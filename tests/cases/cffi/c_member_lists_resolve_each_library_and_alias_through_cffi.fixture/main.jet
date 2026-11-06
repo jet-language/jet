@@ -1,26 +1,26 @@
 use {
     c.[m]
-    libc :: c.c
+    libc: c.c
 }
 
-#Import module c.c {
-    fn clamp(left: Int, middle: Int, right: Int) -> Int = "libc_clamp"
+#Import c.c: module {
+    clamp: fn(left: Int, middle: Int, right: Int) -> Int = "libc_clamp"
 }
-#Import module c.m {
-    fn version(left: Int, middle: Int, right: Int) -> Int = "libm_version"
+#Import c.m: module {
+    version: fn(left: Int, middle: Int, right: Int) -> Int = "libm_version"
 }
 
-module c_scope {
-    use lib :: c.c
-    fn call() -> Int {
+c_scope: module {
+    use lib: c.c
+    call: fn() -> Int {
         return lib.clamp(1, 2, 3)
     }
 }
-module m_scope {
-    use lib :: c.m
-    fn call() -> Int {
+m_scope: module {
+    use lib: c.m
+    call: fn() -> Int {
         return lib.version(1, 2, 3)
     }
 }
 
-fn run() { }
+run: fn() { }

@@ -1,16 +1,16 @@
 
-use process :: core.process
+use process: core.process
 
-fn run() {
-    policy :: TerminalPolicy{
+run: fn() {
+    policy: TerminalPolicy{
         size: TerminalSize{ cols: 100, rows: 30 },
         mode: .Raw
     }
-    child :: process.cmd(["{work}/terminal_probe.sh"]).terminal(policy).spawn() ?? panic("terminal spawn failed")
-    session :: child.terminal ?? panic("missing terminal session")
+    child: process.cmd(["{work}/terminal_probe.sh"]).terminal(policy).spawn() ?? panic("terminal spawn failed")
+    session: child.terminal ?? panic("missing terminal session")
     session.resize(TerminalSize{ cols: 100, rows: 30 }) ?? panic("resize failed")
     child.stdin.write_text("typed\n") ?? panic("terminal write failed")
-    result :: child.wait() ?? panic("terminal wait failed")
+    result: child.wait() ?? panic("terminal wait failed")
     print(result.success)
     print(result.output)
     if child.stdin.write_text("late") == {

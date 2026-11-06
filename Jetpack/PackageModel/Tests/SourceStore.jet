@@ -9,20 +9,20 @@ use {
         foundation_open_directory_authority, foundation_read_file_nofollow_at_root,
         foundation_tree_hash,
     ]
-    files :: core.files
-    process :: core.process
-    sys :: core.sys
+    files: core.files
+    process: core.process
+    sys: core.sys
 }
 
-fn pkg_source_store_test_root(label: String) -[FS, Env]> String Never! {
-    root :: files.join(sys.temp_dir(), "jet-source-store-{label}-{process.current_pid()}")
+pkg_source_store_test_root: fn(label: String) -[FS, Env]> String Never! {
+    root: files.join(sys.temp_dir(), "jet-source-store-{label}-{process.current_pid()}")
     files.remove_all(root).drop("a stale fixture may be absent")
     files.create_dir_all(root) ?? panic("create fixture")
     root
 }
 
 #Test("source-store components reject path syntax and all C0/C1 controls") {
-    next_line :: String.from_bytes([U8]{194, 133}) ?? panic("valid C1 scalar")
+    next_line: String.from_bytes([U8]{194, 133}) ?? panic("valid C1 scalar")
     loop value in ([String]{"", ".", "..", "../pkg", "pkg/name", "pkg\\name", "pkg:version", "pkg\nname", "pkg{next_line}name"}) {
         assert(pkg_source_store_component(value) == .Err(_))
     }
@@ -32,20 +32,20 @@ fn pkg_source_store_test_root(label: String) -[FS, Env]> String Never! {
 }
 
 #Test("held source copies preserve empty directories and hash the exact copied bytes") {
-    root :: pkg_source_store_test_root("copy")
-    source_path :: files.join(root, "source")
-    target_path :: files.join(root, "target-copy")
+    root: pkg_source_store_test_root("copy")
+    source_path: files.join(root, "source")
+    target_path: files.join(root, "target-copy")
     files.create_dir_all(files.join(source_path, "empty")) ?? panic("empty source directory")
     files.create_dir_all(files.join(source_path, "nested")) ?? panic("nested source directory")
-    files.write(files.join(source_path, "nested/main.jet"), "fn run() {{ 42 }}\n") ?? panic("source file")
+    files.write(files.join(source_path, "nested/main.jet"), "run: fn() {{ 42 }}\n") ?? panic("source file")
     files.write(files.join(source_path, ".ignored"), "not hashed") ?? panic("ignored file")
-    source :: foundation_open_directory_authority(source_path) ?? panic("hold source")
-    target :: foundation_open_directory_authority(target_path, true) ?? panic("hold target")
+    source: foundation_open_directory_authority(source_path) ?? panic("hold source")
+    target: foundation_open_directory_authority(target_path, true) ?? panic("hold target")
     target.copy_tree_from(source) ?? panic("copy held source")
     assert(files.is_dir(files.join(target_path, "empty")))
     assert(!files.exists(files.join(target_path, ".ignored")))
-    expected :: source.tree_hash(true) ?? panic("source hash")
-    actual :: target.tree_hash() ?? panic("copied hash")
+    expected: source.tree_hash(true) ?? panic("source hash")
+    actual: target.tree_hash() ?? panic("copied hash")
     assert_eq(actual, expected)
     assert_eq(actual, foundation_tree_hash(target_path))
     assert_eq((files.stat(files.join(target_path, "nested/main.jet")) ?? panic("copied stat")).mode.bit_and(511), 384)
@@ -53,17 +53,17 @@ fn pkg_source_store_test_root(label: String) -[FS, Env]> String Never! {
 }
 
 #Test("source snapshots consume staged bytes after the mutable source changes and clean up") {
-    root :: pkg_source_store_test_root("snapshot")
-    source_path :: files.join(root, "source")
-    snapshots_path :: files.join(root, "snapshots")
+    root: pkg_source_store_test_root("snapshot")
+    source_path: files.join(root, "source")
+    snapshots_path: files.join(root, "snapshots")
     files.create_dir_all(source_path) ?? panic("source directory")
     files.write(files.join(source_path, "main.jet"), "before") ?? panic("source bytes")
-    source :: foundation_open_directory_authority(source_path) ?? panic("hold source")
-    snapshots :: foundation_open_directory_authority(snapshots_path, true) ?? panic("hold snapshots")
-    snapshot :: pkg_source_snapshot_into(source, ^snapshots) ?? panic("snapshot")
-    path :: snapshot.path()
+    source: foundation_open_directory_authority(source_path) ?? panic("hold source")
+    snapshots: foundation_open_directory_authority(snapshots_path, true) ?? panic("hold snapshots")
+    snapshot: pkg_source_snapshot_into(source, ^snapshots) ?? panic("snapshot")
+    path: snapshot.path()
     files.write(files.join(source_path, "main.jet"), "after") ?? panic("change source")
-    bytes :: foundation_read_file_nofollow_at_root(path, "main.jet", 1024) ?? panic("read snapshot")
+    bytes: foundation_read_file_nofollow_at_root(path, "main.jet", 1024) ?? panic("read snapshot")
     assert_eq(bytes, "before".bytes())
     assert_eq(snapshot.content_hash, snapshot.directory.tree_hash() ?? panic("snapshot hash"))
     close(^snapshot)
@@ -73,13 +73,13 @@ fn pkg_source_store_test_root(label: String) -[FS, Env]> String Never! {
 
 #Test("source snapshots refuse links even when the link name is ignored and remove failed stages") {
     if sys.is_unix() {
-        root :: pkg_source_store_test_root("links")
-        source_path :: files.join(root, "source")
-        snapshots_path :: files.join(root, "snapshots")
+        root: pkg_source_store_test_root("links")
+        source_path: files.join(root, "source")
+        snapshots_path: files.join(root, "snapshots")
         files.create_dir_all(source_path) ?? panic("source directory")
         files.write(files.join(root, "external"), "external") ?? panic("external bytes")
         files.symlink(files.join(root, "external"), files.join(source_path, ".ignored")) ?? panic("symlink fixture")
-        source :: foundation_open_directory_authority(source_path) ?? panic("hold source")
+        source: foundation_open_directory_authority(source_path) ?? panic("hold source")
         assert(pkg_source_snapshot_into(source, foundation_open_directory_authority(snapshots_path, true) ?? panic("hold snapshots")) == .Err(_))
         assert_eq((files.list_dir(snapshots_path) ?? panic("failed stage list")).len(), 0)
         files.remove(files.join(source_path, ".ignored")) ?? panic("remove symlink")
@@ -91,9 +91,9 @@ fn pkg_source_store_test_root(label: String) -[FS, Env]> String Never! {
 }
 
 #Test("held project dependency links publish verified trees and refuse an existing mismatch") {
-    root :: pkg_source_store_test_root("project-link")
-    source_path :: files.join(root, "source")
-    link_path :: files.join(root, "project/deps/pkg")
+    root: pkg_source_store_test_root("project-link")
+    source_path: files.join(root, "source")
+    link_path: files.join(root, "project/deps/pkg")
     files.create_dir_all(files.join(source_path, "empty")) ?? panic("source empty directory")
     files.write(files.join(source_path, "main.jet"), "immutable source") ?? panic("source bytes")
     pkg_source_store_link_into_project(source_path, link_path) ?? panic("publish project link")
@@ -102,7 +102,7 @@ fn pkg_source_store_test_root(label: String) -[FS, Env]> String Never! {
     pkg_source_store_link_into_project(source_path, link_path) ?? panic("reuse authenticated project link")
     // Build another existing dependency tree, without editing a potential
     // hardlink of the original source.
-    mismatch_path :: files.join(root, "project/deps/different")
+    mismatch_path: files.join(root, "project/deps/different")
     files.create_dir_all(mismatch_path) ?? panic("mismatch directory")
     files.write(files.join(mismatch_path, "main.jet"), "different") ?? panic("mismatch bytes")
     assert(pkg_source_store_link_into_project(source_path, mismatch_path) == .Err(_))
@@ -124,14 +124,14 @@ fn pkg_source_store_test_root(label: String) -[FS, Env]> String Never! {
 // with E1204. The entry is written under a held scratch root instead of
 // installing into the user's default store.
 #Test("content_hash_mismatch_after_tamper") {
-    root :: pkg_source_store_test_root("tamper")
-    entry :: files.join(root, "mylib-0.1.0-bbbb")
+    root: pkg_source_store_test_root("tamper")
+    entry: files.join(root, "mylib-0.1.0-bbbb")
     files.create_dir_all(entry) ?? panic("entry directory")
-    files.write(files.join(entry, "lib.jet"), "fn x() {{}}\n") ?? panic("entry source")
+    files.write(files.join(entry, "lib.jet"), "x: fn() {{}}\n") ?? panic("entry source")
     files.write(files.join(entry, "package.jet"), "name: \"mylib\"\nversion: \"0.1.0\"\n") ?? panic("entry manifest")
-    original :: (foundation_open_directory_authority(entry) ?? panic("hold entry")).tree_hash() ?? panic("entry hash")
+    original: (foundation_open_directory_authority(entry) ?? panic("hold entry")).tree_hash() ?? panic("entry hash")
     pkg_source_store_verify("mylib", entry, original) ?? panic("a fresh entry verifies: {err.diagnostic.what}")
-    files.write(files.join(entry, "lib.jet"), "fn evil() {{}}\n") ?? panic("tamper")
+    files.write(files.join(entry, "lib.jet"), "evil: fn() {{}}\n") ?? panic("tamper")
     if pkg_source_store_verify("mylib", entry, original) == {
         .Err(error) -> assert_eq(error.diagnostic.code, "E1204")
         .Ok(_) -> panic("a tampered entry must fail verification")

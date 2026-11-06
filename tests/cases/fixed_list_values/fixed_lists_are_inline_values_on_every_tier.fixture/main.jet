@@ -2,54 +2,54 @@
 // parameter gets its own copy, and a `&` parameter writes the caller's, as a
 // `[T#N]` or as a `[T]`.
 
-struct Body {
+Body: struct {
     at: [Float#3]
     mass: Float
 }
 
-fn add3(x: [Float#3], y: [Float#3]) -> [Float#3] {
+add3: fn(x: [Float#3], y: [Float#3]) -> [Float#3] {
     return [Float#3]{x[0] + y[0], x[1] + y[1], x[2] + y[2]}
 }
 
-fn bumped(xs: [Int#3]) -> [Int#3] {
+bumped: fn(xs: [Int#3]) -> [Int#3] {
     own := xs
     own[0] = own[0] + 100
     return own
 }
 
-fn scale(xs: &[Int#3], k: Int) {
+scale: fn(xs: &[Int#3], k: Int) {
     loop i in 0..<3 -> xs[i] = xs[i] * k
 }
 
-fn total(xs: [Int#3]) -> Int {
+total: fn(xs: [Int#3]) -> Int {
     return xs[0] + xs[1] + xs[2]
 }
 
-fn widened(xs: [Int]) -> Int {
+widened: fn(xs: [Int]) -> Int {
     sum := 0
     loop x in xs -> sum += x
     return sum
 }
 
-fn first_doubled(xs: &[Int]) {
+first_doubled: fn(xs: &[Int]) {
     xs[0] = xs[0] * 2
 }
 
-fn squares() -> [Int#3] {
+squares: fn() -> [Int#3] {
     out := [Int#3]{0, 0, 0}
     loop i in 0..<3 -> out[i] = (i + 1) * (i + 1)
     return out
 }
 
-ORIGIN :: [Float#3]{1.5, 2.5, 3.5}
-SQUARES :: squares()
+ORIGIN: [Float#3]{1.5, 2.5, 3.5}
+SQUARES: squares()
 
-fn run() {
+run: fn() {
     a := [Int#3]{1, 2, 3}
     b := a
     b[0] = 9
     print("assign {a[0]} {b[0]}")
-    c :: bumped(a)
+    c: bumped(a)
     print("by value {a[0]} {c[0]}")
     scale(&a, 10)
     print("by write {a[0]} {a[1]} {a[2]}")
@@ -64,7 +64,7 @@ fn run() {
     q := p
     q.at[2] = 8.5
     print("field {p.at[2]} {q.at[2]}")
-    moved :: add3(p.at, q.at)
+    moved: add3(p.at, q.at)
     print("sum {moved[0]} {moved[1]} {moved[2]}")
     print("constant {SQUARES[0]} {SQUARES[1]} {SQUARES[2]}")
 }

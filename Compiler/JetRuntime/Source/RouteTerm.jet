@@ -1,16 +1,16 @@
 // core.term leaves over the runtime's one stdio layer.
-#Import(c) fn term_tcgetattr(fd: I64, termios: I64) -> I64 = "tcgetattr"
-#Import(c) fn term_tcsetattr(fd: I64, actions: I64, termios: I64) -> I64 = "tcsetattr"
+#Import(c) term_tcgetattr: fn(fd: I64, termios: I64) -> I64 = "tcgetattr"
+#Import(c) term_tcsetattr: fn(fd: I64, actions: I64, termios: I64) -> I64 = "tcsetattr"
 
 // Stdout write_all, then flush when asked, when the frame is nonempty, or when
 // stdout is a terminal; io::Error's Display on failure.
-#Export(c) fn jet_terminal8_write_stdout(text: I64, flush: Bool, some: I64) -> I64 {
-    now :: flush || rt_text_len(text) != I64{0} || host_is_tty(I64{1})
+#Export(c) jet_terminal8_write_stdout: fn(text: I64, flush: Bool, some: I64) -> I64 {
+    now: flush || rt_text_len(text) != I64{0} || host_is_tty(I64{1})
     host_stdio_option_cause(host_stdio_text_failure(text, false, false, now), some)
 }
 
 // Stderr is unbuffered, so its flush adds no work.
-#Export(c) fn jet_terminal8_write_stderr(text: I64, flush: Bool, some: I64) -> I64 {
+#Export(c) jet_terminal8_write_stderr: fn(text: I64, flush: Bool, some: I64) -> I64 {
     host_stdio_option_cause(host_stdio_text_failure(text, false, true, false), some)
 }
 
@@ -18,13 +18,13 @@
 // input to `value`; 0, or the errno that stopped the read. The line is copied
 // out of the stdin buffer a run at a time; a refill retries EINTR, and EBADF is
 // end of input (std's stdin handle_ebadf).
-fn term_read_line(value: I64) -> I64 {
+term_read_line: fn(value: I64) -> I64 {
     failure := I64{0}
     sync_mutex_lock(terminal_input_root)
     loop {
-        buffered :: term_input_buffered()
+        buffered: term_input_buffered()
         if (buffered == I64{0}) {
-            got :: term_input_fill(true, true)
+            got: term_input_fill(true, true)
             if (got == I64{0}) -> break
             if (got < I64{0}) {
                 failure = -got
@@ -32,8 +32,8 @@ fn term_read_line(value: I64) -> I64 {
             }
             next
         }
-        start :: term_input_next()
-        run :: rt_line_run(start, buffered)
+        start: term_input_next()
+        run: rt_line_run(start, buffered)
         rt_text_append(value, start, run)
         term_input_consume(run)
         if (rt_text_byte(wrapping(wrapping(start + run) - I64{1})) == I64{10}) -> break
@@ -45,13 +45,13 @@ fn term_read_line(value: I64) -> I64 {
 // stdin().read_line: (eof, line, None), or (false, "", Some(io::Error
 // Display)). Invalid UTF-8 is std's InvalidData "stream did not contain valid
 // UTF-8".
-#Export(c) fn jet_terminal8_line(eof: I64, line: I64, error_tag: I64, error: I64) {
-    value :: jet_rt_string_builder_new()
-    code :: term_read_line(value)
-    count :: rt_text_len(value)
+#Export(c) jet_terminal8_line: fn(eof: I64, line: I64, error_tag: I64, error: I64) {
+    value: jet_rt_string_builder_new()
+    code: term_read_line(value)
+    count: rt_text_len(value)
     failure := if (code == I64{0}) -> I64{0} else -> host_errno_cause(code)
     if (failure == I64{0}) {
-        invalid :: text_bytes_utf8_error(rt_text_data(value), rt_text_len(value))
+        invalid: text_bytes_utf8_error(rt_text_data(value), rt_text_len(value))
         if (invalid != I64{0}) {
             jet_rt_string_drop(invalid)
             failure = jet_rt_string_clone(rt_static_text("stream did not contain valid UTF-8"))
@@ -82,17 +82,17 @@ fn term_read_line(value: I64) -> I64 {
 // sync_sole_enter); one that spans a refill is built a run at a time
 // (term_read_line). The lock is released between the two before any byte of
 // the line is taken.
-fn stdin_line_take(error: I64) -> I64 {
-    sole :: sync_sole_enter(terminal_input_root)
-    buffered :: term_input_buffered()
+stdin_line_take: fn(error: I64) -> I64 {
+    sole: sync_sole_enter(terminal_input_root)
+    buffered: term_input_buffered()
     if (buffered > I64{0}) {
-        start :: term_input_next()
-        scan :: stdin_line_scan(start, buffered)
-        run :: if (scan < I64{0}) -> wrapping(I64{0} - scan) else -> scan
+        start: term_input_next()
+        scan: stdin_line_scan(start, buffered)
+        run: if (scan < I64{0}) -> wrapping(I64{0} - scan) else -> scan
         if (rt_text_byte(wrapping(wrapping(start + run) - I64{1})) == I64{10}) {
-            end :: stdin_line_end(start, run)
-            invalid :: if (scan < I64{0}) -> text_bytes_utf8_error(start, end) else -> I64{0}
-            line :: if (invalid == I64{0}) -> rt_text_copy(start, end) else -> I64{0}
+            end: stdin_line_end(start, run)
+            invalid: if (scan < I64{0}) -> text_bytes_utf8_error(start, end) else -> I64{0}
+            line: if (invalid == I64{0}) -> rt_text_copy(start, end) else -> I64{0}
             term_input_consume(run)
             sync_sole_exit(terminal_input_root, sole)
             if (invalid != I64{0}) {
@@ -103,14 +103,14 @@ fn stdin_line_take(error: I64) -> I64 {
         }
     }
     sync_sole_exit(terminal_input_root, sole)
-    value :: jet_rt_string_builder_new()
-    code :: term_read_line(value)
+    value: jet_rt_string_builder_new()
+    code: term_read_line(value)
     if (code != I64{0}) {
         jet_rt_string_drop(value)
         _ := compiler_fs_errno(HOST_IO_OP_READ, rt_static_text("stdin"), code, error)
         return I64{-1}
     }
-    invalid :: text_bytes_utf8_error(rt_text_data(value), rt_text_len(value))
+    invalid: text_bytes_utf8_error(rt_text_data(value), rt_text_len(value))
     if (invalid != I64{0}) {
         jet_rt_string_drop(invalid)
         jet_rt_string_drop(value)
@@ -125,11 +125,11 @@ fn stdin_line_take(error: I64) -> I64 {
 }
 
 // The length of the `count` bytes at `data` without their trailing LFs and CRs.
-fn stdin_line_end(data: I64, count: I64) -> I64 {
+stdin_line_end: fn(data: I64, count: I64) -> I64 {
     end := count
     loop {
         if (end == I64{0}) { break }
-        last :: rt_text_byte(wrapping(data + end - I64{1}))
+        last: rt_text_byte(wrapping(data + end - I64{1}))
         if (last != I64{10} && last != I64{13}) { break }
         end = wrapping(end - I64{1})
     }
@@ -141,19 +141,19 @@ fn stdin_line_end(data: I64, count: I64) -> I64 {
 // LF has its high bit set (the line is not ASCII). Eight bytes a step: the
 // SWAR zero-byte test of the word xor 0x0A..0A finds an LF, and the words
 // before it are or-ed together for their high bits.
-fn stdin_line_scan(start: I64, count: I64) -> I64 {
+stdin_line_scan: fn(start: I64, count: I64) -> I64 {
     at := I64{0}
     seen := I64{0}
-    words :: count - count % I64{8}
+    words: count - count % I64{8}
     loop at < words {
-        raw :: rt_text_word(wrapping(start + at))
-        word :: raw.bit_xor(I64{723401728380766730})
+        raw: rt_text_word(wrapping(start + at))
+        word: raw.bit_xor(I64{723401728380766730})
         if (wrapping(word - I64{72340172838076673}).bit_and(word.bit_xor(I64{-1})).bit_and(I64{-9187201950435737472}) != I64{0}) -> break
         seen = seen.bit_or(raw)
         at = wrapping(at + I64{8})
     }
     loop at < count {
-        byte :: rt_text_byte(wrapping(start + at))
+        byte: rt_text_byte(wrapping(start + at))
         at = wrapping(at + I64{1})
         if (byte == I64{10}) -> break
         seen = seen.bit_or(byte)
@@ -162,15 +162,15 @@ fn stdin_line_scan(start: I64, count: I64) -> I64 {
     at
 }
 
-fn stdin_utf8_error(error: I64) -> I64 {
+stdin_utf8_error: fn(error: I64) -> I64 {
     _ := compiler_fs_error(HOST_IO_KIND_OTHER, HOST_IO_OP_READ, rt_static_text("stdin"), I64{0}, jet_rt_string_clone(rt_static_text("stream did not contain valid UTF-8")), error)
     I64{-1}
 }
 
 // core.term.__stdin_line: Ok(None) at end of input, Ok(Some(line)), or the
 // stdin IOError (stdin_line_take).
-#Export(c) fn jet_stdin_line_raw(some: I64, line: I64, error: I64) -> I64 {
-    value :: stdin_line_take(error)
+#Export(c) jet_stdin_line_raw: fn(some: I64, line: I64, error: I64) -> I64 {
+    value: stdin_line_take(error)
     if (value < I64{0}) -> return I64{0}
     if (value == I64{0}) {
         rt_text_store(some, I64{0})
@@ -186,12 +186,12 @@ fn stdin_utf8_error(error: I64) -> I64 {
 // boxes. The "IO.Read" fault checkpoint, then one line (stdin_line_take):
 // 1 with the line moved into `output`, 0 at end of input, 2 with the IOError
 // read_line would return in `error`.
-#Export(c) fn jet_stdin_lines_next(output: I64, error: I64) -> I64 {
+#Export(c) jet_stdin_lines_next: fn(output: I64, error: I64) -> I64 {
     if jet_fault_should_fail(rt_static_text("IO.Read")) {
         _ := host_io_other_take(HOST_IO_OP_READ, jet_rt_string_clone(rt_static_text("stdin")), jet_rt_string_clone(rt_static_text("fault injected: IO.Read")), error)
         return I64{2}
     }
-    value :: stdin_line_take(error)
+    value: stdin_line_take(error)
     if (value < I64{0}) -> return I64{2}
     if (value == I64{0}) -> return I64{0}
     rt_text_store(output, value)
@@ -203,15 +203,15 @@ fn stdin_utf8_error(error: I64) -> I64 {
 // read() reports them (no EINTR retry); invalid UTF-8 is InvalidData carrying
 // FromUtf8Error's Display. Bytes past the delimiter stay in the stdin buffer
 // for the next read.
-#Export(c) fn jet_terminal8_read_until(delimiter: I64, output: I64, error_tag: I64, error: I64) {
-    needle :: rt_text_data(delimiter)
-    width :: rt_text_len(delimiter)
-    value :: jet_rt_string_builder_new()
+#Export(c) jet_terminal8_read_until: fn(delimiter: I64, output: I64, error_tag: I64, error: I64) {
+    needle: rt_text_data(delimiter)
+    width: rt_text_len(delimiter)
+    value: jet_rt_string_builder_new()
     failure := I64{0}
     sync_mutex_lock(terminal_input_root)
     loop {
         if (term_input_buffered() == I64{0}) {
-            got :: term_input_fill(false, true)
+            got: term_input_fill(false, true)
             if (got == I64{0}) -> break
             if (got < I64{0}) {
                 failure = host_errno_cause(-got)
@@ -220,7 +220,7 @@ fn stdin_utf8_error(error: I64) -> I64 {
         }
         rt_text_append(value, term_input_next(), I64{1})
         term_input_consume(I64{1})
-        length :: rt_text_len(value)
+        length: rt_text_len(value)
         if (length >= width && rt_text_equal_bytes(wrapping(wrapping(rt_text_data(value) + length) - width), needle, width)) {
             rt_text_store(wrapping(value + I64{8}), length - width)
             break
@@ -245,8 +245,8 @@ fn stdin_utf8_error(error: I64) -> I64 {
 // as (bytes, None), or ([], Some(io::Error Display)). Read errors propagate as
 // read() reports them (no EINTR retry); std's stdin maps EBADF to end of input.
 // Core rejects a negative `n` before the call.
-#Export(c) fn jet_terminal8_take(n: I64, data: I64, length: I64, error_tag: I64, error: I64) {
-    capacity :: if (n > I64{0}) -> n else -> I64{0}
+#Export(c) jet_terminal8_take: fn(n: I64, data: I64, length: I64, error_tag: I64, error: I64) {
+    capacity: if (n > I64{0}) -> n else -> I64{0}
     got := I64{0}
     buffer := I64{0}
     if (capacity != I64{0}) {
@@ -275,8 +275,8 @@ fn stdin_utf8_error(error: I64) -> I64 {
 
 // One stdin read of up to six bytes (the buffered ones first; a failed read is
 // no bytes) and the key decoder's platform, 1 for Unix.
-#Export(c) fn jet_terminal8_key_bytes(data: I64, length: I64, platform: I64) {
-    buffer :: jet_rt_alloc(I64{8}, I64{8})
+#Export(c) jet_terminal8_key_bytes: fn(data: I64, length: I64, platform: I64) {
+    buffer: jet_rt_alloc(I64{8}, I64{8})
     sync_mutex_lock(terminal_input_root)
     got := term_input_take(buffer, I64{6})
     sync_mutex_unlock(terminal_input_root)
@@ -288,15 +288,15 @@ fn stdin_utf8_error(error: I64) -> I64 {
 // `stty size` on stdin's terminal: TIOCGWINSZ on fd 0. Some (1) with the size
 // in the checked `(h, w)` member order, rows then columns, when both are
 // positive; None (0) otherwise.
-#Export(c) fn jet_terminal8_stty(height: I64, width: I64) -> I64 {
-    size :: jet_rt_alloc(I64{8}, I64{8})
+#Export(c) jet_terminal8_stty: fn(height: I64, width: I64) -> I64 {
+    size: jet_rt_alloc(I64{8}, I64{8})
     thread_zero(size, I64{8})
-    result :: host_call(I64{16}, I64{0}, I64{21523}, size)
-    packed :: rt_text_word(size)
+    result: host_call(I64{16}, I64{0}, I64{21523}, size)
+    packed: rt_text_word(size)
     jet_rt_free(size, I64{8}, I64{8})
-    rows :: packed.bit_and(I64{65535})
-    columns :: (packed >> I64{16}).bit_and(I64{65535})
-    none :: I64{0}
+    rows: packed.bit_and(I64{65535})
+    columns: (packed >> I64{16}).bit_and(I64{65535})
+    none: I64{0}
     if result != none || rows <= none || columns <= none -> return none
     rt_text_store(height, rows)
     rt_text_store(width, columns)
@@ -304,21 +304,21 @@ fn stdin_utf8_error(error: I64) -> I64 {
 }
 
 // jet_std_env_get: the logical environment, UTF-8 only.
-#Export(c) fn jet_terminal8_env(name: I64, some: I64) -> I64 { jet_std_env_get(name, some) }
+#Export(c) jet_terminal8_env: fn(name: I64, some: I64) -> I64 { jet_std_env_get(name, some) }
 
 // jet_env_value_raw(name).is_some(): logical presence, whatever the value's
 // encoding.
-#Export(c) fn jet_terminal8_env_has(name: I64) -> Bool {
+#Export(c) jet_terminal8_env_has: fn(name: I64) -> Bool {
     jet_rt_logical_env_seed()
     shared_acquire(logical_env_root, false)
-    entry :: logical_environment_find(rt_text_data(name), rt_text_len(name))
+    entry: logical_environment_find(rt_text_data(name), rt_text_len(name))
     shared_release(logical_env_root, false)
     entry != I64{0}
 }
 
 // The process environment's JET_MACHINE_OUTPUT is exactly "1".
-#Export(c) fn jet_term_machine_output() -> Bool {
-    value :: host_environment_value(rt_static_text("JET_MACHINE_OUTPUT"))
+#Export(c) jet_term_machine_output: fn() -> Bool {
+    value: host_environment_value(rt_static_text("JET_MACHINE_OUTPUT"))
     if (value == I64{0}) -> return false
     rt_text_byte(value) == I64{49} && rt_text_byte(wrapping(value + I64{1})) == I64{0}
 }
@@ -327,7 +327,7 @@ fn stdin_utf8_error(error: I64) -> I64 {
 // [previous, struct termios (60 bytes, padded to 64)].
 term_mode_key := I64{0}
 
-fn term_mode_saved_key() -> I64 {
+term_mode_saved_key: fn() -> I64 {
     if (term_mode_key == I64{0}) {
         host_lock()
         if (term_mode_key == I64{0}) {
@@ -342,39 +342,39 @@ fn term_mode_saved_key() -> I64 {
 
 // Clear ECHO; raw also clears ICANON and sets VMIN=1, VTIME=0. Any
 // tcgetattr/tcsetattr failure is false and saves nothing.
-#Export(c) fn jet_term_mode_enter(raw: Bool) -> Bool {
-    node :: jet_rt_alloc(I64{72}, I64{8})
+#Export(c) jet_term_mode_enter: fn(raw: Bool) -> Bool {
+    node: jet_rt_alloc(I64{72}, I64{8})
     thread_zero(node, I64{72})
-    mode :: wrapping(node + I64{8})
+    mode: wrapping(node + I64{8})
     if (net_i32(term_tcgetattr(I64{0}, mode)) != I64{0}) {
         jet_rt_free(node, I64{72}, I64{8})
         return false
     }
-    next :: jet_rt_alloc(I64{64}, I64{8})
+    next: jet_rt_alloc(I64{64}, I64{8})
     rt_text_bytes_copy(next, mode, I64{64})
-    flags :: net_load_uint(wrapping(next + I64{12}), I64{4})
-    cleared :: if raw -> flags.bit_and(I64{4294967285}) else -> flags.bit_and(I64{4294967287})
+    flags: net_load_uint(wrapping(next + I64{12}), I64{4})
+    cleared: if raw -> flags.bit_and(I64{4294967285}) else -> flags.bit_and(I64{4294967287})
     net_store_uint(wrapping(next + I64{12}), I64{4}, cleared)
     if raw {
         net_store_uint(wrapping(wrapping(next + I64{17}) + I64{6}), I64{1}, I64{1})
         net_store_uint(wrapping(wrapping(next + I64{17}) + I64{5}), I64{1}, I64{0})
     }
-    status :: net_i32(term_tcsetattr(I64{0}, I64{0}, next))
+    status: net_i32(term_tcsetattr(I64{0}, I64{0}, next))
     jet_rt_free(next, I64{64}, I64{8})
     if (status != I64{0}) {
         jet_rt_free(node, I64{72}, I64{8})
         return false
     }
-    key :: term_mode_saved_key()
+    key: term_mode_saved_key()
     trap_store(node, jet_rt_tls_get(key))
     jet_rt_tls_set(key, node)
     true
 }
 
 // Pop the newest saved mode and restore it; nothing saved is a no-op.
-#Export(c) fn jet_term_mode_leave() {
-    key :: term_mode_saved_key()
-    node :: jet_rt_tls_get(key)
+#Export(c) jet_term_mode_leave: fn() {
+    key: term_mode_saved_key()
+    node: jet_rt_tls_get(key)
     if (node == I64{0}) -> return
     jet_rt_tls_set(key, trap_word(node))
     _ := term_tcsetattr(I64{0}, I64{0}, node + I64{8})

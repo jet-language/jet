@@ -60,9 +60,9 @@ test("holding a host port excludes every other holder until release", async () =
 });
 
 test("emit tier goldens compare exact stdout and exit", () => {
-  const ok = { code: 0, stdout: "fn run() -> Unit\n", stderr: "", timedOut: false, timeoutSec: 60 };
-  assert.equal(classifyEmit("mir", ok, "fn run() -> Unit\n"), null);
-  assert.equal(classifyEmit("mir", ok, "fn other() -> Unit\n").status, "no-match");
+  const ok = { code: 0, stdout: "run: fn() -> Unit\n", stderr: "", timedOut: false, timeoutSec: 60 };
+  assert.equal(classifyEmit("mir", ok, "run: fn() -> Unit\n"), null);
+  assert.equal(classifyEmit("mir", ok, "other: fn() -> Unit\n").status, "no-match");
   assert.equal(classifyEmit("lir", { ...ok, code: 1 }, "").detail, "emit --lir exit 1");
   assert.equal(classifyEmit("ast", { ...ok, timedOut: true }, "").status, "timeout");
 });

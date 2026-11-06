@@ -1,24 +1,24 @@
-package {
+package: {
     name: "release_frozen_task_many"
     authority: { allow: [IO, Mem.Alloc, Time.Wait] }
 }
 
-struct Snapshot {
+Snapshot: struct {
     left: Int
     right: String
 }
 
-fn left(s: Snapshot) -> Int { s.left }
+left: fn(s: Snapshot) -> Int { s.left }
 
-fn text_len(s: Snapshot) -> Int { s.right.len() }
+text_len: fn(s: Snapshot) -> Int { s.right.len() }
 
-fn combined(s: Snapshot) -> Int { s.left + s.right.len() }
+combined: fn(s: Snapshot) -> Int { s.left + s.right.len() }
 
-fn run() {
+run: fn() {
     source := Snapshot{left: 41, right: "stable"}
-    frozen :: freeze(source)
+    frozen: freeze(source)
     task.group g {
-        results :: task.all {left(frozen), left(frozen), text_len(frozen), combined(frozen)} ?? panic("task.all failed")
+        results: task.all {left(frozen), left(frozen), text_len(frozen), combined(frozen)} ?? panic("task.all failed")
         print(results[0], results[1], results[2], results[3])
     }
 }

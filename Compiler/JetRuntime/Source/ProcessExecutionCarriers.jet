@@ -6,17 +6,17 @@
 // (INT_OPTION_NONE when absent, else the variant index), so it owns nothing.
 // Bool fields are normalized 0/1 words.
 // Borrowed getters lend headers and never transfer ownership.
-fn process_flag_word(address: I64) -> I64 {
-    word :: encoding_word(address)
+process_flag_word: fn(address: I64) -> I64 {
+    word: encoding_word(address)
     if (word.bit_and(I64{255})) == (I64{0}) -> { I64{0} } else -> { I64{1} }
 }
 // jet_rt_int_clone and jet_rt_int_drop pass the INT_OPTION_NONE niche through.
-fn process_optional_int_eq(a: I64, b: I64) -> Bool {
+process_optional_int_eq: fn(a: I64, b: I64) -> Bool {
     if (a == INT_OPTION_NONE || b == INT_OPTION_NONE) -> return a == b
     jet_int_compare(a, b) == I64{0}
 }
-#Export(c) fn jet_rt_handle_clone_process_plan(value: I64) -> I64 {
-    result :: jet_rt_alloc(I64{72}, I64{8})
+#Export(c) jet_rt_handle_clone_process_plan: fn(value: I64) -> I64 {
+    result: jet_rt_alloc(I64{72}, I64{8})
     coll_copy(value, result, I64{72})
     encoding_store(result, jet_rt_string_clone(encoding_word(value)))
     encoding_store(wrapping(result + I64{8}), process_text_list_clone(encoding_word(wrapping(value + I64{8})), false))
@@ -29,7 +29,7 @@ fn process_optional_int_eq(a: I64, b: I64) -> Bool {
     encoding_store(wrapping(result + I64{64}), process_text_list_clone(encoding_word(wrapping(value + I64{64})), false))
     result
 }
-#Export(c) fn jet_rt_handle_drop_process_plan(value: I64) {
+#Export(c) jet_rt_handle_drop_process_plan: fn(value: I64) {
     if (value == I64{0}) -> return
     jet_rt_string_drop(encoding_word(value))
     process_text_list_drop(encoding_word(wrapping(value + I64{8})), false)
@@ -42,7 +42,7 @@ fn process_optional_int_eq(a: I64, b: I64) -> Bool {
     process_text_list_drop(encoding_word(wrapping(value + I64{64})), false)
     jet_rt_free(value, I64{72}, I64{8})
 }
-#Export(c) fn jet_rt_handle_eq_process_plan(a: I64, b: I64) -> Bool {
+#Export(c) jet_rt_handle_eq_process_plan: fn(a: I64, b: I64) -> Bool {
     if !jet_rt_string_eq(encoding_word(a), encoding_word(b)) -> return false
     if !process_text_list_eq(encoding_word(wrapping(a + I64{8})), encoding_word(wrapping(b + I64{8})), false) -> return false
     if !jet_rt_string_eq(encoding_word(wrapping(a + I64{16})), encoding_word(wrapping(b + I64{16}))) -> return false
@@ -53,13 +53,13 @@ fn process_optional_int_eq(a: I64, b: I64) -> Bool {
     if !process_text_list_eq(encoding_word(wrapping(a + I64{56})), encoding_word(wrapping(b + I64{56})), false) -> return false
     process_text_list_eq(encoding_word(wrapping(a + I64{64})), encoding_word(wrapping(b + I64{64})), false)
 }
-#Export(c) fn jet_rt_handle_field_process_plan_executable_identity(value: I64, out: I64) { coll_copy(encoding_word(value), out, I64{24}) }
-#Export(c) fn jet_rt_handle_field_process_plan_input_digest(value: I64, out: I64) { coll_copy(encoding_word(wrapping(value + I64{16})), out, I64{24}) }
-#Export(c) fn jet_rt_handle_field_process_plan_policy_digest(value: I64, out: I64) { coll_copy(encoding_word(wrapping(value + I64{24})), out, I64{24}) }
-#Export(c) fn jet_rt_handle_field_process_plan_backend(value: I64, out: I64) { coll_copy(encoding_word(wrapping(value + I64{32})), out, I64{24}) }
-#Export(c) fn jet_rt_handle_field_process_plan_descendants(value: I64, out: I64) { coll_copy(encoding_word(wrapping(value + I64{48})), out, I64{24}) }
-#Export(c) fn jet_rt_handle_show_process_plan(value: I64) -> I64 {
-    result :: jet_rt_string_builder_new()
+#Export(c) jet_rt_handle_field_process_plan_executable_identity: fn(value: I64, out: I64) { coll_copy(encoding_word(value), out, I64{24}) }
+#Export(c) jet_rt_handle_field_process_plan_input_digest: fn(value: I64, out: I64) { coll_copy(encoding_word(wrapping(value + I64{16})), out, I64{24}) }
+#Export(c) jet_rt_handle_field_process_plan_policy_digest: fn(value: I64, out: I64) { coll_copy(encoding_word(wrapping(value + I64{24})), out, I64{24}) }
+#Export(c) jet_rt_handle_field_process_plan_backend: fn(value: I64, out: I64) { coll_copy(encoding_word(wrapping(value + I64{32})), out, I64{24}) }
+#Export(c) jet_rt_handle_field_process_plan_descendants: fn(value: I64, out: I64) { coll_copy(encoding_word(wrapping(value + I64{48})), out, I64{24}) }
+#Export(c) jet_rt_handle_show_process_plan: fn(value: I64) -> I64 {
+    result: jet_rt_string_builder_new()
     jet_rt_string_builder_push(result, rt_static_text("ProcessPlan "))
     rt_text_push_word(result, I64{123}, I64{1})
     jet_rt_string_builder_push(result, rt_static_text(" executable: "))
@@ -72,8 +72,8 @@ fn process_optional_int_eq(a: I64, b: I64) -> Bool {
     rt_text_push_word(result, I64{125}, I64{1})
     jet_rt_string_builder_finish(result)
 }
-#Export(c) fn jet_rt_handle_clone_process_receipt(value: I64) -> I64 {
-    result :: jet_rt_alloc(I64{144}, I64{8})
+#Export(c) jet_rt_handle_clone_process_receipt: fn(value: I64) -> I64 {
+    result: jet_rt_alloc(I64{144}, I64{8})
     coll_copy(value, result, I64{144})
     encoding_store(result, jet_rt_int_clone(encoding_word(value)))
     encoding_store(wrapping(result + I64{8}), jet_rt_string_clone(encoding_word(wrapping(value + I64{8}))))
@@ -94,7 +94,7 @@ fn process_optional_int_eq(a: I64, b: I64) -> Bool {
     encoding_store(wrapping(result + I64{128}), jet_rt_int_clone(encoding_word(wrapping(value + I64{128}))))
     result
 }
-#Export(c) fn jet_rt_handle_drop_process_receipt(value: I64) {
+#Export(c) jet_rt_handle_drop_process_receipt: fn(value: I64) {
     if (value == I64{0}) -> return
     jet_rt_int_drop(encoding_word(value))
     jet_rt_string_drop(encoding_word(wrapping(value + I64{8})))
@@ -112,7 +112,7 @@ fn process_optional_int_eq(a: I64, b: I64) -> Bool {
     jet_rt_int_drop(encoding_word(wrapping(value + I64{128})))
     jet_rt_free(value, I64{144}, I64{8})
 }
-#Export(c) fn jet_rt_handle_eq_process_receipt(a: I64, b: I64) -> Bool {
+#Export(c) jet_rt_handle_eq_process_receipt: fn(a: I64, b: I64) -> Bool {
     if jet_int_compare(encoding_word(a), encoding_word(b)) != (I64{0}) -> return false
     if !jet_rt_string_eq(encoding_word(wrapping(a + I64{8})), encoding_word(wrapping(b + I64{8}))) -> return false
     if !jet_rt_string_eq(encoding_word(wrapping(a + I64{16})), encoding_word(wrapping(b + I64{16}))) -> return false
@@ -132,13 +132,13 @@ fn process_optional_int_eq(a: I64, b: I64) -> Bool {
     if jet_int_compare(encoding_word(wrapping(a + I64{128})), encoding_word(wrapping(b + I64{128}))) != (I64{0}) -> return false
     encoding_word(wrapping(a + I64{136})) == encoding_word(wrapping(b + I64{136}))
 }
-#Export(c) fn jet_rt_handle_field_process_receipt_output(value: I64, out: I64) { coll_copy(encoding_word(wrapping(value + I64{8})), out, I64{24}) }
-#Export(c) fn jet_rt_handle_field_process_receipt_errors(value: I64, out: I64) { coll_copy(encoding_word(wrapping(value + I64{16})), out, I64{24}) }
-#Export(c) fn jet_rt_handle_field_process_receipt_executable_identity(value: I64, out: I64) { coll_copy(encoding_word(wrapping(value + I64{48})), out, I64{24}) }
-#Export(c) fn jet_rt_handle_field_process_receipt_input_digest(value: I64, out: I64) { coll_copy(encoding_word(wrapping(value + I64{64})), out, I64{24}) }
-#Export(c) fn jet_rt_handle_field_process_receipt_policy_digest(value: I64, out: I64) { coll_copy(encoding_word(wrapping(value + I64{72})), out, I64{24}) }
-#Export(c) fn jet_rt_handle_field_process_receipt_backend(value: I64, out: I64) { coll_copy(encoding_word(wrapping(value + I64{80})), out, I64{24}) }
-#Export(c) fn jet_rt_handle_field_process_receipt_descendants(value: I64, out: I64) { coll_copy(encoding_word(wrapping(value + I64{96})), out, I64{24}) }
-#Export(c) fn jet_rt_handle_field_process_receipt_success(value: I64) -> I64 { value + I64{24} }
-#Export(c) fn jet_rt_handle_field_process_receipt_timed_out(value: I64) -> I64 { value + I64{40} }
-#Export(c) fn jet_rt_handle_field_process_receipt_redacted(value: I64) -> I64 { value + I64{120} }
+#Export(c) jet_rt_handle_field_process_receipt_output: fn(value: I64, out: I64) { coll_copy(encoding_word(wrapping(value + I64{8})), out, I64{24}) }
+#Export(c) jet_rt_handle_field_process_receipt_errors: fn(value: I64, out: I64) { coll_copy(encoding_word(wrapping(value + I64{16})), out, I64{24}) }
+#Export(c) jet_rt_handle_field_process_receipt_executable_identity: fn(value: I64, out: I64) { coll_copy(encoding_word(wrapping(value + I64{48})), out, I64{24}) }
+#Export(c) jet_rt_handle_field_process_receipt_input_digest: fn(value: I64, out: I64) { coll_copy(encoding_word(wrapping(value + I64{64})), out, I64{24}) }
+#Export(c) jet_rt_handle_field_process_receipt_policy_digest: fn(value: I64, out: I64) { coll_copy(encoding_word(wrapping(value + I64{72})), out, I64{24}) }
+#Export(c) jet_rt_handle_field_process_receipt_backend: fn(value: I64, out: I64) { coll_copy(encoding_word(wrapping(value + I64{80})), out, I64{24}) }
+#Export(c) jet_rt_handle_field_process_receipt_descendants: fn(value: I64, out: I64) { coll_copy(encoding_word(wrapping(value + I64{96})), out, I64{24}) }
+#Export(c) jet_rt_handle_field_process_receipt_success: fn(value: I64) -> I64 { value + I64{24} }
+#Export(c) jet_rt_handle_field_process_receipt_timed_out: fn(value: I64) -> I64 { value + I64{40} }
+#Export(c) jet_rt_handle_field_process_receipt_redacted: fn(value: I64) -> I64 { value + I64{120} }

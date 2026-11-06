@@ -6,18 +6,18 @@ use {
     jet_pkg_model.[pkg_version_banner]
 }
 
-fn jet_cli_renderable(text: String, json: Bool) -> JetCLIPlan Never! {
+jet_cli_renderable: fn(text: String, json: Bool) -> JetCLIPlan Never! {
     jet_cli_done(if json -> "" else -> text, "", JET_DRIVER_EXIT_OK)
 }
 
 // Reuse the package model's canonical release/edition/protocol projection
 // (Jetpack/PackageModel/Source/Manifest/Manifest.jet; origin/port/compiler).
-fn jet_cli_version(json: Bool) -> JetCLIPlan Never! {
+jet_cli_version: fn(json: Bool) -> JetCLIPlan Never! {
     jet_cli_renderable(pkg_version_banner(), json)
 }
 
 // Engine compiler aliases own every raw argument,
 // including --version and --help, before Jet's output/flag parser runs.
-fn jet_cli_foreign_compile_plan(raw: [String]) -> JetCLIPlan Never! {
+jet_cli_foreign_compile_plan: fn(raw: [String]) -> JetCLIPlan Never! {
     JetCLIPlan.InspectB{plan: JetCLIInspectBPlan.Engine{engine: JET_CLI_JETPACK_BINARY, verb: raw[0], argv: raw}}
 }

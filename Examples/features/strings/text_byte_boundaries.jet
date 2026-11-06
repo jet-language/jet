@@ -1,4 +1,4 @@
-package {
+package: {
     name: "strings_text_byte_boundaries"
     version: "0.1.0"
     authority: { allow: [Exec, FS, FS.Read, FS.Write, IO, Mem.Alloc] }
@@ -8,14 +8,14 @@ package {
 // Invalid UTF-8 is never silently replaced: a strict text read fails with a
 // typed `IOError`, a byte read is exact, and every offset names its unit.
 use {
-    files :: core.files
-    process :: core.process
-    text :: core.text
+    files: core.files
+    process: core.process
+    text: core.text
 }
 
-fn run() {
-    scratch :: files.temp_dir("jet-text-bytes") ?? panic("temp dir")
-    path :: "{scratch.path}/mixed.bin"
+run: fn() {
+    scratch: files.temp_dir("jet-text-bytes") ?? panic("temp dir")
+    path: "{scratch.path}/mixed.bin"
     files.write_bytes(path, [U8]{0x61, 0xFF, 0x62}) ?? panic("write bytes")
 
     if files.read(path) == {
@@ -27,19 +27,19 @@ fn run() {
             }
         }
     }
-    raw :: files.read_bytes(path) ?? panic("read bytes")
+    raw: files.read_bytes(path) ?? panic("read bytes")
     print("file as bytes: {raw}")
 
-    child :: process.cmd(["printf", "a\\377b\\n"]).stdout(.Capture)
+    child: process.cmd(["printf", "a\\377b\\n"]).stdout(.Capture)
     if process.run_spec(child) == {
         .Ok(receipt) -> print("child text: accepted {process.stdout_lines(receipt).len()} lines")
         .Err(error) -> print("child text: {error}")
     }
 
-    strict :: String.from_bytes([U8]{0x61, 0xFF, 0x62}) ?? "<rejected>"
+    strict: String.from_bytes([U8]{0x61, 0xFF, 0x62}) ?? "<rejected>"
     print("from_bytes invalid: {strict}")
 
-    sample :: "é👍🏽"
+    sample: "é👍🏽"
     print("byte_count: {text.byte_count(sample)} bytes")
     print("scalar_count: {text.scalar_count(sample)} scalars")
     print("graphemes: {text.graphemes(sample).len()} clusters")

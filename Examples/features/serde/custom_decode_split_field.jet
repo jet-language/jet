@@ -1,32 +1,32 @@
 // #3819: a hand-written Decode that splits its text into a list runs when the
 // type is a field of a structurally decoded struct, on every tier.
-use json :: core.encoding.json
+use json: core.encoding.json
 
-struct Handle {
+Handle: struct {
     name: String
     host: String
 }
 
 impl Handle.Decode {
-    fn decode(tree: Dyn) -> Handle [FieldError]! {
-        text :: tree.text()
-        parts :: text.split("@").to_list()
+    decode: fn(tree: Dyn) -> Handle [FieldError]! {
+        text: tree.text()
+        parts: text.split("@").to_list()
         return Ok(Handle{name: parts[0], host: parts[1]})
     }
 }
 
-struct Account {
+Account: struct {
     owner: Handle
 }
 
-fn account(label: String, raw: String) {
-    value :: json.decode<Account>(raw) ?? {
+account: fn(label: String, raw: String) {
+    value: json.decode<Account>(raw) ?? {
         print("account {label}: {err}")
         return
     }
     print("account {label}: {value.owner.name} at {value.owner.host}")
 }
 
-fn run() {
+run: fn() {
     account("custom wins", "{{\"owner\":\"ada@lovelace.org\"}}")
 }

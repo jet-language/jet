@@ -4,23 +4,23 @@
 // inside both caps, so the program runs; a call that broke one would stop the
 // check with E0712 (outside the ceiling) or E0749 (denied).
 #FX(IO)
-module pricing {
-    fn total(prices: [Int]) -> Int {
+pricing: module {
+    total: fn(prices: [Int]) -> Int {
         sum := 0
         loop price in prices -> sum += price
         sum
     }
 
-    fn report(prices: [Int]) { print("total: {total(prices)}") }
+    report: fn(prices: [Int]) { print("total: {total(prices)}") }
 
     #FX(!FS, !Net)
-    module audit {
-        fn check(total: Int) -> Bool { total > 0 }
+    audit: module {
+        check: fn(total: Int) -> Bool { total > 0 }
     }
 }
 
-fn run() {
-    prices :: [Int]{3, 4, 5}
+run: fn() {
+    prices: [Int]{3, 4, 5}
     pricing.report(prices)
     print("audited: {pricing.audit.check(pricing.total(prices))}")
 }

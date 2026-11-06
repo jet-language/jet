@@ -1,21 +1,21 @@
 // core.encoding.toml — full TOML 1.0: `[table]` headers, arrays, typed scalars.
 // Decode a nested document into typed structs, then round-trip it back to text.
-use toml :: core.encoding.toml
+use toml: core.encoding.toml
 
-struct Owner {
+Owner: struct {
     name: String
     port: Int
 }
 
-struct Config {
+Config: struct {
     title: String
     owner: Owner
     ports: [Int]
 }
 
-fn run() [FieldError]! {
-    raw :: "title = \"jet\"\nports = [80, 443]\n\n[owner]\nname = \"ada\"\nport = 8080\n"
-    cfg :: toml.decode<Config>(raw)
+run: fn() [FieldError]! {
+    raw: "title = \"jet\"\nports = [80, 443]\n\n[owner]\nname = \"ada\"\nport = 8080\n"
+    cfg: toml.decode<Config>(raw)
     print(cfg.title)
     print(cfg.owner.name)
     print(cfg.owner.port)

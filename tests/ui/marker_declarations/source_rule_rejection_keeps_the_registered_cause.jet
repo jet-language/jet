@@ -1,24 +1,24 @@
 
-struct RejectedType {
+RejectedType: struct {
     impl Diagnostic {
-        code :: "E0927"
-        fn what(self) -> String { "the rule rejected this type" }
-        fn why(self) -> String { "the test rule is deliberately strict" }
-        fn fix(self) -> String { "remove the marker" }
+        code: "E0927"
+        what: fn(self) -> String { "the rule rejected this type" }
+        why: fn(self) -> String { "the test rule is deliberately strict" }
+        fix: fn(self) -> String { "remove the marker" }
     }
 }
 
-struct Rejects {
+Rejects: struct {
     impl Marker {
-        sites :: [.Type]
+        sites: [.Type]
 
-        fn expand(self, target: Target) {
+        expand: fn(self, target: Target) {
             reject(RejectedType{})
         }
     }
 }
 
 #Rejects
-struct Person { id: Int }
+Person: struct { id: Int }
 
-fn run() {}
+run: fn() {}

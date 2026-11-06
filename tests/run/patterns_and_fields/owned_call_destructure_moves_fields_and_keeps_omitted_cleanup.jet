@@ -1,17 +1,17 @@
 
-struct Parts { left: [Int], right: [Int], spare: String }
-fn pair(seed: Int) -> (left: [Int], right: [Int]) {
+Parts: struct { left: [Int], right: [Int], spare: String }
+pair: fn(seed: Int) -> (left: [Int], right: [Int]) {
     (left: [seed, seed + 1], right: [seed + 2])
 }
-fn parts(seed: Int) -> Parts {
+parts: fn(seed: Int) -> Parts {
     Parts{left: [seed], right: [seed + 1], spare: "omitted"}
 }
-fn run() {
+run: fn() {
     acc := 0
     loop i in 0..<4 {
-        (left, right) :: pair(i)
+        (left, right): pair(i)
         acc += left[1] + right[0]
-        Parts{left: a, right: b, ..} :: parts(i)
+        Parts{left: a, right: b, ..}: parts(i)
         acc += a[0] + b[0]
     }
     print(acc)

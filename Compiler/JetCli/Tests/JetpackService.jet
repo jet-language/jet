@@ -10,7 +10,7 @@ use {
     jet_cli.[jet_cli_compiler_service, jet_cli_compiler_service_answer, jet_cli_plan]
 }
 
-fn jetpack_service_fixture_usage(output: JetDriverVerbOutput, needle: String) Never! {
+jetpack_service_fixture_usage: fn(output: JetDriverVerbOutput, needle: String) Never! {
     assert_eq(output.exit_code, JET_DRIVER_EXIT_USAGE)
     assert_eq(output.stdout, "")
     assert(output.stderr.contains("E2104"), output.stderr)
@@ -33,7 +33,7 @@ fn jetpack_service_fixture_usage(output: JetDriverVerbOutput, needle: String) Ne
         .Done(output) -> jetpack_service_fixture_usage(output, "exactly one operation")
         else -> panic("a missing service operation is a usage error")
     }
-    help :: jet_cli_plan([String]{"help"})
+    help: jet_cli_plan([String]{"help"})
     if help == {
         .Done(output) -> assert(!output.stdout.contains(JET_COMPILER_SERVICE_VERB) && !output.stderr.contains(JET_COMPILER_SERVICE_VERB), "the service verb is never in help")
         else -> {}
@@ -43,7 +43,7 @@ fn jetpack_service_fixture_usage(output: JetDriverVerbOutput, needle: String) Ne
     jetpack_service_fixture_usage(jet_cli_compiler_service_answer(JET_COMPILER_SERVICE_COMPTIME_EVALUATE, "{{\"program\":\"x\"}}"), "`program` and `base_dir`")
     jetpack_service_fixture_usage(jet_cli_compiler_service_answer(JET_COMPILER_SERVICE_CHECK_ENTRY, "{{\"file\":\"main.jet\"}}"), "`file` and `source`")
     // A check whose entry can't be read keeps the loader's refusal.
-    missing :: jet_cli_compiler_service_answer(JET_COMPILER_SERVICE_CHECK_ENTRY, compiler_service_check_request("/nonexistent/jetpack-service/main.jet", "fn run() {{ }}\n"))
+    missing: jet_cli_compiler_service_answer(JET_COMPILER_SERVICE_CHECK_ENTRY, compiler_service_check_request("/nonexistent/jetpack-service/main.jet", "run: fn() {{ }}\n"))
     assert(missing.exit_code != JET_DRIVER_EXIT_OK, "an unreadable entry is not a clean check")
     assert(missing.stderr.contains("E2105"), missing.stderr)
 }

@@ -4,12 +4,12 @@
 // match over its members is exhaustive, and `{e}` / `{e:Debug}` render the
 // member the union holds.
 #Error
-enum ParseError {
+ParseError: enum {
     Bad(String)
 }
 
 impl ParseError.Display {
-    fn display(self) -> String {
+    display: fn(self) -> String {
         if self == {
             .Bad(why) -> "bad input: {why}"
         }
@@ -17,55 +17,55 @@ impl ParseError.Display {
 }
 
 #Error
-enum LookupError {
+LookupError: enum {
     Missing(String)
 }
 
 impl LookupError.Display {
-    fn display(self) -> String {
+    display: fn(self) -> String {
         if self == {
             .Missing(who) -> "no entry for {who}"
         }
     }
 }
 
-fn parse(raw: String) -> Int ParseError! {
+parse: fn(raw: String) -> Int ParseError! {
     if raw == "" -> return Err(ParseError.Bad("empty"))
     Ok(raw.len())
 }
 
-fn lookup(name: String) -> String LookupError! {
+lookup: fn(name: String) -> String LookupError! {
     if name == "zed" -> return Err(LookupError.Missing(name.copy()))
     if name == "bob" -> return Ok("")
     Ok("abc")
 }
 
 // Implicit propagation: `lookup` fails with one member of the union.
-fn implicit(name: String) -> Int (ParseError | LookupError)! {
-    raw :: lookup(name)
+implicit: fn(name: String) -> Int (ParseError | LookupError)! {
+    raw: lookup(name)
     parse(raw)
 }
 
 // Tail value: the member error is the function's last expression.
-fn tail(flag: Bool) -> Int (ParseError | LookupError)! {
+tail: fn(flag: Bool) -> Int (ParseError | LookupError)! {
     if flag -> return Ok(1)
     Err(LookupError.Missing("tail"))
 }
 
 // Explicit `return Err(member)`.
-fn explicit(flag: Bool) -> Int (ParseError | LookupError)! {
+explicit: fn(flag: Bool) -> Int (ParseError | LookupError)! {
     if flag -> return Err(ParseError.Bad("explicit"))
     Ok(2)
 }
 
 // A `?("note")` hop from a member, then a union-to-union hop.
-fn hop(name: String) -> Int (ParseError | LookupError)! {
-    raw :: lookup(name)?("hop lookup")
-    n :: implicit(raw)
+hop: fn(name: String) -> Int (ParseError | LookupError)! {
+    raw: lookup(name)?("hop lookup")
+    n: implicit(raw)
     Ok(n)
 }
 
-fn describe(result: Int (ParseError | LookupError)!) -> String {
+describe: fn(result: Int (ParseError | LookupError)!) -> String {
     if result == {
         .Ok(n) -> "ok {n}"
         .Err(.ParseError(.Bad(why))) -> "parse: {why}"
@@ -73,7 +73,7 @@ fn describe(result: Int (ParseError | LookupError)!) -> String {
     }
 }
 
-fn run() {
+run: fn() {
     print(describe(implicit("ada")))
     print(describe(implicit("bob")))
     print(describe(implicit("zed")))

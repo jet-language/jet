@@ -22,32 +22,32 @@ use jet_foundation.[Span, TComptimeEnumArg, TComptimeField, TComptimeMapEntry, T
 
 // Bytes before a box's payload: the allocator's block header, whose first
 // word is the count (Refcount.jet jet_rt_block_retain).
-IR_STATIC_BOX_HEADER :: 24
+IR_STATIC_BOX_HEADER: 24
 
 // The count word of a static exact-Int node (ir_static_big_int): retains and
 // releases (JetRuntime Int.jet jet_rt_int_clone, jet_rt_int_drop) move it but
 // never bring it to zero, so the runtime never frees the node.
-IR_STATIC_INT_COUNT :: 4611686018427387904
+IR_STATIC_INT_COUNT: 4611686018427387904
 
 // The bit an exact-Int word sets to name a node (JetRuntime Int.jet int_tag).
-IR_STATIC_INT_TAG :: 4611686018427387904
+IR_STATIC_INT_TAG: 4611686018427387904
 
 // A word of a static object while its constant is laid out: a plain word,
 // or an address (`target` a local object, else a module data row, or the
 // immortal String of a data row when `text`).
-struct IRStaticWord { word: Int, target: Int{-1}, addend: Int{0}, local: Bool{false}, text: Bool{false} }
+IRStaticWord: struct { word: Int, target: Int{-1}, addend: Int{0}, local: Bool{false}, text: Bool{false} }
 
-struct IRStaticReloc { offset: Int, target: Int, addend: Int, local: Bool, text: Bool }
+IRStaticReloc: struct { offset: Int, target: Int, addend: Int, local: Bool, text: Bool }
 
 // The objects of one constant, numbered locally until they become data rows.
-struct IRStaticBuild { bytes: [[U8]], relocs: [[IRStaticReloc]] }
+IRStaticBuild: struct { bytes: [[U8]], relocs: [[IRStaticReloc]] }
 
 // Where a struct value's field `name` goes, found once for every struct value
 // of one type (ir_static_struct): its member's position, its declared type
 // and, once a field value needs it, that type's value row (-1 before).
-struct IRStaticField { name: String, member: Int, ty: Type, row: Int }
+IRStaticField: struct { name: String, member: Int, ty: Type, row: Int }
 
-fn ir_static_new(s: &IRStaticBuild, size: Int) -> Int Never! {
+ir_static_new: fn(s: &IRStaticBuild, size: Int) -> Int Never! {
     bytes := [U8]{}
     loop _ in 0..<size -> &bytes.push(U8{0})
     &s.bytes.push(bytes)
@@ -57,13 +57,13 @@ fn ir_static_new(s: &IRStaticBuild, size: Int) -> Int Never! {
 
 // A box of `size` payload bytes (ir_box_alloc's rounding): the immortal
 // (negative) count word Refcount.jet leaves untouched, then the payload.
-fn ir_static_box(s: &IRStaticBuild, size: Int) -> Int Never! {
-    object :: ir_static_new(&s, IR_STATIC_BOX_HEADER + ir_align8(size))
+ir_static_box: fn(s: &IRStaticBuild, size: Int) -> Int Never! {
+    object: ir_static_new(&s, IR_STATIC_BOX_HEADER + ir_align8(size))
     ir_static_put(&s, object, 0, IRStaticWord{word: -9223372036854775807 - 1}, 8)
     object
 }
 
-fn ir_static_box_word(object: Int) -> IRStaticWord Never! {
+ir_static_box_word: fn(object: Int) -> IRStaticWord Never! {
     IRStaticWord{word: 0, target: object, addend: IR_STATIC_BOX_HEADER, local: true}
 }
 
@@ -71,19 +71,19 @@ fn ir_static_box_word(object: Int) -> IRStaticWord Never! {
 // int_node_init, int_pack): [count, 0, sign, limb buffer, length, capacity]
 // over its base-10^9 32-bit limbs, least significant first, the most
 // significant nonzero. Its word is the node's address tagged (int_tag).
-fn ir_static_big_int(s: &IRStaticBuild, value: Int) -> IRStaticWord? Never! {
-    magnitude :: if value < 0 -> -value else -> value
-    digits :: "{magnitude}"
+ir_static_big_int: fn(s: &IRStaticBuild, value: Int) -> IRStaticWord? Never! {
+    magnitude: if value < 0 -> -value else -> value
+    digits: "{magnitude}"
     limbs := [Int]{}
     end := digits.len()
     loop end > 0 {
-        start :: if end > 9 -> end - 9 else -> 0
+        start: if end > 9 -> end - 9 else -> 0
         &limbs.push(Int.parse(digits.slice(start, end)) ?? return None)
         end = start
     }
-    buffer :: ir_static_new(&s, limbs.len() * 4)
+    buffer: ir_static_new(&s, limbs.len() * 4)
     loop (index, limb) in limbs -> ir_static_put(&s, buffer, index * 4, IRStaticWord{word: limb}, 4)
-    node :: ir_static_new(&s, 48)
+    node: ir_static_new(&s, 48)
     ir_static_put(&s, node, 0, IRStaticWord{word: IR_STATIC_INT_COUNT}, 8)
     if value < 0 -> ir_static_put(&s, node, 16, IRStaticWord{word: 1}, 8)
     ir_static_put(&s, node, 24, IRStaticWord{word: 0, target: buffer, local: true}, 8)
@@ -94,7 +94,7 @@ fn ir_static_big_int(s: &IRStaticBuild, value: Int) -> IRStaticWord? Never! {
 
 // Writes the low `size` bytes of `value` at `offset` of local object
 // `object` (an address takes a whole word).
-fn ir_static_put(s: &IRStaticBuild, object: Int, offset: Int, value: IRStaticWord, size: Int) Never! {
+ir_static_put: fn(s: &IRStaticBuild, object: Int, offset: Int, value: IRStaticWord, size: Int) Never! {
     if value.target >= 0 {
         &s.relocs[object].push(IRStaticReloc{offset: offset, target: value.target, addend: value.addend, local: value.local, text: value.text})
         return
@@ -106,17 +106,17 @@ fn ir_static_put(s: &IRStaticBuild, object: Int, offset: Int, value: IRStaticWor
 // row, or -1 when its value is built at each read. Built on first use and
 // kept in m.constant_rows by the constant and the type's content key, which
 // is how a merge (BuildMerge.jet) shares one object between build threads.
-fn ir_static_constant(m: &IRModule, p: IRProgram, ty: Type, key: String, value: TComptimeValue) -> Int Never! {
-    row :: ir_value_type(&m, p, ty) ?? return -1
-    kind :: m.types[row].kind
+ir_static_constant: fn(m: &IRModule, p: IRProgram, ty: Type, key: String, value: TComptimeValue) -> Int Never! {
+    row: ir_value_type(&m, p, ty) ?? return -1
+    kind: m.types[row].kind
     if kind != .Aggregate && kind != .Pointer -> return -1
-    memo :: "{key}|{ir_row_key(m, row)}"
-    known :: name_rows_value(m.constant_rows, memo) ?? -2
+    memo: "{key}|{ir_row_key(m, row)}"
+    known: name_rows_value(m.constant_rows, memo) ?? -2
     if known != -2 -> return known
     s := IRStaticBuild{bytes: [[U8]]{}, relocs: [[IRStaticReloc]]{}}
     root := -1
     if kind == .Aggregate {
-        object :: ir_static_new(&s, m.types[row].size)
+        object: ir_static_new(&s, m.types[row].size)
         if ir_static_fill(&m, p, &s, object, 0, ty, row, value) -> root = object
     } else if ir_static_word(&m, p, &s, ty, row, value) == .Val(word) {
         // Only a box is worth a static object; a null Option is a word.
@@ -126,11 +126,11 @@ fn ir_static_constant(m: &IRModule, p: IRProgram, ty: Type, key: String, value: 
         name_rows_set(&m.constant_rows, memo, -1)
         return -1
     }
-    base :: m.data.len()
+    base: m.data.len()
     loop (object, bytes) in s.bytes {
         relocs := [IRDataReloc]{}
         loop reloc in s.relocs[object] {
-            target :: if reloc.local -> base + reloc.target else -> reloc.target
+            target: if reloc.local -> base + reloc.target else -> reloc.target
             &relocs.push(IRDataReloc{offset: reloc.offset, target: target, addend: reloc.addend, text: reloc.text})
         }
         &m.data.push(bytes)
@@ -143,15 +143,15 @@ fn ir_static_constant(m: &IRModule, p: IRProgram, ty: Type, key: String, value: 
 // A read of module constant `key` as type `ty` that borrows its static
 // object: an aggregate is the object's address, a box the address past its
 // count word. -1 when the constant has no static object.
-fn ir_static_read(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, key: String, value: TComptimeValue) -> Int Never! {
-    object :: ir_static_constant(&m, p, ty, key, value)
+ir_static_read: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, key: String, value: TComptimeValue) -> Int Never! {
+    object: ir_static_constant(&m, p, ty, key, value)
     if object < 0 -> return -1
-    row :: ir_value_type(&m, p, ty) ?? return -1
-    pointer_row :: ir_pointer_row(&m)
-    address :: ir_temp(&m, &b, pointer_row)
+    row: ir_value_type(&m, p, ty) ?? return -1
+    pointer_row: ir_pointer_row(&m)
+    address: ir_temp(&m, &b, pointer_row)
     ir_emit(&b.f, IROp.DataAddress, address, object, -1, -1, b.line)
     if m.types[row].kind == .Aggregate -> return ir_load_at(&m, &b, address, 0, row)
-    slot :: ir_temp(&m, &b, row)
+    slot: ir_temp(&m, &b, row)
     ir_emit(&b.f, IROp.Offset, slot, address, IR_STATIC_BOX_HEADER, -1, b.line)
     slot
 }
@@ -163,26 +163,26 @@ fn ir_static_read(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, key: Stri
 // Float) or an exact Int, which the cell owns: its initial value is an
 // inline word, and each assignment drops the value it replaces
 // (ir_storage_assign). -1 on failure.
-fn ir_storage_address(m: &IRModule, p: IRProgram, b: &IRBuilder, definition: TConstantDef, span: Span) -> Int Never! {
-    row :: ir_value_type(&m, p, definition.ty) ?? return ir_type_fail(&b, span, definition.ty)
-    kind :: m.types[row].kind
-    if kind != .Bool && kind != .Word && kind != .Char && kind != .Float && kind != .Float32 && kind != .Int -> return ir_fail_slot(&b, span, "module storage {definition.name} of {ir_type_name(definition.ty)}")
-    memo :: "storage:{definition.key}"
+ir_storage_address: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, definition: TConstantDef, span: Span) -> Int Never! {
+    row: ir_value_type(&m, p, definition.ty) ?? return ir_type_fail(&b, span, definition.ty)
+    kind: m.types[row].kind
+    if kind != .Bool && kind != .Word && kind != .Char && kind != .Float && kind != .Float32 && kind != .Int -> return ir_fail_slot(&b, span, "storage: module {definition.name} of {ir_type_name(definition.ty)}")
+    memo: "storage:{definition.key}"
     object := name_rows_value(m.constant_rows, memo) ?? -1
     if object < 0 {
         s := IRStaticBuild{bytes: [[U8]]{}, relocs: [[IRStaticReloc]]{}}
-        cell :: ir_static_new(&s, 8)
-        if !ir_static_into(&m, p, &s, cell, 0, definition.ty, row, definition.value) -> return ir_fail_slot(&b, span, "module storage {definition.name}: initial value does not freeze")
+        cell: ir_static_new(&s, 8)
+        if !ir_static_into(&m, p, &s, cell, 0, definition.ty, row, definition.value) -> return ir_fail_slot(&b, span, "storage: module {definition.name}: initial value does not freeze")
         // A static Int node could never be dropped by the cell's next write.
-        if s.bytes.len() != 1 -> return ir_fail_slot(&b, span, "module storage {definition.name}: initial Int outside the inline range")
+        if s.bytes.len() != 1 -> return ir_fail_slot(&b, span, "storage: module {definition.name}: initial Int outside the inline range")
         object = m.data.len()
         &m.data.push(s.bytes[cell].copy())
         // No address words; the entry marks a word-aligned static object.
         m.data_relocs[object] = [IRDataReloc]{}
         name_rows_set(&m.constant_rows, memo, object)
     }
-    pointer :: ir_pointer_row(&m)
-    address :: ir_temp(&m, &b, pointer)
+    pointer: ir_pointer_row(&m)
+    address: ir_temp(&m, &b, pointer)
     ir_emit(&b.f, IROp.DataAddress, address, object, -1, -1, b.line)
     address
 }
@@ -192,8 +192,8 @@ fn ir_storage_address(m: &IRModule, p: IRProgram, b: &IRBuilder, definition: TCo
 // computed, 1: computing, 2: computed) and, from byte 8, the value of type
 // row `row` the constant's startup function returned, which the cell owns
 // for the life of the process.
-fn ir_startup_cell(m: &IRModule, b: &IRBuilder, definition: TConstantDef, row: Int) -> Int Never! {
-    memo :: "startup:{definition.key}"
+ir_startup_cell: fn(m: &IRModule, b: &IRBuilder, definition: TConstantDef, row: Int) -> Int Never! {
+    memo: "startup:{definition.key}"
     object := name_rows_value(m.constant_rows, memo) ?? -1
     if object < 0 {
         object = m.data.len()
@@ -204,8 +204,8 @@ fn ir_startup_cell(m: &IRModule, b: &IRBuilder, definition: TConstantDef, row: I
         m.data_relocs[object] = [IRDataReloc]{}
         name_rows_set(&m.constant_rows, memo, object)
     }
-    pointer :: ir_pointer_row(&m)
-    address :: ir_temp(&m, &b, pointer)
+    pointer: ir_pointer_row(&m)
+    address: ir_temp(&m, &b, pointer)
     ir_emit(&b.f, IROp.DataAddress, address, object, -1, -1, b.line)
     address
 }
@@ -213,17 +213,17 @@ fn ir_startup_cell(m: &IRModule, b: &IRBuilder, definition: TConstantDef, row: I
 // Lays `value` of `ty` (type row `row`) at `offset` of local object
 // `object` the way memory holds a value of that row: an aggregate's bytes in
 // place, any other value's word. false when it cannot be frozen.
-fn ir_static_into(m: &IRModule, p: IRProgram, s: &IRStaticBuild, object: Int, offset: Int, ty: Type, row: Int, value: TComptimeValue) -> Bool Never! {
+ir_static_into: fn(m: &IRModule, p: IRProgram, s: &IRStaticBuild, object: Int, offset: Int, ty: Type, row: Int, value: TComptimeValue) -> Bool Never! {
     if value == .Unit -> return true
     if m.types[row].kind == .Aggregate -> return ir_static_fill(&m, p, &s, object, offset, ty, row, value)
-    word :: ir_static_word(&m, p, &s, ty, row, value) ?? return false
+    word: ir_static_word(&m, p, &s, ty, row, value) ?? return false
     ir_static_put(&s, object, offset, word, m.types[row].size)
     true
 }
 
 // The word of a non-aggregate value (ir_comptime's scalars and boxes).
-fn ir_static_word(m: &IRModule, p: IRProgram, s: &IRStaticBuild, ty: Type, row: Int, value: TComptimeValue) -> IRStaticWord? Never! {
-    kind :: m.types[row].kind
+ir_static_word: fn(m: &IRModule, p: IRProgram, s: &IRStaticBuild, ty: Type, row: Int, value: TComptimeValue) -> IRStaticWord? Never! {
+    kind: m.types[row].kind
     if value == {
         .Int(number) -> {
             if kind == .Int && !ir_int_inline(number) -> return ir_static_big_int(&s, number)
@@ -239,16 +239,16 @@ fn ir_static_word(m: &IRModule, p: IRProgram, s: &IRStaticBuild, ty: Type, row: 
         .BigInt(decimal) -> {
             if kind == .Word -> return Val(IRStaticWord{word: ir_constant_u64_bits(decimal)})
             if kind != .Int -> return None
-            number :: Int.parse(decimal) ?? return None
+            number: Int.parse(decimal) ?? return None
             if ir_int_inline(number) -> return Val(IRStaticWord{word: number})
             return ir_static_big_int(&s, number)
         }
         .Present(inner) -> {
             if ir_untag(ty) == .Option(inner_ty) {
-                inner_row :: ir_value_type(&m, p, inner_ty) ?? return None
+                inner_row: ir_value_type(&m, p, inner_ty) ?? return None
                 // An inline Option is its payload's word.
                 if ir_option_inline(m, row) -> return ir_static_word(&m, p, &s, inner_ty, inner_row, inner)
-                boxed :: ir_static_box(&s, m.types[inner_row].size)
+                boxed: ir_static_box(&s, m.types[inner_row].size)
                 if !ir_static_into(&m, p, &s, boxed, IR_STATIC_BOX_HEADER, inner_ty, inner_row, inner) -> return None
                 return Val(ir_static_box_word(boxed))
             }
@@ -258,13 +258,13 @@ fn ir_static_word(m: &IRModule, p: IRProgram, s: &IRStaticBuild, ty: Type, row: 
         .Failed(report) -> {
             if report == .Told(told) {
                 if ir_untag(ty) == .Result(ok_ty, err_ty) {
-                    ok_size :: ir_type_size(&m, p, ok_ty)
-                    err_size :: ir_type_size(&m, p, err_ty)
-                    widest :: ir_align8(if ok_size > err_size -> ok_size else -> err_size)
-                    boxed :: ir_static_box(&s, 8 + widest)
+                    ok_size: ir_type_size(&m, p, ok_ty)
+                    err_size: ir_type_size(&m, p, err_ty)
+                    widest: ir_align8(if ok_size > err_size -> ok_size else -> err_size)
+                    boxed: ir_static_box(&s, 8 + widest)
                     // Selector 0: Err (ir_result_box).
                     if told != .Unit {
-                        err_row :: ir_value_type(&m, p, err_ty) ?? return None
+                        err_row: ir_value_type(&m, p, err_ty) ?? return None
                         if !ir_static_into(&m, p, &s, boxed, IR_STATIC_BOX_HEADER + 8, err_ty, err_row, told) -> return None
                     }
                     return Val(ir_static_box_word(boxed))
@@ -282,10 +282,10 @@ fn ir_static_word(m: &IRModule, p: IRProgram, s: &IRStaticBuild, ty: Type, row: 
 
 // An enum value (ir_comptime_enum): a payload-free enum's variant index, else
 // a box with the discriminant and each payload member.
-fn ir_static_enum(m: &IRModule, p: IRProgram, s: &IRStaticBuild, ty: Type, slot_type: Int, variant: String, args: [TComptimeEnumArg]) -> IRStaticWord? Never! {
-    nominal :: ir_nominal_name(ir_untag(ty)) ?? return None
-    row :: ir_type_def(p, nominal) ?? ir_enum_def(m, p, slot_type) ?? return None
-    index :: ir_variant_index(p, row, variant) ?? return None
+ir_static_enum: fn(m: &IRModule, p: IRProgram, s: &IRStaticBuild, ty: Type, slot_type: Int, variant: String, args: [TComptimeEnumArg]) -> IRStaticWord? Never! {
+    nominal: ir_nominal_name(ir_untag(ty)) ?? return None
+    row: ir_type_def(p, nominal) ?? ir_enum_def(m, p, slot_type) ?? return None
+    index: ir_variant_index(p, row, variant) ?? return None
     if m.types[slot_type].kind != .Pointer {
         if args.len() > 0 -> return None
         return Val(IRStaticWord{word: index})
@@ -308,11 +308,11 @@ fn ir_static_enum(m: &IRModule, p: IRProgram, s: &IRStaticBuild, ty: Type, slot_
             }
         }
     }
-    slot_args :: ir_row_args(m, slot_type)
-    members :: ir_variant_members(&m, p, row, slot_args, index) ?? return None
+    slot_args: ir_row_args(m, slot_type)
+    members: ir_variant_members(&m, p, row, slot_args, index) ?? return None
     if members.len() != types.len() -> return None
-    size :: ir_enum_box_size(&m, p, row, slot_args) ?? return None
-    boxed :: ir_static_box(&s, size)
+    size: ir_enum_box_size(&m, p, row, slot_args) ?? return None
+    boxed: ir_static_box(&s, size)
     ir_static_put(&s, boxed, IR_STATIC_BOX_HEADER, IRStaticWord{word: index}, 8)
     loop (position, arg) in args {
         target := position
@@ -323,7 +323,7 @@ fn ir_static_enum(m: &IRModule, p: IRProgram, s: &IRStaticBuild, ty: Type, slot_
             }
         }
         if target < 0 || target >= members.len() -> return None
-        value_row :: ir_value_type(&m, p, types[target]) ?? return None
+        value_row: ir_value_type(&m, p, types[target]) ?? return None
         if !ir_static_member(&m, p, &s, boxed, IR_STATIC_BOX_HEADER, members[target], types[target], value_row, arg.value) -> return None
     }
     Val(ir_static_box_word(boxed))
@@ -332,10 +332,10 @@ fn ir_static_enum(m: &IRModule, p: IRProgram, s: &IRStaticBuild, ty: Type, slot_
 // Writes member `member` of the storage at `offset` of `object`
 // (ir_member_store / ir_member_write): a recursive edge gets a wrapper box
 // of its own holding the value.
-fn ir_static_member(m: &IRModule, p: IRProgram, s: &IRStaticBuild, object: Int, offset: Int, member: IRMember, ty: Type, value_row: Int, value: TComptimeValue) -> Bool Never! {
+ir_static_member: fn(m: &IRModule, p: IRProgram, s: &IRStaticBuild, object: Int, offset: Int, member: IRMember, ty: Type, value_row: Int, value: TComptimeValue) -> Bool Never! {
     if (m.types[member.ty].kind == .Aggregate) != (m.types[value_row].kind == .Aggregate) -> return false
     if !member.boxed -> return ir_static_into(&m, p, &s, object, offset + member.offset, ty, value_row, value)
-    wrapper :: ir_static_box(&s, m.types[member.ty].size)
+    wrapper: ir_static_box(&s, m.types[member.ty].size)
     if !ir_static_into(&m, p, &s, wrapper, IR_STATIC_BOX_HEADER, ty, value_row, value) -> return false
     ir_static_put(&s, object, offset + member.offset, ir_static_box_word(wrapper), 8)
     true
@@ -344,19 +344,19 @@ fn ir_static_member(m: &IRModule, p: IRProgram, s: &IRStaticBuild, object: Int, 
 // Lays an aggregate value out in place: a struct or tuple member by member
 // (ir_comptime_struct), a List as its frozen header over a static element
 // buffer (ir_list_from), a byte List over its data row (ir_comptime_bytes).
-fn ir_static_fill(m: &IRModule, p: IRProgram, s: &IRStaticBuild, object: Int, offset: Int, ty: Type, row: Int, value: TComptimeValue) -> Bool Never! {
+ir_static_fill: fn(m: &IRModule, p: IRProgram, s: &IRStaticBuild, object: Int, offset: Int, ty: Type, row: Int, value: TComptimeValue) -> Bool Never! {
     if value == {
         .Struct(_, fields) -> {
-            members :: ir_static_members(&m, p, row) ?? return false
+            members: ir_static_members(&m, p, row) ?? return false
             plan := [IRStaticField]{}
             return ir_static_struct(&m, p, &s, object, offset, ty, members, &plan, fields)
         }
         .List(values) -> {
             if ir_untag(ty) == .List(element) {
-                element_row :: ir_value_type(&m, p, element) ?? return false
+                element_row: ir_value_type(&m, p, element) ?? return false
                 if values.len() == 0 -> return true
-                stride :: ir_list_stride(m, element_row)
-                data :: ir_static_new(&s, values.len() * stride)
+                stride: ir_list_stride(m, element_row)
+                data: ir_static_new(&s, values.len() * stride)
                 // Struct items share one member list and one field plan.
                 members := [IRMember]{}
                 laid := false
@@ -381,16 +381,16 @@ fn ir_static_fill(m: &IRModule, p: IRProgram, s: &IRStaticBuild, object: Int, of
             return false
         }
         .Map(entries) -> {
-            shape :: ir_map_shape(&m, p, row) ?? return false
+            shape: ir_map_shape(&m, p, row) ?? return false
             if entries.len() == 0 -> return true
-            order :: ir_static_map_order(shape.kind, entries) ?? return false
-            key_ty :: m.types[shape.key.ty].ty.copy()
-            value_ty :: m.types[shape.value.ty].ty.copy()
-            key_row :: ir_value_type(&m, p, key_ty) ?? return false
-            value_row :: ir_value_type(&m, p, value_ty) ?? return false
-            data :: ir_static_new(&s, order.len() * shape.stride)
+            order: ir_static_map_order(shape.kind, entries) ?? return false
+            key_ty: m.types[shape.key.ty].ty.copy()
+            value_ty: m.types[shape.value.ty].ty.copy()
+            key_row: ir_value_type(&m, p, key_ty) ?? return false
+            value_row: ir_value_type(&m, p, value_ty) ?? return false
+            data: ir_static_new(&s, order.len() * shape.stride)
             loop (index, position) in order {
-                at :: index * shape.stride
+                at: index * shape.stride
                 if !ir_static_member(&m, p, &s, data, at, shape.key, key_ty, key_row, ir_comptime_key_value(entries[position].key)) -> return false
                 if !ir_static_member(&m, p, &s, data, at, shape.value, value_ty, value_row, entries[position].value) -> return false
             }
@@ -417,7 +417,7 @@ fn ir_static_fill(m: &IRModule, p: IRProgram, s: &IRStaticBuild, object: Int, of
 // `offset` of `object`, member by member (ir_comptime_struct). `plan` keeps
 // each field position's member, declared type and value row for the next
 // value of the same type; a position naming another field is found again.
-fn ir_static_struct(m: &IRModule, p: IRProgram, s: &IRStaticBuild, object: Int, offset: Int, ty: Type, members: [IRMember], plan: &[IRStaticField], fields: [TComptimeField]) -> Bool Never! {
+ir_static_struct: fn(m: &IRModule, p: IRProgram, s: &IRStaticBuild, object: Int, offset: Int, ty: Type, members: [IRMember], plan: &[IRStaticField], fields: [TComptimeField]) -> Bool Never! {
     loop (position, field) in fields {
         if position >= plan.len() || plan[position].name != field.name {
             found := -1
@@ -425,8 +425,8 @@ fn ir_static_struct(m: &IRModule, p: IRProgram, s: &IRStaticBuild, object: Int, 
                 if member.name == field.name -> found = index
             }
             if found < 0 -> return false
-            field_ty :: ir_declared_field_type(m, p, ty, field.name) ?? return false
-            known :: IRStaticField{name: field.name.copy(), member: found, ty: field_ty, row: -1}
+            field_ty: ir_declared_field_type(m, p, ty, field.name) ?? return false
+            known: IRStaticField{name: field.name.copy(), member: found, ty: field_ty, row: -1}
             if position < plan.len() {
                 plan[position] = known
             } else {
@@ -446,7 +446,7 @@ fn ir_static_struct(m: &IRModule, p: IRProgram, s: &IRStaticBuild, object: Int, 
 // them (ir_comptime_map's map.set): ascending keys (BuildMaps ir_map_order),
 // a later duplicate key's value replacing the earlier one. None for a key
 // order this does not reproduce ("order": tuple, List and Option keys).
-fn ir_static_map_order(kind: String, entries: [TComptimeMapEntry]) -> [Int]? Never! {
+ir_static_map_order: fn(kind: String, entries: [TComptimeMapEntry]) -> [Int]? Never! {
     if kind != "int" && kind != "word" && kind != "uword" && kind != "string" -> return None
     // Each key with its position; ordering the pairs by key, then position,
     // makes the last of a run the later duplicate. The comparator is
@@ -488,10 +488,10 @@ fn ir_static_map_order(kind: String, entries: [TComptimeMapEntry]) -> [Int]? Nev
 }
 
 // The members of the tuple or struct type row `row` (ir_member_of).
-fn ir_static_members(m: &IRModule, p: IRProgram, row: Int) -> [IRMember]? Never! {
-    ty :: ir_untag(m.types[row].ty)
+ir_static_members: fn(m: &IRModule, p: IRProgram, row: Int) -> [IRMember]? Never! {
+    ty: ir_untag(m.types[row].ty)
     if ty == .Tuple(fields) -> return ir_tuple_members(&m, p, fields)
-    nominal :: ir_nominal_name(ty) ?? return None
-    definition :: ir_type_def(p, nominal) ?? return None
+    nominal: ir_nominal_name(ty) ?? return None
+    definition: ir_type_def(p, nominal) ?? return None
     ir_struct_members(&m, p, definition, ir_type_args(ty))
 }

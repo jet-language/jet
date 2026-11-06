@@ -1,19 +1,19 @@
-package {
+package: {
     name: "reactive_conditional_smoke"
     authority: { allow: [Browser, IO, Mem.Alloc] }
 }
 
 use {
-    ui :: core.ui
-    reactive :: core.reactive
+    ui: core.ui
+    reactive: core.reactive
 }
 
-fn run() {
+run: fn() {
     selected := reactive.signal(0)
     backend := ui.tui_backend()
-    render_backend :: backend.copy()
+    render_backend: backend.copy()
     ui.reactive_render(() -> {
-        marker :: if selected.get() == 0 -> "* " else -> "  "
+        marker: if selected.get() == 0 -> "* " else -> "  "
         ui.mount(render_backend, ui.text("{marker}Meeting"))
     })
     print("initial: {backend.render_count()}")

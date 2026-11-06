@@ -14,8 +14,8 @@ use {
         diagnostic_render_all,
     ]
     core.build.[BuildGraphNode]
-    build_files :: core.files
-    build_math :: core.math
+    build_files: core.files
+    build_math: core.math
     jetpack_artifact_store.[BuildNodeRecord, BuildRecord, ObjectHandle]
     jet_build_session.[BuildPlanExecution, BuildPlanSelection, BuildSessionGeneratedModule, BuildSessionOption, BuildSessionPlan, BuildSessionValue, build_plan_contributions, build_plan_execution, build_plan_generated, build_plan_selection]
     jet_pkg_model.[
@@ -24,34 +24,34 @@ use {
     ]
 }
 
-fn jet_cli_build_report(query: JetDriverBuildQueryResult, subject: String?, json: Bool) -> String Never! {
-    plan :: query.plan ?? {
+jet_cli_build_report: fn(query: JetDriverBuildQueryResult, subject: String?, json: Bool) -> String Never! {
+    plan: query.plan ?? {
         if json -> return "{jet_cli_status_render("inspect.build", true, [jet_cli_status_field("build", JetCLIStatusValue.Null)])}\n"
         return "default pipeline: no root fn build\n"
     }
     if subject == .Val(name) {
-        explanation :: jet_driver_build_explanation(plan, name)
+        explanation: jet_driver_build_explanation(plan, name)
         if json -> return "{jet_cli_status_render("inspect.build", true, [jet_cli_status_field("label", jet_cli_status_text(explanation.label)), jet_cli_status_field("provenance", jet_cli_status_texts(explanation.provenance))])}\n"
         text := "{explanation.label}\n"
         loop fact in explanation.provenance -> text += "  {fact}\n"
         return text
     }
     if json {
-        payload :: jet_driver_build_plan_json(plan)
-        build :: jet_cli_status_from_tree(report_status_value_parse(payload) ?? panic("checked build projection lost its JSON")) ?? panic("checked build projection lost its status value")
+        payload: jet_driver_build_plan_json(plan)
+        build: jet_cli_status_from_tree(report_status_value_parse(payload) ?? panic("checked build projection lost its JSON")) ?? panic("checked build projection lost its status value")
         return "{jet_cli_status_render("inspect.build", true, [jet_cli_status_field("build", build)])}\n"
     }
-    graph :: query.graph ?? panic("checked plan lost its graph")
+    graph: query.graph ?? panic("checked plan lost its graph")
     text := ""
     loop target in graph.targets -> text += "target\t{target.name}\t{target.kind}\n"
     loop action in graph.actions -> text += "action\t{action.name}\t{action.outputs.join(",")}\n"
     text
 }
 
-fn jet_cli_build_query_failure(request: JetDriverCompileRequest, query: JetDriverBuildQueryResult, file: String, json: Bool, color: Bool, verbose: Bool) -> JetDriverVerbOutput Never! {
+jet_cli_build_query_failure: fn(request: JetDriverCompileRequest, query: JetDriverBuildQueryResult, file: String, json: Bool, color: Bool, verbose: Bool) -> JetDriverVerbOutput Never! {
     if query.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
-    diagnostics :: jet_driver_present_diagnostics(query.diagnostics, request.authorized_sources, [SourceFile]{})
-    errors :: jet_cli_errors(diagnostics)
+    diagnostics: jet_driver_present_diagnostics(query.diagnostics, request.authorized_sources, [SourceFile]{})
+    errors: jet_cli_errors(diagnostics)
     if errors.len() == 0 -> return jet_cli_ice("the checked build query stopped before completing `{file}`")
     source := ""
     loop root in request.authorized_sources.roots {
@@ -68,7 +68,7 @@ fn jet_cli_build_query_failure(request: JetDriverCompileRequest, query: JetDrive
     // (`jet build --json`) answers with them (jet_cli_json_outcome).
     {stdout: "", stderr: jet_driver_report_problems(file, source, shown, color, verbose), exit_code: JET_DRIVER_EXIT_USER_ERROR, failure: Val(JetDriverFailure{reports: shown, notice: ""})}
 }
-// `jet build` of a package whose `fn build(b: Build)` configures the build: evaluate it,
+// `jet build` of a package whose `build: fn(b: Build)` configures the build: evaluate it,
 // record the values it contributes to the package's declared settings
 // (jet_cli_record_build_contributions), run the selected actions
 // (jet_cli_build_execute), then compile each selected executable target from
@@ -78,22 +78,22 @@ fn jet_cli_build_query_failure(request: JetDriverCompileRequest, query: JetDrive
 // `write_generated: on` each generated source is first written to its
 // `.jet/generated/` path under the package root.
 // A workspace index first builds its members (jet_cli_build_workspace_members).
-fn jet_cli_build_package(file: String, color: Bool, options: BuildOptions, build_args: [String], threads: Int?, invocation: JetCLIInvocationAuthority?, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
-    members :: jet_cli_build_workspace_members(file, color, options, threads, trace_sink)
+jet_cli_build_package: fn(file: String, color: Bool, options: BuildOptions, build_args: [String], threads: Int?, invocation: JetCLIInvocationAuthority?, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
+    members: jet_cli_build_workspace_members(file, color, options, threads, trace_sink)
     if members.exit_code != JET_DRIVER_EXIT_OK -> return members
     jet_cli_build_package_as(file, color, options, build_args, threads, invocation, None, trace_sink)
 }
 
 // `jet_cli_build_package` of one package; `member` names the workspace member
 // a workspace build runs it for (jet_cli_build_execute).
-fn jet_cli_build_package_as(file: String, color: Bool, options: BuildOptions, build_args: [String], threads: Int?, invocation: JetCLIInvocationAuthority?, member: String?, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
+jet_cli_build_package_as: fn(file: String, color: Bool, options: BuildOptions, build_args: [String], threads: Int?, invocation: JetCLIInvocationAuthority?, member: String?, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
     selection := BuildPlanSelection?{None}
     execution := BuildPlanExecution?{None}
     policy := JetDriverAuthorityPolicy?{None}
     generated := [BuildSessionGeneratedModule]{}
     // The modules every target compile loads beside the package's sources.
     target_generated := [JetDriverGeneratedModule]{}
-    prepared :: jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, threads, JetDriverCompileMode.Doc)
+    prepared: jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, threads, JetDriverCompileMode.Doc)
     if ^prepared == {
         .Refused(output) -> return output
         .Prepared(request, snapshot) -> {
@@ -103,9 +103,9 @@ fn jet_cli_build_package_as(file: String, color: Bool, options: BuildOptions, bu
             response := jet_driver_query_build_plan(^query_request, &scope)
             query := ^response.query
             if !query.complete || query.internal_problem != None -> return jet_cli_build_query_failure(response.request, query, file, false, color, false)
-            plan :: query.plan ?? return jet_cli_ice("the completed build query has no plan")
+            plan: query.plan ?? return jet_cli_ice("the completed build query has no plan")
             if jet_cli_settings_package(snapshot) == .Val(package) {
-                recorded :: jet_cli_record_build_contributions(plan, package, color)
+                recorded: jet_cli_record_build_contributions(plan, package, color)
                 // copy: `refusal` is a payload view of `recorded`.
                 if recorded == .Val(refusal) -> return refusal.copy()
             }
@@ -117,7 +117,7 @@ fn jet_cli_build_package_as(file: String, color: Bool, options: BuildOptions, bu
             target_generated = query.generated.copy()
         }
     }
-    selected :: selection ?? return jet_cli_ice("the completed build query has no plan")
+    selected: selection ?? return jet_cli_ice("the completed build query has no plan")
     if selected.unsupported.len() > 0 {
         return jet_cli_build_failed("`jet build` doesn't run these build targets yet: {selected.unsupported.join(", ")}", jet_cli_why("E2105"), "select an executable target with `b.default(...)`, or build its source file directly", color)
     }
@@ -134,40 +134,40 @@ fn jet_cli_build_package_as(file: String, color: Bool, options: BuildOptions, bu
             resolved_options = Val(^resolved)
         }
     }
-    selected_options :: resolved_options ?? return jet_cli_ice("the build options lost their resolution")
+    selected_options: resolved_options ?? return jet_cli_ice("the build options lost their resolution")
     // A web build is one entry's `app.*` files (BuildWeb.jet), so a package's
     // build targets are built native only.
     if build_options_value(selected_options, "os") == "web" {
-        return jet_cli_build_failed("`jet build` writes a web build of one entry file, not of a package's `fn build` targets", jet_cli_why("E2105"), "build the entry file with `jet build --target web <file>`", color)
+        return jet_cli_build_failed("`jet build` writes a web build of one entry file, not of a package's `build: fn` targets", jet_cli_why("E2105"), "build the entry file with `jet build --target web <file>`", color)
     }
-    root :: jet_cli_parent(build_files.realpath(file) ?? file) ?? "."
+    root: jet_cli_parent(build_files.realpath(file) ?? file) ?? "."
     if build_options_value(selected_options, "write_generated") == "on" {
         loop source_file in generated {
-            path :: jet_cli_entry_join(root, source_file.path)
-            directory :: jet_cli_parent(path) ?? root
+            path: jet_cli_entry_join(root, source_file.path)
+            directory: jet_cli_parent(path) ?? root
             build_files.create_dir_all(directory) ?? return jet_cli_build_failed("couldn't write the generated source `{path}`: {err}", jet_cli_why("E2105"), "make `{directory}` writable, or build with `--write-generated=off`", color)
             build_files.write(path, source_file.source) ?? return jet_cli_build_failed("couldn't write the generated source `{path}`: {err}", jet_cli_why("E2105"), "make `{directory}` writable, or build with `--write-generated=off`", color)
         }
     }
-    graph :: execution ?? return jet_cli_ice("the completed build query has no plan")
+    graph: execution ?? return jet_cli_ice("the completed build query has no plan")
     // copy: `failed` is a payload view of the execution's result.
     if jet_cli_build_execute(graph, root, policy, invocation, member, color) == .Val(failed) -> return failed.copy()
     loop executable in selected.executables {
-        source_path :: jet_cli_entry_join(root, executable.source)
-        source :: build_files.read(source_path) ?? return jet_cli_build_failed("couldn't read the target source `{source_path}`: {err}", jet_cli_why("E2105"), "correct the source path given to `b.add_executable`", color)
-        built :: jet_cli_compile_target(source_path, executable.name, source, target_generated, color, selected_options.copy(), threads, invocation, trace_sink)
+        source_path: jet_cli_entry_join(root, executable.source)
+        source: build_files.read(source_path) ?? return jet_cli_build_failed("couldn't read the target source `{source_path}`: {err}", jet_cli_why("E2105"), "correct the source path given to `b.add_executable`", color)
+        built: jet_cli_compile_target(source_path, executable.name, source, target_generated, color, selected_options.copy(), threads, invocation, trace_sink)
         if built.exit_code != JET_DRIVER_EXIT_OK -> return built
     }
     loop library in selected.libraries {
-        source_path :: jet_cli_entry_join(root, library.source)
-        source :: build_files.read(source_path) ?? return jet_cli_build_failed("couldn't read the target source `{source_path}`: {err}", jet_cli_why("E2105"), "correct the source path given to `b.add_library`", color)
-        checked :: jet_cli_check_library(source_path, source, color, threads, trace_sink)
+        source_path: jet_cli_entry_join(root, library.source)
+        source: build_files.read(source_path) ?? return jet_cli_build_failed("couldn't read the target source `{source_path}`: {err}", jet_cli_why("E2105"), "correct the source path given to `b.add_library`", color)
+        checked: jet_cli_check_library(source_path, source, color, threads, trace_sink)
         if checked.exit_code != JET_DRIVER_EXIT_OK -> return checked
     }
-    // A `fn build` that selects no executable keeps the stock build of the
+    // A `build: fn` that selects no executable keeps the stock build of the
     // program beside it, named after its file.
     if selected.executables.len() == 0 {
-        source :: build_files.read(file) ?? ""
+        source: build_files.read(file) ?? ""
         if jet_cli_top_level_function_lines(source, "run").len() > 0 -> return jet_cli_compile_target(file, jet_cli_stem(file), source, target_generated, color, selected_options.copy(), threads, invocation, trace_sink)
     }
     JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
@@ -179,15 +179,15 @@ fn jet_cli_build_package_as(file: String, color: Bool, options: BuildOptions, bu
 // grant to it: the command line's grant is the root build's. A member
 // without one builds its run entry stock. A clean output when every member
 // built, or when `file` is not its directory's workspace index.
-fn jet_cli_build_workspace_members(file: String, color: Bool, options: BuildOptions, threads: Int?, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
+jet_cli_build_workspace_members: fn(file: String, color: Bool, options: BuildOptions, threads: Int?, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
     built := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    index :: jet_cli_workspace_index_of(file, color) ?? return built
+    index: jet_cli_workspace_index_of(file, color) ?? return built
     members := [JetCLIWorkspaceMember]{}
     if jet_cli_workspace_members(index.root, index.path, "build", color) == {
         .Refused(plan) -> return jet_cli_execute(^plan)
         .Members(found) -> members = found
     }
-    root :: index.root
+    root: index.root
     loop member in jet_cli_workspace_build_order(root, members) {
         notices := [String]{}
         entry := JetCLIEntry?{None}
@@ -197,11 +197,11 @@ fn jet_cli_build_workspace_members(file: String, color: Bool, options: BuildOpti
             .Absent -> {}
         }
         loop notice in notices -> jet_cli_write_notice(notice)
-        found :: entry ?? next
+        found: entry ?? next
         if jet_cli_package_declares_build_entry(found.path) {
             built = jet_cli_build_package_as(found.path, color, options.copy(), [String]{}, threads, None, Val(member.name), trace_sink)
         } else {
-            source :: build_files.read(found.path) ?? next
+            source: build_files.read(found.path) ?? next
             if jet_cli_top_level_function_lines(source, "run").len() == 0 -> next
             built = jet_cli_compile_target(found.path, jet_cli_stem(found.path), source, [JetDriverGeneratedModule]{}, color, options.copy(), threads, None, trace_sink)
         }
@@ -211,16 +211,16 @@ fn jet_cli_build_workspace_members(file: String, color: Bool, options: BuildOpti
 }
 
 // The workspace whose index `file` is: its root directory and index path.
-struct JetCLIWorkspaceIndex {
+JetCLIWorkspaceIndex: struct {
     root: String
     path: String
 }
 
 // The workspace `file` indexes, or None when `file` is not its directory's
 // workspace index (a `workspace.jet`, or a `package.jet` listing members).
-fn jet_cli_workspace_index_of(file: String, color: Bool) -[FS]> JetCLIWorkspaceIndex? Never! {
-    canonical :: build_files.realpath(file) ?? return None
-    root :: jet_cli_parent(canonical) ?? return None
+jet_cli_workspace_index_of: fn(file: String, color: Bool) -[FS]> JetCLIWorkspaceIndex? Never! {
+    canonical: build_files.realpath(file) ?? return None
+    root: jet_cli_parent(canonical) ?? return None
     if jet_cli_workspace_source(root, color) == {
         .Index(path) -> {
             if (build_files.realpath(path) ?? path) != canonical -> return None
@@ -232,10 +232,10 @@ fn jet_cli_workspace_index_of(file: String, color: Bool) -[FS]> JetCLIWorkspaceI
 
 // `members` with each after the members its manifest names as path `deps:`,
 // index order among those ready; members in a dependency cycle keep index order.
-fn jet_cli_workspace_build_order(root: String, members: [JetCLIWorkspaceMember]) -[FS, Env]> [JetCLIWorkspaceMember] Never! {
+jet_cli_workspace_build_order: fn(root: String, members: [JetCLIWorkspaceMember]) -[FS, Env]> [JetCLIWorkspaceMember] Never! {
     directories := [String]{}
     loop member in members {
-        member_root :: jet_cli_entry_join(root, member.path)
+        member_root: jet_cli_entry_join(root, member.path)
         &directories.push(build_files.realpath(member_root) ?? member_root)
     }
     needs := (loop directory in directories -> jet_cli_workspace_member_needs(directory, directories))
@@ -246,7 +246,7 @@ fn jet_cli_workspace_build_order(root: String, members: [JetCLIWorkspaceMember])
         progressed = false
         loop (index, member) in members {
             if placed[index] -> next
-            ready :: loop need in needs[index] {
+            ready: loop need in needs[index] {
                 if !placed[need] -> break false
             } ?? true
             if ready {
@@ -263,13 +263,13 @@ fn jet_cli_workspace_build_order(root: String, members: [JetCLIWorkspaceMember])
 }
 
 // The indexes in `directories` of the members `directory`'s manifest names as path dependencies.
-fn jet_cli_workspace_member_needs(directory: String, directories: [String]) -[FS, Env]> [Int] Never! {
+jet_cli_workspace_member_needs: fn(directory: String, directories: [String]) -[FS, Env]> [Int] Never! {
     needs := [Int]{}
-    manifest_path :: jet_cli_checked_file(directory, JET_CLI_PACKAGE_FILE) ?? return needs
-    manifest :: pkg_manifest_parse(manifest_path, build_files.read(manifest_path) ?? "") ?? return needs
+    manifest_path: jet_cli_checked_file(directory, JET_CLI_PACKAGE_FILE) ?? return needs
+    manifest: pkg_manifest_parse(manifest_path, build_files.read(manifest_path) ?? "") ?? return needs
     loop name in manifest.dependencies.keys() {
         if manifest.dependencies[name] == .Path(path) {
-            target :: build_files.realpath(jet_cli_entry_join(directory, path)) ?? next
+            target: build_files.realpath(jet_cli_entry_join(directory, path)) ?? next
             loop (index, candidate) in directories {
                 if candidate == target && candidate != directory -> &needs.push(index)
             }
@@ -280,13 +280,13 @@ fn jet_cli_workspace_member_needs(directory: String, directories: [String]) -[FS
 
 // A library target builds as its importers compile it: its source checks
 // clean and nothing is written, so a clean check prints nothing.
-fn jet_cli_check_library(file: String, source: String, color: Bool, threads: Int?, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
+jet_cli_check_library: fn(file: String, source: String, color: Bool, threads: Int?, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    compiled :: jet_cli_compile_entry(file, color, threads, JetDriverCompileMode.Check, None, trace_sink)
+    compiled: jet_cli_compile_entry(file, color, threads, JetDriverCompileMode.Check, None, trace_sink)
     if compiled == {
         .Refused(refusal) -> output = ^refusal
         .Compiled(result, snapshot) -> {
-            errors :: jet_driver_present_diagnostics(jet_cli_errors(result.diagnostics), snapshot, result.generated_source_files)
+            errors: jet_driver_present_diagnostics(jet_cli_errors(result.diagnostics), snapshot, result.generated_source_files)
             if errors.len() > 0 {
                 output = JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all(file, source, errors, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
             } else if result.internal_problem == .Val(problem) {
@@ -298,20 +298,20 @@ fn jet_cli_check_library(file: String, source: String, color: Bool, threads: Int
 }
 
 // The entry root's package when its manifest declares `settings:`. The values
-// its `fn build` contributes to them (`b.contribute`) are the package's
+// its `build: fn` contributes to them (`b.contribute`) are the package's
 // `[[build.contribution]]` rows of the project lock under `root`, which every
 // compile of the package folds (jet_cli_driver_request).
-struct JetCLISettingsPackage {
+JetCLISettingsPackage: struct {
     root: String
     name: String
 }
 
 // The settings package of `snapshot`'s entry root, read from the snapshot's
 // bytes of its manifest; None when the root declares no setting.
-fn jet_cli_settings_package(snapshot: JetDriverAuthorizedSourceSnapshot) -> JetCLISettingsPackage? Never! {
+jet_cli_settings_package: fn(snapshot: JetDriverAuthorizedSourceSnapshot) -> JetCLISettingsPackage? Never! {
     loop root in snapshot.roots {
         if root.identity != snapshot.entry_root_identity -> next
-        facts :: jet_cli_root_package_facts(root) ?? return None
+        facts: jet_cli_root_package_facts(root) ?? return None
         if facts.settings.len() == 0 -> return None
         return Val(JetCLISettingsPackage{root: root.canonical_path.copy(), name: facts.name.copy()})
     }
@@ -319,18 +319,18 @@ fn jet_cli_settings_package(snapshot: JetDriverAuthorizedSourceSnapshot) -> JetC
 }
 
 // The package facts `root` declares: its `package.jet`, else a stock entry's
-// leading inline `package { … }` block. None for an unparsable manifest: the
+// leading inline `package: { … }` block. None for an unparsable manifest: the
 // compile reports it.
-fn jet_cli_root_package_facts(root: JetDriverAuthorizedSourceRoot) -> PackageFacts? Never! {
+jet_cli_root_package_facts: fn(root: JetDriverAuthorizedSourceRoot) -> PackageFacts? Never! {
     loop file in root.files {
         if file.relative_path != "package.jet" -> next
-        facts :: PackageFacts.parse_uncomposed(file.source, file.path) ?? return None
+        facts: PackageFacts.parse_uncomposed(file.source, file.path) ?? return None
         return Val(facts)
     }
     loop relative in JET_CLI_STOCK_ENTRIES {
         loop file in root.files {
             if file.relative_path != relative -> next
-            inline :: if PackageFacts.parse_inline(file.source, file.path) == {
+            inline: if PackageFacts.parse_inline(file.source, file.path) == {
                 .Ok(value) -> value
                 .Err(_) -> { return None }
             }
@@ -342,29 +342,29 @@ fn jet_cli_root_package_facts(root: JetDriverAuthorizedSourceRoot) -> PackageFac
 }
 
 // The request a compile of `owned_request` folds settings from. When its entry
-// package declares settings and a `fn build`, that build is evaluated first and
+// package declares settings and a `build: fn`, that build is evaluated first and
 // the values it contributes are recorded (jet_cli_record_build_contributions),
 // so the compile reads the rows of this evaluation. `refusal` is set when the
 // build or the lock write failed.
-struct JetCLIContributedRequest {
+JetCLIContributedRequest: struct {
     request: JetDriverCompileRequest
     refusal: JetDriverVerbOutput?
 }
 
-fn jet_cli_contributed_request(owned_request: ^JetDriverCompileRequest, color: Bool) -> JetCLIContributedRequest {
+jet_cli_contributed_request: fn(owned_request: ^JetDriverCompileRequest, color: Bool) -> JetCLIContributedRequest {
     request := ^owned_request
-    package :: jet_cli_settings_package(request.authorized_sources) ?? return {request: ^request, refusal: None}
+    package: jet_cli_settings_package(request.authorized_sources) ?? return {request: ^request, refusal: None}
     if !jet_driver_entry_package_has_build(request) -> return {request: ^request, refusal: None}
     scope := JetDriverBuildQueryScope{next_session_id: 1}
     response := jet_driver_query_build_plan(^request, &scope)
     query := ^response.query
     if !query.complete || query.internal_problem != None {
-        failure :: jet_cli_build_query_failure(response.request, query, response.request.authorized_sources.entry_path, false, color, false)
+        failure: jet_cli_build_query_failure(response.request, query, response.request.authorized_sources.entry_path, false, color, false)
         return {request: ^response.request, refusal: Val(failure)}
     }
     contributed := ^response.request
-    plan :: query.plan ?? return {request: ^contributed, refusal: None}
-    recorded :: jet_cli_record_build_contributions(plan, package, color)
+    plan: query.plan ?? return {request: ^contributed, refusal: None}
+    recorded: jet_cli_record_build_contributions(plan, package, color)
     if recorded == .Val(refusal) {
         // copy: `refusal` is a payload view of `recorded`.
         return JetCLIContributedRequest{request: ^contributed, refusal: Val(refusal.copy())}
@@ -377,15 +377,15 @@ fn jet_cli_contributed_request(owned_request: ^JetDriverCompileRequest, color: B
     {request: ^contributed, refusal: None}
 }
 
-// Record what `plan`'s `fn build` contributed as `package`'s
+// Record what `plan`'s `build: fn` contributed as `package`'s
 // `[[build.contribution]]` rows of the project lock: each one a function-scope
-// writer at the environment layer, computed by `fn build`. The lock is
+// writer at the environment layer, computed by `build: fn`. The lock is
 // rewritten only when the rows changed; a new lock captures its build stamp.
 // None when the rows are recorded, else the refusal.
-fn jet_cli_record_build_contributions(plan: BuildSessionPlan, package: JetCLISettingsPackage, color: Bool) -> JetDriverVerbOutput? {
+jet_cli_record_build_contributions: fn(plan: BuildSessionPlan, package: JetCLISettingsPackage, color: Bool) -> JetDriverVerbOutput? {
     facts := [FactContribution]{}
     loop contribution in build_plan_contributions(plan) {
-        value :: jet_cli_build_fact_value(contribution.value) ?? return Val(jet_cli_ice("`fn build` contributed `{contribution.key}` a value no setting holds"))
+        value: jet_cli_build_fact_value(contribution.value) ?? return Val(jet_cli_ice("`build: fn` contributed `{contribution.key}` a value no setting holds"))
         &facts.push(FactContribution{
             key: contribution.key.copy(),
             value: value,
@@ -403,14 +403,14 @@ fn jet_cli_record_build_contributions(plan: BuildSessionPlan, package: JetCLISet
         }
         if pkg_lock_sorted_contributions(recorded) == pkg_lock_locked_build_contribution_set(package.name, facts) -> return None
     }
-    stamp :: pkg_lock_build_stamp(package.root, false) ?? return Val(jet_cli_lock_refusal(err, color))
+    stamp: pkg_lock_build_stamp(package.root, false) ?? return Val(jet_cli_lock_refusal(err, color))
     if pkg_lock_record_build_contributions(package.root, package.name, facts, false, stamp) == .Err(error) -> return Val(jet_cli_lock_refusal(error, color))
     None
 }
 
 // The fact value of a `b.contribute` value: the build session admits only
 // these kinds, so any other is None.
-fn jet_cli_build_fact_value(value: BuildSessionValue) -> FactValue? Never! {
+jet_cli_build_fact_value: fn(value: BuildSessionValue) -> FactValue? Never! {
     if value == {
         .Bool(flag) -> Val(FactValue.Bool{value: flag})
         .Int(number) -> Val(FactValue.Int{value: number})
@@ -422,7 +422,7 @@ fn jet_cli_build_fact_value(value: BuildSessionValue) -> FactValue? Never! {
 }
 
 // A lock update the project refused: its registered diagnostic.
-fn jet_cli_lock_refusal(error: LockError, color: Bool) -> JetDriverVerbOutput Never! {
+jet_cli_lock_refusal: fn(error: LockError, color: Bool) -> JetDriverVerbOutput Never! {
     // copy: `diagnostic` is a payload view of `error`.
     if error == .Reported(diagnostic) -> return JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all("", "", [Diagnostic]{diagnostic.copy()}, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
     jet_cli_ice("the project lock refused the build contributions: {error.message()}")
@@ -430,15 +430,15 @@ fn jet_cli_lock_refusal(error: LockError, color: Bool) -> JetDriverVerbOutput Ne
 
 // fn build's layer of the build options: each option `selected` set, placed
 // at its call in `file` (`at build.jet:3`, relative to the package root).
-fn jet_cli_build_code_options(file: String, set: [BuildSessionOption]) -> [BuildOptionChoice] {
+jet_cli_build_code_options: fn(file: String, set: [BuildSessionOption]) -> [BuildOptionChoice] {
     choices := [BuildOptionChoice]{}
     if set.len() == 0 -> return choices
-    source :: build_files.read(file) ?? ""
-    directory :: jet_cli_parent(file) ?? "."
-    root :: jet_cli_manifest_root(directory) ?? directory
+    source: build_files.read(file) ?? ""
+    directory: jet_cli_parent(file) ?? "."
+    root: jet_cli_manifest_root(directory) ?? directory
     relative := file.copy()
     if file.starts_with("{root}/") -> relative = file.slice(root.len() + 1..<file.len())
-    bytes :: source.bytes()
+    bytes: source.bytes()
     loop option in set {
         end := option.start
         if end > bytes.len() -> end = bytes.len()
@@ -446,15 +446,15 @@ fn jet_cli_build_code_options(file: String, set: [BuildSessionOption]) -> [Build
         loop index in 0..<end {
             if bytes[index] == (U8{10}) -> line += 1
         }
-        row :: build_option_row(option.name) ?? panic("the build session set `{option.name}`, which is no build-option row")
-        value :: build_option_argument(row, option.value)
-        written :: if option.pinned -> "b.pin(.{option.name}, {value})" else -> "b.{option.name}({value})"
+        row: build_option_row(option.name) ?? panic("the build session set `{option.name}`, which is no build-option row")
+        value: build_option_argument(row, option.value)
+        written: if option.pinned -> "b.pin(.{option.name}, {value})" else -> "b.{option.name}({value})"
         &choices.push(BuildOptionChoice{name: option.name.copy(), value: option.value.copy(), layer: BuildOptionLayer.Code, written: written, site: "at {relative}:{line}", pinned: option.pinned})
     }
     choices
 }
 
-fn jet_cli_build_host(owned_request: ^JetDriverCompileRequest, scope: &JetDriverBuildQueryScope, file: String, subject: String?, json: Bool, color: Bool, verbose: Bool) -> JetDriverVerbOutput {
+jet_cli_build_host: fn(owned_request: ^JetDriverCompileRequest, scope: &JetDriverBuildQueryScope, file: String, subject: String?, json: Bool, color: Bool, verbose: Bool) -> JetDriverVerbOutput {
     response := jet_driver_query_build_plan(^owned_request, &scope)
     request := ^response.request
     query := ^response.query
@@ -465,9 +465,9 @@ fn jet_cli_build_host(owned_request: ^JetDriverCompileRequest, scope: &JetDriver
 // Exact IEEE-754 fixed-three formatting, including half-to-even and -0.
 // Multiplying the binary significand by 125 is exact in Int; 1000 = 125*8.
 // A floating multiply/round would double-round and diverge from Rust's {:.3}.
-fn jet_cli_build_duration(value: Float) -> String Never! {
-    bits :: build_math.to_bits(value)
-    raw_exponent :: (bits >> 52).bit_and(2047)
+jet_cli_build_duration: fn(value: Float) -> String Never! {
+    bits: build_math.to_bits(value)
+    raw_exponent: (bits >> 52).bit_and(2047)
     if raw_exponent == 2047 -> panic("build record duration must be finite")
     significand := bits.bit_and(4503599627370495)
     exponent := -1071
@@ -477,13 +477,13 @@ fn jet_cli_build_duration(value: Float) -> String Never! {
     }
     scaled := significand * 125
     if exponent < 0 {
-        shift :: -exponent
+        shift: -exponent
         if shift > 60 -> scaled = 0
         else {
-            divisor :: 1 << shift
-            quotient :: scaled /% divisor
-            remainder :: scaled % divisor
-            half :: divisor /% 2
+            divisor: 1 << shift
+            quotient: scaled /% divisor
+            remainder: scaled % divisor
+            half: divisor /% 2
             scaled = quotient
             if remainder > half || (remainder == half && quotient % 2 != 0) -> scaled += 1
         }
@@ -498,7 +498,7 @@ fn jet_cli_build_duration(value: Float) -> String Never! {
     loop exponent > 0 {
         carry := 0
         loop index in 0..<digits.len() {
-            doubled :: digits[index] * 2 + carry
+            doubled: digits[index] * 2 + carry
             digits[index] = doubled % 10
             carry = doubled /% 10
         }
@@ -521,17 +521,17 @@ fn jet_cli_build_duration(value: Float) -> String Never! {
 // CAS publication. A graph key is not an artifact/cache key: it omits target,
 // profile and runtime identity. Retain the verified object handle separately;
 // the current RecordIndex contract has no native-object link kind.
-struct JetCLICompileNodeObservation {
+JetCLICompileNodeObservation: struct {
     node: BuildNodeRecord
     object: ObjectHandle
 }
 
-fn jet_cli_build_compile_observation(executed: BuildGraphNode, duration_ms: Float, previous: BuildRecord?, object: ObjectHandle) -> JetCLICompileNodeObservation JetCLIReadError! {
+jet_cli_build_compile_observation: fn(executed: BuildGraphNode, duration_ms: Float, previous: BuildRecord?, object: ObjectHandle) -> JetCLICompileNodeObservation JetCLIReadError! {
     if executed.kind != "compile" -> return Err(jet_cli_read_error("native object production requires a compile node"))
     if duration_ms - duration_ms != 0.0 || duration_ms < 0.0 -> return Err(jet_cli_read_error("native compile duration is not a finite non-negative observation"))
     // CmdCompile15122-15129 names the first canonical input when a prior
     // authenticated record exists. It does not claim that input changed.
-    reason :: if {
+    reason: if {
         previous == None -> "first-run"
         executed.inputs.len() > 0 -> "input:{executed.inputs[0]}"
         else -> "first-run"
@@ -546,7 +546,7 @@ fn jet_cli_build_compile_observation(executed: BuildGraphNode, duration_ms: Floa
 // Planned nodes carry only what the compiler knows before a run (kind, key,
 // subject, inputs): a step that has not run gets no time and no reason, so no
 // row reads as a measured run. `nodes` is empty when no build was recorded.
-fn jet_cli_build_nodes_report(program: String, record: BuildRecord?, planned: [BuildGraphNode], json: Bool) -> String Never! {
+jet_cli_build_nodes_report: fn(program: String, record: BuildRecord?, planned: [BuildGraphNode], json: Bool) -> String Never! {
     recorded := [BuildNodeRecord]{}
     measured := false
     if record == {
@@ -577,7 +577,7 @@ fn jet_cli_build_nodes_report(program: String, record: BuildRecord?, planned: [B
                 jet_cli_status_field("inputs", jet_cli_status_texts(node.inputs)),
             ]))
         }
-        document :: jet_cli_status_object([
+        document: jet_cli_status_object([
             jet_cli_status_field("schema", jet_cli_status_text("jet.explain-build/v1")),
             jet_cli_status_field("program", jet_cli_status_text(program)),
             jet_cli_status_field("nodes", jet_cli_status_array(rows)),
@@ -603,7 +603,7 @@ fn jet_cli_build_nodes_report(program: String, record: BuildRecord?, planned: [B
 // authenticated last record, if any. With no record the command still answers
 // with the planned nodes; a record for another program means the store is
 // damaged and is refused with E2104.
-fn jet_cli_build_nodes_host(owned_request: ^JetDriverCompileRequest, scope: &JetDriverBuildQueryScope, file: String, program: String, record: BuildRecord?, json: Bool, color: Bool, verbose: Bool) -> JetDriverVerbOutput {
+jet_cli_build_nodes_host: fn(owned_request: ^JetDriverCompileRequest, scope: &JetDriverBuildQueryScope, file: String, program: String, record: BuildRecord?, json: Bool, color: Bool, verbose: Bool) -> JetDriverVerbOutput {
     response := jet_driver_query_build_plan(^owned_request, &scope)
     request := ^response.request
     query := ^response.query

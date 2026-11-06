@@ -4,7 +4,7 @@
 // D-FAIL-INFER-UNION1=A rule 7: the conversion applies only against a written
 // contract, so `load_user` writes `Err!`; unwritten, it would pass `StoreErr` up.
 #Error
-enum StoreErr {
+StoreErr: enum {
     Missing
 }
 
@@ -12,32 +12,32 @@ impl StoreErr -> Err {
     return Err("store unavailable: missing user", code: "E_STORE", cause: Err("disk offline"))
 }
 
-struct User {
+User: struct {
     name: String
 }
 
-fn read_store() -> User StoreErr! {
+read_store: fn() -> User StoreErr! {
     Err(StoreErr.Missing)
 }
 
-fn load_user() -> User Err! {
+load_user: fn() -> User Err! {
     read_store()
 }
 
-fn load_profile() -> User {
-    user :: load_user()?("loading the profile")
+load_profile: fn() -> User {
+    user: load_user()?("loading the profile")
     return Ok(user)
 }
 
-fn run() {
-    user :: load_user() ?? {
+run: fn() {
+    user: load_user() ?? {
         print("load failed: {err.message}")
         print("code: {err.code ?? "none"}")
         User{name: "guest"}
     }
     print(user.name)
 
-    profile :: load_profile() ?? {
+    profile: load_profile() ?? {
         print("profile failed: {err.message}")
         return
     }

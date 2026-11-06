@@ -1,15 +1,15 @@
 // Typed projection, no kind/payload reparsing.
-fn trace_game_function(value: JetDevtoolsFunctionIdentity) -> TraceGameFunction Never! {
+trace_game_function: fn(value: JetDevtoolsFunctionIdentity) -> TraceGameFunction Never! {
     TraceGameFunction{function_id: value.function_id.copy(), name: value.name.copy(), source: TraceGameFunctionSource{
         source_id: value.source.source_id.copy(), file: value.source.file.copy(),
         start_line: U64.from_u32(value.source.start_line), start_column: U64.from_u32(value.source.start_column),
         end_line: U64.from_u32(value.source.end_line), end_column: U64.from_u32(value.source.end_column)}}
 }
-fn trace_game_project_into(bodies: [JetDevtoolsEventBody], frames: &[TraceGameFrame], draws: &[TraceGameDrawEvent]) Never! {
+trace_game_project_into: fn(bodies: [JetDevtoolsEventBody], frames: &[TraceGameFrame], draws: &[TraceGameDrawEvent]) Never! {
     loop body in bodies {
         if body == {
             .GameFrameSample(sequence, frame_id, scene, frame_index, build, revision, id, start_ns, cpu_ns, gpu_ns, responsible) -> {
-                function :: if responsible == {
+                function: if responsible == {
                     .Val(value) -> Val(trace_game_function(value))
                     else -> None
                 }
@@ -27,13 +27,13 @@ fn trace_game_project_into(bodies: [JetDevtoolsEventBody], frames: &[TraceGameFr
         }
     }
 }
-fn project_game_devtools_bodies(bodies: [JetDevtoolsEventBody]) -> (frames: [TraceGameFrame], draws: [TraceGameDrawEvent]) JetTraceError! {
+project_game_devtools_bodies: fn(bodies: [JetDevtoolsEventBody]) -> (frames: [TraceGameFrame], draws: [TraceGameDrawEvent]) JetTraceError! {
     frames := [TraceGameFrame]{}
     draws := [TraceGameDrawEvent]{}
     trace_game_project_into(bodies, &frames, &draws)
     Ok((draws: ^draws, frames: ^frames))
 }
-fn trace_skeleton_add_game_devtools_bodies(skeleton: &TraceSkeleton, bodies: [JetDevtoolsEventBody]) JetTraceError! {
+trace_skeleton_add_game_devtools_bodies: fn(skeleton: &TraceSkeleton, bodies: [JetDevtoolsEventBody]) JetTraceError! {
     trace_game_project_into(bodies, &skeleton.game_frames, &skeleton.game_draw_events)
     return
 }

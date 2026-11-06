@@ -1,16 +1,16 @@
 
 use {
-    crypto :: core.crypto
-    json :: core.encoding.json
+    crypto: core.crypto
+    json: core.encoding.json
 }
 
 #Decode
-struct Config {
+Config: struct {
     #Redact password: crypto.Secret
 }
 
-fn run() {
-    value :: json.decode<Config>("{{\"password\":\"credential\"}}") ?? return
+run: fn() {
+    value: json.decode<Config>("{{\"password\":\"credential\"}}") ?? return
     if !crypto.constant_time_equal(value.password, crypto.Secret.from_text("credential")) -> panic("secret decode bytes")
     if crypto.Secret.decode(Dyn.Int(42)) == .Ok(_) -> panic("non-text secret accepted")
 }

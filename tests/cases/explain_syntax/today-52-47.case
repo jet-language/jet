@@ -3,12 +3,12 @@
 # PENDING-GRAMMAR(batch-four); PENDING-SAME-HEAD; no blessed snapshots.
 fixture: plain-words.fixture
 env: NO_COLOR=1
-step: jet explain "::" --json
+step: jet explain ":" --json
 exit: 0
 json: stdout doc $.what ~ "Example:" # original contains, meanings checked by exact tokenizer helper
 capture: what stdout doc $.what
 write: what.txt = "{cap:what}"
-step: jet explain "::"
+step: jet explain ":"
 exit: 0
 stdout: ~ "Example:" # original contains
 stdout: !~ "SIGIL_BIND_IMMUT" # original !rendered.contains(row.name) unless name==token
@@ -16,7 +16,7 @@ capture: plain = text stdout
 write: plain.txt = "{cap:plain}"
 step: jet test run.jet
 exit: 0
-step: jet explain "::" --verbose
+step: jet explain ":" --verbose
 exit: 0
 stdout: ~ "Registry name: SIGIL_BIND_IMMUT" # lookup current row registry name for the plain-name exclusion
 step: jet explain "E0111"

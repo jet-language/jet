@@ -1,14 +1,14 @@
 // Function-boundary cell split-join: split a comma-separated text into
 // pieces and join them with a new separator, once per round.
-#CLI struct Args { n: Int }
+#CLI Args: struct { n: Int }
 
-fn run(args: Args) {
+run: fn(args: Args) {
     words := [String]{}
     loop i in 0..<20000 -> &words.push("w{i % 1000}")
-    text :: words.join(",")
+    text: words.join(",")
     acc := 0
     loop r in 0..<args.n {
-        joined :: text.split(",").join(";")
+        joined: text.split(",").join(";")
         acc += joined.len() + r
     }
     print(acc)

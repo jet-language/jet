@@ -127,7 +127,7 @@ export const CC_PACK_SOURCE = 'Jetpack/Provider/Source/Toolchain/CcToolchainPack
 
 // The CC_PACK_ASSETS rows of CC_PACK_SOURCE's text: [{ platform, file, sha256, size }].
 export function ccPackAssets(text) {
-    const start = text.indexOf('CC_PACK_ASSETS ::');
+    const start = text.indexOf('CC_PACK_ASSETS:');
     if (start < 0) return [];
     const end = text.indexOf('} }', start);
     const table = text.slice(start, end < 0 ? text.length : end);

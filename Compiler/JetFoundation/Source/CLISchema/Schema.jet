@@ -1,7 +1,7 @@
 // Executable command metadata carriers. Defaults in a decoded record are the
 // canonical recorded Display text, not evaluator values.
 
-enum CLIValueKind {
+CLIValueKind: enum {
     Bool
     Int
     Float
@@ -9,7 +9,7 @@ enum CLIValueKind {
     Path
 }
 impl CLIValueKind {
-    fn as_str(self) -> String Never! {
+    as_str: fn(self) -> String Never! {
         if self == {
             .Bool -> "Bool"
             .Int -> "Int"
@@ -19,23 +19,23 @@ impl CLIValueKind {
         }
     }
 }
-enum CLIDefault {
+CLIDefault: enum {
     TypeDefault
     Recorded(value: String)
 }
 impl CLIDefault {
-    fn display(self) -> String Never! {
+    display: fn(self) -> String Never! {
         if self == {
             .TypeDefault -> "type default"
             .Recorded(value) -> value
         }
     }
 }
-enum CLIInputShape {
+CLIInputShape: enum {
     Flag
     Value(kind: CLIValueKind, optional: Bool, default: CLIDefault?)
 }
-struct CLIInputSchema {
+CLIInputSchema: struct {
     field: String
     flag: String
     short: String?
@@ -46,31 +46,31 @@ struct CLIInputSchema {
     positional: U16?
 }
 impl CLIInputSchema {
-    fn required(self) -> Bool Never! {
+    required: fn(self) -> Bool Never! {
         if self.shape == {
             .Value(_, optional, default) -> !optional && default == None
             else -> false
         }
     }
-    fn value_kind(self) -> CLIValueKind Never! {
+    value_kind: fn(self) -> CLIValueKind Never! {
         if self.shape == {
             .Flag -> CLIValueKind.Bool
             .Value(kind, _, _) -> kind
         }
     }
-    fn default_display(self) -> String? Never! {
+    default_display: fn(self) -> String? Never! {
         if self.shape == {
             .Flag -> Val("false")
             .Value(_, _, default) -> if default == .Val(value) -> Val(value.display()) else -> None
         }
     }
 }
-struct CLISubcommandSchema {
+CLISubcommandSchema: struct {
     name: String
     description: String?
     inputs: [CLIInputSchema]
 }
-struct JobArgumentSchema {
+JobArgumentSchema: struct {
     name: String
     label: String
     ty: String
@@ -79,11 +79,11 @@ struct JobArgumentSchema {
     variadic: Bool
     zone: ParamZone
 
-    fn display(self) -> String Never! {
+    display: fn(self) -> String Never! {
         "{self.label}: {if self.variadic -> "..." else -> ""}{self.ty}"
     }
 }
-struct JobFact {
+JobFact: struct {
     name: String
     scope: JobScope
     doc: String?
@@ -99,28 +99,28 @@ struct JobFact {
     limits: [StringMapEntry]
     schedule: String?
 
-    fn scope_name(self) -> String Never! {
+    scope_name: fn(self) -> String Never! {
         if self.scope == {
             .Dev -> "dev"
             .Ship -> "ship"
             .Internal -> "internal"
         }
     }
-    fn metadata(self) -> JobMetadata Never! {
+    metadata: fn(self) -> JobMetadata Never! {
         JobMetadata{scope: self.scope, after: self.after, packages: self.packages, cwd: self.cwd, inputs: self.inputs, outputs: self.outputs, skip: self.skip, cache: self.cache, parallel: Val(self.parallel), limits: self.limits}
     }
 }
 
 #Error
-struct CLIJobGraphError { message: String }
+CLIJobGraphError: struct { message: String }
 
 // The registry is an owned metadata projection, not evidence that a job was
 // checked or run. Driver callers must supply the actual successful entry
 // projection; importing a helper module never extends the job argv namespace.
-struct JobRegistry {
+JobRegistry: struct {
     jobs: [JobFact]
 
-    fn from_items(items: [Item]) -> JobRegistry Never! {
+    from_items: fn(items: [Item]) -> JobRegistry Never! {
         jobs := [JobFact]{}
         loop item in items {
             if item == .Func(function) {
@@ -129,51 +129,51 @@ struct JobRegistry {
         }
         JobRegistry{jobs: ^jobs}
     }
-    fn from_program(program: Program) -> JobRegistry Never! {
+    from_program: fn(program: Program) -> JobRegistry Never! {
         JobRegistry.from_items(program.items)
     }
-    fn for_entry(programs: [Program], entry: Int) -> JobRegistry Never! {
+    for_entry: fn(programs: [Program], entry: Int) -> JobRegistry Never! {
         if entry < 0 || entry >= programs.len() -> return JobRegistry{jobs: [JobFact]{}}
         JobRegistry.from_program(programs[entry])
     }
-    fn jobs(self) -> View<JobFact> Never! from self {
+    jobs: fn(self) -> View<JobFact> Never! from self {
         self.jobs[0..<self.jobs.len()]
     }
-    fn visible_jobs(self) -> [View<JobFact>] Never! from self {
+    visible_jobs: fn(self) -> [View<JobFact>] Never! from self {
         visible := [View<JobFact>]{}
         loop index in 0..<self.jobs.len() {
             if self.jobs[index].scope != .Internal -> &visible.push(self.jobs[index..<index + 1])
         }
         ^visible
     }
-    fn find(self, name: String) -> View<JobFact>? Never! from self {
+    find: fn(self, name: String) -> View<JobFact>? Never! from self {
         loop index in 0..<self.jobs.len() {
             if self.jobs[index].name == name -> return Val(self.jobs[index..<index + 1])
         }
         None
     }
-    fn find_visible(self, name: String) -> View<JobFact>? Never! from self {
+    find_visible: fn(self, name: String) -> View<JobFact>? Never! from self {
         loop index in 0..<self.jobs.len() {
             if self.jobs[index].name == name && self.jobs[index].scope != .Internal -> return Val(self.jobs[index..<index + 1])
         }
         None
     }
-    fn dependency_closure(self, root: String) -> [View<JobFact>] CLIJobGraphError! from self {
-        index :: cli_schema_job_index(self.jobs)
+    dependency_closure: fn(self, root: String) -> [View<JobFact>] CLIJobGraphError! from self {
+        index: cli_schema_job_index(self.jobs)
         state := [Int]{}
         loop _ in 0..<self.jobs.len() -> &state.push(0)
         stack := [CLIJobVisit]{}
         cli_schema_job_enter(self.jobs, index, root, &state, &stack)
         rows := [View<JobFact>]{}
         loop stack.len() > 0 {
-            next_row :: cli_schema_job_finish(self.jobs, index, &state, &stack)
-            row :: next_row ?? panic("a nonempty job traversal lost its next row")
+            next_row: cli_schema_job_finish(self.jobs, index, &state, &stack)
+            row: next_row ?? panic("a nonempty job traversal lost its next row")
             &rows.push(self.jobs[row..<row + 1])
         }
         Ok(^rows)
     }
-    fn validate_graph(self) CLIJobGraphError! {
-        index :: cli_schema_job_index(self.jobs)
+    validate_graph: fn(self) CLIJobGraphError! {
+        index: cli_schema_job_index(self.jobs)
         names := index.keys().to_list()
         &names.sort()
         state := [Int]{}
@@ -187,7 +187,7 @@ struct JobRegistry {
         }
         Ok()
     }
-    fn completion_words(self) -> [String] Never! {
+    completion_words: fn(self) -> [String] Never! {
         words := [String]{}
         seen := [String:Bool]{}
         loop job in self.jobs {
@@ -199,9 +199,9 @@ struct JobRegistry {
     }
 }
 
-struct CLIJobVisit { row: Int, dependency: Int }
+CLIJobVisit: struct { row: Int, dependency: Int }
 
-fn cli_schema_job_index(jobs: [JobFact]) -> [String:Int] Never! {
+cli_schema_job_index: fn(jobs: [JobFact]) -> [String:Int] Never! {
     index := [String:Int]{}
     loop (row, job) in jobs {
         if index.get(job.name) == None -> index[job.name] = row
@@ -209,8 +209,8 @@ fn cli_schema_job_index(jobs: [JobFact]) -> [String:Int] Never! {
     }
     ^index
 }
-fn cli_schema_job_enter(jobs: [JobFact], index: [String:Int], name: String, state: &[Int], stack: &[CLIJobVisit]) CLIJobGraphError! {
-    row :: index.get(name) ?? return Err(CLIJobGraphError{message: "job graph references unknown job `{name}`"})
+cli_schema_job_enter: fn(jobs: [JobFact], index: [String:Int], name: String, state: &[Int], stack: &[CLIJobVisit]) CLIJobGraphError! {
+    row: index.get(name) ?? return Err(CLIJobGraphError{message: "job graph references unknown job `{name}`"})
     if row < 0 -> return Err(CLIJobGraphError{message: "job `{name}` has an ambiguous declaration"})
     if state[row] == 2 -> return Ok()
     if state[row] == 1 {
@@ -228,11 +228,11 @@ fn cli_schema_job_enter(jobs: [JobFact], index: [String:Int], name: String, stat
     &stack.push(CLIJobVisit{row: row, dependency: 0})
     Ok()
 }
-fn cli_schema_job_finish(jobs: [JobFact], index: [String:Int], state: &[Int], stack: &[CLIJobVisit]) -> Int? CLIJobGraphError! {
+cli_schema_job_finish: fn(jobs: [JobFact], index: [String:Int], state: &[Int], stack: &[CLIJobVisit]) -> Int? CLIJobGraphError! {
     loop stack.len() > 0 {
-        last :: stack.len() - 1
-        row :: stack[last].row
-        dependency :: stack[last].dependency
+        last: stack.len() - 1
+        row: stack[last].row
+        dependency: stack[last].dependency
         if {
             dependency < jobs[row].after.len() -> {
                 stack[last].dependency = dependency + 1
@@ -247,10 +247,10 @@ fn cli_schema_job_finish(jobs: [JobFact], index: [String:Int], state: &[Int], st
     }
     Ok(None)
 }
-fn cli_schema_job_argument(param: Param) -> JobArgumentSchema Never! {
-    optional :: if param.ty == { .Option(_) -> true else -> false }
-    boolean :: if param.ty == { .Bool -> true else -> false }
-    label :: if param.public_label == {
+cli_schema_job_argument: fn(param: Param) -> JobArgumentSchema Never! {
+    optional: if param.ty == { .Option(_) -> true else -> false }
+    boolean: if param.ty == { .Bool -> true else -> false }
+    label: if param.public_label == {
         .Val(value) -> value.name
         else -> param.name
     }
@@ -258,7 +258,7 @@ fn cli_schema_job_argument(param: Param) -> JobArgumentSchema Never! {
     if param.default == .Val(value) -> default = cli_schema_job_default(value)
     JobArgumentSchema{name: param.name, label: label, ty: type_name(param.ty), required: !param.variadic && !optional && !boolean && param.default == None, default: default, variadic: param.variadic, zone: param.zone}
 }
-fn cli_schema_job_default(expression: Expr) -> String? Never! {
+cli_schema_job_default: fn(expression: Expr) -> String? Never! {
     if expression == {
         .Paren(inner, _, _) -> cli_schema_job_default(inner)
         .Int(value, _, _, _, _) -> Val("{value}")
@@ -277,7 +277,7 @@ fn cli_schema_job_default(expression: Expr) -> String? Never! {
         else -> None
     }
 }
-fn cli_schema_job_doc(function: Func) -> String? Never! {
+cli_schema_job_doc: fn(function: Func) -> String? Never! {
     loop marker in function.markers {
         if marker.name != "Doc" -> next
         if marker.args.len() == 0 -> return None
@@ -295,40 +295,40 @@ fn cli_schema_job_doc(function: Func) -> String? Never! {
 // JetShow and Rust Display share the shortest round-trippable digits but use
 // different notation. This adapter only changes notation, never recomputes a
 // floating-point value, so metadata has no second numeric formatter.
-fn cli_schema_job_float_display(value: Float) -> String Never! {
-    shown :: "{value}"
-    exponent_at :: shown.find("e")
+cli_schema_job_float_display: fn(value: Float) -> String Never! {
+    shown: "{value}"
+    exponent_at: shown.find("e")
     if exponent_at < 0 {
         if shown.ends_with(".0") -> return shown.slice(0..<(shown.len() - 2))
         return shown
     }
-    mantissa :: shown.slice(0..<exponent_at)
-    exponent :: Int.parse(shown.slice(exponent_at + 1..<shown.len())) ?? panic("canonical Float exponent is not an integer")
-    negative :: mantissa.starts_with("-")
-    unsigned :: if negative -> mantissa.slice(1..<mantissa.len()) else -> mantissa
-    dot :: unsigned.find(".")
-    digits :: unsigned.replace(".", "")
-    decimal :: (if dot < 0 -> unsigned.len() else -> dot) + exponent
-    sign :: if negative -> "-" else -> ""
+    mantissa: shown.slice(0..<exponent_at)
+    exponent: Int.parse(shown.slice(exponent_at + 1..<shown.len())) ?? panic("canonical Float exponent is not an integer")
+    negative: mantissa.starts_with("-")
+    unsigned: if negative -> mantissa.slice(1..<mantissa.len()) else -> mantissa
+    dot: unsigned.find(".")
+    digits: unsigned.replace(".", "")
+    decimal: (if dot < 0 -> unsigned.len() else -> dot) + exponent
+    sign: if negative -> "-" else -> ""
     if decimal <= 0 {
         zero_bytes := [U8]{}
         loop _ in 0..<(-decimal) -> &zero_bytes.push(U8{48})
-        zeros :: String.from_bytes(^zero_bytes) ?? panic("ASCII zero padding is not UTF-8")
+        zeros: String.from_bytes(^zero_bytes) ?? panic("ASCII zero padding is not UTF-8")
         return "{sign}0.{zeros}{digits}"
     }
     if decimal >= digits.len() {
         zero_bytes := [U8]{}
         loop _ in digits.len()..<decimal -> &zero_bytes.push(U8{48})
-        zeros :: String.from_bytes(^zero_bytes) ?? panic("ASCII zero padding is not UTF-8")
+        zeros: String.from_bytes(^zero_bytes) ?? panic("ASCII zero padding is not UTF-8")
         return "{sign}{digits}{zeros}"
     }
     "{sign}{digits.slice(0..<decimal)}.{digits.slice(decimal..<digits.len())}"
 }
-fn cli_schema_job_schedule(function: Func) -> String? Never! {
-    marker :: function.every ?? return None
+cli_schema_job_schedule: fn(function: Func) -> String? Never! {
+    marker: function.every ?? return None
     if marker.arg == {
         .Duration(integer, floating, suffix, _) -> {
-            number :: if integer == {
+            number: if integer == {
                 .Val(value) -> "{value}"
                 else -> if floating == { .Val(value) -> cli_schema_job_float_display(value) else -> "" }
             }
@@ -338,8 +338,8 @@ fn cli_schema_job_schedule(function: Func) -> String? Never! {
         .Expression(_) -> None
     }
 }
-fn cli_schema_job_fact(function: Func) -> JobFact Never! {
-    metadata :: function.job_metadata ?? ast_job_metadata()
+cli_schema_job_fact: fn(function: Func) -> JobFact Never! {
+    metadata: function.job_metadata ?? ast_job_metadata()
     arguments := [JobArgumentSchema]{}
     loop param in function.params {
         if param.name != "self" -> &arguments.push(cli_schema_job_argument(param))
@@ -347,7 +347,7 @@ fn cli_schema_job_fact(function: Func) -> JobFact Never! {
     JobFact{name: function.name, scope: metadata.scope, doc: cli_schema_job_doc(function), arguments: ^arguments, after: metadata.after, packages: metadata.packages, cwd: metadata.cwd, inputs: metadata.inputs, outputs: metadata.outputs, skip: metadata.skip, cache: metadata.cache, parallel: metadata.parallel ?? 1, limits: metadata.limits, schedule: cli_schema_job_schedule(function)}
 }
 
-struct CLICommandSchema {
+CLICommandSchema: struct {
     entry_type: String
     description: String?
     inputs: [CLIInputSchema]
@@ -356,7 +356,7 @@ struct CLICommandSchema {
     standard: Bool
     version: String?
 }
-fn cli_schema_input_words(inputs: [CLIInputSchema]) -> [String] Never! {
+cli_schema_input_words: fn(inputs: [CLIInputSchema]) -> [String] Never! {
     positionals := [Int]{}
     loop index in 0..<inputs.len() {
         if inputs[index].positional != None -> &positionals.push(index)
@@ -372,38 +372,38 @@ fn cli_schema_input_words(inputs: [CLIInputSchema]) -> [String] Never! {
     words
 }
 impl CLICommandSchema {
-    fn standard_completion_words(self) -> [String] Never! {
+    standard_completion_words: fn(self) -> [String] Never! {
         if !self.standard -> return [String]{}
         words := [String]{"--verbose", "-v", "--quiet", "-q", "--color"}
         if self.version != None -> &words.push("--version")
         words
     }
-    fn command_inputs(self, command: CLISubcommandSchema) -> [CLIInputSchema] Never! { command.inputs }
-    fn command_completion_words(self, command: CLISubcommandSchema) -> [String] Never! {
+    command_inputs: fn(self, command: CLISubcommandSchema) -> [CLIInputSchema] Never! { command.inputs }
+    command_completion_words: fn(self, command: CLISubcommandSchema) -> [String] Never! {
         words := [String]{"--help"}
         &words.extend(cli_schema_input_words(command.inputs))
         words
     }
-    fn job_completion_words(self) -> [String] Never! {
+    job_completion_words: fn(self) -> [String] Never! {
         words := [String]{}
         loop job in self.jobs {
             if job.scope != JobScope.Internal -> &words.push(job.name)
         }
         words
     }
-    fn job(self, name: String) -> JobFact? Never! {
+    job: fn(self, name: String) -> JobFact? Never! {
         loop job in self.jobs {
             if job.name == name && job.scope != JobScope.Internal -> return Val(job)
         }
         None
     }
-    fn root_completion_words(self) -> [String] Never! {
+    root_completion_words: fn(self) -> [String] Never! {
         words := [String]{"--help"}
         &words.extend(self.standard_completion_words())
         &words.extend(cli_schema_input_words(self.inputs))
         words
     }
-    fn completion_words(self) -> [String] Never! {
+    completion_words: fn(self) -> [String] Never! {
         words := self.root_completion_words()
         loop command in self.commands -> &words.push(command.name)
         &words.extend(self.job_completion_words())

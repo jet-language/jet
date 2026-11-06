@@ -13,18 +13,18 @@
 //
 // Usage (from the repository root): jet Tools/agent/RustEraRatchet.jet
 use {
-    process :: core.process
-    regex :: core.regex
-    term :: core.term
+    process: core.process
+    regex: core.regex
+    term: core.term
 }
 
-DATA_ROOTS :: [String]{"tests", "Tools/ci"}
-DATA_SUFFIXES :: [String]{".tsv", ".txt"}
-NOT_READERS :: [String]{"Tools/script-census.tsv"}
-CITATION_ROOTS :: [String]{"Compiler", "Core"}
+DATA_ROOTS: [String]{"tests", "Tools/ci"}
+DATA_SUFFIXES: [String]{".tsv", ".txt"}
+NOT_READERS: [String]{"Tools/script-census.tsv"}
+CITATION_ROOTS: [String]{"Compiler", "Core"}
 // Foreign-binding code: the Rust crates it names are real files it writes,
 // builds or reads.
-FOREIGN_BINDING :: [String]{
+FOREIGN_BINDING: [String]{
     "Compiler/JetCli/Source/Cli/RustForeign.jet",
     "Compiler/JetDriver/Tests/run-rust-foreign-fixtures.mjs",
     "Compiler/JetIR/Tests/run-inline-foreign-link.mjs",
@@ -33,19 +33,19 @@ FOREIGN_BINDING :: [String]{
 
 // git grep -E pattern (POSIX ERE): a line naming `<word>.rs`, line numbers
 // glued on (`Layout.rs61-85`) included.
-CITATION_GREP :: "[A-Za-z0-9_]\\.rs([^A-Za-z_]|$)"
-UPSTREAM_LIBRARY :: Regex{"library/(?:std|core|alloc)/"}
-CITATION :: Regex{"\w\.rs(?:[^A-Za-z_]|$)"}
+CITATION_GREP: "[A-Za-z0-9_]\\.rs([^A-Za-z_]|$)"
+UPSTREAM_LIBRARY: Regex{"library/(?:std|core|alloc)/"}
+CITATION: Regex{"\w\.rs(?:[^A-Za-z_]|$)"}
 
 #Error
-struct RatchetError {
+RatchetError: struct {
     message: String
 }
 
 // The stdout lines of a git command; `allow_empty` accepts git grep's exit 1
 // (no match) as no lines.
-fn git_lines(argv: [String], allow_empty: Bool) -[Exec, IO, Time.Wait]> [String] RatchetError! {
-    receipt :: process.cmd(argv).stdout(.Capture).stderr(.Capture).run() ?? return Err(RatchetError{message: "cannot run {argv.join(" ")}: {err}"})
+git_lines: fn(argv: [String], allow_empty: Bool) -[Exec, IO, Time.Wait]> [String] RatchetError! {
+    receipt: process.cmd(argv).stdout(.Capture).stderr(.Capture).run() ?? return Err(RatchetError{message: "cannot run {argv.join(" ")}: {err}"})
     if allow_empty && receipt.code == 1 && receipt.errors == "" -> return Ok([String]{})
     if receipt.code != 0 -> return Err(RatchetError{message: "{argv.join(" ")} failed ({receipt.code}): {receipt.errors}"})
     lines := [String]{}
@@ -55,15 +55,15 @@ fn git_lines(argv: [String], allow_empty: Bool) -[Exec, IO, Time.Wait]> [String]
     Ok(lines)
 }
 
-fn base_name(path: String) -> String Never! {
-    split :: path.rpartition("/")
+base_name: fn(path: String) -> String Never! {
+    split: path.rpartition("/")
     if split.sep == "" -> return path.copy()
     split.tail.copy()
 }
 
 // A harness table: a `.tsv` or `.txt` directly in tests/, or anywhere under
 // Tools/ci/.
-fn is_harness_table(path: String) -> Bool Never! {
+is_harness_table: fn(path: String) -> Bool Never! {
     suffixed := false
     loop suffix in DATA_SUFFIXES {
         if path.ends_with(suffix) -> suffixed = true
@@ -74,17 +74,17 @@ fn is_harness_table(path: String) -> Bool Never! {
 }
 
 // Whether `path`, a tracked file that names `table`, reads it.
-fn is_reader(table: String, path: String) -> Bool Never! {
+is_reader: fn(table: String, path: String) -> Bool Never! {
     path != table && !path.starts_with("Docs/") && !path.ends_with(".md") && !NOT_READERS.contains(path)
 }
 
-fn unread_tables() -[Exec, IO, Time.Wait]> [String] RatchetError! {
+unread_tables: fn() -[Exec, IO, Time.Wait]> [String] RatchetError! {
     argv := [String]{"git", "ls-files", "--"}
     loop root in DATA_ROOTS -> &argv.push(root)
     unread := [String]{}
     loop table in git_lines(argv, false) ?? return Err(err) {
         if !is_harness_table(table) -> next
-        naming :: git_lines([String]{"git", "grep", "-l", "-I", "-F", "-e", base_name(table), "--", "."}, true) ?? return Err(err)
+        naming: git_lines([String]{"git", "grep", "-l", "-I", "-F", "-e", base_name(table), "--", "."}, true) ?? return Err(err)
         read := false
         loop path in naming {
             if is_reader(table, path) -> read = true
@@ -95,31 +95,31 @@ fn unread_tables() -[Exec, IO, Time.Wait]> [String] RatchetError! {
 }
 
 // Whether `path` is foreign-binding code.
-fn exempt(path: String) -> Bool Never! {
+exempt: fn(path: String) -> Bool Never! {
     FOREIGN_BINDING.contains(path)
 }
 
 // `path:line:text` rows of git grep -n whose text names a deleted Rust source.
-fn stale_citations(rows: [String]) -> [String] Never! {
+stale_citations: fn(rows: [String]) -> [String] Never! {
     stale := [String]{}
     loop row in rows {
-        location :: row.partition(":")
-        rest :: location.tail.partition(":")
+        location: row.partition(":")
+        rest: location.tail.partition(":")
         if exempt(location.head) || !CITATION.is_match(rest.tail) || UPSTREAM_LIBRARY.is_match(rest.tail) -> next
         &stale.push(row.copy())
     }
     stale
 }
 
-fn citation_rows() -[Exec, IO, Time.Wait]> [String] RatchetError! {
+citation_rows: fn() -[Exec, IO, Time.Wait]> [String] RatchetError! {
     argv := [String]{"git", "grep", "-n", "-I", "-E", "-e", CITATION_GREP, "--"}
     loop root in CITATION_ROOTS -> &argv.push(root)
     git_lines(argv, true)
 }
 
-fn rust_era_main() -[Exec, IO, Time.Wait]> Int RatchetError! {
-    unread :: unread_tables() ?? return Err(err)
-    stale :: stale_citations(citation_rows() ?? return Err(err))
+rust_era_main: fn() -[Exec, IO, Time.Wait]> Int RatchetError! {
+    unread: unread_tables() ?? return Err(err)
+    stale: stale_citations(citation_rows() ?? return Err(err))
     if unread.len() == 0 && stale.len() == 0 {
         print("rust-era-ratchet: ok (every harness table has a reader; Compiler and Core name no deleted .rs source)")
         return Ok(0)
@@ -130,7 +130,7 @@ fn rust_era_main() -[Exec, IO, Time.Wait]> Int RatchetError! {
     Ok(1)
 }
 
-fn run() {
+run: fn() {
     if rust_era_main() == {
         .Ok(code) -> {
             if code != 0 -> process.exit(code)
@@ -159,15 +159,15 @@ fn run() {
 }
 
 #Test("names of deleted Rust sources are stale; upstream library and foreign binding are not") {
-    rows :: [String]{
+    rows: [String]{
         "Compiler/A.jet:3:// Rust: crates/jet-cli/src/Lock.rs:12",
         "Compiler/B.jet:9:    /// See CmdFlash.rs `identity`.",
         "Core/C.jet:4:// Rust 1.90.0 library/std/src/sys/env/unix.rs, env()::parse:",
-        "Compiler/D.jet:7:    seed :: \"crates/x/src/Layout.rs\"",
+        "Compiler/D.jet:7:    seed: \"crates/x/src/Layout.rs\"",
         "Compiler/E.jet:2:// The term rs.trust is unrelated.",
         "Compiler/F.jet:1:// Layout.rs61-85: native fields.",
         "Compiler/JetCli/Source/Cli/RustForeign.jet:5:    write(src, \"lib.rs\")",
-        "Compiler/JetDebug/Source/A.jet:2:    rust_file :: dir.join(\"prog.rs\")",
+        "Compiler/JetDebug/Source/A.jet:2:    rust_file: dir.join(\"prog.rs\")",
         "Compiler/JetDebugger/B.jet:2:// Engine.rs:4",
     }
     assert_eq(stale_citations(rows).join("|"), "Compiler/A.jet:3:// Rust: crates/jet-cli/src/Lock.rs:12|Compiler/B.jet:9:    /// See CmdFlash.rs `identity`.|Compiler/D.jet:7:    seed :: \"crates/x/src/Layout.rs\"|Compiler/F.jet:1:// Layout.rs61-85: native fields.|Compiler/JetDebug/Source/A.jet:2:    rust_file :: dir.join(\"prog.rs\")|Compiler/JetDebugger/B.jet:2:// Engine.rs:4")

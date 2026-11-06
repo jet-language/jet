@@ -15,26 +15,26 @@ step debug: {work}/app/.jet/build/overflow
 cwd: app
 exit: 70
 stderr: ~ "--> overflow.jet:2 in recurse" # debug build names the stopping frame
-stderr: ~ "2 | fn recurse(n: Int) -> Int { recurse(n + 1) + 1 }" # debug build shows the source line
+stderr: ~ "2 | recurse: fn(n: Int) -> Int { recurse(n + 1) + 1 }" # debug build shows the source line
 step: jet build --release --debug-info=true app/overflow.jet
 exit: 0
 step release: {work}/app/.jet/build/overflow
 cwd: app
 exit: 70
 stderr: ~ "--> overflow.jet:2 in recurse" # release build names the stopping frame
-stderr: ~ "2 | fn recurse(n: Int) -> Int { recurse(n + 1) + 1 }" # release build shows the source line
+stderr: ~ "2 | recurse: fn(n: Int) -> Int { recurse(n + 1) + 1 }" # release build shows the source line
 step outside: jet run app/overflow.jet
 exit: 70
-stderr: ~ "2 | fn recurse(n: Int) -> Int { recurse(n + 1) + 1 }" # run from the work directory shows the line
+stderr: ~ "2 | recurse: fn(n: Int) -> Int { recurse(n + 1) + 1 }" # run from the work directory shows the line
 step inside: jet run overflow.jet
 cwd: app
 exit: 70
-stderr: ~ "2 | fn recurse(n: Int) -> Int { recurse(n + 1) + 1 }" # run from app/ shows the line
+stderr: ~ "2 | recurse: fn(n: Int) -> Int { recurse(n + 1) + 1 }" # run from app/ shows the line
 step inside_o0: jet run --optimize=none overflow.jet
 cwd: app
 exit: 70
-stderr: ~ "2 | fn recurse(n: Int) -> Int { recurse(n + 1) + 1 }" # O0 run from app/ shows the line
+stderr: ~ "2 | recurse: fn(n: Int) -> Int { recurse(n + 1) + 1 }" # O0 run from app/ shows the line
 step inside_o2: jet run --optimize=full overflow.jet
 cwd: app
 exit: 70
-stderr: ~ "2 | fn recurse(n: Int) -> Int { recurse(n + 1) + 1 }" # O2 run from app/ shows the line
+stderr: ~ "2 | recurse: fn(n: Int) -> Int { recurse(n + 1) + 1 }" # O2 run from app/ shows the line

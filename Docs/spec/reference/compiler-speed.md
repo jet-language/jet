@@ -138,7 +138,7 @@ cannot be averaged away.
 The build system has its own required peer: Nix, in the `build_system` axis of
 `Tools/gauntlet/measurement-manifest.json` (harness
 `Tools/gauntlet/harness/build-system.mjs`). Both build the same medium project.
-Jet builds it as a package with a `fn build` program, and Nix builds it as a
+Jet builds it as a package with a `build: fn` program, and Nix builds it as a
 flake. The five paired cells are configuration evaluation (`jet check` of
 `@build.jet` against `nix eval`), no-op rebuild, one-file incremental rebuild,
 a cold build while a populated cache or substituter holds the result, and a

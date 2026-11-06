@@ -7,7 +7,7 @@ if [ "${JET_TESTKIT_WARNING:-}" = 1 ]; then
 fi
 here=$(dirname "$0")
 case "$1" in
-    emit) printf 'fn main() {}\n' ;;
+    emit) printf 'main: fn() {}\n' ;;
     check) exit 0 ;;
     build)
         if [ "${JET_TESTKIT_REJECT:-}" = 1 ]; then printf 'Error [jet.StrayCharacter]: rejected\n' >&2; exit 1; fi

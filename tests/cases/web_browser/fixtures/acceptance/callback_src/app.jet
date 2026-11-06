@@ -2,13 +2,13 @@
 #HTML("index.html")
 // D-JSBIND1 / #123: JS event callback invokes a #WasmExport bridge (JS -> Wasm
 // inside a browser-style handler), proving callback + compute round-trip.
-use web :: core.web
+use web: core.web
 
 #WasmExport
-fn double(n: Int) -> Int { n * 2 }
+double: fn(n: Int) -> Int { n * 2 }
 
 #Target(JS)
-fn init() {
+init: fn() {
     web.on("#go", "click", ev -> {
         if double(21) == 42 {
             print("42")
@@ -17,4 +17,4 @@ fn init() {
     })
 }
 
-fn run() {}
+run: fn() {}

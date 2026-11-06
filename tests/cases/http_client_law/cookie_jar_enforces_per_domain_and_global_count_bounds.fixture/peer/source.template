@@ -1,16 +1,16 @@
 use {
-    net :: core.net
-    files :: core.files
-    time :: core.time
+    net: core.net
+    files: core.files
+    time: core.time
 }
-PEER_CRLF :: comptime { String.from_bytes([U8]{13, 10}) ?? panic("fixture CRLF") }
+PEER_CRLF: comptime { String.from_bytes([U8]{13, 10}) ?? panic("fixture CRLF") }
 
-fn prefix(raw: [U8], want: [U8]) -> Bool {
+prefix: fn(raw: [U8], want: [U8]) -> Bool {
     if raw.len() < want.len() -> return false
     loop i in 0..<want.len() { if raw[i] != want[i] -> return false }
     return true
 }
-fn contains_bytes(raw: [U8], want: [U8], ascii_casefold: Bool) -> Bool {
+contains_bytes: fn(raw: [U8], want: [U8], ascii_casefold: Bool) -> Bool {
     if raw.len() < want.len() -> return false
     loop start in 0..<(raw.len() - want.len() + 1) {
         same := true
@@ -23,37 +23,37 @@ fn contains_bytes(raw: [U8], want: [U8], ascii_casefold: Bool) -> Bool {
     }
     return false
 }
-fn request_head(stream: &TCPStream) -> [U8] {
+request_head: fn(stream: &TCPStream) -> [U8] {
     // Original request_head10-23: persistent 5s read timeout,512-byte reads, positive read, <=64KiB bound, exact CRLFCRLF terminator.
     net.set_read_timeout(&stream, 5000) ?? panic("request timeout")
     request := [U8]{}
     loop !contains_bytes(request, [U8]{13,10,13,10}, false) {
-        block :: stream.read(512) ?? panic("request read")
+        block: stream.read(512) ?? panic("request read")
         assert(block.len() > 0)
         loop byte in block { &request.push(byte) }
         assert(request.len() <= 65536)
     }
     return request
 }
-fn publish(listener: TCPListener, path: String) {
-    address :: listener.local_addr() ?? panic("address")
+publish: fn(listener: TCPListener, path: String) {
+    address: listener.local_addr() ?? panic("address")
     files.write_atomic(path, address.bytes()) ?? panic("publish address")
 }
 
-fn run() {
-    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+run: fn() {
+    listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     publish(listener, "{work}/addr.txt")
     loop domain in 0..<23 {
-        count :: if domain == 0 -> 181 else -> 180
-        batches :: (count + 89) /% 90
+        count: if domain == 0 -> 181 else -> 180
+        batches: (count + 89) /% 90
         loop batch_index in 0..<batches {
-            start :: batch_index * 90
+            start: batch_index * 90
             stream := &listener.accept() ?? panic("seed accept")
-            head :: request_head(&stream)
-            _ :: String.from_bytes(head) ?? panic("original strict UTF8")
+            head: request_head(&stream)
+            _: String.from_bytes(head) ?? panic("original strict UTF8")
             assert(prefix(head, "GET http://d{domain}.xn--55qx5d.cn/seed{batch_index} HTTP/1.1{PEER_CRLF}".bytes()))
             response := "HTTP/1.1 200 OK{PEER_CRLF}"
-            end :: if count < start + 90 -> count else -> start + 90
+            end: if count < start + 90 -> count else -> start + 90
             loop cookie in start..<end { response += "Set-Cookie: c{domain}_{cookie}=v; Path=/; SameSite=Lax{PEER_CRLF}" }
             response += "Content-Length: 0{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}"
             stream.write_all(response.bytes()) ?? panic("seed write")
@@ -61,7 +61,7 @@ fn run() {
         }
     }
     stream := &listener.accept() ?? panic("verify accept")
-    head :: String.from_bytes(request_head(&stream)) ?? panic("original strict UTF8")
+    head: String.from_bytes(request_head(&stream)) ?? panic("original strict UTF8")
     cookies := ""
     found := false
     loop line in head.lines() {

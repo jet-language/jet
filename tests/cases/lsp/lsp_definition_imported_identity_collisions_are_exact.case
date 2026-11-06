@@ -7,13 +7,13 @@ send lsp: "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\
 recv lsp until $.id = 1
 stdout: ~ "definitionProvider" # original predicate
 send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
-send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/run.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"use grades :: scoring\\nuse \\\"util\\\"\\nfn run() {\\n    print(grades.letter(91))\\n    print(util.letter(91))\\n}\\nfn local(letter: Int) {\\n    print(letter)\\n}\\n\"}}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/run.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"use grades: scoring\\nuse \\\"util\\\"\\nrun: fn() {\\n    print(grades.letter(91))\\n    print(util.letter(91))\\n}\\nlocal: fn(letter: Int) {\\n    print(letter)\\n}\\n\"}}}"
 recv lsp
 stdout: ~ "publishDiagnostics" # original predicate
-send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/scoring.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"fn letter(score: Int) -> String { \\\"A\\\" }\\n\"}}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/scoring.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"letter: fn(score: Int) -> String { \\\"A\\\" }\\n\"}}}"
 recv lsp
 stdout: ~ "publishDiagnostics" # original predicate
-send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/util.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"fn letter(score: Int) -> String { \\\"unrelated\\\" }\\n\"}}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/util.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"letter: fn(score: Int) -> String { \\\"unrelated\\\" }\\n\"}}}"
 recv lsp
 stdout: ~ "publishDiagnostics" # original predicate
 send lsp: "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/definition\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/run.jet\"},\"position\":{\"line\":3,\"character\":19}}}"

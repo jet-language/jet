@@ -1,7 +1,7 @@
 use jet_devserver.Canvas.EditActions.[core_import_insert_point, core_imports, ident_prefix, imported_core_prefix]
 
 #Test("canvas_core_imports_preserve_module_alias_and_ignore_comments") {
-    imports :: core_imports("// use fake :: core.fake\nuse output :: core.io // alias\nuse core.math\nfn run() -> {{}}\n")
+    imports: core_imports("// use fake: core.fake\nuse output: core.io // alias\nuse core.math\nrun: fn() -> {{}}\n")
     assert(imports.len() == 2)
     assert(imports[0].module_ref == "core.io")
     assert(imports[0].alias == "output")
@@ -11,7 +11,7 @@ use jet_devserver.Canvas.EditActions.[core_import_insert_point, core_imports, id
 }
 
 #Test("canvas_core_prefix_selects_longest_existing_import") {
-    src :: "use base :: core\nuse output :: core.io\nuse files :: core.io.file\n"
+    src: "use base: core\nuse output: core.io\nuse files: core.io.file\n"
     assert(imported_core_prefix(src, "core.io.file") == "files")
     assert(imported_core_prefix(src, "core.io.file.read") == "files.read")
     assert(imported_core_prefix(src, "core.io.net") == "output.net")
@@ -19,24 +19,24 @@ use jet_devserver.Canvas.EditActions.[core_import_insert_point, core_imports, id
 }
 
 #Test("canvas_core_import_insertion_preserves_header_and_use_block") {
-    header :: "// heading\n\n"
-    imports :: "use math :: core.math\nuse io :: core.io\n"
-    (point, joined) :: core_import_insert_point("{header}{imports}\nfn run() -> {{}}\n")
+    header: "// heading\n\n"
+    imports: "use math: core.math\nuse io: core.io\n"
+    (point, joined): core_import_insert_point("{header}{imports}\nrun: fn() -> {{}}\n")
     assert(point == header.len() + imports.len())
     assert(joined)
-    (point, joined) :: core_import_insert_point("{header}fn run() -> {{}}\n")
+    (point, joined): core_import_insert_point("{header}run: fn() -> {{}}\n")
     assert(point == header.len())
     assert(!joined)
-    (point, joined) :: core_import_insert_point("fn run() -> {{}}\nuse io :: core.io\n")
+    (point, joined): core_import_insert_point("run: fn() -> {{}}\nuse io: core.io\n")
     assert(point == 0)
     assert(!joined)
 }
 
-// #6542: `alias :: path` lines and `use {` block rows name core imports too,
+// #6542: `alias: path` lines and `use {` block rows name core imports too,
 // and a new import goes after the block's closing brace.
 #Test("canvas_core_imports_read_alias_rows_and_use_blocks") {
-    src :: "use {{\n    output :: core.io // alias\n    core.math\n    // core.fake\n}}\nuse files :: core.io.file\nfn run() -> {{}}\n"
-    imports :: core_imports(src)
+    src: "use {{\n    output: core.io // alias\n    core.math\n    // core.fake\n}}\nuse files: core.io.file\nrun: fn() -> {{}}\n"
+    imports: core_imports(src)
     assert(imports.len() == 3)
     assert(imports[0].module_ref == "core.io")
     assert(imports[0].alias == "output")
@@ -45,8 +45,8 @@ use jet_devserver.Canvas.EditActions.[core_import_insert_point, core_imports, id
     assert(imports[2].module_ref == "core.io.file")
     assert(imports[2].alias == "files")
     assert(imported_core_prefix(src, "core.io.file.read") == "files.read")
-    block :: "use {{\n    m :: core.math\n    io :: core.io\n}}\n"
-    (point, joined) :: core_import_insert_point("{block}\nfn run() -> {{}}\n")
+    block: "use {{\n    m: core.math\n    io: core.io\n}}\n"
+    (point, joined): core_import_insert_point("{block}\nrun: fn() -> {{}}\n")
     assert(point == block.len())
     assert(joined)
 }

@@ -1,52 +1,52 @@
 // core.data.sketch.tdigest — the shipped unit-weight, step-quantile digest.
 // All samples, including non-finite values, follow the original insertion and
 // compression order. Cloning produces an independent centroid value.
-struct TDigest {
+TDigest: struct {
     centroids: [Centroid]
 
     impl Display {
-        fn display(self) -> String { "TDigest" }
+        display: fn(self) -> String { "TDigest" }
     }
 }
 
-struct Centroid {
+Centroid: struct {
     mean: Float
     weight: Float
 }
 
-fn new() -> TDigest Never! { TDigest.new() }
+new: fn() -> TDigest Never! { TDigest.new() }
 
 impl TDigest {
-    fn new() -> TDigest Never! {
+    new: fn() -> TDigest Never! {
         TDigest{centroids: [Centroid]{}}
     }
 
     /// Record one sample with the shipped unit weight.
-    fn add(&self, value: Float) Never! {
+    add: fn(&self, value: Float) Never! {
         add_sample(&self.centroids, value)
     }
 
     /// Return the first centroid whose cumulative weight reaches q * total.
-    fn quantile(self, q: Float) -> Float Never! {
+    quantile: fn(self, q: Float) -> Float Never! {
         step_quantile(self.centroids, q)
     }
 }
 
-fn insertion_index(values: [Centroid], value: Float) -> Int Never! {
+insertion_index: fn(values: [Centroid], value: Float) -> Int Never! {
     if values.len() == 0 -> return 0
     base := 0
     size := values.len()
     loop size > 1 {
-        half :: size /% 2
-        middle :: base + half
+        half: size /% 2
+        middle: base + half
         if values[middle].mean < value -> base = middle
         size = size - half
     }
     if values[base].mean < value -> base + 1 else -> base
 }
 
-fn add_sample(values: &[Centroid], value: Float) Never! {
-    index :: insertion_index(values, value)
+add_sample: fn(values: &[Centroid], value: Float) Never! {
+    index: insertion_index(values, value)
     &values.push(Centroid{mean: value, weight: Float{1.0}})
     at := values.len() - 1
     loop at > index {
@@ -60,13 +60,13 @@ fn add_sample(values: &[Centroid], value: Float) Never! {
     last := 0
     cumulative := values[0].weight
     loop i in 1..<values.len() {
-        sample :: values[i].copy()
-        previous :: values[last].copy()
-        q :: cumulative / total
-        limit :: Float{4.0} * total * q * (Float{1.0} - q) / Float{100.0}
-        capacity :: if limit > (Float{1.0}) -> limit else -> Float{1.0}
+        sample: values[i].copy()
+        previous: values[last].copy()
+        q: cumulative / total
+        limit: Float{4.0} * total * q * (Float{1.0} - q) / Float{100.0}
+        capacity: if limit > (Float{1.0}) -> limit else -> Float{1.0}
         if previous.weight + sample.weight <= capacity {
-            weight :: previous.weight + sample.weight
+            weight: previous.weight + sample.weight
             values[last] = Centroid{
                 mean: (previous.mean * previous.weight + sample.mean * sample.weight) / weight,
                 weight: weight,
@@ -77,14 +77,14 @@ fn add_sample(values: &[Centroid], value: Float) Never! {
             cumulative = cumulative + sample.weight
         }
     }
-    loop values.len() > last + 1 -> _ :: &values.pop()
+    loop values.len() > last + 1 -> _: &values.pop()
 }
 
-fn step_quantile(values: [Centroid], q: Float) -> Float Never! {
+step_quantile: fn(values: [Centroid], q: Float) -> Float Never! {
     if values.len() == 0 -> return Float{0.0}
     total := Float{0.0}
     loop centroid in values -> total = total + centroid.weight
-    target :: q * total
+    target: q * total
     cumulative := Float{0.0}
     loop centroid in values {
         cumulative = cumulative + centroid.weight

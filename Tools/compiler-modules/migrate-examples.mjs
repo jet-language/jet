@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 // D-MOD-CYCLE1=A cutover for the example and tooling trees.
 //
-// A package is one namespace with at most one `fn run`; a library has none.
+// A package is one namespace with at most one `run: fn`; a library has none.
 // Directories that hold several independent programs under one package.jet
 // (a "collection") therefore stop being packages: the manifest goes away and
 // every file becomes a loose file. A loose file holds only the beginner
-// authority floor, so a file that needs more gets a leading `package { }`
+// authority floor, so a file that needs more gets a leading `package: { }`
 // header with the exact row `jet fix --all` computes for it. Only that header
 // is taken from the fix; every other fix is discarded. A real multi-file
 // package (one program) keeps its manifest and loses its file imports, since
@@ -68,7 +68,7 @@ function members(root) {
   return out.sort();
 }
 
-const DECL = /^(?:pub(?:\(package\))? )?(?:fn|struct|enum|trait|tag|distinct|type) ([A-Za-z_]\w*)|^(?:pub )?([A-Z_][A-Z0-9_]*) ::/gm;
+const DECL = /^(?:pub(?:\(package\))? )?([A-Za-z_]\w*): (?:fn|struct|enum|trait|tag|distinct)\b|^(?:pub )?([A-Z_][A-Z0-9_]*):/gm;
 function classify(root) {
   const files = members(root);
   const texts = files.map((file) => readFileSync(file, "utf8"));
@@ -84,7 +84,7 @@ function classify(root) {
   const manifest = readFileSync(join(root, "package.jet"), "utf8");
   return {
     files,
-    runs: texts.filter((text) => /^(?:pub )?fn run\(/m.test(text)).length,
+    runs: texts.filter((text) => /^(?:pub )?run: fn\(/m.test(text)).length,
     fileImports: files.filter((_, index) => /^\s*(?:pub )?use "(?![^"]*\.h")/m.test(texts[index])),
     duplicates,
     keys: [...manifest.matchAll(/^([a-z_]+):/gm)].map((match) => match[1]),

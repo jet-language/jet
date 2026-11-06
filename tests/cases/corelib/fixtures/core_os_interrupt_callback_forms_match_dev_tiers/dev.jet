@@ -1,28 +1,28 @@
 
 // `jet dev` takes no --allow flag; the package block grants on_interrupt its Env.
-package {
+package: {
     name: "interrupt_callback_forms"
     authority: { allow: [Env] }
 }
 
 use {
-    os :: core.sys
-    term :: core.term
+    os: core.sys
+    term: core.term
 }
 
-fn named_callback() {
+named_callback: fn() {
     print("named")
 }
 
-fn stop_callback() {
+stop_callback: fn() {
     print("stop")
     panic("stop")
 }
 
-fn run() {
+run: fn() {
     loop indirect := stop_callback, true {
-        named_alias :: named_callback
-        local_lambda :: () -> {
+        named_alias: named_callback
+        local_lambda: () -> {
             print("lambda")
         }
         os.on_interrupt(() -> {
@@ -37,7 +37,7 @@ fn run() {
         ready_out := term.stdout()
         &ready_out.flush() ?? panic("flush")
         loop {
-            tick :: 0
+            tick: 0
         }
     }
 }

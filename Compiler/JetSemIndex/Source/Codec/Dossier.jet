@@ -10,8 +10,8 @@ impl TypeDossier {
     // Typed dossier boundary, exact eight-field order. All retained vectors are
     // read in place; Foundation Report is the only envelope encoder and S18
     // owns nested semantic-fact codecs.
-    fn to_status_envelope(self) -> StatusEnvelope Never! {
-        definition :: if self.definition == {
+    to_status_envelope: fn(self) -> StatusEnvelope Never! {
+        definition: if self.definition == {
             .Val(row) -> semindex_status_def(row)
             .None -> StatusValue.Null
         }
@@ -23,7 +23,7 @@ impl TypeDossier {
         loop row in self.bypass_facts -> &bypasses.push(semindex_status_bypass(row))
         state_graphs := [StatusValue]{}
         loop row in self.state_graphs -> &state_graphs.push(semindex_status_state_graph(row))
-        fields :: StatusFields.new()
+        fields: StatusFields.new()
             .with("schema_version", StatusValue.Integer{value: self.schema_version})
             .with("target", StatusValue.String{value: self.target})
             .with("definition", definition)
@@ -35,9 +35,9 @@ impl TypeDossier {
         StatusEnvelope.new("inspect.dossier", true).with_field("dossier", StatusValue.Object{fields: fields})
     }
 
-    fn to_json(self) -> String Never! { self.to_status_envelope().json() }
+    to_json: fn(self) -> String Never! { self.to_status_envelope().json() }
 
-    fn render_text(self) -> String Never! {
+    render_text: fn(self) -> String Never! {
         out := "dossier `{self.target}` (schema v{self.schema_version})\n"
         if self.definition == {
             .Val(definition) -> {
@@ -57,8 +57,8 @@ impl TypeDossier {
                     }
                 }
                 if definition.callable_signature == .Val(signature) {
-                    failure :: signature.failure_contract_name()
-                    source :: signature.failure_source_name()
+                    failure: signature.failure_contract_name()
+                    source: signature.failure_source_name()
                     if failure == {
                         .Val(name) -> {
                             if source == {
@@ -83,15 +83,15 @@ impl TypeDossier {
         loop graph in self.state_graphs {
             out += "  {graph.owner} @ {graph.module_path}\n"
             loop state in graph.states {
-                reachability :: if state.reachable == {
+                reachability: if state.reachable == {
                     .Val(value) -> if value -> "reachable" else -> "unreachable"
                     .None -> "reachability unknown"
                 }
-                terminality :: if state.terminal -> "terminal" else -> "nonterminal"
+                terminality: if state.terminal -> "terminal" else -> "nonterminal"
                 out += "    state {state.name} ({terminality}; {reachability}) @ {graph.module_path}:{state.span.start}..{state.span.end}\n"
             }
             loop transition in graph.transitions {
-                from :: transition.from ?? "_"
+                from: transition.from ?? "_"
                 out += "    transition {transition.operation}: {from} -> {transition.to}\n"
             }
         }
@@ -100,7 +100,7 @@ impl TypeDossier {
         // Every spelled bypass, including unrelated sites.
         out += "bypass facts\n  count: {self.bypass_facts.len()}\n"
         loop bypass in self.bypass_facts {
-            detail :: if bypass.detail == "" -> "(no reason given)" else -> bypass.detail
+            detail: if bypass.detail == "" -> "(no reason given)" else -> bypass.detail
             out += "  {semindex_bypass_kind_text(bypass.kind)} at `{bypass.site}` ({detail}) @ {bypass.module_path}:{bypass.span.start}..{bypass.span.end}\n"
         }
         out
@@ -109,7 +109,7 @@ impl TypeDossier {
 
 // bypass_kind_text/json_bypass: distinct human and machine labels; empty
 // reasons remain empty in JSON, but visible in text.
-fn semindex_bypass_kind_text(kind: BypassKind) -> String Never! {
+semindex_bypass_kind_text: fn(kind: BypassKind) -> String Never! {
     if kind == {
         .UnsafeRegion -> "#Unsafe region"
         .UnsafeFn -> "#Unsafe fn"
@@ -117,11 +117,11 @@ fn semindex_bypass_kind_text(kind: BypassKind) -> String Never! {
         .LintAllow -> "#Allow(lint)"
     }
 }
-fn semindex_json_bypass(bypass: BypassFact) -> String Never! {
+semindex_json_bypass: fn(bypass: BypassFact) -> String Never! {
     "{{\"kind\":{foundation_json_quote(bypass.kind.as_str())},\"site\":{foundation_json_quote(bypass.site)},\"detail\":{foundation_json_quote(bypass.detail)},\"module_path\":{foundation_json_quote(bypass.module_path)},\"span\":{semindex_json_span(bypass.span)}}}"
 }
 
-fn semindex_status_bypass(bypass: BypassFact) -> StatusValue Never! {
+semindex_status_bypass: fn(bypass: BypassFact) -> StatusValue Never! {
     StatusValue.Object{fields: StatusFields.new()
         .with("kind", StatusValue.String{value: bypass.kind.as_str()})
         .with("site", StatusValue.String{value: bypass.site})
@@ -131,7 +131,7 @@ fn semindex_status_bypass(bypass: BypassFact) -> StatusValue Never! {
 }
 
 // origin_text (JSON origin stays S18's sole codec).
-fn semindex_origin_text(origin: MemberOrigin) -> String Never! {
+semindex_origin_text: fn(origin: MemberOrigin) -> String Never! {
     if origin == {
         .TypeBody -> "type body"
         .InherentImpl -> "impl"

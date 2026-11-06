@@ -1,17 +1,17 @@
 // core-conformance: core.data.json_reader
 use {
-    data :: core.data
-    stream :: core.data.stream
-    files :: core.files
+    data: core.data
+    stream: core.data.stream
+    files: core.files
 }
 
 #Codable
-struct Record {
+Record: struct {
     value: Int
 }
 
-fn run() {
-    input :: files.open("/dev/null") ?? panic("open")
+run: fn() {
+    input: files.open("/dev/null") ?? panic("open")
     limits := data.DataLimits.safe()
     reader := data.json_reader<Record>(^input, limits) ?? panic("reader")
     if stream.next(&reader) == {

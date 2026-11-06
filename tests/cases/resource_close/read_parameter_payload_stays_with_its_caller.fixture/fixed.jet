@@ -1,27 +1,27 @@
 // main.jet with each payload read where the caller holds it.
-struct Res {
+Res: struct {
     name: String
 }
 
 impl Res.Close {
-    fn close(^self) { print("close {self.name}") }
+    close: fn(^self) { print("close {self.name}") }
 }
 
-fn peek(warm: Res?) -> Bool {
+peek: fn(warm: Res?) -> Bool {
     if warm == {
         .Val(got) -> got.name == "a"
         .None -> false
     }
 }
 
-fn peek_list(warm: [Res]?) -> Int {
+peek_list: fn(warm: [Res]?) -> Int {
     if warm == {
         .Val(got) -> got.len()
         .None -> 0
     }
 }
 
-fn run() {
+run: fn() {
     one := Res?{None}
     one = Val(Res{name: "a"})
     print("peek {peek(one)}")

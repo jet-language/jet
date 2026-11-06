@@ -1,17 +1,17 @@
 // CSV rows keep quoted delimiters, embedded newlines and doubled quotes inside
 // one field; a row's `line` is the physical line it starts on, and a syntax
 // error reports its line and column (#3818: `err.line` reads on every tier).
-use csv :: core.encoding.csv
+use csv: core.encoding.csv
 
-fn show_rows(label: String, raw: String) {
-    rows :: csv.rows(raw) ?? {
+show_rows: fn(label: String, raw: String) {
+    rows: csv.rows(raw) ?? {
         print("{label}: error line {err.line ?? 0} column {err.column ?? 0}: {err.reason}")
         return
     }
     loop row in rows -> print("{label}: line {row.line} fields {row.fields.len()} {row.fields}")
 }
 
-fn run() {
+run: fn() {
     show_rows("quoted delimiter", "a,\"b,c\",d")
     show_rows("embedded newline", "id,text\n1,\"two\nlines\"\n2,plain")
     show_rows("doubled quote", "\"say \"\"hi\"\"\",x")

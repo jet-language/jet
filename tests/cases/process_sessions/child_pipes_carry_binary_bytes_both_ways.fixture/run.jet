@@ -1,17 +1,17 @@
-use process :: core.process
+use process: core.process
 
 // Every byte value crosses a child's pipes unchanged: stdin takes bytes and
 // text, and stdout comes back through `read` and `chunks`.
-fn round_trip() {
-    child :: process.cmd([String]{"cat"}).stdin(.Stream).stdout(.Stream).spawn() ?? panic("spawn failed")
+round_trip: fn() {
+    child: process.cmd([String]{"cat"}).stdin(.Stream).stdout(.Stream).spawn() ?? panic("spawn failed")
     all := [U8]{}
     loop value in 0..<256 { &all.push(U8{value}) }
-    taken :: child.stdin.write([U8]{U8{0}, U8{255}}) ?? panic("write failed")
+    taken: child.stdin.write([U8]{U8{0}, U8{255}}) ?? panic("write failed")
     print("write took {taken}")
     child.stdin.write_all(all) ?? panic("write_all failed")
     child.stdin.write_text("é\n") ?? panic("write_text failed")
     child.stdin.close()
-    first :: child.stdout.read(1) ?? panic("read failed")
+    first: child.stdout.read(1) ?? panic("read failed")
     print("first {first}")
     received := [U8]{}
     loop chunk in child.stdout.chunks(100) {
@@ -23,25 +23,25 @@ fn round_trip() {
     loop byte in "é\n".bytes() { &expected.push(byte) }
     print("received {received.len()} bytes, equal: {received == expected}")
     print("after end {child.stdout.read(8) ?? panic("read after end failed")}")
-    receipt :: child.wait() ?? panic("wait failed")
+    receipt: child.wait() ?? panic("wait failed")
     print("exit {receipt.code}")
 }
 
 // `chunks()` reads 65536 bytes at a time by default, and a size below one
 // ends the loop before any read, as `read` refuses such a limit.
-fn sizes() {
-    child :: process.cmd([String]{"sh", "-c", "printf abc >&2"}).stderr(.Stream).spawn() ?? panic("spawn failed")
+sizes: fn() {
+    child: process.cmd([String]{"sh", "-c", "printf abc >&2"}).stderr(.Stream).spawn() ?? panic("spawn failed")
     loop chunk in child.stderr.chunks(0) { print("size 0 yielded {chunk}") }
     if child.stderr.read(0) == {
         .Ok(_) -> print("read(0) read")
         .Err(error) -> print("read(0) failed: {error}")
     }
     loop chunk in child.stderr.chunks() { print("stderr {String.from_bytes(chunk) ?? "?"}") }
-    receipt :: child.wait() ?? panic("wait failed")
+    receipt: child.wait() ?? panic("wait failed")
     print("exit {receipt.code}")
 }
 
-fn run() {
+run: fn() {
     round_trip()
     sizes()
 }

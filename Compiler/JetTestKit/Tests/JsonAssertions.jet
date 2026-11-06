@@ -1,4 +1,4 @@
-use json :: core.encoding.json
+use json: core.encoding.json
 
 #Test("JSON assertions use typed equality independent of object key order") {
     assert_eq(kit_steps_json_test("{{\"a\":1,\"b\":true}}", "doc", "$", "=", "{{\"b\":true,\"a\":1}}"), None)
@@ -13,7 +13,7 @@ use json :: core.encoding.json
     assert(kit_steps_json_test("18446744073709551614", "doc", "$", "=", "18446744073709551615") != None)
     assert_eq(kit_steps_json_scalar("{{\"count\":9007199254740993}}", "doc", "$.count") ?? panic("JSON scalar: {err}"), "9007199254740993")
     assert_eq(kit_steps_json_number(json.parse("1.25e2") ?? panic("numeric token")), Val(125.0))
-    edit :: kit_steps_edit(json.parse("{{\"file\":\"main.jet\",\"span\":{{\"start\":1,\"end\":3}},\"new_text\":\"fixed\"}}") ?? panic("edit numeric tokens")) ?? panic("Number offsets must decode as Int")
+    edit: kit_steps_edit(json.parse("{{\"file\":\"main.jet\",\"span\":{{\"start\":1,\"end\":3}},\"new_text\":\"fixed\"}}") ?? panic("edit numeric tokens")) ?? panic("Number offsets must decode as Int")
     assert_eq(edit.start, 1)
     assert_eq(edit.end, 3)
 }
@@ -35,7 +35,7 @@ use json :: core.encoding.json
 }
 
 #Test("JSON wildcard requires every nonempty selected record to match") {
-    rows :: "{{\"name\":\"needle\",\"mean_ns\":1}}\n\n{{\"mean_ns\":1.5,\"name\":\"needle\"}}\n"
+    rows: "{{\"name\":\"needle\",\"mean_ns\":1}}\n\n{{\"mean_ns\":1.5,\"name\":\"needle\"}}\n"
     assert_eq(kit_steps_json_test(rows, "ndjson", "$", "#=", "2"), None)
     assert_eq(kit_steps_json_test(rows, "ndjson", "$[*].name", "=", "\"needle\""), None)
     assert_eq(kit_steps_json_test(rows, "ndjson", "$[*].mean_ns", ":", "number"), None)
@@ -64,8 +64,8 @@ use json :: core.encoding.json
 }
 
 #Test("JSON has selects all pinned keys in one record without imposing array order") {
-    records :: "[{{\"claim\":\"needle\",\"kind\":\"unit\",\"outcome\":\"failed\",\"expectation\":\"expected_failure\",\"extra\":9}},{{\"claim\":\"other\",\"kind\":\"unit\"}}]"
-    wanted :: "{{\"kind\":\"unit\",\"claim\":\"needle\",\"expectation\":\"expected_failure\",\"outcome\":\"failed\"}}"
+    records: "[{{\"claim\":\"needle\",\"kind\":\"unit\",\"outcome\":\"failed\",\"expectation\":\"expected_failure\",\"extra\":9}},{{\"claim\":\"other\",\"kind\":\"unit\"}}]"
+    wanted: "{{\"kind\":\"unit\",\"claim\":\"needle\",\"expectation\":\"expected_failure\",\"outcome\":\"failed\"}}"
     assert_eq(kit_steps_json_test(records, "doc", "$", "has", wanted), None)
     assert(kit_steps_json_test(records, "doc", "$", "has", "{{\"claim\":\"needle\",\"outcome\":\"passed\"}}") != None)
     assert(kit_steps_json_test(records, "doc", "$", "has", "{{\"claim\":\"missing\"}}") != None)
@@ -75,22 +75,22 @@ use json :: core.encoding.json
 }
 
 #Test("typed JSON normalizer replaces exact spans without changing surrounding bytes") {
-    rule :: KitJSONNormalization{stream: "stdout", path: "$.time", kind: "number"}
-    source :: " \n{{ \"tim\\u0065\" : 1.25e2 , \"note\" : \"é }} [ \\\"quote\\\"\", \"other\" : [1, 2] }}\t\n"
-    normalized :: kit_steps_json_normalize(source, "stdout", [rule])
+    rule: KitJSONNormalization{stream: "stdout", path: "$.time", kind: "number"}
+    source: " \n{{ \"tim\\u0065\" : 1.25e2 , \"note\" : \"é }} [ \\\"quote\\\"\", \"other\" : [1, 2] }}\t\n"
+    normalized: kit_steps_json_normalize(source, "stdout", [rule])
     assert_eq(normalized.error, "")
     assert_eq(normalized.text, " \n{{ \"tim\\u0065\" : \"<<number>>\" , \"note\" : \"é }} [ \\\"quote\\\"\", \"other\" : [1, 2] }}\t\n")
     assert_eq(kit_steps_json_normalize("human text", "stderr", [rule]).text, "human text")
-    wildcard :: KitJSONNormalization{stream: "stdout", path: "$.items[*].time", kind: "number"}
-    values :: kit_steps_json_normalize("{{\"items\":[{{\"time\":1}}, {{ \"time\" : 2.5 }}]}}", "stdout", [wildcard])
+    wildcard: KitJSONNormalization{stream: "stdout", path: "$.items[*].time", kind: "number"}
+    values: kit_steps_json_normalize("{{\"items\":[{{\"time\":1}}, {{ \"time\" : 2.5 }}]}}", "stdout", [wildcard])
     assert_eq(values.error, "")
     assert_eq(values.text, "{{\"items\":[{{\"time\":\"<<number>>\"}}, {{ \"time\" : \"<<number>>\" }}]}}")
 }
 
 #Test("typed JSON normalizer masks every line of JSON Lines output") {
-    rule :: KitJSONNormalization{stream: "stdout", path: "$.mean_ns", kind: "number"}
-    lines :: "{{\"name\":\"a\",\"mean_ns\":7.2}}\n{{\"name\":\"b\", \"mean_ns\" : 34}}\n"
-    normalized :: kit_steps_json_normalize(lines, "stdout", [rule])
+    rule: KitJSONNormalization{stream: "stdout", path: "$.mean_ns", kind: "number"}
+    lines: "{{\"name\":\"a\",\"mean_ns\":7.2}}\n{{\"name\":\"b\", \"mean_ns\" : 34}}\n"
+    normalized: kit_steps_json_normalize(lines, "stdout", [rule])
     assert_eq(normalized.error, "")
     assert_eq(normalized.text, "{{\"name\":\"a\",\"mean_ns\":\"<<number>>\"}}\n{{\"name\":\"b\", \"mean_ns\" : \"<<number>>\"}}\n")
     assert(kit_steps_json_normalize("{{\"mean_ns\":1}}\n{{\"name\":\"b\"}}\n", "stdout", [rule]).error.contains("missing"))
@@ -98,11 +98,11 @@ use json :: core.encoding.json
 }
 
 #Test("typed JSON normalizer fails wrong types missing paths and empty wildcards") {
-    rule :: KitJSONNormalization{stream: "stdout", path: "$.time", kind: "number"}
+    rule: KitJSONNormalization{stream: "stdout", path: "$.time", kind: "number"}
     assert(kit_steps_json_normalize("{{\"time\":\"not a number\"}}", "stdout", [rule]).error.contains("type differs"))
     assert(kit_steps_json_normalize("{{\"other\":1}}", "stdout", [rule]).error.contains("missing"))
     assert(kit_steps_json_normalize("not JSON", "stdout", [rule]).error.contains("parse"))
-    wildcard :: KitJSONNormalization{stream: "stdout", path: "$.items[*].time", kind: "number"}
+    wildcard: KitJSONNormalization{stream: "stdout", path: "$.items[*].time", kind: "number"}
     assert(kit_steps_json_normalize("{{\"items\":[]}}", "stdout", [wildcard]).error.contains("empty"))
     assert(kit_steps_json_normalize("{{\"items\":[{{\"time\":1}},{{}}]}}", "stdout", [wildcard]).error.contains("missing"))
 }

@@ -19,19 +19,19 @@ use jet_foundation.[
     sha256_hex,
 ]
 
-JET_DRIVER_EXIT_OK :: 0
-JET_DRIVER_EXIT_USER_ERROR :: 1
-JET_DRIVER_EXIT_USAGE :: 2
+JET_DRIVER_EXIT_OK: 0
+JET_DRIVER_EXIT_USER_ERROR: 1
+JET_DRIVER_EXIT_USAGE: 2
 
 // A failed verb's typed reports, kept beside the text its stderr renders, so
 // a `--json` run answers with them in the `jet.status/v1` envelope instead
 // (D-REPORT-MACHINE1). `notice` is the stderr text that comes before them.
-struct JetDriverFailure {
+JetDriverFailure: struct {
     reports: [Diagnostic]
     notice: String
 }
 
-struct JetDriverVerbOutput {
+JetDriverVerbOutput: struct {
     stdout: String
     stderr: String
     exit_code: Int
@@ -39,12 +39,12 @@ struct JetDriverVerbOutput {
 }
 
 // Accessibility lints that only `jet lint --a11y` shows.
-fn jet_driver_is_a11y_lint(code: String) -> Bool Never! {
+jet_driver_is_a11y_lint: fn(code: String) -> Bool Never! {
     code == "E2930" || code == "E2931"
 }
 
 // The one dim teaching pointer after a rendered report.
-fn jet_driver_explain_pointer_line(code: String, color: Bool) -> String Never! {
+jet_driver_explain_pointer_line: fn(code: String, color: Bool) -> String Never! {
     diagnostic_theme_dim(color, "run `jet explain {code}` to learn more")
 }
 
@@ -52,12 +52,12 @@ fn jet_driver_explain_pointer_line(code: String, color: Bool) -> String Never! {
 // or E2104 on stderr when no such code exists. The other explain subjects
 // (syntax tokens, build facts, policies, markers, and the `--web-graph` view)
 // belong to the CLI (`jet_cli_explain`).
-fn jet_driver_explain_code(code: String?, color: Bool) -> JetDriverVerbOutput Never! {
+jet_driver_explain_code: fn(code: String?, color: Bool) -> JetDriverVerbOutput Never! {
     if code == .Val(query) {
         if diagnostic_explanation(query) == .Val(explanation) {
             return JetDriverVerbOutput{stdout: diagnostic_explanation_render(explanation, color), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
         }
-        report :: diagnostic_from_registry(
+        report: diagnostic_from_registry(
             "E2104",
             None,
             "no diagnostic code `{query}` exists",
@@ -73,7 +73,7 @@ fn jet_driver_explain_code(code: String?, color: Bool) -> JetDriverVerbOutput Ne
     }
 }
 
-fn jet_driver_shift_span(span: Span, shift: Int) -> Span Never! {
+jet_driver_shift_span: fn(span: Span, shift: Int) -> Span Never! {
     Span{start: span.start + shift, end: span.end + shift}
 }
 
@@ -82,13 +82,13 @@ fn jet_driver_shift_span(span: Span, shift: Int) -> Span Never! {
 // origins do. A file of the entry root displays root-relative; a file of
 // another root (a dependency package's error, reported inline before its
 // E0626) keeps the entry-relative display path, so it names that package.
-fn jet_driver_present_origin(path: String, snapshot: JetDriverAuthorizedSourceSnapshot, generated: [SourceFile]) -> DiagnosticOrigin? Never! {
+jet_driver_present_origin: fn(path: String, snapshot: JetDriverAuthorizedSourceSnapshot, generated: [SourceFile]) -> DiagnosticOrigin? Never! {
     loop file in generated {
         if file.path == path -> return Val(DiagnosticOrigin{display: path, path: path, source: file.source, revision: sha256_hex(file.source)})
     }
-    physical :: jet_driver_physical_path(jet_driver_entry_root_path(snapshot), path)
+    physical: jet_driver_physical_path(jet_driver_entry_root_path(snapshot), path)
     loop root in snapshot.roots {
-        entry :: root.identity == snapshot.entry_root_identity
+        entry: root.identity == snapshot.entry_root_identity
         loop file in root.files {
             if file.path == physical -> return Val(DiagnosticOrigin{display: if entry -> file.relative_path else -> path, path: physical, source: file.source, revision: sha256_hex(file.source)})
         }
@@ -103,9 +103,9 @@ fn jet_driver_present_origin(path: String, snapshot: JetDriverAuthorizedSourceSn
 // of a file carries that file's exact bytes, so the file is hashed once, not
 // once per diagnostic (the compiler unit is one 12.8 MB file with thousands of
 // lints). The Rust driver shares one origin per module the same way.
-fn jet_driver_present_origin_once(path: String, snapshot: JetDriverAuthorizedSourceSnapshot, generated: [SourceFile], origins: &[String:DiagnosticOrigin]) -> DiagnosticOrigin? Never! {
+jet_driver_present_origin_once: fn(path: String, snapshot: JetDriverAuthorizedSourceSnapshot, generated: [SourceFile], origins: &[String:DiagnosticOrigin]) -> DiagnosticOrigin? Never! {
     if origins.get(path) == .Val(origin) -> return Val(origin)
-    origin :: jet_driver_present_origin(path, snapshot, generated) ?? return None
+    origin: jet_driver_present_origin(path, snapshot, generated) ?? return None
     origins[path] = origin
     Val(origin)
 }
@@ -114,17 +114,17 @@ fn jet_driver_present_origin_once(path: String, snapshot: JetDriverAuthorizedSou
 // bootstrap host does: a named source path becomes the origin (root-relative
 // display; a generated source shows its path), and the span, edit, and labels
 // move from aggregate offsets to offsets in that file's exact bytes.
-fn jet_driver_present_diagnostic(diagnostic: Diagnostic, snapshot: JetDriverAuthorizedSourceSnapshot, generated: [SourceFile], origins: &[String:DiagnosticOrigin]) -> Diagnostic Never! {
+jet_driver_present_diagnostic: fn(diagnostic: Diagnostic, snapshot: JetDriverAuthorizedSourceSnapshot, generated: [SourceFile], origins: &[String:DiagnosticOrigin]) -> Diagnostic Never! {
     // copy: `presented` is the shifted copy returned for display, while `diagnostic` stays the
     // caller's raw row (a read parameter). Its source_start/offset/span/edit are read below to
     // compute the shift.
     presented := diagnostic.copy()
-    path :: diagnostic.source_path ?? return presented
+    path: diagnostic.source_path ?? return presented
     if presented.origin == None {
         presented.origin = jet_driver_present_origin_once(path, snapshot, generated, &origins)
         if presented.origin == None -> return presented
     }
-    shift :: (diagnostic.source_start ?? 0) - (diagnostic.source_offset ?? 0)
+    shift: (diagnostic.source_start ?? 0) - (diagnostic.source_offset ?? 0)
     if diagnostic.span == .Val(span) -> presented.span = Val(jet_driver_shift_span(span, shift))
     if diagnostic.edit == .Val(edit) -> presented.edit = Val(TextEdit{span: jet_driver_shift_span(edit.span, shift), new_text: edit.new_text})
     loop index in 0..<presented.labels.len() {
@@ -144,34 +144,34 @@ fn jet_driver_present_diagnostic(diagnostic: Diagnostic, snapshot: JetDriverAuth
     presented
 }
 
-fn jet_driver_present_diagnostics(diagnostics: [Diagnostic], snapshot: JetDriverAuthorizedSourceSnapshot, generated: [SourceFile]) -> [Diagnostic] Never! {
+jet_driver_present_diagnostics: fn(diagnostics: [Diagnostic], snapshot: JetDriverAuthorizedSourceSnapshot, generated: [SourceFile]) -> [Diagnostic] Never! {
     origins := [String:DiagnosticOrigin]{}
-    presented :: loop diagnostic in diagnostics -> jet_driver_present_diagnostic(diagnostic, snapshot, generated, &origins)
+    presented: loop diagnostic in diagnostics -> jet_driver_present_diagnostic(diagnostic, snapshot, generated, &origins)
     presented
 }
 
 // Rendered problems, a blank line, the summary verdict, and the pointer that
 // names the first code.
-fn jet_driver_problem_report(file: String, source: String, diagnostics: [Diagnostic], summary: String, color: Bool) -> String Never! {
+jet_driver_problem_report: fn(file: String, source: String, diagnostics: [Diagnostic], summary: String, color: Bool) -> String Never! {
     if diagnostics.len() == 0 -> return ""
-    rendered :: diagnostic_render_all(file, source, diagnostics, color)
-    pointer :: jet_driver_explain_pointer_line(diagnostics[0].code, color)
+    rendered: diagnostic_render_all(file, source, diagnostics, color)
+    pointer: jet_driver_explain_pointer_line(diagnostics[0].code, color)
     "{rendered}\n{summary}\n{pointer}\n"
 }
 
-fn jet_driver_plural(count: Int) -> String Never! {
+jet_driver_plural: fn(count: Int) -> String Never! {
     if count == 1 -> "" else -> "s"
 }
 
 // Front-end problems ending in the "N problems found" count. `run`, `dev`,
 // and `test` hide ordinary advisory lints unless `--verbose` asks
 // pass `show_advisories` accordingly.
-fn jet_driver_report_problems(file: String, source: String, diagnostics: [Diagnostic], color: Bool, show_advisories: Bool) -> String Never! {
+jet_driver_report_problems: fn(file: String, source: String, diagnostics: [Diagnostic], color: Bool, show_advisories: Bool) -> String Never! {
     shown := [Diagnostic]{}
     loop diagnostic in diagnostics {
         if show_advisories || diagnostic.severity != DIAGNOSTIC_LINT -> &shown.push(diagnostic)
     }
-    count :: shown.len()
+    count: shown.len()
     jet_driver_problem_report(file, source, shown, "{count} problem{jet_driver_plural(count)} found", color)
 }
 
@@ -179,7 +179,7 @@ fn jet_driver_report_problems(file: String, source: String, diagnostics: [Diagno
 // problem count; warnings alone end in one `ok:` verdict; a clean check says
 // so unless `--quiet`. `file` is the entry as the user named it and `source`
 // its bytes, used for any diagnostic that carries no origin of its own.
-fn jet_driver_check_outcome(file: String, source: String, diagnostics: [Diagnostic], color: Bool, quiet: Bool) -> JetDriverVerbOutput Never! {
+jet_driver_check_outcome: fn(file: String, source: String, diagnostics: [Diagnostic], color: Bool, quiet: Bool) -> JetDriverVerbOutput Never! {
     errors := [Diagnostic]{}
     lints := [Diagnostic]{}
     loop diagnostic in diagnostics {
@@ -192,7 +192,7 @@ fn jet_driver_check_outcome(file: String, source: String, diagnostics: [Diagnost
     if errors.len() > 0 {
         return JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, errors, color, true), exit_code: JET_DRIVER_EXIT_USER_ERROR}
     }
-    count :: lints.len()
+    count: lints.len()
     stderr := ""
     if {
         count > 0 -> stderr = jet_driver_problem_report(file, source, lints, "ok: `{file}` has no errors ({count} warning{jet_driver_plural(count)})", color)

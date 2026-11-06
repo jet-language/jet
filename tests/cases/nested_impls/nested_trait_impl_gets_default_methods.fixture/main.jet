@@ -1,43 +1,43 @@
 // A trait block in a struct or enum body gets the trait's default methods,
 // for a trait in the same module and for one in another module.
-trait Greet {
-    fn name(self) -> String
-    fn hello(self) -> String { "hello {self.name()}" }
+Greet: trait {
+    name: fn(self) -> String
+    hello: fn(self) -> String { "hello {self.name()}" }
 }
 
-module far {
-    trait Wave {
-        fn who(self) -> String
-        fn wave(self) -> String { "wave {self.who()}" }
+far: module {
+    Wave: trait {
+        who: fn(self) -> String
+        wave: fn(self) -> String { "wave {self.who()}" }
     }
 }
 
-struct Inner {
+Inner: struct {
     n: String
 
     impl Greet {
-        fn name(self) -> String { self.n }
+        name: fn(self) -> String { self.n }
     }
 
     impl far.Wave {
-        fn who(self) -> String { self.n }
+        who: fn(self) -> String { self.n }
     }
 }
 
-enum Pet {
+Pet: enum {
     Cat
     Dog
 
     impl Greet {
-        fn name(self) -> String { if self == .Cat -> "cat" else -> "dog" }
+        name: fn(self) -> String { if self == .Cat -> "cat" else -> "dog" }
     }
 
     impl far.Wave {
-        fn who(self) -> String { self.name() }
+        who: fn(self) -> String { self.name() }
     }
 }
 
-fn run() {
+run: fn() {
     print(Inner{n: "a"}.hello())
     print(Inner{n: "b"}.wave())
     print(Pet.Cat.hello())

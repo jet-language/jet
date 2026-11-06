@@ -2,36 +2,36 @@
 // runs: each hole goes through encode_hole, and check sees the complete text.
 // A literal whose holes are constants is still checked before the program runs.
 #Error
-enum TokenError { Empty TooLong }
+TokenError: enum { Empty TooLong }
 
-Token :: distinct String
+Token: distinct String
 
 impl Token.CheckedText {
-    type Error = TokenError
+    Error: TokenError
 
-    fn check(text: String) TokenError! -[]> {
+    check: fn(text: String) TokenError! -[]> {
         if text == "" -> return Err(TokenError.Empty)
         if text.len() > 20 -> return Err(TokenError.TooLong)
         return Ok(())
     }
 
-    fn encode_hole<T: Printable>(value: T) -[]> String {
+    encode_hole: fn<T: Printable>(value: T) -[]> String {
         return "[{value}]"
     }
 }
 
-fn show(value: Token) {
+show: fn(value: Token) {
     #Unsafe("checked text example output") {
         print(value.raw())
     }
 }
 
-fn greet(name: String) -> Token {
+greet: fn(name: String) -> Token {
     Token{"hello {name}"}
 }
 
-fn run() {
-    name :: "Ada"
+run: fn() {
+    name: "Ada"
     show(Token{"hi {name}"})
     count := 2
     count += 1

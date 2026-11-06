@@ -1,20 +1,20 @@
-use json :: core.encoding.json
+use json: core.encoding.json
 
-fn price(item: Dyn) -> Int? {
+price: fn(item: Dyn) -> Int? {
     if item == .Object(_) {
-        price_tree :: &item.field("price") ?? return None
+        price_tree: &item.field("price") ?? return None
         return Val(price_tree.int() ?? 0)
     }
     return None
 }
 
-fn select_prices(data: Dyn) -> [Int] {
+select_prices: fn(data: Dyn) -> [Int] {
     prices := [Int]{}
     if data == .Object(_) {
-        rows :: &data.field("items") ?? Dyn.Null
+        rows: &data.field("items") ?? Dyn.Null
         if rows == .Array(items) {
             loop item in items {
-                p :: price(item)
+                p: price(item)
                 if p != None -> &prices.push(p)
             }
         }
@@ -22,8 +22,8 @@ fn select_prices(data: Dyn) -> [Int] {
     return prices
 }
 
-fn sample() -> [Int] {
-    raw :: "{{\"items\":[{{\"price\":3}},{{\"price\":8}},{{\"name\":\"free\"}}]}}"
-    data :: json.parse(raw) ?? Dyn.Null
+sample: fn() -> [Int] {
+    raw: "{{\"items\":[{{\"price\":3}},{{\"price\":8}},{{\"name\":\"free\"}}]}}"
+    data: json.parse(raw) ?? Dyn.Null
     return select_prices(data)
 }

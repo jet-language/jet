@@ -1,7 +1,7 @@
 // The built-in derive providers: ordinary Prelude derives whose typed bodies
 // JetSema expands for each selected capability (Registration/Derives.jet).
-SEMA_PRELUDE_DERIVE_SOURCE_PATH :: "jet:canonical-prelude/Prelude/Derives.jet"
-SEMA_PRELUDE_DERIVE_SOURCE :: comptime { ```// Built-in derive providers are ordinary Prelude derives.
+SEMA_PRELUDE_DERIVE_SOURCE_PATH: "jet:canonical-prelude/Prelude/Derives.jet"
+SEMA_PRELUDE_DERIVE_SOURCE: comptime { ```// Built-in derive providers are ordinary Prelude derives.
 // Their typed bodies use the same template expansion as package source,
 // including reflected enum variant payloads.
 //
@@ -14,7 +14,7 @@ SEMA_PRELUDE_DERIVE_SOURCE :: comptime { ```// Built-in derive providers are ord
 // `return false`, and ordering reads the `rhs` variant ordinal once and orders
 // different variants by ordinal before comparing payloads.
 derive T.Equatable {
-    fn equal(self, rhs: T) -> Bool {
+    equal: fn(self, rhs: T) -> Bool {
         comptime if T.$kind == "enum" {
             comptime loop left in T.$fields {
                 if self == {
@@ -56,7 +56,7 @@ derive T.Equatable {
 }
 
 derive T.Comparable {
-    fn compare(self, rhs: T) -> Ordering {
+    compare: fn(self, rhs: T) -> Ordering {
         comptime if T.$kind == "enum" {
             jet_rhs_variant_index := 0
             comptime loop right in T.$fields {
@@ -113,9 +113,9 @@ derive T.Comparable {
 
 // The standard library's own error family and its conversions into the
 // default `Err`: ordinary Prelude source JetSema injects where a module needs it.
-SEMA_PRELUDE_ERROR_SOURCE_PATH :: "jet:canonical-prelude/Prelude/Errors.jet"
-SEMA_PRELUDE_ERROR_SOURCE :: comptime { ```// (ratified 2026-08-17, card #2018): the standard library declares
-// the conversion for its own error family. A program can write `fn run()` and
+SEMA_PRELUDE_ERROR_SOURCE_PATH: "jet:canonical-prelude/Prelude/Errors.jet"
+SEMA_PRELUDE_ERROR_SOURCE: comptime { ```// (ratified 2026-08-17, card #2018): the standard library declares
+// the conversion for its own error family. A program can write `run: fn()` and
 // pass a Core failure up automatically without declaring anything, because
 // these declarations already sit on the existing rail. One source;
 // every tier lowers the same `impl <CoreError> -> Err` block, the same way
@@ -127,7 +127,7 @@ SEMA_PRELUDE_ERROR_SOURCE :: comptime { ```// (ratified 2026-08-17, card #2018):
 // cannot break a program that never produces that error.
 //
 // An author who wants the failure named still writes the named form
-// (`fn run() !EncodingError`), and that stays correct: this file only makes the
+// (`run: fn() !EncodingError`), and that stays correct: this file only makes the
 // unnamed form work.
 //
 // This rule keeps the rest of the rule intact. A user error type still
@@ -161,35 +161,35 @@ SEMA_PRELUDE_ERROR_SOURCE :: comptime { ```// (ratified 2026-08-17, card #2018):
 // checked nominal types; only Err carries the existing default-error role.
 // Fresh construction evaluates the declared metadata default in this owner.
 // Copy, context and conversion retain the existing stored metadata instead.
-struct __jet_ErrorContextFrame {
+__jet_ErrorContextFrame: struct {
     text: String
     file: String
     line: Int
 }
-struct __jet_ErrorConversion {
+__jet_ErrorConversion: struct {
     source: String
     target: String
 }
-struct __jet_ErrorField {
+__jet_ErrorField: struct {
     name: String
     value: String
 }
-struct __jet_ErrorSpan {
+__jet_ErrorSpan: struct {
     start: Int
     end: Int
 }
-struct __jet_ErrorDetails {
+__jet_ErrorDetails: struct {
     variant: String
     fields: [__jet_ErrorField]
     source_span: __jet_ErrorSpan?
 }
-struct __jet_ErrorMetadata {
+__jet_ErrorMetadata: struct {
     typed_identity: String?
     context_frames: [__jet_ErrorContextFrame]
     conversion_history: [__jet_ErrorConversion]
     details: __jet_ErrorDetails?
 }
-struct Err {
+Err: struct {
     message: String
     code: String?
     cause: Err?

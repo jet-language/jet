@@ -1,25 +1,25 @@
 // `total` takes the same call, so L2001 on `add(1, 2)` offers `jet fix`.
 // `scaled` takes another argument, so `jet fix` can't rename `double(4)`:
 // L2001 says to edit that use by hand and offers no `jet fix` migration.
-fn total(a: Int, b: Int) -> Int {
+total: fn(a: Int, b: Int) -> Int {
     a + b
 }
 
 #Deprecated(since: "1.2", use: "total")
-fn add(a: Int, b: Int) -> Int {
+add: fn(a: Int, b: Int) -> Int {
     total(a, b)
 }
 
-fn scaled(a: Int, by: Int) -> Int {
+scaled: fn(a: Int, by: Int) -> Int {
     a * by
 }
 
 #Deprecated(since: "1.2", use: "scaled")
-fn double(a: Int) -> Int {
+double: fn(a: Int) -> Int {
     scaled(a, 2)
 }
 
-fn run() {
+run: fn() {
     print(add(1, 2))
     print(double(4))
 }

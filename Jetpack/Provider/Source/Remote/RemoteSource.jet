@@ -4,35 +4,35 @@
 // fetch reads from a `git ls-tree` listing.
 
 // One remote source: the clone URL, the optional revision, and its label.
-struct RemoteSource {
+RemoteSource: struct {
     url: String
     rev: String?
     label: String
 
     // `github:owner/repo[/rev][#rev]` or a git URL (`git://`, `https://`,
     // `ssh://`, `file://`, `git@`), each with an optional `#rev`.
-    fn parse(upstream: String) -> RemoteSource ProviderError! {
+    parse: fn(upstream: String) -> RemoteSource ProviderError! {
         if !provider_remote_text_is_safe(upstream) {
             return Err(ProviderError.CoreBuild("remote source is empty or contains unsafe control characters"))
         }
-        split :: provider_remote_split_ref(upstream)
-        base :: split.base
+        split: provider_remote_split_ref(upstream)
+        base: split.base
         if base.starts_with("github:") {
-            parts :: base.removeprefix("github:").split("/").to_list()
-            owner :: if parts.len() > 0 -> parts[0] else -> ""
-            repo :: if parts.len() > 1 -> parts[1] else -> ""
+            parts: base.removeprefix("github:").split("/").to_list()
+            owner: if parts.len() > 0 -> parts[0] else -> ""
+            repo: if parts.len() > 1 -> parts[1] else -> ""
             if owner == "" || repo == "" -> return Err(ProviderError.CoreBuild("`github:` sources need `github:owner/repo`, got `{upstream}`"))
             path_rev := [String]{}
             loop index in 2..<parts.len() -> &path_rev.push(parts[index])
-            joined :: path_rev.join("/")
-            rev :: if split.rev != None -> split.rev else -> (if joined == "" -> None else -> Val(joined))
-            remote :: RemoteSource{url: "https://github.com/{owner}/{repo}.git", rev, label: "github:{owner}/{repo}"}
+            joined: path_rev.join("/")
+            rev: if split.rev != None -> split.rev else -> (if joined == "" -> None else -> Val(joined))
+            remote: RemoteSource{url: "https://github.com/{owner}/{repo}.git", rev, label: "github:{owner}/{repo}"}
             provider_validate_remote_source(remote)
             return Ok(remote)
         }
-        git_url :: base.starts_with("git://") || base.starts_with("https://") || base.starts_with("ssh://") || base.starts_with("file://") || base.starts_with("git@")
+        git_url: base.starts_with("git://") || base.starts_with("https://") || base.starts_with("ssh://") || base.starts_with("file://") || base.starts_with("git@")
         if git_url {
-            remote :: RemoteSource{url: base, rev: split.rev, label: base}
+            remote: RemoteSource{url: base, rev: split.rev, label: base}
             provider_validate_remote_source(remote)
             return Ok(remote)
         }
@@ -41,20 +41,20 @@ struct RemoteSource {
 }
 
 // `base#rev` with an empty revision meaning none.
-fn provider_remote_split_ref(upstream: String) -> (base: String, rev: String?) Never! {
-    halves :: upstream.split_once("#") ?? return (base: upstream, rev: None)
+provider_remote_split_ref: fn(upstream: String) -> (base: String, rev: String?) Never! {
+    halves: upstream.split_once("#") ?? return (base: upstream, rev: None)
     if halves.after == "" -> return (base: halves.before, rev: None)
     (base: halves.before, rev: Val(halves.after))
 }
 
 // A revision may never be empty, carry control characters, or start with
 // `-` (git option injection).
-fn provider_remote_revision_is_safe(revision: String?) -> Bool Never! {
-    rev :: revision ?? return true
+provider_remote_revision_is_safe: fn(revision: String?) -> Bool Never! {
+    rev: revision ?? return true
     provider_remote_text_is_safe(rev) && !rev.starts_with("-")
 }
 
-fn provider_validate_remote_source(remote: RemoteSource) ProviderError! {
+provider_validate_remote_source: fn(remote: RemoteSource) ProviderError! {
     if !provider_remote_text_is_safe(remote.url) || remote.url.starts_with("-") {
         return Err(ProviderError.CoreBuild("remote URL is empty or contains unsafe control characters"))
     }
@@ -65,12 +65,12 @@ fn provider_validate_remote_source(remote: RemoteSource) ProviderError! {
 
 // Non-empty, with no control character and no U+2028/U+2029 line or
 // paragraph separator (UTF-8 `E2 80 A8` / `E2 80 A9`).
-fn provider_remote_text_is_safe(value: String) -> Bool Never! {
+provider_remote_text_is_safe: fn(value: String) -> Bool Never! {
     if value == "" || pkg_text_has_control(value) -> return false
-    raw :: value.bytes()
+    raw: value.bytes()
     loop index in 0..<raw.len() {
         if index + 2 < raw.len() && Int.from_u8(raw[index]) == 226 && Int.from_u8(raw[index + 1]) == 128 {
-            third :: Int.from_u8(raw[index + 2])
+            third: Int.from_u8(raw[index + 2])
             if third == 168 || third == 169 -> return false
         }
     }
@@ -79,18 +79,18 @@ fn provider_remote_text_is_safe(value: String) -> Bool Never! {
 
 // The content-addressed checkout of `remote`: `<store parent>/sources/<key>`,
 // keyed by URL and revision.
-fn provider_source_cache_dir(store_dir: String, remote: RemoteSource) -> String Never! {
-    parent :: files.dirname(store_dir)
-    root :: files.join(if parent == "" -> store_dir else -> parent, "sources")
-    key :: pkg_sha256_hex("{remote.url}\n{remote.rev ?? "HEAD"}".bytes())
+provider_source_cache_dir: fn(store_dir: String, remote: RemoteSource) -> String Never! {
+    parent: files.dirname(store_dir)
+    root: files.join(if parent == "" -> store_dir else -> parent, "sources")
+    key: pkg_sha256_hex("{remote.url}\n{remote.rev ?? "HEAD"}".bytes())
     files.join(root, provider_prefix(key, 16))
 }
 
 // Infer a package's kind from its source. A staged, non-empty `bin/`
-// or a top-level `fn run` in any `.jet` file means executable; otherwise
-// library. Sources are lexed, so `fn run` in a comment or string never counts.
-fn provider_infer_package_kind(dir: String) -[FS]> PackageKind Never! {
-    has_bin :: if files.list_dir(files.join(dir, "bin")) == {
+// or a top-level `run: fn` in any `.jet` file means executable; otherwise
+// library. Sources are lexed, so `run: fn` in a comment or string never counts.
+provider_infer_package_kind: fn(dir: String) -[FS]> PackageKind Never! {
+    has_bin: if files.list_dir(files.join(dir, "bin")) == {
         .Ok(entries) -> entries.len() > 0
         .Err(_) -> false
     }
@@ -98,36 +98,32 @@ fn provider_infer_package_kind(dir: String) -[FS]> PackageKind Never! {
     PackageKind.Library
 }
 
-fn provider_dir_has_top_level_run(dir: String) -[FS]> Bool Never! {
-    entries :: files.list_dir(dir) ?? return false
+provider_dir_has_top_level_run: fn(dir: String) -[FS]> Bool Never! {
+    entries: files.list_dir(dir) ?? return false
     loop entry in entries {
-        name :: entry.name
+        name: entry.name
         if name.starts_with(".") || name == "build" || name == "target" || name == "bin" -> next
         if files.is_dir(entry.path) {
             if provider_dir_has_top_level_run(entry.path) -> return true
         } else if name.ends_with(".{FILE_EXT}") {
-            source :: files.read(entry.path) ?? next
+            source: files.read(entry.path) ?? next
             if provider_file_has_top_level_run(source) -> return true
         }
     }
     false
 }
 
-// True when `src` declares `run: fn` (or the retired `fn run`) at brace
-// depth 0.
-fn provider_file_has_top_level_run(src: String) -> Bool Never! {
-    lexed :: lex(src.bytes())
-    tokens :: lexed.tokens
+// True when `src` declares `run: fn` at brace depth 0.
+provider_file_has_top_level_run: fn(src: String) -> Bool Never! {
+    lexed: lex(src.bytes())
+    tokens: lexed.tokens
     depth := 0
     loop index in 0..<tokens.len() {
-        kind :: tokens[index].kind
+        kind: tokens[index].kind
         if kind == TOKEN_LBRACE {
             depth += 1
         } else if kind == TOKEN_RBRACE {
             depth -= 1
-        } else if kind == TOKEN_KW_FN && depth == 0 && index + 1 < tokens.len() {
-            next_token :: tokens[index + 1]
-            if next_token.kind == TOKEN_IDENT && token_text(lexed.tables, next_token) == "run" -> return true
         } else if kind == TOKEN_IDENT && depth == 0 && index + 2 < tokens.len() && tokens[index + 1].kind == TOKEN_COLON && tokens[index + 2].kind == TOKEN_KW_FN && (index == 0 || tokens[index - 1].kind != TOKEN_DOT) {
             if token_text(lexed.tables, tokens[index]) == "run" -> return true
         }
@@ -138,10 +134,10 @@ fn provider_file_has_top_level_run(src: String) -> Bool Never! {
 // The directories holding a package marker (workspace members, `find()`
 // semantics) in a `git ls-tree -r --name-only` listing, sorted and unique.
 // Root-level markers are not member subtrees.
-fn provider_member_dirs_from_listing(listing: String) -> [String] Never! {
+provider_member_dirs_from_listing: fn(listing: String) -> [String] Never! {
     out := [String]{}
     loop line in listing.split("\n") {
-        path :: line.trim()
+        path: line.trim()
         dir := ""
         if path.ends_with("/{PACKAGE_FILE}") {
             dir = path.removesuffix("/{PACKAGE_FILE}")
@@ -154,7 +150,7 @@ fn provider_member_dirs_from_listing(listing: String) -> [String] Never! {
 
 // How an in-repo-shaped dependency resolves against the workspace member
 // index.
-enum InRepoDep {
+InRepoDep: enum {
     // A workspace member subtree at this path.
     Member(String)
     // A directory inside the repo that is not a member (E1233).
@@ -165,14 +161,14 @@ enum InRepoDep {
 
 // A dependency named like a member resolves to it; a path dependency
 // resolves by its target (not its alias) against the member index.
-fn provider_classify_canonical_dep(name: String, source: DepSource, member_dir: String, member_dirs: [String], all_dirs: [String]) -> InRepoDep Never! {
+provider_classify_canonical_dep: fn(name: String, source: DepSource, member_dir: String, member_dirs: [String], all_dirs: [String]) -> InRepoDep Never! {
     loop dir in member_dirs {
         if provider_dir_basename(dir) == name -> return InRepoDep.Member(dir)
     }
     if source == {
         .Provider(provider, target) -> {
             if provider != RefSource.Path -> return InRepoDep.External
-            resolved :: provider_join_repo_relative(member_dir, target) ?? return InRepoDep.External
+            resolved: provider_join_repo_relative(member_dir, target) ?? return InRepoDep.External
             if member_dirs.contains(resolved) -> return InRepoDep.Member(resolved)
             if all_dirs.contains(resolved) -> return InRepoDep.OutsideWorkspace(resolved)
             InRepoDep.External
@@ -182,7 +178,7 @@ fn provider_classify_canonical_dep(name: String, source: DepSource, member_dir: 
 }
 
 // Every directory that appears in a tree listing.
-fn provider_all_tree_dirs(listing: String) -> [String] Never! {
+provider_all_tree_dirs: fn(listing: String) -> [String] Never! {
     out := [String]{}
     loop line in listing.split("\n") {
         current := line.trim()
@@ -195,13 +191,13 @@ fn provider_all_tree_dirs(listing: String) -> [String] Never! {
 }
 
 // The last segment of a `/`-separated member directory.
-fn provider_dir_basename(dir: String) -> String Never! {
+provider_dir_basename: fn(dir: String) -> String Never! {
     dir.cut_last("/")?.after ?? dir
 }
 
 // Resolve a bare path relative to a member directory, staying inside the
 // repo; None when it escapes the repo root (an external local dependency).
-fn provider_join_repo_relative(member_dir: String, target: String) -> String? Never! {
+provider_join_repo_relative: fn(member_dir: String, target: String) -> String? Never! {
     parts := [String]{}
     loop part in member_dir.split("/") {
         if part != "" -> &parts.push(part)

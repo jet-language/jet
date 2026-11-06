@@ -1,16 +1,16 @@
 // Reuses its typed field order and root rendering; no display-text
 // reconstruction. Err88 is borrowed; output E4 is owned.
-fn err_append(out: I64, text: I64) { if (text != I64{0}) -> rt_text_append(out, rt_text_data(text), rt_text_len(text)) }
-fn err_spaces(out: I64, depth: I64) {
+err_append: fn(out: I64, text: I64) { if (text != I64{0}) -> rt_text_append(out, rt_text_data(text), rt_text_len(text)) }
+err_spaces: fn(out: I64, depth: I64) {
     at := I64{0}
     loop at < depth {
         rt_text_push_word(out, I64{8224}, I64{2})
         at += I64{1}
     }
 }
-fn err_root(out: I64, error: I64, depth: I64) {
+err_root: fn(out: I64, error: I64, depth: I64) {
     if (depth == I64{0}) {
-        code :: rt_text_word(wrapping(error + ERR_CODE))
+        code: rt_text_word(wrapping(error + ERR_CODE))
         if (code != I64{0}) {
             rt_text_push_word(out, I64{25649898748801605}, I64{7}) // Error [
             err_append(out, code)
@@ -21,22 +21,22 @@ fn err_root(out: I64, error: I64, depth: I64) {
         rt_text_push_word(out, I64{9071406657921379}, I64{7}) // cause:
     }
     err_append(out, rt_text_word(wrapping(error + ERR_MESSAGE)))
-    identity :: rt_text_word(wrapping(error + ERR_IDENTITY))
+    identity: rt_text_word(wrapping(error + ERR_IDENTITY))
     if (identity != I64{0}) {
         rt_text_push_word(out, I64{2322280091611310112}, I64{8})
         err_append(out, identity)
         rt_text_push_scalar(out, I64{41})
     }
-    cause :: rt_text_word(wrapping(error + ERR_CAUSE))
+    cause: rt_text_word(wrapping(error + ERR_CAUSE))
     if (cause != I64{0}) {
         rt_text_push_scalar(out, I64{10})
         err_root(out, cause, depth + I64{1})
     }
-    count :: rt_text_word(wrapping(error + ERR_CONTEXT))
-    data :: rt_text_word(wrapping(wrapping(error + ERR_CONTEXT) + I64{16}))
+    count: rt_text_word(wrapping(error + ERR_CONTEXT))
+    data: rt_text_word(wrapping(wrapping(error + ERR_CONTEXT) + I64{16}))
     row := I64{0}
     loop row < count {
-        frame :: data + row * ERR_CONTEXT_BYTES
+        frame: data + row * ERR_CONTEXT_BYTES
         rt_text_push_scalar(out, I64{10})
         err_spaces(out, depth + I64{1})
         rt_text_push_word(out, I64{2338626483652554595}, I64{8})
@@ -48,10 +48,10 @@ fn err_root(out: I64, error: I64, depth: I64) {
         err_append(out, rt_text_word(frame))
         row += I64{1}
     }
-    conversions :: rt_text_word(wrapping(wrapping(error + ERR_CONVERSIONS) + I64{16}))
+    conversions: rt_text_word(wrapping(wrapping(error + ERR_CONVERSIONS) + I64{16}))
     row = I64{0}
     loop row < rt_text_word(wrapping(error + ERR_CONVERSIONS)) {
-        frame :: conversions + row * ERR_CONVERSION_BYTES
+        frame: conversions + row * ERR_CONVERSION_BYTES
         rt_text_push_scalar(out, I64{10})
         err_spaces(out, depth + I64{1})
         rt_text_push_word(out, I64{7598542776408371043}, I64{8})
@@ -62,19 +62,19 @@ fn err_root(out: I64, error: I64, depth: I64) {
         row += I64{1}
     }
 }
-#Export(c) fn jet_render_err(error: I64) -> I64 {
-    out :: jet_rt_string_builder_new()
+#Export(c) jet_render_err: fn(error: I64) -> I64 {
+    out: jet_rt_string_builder_new()
     err_root(out, error, I64{0})
     out
 }
-fn err_json_null(out: I64) { rt_text_push_word(out, I64{1819047278}, I64{4}) }
-fn err_json_quote(out: I64, text: I64) {
+err_json_null: fn(out: I64) { rt_text_push_word(out, I64{1819047278}, I64{4}) }
+err_json_quote: fn(out: I64, text: I64) {
     rt_text_push_scalar(out, I64{34})
-    data :: rt_text_data(text)
-    length :: rt_text_len(text)
+    data: rt_text_data(text)
+    length: rt_text_len(text)
     at := I64{0}
     loop at < length {
-        scalar :: rt_text_decode(wrapping(data + at))
+        scalar: rt_text_decode(wrapping(data + at))
         at += rt_text_width(wrapping(data + at))
         if (scalar == I64{34} || scalar == I64{92}) {
             rt_text_push_scalar(out, I64{92})
@@ -90,7 +90,7 @@ fn err_json_quote(out: I64, text: I64) {
             rt_text_push_word(out, I64{30044}, I64{2})
             shift := I64{12}
             loop shift >= (I64{0}) {
-                digit :: (scalar >> shift).bit_and(I64{15})
+                digit: (scalar >> shift).bit_and(I64{15})
                 rt_text_push_scalar(out, if (digit < I64{10}) -> I64{48} + digit else -> I64{87} + digit)
                 shift -= I64{4}
             }
@@ -98,8 +98,8 @@ fn err_json_quote(out: I64, text: I64) {
     }
     rt_text_push_scalar(out, I64{34})
 }
-fn err_json_optional(out: I64, text: I64) { if (text == I64{0}) -> err_json_null(out) else -> err_json_quote(out, text) }
-fn err_json_hop(out: I64, hop: I64) {
+err_json_optional: fn(out: I64, text: I64) { if (text == I64{0}) -> err_json_null(out) else -> err_json_quote(out, text) }
+err_json_hop: fn(out: I64, hop: I64) {
     rt_text_push_word(out, I64{7881702179028214395}, I64{8})
     rt_text_push_word(out, I64{3809893}, I64{3})
     err_json_quote(out, rt_text_word(wrapping(hop + HOP_FUNCTION)))
@@ -116,17 +116,17 @@ fn err_json_hop(out: I64, hop: I64) {
     rt_text_push_number(out, rt_text_word(wrapping(hop + HOP_COUNT)))
     rt_text_push_scalar(out, I64{125})
 }
-fn err_json_details(out: I64, details: I64) {
+err_json_details: fn(out: I64, details: I64) {
     rt_text_push_word(out, I64{7953754356895326843}, I64{8})
     rt_text_push_word(out, I64{3809908}, I64{3})
     err_json_quote(out, rt_text_word(wrapping(details + ERR_DETAILS_VARIANT)))
     rt_text_push_word(out, I64{8314889994848576044}, I64{8})
     rt_text_push_word(out, I64{8075810}, I64{3})
-    data :: rt_text_word(wrapping(wrapping(details + ERR_DETAILS_FIELDS) + I64{16}))
+    data: rt_text_word(wrapping(wrapping(details + ERR_DETAILS_FIELDS) + I64{16}))
     row := I64{0}
     loop row < rt_text_word(wrapping(details + ERR_DETAILS_FIELDS)) {
         if (row != I64{0}) -> rt_text_push_scalar(out, I64{44})
-        field :: wrapping(data + row * ERR_FIELD_BYTES)
+        field: wrapping(data + row * ERR_FIELD_BYTES)
         err_json_quote(out, rt_text_word(field))
         rt_text_push_scalar(out, I64{58})
         err_append(out, rt_text_word(wrapping(field + I64{8}))) // canonical JSON value
@@ -146,7 +146,7 @@ fn err_json_details(out: I64, details: I64) {
     }
     rt_text_push_scalar(out, I64{125})
 }
-fn err_json(out: I64, error: I64, journey: I64) {
+err_json: fn(out: I64, error: I64, journey: I64) {
     jet_rt_string_builder_push(out, rt_static_text("{{\"schema\":\"jet.err/v1\",\"message\""))
     rt_text_push_scalar(out, I64{58})
     err_json_quote(out, rt_text_word(wrapping(error + ERR_MESSAGE)))
@@ -154,9 +154,9 @@ fn err_json(out: I64, error: I64, journey: I64) {
     err_json_optional(out, rt_text_word(wrapping(error + ERR_CODE)))
     rt_text_push_word(out, I64{2478514117919580716}, I64{8})
     rt_text_push_scalar(out, I64{58})
-    cause :: rt_text_word(wrapping(error + ERR_CAUSE))
+    cause: rt_text_word(wrapping(error + ERR_CAUSE))
     if (cause == I64{0}) -> err_json_null(out) else -> err_json(out, cause, I64{0})
-    identity :: rt_text_word(wrapping(error + ERR_IDENTITY))
+    identity: rt_text_word(wrapping(error + ERR_IDENTITY))
     if (identity != I64{0}) {
         jet_rt_string_builder_push(out, rt_static_text(",\"typed_identity\":"))
         err_json_quote(out, identity)
@@ -164,10 +164,10 @@ fn err_json(out: I64, error: I64, journey: I64) {
     row := I64{0}
     if (rt_text_word(wrapping(error + ERR_CONTEXT)) != I64{0}) {
         jet_rt_string_builder_push(out, rt_static_text(",\"context_frames\":["))
-        data :: rt_text_word(wrapping(wrapping(error + ERR_CONTEXT) + I64{16}))
+        data: rt_text_word(wrapping(wrapping(error + ERR_CONTEXT) + I64{16}))
         loop row < rt_text_word(wrapping(error + ERR_CONTEXT)) {
             if (row != I64{0}) -> rt_text_push_scalar(out, I64{44})
-            frame :: data + row * ERR_CONTEXT_BYTES
+            frame: data + row * ERR_CONTEXT_BYTES
             rt_text_push_word(out, I64{4189038663854989947}, I64{8})
             err_json_quote(out, rt_text_word(frame))
             rt_text_push_word(out, I64{4189022119707157036}, I64{8})
@@ -180,16 +180,16 @@ fn err_json(out: I64, error: I64, journey: I64) {
         rt_text_push_scalar(out, I64{93})
     }
     if (journey != I64{0}) {
-        origin :: rt_text_word(wrapping(journey + JOURNEY_ORIGIN))
+        origin: rt_text_word(wrapping(journey + JOURNEY_ORIGIN))
         if (origin != I64{0}) {
             rt_text_push_word(out, I64{7956003919315804716}, I64{8})
             rt_text_push_word(out, I64{14882}, I64{2})
             err_json_hop(out, origin)
         }
-        count :: rt_text_word(wrapping(journey + JOURNEY_HOPS))
+        count: rt_text_word(wrapping(journey + JOURNEY_HOPS))
         if (count != I64{0}) {
             jet_rt_string_builder_push(out, rt_static_text(",\"source_journey\":["))
-            data :: rt_text_word(wrapping(wrapping(journey + JOURNEY_HOPS) + I64{16}))
+            data: rt_text_word(wrapping(wrapping(journey + JOURNEY_HOPS) + I64{16}))
             row = I64{0}
             loop row < count {
                 if (row != I64{0}) -> rt_text_push_scalar(out, I64{44})
@@ -201,11 +201,11 @@ fn err_json(out: I64, error: I64, journey: I64) {
     }
     if (rt_text_word(wrapping(error + ERR_CONVERSIONS)) != I64{0}) {
         jet_rt_string_builder_push(out, rt_static_text(",\"conversion_history\":["))
-        data :: rt_text_word(wrapping(wrapping(error + ERR_CONVERSIONS) + I64{16}))
+        data: rt_text_word(wrapping(wrapping(error + ERR_CONVERSIONS) + I64{16}))
         row = I64{0}
         loop row < rt_text_word(wrapping(error + ERR_CONVERSIONS)) {
             if (row != I64{0}) -> rt_text_push_scalar(out, I64{44})
-            frame :: data + row * ERR_CONVERSION_BYTES
+            frame: data + row * ERR_CONVERSION_BYTES
             rt_text_push_word(out, I64{7305808869231633019}, I64{8})
             rt_text_push_word(out, I64{14882}, I64{2})
             err_json_quote(out, rt_text_word(frame))
@@ -217,7 +217,7 @@ fn err_json(out: I64, error: I64, journey: I64) {
         }
         rt_text_push_scalar(out, I64{93})
     }
-    details :: rt_text_word(wrapping(error + ERR_DETAILS))
+    details: rt_text_word(wrapping(error + ERR_DETAILS))
     if (details != I64{0}) {
         rt_text_push_word(out, I64{7811882181195997740}, I64{8})
         rt_text_push_word(out, I64{3809907}, I64{3})
@@ -225,8 +225,8 @@ fn err_json(out: I64, error: I64, journey: I64) {
     }
     rt_text_push_scalar(out, I64{125})
 }
-#Export(c) fn jet_error_report_json(error: I64, journey: I64) -> I64 {
-    out :: jet_rt_string_builder_new()
+#Export(c) jet_error_report_json: fn(error: I64, journey: I64) -> I64 {
+    out: jet_rt_string_builder_new()
     err_json(out, error, journey)
     out
 }

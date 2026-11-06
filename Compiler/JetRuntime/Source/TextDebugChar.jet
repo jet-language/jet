@@ -3,9 +3,9 @@
 // Frozen char Debug goldens (Tests/CharDebugPlain.ranges, run by
 // run-ui-key-witness.mjs): all 1,112,064 Unicode scalars, zero differences.
 // Caller supplies a valid Unicode scalar; append directly, without temporary text.
-fn rt_text_push_rust_debug_char(target: I64, cp: I64) {
+rt_text_push_rust_debug_char: fn(target: I64, cp: I64) {
     rt_text_push_word(target, I64{39}, I64{1})
-    short :: if {
+    short: if {
         (cp == I64{0}) -> I64{48}
         (cp == I64{9}) -> I64{116}
         (cp == I64{10}) -> I64{110}
@@ -24,9 +24,9 @@ fn rt_text_push_rust_debug_char(target: I64, cp: I64) {
 
 // The Debug text of a Char (`{c:Debug}`): quoted and escaped, an invalid
 // scalar shown as U+FFFD like its Display.
-#Export(c) fn jet_rt_char_debug(value: I64) -> I64 {
-    scalar :: if (value < I64{0} || value > I64{1114111} || (value >= I64{55296} && value <= I64{57343})) -> I64{65533} else -> value
-    target :: jet_rt_string_builder_new()
+#Export(c) jet_rt_char_debug: fn(value: I64) -> I64 {
+    scalar: if (value < I64{0} || value > I64{1114111} || (value >= I64{55296} && value <= I64{57343})) -> I64{65533} else -> value
+    target: jet_rt_string_builder_new()
     rt_text_push_rust_debug_char(target, scalar)
     jet_rt_string_builder_finish(target)
 }

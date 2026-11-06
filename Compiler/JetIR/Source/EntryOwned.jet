@@ -44,7 +44,7 @@ use jet_foundation.[name_rows_value]
 // ever is) and process.exit (with no root, HostProcess.jet runs the exit
 // handlers, flushes and exits at once; under the root the same steps run
 // after the stop edges, which an owned main's do nothing observable on).
-IR_ROOT_FREE_ROUTES :: comptime { [String]{
+IR_ROOT_FREE_ROUTES: comptime { [String]{
     "jet_char_len",
     "jet_fault_should_fail",
     "jet_int_add",
@@ -121,7 +121,7 @@ IR_ROOT_FREE_ROUTES :: comptime { [String]{
 // The runtime routes a stop edge or a drop routine may call with nothing a
 // process exit could observe: they free memory, or enter and leave a
 // cleanup scope (an owned main drops those).
-IR_ENTRY_QUIET_ROUTES :: comptime { [String]{
+IR_ENTRY_QUIET_ROUTES: comptime { [String]{
     "jet_rt_block_release",
     "jet_rt_cleanup_enter",
     "jet_rt_cleanup_leave",
@@ -136,12 +136,12 @@ IR_ENTRY_QUIET_ROUTES :: comptime { [String]{
 // module order, that calls a route outside IR_ROOT_FREE_ROUTES or has a
 // stop point without its stop edge, else the first that cleans up on a
 // stop edge. Returns "" when the program can own its main.
-fn ir_entry_root_need(m: IRModule) -> String Never! {
+ir_entry_root_need: fn(m: IRModule) -> String Never! {
     if m.entry < 0 -> return "the module has no program entry"
     free := [String:Bool]{}
     loop route in IR_ROOT_FREE_ROUTES -> free[route.copy()] = true
-    poll :: name_rows_value(m.function_rows, IR_STOP_POLL_KEY) ?? -1
-    trap :: name_rows_value(m.function_rows, IR_STOP_TRAP_KEY) ?? -1
+    poll: name_rows_value(m.function_rows, IR_STOP_POLL_KEY) ?? -1
+    trap: name_rows_value(m.function_rows, IR_STOP_TRAP_KEY) ?? -1
     // Each stop edge as (function, its first instruction, its End).
     edges := [Int]{}
     seeds := [Int]{}
@@ -149,7 +149,7 @@ fn ir_entry_root_need(m: IRModule) -> String Never! {
         if f.asm != None -> next
         loop at in 0..<f.op.len() {
             if f.op[at] == .CallRuntime {
-                symbol :: m.names[f.a[at]]
+                symbol: m.names[f.a[at]]
                 if free.get(symbol) == None -> return "`{f.name}` calls the runtime route `{symbol}`"
                 next
             }
@@ -163,10 +163,10 @@ fn ir_entry_root_need(m: IRModule) -> String Never! {
             }
         }
     }
-    quiet :: ir_entry_quiet_functions(m, seeds)
+    quiet: ir_entry_quiet_functions(m, seeds)
     edge := 0
     loop edge < edges.len() {
-        f :: m.functions[edges[edge]]
+        f: m.functions[edges[edge]]
         loop k in edges[edge + 1]..<edges[edge + 2] {
             if !ir_entry_quiet(m, f, k, quiet) -> return "`{f.name}` cleans up on a stop edge"
         }
@@ -179,26 +179,26 @@ fn ir_entry_root_need(m: IRModule) -> String Never! {
 // routine's function (-1: it drops nothing a process exit could observe,
 // -2: its routine is missing), and per function whether running it does
 // nothing a process exit could observe.
-struct IREntryQuiet { glue: [Int], functions: [Bool] }
+IREntryQuiet: struct { glue: [Int], functions: [Bool] }
 
 // Whether instruction `at` of `f` (on a stop edge, or in a function one
 // reaches) does nothing a process exit could observe: it is no indirect
 // call, close or unreachable; a call of an IR_ENTRY_QUIET_ROUTES route; a
 // call of a function `quiet` marks; or a drop of a type that drops nothing
 // or whose drop routine `quiet` marks.
-fn ir_entry_quiet(m: IRModule, f: IRFunction, at: Int, quiet: IREntryQuiet) -> Bool Never! {
+ir_entry_quiet: fn(m: IRModule, f: IRFunction, at: Int, quiet: IREntryQuiet) -> Bool Never! {
     if f.op[at] == {
         .CallIndirect | .Close | .Unreachable -> false
         .Call -> f.a[at] >= 0 && f.a[at] < quiet.functions.len() && quiet.functions[f.a[at]]
         .CallRuntime -> {
-            symbol :: m.names[f.a[at]]
+            symbol: m.names[f.a[at]]
             loop route in IR_ENTRY_QUIET_ROUTES {
                 if route == symbol -> return true
             }
             false
         }
         .Drop -> {
-            glue :: quiet.glue[f.slot_type[f.a[at]]]
+            glue: quiet.glue[f.slot_type[f.a[at]]]
             glue == -1 || (glue >= 0 && quiet.functions[glue])
         }
         else -> true
@@ -213,22 +213,22 @@ fn ir_entry_quiet(m: IRModule, f: IRFunction, at: Int, quiet: IREntryQuiet) -> B
 // They start quiet and lose it until nothing changes, so a recursive
 // type's routine, or a routine calling one outlined part of it (a buffer's
 // last-owner release), counts as quiet when its cycle does nothing else.
-fn ir_entry_quiet_functions(m: IRModule, seeds: [Int]) -> IREntryQuiet Never! {
+ir_entry_quiet_functions: fn(m: IRModule, seeds: [Int]) -> IREntryQuiet Never! {
     q := IREntryQuiet{glue: [Int]{}, functions: [Bool]{}}
     loop _ in m.functions -> &q.functions.push(false)
     seen := q.functions.copy()
     work := seeds.copy()
     loop row in m.types {
-        id :: if row.drop == "" || row.kind == .Int || row.kind == .String -> -1 else -> name_rows_value(m.function_rows, row.drop) ?? -2
+        id: if row.drop == "" || row.kind == .Int || row.kind == .String -> -1 else -> name_rows_value(m.function_rows, row.drop) ?? -2
         &q.glue.push(id)
         if id >= 0 -> &work.push(id)
     }
     members := [Int]{}
     loop work.len() > 0 {
-        id :: &work.pop() ?? -1
+        id: &work.pop() ?? -1
         if id < 0 || id >= m.functions.len() || seen[id] -> next
         seen[id] = true
-        f :: m.functions[id]
+        f: m.functions[id]
         if f.asm != None -> next
         q.functions[id] = true
         &members.push(id)
@@ -242,7 +242,7 @@ fn ir_entry_quiet_functions(m: IRModule, seeds: [Int]) -> IREntryQuiet Never! {
         changed = false
         loop id in members {
             if !q.functions[id] -> next
-            f :: m.functions[id]
+            f: m.functions[id]
             loop at in 0..<f.op.len() {
                 if !ir_entry_quiet(m, f, at, q) {
                     q.functions[id] = false
@@ -270,7 +270,7 @@ fn ir_entry_quiet_functions(m: IRModule, seeds: [Int]) -> IREntryQuiet Never! {
 // session flags are untouched and the saved word is 0 (Scheduler.jet
 // jet_rt_cleanup_enter/leave), so an owned main drops their calls and links
 // none of the deadline delivery behind the shield's leave.
-IR_OWNED_ATTACH_ROUTES :: comptime { [String]{
+IR_OWNED_ATTACH_ROUTES: comptime { [String]{
     "jet_fault_should_fail",
     "jet_journey_origin",
     "jet_journey_reset",
@@ -281,7 +281,7 @@ IR_OWNED_ATTACH_ROUTES :: comptime { [String]{
 // The root-free routes besides print that may write stdout (through its
 // buffer, HostStdio.jet host_stdout_write). A main that calls one keeps
 // print's buffered writer, so their lines stay in program order.
-IR_OWNED_STDOUT_ROUTES :: comptime { [String]{
+IR_OWNED_STDOUT_ROUTES: comptime { [String]{
     "jet_term_stdio_write_raw",
 } }
 
@@ -295,30 +295,30 @@ IR_OWNED_STDOUT_ROUTES :: comptime { [String]{
 // route, its print calls jet_term_write_stdout_line_direct: no other route
 // it may call writes stdout and it runs no test capture, so its lines need
 // no buffer.
-fn ir_entry_own(m: &IRModule) -> String Never! {
-    need :: ir_entry_root_need(m)
+ir_entry_own: fn(m: &IRModule) -> String Never! {
+    need: ir_entry_root_need(m)
     if need != "" -> return need
-    poll :: name_rows_value(m.function_rows, IR_STOP_POLL_KEY) ?? -1
-    trap :: name_rows_value(m.function_rows, IR_STOP_TRAP_KEY) ?? -1
-    entry_return :: name_rows_value(m.name_rows, "jet_rt_process_entry_return") ?? -1
+    poll: name_rows_value(m.function_rows, IR_STOP_POLL_KEY) ?? -1
+    trap: name_rows_value(m.function_rows, IR_STOP_TRAP_KEY) ?? -1
+    entry_return: name_rows_value(m.name_rows, "jet_rt_process_entry_return") ?? -1
     buffered := false
     loop route in IR_OWNED_STDOUT_ROUTES {
-        row :: name_rows_value(m.name_rows, route) ?? -1
+        row: name_rows_value(m.name_rows, route) ?? -1
         if row >= 0 && ir_entry_calls(m, row) -> buffered = true
     }
-    print :: if buffered -> -1 else -> name_rows_value(m.name_rows, "jet_term_write_stdout_line") ?? -1
-    direct :: if print >= 0 -> ir_intern_name(&m, "jet_term_write_stdout_line_direct") else -> -1
-    exit :: name_rows_value(m.name_rows, "jet_std_process_exit") ?? -1
-    exit_owned :: if exit >= 0 -> ir_intern_name(&m, "jet_std_process_exit_owned") else -> -1
+    print: if buffered -> -1 else -> name_rows_value(m.name_rows, "jet_term_write_stdout_line") ?? -1
+    direct: if print >= 0 -> ir_intern_name(&m, "jet_term_write_stdout_line_direct") else -> -1
+    exit: name_rows_value(m.name_rows, "jet_std_process_exit") ?? -1
+    exit_owned: if exit >= 0 -> ir_intern_name(&m, "jet_std_process_exit_owned") else -> -1
     redirect := [Int]{}
     loop _ in 0..<m.names.len() -> &redirect.push(-1)
     if print >= 0 -> redirect[print] = direct
     if exit >= 0 -> redirect[exit] = exit_owned
-    cleanup :: IRCleanupRoutes{enter: name_rows_value(m.name_rows, "jet_rt_cleanup_enter") ?? -1, leave: name_rows_value(m.name_rows, "jet_rt_cleanup_leave") ?? -1}
+    cleanup: IRCleanupRoutes{enter: name_rows_value(m.name_rows, "jet_rt_cleanup_enter") ?? -1, leave: name_rows_value(m.name_rows, "jet_rt_cleanup_leave") ?? -1}
     attach := [Bool]{}
     loop _ in 0..<m.names.len() -> &attach.push(false)
     loop route in IR_OWNED_ATTACH_ROUTES {
-        row :: name_rows_value(m.name_rows, route) ?? -1
+        row: name_rows_value(m.name_rows, route) ?? -1
         if row >= 0 -> attach[row] = true
     }
     if exit >= 0 -> attach[exit_owned] = true
@@ -335,7 +335,7 @@ fn ir_entry_own(m: &IRModule) -> String Never! {
 }
 
 // Whether a function of `m` calls the runtime route of name row `row`.
-fn ir_entry_calls(m: IRModule, row: Int) -> Bool Never! {
+ir_entry_calls: fn(m: IRModule, row: Int) -> Bool Never! {
     loop f in m.functions {
         if f.asm != None -> next
         loop (at, op) in f.op {
@@ -347,7 +347,7 @@ fn ir_entry_calls(m: IRModule, row: Int) -> Bool Never! {
 
 // The name rows of jet_rt_cleanup_enter and jet_rt_cleanup_leave (-1: not
 // called).
-struct IRCleanupRoutes {
+IRCleanupRoutes: struct {
     enter: Int
     leave: Int
 }
@@ -357,7 +357,7 @@ struct IRCleanupRoutes {
 // cleanup scopes (an enter's saved word becomes the 0 it returns with no
 // control), and points each runtime call whose name row `redirect` maps
 // (-1: none) at the owned main's route.
-fn ir_entry_own_strip(f: &IRFunction, poll: Int, trap: Int, entry_return: Int, redirect: [Int], cleanup: IRCleanupRoutes) Never! {
+ir_entry_own_strip: fn(f: &IRFunction, poll: Int, trap: Int, entry_return: Int, redirect: [Int], cleanup: IRCleanupRoutes) Never! {
     removed := false
     at := 0
     loop at < f.op.len() {
@@ -372,7 +372,7 @@ fn ir_entry_own_strip(f: &IRFunction, poll: Int, trap: Int, entry_return: Int, r
         } else if f.op[at] == .CallRuntime && f.a[at] < redirect.len() && redirect[f.a[at]] >= 0 {
             f.a[at] = redirect[f.a[at]]
         } else if f.op[at] == .Call && f.a[at] >= 0 && (f.a[at] == poll || f.a[at] == trap) {
-            end :: f.c[at + 1]
+            end: f.c[at + 1]
             loop k in at..<(end + 1) -> ir_opt_kill(&f, k)
             removed = true
             at = end

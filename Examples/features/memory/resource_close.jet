@@ -1,14 +1,14 @@
 //! D-SHAPE-RESOURCE2=A: explicit deferred close transfers ownership beside
 //! acquisition and runs once in reverse order when the scope exits.
-struct Resource {
+Resource: struct {
     name: String
 }
 
 impl Resource.Close {
-    fn close(^self) { print("closed {self.name}") }
+    close: fn(^self) { print("closed {self.name}") }
 }
 
-fn run() {
+run: fn() {
     first := Resource{name: "first"}
     defer close(^first)
     second := Resource{name: "second"}

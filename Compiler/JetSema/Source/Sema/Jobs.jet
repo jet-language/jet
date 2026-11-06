@@ -1,6 +1,6 @@
 use {
-    math :: core.math
-    unicode :: core.text
+    math: core.math
+    unicode: core.text
     jet_foundation.[
         JET_CLI_COMMANDS,
         Diagnostic,
@@ -24,17 +24,17 @@ use {
     ]
 }
 
-struct SemaJobScheduleResolution {
+SemaJobScheduleResolution: struct {
     schedule: EverySchedule?
     error: EveryScheduleError?
 }
 
-fn sema_job_schedule_unit(suffix: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaRegistrationUnitFact? {
+sema_job_schedule_unit: fn(suffix: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaRegistrationUnitFact? {
     if program.registration_graph == .Val(graph) -> return sema_expression_unit_literal_time_fact(suffix, graph)
     None
 }
 
-fn sema_job_schedule_float_to_int(value: Float) -> Int Never! {
+sema_job_schedule_float_to_int: fn(value: Float) -> Int Never! {
     remaining := value
     result := 0
     bit := 62
@@ -50,21 +50,21 @@ fn sema_job_schedule_float_to_int(value: Float) -> Int Never! {
     result
 }
 
-fn sema_job_schedule_duration_int(value: Int, unit: SemaRegistrationUnitFact) -> Int? {
+sema_job_schedule_duration_int: fn(value: Int, unit: SemaRegistrationUnitFact) -> Int? {
     if value <= 0 -> return None
     if unit.scale.numerator <= 0 || unit.scale.denominator <= 0 -> return None
-    max_int :: 9223372036854775807
+    max_int: 9223372036854775807
     if value > max_int /% unit.scale.numerator -> return None
     nanos := value * unit.scale.numerator /% unit.scale.denominator
     if nanos <= 0 || nanos > max_int -> return None
     Val(nanos)
 }
 
-fn sema_job_schedule_duration_float(value: Float, unit: SemaRegistrationUnitFact) -> SemaJobScheduleResolution {
+sema_job_schedule_duration_float: fn(value: Float, unit: SemaRegistrationUnitFact) -> SemaJobScheduleResolution {
     if !math.is_finite(value) || value <= 0.0 -> return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.NonPositiveDuration)}
     if unit.scale.numerator <= 0 || unit.scale.denominator <= 0 -> return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.DurationOutOfRange)}
     nanos := value * approx(unit.scale.numerator) / approx(unit.scale.denominator)
-    max_int_exclusive :: Float{9223372036854775808.0}
+    max_int_exclusive: Float{9223372036854775808.0}
     if !math.is_finite(nanos) || nanos >= max_int_exclusive -> return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.DurationOutOfRange)}
     if nanos <= 0.0 -> return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.NonPositiveDuration)}
     integer_nanos := sema_job_schedule_float_to_int(nanos)
@@ -72,28 +72,28 @@ fn sema_job_schedule_duration_float(value: Float, unit: SemaRegistrationUnitFact
     SemaJobScheduleResolution{schedule: Val(EverySchedule.Duration{nanos: integer_nanos}), error: None}
 }
 
-fn sema_job_schedule_wall_clock(text: String) -> SemaJobScheduleResolution Never! {
+sema_job_schedule_wall_clock: fn(text: String) -> SemaJobScheduleResolution Never! {
     bytes := text.bytes()
     if bytes.len() != 5 || Int.from_u8(bytes[2]) != 58 -> return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.BadWallClockFormat)}
     loop index in ([Int]{0, 1, 3, 4}) {
         digit := Int.from_u8(bytes[index])
         if digit < 48 || digit > 57 -> return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.BadWallClockFormat)}
     }
-    hour_text :: String.from_bytes(bytes.slice(0, 2)) ?? return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.BadWallClockFormat)}
-    minute_text :: String.from_bytes(bytes.slice(3, 5)) ?? return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.BadWallClockFormat)}
-    hour :: Int.parse(hour_text) ?? return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.BadWallClockFormat)}
-    minute :: Int.parse(minute_text) ?? return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.BadWallClockFormat)}
+    hour_text: String.from_bytes(bytes.slice(0, 2)) ?? return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.BadWallClockFormat)}
+    minute_text: String.from_bytes(bytes.slice(3, 5)) ?? return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.BadWallClockFormat)}
+    hour: Int.parse(hour_text) ?? return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.BadWallClockFormat)}
+    minute: Int.parse(minute_text) ?? return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.BadWallClockFormat)}
     if hour > 23 -> return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.HourOutOfRange)}
     if minute > 59 -> return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.MinuteOutOfRange)}
     return SemaJobScheduleResolution{schedule: Val(EverySchedule.WallClockTime{hour: hour, minute: minute}), error: None}
 }
 
-fn sema_job_resolve_every_arg(argument: EveryArg, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaJobScheduleResolution {
+sema_job_resolve_every_arg: fn(argument: EveryArg, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaJobScheduleResolution {
     if argument == {
         .Duration(int, float, suffix, _) -> {
-            unit :: sema_job_schedule_unit(suffix, environment, program) ?? return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.UnknownDurationUnit)}
+            unit: sema_job_schedule_unit(suffix, environment, program) ?? return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.UnknownDurationUnit)}
             if int == .Val(value) {
-                nanos :: sema_job_schedule_duration_int(value, unit) ?? {
+                nanos: sema_job_schedule_duration_int(value, unit) ?? {
                     error := if value <= 0 -> EveryScheduleError.NonPositiveDuration else -> EveryScheduleError.DurationOutOfRange
                     return SemaJobScheduleResolution{schedule: None, error: Val(error)}
                 }
@@ -107,7 +107,7 @@ fn sema_job_resolve_every_arg(argument: EveryArg, environment: SemaScopeEnvironm
     }
 }
 
-fn sema_job_every_error_span(argument: EveryArg) -> Span {
+sema_job_every_error_span: fn(argument: EveryArg) -> Span {
     if argument == {
         .Duration(_, _, _, suffix_span) -> suffix_span
         .WallClock(_, text_span) -> text_span
@@ -115,7 +115,7 @@ fn sema_job_every_error_span(argument: EveryArg) -> Span {
     }
 }
 
-fn sema_job_schedule_error(reason: EveryScheduleError, span: Span) -> Diagnostic {
+sema_job_schedule_error: fn(reason: EveryScheduleError, span: Span) -> Diagnostic {
     if reason == {
         .UnknownDurationUnit -> sema_error("E0926", span, "this duration's unit isn't a recognized schedule cadence", "a schedule's repeat interval uses the canonical Time family — `ns`/`us`/`ms`/`s`/`min`/`h`/`d` — not an arbitrary `#UnitFamily` member.", "use a canonical Time unit such as `min`, `h`, or `d` (e.g. `#Every(2h)`).")
         .NonPositiveDuration -> sema_error("E0926", span, "a schedule interval must be a positive duration", "`#Every(0ms)` or a negative duration never becomes due — it isn't a real cadence.", "write a duration greater than zero, e.g. `#Every(5min)`.")
@@ -127,12 +127,12 @@ fn sema_job_schedule_error(reason: EveryScheduleError, span: Span) -> Diagnostic
     }
 }
 
-fn sema_job_default_text(expression: Expr) -> String? {
+sema_job_default_text: fn(expression: Expr) -> String? {
     if expression == {
         .Paren(value, _, _) -> return sema_job_default_text(value)
         .Int(value, _, _, _, _) -> return Val("{value}")
         .Float(value, _, _, raw, _) -> {
-            text :: raw ?? "{value}"
+            text: raw ?? "{value}"
             return Val(text.replace("_", ""))
         }
         .Bool(value, _, _) -> return Val("{value}")
@@ -151,7 +151,7 @@ fn sema_job_default_text(expression: Expr) -> String? {
     }
 }
 
-fn sema_job_doc(function: Func) -> String? {
+sema_job_doc: fn(function: Func) -> String? {
     loop marker in function.markers {
         if marker.name != "Doc" -> next
         if marker.args.len() == 0 -> return None
@@ -178,14 +178,14 @@ fn sema_job_doc(function: Func) -> String? {
 }
 
 /// Sema and help read the same command registry.
-fn sema_job_is_reserved(name: String) -> Bool Never! {
+sema_job_is_reserved: fn(name: String) -> Bool Never! {
     loop command in JET_CLI_COMMANDS {
         if command.name == name -> return true
     }
     false
 }
 
-fn sema_job_scope_name(scope: JobScope) -> String Never! {
+sema_job_scope_name: fn(scope: JobScope) -> String Never! {
     if scope == {
         .Dev -> "Dev"
         .Ship -> "Ship"
@@ -193,22 +193,22 @@ fn sema_job_scope_name(scope: JobScope) -> String Never! {
     }
 }
 
-fn sema_job_reserved_name_error(name: String, span: Span) -> Diagnostic {
+sema_job_reserved_name_error: fn(name: String, span: Span) -> Diagnostic {
     sema_error("E0928", span, "`{name}` is reserved by Jet's command line", "`{name}` is a Jet command; top-level jobs must have distinct names", "rename the job, e.g. `#Job fn {name}_all()`")
 }
 
-fn sema_job_duplicate_error(name: String, scope: JobScope, span: Span) -> Diagnostic {
+sema_job_duplicate_error: fn(name: String, scope: JobScope, span: Span) -> Diagnostic {
     scope_name := sema_job_scope_name(scope)
     sema_error("E0928", span, "job `{name}` is declared more than once in scope .{scope_name}", "`jet {name}` must select exactly one function", "rename one of the jobs, or give the declarations different scopes")
 }
 
-fn sema_job_command_clash_error(name: String, span: Span, command_span: Span) -> Diagnostic {
-    diagnostic :: sema_error("E0928", span, "job `{name}` clashes with the `#CLI` command `{name}`", "`{name}` names both a job and a command of this program, so `jet {name}` cannot select exactly one function", "rename the job or the command; an `.Internal` job never clashes")
+sema_job_command_clash_error: fn(name: String, span: Span, command_span: Span) -> Diagnostic {
+    diagnostic: sema_error("E0928", span, "job `{name}` clashes with the `#CLI` command `{name}`", "`{name}` names both a job and a command of this program, so `jet {name}` cannot select exactly one function", "rename the job or the command; an `.Internal` job never clashes")
     diagnostic_with_label(^diagnostic, command_span, "the `#CLI` command `{name}` is declared here")
 }
 
 // One command word of a `#CLI` struct and where it is written.
-struct SemaJobCommandWord {
+SemaJobCommandWord: struct {
     name: String
     span: Span
 }
@@ -216,7 +216,7 @@ struct SemaJobCommandWord {
 // The command words of the `#CLI` structs among `items`: each method that is
 // not a computed-field getter and each bound command, lowercased as the
 // command line reads them (CliEntry.jet `sema_cli_entry_spec`).
-fn sema_job_cli_commands(items: [Item]) -> [SemaJobCommandWord] {
+sema_job_cli_commands: fn(items: [Item]) -> [SemaJobCommandWord] {
     words := [SemaJobCommandWord]{}
     loop item in items {
         if item == .Struct(definition) {
@@ -238,9 +238,9 @@ fn sema_job_cli_commands(items: [Item]) -> [SemaJobCommandWord] {
 /// E0928: a `#Job fn` takes a reserved name, shares its word with a `#CLI`
 /// command of the module (unless the job is `.Internal`), or two jobs share
 /// one name in the same scope of a module.
-fn sema_check_job_names(items: [Item]) -> [Diagnostic] {
+sema_check_job_names: fn(items: [Item]) -> [Diagnostic] {
     diagnostics := [Diagnostic]{}
-    commands :: sema_job_cli_commands(items)
+    commands: sema_job_cli_commands(items)
     seen_names := [String]{}
     seen_scopes := [JobScope]{}
     loop item in items {
@@ -255,7 +255,7 @@ fn sema_check_job_names(items: [Item]) -> [Diagnostic] {
                 metadata := function.job_metadata ?? ast_job_metadata()
                 scope := metadata.scope
                 if scope != .Internal {
-                    word :: unicode.lower(function.name)
+                    word: unicode.lower(function.name)
                     clash := false
                     loop command in commands {
                         if command.name == word {
@@ -291,16 +291,16 @@ fn sema_check_job_names(items: [Item]) -> [Diagnostic] {
 /// E0926: a job's `#Every(…)` must resolve to one fixed cadence. A function
 /// parameter of a type other than `Duration` is the marker's argument-type
 /// error (E0930), so it is not also reported as a dynamic schedule.
-fn sema_check_job_schedules(items: [Item], environment: SemaScopeEnvironment, program: SemaProgramTables) -> [Diagnostic] {
+sema_check_job_schedules: fn(items: [Item], environment: SemaScopeEnvironment, program: SemaProgramTables) -> [Diagnostic] {
     diagnostics := [Diagnostic]{}
     loop item in items {
         if item == {
             .Func(function) -> {
-                marker :: function.every ?? next
+                marker: function.every ?? next
                 if marker.arg == .Expression(expression) {
                     if expression == .Ident(name, _, _) && sema_job_mistyped_parameter(function.params, name) -> next
                 }
-                resolution :: sema_job_resolve_every_arg(marker.arg, environment, program)
+                resolution: sema_job_resolve_every_arg(marker.arg, environment, program)
                 if resolution.error == .Val(reason) -> &diagnostics.push(sema_job_schedule_error(reason, sema_job_every_error_span(marker.arg)))
             }
             else -> {}
@@ -309,7 +309,7 @@ fn sema_check_job_schedules(items: [Item], environment: SemaScopeEnvironment, pr
     diagnostics
 }
 
-fn sema_job_mistyped_parameter(params: [Param], name: String) -> Bool Never! {
+sema_job_mistyped_parameter: fn(params: [Param], name: String) -> Bool Never! {
     loop param in params {
         if param.name == name -> return param.ty != Type.Named{name: "Duration"}
     }

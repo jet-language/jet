@@ -1,8 +1,8 @@
 Error [jet.ImpureCallInPureContext]: `readit` calls the impure function `files.read`
-  --> pure_fn_with_core_effect_is_e3401.jet:3:46
+  --> tests/ui/effects/pure_fn_with_core_effect_is_e3401.jet:3:47
     |
-  3 | fn readit(p: String) -[]> String { return fs.read(p) ?? "" }
-    |                                              ^^^^
+  3 | readit: fn(p: String) -[]> String { return fs.read(p) ?? "" }
+    |                                               ^^^^
  Why: `files.read` is impure, but `readit` declares `-[]>`
  Fix: Remove the call from `readit`, or drop the `-[]>` bound from `readit` so its effects are inferred
  Denial: pure

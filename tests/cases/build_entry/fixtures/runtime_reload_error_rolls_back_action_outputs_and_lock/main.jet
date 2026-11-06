@@ -1,9 +1,9 @@
 
-fn build(b: Build) -[Exec, FS]> {
+build: fn(b: Build) -[Exec, FS]> {
     #Impure("rollback after runtime reload") {
-    stamp :: b.action("stamp", [], ["stamp"], ["sh", "-c", "printf changed > stamp"], ["Exec", "FS"])
-    app :: b.add_executable("app", ["main.jet", "missing.jet"], [stamp])
+    stamp: b.action("stamp", [], ["stamp"], ["sh", "-c", "printf changed > stamp"], ["Exec", "FS"])
+    app: b.add_executable("app", ["main.jet", "missing.jet"], [stamp])
     b.default(app)
     }
 }
-fn run() {}
+run: fn() {}

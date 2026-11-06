@@ -17,7 +17,7 @@ use {
 // Construction, attachment, retained checked facts and first-match queries.
 // Views borrow the index; a single-result view has one row.
 impl SemIndex {
-    fn new(defs: ^[SymbolDef], refs: ^[SymbolRef], calls: ^[CallEdge], effects: ^[EffectFact], members: ^[MemberFact], nodes: ^[StructuralNode], definition_facts: ^[DefinitionFact]) -> SemIndex Never! {
+    new: fn(defs: ^[SymbolDef], refs: ^[SymbolRef], calls: ^[CallEdge], effects: ^[EffectFact], members: ^[MemberFact], nodes: ^[StructuralNode], definition_facts: ^[DefinitionFact]) -> SemIndex Never! {
         SemIndex{
             schema_version: SEMINDEX_SCHEMA_VERSION,
             defs: ^defs,
@@ -39,33 +39,33 @@ impl SemIndex {
         }
     }
 
-    fn set_bypasses(&self, facts: ^[BypassFact]) Never! { self.bypasses = ^facts }
-    fn set_instances(&self, facts: ^[InstanceFact]) Never! { self.instances = ^facts }
-    fn set_outputs(&self, facts: ^[SemIndexOutputFact]) Never! { self.outputs = ^facts }
-    fn set_state_graphs(&self, facts: ^[StateGraphFact]) Never! { self.state_graphs = ^facts }
-    fn set_arithmetic(&self, facts: ^[ArithmeticOperationFact]) Never! { self.arithmetic = ^facts }
-    fn set_effect_projection(&self, projection: ^EffectProjection) Never! { self.effect_projection = ^projection }
+    set_bypasses: fn(&self, facts: ^[BypassFact]) Never! { self.bypasses = ^facts }
+    set_instances: fn(&self, facts: ^[InstanceFact]) Never! { self.instances = ^facts }
+    set_outputs: fn(&self, facts: ^[SemIndexOutputFact]) Never! { self.outputs = ^facts }
+    set_state_graphs: fn(&self, facts: ^[StateGraphFact]) Never! { self.state_graphs = ^facts }
+    set_arithmetic: fn(&self, facts: ^[ArithmeticOperationFact]) Never! { self.arithmetic = ^facts }
+    set_effect_projection: fn(&self, projection: ^EffectProjection) Never! { self.effect_projection = ^projection }
 
-    fn set_derivations(&self, facts: ^[DerivationRecord]) Never! {
+    set_derivations: fn(&self, facts: ^[DerivationRecord]) Never! {
         self.derivations = ^facts
         // #4343: inline comparator, not a named-function comparator.
         &self.derivations.sort_by((left: DerivationRecord, right: DerivationRecord) -> left.id <=> right.id)
     }
-    fn derivations(self) -> View<DerivationRecord> Never! { self.derivations[0..<self.derivations.len()] }
-    fn derivation_window(self, index: Int) -> View<DerivationRecord> Never! { self.derivations[index..index] }
-    fn derivation(self, id: String) -> View<DerivationRecord>? Never! {
+    derivations: fn(self) -> View<DerivationRecord> Never! { self.derivations[0..<self.derivations.len()] }
+    derivation_window: fn(self, index: Int) -> View<DerivationRecord> Never! { self.derivations[index..index] }
+    derivation: fn(self, id: String) -> View<DerivationRecord>? Never! {
         loop index in 0..<self.derivations.len() {
             if self.derivations[index].id == id -> return Val(self.derivation_window(index))
         }
         None
     }
-    fn derivation_ref(self, subject: String) -> DerivationRef? Never! {
+    derivation_ref: fn(self, subject: String) -> DerivationRef? Never! {
         loop record in self.derivations {
             if record.subject == subject -> return Val(derivation_record_reference(record))
         }
         None
     }
-    fn invalidate_derivations(&self, current: DerivationIdentity) -> Int Never! {
+    invalidate_derivations: fn(&self, current: DerivationIdentity) -> Int Never! {
         count := 0
         loop index in 0..<self.derivations.len() {
             if derivation_record_invalidate_if_identity_changed(&self.derivations[index], current) -> count += 1
@@ -73,60 +73,60 @@ impl SemIndex {
         count
     }
 
-    fn attach_package_facts(&self, facts: ^PackageFacts) Never! {
+    attach_package_facts: fn(&self, facts: ^PackageFacts) Never! {
         self.effect_projection = pkg_project_application_effects(self.effect_projection.required_effects, Val(facts))
         self.package_facts = Val(^facts)
         // Scalar facts stay in their canonical owner. Read consumers take the
         // SemIndex as a READ parameter and project its fields synchronously;
         // #4446 has no scalar View representation, and lists would allocate.
     }
-    fn attach_workspace_overlay_policy(&self, policy: ^OverlayPolicy) Never! { self.workspace_overlay_policy = Val(^policy) }
+    attach_workspace_overlay_policy: fn(&self, policy: ^OverlayPolicy) Never! { self.workspace_overlay_policy = Val(^policy) }
 
-    fn schema_version(self) -> Int Never! { self.schema_version }
-    fn definitions(self) -> View<SymbolDef> Never! { self.defs[0..<self.defs.len()] }
-    fn references(self) -> View<SymbolRef> Never! { self.refs[0..<self.refs.len()] }
-    fn call_edges(self) -> View<CallEdge> Never! { self.calls[0..<self.calls.len()] }
-    fn effects(self) -> View<EffectFact> Never! { self.effects[0..<self.effects.len()] }
-    fn arithmetic(self) -> View<ArithmeticOperationFact> Never! { self.arithmetic[0..<self.arithmetic.len()] }
-    fn members(self) -> View<MemberFact> Never! { self.members[0..<self.members.len()] }
-    fn structural_nodes(self) -> View<StructuralNode> Never! { self.nodes[0..<self.nodes.len()] }
-    fn definition_facts(self) -> View<DefinitionFact> Never! { self._definition_facts[0..<self._definition_facts.len()] }
-    fn bypasses(self) -> View<BypassFact> Never! { self.bypasses[0..<self.bypasses.len()] }
-    fn instances(self) -> View<InstanceFact> Never! { self.instances[0..<self.instances.len()] }
-    fn outputs(self) -> View<SemIndexOutputFact> Never! { self.outputs[0..<self.outputs.len()] }
-    fn state_graphs(self) -> View<StateGraphFact> Never! { self.state_graphs[0..<self.state_graphs.len()] }
+    schema_version: fn(self) -> Int Never! { self.schema_version }
+    definitions: fn(self) -> View<SymbolDef> Never! { self.defs[0..<self.defs.len()] }
+    references: fn(self) -> View<SymbolRef> Never! { self.refs[0..<self.refs.len()] }
+    call_edges: fn(self) -> View<CallEdge> Never! { self.calls[0..<self.calls.len()] }
+    effects: fn(self) -> View<EffectFact> Never! { self.effects[0..<self.effects.len()] }
+    arithmetic: fn(self) -> View<ArithmeticOperationFact> Never! { self.arithmetic[0..<self.arithmetic.len()] }
+    members: fn(self) -> View<MemberFact> Never! { self.members[0..<self.members.len()] }
+    structural_nodes: fn(self) -> View<StructuralNode> Never! { self.nodes[0..<self.nodes.len()] }
+    definition_facts: fn(self) -> View<DefinitionFact> Never! { self._definition_facts[0..<self._definition_facts.len()] }
+    bypasses: fn(self) -> View<BypassFact> Never! { self.bypasses[0..<self.bypasses.len()] }
+    instances: fn(self) -> View<InstanceFact> Never! { self.instances[0..<self.instances.len()] }
+    outputs: fn(self) -> View<SemIndexOutputFact> Never! { self.outputs[0..<self.outputs.len()] }
+    state_graphs: fn(self) -> View<StateGraphFact> Never! { self.state_graphs[0..<self.state_graphs.len()] }
 
-    fn definition_window(self, index: Int) -> View<SymbolDef> Never! { self.defs[index..index] }
-    fn reference_window(self, index: Int) -> View<SymbolRef> Never! { self.refs[index..index] }
-    fn call_window(self, index: Int) -> View<CallEdge> Never! { self.calls[index..index] }
-    fn effect_window(self, index: Int) -> View<EffectFact> Never! { self.effects[index..index] }
-    fn references_to(self, name: String) -> [View<SymbolRef>] Never! {
+    definition_window: fn(self, index: Int) -> View<SymbolDef> Never! { self.defs[index..index] }
+    reference_window: fn(self, index: Int) -> View<SymbolRef> Never! { self.refs[index..index] }
+    call_window: fn(self, index: Int) -> View<CallEdge> Never! { self.calls[index..index] }
+    effect_window: fn(self, index: Int) -> View<EffectFact> Never! { self.effects[index..index] }
+    references_to: fn(self, name: String) -> [View<SymbolRef>] Never! {
         matches := [View<SymbolRef>]{}
         loop index in 0..<self.refs.len() {
             if self.refs[index].name == name -> &matches.push(self.reference_window(index))
         }
         matches
     }
-    fn call_sites(self, callee: String) -> [View<CallEdge>] Never! {
+    call_sites: fn(self, callee: String) -> [View<CallEdge>] Never! {
         matches := [View<CallEdge>]{}
         loop index in 0..<self.calls.len() {
             if self.calls[index].callee == callee -> &matches.push(self.call_window(index))
         }
         matches
     }
-    fn effect_of(self, function: String) -> View<EffectFact>? Never! {
+    effect_of: fn(self, function: String) -> View<EffectFact>? Never! {
         loop index in 0..<self.effects.len() {
             if self.effects[index].function == function -> return Val(self.effect_window(index))
         }
         None
     }
-    fn lookup(self, name: String) -> View<SymbolDef>? Never! {
+    lookup: fn(self, name: String) -> View<SymbolDef>? Never! {
         loop index in 0..<self.defs.len() {
             if self.defs[index].name == name -> return Val(self.definition_window(index))
         }
         None
     }
-    fn lookup_identity(self, identity: String) -> View<SymbolDef>? Never! {
+    lookup_identity: fn(self, identity: String) -> View<SymbolDef>? Never! {
         loop index in 0..<self.defs.len() {
             if self.defs[index].identity == identity -> return Val(self.definition_window(index))
         }
@@ -135,7 +135,7 @@ impl SemIndex {
 
     // Dossier joins retained facts, never checks again. Bypass facts are
     // program-wide; state graphs and references are owner-only.
-    fn dossier(self, target: String) -> TypeDossier Never! {
+    dossier: fn(self, target: String) -> TypeDossier Never! {
         definition := SymbolDef?{None}
         owner := target.copy()
         loop row in self.defs {
@@ -169,7 +169,7 @@ impl SemIndex {
 
     // location/body/name alone never change the structural signature. Repeated IDs
     // are retained, not deduplicated.
-    fn structural_audit(self, next: SemIndex) -> StructuralAudit Never! {
+    structural_audit: fn(self, next: SemIndex) -> StructuralAudit Never! {
         added := [String]{}
         removed := [String]{}
         changed := [String]{}
@@ -193,17 +193,17 @@ impl SemIndex {
 
 // Stable member order by kind, origin, spelling, module, then byte start; end
 // and trait spelling are intentionally not tie breakers.
-fn semindex_sort_members(members: &[MemberFact]) Never! {
+semindex_sort_members: fn(members: &[MemberFact]) Never! {
     &members.sort_by((left: MemberFact, right: MemberFact) -> (semindex_member_rank(left.kind) <=> semindex_member_rank(right.kind)).then(semindex_origin_rank(left.origin) <=> semindex_origin_rank(right.origin)).then(left.name <=> right.name).then(left.module_path <=> right.module_path).then(left.span.start <=> right.span.start))
 }
-fn semindex_member_rank(kind: MemberKind) -> Int Never! {
+semindex_member_rank: fn(kind: MemberKind) -> Int Never! {
     if kind == {
         .Field -> 0
         .Variant -> 1
         .Method -> 2
     }
 }
-fn semindex_origin_rank(origin: MemberOrigin) -> Int Never! {
+semindex_origin_rank: fn(origin: MemberOrigin) -> Int Never! {
     if origin == {
         .TypeBody -> 0
         .InherentImpl -> 1
@@ -214,7 +214,7 @@ fn semindex_origin_rank(origin: MemberOrigin) -> Int Never! {
 
 // Exact callable/field/variant identity material, including structured
 // returned-view provenance. Parameter names are excluded.
-fn semindex_structural_signature(kind: SemIndexSymbolKind, view_provenance: [ViewProvenanceFact]) -> String Never! {
+semindex_structural_signature: fn(kind: SemIndexSymbolKind, view_provenance: [ViewProvenanceFact]) -> String Never! {
     if kind == {
         .Module -> "module"
         .Function(params, call_contract, ret) -> {

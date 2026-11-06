@@ -1,9 +1,9 @@
-package {
+package: {
     name: "task_all"
     authority: { allow: [IO, Time.Wait] }
 }
 
-fn work(value: Int, turns: Int) -> Int {
+work: fn(value: Int, turns: Int) -> Int {
     total := value
     loop _ in 1..turns {
         total += 1
@@ -12,7 +12,7 @@ fn work(value: Int, turns: Int) -> Int {
     return total
 }
 
-fn run() {
-    results :: task.all {first: work(10, 10000), second: work(20, 1), third: work(30, 100)} ?? panic("task.all failed")
+run: fn() {
+    results: task.all {first: work(10, 10000), second: work(20, 1), third: work(30, 100)} ?? panic("task.all failed")
     print(results.first, results.second, results.third)
 }

@@ -1,23 +1,23 @@
 // D-PREP-SURFACE2=A: `comptime { … }` is the explicit shared-preparation block.
 // Its body runs while building and emits no runtime code. A value that
-// outlives the block is prepared explicitly with `name :: comptime { value }`, so
+// outlives the block is prepared explicitly with `name: comptime { value }`, so
 // the runtime code reads a finished literal. A failed check stops the build,
 // not the program.
-WIDTH :: comptime { 12 }
+WIDTH: comptime { 12 }
 
-HEIGHT :: comptime { 5 }
+HEIGHT: comptime { 5 }
 
-fn area(width: Int, height: Int) -> Int { width * height }
+area: fn(width: Int, height: Int) -> Int { width * height }
 
-fn run() {
-    cells :: comptime { area(WIDTH, HEIGHT) }
+run: fn() {
+    cells: comptime { area(WIDTH, HEIGHT) }
     comptime {
         if cells > 100 -> panic("the grid is too large")
     }
     print("cells: {cells}")
     // `prep` is no longer a keyword: a value named `prep` is an ordinary
     // name, even right before a block.
-    prep :: cells > 50
+    prep: cells > 50
     if prep {
         print("large grid")
     }

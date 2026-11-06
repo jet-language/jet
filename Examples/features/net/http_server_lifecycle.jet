@@ -1,24 +1,24 @@
 // D-HTTP-SERVER2=A: one bound Server owns bounded serve and graceful shutdown.
-package {
+package: {
     name: "http_server_lifecycle"
     authority: { allow: [FS.Read, IO, Net, Time] }
 }
 
 use {
-    http_server :: core.http.server
-    time :: core.time
+    http_server: core.http.server
+    time: core.time
 }
 
-fn run() (HTTPError | RangeError | TaskFailure)! {
-    mux :: http_server.mux()
+run: fn() (HTTPError | RangeError | TaskFailure)! {
+    mux: http_server.mux()
     mux.get("/", (_req: HTTPRequest) -> Ok(http_server.response(200, "ok")))
-    server :: http_server.bind("127.0.0.1:0", mux) ?? panic("bind")
-    addr :: server.local_addr() ?? panic("address")
+    server: http_server.bind("127.0.0.1:0", mux) ?? panic("bind")
+    addr: server.local_addr() ?? panic("address")
     print(addr.starts_with("127.0.0.1:"))
-    serving :: task { server.serve() ?? panic("serve") }
+    serving: task { server.serve() ?? panic("serve") }
     time.sleep(20ms)
-    grace :: 100ms
-    report :: server.shutdown(grace) ?? panic("shutdown")
+    grace: 100ms
+    report: server.shutdown(grace) ?? panic("shutdown")
     print(report.cancelled)
     ^serving.join() ?? panic("server")
 }

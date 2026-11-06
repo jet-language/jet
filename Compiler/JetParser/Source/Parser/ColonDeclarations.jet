@@ -93,19 +93,19 @@ use {
 // The frame an open delimiter starts. A group is `(…)` or `[…]`, where no
 // declaration starts. A container body holds declarations; a shape body holds
 // fields, variants and methods; code holds statements.
-PARSER_COLON_FRAME_GROUP :: 0
-PARSER_COLON_FRAME_CONTAINER :: 1
-PARSER_COLON_FRAME_SHAPE :: 2
-PARSER_COLON_FRAME_CODE :: 3
+PARSER_COLON_FRAME_GROUP: 0
+PARSER_COLON_FRAME_CONTAINER: 1
+PARSER_COLON_FRAME_SHAPE: 2
+PARSER_COLON_FRAME_CODE: 3
 // File scope or a module body: a container where a module instance may sit.
-PARSER_COLON_FRAME_MODULE :: 4
+PARSER_COLON_FRAME_MODULE: 4
 
-fn parser_colon_is_trivia(kind: Int) -> Bool Never! {
+parser_colon_is_trivia: fn(kind: Int) -> Bool Never! {
     kind == TOKEN_LINE_COMMENT || kind == TOKEN_BLOCK_COMMENT
 }
 
 // The next code token at or after `from`, or `tokens.len()`.
-fn parser_colon_code_at(tokens: [Token], from: Int) -> Int Never! {
+parser_colon_code_at: fn(tokens: [Token], from: Int) -> Int Never! {
     index := from
     loop index < tokens.len() && parser_colon_is_trivia(tokens[index].kind) -> index += 1
     index
@@ -113,22 +113,22 @@ fn parser_colon_code_at(tokens: [Token], from: Int) -> Int Never! {
 
 // A word that may name a declaration: an identifier or a keyword that also
 // spells a member name (`tag`, `copy`, `effect`, …).
-fn parser_colon_word(kind: Int) -> Bool Never! {
+parser_colon_word: fn(kind: Int) -> Bool Never! {
     kind == TOKEN_IDENT || kind == TOKEN_KW_TAG || kind == TOKEN_KW_EFFECT || kind == TOKEN_KW_COPY || kind == TOKEN_KW_MOVE || kind == TOKEN_KW_MUTATE || kind == TOKEN_KW_IT || kind == TOKEN_KW_CONST || kind == TOKEN_KW_DERIVE || kind == TOKEN_KW_YIELD || kind == TOKEN_KW_IN || kind == TOKEN_KW_EXTERN
 }
 
 // The declaration keywords a colon head may carry.
-fn parser_colon_head_keyword(kind: Int) -> Bool Never! {
+parser_colon_head_keyword: fn(kind: Int) -> Bool Never! {
     kind == TOKEN_KW_FN || kind == TOKEN_KW_STRUCT || kind == TOKEN_KW_ENUM || kind == TOKEN_KW_TRAIT || kind == TOKEN_KW_MODULE || kind == TOKEN_KW_TAG || kind == TOKEN_KW_EFFECT
 }
 
 // The head kind of a `comptime loop` or `comptime if` statement.
-PARSER_COLON_HEAD_COMPTIME_BLOCK :: -2
+PARSER_COLON_HEAD_COMPTIME_BLOCK: -2
 
 // The frame a declaration's body brace opens, by the declaration's keyword.
 // A `comptime loop` or `comptime if` among declarations generates
 // declarations, so its bodies keep the enclosing frame.
-fn parser_colon_body_frame(head: Int, frame: Int) -> Int Never! {
+parser_colon_body_frame: fn(head: Int, frame: Int) -> Int Never! {
     if head == TOKEN_KW_STRUCT || head == TOKEN_KW_ENUM -> return PARSER_COLON_FRAME_SHAPE
     if head == TOKEN_KW_MODULE -> return PARSER_COLON_FRAME_MODULE
     if head == TOKEN_KW_IMPL || head == TOKEN_KW_TRAIT || head == TOKEN_KW_DERIVE || head == TOKEN_KW_EXTERN || head == TOKEN_KW_TAG || head == TOKEN_KW_EFFECT -> return PARSER_COLON_FRAME_CONTAINER
@@ -138,17 +138,17 @@ fn parser_colon_body_frame(head: Int, frame: Int) -> Int Never! {
 
 // Whether the group opening at `open` holds the arguments of a `.generate(…)`
 // call, whose trailing brace is an item block.
-fn parser_colon_generate_call(tokens: [Token], tables: TokenTables, open: Int) -> Bool Never! {
-    name :: open - 1
+parser_colon_generate_call: fn(tokens: [Token], tables: TokenTables, open: Int) -> Bool Never! {
+    name: open - 1
     name >= 1 && tokens[name].kind == TOKEN_IDENT && tokens[name - 1].kind == TOKEN_DOT && token_decoded(tables, tokens[name]) == "generate"
 }
 
 // One past a balanced `(…)` or `[…]` group opening at `open`.
-fn parser_colon_skip_group(tokens: [Token], open: Int) -> Int Never! {
+parser_colon_skip_group: fn(tokens: [Token], open: Int) -> Int Never! {
     depth := 0
     index := open
     loop index < tokens.len() {
-        kind :: tokens[index].kind
+        kind: tokens[index].kind
         if kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET -> depth += 1
         if kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET {
             depth -= 1
@@ -162,14 +162,16 @@ fn parser_colon_skip_group(tokens: [Token], open: Int) -> Int Never! {
 
 // The head of the statement starting at `start`: past `pub`, `pub(…)`,
 // `priv`, `priv(…)`, `comptime` and `#Marker(…)` / `#[…]` markers written on
-// the declaration's line.
-fn parser_colon_head_at(tokens: [Token], start: Int) -> Int Never! {
+// the declaration's line. A `pub:` / `priv:` section label (E0415) is passed
+// over too, so the declaration after it keeps its head.
+parser_colon_head_at: fn(tokens: [Token], start: Int) -> Int Never! {
     index := parser_colon_code_at(tokens, start)
     loop index < tokens.len() {
-        kind :: tokens[index].kind
+        kind: tokens[index].kind
         if kind == TOKEN_KW_PUB || kind == TOKEN_KW_PRIV {
             index = parser_colon_code_at(tokens, index + 1)
             if index < tokens.len() && tokens[index].kind == TOKEN_LPAREN -> index = parser_colon_code_at(tokens, parser_colon_skip_group(tokens, index))
+            if index < tokens.len() && tokens[index].kind == TOKEN_COLON -> index = parser_colon_code_at(tokens, index + 1)
             next
         }
         if kind == TOKEN_KW_COMPTIME {
@@ -186,7 +188,7 @@ fn parser_colon_head_at(tokens: [Token], start: Int) -> Int Never! {
         if index >= tokens.len() || tokens[index].kind != TOKEN_IDENT -> return index
         index = parser_colon_code_at(tokens, index + 1)
         loop index < tokens.len() && tokens[index].kind == TOKEN_DOT {
-            segment :: parser_colon_code_at(tokens, index + 1)
+            segment: parser_colon_code_at(tokens, index + 1)
             if segment >= tokens.len() || tokens[segment].kind != TOKEN_IDENT -> break
             index = parser_colon_code_at(tokens, segment + 1)
         }
@@ -200,22 +202,22 @@ fn parser_colon_head_at(tokens: [Token], start: Int) -> Int Never! {
 // The `:` of a colon head whose name path starts at `head`, or -1. The path
 // is `name(.name)*`, a `$name` template name, or a dashed module name
 // (`web-app`), which only a `module` head may carry.
-fn parser_colon_head_colon(tokens: [Token], head: Int) -> Int Never! {
+parser_colon_head_colon: fn(tokens: [Token], head: Int) -> Int Never! {
     index := head
     if index < tokens.len() && tokens[index].kind == TOKEN_DOLLAR -> index = parser_colon_code_at(tokens, index + 1)
     if index >= tokens.len() || !parser_colon_word(tokens[index].kind) -> return -1
     dashed := false
     index = parser_colon_code_at(tokens, index + 1)
     loop index < tokens.len() {
-        kind :: tokens[index].kind
+        kind: tokens[index].kind
         if kind != TOKEN_DOT && kind != TOKEN_MINUS -> break
-        word :: parser_colon_code_at(tokens, index + 1)
+        word: parser_colon_code_at(tokens, index + 1)
         if word >= tokens.len() || !parser_colon_word(tokens[word].kind) -> return -1
         if kind == TOKEN_MINUS -> dashed = true
         index = parser_colon_code_at(tokens, word + 1)
     }
     if index >= tokens.len() || tokens[index].kind != TOKEN_COLON -> return -1
-    keyword :: parser_colon_code_at(tokens, index + 1)
+    keyword: parser_colon_code_at(tokens, index + 1)
     if keyword >= tokens.len() || !parser_colon_head_keyword(tokens[keyword].kind) -> return -1
     if dashed && tokens[keyword].kind != TOKEN_KW_MODULE -> return -1
     index
@@ -225,13 +227,13 @@ fn parser_colon_head_colon(tokens: [Token], head: Int) -> Int Never! {
 // a `{` outside its groups, or an arrow past the result's (the arrow body).
 // Each `fn` type in the signature brings an arrow of its own, and a `pub` or
 // `priv` starts the next member of a one-line body.
-fn parser_colon_fn_has_body(tokens: [Token], keyword: Int) -> Bool Never! {
+parser_colon_fn_has_body: fn(tokens: [Token], keyword: Int) -> Bool Never! {
     depth := 0
     arrows := 0
     types := 0
     index := keyword + 1
     loop index < tokens.len() {
-        kind :: tokens[index].kind
+        kind: tokens[index].kind
         if kind == TOKEN_EOF -> return false
         if kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET {
             depth += 1
@@ -254,15 +256,15 @@ fn parser_colon_fn_has_body(tokens: [Token], keyword: Int) -> Bool Never! {
 // Moves the keyword at `keyword` before the name path at `head`. The path,
 // the `:` (now trivia) and any trivia before the keyword each shift one slot
 // right, and the keyword takes the name's start as a zero-width span.
-fn parser_colon_rotate(tokens: &[Token], head: Int, keyword: Int, colon: Int) Never! {
-    moved :: tokens[keyword]
+parser_colon_rotate: fn(tokens: &[Token], head: Int, keyword: Int, colon: Int) Never! {
+    moved: tokens[keyword]
     index := keyword
     loop index > head {
         tokens[index] = tokens[index - 1]
         index -= 1
     }
     tokens[colon + 1].kind = TOKEN_BLOCK_COMMENT
-    at :: tokens[head + 1].span.start
+    at: tokens[head + 1].span.start
     tokens[head] = Token{kind: moved.kind, span: Span{start: at, end: at}, text: moved.text, decoded: moved.decoded, literal: moved.literal}
 }
 
@@ -271,7 +273,7 @@ fn parser_colon_rotate(tokens: &[Token], head: Int, keyword: Int, colon: Int) Ne
 // declares, whatever the casing. Read from `<types>` alone, module names are
 // snake case, so a capitalized name or target (a type alias
 // `Lookup: Map<String, Int>`, a constant `LIMIT: limit<Int>()`) is not one.
-struct ParserColonInstance {
+ParserColonInstance: struct {
     head: Int
     name: Int
     target: Int
@@ -280,20 +282,20 @@ struct ParserColonInstance {
 }
 
 // Whether `token` spells a snake-case name.
-fn parser_colon_snake(tables: TokenTables, token: Token) -> Bool Never! {
-    bytes :: token_decoded(tables, token).bytes()
+parser_colon_snake: fn(tables: TokenTables, token: Token) -> Bool Never! {
+    bytes: token_decoded(tables, token).bytes()
     bytes.len() > 0 && ((bytes[0] >= 97 && bytes[0] <= 122) || bytes[0] == 95)
 }
 
-fn parser_colon_instance_at(tokens: [Token], tables: TokenTables, head: Int) -> ParserColonInstance? Never! {
+parser_colon_instance_at: fn(tokens: [Token], tables: TokenTables, head: Int) -> ParserColonInstance? Never! {
     if head >= tokens.len() || tokens[head].kind != TOKEN_IDENT -> return None
-    colon :: parser_colon_code_at(tokens, head + 1)
+    colon: parser_colon_code_at(tokens, head + 1)
     if colon >= tokens.len() || tokens[colon].kind != TOKEN_COLON -> return None
-    target :: parser_colon_code_at(tokens, colon + 1)
+    target: parser_colon_code_at(tokens, colon + 1)
     if target >= tokens.len() || tokens[target].kind != TOKEN_IDENT -> return None
     index := parser_colon_code_at(tokens, target + 1)
     loop index < tokens.len() && tokens[index].kind == TOKEN_MINUS {
-        word :: parser_colon_code_at(tokens, index + 1)
+        word: parser_colon_code_at(tokens, index + 1)
         if word >= tokens.len() || tokens[word].kind != TOKEN_IDENT -> return None
         index = parser_colon_code_at(tokens, word + 1)
     }
@@ -302,7 +304,7 @@ fn parser_colon_instance_at(tokens: [Token], tables: TokenTables, head: Int) -> 
         typed = true
         depth := 0
         loop index < tokens.len() {
-            kind :: tokens[index].kind
+            kind: tokens[index].kind
             if kind == TOKEN_LT -> depth += 1
             if kind == TOKEN_GT -> depth -= 1
             if kind == TOKEN_SHR -> depth -= 2
@@ -323,9 +325,9 @@ fn parser_colon_instance_at(tokens: [Token], tables: TokenTables, head: Int) -> 
 }
 
 // The name a keyword head at `head` declares, or -1.
-fn parser_colon_declared_name(tokens: [Token], head: Int) -> Int Never! {
+parser_colon_declared_name: fn(tokens: [Token], head: Int) -> Int Never! {
     if head >= tokens.len() || !parser_colon_head_keyword(tokens[head].kind) -> return -1
-    word :: parser_colon_code_at(tokens, head + 1)
+    word: parser_colon_code_at(tokens, head + 1)
     if word >= tokens.len() || !parser_colon_word(tokens[word].kind) -> return -1
     name_index(tokens[word].text)
 }
@@ -333,7 +335,7 @@ fn parser_colon_declared_name(tokens: [Token], head: Int) -> Int Never! {
 // Writes `module` in front of each binding that names a module (see the file
 // comment). A binding naming an instance is one too, so the choice runs to a
 // fixed point over the file's candidates.
-fn parser_colon_mark_instances(tokens: ^[Token], candidates: [ParserColonInstance], declared_modules: [Int:Bool], others: [Int:Bool]) -> [Token] Never! {
+parser_colon_mark_instances: fn(tokens: ^[Token], candidates: [ParserColonInstance], declared_modules: [Int:Bool], others: [Int:Bool]) -> [Token] Never! {
     modules := declared_modules
     chosen := [Bool]{}
     loop _ in candidates -> &chosen.push(false)
@@ -343,7 +345,7 @@ fn parser_colon_mark_instances(tokens: ^[Token], candidates: [ParserColonInstanc
         changed = false
         loop index in 0..<candidates.len() {
             if chosen[index] -> next
-            candidate :: candidates[index]
+            candidate: candidates[index]
             if modules.get(candidate.target) != None || (candidate.typed && candidate.snake && others.get(candidate.target) == None) {
                 chosen[index] = true
                 modules[candidate.name] = true
@@ -358,7 +360,7 @@ fn parser_colon_mark_instances(tokens: ^[Token], candidates: [ParserColonInstanc
     loop index in 0..<tokens.len() {
         loop next_candidate < candidates.len() && candidates[next_candidate].head < index -> next_candidate += 1
         if next_candidate < candidates.len() && candidates[next_candidate].head == index && chosen[next_candidate] {
-            at :: tokens[index].span.start
+            at: tokens[index].span.start
             &marked.push(Token{kind: TOKEN_KW_MODULE, span: Span{start: at, end: at}, text: name_empty(), decoded: name_empty(), literal: -1})
         }
         &marked.push(tokens[index])
@@ -367,7 +369,7 @@ fn parser_colon_mark_instances(tokens: ^[Token], candidates: [ParserColonInstanc
 }
 
 // One retired spelling (E0397): the text it replaces and the edit.
-struct ParserColonRetired {
+ParserColonRetired: struct {
     old: String
     new: String
     edit: TextEdit
@@ -375,33 +377,33 @@ struct ParserColonRetired {
 
 // The E0397 report of one retired spelling; the driver reports the retired
 // `package {` carrier with it too.
-fn parser_colon_retired_diagnostic(old: String, new: String, edit: TextEdit) -> Diagnostic Never! {
-    what :: "`{old}` is a retired declaration spelling; write `{new}`."
-    why :: "Every declaration is written `name: value`: a binding `limit: 100`, a function `area: fn(r: Float) -> Float`, a type `Point: struct`; `:=` stays the mutable binding."
-    fix :: "Write `{new}`; `jet fix` applies this fix."
-    diagnostic :: diagnostic_from_registry("E0397", Val(edit.span), what, why, fix)
+parser_colon_retired_diagnostic: fn(old: String, new: String, edit: TextEdit) -> Diagnostic Never! {
+    what: "`{old}` is a retired declaration spelling; write `{new}`."
+    why: "Every declaration is written `name: value`: a binding `limit: 100`, a function `area: fn(r: Float) -> Float`, a type `Point: struct`; `:=` stays the mutable binding."
+    fix: "Write `{new}`; `jet fix` applies this fix."
+    diagnostic: diagnostic_from_registry("E0397", Val(edit.span), what, why, fix)
     diagnostic_with_edit(diagnostic, edit)
 }
 
-fn parser_colon_report(retired: &[Diagnostic], site: ParserColonRetired) Never! {
-    if site.old.len() == 0 -> &retired.push(parser_colon_retired_diagnostic(site.old, site.new, site.edit))
+parser_colon_report: fn(retired: &[Diagnostic], site: ParserColonRetired) Never! {
+    &retired.push(parser_colon_retired_diagnostic(site.old, site.new, site.edit))
 }
 
 // The sigil `::` at `index` (the lexer's token): the edit writes `:` against
 // the code before it, as in `limit: 100`.
-fn parser_colon_retired_sigil(tokens: [Token], index: Int) -> ParserColonRetired Never! {
-    sigil :: tokens[index].span
+parser_colon_retired_sigil: fn(tokens: [Token], index: Int) -> ParserColonRetired Never! {
+    sigil: tokens[index].span
     start := sigil.start
     if index > 0 {
-        previous :: tokens[index - 1]
+        previous: tokens[index - 1]
         if previous.kind != TOKEN_SEMI && previous.kind != TOKEN_EOF && previous.span.end <= sigil.start -> start = previous.span.end
     }
-    spaced :: index + 1 < tokens.len() && tokens[index + 1].span.start > sigil.end
-    new :: if spaced -> ":" else -> ": "
+    spaced: index + 1 < tokens.len() && tokens[index + 1].span.start > sigil.end
+    new: if spaced -> ":" else -> ": "
     ParserColonRetired{old: "::", new: ":", edit: TextEdit{span: Span{start: start, end: sigil.end}, new_text: new}}
 }
 
-fn parser_colon_keyword_text(kind: Int) -> String Never! {
+parser_colon_keyword_text: fn(kind: Int) -> String Never! {
     if kind == {
         TOKEN_KW_FN -> "fn"
         TOKEN_KW_STRUCT -> "struct"
@@ -416,7 +418,7 @@ fn parser_colon_keyword_text(kind: Int) -> String Never! {
 
 // The spelling of a word token in a name path, as the lexer reads it
 // (`take` and `mut` are the move and mutate keywords).
-fn parser_colon_word_text(tables: TokenTables, token: Token) -> String Never! {
+parser_colon_word_text: fn(tables: TokenTables, token: Token) -> String Never! {
     if token.kind == TOKEN_IDENT -> return token_decoded(tables, token)
     if token.kind == TOKEN_KW_TAG -> return "tag"
     if token.kind == TOKEN_KW_EFFECT -> return "effect"
@@ -437,21 +439,21 @@ fn parser_colon_word_text(tables: TokenTables, token: Token) -> String Never! {
 // `type X` in a trait); `enclosing` is the keyword of the body it sits in.
 // `sigils` holds the starts of the lexer's `::` tokens; the one a module
 // instance's edit covers joins `consumed`.
-fn parser_colon_retired_head(tokens: [Token], tables: TokenTables, head: Int, frame: Int, enclosing: Int, sigils: [Int:Bool], consumed: &[Int:Bool]) -> ParserColonRetired? Never! {
+parser_colon_retired_head: fn(tokens: [Token], tables: TokenTables, head: Int, frame: Int, enclosing: Int, sigils: [Int:Bool], consumed: &[Int:Bool]) -> ParserColonRetired? Never! {
     if head >= tokens.len() || frame == PARSER_COLON_FRAME_GROUP -> return None
-    kind :: tokens[head].kind
+    kind: tokens[head].kind
     if kind == TOKEN_IDENT && frame == PARSER_COLON_FRAME_CONTAINER && (enclosing == TOKEN_KW_IMPL || enclosing == TOKEN_KW_TRAIT) && token_decoded(tables, tokens[head]) == "type" {
-        name :: parser_colon_code_at(tokens, head + 1)
+        name: parser_colon_code_at(tokens, head + 1)
         if name >= tokens.len() || tokens[name].kind != TOKEN_IDENT -> return None
-        word :: token_decoded(tables, tokens[name])
-        after :: parser_colon_code_at(tokens, name + 1)
+        word: token_decoded(tables, tokens[name])
+        after: parser_colon_code_at(tokens, name + 1)
         if after >= tokens.len() -> return None
         if enclosing == TOKEN_KW_IMPL && tokens[after].kind == TOKEN_EQ {
-            value :: parser_colon_code_at(tokens, after + 1)
+            value: parser_colon_code_at(tokens, after + 1)
             if value >= tokens.len() -> return None
             return Val(ParserColonRetired{old: "type {word} =", new: "{word}:", edit: TextEdit{span: Span{start: tokens[head].span.start, end: tokens[value].span.start}, new_text: "{word}: "}})
         }
-        ends :: tokens[after].kind == TOKEN_SEMI || tokens[after].kind == TOKEN_RBRACE || tokens[after].kind == TOKEN_EOF
+        ends: tokens[after].kind == TOKEN_SEMI || tokens[after].kind == TOKEN_RBRACE || tokens[after].kind == TOKEN_EOF
         if enclosing == TOKEN_KW_TRAIT && ends -> return Val(ParserColonRetired{old: "type {word}", new: "{word}: type", edit: TextEdit{span: Span{start: tokens[head].span.start, end: tokens[name].span.end}, new_text: "{word}: type"}})
         return None
     }
@@ -468,17 +470,17 @@ fn parser_colon_retired_head(tokens: [Token], tables: TokenTables, head: Int, fr
     end := tokens[word].span.end
     index := parser_colon_code_at(tokens, word + 1)
     loop index < tokens.len() {
-        separator :: tokens[index].kind
+        separator: tokens[index].kind
         if separator != TOKEN_DOT && !(separator == TOKEN_MINUS && kind == TOKEN_KW_MODULE) -> break
-        part :: parser_colon_code_at(tokens, index + 1)
+        part: parser_colon_code_at(tokens, index + 1)
         if part >= tokens.len() || !parser_colon_word(tokens[part].kind) -> break
-        joiner :: if separator == TOKEN_DOT -> "." else -> "-"
+        joiner: if separator == TOKEN_DOT -> "." else -> "-"
         path = "{path}{joiner}{parser_colon_word_text(tables, tokens[part])}"
         end = tokens[part].span.end
         index = parser_colon_code_at(tokens, part + 1)
     }
-    keyword :: parser_colon_keyword_text(kind)
-    start :: tokens[head].span.start
+    keyword: parser_colon_keyword_text(kind)
+    start: tokens[head].span.start
     if kind == TOKEN_KW_MODULE && index < tokens.len() && tokens[index].kind == TOKEN_COLON && sigils.get(tokens[index].span.start) != None {
         consumed[tokens[index].span.start] = true
         return Val(ParserColonRetired{old: "module {path} ::", new: "{path}:", edit: TextEdit{span: Span{start: start, end: tokens[index].span.end}, new_text: "{path}:"}})
@@ -488,22 +490,30 @@ fn parser_colon_retired_head(tokens: [Token], tables: TokenTables, head: Int, fr
 
 // The frames whose members may share a line: file scope and module,
 // container and shape bodies.
-fn parser_colon_member_frame(frame: Int) -> Bool Never! {
+parser_colon_member_frame: fn(frame: Int) -> Bool Never! {
     frame == PARSER_COLON_FRAME_MODULE || frame == PARSER_COLON_FRAME_CONTAINER || frame == PARSER_COLON_FRAME_SHAPE
 }
 
 // Whether a member starts at `index` with no separator before it, as in the
 // one-line bodies `{ step: Int fn step(self) {} }` and
 // `{ step: Int step: fn(self) {} }`: a `pub` or `priv`, or a declaration head
-// right after the last token of a type (`previous`).
-fn parser_colon_member_break(tokens: [Token], index: Int, previous: Int) -> Bool Never! {
-    kind :: tokens[index].kind
+// right after the last token of a type (`previous`). A `name: fn`-style head
+// starts a member after any other token too: a line the lexer continued
+// (`use math.*` before `run: fn() {`) still ends before it.
+parser_colon_member_break: fn(tokens: [Token], index: Int, previous: Int) -> Bool Never! {
+    kind: tokens[index].kind
     if kind == TOKEN_KW_PUB || kind == TOKEN_KW_PRIV -> return true
     if previous < 0 -> return false
-    before :: tokens[previous].kind
-    if before != TOKEN_IDENT && before != TOKEN_RPAREN && before != TOKEN_RBRACKET && before != TOKEN_GT -> return false
+    before: tokens[previous].kind
+    if before != TOKEN_IDENT && before != TOKEN_RPAREN && before != TOKEN_RBRACKET && before != TOKEN_GT {
+        if kind != TOKEN_IDENT || before == TOKEN_DOT || before == TOKEN_COLON -> return false
+        colon: parser_colon_head_colon(tokens, index)
+        if colon < 0 -> return false
+        keyword: parser_colon_code_at(tokens, colon + 1)
+        return keyword < tokens.len() && parser_colon_head_keyword(tokens[keyword].kind)
+    }
     if kind == TOKEN_KW_FN || kind == TOKEN_KW_STRUCT || kind == TOKEN_KW_ENUM || kind == TOKEN_KW_TRAIT || kind == TOKEN_KW_MODULE {
-        word :: parser_colon_code_at(tokens, index + 1)
+        word: parser_colon_code_at(tokens, index + 1)
         return word < tokens.len() && parser_colon_word(tokens[word].kind)
     }
     kind == TOKEN_IDENT && parser_colon_head_colon(tokens, index) >= 0
@@ -511,7 +521,7 @@ fn parser_colon_member_break(tokens: [Token], index: Int, previous: Int) -> Bool
 
 // `tables` spells the tokens' names; each retired spelling adds its E0397
 // to `retired`.
-fn parser_colon_declarations(input: ^[Token], tables: TokenTables, retired: &[Diagnostic]) -> [Token] Never! {
+parser_colon_declarations: fn(input: ^[Token], tables: TokenTables, retired: &[Diagnostic]) -> [Token] Never! {
     tokens := ^input
     // Per open delimiter: its frame, and the enclosing statement's head
     // kind and whether that statement had opened its body.
@@ -559,11 +569,11 @@ fn parser_colon_declarations(input: ^[Token], tables: TokenTables, retired: &[Di
         if !at_start && index > head_end && parser_colon_member_frame(frame) && parser_colon_member_break(tokens, index, previous) -> at_start = true
         if at_start && frame != PARSER_COLON_FRAME_GROUP {
             at_start = false
-            head :: parser_colon_head_at(tokens, index)
-            colon :: parser_colon_head_colon(tokens, head)
+            head: parser_colon_head_at(tokens, index)
+            colon: parser_colon_head_colon(tokens, head)
             if colon >= 0 {
-                keyword :: parser_colon_code_at(tokens, colon + 1)
-                rotate :: if {
+                keyword: parser_colon_code_at(tokens, colon + 1)
+                rotate: if {
                     tokens[keyword].kind != TOKEN_KW_FN -> true
                     frame == PARSER_COLON_FRAME_CONTAINER || frame == PARSER_COLON_FRAME_MODULE -> true
                     frame == PARSER_COLON_FRAME_SHAPE -> parser_colon_fn_has_body(tokens, keyword)
@@ -573,13 +583,13 @@ fn parser_colon_declarations(input: ^[Token], tables: TokenTables, retired: &[Di
                 if keyword > head_end -> head_end = keyword
             } else {
                 if head > head_end -> head_end = head
-                enclosing :: if saved_heads.len() > 0 -> saved_heads[saved_heads.len() - 1] else -> -1
+                enclosing: if saved_heads.len() > 0 -> saved_heads[saved_heads.len() - 1] else -> -1
                 if parser_colon_retired_head(tokens, tables, head, frame, enclosing, sigils, &consumed) == .Val(site) -> &heads.push(site)
                 if frame == PARSER_COLON_FRAME_MODULE {
                     if parser_colon_instance_at(tokens, tables, head) == .Val(candidate) -> &candidates.push(candidate)
                 }
             }
-            declared :: parser_colon_declared_name(tokens, head)
+            declared: parser_colon_declared_name(tokens, head)
             if declared >= 0 {
                 if tokens[head].kind == TOKEN_KW_MODULE -> modules[declared] = true else -> others[declared] = true
             }
@@ -591,14 +601,14 @@ fn parser_colon_declarations(input: ^[Token], tables: TokenTables, retired: &[Di
             }
             opened = false
         }
-        current :: tokens[index].kind
+        current: tokens[index].kind
         if current == TOKEN_LPAREN || current == TOKEN_LBRACKET || current == TOKEN_LBRACE {
             &frames.push(frame)
             &opens.push(index)
             &saved_heads.push(head_kind)
             &saved_opened.push(opened)
             if current == TOKEN_LBRACE {
-                body :: frame != PARSER_COLON_FRAME_GROUP && (!opened || head_kind == PARSER_COLON_HEAD_COMPTIME_BLOCK)
+                body: frame != PARSER_COLON_FRAME_GROUP && (!opened || head_kind == PARSER_COLON_HEAD_COMPTIME_BLOCK)
                 frame = if body -> parser_colon_body_frame(head_kind, frame) else -> PARSER_COLON_FRAME_CODE
                 if previous >= 0 && tokens[previous].kind == TOKEN_RPAREN && parser_colon_generate_call(tokens, tables, closed) -> frame = PARSER_COLON_FRAME_MODULE
                 saved_opened[saved_opened.len() - 1] = true
@@ -619,7 +629,7 @@ fn parser_colon_declarations(input: ^[Token], tables: TokenTables, retired: &[Di
             // next member (`{ get: fn(self) -> Int { 1 } put: fn… }`) starts
             // here; an `else` goes on with a `comptime if`.
             if current == TOKEN_RBRACE && parser_colon_member_frame(frame) {
-                after :: parser_colon_code_at(tokens, index + 1)
+                after: parser_colon_code_at(tokens, index + 1)
                 if after >= tokens.len() || tokens[after].kind != TOKEN_KW_ELSE -> at_start = true
             }
         } else if current == TOKEN_SEMI && frame != PARSER_COLON_FRAME_GROUP {

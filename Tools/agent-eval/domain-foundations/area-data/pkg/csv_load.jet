@@ -1,15 +1,15 @@
-package {
+package: {
     name: "csv_load"
     authority: { allow: [FS.Read, IO, Mem.Alloc] }
 }
 
 use {
-    data :: core.data
-    files :: core.files
+    data: core.data
+    files: core.files
 }
 
 #Codable
-struct Observation {
+Observation: struct {
     team: String
     segment: String
     x: Float
@@ -17,8 +17,8 @@ struct Observation {
     value: Float
 }
 
-fn run() {
-    raw :: files.read("$JET_STATE_ROOT/dx3/area-data/fixture-100k.csv") ?? panic("read")
-    rows :: data.csv<Observation>(raw) ?? panic("csv")
+run: fn() {
+    raw: files.read("$JET_STATE_ROOT/dx3/area-data/fixture-100k.csv") ?? panic("read")
+    rows: data.csv<Observation>(raw) ?? panic("csv")
     print("rows={data.count(rows)} columns={data.schema(rows).len()}")
 }

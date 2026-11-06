@@ -1,10 +1,10 @@
-package { name: "runtime-e3014", authority: { allow: [Browser, DB, Env, Exec, FFI, FS, GPU, IO, Log, Net, Rand, Secret, Time] } }
+package: { name: "runtime-e3014", authority: { allow: [Browser, DB, Env, Exec, FFI, FS, GPU, IO, Log, Net, Rand, Secret, Time] } }
 
 extern rust "std" {
-    fn panic_now(value: String) -> Int = "std::panic::panic_any"
+    panic_now: fn(value: String) -> Int = "std::panic::panic_any"
 }
 
-fn run() {
+run: fn() {
     panic_now("foreign failure").drop("the foreign call panics before returning")
 }
 // @run_cli

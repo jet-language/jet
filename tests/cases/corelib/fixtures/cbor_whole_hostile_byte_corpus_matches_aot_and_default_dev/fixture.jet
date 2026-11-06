@@ -1,7 +1,7 @@
 
-use cbor :: core.encoding.cbor
+use cbor: core.encoding.cbor
 
-fn wire(values: [Int]) -> [U8] {
+wire: fn(values: [Int]) -> [U8] {
     bytes := [U8]{}
     loop value in values {
         &bytes.push(U8.from_int(value) ?? panic("corpus byte outside U8"))
@@ -9,7 +9,7 @@ fn wire(values: [Int]) -> [U8] {
     return bytes
 }
 
-fn accepted(values: [Int]) -> Bool {
+accepted: fn(values: [Int]) -> Bool {
     if cbor.parse(wire(values)) == {
         .Ok(_) -> return true
         .Err(_) -> return false
@@ -17,7 +17,7 @@ fn accepted(values: [Int]) -> Bool {
     return false
 }
 
-fn rejected(values: [Int], offset: Int, path: String, reason: String) -> Bool {
+rejected: fn(values: [Int], offset: Int, path: String, reason: String) -> Bool {
     if cbor.parse(wire(values)) == {
         .Ok(_) -> return false
         .Err(error) -> return error.byte_offset == offset && error.path == path && error.reason == reason
@@ -25,7 +25,7 @@ fn rejected(values: [Int], offset: Int, path: String, reason: String) -> Bool {
     return false
 }
 
-fn canonical_rejected(values: [Int], offset: Int, path: String, reason: String) -> Bool {
+canonical_rejected: fn(values: [Int], offset: Int, path: String, reason: String) -> Bool {
     strict := cbor.CBOROptions{
         max_depth: 256,
         max_items: 1000000,
@@ -39,7 +39,7 @@ fn canonical_rejected(values: [Int], offset: Int, path: String, reason: String) 
     return false
 }
 
-fn run() {
+run: fn() {
     empty := [Int]{}
     // RFC 8949 argument widths, scalar families, nested containers, preferred
     // floats, and every supported normal-mode indefinite family.

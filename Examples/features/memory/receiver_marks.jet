@@ -1,39 +1,39 @@
 // D-CAP-RECEIVER1=D: mark the value, not the call. `&` or `^` sits on the
 // named place a call writes or takes, receiver or argument alike.
-struct Buffer { text: String }
+Buffer: struct { text: String }
 
 impl Buffer {
-    fn append(&self, chunk: String) {
+    append: fn(&self, chunk: String) {
         self.text = "{self.text}{chunk}"
     }
-    fn grow(&self) -> Buffer {
+    grow: fn(&self) -> Buffer {
         self.text = "{self.text}!"
         return Buffer{text: self.text.copy()}
     }
-    fn clear(&self) {
+    clear: fn(&self) {
         self = Buffer{text: "cleared"}
     }
-    fn len(self) -> Int {
+    len: fn(self) -> Int {
         return self.text.len()
     }
-    fn seal(^self) {
+    seal: fn(^self) {
         print(self.text)
     }
 }
 
-fn make_buffer() -> Buffer {
+make_buffer: fn() -> Buffer {
     return Buffer{text: "fresh"}
 }
 
-fn inspect(buffer: Buffer) {
+inspect: fn(buffer: Buffer) {
     print("inspect {buffer.text}")
 }
 
-fn edit(buffer: &Buffer) {
+edit: fn(buffer: &Buffer) {
     &buffer.append(" edited")
 }
 
-fn run() {
+run: fn() {
     buf := Buffer{text: "hello"}
     &buf.append(" world")
     print(buf.len())

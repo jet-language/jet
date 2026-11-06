@@ -1,4 +1,4 @@
-package {
+package: {
     name: "cli-battery"
     version: "0.1.0"
     edition: "2026"
@@ -12,59 +12,59 @@ package {
 
 use {
     cli
-    fs :: core.files
+    fs: core.files
 }
 
 // The standard marker supplies root help, --version, --color, --verbose, and
 // --quiet. The command-local fields below make defaults visible in each
 // generated command help page.
 #CLI(Standard)
-struct CLI {
+CLI: struct {
     #[Doc("directory for the CLI config file"), Env("CLI_CONFIG_DIR")] config_dir: String{"cli-config"}
 
     #Doc("run every library part once with deterministic fixtures")
-    fn demo(self) {
+    demo: fn(self) {
         run_all(self.config_dir)
     }
 
     #Doc("write and read the config file")
-    fn config(self) {
+    config: fn(self) {
         cli.write_config(self.config_dir, "always", "aligned")
         print(cli.read_config(self.config_dir).trim())
     }
 
     #Doc("append one note to the config directory")
-    fn add(self, title: String, body: String) {
+    add: fn(self, title: String, body: String) {
         print(cli.append_note(self.config_dir, title, body).trim())
     }
 
     #Doc("search a recursive root with its .gitignore")
-    fn search(self, pattern: String{"needle"}, root: String{"."}) {
+    search: fn(self, pattern: String{"needle"}, root: String{"."}) {
         show_search(root, pattern)
     }
 
     #Doc("launch, stream, pipe, close stdin, and inspect process receipts")
-    fn process(self, pattern: String{"keep"}) {
+    process: fn(self, pattern: String{"keep"}) {
         print(cli.process_demo(pattern))
     }
 
     #Doc("exercise the child EOF path")
-    fn eof(self) {
+    eof: fn(self) {
         print(cli.process_demo("keep"))
     }
 
     #Doc("decode, filter, sort, and print typed CSV records")
-    fn records(self, wanted: String{"keep"}) {
+    records: fn(self, wanted: String{"keep"}) {
         show_records(wanted)
     }
 
     #Doc("overlay one child environment and inspect a failed receipt")
-    fn env(self) {
+    env: fn(self) {
         print(cli.environment_demo())
     }
 
     #Doc("show ten typed options and their defaults")
-    fn flags(
+    flags: fn(
         self,
         one: String{"1"},
         two: String{"2"},
@@ -81,31 +81,31 @@ struct CLI {
     }
 
     #Doc("exit with the exact requested status code")
-    fn exit(self, code: Int{7}) {
+    exit: fn(self, code: Int{7}) {
         cli.exit_with(code)
     }
 }
 
-fn show_search(root: String, pattern: String) {
-    hits :: cli.search(root, pattern)
+show_search: fn(root: String, pattern: String) {
+    hits: cli.search(root, pattern)
     loop hit in hits -> print(cli.format_hit(hit, true))
 }
 
-fn show_records(wanted: String) {
-    rows :: cli.records(wanted)
+show_records: fn(wanted: String) {
+    rows: cli.records(wanted)
     loop row in rows -> print("{row.title}|{row.tag}|{row.path}")
 }
 
-fn run_all(config_root: String) {
+run_all: fn(config_root: String) {
     cli.write_config(config_root, "always", "aligned")
     print("config")
     print(cli.read_config(config_root).trim())
 
-    note_dir :: fs.temp_dir("cli-battery-notes") ?? panic("note temp dir")
+    note_dir: fs.temp_dir("cli-battery-notes") ?? panic("note temp dir")
     print("notes")
     print(cli.append_note(note_dir.path, "first", "ship it").trim())
 
-    fixture_dir :: fs.temp_dir("cli-battery-fixture") ?? panic("fixture temp dir")
+    fixture_dir: fs.temp_dir("cli-battery-fixture") ?? panic("fixture temp dir")
     cli.seed_fixture(fixture_dir.path)
     print("search")
     show_search(fixture_dir.path, "needle")
@@ -122,7 +122,7 @@ fn run_all(config_root: String) {
 }
 
 #[Job(.Dev), Doc("refresh the CLI battery fixture"), Every(1h)]
-fn refresh() {
+refresh: fn() {
     print("job=refresh")
 }
 
@@ -140,6 +140,6 @@ fn refresh() {
 //            mkdir -p bin && cp build/run bin/cli-battery
 //            ./bin/cli-battery flags
 
-fn run(args: CLI) {
+run: fn(args: CLI) {
     run_all(args.config_dir)
 }

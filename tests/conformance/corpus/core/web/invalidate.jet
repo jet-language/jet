@@ -1,20 +1,20 @@
 // core-conformance: core.web.invalidate
 use {
-    web :: core.web
+    web: core.web
     core.reactive.loadable.[Loadable]
 }
 
 #Error
-enum LoadError {
+LoadError: enum {
     Negative
 }
 
-fn load(id: Int) -[DB.Read]> Int LoadError! {
+load: fn(id: Int) -[DB.Read]> Int LoadError! {
     if id < 0 -> return Err(LoadError.Negative)
     id * 10
 }
 
-fn shown(state: Loadable<Int, LoadError>) -> String {
+shown: fn(state: Loadable<Int, LoadError>) -> String {
     if state == {
         .Loaded(value) -> "loaded {value}"
         .Failed(_) -> "failed"
@@ -22,8 +22,8 @@ fn shown(state: Loadable<Int, LoadError>) -> String {
     }
 }
 
-fn run() {
-    binding :: web.live(load, 4)
+run: fn() {
+    binding: web.live(load, 4)
     print(shown(web.state(binding)))
     web.invalidate(load)
     print(shown(web.state(binding)))

@@ -1,26 +1,26 @@
 // A failure passes up by itself, but a missing value
 // never does. `user` stays `User?`, so reading its field is E0310, which
 // teaches `?.`, `??`, or a `.Val`/`.None` pattern instead of an early return.
-struct User {
+User: struct {
     name: String
 }
 
 #Error
-enum DBError {
+DBError: enum {
     Down
 }
 
-fn read_user(id: Int) -> User? DBError! {
+read_user: fn(id: Int) -> User? DBError! {
     if id == 0 -> return Err(DBError.Down)
     if id == 7 -> return Ok(Val(User{name: "priya"}))
     Ok(None)
 }
 
-fn greet(id: Int) -> String? DBError! {
-    user :: read_user(id)
+greet: fn(id: Int) -> String? DBError! {
+    user: read_user(id)
     Ok(Val(user.name))
 }
 
-fn run() {
+run: fn() {
     print(greet(7) ?? "stranger")
 }

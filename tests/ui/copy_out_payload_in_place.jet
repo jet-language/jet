@@ -1,16 +1,16 @@
 // A match payload bound from storage this scope does not own reads its
 // value in place: a borrowed parameter's payload, an element subject's
 // payload and a loop name over such a payload can't be copied out. A loop
-// over a `::` field binding reads the field in place, so its names can't be
+// over a `:` field binding reads the field in place, so its names can't be
 // moved out either.
-struct Res { name: String }
+Res: struct { name: String }
 impl Res.Close {
-    fn close(^self) { print("close {self.name}") }
+    close: fn(^self) { print("close {self.name}") }
 }
 
-fn keep(r: ^Res) -> Int { r.name.len() }
+keep: fn(r: ^Res) -> Int { r.name.len() }
 
-fn from_param(env: Res?) -> Int {
+from_param: fn(env: Res?) -> Int {
     if env == .Val(held) {
         applied := held
         return keep(^applied)
@@ -18,7 +18,7 @@ fn from_param(env: Res?) -> Int {
     0
 }
 
-fn from_element(items: [Res?]) -> Int {
+from_element: fn(items: [Res?]) -> Int {
     if items[0] == .Val(held) {
         applied := held
         return keep(^applied)
@@ -26,7 +26,7 @@ fn from_element(items: [Res?]) -> Int {
     0
 }
 
-fn from_payload_loop(warm: [Res]?) -> Int {
+from_payload_loop: fn(warm: [Res]?) -> Int {
     merged := [Res]{}
     if warm == .Val(existing) {
         loop entry in existing -> &merged.push(entry)
@@ -34,23 +34,23 @@ fn from_payload_loop(warm: [Res]?) -> Int {
     merged.len()
 }
 
-struct Holder { items: [Res] }
+Holder: struct { items: [Res] }
 
-fn from_projection_loop() -> Int {
+from_projection_loop: fn() -> Int {
     value := Holder{items: [Res{name: "a"}]}
-    items :: value.items
+    items: value.items
     value.items = [Res]{}
     sink := [Res]{}
     loop item in items -> &sink.push(^item)
     sink.len()
 }
 
-fn from_param_loop(items: [Res]) -> Int {
+from_param_loop: fn(items: [Res]) -> Int {
     sink := [Res]{}
     loop item in items -> &sink.push(^item)
     sink.len()
 }
 
-fn run() {
+run: fn() {
     print("unreached")
 }

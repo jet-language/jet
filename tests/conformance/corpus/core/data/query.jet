@@ -1,18 +1,18 @@
 // core-conformance: core.data.query
-use data :: core.data
+use data: core.data
 
 #Codable
-struct Sale {
+Sale: struct {
     item: String
     quantity: Int
 }
 
-fn run() {
-    rows :: [Sale]{
+run: fn() {
+    rows: [Sale]{
         Sale{item: "small", quantity: 1},
         Sale{item: "large", quantity: 3}
     }
-    query :: data.query(rows).filter(row -> row.quantity > 1)
-    result :: query.collect() ?? panic("collect")
+    query: data.query(rows).filter(row -> row.quantity > 1)
+    result: query.collect() ?? panic("collect")
     print(result[0].item)
 }

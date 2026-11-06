@@ -1,13 +1,13 @@
 
-use browser :: core.web.browser
+use browser: core.web.browser
 
-fn run() {
-    profile :: browser.profile("bidi-2025.5") ?? panic("profile")
-    timeout :: browser.timeout(80) ?? panic("timeout")
-    session :: browser.connect_profile("ws://127.0.0.1:{free-port:missing_locator}/session?token=MISSING_LOCATOR_SECRET", profile, timeout) ?? panic("connect")
-    context :: session.context() ?? panic("context")
-    page :: context.page() ?? panic("page")
-    missing :: page.get_by_role("button", "Missing")
+run: fn() {
+    profile: browser.profile("bidi-2025.5") ?? panic("profile")
+    timeout: browser.timeout(80) ?? panic("timeout")
+    session: browser.connect_profile("ws://127.0.0.1:{free-port:missing_locator}/session?token=MISSING_LOCATOR_SECRET", profile, timeout) ?? panic("connect")
+    context: session.context() ?? panic("context")
+    page: context.page() ?? panic("page")
+    missing: page.get_by_role("button", "Missing")
     loop attempt in [1] {
         missing.click() ?? next
         print("unexpected")

@@ -3,10 +3,10 @@ Error [jet.UseAfterMove]: `frozen` was consumed by a lambda that captures it, so
     |
  11 |     print(frozen.value)
     |                  ^^^^^
-  --> tests/ui/frozen_capture_use_after_move.jet:8:23
+  --> tests/ui/frozen_capture_use_after_move.jet:8:21
     |
-  8 |         child :: task ^frozen { frozen.value }
-    |                       ^^^^^^^ `frozen` moved to a lambda that captures it here
+  8 |         child: task ^frozen { frozen.value }
+    |                     ^^^^^^^ `frozen` moved to a lambda that captures it here
  Why: After a value moves somewhere else, its old name no longer gives access to it
  Fix: Stop using `frozen` after the move, or give a lambda that captures it a copy with `frozen.copy()` where it moved.
 More: jet-lang.dev/e/E0121

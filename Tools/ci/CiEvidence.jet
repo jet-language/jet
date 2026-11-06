@@ -14,17 +14,17 @@
 // candidate) is a failure receipt and exit 78 without running the command. A
 // receipt that cannot be finalized is exit 78 too: never a green gate.
 use {
-    crypto :: core.crypto
-    files :: core.files
-    process :: core.process
-    sys :: core.sys
-    term :: core.term
-    time :: core.time
+    crypto: core.crypto
+    files: core.files
+    process: core.process
+    sys: core.sys
+    term: core.term
+    time: core.time
 }
 
-FAILED_IDENTITY :: 78
+FAILED_IDENTITY: 78
 
-struct Evidence {
+Evidence: struct {
     root: String
     dir: String
     candidate: String
@@ -41,8 +41,8 @@ struct Evidence {
     command: [String]
 }
 
-fn run() {
-    args :: process.args()
+run: fn() {
+    args: process.args()
     if args.len() < 4 || args[0] != "--report-dir" || args[2] != "--" {
         term.eprint("usage: jet Tools/ci/CiEvidence.jet --report-dir DIR -- COMMAND [ARG ...]")
         process.exit(64)
@@ -50,55 +50,55 @@ fn run() {
     process.exit(gate(repo_root(), args[1], args[3..<args.len()]))
 }
 
-fn env_or(name: String, fallback: String) -[Env]> String Never! {
-    value :: process.env_get(name) ?? return fallback.copy()
+env_or: fn(name: String, fallback: String) -[Env]> String Never! {
+    value: process.env_get(name) ?? return fallback.copy()
     if value == "" -> return fallback.copy()
     value
 }
 
 // The checkout holding this tool, else the working directory.
-fn repo_root() -[Env, FS]> String Never! {
-    tool :: "/Tools/ci/CiEvidence.jet"
-    script :: sys.executable()
+repo_root: fn() -[Env, FS]> String Never! {
+    tool: "/Tools/ci/CiEvidence.jet"
+    script: sys.executable()
     if script.ends_with(tool) -> return script.removesuffix(tool)
     files.cwd() ?? "."
 }
 
-fn hash_file(path: String) -[FS]> String Never! {
+hash_file: fn(path: String) -[FS]> String Never! {
     if !files.is_file(path) -> return "unavailable"
-    bytes :: files.read_bytes(path) ?? return "unavailable"
+    bytes: files.read_bytes(path) ?? return "unavailable"
     crypto.sha256(bytes).hex()
 }
 
-fn run_text(argv: [String], dir: String) -[Exec, Time.Wait]> String Never! {
-    receipt :: process.cmd(argv).cwd(dir).run() ?? return ""
+run_text: fn(argv: [String], dir: String) -[Exec, Time.Wait]> String Never! {
+    receipt: process.cmd(argv).cwd(dir).run() ?? return ""
     if receipt.code != 0 -> return ""
     receipt.output.trim()
 }
 
-fn is_hex(text: String) -> Bool Never! {
+is_hex: fn(text: String) -> Bool Never! {
     loop byte in text.bytes() {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         if !((code >= 48 && code <= 57) || (code >= 97 && code <= 102) || (code >= 65 && code <= 70)) -> return false
     }
     true
 }
 
-fn pad(value: Int, width: Int) -> String Never! {
+pad: fn(value: Int, width: Int) -> String Never! {
     text := "{value}"
     loop text.len() < width -> text = "0{text}"
     text
 }
 
-fn utc_stamp() -[Time]> String Never! {
-    now :: time.now()
-    clock :: now.time()
+utc_stamp: fn() -[Time]> String Never! {
+    now: time.now()
+    clock: now.time()
     "{time.isoformat_date(now.date())}T{pad(clock.hour(), 2)}:{pad(clock.minute(), 2)}:{pad(clock.second(), 2)}Z"
 }
 
 // `uname -s` spelling of the running system: Linux, Darwin, FreeBSD ...
-fn system_name() -[Env]> String Never! {
-    name :: sys.sysname()
+system_name: fn() -[Env]> String Never! {
+    name: sys.sysname()
     if {
         name == "macos" || name == "darwin" -> "Darwin"
         name == "freebsd" -> "FreeBSD"
@@ -108,9 +108,9 @@ fn system_name() -[Env]> String Never! {
 }
 
 // One argument as bash's `printf %q` writes it.
-fn shell_quote(arg: String) -> String Never! {
+shell_quote: fn(arg: String) -> String Never! {
     if arg == "" -> return "''"
-    safe :: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789,._+:@%/-="
+    safe: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789,._+:@%/-="
     control := false
     loop ch in arg.chars() {
         if "{ch}" == "\n" || "{ch}" == "\t" || "{ch}" == "\r" -> control = true
@@ -118,7 +118,7 @@ fn shell_quote(arg: String) -> String Never! {
     out := ""
     if control {
         loop ch in arg.chars() {
-            piece :: "{ch}"
+            piece: "{ch}"
             out = if {
                 piece == "\n" -> "{out}\\n"
                 piece == "\t" -> "{out}\\t"
@@ -131,29 +131,29 @@ fn shell_quote(arg: String) -> String Never! {
         return "$'{out}'"
     }
     loop ch in arg.chars() {
-        piece :: "{ch}"
+        piece: "{ch}"
         out = if safe.contains(piece) -> "{out}{piece}" else -> "{out}\\{piece}"
     }
     out
 }
 
-fn evidence_paths(dir: String) -> [String] Never! {
+evidence_paths: fn(dir: String) -> [String] Never! {
     [String]{"{dir}/command.stdout", "{dir}/command.stderr", "{dir}/receipt.txt", "{dir}/toolchain.txt", "{dir}/candidate.txt"}
 }
 
-fn regular(path: String) -[FS]> Bool Never! { files.is_file(path) && !files.is_symlink(path) }
+regular: fn(path: String) -[FS]> Bool Never! { files.is_file(path) && !files.is_symlink(path) }
 
-fn gate(root: String, dir: String, command: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
+gate: fn(root: String, dir: String, command: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
     files.create_dir_all(dir) ?? {
         term.eprint("cannot create the report directory {dir}: {err}")
         return 1
     }
-    stdout_file :: "{dir}/command.stdout"
-    stderr_file :: "{dir}/command.stderr"
-    toolchain :: "{dir}/toolchain.txt"
-    github :: env_or("GITHUB_ACTIONS", "") == "true" || env_or("GITHUB_ACTIONS", "") == "1"
-    checkout :: run_text([String]{"git", "-C", root, "rev-parse", "--verify", "HEAD"}, root)
-    candidate :: env_or("JET_CI_CANDIDATE_COMMIT", env_or("GITHUB_SHA", checkout))
+    stdout_file: "{dir}/command.stdout"
+    stderr_file: "{dir}/command.stderr"
+    toolchain: "{dir}/toolchain.txt"
+    github: env_or("GITHUB_ACTIONS", "") == "true" || env_or("GITHUB_ACTIONS", "") == "1"
+    checkout: run_text([String]{"git", "-C", root, "rev-parse", "--verify", "HEAD"}, root)
+    candidate: env_or("JET_CI_CANDIDATE_COMMIT", env_or("GITHUB_SHA", checkout))
     runner_os := env_or("RUNNER_OS", env_or("GITHUB_RUNNER_OS", ""))
     runner_arch := env_or("RUNNER_ARCH", env_or("GITHUB_RUNNER_ARCH", ""))
     problems := [String]{}
@@ -175,13 +175,13 @@ fn gate(root: String, dir: String, command: [String]) -[Env, Exec, FS, IO, Time,
     if runner_arch == "" -> runner_arch = if github -> "unknown" else -> sys.arch()
 
     files.write(stdout_file, "") ?? &problems.push("cannot initialize evidence stdout: {stdout_file}")
-    nix :: run_text([String]{"nix", "--version"}, root)
+    nix: run_text([String]{"nix", "--version"}, root)
     files.write(toolchain, "=== nix ===\n{if nix == "" -> "(unavailable)" else -> nix}\n") ?? &problems.push("cannot write toolchain evidence: {toolchain}")
 
-    artifact_name :: env_or("JET_CI_ARTIFACT_NAME", "not-published")
-    signature_candidate :: env_or("JET_CI_SIGNATURE_CANDIDATE", candidate)
-    release_candidate :: env_or("JET_CI_RELEASE_CANDIDATE", candidate)
-    evidence :: Evidence{
+    artifact_name: env_or("JET_CI_ARTIFACT_NAME", "not-published")
+    signature_candidate: env_or("JET_CI_SIGNATURE_CANDIDATE", candidate)
+    release_candidate: env_or("JET_CI_RELEASE_CANDIDATE", candidate)
+    evidence: Evidence{
         root: root.copy(), dir: dir.copy(), candidate: candidate.copy(), checkout: checkout.copy(),
         runner_os: runner_os.copy(), runner_arch: runner_arch.copy(), artifact_name: artifact_name.copy(),
         signature_candidate: signature_candidate.copy(), release_candidate: release_candidate.copy(), started_at: utc_stamp(),
@@ -191,7 +191,7 @@ fn gate(root: String, dir: String, command: [String]) -[Env, Exec, FS, IO, Time,
 
     if candidate == "" || !is_hex(candidate) -> &problems.push("missing or invalid candidate commit identity")
     if candidate.len() != 40 -> &problems.push("candidate commit identity must be a 40-character SHA-1")
-    github_sha :: env_or("GITHUB_SHA", "")
+    github_sha: env_or("GITHUB_SHA", "")
     if github_sha != "" && candidate != github_sha -> &problems.push("candidate commit does not match GITHUB_SHA: {candidate} != {github_sha}")
     if checkout != "" && candidate != checkout -> &problems.push("candidate commit does not match checked-out revision: {candidate} != {checkout}")
     if artifact_name != "not-published" && !artifact_name.ends_with("-{candidate}") -> &problems.push("artifact name does not identify candidate: {artifact_name}")
@@ -208,17 +208,17 @@ fn gate(root: String, dir: String, command: [String]) -[Env, Exec, FS, IO, Time,
         return FAILED_IDENTITY
     }
 
-    spec :: process.cmd(command).stdin(.Inherit).stdout(.Capture).stderr(.Capture).output_limit(1073741824)
-    results :: process.run_all([ProcessSpec]{spec}, 1) ?? return start_failed(evidence, "{err}")
-    receipt :: results[0] ?? return start_failed(evidence, "{err}")
-    code :: if receipt.signal == .Val(number) -> 128 + number else -> receipt.code
+    spec: process.cmd(command).stdin(.Inherit).stdout(.Capture).stderr(.Capture).output_limit(1073741824)
+    results: process.run_all([ProcessSpec]{spec}, 1) ?? return start_failed(evidence, "{err}")
+    receipt: results[0] ?? return start_failed(evidence, "{err}")
+    code: if receipt.signal == .Val(number) -> 128 + number else -> receipt.code
     files.write(stdout_file, receipt.output) ?? ()
     files.write(stderr_file, receipt.errors) ?? ()
     out := term.stdout()
     &out.write(receipt.output).drop("gate stdout")
     errors := term.stderr()
     &errors.write(receipt.errors).drop("gate stderr")
-    status :: if code == 0 && candidate != "" && candidate != "unknown" -> "pass" else -> "fail"
+    status: if code == 0 && candidate != "" && candidate != "unknown" -> "pass" else -> "fail"
     if !finalize(evidence, status, "{code}") {
         term.eprint("evidence finalization failed; refusing a green gate")
         return if code == 0 -> FAILED_IDENTITY else -> code
@@ -227,8 +227,8 @@ fn gate(root: String, dir: String, command: [String]) -[Env, Exec, FS, IO, Time,
 }
 
 // The command could not start: bash's `command not found` status.
-fn start_failed(evidence: Evidence, reason: String) -[Env, FS, IO]> Int Never! {
-    message :: "{evidence.command[0]}: {reason}"
+start_failed: fn(evidence: Evidence, reason: String) -[Env, FS, IO]> Int Never! {
+    message: "{evidence.command[0]}: {reason}"
     files.write("{evidence.dir}/command.stderr", "{message}\n") ?? ()
     term.eprint(message)
     if !finalize(evidence, "fail", "127") -> term.eprint("evidence finalization failed; refusing a green gate")
@@ -237,15 +237,15 @@ fn start_failed(evidence: Evidence, reason: String) -[Env, FS, IO]> Int Never! {
 
 // Write candidate.txt then receipt.txt, each through a temporary file, and
 // confirm every evidence file is a regular file.
-fn finalize(e: Evidence, status: String, command_exit: String) -[Env, FS, IO]> Bool Never! {
-    matrix :: env_or("JET_CI_SUPPORT_MATRIX", "{e.runner_os}/{e.runner_arch}")
-    run_id :: env_or("GITHUB_RUN_ID", "local")
-    attempt :: env_or("GITHUB_RUN_ATTEMPT", "1")
-    ref :: env_or("GITHUB_REF", "local")
-    shown :: if e.candidate == "" -> "unknown" else -> e.candidate.copy()
-    bindings :: "source_candidate_commit={e.candidate}\ntoolchain_candidate_commit={e.candidate}\nartifact_candidate_commit={e.candidate}\nsignature_candidate_commit={e.signature_candidate}\ntest_candidate_commit={e.candidate}\nsupport_matrix_candidate_commit={e.candidate}\nprovenance_candidate_commit={e.candidate}\nrelease_metadata_candidate_commit={e.release_candidate}\n"
-    manifest :: "schema=jet.ci-candidate.v1\ncandidate_commit={e.candidate}\n{bindings}source_revision={if e.checkout == "" -> "unknown" else -> e.checkout}\nsource_manifest_sha256={e.source_hash}\nworkflow_sha256={e.workflow_hash}\ntoolchain_sha256={e.toolchain_hash}\nartifact_name={e.artifact_name}\nsignature=not-required-for-ci-test-gate\nsupport_matrix={matrix}\nprovenance=github-actions:{run_id}/{attempt}\nrelease_ref={ref}\n"
-    candidate_path :: "{e.dir}/candidate.txt"
+finalize: fn(e: Evidence, status: String, command_exit: String) -[Env, FS, IO]> Bool Never! {
+    matrix: env_or("JET_CI_SUPPORT_MATRIX", "{e.runner_os}/{e.runner_arch}")
+    run_id: env_or("GITHUB_RUN_ID", "local")
+    attempt: env_or("GITHUB_RUN_ATTEMPT", "1")
+    ref: env_or("GITHUB_REF", "local")
+    shown: if e.candidate == "" -> "unknown" else -> e.candidate.copy()
+    bindings: "source_candidate_commit={e.candidate}\ntoolchain_candidate_commit={e.candidate}\nartifact_candidate_commit={e.candidate}\nsignature_candidate_commit={e.signature_candidate}\ntest_candidate_commit={e.candidate}\nsupport_matrix_candidate_commit={e.candidate}\nprovenance_candidate_commit={e.candidate}\nrelease_metadata_candidate_commit={e.release_candidate}\n"
+    manifest: "schema=jet.ci-candidate.v1\ncandidate_commit={e.candidate}\n{bindings}source_revision={if e.checkout == "" -> "unknown" else -> e.checkout}\nsource_manifest_sha256={e.source_hash}\nworkflow_sha256={e.workflow_hash}\ntoolchain_sha256={e.toolchain_hash}\nartifact_name={e.artifact_name}\nsignature=not-required-for-ci-test-gate\nsupport_matrix={matrix}\nprovenance=github-actions:{run_id}/{attempt}\nrelease_ref={ref}\n"
+    candidate_path: "{e.dir}/candidate.txt"
     if !replace(candidate_path, manifest) -> return false
     quoted := ""
     loop arg in e.command -> quoted = "{quoted}{shell_quote(arg)} "
@@ -265,9 +265,9 @@ fn finalize(e: Evidence, status: String, command_exit: String) -[Env, FS, IO]> B
 
 // Replace `path` with `text` through a temporary file; refuse a symlink or a
 // non-file at `path`.
-fn replace(path: String, text: String) -[Env, FS]> Bool Never! {
+replace: fn(path: String, text: String) -[Env, FS]> Bool Never! {
     if files.is_symlink(path) || (files.exists(path) && !files.is_file(path)) -> return false
-    temporary :: "{path}.tmp.{sys.pid()}"
+    temporary: "{path}.tmp.{sys.pid()}"
     files.write(temporary, text) ?? return false
     files.rename(temporary, path) ?? {
         files.remove(temporary) ?? ()

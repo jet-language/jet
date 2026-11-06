@@ -3,18 +3,18 @@
 // runtime carrier. IO/Internal alone own provider-redacted Text payloads.
 // Searches of all refs for vault_record_hash found no reusable Jet codec;
 // 5933a61b2/d587c4035 contain only the public facade and vault_02 state/Linux.
-VAULT_ERROR_BYTES :: I64{24}
-VAULT_ERROR_TAG :: I64{0}
-VAULT_ERROR_FIRST :: I64{8}
-VAULT_ERROR_SECOND :: I64{16}
-VAULT_CRYPTO_OPEN_FAILED :: I64{0}
-VAULT_CRYPTO_VERIFY_FAILED :: I64{1}
-VAULT_CRYPTO_KEY_REJECTED :: I64{2}
-VAULT_CRYPTO_LENGTH :: I64{3}
-VAULT_CRYPTO_UNAVAILABLE :: I64{4}
+VAULT_ERROR_BYTES: I64{24}
+VAULT_ERROR_TAG: I64{0}
+VAULT_ERROR_FIRST: I64{8}
+VAULT_ERROR_SECOND: I64{16}
+VAULT_CRYPTO_OPEN_FAILED: I64{0}
+VAULT_CRYPTO_VERIFY_FAILED: I64{1}
+VAULT_CRYPTO_KEY_REJECTED: I64{2}
+VAULT_CRYPTO_LENGTH: I64{3}
+VAULT_CRYPTO_UNAVAILABLE: I64{4}
 // Rich tags project by variant NAME, never by ordinal. Every richer case is
 // represented; public VerifyFailed has no rich seed case.
-fn vault_crypto_from_provider(kind: I64) -> I64 {
+vault_crypto_from_provider: fn(kind: I64) -> I64 {
     if (kind == I64{4}) -> return VAULT_CRYPTO_OPEN_FAILED
     if (kind == I64{1} || kind == I64{2} || kind == I64{3} || kind == I64{5} || kind == I64{7}) -> return VAULT_CRYPTO_KEY_REJECTED
     if (kind == I64{0} || kind == I64{6}) -> return VAULT_CRYPTO_LENGTH
@@ -23,7 +23,7 @@ fn vault_crypto_from_provider(kind: I64) -> I64 {
 }
 // Native Lower/Display.jet:423-424 renders unit-only enum Display/Debug as
 // the variant name. JetEval Formatting/Values.jet:299,356 agrees.
-fn vault_crypto_name(target: I64, kind: I64) {
+vault_crypto_name: fn(target: I64, kind: I64) {
     if {
         (kind == VAULT_CRYPTO_OPEN_FAILED) -> {
             rt_text_push_word(target, I64{7811881983778582607}, I64{8})
@@ -45,50 +45,50 @@ fn vault_crypto_name(target: I64, kind: I64) {
         else -> panic("record variant index out of range")
     }
 }
-fn vault_error_tag(error: I64) -> I64 {
-    kind :: rt_text_word(wrapping(error + VAULT_ERROR_TAG))
+vault_error_tag: fn(error: I64) -> I64 {
+    kind: rt_text_word(wrapping(error + VAULT_ERROR_TAG))
     if (kind < I64{0} || kind > I64{12}) -> panic("record variant index out of range")
     kind
 }
 // Unit variants ignore both payloads; Crypto borrows an inline discriminant;
 // IO takes operation/redacted-path, Internal takes its incident identifier.
-fn vault_error_new(kind: I64, first: I64, second: I64) -> I64 {
+vault_error_new: fn(kind: I64, first: I64, second: I64) -> I64 {
     if (kind < I64{0} || kind > I64{12}) -> panic("record variant index out of range")
     if (kind == I64{10} && (first < VAULT_CRYPTO_OPEN_FAILED || first > VAULT_CRYPTO_UNAVAILABLE)) -> panic("record variant index out of range")
-    result :: jet_rt_alloc(VAULT_ERROR_BYTES, I64{8})
+    result: jet_rt_alloc(VAULT_ERROR_BYTES, I64{8})
     rt_text_store(wrapping(result + VAULT_ERROR_TAG), kind)
     rt_text_store(wrapping(result + VAULT_ERROR_FIRST), if (kind == I64{10}) -> first else if (kind >= I64{11}) -> jet_rt_string_clone(first) else -> I64{0})
     rt_text_store(wrapping(result + VAULT_ERROR_SECOND), if (kind == I64{11}) -> jet_rt_string_clone(second) else -> I64{0})
     result
 }
-fn vault_error_clone(error: I64) -> I64 {
+vault_error_clone: fn(error: I64) -> I64 {
     vault_error_new(vault_error_tag(error), rt_text_word(wrapping(error + VAULT_ERROR_FIRST)), rt_text_word(wrapping(error + VAULT_ERROR_SECOND)))
 }
-fn vault_error_drop(error: I64) {
+vault_error_drop: fn(error: I64) {
     if (error == I64{0}) -> return
-    kind :: vault_error_tag(error)
+    kind: vault_error_tag(error)
     if (kind >= I64{11}) -> jet_rt_string_drop(rt_text_word(wrapping(error + VAULT_ERROR_FIRST)))
     if (kind == I64{11}) -> jet_rt_string_drop(rt_text_word(wrapping(error + VAULT_ERROR_SECOND)))
     jet_rt_free(error, VAULT_ERROR_BYTES, I64{8})
 }
 // The Core VaultError record ABI (IR_GENERATED_RECORDS): its variant index,
 // owned member getters (Crypto as its CryptoError index), clone and drop.
-#Export(c) fn jet_rt_record_tag_jet_x3ccorelib_x3e_score_dcrypto_dvault_c_c_vault_error(value: I64) -> I64 { vault_error_tag(value) }
-#Export(c) fn jet_rt_record_get_jet_x3ccorelib_x3e_score_dcrypto_dvault_c_c_vault_error_crypto(value: I64) -> I64 { rt_text_word(wrapping(value + VAULT_ERROR_FIRST)) }
-#Export(c) fn jet_rt_record_get_jet_x3ccorelib_x3e_score_dcrypto_dvault_c_c_vault_error_io_operation(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(wrapping(value + VAULT_ERROR_FIRST))) }
-#Export(c) fn jet_rt_record_get_jet_x3ccorelib_x3e_score_dcrypto_dvault_c_c_vault_error_io_redacted_path(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(wrapping(value + VAULT_ERROR_SECOND))) }
-#Export(c) fn jet_rt_record_get_jet_x3ccorelib_x3e_score_dcrypto_dvault_c_c_vault_error_internal_incident_id(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(wrapping(value + VAULT_ERROR_FIRST))) }
-#Export(c) fn jet_rt_handle_clone_jet_x3ccorelib_x3e_score_dcrypto_dvault_c_c_vault_error(value: I64) -> I64 { vault_error_clone(value) }
-#Export(c) fn jet_rt_handle_drop_jet_x3ccorelib_x3e_score_dcrypto_dvault_c_c_vault_error(value: I64) { vault_error_drop(value) }
-fn vault_error_equal(left: I64, right: I64) -> Bool {
-    kind :: vault_error_tag(left)
+#Export(c) jet_rt_record_tag_jet_x3ccorelib_x3e_score_dcrypto_dvault_c_c_vault_error: fn(value: I64) -> I64 { vault_error_tag(value) }
+#Export(c) jet_rt_record_get_jet_x3ccorelib_x3e_score_dcrypto_dvault_c_c_vault_error_crypto: fn(value: I64) -> I64 { rt_text_word(wrapping(value + VAULT_ERROR_FIRST)) }
+#Export(c) jet_rt_record_get_jet_x3ccorelib_x3e_score_dcrypto_dvault_c_c_vault_error_io_operation: fn(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(wrapping(value + VAULT_ERROR_FIRST))) }
+#Export(c) jet_rt_record_get_jet_x3ccorelib_x3e_score_dcrypto_dvault_c_c_vault_error_io_redacted_path: fn(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(wrapping(value + VAULT_ERROR_SECOND))) }
+#Export(c) jet_rt_record_get_jet_x3ccorelib_x3e_score_dcrypto_dvault_c_c_vault_error_internal_incident_id: fn(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(wrapping(value + VAULT_ERROR_FIRST))) }
+#Export(c) jet_rt_handle_clone_jet_x3ccorelib_x3e_score_dcrypto_dvault_c_c_vault_error: fn(value: I64) -> I64 { vault_error_clone(value) }
+#Export(c) jet_rt_handle_drop_jet_x3ccorelib_x3e_score_dcrypto_dvault_c_c_vault_error: fn(value: I64) { vault_error_drop(value) }
+vault_error_equal: fn(left: I64, right: I64) -> Bool {
+    kind: vault_error_tag(left)
     if kind != vault_error_tag(right) -> return false
     if (kind == I64{10}) -> return rt_text_word(wrapping(left + VAULT_ERROR_FIRST)) == rt_text_word(wrapping(right + VAULT_ERROR_FIRST))
     if (kind >= I64{11} && !jet_rt_string_eq(rt_text_word(wrapping(left + VAULT_ERROR_FIRST)), rt_text_word(wrapping(right + VAULT_ERROR_FIRST)))) -> return false
     if (kind == I64{11}) -> return jet_rt_string_eq(rt_text_word(wrapping(left + VAULT_ERROR_SECOND)), rt_text_word(wrapping(right + VAULT_ERROR_SECOND)))
     true
 }
-fn vault_error_name(target: I64, kind: I64) {
+vault_error_name: fn(target: I64, kind: I64) {
     if {
         (kind == I64{0}) -> {
             rt_text_push_word(target, I64{5648755746841980489}, I64{8})
@@ -121,9 +121,9 @@ fn vault_error_name(target: I64, kind: I64) {
         else -> rt_text_push_word(target, I64{7809644666444607049}, I64{8})
     }
 }
-fn vault_error_display(error: I64) -> I64 {
-    kind :: vault_error_tag(error)
-    target :: jet_rt_string_builder_new()
+vault_error_display: fn(error: I64) -> I64 {
+    kind: vault_error_tag(error)
+    target: jet_rt_string_builder_new()
     if {
         (kind == I64{0}) -> {
             jet_rt_string_builder_push(target, rt_static_text("invalid vault key name"))
@@ -174,9 +174,9 @@ fn vault_error_display(error: I64) -> I64 {
     }
     jet_rt_string_builder_finish(target)
 }
-fn vault_error_debug(error: I64) -> I64 {
-    kind :: vault_error_tag(error)
-    target :: jet_rt_string_builder_new()
+vault_error_debug: fn(error: I64) -> I64 {
+    kind: vault_error_tag(error)
+    target: jet_rt_string_builder_new()
     vault_error_name(target, kind)
     if (kind == I64{10}) {
         rt_text_push_word(target, I64{40}, I64{1})
@@ -199,8 +199,8 @@ fn vault_error_debug(error: I64) -> I64 {
 }
 // The JVLT2 payload domain is synthesized in borrowed scratch, not copied
 // together with the payload. Caller owns 592-byte scratch (aligned8).
-fn vault_payload_hash(payload: I64, length: I64, digest: I64, scratch: I64) {
-    domain :: wrapping(scratch + I64{576})
+vault_payload_hash: fn(payload: I64, length: I64, digest: I64, scratch: I64) {
+    domain: wrapping(scratch + I64{576})
     rt_text_store(domain, I64{7021147219605345866})
     rt_text_store(wrapping(domain + I64{8}), I64{431131421817})
     rt_sha256_parts(domain, I64{13}, payload, length, digest, scratch)
@@ -211,51 +211,51 @@ fn vault_payload_hash(payload: I64, length: I64, digest: I64, scratch: I64) {
 // Historical pair codec. Wire buffers use the E4 raw-byte header privately (not
 // exposed as UTF-8 Text). Pairs own a native List<(Text,Text)> with the
 // canonical 16-byte pair stride.
-VAULT_PAIR_BYTES :: I64{16}
-fn vault_utf8_valid(data: I64, length: I64) -> Bool {
+VAULT_PAIR_BYTES: I64{16}
+vault_utf8_valid: fn(data: I64, length: I64) -> Bool {
     at := I64{0}
     loop at < length {
-        width :: rt_text_valid_width(wrapping(data + at), length - at, I64{1})
+        width: rt_text_valid_width(wrapping(data + at), length - at, I64{1})
         if (width <= I64{0}) -> return false
         at += width
     }
     true
 }
-fn vault_u32(data: I64) -> I64 {
+vault_u32: fn(data: I64) -> I64 {
     rt_text_byte(data).bit_or((rt_text_byte(wrapping(data + I64{1})) << I64{8})).bit_or((rt_text_byte(wrapping(data + I64{2})) << I64{16})).bit_or((rt_text_byte(wrapping(data + I64{3})) << I64{24}))
 }
-fn vault_put_u32(target: I64, value: I64) {
+vault_put_u32: fn(target: I64, value: I64) {
     rt_text_put(target, value.bit_and(I64{255}))
     rt_text_put(wrapping(target + I64{1}), (value >> I64{8}).bit_and(I64{255}))
     rt_text_put(wrapping(target + I64{2}), (value >> I64{16}).bit_and(I64{255}))
     rt_text_put(wrapping(target + I64{3}), (value >> I64{24}).bit_and(I64{255}))
 }
-fn vault_encode_pairs(pairs: I64) -> I64 {
-    count :: rt_text_word(wrapping(pairs + DATA_SEQUENCE_LENGTH))
-    data :: rt_text_word(wrapping(pairs + DATA_SEQUENCE_DATA))
+vault_encode_pairs: fn(pairs: I64) -> I64 {
+    count: rt_text_word(wrapping(pairs + DATA_SEQUENCE_LENGTH))
+    data: rt_text_word(wrapping(pairs + DATA_SEQUENCE_DATA))
     length := I64{4}
     at := I64{0}
     loop at < count {
-        pair :: data + at * VAULT_PAIR_BYTES
-        key :: rt_text_word(pair)
-        value :: rt_text_word(wrapping(pair + I64{8}))
-        key_len :: rt_text_len(key)
-        value_len :: rt_text_len(value)
+        pair: data + at * VAULT_PAIR_BYTES
+        key: rt_text_word(pair)
+        value: rt_text_word(wrapping(pair + I64{8}))
+        key_len: rt_text_len(key)
+        value_len: rt_text_len(value)
         if (key_len > I64{9223372036854775799} - length || value_len > I64{9223372036854775799} - length - key_len) -> rt_text_capacity_stop()
         length += I64{8} + key_len + value_len
         at += I64{1}
     }
-    result :: rt_text_builder_with_capacity(length)
-    output :: rt_text_data(result)
+    result: rt_text_builder_with_capacity(length)
+    output: rt_text_data(result)
     vault_put_u32(output, count)
     cursor := I64{4}
     at = I64{0}
     loop at < count {
-        pair :: data + at * VAULT_PAIR_BYTES
-        key :: rt_text_word(pair)
-        value :: rt_text_word(wrapping(pair + I64{8}))
-        key_len :: rt_text_len(key)
-        value_len :: rt_text_len(value)
+        pair: data + at * VAULT_PAIR_BYTES
+        key: rt_text_word(pair)
+        value: rt_text_word(wrapping(pair + I64{8}))
+        key_len: rt_text_len(key)
+        value_len: rt_text_len(value)
         vault_put_u32(wrapping(output + cursor), key_len)
         cursor += I64{4}
         rt_text_bytes_copy(wrapping(output + cursor), rt_text_data(key), key_len)
@@ -269,39 +269,39 @@ fn vault_encode_pairs(pairs: I64) -> I64 {
     rt_text_store(wrapping(result + I64{8}), length)
     jet_rt_string_builder_finish(result)
 }
-fn vault_text_zero(value: I64) {
-    data :: rt_text_data(value)
-    capacity :: rt_text_word(wrapping(value + I64{16}))
+vault_text_zero: fn(value: I64) {
+    data: rt_text_data(value)
+    capacity: rt_text_word(wrapping(value + I64{16}))
     at := I64{0}
     loop at < capacity {
         rt_text_put(wrapping(data + at), I64{0})
         at += I64{1}
     }
 }
-fn vault_pairs_drop(pairs: I64) {
+vault_pairs_drop: fn(pairs: I64) {
     if (pairs == I64{0}) -> return
-    count :: rt_text_word(wrapping(pairs + DATA_SEQUENCE_LENGTH))
-    data :: rt_text_word(wrapping(pairs + DATA_SEQUENCE_DATA))
+    count: rt_text_word(wrapping(pairs + DATA_SEQUENCE_LENGTH))
+    data: rt_text_word(wrapping(pairs + DATA_SEQUENCE_DATA))
     at := I64{0}
     loop at < count {
-        pair :: wrapping(data + at * VAULT_PAIR_BYTES)
-        key :: rt_text_word(pair)
-        value :: rt_text_word(wrapping(pair + I64{8}))
+        pair: wrapping(data + at * VAULT_PAIR_BYTES)
+        key: rt_text_word(pair)
+        value: rt_text_word(wrapping(pair + I64{8}))
         vault_text_zero(value)
         jet_rt_string_drop(key)
         jet_rt_string_drop(value)
         at += I64{1}
     }
-    capacity :: rt_text_word(wrapping(pairs + DATA_SEQUENCE_CAPACITY))
+    capacity: rt_text_word(wrapping(pairs + DATA_SEQUENCE_CAPACITY))
     if (capacity != I64{0}) -> jet_rt_free(data, capacity * VAULT_PAIR_BYTES, I64{8})
     jet_rt_free(pairs, DATA_SEQUENCE_BYTES, I64{8})
 }
 // Complete structural/UTF-8 preflight precedes any owner allocation. Rejecting
 // an impossible count is equivalent to the reference's subsequent truncation,
 // but avoids reserving an attacker-selected multi-gigabyte pair array.
-fn vault_decode_pairs(bytes: I64, length: I64) -> I64 {
+vault_decode_pairs: fn(bytes: I64, length: I64) -> I64 {
     if (length < I64{4}) -> return I64{0}
-    count :: vault_u32(bytes)
+    count: vault_u32(bytes)
     if (count > (length - I64{4}) / I64{8}) -> return I64{0}
     at := I64{4}
     index := I64{0}
@@ -310,7 +310,7 @@ fn vault_decode_pairs(bytes: I64, length: I64) -> I64 {
         loop {
             if (field == I64{2}) -> break
             if (length - at < I64{4}) -> return I64{0}
-            size :: vault_u32(wrapping(bytes + at))
+            size: vault_u32(wrapping(bytes + at))
             at += I64{4}
             if size > length - at -> return I64{0}
             if !vault_utf8_valid(wrapping(bytes + at), size) -> return I64{0}
@@ -320,17 +320,17 @@ fn vault_decode_pairs(bytes: I64, length: I64) -> I64 {
         index += I64{1}
     }
     if at != length -> return I64{0}
-    result :: data_sequence_new(count, VAULT_PAIR_BYTES)
-    data :: rt_text_word(wrapping(result + DATA_SEQUENCE_DATA))
+    result: data_sequence_new(count, VAULT_PAIR_BYTES)
+    data: rt_text_word(wrapping(result + DATA_SEQUENCE_DATA))
     at = I64{4}
     index = I64{0}
     loop index < count {
-        pair :: wrapping(data + index * VAULT_PAIR_BYTES)
-        size :: vault_u32(wrapping(bytes + at))
+        pair: wrapping(data + index * VAULT_PAIR_BYTES)
+        size: vault_u32(wrapping(bytes + at))
         at += I64{4}
         rt_text_store(pair, rt_text_copy(wrapping(bytes + at), size))
         at += size
-        value_size :: vault_u32(wrapping(bytes + at))
+        value_size: vault_u32(wrapping(bytes + at))
         at += I64{4}
         rt_text_store(wrapping(pair + I64{8}), rt_text_copy(wrapping(bytes + at), value_size))
         at += value_size
@@ -340,20 +340,20 @@ fn vault_decode_pairs(bytes: I64, length: I64) -> I64 {
     result
 }
 
-VAULT_MAX_BYTES :: I64{16777216}
-VAULT_MAX_STRINGS :: I64{4096}
-VAULT_MAX_NAMES :: I64{1024}
-VAULT_MAX_VERSIONS :: I64{8192}
-VAULT_ID_NODE_BYTES :: I64{32}
-fn vault_record_compare(left: I64, right: I64) -> I64 {
-    a :: rt_text_word(wrapping(left + VAULT_RECORD_TYPE))
-    b :: rt_text_word(wrapping(right + VAULT_RECORD_TYPE))
+VAULT_MAX_BYTES: I64{16777216}
+VAULT_MAX_STRINGS: I64{4096}
+VAULT_MAX_NAMES: I64{1024}
+VAULT_MAX_VERSIONS: I64{8192}
+VAULT_ID_NODE_BYTES: I64{32}
+vault_record_compare: fn(left: I64, right: I64) -> I64 {
+    a: rt_text_word(wrapping(left + VAULT_RECORD_TYPE))
+    b: rt_text_word(wrapping(right + VAULT_RECORD_TYPE))
     if a < b -> return I64{-1}
     if a > b -> return I64{1}
-    name :: jet_rt_string_compare(rt_text_word(wrapping(left + VAULT_RECORD_NAME)), rt_text_word(wrapping(right + VAULT_RECORD_NAME)))
+    name: jet_rt_string_compare(rt_text_word(wrapping(left + VAULT_RECORD_NAME)), rt_text_word(wrapping(right + VAULT_RECORD_NAME)))
     if (name != I64{0}) -> return name
-    x :: rt_text_word(wrapping(left + VAULT_RECORD_GENERATION))
-    y :: rt_text_word(wrapping(right + VAULT_RECORD_GENERATION))
+    x: rt_text_word(wrapping(left + VAULT_RECORD_GENERATION))
+    y: rt_text_word(wrapping(right + VAULT_RECORD_GENERATION))
     if vault_unsigned_less(x, y) -> return I64{-1}
     if vault_unsigned_less(y, x) -> return I64{1}
     I64{0}
@@ -361,10 +361,10 @@ fn vault_record_compare(left: I64, right: I64) -> I64 {
 // The Rust original use stable Rust sorts. The index merge is stable even on
 // invalid duplicate input; records/key buffers are never copied. Caller lends
 // two count-word scratch arrays; count is bounded by the codec.
-fn vault_sorted_indices(data: I64, count: I64, records: Bool, first: I64, second: I64) -> I64 {
+vault_sorted_indices: fn(data: I64, count: I64, records: Bool, first: I64, second: I64) -> I64 {
     at := I64{0}
     loop at < count {
-        item :: if records -> rt_text_word(wrapping(data + at * DATA_TREE_ELEMENT_BYTES)) else -> data + at * VAULT_PAIR_BYTES
+        item: if records -> rt_text_word(wrapping(data + at * DATA_TREE_ELEMENT_BYTES)) else -> data + at * VAULT_PAIR_BYTES
         rt_text_store(wrapping(first + at * DATA_TREE_ELEMENT_BYTES), item)
         at += I64{1}
     }
@@ -374,27 +374,27 @@ fn vault_sorted_indices(data: I64, count: I64, records: Bool, first: I64, second
     loop width < count {
         start := I64{0}
         loop start < count {
-            middle :: if start + width < count -> start + width else -> count
-            end :: if (start + width * I64{2} < count) -> start + width * I64{2} else -> count
+            middle: if start + width < count -> start + width else -> count
+            end: if (start + width * I64{2} < count) -> start + width * I64{2} else -> count
             left := start
             right := middle
             out := start
             loop out < end {
                 use_left := right == end
                 if left < middle && right < end {
-                    a :: rt_text_word(wrapping(source + left * DATA_TREE_ELEMENT_BYTES))
-                    b :: rt_text_word(wrapping(source + right * DATA_TREE_ELEMENT_BYTES))
-                    compare :: if records -> vault_record_compare(a, b) else -> jet_rt_string_compare(rt_text_word(a), rt_text_word(b))
+                    a: rt_text_word(wrapping(source + left * DATA_TREE_ELEMENT_BYTES))
+                    b: rt_text_word(wrapping(source + right * DATA_TREE_ELEMENT_BYTES))
+                    compare: if records -> vault_record_compare(a, b) else -> jet_rt_string_compare(rt_text_word(a), rt_text_word(b))
                     use_left = compare <= I64{0}
                 }
-                index :: if use_left -> left else -> right
+                index: if use_left -> left else -> right
                 rt_text_store(wrapping(target + out * DATA_TREE_ELEMENT_BYTES), rt_text_word(wrapping(source + index * DATA_TREE_ELEMENT_BYTES)))
                 if use_left { left += I64{1} } else { right += I64{1} }
                 out += I64{1}
             }
             start = end
         }
-        swap :: source
+        swap: source
         source = target
         target = swap
         width *= I64{2}
@@ -405,52 +405,52 @@ fn vault_sorted_indices(data: I64, count: I64, records: Bool, first: I64, second
 // additional entropy, or quadratic scans. With <=8192 unique nodes its depth
 // is <=19 (the AVL minimum-node recurrence), including a deepest insertion.
 // Nodes32 = left0/right8/height16/borrowed-record24; never persisted/exposed.
-fn vault_id_nodes_new(count: I64) -> I64 {
+vault_id_nodes_new: fn(count: I64) -> I64 {
     if (count < I64{0} || count > I64{9223372036854775807} / VAULT_ID_NODE_BYTES) -> jet_rt_panic_overflow()
     if (count == I64{0}) -> return I64{8}
     jet_rt_alloc(count * VAULT_ID_NODE_BYTES, I64{8})
 }
-fn vault_id_node(nodes: I64, index: I64, record: I64) -> I64 {
-    node :: wrapping(nodes + index * VAULT_ID_NODE_BYTES)
+vault_id_node: fn(nodes: I64, index: I64, record: I64) -> I64 {
+    node: wrapping(nodes + index * VAULT_ID_NODE_BYTES)
     rt_text_store(node, I64{0})
     rt_text_store(wrapping(node + I64{8}), I64{0})
     rt_text_store(wrapping(node + I64{16}), I64{1})
     rt_text_store(wrapping(node + I64{24}), record)
     node
 }
-fn vault_id_nodes_drop(nodes: I64, count: I64) {
+vault_id_nodes_drop: fn(nodes: I64, count: I64) {
     if (count != I64{0}) -> jet_rt_free(nodes, count * VAULT_ID_NODE_BYTES, I64{8})
 }
-fn vault_id_compare(left: I64, right: I64) -> I64 {
+vault_id_compare: fn(left: I64, right: I64) -> I64 {
     at := I64{0}
     loop {
         if (at == I64{16}) -> break
-        a :: rt_text_byte(wrapping(wrapping(left + VAULT_RECORD_OPAQUE) + at))
-        b :: rt_text_byte(wrapping(wrapping(right + VAULT_RECORD_OPAQUE) + at))
+        a: rt_text_byte(wrapping(wrapping(left + VAULT_RECORD_OPAQUE) + at))
+        b: rt_text_byte(wrapping(wrapping(right + VAULT_RECORD_OPAQUE) + at))
         if a < b -> return I64{-1}
         if a > b -> return I64{1}
         at += I64{1}
     }
     I64{0}
 }
-fn vault_id_height(node: I64) -> I64 {
+vault_id_height: fn(node: I64) -> I64 {
     if (node == I64{0}) -> I64{0} else -> rt_text_word(wrapping(node + I64{16}))
 }
-fn vault_id_height_update(node: I64) {
-    left :: vault_id_height(rt_text_word(node))
-    right :: vault_id_height(rt_text_word(wrapping(node + I64{8})))
+vault_id_height_update: fn(node: I64) {
+    left: vault_id_height(rt_text_word(node))
+    right: vault_id_height(rt_text_word(wrapping(node + I64{8})))
     rt_text_store(wrapping(node + I64{16}), I64{1} + (if left > right -> left else -> right))
 }
-fn vault_id_rotate_right(node: I64) -> I64 {
-    pivot :: rt_text_word(node)
+vault_id_rotate_right: fn(node: I64) -> I64 {
+    pivot: rt_text_word(node)
     rt_text_store(node, rt_text_word(wrapping(pivot + I64{8})))
     rt_text_store(wrapping(pivot + I64{8}), node)
     vault_id_height_update(node)
     vault_id_height_update(pivot)
     pivot
 }
-fn vault_id_rotate_left(node: I64) -> I64 {
-    pivot :: rt_text_word(wrapping(node + I64{8}))
+vault_id_rotate_left: fn(node: I64) -> I64 {
+    pivot: rt_text_word(wrapping(node + I64{8}))
     rt_text_store(wrapping(node + I64{8}), rt_text_word(pivot))
     rt_text_store(pivot, node)
     vault_id_height_update(node)
@@ -458,46 +458,46 @@ fn vault_id_rotate_left(node: I64) -> I64 {
     pivot
 }
 // -1 means duplicate. The caller reports it at the exact HashSet-insert point.
-fn vault_id_insert(root: I64, node: I64) -> I64 {
+vault_id_insert: fn(root: I64, node: I64) -> I64 {
     if (root == I64{0}) -> return node
-    compare :: vault_id_compare(rt_text_word(wrapping(node + I64{24})), rt_text_word(wrapping(root + I64{24})))
+    compare: vault_id_compare(rt_text_word(wrapping(node + I64{24})), rt_text_word(wrapping(root + I64{24})))
     if (compare == I64{0}) -> return I64{-1}
-    side :: if (compare < I64{0}) -> I64{0} else -> I64{8}
-    child :: vault_id_insert(rt_text_word(wrapping(root + side)), node)
+    side: if (compare < I64{0}) -> I64{0} else -> I64{8}
+    child: vault_id_insert(rt_text_word(wrapping(root + side)), node)
     if (child == I64{-1}) -> return I64{-1}
     rt_text_store(wrapping(root + side), child)
     vault_id_height_update(root)
-    balance :: vault_id_height(rt_text_word(root)) - vault_id_height(rt_text_word(wrapping(root + I64{8})))
+    balance: vault_id_height(rt_text_word(root)) - vault_id_height(rt_text_word(wrapping(root + I64{8})))
     if (balance > I64{1}) {
-        left :: rt_text_word(root)
+        left: rt_text_word(root)
         if (vault_id_compare(rt_text_word(wrapping(node + I64{24})), rt_text_word(wrapping(left + I64{24}))) > I64{0}) -> rt_text_store(root, vault_id_rotate_left(left))
         return vault_id_rotate_right(root)
     }
     if (balance < I64{-1}) {
-        right :: rt_text_word(wrapping(root + I64{8}))
+        right: rt_text_word(wrapping(root + I64{8}))
         if (vault_id_compare(rt_text_word(wrapping(node + I64{24})), rt_text_word(wrapping(right + I64{24}))) < I64{0}) -> rt_text_store(wrapping(root + I64{8}), vault_id_rotate_right(right))
         return vault_id_rotate_left(root)
     }
     root
 }
 
-fn vault_group_end(records: I64, count: I64, start: I64) -> I64 {
-    first :: rt_text_word(wrapping(records + start * DATA_TREE_ELEMENT_BYTES))
-    key_type :: rt_text_word(wrapping(first + VAULT_RECORD_TYPE))
-    name :: rt_text_word(wrapping(first + VAULT_RECORD_NAME))
+vault_group_end: fn(records: I64, count: I64, start: I64) -> I64 {
+    first: rt_text_word(wrapping(records + start * DATA_TREE_ELEMENT_BYTES))
+    key_type: rt_text_word(wrapping(first + VAULT_RECORD_TYPE))
+    name: rt_text_word(wrapping(first + VAULT_RECORD_NAME))
     end := start + I64{1}
     loop end < count {
-        row :: rt_text_word(wrapping(records + end * DATA_TREE_ELEMENT_BYTES))
+        row: rt_text_word(wrapping(records + end * DATA_TREE_ELEMENT_BYTES))
         if rt_text_word(wrapping(row + VAULT_RECORD_TYPE)) != key_type -> break
         if !jet_rt_string_eq(rt_text_word(wrapping(row + VAULT_RECORD_NAME)), name) -> break
         end += I64{1}
     }
     end
 }
-fn vault_write_origin(buffer: I64, cursor: I64, origin: I64) -> I64 {
+vault_write_origin: fn(buffer: I64, cursor: I64, origin: I64) -> I64 {
     at := cursor
     if (origin == I64{0}) {
-        end :: at + I64{75}
+        end: at + I64{75}
         loop at < end {
             rt_text_put(wrapping(buffer + at), I64{0})
             at += I64{1}
@@ -508,8 +508,8 @@ fn vault_write_origin(buffer: I64, cursor: I64, origin: I64) -> I64 {
     at += I64{1}
     rt_text_bytes_copy(wrapping(buffer + at), wrapping(origin + VAULT_ORIGIN_UUID), I64{16})
     at += I64{16}
-    name :: rt_text_word(wrapping(origin + VAULT_ORIGIN_NAME))
-    length :: rt_text_len(name)
+    name: rt_text_word(wrapping(origin + VAULT_ORIGIN_NAME))
+    length: rt_text_len(name)
     vault_put_u16(wrapping(buffer + at), length)
     at += I64{2}
     rt_text_bytes_copy(wrapping(buffer + at), rt_text_data(name), length)
@@ -521,15 +521,15 @@ fn vault_write_origin(buffer: I64, cursor: I64, origin: I64) -> I64 {
     rt_text_bytes_copy(wrapping(buffer + at), wrapping(origin + VAULT_ORIGIN_HASH), I64{32})
     at + I64{32}
 }
-fn vault_write_record(buffer: I64, cursor: I64, record: I64) -> I64 {
+vault_write_record: fn(buffer: I64, cursor: I64, record: I64) -> I64 {
     at := cursor
     rt_text_put(wrapping(buffer + at), rt_text_word(wrapping(record + VAULT_RECORD_TYPE)))
     rt_text_put(wrapping(wrapping(buffer + at) + I64{1}), rt_text_word(wrapping(record + VAULT_RECORD_STATUS)))
     rt_text_put(wrapping(wrapping(buffer + at) + I64{2}), rt_text_word(wrapping(record + VAULT_RECORD_PROVENANCE)))
     rt_text_put(wrapping(wrapping(buffer + at) + I64{3}), I64{0})
     at += I64{4}
-    name :: rt_text_word(wrapping(record + VAULT_RECORD_NAME))
-    length :: rt_text_len(name)
+    name: rt_text_word(wrapping(record + VAULT_RECORD_NAME))
+    length: rt_text_len(name)
     vault_put_u16(wrapping(buffer + at), length)
     at += I64{2}
     rt_text_bytes_copy(wrapping(buffer + at), rt_text_data(name), length)
@@ -549,24 +549,24 @@ fn vault_write_record(buffer: I64, cursor: I64, record: I64) -> I64 {
     at = vault_write_origin(buffer, at, rt_text_word(wrapping(record + VAULT_RECORD_ORIGIN)))
     vault_put_u16(wrapping(buffer + at), I64{32})
     at += I64{2}
-    bytes :: jet_rt_secret_bytes(rt_text_word(wrapping(record + VAULT_RECORD_SECRET)))
+    bytes: jet_rt_secret_bytes(rt_text_word(wrapping(record + VAULT_RECORD_SECRET)))
     rt_text_bytes_copy(wrapping(buffer + at), rt_text_word(wrapping(bytes + DATA_SEQUENCE_DATA)), I64{32})
     at + I64{32}
 }
 // Validation follows864-1018's order, including the name/group error ordering.
 // No output owner is allocated until validation succeeds; caller scratch/index
 // owners are always released by the outer function, including on every error.
-fn vault_encode_v2_inner(store: I64, strings: I64, string_count: I64, records: I64, record_count: I64, nodes: I64, scratch: I64, output: I64) -> I64 {
+vault_encode_v2_inner: fn(store: I64, strings: I64, string_count: I64, records: I64, record_count: I64, nodes: I64, scratch: I64, output: I64) -> I64 {
     names := I64{0}
     at := I64{0}
     loop at < record_count {
-        end :: vault_group_end(records, record_count, at)
+        end: vault_group_end(records, record_count, at)
         active_count := I64{0}
         current := I64{0}
         index := at
         loop index < end {
-            record :: rt_text_word(wrapping(records + index * DATA_TREE_ELEMENT_BYTES))
-            generation :: rt_text_word(wrapping(record + VAULT_RECORD_GENERATION))
+            record: rt_text_word(wrapping(records + index * DATA_TREE_ELEMENT_BYTES))
+            generation: rt_text_word(wrapping(record + VAULT_RECORD_GENERATION))
             if (generation != index - at + I64{1}) -> return I64{8}
             if (rt_text_word(wrapping(record + VAULT_RECORD_STATUS)) == I64{1}) {
                 active_count += I64{1}
@@ -583,23 +583,23 @@ fn vault_encode_v2_inner(store: I64, strings: I64, string_count: I64, records: I
     previous := I64{0}
     at = I64{0}
     loop at < string_count {
-        pair :: rt_text_word(wrapping(strings + at * DATA_TREE_ELEMENT_BYTES))
-        name :: rt_text_word(pair)
-        value :: rt_text_word(wrapping(pair + I64{8}))
+        pair: rt_text_word(wrapping(strings + at * DATA_TREE_ELEMENT_BYTES))
+        name: rt_text_word(pair)
+        value: rt_text_word(wrapping(pair + I64{8}))
         if !vault_validate_text(name, false) -> return I64{0}
         if (previous != I64{0} && jet_rt_string_compare(previous, name) >= I64{0}) -> return I64{8}
         previous = name
-        value_length :: rt_text_len(value)
+        value_length: rt_text_len(value)
         if (value_length > I64{1048576}) -> return I64{8}
         length += I64{6} + rt_text_len(name) + value_length
         at += I64{1}
     }
     at = I64{0}
     loop at < record_count {
-        record :: rt_text_word(wrapping(records + at * DATA_TREE_ELEMENT_BYTES))
-        key_type :: rt_text_word(wrapping(record + VAULT_RECORD_TYPE))
+        record: rt_text_word(wrapping(records + at * DATA_TREE_ELEMENT_BYTES))
+        key_type: rt_text_word(wrapping(record + VAULT_RECORD_TYPE))
         if (key_type != I64{1} && key_type != I64{2}) -> return I64{8}
-        name :: rt_text_word(wrapping(record + VAULT_RECORD_NAME))
+        name: rt_text_word(wrapping(record + VAULT_RECORD_NAME))
         if !vault_validate_text(name, false) -> return I64{0}
         length += I64{19} + rt_text_len(name)
         at = vault_group_end(records, record_count, at)
@@ -607,25 +607,25 @@ fn vault_encode_v2_inner(store: I64, strings: I64, string_count: I64, records: I
     id_root := I64{0}
     at = I64{0}
     loop at < record_count {
-        record :: rt_text_word(wrapping(records + at * DATA_TREE_ELEMENT_BYTES))
-        bytes :: jet_rt_secret_bytes(rt_text_word(wrapping(record + VAULT_RECORD_SECRET)))
+        record: rt_text_word(wrapping(records + at * DATA_TREE_ELEMENT_BYTES))
+        bytes: jet_rt_secret_bytes(rt_text_word(wrapping(record + VAULT_RECORD_SECRET)))
         if (rt_text_word(wrapping(record + VAULT_RECORD_GENERATION)) == I64{0} ||
             rt_text_word(wrapping(bytes + DATA_SEQUENCE_LENGTH)) != I64{32} ||
             vault_bytes_zero(wrapping(record + VAULT_RECORD_OPAQUE), I64{16})) -> return I64{8}
-        node :: vault_id_node(nodes, at, record)
+        node: vault_id_node(nodes, at, record)
         // Exactly the seed's !opaque_ids.insert point, before public/hash/time.
         id_root = vault_id_insert(id_root, node)
         if (id_root == I64{-1}) -> return I64{8}
-        error :: vault_record_validate(record, false, scratch)
+        error: vault_record_validate(record, false, scratch)
         if (error != I64{-1}) -> return error
-        origin :: rt_text_word(wrapping(record + VAULT_RECORD_ORIGIN))
-        origin_length :: if (origin == I64{0}) -> I64{0} else -> rt_text_len(rt_text_word(wrapping(origin + VAULT_ORIGIN_NAME)))
+        origin: rt_text_word(wrapping(record + VAULT_RECORD_ORIGIN))
+        origin_length: if (origin == I64{0}) -> I64{0} else -> rt_text_len(rt_text_word(wrapping(origin + VAULT_ORIGIN_NAME)))
         length += I64{219} + rt_text_len(rt_text_word(wrapping(record + VAULT_RECORD_NAME))) + origin_length
         at += I64{1}
     }
     if (length > VAULT_MAX_BYTES - I64{32}) -> return I64{8}
-    result :: rt_text_builder_with_capacity(length + I64{32})
-    buffer :: rt_text_data(result)
+    result: rt_text_builder_with_capacity(length + I64{32})
+    buffer: rt_text_data(result)
     vault_put_u32(buffer, I64{1414288970}) // "JVLT"
     rt_text_put(wrapping(buffer + I64{4}), I64{2})
     rt_text_put(wrapping(buffer + I64{5}), I64{0})
@@ -638,11 +638,11 @@ fn vault_encode_v2_inner(store: I64, strings: I64, string_count: I64, records: I
     cursor := I64{44}
     at = I64{0}
     loop at < string_count {
-        pair :: rt_text_word(wrapping(strings + at * DATA_TREE_ELEMENT_BYTES))
-        name :: rt_text_word(pair)
-        value :: rt_text_word(wrapping(pair + I64{8}))
-        name_length :: rt_text_len(name)
-        value_length :: rt_text_len(value)
+        pair: rt_text_word(wrapping(strings + at * DATA_TREE_ELEMENT_BYTES))
+        name: rt_text_word(pair)
+        value: rt_text_word(wrapping(pair + I64{8}))
+        name_length: rt_text_len(name)
+        value_length: rt_text_len(value)
         vault_put_u16(wrapping(buffer + cursor), name_length)
         cursor += I64{2}
         rt_text_bytes_copy(wrapping(buffer + cursor), rt_text_data(name), name_length)
@@ -655,14 +655,14 @@ fn vault_encode_v2_inner(store: I64, strings: I64, string_count: I64, records: I
     }
     at = I64{0}
     loop at < record_count {
-        end :: vault_group_end(records, record_count, at)
-        first :: rt_text_word(wrapping(records + at * DATA_TREE_ELEMENT_BYTES))
-        name :: rt_text_word(wrapping(first + VAULT_RECORD_NAME))
-        name_length :: rt_text_len(name)
+        end: vault_group_end(records, record_count, at)
+        first: rt_text_word(wrapping(records + at * DATA_TREE_ELEMENT_BYTES))
+        name: rt_text_word(wrapping(first + VAULT_RECORD_NAME))
+        name_length: rt_text_len(name)
         current := I64{0}
         index := at
         loop index < end {
-            row :: rt_text_word(wrapping(records + index * DATA_TREE_ELEMENT_BYTES))
+            row: rt_text_word(wrapping(records + index * DATA_TREE_ELEMENT_BYTES))
             if (rt_text_word(wrapping(row + VAULT_RECORD_STATUS)) == I64{1}) -> current = rt_text_word(wrapping(row + VAULT_RECORD_GENERATION))
             index += I64{1}
         }
@@ -688,23 +688,23 @@ fn vault_encode_v2_inner(store: I64, strings: I64, string_count: I64, records: I
     rt_text_store(output, jet_rt_string_builder_finish(result))
     I64{-1}
 }
-fn vault_encode_v2(store: I64, output: I64) -> I64 {
-    pairs :: rt_text_word(wrapping(store + VAULT_STORE_STRINGS))
-    rows :: rt_text_word(wrapping(store + VAULT_STORE_RECORDS))
-    string_count :: rt_text_word(wrapping(pairs + DATA_SEQUENCE_LENGTH))
-    record_count :: rt_text_word(wrapping(rows + DATA_SEQUENCE_LENGTH))
+vault_encode_v2: fn(store: I64, output: I64) -> I64 {
+    pairs: rt_text_word(wrapping(store + VAULT_STORE_STRINGS))
+    rows: rt_text_word(wrapping(store + VAULT_STORE_RECORDS))
+    string_count: rt_text_word(wrapping(pairs + DATA_SEQUENCE_LENGTH))
+    record_count: rt_text_word(wrapping(rows + DATA_SEQUENCE_LENGTH))
     if (rt_text_word(wrapping(store + VAULT_STORE_REVISION)) == I64{0} ||
         vault_bytes_zero(wrapping(store + VAULT_STORE_UUID), I64{16}) ||
         string_count > VAULT_MAX_STRINGS || record_count > VAULT_MAX_VERSIONS) -> return I64{8}
-    strings_bytes :: string_count * DATA_TREE_ELEMENT_BYTES * I64{2}
-    records_bytes :: record_count * DATA_TREE_ELEMENT_BYTES * I64{2}
-    strings_mem :: if (strings_bytes == I64{0}) -> I64{8} else -> jet_rt_alloc(strings_bytes, I64{8})
-    records_mem :: if (records_bytes == I64{0}) -> I64{8} else -> jet_rt_alloc(records_bytes, I64{8})
-    strings :: vault_sorted_indices(rt_text_word(wrapping(pairs + DATA_SEQUENCE_DATA)), string_count, false, strings_mem, strings_mem + strings_bytes / I64{2})
-    records :: vault_sorted_indices(rt_text_word(wrapping(rows + DATA_SEQUENCE_DATA)), record_count, true, records_mem, records_mem + records_bytes / I64{2})
-    nodes :: vault_id_nodes_new(record_count)
-    scratch :: jet_rt_alloc(I64{8256}, I64{8})
-    error :: vault_encode_v2_inner(store, strings, string_count, records, record_count, nodes, scratch, output)
+    strings_bytes: string_count * DATA_TREE_ELEMENT_BYTES * I64{2}
+    records_bytes: record_count * DATA_TREE_ELEMENT_BYTES * I64{2}
+    strings_mem: if (strings_bytes == I64{0}) -> I64{8} else -> jet_rt_alloc(strings_bytes, I64{8})
+    records_mem: if (records_bytes == I64{0}) -> I64{8} else -> jet_rt_alloc(records_bytes, I64{8})
+    strings: vault_sorted_indices(rt_text_word(wrapping(pairs + DATA_SEQUENCE_DATA)), string_count, false, strings_mem, strings_mem + strings_bytes / I64{2})
+    records: vault_sorted_indices(rt_text_word(wrapping(rows + DATA_SEQUENCE_DATA)), record_count, true, records_mem, records_mem + records_bytes / I64{2})
+    nodes: vault_id_nodes_new(record_count)
+    scratch: jet_rt_alloc(I64{8256}, I64{8})
+    error: vault_encode_v2_inner(store, strings, string_count, records, record_count, nodes, scratch, output)
     thread_zero(scratch, I64{8256})
     jet_rt_free(scratch, I64{8256}, I64{8})
     vault_id_nodes_drop(nodes, record_count)
@@ -713,12 +713,12 @@ fn vault_encode_v2(store: I64, output: I64) -> I64 {
     error
 }
 
-VAULT_GROUP_BYTES :: I64{32}
+VAULT_GROUP_BYTES: I64{32}
 // Cursor32 = borrowed bytes0/length8/position16/private error24.
 // All wire counts are nonnegative; remaining-length checks precede additions.
-fn vault_take_bytes(cursor: I64, count: I64) -> I64 {
+vault_take_bytes: fn(cursor: I64, count: I64) -> I64 {
     if (rt_text_word(wrapping(cursor + I64{24})) != I64{-1}) -> return I64{0}
-    at :: rt_text_word(wrapping(cursor + I64{16}))
+    at: rt_text_word(wrapping(cursor + I64{16}))
     if (count < I64{0} || count > rt_text_word(wrapping(cursor + I64{8})) - at) {
         rt_text_store(wrapping(cursor + I64{24}), I64{8})
         return I64{0}
@@ -726,8 +726,8 @@ fn vault_take_bytes(cursor: I64, count: I64) -> I64 {
     rt_text_store(wrapping(cursor + I64{16}), at + count)
     rt_text_word(cursor) + at
 }
-fn vault_take_uint(cursor: I64, width: I64) -> I64 {
-    bytes :: vault_take_bytes(cursor, width)
+vault_take_uint: fn(cursor: I64, width: I64) -> I64 {
+    bytes: vault_take_bytes(cursor, width)
     if (bytes == I64{0}) -> return I64{0}
     at := I64{0}
     value := I64{0}
@@ -737,14 +737,14 @@ fn vault_take_uint(cursor: I64, width: I64) -> I64 {
     }
     value
 }
-fn vault_take_text(cursor: I64, width: I64, maximum: I64) -> I64 {
-    length :: vault_take_uint(cursor, width)
+vault_take_text: fn(cursor: I64, width: I64, maximum: I64) -> I64 {
+    length: vault_take_uint(cursor, width)
     if (rt_text_word(wrapping(cursor + I64{24})) != I64{-1}) -> return I64{0}
     if (length > maximum || (width == I64{2} && length == I64{0})) {
         rt_text_store(wrapping(cursor + I64{24}), I64{8})
         return I64{0}
     }
-    data :: vault_take_bytes(cursor, length)
+    data: vault_take_bytes(cursor, length)
     if (data == I64{0}) -> return I64{0}
     if !vault_utf8_valid(data, length) {
         rt_text_store(wrapping(cursor + I64{24}), I64{8})
@@ -752,13 +752,13 @@ fn vault_take_text(cursor: I64, width: I64, maximum: I64) -> I64 {
     }
     rt_text_copy(data, length)
 }
-fn vault_decode_strings(cursor: I64, count: I64) -> I64 {
-    pairs :: data_sequence_new(count, VAULT_PAIR_BYTES)
-    data :: rt_text_word(wrapping(pairs + DATA_SEQUENCE_DATA))
+vault_decode_strings: fn(cursor: I64, count: I64) -> I64 {
+    pairs: data_sequence_new(count, VAULT_PAIR_BYTES)
+    data: rt_text_word(wrapping(pairs + DATA_SEQUENCE_DATA))
     previous := I64{0}
     at := I64{0}
     loop at < count {
-        name :: vault_take_text(cursor, I64{2}, I64{128})
+        name: vault_take_text(cursor, I64{2}, I64{128})
         if (name == I64{0}) -> break
         if !vault_validate_text(name, false) {
             jet_rt_string_drop(name)
@@ -770,12 +770,12 @@ fn vault_decode_strings(cursor: I64, count: I64) -> I64 {
             rt_text_store(wrapping(cursor + I64{24}), I64{8})
             break
         }
-        value :: vault_take_text(cursor, I64{4}, I64{1048576})
+        value: vault_take_text(cursor, I64{4}, I64{1048576})
         if (value == I64{0}) {
             jet_rt_string_drop(name)
             break
         }
-        slot :: wrapping(data + at * VAULT_PAIR_BYTES)
+        slot: wrapping(data + at * VAULT_PAIR_BYTES)
         rt_text_store(slot, name)
         rt_text_store(wrapping(slot + I64{8}), value)
         at += I64{1}
@@ -788,28 +788,28 @@ fn vault_decode_strings(cursor: I64, count: I64) -> I64 {
     }
     pairs
 }
-fn vault_groups_drop(groups: I64) {
+vault_groups_drop: fn(groups: I64) {
     if (groups == I64{0}) -> return
     at := I64{0}
-    count :: rt_text_word(wrapping(groups + DATA_SEQUENCE_LENGTH))
-    data :: rt_text_word(wrapping(groups + DATA_SEQUENCE_DATA))
+    count: rt_text_word(wrapping(groups + DATA_SEQUENCE_LENGTH))
+    data: rt_text_word(wrapping(groups + DATA_SEQUENCE_DATA))
     loop at < count {
         jet_rt_string_drop(rt_text_word(wrapping(wrapping(data + at * VAULT_GROUP_BYTES) + I64{8})))
         at += I64{1}
     }
-    capacity :: rt_text_word(wrapping(groups + DATA_SEQUENCE_CAPACITY))
+    capacity: rt_text_word(wrapping(groups + DATA_SEQUENCE_CAPACITY))
     if (capacity != I64{0}) -> jet_rt_free(data, capacity * VAULT_GROUP_BYTES, I64{8})
     jet_rt_free(groups, DATA_SEQUENCE_BYTES, I64{8})
 }
-fn vault_decode_groups(cursor: I64, count: I64) -> I64 {
-    groups :: data_sequence_new(count, VAULT_GROUP_BYTES)
-    data :: rt_text_word(wrapping(groups + DATA_SEQUENCE_DATA))
+vault_decode_groups: fn(cursor: I64, count: I64) -> I64 {
+    groups: data_sequence_new(count, VAULT_GROUP_BYTES)
+    data: rt_text_word(wrapping(groups + DATA_SEQUENCE_DATA))
     previous := I64{0}
     previous_tag := I64{0}
     at := I64{0}
     loop at < count {
-        key_tag :: vault_take_uint(cursor, I64{1})
-        name :: vault_take_text(cursor, I64{2}, I64{128})
+        key_tag: vault_take_uint(cursor, I64{1})
+        name: vault_take_text(cursor, I64{2}, I64{128})
         if (name == I64{0}) -> break
         // Name validation precedes tag/order validation, exactly1069-1076.
         if !vault_validate_text(name, false) {
@@ -824,15 +824,15 @@ fn vault_decode_groups(cursor: I64, count: I64) -> I64 {
             rt_text_store(wrapping(cursor + I64{24}), I64{8})
             break
         }
-        current :: vault_take_uint(cursor, I64{8})
-        latest :: vault_take_uint(cursor, I64{8})
+        current: vault_take_uint(cursor, I64{8})
+        latest: vault_take_uint(cursor, I64{8})
         if (rt_text_word(wrapping(cursor + I64{24})) != I64{-1} ||
             latest == I64{0} || (current != I64{0} && current != latest)) {
             jet_rt_string_drop(name)
             rt_text_store(wrapping(cursor + I64{24}), I64{8})
             break
         }
-        slot :: wrapping(data + at * VAULT_GROUP_BYTES)
+        slot: wrapping(data + at * VAULT_GROUP_BYTES)
         rt_text_store(slot, key_tag)
         rt_text_store(wrapping(slot + I64{8}), name)
         rt_text_store(wrapping(slot + I64{16}), current)
@@ -848,14 +848,14 @@ fn vault_decode_groups(cursor: I64, count: I64) -> I64 {
     }
     groups
 }
-fn vault_decode_origin(cursor: I64, provenance: I64) -> I64 {
-    present :: vault_take_uint(cursor, I64{1})
-    uuid :: vault_take_bytes(cursor, I64{16})
-    length :: vault_take_uint(cursor, I64{2})
-    name_data :: vault_take_bytes(cursor, length)
-    generation :: vault_take_uint(cursor, I64{8})
-    opaque :: vault_take_bytes(cursor, I64{16})
-    hash :: vault_take_bytes(cursor, I64{32})
+vault_decode_origin: fn(cursor: I64, provenance: I64) -> I64 {
+    present: vault_take_uint(cursor, I64{1})
+    uuid: vault_take_bytes(cursor, I64{16})
+    length: vault_take_uint(cursor, I64{2})
+    name_data: vault_take_bytes(cursor, length)
+    generation: vault_take_uint(cursor, I64{8})
+    opaque: vault_take_bytes(cursor, I64{16})
+    hash: vault_take_bytes(cursor, I64{32})
     if (rt_text_word(wrapping(cursor + I64{24})) != I64{-1}) -> return I64{0}
     if !vault_utf8_valid(name_data, length) {
         rt_text_store(wrapping(cursor + I64{24}), I64{8})
@@ -870,13 +870,13 @@ fn vault_decode_origin(cursor: I64, provenance: I64) -> I64 {
         rt_text_store(wrapping(cursor + I64{24}), I64{8})
         return I64{0}
     }
-    name :: rt_text_copy(name_data, length)
+    name: rt_text_copy(name_data, length)
     if !vault_validate_text(name, false) {
         jet_rt_string_drop(name)
         rt_text_store(wrapping(cursor + I64{24}), I64{0})
         return I64{0}
     }
-    origin :: jet_rt_alloc(VAULT_ORIGIN_BYTES, I64{8})
+    origin: jet_rt_alloc(VAULT_ORIGIN_BYTES, I64{8})
     rt_text_bytes_copy(wrapping(origin + VAULT_ORIGIN_UUID), uuid, I64{16})
     rt_text_store(wrapping(origin + VAULT_ORIGIN_NAME), name)
     rt_text_store(wrapping(origin + VAULT_ORIGIN_GENERATION), generation)
@@ -885,14 +885,14 @@ fn vault_decode_origin(cursor: I64, provenance: I64) -> I64 {
     origin
 }
 
-fn vault_decode_record(cursor: I64, previous: I64) -> I64 {
-    key_type :: vault_take_uint(cursor, I64{1})
-    status :: vault_take_uint(cursor, I64{1})
+vault_decode_record: fn(cursor: I64, previous: I64) -> I64 {
+    key_type: vault_take_uint(cursor, I64{1})
+    status: vault_take_uint(cursor, I64{1})
     if (status < I64{1} || status > I64{3}) {
         rt_text_store(wrapping(cursor + I64{24}), I64{8})
         return I64{0}
     }
-    provenance :: vault_take_uint(cursor, I64{1})
+    provenance: vault_take_uint(cursor, I64{1})
     if (provenance < I64{1} || provenance > I64{2}) {
         rt_text_store(wrapping(cursor + I64{24}), I64{8})
         return I64{0}
@@ -901,18 +901,18 @@ fn vault_decode_record(cursor: I64, previous: I64) -> I64 {
         rt_text_store(wrapping(cursor + I64{24}), I64{8})
         return I64{0}
     }
-    name :: vault_take_text(cursor, I64{2}, I64{128})
+    name: vault_take_text(cursor, I64{2}, I64{128})
     if (name == I64{0}) -> return I64{0}
     if !vault_validate_text(name, false) {
         jet_rt_string_drop(name)
         rt_text_store(wrapping(cursor + I64{24}), I64{0})
         return I64{0}
     }
-    generation :: vault_take_uint(cursor, I64{8})
+    generation: vault_take_uint(cursor, I64{8})
     ordered := true
     if (previous != I64{0}) {
-        prior_tag :: rt_text_word(wrapping(previous + VAULT_RECORD_TYPE))
-        compare :: jet_rt_string_compare(rt_text_word(wrapping(previous + VAULT_RECORD_NAME)), name)
+        prior_tag: rt_text_word(wrapping(previous + VAULT_RECORD_TYPE))
+        compare: jet_rt_string_compare(rt_text_word(wrapping(previous + VAULT_RECORD_NAME)), name)
         ordered = prior_tag < key_type || (prior_tag == key_type &&
             (compare < I64{0} || (compare == I64{0} &&
              vault_unsigned_less(rt_text_word(wrapping(previous + VAULT_RECORD_GENERATION)), generation))))
@@ -922,31 +922,31 @@ fn vault_decode_record(cursor: I64, previous: I64) -> I64 {
         rt_text_store(wrapping(cursor + I64{24}), I64{8})
         return I64{0}
     }
-    opaque :: vault_take_bytes(cursor, I64{16})
-    created :: vault_take_uint(cursor, I64{8})
-    changed :: vault_take_uint(cursor, I64{8})
-    reason :: vault_take_bytes(cursor, I64{32})
-    public :: vault_take_bytes(cursor, I64{32})
-    origin :: vault_decode_origin(cursor, provenance)
-    key_length :: vault_take_uint(cursor, I64{2})
+    opaque: vault_take_bytes(cursor, I64{16})
+    created: vault_take_uint(cursor, I64{8})
+    changed: vault_take_uint(cursor, I64{8})
+    reason: vault_take_bytes(cursor, I64{32})
+    public: vault_take_bytes(cursor, I64{32})
+    origin: vault_decode_origin(cursor, provenance)
+    key_length: vault_take_uint(cursor, I64{2})
     if (rt_text_word(wrapping(cursor + I64{24})) != I64{-1} || key_length != I64{32}) {
         jet_rt_string_drop(name)
         vault_origin_drop(origin)
         if (rt_text_word(wrapping(cursor + I64{24})) == I64{-1}) -> rt_text_store(wrapping(cursor + I64{24}), I64{8})
         return I64{0}
     }
-    key :: vault_take_bytes(cursor, I64{32})
+    key: vault_take_bytes(cursor, I64{32})
     if (key == I64{0}) {
         jet_rt_string_drop(name)
         vault_origin_drop(origin)
         return I64{0}
     }
-    bytes :: data_sequence_new(I64{32}, RT_HOST_U8_STRIDE)
+    bytes: data_sequence_new(I64{32}, RT_HOST_U8_STRIDE)
     rt_text_bytes_copy(rt_text_word(wrapping(bytes + DATA_SEQUENCE_DATA)), key, I64{32})
     rt_text_store(wrapping(bytes + DATA_SEQUENCE_LENGTH), I64{32})
-    secret :: jet_rt_secret_from_bytes(bytes)
+    secret: jet_rt_secret_from_bytes(bytes)
     jet_rt_free(bytes, DATA_SEQUENCE_BYTES, I64{8})
-    record :: vault_record_allocate_owned(name, key_type, generation, status, provenance, secret)
+    record: vault_record_allocate_owned(name, key_type, generation, status, provenance, secret)
     rt_text_bytes_copy(wrapping(record + VAULT_RECORD_OPAQUE), opaque, I64{16})
     rt_text_store(wrapping(record + VAULT_RECORD_CREATED), created)
     rt_text_store(wrapping(record + VAULT_RECORD_STATUS_MS), changed)
@@ -955,19 +955,19 @@ fn vault_decode_record(cursor: I64, previous: I64) -> I64 {
     rt_text_store(wrapping(record + VAULT_RECORD_ORIGIN), origin)
     record
 }
-fn vault_decode_records(cursor: I64, count: I64, nodes: I64, scratch: I64) -> I64 {
-    records :: data_sequence_new(count, DATA_TREE_ELEMENT_BYTES)
-    data :: rt_text_word(wrapping(records + DATA_SEQUENCE_DATA))
+vault_decode_records: fn(cursor: I64, count: I64, nodes: I64, scratch: I64) -> I64 {
+    records: data_sequence_new(count, DATA_TREE_ELEMENT_BYTES)
+    data: rt_text_word(wrapping(records + DATA_SEQUENCE_DATA))
     previous := I64{0}
     root := I64{0}
     at := I64{0}
     loop at < count {
-        record :: vault_decode_record(cursor, previous)
+        record: vault_decode_record(cursor, previous)
         if (record == I64{0}) -> break
-        key_tag :: rt_text_word(wrapping(record + VAULT_RECORD_TYPE))
+        key_tag: rt_text_word(wrapping(record + VAULT_RECORD_TYPE))
         error := I64{8}
         if ((key_tag == I64{1} || key_tag == I64{2}) && !vault_bytes_zero(wrapping(record + VAULT_RECORD_OPAQUE), I64{16})) {
-            node :: vault_id_node(nodes, at, record)
+            node: vault_id_node(nodes, at, record)
             root = vault_id_insert(root, node)
             if (root != I64{-1}) -> error = vault_record_validate(record, true, scratch)
         }
@@ -989,29 +989,29 @@ fn vault_decode_records(cursor: I64, count: I64, nodes: I64, scratch: I64) -> I6
 }
 // The wire's groups and records are already strictly ordered. A single merge
 // proves the seed1193-1221 coverage/continuity/current checks without its scans.
-fn vault_groups_cover_records(groups: I64, records: I64) -> Bool {
-    count :: rt_text_word(wrapping(records + DATA_SEQUENCE_LENGTH))
-    data :: rt_text_word(wrapping(records + DATA_SEQUENCE_DATA))
-    group_count :: rt_text_word(wrapping(groups + DATA_SEQUENCE_LENGTH))
-    group_data :: rt_text_word(wrapping(groups + DATA_SEQUENCE_DATA))
+vault_groups_cover_records: fn(groups: I64, records: I64) -> Bool {
+    count: rt_text_word(wrapping(records + DATA_SEQUENCE_LENGTH))
+    data: rt_text_word(wrapping(records + DATA_SEQUENCE_DATA))
+    group_count: rt_text_word(wrapping(groups + DATA_SEQUENCE_LENGTH))
+    group_data: rt_text_word(wrapping(groups + DATA_SEQUENCE_DATA))
     group_index := I64{0}
     at := I64{0}
     loop group_index < group_count {
         if at == count -> return false
-        group :: wrapping(group_data + group_index * VAULT_GROUP_BYTES)
-        row :: rt_text_word(wrapping(data + at * DATA_TREE_ELEMENT_BYTES))
+        group: wrapping(group_data + group_index * VAULT_GROUP_BYTES)
+        row: rt_text_word(wrapping(data + at * DATA_TREE_ELEMENT_BYTES))
         if rt_text_word(group) != rt_text_word(wrapping(row + VAULT_RECORD_TYPE)) -> return false
         if !jet_rt_string_eq(rt_text_word(wrapping(group + I64{8})), rt_text_word(wrapping(row + VAULT_RECORD_NAME))) -> return false
-        end :: vault_group_end(data, count, at)
-        current :: rt_text_word(wrapping(group + I64{16}))
-        latest :: rt_text_word(wrapping(group + I64{24}))
+        end: vault_group_end(data, count, at)
+        current: rt_text_word(wrapping(group + I64{16}))
+        latest: rt_text_word(wrapping(group + I64{24}))
         if latest != end - at -> return false
         active_count := I64{0}
         active_generation := I64{0}
         index := at
         loop index < end {
-            record :: rt_text_word(wrapping(data + index * DATA_TREE_ELEMENT_BYTES))
-            generation :: rt_text_word(wrapping(record + VAULT_RECORD_GENERATION))
+            record: rt_text_word(wrapping(data + index * DATA_TREE_ELEMENT_BYTES))
+            generation: rt_text_word(wrapping(record + VAULT_RECORD_GENERATION))
             if (generation != index - at + I64{1}) -> return false
             if (rt_text_word(wrapping(record + VAULT_RECORD_STATUS)) == I64{1}) {
                 active_count += I64{1}
@@ -1019,19 +1019,19 @@ fn vault_groups_cover_records(groups: I64, records: I64) -> Bool {
             }
             index += I64{1}
         }
-        expected_active :: if (current == I64{0}) -> I64{0} else -> I64{1}
+        expected_active: if (current == I64{0}) -> I64{0} else -> I64{1}
         if active_count != expected_active || active_generation != current -> return false
         at = end
         group_index += I64{1}
     }
     at == count
 }
-fn vault_decode_v2(bytes: I64, length: I64, output: I64) -> I64 {
+vault_decode_v2: fn(bytes: I64, length: I64, output: I64) -> I64 {
     if (length < I64{76} || length > VAULT_MAX_BYTES) -> return I64{8}
-    payload_length :: length - I64{32}
-    scratch :: jet_rt_alloc(I64{8288}, I64{8})
+    payload_length: length - I64{32}
+    scratch: jet_rt_alloc(I64{8288}, I64{8})
     vault_payload_hash(bytes, payload_length, wrapping(scratch + I64{8192}), scratch)
-    valid_hash :: rt_text_equal_bytes(wrapping(scratch + I64{8192}), wrapping(bytes + payload_length), I64{32})
+    valid_hash: rt_text_equal_bytes(wrapping(scratch + I64{8192}), wrapping(bytes + payload_length), I64{32})
     if (!valid_hash || vault_u32(bytes) != I64{1414288970} ||
         rt_text_byte(wrapping(bytes + I64{4})) != I64{2} ||
         rt_text_byte(wrapping(bytes + I64{5})) != I64{0} ||
@@ -1042,15 +1042,15 @@ fn vault_decode_v2(bytes: I64, length: I64, output: I64) -> I64 {
         jet_rt_free(scratch, I64{8288}, I64{8})
         return I64{8}
     }
-    cursor :: wrapping(scratch + I64{8256})
+    cursor: wrapping(scratch + I64{8256})
     rt_text_store(cursor, bytes)
     rt_text_store(wrapping(cursor + I64{8}), payload_length)
     rt_text_store(wrapping(cursor + I64{16}), I64{24})
     rt_text_store(wrapping(cursor + I64{24}), I64{-1})
-    revision :: vault_take_uint(cursor, I64{8})
-    string_count :: vault_take_uint(cursor, I64{4})
-    name_count :: vault_take_uint(cursor, I64{4})
-    record_count :: vault_take_uint(cursor, I64{4})
+    revision: vault_take_uint(cursor, I64{8})
+    string_count: vault_take_uint(cursor, I64{4})
+    name_count: vault_take_uint(cursor, I64{4})
+    record_count: vault_take_uint(cursor, I64{4})
     if (revision == I64{0} || string_count > VAULT_MAX_STRINGS ||
         name_count > VAULT_MAX_NAMES || record_count > VAULT_MAX_VERSIONS) {
         thread_zero(scratch, I64{8288})
@@ -1059,10 +1059,10 @@ fn vault_decode_v2(bytes: I64, length: I64, output: I64) -> I64 {
     }
     // Each phase releases its own partial owners on error. Subsequent phases
     // are entered only on success, so malformed prefixes allocate no later Vec.
-    pairs :: vault_decode_strings(cursor, string_count)
-    groups :: if (pairs == I64{0}) -> I64{0} else -> vault_decode_groups(cursor, name_count)
-    nodes :: if (groups == I64{0}) -> I64{8} else -> vault_id_nodes_new(record_count)
-    records :: if (groups == I64{0}) -> I64{0} else -> vault_decode_records(cursor, record_count, nodes, scratch)
+    pairs: vault_decode_strings(cursor, string_count)
+    groups: if (pairs == I64{0}) -> I64{0} else -> vault_decode_groups(cursor, name_count)
+    nodes: if (groups == I64{0}) -> I64{8} else -> vault_id_nodes_new(record_count)
+    records: if (groups == I64{0}) -> I64{0} else -> vault_decode_records(cursor, record_count, nodes, scratch)
     error := rt_text_word(wrapping(cursor + I64{24}))
     if (error == I64{-1}) {
         if rt_text_word(wrapping(cursor + I64{16})) != payload_length || !vault_groups_cover_records(groups, records) -> error = I64{8}
@@ -1070,7 +1070,7 @@ fn vault_decode_v2(bytes: I64, length: I64, output: I64) -> I64 {
     if (groups != I64{0}) -> vault_id_nodes_drop(nodes, record_count)
     vault_groups_drop(groups)
     if (error == I64{-1}) {
-        store :: jet_rt_alloc(VAULT_STORE_BYTES, I64{8})
+        store: jet_rt_alloc(VAULT_STORE_BYTES, I64{8})
         rt_text_bytes_copy(wrapping(store + VAULT_STORE_UUID), wrapping(bytes + I64{8}), I64{16})
         rt_text_store(wrapping(store + VAULT_STORE_REVISION), revision)
         rt_text_store(wrapping(store + VAULT_STORE_STRINGS), pairs)

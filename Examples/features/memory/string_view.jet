@@ -6,11 +6,11 @@
 // `String` stays the one Jet-level
 // string type end to end (D-MEM1 gallery): the view is an internal
 // representation choice, invisible in the surface syntax.
-fn run() {
-    padded :: "  user@jet-lang.dev  "
-    email :: padded.trim()
-    domain :: email.after("@")
-    user :: email.before("@")
+run: fn() {
+    padded: "  user@jet-lang.dev  "
+    email: padded.trim()
+    domain: email.after("@")
+    user: email.before("@")
     print("user={user} domain={domain}")
     // The view borrows `padded`'s buffer; reading `padded` again afterward
     // still works (this is a read, not a move) — proving the view didn't
@@ -24,22 +24,22 @@ fn run() {
     print("implicit copy={implicit_domain(padded)}")
 }
 
-fn implicit_domain(s: String) -> String {
-    d :: s.after("@")
+implicit_domain: fn(s: String) -> String {
+    d: s.after("@")
     return d
 }
 
-fn domain_of(s: String) -> String {
-    d :: s.after("@")
+domain_of: fn(s: String) -> String {
+    d: s.after("@")
     return d.copy()
 }
 
 #Test("string view: after/before/trim, no owning materialization") {
     .measure {
-        email :: "user@jet-lang.dev"
+        email: "user@jet-lang.dev"
         loop i in 0..1000 {
-            d :: email.after("@")
-            s :: "{d}"
+            d: email.after("@")
+            s: "{d}"
             assert_eq(s, "jet-lang.dev")
         }
     }

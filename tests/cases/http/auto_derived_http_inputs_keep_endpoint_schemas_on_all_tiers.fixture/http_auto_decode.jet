@@ -1,19 +1,19 @@
 
 use {
-    server :: core.http.server
-    web :: core.web
+    server: core.http.server
+    web: core.web
 }
-struct JokeID { value: Int }
-struct Jokes {
+JokeID: struct { value: Int }
+Jokes: struct {
     #Server.Get("/mounted/:id")
-    fn joke(self, id: JokeID) -> HTTPResponse HTTPError! {
+    joke: fn(self, id: JokeID) -> HTTPResponse HTTPError! {
         Ok(server.response(200, "joke={id.value}"))
     }
 }
-fn run() {
-    mux :: server.mux()
+run: fn() {
+    mux: server.mux()
     mux.get("/direct/:id", (id: JokeID) -> Ok(server.response(200, "joke={id.value}")))
     mux.mount(Jokes{})
-    schema :: web.openapi(mux)
+    schema: web.openapi(mux)
     print(schema.contains("\"value\"") && schema.contains("/mounted/") && schema.contains("/direct/"))
 }

@@ -2,75 +2,75 @@
 // beyond-64-bit integers stay exact in `Int`, decimals stay exact in
 // `Decimal`, and a quoted, fractional, out-of-range or nonfinite number
 // is a typed decode error, never a silent coercion.
-use json :: core.encoding.json
+use json: core.encoding.json
 
-struct WholeBox {
+WholeBox: struct {
     n: Int
 }
 
-struct ByteBox {
+ByteBox: struct {
     n: U8
 }
 
-struct Int32Box {
+Int32Box: struct {
     n: I32
 }
 
-struct FloatBox {
+FloatBox: struct {
     n: Float
 }
 
-struct DecimalBox {
+DecimalBox: struct {
     n: Decimal
 }
 
-struct Inner {
+Inner: struct {
     count: Int
     ratio: Float
     price: Decimal
     tally: [Int]
 }
 
-struct Outer {
+Outer: struct {
     inner: Inner
 }
 
-fn whole(label: String, raw: String) {
+whole: fn(label: String, raw: String) {
     if json.decode<WholeBox>(raw) == {
         .Ok(value) -> print("{label}: Int {value.n}")
         .Err(errors) -> print("{label}: Int rejected {errors}")
     }
 }
 
-fn byte(label: String, raw: String) {
+byte: fn(label: String, raw: String) {
     if json.decode<ByteBox>(raw) == {
         .Ok(value) -> print("{label}: U8 {value.n}")
         .Err(errors) -> print("{label}: U8 rejected {errors}")
     }
 }
 
-fn int32(label: String, raw: String) {
+int32: fn(label: String, raw: String) {
     if json.decode<Int32Box>(raw) == {
         .Ok(value) -> print("{label}: I32 {value.n}")
         .Err(errors) -> print("{label}: I32 rejected {errors}")
     }
 }
 
-fn float(label: String, raw: String) {
+float: fn(label: String, raw: String) {
     if json.decode<FloatBox>(raw) == {
         .Ok(value) -> print("{label}: Float {value.n}")
         .Err(errors) -> print("{label}: Float rejected {errors}")
     }
 }
 
-fn decimal(label: String, raw: String) {
+decimal: fn(label: String, raw: String) {
     if json.decode<DecimalBox>(raw) == {
         .Ok(value) -> print("{label}: Decimal {value.n.to_string()}")
         .Err(errors) -> print("{label}: Decimal rejected {errors}")
     }
 }
 
-fn run() {
+run: fn() {
     whole("exact", "{{\"n\":42}}")
     whole("i64 max", "{{\"n\":9223372036854775807}}")
     whole("beyond i64", "{{\"n\":123456789012345678901234567890}}")
@@ -94,12 +94,12 @@ fn run() {
     decimal("scale kept", "{{\"n\":12.340}}")
     decimal("tenth", "{{\"n\":0.1}}")
     decimal("exponent", "{{\"n\":1E-5}}")
-    nested :: "{{\"inner\":{{\"count\":7,\"ratio\":2.5,\"price\":19.990,\"tally\":[1,2,99999999999999999999]}}}}"
+    nested: "{{\"inner\":{{\"count\":7,\"ratio\":2.5,\"price\":19.990,\"tally\":[1,2,99999999999999999999]}}}}"
     if json.decode<Outer>(nested) == {
         .Ok(value) -> print("nested: count {value.inner.count}, ratio {value.inner.ratio}, price {value.inner.price.to_string()}, tally {value.inner.tally}")
         .Err(errors) -> print("nested: rejected {errors}")
     }
-    bad_nested :: "{{\"inner\":{{\"count\":7.5,\"ratio\":2.5,\"price\":1,\"tally\":[1]}}}}"
+    bad_nested: "{{\"inner\":{{\"count\":7.5,\"ratio\":2.5,\"price\":1,\"tally\":[1]}}}}"
     if json.decode<Outer>(bad_nested) == {
         .Ok(value) -> print("nested fractional count: accepted {value.inner.count}")
         .Err(errors) -> print("nested fractional count: rejected {errors}")

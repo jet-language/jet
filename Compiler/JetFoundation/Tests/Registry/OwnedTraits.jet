@@ -2,25 +2,25 @@
 // the compiler-owned traits: its rows are consistent, and no compiler source
 // or syntax constant keeps a second list of them.
 use {
-    owned_traits_files :: core.files
+    owned_traits_files: core.files
     jet_foundation.[OWNED_TRAITS, OwnedContract, owned_trait, owned_trait_auto_derive_marker, owned_trait_bundle, owned_trait_bundle_marker, owned_trait_codec, owned_trait_codec_marker, owned_trait_codec_names, owned_trait_commutative, owned_trait_family, owned_trait_literal, owned_trait_requires_listed, owned_trait_structural_names]
 }
 
 // The one file that may list the owned trait names.
-OWNED_TRAITS_ROWS :: "Compiler/JetFoundation/Source/Registry/OwnedTraitRows.jet"
+OWNED_TRAITS_ROWS: "Compiler/JetFoundation/Source/Registry/OwnedTraitRows.jet"
 
 // The syntax registry, whose constants are spellings, not trait lists.
-OWNED_TRAITS_SYNTAX :: "Compiler/JetFoundation/Data/Syntax"
+OWNED_TRAITS_SYNTAX: "Compiler/JetFoundation/Data/Syntax"
 
 // A name the table answers for: a trait, or a derive or bundle family marker.
-fn owned_traits_known(name: String) -> Bool Never! {
+owned_traits_known: fn(name: String) -> Bool Never! {
     owned_trait(name) != None || owned_trait_family(name, false).len() > 0 || owned_trait_family(name, true).len() > 0
 }
 
 // The owned trait and family names one source line quotes, in order, each once.
-fn owned_traits_quoted(line: String) -> [String] Never! {
+owned_traits_quoted: fn(line: String) -> [String] Never! {
     found := [String]{}
-    parts :: line.split("\"").to_list()
+    parts: line.split("\"").to_list()
     loop index in 0..<parts.len() {
         if index % 2 == 0 -> next
         if owned_traits_known(parts[index]) && !found.contains(parts[index]) -> &found.push(parts[index])
@@ -94,15 +94,15 @@ fn owned_traits_quoted(line: String) -> [String] Never! {
 
 #Test("no compiler source lists the owned trait names outside OWNED_TRAITS") {
     violations := [String]{}
-    entries :: owned_traits_files.walk("Compiler", None) ?? panic("walk Compiler: {err}")
+    entries: owned_traits_files.walk("Compiler", None) ?? panic("walk Compiler: {err}")
     loop entry in entries {
         if entry.is_dir || !entry.path.ends_with(".jet") -> next
         if !entry.path.contains("/Source/") && !entry.path.contains("/Data/") -> next
         if entry.path.ends_with(OWNED_TRAITS_ROWS) -> next
-        source :: owned_traits_files.read(entry.path) ?? panic("read {entry.path}: {err}")
+        source: owned_traits_files.read(entry.path) ?? panic("read {entry.path}: {err}")
         loop (index, line) in source.split("\n").to_list() {
             if line.trim_start().starts_with("//") -> next
-            quoted :: owned_traits_quoted(line)
+            quoted: owned_traits_quoted(line)
             if quoted.len() >= 3 -> &violations.push("{entry.path}:{index + 1} lists {quoted.join(" ")}; ask OWNED_TRAITS instead")
         }
     }
@@ -115,16 +115,16 @@ fn owned_traits_quoted(line: String) -> [String] Never! {
 // marker, not the trait).
 #Test("no syntax constant spells an owned trait or its markers") {
     violations := [String]{}
-    entries :: owned_traits_files.walk(OWNED_TRAITS_SYNTAX, None) ?? panic("walk {OWNED_TRAITS_SYNTAX}: {err}")
+    entries: owned_traits_files.walk(OWNED_TRAITS_SYNTAX, None) ?? panic("walk {OWNED_TRAITS_SYNTAX}: {err}")
     loop entry in entries {
         if entry.is_dir || !entry.path.ends_with(".jet") -> next
-        source :: owned_traits_files.read(entry.path) ?? panic("read {entry.path}: {err}")
+        source: owned_traits_files.read(entry.path) ?? panic("read {entry.path}: {err}")
         loop (index, line) in source.split("\n").to_list() {
-            parts :: line.split(" :: \"").to_list()
+            parts: line.split(": \"").to_list()
             if parts.len() < 2 || parts[0].contains(" ") || parts[0] == "" -> next
-            value :: parts[1].split("\"").to_list()[0]
+            value: parts[1].split("\"").to_list()[0]
             if !owned_traits_known(value) -> next
-            marker :: parts[0].starts_with("MARKER_")
+            marker: parts[0].starts_with("MARKER_")
             if marker && !owned_trait_auto_derive_marker(value) && owned_trait_bundle(value).len() == 0 -> next
             &violations.push("{entry.path}:{index + 1} spells `{value}` as {parts[0]}; OWNED_TRAITS owns it")
         }

@@ -11,10 +11,10 @@
 // finite value-position loop (`loop item in items -> value`) is also eager and
 // returns a List; use `.lazy()` on a collection pipeline when evaluation must
 // be deferred.
-// `::` below keeps the source binding immutable; iteration reads the source and
+// `:` below keeps the source binding immutable; iteration reads the source and
 // does not mutate it. The explicit-state form (`loop i := 0, i < n { ... }`)
 // owns its mutable header state in the body.
-fn run() {
+run: fn() {
     // 1. Infinite loop, left with `break` (S23).
     n := 0
     loop {
@@ -32,7 +32,7 @@ fn run() {
     print("iterator sum {sum}")
     // 4. Two-binding over a list — index comes free, no bounds math. The
     // immutable `items` binding and its list storage are only read here.
-    items :: [String]{"a", "b"}
+    items: [String]{"a", "b"}
     loop (i, item) in items -> print("pair {i}:{item}")
     // 5. Index-only, always in bounds for this source.
     loop i in items.indexes() -> print("idx {i}")

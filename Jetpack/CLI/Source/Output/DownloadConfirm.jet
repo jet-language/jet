@@ -6,12 +6,12 @@
 impl Theme {
     // `env.dev: 2 new, 3 cached, 1 repaired · download 1.5 MB · on disk
     // 4.2 MB · about 3s`. A cached-only plan says `no download` and no time.
-    fn render_download_summary(label: String, plan: DownloadPlan) -> String Never! {
-        download :: if plan.download_bytes == {
+    render_download_summary: fn(label: String, plan: DownloadPlan) -> String Never! {
+        download: if plan.download_bytes == {
             .Val(bytes) -> if bytes == 0 -> "no download" else -> "download {terminal_human_size(bytes)}"
             .None -> "download unknown"
         }
-        disk :: if plan.disk_bytes == {
+        disk: if plan.disk_bytes == {
             .Val(bytes) -> terminal_human_size(bytes)
             .None -> "unknown"
         }
@@ -22,19 +22,19 @@ impl Theme {
         "{label}: {plan.new} new, {plan.cached} cached, {plan.repaired} repaired · {download} · on disk {disk}{estimate}"
     }
 
-    fn download_plan_table(self, plan: DownloadPlan) Never! -[IO, Time.Wait]> {
+    download_plan_table: fn(self, plan: DownloadPlan) Never! -[IO, Time.Wait]> {
         self.detail("package                                  state     download   on disk")
         loop item in plan.items {
-            state :: if item.state == {
+            state: if item.state == {
                 .New -> "new"
                 .Cached -> "cached"
                 .Repaired -> "repaired"
             }
-            download :: if item.download_bytes == {
+            download: if item.download_bytes == {
                 .Val(bytes) -> terminal_human_size(bytes)
                 .None -> "unknown"
             }
-            disk :: if item.disk_bytes == {
+            disk: if item.disk_bytes == {
                 .Val(bytes) -> terminal_human_size(bytes)
                 .None -> "unknown"
             }
@@ -45,8 +45,8 @@ impl Theme {
     // Confirm the first acquisition for an environment. The closure is
     // already resolved, so the gate reports trusted plan facts before any
     // payload is fetched.
-    fn confirm_download(self, label: String, plan: DownloadPlan, explain: Bool, assume_yes: Bool) -[IO, Time.Wait]> Bool Never! {
-        summary :: Theme.render_download_summary(label, plan)
+    confirm_download: fn(self, label: String, plan: DownloadPlan, explain: Bool, assume_yes: Bool) -[IO, Time.Wait]> Bool Never! {
+        summary: Theme.render_download_summary(label, plan)
         if explain -> self.download_plan_table(plan)
         if assume_yes || plan.new + plan.repaired == 0 {
             self.status(summary)
@@ -57,12 +57,12 @@ impl Theme {
             return false
         }
         terminal_write_output("  {self.gutter()}  {summary} - Continue? [Y/n] ")
-        answer :: term.readline() ?? {
+        answer: term.readline() ?? {
             self.status("download cancelled.")
             return false
         }
-        reply :: answer.trim().to_lower()
-        apply :: reply == "" || reply == "y" || reply == "yes"
+        reply: answer.trim().to_lower()
+        apply: reply == "" || reply == "y" || reply == "yes"
         if !apply -> self.status("download cancelled.")
         apply
     }
@@ -70,8 +70,8 @@ impl Theme {
 
 impl ByteProgress {
     // The Store progress sink that drives this ledger.
-    fn handle(self) -> ProgressHandle Never! {
-        progress :: ByteProgress{state: self.state}
+    handle: fn(self) -> ProgressHandle Never! {
+        progress: ByteProgress{state: self.state}
         ProgressHandle{
             discovered_bytes: (bytes: Int) -[IO, Env, Time.Wait]> { progress.discovered_bytes(bytes) },
             transferred_bytes: (bytes: Int) -[IO, Env, Time.Wait]> { progress.transferred_bytes(bytes) },
@@ -83,7 +83,7 @@ impl ByteProgress {
 
 impl LiveRegion {
     // The sink a provider reports byte and object progress through.
-    fn progress_handle(self) -> ProgressHandle Never! {
+    progress_handle: fn(self) -> ProgressHandle Never! {
         self.progress.handle()
     }
 }

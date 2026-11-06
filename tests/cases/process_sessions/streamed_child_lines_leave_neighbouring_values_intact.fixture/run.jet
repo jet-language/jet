@@ -2,14 +2,14 @@
 // before it decodes it. The line buffer is a counted List block, so trimming
 // it never writes the bytes beside it: each line reads back as sent, and the
 // boxed names allocated between the reads keep their values.
-use process :: core.process
+use process: core.process
 
-struct Holder {
+Holder: struct {
     name: String?
 }
 
-fn run() {
-    script :: "i=0; while [ $i -lt 300 ]; do echo ready; echo ready >&2; i=$((i+1)); done"
+run: fn() {
+    script: "i=0; while [ $i -lt 300 ]; do echo ready; echo ready >&2; i=$((i+1)); done"
     child := process.cmd(["/bin/sh", "-c", script]).stdout(.Stream).stderr(.Stream).spawn()
     kept := [Holder]{}
     lines := 0
@@ -24,11 +24,11 @@ fn run() {
         &kept.push(Holder{name: Val("value {lines + errors}")})
         errors += 1
     }
-    receipt :: child.wait()
+    receipt: child.wait()
     intact := 0
     loop (index, holder) in kept {
         if holder.name == .Val(name) {
-            expected :: "value {index}"
+            expected: "value {index}"
             if name == expected -> intact += 1
         }
     }

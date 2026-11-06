@@ -1,10 +1,10 @@
 
-use event :: core.event
+use event: core.event
 
-fn run() {
-    scope :: event.scope()
-    hook :: event.decision_hook<Int, String>(HookPolicy.FirstCancelElseTransform)
-    late :: hook.on(scope, (value: Int) -> {
+run: fn() {
+    scope: event.scope()
+    hook: event.decision_hook<Int, String>(HookPolicy.FirstCancelElseTransform)
+    late: hook.on(scope, (value: Int) -> {
         print("late {value}")
         HookDecision.Continue
     })
@@ -28,9 +28,9 @@ fn run() {
     scope.cancel()
     hook.run(3)
 
-    owned :: event.decision_hook<Int, String>(HookPolicy.FirstCancelElseTransform)
+    owned: event.decision_hook<Int, String>(HookPolicy.FirstCancelElseTransform)
     if true {
-        owner :: event.scope()
+        owner: event.scope()
         owned.on(owner, (value: Int) -> {
             print("leaked {value}")
             HookDecision.Continue

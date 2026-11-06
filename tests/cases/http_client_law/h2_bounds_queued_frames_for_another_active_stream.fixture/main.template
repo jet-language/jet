@@ -1,10 +1,10 @@
-use http :: core.http.client
-fn run() {
-    client :: http.Client.new().protocols(true, false, true)
-    first :: client.send(http.request("GET", "http://{cap:addr}/h2")) ?? panic("first")
+use http: core.http.client
+run: fn() {
+    client: http.Client.new().protocols(true, false, true)
+    first: client.send(http.request("GET", "http://{cap:addr}/h2")) ?? panic("first")
     assert_eq(first.status(), 200)
-    second_task :: task { client.send(http.request("GET", "http://{cap:addr}/h2")) ?? panic("second") }
-    second :: second_task.join() ?? panic("second task")
+    second_task: task { client.send(http.request("GET", "http://{cap:addr}/h2")) ?? panic("second") }
+    second: second_task.join() ?? panic("second task")
     assert_eq(second.status(), 200)
     saw_error := false
     loop chunk in first.body().chunks(65536) {

@@ -1,7 +1,7 @@
-use process :: core.process
+use process: core.process
 
-fn run() {
-    policy :: process.workspace()
+run: fn() {
+    policy: process.workspace()
     print("host-read")
     if process.cmd(["bash", "-c", "if test -r '{tmp}/host-secret'; then printf escaped; else printf blocked; fi"]).cwd("{work}").under(policy).run_checked() == {
         .Ok(value) -> print(value.output)

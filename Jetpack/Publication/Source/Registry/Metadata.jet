@@ -9,10 +9,10 @@ use {
     jetpack_foundation.[foundation_open_file_authority]
 }
 
-PUBLICATION_REGISTRY_PACKAGE_METADATA_FILE :: "registry.json"
-PUBLICATION_MAX_REGISTRY_PACKAGE_METADATA_BYTES :: 1048576
+PUBLICATION_REGISTRY_PACKAGE_METADATA_FILE: "registry.json"
+PUBLICATION_MAX_REGISTRY_PACKAGE_METADATA_BYTES: 1048576
 
-struct PublicationRegistryDependency {
+PublicationRegistryDependency: struct {
     name: String
     requirements: [String]
     // Rust BTreeSet fields are sorted unique lists.
@@ -22,14 +22,14 @@ struct PublicationRegistryDependency {
     strict: Bool
     enabled_by_default: Bool
 }
-struct PublicationRegistryPackageMetadata {
+PublicationRegistryPackageMetadata: struct {
     name: String
     version: String
     dependencies: [PublicationRegistryDependency]
     active_features: [String]
     canonical_text: String
 
-    fn active_dependencies(self) -> [PublicationRegistryDependency] Never! {
+    active_dependencies: fn(self) -> [PublicationRegistryDependency] Never! {
         out := [PublicationRegistryDependency]{}
         loop dependency in self.dependencies {
             dev_or_test_only := true
@@ -43,20 +43,20 @@ struct PublicationRegistryPackageMetadata {
         }
         out
     }
-    fn contains_dependency(self, name: String) -> Bool Never! {
+    contains_dependency: fn(self, name: String) -> Bool Never! {
         loop dependency in self.dependencies {
             if dependency.name == name -> return true
         }
         false
     }
-    fn canonical(self) -> String Never! { self.canonical_text }
+    canonical: fn(self) -> String Never! { self.canonical_text }
 }
 
 // Foundation's canonical descriptor-relative reader retains every ancestor
 // and refuses links. Only its known semantic bound/nonregular refusals change
 // into the Rust metadata diagnostic; OS errors retain their kind and context.
-fn publication_read_registry_package_metadata(artifact: String, expected_name: String, expected_version: String) -[FS, Env]> PublicationRegistryPackageMetadata? IOError! {
-    held :: if foundation_open_file_authority(artifact, PUBLICATION_REGISTRY_PACKAGE_METADATA_FILE) == {
+publication_read_registry_package_metadata: fn(artifact: String, expected_name: String, expected_version: String) -[FS, Env]> PublicationRegistryPackageMetadata? IOError! {
+    held: if foundation_open_file_authority(artifact, PUBLICATION_REGISTRY_PACKAGE_METADATA_FILE) == {
         .Ok(source) -> source
         .Err(error) -> if error == {
             .NotFound(_) -> { return Ok(None) }
@@ -67,7 +67,7 @@ fn publication_read_registry_package_metadata(artifact: String, expected_name: S
             else -> { return Err(error) }
         }
     }
-    bytes :: if held.read_bounded(PUBLICATION_MAX_REGISTRY_PACKAGE_METADATA_BYTES) == {
+    bytes: if held.read_bounded(PUBLICATION_MAX_REGISTRY_PACKAGE_METADATA_BYTES) == {
         .Ok(contents) -> contents
         .Err(error) -> if error == {
             .InvalidInput(context) -> {
@@ -77,45 +77,45 @@ fn publication_read_registry_package_metadata(artifact: String, expected_name: S
             else -> { return Err(error) }
         }
     }
-    text :: String.from_bytes(bytes) ?? return Err(publication_invalid_registry_metadata("stream did not contain valid UTF-8"))
-    metadata :: publication_parse_registry_package_metadata(text, expected_name, expected_version)
+    text: String.from_bytes(bytes) ?? return Err(publication_invalid_registry_metadata("stream did not contain valid UTF-8"))
+    metadata: publication_parse_registry_package_metadata(text, expected_name, expected_version)
     held.revalidate()
     Ok(Val(metadata))
 }
-fn publication_validate_registry_metadata_file(source: String, expected_name: String, expected_version: String) IOError! -[FS, Env]> {
-    _ :: publication_read_registry_package_metadata(source, expected_name, expected_version)
+publication_validate_registry_metadata_file: fn(source: String, expected_name: String, expected_version: String) IOError! -[FS, Env]> {
+    _: publication_read_registry_package_metadata(source, expected_name, expected_version)
 }
 
 // Rust parse_registry_package_metadata: trim/join lines without re-encoding.
-fn publication_parse_registry_package_metadata(text: String, expected_name: String, expected_version: String) -> PublicationRegistryPackageMetadata IOError! {
+publication_parse_registry_package_metadata: fn(text: String, expected_name: String, expected_version: String) -> PublicationRegistryPackageMetadata IOError! {
     // Collect the trimmed lines and join once, as Rust's collect::<String>()
     // does, instead of re-copying the growing text for every line.
     trimmed := [String]{}
     loop line in text.lines() -> &trimmed.push(line.trim())
-    canonical :: trimmed.join("")
-    tree :: foundation_parse_protocol_json(canonical) ?? return Err(publication_invalid_registry_metadata("registry.json is not valid JSON"))
-    object :: pkg_json_object(tree) ?? return Err(publication_invalid_registry_metadata("registry.json must contain one JSON object"))
-    name :: publication_required_metadata_string(object, "name")
-    version :: publication_required_metadata_string(object, "version")
+    canonical: trimmed.join("")
+    tree: foundation_parse_protocol_json(canonical) ?? return Err(publication_invalid_registry_metadata("registry.json is not valid JSON"))
+    object: pkg_json_object(tree) ?? return Err(publication_invalid_registry_metadata("registry.json must contain one JSON object"))
+    name: publication_required_metadata_string(object, "name")
+    version: publication_required_metadata_string(object, "version")
     if name != expected_name || version != expected_version -> return Err(publication_invalid_registry_metadata("registry.json identity disagrees with its artifact path"))
     dependencies := [String: PublicationRegistryDependency]{}
-    fields :: [String]{"dependencies", "build_dependencies", "tool_dependencies", "dev_dependencies", "test_dependencies", "optional_dependencies", "peer_dependencies", "plugin_dependencies", "target_dependencies"}
-    roles :: [String]{"normal", "build", "tool", "dev", "test", "optional", "peer", "plugin", "target"}
+    fields: [String]{"dependencies", "build_dependencies", "tool_dependencies", "dev_dependencies", "test_dependencies", "optional_dependencies", "peer_dependencies", "plugin_dependencies", "target_dependencies"}
+    roles: [String]{"normal", "build", "tool", "dev", "test", "optional", "peer", "plugin", "target"}
     loop index in 0..<fields.len() {
-        field :: fields[index]
-        value :: object.get(field) ?? next
-        values :: pkg_json_object(value) ?? return Err(publication_invalid_registry_metadata("registry `{field}` dependencies must be an object"))
+        field: fields[index]
+        value: object.get(field) ?? next
+        values: pkg_json_object(value) ?? return Err(publication_invalid_registry_metadata("registry `{field}` dependencies must be an object"))
         // The protocol object map is insertion-ordered, as Rust Dyn is.
         loop dependency_name in values.keys() -> publication_merge_registry_dependency(&dependencies, dependency_name, values[dependency_name], roles[index])
     }
     features := [String: [String]]{}
     if object.get("features") == .Val(value) {
-        values :: pkg_json_object(value) ?? return Err(publication_invalid_registry_metadata("registry `features` must be an object of string arrays"))
+        values: pkg_json_object(value) ?? return Err(publication_invalid_registry_metadata("registry `features` must be an object of string arrays"))
         loop feature in values.keys() {
-            items :: pkg_json_array(values[feature]) ?? return Err(publication_invalid_registry_metadata("registry feature values must be arrays"))
+            items: pkg_json_array(values[feature]) ?? return Err(publication_invalid_registry_metadata("registry feature values must be arrays"))
             names := [String]{}
             loop item in items {
-                member :: pkg_json_text(item) ?? return Err(publication_invalid_registry_metadata("registry feature members must be strings"))
+                member: pkg_json_text(item) ?? return Err(publication_invalid_registry_metadata("registry feature members must be strings"))
                 publication_validate_registry_dependency_name(member)
                 if !names.contains(member) -> &names.push(member)
             }
@@ -124,7 +124,7 @@ fn publication_parse_registry_package_metadata(text: String, expected_name: Stri
         }
     }
     if object.get("constraints") == .Val(value) {
-        constraints :: pkg_json_object(value) ?? return Err(publication_invalid_registry_metadata("registry `constraints` must be an object"))
+        constraints: pkg_json_object(value) ?? return Err(publication_invalid_registry_metadata("registry `constraints` must be an object"))
         loop dependency_name in constraints.keys() -> publication_merge_registry_dependency(&dependencies, dependency_name, constraints[dependency_name], "normal")
     }
     loop members in features.values() {
@@ -149,9 +149,9 @@ fn publication_parse_registry_package_metadata(text: String, expected_name: Stri
 
 // Rust merge_registry_dependency: stable requirement/preference order, set
 // union of roles/rejections and Boolean OR across every role and constraint.
-fn publication_merge_registry_dependency(dependencies: &[String: PublicationRegistryDependency], name: String, descriptor: Dyn, role: String) IOError! {
+publication_merge_registry_dependency: fn(dependencies: &[String: PublicationRegistryDependency], name: String, descriptor: Dyn, role: String) IOError! {
     publication_validate_registry_dependency_name(name)
-    parsed :: publication_parse_registry_dependency_descriptor(descriptor)
+    parsed: publication_parse_registry_dependency_descriptor(descriptor)
     dependency := dependencies.get(name) ?? PublicationRegistryDependency{name: name.copy(), requirements: [String]{}, roles: [String]{}, prefer: [String]{}, reject: [String]{}, strict: false, enabled_by_default: false}
     if !dependency.roles.contains(role) -> &dependency.roles.push(role.copy())
     &dependency.roles.sort()
@@ -169,14 +169,14 @@ fn publication_merge_registry_dependency(dependencies: &[String: PublicationRegi
     dependency.enabled_by_default = dependency.enabled_by_default || parsed.enabled_by_default
     dependencies[name] = dependency
 }
-struct PublicationRegistryDependencyDescriptor {
+PublicationRegistryDependencyDescriptor: struct {
     requirements: [String]
     prefer: [String]
     reject: [String]
     strict: Bool
     enabled_by_default: Bool
 }
-fn publication_parse_registry_dependency_descriptor(descriptor: Dyn) -> PublicationRegistryDependencyDescriptor IOError! {
+publication_parse_registry_dependency_descriptor: fn(descriptor: Dyn) -> PublicationRegistryDependencyDescriptor IOError! {
     requirements := [String]{}
     prefer := [String]{}
     reject := [String]{}
@@ -192,16 +192,16 @@ fn publication_parse_registry_dependency_descriptor(descriptor: Dyn) -> Publicat
             value := fields.get("require")
             if value == None -> value = fields.get("version")
             if value == .Val(item) {
-                requirement :: pkg_json_text(item) ?? return Err(publication_invalid_registry_metadata("registry dependency `require` must be a string"))
+                requirement: pkg_json_text(item) ?? return Err(publication_invalid_registry_metadata("registry dependency `require` must be a string"))
                 &requirements.push(requirement)
             } else {
                 &requirements.push("*")
             }
             if fields.get("prefer") == .Val(item) -> &prefer.push(pkg_json_text(item) ?? return Err(publication_invalid_registry_metadata("registry dependency `prefer` must be a string")))
             if fields.get("reject") == .Val(item) {
-                items :: pkg_json_array(item) ?? return Err(publication_invalid_registry_metadata("registry dependency `reject` must be an array"))
+                items: pkg_json_array(item) ?? return Err(publication_invalid_registry_metadata("registry dependency `reject` must be an array"))
                 loop rejected in items {
-                    version :: pkg_json_text(rejected) ?? return Err(publication_invalid_registry_metadata("registry dependency reject values must be strings"))
+                    version: pkg_json_text(rejected) ?? return Err(publication_invalid_registry_metadata("registry dependency reject values must be strings"))
                     if publication_parse_semver(version) == None -> return Err(publication_invalid_registry_metadata("registry dependency reject values must be SemVer"))
                     if !reject.contains(version) -> &reject.push(version)
                 }
@@ -209,7 +209,7 @@ fn publication_parse_registry_dependency_descriptor(descriptor: Dyn) -> Publicat
             if fields.get("strict") == .Val(item) -> strict = pkg_json_bool(item) ?? return Err(publication_invalid_registry_metadata("registry dependency `strict` must be boolean"))
             if fields.get("default") == .Val(item) -> enabled_by_default = pkg_json_bool(item) ?? return Err(publication_invalid_registry_metadata("registry dependency `default` must be boolean"))
             if fields.get("features") == .Val(item) {
-                items :: pkg_json_array(item) ?? return Err(publication_invalid_registry_metadata("registry dependency `features` must be an array"))
+                items: pkg_json_array(item) ?? return Err(publication_invalid_registry_metadata("registry dependency `features` must be an array"))
                 loop member in items {
                     if pkg_json_text(member) == None -> return Err(publication_invalid_registry_metadata("registry dependency feature values must be strings"))
                 }
@@ -226,7 +226,7 @@ fn publication_parse_registry_dependency_descriptor(descriptor: Dyn) -> Publicat
     &reject.sort()
     Ok(PublicationRegistryDependencyDescriptor{requirements: requirements, prefer: prefer, reject: reject, strict: strict, enabled_by_default: enabled_by_default})
 }
-fn publication_activate_registry_feature(feature: String, features: [String: [String]], active: &[String], visiting: &[String]) IOError! {
+publication_activate_registry_feature: fn(feature: String, features: [String: [String]], active: &[String], visiting: &[String]) IOError! {
     if visiting.contains(feature) -> return Err(publication_invalid_registry_metadata("registry feature closure contains a cycle"))
     &visiting.push(feature.copy())
     if features.get(feature) == .Val(members) {
@@ -235,20 +235,20 @@ fn publication_activate_registry_feature(feature: String, features: [String: [St
             else if !active.contains(member) -> &active.push(member.copy())
         }
     }
-    _ :: &visiting.pop()
+    _: &visiting.pop()
 }
-fn publication_required_metadata_string(object: [String: Dyn], key: String) -> String IOError! {
-    value :: pkg_json_text(object.get(key) ?? return Err(publication_invalid_registry_metadata("registry.json requires a non-empty `{key}`"))) ?? return Err(publication_invalid_registry_metadata("registry.json requires a non-empty `{key}`"))
+publication_required_metadata_string: fn(object: [String: Dyn], key: String) -> String IOError! {
+    value: pkg_json_text(object.get(key) ?? return Err(publication_invalid_registry_metadata("registry.json requires a non-empty `{key}`"))) ?? return Err(publication_invalid_registry_metadata("registry.json requires a non-empty `{key}`"))
     if value.trim() == "" -> return Err(publication_invalid_registry_metadata("registry.json requires a non-empty `{key}`"))
     Ok(value)
 }
-fn publication_validate_registry_dependency_name(name: String) IOError! {
+publication_validate_registry_dependency_name: fn(name: String) IOError! {
     if name == "" || name == "." || name == ".." || name.contains("/") || name.contains("\\") -> return Err(publication_invalid_registry_metadata("registry dependency name is not a safe package name"))
     loop byte in name.bytes() {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         if code < 32 || code == 127 -> return Err(publication_invalid_registry_metadata("registry dependency name is not a safe package name"))
     }
 }
-fn publication_invalid_registry_metadata(detail: String) -> IOError Never! {
+publication_invalid_registry_metadata: fn(detail: String) -> IOError Never! {
     publication_read_error(.InvalidInput, PUBLICATION_REGISTRY_PACKAGE_METADATA_FILE, detail)
 }

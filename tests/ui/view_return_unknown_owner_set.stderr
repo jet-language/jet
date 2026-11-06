@@ -1,17 +1,17 @@
 Error [jet.ViewOutlivesOwner]: Returned views need a stable owner relationship
-  --> tests/ui/view_return_unknown_owner_set.jet:1:37
+  --> tests/ui/view_return_unknown_owner_set.jet:1:38
     |
-  1 | fn bad_view() -> View<Int> { return 0 }
-    |                                     ^
+  1 | bad_view: fn() -> View<Int> { return 0 }
+    |                                      ^
  Why: Each public `View`/`ViewMut` slot must name a bounded set of receiver, parameter, or static sources that stay live; this return did not prove those sources
  Fix: Return a view derived from parameters or the receiver on every path, keep the view local, or return an owned copy with `.copy()`
 More: jet-lang.dev/e/E2305
 
 Error [jet.ReturnTypeMismatch]: This value is Int (a whole number), but `bad_view` returns View<Int>
-  --> tests/ui/view_return_unknown_owner_set.jet:1:37
+  --> tests/ui/view_return_unknown_owner_set.jet:1:38
     |
-  1 | fn bad_view() -> View<Int> { return 0 }
-    |                                     ^
+  1 | bad_view: fn() -> View<Int> { return 0 }
+    |                                      ^
  Why: `bad_view` declares View<Int> as its result, so the value it hands back must be View<Int>
  Fix: Hand back a View<Int> value: convert this value to View<Int>, or return the value you meant
 More: jet-lang.dev/e/E0113

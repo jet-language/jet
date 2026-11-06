@@ -1,25 +1,25 @@
 // A mutually recursive group derives `Equatable` together, so one member
 // without equality blocks the whole group and every type built on it.
 #!Equatable
-struct Opaque { value: Int }
+Opaque: struct { value: Int }
 
-enum Shape {
+Shape: enum {
     Leaf
     Node(parts: [Part])
 }
 
-struct Part {
+Part: struct {
     shape: Shape
     tag: Opaque
 }
 
-struct Wrapper { shape: Shape }
+Wrapper: struct { shape: Shape }
 
-fn run() {
-    a :: Shape.Leaf
-    b :: Shape.Leaf
+run: fn() {
+    a: Shape.Leaf
+    b: Shape.Leaf
     print(a == b)
-    w :: Wrapper{shape: Shape.Leaf}
-    v :: Wrapper{shape: Shape.Leaf}
+    w: Wrapper{shape: Shape.Leaf}
+    v: Wrapper{shape: Shape.Leaf}
     print(w == v)
 }

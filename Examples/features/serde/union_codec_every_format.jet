@@ -11,13 +11,13 @@ use {
     core.encoding.xml
 }
 
-struct Reading {
+Reading: struct {
     label: String
     value: Int | String
 }
 
-fn show(value: Int | String) -> String {
-    copied :: value.copy() // copy: match consumes the scrutinee; the caller keeps its value
+show: fn(value: Int | String) -> String {
+    copied: value.copy() // copy: match consumes the scrutinee; the caller keeps its value
     if copied == {
         .Int(n) -> { return "int {n}" }
         .String(s) -> { return "text {s}" }
@@ -25,15 +25,15 @@ fn show(value: Int | String) -> String {
     return "unknown"
 }
 
-fn line(codec: String, back: Reading) {
+line: fn(codec: String, back: Reading) {
     print("{codec}: {back.label} {show(back.value)}")
 }
 
-fn run() {
-    rows :: [Reading]{Reading{label: "n", value: 7}, Reading{label: "s", value: "seven"}}
+run: fn() {
+    rows: [Reading]{Reading{label: "n", value: 7}, Reading{label: "s", value: "seven"}}
     loop row in rows {
         // Dyn: encode() and Dyn.decode<T>().
-        tree :: row.encode()
+        tree: row.encode()
         line("dyn", tree.decode<Reading>() ?? panic("dyn"))
         // JSON text.
         line("json", json.decode<Reading>(json.to_string(row) ?? panic("json enc")) ?? panic("json"))
@@ -49,8 +49,8 @@ fn run() {
         line("csv", back)
     }
     // A bare union value through JSON.
-    number :: json.decode<Int | String>("7") ?? panic("bare int")
-    word :: json.decode<Int | String>("\"seven\"") ?? panic("bare text")
+    number: json.decode<Int | String>("7") ?? panic("bare int")
+    word: json.decode<Int | String>("\"seven\"") ?? panic("bare text")
     print("bare: {show(number)} / {show(word)}")
     // XML decode.
     line("xml", xml.decode<Reading>("<Reading><label>n</label><value>7</value></Reading>") ?? panic("xml"))

@@ -1,13 +1,13 @@
 // core-conformance: core.crypto.vault.prepare_retire
 use {
-    crypto :: core.crypto
-    vault :: core.crypto.vault
+    crypto: core.crypto
+    vault: core.crypto.vault
 }
 
-fn run() -[Secret, IO]> {
-    current :: vault.current<crypto.SigningKey>("__core_conformance_lifecycle") ?? return
-    plan :: vault.prepare_retire<crypto.SigningKey>(current, "fixed retire reason") ?? return
-    write :: vault.authorize_write(plan, "fixed prepare-retire authorization") ?? return
-    result :: vault.commit_retire<crypto.SigningKey>(^write, ^plan) ? ok -> true ! error -> false
+run: fn() -[Secret, IO]> {
+    current: vault.current<crypto.SigningKey>("__core_conformance_lifecycle") ?? return
+    plan: vault.prepare_retire<crypto.SigningKey>(current, "fixed retire reason") ?? return
+    write: vault.authorize_write(plan, "fixed prepare-retire authorization") ?? return
+    result: vault.commit_retire<crypto.SigningKey>(^write, ^plan) ? ok -> true ! error -> false
     print(result)
 }

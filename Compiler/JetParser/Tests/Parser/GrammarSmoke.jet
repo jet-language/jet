@@ -1,13 +1,13 @@
 // Ports of the parser smoke tests from the deleted (#6096).
 use jet_foundation.[Program]
 
-fn grammar_smoke_parsed(source: String) -> Program { parser_test_program(source) }
+grammar_smoke_parsed: fn(source: String) -> Program { parser_test_program(source) }
 
 // A braced subjectless guard table is the `if` dispatch AST with a synthetic
 // `true` subject spanning the statement; as a value it is an `if` expression.
 #Test("parse_subjectless_guard_tables_reuse_if_dispatch") {
-    program :: grammar_smoke_parsed("\nfn run() {{\n    ready :: false\n    stale :: true\n    if {{\n        ready -> print(\"ready\")\n        stale -> print(\"stale\")\n    }}\n    label :: if {{\n        ready -> \"ready\"\n        stale -> \"stale\"\n        else -> \"waiting\"\n    }}\n    if ready {{ print(label) }}\n}}\n")
-    run :: parser_test_function(program, "run")
+    program: grammar_smoke_parsed("\nrun: fn() {{\n    ready: false\n    stale: true\n    if {{\n        ready -> print(\"ready\")\n        stale -> print(\"stale\")\n    }}\n    label: if {{\n        ready -> \"ready\"\n        stale -> \"stale\"\n        else -> \"waiting\"\n    }}\n    if ready {{ print(label) }}\n}}\n")
+    run: parser_test_function(program, "run")
     assert(run.body.len() == 5, "run keeps five statements")
     assert(if run.body[2] == {
         .Switch(subject, arms, else_body, span) -> {
@@ -33,11 +33,11 @@ fn grammar_smoke_parsed(source: String) -> Program { parser_test_program(source)
 // Jet has no explicit semicolons (E0373, State.jet
 // `parser_report_explicit_semicolon`), so the item ends at the line break.
 #Test("parse_bracket_collection_types_and_semicolon_list_items") {
-    program :: grammar_smoke_parsed("\nfn shell() -> [JSON] {{\n    return [\n        JSON.Null\n    ]\n}}\n\nfn use_collections(items: [String], counts: [String:Int]) {{}}\n")
-    shell :: parser_test_function(program, "shell")
+    program: grammar_smoke_parsed("\nshell: fn() -> [JSON] {{\n    return [\n        JSON.Null\n    ]\n}}\n\nuse_collections: fn(items: [String], counts: [String:Int]) {{}}\n")
+    shell: parser_test_function(program, "shell")
     assert(if shell.return_type == { .Val(.List(_)) -> true
  else -> false }, "`[JSON]` return type is a list")
-    use_collections :: parser_test_function(program, "use_collections")
+    use_collections: parser_test_function(program, "use_collections")
     assert(use_collections.params.len() == 2, "two parameters")
     assert(if use_collections.params[0].ty == { .List(_) -> true
  else -> false }, "`[String]` is a list")

@@ -71,7 +71,7 @@ duplicating parsers, trees, or error rules. (D-ENCSTREAM1=A)
 
 Keep shared carriers in `core.encoding`: `EncodingLimits`, `EncodingError`,
 `EncodingCause`, `EncodingFormat`, `EncodingErrorKind`, `DataEvent`, and
-`Dyn`. Refer to them through `use encoding :: core.encoding`. Keep
+`Dyn`. Refer to them through `use encoding: core.encoding`. Keep
 format handles and format-only options/events in
 `core.encoding.json`, `core.encoding.jsonl`, `core.encoding.csv`,
 `core.encoding.xml`, and `core.encoding.cbor`. `FileReader` and `FileWriter`
@@ -173,15 +173,15 @@ XML uses the exact tagged `Dyn` schema in the XML section. Every reader
 has the current-signature form
 
 ```jet
-fn next(&self) -> Item? encoding.EncodingError!
+next: fn(&self) -> Item? encoding.EncodingError!
 ```
 
 Every writer has
 
 ```jet
-fn write(&self, item: Item) encoding.EncodingError!
-fn flush(&self) encoding.EncodingError!
-fn finish(&self) encoding.EncodingError!
+write: fn(&self, item: Item) encoding.EncodingError!
+flush: fn(&self) encoding.EncodingError!
+finish: fn(&self) encoding.EncodingError!
 ```
 
 `&self` is the edit access because each call advances state; callers keep a
@@ -252,14 +252,14 @@ already-reserved frame storage to preserve its path.
   XML coordinates distinguish UTF-8 byte offsets from scalar-based columns.
 ```jet
 use {
-    encoding :: core.encoding
-    json :: core.encoding.json
-    files :: core.files
+    encoding: core.encoding
+    json: core.encoding.json
+    files: core.files
 }
 
-fn run() (EncodingError | IOError)! {
-    input :: files.open("catalog.json") ?? return
-    reader :: json.reader(^input, limits: encoding.EncodingLimits.safe()) ?? return
+run: fn() (EncodingError | IOError)! {
+    input: files.open("catalog.json") ?? return
+    reader: json.reader(^input, limits: encoding.EncodingLimits.safe()) ?? return
     loop event in reader {
         if event == .Key("item") { print("item") }
     }
@@ -730,31 +730,31 @@ the root path is empty and nested paths use the same field/index segments as
 every other codec. Do not add another query or wrapper type. (D-ENCXML-PROJECTION1=A)
 
 ```jet
-use xml :: core.encoding.xml
+use xml: core.encoding.xml
 
 #Codable
-struct Catalog { book: [Book] }
+Catalog: struct { book: [Book] }
 #Codable
-struct Book {
+Book: struct {
     #Rename("@id") id: String
     title: String
 }
 
-fn run() (XMLError | [FieldError])! {
-    source :: "<catalog><book id=\"7\"><title>Hi</title></book></catalog>"
-    document :: xml.parse(source) ?? return
-    root :: xml.root(document) ?? return
-    name :: xml.expanded_name(root) ?? return
+run: fn() (XMLError | [FieldError])! {
+    source: "<catalog><book id=\"7\"><title>Hi</title></book></catalog>"
+    document: xml.parse(source) ?? return
+    root: xml.root(document) ?? return
+    name: xml.expanded_name(root) ?? return
     print(name.local)
     print((xml.attribute(root, "id")) ?? "missing")
-    children :: xml.content(root) ?? return
+    children: xml.content(root) ?? return
     loop child in children {
-        child_name :: xml.expanded_name(child) ?? return
+        child_name: xml.expanded_name(child) ?? return
         print(child_name.local)
     }
-    catalog :: xml.decode<Catalog>(source) ?? return
-    wire :: xml.to_bytes(document, xml.XMLRenderOptions.safe()) ?? return
-    copy :: xml.decode_bytes<Catalog>(wire) ?? return
+    catalog: xml.decode<Catalog>(source) ?? return
+    wire: xml.to_bytes(document, xml.XMLRenderOptions.safe()) ?? return
+    copy: xml.decode_bytes<Catalog>(wire) ?? return
     print(catalog.book.len())
     print(copy.book[0].title)
 }
@@ -764,16 +764,16 @@ The node sequence remains ordered and lossless, including document type,
 comments, CDATA, and entity references:
 
 ```jet
-use xml :: core.encoding.xml
+use xml: core.encoding.xml
 
-fn inspect() (XMLError | [FieldError])! {
-    source :: "<!DOCTYPE p [<!ENTITY legal 'ok'>]><p a='1'>hi <b>x</b><!--c--><![CDATA[<&]]>&legal;</p>"
-    document :: xml.parse(source) ?? return
-    root :: xml.root(document) ?? return
-    name :: xml.expanded_name(root) ?? return
+inspect: fn() (XMLError | [FieldError])! {
+    source: "<!DOCTYPE p [<!ENTITY legal 'ok'>]><p a='1'>hi <b>x</b><!--c--><![CDATA[<&]]>&legal;</p>"
+    document: xml.parse(source) ?? return
+    root: xml.root(document) ?? return
+    name: xml.expanded_name(root) ?? return
     print(name.local)
     print((xml.attribute(root, "a")) ?? "missing")
-    children :: xml.content(root) ?? return
+    children: xml.content(root) ?? return
     print(children.len())
 }
 ```
@@ -883,13 +883,13 @@ I4-gated, while runtime `EncodingError` text follows the shared law.
 
 ```jet
 use {
-    encoding :: core.encoding
-    json :: core.encoding.json
+    encoding: core.encoding
+    json: core.encoding.json
 }
 
-fn run() {
-    data :: json.parse("{\"b\":-0.0,\"a\":1e30}") ?? panic("parse")
-    canonical :: json.canonical(data) ?? panic("canonical")
+run: fn() {
+    data: json.parse("{\"b\":-0.0,\"a\":1e30}") ?? panic("parse")
+    canonical: json.canonical(data) ?? panic("canonical")
 
     print(canonical)
 }
@@ -909,19 +909,19 @@ I8. The whole-value verbs are `parse`, typed `decode<T>`, `to_bytes`, and
 `to_bytes_canonical`; CBOR has no `to_string`. (D-ENCBIN1=A)
 ```jet
 use {
-    crypto :: core.crypto
-    cbor :: core.encoding.cbor
+    crypto: core.crypto
+    cbor: core.encoding.cbor
 }
 
 #Codable
-struct Tick { count: Int }
+Tick: struct { count: Int }
 
-fn run() {
-    tick :: Tick{ count: 1 }
-    bytes :: cbor.to_bytes(tick) ?? panic("encode")
-    back :: cbor.decode<Tick>(bytes) ?? panic("decode")
-    hash :: crypto.sha256(cbor.to_bytes_canonical(tick) ?? panic("canonical"))
-    _ :: back
+run: fn() {
+    tick: Tick{ count: 1 }
+    bytes: cbor.to_bytes(tick) ?? panic("encode")
+    back: cbor.decode<Tick>(bytes) ?? panic("decode")
+    hash: crypto.sha256(cbor.to_bytes_canonical(tick) ?? panic("canonical"))
+    _: back
     print(hash)
 }
 ```
@@ -1067,28 +1067,28 @@ misuse. Terminal clone/equality follows the shared reader/writer law.
 
 ```jet
 use {
-    encoding :: core.encoding
-    cbor :: core.encoding.cbor
+    encoding: core.encoding
+    cbor: core.encoding.cbor
 }
 
 #Codable
-struct Packet { id: Int, payload: [U8] }
+Packet: struct { id: Int, payload: [U8] }
 #Codable
-struct Header { id: Int }
+Header: struct { id: Int }
 
-fn run() {
-    packet :: Packet{ id: 7, payload: [222, 173] }
-    bytes :: cbor.to_bytes(packet) ?? panic("encode")
-    copy :: cbor.decode<Packet>(bytes) ?? panic("decode")
-    stable :: cbor.to_bytes_canonical(packet) ?? panic("canonical")
-    data :: cbor.parse(cbor.to_bytes(Header{ id: 7 }) ?? panic("header"), cbor.CBOROptions.safe()) ?? panic("parse")
-    _ :: copy
-    _ :: stable
-    _ :: data
+run: fn() {
+    packet: Packet{ id: 7, payload: [222, 173] }
+    bytes: cbor.to_bytes(packet) ?? panic("encode")
+    copy: cbor.decode<Packet>(bytes) ?? panic("decode")
+    stable: cbor.to_bytes_canonical(packet) ?? panic("canonical")
+    data: cbor.parse(cbor.to_bytes(Header{ id: 7 }) ?? panic("header"), cbor.CBOROptions.safe()) ?? panic("parse")
+    _: copy
+    _: stable
+    _: data
 
-    malformed :: [0xA2, 0x62, 0x69, 0x64, 0x07, 0x67, 0x70, 0x61, 0x79, 0x6C, 0x6F, 0x61, 0x64, 0x42, 0xDE]
-    failed :: cbor.decode<Packet>(malformed) ?? panic("expected failure")
-    _ :: failed
+    malformed: [0xA2, 0x62, 0x69, 0x64, 0x07, 0x67, 0x70, 0x61, 0x79, 0x6C, 0x6F, 0x61, 0x64, 0x42, 0xDE]
+    failed: cbor.decode<Packet>(malformed) ?? panic("expected failure")
+    _: failed
 }
 
 // Err([FieldError{ path: "[\"payload\"]", reason: "CBOR Truncated at byte 15: CBOR byte string declares 2 bytes but input ended after 1" }])
@@ -1185,19 +1185,19 @@ required.
 The exact edition-2027 APIs are:
 
 ```jet
-fn encode(bytes: [U8]) -> String
-fn decode(text: String,
+encode: fn(bytes: [U8]) -> String
+decode: fn(text: String,
               allow_whitespace: Bool{false},
               allow_missing_padding: Bool{false})
     -> [U8] String!
-fn encode_url(bytes: [U8]) -> String
-fn decode_url(text: String,
+encode_url: fn(bytes: [U8]) -> String
+decode_url: fn(text: String,
                   allow_whitespace: Bool{false},
                   allow_padding: Bool{false})
     -> [U8] String!
 
-fn encode(bytes: [U8]) -> String
-fn decode(text: String,
+encode: fn(bytes: [U8]) -> String
+decode: fn(text: String,
               allow_whitespace: Bool{false},
               allow_missing_padding: Bool{false},
               allow_lowercase: Bool{false})
@@ -1273,28 +1273,28 @@ mechanical decoder, not a second permissive codec. (D-ENCBASE-STRICT1=A)
 
 ```jet
 use {
-    base64 :: core.encoding.base64
-    base32 :: core.encoding.base32
+    base64: core.encoding.base64
+    base32: core.encoding.base32
 }
 
-fn run() {
-    body :: "Zg=="
-    token :: "Zg=="
-    text :: "my======"
-    raw :: base64.decode("Zg==") ?? panic("decode")
+run: fn() {
+    body: "Zg=="
+    token: "Zg=="
+    text: "my======"
+    raw: base64.decode("Zg==") ?? panic("decode")
     print(raw.len())
-    bad :: base64.decode("Zg==\n") ?? panic("expected failure")
-    _ :: bad
+    bad: base64.decode("Zg==\n") ?? panic("expected failure")
+    _: bad
     // Err("invalid base64 at byte 4: ASCII whitespace is not allowed")
 
-    mime :: base64.decode(body, allow_whitespace: true) ?? panic("mime")
-    url :: base64.decode_url(token, allow_padding: true) ?? panic("url")
-    legacy_id :: base32.decode(text, allow_lowercase: true, allow_missing_padding: true) ?? panic("base32")
-    bytes :: base32.decode(text, allow_whitespace: true, allow_missing_padding: true, allow_lowercase: true) ?? panic("base32")
-    _ :: mime
-    _ :: url
-    _ :: legacy_id
-    _ :: bytes
+    mime: base64.decode(body, allow_whitespace: true) ?? panic("mime")
+    url: base64.decode_url(token, allow_padding: true) ?? panic("url")
+    legacy_id: base32.decode(text, allow_lowercase: true, allow_missing_padding: true) ?? panic("base32")
+    bytes: base32.decode(text, allow_whitespace: true, allow_missing_padding: true, allow_lowercase: true) ?? panic("base32")
+    _: mime
+    _: url
+    _: legacy_id
+    _: bytes
 }
 
 // `jet fix --edition=2027` preserves named relaxations, then audits forms no allowance can preserve.

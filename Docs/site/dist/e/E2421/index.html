@@ -38,21 +38,21 @@
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E2421</code>: <code>tests/ui/e2421_public_failure_carrier.stderr</code>.</p>
 <pre class="diag">Error [jet.PrivateFailureMemberExposed]: Public fallible function `load` exposes non-public failure carrier member `PublicFailure.detail`.
-  --&gt; tests/ui/e2421_public_failure_carrier.jet:5:5
+  --&gt; tests/ui/e2421_public_failure_carrier.jet:5:10
     |
-  5 |     detail: String
-    |     ^^^^^^
+  5 |     priv detail: String
+    |          ^^^^^^
  Why: The public failure contract makes `PublicFailure.detail` part of the callable&#39;s visible carrier, but its declaration is not public.
- Fix: Make `PublicFailure.detail` public, or keep `load` non-public.
+ Fix: Remove `priv` from `PublicFailure.detail` or move it out of its `priv module`, or move `load` into a `priv module`.
 More: jet-lang.dev/e/E2421
 
 Error [jet.PrivateFailureMemberExposed]: Public fallible function `private_load` exposes non-public failure carrier member `PrivateFailure`.
-  --&gt; tests/ui/e2421_public_failure_carrier.jet:13:6
+  --&gt; tests/ui/e2421_public_failure_carrier.jet:14:5
     |
- 13 | enum PrivateFailure { Missing }
-    |      ^^^^^^^^^^^^^^
+ 14 |     PrivateFailure: enum { Missing }
+    |     ^^^^^^^^^^^^^^
  Why: The public failure contract makes `PrivateFailure` part of the callable&#39;s visible carrier, but its declaration is not public.
- Fix: Make `PrivateFailure` public, or keep `private_load` non-public.
+ Fix: Remove `priv` from `PrivateFailure` or move it out of its `priv module`, or move `private_load` into a `priv module`.
 More: jet-lang.dev/e/E2421
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

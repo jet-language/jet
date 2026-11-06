@@ -58,11 +58,11 @@ if (assemble.error || assemble.status !== 0) failures.push(`raw assembly: ${asse
 else {
   try {
     const corpus = readFileSync(join(root, "Compiler/JetRuntime/Tests/scan-floats.tsv"), "utf8").split("\n").filter(line => line && !line.startsWith("#")).map(line => line.split("\t"));
-    let tests = "fn scan_float_corpus() {\n";
+    let tests = "scan_float_corpus: fn() {\n";
     for (const [index, [text, expected]] of corpus.entries()) {
       if (!/^-?[0-9]+$/u.test(expected)) throw new Error(`invalid IEEE word ${index}`);
       const bytes = Buffer.from(text, "utf8");
-      tests += `    text${index} :: rt_text_builder_with_capacity(I64{${bytes.length}})\n`;
+      tests += `    text${index}: rt_text_builder_with_capacity(I64{${bytes.length}})\n`;
       for (let at = 0; at < bytes.length; at += 8) {
         const chunk = bytes.subarray(at, at + 8);
         const word = chunk.reduceRight((word, byte) => (word << 8n) | BigInt(byte), 0n);
@@ -79,7 +79,7 @@ else {
       ["1.", 48, 49, "4607182418800017408"],
     ].entries()) {
       const bytes = Buffer.from(prefixText, "utf8");
-      tests += `    long${index} :: rt_text_builder_with_capacity(I64{100000})\n`;
+      tests += `    long${index}: rt_text_builder_with_capacity(I64{100000})\n`;
       for (let at = 0; at < bytes.length; at += 8) {
         const chunk = bytes.subarray(at, at + 8);
         const word = chunk.reduceRight((word, byte) => (word << 8n) | BigInt(byte), 0n);
@@ -88,7 +88,7 @@ else {
       tests += `    loop rt_text_len(long${index}) < (I64{99999}) {\n        rt_text_push_word(long${index}, I64{${fill}}, I64{1})\n    }\n`;
       tests += `    rt_text_push_word(long${index}, I64{${last}}, I64{1})\n    scan_test_float(long${index}, I64{${expected}})\n`;
     }
-    tests += "}\nfn run() {\n    scan_tests()\n    scan_float_corpus()\n}\n";
+    tests += "}\nrun: fn() {\n    scan_tests()\n    scan_float_corpus()\n}\n";
     const executableRoot = join(out, "raw-native");
     mkdirSync(executableRoot, { recursive: true });
     const program = join(executableRoot, "unit.jet");

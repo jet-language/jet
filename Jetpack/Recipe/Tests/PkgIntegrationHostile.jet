@@ -1,16 +1,16 @@
 // Exact hostile Recipe matrix: tests/build_sandbox.rs:664-852 and1170-1322.
 // PENDING-SEAM(package-tests): canonical Jetpack package staging, not a public entry.
-use hostile_net :: core.net
+use hostile_net: core.net
 
-fn recipe_hostile_rows() -> [[String]] {
-    root :: sys.get("JET_REPO_ROOT") ?? "."
-    corpus :: files.read(files.join(root, "tests/fixtures/build_sandbox/hostile-corpus.tsv")) ?? panic("hostile corpus")
+recipe_hostile_rows: fn() -> [[String]] {
+    root: sys.get("JET_REPO_ROOT") ?? "."
+    corpus: files.read(files.join(root, "tests/fixtures/build_sandbox/hostile-corpus.tsv")) ?? panic("hostile corpus")
     rows := [[String]]{}
     ids := [String]{}
-    categories :: [String]{"escape", "exfiltration", "resource-abuse", "toctou", "child-process-abuse"}
+    categories: [String]{"escape", "exfiltration", "resource-abuse", "toctou", "child-process-abuse"}
     loop line in corpus.lines() {
         if line == "" || line.starts_with("#") -> next
-        fields :: line.split("\t").to_list()
+        fields: line.split("\t").to_list()
         assert(fields.len() == 4, "malformed hostile corpus row")
         assert(!ids.contains(fields[0]), "hostile corpus repeats case")
         &ids.push(fields[0])
@@ -28,12 +28,12 @@ fn recipe_hostile_rows() -> [[String]] {
     rows
 }
 
-fn recipe_hostile_quote(path: String) -> String {
+recipe_hostile_quote: fn(path: String) -> String {
     "'{path.replace("'", "'\\''")}'"
 }
 
-fn recipe_hostile_observe(listener: TCPListener, milliseconds: Int, bytes_predicate: Bool) -> Bool {
-    deadline :: time.instant() + time.duration_ms(milliseconds)
+recipe_hostile_observe: fn(listener: TCPListener, milliseconds: Int, bytes_predicate: Bool) -> Bool {
+    deadline: time.instant() + time.duration_ms(milliseconds)
     loop {
         // Exact WouldBlock polling: deadline0 drains queued sockets; ONLY Timeout polls.
         if &listener.accept(deadline: 0s) == {
@@ -67,17 +67,17 @@ fn recipe_hostile_observe(listener: TCPListener, milliseconds: Int, bytes_predic
     }
 }
 
-fn recipe_hostile_execute(base: String, ctx: RecipeBuildContext, tool: String, args: [String], windows: Bool, id: String) {
+recipe_hostile_execute: fn(base: String, ctx: RecipeBuildContext, tool: String, args: [String], windows: Bool, id: String) {
     if recipe_run(recipe_sandbox_test_exec(tool, args), ctx, None) == {
         .Ok(report) -> {
             if windows {
                 assert_eq(report.sandbox_class, "windows-appcontainer")
             } else {
                 assert(report.sandbox_class != "non-executing")
-                status :: files.read(files.join(ctx.output_root, "status")) ?? panic("corpus status")
+                status: files.read(files.join(ctx.output_root, "status")) ?? panic("corpus status")
                 assert(status.trim() == "blocked", "corpus attempt must be blocked")
             }
-            policies :: [String]{"filesystem=", "process=", "network=", "environment=", "devices=", "resources="}
+            policies: [String]{"filesystem=", "process=", "network=", "environment=", "devices=", "resources="}
             loop policy in policies -> assert(report.sandbox_policy.contains(policy), "missing sandbox policy")
         }
         .Err(error) -> {
@@ -102,41 +102,41 @@ fn recipe_hostile_execute(base: String, ctx: RecipeBuildContext, tool: String, a
     }
 }
 
-fn recipe_hostile_matrix(windows: Bool) {
+recipe_hostile_matrix: fn(windows: Bool) {
     if windows && !sys.is_windows() -> return
     if !windows && !sys.is_unix() -> return
-    rows :: recipe_hostile_rows()
-    shell :: if windows -> recipe_sandbox_test_cmd() else -> process.which("bash") ?? process.which("sh") ?? panic("hostile corpus needs shell")
+    rows: recipe_hostile_rows()
+    shell: if windows -> recipe_sandbox_test_cmd() else -> process.which("bash") ?? process.which("sh") ?? panic("hostile corpus needs shell")
     loop row in rows {
-        id :: row[0]
-        base :: recipe_test_scratch("hostile-{id}")
-        src :: files.join(base, "src")
-        out :: files.join(base, "out")
-        secret :: files.join(base, "host-secret")
-        marker :: files.join(base, "host-marker")
-        fill :: "/tmp/jet-build-hostile-fill-{sys.pid()}-{id}"
+        id: row[0]
+        base: recipe_test_scratch("hostile-{id}")
+        src: files.join(base, "src")
+        out: files.join(base, "out")
+        secret: files.join(base, "host-secret")
+        marker: files.join(base, "host-marker")
+        fill: "/tmp/jet-build-hostile-fill-{sys.pid()}-{id}"
         files.create_dir_all(src) ?? panic("source directory")
         files.write(secret, "host-only-secret") ?? panic("host secret")
         if id == "source-symlink" -> files.symlink(secret, files.join(src, "link")) ?? panic("source symlink")
-        tool :: if windows -> "hostile-tool" else -> "sh"
+        tool: if windows -> "hostile-tool" else -> "sh"
         ctx := RecipeBuildContext{source_dir: src, output_root: out, tools: [String: String]{tool: shell}, fetch_cache: files.join(base, "cache"), offline: false}
         if id == "network-exfiltration" {
-            listener :: hostile_net.tcp_listen("127.0.0.1:0") ?? panic("network observer")
-            port :: hostile_net.socket_port(hostile_net.listener_local_socket_addr(listener) ?? panic("observer address"))
-            peer :: task { recipe_hostile_observe(listener, if windows -> 750 else -> 500, !windows) }
+            listener: hostile_net.tcp_listen("127.0.0.1:0") ?? panic("network observer")
+            port: hostile_net.socket_port(hostile_net.listener_local_socket_addr(listener) ?? panic("observer address"))
+            peer: task { recipe_hostile_observe(listener, if windows -> 750 else -> 500, !windows) }
             if windows {
-                windir :: sys.get("WINDIR") ?? "C:\\Windows"
-                powershell :: files.join(windir, "System32/WindowsPowerShell/v1.0/powershell.exe")
+                windir: sys.get("WINDIR") ?? "C:\\Windows"
+                powershell: files.join(windir, "System32/WindowsPowerShell/v1.0/powershell.exe")
                 ctx.tools = [String: String]{tool: powershell}
-                command :: "try {{$c=New-Object Net.Sockets.TcpClient('127.0.0.1',{port});$c.Close();exit 70}} catch {{exit 0}}"
+                command: "try {{$c=New-Object Net.Sockets.TcpClient('127.0.0.1',{port});$c.Close();exit 70}} catch {{exit 0}}"
                 recipe_hostile_execute(base, ctx, tool, [String]{"-NoProfile", "-NonInteractive", "-Command", command}, true, id)
             } else {
-                command :: "if printf escaped > /dev/tcp/127.0.0.1/{port} 2>/dev/null; then printf leaked > \"$JET_BUILD_OUTPUT/status\"; exit 70; else printf blocked > \"$JET_BUILD_OUTPUT/status\"; fi"
+                command: "if printf escaped > /dev/tcp/127.0.0.1/{port} 2>/dev/null; then printf leaked > \"$JET_BUILD_OUTPUT/status\"; exit 70; else printf blocked > \"$JET_BUILD_OUTPUT/status\"; fi"
                 recipe_hostile_execute(base, ctx, tool, [String]{"-c", command}, false, id)
             }
             assert(!(peer.join() ?? panic("network observer")), "hostile corpus reached network")
         } else {
-            command :: if windows -> {
+            command: if windows -> {
                 if id == {
                     "host-read" -> "copy /Y \"{secret}\" \"{marker}\" >NUL 2>&1 && exit /b 70 || echo blocked>\"%JET_BUILD_OUTPUT%\\status\""
                     "host-write" -> "echo escaped>\"{marker}\""
@@ -147,10 +147,10 @@ fn recipe_hostile_matrix(windows: Bool) {
                     else -> panic("unmapped hostile corpus")
                 }
             } else -> {
-                secret_q :: recipe_hostile_quote(secret)
-                marker_q :: recipe_hostile_quote(marker)
-                ln_q :: recipe_hostile_quote(recipe_sandbox_test_tool("ln"))
-                fill_q :: recipe_hostile_quote(fill)
+                secret_q: recipe_hostile_quote(secret)
+                marker_q: recipe_hostile_quote(marker)
+                ln_q: recipe_hostile_quote(recipe_sandbox_test_tool("ln"))
+                fill_q: recipe_hostile_quote(fill)
                 if id == {
                     "host-read" -> "if [ -r {secret_q} ]; then printf leaked > \"$JET_BUILD_OUTPUT/status\"; exit 70; else printf blocked > \"$JET_BUILD_OUTPUT/status\"; fi"
                     "host-write" -> "if printf escaped > {marker_q}; then printf escaped > \"$JET_BUILD_OUTPUT/status\"; exit 70; else printf blocked > \"$JET_BUILD_OUTPUT/status\"; fi"
@@ -161,7 +161,7 @@ fn recipe_hostile_matrix(windows: Bool) {
                     else -> panic("unmapped hostile corpus")
                 }
             }
-            args :: [String]{if windows -> "/C" else -> "-c", command}
+            args: [String]{if windows -> "/C" else -> "-c", command}
             recipe_hostile_execute(base, ctx, tool, args, windows, id)
         }
         if !windows {

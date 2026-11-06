@@ -28,13 +28,13 @@
 // side debug file (D-RT-DEFECT-REPORT1 A).
 
 // Checked FunctionAddress intrinsic in the canonical RuntimeLibrary table.
-fn rt_fault_signal_address() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
+rt_fault_signal_address: fn() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
 
 // The fault report intrinsic (JetIR BuildLibrary.jet ir_fault_report_call):
 // signal, siginfo_t and ucontext_t as the handler receives them, the
 // backtrace mode, the image mapping (0: none) and its load bias. It writes
 // the report to fd 2 and returns 70 after an E3012 stop, else 0.
-fn rt_fault_print(_signal: I64, _info: I64, _context: I64, _backtrace: I64, _image: I64, _bias: I64) -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
+rt_fault_print: fn(_signal: I64, _info: I64, _context: I64, _backtrace: I64, _image: I64, _bias: I64) -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
 
 // The main thread's alternate stack (fault_stack_start); its word 24 is the
 // claim of the one report a process prints.
@@ -48,7 +48,7 @@ fault_backtrace := I64{0}
 
 // The image's entry passes a `brief` or `off` backtrace before it runs
 // anything else (JetIR ir_entry_function).
-#Export(c) fn jet_rt_fault_backtrace(mode: I64) {
+#Export(c) jet_rt_fault_backtrace: fn(mode: I64) {
     #Unsafe("the image's entry calls this before it starts any other thread") {
         fault_backtrace = mode
     }
@@ -57,13 +57,13 @@ fault_backtrace := I64{0}
 // The handler for the four fatal signals, and the calling thread's
 // alternate stack. jet_rt_main calls it once per entry; a loaded-image host
 // running another entry on the same thread keeps the first stack.
-fn fault_start() {
+fault_start: fn() {
     if (fault_main_stack == I64{0}) {
         #Unsafe("jet_rt_main calls this on the main thread before the entry runs") {
             fault_main_stack = fault_stack_start()
         }
     }
-    handler :: rt_fault_signal_address()
+    handler: rt_fault_signal_address()
     fault_action(I64{11}, handler)
     fault_action(I64{7}, handler)
     fault_action(I64{4}, handler)
@@ -74,7 +74,7 @@ fn fault_start() {
 // x86-64 refuses a handler without SA_RESTORER; the handler never returns,
 // so its restorer is never used. SA_RESETHAND makes a fault inside the report
 // take the default action; SA_NODEFER lets the report re-raise its signal.
-fn fault_action(signal: I64, handler: I64) {
+fault_action: fn(signal: I64, handler: I64) {
     #Unsafe("rt_sigaction borrows the four-word action on the stack; handler is this runtime's C-ABI export with the (signal, info, context) signature") {
         _ := os_syscall_stack4_i64(I64{13}, signal, handler, I64{3422552068}, I64{0}, I64{0}, I64{8})
     }
@@ -82,8 +82,8 @@ fn fault_action(signal: I64, handler: I64) {
 
 // Map and register this thread's 256 KiB alternate signal stack; its lowest
 // words hold the stack_t that sigaltstack copies. 0 when either call fails.
-fn fault_stack_start() -> I64 {
-    stack :: alloc_map_try(I64{262144})
+fault_stack_start: fn() -> I64 {
+    stack: alloc_map_try(I64{262144})
     if (stack == I64{0}) -> return I64{0}
     status := I64{0}
     #Unsafe("stack is a fresh private mapping; sigaltstack copies its first three words (ss_sp, ss_flags, ss_size)") {
@@ -102,7 +102,7 @@ fn fault_stack_start() -> I64 {
 
 // Unregister (SS_DISABLE) and unmap a thread's alternate stack before the
 // thread ends; the thread is not on it.
-fn fault_stack_end(stack: I64) {
+fault_stack_end: fn(stack: I64) {
     if (stack == I64{0}) -> return
     #Unsafe("stack is this thread's registered alternate stack, unused outside a handler; sigaltstack copies its first three words") {
         os_store_i64(wrapping(stack + I64{8}), I64{2})
@@ -117,7 +117,7 @@ fn fault_stack_end(stack: I64) {
 // signal, siginfo_t (si_addr at 16) and ucontext_t (mcontext gregs at 40:
 // rbp 120, rsp 160, rip 168), as the kernel passes them to an SA_SIGINFO
 // handler. It never returns; the I64 result is the address-target shape.
-#Export(c) fn jet_rt_fault_signal(signal: I64, info: I64, context: I64) -> I64 {
+#Export(c) jet_rt_fault_signal: fn(signal: I64, info: I64, context: I64) -> I64 {
     // One report per process: a second faulting thread waits for the exit.
     if (fault_main_stack != I64{0} && sync_cas(wrapping(fault_main_stack + I64{24}), I64{0}, I64{1}) != I64{0}) {
         loop { _ := trap_syscall(I64{34}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}) }
@@ -126,7 +126,7 @@ fn fault_stack_end(stack: I64) {
     // even if the report itself faults.
     secret_scrub()
     host_stdout_flush_fault()
-    image :: alloc_check_image()
+    image: alloc_check_image()
     if (rt_fault_print(signal, info, context, fault_backtrace, image, alloc_check_bias(image)) == I64{70}) -> trap_defect_exit(I64{70})
     fault_raise(signal)
     I64{0}
@@ -135,11 +135,11 @@ fn fault_stack_end(stack: I64) {
 // The default action of signal for this thread, now: SIG_DFL, then tgkill.
 // SA_NODEFER left the signal unblocked, so it is delivered as the syscall
 // returns; exit_group(128 + signal) only if it is not.
-fn fault_raise(signal: I64) {
+fault_raise: fn(signal: I64) {
     #Unsafe("rt_sigaction borrows the four-word SIG_DFL action on the stack; tgkill signals this thread") {
         _ := os_syscall_stack4_i64(I64{13}, signal, I64{0}, I64{0}, I64{0}, I64{0}, I64{8})
-        process :: os_syscall_i64(I64{39}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
-        thread :: os_syscall_i64(I64{186}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+        process: os_syscall_i64(I64{39}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+        thread: os_syscall_i64(I64{186}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
         _ := os_syscall_i64(I64{234}, process, thread, signal, I64{0}, I64{0}, I64{0})
     }
     trap_defect_exit(wrapping(I64{128} + signal))

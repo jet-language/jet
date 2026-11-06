@@ -2,33 +2,33 @@
 // window into the matched place: edits through the binding land in the
 // owner's storage, like Rust `if let Some(s) = &mut x`.
 
-struct Machine {
+Machine: struct {
     n: Int
     log: [String]
 }
 
-struct Session {
+Session: struct {
     machine: Machine
     retired: Bool
 }
 
-struct Res {
+Res: struct {
     session: Session?
     count: Int?
 }
 
-enum Slot {
+Slot: enum {
     Empty
     Held(Int)
 }
 
-fn bump(machine: &Machine) -> Bool {
+bump: fn(machine: &Machine) -> Bool {
     machine.n = machine.n + 1
     &machine.log.push("bumped")
     true
 }
 
-fn retire(result: &Res) -> Bool {
+retire: fn(result: &Res) -> Bool {
     if &result.session == {
         None -> return false
         .Val(session) -> {
@@ -39,25 +39,25 @@ fn retire(result: &Res) -> Bool {
     true
 }
 
-fn tick(result: &Res) {
+tick: fn(result: &Res) {
     if &result.count == {
         .Val(count) -> count = count + 10
         None -> {}
     }
 }
 
-fn double(slot: &Slot) {
+double: fn(slot: &Slot) {
     if &slot == {
         .Held(value) -> value = value * 2
         .Empty -> {}
     }
 }
 
-fn run() {
+run: fn() {
     result := Res{session: Val(Session{machine: Machine{n: 1, log: [String]{}}, retired: false}), count: Val(3)}
     print(retire(&result))
     tick(&result)
-    session :: result.session ?? return
+    session: result.session ?? return
     print(session.machine.n)
     print(session.machine.log.len())
     print(session.retired)

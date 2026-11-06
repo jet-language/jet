@@ -1,12 +1,12 @@
 // core-conformance: core.crypto.vault.export_to_passphrase
 use {
-    crypto :: core.crypto
-    vault :: core.crypto.vault
+    crypto: core.crypto
+    vault: core.crypto.vault
 }
 
-fn run() -[Secret, IO]> {
-    current :: vault.current<crypto.SigningKey>("__core_conformance_export_passphrase") ?? return
-    passphrase :: crypto.Secret.from_text("a sixteen byte recovery phrase")
-    result :: vault.export_to_passphrase<crypto.SigningKey>(current, passphrase) ?? return
+run: fn() -[Secret, IO]> {
+    current: vault.current<crypto.SigningKey>("__core_conformance_export_passphrase") ?? return
+    passphrase: crypto.Secret.from_text("a sixteen byte recovery phrase")
+    result: vault.export_to_passphrase<crypto.SigningKey>(current, passphrase) ?? return
     print(result.bytes().len())
 }

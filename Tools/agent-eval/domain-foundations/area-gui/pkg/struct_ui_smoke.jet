@@ -1,30 +1,30 @@
-package {
+package: {
     name: "struct_ui_smoke"
     authority: { allow: [Browser, IO, Mem.Alloc] }
 }
 
 use {
-    ui :: core.ui
-    reactive :: core.reactive
+    ui: core.ui
+    reactive: core.reactive
 }
 
-struct Note {
+Note: struct {
     title: String
     body: String
 }
 
-fn view(note: Note, body: String) -> UINode { ui.box([
+view: fn(note: Note, body: String) -> UINode { ui.box([
     ui.text(note.title),
     ui.node_role(body, 30.0, 3.0, ui.aria_role_text_input())
 ]) }
 
-fn run() {
-    note :: Note{title: "Meeting", body: "old"}
+run: fn() {
+    note: Note{title: "Meeting", body: "old"}
     body := reactive.signal("old")
     backend := ui.tui_backend()
-    render_backend :: backend.copy()
+    render_backend: backend.copy()
     ui.reactive_render(() -> {
-        tree :: view(note, body.get())
+        tree: view(note, body.get())
         ui.mount(render_backend, tree)
     })
     print("renders: {backend.render_count()}")

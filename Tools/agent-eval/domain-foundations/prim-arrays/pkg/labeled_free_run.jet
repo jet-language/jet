@@ -1,13 +1,13 @@
 use {
-    compute :: core.compute
-    labeled :: "labeled"
-    labeled_ops :: "labeled_free"
+    compute: core.compute
+    labeled: "labeled"
+    labeled_ops: "labeled_free"
 }
 
-fn run() {
-    values :: compute.from_list([1.0, 2.0, 3.0, 4.0, 5.0, 6.0]) ?? panic("values")
-    tensor :: compute.reshape(values, [2, 3]) ?? panic("reshape")
-    coords :: [labeled.coordinate("row", ["r0", "r1"]), labeled.coordinate("col", ["c0", "c1", "c2"])]
-    array :: labeled.make(tensor, ["row", "col"], coords)
+run: fn() {
+    values: compute.from_list([1.0, 2.0, 3.0, 4.0, 5.0, 6.0]) ?? panic("values")
+    tensor: compute.reshape(values, [2, 3]) ?? panic("reshape")
+    coords: [labeled.coordinate("row", ["r0", "r1"]), labeled.coordinate("col", ["c0", "c1", "c2"])]
+    array: labeled.make(tensor, ["row", "col"], coords)
     print("lookup:{labeled_ops.lookup(array, "col", "c2")}")
 }

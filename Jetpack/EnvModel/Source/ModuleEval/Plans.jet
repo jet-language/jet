@@ -9,7 +9,7 @@ use {
 // One `$NAME` read captured from a config surface. Environment variables are
 // always text, so the type is explicit in the plan instead of being inferred
 // again by an inspect or deploy consumer.
-struct EnvironmentRead {
+EnvironmentRead: struct {
     name: String
     ty: String
 }
@@ -20,7 +20,7 @@ struct EnvironmentRead {
 // activation tier checks the policy against the encrypted store and the
 // Prelude resolves a composed value only for the individual read that asks
 // for it.
-struct SecretSpec {
+SecretSpec: struct {
     name: String
     description: String?{None}
     required: Bool{true}
@@ -33,15 +33,15 @@ struct SecretSpec {
     // not a second author spelling; an explicit map entry replaces it.
     implicit: Bool{false}
 
-    fn stored(name: String) -> SecretSpec Never! {
+    stored: fn(name: String) -> SecretSpec Never! {
         SecretSpec{name: name}
     }
 
-    fn implicit_source(name: String) -> SecretSpec Never! {
+    implicit_source: fn(name: String) -> SecretSpec Never! {
         SecretSpec{name: name, implicit: true}
     }
 
-    fn is_composed(self) -> Bool Never! {
+    is_composed: fn(self) -> Bool Never! {
         if self.declaration == {
             .Compose(_, _) -> true
             .Stored -> false
@@ -50,8 +50,8 @@ struct SecretSpec {
 
     // Stable trust identity. Secret defaults and generator recipes can carry
     // sensitive material, so only their non-value shape enters the hash.
-    fn trust_fingerprint(self) -> String Never! {
-        declaration :: if self.declaration == {
+    trust_fingerprint: fn(self) -> String Never! {
+        declaration: if self.declaration == {
             .Stored -> "stored"
             .Compose(_, from) -> {
                 sorted := from
@@ -61,15 +61,15 @@ struct SecretSpec {
         }
         allowed := self.allowed_environments
         &allowed.sort()
-        rotation :: if self.rotation == {
+        rotation: if self.rotation == {
             .Unset -> "none"
             .MaxAge(seconds) -> "max_age:{seconds}"
         }
-        default_profiles :: if self.default == {
+        default_profiles: if self.default == {
             .Unset -> ""
             .PerProfile(values) -> envmodel_sorted_keys_of(values).join(",")
         }
-        generator :: if self.generate == {
+        generator: if self.generate == {
             .Unset -> "none"
             .Random(length) -> "random:{length}"
         }
@@ -80,8 +80,8 @@ struct SecretSpec {
 // Descriptions, defaults, and templates can carry sensitive material, so the
 // debug rendering names only their shape.
 impl SecretSpec.Debug {
-    fn debug(self) -> String {
-        description :: if self.description == {
+    debug: fn(self) -> String {
+        description: if self.description == {
             .Val(_) -> "Some(\"<redacted>\")"
             .None -> "None"
         }
@@ -89,13 +89,13 @@ impl SecretSpec.Debug {
     }
 }
 
-enum SecretDeclaration {
+SecretDeclaration: enum {
     Stored
     Compose(template: String, from: [String])
 }
 
 impl SecretDeclaration.Debug {
-    fn debug(self) -> String {
+    debug: fn(self) -> String {
         if self == {
             .Stored -> "Stored"
             .Compose(_, from) -> "Compose {{ from: {from:Debug} }}"
@@ -105,13 +105,13 @@ impl SecretDeclaration.Debug {
 
 // Rust `SecretRotationPolicy::None` is `Unset` here: `None` is the optional
 // literal in Jet.
-enum SecretRotationPolicy {
+SecretRotationPolicy: enum {
     Unset
     MaxAge(seconds: Int)
 }
 
 impl SecretRotationPolicy.Debug {
-    fn debug(self) -> String {
+    debug: fn(self) -> String {
         if self == {
             .Unset -> "None"
             .MaxAge(seconds) -> "MaxAge {{ seconds: {seconds} }}"
@@ -120,13 +120,13 @@ impl SecretRotationPolicy.Debug {
 }
 
 // Rust `SecretDefault::None` is `Unset` here.
-enum SecretDefault {
+SecretDefault: enum {
     Unset
     PerProfile(values: [String: String])
 }
 
 impl SecretDefault.Debug {
-    fn debug(self) -> String {
+    debug: fn(self) -> String {
         if self == {
             .Unset -> "None"
             .PerProfile(values) -> "PerProfile {{ profiles: {envmodel_sorted_keys_of(values):Debug} }}"
@@ -135,13 +135,13 @@ impl SecretDefault.Debug {
 }
 
 // Rust `SecretGenerator::None` is `Unset` here.
-enum SecretGenerator {
+SecretGenerator: enum {
     Unset
     Random(length: Int)
 }
 
 impl SecretGenerator.Debug {
-    fn debug(self) -> String {
+    debug: fn(self) -> String {
         if self == {
             .Unset -> "None"
             .Random(length) -> "Random {{ length: {length} }}"
@@ -149,12 +149,12 @@ impl SecretGenerator.Debug {
     }
 }
 
-enum PromptPathMode {
+PromptPathMode: enum {
     Short
     Full
 }
 
-enum PromptStripMode {
+PromptStripMode: enum {
     Off
     On
 }
@@ -163,7 +163,7 @@ enum PromptStripMode {
 // facts beside the environment name prevents sibling `env.<name>` modules
 // from leaking services, lifecycle, files, or variable reads into the one
 // selected runtime plan.
-struct EnvironmentContribution {
+EnvironmentContribution: struct {
     name: String
     environment_reads: [EnvironmentRead]
     dev_services: [DevServicePlan]
@@ -177,19 +177,19 @@ struct EnvironmentContribution {
 
 // The `(namespace, path)` key a contribution merges under, so `merge_all`
 // can combine same-keyed contributions from different modules.
-struct ModuleEntryKey {
+ModuleEntryKey: struct {
     namespace: Namespace
     path: String
 }
 
 // One keyed contribution of one module.
-struct ModuleEntry {
+ModuleEntry: struct {
     key: ModuleEntryKey
     entry: EntryContribution
 }
 
 // One module's contributions, keyed by `(namespace, path)`.
-struct EvaluatedModule {
+EvaluatedModule: struct {
     name: String
     entries: [ModuleEntry]
     // U11: ordered system contributions for the shared JetOS engine.
@@ -211,7 +211,7 @@ struct EvaluatedModule {
 }
 
 // U15: one captured host of a fleet or vmtest and the system it runs.
-struct HostPlan {
+HostPlan: struct {
     name: String
     system: String
     // Rust ModuleEval/Types.rs:491-495: typed copy-with-update facts and
@@ -222,20 +222,20 @@ struct HostPlan {
 
 // Rust ModuleEval/Types.rs:498-525. Preserve source order and the System
 // field shapes; generic host-local fields use the shared comptime values.
-struct HostOverride {
+HostOverride: struct {
     fields: [(name: String, value: HostOverrideValue)]
     source: String
     provenance: [HostOverrideProvenance]
 }
 
-struct HostOverrideProvenance {
+HostOverrideProvenance: struct {
     field: String
     dependencies: [String]
     pure: Bool
     source: String
 }
 
-enum HostOverrideValue {
+HostOverrideValue: enum {
     Platform(value: String)
     Packages(values: [Pkg])
     Services(values: [ServicePlan])
@@ -245,13 +245,13 @@ enum HostOverrideValue {
 
 // U15: a `fleet.<name>:` (or `vmtest.<name>:`) capture; frozen jetos
 // research whose hosts are still cross-checked against the known systems.
-struct FleetPlan {
+FleetPlan: struct {
     name: String
     hosts: [HostPlan]
 }
 
 // U20: an ad-hoc adapter package declared with `Pkg.adapt(...)`.
-struct AdapterPlan {
+AdapterPlan: struct {
     name: String
     // A source ref string such as `"./vendor/weirdctl"`.
     source: String
@@ -259,7 +259,7 @@ struct AdapterPlan {
     recipe: AdapterRecipe
 }
 
-enum AdapterRecipe {
+AdapterRecipe: enum {
     // `Recipe.copy(...)`: copy the staged source tree as-is.
     Copy
     // `Recipe.prebuilt(bin: "...", as: "...")`: install one executable under
@@ -272,7 +272,7 @@ enum AdapterRecipe {
 // Rust ModuleEval/Types.rs::SystemPlan: the checked system contribution.
 // Realization belongs to JetOS; these carriers preserve the evaluator's
 // source-qualified packages, ordered services, and ordered option facts.
-struct SystemPlan {
+SystemPlan: struct {
     name: String
     target: String
     packages: [Pkg]
@@ -281,19 +281,19 @@ struct SystemPlan {
 }
 
 // Rust ServicePlan: open service fields retain their source order and text.
-struct ServicePlan {
+ServicePlan: struct {
     name: String
     enable: Bool
     extra: [ServicePlanExtra]
 }
 
-struct ServicePlanExtra {
+ServicePlanExtra: struct {
     key: String
     value: String
 }
 
 // Rust OptionPlan: one dotted option key and its rendered display value.
-struct OptionPlan {
+OptionPlan: struct {
     key: String
     value: String
 }
@@ -302,7 +302,7 @@ struct OptionPlan {
 // role-module's `services:` map. Jetpack's dev-runtime tier owns and
 // interprets every field here, so an unrecognized `extra` key is a
 // supervision-time error (E1262), not silently-forwarded metadata.
-struct DevServicePlan {
+DevServicePlan: struct {
     // The service name (the map key), e.g. `redis`.
     name: String{""}
     // The required `enable` flag (U12) — `false` captures the service
@@ -345,25 +345,25 @@ struct DevServicePlan {
 }
 
 // One unrecognized open-record field of a dev service, rendered for display.
-struct DevServiceExtra {
+DevServiceExtra: struct {
     name: String
     value: String
 }
 
-enum ReadyProbe {
+ReadyProbe: enum {
     Exec(command: String)
     HTTP(url: String, status: Int?)
     Notify(path: String)
     TCP(host: String, port: Int)
 }
 
-enum RestartPolicy {
+RestartPolicy: enum {
     Never
     OnFailure(max: Int, backoff_ms: Int, exponential: Bool)
     Always(max: Int, backoff_ms: Int, exponential: Bool)
 }
 
-enum ShutdownPolicy {
+ShutdownPolicy: enum {
     // Send TERM, wait up to `grace_ms`, then use the bounded KILL fallback.
     Term(grace_ms: Int)
     // Skip the graceful signal and terminate the verified process group.
@@ -372,14 +372,14 @@ enum ShutdownPolicy {
 
 // The referent selects the realization tier. ISO disk images
 // inherit system facts; OCI images project a package or environment.
-enum ImageKind {
+ImageKind: enum {
     Iso
     OCI
 }
 
 // U14 one checked image contribution. ISO inherits its
 // system's packages/services/options; OCI supplies container projection facts.
-struct ImagePlan {
+ImagePlan: struct {
     // The contribution path — the `<name>` in `image.<name>`.
     name: String
     // Which referent `from:` names, and which tier realizes this image.
@@ -419,14 +419,14 @@ struct ImagePlan {
 }
 
 // One `env_vars:` entry of an OCI image.
-struct ImageEnvVar {
+ImageEnvVar: struct {
     key: String
     value: String
 }
 
 // The runnable environment plan, sharing captured system/image declarations
 // with the JetOS tier rather than maintaining another evaluator model.
-struct EnvPlan {
+EnvPlan: struct {
     table: SourceTable
     // The source files that contributed to this graph, relative to the
     // environment root and in deterministic discovery order.
@@ -496,7 +496,7 @@ struct EnvPlan {
     active_environment_provenance: [String]
 }
 
-struct EnvironmentFacts {
+EnvironmentFacts: struct {
     environment_names: [String]{[String]{}}
     active_environment: String?{None}
     active_environment_provenance: [String]{[String]{}}
@@ -520,7 +520,7 @@ struct EnvironmentFacts {
 }
 
 // The keys of a string map in byte order (Rust `BTreeMap` key order).
-fn envmodel_sorted_keys_of(values: [String: String]) -> [String] Never! {
+envmodel_sorted_keys_of: fn(values: [String: String]) -> [String] Never! {
     keys := values.keys().to_list()
     &keys.sort()
     keys

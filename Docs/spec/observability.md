@@ -54,7 +54,7 @@ periodic publication of a run that had not exited, and `unavailable` when no
 window was published. On Linux, `jet perf run` reads the exit publication
 before it reaps the child, so a completed short run records the same profile
 rows, in the same order and with the same source ranges, on every capture.
-Rows attribute to the parsed `fn run` declaration (`fn` through its closing
+Rows attribute to the parsed `run: fn` declaration (`fn` through its closing
 brace). The observe snapshot has no current-function or stack sample, so rows
 do not yet separate the functions that `run` calls.
 

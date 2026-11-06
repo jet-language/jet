@@ -4,41 +4,41 @@
 // PATH separators, and executable suffixes live in this one module so platform
 // handling does not drift across providers, the hangar envelope, services,
 // secrets, and trust code.
-use pkg_platform_core_sys :: core.sys
+use pkg_platform_core_sys: core.sys
 
-OS_LINUX :: "linux"
-OS_MACOS :: "macos"
-OS_WINDOWS :: "windows"
+OS_LINUX: "linux"
+OS_MACOS: "macos"
+OS_WINDOWS: "windows"
 
-ARCH_X64 :: "x86_64"
-ARCH_ARM64 :: "aarch64"
+ARCH_X64: "x86_64"
+ARCH_ARM64: "aarch64"
 
-TIER_ONE_OSES :: comptime { [String]{OS_LINUX, OS_MACOS, OS_WINDOWS} }
-TIER_ONE_ARCHES :: comptime { [String]{ARCH_X64, ARCH_ARM64} }
+TIER_ONE_OSES: comptime { [String]{OS_LINUX, OS_MACOS, OS_WINDOWS} }
+TIER_ONE_ARCHES: comptime { [String]{ARCH_X64, ARCH_ARM64} }
 
 // An `arch-os` target identity. The fields stay open strings because a host
 // key may name a platform outside tier one; `is_tier_one` reports that fact.
-struct PlatformKey {
+PlatformKey: struct {
     arch: String
     os: String
 
     // A tier-one key, or None when either half is outside tier one.
-    fn new(arch: String, os: String) -> PlatformKey? Never! {
+    new: fn(arch: String, os: String) -> PlatformKey? Never! {
         if !pkg_is_tier_one(arch, os) -> return None
         Val(PlatformKey{arch: arch, os: os})
     }
 
     // The host process's key in Rust `std::env::consts` spelling:
     // `linux`/`macos`/`windows` and `x86_64`/`aarch64`.
-    fn host() -[Env]> PlatformKey Never! {
-        os :: if {
+    host: fn() -[Env]> PlatformKey Never! {
+        os: if {
             pkg_platform_core_sys.is_macos() -> OS_MACOS
             pkg_platform_core_sys.is_windows() -> OS_WINDOWS
             pkg_platform_core_sys.is_linux() -> OS_LINUX
             else -> pkg_ascii_lower(pkg_platform_core_sys.name())
         }
-        raw_arch :: pkg_ascii_lower(pkg_platform_core_sys.arch())
-        arch :: if raw_arch == {
+        raw_arch: pkg_ascii_lower(pkg_platform_core_sys.arch())
+        arch: if raw_arch == {
             "amd64" | "x64" -> ARCH_X64
             "arm64" -> ARCH_ARM64
             else -> raw_arch
@@ -46,38 +46,38 @@ struct PlatformKey {
         PlatformKey{arch: arch, os: os}
     }
 
-    fn envelope_key(self) -> String Never! {
+    envelope_key: fn(self) -> String Never! {
         "{self.arch}-{self.os}"
     }
 
-    fn is_tier_one(self) -> Bool Never! {
+    is_tier_one: fn(self) -> Bool Never! {
         pkg_is_tier_one(self.arch, self.os)
     }
 }
 
 // The host's `arch-os` envelope key (Rust `host_key`).
-fn pkg_host_key() -[Env]> String Never! {
+pkg_host_key: fn() -[Env]> String Never! {
     PlatformKey.host().envelope_key()
 }
 
-fn pkg_is_tier_one(arch: String, os: String) -> Bool Never! {
-    arch_ok :: if arch == {
+pkg_is_tier_one: fn(arch: String, os: String) -> Bool Never! {
+    arch_ok: if arch == {
         ARCH_X64 | ARCH_ARM64 -> true
         else -> false
     }
-    os_ok :: if os == {
+    os_ok: if os == {
         OS_LINUX | OS_MACOS | OS_WINDOWS -> true
         else -> false
     }
     arch_ok && os_ok
 }
 
-fn pkg_path_separator_for_os(os: String) -> String Never! {
+pkg_path_separator_for_os: fn(os: String) -> String Never! {
     if os == OS_WINDOWS -> return ";"
     ":"
 }
 
-fn pkg_exe_suffix_for_os(os: String) -> String Never! {
+pkg_exe_suffix_for_os: fn(os: String) -> String Never! {
     if os == OS_WINDOWS -> return ".exe"
     ""
 }

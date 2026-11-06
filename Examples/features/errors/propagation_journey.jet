@@ -1,23 +1,23 @@
 // D-FAIL-MODEL1=A / D-ERRCTX1 (#3713): a failure that propagates
 // automatically reports where it started (`failed here`) and every call it
 // passed through on the way out, origin first.
-fn parse(raw: String) -> Int {
+parse: fn(raw: String) -> Int {
     if raw == "" -> return Err("empty input")
     7
 }
 
-fn double(raw: String) -> Int {
-    n :: parse(raw)
+double: fn(raw: String) -> Int {
+    n: parse(raw)
     n * 2
 }
 
-fn total() -> Int {
-    a :: double("x")
-    b :: double("")
+total: fn() -> Int {
+    a: double("x")
+    b: double("")
     a + b
 }
 
-fn run() {
+run: fn() {
     print("start")
     print(total())
     print("end")

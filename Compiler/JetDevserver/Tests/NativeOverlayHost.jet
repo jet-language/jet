@@ -1,28 +1,28 @@
 use jet_devserver.NativeOverlayHost.[MAX_OVERLAY_NODES, NativeOverlayEvent, NativeOverlayHost, NativeOverlayInput, NativeOverlayInputRoute, NativeOverlayNode, NativeOverlayPanelFact]
 
-fn panel(id: String, freshness: U64) -> NativeOverlayPanelFact {
+panel: fn(id: String, freshness: U64) -> NativeOverlayPanelFact {
     return NativeOverlayPanelFact.new(id, id, freshness, "ready", [NativeOverlayNode.text("{id}:item", "item")])
 }
 #Test("projection_keeps_panel_identity_and_freshness") {
     host := NativeOverlayHost.new()
     host.ingest(NativeOverlayEvent.current("session", "revision", 1, 10, [panel("Build", 4)])).unwrap()
-    first :: host.frame().unwrap().clone()
+    first: host.frame().unwrap().clone()
     host.ingest(NativeOverlayEvent.current("session", "revision", 2, 11, [panel("Build", 5)])).unwrap()
-    second :: host.frame().unwrap()
+    second: host.frame().unwrap()
     assert_eq(first.panels[0].panel_id, second.panels[0].panel_id)
     assert_eq(second.panels[0].freshness, 5)
 }
 #Test("stale_revision_identity_is_rejected_at_equal_sequence") {
     host := NativeOverlayHost.new()
     host.ingest(NativeOverlayEvent.current("session", "revision-a", 1, 10, [panel("Build", 1)])).unwrap()
-    error :: host.ingest(NativeOverlayEvent.current("session", "revision-b", 1, 11, [panel("Build", 2)])).unwrap_err()
+    error: host.ingest(NativeOverlayEvent.current("session", "revision-b", 1, 11, [panel("Build", 2)])).unwrap_err()
     assert(error.contains("revision identity"))
 }
 #Test("revision_rollover_discards_old_panels") {
     host := NativeOverlayHost.new()
     host.ingest(NativeOverlayEvent.current("session", "revision-a", 1, 10, [panel("Old", 1)])).unwrap()
     host.ingest(NativeOverlayEvent.current("session", "revision-b", 2, 11, [panel("New", 1)])).unwrap()
-    frame :: host.frame().unwrap()
+    frame: host.frame().unwrap()
     assert_eq(frame.panels.len(), 1)
     assert_eq(frame.panels[0].panel_id, "New")
 }
@@ -38,14 +38,14 @@ fn panel(id: String, freshness: U64) -> NativeOverlayPanelFact {
     assert_eq(host.route_input(.Key { code: "Space", pressed: true }), NativeOverlayInputRoute.Game)
 }
 #Test("headless_projection_is_deterministic") {
-    event :: NativeOverlayEvent.current("session", "revision", 7, 99, [panel("Traces", 3), panel("Build", 3)])
+    event: NativeOverlayEvent.current("session", "revision", 7, 99, [panel("Traces", 3), panel("Build", 3)])
     assert_eq(NativeOverlayHost.headless_projection(&event).unwrap(), NativeOverlayHost.headless_projection(&event).unwrap())
 }
 #Test("merged_projection_stays_bounded") {
     host := NativeOverlayHost.new()
-    nodes :: (0..MAX_OVERLAY_NODES).map((index) -> NativeOverlayNode.text("node-{index}", "node")).collect()
+    nodes: (0..MAX_OVERLAY_NODES).map((index) -> NativeOverlayNode.text("node-{index}", "node")).collect()
     host.ingest(NativeOverlayEvent.current("session", "revision", 1, 1, [NativeOverlayPanelFact.new("first", "first", 1, "ready", ^nodes)])).unwrap()
-    error :: host.ingest(NativeOverlayEvent.current("session", "revision", 2, 2, [panel("second", 1)])).unwrap_err()
+    error: host.ingest(NativeOverlayEvent.current("session", "revision", 2, 2, [panel("second", 1)])).unwrap_err()
     assert(error.contains("node budget"))
     assert_eq(host.frame().unwrap().sequence, 1)
 }

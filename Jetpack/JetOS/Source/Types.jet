@@ -1,13 +1,13 @@
 // Rust crates/jetpack/src/JetOS/types.rs:4-79. JetOS owns these carriers;
 // system/service/option plans remain the canonical EnvModel carriers.
-JETOS_CACHYOS_KERNEL_PACKAGE :: "cachyos-kernel"
-JETOS_SYSTEMD_INIT_PACKAGE :: "systemd"
-JETOS_GNOME_DESKTOP_PACKAGES :: [String]{"gdm", "gnome-session", "gnome-shell"}
-JETOS_VM_TOOLS :: [String]{"qemu-system-x86_64", "qemu-img", "xorriso", "limine", "sfdisk", "blockdev", "mkfs.ext4", "mkfs.vfat", "mmd", "mcopy", "zstd"}
-JETOS_VM_GUEST_PROOF_MARKER :: "JETOS_GUEST_PROOF:"
-JETOS_VM_PROOF_TIMEOUT_MS :: 300000
+JETOS_CACHYOS_KERNEL_PACKAGE: "cachyos-kernel"
+JETOS_SYSTEMD_INIT_PACKAGE: "systemd"
+JETOS_GNOME_DESKTOP_PACKAGES: [String]{"gdm", "gnome-session", "gnome-shell"}
+JETOS_VM_TOOLS: [String]{"qemu-system-x86_64", "qemu-img", "xorriso", "limine", "sfdisk", "blockdev", "mkfs.ext4", "mkfs.vfat", "mmd", "mcopy", "zstd"}
+JETOS_VM_GUEST_PROOF_MARKER: "JETOS_GUEST_PROOF:"
+JETOS_VM_PROOF_TIMEOUT_MS: 300000
 
-struct JetOSFlags {
+JetOSFlags: struct {
     fixtures: String?
     offline: Bool
     name: String?
@@ -23,12 +23,12 @@ struct JetOSFlags {
     real_tier: Bool
 }
 
-struct JetOSTarget {
+JetOSTarget: struct {
     config: String
     host: String
 }
 
-struct JetOSGeneration {
+JetOSGeneration: struct {
     name: String
     host: String
     path: String
@@ -37,7 +37,7 @@ struct JetOSGeneration {
 
 // Rust store_realize.rs:11-17. The held lease and original identity are not
 // flattened into metadata; realization/consumption owns their lifecycle.
-struct JetOSRealizedPackage {
+JetOSRealizedPackage: struct {
     entry: StoreEntry
     lease: CacheLease
     original_out: String
@@ -46,9 +46,9 @@ struct JetOSRealizedPackage {
 
     // Rust store_realize.rs:41-49; the held lease remains authoritative: a
     // durable member is consumed only after the lease revalidates it.
-    fn consumption_path(self, path: String) -[FS, Env, Rand]> String IOError! {
+    consumption_path: fn(self, path: String) -[FS, Env, Rand]> String IOError! {
         if self.consumption_override == .Val(root) {
-            relative :: store_path_strip_prefix(path, self.entry.out) ?? return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("package member escapes realized output")}))
+            relative: store_path_strip_prefix(path, self.entry.out) ?? return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("package member escapes realized output")}))
             return Ok(files.join(root, relative))
         }
         self.lease.validate()
@@ -58,22 +58,22 @@ struct JetOSRealizedPackage {
 
     // Rust store_realize.rs:55-60: provenance names durable provider output,
     // never a process-scoped consumption projection.
-    fn original_output(self) -> String Never! { self.original_out }
-    fn original_reference(self) -> String Never! { self.original_reference_text }
+    original_output: fn(self) -> String Never! { self.original_out }
+    original_reference: fn(self) -> String Never! { self.original_reference_text }
 }
 
-struct JetOSBootProfile {
+JetOSBootProfile: struct {
     loader: String
     kernel: String
     init: String
     initrd_modules: [String]
 
-    fn to_json(self) -> String Never! {
+    to_json: fn(self) -> String Never! {
         "{{\"loader\":{foundation_json_quote(self.loader)},\"kernel\":{foundation_json_quote(self.kernel)},\"init\":{foundation_json_quote(self.init)},\"initrd_modules\":[{jetos_strings_json(self.initrd_modules)}]}}"
     }
 }
 
-struct JetOSOptionContender {
+JetOSOptionContender: struct {
     value: String
     tier: String
     priority: Int
@@ -81,7 +81,7 @@ struct JetOSOptionContender {
     winner: Bool
 }
 
-struct JetOSResolvedOption {
+JetOSResolvedOption: struct {
     key: String
     value: String
     tier: String
@@ -89,7 +89,7 @@ struct JetOSResolvedOption {
     contenders: [JetOSOptionContender]
 
     // Rust options_rendering.rs:52-78: field and contender order are stable.
-    fn to_json(self) -> String Never! {
+    to_json: fn(self) -> String Never! {
         rows := [String]{}
         loop contender in self.contenders {
             &rows.push("{{\"value\":{foundation_json_quote(contender.value)},\"tier\":{foundation_json_quote(contender.tier)},\"priority\":{contender.priority},\"source_order\":{contender.source_order},\"winner\":{if contender.winner -> "true" else -> "false"}}}")

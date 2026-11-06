@@ -1,27 +1,27 @@
 // D-MEM1: both access markers (plus plain read) in one program.
 // plain T = read; &T = write; ^T = take/move.
-struct Account {
+Account: struct {
     owner: String
     balance: Int
 }
 
 // plain read — no sigil
-fn check(a: Account) -> Bool { a.balance > 0 }
+check: fn(a: Account) -> Bool { a.balance > 0 }
 
-fn print_balance(a: Account) { print("{a.owner}: {a.balance}") }
+print_balance: fn(a: Account) { print("{a.owner}: {a.balance}") }
 
 // &Account = edit in place
-fn deposit(a: &Account, amount: Int) { a.balance += amount }
+deposit: fn(a: &Account, amount: Int) { a.balance += amount }
 
 // ^Account = consume; return a log string
-fn finish_account(a: ^Account) -> String { "closed {a.owner} (final balance: {a.balance})" }
+finish_account: fn(a: ^Account) -> String { "closed {a.owner} (final balance: {a.balance})" }
 
-fn run() {
+run: fn() {
     acc := Account{owner: "Alice", balance: 100}
     print(check(acc))  // plain read
     print_balance(acc)  // plain read
     deposit(&acc, 50)  // & write
     print_balance(acc)  // plain read again
-    log :: finish_account(^acc)  // ^ take; acc consumed
+    log: finish_account(^acc)  // ^ take; acc consumed
     print(log)
 }

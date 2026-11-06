@@ -1,4 +1,4 @@
-package {
+package: {
     name: "core.font"
     version: "0.0.1"
     edition: "2026"
@@ -9,31 +9,31 @@ package {
     }
     authority: { needs: [UI.FontShaping] }
 }
-use core :: core
+use core: core
 
 // core.font — one face/run model across native and headless tiers.
 //
 // `shape` is the provider seam: the host owns real shaping and returns a
 // canonical run.  `shape_with` is the explicit portable fallback for callers
 // that need deterministic, approximate advances without a shaping provider.
-enum FontStyle {
+FontStyle: enum {
     Body
     Title
     Monospace
 }
 
-enum GlyphShaper {
+GlyphShaper: enum {
     HarfBuzz
     HeadlessFallback
 }
 
-struct FontFace {
+FontFace: struct {
     family: String
     size: Float
     style: FontStyle
 }
 
-struct Glyph {
+Glyph: struct {
     id: Int
     cluster: Int
     x: Float
@@ -42,7 +42,7 @@ struct Glyph {
     advance_y: Float
 }
 
-struct GlyphRun {
+GlyphRun: struct {
     glyphs: [Glyph]
     advance_x: Float
     advance_y: Float
@@ -51,33 +51,33 @@ struct GlyphRun {
     approximate: Bool
 }
 
-fn system(style: FontStyle) -> FontFace Never! {
+system: fn(style: FontStyle) -> FontFace Never! {
     if style == FontStyle.Monospace -> return FontFace{family: "monospace", size: 14.0, style: style}
     if style == FontStyle.Title -> return FontFace{family: "system-ui", size: 24.0, style: style}
     FontFace{family: "system-ui", size: 14.0, style: style}
 }
 
-fn shape_with(face: FontFace, text: String) -> GlyphRun Never! {
+shape_with: fn(face: FontFace, text: String) -> GlyphRun Never! {
     // This is the explicit opt-in for deterministic approximate metrics.
     // `shape` is the only path that requests the FontShaping capability.
     shape_fallback(face, text)
 }
 
-fn shape(text: String, face: FontFace) -> GlyphRun Never! {
+shape: fn(text: String, face: FontFace) -> GlyphRun Never! {
     if core.font.__shape_text(text, face) == {
         .Ok(run) -> run
         .Err(cause) -> panic("font shaping host contract failure: {cause}")
     }
 }
 
-fn shape_fallback(face: FontFace, text: String) -> GlyphRun {
+shape_fallback: fn(face: FontFace, text: String) -> GlyphRun {
     glyphs := [Glyph]{}
     advance := Float{0.0}
-    raw :: text.bytes()
+    raw: text.bytes()
     i := 0
     loop i < raw.len() {
-        pair :: decode_cp(raw, i)
-        width :: glyph_advance(face, pair.cp)
+        pair: decode_cp(raw, i)
+        width: glyph_advance(face, pair.cp)
         &glyphs.push(Glyph{
             id: pair.cp,
             cluster: i,
@@ -99,20 +99,20 @@ fn shape_fallback(face: FontFace, text: String) -> GlyphRun {
     }
 }
 
-fn glyph_advance(face: FontFace, cp: Int) -> Float {
+glyph_advance: fn(face: FontFace, cp: Int) -> Float {
     if cp == 10 -> return 0.0
     if cp < 128 -> return face.size * 0.6
     face.size
 }
 
-struct DecodePair {
+DecodePair: struct {
     cp: Int
     next: Int
 }
 
-fn decode_cp(raw: [U8], i: Int) -> DecodePair {
+decode_cp: fn(raw: [U8], i: Int) -> DecodePair {
     if i >= raw.len() -> return DecodePair{cp: 0, next: i}
-    first :: Int.from_u8(raw[i])
+    first: Int.from_u8(raw[i])
     if first < 128 -> return DecodePair{cp: first, next: i + 1}
 
     width := 0
@@ -131,7 +131,7 @@ fn decode_cp(raw: [U8], i: Int) -> DecodePair {
     }
     if width == 0 || i + width > raw.len() -> return DecodePair{cp: 65533, next: i + 1}
 
-    second :: Int.from_u8(raw[i + 1])
+    second: Int.from_u8(raw[i + 1])
     // Reject overlong encodings and UTF-16 surrogate prefixes before the
     // continuation loop so malformed bytes consume one byte at a time.
     if (first == 224 && second < 160) || (first == 237 && second >= 160) {
@@ -143,7 +143,7 @@ fn decode_cp(raw: [U8], i: Int) -> DecodePair {
 
     k := 1
     loop k < width {
-        byte :: Int.from_u8(raw[i + k])
+        byte: Int.from_u8(raw[i + k])
         if byte < 128 || byte >= 192 -> return DecodePair{cp: 65533, next: i + 1}
         cp = ((cp << 6)).bit_or(((byte).bit_and(63)))
         k += 1
@@ -156,9 +156,9 @@ fn decode_cp(raw: [U8], i: Int) -> DecodePair {
 
 
 #Test("system font styles have canonical family and size defaults") {
-    body :: system(.Body)
-    title :: system(.Title)
-    mono :: system(.Monospace)
+    body: system(.Body)
+    title: system(.Title)
+    mono: system(.Monospace)
     assert_eq(body.family, "system-ui")
     assert_eq(body.size, 14.0)
     assert_eq(title.family, "system-ui")

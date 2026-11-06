@@ -4,7 +4,7 @@ use {
     jet_cli.[jet_cli_report_json]
 }
 
-fn report_causes_require(ok: Bool, name: String) Never! {
+report_causes_require: fn(ok: Bool, name: String) Never! {
     if !ok -> panic("report causes contract: {name}")
 }
 
@@ -17,7 +17,7 @@ fn report_causes_require(ok: Bool, name: String) Never! {
         fix: "fix it",
         cause: [DiagnosticCause]{DiagnosticCause{code: "E0109", span: None, origin: None}},
     }
-    json :: jet_cli_report_json(one, None, "", "", 1)
+    json: jet_cli_report_json(one, None, "", "", 1)
     report_causes_require(json.starts_with("{{\"schema\":\"jet.report/v3\""), "report schema is v3")
     report_causes_require(json.contains("\"cause\":[{{\"code\":\"E0109\",\"file\":null,\"line\":null,\"col\":null,\"span\":null}}],\"clears\":1"), "single unlocated cause renders null fields")
 
@@ -32,7 +32,7 @@ fn report_causes_require(ok: Bool, name: String) Never! {
             {code: "E0109", span: None, origin: None},
         },
     }
-    json2 :: jet_cli_report_json(two, None, "", "", 0)
+    json2: jet_cli_report_json(two, None, "", "", 0)
     report_causes_require(json2.contains("\"cause\":[{{\"code\":\"E0108\",\"file\":null,\"line\":null,\"col\":null,\"span\":null}},{{\"code\":\"E0109\",\"file\":null,\"line\":null,\"col\":null,\"span\":null}}],\"clears\":0"), "two causes keep order")
     print("report causes: passed")
 }

@@ -11,18 +11,18 @@
 //   jet Compiler/JetRuntime/Tests/UiWitness.jet WITNESS OUT BINARY [ORACLE]
 // key also takes the frozen character ORACLE its ownership run reads.
 use {
-    files :: core.files
-    process :: core.process
-    term :: core.term
+    files: core.files
+    process: core.process
+    term: core.term
 }
 
-GOLDENS :: "Compiler/JetRuntime/Tests"
-SHARED_STOP :: "DataPlotStops-getter-variant.stderr"
-USAGE :: "usage: jet Compiler/JetRuntime/Tests/UiWitness.jet WITNESS OUT BINARY [ORACLE]"
-WITNESSES :: "choices, events, form-action-error, key, raylib-metadata, view-snapshots"
-OUTPUT_MISMATCH :: "byte-exact output mismatch"
+GOLDENS: "Compiler/JetRuntime/Tests"
+SHARED_STOP: "DataPlotStops-getter-variant.stderr"
+USAGE: "usage: jet Compiler/JetRuntime/Tests/UiWitness.jet WITNESS OUT BINARY [ORACLE]"
+WITNESSES: "choices, events, form-action-error, key, raylib-metadata, view-snapshots"
+OUTPUT_MISMATCH: "byte-exact output mismatch"
 
-struct Case {
+Case: struct {
     name: String
     args: [String]
     status: Int
@@ -31,7 +31,7 @@ struct Case {
 
 // One witness: the operands its usage line names, its cases in run order, the
 // per-run timeout, the spacing of its exit message and its success line.
-struct Witness {
+Witness: struct {
     operands: String
     oracle: Bool
     cases: [Case]
@@ -42,7 +42,7 @@ struct Witness {
 
 // What one run of the binary left: `exited` is false when no exit status exists
 // (spawn failure, signal or timeout); `signal` and `error` are "" when absent.
-struct Outcome {
+Outcome: struct {
     stdout: [U8]
     stderr: [U8]
     status: Int
@@ -51,16 +51,16 @@ struct Outcome {
     error: String
 }
 
-fn ownership(golden: String) -> Case Never! { Case{name: "ownership", args: [String]{}, status: 0, golden: golden} }
+ownership: fn(golden: String) -> Case Never! { Case{name: "ownership", args: [String]{}, status: 0, golden: golden} }
 
-fn stop(mode: String, status: Int, golden: String) -> Case Never! { Case{name: mode, args: [String]{mode}, status: status, golden: golden} }
+stop: fn(mode: String, status: Int, golden: String) -> Case Never! { Case{name: mode, args: [String]{mode}, status: status, golden: golden} }
 
-fn plain(operand: String, golden: String, done: String) -> Witness Never! {
+plain: fn(operand: String, golden: String, done: String) -> Witness Never! {
     Witness{operands: "OUT {operand}", oracle: false, cases: [Case]{ownership(golden)}, timeout: 30s, exit_gap: "", done: done}
 }
 
 // Ownership, then the shared record-variant stop (exit 70) for every mode.
-fn variant_stops(operand: String, golden: String, modes: [String], exit_gap: String, done: String) -> Witness Never! {
+variant_stops: fn(operand: String, golden: String, modes: [String], exit_gap: String, done: String) -> Witness Never! {
     cases := [Case]{ownership(golden)}
     loop mode in modes {
         &cases.push(stop(mode, 70, SHARED_STOP))
@@ -69,27 +69,27 @@ fn variant_stops(operand: String, golden: String, modes: [String], exit_gap: Str
 }
 
 // The witness a name selects; an unknown name has no cases.
-fn witness(key: String) -> Witness Never! {
+witness: fn(key: String) -> Witness Never! {
     if key == "events" -> return plain("UI_EVENTS_WITNESS", "UiEventsWitness.stdout", "UI events: real-provider ownership byte-identical")
     if key == "form-action-error" -> return plain("UI_ACTION_ERROR_WITNESS", "UiFormActionErrorWitness.stdout", "UI ActionError: real consumed producers and transitive ownership byte-identical")
     if key == "raylib-metadata" -> return plain("UI_RAYLIB_METADATA_WITNESS", "UiRaylibMetadataWitness.stdout", "UI raylib metadata and canonical Cursor: real-provider ownership byte-identical")
     if key == "view-snapshots" -> return plain("UI_VIEW_SNAPSHOTS_WITNESS", "UiViewSnapshotsWitness.stdout", "UI view snapshots: real-provider ownership byte-identical")
     if key == "choices" -> return variant_stops("UI_CHOICES_WITNESS", "UiCarriersChoicesWitness.stdout", [String]{"aria-tag"}, " ", "UI choices: ownership and record-variant stop byte-identical")
     if key == "key" {
-        cases :: [Case]{ownership("UiKeyWitness.stdout"), stop("key-tag", 70, SHARED_STOP)}
+        cases: [Case]{ownership("UiKeyWitness.stdout"), stop("key-tag", 70, SHARED_STOP)}
         return Witness{operands: "OUT UI_KEY_WITNESS FROZEN_CHAR_ORACLE", oracle: true, cases: cases, timeout: 300s, exit_gap: " ", done: "UI Key: exhaustive real-provider oracle and record-variant stop byte-identical"}
     }
     Witness{operands: "", oracle: false, cases: [Case]{}, timeout: 0s, exit_gap: "", done: ""}
 }
 
-fn fail(message: String) -[IO]> Int Never! {
+fail: fn(message: String) -[IO]> Int Never! {
     term.eprint(message)
     1
 }
 
 // An absolute path with `.`, `..` and empty segments folded, as path.resolve gives.
-fn resolve(cwd: String, path: String) -> String Never! {
-    full :: if path.starts_with("/") -> path.copy() else -> "{cwd}/{path}"
+resolve: fn(cwd: String, path: String) -> String Never! {
+    full: if path.starts_with("/") -> path.copy() else -> "{cwd}/{path}"
     parts := [String]{}
     loop part in full.split("/").to_list() {
         if part == ".." {
@@ -107,7 +107,7 @@ fn resolve(cwd: String, path: String) -> String Never! {
     "/{parts.join("/")}"
 }
 
-fn same_bytes(left: [U8], right: [U8]) -> Bool Never! {
+same_bytes: fn(left: [U8], right: [U8]) -> Bool Never! {
     if left.len() != right.len() -> return false
     loop index in 0..<left.len() {
         if left[index] != right[index] -> return false
@@ -115,10 +115,10 @@ fn same_bytes(left: [U8], right: [U8]) -> Bool Never! {
     true
 }
 
-fn json_text(text: String) -> String Never! {
+json_text: fn(text: String) -> String Never! {
     out := ""
     loop byte in text.bytes() {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         if code == 34 -> out = "{out}\\\""
         else if code == 92 -> out = "{out}\\\\"
         else -> out = "{out}{String.from_bytes_lossy([U8]{byte})}"
@@ -126,8 +126,8 @@ fn json_text(text: String) -> String Never! {
     "\"{out}\""
 }
 
-fn signal_name(number: Int) -> String Never! {
-    names :: [String]{"", "SIGHUP", "SIGINT", "SIGQUIT", "SIGILL", "SIGTRAP", "SIGABRT", "SIGBUS", "SIGFPE", "SIGKILL", "SIGUSR1", "SIGSEGV", "SIGUSR2", "SIGPIPE", "SIGALRM", "SIGTERM"}
+signal_name: fn(number: Int) -> String Never! {
+    names: [String]{"", "SIGHUP", "SIGINT", "SIGQUIT", "SIGILL", "SIGTRAP", "SIGABRT", "SIGBUS", "SIGFPE", "SIGKILL", "SIGUSR1", "SIGSEGV", "SIGUSR2", "SIGPIPE", "SIGALRM", "SIGTERM"}
     if number > 0 && number < names.len() -> return names[number].copy()
     "SIG{number}"
 }
@@ -135,8 +135,8 @@ fn signal_name(number: Int) -> String Never! {
 // Runs the binary within the per-run limit, and reports the run the way node's
 // spawnSync does: no status after a signal, a timeout or a spawn failure, and
 // spawn failures and timeouts as an error message.
-fn run_binary(binary: String, args: [String], timeout: Duration) -[Exec, FS, IO, Time.Wait]> Outcome Never! {
-    none :: [U8]{}
+run_binary: fn(binary: String, args: [String], timeout: Duration) -[Exec, FS, IO, Time.Wait]> Outcome Never! {
+    none: [U8]{}
     if !files.exists(binary) -> return Outcome{stdout: none.copy(), stderr: none.copy(), status: 0, exited: false, signal: "", error: "spawnSync {binary} ENOENT"}
     argv := [String]{binary.copy()}
     loop arg in args {
@@ -144,19 +144,19 @@ fn run_binary(binary: String, args: [String], timeout: Duration) -[Exec, FS, IO,
     }
     if process.cmd(argv).timeout(timeout).run() == {
         .Ok(receipt) -> {
-            stdout :: receipt.output.bytes()
+            stdout: receipt.output.bytes()
             if receipt.timed_out -> return Outcome{stdout: stdout, stderr: receipt.errors.bytes(), status: 0, exited: false, signal: "SIGTERM", error: "spawnSync {binary} ETIMEDOUT"}
             if receipt.signal == .Val(number) -> return Outcome{stdout: stdout, stderr: receipt.errors.bytes(), status: 0, exited: false, signal: signal_name(number), error: ""}
             Outcome{stdout: stdout, stderr: receipt.errors.bytes(), status: receipt.code, exited: true, signal: "", error: ""}
         }
         .Err(error) -> {
-            code :: if error == .PermissionDenied(_) -> "EACCES" else if error == .NotFound(_) -> "ENOENT" else -> "{error}"
+            code: if error == .PermissionDenied(_) -> "EACCES" else if error == .NotFound(_) -> "ENOENT" else -> "{error}"
             Outcome{stdout: none.copy(), stderr: none.copy(), status: 0, exited: false, signal: "", error: "spawnSync {binary} {code}"}
         }
     }
 }
 
-fn write_file(path: String, bytes: [U8]) -[FS, IO]> Bool Never! {
+write_file: fn(path: String, bytes: [U8]) -[FS, IO]> Bool Never! {
     if files.write_bytes(path, bytes) == {
         .Ok(_) -> true
         .Err(error) -> {
@@ -166,17 +166,17 @@ fn write_file(path: String, bytes: [U8]) -[FS, IO]> Bool Never! {
     }
 }
 
-fn ui_witness(args: [String]) -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
+ui_witness: fn(args: [String]) -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
     if args.len() == 0 -> return fail("{USAGE}\nWITNESS is one of: {WITNESSES}")
-    key :: args[0]
-    spec :: witness(key)
+    key: args[0]
+    spec: witness(key)
     if spec.cases.len() == 0 -> return fail("unknown witness: {key}\nWITNESS is one of: {WITNESSES}")
-    wanted :: if spec.oracle -> 4 else -> 3
-    empty_operand :: args.contains("")
+    wanted: if spec.oracle -> 4 else -> 3
+    empty_operand: args.contains("")
     if args.len() != wanted || empty_operand -> return fail("usage: jet Compiler/JetRuntime/Tests/UiWitness.jet {key} {spec.operands}")
-    cwd :: files.cwd() ?? return fail("cannot read the working directory: {err}")
-    out :: resolve(cwd, args[1])
-    binary :: resolve(cwd, args[2])
+    cwd: files.cwd() ?? return fail("cannot read the working directory: {err}")
+    out: resolve(cwd, args[1])
+    binary: resolve(cwd, args[2])
     if files.create_dir_all(out) == {
         .Ok(_) -> {}
         .Err(error) -> return fail("cannot create {out}: {error}")
@@ -186,32 +186,32 @@ fn ui_witness(args: [String]) -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
         if spec.oracle && item.status == 0 {
             run_args = [String]{resolve(cwd, args[3])}
         }
-        outcome :: run_binary(binary, run_args, spec.timeout)
-        status :: if outcome.exited -> "{outcome.status}" else -> "null"
-        signal :: if outcome.signal == "" -> "null" else -> json_text(outcome.signal)
-        error :: if outcome.error == "" -> "null" else -> json_text(outcome.error)
+        outcome: run_binary(binary, run_args, spec.timeout)
+        status: if outcome.exited -> "{outcome.status}" else -> "null"
+        signal: if outcome.signal == "" -> "null" else -> json_text(outcome.signal)
+        error: if outcome.error == "" -> "null" else -> json_text(outcome.error)
         if !write_file("{out}/{item.name}.stdout", outcome.stdout) -> return 1
         if !write_file("{out}/{item.name}.stderr", outcome.stderr) -> return 1
         if !write_file("{out}/{item.name}.status.json", "{{\"status\":{status},\"signal\":{signal},\"error\":{error}}}\n".bytes()) -> return 1
         if outcome.error != "" || outcome.signal != "" || !outcome.exited || outcome.status != item.status {
-            shown_signal :: if outcome.signal == "" -> "null" else -> outcome.signal
+            shown_signal: if outcome.signal == "" -> "null" else -> outcome.signal
             return fail("{item.name}: expected exit{spec.exit_gap}{item.status}, got {status}/{shown_signal}/{outcome.error}")
         }
-        golden_path :: "{cwd}/{GOLDENS}/{item.golden}"
-        expected :: if files.read_bytes(golden_path) == {
+        golden_path: "{cwd}/{GOLDENS}/{item.golden}"
+        expected: if files.read_bytes(golden_path) == {
             .Ok(value) -> value
             .Err(_) -> { return fail("ENOENT: no such file or directory, open '{golden_path}'") }
         }
-        want_stdout :: if item.status == 0 -> expected.copy() else -> [U8]{}
-        want_stderr :: if item.status == 0 -> [U8]{} else -> expected.copy()
+        want_stdout: if item.status == 0 -> expected.copy() else -> [U8]{}
+        want_stderr: if item.status == 0 -> [U8]{} else -> expected.copy()
         if !same_bytes(outcome.stdout, want_stdout) || !same_bytes(outcome.stderr, want_stderr) -> return fail("{item.name}: {OUTPUT_MISMATCH}")
     }
     print(spec.done)
     0
 }
 
-fn run() {
-    code :: ui_witness(process.args())
+run: fn() {
+    code: ui_witness(process.args())
     if code != 0 -> process.exit(code)
 }
 

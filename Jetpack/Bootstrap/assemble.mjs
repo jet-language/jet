@@ -8,7 +8,7 @@
 //          type-checked in the fast loop, not first discovered by --tests)
 //   aot    the same unit, for `jet test`
 //   run    implementation + the same test bodies as functions, driven by one
-//          generated `fn run()` for the default `jet run` tier (I9)
+//          generated `run: fn()` for the default `jet run` tier (I9)
 //   hosted implementation only + Jetpack/run.jet, for the standalone native
 //          `jetpack` engine binary (`jet build`)
 //   publication  INTERNAL Engine implementation closure + the one registered
@@ -294,7 +294,7 @@ function renderTests(text, sourcePath, section) {
     if (testNames.some((claim) => claim.name === match[1])) fail(`${sourcePath}:${index + 1}: duplicate test claim "${match[1]}"`);
     const fnName = `jetpack_test_claim_${testNames.length}`;
     testNames.push({ name: match[1], fnName, section });
-    if (mode === "run") lines[index] = `fn ${fnName}() {`;
+    if (mode === "run") lines[index] = `${fnName}: fn() {`;
   }
   // Shared test helpers live in `*Support.jet` files: helpers only, never claims.
   const support = sourcePath.endsWith("Support.jet");
@@ -402,14 +402,14 @@ if (mode === "run") {
   // failure on either tier names the same claim. A failing claim stops the
   // process (E3001); check.sh resumes after it with JETPACK_CLAIM_FROM set to
   // the next claim's index, so one run reports every failing claim.
-  append("// [jetpack-bootstrap generated: default-tier test driver]\nuse jetpack_bootstrap_sys :: core.sys\nfn run() {\n");
-  append(`    from :: Int.parse(jetpack_bootstrap_sys.get("JETPACK_CLAIM_FROM") ?? "0") ?? 0\n`);
+  append("// [jetpack-bootstrap generated: default-tier test driver]\nuse jetpack_bootstrap_sys: core.sys\nrun: fn() {\n");
+  append(`    from: Int.parse(jetpack_bootstrap_sys.get("JETPACK_CLAIM_FROM") ?? "0") ?? 0\n`);
   for (const [index, { name, fnName }] of testNames.entries()) append(`    if from <= ${index} {\n        ${fnName}()\n        print("pass ${name}")\n    }\n`);
   append(`    print("jetpack-bootstrap: claims done")\n}\n`);
 }
 if (mode === "publication") {
   // Preserve the publisher's typed failure for the canonical entry reporter.
-  append("// [jetpack-bootstrap generated: internal native runtime-pack publisher]\nfn run() NativeRuntimePackError! {\n    native_runtime_pack_publisher()\n}\n");
+  append("// [jetpack-bootstrap generated: internal native runtime-pack publisher]\nrun: fn() NativeRuntimePackError! {\n    native_runtime_pack_publisher()\n}\n");
 }
 
 await rm(projectDir, { recursive: true, force: true });

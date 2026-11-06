@@ -6,12 +6,12 @@ use {
     jet_sema.[SemaGateModule, SemaGraphResult, SemaRegistrationGraph, SemaSourceOrigin, sema_gate_ledger_collect, sema_gate_checked_text_names, sema_gate_policy_diagnostics, sema_gate_source_policy_diagnostics, sema_unsafe_inspect]
 }
 
-fn jet_driver_doc_gate_projection(docs: &[JetDriverDocModule], graph: SemaGraphResult, registration: SemaRegistrationGraph, request: JetDriverCompileRequest, packages: [JetDriverPackageInfo]) Never! {
+jet_driver_doc_gate_projection: fn(docs: &[JetDriverDocModule], graph: SemaGraphResult, registration: SemaRegistrationGraph, request: JetDriverCompileRequest, packages: [JetDriverPackageInfo]) Never! {
     modules := [SemaGateModule]{}
     loop doc in docs {
-        index :: doc.name_module_index
+        index: doc.name_module_index
         if index < 0 || index >= graph.programs.len() || index >= registration.modules.len() -> next
-        owner :: registration.modules[index].package_identity
+        owner: registration.modules[index].package_identity
         row := SemaGateModule{source: doc.path, program: graph.programs[index]}
         loop package in packages {
             if package.identity == owner {
@@ -32,13 +32,13 @@ fn jet_driver_doc_gate_projection(docs: &[JetDriverDocModule], graph: SemaGraphR
     if docs.len() == 0 {
         return
     }
-    storage :: docs[0].name_ledger ?? panic("checked documentation row lost its NameLedger")
-    permit :: storage.guard_read()
-    ledger :: shared sema_gate_ledger_collect(modules, permit.value, request.gate_set, request.external_gate_entries, sema_gate_checked_text_names(graph.programs))
+    storage: docs[0].name_ledger ?? panic("checked documentation row lost its NameLedger")
+    permit: storage.guard_read()
+    ledger: shared sema_gate_ledger_collect(modules, permit.value, request.gate_set, request.external_gate_entries, sema_gate_checked_text_names(graph.programs))
     loop index in 0..<docs.len() -> docs[index].gate_ledger = Val(ledger)
 }
 
-struct JetDriverGateQueryResult {
+JetDriverGateQueryResult: struct {
     source: JetDriverSourceQueryResult
     ledger: GateLedger
     diagnostics: [Diagnostic]
@@ -47,9 +47,9 @@ struct JetDriverGateQueryResult {
 
 // Inspect uses exactly the authorized source-query loader. No registration,
 // body checking, comptime execution, IR lowering, or emission happens here.
-fn jet_driver_gate_query(request: JetDriverCompileRequest) -> JetDriverGateQueryResult {
-    load :: jet_driver_load_with_names(request)
-    source :: jet_driver_source_query_loaded(load, request)
+jet_driver_gate_query: fn(request: JetDriverCompileRequest) -> JetDriverGateQueryResult {
+    load: jet_driver_load_with_names(request)
+    source: jet_driver_source_query_loaded(load, request)
     if !source.complete -> return JetDriverGateQueryResult{source: source, ledger: GateLedger{}, diagnostics: source.diagnostics, complete: false}
     modules := [SemaGateModule]{}
     programs := [Program]{}
@@ -59,7 +59,7 @@ fn jet_driver_gate_query(request: JetDriverCompileRequest) -> JetDriverGateQuery
         &modules.push(row)
         &programs.push(module_row.program)
     }
-    names :: source.names ?? panic("completed load lost its canonical name facts")
+    names: source.names ?? panic("completed load lost its canonical name facts")
     ledger := sema_gate_ledger_collect(modules, names, request.gate_set, request.external_gate_entries, sema_gate_checked_text_names(programs))
     loop diagnostic in sema_gate_policy_diagnostics(ledger, modules, source.entry_module_index) -> &ledger.diagnostic_rows.push(diagnostic)
     diagnostics := source.diagnostics
@@ -79,7 +79,7 @@ fn jet_driver_gate_query(request: JetDriverCompileRequest) -> JetDriverGateQuery
 
 // A module gate row's package display path and `policy.unsafe` /
 // `policy.expert` surface, then any host-supplied gate policy for the package.
-fn jet_driver_gate_module_policy(row: &SemaGateModule, request: JetDriverCompileRequest, packages: [JetDriverPackageInfo], package_identity: String, physical_path: String) Never! {
+jet_driver_gate_module_policy: fn(row: &SemaGateModule, request: JetDriverCompileRequest, packages: [JetDriverPackageInfo], package_identity: String, physical_path: String) Never! {
     loop package in packages {
         if package.identity != package_identity -> next
         row.policy_path = Val(jet_driver_display_path(package.root_path, physical_path))
@@ -104,17 +104,17 @@ fn jet_driver_gate_module_policy(row: &SemaGateModule, request: JetDriverCompile
 // refusals name as the gate's site; each diagnostic is reported against the
 // unit's own path. Each program's items move into its row for the read and
 // back after it.
-fn jet_driver_unsafe_check(request: JetDriverCompileRequest, load: &JetDriverLoadResult) Never! {
+jet_driver_unsafe_check: fn(request: JetDriverCompileRequest, load: &JetDriverLoadResult) Never! {
     modules := [SemaGateModule]{}
     owners := [Int]{}
     unit_paths := [String:String]{}
     loop index in 0..<load.modules.len() {
-        unit_index :: load.modules[index].source_unit_index
+        unit_index: load.modules[index].source_unit_index
         if jet_driver_unit_is_core(load.source_units[unit_index]) -> next
-        source :: load.source_units[unit_index].path
+        source: load.source_units[unit_index].path
         physical := source
-        root_index :: load.source_units[unit_index].root_index
-        file_index :: load.source_units[unit_index].file_index
+        root_index: load.source_units[unit_index].root_index
+        file_index: load.source_units[unit_index].file_index
         if load.source_units[unit_index].source_origin == SemaSourceOrigin.Snapshot && root_index >= 0 && file_index >= 0 {
             physical = request.authorized_sources.roots[root_index].files[file_index].path
         }
@@ -130,8 +130,8 @@ fn jet_driver_unsafe_check(request: JetDriverCompileRequest, load: &JetDriverLoa
         &owners.push(index)
     }
     if modules.len() == 0 -> return
-    inspection :: sema_unsafe_inspect(modules, request.gate_set)
-    refusals :: sema_gate_source_policy_diagnostics(modules)
+    inspection: sema_unsafe_inspect(modules, request.gate_set)
+    refusals: sema_gate_source_policy_diagnostics(modules)
     loop position in 0..<owners.len() -> compiler_transfer_rows<Item>(&load.modules[owners[position]].program.items, &modules[position].program.items)
     loop entry in inspection.diagnostics -> &load.diagnostics.push(diagnostic_with_source_path(entry.diagnostic, unit_paths.get(entry.source) ?? entry.source, 0))
     loop entry in refusals -> &load.diagnostics.push(diagnostic_with_source_path(entry.diagnostic, unit_paths.get(entry.source) ?? entry.source, 0))

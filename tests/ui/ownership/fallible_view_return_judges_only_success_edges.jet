@@ -1,16 +1,16 @@
 // A fallible `View<T>` return proves its owner only on success edges: the
 // `Err` exits carry no view, while an `Ok` window into a local is refused.
-fn pick(items: [Int], local_too: Bool) -> View<Int> Err! from items {
-    reason :: "empty"
+pick: fn(items: [Int], local_too: Bool) -> View<Int> Err! from items {
+    reason: "empty"
     if items.len() == 0 -> return Err(reason)
     if local_too {
-        scratch :: [Int]{1, 2}
+        scratch: [Int]{1, 2}
         return Ok(scratch)
     }
     Ok(items)
 }
 
-fn run() {
-    xs :: [Int]{1, 2, 3}
+run: fn() {
+    xs: [Int]{1, 2, 3}
     print(pick(xs, false) ?? panic("pick"))
 }

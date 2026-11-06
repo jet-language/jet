@@ -1,26 +1,26 @@
 Warning [jet.PositionalBoolParameter]: Public function `early` has a positional `Bool` parameter `ready`
-  --> unused_parameter_match_subject.jet:24:10
+  --> tests/ui_lint/unused_parameter_match_subject.jet:24:11
     |
- 24 | fn early(ready: Bool, value: Int, unused: Int) -> Int {
-    |          ^^^^^
+ 24 | early: fn(ready: Bool, value: Int, unused: Int) -> Int {
+    |           ^^^^^
  Why: Positional booleans are easy to transpose at the call site
  Fix: Callers can write `ready: true` to make the intent clear (S61 labels)
 More: jet-lang.dev/e/L2401
 
 Warning [jet.UnusedParameter]: Parameter `unused` is never used.
-  --> unused_parameter_match_subject.jet:24:35
+  --> tests/ui_lint/unused_parameter_match_subject.jet:24:36
     |
- 24 | fn early(ready: Bool, value: Int, unused: Int) -> Int {
-    |                                   ^^^^^^
+ 24 | early: fn(ready: Bool, value: Int, unused: Int) -> Int {
+    |                                    ^^^^^^
  Why: An unused parameter often means the function contract or implementation is incomplete; Jet keeps this warning-only so prototypes stay unblocked.
  Fix: Use `unused`, rename it to `_unused` when it is intentionally unused, or remove it from the function contract.
 More: jet-lang.dev/e/L0102
 
 Warning [jet.PositionalBoolParameter]: Public function `local_subject` has a positional `Bool` parameter `ready`
-  --> unused_parameter_match_subject.jet:31:101
+  --> tests/ui_lint/unused_parameter_match_subject.jet:31:102
     |
- 31 | #Allow(jet.RedundantFinalReturn, "the arm returns are the L0102 regression shape") fn local_subject(ready: Bool) -> String {
-    |                                                                                                     ^^^^^
+ 31 | #Allow(jet.RedundantFinalReturn, "the arm returns are the L0102 regression shape") local_subject: fn(ready: Bool) -> String {
+    |                                                                                                      ^^^^^
  Why: Positional booleans are easy to transpose at the call site
  Fix: Callers can write `ready: true` to make the intent clear (S61 labels)
 More: jet-lang.dev/e/L2401

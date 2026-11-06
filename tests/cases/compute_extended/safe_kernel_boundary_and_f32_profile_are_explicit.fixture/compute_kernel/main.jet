@@ -1,4 +1,4 @@
-package {
+package: {
     name: "tooling_compute_kernel"
     version: "0.1.0"
     authority: { allow: [GPU, IO, Mem.Alloc] }
@@ -7,12 +7,12 @@ package {
 // D-COMPUTE-KERNEL1 / D-COMPUTE-KERNEL-SURFACE1=B (#1139/#1140): the safe
 // marker carries a sema proof. Raw contracts are issued only by accelerator
 // providers; the Epoch 3 CPU surface exposes no forgeable constructor.
-use compute :: core.compute
+use compute: core.compute
 
-#Kernel(.parallel) fn lane_add(left: Int, right: Int) -> Int { left + right }
+#Kernel(.parallel) lane_add: fn(left: Int, right: Int) -> Int { left + right }
 
-fn run() {
+run: fn() {
     print("kernel:{lane_add(20, 22)}")
-    ok :: compute.kernel_bounds_ok([2, 3], [1, 2]) ?? return
+    ok: compute.kernel_bounds_ok([2, 3], [1, 2]) ?? return
     print("bounds:{ok}")
 }

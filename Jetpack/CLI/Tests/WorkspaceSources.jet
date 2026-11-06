@@ -1,37 +1,37 @@
 // Claims for project and workspace root discovery (Rust
 // jetpack::CLI::workspace_sources tests).
 
-fn cli_ws_test_scratch(label: String) -[FS]> String {
+cli_ws_test_scratch: fn(label: String) -[FS]> String {
     files.tmpdir("jetpack-{label}-root-") ?? panic("claim scratch dir")
 }
 
 // The Rust test-only `load_workspace`: the checked index snapshot, written
 // through to `.jet/lock`; None when no index source declares a workspace.
-fn cli_ws_test_load_workspace(cache: &WorkspaceDeclarationCache, dir: String) -> WorkspacePlan? {
-    source :: if cli_checked_workspace_source(&cache, dir) == {
+cli_ws_test_load_workspace: fn(cache: &WorkspaceDeclarationCache, dir: String) -> WorkspacePlan? {
+    source: if cli_checked_workspace_source(&cache, dir) == {
         .Val(found) -> found
         .None -> { return None }
         .Err(_) -> panic("workspace discovery")
     }
     if source.source.role != WorkspaceSourceRole.Index -> return None
-    snapshot :: cli_workspace_snapshot_from_source(source.resolver, ^source.source) ?? panic("workspace snapshot")
+    snapshot: cli_workspace_snapshot_from_source(source.resolver, ^source.source) ?? panic("workspace snapshot")
     cli_finish_workspace_load(&cache, dir, Val(snapshot)) ?? panic("workspace lock write")
 }
 
 #Test("cli project root walks from a nested command directory") {
     cache := WorkspaceDeclarationCache.new()
-    root :: cli_ws_test_scratch("project")
-    nested :: files.join(root, "packages/app/src")
+    root: cli_ws_test_scratch("project")
+    nested: files.join(root, "packages/app/src")
     files.create_dir_all(nested) ?? panic("create nested dir")
-    files.write(files.join(root, "env.jet"), "module env.dev {{}}\n") ?? panic("write env.jet")
+    files.write(files.join(root, "env.jet"), "env.dev: module {{}}\n") ?? panic("write env.jet")
     assert_eq(cli_project_root(&cache, nested), root)
     files.remove_all(root).drop("scratch cleanup")
 }
 
 #Test("cli project root walks to the nearest package file") {
     cache := WorkspaceDeclarationCache.new()
-    root :: cli_ws_test_scratch("package")
-    nested :: files.join(root, "packages/app/src")
+    root: cli_ws_test_scratch("package")
+    nested: files.join(root, "packages/app/src")
     files.create_dir_all(nested) ?? panic("create nested dir")
     files.write(files.join(root, PACKAGE_FILE), "name: \"app\"\n") ?? panic("write package.jet")
     assert_eq(cli_project_root(&cache, nested), root)
@@ -40,11 +40,11 @@ fn cli_ws_test_load_workspace(cache: &WorkspaceDeclarationCache, dir: String) ->
 
 #Test("cli workspace root survives a nested package boundary") {
     cache := WorkspaceDeclarationCache.new()
-    root :: cli_ws_test_scratch("workspace")
-    package :: files.join(root, "packages/app")
-    nested :: files.join(package, "src")
+    root: cli_ws_test_scratch("workspace")
+    package: files.join(root, "packages/app")
+    nested: files.join(package, "src")
     files.create_dir_all(nested) ?? panic("create nested dir")
-    files.write(files.join(root, "authority.jet"), "module workspace {{ policy: {{ deny: #(Exec) }} }}\n") ?? panic("write authority.jet")
+    files.write(files.join(root, "authority.jet"), "workspace: module {{ policy: {{ deny: #(Exec) }} }}\n") ?? panic("write authority.jet")
     files.write(files.join(package, PACKAGE_FILE), "name: \"app\"\n") ?? panic("write package.jet")
     assert_eq(cli_project_root(&cache, nested), package)
     assert_eq(cli_workspace_root(&cache, nested), root)
@@ -55,15 +55,15 @@ fn cli_ws_test_load_workspace(cache: &WorkspaceDeclarationCache, dir: String) ->
 
 #Test("repeated workspace discovery lexes each candidate source once") {
     cache := WorkspaceDeclarationCache.new()
-    root :: cli_ws_test_scratch("lex-once")
-    package :: files.join(root, "packages/app")
-    nested :: files.join(package, "src")
+    root: cli_ws_test_scratch("lex-once")
+    package: files.join(root, "packages/app")
+    nested: files.join(package, "src")
     files.create_dir_all(nested) ?? panic("create nested dir")
     // The scratch path keeps each source distinct from every other claim's.
-    files.write(files.join(root, "authority.jet"), "// {root}\nmodule workspace {{ policy: {{ deny: #(Exec) }} }}\n") ?? panic("write authority.jet")
-    files.write(files.join(root, "tools.jet"), "// {root}\nfn helper() {{}}\n") ?? panic("write tools.jet")
+    files.write(files.join(root, "authority.jet"), "// {root}\nworkspace: module {{ policy: {{ deny: #(Exec) }} }}\n") ?? panic("write authority.jet")
+    files.write(files.join(root, "tools.jet"), "// {root}\nhelper: fn() {{}}\n") ?? panic("write tools.jet")
     files.write(files.join(package, PACKAGE_FILE), "// {root}\nname: \"app\"\n") ?? panic("write package.jet")
-    before :: cache.lexes
+    before: cache.lexes
     assert_eq(cli_workspace_root(&cache, nested), root)
     assert_eq(cli_workspace_root(&cache, nested), root)
     assert((envmodel_workspace_load(&cache, root) ? found -> found ! error -> panic("load the workspace")) == None)

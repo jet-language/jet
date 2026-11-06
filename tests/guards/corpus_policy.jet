@@ -2,9 +2,9 @@
 // owns recurrence. This is test support, never a user-program lint.
 // Guard logic lives in ordinary helpers so LIGHT `jet check tests/guards` sees
 // its semantic errors; #Test blocks only dispatch to those checked helpers.
-use policy_files :: core.files
+use policy_files: core.files
 
-struct PolicySourceRow {
+PolicySourceRow: struct {
     selector: String
     role: String
     profile: String
@@ -13,12 +13,12 @@ struct PolicySourceRow {
     owner: String
     reason: String
 }
-struct PolicyScopeRow { rule: String, selector: String, reason: String }
-struct PolicyProducerRow { selector: String, artifact: String, protocol: String, owner: String, reason: String }
-struct PolicyArtifactRow { selector: String, producer: String, kind: String, reason: String }
-struct PolicyFindingRow { id: String, rule: String, owner: String, proof: String }
-struct PolicyExceptionRow { rule: String, selector: String, site: String, expected: String, protocol: String, reason: String }
-struct PolicyManifest {
+PolicyScopeRow: struct { rule: String, selector: String, reason: String }
+PolicyProducerRow: struct { selector: String, artifact: String, protocol: String, owner: String, reason: String }
+PolicyArtifactRow: struct { selector: String, producer: String, kind: String, reason: String }
+PolicyFindingRow: struct { id: String, rule: String, owner: String, proof: String }
+PolicyExceptionRow: struct { rule: String, selector: String, site: String, expected: String, protocol: String, reason: String }
+PolicyManifest: struct {
     sources: [PolicySourceRow]
     scopes: [PolicyScopeRow]
     producers: [PolicyProducerRow]
@@ -26,25 +26,25 @@ struct PolicyManifest {
     findings: [PolicyFindingRow]
     exceptions: [PolicyExceptionRow]
 }
-struct PolicyRuleSpec { name: String, why: String, replacement: String }
-struct PolicyOccurrence { file: String, rule: String, site: String }
+PolicyRuleSpec: struct { name: String, why: String, replacement: String }
+PolicyOccurrence: struct { file: String, rule: String, site: String }
 #Error
-struct PolicyError { message: String }
+PolicyError: struct { message: String }
 
 // Compiler/token offsets and the Rust adapter's slices are UTF-8 byte offsets.
-fn policy_slice_bytes(text: String, start: Int, end: Int) -> String { policy_slice_raw(text.bytes(), start, end) }
+policy_slice_bytes: fn(text: String, start: Int, end: Int) -> String { policy_slice_raw(text.bytes(), start, end) }
 
 // The same slice of an already indexed text: a scan over one text indexes it
 // once instead of copying it per slice (#6301).
-fn policy_slice_raw(raw: [U8], start: Int, end: Int) -> String {
+policy_slice_raw: fn(raw: [U8], start: Int, end: Int) -> String {
     assert(start >= 0 && end >= start && end <= raw.len(), "valid corpus byte span")
     if start == end -> return ""
     String.from_bytes(raw[start..(end - 1)]) ?? panic("corpus byte span must end on UTF-8 boundaries")
 }
 
-fn policy_rule_registry() -> [PolicyRuleSpec] {
+policy_rule_registry: fn() -> [PolicyRuleSpec] {
     [PolicyRuleSpec]{
-        PolicyRuleSpec{name: "raw-cli-fixed-shape", why: "maintained beginner programs must use the typed entry shape", replacement: "declare a typed #CLI entry struct and fn run(args: Args)"},
+        PolicyRuleSpec{name: "raw-cli-fixed-shape", why: "maintained beginner programs must use the typed entry shape", replacement: "declare a typed #CLI entry struct and run: fn(args: Args)"},
         PolicyRuleSpec{name: "fixture-cli-role", why: "a diagnostic fixture may retain parser syntax only as an explicitly classified fixture", replacement: "keep the exact negative or fixture role and do not copy its shape into teaching code"},
         PolicyRuleSpec{name: "dogfood-stdlib-recipes", why: "the maintained dogfood recipe must use the canonical typed helper", replacement: "call the resolved Core helper instead of a local reimplementation"},
         PolicyRuleSpec{name: "dogfood-path-containment", why: "path containment must use the typed path relation", replacement: "call Path.is_within for the normalized path values"},
@@ -57,7 +57,7 @@ fn policy_rule_registry() -> [PolicyRuleSpec] {
         PolicyRuleSpec{name: "dogfood-json-url-list", why: "dogfood JSON, URL, and list operations have one typed path", replacement: "use the typed JSON, URL, or list API"},
         PolicyRuleSpec{name: "raw-cli-process-boundary", why: "a canonical program must not repeatedly reconstruct the process boundary", replacement: "use the one typed entry boundary or one explicit expert boundary"},
         PolicyRuleSpec{name: "product-parser-regression", why: "the parser boundary must reject the recorded invalid shape", replacement: "keep the shared parser regression fixture and assertion"},
-        PolicyRuleSpec{name: "entry-explicit", why: "ordinary-file execution belongs in an explicit fn run (D-ENTRY-SCRIPT1=C)", replacement: "move loose executable statements into fn run"},
+        PolicyRuleSpec{name: "entry-explicit", why: "ordinary-file execution belongs in an explicit run: fn (D-ENTRY-SCRIPT1=C)", replacement: "move loose executable statements into fn run"},
         PolicyRuleSpec{name: "message_text", why: "the maintained corpus should use the message-level HTTP text default", replacement: "replace body().text(default_limit) with text()"},
         PolicyRuleSpec{name: "redundant_fixed_cleanup", why: "the maintained corpus should keep plain Fixed output free of grouping cleanup", replacement: "delete the grouping-separator cleanup"},
         PolicyRuleSpec{name: "unit-scalar-rewrap", why: "a scalar conversion must not unwrap and immediately rewrap the same unit", replacement: "use the linear unit operation directly"},
@@ -91,39 +91,39 @@ fn policy_rule_registry() -> [PolicyRuleSpec] {
     }
 }
 
-fn policy_violation(file: String, rule: String, site: String) -> String {
+policy_violation: fn(file: String, rule: String, site: String) -> String {
     loop spec in policy_rule_registry() {
         if spec.name == rule -> return "file={file}; rule={rule}; site={site}; why={spec.why}; replacement={spec.replacement}"
     }
     panic("unregistered corpus rule: {rule}")
 }
-fn policy_relative_path(path: String) -> String? {
+policy_relative_path: fn(path: String) -> String? {
     if path.is_empty() || path.starts_with("/") -> return Val("manifest path is not a normalized relative path ({path})")
     loop part in path.split("/") {
         if part == ".." || part.is_empty() -> return Val("manifest path is not a normalized relative path ({path})")
     }
     None
 }
-fn policy_selector_path(selector: String) -> String {
+policy_selector_path: fn(selector: String) -> String {
     if selector.starts_with("root:") || selector.starts_with("file:") -> return policy_slice_bytes(selector, 5, selector.bytes().len())
     selector.copy()
 }
-fn policy_selector_error(value: String) -> String? {
+policy_selector_error: fn(value: String) -> String? {
     if !value.starts_with("root:") && !value.starts_with("file:") -> return Val("selector must start with root: or file: ({value})")
     policy_relative_path(policy_selector_path(value))
 }
-fn policy_producer_error(value: String) -> String? {
+policy_producer_error: fn(value: String) -> String? {
     if !value.starts_with("producer:") -> return Val("producer selector must start with producer: ({value})")
-    parts :: policy_slice_bytes(value, 9, value.bytes().len()).split("#").to_list()
+    parts: policy_slice_bytes(value, 9, value.bytes().len()).split("#").to_list()
     if parts.len() < 2 -> return Val("producer selector must name a symbol ({value})")
     if policy_relative_path(parts[0]) == .Val(error) -> return Val(error.copy())
     if parts.len() != 2 || parts[1].is_empty() -> return Val("producer selector must name one non-empty symbol ({value})")
     None
 }
-fn policy_artifact_error(value: String) -> String? {
+policy_artifact_error: fn(value: String) -> String? {
     if value.starts_with("path:") -> return policy_relative_path(policy_slice_bytes(value, 5, value.bytes().len()))
     if value.starts_with("family:") {
-        family :: policy_slice_bytes(value, 7, value.bytes().len())
+        family: policy_slice_bytes(value, 7, value.bytes().len())
         if family.is_empty() || family.contains("/") -> return Val("artifact family is not a stable identifier ({value})")
         return None
     }
@@ -131,9 +131,9 @@ fn policy_artifact_error(value: String) -> String? {
 }
 // Preserve Rust usize's full x64 domain, including + and leading zeroes.
 // Counts are canonical decimal strings so Jet Int cannot truncate u64::MAX.
-fn policy_unsigned(raw: String) -> String? {
+policy_unsigned: fn(raw: String) -> String? {
     if raw.is_empty() -> return None
-    digits :: raw.bytes()
+    digits: raw.bytes()
     start := 0
     if digits[0] == (U8{43}) -> start = 1
     if start == digits.len() -> return None
@@ -141,49 +141,49 @@ fn policy_unsigned(raw: String) -> String? {
         if digits[index] < (U8{48}) || digits[index] > (U8{57}) -> return None
     }
     loop start + 1 < digits.len() && digits[start] == (U8{48}) -> start += 1
-    value :: policy_slice_bytes(raw, start, digits.len())
+    value: policy_slice_bytes(raw, start, digits.len())
     if value.len() > 20 || (value.len() == 20 && value > "18446744073709551615") -> return None
     Val(value)
 }
-fn policy_decimal_less(left: String, right: String) -> Bool {
+policy_decimal_less: fn(left: String, right: String) -> Bool {
     left.len() < right.len() || (left.len() == right.len() && left < right)
 }
-fn policy_site_error(value: String) -> String? {
-    parts :: value.split("@").to_list()
+policy_site_error: fn(value: String) -> String? {
+    parts: value.split("@").to_list()
     if parts.len() < 2 -> return Val("semantic site must carry a span ({value})")
     if parts.len() != 2 || parts[0].is_empty() -> return Val("semantic site kind is empty or malformed ({value})")
-    span :: parts[1].split("..").to_list()
+    span: parts[1].split("..").to_list()
     if span.len() < 2 -> return Val("semantic site span must use start..end ({value})")
-    start :: policy_unsigned(span[0]) ?? return Val("bad site start ({value})")
-    end :: policy_unsigned(span[1]) ?? return Val("bad site end ({value})")
+    start: policy_unsigned(span[0]) ?? return Val("bad site start ({value})")
+    end: policy_unsigned(span[1]) ?? return Val("bad site end ({value})")
     if span.len() != 2 -> return Val("bad site end ({value})")
     if policy_decimal_less(end, start) -> return Val("site end precedes start ({value})")
     None
 }
-fn policy_role_valid(role: String) -> Bool {
+policy_role_valid: fn(role: String) -> Bool {
     role == "canonical-teaching" || role == "expert-lesson" || role == "negative-diagnostic" || role == "raw-protocol" || role == "fixture-harness-boundary" || role == "generated-output" || role == "non-teaching-test-data"
 }
-fn policy_parse_manifest(text: String) -> PolicyManifest PolicyError! {
+policy_parse_manifest: fn(text: String) -> PolicyManifest PolicyError! {
     manifest := PolicyManifest{sources: [PolicySourceRow]{}, scopes: [PolicyScopeRow]{}, producers: [PolicyProducerRow]{}, artifacts: [PolicyArtifactRow]{}, findings: [PolicyFindingRow]{}, exceptions: [PolicyExceptionRow]{}}
     section := ""
     number := 0
     loop raw in text.split("\n") {
         number += 1
-        bytes :: raw.bytes()
-        carriage_return :: U8{13}
+        bytes: raw.bytes()
+        carriage_return: U8{13}
         end := bytes.len()
         loop end > 0 && bytes[end - 1] == carriage_return -> end -= 1
-        line :: policy_slice_bytes(raw, 0, end)
+        line: policy_slice_bytes(raw, 0, end)
         if line.is_empty() || line.starts_with("#") -> next
         if line.starts_with("[") && line.ends_with("]") {
             section = policy_slice_bytes(line, 1, line.bytes().len() - 1)
             if section != "source" && section != "scope" && section != "producer" && section != "artifact" && section != "finding" && section != "exception" -> return Err(PolicyError{message: "manifest line {number}: unknown section [{section}]"})
             next
         }
-        fields :: line.split("\t").to_list()
-        expected :: if section == "source" -> 8 else if section == "scope" -> 4 else if section == "producer" -> 6 else if section == "artifact" || section == "finding" -> 5 else if section == "exception" -> 7 else -> 0
+        fields: line.split("\t").to_list()
+        expected: if section == "source" -> 8 else if section == "scope" -> 4 else if section == "producer" -> 6 else if section == "artifact" || section == "finding" -> 5 else if section == "exception" -> 7 else -> 0
         if fields.len() != expected || expected == 0 -> return Err(PolicyError{message: "manifest line {number}: wrong field count or row outside a section"})
-        labels :: if section == "source" -> [String]{"", "", "", "source profile", "source decision", "source proof", "source owner", "source reason"} else if section == "scope" -> [String]{"", "scope rule", "", "scope reason"} else if section == "producer" -> [String]{"", "", "", "producer protocol", "producer owner", "producer reason"} else if section == "artifact" -> [String]{"", "", "", "artifact kind", "artifact reason"} else if section == "finding" -> [String]{"", "finding id", "finding rule", "finding owner", "finding proof"} else -> [String]{"", "exception rule", "", "", "", "exception protocol", "exception reason"}
+        labels: if section == "source" -> [String]{"", "", "", "source profile", "source decision", "source proof", "source owner", "source reason"} else if section == "scope" -> [String]{"", "scope rule", "", "scope reason"} else if section == "producer" -> [String]{"", "", "", "producer protocol", "producer owner", "producer reason"} else if section == "artifact" -> [String]{"", "", "", "artifact kind", "artifact reason"} else if section == "finding" -> [String]{"", "finding id", "finding rule", "finding owner", "finding proof"} else -> [String]{"", "exception rule", "", "", "", "exception protocol", "exception reason"}
         // Validate in field order, matching the Rust row constructors.
         loop index in 1..<fields.len() {
             error := String?{None}
@@ -206,49 +206,49 @@ fn policy_parse_manifest(text: String) -> PolicyManifest PolicyError! {
     }
     Ok(manifest)
 }
-fn policy_selector_matches(selector: String, path: String) -> Bool {
+policy_selector_matches: fn(selector: String, path: String) -> Bool {
     if selector.starts_with("file:") -> return policy_selector_path(selector) == path
     if !selector.starts_with("root:") -> return false
-    root :: policy_selector_path(selector)
+    root: policy_selector_path(selector)
     path == root || path.starts_with("{root}/")
 }
-fn policy_specificity(selector: String) -> Int {
+policy_specificity: fn(selector: String) -> Int {
     if selector.starts_with("file:") -> return 100000 + selector.len() - 5
     if selector.starts_with("root:") -> return selector.len() - 5
     0
 }
-fn policy_source_row(manifest: PolicyManifest, path: String) -> PolicySourceRow? {
+policy_source_row: fn(manifest: PolicyManifest, path: String) -> PolicySourceRow? {
     found := PolicySourceRow?{None}
     best := -1
     loop row in manifest.sources {
-        rank :: policy_specificity(row.selector)
+        rank: policy_specificity(row.selector)
         if policy_selector_matches(row.selector, path) && rank >= best { found = Val(row)
             best = rank
         }
     }
     found
 }
-fn policy_protocol_error(protocol: String) -> String? {
+policy_protocol_error: fn(protocol: String) -> String? {
     if protocol == "ordinary-envelope" || protocol == "no-response-protocol" -> return None
     if !protocol.starts_with("override:") -> return Val("generated protocol must be ordinary-envelope, no-response-protocol, or an override ({protocol})")
-    parts :: policy_slice_bytes(protocol, 9, protocol.bytes().len()).split(":").to_list()
+    parts: policy_slice_bytes(protocol, 9, protocol.bytes().len()).split(":").to_list()
     if parts.len() < 2 -> return Val("generated protocol override must name identity and proof ({protocol})")
     if parts[0].is_empty() || parts[0] == "ordinary-envelope" || parts.len() != 2 || parts[1] != "differs-from-ordinary-envelope" -> return Val("generated protocol override must prove a distinct protocol identity ({protocol})")
     None
 }
-fn policy_exception_protocol_error(protocol: String) -> String? {
+policy_exception_protocol_error: fn(protocol: String) -> String? {
     if protocol == "fixture" || protocol == "expert-lesson" || protocol == "negative-diagnostic" || protocol == "canonical-teaching" || protocol == "raw-protocol" || protocol == "fixture-harness-boundary" -> return None
     if protocol.starts_with("override:") -> return policy_protocol_error(protocol)
     Val("exception protocol must name its source boundary or a generated override ({protocol})")
 }
-fn policy_domain_guard(rule: String) -> Bool {
+policy_domain_guard: fn(rule: String) -> Bool {
     rule == "product-parser-regression" || rule == "compiler-loop-fact" || rule == "build-root-fact" || rule == "fixture-role-classification" || rule == "fixture-cli-role" || rule == "bindgen-one-decoder"
 }
-fn policy_registered(rule: String) -> Bool {
+policy_registered: fn(rule: String) -> Bool {
     loop spec in policy_rule_registry() { if spec.name == rule -> return true }
     false
 }
-fn policy_duplicate_errors(values: [String], kind: String) -> [String] {
+policy_duplicate_errors: fn(values: [String], kind: String) -> [String] {
     seen := [String]{}
     errors := [String]{}
     loop value in values {
@@ -257,7 +257,7 @@ fn policy_duplicate_errors(values: [String], kind: String) -> [String] {
     }
     errors
 }
-fn policy_role_debug(role: String) -> String {
+policy_role_debug: fn(role: String) -> String {
     if role == "canonical-teaching" -> return "CanonicalTeaching"
     if role == "expert-lesson" -> return "ExpertLesson"
     if role == "negative-diagnostic" -> return "NegativeDiagnostic"
@@ -266,14 +266,14 @@ fn policy_role_debug(role: String) -> String {
     if role == "generated-output" -> return "GeneratedOutput"
     "NonTeachingTestData"
 }
-fn policy_validate_manifest(manifest: PolicyManifest) -> [String] {
+policy_validate_manifest: fn(manifest: PolicyManifest) -> [String] {
     errors := [String]{}
     names := [String]{}
     loop row in manifest.sources -> &names.push(row.selector)
     loop error in policy_duplicate_errors(names, "source") -> &errors.push(error)
     scopes := [String]{}
     loop scope in manifest.scopes {
-        key :: "{scope.rule}\t{scope.selector}"
+        key: "{scope.rule}\t{scope.selector}"
         if scopes.contains(key) -> &errors.push("duplicate scope {scope.rule} {scope.selector}")
         else -> &scopes.push(key)
     }
@@ -301,8 +301,8 @@ fn policy_validate_manifest(manifest: PolicyManifest) -> [String] {
     }
     loop producer in manifest.producers {
         if policy_protocol_error(producer.protocol) == .Val(error) {
-            path :: policy_slice_bytes(producer.selector, 9, producer.selector.bytes().len()).split("#").to_list()[0].copy()
-            message :: policy_violation(path, "generated-protocol-override", "manifest:generated-protocol@0..0")
+            path: policy_slice_bytes(producer.selector, 9, producer.selector.bytes().len()).split("#").to_list()[0].copy()
+            message: policy_violation(path, "generated-protocol-override", "manifest:generated-protocol@0..0")
             &errors.push("{message} ({error})")
         }
         has_artifact := false
@@ -319,16 +319,16 @@ fn policy_validate_manifest(manifest: PolicyManifest) -> [String] {
     exceptions := [String]{}
     loop exception in manifest.exceptions {
         if !policy_registered(exception.rule) -> &errors.push("exception names unknown rule {exception.rule}")
-        key :: "{exception.rule}\t{exception.selector}\t{exception.site}"
+        key: "{exception.rule}\t{exception.selector}\t{exception.site}"
         if exceptions.contains(key) -> &errors.push("duplicate occurrence exception {exception.rule} {exception.selector} {exception.site}")
         else -> &exceptions.push(key)
         if exception.expected == "0" -> &errors.push("exception {exception.rule} {exception.site} has zero expected occurrences")
         if !exception.selector.starts_with("file:") -> &errors.push("exception {exception.rule} {exception.site} is not occurrence-scoped to one file")
         else {
-            source :: policy_source_row(manifest, policy_selector_path(exception.selector))
+            source: policy_source_row(manifest, policy_selector_path(exception.selector))
             if source == .Val(row) {
                 if !exception.site.starts_with("allow:") && row.role != "expert-lesson" && row.role != "negative-diagnostic" {
-                    role :: policy_role_debug(row.role)
+                    role: policy_role_debug(row.role)
                     &errors.push("exception {exception.rule} {exception.selector} requires an expert-lesson or negative-diagnostic source, found {role}")
                 }
             } else {
@@ -341,20 +341,20 @@ fn policy_validate_manifest(manifest: PolicyManifest) -> [String] {
     errors
 }
 
-fn policy_join(root: String, path: String) -> String {
+policy_join: fn(root: String, path: String) -> String {
     if root.is_empty() || root == "." -> return path.copy()
     if root.ends_with("/") -> return "{root}{path}"
     "{root}/{path}"
 }
-fn policy_validate_manifest_paths(manifest: PolicyManifest, root: String) -> [String] {
+policy_validate_manifest_paths: fn(manifest: PolicyManifest, root: String) -> [String] {
     errors := [String]{}
     loop source in manifest.sources {
-        path :: policy_join(root, policy_selector_path(source.selector))
-        exists :: if source.selector.starts_with("root:") -> policy_files.is_dir(path) else -> policy_files.is_file(path)
+        path: policy_join(root, policy_selector_path(source.selector))
+        exists: if source.selector.starts_with("root:") -> policy_files.is_dir(path) else -> policy_files.is_file(path)
         if !exists -> &errors.push("manifest source selector does not exist: {source.selector}")
     }
     loop producer in manifest.producers {
-        path :: policy_slice_bytes(producer.selector, 9, producer.selector.bytes().len()).split("#").to_list()[0].copy()
+        path: policy_slice_bytes(producer.selector, 9, producer.selector.bytes().len()).split("#").to_list()[0].copy()
         if !policy_files.is_file(policy_join(root, path)) -> &errors.push("manifest producer source does not exist: {producer.selector}")
     }
     loop exception in manifest.exceptions {
@@ -362,11 +362,11 @@ fn policy_validate_manifest_paths(manifest: PolicyManifest, root: String) -> [St
     }
     errors
 }
-fn policy_inventory_error(message: String, file: String, site_kind: String) -> String {
-    violation :: policy_violation(file, "corpus-inventory", "{site_kind}@0..0")
+policy_inventory_error: fn(message: String, file: String, site_kind: String) -> String {
+    violation: policy_violation(file, "corpus-inventory", "{site_kind}@0..0")
     "{message}: {file}; {violation}"
 }
-fn policy_audit_inventory(manifest: PolicyManifest, files: [String], producers: [String]) -> [String] {
+policy_audit_inventory: fn(manifest: PolicyManifest, files: [String], producers: [String]) -> [String] {
     errors := [String]{}
     loop file in files {
         if policy_source_row(manifest, file) == None -> &errors.push(policy_inventory_error("unclassified eligible source", file, "inventory:source"))
@@ -378,18 +378,18 @@ fn policy_audit_inventory(manifest: PolicyManifest, files: [String], producers: 
     }
     errors
 }
-fn policy_validate_occurrences(manifest: PolicyManifest, selector: String, candidates: [PolicyOccurrence]) -> String? {
+policy_validate_occurrences: fn(manifest: PolicyManifest, selector: String, candidates: [PolicyOccurrence]) -> String? {
     keys := [String]{}
     loop candidate in candidates {
         if candidate.file != selector -> return Val("candidate file {candidate.file} does not match {selector}")
-        key :: "{candidate.rule}\t{candidate.site}"
+        key: "{candidate.rule}\t{candidate.site}"
         if !keys.contains(key) -> &keys.push(key)
     }
     &keys.sort()
     loop key in keys {
-        parts :: key.split("\t").to_list()
-        rule :: parts[0]
-        site :: parts[1]
+        parts: key.split("\t").to_list()
+        rule: parts[0]
+        site: parts[1]
         count := 0
         loop candidate in candidates { if candidate.rule == rule && candidate.site == site -> count += 1 }
         matches := 0
@@ -411,7 +411,7 @@ fn policy_validate_occurrences(manifest: PolicyManifest, selector: String, candi
     }
     None
 }
-fn policy_apply_exceptions(manifest: PolicyManifest, path: String, candidates: [PolicyOccurrence]) -> [PolicyOccurrence] PolicyError! {
+policy_apply_exceptions: fn(manifest: PolicyManifest, path: String, candidates: [PolicyOccurrence]) -> [PolicyOccurrence] PolicyError! {
     errors := [String]{}
     loop exception in manifest.exceptions {
         if exception.selector != "file:{path}" -> next
@@ -423,7 +423,7 @@ fn policy_apply_exceptions(manifest: PolicyManifest, path: String, candidates: [
     remaining := [PolicyOccurrence]{}
     consumed := [String: Int]{}
     loop candidate in candidates {
-        key :: "{candidate.rule}\t{candidate.site}"
+        key: "{candidate.rule}\t{candidate.site}"
         expected := String?{None}
         loop exception in manifest.exceptions {
             if exception.rule == candidate.rule && exception.selector == ("file:{path}") && exception.site == candidate.site {
@@ -432,7 +432,7 @@ fn policy_apply_exceptions(manifest: PolicyManifest, path: String, candidates: [
             }
         }
         if expected == .Val(limit) {
-            seen :: (consumed.get(key) ?? 0) + 1
+            seen: (consumed.get(key) ?? 0) + 1
             consumed[key] = seen
             if policy_decimal_less(limit, "{seen}") -> &remaining.push(candidate)
         } else {
@@ -441,29 +441,29 @@ fn policy_apply_exceptions(manifest: PolicyManifest, path: String, candidates: [
     }
     Ok(remaining)
 }
-fn policy_manifest() -> PolicyManifest {
-    text :: policy_files.read("tests/corpus_policy.tsv") ?? panic("read corpus manifest")
-    manifest :: policy_parse_manifest(text) ?? panic("checked-in corpus manifest is valid")
+policy_manifest: fn() -> PolicyManifest {
+    text: policy_files.read("tests/corpus_policy.tsv") ?? panic("read corpus manifest")
+    manifest: policy_parse_manifest(text) ?? panic("checked-in corpus manifest is valid")
     errors := policy_validate_manifest(manifest)
     loop error in policy_validate_manifest_paths(manifest, ".") -> &errors.push(error)
     assert_eq(errors, [String]{})
     manifest
 }
-fn policy_manifest_failure(text: String) -> String {
+policy_manifest_failure: fn(text: String) -> String {
     if policy_parse_manifest(text) == {
         .Err(error) -> return error.message.copy()
         .Ok(_) -> panic("invalid manifest unexpectedly accepted")
     }
 }
-fn policy_exception_failure(manifest: PolicyManifest, path: String, candidates: [PolicyOccurrence]) -> String {
+policy_exception_failure: fn(manifest: PolicyManifest, path: String, candidates: [PolicyOccurrence]) -> String {
     if policy_apply_exceptions(manifest, path, candidates) == {
         .Err(error) -> return error.message.copy()
         .Ok(_) -> panic("invalid exception occurrences unexpectedly accepted")
     }
 }
 
-fn policy_test_checked_findings_and_provenance() {
-    manifest :: policy_manifest()
+policy_test_checked_findings_and_provenance: fn() {
+    manifest: policy_manifest()
     assert_eq(policy_validate_manifest(manifest), [String]{})
     // Keep Fdogjet-1..9 original proofs KNOWN-FAILING #4817 / no-subject:
     // dogfood/jetpack (1,2,5..9) was deleted in 6fc6f3862; dogfood/tower (3,4)
@@ -484,13 +484,13 @@ fn policy_test_checked_findings_and_provenance() {
     assert(has_renderer, "Lua renderer is inventoried")
 }
 #Test("checked_manifest_has_all_audited_findings_and_provenance") { policy_test_checked_findings_and_provenance() }
-fn policy_test_uncovered_scope() {
+policy_test_uncovered_scope: fn() {
     manifest := policy_manifest()
     &manifest.scopes.push(PolicyScopeRow{rule: "entry-explicit", selector: "file:unclassified/entry.jet", reason: "synthetic uncovered scope"})
     assert(policy_validate_manifest(manifest).join("\n").contains("unclassified source selector"), "uncovered scope must fail")
 }
 #Test("manifest_rejects_a_scope_without_source_coverage") { policy_test_uncovered_scope() }
-fn policy_test_unguarded_finding() {
+policy_test_unguarded_finding: fn() {
     manifest := policy_manifest()
     kept := [PolicyScopeRow]{}
     loop scope in manifest.scopes { if scope.rule != "entry-explicit" -> &kept.push(scope) }
@@ -498,7 +498,7 @@ fn policy_test_unguarded_finding() {
     assert(policy_validate_manifest(manifest).join("\n").contains("entry-explicit has no executable corpus or domain guard"), "orphan finding must fail")
 }
 #Test("manifest_rejects_a_finding_without_an_executable_guard") { policy_test_unguarded_finding() }
-fn policy_test_invalid_manifest_rows() {
+policy_test_invalid_manifest_rows: fn() {
     assert_eq(policy_manifest_failure("[unknown]\n"), "manifest line 1: unknown section [unknown]")
     assert_eq(policy_manifest_failure("[scope]\n1\tentry-explicit\tfile:../escape.jet\twhy"), "manifest line 2: manifest path is not a normalized relative path (../escape.jet)")
     assert_eq(policy_manifest_failure("[exception]\n1\tentry-explicit\tfile:ok.jet\tstmt:top-level@3..2\t1\tfixture\twhy"), "manifest line 2: site end precedes start (stmt:top-level@3..2)")
@@ -506,90 +506,90 @@ fn policy_test_invalid_manifest_rows() {
     assert_eq(policy_manifest_failure("[scope]\n1\tentry-explicit\tfile:ok.jet"), "manifest line 2: wrong field count or row outside a section")
 }
 #Test("corpus manifest parser planted invalid rows") { policy_test_invalid_manifest_rows() }
-fn policy_test_duplicate_and_provenance_violations() {
+policy_test_duplicate_and_provenance_violations: fn() {
     manifest := policy_manifest()
     &manifest.sources.push(manifest.sources[0])
     &manifest.artifacts.push(PolicyArtifactRow{selector: "family:planted", producer: "producer:new.rs#render", kind: "generated-output", reason: "planted"})
-    errors :: policy_validate_manifest(manifest)
+    errors: policy_validate_manifest(manifest)
     assert(errors.contains("duplicate source selector {manifest.sources[0].selector}"), "duplicate source must fail")
     assert(errors.contains("artifact family:planted names unknown producer producer:new.rs#render"), "missing provenance must fail")
 }
 #Test("corpus manifest validation planted duplicate and provenance violations") { policy_test_duplicate_and_provenance_violations() }
-fn policy_test_exception_source_roles() {
-    manifest :: policy_manifest()
+policy_test_exception_source_roles: fn() {
+    manifest: policy_manifest()
     loop exception in manifest.exceptions {
         assert(exception.selector.starts_with("file:"), "exceptions use exact file selectors")
-        source :: policy_source_row(manifest, policy_selector_path(exception.selector)) ?? panic("exception source is classified")
+        source: policy_source_row(manifest, policy_selector_path(exception.selector)) ?? panic("exception source is classified")
         assert(source.role == "expert-lesson" || source.role == "negative-diagnostic", "exception requires expert or negative source")
     }
 }
 #Test("exceptions_are_limited_to_expert_or_negative_sources") { policy_test_exception_source_roles() }
-fn policy_test_canonical_source_exception() {
+policy_test_canonical_source_exception: fn() {
     manifest := policy_manifest()
     &manifest.exceptions.push(PolicyExceptionRow{rule: "entry-explicit", selector: "file:Examples/features/basics/hello.jet", site: "stmt:top-level@0..0", expected: "1", protocol: "fixture", reason: "planted"})
-    error :: "exception entry-explicit file:Examples/features/basics/hello.jet requires an expert-lesson or negative-diagnostic source, found CanonicalTeaching"
+    error: "exception entry-explicit file:Examples/features/basics/hello.jet requires an expert-lesson or negative-diagnostic source, found CanonicalTeaching"
     assert(policy_validate_manifest(manifest).contains(error), "canonical source cannot absorb a violation")
 }
 #Test("corpus manifest planted canonical-source exception") { policy_test_canonical_source_exception() }
 
-fn policy_test_unclassified_inventory_entries() {
-    manifest :: policy_manifest()
-    error :: policy_audit_inventory(manifest, [String]{"unclassified/new-maintained-program.jet"}, [String]{}).join("\n")
+policy_test_unclassified_inventory_entries: fn() {
+    manifest: policy_manifest()
+    error: policy_audit_inventory(manifest, [String]{"unclassified/new-maintained-program.jet"}, [String]{}).join("\n")
     assert(error.contains("unclassified eligible source"), "a synthetic source without a classification must fail")
     assert(error.contains("rule=corpus-inventory"), "inventory rule identity")
     assert(error.contains("site=inventory:source@0..0"), "inventory byte site")
     assert(error.contains("replacement="), "inventory replacement")
     assert_eq(error, "unclassified eligible source: unclassified/new-maintained-program.jet; file=unclassified/new-maintained-program.jet; rule=corpus-inventory; site=inventory:source@0..0; why=every maintained source and generated producer needs an explicit manifest boundary; replacement=add one exact manifest row with its role, owner, reason, and provenance")
-    producer_error :: policy_audit_inventory(manifest, [String]{"Examples/features/basics/hello.jet"}, [String]{"producer:new.rs#render"}).join("\n")
+    producer_error: policy_audit_inventory(manifest, [String]{"Examples/features/basics/hello.jet"}, [String]{"producer:new.rs#render"}).join("\n")
     assert(producer_error.contains("unclassified generated-source producer"), "a synthetic producer without provenance must fail")
     assert_eq(policy_audit_inventory(manifest, [String]{"Examples/features/basics/hello.jet"}, [String]{"producer:Jetpack/Integrations/Source/Foreign/Binders/Lua.jet#pkg_lua_render_jet"}), [String]{})
 }
 #Test("inventory_rejects_new_source_or_producer_without_a_row") { policy_test_unclassified_inventory_entries() }
-fn policy_test_occurrence_scoped_exceptions() {
-    manifest :: policy_manifest()
-    selector :: "tests/ui/args_spec_bad_parse_arity.jet"
-    candidate :: PolicyOccurrence{file: selector, rule: "raw-cli-fixed-shape", site: "call:process.args@0..0"}
+policy_test_occurrence_scoped_exceptions: fn() {
+    manifest: policy_manifest()
+    selector: "tests/ui/args_spec_bad_parse_arity.jet"
+    candidate: PolicyOccurrence{file: selector, rule: "raw-cli-fixed-shape", site: "call:process.args@0..0"}
     assert_eq(policy_validate_occurrences(manifest, selector, [PolicyOccurrence]{candidate}), None)
-    duplicate :: policy_validate_occurrences(manifest, selector, [PolicyOccurrence]{candidate, candidate}) ?? panic("a second occurrence cannot reuse one exception")
+    duplicate: policy_validate_occurrences(manifest, selector, [PolicyOccurrence]{candidate, candidate}) ?? panic("a second occurrence cannot reuse one exception")
     assert(duplicate.contains("expected 1"), "duplicate occurrence must fail")
     assert_eq(duplicate, "file=tests/ui/args_spec_bad_parse_arity.jet; rule=raw-cli-fixed-shape; site=call:process.args@0..0; why=expected 1 occurrence(s), found 2; replacement=remove the additional occurrence or add a distinct reviewed site")
-    applied :: policy_apply_exceptions(manifest, selector, [PolicyOccurrence]{candidate}) ?? panic("recorded occurrence is accepted")
+    applied: policy_apply_exceptions(manifest, selector, [PolicyOccurrence]{candidate}) ?? panic("recorded occurrence is accepted")
     assert_eq(applied, [PolicyOccurrence]{})
 }
 #Test("exception_matching_is_occurrence_scoped") { policy_test_occurrence_scoped_exceptions() }
-fn policy_test_missing_and_shifted_exception_sites() {
-    manifest :: policy_manifest()
-    selector :: "tests/ui/args_spec_bad_parse_arity.jet"
-    shifted :: PolicyOccurrence{file: selector, rule: "raw-cli-fixed-shape", site: "call:process.args@1..1"}
+policy_test_missing_and_shifted_exception_sites: fn() {
+    manifest: policy_manifest()
+    selector: "tests/ui/args_spec_bad_parse_arity.jet"
+    shifted: PolicyOccurrence{file: selector, rule: "raw-cli-fixed-shape", site: "call:process.args@1..1"}
     assert_eq(policy_validate_occurrences(manifest, selector, [PolicyOccurrence]{shifted}), Val("file=tests/ui/args_spec_bad_parse_arity.jet; rule=raw-cli-fixed-shape; site=call:process.args@1..1; why=occurrence has no unique exception; replacement=add one exact exception"))
     assert_eq(policy_validate_occurrences(manifest, selector, [PolicyOccurrence]{}), Val("file=tests/ui/args_spec_bad_parse_arity.jet; rule=raw-cli-fixed-shape; site=call:process.args@0..0; why=expected 1 occurrence(s), found 0; replacement=remove the additional occurrence or update the exact reviewed site"))
     assert_eq(policy_exception_failure(manifest, selector, [PolicyOccurrence]{}), "file=tests/ui/args_spec_bad_parse_arity.jet; rule=raw-cli-fixed-shape; site=call:process.args@0..0; why=expected 1 occurrence(s), found 0; replacement=remove the additional occurrence or update the exact reviewed site")
 }
 #Test("corpus occurrence exceptions reject missing and shifted sites") { policy_test_missing_and_shifted_exception_sites() }
 
-struct PolicyInventoryEntry { path: String, role: String, producer: String? }
-struct PolicyProvenanceEntry { producer: String, artifact: String, protocol: String }
-struct PolicyInventory {
+PolicyInventoryEntry: struct { path: String, role: String, producer: String? }
+PolicyProvenanceEntry: struct { producer: String, artifact: String, protocol: String }
+PolicyInventory: struct {
     files: [PolicyInventoryEntry]
     producers: [String]
     artifacts: [String]
     provenance: [PolicyProvenanceEntry]
 }
-struct PolicyDiscovery { paths: [String], config_candidates: [String] }
+PolicyDiscovery: struct { paths: [String], config_candidates: [String] }
 
-fn policy_skip_directory(name: String) -> Bool {
+policy_skip_directory: fn(name: String) -> Bool {
     name == ".git" || name == ".claude" || name == ".opencode" || name == ".tmp" ||
     name == ".jet" || name == ".tower" || name == ".cache" || name == ".agent-worktrees" ||
     name == "plugins" || name == "node_modules" || name == "target" || name == "build" ||
     name == "cache" || name == "dist" || name == "result" ||
     name.starts_with("target-") || name.starts_with("build-") || name.starts_with("result-")
 }
-fn policy_discover_manifest_files(manifest: PolicyManifest, root: String) -> PolicyDiscovery PolicyError! {
+policy_discover_manifest_files: fn(manifest: PolicyManifest, root: String) -> PolicyDiscovery PolicyError! {
     paths := [String]{}
     candidates := [String]{}
     pending := [String]{}
     loop source in manifest.sources {
-        relative :: policy_selector_path(source.selector)
+        relative: policy_selector_path(source.selector)
         if source.selector.starts_with("root:") {
             &pending.push(relative)
         } else if source.selector.starts_with("file:") && policy_files.is_file(policy_join(root, relative)) {
@@ -597,14 +597,14 @@ fn policy_discover_manifest_files(manifest: PolicyManifest, root: String) -> Pol
         }
     }
     loop pending.len() > 0 {
-        relative :: &pending.pop() ?? panic("pending directory is present")
-        directory :: policy_join(root, relative)
+        relative: &pending.pop() ?? panic("pending directory is present")
+        directory: policy_join(root, relative)
         metadata := policy_files.Stat?{None}
         if policy_files.stat(directory) == {
             .Ok(info) -> metadata = Val(info)
             .Err(error) -> return Err(PolicyError{message: "stat {directory}: {error}"})
         }
-        info :: metadata ?? panic("stat succeeded")
+        info: metadata ?? panic("stat succeeded")
         if info.is_symlink -> next
         entries := [policy_files.DirEntry]{}
         if policy_files.list_dir(directory) == {
@@ -612,14 +612,14 @@ fn policy_discover_manifest_files(manifest: PolicyManifest, root: String) -> Pol
             .Err(error) -> return Err(PolicyError{message: "read {directory}: {error}"})
         }
         loop entry in entries {
-            child :: "{relative}/{entry.name}"
-            path :: policy_join(root, child)
+            child: "{relative}/{entry.name}"
+            path: policy_join(root, child)
             file_type := policy_files.Stat?{None}
             if policy_files.stat(path) == {
                 .Ok(found) -> file_type = Val(found)
                 .Err(error) -> return Err(PolicyError{message: "stat {path}: {error}"})
             }
-            kind :: file_type ?? panic("entry stat succeeded")
+            kind: file_type ?? panic("entry stat succeeded")
             if kind.is_symlink -> next
             if kind.is_dir {
                 // A `config/` directory beside a `package.jet` is a candidate; the
@@ -640,7 +640,7 @@ fn policy_discover_manifest_files(manifest: PolicyManifest, root: String) -> Pol
 }
 // `declared_configs` are the discovery candidates their sibling `package.jet`
 // declares under `configs:`; their files are package configuration, not corpus.
-fn policy_inventory(manifest: PolicyManifest, root: String, discovery: PolicyDiscovery, declared_configs: [String]) -> PolicyInventory PolicyError! {
+policy_inventory: fn(manifest: PolicyManifest, root: String, discovery: PolicyDiscovery, declared_configs: [String]) -> PolicyInventory PolicyError! {
     errors := [String]{}
     entries := [PolicyInventoryEntry]{}
     loop path in discovery.paths {
@@ -653,7 +653,7 @@ fn policy_inventory(manifest: PolicyManifest, root: String, discovery: PolicyDis
             &errors.push(policy_inventory_error("unclassified eligible source", path, "inventory:source"))
             next
         }
-        row :: source ?? panic("source classification is present")
+        row: source ?? panic("source classification is present")
         producer := String?{None}
         loop artifact in manifest.artifacts {
             if artifact.selector == ("path:{path}") {
@@ -666,14 +666,14 @@ fn policy_inventory(manifest: PolicyManifest, root: String, discovery: PolicyDis
     }
     loop artifact in manifest.artifacts {
         if !artifact.selector.starts_with("path:") -> next
-        path :: policy_slice_bytes(artifact.selector, 5, artifact.selector.bytes().len())
+        path: policy_slice_bytes(artifact.selector, 5, artifact.selector.bytes().len())
         if !policy_files.is_file(policy_join(root, path)) -> &errors.push("manifest artifact is missing: {path}")
     }
     loop artifact in manifest.artifacts {
         if !artifact.selector.starts_with("path:") -> next
-        path :: policy_slice_bytes(artifact.selector, 5, artifact.selector.bytes().len())
+        path: policy_slice_bytes(artifact.selector, 5, artifact.selector.bytes().len())
         if !path.ends_with(".jet") -> next
-        source :: policy_source_row(manifest, path)
+        source: policy_source_row(manifest, path)
         if source == {
             .Val(row) -> { if row.role != "generated-output" -> &errors.push("generated artifact {path} is classified as {policy_role_debug(row.role)}, not generated-output") }
             .None -> &errors.push("generated artifact has no source classification: {path}")
@@ -695,7 +695,7 @@ fn policy_inventory(manifest: PolicyManifest, root: String, discovery: PolicyDis
     if errors.len() > 0 -> return Err(PolicyError{message: errors.join("\n")})
     Ok(PolicyInventory{files: entries, producers: producers, artifacts: artifacts, provenance: provenance})
 }
-fn policy_test_usize_domain() {
+policy_test_usize_domain: fn() {
     assert_eq(policy_unsigned("+0001"), Val("1"))
     assert_eq(policy_unsigned("18446744073709551615"), Val("18446744073709551615"))
     assert_eq(policy_unsigned("18446744073709551616"), None)
@@ -707,8 +707,8 @@ fn policy_test_usize_domain() {
 }
 #Test("corpus manifest usize parsing retains the full x64 domain") { policy_test_usize_domain() }
 
-fn policy_test_unicode_manifest_fields() {
-    manifest :: policy_parse_manifest("[source]\n1\tfile:案例.jet\tcanonical-teaching\troutine\tdecision\tproof\towner\treason é") ?? panic("Unicode manifest")
+policy_test_unicode_manifest_fields: fn() {
+    manifest: policy_parse_manifest("[source]\n1\tfile:案例.jet\tcanonical-teaching\troutine\tdecision\tproof\towner\treason é") ?? panic("Unicode manifest")
     assert_eq(manifest.sources[0].selector, "file:案例.jet")
     assert_eq(manifest.sources[0].reason, "reason é")
     assert_eq(policy_selector_path(manifest.sources[0].selector), "案例.jet")
@@ -720,27 +720,27 @@ fn policy_test_unicode_manifest_fields() {
 #Test("corpus manifest byte spans retain Unicode fields") { policy_test_unicode_manifest_fields() }
 // Rust str::split_whitespace uses Unicode White_Space, not just ASCII space.
 // Scan byte spans directly; only the returned words allocate.
-fn policy_space_width(bytes: [U8], index: Int) -> Int {
-    first :: Int.from_u8(bytes[index])
+policy_space_width: fn(bytes: [U8], index: Int) -> Int {
+    first: Int.from_u8(bytes[index])
     if first == 32 || (first >= 9 && first <= 13) -> return 1
     if index + 1 >= bytes.len() -> return 0
-    second :: Int.from_u8(bytes[index + 1])
+    second: Int.from_u8(bytes[index + 1])
     if first == 194 && (second == 133 || second == 160) -> return 2
     if index + 2 >= bytes.len() -> return 0
-    third :: Int.from_u8(bytes[index + 2])
+    third: Int.from_u8(bytes[index + 2])
     if first == 225 && second == 154 && third == 128 -> return 3
     if first == 226 && second == 128 && ((third >= 128 && third <= 138) || third == 168 || third == 169 || third == 175) -> return 3
     if first == 226 && second == 129 && third == 159 -> return 3
     if first == 227 && second == 128 && third == 128 -> return 3
     0
 }
-fn policy_split_whitespace(text: String) -> [String] {
-    bytes :: text.bytes()
+policy_split_whitespace: fn(text: String) -> [String] {
+    bytes: text.bytes()
     words := [String]{}
     index := 0
     start := -1
     loop index < bytes.len() {
-        width :: policy_space_width(bytes, index)
+        width: policy_space_width(bytes, index)
         if width > 0 {
             if start >= 0 -> &words.push(policy_slice_bytes(text, start, index))
             start = -1
@@ -755,16 +755,16 @@ fn policy_split_whitespace(text: String) -> [String] {
 }
 
 // Keep byte-exact control characters without unsupported lexer escapes.
-fn policy_byte_text(code: U8) -> String {
+policy_byte_text: fn(code: U8) -> String {
     String.from_bytes([U8]{code}) ?? panic("guard control byte must be UTF-8")
 }
 
-fn policy_test_unicode_word_splitting() {
-    nel :: String.from_bytes([U8]{194, 133}) ?? panic("NEL UTF-8")
-    nbsp :: String.from_bytes([U8]{194, 160}) ?? panic("NBSP UTF-8")
-    emspace :: String.from_bytes([U8]{226, 128, 131}) ?? panic("EM SPACE UTF-8")
+policy_test_unicode_word_splitting: fn() {
+    nel: String.from_bytes([U8]{194, 133}) ?? panic("NEL UTF-8")
+    nbsp: String.from_bytes([U8]{194, 160}) ?? panic("NBSP UTF-8")
+    emspace: String.from_bytes([U8]{226, 128, 131}) ?? panic("EM SPACE UTF-8")
     assert_eq(policy_split_whitespace("jet{nel}run{nbsp}file{emspace}"), [String]{"jet", "run", "file"})
-    carriage_return :: policy_byte_text(U8{13})
+    carriage_return: policy_byte_text(U8{13})
     assert_eq(policy_split_whitespace(" \t{carriage_return}\n"), [String]{})
     assert_eq(policy_split_whitespace("例{emspace}子"), [String]{"例", "子"})
 }

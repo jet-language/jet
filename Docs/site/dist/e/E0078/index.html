@@ -34,7 +34,7 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">A finite source can end without a matching `break`; `next` and `break` after the closing brace would control the loop that just closed instead of naming a target.</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Add `?? fallback` after the closing `}`, or write a labeled search such as `found :: loop { ... break(found, value) }`.</p>
+<p class="diag-copy fix" data-registry-field="fix">Add `?? fallback` after the closing `}`, or write a labeled search such as `found: loop { ... break(found, value) }`.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0078</code>: <code>tests/ui/value_loop_exhaustion_route.stderr</code>.</p>
 <pre class="diag">Error [jet.MissingExhaustionRoute]: This finite value loop needs a written exhaustion route
@@ -52,7 +52,7 @@ Error [jet.MissingExhaustionRoute]: This finite value loop cannot use `?? next` 
  15 |     } ?? next
     |          ^^^^
  Why: The route would control the loop that just closed; use a labeled loop to name the target
- Fix: Write a labeled search such as `found :: loop { ... break(found, value) }`
+ Fix: Write a labeled search such as `found: loop { ... break(found, value) }`
 More: jet-lang.dev/e/E0078
 
 Error [jet.MissingExhaustionRoute]: This finite value loop cannot use `?? break` after its closing brace
@@ -61,7 +61,7 @@ Error [jet.MissingExhaustionRoute]: This finite value loop cannot use `?? break`
  24 |     } ?? break
     |          ^^^^^
  Why: The route would control the loop that just closed; use a labeled loop to name the target
- Fix: Write a labeled search such as `found :: loop { ... break(found, value) }`
+ Fix: Write a labeled search such as `found: loop { ... break(found, value) }`
 More: jet-lang.dev/e/E0078
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

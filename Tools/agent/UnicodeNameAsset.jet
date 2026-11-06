@@ -8,63 +8,63 @@
 // Usage (from the repository root): jet Tools/agent/UnicodeNameAsset.jet
 //   (`jet test Tools/agent/UnicodeNameAsset.jet` runs the same check as a #Test)
 use {
-    crypto :: core.crypto
-    binary :: core.encoding.binary
-    hex :: core.encoding.hex
-    files :: core.files
-    process :: core.process
-    term :: core.term
+    crypto: core.crypto
+    binary: core.encoding.binary
+    hex: core.encoding.hex
+    files: core.files
+    process: core.process
+    term: core.term
 }
 
-ASSET_PATH :: "Core/Text/Runtime/Assets/UnicodeNameIndex.jet"
-MARKER :: "UNICODE_NAME_INDEX :: [U8]{{\""
-TREE_ROWS :: 40531
-TREE_SHA256 :: "a60dd4cc39c63787a010ddb7a70b20daa37106405784a2912e3583891ea340c0"
-RECORD_STRIDE :: 11
+ASSET_PATH: "Core/Text/Runtime/Assets/UnicodeNameIndex.jet"
+MARKER: "UNICODE_NAME_INDEX: [U8]{{\""
+TREE_ROWS: 40531
+TREE_SHA256: "a60dd4cc39c63787a010ddb7a70b20daa37106405784a2912e3583891ea340c0"
+RECORD_STRIDE: 11
 
 // The bytes the asset's `\xHH` byte literal spells; None without the literal.
-fn literal_bytes(source: String) -> [U8]? Never! {
-    opened :: source.partition(MARKER)
+literal_bytes: fn(source: String) -> [U8]? Never! {
+    opened: source.partition(MARKER)
     if opened.sep == "" -> return None
-    literal :: opened.tail.partition("\"")
+    literal: opened.tail.partition("\"")
     if literal.sep == "" -> return None
-    decoded :: hex.decode(literal.head.replace("\\x", "")) ?? return None
+    decoded: hex.decode(literal.head.replace("\\x", "")) ?? return None
     Val(decoded)
 }
 
 // The little-endian unsigned word of `width` 3 or 4 bytes at `at`; the caller
 // has checked the extent.
-fn word(bytes: [U8], at: Int, width: Int) -> Int Never! {
+word: fn(bytes: [U8], at: Int, width: Int) -> Int Never! {
     if width == 3 -> return (binary.unpack_u16le(bytes, at) ?? 0) + (binary.unpack_u8(bytes, at + 2) ?? 0) * 65536
     binary.unpack_u32le(bytes, at) ?? 0
 }
 
 // Every way the asset departs from the retired decision tree; empty when it matches.
-fn asset_failures(source: String) -> [String] Never! {
+asset_failures: fn(source: String) -> [String] Never! {
     failures := [String]{}
-    bytes :: literal_bytes(source) ?? return [String]{"UNICODE_NAME_INDEX byte literal is missing"}
+    bytes: literal_bytes(source) ?? return [String]{"UNICODE_NAME_INDEX byte literal is missing"}
     if bytes.len() < 40 -> return [String]{"UNICODE_NAME_INDEX header is truncated ({bytes.len()} bytes)"}
-    magic :: String.from_bytes_lossy(bytes[0..<4])
+    magic: String.from_bytes_lossy(bytes[0..<4])
     if magic != "JUCD" -> &failures.push("magic is {magic}, expected JUCD")
     if word(bytes, 12, 4) != 8 -> &failures.push("kind {word(bytes, 12, 4)}, expected 8 (UTF-8 names)")
     if word(bytes, 20, 4) != RECORD_STRIDE -> &failures.push("stride {word(bytes, 20, 4)}, expected {RECORD_STRIDE}")
     if word(bytes, 36, 4) != bytes.len() -> &failures.push("extent {word(bytes, 36, 4)}, expected {bytes.len()}")
     if failures.len() > 0 -> return failures
-    count :: word(bytes, 16, 4)
-    records :: word(bytes, 24, 4)
-    pool :: word(bytes, 28, 4)
+    count: word(bytes, 16, 4)
+    records: word(bytes, 24, 4)
+    pool: word(bytes, 28, 4)
     if count != TREE_ROWS -> &failures.push("{count} rows, expected {TREE_ROWS}")
     rows := [String]{}
     previous := -1
     loop row in 0..<count {
-        at :: records + row * RECORD_STRIDE
+        at: records + row * RECORD_STRIDE
         if at + RECORD_STRIDE > bytes.len() {
             &failures.push("row {row} record extent")
             return failures
         }
-        scalar :: word(bytes, at, 3)
-        start :: pool + word(bytes, at + 3, 4)
-        end :: start + word(bytes, at + 7, 4)
+        scalar: word(bytes, at, 3)
+        start: pool + word(bytes, at + 3, 4)
+        end: start + word(bytes, at + 7, 4)
         if end > bytes.len() {
             &failures.push("row {row} name extent")
             return failures
@@ -73,22 +73,22 @@ fn asset_failures(source: String) -> [String] Never! {
         previous = scalar
         &rows.push("{scalar}\t{String.from_bytes_lossy(bytes[start..<end])}\n")
     }
-    expected_first :: "0\tNULL\n"
-    expected_last :: "917999\tVARIATION SELECTOR-256\n"
+    expected_first: "0\tNULL\n"
+    expected_last: "917999\tVARIATION SELECTOR-256\n"
     if rows.len() > 0 && rows[0] != expected_first -> &failures.push("first row is {rows[0].trim_end()}, expected {expected_first.trim_end()}")
     if rows.len() > 0 && rows[rows.len() - 1] != expected_last -> &failures.push("last row is {rows[rows.len() - 1].trim_end()}, expected {expected_last.trim_end()}")
-    digest :: crypto.sha256(rows.join("").bytes()).hex()
+    digest: crypto.sha256(rows.join("").bytes()).hex()
     if digest != TREE_SHA256 -> &failures.push("row digest {digest}, expected {TREE_SHA256}")
     failures
 }
 
-fn run() {
-    source :: files.read(ASSET_PATH) ?? {
+run: fn() {
+    source: files.read(ASSET_PATH) ?? {
         term.eprint("unicode-name-asset: cannot read {ASSET_PATH}: {err}")
         process.exit(1)
         return
     }
-    failures :: asset_failures(source)
+    failures: asset_failures(source)
     if failures.len() > 0 {
         loop failure in failures -> term.eprint("unicode-name-asset: {failure}")
         process.exit(1)
@@ -97,6 +97,6 @@ fn run() {
 }
 
 #Test("UNICODE_NAME_INDEX carries the retired decision tree's exact names") {
-    source :: files.read(ASSET_PATH) ?? panic("cannot read {ASSET_PATH}: {err}")
+    source: files.read(ASSET_PATH) ?? panic("cannot read {ASSET_PATH}: {err}")
     assert_eq(asset_failures(source).join("\n"), "")
 }

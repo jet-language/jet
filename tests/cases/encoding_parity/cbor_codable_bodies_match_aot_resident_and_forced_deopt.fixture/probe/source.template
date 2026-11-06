@@ -1,19 +1,19 @@
 
 use {
-    cbor :: core.encoding.cbor
-    hex :: core.encoding.hex
-    text :: core.text
+    cbor: core.encoding.cbor
+    hex: core.encoding.hex
+    text: core.text
 }
 
-struct Token { raw: String }
+Token: struct { raw: String }
 
 impl Token.Encode {
-    fn encode(self) -> Dyn { Dyn.Text("wire") }
+    encode: fn(self) -> Dyn { Dyn.Text("wire") }
 }
 
 impl Token.Decode {
-    fn decode(tree: Dyn) -[]> Token ![FieldError] {
-        value :: tree.text()
+    decode: fn(tree: Dyn) -[]> Token ![FieldError] {
+        value: tree.text()
         if value != "wire" {
             return Err([FieldError{ path: "$xml_event", reason: "bad token" }])
         }
@@ -22,18 +22,18 @@ impl Token.Decode {
 }
 
 #Codable
-enum Event {
+Event: enum {
     Idle
     Count(Int)
 }
 
 #Codable
-struct Wrap<T> {
+Wrap: struct<T> {
     value: T
 }
 
 #[Codable, RenameAll(camel)]
-struct Packet {
+Packet: struct {
     display_name: String
     token: Token
     event: Event
@@ -45,7 +45,7 @@ struct Packet {
     letter: Char
 }
 
-fn resident() -[]> String {
+resident: fn() -[]> String {
     value := Packet{
         display_name: "Ada",
         token: Token{ raw: "ignored" },
@@ -66,7 +66,7 @@ fn resident() -[]> String {
     return "{hex.encode(encoded)}|{hex.encode(roundtrip)}|{decoded.token.raw}|{boxed_back.value}"
 }
 
-fn forced_deopt(seed: String) -[]> String {
+forced_deopt: fn(seed: String) -[]> String {
     folded := text.casefold(seed)
     if folded != "strasse" { panic("casefold") }
     value := Packet{
@@ -89,7 +89,7 @@ fn forced_deopt(seed: String) -[]> String {
     return "{hex.encode(encoded)}|{hex.encode(roundtrip)}|{decoded.token.raw}|{boxed_back.value}"
 }
 
-fn run() {
+run: fn() {
     print(resident())
     print(forced_deopt("Straße"))
 }

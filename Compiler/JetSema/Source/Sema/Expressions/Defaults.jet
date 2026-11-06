@@ -18,7 +18,7 @@ use jet_foundation.[
 // the calling function so a binder slot the default declares keys under the
 // call. `state` is the default's own ownership state: the default is a fresh
 // value, so nothing it records concerns the caller's bindings.
-struct SemaDefaultOwnerScope {
+SemaDefaultOwnerScope: struct {
     environment: SemaScopeEnvironment
     scopes: SemaScopeTable
     state: SemaOwnershipState
@@ -26,11 +26,11 @@ struct SemaDefaultOwnerScope {
 
 // None when the default is written in the module being checked, or when it is
 // a literal that names nothing, so the caller's scope checks it unchanged.
-fn sema_default_owner_scope(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, owner_module: String, default_value: Expr) -> SemaDefaultOwnerScope? {
+sema_default_owner_scope: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, owner_module: String, default_value: Expr) -> SemaDefaultOwnerScope? {
     if owner_module == "" || owner_module == environment.module_identity -> return None
     if sema_default_names_nothing(default_value) -> return None
     if program.registration_graph == .Val(graph) {
-        module_index :: sema_registration_module_index(graph, owner_module) ?? return None
+        module_index: sema_registration_module_index(graph, owner_module) ?? return None
         owner_environment := sema_scope_environment_init(
             graph.modules[module_index].module_identity,
             graph.modules[module_index].package_identity,
@@ -56,7 +56,7 @@ fn sema_default_owner_scope(environment: SemaScopeEnvironment, program: SemaProg
 
 // A literal default (`0`, `""`, `false`, `[]`, `None`, `.Variant`) resolves no
 // name, so it checks the same in any module.
-fn sema_default_names_nothing(value: Expr) -> Bool Never! {
+sema_default_names_nothing: fn(value: Expr) -> Bool Never! {
     if value == {
         .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Absent(_, _) -> true
         .Str(parts, _, _) -> {
@@ -78,7 +78,7 @@ fn sema_default_names_nothing(value: Expr) -> Bool Never! {
 // A problem the default reports in its declaring module, anchored at the use
 // that takes the default: its declaration-site edit and labels belong to the
 // other module's text.
-fn sema_default_use_site_diagnostic(diagnostic: ^Diagnostic, use_span: Span) -> Diagnostic Never! {
+sema_default_use_site_diagnostic: fn(diagnostic: ^Diagnostic, use_span: Span) -> Diagnostic Never! {
     updated := diagnostic
     updated.span = Val(use_span)
     updated.source_path = None

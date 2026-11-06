@@ -1,19 +1,19 @@
 // r19: materialize only hook metadata before mutating its owning context;
 // dependency searches are ordinary first-match loops with statement exits.
-struct HookSpan { start: Int end: Int }
-struct HookRow { id: Int key: String span: HookSpan fields: [Int] }
-struct HookContext { rows: [HookRow] queries: Int }
-fn record_query(ctx: &HookContext, type_id: Int, key: String, span: HookSpan) -> Bool Never! {
+HookSpan: struct { start: Int end: Int }
+HookRow: struct { id: Int key: String span: HookSpan fields: [Int] }
+HookContext: struct { rows: [HookRow] queries: Int }
+record_query: fn(ctx: &HookContext, type_id: Int, key: String, span: HookSpan) -> Bool Never! {
     ctx.queries += 1
     type_id == 7 && key == "Clock" && span.start == 3 && span.end == 8
 }
-fn check_hook(ctx: &HookContext) -> Bool Never! {
-    hook_type_id :: ctx.rows[0].id.copy()
-    hook_key :: ctx.rows[0].key.copy()
-    hook_span :: ctx.rows[0].span.copy()
+check_hook: fn(ctx: &HookContext) -> Bool Never! {
+    hook_type_id: ctx.rows[0].id.copy()
+    hook_key: ctx.rows[0].key.copy()
+    hook_span: ctx.rows[0].span.copy()
     record_query(&ctx, hook_type_id, hook_key, hook_span)
 }
-fn bind_matches(roots: [String], entry: String, files: [String], file: String, refs: [String], admitted: [String], diagnostics: &[String], matches: &[String]) Never! {
+bind_matches: fn(roots: [String], entry: String, files: [String], file: String, refs: [String], admitted: [String], diagnostics: &[String], matches: &[String]) Never! {
     entry_index := -1
     loop (root_index, root_name) in roots {
         if root_name == entry {
@@ -45,7 +45,7 @@ fn bind_matches(roots: [String], entry: String, files: [String], file: String, r
         &matches.push("{entry_index}:{entry_file_index}:{reference_index}:{refs[reference_index]}")
     }
 }
-fn run() Never! {
+run: fn() Never! {
     ctx := HookContext{rows: [HookRow]{HookRow{id: 7, key: "Clock", span: HookSpan{start: 3, end: 8}, fields: [Int]{1, 2, 3}}}, queries: 0}
     assert(check_hook(&ctx))
     assert_eq(ctx.queries, 1)

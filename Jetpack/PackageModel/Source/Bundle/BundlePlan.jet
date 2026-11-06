@@ -6,11 +6,11 @@
 // main Compiler/ after stage 2; Bootstrap never references a worktree path.
 use {
     jet_foundation.[CanonicalJSON, CanonicalJSONField, canonical_json_bytes, canonical_json_object]
-    hex :: core.encoding.hex
-    base64 :: core.encoding.base64
+    hex: core.encoding.hex
+    base64: core.encoding.base64
 }
 
-enum BundleFileKind {
+BundleFileKind: enum {
     Executable
     Launcher
     Metadata
@@ -22,7 +22,7 @@ enum BundleFileKind {
     GameManifest
     GameAsset
 
-    fn as_str(self) -> String Never! {
+    as_str: fn(self) -> String Never! {
         if self == {
             .Executable -> "executable"
             .Launcher -> "launcher"
@@ -39,21 +39,21 @@ enum BundleFileKind {
 }
 
 // One exact file in a plan or emitted artifact.
-struct BundleFile {
+BundleFile: struct {
     path: String
     kind: BundleFileKind
     mode: Int
     bytes: [U8]
 
-    fn new(path: String, kind: BundleFileKind, mode: Int, bytes: [U8]) -> BundleFile Never! {
+    new: fn(path: String, kind: BundleFileKind, mode: Int, bytes: [U8]) -> BundleFile Never! {
         BundleFile{path: path, kind: kind, mode: mode, bytes: bytes}
     }
 
-    fn digest(self) -> String Never! {
+    digest: fn(self) -> String Never! {
         pkg_sha256_hex(self.bytes)
     }
 
-    fn to_json_tree(self) -> CanonicalJSON Never! {
+    to_json_tree: fn(self) -> CanonicalJSON Never! {
         pkg_bundle_object([
             "bytes": pkg_bundle_integer(self.bytes.len()),
             "kind": CanonicalJSON.String(self.kind.as_str()),
@@ -65,16 +65,16 @@ struct BundleFile {
 }
 
 // The exact launch paths a later adapter must preserve.
-struct LaunchDescriptor {
+LaunchDescriptor: struct {
     launcher: String
     executable: String
     arguments_passthrough: Bool
 
-    fn new(launcher: String, executable: String) -> LaunchDescriptor Never! {
+    new: fn(launcher: String, executable: String) -> LaunchDescriptor Never! {
         LaunchDescriptor{launcher: launcher, executable: executable, arguments_passthrough: true}
     }
 
-    fn to_json_tree(self) -> CanonicalJSON Never! {
+    to_json_tree: fn(self) -> CanonicalJSON Never! {
         pkg_bundle_object([
             "arguments_passthrough": CanonicalJSON.Bool(self.arguments_passthrough),
             "executable": CanonicalJSON.String(self.executable.copy()),
@@ -84,7 +84,7 @@ struct LaunchDescriptor {
 }
 
 // Updater manifest generated from the exact executable payload.
-struct UpdaterManifest {
+UpdaterManifest: struct {
     schema: String
     package: String
     version: String
@@ -97,7 +97,7 @@ struct UpdaterManifest {
     payload_sha256: String
     payload_bytes: Int
 
-    fn for_spec(spec: BundleSpec, updater: UpdaterSpec, payload_sha256: String) -> UpdaterManifest Never! {
+    for_spec: fn(spec: BundleSpec, updater: UpdaterSpec, payload_sha256: String) -> UpdaterManifest Never! {
         UpdaterManifest{
             schema: PACKAGE_UPDATE_MANIFEST_SCHEMA,
             package: spec.package,
@@ -113,7 +113,7 @@ struct UpdaterManifest {
         }
     }
 
-    fn to_json_tree(self) -> CanonicalJSON Never! {
+    to_json_tree: fn(self) -> CanonicalJSON Never! {
         pkg_bundle_object([
             "artifact": CanonicalJSON.String(self.artifact.copy()),
             "channel": CanonicalJSON.String(self.channel.copy()),
@@ -131,7 +131,7 @@ struct UpdaterManifest {
 
     // The receipt projection: URLs with credentials, queries, or fragments
     // are redacted.
-    fn receipt_json_tree(self) -> CanonicalJSON Never! {
+    receipt_json_tree: fn(self) -> CanonicalJSON Never! {
         pkg_bundle_object([
             "artifact": CanonicalJSON.String(self.artifact.copy()),
             "channel": CanonicalJSON.String(self.channel.copy()),
@@ -147,23 +147,23 @@ struct UpdaterManifest {
         ])
     }
 
-    fn json_bytes(self) -> [U8] Never! {
+    json_bytes: fn(self) -> [U8] Never! {
         pkg_bundle_canonical_bytes(self.to_json_tree())
     }
 
-    fn json(self) -> String Never! {
+    json: fn(self) -> String Never! {
         pkg_bundle_canonical_text(self.to_json_tree())
     }
 }
 
 // One input the plan read, with its digest and size.
-struct BundleInputFact {
+BundleInputFact: struct {
     role: String
     path: String
     digest: String
     bytes: Int
 
-    fn to_json_tree(self) -> CanonicalJSON Never! {
+    to_json_tree: fn(self) -> CanonicalJSON Never! {
         pkg_bundle_object([
             "bytes": pkg_bundle_integer(self.bytes),
             "digest": CanonicalJSON.String(self.digest.copy()),
@@ -172,7 +172,7 @@ struct BundleInputFact {
         ])
     }
 
-    fn receipt_json_tree(self) -> CanonicalJSON Never! {
+    receipt_json_tree: fn(self) -> CanonicalJSON Never! {
         pkg_bundle_object([
             "bytes": pkg_bundle_integer(self.bytes),
             "digest": CanonicalJSON.String(self.digest.copy()),
@@ -184,7 +184,7 @@ struct BundleInputFact {
 
 // A complete, deterministic target layout. It contains no host-derived
 // values and can be handed to a platform adapter without re-planning.
-struct BundlePlan {
+BundlePlan: struct {
     schema_version: Int
     kind: BundleKind
     target: BundleTarget
@@ -204,16 +204,16 @@ struct BundlePlan {
 
     // Validate `spec` and lay out its target files. A Windows version is
     // normalized to four parts; other versions are trimmed.
-    fn from_spec(input: BundleSpec) -> BundlePlan BundleError! {
+    from_spec: fn(input: BundleSpec) -> BundlePlan BundleError! {
         spec := input
         spec.version = if spec.target == BundleTarget.WindowsMsix -> pkg_bundle_windows_version(spec.version) else -> spec.version.trim()
         spec.validate()
         icons := spec.icons
         &icons.sort_by((left: BundleIcon, right: BundleIcon) -> (left.name <=> right.name).then(left.format.rank() <=> right.format.rank()).then(left.size <=> right.size).then(left.digest() <=> right.digest()))
-        hooks :: pkg_bundle_sorted_hooks(spec.signing_hooks)
+        hooks: pkg_bundle_sorted_hooks(spec.signing_hooks)
         metadata := spec.metadata
         &metadata.categories.sort()
-        executable_digest :: spec.executable.digest()
+        executable_digest: spec.executable.digest()
         game := spec.game
         if game == {
             .Val(declared) -> {
@@ -223,7 +223,7 @@ struct BundlePlan {
             }
             .None -> {}
         }
-        metadata_bytes :: pkg_bundle_canonical_bytes(pkg_bundle_metadata_json(spec, metadata, executable_digest, icons, hooks))
+        metadata_bytes: pkg_bundle_canonical_bytes(pkg_bundle_metadata_json(spec, metadata, executable_digest, icons, hooks))
         inputs := [BundleInputFact]{BundleInputFact{role: "executable", path: spec.executable.source, digest: executable_digest, bytes: spec.executable.bytes.len()}}
         loop icon in icons {
             if icon.source == {
@@ -241,16 +241,16 @@ struct BundlePlan {
             .None -> {}
         }
         &inputs.sort_by((left: BundleInputFact, right: BundleInputFact) -> (left.role <=> right.role).then(left.path <=> right.path))
-        identifier :: spec.metadata.identifier
-        artifact_name :: [identifier, spec.target.artifact_suffix()].join("")
+        identifier: spec.metadata.identifier
+        artifact_name: [identifier, spec.target.artifact_suffix()].join("")
         layout_files := [BundleFile]{}
         launch := LaunchDescriptor.new("", "")
         if spec.target == {
             .LinuxAppImage -> {
-                executable :: "usr/bin/{spec.executable.name}"
+                executable: "usr/bin/{spec.executable.name}"
                 &layout_files.push(BundleFile.new("AppRun", BundleFileKind.Launcher, 0o755, pkg_bundle_linux_launcher(spec.executable.name)))
                 &layout_files.push(BundleFile.new(executable, BundleFileKind.Executable, 0o755, spec.executable.bytes))
-                icon_name :: if icons.len() > 0 -> Val(icons[0].name) else -> None
+                icon_name: if icons.len() > 0 -> Val(icons[0].name) else -> None
                 &layout_files.push(BundleFile.new("usr/share/applications/{identifier}.desktop", BundleFileKind.Manifest, 0o644, pkg_bundle_linux_desktop_file(metadata, icon_name)))
                 &layout_files.push(BundleFile.new("usr/share/{identifier}/jet-bundle.json", BundleFileKind.Metadata, 0o644, metadata_bytes))
                 loop icon in icons {
@@ -264,10 +264,10 @@ struct BundlePlan {
                 launch = LaunchDescriptor.new("AppRun", executable)
             }
             .MacOSApp -> {
-                root :: "{identifier}.app"
-                executable :: "{root}/Contents/MacOS/{spec.executable.name}"
+                root: "{identifier}.app"
+                executable: "{root}/Contents/MacOS/{spec.executable.name}"
                 &layout_files.push(BundleFile.new(executable, BundleFileKind.Executable, 0o755, spec.executable.bytes))
-                icon_name :: if icons.len() > 0 -> Val("{icons[0].name}.{icons[0].format.extension()}") else -> None
+                icon_name: if icons.len() > 0 -> Val("{icons[0].name}.{icons[0].format.extension()}") else -> None
                 &layout_files.push(BundleFile.new("{root}/Contents/Info.plist", BundleFileKind.Manifest, 0o644, pkg_bundle_mac_info_plist(spec, icon_name)))
                 &layout_files.push(BundleFile.new("{root}/Contents/Resources/jet-bundle.json", BundleFileKind.Metadata, 0o644, metadata_bytes))
                 loop icon in icons {
@@ -280,9 +280,9 @@ struct BundlePlan {
                 launch = LaunchDescriptor.new(executable, executable)
             }
             .WindowsMsix -> {
-                executable :: pkg_bundle_windows_executable_name(spec.executable.name)
+                executable: pkg_bundle_windows_executable_name(spec.executable.name)
                 &layout_files.push(BundleFile.new(executable, BundleFileKind.Executable, 0o755, spec.executable.bytes))
-                logo :: if icons.len() > 0 -> Val("Assets/{icons[0].name}.{icons[0].format.extension()}") else -> None
+                logo: if icons.len() > 0 -> Val("Assets/{icons[0].name}.{icons[0].format.extension()}") else -> None
                 &layout_files.push(BundleFile.new("AppxManifest.xml", BundleFileKind.Manifest, 0o644, pkg_bundle_windows_manifest(spec, executable, logo)))
                 &layout_files.push(BundleFile.new("[Content_Types].xml", BundleFileKind.ContentTypes, 0o644, pkg_bundle_windows_content_types(layout_files)))
                 &layout_files.push(BundleFile.new("jet/jet-bundle.json", BundleFileKind.Metadata, 0o644, metadata_bytes))
@@ -306,7 +306,7 @@ struct BundlePlan {
             .None -> {}
         }
         if spec.target == BundleTarget.WindowsMsix {
-            content_types :: pkg_bundle_windows_content_types(layout_files)
+            content_types: pkg_bundle_windows_content_types(layout_files)
             loop index in 0..<layout_files.len() {
                 if layout_files[index].kind == BundleFileKind.ContentTypes -> layout_files[index].bytes = content_types
             }
@@ -318,7 +318,7 @@ struct BundlePlan {
             &paths.push(file.path)
         }
         &layout_files.sort_by((left: BundleFile, right: BundleFile) -> left.path <=> right.path)
-        updater_manifest :: if spec.updater == {
+        updater_manifest: if spec.updater == {
             .Val(updater) -> Val(UpdaterManifest.for_spec(spec, updater, executable_digest))
             .None -> None
         }
@@ -344,17 +344,17 @@ struct BundlePlan {
     }
 
     // The logical artifact view for callers without a platform transport.
-    fn emit(self) -> BundleArtifact Never! {
+    emit: fn(self) -> BundleArtifact Never! {
         self.materialized_artifact(self.logical_artifact_sha256(), self.logical_artifact_bytes())
     }
 
     // Digest of the checked plan's sorted file set; a platform adapter may
     // replace it with the digest of its actual transport bytes.
-    fn logical_artifact_sha256(self) -> String Never! {
+    logical_artifact_sha256: fn(self) -> String Never! {
         pkg_bundle_artifact_digest(self.files)
     }
 
-    fn logical_artifact_bytes(self) -> Int Never! {
+    logical_artifact_bytes: fn(self) -> Int Never! {
         total := 0
         loop file in self.files -> total += file.bytes.len()
         total
@@ -362,8 +362,8 @@ struct BundlePlan {
 
     // An artifact and typed receipt from an adapter's materialized digest and
     // byte count; the plan stays the semantic authority.
-    fn materialized_artifact(self, artifact_sha256: String, artifact_bytes: Int) -> BundleArtifact Never! {
-        receipt :: BundleReceipt.from_plan_with_bytes(self, artifact_sha256, artifact_bytes)
+    materialized_artifact: fn(self, artifact_sha256: String, artifact_bytes: Int) -> BundleArtifact Never! {
+        receipt: BundleReceipt.from_plan_with_bytes(self, artifact_sha256, artifact_bytes)
         BundleArtifact{
             schema_version: self.schema_version,
             kind: self.kind,
@@ -377,47 +377,47 @@ struct BundlePlan {
         }
     }
 
-    fn file_paths(self) -> [String] Never! {
+    file_paths: fn(self) -> [String] Never! {
         paths := [String]{}
         loop file in self.files -> &paths.push(file.path)
         paths
     }
 
     // `jet-bundle-plan-sha256:<hex>` of the canonical plan.
-    fn identity_text(self) -> String Never! {
+    identity_text: fn(self) -> String Never! {
         "jet-bundle-plan-sha256:{pkg_sha256_hex(self.canonical_bytes())}"
     }
 
     // Source paths are receipt provenance, not package meaning: the identity
     // keeps role, digest, and byte count so identical inputs from different
     // checkouts produce one cache key.
-    fn canonical_bytes(self) -> [U8] Never! {
+    canonical_bytes: fn(self) -> [U8] Never! {
         canonical := self
         canonical.identity = ""
         canonical.executable_source = ""
         loop index in 0..<canonical.inputs.len() {
-            role :: canonical.inputs[index].role
+            role: canonical.inputs[index].role
             if role == "executable" || role == "icon" -> canonical.inputs[index].path = ""
         }
         pkg_bundle_canonical_bytes(canonical.to_json_tree())
     }
 
-    fn json(self) -> String Never! {
+    json: fn(self) -> String Never! {
         pkg_bundle_canonical_text(self.to_json_tree())
     }
 
-    fn to_json_tree(self) -> CanonicalJSON Never! {
+    to_json_tree: fn(self) -> CanonicalJSON Never! {
         file_values := [CanonicalJSON]{}
         loop file in self.files -> &file_values.push(file.to_json_tree())
         inputs := [CanonicalJSON]{}
         loop input in self.inputs -> &inputs.push(input.to_json_tree())
         hooks := [CanonicalJSON]{}
         loop hook in self.signing_hooks -> &hooks.push(pkg_bundle_signing_hook_json(hook))
-        game :: if self.game == {
+        game: if self.game == {
             .Val(declared) -> pkg_bundle_game_spec_json(declared)
             .None -> CanonicalJSON.Null
         }
-        updater :: if self.updater == {
+        updater: if self.updater == {
             .Val(manifest) -> manifest.to_json_tree()
             .None -> CanonicalJSON.Null
         }
@@ -443,7 +443,7 @@ struct BundlePlan {
 }
 
 // Bytes plus receipt facts ready for a platform adapter to materialize.
-struct BundleArtifact {
+BundleArtifact: struct {
     schema_version: Int
     kind: BundleKind
     target: BundleTarget
@@ -454,29 +454,29 @@ struct BundleArtifact {
     launch: LaunchDescriptor
     receipt: BundleReceipt
 
-    fn digest(self) -> String Never! {
+    digest: fn(self) -> String Never! {
         self.receipt.artifact_sha256
     }
 
-    fn byte_count(self) -> Int Never! {
+    byte_count: fn(self) -> Int Never! {
         self.receipt.artifact_bytes
     }
 
-    fn file_paths(self) -> [String] Never! {
+    file_paths: fn(self) -> [String] Never! {
         paths := [String]{}
         loop file in self.files -> &paths.push(file.path)
         paths
     }
 
-    fn canonical_bytes(self) -> [U8] Never! {
+    canonical_bytes: fn(self) -> [U8] Never! {
         pkg_bundle_canonical_bytes(self.to_json_tree())
     }
 
-    fn json(self) -> String Never! {
+    json: fn(self) -> String Never! {
         pkg_bundle_canonical_text(self.to_json_tree())
     }
 
-    fn to_json_tree(self) -> CanonicalJSON Never! {
+    to_json_tree: fn(self) -> CanonicalJSON Never! {
         pkg_bundle_object([
             "artifact_name": CanonicalJSON.String(self.artifact_name.copy()),
             "artifact_sha256": CanonicalJSON.String(self.digest()),
@@ -493,11 +493,11 @@ struct BundleArtifact {
 
 // Whether the artifact facts describe only the checked plan or a transport a
 // platform adapter produced.
-enum BundleArtifactStatus {
+BundleArtifactStatus: enum {
     Planned
     Materialized
 
-    fn as_str(self) -> String Never! {
+    as_str: fn(self) -> String Never! {
         if self == {
             .Planned -> "planned"
             .Materialized -> "materialized"
@@ -507,13 +507,13 @@ enum BundleArtifactStatus {
 
 // Signing state an adapter recorded. A declared hook is only `Requested`; it
 // never implies a signer ran or produced a signature.
-enum BundleSigningStatus {
+BundleSigningStatus: enum {
     NotRequested
     Requested
     Signed
     Failed
 
-    fn as_str(self) -> String Never! {
+    as_str: fn(self) -> String Never! {
         if self == {
             .NotRequested -> "not-requested"
             .Requested -> "requested"
@@ -524,22 +524,22 @@ enum BundleSigningStatus {
 }
 
 // Signing execution facts attached after a platform adapter runs.
-struct BundleSigningFact {
+BundleSigningFact: struct {
     status: BundleSigningStatus
     tool: String?
     tool_identity: String?
     tool_version: String?
     diagnostic: String?
 
-    fn signed() -> BundleSigningFact Never! {
+    signed: fn() -> BundleSigningFact Never! {
         BundleSigningFact{status: BundleSigningStatus.Signed, tool: None, tool_identity: None, tool_version: None, diagnostic: None}
     }
 
-    fn failed(diagnostic: String) -> BundleSigningFact Never! {
+    failed: fn(diagnostic: String) -> BundleSigningFact Never! {
         BundleSigningFact{status: BundleSigningStatus.Failed, tool: None, tool_identity: None, tool_version: None, diagnostic: Val(diagnostic)}
     }
 
-    fn with_tool(self, tool: String, tool_identity: String, tool_version: String) -> BundleSigningFact Never! {
+    with_tool: fn(self, tool: String, tool_identity: String, tool_version: String) -> BundleSigningFact Never! {
         out := self
         out.tool = Val(tool)
         out.tool_identity = Val(tool_identity)
@@ -547,7 +547,7 @@ struct BundleSigningFact {
         out
     }
 
-    fn to_json_tree(self) -> CanonicalJSON Never! {
+    to_json_tree: fn(self) -> CanonicalJSON Never! {
         pkg_bundle_object([
             "diagnostic": pkg_bundle_optional_receipt_text(self.diagnostic),
             "status": CanonicalJSON.String(self.status.as_str()),
@@ -559,13 +559,13 @@ struct BundleSigningFact {
 }
 
 // Installability verdict derived from materialization and signing evidence.
-enum BundleInstallability {
+BundleInstallability: enum {
     NotMaterialized
     Installable
     RequiresSigning
     NotInstallable
 
-    fn as_str(self) -> String Never! {
+    as_str: fn(self) -> String Never! {
         if self == {
             .NotMaterialized -> "not-materialized"
             .Installable -> "installable"
@@ -577,7 +577,7 @@ enum BundleInstallability {
 
 // Identity and authority facts for the adapter that produced the transport.
 // `tool_identity` is the SHA-256 digest of the resolved executable.
-struct BundleMaterializerFact {
+BundleMaterializerFact: struct {
     tool: String
     tool_identity: String
     tool_version: String
@@ -586,7 +586,7 @@ struct BundleMaterializerFact {
     mechanism: String
     policy: String
 
-    fn to_json_tree(self) -> CanonicalJSON Never! {
+    to_json_tree: fn(self) -> CanonicalJSON Never! {
         pkg_bundle_object([
             "authority": CanonicalJSON.String(pkg_bundle_receipt_safe_text(self.authority)),
             "executable": CanonicalJSON.String(pkg_bundle_receipt_safe_text(self.executable)),
@@ -599,14 +599,14 @@ struct BundleMaterializerFact {
     }
 }
 
-struct BundleFileFact {
+BundleFileFact: struct {
     path: String
     kind: BundleFileKind
     mode: Int
     bytes: Int
     sha256: String
 
-    fn receipt_json_tree(self) -> CanonicalJSON Never! {
+    receipt_json_tree: fn(self) -> CanonicalJSON Never! {
         pkg_bundle_object([
             "bytes": pkg_bundle_integer(self.bytes),
             "kind": CanonicalJSON.String(self.kind.as_str()),
@@ -618,7 +618,7 @@ struct BundleFileFact {
 }
 
 // Machine-readable facts carried beside a packaged artifact.
-struct BundleReceipt {
+BundleReceipt: struct {
     schema: String
     plan_identity: String
     kind: BundleKind
@@ -638,11 +638,11 @@ struct BundleReceipt {
     materializer: BundleMaterializerFact?
     signing: BundleSigningFact?
 
-    fn from_plan(plan: BundlePlan, artifact_sha256: String) -> BundleReceipt Never! {
+    from_plan: fn(plan: BundlePlan, artifact_sha256: String) -> BundleReceipt Never! {
         BundleReceipt.from_plan_with_bytes(plan, artifact_sha256, plan.logical_artifact_bytes())
     }
 
-    fn from_plan_with_bytes(plan: BundlePlan, artifact_sha256: String, artifact_bytes: Int) -> BundleReceipt Never! {
+    from_plan_with_bytes: fn(plan: BundlePlan, artifact_sha256: String, artifact_bytes: Int) -> BundleReceipt Never! {
         file_facts := [BundleFileFact]{}
         loop file in plan.files {
             &file_facts.push(BundleFileFact{path: file.path, kind: file.kind, mode: file.mode, bytes: file.bytes.len(), sha256: file.digest()})
@@ -670,39 +670,39 @@ struct BundleReceipt {
         }
     }
 
-    fn with_materializer(self, materializer: BundleMaterializerFact) -> BundleReceipt Never! {
+    with_materializer: fn(self, materializer: BundleMaterializerFact) -> BundleReceipt Never! {
         out := self
         out.materializer = Val(materializer)
         out
     }
 
-    fn with_signing(self, signing: BundleSigningFact) -> BundleReceipt Never! {
+    with_signing: fn(self, signing: BundleSigningFact) -> BundleReceipt Never! {
         out := self
         out.signing = Val(signing)
         out
     }
 
-    fn record_materializer(&self, materializer: BundleMaterializerFact) Never! {
+    record_materializer: fn(&self, materializer: BundleMaterializerFact) Never! {
         self.materializer = Val(materializer)
     }
 
-    fn record_signing(&self, signing: BundleSigningFact) Never! {
+    record_signing: fn(&self, signing: BundleSigningFact) Never! {
         self.signing = Val(signing)
     }
 
-    fn artifact_status(self) -> BundleArtifactStatus Never! {
+    artifact_status: fn(self) -> BundleArtifactStatus Never! {
         if self.materializer == None -> return BundleArtifactStatus.Planned
         BundleArtifactStatus.Materialized
     }
 
-    fn signing_status(self) -> BundleSigningStatus Never! {
+    signing_status: fn(self) -> BundleSigningStatus Never! {
         if self.signing == {
             .Val(fact) -> fact.status
             .None -> if self.signing_hooks.len() == 0 -> BundleSigningStatus.NotRequested else -> BundleSigningStatus.Requested
         }
     }
 
-    fn installability(self) -> BundleInstallability Never! {
+    installability: fn(self) -> BundleInstallability Never! {
         if self.materializer == None -> return BundleInstallability.NotMaterialized
         if self.signing_status() == {
             .Failed -> BundleInstallability.NotInstallable
@@ -712,26 +712,26 @@ struct BundleReceipt {
         }
     }
 
-    fn to_json_tree(self) -> CanonicalJSON Never! {
+    to_json_tree: fn(self) -> CanonicalJSON Never! {
         file_values := [CanonicalJSON]{}
         loop file in self.files -> &file_values.push(file.receipt_json_tree())
         inputs := [CanonicalJSON]{}
         loop input in self.inputs -> &inputs.push(input.receipt_json_tree())
         hooks := [CanonicalJSON]{}
         loop hook in self.signing_hooks -> &hooks.push(pkg_bundle_signing_hook_receipt_json(hook))
-        game :: if self.game == {
+        game: if self.game == {
             .Val(declared) -> pkg_bundle_game_spec_receipt_json(declared)
             .None -> CanonicalJSON.Null
         }
-        materializer :: if self.materializer == {
+        materializer: if self.materializer == {
             .Val(fact) -> fact.to_json_tree()
             .None -> CanonicalJSON.Null
         }
-        signing :: if self.signing == {
+        signing: if self.signing == {
             .Val(fact) -> fact.to_json_tree()
             .None -> CanonicalJSON.Null
         }
-        updater :: if self.updater == {
+        updater: if self.updater == {
             .Val(manifest) -> manifest.receipt_json_tree()
             .None -> CanonicalJSON.Null
         }
@@ -760,38 +760,38 @@ struct BundleReceipt {
         ])
     }
 
-    fn canonical_bytes(self) -> [U8] Never! {
+    canonical_bytes: fn(self) -> [U8] Never! {
         pkg_bundle_canonical_bytes(self.to_json_tree())
     }
 
-    fn json(self) -> String Never! {
+    json: fn(self) -> String Never! {
         pkg_bundle_canonical_text(self.to_json_tree())
     }
 }
 
 // The checked plan for `spec` (Rust `package_bundle_plan`).
-fn pkg_package_bundle_plan(spec: BundleSpec) -> BundlePlan BundleError! {
+pkg_package_bundle_plan: fn(spec: BundleSpec) -> BundlePlan BundleError! {
     BundlePlan.from_spec(spec)
 }
 
 // The logical artifact of `spec` (Rust `emit_package_bundle`).
-fn pkg_emit_package_bundle(spec: BundleSpec) -> BundleArtifact BundleError! {
+pkg_emit_package_bundle: fn(spec: BundleSpec) -> BundleArtifact BundleError! {
     Ok(BundlePlan.from_spec(spec).emit())
 }
 
 // Hooks in the reference's derived order: name, phase, program, arguments,
 // then inputs.
-fn pkg_bundle_sorted_hooks(hooks: [SigningHook]) -> [SigningHook] Never! {
+pkg_bundle_sorted_hooks: fn(hooks: [SigningHook]) -> [SigningHook] Never! {
     sorted := hooks
     &sorted.sort_by((left: SigningHook, right: SigningHook) -> (left.name <=> right.name).then(left.phase.rank() <=> right.phase.rank()).then(left.program <=> right.program).then(left.args.join(pkg_bundle_nul()) <=> right.args.join(pkg_bundle_nul())).then(pkg_bundle_hook_inputs_key(left.inputs) <=> pkg_bundle_hook_inputs_key(right.inputs)))
     sorted
 }
 
-fn pkg_bundle_nul() -> String Never! {
+pkg_bundle_nul: fn() -> String Never! {
     String.from_bytes([U8]{U8{0}}) ?? panic("NUL is valid UTF-8")
 }
 
-fn pkg_bundle_hook_inputs_key(inputs: [SigningHookInput]) -> String Never! {
+pkg_bundle_hook_inputs_key: fn(inputs: [SigningHookInput]) -> String Never! {
     parts := [String]{}
     loop input in inputs -> &parts.push([input.path, input.digest].join(pkg_bundle_nul()))
     parts.join([pkg_bundle_nul(), pkg_bundle_nul()].join(""))
@@ -799,38 +799,38 @@ fn pkg_bundle_hook_inputs_key(inputs: [SigningHookInput]) -> String Never! {
 
 // Rust Bundler::integer: Int's canonical decimal text is kept exactly; the
 // CanonicalJSON carrier cannot represent a Float.
-fn pkg_bundle_integer(value: Int) -> CanonicalJSON Never! {
+pkg_bundle_integer: fn(value: Int) -> CanonicalJSON Never! {
     CanonicalJSON.Integer("{value}")
 }
 
-fn pkg_bundle_canonical_text(value: CanonicalJSON) -> String Never! {
+pkg_bundle_canonical_text: fn(value: CanonicalJSON) -> String Never! {
     String.from_bytes(pkg_bundle_canonical_bytes(value)) ?? panic("canonical bundle JSON is UTF-8")
 }
 
-fn pkg_bundle_canonical_bytes(value: CanonicalJSON) -> [U8] Never! {
+pkg_bundle_canonical_bytes: fn(value: CanonicalJSON) -> [U8] Never! {
     canonical_json_bytes(value)
 }
 
-fn pkg_bundle_object(values: [String: CanonicalJSON]) -> CanonicalJSON Never! {
+pkg_bundle_object: fn(values: [String: CanonicalJSON]) -> CanonicalJSON Never! {
     fields := [CanonicalJSONField]{}
     loop (key, value) in values -> &fields.push(CanonicalJSONField{key: key, value: value})
     canonical_json_object(fields) ?? panic("bundle JSON keys must be unique")
 }
 
-fn pkg_bundle_optional_text(value: String?) -> CanonicalJSON Never! {
+pkg_bundle_optional_text: fn(value: String?) -> CanonicalJSON Never! {
     if value == {
         .Val(text) -> CanonicalJSON.String(text)
         .None -> CanonicalJSON.Null
     }
 }
 
-fn pkg_bundle_texts(values: [String]) -> CanonicalJSON Never! {
+pkg_bundle_texts: fn(values: [String]) -> CanonicalJSON Never! {
     items := [CanonicalJSON]{}
     loop value in values -> &items.push(CanonicalJSON.String(value))
     CanonicalJSON.Array(items)
 }
 
-fn pkg_bundle_metadata_json(spec: BundleSpec, metadata: BundleMetadata, executable_digest: String, icons: [BundleIcon], hooks: [SigningHook]) -> CanonicalJSON Never! {
+pkg_bundle_metadata_json: fn(spec: BundleSpec, metadata: BundleMetadata, executable_digest: String, icons: [BundleIcon], hooks: [SigningHook]) -> CanonicalJSON Never! {
     icon_values := [CanonicalJSON]{}
     loop icon in icons {
         &icon_values.push(pkg_bundle_object([
@@ -861,7 +861,7 @@ fn pkg_bundle_metadata_json(spec: BundleSpec, metadata: BundleMetadata, executab
     ])
 }
 
-fn pkg_bundle_plan_metadata_json(metadata: BundleMetadata) -> CanonicalJSON Never! {
+pkg_bundle_plan_metadata_json: fn(metadata: BundleMetadata) -> CanonicalJSON Never! {
     pkg_bundle_object([
         "categories": pkg_bundle_texts(metadata.categories),
         "description": CanonicalJSON.String(metadata.description.copy()),
@@ -871,7 +871,7 @@ fn pkg_bundle_plan_metadata_json(metadata: BundleMetadata) -> CanonicalJSON Neve
     ])
 }
 
-fn pkg_bundle_game_manifest_path(spec: BundleSpec) -> String Never! {
+pkg_bundle_game_manifest_path: fn(spec: BundleSpec) -> String Never! {
     if spec.target == {
         .LinuxAppImage -> "usr/share/{spec.metadata.identifier}/jet-game.json"
         .MacOSApp -> "{spec.metadata.identifier}.app/Contents/Resources/jet-game.json"
@@ -879,7 +879,7 @@ fn pkg_bundle_game_manifest_path(spec: BundleSpec) -> String Never! {
     }
 }
 
-fn pkg_bundle_game_asset_path(spec: BundleSpec, path: String) -> String Never! {
+pkg_bundle_game_asset_path: fn(spec: BundleSpec, path: String) -> String Never! {
     if spec.target == {
         .LinuxAppImage -> "usr/share/{spec.metadata.identifier}/assets/{path}"
         .MacOSApp -> "{spec.metadata.identifier}.app/Contents/Resources/assets/{path}"
@@ -887,7 +887,7 @@ fn pkg_bundle_game_asset_path(spec: BundleSpec, path: String) -> String Never! {
     }
 }
 
-fn pkg_bundle_game_spec_json(game: GameBundleSpec) -> CanonicalJSON Never! {
+pkg_bundle_game_spec_json: fn(game: GameBundleSpec) -> CanonicalJSON Never! {
     assets := [CanonicalJSON]{}
     loop asset in game.assets {
         &assets.push(pkg_bundle_object([
@@ -914,7 +914,7 @@ fn pkg_bundle_game_spec_json(game: GameBundleSpec) -> CanonicalJSON Never! {
     ])
 }
 
-fn pkg_bundle_game_spec_receipt_json(game: GameBundleSpec) -> CanonicalJSON Never! {
+pkg_bundle_game_spec_receipt_json: fn(game: GameBundleSpec) -> CanonicalJSON Never! {
     assets := [CanonicalJSON]{}
     loop asset in game.assets {
         &assets.push(pkg_bundle_object([
@@ -941,14 +941,14 @@ fn pkg_bundle_game_spec_receipt_json(game: GameBundleSpec) -> CanonicalJSON Neve
     ])
 }
 
-fn pkg_bundle_crash_runtime_text(value: String, receipt: Bool) -> String Never! {
+pkg_bundle_crash_runtime_text: fn(value: String, receipt: Bool) -> String Never! {
     if receipt -> pkg_bundle_receipt_safe_text(value) else -> value.copy()
 }
 
 // The crash runtime facts; the receipt form redacts sensitive text and
 // source-like paths.
-fn pkg_bundle_crash_runtime_json(runtime: GameCrashReporterSpec, receipt: Bool) -> CanonicalJSON Never! {
-    retention_path :: if receipt -> pkg_bundle_receipt_source(runtime.retention_path) else -> runtime.retention_path
+pkg_bundle_crash_runtime_json: fn(runtime: GameCrashReporterSpec, receipt: Bool) -> CanonicalJSON Never! {
+    retention_path: if receipt -> pkg_bundle_receipt_source(runtime.retention_path) else -> runtime.retention_path
     pkg_bundle_object([
         "abi": CanonicalJSON.String(pkg_bundle_crash_runtime_text(GAME_CRASH_REPORTER_ABI, receipt)),
         "installation": CanonicalJSON.String(pkg_bundle_crash_runtime_text(runtime.installation, receipt)),
@@ -959,7 +959,7 @@ fn pkg_bundle_crash_runtime_json(runtime: GameCrashReporterSpec, receipt: Bool) 
     ])
 }
 
-fn pkg_bundle_game_manifest_json(spec: BundleSpec, game: GameBundleSpec) -> CanonicalJSON Never! {
+pkg_bundle_game_manifest_json: fn(spec: BundleSpec, game: GameBundleSpec) -> CanonicalJSON Never! {
     pkg_bundle_object([
         "game": pkg_bundle_game_spec_json(game),
         "package": CanonicalJSON.String(spec.package.copy()),
@@ -968,7 +968,7 @@ fn pkg_bundle_game_manifest_json(spec: BundleSpec, game: GameBundleSpec) -> Cano
     ])
 }
 
-fn pkg_bundle_signing_hook_json(hook: SigningHook) -> CanonicalJSON Never! {
+pkg_bundle_signing_hook_json: fn(hook: SigningHook) -> CanonicalJSON Never! {
     inputs := [CanonicalJSON]{}
     loop input in hook.inputs -> &inputs.push(pkg_bundle_object(["digest": CanonicalJSON.String(input.digest), "path": CanonicalJSON.String(input.path)]))
     pkg_bundle_object([
@@ -983,7 +983,7 @@ fn pkg_bundle_signing_hook_json(hook: SigningHook) -> CanonicalJSON Never! {
 // Hook arguments may carry a password, token, or key: the plan keeps the
 // exact declaration for the adapter, the receipt only the argument count and
 // redaction markers.
-fn pkg_bundle_signing_hook_receipt_json(hook: SigningHook) -> CanonicalJSON Never! {
+pkg_bundle_signing_hook_receipt_json: fn(hook: SigningHook) -> CanonicalJSON Never! {
     args := [CanonicalJSON]{}
     loop _ in hook.args -> &args.push(CanonicalJSON.String("<redacted>"))
     inputs := [CanonicalJSON]{}
@@ -998,34 +998,34 @@ fn pkg_bundle_signing_hook_receipt_json(hook: SigningHook) -> CanonicalJSON Neve
     ])
 }
 
-fn pkg_bundle_optional_receipt_url(value: String?) -> CanonicalJSON Never! {
+pkg_bundle_optional_receipt_url: fn(value: String?) -> CanonicalJSON Never! {
     if value == {
         .Val(text) -> CanonicalJSON.String(pkg_bundle_receipt_source(text))
         .None -> CanonicalJSON.Null
     }
 }
 
-fn pkg_bundle_optional_receipt_text(value: String?) -> CanonicalJSON Never! {
+pkg_bundle_optional_receipt_text: fn(value: String?) -> CanonicalJSON Never! {
     if value == {
         .Val(text) -> CanonicalJSON.String(pkg_bundle_receipt_safe_text(text))
         .None -> CanonicalJSON.Null
     }
 }
 
-fn pkg_bundle_receipt_safe_text(value: String) -> String Never! {
+pkg_bundle_receipt_safe_text: fn(value: String) -> String Never! {
     if pkg_bundle_contains_sensitive_marker(value) -> return "<redacted>"
     value.copy()
 }
 
 // A source path or URL; credentials, queries, and fragments are redacted.
-fn pkg_bundle_receipt_source(value: String) -> String Never! {
+pkg_bundle_receipt_source: fn(value: String) -> String Never! {
     if value.contains("@") || value.contains("?") || value.contains("#") -> return "<redacted>"
     pkg_bundle_receipt_safe_text(value)
 }
 
-fn pkg_bundle_contains_sensitive_marker(value: String) -> Bool Never! {
-    lower :: pkg_ascii_lower(value)
-    markers :: [String]{"password", "passphrase", "secret", "credential", "api-key", "apikey", "authorization", "bearer "}
+pkg_bundle_contains_sensitive_marker: fn(value: String) -> Bool Never! {
+    lower: pkg_ascii_lower(value)
+    markers: [String]{"password", "passphrase", "secret", "credential", "api-key", "apikey", "authorization", "bearer "}
     loop marker in markers {
         if lower.contains(marker) -> return true
     }
@@ -1034,7 +1034,7 @@ fn pkg_bundle_contains_sensitive_marker(value: String) -> Bool Never! {
 
 // SHA-256 over the path-sorted files, each framed as path, kind, 32-bit mode,
 // and payload.
-fn pkg_bundle_artifact_digest(bundle_files: [BundleFile]) -> String Never! {
+pkg_bundle_artifact_digest: fn(bundle_files: [BundleFile]) -> String Never! {
     ordered := bundle_files
     &ordered.sort_by((left: BundleFile, right: BundleFile) -> left.path <=> right.path)
     bytes := "jet-package-artifact-v1".bytes()
@@ -1049,12 +1049,12 @@ fn pkg_bundle_artifact_digest(bundle_files: [BundleFile]) -> String Never! {
 }
 
 // A 64-bit big-endian length, then the value.
-fn pkg_bundle_frame(out: &[U8], value: [U8]) Never! {
+pkg_bundle_frame: fn(out: &[U8], value: [U8]) Never! {
     pkg_bundle_push_big_endian(&out, value.len(), 8)
     loop byte in value -> &out.push(byte)
 }
 
-fn pkg_bundle_push_big_endian(out: &[U8], value: Int, width: Int) Never! {
+pkg_bundle_push_big_endian: fn(out: &[U8], value: Int, width: Int) Never! {
     shift := (width - 1) * 8
     loop shift >= 0 {
         &out.push(U8{((value >> shift)).bit_and(255)})
@@ -1062,16 +1062,16 @@ fn pkg_bundle_push_big_endian(out: &[U8], value: Int, width: Int) Never! {
     }
 }
 
-fn pkg_bundle_linux_launcher(executable: String) -> [U8] Never! {
-    quoted :: pkg_bundle_shell_double_quote(executable)
+pkg_bundle_linux_launcher: fn(executable: String) -> [U8] Never! {
+    quoted: pkg_bundle_shell_double_quote(executable)
     "#!/bin/sh\nset -eu\nHERE=$(CDPATH= cd -- \"$(dirname -- \"$0\")\" && pwd)\nexec \"$HERE/usr/bin/{quoted}\" \"$@\"\n".bytes()
 }
 
-fn pkg_bundle_shell_double_quote(value: String) -> String Never! {
+pkg_bundle_shell_double_quote: fn(value: String) -> String Never! {
     value.replace("\\", "\\\\").replace("\"", "\\\"").replace("$", "\\$").replace("`", "\\`")
 }
 
-fn pkg_bundle_linux_desktop_file(metadata: BundleMetadata, icon_name: String?) -> [U8] Never! {
+pkg_bundle_linux_desktop_file: fn(metadata: BundleMetadata, icon_name: String?) -> [U8] Never! {
     lines := [String]{"[Desktop Entry]", "Type=Application", "Version=1.0", "Name={pkg_bundle_desktop_escape(metadata.display_name)}", "Exec=AppRun"}
     if icon_name == {
         .Val(icon) -> &lines.push("Icon={pkg_bundle_desktop_escape(icon)}")
@@ -1083,11 +1083,11 @@ fn pkg_bundle_linux_desktop_file(metadata: BundleMetadata, icon_name: String?) -
     "{lines.join("\n")}\n".bytes()
 }
 
-fn pkg_bundle_desktop_escape(value: String) -> String Never! {
+pkg_bundle_desktop_escape: fn(value: String) -> String Never! {
     value.replace("\\", "\\\\").replace("\n", "\\n")
 }
 
-fn pkg_bundle_mac_info_plist(spec: BundleSpec, icon_name: String?) -> [U8] Never! {
+pkg_bundle_mac_info_plist: fn(spec: BundleSpec, icon_name: String?) -> [U8] Never! {
     lines := [String]{
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
         "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">",
@@ -1107,15 +1107,15 @@ fn pkg_bundle_mac_info_plist(spec: BundleSpec, icon_name: String?) -> [U8] Never
     "{lines.join("\n")}\n".bytes()
 }
 
-fn pkg_bundle_windows_executable_name(name: String) -> String Never! {
+pkg_bundle_windows_executable_name: fn(name: String) -> String Never! {
     if pkg_ascii_lower(name).ends_with(".exe") -> return name.copy()
     "{name}.exe"
 }
 
 // The AppxManifest; the version is already normalized by the plan.
-fn pkg_bundle_windows_manifest(spec: BundleSpec, executable: String, logo: String?) -> [U8] Never! {
-    display :: pkg_bundle_xml_escape(spec.metadata.display_name)
-    publisher :: pkg_bundle_xml_escape(spec.metadata.publisher)
+pkg_bundle_windows_manifest: fn(spec: BundleSpec, executable: String, logo: String?) -> [U8] Never! {
+    display: pkg_bundle_xml_escape(spec.metadata.display_name)
+    publisher: pkg_bundle_xml_escape(spec.metadata.publisher)
     parts := [String]{
         "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<Package xmlns=\"http://schemas.microsoft.com/appx/manifest/foundation/windows10\" xmlns:uap=\"http://schemas.microsoft.com/appx/manifest/uap/windows10\" IgnorableNamespaces=\"uap\">\n",
         "<Identity Name=\"{pkg_bundle_xml_escape(spec.metadata.identifier)}\" Publisher=\"{publisher}\" Version=\"{spec.version}\" />\n",
@@ -1139,18 +1139,18 @@ fn pkg_bundle_windows_manifest(spec: BundleSpec, executable: String, logo: Strin
 }
 
 // One `Default` per distinct lowercase file extension, in byte order.
-fn pkg_bundle_windows_content_types(bundle_files: [BundleFile]) -> [U8] Never! {
+pkg_bundle_windows_content_types: fn(bundle_files: [BundleFile]) -> [U8] Never! {
     extensions := [String]{}
     loop file in bundle_files {
-        name :: file.path.cut_last("/")?.after ?? file.path
-        extension :: name.cut_last(".")?.after ?? ""
-        lower :: pkg_ascii_lower(extension)
+        name: file.path.cut_last("/")?.after ?? file.path
+        extension: name.cut_last(".")?.after ?? ""
+        lower: pkg_ascii_lower(extension)
         if lower != "" && !extensions.contains(lower) -> &extensions.push(lower)
     }
     &extensions.sort()
     parts := [String]{"<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">"}
     loop extension in extensions {
-        content_type :: if extension == {
+        content_type: if extension == {
             "xml" -> "application/xml"
             "json" -> "application/json"
             "exe" -> "application/octet-stream"
@@ -1168,12 +1168,12 @@ fn pkg_bundle_windows_content_types(bundle_files: [BundleFile]) -> [U8] Never! {
 
 // A SHA-256 hex digest as standard padded base64; text that is not hex is
 // returned unchanged.
-fn pkg_bundle_sha256_base64(digest: String) -> String Never! {
-    decoded :: hex.decode(digest) ?? return digest
+pkg_bundle_sha256_base64: fn(digest: String) -> String Never! {
+    decoded: hex.decode(digest) ?? return digest
     base64.encode(decoded)
 }
 
-fn pkg_bundle_windows_block_map(bundle_files: [BundleFile]) -> [U8] Never! {
+pkg_bundle_windows_block_map: fn(bundle_files: [BundleFile]) -> [U8] Never! {
     parts := [String]{"<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<BlockMap xmlns=\"http://schemas.microsoft.com/appx/2010/blockmap\" HashMethod=\"http://www.w3.org/2001/04/xmlenc#sha256\">"}
     loop file in bundle_files {
         &parts.push("<File Name=\"{pkg_bundle_xml_escape(file.path)}\" Size=\"{file.bytes.len()}\"><Block Hash=\"{pkg_bundle_sha256_base64(file.digest())}\" /></File>")
@@ -1182,6 +1182,6 @@ fn pkg_bundle_windows_block_map(bundle_files: [BundleFile]) -> [U8] Never! {
     parts.join("").bytes()
 }
 
-fn pkg_bundle_xml_escape(value: String) -> String Never! {
+pkg_bundle_xml_escape: fn(value: String) -> String Never! {
     value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;").replace("'", "&apos;")
 }

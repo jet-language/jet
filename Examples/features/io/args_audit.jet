@@ -1,12 +1,12 @@
 // D-COREARGS1: one ArgsSpec model covers builder-driven CLIs with short flags,
 // typed options, defaults, repeated values, subcommands, suggestions, and
 // completion text.
-use args :: core.args
+use args: core.args
 
-fn run() {
-    serve :: args.spec()
+run: fn() {
+    serve: args.spec()
         .option_int("port", "listen port", "PORT")
-    spec :: args.spec()
+    spec: args.spec()
         .flag_short("verbose", "v", "print extra detail")
         .option_int("jobs", "worker count", "N")
         .option_default("mode", "run mode", "MODE", "fast")
@@ -14,7 +14,7 @@ fn run() {
         .repeat("tag", "classification tag", "TAG")
         .subcommand("serve", "run the server", serve)
         .version("args-audit 1.0")
-    words :: [
+    words: [
         "-vv",
         "--jobs",
         "4",
@@ -26,7 +26,7 @@ fn run() {
         "--port",
         "8080"
     ]
-    parsed :: spec.parse_or_exit(words)
+    parsed: spec.parse_or_exit(words)
     print(parsed.flag("verbose"))
     print(parsed.option_int("jobs") ?? 0)
     print(parsed.option("mode") ?? "")

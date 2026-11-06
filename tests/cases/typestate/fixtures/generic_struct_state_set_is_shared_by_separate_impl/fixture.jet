@@ -1,25 +1,25 @@
 
-struct Box<T> {
+Box: struct<T> {
     state { Empty, Full }
     value: T
 }
 
 impl Box {
-    #Transition(_, Empty) fn new(value: ^T) -[]> Box<T> {
+    #Transition(_, Empty) new: fn(value: ^T) -[]> Box<T> {
         return Box<T>{ value: value }
     }
-    #Transition(Empty, Full) fn fill(self: ^Box<T>) -[]> Box<T> {
+    #Transition(Empty, Full) fill: fn(self: ^Box<T>) -[]> Box<T> {
         return self
     }
 }
 
 impl Box {
-    #State(Full) fn read(self) -[]> T {
+    #State(Full) read: fn(self) -[]> T {
         return self.value
     }
 }
 
-fn run() {
+run: fn() {
     box := Box<Int>.new(1)
     box = ^box.fill()
     print(box.read())

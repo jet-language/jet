@@ -1,7 +1,7 @@
 // Target machine facts: memory, providers, policies, hardware registers, interrupts and DMA, and the
 // layout facts the selected target supplies.
 
-struct LayoutAlignmentFact {
+LayoutAlignmentFact: struct {
     requested_alignment: Int
     effective_alignment: Int
     target_mode: Bool
@@ -9,15 +9,15 @@ struct LayoutAlignmentFact {
     fact_identity: String
 }
 
-enum RegisterWidth { U8 U16 U32 U64 }
+RegisterWidth: enum { U8 U16 U32 U64 }
 
-struct ByteSize { bytes: Int }
+ByteSize: struct { bytes: Int }
 
-enum TargetRegisterAccessMode { ReadOnly WriteOnly ReadWrite }
+TargetRegisterAccessMode: enum { ReadOnly WriteOnly ReadWrite }
 
-struct SVDProvenance { source: String, sha256: String }
+SVDProvenance: struct { source: String, sha256: String }
 
-struct TargetRegisterFact {
+TargetRegisterFact: struct {
     name: String
     offset: Int
     width: RegisterWidth
@@ -25,30 +25,30 @@ struct TargetRegisterFact {
     volatile: Bool
 }
 
-struct TargetRegisterBlockFact {
+TargetRegisterBlockFact: struct {
     name: String
     base: Int
     size: ByteSize
     registers: [TargetRegisterFact]
 }
 
-enum TargetRegisterOperation { Read Write }
+TargetRegisterOperation: enum { Read Write }
 
-struct TargetRegisterAccessFact {
+TargetRegisterAccessFact: struct {
     block: String
     register: String
     operation: TargetRegisterOperation
     width: RegisterWidth
 }
 
-struct TargetInterruptFact {
+TargetInterruptFact: struct {
     name: String
     vector: Int
     forbidden_effects: [String]
     bounded: Bool
 }
 
-struct TargetInterruptHandlerFact {
+TargetInterruptHandlerFact: struct {
     interrupt: String
     handler: String
     effects: [String]
@@ -56,9 +56,9 @@ struct TargetInterruptHandlerFact {
     bounded: Bool
 }
 
-enum TargetDMAOwnership { Borrowed Transfer }
+TargetDMAOwnership: enum { Borrowed Transfer }
 
-struct TargetDMAChannelFact {
+TargetDMAChannelFact: struct {
     name: String
     channel: Int
     transfer_width: RegisterWidth
@@ -66,41 +66,41 @@ struct TargetDMAChannelFact {
     max_transfer_bytes: Int?
 }
 
-enum TargetDMAOperation { Start Wait UseBuffer }
+TargetDMAOperation: enum { Start Wait UseBuffer }
 
-enum TargetDMAOwner { CPU Device }
+TargetDMAOwner: enum { CPU Device }
 
-struct TargetDMAOperationFact {
+TargetDMAOperationFact: struct {
     channel: String
     buffer: String
     operation: TargetDMAOperation
     owner: TargetDMAOwner
 }
 
-enum TargetHardwareUnresolvedReference {
+TargetHardwareUnresolvedReference: enum {
     RegisterBlock(block: String)
     Register(block: String, register: String)
     DMAChannel(channel: String)
     Interrupt(interrupt: String)
 }
 
-struct TargetHardwareFacts {
+TargetHardwareFacts: struct {
     svd: SVDProvenance?
     register_blocks: [TargetRegisterBlockFact]
     interrupts: [TargetInterruptFact]
     dma_channels: [TargetDMAChannelFact]
 }
 
-struct TargetHardwareUse {
+TargetHardwareUse: struct {
     register_accesses: [TargetRegisterAccessFact]
     interrupt_handlers: [TargetInterruptHandlerFact]
     dma_operations: [TargetDMAOperationFact]
     unresolved_references: [TargetHardwareUnresolvedReference]
 }
 
-enum TargetProgrammerAdapter { Emulator ProbeRs OpenOcd }
+TargetProgrammerAdapter: enum { Emulator ProbeRs OpenOcd }
 
-struct TargetProgrammerFacts {
+TargetProgrammerFacts: struct {
     adapter: TargetProgrammerAdapter
     executable: String
     chip: String?
@@ -112,7 +112,7 @@ struct TargetProgrammerFacts {
     cpu: String?
 }
 
-struct LayoutSupportFacts {
+LayoutSupportFacts: struct {
     proven: Bool
     alignments: [Int]
     max_size: Int?
@@ -121,7 +121,7 @@ struct LayoutSupportFacts {
     provenance: String
 }
 
-struct LayoutCapabilityFacts {
+LayoutCapabilityFacts: struct {
     fact_version: String
     target_profile: String
     execution_modes: [String]
@@ -136,11 +136,11 @@ struct LayoutCapabilityFacts {
     foreign_by_value_abi: LayoutSupportFacts
 }
 
-enum MemoryKind { Flash Ram MMIO Reserved }
+MemoryKind: enum { Flash Ram MMIO Reserved }
 
-enum MemoryAccess { R Rw Rx Rwx }
+MemoryAccess: enum { R Rw Rx Rwx }
 
-struct MemoryRegion {
+MemoryRegion: struct {
     name: String
     origin: Int
     size: ByteSize
@@ -148,22 +148,22 @@ struct MemoryRegion {
     access: MemoryAccess
 }
 
-enum LinkerInput {
+LinkerInput: enum {
     HostedDefault
     Unspecified
     Generated
     File(path: String, sha256: String)
 }
 
-struct ProviderABI { calling_convention: String, version: String }
+ProviderABI: struct { calling_convention: String, version: String }
 
-struct ProviderLimits {
+ProviderLimits: struct {
     max_request_bytes: Int?
     max_response_bytes: Int?
     max_calls: Int?
 }
 
-struct ProviderContract {
+ProviderContract: struct {
     provider: String
     sha256: String
     provenance: String
@@ -171,7 +171,7 @@ struct ProviderContract {
     limits: ProviderLimits
 }
 
-enum AllocatorPolicy {
+AllocatorPolicy: enum {
     HostedDefault
     Unspecified
     NoAllocator
@@ -180,18 +180,18 @@ enum AllocatorPolicy {
     Counting(cap: ByteSize?)
 }
 
-enum PanicPolicy {
+PanicPolicy: enum {
     HostedDefault
     Unspecified
     Abort
     Report(provider: ProviderContract)
 }
 
-enum ClockPolicy { HostedDefault Unspecified NoClock Provider(provider: ProviderContract) }
+ClockPolicy: enum { HostedDefault Unspecified NoClock Provider(provider: ProviderContract) }
 
-enum EntropyPolicy { HostedDefault Unspecified NoEntropy Provider(provider: ProviderContract) }
+EntropyPolicy: enum { HostedDefault Unspecified NoEntropy Provider(provider: ProviderContract) }
 
-enum SchedulerPolicy {
+SchedulerPolicy: enum {
     HostedDefault
     Unspecified
     NoScheduler
@@ -200,24 +200,24 @@ enum SchedulerPolicy {
     BoardRuntime(provider: ProviderContract)
 }
 
-enum MMIOPolicy { HostedDefault Unspecified NoMMIO Provider(provider: ProviderContract) }
+MMIOPolicy: enum { HostedDefault Unspecified NoMMIO Provider(provider: ProviderContract) }
 
-enum ByteSinkPolicy {
+ByteSinkPolicy: enum {
     HostedDefault
     Unspecified
     NoByteSink
     Provider(read: ProviderContract?, write: ProviderContract?, report: ProviderContract?)
 }
 
-enum StartupPolicy {
+StartupPolicy: enum {
     HostedDefault
     Unspecified
     Generated(provider: ProviderContract)
 }
 
-struct AuditPolicy { build_artifact: Bool, dossier_lens: Bool }
+AuditPolicy: struct { build_artifact: Bool, dossier_lens: Bool }
 
-struct TargetMachine {
+TargetMachine: struct {
     name: String
     triple: String
     layout: LayoutCapabilityFacts
@@ -244,4 +244,4 @@ struct TargetMachine {
     audit: AuditPolicy
 }
 
-enum RuntimeLayer { Core Alloc Std }
+RuntimeLayer: enum { Core Alloc Std }

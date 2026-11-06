@@ -1,15 +1,15 @@
 
-use re :: core.regex
+use re: core.regex
 
-fn run() {
-    text :: "2024-06-21 build ok"
+run: fn() {
+    text: "2024-06-21 build ok"
 
     // is_match. NB: `{N}` regex quantifiers are written `{{N}}` in Jet source —
     // single braces are string interpolation (S8).
     print(re.is_match(pattern: {"\\d{{4}}"}, text: text))
 
     // match + capture groups: whole + each group
-    m :: re.match({"(\\d{{4}})-(\\d{{2}})-(\\d{{2}})"}, text)
+    m: re.match({"(\\d{{4}})-(\\d{{2}})-(\\d{{2}})"}, text)
     if m == Val(mat) {
         print(mat.group(0) ?? "x")
         print(mat.group(1) ?? "x")
@@ -20,15 +20,15 @@ fn run() {
     }
 
     // no match -> None optional
-    none_match :: re.match({"zzz"}, text)
+    none_match: re.match({"zzz"}, text)
     if none_match == None {
         print("no-match")
     }
 
     // find / find_all
-    first :: re.find({"\\d+"}, text)
+    first: re.find({"\\d+"}, text)
     print(first ?? "none")
-    nums :: re.find_all({"\\d+"}, text)
+    nums: re.find_all({"\\d+"}, text)
     print(nums.len())
 
     // replace (all matches) / explicit first-match sibling
@@ -36,6 +36,6 @@ fn run() {
     print(re.replace_first({"\\d"}, "1-2", "#"))
 
     // split
-    parts :: re.split({"-"}, "a-b-c")
+    parts: re.split({"-"}, "a-b-c")
     print(parts.len())
 }

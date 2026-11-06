@@ -1,38 +1,38 @@
-module backend {
+backend: module {
 }
 
 use {
-    auth :: core.auth
-    crypto :: core.crypto
-    db :: core.db
-    http_client :: core.http.client
-    http_server :: core.http.server
-    log :: core.log
-    service :: core.service
-    json :: core.encoding.json
-    web :: core.web
-    time :: core.time
+    auth: core.auth
+    crypto: core.crypto
+    db: core.db
+    http_client: core.http.client
+    http_server: core.http.server
+    log: core.log
+    service: core.service
+    json: core.encoding.json
+    web: core.web
+    time: core.time
 }
 
 #Codable
-struct RequestID {
+RequestID: struct {
     value: String
 }
 
 #Codable
-struct HealthResponse {
+HealthResponse: struct {
     status: String
     request_id: String
 }
 
 #Codable
-struct OrderRequest {
+OrderRequest: struct {
     item: String
     quantity: Int
 }
 
 #Codable
-struct OrderResponse {
+OrderResponse: struct {
     order_id: Int
     item: String
     quantity: Int
@@ -42,14 +42,14 @@ struct OrderResponse {
 }
 
 #Codable
-struct ErrorResponse {
+ErrorResponse: struct {
     status: Int
     code: String
     message: String
     request_id: String
 }
 #Codable
-struct SessionPolicy {
+SessionPolicy: struct {
     session_header: String
     role_header: String
     cookie_name: String
@@ -57,7 +57,7 @@ struct SessionPolicy {
 
 
 #Codable
-struct MigrationReceipt {
+MigrationReceipt: struct {
     name: String
     checksum: String
     applied: Int
@@ -67,7 +67,7 @@ struct MigrationReceipt {
 }
 
 #Codable
-struct PoolReceipt {
+PoolReceipt: struct {
     ready: Bool
     acquired: Bool
     before: String
@@ -77,7 +77,7 @@ struct PoolReceipt {
 
 
 #Codable
-struct QueueReceipt {
+QueueReceipt: struct {
     key: String
     payload: String
     status: String
@@ -86,7 +86,7 @@ struct QueueReceipt {
 }
 
 #Codable
-struct TraceReceipt {
+TraceReceipt: struct {
     trace_id: String
     sink: String
     redacted: Bool
@@ -95,13 +95,13 @@ struct TraceReceipt {
 }
 
 #Codable
-struct LoadSample {
+LoadSample: struct {
     latency_ms: Int
     status: Int
 }
 
 #Codable
-struct LoadSummary {
+LoadSummary: struct {
     users: Int
     completed: Int
     ok: Int
@@ -113,7 +113,7 @@ struct LoadSummary {
     samples: [Int]
 }
 #Codable
-struct LoadAssertionReceipt {
+LoadAssertionReceipt: struct {
     users: Int
     completed: Int
     ok: Int
@@ -128,25 +128,25 @@ struct LoadAssertionReceipt {
 
 
 #Codable
-struct CoreGate {
+CoreGate: struct {
     name: String
     ticket: String
     available: Bool
     reason: String
 }
-fn session_policy() -> SessionPolicy {
+session_policy: fn() -> SessionPolicy {
     return SessionPolicy{
         session_header: "x-session",
         role_header: "x-role",
         cookie_name: "session",
     }
 }
-fn session_value(req: HTTPRequest, policy: SessionPolicy) -> String {
-    header_value :: req.header(policy.session_header) ?? ""
+session_value: fn(req: HTTPRequest, policy: SessionPolicy) -> String {
+    header_value: req.header(policy.session_header) ?? ""
     if header_value != "" -> return header_value
-    cookie_header :: req.header("cookie") ?? ""
+    cookie_header: req.header("cookie") ?? ""
     loop part in cookie_header.split(";").to_list() {
-        pair_opt :: part.trim().split_once("=")
+        pair_opt: part.trim().split_once("=")
         if pair_opt == .Val(pair) {
             if pair.before.trim() == policy.cookie_name -> return pair.after.trim()
         }
@@ -155,14 +155,14 @@ fn session_value(req: HTTPRequest, policy: SessionPolicy) -> String {
 }
 
 
-fn request_id(raw: String) -> RequestID {
+request_id: fn(raw: String) -> RequestID {
     if raw == "" -> return RequestID{value: "unassigned"}
     return RequestID{value: raw}
 }
 
 
-fn error_response(req: HTTPRequest, status: Int, code: String, message: String) -> HTTPResponse HTTPError! {
-    id :: request_id(req.header("x-request-id") ?? "")
+error_response: fn(req: HTTPRequest, status: Int, code: String, message: String) -> HTTPResponse HTTPError! {
+    id: request_id(req.header("x-request-id") ?? "")
     return Ok(http_server.json(status, ErrorResponse{
         status: status,
         code: code,
@@ -171,57 +171,57 @@ fn error_response(req: HTTPRequest, status: Int, code: String, message: String) 
     }))
 }
 
-fn health_response(req: HTTPRequest) -> HTTPResponse HTTPError! {
-    id :: request_id(req.header("x-request-id") ?? "")
+health_response: fn(req: HTTPRequest) -> HTTPResponse HTTPError! {
+    id: request_id(req.header("x-request-id") ?? "")
     return Ok(http_server.json(200, HealthResponse{
         status: "ok",
         request_id: id.value,
     }))
 }
 
-fn order_response(status: Int, body: OrderResponse) -> HTTPResponse HTTPError! {
+order_response: fn(status: Int, body: OrderResponse) -> HTTPResponse HTTPError! {
     return Ok(http_server.json(status, body))
 }
 
-fn decode_order(req: HTTPRequest) -> OrderRequest HTTPError! {
+decode_order: fn(req: HTTPRequest) -> OrderRequest HTTPError! {
     return req.json<OrderRequest>()
 }
 
-fn role_allowed(req: HTTPRequest, session_id: String, expected_role: String, now: Int) -[DB, Time]> Bool {
-    policy :: session_policy()
-    provided :: session_value(req, policy)
+role_allowed: fn(req: HTTPRequest, session_id: String, expected_role: String, now: Int) -[DB, Time]> Bool {
+    policy: session_policy()
+    provided: session_value(req, policy)
     if provided == "" || provided != session_id -> return false
-    role :: req.header(policy.role_header) ?? ""
+    role: req.header(policy.role_header) ?? ""
     if role != expected_role -> return false
-    _checked :: auth.session_validate(provided, now) ?? return false
+    _checked: auth.session_validate(provided, now) ?? return false
     return true
 }
 
-fn issue_session(user: String, password: String, now: Int, ttl_ms: Int) -[DB, Rand, Time]> String {
-    session :: auth.password_login(user, password, now, ttl_ms) ?? return ""
+issue_session: fn(user: String, password: String, now: Int, ttl_ms: Int) -[DB, Rand, Time]> String {
+    session: auth.password_login(user, password, now, ttl_ms) ?? return ""
     return auth.session_id(session)
 }
 
-fn migration_checksum(name: String, sql_text: String) -> String {
+migration_checksum: fn(name: String, sql_text: String) -> String {
     return crypto.sha256("{name}\n{sql_text}".bytes()).hex()
 }
 
-fn sqlite_fixture() -> MigrationReceipt {
-    migration_name :: "orders-v1"
-    create_sql :: "CREATE TABLE IF NOT EXISTS orders (id INTEGER PRIMARY KEY, item TEXT NOT NULL)"
-    checksum :: migration_checksum(migration_name, create_sql)
-    conn :: db.open_memory()
-    policy :: db.policy("orders", "true") ?? panic("db.policy")
-    scoped :: conn.with_policy(policy, "backend-battery")
-    applied :: db.migrate(scoped, migration_name, [SQL{"CREATE TABLE IF NOT EXISTS orders (id INTEGER PRIMARY KEY, item TEXT NOT NULL)"}]) ?? panic("db.migrate")
-    item :: "durable-order"
-    seeded :: db.transaction(scoped, "seed-order", [SQL{"INSERT INTO orders (item) VALUES ({item})"}]) ?? panic("db.transaction")
+sqlite_fixture: fn() -> MigrationReceipt {
+    migration_name: "orders-v1"
+    create_sql: "CREATE TABLE IF NOT EXISTS orders (id INTEGER PRIMARY KEY, item TEXT NOT NULL)"
+    checksum: migration_checksum(migration_name, create_sql)
+    conn: db.open_memory()
+    policy: db.policy("orders", "true") ?? panic("db.policy")
+    scoped: conn.with_policy(policy, "backend-battery")
+    applied: db.migrate(scoped, migration_name, [SQL{"CREATE TABLE IF NOT EXISTS orders (id INTEGER PRIMARY KEY, item TEXT NOT NULL)"}]) ?? panic("db.migrate")
+    item: "durable-order"
+    seeded: db.transaction(scoped, "seed-order", [SQL{"INSERT INTO orders (item) VALUES ({item})"}]) ?? panic("db.transaction")
     if !scoped.begin() -> panic("db.begin")
-    transient :: "rolled-back"
-    _transient :: scoped.execute(SQL{"INSERT INTO orders (item) VALUES ({transient})"}) ?? panic("db.execute")
+    transient: "rolled-back"
+    _transient: scoped.execute(SQL{"INSERT INTO orders (item) VALUES ({transient})"}) ?? panic("db.execute")
     if !scoped.rollback() -> panic("db.rollback")
-    row :: scoped.query_one(SQL{"SELECT item FROM orders ORDER BY id LIMIT 1"}) ?? panic("db.query_one")
-    first_item :: db.row_text(row, "item") ?? "missing"
+    row: scoped.query_one(SQL{"SELECT item FROM orders ORDER BY id LIMIT 1"}) ?? panic("db.query_one")
+    first_item: db.row_text(row, "item") ?? "missing"
     if !scoped.close() -> panic("db.close")
     return MigrationReceipt{
         name: migration_name,
@@ -233,15 +233,15 @@ fn sqlite_fixture() -> MigrationReceipt {
     }
 }
 
-fn pool_fixture(path: String) -> PoolReceipt {
-    pool :: db.pool(path, max: 2) ?? panic("db.pool")
-    ready :: pool.ready() ?? panic("db.pool.ready")
+pool_fixture: fn(path: String) -> PoolReceipt {
+    pool: db.pool(path, max: 2) ?? panic("db.pool")
+    ready: pool.ready() ?? panic("db.pool.ready")
     if !ready -> panic("db.pool.not-ready")
-    lease :: pool.acquire(deadline: 1s) ?? panic("db.pool.acquire")
-    before :: "{pool.receipt()}"
+    lease: pool.acquire(deadline: 1s) ?? panic("db.pool.acquire")
+    before: "{pool.receipt()}"
     lease.close() ?? panic("db.pool.release")
-    drained_receipt :: pool.drain() ?? panic("db.pool.drain")
-    after :: "{drained_receipt}"
+    drained_receipt: pool.drain() ?? panic("db.pool.drain")
+    after: "{drained_receipt}"
     return PoolReceipt{
         ready: ready,
         acquired: true,
@@ -252,8 +252,8 @@ fn pool_fixture(path: String) -> PoolReceipt {
 }
 
 
-fn queue_state(delivery: ^Delivery) -[FS.Read, FS.Write]> String {
-    state :: delivery.status() ?? return "unknown"
+queue_state: fn(delivery: ^Delivery) -[FS.Read, FS.Write]> String {
+    state: delivery.status() ?? return "unknown"
     if state == {
         .Pending -> return "pending"
         .Accepted -> return "accepted"
@@ -265,21 +265,21 @@ fn queue_state(delivery: ^Delivery) -[FS.Read, FS.Write]> String {
     }
 }
 
-fn backend_worker() {
+backend_worker: fn() {
     log.info_fields("backend.worker", [log.counter("invocations", 1)])
 }
 
-fn durable_queue(state_path: String, payload: String, key: String) -> QueueReceipt {
+durable_queue: fn(state_path: String, payload: String, key: String) -> QueueReceipt {
     tree := service.tree("backend-battery")
     &tree.set_delivery(service.delivery_durable()) ?? panic("service.delivery_durable")
-    store :: service.state_store(state_path) ?? panic("service.state_store")
+    store: service.state_store(state_path) ?? panic("service.state_store")
     &tree.set_state_event_log(store, "backend-events", 1, "reversible") ?? panic("service.event_log")
-    endpoint :: &tree.worker("orders", backend_worker, capacity: 8) ?? panic("service.worker")
+    endpoint: &tree.worker("orders", backend_worker, capacity: 8) ?? panic("service.worker")
     &tree.start() ?? panic("service.start")
-    delivery :: &tree.send_durable(endpoint, payload.copy(), key: key.copy()) ?? panic("service.send_durable")
-    retry :: ^delivery.retry() ?? panic("service.retry")
-    status :: queue_state(^retry)
-    delivered :: &tree.receive(endpoint) ?? panic("service.receive")
+    delivery: &tree.send_durable(endpoint, payload.copy(), key: key.copy()) ?? panic("service.send_durable")
+    retry: ^delivery.retry() ?? panic("service.retry")
+    status: queue_state(^retry)
+    delivered: &tree.receive(endpoint) ?? panic("service.receive")
     &tree.append_event("order-received") ?? panic("service.append_event")
     &tree.stop() ?? panic("service.stop")
     return QueueReceipt{
@@ -291,12 +291,12 @@ fn durable_queue(state_path: String, payload: String, key: String) -> QueueRecei
     }
 }
 
-fn configure_trace(path: String, format: String, trace_id: String) -> TraceReceipt {
+configure_trace: fn(path: String, format: String, trace_id: String) -> TraceReceipt {
     log.setup("json")
     if format == "otlp" -> log.otlp_file(path)
     if format != "otlp" -> log.set_sink(format, path)
     log.set_trace_id(trace_id)
-    span :: log.span("backend.request")
+    span: log.span("backend.request")
     log.enter(span)
     log.info_fields("backend.started", [
         log.field("trace_id", trace_id),
@@ -315,9 +315,9 @@ fn configure_trace(path: String, format: String, trace_id: String) -> TraceRecei
     }
 }
 
-fn emit_trace(trace_id: String, route_name: String, status: Int, requests: Int, errors: Int, sink: String) -> TraceReceipt {
+emit_trace: fn(trace_id: String, route_name: String, status: Int, requests: Int, errors: Int, sink: String) -> TraceReceipt {
     log.set_trace_id(trace_id)
-    span :: log.span("backend.request")
+    span: log.span("backend.request")
     log.enter(span)
     log.info_fields("backend.request", [
         log.field("trace_id", trace_id),
@@ -338,7 +338,7 @@ fn emit_trace(trace_id: String, route_name: String, status: Int, requests: Int, 
     }
 }
 
-fn core_gates() -> [CoreGate] {
+core_gates: fn() -> [CoreGate] {
     return [
         CoreGate{
             name: "native HTTP handler build",
@@ -356,20 +356,20 @@ fn core_gates() -> [CoreGate] {
 }
 
 
-fn openapi_document(router: HTTPRouter) -> String {
+openapi_document: fn(router: HTTPRouter) -> String {
     return web.openapi(router)
 }
 
-fn load_one(address: String) -> LoadSample {
-    started :: time.instant()
-    request :: http_client.request("GET", "http://{address}/health")
+load_one: fn(address: String) -> LoadSample {
+    started: time.instant()
+    request: http_client.request("GET", "http://{address}/health")
         .connect_timeout(1000)
         .read_timeout(1000)
-    response :: request.send() ?? return LoadSample{latency_ms: started.elapsed_millis(), status: 599}
+    response: request.send() ?? return LoadSample{latency_ms: started.elapsed_millis(), status: 599}
     return LoadSample{latency_ms: started.elapsed_millis(), status: response.status()}
 }
 
-fn load_worker(address: String, count: Int, sender: Sender<LoadSample>) {
+load_worker: fn(address: String, count: Int, sender: Sender<LoadSample>) {
     index := 0
     loop index < count {
         sender.send(load_one(address))
@@ -377,32 +377,32 @@ fn load_worker(address: String, count: Int, sender: Sender<LoadSample>) {
     }
 }
 
-fn percentile(samples: [Int], percent: Int) -> Int {
+percentile: fn(samples: [Int], percent: Int) -> Int {
     if samples.len() == 0 -> return 0
     ordered := samples.copy()
     &ordered.sort()
-    index :: (ordered.len() - 1) * percent /% 100
+    index: (ordered.len() - 1) * percent /% 100
     return ordered[index]
 }
 
-fn load_test(address: String) -> LoadSummary {
+load_test: fn(address: String) -> LoadSummary {
     users := 1000
     worker_limit := 32
-    (sender, receiver) :: channel<LoadSample>(capacity: users)
+    (sender, receiver): channel<LoadSample>(capacity: users)
     workers := [Task<()>]{ }
     worker := 0
     loop worker < worker_limit {
         count := users /% worker_limit
         if worker < users % worker_limit -> count += 1
-        tx :: sender.copy()
-        addr :: address.copy()
+        tx: sender.copy()
+        addr: address.copy()
         &workers.push(task {
             load_worker(addr, count, tx)
         })
         worker += 1
     }
     loop workers.len() > 0 {
-        handle :: &workers.pop() ?? panic("load worker")
+        handle: &workers.pop() ?? panic("load worker")
         handle.join() ?? panic("load worker join")
     }
     sender.close()
@@ -430,7 +430,7 @@ fn load_test(address: String) -> LoadSummary {
         samples: samples,
     }
 }
-fn load_receipt(summary: LoadSummary) -> String {
+load_receipt: fn(summary: LoadSummary) -> String {
     return json.to_string(LoadAssertionReceipt{
         users: summary.users,
         completed: summary.completed,

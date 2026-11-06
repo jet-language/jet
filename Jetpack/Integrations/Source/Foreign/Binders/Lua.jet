@@ -3,10 +3,10 @@
 // cross as JSON Dyns or as zero-copy table views.
 use {
     jetpack_foundation.[JET_KEYWORD_LIST, JET_TYPE_LIST]
-    json :: core.encoding.json
-    files :: core.files
-    time :: core.time
-    math :: core.math
+    json: core.encoding.json
+    files: core.files
+    time: core.time
+    math: core.math
     jet_pkg_model.[
         BinderHostOS, ForeignBindError, ForeignLanguage, pkg_binder_append_artifact_boundary,
         pkg_binder_c_escape, pkg_binder_cc_ar_identity, pkg_binder_create_dir_all,
@@ -18,7 +18,7 @@ use {
 }
 
 // A Lua binding also names the directory holding the embeddable runtime.
-struct LuaBindResult {
+LuaBindResult: struct {
     source: String
     bound: [String]
     archive: String
@@ -28,7 +28,7 @@ struct LuaBindResult {
 
 // The fixed C entry points every Lua binding imports; they drive both the
 // generated import block and the reserved-name check.
-PKG_LUA_FIXED_FUNCTIONS :: comptime { [(name: String, signature: String)]{
+PKG_LUA_FIXED_FUNCTIONS: comptime { [(name: String, signature: String)]{
     (name: "open", signature: "() Int"),
     (name: "take_error", signature: "() Int"),
     (name: "cancel", signature: "(handle: Int)"),
@@ -38,22 +38,22 @@ PKG_LUA_FIXED_FUNCTIONS :: comptime { [(name: String, signature: String)]{
     (name: "view_release", signature: "(handle: Int, table: Int)")
 } }
 
-PKG_LUA_RESERVED :: [String]{"Session", "TableView", "LuaError", "decode_response", "decode_status"}
+PKG_LUA_RESERVED: [String]{"Session", "TableView", "LuaError", "decode_response", "decode_status"}
 
 // One lexical token of the discovery scan: a name or one of `(`, `)`, `,`.
-enum LuaToken {
+LuaToken: enum {
     Word(String)
     Punct(Int)
 }
 
 // The verb phrase a failing Lua build tool reports; its detail is the
 // laundered stderr line (stdout is discarded).
-PKG_LUA_TOOL_ACTION :: "rejected the Lua binding input"
+PKG_LUA_TOOL_ACTION: "rejected the Lua binding input"
 
 // Bind the named top-level `function name(input)` declarations of `source`.
-fn pkg_lua_bind(path: String, source: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> LuaBindResult ForeignBindError! {
+pkg_lua_bind: fn(path: String, source: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> LuaBindResult ForeignBindError! {
     pkg_binder_require_lib_name(lib)
-    luac :: pkg_bridge_tool_path("luac") ?? return Err(ForeignBindError.ToolMissing("luac"))
+    luac: pkg_bridge_tool_path("luac") ?? return Err(ForeignBindError.ToolMissing("luac"))
     if pkg_binder_run_reporting_detail([String]{luac, "-p", path}, "luac", PKG_LUA_TOOL_ACTION) == {
         .Ok(_) -> {}
         .Err(error) -> {
@@ -63,54 +63,54 @@ fn pkg_lua_bind(path: String, source: String, lib: String, cache: String) -[FS, 
             }
         }
     }
-    functions :: pkg_lua_discover(source)
+    functions: pkg_lua_discover(source)
     if functions.len() == 0 -> return Err(ForeignBindError.Source("the script has no top-level `function name(input)` declarations"))
-    root :: pkg_binder_tool_root(luac) ?? return Err(ForeignBindError.Source("the provisioned Lua root could not be resolved"))
-    include :: pkg_lua_find_header_dir(root) ?? return Err(ForeignBindError.Source("the provisioned Lua runtime has no `lua.h` header"))
-    lib_dir :: pkg_lua_find_library_dir(root) ?? return Err(ForeignBindError.Source("the provisioned Lua runtime has no embeddable library"))
+    root: pkg_binder_tool_root(luac) ?? return Err(ForeignBindError.Source("the provisioned Lua root could not be resolved"))
+    include: pkg_lua_find_header_dir(root) ?? return Err(ForeignBindError.Source("the provisioned Lua runtime has no `lua.h` header"))
+    lib_dir: pkg_lua_find_library_dir(root) ?? return Err(ForeignBindError.Source("the provisioned Lua runtime has no embeddable library"))
     pkg_binder_create_dir_all(cache, "could not create Lua binding cache")
-    abi :: "jet_lua_{lib}"
-    c :: files.join(cache, "{abi}.c")
-    object :: files.join(cache, "{abi}.o")
-    archive :: files.join(cache, "lib{abi}.a")
+    abi: "jet_lua_{lib}"
+    c: files.join(cache, "{abi}.c")
+    object: files.join(cache, "{abi}.o")
+    archive: files.join(cache, "lib{abi}.a")
     pkg_binder_write(c, pkg_lua_render_c(abi, source, functions), "could not write Lua bridge")
     pkg_binder_run_reporting_detail([String]{"cc", "-std=c11", "-D_POSIX_C_SOURCE=200809L", "-fPIC", "-c", "-I", include, c, "-o", object}, "cc", PKG_LUA_TOOL_ACTION)
     pkg_binder_remove_file_quiet(archive)
     pkg_binder_run_reporting_detail([String]{"ar", "rcs", archive, object}, "ar", PKG_LUA_TOOL_ACTION)
     pkg_binder_remove_file_quiet(c)
     pkg_binder_remove_file_quiet(object)
-    digest :: pkg_binder_identity_digest([String]{"jet-lua-bind-v2", source, root})
+    digest: pkg_binder_identity_digest([String]{"jet-lua-bind-v2", source, root})
     provenance := "schema=jet-lua-bind-v2\nsha256={digest}\nruntime={root}\nstate=per-session\ntransport=dyn+table-view\ntable-view=zero-copy\nhook=instructions\n"
     pkg_binder_append_artifact_boundary(&provenance, ForeignLanguage.Lua, "Lua", lib, path, archive, "luac={luac};{pkg_binder_cc_ar_identity()}")
     Ok(LuaBindResult{source: pkg_lua_render_jet(abi, functions), bound: functions, archive: archive, lib_dir: lib_dir, provenance: provenance})
 }
 
-fn pkg_lua_find_header_dir(root: String) -[FS]> String? Never! {
-    candidates :: [String]{files.join(root, "include"), files.join(root, "include/lua5.4")}
+pkg_lua_find_header_dir: fn(root: String) -[FS]> String? Never! {
+    candidates: [String]{files.join(root, "include"), files.join(root, "include/lua5.4")}
     loop candidate in candidates {
         if files.is_file(files.join(candidate, "lua.h")) -> return Val(candidate)
     }
     None
 }
 
-fn pkg_lua_find_library_dir(root: String) -[FS, Env]> String? Never! {
-    library :: BinderHostOS.current().shared_library("lua", "lua54.dll")
-    candidates :: [String]{files.join(root, "lib"), files.join(root, "lib64")}
+pkg_lua_find_library_dir: fn(root: String) -[FS, Env]> String? Never! {
+    library: BinderHostOS.current().shared_library("lua", "lua54.dll")
+    candidates: [String]{files.join(root, "lib"), files.join(root, "lib64")}
     loop candidate in candidates {
         if files.is_file(files.join(candidate, library)) -> return Val(candidate)
     }
     None
 }
 
-fn pkg_lua_render_jet(abi: String, functions: [String]) -> String Never! {
-    out := [String]{"#Import module c.{abi} {{\n"}
-    fixed :: PKG_LUA_FIXED_FUNCTIONS
-    loop entry in fixed -> &out.push("    fn {entry.name}{entry.signature} = \"{abi}_{entry.name}\"\n")
+pkg_lua_render_jet: fn(abi: String, functions: [String]) -> String Never! {
+    out := [String]{"#Import c.{abi}: module {{\n"}
+    fixed: PKG_LUA_FIXED_FUNCTIONS
+    loop entry in fixed -> &out.push("    {entry.name}: fn{entry.signature} = \"{abi}_{entry.name}\"\n")
     loop name in functions {
-        &out.push("    fn {name}(handle: Int, input: String, deadline_ms: Int) -> String = \"{abi}_invoke_{name}\"\n")
-        &out.push("    fn {name}_view(handle: Int, deadline_ms: Int) Int = \"{abi}_view_{name}\"\n")
+        &out.push("    {name}: fn(handle: Int, input: String, deadline_ms: Int) -> String = \"{abi}_invoke_{name}\"\n")
+        &out.push("    {name}_view: fn(handle: Int, deadline_ms: Int) Int = \"{abi}_view_{name}\"\n")
     }
-    &out.push("}}\nuse abi :: c.{abi}\nuse json :: core.encoding.json\n\nstruct Session {{ value: Int }}\nstruct TableView {{ session: Int, table: Int }}\n#Error\nenum LuaError {{ NotRunning Timeout Cancelled Protocol CommandFailed Limit }}\n\n")
+    &out.push("}}\nuse abi: c.{abi}\nuse json: core.encoding.json\n\nSession: struct {{ value: Int }}\nTableView: struct {{ session: Int, table: Int }}\n#Error\nLuaError: enum {{ NotRunning Timeout Cancelled Protocol CommandFailed Limit }}\n\n")
     &out.push(pkg_render_lua_decode_status("LuaError"))
     &out.push(pkg_render_decode_response("LuaError", DecoderProtocol.LuaRawJSON))
     &out.push(PKG_LUA_JET_SESSION)
@@ -119,11 +119,11 @@ fn pkg_lua_render_jet(abi: String, functions: [String]) -> String Never! {
 }
 
 // The generated surface for the binder registry's rendering probe.
-fn pkg_lua_render_probe() -> String Never! {
+pkg_lua_render_probe: fn() -> String Never! {
     pkg_lua_render_jet("registry", [String]{"probe"})
 }
 
-fn pkg_lua_render_c(abi: String, source: String, functions: [String]) -> String Never! {
+pkg_lua_render_c: fn(abi: String, source: String, functions: [String]) -> String Never! {
     wrappers := [String]{}
     loop name in functions {
         &wrappers.push("const char* {abi}_invoke_{name}(int64_t h,const char*input,int64_t deadline){{return invoke(h,\"{name}\",input,deadline);}}\nint64_t {abi}_view_{name}(int64_t h,int64_t deadline){{return view(h,\"{name}\",deadline);}}\n")
@@ -138,20 +138,20 @@ fn pkg_lua_render_c(abi: String, source: String, functions: [String]) -> String 
 
 // Top-level `function name(input)` declarations; `local function` and nested
 // blocks are skipped by tracking block depth.
-fn pkg_lua_discover(source: String) -> [String] ForeignBindError! {
-    tokens :: pkg_lua_lex(source)
+pkg_lua_discover: fn(source: String) -> [String] ForeignBindError! {
+    tokens: pkg_lua_lex(source)
     functions := [String]{}
     depth := 0
     index := 0
     loop index < tokens.len() {
-        word :: pkg_lua_word_at(tokens, index) ?? ""
+        word: pkg_lua_word_at(tokens, index) ?? ""
         if word == "function" && depth == 0 {
             if (pkg_lua_word_at(tokens, index - 1) ?? "") == "local" {
                 depth = 1
                 index += 1
                 next
             }
-            name :: pkg_lua_word_at(tokens, index + 1) ?? return Err(ForeignBindError.Source("only named top-level Lua functions can be bound"))
+            name: pkg_lua_word_at(tokens, index + 1) ?? return Err(ForeignBindError.Source("only named top-level Lua functions can be bound"))
             if !pkg_binder_is_ident(name) || pkg_lua_reserved(name) -> return Err(ForeignBindError.Source("`{name}` cannot be exported as a Jet function"))
             if pkg_lua_punct_at(tokens, index + 2) != 40 -> return Err(ForeignBindError.Source("Lua function `{name}` has an unsupported declaration"))
             if pkg_lua_word_at(tokens, index + 3) == None -> return Err(ForeignBindError.Source("Lua function `{name}` must take one input argument"))
@@ -171,7 +171,7 @@ fn pkg_lua_discover(source: String) -> [String] ForeignBindError! {
         }
         index += 1
     }
-    suffixes :: [String]{"typed", "view"}
+    suffixes: [String]{"typed", "view"}
     loop name in functions {
         loop suffix in suffixes {
             if functions.contains("{name}_{suffix}") -> return Err(ForeignBindError.Source("Lua function `{name}` collides with generated adapter `{name}_{suffix}`"))
@@ -180,7 +180,7 @@ fn pkg_lua_discover(source: String) -> [String] ForeignBindError! {
     Ok(functions)
 }
 
-fn pkg_lua_word_at(tokens: [LuaToken], at: Int) -> String? Never! {
+pkg_lua_word_at: fn(tokens: [LuaToken], at: Int) -> String? Never! {
     if at < 0 || at >= tokens.len() -> return None
     if tokens[at] == {
         .Word(word) -> Val(word)
@@ -189,7 +189,7 @@ fn pkg_lua_word_at(tokens: [LuaToken], at: Int) -> String? Never! {
 }
 
 // The punctuation byte at `at`, or -1 for a word or past the end.
-fn pkg_lua_punct_at(tokens: [LuaToken], at: Int) -> Int Never! {
+pkg_lua_punct_at: fn(tokens: [LuaToken], at: Int) -> Int Never! {
     if at < 0 || at >= tokens.len() -> return -1
     if tokens[at] == {
         .Punct(code) -> code
@@ -198,12 +198,12 @@ fn pkg_lua_punct_at(tokens: [LuaToken], at: Int) -> Int Never! {
 }
 
 // Names and `(`, `)`, `,`; comments and string bodies are skipped.
-fn pkg_lua_lex(source: String) -> [LuaToken] ForeignBindError! {
-    bytes :: source.bytes()
+pkg_lua_lex: fn(source: String) -> [LuaToken] ForeignBindError! {
+    bytes: source.bytes()
     out := [LuaToken]{}
     index := 0
     loop index < bytes.len() {
-        code :: Int.from_u8(bytes[index])
+        code: Int.from_u8(bytes[index])
         if code == 32 || code == 9 || code == 10 || code == 12 || code == 13 {
             index += 1
             next
@@ -223,7 +223,7 @@ fn pkg_lua_lex(source: String) -> [LuaToken] ForeignBindError! {
         if code == 39 || code == 34 {
             index += 1
             loop index < bytes.len() {
-                current :: Int.from_u8(bytes[index])
+                current: Int.from_u8(bytes[index])
                 if current == 92 {
                     index += 2
                     next
@@ -243,7 +243,7 @@ fn pkg_lua_lex(source: String) -> [LuaToken] ForeignBindError! {
             next
         }
         if pkg_binder_is_ascii_alpha(code) || code == 95 {
-            start :: index
+            start: index
             index += 1
             loop index < bytes.len() && pkg_bytes_is_word(Int.from_u8(bytes[index])) -> index += 1
             &out.push(LuaToken.Word(pkg_bytes_text(bytes, start, index)))
@@ -255,37 +255,37 @@ fn pkg_lua_lex(source: String) -> [LuaToken] ForeignBindError! {
     Ok(out)
 }
 
-fn pkg_lua_reserved(value: String) -> Bool Never! {
-    fixed :: PKG_LUA_FIXED_FUNCTIONS
+pkg_lua_reserved: fn(value: String) -> Bool Never! {
+    fixed: PKG_LUA_FIXED_FUNCTIONS
     loop entry in fixed {
         if entry.name == value -> return true
     }
     PKG_LUA_RESERVED.contains(value) || JET_KEYWORD_LIST.contains(value) || JET_TYPE_LIST.contains(value)
 }
 
-PKG_LUA_JET_SESSION :: comptime { ```impl Session.Close {
-    fn close(^self) { abi.close(self.value) }
+PKG_LUA_JET_SESSION: comptime { ```impl Session.Close {
+    close: fn(^self) { abi.close(self.value) }
 }
 
 impl TableView.Close {
-    fn close(^self) { abi.view_release(self.session, self.table) }
+    close: fn(^self) { abi.view_release(self.session, self.table) }
 }
 
-fn open() -> Session LuaError! {
-    handle :: abi.open()
+open: fn() -> Session LuaError! {
+    handle: abi.open()
     decode_status(abi.take_error())
     return Ok(Session{ value: handle })
 }
 
-fn cancel(session: Session) { abi.cancel(session.value) }
+cancel: fn(session: Session) { abi.cancel(session.value) }
 
-fn view_get_int(view: TableView, key: String) -> Int LuaError! {
-    value :: abi.view_get_int(view.session, view.table, key)
+view_get_int: fn(view: TableView, key: String) -> Int LuaError! {
+    value: abi.view_get_int(view.session, view.table, key)
     decode_status(abi.take_error())
     return Ok(value)
 }
 
-fn view_set_int(view: TableView, key: String, value: Int) -> Bool LuaError! {
+view_set_int: fn(view: TableView, key: String, value: Int) -> Bool LuaError! {
     abi.view_set_int(view.session, view.table, key, value)
     decode_status(abi.take_error())
     return Ok(true)
@@ -294,24 +294,24 @@ fn view_set_int(view: TableView, key: String, value: Int) -> Bool LuaError! {
 ``` }
 
 // The three generated entry points per function. Hole: `name`.
-PKG_LUA_JET_FUNCTION :: comptime { ```fn @@name@@(session: Session, input: Dyn, deadline_ms: Int) -> Dyn LuaError! {
-    payload :: json.to_string(input) ?? return Err(LuaError.Protocol)
-    raw :: abi.@@name@@(session.value, payload, deadline_ms)
-    code :: abi.take_error()
+PKG_LUA_JET_FUNCTION: comptime { ```@@name@@: fn(session: Session, input: Dyn, deadline_ms: Int) -> Dyn LuaError! {
+    payload: json.to_string(input) ?? return Err(LuaError.Protocol)
+    raw: abi.@@name@@(session.value, payload, deadline_ms)
+    code: abi.take_error()
     return decode_response(raw, code)
 }
 
-fn @@name@@_typed<T: [Encode, Decode]>(session: Session, input: T, deadline_ms: Int) -> T LuaError! {
-    input_json :: json.to_string(input) ?? return Err(LuaError.Protocol)
+@@name@@_typed: fn<T: [Encode, Decode]>(session: Session, input: T, deadline_ms: Int) -> T LuaError! {
+    input_json: json.to_string(input) ?? return Err(LuaError.Protocol)
     tree := json.parse(input_json) ?? return Err(LuaError.Protocol)
     value := @@name@@(session, tree, deadline_ms)
-    output_json :: json.to_string(value) ?? return Err(LuaError.Protocol)
+    output_json: json.to_string(value) ?? return Err(LuaError.Protocol)
     decoded := json.decode<T>(output_json) ?? return Err(LuaError.Protocol)
     return Ok(decoded)
 }
 
-fn @@name@@_view(session: Session, deadline_ms: Int) -> TableView LuaError! {
-    table :: abi.@@name@@_view(session.value, deadline_ms)
+@@name@@_view: fn(session: Session, deadline_ms: Int) -> TableView LuaError! {
+    table: abi.@@name@@_view(session.value, deadline_ms)
     decode_status(abi.take_error())
     return Ok(TableView{ session: session.value, table: table })
 }
@@ -320,7 +320,7 @@ fn @@name@@_view(session: Session, deadline_ms: Int) -> TableView LuaError! {
 
 // The embedded-VM bridge. Holes: `abi`, the c-escaped `codec` and `program`,
 // and the per-function `wrappers`.
-PKG_LUA_BRIDGE_C :: comptime { ```#include <lua.h>
+PKG_LUA_BRIDGE_C: comptime { ```#include <lua.h>
 #include <lauxlib.h>
 #include <lualib.h>
 #include <stdint.h>
@@ -355,7 +355,7 @@ void @@abi@@_close(int64_t h){failed=0;int index=(int)(h&63)-1;uint32_t generati
 @@wrappers@@``` }
 
 // The JSON codec loaded into every Lua state before the user module.
-PKG_LUA_JSON_CODEC :: comptime { ```
+PKG_LUA_JSON_CODEC: comptime { ```
 jet = jet or {}; jet.null = jet.null or setmetatable({}, {__tostring=function() return "null" end})
 local kinds=setmetatable({}, {__mode="k"})
 local function decode(text)

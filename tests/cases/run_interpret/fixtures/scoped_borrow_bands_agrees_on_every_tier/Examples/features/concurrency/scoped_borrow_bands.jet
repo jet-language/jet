@@ -3,25 +3,25 @@
 // prove the places never overlap — here, two constant indexes into one list.
 // The loan opens before the child launches and closes when the group joins, so
 // the owner sees every write once the block ends.
-package {
+package: {
     name: "scoped_borrow_bands"
     authority: { allow: [IO, Mem.Alloc, Time.Wait] }
 }
 
-struct Particle {
+Particle: struct {
     position: Int
     velocity: Int
 }
 
-fn run() {
+run: fn() {
     particles := [Particle]{
         {position: 10, velocity: 2},
         {position: 20, velocity: 3},
         {position: 30, velocity: 4},
     }
     task.group g {
-        left :: &particles[0]
-        right :: &particles[2]
+        left: &particles[0]
+        right: &particles[2]
         print(
         task.all {{
             left.position += left.velocity
@@ -39,8 +39,8 @@ fn run() {
     // One borrow on its own is the same law with one child. The write still
     // lands on the owner, because the group joins before the block ends.
     task.group solo {
-        only :: &particles[1]
-        done :: task {
+        only: &particles[1]
+        done: task {
             only.position += only.velocity
             only.position
         }

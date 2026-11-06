@@ -1,16 +1,16 @@
 // A switch over `net.unix_connect(path)` binds its `NetError` as Core's
 // declared `core.net` error, whichever spelling the signature names.
-package {
+package: {
     name: "unix_connect_switch"
     authority: { allow: [IO, Mem.Alloc, Net, Time.Wait] }
 }
 
 use {
-    net :: core.net
+    net: core.net
     core.net.[UnixStream, NetError]
 }
 
-fn connect(socket: String) -> UnixStream? NetError! {
+connect: fn(socket: String) -> UnixStream? NetError! {
     if net.unix_connect(socket) == {
         .Ok(stream) -> Ok(Val(stream))
         .Err(error) -> {
@@ -20,7 +20,7 @@ fn connect(socket: String) -> UnixStream? NetError! {
     }
 }
 
-fn run() {
+run: fn() {
     if connect("/nonexistent/jet-unix-connect-switch.sock") == {
         .Ok(found) -> print(if found == None -> "nobody listening" else -> "connected")
         .Err(_) -> print("no socket")

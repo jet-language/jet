@@ -8,7 +8,7 @@
 
 use {
     jetpack_foundation.[JET_KEYWORD_LIST, JET_TYPE_LIST]
-    files :: core.files
+    files: core.files
     jet_pkg_model.[
         ForeignBindError, ForeignBindResult, ForeignLanguage, WorkerLanguage,
         pkg_binder_append_artifact_boundary, pkg_binder_canonicalize, pkg_binder_cc_ar_identity,
@@ -21,14 +21,14 @@ use {
     ]
 }
 
-PKG_OCTAVE_RESERVED :: [String]{"open", "take_error", "cancel", "close", "decode_response", "abi", "compute", "json", "Session", "TensorWire", "OctaveError"}
+PKG_OCTAVE_RESERVED: [String]{"open", "take_error", "cancel", "close", "decode_response", "abi", "compute", "json", "Session", "TensorWire", "OctaveError"}
 
 // Bind the one-matrix functions of the Octave `.m` script at `path`.
-fn pkg_octave_bind(path: String, source: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> ForeignBindResult ForeignBindError! {
-    language :: WorkerLanguage.Octave
+pkg_octave_bind: fn(path: String, source: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> ForeignBindResult ForeignBindError! {
+    language: WorkerLanguage.Octave
     pkg_worker_require_supported_host(language, pkg_binder_host_is_unix())
     pkg_binder_require_lib_name(lib)
-    functions :: pkg_octave_parse_functions(source)
+    functions: pkg_octave_parse_functions(source)
     tool := "octave-cli"
     octave := ""
     if pkg_binder_resolved_tool_path("octave-cli") == {
@@ -39,61 +39,61 @@ fn pkg_octave_bind(path: String, source: String, lib: String, cache: String) -[F
         }
     }
     pkg_worker_run_tool([String]{octave, "--version"}, tool, language, false)
-    script :: pkg_binder_canonicalize(path, "could not resolve the Octave script")
+    script: pkg_binder_canonicalize(path, "could not resolve the Octave script")
     if !pkg_octave_has_m_extension(script) -> return Err(ForeignBindError.Source("Octave bindings require a `.m` source file"))
-    build :: pkg_worker_prepare_build(cache, "octave", lib, "Octave")
-    worker_source :: pkg_octave_render_worker(script, functions)
-    worker_file :: files.join(cache, "{lib}_worker.m")
+    build: pkg_worker_prepare_build(cache, "octave", lib, "Octave")
+    worker_source: pkg_octave_render_worker(script, functions)
+    worker_file: files.join(cache, "{lib}_worker.m")
     pkg_binder_write(worker_file, worker_source, "could not write Octave worker")
-    worker :: pkg_binder_canonicalize(worker_file, "could not resolve the Octave worker")
-    abi :: "jet_octave_{lib}"
+    worker: pkg_binder_canonicalize(worker_file, "could not resolve the Octave worker")
+    abi: "jet_octave_{lib}"
     wrappers := [String]{}
     loop function in functions -> &wrappers.push(pkg_worker_invoke_wrapper(abi, function, "invoke", function))
-    bridge :: pkg_worker_render_supervisor_c(abi, octave, worker, script, wrappers.join(""), "\"--quiet\",\"--no-gui\",\"--no-window-system\",\"--no-init-file\",worker_path")
-    archive :: pkg_worker_build_archive(language, abi, build, cache, bridge, "could not write Octave process bridge")
-    digest :: pkg_binder_identity_digest([String]{"jet-octave-bind-v1", source, script, octave, worker_source})
+    bridge: pkg_worker_render_supervisor_c(abi, octave, worker, script, wrappers.join(""), "\"--quiet\",\"--no-gui\",\"--no-window-system\",\"--no-init-file\",worker_path")
+    archive: pkg_worker_build_archive(language, abi, build, cache, bridge, "could not write Octave process bridge")
+    digest: pkg_binder_identity_digest([String]{"jet-octave-bind-v1", source, script, octave, worker_source})
     provenance := "schema=jet-octave-bind-v1\nsha256={digest}\noctave={octave}\nscript={script}\nworker={worker}\ntransport=json\norder=column-major\nshape=rank-2\nmax_sessions=32\n"
     pkg_binder_append_artifact_boundary(&provenance, ForeignLanguage.Octave, "Octave", lib, script, archive, "{tool}={octave};{pkg_binder_cc_ar_identity()}")
-    result :: ForeignBindResult{source: pkg_octave_render_jet(lib, functions), bound: functions, archive: archive, provenance: provenance}
+    result: ForeignBindResult{source: pkg_octave_render_jet(lib, functions), bound: functions, archive: archive, provenance: provenance}
     pkg_binder_remove_tree_quiet(build)
     Ok(result)
 }
 
 // `Path::extension() == Some("m")`: a `.m` suffix after a non-empty stem.
-fn pkg_octave_has_m_extension(path: String) -> Bool Never! {
-    name :: files.basename(path)
-    at :: pkg_binder_rfind(name, ".")
+pkg_octave_has_m_extension: fn(path: String) -> Bool Never! {
+    name: files.basename(path)
+    at: pkg_binder_rfind(name, ".")
     at > 0 && pkg_binder_tail(name, at + 1) == "m"
 }
 
 // Source-only discovery of `output = name(input)` functions; comments after
 // `%` are ignored.
-fn pkg_octave_parse_functions(source: String) -> [String] ForeignBindError! {
+pkg_octave_parse_functions: fn(source: String) -> [String] ForeignBindError! {
     functions := [String]{}
     loop raw_line in pkg_binder_lines(source) {
-        line :: raw_line.split("%").to_list()[0].trim()
+        line: raw_line.split("%").to_list()[0].trim()
         if !line.starts_with("function") -> next
-        rest :: line.removeprefix("function")
-        next_code :: pkg_bytes_code(rest.bytes(), 0)
+        rest: line.removeprefix("function")
+        next_code: pkg_bytes_code(rest.bytes(), 0)
         if pkg_bytes_is_word(next_code) -> next
-        open :: pkg_binder_find(rest, "(", 0)
+        open: pkg_binder_find(rest, "(", 0)
         if open < 0 -> return Err(ForeignBindError.Source("Octave function declaration is missing its argument list"))
-        close :: pkg_binder_find(rest, ")", open + 1)
+        close: pkg_binder_find(rest, ")", open + 1)
         if close < 0 -> return Err(ForeignBindError.Source("Octave function declaration has an unterminated argument list"))
-        head :: pkg_binder_slice(rest, 0, open).trim()
-        equal :: pkg_binder_rfind(head, "=")
+        head: pkg_binder_slice(rest, 0, open).trim()
+        equal: pkg_binder_rfind(head, "=")
         if equal < 0 -> return Err(ForeignBindError.Source("Octave functions must declare one matrix output with `name = function(input)`"))
         output := pkg_binder_slice(head, 0, equal).trim()
         if output.starts_with("[") {
-            inner :: output.removeprefix("[")
+            inner: output.removeprefix("[")
             if !inner.ends_with("]") -> return Err(ForeignBindError.Source("Octave multiple-output functions must use one bracketed output name"))
             output = inner.removesuffix("]").trim()
         }
         if output == "" || output.contains(",") || !pkg_binder_is_ident(output) -> return Err(ForeignBindError.Source("Octave multiple-output functions are unsupported; expose one matrix output per binding"))
-        name :: pkg_binder_tail(head, equal + 1).trim()
+        name: pkg_binder_tail(head, equal + 1).trim()
         if !pkg_binder_is_ident(name) -> return Err(ForeignBindError.Source("Octave function `{name}` cannot be projected as a Jet identifier"))
         if pkg_octave_reserved(name) -> return Err(ForeignBindError.Source("Octave function `{name}` uses a reserved generated binding name"))
-        params :: pkg_binder_slice(rest, open + 1, close).trim()
+        params: pkg_binder_slice(rest, open + 1, close).trim()
         if params == "" || params.contains(",") || params == "varargin" -> return Err(ForeignBindError.Source("Octave function `{name}` must take exactly one matrix argument"))
         if functions.contains(name) -> return Err(ForeignBindError.Source("Octave function `{name}` is declared more than once"))
         &functions.push(name)
@@ -103,21 +103,21 @@ fn pkg_octave_parse_functions(source: String) -> [String] ForeignBindError! {
 }
 
 // Octave single-quoted string literal.
-fn pkg_octave_string(value: String) -> String Never! {
+pkg_octave_string: fn(value: String) -> String Never! {
     "'{value.replace("'", "''")}'"
 }
 
-fn pkg_octave_render_worker(script: String, functions: [String]) -> String Never! {
+pkg_octave_render_worker: fn(script: String, functions: [String]) -> String Never! {
     allowed := [String]{}
     loop function in functions -> &allowed.push("'{function.replace("'", "''")}'")
     PKG_OCTAVE_WORKER.replace("__JET_SCRIPT__", pkg_octave_string(script)).replace("__JET_ALLOWED__", allowed.join(", "))
 }
 
-fn pkg_octave_render_jet(lib: String, functions: [String]) -> String Never! {
-    abi :: "jet_octave_{lib}"
+pkg_octave_render_jet: fn(lib: String, functions: [String]) -> String Never! {
+    abi: "jet_octave_{lib}"
     out := [String]{pkg_binder_fill_template(PKG_OCTAVE_JET_HEAD, [String: String]{"abi": abi})}
     loop function in functions {
-        &out.push("    fn {function}(handle: Int, input: String, deadline_ms: Int) -> String = \"{abi}_invoke_{function}\"\n")
+        &out.push("    {function}: fn(handle: Int, input: String, deadline_ms: Int) -> String = \"{abi}_invoke_{function}\"\n")
     }
     &out.push(PKG_OCTAVE_JET_TYPES)
     &out.push(pkg_render_decode_response("OctaveError", DecoderProtocol.StandardEnvelope))
@@ -129,36 +129,36 @@ fn pkg_octave_render_jet(lib: String, functions: [String]) -> String Never! {
 }
 
 // The generated surface for the binder registry's rendering probe.
-fn pkg_octave_render_probe() -> String Never! {
+pkg_octave_render_probe: fn() -> String Never! {
     pkg_octave_render_jet("registry", [String]{"transform"})
 }
 
-fn pkg_octave_reserved(value: String) -> Bool Never! {
+pkg_octave_reserved: fn(value: String) -> Bool Never! {
     PKG_OCTAVE_RESERVED.contains(value) || JET_KEYWORD_LIST.contains(value) || JET_TYPE_LIST.contains(value)
 }
 
 // Generated module head. Hole: `abi`.
-PKG_OCTAVE_JET_HEAD :: comptime { ```use abi :: c.@@abi@@
+PKG_OCTAVE_JET_HEAD: comptime { ```use abi: c.@@abi@@
 use {
-    compute :: core.compute
-    json :: core.encoding.json
+    compute: core.compute
+    json: core.encoding.json
 }
 
-#Import module c.@@abi@@ {
-    fn open() -> Int = "@@abi@@_open"
-    fn take_error() -> Int = "@@abi@@_take_error"
-    fn cancel(handle: Int) = "@@abi@@_cancel"
-    fn close(handle: Int) = "@@abi@@_close"
+#Import c.@@abi@@: module {
+    open: fn() -> Int = "@@abi@@_open"
+    take_error: fn() -> Int = "@@abi@@_take_error"
+    cancel: fn(handle: Int) = "@@abi@@_cancel"
+    close: fn(handle: Int) = "@@abi@@_close"
 ``` }
 
-PKG_OCTAVE_JET_TYPES :: comptime { ```}
+PKG_OCTAVE_JET_TYPES: comptime { ```}
 
-struct Session {
+Session: struct {
     value: Int
 }
 
 #Error
-enum OctaveError {
+OctaveError: enum {
     NotRunning
     Timeout
     Cancelled
@@ -171,24 +171,24 @@ enum OctaveError {
 
 ``` }
 
-PKG_OCTAVE_JET_SESSION :: comptime { ```impl Session.Close {
-    fn close(^self) { abi.close(self.value) }
+PKG_OCTAVE_JET_SESSION: comptime { ```impl Session.Close {
+    close: fn(^self) { abi.close(self.value) }
 }
 
-fn close(session: ^Session) -[FFI.Octave]> { abi.close(session.value) }
+close: fn(session: ^Session) -[FFI.Octave]> { abi.close(session.value) }
 
-fn open() -[FFI.Octave]> Session OctaveError! {
-    handle :: abi.open()
+open: fn() -[FFI.Octave]> Session OctaveError! {
+    handle: abi.open()
     if abi.take_error() != 0 -> return Err(OctaveError.NotRunning)
     return Ok(Session{ value: handle })
 }
 
-fn cancel(session: Session) -[FFI.Octave]> { abi.cancel(session.value) }
+cancel: fn(session: Session) -[FFI.Octave]> { abi.cancel(session.value) }
 
 ``` }
 
 // One generated tensor call. Hole: `function`.
-PKG_OCTAVE_JET_FUNCTION :: comptime { ```fn @@function@@(session: Session, input: Tensor, deadline_ms: Int) -[FFI.Octave, GPU]> Tensor OctaveError! {
+PKG_OCTAVE_JET_FUNCTION: comptime { ```@@function@@: fn(session: Session, input: Tensor, deadline_ms: Int) -[FFI.Octave, GPU]> Tensor OctaveError! {
     if compute.rank(input) != 2 -> return Err(OctaveError.Shape)
     shape_wire := [Dyn]{}
     loop dimension in compute.shape(input) {
@@ -198,29 +198,29 @@ PKG_OCTAVE_JET_FUNCTION :: comptime { ```fn @@function@@(session: Session, input
     loop value in compute.to_list(input) {
         data_wire.push(Dyn.Float(value))
     }
-    request :: json.to_string(Dyn.Object([
+    request: json.to_string(Dyn.Object([
         "shape": Dyn.Array(shape_wire),
         "data": Dyn.Array(data_wire)
     ])) ?? return Err(OctaveError.Protocol)
-    raw :: abi.@@function@@(session.value, request, deadline_ms)
-    code :: abi.take_error()
-    value :: decode_response(raw, code)
-    shape_tree :: value.field("shape") ?? return Err(OctaveError.Protocol)
+    raw: abi.@@function@@(session.value, request, deadline_ms)
+    code: abi.take_error()
+    value: decode_response(raw, code)
+    shape_tree: value.field("shape") ?? return Err(OctaveError.Protocol)
     if shape_tree == .Array(shape_values) {
         if shape_values.len() != 2 -> return Err(OctaveError.Shape)
-        rows :: shape_values[0].int() ?? return Err(OctaveError.Shape)
-        cols :: shape_values[1].int() ?? return Err(OctaveError.Shape)
+        rows: shape_values[0].int() ?? return Err(OctaveError.Shape)
+        cols: shape_values[1].int() ?? return Err(OctaveError.Shape)
         if rows < 0 || cols < 0 -> return Err(OctaveError.Shape)
-        dyn_value :: value.field("data") ?? return Err(OctaveError.Protocol)
+        dyn_value: value.field("data") ?? return Err(OctaveError.Protocol)
         if dyn_value == .Array(items) {
             if items.len() != rows * cols -> return Err(OctaveError.Width)
             flat := [Float]{}
             loop item in items {
-                number :: item.float() ?? return Err(OctaveError.Width)
+                number: item.float() ?? return Err(OctaveError.Width)
                 flat.push(number)
             }
-            tensor :: compute.from_list(flat) ?? return Err(OctaveError.Width)
-            result :: compute.reshape(tensor, [rows, cols]) ?? return Err(OctaveError.Shape)
+            tensor: compute.from_list(flat) ?? return Err(OctaveError.Width)
+            result: compute.reshape(tensor, [rows, cols]) ?? return Err(OctaveError.Shape)
             return Ok(result)
         } else { return Err(OctaveError.Protocol) }
     } else { return Err(OctaveError.Shape) }
@@ -231,7 +231,7 @@ PKG_OCTAVE_JET_FUNCTION :: comptime { ```fn @@function@@(session: Session, input
 
 // The persistent worker. `__JET_SCRIPT__` and `__JET_ALLOWED__` are replaced
 // in that order, exactly as the Rust binder does.
-PKG_OCTAVE_WORKER :: comptime { ```input = fopen('/dev/stdin', 'rb');
+PKG_OCTAVE_WORKER: comptime { ```input = fopen('/dev/stdin', 'rb');
 output = fopen('/dev/stdout', 'wb');
 script_path = __JET_SCRIPT__;
 try

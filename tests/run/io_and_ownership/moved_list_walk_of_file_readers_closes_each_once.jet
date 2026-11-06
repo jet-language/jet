@@ -1,4 +1,4 @@
-package {
+package: {
     name: "moved_list_walk_of_file_readers_closes_each_once"
     authority: { allow: [FS, FS.Read, FS.Write, IO, Mem.Alloc] }
 }
@@ -9,16 +9,16 @@ package {
 // the same reader used to hang in jet_fd_drop_raw.
 
 use {
-    files :: core.files
+    files: core.files
     core.files.[FileReader]
 }
 
-struct Held {
+Held: struct {
     name: String
     reader: FileReader
 }
 
-fn open_all(paths: [String]) -[FS]> [Held] IOError! {
+open_all: fn(paths: [String]) -[FS]> [Held] IOError! {
     opened := [Held]{}
     loop path in paths -> &opened.push(Held{name: path, reader: files.open(path)})
     kept := [Held]{}
@@ -29,7 +29,7 @@ fn open_all(paths: [String]) -[FS]> [Held] IOError! {
     Ok(kept)
 }
 
-fn first_taken(paths: [String]) -[FS]> Int IOError! {
+first_taken: fn(paths: [String]) -[FS]> Int IOError! {
     opened := [Held]{}
     loop path in paths -> &opened.push(Held{name: path, reader: files.open(path)})
     loop held in ^opened {
@@ -38,15 +38,15 @@ fn first_taken(paths: [String]) -[FS]> Int IOError! {
     Ok(0)
 }
 
-fn run() {
-    scratch :: files.temp_dir("moved-readers")
-    a :: files.join(scratch.path, "a")
-    b :: files.join(scratch.path, "b-skip")
-    c :: files.join(scratch.path, "c")
+run: fn() {
+    scratch: files.temp_dir("moved-readers")
+    a: files.join(scratch.path, "a")
+    b: files.join(scratch.path, "b-skip")
+    c: files.join(scratch.path, "c")
     files.write(a, "alpha\n")
     files.write(b, "bravo\n")
     files.write(c, "charlie\n")
-    kept :: open_all([String]{a, b, c}) ?? panic("open")
+    kept: open_all([String]{a, b, c}) ?? panic("open")
     loop held in kept -> print("{files.basename(held.name)} {(held.reader.read(64) ?? [U8]{}).len()}")
     print("first taken {first_taken([String]{c, a}) ?? -1}")
 }

@@ -1,13 +1,13 @@
 // #4431: both source parsers admit exactly the body cap and reject cap + 1
 // before making the owned byte projection. No transport is involved.
-package {
+package: {
     name: "http_parse_body_limits"
     authority: { allow: [IO, Net] }
 }
 
-use http :: core.http
+use http: core.http
 
-fn request_result(raw: [U8]) -> String Never! {
+request_result: fn(raw: [U8]) -> String Never! {
     if http.parse_request(raw) == {
         .Ok(_) -> return "accepted"
         .Err(error) -> {
@@ -20,7 +20,7 @@ fn request_result(raw: [U8]) -> String Never! {
     "unexpected result"
 }
 
-fn response_result(raw: [U8]) -> String Never! {
+response_result: fn(raw: [U8]) -> String Never! {
     if http.parse_response("http://example.test/", raw) == {
         .Ok(_) -> return "accepted"
         .Err(error) -> {
@@ -33,8 +33,8 @@ fn response_result(raw: [U8]) -> String Never! {
     "unexpected result"
 }
 
-fn run() {
-    crlf :: String.from_bytes([U8]{13, 10}) ?? panic("CRLF")
+run: fn() {
+    crlf: String.from_bytes([U8]{13, 10}) ?? panic("CRLF")
     loop size in [0, 3, 1048576, 1048577] {
         request := "POST / HTTP/1.1{crlf}Host: example.test{crlf}Content-Length: {size}{crlf}{crlf}".bytes()
         response := "HTTP/1.1 200 OK{crlf}Content-Length: {size}{crlf}{crlf}".bytes()

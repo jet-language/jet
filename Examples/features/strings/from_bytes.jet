@@ -1,12 +1,12 @@
 // #2306 / D-BYTESDECODE1=A: strict decoding fails invalid UTF-8; the named
 // lossy form replaces each invalid sequence with U+FFFD.
-fn run() {
-    ascii :: String.from_bytes([U8]{72, 105}) ?? panic("ascii")
-    unicode :: String.from_bytes([U8]{0xE2, 0x9C, 0xA8}) ?? panic("unicode")
-    empty :: String.from_bytes([U8]{}) ?? panic("empty")
-    strict_lead :: String.from_bytes([U8]{0xFF}) ?? "error"
-    strict_continuation :: String.from_bytes([U8]{0x80}) ?? "error"
-    strict_truncated :: String.from_bytes([U8]{0xE2, 0x82}) ?? "error"
+run: fn() {
+    ascii: String.from_bytes([U8]{72, 105}) ?? panic("ascii")
+    unicode: String.from_bytes([U8]{0xE2, 0x9C, 0xA8}) ?? panic("unicode")
+    empty: String.from_bytes([U8]{}) ?? panic("empty")
+    strict_lead: String.from_bytes([U8]{0xFF}) ?? "error"
+    strict_continuation: String.from_bytes([U8]{0x80}) ?? "error"
+    strict_truncated: String.from_bytes([U8]{0xE2, 0x82}) ?? "error"
 
     print("ascii={ascii}")
     print("unicode={unicode}")

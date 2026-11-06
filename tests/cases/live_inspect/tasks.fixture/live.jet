@@ -1,14 +1,14 @@
 use {
-    tasks :: core.tasks
-    time :: core.time
+    tasks: core.tasks
+    time: core.time
 }
 
-fn run() {
-    { sender: secret_sender, receiver: _secrets } :: channel<String>(1)
+run: fn() {
+    { sender: secret_sender, receiver: _secrets }: channel<String>(1)
     secret_sender.send("TOP_SECRET_CHANNEL_PAYLOAD")
-    { sender: ready_sender, receiver: ready } :: channel<Int>()
-    { sender: _sender, receiver: blocked } :: channel<Int>(1)
-    child :: task {
+    { sender: ready_sender, receiver: ready }: channel<Int>()
+    { sender: _sender, receiver: blocked }: channel<Int>(1)
+    child: task {
         ready_sender.send(1)
         blocked.receive() ?? panic("closed")
     }

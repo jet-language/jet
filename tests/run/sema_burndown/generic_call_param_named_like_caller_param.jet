@@ -4,25 +4,25 @@
 // explicit list argument also works with no value arguments (`slots<[Int]>()`).
 // Before, the solver read the caller's `T` as the callee's own: inference
 // reported E0904, and the explicit spelling stopped with an internal error.
-trait Weighed {
-    fn weight(self) -> Int
+Weighed: trait {
+    weight: fn(self) -> Int
 }
 
-struct Stone {
+Stone: struct {
     kilos: Int
 }
 
 impl Stone.Weighed {
-    fn weight(self) -> Int { self.kilos }
+    weight: fn(self) -> Int { self.kilos }
 }
 
-fn size<T>(values: T) -> Int { 1 }
+size: fn<T>(values: T) -> Int { 1 }
 
-fn count<T>(values: [T]) -> Int { values.len() }
+count: fn<T>(values: [T]) -> Int { values.len() }
 
-fn slots<T>() -> Int { 7 }
+slots: fn<T>() -> Int { 7 }
 
-fn heaviest<T: Weighed>(values: [T]) -> Int {
+heaviest: fn<T: Weighed>(values: [T]) -> Int {
     best := 0
     loop value in values {
         if value.weight() > best -> best = value.weight()
@@ -30,34 +30,34 @@ fn heaviest<T: Weighed>(values: [T]) -> Int {
     best
 }
 
-fn first<T>(values: [T]) -> T { values[0] }
+first: fn<T>(values: [T]) -> T { values[0] }
 
-fn inferred<T>(value: T) -> Int {
-    items :: [T]{value, value}
+inferred: fn<T>(value: T) -> Int {
+    items: [T]{value, value}
     size(items) + count(items)
 }
 
-fn explicit<T>(value: T) -> Int {
+explicit: fn<T>(value: T) -> Int {
     1 + size<[T]>([T]{value})
 }
 
-fn nested<T>(value: T) -> Int {
+nested: fn<T>(value: T) -> Int {
     count<[T]>([[T]]{[T]{value}, [T]{value, value}})
 }
 
-fn bounded<T: Weighed>(value: T) -> Int {
+bounded: fn<T: Weighed>(value: T) -> Int {
     heaviest([T]{value})
 }
 
-fn forwarded<T>(values: [T]) -> T {
+forwarded: fn<T>(values: [T]) -> T {
     first(values)
 }
 
-fn listed<T>(value: T) -> Int {
+listed: fn<T>(value: T) -> Int {
     slots<[T]>() + slots<T>()
 }
 
-fn run() {
+run: fn() {
     print(inferred(5))
     print(explicit("a"))
     print(nested(true))

@@ -1,18 +1,18 @@
 // `^p` of an owned subject's payload moves it; the subject's other fields
 // stay usable.
-enum Slot {
+Slot: enum {
     Full(items: [Int], label: String)
     Empty
 }
 
-struct Holder {
+Holder: struct {
     slot: Slot
     name: String
 }
 
-fn keep(items: ^[Int]) -> Int { items.len() }
+keep: fn(items: ^[Int]) -> Int { items.len() }
 
-fn take_items(holder: ^Holder) -> Int {
+take_items: fn(holder: ^Holder) -> Int {
     total := 0
     if holder.slot == .Full(items, label) {
         total = keep(^items) + label.len()
@@ -20,4 +20,4 @@ fn take_items(holder: ^Holder) -> Int {
     total + holder.name.len()
 }
 
-fn run() { print(take_items(Holder{slot: Slot.Full{items: [Int]{1}, label: "a"}, name: "h"})) }
+run: fn() { print(take_items(Holder{slot: Slot.Full{items: [Int]{1}, label: "a"}, name: "h"})) }

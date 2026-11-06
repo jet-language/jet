@@ -1,10 +1,10 @@
 // core-conformance: core.net.unix_write_all_bytes
-use net :: core.net
+use net: core.net
 
-fn run() {
-    listener :: net.unix_listen("/tmp/jet-conformance-unix-write-all-bytes.sock") ?? panic("listen")
-    client :: net.unix_connect("/tmp/jet-conformance-unix-write-all-bytes.sock") ?? panic("connect")
-    server :: net.unix_accept(listener) ?? panic("accept")
+run: fn() {
+    listener: net.unix_listen("/tmp/jet-conformance-unix-write-all-bytes.sock") ?? panic("listen")
+    client: net.unix_connect("/tmp/jet-conformance-unix-write-all-bytes.sock") ?? panic("connect")
+    server: net.unix_accept(listener) ?? panic("accept")
     print((() -> {
         net.unix_write_all_bytes(&client, "all".bytes()) ?? panic("write")
         true

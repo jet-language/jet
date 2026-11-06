@@ -3,7 +3,7 @@
 // First run:
 //   jet run Examples/features/script_job/script_job.jet
 // After one edit, run the same command again. There is no project scaffold or
-// hand-written dispatcher to maintain; the small `fn run()` below is the
+// hand-written dispatcher to maintain; the small `run: fn()` below is the
 // checked entry that the host invokes.
 //
 // The edit is intentionally small: change the text assigned to `edited` and
@@ -23,32 +23,32 @@
 // cancel a blocking child, or make wall-clock work reproducible. Add explicit
 // package authority and runtime controls when those promises are required.
 #Error
-struct InputError {
+InputError: struct {
     message: String
 }
 
-#SingleUse struct Lease {
+#SingleUse Lease: struct {
     name: String
 }
 
-fn acquire(name: String) -> Lease { Lease{name: name.copy()} }
+acquire: fn(name: String) -> Lease { Lease{name: name.copy()} }
 
-fn release(lease: ^Lease) { print("cleanup: released {lease.name}") }
+release: fn(lease: ^Lease) { print("cleanup: released {lease.name}") }
 
-fn checked_input(value: String) -> String InputError! {
+checked_input: fn(value: String) -> String InputError! {
     if value == "bad" -> return Err(InputError{message: "input is not valid"})
     Ok(value)
 }
 
-fn run() {
+run: fn() {
     print("first run: hello from a script job")
-    edited :: "hello after one edit"
+    edited: "hello after one edit"
     print("one edit: {edited}")
 
-    lease :: acquire("workspace")
+    lease: acquire("workspace")
     print("job owns: {lease.name}")
 
-    message :: checked_input("bad") ?? {
+    message: checked_input("bad") ?? {
         print("real error: {err.message}")
         "recovered"
     }

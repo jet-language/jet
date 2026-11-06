@@ -6,7 +6,7 @@
 
 // The refs to realize, the table that resolves their named sources, and the
 // prompt label for the resulting shell.
-struct RunPlan {
+RunPlan: struct {
     // Canonical project root for project-relative lifecycle files, so nested
     // hook commands never resolve `.env` against a caller's subdirectory.
     project_root: String
@@ -28,7 +28,7 @@ struct RunPlan {
 
     // A plan with no packages over `table`: job-only projects, `-p`-only
     // shells, `use`, and the foreign-flake projection start here.
-    fn empty(project_root: String, table: SourceTable) -> RunPlan Never! {
+    empty: fn(project_root: String, table: SourceTable) -> RunPlan Never! {
         RunPlan{
             project_root: project_root,
             refs: [RefSpec]{},
@@ -44,7 +44,7 @@ struct RunPlan {
     }
 
     // The reference an adapter realization is recorded under.
-    fn adapter_reference(adapter: AdapterPlan) -> String Never! {
+    adapter_reference: fn(adapter: AdapterPlan) -> String Never! {
         "adapt:{adapter.name}:{adapter.source}"
     }
 }
@@ -53,19 +53,19 @@ struct RunPlan {
 // Environment and workspace commands run from a project subdirectory keep
 // this one root so planning, trust, dotenv composition, managed state, and
 // explicit refs share the same project identity.
-fn cli_project_env_root(cache: &WorkspaceDeclarationCache, start: String) -[IO, FS, Env, Exec, Time.Wait]> String Never! {
+cli_project_env_root: fn(cache: &WorkspaceDeclarationCache, start: String) -[IO, FS, Env, Exec, Time.Wait]> String Never! {
     cli_project_root(&cache, start)
 }
 
 // Build a plan from the project `env.jet` (the no-explicit-ref path).
-fn cli_load_project_plan(cache: &WorkspaceDeclarationCache, theme: Theme) -[IO, FS, Env, Exec, Time.Wait]> RunPlan CLIError! {
+cli_load_project_plan: fn(cache: &WorkspaceDeclarationCache, theme: Theme) -[IO, FS, Env, Exec, Time.Wait]> RunPlan CLIError! {
     cli_load_project_plan_with_selections(&cache, theme, None, None)
 }
 
-fn cli_load_project_plan_with_selections(cache: &WorkspaceDeclarationCache, theme: Theme, requested_preset: String?, requested_environment: String?) -[IO, FS, Env, Exec, Time.Wait]> RunPlan CLIError! {
-    cwd :: cli_current_dir()
-    dir :: cli_project_env_root(&cache, cwd)
-    src :: files.read(EnvFile.path_in(dir)) ?? {
+cli_load_project_plan_with_selections: fn(cache: &WorkspaceDeclarationCache, theme: Theme, requested_preset: String?, requested_environment: String?) -[IO, FS, Env, Exec, Time.Wait]> RunPlan CLIError! {
+    cwd: cli_current_dir()
+    dir: cli_project_env_root(&cache, cwd)
+    src: files.read(EnvFile.path_in(dir)) ?? {
         theme.error("nothing to do", "no ref was given and there is no {ENV_FILE} here.", "try `jet run fastfetch@jetpack`, or `jet add <ref>` first.")
         return Err(CLIError.Reported(EXIT_USAGE))
     }
@@ -79,10 +79,10 @@ fn cli_load_project_plan_with_selections(cache: &WorkspaceDeclarationCache, them
         )
         return Err(CLIError.Reported(EXIT_USAGE))
     }
-    env_file :: EnvFile.parse(src)
+    env_file: EnvFile.parse(src)
     table := env_file.source_table()
     cli_ensure_builtin_sources(&table)
-    refs :: cli_classify_all(theme, env_file.refs(), table)
+    refs: cli_classify_all(theme, env_file.refs(), table)
     plan := RunPlan.empty(dir, table)
     plan.refs = refs
     plan.label = env_file.prompt_label()
@@ -90,15 +90,15 @@ fn cli_load_project_plan_with_selections(cache: &WorkspaceDeclarationCache, them
 }
 
 // Add `package` to `refs` once, keeping first-seen order.
-fn cli_push_package_ref(refs: &[String], package: String) Never! {
+cli_push_package_ref: fn(refs: &[String], package: String) Never! {
     if !refs.contains(package) -> &refs.push(package)
 }
 
 // Evaluate the typed `module { … }` env surface (U3/U6/U8) into a plan.
 // Source refs merge across modules, `Pkg` sugar resolves to
 // `package@source` refs, and the merged `prompt` becomes the shell label.
-fn cli_typed_plan(theme: Theme, src: String, dir: String, requested_preset: String?, requested_environment: String?) -[IO, FS, Env, Exec, Time.Wait]> RunPlan CLIError! {
-    plan :: envmodel_evaluate_env_with_selections(src, dir, requested_preset, requested_environment) ?? {
+cli_typed_plan: fn(theme: Theme, src: String, dir: String, requested_preset: String?, requested_environment: String?) -[IO, FS, Env, Exec, Time.Wait]> RunPlan CLIError! {
+    plan: envmodel_evaluate_env_with_selections(src, dir, requested_preset, requested_environment) ?? {
         term.eprint(diagnostic_render_all(ENV_FILE, src, [Diagnostic]{err.diagnostic}, false))
         return Err(CLIError.Reported(EXIT_USAGE))
     }
@@ -115,7 +115,7 @@ fn cli_typed_plan(theme: Theme, src: String, dir: String, requested_preset: Stri
     if plan.selected_preset == .Val(preset) {
         loop package in preset.packages -> cli_push_package_ref(&package_refs, package)
     }
-    expansion :: plan.language_expansion
+    expansion: plan.language_expansion
     loop package in expansion.packages -> cli_push_package_ref(&package_refs, package)
     loop integration in plan.integrations {
         loop package in integration.packages -> cli_push_package_ref(&package_refs, package)
@@ -125,7 +125,7 @@ fn cli_typed_plan(theme: Theme, src: String, dir: String, requested_preset: Stri
             if services_catalog_pkg_ref(service.name) == .Val(package) -> cli_push_package_ref(&package_refs, package)
         }
     }
-    refs :: cli_classify_all(theme, package_refs, table)
+    refs: cli_classify_all(theme, package_refs, table)
     Ok(RunPlan{
         project_root: dir,
         refs: refs,
@@ -160,10 +160,10 @@ fn cli_typed_plan(theme: Theme, src: String, dir: String, requested_preset: Stri
 
 // Classify a sequence of `package@source` refs against `table`, printing the
 // first failure and exiting 2.
-fn cli_classify_all(theme: Theme, raws: [String], table: SourceTable) -[IO, Time.Wait]> [RefSpec] CLIError! {
+cli_classify_all: fn(theme: Theme, raws: [String], table: SourceTable) -[IO, Time.Wait]> [RefSpec] CLIError! {
     refs := [RefSpec]{}
     loop raw in raws {
-        spec :: RefSpec.classify_in(raw, table) ?? {
+        spec: RefSpec.classify_in(raw, table) ?? {
             cli_ref_error(theme, err)
             return Err(CLIError.Reported(EXIT_USAGE))
         }

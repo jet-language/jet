@@ -1,27 +1,27 @@
 
-#Error enum TextError { Bad }
+#Error TextError: enum { Bad }
 
-Pattern :: distinct String
+Pattern: distinct String
 
 impl Pattern.CheckedText {
-    type Error = TextError
+    Error: TextError
 
-    fn check(text: String) TextError! -[]> {
+    check: fn(text: String) TextError! -[]> {
         if text == "" { return Err(TextError.Bad) }
         return Ok(())
     }
 
-    fn encode_hole<T: Printable>(value: T) -[]> String {
+    encode_hole: fn<T: Printable>(value: T) -[]> String {
         return "{value}"
     }
 }
 
 
-struct Envelope {
+Envelope: struct {
     value: Pattern
 }
 
-fn run() {
-    plain :: "plain"
-    envelope :: Envelope{ value: plain }
+run: fn() {
+    plain: "plain"
+    envelope: Envelope{ value: plain }
 }

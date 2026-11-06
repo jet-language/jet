@@ -12,7 +12,7 @@ use {
     ]
     jetpack_foundation.[FoundationFileAuthority, MAX_TREE_FILE_BYTES, foundation_open_file_authority]
     jet_foundation.[Diagnostic, diagnostic_from_registry, diagnostic_render_all]
-    cli_files :: core.files
+    cli_files: core.files
     jet_cli.[
         JET_CLI_PACKAGE_FILE, jet_cli_diagnostic_copy, jet_cli_find_project_entry,
         jet_cli_io_error_text, jet_cli_reports_status_json,
@@ -20,8 +20,8 @@ use {
 }
 
 #Error
-struct JetCLIDependencyError { output: JetDriverVerbOutput }
-struct JetCLIPackageInput {
+JetCLIDependencyError: struct { output: JetDriverVerbOutput }
+JetCLIPackageInput: struct {
     path: String
     raw: String
     inline: InlinePackageBlock?
@@ -30,28 +30,28 @@ struct JetCLIPackageInput {
     authority: FoundationFileAuthority
 }
 
-fn jet_cli_dependency_cli_error(code: String, what: String, fix: String?, color: Bool, json: Bool) -[FS, Env]> JetCLIDependencyError Never! {
-    shared :: jet_cli_diagnostic_copy(code)
-    report :: diagnostic_from_registry(code, None, what, shared.why, fix ?? shared.fix)
+jet_cli_dependency_cli_error: fn(code: String, what: String, fix: String?, color: Bool, json: Bool) -[FS, Env]> JetCLIDependencyError Never! {
+    shared: jet_cli_diagnostic_copy(code)
+    report: diagnostic_from_registry(code, None, what, shared.why, fix ?? shared.fix)
     if json -> return JetCLIDependencyError{output: JetDriverVerbOutput{stdout: jet_cli_reports_status_json("cli", false, jet_cli_report_base(""), "", "", [Diagnostic]{report}), stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}}
     JetCLIDependencyError{output: JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all("", "", [Diagnostic]{report}, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}}
 }
-fn jet_cli_dependency_source_error(path: String, raw: String, report: Diagnostic) -> JetCLIDependencyError Never! {
+jet_cli_dependency_source_error: fn(path: String, raw: String, report: Diagnostic) -> JetCLIDependencyError Never! {
     JetCLIDependencyError{output: JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all(path, raw, [Diagnostic]{report}, false), exit_code: JET_DRIVER_EXIT_USER_ERROR}}
 }
 
-fn jet_cli_dependency_read(path: String, color: Bool, json: Bool) -[FS, Env]> (raw: String, authority: FoundationFileAuthority) JetCLIDependencyError! {
-    authority :: foundation_open_file_authority(cli_files.dirname(path), cli_files.basename(path)) ?? return Err(jet_cli_dependency_cli_error("E2105", "couldn't read {path}: {jet_cli_io_error_text(err)}", None, color, json))
-    bytes :: authority.read_bounded(MAX_TREE_FILE_BYTES) ?? return Err(jet_cli_dependency_cli_error("E2105", "couldn't read {path}: {jet_cli_io_error_text(err)}", None, color, json))
-    raw :: String.from_bytes(bytes) ?? return Err(jet_cli_dependency_cli_error("E2105", "couldn't read {path}: stream did not contain valid UTF-8", None, color, json))
+jet_cli_dependency_read: fn(path: String, color: Bool, json: Bool) -[FS, Env]> (raw: String, authority: FoundationFileAuthority) JetCLIDependencyError! {
+    authority: foundation_open_file_authority(cli_files.dirname(path), cli_files.basename(path)) ?? return Err(jet_cli_dependency_cli_error("E2105", "couldn't read {path}: {jet_cli_io_error_text(err)}", None, color, json))
+    bytes: authority.read_bounded(MAX_TREE_FILE_BYTES) ?? return Err(jet_cli_dependency_cli_error("E2105", "couldn't read {path}: {jet_cli_io_error_text(err)}", None, color, json))
+    raw: String.from_bytes(bytes) ?? return Err(jet_cli_dependency_cli_error("E2105", "couldn't read {path}: stream did not contain valid UTF-8", None, color, json))
     Ok((raw: raw, authority: authority))
 }
-fn jet_cli_dependency_with_notice(error: JetCLIDependencyError, notice: String) -> JetCLIDependencyError Never! {
+jet_cli_dependency_with_notice: fn(error: JetCLIDependencyError, notice: String) -> JetCLIDependencyError Never! {
     JetCLIDependencyError{output: JetDriverVerbOutput{stdout: error.output.stdout, stderr: "{notice}{error.output.stderr}", exit_code: error.output.exit_code}}
 }
-fn jet_cli_package_input_entry(root: String, color: Bool, json: Bool) -[FS, Env]> (path: String, notice: String) JetCLIDependencyError! {
+jet_cli_package_input_entry: fn(root: String, color: Bool, json: Bool) -[FS, Env]> (path: String, notice: String) JetCLIDependencyError! {
     notices := [String]{}
-    entry :: if jet_cli_find_project_entry(root, "fetch", color, &notices) == {
+    entry: if jet_cli_find_project_entry(root, "fetch", color, &notices) == {
         .Entry(found) -> found.path
         .Refused(plan) -> {
             if plan == {
@@ -68,32 +68,32 @@ fn jet_cli_package_input_entry(root: String, color: Bool, json: Bool) -[FS, Env]
     Ok((path: entry, notice: notices.join("")))
 }
 
-fn jet_cli_dependency_input_at_entry(root: String, entry: String, color: Bool, json: Bool) -[FS, Env]> JetCLIPackageInput JetCLIDependencyError! {
-    source :: jet_cli_dependency_read(entry, color, json)
-    inline :: if pkg_extract_inline_package(source.raw) == {
+jet_cli_dependency_input_at_entry: fn(root: String, entry: String, color: Bool, json: Bool) -[FS, Env]> JetCLIPackageInput JetCLIDependencyError! {
+    source: jet_cli_dependency_read(entry, color, json)
+    inline: if pkg_extract_inline_package(source.raw) == {
         .Ok(value) -> value
         .Err(error) -> { return Err(jet_cli_dependency_source_error(entry, source.raw, error.diagnostic())) }
     }
     cache := WorkspaceDeclarationCache.new()
-    found :: if pkg_package_facts_for_entry(&cache, entry) == {
+    found: if pkg_package_facts_for_entry(&cache, entry) == {
         .Ok(value) -> value
         .Err(error) -> { return Err(jet_cli_dependency_source_error(entry, source.raw, error.diagnostic)) }
     }
-    facts :: found ?? return Err(jet_cli_dependency_cli_error("E2105", "couldn't resolve package facts for {entry}", None, color, json))
+    facts: found ?? return Err(jet_cli_dependency_cli_error("E2105", "couldn't resolve package facts for {entry}", None, color, json))
     if inline == .Val(block) {
-        manifest :: pkg_to_manifest(facts, block.body(source.raw)) ?? return Err(jet_cli_dependency_source_error(entry, block.body(source.raw), err.diagnostic))
+        manifest: pkg_to_manifest(facts, block.body(source.raw)) ?? return Err(jet_cli_dependency_source_error(entry, block.body(source.raw), err.diagnostic))
         return Ok(JetCLIPackageInput{path: entry, raw: source.raw, inline: inline, manifest: manifest, authority: source.authority})
     }
     jet_cli_package_input_from_facts(root, facts, color, json)
 }
 
-fn jet_cli_package_input_from_facts(root: String, facts: PackageFacts, color: Bool, json: Bool) -[FS, Env]> JetCLIPackageInput JetCLIDependencyError! {
-    located :: if pkg_manifest_path_checked(root) == {
+jet_cli_package_input_from_facts: fn(root: String, facts: PackageFacts, color: Bool, json: Bool) -[FS, Env]> JetCLIPackageInput JetCLIDependencyError! {
+    located: if pkg_manifest_path_checked(root) == {
         .Ok(value) -> value
         .Err(error) -> { return Err(jet_cli_dependency_source_error(JET_CLI_PACKAGE_FILE, "", error.diagnostic)) }
     }
-    path :: located ?? return Err(jet_cli_dependency_cli_error("E2105", "couldn't locate {JET_CLI_PACKAGE_FILE}", None, color, json))
-    carrier :: jet_cli_dependency_read(path, color, json)
-    manifest :: pkg_to_manifest(facts, carrier.raw) ?? return Err(jet_cli_dependency_source_error(path, carrier.raw, err.diagnostic))
+    path: located ?? return Err(jet_cli_dependency_cli_error("E2105", "couldn't locate {JET_CLI_PACKAGE_FILE}", None, color, json))
+    carrier: jet_cli_dependency_read(path, color, json)
+    manifest: pkg_to_manifest(facts, carrier.raw) ?? return Err(jet_cli_dependency_source_error(path, carrier.raw, err.diagnostic))
     Ok(JetCLIPackageInput{path: path, raw: carrier.raw, inline: None, manifest: manifest, authority: carrier.authority})
 }

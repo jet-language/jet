@@ -29,29 +29,29 @@ use jet_foundation.[
 
 // The types of `generic` (a checked function's FnBody.tree.types) with each
 // type parameter `names[i]` bound to `args[i]`, row for row.
-fn sema_instance_types(generic: TypeTable, names: [String], args: [Type]) -> [Type] Never! {
+sema_instance_types: fn(generic: TypeTable, names: [String], args: [Type]) -> [Type] Never! {
     loop ty in generic.types -> sema_inference_substitute_type(ty, names, args)
 }
 
 // One row of sema_instance_types: the row of `ty` in `generic` at the
 // instance. None when the tree's facts never named `ty`.
-fn sema_instance_type(generic: TypeTable, names: [String], args: [Type], ty: Type) -> Type? Never! {
-    row :: type_table_find(generic, ty) ?? return None
+sema_instance_type: fn(generic: TypeTable, names: [String], args: [Type], ty: Type) -> Type? Never! {
+    row: type_table_find(generic, ty) ?? return None
     Val(sema_inference_substitute_type(generic.types[row], names, args))
 }
 
 // Member type `written` of type declaration `def` (a field, variant payload,
 // base or alias target) in the instance binding its parameters to `args`.
-fn sema_type_def_instance_type(def: TTypeDef, args: [Type], written: Type) -> Type Never! {
+sema_type_def_instance_type: fn(def: TTypeDef, args: [Type], written: Type) -> Type Never! {
     if args.len() == 0 -> return written.copy()
-    names :: loop parameter in def.generic_params -> parameter.name
+    names: loop parameter in def.generic_params -> parameter.name
     sema_inference_substitute_type(written, names, args)
 }
 
 // Interns into `tree.types` every type the facts of a function's tree and
 // signature name, beyond its nodes' own types: an instance publishes each of
 // them (sema_instance_types).
-fn sema_body_fact_types(tree: &BodyTree, params: [BodyParameter], ret: Type?, kind: TFuncKind, failure: TFailureCarrier) Never! {
+sema_body_fact_types: fn(tree: &BodyTree, params: [BodyParameter], ret: Type?, kind: TFuncKind, failure: TFailureCarrier) Never! {
     loop parameter in params {
         sema_fact_type(&tree, parameter.ty)
         sema_fact_local(&tree, parameter.local)
@@ -62,35 +62,35 @@ fn sema_body_fact_types(tree: &BodyTree, params: [BodyParameter], ret: Type?, ki
         .TopLevel -> {}
     }
     sema_fact_failure(&tree, failure)
-    nodes :: tree.nodes.copy()
+    nodes: tree.nodes.copy()
     loop node in nodes -> sema_fact_node(&tree, node.kind)
-    stmts :: tree.stmts.copy()
+    stmts: tree.stmts.copy()
     loop statement in stmts -> sema_fact_stmt(&tree, statement)
 }
 
 // A checked function's return `ret` and failure carrier `failure`, set after
 // its tree was flattened (sema_failure_reconcile_infallible), published in
 // its tree's types like the rest of its signature (sema_body_fact_types).
-fn sema_body_fact_return(tree: &BodyTree, ret: Type, failure: TFailureCarrier) Never! {
+sema_body_fact_return: fn(tree: &BodyTree, ret: Type, failure: TFailureCarrier) Never! {
     sema_fact_type(&tree, ret)
     sema_fact_failure(&tree, failure)
 }
 
-fn sema_fact_type(tree: &BodyTree, ty: Type) Never! {
-    _ :: type_table_intern(&tree.types, ty)
+sema_fact_type: fn(tree: &BodyTree, ty: Type) Never! {
+    _: type_table_intern(&tree.types, ty)
 }
 
-fn sema_fact_types(tree: &BodyTree, types: [Type]) Never! {
+sema_fact_types: fn(tree: &BodyTree, types: [Type]) Never! {
     loop ty in types -> sema_fact_type(&tree, ty)
 }
 
-fn sema_fact_local(tree: &BodyTree, local: TLocal) Never! {
+sema_fact_local: fn(tree: &BodyTree, local: TLocal) Never! {
     sema_fact_type(&tree, local.ty)
     if local.persist_ty == .Val(persisted) -> sema_fact_type(&tree, persisted)
     if local.string_bytes_source == .Val(source) -> sema_fact_local(&tree, source)
 }
 
-fn sema_fact_failure(tree: &BodyTree, failure: TFailureCarrier) Never! {
+sema_fact_failure: fn(tree: &BodyTree, failure: TFailureCarrier) Never! {
     if failure == {
         .Result(success, error) -> {
             sema_fact_type(&tree, success)
@@ -101,32 +101,32 @@ fn sema_fact_failure(tree: &BodyTree, failure: TFailureCarrier) Never! {
     }
 }
 
-fn sema_fact_args(tree: &BodyTree, args: [BodyCallArg]) Never! {
+sema_fact_args: fn(tree: &BodyTree, args: [BodyCallArg]) Never! {
     loop arg in args {
         if arg.widen_to_union == .Val(union) -> sema_fact_type(&tree, union)
         if arg.box_as_trait == .Val(target) -> sema_fact_type(&tree, target)
     }
 }
 
-fn sema_fact_captures(tree: &BodyTree, captures: [TCapture]) Never! {
+sema_fact_captures: fn(tree: &BodyTree, captures: [TCapture]) Never! {
     loop capture in captures {
         sema_fact_type(&tree, capture.ty)
         sema_fact_local(&tree, capture.local)
     }
 }
 
-fn sema_fact_lambda(tree: &BodyTree, lambda: BodyLambda) Never! {
+sema_fact_lambda: fn(tree: &BodyTree, lambda: BodyLambda) Never! {
     sema_fact_types(&tree, lambda.param_types)
     if lambda.ret == .Val(returned) -> sema_fact_type(&tree, returned)
     sema_fact_captures(&tree, lambda.captures)
     sema_fact_failure(&tree, lambda.failure_carrier)
 }
 
-fn sema_fact_pattern(tree: &BodyTree, pattern: BodyPattern) Never! {
+sema_fact_pattern: fn(tree: &BodyTree, pattern: BodyPattern) Never! {
     loop binding in pattern.bindings -> sema_fact_type(&tree, binding.ty)
 }
 
-fn sema_fact_condition(tree: &BodyTree, condition: BodyIfCond) Never! {
+sema_fact_condition: fn(tree: &BodyTree, condition: BodyIfCond) Never! {
     if condition == {
         .And(left, right) -> {
             sema_fact_condition(&tree, left)
@@ -137,14 +137,14 @@ fn sema_fact_condition(tree: &BodyTree, condition: BodyIfCond) Never! {
     }
 }
 
-fn sema_fact_contract_result(tree: &BodyTree, result: TContractResult) Never! {
+sema_fact_contract_result: fn(tree: &BodyTree, result: TContractResult) Never! {
     sema_fact_type(&tree, result.carrier_ty)
     sema_fact_type(&tree, result.binding_ty)
     sema_fact_local(&tree, result.carrier_local)
     sema_fact_local(&tree, result.binding_local)
 }
 
-fn sema_fact_node(tree: &BodyTree, kind: NodeKind) Never! {
+sema_fact_node: fn(tree: &BodyTree, kind: NodeKind) Never! {
     if kind == {
         .Local(local) -> sema_fact_local(&tree, local)
         .Call(_, type_args, args) -> {
@@ -252,7 +252,7 @@ fn sema_fact_node(tree: &BodyTree, kind: NodeKind) Never! {
     }
 }
 
-fn sema_fact_stmt(tree: &BodyTree, statement: StmtKind) Never! {
+sema_fact_stmt: fn(tree: &BodyTree, statement: StmtKind) Never! {
     if statement == {
         .ContractScope(_, _, _, result, _) -> sema_fact_contract_result(&tree, result)
         .Let(local, let_ty, _, _, _, _) -> {

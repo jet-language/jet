@@ -1,12 +1,12 @@
 
 use {
-    process :: core.process
-    time :: core.time
+    process: core.process
+    time: core.time
 }
 
-fn run() -[Exec, IO, Time.Wait]> {
-    timeout :: Duration.seconds(1) ?? panic("duration")
-    timed :: process.run_spec(process.cmd(["{work}/timeout.sh"]).timeout(timeout)) ?? panic("timeout run failed")
+run: fn() -[Exec, IO, Time.Wait]> {
+    timeout: Duration.seconds(1) ?? panic("duration")
+    timed: process.run_spec(process.cmd(["{work}/timeout.sh"]).timeout(timeout)) ?? panic("timeout run failed")
     print(timed.timed_out)
     if process.run_spec(process.cmd(["{work}/output.sh"]).output_limit(16)) == {
         .Ok(_) -> { print("limit:accepted") }

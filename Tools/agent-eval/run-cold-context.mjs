@@ -249,7 +249,7 @@ export function validateCapsule(capsule) {
     const sectionEnd = programs[index + 1]?.index ?? capsule.length;
     const section = capsule.slice(heading.index, sectionEnd);
     const sources = [...section.matchAll(/```jet\s*\r?\n([\s\S]*?)\r?\n```/g)];
-    if (sources.length !== 1 || !/\bfn\s+run\b/u.test(sources[0][1])) {
+    if (sources.length !== 1 || !/\brun:\s*fn\b/u.test(sources[0][1])) {
       throw new HarnessUsageError(`capsule program ${index + 1} is missing a complete fn run source block`);
     }
   }
@@ -747,7 +747,7 @@ function extractSource(text) {
   }
   const fenced = value.match(/^```(?:jet)?\s*\r?\n([\s\S]*?)\r?\n```$/iu);
   if (fenced) value = fenced[1].trim();
-  if (!value.includes("fn run")) throw new ModelOutputError("model output has no fn run entry point");
+  if (!value.includes("run: fn")) throw new ModelOutputError("model output has no fn run entry point");
   if (value.startsWith("```") || value.includes("\n```")) throw new ModelOutputError("model output contains an unclosed Markdown fence");
   return `${value}\n`;
 }

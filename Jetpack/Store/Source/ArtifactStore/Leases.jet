@@ -5,17 +5,17 @@
 // `jet_store` Lease, StoreLock, LeaseRecord, JournalState, owner liveness).
 use {
     jet_pkg_model.[pkg_bytes_starts_with, pkg_bytes_text, pkg_sha256_hex]
-    sys :: core.sys
-    files :: core.files
+    sys: core.sys
+    files: core.files
 }
 
 // Ownership identity recorded in lock and lease files. PID alone is not
 // sufficient because a later process may reuse it.
-struct ArtifactProcessIdentity {
+ArtifactProcessIdentity: struct {
     priv pid_value: Int
     priv start_value: String
 
-    fn new(pid: Int, start: String) -> ArtifactProcessIdentity Never! {
+    new: fn(pid: Int, start: String) -> ArtifactProcessIdentity Never! {
         ArtifactProcessIdentity{pid_value: pid, start_value: start}
     }
 
@@ -24,27 +24,27 @@ struct ArtifactProcessIdentity {
     // OnceLock token; this per-open token makes two stores in one process on a
     // non-Linux host see each other's lock/leases as a dead same-PID owner.
     // A process-wide identity provider is required; no substitute is invented.
-    fn current() -[FS, Env, Rand]> ArtifactProcessIdentity ArtifactStoreError! {
-        pid :: sys.pid()
+    current: fn() -[FS, Env, Rand]> ArtifactProcessIdentity ArtifactStoreError! {
+        pid: sys.pid()
         if store_artifact_lookup_process_start(pid) == {
             .Found(start) -> Ok(ArtifactProcessIdentity.new(pid, start))
             else -> Ok(ArtifactProcessIdentity.new(pid, "fallback-{pid}-{store_artifact_unique_token()}"))
         }
     }
 
-    fn pid(self) -> Int Never! { self.pid_value }
+    pid: fn(self) -> Int Never! { self.pid_value }
 
-    fn start(self) -> String Never! { self.start_value }
+    start: fn(self) -> String Never! { self.start_value }
 
     // `jet.store.v1|<role>|<pid>|<start>\n`, the first line of a lock or
     // lease file.
-    fn owner_line(self, role: String) -> String Never! {
+    owner_line: fn(self, role: String) -> String Never! {
         "{STORE_ARTIFACT_VERSION}|{role}|{self.pid_value}|{self.start_value}\n"
     }
 }
 
 // What the platform reports about a process start token.
-enum ArtifactIdentityLookup {
+ArtifactIdentityLookup: enum {
     Found(String)
     Missing
     Unknown
@@ -53,19 +53,19 @@ enum ArtifactIdentityLookup {
 // The kernel start time of `pid` (Linux `/proc/<pid>/stat` field 22); other
 // platforms cannot tell.
 // #3594: platform/process identity providers remain required.
-fn store_artifact_lookup_process_start(pid: Int) -[FS, Env]> ArtifactIdentityLookup Never! {
+store_artifact_lookup_process_start: fn(pid: Int) -[FS, Env]> ArtifactIdentityLookup Never! {
     if !sys.is_linux() -> return ArtifactIdentityLookup.Unknown
-    content :: if files.read("/proc/{pid}/stat") == {
+    content: if files.read("/proc/{pid}/stat") == {
         .Ok(text) -> text
         .Err(error) -> {
             if store_artifact_io_missing(error) -> return ArtifactIdentityLookup.Missing
             return ArtifactIdentityLookup.Unknown
         }
     }
-    raw :: content.bytes()
-    paren :: store_artifact_rfind(raw, ") ".bytes())
+    raw: content.bytes()
+    paren: store_artifact_rfind(raw, ") ".bytes())
     if paren < 0 -> return ArtifactIdentityLookup.Unknown
-    fields :: store_artifact_split_whitespace(pkg_bytes_text(raw, paren + 2, raw.len()))
+    fields: store_artifact_split_whitespace(pkg_bytes_text(raw, paren + 2, raw.len()))
     if fields.len() <= 19 -> return ArtifactIdentityLookup.Unknown
     ArtifactIdentityLookup.Found(fields[19])
 }
@@ -73,7 +73,7 @@ fn store_artifact_lookup_process_start(pid: Int) -[FS, Env]> ArtifactIdentityLoo
 // Whether `owner` is still running: the same process as `current`, or a
 // process whose start token still matches. None when the platform cannot
 // tell, which callers treat as live.
-fn store_artifact_owner_liveness(owner: ArtifactProcessIdentity, current: ArtifactProcessIdentity) -[FS, Env]> Bool? Never! {
+store_artifact_owner_liveness: fn(owner: ArtifactProcessIdentity, current: ArtifactProcessIdentity) -[FS, Env]> Bool? Never! {
     if owner.pid() == current.pid() -> return Val(owner.start() == current.start())
     if store_artifact_lookup_process_start(owner.pid()) == {
         .Found(start) -> Val(start == owner.start())
@@ -83,7 +83,7 @@ fn store_artifact_owner_liveness(owner: ArtifactProcessIdentity, current: Artifa
 }
 
 // The last byte offset where `needle` occurs, or -1.
-fn store_artifact_rfind(haystack: [U8], needle: [U8]) -> Int Never! {
+store_artifact_rfind: fn(haystack: [U8], needle: [U8]) -> Int Never! {
     at := haystack.len() - needle.len()
     loop at >= 0 {
         if pkg_bytes_starts_with(haystack, at, needle) -> return at
@@ -95,23 +95,23 @@ fn store_artifact_rfind(haystack: [U8], needle: [U8]) -> Int Never! {
 // A live lease. Closing it releases the file only if its ownership record is
 // unchanged; a later process can therefore never remove a live lease by PID
 // coincidence.
-struct ArtifactLease {
+ArtifactLease: struct {
     priv path_value: String
     priv owner_value: ArtifactProcessIdentity
 
-    fn path(self) -> String Never! { self.path_value }
+    path: fn(self) -> String Never! { self.path_value }
 
-    fn owner(self) -> ArtifactProcessIdentity Never! { self.owner_value }
+    owner: fn(self) -> ArtifactProcessIdentity Never! { self.owner_value }
 
-    fn is_live(self) -[FS, Env]> Bool Never! {
+    is_live: fn(self) -[FS, Env]> Bool Never! {
         store_artifact_owner_liveness(self.owner_value, self.owner_value) ?? true
     }
 }
 
 impl ArtifactLease.Close {
-    fn close(^self) -[FS]> {
-        expected :: self.owner_value.owner_line("lease").bytes()
-        bytes :: files.read_bytes(self.path_value) ?? return
+    close: fn(^self) -[FS]> {
+        expected: self.owner_value.owner_line("lease").bytes()
+        bytes: files.read_bytes(self.path_value) ?? return
         if !pkg_bytes_starts_with(bytes, 0, expected) -> return
         files.remove(self.path_value) ?? return
         store_artifact_sync_dir(files.dirname(self.path_value)).drop("lease release is best-effort once the file is gone")
@@ -120,14 +120,14 @@ impl ArtifactLease.Close {
 
 // The held machine-wide store lock. Closing it removes the lock file only
 // while it still holds this owner's line.
-struct ArtifactStoreLock {
+ArtifactStoreLock: struct {
     path: String
     owner_line: [U8]
 }
 
 impl ArtifactStoreLock.Close {
-    fn close(^self) -[FS]> {
-        bytes :: files.read_bytes(self.path) ?? return
+    close: fn(^self) -[FS]> {
+        bytes: files.read_bytes(self.path) ?? return
         if bytes != self.owner_line -> return
         files.remove(self.path) ?? return
         store_artifact_sync_dir(files.dirname(self.path)).drop("lock release is best-effort once the file is gone")
@@ -135,25 +135,25 @@ impl ArtifactStoreLock.Close {
 }
 
 // One parsed lease file: its owner and the entries it pins.
-struct ArtifactLeaseRecord {
+ArtifactLeaseRecord: struct {
     owner: ArtifactProcessIdentity
     targets: [ArtifactEntryKey]
 }
 
 // A lease file: the owner line, then one `kind|value` line per pinned entry.
 // Any malformed line refuses the whole file.
-fn store_artifact_parse_lease(bytes: [U8]) -> ArtifactLeaseRecord? Never! {
-    text :: String.from_bytes(bytes) ?? return None
-    lines :: store_artifact_lines(text)
+store_artifact_parse_lease: fn(bytes: [U8]) -> ArtifactLeaseRecord? Never! {
+    text: String.from_bytes(bytes) ?? return None
+    lines: store_artifact_lines(text)
     if lines.len() == 0 -> return None
-    header :: lines[0].split("|").to_list()
+    header: lines[0].split("|").to_list()
     if header.len() != 4 || header[0] != STORE_ARTIFACT_VERSION || header[1] != "lease" -> return None
-    pid :: store_artifact_parse_pid(header[2]) ?? return None
+    pid: store_artifact_parse_pid(header[2]) ?? return None
     if header[3] == "" -> return None
-    owner :: ArtifactProcessIdentity.new(pid, header[3])
+    owner: ArtifactProcessIdentity.new(pid, header[3])
     targets := [ArtifactEntryKey]{}
     loop index in 1..<lines.len() {
-        fields :: lines[index].split("|").to_list()
+        fields: lines[index].split("|").to_list()
         if fields.len() != 2 -> return None
         &targets.push(ArtifactEntryKey.parse_wire(fields[0], fields[1]) ?? return None)
     }
@@ -161,39 +161,39 @@ fn store_artifact_parse_lease(bytes: [U8]) -> ArtifactLeaseRecord? Never! {
 }
 
 // The owner of a lock file (`jet.store.v1|lock|<pid>|<start>`).
-fn store_artifact_parse_owner_line(bytes: [U8]) -> ArtifactProcessIdentity? Never! {
+store_artifact_parse_owner_line: fn(bytes: [U8]) -> ArtifactProcessIdentity? Never! {
     text := String.from_bytes(bytes) ?? return None
     loop text.ends_with("\n") {
-        raw :: text.bytes()
+        raw: text.bytes()
         text = pkg_bytes_text(raw, 0, raw.len() - 1)
     }
-    fields :: text.split("|").to_list()
+    fields: text.split("|").to_list()
     if fields.len() != 4 || fields[0] != STORE_ARTIFACT_VERSION || fields[1] != "lock" || fields[3] == "" -> return None
-    pid :: store_artifact_parse_pid(fields[2]) ?? return None
+    pid: store_artifact_parse_pid(fields[2]) ?? return None
     Val(ArtifactProcessIdentity.new(pid, fields[3]))
 }
 
 // A `u32` process id.
-fn store_artifact_parse_pid(text: String) -> Int? Never! {
-    pid :: store_artifact_parse_count(text) ?? return None
+store_artifact_parse_pid: fn(text: String) -> Int? Never! {
+    pid: store_artifact_parse_count(text) ?? return None
     if pid > 4294967295 -> return None
     Val(pid)
 }
 
 // `str::lines`: split on LF, drop one CR before each LF, and yield no final
 // empty line after a trailing LF.
-fn store_artifact_lines(text: String) -> [String] Never! {
+store_artifact_lines: fn(text: String) -> [String] Never! {
     lines := [String]{}
-    raw :: text.bytes()
+    raw: text.bytes()
     start := 0
     loop index in 0..<raw.len() {
         if Int.from_u8(raw[index]) != 10 -> next
-        end :: if index > start && Int.from_u8(raw[index - 1]) == 13 -> index - 1 else -> index
+        end: if index > start && Int.from_u8(raw[index - 1]) == 13 -> index - 1 else -> index
         &lines.push(pkg_bytes_text(raw, start, end))
         start = index + 1
     }
     if start < raw.len() {
-        end :: if Int.from_u8(raw[raw.len() - 1]) == 13 -> raw.len() - 1 else -> raw.len()
+        end: if Int.from_u8(raw[raw.len() - 1]) == 13 -> raw.len() - 1 else -> raw.len()
         &lines.push(pkg_bytes_text(raw, start, end))
     }
     lines
@@ -202,26 +202,26 @@ fn store_artifact_lines(text: String) -> [String] Never! {
 // The replayed access journal: the last-use sequence of every live key
 // (by `ArtifactEntryKey.identity`), the highest sequence, the file size, and
 // whether every record was valid. Replay stops at the first invalid record.
-struct ArtifactJournalState {
+ArtifactJournalState: struct {
     last_use: [String: Int]
     last_sequence: Int
     bytes: Int
     valid: Bool
 
-    fn last_use_of(self, key: ArtifactEntryKey) -> Int Never! {
+    last_use_of: fn(self, key: ArtifactEntryKey) -> Int Never! {
         self.last_use.get(key.identity()) ?? 0
     }
 }
 
 // One checksummed journal line:
 // `jet.store.v1|<op>|<kind>|<value>|<length>|<sequence>|<sha256 of prefix>`.
-fn store_artifact_journal_line(operation: String, key: ArtifactEntryKey, length: Int, sequence: Int) -> String Never! {
-    prefix :: "{STORE_ARTIFACT_VERSION}|{operation}|{key.kind_name()}|{key.wire_value()}|{length}|{sequence}|"
+store_artifact_journal_line: fn(operation: String, key: ArtifactEntryKey, length: Int, sequence: Int) -> String Never! {
+    prefix: "{STORE_ARTIFACT_VERSION}|{operation}|{key.kind_name()}|{key.wire_value()}|{length}|{sequence}|"
     "{prefix}{pkg_sha256_hex(prefix.bytes())}\n"
 }
 
-fn store_artifact_read_journal(path: String) -[FS]> ArtifactJournalState ArtifactStoreError! {
-    bytes :: if files.read_bytes(path) == {
+store_artifact_read_journal: fn(path: String) -[FS]> ArtifactJournalState ArtifactStoreError! {
+    bytes: if files.read_bytes(path) == {
         .Ok(read) -> read
         .Err(error) -> {
             if store_artifact_io_missing(error) -> return Ok(ArtifactJournalState{last_use: [String: Int]{}, last_sequence: 0, bytes: 0, valid: true})
@@ -232,7 +232,7 @@ fn store_artifact_read_journal(path: String) -[FS]> ArtifactJournalState Artifac
     start := 0
     loop index in 0..<(bytes.len() + 1) {
         if index < bytes.len() && Int.from_u8(bytes[index]) != 10 -> next
-        line_start :: start
+        line_start: start
         start = index + 1
         if index == line_start -> next
         if store_artifact_parse_journal_line(store_artifact_slice(bytes, line_start, index)) == {
@@ -254,7 +254,7 @@ fn store_artifact_read_journal(path: String) -[FS]> ArtifactJournalState Artifac
 }
 
 // One verified journal record (Rust `(operation, key, sequence)`).
-struct ArtifactJournalRecord {
+ArtifactJournalRecord: struct {
     operation: String
     key: ArtifactEntryKey
     sequence: Int
@@ -263,30 +263,30 @@ struct ArtifactJournalRecord {
 // One checksummed journal line (Rust parse_journal_line); None for a torn,
 // foreign or corrupt line, including an unknown operation. One trailing CR is
 // dropped here, as in Rust; nothing is recorded from a refused line.
-fn store_artifact_parse_journal_line(line: [U8]) -> ArtifactJournalRecord? Never! {
-    end :: if line.len() > 0 && Int.from_u8(line[line.len() - 1]) == 13 -> line.len() - 1 else -> line.len()
-    text :: String.from_bytes(store_artifact_slice(line, 0, end)) ?? return None
-    fields :: text.split("|").to_list()
+store_artifact_parse_journal_line: fn(line: [U8]) -> ArtifactJournalRecord? Never! {
+    end: if line.len() > 0 && Int.from_u8(line[line.len() - 1]) == 13 -> line.len() - 1 else -> line.len()
+    text: String.from_bytes(store_artifact_slice(line, 0, end)) ?? return None
+    fields: text.split("|").to_list()
     if fields.len() != 7 || fields[0] != STORE_ARTIFACT_VERSION -> return None
     // The checksum covers everything before it, trailing separator included.
     if pkg_sha256_hex(store_artifact_slice(line, 0, end - fields[6].bytes().len())) != fields[6] -> return None
     store_artifact_parse_count(fields[4]) ?? return None
-    sequence :: store_artifact_parse_count(fields[5]) ?? return None
-    key :: ArtifactEntryKey.parse_wire(fields[2], fields[3]) ?? return None
+    sequence: store_artifact_parse_count(fields[5]) ?? return None
+    key: ArtifactEntryKey.parse_wire(fields[2], fields[3]) ?? return None
     if fields[1] != "put" && fields[1] != "touch" && fields[1] != "remove" -> return None
     Val(ArtifactJournalRecord{operation: fields[1], key, sequence})
 }
 
 // Bytes read from the journal's end to find its final line. A line is one
 // wire key plus a few short fields, far below this.
-STORE_ARTIFACT_JOURNAL_TAIL_WINDOW :: 65536
+STORE_ARTIFACT_JOURNAL_TAIL_WINDOW: 65536
 
 // The journal's last sequence number, read from its final line alone (Rust
 // journal_tail_sequence). Every append numbers after the previous maximum and
 // compaction renumbers in file order, so the final line carries the maximum.
 // None marks a torn or corrupt tail: the caller compacts.
-fn store_artifact_journal_tail_sequence(path: String) -[FS]> Int? ArtifactStoreError! {
-    length :: if files.stat(path) == {
+store_artifact_journal_tail_sequence: fn(path: String) -[FS]> Int? ArtifactStoreError! {
+    length: if files.stat(path) == {
         .Ok(info) -> info.size
         .Err(error) -> {
             if store_artifact_io_missing(error) -> return Ok(Val(0))
@@ -294,10 +294,10 @@ fn store_artifact_journal_tail_sequence(path: String) -[FS]> Int? ArtifactStoreE
         }
     }
     if length == 0 -> return Ok(Val(0))
-    window :: if length < STORE_ARTIFACT_JOURNAL_TAIL_WINDOW -> length else -> STORE_ARTIFACT_JOURNAL_TAIL_WINDOW
-    tail :: files.read_at(path, length - window, window)
+    window: if length < STORE_ARTIFACT_JOURNAL_TAIL_WINDOW -> length else -> STORE_ARTIFACT_JOURNAL_TAIL_WINDOW
+    tail: files.read_at(path, length - window, window)
     if tail.len() == 0 || Int.from_u8(tail[tail.len() - 1]) != 10 -> return Ok(None)
-    body_end :: tail.len() - 1
+    body_end: tail.len() - 1
     start := -1
     at := body_end - 1
     loop at >= 0 {

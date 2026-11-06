@@ -1,20 +1,20 @@
-package { name: "http-router-dispatch" authority: { allow: [Net] } }
+package: { name: "http-router-dispatch" authority: { allow: [Net] } }
 use {
-    http :: core.http
-    server :: core.http.server
+    http: core.http
+    server: core.http.server
 }
-fn handle_root(req: HTTPRequest) -> HTTPResponse HTTPError! {
+handle_root: fn(req: HTTPRequest) -> HTTPResponse HTTPError! {
     return Ok(server.response(200, "welcome"))
 }
 
-fn handle_user(id: String) -> HTTPResponse HTTPError! {
+handle_user: fn(id: String) -> HTTPResponse HTTPError! {
     return Ok(server.response(200, "user={id}"))
 }
-fn run() {
-    router :: http.router()
+run: fn() {
+    router: http.router()
     router.get("/", handle_root)
     router.get("/users/:id", handle_user)
-    req :: http.parse("GET / HTTP/1.1\nHost: localhost")
-    resp :: http.dispatch(router, req) ?? panic("dispatch")
+    req: http.parse("GET / HTTP/1.1\nHost: localhost")
+    resp: http.dispatch(router, req) ?? panic("dispatch")
     print(resp.body().text(1024) ?? panic("body"))
 }

@@ -1,23 +1,23 @@
 
-struct ImportErr {
+ImportErr: struct {
     broken: Int
     partial: [String]
     notes: [String]
 }
 
-fn import_rows(label: String, rows: [String]) -> [String] ImportErr! {
-    good :: rows.filter((row) -> row != "")
-    broken :: rows.len() - good.len()
+import_rows: fn(label: String, rows: [String]) -> [String] ImportErr! {
+    good: rows.filter((row) -> row != "")
+    broken: rows.len() - good.len()
     if broken > 0 {
         return Err(ImportErr{ broken: broken, partial: good, notes: [label.copy()] })
     }
     return Ok(good)
 }
 
-fn run() {
-    people :: import_rows("people", ["ada", "", "alan"])
-    ports :: import_rows("ports", ["80", ""])
-    clean :: import_rows("clean", ["ada"])
+run: fn() {
+    people: import_rows("people", ["ada", "", "alan"])
+    ports: import_rows("ports", ["80", ""])
+    clean: import_rows("clean", ["ada"])
     print(people.notes().join(""))
     print(ports.notes().join(""))
     print(people.notes().join(""))

@@ -26,10 +26,10 @@
 // per-function spans were requested (`JET_TRACE_DETAIL=functions`). The host
 // writes the trace file, so each call declares the FS row; an undeclared
 // dynamic dispatch would be the maximal row.
-trait CompilerTraceSink {
-    fn begin(self, name: String, detail: String, index: Int, total: Int) Never! -[FS]>
-    fn begin_item(self, name: String, file: String, item: String) Never! -[FS]>
-    fn end(self, name: String, items: Int) Never! -[FS]>
-    fn progress(self, name: String, done: Int, total: Int) Never! -[FS]>
-    fn functions(self) -[]> Bool Never!
+CompilerTraceSink: trait {
+    begin: fn(self, name: String, detail: String, index: Int, total: Int) Never! -[FS]>
+    begin_item: fn(self, name: String, file: String, item: String) Never! -[FS]>
+    end: fn(self, name: String, items: Int) Never! -[FS]>
+    progress: fn(self, name: String, done: Int, total: Int) Never! -[FS]>
+    functions: fn(self) -[]> Bool Never!
 }

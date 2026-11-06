@@ -1,8 +1,8 @@
-fn kit_steps_build_target_text(text: String) -> Bool {
+kit_steps_build_target_text: fn(text: String) -> Bool {
     text.contains("{{jet-build-target}}")
 }
 
-fn kit_steps_build_target_used(step: KitStep, plan: KitPlan) -> Bool {
+kit_steps_build_target_used: fn(step: KitStep, plan: KitPlan) -> Bool {
     loop word in step.argv {
         if kit_steps_build_target_text(word) -> return true
     }
@@ -30,7 +30,7 @@ fn kit_steps_build_target_used(step: KitStep, plan: KitPlan) -> Bool {
     false
 }
 
-fn kit_steps_build_target_conditions(conditions: [String]) -> Bool {
+kit_steps_build_target_conditions: fn(conditions: [String]) -> Bool {
     loop condition in conditions {
         if kit_steps_build_target_text(condition) -> return true
     }

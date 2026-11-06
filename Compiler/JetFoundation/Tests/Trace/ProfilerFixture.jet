@@ -10,18 +10,18 @@ use jet_foundation.[
     trace_profile_unsupported, trace_source_map_jet_with_source, verify_jettrace,
 ]
 
-PERF_PROFILE_FIXTURE_SOURCE :: "fn run() {{\n    hot()\n}}\nfn hot() {{\n}}\nfn cold() {{\n}}\n"
-PERF_PROFILE_FIXTURE_STATES :: [String]{"captured", "no_samples", "unsupported", "truncated", "dropped"}
+PERF_PROFILE_FIXTURE_SOURCE: "run: fn() {{\n    hot()\n}}\nhot: fn() {{\n}}\ncold: fn() {{\n}}\n"
+PERF_PROFILE_FIXTURE_STATES: [String]{"captured", "no_samples", "unsupported", "truncated", "dropped"}
 
-fn perf_profile_fixture_row(clock: String, name: String, start_line: U64, end_column: U64, sample_count: U64) -> TraceProfileRow Never! {
+perf_profile_fixture_row: fn(clock: String, name: String, start_line: U64, end_column: U64, sample_count: U64) -> TraceProfileRow Never! {
     TraceProfileRow{clock: clock, execution_count: None, sample_count: sample_count, sample_weight: sample_count,
         source: TraceProfileSource{path: "profile.jet", sha256: sha256_hex(PERF_PROFILE_FIXTURE_SOURCE), start_line: start_line, start_column: U64{1}, end_line: start_line, end_column: end_column},
         symbol: JetSymbolRef{path: "profile.jet", name: name}}
 }
-fn perf_profile_fixture_profile(state: String) -> TraceProfile Never! {
-    hot_wall :: perf_profile_fixture_row("wall", "hot", U64{4}, U64{7}, U64{37})
-    hot_cpu :: perf_profile_fixture_row("cpu", "hot", U64{4}, U64{7}, U64{11})
-    cold_wall :: perf_profile_fixture_row("wall", "cold", U64{6}, U64{8}, U64{1})
+perf_profile_fixture_profile: fn(state: String) -> TraceProfile Never! {
+    hot_wall: perf_profile_fixture_row("wall", "hot", U64{4}, U64{7}, U64{37})
+    hot_cpu: perf_profile_fixture_row("cpu", "hot", U64{4}, U64{7}, U64{11})
+    cold_wall: perf_profile_fixture_row("wall", "cold", U64{6}, U64{8}, U64{1})
     if state == {
         "captured" -> return TraceProfile{method: "sampling", status: "captured", coverage: "complete", rows: [TraceProfileRow]{hot_wall, hot_cpu, cold_wall},
             row_limit: U64{4096}, rows_truncated: false, overhead_ns: Val(U64{3}), overhead_status: "measured", overhead_reason: "fixture sampling overhead",
@@ -43,11 +43,11 @@ fn perf_profile_fixture_profile(state: String) -> TraceProfile Never! {
         else -> panic("unknown profiler fixture state {state}")
     }
 }
-fn perf_profile_fixture(state: String) -> [U8] Never! {
+perf_profile_fixture: fn(state: String) -> [U8] Never! {
     identity := SourceIdentity{path: "profile.jet", sha256: sha256_hex(PERF_PROFILE_FIXTURE_SOURCE), symbols: [(kind: String, name: String)]{}}
     loop name in ([String]{"cold", "hot", "run"}) -> &identity.symbols.push((kind: "fn", name: name))
-    source_map :: trace_source_map_jet_with_source("profile.jet", PERF_PROFILE_FIXTURE_SOURCE) ?? panic(err.message)
-    skeleton :: TraceSkeleton{command: "run", argv: [String]{"run", "profile.jet"},
+    source_map: trace_source_map_jet_with_source("profile.jet", PERF_PROFILE_FIXTURE_SOURCE) ?? panic(err.message)
+    skeleton: TraceSkeleton{command: "run", argv: [String]{"run", "profile.jet"},
         toolchain: TraceToolchain{jet_version: "fixture", compiler_build_id: "profile-fixture", stdlib_id: "profile-stdlib", runner_id: "profile-runner"},
         hardware: TraceHardware{cpu_arch: "x86_64", logical_cpus: U64{1}, os: "fixture", target: "profile-target"},
         capture_policy: capture_policy_default_exclusions(), samples: [TraceSample]{}, profile: perf_profile_fixture_profile(state),
@@ -58,11 +58,11 @@ fn perf_profile_fixture(state: String) -> [U8] Never! {
 }
 
 #Test("perf_source_profile_view_preserves_ranges_and_coverage_states capture") {
-    captured :: perf_profile_fixture("captured")
-    _ :: verify_jettrace(captured) ?? panic(err.message)
-    text :: String.from_bytes(captured) ?? panic("captured trace is not UTF-8")
-    markers :: [String]{"\"method\":\"sampling\"", "\"execution_count\":null", "\"sample_count\":37", "\"sample_weight\":37",
+    captured: perf_profile_fixture("captured")
+    _: verify_jettrace(captured) ?? panic(err.message)
+    text: String.from_bytes(captured) ?? panic("captured trace is not UTF-8")
+    markers: [String]{"\"method\":\"sampling\"", "\"execution_count\":null", "\"sample_count\":37", "\"sample_weight\":37",
         "\"sha256\":\"{sha256_hex(PERF_PROFILE_FIXTURE_SOURCE)}\"", "\"start_line\":4", "\"end_column\":7"}
     loop marker in markers -> assert(text.contains(marker), "{marker}: {text}")
-    loop state in PERF_PROFILE_FIXTURE_STATES -> _ :: verify_jettrace(perf_profile_fixture(state)) ?? panic("{state}: {err.message}")
+    loop state in PERF_PROFILE_FIXTURE_STATES -> _: verify_jettrace(perf_profile_fixture(state)) ?? panic("{state}: {err.message}")
 }

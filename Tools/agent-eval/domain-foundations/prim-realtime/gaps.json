@@ -21,7 +21,7 @@
     "id": "prim-realtime-G3",
     "tags": ["impossible"],
     "primitive": "A lock-free atomic or bounded nonblocking shared-state primitive must be visible to the type/effect checker for callback use.",
-    "evidence": "Tools/agent/jet-env jet check $JET_STATE_ROOT/dx3/prim-realtime/pkg/atomic-attempt.jet -> Error [E0102]: Nothing named `atomic` exists here at atomic-attempt.jet:2; Tools/agent/jet-env jet check $JET_STATE_ROOT/dx3/prim-realtime/pkg/lock-free-attempt.jet -> Error [E0041]: `mutex` is not in Jet at lock-free-attempt.jet:2; yet shared-hot.jet:11-12 (`fn hot(state: Shared<State>) -[!Mem.Alloc, !Time]>` then `state.ready += 1`) passes with diagnostics=0. Docs/spec/spec.md:587-600 defines Shared<T> as lock-guarded, and callback-channel-attempt.jet:1-5 also passes -[!Mem.Alloc, !Time]> while calling tx.send(1).",
+    "evidence": "Tools/agent/jet-env jet check $JET_STATE_ROOT/dx3/prim-realtime/pkg/atomic-attempt.jet -> Error [E0102]: Nothing named `atomic` exists here at atomic-attempt.jet:2; Tools/agent/jet-env jet check $JET_STATE_ROOT/dx3/prim-realtime/pkg/lock-free-attempt.jet -> Error [E0041]: `mutex` is not in Jet at lock-free-attempt.jet:2; yet shared-hot.jet:11-12 (`hot: fn(state: Shared<State>) -[!Mem.Alloc, !Time]>` then `state.ready += 1`) passes with diagnostics=0. Docs/spec/spec.md:587-600 defines Shared<T> as lock-guarded, and callback-channel-attempt.jet:1-5 also passes -[!Mem.Alloc, !Time]> while calling tx.send(1).",
     "areas": ["games", "embedded", "gui"],
     "severity": "blocks",
     "workaround": "Keep callback state in caller-owned buffers and move communication outside the callback, or provide a separately audited native atomic/ring-buffer backend."

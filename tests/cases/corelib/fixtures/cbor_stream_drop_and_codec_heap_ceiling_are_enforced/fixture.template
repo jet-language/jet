@@ -1,12 +1,12 @@
 
 use {
-    encoding :: core.encoding
-    cbor :: core.encoding.cbor
-    files :: core.files
+    encoding: core.encoding
+    cbor: core.encoding.cbor
+    files: core.files
 }
 
-fn write_unfinished(path: String) {
-    output :: files.create(path) ?? panic("create partial")
+write_unfinished: fn(path: String) {
+    output: files.create(path) ?? panic("create partial")
     writer := cbor.writer(^output) ?? panic("writer")
     &writer.write(encoding.DataEvent.ArrayStart) ?? panic("array")
     &writer.write(encoding.DataEvent.Int(7)) ?? panic("int")
@@ -14,19 +14,19 @@ fn write_unfinished(path: String) {
     // no ArrayEnd / finish — Drop leaves buffered items unwritten (incomplete)
 }
 
-fn run() {
+run: fn() {
     write_unfinished("{work}/partial.cbor")
     // Same-path reopen after Drop: incomplete leftover still here (empty wire).
-    leftover :: files.read_bytes("{work}/partial.cbor") ?? panic("same-path read after Drop")
-    empty :: [U8]{}
+    leftover: files.read_bytes("{work}/partial.cbor") ?? panic("same-path read after Drop")
+    empty: [U8]{}
     print(leftover == empty)
     // Same-path recreate: Drop must have released the unfinished writer handle.
-    reopen_out :: files.create("{work}/partial.cbor") ?? panic("same-path recreate after Drop")
+    reopen_out: files.create("{work}/partial.cbor") ?? panic("same-path recreate after Drop")
     reopen_writer := cbor.writer(^reopen_out) ?? panic("reopen writer")
     &reopen_writer.write(encoding.DataEvent.Null) ?? panic("reopen write")
     &reopen_writer.finish() ?? panic("reopen finish")
-    finished :: files.read_bytes("{work}/partial.cbor") ?? panic("same-path read after finish")
-    null_wire :: [U8]{ 246 }
+    finished: files.read_bytes("{work}/partial.cbor") ?? panic("same-path read after finish")
+    null_wire: [U8]{ 246 }
     print(finished == null_wire)
     // Honesty: unfinished Drop wire ≠ finished complete root.
     print(leftover != finished)
@@ -36,7 +36,7 @@ fn run() {
     limits.max_depth = 1
     limits.max_item_bytes = 150000
     limits.max_expansion_bytes = 0
-    input :: files.open("{work}/heap.cbor") ?? panic("heap open")
+    input: files.open("{work}/heap.cbor") ?? panic("heap open")
     reader := cbor.reader(^input, limits) ?? panic("heap reader")
     count := 0
     loop count < 4 {

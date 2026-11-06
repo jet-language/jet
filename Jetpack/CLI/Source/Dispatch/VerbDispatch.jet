@@ -4,7 +4,7 @@
 // verbs (`os`, `user`, `studio`, `push`) are not part of this port.
 
 // Every verb this dispatcher routes.
-enum JetpackVerb {
+JetpackVerb: enum {
     Doctor
     Env
     Use
@@ -36,7 +36,7 @@ enum JetpackVerb {
     Fold
     Help
 
-    fn parse(text: String) -> JetpackVerb? Never! {
+    parse: fn(text: String) -> JetpackVerb? Never! {
         if text == {
             "doctor" -> Val(JetpackVerb.Doctor)
             "env" -> Val(JetpackVerb.Env)
@@ -75,23 +75,23 @@ enum JetpackVerb {
 
 // Read-only commands observe state without repairing or migrating it: a
 // `hangar list` must not create its profile lock or rewrite a drifted pin.
-fn cli_read_only_command(verb: String, parsed: CLIParsed) -> Bool Never! {
-    first :: parsed.positional.get(0) ?? ""
-    second :: parsed.positional.get(1) ?? ""
-    hangar :: verb == "hangar"
-    shared_status :: hangar && first == "shared" && second == "status"
-    hangar_doctor :: hangar && first == "doctor" && !parsed.flags.hangar_repair
-    hangar_list :: hangar && first == "list"
+cli_read_only_command: fn(verb: String, parsed: CLIParsed) -> Bool Never! {
+    first: parsed.positional.get(0) ?? ""
+    second: parsed.positional.get(1) ?? ""
+    hangar: verb == "hangar"
+    shared_status: hangar && first == "shared" && second == "status"
+    hangar_doctor: hangar && first == "doctor" && !parsed.flags.hangar_repair
+    hangar_list: hangar && first == "list"
     shared_status || verb == "doctor" || verb == "audit" || verb == JETPACK_WHY || verb == JETPACK_LOCK_VERB || hangar_doctor || hangar_list
 }
 
 // Process entry after invocation setup. Returns the process exit code.
-fn cli_main(args: [String], invocation: DiagnosticInvocation) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+cli_main: fn(args: [String], invocation: DiagnosticInvocation) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     verification := StoreVerification.new()
     // Bare `jetpack` is the keyboard-first dashboard; its own TTY guard keeps
     // the status-summary floor for pipes, CI, and redirected output.
-    verb :: args.get(0) ?? return cli_run_dashboard(&verification)
-    rest :: cli_tail(args, 1)
+    verb: args.get(0) ?? return cli_run_dashboard(&verification)
+    rest: cli_tail(args, 1)
     if verb == "cc" || verb == "c++" -> return cli_cc_main(&verification, verb, rest)
     // GateWriters.rs:266 / Source/main.rs:1537: invocation choices must
     // be refused before migration, profile drift repair, or any command.
@@ -101,11 +101,11 @@ fn cli_main(args: [String], invocation: DiagnosticInvocation) -[IO, FS, Env, Exe
         }
         return EXIT_USAGE
     }
-    parsed :: cli_parse_args_for(verb, rest)
-    color :: if parsed.flags.json -> ColorChoice.Never else -> parsed.flags.color
-    theme :: Theme.resolve_choice(color).with_invocation(invocation)
-    known_verb :: JetpackVerb.parse(verb)
-    checks_flags :: if known_verb == {
+    parsed: cli_parse_args_for(verb, rest)
+    color: if parsed.flags.json -> ColorChoice.Never else -> parsed.flags.color
+    theme: Theme.resolve_choice(color).with_invocation(invocation)
+    known_verb: JetpackVerb.parse(verb)
+    checks_flags: if known_verb == {
         .Val(_) -> verb != "help" && verb != "--help" && verb != "-h"
         .None -> false
     }
@@ -117,12 +117,12 @@ fn cli_main(args: [String], invocation: DiagnosticInvocation) -[IO, FS, Env, Exe
             return EXIT_USAGE
         }
     }
-    read_only :: cli_read_only_command(verb, parsed)
+    read_only: cli_read_only_command(verb, parsed)
     if !read_only {
-        drift_code :: cli_check_user_tools_drift(&verification, theme, parsed)
+        drift_code: cli_check_user_tools_drift(&verification, theme, parsed)
         if drift_code != 0 -> return drift_code
     }
-    code :: if known_verb == {
+    code: if known_verb == {
         .Val(known) -> cli_dispatch_verb(&verification, known, theme, color, parsed)
         .None -> {
             theme.error("`{verb}` is not a jetpack command", "Phase 1 commands are: {JETPACK_VERBS.join(", ")}.", "run `jetpack help` to see them.")
@@ -133,7 +133,7 @@ fn cli_main(args: [String], invocation: DiagnosticInvocation) -[IO, FS, Env, Exe
     code
 }
 
-fn cli_dispatch_verb(verification: &StoreVerification, verb: JetpackVerb, theme: Theme, color: ColorChoice, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+cli_dispatch_verb: fn(verification: &StoreVerification, verb: JetpackVerb, theme: Theme, color: ColorChoice, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     if verb == {
         .Doctor -> cli_cmd_doctor(&verification, theme, parsed)
         .Env -> cli_cmd_env(&verification, theme, parsed)
@@ -165,7 +165,7 @@ fn cli_dispatch_verb(verification: &StoreVerification, verb: JetpackVerb, theme:
         .Split -> cli_cmd_split(theme, parsed)
         .Fold -> cli_cmd_fold(theme, parsed)
         .Help -> {
-            help_theme :: Theme.resolve_for(color, term.stdout().is_tty())
+            help_theme: Theme.resolve_for(color, term.stdout().is_tty())
             print(cli_usage_with_color(help_theme.color))
             EXIT_OK
         }

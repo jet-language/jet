@@ -4,35 +4,35 @@
 // inside a list, on every tier. A `T: Debug` or `T: Display` bound carries
 // the trait into a generic body, where `{value:Debug}`, `{value:Pretty}` and
 // `{value}` render the argument's own text, authored or derived.
-struct NestedPoint {
+NestedPoint: struct {
     x: Int
     y: Int
     impl Debug {
-        fn debug(^self) -> String { "NestedPoint<{self.x},{self.y}>" }
+        debug: fn(^self) -> String { "NestedPoint<{self.x},{self.y}>" }
     }
     impl Display {
-        fn display(self) -> String { "nested {self.x},{self.y}" }
+        display: fn(self) -> String { "nested {self.x},{self.y}" }
     }
 }
 
-struct TopPoint {
+TopPoint: struct {
     x: Int
     y: Int
 }
 
 impl TopPoint.Debug {
-    fn debug(^self) -> String { "TopPoint<{self.x},{self.y}>" }
+    debug: fn(^self) -> String { "TopPoint<{self.x},{self.y}>" }
 }
 
 impl TopPoint.Display {
-    fn display(self) -> String { "top {self.x},{self.y}" }
+    display: fn(self) -> String { "top {self.x},{self.y}" }
 }
 
-enum Signal {
+Signal: enum {
     Go
     Stop
     impl Debug {
-        fn debug(^self) -> String {
+        debug: fn(^self) -> String {
             if self == {
                 .Go -> "signal:go"
                 .Stop -> "signal:stop"
@@ -41,29 +41,29 @@ enum Signal {
     }
 }
 
-struct Labeled<T> {
+Labeled: struct<T> {
     value: T
     impl Debug {
-        fn debug(^self) -> String { "labeled" }
+        debug: fn(^self) -> String { "labeled" }
     }
 }
 
-struct Plain {
+Plain: struct {
     value: Int
 }
 
-fn debug_text<T: Debug>(value: T) -> String { "{value:Debug}" }
-fn pretty_text<T: Debug>(value: T) -> String { "{value:Pretty}" }
-fn display_text<T: Display>(value: T) -> String { "{value}" }
+debug_text: fn<T: Debug>(value: T) -> String { "{value:Debug}" }
+pretty_text: fn<T: Debug>(value: T) -> String { "{value:Pretty}" }
+display_text: fn<T: Display>(value: T) -> String { "{value}" }
 
-fn run() {
-    nested :: NestedPoint{x: 1, y: 2}
-    top :: TopPoint{x: 3, y: 4}
+run: fn() {
+    nested: NestedPoint{x: 1, y: 2}
+    top: TopPoint{x: 3, y: 4}
     print("{nested:Debug} {top:Debug}")
     print("{Signal.Go:Debug} {Signal.Stop:Debug}")
-    labeled :: Labeled<Int>{value: 5}
+    labeled: Labeled<Int>{value: 5}
     print("{labeled:Debug}")
-    points :: [NestedPoint]{NestedPoint{x: 5, y: 6}, NestedPoint{x: 7, y: 8}}
+    points: [NestedPoint]{NestedPoint{x: 5, y: 6}, NestedPoint{x: 7, y: 8}}
     print("{points:Debug}")
     print("{debug_text(NestedPoint{x: 1, y: 2})} {debug_text(TopPoint{x: 3, y: 4})} {debug_text(Signal.Go)}")
     print("{pretty_text(NestedPoint{x: 1, y: 2})} {debug_text(Plain{value: 9})} {debug_text(7)}")

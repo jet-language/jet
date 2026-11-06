@@ -4,22 +4,22 @@ use jet_wasm.[
     WasmComponent, WasmModule, wasm_decode_component, wasm_decode_module, wasm_is_component,
 ]
 
-fn component_of(bytes: ^[U8]) -> WasmComponent Never! {
+component_of: fn(bytes: ^[U8]) -> WasmComponent Never! {
     if wasm_decode_component(^bytes) == {
         .Ok(component) -> component
         .Err(error) -> panic("decode failed: {error.render()}")
     }
 }
 
-fn component_failure(bytes: ^[U8]) -> String Never! {
+component_failure: fn(bytes: ^[U8]) -> String Never! {
     if wasm_decode_component(^bytes) == {
         .Ok(_) -> ""
         .Err(error) -> error.render()
     }
 }
 
-fn raw_module_failure(values: [Int]) -> String Never! {
-    bytes :: loop value in values -> U8{value}
+raw_module_failure: fn(values: [Int]) -> String Never! {
+    bytes: loop value in values -> U8{value}
     if wasm_decode_module(^bytes) == {
         .Ok(_) -> ""
         .Err(error) -> error.render()
@@ -27,18 +27,18 @@ fn raw_module_failure(values: [Int]) -> String Never! {
 }
 
 // The decode failure of a module with the standard header followed by `sections`.
-fn module_failure(sections: [Int]) -> String Never! {
+module_failure: fn(sections: [Int]) -> String Never! {
     values := [Int]{0, 0x61, 0x73, 0x6d, 1, 0, 0, 0}
     loop value in sections -> &values.push(value)
     raw_module_failure(values)
 }
 
 #Test("the mathkit component decodes: one core module, its instance, aliases, lifts and exports") {
-    bytes :: mathkit()
+    bytes: mathkit()
     assert(wasm_is_component(bytes))
-    component :: component_of(bytes)
+    component: component_of(bytes)
     assert_eq(component.modules.len(), 1)
-    core :: component.modules[0]
+    core: component.modules[0]
     assert_eq(core.types.len(), 12)
     assert_eq(core.funcs.len(), 83)
     assert_eq(core.codes.len(), 83)
@@ -50,10 +50,10 @@ fn module_failure(sections: [Int]) -> String Never! {
     assert(core.globals[0].ty.mutable)
     assert_eq(core.globals[0].init.value, 1048576)
     assert_eq(core.exports.len(), 8)
-    memory :: core.export_named("memory") ?? panic("memory export")
+    memory: core.export_named("memory") ?? panic("memory export")
     assert_eq(memory.kind, WASM_EXTERN_MEMORY)
-    gcd :: core.export_named("gcd") ?? panic("gcd export")
-    gcd_type :: core.function_type(gcd.index) ?? panic("gcd type")
+    gcd: core.export_named("gcd") ?? panic("gcd export")
+    gcd_type: core.function_type(gcd.index) ?? panic("gcd type")
     assert_eq(core.types[gcd_type].params, [Int]{WASM_I64, WASM_I64})
     assert_eq(core.types[gcd_type].results, [Int]{WASM_I64})
     assert_eq(core.function_name(gcd.index), "gcd")
@@ -63,31 +63,31 @@ fn module_failure(sections: [Int]) -> String Never! {
     assert_eq(component.core_instances[0].source, 0)
     assert_eq(component.core_memories.len(), 1)
     assert_eq(component.core_memories[0].name, "memory")
-    names :: loop entry in component.exports -> entry.name
+    names: loop entry in component.exports -> entry.name
     assert_eq(names, [String]{"scale", "hypot", "gcd", "is-enabled", "greet"})
-    greet :: component.export_named("greet") ?? panic("greet export")
+    greet: component.export_named("greet") ?? panic("greet export")
     assert_eq(greet.sort, WASM_SORT_FUNC)
-    lift :: component.funcs[greet.index]
+    lift: component.funcs[greet.index]
     assert_eq(lift.origin, WASM_ORIGIN_LIFT)
     assert_eq(component.core_funcs[lift.target].origin, WASM_ORIGIN_ALIAS)
     assert_eq(component.core_funcs[lift.target].name, "greet")
     assert_eq(lift.options.encoding, WASM_ENCODING_UTF8)
     assert_eq(component.core_funcs[lift.options.post_return].name, "cabi_post_greet")
     assert_eq(component.core_funcs[lift.options.realloc].name, "cabi_realloc")
-    greet_type :: component.func_type(greet.index) ?? panic("greet type")
+    greet_type: component.func_type(greet.index) ?? panic("greet type")
     assert_eq(greet_type.kind, WASM_CT_FUNC)
     assert_eq(greet_type.types, [Int]{WASM_PRIM_STRING})
     assert_eq(greet_type.ok, WASM_PRIM_STRING)
-    hypot_type :: component.func_type((component.export_named("hypot") ?? panic("hypot")).index) ?? panic("hypot type")
+    hypot_type: component.func_type((component.export_named("hypot") ?? panic("hypot")).index) ?? panic("hypot type")
     assert_eq(hypot_type.names, [String]{"p0", "p1"})
     assert_eq(hypot_type.types, [Int]{WASM_PRIM_F64, WASM_PRIM_F64})
-    gcd_lift_type :: component.func_type((component.export_named("gcd") ?? panic("gcd")).index) ?? panic("gcd type")
+    gcd_lift_type: component.func_type((component.export_named("gcd") ?? panic("gcd")).index) ?? panic("gcd type")
     assert_eq(gcd_lift_type.ok, WASM_PRIM_S64)
 }
 
 #Test("every function body of the mathkit module decodes to a closed instruction list") {
-    component :: component_of(mathkit())
-    core :: component.modules[0]
+    component: component_of(mathkit())
+    core: component.modules[0]
     total := 0
     loop code in core.codes {
         assert(code.op.len() > 0)
@@ -100,26 +100,26 @@ fn module_failure(sections: [Int]) -> String Never! {
 }
 
 #Test("the compiler-extension fixtures decode, and the random import is visible as an instance import") {
-    names :: [String]{"lint_no_x", "crash", "fuel_loop", "incompatible", "malformed"}
+    names: [String]{"lint_no_x", "crash", "fuel_loop", "incompatible", "malformed"}
     loop name in names {
-        component :: component_of(extension(name))
+        component: component_of(extension(name))
         assert(component.modules.len() >= 1)
     }
-    random :: component_of(extension("imports_random"))
+    random: component_of(extension("imports_random"))
     assert_eq(random.imports.len(), 1)
     assert_eq(random.imports[0].name, "wasi:random/random@0.2.0")
     assert_eq(random.imports[0].kind, WASM_SORT_INSTANCE)
-    instance_type :: random.types[random.imports[0].type_index]
+    instance_type: random.types[random.imports[0].type_index]
     assert_eq(instance_type.kind, WASM_CT_INSTANCE)
     assert_eq(instance_type.names, [String]{"get-random-u64"})
-    analyze :: random.export_named("analyze") ?? panic("analyze export")
+    analyze: random.export_named("analyze") ?? panic("analyze export")
     assert_eq(analyze.sort, WASM_SORT_FUNC)
 }
 
 #Test("text and non-component inputs fail with the component diagnostic") {
     assert_eq(component_failure(fixture("Examples/features/packages/plugin_failure/malformed_guest.wasm")), "not a WebAssembly Component: magic header not detected (at byte 0)")
     assert_eq(component_failure(fixture("Examples/features/foundations/capabilities/guest/hostile/capability_guest.wasm")), "not a WebAssembly Component: magic header not detected (at byte 0)")
-    core_header :: [U8]{U8{0}, U8{0x61}, U8{0x73}, U8{0x6d}, U8{1}, U8{0}, U8{0}, U8{0}}
+    core_header: [U8]{U8{0}, U8{0x61}, U8{0x73}, U8{0x6d}, U8{1}, U8{0}, U8{0}, U8{0}}
     assert_eq(component_failure(core_header), "not a WebAssembly Component: this is a core module (at byte 4)")
 }
 

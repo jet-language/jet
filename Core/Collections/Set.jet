@@ -2,25 +2,25 @@
 //
 // The set stores first-seen values in a deterministic order. All public
 // operations return owned values and leave their inputs unchanged.
-struct StringSet {
+StringSet: struct {
     items: [String]
 }
-fn copy_strings(xs: [String]) -> [String] {
+copy_strings: fn(xs: [String]) -> [String] {
     out := [String]{}
     loop x in xs -> &out.push(x.copy())
     out
 }
 
-fn has_string(xs: [String], item: String) -> Bool Never! {
+has_string: fn(xs: [String], item: String) -> Bool Never! {
     loop x in xs {
         if x == item -> return true
     }
     false
 }
 
-fn new() -> StringSet Never! { StringSet{items: [String]{}} }
+new: fn() -> StringSet Never! { StringSet{items: [String]{}} }
 
-fn from_list(items: [String]) -> StringSet Never! {
+from_list: fn(items: [String]) -> StringSet Never! {
     out := [String]{}
     loop item in items {
         if !has_string(out, item) -> &out.push(item.copy())
@@ -28,14 +28,14 @@ fn from_list(items: [String]) -> StringSet Never! {
     StringSet{items: out}
 }
 
-fn add(s: StringSet, item: String) -> StringSet Never! {
+add: fn(s: StringSet, item: String) -> StringSet Never! {
     if has_string(s.items, item) -> return StringSet{items: copy_strings(s.items)}
     items := copy_strings(s.items)
     &items.push(item.copy())
     StringSet{items: items}
 }
 
-fn discard(s: StringSet, item: String) -> StringSet Never! {
+discard: fn(s: StringSet, item: String) -> StringSet Never! {
     items := [String]{}
     loop x in s.items {
         if x != item -> &items.push(x.copy())
@@ -43,24 +43,24 @@ fn discard(s: StringSet, item: String) -> StringSet Never! {
     StringSet{items: items}
 }
 
-fn remove(s: StringSet, item: String) -> StringSet? Never! {
+remove: fn(s: StringSet, item: String) -> StringSet? Never! {
     if !contains(s, item) -> return None
     Val(discard(s, item))
 }
 
-fn contains(s: StringSet, item: String) -> Bool Never! {
+contains: fn(s: StringSet, item: String) -> Bool Never! {
     has_string(s.items, item)
 }
 
-fn len(s: StringSet) -> Int Never! { s.items.len() }
+len: fn(s: StringSet) -> Int Never! { s.items.len() }
 
-fn is_empty(s: StringSet) -> Bool Never! { s.items.len() == 0 }
+is_empty: fn(s: StringSet) -> Bool Never! { s.items.len() == 0 }
 
-fn to_list(s: StringSet) -> [String] Never! { copy_strings(s.items) }
+to_list: fn(s: StringSet) -> [String] Never! { copy_strings(s.items) }
 
-fn clear(_s: StringSet) -> StringSet Never! { new() }
+clear: fn(_s: StringSet) -> StringSet Never! { new() }
 
-fn union(a: StringSet, b: StringSet) -> StringSet Never! {
+union: fn(a: StringSet, b: StringSet) -> StringSet Never! {
     items := copy_strings(a.items)
     loop x in b.items {
         if !has_string(items, x) -> &items.push(x.copy())
@@ -68,7 +68,7 @@ fn union(a: StringSet, b: StringSet) -> StringSet Never! {
     StringSet{items: items}
 }
 
-fn intersection(a: StringSet, b: StringSet) -> StringSet Never! {
+intersection: fn(a: StringSet, b: StringSet) -> StringSet Never! {
     items := [String]{}
     loop x in a.items {
         if has_string(b.items, x) -> &items.push(x.copy())
@@ -76,7 +76,7 @@ fn intersection(a: StringSet, b: StringSet) -> StringSet Never! {
     StringSet{items: items}
 }
 
-fn difference(a: StringSet, b: StringSet) -> StringSet Never! {
+difference: fn(a: StringSet, b: StringSet) -> StringSet Never! {
     items := [String]{}
     loop x in a.items {
         if !has_string(b.items, x) -> &items.push(x.copy())
@@ -84,26 +84,26 @@ fn difference(a: StringSet, b: StringSet) -> StringSet Never! {
     StringSet{items: items}
 }
 
-fn symmetric_difference(a: StringSet, b: StringSet) -> StringSet Never! {
+symmetric_difference: fn(a: StringSet, b: StringSet) -> StringSet Never! {
     union(difference(a, b), difference(b, a))
 }
 
-fn issubset(a: StringSet, b: StringSet) -> Bool Never! {
+issubset: fn(a: StringSet, b: StringSet) -> Bool Never! {
     loop x in a.items {
         if !contains(b, x) -> return false
     }
     true
 }
 
-fn issuperset(a: StringSet, b: StringSet) -> Bool Never! { issubset(b, a) }
+issuperset: fn(a: StringSet, b: StringSet) -> Bool Never! { issubset(b, a) }
 
-fn isdisjoint(a: StringSet, b: StringSet) -> Bool Never! {
+isdisjoint: fn(a: StringSet, b: StringSet) -> Bool Never! {
     loop x in a.items {
         if has_string(b.items, x) -> return false
     }
     true
 }
 
-fn clone_set(s: StringSet) -> StringSet Never! {
+clone_set: fn(s: StringSet) -> StringSet Never! {
     StringSet{items: copy_strings(s.items)}
 }

@@ -6,16 +6,16 @@ use {
     core.mem.[from_addr, volatile_read]
 }
 
-fn read(value: &Int) -> Int {
-    cell :: value
+read: fn(value: &Int) -> Int {
+    cell: value
     #Unsafe("the borrowed value is live in the caller and the pointer never escapes") {
-        addr :: mem.address_of(cell)
-        pointer :: from_addr<Int>(addr)
+        addr: mem.address_of(cell)
+        pointer: from_addr<Int>(addr)
         volatile_read(pointer)
     }
 }
 
-fn run() {
+run: fn() {
     value := 23
     print(read(&value))
 }

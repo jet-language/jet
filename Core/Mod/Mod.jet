@@ -1,4 +1,4 @@
-package {
+package: {
     name: "core.mod"
     version: "0.0.1"
     edition: "2026"
@@ -9,8 +9,8 @@ package {
     }
 }
 use {
-    core :: core
-    parse :: core.text.parse
+    core: core
+    parse: core.text.parse
 }
 
 // core.mod — a compiled Jet unit loaded under an explicit read grant.
@@ -25,26 +25,26 @@ use {
 /// library. `Unsupported`: another Jet version, ABI or platform built it, or
 /// loading is not available here. Each case holds the provider's reason.
 #Error
-enum ModError {
+ModError: enum {
     Denied(String)
     NotFound(String)
     Invalid(String)
     Unsupported(String)
 }
 
-struct __LoadContext { handle: Int }
+__LoadContext: struct { handle: Int }
 
 impl __LoadContext.Close {
-    fn close(^self) {
+    close: fn(^self) {
         core.mod.__close_context(self.handle)
     }
 }
 
-fn load(path: String, grant: ModGrant) -[FS, Exec]> Mod ModError! {
+load: fn(path: String, grant: ModGrant) -[FS, Exec]> Mod ModError! {
     if !core.mod.__supported() ->
         return Err(ModError.Unsupported("Mod.load is not supported on target `{core.mod.__os()}`"))
-    handle :: core.mod.__read_context(path, grant) ?? return Err(mod_error(err))
-    context :: __LoadContext{handle: handle}
+    handle: core.mod.__read_context(path, grant) ?? return Err(mod_error(err))
+    context: __LoadContext{handle: handle}
     core.mod.__parse_context(handle) ?? return Err(ModError.Invalid(err))
     core.mod.__check_context(handle) ?? return Err(mod_error(err))
     if !core.mod.__context_digest(handle) ->
@@ -53,7 +53,7 @@ fn load(path: String, grant: ModGrant) -[FS, Exec]> Mod ModError! {
     core.mod.__open_context(handle) ?? return Err(ModError.Invalid("cannot map library payload: {err}"))
     text_exports := false
     loop index in 0..<core.mod.__exports_count(handle) {
-        info :: core.mod.__export_info(handle, index)
+        info: core.mod.__export_info(handle, index)
         text_exports = text_exports || info.text
         core.mod.__resolve_export(handle, index) ?? return Err(ModError.Invalid("E1341: library `{core.mod.__context_name(handle)}` metadata names `{info.name}`, but the payload has no `{info.symbol}` export: {err}"))
     }
@@ -63,7 +63,7 @@ fn load(path: String, grant: ModGrant) -[FS, Exec]> Mod ModError! {
     // Finish consumes the raw owner; the lexical Close sees an empty slot.
     Ok(core.mod.__finish_context(handle))
 }
-struct CompiledModule {
+CompiledModule: struct {
     path: String
     handle: Int
 }
@@ -71,13 +71,13 @@ struct CompiledModule {
 // The provider exposes no `jet_mod_unload` operation.  `Mod` owns its native
 // handle and unloads on drop; a legacy value cannot truthfully be turned into
 // a detached carrier, so preserve the export as a typed refusal.
-fn unload(compiled: CompiledModule) -[FS]> CompiledModule ModError! {
+unload: fn(compiled: CompiledModule) -[FS]> CompiledModule ModError! {
     Err(ModError.Unsupported("core.mod.unload is unavailable: loaded Mod handles are provider-owned and unload on drop"))
 }
 
 // The provider reports a refusal as `<Case>: <reason>`; an untagged reason is a
 // malformed request, so `Invalid`.
-fn mod_error(reason: String) -> ModError Never! {
+mod_error: fn(reason: String) -> ModError Never! {
     if reason.starts_with("Denied: ") -> return ModError.Denied(parse.strip_prefix(reason, "Denied: "))
     if reason.starts_with("NotFound: ") -> return ModError.NotFound(parse.strip_prefix(reason, "NotFound: "))
     if reason.starts_with("Invalid: ") -> return ModError.Invalid(parse.strip_prefix(reason, "Invalid: "))
@@ -85,11 +85,11 @@ fn mod_error(reason: String) -> ModError Never! {
     ModError.Invalid(reason)
 }
 
-fn is_loaded(compiled: CompiledModule) -> Bool Never! {
+is_loaded: fn(compiled: CompiledModule) -> Bool Never! {
     compiled.handle > 0
 }
 
-fn path(compiled: CompiledModule) -> String Never! {
+path: fn(compiled: CompiledModule) -> String Never! {
     compiled.path
 }
 

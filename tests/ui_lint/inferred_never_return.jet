@@ -1,24 +1,24 @@
 // L2421 reports `fail` and `stop`: each public body reaches `panic` on its one
 // path. `declared` writes `-> Never` and `maybe` can return first, so neither
 // is reported.
-fn fail(message: String) {
+fail: fn(message: String) {
     panic(message)
 }
 
-fn stop(code: Int) -> Int {
+stop: fn(code: Int) -> Int {
     print("stopping with {code}")
     panic("stopped")
 }
 
-fn declared() -> Never {
+declared: fn() -> Never {
     panic("declared")
 }
 
-fn maybe(flag: Bool) {
+maybe: fn(flag: Bool) {
     if flag -> return
     panic("flag was false")
 }
 
-fn run() {
+run: fn() {
     maybe(true)
 }

@@ -1,8 +1,8 @@
 
-use process :: core.process
+use process: core.process
 
-fn run() {
-    streamed :: process.pipeline([
+run: fn() {
+    streamed: process.pipeline([
         process.cmd(["python3", "-c", "import sys;sys.stdout.write('x'*131072)"]),
         process.cmd(["wc", "-c"])
     ]) ?? panic("stream pipeline failed")
@@ -29,7 +29,7 @@ fn run() {
         .Err(_) -> print("early:error")
     }
 
-    nonzero :: process.pipeline([
+    nonzero: process.pipeline([
         process.cmd(["sh", "-c", "printf out; printf err >&2; exit 7"]),
         process.cmd(["cat"])
     ]) ?? panic("nonzero pipeline failed")

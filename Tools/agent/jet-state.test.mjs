@@ -31,7 +31,7 @@ function fixture(t) {
   git('init', '-b', 'master'); git('config', 'user.name', 'Fixture'); git('config', 'user.email', 'fixture@example.invalid');
   file('memory.jet', '// memory model initial\n'); file('delete-memory.jet', '// memory deleted\n');
   file('neutral.jet', '// unrelated initial\n');
-  file(SYNTAX, 'LEXICAL_LEDGER :: [LexicalEntry]{\n    { spelling: "borrow", meaning: "memory model borrow", decision: "D-MEM" },\n}\n');
+  file(SYNTAX, 'LEXICAL_LEDGER: [LexicalEntry]{\n    { spelling: "borrow", meaning: "memory model borrow", decision: "D-MEM" },\n}\n');
   file('Docs/research/memory.md', '# Memory model\n\nMechanism: https://example.org/paper?edition=2#evaluation\n');
   file('Docs/proposals/build.md', '# Build system\n\nUnratified packaging proposal.\n');
   const state = stateOf([card(1, 'ready')], [decision('D-MEM', 'c1')]);
@@ -170,7 +170,7 @@ test('dirty file content changes alter freshness fingerprint even when XY status
 });
 test('missing dev and unsupported registry form are unknown, not empty current facts', t => {
   const f = fixture(t); f.git('branch', '-D', 'dev');
-  f.file(SYNTAX, 'LEXICAL_LEDGER :: [LexicalEntry]{\n    { spelling: computed(), meaning: "memory", decision: "D-MEM" },\n}\n');
+  f.file(SYNTAX, 'LEXICAL_LEDGER: [LexicalEntry]{\n    { spelling: computed(), meaning: "memory", decision: "D-MEM" },\n}\n');
   const digest = collectDigest({ root: f.root, subject: 'memory' });
   assert.equal(digest.providers.development_branch.status, 'unknown');
   assert.equal(digest.providers.syntax.status, 'unknown'); assert.deepEqual(digest.idioms, []);

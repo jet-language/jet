@@ -1,4 +1,4 @@
-package {
+package: {
     name: "serde_encoding_cbor_stream"
     version: "0.1.0"
     authority: { allow: [Exec, FS, FS.Read, IO, Mem.Alloc, Time.Wait] }
@@ -6,13 +6,13 @@ package {
 
 // D-ENCSTREAM-SURFACE1=A: bounded CBOR reader/writer lifecycle.
 use {
-    encoding :: core.encoding
-    cbor :: core.encoding.cbor
-    files :: core.files
+    encoding: core.encoding
+    cbor: core.encoding.cbor
+    files: core.files
 }
 
-fn write_catalog(path: Path) -> Bool (EncodingError | IOError)! {
-    output :: files.create(path) ?? return Err(err)
+write_catalog: fn(path: Path) -> Bool (EncodingError | IOError)! {
+    output: files.create(path) ?? return Err(err)
     writer := cbor.writer(^output, encoding.EncodingLimits.safe()) ?? return Err(err)
     &writer.write(encoding.DataEvent.ObjectStart) ?? return Err(err)
     &writer.write(encoding.DataEvent.Key("ok")) ?? return Err(err)
@@ -23,17 +23,17 @@ fn write_catalog(path: Path) -> Bool (EncodingError | IOError)! {
     return Ok(true)
 }
 
-fn run() (EncodingError | IOError)! {
+run: fn() (EncodingError | IOError)! {
     // Scratch output belongs in a fresh temp directory, never the working
     // directory the example happens to run from.
-    scratch :: files.temp_dir("jet-encoding-cbor") ?? return
-    path :: Path.from(scratch.path).join("catalog.cbor")
+    scratch: files.temp_dir("jet-encoding-cbor") ?? return
+    path: Path.from(scratch.path).join("catalog.cbor")
     write_catalog(path) ?? return
-    input :: files.open(path) ?? return
+    input: files.open(path) ?? return
     reader := cbor.reader(^input) ?? return
     loop {
         // A failed read propagates; `??` handles the end of the stream.
-        _value :: &reader.next() ?? break
+        _value: &reader.next() ?? break
         print("event")
     }
     print("eof")

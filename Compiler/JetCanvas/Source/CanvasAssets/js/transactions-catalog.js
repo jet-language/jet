@@ -492,7 +492,7 @@
   }
 
   function setTeachingEmptyCanvasState() {
-    setCanvasState("empty", "No functions yet", "Add fn run() in Jet source. Canvas will project the source here; no graph file is created.", [
+    setCanvasState("empty", "No functions yet", "Add run: fn() in Jet source. Canvas will project the source here; no graph file is created.", [
         { label: "Open Source", run: openSourceRecovery },
       { label: "Reload", primary: true, run: () => loadGraph(currentCanvasSourceId()) }
     ]);

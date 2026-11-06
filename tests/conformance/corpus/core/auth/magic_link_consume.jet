@@ -1,14 +1,14 @@
 // core-conformance: core.auth.magic_link_consume
-package {
+package: {
     name: "conformance_auth_magic_link_consume"
     version: "0.1.0"
     authority: { allow: [DB, IO, Mem.Alloc, Rand] }
 }
-use auth :: core.auth
+use auth: core.auth
 
-fn run() {
+run: fn() {
     auth.register_user("alice@example.com", "argon2id:demo") ?? panic("register")
-    token :: auth.magic_link_issue("alice@example.com", 1_700_000_000_000, 600_000) ?? panic("issue")
-    result :: auth.magic_link_consume(token, 1_700_000_000_100, 3_600_000) ?? panic("consume")
+    token: auth.magic_link_issue("alice@example.com", 1_700_000_000_000, 600_000) ?? panic("issue")
+    result: auth.magic_link_consume(token, 1_700_000_000_100, 3_600_000) ?? panic("consume")
     print(auth.session_user(result))
 }

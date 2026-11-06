@@ -1,14 +1,14 @@
 // Declaration checks of the build graph, ported 1:1 from crates/jet-comptime
 // Build/validation.rs (the plugin and generated-module checks belong to the
-// unported `fn build` surface; see Model.jet).
+// unported `build: fn` surface; see Model.jet).
 
 use {
-    files :: core.files
+    files: core.files
 }
 
 // Rust `resolve_under`: `rel` joined under `base`; `.` components are
 // dropped and `..`, a root, or a prefix refuses the path.
-fn build_resolve_under(base: String, rel: String) -> String BuildIOError! {
+build_resolve_under: fn(base: String, rel: String) -> String BuildIOError! {
     if rel.starts_with("/") -> return Err(BuildIOError.new(.InvalidInput, "build output path escapes base directory"))
     out := base
     loop part in rel.split("/") {
@@ -19,7 +19,7 @@ fn build_resolve_under(base: String, rel: String) -> String BuildIOError! {
     Ok(out)
 }
 
-fn build_check_name(name: String, kind: BuildNameKind) -> String HermeticBuildError! {
+build_check_name: fn(name: String, kind: BuildNameKind) -> String HermeticBuildError! {
     if name.trim() == "" {
         return Err(if kind == {
             .Target -> HermeticBuildError.EmptyTargetName
@@ -32,7 +32,7 @@ fn build_check_name(name: String, kind: BuildNameKind) -> String HermeticBuildEr
     Ok(name)
 }
 
-fn build_validate_toolchain(name: String, spec: ToolchainSpec) HermeticBuildError! {
+build_validate_toolchain: fn(name: String, spec: ToolchainSpec) HermeticBuildError! {
     if spec.host_triple.trim() == "" || spec.target_triple.trim() == "" -> return Err(HermeticBuildError.EmptyToolchainTriple(name))
     if spec.sdk == .Val(sdk) {
         build_validate_identity(name, sdk.name, sdk.provenance)
@@ -40,7 +40,7 @@ fn build_validate_toolchain(name: String, spec: ToolchainSpec) HermeticBuildErro
     }
     if spec.linker == .Val(linker) -> build_validate_identity(name, linker.name, linker.provenance)
     loop tool in spec.tools.keys() {
-        path :: spec.tools[tool]
+        path: spec.tools[tool]
         if tool.trim() == "" || path.trim() == "" || build_has_nul(path) -> return Err(HermeticBuildError.EmptyIdentityField(name))
     }
     loop mount in spec.mounts {
@@ -51,27 +51,27 @@ fn build_validate_toolchain(name: String, spec: ToolchainSpec) HermeticBuildErro
     build_validate_provenance(name, spec.provenance)
 }
 
-fn build_has_nul(text: String) -> Bool Never! {
+build_has_nul: fn(text: String) -> Bool Never! {
     loop byte in text.bytes() {
         if Int.from_u8(byte) == 0 -> return true
     }
     false
 }
 
-fn build_path_has_parent(path: String) -> Bool Never! {
+build_path_has_parent: fn(path: String) -> Bool Never! {
     loop part in path.split("/") {
         if part == ".." -> return true
     }
     false
 }
 
-fn build_validate_identity(name: String, field: String, provenance: BuildProvenance) HermeticBuildError! {
+build_validate_identity: fn(name: String, field: String, provenance: BuildProvenance) HermeticBuildError! {
     if field.trim() == "" -> return Err(HermeticBuildError.EmptyIdentityField(name))
     build_validate_provenance(name, provenance)
 }
 
-fn build_validate_probe(name: String, spec: ProbeSpec) HermeticBuildError! {
-    invalid :: if spec.kind == {
+build_validate_probe: fn(name: String, spec: ProbeSpec) HermeticBuildError! {
+    invalid: if spec.kind == {
         .FindProgram(program) -> program.trim() == ""
         .PkgConfig(package, _) -> package.trim() == ""
         .HeaderCheck(header) -> header.trim() == "" || !build_valid_header_name(header)
@@ -92,17 +92,17 @@ fn build_validate_probe(name: String, spec: ProbeSpec) HermeticBuildError! {
 
 // A header name: no NUL, newline, quote or angle bracket; relative; every
 // component a plain name.
-fn build_valid_header_name(header: String) -> Bool Never! {
+build_valid_header_name: fn(header: String) -> Bool Never! {
     if header == "" -> return false
     loop byte in header.bytes() {
         // NUL, LF, CR, `"`, `<`, `>`.
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         if code == 0 || code == 10 || code == 13 || code == 34 || code == 60 || code == 62 -> return false
     }
     if header.starts_with("/") -> return false
     // `Path::components` keeps only a leading `.` (CurDir); interior `.`
     // components are dropped, `..` is ParentDir.
-    parts :: header.split("/").to_list()
+    parts: header.split("/").to_list()
     if parts.len() > 0 && parts[0] == "." -> return false
     loop part in parts {
         if part == ".." -> return false
@@ -110,8 +110,8 @@ fn build_valid_header_name(header: String) -> Bool Never! {
     true
 }
 
-fn build_validate_provenance(name: String, provenance: BuildProvenance) HermeticBuildError! {
-    blank :: if provenance.source == {
+build_validate_provenance: fn(name: String, provenance: BuildProvenance) HermeticBuildError! {
+    blank: if provenance.source == {
         .JetpackDependency(dep) -> dep.trim() == ""
         .AmbientRecord(dep) -> dep.trim() == ""
         .UserDeclared(dep) -> dep.trim() == ""
@@ -123,7 +123,7 @@ fn build_validate_provenance(name: String, provenance: BuildProvenance) Hermetic
     }
 }
 
-fn build_validate_action(name: String, spec: ActionSpec) HermeticBuildError! {
+build_validate_action: fn(name: String, spec: ActionSpec) HermeticBuildError! {
     if spec.argv.len() == 0 -> return Err(HermeticBuildError.EmptyActionArgv(name))
     loop arg in spec.argv {
         if arg.trim() == "" -> return Err(HermeticBuildError.EmptyActionArgv(name))
@@ -152,7 +152,7 @@ fn build_validate_action(name: String, spec: ActionSpec) HermeticBuildError! {
 }
 
 // Rust `validate_action_output_owners`: one owner per declared output.
-fn build_validate_action_output_owners(actions: [HermeticBuildAction]) HermeticBuildError! {
+build_validate_action_output_owners: fn(actions: [HermeticBuildAction]) HermeticBuildError! {
     owners := [String: String]{}
     loop action in actions {
         loop output in action.outputs {
@@ -164,7 +164,7 @@ fn build_validate_action_output_owners(actions: [HermeticBuildAction]) HermeticB
     }
 }
 
-fn build_validate_paths(paths: [String]) HermeticBuildError! {
+build_validate_paths: fn(paths: [String]) HermeticBuildError! {
     loop path in paths {
         if path.trim() == "" -> return Err(HermeticBuildError.EmptyPath)
         if !build_path_is_relative_normal(path) -> return Err(HermeticBuildError.InvalidPath(path))

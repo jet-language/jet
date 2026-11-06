@@ -1,17 +1,17 @@
-package {
+package: {
     name: "release_frozen_task_all"
     authority: { allow: [IO, Mem.Alloc, Time.Wait] }
 }
 
-struct Snapshot {
+Snapshot: struct {
     value: Int
 }
 
-fn get(s: Snapshot) -> Int { s.value }
+get: fn(s: Snapshot) -> Int { s.value }
 
-fn run() {
+run: fn() {
     source := Snapshot{value: 41}
-    frozen :: freeze(source)
-    values :: task.all {get(frozen), get(frozen)} ?? panic("task.all failed")
+    frozen: freeze(source)
+    values: task.all {get(frozen), get(frozen)} ?? panic("task.all failed")
     print(values[0], values[1])
 }

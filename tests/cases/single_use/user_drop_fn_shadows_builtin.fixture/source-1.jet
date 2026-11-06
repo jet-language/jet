@@ -1,21 +1,21 @@
 
-#SingleUse struct Lock {
+#SingleUse Lock: struct {
     resource: String,
 }
-fn acquire(resource: String) -> Lock {
+acquire: fn(resource: String) -> Lock {
     return Lock{ resource: resource }
 }
-fn release(lock: ^Lock) {
+release: fn(lock: ^Lock) {
     print(lock.resource)
 }
 
 
-fn drop(n: Int) -> Int {
+drop: fn(n: Int) -> Int {
     return n + 1
 }
-fn run() {
-    db :: acquire("db")
+run: fn() {
+    db: acquire("db")
     release(^db)
-    x :: drop(41)
+    x: drop(41)
     print("{x}")
 }

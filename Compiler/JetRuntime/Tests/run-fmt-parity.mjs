@@ -57,7 +57,7 @@ if (registered.length !== 23 || registered.some(kernel => !kernels.includes(kern
 if (new Set(cases.map(row => row.id)).size !== cases.length) throw Error('duplicate case id');
 const quote = text => JSON.stringify(text);
 const jetArg = arg => arg.kind === 'text' ? quote(arg.value.replace(/\{/g, '{{').replace(/\}/g, '}}')) : arg.value;
-const jet = `use fmt :: fmt_source\nfn run() {\n${cases.map(row => `    print("CASE ${row.id}")\n    print(fmt.${members[row.kernel] ?? row.kernel}(${row.args.map(jetArg).join(', ')}))\n    print("END ${row.id}")`).join('\n')}\n}\n`;
+const jet = `use fmt: fmt_source\nrun: fn() {\n${cases.map(row => `    print("CASE ${row.id}")\n    print(fmt.${members[row.kernel] ?? row.kernel}(${row.args.map(jetArg).join(', ')}))\n    print("END ${row.id}")`).join('\n')}\n}\n`;
 function run(binary, args, name, cwd = out) {
   const result = spawnSync(binary, args, { cwd, encoding: 'utf8', maxBuffer: 1 << 27, timeout: 0 });
   writeFileSync(join(out, `${name}.stdout`), result.stdout ?? '');
@@ -95,7 +95,7 @@ if (mode === 'prepare') {
   const wanted = blocks(expected), got = blocks(actual);
   const sourceLines = readFileSync(join(out, 'fmt_source.jet'), 'utf8').split('\n');
   const rows = cases.map(row => ({ id: row.id, kernel: row.kernel, input: row.args,
-    source: `Core/Text/Fmt.jet:${sourceLines.findIndex(line => new RegExp(`^(?:pub )?fn ${members[row.kernel] ?? row.kernel}\\(`).test(line)) + 1}`,
+    source: `Core/Text/Fmt.jet:${sourceLines.findIndex(line => new RegExp(`^(?:pub )?${members[row.kernel] ?? row.kernel}: fn\\(`).test(line)) + 1}`,
     byte_equal: wanted.get(row.id) === got.get(row.id), expected: wanted.get(row.id), actual: got.get(row.id) }));
   const failures = rows.filter(row => !row.byte_equal);
   writeFileSync(join(out, 'parity.json'), JSON.stringify({ label: 'Rust-seed source-body byte parity; NOT native selector migration parity', checker: { path: checkerPath, sha256: checkerSha256 }, expected_sha256: createHash('sha256').update(expected).digest('hex'), kernels: kernels.length, cases: cases.length, failures: failures.length, stdout_equal: actual === expected, rows }, null, 2) + '\n');

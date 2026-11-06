@@ -1,37 +1,37 @@
 // 34 — Parallel file scan (D-EXAMPLES-SHORTPATH1=A).
 // Short path: `para_map`. Expert channel+spawn+join → parallel_scan_expert.jet.
-package {
+package: {
     name: "parallel_scan"
     authority: { allow: [Env, Exec.Args, FS.Read, FS.Write, IO, Mem.Alloc] }
 }
 
 use {
-    fs :: core.files
-    process :: core.process
-    env :: core.sys
+    fs: core.files
+    process: core.process
+    env: core.sys
 }
 
-fn count_lines(text: String) -> Int { text.lines().len() }
+count_lines: fn(text: String) -> Int { text.lines().len() }
 
-fn scan_one(file_path: String) -> String {
-    text :: fs.read(file_path) ?? return "{file_path}: unreadable"
-    lines :: count_lines(text)
+scan_one: fn(file_path: String) -> String {
+    text: fs.read(file_path) ?? return "{file_path}: unreadable"
+    lines: count_lines(text)
     return "{file_path}: {lines} lines, {text.len()} chars"
 }
 
-fn default_paths() -> [String] {
+default_paths: fn() -> [String] {
     // Self-contained fixtures under /tmp so the golden does not depend on CWD.
-    a :: Path.from("/tmp").join("jet_parallel_scan_a.txt").to_string()
-    b :: Path.from("/tmp").join("jet_parallel_scan_b.txt").to_string()
-    _ :: fs.write(a, "one\ntwo\n")
-    _ :: fs.write(b, "alpha\nbeta\ngamma\n")
+    a: Path.from("/tmp").join("jet_parallel_scan_a.txt").to_string()
+    b: Path.from("/tmp").join("jet_parallel_scan_b.txt").to_string()
+    _: fs.write(a, "one\ntwo\n")
+    _: fs.write(b, "alpha\nbeta\ngamma\n")
     return [a, b]
 }
 
-fn paths_from_args() -> [String] { process.args() }
+paths_from_args: fn() -> [String] { process.args() }
 
-fn gather_paths() -> [String] {
-    from_args :: paths_from_args()
+gather_paths: fn() -> [String] {
+    from_args: paths_from_args()
     if from_args.len() > 0 -> return from_args
     if (env.get("INTERACTIVE") ?? "") == "1" {
         print("(interactive paths omitted in short-path demo — pass files on the CLI)")
@@ -39,8 +39,8 @@ fn gather_paths() -> [String] {
     return default_paths()
 }
 
-fn run() {
-    paths :: gather_paths()
+run: fn() {
+    paths: gather_paths()
     if paths.len() == 0 {
         print("no files to scan")
         return

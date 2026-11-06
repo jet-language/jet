@@ -6,22 +6,22 @@ use {
     jet_sema.[SemaGraphModuleResult]
 }
 
-struct JetDriverCDependency {
+JetDriverCDependency: struct {
     library: String
     root: String
     target: String
 }
 
-fn jet_driver_c_dependencies(snapshot: JetDriverAuthorizedSourceSnapshot) -> [JetDriverCDependency] {
+jet_driver_c_dependencies: fn(snapshot: JetDriverAuthorizedSourceSnapshot) -> [JetDriverCDependency] {
     declarations := [JetDriverCDependency]{}
     diagnostics := [Diagnostic]{}
     loop index in 0..<snapshot.roots.len() {
-        package :: jet_driver_parse_package_root(snapshot, index, &diagnostics)
+        package: jet_driver_parse_package_root(snapshot, index, &diagnostics)
         loop dependency in package.dependencies {
             if !dependency.source.starts_with("c@") -> next
             target := dependency.source.removeprefix("c@").trim()
-            lexed :: lex_config(target.bytes())
-            tokens :: lexed.tokens
+            lexed: lex_config(target.bytes())
+            tokens: lexed.tokens
             if tokens.len() > 0 && (tokens[0].kind == TOKEN_STRING || tokens[0].kind == TOKEN_RAW_STRING) -> target = token_decoded(lexed.tables, tokens[0])
             &declarations.push(JetDriverCDependency{library: dependency.name, root: snapshot.roots[index].canonical_path, target: target})
         }
@@ -31,13 +31,13 @@ fn jet_driver_c_dependencies(snapshot: JetDriverAuthorizedSourceSnapshot) -> [Je
 
 // One parameter of an inline C body's C ABI: its checked type, by pointer
 // when the declaration writes it.
-struct JetDriverInlineCParam { ty: Type, write: Bool }
+JetDriverInlineCParam: struct { ty: Type, write: Bool }
 
 // One `#FFI(c)` (or `#FFI(cpp)`) inline body of the checked foreign rows:
 // its checked C ABI, the triple-quoted body within its declaration span
 // (None when the span holds none) and its position among the program's
 // foreign rows in foreign identity order, which names its translation unit.
-struct JetDriverInlineC {
+JetDriverInlineC: struct {
     index: Int
     name: String
     symbol: String
@@ -50,7 +50,7 @@ struct JetDriverInlineC {
 // One checked foreign declaration (`#Import(<lang>)` or `#FFI(<lang>)`): its
 // name, its language head (jet_driver_foreign_language_head), its linked
 // symbol and its source site, a file path and 1-based line.
-struct JetDriverForeignDeclaration {
+JetDriverForeignDeclaration: struct {
     name: String
     language: String
     symbol: String
@@ -63,7 +63,7 @@ struct JetDriverForeignDeclaration {
 // links (sorted; transitive without the direct ones), whether a C or Rust
 // foreign row needs the program's C platform, and the inline C bodies. The
 // declarations, in foreign identity order, are every checked foreign row.
-struct JetDriverForeignLinkFacts {
+JetDriverForeignLinkFacts: struct {
     libraries: [String]
     direct_links: [String]
     transitive_links: [String]
@@ -72,23 +72,23 @@ struct JetDriverForeignLinkFacts {
     declarations: [JetDriverForeignDeclaration]
 }
 
-fn jet_driver_foreign_link_empty() -> JetDriverForeignLinkFacts Never! {
+jet_driver_foreign_link_empty: fn() -> JetDriverForeignLinkFacts Never! {
     JetDriverForeignLinkFacts{libraries: [String]{}, direct_links: [String]{}, transitive_links: [String]{}, c_or_rust_rows: false, inline_c: [JetDriverInlineC]{}, declarations: [JetDriverForeignDeclaration]{}}
 }
 
 // The cache identity every C provider link unit carries.
-fn jet_driver_foreign_link_cache_identity(facts: JetDriverForeignLinkFacts) -> String Never! {
+jet_driver_foreign_link_cache_identity: fn(facts: JetDriverForeignLinkFacts) -> String Never! {
     "direct={facts.direct_links.join(",")};transitive={facts.transitive_links.join(",")}"
 }
 
-fn jet_driver_foreign_push_unique(rows: &[String], value: String) Never! {
+jet_driver_foreign_push_unique: fn(rows: &[String], value: String) Never! {
     if !rows.contains(value) -> &rows.push(value)
 }
 
 // The language head before any `:`; every head other than C, C++ and
 // assembly (an inline body's `rust`, `zig`, ...) is Rust.
-fn jet_driver_foreign_language_head(language: String) -> String Never! {
-    head :: language.split(":").to_list()[0].lower()
+jet_driver_foreign_language_head: fn(language: String) -> String Never! {
+    head: language.split(":").to_list()[0].lower()
     if head == "c" -> return "c"
     if head == "cpp" || head == "c++" -> return "cpp"
     if head == "asm" || head == "assembly" -> return "asm"
@@ -96,10 +96,10 @@ fn jet_driver_foreign_language_head(language: String) -> String Never! {
 }
 
 // The triple-quoted body within `span` of the source file `path`.
-fn jet_driver_inline_c_body(source_files: [SourceFile], path: String, start: Int, end: Int) -> String? Never! {
+jet_driver_inline_c_body: fn(source_files: [SourceFile], path: String, start: Int, end: Int) -> String? Never! {
     loop source_file in source_files {
         if source_file.path != path -> next
-        bytes :: source_file.source.bytes()
+        bytes: source_file.source.bytes()
         if start < 0 || end < start || end > bytes.len() -> return None
         open := -1
         at := start
@@ -121,11 +121,11 @@ fn jet_driver_inline_c_body(source_files: [SourceFile], path: String, start: Int
 
 // The 1-based line of byte `offset` in the source file `path`; 0 when the
 // file is not among `source_files`.
-fn jet_driver_foreign_line(source_files: [SourceFile], path: String, offset: Int) -> Int Never! {
+jet_driver_foreign_line: fn(source_files: [SourceFile], path: String, offset: Int) -> Int Never! {
     loop source_file in source_files {
         if source_file.path != path -> next
-        bytes :: source_file.source.bytes()
-        end :: if offset < bytes.len() -> offset else -> bytes.len()
+        bytes: source_file.source.bytes()
+        end: if offset < bytes.len() -> offset else -> bytes.len()
         line := 1
         loop at in 0..<end {
             if bytes[at] == (U8{10}) -> line += 1
@@ -137,7 +137,7 @@ fn jet_driver_foreign_line(source_files: [SourceFile], path: String, offset: Int
 
 // The foreign link facts of the checked modules `modules`; inline bodies
 // read their declaration span in `source_files`.
-fn jet_driver_foreign_link_facts(modules: [SemaGraphModuleResult], source_files: [SourceFile]) -> JetDriverForeignLinkFacts Never! {
+jet_driver_foreign_link_facts: fn(modules: [SemaGraphModuleResult], source_files: [SourceFile]) -> JetDriverForeignLinkFacts Never! {
     facts := jet_driver_foreign_link_empty()
     direct := [String]{}
     transitive := [String]{}
@@ -153,7 +153,7 @@ fn jet_driver_foreign_link_facts(modules: [SemaGraphModuleResult], source_files:
             loop library in provider.transitive_links -> jet_driver_foreign_push_unique(&transitive, library)
         }
         loop (row_index, row) in semantic_module.foreign_functions {
-            head :: jet_driver_foreign_language_head(row.language)
+            head: jet_driver_foreign_language_head(row.language)
             if head == "c" || head == "rust" -> facts.c_or_rust_rows = true
             &ids.push(stable_id("foreign", row.key))
             &keys.push(row.key)
@@ -172,7 +172,7 @@ fn jet_driver_foreign_link_facts(modules: [SemaGraphModuleResult], source_files:
     loop position in 0..<ids.len() -> &order.push(position)
     &order.sort_by((left: Int, right: Int) -> if ids[left] != ids[right] -> ids[left] <=> ids[right] else -> keys[left] <=> keys[right])
     loop (index, position) in order {
-        row :: modules[modules_of[position]].foreign_functions[rows[position]]
+        row: modules[modules_of[position]].foreign_functions[rows[position]]
         &facts.declarations.push(JetDriverForeignDeclaration{
             name: row.name,
             language: jet_driver_foreign_language_head(row.language),
@@ -181,9 +181,9 @@ fn jet_driver_foreign_link_facts(modules: [SemaGraphModuleResult], source_files:
             line: jet_driver_foreign_line(source_files, row.source_file, row.span.start),
         })
         if !row.path.starts_with("jet_ffi_") || row.symbol != "jet_inline_{row.path}" -> next
-        head :: jet_driver_foreign_language_head(row.language)
+        head: jet_driver_foreign_language_head(row.language)
         if head != "c" && head != "cpp" -> next
-        params :: loop param in row.params -> JetDriverInlineCParam{ty: param.ty, write: param.convention == AccessConvention.Write}
+        params: loop param in row.params -> JetDriverInlineCParam{ty: param.ty, write: param.convention == AccessConvention.Write}
         &facts.inline_c.push(JetDriverInlineC{
             index: index,
             name: row.name,

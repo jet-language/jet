@@ -1,7 +1,7 @@
-use auth :: core.auth
-fn run() {
-    session :: auth.Session{id: "sess-live-bearer", user_id: "alice", expires_at: 42, cookie: "jet_session=sess-live-bearer"}
-    shown :: auth.session_show(session)
+use auth: core.auth
+run: fn() {
+    session: auth.Session{id: "sess-live-bearer", user_id: "alice", expires_at: 42, cookie: "jet_session=sess-live-bearer"}
+    shown: auth.session_show(session)
     assert(shown == "Session(id=<redacted>, user=alice, exp=42, cookie_len=28)")
     assert(!shown.contains("sess-live-bearer"))
     if auth.oauth_begin("google") == {

@@ -6,28 +6,28 @@ use {
     jetpack_artifact_store.[ArtifactDigest, ArtifactStore, ArtifactStoreError]
 }
 
-struct BuildArtifactStoreHandle {
+BuildArtifactStoreHandle: struct {
     store: ArtifactStore
 
     // The store named by `JET_STORE_DIR` (else the default store root). Rust
     // reports the open refusal as its display string; `{err}` is that text.
-    fn open() -[FS, Env, Rand]> BuildArtifactStoreHandle ArtifactStoreError! {
+    open: fn() -[FS, Env, Rand]> BuildArtifactStoreHandle ArtifactStoreError! {
         Ok(BuildArtifactStoreHandle{store: ArtifactStore.from_env()})
     }
 
-    fn at(root: String) -[FS, Env, Rand]> BuildArtifactStoreHandle ArtifactStoreError! {
+    at: fn(root: String) -[FS, Env, Rand]> BuildArtifactStoreHandle ArtifactStoreError! {
         Ok(BuildArtifactStoreHandle{store: ArtifactStore.new(root)})
     }
 
-    fn put_blob(self, bytes: [U8]) -[FS, Env, Exec, Time, Rand]> ContentDigest BuildIOError! {
-        object :: self.store.publish_blob(bytes) ?? return Err(build_store_io_error(err))
+    put_blob: fn(self, bytes: [U8]) -[FS, Env, Exec, Time, Rand]> ContentDigest BuildIOError! {
+        object: self.store.publish_blob(bytes) ?? return Err(build_store_io_error(err))
         ContentDigest.parse("sha256:{object.digest().to_hex()}") ?? return Err(BuildIOError.new(.InvalidData, err.message))
     }
 
-    fn get_blob(self, digest: ContentDigest) -[FS, Env, Exec, Time, Rand]> [U8]? BuildIOError! {
+    get_blob: fn(self, digest: ContentDigest) -[FS, Env, Exec, Time, Rand]> [U8]? BuildIOError! {
         if !digest.as_str().starts_with("sha256:") -> return Err(BuildIOError.new(.InvalidInput, "artifact digest has no sha256 prefix"))
-        parsed :: ArtifactDigest.from_hex(digest.as_str().removeprefix("sha256:")) ?? return Err(build_store_io_error(err))
-        found :: if self.store.blob_by_digest(parsed) == {
+        parsed: ArtifactDigest.from_hex(digest.as_str().removeprefix("sha256:")) ?? return Err(build_store_io_error(err))
+        found: if self.store.blob_by_digest(parsed) == {
             .Val(bytes) -> Val(bytes)
             .None -> None
             .Err(error) -> { return Err(build_store_io_error(error)) }
@@ -35,12 +35,12 @@ struct BuildArtifactStoreHandle {
         Ok(found)
     }
 
-    fn put_record(self, key: String, bytes: [U8]) BuildIOError! -[FS, Env, Exec, Time, Rand]> {
+    put_record: fn(self, key: String, bytes: [U8]) BuildIOError! -[FS, Env, Exec, Time, Rand]> {
         self.store.publish_action(self.store.action(key), bytes) ?? return Err(build_store_io_error(err))
     }
 
-    fn get_record(self, key: String) -[FS, Env, Exec, Time, Rand]> [U8]? BuildIOError! {
-        found :: if self.store.get_action(self.store.action(key)) == {
+    get_record: fn(self, key: String) -[FS, Env, Exec, Time, Rand]> [U8]? BuildIOError! {
+        found: if self.store.get_action(self.store.action(key)) == {
             .Val(bytes) -> Val(bytes)
             .None -> None
             .Err(error) -> { return Err(build_store_io_error(error)) }
@@ -50,6 +50,6 @@ struct BuildArtifactStoreHandle {
 }
 
 // Rust `store_io_error`: every store refusal is an `Other` I/O error.
-fn build_store_io_error(error: ArtifactStoreError) -> BuildIOError Never! {
+build_store_io_error: fn(error: ArtifactStoreError) -> BuildIOError Never! {
     BuildIOError.new(.Other, "{error}")
 }

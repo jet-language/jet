@@ -1,13 +1,13 @@
 
-use browser :: core.web.browser
+use browser: core.web.browser
 
-fn outcome(endpoint: String) -> String {
-    session :: browser.connect(endpoint) ?? return "caught"
+outcome: fn(endpoint: String) -> String {
+    session: browser.connect(endpoint) ?? return "caught"
     session.close() ?? return "close-error"
     return "connected"
 }
 
-fn run() {
+run: fn() {
     print(outcome("ws://127.0.0.1:{free-port:invalid}/session"))
     print(outcome("ws://127.0.0.1:{free-port:codec_surrogate}/session"))
 }

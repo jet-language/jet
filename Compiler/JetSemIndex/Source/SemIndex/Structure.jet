@@ -7,13 +7,13 @@
 // normalization/bounds/call-row/breadcrumb helpers are separate exercised
 // algorithms. No full structural or checked-index parity is claimed.
 use {
-    semindex_text :: core.text
+    semindex_text: core.text
     jet_foundation.[Expr, Stmt, Item, Func, Param, Marker, Span, NamedSpan, Program, NameFacts, NameModule, NameDeclaration, NameAlias, NameReference, StructureFact, expr_span]
     jet_sema.[SemaCompilerModuleSource, SemaRegistrationGraph, SemaGraphResult]
     jet_pkg_model.[EffectBudgetProgram, PackageEffectSummary]
 }
 
-fn semindex_state_marker_path(expr: Expr) -> NamedSpan? Never! {
+semindex_state_marker_path: fn(expr: Expr) -> NamedSpan? Never! {
     if expr == {
         .Ident(name, span, _) -> Val(NamedSpan{name: name, span: span})
         .Field(base, member, span, _) -> {
@@ -24,17 +24,17 @@ fn semindex_state_marker_path(expr: Expr) -> NamedSpan? Never! {
     }
 }
 
-fn semindex_collect_state_marker_references_for_method(db: &SymbolDB, ctx: WalkCtx, names: NameFacts, method: Func, mp: String) Never! {
+semindex_collect_state_marker_references_for_method: fn(db: &SymbolDB, ctx: WalkCtx, names: NameFacts, method: Func, mp: String) Never! {
     loop marker in method.markers {
-        slots :: if marker.name == "State" -> 1 else if marker.name == "Transition" -> 2 else -> 0
+        slots: if marker.name == "State" -> 1 else if marker.name == "Transition" -> 2 else -> 0
         loop slot in 0..<slots {
             if slot >= marker.args.len() -> next
             if marker.args[slot] == .Expr(expr) {
                 if semindex_state_marker_path(expr) == .Val(path) {
                     if path.name == "_" -> next
-                    leaves :: path.name.split(".")
+                    leaves: path.name.split(".")
                     name := leaves[leaves.len() - 1] // #4303
-                    reference :: semindex_scoped_ref(&db, ctx, names, name, path.span, mp)
+                    reference: semindex_scoped_ref(&db, ctx, names, name, path.span, mp)
                     &db.refs.push(reference)
                 }
             }
@@ -42,7 +42,7 @@ fn semindex_collect_state_marker_references_for_method(db: &SymbolDB, ctx: WalkC
     }
 }
 
-fn semindex_collect_state_marker_references(db: &SymbolDB, ctx: WalkCtx, names: NameFacts, item: Item, mp: String) Never! {
+semindex_collect_state_marker_references: fn(db: &SymbolDB, ctx: WalkCtx, names: NameFacts, item: Item, mp: String) Never! {
     if item == {
         .Struct(definition) -> {
             loop method in definition.methods -> semindex_collect_state_marker_references_for_method(&db, ctx, names, method, mp)
@@ -61,52 +61,52 @@ fn semindex_collect_state_marker_references(db: &SymbolDB, ctx: WalkCtx, names: 
 }
 
 // #4397: a real (optional parent, slot) key; never encode it in a string.
-fn semindex_record_node(db: SymbolDB, ctx: WalkCtx, class: String, shape: String, mp: String, span: Span) -> Int? Never! {
+semindex_record_node: fn(db: SymbolDB, ctx: WalkCtx, class: String, shape: String, mp: String, span: Span) -> Int? Never! {
     if span.end < span.start -> return None
     parent := Int?{None}
     if ctx.structural_parents.len() > 0 -> parent = Val(ctx.structural_parents[ctx.structural_parents.len() - 1])
     assert(parent == None || ctx.structural_slot != "root", "compiler structural child missing explicit slot: {class}/{shape}")
-    key :: StructuralOrdinalKey{parent: parent, slot: ctx.structural_slot}
-    ordinal :: db.structural_ordinals.get(key) ?? 0
+    key: StructuralOrdinalKey{parent: parent, slot: ctx.structural_slot}
+    ordinal: db.structural_ordinals.get(key) ?? 0
     db.structural_ordinals[key] = ordinal + 1
-    id :: db.nodes.len()
+    id: db.nodes.len()
     &db.nodes.push(StructuralNode{id: id, parent: parent, slot: ctx.structural_slot, slot_kind: ctx.structural_slot_kind, ordinal: ordinal, class: class, shape: shape, module_path: mp, span: semindex_source_span(span)})
     Val(id)
 }
 
-fn semindex_is_lexical_structural_slot(slot: String) -> Bool Never! {
+semindex_is_lexical_structural_slot: fn(slot: String) -> Bool Never! {
     slot == "body" || slot.ends_with("_body") || slot.ends_with("_bodies")
 }
 
 // Real arms enforce the upper bound, except the classic-if private arm whose
 // head-only span ends before its body starts. All parents enforce the lower bound.
 // Claimed spans never reach this test: semindex_next_unclaimed skips them.
-fn semindex_block_span_candidate(parent: StructuralNode, span: Span) -> Bool Never! {
+semindex_block_span_candidate: fn(parent: StructuralNode, span: Span) -> Bool Never! {
     parent.span.start <= span.start && (parent.class != "arm" || span.end <= parent.span.end || parent.span.end <= span.start)
 }
 
 // The first unclaimed index of `ctx.block_spans` at or after `index` (`block_spans.len()` when
 // none), compressing the path it walked.
-fn semindex_next_unclaimed(ctx: &WalkCtx, index: Int) -> Int Never! {
+semindex_next_unclaimed: fn(ctx: &WalkCtx, index: Int) -> Int Never! {
     root := index
     loop ctx.block_next[root] != root -> root = ctx.block_next[root]
     cursor := index
     loop cursor != root {
-        following :: ctx.block_next[cursor]
+        following: ctx.block_next[cursor]
         ctx.block_next[cursor] = root
         cursor = following
     }
     root
 }
 
-fn semindex_claim_slot_boundary(db: &SymbolDB, ctx: &WalkCtx, name: String) Never! {
+semindex_claim_slot_boundary: fn(db: &SymbolDB, ctx: &WalkCtx, name: String) Never! {
     if !semindex_is_lexical_structural_slot(name) || ctx.structural_parents.len() == 0 -> return
-    parent :: db.nodes[ctx.structural_parents[ctx.structural_parents.len() - 1]]
+    parent: db.nodes[ctx.structural_parents[ctx.structural_parents.len() - 1]]
     first := 0
     // Rust partition_point; block_spans is sorted by the module initializer.
     high := ctx.block_spans.len()
     loop first < high {
-        middle :: first + (high - first) /% 2
+        middle: first + (high - first) /% 2
         if ctx.block_spans[middle].start < parent.span.start -> first = middle + 1 else -> high = middle
     }
     // Rust's min_by_key over the sorted tail is its first candidate; claimed spans are skipped
@@ -124,7 +124,7 @@ fn semindex_claim_slot_boundary(db: &SymbolDB, ctx: &WalkCtx, name: String) Neve
     if chosen == .Val(claimed) {
         // copy: `ctx.block_spans[claimed]` stays in its list (no move out of an element, E0225);
         // the binding `span` owns its own.
-        span :: ctx.block_spans[claimed].copy()
+        span: ctx.block_spans[claimed].copy()
         // Equal spans sort together (same start) after the first unclaimed one; the claim covers them.
         loop at in claimed..<ctx.block_spans.len() {
             if ctx.block_spans[at].start != span.start -> break
@@ -136,20 +136,20 @@ fn semindex_claim_slot_boundary(db: &SymbolDB, ctx: &WalkCtx, name: String) Neve
 
 // The callback is run even for empty/optional slots. Restoration is stack-like,
 // so siblings never inherit a nested child's name or kind.
-fn semindex_structural_slot<T>(db: &SymbolDB, ctx: &WalkCtx, name: String, kind: StructuralSlotKind, f: fn(SymbolDB, WalkCtx) -> T) -> T {
+semindex_structural_slot: fn<T>(db: &SymbolDB, ctx: &WalkCtx, name: String, kind: StructuralSlotKind, f: fn(SymbolDB, WalkCtx) -> T) -> T {
     semindex_claim_slot_boundary(&db, &ctx, name)
-    old_name :: ctx.structural_slot
-    old_kind :: ctx.structural_slot_kind
+    old_name: ctx.structural_slot
+    old_kind: ctx.structural_slot_kind
     ctx.structural_slot = name
     ctx.structural_slot_kind = kind
-    value :: f(&db, &ctx)
+    value: f(&db, &ctx)
     ctx.structural_slot = old_name
     ctx.structural_slot_kind = old_kind
     value
 }
 
-fn semindex_expr_shape(expr: Expr) -> String Never! {
-    ordinal :: if expr == {
+semindex_expr_shape: fn(expr: Expr) -> String Never! {
+    ordinal: if expr == {
         .Str(_, _, _) -> 0
         .StrMatchLit(_, _, _) -> 1
         .BinMatchLit(_, _, _) -> 2
@@ -206,7 +206,7 @@ fn semindex_expr_shape(expr: Expr) -> String Never! {
 
 // Call/method end offsets use plain Int + 2 (empty) or + 1 (last argument);
 // retain the original name/receiver starts without saturation or clamping.
-fn semindex_structural_expr_span(expr: Expr) -> Span Never! {
+semindex_structural_expr_span: fn(expr: Expr) -> Span Never! {
     if expr == {
         .Call(call, _) -> {
             end := call.name_span.end + 2
@@ -223,8 +223,8 @@ fn semindex_structural_expr_span(expr: Expr) -> Span Never! {
     }
 }
 
-fn semindex_stmt_shape(stmt: Stmt) -> String Never! {
-    ordinal :: if stmt == {
+semindex_stmt_shape: fn(stmt: Stmt) -> String Never! {
+    ordinal: if stmt == {
         .Expr(_) -> 0
         .Val(_) -> 1
         .Assign(_, _, _, _) -> 2
@@ -264,8 +264,8 @@ fn semindex_stmt_shape(stmt: Stmt) -> String Never! {
     "Discriminant({ordinal})"
 }
 
-fn semindex_item_shape(item: Item) -> String Never! {
-    ordinal :: if item == {
+semindex_item_shape: fn(item: Item) -> String Never! {
+    ordinal: if item == {
         .Func(_) -> 0
         .Struct(_) -> 1
         .Enum(_) -> 2
@@ -295,7 +295,7 @@ fn semindex_item_shape(item: Item) -> String Never! {
     "Discriminant({ordinal})"
 }
 
-fn semindex_item_span(item: Item) -> Span Never! {
+semindex_item_span: fn(item: Item) -> Span Never! {
     if item == {
         .Func(x) -> x.span
         .Struct(x) -> x.span
@@ -325,7 +325,7 @@ fn semindex_item_span(item: Item) -> Span Never! {
     }
 }
 
-fn semindex_record_func_type_nodes(db: &SymbolDB, ctx: &WalkCtx, function: Func, mp: String) {
+semindex_record_func_type_nodes: fn(db: &SymbolDB, ctx: &WalkCtx, function: Func, mp: String) {
     semindex_structural_slot(&db, &ctx, "params", StructuralSlotKind.List, (db: SymbolDB, ctx: WalkCtx) -> {
         loop param in function.params -> _ := semindex_record_node(&db, ctx, "type", "type", mp, param.ty_span)
     })
@@ -336,7 +336,7 @@ fn semindex_record_func_type_nodes(db: &SymbolDB, ctx: &WalkCtx, function: Func,
     }
 }
 
-fn semindex_collect_allow_markers(db: &SymbolDB, markers: [Marker], site: String, mp: String) Never! {
+semindex_collect_allow_markers: fn(db: &SymbolDB, markers: [Marker], site: String, mp: String) Never! {
     loop marker in markers {
         if marker.name != "Allow" -> next
         loop arg in marker.args {
@@ -349,26 +349,26 @@ fn semindex_collect_allow_markers(db: &SymbolDB, markers: [Marker], site: String
     }
 }
 
-fn semindex_record_call_rows(calls: &[CallEdge], caller: CallerFrame?, mp: String, callee: String, span: Span) Never! {
+semindex_record_call_rows: fn(calls: &[CallEdge], caller: CallerFrame?, mp: String, callee: String, span: Span) Never! {
     if caller == .Val(frame) -> &calls.push(CallEdge{caller: semindex_caller_key(frame), callee: callee, module_path: mp, call_span: semindex_source_span(span)})
 }
-fn semindex_record_call(db: &SymbolDB, ctx: WalkCtx, mp: String, callee: String, span: Span) Never! {
+semindex_record_call: fn(db: &SymbolDB, ctx: WalkCtx, mp: String, callee: String, span: Span) Never! {
     semindex_record_call_rows(&db.calls, ctx.caller, mp, callee, span)
 }
-fn semindex_with_caller(db: &SymbolDB, ctx: &WalkCtx, frame: CallerFrame, params: [Param], mp: String, f: fn(SymbolDB, WalkCtx)) {
-    previous :: ctx.caller
+semindex_with_caller: fn(db: &SymbolDB, ctx: &WalkCtx, frame: CallerFrame, params: [Param], mp: String, f: fn(SymbolDB, WalkCtx)) {
+    previous: ctx.caller
     ctx.caller = Val(frame)
     f(&db, &ctx)
     ctx.caller = previous
 }
 
-fn semindex_normalize_definition(source: String) -> String Never! {
-    chars :: semindex_text.scalars(source)
+semindex_normalize_definition: fn(source: String) -> String Never! {
+    chars: semindex_text.scalars(source)
     out := [String]{}
     string := false
     index := 0
     loop index < chars.len() {
-        ch :: chars[index]
+        ch: chars[index]
         index += 1
         if string {
             &out.push(ch)
@@ -384,7 +384,7 @@ fn semindex_normalize_definition(source: String) -> String Never! {
         } else if ch == "/" && index < chars.len() && chars[index] == "/" {
             index += 1
             loop index < chars.len() {
-                next_ch :: chars[index]
+                next_ch: chars[index]
                 index += 1
                 if next_ch == "\n" -> break
             }
@@ -398,17 +398,17 @@ fn semindex_normalize_definition(source: String) -> String Never! {
 // module's program/source; never synthesize an empty checked registration.
 // Gated by that canonical shared walker; this intentional parsed-only default
 // is Rust's default NameLedger, not a fake checked-registration carrier.
-fn semindex_structural_nodes_from_parsed(program: Program, module_path: String, source: String) -> [StructuralNode] {
+semindex_structural_nodes_from_parsed: fn(program: Program, module_path: String, source: String) -> [StructuralNode] {
     block_spans := program.block_spans.copy()
     &block_spans.sort_by((left: Span, right: Span) -> left.start <=> right.start)
     db := SymbolDB.new()
     ctx := WalkCtx.new(0, semindex_root_identity(module_path), ^block_spans)
-    names :: NameFacts{modules: [NameModule]{}, declarations: [NameDeclaration]{}, aliases: [NameAlias]{}, references: [NameReference]{}, structure_facts: [StructureFact]{}}
+    names: NameFacts{modules: [NameModule]{}, declarations: [NameDeclaration]{}, aliases: [NameAlias]{}, references: [NameReference]{}, structure_facts: [StructureFact]{}}
     loop item in program.items -> semindex_collect_item(&db, &ctx, names, program, source, item, module_path)
     ^db.nodes
 }
 
-fn semindex_breadcrumb_label(owner: String, members: [MemberFact]) -> String? Never! {
+semindex_breadcrumb_label: fn(owner: String, members: [MemberFact]) -> String? Never! {
     remote := [MemberFact]{}
     loop member in members {
         if member.owner != owner || member.kind != MemberKind.Method -> next
@@ -424,7 +424,7 @@ fn semindex_breadcrumb_label(owner: String, members: [MemberFact]) -> String? Ne
     Val(labels.join(" | "))
 }
 
-fn semindex_add_breadcrumb_hints(db: &SymbolDB) Never! {
+semindex_add_breadcrumb_hints: fn(db: &SymbolDB) Never! {
     loop definition in db.defs {
         if definition.kind == {
             .Struct(_, _) | .Enum(_, _) -> {
@@ -438,6 +438,6 @@ fn semindex_add_breadcrumb_hints(db: &SymbolDB) Never! {
 // S8 delegates finalization to S5's sole DB, forwarding the caller's exact
 // module-source rows and explicit PackageModel program/summaries unchanged.
 // C4/S20 and the canonical checked-to-budget adapter remain producer gates.
-fn semindex_build_index(registration: SemaRegistrationGraph, checked: SemaGraphResult, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int], effect_program: EffectBudgetProgram, effect_summaries: [String:PackageEffectSummary]) -> SemIndex {
+semindex_build_index: fn(registration: SemaRegistrationGraph, checked: SemaGraphResult, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int], effect_program: EffectBudgetProgram, effect_summaries: [String:PackageEffectSummary]) -> SemIndex {
     semindex_build_symbol_db(registration, checked, module_sources, loaded_module_rows, effect_program, effect_summaries).index
 }

@@ -1,14 +1,14 @@
 // The `sizes` code suite: one row per check.
 use {
-    files :: core.files
-    sys :: core.sys
+    files: core.files
+    sys: core.sys
 }
 
-fn sizes_rows(rows: TestRows) {
+sizes_rows: fn(rows: TestRows) {
     rows.pass("size hello")
     rows.skip("slow", "needs a release build")
-    jet :: sys.get("JET") ?? ""
-    root :: sys.get("JET_TEST_SUITE_ROOT") ?? ""
+    jet: sys.get("JET") ?? ""
+    root: sys.get("JET_TEST_SUITE_ROOT") ?? ""
     if files.is_file(jet) && files.is_file(files.join(root, "package.jet")) {
         rows.pass("suite env")
     } else {

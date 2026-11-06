@@ -1,32 +1,32 @@
 
 use {
-    json :: core.encoding.json
-    toml :: core.encoding.toml
-    yaml :: core.encoding.yaml
+    json: core.encoding.json
+    toml: core.encoding.toml
+    yaml: core.encoding.yaml
 }
 
 #Codable
-struct Row {
+Row: struct {
     value: Int
 }
 
-fn json_parse_error() -[]> String {
+json_parse_error: fn() -[]> String {
     json.parse("\n{{oops") ? _value -> return "accepted" ! error -> return "{error.line}|{error.message}"
 }
 
-fn json_decode_error() -[]> String {
+json_decode_error: fn() -[]> String {
     json.decode<Row>("\n{{oops") ? _value -> return "accepted" ! errors -> return "{errors[0].path}|{errors[0].reason}"
 }
 
-fn toml_parse_error() -[]> String {
+toml_parse_error: fn() -[]> String {
     toml.parse("value = ") ? _value -> return "accepted" ! error -> return error.message
 }
 
-fn yaml_parse_error() -[]> String {
+yaml_parse_error: fn() -[]> String {
     yaml.parse("key: value\nbad") ? _value -> return "accepted" ! error -> return error.message
 }
 
-fn run() {
+run: fn() {
     print(json_parse_error())
     print(json_decode_error())
     print(toml_parse_error())

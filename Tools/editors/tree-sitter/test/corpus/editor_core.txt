@@ -3,9 +3,9 @@ Functions, bindings and calls
 ==================
 
 #Doc("adds a fee")
-fn add_fee<T: Numeric>(cents: Int, fee: T) -> Int Err! -[IO]> {
+add_fee: fn<T: Numeric>(cents: Int, fee: T) -> Int Err! -[IO]> {
     total := cents + fee
-    limit :: comptime { 1000 }
+    limit: comptime { 1000 }
     print("total={total}")
     return total.clamp(0, limit)
 }
@@ -38,7 +38,7 @@ fn add_fee<T: Numeric>(cents: Int, fee: T) -> Int Err! -[IO]> {
         name: (identifier))
       (identifier)
       (identifier)
-      (binding
+      (label
         name: (identifier))
       (keyword)
       (block
@@ -61,17 +61,17 @@ fn add_fee<T: Numeric>(cents: Int, fee: T) -> Int Err! -[IO]> {
 Types, variants and value tables
 ==================
 
-struct Point {
+Point: struct {
     x: Float
     tags: [String: Int]
 }
 
-enum Shape {
+Shape: enum {
     Circle(radius: Float)
     Square
 }
 
-fn area(shape: Shape) -> Float {
+area: fn(shape: Shape) -> Float {
     if shape == {
         .Circle(r) -> 3.14 * r * r
         .Square -> 1.0
@@ -127,15 +127,15 @@ fn area(shape: Shape) -> Float {
 Strings, raw text and contextual words
 ==================
 
-use fs :: core.files
+use fs: core.files
 
 state Pending {}
 
-fn run() {
-    banner :: """
+run: fn() {
+    banner: """
     Hello {name}
     """
-    raw :: ``C:\path\{x}``
+    raw: ``C:\path\{x}``
     defer fs.close()
     next
 }
@@ -143,7 +143,7 @@ fn run() {
 ---
 
 (source_file
-  (binding
+  (label
     name: (identifier))
   (identifier)
   (member_expr
@@ -156,14 +156,14 @@ fn run() {
     name: (identifier)
     parameters: (parameters)
     body: (block
-      (binding
+      (label
         name: (identifier))
       (multiline_string
         (string_content)
         (interpolation
           (identifier))
         (string_content))
-      (binding
+      (label
         name: (identifier))
       (raw_string)
       (control_keyword)

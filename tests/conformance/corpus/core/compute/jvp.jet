@@ -1,15 +1,15 @@
 // core-conformance: core.compute.jvp
-use compute :: core.compute
+use compute: core.compute
 
-fn product(left: Tensor, right: Tensor) -> Tensor { compute.mul(left, right) ?? panic("product") }
+product: fn(left: Tensor, right: Tensor) -> Tensor { compute.mul(left, right) ?? panic("product") }
 
-fn run() {
-    left :: compute.from_list([2.0]) ?? panic("left")
-    right :: compute.from_list([3.0]) ?? panic("right")
-    left_tangent :: compute.ones([1]) ?? panic("left tangent")
-    right_tangent :: compute.ones([1]) ?? panic("right tangent")
-    derivative :: compute.jvp(product)
-    result :: derivative(left, right, left_tangent, right_tangent)
+run: fn() {
+    left: compute.from_list([2.0]) ?? panic("left")
+    right: compute.from_list([3.0]) ?? panic("right")
+    left_tangent: compute.ones([1]) ?? panic("left tangent")
+    right_tangent: compute.ones([1]) ?? panic("right tangent")
+    derivative: compute.jvp(product)
+    result: derivative(left, right, left_tangent, right_tangent)
     print(compute.to_list(result.value))
     print(compute.to_list(result.tangent))
 }

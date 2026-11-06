@@ -1,19 +1,19 @@
-trait Owner {
-    fn identity(self) -> Int Never!
+Owner: trait {
+    identity: fn(self) -> Int Never!
 }
-struct TokenOwner { token: Int }
+TokenOwner: struct { token: Int }
 impl TokenOwner.Owner {
-    fn identity(self) -> Int Never! { self.token }
+    identity: fn(self) -> Int Never! { self.token }
 }
-struct Carrier { owner: Owner, adopted: Bool }
-enum HostValue {
+Carrier: struct { owner: Owner, adopted: Bool }
+HostValue: enum {
     Leaf(carrier: Carrier)
     List(values: [HostValue])
 }
-fn leaf(token: Int) -> HostValue Never! {
+leaf: fn(token: Int) -> HostValue Never! {
     HostValue.Leaf{carrier: Carrier{owner: TokenOwner{token: token}, adopted: false}}
 }
-fn adopt(value: &HostValue, path: [Int], position: Int) -> Bool Never! {
+adopt: fn(value: &HostValue, path: [Int], position: Int) -> Bool Never! {
     if position >= path.len() {
         if &value == .Leaf(carrier) {
             if carrier.adopted -> return false
@@ -23,17 +23,17 @@ fn adopt(value: &HostValue, path: [Int], position: Int) -> Bool Never! {
         return false
     }
     if &value == .List(values) {
-        index :: path[position]
+        index: path[position]
         if index < 0 || index >= values.len() -> return false
         return adopt(&values[index], path, position + 1)
     }
     false
 }
-fn adopted(value: HostValue, token: Int) -> Bool Never! {
+adopted: fn(value: HostValue, token: Int) -> Bool Never! {
     if value == .Leaf(carrier) -> return carrier.adopted && carrier.owner.identity() == token
     false
 }
-fn run() {
+run: fn() {
     root := HostValue.List{values: [HostValue]{leaf(10), HostValue.List{values: [HostValue]{leaf(20), leaf(30)}}}}
     if !adopt(&root, [Int]{1, 0}, 0) -> panic("nested owner adoption failed")
     if adopt(&root, [Int]{1, 0}, 0) -> panic("owner alias adopted twice")

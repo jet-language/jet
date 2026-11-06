@@ -50,39 +50,39 @@ use {
     ]
 }
 
-JFMT_INDENT :: 4
+JFMT_INDENT: 4
 // The width floor (gate d) for keeping a body on one line.
-JFMT_MAX_WIDTH :: 100
+JFMT_MAX_WIDTH: 100
 // Rust `usize::MAX`: no trailing-comment limit.
-JFMT_NO_LIMIT :: 9223372036854775807
+JFMT_NO_LIMIT: 9223372036854775807
 
 // Rust `Prec`, ordered loosest to tightest.
-JFMT_PREC_OR_FALLBACK :: 0
-JFMT_PREC_RANGE :: 1
-JFMT_PREC_OR :: 2
-JFMT_PREC_AND :: 3
-JFMT_PREC_CMP :: 4
-JFMT_PREC_BIT_OR :: 5
-JFMT_PREC_BIT_AND :: 7
-JFMT_PREC_SHIFT :: 8
-JFMT_PREC_ADD :: 9
-JFMT_PREC_MUL :: 10
-JFMT_PREC_UNARY :: 11
-JFMT_PREC_POSTFIX :: 13
-JFMT_PREC_PRIMARY :: 14
+JFMT_PREC_OR_FALLBACK: 0
+JFMT_PREC_RANGE: 1
+JFMT_PREC_OR: 2
+JFMT_PREC_AND: 3
+JFMT_PREC_CMP: 4
+JFMT_PREC_BIT_OR: 5
+JFMT_PREC_BIT_AND: 7
+JFMT_PREC_SHIFT: 8
+JFMT_PREC_ADD: 9
+JFMT_PREC_MUL: 10
+JFMT_PREC_UNARY: 11
+JFMT_PREC_POSTFIX: 13
+JFMT_PREC_PRIMARY: 14
 
 // Rust `SourceDelimiter`.
-JFMT_DELIM_PAREN :: 0
-JFMT_DELIM_BRACKET :: 1
-JFMT_DELIM_BRACE :: 2
-JFMT_DELIM_ANGLE :: 3
+JFMT_DELIM_PAREN: 0
+JFMT_DELIM_BRACKET: 1
+JFMT_DELIM_BRACE: 2
+JFMT_DELIM_ANGLE: 3
 
-struct JetFmtComment {
+JetFmtComment: struct {
     text: String
     span: Span
 }
 
-struct JetFmt {
+JetFmt: struct {
     src: String
     src_bytes: [U8]
     // Byte offsets of every `\n` in `src`, for Rust `line_of`.
@@ -112,19 +112,19 @@ struct JetFmt {
 }
 
 // Rust `Option<(Span, usize)>` from `source_list_span_after`.
-struct JetFmtSourceList {
+JetFmtSourceList: struct {
     span: Span
     close_start: Int
 }
 
 // Rust `Option<(usize, usize)>` from `single_stmt_braces`/`value_block_braces`.
-struct JetFmtBraces {
+JetFmtBraces: struct {
     open: Int
     close: Int
 }
 
 // The saved writer state every Rust rollback restores.
-struct JetFmtMark {
+JetFmtMark: struct {
     out_len: Int
     col: Int
     at_line_start: Bool
@@ -133,7 +133,7 @@ struct JetFmtMark {
 }
 
 // Rust `Result<String, Vec<Diagnostic>>` from `format_source_with_options`.
-struct JetFormatResult {
+JetFormatResult: struct {
     ok: Bool
     text: String
     diagnostics: [Diagnostic]
@@ -141,7 +141,7 @@ struct JetFormatResult {
 
 // ---- Prec ----
 
-fn jfmt_prec_of_bin(op: BinOp) -> Int Never! {
+jfmt_prec_of_bin: fn(op: BinOp) -> Int Never! {
     if op == {
         .Or -> JFMT_PREC_OR
         .And -> JFMT_PREC_AND
@@ -156,7 +156,7 @@ fn jfmt_prec_of_bin(op: BinOp) -> Int Never! {
     }
 }
 
-fn jfmt_prec_add_rhs(prec: Int) -> Int Never! {
+jfmt_prec_add_rhs: fn(prec: Int) -> Int Never! {
     if {
         prec == JFMT_PREC_OR_FALLBACK -> JFMT_PREC_OR_FALLBACK
         prec >= JFMT_PREC_PRIMARY -> JFMT_PREC_PRIMARY
@@ -166,7 +166,7 @@ fn jfmt_prec_add_rhs(prec: Int) -> Int Never! {
 
 // Rust `BinOp::spell`. Power and exclusive-or have no infix spelling: they
 // are the `pow` and `bit_xor` methods (jfmt_bin_op_method).
-fn jfmt_bin_op_spell(op: BinOp) -> String Never! {
+jfmt_bin_op_spell: fn(op: BinOp) -> String Never! {
     if op == {
         .Add -> "+"
         .Sub -> "-"
@@ -194,7 +194,7 @@ fn jfmt_bin_op_spell(op: BinOp) -> String Never! {
 }
 
 // The method that spells an operator with no infix form.
-fn jfmt_bin_op_method(op: BinOp) -> String? Never! {
+jfmt_bin_op_method: fn(op: BinOp) -> String? Never! {
     if op == {
         .Pow -> Val("pow")
         .BitXor -> Val("bit_xor")
@@ -202,7 +202,7 @@ fn jfmt_bin_op_method(op: BinOp) -> String? Never! {
     }
 }
 
-fn jfmt_compound_spell(op: BinOp) -> String Never! {
+jfmt_compound_spell: fn(op: BinOp) -> String Never! {
     if op == {
         .Add -> "+="
         .Sub -> "-="
@@ -221,24 +221,42 @@ fn jfmt_compound_spell(op: BinOp) -> String Never! {
 
 // ---- byte/text helpers ----
 
-fn jfmt_bytes_text(bytes: [U8], start: Int, end: Int) -> String Never! {
+jfmt_bytes_text: fn(bytes: [U8], start: Int, end: Int) -> String Never! {
     if start < 0 || end > bytes.len() || start > end -> return ""
     String.from_bytes(bytes[start..<end]) ?? ""
 }
 
 // Rust `self.src.get(start..end)`: the source text of a byte span, "" when
 // the span is out of range.
-fn jfmt_src_text(f: JetFmt, start: Int, end: Int) -> String Never! {
+jfmt_src_text: fn(f: JetFmt, start: Int, end: Int) -> String Never! {
     jfmt_bytes_text(f.src_bytes, start, end)
 }
 
+// A leaf `Root.Leaf: effect` parses with its `effect` keyword moved in front
+// of the name, so the parsed span stops at the name; the `: effect` after it
+// still belongs to the declaration.
+jfmt_effect_decl_end: fn(f: JetFmt, span: Span) -> Int Never! {
+    bytes: f.src_bytes
+    index := span.end
+    loop index < bytes.len() && (bytes[index] == 32 || bytes[index] == 9) -> index += 1
+    if index >= bytes.len() || bytes[index] != 58 -> return span.end
+    index += 1
+    loop index < bytes.len() && (bytes[index] == 32 || bytes[index] == 9) -> index += 1
+    word: "effect".bytes()
+    if index + word.len() > bytes.len() -> return span.end
+    loop offset in 0..<word.len() {
+        if bytes[index + offset] != word[offset] -> return span.end
+    }
+    index + word.len()
+}
+
 // Rust `src.get(start..end).is_some()`.
-fn jfmt_src_valid(f: JetFmt, start: Int, end: Int) -> Bool Never! {
+jfmt_src_valid: fn(f: JetFmt, start: Int, end: Int) -> Bool Never! {
     start >= 0 && start <= end && end <= f.src_bytes.len()
 }
 
-fn jfmt_bytes_starts_at(bytes: [U8], at: Int, needle: String) -> Bool Never! {
-    pattern :: needle.bytes()
+jfmt_bytes_starts_at: fn(bytes: [U8], at: Int, needle: String) -> Bool Never! {
+    pattern: needle.bytes()
     if at < 0 || at + pattern.len() > bytes.len() -> return false
     loop index in 0..<pattern.len() {
         if bytes[at + index] != pattern[index] -> return false
@@ -247,9 +265,9 @@ fn jfmt_bytes_starts_at(bytes: [U8], at: Int, needle: String) -> Bool Never! {
 }
 
 // Rust `bytes[..end].rfind(needle)`: the last start offset, -1 when absent.
-fn jfmt_bytes_rfind(bytes: [U8], end: Int, needle: String) -> Int Never! {
-    width :: needle.bytes().len()
-    limit :: if end > bytes.len() -> bytes.len() else -> end
+jfmt_bytes_rfind: fn(bytes: [U8], end: Int, needle: String) -> Int Never! {
+    width: needle.bytes().len()
+    limit: if end > bytes.len() -> bytes.len() else -> end
     at := limit - width
     loop at >= 0 {
         if jfmt_bytes_starts_at(bytes, at, needle) -> return at
@@ -259,8 +277,8 @@ fn jfmt_bytes_rfind(bytes: [U8], end: Int, needle: String) -> Int Never! {
 }
 
 // Rust `bytes[start..].find(needle)` as an absolute offset, -1 when absent.
-fn jfmt_bytes_find(bytes: [U8], start: Int, needle: String) -> Int Never! {
-    width :: needle.bytes().len()
+jfmt_bytes_find: fn(bytes: [U8], start: Int, needle: String) -> Int Never! {
+    width: needle.bytes().len()
     at := if start < 0 -> 0 else -> start
     loop at + width <= bytes.len() {
         if jfmt_bytes_starts_at(bytes, at, needle) -> return at
@@ -269,7 +287,7 @@ fn jfmt_bytes_find(bytes: [U8], start: Int, needle: String) -> Int Never! {
     -1
 }
 
-fn jfmt_bytes_have_newline(bytes: [U8], start: Int, end: Int) -> Bool Never! {
+jfmt_bytes_have_newline: fn(bytes: [U8], start: Int, end: Int) -> Bool Never! {
     if start < 0 || end > bytes.len() -> return false
     loop index in start..<end {
         if bytes[index] == 10 -> return true
@@ -277,18 +295,18 @@ fn jfmt_bytes_have_newline(bytes: [U8], start: Int, end: Int) -> Bool Never! {
     false
 }
 
-fn jfmt_is_space_byte(byte: U8) -> Bool Never! {
+jfmt_is_space_byte: fn(byte: U8) -> Bool Never! {
     byte == 32 || byte == 9 || byte == 10 || byte == 13 || byte == 11 || byte == 12
 }
 
 // Rust `char::is_whitespace` over a source range. Non-ASCII whitespace
 // (NBSP, U+2028, …) is checked by its UTF-8 lead bytes.
-fn jfmt_src_all_whitespace(f: JetFmt, start: Int, end: Int) -> Bool Never! {
-    text :: jfmt_src_text(f, start, end)
+jfmt_src_all_whitespace: fn(f: JetFmt, start: Int, end: Int) -> Bool Never! {
+    text: jfmt_src_text(f, start, end)
     text.trim().len() == 0
 }
 
-fn jfmt_text_has_newline(text: String) -> Bool Never! {
+jfmt_text_has_newline: fn(text: String) -> Bool Never! {
     loop byte in text.bytes() {
         if byte == 10 -> return true
     }
@@ -296,7 +314,7 @@ fn jfmt_text_has_newline(text: String) -> Bool Never! {
 }
 
 // The number of chars in `text` (Rust `s.chars().count()`).
-fn jfmt_char_count(text: String) -> Int Never! {
+jfmt_char_count: fn(text: String) -> Int Never! {
     count := 0
     loop byte in text.bytes() {
         if byte < 128 || byte >= 192 -> count += 1
@@ -305,18 +323,18 @@ fn jfmt_char_count(text: String) -> Int Never! {
 }
 
 // A compiler-private name: a NUL byte followed by `suffix`.
-fn jfmt_internal_name(suffix: String) -> String Never! {
+jfmt_internal_name: fn(suffix: String) -> String Never! {
     bytes := [U8]{U8{0}}
     loop byte in suffix.bytes() -> &bytes.push(byte)
     String.from_bytes(bytes) ?? suffix
 }
 
 // Rust `line_of`: the zero-based line holding byte `pos`.
-fn jfmt_line_of(f: JetFmt, pos: Int) -> Int Never! {
+jfmt_line_of: fn(f: JetFmt, pos: Int) -> Int Never! {
     low := 0
     high := f.newlines.len()
     loop low < high {
-        middle :: (low + high) /% 2
+        middle: (low + high) /% 2
         if f.newlines[middle] < pos {
             low = middle + 1
         } else {
@@ -327,11 +345,11 @@ fn jfmt_line_of(f: JetFmt, pos: Int) -> Int Never! {
 }
 
 // Rust `partition_point(|token| token.span.start < start)`.
-fn jfmt_first_token_at(f: JetFmt, start: Int) -> Int Never! {
+jfmt_first_token_at: fn(f: JetFmt, start: Int) -> Int Never! {
     low := 0
     high := f.source_toks.len()
     loop low < high {
-        middle :: (low + high) /% 2
+        middle: (low + high) /% 2
         if f.source_toks[middle].span.start < start {
             low = middle + 1
         } else {
@@ -341,11 +359,11 @@ fn jfmt_first_token_at(f: JetFmt, start: Int) -> Int Never! {
     low
 }
 
-fn jfmt_is_comment_kind(kind: Int) -> Bool Never! {
+jfmt_is_comment_kind: fn(kind: Int) -> Bool Never! {
     kind == TOKEN_LINE_COMMENT || kind == TOKEN_BLOCK_COMMENT
 }
 
-fn jfmt_is_generated_label(name: String) -> Bool Never! {
+jfmt_is_generated_label: fn(name: String) -> Bool Never! {
     name.starts_with("__jet_")
 }
 
@@ -353,7 +371,7 @@ fn jfmt_is_generated_label(name: String) -> Bool Never! {
 
 // May this statement render inline inside a one-line brace body? Only
 // non-block statements qualify.
-fn jfmt_is_simple_stmt(stmt: Stmt) -> Bool Never! {
+jfmt_is_simple_stmt: fn(stmt: Stmt) -> Bool Never! {
     if stmt == {
         // Bare `return` stays multiline: `{ return }` is not a recoverable parse.
         .Return(value, _) -> value != None
@@ -368,7 +386,7 @@ fn jfmt_is_simple_stmt(stmt: Stmt) -> Bool Never! {
     }
 }
 
-fn jfmt_is_simple_expr(expr: Expr) -> Bool Never! {
+jfmt_is_simple_expr: fn(expr: Expr) -> Bool Never! {
     if expr == .CallValue(callee, _, _, _) {
         if callee == .Lambda(lambda, _) {
             return !(lambda.meta.collecting_loop || lambda.meta.result_loop)
@@ -379,7 +397,7 @@ fn jfmt_is_simple_expr(expr: Expr) -> Bool Never! {
 
 // ---- spans of statements and items ----
 
-fn jfmt_stmt_start(stmt: Stmt) -> Int Never! {
+jfmt_stmt_start: fn(stmt: Stmt) -> Int Never! {
     if stmt == {
         .Expr(expr) -> expr_span(expr).start
         .DeferClose(_, span) -> span.start
@@ -425,12 +443,12 @@ fn jfmt_stmt_start(stmt: Stmt) -> Int Never! {
     }
 }
 
-fn jfmt_body_end(body: [Stmt], fallback: Int) -> Int Never! {
+jfmt_body_end: fn(body: [Stmt], fallback: Int) -> Int Never! {
     if body.len() == 0 -> return fallback
     jfmt_stmt_end(body[body.len() - 1])
 }
 
-fn jfmt_stmt_end(stmt: Stmt) -> Int Never! {
+jfmt_stmt_end: fn(stmt: Stmt) -> Int Never! {
     if stmt == {
         .Expr(expr) -> expr_span(expr).end
         .DeferClose(_, span) -> span.end
@@ -448,7 +466,7 @@ fn jfmt_stmt_end(stmt: Stmt) -> Int Never! {
                 if body.len() > 0 -> return jfmt_stmt_end(body[body.len() - 1])
             }
             if arms.len() == 0 -> return 0
-            last :: arms[arms.len() - 1]
+            last: arms[arms.len() - 1]
             jfmt_body_end(last.body, last.span.end)
         }
         .Break(span) -> span.end
@@ -485,31 +503,39 @@ fn jfmt_stmt_end(stmt: Stmt) -> Int Never! {
     }
 }
 
-fn jfmt_func_decl_start(f: JetFmt, function: Func) -> Int Never! {
-    jfmt_rfind_or(f, function.name_span.start, "fn", function.name_span.start)
-}
-
-fn jfmt_type_decl_start(f: JetFmt, name_start: Int, keyword: String) -> Int Never! {
-    jfmt_rfind_or(f, name_start, keyword, name_start)
-}
-
-fn jfmt_rfind_or(f: JetFmt, end: Int, needle: String, fallback: Int) -> Int Never! {
-    found :: jfmt_bytes_rfind(f.src_bytes, end, needle)
+jfmt_rfind_or: fn(f: JetFmt, end: Int, needle: String, fallback: Int) -> Int Never! {
+    found: jfmt_bytes_rfind(f.src_bytes, end, needle)
     if found < 0 -> fallback else -> found
 }
 
-fn jfmt_item_span_start(f: JetFmt, item: Item) -> Int Never! {
+// Where `keyword` starts when only blanks separate it from `at`, else `at`:
+// `impl Shape {` starts at `impl`, the method sugar `Shape.area: fn` at
+// its name.
+jfmt_keyword_before: fn(f: JetFmt, at: Int, keyword: String) -> Int Never! {
+    end := if at > f.src_bytes.len() -> f.src_bytes.len() else -> at
+    loop end > 0 {
+        byte: Int.from_u8(f.src_bytes[end - 1])
+        if byte != 32 && byte != 9 && byte != 10 && byte != 13 -> break
+        end -= 1
+    }
+    width: keyword.bytes().len()
+    if end >= width && jfmt_bytes_starts_at(f.src_bytes, end - width, keyword) -> end - width else -> at
+}
+
+jfmt_item_span_start: fn(f: JetFmt, item: Item) -> Int Never! {
     if item == {
-        .Func(function) -> jfmt_func_decl_start(f, function)
-        .Struct(definition) -> jfmt_type_decl_start(f, definition.name_span.start, "struct")
-        .Enum(definition) -> jfmt_type_decl_start(f, definition.name_span.start, "enum")
-        .Impl(definition) -> jfmt_rfind_or(f, definition.type_span.start, "impl", definition.type_span.start)
+        // A declaration starts at its name (`area: fn`, `Point: struct`): the
+        // kind word follows the name.
+        .Func(function) -> function.name_span.start
+        .Struct(definition) -> definition.name_span.start
+        .Enum(definition) -> definition.name_span.start
+        .Impl(definition) -> jfmt_keyword_before(f, definition.type_span.start, "impl")
         .Const(constant) -> {
             if constant.is_persist -> return jfmt_rfind_or(f, constant.name_span.start, "#Persist", constant.name_span.start)
             if constant.attrs.len() > 0 {
                 // Only a storage marker can sit in front of a
                 // constant's name.
-                found :: jfmt_bytes_rfind(f.src_bytes, constant.name_span.start, "#Static")
+                found: jfmt_bytes_rfind(f.src_bytes, constant.name_span.start, "#Static")
                 if found >= 0 -> return found
                 return jfmt_rfind_or(f, constant.name_span.start, "#Inline", constant.name_span.start)
             }
@@ -517,14 +543,14 @@ fn jfmt_item_span_start(f: JetFmt, item: Item) -> Int Never! {
         }
         .Test(test) -> jfmt_rfind_or(f, test.name_span.start, "#Test", test.name_span.start)
         .ExternRust(block) -> jfmt_rfind_or(f, block.crate_span.start, "extern", block.span.start)
-        .Trait(definition) -> jfmt_type_decl_start(f, definition.name_span.start, "trait")
+        .Trait(definition) -> definition.name_span.start
         .Tag(definition) -> definition.span.start
         .EffectDecl(declaration) -> declaration.span.start
         .MarkerDecl(declaration) -> declaration.span.start
         .FactDecl(declaration) -> declaration.span.start
-        .Module(decl) -> jfmt_rfind_or(f, decl.name_span.start, "module", decl.span.start)
+        .Module(decl) -> decl.name_span.start
         .CModule(decl) -> decl.span.start
-        .CodeModule(decl) -> jfmt_rfind_or(f, decl.name_span.start, "module", decl.span.start)
+        .CodeModule(decl) -> decl.name_span.start
         .Distinct(definition) -> definition.span.start
         .TypeAlias(definition) -> definition.span.start
         .UnitFamily(definition) -> definition.span.start
@@ -538,13 +564,13 @@ fn jfmt_item_span_start(f: JetFmt, item: Item) -> Int Never! {
     }
 }
 
-fn jfmt_methods_end(methods: [Func]) -> Int? Never! {
+jfmt_methods_end: fn(methods: [Func]) -> Int? Never! {
     if methods.len() == 0 -> return None
-    last :: methods[methods.len() - 1]
+    last: methods[methods.len() - 1]
     Val(jfmt_body_end(last.body, last.name_span.end))
 }
 
-fn jfmt_item_span_end(item: Item) -> Int Never! {
+jfmt_item_span_end: fn(item: Item) -> Int Never! {
     if item == {
         .Func(function) -> jfmt_body_end(function.body, function.name_span.end)
         .Struct(definition) -> {
@@ -588,8 +614,8 @@ fn jfmt_item_span_end(item: Item) -> Int Never! {
 
 // ---- literal spellings ----
 
-fn jfmt_digit_value(byte: U8) -> Int Never! {
-    value :: Int.from_u8(byte)
+jfmt_digit_value: fn(byte: U8) -> Int Never! {
+    value: Int.from_u8(byte)
     if {
         value >= 48 && value <= 57 -> value - 48
         value >= 97 && value <= 122 -> value - 87
@@ -599,7 +625,7 @@ fn jfmt_digit_value(byte: U8) -> Int Never! {
 }
 
 // Rust `i64::from_str_radix` / `str::parse::<i64>` on `digits[start..]`.
-fn jfmt_parse_radix(digits: [U8], start: Int, radix: Int, allow_sign: Bool) -> Int? Never! {
+jfmt_parse_radix: fn(digits: [U8], start: Int, radix: Int, allow_sign: Bool) -> Int? Never! {
     index := start
     negative := false
     if allow_sign && index < digits.len() && (digits[index] == 43 || digits[index] == 45) {
@@ -609,7 +635,7 @@ fn jfmt_parse_radix(digits: [U8], start: Int, radix: Int, allow_sign: Bool) -> I
     if index >= digits.len() -> return None
     value := 0
     loop index < digits.len() {
-        digit :: jfmt_digit_value(digits[index])
+        digit: jfmt_digit_value(digits[index])
         if digit >= radix -> return None
         if negative {
             if value < (-9223372036854775807 - 1 + digit) /% radix -> return None
@@ -626,16 +652,16 @@ fn jfmt_parse_radix(digits: [U8], start: Int, radix: Int, allow_sign: Bool) -> I
 // S34/S67: re-emit an integer literal exactly as the author spelled it
 // (radix prefix, digit separators, hex case). Falls back to plain decimal
 // when the source slice doesn't round-trip to the same value.
-fn jfmt_int_literal_spelling(f: JetFmt, span: Span, value: Int, raw: String?) -> String Never! {
+jfmt_int_literal_spelling: fn(f: JetFmt, span: Span, value: Int, raw: String?) -> String Never! {
     if raw == .Val(text) -> return text
     if !jfmt_src_valid(f, span.start, span.end) -> return "{value}"
-    slice :: jfmt_src_text(f, span.start, span.end)
+    slice: jfmt_src_text(f, span.start, span.end)
     cleaned := [U8]{}
     loop byte in slice.bytes() {
         if byte != 95 -> &cleaned.push(byte)
     }
     parsed := Int?{None}
-    prefixed :: cleaned.len() >= 2 && cleaned[0] == 48
+    prefixed: cleaned.len() >= 2 && cleaned[0] == 48
     if {
         prefixed && (cleaned[1] == 120 || cleaned[1] == 88) -> parsed = jfmt_parse_radix(cleaned, 2, 16, false)
         prefixed && (cleaned[1] == 111 || cleaned[1] == 79) -> parsed = jfmt_parse_radix(cleaned, 2, 8, false)
@@ -650,19 +676,19 @@ fn jfmt_int_literal_spelling(f: JetFmt, span: Span, value: Int, raw: String?) ->
 
 // S34/S67: a source float keeps its raw spelling; sema-created floats use the
 // canonical numeric formatter.
-fn jfmt_float_literal_spelling(value: Float, raw: String?) -> String Never! {
+jfmt_float_literal_spelling: fn(value: Float, raw: String?) -> String Never! {
     if raw == .Val(text) -> return text
     jfmt_fmt_float(value)
 }
 
 // Rust `fmt_float`: `{:.1}` for a finite integral value, else `{}`.
-fn jfmt_fmt_float(value: Float) -> String Never! {
-    text :: "{value}"
+jfmt_fmt_float: fn(value: Float) -> String Never! {
+    text: "{value}"
     if value == value && value - value == 0.0 && !text.contains(".") && !text.contains("e") && !text.contains("E") -> return "{text}.0"
     text
 }
 
-fn jfmt_fmt_char(value: String) -> String Never! {
+jfmt_fmt_char: fn(value: String) -> String Never! {
     if value.bytes().len() == 1 && value.bytes()[0] == 13 -> return "'\\r'"
     if value == {
         "'" -> "'\\''"
@@ -675,7 +701,7 @@ fn jfmt_fmt_char(value: String) -> String Never! {
 
 // Escape one content line of a triple-quoted string (S70): only `\` and the
 // interpolation braces need escaping.
-fn jfmt_escape_str_multiline(text: String) -> String Never! {
+jfmt_escape_str_multiline: fn(text: String) -> String Never! {
     out := [U8]{}
     loop byte in text.bytes() {
         if {
@@ -693,7 +719,7 @@ fn jfmt_escape_str_multiline(text: String) -> String Never! {
     String.from_bytes(out) ?? text
 }
 
-fn jfmt_escape_str_lit(text: String) -> String Never! {
+jfmt_escape_str_lit: fn(text: String) -> String Never! {
     out := [U8]{}
     loop byte in text.bytes() {
         if {
@@ -729,7 +755,7 @@ fn jfmt_escape_str_lit(text: String) -> String Never! {
 
 // ---- writer ----
 
-fn jfmt_write(f: &JetFmt, text: String) Never! {
+jfmt_write: fn(f: &JetFmt, text: String) Never! {
     if f.at_line_start && text.len() > 0 -> jfmt_write_indent(&f)
     f.col += jfmt_char_count(text)
     f.at_line_start = false
@@ -737,7 +763,7 @@ fn jfmt_write(f: &JetFmt, text: String) Never! {
     f.pending_blank = false
 }
 
-fn jfmt_write_indent(f: &JetFmt) Never! {
+jfmt_write_indent: fn(f: &JetFmt) Never! {
     loop _ in 0..<f.indent {
         loop _ in 0..<JFMT_INDENT -> &f.out.push(U8{32})
     }
@@ -745,26 +771,26 @@ fn jfmt_write_indent(f: &JetFmt) Never! {
     f.at_line_start = false
 }
 
-fn jfmt_newline(f: &JetFmt) Never! {
+jfmt_newline: fn(f: &JetFmt) Never! {
     &f.out.push(U8{10})
     f.col = 0
     f.at_line_start = true
 }
 
-fn jfmt_end_block(f: &JetFmt) Never! {
+jfmt_end_block: fn(f: &JetFmt) Never! {
     jfmt_newline(&f)
     jfmt_write(&f, "}}")
 }
 
-fn jfmt_mark(f: JetFmt) -> JetFmtMark Never! {
+jfmt_mark: fn(f: JetFmt) -> JetFmtMark Never! {
     JetFmtMark{out_len: f.out.len(), col: f.col, at_line_start: f.at_line_start, pending_blank: f.pending_blank, comment_i: f.comment_i}
 }
 
-fn jfmt_truncate(f: &JetFmt, length: Int) Never! {
+jfmt_truncate: fn(f: &JetFmt, length: Int) Never! {
     loop f.out.len() > length -> _ := &f.out.pop()
 }
 
-fn jfmt_rollback(f: &JetFmt, mark: JetFmtMark) Never! {
+jfmt_rollback: fn(f: &JetFmt, mark: JetFmtMark) Never! {
     jfmt_truncate(&f, mark.out_len)
     f.col = mark.col
     f.at_line_start = mark.at_line_start
@@ -773,42 +799,42 @@ fn jfmt_rollback(f: &JetFmt, mark: JetFmtMark) Never! {
 }
 
 // Rust `self.out[out_len..].contains('\n')`.
-fn jfmt_out_since_has_newline(f: JetFmt, out_len: Int) -> Bool Never! {
+jfmt_out_since_has_newline: fn(f: JetFmt, out_len: Int) -> Bool Never! {
     jfmt_bytes_have_newline(f.out, out_len, f.out.len())
 }
 
-fn jfmt_out_ends_with(f: JetFmt, text: String) -> Bool Never! {
-    pattern :: text.bytes()
+jfmt_out_ends_with: fn(f: JetFmt, text: String) -> Bool Never! {
+    pattern: text.bytes()
     if pattern.len() > f.out.len() -> return false
     jfmt_bytes_starts_at(f.out, f.out.len() - pattern.len(), text)
 }
 
-fn jfmt_out_text(f: JetFmt) -> String Never! {
+jfmt_out_text: fn(f: JetFmt) -> String Never! {
     String.from_bytes(f.out) ?? ""
 }
 
 // ---- comments and separators ----
 
-fn jfmt_write_loop_continuation_indent(f: &JetFmt) Never! {
+jfmt_write_loop_continuation_indent: fn(f: &JetFmt) Never! {
     f.indent += 1
     jfmt_write_indent(&f)
     f.indent -= 1
 }
 
-fn jfmt_loop_clause_separator(f: &JetFmt, next_start: Int, wrap: Bool) Never! {
+jfmt_loop_clause_separator: fn(f: &JetFmt, next_start: Int, wrap: Bool) Never! {
     jfmt_write(&f, ",")
     jfmt_loop_separator_tail(&f, next_start, wrap)
 }
 
-fn jfmt_loop_source_separator(f: &JetFmt, next_start: Int, wrap: Bool) Never! {
+jfmt_loop_source_separator: fn(f: &JetFmt, next_start: Int, wrap: Bool) Never! {
     jfmt_write(&f, " in")
     jfmt_loop_separator_tail(&f, next_start, wrap)
 }
 
-fn jfmt_loop_separator_tail(f: &JetFmt, next_start: Int, wrap: Bool) Never! {
+jfmt_loop_separator_tail: fn(f: &JetFmt, next_start: Int, wrap: Bool) Never! {
     broke := false
     loop f.comment_i < f.comments.len() && f.comments[f.comment_i].span.start < next_start {
-        text :: f.comments[f.comment_i].text.copy()
+        text: f.comments[f.comment_i].text.copy()
         jfmt_write(&f, "  ")
         jfmt_write(&f, text)
         f.comment_i += 1
@@ -828,14 +854,14 @@ fn jfmt_loop_separator_tail(f: &JetFmt, next_start: Int, wrap: Bool) Never! {
 
 // The bindingless loop subject has no comma before it; only the line break
 // survives from `loop_clause_separator`.
-fn jfmt_maybe_wrap_loop_clause(f: &JetFmt, wrap: Bool) Never! {
+jfmt_maybe_wrap_loop_clause: fn(f: &JetFmt, wrap: Bool) Never! {
     if wrap {
         jfmt_newline(&f)
         jfmt_write_loop_continuation_indent(&f)
     }
 }
 
-fn jfmt_blank_line_between_items(f: &JetFmt) Never! {
+jfmt_blank_line_between_items: fn(f: &JetFmt) Never! {
     if !f.pending_blank {
         jfmt_newline(&f)
         f.pending_blank = true
@@ -843,27 +869,27 @@ fn jfmt_blank_line_between_items(f: &JetFmt) Never! {
 }
 
 // Top-level definitions are separated by exactly one blank line.
-fn jfmt_blank_separator_before_item(f: &JetFmt) Never! {
+jfmt_blank_separator_before_item: fn(f: &JetFmt) Never! {
     if f.out.len() == 0 -> return
     if !f.at_line_start -> jfmt_newline(&f)
     if !jfmt_out_ends_with(f, "\n\n") -> &f.out.push(U8{10})
     f.pending_blank = true
 }
 
-fn jfmt_emit_remaining_comments(f: &JetFmt) Never! {
+jfmt_emit_remaining_comments: fn(f: &JetFmt) Never! {
     loop f.comment_i < f.comments.len() {
-        text :: f.comments[f.comment_i].text.copy()
+        text: f.comments[f.comment_i].text.copy()
         jfmt_emit_comment_line(&f, text)
         f.comment_i += 1
     }
 }
 
-fn jfmt_emit_leading(f: &JetFmt, pos: Int) Never! {
+jfmt_emit_leading: fn(f: &JetFmt, pos: Int) Never! {
     loop f.comment_i < f.comments.len() {
         // copy: the pending comment (owner: f.comments) is emitted through `&f`; a view into
         // f.comments would be live across that exclusive borrow (E0212). A comment is a span and a
         // refcounted text.
-        comment :: f.comments[f.comment_i].copy()
+        comment: f.comments[f.comment_i].copy()
         if comment.span.start >= pos -> break
         if jfmt_is_trailing_comment_at(f, comment.span) -> break
         jfmt_emit_comment_line(&f, comment.text)
@@ -872,12 +898,12 @@ fn jfmt_emit_leading(f: &JetFmt, pos: Int) Never! {
     }
 }
 
-fn jfmt_emit_trailing(f: &JetFmt, end: Int) Never! {
+jfmt_emit_trailing: fn(f: &JetFmt, end: Int) Never! {
     loop f.comment_i < f.comments.len() {
         // copy: the pending comment (owner: f.comments) is written through `&f`; a view into
         // f.comments would be live across that exclusive borrow (E0212). A comment is a span and a
         // refcounted text.
-        comment :: f.comments[f.comment_i].copy()
+        comment: f.comments[f.comment_i].copy()
         if comment.span.start >= f.trailing_comment_limit -> break
         if comment.span.start >= end && jfmt_line_of(f, comment.span.start) == jfmt_line_of(f, end) {
             jfmt_write(&f, "  ")
@@ -891,11 +917,11 @@ fn jfmt_emit_trailing(f: &JetFmt, end: Int) Never! {
 
 // Verbatim items copy their source slice; skip the comments inside it so the
 // next `emit_leading` does not print them twice.
-fn jfmt_skip_verbatim_comments(f: &JetFmt, end: Int) Never! {
+jfmt_skip_verbatim_comments: fn(f: &JetFmt, end: Int) Never! {
     loop f.comment_i < f.comments.len() && f.comments[f.comment_i].span.start < end -> f.comment_i += 1
 }
 
-fn jfmt_is_trailing_comment_at(f: JetFmt, span: Span) -> Bool Never! {
+jfmt_is_trailing_comment_at: fn(f: JetFmt, span: Span) -> Bool Never! {
     if f.out.len() == 0 -> return false
     last_nl := 0
     index := f.out.len() - 1
@@ -906,11 +932,11 @@ fn jfmt_is_trailing_comment_at(f: JetFmt, span: Span) -> Bool Never! {
         }
         index -= 1
     }
-    bounded :: if last_nl < f.src_bytes.len() -> last_nl else -> f.src_bytes.len()
+    bounded: if last_nl < f.src_bytes.len() -> last_nl else -> f.src_bytes.len()
     jfmt_line_of(f, span.start) == jfmt_line_of(f, bounded) && !f.at_line_start
 }
 
-fn jfmt_emit_comment_line(f: &JetFmt, text: String) Never! {
+jfmt_emit_comment_line: fn(f: &JetFmt, text: String) Never! {
     if f.out.len() > 0 && !f.at_line_start -> jfmt_newline(&f)
     jfmt_write_indent(&f)
     jfmt_write(&f, text)
@@ -918,13 +944,13 @@ fn jfmt_emit_comment_line(f: &JetFmt, text: String) Never! {
     f.pending_blank = false
 }
 
-fn jfmt_emit_comment_inline(f: &JetFmt, text: String) Never! {
+jfmt_emit_comment_inline: fn(f: &JetFmt, text: String) Never! {
     jfmt_write(&f, text)
     f.pending_blank = false
 }
 
 // True if any tracked comment falls inside `open..close` (gate c).
-fn jfmt_span_has_comment(f: JetFmt, open: Int, close: Int) -> Bool Never! {
+jfmt_span_has_comment: fn(f: JetFmt, open: Int, close: Int) -> Bool Never! {
     loop comment in f.comments {
         if comment.span.start >= open && comment.span.start < close -> return true
     }
@@ -935,20 +961,20 @@ fn jfmt_span_has_comment(f: JetFmt, open: Int, close: Int) -> Bool Never! {
 
 // The AST stores only the name span for calls; comment attachment walks the
 // lexer tokens to the first top-level terminator.
-fn jfmt_statement_source_end(f: JetFmt, stmt: Stmt) -> Int Never! {
-    scanned :: if stmt == {
+jfmt_statement_source_end: fn(f: JetFmt, stmt: Stmt) -> Int Never! {
+    scanned: if stmt == {
         .Expr(_) | .DeferClose(_, _) | .Val(_) | .Assign(_, _, _, _) | .Return(_, _) | .Yield(_, _) -> true
         else -> false
     }
     if !scanned -> return jfmt_stmt_end(stmt)
-    start :: jfmt_stmt_start(stmt)
+    start: jfmt_stmt_start(stmt)
     parens := 0
     brackets := 0
     braces := 0
     last_end := jfmt_stmt_end(stmt)
     loop index in jfmt_first_token_at(f, start)..<f.source_toks.len() {
-        token :: f.source_toks[index]
-        kind :: token.kind
+        token: f.source_toks[index]
+        kind: token.kind
         if jfmt_is_comment_kind(kind) -> next
         if {
             kind == TOKEN_SEMI && parens == 0 && brackets == 0 && braces == 0 -> return last_end
@@ -970,25 +996,25 @@ fn jfmt_statement_source_end(f: JetFmt, stmt: Stmt) -> Int Never! {
 }
 
 // S69 did the author break the line before this chain step's `.`?
-fn jfmt_chain_break_between(f: JetFmt, from: Int, to: Int) -> Bool Never! {
+jfmt_chain_break_between: fn(f: JetFmt, from: Int, to: Int) -> Bool Never! {
     from <= to && jfmt_src_valid(f, from, to) && jfmt_bytes_have_newline(f.src_bytes, from, to)
 }
 
-fn jfmt_saturating_sub(value: Int, amount: Int) -> Int Never! {
+jfmt_saturating_sub: fn(value: Int, amount: Int) -> Int Never! {
     if value > amount -> value - amount else -> 0
 }
 
 // The exact type spelling through its next top-level terminator: the AST
 // canonicalizes union members, so this slice is the only retained order fact.
-fn jfmt_source_type_spelling(f: JetFmt, start: Int) -> String? Never! {
+jfmt_source_type_spelling: fn(f: JetFmt, start: Int) -> String? Never! {
     parens := 0
     brackets := 0
     angles := 0
     end := start
     loop index in jfmt_first_token_at(f, start)..<f.source_toks.len() {
-        token :: f.source_toks[index]
-        kind :: token.kind
-        top_level :: parens == 0 && brackets == 0 && angles == 0
+        token: f.source_toks[index]
+        kind: token.kind
+        top_level: parens == 0 && brackets == 0 && angles == 0
         if top_level && (kind == TOKEN_COMMA || kind == TOKEN_SEMI || kind == TOKEN_UNIFIED_ARROW || kind == TOKEN_RPAREN || kind == TOKEN_RBRACE || kind == TOKEN_EOF) -> break
         if {
             kind == TOKEN_LPAREN -> parens += 1
@@ -1005,7 +1031,7 @@ fn jfmt_source_type_spelling(f: JetFmt, start: Int) -> String? Never! {
     if end > start -> Val(jfmt_src_text(f, start, end)) else -> None
 }
 
-fn jfmt_delimiter_opens(delimiter: Int, kind: Int) -> Bool Never! {
+jfmt_delimiter_opens: fn(delimiter: Int, kind: Int) -> Bool Never! {
     if {
         delimiter == JFMT_DELIM_PAREN -> kind == TOKEN_LPAREN
         delimiter == JFMT_DELIM_BRACKET -> kind == TOKEN_LBRACKET
@@ -1014,7 +1040,7 @@ fn jfmt_delimiter_opens(delimiter: Int, kind: Int) -> Bool Never! {
     }
 }
 
-fn jfmt_delimiter_closes(delimiter: Int, kind: Int) -> Bool Never! {
+jfmt_delimiter_closes: fn(delimiter: Int, kind: Int) -> Bool Never! {
     if {
         delimiter == JFMT_DELIM_PAREN -> kind == TOKEN_RPAREN
         delimiter == JFMT_DELIM_BRACKET -> kind == TOKEN_RBRACKET
@@ -1025,13 +1051,13 @@ fn jfmt_delimiter_closes(delimiter: Int, kind: Int) -> Bool Never! {
 
 // The first `delimiter` group at or after `start`: its whole span and the
 // offset of its closing token.
-fn jfmt_source_list_span_after(f: JetFmt, start: Int, delimiter: Int) -> JetFmtSourceList? Never! {
+jfmt_source_list_span_after: fn(f: JetFmt, start: Int, delimiter: Int) -> JetFmtSourceList? Never! {
     depth := 0
     open_start := Int?{None}
     loop index in jfmt_first_token_at(f, start)..<f.source_toks.len() {
-        token :: f.source_toks[index]
-        is_open :: jfmt_delimiter_opens(delimiter, token.kind)
-        is_close :: jfmt_delimiter_closes(delimiter, token.kind)
+        token: f.source_toks[index]
+        is_open: jfmt_delimiter_opens(delimiter, token.kind)
+        is_close: jfmt_delimiter_closes(delimiter, token.kind)
         if depth == 0 {
             if is_open {
                 depth = 1
@@ -1042,10 +1068,10 @@ fn jfmt_source_list_span_after(f: JetFmt, start: Int, delimiter: Int) -> JetFmtS
         if is_open {
             depth += 1
         } else if is_close {
-            consumed :: if delimiter == JFMT_DELIM_ANGLE && token.kind == TOKEN_SHR -> 2 else -> 1
+            consumed: if delimiter == JFMT_DELIM_ANGLE && token.kind == TOKEN_SHR -> 2 else -> 1
             depth = jfmt_saturating_sub(depth, consumed)
             if depth == 0 {
-                opened :: open_start ?? return None
+                opened: open_start ?? return None
                 return Val(JetFmtSourceList{span: Span{start: opened, end: token.span.end}, close_start: token.span.start})
             }
         }
@@ -1053,18 +1079,18 @@ fn jfmt_source_list_span_after(f: JetFmt, start: Int, delimiter: Int) -> JetFmtS
     None
 }
 
-fn jfmt_source_effect_row_span_after(f: JetFmt, start: Int) -> JetFmtSourceList? Never! {
-    first :: jfmt_first_token_at(f, start)
-    limit :: jfmt_saturating_sub(f.source_toks.len(), 1)
+jfmt_source_effect_row_span_after: fn(f: JetFmt, start: Int) -> JetFmtSourceList? Never! {
+    first: jfmt_first_token_at(f, start)
+    limit: jfmt_saturating_sub(f.source_toks.len(), 1)
     loop index in first..<limit {
         if f.source_toks[index].kind != TOKEN_MINUS -> next
-        following :: f.source_toks[index + 1]
+        following: f.source_toks[index + 1]
         if following.kind == TOKEN_LBRACKET -> return jfmt_source_list_span_after(f, following.span.start, JFMT_DELIM_BRACKET)
     }
     None
 }
 
-fn jfmt_source_marker_group_span(f: JetFmt, start: Int) -> JetFmtSourceList? Never! {
+jfmt_source_marker_group_span: fn(f: JetFmt, start: Int) -> JetFmtSourceList? Never! {
     index := jfmt_first_token_at(f, start) - 1
     loop index >= 0 {
         if f.source_toks[index].kind == TOKEN_LBRACKET -> return jfmt_source_list_span_after(f, f.source_toks[index].span.start, JFMT_DELIM_BRACKET)
@@ -1073,20 +1099,20 @@ fn jfmt_source_marker_group_span(f: JetFmt, start: Int) -> JetFmtSourceList? Nev
     None
 }
 
-fn jfmt_source_span_multiline(f: JetFmt, span: Span) -> Bool Never! {
+jfmt_source_span_multiline: fn(f: JetFmt, span: Span) -> Bool Never! {
     (jfmt_src_valid(f, span.start, span.end) && jfmt_bytes_have_newline(f.src_bytes, span.start, span.end)) || jfmt_span_has_comment(f, span.start, span.end)
 }
 
 // Rust `fmt_comma_items`, split at its closure boundaries: begin, then per
 // item before/render/after, then end.
-fn jfmt_comma_begin(f: &JetFmt, count: Int, source: JetFmtSourceList?) -> Bool Never! {
+jfmt_comma_begin: fn(f: &JetFmt, count: Int, source: JetFmtSourceList?) -> Bool Never! {
     multiline := false
     if source == .Val(list) -> multiline = jfmt_source_span_multiline(f, list.span)
     if multiline && count > 0 -> jfmt_newline(&f)
     multiline
 }
 
-fn jfmt_comma_before(f: &JetFmt, index: Int, multiline: Bool, item_start: Int) Never! {
+jfmt_comma_before: fn(f: &JetFmt, index: Int, multiline: Bool, item_start: Int) Never! {
     if index > 0 {
         if multiline {
             jfmt_newline(&f)
@@ -1097,23 +1123,23 @@ fn jfmt_comma_before(f: &JetFmt, index: Int, multiline: Bool, item_start: Int) N
     if multiline -> jfmt_emit_leading(&f, item_start)
 }
 
-fn jfmt_comma_after(f: &JetFmt, multiline: Bool, item_end: Int) Never! {
+jfmt_comma_after: fn(f: &JetFmt, multiline: Bool, item_end: Int) Never! {
     if multiline {
         jfmt_write(&f, ",")
         jfmt_emit_trailing(&f, item_end)
     }
 }
 
-fn jfmt_comma_end(f: &JetFmt, multiline: Bool, source: JetFmtSourceList?) Never! {
+jfmt_comma_end: fn(f: &JetFmt, multiline: Bool, source: JetFmtSourceList?) Never! {
     if !multiline -> return
     if source == .Val(list) -> jfmt_emit_leading(&f, list.close_start)
     if !f.at_line_start -> jfmt_newline(&f)
 }
 
 // The top-level comma-separated item spans inside a source list.
-fn jfmt_source_list_item_spans(f: JetFmt, source: JetFmtSourceList) -> [Span] Never! {
-    first :: jfmt_first_token_at(f, source.span.start)
-    opening :: if first < f.source_toks.len() -> f.source_toks[first].kind else -> TOKEN_EOF
+jfmt_source_list_item_spans: fn(f: JetFmt, source: JetFmtSourceList) -> [Span] Never! {
+    first: jfmt_first_token_at(f, source.span.start)
+    opening: if first < f.source_toks.len() -> f.source_toks[first].kind else -> TOKEN_EOF
     parens := if opening == TOKEN_LPAREN -> 1 else -> 0
     brackets := if opening == TOKEN_LBRACKET -> 1 else -> 0
     braces := if opening == TOKEN_LBRACE -> 1 else -> 0
@@ -1122,12 +1148,12 @@ fn jfmt_source_list_item_spans(f: JetFmt, source: JetFmtSourceList) -> [Span] Ne
     item_end := Int?{None}
     items := [Span]{}
     loop index in first..<f.source_toks.len() {
-        token :: f.source_toks[index]
+        token: f.source_toks[index]
         if token.span.start >= source.close_start -> break
         if token.span.start == source.span.start -> next
-        kind :: token.kind
+        kind: token.kind
         if jfmt_is_comment_kind(kind) -> next
-        top_level :: parens == 0 && brackets == 0 && braces == 0 && angles == 0
+        top_level: parens == 0 && brackets == 0 && braces == 0 && angles == 0
         if top_level && kind == TOKEN_COMMA {
             if item_start == .Val(item_from) {
                 if item_end == .Val(item_to) -> &items.push(Span{start: item_from, end: item_to})
@@ -1158,26 +1184,26 @@ fn jfmt_source_list_item_spans(f: JetFmt, source: JetFmtSourceList) -> [Span] Ne
 }
 
 // `spans[index]` from `source_list_item_spans`, else `fallback`.
-fn jfmt_item_span_or(spans: [Span]?, index: Int, fallback: Span) -> Span Never! {
+jfmt_item_span_or: fn(spans: [Span]?, index: Int, fallback: Span) -> Span Never! {
     if spans == .Val(list) {
         if index < list.len() -> return list[index]
     }
     fallback.copy()
 }
 
-fn jfmt_list_item_spans(f: JetFmt, source: JetFmtSourceList?) -> [Span]? Never! {
+jfmt_list_item_spans: fn(f: JetFmt, source: JetFmtSourceList?) -> [Span]? Never! {
     if source == .Val(list) -> return Val(jfmt_source_list_item_spans(f, list))
     None
 }
 
 // ---- brace bodies ----
 
-fn jfmt_fmt_body(f: &JetFmt, body: [Stmt]) {
+jfmt_fmt_body: fn(f: &JetFmt, body: [Stmt]) {
     jfmt_fmt_control_body(&f, body)
 }
 
 // The expanded brace-body shape; the caller has already emitted ` {`.
-fn jfmt_fmt_body_expanded(f: &JetFmt, body: [Stmt]) {
+jfmt_fmt_body_expanded: fn(f: &JetFmt, body: [Stmt]) {
     jfmt_newline(&f)
     f.indent += 1
     jfmt_fmt_block_stmts(&f, body)
@@ -1186,12 +1212,12 @@ fn jfmt_fmt_body_expanded(f: &JetFmt, body: [Stmt]) {
 }
 
 // Locate the `{ … }` around a lone body statement.
-fn jfmt_single_stmt_braces(f: JetFmt, stmt: Stmt) -> JetFmtBraces? Never! {
-    start :: jfmt_stmt_start(stmt)
+jfmt_single_stmt_braces: fn(f: JetFmt, stmt: Stmt) -> JetFmtBraces? Never! {
+    start: jfmt_stmt_start(stmt)
     if start < 0 || start > f.src_bytes.len() -> return None
-    brace :: jfmt_bytes_rfind(f.src_bytes, start, "{{")
+    brace: jfmt_bytes_rfind(f.src_bytes, start, "{{")
     if brace < 0 -> return None
-    open :: brace + 1
+    open: brace + 1
     if !jfmt_source_gap_is_trivia(f, open, start) -> return None
     depth := 1
     loop token in f.source_toks {
@@ -1206,7 +1232,7 @@ fn jfmt_single_stmt_braces(f: JetFmt, stmt: Stmt) -> JetFmtBraces? Never! {
     None
 }
 
-fn jfmt_source_gap_is_trivia(f: JetFmt, start: Int, end: Int) -> Bool Never! {
+jfmt_source_gap_is_trivia: fn(f: JetFmt, start: Int, end: Int) -> Bool Never! {
     cursor := start
     loop comment in f.comments {
         if comment.span.start < cursor -> next
@@ -1219,24 +1245,24 @@ fn jfmt_source_gap_is_trivia(f: JetFmt, start: Int, end: Int) -> Bool Never! {
 
 // Locate the `{ … }` around an if-expression branch whose only content is
 // `value`.
-fn jfmt_value_block_braces(f: JetFmt, value: Expr) -> JetFmtBraces? Never! {
-    span :: expr_span(value)
+jfmt_value_block_braces: fn(f: JetFmt, value: Expr) -> JetFmtBraces? Never! {
+    span: expr_span(value)
     if span.start < 0 || span.start > f.src_bytes.len() || span.end > f.src_bytes.len() -> return None
-    brace :: jfmt_bytes_rfind(f.src_bytes, span.start, "{{")
+    brace: jfmt_bytes_rfind(f.src_bytes, span.start, "{{")
     if brace < 0 -> return None
-    close :: jfmt_bytes_find(f.src_bytes, span.end, "}}")
+    close: jfmt_bytes_find(f.src_bytes, span.end, "}}")
     if close < 0 -> return None
-    open :: brace + 1
+    open: brace + 1
     if open <= close -> Val(JetFmtBraces{open: open, close: close}) else -> None
 }
 
 // Attempt the inline branch `{ value }`; rolls back on overflow. The
 // caller has already emitted the opening `{`.
-fn jfmt_try_inline_value_block(f: &JetFmt, stmts: [Stmt], value: Expr) -> Bool {
+jfmt_try_inline_value_block: fn(f: &JetFmt, stmts: [Stmt], value: Expr) -> Bool {
     if !jfmt_value_block_inlineable(f, stmts, value) -> return false
-    saved_out :: f.out.len()
-    saved_col :: f.col
-    saved_line_start :: f.at_line_start
+    saved_out: f.out.len()
+    saved_col: f.col
+    saved_line_start: f.at_line_start
     jfmt_write(&f, " ")
     jfmt_fmt_expr(&f, value, JFMT_PREC_OR_FALLBACK)
     jfmt_write(&f, " }}")
@@ -1247,13 +1273,13 @@ fn jfmt_try_inline_value_block(f: &JetFmt, stmts: [Stmt], value: Expr) -> Bool {
     false
 }
 
-fn jfmt_fmt_control_body(f: &JetFmt, body: [Stmt]) {
+jfmt_fmt_control_body: fn(f: &JetFmt, body: [Stmt]) {
     if body.len() == 1 {
-        statement :: body[0]
+        statement: body[0]
         comment_free := true
         if jfmt_single_stmt_braces(f, statement) == .Val(braces) -> comment_free = !jfmt_span_has_comment(f, braces.open, braces.close)
         if jfmt_is_simple_stmt(statement) && comment_free {
-            mark :: jfmt_mark(f)
+            mark: jfmt_mark(f)
             jfmt_write(&f, " ")
             jfmt_fmt_stmt_inline(&f, statement)
             jfmt_write(&f, " }}")
@@ -1271,7 +1297,7 @@ fn jfmt_fmt_control_body(f: &JetFmt, body: [Stmt]) {
 // `Val(x)` returned from a function declared `-> T?` drops its `Val` when the
 // payload's type never comes from the optional context: a name, a field
 // path, or a `Bool`/`Char` literal.
-fn jfmt_self_typed(expr: Expr) -> Bool Never! {
+jfmt_self_typed: fn(expr: Expr) -> Bool Never! {
     if expr == {
         .Ident(_, _, _) | .Bool(_, _, _) | .Char(_, _, _) -> true
         .Field(base, _, _, _) -> jfmt_self_typed(base)
@@ -1279,7 +1305,7 @@ fn jfmt_self_typed(expr: Expr) -> Bool Never! {
     }
 }
 
-fn jfmt_unwrap_redundant_optional_value(value: Expr) -> Expr Never! {
+jfmt_unwrap_redundant_optional_value: fn(value: Expr) -> Expr Never! {
     if value == .EnumLit(type_name, variant, _, args, _, _, _) {
         // copy: a read-parameter rewriter returns a value that is not a redundant `Val(..)`
         // unchanged as a new tree (owner: the result) while the caller keeps the input (owner: the
@@ -1297,7 +1323,7 @@ fn jfmt_unwrap_redundant_optional_value(value: Expr) -> Expr Never! {
     value.copy()
 }
 
-fn jfmt_strip_optional_returns_in_if(expr: Expr) -> Expr Never! {
+jfmt_strip_optional_returns_in_if: fn(expr: Expr) -> Expr Never! {
     if expr == .If(cond, then_body, then_value, else_body, else_value, span, _) {
         return Expr.If{cond: cond, then_body: jfmt_strip_optional_returns_in_body(then_body), then_value: then_value, else_body: jfmt_strip_optional_returns_in_body(else_body), else_value: jfmt_strip_optional_returns_in_if(else_value), span: span, id: AST_NODE_GENERATED}
     }
@@ -1308,7 +1334,7 @@ fn jfmt_strip_optional_returns_in_if(expr: Expr) -> Expr Never! {
     expr.copy()
 }
 
-fn jfmt_strip_optional_returns_in_body(body: [Stmt]) -> [Stmt] Never! {
+jfmt_strip_optional_returns_in_body: fn(body: [Stmt]) -> [Stmt] Never! {
     out := [Stmt]{}
     loop stmt in body {
         if stmt == {
@@ -1337,7 +1363,7 @@ fn jfmt_strip_optional_returns_in_body(body: [Stmt]) -> [Stmt] Never! {
     out
 }
 
-fn jfmt_strip_optional_func(function: Func) -> Func Never! {
+jfmt_strip_optional_func: fn(function: Func) -> Func Never! {
     if function.return_type == .Val(declared) {
         if declared == .Option(_) {
             updated := function
@@ -1356,7 +1382,7 @@ fn jfmt_strip_optional_func(function: Func) -> Func Never! {
     function.copy()
 }
 
-fn jfmt_strip_optional_funcs(functions: [Func]) -> [Func] Never! {
+jfmt_strip_optional_funcs: fn(functions: [Func]) -> [Func] Never! {
     out := [Func]{}
     loop function in functions -> &out.push(jfmt_strip_optional_func(function))
     out
@@ -1364,7 +1390,7 @@ fn jfmt_strip_optional_funcs(functions: [Func]) -> [Func] Never! {
 
 // Visit every callable body the simplify catalog rewrites: free functions,
 // type and impl methods, and functions nested in code modules.
-fn jfmt_strip_redundant_optional_returns(items: [Item]) -> [Item] Never! {
+jfmt_strip_redundant_optional_returns: fn(items: [Item]) -> [Item] Never! {
     out := [Item]{}
     loop item in items {
         if item == {
@@ -1408,8 +1434,8 @@ fn jfmt_strip_redundant_optional_returns(items: [Item]) -> [Item] Never! {
 
 // ---- source edits ----
 
-fn jfmt_apply_source_edits(src: String, edits: [TextEdit]) -> String? Never! {
-    source :: src.bytes()
+jfmt_apply_source_edits: fn(src: String, edits: [TextEdit]) -> String? Never! {
+    source: src.bytes()
     ordered := edits
     // Rust sorts by descending start; apply from the end of the source.
     ordered = loop fresh_item in ordered -> fresh_item
@@ -1426,7 +1452,7 @@ fn jfmt_apply_source_edits(src: String, edits: [TextEdit]) -> String? Never! {
     cursor := 0
     position := ordered.len() - 1
     loop position >= 0 {
-        edit :: ordered[position]
+        edit: ordered[position]
         loop cursor < edit.span.start {
             &out.push(source[cursor])
             cursor += 1
@@ -1442,7 +1468,7 @@ fn jfmt_apply_source_edits(src: String, edits: [TextEdit]) -> String? Never! {
     Val(String.from_bytes(out) ?? src)
 }
 
-fn jfmt_sort_edits_by_start(edits: [TextEdit]) -> [TextEdit] Never! {
+jfmt_sort_edits_by_start: fn(edits: [TextEdit]) -> [TextEdit] Never! {
     sorted := edits
     sorted = loop fresh_item in sorted -> fresh_item
     &sorted.sort_by((left: TextEdit, right: TextEdit) -> left.span.start <=> right.span.start)
@@ -1452,16 +1478,16 @@ fn jfmt_sort_edits_by_start(edits: [TextEdit]) -> [TextEdit] Never! {
 // ---- parse acceptance (Rust parse_for_check_with_source / parse_for_fmt) ----
 
 // Live current-rule diagnostics that recover in the AST; fmt may rewrite to canon.
-fn jfmt_is_teaching_parse_diag(code: String) -> Bool Never! {
+jfmt_is_teaching_parse_diag: fn(code: String) -> Bool Never! {
     if code == {
-        "E0080" | "E0082" | "E0154" | "E0986" | "E0992" | "E0994" | "E0366" | "E0367" | "E0372" | "E0373" | "E0379" | "E0386" | "E0999" | "E0413" | "E0414" | "E0415" | "E0417" -> true
+        "E0080" | "E0082" | "E0154" | "E0986" | "E0992" | "E0994" | "E0366" | "E0367" | "E0372" | "E0373" | "E0379" | "E0386" | "E0397" | "E0999" | "E0413" | "E0414" | "E0415" | "E0417" -> true
         else -> false
     }
 }
 
 // Rust `parse_for_check_with_source` succeeds: every diagnostic is a lint, a
 // teaching diagnostic, or E0081.
-fn jfmt_check_parse_accepts(diagnostics: [Diagnostic]) -> Bool Never! {
+jfmt_check_parse_accepts: fn(diagnostics: [Diagnostic]) -> Bool Never! {
     loop diagnostic in diagnostics {
         if diagnostic.severity == DIAGNOSTIC_LINT || jfmt_is_teaching_parse_diag(diagnostic.code) || diagnostic.code == "E0081" -> next
         return false
@@ -1471,7 +1497,7 @@ fn jfmt_check_parse_accepts(diagnostics: [Diagnostic]) -> Bool Never! {
 
 // Rust `parse_for_fmt` succeeds: no errors, or every error is a teaching
 // diagnostic.
-fn jfmt_fmt_parse_accepts(diagnostics: [Diagnostic]) -> Bool Never! {
+jfmt_fmt_parse_accepts: fn(diagnostics: [Diagnostic]) -> Bool Never! {
     loop diagnostic in diagnostics {
         if diagnostic.severity != DIAGNOSTIC_ERROR -> next
         if jfmt_is_teaching_parse_diag(diagnostic.code) -> next
@@ -1482,21 +1508,21 @@ fn jfmt_fmt_parse_accepts(diagnostics: [Diagnostic]) -> Bool Never! {
 
 // ---- driver ----
 
-fn jfmt_web_bucket_name(bucket: WebBucket) -> String Never! {
+jfmt_web_bucket_name: fn(bucket: WebBucket) -> String Never! {
     if bucket == {
         .JS -> "JS"
         .Wasm -> "Wasm"
     }
 }
 
-fn jfmt_is_module_policy(declaration: PolicyDeclaration) -> Bool Never! {
+jfmt_is_module_policy: fn(declaration: PolicyDeclaration) -> Bool Never! {
     if declaration.scope == {
         .Module -> true
         else -> false
     }
 }
 
-fn jfmt_newline_offsets(source: [U8]) -> [Int] Never! {
+jfmt_newline_offsets: fn(source: [U8]) -> [Int] Never! {
     offsets := [Int]{}
     loop (index, byte) in source {
         if byte == 10 -> &offsets.push(index)
@@ -1504,8 +1530,8 @@ fn jfmt_newline_offsets(source: [U8]) -> [Int] Never! {
     offsets
 }
 
-fn jfmt_new(prog: Program, src: String, source_toks: [Token], simplify: Bool) -> JetFmt Never! {
-    bytes :: src.bytes()
+jfmt_new: fn(prog: Program, src: String, source_toks: [Token], simplify: Bool) -> JetFmt Never! {
+    bytes: src.bytes()
     comments := [JetFmtComment]{}
     loop token in source_toks {
         if jfmt_is_comment_kind(token.kind) -> &comments.push(JetFmtComment{text: jfmt_bytes_text(bytes, token.span.start, token.span.end), span: token.span})
@@ -1533,25 +1559,25 @@ fn jfmt_new(prog: Program, src: String, source_toks: [Token], simplify: Bool) ->
 }
 
 // Rust `format_program_with_tokens`; comments come from the source tokens.
-fn jfmt_format_program_with_tokens(prog: Program, src: String, source_toks: [Token], simplify: Bool) -> String {
+jfmt_format_program_with_tokens: fn(prog: Program, src: String, source_toks: [Token], simplify: Bool) -> String {
     f := jfmt_new(prog, src, source_toks, simplify)
     first := true
     ordered_file_rules := [Marker]{}
     loop application in prog.applied_rules {
         if application.target == None -> &ordered_file_rules.push(application.marker)
     }
-    has_ordered_file_rules :: ordered_file_rules.len() > 0
+    has_ordered_file_rules: ordered_file_rules.len() > 0
     ordered_file_rules_precede_imports := false
     loop marker in ordered_file_rules {
         if marker.name == "NoPrelude" -> ordered_file_rules_precede_imports = true
     }
-    web_default :: (prog.default_target ?? "") == "web"
+    web_default: (prog.default_target ?? "") == "web"
     file_rule_count := 0
     if prog.no_prelude -> file_rule_count += 1
     if web_default -> file_rule_count += 1
     if prog.web_target_ceiling != None -> file_rule_count += 1
     if prog.html_path != None -> file_rule_count += 1
-    grouped_file_rules :: file_rule_count > 1
+    grouped_file_rules: file_rule_count > 1
     if has_ordered_file_rules && ordered_file_rules_precede_imports {
         jfmt_fmt_marker_group(&f, ordered_file_rules, "#", true)
         first = false
@@ -1602,7 +1628,7 @@ fn jfmt_format_program_with_tokens(prog: Program, src: String, source_toks: [Tok
         if !grouped_file_rules && !has_ordered_file_rules {
             if !first -> jfmt_blank_line_between_items(&f)
             first = false
-            escaped :: html_path.replace("\\", "\\\\").replace("\"", "\\\"")
+            escaped: html_path.replace("\\", "\\\\").replace("\"", "\\\"")
             jfmt_write(&f, "#HTML(Path{{\"{escaped}\"}})")
             jfmt_newline(&f)
         }
@@ -1624,7 +1650,7 @@ fn jfmt_format_program_with_tokens(prog: Program, src: String, source_toks: [Tok
         if jfmt_is_module_policy(declaration) -> &module_policies.push(declaration)
     }
     if module_policies.len() > 0 {
-        policy_span :: module_policies[0].span
+        policy_span: module_policies[0].span
         if !first -> jfmt_blank_line_between_items(&f)
         first = false
         jfmt_emit_leading(&f, policy_span.start)
@@ -1645,7 +1671,7 @@ fn jfmt_format_program_with_tokens(prog: Program, src: String, source_toks: [Tok
     stmt_i := 0
     previous_was_script := false
     loop item_i < prog.items.len() || stmt_i < prog.script_body.len() {
-        emit_stmt :: if {
+        emit_stmt: if {
             stmt_i == prog.script_body.len() -> false
             item_i == prog.items.len() -> true
             else -> jfmt_stmt_span(prog.script_body[stmt_i]).start < jfmt_item_span_start(f, prog.items[item_i])
@@ -1664,17 +1690,17 @@ fn jfmt_format_program_with_tokens(prog: Program, src: String, source_toks: [Tok
         }
         first = false
         if emit_stmt {
-            stmt :: prog.script_body[stmt_i]
+            stmt: prog.script_body[stmt_i]
             jfmt_emit_leading(&f, jfmt_stmt_span(stmt).start)
             jfmt_fmt_stmt(&f, stmt)
-            stmt_end :: jfmt_statement_source_end(f, stmt)
+            stmt_end: jfmt_statement_source_end(f, stmt)
             jfmt_emit_trailing(&f, stmt_end)
             if !f.at_line_start -> jfmt_newline(&f)
             stmt_i += 1
             previous_was_script = true
         } else {
-            item :: prog.items[item_i]
-            item_start :: jfmt_item_span_start(f, item)
+            item: prog.items[item_i]
+            item_start: jfmt_item_span_start(f, item)
             jfmt_emit_leading(&f, item_start)
             jfmt_fmt_item(&f, item)
             jfmt_emit_trailing(&f, jfmt_item_span_end(item))
@@ -1688,12 +1714,12 @@ fn jfmt_format_program_with_tokens(prog: Program, src: String, source_toks: [Tok
 }
 
 // Lex, parse, then format. Parse errors propagate; sema is not required.
-fn jet_format_source(src: String, simplify_requested: Bool) -> JetFormatResult {
-    source :: src.bytes()
-    lexed :: lex(source)
+jet_format_source: fn(src: String, simplify_requested: Bool) -> JetFormatResult {
+    source: src.bytes()
+    lexed: lex(source)
     if lexed.diagnostics.len() > 0 -> return JetFormatResult{ok: false, text: "", diagnostics: lexed.diagnostics}
     simplify := simplify_requested
-    parsed :: parse_source(source)
+    parsed: parse_source(source)
     if jfmt_check_parse_accepts(parsed.diagnostics) {
         // A recovered control-body diagnostic leaves only a recovery
         // scaffold; simplify must remain a no-op there.
@@ -1710,22 +1736,22 @@ fn jet_format_source(src: String, simplify_requested: Bool) -> JetFormatResult {
     JetFormatResult{ok: true, text: jfmt_format_program_with_tokens(prog, src, lexed.tokens, simplify), diagnostics: [Diagnostic]{}}
 }
 
-fn jfmt_lines(text: String) -> [String] Never! {
+jfmt_lines: fn(text: String) -> [String] Never! {
     lines := text.split("\n").to_list()
     // Rust `str::lines`: no final empty line after a trailing newline, and a
     // trailing `\r` is part of the line break.
     if lines.len() > 0 && lines[lines.len() - 1] == "" -> _ := &lines.pop()
     loop index in 0..<lines.len() {
-        bytes :: lines[index].bytes()
+        bytes: lines[index].bytes()
         if bytes.len() > 0 && bytes[bytes.len() - 1] == 13 -> lines[index] = jfmt_bytes_text(bytes, 0, bytes.len() - 1)
     }
     lines
 }
 
 // Rust `unified_diff`: the simple diff `jet fmt --check --diff` prints.
-fn jet_format_unified_diff(path: String, old: String, new: String) -> String Never! {
-    old_lines :: jfmt_lines(old)
-    new_lines :: jfmt_lines(new)
+jet_format_unified_diff: fn(path: String, old: String, new: String) -> String Never! {
+    old_lines: jfmt_lines(old)
+    new_lines: jfmt_lines(new)
     out := "--- {path}\n+++ {path}\n"
     i := 0
     j := 0
@@ -1735,8 +1761,8 @@ fn jet_format_unified_diff(path: String, old: String, new: String) -> String Nev
             j += 1
             next
         }
-        start_i :: i
-        start_j :: j
+        start_i: i
+        start_j: j
         loop i < old_lines.len() && (j >= new_lines.len() || old_lines[i] != (if j < new_lines.len() -> new_lines[j] else -> "")) -> i += 1
         loop j < new_lines.len() && (i >= old_lines.len() || new_lines[j] != (if i < old_lines.len() -> old_lines[i] else -> "")) -> j += 1
         out = "{out}@@ -{start_i + 1},{i - start_i} +{start_j + 1},{j - start_j} @@\n"

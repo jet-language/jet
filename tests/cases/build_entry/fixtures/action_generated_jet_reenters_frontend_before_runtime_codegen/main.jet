@@ -1,15 +1,15 @@
 
-fn build(b: Build) -[Exec, FS]> {
+build: fn(b: Build) -[Exec, FS]> {
     #Impure("generate declared source") {
-    action :: b.action(
+    action: b.action(
         "bad-gen",
         [],
         [".jet/generated/main/bad.jet"],
-        ["sh", "-c", "printf 'fn nope(' > .jet/generated/main/bad.jet"],
+        ["sh", "-c", "printf 'nope: fn(' > .jet/generated/main/bad.jet"],
         ["Exec", "FS"]
         )
-        app :: b.add_executable("app", ["main.jet", ".jet/generated/main/bad.jet"], [action])
+        app: b.add_executable("app", ["main.jet", ".jet/generated/main/bad.jet"], [action])
     b.default(app)
     }
 }
-fn run() {}
+run: fn() {}

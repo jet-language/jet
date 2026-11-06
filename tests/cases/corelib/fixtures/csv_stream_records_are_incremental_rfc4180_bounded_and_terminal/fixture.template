@@ -1,12 +1,12 @@
 
 use {
-    encoding :: core.encoding
-    csv :: core.encoding.csv
-    files :: core.files
+    encoding: core.encoding
+    csv: core.encoding.csv
+    files: core.files
 }
 
-fn run() {
-    output :: files.create("{work}/output.csv") ?? panic("create")
+run: fn() {
+    output: files.create("{work}/output.csv") ?? panic("create")
     writer := csv.writer(^output) ?? panic("writer")
     &writer.write(["a", "b,b", "c\"c", "line1\nline2"]) ?? panic("write first")
     &writer.write(["last", "", "tail"]) ?? panic("write second")
@@ -23,9 +23,9 @@ fn run() {
         }
     }
 
-    input :: files.open("{work}/input.csv") ?? panic("open")
+    input: files.open("{work}/input.csv") ?? panic("open")
     reader := csv.reader(^input) ?? panic("reader")
-    first :: &reader.next()
+    first: &reader.next()
     if first == {
         .Val(row) -> {
             print(row.fields[0])
@@ -36,7 +36,7 @@ fn run() {
         }
         .None -> { print("first-missing") }
     }
-    second :: &reader.next()
+    second: &reader.next()
     if second == {
         .Val(row) -> {
             print(row.fields[0])
@@ -46,16 +46,16 @@ fn run() {
         }
         .None -> { print("second-missing") }
     }
-    eof :: &reader.next()
+    eof: &reader.next()
     if eof == { .Val(_) -> { print(false) } .None -> { print(true) } }
-    eof_again :: &reader.next()
+    eof_again: &reader.next()
     if eof_again == { .Val(_) -> { print(false) } .None -> { print(true) } }
-    options_input :: files.open("{work}/options.tsv") ?? panic("options open")
+    options_input: files.open("{work}/options.tsv") ?? panic("options open")
     options_reader := csv.reader(
         ^options_input, delimiter: "\t", header: true, skip_blank: true
     ) ?? panic("options reader")
-    options_first :: &options_reader.next()
-    crlf :: String.from_bytes([U8]{"\x0D\x0A"}) ?? panic("crlf")
+    options_first: &options_reader.next()
+    crlf: String.from_bytes([U8]{"\x0D\x0A"}) ?? panic("crlf")
     if options_first == {
         .Val(row) -> {
             print(row.line)
@@ -64,10 +64,10 @@ fn run() {
         }
         .None -> { print("options-missing") }
     }
-    options_eof :: &options_reader.next()
+    options_eof: &options_reader.next()
     if options_eof == { .Val(_) -> { print(false) } .None -> { print(true) } }
 
-    malformed_input :: files.open("{work}/malformed.csv") ?? panic("malformed open")
+    malformed_input: files.open("{work}/malformed.csv") ?? panic("malformed open")
     malformed_reader := csv.reader(^malformed_input) ?? panic("malformed reader")
     if &malformed_reader.next() == {
         .Ok(_) -> { print("malformed-missed") }
@@ -82,7 +82,7 @@ fn run() {
         }
     }
 
-    invalid_utf8_input :: files.open("{work}/invalid-utf8.csv") ?? panic("invalid utf8 open")
+    invalid_utf8_input: files.open("{work}/invalid-utf8.csv") ?? panic("invalid utf8 open")
     invalid_utf8_reader := csv.reader(^invalid_utf8_input) ?? panic("invalid utf8 reader")
     if &invalid_utf8_reader.next() == {
         .Ok(_) -> { print("invalid-utf8-missed") }
@@ -96,7 +96,7 @@ fn run() {
 
     item_limits := encoding.EncodingLimits.safe()
     item_limits.max_item_bytes = 3
-    item_input :: files.open("{work}/item-limit.csv") ?? panic("item open")
+    item_input: files.open("{work}/item-limit.csv") ?? panic("item open")
     item_reader := csv.reader(^item_input, item_limits) ?? panic("item reader")
     if &item_reader.next() == {
         .Ok(_) -> { print("item-limit-missed") }
@@ -113,7 +113,7 @@ fn run() {
 
     total_limits := encoding.EncodingLimits.safe()
     total_limits.max_total_bytes = Val(3)
-    total_input :: files.open("{work}/total-limit.csv") ?? panic("total open")
+    total_input: files.open("{work}/total-limit.csv") ?? panic("total open")
     total_reader := csv.reader(^total_input, total_limits) ?? panic("total reader")
     if &total_reader.next() == {
         .Ok(_) -> { print("total-limit-missed") }
@@ -131,12 +131,12 @@ fn run() {
 
     writer_limits := encoding.EncodingLimits.safe()
     writer_limits.max_item_bytes = 3
-    limited_output :: files.create("{work}/output.csv.limited") ?? panic("limited create")
+    limited_output: files.create("{work}/output.csv.limited") ?? panic("limited create")
     limited_writer := csv.writer(^limited_output, writer_limits) ?? panic("limited writer")
     if &limited_writer.write(["abcd"]) == {
         .Ok(_) -> { print("writer-limit-missed") }
         .Err(limited_first) -> {
-            _ :: &limited_writer.finish() ?? {
+            _: &limited_writer.finish() ?? {
                 print(limited_first.path)
                 print(limited_first.reason == err.reason)
                 return

@@ -1,45 +1,45 @@
-use core :: core
+use core: core
 
 // The shipped process-default store is separate from local storage. Web is
 // registered-unsupported, not a tab store.
-struct SessionStorage {
+SessionStorage: struct {
     entries: [String:String]
 }
 
-fn init_session_storage() -> Shared<SessionStorage> Never! {
+init_session_storage: fn() -> Shared<SessionStorage> Never! {
     shared SessionStorage{entries: [String:String]{}}
 }
 
-fn get(key: String) -[Browser]> String? Never! {
-    state :: core.mem.__process_shared(init_session_storage)
-    guard :: state.guard_read()
+get: fn(key: String) -[Browser]> String? Never! {
+    state: core.mem.__process_shared(init_session_storage)
+    guard: state.guard_read()
     guard.value.entries.get(key)
 }
 
-fn set(key: String, value: String) Never! -[Browser]> {
-    state :: core.mem.__process_shared(init_session_storage)
+set: fn(key: String, value: String) Never! -[Browser]> {
+    state: core.mem.__process_shared(init_session_storage)
     guard := state.guard_edit()
-    _ :: &guard.value.entries.add(key, value)
+    _: &guard.value.entries.add(key, value)
 }
 
-fn remove(key: String) Never! -[Browser]> {
-    state :: core.mem.__process_shared(init_session_storage)
+remove: fn(key: String) Never! -[Browser]> {
+    state: core.mem.__process_shared(init_session_storage)
     guard := state.guard_edit()
-    _ :: &guard.value.entries.remove(key)
+    _: &guard.value.entries.remove(key)
 }
 
-fn clear() Never! -[Browser]> {
-    state :: core.mem.__process_shared(init_session_storage)
+clear: fn() Never! -[Browser]> {
+    state: core.mem.__process_shared(init_session_storage)
     guard := state.guard_edit()
     &guard.value.entries.clear()
 }
 
-fn get_or(key: String, fallback: String) -> String Never! { get(key) ?? fallback }
+get_or: fn(key: String, fallback: String) -> String Never! { get(key) ?? fallback }
 
-fn has(key: String) -> Bool Never! { get(key) != None }
+has: fn(key: String) -> Bool Never! { get(key) != None }
 
-fn test_helper_effects() Never! -[Browser]> {
-    key :: "Core.web.storage.session.helper.effects"
+test_helper_effects: fn() Never! -[Browser]> {
+    key: "Core.web.storage.session.helper.effects"
     remove(key)
     assert_eq(get_or(key, "fallback"), "fallback")
     assert_eq(has(key), false)
@@ -50,7 +50,7 @@ fn test_helper_effects() Never! -[Browser]> {
 }
 
 #Test("session storage preserves miss, replacement and removal") {
-    key :: "Core.web.storage.session.contract"
+    key: "Core.web.storage.session.contract"
     remove(key)
     assert_eq(get(key), None)
     set(key, "first")
@@ -61,7 +61,7 @@ fn test_helper_effects() Never! -[Browser]> {
 }
 
 #Test("session clear removes all session entries without clearing local") {
-    key :: "Core.web.storage.clear"
+    key: "Core.web.storage.clear"
     core.web.storage.local.set(key, "local")
     set(key, "session")
     set("", "empty key")

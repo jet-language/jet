@@ -1,19 +1,19 @@
-package {
+package: {
     name: "stream_scan"
     authority: { allow: [FS.Read, IO, Mem.Alloc, Time, Time.Wait] }
 }
 
 use {
-    files :: core.files
-    re :: core.regex
-    time :: core.time
+    files: core.files
+    re: core.regex
+    time: core.time
 }
 
-fn run() {
-    path :: Path.from("$JET_STATE_ROOT/dx3/prim-text/fixtures/logs_100m.txt")
-    handle :: files.open(path.copy())
-    pattern :: Regex{"ERROR .* user_id=\d+"}
-    started :: time.instant()
+run: fn() {
+    path: Path.from("$JET_STATE_ROOT/dx3/prim-text/fixtures/logs_100m.txt")
+    handle: files.open(path.copy())
+    pattern: Regex{"ERROR .* user_id=\d+"}
+    started: time.instant()
     lines := 0
     matches := 0
     loop line in handle.lines() {

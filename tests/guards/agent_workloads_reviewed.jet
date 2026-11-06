@@ -1,15 +1,15 @@
 // Exact tests/agent_workloads.rs reviewed four corpus/schema guards.
 // Constants below come from the original Rust definitions, not corpus-derived expectations.
-S4_REVIEW_HEADER :: comptime { "version\ttask_id\tdomain\tcase\tdeclared_outcome\tinput\texpected\tauthority\tadapters\tplatforms\tevidence\ttower_card\tloss_cards" }
-S4_REVIEW_BASELINE_HEADER :: comptime { "version\trun_id\tmachine\tadapter\ttask_id\texpressibility\tfinding\tinput_sha256\texpected_sha256\texit_code\tsource_tokens\tstdout_file\tstdout_sha256\tstderr_file\tstderr_sha256\tcold_ns\twarm_ns\twarm_stdout_sha256\twarm_stderr_sha256\toutput_stable\tscoring\ttool_version\tpolicy_digest" }
-S4_REVIEW_DOMAIN_SCORING :: comptime { "#769:v1;exit=0;stdout=exact;cold=recorded;warm=equal;input=unchanged;scratch=closed" }
-S4_REVIEW_DOMAIN_CONTRACT_HEADER :: comptime { "version\ttask_id\tallowed_dependencies\tmachine_spec\tvariant\tscoring" }
-S4_REVIEW_COMPILED_RECEIPT_HEADER :: comptime { "version\ttask_id\tlanguage\tsource_sha256\tinput_sha256\texpected_sha256\toutput_sha256\thostile_input_sha256\thostile_output_sha256\tenvironment\tmachine\ttool_version\tcommand\tpeer_commit\texit_code\thostile_exit_code\tpeer_launcher_path\tpeer_launcher_version\tpeer_launcher_sha256\tauthority" }
-S4_REVIEW_PEER_LAUNCH_CONTRACT :: comptime { "compiled-workload-peer-isolation-v1" }
-S4_REVIEW_POLICY_FIELDS :: comptime { [String]{"version", "plan", "launch_transaction", "descendants", "limits", "outputs", "receipt", "authority"} }
-S4_REVIEW_BASELINE_ADAPTERS :: comptime { [String]{"bash", "python", "node"} }
-S4_REVIEW_ADAPTER_EXTENSIONS :: comptime { [String]{"jet", "bash", "py", "mjs"} }
-S4_REVIEW_EXPECTED_TASKS :: comptime { [[String]]{[String]{"repository-marker-scan", "repository-search-and-edit", "success", "exit=0;stdout=exact"},
+S4_REVIEW_HEADER: comptime { "version\ttask_id\tdomain\tcase\tdeclared_outcome\tinput\texpected\tauthority\tadapters\tplatforms\tevidence\ttower_card\tloss_cards" }
+S4_REVIEW_BASELINE_HEADER: comptime { "version\trun_id\tmachine\tadapter\ttask_id\texpressibility\tfinding\tinput_sha256\texpected_sha256\texit_code\tsource_tokens\tstdout_file\tstdout_sha256\tstderr_file\tstderr_sha256\tcold_ns\twarm_ns\twarm_stdout_sha256\twarm_stderr_sha256\toutput_stable\tscoring\ttool_version\tpolicy_digest" }
+S4_REVIEW_DOMAIN_SCORING: comptime { "#769:v1;exit=0;stdout=exact;cold=recorded;warm=equal;input=unchanged;scratch=closed" }
+S4_REVIEW_DOMAIN_CONTRACT_HEADER: comptime { "version\ttask_id\tallowed_dependencies\tmachine_spec\tvariant\tscoring" }
+S4_REVIEW_COMPILED_RECEIPT_HEADER: comptime { "version\ttask_id\tlanguage\tsource_sha256\tinput_sha256\texpected_sha256\toutput_sha256\thostile_input_sha256\thostile_output_sha256\tenvironment\tmachine\ttool_version\tcommand\tpeer_commit\texit_code\thostile_exit_code\tpeer_launcher_path\tpeer_launcher_version\tpeer_launcher_sha256\tauthority" }
+S4_REVIEW_PEER_LAUNCH_CONTRACT: comptime { "compiled-workload-peer-isolation-v1" }
+S4_REVIEW_POLICY_FIELDS: comptime { [String]{"version", "plan", "launch_transaction", "descendants", "limits", "outputs", "receipt", "authority"} }
+S4_REVIEW_BASELINE_ADAPTERS: comptime { [String]{"bash", "python", "node"} }
+S4_REVIEW_ADAPTER_EXTENSIONS: comptime { [String]{"jet", "bash", "py", "mjs"} }
+S4_REVIEW_EXPECTED_TASKS: comptime { [[String]]{[String]{"repository-marker-scan", "repository-search-and-edit", "success", "exit=0;stdout=exact"},
 [String]{"repository-marker-scan-empty", "repository-search-and-edit", "hostile-empty", "exit=0;stdout=exact"},
 [String]{"repository-semantic-inspection", "repository-search-and-edit", "semantic-index", "exit=0;stdout=exact"},
 [String]{"repository-semantic-edit", "repository-search-and-edit", "semantic-rename-with-decoys", "exit=0;stdout=exact"},
@@ -38,7 +38,7 @@ S4_REVIEW_EXPECTED_TASKS :: comptime { [[String]]{[String]{"repository-marker-sc
 [String]{"interactive-terminal-closed", "interactive-terminals", "hostile-closed-session", "exit=0;stdout=exact"},
 [String]{"service-lifecycle-roundtrip", "service-lifecycle", "up-health-wait-logs-down", "exit=0;stdout=exact"},
 [String]{"service-lifecycle-readiness-timeout", "service-lifecycle", "hostile-readiness-timeout", "exit=0;stdout=exact"}} }
-S4_REVIEW_EXPECTED_DOMAIN_CONTRACT :: comptime { [[String]]{[String]{"build-test-failure-recovery", "jet=Core:files,process,sys,time;bash=bash,coreutils;python=stdlib-pathlib,stdlib-subprocess;node=stdlib-fs,stdlib-child-process", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "hostile"},
+S4_REVIEW_EXPECTED_DOMAIN_CONTRACT: comptime { [[String]]{[String]{"build-test-failure-recovery", "jet=Core:files,process,sys,time;bash=bash,coreutils;python=stdlib-pathlib,stdlib-subprocess;node=stdlib-fs,stdlib-child-process", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "hostile"},
 [String]{"process-batch-success", "jet=Core:files,process,time;bash=bash,coreutils;python=stdlib-pathlib,stdlib-subprocess;node=stdlib-fs,stdlib-child-process", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "normal"},
 [String]{"process-batch-large-stderr", "jet=Core:files,process,time;bash=bash,coreutils;python=stdlib-pathlib,stdlib-subprocess;node=stdlib-fs,stdlib-child-process", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "hostile"},
 [String]{"process-batch-timeout-recovery", "jet=Core:files,process,time;bash=bash,coreutils;python=stdlib-pathlib,stdlib-subprocess;node=stdlib-fs,stdlib-child-process", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "hostile"},
@@ -65,39 +65,39 @@ S4_REVIEW_EXPECTED_DOMAIN_CONTRACT :: comptime { [[String]]{[String]{"build-test
 [String]{"git-diff-review", "jet=Core:process,git;bash=git;python=stdlib-subprocess+git;node=stdlib-child-process+git", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "normal"},
 [String]{"git-diff-empty", "jet=Core:process,git;bash=git;python=stdlib-subprocess+git;node=stdlib-child-process+git", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "hostile"}} }
 use {
-    s4_review_files :: core.files
-    s4_review_crypto :: core.crypto
-    s4_review_sys :: core.sys
-    s4_review_parse :: core.text.parse
-    s4_review_process :: core.process
+    s4_review_files: core.files
+    s4_review_crypto: core.crypto
+    s4_review_sys: core.sys
+    s4_review_parse: core.text.parse
+    s4_review_process: core.process
 }
 
-fn s4_review_slice(text: String, start: Int, end: Int) -> String {
+s4_review_slice: fn(text: String, start: Int, end: Int) -> String {
     if start == end -> return ""
-    raw :: text.bytes()
+    raw: text.bytes()
     String.from_bytes(raw[start..(end - 1)]) ?? panic("ASCII boundary")
 }
 
-fn s4_review_read(path: String) -> String { s4_review_files.read(path) ?? panic("read {path}") }
-fn s4_review_rows(root: String, file: String, header: String, width: Int) -> [[String]] {
-    lines :: s4_review_read("{root}/{file}").lines()
+s4_review_read: fn(path: String) -> String { s4_review_files.read(path) ?? panic("read {path}") }
+s4_review_rows: fn(root: String, file: String, header: String, width: Int) -> [[String]] {
+    lines: s4_review_read("{root}/{file}").lines()
     assert(lines.len() > 0)
     assert_eq(lines[0], header)
     result := [[String]]{}
     loop index in 1..<lines.len() {
         if lines[index] == "" -> next
-        fields :: lines[index].split("\t").to_list()
+        fields: lines[index].split("\t").to_list()
         assert_eq(fields.len(), width)
         &result.push(fields)
     }
     result
 }
-fn s4_review_column(rows: [[String]], column: Int) -> [String] {
+s4_review_column: fn(rows: [[String]], column: Int) -> [String] {
     result := [String]{}
     loop row in rows -> &result.push(row[column])
     result
 }
-fn s4_review_set(values: [String]) -> [String] {
+s4_review_set: fn(values: [String]) -> [String] {
     sorted := values
     &sorted.sort()
     result := [String]{}
@@ -106,42 +106,42 @@ fn s4_review_set(values: [String]) -> [String] {
     }
     result
 }
-fn s4_review_row(rows: [[String]], id: String) -> [String] {
+s4_review_row: fn(rows: [[String]], id: String) -> [String] {
     loop row in rows { if row[1] == id -> return row }
     panic("missing row {id}")
 }
-fn s4_review_field(name: String) -> String {
+s4_review_field: fn(name: String) -> String {
     loop line in s4_review_read("tests/agent_workloads/policy.tsv").lines() {
         if line.starts_with("{name}=") -> return s4_review_parse.split_once(line.to_string(), "=").tail
     }
     panic("missing policy field {name}")
 }
-fn s4_review_digest() -> String {
+s4_review_digest: fn() -> String {
     loop field in S4_REVIEW_POLICY_FIELDS -> s4_review_field(field)
     raw := s4_review_read("tests/agent_workloads/policy.tsv")
     loop raw.ends_with("\n") -> raw = s4_review_slice(raw, 0, raw.len() - 1)
     s4_review_crypto.sha256(raw.bytes()).hex()
 }
-fn s4_review_receipt(digest: String) -> String {
+s4_review_receipt: fn(digest: String) -> String {
     "policy\tversion={s4_review_field("version")}\tdigest={digest}\tplan={s4_review_field("plan")}\tlaunch_transaction={s4_review_field("launch_transaction")}\tdescendants={s4_review_field("descendants")}\tlimits={s4_review_field("limits")}\toutputs={s4_review_field("outputs")}\treceipt={s4_review_field("receipt")}\tauthority={s4_review_field("authority")}"
 }
-fn s4_review_path(relative: String) -> Bool {
+s4_review_path: fn(relative: String) -> Bool {
     if relative == "" || relative.starts_with("/") || relative.contains(":") -> return false
     loop part in relative.replace("\\", "/").split("/") {
         if part == "" || part == "." || part == ".." -> return false
     }
     true
 }
-fn s4_review_authority(authority: String) -> Bool { authority == s4_review_field("authority") }
-fn s4_review_sha(path: String) -> String {
-    bytes :: s4_review_files.read_bytes(path) ?? panic("read bytes {path}")
+s4_review_authority: fn(authority: String) -> Bool { authority == s4_review_field("authority") }
+s4_review_sha: fn(path: String) -> String {
+    bytes: s4_review_files.read_bytes(path) ?? panic("read bytes {path}")
     s4_review_crypto.sha256(bytes).hex()
 }
-fn s4_review_walk(directory: String, relative: String) -> [String] {
+s4_review_walk: fn(directory: String, relative: String) -> [String] {
     result := [String]{}
-    entries :: s4_review_files.list_dir(directory) ?? panic("walk {directory}")
+    entries: s4_review_files.list_dir(directory) ?? panic("walk {directory}")
     loop entry in entries {
-        child :: if relative == "" -> entry.name else -> "{relative}/{entry.name}"
+        child: if relative == "" -> entry.name else -> "{relative}/{entry.name}"
         if s4_review_files.is_dir(entry.path) {
             loop nested in s4_review_walk(entry.path, child) -> &result.push(nested)
         } else {
@@ -152,9 +152,9 @@ fn s4_review_walk(directory: String, relative: String) -> [String] {
     result
 }
 #Error
-struct S4ReviewChecksumError { message: String }
-fn s4_review_checksum_error(message: String) -> S4ReviewChecksumError { S4ReviewChecksumError{message: message} }
-fn s4_review_quoted(paths: [String]) -> String {
+S4ReviewChecksumError: struct { message: String }
+s4_review_checksum_error: fn(message: String) -> S4ReviewChecksumError { S4ReviewChecksumError{message: message} }
+s4_review_quoted: fn(paths: [String]) -> String {
     quoted := [String]{}
     loop path in paths -> &quoted.push("\"{path}\"")
     "[{quoted.join(", ")}]"
@@ -162,12 +162,12 @@ fn s4_review_quoted(paths: [String]) -> String {
 // The SHA256SUMS closure: every row splits on two spaces and names a safe,
 // unique relative path; the listed set equals the files under inputs/ and
 // expected/; each listed file hashes to its row. Returns the row count.
-fn s4_review_checksum_closure(root: String, sums: String) -> Int S4ReviewChecksumError! {
+s4_review_checksum_closure: fn(root: String, sums: String) -> Int S4ReviewChecksumError! {
     declared := [String]{}
     hashes := [String]{}
     loop line in sums.lines() {
         if line == "" -> next
-        parts :: s4_review_parse.split_once(line.to_string(), "  ")
+        parts: s4_review_parse.split_once(line.to_string(), "  ")
         if !parts.found -> return Err(s4_review_checksum_error("bad SHA256SUMS row: {line}"))
         if !s4_review_path(parts.tail) -> return Err(s4_review_checksum_error("invalid checksum path: {parts.tail}"))
         if declared.contains(parts.tail) -> return Err(s4_review_checksum_error("duplicate checksum path: {parts.tail}"))
@@ -175,14 +175,14 @@ fn s4_review_checksum_closure(root: String, sums: String) -> Int S4ReviewChecksu
         &hashes.push(parts.head)
     }
     actual := [String]{}
-    fixture_roots :: [String]{"inputs", "expected"}
+    fixture_roots: [String]{"inputs", "expected"}
     loop name in fixture_roots {
         if s4_review_files.is_dir("{root}/{name}") {
             loop relative in s4_review_walk("{root}/{name}", name) -> &actual.push(relative)
         }
     }
-    actual_set :: s4_review_set(actual)
-    listed :: s4_review_set(declared)
+    actual_set: s4_review_set(actual)
+    listed: s4_review_set(declared)
     if actual_set != listed {
         unhashed := [String]{}
         loop path in actual_set { if !listed.contains(path) -> &unhashed.push(path) }
@@ -191,24 +191,24 @@ fn s4_review_checksum_closure(root: String, sums: String) -> Int S4ReviewChecksu
         return Err(s4_review_checksum_error("checksum closure mismatch; unhashed={s4_review_quoted(unhashed)}; missing={s4_review_quoted(missing)}"))
     }
     loop relative in listed {
-        bytes :: s4_review_files.read_bytes("{root}/{relative}") ?? return Err(s4_review_checksum_error("{err}"))
+        bytes: s4_review_files.read_bytes("{root}/{relative}") ?? return Err(s4_review_checksum_error("{err}"))
         index := 0
         loop declared[index] != relative -> index += 1
         if s4_review_crypto.sha256(bytes).hex() != hashes[index] -> return Err(s4_review_checksum_error("fixture drift: {relative}"))
     }
     Ok(declared.len())
 }
-fn s4_review_input(path: String) -> String {
+s4_review_input: fn(path: String) -> String {
     canonical := ""
     if s4_review_files.is_dir(path) {
         loop relative in s4_review_walk(path, "") -> canonical += "{relative}\t{s4_review_sha("{path}/{relative}")}\n"
     } else {
-        parts :: path.split("/").to_list()
+        parts: path.split("/").to_list()
         canonical = "{parts[parts.len() - 1]}\t{s4_review_sha(path)}\n"
     }
     s4_review_crypto.sha256(canonical.bytes()).hex()
 }
-fn s4_review_unsigned(value: String, maximum: String, canonical: Bool) -> Bool {
+s4_review_unsigned: fn(value: String, maximum: String, canonical: Bool) -> Bool {
     raw := value
     if !canonical && raw.starts_with("+") -> raw = s4_review_slice(raw, 1, raw.len())
     if raw == "" -> return false
@@ -217,48 +217,48 @@ fn s4_review_unsigned(value: String, maximum: String, canonical: Bool) -> Bool {
     loop raw.len() > 1 && raw.starts_with("0") -> raw = s4_review_slice(raw, 1, raw.len())
     raw.len() < maximum.len() || (raw.len() == maximum.len() && raw <= maximum)
 }
-fn s4_review_adapter(id: String) -> String {
+s4_review_adapter: fn(id: String) -> String {
     if id == "repository-marker-scan" || id == "repository-marker-scan-empty" -> return "repository_marker_scan"
     if id == "repository-semantic-inspection" -> return "repository_semantic_inspection"
     if id == "repository-semantic-edit" -> return "repository_semantic_edit"
     if id == "git-diff-review" || id == "git-diff-empty" -> return "git_diff_review"
     if id == "build-test-failure-recovery" -> return "build_test_recovery"
-    prefixes :: [String]{"incident-report-", "structured-data-", "database-", "http-", "process-batch-", "mcp-environment-", "interactive-terminal-", "service-lifecycle-"}
-    stems :: [String]{"incident_report", "structured_data", "database_access", "http_api", "process_batch", "mcp_resource", "interactive_terminal", "service_lifecycle"}
+    prefixes: [String]{"incident-report-", "structured-data-", "database-", "http-", "process-batch-", "mcp-environment-", "interactive-terminal-", "service-lifecycle-"}
+    stems: [String]{"incident_report", "structured_data", "database_access", "http_api", "process_batch", "mcp_resource", "interactive_terminal", "service_lifecycle"}
     loop index in 0..<prefixes.len() { if id.starts_with(prefixes[index]) -> return stems[index] }
-    singles :: [String]{"browser-automation-preflight", "desktop-interaction-focus", "document-markdown-inspection", "media-asset-inventory"}
+    singles: [String]{"browser-automation-preflight", "desktop-interaction-focus", "document-markdown-inspection", "media-asset-inventory"}
     loop single in singles { if id == single -> return single.replace("-", "_") }
     panic("task has no adapter {id}")
 }
-fn s4_review_policy_digest_covers_authority_and_receipt_contract() {
-    digest :: s4_review_digest()
-    receipt :: s4_review_receipt(digest)
-    fields :: s4_review_read("tests/agent_workloads/policy.tsv").lines()
+s4_review_policy_digest_covers_authority_and_receipt_contract: fn() {
+    digest: s4_review_digest()
+    receipt: s4_review_receipt(digest)
+    fields: s4_review_read("tests/agent_workloads/policy.tsv").lines()
     assert_eq(fields.len(), S4_REVIEW_POLICY_FIELDS.len())
     loop index in 0..<fields.len() -> assert(fields[index].starts_with("{S4_REVIEW_POLICY_FIELDS[index]}="))
     assert(receipt.contains("digest={digest}"))
-    receipt_names :: [String]{"plan", "launch_transaction", "descendants", "limits", "outputs", "receipt", "authority"}
+    receipt_names: [String]{"plan", "launch_transaction", "descendants", "limits", "outputs", "receipt", "authority"}
     loop name in receipt_names -> assert(receipt.contains("{name}={s4_review_field(name)}"))
     assert(s4_review_authority(s4_review_field("authority")))
     assert(!s4_review_authority("argv=input-root;cwd=scratch;host=ambient;network=denied;external-write=unmeasured"))
     assert(!s4_review_authority("argv=input-root;cwd=scratch;host=ambient;network=unmeasured;external-write=denied"))
 }
-fn s4_review_recorded_baselines_cover_frozen_tasks() {
-    root :: "tests/agent_workloads"
-    tasks :: s4_review_rows(root, "manifest.tsv", S4_REVIEW_HEADER, 13)
+s4_review_recorded_baselines_cover_frozen_tasks: fn() {
+    root: "tests/agent_workloads"
+    tasks: s4_review_rows(root, "manifest.tsv", S4_REVIEW_HEADER, 13)
     loop subject in tasks {
         assert_eq(subject[0], "1")
         assert(s4_review_path(subject[5]) && s4_review_path(subject[6]))
     }
-    rows :: s4_review_rows("{root}/baselines", "receipt.tsv", S4_REVIEW_BASELINE_HEADER, 23)
+    rows: s4_review_rows("{root}/baselines", "receipt.tsv", S4_REVIEW_BASELINE_HEADER, 23)
     seen := [String]{}
     run_id := ""
     machine := ""
     loop row in rows {
         assert_eq(row[0], "1")
         assert(S4_REVIEW_BASELINE_ADAPTERS.contains(row[3]))
-        subject :: s4_review_row(tasks, row[4])
-        key :: "{row[3]}\t{row[4]}"
+        subject: s4_review_row(tasks, row[4])
+        key: "{row[3]}\t{row[4]}"
         assert(!seen.contains(key))
         &seen.push(key)
         if run_id == "" -> run_id = row[1] else -> assert_eq(run_id, row[1])
@@ -267,10 +267,10 @@ fn s4_review_recorded_baselines_cover_frozen_tasks() {
         assert(row[21] != "" && row[21] != "unknown")
         assert_eq(row[22], s4_review_digest())
         assert_eq(row[7], s4_review_input("{root}/{subject[5]}"))
-        expected :: s4_review_files.read_bytes("{root}/{subject[6]}") ?? panic("expected bytes")
+        expected: s4_review_files.read_bytes("{root}/{subject[6]}") ?? panic("expected bytes")
         assert_eq(row[8], s4_review_crypto.sha256(expected).hex())
-        arch :: s4_review_sys.arch()
-        maxusize :: if arch == "x86" || arch == "arm" || arch == "wasm32" -> "4294967295" else -> "18446744073709551615"
+        arch: s4_review_sys.arch()
+        maxusize: if arch == "x86" || arch == "arm" || arch == "wasm32" -> "4294967295" else -> "18446744073709551615"
         assert(s4_review_unsigned(row[10], maxusize, true))
         assert(s4_review_unsigned(row[15], "340282366920938463463374607431768211455", false))
         assert(s4_review_unsigned(row[16], "340282366920938463463374607431768211455", false))
@@ -281,8 +281,8 @@ fn s4_review_recorded_baselines_cover_frozen_tasks() {
                 assert_eq(row[9], "0")
                 assert_eq(row[19], "true")
                 assert(s4_review_path(row[11]) && s4_review_path(row[13]))
-                stdout :: s4_review_files.read_bytes("{root}/baselines/{row[11]}") ?? panic("stdout artifact")
-                stderr :: s4_review_files.read_bytes("{root}/baselines/{row[13]}") ?? panic("stderr artifact")
+                stdout: s4_review_files.read_bytes("{root}/baselines/{row[11]}") ?? panic("stdout artifact")
+                stderr: s4_review_files.read_bytes("{root}/baselines/{row[13]}") ?? panic("stderr artifact")
                 assert_eq(stdout, expected)
                 assert_eq(row[12], s4_review_crypto.sha256(stdout).hex())
                 assert_eq(row[14], s4_review_crypto.sha256(stderr).hex())
@@ -298,18 +298,18 @@ fn s4_review_recorded_baselines_cover_frozen_tasks() {
     }
     assert_eq(seen.len(), tasks.len() * S4_REVIEW_BASELINE_ADAPTERS.len())
 }
-fn s4_review_manifest_is_complete_frozen_and_non_vacuous() {
-    root :: "tests/agent_workloads"
+s4_review_manifest_is_complete_frozen_and_non_vacuous: fn() {
+    root: "tests/agent_workloads"
     hostile := [[String]]{}
     loop line in s4_review_read("tests/fixtures/build_sandbox/hostile-corpus.tsv").lines() {
         if line == "" || line.starts_with("#") -> next
-        row :: line.split("\t").to_list()
+        row: line.split("\t").to_list()
         assert_eq(row.len(), 4)
         assert_eq(row[3], "blocked-or-unsupported")
         &hostile.push(row)
     }
     assert_eq(hostile.len(), 7)
-    tasks :: s4_review_rows(root, "manifest.tsv", S4_REVIEW_HEADER, 13)
+    tasks: s4_review_rows(root, "manifest.tsv", S4_REVIEW_HEADER, 13)
     actual := [[String]]{}
     ids := [String]{}
     loop subject in tasks {
@@ -327,16 +327,16 @@ fn s4_review_manifest_is_complete_frozen_and_non_vacuous() {
         assert_eq(subject[12], "default-run=#688;wall-time=#666")
         assert(s4_review_files.exists("{root}/{subject[5]}"))
         assert(s4_review_files.is_file("{root}/{subject[6]}"))
-        id :: subject[1]
-        hostile_ids :: [String]{"browser-automation-preflight", "desktop-interaction-focus", "document-markdown-inspection", "media-asset-inventory", "mcp-environment-denied", "interactive-terminal-closed", "service-lifecycle-readiness-timeout"}
+        id: subject[1]
+        hostile_ids: [String]{"browser-automation-preflight", "desktop-interaction-focus", "document-markdown-inspection", "media-asset-inventory", "mcp-environment-denied", "interactive-terminal-closed", "service-lifecycle-readiness-timeout"}
         if id == "build-test-failure-recovery" {
-            invalid_names :: [String]{"invalid.jet", "invalid.sh", "invalid.py", "invalid.mjs"}
+            invalid_names: [String]{"invalid.jet", "invalid.sh", "invalid.py", "invalid.mjs"}
             loop invalid in invalid_names {
-                source :: s4_review_read("{root}/{subject[5]}/{invalid}")
-                assert(source.contains("fn run( {{") || source.contains("if then") || source.contains("def run(:") || source.contains("function run( {{"))
+                source: s4_review_read("{root}/{subject[5]}/{invalid}")
+                assert(source.contains("run: fn( {{") || source.contains("if then") || source.contains("def run(:") || source.contains("function run( {{"))
             }
         } else if id == "process-batch-large-stderr" || id == "process-batch-timeout-recovery" {
-            source :: s4_review_read("{root}/{subject[5]}")
+            source: s4_review_read("{root}/{subject[5]}")
             if id == "process-batch-large-stderr" -> assert(source.contains("100000") && source.contains(">&2")) else -> assert(source.contains("trap '' TERM") && source.contains("50"))
         } else if hostile_ids.contains(id) {
             found := false
@@ -352,11 +352,11 @@ fn s4_review_manifest_is_complete_frozen_and_non_vacuous() {
             }
             assert(found)
         }
-        stem :: s4_review_adapter(id)
+        stem: s4_review_adapter(id)
         loop extension in S4_REVIEW_ADAPTER_EXTENSIONS -> assert(s4_review_files.is_file("{root}/adapters/{stem}.{extension}"))
     }
     assert_eq(actual, S4_REVIEW_EXPECTED_TASKS)
-    domains :: s4_review_rows(root, "domain_contract.tsv", S4_REVIEW_DOMAIN_CONTRACT_HEADER, 6)
+    domains: s4_review_rows(root, "domain_contract.tsv", S4_REVIEW_DOMAIN_CONTRACT_HEADER, 6)
     actual_domains := [[String]]{}
     loop row in domains {
         assert_eq(row[0], "1")
@@ -368,10 +368,10 @@ fn s4_review_manifest_is_complete_frozen_and_non_vacuous() {
     assert_eq(s4_review_checksum_closure(root, s4_review_read("{root}/SHA256SUMS")) ?? panic(err.message), 82)
 }
 
-fn s4_review_compiled_workload_contract_reuses_agent_schema_and_keeps_hosted_rows() {
-    root :: "tests/compiled_workloads"
-    manifest :: s4_review_rows(root, "manifest.tsv", S4_REVIEW_HEADER, 13)
-    task_ids :: s4_review_set(s4_review_column(manifest, 1))
+s4_review_compiled_workload_contract_reuses_agent_schema_and_keeps_hosted_rows: fn() {
+    root: "tests/compiled_workloads"
+    manifest: s4_review_rows(root, "manifest.tsv", S4_REVIEW_HEADER, 13)
+    task_ids: s4_review_set(s4_review_column(manifest, 1))
     assert_eq(manifest.len(), task_ids.len())
     assert_eq(task_ids, s4_review_set([String]{"systems-file-index", "service-json-http", "cli-archive-filter", "library-json-roundtrip", "compute-mandelbrot", "embedded-sensor-ring", "cross-platform-notes"}))
     loop row in manifest {
@@ -382,12 +382,12 @@ fn s4_review_compiled_workload_contract_reuses_agent_schema_and_keeps_hosted_row
         if row[1] == "systems-file-index" -> assert(s4_review_files.is_dir("{root}/{row[5]}")) else -> assert(s4_review_files.is_file("{root}/{row[5]}"))
         assert(s4_review_files.is_file("{root}/{row[6]}"))
     }
-    systems :: s4_review_row(manifest, "systems-file-index")
+    systems: s4_review_row(manifest, "systems-file-index")
     assert_eq(systems[5], "fixtures/systems-file-index/input")
     assert_eq(systems[7], "argv=input-root;cwd=scratch;host=ambient;network=disabled;external-write=disabled")
     assert_eq(s4_review_row(manifest, "service-json-http")[7], "argv=input-root;cwd=scratch;host=ambient;network=loopback-only;external-write=disabled")
     assert_eq(s4_review_row(manifest, "cli-archive-filter")[7], "argv=input-root;cwd=scratch;host=ambient;network=disabled;external-write=disabled")
-    adapters :: s4_review_rows(root, "adapter_ledger.tsv", "version\ttask_id\tjet_source\tjet_hostile\tpeer_source\tpeer_hostile\tpeer_commit", 7)
+    adapters: s4_review_rows(root, "adapter_ledger.tsv", "version\ttask_id\tjet_source\tjet_hostile\tpeer_source\tpeer_hostile\tpeer_commit", 7)
     assert_eq(adapters.len(), manifest.len())
     assert_eq(s4_review_set(s4_review_column(adapters, 1)), task_ids)
     loop row in adapters {
@@ -399,10 +399,10 @@ fn s4_review_compiled_workload_contract_reuses_agent_schema_and_keeps_hosted_row
         assert_eq(row[3], row[5])
         assert_eq(row[6].len(), 40)
     }
-    systems_adapter :: s4_review_row(adapters, "systems-file-index")
+    systems_adapter: s4_review_row(adapters, "systems-file-index")
     assert_eq(systems_adapter[3], "fixtures/systems-file-index/hostile")
     assert_eq(systems_adapter[5], "fixtures/systems-file-index/hostile")
-    peers :: s4_review_rows(root, "peer_ledger.tsv", "version\ttask_id\tselection\tlanguage\tprogram\tsource_url\tsource_revision\tbuild_command\trun_command\tdependency_rule\tsource_boundary\tapplicable_targets\towner", 13)
+    peers: s4_review_rows(root, "peer_ledger.tsv", "version\ttask_id\tselection\tlanguage\tprogram\tsource_url\tsource_revision\tbuild_command\trun_command\tdependency_rule\tsource_boundary\tapplicable_targets\towner", 13)
     selected := [[String]]{}
     candidate_cxx := false
     loop row in peers {
@@ -415,23 +415,23 @@ fn s4_review_compiled_workload_contract_reuses_agent_schema_and_keeps_hosted_row
     assert_eq(s4_review_set(s4_review_column(selected, 3)), s4_review_set([String]{"cxx", "domain", "go", "rust", "zig"}))
     assert_eq(s4_review_set(s4_review_column(selected, 1)), task_ids)
     loop adapter in adapters -> assert_eq(adapter[6], s4_review_row(selected, adapter[1])[6])
-    exact_peers :: [[String]]{
+    exact_peers: [[String]]{
         [String]{"systems-file-index", "rust", "local systems file-index equivalent", "adapters/peer/systems-file-index.rs", "https://github.com/jet-language/jet", "8b9933668f7f7d3c1a62182ff865f68989b41209", "repository source only;no network"},
         [String]{"service-json-http", "go", "local JSON HTTP service equivalent", "adapters/peer/service-json-http.go", "https://github.com/jet-language/jet", "8b9933668f7f7d3c1a62182ff865f68989b41209", "repository source only;loopback only"},
         [String]{"cli-archive-filter", "cxx", "local archive filter equivalent", "adapters/peer/cli-archive-filter.cpp", "https://github.com/jet-language/jet", "8b9933668f7f7d3c1a62182ff865f68989b41209", "repository source only;no network"}
     }
     loop exact in exact_peers {
-        peer :: s4_review_row(selected, exact[0])
+        peer: s4_review_row(selected, exact[0])
         assert_eq(peer[3], exact[1])
         assert_eq(peer[4], exact[2])
         assert_eq(peer[5], exact[4])
         assert_eq(peer[6], exact[5])
         assert_eq(peer[9], exact[6])
-        adapter :: s4_review_row(adapters, exact[0])
+        adapter: s4_review_row(adapters, exact[0])
         assert_eq(adapter[4], exact[3])
         assert_eq(adapter[6], peer[6])
     }
-    cross :: s4_review_row(selected, "cross-platform-notes")
+    cross: s4_review_row(selected, "cross-platform-notes")
     assert_eq(cross[3], "domain")
     assert_eq(cross[4], "ECMAScript browser notes task adapter")
     assert_eq(cross[11], "linux,macos,windows,web")
@@ -443,28 +443,28 @@ fn s4_review_compiled_workload_contract_reuses_agent_schema_and_keeps_hosted_row
         loop index in 7..<12 -> assert(row[index] != "")
         assert(row[12].starts_with("#"))
     }
-    metrics :: s4_review_rows(root, "metric_contract.tsv", "version\tmetric\tunit\tcomparison\tmissing_policy", 5)
+    metrics: s4_review_rows(root, "metric_contract.tsv", "version\tmetric\tunit\tcomparison\tmissing_policy", 5)
     assert_eq(metrics.len(), 10)
     assert_eq(s4_review_set(s4_review_column(metrics, 1)), s4_review_set([String]{"source_effort", "build_time", "edit_time", "runtime", "memory", "artifact_size", "diagnostics", "debugging", "deployment", "unsafe_burden"}))
     loop row in metrics -> assert(row[0] == "1" && row[2] != "" && row[3] == "lower" && row[4] == "fail")
-    domains :: s4_review_rows(root, "domain_contract.tsv", S4_REVIEW_DOMAIN_CONTRACT_HEADER, 6)
+    domains: s4_review_rows(root, "domain_contract.tsv", S4_REVIEW_DOMAIN_CONTRACT_HEADER, 6)
     loop row in domains -> assert(row[0] == "1" && task_ids.contains(row[1]) && row[2] != "" && row[3] != "" && row[4] != "" && row[5].starts_with("#1414:"))
     assert_eq(domains.len(), manifest.len())
     assert_eq(s4_review_row(domains, "systems-file-index")[2], "jet=Core:files,crypto;rust=rust-stdlib;cxx=libstdc++;go=stdlib-os-path-filepath;swift=Foundation;zig=std;domain=POSIX filesystem indexing")
     assert_eq(s4_review_row(domains, "service-json-http")[2], "jet=Core:files,http.client,http.server,net,time;rust=tokio+hyper;cxx=boost-beast;go=stdlib-net-http;swift=swift-nio;zig=std-http;domain=bounded JSON HTTP service")
-    archive :: s4_review_row(domains, "cli-archive-filter")
+    archive: s4_review_row(domains, "cli-archive-filter")
     assert_eq(archive[2], "jet=Core:archive,files;rust=std+tar;cxx=c++20-stdlib;go=archive-tar;swift=Foundation;zig=std-tar;domain=POSIX ustar extraction")
     assert(!archive[2].contains("libarchive"))
-    toolchains :: s4_review_rows(root, "toolchain_contract.tsv", "version\tlanguage\tcommand\tversion_prefix", 4)
+    toolchains: s4_review_rows(root, "toolchain_contract.tsv", "version\tlanguage\tcommand\tversion_prefix", 4)
     assert_eq(toolchains.len(), 6)
     toolchain_keys := [String]{}
     loop row in toolchains -> &toolchain_keys.push("{row[1]}|{row[2]}|{row[3]}")
     assert_eq(s4_review_set(toolchain_keys), s4_review_set([String]{"jet|jet|Jet 0.1.0", "rust|rustc|rustc 1.97.1", "go|go|go version go1.26.5", "cxx|clang++|clang version 21.1.8", "zig|zig|zig 0.16.0", "domain|node|node v22.23.2"}))
-    receipt_fields :: S4_REVIEW_COMPILED_RECEIPT_HEADER.split("\t").to_list()
+    receipt_fields: S4_REVIEW_COMPILED_RECEIPT_HEADER.split("\t").to_list()
     assert_eq(receipt_fields.len(), 20)
     assert_eq([String]{receipt_fields[16], receipt_fields[17], receipt_fields[18], receipt_fields[19]}, [String]{"peer_launcher_path", "peer_launcher_version", "peer_launcher_sha256", "authority"})
     assert_eq(S4_REVIEW_PEER_LAUNCH_CONTRACT, "compiled-workload-peer-isolation-v1")
-    tiers :: s4_review_rows(root, "tier_matrix.tsv", "version\ttask_id\tplatform\ttarget\ttier\trequirement\tavailability\tavailability_reason\trationale", 9)
+    tiers: s4_review_rows(root, "tier_matrix.tsv", "version\ttask_id\tplatform\ttarget\ttier\trequirement\tavailability\tavailability_reason\trationale", 9)
     assert_eq(tiers.len(), 39)
     availability := [String]{}
     aarch64 := 0
@@ -489,9 +489,9 @@ fn s4_review_compiled_workload_contract_reuses_agent_schema_and_keeps_hosted_row
     assert_eq(s4_review_set(availability), s4_review_set([String]{"local|host-toolchain", "local|host-runtime", "local|browser-runtime", "external|host-platform", "external|cross-toolchain", "excluded|freestanding-profile"}))
     assert_eq(aarch64, 5)
     assert(web_found && cross_web_found)
-    hosted_ids :: [String]{"systems-file-index", "service-json-http", "cli-archive-filter", "library-json-roundtrip", "compute-mandelbrot", "cross-platform-notes"}
+    hosted_ids: [String]{"systems-file-index", "service-json-http", "cli-archive-filter", "library-json-roundtrip", "compute-mandelbrot", "cross-platform-notes"}
     loop id in hosted_ids {
-        cross_target :: if id == "cross-platform-notes" -> "web" else -> "aarch64-unknown-linux-gnu"
+        cross_target: if id == "cross-platform-notes" -> "web" else -> "aarch64-unknown-linux-gnu"
         required := [String]{}
         loop row in tiers {
             if row[1] == id && row[5] == "required" -> &required.push("{row[1]}|{row[2]}|{row[3]}|{row[4]}")
@@ -513,7 +513,7 @@ fn s4_review_compiled_workload_contract_reuses_agent_schema_and_keeps_hosted_row
     assert_eq(embedded, 9)
     assert_eq(excluded, 5)
     assert_eq(s4_review_set(embedded_required), s4_review_set([String]{"linux|x86_64-unknown-linux-gnu|aot", "macos|x86_64-apple-darwin|aot", "windows|x86_64-pc-windows-msvc|aot", "linux|x86_64-unknown-linux-gnu|jit"}))
-    canaries :: s4_review_rows(root, "canaries.tsv", "version\tcanary\tmutation\trequired_failure", 4)
+    canaries: s4_review_rows(root, "canaries.tsv", "version\tcanary\tmutation\trequired_failure", 4)
     assert_eq(canaries.len(), 20)
     assert_eq(s4_review_set(s4_review_column(canaries, 1)), s4_review_set([String]{"comparison-dependency-drift", "comparison-toolchain-drift", "statistics-drift", "receipt-input-drift", "missing-samples", "missing-statistics", "missing-receipt", "missing-tier-receipt", "missing-outcome", "unrelated-live-owner", "missing-metric", "missing-tier", "changed-input", "embedded-review-claim", "stale-candidate", "unowned-metric-loss", "required-tier-loss", "toolchain-drift", "missing-peer-coverage", "candidate-peer-loss"}))
     loop row in canaries -> assert(row[0] == "1" && row[1] != "" && row[2] != "" && row[3] != "")
@@ -536,7 +536,7 @@ fn s4_review_compiled_workload_contract_reuses_agent_schema_and_keeps_hosted_row
 // stdout/stderr artifact as baselines/<path> only after s4_review_path accepts it.
 #Test("receipt_artifact_paths_reject_escape_attempts") {
     assert(s4_review_path("outputs/bash/task.stdout"))
-    hostile :: [String]{"/etc/passwd", "../outside", "outputs//task", "outputs/../task", "outputs/./task", "..\\outside", "C:\\outside"}
+    hostile: [String]{"/etc/passwd", "../outside", "outputs//task", "outputs/../task", "outputs/./task", "..\\outside", "C:\\outside"}
     loop path in hostile {
         assert(!s4_review_path(path), "accepted {path}")
     }
@@ -545,13 +545,13 @@ fn s4_review_compiled_workload_contract_reuses_agent_schema_and_keeps_hosted_row
 // Port of tests/agent_workloads.rs:1397-1414.
 #Test("corpus_fixture_paths_reject_escape_attempts") {
     assert(s4_review_path("inputs/repository"))
-    hostile :: [String]{"", "/etc/passwd", "../outside", "inputs/../outside", "..\\outside", "C:\\outside", "inputs//repository", "inputs/./repository"}
+    hostile: [String]{"", "/etc/passwd", "../outside", "inputs/../outside", "..\\outside", "C:\\outside", "inputs//repository", "inputs/./repository"}
     loop path in hostile {
         assert(!s4_review_path(path), "accepted {path}")
     }
 }
 
-fn s4_review_closure_error(root: String, sums: String) -> String {
+s4_review_closure_error: fn(root: String, sums: String) -> String {
     if s4_review_checksum_closure(root, sums) == {
         .Err(error) -> return error.message.copy()
         .Ok(count) -> panic("checksum closure accepted {count} rows")
@@ -560,21 +560,21 @@ fn s4_review_closure_error(root: String, sums: String) -> String {
 
 // Port of tests/agent_workloads.rs:2340-2416.
 #Test("checksum_closure_rejects_drift_and_hostile_sums") {
-    home :: s4_review_sys.get("HOME") ?? panic("HOME required")
-    cache :: s4_review_sys.get("XDG_CACHE_HOME") ?? "{home}/.cache"
-    scratch :: s4_review_sys.get("JET_SCRATCH_ROOT") ?? (s4_review_sys.get("JET_STATE_ROOT") ?? "{cache}/jet-dev")
-    root :: "{scratch}/agent-workloads-{s4_review_process.current_pid()}-checksum-closure"
+    home: s4_review_sys.get("HOME") ?? panic("HOME required")
+    cache: s4_review_sys.get("XDG_CACHE_HOME") ?? "{home}/.cache"
+    scratch: s4_review_sys.get("JET_SCRATCH_ROOT") ?? (s4_review_sys.get("JET_STATE_ROOT") ?? "{cache}/jet-dev")
+    root: "{scratch}/agent-workloads-{s4_review_process.current_pid()}-checksum-closure"
     s4_review_files.remove_all(root).drop("a previous run may have left no scratch")
     s4_review_files.create_dir_all("{root}/inputs") ?? panic("create inputs: {err}")
     s4_review_files.create_dir_all("{root}/expected") ?? panic("create expected: {err}")
     s4_review_files.write("{root}/inputs/task.txt", "input") ?? panic("write input: {err}")
     s4_review_files.write("{root}/expected/task.out", "output") ?? panic("write output: {err}")
-    input_hash :: s4_review_crypto.sha256("input".bytes()).hex()
-    output_hash :: s4_review_crypto.sha256("output".bytes()).hex()
-    sums :: "{input_hash}  inputs/task.txt\n{output_hash}  expected/task.out\n"
+    input_hash: s4_review_crypto.sha256("input".bytes()).hex()
+    output_hash: s4_review_crypto.sha256("output".bytes()).hex()
+    sums: "{input_hash}  inputs/task.txt\n{output_hash}  expected/task.out\n"
     assert_eq(s4_review_checksum_closure(root, sums) ?? panic(err.message), 2)
     s4_review_files.write("{root}/inputs/unhashed.txt", "extra") ?? panic("write extra: {err}")
-    unhashed :: s4_review_closure_error(root, sums)
+    unhashed: s4_review_closure_error(root, sums)
     assert(unhashed.contains("unhashed") && unhashed.contains("inputs/unhashed.txt"), unhashed)
     s4_review_files.remove("{root}/inputs/unhashed.txt") ?? panic("remove extra: {err}")
 
@@ -585,14 +585,14 @@ fn s4_review_closure_error(root: String, sums: String) -> String {
 
     // A removed declared fixture is reported as missing, never as a pass.
     s4_review_files.remove("{root}/expected/task.out") ?? panic("remove output: {err}")
-    missing :: s4_review_closure_error(root, sums)
+    missing: s4_review_closure_error(root, sums)
     assert(missing.contains("missing") && missing.contains("expected/task.out"), missing)
     s4_review_files.write("{root}/expected/task.out", "output") ?? panic("restore output: {err}")
     assert_eq(s4_review_checksum_closure(root, sums) ?? panic(err.message), 2)
 
     // A hostile SHA256SUMS cannot smuggle a path out of the corpus root, hide a
     // fixture behind a duplicate row, or pass a row the reader cannot split.
-    hostile :: [[String]]{
+    hostile: [[String]]{
         [String]{"{input_hash}  /etc/passwd\n{output_hash}  expected/task.out\n", "invalid checksum path: /etc/passwd"},
         [String]{"{input_hash}  ../outside.txt\n{output_hash}  expected/task.out\n", "invalid checksum path: ../outside.txt"},
         [String]{"{input_hash}  ..\\outside.txt\n{output_hash}  expected/task.out\n", "invalid checksum path: ..\\outside.txt"},

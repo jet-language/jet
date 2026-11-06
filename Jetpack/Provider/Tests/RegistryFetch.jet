@@ -1,7 +1,7 @@
 // Claims ported from crates/jetpack/src/Provider/fetch.rs #[cfg(test)] and the
 // shared `dependency_objects` claims of cran.rs and luarocks.rs.
 
-fn provider_registry_test_header(kind: Int, stored: Int) -> [U8] Never! {
+provider_registry_test_header: fn(kind: Int, stored: Int) -> [U8] Never! {
     header := [U8]{}
     loop _ in 0..<512 -> &header.push(U8{0})
     digits := [U8]{}
@@ -15,7 +15,7 @@ fn provider_registry_test_header(kind: Int, stored: Int) -> [U8] Never! {
     header
 }
 
-fn provider_registry_test_authority() -> RegistryAuthority Never! {
+provider_registry_test_authority: fn() -> RegistryAuthority Never! {
     RegistryAuthority{
         provider: "php",
         registry: "https://repo.example.test",
@@ -24,18 +24,18 @@ fn provider_registry_test_authority() -> RegistryAuthority Never! {
     }
 }
 
-fn provider_registry_test_ctx(dir: String) -> ProviderCtx Never! {
+provider_registry_test_ctx: fn(dir: String) -> ProviderCtx Never! {
     ProviderCtx{fixtures: None, store_dir: dir, offline: false, project_dir: Val(dir), nix_index: None, nix_roots: None, allow_local_nix_catalog: false}
 }
 
-fn provider_registry_test_project(manifest: String) -[FS]> String Never! {
-    dir :: files.tmpdir("jet-provider-authority-") ?? panic("claim a project directory")
+provider_registry_test_project: fn(manifest: String) -[FS]> String Never! {
+    dir: files.tmpdir("jet-provider-authority-") ?? panic("claim a project directory")
     files.write(pkg_manifest_path_in(dir), manifest) ?? panic("write the project manifest")
     dir
 }
 
 #Test("registry pax logical size cannot bypass stored payload limit") {
-    pax :: "21 GNU.sparse.size=1\n".bytes()
+    pax: "21 GNU.sparse.size=1\n".bytes()
     archive := provider_registry_test_header(120, pax.len())
     loop byte in pax -> &archive.push(byte)
     loop _ in 0..<(512 - pax.len()) -> &archive.push(U8{0})
@@ -45,15 +45,15 @@ fn provider_registry_test_project(manifest: String) -[FS]> String Never! {
     if &preflight.feed(archive) == {
         .Ok(_) -> panic("an oversized stored payload must be refused")
         .Err(error) -> {
-            message :: error.message()
+            message: error.message()
             assert(message.contains("payload") && message.contains("per-entry limit"), "unexpected PAX limit error: {message}")
         }
     }
 }
 
 #Test("registry authority rejects denied hosts and credentials") {
-    control :: "https://example.test/x{pkg_bytes_text([U8]{U8{13}, U8{10}}, 0, 2)}Injected: yes"
-    refused :: [String]{
+    control: "https://example.test/x{pkg_bytes_text([U8]{U8{13}, U8{10}}, 0, 2)}Injected: yes"
+    refused: [String]{
         "https://user@example.test/x",
         "http://example.test/x",
         "https://bad host.example/x",
@@ -68,14 +68,14 @@ fn provider_registry_test_project(manifest: String) -[FS]> String Never! {
             .Err(_) -> {}
         }
     }
-    authority :: provider_registry_test_authority()
+    authority: provider_registry_test_authority()
     assert(authority.check_url("https://dist.example.test/a") == .Ok(_))
     assert(authority.check_url("https://blocked.example.test/a") == .Err(_))
     assert(authority.check_url("https://other.example.test/a") == .Err(_))
 }
 
 #Test("registry configured provider authority replaces defaults") {
-    dir :: provider_registry_test_project(```
+    dir: provider_registry_test_project(```
 name: "p"
 version: "0.1.0"
 authority: {
@@ -88,7 +88,7 @@ authority: {
     },
 }
 ```)
-    authority :: RegistryAuthority.load(provider_registry_test_ctx(dir), "ruby", "https://index.rubygems.org", [String]{"index.rubygems.org"}) ?? panic("configured authority loads")
+    authority: RegistryAuthority.load(provider_registry_test_ctx(dir), "ruby", "https://index.rubygems.org", [String]{"index.rubygems.org"}) ?? panic("configured authority loads")
     assert_eq(authority.registry(), "https://mirror.example.test")
     assert(authority.check_url("https://mirror.example.test/info/a") == .Ok(_))
     assert(authority.check_url("https://dist.example.test/a.gem") == .Ok(_))
@@ -99,7 +99,7 @@ authority: {
 }
 
 #Test("registry configured provider credentials fail before any fetch") {
-    dir :: provider_registry_test_project(```
+    dir: provider_registry_test_project(```
 name: "p"
 version: "0.1.0"
 authority: {
@@ -118,17 +118,17 @@ authority: {
 }
 
 #Test("registry dependency edges use exact preserved source object digests") {
-    objects :: [RegistrySourceObject]{
+    objects: [RegistrySourceObject]{
         {name: "dep", sha256: "abcd", file_name: "dep.tar.gz"},
         {name: "app", sha256: "root", file_name: "app.tar.gz"},
     }
-    edges :: provider_registry_dependency_objects("app", objects)
+    edges: provider_registry_dependency_objects("app", objects)
     assert_eq(edges.references, [String]{"sha256-abcd"})
     assert_eq(edges.facts.get("dependency.object.sha256-abcd"), Val("sources/dep.tar.gz"))
     assert_eq(edges.facts.len(), 1)
 }
 
-fn provider_registry_test_octal(header: &[U8], at: Int, width: Int, value: Int) Never! {
+provider_registry_test_octal: fn(header: &[U8], at: Int, width: Int, value: Int) Never! {
     remaining := value
     loop index in 0..<(width - 1) {
         header[at + width - 2 - index] = U8{48 + remaining %% 8}
@@ -138,15 +138,15 @@ fn provider_registry_test_octal(header: &[U8], at: Int, width: Int, value: Int) 
 
 // One ustar member: a checksummed header named `name`, then `body` padded to
 // the block size.
-fn provider_registry_test_member(name: String, kind: Int, body: [U8]) -> [U8] Never! {
+provider_registry_test_member: fn(name: String, kind: Int, body: [U8]) -> [U8] Never! {
     header := [U8]{}
     loop _ in 0..<512 -> &header.push(U8{0})
-    raw :: name.bytes()
+    raw: name.bytes()
     loop index in 0..<raw.len() -> header[index] = raw[index]
     provider_registry_test_octal(&header, 100, 8, 420)
     provider_registry_test_octal(&header, 124, 12, body.len())
     header[156] = U8{kind}
-    magic :: "ustar".bytes()
+    magic: "ustar".bytes()
     loop index in 0..<magic.len() -> header[257 + index] = magic[index]
     header[263] = U8{48}
     header[264] = U8{48}
@@ -161,7 +161,7 @@ fn provider_registry_test_member(name: String, kind: Int, body: [U8]) -> [U8] Ne
     member
 }
 
-fn provider_registry_test_tar(members: [[U8]]) -> [U8] Never! {
+provider_registry_test_tar: fn(members: [[U8]]) -> [U8] Never! {
     archive := [U8]{}
     loop member in members {
         loop byte in member -> &archive.push(byte)
@@ -172,18 +172,18 @@ fn provider_registry_test_tar(members: [[U8]]) -> [U8] Never! {
 
 // Validation refuses `archive` with a reason containing `expected`, and
 // extraction refuses it too without writing outside the unpack root.
-fn provider_registry_test_refuses(archive: [U8], expected: String) Never! -[FS]> {
-    dir :: files.tmpdir("jet-registry-tar-") ?? panic("claim a scratch directory")
-    path :: files.join(dir, "source.tar")
+provider_registry_test_refuses: fn(archive: [U8], expected: String) Never! -[FS]> {
+    dir: files.tmpdir("jet-registry-tar-") ?? panic("claim a scratch directory")
+    path: files.join(dir, "source.tar")
     files.write_bytes(path, archive) ?? panic("write the archive")
     if provider_registry_validate_tar_archive(path, false) == {
         .Ok(_) -> panic("a hostile archive must be refused: {expected}")
         .Err(error) -> {
-            message :: error.message()
+            message: error.message()
             assert(message.contains(expected), "unexpected refusal for {expected}: {message}")
         }
     }
-    unpack :: files.join(files.join(dir, "deep"), "unpack")
+    unpack: files.join(files.join(dir, "deep"), "unpack")
     files.create_dir_all(unpack) ?? panic("create the unpack directory")
     if provider_registry_extract_tar(path, false, unpack) == {
         .Ok(_) -> panic("extraction must refuse a hostile archive: {expected}")
@@ -195,9 +195,9 @@ fn provider_registry_test_refuses(archive: [U8], expected: String) Never! -[FS]>
 }
 
 #Test("registry tar reader refuses escaping, absolute, linked, and corrupt members") {
-    unsafe_path :: "unsafe path"
-    links :: "only regular files and directories"
-    body :: "owned\n".bytes()
+    unsafe_path: "unsafe path"
+    links: "only regular files and directories"
+    body: "owned\n".bytes()
     provider_registry_test_refuses(provider_registry_test_tar([[U8]]{provider_registry_test_member("../escape", 48, body)}), unsafe_path)
     provider_registry_test_refuses(provider_registry_test_tar([[U8]]{provider_registry_test_member("pkg/../../escape", 48, body)}), unsafe_path)
     provider_registry_test_refuses(provider_registry_test_tar([[U8]]{provider_registry_test_member("/tmp/jet-registry-escape", 48, body)}), unsafe_path)
@@ -227,27 +227,27 @@ fn provider_registry_test_refuses(archive: [U8], expected: String) Never! -[FS]>
     corrupt[0] = U8{113}
     provider_registry_test_refuses(provider_registry_test_tar([[U8]]{corrupt}), "not a readable tar archive")
     // A header that claims more payload than the stream holds.
-    short :: provider_registry_test_member("pkg/ok", 48, body)
+    short: provider_registry_test_member("pkg/ok", 48, body)
     truncated := provider_registry_test_member("pkg/big", 48, [U8]{})
     provider_registry_test_octal(&truncated, 124, 12, 4096)
     provider_registry_test_refuses(provider_registry_test_tar([[U8]]{short, truncated}), "truncated tar payload")
 }
 
 #Test("registry tar reader extracts a gzip archive of files and directories") {
-    dir :: files.tmpdir("jet-registry-tar-") ?? panic("claim a scratch directory")
-    archive :: provider_registry_test_tar([[U8]]{
+    dir: files.tmpdir("jet-registry-tar-") ?? panic("claim a scratch directory")
+    archive: provider_registry_test_tar([[U8]]{
         provider_registry_test_member("pkg/", 53, [U8]{}),
         provider_registry_test_member("pkg/a.txt", 48, "hello\n".bytes()),
         provider_registry_test_member("PaxHeaders/long", 120, "25 path=pkg/sub/long.txt\n".bytes()),
         provider_registry_test_member("pkg/short", 48, "long\n".bytes()),
     })
-    path :: files.join(dir, "source.tar.gz")
+    path: files.join(dir, "source.tar.gz")
     files.write_bytes(path, gzip.compress(archive) ?? panic("gzip the archive")) ?? panic("write the archive")
     provider_registry_validate_tar_archive(path, true) ?? panic("a plain source archive is admitted")
-    listing :: provider_registry_tar_listing(path, true) ?? panic("list the archive")
+    listing: provider_registry_tar_listing(path, true) ?? panic("list the archive")
     assert_eq(listing.len(), 3)
     assert_eq(listing[2].name, "pkg/sub/long.txt")
-    unpack :: files.join(dir, "unpack")
+    unpack: files.join(dir, "unpack")
     files.create_dir_all(unpack) ?? panic("create the unpack directory")
     provider_registry_extract_tar(path, true, unpack) ?? panic("extract the archive")
     assert_eq(files.read(files.join(unpack, "pkg/a.txt")) ?? panic("read a.txt"), "hello\n")

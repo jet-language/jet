@@ -1,21 +1,21 @@
 // core.encoding.yaml — full YAML 1.2 core: block + flow, sequences, typed scalars.
 // Decode a nested document (a list of mappings) into typed structs, then round-trip.
-use yaml :: core.encoding.yaml
+use yaml: core.encoding.yaml
 
-struct Service {
+Service: struct {
     name: String
     port: Int
 }
 
-struct Config {
+Config: struct {
     app: String
     version: Float
     services: [Service]
 }
 
-fn run() [FieldError]! {
-    raw :: "app: myapp\nversion: 1.5\nservices:\n  - name: web\n    port: 80\n  - name: db\n    port: 5432\n"
-    cfg :: yaml.decode<Config>(raw)
+run: fn() [FieldError]! {
+    raw: "app: myapp\nversion: 1.5\nservices:\n  - name: web\n    port: 80\n  - name: db\n    port: 5432\n"
+    cfg: yaml.decode<Config>(raw)
     print(cfg.app)
     print(cfg.version)
     print(cfg.services.len())

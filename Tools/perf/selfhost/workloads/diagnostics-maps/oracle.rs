@@ -1,12 +1,12 @@
 fn source_map(offset: usize) -> (usize, usize, usize, usize) {
-    if offset < 11 {
+    if offset < 12 {
         return (offset, offset, 1, offset + 1);
     }
-    (offset, offset + 5, 2, offset - 10)
+    (offset, offset + 5, 2, offset - 11)
 }
 
 fn main() {
-    let source = "fn run() {\n    pirnt(\"hi\")\n}";
+    let source = "run: fn() {\n    pirnt(\"hi\")\n}";
     let offset = source.find("pirnt").expect("fixture token");
     let (start, end, line, col) = source_map(offset);
     println!(

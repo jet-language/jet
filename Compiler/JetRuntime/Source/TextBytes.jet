@@ -6,10 +6,10 @@
 
 // Append count native List<U8> elements starting at start. Reserve once,
 // then initialize every byte before publishing the new length.
-fn text_bytes_push(target: I64, data: I64, start: I64, count: I64) {
+text_bytes_push: fn(target: I64, data: I64, start: I64, count: I64) {
     if (count <= I64{0}) -> return
-    used :: rt_text_len(target)
-    buffer :: rt_text_reserve_extra(target, rt_text_data(target), used, count)
+    used: rt_text_len(target)
+    buffer: rt_text_reserve_extra(target, rt_text_data(target), used, count)
     if (buffer == I64{0}) -> return
     if (RT_HOST_U8_STRIDE == I64{1}) {
         rt_text_bytes_copy(wrapping(buffer + used), wrapping(data + start), count)
@@ -26,7 +26,7 @@ fn text_bytes_push(target: I64, data: I64, start: I64, count: I64) {
 // Rust Utf8Error Display of the first invalid sequence, or 0 when the native
 // List<U8> is valid UTF-8. error_len None (a truncated final sequence) is the
 // "incomplete" form; otherwise the invalid subpart length is reported.
-fn text_bytes_utf8_error(data: I64, length: I64) -> I64 {
+text_bytes_utf8_error: fn(data: I64, length: I64) -> I64 {
     at := I64{0}
     loop at < length {
         // Packed ASCII words (no byte with the high bit) are valid as a whole,
@@ -35,7 +35,7 @@ fn text_bytes_utf8_error(data: I64, length: I64) -> I64 {
         // word stays inside one page is one load masked to the tail: the
         // page holds the tail's bytes, so it is mapped, and the mask drops
         // the bytes past them; an all-ASCII tail ends the check.
-        rest :: wrapping(length - at)
+        rest: wrapping(length - at)
         if (RT_HOST_U8_STRIDE == I64{1}) {
             if (rest >= I64{8}) {
                 if (rt_text_word(wrapping(data + at)).bit_and(I64{-9187201950435737472}) == I64{0}) {
@@ -44,7 +44,7 @@ fn text_bytes_utf8_error(data: I64, length: I64) -> I64 {
                 }
             } else if (wrapping(data + at).bit_and(I64{4095}) <= I64{4088}) {
                 // rest is 1..7 here, so its low bits are rest.
-                tail :: rt_text_word(wrapping(data + at)).bit_and(wrapping((I64{1} << (rest.bit_and(I64{7}) * I64{8})) - I64{1}))
+                tail: rt_text_word(wrapping(data + at)).bit_and(wrapping((I64{1} << (rest.bit_and(I64{7}) * I64{8})) - I64{1}))
                 if (tail.bit_and(I64{-9187201950435737472}) == I64{0}) -> return I64{0}
             }
         }
@@ -52,11 +52,11 @@ fn text_bytes_utf8_error(data: I64, length: I64) -> I64 {
             at = wrapping(at + I64{1})
             next
         }
-        width :: rt_text_valid_width(wrapping(data + at * RT_HOST_U8_STRIDE), length - at, RT_HOST_U8_STRIDE)
+        width: rt_text_valid_width(wrapping(data + at * RT_HOST_U8_STRIDE), length - at, RT_HOST_U8_STRIDE)
         if (width < I64{0}) {
-            message :: jet_rt_string_builder_new()
-            lead :: host_u8_get(data, at)
-            expected :: if (lead >= I64{194} && lead <= I64{223}) -> I64{2} else if (lead >= I64{224} && lead <= I64{239}) -> I64{3} else if (lead >= I64{240} && lead <= I64{244}) -> I64{4} else -> I64{1}
+            message: jet_rt_string_builder_new()
+            lead: host_u8_get(data, at)
+            expected: if (lead >= I64{194} && lead <= I64{223}) -> I64{2} else if (lead >= I64{224} && lead <= I64{239}) -> I64{3} else if (lead >= I64{240} && lead <= I64{244}) -> I64{4} else -> I64{1}
             if (expected > I64{1} && at - width == length) {
                 jet_rt_string_builder_push(message, rt_static_text("incomplete utf-8 byte sequence from index "))
                 rt_text_push_number(message, at)
@@ -75,16 +75,16 @@ fn text_bytes_utf8_error(data: I64, length: I64) -> I64 {
 
 // Exact copy of length native List<U8> elements into a fresh owned text:
 // packed elements are the text's bytes, copied whole (rt_text_copy).
-fn text_bytes_owned(data: I64, length: I64) -> I64 {
+text_bytes_owned: fn(data: I64, length: I64) -> I64 {
     if (RT_HOST_U8_STRIDE == I64{1}) -> return rt_text_copy(data, length)
-    result :: rt_text_builder_with_capacity(length)
+    result: rt_text_builder_with_capacity(length)
     text_bytes_push(result, data, I64{0}, length)
     result
 }
 
 // jet_string_validate_utf8: Ok(()) or the Utf8Error text.
-#Export(c) fn jet_string_validate_utf8(data: I64, length: I64, err: I64) -> I64 {
-    message :: text_bytes_utf8_error(data, length)
+#Export(c) jet_string_validate_utf8: fn(data: I64, length: I64, err: I64) -> I64 {
+    message: text_bytes_utf8_error(data, length)
     if (message == I64{0}) -> return I64{1}
     rt_text_store(err, message)
     I64{0}
@@ -92,8 +92,8 @@ fn text_bytes_owned(data: I64, length: I64) -> I64 {
 
 // jet_string_from_bytes: the validated copy, or UTF8Error carrying the same
 // message (the record owns its own message copy).
-#Export(c) fn jet_string_from_bytes(data: I64, length: I64, ok: I64, err: I64) -> I64 {
-    message :: text_bytes_utf8_error(data, length)
+#Export(c) jet_string_from_bytes: fn(data: I64, length: I64, ok: I64, err: I64) -> I64 {
+    message: text_bytes_utf8_error(data, length)
     if (message != I64{0}) {
         rt_text_store(err, jet_rt_record_new_utf8_error(message))
         jet_rt_string_drop(message)
@@ -105,11 +105,11 @@ fn text_bytes_owned(data: I64, length: I64) -> I64 {
 
 // String::from_utf8_lossy: one U+FFFD per maximal invalid subpart; a
 // truncated final sequence is replaced once.
-#Export(c) fn jet_string_from_bytes_lossy(data: I64, length: I64) -> I64 {
-    result :: rt_text_builder_with_capacity(length)
+#Export(c) jet_string_from_bytes_lossy: fn(data: I64, length: I64) -> I64 {
+    result: rt_text_builder_with_capacity(length)
     at := I64{0}
     loop at < length {
-        width :: rt_text_valid_width(wrapping(data + at * RT_HOST_U8_STRIDE), length - at, RT_HOST_U8_STRIDE)
+        width: rt_text_valid_width(wrapping(data + at * RT_HOST_U8_STRIDE), length - at, RT_HOST_U8_STRIDE)
         if (width < I64{0}) {
             rt_text_push_scalar(result, I64{65533})
             at -= width
@@ -123,12 +123,12 @@ fn text_bytes_owned(data: I64, length: I64) -> I64 {
 
 // jet_raw_bytes_into_text: Jet validated these bytes first; the borrowed list
 // is copied, never adopted.
-#Export(c) fn jet_raw_bytes_into_text(data: I64, length: I64) -> I64 { text_bytes_owned(data, length) }
+#Export(c) jet_raw_bytes_into_text: fn(data: I64, length: I64) -> I64 { text_bytes_owned(data, length) }
 
 // jet_string_bytes: the UTF-8 bytes as a fresh List<U8>, one block move into
 // the packed buffer (not a store per byte).
-#Export(c) fn jet_string_bytes(value: I64, output: I64) -> I64 {
-    length :: rt_text_len(value)
+#Export(c) jet_string_bytes: fn(value: I64, output: I64) -> I64 {
+    length: rt_text_len(value)
     if (length == I64{0}) {
         rt_text_store(output, I64{0})
         return I64{0}
@@ -137,8 +137,8 @@ fn text_bytes_owned(data: I64, length: I64) -> I64 {
         rt_text_capacity_stop()
         return I64{0}
     }
-    bytes :: jet_rt_alloc_8(length * RT_HOST_U8_STRIDE)
-    data :: rt_text_data(value)
+    bytes: jet_rt_alloc_8(length * RT_HOST_U8_STRIDE)
+    data: rt_text_data(value)
     if (RT_HOST_U8_STRIDE == I64{1}) {
         jet_rt_mem_move(bytes, data, length)
     } else {
@@ -154,8 +154,8 @@ fn text_bytes_owned(data: I64, length: I64) -> I64 {
 
 // jet_raw_string_byte: CAbiRoutes fixed::<u64> decodes the exact Int index,
 // then the compiler-checked byte is read without a bound.
-#Export(c) fn jet_raw_string_byte(value: I64, index: I64) -> I64 {
-    at :: jet_int_owned_to_i64(index)
+#Export(c) jet_raw_string_byte: fn(value: I64, index: I64) -> I64 {
+    at: jet_int_owned_to_i64(index)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     if (at < I64{0}) {
         trap_native_index_range_stop()

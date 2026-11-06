@@ -1,18 +1,18 @@
 // core.text.fmt contract rows (owner rulings, card #4588). Calls and the
 // matching interpolation selectors print the same text on every tier.
-use fmt :: core.text.fmt
+use fmt: core.text.fmt
 
-struct P {
+P: struct {
     x: Int
     y: Int
 }
 
-fn row(label: String, actual: String, expected: String) {
+row: fn(label: String, actual: String, expected: String) {
     if actual != expected -> panic("{label}: expected |{expected}|, got |{actual}|")
     print("{label} = |{actual}|")
 }
 
-fn run() {
+run: fn() {
     print("percent")
     row("percent(12345.6, 0)", fmt.percent(12345.6, 0), "1,234,560%")
     row("percent(0.1234, 1)", fmt.percent(Float{0.1234}, 1), "12.3%")
@@ -68,14 +68,14 @@ fn run() {
     row("duration(90061000)", fmt.duration(90061000), "1d 1h 1m")
 
     print("selectors")
-    tie :: Float{0.125}
-    tiny :: Float{-0.0001}
-    price :: Float{1234.5678}
-    big :: Float{1234.0}
-    carry :: Float{9.999}
-    share :: Float{12345.6}
-    point :: P{x: 1, y: 2}
-    empty :: [Int]{}
+    tie: Float{0.125}
+    tiny: Float{-0.0001}
+    price: Float{1234.5678}
+    big: Float{1234.0}
+    carry: Float{9.999}
+    share: Float{12345.6}
+    point: P{x: 1, y: 2}
+    empty: [Int]{}
     row("tie:Fixed(2)", "{tie:Fixed(2)}", fmt.decimal(tie, 2))
     row("tiny:Fixed(2)", "{tiny:Fixed(2)}", fmt.decimal(tiny, 2))
     row("price:Grouped(2)", "{price:Grouped(2)}", fmt.grouped(price, 2))

@@ -1,30 +1,30 @@
 // Field metadata edges on one #Codable model: missing, null and wrong-typed
 // fields stay distinct, #Flatten keys count as declared, and
 // #DenyUnknownFields rejects any other key with E2412.
-use json :: core.encoding.json
+use json: core.encoding.json
 
-struct Address {
+Address: struct {
     city: String
     zip: String
 }
 
 #[Codable, DenyUnknownFields]
-struct Customer {
+Customer: struct {
     name: String
     #Flatten address: Address
     nickname: String?
     visits: Int{0}
 }
 
-fn attempt(label: String, raw: String) {
-    value :: json.decode<Customer>(raw) ?? {
+attempt: fn(label: String, raw: String) {
+    value: json.decode<Customer>(raw) ?? {
         print("{label}: {err}")
         return
     }
     print("{label}: {json.to_string(value) ?? panic("JSON encode")}")
 }
 
-fn run() {
+run: fn() {
     attempt("complete", "{{\"name\":\"Ada\",\"city\":\"Reno\",\"zip\":\"89501\",\"nickname\":\"A\",\"visits\":3}}")
     attempt("missing optional+default", "{{\"name\":\"Ada\",\"city\":\"Reno\",\"zip\":\"89501\"}}")
     attempt("null optional", "{{\"name\":\"Ada\",\"city\":\"Reno\",\"zip\":\"89501\",\"nickname\":null}}")

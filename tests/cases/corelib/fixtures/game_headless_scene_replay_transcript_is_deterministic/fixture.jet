@@ -1,7 +1,7 @@
 
-use game :: core.game
+use game: core.game
 
-module perf.game {
+perf.game: module {
     budgets: [
         Budget{ name: "frame", scope: .Scene("arcade"), metric: .FrameTime(.P99), provider: .SceneProbe("arcade"), comparison: .AbsoluteFrom("local/arcade"), limit: .AtMost(16ms) },
         Budget{ name: "memory", scope: .Scene("arcade"), metric: .MemoryHighWater, provider: .SceneProbe("arcade"), comparison: .AbsoluteFrom("local/arcade"), limit: .AtMost(96MiB) },
@@ -10,17 +10,17 @@ module perf.game {
     ]
 }
 
-struct Position { x: Int }
-struct Velocity { dx: Int }
+Position: struct { x: Int }
+Velocity: struct { dx: Int }
 
-fn run() {
+run: fn() {
     scene := game.Scene.new("arcade")
     scene.assets.image("assets/player.png") ?? panic("image")
     scene.assets.sound("assets/jump.wav") ?? panic("sound")
     scene.input.bind("jump", "Space")
     scene.component<Position>()
     scene.component<Velocity>()
-    hits :: scene.query<Position, Velocity>()
+    hits: scene.query<Position, Velocity>()
     print("query {hits.len()}")
     print("row {hits[0]}")
     backend := game.Backend.headless()
@@ -36,6 +36,6 @@ fn run() {
             print("hook jump {frame.index}")
         }
     })
-    replay :: game.Replay.record("runs/demo.jetreplay")
+    replay: game.Replay.record("runs/demo.jetreplay")
     print(game.run(scene, replay: replay))
 }

@@ -12,7 +12,7 @@ const [output, mode] = process.argv.slice(2);
 if (!output || !['assemble', 'lower', 'audit', 'link', 'run'].includes(mode)) throw Error('usage: run-atomic-fixtures.mjs OUT assemble|lower|audit|link|run');
 const out = resolve(output), unit = join(out, 'unit');
 const source = readFileSync(join(root, 'Compiler/JetRuntime/Source/Atomic.jet'), 'utf8');
-const exports = [...source.matchAll(/^#Export\(c\)\s+fn\s+(\w+)\(/gm)].map(match => match[1]);
+const exports = [...source.matchAll(/^#Export\(c\)\s+(\w+): fn\(/gm)].map(match => match[1]);
 function command(name, binary, args, options = {}) {
   const result = spawnSync(binary, args, { cwd: root, encoding: 'utf8', maxBuffer: 1 << 27, ...options });
   writeFileSync(join(out, name + '.receipt.json'), JSON.stringify({ status: result.status, signal: result.signal, error: result.error?.message ?? null, stdout: result.stdout, stderr: result.stderr }, null, 2) + '\n');

@@ -1,10 +1,10 @@
-// (#5097) A read-only binding of a place (`x :: rows[i]`, `x :: s.field`)
+// (#5097) A read-only binding of a place (`x: rows[i]`, `x: s.field`)
 // borrows the place instead of copying it (TLocal.place_borrow) when no
 // copy could be observed. The binding and the variable the place reads
 // (its root) are both immutable: sema rejects every write through either
 // (E0202). The root holds its value for the whole function: it is a read
 // parameter (or `self`), or an immutable Let that is not itself a window
-// (`r :: &place`). Nowhere in the
+// (`r: &place`). Nowhere in the
 // function is either variable moved, dropped, closed, taken apart, rolled
 // back, edited through a window or named by a closure. So every read of the
 // binding sees the bytes a copy would have held, and lowering reads the
@@ -34,7 +34,7 @@ use jet_foundation.[
 
 // The variables the body consumes or a closure names: by symbol key, and by
 // name for a local without a key, a window edit's root or a closure's name.
-struct SemaPlaceBorrowCensus {
+SemaPlaceBorrowCensus: struct {
     keys: [String:Bool]
     names: [String:Bool]
     // A payload take (`^p`) moves out of a subject this walk does not name:
@@ -45,7 +45,7 @@ struct SemaPlaceBorrowCensus {
 // The variables a place binding may borrow from (`roots`, by symbol key)
 // and the Let keys seen so far; a key declared twice (`blocked`) names no
 // single variable.
-struct SemaPlaceBorrowRoots {
+SemaPlaceBorrowRoots: struct {
     roots: [String:Bool]
     seen: [String:Bool]
     blocked: [String:Bool]
@@ -54,7 +54,7 @@ struct SemaPlaceBorrowRoots {
 // Marks the place-borrowing Lets of a checked function `body`. `receiver`
 // is the symbol key of an explicit read `self` ("" when none); `arena` holds
 // the rows of the body's flat nodes (sema_node).
-fn sema_place_borrow_function(body: &[TStmt], params: [TParameter], receiver: String, arena: BodyTree) Never! {
+sema_place_borrow_function: fn(body: &[TStmt], params: [TParameter], receiver: String, arena: BodyTree) Never! {
     census := SemaPlaceBorrowCensus{keys: [String:Bool]{}, names: [String:Bool]{}, any: false}
     sema_place_borrow_census_list(body, arena, &census)
     table := SemaPlaceBorrowRoots{roots: [String:Bool]{}, seen: [String:Bool]{}, blocked: [String:Bool]{}}
@@ -67,22 +67,22 @@ fn sema_place_borrow_function(body: &[TStmt], params: [TParameter], receiver: St
     sema_place_borrow_statements(&body, census, arena, &table)
 }
 
-fn sema_place_borrow_statements(body: &[TStmt], census: SemaPlaceBorrowCensus, arena: BodyTree, table: &SemaPlaceBorrowRoots) Never! {
+sema_place_borrow_statements: fn(body: &[TStmt], census: SemaPlaceBorrowCensus, arena: BodyTree, table: &SemaPlaceBorrowRoots) Never! {
     loop index in 0..<body.len() {
         borrow := false
         if body[index] == .Let(local, let_ty, init, gc_promotion, gc_transferred, _) {
-            key :: if local.symbol_id == .Val(id) -> id.key else -> ""
+            key: if local.symbol_id == .Val(id) -> id.key else -> ""
             if key != "" {
                 if table.seen.get(key) != None -> _ := &table.blocked.add(key, true)
                 _ := &table.seen.add(key, true)
             }
             if key != "" && gc_promotion == None && !gc_transferred && sema_place_borrow_plain_local(local, let_ty) {
                 if sema_place_borrow_place(init, false, arena) && !sema_place_borrow_consumed(census, key, local.name) {
-                    root :: sema_place_borrow_root(init, arena)
+                    root: sema_place_borrow_root(init, arena)
                     if table.roots.get(root.key) != None && table.blocked.get(root.key) == None && !sema_place_borrow_consumed(census, root.key, root.name) -> borrow = true
                 }
                 // An owning immutable variable is a root for later places;
-                // a window (`r :: &place`) aliases storage another variable
+                // a window (`r: &place`) aliases storage another variable
                 // may still change.
                 if !sema_place_borrow_is_window(init, arena) -> _ := &table.roots.add(key, true)
             }
@@ -97,7 +97,7 @@ fn sema_place_borrow_statements(body: &[TStmt], census: SemaPlaceBorrowCensus, a
 }
 
 // Whether `init` is a window (`&place`).
-fn sema_place_borrow_is_window(init: TExpr, arena: BodyTree) -> Bool Never! {
+sema_place_borrow_is_window: fn(init: TExpr, arena: BodyTree) -> Bool Never! {
     if init.kind == {
         .Borrow(_, _) -> true
         .Flat(index) -> arena.nodes[index - arena.node_base].kind == .Borrow(_, _)
@@ -106,7 +106,7 @@ fn sema_place_borrow_is_window(init: TExpr, arena: BodyTree) -> Bool Never! {
 }
 
 // An immutable user variable with no address, persistence, wrapper or view.
-fn sema_place_borrow_plain_local(local: TLocal, let_ty: TLetTy) -> Bool Never! {
+sema_place_borrow_plain_local: fn(local: TLocal, let_ty: TLetTy) -> Bool Never! {
     if local.mutable || local.generated || local.deref || local.address_lifetime != None || local.persist_key != None -> return false
     if let_ty == {
         .Inferred -> true
@@ -117,7 +117,7 @@ fn sema_place_borrow_plain_local(local: TLocal, let_ty: TLetTy) -> Bool Never! {
 
 // Whether `place` reads an immutable keyed variable through at least one
 // field or List element step (`stepped`: a step was already seen).
-fn sema_place_borrow_place(place: TExpr, stepped: Bool, arena: BodyTree) -> Bool Never! {
+sema_place_borrow_place: fn(place: TExpr, stepped: Bool, arena: BodyTree) -> Bool Never! {
     if place.kind == {
         .Flat(index) -> sema_place_borrow_row_place(arena, index, stepped)
         .Local(local) -> stepped && !local.mutable && !local.deref && local.symbol_id != None
@@ -132,7 +132,7 @@ fn sema_place_borrow_place(place: TExpr, stepped: Bool, arena: BodyTree) -> Bool
 }
 
 // sema_place_borrow_place of node row `index` of `tree`.
-fn sema_place_borrow_row_place(tree: BodyTree, index: Int, stepped: Bool) -> Bool Never! {
+sema_place_borrow_row_place: fn(tree: BodyTree, index: Int, stepped: Bool) -> Bool Never! {
     if tree.nodes[index - tree.node_base].kind == {
         .Local(local) -> stepped && !local.mutable && !local.deref && local.symbol_id != None
         .Field(receiver, _) -> sema_place_borrow_row_place(tree, receiver, true)
@@ -146,12 +146,12 @@ fn sema_place_borrow_row_place(tree: BodyTree, index: Int, stepped: Bool) -> Boo
 }
 
 // The symbol key and name of the variable a checked place reads.
-struct SemaPlaceBorrowRoot {
+SemaPlaceBorrowRoot: struct {
     key: String
     name: String
 }
 
-fn sema_place_borrow_root(place: TExpr, arena: BodyTree) -> SemaPlaceBorrowRoot Never! {
+sema_place_borrow_root: fn(place: TExpr, arena: BodyTree) -> SemaPlaceBorrowRoot Never! {
     if place.kind == {
         .Flat(index) -> sema_place_borrow_row_root(arena, index)
         .Local(local) -> SemaPlaceBorrowRoot{key: if local.symbol_id == .Val(id) -> id.key else -> "", name: local.name}
@@ -163,7 +163,7 @@ fn sema_place_borrow_root(place: TExpr, arena: BodyTree) -> SemaPlaceBorrowRoot 
 }
 
 // sema_place_borrow_root of node row `index` of `tree`.
-fn sema_place_borrow_row_root(tree: BodyTree, index: Int) -> SemaPlaceBorrowRoot Never! {
+sema_place_borrow_row_root: fn(tree: BodyTree, index: Int) -> SemaPlaceBorrowRoot Never! {
     if tree.nodes[index - tree.node_base].kind == {
         .Local(local) -> SemaPlaceBorrowRoot{key: if local.symbol_id == .Val(id) -> id.key else -> "", name: local.name}
         .Field(receiver, _) -> sema_place_borrow_row_root(tree, receiver)
@@ -173,11 +173,11 @@ fn sema_place_borrow_row_root(tree: BodyTree, index: Int) -> SemaPlaceBorrowRoot
     }
 }
 
-fn sema_place_borrow_consumed(census: SemaPlaceBorrowCensus, key: String, name: String) -> Bool Never! {
+sema_place_borrow_consumed: fn(census: SemaPlaceBorrowCensus, key: String, name: String) -> Bool Never! {
     census.any || census.keys.get(key) != None || census.names.get(name) != None
 }
 
-fn sema_place_borrow_note_local(census: &SemaPlaceBorrowCensus, local: TLocal) Never! {
+sema_place_borrow_note_local: fn(census: &SemaPlaceBorrowCensus, local: TLocal) Never! {
     if local.symbol_id == .Val(id) {
         _ := &census.keys.add(id.key, true)
         return
@@ -186,7 +186,7 @@ fn sema_place_borrow_note_local(census: &SemaPlaceBorrowCensus, local: TLocal) N
 }
 
 // The variable at the root of a consumed place.
-fn sema_place_borrow_note_root(census: &SemaPlaceBorrowCensus, root: SemaPlaceBorrowRoot) Never! {
+sema_place_borrow_note_root: fn(census: &SemaPlaceBorrowCensus, root: SemaPlaceBorrowRoot) Never! {
     if root.key != "" {
         _ := &census.keys.add(root.key, true)
         return
@@ -194,17 +194,17 @@ fn sema_place_borrow_note_root(census: &SemaPlaceBorrowCensus, root: SemaPlaceBo
     if root.name != "" -> _ := &census.names.add(root.name, true)
 }
 
-fn sema_place_borrow_census_list(body: [TStmt], arena: BodyTree, census: &SemaPlaceBorrowCensus) Never! {
+sema_place_borrow_census_list: fn(body: [TStmt], arena: BodyTree, census: &SemaPlaceBorrowCensus) Never! {
     loop statement in body -> sema_place_borrow_census_stmt(statement, arena, &census)
 }
 
-fn sema_place_borrow_census_optional_list(body: [TStmt]?, arena: BodyTree, census: &SemaPlaceBorrowCensus) Never! {
+sema_place_borrow_census_optional_list: fn(body: [TStmt]?, arena: BodyTree, census: &SemaPlaceBorrowCensus) Never! {
     if body == .Val(statements) -> sema_place_borrow_census_list(statements, arena, &census)
 }
 
 // A statement's own consuming facts, then its expressions; a statement with
 // nested bodies walks its head expressions here and each body as statements.
-fn sema_place_borrow_census_stmt(statement: TStmt, arena: BodyTree, census: &SemaPlaceBorrowCensus) Never! {
+sema_place_borrow_census_stmt: fn(statement: TStmt, arena: BodyTree, census: &SemaPlaceBorrowCensus) Never! {
     if statement == {
         .TupleDestructure(_, init, _, _, _) | .StructDestructure(_, init, _, _, _) | .ListDestructure(_, init, _, _, _, _) -> sema_place_borrow_note_root(&census, sema_place_borrow_root(init, arena))
         .RefutableBind(pattern, init, fallback, _) -> {
@@ -294,7 +294,7 @@ fn sema_place_borrow_census_stmt(statement: TStmt, arena: BodyTree, census: &Sem
     tree_each_stmt_child(statement, (child: TExpr) -> sema_place_borrow_census_expr(child, arena, &census))
 }
 
-fn sema_place_borrow_census_cond(condition: TIfCond, arena: BodyTree, census: &SemaPlaceBorrowCensus) Never! {
+sema_place_borrow_census_cond: fn(condition: TIfCond, arena: BodyTree, census: &SemaPlaceBorrowCensus) Never! {
     if condition == {
         .Plain(value) -> sema_place_borrow_census_expr(value, arena, &census)
         .And(left, right) -> {
@@ -308,11 +308,11 @@ fn sema_place_borrow_census_cond(condition: TIfCond, arena: BodyTree, census: &S
     }
 }
 
-fn sema_place_borrow_census_pattern(pattern: TPattern, arena: BodyTree, census: &SemaPlaceBorrowCensus) Never! {
+sema_place_borrow_census_pattern: fn(pattern: TPattern, arena: BodyTree, census: &SemaPlaceBorrowCensus) Never! {
     tree_each_pattern_child(pattern, (child: TExpr) -> sema_place_borrow_census_expr(child, arena, &census))
 }
 
-fn sema_place_borrow_census_expr(value: TExpr, arena: BodyTree, census: &SemaPlaceBorrowCensus) Never! {
+sema_place_borrow_census_expr: fn(value: TExpr, arena: BodyTree, census: &SemaPlaceBorrowCensus) Never! {
     if value.kind == {
         .Flat(index) -> return sema_place_borrow_census_row(arena, index, &census)
         .Move(moved) -> {
@@ -346,7 +346,7 @@ fn sema_place_borrow_census_expr(value: TExpr, arena: BodyTree, census: &SemaPla
 // A Binary node's operands, in tree_each_expr_child's order. A left-leaning
 // chain (`a + b + c …`) walks its left spine in this frame, so its length
 // costs no stack: a Binary node is no census site of its own.
-fn sema_place_borrow_census_binary(lhs: TExpr, rhs: TExpr, arena: BodyTree, census: &SemaPlaceBorrowCensus) Never! {
+sema_place_borrow_census_binary: fn(lhs: TExpr, rhs: TExpr, arena: BodyTree, census: &SemaPlaceBorrowCensus) Never! {
     rights := [TExpr]{rhs}
     operand := lhs
     loop {
@@ -366,7 +366,7 @@ fn sema_place_borrow_census_binary(lhs: TExpr, rhs: TExpr, arena: BodyTree, cens
 }
 
 // A closure captures what it names.
-fn sema_place_borrow_census_lambda(lambda: TLambda, arena: BodyTree, census: &SemaPlaceBorrowCensus) Never! {
+sema_place_borrow_census_lambda: fn(lambda: TLambda, arena: BodyTree, census: &SemaPlaceBorrowCensus) Never! {
     loop capture in lambda.captures {
         _ := &census.names.add(capture.source, true)
         _ := &census.names.add(capture.local.name, true)
@@ -374,7 +374,7 @@ fn sema_place_borrow_census_lambda(lambda: TLambda, arena: BodyTree, census: &Se
     tree_each_lambda_child(lambda, (child: TExpr) -> sema_place_borrow_census_names(child, arena, &census))
 }
 
-fn sema_place_borrow_census_names(value: TExpr, arena: BodyTree, census: &SemaPlaceBorrowCensus) Never! {
+sema_place_borrow_census_names: fn(value: TExpr, arena: BodyTree, census: &SemaPlaceBorrowCensus) Never! {
     if value.kind == {
         .Flat(index) -> return sema_place_borrow_census_row_names(arena, index, &census)
         .Local(local) -> {
@@ -393,15 +393,15 @@ fn sema_place_borrow_census_names(value: TExpr, arena: BodyTree, census: &SemaPl
 // sema_place_borrow_census_stmt, sema_place_borrow_census_cond,
 // sema_place_borrow_census_pattern, sema_place_borrow_census_expr and
 // sema_place_borrow_census_names over rows of `tree`.
-fn sema_place_borrow_census_row_list(tree: BodyTree, body: [Int], census: &SemaPlaceBorrowCensus) Never! {
+sema_place_borrow_census_row_list: fn(tree: BodyTree, body: [Int], census: &SemaPlaceBorrowCensus) Never! {
     loop item in body -> sema_place_borrow_census_row_stmt(tree, item, &census)
 }
 
-fn sema_place_borrow_census_row_optional_list(tree: BodyTree, body: [Int]?, census: &SemaPlaceBorrowCensus) Never! {
+sema_place_borrow_census_row_optional_list: fn(tree: BodyTree, body: [Int]?, census: &SemaPlaceBorrowCensus) Never! {
     if body == .Val(statements) -> sema_place_borrow_census_row_list(tree, statements, &census)
 }
 
-fn sema_place_borrow_census_row_stmt(tree: BodyTree, item: Int, census: &SemaPlaceBorrowCensus) Never! {
+sema_place_borrow_census_row_stmt: fn(tree: BodyTree, item: Int, census: &SemaPlaceBorrowCensus) Never! {
     if tree.stmts[item - tree.stmt_base] == {
         .TupleDestructure(_, init, _, _, _) | .StructDestructure(_, init, _, _, _) | .ListDestructure(_, init, _, _, _, _) -> sema_place_borrow_note_root(&census, sema_place_borrow_row_root(tree, init))
         .RefutableBind(pattern, init, fallback, _) -> {
@@ -489,7 +489,7 @@ fn sema_place_borrow_census_row_stmt(tree: BodyTree, item: Int, census: &SemaPla
     body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], (child: Int) -> sema_place_borrow_census_row(tree, child, &census))
 }
 
-fn sema_place_borrow_census_row_cond(tree: BodyTree, condition: BodyIfCond, census: &SemaPlaceBorrowCensus) Never! {
+sema_place_borrow_census_row_cond: fn(tree: BodyTree, condition: BodyIfCond, census: &SemaPlaceBorrowCensus) Never! {
     if condition == {
         .Plain(value) -> sema_place_borrow_census_row(tree, value, &census)
         .And(left, right) -> {
@@ -503,11 +503,11 @@ fn sema_place_borrow_census_row_cond(tree: BodyTree, condition: BodyIfCond, cens
     }
 }
 
-fn sema_place_borrow_census_row_pattern(tree: BodyTree, pattern: BodyPattern, census: &SemaPlaceBorrowCensus) Never! {
+sema_place_borrow_census_row_pattern: fn(tree: BodyTree, pattern: BodyPattern, census: &SemaPlaceBorrowCensus) Never! {
     body_each_pattern_child(tree, pattern, (child: Int) -> sema_place_borrow_census_row(tree, child, &census))
 }
 
-fn sema_place_borrow_census_row(tree: BodyTree, index: Int, census: &SemaPlaceBorrowCensus) Never! {
+sema_place_borrow_census_row: fn(tree: BodyTree, index: Int, census: &SemaPlaceBorrowCensus) Never! {
     if tree.nodes[index - tree.node_base].kind == {
         .Move(moved) -> {
             sema_place_borrow_note_root(&census, sema_place_borrow_row_root(tree, moved))
@@ -537,7 +537,7 @@ fn sema_place_borrow_census_row(tree: BodyTree, index: Int, census: &SemaPlaceBo
 }
 
 // A closure captures what it names.
-fn sema_place_borrow_census_row_lambda(tree: BodyTree, lambda: BodyLambda, census: &SemaPlaceBorrowCensus) Never! {
+sema_place_borrow_census_row_lambda: fn(tree: BodyTree, lambda: BodyLambda, census: &SemaPlaceBorrowCensus) Never! {
     loop capture in lambda.captures {
         _ := &census.names.add(capture.source, true)
         _ := &census.names.add(capture.local.name, true)
@@ -545,7 +545,7 @@ fn sema_place_borrow_census_row_lambda(tree: BodyTree, lambda: BodyLambda, censu
     body_each_lambda_child(tree, lambda, (child: Int) -> sema_place_borrow_census_row_names(tree, child, &census))
 }
 
-fn sema_place_borrow_census_row_names(tree: BodyTree, index: Int, census: &SemaPlaceBorrowCensus) Never! {
+sema_place_borrow_census_row_names: fn(tree: BodyTree, index: Int, census: &SemaPlaceBorrowCensus) Never! {
     if tree.nodes[index - tree.node_base].kind == {
         .Local(local) -> {
             _ := &census.names.add(local.name, true)
@@ -560,7 +560,7 @@ fn sema_place_borrow_census_row_names(tree: BodyTree, index: Int, census: &SemaP
 }
 
 // The statement bodies of `statement` that hold Lets of their own block.
-fn sema_place_borrow_nested(statement: &TStmt, census: SemaPlaceBorrowCensus, arena: BodyTree, table: &SemaPlaceBorrowRoots) Never! {
+sema_place_borrow_nested: fn(statement: &TStmt, census: SemaPlaceBorrowCensus, arena: BodyTree, table: &SemaPlaceBorrowRoots) Never! {
     if &statement == {
         // One arm per statement kind: an alternative pattern binds read-only.
         .ContractScope(_, body, _, _, _) -> sema_place_borrow_statements(&body, census, arena, &table)

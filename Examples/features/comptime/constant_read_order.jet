@@ -2,16 +2,16 @@
 // compile-time constant declared later in the file. The compiler computes
 // ROWS first, then checks `total` and `first_name` against its value; the
 // order the constants are written in does not matter.
-struct Row {
+Row: struct {
     name: String
     size: Int
 }
 
-fn small(n: Int) -> Bool {
+small: fn(n: Int) -> Bool {
     n < 10
 }
 
-fn total() -> Int Never! {
+total: fn() -> Int Never! {
     sum := 0
     loop row in ROWS {
         if row.size > 0 && small(row.size) -> sum += row.size
@@ -19,16 +19,16 @@ fn total() -> Int Never! {
     sum
 }
 
-fn first_name() -> String Never! {
-    picked :: ROWS.get(0)
+first_name: fn() -> String Never! {
+    picked: ROWS.get(0)
     if picked == .Val(row) -> return row.name
     ""
 }
 
-TOTAL :: comptime { total() }
-FIRST :: comptime { first_name() }
+TOTAL: comptime { total() }
+FIRST: comptime { first_name() }
 
-fn build_rows() -> [Row] Never! {
+build_rows: fn() -> [Row] Never! {
     rows := [Row]{}
     loop index in 0..<4 {
         if small(index) -> &rows.push(Row{name: "r{index}", size: index + 1})
@@ -36,9 +36,9 @@ fn build_rows() -> [Row] Never! {
     rows
 }
 
-ROWS :: comptime { build_rows() }
+ROWS: comptime { build_rows() }
 
-fn run() {
+run: fn() {
     print("total at build {TOTAL}, at run {total()}")
     print("first at build {FIRST}, rows {ROWS.len()}")
 }

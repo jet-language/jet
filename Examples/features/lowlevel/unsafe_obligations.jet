@@ -4,14 +4,14 @@
 // alias freedom explicit before each access.
 use core.mem
 
-fn run() {
-    cell :: 1337
+run: fn() {
+    cell: 1337
     #Unsafe("cell stays live and the pointer remains local", obligations: .Track) {
-        pointer :: *cell
+        pointer: *cell
         assert no_alias
         print(pointer.*)
         assert valid_ptr, aligned
-        observed :: mem.volatile_read(pointer)
+        observed: mem.volatile_read(pointer)
         assert valid_ptr, aligned
         print(observed)
     }

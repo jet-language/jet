@@ -10,7 +10,7 @@ const out = process.argv[2] && resolve(process.argv[2]);
 if (!out) throw new Error("usage: run-return-diagnostic-fixtures.mjs OUTDIR");
 const webHost = process.argv[3] === "--web-host";
 if (process.argv[3] && !webHost) throw new Error("unknown diagnostic fixture mode");
-// The item declared by `head` (`fn name(`, public or not) through its closing brace.
+// The item declared by `head` (`name: fn(`, public or not) through its closing brace.
 function item(path, head) {
   const lines = readFileSync(join(repo, path), "utf8").split("\n");
   const start = lines.findIndex((line) => line.startsWith(head) || line.startsWith(`pub ${head}`));
@@ -20,19 +20,19 @@ function item(path, head) {
 }
 const diagnosticPath = "Compiler/JetSema/Source/Sema/Diagnostics.jet";
 const builders = (webHost ? [
-  "fn sema_error_optional(", "fn sema_error(",
+  "sema_error_optional: fn(", "sema_error: fn(",
 ] : [
-  "fn sema_error_optional(", "fn sema_error(",
-  "fn sema_type_show(", "fn sema_type_int_range_text(",
-  "fn sema_type_nominal_leaf(", "fn sema_type_fix_hint(",
-  "fn sema_return_value_fix(", "fn sema_return_value_mismatch(",
+  "sema_error_optional: fn(", "sema_error: fn(",
+  "sema_type_show: fn(", "sema_type_int_range_text: fn(",
+  "sema_type_nominal_leaf: fn(", "sema_type_fix_hint: fn(",
+  "sema_return_value_fix: fn(", "sema_return_value_mismatch: fn(",
 ]).map((head) => item(diagnosticPath, head));
 if (webHost) {
   const checkPath = "Compiler/JetSema/Source/Sema/CheckProgram.jet";
-  builders.push(item(checkPath, "fn sema_web_host_unsupported_core_apis("));
-  builders.push(item(checkPath, "fn sema_web_host_check_core_usage("));
+  builders.push(item(checkPath, "sema_web_host_unsupported_core_apis: fn("));
+  builders.push(item(checkPath, "sema_web_host_check_core_usage: fn("));
 } else {
-  builders.push(item("Compiler/JetSema/Source/Sema/Expressions.jet", "fn sema_expr_unwrap_tag("));
+  builders.push(item("Compiler/JetSema/Source/Sema/Expressions.jet", "sema_expr_unwrap_tag: fn("));
 }
 const foundation = compilerFixtureUnit(repo, ["Compiler/JetFoundation"]);
 const fixtureName = webHost ? "WebHostDiagnosticFixtures" : "ReturnDiagnosticFixtures";

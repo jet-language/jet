@@ -1,9 +1,9 @@
-use service :: core.service
-fn policy_reason(error: ServiceError) -> String Never! {
+use service: core.service
+policy_reason: fn(error: ServiceError) -> String Never! {
     if error == .Policy(reason) -> return reason
     panic("expected policy refusal")
 }
-fn run() {
+run: fn() {
     service.state_store("./store-file") ?? panic("existing file")
     print("file")
     service.state_store("./absent/store") ?? panic("absent file")
@@ -14,7 +14,7 @@ fn run() {
     }
     if service.state_store("./store-file/child") == {
         .Err(error) -> {
-            reason :: policy_reason(error)
+            reason: policy_reason(error)
             print(reason.starts_with("cannot inspect service state store: "))
             print(reason.ends_with("; repair or replace the state store before retrying"))
         }

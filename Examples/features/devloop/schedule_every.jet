@@ -10,20 +10,20 @@
 // only changes when a runtime consumer invokes it automatically. The service
 // runtime and jetos consumers use the same checked schedule metadata.
 #[Job(.Dev), Every(5min)]
-fn prune_sessions() { print("pruning sessions") }
+prune_sessions: fn() { print("pruning sessions") }
 
 #[Job(.Dev), Every(2h)]
-fn refresh_indexes() { print("refreshing indexes") }
+refresh_indexes: fn() { print("refreshing indexes") }
 
 #[Job(.Dev), Every(1d)]
-fn compact_archive() { print("compacting archive") }
+compact_archive: fn() { print("compacting archive") }
 
 #[Job(.Dev), Every("03:00")]
-fn nightly_backup() { print("running nightly backup") }
+nightly_backup: fn() { print("running nightly backup") }
 
-#Job(.Ship) fn manual_only() { print("ran manually") }
+#Job(.Ship) manual_only: fn() { print("ran manually") }
 
-fn run() {
+run: fn() {
     prune_sessions()
     refresh_indexes()
     compact_archive()

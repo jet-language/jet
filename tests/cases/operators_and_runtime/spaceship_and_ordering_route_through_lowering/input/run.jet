@@ -1,27 +1,27 @@
 
-struct Score { points: Int }
+Score: struct { points: Int }
 
 impl Score.Comparable {
-    fn compare(self, rhs: Score) -> Ordering {
+    compare: fn(self, rhs: Score) -> Ordering {
         if self.points < rhs.points { return Ordering.Less }
         if self.points > rhs.points { return Ordering.Greater }
         return Ordering.Equal
     }
 }
 
-fn show_text_order(left: String, right: String) {
+show_text_order: fn(left: String, right: String) {
     print("{(left < right)} {(left <= right)} {(left > right)} {(left >= right)}")
 }
 
-fn run() {
-    low :: Score{ points: 10 }
-    high :: Score{ points: 20 }
-    int_cmp :: 1 <=> 2
-    text_cmp :: "alpha" <=> "beta"
-    chained :: (low <=> high).then(high <=> high)
-    then_greater :: (low <=> low).then(high <=> low)
-    reverse_greater :: (high <=> low).reverse()
-    reverse_equal :: (low <=> low).reverse()
+run: fn() {
+    low: Score{ points: 10 }
+    high: Score{ points: 20 }
+    int_cmp: 1 <=> 2
+    text_cmp: "alpha" <=> "beta"
+    chained: (low <=> high).then(high <=> high)
+    then_greater: (low <=> low).then(high <=> low)
+    reverse_greater: (high <=> low).reverse()
+    reverse_equal: (low <=> low).reverse()
     numbers := [3, 1, 2]
     &numbers.sort_by((left: Int, right: Int) -> left <=> right)
     scores := [Score{ points: 30 }, Score{ points: 10 }, Score{ points: 20 }]

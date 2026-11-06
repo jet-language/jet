@@ -2,19 +2,19 @@
 // registries (updated 2025-10-09); `is_public_destination` also refuses
 // carrier-grade NAT, all of 192.0.0.0/24, benchmarking, documentation,
 // NAT64, 6to4 and Teredo, and judges an IPv4-mapped address by IPv4 rules.
-use ip :: core.net.ip
+use ip: core.net.ip
 
-fn v4(text: String) -> String {
-    addr :: ip.parse_ipv4(text) ?? panic("IPv4 {text}")
+v4: fn(text: String) -> String {
+    addr: ip.parse_ipv4(text) ?? panic("IPv4 {text}")
     "{text} global:{ip.is_global(addr)} public:{ip.is_public_destination(addr)}"
 }
 
-fn v6(text: String) -> String {
-    addr :: ip.parse_ipv6(text) ?? panic("IPv6 {text}")
+v6: fn(text: String) -> String {
+    addr: ip.parse_ipv6(text) ?? panic("IPv6 {text}")
     "{text} global:{ip.ipv6_is_global(addr)} public:{ip.ipv6_is_public_destination(addr)}"
 }
 
-fn run() {
+run: fn() {
     loop text in ([String]{"8.8.8.8", "100.64.0.1", "192.0.0.9", "192.88.99.2", "198.18.0.1", "127.0.0.1", "240.0.0.1"}) {
         print(v4(text))
     }

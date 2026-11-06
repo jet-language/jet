@@ -1,39 +1,39 @@
 
 use {
-    event :: core.event
-    tasks :: core.tasks
+    event: core.event
+    tasks: core.tasks
 }
 
-enum LocalState { Closed }
+LocalState: enum { Closed }
 
-fn run() {
-    local :: LocalState.Closed
+run: fn() {
+    local: LocalState.Closed
     print("local={local == .Closed}")
-    bad :: event.async_result<Int, String>(AsyncPolicy{ capacity: 0, overflow: .Block }, .Collect)
+    bad: event.async_result<Int, String>(AsyncPolicy{ capacity: 0, overflow: .Block }, .Collect)
     if bad == {
         .Ok(_) -> print("bad accepted")
         .Err(_) -> print("invalid capacity")
     }
-    scope :: event.scope()
-    ev :: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
-    { sender: started_tx, receiver: started_rx } :: channel<Int>()
-    { sender: release_tx, receiver: release_rx } :: channel<Int>()
+    scope: event.scope()
+    ev: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
+    { sender: started_tx, receiver: started_rx }: channel<Int>()
+    { sender: release_tx, receiver: release_rx }: channel<Int>()
     ev.on(scope, (n: Int) -> {
         started_tx.send(n.copy())
-        released :: release_rx.receive() ?? panic("release")
+        released: release_rx.receive() ?? panic("release")
     })
-    first :: ev.emit_async(1)
-    started_first :: started_rx.receive() ?? panic("started")
-    second :: ev.emit_async(2)
-    third :: ev.emit_async(3)
+    first: ev.emit_async(1)
+    started_first: started_rx.receive() ?? panic("started")
+    second: ev.emit_async(2)
+    third: ev.emit_async(3)
     print("queued={ev.queued_count()} running={ev.running_count()} blocked={ev.blocked_count()}")
     ev.close()
     release_tx.send(1)
-    started_second :: started_rx.receive() ?? panic("second started")
+    started_second: started_rx.receive() ?? panic("second started")
     release_tx.send(2)
-    first_report :: first.join() ?? panic("first join")
-    second_report :: second.join() ?? panic("second join")
-    third_report :: third.join() ?? panic("third join")
+    first_report: first.join() ?? panic("first join")
+    second_report: second.join() ?? panic("second join")
+    third_report: third.join() ?? panic("third join")
     print("delivered={first_report.delivered_handlers() + second_report.delivered_handlers()}")
     print("delivered state={first_report.state() == .Delivered}")
     print("closed={!third_report.accepted() && third_report.state() == .Closed}")

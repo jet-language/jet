@@ -1,13 +1,13 @@
 
-use process :: core.process
+use process: core.process
 
-fn run() {
-    policy :: process.workspace()
-    spec :: process.cmd(["cmd.exe", "/C", "type \"{tmp}/jet-agent-executor-windows-host-secret-{pid}.txt\""]).cwd("/tmp").under(policy)
+run: fn() {
+    policy: process.workspace()
+    spec: process.cmd(["cmd.exe", "/C", "type \"{tmp}/jet-agent-executor-windows-host-secret-{pid}.txt\""]).cwd("/tmp").under(policy)
     if spec.plan() == {
         .Ok(plan) -> {
             print(plan.backend)
-            result :: spec.run_checked()
+            result: spec.run_checked()
             if result == {
                 .Ok(_) -> print("escaped")
                 .Err(_) -> print("blocked")

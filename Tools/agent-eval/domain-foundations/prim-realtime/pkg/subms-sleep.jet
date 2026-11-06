@@ -1,23 +1,23 @@
-package {
+package: {
     name: "subms-sleep"
     version: "0.1.0"
     authority: { allow: [IO, Time, Mem.Alloc] }
 }
 
-package {
+package: {
     name: "prim-realtime-subms-sleep"
     version: "0.1.0"
     authority: { allow: [IO, Time, Mem.Alloc] }
 }
 
-use time :: core.time
+use time: core.time
 
-fn run() {
-    started :: time.instant()
+run: fn() {
+    started: time.instant()
     loop i in 0..<100 {
         time.sleep(999_999ns)
     }
-    elapsed_us :: started.elapsed().in(.Microseconds)
+    elapsed_us: started.elapsed().in(.Microseconds)
     print("requested_total_us=99999")
     print("elapsed_total_us={elapsed_us}")
 }

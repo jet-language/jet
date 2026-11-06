@@ -24,7 +24,7 @@ use jet_foundation.[
 
 // The package's rows (sema_public_api_items over each of its modules) in
 // canonical order, each once.
-fn sema_public_api_canonical(rows: [PublicAPIItem]) -> [PublicAPIItem] Never! {
+sema_public_api_canonical: fn(rows: [PublicAPIItem]) -> [PublicAPIItem] Never! {
     ordered := rows
     &ordered.sort_by(sema_public_api_order)
     unique := [PublicAPIItem]{}
@@ -35,13 +35,13 @@ fn sema_public_api_canonical(rows: [PublicAPIItem]) -> [PublicAPIItem] Never! {
     unique
 }
 
-fn sema_public_api_order(left: PublicAPIItem, right: PublicAPIItem) -> Ordering Never! {
+sema_public_api_order: fn(left: PublicAPIItem, right: PublicAPIItem) -> Ordering Never! {
     (left.kind <=> right.kind).then(left.name <=> right.name).then(left.signature <=> right.signature)
 }
 
 // One module's rows, its names under `prefix` (`""` for the package's entry
 // module, `"geometry."` for its `geometry` module).
-fn sema_public_api_items(items: [Item], functions: [FnBody], prefix: String, rows: &[PublicAPIItem]) Never! {
+sema_public_api_items: fn(items: [Item], functions: [FnBody], prefix: String, rows: &[PublicAPIItem]) Never! {
     loop item in items {
         if item == {
             .Func(function) -> {
@@ -60,7 +60,7 @@ fn sema_public_api_items(items: [Item], functions: [FnBody], prefix: String, row
             }
             .Impl(definition) -> {
                 if !sema_public_api_type_is_pub(items, definition.type_name) -> next
-                name :: "{prefix}{definition.type_name}"
+                name: "{prefix}{definition.type_name}"
                 if definition.trait_name == .Val(trait_name) {
                     &rows.push(PublicAPIItem{kind: "impl", name: "{name}.{trait_name}", signature: "impl {name}.{trait_name}"})
                 } else {
@@ -69,14 +69,14 @@ fn sema_public_api_items(items: [Item], functions: [FnBody], prefix: String, row
             }
             .Distinct(definition) -> {
                 if definition.is_pub {
-                    name :: "{prefix}{definition.name}"
-                    range :: if definition.range == .Val(bounds) -> " in {bounds.lo}..={bounds.hi}" else -> ""
+                    name: "{prefix}{definition.name}"
+                    range: if definition.range == .Val(bounds) -> " in {bounds.lo}..={bounds.hi}" else -> ""
                     &rows.push(PublicAPIItem{kind: "distinct", name: name, signature: "distinct {name}: {type_name(definition.base)}{range}"})
                 }
             }
             .TypeAlias(definition) -> {
                 if definition.is_pub {
-                    name :: "{prefix}{definition.name}"
+                    name: "{prefix}{definition.name}"
                     &rows.push(PublicAPIItem{kind: "type", name: name, signature: "type {name}{sema_public_api_type_params(definition.type_params)} = {type_name(definition.target)}"})
                 }
             }
@@ -85,8 +85,8 @@ fn sema_public_api_items(items: [Item], functions: [FnBody], prefix: String, row
             }
             .Const(definition) -> {
                 if definition.is_pub && sema_public_api_named(definition.name) {
-                    name :: "{prefix}{definition.name}"
-                    ty :: if definition.ty == .Val(value) -> ": {type_name(value)}" else -> ""
+                    name: "{prefix}{definition.name}"
+                    ty: if definition.ty == .Val(value) -> ": {type_name(value)}" else -> ""
                     &rows.push(PublicAPIItem{kind: "const", name: name, signature: "const {name}{ty}"})
                 }
             }
@@ -99,12 +99,12 @@ fn sema_public_api_items(items: [Item], functions: [FnBody], prefix: String, row
 }
 
 // Jet-reserved spellings are not part of any package's API.
-fn sema_public_api_named(name: String) -> Bool Never! {
+sema_public_api_named: fn(name: String) -> Bool Never! {
     !name.starts_with("__")
 }
 
 // An `impl` block widens the API only for a type dependents can name.
-fn sema_public_api_type_is_pub(items: [Item], name: String) -> Bool Never! {
+sema_public_api_type_is_pub: fn(items: [Item], name: String) -> Bool Never! {
     loop item in items {
         if item == {
             .Struct(definition) -> { if definition.name == name -> return definition.is_pub }
@@ -116,24 +116,24 @@ fn sema_public_api_type_is_pub(items: [Item], name: String) -> Bool Never! {
     false
 }
 
-fn sema_public_api_type_params(params: [TypeParam]) -> String Never! {
+sema_public_api_type_params: fn(params: [TypeParam]) -> String Never! {
     if params.len() == 0 -> return ""
-    texts :: loop param in params -> if param.bounds.len() == 0 -> param.name.copy() else -> "{param.name}: {param.bounds.join(" + ")}"
+    texts: loop param in params -> if param.bounds.len() == 0 -> param.name.copy() else -> "{param.name}: {param.bounds.join(" + ")}"
     "<{texts.join(", ")}>"
 }
 
-fn sema_public_api_params(params: [Param]) -> String Never! {
+sema_public_api_params: fn(params: [Param]) -> String Never! {
     texts := [String]{}
     loop param in params {
-        label :: if param.public_label == .Val(public_label) && public_label.name != param.name -> "{public_label.name} " else -> ""
-        variadic :: if param.variadic -> "..." else -> ""
-        default :: if param.default != None -> " = _" else -> ""
+        label: if param.public_label == .Val(public_label) && public_label.name != param.name -> "{public_label.name} " else -> ""
+        variadic: if param.variadic -> "..." else -> ""
+        default: if param.default != None -> " = _" else -> ""
         &texts.push("{label}{param.name}: {variadic}{access_sigil(param.convention)}{type_name(param.ty)}{default}")
     }
     texts.join(", ")
 }
 
-fn sema_public_api_effects(effects: [String]) -> String Never! {
+sema_public_api_effects: fn(effects: [String]) -> String Never! {
     sorted := loop name in effects -> name.copy()
     &sorted.sort()
     " -[{sorted.join(", ")}]>"
@@ -141,7 +141,7 @@ fn sema_public_api_effects(effects: [String]) -> String Never! {
 
 // The solved effect row of the checked body this declaration produced; a
 // body with no known row is maximal.
-fn sema_public_api_solved_effects(function: Func, functions: [FnBody]) -> String Never! {
+sema_public_api_solved_effects: fn(function: Func, functions: [FnBody]) -> String Never! {
     loop body in functions {
         if body.source_span == function.span {
             if body.effects.maximal -> return " -[*]>"
@@ -152,12 +152,12 @@ fn sema_public_api_solved_effects(function: Func, functions: [FnBody]) -> String
     " -[*]>"
 }
 
-fn sema_public_api_fn(name: String, function: Func, functions: [FnBody]) -> PublicAPIItem Never! {
-    ret :: if function.return_type == .Val(ty) -> " {type_name(ty)}" else -> ""
+sema_public_api_fn: fn(name: String, function: Func, functions: [FnBody]) -> PublicAPIItem Never! {
+    ret: if function.return_type == .Val(ty) -> " {type_name(ty)}" else -> ""
     PublicAPIItem{kind: "fn", name: name, signature: "fn {name}{sema_public_api_type_params(function.type_params)}({sema_public_api_params(function.params)}){ret}{sema_public_api_solved_effects(function, functions)}"}
 }
 
-fn sema_public_api_methods(owner: String, methods: [Func], functions: [FnBody], rows: &[PublicAPIItem]) Never! {
+sema_public_api_methods: fn(owner: String, methods: [Func], functions: [FnBody], rows: &[PublicAPIItem]) Never! {
     loop method in methods {
         if method.is_pub && sema_public_api_named(method.name) && !method.compiler_generated {
             &rows.push(sema_public_api_fn("{owner}.{method.name}", method, functions))
@@ -167,39 +167,39 @@ fn sema_public_api_methods(owner: String, methods: [Func], functions: [FnBody], 
 
 // Every trait a type implements, written or derived, is a promise its
 // dependents can lean on.
-fn sema_public_api_impls(owner: String, blocks: [TraitImplBlock], rows: &[PublicAPIItem]) Never! {
+sema_public_api_impls: fn(owner: String, blocks: [TraitImplBlock], rows: &[PublicAPIItem]) Never! {
     loop block in blocks -> &rows.push(PublicAPIItem{kind: "impl", name: "{owner}.{block.trait_name}", signature: "impl {owner}.{block.trait_name}"})
 }
 
 // A struct is its row plus one `field` row per public field. The struct row
 // ends in `{ .. }` when it has private fields: dependents cannot write its
 // literal, so a new field breaks no one. A defaulted field ends in `= _`.
-fn sema_public_api_struct(definition: StructDef, functions: [FnBody], prefix: String, rows: &[PublicAPIItem]) Never! {
-    name :: "{prefix}{definition.name}"
+sema_public_api_struct: fn(definition: StructDef, functions: [FnBody], prefix: String, rows: &[PublicAPIItem]) Never! {
+    name: "{prefix}{definition.name}"
     hidden := false
     loop field in definition.fields {
         if !field.is_pub {
             hidden = true
             next
         }
-        default :: if field.default != None -> " = _" else -> ""
+        default: if field.default != None -> " = _" else -> ""
         &rows.push(PublicAPIItem{kind: "field", name: "{name}.{field.name}", signature: "field {name}.{field.name}: {type_name(field.ty)}{default}"})
     }
-    sealed :: if hidden -> " {{ .. }}" else -> ""
+    sealed: if hidden -> " {{ .. }}" else -> ""
     &rows.push(PublicAPIItem{kind: "struct", name: name, signature: "struct {name}{sema_public_api_type_params(definition.type_params)}{sealed}"})
     sema_public_api_methods(name, definition.methods, functions, &rows)
     sema_public_api_impls(name, definition.trait_impls, &rows)
 }
 
 // An enum is its row plus one `variant` row per variant.
-fn sema_public_api_enum(definition: EnumDef, functions: [FnBody], prefix: String, rows: &[PublicAPIItem]) Never! {
-    name :: "{prefix}{definition.name}"
+sema_public_api_enum: fn(definition: EnumDef, functions: [FnBody], prefix: String, rows: &[PublicAPIItem]) Never! {
+    name: "{prefix}{definition.name}"
     loop variant in definition.variants {
-        payload :: if variant.payload == {
+        payload: if variant.payload == {
             .Unit -> ""
             .Single(ty, _) -> "({type_name(ty)})"
             .Named(fields) -> {
-                texts :: loop field in fields -> "{field.name}: {type_name(field.ty)}"
+                texts: loop field in fields -> "{field.name}: {type_name(field.ty)}"
                 "{{{texts.join(", ")}}}"
             }
         }
@@ -210,9 +210,9 @@ fn sema_public_api_enum(definition: EnumDef, functions: [FnBody], prefix: String
     sema_public_api_impls(name, definition.trait_impls, &rows)
 }
 
-fn sema_public_api_trait_method(name: String, method: TraitMethodSig) -> String Never! {
-    ret :: if method.return_type == .Val(ty) -> " {type_name(ty)}" else -> ""
-    effects :: if method.declared_effects == .Val(declared) -> sema_public_api_effects(loop entry in declared -> entry.name.copy()) else -> ""
+sema_public_api_trait_method: fn(name: String, method: TraitMethodSig) -> String Never! {
+    ret: if method.return_type == .Val(ty) -> " {type_name(ty)}" else -> ""
+    effects: if method.declared_effects == .Val(declared) -> sema_public_api_effects(loop entry in declared -> entry.name.copy()) else -> ""
     "{name}.{method.name}({sema_public_api_params(method.params)}){ret}{effects}"
 }
 
@@ -221,11 +221,11 @@ fn sema_public_api_trait_method(name: String, method: TraitMethodSig) -> String 
 // without a default and methods without a body. A defaulted constant or
 // method is a `const` or `fn` row ending in `= _`, so adding one breaks no
 // implementor.
-fn sema_public_api_trait(definition: TraitDef, functions: [FnBody], prefix: String, rows: &[PublicAPIItem]) Never! {
-    name :: "{prefix}{definition.name}"
+sema_public_api_trait: fn(definition: TraitDef, functions: [FnBody], prefix: String, rows: &[PublicAPIItem]) Never! {
+    name: "{prefix}{definition.name}"
     loop assoc in definition.assoc_types -> &rows.push(PublicAPIItem{kind: "require", name: "{name}.{assoc.name}", signature: "require {name}.{assoc.name}: type"})
     loop constant in definition.constants {
-        member :: "{name}.{constant.name}: {type_name(constant.ty)}"
+        member: "{name}.{constant.name}: {type_name(constant.ty)}"
         if constant.default == None {
             &rows.push(PublicAPIItem{kind: "require", name: "{name}.{constant.name}", signature: "require {member}"})
         } else {
@@ -233,25 +233,25 @@ fn sema_public_api_trait(definition: TraitDef, functions: [FnBody], prefix: Stri
         }
     }
     loop method in definition.methods {
-        signature :: sema_public_api_trait_method(name, method)
+        signature: sema_public_api_trait_method(name, method)
         if method.default_body == None {
             &rows.push(PublicAPIItem{kind: "require", name: "{name}.{method.name}", signature: "require {signature}"})
         } else {
             &rows.push(PublicAPIItem{kind: "fn", name: "{name}.{method.name}", signature: "fn {signature} = _"})
         }
     }
-    supertraits :: if definition.supertraits.len() == 0 -> "" else -> ": {definition.supertraits.join(" + ")}"
+    supertraits: if definition.supertraits.len() == 0 -> "" else -> ": {definition.supertraits.join(" + ")}"
     &rows.push(PublicAPIItem{kind: "trait", name: name, signature: "trait {name}{supertraits}"})
 }
 
-fn sema_public_api_unit_family(definition: UnitFamilyDef, prefix: String) -> PublicAPIItem Never! {
-    name :: "{prefix}{definition.family}"
-    dimension :: if definition.resolved_dimension == .Val(value) -> "[{dimension_identity(value)}]" else -> "[]"
-    base :: if definition.base == .Val(value) -> " base {value.name}" else -> ""
-    owner :: if definition.resolved_owner == .Val(value) -> " owner {value}" else -> ""
+sema_public_api_unit_family: fn(definition: UnitFamilyDef, prefix: String) -> PublicAPIItem Never! {
+    name: "{prefix}{definition.family}"
+    dimension: if definition.resolved_dimension == .Val(value) -> "[{dimension_identity(value)}]" else -> "[]"
+    base: if definition.base == .Val(value) -> " base {value.name}" else -> ""
+    owner: if definition.resolved_owner == .Val(value) -> " owner {value}" else -> ""
     members := [String]{}
     loop member in definition.members {
-        offset :: if member.offset.numerator == 0 -> "" else -> " + {member.offset.numerator}/{member.offset.denominator}"
+        offset: if member.offset.numerator == 0 -> "" else -> " + {member.offset.numerator}/{member.offset.denominator}"
         &members.push("{member.name} = {member.scale.numerator}/{member.scale.denominator}{offset}")
     }
     PublicAPIItem{kind: "unit", name: name, signature: "unit {name}{dimension}{base}{owner} {{ {members.join(", ")} }}"}

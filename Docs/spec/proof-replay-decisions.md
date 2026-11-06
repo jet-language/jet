@@ -616,9 +616,9 @@ reaches users. (D-PROVE-SOLVER1=A)
 The refinements fixture is `fixture/refinements.jet`:
 
 ```jet
-Index4 :: distinct Int(0..3)
+Index4: distinct Int(0..3)
 
-fn pick(xs: [String#4], i: Index4) -> String {
+pick: fn(xs: [String#4], i: Index4) -> String {
     xs[i]
 }
 ```
@@ -638,7 +638,7 @@ three hashes.
 # src/bad_fee.jet
 #Pre(cents > 0, "positive input")
 #Post(result > cents, "fee grows total")
-fn add_fee(cents: Int) -> Int {
+add_fee: fn(cents: Int) -> Int {
     return cents
 }
 

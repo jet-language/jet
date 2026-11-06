@@ -27,10 +27,10 @@ async function fixture(run) {
     // The compiler-slice check walks the compiler packages from Compiler/JetCli;
     // an empty entry package keeps the slice (and its drift) empty.
     await put("Compiler/JetCli/package.jet", 'name: "jet-cli"\n');
-    await put(paths[0], "fn foundation_fixture() {}\n");
-    await put(paths[1], "fn store_fixture() {}\n");
-    await put(entry, "fn native_runtime_pack_publisher() NativeRuntimePackError! {}\n");
-    await put(paths[3], "fn cli_fixture() {}\n");
+    await put(paths[0], "foundation_fixture: fn() {}\n");
+    await put(paths[1], "store_fixture: fn() {}\n");
+    await put(entry, "native_runtime_pack_publisher: fn() NativeRuntimePackError! {}\n");
+    await put(paths[3], "cli_fixture: fn() {}\n");
     await put("Jetpack/Store/Tests/Fixture.jet", '#Test("store fixture") {\n    assert(true)\n}\n');
     const invoke = (mode, extra = {}) => spawnSync(process.execPath, [assembler, mode], {
       cwd: root,
@@ -54,8 +54,8 @@ test("publication emits only the canonical Engine closure plus one fixed forward
     const source = await readFile(resolve(root, "scratch/publication/project/src/jetpack.jet"), "utf8");
     assert.equal(source.includes("#Test"), false);
     assert.equal(source.includes("cli_fixture"), false);
-    assert.equal((source.match(/\bfn run\(\)/g) ?? []).length, 1);
-    assert.equal(source.endsWith("// [jetpack-bootstrap generated: internal native runtime-pack publisher]\nfn run() NativeRuntimePackError! {\n    native_runtime_pack_publisher()\n}\n"), true);
+    assert.equal((source.match(/\brun: fn\(\)/g) ?? []).length, 1);
+    assert.equal(source.endsWith("// [jetpack-bootstrap generated: internal native runtime-pack publisher]\nrun: fn() NativeRuntimePackError! {\n    native_runtime_pack_publisher()\n}\n"), true);
   });
 });
 
@@ -71,14 +71,14 @@ test("ordinary modes retain test semantics without emitting the fixed Tools entr
       const source = await readFile(resolve(root, `scratch/${mode}/project/src/jetpack.jet`), "utf8");
       assert.equal(source.includes("native_runtime_pack_publisher"), false);
       assert.equal(source.includes('#Test("store fixture")'), mode !== "run");
-      assert.equal((source.match(/\bfn run\(\)/g) ?? []).length, mode === "run" ? 1 : 0);
+      assert.equal((source.match(/\brun: fn\(\)/g) ?? []).length, mode === "run" ? 1 : 0);
     }
   });
 });
 
 test("publication refuses missing or duplicate registration, generic Tools paths and a wrong section", async () => {
   await fixture(async ({ put, invoke }) => {
-    await put("Tools/packaging/other.jet", "fn other() {}\n");
+    await put("Tools/packaging/other.jet", "other: fn() {}\n");
     for (const sources of [manifest.replace(`${entry}\n`, ""), manifest.replace(`${entry}\n`, `${entry}\n${entry}\n`), manifest.replace(entry, "Tools/packaging/other.jet"), manifest.replace(`${entry}\n# == CLI ==`, `# == CLI ==\n${entry}`)]) {
       await put("Jetpack/Bootstrap/sources.list", sources);
       const result = invoke("publication");

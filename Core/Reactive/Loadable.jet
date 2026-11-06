@@ -1,54 +1,54 @@
 // core.reactive.loadable — bounded async slot states.
 // The provider owns scheduling and transport; this carrier owns the legal
 // state transitions and never manufactures a success value from an error.
-enum Loadable<T, E> {
+Loadable: enum<T, E> {
     Idle
     Loading
     Loaded(T)
     Failed(E)
 }
 
-fn idle<T, E>() -> Loadable<T, E> Never! { Loadable.Idle }
+idle: fn<T, E>() -> Loadable<T, E> Never! { Loadable.Idle }
 
-fn loading<T, E>() -> Loadable<T, E> Never! { Loadable.Loading }
+loading: fn<T, E>() -> Loadable<T, E> Never! { Loadable.Loading }
 
-fn loaded<T, E>(value: T) -> Loadable<T, E> Never! { Loadable.Loaded(value) }
+loaded: fn<T, E>(value: T) -> Loadable<T, E> Never! { Loadable.Loaded(value) }
 
-fn failed<T, E>(reason: E) -> Loadable<T, E> Never! { Loadable.Failed(reason) }
+failed: fn<T, E>(reason: E) -> Loadable<T, E> Never! { Loadable.Failed(reason) }
 
-fn is_idle<T, E>(state: Loadable<T, E>) -> Bool Never! {
+is_idle: fn<T, E>(state: Loadable<T, E>) -> Bool Never! {
     if state == {
         .Idle -> true
         else -> false
     }
 }
-fn is_loading<T, E>(state: Loadable<T, E>) -> Bool Never! {
+is_loading: fn<T, E>(state: Loadable<T, E>) -> Bool Never! {
     if state == {
         .Loading -> true
         else -> false
     }
 }
-fn is_loaded<T, E>(state: Loadable<T, E>) -> Bool Never! {
+is_loaded: fn<T, E>(state: Loadable<T, E>) -> Bool Never! {
     if state == {
         .Loaded(_) -> true
         else -> false
     }
 }
-fn is_failed<T, E>(state: Loadable<T, E>) -> Bool Never! {
+is_failed: fn<T, E>(state: Loadable<T, E>) -> Bool Never! {
     if state == {
         .Failed(_) -> true
         else -> false
     }
 }
 
-fn value<T, E>(state: Loadable<T, E>) -> T? Never! {
+value: fn<T, E>(state: Loadable<T, E>) -> T? Never! {
     if state == {
         .Loaded(value) -> Val(value)
         else -> None
     }
 }
 
-fn reason<T, E>(state: Loadable<T, E>) -> E? Never! {
+reason: fn<T, E>(state: Loadable<T, E>) -> E? Never! {
     if state == {
         .Failed(message) -> Val(message)
         else -> None
@@ -57,7 +57,7 @@ fn reason<T, E>(state: Loadable<T, E>) -> E? Never! {
 
 // Retry starts a fresh attempt only from an idle or failed state.  A loaded
 // result is stable, and retrying an in-flight request must not discard it.
-fn retry<T, E>(state: Loadable<T, E>) -> Loadable<T, E> Never! {
+retry: fn<T, E>(state: Loadable<T, E>) -> Loadable<T, E> Never! {
     if is_failed<T, E>(state) || is_idle<T, E>(state) -> return Loadable.Loading
     state.copy()
 }

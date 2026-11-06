@@ -1,4 +1,4 @@
-package {
+package: {
     name: "tooling_data_stream_bounds"
     version: "0.1.0"
     authority: { allow: [FS, IO, Mem.Alloc] }
@@ -6,29 +6,29 @@ package {
 
 // D-DATAFLOW1=A: bounded typed pull stream + typed DataError.
 use {
-    data :: core.data
-    files :: core.files
-    stream :: core.data.stream
-    testing :: core.testing
+    data: core.data
+    files: core.files
+    stream: core.data.stream
+    testing: core.testing
 }
 #Codable
-struct Event {
+Event: struct {
     service: String
     latency_ms: Float
 }
 
-fn run() {
-    root :: testing.temp_dir("jet-data-stream-bounds")
-    path :: Path.from(root).join("events.csv").to_string()
+run: fn() {
+    root: testing.temp_dir("jet-data-stream-bounds")
+    path: Path.from(root).join("events.csv").to_string()
     files.write(path, "service,latency_ms\napi,10.0\napi,20.0\ndb,5.0\napi,30.0\n") ?? panic("write")
-    input :: files.open(path) ?? panic("open")
+    input: files.open(path) ?? panic("open")
     limits := data.DataLimits.safe()
     limits.max_groups = 1
     limits.max_output_rows = 10
     reader := data.csv_reader<Event>(^input, limits) ?? panic("reader")
-    first :: stream.next(&reader) ?? panic("next")
+    first: stream.next(&reader) ?? panic("next")
     print("first: {first.service} {first.latency_ms}")
-    rows :: stream.collect(&reader) ?? panic("collect")
+    rows: stream.collect(&reader) ?? panic("collect")
     if data.query(rows)
         .group_by(e -> e.service)
         .mean(e -> e.latency_ms)

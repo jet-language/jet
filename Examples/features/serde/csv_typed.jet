@@ -5,18 +5,18 @@
 // (D-VALIDATE-DECODE1=B) renders every element's path and reason in a single
 // interpolation hole.
 use {
-    csv :: core.encoding.csv
-    json :: core.encoding.json
+    csv: core.encoding.csv
+    json: core.encoding.json
 }
 
-struct Sale {
+Sale: struct {
     item: String
     qty: Int
 }
 
-fn run() [FieldError]! {
-    raw :: "item,qty\npen,3\nink,5"
-    sales :: csv.decode<Sale>(raw)
+run: fn() [FieldError]! {
+    raw: "item,qty\npen,3\nink,5"
+    sales: csv.decode<Sale>(raw)
     total := 0
     loop s in sales -> total += s.qty
     print("rows: {sales.len()}")
@@ -25,8 +25,8 @@ fn run() [FieldError]! {
     print(json.to_string(sales) ?? panic("JSON encode"))
     // Every row that fails accumulates instead of stopping the decode, and the
     // whole list prints in one hole — no hand loop over `.path`/`.reason`.
-    bad_raw :: "item,qty\npen,x\nink,y"
-    _attempted :: csv.decode<Sale>(bad_raw) ?? {
+    bad_raw: "item,qty\npen,x\nink,y"
+    _attempted: csv.decode<Sale>(bad_raw) ?? {
         print("{err}")
         []
     }

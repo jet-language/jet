@@ -5,10 +5,10 @@
 use jet_foundation.[DiagnosticExplanation]
 
 // ASCII lowercase (Rust `to_ascii_lowercase`).
-fn jet_cli_ascii_lower(value: String) -> String Never! {
+jet_cli_ascii_lower: fn(value: String) -> String Never! {
     bytes := [U8]{}
     loop byte in value.bytes() {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         if code >= 65 && code <= 90 {
             &bytes.push(U8.from_int(code + 32) ?? byte)
         } else {
@@ -19,15 +19,15 @@ fn jet_cli_ascii_lower(value: String) -> String Never! {
 }
 
 // Levenshtein distance over characters.
-fn jet_cli_edit_distance(left: String, right: String) -> Int Never! {
-    a :: left.chars()
-    b :: right.chars()
+jet_cli_edit_distance: fn(left: String, right: String) -> Int Never! {
+    a: left.chars()
+    b: right.chars()
     previous := [Int]{}
     loop index in 0..<b.len() + 1 -> &previous.push(index)
     loop i in 0..<a.len() {
         current := [Int]{i + 1}
         loop j in 0..<b.len() {
-            cost :: if a[i] == b[j] -> 0 else -> 1
+            cost: if a[i] == b[j] -> 0 else -> 1
             best := previous[j] + cost
             if previous[j + 1] + 1 < best -> best = previous[j + 1] + 1
             if current[j] + 1 < best -> best = current[j] + 1
@@ -41,23 +41,23 @@ fn jet_cli_edit_distance(left: String, right: String) -> Int Never! {
 // An exact spelling wins before ASCII case folding: `Effect` (the type) and
 // `effect` (the keyword), or `#static` and `#Static`, are separate rows, and
 // each row's own display must find that row.
-fn jet_cli_syntax_lookup(query: String) -> Int? Never! {
-    trimmed :: query.trim()
+jet_cli_syntax_lookup: fn(query: String) -> Int? Never! {
+    trimmed: query.trim()
     loop (index, row) in JET_CLI_SYNTAX_ROWS {
         if trimmed == jet_cli_syntax_display(row) -> return Val(index)
     }
-    wanted :: jet_cli_ascii_lower(trimmed)
+    wanted: jet_cli_ascii_lower(trimmed)
     loop (index, row) in JET_CLI_SYNTAX_ROWS {
         if wanted == row.query || wanted == row.display_query -> return Val(index)
     }
     None
 }
 
-fn jet_cli_syntax_display(row: JetCLISyntaxRow) -> String Never! {
+jet_cli_syntax_display: fn(row: JetCLISyntaxRow) -> String Never! {
     if row.kind == JetCLISyntaxKind.Marker -> "#{row.token}" else -> row.token
 }
 
-fn jet_cli_syntax_plain_text(row: JetCLISyntaxRow) -> String Never! {
+jet_cli_syntax_plain_text: fn(row: JetCLISyntaxRow) -> String Never! {
     text := ""
     loop (index, meaning) in row.meanings {
         if index > 0 -> text = "{text}\n"
@@ -75,23 +75,23 @@ fn jet_cli_syntax_plain_text(row: JetCLISyntaxRow) -> String Never! {
 }
 
 // The syntax-registry explanation of a dictionary token, or None.
-fn jet_cli_syntax_explanation(query: String) -> DiagnosticExplanation? Never! {
-    index :: jet_cli_syntax_lookup(query) ?? return None
-    row :: JET_CLI_SYNTAX_ROWS[index]
-    meaning :: if row.meanings.len() > 0 -> row.meanings[0].text else -> ""
+jet_cli_syntax_explanation: fn(query: String) -> DiagnosticExplanation? Never! {
+    index: jet_cli_syntax_lookup(query) ?? return None
+    row: JET_CLI_SYNTAX_ROWS[index]
+    meaning: if row.meanings.len() > 0 -> row.meanings[0].text else -> ""
     Val(DiagnosticExplanation{code: query.trim(), stage: "syntax registry", meaning: meaning, what: Val(jet_cli_syntax_plain_text(row).trim_end()), why: None, fix: None, example: None})
 }
 
-fn jet_cli_syntax_ascii_alphanumeric(code: Int) -> Bool Never! {
+jet_cli_syntax_ascii_alphanumeric: fn(code: Int) -> Bool Never! {
     (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
 }
 
 // looks_like_query: package references are not typo queries.
-fn jet_cli_syntax_query(query: String) -> Bool Never! {
-    text :: query.trim()
+jet_cli_syntax_query: fn(query: String) -> Bool Never! {
+    text: query.trim()
     if text.starts_with("package-overlay:") -> return false
     if text.contains("@") && !text.starts_with("@") -> return false
-    raw :: text.bytes()
+    raw: text.bytes()
     colon := -1
     loop (index, byte) in raw {
         if byte == (U8{58}) {
@@ -102,7 +102,7 @@ fn jet_cli_syntax_query(query: String) -> Bool Never! {
     if colon > 0 && colon + 1 < raw.len() {
         prefix := true
         loop index in 0..<colon {
-            code :: Int.from_u8(raw[index])
+            code: Int.from_u8(raw[index])
             if !jet_cli_syntax_ascii_alphanumeric(code) && code != 95 && code != 45 && code != 46 && code != 47 -> prefix = false
         }
         if prefix {
@@ -111,20 +111,20 @@ fn jet_cli_syntax_query(query: String) -> Bool Never! {
             }
         }
     }
-    if text.starts_with("@") || text.starts_with("#") || text.starts_with("::") || text.starts_with(":=") -> return true
+    if text.starts_with("@") || text.starts_with("#") || text.starts_with(":") -> return true
     loop byte in raw {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         if !jet_cli_syntax_ascii_alphanumeric(code) && code != 95 && code != 46 && code != 45 && code != 47 && code != 64 -> return true
     }
     false
 }
 
-fn jet_cli_syntax_nearest(query: String) -> String Never! {
-    wanted :: jet_cli_ascii_lower(query.trim())
+jet_cli_syntax_nearest: fn(query: String) -> String Never! {
+    wanted: jet_cli_ascii_lower(query.trim())
     best := -1
     closest := -1
     loop (index, row) in JET_CLI_SYNTAX_ROWS {
-        distance :: jet_cli_edit_distance(wanted, row.display_query)
+        distance: jet_cli_edit_distance(wanted, row.display_query)
         if best < 0 || distance < best {
             best = distance
             closest = index

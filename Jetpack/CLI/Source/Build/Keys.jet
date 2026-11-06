@@ -6,22 +6,22 @@
 
 use {
     jetpack_foundation.[BuildEffect]
-    crypto :: core.crypto
+    crypto: core.crypto
 }
 
 // The Rust key embeds `env!("CARGO_PKG_VERSION")` and
 // `CARGO_PKG_NAME@CARGO_PKG_VERSION` of the jet-comptime crate; the same
 // spellings keep one key per action across both implementations.
-BUILD_KEY_COMPILER_VERSION :: "0.0.1"
-BUILD_KEY_COMPILER_IDENTITY :: "jet-comptime@0.0.1"
+BUILD_KEY_COMPILER_VERSION: "0.0.1"
+BUILD_KEY_COMPILER_IDENTITY: "jet-comptime@0.0.1"
 
 // Rust `KeyWriter`: u64 big-endian lengths, raw bytes, one-byte booleans.
-struct BuildKeyWriter {
+BuildKeyWriter: struct {
     bytes: [U8]
 
-    fn new() -> BuildKeyWriter Never! { BuildKeyWriter{bytes: [U8]{}} }
+    new: fn() -> BuildKeyWriter Never! { BuildKeyWriter{bytes: [U8]{}} }
 
-    fn number(&self, value: Int) Never! {
+    number: fn(&self, value: Int) Never! {
         shift := 56
         loop shift >= 0 {
             &self.bytes.push(U8{(value >> shift).bit_and(255)})
@@ -29,23 +29,23 @@ struct BuildKeyWriter {
         }
     }
 
-    fn text(&self, value: String) Never! {
-        raw :: value.bytes()
+    text: fn(&self, value: String) Never! {
+        raw: value.bytes()
         &self.number(raw.len())
         loop byte in raw -> &self.bytes.push(byte)
     }
 
-    fn flag(&self, value: Bool) Never! {
+    flag: fn(&self, value: Bool) Never! {
         &self.bytes.push(if value -> U8{1} else -> U8{0})
     }
 
-    fn texts(&self, values: [String]) Never! {
+    texts: fn(&self, values: [String]) Never! {
         &self.number(values.len())
         loop value in values -> &self.text(value)
     }
 
     // Rust `BTreeMap<String, String>`: entries in key order.
-    fn map(&self, values: [String: String]) Never! {
+    map: fn(&self, values: [String: String]) Never! {
         keys := values.keys().to_list()
         &keys.sort()
         &self.number(keys.len())
@@ -55,17 +55,17 @@ struct BuildKeyWriter {
         }
     }
 
-    fn finish(self) -> String Never! {
+    finish: fn(self) -> String Never! {
         "act-sha256:{crypto.sha256(self.bytes).hex()}"
     }
 }
 
-fn build_canonical_action_key(plan: HermeticBuildPlan, action: HermeticBuildAction, inputs: [ActionInputSnapshot]) -> String Never! {
+build_canonical_action_key: fn(plan: HermeticBuildPlan, action: HermeticBuildAction, inputs: [ActionInputSnapshot]) -> String Never! {
     w := BuildKeyWriter.new()
     &w.text("jet.action-key.v2")
     &w.text("kind")
     &w.text(action.kind.as_str())
-    observes :: action.kind.observes_exact_source()
+    observes: action.kind.observes_exact_source()
     &w.text("observe-exact-source")
     &w.flag(observes)
     &w.text("compiler-owned")
@@ -112,8 +112,8 @@ fn build_canonical_action_key(plan: HermeticBuildPlan, action: HermeticBuildActi
     &w.text("generated-modules")
     &w.text("build-fact-contributions")
     &w.text("target")
-    owner :: plan.action_targets().get(action.id)
-    target :: if owner == {
+    owner: plan.action_targets().get(action.id)
+    target: if owner == {
         .Val(id) -> plan.targets.get(id)
         .None -> None
     }
@@ -135,7 +135,7 @@ fn build_canonical_action_key(plan: HermeticBuildPlan, action: HermeticBuildActi
     if action.signing_identity == {
         .Val(identity) -> {
             &w.flag(true)
-            selected :: plan.signing_identities[identity.id]
+            selected: plan.signing_identities[identity.id]
             &w.text(selected.name)
             &w.text(selected.label)
             build_key_provenance(&w, selected.provenance)
@@ -170,7 +170,7 @@ fn build_canonical_action_key(plan: HermeticBuildPlan, action: HermeticBuildActi
 }
 
 // Rust `allowlisted_env`: the whole env map when the allowlist is empty.
-fn build_allowlisted_env(action: HermeticBuildAction) -> [String: String] Never! {
+build_allowlisted_env: fn(action: HermeticBuildAction) -> [String: String] Never! {
     if action.env_allowlist.len() == 0 -> return action.env
     out := [String: String]{}
     loop key in action.env.keys() {
@@ -181,16 +181,16 @@ fn build_allowlisted_env(action: HermeticBuildAction) -> [String: String] Never!
 
 // Rust `declared_dep_outputs`: outputs and inputs of every dependency target
 // of the owning target, plus their actions' outputs, sorted and unique.
-fn build_declared_dep_outputs(plan: HermeticBuildPlan, action: HermeticBuildAction) -> [String] Never! {
-    owner :: plan.action_targets().get(action.id) ?? return [String]{}
-    target :: plan.targets.get(owner) ?? return [String]{}
+build_declared_dep_outputs: fn(plan: HermeticBuildPlan, action: HermeticBuildAction) -> [String] Never! {
+    owner: plan.action_targets().get(action.id) ?? return [String]{}
+    target: plan.targets.get(owner) ?? return [String]{}
     outs := [String]{}
     loop dep in target.deps {
-        dep_target :: plan.targets.get(dep.id) ?? next
+        dep_target: plan.targets.get(dep.id) ?? next
         loop path in dep_target.outputs -> build_insert_sorted_text(&outs, path)
         loop path in dep_target.inputs -> build_insert_sorted_text(&outs, path)
         loop dep_action in dep_target.actions {
-            found :: plan.actions.get(dep_action.id) ?? next
+            found: plan.actions.get(dep_action.id) ?? next
             loop path in found.outputs -> build_insert_sorted_text(&outs, path)
         }
     }
@@ -199,8 +199,8 @@ fn build_declared_dep_outputs(plan: HermeticBuildPlan, action: HermeticBuildActi
 
 // Rust `canonical_effective_action_key`: the canonical key plus the
 // effective grants, resolved executable digest and actual probe facts.
-fn build_canonical_effective_action_key(plan: HermeticBuildPlan, action: HermeticBuildAction, inputs: [ActionInputSnapshot], grants: [BuildEffect], executable_digest: ContentDigest, probe_facts: [BuildProbeFact]) -> String Never! {
-    base :: build_canonical_action_key(plan, action, inputs)
+build_canonical_effective_action_key: fn(plan: HermeticBuildPlan, action: HermeticBuildAction, inputs: [ActionInputSnapshot], grants: [BuildEffect], executable_digest: ContentDigest, probe_facts: [BuildProbeFact]) -> String Never! {
+    base: build_canonical_action_key(plan, action, inputs)
     w := BuildKeyWriter.new()
     &w.text("jet.effective-action-key.v1")
     &w.text(base)
@@ -225,13 +225,13 @@ fn build_canonical_effective_action_key(plan: HermeticBuildPlan, action: Hermeti
 }
 
 // Rust `BTreeSet<BuildCapability>`: canonical order, each effect once.
-fn build_effect_set(effects: [BuildEffect]) -> [BuildEffect] Never! {
+build_effect_set: fn(effects: [BuildEffect]) -> [BuildEffect] Never! {
     out := [BuildEffect]{}
     loop ability in effects -> build_insert_effect(&out, ability)
     out
 }
 
-fn build_key_toolchain(w: &BuildKeyWriter, toolchain: HermeticBuildToolchain) Never! {
+build_key_toolchain: fn(w: &BuildKeyWriter, toolchain: HermeticBuildToolchain) Never! {
     &w.text(toolchain.name)
     &w.text(if toolchain.role == ToolchainRole.Host -> "host" else -> "target")
     &w.text(toolchain.host_triple)
@@ -280,7 +280,7 @@ fn build_key_toolchain(w: &BuildKeyWriter, toolchain: HermeticBuildToolchain) Ne
     build_key_provenance(&w, toolchain.provenance)
 }
 
-fn build_key_probe(w: &BuildKeyWriter, plan: HermeticBuildPlan, probe: HermeticBuildProbe) Never! {
+build_key_probe: fn(w: &BuildKeyWriter, plan: HermeticBuildPlan, probe: HermeticBuildProbe) Never! {
     &w.text(probe.name)
     if probe.kind == {
         .FindProgram(program) -> {
@@ -314,7 +314,7 @@ fn build_key_probe(w: &BuildKeyWriter, plan: HermeticBuildPlan, probe: HermeticB
     build_key_toolchain(&w, plan.toolchains[probe.toolchain.id])
 }
 
-fn build_key_provenance(w: &BuildKeyWriter, provenance: BuildProvenance) Never! {
+build_key_provenance: fn(w: &BuildKeyWriter, provenance: BuildProvenance) Never! {
     if provenance.source == {
         .InferredHost -> &w.text("inferred-host")
         .JetpackDependency(dep) -> {

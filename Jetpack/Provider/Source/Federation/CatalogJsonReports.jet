@@ -4,8 +4,8 @@
 
 impl ProviderFactReport {
     // A vcpkg.json manifest.
-    fn vcpkg_document(document: String) -> ProviderFactReport Never! {
-        object :: provider_graph_json_root(document) ?? return ProviderFactReport.unreadable(ProviderFamily.Vcpkg, "vcpkg", "vcpkg.json is not valid JSON")
+    vcpkg_document: fn(document: String) -> ProviderFactReport Never! {
+        object: provider_graph_json_root(document) ?? return ProviderFactReport.unreadable(ProviderFamily.Vcpkg, "vcpkg", "vcpkg.json is not valid JSON")
         losses := [String]{}
         conflicts := [String]{}
         facts := MetadataFacts.empty(ProviderFamily.Vcpkg, provider_graph_json_string(object, "name") ?? "")
@@ -17,10 +17,10 @@ impl ProviderFactReport {
             }
             .None -> {}
         }
-        version_fields :: [String]{"version", "version-string", "version-semver", "version-date"}
+        version_fields: [String]{"version", "version-string", "version-semver", "version-date"}
         versions := [(key: String, version: String)]{}
         loop key in version_fields {
-            value :: object.get(key) ?? next
+            value: object.get(key) ?? next
             if pkg_json_text(value) == {
                 .Val(version) -> {
                     if version.trim() == "" {
@@ -59,9 +59,9 @@ impl ProviderFactReport {
             }
             .None -> {}
         }
-        projected_keys :: [String]{"builtin-baseline", "overrides", "features"}
+        projected_keys: [String]{"builtin-baseline", "overrides", "features"}
         loop key in projected_keys {
-            value :: object.get(key) ?? next
+            value: object.get(key) ?? next
             &facts.add_typed_json("vcpkg.{key}", value)
         }
         if object.get("port-version") == {
@@ -99,13 +99,13 @@ impl ProviderFactReport {
                 if pkg_json_array(raw_overrides) == {
                     .Val(overrides) -> {
                         loop index in 0..<overrides.len() {
-                            override_value :: pkg_json_object(overrides[index]) ?? {
+                            override_value: pkg_json_object(overrides[index]) ?? {
                                 &losses.push("vcpkg override {index} must be an object")
                                 next
                             }
                             if provider_graph_json_string(override_value, "name") == None -> &losses.push("vcpkg override {index} has no non-empty `name`")
                             loop key in version_fields {
-                                value :: override_value.get(key) ?? next
+                                value: override_value.get(key) ?? next
                                 if !provider_graph_is_non_blank_text(value) -> &losses.push("vcpkg override {index} field `{key}` must be a non-empty string")
                             }
                             if override_value.get("port-version") == {
@@ -134,11 +134,11 @@ impl ProviderFactReport {
     }
 
     // Homebrew formula JSON (`brew info --json=v2` style).
-    fn homebrew_document(document: String) -> ProviderFactReport Never! {
-        object :: provider_graph_json_root(document) ?? return ProviderFactReport.unreadable(ProviderFamily.Homebrew, "homebrew", "formula metadata is not valid JSON")
+    homebrew_document: fn(document: String) -> ProviderFactReport Never! {
+        object: provider_graph_json_root(document) ?? return ProviderFactReport.unreadable(ProviderFamily.Homebrew, "homebrew", "formula metadata is not valid JSON")
         losses := [String]{}
         conflicts := [String]{}
-        name :: provider_graph_json_first_string(object, [String]{"name", "full_name"}) ?? ""
+        name: provider_graph_json_first_string(object, [String]{"name", "full_name"}) ?? ""
         if name == "" -> &losses.push("Homebrew formula has no name or full_name")
         facts := MetadataFacts.empty(ProviderFamily.Homebrew, name)
         &facts.add_json_projection("provider.homebrew.native", object)
@@ -160,7 +160,7 @@ impl ProviderFactReport {
         }
         if object.get("versions") == {
             .Val(raw_versions) -> {
-                versions_object :: pkg_json_object(raw_versions) ?? {
+                versions_object: pkg_json_object(raw_versions) ?? {
                     &losses.push("Homebrew formula `versions` must be an object")
                     facts.version = ""
                     facts.source_identity = "homebrew:{facts.name}@"
@@ -204,12 +204,12 @@ impl ProviderFactReport {
         facts.dependencies = provider_graph_dependency_field(&facts, object, "dependencies", "runtime", "homebrew", &losses)
         facts.build_dependencies = provider_graph_dependency_field(&facts, object, "build_dependencies", "build", "homebrew", &losses)
         facts.dev_dependencies = provider_graph_dependency_field(&facts, object, "test_dependencies", "test", "homebrew", &losses)
-        extra_fields :: [(field: String, kind: String)]{
+        extra_fields: [(field: String, kind: String)]{
             (field: "recommended_dependencies", kind: "recommended"), (field: "optional_dependencies", kind: "optional"),
             (field: "uses_from_macos", kind: "platform"), (field: "requirements", kind: "requirement"), (field: "conflicts", kind: "conflict")
         }
         loop extra in extra_fields {
-            _ :: provider_graph_dependency_field(&facts, object, extra.field, extra.kind, "homebrew", &losses)
+            _: provider_graph_dependency_field(&facts, object, extra.field, extra.kind, "homebrew", &losses)
         }
         if object.get("platforms") == {
             .Val(raw_platforms) -> {
@@ -232,7 +232,7 @@ impl ProviderFactReport {
 
     // A Jet registry entry: one JSON object, or newline-delimited objects
     // whose later lines must repeat the first identity.
-    fn jet_registry_document(document: String) -> ProviderFactReport Never! {
+    jet_registry_document: fn(document: String) -> ProviderFactReport Never! {
         lines := [String]{}
         loop line in provider_lines(document) {
             if line.trim() != "" -> &lines.push(line)
@@ -268,15 +268,15 @@ impl ProviderFactReport {
             }
             .None -> {}
         }
-        roles :: [(field: String, role: String)]{
+        roles: [(field: String, role: String)]{
             (field: "build_dependencies", role: "build"), (field: "tool_dependencies", role: "tool"),
             (field: "dev_dependencies", role: "dev"), (field: "test_dependencies", role: "test"),
             (field: "optional_dependencies", role: "optional"), (field: "peer_dependencies", role: "peer"),
             (field: "plugin_dependencies", role: "plugin"), (field: "target_dependencies", role: "target")
         }
         loop entry in roles {
-            value :: object.get(entry.field) ?? next
-            dependencies :: pkg_json_object(value) ?? {
+            value: object.get(entry.field) ?? next
+            dependencies: pkg_json_object(value) ?? {
                 &losses.push("registry `{entry.field}` dependencies must be an object")
                 next
             }
@@ -318,7 +318,7 @@ impl ProviderFactReport {
             }
             .None -> {}
         }
-        shapes :: [(field: String, valid: Bool)]{
+        shapes: [(field: String, valid: Bool)]{
             (field: "license", valid: provider_graph_shape_is(object.get("license"), true, false, true)),
             (field: "source", valid: provider_graph_shape_is(object.get("source"), true, false, true)),
             (field: "advisories", valid: provider_graph_shape_is(object.get("advisories"), false, true, true)),
@@ -328,7 +328,7 @@ impl ProviderFactReport {
         loop shape in shapes {
             if !shape.valid -> &losses.push("registry `{shape.field}` has an unsupported shape")
         }
-        projections :: [(field: String, target: String)]{
+        projections: [(field: String, target: String)]{
             (field: "content_hash", target: "provider.registry.content_hash"), (field: "fingerprint", target: "provider.registry.fingerprint"),
             (field: "yanked", target: "provider.registry.yanked"), (field: "tier", target: "provider.registry.tier"),
             (field: "gate_status", target: "provider.registry.gate_status"), (field: "public_key", target: "provider.registry.publisher_key"),
@@ -337,7 +337,7 @@ impl ProviderFactReport {
             (field: "variants", target: "provider.registry.variants"), (field: "hooks", target: "provider.registry.hooks")
         }
         loop projection in projections {
-            value :: object.get(projection.field) ?? next
+            value: object.get(projection.field) ?? next
             &facts.add_typed_json(projection.target, value)
         }
         facts.source_identity = "jet-registry:{facts.name}@{facts.version}"
@@ -350,12 +350,12 @@ impl ProviderFactReport {
             .None -> {}
         }
         loop index in 0..<duplicate_lines.len() {
-            line_number :: index + 2
-            other :: provider_graph_json_root(duplicate_lines[index]) ?? {
+            line_number: index + 2
+            other: provider_graph_json_root(duplicate_lines[index]) ?? {
                 &report.losses.push("registry metadata line {line_number} is not a JSON object")
                 next
             }
-            same_identity :: provider_graph_json_string(other, "name") == provider_graph_json_string(object, "name") && provider_graph_json_string(other, "version") == provider_graph_json_string(object, "version")
+            same_identity: provider_graph_json_string(other, "name") == provider_graph_json_string(object, "name") && provider_graph_json_string(other, "version") == provider_graph_json_string(object, "version")
             if {
                 !same_identity -> &report.losses.push("registry metadata contains multiple package identities; line {line_number} needs its own lock record")
                 !pkg_json_objects_equal(other, object) -> &report.conflicts.push("registry identity on line {line_number} has conflicting native facts")
@@ -366,17 +366,17 @@ impl ProviderFactReport {
     }
 
     // A GitHub release record.
-    fn github_document(document: String) -> ProviderFactReport Never! {
-        object :: provider_graph_json_root(document) ?? return ProviderFactReport.unreadable(ProviderFamily.Github, "github", "release metadata is not valid JSON")
+    github_document: fn(document: String) -> ProviderFactReport Never! {
+        object: provider_graph_json_root(document) ?? return ProviderFactReport.unreadable(ProviderFamily.Github, "github", "release metadata is not valid JSON")
         losses := [String]{}
         conflicts := [String]{}
-        repository :: pkg_json_object(object.get("repository") ?? Dyn.Null) ?? [String: Dyn]{}
-        name :: provider_graph_either(provider_graph_json_first_string(object, [String]{"name", "full_name"}), provider_graph_json_string(repository, "full_name")) ?? ""
+        repository: pkg_json_object(object.get("repository") ?? Dyn.Null) ?? [String: Dyn]{}
+        name: provider_graph_either(provider_graph_json_first_string(object, [String]{"name", "full_name"}), provider_graph_json_string(repository, "full_name")) ?? ""
         if name == "" -> &losses.push("GitHub release has no package or repository name")
         facts := MetadataFacts.empty(ProviderFamily.Github, name)
         &facts.add_json_projection("provider.github.native", object)
-        release_tag :: provider_graph_json_string(object, "tag_name")
-        version :: provider_graph_json_string(object, "version")
+        release_tag: provider_graph_json_string(object, "tag_name")
+        version: provider_graph_json_string(object, "version")
         if release_tag != None && version != None && release_tag != version {
             &conflicts.push("GitHub release declares conflicting tag/version facts: {release_tag} vs {version}")
         }
@@ -420,9 +420,9 @@ impl ProviderFactReport {
         facts.dependencies = provider_graph_dependency_field(&facts, object, "dependencies", "runtime", "github", &losses)
         facts.build_dependencies = provider_graph_dependency_field(&facts, object, "build_dependencies", "build", "github", &losses)
         facts.dev_dependencies = provider_graph_dependency_field(&facts, object, "dev_dependencies", "dev", "github", &losses)
-        platform_keys :: [String]{"platforms", "os", "architectures"}
+        platform_keys: [String]{"platforms", "os", "architectures"}
         loop key in platform_keys {
-            value :: object.get(key) ?? next
+            value: object.get(key) ?? next
             if provider_graph_json_string_list(value) == {
                 .Val(values) -> {
                     loop item in values -> &facts.platforms.push(item)
@@ -434,7 +434,7 @@ impl ProviderFactReport {
             .Val(assets) -> provider_github_asset_facts(&facts, assets, &losses)
             .None -> {}
         }
-        projections :: [(field: String, target: String)]{
+        projections: [(field: String, target: String)]{
             (field: "html_url", target: "provider.github.source.html_url"), (field: "tarball_url", target: "provider.github.source.tarball_url"),
             (field: "zipball_url", target: "provider.github.source.zipball_url"), (field: "repository", target: "provider.github.source.repository"),
             (field: "owner", target: "provider.github.source.owner"), (field: "url", target: "provider.github.source.api_url"),
@@ -448,14 +448,14 @@ impl ProviderFactReport {
             (field: "variants", target: "provider.github.variants")
         }
         loop projection in projections {
-            value :: object.get(projection.field) ?? next
+            value: object.get(projection.field) ?? next
             &facts.add_typed_json(projection.target, value)
         }
-        digest_keys :: [String]{"sha256", "digest", "hash"}
+        digest_keys: [String]{"sha256", "digest", "hash"}
         loop key in digest_keys {
-            value :: object.get(key) ?? next
+            value: object.get(key) ?? next
             &facts.add_typed_json("provider.github.digest", value)
-            digest :: provider_graph_json_string(object, key) ?? {
+            digest: provider_graph_json_string(object, key) ?? {
                 &losses.push("GitHub `{key}` must be a string")
                 next
             }
@@ -472,11 +472,11 @@ impl ProviderFactReport {
 
     // Binary artifact metadata: a content hash and target platform are the
     // identity.
-    fn binary_document(document: String) -> ProviderFactReport Never! {
-        object :: provider_graph_json_root(document) ?? return ProviderFactReport.unreadable(ProviderFamily.Binary, "binary", "binary metadata is not valid JSON")
+    binary_document: fn(document: String) -> ProviderFactReport Never! {
+        object: provider_graph_json_root(document) ?? return ProviderFactReport.unreadable(ProviderFamily.Binary, "binary", "binary metadata is not valid JSON")
         losses := [String]{}
         conflicts := [String]{}
-        name :: provider_graph_json_string(object, "name") ?? ""
+        name: provider_graph_json_string(object, "name") ?? ""
         if name == "" -> &losses.push("binary metadata has no package name")
         facts := MetadataFacts.empty(ProviderFamily.Binary, name)
         &facts.add_json_projection("provider.binary.native", object)
@@ -490,10 +490,10 @@ impl ProviderFactReport {
             .None -> {}
         }
         digests := [String]{}
-        digest_keys :: [String]{"hash", "sha256", "digest"}
+        digest_keys: [String]{"hash", "sha256", "digest"}
         loop key in digest_keys {
-            value :: object.get(key) ?? next
-            digest :: pkg_json_text(value) ?? {
+            value: object.get(key) ?? next
+            digest: pkg_json_text(value) ?? {
                 &losses.push("binary metadata `{key}` must be a string")
                 next
             }
@@ -517,10 +517,10 @@ impl ProviderFactReport {
             else -> {}
         }
         platforms := [String]{}
-        platform_keys :: [String]{"platform", "target"}
+        platform_keys: [String]{"platform", "target"}
         loop key in platform_keys {
-            value :: object.get(key) ?? next
-            platform :: pkg_json_text(value) ?? {
+            value: object.get(key) ?? next
+            platform: pkg_json_text(value) ?? {
                 &losses.push("binary metadata `{key}` must be a string")
                 next
             }
@@ -555,7 +555,7 @@ impl ProviderFactReport {
             }
             .None -> {}
         }
-        projections :: [(field: String, target: String)]{
+        projections: [(field: String, target: String)]{
             (field: "license", target: "provider.binary.license"), (field: "url", target: "provider.binary.source.url"),
             (field: "urls", target: "provider.binary.source.urls"), (field: "source", target: "provider.binary.source.identity"),
             (field: "owner", target: "provider.binary.source.owner"), (field: "signature", target: "provider.binary.signature"),
@@ -565,7 +565,7 @@ impl ProviderFactReport {
             (field: "variants", target: "provider.binary.variants"), (field: "hooks", target: "provider.binary.hooks")
         }
         loop projection in projections {
-            value :: object.get(projection.field) ?? next
+            value: object.get(projection.field) ?? next
             &facts.add_typed_json(projection.target, value)
         }
         if object.get("artifacts") == {
@@ -578,26 +578,26 @@ impl ProviderFactReport {
 }
 
 // Whether `digest` is an exact `#digest=` selector value.
-fn provider_graph_exact_digest(digest: String) -> Bool Never! {
+provider_graph_exact_digest: fn(digest: String) -> Bool Never! {
     ProviderSelector.parse("#digest={digest}").is_exact()
 }
 
-fn provider_graph_is_string_array(value: Dyn) -> Bool Never! {
-    items :: pkg_json_array(value) ?? return false
+provider_graph_is_string_array: fn(value: Dyn) -> Bool Never! {
+    items: pkg_json_array(value) ?? return false
     loop item in items {
         if !provider_graph_is_text(item) -> return false
     }
     true
 }
 
-fn provider_graph_is_non_negative_int(value: Dyn) -> Bool Never! {
-    number :: provider_graph_json_int(value) ?? return false
+provider_graph_is_non_negative_int: fn(value: Dyn) -> Bool Never! {
+    number: provider_graph_json_int(value) ?? return false
     number >= 0
 }
 
 // Whether an optional field is absent or one of the allowed shapes.
-fn provider_graph_shape_is(value: Dyn?, text: Bool, array: Bool, object: Bool) -> Bool Never! {
-    present :: value ?? return true
+provider_graph_shape_is: fn(value: Dyn?, text: Bool, array: Bool, object: Bool) -> Bool Never! {
+    present: value ?? return true
     if text && provider_graph_is_text(present) -> return true
     if array && pkg_json_array(present) == .Val(_) -> return true
     object && pkg_json_object(present) == .Val(_)
@@ -605,15 +605,15 @@ fn provider_graph_shape_is(value: Dyn?, text: Bool, array: Bool, object: Bool) -
 
 // Rust `provider_dependency_field`: the dependency names of an array field,
 // each item recorded by index and by name.
-fn provider_graph_dependency_field(facts: &MetadataFacts, object: [String: Dyn], field: String, kind: String, namespace: String, losses: &[String]) -> [String] Never! {
-    value :: object.get(field) ?? return [String]{}
-    items :: pkg_json_array(value) ?? {
+provider_graph_dependency_field: fn(facts: &MetadataFacts, object: [String: Dyn], field: String, kind: String, namespace: String, losses: &[String]) -> [String] Never! {
+    value: object.get(field) ?? return [String]{}
+    items: pkg_json_array(value) ?? {
         &losses.push("{namespace} `{field}` must be an array")
         return [String]{}
     }
     dependencies := [String]{}
     loop index in 0..<items.len() {
-        item :: items[index]
+        item: items[index]
         &facts.add_typed_json("provider.{namespace}.dependency.{kind}.{index}", item)
         if pkg_json_text(item) == {
             .Val(name) -> {
@@ -625,15 +625,15 @@ fn provider_graph_dependency_field(facts: &MetadataFacts, object: [String: Dyn],
             }
             .None -> {}
         }
-        dependency :: pkg_json_object(item) ?? {
+        dependency: pkg_json_object(item) ?? {
             &losses.push("{namespace} `{field}[{index}]` must be a dependency name or object")
             next
         }
-        name :: provider_graph_json_first_string(dependency, [String]{"name", "id"}) ?? {
+        name: provider_graph_json_first_string(dependency, [String]{"name", "id"}) ?? {
             &losses.push("{namespace} `{field}[{index}]` has no dependency name")
             next
         }
-        requirement :: provider_graph_json_first_string(dependency, [String]{"version", "version_requirement", "requirement"}) ?? ""
+        requirement: provider_graph_json_first_string(dependency, [String]{"version", "version_requirement", "requirement"}) ?? ""
         &dependencies.push(provider_format_dependency(name, requirement))
         &facts.add_conflicting_typed_json("provider.{namespace}.dependency.{kind}.{name}", item)
     }
@@ -642,15 +642,15 @@ fn provider_graph_dependency_field(facts: &MetadataFacts, object: [String: Dyn],
 
 // vcpkg `dependencies`: names or dependency objects with version, feature,
 // platform, and host facts.
-fn provider_vcpkg_dependencies(object: [String: Dyn], facts: &MetadataFacts, losses: &[String]) -> [String] Never! {
-    value :: object.get("dependencies") ?? return [String]{}
-    items :: pkg_json_array(value) ?? {
+provider_vcpkg_dependencies: fn(object: [String: Dyn], facts: &MetadataFacts, losses: &[String]) -> [String] Never! {
+    value: object.get("dependencies") ?? return [String]{}
+    items: pkg_json_array(value) ?? {
         &losses.push("vcpkg `dependencies` must be an array")
         return [String]{}
     }
     dependencies := [String]{}
-    version_keys :: [String]{"version>=", "version>", "version"}
-    fact_keys :: [String]{"features", "platform", "host", "default-features"}
+    version_keys: [String]{"version>=", "version>", "version"}
+    fact_keys: [String]{"features", "platform", "host", "default-features"}
     loop index in 0..<items.len() {
         if pkg_json_text(items[index]) == {
             .Val(name) -> {
@@ -663,20 +663,20 @@ fn provider_vcpkg_dependencies(object: [String: Dyn], facts: &MetadataFacts, los
             }
             .None -> {}
         }
-        dependency :: pkg_json_object(items[index]) ?? {
+        dependency: pkg_json_object(items[index]) ?? {
             &losses.push("vcpkg dependency {index} must be a string or object")
             next
         }
-        name :: provider_graph_json_string(dependency, "name") ?? {
+        name: provider_graph_json_string(dependency, "name") ?? {
             &losses.push("vcpkg dependency {index} has no non-empty `name`")
             next
         }
-        version :: provider_graph_json_first_string(dependency, version_keys) ?? ""
+        version: provider_graph_json_first_string(dependency, version_keys) ?? ""
         &dependencies.push(provider_format_dependency(name, version))
         loop key in fact_keys {
-            fact :: dependency.get(key) ?? next
+            fact: dependency.get(key) ?? next
             &facts.add_conflicting_typed_json("vcpkg.dependency.{name}.{key}", fact)
-            valid :: if key == {
+            valid: if key == {
                 "features" -> provider_graph_is_string_array(fact)
                 "platform" -> provider_graph_is_non_blank_text(fact)
                 else -> provider_graph_is_bool(fact)
@@ -684,7 +684,7 @@ fn provider_vcpkg_dependencies(object: [String: Dyn], facts: &MetadataFacts, los
             if !valid -> &losses.push("vcpkg dependency `{name}` field `{key}` has an invalid shape")
         }
         loop key in version_keys {
-            declared :: dependency.get(key) ?? next
+            declared: dependency.get(key) ?? next
             if !provider_graph_is_text(declared) -> &losses.push("vcpkg dependency `{name}` field `{key}` must be a string")
         }
     }
@@ -692,8 +692,8 @@ fn provider_vcpkg_dependencies(object: [String: Dyn], facts: &MetadataFacts, los
 }
 
 // Homebrew source, variant, hook, and advisory fields as typed facts.
-fn provider_homebrew_named_facts(facts: &MetadataFacts, object: [String: Dyn]) Never! {
-    fields :: [(field: String, category: String)]{
+provider_homebrew_named_facts: fn(facts: &MetadataFacts, object: [String: Dyn]) Never! {
+    fields: [(field: String, category: String)]{
         (field: "homepage", category: "source"), (field: "tap", category: "source"), (field: "full_name", category: "source"),
         (field: "urls", category: "source"), (field: "source", category: "source"), (field: "head", category: "source"),
         (field: "bottle", category: "variant"), (field: "variations", category: "variant"), (field: "keg_only", category: "variant"),
@@ -704,33 +704,33 @@ fn provider_homebrew_named_facts(facts: &MetadataFacts, object: [String: Dyn]) N
         (field: "disable_date", category: "advisory"), (field: "replacement", category: "advisory")
     }
     loop entry in fields {
-        value :: object.get(entry.field) ?? next
+        value: object.get(entry.field) ?? next
         &facts.add_typed_json("provider.homebrew.{entry.category}.{entry.field}", value)
     }
 }
 
 // Each stable bottle's artifact and exact sha256.
-fn provider_homebrew_bottle_facts(facts: &MetadataFacts, value: Dyn, losses: &[String]) Never! {
-    bottle :: pkg_json_object(value) ?? {
+provider_homebrew_bottle_facts: fn(facts: &MetadataFacts, value: Dyn, losses: &[String]) Never! {
+    bottle: pkg_json_object(value) ?? {
         &losses.push("Homebrew `bottle` must be an object")
         return
     }
-    raw_stable :: bottle.get("stable") ?? {
+    raw_stable: bottle.get("stable") ?? {
         &losses.push("Homebrew `bottle` has no stable artifact set")
         return
     }
-    stable :: pkg_json_object(raw_stable) ?? {
+    stable: pkg_json_object(raw_stable) ?? {
         &losses.push("Homebrew `bottle.stable` must be an object")
         return
     }
-    files :: pkg_json_object(stable.get("files") ?? Dyn.Null) ?? stable
+    files: pkg_json_object(stable.get("files") ?? Dyn.Null) ?? stable
     loop platform in files.keys().to_list() {
-        artifact :: pkg_json_object(files[platform]) ?? {
+        artifact: pkg_json_object(files[platform]) ?? {
             if platform != "rebuild" -> &losses.push("Homebrew bottle entry `{platform}` must be an object")
             next
         }
         &facts.add_typed_json("provider.homebrew.bottle.{platform}", Dyn.Object(artifact))
-        hash :: provider_graph_json_string(artifact, "sha256") ?? {
+        hash: provider_graph_json_string(artifact, "sha256") ?? {
             &losses.push("Homebrew bottle entry `{platform}` has no content hash")
             next
         }
@@ -741,7 +741,7 @@ fn provider_homebrew_bottle_facts(facts: &MetadataFacts, value: Dyn, losses: &[S
 
 // The formula's source hash from `sha256`, `source.sha256`, or
 // `urls.stable.sha256`; differing hashes are a loss.
-fn provider_homebrew_source_hash(object: [String: Dyn], losses: &[String]) -> String? Never! {
+provider_homebrew_source_hash: fn(object: [String: Dyn], losses: &[String]) -> String? Never! {
     hashes := [String]{}
     if object.get("sha256") == {
         .Val(value) -> {
@@ -787,13 +787,13 @@ fn provider_homebrew_source_hash(object: [String: Dyn], losses: &[String]) -> St
     }
     if object.get("urls") == {
         .Val(raw_urls) -> {
-            urls :: pkg_json_object(raw_urls) ?? {
+            urls: pkg_json_object(raw_urls) ?? {
                 &losses.push("Homebrew `urls` must be an object")
                 return hashes.get(0)
             }
             if urls.get("stable") == {
                 .Val(raw_stable) -> {
-                    stable :: pkg_json_object(raw_stable) ?? {
+                    stable: pkg_json_object(raw_stable) ?? {
                         &losses.push("Homebrew `urls.stable` must be an object")
                         return hashes.get(0)
                     }
@@ -822,17 +822,17 @@ fn provider_homebrew_source_hash(object: [String: Dyn], losses: &[String]) -> St
 }
 
 // Each named release asset's projection, platform, and exact digest.
-fn provider_github_asset_facts(facts: &MetadataFacts, value: Dyn, losses: &[String]) Never! {
-    assets :: pkg_json_array(value) ?? {
+provider_github_asset_facts: fn(facts: &MetadataFacts, value: Dyn, losses: &[String]) Never! {
+    assets: pkg_json_array(value) ?? {
         &losses.push("GitHub `assets` must be an array")
         return
     }
     loop index in 0..<assets.len() {
-        asset :: pkg_json_object(assets[index]) ?? {
+        asset: pkg_json_object(assets[index]) ?? {
             &losses.push("GitHub asset {index} must be an object")
             next
         }
-        name :: provider_graph_json_string(asset, "name") ?? {
+        name: provider_graph_json_string(asset, "name") ?? {
             &losses.push("GitHub asset {index} has no name")
             next
         }
@@ -841,11 +841,11 @@ fn provider_github_asset_facts(facts: &MetadataFacts, value: Dyn, losses: &[Stri
             .Val(platform) -> &facts.platforms.push(platform)
             .None -> {}
         }
-        raw_digest :: provider_graph_either(provider_graph_either(asset.get("digest"), asset.get("sha256")), asset.get("hash")) ?? {
+        raw_digest: provider_graph_either(provider_graph_either(asset.get("digest"), asset.get("sha256")), asset.get("hash")) ?? {
             &losses.push("GitHub asset `{name}` has no content digest")
             next
         }
-        digest :: pkg_json_text(raw_digest) ?? {
+        digest: pkg_json_text(raw_digest) ?? {
             &losses.push("GitHub asset `{name}` digest must be a string")
             next
         }
@@ -854,19 +854,19 @@ fn provider_github_asset_facts(facts: &MetadataFacts, value: Dyn, losses: &[Stri
 }
 
 // Each platform artifact's projection and exact digest.
-fn provider_binary_artifact_facts(facts: &MetadataFacts, value: Dyn, losses: &[String]) Never! {
-    artifacts :: pkg_json_object(value) ?? {
+provider_binary_artifact_facts: fn(facts: &MetadataFacts, value: Dyn, losses: &[String]) Never! {
+    artifacts: pkg_json_object(value) ?? {
         &losses.push("binary metadata `artifacts` must be an object")
         return
     }
     loop platform in artifacts.keys().to_list() {
         &facts.platforms.push(platform)
-        artifact :: pkg_json_object(artifacts[platform]) ?? {
+        artifact: pkg_json_object(artifacts[platform]) ?? {
             &losses.push("binary artifact `{platform}` must be an object")
             next
         }
         &facts.add_json_projection("provider.binary.artifact.{platform}", artifact)
-        digest :: provider_graph_json_first_string(artifact, [String]{"sha256", "hash", "digest"}) ?? {
+        digest: provider_graph_json_first_string(artifact, [String]{"sha256", "hash", "digest"}) ?? {
             &losses.push("binary artifact `{platform}` has no content hash")
             next
         }

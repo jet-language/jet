@@ -1,9 +1,9 @@
 // core-conformance: core.sys.set_cpu_time_limit
-use os :: core.sys
+use os: core.sys
 
-fn run() {
-    limit :: os.cpu_time_limit() ?? panic("cpu_time_limit")
+run: fn() {
+    limit: os.cpu_time_limit() ?? panic("cpu_time_limit")
     os.set_cpu_time_limit(limit.soft, limit.hard) ?? panic("set_cpu_time_limit")
-    after :: os.cpu_time_limit() ?? panic("cpu_time_limit after")
+    after: os.cpu_time_limit() ?? panic("cpu_time_limit after")
     print(after.soft == limit.soft && after.hard == limit.hard)
 }

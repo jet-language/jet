@@ -1,14 +1,14 @@
 
-fn present() -> String { Ok("ok") }
-fn note_value() -[IO]> String {
+present: fn() -> String { Ok("ok") }
+note_value: fn() -[IO]> String {
     print("evaluated")
     return "unexpected"
 }
-fn wrapped() -[IO]> String {
-    value :: present()?("never {note_value()}")
+wrapped: fn() -[IO]> String {
+    value: present()?("never {note_value()}")
     return Ok(value)
 }
-fn run() {
+run: fn() {
     if wrapped() == {
         .Ok(value) -> { print(value) }
         .Err(_) -> { print("failed") }

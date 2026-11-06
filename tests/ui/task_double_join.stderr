@@ -1,12 +1,12 @@
 Error [jet.UseAfterMove]: `t` was consumed by `.join()`, so it can't be used here
-  --> tests/ui/task_double_join.jet:4:11
+  --> tests/ui/task_double_join.jet:4:9
     |
-  4 |     b :: ^t.join() ?? 0
-    |           ^
-  --> tests/ui/task_double_join.jet:3:11
+  4 |     b: ^t.join() ?? 0
+    |         ^
+  --> tests/ui/task_double_join.jet:3:9
     |
-  3 |     a :: ^t.join() ?? 0
-    |           ^ `t` moved to `.join()` here
+  3 |     a: ^t.join() ?? 0
+    |         ^ `t` moved to `.join()` here
  Why: After a value moves somewhere else, its old name no longer gives access to it
  Fix: Stop using `t` after the move, or give `.join()` a copy with `t.copy()` where it moved.
 More: jet-lang.dev/e/E0121

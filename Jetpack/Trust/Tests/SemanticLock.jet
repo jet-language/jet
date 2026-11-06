@@ -13,7 +13,7 @@ use {
     jet_pkg_model.[pkg_bytes_text]
 }
 
-fn trust_test_pkg(owner: String, key: String, exact: String, hash: String) -> SemanticRecord {
+trust_test_pkg: fn(owner: String, key: String, exact: String, hash: String) -> SemanticRecord {
     rationale := LockRationale.empty()
     rationale.owner_package = owner
     rationale.reason = "{owner} declared {key}"
@@ -29,23 +29,23 @@ fn trust_test_pkg(owner: String, key: String, exact: String, hash: String) -> Se
 }
 
 // The `[[semantic_record]]` block of `text` that contains `needle`.
-fn trust_test_record_block(text: String, needle: String) -> String {
-    raw :: text.bytes()
-    header :: "[[semantic_record]]".bytes()
+trust_test_record_block: fn(text: String, needle: String) -> String {
+    raw: text.bytes()
+    header: "[[semantic_record]]".bytes()
     start := 0
     loop {
-        at :: trust_text_find(raw, header, start)
-        end :: if at < 0 -> raw.len() else -> at
-        block :: pkg_bytes_text(raw, start, end)
+        at: trust_text_find(raw, header, start)
+        end: if at < 0 -> raw.len() else -> at
+        block: pkg_bytes_text(raw, start, end)
         if block.contains(needle) -> return block
         if at < 0 -> panic("no semantic record block contains {needle}")
         start = at + header.len()
     }
 }
 
-fn trust_test_has_issue(issues: [ValidationIssue], expected: String) -> Bool {
+trust_test_has_issue: fn(issues: [ValidationIssue], expected: String) -> Bool {
     loop issue in issues {
-        kind :: if issue == {
+        kind: if issue == {
             .InputCycle(_) -> "InputCycle"
             .MissingFollows(_, _) -> "MissingFollows"
             .MissingHash(_) -> "MissingHash"
@@ -59,7 +59,7 @@ fn trust_test_has_issue(issues: [ValidationIssue], expected: String) -> Bool {
     false
 }
 
-TRUST_TEST_MACHINE_LOCK :: comptime { `version = 1
+TRUST_TEST_MACHINE_LOCK: comptime { `version = 1
 
 [[package]]
 name = "app"
@@ -80,7 +80,7 @@ dependencies = ["app"]
     }
     semantic.source_maps = [SourceMapEntry]{SourceMapEntry{pattern: "core.*", sources: [String]{"catalog:core.log", "core"}}}
     assert_eq(trust_semantic_lock_issues(semantic).len(), 0)
-    raw :: "{TRUST_TEST_MACHINE_LOCK.trim_end()}\n\n{trust_write_semantic_lock(semantic)}"
+    raw: "{TRUST_TEST_MACHINE_LOCK.trim_end()}\n\n{trust_write_semantic_lock(semantic)}"
     assert(raw.contains("[[package]]"))
     assert(raw.contains("name = \"app\""))
     assert(raw.contains("[[semantic_record]]"))
@@ -88,13 +88,13 @@ dependencies = ["app"]
     assert(raw.contains("[[source_map]]"))
     assert(raw.contains("follows = \"nixpkgs\""))
 
-    loaded :: trust_parse_semantic_lock(raw)
+    loaded: trust_parse_semantic_lock(raw)
     assert_eq(loaded.records.len(), 1)
     assert_eq(loaded.inputs.len(), 2)
     assert_eq(loaded.source_maps.len(), 1)
     assert_eq(loaded.records[0].identity.exact, "1.2.3")
 
-    machine :: trust_strip_semantic_sections(raw)
+    machine: trust_strip_semantic_sections(raw)
     assert(!machine.contains("semantic_record"))
     assert(!machine.contains("lock_input"))
     assert(machine.contains("version = 1"))
@@ -115,11 +115,11 @@ dependencies = ["app"]
         trust_test_pkg("app", "core.log", "1.2.3", "sha256-log"),
         trust_test_pkg("app", "core.http", "2.0.0", "sha256-http")
     })
-    before :: trust_write_semantic_lock(lock)
-    http_block :: trust_test_record_block(before, "key = \"core.http\"")
-    previous :: &lock.selective_update(trust_test_pkg("app", "core.log", "1.3.0", "sha256-log-new")) ?? panic("core.log should be replaced")
+    before: trust_write_semantic_lock(lock)
+    http_block: trust_test_record_block(before, "key = \"core.http\"")
+    previous: &lock.selective_update(trust_test_pkg("app", "core.log", "1.3.0", "sha256-log-new")) ?? panic("core.log should be replaced")
     assert_eq(previous.identity.exact, "1.2.3")
-    after :: trust_write_semantic_lock(lock)
+    after: trust_write_semantic_lock(lock)
     assert_eq(trust_test_record_block(after, "key = \"core.http\""), http_block)
     assert(after.contains("exact = \"1.3.0\""))
 }
@@ -145,7 +145,7 @@ dependencies = ["app"]
 #Test("overlay change invalidates exact action keys and explains why") {
     actions := [String: [String]]{}
     actions["foo"] = [String]{"action:foo:build", "action:foo:check"}
-    invalidations :: trust_overlay_invalidations(
+    invalidations: trust_overlay_invalidations(
         [OverlayFingerprint]{OverlayFingerprint{overlay: "beta", package: "foo", fingerprint: "fp-patch-a"}},
         [OverlayFingerprint]{OverlayFingerprint{overlay: "beta", package: "foo", fingerprint: "fp-patch-a-b"}},
         actions
@@ -178,19 +178,19 @@ dependencies = ["app"]
     &record.rationales.push(force)
     record.future_fields["overlay-fact-version"] = "2"
 
-    loaded :: trust_parse_semantic_lock(trust_write_semantic_lock(SemanticLockFile.with_records([SemanticRecord]{record})))
+    loaded: trust_parse_semantic_lock(trust_write_semantic_lock(SemanticLockFile.with_records([SemanticRecord]{record})))
     assert_eq(loaded.records.len(), 1)
     assert_eq(loaded.records[0].future_fields.get("overlay-fact-version"), Val("2"))
     assert_eq(loaded.records[0].rationales.len(), 2)
-    explanation :: trust_explain_semantic_lock(loaded, "package-overlay:force:foo") ?? panic("overlay explanation")
+    explanation: trust_explain_semantic_lock(loaded, "package-overlay:force:foo") ?? panic("overlay explanation")
     assert_eq(explanation.contenders.len(), 2)
     assert(explanation.contenders[0].reason.contains("base"))
     assert(explanation.contenders[1].reason.contains("force"))
 }
 
 #Test("merge for commit rejects conflicts before write") {
-    left :: SemanticLockFile.with_records([SemanticRecord]{trust_test_pkg("app", "core.log", "1.2.3", "sha256-a")})
-    right :: SemanticLockFile.with_records([SemanticRecord]{trust_test_pkg("app", "core.log", "1.3.0", "sha256-b")})
+    left: SemanticLockFile.with_records([SemanticRecord]{trust_test_pkg("app", "core.log", "1.2.3", "sha256-a")})
+    right: SemanticLockFile.with_records([SemanticRecord]{trust_test_pkg("app", "core.log", "1.3.0", "sha256-b")})
     if trust_merge_for_commit(SemanticLockFile.empty(), left, right) == {
         .Ok(_) -> panic("expected a conflict")
         .Err(error) -> {
@@ -203,13 +203,13 @@ dependencies = ["app"]
 }
 
 #Test("merge for commit accepts a clean merge") {
-    left :: SemanticLockFile.with_records([SemanticRecord]{trust_test_pkg("app", "core.log", "1.2.3", "sha256-log")})
-    right :: SemanticLockFile.with_records([SemanticRecord]{trust_test_pkg("app", "core.http", "2.0.0", "sha256-http")})
-    merged :: trust_merge_for_commit(SemanticLockFile.empty(), left, right) ?? panic("clean merge should commit")
+    left: SemanticLockFile.with_records([SemanticRecord]{trust_test_pkg("app", "core.log", "1.2.3", "sha256-log")})
+    right: SemanticLockFile.with_records([SemanticRecord]{trust_test_pkg("app", "core.http", "2.0.0", "sha256-http")})
+    merged: trust_merge_for_commit(SemanticLockFile.empty(), left, right) ?? panic("clean merge should commit")
     assert_eq(merged.records.len(), 2)
-    raw :: "{TRUST_TEST_MACHINE_LOCK.trim_end()}\n\n{trust_write_semantic_lock(merged)}"
+    raw: "{TRUST_TEST_MACHINE_LOCK.trim_end()}\n\n{trust_write_semantic_lock(merged)}"
     assert_eq(trust_parse_semantic_lock(raw).records.len(), 2)
-    machine :: trust_strip_semantic_sections(raw)
+    machine: trust_strip_semantic_sections(raw)
     assert(!machine.contains("semantic_record"))
     assert(machine.contains("version = 1"))
 }
@@ -217,7 +217,7 @@ dependencies = ["app"]
 #Test("overlay invalidations helper matches fingerprint diff") {
     actions := [String: [String]]{}
     actions["foo"] = [String]{"a:foo"}
-    invalidations :: trust_overlay_invalidations(
+    invalidations: trust_overlay_invalidations(
         [OverlayFingerprint]{OverlayFingerprint{overlay: "beta", package: "foo", fingerprint: "fp-1"}},
         [OverlayFingerprint]{OverlayFingerprint{overlay: "beta", package: "foo", fingerprint: "fp-2"}},
         actions
@@ -232,7 +232,7 @@ dependencies = ["app"]
     left.source_maps = [SourceMapEntry]{SourceMapEntry{pattern: "Acme.*", sources: [String]{"nuget:Acme"}}}
     right := base.copy()
     right.inputs = [LockInput]{LockInput{name: "nixpkgs", url: "new", follows: ""}}
-    outcome :: trust_merge_semantic_locks(base, left, right)
+    outcome: trust_merge_semantic_locks(base, left, right)
     assert_eq(outcome.conflicts.len(), 0)
     assert_eq(outcome.merged.inputs[0].url, "new")
     assert_eq(outcome.merged.source_maps[0].pattern, "Acme.*")

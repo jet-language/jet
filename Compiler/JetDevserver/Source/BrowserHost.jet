@@ -1,32 +1,32 @@
 // Typed projection of the shared session; no wire decoder or renderer lives here.
 use {
     std.collections.[VecDeque]
-    fmt :: std.fmt
+    fmt: std.fmt
     jet_devserver.Devtools.catalog.[descriptors]
 }
-BROWSER_DEVTOOLS_PROTOCOL :: "jet.devtools.v1"
-JET_DEVTOOLS_PROTOCOL :: BROWSER_DEVTOOLS_PROTOCOL
-MAX_RECONNECT_EVENTS :: 256
-MAX_BROWSER_PANELS :: 128
-MAX_BROWSER_NODES :: 4096
-MAX_BROWSER_NODE_DEPTH :: 64
-MAX_BROWSER_TEXT :: 256
-MAX_BROWSER_VALUE :: 4096
-enum BrowserPlacement { InApp; Workbench }
+BROWSER_DEVTOOLS_PROTOCOL: "jet.devtools.v1"
+JET_DEVTOOLS_PROTOCOL: BROWSER_DEVTOOLS_PROTOCOL
+MAX_RECONNECT_EVENTS: 256
+MAX_BROWSER_PANELS: 128
+MAX_BROWSER_NODES: 4096
+MAX_BROWSER_NODE_DEPTH: 64
+MAX_BROWSER_TEXT: 256
+MAX_BROWSER_VALUE: 4096
+BrowserPlacement: enum { InApp; Workbench }
 impl BrowserPlacement {
-    fn as_str(self) -> String { if self == {
+    as_str: fn(self) -> String { if self == {
         .InApp -> "in-app"
         .Workbench -> "workbench"
     } }
-    fn index(self) -> USize { if self == {
+    index: fn(self) -> USize { if self == {
         .InApp -> 0
         .Workbench -> 1
     } }
-    fn default() -> BrowserPlacement { .InApp }
+    default: fn() -> BrowserPlacement { .InApp }
 }
-enum BrowserNodeKind { Text; Status; Table; Tree; Chart; Action }
+BrowserNodeKind: enum { Text; Status; Table; Tree; Chart; Action }
 impl BrowserNodeKind {
-    fn as_str(self) -> String {
+    as_str: fn(self) -> String {
         if self == {
             .Text -> "text"
             .Status -> "status"
@@ -37,19 +37,19 @@ impl BrowserNodeKind {
         }
     }
 }
-enum BrowserDock { Left; Right; Bottom; Floating }
+BrowserDock: enum { Left; Right; Bottom; Floating }
 impl BrowserDock {
-    fn as_str(self) -> String { if self == {
+    as_str: fn(self) -> String { if self == {
         .Left -> "left"
         .Right -> "right"
         .Bottom -> "bottom"
         .Floating -> "floating"
     } }
-    fn default() -> BrowserDock { .Left }
+    default: fn() -> BrowserDock { .Left }
 }
-enum BrowserSessionState { Idle; Building; BuildFailed; RuntimeFailure; HotReload; TestsFailing }
+BrowserSessionState: enum { Idle; Building; BuildFailed; RuntimeFailure; HotReload; TestsFailing }
 impl BrowserSessionState {
-    fn as_str(self) -> String {
+    as_str: fn(self) -> String {
         if self == {
             .Idle -> "idle"
             .Building -> "building"
@@ -59,104 +59,104 @@ impl BrowserSessionState {
             .TestsFailing -> "tests-failing"
         }
     }
-    fn default() -> BrowserSessionState { .Idle }
+    default: fn() -> BrowserSessionState { .Idle }
 }
-struct BrowserSourceLocation { source_id: String; line: U32; column: U32; function: String? }
+BrowserSourceLocation: struct { source_id: String; line: U32; column: U32; function: String? }
 impl BrowserSourceLocation {
-    fn new(source_id: String, line: U32, column: U32, function: String?) -> BrowserSourceLocation {
+    new: fn(source_id: String, line: U32, column: U32, function: String?) -> BrowserSourceLocation {
         BrowserSourceLocation { source_id: ^source_id, line: line, column: column, function: ^function }
     }
-    fn validate(self) BrowserHostError! {
-        _ :: validate_source_id(self.source_id) ?? return .Err(err)
+    validate: fn(self) BrowserHostError! {
+        _: validate_source_id(self.source_id) ?? return .Err(err)
         if self.line == 0 -> return .Err(.InvalidSource("source line must be one-based"))
-        if self.function == .Val(function) -> _ :: validate_text(function, "source function", MAX_BROWSER_TEXT) ?? return .Err(err)
+        if self.function == .Val(function) -> _: validate_text(function, "source function", MAX_BROWSER_TEXT) ?? return .Err(err)
     }
 }
-struct BrowserSourceGrant {
+BrowserSourceGrant: struct {
     session_id: String; revision: U64; panel_id: String; node_id: String; source: BrowserSourceLocation
 }
 impl BrowserSourceGrant {
-    fn new(session_id: String, revision: U64, panel_id: String, node_id: String, source: BrowserSourceLocation) -> BrowserSourceGrant {
+    new: fn(session_id: String, revision: U64, panel_id: String, node_id: String, source: BrowserSourceLocation) -> BrowserSourceGrant {
         BrowserSourceGrant { session_id: ^session_id, revision: revision, panel_id: ^panel_id, node_id: ^node_id, source: ^source }
     }
 }
 // The Rust `SourceNavigationGrant` is `BrowserSourceGrant` `BrowserNavigationGrant` is
 // `BrowserSourceGrant`
-struct BrowserActionGrant { session_id: String; revision: U64; panel_id: String; node_id: String; action_id: String }
+BrowserActionGrant: struct { session_id: String; revision: U64; panel_id: String; node_id: String; action_id: String }
 impl BrowserActionGrant {
-    fn new(session_id: String, revision: U64, panel_id: String, node_id: String, action_id: String) -> BrowserActionGrant {
+    new: fn(session_id: String, revision: U64, panel_id: String, node_id: String, action_id: String) -> BrowserActionGrant {
         BrowserActionGrant { session_id: ^session_id, revision: revision, panel_id: ^panel_id, node_id: ^node_id, action_id: ^action_id }
     }
 }
 // The Rust `ActionGrant` is `BrowserActionGrant`
-struct BrowserNode { id: String; kind: BrowserNodeKind; label: String; value: String?; status: String?; children: [BrowserNode] }
+BrowserNode: struct { id: String; kind: BrowserNodeKind; label: String; value: String?; status: String?; children: [BrowserNode] }
 impl BrowserNode {
-    fn new(id: String, kind: BrowserNodeKind, label: String) -> BrowserNode {
+    new: fn(id: String, kind: BrowserNodeKind, label: String) -> BrowserNode {
         BrowserNode { id: ^id, kind: kind, label: ^label, value: None, status: None, children: [] }
     }
-    fn with_value(self: BrowserNode, value: String) -> BrowserNode {
+    with_value: fn(self: BrowserNode, value: String) -> BrowserNode {
         self := ^self
         self.value = .Val(^value)
         return self
     }
-    fn with_status(self: BrowserNode, status: String) -> BrowserNode {
+    with_status: fn(self: BrowserNode, status: String) -> BrowserNode {
         self := ^self
         self.status = .Val(^status)
         return self
     }
-    fn with_children(self: BrowserNode, children: [BrowserNode]) -> BrowserNode {
+    with_children: fn(self: BrowserNode, children: [BrowserNode]) -> BrowserNode {
         self := ^self
         self.children = ^children
         return self
     }
 }
-struct BrowserPanelFact {
+BrowserPanelFact: struct {
     panel_id: String; title: String; freshness_ms: U64; status: String; cursor: U64?; nodes: [BrowserNode]
 }
 impl BrowserPanelFact {
-    fn new(panel_id: String, title: String, freshness_ms: U64, status: String, nodes: [BrowserNode]) -> BrowserPanelFact {
+    new: fn(panel_id: String, title: String, freshness_ms: U64, status: String, nodes: [BrowserNode]) -> BrowserPanelFact {
         BrowserPanelFact { panel_id: ^panel_id, title: ^title, freshness_ms: freshness_ms, status: ^status, cursor: None, nodes: ^nodes }
     }
-    fn with_cursor(self: BrowserPanelFact, cursor: U64?) -> BrowserPanelFact {
+    with_cursor: fn(self: BrowserPanelFact, cursor: U64?) -> BrowserPanelFact {
         self := ^self
         self.cursor = cursor
         return self
     }
-    fn identity(self) -> String { self.panel_id }
+    identity: fn(self) -> String { self.panel_id }
 }
-struct BrowserHostEvent {
+BrowserHostEvent: struct {
     protocol: String; session_id: String; revision: U64; sequence: U64; observed_at_ms: U64; panels: [BrowserPanelFact]
 }
 impl BrowserHostEvent {
-    fn new(session_id: String, revision: U64, sequence: U64, observed_at_ms: U64, panels: [BrowserPanelFact]) -> BrowserHostEvent {
+    new: fn(session_id: String, revision: U64, sequence: U64, observed_at_ms: U64, panels: [BrowserPanelFact]) -> BrowserHostEvent {
         BrowserHostEvent { protocol: BROWSER_DEVTOOLS_PROTOCOL, session_id: ^session_id, revision: revision, sequence: sequence, observed_at_ms: observed_at_ms, panels: ^panels }
     }
-    fn validate(self) BrowserHostError! {
+    validate: fn(self) BrowserHostError! {
         if self.protocol != BROWSER_DEVTOOLS_PROTOCOL -> return .Err(.InvalidEvent("browser event protocol does not match jet.devtools.v1"))
-        _ :: validate_text(self.session_id, "event session", MAX_BROWSER_TEXT) ?? return .Err(err)
+        _: validate_text(self.session_id, "event session", MAX_BROWSER_TEXT) ?? return .Err(err)
         if self.panels.len() > MAX_BROWSER_PANELS -> return .Err(.InvalidEvent("browser event exceeds the panel bound"))
         panel_ids := [String:Bool]{}
         node_count := USize{0}
         loop panel in self.panels {
-            _ :: validate_panel(panel, &node_count) ?? return .Err(err)
+            _: validate_panel(panel, &node_count) ?? return .Err(err)
             if panel_ids.contains(panel.panel_id) -> return .Err(.InvalidEvent("browser event repeats panel `{panel.panel_id}`"))
             &panel_ids.insert(panel.panel_id, true)
         }
     }
 }
-struct BrowserReconnectCursor { sequence: U64 }
+BrowserReconnectCursor: struct { sequence: U64 }
 impl BrowserReconnectCursor {
-    fn new(sequence: U64) -> BrowserReconnectCursor { BrowserReconnectCursor { sequence: sequence } }
-    fn default() -> BrowserReconnectCursor { BrowserReconnectCursor.new(0) }
+    new: fn(sequence: U64) -> BrowserReconnectCursor { BrowserReconnectCursor { sequence: sequence } }
+    default: fn() -> BrowserReconnectCursor { BrowserReconnectCursor.new(0) }
 }
 impl From[U64] for BrowserReconnectCursor {
-    fn from(sequence: U64) -> BrowserReconnectCursor { BrowserReconnectCursor.new(sequence) }
+    from: fn(sequence: U64) -> BrowserReconnectCursor { BrowserReconnectCursor.new(sequence) }
 }
-struct BrowserReconnect {
+BrowserReconnect: struct {
     session_id: String; from: BrowserReconnectCursor?; cursor: BrowserReconnectCursor?; events: [BrowserHostEvent]; complete: Bool
 }
-struct BrowserSelection { panel_id: String; node_id: String? }
-enum BrowserHostAction {
+BrowserSelection: struct { panel_id: String; node_id: String? }
+BrowserHostAction: enum {
     OpenPanel { placement: BrowserPlacement, panel_id: String }
     ClosePanel { placement: BrowserPlacement, panel_id: String }
     DockPanel { placement: BrowserPlacement, panel_id: String, dock: BrowserDock }
@@ -164,33 +164,33 @@ enum BrowserHostAction {
     InvokeAction { placement: BrowserPlacement, panel_id: String, node_id: String, action_id: String, grant: BrowserActionGrant }
 }
 impl BrowserHostAction {
-    fn open(placement: BrowserPlacement, panel_id: String) -> BrowserHostAction { .OpenPanel { placement: placement, panel_id: ^panel_id } }
-    fn close(placement: BrowserPlacement, panel_id: String) -> BrowserHostAction { .ClosePanel { placement: placement, panel_id: ^panel_id } }
-    fn dock(placement: BrowserPlacement, panel_id: String, dock: BrowserDock) -> BrowserHostAction { .DockPanel { placement: placement, panel_id: ^panel_id, dock: dock } }
-    fn navigate_source(placement: BrowserPlacement, panel_id: String, node_id: String, grant: BrowserSourceGrant) -> BrowserHostAction { .NavigateSource { placement: placement, panel_id: ^panel_id, node_id: ^node_id, grant: ^grant } }
-    fn invoke_action(placement: BrowserPlacement, panel_id: String, node_id: String, action_id: String, grant: BrowserActionGrant) -> BrowserHostAction { .InvokeAction { placement: placement, panel_id: ^panel_id, node_id: ^node_id, action_id: ^action_id, grant: ^grant } }
+    open: fn(placement: BrowserPlacement, panel_id: String) -> BrowserHostAction { .OpenPanel { placement: placement, panel_id: ^panel_id } }
+    close: fn(placement: BrowserPlacement, panel_id: String) -> BrowserHostAction { .ClosePanel { placement: placement, panel_id: ^panel_id } }
+    dock: fn(placement: BrowserPlacement, panel_id: String, dock: BrowserDock) -> BrowserHostAction { .DockPanel { placement: placement, panel_id: ^panel_id, dock: dock } }
+    navigate_source: fn(placement: BrowserPlacement, panel_id: String, node_id: String, grant: BrowserSourceGrant) -> BrowserHostAction { .NavigateSource { placement: placement, panel_id: ^panel_id, node_id: ^node_id, grant: ^grant } }
+    invoke_action: fn(placement: BrowserPlacement, panel_id: String, node_id: String, action_id: String, grant: BrowserActionGrant) -> BrowserHostAction { .InvokeAction { placement: placement, panel_id: ^panel_id, node_id: ^node_id, action_id: ^action_id, grant: ^grant } }
 }
-enum BrowserHostEffect {
+BrowserHostEffect: enum {
     PanelOpened { placement: BrowserPlacement, panel_id: String }
     PanelClosed { placement: BrowserPlacement, panel_id: String }
     PanelDocked { placement: BrowserPlacement, panel_id: String, dock: BrowserDock }
     SourceNavigated { placement: BrowserPlacement, panel_id: String, node_id: String, source: BrowserSourceLocation }
     ActionInvoked { placement: BrowserPlacement, panel_id: String, node_id: String, action_id: String }
 }
-struct BrowserHtmlElement {
+BrowserHtmlElement: struct {
     id: String; kind: String; panel_id: String?; node_id: String?; label: String; value: String?; status: String?
 }
-struct BrowserHtmlViewModel {
+BrowserHtmlViewModel: struct {
     placement: BrowserPlacement; route: String; protocol: String; session_id: String;
     revision: U64?; sequence: U64?; cursor: BrowserReconnectCursor?; state: BrowserSessionState;
     selection: BrowserSelection?; panels: [BrowserPanelView]; elements: [BrowserHtmlElement]
 }
-struct BrowserPanelView {
+BrowserPanelView: struct {
     panel_id: String; title: String; freshness_ms: U64; status: String; cursor: U64?;
     open: Bool; dock: BrowserDock; nodes: [BrowserNode]
 }
 #Error
-enum BrowserHostError {
+BrowserHostError: enum {
     InvalidEvent(String)
     WrongSession { expected: String, received: String }
     StaleRevision { current: U64, received: U64 }
@@ -204,8 +204,8 @@ enum BrowserHostError {
     InvalidAction(String)
 }
 impl BrowserHostError.Display {
-    fn fmt(self, formatter: &fmt.Formatter) -> fmt.Result {
-        message :: if self == {
+    fmt: fn(self, formatter: &fmt.Formatter) -> fmt.Result {
+        message: if self == {
             .InvalidEvent(message) -> "invalid browser event: {message}"
             .WrongSession { expected, received } -> "browser event belongs to session `{received}`, expected `{expected}`"
             .StaleRevision { current, received } -> "stale browser revision {received}; current revision is {current}"
@@ -221,27 +221,27 @@ impl BrowserHostError.Display {
         return &formatter.write_str(message)
     }
 }
-struct PanelState { fact: BrowserPanelFact; layout: [PanelLayout] }
-struct PanelLayout { open: Bool; dock: BrowserDock }
-impl PanelLayout { fn default() -> PanelLayout { PanelLayout { open: false, dock: .Left } } }
-struct BrowserHost {
+PanelState: struct { fact: BrowserPanelFact; layout: [PanelLayout] }
+PanelLayout: struct { open: Bool; dock: BrowserDock }
+impl PanelLayout { default: fn() -> PanelLayout { PanelLayout { open: false, dock: .Left } } }
+BrowserHost: struct {
     session_id: String; revision: U64?; sequence: U64?; observed_at_ms: U64?; state: BrowserSessionState;
     cursor: BrowserReconnectCursor?; selection: BrowserSelection?; panels: [String:PanelState]; history: VecDeque<BrowserHostEvent>
 }
 impl BrowserHost {
-    fn new(session_id: String) -> BrowserHost {
+    new: fn(session_id: String) -> BrowserHost {
         BrowserHost { session_id: ^session_id, revision: None, sequence: None, observed_at_ms: None, state: .Idle, cursor: None, selection: None, panels: {}, history: VecDeque[BrowserHostEvent].new() }
     }
-    fn for_session(session_id: String) -> BrowserHost { BrowserHost.new(^session_id) }
-    fn session_id(self) -> String { self.session_id }
-    fn revision(self) -> U64? { self.revision }
-    fn sequence(self) -> U64? { self.sequence }
-    fn observed_at_ms(self) -> U64? { self.observed_at_ms }
-    fn state(self) -> BrowserSessionState { self.state }
-    fn cursor(self) -> BrowserReconnectCursor? { self.cursor }
-    fn selection(self) -> BrowserSelection? { self.selection }
-    fn apply_event(&self, event: BrowserHostEvent) BrowserHostError! {
-        _ :: event.validate() ?? return .Err(err)
+    for_session: fn(session_id: String) -> BrowserHost { BrowserHost.new(^session_id) }
+    session_id: fn(self) -> String { self.session_id }
+    revision: fn(self) -> U64? { self.revision }
+    sequence: fn(self) -> U64? { self.sequence }
+    observed_at_ms: fn(self) -> U64? { self.observed_at_ms }
+    state: fn(self) -> BrowserSessionState { self.state }
+    cursor: fn(self) -> BrowserReconnectCursor? { self.cursor }
+    selection: fn(self) -> BrowserSelection? { self.selection }
+    apply_event: fn(&self, event: BrowserHostEvent) BrowserHostError! {
+        _: event.validate() ?? return .Err(err)
         if event.session_id != self.session_id -> return .Err(.WrongSession { expected: self.session_id.copy(), received: ^event.session_id })
         if self.revision == .Val(current) && event.revision < current -> return .Err(.StaleRevision { current: current, received: event.revision })
         if self.sequence == .Val(current) && event.sequence <= current -> return .Err(.StaleSequence { current: current, received: event.sequence })
@@ -261,35 +261,35 @@ impl BrowserHost {
         self.state = derive_session_state(event.panels)
         self.cursor = .Val(BrowserReconnectCursor.new(event.sequence))
         if self.selection == .Val(selection) && !self.node_exists(selection.panel_id, selection.node_id) -> self.selection = None
-        if self.history.len() == MAX_RECONNECT_EVENTS -> _ :: &self.history.pop_front()
+        if self.history.len() == MAX_RECONNECT_EVENTS -> _: &self.history.pop_front()
         &self.history.push_back(^event)
     }
-    fn apply(&self, event: BrowserHostEvent) BrowserHostError! { &self.apply_event(^event) }
-    fn resume_from(self, cursor: BrowserReconnectCursor?) -> BrowserReconnect BrowserHostError! {
+    apply: fn(&self, event: BrowserHostEvent) BrowserHostError! { &self.apply_event(^event) }
+    resume_from: fn(self, cursor: BrowserReconnectCursor?) -> BrowserReconnect BrowserHostError! {
         if cursor == .Val(requested) && self.sequence == .Val(current) && requested.sequence > current -> return .Err(.CursorAhead { cursor: requested.sequence, current: current })
         if cursor == .Val(requested) {
             if self.history.front() == .Val(first) {
-                earliest :: first.sequence
+                earliest: first.sequence
                 if requested.sequence.saturating_add(1) < earliest -> return .Err(.CursorExpired { cursor: requested.sequence, earliest: earliest })
             } else if requested.sequence > 0 -> return .Err(.CursorExpired { cursor: requested.sequence, earliest: 0 })
         }
-        events :: self.history.iter().filter((event) -> cursor == None || cursor.is_some_and((from) -> event.sequence > from.sequence)).cloned().collect[[BrowserHostEvent]]()
+        events: self.history.iter().filter((event) -> cursor == None || cursor.is_some_and((from) -> event.sequence > from.sequence)).cloned().collect[[BrowserHostEvent]]()
         return BrowserReconnect { session_id: self.session_id.copy(), from: cursor, cursor: self.sequence.map(BrowserReconnectCursor.new), events: ^events, complete: true }
     }
-    fn events_since(self, sequence: U64?) -> [BrowserHostEvent] BrowserHostError! {
-        resumed :: self.resume_from(sequence.map(BrowserReconnectCursor.new)) ?? return .Err(err)
+    events_since: fn(self, sequence: U64?) -> [BrowserHostEvent] BrowserHostError! {
+        resumed: self.resume_from(sequence.map(BrowserReconnectCursor.new)) ?? return .Err(err)
         return ^resumed.events
     }
-    fn set_cursor(&self, cursor: BrowserReconnectCursor?) BrowserHostError! {
-        if cursor == .Val(value) -> _ :: self.resume_from(.Val(value)) ?? return .Err(err)
+    set_cursor: fn(&self, cursor: BrowserReconnectCursor?) BrowserHostError! {
+        if cursor == .Val(value) -> _: self.resume_from(.Val(value)) ?? return .Err(err)
         self.cursor = cursor
     }
-    fn scrub(&self, sequence: U64?) BrowserHostError! { &self.set_cursor(sequence.map(BrowserReconnectCursor.new)) }
-    fn panel_catalog(self) -> [BrowserPanelFact] {
+    scrub: fn(&self, sequence: U64?) BrowserHostError! { &self.set_cursor(sequence.map(BrowserReconnectCursor.new)) }
+    panel_catalog: fn(self) -> [BrowserPanelFact] {
         keys := self.panels.keys().collect[[String]]()
         &keys.sort()
         panels := keys.iter().map((key) -> self.panels[key].fact.copy()).collect[[BrowserPanelFact]]()
-        catalog :: descriptors()
+        catalog: descriptors()
         ranks := [String:USize]{}
         loop (index, descriptor) in catalog.iter().enumerate() {
             if !ranks.contains(descriptor.id.as_str()) -> &ranks.insert(descriptor.id.as_str(), index)
@@ -298,32 +298,32 @@ impl BrowserHost {
         &panels.sort_by_key((panel) -> ranks.get(panel.panel_id) ?? USize.MAX)
         return panels
     }
-    fn panel(self, panel_id: String) -> BrowserPanelFact? { self.panels.get(panel_id).map((panel) -> panel.fact) }
-    fn is_open(self, placement: BrowserPlacement, panel_id: String) -> Bool { self.panels.get(panel_id).is_some_and((panel) -> panel.layout[placement.index()].open) }
-    fn dock(self, placement: BrowserPlacement, panel_id: String) -> BrowserDock? { self.panels.get(panel_id).map((panel) -> panel.layout[placement.index()].dock) }
-    fn open_panel(&self, placement: BrowserPlacement, panel_id: String) -> BrowserHostEffect BrowserHostError! {
-        panel :: &self.require_panel(panel_id) ?? return .Err(err)
+    panel: fn(self, panel_id: String) -> BrowserPanelFact? { self.panels.get(panel_id).map((panel) -> panel.fact) }
+    is_open: fn(self, placement: BrowserPlacement, panel_id: String) -> Bool { self.panels.get(panel_id).is_some_and((panel) -> panel.layout[placement.index()].open) }
+    dock: fn(self, placement: BrowserPlacement, panel_id: String) -> BrowserDock? { self.panels.get(panel_id).map((panel) -> panel.layout[placement.index()].dock) }
+    open_panel: fn(&self, placement: BrowserPlacement, panel_id: String) -> BrowserHostEffect BrowserHostError! {
+        panel: &self.require_panel(panel_id) ?? return .Err(err)
         panel.layout[placement.index()].open = true
         return .PanelOpened { placement: placement, panel_id: ^panel_id }
     }
-    fn close_panel(&self, placement: BrowserPlacement, panel_id: String) -> BrowserHostEffect BrowserHostError! {
-        panel :: &self.require_panel(panel_id) ?? return .Err(err)
+    close_panel: fn(&self, placement: BrowserPlacement, panel_id: String) -> BrowserHostEffect BrowserHostError! {
+        panel: &self.require_panel(panel_id) ?? return .Err(err)
         panel.layout[placement.index()].open = false
         if self.selection.is_some_and((selection) -> selection.panel_id == panel_id) -> self.selection = None
         return .PanelClosed { placement: placement, panel_id: ^panel_id }
     }
-    fn dock_panel(&self, placement: BrowserPlacement, panel_id: String, dock: BrowserDock) -> BrowserHostEffect BrowserHostError! {
-        panel :: &self.require_panel(panel_id) ?? return .Err(err)
+    dock_panel: fn(&self, placement: BrowserPlacement, panel_id: String, dock: BrowserDock) -> BrowserHostEffect BrowserHostError! {
+        panel: &self.require_panel(panel_id) ?? return .Err(err)
         panel.layout[placement.index()].dock = dock
         return .PanelDocked { placement: placement, panel_id: ^panel_id, dock: dock }
     }
-    fn select(&self, panel_id: String, node_id: String?) BrowserHostError! {
-        _ :: &self.require_panel(panel_id) ?? return .Err(err)
-        if node_id == .Val(id) -> _ :: self.require_node(panel_id, id) ?? return .Err(err)
+    select: fn(&self, panel_id: String, node_id: String?) BrowserHostError! {
+        _: &self.require_panel(panel_id) ?? return .Err(err)
+        if node_id == .Val(id) -> _: self.require_node(panel_id, id) ?? return .Err(err)
         self.selection = .Val(BrowserSelection { panel_id: ^panel_id, node_id: ^node_id })
     }
-    fn clear_selection(&self) { self.selection = None }
-    fn dispatch(&self, action: BrowserHostAction) -> BrowserHostEffect BrowserHostError! {
+    clear_selection: fn(&self) { self.selection = None }
+    dispatch: fn(&self, action: BrowserHostAction) -> BrowserHostEffect BrowserHostError! {
         if action == {
             .OpenPanel { placement, panel_id } -> &self.open_panel(placement, ^panel_id)
             .ClosePanel { placement, panel_id } -> &self.close_panel(placement, ^panel_id)
@@ -332,28 +332,28 @@ impl BrowserHost {
             .InvokeAction { placement, panel_id, node_id, action_id, grant } -> self.invoke_action(placement, panel_id, node_id, action_id, ^grant)
         }
     }
-    fn navigate_source(self, placement: BrowserPlacement, panel_id: String, node_id: String, grant: BrowserSourceGrant) -> BrowserHostEffect BrowserHostError! {
-        _ :: self.validate_grant_context(panel_id, node_id, grant.session_id, grant.revision) ?? return .Err(err)
+    navigate_source: fn(self, placement: BrowserPlacement, panel_id: String, node_id: String, grant: BrowserSourceGrant) -> BrowserHostEffect BrowserHostError! {
+        _: self.validate_grant_context(panel_id, node_id, grant.session_id, grant.revision) ?? return .Err(err)
         if grant.panel_id != panel_id || grant.node_id != node_id -> return .Err(.ActionNotGranted("source grant does not name the requested panel/node"))
-        _ :: grant.source.validate() ?? return .Err(err)
+        _: grant.source.validate() ?? return .Err(err)
         return .SourceNavigated { placement: placement, panel_id: panel_id.to_string(), node_id: node_id.to_string(), source: ^grant.source }
     }
-    fn invoke_action(self, placement: BrowserPlacement, panel_id: String, node_id: String, action_id: String, grant: BrowserActionGrant) -> BrowserHostEffect BrowserHostError! {
-        _ :: self.validate_grant_context(panel_id, node_id, grant.session_id, grant.revision) ?? return .Err(err)
+    invoke_action: fn(self, placement: BrowserPlacement, panel_id: String, node_id: String, action_id: String, grant: BrowserActionGrant) -> BrowserHostEffect BrowserHostError! {
+        _: self.validate_grant_context(panel_id, node_id, grant.session_id, grant.revision) ?? return .Err(err)
         if grant.panel_id != panel_id || grant.node_id != node_id || grant.action_id != action_id -> return .Err(.ActionNotGranted("action grant does not name the requested panel/node/action"))
-        _ :: validate_text(action_id, "action identity", MAX_BROWSER_TEXT) ?? return .Err(.ActionNotGranted(err.to_string()))
-        node :: self.require_node(panel_id, node_id) ?? return .Err(err)
+        _: validate_text(action_id, "action identity", MAX_BROWSER_TEXT) ?? return .Err(.ActionNotGranted(err.to_string()))
+        node: self.require_node(panel_id, node_id) ?? return .Err(err)
         if node.kind != .Action || node.id != action_id -> return .Err(.ActionNotGranted("the requested node is not an explicitly granted Action node"))
         return .ActionInvoked { placement: placement, panel_id: panel_id.to_string(), node_id: node_id.to_string(), action_id: action_id.to_string() }
     }
-    fn view_model(self, placement: BrowserPlacement) -> BrowserHtmlViewModel {
+    view_model: fn(self, placement: BrowserPlacement) -> BrowserHtmlViewModel {
         keys := self.panels.keys().collect[[String]]()
         &keys.sort()
         panels := keys.iter().map((key) -> {
-            panel :: self.panels[key]
+            panel: self.panels[key]
             BrowserPanelView { panel_id: panel.fact.panel_id.copy(), title: panel.fact.title.copy(), freshness_ms: panel.fact.freshness_ms, status: panel.fact.status.copy(), cursor: panel.fact.cursor, open: panel.layout[placement.index()].open, dock: panel.layout[placement.index()].dock, nodes: panel.fact.nodes.copy() }
         }).collect[[BrowserPanelView]]()
-        catalog :: descriptors()
+        catalog: descriptors()
         ranks := [String:USize]{}
         loop (index, descriptor) in catalog.iter().enumerate() {
             if !ranks.contains(descriptor.id.as_str()) -> &ranks.insert(descriptor.id.as_str(), index)
@@ -376,58 +376,58 @@ impl BrowserHost {
             cursor: self.cursor, state: self.state, selection: self.selection.copy(), panels: ^panels, elements: ^elements
         }
     }
-    fn require_panel(&self, panel_id: String) -> PanelState BrowserHostError! {
+    require_panel: fn(&self, panel_id: String) -> PanelState BrowserHostError! {
         self.panels.get_mut(panel_id) ?? return .Err(.UnknownPanel(panel_id.to_string()))
     }
-    fn require_node(self, panel_id: String, node_id: String) -> BrowserNode BrowserHostError! {
-        panel :: self.panels.get(panel_id) ?? return .Err(.UnknownPanel(panel_id.to_string()))
+    require_node: fn(self, panel_id: String, node_id: String) -> BrowserNode BrowserHostError! {
+        panel: self.panels.get(panel_id) ?? return .Err(.UnknownPanel(panel_id.to_string()))
         find_node(panel.fact.nodes, node_id) ?? return .Err(.UnknownNode { panel_id: panel_id.to_string(), node_id: node_id.to_string() })
     }
-    fn node_exists(self, panel_id: String, node_id: String?) -> Bool {
+    node_exists: fn(self, panel_id: String, node_id: String?) -> Bool {
         if node_id == {
             .Val(id) -> self.require_node(panel_id, id).is_ok()
             .None -> self.panels.contains(panel_id)
         }
     }
-    fn validate_grant_context(self, panel_id: String, node_id: String, grant_session: String, grant_revision: U64) BrowserHostError! {
-        current_revision :: self.revision ?? return .Err(.ActionNotGranted("no canonical event has established a current revision"))
+    validate_grant_context: fn(self, panel_id: String, node_id: String, grant_session: String, grant_revision: U64) BrowserHostError! {
+        current_revision: self.revision ?? return .Err(.ActionNotGranted("no canonical event has established a current revision"))
         if grant_session != self.session_id -> return .Err(.WrongSession { expected: self.session_id.copy(), received: grant_session.to_string() })
         if grant_revision != current_revision -> return .Err(.StaleRevision { current: current_revision, received: grant_revision })
-        _ :: self.require_node(panel_id, node_id) ?? return .Err(err)
+        _: self.require_node(panel_id, node_id) ?? return .Err(err)
     }
-    fn default() -> BrowserHost { BrowserHost.new("") }
+    default: fn() -> BrowserHost { BrowserHost.new("") }
 }
-fn validate_panel(panel: BrowserPanelFact, node_count: &USize) BrowserHostError! {
-    _ :: validate_text(panel.panel_id, "panel identity", MAX_BROWSER_TEXT) ?? return .Err(err)
-    _ :: validate_text(panel.title, "panel title", MAX_BROWSER_TEXT) ?? return .Err(err)
-    _ :: validate_text(panel.status, "panel status", MAX_BROWSER_TEXT) ?? return .Err(err)
+validate_panel: fn(panel: BrowserPanelFact, node_count: &USize) BrowserHostError! {
+    _: validate_text(panel.panel_id, "panel identity", MAX_BROWSER_TEXT) ?? return .Err(err)
+    _: validate_text(panel.title, "panel title", MAX_BROWSER_TEXT) ?? return .Err(err)
+    _: validate_text(panel.status, "panel status", MAX_BROWSER_TEXT) ?? return .Err(err)
     node_ids := [String:Bool]{}
-    loop node in panel.nodes { _ :: validate_node(node, 0, node_count, &node_ids) ?? return .Err(err) }
+    loop node in panel.nodes { _: validate_node(node, 0, node_count, &node_ids) ?? return .Err(err) }
 }
-fn validate_node(node: BrowserNode, depth: USize, node_count: &USize, node_ids: &[String:Bool]) BrowserHostError! {
+validate_node: fn(node: BrowserNode, depth: USize, node_count: &USize, node_ids: &[String:Bool]) BrowserHostError! {
     if depth > MAX_BROWSER_NODE_DEPTH -> return .Err(.InvalidEvent("browser node tree exceeds the depth bound"))
     node_count = node_count.saturating_add(1)
     if node_count > MAX_BROWSER_NODES -> return .Err(.InvalidEvent("browser event exceeds the node bound"))
-    _ :: validate_text(node.id, "node identity", MAX_BROWSER_TEXT) ?? return .Err(err)
-    _ :: validate_text(node.label, "node label", MAX_BROWSER_TEXT) ?? return .Err(err)
-    if node.value == .Val(value) -> _ :: validate_text(value, "node value", MAX_BROWSER_VALUE) ?? return .Err(err)
-    if node.status == .Val(status) -> _ :: validate_text(status, "node status", MAX_BROWSER_TEXT) ?? return .Err(err)
+    _: validate_text(node.id, "node identity", MAX_BROWSER_TEXT) ?? return .Err(err)
+    _: validate_text(node.label, "node label", MAX_BROWSER_TEXT) ?? return .Err(err)
+    if node.value == .Val(value) -> _: validate_text(value, "node value", MAX_BROWSER_VALUE) ?? return .Err(err)
+    if node.status == .Val(status) -> _: validate_text(status, "node status", MAX_BROWSER_TEXT) ?? return .Err(err)
     if node_ids.contains(node.id) -> return .Err(.InvalidEvent("browser panel repeats node `{node.id}`"))
     &node_ids.insert(node.id, true)
-    loop child in node.children { _ :: validate_node(child, depth + 1, node_count, node_ids) ?? return .Err(err) }
+    loop child in node.children { _: validate_node(child, depth + 1, node_count, node_ids) ?? return .Err(err) }
 }
-fn validate_text(value: String, label: String, limit: USize) BrowserHostError! {
+validate_text: fn(value: String, label: String, limit: USize) BrowserHostError! {
     if value.is_empty() || value.len() > limit || value.chars().any((c) -> c.is_control()) -> return .Err(.InvalidEvent("{label} is empty, too long, or contains control text"))
 }
-fn validate_source_id(source_id: String) BrowserHostError! {
+validate_source_id: fn(source_id: String) BrowserHostError! {
     if source_id.is_empty() || source_id.len() > MAX_BROWSER_TEXT || source_id.chars().any((c) -> c.is_control()) || source_id.starts_with('/') || source_id.starts_with('\\') || source_id.contains('\\') || source_id.split('/').any((part) -> part == ".." || part.is_empty()) || source_id.contains("://") -> return .Err(.InvalidSource("source identity must be a non-empty project-relative path"))
 }
-fn derive_session_state(panels: [BrowserPanelFact]) -> BrowserSessionState {
+derive_session_state: fn(panels: [BrowserPanelFact]) -> BrowserSessionState {
     state := BrowserSessionState.Idle
     loop panel in panels {
         value := panel.status.trim() // #4303
         value = value.to_ascii_lowercase()
-        candidate :: if value == {
+        candidate: if value == {
             "building" -> .Building
             "build_failed" | "build-failed" | "build failed" -> .BuildFailed
             "runtime_failure" | "runtime-failure" | "runtime failure" -> .RuntimeFailure
@@ -439,7 +439,7 @@ fn derive_session_state(panels: [BrowserPanelFact]) -> BrowserSessionState {
     }
     return state
 }
-fn prefer_state(current: BrowserSessionState, candidate: BrowserSessionState) -> BrowserSessionState {
+prefer_state: fn(current: BrowserSessionState, candidate: BrowserSessionState) -> BrowserSessionState {
     fn rank(state: BrowserSessionState) -> U8 {
         if state == {
             .Idle -> 0
@@ -452,24 +452,24 @@ fn prefer_state(current: BrowserSessionState, candidate: BrowserSessionState) ->
     }
     if rank(candidate) >= rank(current) -> candidate else -> current
 }
-fn find_node(nodes: [BrowserNode], node_id: String) -> BrowserNode? {
+find_node: fn(nodes: [BrowserNode], node_id: String) -> BrowserNode? {
     loop node in nodes {
         if node.id == node_id -> return .Val(node)
         if find_node(node.children, node_id) == .Val(found) -> return .Val(found)
     }
     return None
 }
-fn element_id(placement: BrowserPlacement, panel_id: String, node_id: String?) -> String {
+element_id: fn(placement: BrowserPlacement, panel_id: String, node_id: String?) -> String {
     id := "jet-devtools-{placement.as_str()}-panel-{stable_fragment(panel_id)}"
     if node_id == .Val(node_id) { &id.push_str("-node-"); &id.push_str(stable_fragment(node_id)) }
     return id
 }
-fn stable_fragment(value: String) -> String {
+stable_fragment: fn(value: String) -> String {
     output := String.with_capacity(value.len())
     loop character in value.chars() { &output.push(if character.is_ascii_alphanumeric() || character == '_' || character == '-' -> character else -> '-') }
     if output.is_empty() -> "item" else -> output
 }
-fn flatten_nodes(placement: BrowserPlacement, panel_id: String, nodes: [BrowserNode], elements: &[BrowserHtmlElement]) {
+flatten_nodes: fn(placement: BrowserPlacement, panel_id: String, nodes: [BrowserNode], elements: &[BrowserHtmlElement]) {
     loop node in nodes {
         &elements.push(BrowserHtmlElement { id: element_id(placement, panel_id, .Val(node.id)), kind: node.kind.as_str(), panel_id: .Val(panel_id.to_string()), node_id: .Val(node.id.copy()), label: node.label.copy(), value: node.value.copy(), status: node.status.copy() })
         flatten_nodes(placement, panel_id, node.children, elements)

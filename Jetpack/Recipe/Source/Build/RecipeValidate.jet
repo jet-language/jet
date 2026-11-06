@@ -4,7 +4,7 @@
 // that seam; no never-defined Rust-derived plan types remain in this unit.
 
 // What a recipe run needs, and where its confinement boundaries are.
-struct RecipeBuildContext {
+RecipeBuildContext: struct {
     // The staged source tree (read-only by contract).
     source_dir: String
     // The single writable install target; every install destination resolves here.
@@ -20,7 +20,7 @@ struct RecipeBuildContext {
 
 // The provenance a recipe run produced: locked fetches plus the effect
 // vocabulary the build exercised. Both flow into `.jet/lock`.
-struct RunReport {
+RunReport: struct {
     fetches: [FetchRecord]
     // Sorted, de-duplicated effect names (`net.fetch`, `exec:<tool>`, `write`).
     effects: [String]
@@ -34,7 +34,7 @@ struct RunReport {
 }
 
 // One refusal shared by recipe validation, execution and staged-plan entry.
-fn recipe_plan_refusal() -> RecipeDiagnostic Never! {
+recipe_plan_refusal: fn() -> RecipeDiagnostic Never! {
     RecipeDiagnostic.new(
         "E1238",
         "recipe graph admission is not available in the Jet-hosted engine",
@@ -43,17 +43,17 @@ fn recipe_plan_refusal() -> RecipeDiagnostic Never! {
     )
 }
 
-fn recipe_validate(_recipe: BuildRecipe, _ctx: RecipeBuildContext) RecipeDiagnostic! -[FS, Env]> {
+recipe_validate: fn(_recipe: BuildRecipe, _ctx: RecipeBuildContext) RecipeDiagnostic! -[FS, Env]> {
     Err(recipe_plan_refusal())
 }
 
 // Rust `str::parse::<usize>`: ASCII digits only.
-fn recipe_parse_count(text: String) -> Int? Never! {
+recipe_parse_count: fn(text: String) -> Int? Never! {
     if text == "" -> return None
     loop byte in text.bytes() {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         if code < 48 || code > 57 -> return None
     }
-    parsed :: Int.parse(text) ?? return None
+    parsed: Int.parse(text) ?? return None
     Val(parsed)
 }

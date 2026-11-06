@@ -6,48 +6,48 @@
 // The bounded JSON field readers at the end are shared by the tool manifest
 // and the package-generation records.
 
-TOOL_PROFILE_CURRENT_SCHEMA :: "jet-profile-current-v1"
-TOOL_PROFILE_GENERATION_SCHEMA :: "jet-profile-generation-v2"
-TOOL_PROFILE_OWNER :: "user"
-TOOL_PROFILE_MAX_TOOLS :: 256
-TOOL_PROFILE_MAX_BINS :: 1024
-TOOL_PROFILE_MAX_STRING :: 4096
-TOOL_PROFILE_MAX_BIN_NAME :: 255
-CLI_INT_MAX :: 9223372036854775807
+TOOL_PROFILE_CURRENT_SCHEMA: "jet-profile-current-v1"
+TOOL_PROFILE_GENERATION_SCHEMA: "jet-profile-generation-v2"
+TOOL_PROFILE_OWNER: "user"
+TOOL_PROFILE_MAX_TOOLS: 256
+TOOL_PROFILE_MAX_BINS: 1024
+TOOL_PROFILE_MAX_STRING: 4096
+TOOL_PROFILE_MAX_BIN_NAME: 255
+CLI_INT_MAX: 9223372036854775807
 
 // The checked `current` pointer: which generation is live, bound to its
 // witness and a checksum over the preceding lines.
-struct ToolProfilePointer {
+ToolProfilePointer: struct {
     generation: Int
     witness: String
 
-    fn format(self) -> String CLIError! {
+    format: fn(self) -> String CLIError! {
         if self.generation == 0 -> return Err(CLIError.InvalidData("tool generation is zero"))
         cli_profile_validate_digest(self.witness)
-        body :: "{TOOL_PROFILE_CURRENT_SCHEMA}\ngeneration\t{self.generation}\nwitness\t{self.witness}\n"
+        body: "{TOOL_PROFILE_CURRENT_SCHEMA}\ngeneration\t{self.generation}\nwitness\t{self.witness}\n"
         Ok("{body}checksum\tsha256-{pkg_sha256_hex(body.bytes())}\n")
     }
 
-    fn parse(text: String) -> ToolProfilePointer CLIError! {
-        lines :: trust_text_lines(text)
+    parse: fn(text: String) -> ToolProfilePointer CLIError! {
+        lines: trust_text_lines(text)
         if lines.len() != 4 || lines[0] != TOOL_PROFILE_CURRENT_SCHEMA || !text.ends_with("\n") {
             return Err(CLIError.InvalidData("current pointer has wrong schema or field count"))
         }
-        generation_text :: cli_strip_prefix(lines[1], "generation\t") ?? return Err(CLIError.InvalidData("current pointer lacks generation"))
-        generation :: cli_parse_u64(generation_text) ?? return Err(CLIError.InvalidData("current pointer generation is invalid"))
+        generation_text: cli_strip_prefix(lines[1], "generation\t") ?? return Err(CLIError.InvalidData("current pointer lacks generation"))
+        generation: cli_parse_u64(generation_text) ?? return Err(CLIError.InvalidData("current pointer generation is invalid"))
         if generation == 0 -> return Err(CLIError.InvalidData("current pointer generation is zero"))
-        witness :: cli_strip_prefix(lines[2], "witness\t") ?? return Err(CLIError.InvalidData("current pointer lacks witness"))
+        witness: cli_strip_prefix(lines[2], "witness\t") ?? return Err(CLIError.InvalidData("current pointer lacks witness"))
         cli_profile_validate_digest(witness)
-        checksum :: cli_strip_prefix(lines[3], "checksum\tsha256-") ?? return Err(CLIError.InvalidData("current pointer lacks checksum"))
+        checksum: cli_strip_prefix(lines[3], "checksum\tsha256-") ?? return Err(CLIError.InvalidData("current pointer lacks checksum"))
         cli_profile_validate_hex64(checksum, "current pointer checksum")
-        body :: trust_text_split_last_text(text, "checksum\t") ?? return Err(CLIError.InvalidData("current pointer lacks checksum"))
+        body: trust_text_split_last_text(text, "checksum\t") ?? return Err(CLIError.InvalidData("current pointer lacks checksum"))
         if pkg_sha256_hex(body.before.bytes()) != checksum -> return Err(CLIError.InvalidData("current pointer checksum mismatch"))
         Ok(ToolProfilePointer{generation: generation, witness: witness})
     }
 }
 
 // One tool in a generation record.
-struct ToolGenerationTool {
+ToolGenerationTool: struct {
     name: String
     version: String
     source: String
@@ -59,14 +59,14 @@ struct ToolGenerationTool {
     projection_hashes: [String]
 
     // The canonical identity order of a generation's tools.
-    fn before(self, other: ToolGenerationTool) -> Bool Never! {
+    before: fn(self, other: ToolGenerationTool) -> Bool Never! {
         if self.name != other.name -> return self.name < other.name
         self.reference < other.reference
     }
 
-    fn format_into(self, out: &[String], last: Bool) Never! {
+    format_into: fn(self, out: &[String], last: Bool) Never! {
         &out.push("    {{\n")
-        fields :: [(key: String, value: String)]{
+        fields: [(key: String, value: String)]{
             (key: "name", value: self.name),
             (key: "version", value: self.version),
             (key: "source", value: self.source),
@@ -81,8 +81,8 @@ struct ToolGenerationTool {
         &out.push(if last -> "    }}\n" else -> "    }},\n")
     }
 
-    fn from_json_tree(value: Dyn) -> ToolGenerationTool CLIError! {
-        tool :: pkg_json_object(value) ?? return Err(CLIError.InvalidData("profile tool entry is not an object"))
+    from_json_tree: fn(value: Dyn) -> ToolGenerationTool CLIError! {
+        tool: pkg_json_object(value) ?? return Err(CLIError.InvalidData("profile tool entry is not an object"))
         cli_json_expect_exact_keys(tool, [String]{"bins", "members", "name", "output_hash", "projection_hashes", "reference", "source", "store_root", "version"}, "profile tool")
         Ok(ToolGenerationTool{
             name: cli_profile_bounded_string(tool, "name"),
@@ -99,12 +99,12 @@ struct ToolGenerationTool {
 }
 
 // A generation's immutable `meta.json` record.
-struct ToolGenerationMetadata {
+ToolGenerationMetadata: struct {
     generation: Int
     created_at: Int
     tools: [ToolGenerationTool]
 
-    fn format(self) -> String CLIError! {
+    format: fn(self) -> String CLIError! {
         self.validate()
         out := [String]{"{{\n"}
         &out.push("  \"schema\": {cli_json_quote(TOOL_PROFILE_GENERATION_SCHEMA)},\n")
@@ -118,52 +118,52 @@ struct ToolGenerationMetadata {
         Ok(out.join(""))
     }
 
-    fn parse(text: String, expected_generation: Int) -> ToolGenerationMetadata CLIError! {
-        tree :: cli_json_parse(text)
-        root :: pkg_json_object(tree) ?? return Err(CLIError.InvalidData("profile metadata root is not an object"))
+    parse: fn(text: String, expected_generation: Int) -> ToolGenerationMetadata CLIError! {
+        tree: cli_json_parse(text)
+        root: pkg_json_object(tree) ?? return Err(CLIError.InvalidData("profile metadata root is not an object"))
         cli_json_expect_exact_keys(root, [String]{"created_at", "generation", "owner", "profile", "schema", "tools"}, "profile metadata")
-        schema :: cli_json_string_field(root, "schema")
-        owner :: cli_json_string_field(root, "owner")
-        profile :: cli_json_string_field(root, "profile")
+        schema: cli_json_string_field(root, "schema")
+        owner: cli_json_string_field(root, "owner")
+        profile: cli_json_string_field(root, "profile")
         if schema != TOOL_PROFILE_GENERATION_SCHEMA || owner != TOOL_PROFILE_OWNER || profile != TOOL_PROFILE_NAME {
             return Err(CLIError.InvalidData("profile metadata identity mismatch"))
         }
-        generation :: cli_json_integer_field(root, "generation")
+        generation: cli_json_integer_field(root, "generation")
         if generation != expected_generation || generation == 0 -> return Err(CLIError.InvalidData("tool generation metadata disagrees with path"))
-        created_at :: cli_json_integer_field(root, "created_at")
-        entries :: pkg_json_array(root.get("tools") ?? Dyn.Null) ?? return Err(CLIError.InvalidData("profile tools field is not an array"))
+        created_at: cli_json_integer_field(root, "created_at")
+        entries: pkg_json_array(root.get("tools") ?? Dyn.Null) ?? return Err(CLIError.InvalidData("profile tools field is not an array"))
         if entries.len() > TOOL_PROFILE_MAX_TOOLS -> return Err(CLIError.InvalidData("profile tool count exceeds bound"))
         tools := [ToolGenerationTool]{}
         loop entry in entries -> &tools.push(ToolGenerationTool.from_json_tree(entry))
-        metadata :: ToolGenerationMetadata{generation: generation, created_at: created_at, tools: tools}
+        metadata: ToolGenerationMetadata{generation: generation, created_at: created_at, tools: tools}
         metadata.validate()
         Ok(metadata)
     }
 
     // Bounds, canonical digests, one identity per tool, one physical name per
     // bin (case-insensitive, `.exe`-aliased), and canonical tool order.
-    fn validate(self) CLIError! {
+    validate: fn(self) CLIError! {
         if self.generation == 0 || self.tools.len() > TOOL_PROFILE_MAX_TOOLS -> return Err(CLIError.InvalidData("tool generation exceeds bounds"))
         identities := [(name: String, reference: String)]{}
         bins := [String]{}
         physical_bins := [String]{}
         loop tool in self.tools {
-            texts :: [String]{tool.name, tool.version, tool.source, tool.reference, tool.store_root}
+            texts: [String]{tool.name, tool.version, tool.source, tool.reference, tool.store_root}
             loop value in texts -> cli_profile_validate_string(value)
             cli_profile_validate_digest(tool.output_hash)
             cli_profile_validate_store_root(tool.store_root)
             if tool.bins.len() == 0 || tool.bins.len() != tool.members.len() || tool.bins.len() != tool.projection_hashes.len() {
                 return Err(CLIError.InvalidData("profile tool has mismatched projection fields"))
             }
-            identity :: (name: tool.name, reference: tool.reference)
+            identity: (name: tool.name, reference: tool.reference)
             if identities.contains(identity) -> return Err(CLIError.InvalidData("duplicate profile tool identity"))
             &identities.push(identity)
             loop index in 0..<tool.bins.len() {
-                bin :: tool.bins[index]
+                bin: tool.bins[index]
                 cli_validate_bin_name(bin)
                 cli_validate_bin_name(tool.members[index])
                 cli_profile_validate_digest(tool.projection_hashes[index])
-                physical :: pkg_ascii_lower(cli_physical_bin_name_for(bin, true))
+                physical: pkg_ascii_lower(cli_physical_bin_name_for(bin, true))
                 if bins.contains(bin) || physical_bins.contains(physical) -> return Err(CLIError.InvalidData("duplicate profile bin"))
                 &bins.push(bin)
                 &physical_bins.push(physical)
@@ -177,7 +177,7 @@ struct ToolGenerationMetadata {
 
     // The witness binds the exact metadata bytes and the sorted, distinct set
     // of target output digests.
-    fn witness(self, metadata_text: String) -> String Never! {
+    witness: fn(self, metadata_text: String) -> String Never! {
         targets := [String]{}
         loop tool in self.tools -> &targets.push(tool.output_hash)
         cli_profile_generation_witness(metadata_text, targets)
@@ -186,7 +186,7 @@ struct ToolGenerationMetadata {
 
 // `sha256-<hex>` over the metadata digest and every distinct target digest
 // in byte order (Rust `profile_generation_witness` / `generation_witness`).
-fn cli_profile_generation_witness(metadata: String, digests: [String]) -> String Never! {
+cli_profile_generation_witness: fn(metadata: String, digests: [String]) -> String Never! {
     sorted := cli_sorted_unique(digests)
     lines := [String]{"jet-profile-generation-witness-v1\nmetadata\t{pkg_sha256_hex(metadata.bytes())}\n"}
     loop digest in sorted -> &lines.push("target\t{digest}\n")
@@ -194,55 +194,55 @@ fn cli_profile_generation_witness(metadata: String, digests: [String]) -> String
 }
 
 // The on-disk name of a logical bin on this host.
-fn cli_physical_bin_name(logical: String) -[Env]> String {
+cli_physical_bin_name: fn(logical: String) -[Env]> String {
     cli_physical_bin_name_for(logical, sys.is_windows())
 }
 
 // Windows appends `.exe` unless the name already ends with it in any case.
-fn cli_physical_bin_name_for(logical: String, windows: Bool) -> String Never! {
+cli_physical_bin_name_for: fn(logical: String, windows: Bool) -> String Never! {
     if windows && !pkg_ascii_lower(logical).ends_with(".exe") -> return "{logical}.exe"
     logical.copy()
 }
 
 // One normal path component of `[A-Za-z0-9_.+-]`, not a Windows device name
 // and not the package engine itself.
-fn cli_validate_bin_name(value: String) CLIError! {
-    raw :: value.bytes()
+cli_validate_bin_name: fn(value: String) CLIError! {
+    raw: value.bytes()
     if raw.len() == 0 || raw.len() > TOOL_PROFILE_MAX_BIN_NAME -> return Err(CLIError.InvalidData("profile bin name has invalid length"))
     if value == "." || value == ".." -> return Err(CLIError.InvalidData("profile bin name is not one normal component"))
     loop byte in raw {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         if !(trust_text_is_alphanumeric(code) || code == 95 || code == 45 || code == 46 || code == 43) {
             return Err(CLIError.InvalidData("profile bin name is not one normal component"))
         }
     }
-    stem :: cli_ascii_upper(trust_text_split(value, TRUST_DOT)[0])
+    stem: cli_ascii_upper(trust_text_split(value, TRUST_DOT)[0])
     if cli_windows_reserved_stem(stem) -> return Err(CLIError.InvalidData("profile bin name is reserved on Windows"))
-    lowered :: pkg_ascii_lower(value)
+    lowered: pkg_ascii_lower(value)
     if lowered == "jetpack" || lowered == "jetpack.exe" -> return Err(CLIError.InvalidData("profile bin name collides with the package engine"))
 }
 
-fn cli_windows_reserved_stem(stem: String) -> Bool Never! {
+cli_windows_reserved_stem: fn(stem: String) -> Bool Never! {
     if stem == {
         "CON" | "PRN" | "AUX" | "NUL" | "CLOCK$" -> return true
         else -> {}
     }
-    prefixes :: [String]{"COM", "LPT"}
+    prefixes: [String]{"COM", "LPT"}
     loop prefix in prefixes {
-        number_text :: cli_strip_prefix(stem, prefix) ?? next
-        number :: cli_parse_u64(number_text) ?? next
+        number_text: cli_strip_prefix(stem, prefix) ?? next
+        number: cli_parse_u64(number_text) ?? next
         if number >= 1 && number <= 9 -> return true
     }
     false
 }
 
 // An absolute path with no `.` or `..` component.
-fn cli_profile_validate_store_root(value: String) CLIError! {
+cli_profile_validate_store_root: fn(value: String) CLIError! {
     cli_profile_validate_string(value)
     if !cli_path_is_normalized_absolute(value) -> return Err(CLIError.InvalidData("profile Store authority is not absolute and normalized"))
 }
 
-fn cli_path_is_normalized_absolute(value: String) -> Bool Never! {
+cli_path_is_normalized_absolute: fn(value: String) -> Bool Never! {
     if !files.is_abs(value) -> return false
     loop part in trust_text_split(trust_text_replace_all(value, "\\", "/"), TRUST_SLASH) {
         if part == "." || part == ".." -> return false
@@ -250,48 +250,48 @@ fn cli_path_is_normalized_absolute(value: String) -> Bool Never! {
     true
 }
 
-fn cli_profile_validate_digest(value: String) CLIError! {
-    hex :: cli_strip_prefix(value, "sha256-") ?? return Err(CLIError.InvalidData("profile digest is not sha256"))
+cli_profile_validate_digest: fn(value: String) CLIError! {
+    hex: cli_strip_prefix(value, "sha256-") ?? return Err(CLIError.InvalidData("profile digest is not sha256"))
     cli_profile_validate_hex64(hex, "profile digest")
 }
 
-fn cli_profile_validate_hex64(value: String, label: String) CLIError! {
+cli_profile_validate_hex64: fn(value: String, label: String) CLIError! {
     if !cli_is_lower_hex64(value) -> return Err(CLIError.InvalidData("{label} is not canonical"))
 }
 
 // Exactly 64 lowercase hexadecimal digits.
-fn cli_is_lower_hex64(value: String) -> Bool Never! {
-    raw :: value.bytes()
+cli_is_lower_hex64: fn(value: String) -> Bool Never! {
+    raw: value.bytes()
     if raw.len() != 64 -> return false
     loop byte in raw {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         if !((code >= 48 && code <= 57) || (code >= 97 && code <= 102)) -> return false
     }
     true
 }
 
 // `sha256-` followed by 64 lowercase hexadecimal digits.
-fn cli_is_canonical_digest(value: String) -> Bool Never! {
-    hex :: cli_strip_prefix(value, "sha256-") ?? return false
+cli_is_canonical_digest: fn(value: String) -> Bool Never! {
+    hex: cli_strip_prefix(value, "sha256-") ?? return false
     cli_is_lower_hex64(hex)
 }
 
-fn cli_profile_validate_string(value: String) CLIError! {
-    raw :: value.bytes()
+cli_profile_validate_string: fn(value: String) CLIError! {
+    raw: value.bytes()
     if raw.len() > TOOL_PROFILE_MAX_STRING -> return Err(CLIError.InvalidData("profile string exceeds bounds"))
     loop byte in raw {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         if code < 32 || code == 127 -> return Err(CLIError.InvalidData("profile string exceeds bounds"))
     }
 }
 
-fn cli_profile_bounded_string(object: [String: Dyn], key: String) -> String CLIError! {
-    value :: cli_json_string_field(object, key)
+cli_profile_bounded_string: fn(object: [String: Dyn], key: String) -> String CLIError! {
+    value: cli_json_string_field(object, key)
     cli_profile_validate_string(value)
     Ok(value)
 }
 
-fn cli_profile_string_array_line(out: &[String], key: String, values: [String], comma: Bool) Never! {
+cli_profile_string_array_line: fn(out: &[String], key: String, values: [String], comma: Bool) Never! {
     quoted := [String]{}
     loop value in values -> &quoted.push(cli_json_quote(value))
     &out.push("      \"{key}\": [{quoted.join(", ")}]{if comma -> "," else -> ""}\n")
@@ -300,25 +300,25 @@ fn cli_profile_string_array_line(out: &[String], key: String, values: [String], 
 // ── Shared bounded JSON field readers (CLI profile, tool manifest, package generations) ──
 
 // One JSON string literal.
-fn cli_json_quote(value: String) -> String Never! {
+cli_json_quote: fn(value: String) -> String Never! {
     pkg_json_render(Dyn.Text(value.copy()))
 }
 
 // `[a,b]` of JSON string literals, no spaces.
-fn cli_json_quote_list(values: [String]) -> String Never! {
+cli_json_quote_list: fn(values: [String]) -> String Never! {
     quoted := [String]{}
     loop value in values -> &quoted.push(cli_json_quote(value))
     quoted.join(",")
 }
 
-fn cli_json_parse(text: String) -> Dyn CLIError! {
+cli_json_parse: fn(text: String) -> Dyn CLIError! {
     if json.parse(text) == {
         .Ok(tree) -> Ok(tree)
         .Err(error) -> Err(CLIError.InvalidData(error.reason))
     }
 }
 
-fn cli_json_expect_exact_keys(object: [String: Dyn], expected: [String], label: String) CLIError! {
+cli_json_expect_exact_keys: fn(object: [String: Dyn], expected: [String], label: String) CLIError! {
     actual := object.keys().to_list()
     &actual.sort()
     wanted := expected
@@ -326,27 +326,27 @@ fn cli_json_expect_exact_keys(object: [String: Dyn], expected: [String], label: 
     if actual != wanted -> return Err(CLIError.InvalidData("{label} has unknown or missing fields"))
 }
 
-fn cli_json_string_field(object: [String: Dyn], key: String) -> String CLIError! {
-    value :: object.get(key) ?? return Err(CLIError.InvalidData("missing key `{key}`"))
-    text :: pkg_json_text(value) ?? return Err(CLIError.InvalidData("expected a Dyn string"))
+cli_json_string_field: fn(object: [String: Dyn], key: String) -> String CLIError! {
+    value: object.get(key) ?? return Err(CLIError.InvalidData("missing key `{key}`"))
+    text: pkg_json_text(value) ?? return Err(CLIError.InvalidData("expected a Dyn string"))
     Ok(text)
 }
 
 // A non-negative exact integer, read through Core's typed Int decode.
-fn cli_json_integer_field(object: [String: Dyn], key: String) -> Int CLIError! {
-    value :: object.get(key) ?? return Err(CLIError.InvalidData("profile field `{key}` is not a number"))
-    number :: value.decode<Int>() ?? return Err(CLIError.InvalidData("profile field `{key}` is not an exact integer"))
+cli_json_integer_field: fn(object: [String: Dyn], key: String) -> Int CLIError! {
+    value: object.get(key) ?? return Err(CLIError.InvalidData("profile field `{key}` is not a number"))
+    number: value.decode<Int>() ?? return Err(CLIError.InvalidData("profile field `{key}` is not an exact integer"))
     if number < 0 -> return Err(CLIError.InvalidData("profile field `{key}` is not an exact integer"))
     Ok(number)
 }
 
 // A string array whose members are at most `max_len` bytes; `forbid_nul`
 // additionally refuses a NUL byte (the manifest readers).
-fn cli_json_string_array(object: [String: Dyn], key: String, max_len: Int, forbid_nul: Bool) -> [String] CLIError! {
-    values :: pkg_json_array(object.get(key) ?? Dyn.Null) ?? return Err(CLIError.InvalidData("profile field `{key}` is not an array"))
+cli_json_string_array: fn(object: [String: Dyn], key: String, max_len: Int, forbid_nul: Bool) -> [String] CLIError! {
+    values: pkg_json_array(object.get(key) ?? Dyn.Null) ?? return Err(CLIError.InvalidData("profile field `{key}` is not an array"))
     out := [String]{}
     loop value in values {
-        text :: pkg_json_text(value) ?? return Err(CLIError.InvalidData("expected a Dyn string"))
+        text: pkg_json_text(value) ?? return Err(CLIError.InvalidData("expected a Dyn string"))
         if text.bytes().len() > max_len || (forbid_nul && text.bytes().contains(U8{0})) -> return Err(CLIError.InvalidData("profile field `{key}` exceeds bounds"))
         &out.push(text)
     }
@@ -356,21 +356,21 @@ fn cli_json_string_array(object: [String: Dyn], key: String, max_len: Int, forbi
 // ── Small text helpers shared by the CLI profile slices ──
 
 // Rust `strip_prefix`.
-fn cli_strip_prefix(value: String, prefix: String) -> String? Never! {
+cli_strip_prefix: fn(value: String, prefix: String) -> String? Never! {
     if !value.starts_with(prefix) -> return None
     Val(value.removeprefix(prefix))
 }
 
 // Rust `str::parse::<u64>`: an optional `+` and one or more ASCII digits
 // that fit the signed 64-bit range.
-fn cli_parse_u64(text: String) -> Int? Never! {
+cli_parse_u64: fn(text: String) -> Int? Never! {
     digits := text
     if digits.starts_with("+") -> digits = digits.removeprefix("+")
-    raw :: digits.bytes()
+    raw: digits.bytes()
     if raw.len() == 0 -> return None
     value := 0
     loop byte in raw {
-        digit :: Int.from_u8(byte) - 48
+        digit: Int.from_u8(byte) - 48
         if digit < 0 || digit > 9 -> return None
         if value > (CLI_INT_MAX - digit) /% 10 -> return None
         value = value * 10 + digit
@@ -379,17 +379,17 @@ fn cli_parse_u64(text: String) -> Int? Never! {
 }
 
 // ASCII-only uppercase (`str::to_ascii_uppercase`).
-fn cli_ascii_upper(value: String) -> String Never! {
+cli_ascii_upper: fn(value: String) -> String Never! {
     out := [U8]{}
     loop byte in value.bytes() {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         &out.push(if code >= 97 && code <= 122 -> U8{code - 32} else -> byte)
     }
     String.from_bytes(out) ?? value
 }
 
 // Distinct values in byte order (a `BTreeSet` walk).
-fn cli_sorted_unique(values: [String]) -> [String] Never! {
+cli_sorted_unique: fn(values: [String]) -> [String] Never! {
     sorted := values
     &sorted.sort()
     out := [String]{}

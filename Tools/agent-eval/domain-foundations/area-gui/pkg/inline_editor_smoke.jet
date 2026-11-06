@@ -1,20 +1,20 @@
-package {
+package: {
     name: "inline_editor_smoke"
     authority: { allow: [Browser, IO, Mem.Alloc] }
 }
 
 use {
-    ui :: core.ui
-    reactive :: core.reactive
+    ui: core.ui
+    reactive: core.reactive
 }
 
-fn run() {
-    title :: "Meeting"
+run: fn() {
+    title: "Meeting"
     body := reactive.signal("old")
     backend := ui.tui_backend()
-    render_backend :: backend.copy()
+    render_backend: backend.copy()
     ui.reactive_render(() -> {
-        tree :: ui.box([
+        tree: ui.box([
             ui.text(title),
             ui.node_role(body.get(), 30.0, 3.0, ui.aria_role_text_input()),
             ui.button("Save", on_click: () -> { print("save") })

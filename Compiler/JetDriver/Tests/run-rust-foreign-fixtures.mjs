@@ -22,7 +22,7 @@ function body(text) {
     if (skipping) { if (line.trimStart().startsWith(']') || line === '}') skipping = false; continue; }
     if (/^use jet_\w+\.\[\s*$/.test(line)) { skipping = true; continue; }
     if (/^use jet_/.test(line)) continue;
-    if (/^use (?:\w+ :: )?core\./.test(line)) { core.add(line); continue; }
+    if (/^use (?:\w+: )?core\./.test(line)) { core.add(line); continue; }
     kept.push(line);
   }
   return kept.join('\n');
@@ -34,7 +34,7 @@ const declaredIn = compilerSources(repo).flatMap(entry => entry.files)
 for (const path of declaredIn) {
   const lines = read(path).split('\n');
   for (let i = 0; i < lines.length; i++) {
-    const match = /^(?:struct|enum|fn)\s+([A-Za-z_]\w*)\b|^([A-Z][A-Z_\d]*)\s*::/.exec(lines[i]);
+    const match = /^([A-Za-z_]\w*)(?:\.[A-Za-z_]\w*)?:\s*(?:struct|enum|fn)\b|^([A-Z][A-Z_\d]*):/.exec(lines[i]);
     if (!match) continue;
     const name = match[1] ?? match[2]; let start = i;
     while (start > 0 && lines[start - 1].startsWith('#')) start--;
@@ -49,21 +49,21 @@ for (const path of declaredIn) {
   }
 }
 const planner = read('Compiler/JetDriver/Source/Driver/RustForeign.jet');
-const prefix = planner.indexOf('struct JetDriverRustForeignRecord ');
+const prefix = planner.indexOf('JetDriverRustForeignRecord: struct ');
 if (prefix < 0) throw new Error('missing planner/checked-graph boundary');
 const fixture = read('Compiler/JetDriver/Tests/RustForeignFixtures.fixture/RustForeignFixtures.jet');
 const environmentFixture = process.argv.includes('--host-env');
 const host = process.argv.includes('--host') || process.argv.includes('--host-full') || environmentFixture;
-const roots = [body(planner.slice(0, prefix)), body(read('Compiler/JetDriver/Source/Driver/RustForeignSource.jet')), body(host ? fixture.slice(0, fixture.indexOf('fn run()')) : fixture)];
+const roots = [body(planner.slice(0, prefix)), body(read('Compiler/JetDriver/Source/Driver/RustForeignSource.jet')), body(host ? fixture.slice(0, fixture.indexOf('run: fn()')) : fixture)];
 if (host) {
   if (process.argv.includes('--host-full')) roots.push(body(read('Compiler/JetCli/Source/Cli/RustForeign.jet')));
-  else roots.push(body(unblockUses(read('Compiler/JetCli/Source/Cli/RustForeign.jet')).split('\n').filter(line => /^use (?:\w+ :: )?core\./.test(line)).join('\n')));
+  else roots.push(body(unblockUses(read('Compiler/JetCli/Source/Cli/RustForeign.jet')).split('\n').filter(line => /^use (?:\w+: )?core\./.test(line)).join('\n')));
   if (environmentFixture) {
     const tests = read('Compiler/JetCli/Tests/RustForeign.fixture/RustForeign.jet');
-    const start = tests.indexOf('fn cli_rust_foreign_test_environment()');
-    const end = tests.indexOf('\nfn run()', start);
+    const start = tests.indexOf('cli_rust_foreign_test_environment: fn()');
+    const end = tests.indexOf('\nrun: fn()', start);
     if (start < 0 || end < 0) throw new Error('missing canonical helper environment regression');
-    roots.push(body('use rust_foreign_test_sys :: core.sys\n' + tests.slice(start, end) + '\nfn run() { cli_rust_foreign_test_environment()\nprint("FFI environment fixtures passed") }\n'));
+    roots.push(body('use rust_foreign_test_sys: core.sys\n' + tests.slice(start, end) + '\nrun: fn() { cli_rust_foreign_test_environment()\nprint("FFI environment fixtures passed") }\n'));
   } else roots.push(body(read('Compiler/JetCli/Tests/RustForeignFixtures.fixture/RustForeignFixtures.jet')));
 }
 const owned = new Set(roots.join('\n').match(/\b(?:JetDriverRustForeign\w*|jet_driver_rust_foreign_\w*|rust_foreign_fixture_\w*|JET_DRIVER_RUST_FOREIGN_\w*)\b/g) ?? []);
@@ -78,7 +78,7 @@ while (queue.length) {
   // Literal descriptor words (e.g. RustExternBlock) are not AST dependencies.
   // Retain function calls inside interpolations, including hashing/display.
   const code = text.replace(/\/\/[^\n]*/g, '').replace(/"(?:\\.|[^"\\])*"/g, '');
-  const calls = [...text.matchAll(/\b([A-Za-z_]\w*)\s*\(/g)].map(match => match[1]).filter(name => /^fn /m.test(declarations.get(name)?.text ?? ''));
+  const calls = [...text.matchAll(/\b([A-Za-z_]\w*)\s*\(/g)].map(match => match[1]).filter(name => /^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?: fn\b/m.test(declarations.get(name)?.text ?? ''));
   // A variant named Field/Symbol is not the unrelated AST Field/Symbol type.
   const types = [...code.matchAll(/\b([A-Za-z_]\w*)\s*(?=[.{])|(?:[:[\]<]|->)\s*([A-Za-z_]\w*)/g)].map(match => match[1] ?? match[2]);
   const constants = text.match(/\b[A-Z][A-Z_\d]*\b/g) ?? [];

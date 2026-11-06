@@ -1,17 +1,17 @@
 // #3713: a failing Core call is the origin. Reading a missing file fails at
 // the `files.read` call, and the report names that line.
-package {
+package: {
     name: "propagation_journey_core"
     authority: { allow: [FS.Read, IO] }
 }
 
 use core.files
 
-fn load(path: String) -> String {
-    text :: files.read(path)
+load: fn(path: String) -> String {
+    text: files.read(path)
     text.trim()
 }
 
-fn run() {
+run: fn() {
     print(load("propagation-journey-missing.txt"))
 }

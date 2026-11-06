@@ -7,13 +7,13 @@
 // clears on thread exit.
 crypto_entropy_key := I64{0}
 
-fn rt_crypto_entropy_drop_address() -> I64 {
+rt_crypto_entropy_drop_address: fn() -> I64 {
     loop { jet_rt_unreachable(I64{0}, I64{0}) }
 }
 // runtime-init: 3 when crypto_entropy_key
-#Export(c) fn jet_rt_crypto_entropy_init() {
+#Export(c) jet_rt_crypto_entropy_init: fn() {
     if (crypto_entropy_key != I64{0}) -> return
-    closure :: jet_rt_alloc(I64{24}, I64{8})
+    closure: jet_rt_alloc(I64{24}, I64{8})
     rt_text_store(closure, I64{1})
     rt_text_store(wrapping(closure + I64{8}), rt_crypto_entropy_drop_address())
     rt_text_store(wrapping(closure + I64{16}), I64{0})
@@ -21,14 +21,14 @@ fn rt_crypto_entropy_drop_address() -> I64 {
         crypto_entropy_key = jet_rt_tls_key_new(closure)
     }
 }
-#Export(c) fn jet_rt_crypto_entropy_drop(_closure: I64, state: I64) -> I64 {
+#Export(c) jet_rt_crypto_entropy_drop: fn(_closure: I64, state: I64) -> I64 {
     rt_crypto_wipe(state, I64{16})
     jet_rt_free(state, I64{16}, I64{8})
     return I64{0}
 }
-fn rt_crypto_entropy_clear() {
+rt_crypto_entropy_clear: fn() {
     if (crypto_entropy_key == I64{0}) -> return
-    state :: jet_rt_tls_get(crypto_entropy_key)
+    state: jet_rt_tls_get(crypto_entropy_key)
     if (state == I64{0}) -> return
     jet_rt_tls_set(crypto_entropy_key, I64{0})
     _ := jet_rt_crypto_entropy_drop(I64{0}, state)
@@ -36,17 +36,17 @@ fn rt_crypto_entropy_clear() {
 // Internal test/fault adapter installation, not a Core API. The callback ABI is
 // (context, suffix, remaining)->I64: >0 Filled(n), -4 Interrupted, else Failed.
 // A callback of zero resets to the real provider. No second Rand hook exists.
-fn rt_crypto_entropy_set(callback: I64, context: I64) {
+rt_crypto_entropy_set: fn(callback: I64, context: I64) {
     rt_crypto_entropy_clear()
     if (callback == I64{0}) -> return
-    state :: jet_rt_alloc(I64{16}, I64{8})
+    state: jet_rt_alloc(I64{16}, I64{8})
     rt_text_store(state, callback)
     rt_text_store(wrapping(state + I64{8}), context)
     jet_rt_tls_set(crypto_entropy_key, state)
 }
-fn rt_crypto_entropy_step(out: I64, count: I64) -> I64 {
+rt_crypto_entropy_step: fn(out: I64, count: I64) -> I64 {
     if (crypto_entropy_key != I64{0}) {
-        state :: jet_rt_tls_get(crypto_entropy_key)
+        state: jet_rt_tls_get(crypto_entropy_key)
         if (state != I64{0}) {
             #Unsafe("the test/fault harness owns the synchronous callback and context until reset; the callback borrows only this writable suffix") {
                 return os_call3_i64(rt_text_word(state), rt_text_word(wrapping(state + I64{8})), out, count)
@@ -57,14 +57,14 @@ fn rt_crypto_entropy_step(out: I64, count: I64) -> I64 {
         return os_syscall_i64(I64{318}, out, count, I64{0}, I64{0}, I64{0}, I64{0})
     }
 }
-fn rt_crypto_entropy_fill(out: I64, count: I64) -> I64 {
+rt_crypto_entropy_fill: fn(out: I64, count: I64) -> I64 {
     // Bounds belong to Core too; this raw ABI rejects invalid spans before
     // dereference. An invalid count has no valid borrowed span to wipe.
     if (count < I64{0} || count > I64{1048576}) -> return I64{1}
     if (count == I64{0}) -> return I64{0}
     filled := I64{0}
     loop filled < count {
-        n :: rt_crypto_entropy_step(out + filled, count - filled)
+        n: rt_crypto_entropy_step(out + filled, count - filled)
         if (n > I64{0} && n <= count - filled) {
             filled += n
         } else if (n == I64{-4}) {
@@ -85,18 +85,18 @@ fn rt_crypto_entropy_fill(out: I64, count: I64) -> I64 {
 // zero-at-free (Refcount.jet RC_ZERO_MARK) before this List's reference is
 // released, so its last owner's release wipes it. Frozen static bytes
 // (capacity 0) cannot be written; this List takes fresh zeroes of its length.
-#Export(c) fn jet_rt_crypto_wipe(header: I64) {
-    length :: trap_word(header)
-    capacity :: trap_word(wrapping(header + I64{8}))
-    data :: trap_word(wrapping(header + I64{16}))
+#Export(c) jet_rt_crypto_wipe: fn(header: I64) {
+    length: trap_word(header)
+    capacity: trap_word(wrapping(header + I64{8}))
+    data: trap_word(wrapping(header + I64{16}))
     if (capacity != I64{0} && jet_rt_block_unique(data)) {
         rt_wipe_bytes(data, rt_secret_buffer_bytes(capacity))
         return
     }
     if (capacity == I64{0} && length == I64{0}) -> return
-    fresh_capacity :: if (capacity == I64{0}) -> length else -> capacity
-    bytes :: rt_secret_buffer_bytes(fresh_capacity)
-    fresh :: jet_rt_alloc(bytes, I64{8})
+    fresh_capacity: if (capacity == I64{0}) -> length else -> capacity
+    bytes: rt_secret_buffer_bytes(fresh_capacity)
+    fresh: jet_rt_alloc(bytes, I64{8})
     rt_wipe_bytes(fresh, bytes)
     if (capacity != I64{0}) {
         jet_rt_block_mark_zero(data)
@@ -108,7 +108,7 @@ fn rt_crypto_entropy_fill(out: I64, count: I64) -> I64 {
 
 // CAbiRoutes:15924 Option<List<U8>> transfers payload pointer/count on Some;
 // None leaves both out slots untouched. No list header crosses this boundary.
-#Export(c) fn jet_random_os_entropy(count: I64, some: I64, some_len: I64) -> I64 {
+#Export(c) jet_random_os_entropy: fn(count: I64, some: I64, some_len: I64) -> I64 {
     jet_rt_world_reject_uncontrolled(I64{3})
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     if (count < I64{0} || count > I64{1048576}) -> return I64{0}
@@ -117,8 +117,8 @@ fn rt_crypto_entropy_fill(out: I64, count: I64) -> I64 {
         rt_text_store(some_len, I64{0})
         return I64{1}
     }
-    capacity :: count * RT_HOST_U8_STRIDE
-    bytes :: jet_rt_alloc(capacity, I64{8})
+    capacity: count * RT_HOST_U8_STRIDE
+    bytes: jet_rt_alloc(capacity, I64{8})
     if (rt_prove_rand_fill(bytes, count) != I64{0}) {
         rt_crypto_wipe(bytes, capacity)
         jet_rt_free(bytes, capacity, I64{8})

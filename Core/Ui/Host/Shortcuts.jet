@@ -1,5 +1,5 @@
 use {
-    core :: core
+    core: core
     core.ui.host.[UIHostError, UIShortcut, UIShortcutBinding, UIShortcutDispatch, UIShortcutModifiers]
 }
 
@@ -9,15 +9,15 @@ use {
 //
 // Modifier bits: Control 1, Alt 2, Shift 4, Meta 8, and 16 for the logical
 // platform command (`UIShortcut.cmd`), which is Control or Meta by platform.
-struct ShortcutRegistry {
+ShortcutRegistry: struct {
     bindings: [UIShortcutBinding]
 }
 
-SHORTCUTS :: shared ShortcutRegistry{bindings: [UIShortcutBinding]{}}
+SHORTCUTS: shared ShortcutRegistry{bindings: [UIShortcutBinding]{}}
 
-COMMAND :: 16
+COMMAND: 16
 
-fn binding(shortcut: UIShortcut, action: String) -> UIShortcutBinding UIHostError! {
+binding: fn(shortcut: UIShortcut, action: String) -> UIShortcutBinding UIHostError! {
     if action.len() == 0 -> return Err(UIHostError.InvalidRequest("shortcut action must not be empty"))
     Ok(UIShortcutBinding{shortcut: shortcut, action: action, node: None})
 }
@@ -26,7 +26,7 @@ fn binding(shortcut: UIShortcut, action: String) -> UIShortcutBinding UIHostErro
 // shortcut for a different action conflicts with the first. A new binding
 // claims its key from the provider first (D-UI-WEB-KEYS1=A), so a browser page
 // cancels the default action of bound keys only.
-fn register(binding: UIShortcutBinding) -[IO]> UIShortcutBinding UIHostError! {
+register: fn(binding: UIShortcutBinding) -[IO]> UIShortcutBinding UIHostError! {
     if !core.ui.host.__capability(4) -> return Err(UIHostError.CapabilityUnavailable{capability: "Shortcuts"})
     if binding.action.len() == 0 -> return Err(UIHostError.InvalidRequest("shortcut action must not be empty"))
     loop existing in SHORTCUTS.bindings {
@@ -41,7 +41,7 @@ fn register(binding: UIShortcutBinding) -[IO]> UIShortcutBinding UIHostError! {
     Ok(binding)
 }
 
-fn dispatch(shortcut: UIShortcut) -[IO]> UIShortcutDispatch UIHostError! {
+dispatch: fn(shortcut: UIShortcut) -[IO]> UIShortcutDispatch UIHostError! {
     if !core.ui.host.__capability(4) -> return Err(UIHostError.CapabilityUnavailable{capability: "Shortcuts"})
     Ok(dispatched(lookup(shortcut)))
 }
@@ -51,31 +51,31 @@ fn dispatch(shortcut: UIShortcut) -[IO]> UIShortcutDispatch UIHostError! {
 // provider queues only keys a registration claimed. A key pressed with
 // exactly one of Control and Meta also matches a command binding. An empty
 // record is the provider's mark that its queue overflowed and dropped events.
-fn poll() -[IO]> UIShortcutDispatch? UIHostError! {
+poll: fn() -[IO]> UIShortcutDispatch? UIHostError! {
     if !core.ui.host.__capability(4) -> return Err(UIHostError.CapabilityUnavailable{capability: "Shortcuts"})
-    raw :: core.ui.host.__event_pop(2) ?? return Ok(None)
+    raw: core.ui.host.__event_pop(2) ?? return Ok(None)
     if raw.len() == 0 -> return Err(UIHostError.QueueFull{service: "Shortcuts"})
-    fields :: core.ui.host.provider_record_fields(raw) ?? return Err(shortcut_failure("a key event is not a provider record"))
+    fields: core.ui.host.provider_record_fields(raw) ?? return Err(shortcut_failure("a key event is not a provider record"))
     if fields.len() != 3 -> return Err(shortcut_failure("a key event has 3 fields, not {fields.len()}"))
-    mask :: Int.parse(fields[2]) ?? return Err(shortcut_failure("key modifiers `{fields[2]}` are not a number"))
+    mask: Int.parse(fields[2]) ?? return Err(shortcut_failure("key modifiers `{fields[2]}` are not a number"))
     if mask < 0 || mask > 15 -> return Err(shortcut_failure("key modifiers `{fields[2]}` are outside the Control, Alt, Shift and Meta bits"))
-    pressed :: core.ui.host.shortcut(fields[1], UIShortcutModifiers{bits: mask})
+    pressed: core.ui.host.shortcut(fields[1], UIShortcutModifiers{bits: mask})
     if lookup(pressed) == .Val(exact) -> return Ok(Val(UIShortcutDispatch.Dispatched(exact)))
-    control :: mask.bit_and(1) != 0
-    meta :: mask.bit_and(8) != 0
+    control: mask.bit_and(1) != 0
+    meta: mask.bit_and(8) != 0
     if control == meta -> return Ok(Val(UIShortcutDispatch.Unhandled))
-    command :: mask - (if control -> 1 else -> 8) + COMMAND
+    command: mask - (if control -> 1 else -> 8) + COMMAND
     Ok(Val(dispatched(lookup(UIShortcut{key: pressed.key.copy(), modifiers: UIShortcutModifiers{bits: command}}))))
 }
 
-fn lookup(shortcut: UIShortcut) -> UIShortcutBinding? Never! {
+lookup: fn(shortcut: UIShortcut) -> UIShortcutBinding? Never! {
     loop existing in SHORTCUTS.bindings {
         if existing.shortcut == shortcut -> return Val(existing.copy())
     }
     None
 }
 
-fn dispatched(found: UIShortcutBinding?) -> UIShortcutDispatch Never! {
+dispatched: fn(found: UIShortcutBinding?) -> UIShortcutDispatch Never! {
     if found == .Val(binding) -> return UIShortcutDispatch.Dispatched(binding)
     UIShortcutDispatch.Unhandled
 }
@@ -83,22 +83,22 @@ fn dispatched(found: UIShortcutBinding?) -> UIShortcutDispatch Never! {
 // The provider claims of a shortcut: `<mask>:<key>` for each modifier mask a
 // browser key event can carry for it. A command shortcut claims its Control
 // and its Meta form, since the page's platform is the browser's.
-fn key_claims(shortcut: UIShortcut) -> [String] Never! {
-    bits :: shortcut.modifiers.bits
-    base :: bits.bit_and(15)
+key_claims: fn(shortcut: UIShortcut) -> [String] Never! {
+    bits: shortcut.modifiers.bits
+    base: bits.bit_and(15)
     if bits.bit_and(COMMAND) == 0 -> return [String]{"{base}:{shortcut.key}"}
-    control :: if base.bit_and(1) == 0 -> base + 1 else -> base
-    meta :: if base.bit_and(8) == 0 -> base + 8 else -> base
+    control: if base.bit_and(1) == 0 -> base + 1 else -> base
+    meta: if base.bit_and(8) == 0 -> base + 8 else -> base
     [String]{"{control}:{shortcut.key}", "{meta}:{shortcut.key}"}
 }
 
-fn shortcut_failure(message: String) -> UIHostError Never! {
+shortcut_failure: fn(message: String) -> UIHostError Never! {
     UIHostError.HostFailure{service: "Shortcuts", message: message}
 }
 
 #Test("UI shortcut bindings preserve action bytes and absent node identity") {
-    key :: core.ui.host.shortcut(" A ", core.ui.host.UIShortcutModifiers{}) ?? panic("valid shortcut rejected")
-    bound :: binding(key, " ") ?? panic("space action rejected")
+    key: core.ui.host.shortcut(" A ", core.ui.host.UIShortcutModifiers{}) ?? panic("valid shortcut rejected")
+    bound: binding(key, " ") ?? panic("space action rejected")
     assert(bound.action == " " && bound.node == None && bound.shortcut == key)
     if binding(key, "") == .Err(error) {
         if error == .InvalidRequest(message) -> assert(message == "shortcut action must not be empty")
@@ -108,8 +108,8 @@ fn shortcut_failure(message: String) -> UIHostError Never! {
 
 #Test("a command shortcut claims its Control and Meta forms; others claim their own mask") {
     assert_eq(key_claims(UIShortcut.cmd("s")), [String]{"1:s", "8:s"})
-    shifted :: UIShortcut{key: "k", modifiers: UIShortcutModifiers{bits: 4}}
+    shifted: UIShortcut{key: "k", modifiers: UIShortcutModifiers{bits: 4}}
     assert_eq(key_claims(shifted), [String]{"4:k"})
-    command_shift :: UIShortcut{key: "p", modifiers: UIShortcutModifiers{bits: 20}}
+    command_shift: UIShortcut{key: "p", modifiers: UIShortcutModifiers{bits: 20}}
     assert_eq(key_claims(command_shift), [String]{"5:p", "12:p"})
 }

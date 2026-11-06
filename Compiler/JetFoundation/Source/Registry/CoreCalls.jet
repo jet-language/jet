@@ -1,65 +1,65 @@
-CORE_CALL_COVERAGE_SEMA :: 1
-CORE_CALL_COVERAGE_TIR_SUBSET :: 2
-CORE_CALL_COVERAGE_TIR_EVAL :: 4
-CORE_CALL_COVERAGE_AOT :: 8
-CORE_CALL_COVERAGE_COMPTIME :: 32
-CORE_CALL_COVERAGE_KNOWN :: 47
+CORE_CALL_COVERAGE_SEMA: 1
+CORE_CALL_COVERAGE_TIR_SUBSET: 2
+CORE_CALL_COVERAGE_TIR_EVAL: 4
+CORE_CALL_COVERAGE_AOT: 8
+CORE_CALL_COVERAGE_COMPTIME: 32
+CORE_CALL_COVERAGE_KNOWN: 47
 
-enum Effect { Net FS IO DB Time Rand Env Exec Log GPU Panic FFI Browser Secret Mem }
+Effect: enum { Net FS IO DB Time Rand Env Exec Log GPU Panic FFI Browser Secret Mem }
 
-enum SinkClass { Credential }
+SinkClass: enum { Credential }
 
-enum CoreCallFallibility { Sema }
+CoreCallFallibility: enum { Sema }
 
-enum CoreCallResourceAccessMode { Read Write Move }
+CoreCallResourceAccessMode: enum { Read Write Move }
 
-enum CoreCallCompletionKind { Synchronous Pending Event }
+CoreCallCompletionKind: enum { Synchronous Pending Event }
 
-enum CoreCapabilityKind { Pure NativeRequired PortableFallback ExplicitSimulation }
+CoreCapabilityKind: enum { Pure NativeRequired PortableFallback ExplicitSimulation }
 
-enum CoreCallPureRoute {
+CoreCallPureRoute: enum {
     NoPureRoute MIME EncodingXML Time Math Date DateTime SketchHLL SketchTDigest
     SketchCMS SketchReservoir UI Raylib IO Net Crypto
 }
 
 // Prelude names the Jet runtime route a call lowers to; SourceOwned carries
 // declaration facts only, and execution uses the owning Jet function.
-enum CoreCallSymbol { Prelude(name: String) SourceOwned }
+CoreCallSymbol: enum { Prelude(name: String) SourceOwned }
 
-struct CoreCallSignature {
+CoreCallSignature: struct {
     arity: Int
     max_arity: Int
     borrow_mask: [Bool]
 }
 
-struct CoreCallCoverage { bits: Int }
+CoreCallCoverage: struct { bits: Int }
 
-struct CoreCallResourceAccess {
+CoreCallResourceAccess: struct {
     argument: Int
     mode: CoreCallResourceAccessMode
 }
 
-struct CoreCallCompletion {
+CoreCallCompletion: struct {
     kind: CoreCallCompletionKind
     token: String?
     provider: String
 }
 
-struct CoreCapabilityContract {
+CoreCapabilityContract: struct {
     kind: CoreCapabilityKind
     provider: String?
     fallback: String?
     failure: String?
 }
 
-struct CoreMarkerApplication {
+CoreMarkerApplication: struct {
     member: String
     since: String
     replacement: String
     removed_in: String?
 }
 
-struct CoreCallRecord {
+CoreCallRecord: struct {
     module_name: String
     member: String
     receiver_types: [String]
@@ -85,18 +85,18 @@ struct CoreCallRecord {
     authority: AuthorityDecision?
 }
 
-enum CoreCallProjectionError {
+CoreCallProjectionError: enum {
     Unknown
     Uncovered(projection: Int)
     Arity(expected: Int, actual: Int)
 }
 
-enum CoreCallProjectionResult {
+CoreCallProjectionResult: enum {
     Row(record: CoreCallRecord)
     Error(error: CoreCallProjectionError)
 }
 
-fn core_call_one_of(value: String, choices: [String]) -> Bool Never! {
+core_call_one_of: fn(value: String, choices: [String]) -> Bool Never! {
     loop choice in choices {
         if value == choice {
             return true
@@ -105,44 +105,44 @@ fn core_call_one_of(value: String, choices: [String]) -> Bool Never! {
     false
 }
 
-fn core_call_coverage_contains(coverage: CoreCallCoverage, projection: Int) -> Bool Never! {
+core_call_coverage_contains: fn(coverage: CoreCallCoverage, projection: Int) -> Bool Never! {
     coverage.bits.bit_and(projection) == projection
 }
 
-fn core_call_coverage_is_complete(coverage: CoreCallCoverage) -> Bool Never! {
+core_call_coverage_is_complete: fn(coverage: CoreCallCoverage) -> Bool Never! {
     coverage.bits == CORE_CALL_COVERAGE_KNOWN
 }
 
-fn core_call_source_member(row: CoreCallRecord) -> String? Never! {
+core_call_source_member: fn(row: CoreCallRecord) -> String? Never! {
     if row.symbol != CoreCallSymbol.SourceOwned -> return None
     Val(row.source_target ?? row.member)
 }
 
 // The checked authority boundary sema applies to a `core.plugin.load` argument.
-fn core_call_authority_boundary_at(row: CoreCallRecord, index: Int) -> Bool Never! {
+core_call_authority_boundary_at: fn(row: CoreCallRecord, index: Int) -> Bool Never! {
     row.module_name == "core.plugin" && row.member == "load" && index == 1
 }
 
 #Test("authority boundary stays on plugin load argument one") {
-    row :: core_call("core.plugin", "load") ?? panic("plugin load row")
+    row: core_call("core.plugin", "load") ?? panic("plugin load row")
     assert_eq(core_call_authority_boundary_at(row, 0), false)
     assert_eq(core_call_authority_boundary_at(row, 1), true)
     assert_eq(core_call_authority_boundary_at(row, 2), false)
-    wire :: core_call("core.plugin", "__authority_to_wire") ?? panic("authority wire row")
+    wire: core_call("core.plugin", "__authority_to_wire") ?? panic("authority wire row")
     assert_eq(core_call_authority_boundary_at(wire, 1), false)
     assert_eq(wire.effect_kind, None)
 }
 
-fn core_call_capability_is_well_formed(capability: CoreCapabilityContract) -> Bool Never! {
-    provider_present :: if capability.provider == {
+core_call_capability_is_well_formed: fn(capability: CoreCapabilityContract) -> Bool Never! {
+    provider_present: if capability.provider == {
         .Val(value) -> value != ""
         .None -> false
     }
-    fallback_present :: if capability.fallback == {
+    fallback_present: if capability.fallback == {
         .Val(value) -> value != ""
         .None -> false
     }
-    failure_present :: if capability.failure == {
+    failure_present: if capability.failure == {
         .Val(value) -> value != ""
         .None -> false
     }
@@ -154,47 +154,47 @@ fn core_call_capability_is_well_formed(capability: CoreCapabilityContract) -> Bo
     }
 }
 
-fn core_call_is_receiver(row: CoreCallRecord) -> Bool Never! {
+core_call_is_receiver: fn(row: CoreCallRecord) -> Bool Never! {
     row.receiver_types.len() > 0
 }
 
-fn core_call_key(row: CoreCallRecord) -> String Never! {
+core_call_key: fn(row: CoreCallRecord) -> String Never! {
     if !core_call_is_receiver(row) -> return "{row.module_name}.{row.member}"
-    receiver_key :: row.receiver_types.join("|")
+    receiver_key: row.receiver_types.join("|")
     "receiver({receiver_key}).{row.member}"
 }
 
-fn core_call_accepts_arity(row: CoreCallRecord, count: Int) -> Bool Never! {
+core_call_accepts_arity: fn(row: CoreCallRecord, count: Int) -> Bool Never! {
     count >= row.signature.arity && count <= row.signature.max_arity
 }
 
-fn core_call_in(rows: [CoreCallRecord], module_name: String, member: String) -> CoreCallRecord? {
+core_call_in: fn(rows: [CoreCallRecord], module_name: String, member: String) -> CoreCallRecord? {
     loop row in rows {
         if !core_call_is_receiver(row) && row.module_name == module_name && row.member == member -> return Val(row)
     }
     None
 }
 
-fn core_call(module_name: String, member: String) -> CoreCallRecord? {
+core_call: fn(module_name: String, member: String) -> CoreCallRecord? {
     core_call_in(CORE_CALLS, module_name, member)
 }
 
-fn core_receiver_method_in(rows: [CoreCallRecord], receiver_type: String, member: String) -> CoreCallRecord? {
+core_receiver_method_in: fn(rows: [CoreCallRecord], receiver_type: String, member: String) -> CoreCallRecord? {
     loop row in rows {
         if row.member == member && core_call_one_of(receiver_type, row.receiver_types) -> return Val(row)
     }
     None
 }
 
-fn core_receiver_method(receiver_type: String, member: String) -> CoreCallRecord? {
+core_receiver_method: fn(receiver_type: String, member: String) -> CoreCallRecord? {
     core_receiver_method_in(CORE_CALLS, receiver_type, member)
 }
 
-fn core_marker_application(module_name: String, member: String) -> CoreMarkerApplication? {
+core_marker_application: fn(module_name: String, member: String) -> CoreMarkerApplication? {
     core_marker_application_in(CORE_CALLS, module_name, member)
 }
 
-fn core_marker_application_in(rows: [CoreCallRecord], module_name: String, member: String) -> CoreMarkerApplication? {
+core_marker_application_in: fn(rows: [CoreCallRecord], module_name: String, member: String) -> CoreMarkerApplication? {
     loop row in rows {
         if row.module_name == module_name && row.receiver_types.len() == 0 {
             if row.marker == .Val(marker) {
@@ -205,10 +205,10 @@ fn core_marker_application_in(rows: [CoreCallRecord], module_name: String, membe
     None
 }
 
-fn core_call_projection_in(rows: [CoreCallRecord], module_name: String, member: String, projection: Int, actual_arity: Int) -> CoreCallProjectionResult Never! {
-    row :: core_call_in(rows, module_name, member) ?? return CoreCallProjectionResult.Error{error: CoreCallProjectionError.Unknown}
+core_call_projection_in: fn(rows: [CoreCallRecord], module_name: String, member: String, projection: Int, actual_arity: Int) -> CoreCallProjectionResult Never! {
+    row: core_call_in(rows, module_name, member) ?? return CoreCallProjectionResult.Error{error: CoreCallProjectionError.Unknown}
     if row.symbol == CoreCallSymbol.SourceOwned && projection != CORE_CALL_COVERAGE_SEMA -> return CoreCallProjectionResult.Error{error: CoreCallProjectionError.Uncovered{projection: projection}}
-    authority_boundary_form :: actual_arity == row.signature.arity + 1 && module_name == "core.process" && member == "run"
+    authority_boundary_form: actual_arity == row.signature.arity + 1 && module_name == "core.process" && member == "run"
     if {
         !core_call_coverage_contains(row.coverage, projection) -> CoreCallProjectionResult.Error{error: CoreCallProjectionError.Uncovered{projection: projection}}
         !core_call_accepts_arity(row, actual_arity) && !authority_boundary_form -> CoreCallProjectionResult.Error{error: CoreCallProjectionError.Arity{expected: row.signature.arity, actual: actual_arity}}
@@ -216,6 +216,6 @@ fn core_call_projection_in(rows: [CoreCallRecord], module_name: String, member: 
     }
 }
 
-fn core_call_projection(module_name: String, member: String, projection: Int, actual_arity: Int) -> CoreCallProjectionResult Never! {
+core_call_projection: fn(module_name: String, member: String, projection: Int, actual_arity: Int) -> CoreCallProjectionResult Never! {
     core_call_projection_in(CORE_CALLS, module_name, member, projection, actual_arity)
 }

@@ -4,49 +4,49 @@
 // and in a type (`plain.Holder<Int>`). The same holds through a generic-module
 // instance (`shelf_i.Holder<shelf_i.Box>{…}`). Before, the head of
 // `Holder<…>` kept its source spelling and failed E0107.
-module plain {
-    struct Box {
+plain: module {
+    Box: struct {
         count: Int
     }
 
-    struct Holder<N> {
+    Holder: struct<N> {
         value: N
     }
 
-    fn make(value: Int) -> Holder<Int> { Holder<Int>{value: value} }
+    make: fn(value: Int) -> Holder<Int> { Holder<Int>{value: value} }
 
-    fn boxed(count: Int) -> Holder<Box> { Holder<Box>{value: Box{count: count}} }
+    boxed: fn(count: Int) -> Holder<Box> { Holder<Box>{value: Box{count: count}} }
 }
 
-module shelf<N>(base: Int) {
-    struct Box {
+shelf: module<N>(base: Int) {
+    Box: struct {
         count: N
     }
 
-    struct Holder<V> {
+    Holder: struct<V> {
         value: V
     }
 
-    fn make(count: N) -> Holder<Box> { Holder<Box>{value: Box{count: count}} }
+    make: fn(count: N) -> Holder<Box> { Holder<Box>{value: Box{count: count}} }
 
-    fn offset() -> Int { base }
+    offset: fn() -> Int { base }
 }
 
-module shelf_i :: shelf<Int>(10)
+shelf_i: shelf<Int>(10)
 
-fn read(holder: plain.Holder<Int>) -> Int { holder.value }
+read: fn(holder: plain.Holder<Int>) -> Int { holder.value }
 
-fn run() {
+run: fn() {
     print(read(plain.make(1)))
     print(plain.boxed(2).value.count)
-    boxed :: plain.Holder<plain.Box>{value: plain.Box{count: 3}}
+    boxed: plain.Holder<plain.Box>{value: plain.Box{count: 3}}
     print(boxed.value.count)
     print(read(plain.Holder<Int>{value: 4}))
-    nested :: plain.Holder<[plain.Holder<Int>]>{value: [plain.Holder<Int>]{plain.make(5), plain.make(6)}}
+    nested: plain.Holder<[plain.Holder<Int>]>{value: [plain.Holder<Int>]{plain.make(5), plain.make(6)}}
     print(nested.value.len() + nested.value[1].value)
-    held :: shelf_i.Holder<shelf_i.Box>{value: shelf_i.Box{count: 3}}
+    held: shelf_i.Holder<shelf_i.Box>{value: shelf_i.Box{count: 3}}
     print(held.value.count + shelf_i.offset())
     print(shelf_i.make(4).value.count)
-    many :: shelf_i.Holder<[Int]>{value: [Int]{1, 2}}
+    many: shelf_i.Holder<[Int]>{value: [Int]{1, 2}}
     print(many.value.len())
 }

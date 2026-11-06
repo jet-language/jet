@@ -4,12 +4,12 @@
 // point cannot be a String and are counted, not checked. Equal neighbours must
 // be canonically equivalent: the identical level compares NFD scalars.
 use {
-    collation_files :: core.files
-    collation_text :: core.text
-    collation_parse :: core.text.parse
+    collation_files: core.files
+    collation_text: core.text
+    collation_parse: core.text.parse
 }
 
-fn collation_scalar(out: &[U8], cp: Int) Never! {
+collation_scalar: fn(out: &[U8], cp: Int) Never! {
     if cp < 128 {
         &out.push(U8{cp})
     } else if cp < 2048 {
@@ -27,7 +27,7 @@ fn collation_scalar(out: &[U8], cp: Int) Never! {
     }
 }
 
-fn collation_key_order(left: [U8], right: [U8]) -> Ordering Never! {
+collation_key_order: fn(left: [U8], right: [U8]) -> Ordering Never! {
     at := 0
     loop at < left.len() && at < right.len() {
         if left[at] != right[at] -> return left[at] <=> right[at]
@@ -36,8 +36,8 @@ fn collation_key_order(left: [U8], right: [U8]) -> Ordering Never! {
     left.len() <=> right.len()
 }
 
-fn run() {
-    source :: collation_files.read("CollationTest.txt") ?? panic("missing CollationTest_CLDR_NON_IGNORABLE_SHORT.txt")
+run: fn() {
+    source: collation_files.read("CollationTest.txt") ?? panic("missing CollationTest_CLDR_NON_IGNORABLE_SHORT.txt")
     previous := [U8]{}
     previous_value := ""
     checked := 0
@@ -46,13 +46,13 @@ fn run() {
     equal := 0
     disagreements := 0
     loop raw in source.lines() {
-        line :: raw.partition("#").head.trim()
+        line: raw.partition("#").head.trim()
         if line == "" -> next
         bytes := [U8]{}
         surrogate := false
         loop word in line.split(" ") {
             if word == "" -> next
-            cp :: collation_parse.parse_int_base(word, 16) ?? panic("bad code point `{word}`")
+            cp: collation_parse.parse_int_base(word, 16) ?? panic("bad code point `{word}`")
             if cp >= 0xd800 && cp <= 0xdfff -> surrogate = true
             collation_scalar(&bytes, cp)
         }
@@ -60,10 +60,10 @@ fn run() {
             surrogates += 1
             next
         }
-        value :: String.from_bytes(bytes) ?? panic("row `{line}` is not UTF-8")
-        key :: collation_text.collation_key(value)
+        value: String.from_bytes(bytes) ?? panic("row `{line}` is not UTF-8")
+        key: collation_text.collation_key(value)
         if checked > 0 {
-            order :: collation_key_order(previous, key)
+            order: collation_key_order(previous, key)
             if order == Ordering.Greater {
                 out_of_order += 1
                 if out_of_order <= 10 -> print("out of order: `{line}`")

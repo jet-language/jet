@@ -20,18 +20,18 @@ use jet_foundation.[
     type_name,
 ]
 
-struct SemaGameCoreStaticTarget {
+SemaGameCoreStaticTarget: struct {
     type_name: String
 }
 
-fn sema_game_static_target(receiver: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> SemaGameCoreStaticTarget? {
+sema_game_static_target: fn(receiver: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> SemaGameCoreStaticTarget? {
     if receiver == {
         .Field(base, type_name, _, _) -> {
-            alias :: if base == {.Ident(name, _, _) -> name else -> { return None }}
+            alias: if base == {.Ident(name, _, _) -> name else -> { return None }}
             if sema_call_core_import_module(environment, program, alias) != (Val("core.game")) {
                 return None
             }
-            binding_index :: sema_scope_resolve_index(scopes, alias) ?? return None
+            binding_index: sema_scope_resolve_index(scopes, alias) ?? return None
             binding := scopes.bindings[binding_index]
             if binding.symbol.kind != SymbolKind.Import {
                 return None
@@ -42,15 +42,15 @@ fn sema_game_static_target(receiver: Expr, environment: SemaScopeEnvironment, pr
     }
 }
 
-fn sema_game_discard_arguments(args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
+sema_game_discard_arguments: fn(args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
     loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
 }
-fn sema_game_check_first_string_discard_rest(args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
+sema_game_check_first_string_discard_rest: fn(args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
     if args.len() > 0 -> _ := sema_check_expression(args[0].expr, Val(Type.String), environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if args.len() > 1 -> loop index in 1..<args.len() -> _ := sema_check_expression(args[index].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
 }
 
-fn sema_game_literal_string(expression: Expr) -> String? {
+sema_game_literal_string: fn(expression: Expr) -> String? {
     if expression == {
         .Str(parts, _, _) -> {
             if parts.len() != 1 -> return None
@@ -63,14 +63,14 @@ fn sema_game_literal_string(expression: Expr) -> String? {
     }
 }
 
-fn sema_game_replay_path_problem(path: String) -> String? {
+sema_game_replay_path_problem: fn(path: String) -> String? {
     if path.ends_with(".jetreplay") -> return None
     if path.ends_with(".jetproof-replay") -> return Val("that suffix identifies a proof replay, not a game input replay")
     if path.ends_with(".jetmap") || path.ends_with(".jetnb") || path.ends_with(".jetproof") || path.ends_with(".jettrace") -> return Val("that suffix identifies a different compiler artifact, not a game input replay")
     Val("game input replay paths end in `.jetreplay`")
 }
 
-fn sema_game_static_call(target: SemaGameCoreStaticTarget, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_game_static_call: fn(target: SemaGameCoreStaticTarget, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if target.type_name != "Scene" && target.type_name != "Replay" && target.type_name != "Backend" -> return SemaMethodSpecialCheck{handled: false, value: None}
     valid_method := (target.type_name == "Scene" && method == "new") || (target.type_name == "Replay" && method == "record") || (target.type_name == "Backend" && method == "headless")
     if !valid_method -> return SemaMethodSpecialCheck{handled: false, value: None}
@@ -93,14 +93,14 @@ fn sema_game_static_call(target: SemaGameCoreStaticTarget, method: String, args:
     }
     receiver_value := sema_node(&context, Type.Named{name: "Unit"}, NodeKind.Unit, span)
     if expected_arity == 1 {
-        value :: sema_check_expression(args[0].expr, Val(Type.String), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+        value: sema_check_expression(args[0].expr, Val(Type.String), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         if target.type_name == "Replay" {
             literal_path := sema_game_literal_string(args[0].expr)
             if literal_path == {
                 .Val(path) -> {
-                    problem :: sema_game_replay_path_problem(path)
+                    problem: sema_game_replay_path_problem(path)
                     if problem != None {
-                        detail :: problem
+                        detail: problem
                         &diagnostics.push(sema_error("E0103", expr_span(args[0].expr), "`Replay.record` needs a `.jetreplay` game replay path", detail, "rename the path to end in `.jetreplay`"))
                     }
                 }
@@ -116,14 +116,14 @@ fn sema_game_static_call(target: SemaGameCoreStaticTarget, method: String, args:
 
 // Handles only the three reserved static Core paths before ordinary CoreCall
 // and registered static method resolution.
-fn sema_call_try_game_static(receiver: Expr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
-    target :: sema_game_static_target(receiver, environment, program, scopes) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+sema_call_try_game_static: fn(receiver: Expr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    target: sema_game_static_target(receiver, environment, program, scopes) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     sema_game_static_call(target, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
 }
 
 // Canonical Core-owned fields are projected by exact owner identity, never by
 // a same-spelled user field.
-fn sema_game_core_field_type(owner: Type, field: String) -> Type? {
+sema_game_core_field_type: fn(owner: Type, field: String) -> Type? {
     if owner == {
         .Named(name) -> {
             if name == "GameScene" {
@@ -148,19 +148,19 @@ fn sema_game_core_field_type(owner: Type, field: String) -> Type? {
     }
 }
 
-fn sema_game_check_typed_argument(argument: CallArg, required: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+sema_game_check_typed_argument: fn(argument: CallArg, required: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     sema_check_expression(argument.expr, Val(required), environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
 }
 
-fn sema_game_check_untyped_args(args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
+sema_game_check_untyped_args: fn(args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
     sema_game_discard_arguments(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
 }
 
-fn sema_game_report_arity(method: String, expected: Int, actual: Int, span: Span, diagnostics: &[Diagnostic]) {
+sema_game_report_arity: fn(method: String, expected: Int, actual: Int, span: Span, diagnostics: &[Diagnostic]) {
     &diagnostics.push(sema_call_arity_diagnostic(method, expected, actual, false, span))
 }
 
-fn sema_game_record_effect(api: String, result_type: Type, effect_row: [EffectRowEntry], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool Never! {
+sema_game_record_effect: fn(api: String, result_type: Type, effect_row: [EffectRowEntry], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool Never! {
     facts := SemaCallFacts{
         return_type: result_type,
         failure_carrier: sema_expression_failure_carrier(result_type),
@@ -171,11 +171,11 @@ fn sema_game_record_effect(api: String, result_type: Type, effect_row: [EffectRo
     sema_effect_record_intrinsic_fact(environment, program, &scopes, &context, api, span, facts, &diagnostics)
 }
 
-fn sema_game_string_value(text: String, span: Span) -> TExpr Never! {
+sema_game_string_value: fn(text: String, span: Span) -> TExpr Never! {
     sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: text}}}, span)
 }
 
-fn sema_game_check_scene_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck? {
+sema_game_check_scene_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck? {
     if method == "on_frame" {
         if args.len() != 1 {
             sema_game_report_arity("GameScene.on_frame", 1, args.len(), span, &diagnostics)
@@ -189,7 +189,7 @@ fn sema_game_check_scene_method(receiver: Expr, receiver_value: TExpr, method: S
         frame_refusal := String?{None}
         frame_span := span
         if args[0].expr == .Lambda(lambda, node) {
-            facts :: sema_frame_lambda_schedule(lambda, environment, program, scopes)
+            facts: sema_frame_lambda_schedule(lambda, environment, program, scopes)
             if facts.schedule != None {
                 scheduled := lambda
                 scheduled.meta.frame_schedule = facts.schedule
@@ -200,12 +200,12 @@ fn sema_game_check_scene_method(receiver: Expr, receiver_value: TExpr, method: S
             frame_refusal = facts.error
             frame_span = lambda.span
         }
-        diagnostics_before :: diagnostics.len()
-        callback :: sema_expression_lambda_host_callback_stored(callback_source, Val(callback_type), true, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return Val(SemaMethodSpecialCheck{handled: true, value: None})
+        diagnostics_before: diagnostics.len()
+        callback: sema_expression_lambda_host_callback_stored(callback_source, Val(callback_type), true, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return Val(SemaMethodSpecialCheck{handled: true, value: None})
         // A refusal is reported only for a callback that otherwise checks: an
         // unresolved or ill-typed call has its own error already.
         if frame_refusal == .Val(detail) && !sema_has_error_since(diagnostics, diagnostics_before) {
-            row :: diagnostic_registry_row("E2967") ?? panic("E2967 has no registry row")
+            row: diagnostic_registry_row("E2967") ?? panic("E2967 has no registry row")
             &diagnostics.push(sema_error("E2967", frame_span, row.what.replace("{{detail}}", detail), row.why, row.fix))
             return Val(SemaMethodSpecialCheck{handled: true, value: None})
         }
@@ -225,9 +225,9 @@ fn sema_game_check_scene_method(receiver: Expr, receiver_value: TExpr, method: S
         return Val(SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(built, expected, environment, program, &diagnostics)})
     }
     if method != "component" && method != "query" -> return None
-    argument :: if {
+    argument: if {
         args.len() == 1 -> {
-            value :: sema_game_check_typed_argument(args[0], Type.String, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return Val(SemaMethodSpecialCheck{handled: true, value: None})
+            value: sema_game_check_typed_argument(args[0], Type.String, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return Val(SemaMethodSpecialCheck{handled: true, value: None})
             value
         }
         args.len() == 0 && method == "component" && type_args.len() == 1 -> sema_game_string_value(type_name(type_args[0]), span)
@@ -250,14 +250,14 @@ fn sema_game_check_scene_method(receiver: Expr, receiver_value: TExpr, method: S
     Val(SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(built, expected, environment, program, &diagnostics)})
 }
 
-fn sema_game_check_assets_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck? {
+sema_game_check_assets_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck? {
     if method != "image" && method != "sound" -> return None
     if args.len() != 1 {
         sema_game_report_arity("GameAssets.{method}", 1, args.len(), span, &diagnostics)
         sema_game_check_first_string_discard_rest(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         return Val(SemaMethodSpecialCheck{handled: true, value: None})
     }
-    asset_path :: sema_game_check_typed_argument(args[0], Type.String, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return Val(SemaMethodSpecialCheck{handled: true, value: None})
+    asset_path: sema_game_check_typed_argument(args[0], Type.String, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return Val(SemaMethodSpecialCheck{handled: true, value: None})
     if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return Val(SemaMethodSpecialCheck{handled: true, value: None})
     asset_type := if method == "image" -> Type.Named{name: "GameImage"} else -> Type.Named{name: "GameSound"}
     result_type := Type.Result{ok: asset_type, err: Type.String}
@@ -267,7 +267,7 @@ fn sema_game_check_assets_method(receiver: Expr, receiver_value: TExpr, method: 
     Val(SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(built, expected, environment, program, &diagnostics)})
 }
 
-fn sema_game_check_input_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck? {
+sema_game_check_input_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck? {
     if receiver_value.ty == (Type.Named{name: "GameInputMap"}) && method != "bind" -> return None
     if receiver_value.ty == (Type.Named{name: "GameInputSnapshot"}) && method != "pressed" -> return None
     if receiver_value.ty != (Type.Named{name: "GameInputMap"}) && receiver_value.ty != (Type.Named{name: "GameInputSnapshot"}) -> return None
@@ -275,7 +275,7 @@ fn sema_game_check_input_method(receiver: Expr, receiver_value: TExpr, method: S
     if args.len() != wanted {
         sema_game_report_arity("GameInput.{method}", wanted, args.len(), span, &diagnostics)
         loop (index, argument) in args {
-            checked :: if index < wanted -> sema_check_expression(argument.expr, Val(Type.String), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            checked: if index < wanted -> sema_check_expression(argument.expr, Val(Type.String), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             _ := checked
         }
         return Val(SemaMethodSpecialCheck{handled: true, value: None})
@@ -297,7 +297,7 @@ fn sema_game_check_input_method(receiver: Expr, receiver_value: TExpr, method: S
     Val(SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(built, expected, environment, program, &diagnostics)})
 }
 
-fn sema_game_check_backend_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck? {
+sema_game_check_backend_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck? {
     if method != "should_continue" && method != "present" -> return None
     if args.len() != 0 {
         sema_game_report_arity("GameBackend.{method}", 0, args.len(), span, &diagnostics)
@@ -316,8 +316,8 @@ fn sema_game_check_backend_method(receiver: Expr, receiver_value: TExpr, method:
 // local is mutable); the handle receiver itself is only read, so these calls
 // take no `&` mark. on_frame carries only the callback's checked schedule and
 // derivation, never a fabricated one.
-fn sema_call_try_game_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck? {
-    edit_api :: if receiver_value.ty == {
+sema_call_try_game_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck? {
+    edit_api: if receiver_value.ty == {
         .Named(name) -> if {
             name == "GameScene" && (method == "on_frame" || method == "component") -> method
             name == "GameAssets" && (method == "image" || method == "sound") -> method
@@ -335,9 +335,9 @@ fn sema_call_try_game_method(receiver: Expr, receiver_value: TExpr, method: Stri
     None
 }
 
-fn sema_game_needs_edit(receiver: Expr, api: String, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) {
-    root :: sema_receiver_mark_place_root(receiver) ?? return
-    index :: sema_scope_resolve_index(scopes, root) ?? return
+sema_game_needs_edit: fn(receiver: Expr, api: String, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) {
+    root: sema_receiver_mark_place_root(receiver) ?? return
+    index: sema_scope_resolve_index(scopes, root) ?? return
     if !scopes.bindings[index].mutable {
         &diagnostics.push(sema_error("E0202", expr_span(receiver), "`{api}` needs edit access to `{root}`", "game scene setup changes durable scene state", "declare `{root} := game.Scene.new(...)` before calling `{api}`"))
     }

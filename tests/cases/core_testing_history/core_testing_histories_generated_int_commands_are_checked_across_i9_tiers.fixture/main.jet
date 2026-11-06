@@ -1,22 +1,22 @@
 
-use api :: core.testing
+use api: core.testing
 
-enum HistoryStep {
+HistoryStep: enum {
     Step(Int)
 }
 
-fn reference_size(commands: [HistoryStep]) -> Dyn {
+reference_size: fn(commands: [HistoryStep]) -> Dyn {
     Dyn.Int(commands.len())
 }
 
-fn candidate_size(commands: [HistoryStep]) -> Dyn {
+candidate_size: fn(commands: [HistoryStep]) -> Dyn {
     Dyn.Int(commands.len())
 }
 
-fn observe(value: Dyn) -> Dyn { value.copy() }
+observe: fn(value: Dyn) -> Dyn { value.copy() }
 
-fn run() Err! {
-    comparison :: api.histories<HistoryStep>(
+run: fn() Err! {
+    comparison: api.histories<HistoryStep>(
         seed: 1,
         cases: 1,
         strategy: None,

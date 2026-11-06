@@ -1,9 +1,9 @@
 // Run `jet inspect bind tcl eda.tcl --pkg eda`, then `jet run run.jet`.
-use tcl :: tcl.eda
+use tcl: tcl.eda
 
 // A live session keeps Tcl variables between calls. One-shot evaluation is isolated.
-fn run() {
-    session :: tcl.open() ?? panic("Tcl open failed")
+run: fn() {
+    session: tcl.open() ?? panic("Tcl open failed")
     print(tcl.eval_int(session, "incr counter 2") ?? -1)
     print(tcl.eval_once("expr 6 * 7") ?? "one-shot failed")
     print(tcl.eval_float(session, "expr 5.0 / 2") ?? -1.0)

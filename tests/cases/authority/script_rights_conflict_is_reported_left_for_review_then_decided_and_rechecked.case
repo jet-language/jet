@@ -23,7 +23,7 @@ json: stderr doc $.reports[0].denial_kind = "authority"
 json: stderr doc $.reports[0].applicability = "suggested"
 json: stderr doc $.reports[0].fix_edits #= 1
 json: stderr doc $.reports[0].fix_edits[0].safety = "needs-review"
-json: stderr doc $.reports[0].fix_edits[0].new_text = "package {\n    name: \"write\"\n    authority: { allow: [FS.Write] }\n}\n\n"
+json: stderr doc $.reports[0].fix_edits[0].new_text = "package: {\n    name: \"write\"\n    authority: { allow: [FS.Write] }\n}\n\n"
 file: out.txt absent
 step: jet fix --json write.jet
 exit: 0
@@ -36,7 +36,7 @@ json: stdout doc $.fix.dry_run = false
 json: stdout doc $.fix.applied = 0
 json: stdout doc $.fix.skipped #= 1
 json: stdout doc $.fix.skipped[0].reason = "needs review: `jet fix --all` applies it"
-json: stdout doc $.fix.skipped[0].new_text = "package {\n    name: \"write\"\n    authority: { allow: [FS.Write] }\n}\n\n"
+json: stdout doc $.fix.skipped[0].new_text = "package: {\n    name: \"write\"\n    authority: { allow: [FS.Write] }\n}\n\n"
 json: stdout doc $.fix.log = null
 file: write.jet == original.bytes
 step: jet fix write.jet

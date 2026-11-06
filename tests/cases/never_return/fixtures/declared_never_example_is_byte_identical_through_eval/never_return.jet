@@ -1,4 +1,4 @@
-package {
+package: {
     name: "functions_never_return"
     version: "0.1.0"
     authority: { allow: [Exec, IO, Mem.Alloc] }
@@ -6,63 +6,63 @@ package {
 
 // D-NEVER2=B: declared Never belongs in the return slot, while ordinary
 // functions still infer the same bottom fact without an annotation.
-use process :: core.process
+use process: core.process
 
 #Error
-enum StopError {
+StopError: enum {
     Closed
 }
 
-fn usage() -> Never {
+usage: fn() -> Never {
     print("usage: tool <count>")
     process.exit(2)
 }
 
-fn count(arg: String) -> Int { return Int.parse(arg) ?? usage() }
+count: fn(arg: String) -> Int { return Int.parse(arg) ?? usage() }
 
-fn serve(addr: String) -> Never NetError! {
+serve: fn(addr: String) -> Never NetError! {
     loop { panic("serve stopped") }
 }
 
-fn propagate(error: NetError) -> Never NetError! { return Err(error) }
+propagate: fn(error: NetError) -> Never NetError! { return Err(error) }
 
-fn stop() -> Never { panic("stop") }
+stop: fn() -> Never { panic("stop") }
 
-fn run_then_stop(stop: fn() -> Never) -> Never { stop() }
+run_then_stop: fn(stop: fn() -> Never) -> Never { stop() }
 
-fn fail() -> Never StopError! { return Err(StopError.Closed) }
+fail: fn() -> Never StopError! { return Err(StopError.Closed) }
 
 // `Never Never!` has neither a success value nor a failure route, so a call
 // to it stops like any `Never` call, here in tail position.
-fn halt(code: Int) -> Never Never! { process.exit(code) }
+halt: fn(code: Int) -> Never Never! { process.exit(code) }
 
-fn halt_usage() -> Never { halt(3) }
+halt_usage: fn() -> Never { halt(3) }
 
-fn unbounded() -> Never {
+unbounded: fn() -> Never {
     loop {
 
     }
 }
 
-fn inferred() {
+inferred: fn() {
     loop {
 
     }
 }
 
-trait Terminator {
-    fn stop(self) -> Never
+Terminator: trait {
+    stop: fn(self) -> Never
 }
 
-struct Worker {
+Worker: struct {
 
 }
 
 impl Worker.Terminator {
-    fn stop(self) -> Never { panic("worker stopped") }
+    stop: fn(self) -> Never { panic("worker stopped") }
 }
 
-fn run() {
+run: fn() {
     print(count("41"))
     print(fail() ?? 42)
 }

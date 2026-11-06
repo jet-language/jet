@@ -19,7 +19,7 @@ const out = resolve(output);
 mkdirSync(out, { recursive: true });
 const literals = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../Source/TrapMessages.jet'), 'utf8');
 function literal(name) {
-  const body = literals.match(new RegExp(`^fn ${name}\\(\\) \\{\\n([\\s\\S]*?)^\\}`, 'm'))?.[1];
+  const body = literals.match(new RegExp(`^${name}: fn\\(\\) \\{\\n([\\s\\S]*?)^\\}`, 'm'))?.[1];
   if (!body) throw Error(`missing frozen report literal ${name}`);
   const rows = [...body.matchAll(/trap_write_word\(I64\{(-?\d+)\}, I64\{(\d+)\}\)/g)];
   if (!rows.length || body.replace(/\s*trap_write_word\(I64\{-?\d+\}, I64\{\d+\}\)\s*/g, '').trim()) throw Error(`unsupported frozen report literal ${name}`);

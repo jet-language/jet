@@ -1,21 +1,21 @@
-package {
+package: {
     name: "fs_reactive_smoke"
     authority: { allow: [Browser, FS.Read, FS.Write, IO, Mem.Alloc] }
 }
 
 use {
-    ui :: core.ui
-    reactive :: core.reactive
-    fs :: core.files
+    ui: core.ui
+    reactive: core.reactive
+    fs: core.files
 }
 
-fn run() {
-    path :: "$JET_STATE_ROOT/dx3/area-gui/pkg/fs-smoke.txt"
+run: fn() {
+    path: "$JET_STATE_ROOT/dx3/area-gui/pkg/fs-smoke.txt"
     fs.write(path, "old") ?? panic("seed")
-    loaded :: fs.read(path) ?? panic("read")
+    loaded: fs.read(path) ?? panic("read")
     body := reactive.signal(loaded)
     backend := ui.tui_backend()
-    render_backend :: backend.copy()
+    render_backend: backend.copy()
     ui.reactive_render(() -> {
         ui.mount(render_backend, ui.text(body.get()))
     })

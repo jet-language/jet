@@ -1,16 +1,16 @@
-package {
+package: {
     name: "gap"
     authority: {
         allow: [GPU]
     }
 }
 
-use compute :: core.compute
+use compute: core.compute
 
-fn loss(w: Tensor) -> Tensor { compute.mul(w.copy(), w) ?? panic("loss") }
+loss: fn(w: Tensor) -> Tensor { compute.mul(w.copy(), w) ?? panic("loss") }
 
-fn nine() {
-    _slope :: compute.gradient(loss)
+nine: fn() {
+    _slope: compute.gradient(loss)
     print("made")
 }
 
@@ -18,8 +18,8 @@ fn nine() {
     nine()
 }
 
-fn run() {
+run: fn() {
     nine()
-    _tangent :: compute.jvp(loss)
+    _tangent: compute.jvp(loss)
     print("made")
 }

@@ -147,26 +147,26 @@ use {
     ]
 }
 
-JET_COMPILER_SERVICES_SCHEMA_VERSION :: 1
+JET_COMPILER_SERVICES_SCHEMA_VERSION: 1
 
-enum JetCompilerServicesSourcePreparation {
+JetCompilerServicesSourcePreparation: enum {
     Masked(source: String)
     Rejected(diagnostic: Diagnostic)
 }
 
-struct JetCompilerServicesSourceInput {
+JetCompilerServicesSourceInput: struct {
     source: String
     preparation: JetCompilerServicesSourcePreparation?
 }
 
-struct JetCompilerServicesLexFacts {
+JetCompilerServicesLexFacts: struct {
     source: String
     compiler_source: String
     lexed: Lexed
     value: TComptimeValue
 }
 
-struct JetCompilerServicesParseFacts {
+JetCompilerServicesParseFacts: struct {
     source: String
     compiler_source: String
     lexed: Lexed
@@ -174,7 +174,7 @@ struct JetCompilerServicesParseFacts {
     value: TComptimeValue
 }
 
-struct JetCompilerServicesCheckedInput {
+JetCompilerServicesCheckedInput: struct {
     parsed: JetCompilerServicesParseFacts
     registration: SemaRegistrationGraph
     graph: SemaGraphResult
@@ -182,37 +182,37 @@ struct JetCompilerServicesCheckedInput {
     diagnostics: [Diagnostic]
 }
 
-struct JetCompilerServicesCheckedFacts {
+JetCompilerServicesCheckedFacts: struct {
     value: TComptimeValue
     semantic_index_complete: Bool
 }
 
-fn jet_eval_compiler_services_int(value: Int) -> TComptimeValue Never! {
+jet_eval_compiler_services_int: fn(value: Int) -> TComptimeValue Never! {
     TComptimeValue.Int{value: value}
 }
 
-fn jet_eval_compiler_services_string(value: String) -> TComptimeValue Never! {
+jet_eval_compiler_services_string: fn(value: String) -> TComptimeValue Never! {
     TComptimeValue.String{value: value}
 }
 
-fn jet_eval_compiler_services_span(span: Span) -> TComptimeValue Never! {
+jet_eval_compiler_services_span: fn(span: Span) -> TComptimeValue Never! {
     TComptimeValue.Struct{type_name: "SourceSpan", fields: [TComptimeField]{
         TComptimeField{name: "start", value: jet_eval_compiler_services_int(span.start)},
         TComptimeField{name: "end", value: jet_eval_compiler_services_int(span.end)},
     }}
 }
 
-fn jet_eval_compiler_services_option_string(value: String?) -> TComptimeValue Never! {
+jet_eval_compiler_services_option_string: fn(value: String?) -> TComptimeValue Never! {
     if value == .Val(item) -> return TComptimeValue.Present{value: jet_eval_compiler_services_string(item)}
     TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.String}}
 }
 
-fn jet_eval_compiler_services_option_span(value: Span?) -> TComptimeValue Never! {
+jet_eval_compiler_services_option_span: fn(value: Span?) -> TComptimeValue Never! {
     if value == .Val(item) -> return TComptimeValue.Present{value: jet_eval_compiler_services_span(item)}
     TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Named{name: "SourceSpan"}}}
 }
 
-fn jet_eval_compiler_services_diagnostic_value(diagnostic: Diagnostic) -> TComptimeValue Never! {
+jet_eval_compiler_services_diagnostic_value: fn(diagnostic: Diagnostic) -> TComptimeValue Never! {
     severity := if diagnostic.severity == DIAGNOSTIC_LINT -> "lint" else -> "error"
     TComptimeValue.Struct{type_name: "CompilerDiagnostic", fields: [TComptimeField]{
         TComptimeField{name: "code", value: jet_eval_compiler_services_string(diagnostic.code)},
@@ -224,13 +224,13 @@ fn jet_eval_compiler_services_diagnostic_value(diagnostic: Diagnostic) -> TCompt
     }}
 }
 
-fn jet_eval_compiler_services_diagnostic_values(diagnostics: [Diagnostic]) -> TComptimeValue Never! {
+jet_eval_compiler_services_diagnostic_values: fn(diagnostics: [Diagnostic]) -> TComptimeValue Never! {
     values := [TComptimeValue]{}
     loop diagnostic in diagnostics -> &values.push(jet_eval_compiler_services_diagnostic_value(diagnostic))
     TComptimeValue.List{values: values}
 }
 
-fn jet_eval_compiler_services_token_kind(kind: Int) -> String? {
+jet_eval_compiler_services_token_kind: fn(kind: Int) -> String? {
     if kind == TOKEN_IDENT -> return Val("identifier")
     if kind == TOKEN_RAW_STRING -> return Val("literal.raw_string")
     if kind == TOKEN_STRING -> return Val("literal.string")
@@ -339,14 +339,14 @@ fn jet_eval_compiler_services_token_kind(kind: Int) -> String? {
     None
 }
 
-fn jet_eval_compiler_services_string_values(values: [String]) -> TComptimeValue Never! {
+jet_eval_compiler_services_string_values: fn(values: [String]) -> TComptimeValue Never! {
     output := [TComptimeValue]{}
     loop value in values -> &output.push(jet_eval_compiler_services_string(value))
     TComptimeValue.List{values: output}
 }
 
-fn jet_eval_compiler_services_token_value(tables: TokenTables, token: Token) -> TComptimeValue? {
-    kind :: jet_eval_compiler_services_token_kind(token.kind) ?? return None
+jet_eval_compiler_services_token_value: fn(tables: TokenTables, token: Token) -> TComptimeValue? {
+    kind: jet_eval_compiler_services_token_kind(token.kind) ?? return None
     TComptimeValue.Struct{type_name: "CompilerToken", fields: [TComptimeField]{
         TComptimeField{name: "kind", value: jet_eval_compiler_services_string(kind)},
         TComptimeField{name: "text", value: jet_eval_compiler_services_string(token_text(tables, token))},
@@ -354,10 +354,10 @@ fn jet_eval_compiler_services_token_value(tables: TokenTables, token: Token) -> 
     }}
 }
 
-fn jet_eval_compiler_services_lex_value(source: String, lexed: Lexed) -> TComptimeValue? {
+jet_eval_compiler_services_lex_value: fn(source: String, lexed: Lexed) -> TComptimeValue? {
     tokens := [TComptimeValue]{}
     loop token in lexed.tokens {
-        value :: jet_eval_compiler_services_token_value(lexed.tables, token) ?? return None
+        value: jet_eval_compiler_services_token_value(lexed.tables, token) ?? return None
         &tokens.push(value)
     }
     TComptimeValue.Struct{type_name: "CompilerLexed", fields: [TComptimeField]{
@@ -368,8 +368,8 @@ fn jet_eval_compiler_services_lex_value(source: String, lexed: Lexed) -> TCompti
     }}
 }
 
-fn jet_eval_compiler_services_lex(input: JetCompilerServicesSourceInput) -> JetCompilerServicesLexFacts? {
-    preparation :: input.preparation ?? return None
+jet_eval_compiler_services_lex: fn(input: JetCompilerServicesSourceInput) -> JetCompilerServicesLexFacts? {
+    preparation: input.preparation ?? return None
     compiler_source := ""
     lexed := Lexed{tokens: [Token]{}, tables: token_tables(), diagnostics: [Diagnostic]{}}
     if preparation == {
@@ -380,11 +380,11 @@ fn jet_eval_compiler_services_lex(input: JetCompilerServicesSourceInput) -> JetC
         }
         .Rejected(diagnostic) -> &lexed.diagnostics.push(diagnostic)
     }
-    value :: jet_eval_compiler_services_lex_value(input.source, lexed) ?? return None
+    value: jet_eval_compiler_services_lex_value(input.source, lexed) ?? return None
     Val(JetCompilerServicesLexFacts{source: input.source, compiler_source: compiler_source, lexed: lexed, value: value})
 }
 
-fn jet_eval_compiler_services_syntax_node(item: Item) -> TComptimeValue Never! {
+jet_eval_compiler_services_syntax_node: fn(item: Item) -> TComptimeValue Never! {
     kind := ""
     name := String?{None}
     span := Span{start: 0, end: 0}
@@ -521,7 +521,7 @@ fn jet_eval_compiler_services_syntax_node(item: Item) -> TComptimeValue Never! {
     }}
 }
 
-fn jet_eval_compiler_services_syntax_value(source: String, parsed: ParseResult) -> TComptimeValue Never! {
+jet_eval_compiler_services_syntax_value: fn(source: String, parsed: ParseResult) -> TComptimeValue Never! {
     items := [TComptimeValue]{}
     has_error := false
     loop diagnostic in parsed.diagnostics {
@@ -538,8 +538,8 @@ fn jet_eval_compiler_services_syntax_value(source: String, parsed: ParseResult) 
     }}
 }
 
-fn jet_eval_compiler_services_parse(input: JetCompilerServicesSourceInput) -> JetCompilerServicesParseFacts? {
-    lex_facts :: jet_eval_compiler_services_lex(input) ?? return None
+jet_eval_compiler_services_parse: fn(input: JetCompilerServicesSourceInput) -> JetCompilerServicesParseFacts? {
+    lex_facts: jet_eval_compiler_services_lex(input) ?? return None
     parsed := if {
         lex_facts.lexed.diagnostics.len() > 0 -> {
             ParseResult{program: ast_program(), diagnostics: lex_facts.lexed.diagnostics}
@@ -550,7 +550,7 @@ fn jet_eval_compiler_services_parse(input: JetCompilerServicesSourceInput) -> Je
     Val(JetCompilerServicesParseFacts{source: input.source, compiler_source: lex_facts.compiler_source, lexed: lex_facts.lexed, parsed: parsed, value: value})
 }
 
-fn jet_eval_compiler_services_function_info(function: Func, registration_module: SemaRegistrationModule, checked_module: SemaGraphModuleResult?, function_key: String?) -> TComptimeValue {
+jet_eval_compiler_services_function_info: fn(function: Func, registration_module: SemaRegistrationModule, checked_module: SemaGraphModuleResult?, function_key: String?) -> TComptimeValue {
     solved_effects := [String]{}
     reaches_panic := false
     if checked_module == .Val(checked) {
@@ -584,11 +584,11 @@ fn jet_eval_compiler_services_function_info(function: Func, registration_module:
     }}
 }
 
-fn jet_eval_compiler_services_error_diagnostic(diagnostic: Diagnostic) -> Bool Never! {
+jet_eval_compiler_services_error_diagnostic: fn(diagnostic: Diagnostic) -> Bool Never! {
     diagnostic.severity == DIAGNOSTIC_ERROR
 }
 
-fn jet_eval_compiler_services_function_key(function: Func, registration_module: SemaRegistrationModule) -> String? {
+jet_eval_compiler_services_function_key: fn(function: Func, registration_module: SemaRegistrationModule) -> String? {
     loop registered in registration_module.functions {
         if registered.declaration.name == function.name && registered.declaration.name_span.start == function.name_span.start && registered.declaration.name_span.end == function.name_span.end {
             return Val(registered.symbol.id.key)
@@ -597,7 +597,7 @@ fn jet_eval_compiler_services_function_key(function: Func, registration_module: 
     None
 }
 
-fn jet_eval_compiler_services_checked(input: JetCompilerServicesCheckedInput) -> JetCompilerServicesCheckedFacts {
+jet_eval_compiler_services_checked: fn(input: JetCompilerServicesCheckedInput) -> JetCompilerServicesCheckedFacts {
     diagnostics := input.diagnostics
     functions := [TComptimeValue]{}
     effects := [TComptimeValue]{}
@@ -641,7 +641,7 @@ fn jet_eval_compiler_services_checked(input: JetCompilerServicesCheckedInput) ->
 }
 
 // The build context's whole-program view, or the first producer fact it lacks.
-enum JetCompilerServicesProgramInfo {
+JetCompilerServicesProgramInfo: enum {
     Ready(value: TComptimeValue)
     Missing(fact: String)
 }
@@ -649,12 +649,12 @@ enum JetCompilerServicesProgramInfo {
 // The build context reads this immutable, fully checked whole-program view.
 // Reuse the same TypeInfo, FunctionInfo and semantic-index producers as the
 // compiler API; a missing producer fact refuses the snapshot and is named.
-fn jet_eval_compiler_services_program_info(registration: SemaRegistrationGraph, graph: SemaGraphResult, source: String, module_sources: [SemaCompilerModuleSource]) -> JetCompilerServicesProgramInfo {
+jet_eval_compiler_services_program_info: fn(registration: SemaRegistrationGraph, graph: SemaGraphResult, source: String, module_sources: [SemaCompilerModuleSource]) -> JetCompilerServicesProgramInfo {
     if !registration.complete -> return .Missing(fact: "the registration graph is incomplete")
     if !graph.complete -> return .Missing(fact: "the checked graph is incomplete")
-    index :: sema_compiler_semantic_index_from_checked(registration, graph, source, module_sources)
+    index: sema_compiler_semantic_index_from_checked(registration, graph, source, module_sources)
     if !index.complete -> return .Missing(fact: "semantic index: {index.missing}")
-    catalog :: TAppliedRuleCatalog{rows: [TAppliedRule]{}, argument_menus: [TAppliedRuleArgumentMenu]{}}
+    catalog: TAppliedRuleCatalog{rows: [TAppliedRule]{}, argument_menus: [TAppliedRuleArgumentMenu]{}}
     types := [TComptimeValue]{}
     functions := [TComptimeValue]{}
     packages := [TComptimeValue]{}
@@ -672,15 +672,15 @@ fn jet_eval_compiler_services_program_info(registration: SemaRegistrationGraph, 
                 .Distinct(definition) -> name = Val(definition.name)
                 .Func(function) -> {
                     if function.name == "build" -> next
-                    key :: jet_eval_compiler_services_function_key(function, module_row) ?? return .Missing(fact: "function `{module_row.module_identity}::{function.name}` is not registered")
-                    value :: jet_eval_compiler_services_function_info(function, module_row, checked, Val(key))
+                    key: jet_eval_compiler_services_function_key(function, module_row) ?? return .Missing(fact: "function `{module_row.module_identity}::{function.name}` is not registered")
+                    value: jet_eval_compiler_services_function_info(function, module_row, checked, Val(key))
                     &functions.push(value)
                     &package_functions.push(value)
                 }
                 else -> {}
             }
             if name == .Val(type_name) {
-                value :: sema_comptime_reflection_type_info(registration, module_row.module_identity, type_name, catalog) ?? return .Missing(fact: "type `{module_row.module_identity}::{type_name}` has no TypeInfo")
+                value: sema_comptime_reflection_type_info(registration, module_row.module_identity, type_name, catalog) ?? return .Missing(fact: "type `{module_row.module_identity}::{type_name}` has no TypeInfo")
                 &types.push(value)
                 &package_types.push(value)
             }
@@ -717,24 +717,24 @@ fn jet_eval_compiler_services_program_info(registration: SemaRegistrationGraph, 
 // One `// jet:line <n>` marker of generated Rust: its 1-based line, the
 // source the nearest `// jet:source-map source=` marker above it opened, and
 // the source line it names.
-struct JetCompilerServicesGeneratedLine {
+JetCompilerServicesGeneratedLine: struct {
     generated_line: Int
     source: String?
     source_line: Int
 }
 
 // `SourceMap`: every opened source once, in first-seen order.
-struct JetCompilerServicesSourceMap {
+JetCompilerServicesSourceMap: struct {
     sources: [String]
     generated_lines: [JetCompilerServicesGeneratedLine]
 }
 
 // Rust `str::trim_start` over ASCII whitespace.
-fn jet_eval_compiler_services_trim_start(line: String) -> String Never! {
-    bytes :: line.bytes()
+jet_eval_compiler_services_trim_start: fn(line: String) -> String Never! {
+    bytes: line.bytes()
     start := 0
     loop start < bytes.len() {
-        code :: Int.from_u8(bytes[start])
+        code: Int.from_u8(bytes[start])
         if code != 32 && code != 9 && code != 10 && code != 11 && code != 12 && code != 13 -> break
         start += 1
     }
@@ -742,14 +742,14 @@ fn jet_eval_compiler_services_trim_start(line: String) -> String Never! {
 }
 
 // A Rust `usize` parse: ASCII digits after an optional `+`.
-fn jet_eval_compiler_services_count(text: String) -> Int? Never! {
-    bytes :: text.bytes()
+jet_eval_compiler_services_count: fn(text: String) -> Int? Never! {
+    bytes: text.bytes()
     start := 0
     if bytes.len() > 0 && bytes[0] == (U8{43}) -> start = 1
     if start >= bytes.len() -> return None
     value := 0
     loop index in start..<bytes.len() {
-        digit :: Int.from_u8(bytes[index]) - 48
+        digit: Int.from_u8(bytes[index]) - 48
         if digit < 0 || digit > 9 -> return None
         value = value * 10 + digit
     }
@@ -759,27 +759,27 @@ fn jet_eval_compiler_services_count(text: String) -> Int? Never! {
 // `source_map_from_generated_rust`: the one reader of generated Rust markers,
 // for `jet inspect compiler source-map` and `core.compiler.source_map`. Lines
 // split as Rust `str::lines` does.
-fn jet_eval_compiler_services_source_map(rust_source: String) -> JetCompilerServicesSourceMap Never! {
+jet_eval_compiler_services_source_map: fn(rust_source: String) -> JetCompilerServicesSourceMap Never! {
     sources := [String]{}
     current := String?{None}
     lines := [JetCompilerServicesGeneratedLine]{}
     raw_lines := rust_source.split("\n").to_list()
     if rust_source.ends_with("\n") -> _ := &raw_lines.pop()
     loop (index, raw) in raw_lines {
-        raw_bytes :: raw.bytes()
-        carriage :: raw_bytes.len() > 0 && Int.from_u8(raw_bytes[raw_bytes.len() - 1]) == 13
-        line :: if carriage -> raw.slice(0..<(raw.len() - 1)) else -> raw
-        trimmed :: jet_eval_compiler_services_trim_start(line)
-        source_marker :: "// jet:source-map source="
+        raw_bytes: raw.bytes()
+        carriage: raw_bytes.len() > 0 && Int.from_u8(raw_bytes[raw_bytes.len() - 1]) == 13
+        line: if carriage -> raw.slice(0..<(raw.len() - 1)) else -> raw
+        trimmed: jet_eval_compiler_services_trim_start(line)
+        source_marker: "// jet:source-map source="
         if trimmed.starts_with(source_marker) {
-            source :: trimmed.slice(source_marker.len()..<trimmed.len())
+            source: trimmed.slice(source_marker.len()..<trimmed.len())
             current = Val(source)
             if !sources.contains(source) -> &sources.push(source)
             next
         }
-        line_marker :: "// jet:line "
+        line_marker: "// jet:line "
         if trimmed.starts_with(line_marker) {
-            number :: jet_eval_compiler_services_count(trimmed.slice(line_marker.len()..<trimmed.len()).trim()) ?? next
+            number: jet_eval_compiler_services_count(trimmed.slice(line_marker.len()..<trimmed.len()).trim()) ?? next
             &lines.push(JetCompilerServicesGeneratedLine{generated_line: index + 1, source: current.copy(), source_line: number})
         }
     }
@@ -787,7 +787,7 @@ fn jet_eval_compiler_services_source_map(rust_source: String) -> JetCompilerServ
 }
 
 // `source_map_value`: the `CompilerSourceMap` comptime value.
-fn jet_eval_compiler_services_source_map_value(map: JetCompilerServicesSourceMap) -> TComptimeValue Never! {
+jet_eval_compiler_services_source_map_value: fn(map: JetCompilerServicesSourceMap) -> TComptimeValue Never! {
     lines := [TComptimeValue]{}
     loop line in map.generated_lines {
         &lines.push(TComptimeValue.Struct{type_name: "CompilerGeneratedLine", fields: [TComptimeField]{

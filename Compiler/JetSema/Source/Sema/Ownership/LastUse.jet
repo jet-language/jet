@@ -10,7 +10,7 @@ use jet_foundation.[
     Stmt,
 ]
 
-fn sema_ownership_last_use_expr(expr: Expr, name: String) -> Bool {
+sema_ownership_last_use_expr: fn(expr: Expr, name: String) -> Bool {
     if expr == {
         .Ident(candidate, _, _) -> return candidate == name
         .Call(call, _) -> {
@@ -126,14 +126,14 @@ fn sema_ownership_last_use_expr(expr: Expr, name: String) -> Bool {
     false
 }
 
-fn sema_ownership_last_use_enum_arg(argument: EnumLitArg, name: String) -> Bool {
+sema_ownership_last_use_enum_arg: fn(argument: EnumLitArg, name: String) -> Bool {
     if argument == {
         .Positional(value) -> return sema_ownership_last_use_expr(value, name)
         .Named(_, value) -> return sema_ownership_last_use_expr(value, name)
     }
 }
 
-fn sema_ownership_last_use_lvalue(target: LValue, name: String) -> Bool {
+sema_ownership_last_use_lvalue: fn(target: LValue, name: String) -> Bool {
     if target == {
         .Local(candidate, _) -> return candidate == name
         .Index(base, index, _, _) -> return sema_ownership_last_use_expr(base, name) || sema_ownership_last_use_expr(index, name)
@@ -141,7 +141,7 @@ fn sema_ownership_last_use_lvalue(target: LValue, name: String) -> Bool {
     }
 }
 
-fn sema_ownership_last_use_statement(statement: Stmt, name: String) -> Bool {
+sema_ownership_last_use_statement: fn(statement: Stmt, name: String) -> Bool {
     if statement == {
         .Expr(value) | .Yield(value, _) | .DeferClose(value, _) -> return sema_ownership_last_use_expr(value, name)
         .Val(binding) -> return sema_ownership_last_use_expr(binding.init, name)
@@ -201,7 +201,7 @@ fn sema_ownership_last_use_statement(statement: Stmt, name: String) -> Bool {
     false
 }
 
-fn sema_ownership_last_use_statements(statements: [Stmt], name: String) -> Bool {
+sema_ownership_last_use_statements: fn(statements: [Stmt], name: String) -> Bool {
     loop index in 0..<statements.len() {
         if sema_ownership_last_use_statement(statements[index], name) -> return true
     }
@@ -212,17 +212,17 @@ fn sema_ownership_last_use_statements(statements: [Stmt], name: String) -> Bool 
 // frame reads `name` at or after its start). The last reading statement of each
 // body is computed once per name and reused, instead of rewalking every
 // remaining statement on each query.
-fn sema_ownership_name_live_after(name: String, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> Bool {
+sema_ownership_name_live_after: fn(name: String, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> Bool {
     frame_index := context.lambda_statement_tails.len() - 1
     loop frame_index >= 0 {
-        body_id :: context.lambda_statement_tails[frame_index].body_id
+        body_id: context.lambda_statement_tails[frame_index].body_id
         if sema_ownership_tail_last_read(&tail_store, body_id, name) >= context.lambda_statement_tails[frame_index].start_index -> return true
         frame_index -= 1
     }
     false
 }
 
-fn sema_ownership_tail_last_read(tail_store: &SemaStatementTailStore, body_id: Int, name: String) -> Int Never! {
+sema_ownership_tail_last_read: fn(tail_store: &SemaStatementTailStore, body_id: Int, name: String) -> Int Never! {
     if tail_store.bodies[body_id].last_reads.get(name) == .Val(known) -> return known
     // The body is read in place: binding it would copy the whole body.
     index := tail_store.bodies[body_id].statements.len() - 1
@@ -234,7 +234,7 @@ fn sema_ownership_tail_last_read(tail_store: &SemaStatementTailStore, body_id: I
     index
 }
 
-fn sema_ownership_last_use_pattern(pattern: Pattern, name: String) -> Bool Never! {
+sema_ownership_last_use_pattern: fn(pattern: Pattern, name: String) -> Bool Never! {
     if pattern == {
         .Struct(fields, _, _, _) -> loop field in fields {
             if field == {
@@ -265,7 +265,7 @@ fn sema_ownership_last_use_pattern(pattern: Pattern, name: String) -> Bool Never
     false
 }
 
-fn sema_ownership_last_use_slot(slot: PatSlot, name: String) -> Bool Never! {
+sema_ownership_last_use_slot: fn(slot: PatSlot, name: String) -> Bool Never! {
     if slot == {
         .Value(value) -> sema_ownership_last_use_expr(value, name)
         .Nested(pattern) -> sema_ownership_last_use_pattern(pattern, name)

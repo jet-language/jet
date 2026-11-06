@@ -11,141 +11,141 @@ use {
 // evaluator stopped on. Module surfaces are evaluated, not type-checked, so
 // the first diagnostic is the whole failure.
 #Error
-struct EnvModelEvalError {
+EnvModelEvalError: struct {
     diagnostic: Diagnostic
 }
 
 impl ComptimeEvalError -> EnvModelEvalError { return EnvModelEvalError{diagnostic: self.diagnostic} }
 
 // Rust `Diagnostic::error(code, what, why, fix, span)`.
-fn envmodel_error(code: String, what: String, why: String, fix: String, span: Span?) -> EnvModelEvalError Never! {
+envmodel_error: fn(code: String, what: String, why: String, fix: String, span: Span?) -> EnvModelEvalError Never! {
     EnvModelEvalError{diagnostic: diagnostic_from_registry(code, span, what, why, fix)}
 }
 
 // E3402 (Rust Sema/Purity.rs `e3402`): ambient I/O or network access
 // attempted during a sandboxed package build or module-value evaluation.
-fn envmodel_e3402(call_name: String, span: Span?) -> Diagnostic Never! {
+envmodel_e3402: fn(call_name: String, span: Span?) -> Diagnostic Never! {
     diagnostic_from_registry("E3402", span, "`{call_name}` is not allowed during a sandboxed package build", "package builds run with ambient I/O and network access disabled", "compute this value at compile time or pass it in as a parameter")
 }
 
 // E1242: a fleet or vmtest host references a system that no contribution
 // defines (U15). `known` is the rendered hint naming the captured systems.
-fn envmodel_fleet_unknown_system(fleet: String, host: String, system: String, known: String) -> EnvModelEvalError Never! {
+envmodel_fleet_unknown_system: fn(fleet: String, host: String, system: String, known: String) -> EnvModelEvalError Never! {
     envmodel_error("E1242", "the fleet `{fleet}` host `{host}` names an unknown system `{system}`", "fleets are frozen jetos research capture; captured hosts must still point at a captured system so the plan is coherent", "define captured `system.{system}: {{ … }}`, or point the host at an existing captured system ({known})", None)
 }
 
-fn envmodel_bad_source_ref(ref_text: String, span: Span?) -> EnvModelEvalError Never! {
+envmodel_bad_source_ref: fn(ref_text: String, span: Span?) -> EnvModelEvalError Never! {
     envmodel_error("E0968", "`{ref_text}` isn't a `target@provider` source ref or bare path", "Jet puts the upstream target before `@` and its provider after it; local `./`, `../`, and `/` paths stay bare", "Write `NixOS/nixpkgs/nixos-24.05@github`, `nixos-unstable@jetpack`, or a bare path such as `../local`", span)
 }
 
 // E0969: an `imports:` discovery directive must be `find("<dir>")` with a
 // literal path; recognized first-party integration calls are handled before
 // this constructor is reached.
-fn envmodel_bad_import_directive(span: Span) -> EnvModelEvalError Never! {
+envmodel_bad_import_directive: fn(span: Span) -> EnvModelEvalError Never! {
     envmodel_error("E0969", "An `imports:` directive must be `find(\"<dir>\")`", "Imports auto-discover a directory of modules (U4); discovery uses `find` with one string-literal path, while recognized first-party integrations use their typed calls", "Write `imports: find(\"./modules\")`", Val(span))
 }
 
 // E0970: `imports: find("<dir>")` names a directory that is not there.
-fn envmodel_find_missing_directory(path: String, span: Span?) -> EnvModelEvalError Never! {
+envmodel_find_missing_directory: fn(path: String, span: Span?) -> EnvModelEvalError Never! {
     envmodel_error("E0970", "`find` can't read the directory `{path}`", "`imports: find(\"<dir>\")` walks that directory for `.jet` modules (U4); it must exist relative to this file", "create the directory, or fix the path so it points at your modules folder", span)
 }
 
 // E0971: a discovered module imports — forbidden by the liftability law (U4):
 // modules contribute to the merged whole, they don't import each other.
-fn envmodel_discovered_module_imports(file: String) -> EnvModelEvalError Never! {
+envmodel_discovered_module_imports: fn(file: String) -> EnvModelEvalError Never! {
     envmodel_error("E0971", "The discovered module `{file}` has its own `imports:`", "A module found by `find(…)` may not import (the liftability law, U4) — modules only contribute to the merged whole, they never import each other; nesting `find` would make composition explode", "Remove the `imports:` from this module; declare all `find(…)` directives in the top-level env.jet", None)
 }
 
-fn envmodel_not_a_namespace_literal(expected: String, span: Span) -> EnvModelEvalError Never! {
+envmodel_not_a_namespace_literal: fn(expected: String, span: Span) -> EnvModelEvalError Never! {
     envmodel_error("E0966", "A module contribution must be a `{expected}` literal", "A contribution's value describes its namespace with a typed struct literal, e.g. `env.dev: {expected}{{…}}`", "Wrap the value in `{expected}{{…}}`", Val(span))
 }
 
-fn envmodel_wrong_namespace_type(expected: String, got: String, span: Span) -> EnvModelEvalError Never! {
+envmodel_wrong_namespace_type: fn(expected: String, got: String, span: Span) -> EnvModelEvalError Never! {
     envmodel_error("E0966", "Expected a `{expected}` literal here, found `{got}`", "A contribution to this namespace must use the matching type `{expected}`", "Change `{got}{{…}}` to `{expected}{{…}}`", Val(span))
 }
 
-fn envmodel_packages_not_a_list(span: Span) -> EnvModelEvalError Never! {
+envmodel_packages_not_a_list: fn(span: Span) -> EnvModelEvalError Never! {
     envmodel_error("E0966", "The `packages` field must be a list literal", "`packages: [ … ]` lists the packages this contribution adds, using the Pkg sugar (U6)", "Write `packages: [ … ]`", Val(span))
 }
 
-fn envmodel_prompt_bad_field(field: String, span: Span) -> EnvModelEvalError Never! {
+envmodel_prompt_bad_field: fn(field: String, span: Span) -> EnvModelEvalError Never! {
     envmodel_error("E0966", "`{field}` isn't a field of `Prompt`", "`Prompt` config has fixed fields: `label`, `path`, and `strip`", "Remove this field, or write `label`, `path`, or `strip`", Val(span))
 }
 
-fn envmodel_prompt_bad_value(field: String, expected: String, span: Span) -> EnvModelEvalError Never! {
+envmodel_prompt_bad_value: fn(field: String, expected: String, span: Span) -> EnvModelEvalError Never! {
     envmodel_error("E0966", "`Prompt.{field}` isn't shaped like {expected}", "The shell prompt is source-owned by `env.jet`; each prompt setting has one typed shape", "Write `{field}: {expected}`", Val(span))
 }
 
 // E0972: an unknown field on a `System` / `Image` / `Service` record (U11/U14).
-fn envmodel_unknown_record_field(type_name: String, field: String, known: String, span: Span) -> EnvModelEvalError Never! {
+envmodel_unknown_record_field: fn(type_name: String, field: String, known: String, span: Span) -> EnvModelEvalError Never! {
     envmodel_error("E0972", "`{field}` isn't a field of `{type_name}`", "A `{type_name}` has a fixed set of fields: {known}", "Remove `{field}`, or use one of {known}", Val(span))
 }
 
 // E0973: an image `target:` names an unknown platform (U13).
-fn envmodel_unknown_platform(os: String, arch: String, span: Span) -> EnvModelEvalError Never! {
+envmodel_unknown_platform: fn(os: String, arch: String, span: Span) -> EnvModelEvalError Never! {
     envmodel_error("E0973", "`{os}.{arch}` isn't a platform Jet knows", "U13: a `target` is a typed platform value, not a piece of quoted text — it must be `linux.x64` or `linux.arm64`", "Write `target: linux.x64` or `target: linux.arm64`", Val(span))
 }
 
 // E0974: a `System` with no `target` field (U11).
-fn envmodel_missing_system_target(span: Span) -> EnvModelEvalError Never! {
+envmodel_missing_system_target: fn(span: Span) -> EnvModelEvalError Never! {
     envmodel_error("E0974", "This `System` has no `target`", "U11: every machine names the platform it runs on with a typed `target` value", "Add `target: linux.x64` (or `linux.arm64`)", Val(span))
 }
 
 // E0975: a `Service` record's `enable` field is not a yes/no value (U12).
-fn envmodel_service_enable_not_bool(span: Span) -> EnvModelEvalError Never! {
+envmodel_service_enable_not_bool: fn(span: Span) -> EnvModelEvalError Never! {
     envmodel_error("E0975", "A service's `enable` must be `true` or `false`", "U12: a `Service` turns on or off with a yes/no `enable` flag", "Write `enable: true` or `enable: false`", Val(span))
 }
 
 // E0975: a `Service` record with no `enable` field (U12).
-fn envmodel_service_missing_enable(name: String, span: Span) -> EnvModelEvalError Never! {
+envmodel_service_missing_enable: fn(name: String, span: Span) -> EnvModelEvalError Never! {
     envmodel_error("E0975", "The service `{name}` has no `enable`", "U12: every `Service` says whether it is on with a required `enable` flag, then any further settings", "Add `enable: true` (or `false`) to `{name}`", Val(span))
 }
 
 // E0976: an `Image` `format:` that isn't `iso` / `qcow` / `raw` (U14).
-fn envmodel_image_bad_format(word: String, span: Span) -> EnvModelEvalError Never! {
+envmodel_image_bad_format: fn(word: String, span: Span) -> EnvModelEvalError Never! {
     envmodel_error("E0976", "`{word}` isn't a disk-image format", "Disk-image formats are frozen jetos research; Jetpack only builds `.Oci` images today", "Use `kind: .Oci` for an active image, or keep disk-image notes in the jetos research appendix", Val(span))
 }
 
 // E0977: an `Image` with no `from:` field (U14).
-fn envmodel_image_missing_from(span: Span) -> EnvModelEvalError Never! {
+envmodel_image_missing_from: fn(span: Span) -> EnvModelEvalError Never! {
     envmodel_error("E0977", "This `Image` has no `from`", "active Jetpack images are OCI containers built from a package; `system.*` disk images are frozen jetos research", "Add `from: packages.<name>` for an `.Oci` image", Val(span))
 }
 
 // E0977: an `Image` restates a field that is not an active `.Oci` field.
-fn envmodel_image_restated_field(field: String, span: Span) -> EnvModelEvalError Never! {
+envmodel_image_restated_field: fn(field: String, span: Span) -> EnvModelEvalError Never! {
     envmodel_error("E0977", "An image doesn't restate `{field}`", "Fields inherited from `system.*` belong to frozen jetos disk-image research, not active `.Oci` images", "Remove `{field}` from the active image; use package/env inputs instead", Val(span))
 }
 
 // E1266: an `Image`'s `kind:` doesn't name `.Oci`.
-fn envmodel_image_unknown_kind(word: String, span: Span) -> EnvModelEvalError Never! {
+envmodel_image_unknown_kind: fn(word: String, span: Span) -> EnvModelEvalError Never! {
     envmodel_error("E1266", "`{word}` isn't an image kind", "active Jetpack images use `.Oci`; `.Iso` disk images are frozen jetos research capture", "write `kind: .Oci` for active Jetpack images", Val(span))
 }
 
 // E1266: an explicit or implied `kind:` disagrees with what this image's
 // `from:` names — e.g. `kind: .Iso` alongside
 // `from: packages.<name>`, or any `from: system.<name>`.
-fn envmodel_image_kind_from_mismatch(kind: String, span: Span) -> EnvModelEvalError Never! {
-    wants :: if kind == IMAGE_KIND_OCI -> "packages.<name>" else -> "system.<name>"
-    got :: if kind == IMAGE_KIND_OCI -> "system.<name>" else -> "packages.<name>"
-    status :: if kind == IMAGE_KIND_OCI -> "active `.Oci` images are built from packages" else -> "`.Iso` disk images are frozen jetos research capture"
+envmodel_image_kind_from_mismatch: fn(kind: String, span: Span) -> EnvModelEvalError Never! {
+    wants: if kind == IMAGE_KIND_OCI -> "packages.<name>" else -> "system.<name>"
+    got: if kind == IMAGE_KIND_OCI -> "system.<name>" else -> "packages.<name>"
+    status: if kind == IMAGE_KIND_OCI -> "active `.Oci` images are built from packages" else -> "`.Iso` disk images are frozen jetos research capture"
     envmodel_error("E1266", "`kind: .{kind}` doesn't match this image's `from:`", "{status}; this `from:` names a `{got}`", "change `from:` to `{wants}`, or change `kind:` to match what `from:` names", Val(span))
 }
 
 // E1267: an `.Oci` image's `from: packages.<name>` doesn't name a package
 // declared `executable` in this project's package manifest.
-fn envmodel_oci_from_non_executable(image: String, package: String, is_library: Bool) -> EnvModelEvalError Never! {
-    why :: if is_library -> "`{package}` is declared `library` in `pkg.jet` — a library has no binary to containerize" else -> "`{package}` isn't declared in this project's `pkg.jet` `packages:` block"
+envmodel_oci_from_non_executable: fn(image: String, package: String, is_library: Bool) -> EnvModelEvalError Never! {
+    why: if is_library -> "`{package}` is declared `library` in `pkg.jet` — a library has no binary to containerize" else -> "`{package}` isn't declared in this project's `pkg.jet` `packages:` block"
     envmodel_error("E1267", "the image `{image}` is built from a non-executable package `{package}`", "an `.Oci` image's `from: packages.<name>` must name an `executable` package — {why}", "declare `{package}: executable` in `pkg.jet`, or point `from:` at an existing executable package", None)
 }
 
 // E1269: an `.Oci` image field is written, but not shaped the way
 // This rule spells it.
-fn envmodel_image_field_shape(field: String, expected: String, span: Span) -> EnvModelEvalError Never! {
+envmodel_image_field_shape: fn(field: String, expected: String, span: Span) -> EnvModelEvalError Never! {
     envmodel_error("E1269", "`{field}` isn't shaped like {expected}", "`{field}` is always written as {expected}", "rewrite `{field}:` as {expected}", Val(span))
 }
 
 // Wrap a merge conflict (§6) as a user-facing diagnostic (I4).
-fn envmodel_merge_error_to_diagnostic(error: MergeError) -> EnvModelEvalError Never! {
+envmodel_merge_error_to_diagnostic: fn(error: MergeError) -> EnvModelEvalError Never! {
     if error == {
         .SourceConflict(name, a, b) -> envmodel_error("E0967", "Source `{name}` is declared with two different refs", "One module declares `{name}` as `{a}`, another as `{b}` — sources merge by name, so the refs must agree", "Make every declaration of this source agree, or rename one of them", None)
         .FactConflict(fact_error) -> {

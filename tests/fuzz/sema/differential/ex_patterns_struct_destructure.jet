@@ -2,34 +2,34 @@
 // pattern that doesn't name every field must end with `..` — the skipped
 // fields are visible at a glance instead of silently dropped. `field: name`
 // renames the local binding.
-struct Incident {
+Incident: struct {
     id: Int
     severity: Int
     title: String
     kind: String
 }
 
-fn owned_pair(seed: Int) -> (left: [Int], right: [Int]) {
+owned_pair: fn(seed: Int) -> (left: [Int], right: [Int]) {
     (left: [seed, seed + 1], right: [seed + 2])
 }
 
-fn owned_incident() -> Incident {
+owned_incident: fn() -> Incident {
     Incident{id: 3, severity: 2, title: "owned result", kind: "page"}
 }
 
-fn run() {
-    incident :: Incident{id: 1, severity: 5, title: "database down", kind: "page"}
-    Incident{id, severity: sev, ..} :: incident
+run: fn() {
+    incident: Incident{id: 1, severity: 5, title: "database down", kind: "page"}
+    Incident{id, severity: sev, ..}: incident
     print("#{id} sev {sev}")
-    routed :: Incident{id: 2, severity: 1, title: "database down", kind: "page"}
+    routed: Incident{id: 2, severity: 1, title: "database down", kind: "page"}
     if routed == {
         {kind: "page", title, ..} -> { print("page {title}") }
         else -> { print("other") }
     }
     loop i in 0..<3 {
-        (left, right) :: owned_pair(i)
+        (left, right): owned_pair(i)
         print(left[1] + right[0])
     }
-    Incident{id: owned_id, title: owned_title, ..} :: owned_incident()
+    Incident{id: owned_id, title: owned_title, ..}: owned_incident()
     print("#{owned_id} {owned_title}")
 }

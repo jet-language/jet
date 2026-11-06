@@ -1,8 +1,8 @@
 // IANA IPv4 Special-Purpose Address Space, updated 2025-10-09.
 // More-specific rows override parents. Blank global fields keep Core's policy.
-use ip :: core.net.ip
+use ip: core.net.ip
 
-struct ProfileRow {
+ProfileRow: struct {
     cidr: String
     a: Int
     b: Int
@@ -14,8 +14,8 @@ struct ProfileRow {
     after_global: Bool
 }
 
-fn check_address(n: Int, global: Bool) {
-    addr :: ip.ipv4_from_int(n) ?? panic("profile address")
+check_address: fn(n: Int, global: Bool) {
+    addr: ip.ipv4_from_int(n) ?? panic("profile address")
     assert(ip.is_global(addr) == global)
     assert(ip.is_reserved(addr) == (addr.a >= 240))
     assert(ip.is_private(addr) == (addr.a == 10 || (addr.a == 172 && addr.b >= 16 && addr.b <= 31) || (addr.a == 192 && addr.b == 168)))
@@ -25,10 +25,10 @@ fn check_address(n: Int, global: Bool) {
     assert(ip.is_unspecified(addr) == (n == 0))
 }
 
-fn run() {
+run: fn() {
     // Each row checks its start, end, and both existing immediate neighbours.
     // Neighbour expectations account for enclosing rows and adjacent exceptions.
-    rows :: [
+    rows: [
         ProfileRow{cidr: "0.0.0.0/8", a: 0, b: 0, c: 0, d: 0, prefix: 8, global: false, before_global: false, after_global: true},
         ProfileRow{cidr: "0.0.0.0/32", a: 0, b: 0, c: 0, d: 0, prefix: 32, global: false, before_global: false, after_global: false},
         ProfileRow{cidr: "10.0.0.0/8", a: 10, b: 0, c: 0, d: 0, prefix: 8, global: false, before_global: true, after_global: true},
@@ -60,10 +60,10 @@ fn run() {
         ProfileRow{cidr: "8.8.8.8/32", a: 8, b: 8, c: 8, d: 8, prefix: 32, global: true, before_global: true, after_global: true},
     ]
     loop row in rows {
-        start :: ip.ipv4_int(ip.ipv4(row.a, row.b, row.c, row.d) ?? panic("profile start"))
+        start: ip.ipv4_int(ip.ipv4(row.a, row.b, row.c, row.d) ?? panic("profile start"))
         size := 1
         loop _ in 0..<(32 - row.prefix) -> size = size * 2
-        end :: start + size - 1
+        end: start + size - 1
         check_address(start, row.global)
         check_address(end, row.global)
         if start > 0 -> check_address(start - 1, row.before_global)
@@ -73,7 +73,7 @@ fn run() {
     reserved_octets := 0
     loop a in 0..<256 {
         // Three points per first octet include both extremes and an interior host.
-        global :: a != 0 && a != 10 && a != 127 && a < 224
+        global: a != 0 && a != 10 && a != 127 && a < 224
         check_address(ip.ipv4_int(ip.ipv4(a, 0, 0, 0) ?? panic("octet start")), global && a != 192)
         check_address(ip.ipv4_int(ip.ipv4(a, 1, 2, 3) ?? panic("octet host")), global)
         check_address(ip.ipv4_int(ip.ipv4(a, 255, 255, 255) ?? panic("octet end")), global)

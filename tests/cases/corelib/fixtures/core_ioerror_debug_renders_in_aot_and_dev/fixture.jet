@@ -1,9 +1,9 @@
 
-fn activate_core() -[IO]> String {
+activate_core: fn() -[IO]> String {
     return input() ?? ""
 }
 
-fn fail() -[]> Int IOError! {
+fail: fn() -[]> Int IOError! {
     return Err(IOError.InvalidInput(IOContext{
         operation: .Read,
         resource: None,
@@ -12,7 +12,7 @@ fn fail() -[]> Int IOError! {
     }))
 }
 
-fn fail_other() -[]> Int IOError! {
+fail_other: fn() -[]> Int IOError! {
     return Err(IOError.Other(IOContext{
         cause: Val("denied"),
         os_code: Val(13),
@@ -21,9 +21,9 @@ fn fail_other() -[]> Int IOError! {
     }))
 }
 
-fn run() {
+run: fn() {
     print("{42:Debug}")
-    debug :: "debug"
+    debug: "debug"
     print("{debug:Debug}")
     print("{[1, 2, 3]:Debug}")
     if fail() == {

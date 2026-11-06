@@ -4,10 +4,10 @@
 // `be`/`le` suffix picks byte order on a multi-byte read, and a final
 // `{name:...}` captures the remaining bytes. Always refutable, so the
 // `if == {}` table needs an `else`.
-fn run() {
+run: fn() {
     // A minimal IPv4-style header: version + IHL nibbles, a type-of-service
     // byte, a big-endian 16-bit total length, then the payload bytes.
-    packet :: [U8]{0x45, 0x00, 0x00, 0x28, 0xDE, 0xAD}
+    packet: [U8]{0x45, 0x00, 0x00, 0x28, 0xDE, 0xAD}
     if packet == {
         [U8]{"{version:U4}{ihl:U4}{tos:U8}{len:U16be}{rest:...}"} -> {
             print("IPv{version}, header {ihl} words, {len} bytes total")
@@ -16,7 +16,7 @@ fn run() {
         else -> { print("not a recognizable packet") }
     }
     // A truncated buffer can't fill the same shape, so the `else` runs.
-    short :: [U8]{0x45}
+    short: [U8]{0x45}
     if short == {
         [U8]{"{version:U4}{ihl:U4}{tos:U8}{len:U16be}{rest:...}"} -> { print("unexpected match") }
         else -> { print("too short to decode") }
@@ -25,22 +25,22 @@ fn run() {
     // D-BINPAT1 / #2100: parity covers sub-byte and non-power-of-two byte
     // widths in both byte orders. These widths used to answer differently
     // between AOT and the shared interpreter matcher.
-    nibble :: [U8]{0xAB}
+    nibble: [U8]{0xAB}
     if nibble == {
         [U8]{"{hi:U4}{lo:U4}"} -> { print("U4={hi}/{lo}") }
         else -> { print("U4 mismatch") }
     }
-    wide_be :: [U8]{0x01, 0x02, 0x03}
+    wide_be: [U8]{0x01, 0x02, 0x03}
     if wide_be == {
         [U8]{"{value:U24be}"} -> { print("U24be={value}") }
         else -> { print("U24be mismatch") }
     }
-    wide_le :: [U8]{0x01, 0x02, 0x03}
+    wide_le: [U8]{0x01, 0x02, 0x03}
     if wide_le == {
         [U8]{"{value:U24le}"} -> { print("U24le={value}") }
         else -> { print("U24le mismatch") }
     }
-    wide40 :: [U8]{0x01, 0x02, 0x03, 0x04, 0x05}
+    wide40: [U8]{0x01, 0x02, 0x03, 0x04, 0x05}
     if wide40 == {
         [U8]{"{be:U40be}"} -> { print("U40be={be}") }
         else -> { print("U40be mismatch") }
@@ -49,7 +49,7 @@ fn run() {
         [U8]{"{le:U40le}"} -> { print("U40le={le}") }
         else -> { print("U40le mismatch") }
     }
-    wide48 :: [U8]{0x01, 0x02, 0x03, 0x04, 0x05, 0x06}
+    wide48: [U8]{0x01, 0x02, 0x03, 0x04, 0x05, 0x06}
     if wide48 == {
         [U8]{"{be:U48be}"} -> { print("U48be={be}") }
         else -> { print("U48be mismatch") }
@@ -58,7 +58,7 @@ fn run() {
         [U8]{"{le:U48le}"} -> { print("U48le={le}") }
         else -> { print("U48le mismatch") }
     }
-    wide56 :: [U8]{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07}
+    wide56: [U8]{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07}
     if wide56 == {
         [U8]{"{be:U56be}"} -> { print("U56be={be}") }
         else -> { print("U56be mismatch") }

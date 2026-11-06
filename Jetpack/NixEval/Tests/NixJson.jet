@@ -2,55 +2,55 @@
 // share. Number claims pin the binary64 rounding the reference reader uses.
 use jetpack_nix_eval.[NixEvalJSON, NixEvalJSONNumber, nixeval_push_byte, nixeval_push_text]
 
-fn nixeval_test_json(text: String) -> NixEvalJSON {
+nixeval_test_json: fn(text: String) -> NixEvalJSON {
     NixEvalJSON.parse(text) ?? panic("fixture JSON must parse")
 }
 
-fn nixeval_test_object(document: NixEvalJSON, index: Int) -> [String: Int] {
+nixeval_test_object: fn(document: NixEvalJSON, index: Int) -> [String: Int] {
     document.object(index) ?? panic("expected a JSON object")
 }
 
-fn nixeval_test_array(document: NixEvalJSON, index: Int) -> [Int] {
+nixeval_test_array: fn(document: NixEvalJSON, index: Int) -> [Int] {
     document.array(index) ?? panic("expected a JSON array")
 }
 
-fn nixeval_test_string(document: NixEvalJSON, index: Int) -> String {
+nixeval_test_string: fn(document: NixEvalJSON, index: Int) -> String {
     document.string(index) ?? panic("expected a JSON string")
 }
 
-fn nixeval_test_get(fields: [String: Int], key: String) -> Int {
+nixeval_test_get: fn(fields: [String: Int], key: String) -> Int {
     fields.get(key) ?? panic("missing fixture field {key}")
 }
 
-fn nixeval_test_text(document: NixEvalJSON, fields: [String: Int], key: String) -> String {
+nixeval_test_text: fn(document: NixEvalJSON, fields: [String: Int], key: String) -> String {
     nixeval_test_string(document, nixeval_test_get(fields, key))
 }
 
-fn nixeval_test_integer(document: NixEvalJSON, index: Int) -> Int {
-    number :: document.number(index) ?? panic("expected a JSON number")
+nixeval_test_integer: fn(document: NixEvalJSON, index: Int) -> Int {
+    number: document.number(index) ?? panic("expected a JSON number")
     number.integer() ?? panic("expected an integral JSON number")
 }
 
 // Rust `fixture_strings`: a JSON array of strings.
-fn nixeval_test_strings(document: NixEvalJSON, index: Int) -> [String] {
+nixeval_test_strings: fn(document: NixEvalJSON, index: Int) -> [String] {
     strings := [String]{}
     loop item in nixeval_test_array(document, index) -> &strings.push(nixeval_test_string(document, item))
     strings
 }
 
-fn nixeval_test_number(text: String) -> NixEvalJSONNumber {
-    document :: nixeval_test_json(text)
+nixeval_test_number: fn(text: String) -> NixEvalJSONNumber {
+    document: nixeval_test_json(text)
     document.number(document.root) ?? panic("expected a JSON number")
 }
 
-fn nixeval_test_json_error(text: String) -> String {
+nixeval_test_json_error: fn(text: String) -> String {
     if NixEvalJSON.parse(text) == {
         .Ok(_) -> panic("JSON must be rejected")
         .Err(error) -> error.message()
     }
 }
 
-fn nixeval_test_nested_arrays(depth: Int) -> String {
+nixeval_test_nested_arrays: fn(depth: Int) -> String {
     bytes := [U8]{}
     loop _ in 0..<depth -> nixeval_push_byte(&bytes, 91)
     nixeval_push_text(&bytes, "true")
@@ -109,8 +109,8 @@ fn nixeval_test_nested_arrays(depth: Int) -> String {
 }
 
 #Test("nixeval json decodes escapes and surrogate pairs") {
-    document :: nixeval_test_json(`["\u00e9\ud83d\ude00\n\/", "tab\there"]`)
-    items :: nixeval_test_array(document, document.root)
+    document: nixeval_test_json(`["\u00e9\ud83d\ude00\n\/", "tab\there"]`)
+    items: nixeval_test_array(document, document.root)
     assert_eq(nixeval_test_string(document, items[0]), "é😀\n/")
     assert_eq(nixeval_test_string(document, items[1]), "tab\there")
     assert_eq(nixeval_test_json_error(`"\ud83d"`), "unpaired surrogate in string")
@@ -125,9 +125,9 @@ fn nixeval_test_nested_arrays(depth: Int) -> String {
 }
 
 #Test("nixeval json documents compare structurally") {
-    left :: nixeval_test_json(`{"a": [1, 2.0, {"b": null}], "c": "x"}`)
-    right :: nixeval_test_json(`{"c": "x", "a": [1.0, 2, {"b": null}]}`)
-    other :: nixeval_test_json(`{"c": "x", "a": [1.0, 2, {"b": false}]}`)
+    left: nixeval_test_json(`{"a": [1, 2.0, {"b": null}], "c": "x"}`)
+    right: nixeval_test_json(`{"c": "x", "a": [1.0, 2, {"b": null}]}`)
+    other: nixeval_test_json(`{"c": "x", "a": [1.0, 2, {"b": false}]}`)
     assert(left.same(left.root, right, right.root))
     assert(!left.same(left.root, other, other.root))
 }

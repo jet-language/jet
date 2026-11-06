@@ -2,12 +2,12 @@
 // WouldBlock keeps polling to 1s and yields; any other error returns false.
 // D-NET-NONBLOCKING1 maps WouldBlock to typed Timeout from accept(deadline:0s).
 use {
-    net :: core.net
-    time :: core.time
-    tasks :: core.tasks
+    net: core.net
+    time: core.time
+    tasks: core.tasks
 }
-fn observed_connection(listener: TCPListener) -> Bool {
-    deadline :: time.instant() + 1s
+observed_connection: fn(listener: TCPListener) -> Bool {
+    deadline: time.instant() + 1s
     loop {
         if listener.accept(deadline: 0s) == {
             .Ok(_) -> return true
@@ -21,9 +21,9 @@ fn observed_connection(listener: TCPListener) -> Bool {
         }
     }
 }
-fn run() {
-    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind observer")
-    addr :: listener.local_addr() ?? panic("observer address")
+run: fn() {
+    listener: net.tcp_listen("127.0.0.1:0") ?? panic("bind observer")
+    addr: listener.local_addr() ?? panic("observer address")
     print("ADDRESS={addr}")
     print(observed_connection(listener))
 }

@@ -1,25 +1,25 @@
 // Transport ALGORITHM port of tests/web_app.rs:63-95; assertions stay in .case.
-package {
+package: {
     name: "s6_web_request"
     authority: { allow: [Env, FS.Write, Net, Time] }
 }
 use {
-    net :: core.net
-    time :: core.time
-    files :: core.files
-    sys :: core.sys
+    net: core.net
+    time: core.time
+    files: core.files
+    sys: core.sys
 }
 
-fn s6_web_request_env(name: String) -> String {
+s6_web_request_env: fn(name: String) -> String {
     sys.get(name) ?? panic("missing {name}")
 }
 
-fn run() {
-    port :: s6_web_request_env("S6_WEB_PORT")
-    method :: s6_web_request_env("S6_WEB_METHOD")
-    path :: s6_web_request_env("S6_WEB_PATH")
-    output :: s6_web_request_env("S6_WEB_RESPONSE")
-    deadline :: time.instant() + 30s
+run: fn() {
+    port: s6_web_request_env("S6_WEB_PORT")
+    method: s6_web_request_env("S6_WEB_METHOD")
+    path: s6_web_request_env("S6_WEB_PATH")
+    output: s6_web_request_env("S6_WEB_RESPONSE")
+    deadline: time.instant() + 30s
     connected := net.TCPStream?{None}
     loop {
         if net.tcp_connect("127.0.0.1:{port}") == {
@@ -34,19 +34,19 @@ fn run() {
         }
     }
     stream := connected ?? panic("connected stream")
-    crlf :: String.from_bytes([U8]{13, 10}) ?? panic("CRLF")
-    request :: "{method} {path} HTTP/1.1{crlf}Host: localhost{crlf}Connection: close{crlf}Content-Length: 0{crlf}{crlf}"
+    crlf: String.from_bytes([U8]{13, 10}) ?? panic("CRLF")
+    request: "{method} {path} HTTP/1.1{crlf}Host: localhost{crlf}Connection: close{crlf}Content-Length: 0{crlf}{crlf}"
     stream.write_all(request.bytes()) ?? panic("request write")
     net.tcp_shutdown(&stream, NetShutdown.Write) ?? panic("finish request")
     bytes := [U8]{}
     complete := false
-    reload :: sys.get("S6_WEB_RELOAD_APP")
+    reload: sys.get("S6_WEB_RELOAD_APP")
     if reload == .Val(app) {
         // Original predicate: completion must not arrive during the absolute
         // 250ms post-send/shutdown window. Partial bytes are retained.
-        started :: time.instant()
+        started: time.instant()
         loop time.instant() - started < 250ms {
-            remaining :: 250 - time.duration_as_ms(time.instant() - started)
+            remaining: 250 - time.duration_as_ms(time.instant() - started)
             net.set_read_timeout(&stream, remaining) ?? panic("first window timeout")
             failed := false
             if net.tcp_read_bytes(&stream, 8192) == {
@@ -66,14 +66,14 @@ fn run() {
         }
         files.append_all(app, "\n") ?? panic("append source newline")
     }
-    changed :: time.instant()
+    changed: time.instant()
     loop !complete {
         if reload != None {
             assert(time.instant() - changed < 10s, "reload response did not complete")
-            remaining :: 10000 - time.duration_as_ms(time.instant() - changed)
+            remaining: 10000 - time.duration_as_ms(time.instant() - changed)
             net.set_read_timeout(&stream, remaining) ?? panic("changed window timeout")
         }
-        part :: net.tcp_read_bytes(&stream, 8192) ?? panic("response read")
+        part: net.tcp_read_bytes(&stream, 8192) ?? panic("response read")
         if part.len() == 0 {
             complete = true
             if reload != None -> assert(time.instant() - changed <= 10s, "reload response completed after deadline")
@@ -81,6 +81,6 @@ fn run() {
             loop byte in part -> &bytes.push(byte)
         }
     }
-    response :: String.from_bytes(bytes) ?? panic("response UTF-8")
+    response: String.from_bytes(bytes) ?? panic("response UTF-8")
     files.write(output, response) ?? panic("record response")
 }

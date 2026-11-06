@@ -4,11 +4,11 @@
 // its read-only data objects, its debug files and types, and each function's
 // source facts.
 
-struct X64FunctionID { value: Int }
+X64FunctionID: struct { value: Int }
 
-struct X64DataID { value: Int }
+X64DataID: struct { value: Int }
 
-enum X64RelocTarget {
+X64RelocTarget: enum {
     Function(id: X64FunctionID)
     Runtime(symbol: String)
     Data(id: X64DataID)
@@ -16,11 +16,11 @@ enum X64RelocTarget {
 
 // A rel32 field at `at` (offset in the function's code) that must hold the
 // distance from the end of the field to the target.
-struct X64Reloc { at: Int, target: X64RelocTarget }
+X64Reloc: struct { at: Int, target: X64RelocTarget }
 
 // `align`: the function's start alignment in `.text`, a power of two of at
 // least X64_FUNCTION_ALIGN; code inside it aligned to `align` stays aligned.
-struct X64CompiledFunction {
+X64CompiledFunction: struct {
     id: X64FunctionID
     name: String
     code: [U8]
@@ -32,12 +32,12 @@ struct X64CompiledFunction {
 // where each run of code from one source line starts, the end of the
 // prologue, the call frame instructions of its FDE, and where each debug
 // variable lives over which code range.
-struct X64LineRow { at: Int, line: Int }
+X64LineRow: struct { at: Int, line: Int }
 
 // A register (hardware number; xmm n as 16 + n), a frame slot at `offset`
 // from rbp, or the frame address rbp + `offset` itself (a StackSlot's
 // address).
-enum X64DebugLocation {
+X64DebugLocation: enum {
     Register(reg: Int)
     Frame(offset: Int)
     FrameAddress(offset: Int)
@@ -45,9 +45,9 @@ enum X64DebugLocation {
 
 // X64FunctionSource.variables[variable] is at `location` for code offsets
 // start..<end.
-struct X64VariableRange { variable: Int, start: Int, end: Int, location: X64DebugLocation }
+X64VariableRange: struct { variable: Int, start: Int, end: Int, location: X64DebugLocation }
 
-struct X64FunctionDebug {
+X64FunctionDebug: struct {
     lines: [X64LineRow]
     body: Int
     cfi: [U8]
@@ -56,15 +56,15 @@ struct X64FunctionDebug {
 
 // The source types of the debug variables, described by their machine
 // layout.
-enum X64DebugEncoding { Signed Unsigned Float Bool Char }
+X64DebugEncoding: enum { Signed Unsigned Float Bool Char }
 
-struct X64DebugMember { name: String, offset: Int, ty: Int }
+X64DebugMember: struct { name: String, offset: Int, ty: Int }
 
-struct X64DebugEnumerator { name: String, value: Int }
+X64DebugEnumerator: struct { name: String, value: Int }
 
 // Type references are rows of X64ModuleDebug.types; -1 is no type (an
 // untyped pointer). `Opaque` has a name and size but no known contents.
-enum X64DebugTypeKind {
+X64DebugTypeKind: enum {
     Base(encoding: X64DebugEncoding)
     Pointer(target: Int)
     Struct(members: [X64DebugMember])
@@ -74,12 +74,12 @@ enum X64DebugTypeKind {
     Opaque
 }
 
-struct X64DebugType { name: String, size: Int, kind: X64DebugTypeKind }
+X64DebugType: struct { name: String, size: Int, kind: X64DebugTypeKind }
 
 // A source variable: a parameter or a named local. `indirect` when the
 // carried value is the address of the variable's bytes (an inline aggregate)
 // rather than the variable itself.
-struct X64DebugVariable {
+X64DebugVariable: struct {
     name: String
     ty: Int
     line: Int
@@ -89,20 +89,20 @@ struct X64DebugVariable {
 
 // `directory` is the compilation directory relative `files` resolve
 // against; "" leaves that to the debugger (its working directory).
-struct X64ModuleDebug {
+X64ModuleDebug: struct {
     directory: String
     files: [String]
     types: [X64DebugType]
 }
 
 // Read-only module objects, including immutable aggregate constant trees.
-struct X64DataReloc {
+X64DataReloc: struct {
     offset: Int
     target: X64DataID
     addend: Int
 }
 
-struct X64Data {
+X64Data: struct {
     id: X64DataID
     bytes: [U8]
     align: Int
@@ -112,21 +112,21 @@ struct X64Data {
 // The source facts of one compiled function: `file` is a row of
 // X64ModuleDebug.files, -1 for generated code (glue, helpers, the generated
 // entry), which has no source name or variables.
-struct X64FunctionSource {
+X64FunctionSource: struct {
     name: String
     file: Int
     line: Int
     variables: [X64DebugVariable]
 }
 
-fn x64_function_source_none() -> X64FunctionSource Never! {
+x64_function_source_none: fn() -> X64FunctionSource Never! {
     X64FunctionSource{name: "", file: -1, line: 0, variables: [X64DebugVariable]{}}
 }
 
 // What the object writer reads besides the compiled functions: the data
 // objects (`data[i].id.value == i`), the debug files and types, and the
 // source facts of the function with id `i` at `functions[i]`.
-struct X64ObjectModule {
+X64ObjectModule: struct {
     data: [X64Data]
     debug: X64ModuleDebug
     functions: [X64FunctionSource]

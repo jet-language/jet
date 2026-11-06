@@ -1,7 +1,7 @@
-use http :: core.http.client
-fn run() {
-    client :: http.Client.new().protocols(true, false, true)
-    first :: client.send(http.request("GET", "http://{cap:addr}/h2")) ?? panic("send")
+use http: core.http.client
+run: fn() {
+    client: http.Client.new().protocols(true, false, true)
+    first: client.send(http.request("GET", "http://{cap:addr}/h2")) ?? panic("send")
     assert_eq(first.status(), 200)
     saw_error := false
     loop chunk in first.body().chunks(65536) {

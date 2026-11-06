@@ -8,12 +8,12 @@ use jet_foundation.[
     inline_assembly_contract,
 ]
 
-fn sema_inline_assembly_contract(function: Func, target: String, diagnostics: &[Diagnostic]) -> InlineAsmContract? {
+sema_inline_assembly_contract: fn(function: Func, target: String, diagnostics: &[Diagnostic]) -> InlineAsmContract? {
     if inline_assembly_contract(function, target) == {
         .NotAssembly -> return None
         .Checked(contract) -> return Val(contract)
         .Incomplete(problem) -> {
-            inline :: function.inline_foreign ?? return None
+            inline: function.inline_foreign ?? return None
             &diagnostics.push(sema_error("E3223", inline.source_span, "this inline assembly operand contract is incomplete", problem, "bind each Jet parameter as `{{name}}`, mark one result with `; -> return`, and list overwritten registers on `; clobbers …`"))
         }
     }

@@ -1,15 +1,15 @@
 
-fn build(b: Build) -[Exec, FS]> {
+build: fn(b: Build) -[Exec, FS]> {
     #Impure("write CLI test output") {
-    action :: b.action(
+    action: b.action(
         "stamp",
         [],
         ["stamp.txt"],
         ["sh", "-c", "printf cli-built > stamp.txt"],
         ["Exec", "FS"]
         )
-        app :: b.add_executable("app", ["main.jet"], [action])
+        app: b.add_executable("app", ["main.jet"], [action])
     b.default(app)
     }
 }
-fn run() { print("ok") }
+run: fn() { print("ok") }

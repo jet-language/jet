@@ -1,16 +1,16 @@
 // A local value wins an unqualified call name. Select the declared function
 // explicitly through its module while still reading the same-named local.
-module labels {
-    fn describe(value: Int) -> String {
+labels: module {
+    describe: fn(value: Int) -> String {
         "v{value}"
     }
 }
 
-fn label(value: Int) -> String {
-    describe :: "local"
+label: fn(value: Int) -> String {
+    describe: "local"
     "{describe}:{labels.describe(value)}"
 }
 
-fn run() {
+run: fn() {
     print(label(4))
 }

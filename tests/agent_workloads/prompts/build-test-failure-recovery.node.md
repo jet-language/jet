@@ -12,8 +12,8 @@ input directory itself must be left unchanged.
 
 The input directory contains exactly this, with small files shown inline:
 
-    build_test_recovery.jet  (83 bytes)
-      | fn run() {
+    build_test_recovery.jet  (84 bytes)
+      | run: fn() {
       |     print("ready")
       | }
       | 
@@ -21,8 +21,8 @@ The input directory contains exactly this, with small files shown inline:
       |     assert(true)
       | }
       | 
-    invalid.jet  (31 bytes)
-      | fn run( {
+    invalid.jet  (32 bytes)
+      | run: fn( {
       |     print("ready")
       | }
       | 

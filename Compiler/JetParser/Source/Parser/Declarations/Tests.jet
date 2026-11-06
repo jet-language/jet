@@ -14,11 +14,11 @@ use {
     ]
 }
 
-fn parser_test_ahead(state: &JetParserState) -> Bool Never! {
+parser_test_ahead: fn(state: &JetParserState) -> Bool Never! {
     parser_current_kind(&state) == TOKEN_HASH && parser_kind_at(&state, 1) == TOKEN_IDENT && parser_value_at(&state, 1) == "Test"
 }
 
-fn parser_test_name(value: Expr) -> (name: String?, span: Span) {
+parser_test_name: fn(value: Expr) -> (name: String?, span: Span) {
     if value == {
         .Str(parts, span, _) -> {
             if parts.len() == 1 {
@@ -30,7 +30,7 @@ fn parser_test_name(value: Expr) -> (name: String?, span: Span) {
     }
 }
 
-fn parser_test_name_of(value: Expr?, fallback: Span) -> (name: String?, span: Span) {
+parser_test_name_of: fn(value: Expr?, fallback: Span) -> (name: String?, span: Span) {
     if value == {
         .Val(expression) -> parser_test_name(expression)
         else -> (name: None, span: fallback)
@@ -40,24 +40,24 @@ fn parser_test_name_of(value: Expr?, fallback: Span) -> (name: String?, span: Sp
 // Rust `test_def`: `#Test(name, faults, expected_fail)` binds its arguments
 // by the registered parameter order or by label. A name that is not one plain
 // literal stays in `name_expr` for compile-time evaluation.
-fn parser_parse_test(state: &JetParserState) -> Item {
-    marker :: parser_parse_marker(&state)
-    bound :: parser_bind_marker_arguments(&state, marker, [String]{"name", "faults", "expected_fail"}, 0)
+parser_parse_test: fn(state: &JetParserState) -> Item {
+    marker: parser_parse_marker(&state)
+    bound: parser_bind_marker_arguments(&state, marker, [String]{"name", "faults", "expected_fail"}, 0)
     values := [Expr?]{None, None, None}
     if bound == .Val(found) -> values = found
-    faults :: values[1]
-    expected_fail :: values[2]
+    faults: values[1]
+    expected_fail: values[2]
     if parser_current_kind(&state) == TOKEN_KW_FN {
-        start :: parser_bump(&state)
-        name :: parser_expect_name(&state, "after `fn` in a property test")
-        params :: parser_parse_param_list(&state)
-        body :: parser_parse_block(&state)
-        value :: TestDef{span: parser_cover(marker.span, body.span), name: Val(parser_value(state, name)), name_expr: None, faults_expr: faults, faults: [String]{}, expected_fail_expr: expected_fail, expected_fail: false, marker_name_span: marker.span, name_prefix: None, name_span: name.span, params: ^params, fn_keyword_span: Val(start.span), body: body.statements}
+        start: parser_bump(&state)
+        name: parser_expect_name(&state, "after `fn` in a property test")
+        params: parser_parse_param_list(&state)
+        body: parser_parse_block(&state)
+        value: TestDef{span: parser_cover(marker.span, body.span), name: Val(parser_value(state, name)), name_expr: None, faults_expr: faults, faults: [String]{}, expected_fail_expr: expected_fail, expected_fail: false, marker_name_span: marker.span, name_prefix: None, name_span: name.span, params: ^params, fn_keyword_span: Val(start.span), body: body.statements}
         return Item.Test{value: value}
     }
-    first :: values[0]
+    first: values[0]
     if bound != None && first == None -> parser_marker_shape_error(&state, marker)
-    named :: parser_test_name_of(first, marker.span)
-    body :: parser_parse_block(&state)
+    named: parser_test_name_of(first, marker.span)
+    body: parser_parse_block(&state)
     Item.Test{value: TestDef{span: parser_cover(marker.span, body.span), name: named.name, name_expr: first, faults_expr: faults, faults: [String]{}, expected_fail_expr: expected_fail, expected_fail: false, marker_name_span: marker.span, name_prefix: None, name_span: named.span, params: [Param]{}, fn_keyword_span: None, body: body.statements}}
 }

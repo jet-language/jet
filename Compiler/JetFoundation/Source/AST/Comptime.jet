@@ -2,7 +2,7 @@
 
 // The compiler stage at which a checked fact becomes available; distinct from
 // the language execution phase `$phase` returns.
-enum CompilerStage {
+CompilerStage: enum {
     Parsed
     Resolved
     Typed
@@ -10,12 +10,12 @@ enum CompilerStage {
     Emitted
 }
 
-COMPILER_STAGE_ALL :: comptime { [CompilerStage]{
+COMPILER_STAGE_ALL: comptime { [CompilerStage]{
     CompilerStage.Parsed, CompilerStage.Resolved, CompilerStage.Typed,
     CompilerStage.Prepared, CompilerStage.Emitted
 } }
 
-fn compiler_stage_as_str(stage: CompilerStage) -> String Never! {
+compiler_stage_as_str: fn(stage: CompilerStage) -> String Never! {
     if stage == {
         .Parsed -> "Parsed"
         .Resolved -> "Resolved"
@@ -27,18 +27,18 @@ fn compiler_stage_as_str(stage: CompilerStage) -> String Never! {
 
 // What a metadata producer owes: an unavailable producer never becomes a
 // default value.
-enum MetadataProducerStatus {
+MetadataProducerStatus: enum {
     ContractOnly
     NotImplemented
     ExistingCallableProducerNeedsExtension
 }
 
-enum CtFloat {
+CtFloat: enum {
     F32(value: Float)
     F64(value: Float)
 }
 
-enum CtValue {
+CtValue: enum {
     Int(value: Int)
     Float(value: CtFloat)
     Bool(value: Bool)
@@ -56,39 +56,39 @@ enum CtValue {
     Closure(value: ClosureData)
 }
 
-struct CtMapEntry {
+CtMapEntry: struct {
     key: CtKey
     value: CtValue
 }
 
-struct NamedCtValue {
+NamedCtValue: struct {
     name: String
     value: CtValue
 }
 
-struct CtEnumArg {
+CtEnumArg: struct {
     label: String?
     value: CtValue
 }
 
-enum CtReport {
+CtReport: enum {
     Clean(ty: Type)
     Told(value: CtValue)
 }
 
-struct ClosureData {
+ClosureData: struct {
     lambda: Lambda
     captured: [NamedCtValue]
     return_type: Type?
     opaque: CtOpaque?
 }
 
-struct CtOpaque {
+CtOpaque: struct {
     kind: String
     identity: String
 }
 
-enum CtKey {
+CtKey: enum {
     Int(value: Int)
     BigInt(decimal: String)
     Str(value: String)
@@ -99,12 +99,12 @@ enum CtKey {
     Enum(type_name: String, variant: String)
 }
 
-struct NamedCtKey {
+NamedCtKey: struct {
     name: String
     value: CtKey
 }
 
-enum FailureContract {
+FailureContract: enum {
     Default(success: Type, error: Type)
     Optional(success: Type)
     DeclaredNever
@@ -121,8 +121,8 @@ enum FailureContract {
 
 // Rust `FailureContract::from_return_type`: the contract a written return
 // type declares.
-fn failure_contract_from_return_type(return_type: Type?) -> FailureContract Never! {
-    declared :: return_type ?? return FailureContract.Default{success: Type.Named{name: "Unit"}, error: Type.Named{name: "Err"}}
+failure_contract_from_return_type: fn(return_type: Type?) -> FailureContract Never! {
+    declared: return_type ?? return FailureContract.Default{success: Type.Named{name: "Unit"}, error: Type.Named{name: "Err"}}
     if declared == {
         .Named(name) -> if name == "Never" -> return FailureContract.DeclaredNever
         .Result(ok, err) -> {
@@ -139,8 +139,8 @@ fn failure_contract_from_return_type(return_type: Type?) -> FailureContract Neve
 // declaration with no written span, so a span-less `T Never!` is the
 // inferred-empty set and a span-less typed error is an inferred union. The
 // defaulted `run` keeps its span-less `Err!` as an explicit contract.
-fn failure_contract_of_function(return_type: Type?, return_type_span: Span?) -> FailureContract Never! {
-    contract :: failure_contract_from_return_type(return_type)
+failure_contract_of_function: fn(return_type: Type?, return_type_span: Span?) -> FailureContract Never! {
+    contract: failure_contract_from_return_type(return_type)
     if return_type_span != None -> return contract
     if contract == {
         .ProvenUnreachable(success) -> return FailureContract.InferredNever{success: success}
@@ -154,7 +154,7 @@ fn failure_contract_of_function(return_type: Type?, return_type_span: Span?) -> 
 }
 
 // The failure route a callable exposes to its callers.
-fn failure_contract_effective_type(contract: FailureContract) -> Type Never! {
+failure_contract_effective_type: fn(contract: FailureContract) -> Type Never! {
     if contract == {
         .DeclaredNever -> Type.Named{name: "Never"}
         .Default(success, error) | .Explicit(success, error) | .Inferred(success, error) -> Type.Result{ok: success, err: error}
@@ -170,7 +170,7 @@ fn failure_contract_effective_type(contract: FailureContract) -> Type Never! {
 // a solved contract onto a declaration that wrote none (InferredNever,
 // Inferred); that declaration still has the implicit default `Err`, so tools
 // show the default and never the solved set.
-fn failure_contract_written(contract: FailureContract) -> FailureContract Never! {
+failure_contract_written: fn(contract: FailureContract) -> FailureContract Never! {
     if contract == {
         // copy: `success` is a payload of read parameter `contract`, which keeps the original; the new Default owns this one
         .InferredNever(success) | .Inferred(success, _) -> FailureContract.Default{success: success.copy(), error: Type.Named{name: "Err"}}
@@ -180,15 +180,15 @@ fn failure_contract_written(contract: FailureContract) -> FailureContract Never!
 }
 
 // The failure route tools render for a callable (failure_contract_written).
-fn failure_contract_shown_type(contract: FailureContract) -> Type Never! {
+failure_contract_shown_type: fn(contract: FailureContract) -> Type Never! {
     failure_contract_effective_type(failure_contract_written(contract))
 }
 
 // The return a signature line shows: the shown failure route, or nothing for
 // a unit-success implicit default, which writes no return type. The failure
 // line still shows that route as `Err!`.
-fn failure_contract_shown_return(contract: FailureContract) -> Type? Never! {
-    written :: failure_contract_written(contract)
+failure_contract_shown_return: fn(contract: FailureContract) -> Type? Never! {
+    written: failure_contract_written(contract)
     if written == .Default(success, _) && success == (Type.Named{name: "Unit"}) -> return None
     Val(failure_contract_effective_type(written))
 }
@@ -196,7 +196,7 @@ fn failure_contract_shown_return(contract: FailureContract) -> Type? Never! {
 // Stable tooling projection of where the shown failure route came from;
 // consumers read this fact instead of reconstructing it from the rendered type.
 // Error contracts render in the suffix form only.
-fn failure_contract_source(contract: FailureContract) -> String Never! {
+failure_contract_source: fn(contract: FailureContract) -> String Never! {
     if failure_contract_written(contract) == {
         .Default(_, _) -> "implicit default Err!"
         .Optional(_) -> "optional success"
@@ -208,7 +208,7 @@ fn failure_contract_source(contract: FailureContract) -> String Never! {
     }
 }
 
-fn ast_comptime_key_type(key: CtKey) -> Type Never! {
+ast_comptime_key_type: fn(key: CtKey) -> Type Never! {
     if key == {
         .Int(_) | .BigInt(_) -> Type.Int
         .Str(_) -> Type.String
@@ -223,7 +223,7 @@ fn ast_comptime_key_type(key: CtKey) -> Type Never! {
     }
 }
 
-fn ast_comptime_value_type(value: CtValue) -> Type Never! {
+ast_comptime_value_type: fn(value: CtValue) -> Type Never! {
     if value == {
         .Int(_) | .BigInt(_) -> Type.Int
         .Float(number) -> if number == {
@@ -254,7 +254,7 @@ fn ast_comptime_value_type(value: CtValue) -> Type Never! {
 
 // One named site an expression walk visits: a call's name or an identifier
 // read, with its source span.
-struct ComptimeNameSite {
+ComptimeNameSite: struct {
     name: String
     span: Span
 }
@@ -262,7 +262,7 @@ struct ComptimeNameSite {
 // Rust jet-comptime `walk_calls`: every direct `Call` name in an expression
 // tree, in visit order (shallow over lambda and `#Impure` bodies, crossing
 // `comptime` blocks; `WalkOpts::PLAIN`).
-fn comptime_walk_calls(expr: Expr) -> [ComptimeNameSite] Never! {
+comptime_walk_calls: fn(expr: Expr) -> [ComptimeNameSite] Never! {
     sites := [ComptimeNameSite]{}
     ast_comptime_walk_expr(expr, true, &sites)
     sites
@@ -271,7 +271,7 @@ fn comptime_walk_calls(expr: Expr) -> [ComptimeNameSite] Never! {
 // Rust jet-comptime `walk_identifiers`: every identifier an expression reads.
 // A syntax walk only: function and type names are identifiers too, so a
 // consumer filters the names against its own declarations.
-fn comptime_walk_identifiers(expr: Expr) -> [ComptimeNameSite] Never! {
+comptime_walk_identifiers: fn(expr: Expr) -> [ComptimeNameSite] Never! {
     sites := [ComptimeNameSite]{}
     ast_comptime_walk_expr(expr, false, &sites)
     sites
@@ -279,7 +279,7 @@ fn comptime_walk_identifiers(expr: Expr) -> [ComptimeNameSite] Never! {
 
 // Rust `walk_expr_nodes` under `WalkOpts::PLAIN`; `calls` picks the visited
 // node kind (Call names, else Ident reads).
-fn ast_comptime_walk_expr(expr: Expr, calls: Bool, sites: &[ComptimeNameSite]) Never! {
+ast_comptime_walk_expr: fn(expr: Expr, calls: Bool, sites: &[ComptimeNameSite]) Never! {
     if expr == {
         .Ident(name, span, _) -> {
             if !calls -> &sites.push(ComptimeNameSite{name: name, span: span})
@@ -394,7 +394,7 @@ fn ast_comptime_walk_expr(expr: Expr, calls: Bool, sites: &[ComptimeNameSite]) N
     }
 }
 
-fn ast_comptime_walk_pattern(pattern: Pattern, calls: Bool, sites: &[ComptimeNameSite]) Never! {
+ast_comptime_walk_pattern: fn(pattern: Pattern, calls: Bool, sites: &[ComptimeNameSite]) Never! {
     if pattern == {
         .Or(alternatives, _) -> loop alternative in alternatives -> ast_comptime_walk_pattern(alternative, calls, &sites)
         .Struct(fields, _, _, _) -> {
@@ -415,7 +415,7 @@ fn ast_comptime_walk_pattern(pattern: Pattern, calls: Bool, sites: &[ComptimeNam
     }
 }
 
-fn ast_comptime_walk_pattern_slot(slot: PatSlot, calls: Bool, sites: &[ComptimeNameSite]) Never! {
+ast_comptime_walk_pattern_slot: fn(slot: PatSlot, calls: Bool, sites: &[ComptimeNameSite]) Never! {
     if slot == {
         .Value(value) -> ast_comptime_walk_expr(value, calls, &sites)
         .Nested(inner) -> ast_comptime_walk_pattern(inner, calls, &sites)
@@ -424,14 +424,14 @@ fn ast_comptime_walk_pattern_slot(slot: PatSlot, calls: Bool, sites: &[ComptimeN
     }
 }
 
-fn ast_comptime_walk_stmts(body: [Stmt], calls: Bool, sites: &[ComptimeNameSite]) Never! {
+ast_comptime_walk_stmts: fn(body: [Stmt], calls: Bool, sites: &[ComptimeNameSite]) Never! {
     loop statement in body -> ast_comptime_walk_stmt(statement, calls, &sites)
 }
 
 // Rust `walk_stmt_expr_nodes` under `WalkOpts::PLAIN`: `#Impure` and
 // `#AssumeDet` bodies and switched-off statements are skipped; `comptime`
 // blocks are crossed.
-fn ast_comptime_walk_stmt(statement: Stmt, calls: Bool, sites: &[ComptimeNameSite]) Never! {
+ast_comptime_walk_stmt: fn(statement: Stmt, calls: Bool, sites: &[ComptimeNameSite]) Never! {
     if statement == {
         .Expr(value) | .DeferClose(value, _) | .Yield(value, _) | .BreakValue(value, _) | .BreakLabelValue(_, _, value, _) -> ast_comptime_walk_expr(value, calls, &sites)
         .Val(binding) -> ast_comptime_walk_expr(binding.init, calls, &sites)
@@ -510,11 +510,11 @@ fn ast_comptime_walk_stmt(statement: Stmt, calls: Bool, sites: &[ComptimeNameSit
 
 // Rust `CtKey::from_value`: the deterministic scalar or record key a value
 // names, or None for a value that cannot key a map.
-fn ast_comptime_key_from_value(value: CtValue) -> CtKey? Never! {
+ast_comptime_key_from_value: fn(value: CtValue) -> CtKey? Never! {
     if value == {
         .Int(number) -> Val(ast_comptime_integer_key(number))
         .BigInt(decimal) -> {
-            number :: Int.parse(decimal) ?? return None
+            number: Int.parse(decimal) ?? return None
             Val(ast_comptime_integer_key(number))
         }
         .Str(text) -> Val(CtKey.Str{value: text})
@@ -524,7 +524,7 @@ fn ast_comptime_key_from_value(value: CtValue) -> CtKey? Never! {
             keys := [NamedCtKey]{}
             loop field in fields {
                 if ast_comptime_memo_storage_name(field.name) -> next
-                key :: ast_comptime_key_from_value(field.value) ?? return None
+                key: ast_comptime_key_from_value(field.value) ?? return None
                 &keys.push(NamedCtKey{name: field.name, value: key})
             }
             if type_name == "tuple" || type_name.starts_with("JetTup_") || type_name.starts_with("(") -> return Val(CtKey.Tuple{fields: keys})
@@ -539,13 +539,13 @@ fn ast_comptime_key_from_value(value: CtValue) -> CtKey? Never! {
 }
 
 // An Int outside the i64 word is keyed by its BigInt decimal.
-fn ast_comptime_integer_key(number: Int) -> CtKey Never! {
+ast_comptime_integer_key: fn(number: Int) -> CtKey Never! {
     if number < -9223372036854775807 - 1 || number > 9223372036854775807 -> return CtKey.BigInt{decimal: "{number}"}
     CtKey.Int{value: number}
 }
 
 // Rust `CtKey::to_value`.
-fn ast_comptime_key_to_value(key: CtKey) -> CtValue Never! {
+ast_comptime_key_to_value: fn(key: CtKey) -> CtValue Never! {
     if key == {
         .Int(number) -> CtValue.Int{value: number}
         .BigInt(decimal) -> CtValue.BigInt{value: decimal}
@@ -558,7 +558,7 @@ fn ast_comptime_key_to_value(key: CtKey) -> CtValue Never! {
     }
 }
 
-fn ast_comptime_key_field_values(fields: [NamedCtKey]) -> [NamedCtValue] Never! {
+ast_comptime_key_field_values: fn(fields: [NamedCtKey]) -> [NamedCtValue] Never! {
     values := [NamedCtValue]{}
     loop field in fields -> &values.push(NamedCtValue{name: field.name, value: ast_comptime_key_to_value(field.value)})
     values
@@ -568,16 +568,16 @@ fn ast_comptime_key_field_values(fields: [NamedCtKey]) -> [NamedCtValue] Never! 
 // carrier): kind rank Int, String, Bool, Char, Record; records compare their
 // field values in order, then by length; an enum key is its variant text.
 // Negative, zero, or positive as `left` sorts before, with, or after `right`.
-fn ast_comptime_key_compare(left: CtKey, right: CtKey) -> Int Never! {
-    left_rank :: ast_comptime_key_rank(left)
-    right_rank :: ast_comptime_key_rank(right)
+ast_comptime_key_compare: fn(left: CtKey, right: CtKey) -> Int Never! {
+    left_rank: ast_comptime_key_rank(left)
+    right_rank: ast_comptime_key_rank(right)
     if left_rank != right_rank -> return if left_rank < right_rank -> -1 else -> 1
     if left_rank == 5 {
-        left_fields :: ast_comptime_key_record(left)
-        right_fields :: ast_comptime_key_record(right)
+        left_fields: ast_comptime_key_record(left)
+        right_fields: ast_comptime_key_record(right)
         loop index in 0..<left_fields.len() {
             if index >= right_fields.len() -> return 1
-            order :: ast_comptime_key_compare(left_fields[index].value, right_fields[index].value)
+            order: ast_comptime_key_compare(left_fields[index].value, right_fields[index].value)
             if order != 0 -> return order
         }
         return if left_fields.len() < right_fields.len() -> -1 else -> 0
@@ -599,7 +599,7 @@ fn ast_comptime_key_compare(left: CtKey, right: CtKey) -> Int Never! {
     ast_comptime_bytes_compare(ast_comptime_key_text(left).bytes(), ast_comptime_key_text(right).bytes())
 }
 
-fn ast_comptime_key_rank(key: CtKey) -> Int Never! {
+ast_comptime_key_rank: fn(key: CtKey) -> Int Never! {
     if key == {
         .Int(_) | .BigInt(_) -> 0
         .Str(_) | .Enum(_, _) -> 2
@@ -609,14 +609,14 @@ fn ast_comptime_key_rank(key: CtKey) -> Int Never! {
     }
 }
 
-fn ast_comptime_key_record(key: CtKey) -> [NamedCtKey] Never! {
+ast_comptime_key_record: fn(key: CtKey) -> [NamedCtKey] Never! {
     if key == {
         .Tuple(fields) | .Struct(_, fields) -> fields
         else -> [NamedCtKey]{}
     }
 }
 
-fn ast_comptime_key_text(key: CtKey) -> String Never! {
+ast_comptime_key_text: fn(key: CtKey) -> String Never! {
     if key == {
         .Str(text) -> text
         .Enum(_, variant) -> variant
@@ -625,7 +625,7 @@ fn ast_comptime_key_text(key: CtKey) -> String Never! {
 }
 
 // Rust `str::cmp`: lexicographic over the UTF-8 bytes.
-fn ast_comptime_bytes_compare(left: [U8], right: [U8]) -> Int Never! {
+ast_comptime_bytes_compare: fn(left: [U8], right: [U8]) -> Int Never! {
     loop index in 0..<left.len() {
         if index >= right.len() -> return 1
         if left[index] != right[index] -> return if left[index] < right[index] -> -1 else -> 1
@@ -635,14 +635,14 @@ fn ast_comptime_bytes_compare(left: [U8], right: [U8]) -> Int Never! {
 }
 
 // Rust `Syntax::is_memo_storage_name`: generated memo storage fields.
-fn ast_comptime_memo_storage_name(field: String) -> Bool Never! {
+ast_comptime_memo_storage_name: fn(field: String) -> Bool Never! {
     field.starts_with("__jet___memo_")
 }
 
 // Rust `CtValue::jet_show`: the Display rendering `print` and string
 // interpolation give a compile-time value. Nominal values render the
 // compiled program's derived Rust `{:?}` spelling (I2).
-fn ast_comptime_value_show(value: CtValue) -> String Never! {
+ast_comptime_value_show: fn(value: CtValue) -> String Never! {
     if value == {
         .Int(number) -> "{number}"
         .Float(number) -> ast_comptime_float_text(number)
@@ -652,11 +652,11 @@ fn ast_comptime_value_show(value: CtValue) -> String Never! {
         .BigInt(decimal) -> decimal
         .Bytes(bytes) -> ast_comptime_bytes_list(bytes)
         .List(values) -> {
-            parts :: loop item in values -> ast_comptime_value_show(item)
+            parts: loop item in values -> ast_comptime_value_show(item)
             "[{parts.join(", ")}]"
         }
         .Map(entries) -> {
-            parts :: loop entry in entries -> "{ast_comptime_value_show(ast_comptime_key_to_value(entry.key))}: {ast_comptime_value_show(entry.value)}"
+            parts: loop entry in entries -> "{ast_comptime_value_show(ast_comptime_key_to_value(entry.key))}: {ast_comptime_value_show(entry.value)}"
             "[{parts.join(", ")}]"
         }
         .Present(inner) -> ast_comptime_value_show(inner)
@@ -676,7 +676,7 @@ fn ast_comptime_value_show(value: CtValue) -> String Never! {
 
 // Rust `CtValue::debug_rust`: the `{:?}` spelling of the compiled program's
 // derived `Debug`, used for values nested in a nominal.
-fn ast_comptime_value_debug(value: CtValue) -> String Never! {
+ast_comptime_value_debug: fn(value: CtValue) -> String Never! {
     if value == {
         .Int(number) -> "{number}"
         .Float(number) -> ast_comptime_float_text(number)
@@ -686,11 +686,11 @@ fn ast_comptime_value_debug(value: CtValue) -> String Never! {
         .BigInt(decimal) -> decimal
         .Bytes(bytes) -> ast_comptime_bytes_list(bytes)
         .List(values) -> {
-            parts :: loop item in values -> ast_comptime_value_debug(item)
+            parts: loop item in values -> ast_comptime_value_debug(item)
             "[{parts.join(", ")}]"
         }
         .Map(entries) -> {
-            parts :: loop entry in entries -> "{ast_comptime_value_debug(ast_comptime_key_to_value(entry.key))}: {ast_comptime_value_debug(entry.value)}"
+            parts: loop entry in entries -> "{ast_comptime_value_debug(ast_comptime_key_to_value(entry.key))}: {ast_comptime_value_debug(entry.value)}"
             ["{{", parts.join(", "), "}}"].join("")
         }
         .Present(inner) -> "Ok({ast_comptime_value_debug(inner)})"
@@ -699,7 +699,7 @@ fn ast_comptime_value_debug(value: CtValue) -> String Never! {
             .Told(inner) -> "Err({ast_comptime_value_debug(inner)})"
         }
         .Struct(type_name, fields) -> {
-            mangled :: ast_comptime_generated_path(ast_comptime_generated_suffix(type_name))
+            mangled: ast_comptime_generated_path(ast_comptime_generated_suffix(type_name))
             parts := [String]{}
             loop field in fields {
                 if ast_comptime_memo_storage_name(field.name) -> next
@@ -710,7 +710,7 @@ fn ast_comptime_value_debug(value: CtValue) -> String Never! {
         }
         .Enum(type_name, variant, args) -> {
             if type_name == "Loadable" -> return ast_comptime_loadable(variant, args, true)
-            mangled :: ast_comptime_generated_path(variant)
+            mangled: ast_comptime_generated_path(variant)
             if args.len() == 0 -> return mangled
             labeled := true
             loop arg in args {
@@ -719,12 +719,12 @@ fn ast_comptime_value_debug(value: CtValue) -> String Never! {
             if labeled {
                 parts := [String]{}
                 loop arg in args {
-                    label :: arg.label ?? ""
+                    label: arg.label ?? ""
                     &parts.push("{label}: {ast_comptime_value_debug(arg.value)}")
                 }
                 return "{mangled} {{ {parts.join(", ")} }}"
             }
-            parts :: loop arg in args -> ast_comptime_value_debug(arg.value)
+            parts: loop arg in args -> ast_comptime_value_debug(arg.value)
             "{mangled}({parts.join(", ")})"
         }
         .Unit -> "()"
@@ -733,32 +733,32 @@ fn ast_comptime_value_debug(value: CtValue) -> String Never! {
 }
 
 // `Loadable` renders its source variant names (Rust `jet_show`/`debug_rust`).
-fn ast_comptime_loadable(variant: String, args: [CtEnumArg], debug: Bool) -> String Never! {
+ast_comptime_loadable: fn(variant: String, args: [CtEnumArg], debug: Bool) -> String Never! {
     if (variant == "Loaded" || variant == "Failed") && args.len() > 0 {
-        inner :: if debug -> ast_comptime_value_debug(args[0].value) else -> ast_comptime_value_show(args[0].value)
+        inner: if debug -> ast_comptime_value_debug(args[0].value) else -> ast_comptime_value_show(args[0].value)
         return "{variant}({inner})"
     }
     variant.copy()
 }
 
 // Rust `CtFloat::render` (`{:?}`), which Jet's Float interpolation matches.
-fn ast_comptime_float_text(number: CtFloat) -> String Never! {
+ast_comptime_float_text: fn(number: CtFloat) -> String Never! {
     if number == {
         .F32(value) -> "{value}"
         .F64(value) -> "{value}"
     }
 }
 
-fn ast_comptime_bytes_list(bytes: [U8]) -> String Never! {
-    parts :: loop byte in bytes -> "{Int.from_u8(byte)}"
+ast_comptime_bytes_list: fn(bytes: [U8]) -> String Never! {
+    parts: loop byte in bytes -> "{Int.from_u8(byte)}"
     "[{parts.join(", ")}]"
 }
 
 // Rust `{:?}` escaping inside a quoted string (`"`) or char (`'`) literal.
-fn ast_comptime_debug_escape(text: String, in_char: Bool) -> String Never! {
+ast_comptime_debug_escape: fn(text: String, in_char: Bool) -> String Never! {
     out := [U8]{}
     loop byte in text.bytes() {
-        escaped :: if {
+        escaped: if {
             byte == (U8{92}) -> U8{92}
             byte == (U8{10}) -> U8{110}
             byte == (U8{13}) -> U8{114}
@@ -780,20 +780,20 @@ fn ast_comptime_debug_escape(text: String, in_char: Bool) -> String Never! {
 // Rust `Syntax::GENERATED_NAME_PREFIX` names: `generated_name` prefixes a
 // plain name once, `generated_suffix` drops the prefix, and `generated_path`
 // encodes a path identity as one injective Rust identifier suffix.
-fn ast_comptime_generated_name(name: String) -> String Never! {
+ast_comptime_generated_name: fn(name: String) -> String Never! {
     if name.starts_with("__jet_") -> return name.copy()
     "__jet_{name}"
 }
 
-fn ast_comptime_generated_suffix(name: String) -> String Never! {
+ast_comptime_generated_suffix: fn(name: String) -> String Never! {
     name.removeprefix("__jet_")
 }
 
-fn ast_comptime_generated_path(name: String) -> String Never! {
-    hex :: "0123456789abcdef".bytes()
+ast_comptime_generated_path: fn(name: String) -> String Never! {
+    hex: "0123456789abcdef".bytes()
     out := "__jet_".bytes()
     loop byte in name.bytes() {
-        alphanumeric :: (byte >= (U8{48}) && byte <= (U8{57})) || (byte >= (U8{65}) && byte <= (U8{90})) || (byte >= (U8{97}) && byte <= (U8{122}))
+        alphanumeric: (byte >= (U8{48}) && byte <= (U8{57})) || (byte >= (U8{65}) && byte <= (U8{90})) || (byte >= (U8{97}) && byte <= (U8{122}))
         if alphanumeric {
             &out.push(byte)
             next
@@ -807,7 +807,7 @@ fn ast_comptime_generated_path(name: String) -> String Never! {
             byte == (U8{92}) -> &out.push(U8{98})
             byte == (U8{45}) -> &out.push(U8{104})
             else -> {
-                code :: Int.from_u8(byte)
+                code: Int.from_u8(byte)
                 &out.push(U8{120})
                 &out.push(hex[code /% 16])
                 &out.push(hex[code % 16])

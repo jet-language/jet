@@ -1,4 +1,4 @@
-# `fn run() { print("hello") }` by hand, with everything Jet's hello keeps:
+# `run: fn() { print("hello") }` by hand, with everything Jet's hello keeps:
 # SIGPIPE ignored (a gone reader is exit 0), EINTR retried, short writes
 # advanced, a failed write ignored, exit 0, and the fixed-text fault
 # handler of a program that cannot fault (D-RT-DEFECT-REPORT1 A). The

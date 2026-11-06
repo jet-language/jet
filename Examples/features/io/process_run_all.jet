@@ -2,25 +2,25 @@
 // `jobs` children run at once, the results come back in input order whatever
 // order the children finish in, a nonzero exit is a receipt, and a spec that
 // cannot start is an error in its own slot. Each spec keeps its own timeout.
-package {
+package: {
     name: "process_run_all"
     edition: "2026"
     authority: { allow: [Exec, IO, FS, Env, Time.Wait] }
 }
 
 use {
-    files :: core.files
-    process :: core.process
+    files: core.files
+    process: core.process
 }
 
-fn show(label: String, result: Result<ProcessReceipt, IOError>) {
+show: fn(label: String, result: Result<ProcessReceipt, IOError>) {
     if result == {
         .Ok(receipt) -> print(if receipt.timed_out -> "{label}: timed out" else -> "{label}: exit {receipt.code} out={receipt.output.trim()}")
         .Err(error) -> print("{label}: {kind(error)}")
     }
 }
 
-fn kind(error: IOError) -> String {
+kind: fn(error: IOError) -> String {
     if error == {
         .NotFound(_) -> "NotFound"
         .InvalidInput(_) -> "InvalidInput"
@@ -28,13 +28,13 @@ fn kind(error: IOError) -> String {
     }
 }
 
-fn run() -[Exec, IO, FS, Env, Time.Wait]> {
+run: fn() -[Exec, IO, FS, Env, Time.Wait]> {
     // Later jobs finish first; the results still follow the input.
-    ordered :: loop i in 0..<4 -> process.cmd(["sh", "-c", "sleep 0.{4 - i}; echo job {i}; exit {i}"])
+    ordered: loop i in 0..<4 -> process.cmd(["sh", "-c", "sleep 0.{4 - i}; echo job {i}; exit {i}"])
     loop result in process.run_all(ordered, 2) ?? panic("run_all failed") -> show("ordered", result)
 
     // One spec cannot start and one times out; their neighbours still run.
-    mixed :: [ProcessSpec]{
+    mixed: [ProcessSpec]{
         process.cmd(["/nonexistent/jet-no-such"]),
         process.cmd(["sleep", "5"]).timeout(200ms),
         process.cmd(["echo", "fine"]),
@@ -43,22 +43,22 @@ fn run() -[Exec, IO, FS, Env, Time.Wait]> {
 
     // Every job counts the jobs running when it starts. With jobs = 2 no job
     // ever sees more than 2.
-    dir :: files.mkdtemp("run_all") ?? panic("temp dir")
-    marks :: "{dir}/marks"
+    dir: files.mkdtemp("run_all") ?? panic("temp dir")
+    marks: "{dir}/marks"
     files.create_dir(marks) ?? panic("marks dir")
-    counted :: loop _ in 0..<6 -> process.cmd(["sh", "-c", "touch {marks}/$$; ls {marks} | wc -l; sleep 0.2; rm {marks}/$$"])
+    counted: loop _ in 0..<6 -> process.cmd(["sh", "-c", "touch {marks}/$$; ls {marks} | wc -l; sleep 0.2; rm {marks}/$$"])
     most := 0
     loop result in process.run_all(counted, 2) ?? panic("run_all failed") {
-        receipt :: result ?? panic("count job failed")
-        seen :: receipt.output.trim().to_int() ?? panic("count")
+        receipt: result ?? panic("count job failed")
+        seen: receipt.output.trim().to_int() ?? panic("count")
         if seen > most -> most = seen
     }
     print("bound held: {most <= 2}")
 
     // A FIFO rendezvous only completes when both ends run at the same time.
-    fifo :: "{dir}/meet"
+    fifo: "{dir}/meet"
     process.run_spec(process.cmd(["mkfifo", fifo])) ?? panic("mkfifo")
-    meet :: [ProcessSpec]{
+    meet: [ProcessSpec]{
         process.cmd(["sh", "-c", "echo hello > {fifo}"]).timeout(5s),
         process.cmd(["cat", fifo]).timeout(5s),
     }

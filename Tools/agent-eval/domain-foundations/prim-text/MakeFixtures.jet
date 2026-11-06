@@ -5,17 +5,17 @@
 // Usage (from the repository root):
 //   jet Tools/agent-eval/domain-foundations/prim-text/MakeFixtures.jet
 use {
-    files :: core.files
-    process :: core.process
-    term :: core.term
+    files: core.files
+    process: core.process
+    term: core.term
 }
 
-FIXTURES :: "Tools/agent-eval/domain-foundations/prim-text/fixtures"
-CORPUS_BYTES :: 1048576
-LOGS_BYTES :: 100000000
+FIXTURES: "Tools/agent-eval/domain-foundations/prim-text/fixtures"
+CORPUS_BYTES: 1048576
+LOGS_BYTES: 100000000
 
-fn repeated(seed: String, size: Int) -> [U8] Never! {
-    bytes :: seed.bytes()
+repeated: fn(seed: String, size: Int) -> [U8] Never! {
+    bytes: seed.bytes()
     out := [U8]{}
     loop out.len() < size {
         loop byte in bytes {
@@ -26,8 +26,8 @@ fn repeated(seed: String, size: Int) -> [U8] Never! {
     out
 }
 
-fn write_fixture(name: String, bytes: [U8]) -[FS.Write, IO]> Bool Never! {
-    path :: "{FIXTURES}/{name}"
+write_fixture: fn(name: String, bytes: [U8]) -[FS.Write, IO]> Bool Never! {
+    path: "{FIXTURES}/{name}"
     if files.write_bytes(path, bytes) == {
         .Ok(_) -> true
         .Err(error) -> {
@@ -37,7 +37,7 @@ fn write_fixture(name: String, bytes: [U8]) -[FS.Write, IO]> Bool Never! {
     }
 }
 
-fn run() {
+run: fn() {
     if files.create_dir_all(FIXTURES) == {
         .Ok(_) -> {}
         .Err(error) -> {
@@ -45,10 +45,10 @@ fn run() {
             process.exit(1)
         }
     }
-    corpus :: repeated("Hello café κόσμε नमस्ते سلام — Jet tokenizer search. The quick brown fox jumps over 42 logs; user_id=31415 level=INFO.\n", CORPUS_BYTES)
+    corpus: repeated("Hello café κόσμε नमस्ते سلام — Jet tokenizer search. The quick brown fox jumps over 42 logs; user_id=31415 level=INFO.\n", CORPUS_BYTES)
     if !write_fixture("corpus_1m.txt", corpus) -> process.exit(1)
-    log_seed :: "2026-09-02T00:00:00Z INFO api request user_id=31415 path=/orders status=200\n2026-09-02T00:00:01Z WARN api retry user_id=27182 path=/orders status=503\n2026-09-02T00:00:02Z ERROR db timeout user_id=16180 path=/orders status=500\n"
-    logs :: repeated(log_seed, LOGS_BYTES)
+    log_seed: "2026-09-02T00:00:00Z INFO api request user_id=31415 path=/orders status=200\n2026-09-02T00:00:01Z WARN api retry user_id=27182 path=/orders status=503\n2026-09-02T00:00:02Z ERROR db timeout user_id=16180 path=/orders status=500\n"
+    logs: repeated(log_seed, LOGS_BYTES)
     if !write_fixture("logs_100m.txt", logs) -> process.exit(1)
     print("corpus_1m_bytes={corpus.len()}")
     print("logs_100m_bytes={logs.len()}")

@@ -5,27 +5,27 @@
 // Tests/Docs/Graph.jet (doc_test_checked_text_source/oracle).
 
 #Test("doc_trait_contract_render_keeps_missing_associated_types_and_fact_order") {
-    contract :: TraitContractFact{
+    contract: TraitContractFact{
         trait_name: "CheckedText",
         associated_types: [SemIndexAssociatedTypeFact]{
             {name: "Error", implementation: Val("PatternError")},
             {name: "Context", implementation: None},
             {name: "Error", implementation: Val("SecondError")},
         },
-        methods: [String]{"fn check(text: String) PatternError!", "fn encode_hole<T: Printable>(value: T) -> String"},
+        methods: [String]{"check: fn(text: String) PatternError!", "encode_hole: fn<T: Printable>(value: T) -> String"},
     }
-    assert_eq(doc_render_trait_contract(contract), "implements CheckedText\n  type Error = PatternError\n  type Context\n  type Error = SecondError\n  fn check(text: String) PatternError!\n  fn encode_hole<T: Printable>(value: T) -> String")
+    assert_eq(doc_render_trait_contract(contract), "implements CheckedText\n  type Error = PatternError\n  type Context\n  type Error = SecondError\n  check: fn(text: String) PatternError!\n  encode_hole: fn<T: Printable>(value: T) -> String")
 }
 
 #Test("doc_trait_contract_empty_checked_rows_do_not_fabricate_members") {
-    contract :: TraitContractFact{trait_name: "Empty", associated_types: [SemIndexAssociatedTypeFact]{}, methods: [String]{}}
+    contract: TraitContractFact{trait_name: "Empty", associated_types: [SemIndexAssociatedTypeFact]{}, methods: [String]{}}
     assert_eq(doc_render_trait_contract(contract), "implements Empty")
 }
 
 // These are source-row metadata fixtures, not a pretend checked SemIndex.
 // The original row table contains registration-only and omitted-loaded rows;
 // the caller's compact READ membership alone decides which ones Docs sees.
-fn doc_test_loaded_source(identity: String, display: String, alias: String, path: doc_os_path.OsPath?, ordinal: Int?) -> SemaCompilerModuleSource Never! {
+doc_test_loaded_source: fn(identity: String, display: String, alias: String, path: doc_os_path.OsPath?, ordinal: Int?) -> SemaCompilerModuleSource Never! {
     SemaCompilerModuleSource{
         module_identity: identity, source: "masked", loaded_source: "/// authored\n",
         path: display, display: display, relative_path: display, alias: alias,
@@ -34,7 +34,7 @@ fn doc_test_loaded_source(identity: String, display: String, alias: String, path
     }
 }
 #Test("doc_contract_module_membership_uses_original_rows_and_loaded_display_alias") {
-    sources :: [SemaCompilerModuleSource]{
+    sources: [SemaCompilerModuleSource]{
         doc_test_loaded_source("registration-only", "Core/native", "native", None, None),
         doc_test_loaded_source("second", "shared-display", "shared-alias", doc_test_os_path("/project/second.jet"), Val(1)),
         doc_test_loaded_source("omitted", "omitted.jet", "omitted", doc_test_os_path("/project/omitted.jet"), Val(2)),
@@ -42,8 +42,8 @@ fn doc_test_loaded_source(identity: String, display: String, alias: String, path
         doc_test_loaded_source("core", "Core/Math", "math", None, Val(3)),
     }
     // Deliberately not table order, not loaded ordinals and not registration.
-    original_rows :: [Int]{3, 1, 4}
-    paths :: doc_contract_module_paths(sources, original_rows, doc_test_os_path("/project"))
+    original_rows: [Int]{3, 1, 4}
+    paths: doc_contract_module_paths(sources, original_rows, doc_test_os_path("/project"))
     assert_eq(paths["shared-display"], [String]{"first.jet", "second.jet"})
     assert_eq(paths["shared-alias"], [String]{"first.jet", "second.jet"})
     assert_eq(paths["Core/Math"], [String]{"Core/Math"})
@@ -58,7 +58,7 @@ fn doc_test_loaded_source(identity: String, display: String, alias: String, path
 // fixture. The runner must select answer's actual checked signature, not build
 // a substitute literal signature. Presentation uses canonical FailureContract
 // facts (frozen Rust's source spelling changes are Main's tandem responsibility).
-fn doc_test_checked_callable_contract_enrichment(items: &[DocItem], index: SemIndex, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int], root: doc_os_path.OsPath?, checked_answer: CallableSignatureFact) Never! {
+doc_test_checked_callable_contract_enrichment: fn(items: &[DocItem], index: SemIndex, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int], root: doc_os_path.OsPath?, checked_answer: CallableSignatureFact) Never! {
     doc_enrich_callable_contracts(&items, index, module_sources, loaded_module_rows, root)
     found := false
     loop item in items {
@@ -83,13 +83,13 @@ fn doc_test_checked_callable_contract_enrichment(items: &[DocItem], index: SemIn
 
 // Original checked_text.jet fixture, supplied by the canonical loader and checked
 // SemIndex, not hand-filled DocItem/trait facts.
-fn doc_test_checked_text_type_contract_enrichment(items: &[DocItem], index: SemIndex, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int], root: doc_os_path.OsPath?) Never! {
+doc_test_checked_text_type_contract_enrichment: fn(items: &[DocItem], index: SemIndex, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int], root: doc_os_path.OsPath?) Never! {
     doc_enrich_type_contracts(&items, index, module_sources, loaded_module_rows, root)
     found := false
     loop item in items {
         if item.name != "Pattern" || item.kind != "distinct" || item.module_path != "checked_text.jet" -> next
         found = true
-        assert(item.signature.contains("Pattern :: distinct String"))
+        assert(item.signature.contains("Pattern: distinct String"))
         assert(item.signature.contains("implements CheckedText"))
         assert(item.signature.contains("type Error = PatternError"))
         assert(item.signature.contains("encode_hole"))

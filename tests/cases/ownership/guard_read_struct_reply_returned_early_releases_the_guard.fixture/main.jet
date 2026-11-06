@@ -3,26 +3,26 @@
 // through `?? return reply(404)` while that guard is live. The exit releases
 // the guard, so the next guard_edit() on the same store proceeds.
 
-struct Reply {
+Reply: struct {
     status: Int
     body: String
 }
 
-fn reply(status: Int) -> Reply {
+reply: fn(status: Int) -> Reply {
     Reply{status: status, body: "status {status}"}
 }
 
-fn handle(store: Shared<[String:String]>, key: String) -> Reply {
-    stored :: store.guard_read().value.get(key) ?? return reply(404)
+handle: fn(store: Shared<[String:String]>, key: String) -> Reply {
+    stored: store.guard_read().value.get(key) ?? return reply(404)
     Reply{status: 200, body: stored}
 }
 
-fn show(answer: Reply) {
+show: fn(answer: Reply) {
     print("{answer.status} {answer.body}")
 }
 
-fn run() {
-    store :: shared [String:String]{}
+run: fn() {
+    store: shared [String:String]{}
     show(handle(store, "ada"))
     store.guard_edit().value["ada"] = "1815"
     show(handle(store, "ada"))

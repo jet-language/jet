@@ -1,16 +1,16 @@
 // An optional copy that a guarded branch may clear keeps its optional type
 // through later `.Val` tests of the copy, inside an enum arm.
-enum Shape {
+Shape: enum {
     Leaf(name: String)
     Fn(ret: Shape?)
 }
 
-fn is_unit(value: Shape) -> Bool {
+is_unit: fn(value: Shape) -> Bool {
     if value == .Leaf(name) -> return name == "Unit"
     false
 }
 
-fn shape_name(shape: Shape) -> String {
+shape_name: fn(shape: Shape) -> String {
     if shape == {
         .Leaf(name) -> name
         .Fn(ret) -> {
@@ -26,7 +26,7 @@ fn shape_name(shape: Shape) -> String {
     }
 }
 
-fn run() {
+run: fn() {
     print(shape_name(Shape.Fn{ret: Val(Shape.Leaf{name: "Err"})}))
     print(shape_name(Shape.Fn{ret: Val(Shape.Leaf{name: "Unit"})}))
     print(shape_name(Shape.Fn{ret: None}))

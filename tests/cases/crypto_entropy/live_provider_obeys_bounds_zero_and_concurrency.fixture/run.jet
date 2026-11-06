@@ -1,22 +1,22 @@
 // Original crypto_entropy.rs336-378. Shared+Condition is a real eight-way blocking barrier, not a spin/timing surrogate.
 use {
-    random :: core.crypto.random
+    random: core.crypto.random
     core.crypto.[CryptoError]
 }
-struct EntropyBarrier { arrived: Int }
-fn s1_entropy_barrier_wait(state: Shared<EntropyBarrier>, changed: Condition) {
-    guard :: state.guard_edit()
+EntropyBarrier: struct { arrived: Int }
+s1_entropy_barrier_wait: fn(state: Shared<EntropyBarrier>, changed: Condition) {
+    guard: state.guard_edit()
     guard.value.arrived += 1
     changed.notify_all()
     guard.wait(changed, value -> value.arrived == 8) ?? panic("barrier wait")
 }
-fn s1_entropy_worker(state: Shared<EntropyBarrier>, changed: Condition) -> [U8] {
+s1_entropy_worker: fn(state: Shared<EntropyBarrier>, changed: Condition) -> [U8] {
     s1_entropy_barrier_wait(state, changed)
     random.bytes(64) ?? panic("entropy")
 }
 #Test("live_provider_obeys_bounds_zero_and_concurrency") {
     assert_eq(random.bytes(0) ?? panic("empty"), [U8]{})
-    filled :: random.bytes(32) ?? panic("fill")
+    filled: random.bytes(32) ?? panic("fill")
     zeros := [U8]{}
     loop _ in 0..<32 -> &zeros.push(U8{0})
     assert(filled != zeros)
@@ -28,18 +28,18 @@ fn s1_entropy_worker(state: Shared<EntropyBarrier>, changed: Condition) -> [U8] 
         .Err(error) -> assert_eq(error, CryptoError.Length)
         .Ok(_) -> panic("oversize accepted")
     }
-    state :: shared EntropyBarrier{arrived: 0}
-    changed :: Condition.new()
+    state: shared EntropyBarrier{arrived: 0}
+    changed: Condition.new()
     outputs := [[U8]]{}
     task.group workers {
-        a :: task s1_entropy_worker(state, changed)
-        b :: task s1_entropy_worker(state, changed)
-        c :: task s1_entropy_worker(state, changed)
-        d :: task s1_entropy_worker(state, changed)
-        e :: task s1_entropy_worker(state, changed)
-        f :: task s1_entropy_worker(state, changed)
-        g :: task s1_entropy_worker(state, changed)
-        h :: task s1_entropy_worker(state, changed)
+        a: task s1_entropy_worker(state, changed)
+        b: task s1_entropy_worker(state, changed)
+        c: task s1_entropy_worker(state, changed)
+        d: task s1_entropy_worker(state, changed)
+        e: task s1_entropy_worker(state, changed)
+        f: task s1_entropy_worker(state, changed)
+        g: task s1_entropy_worker(state, changed)
+        h: task s1_entropy_worker(state, changed)
         &outputs.push(^a.join() ?? panic("a"))
         &outputs.push(^b.join() ?? panic("b"))
         &outputs.push(^c.join() ?? panic("c"))

@@ -10,14 +10,14 @@
 // `jet dev`/`jet build`/`jet run` infer the web backend from #Target(Web)
 // (no --target=web needed), and #HTML names the companion host page instead
 // of relying on the <stem>.html filename convention.
-// c-devserver (owner-directed 2026-07-01): `fn dev()` below is this file's
+// c-devserver (owner-directed 2026-07-01): `dev: fn()` below is this file's
 // OWN `jet dev` behavior — a real `core.web.devserver` value, configured and
 // started as ordinary Jet code. `jet dev Examples/features/web/ui_web_click.jet`
 // (zero flags) now detects `dev()`, compiles this file NATIVELY with `dev()`
 // as the entry point (not `main()`), and runs it; `dev()`'s body then shells
 // out to `jet build --target=web` on every save and serves `build/` with
 // live-reload — same end result as the old `jet dev --target=web`, but
-// authored by the file itself instead of hardcoded in the CLI. `fn run()`
+// authored by the file itself instead of hardcoded in the CLI. `run: fn()`
 // below is untouched: `jet run Examples/features/web/ui_web_click.jet` still
 // prints the native demo exactly as before.
 // `devserver.app()` = "watch the file jet dev launched" (passed in via
@@ -25,26 +25,26 @@
 // `devserver.for_app("path")` only to watch a DIFFERENT entry file; it
 // accepts relative (resolved against the invocation cwd) or absolute paths.
 use {
-    ui :: core.ui
-    devserver :: core.web.devserver
+    ui: core.ui
+    devserver: core.web.devserver
 }
 #[Target(Web), HTML("ui_web_click.html")]
 
-fn dev() {
-    server :: devserver.app()
+dev: fn() {
+    server: devserver.app()
     server.serve()
 }
 
-fn render(n: Int) {
-    backend :: ui.null_backend()
+render: fn(n: Int) {
+    backend: ui.null_backend()
     color := "#e8790c"
     if n % 2 == 0 -> color = "#3366ff"
-    node :: ui.node_color("Clicks: {n}", 160.0, 40.0, color)
-    constraint :: ui.constraint(0.0, 0.0, 300.0, 100.0)
-    size :: backend.measure(node, constraint)
-    frame :: ui.rect(20.0, 20.0, size.width, size.height)
+    node: ui.node_color("Clicks: {n}", 160.0, 40.0, color)
+    constraint: ui.constraint(0.0, 0.0, 300.0, 100.0)
+    size: backend.measure(node, constraint)
+    frame: ui.rect(20.0, 20.0, size.width, size.height)
     backend.layout(node, frame)
     backend.paint(node)
 }
 
-fn run() { render(0) }
+run: fn() { render(0) }

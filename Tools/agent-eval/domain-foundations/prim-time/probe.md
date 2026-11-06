@@ -14,7 +14,7 @@ Files:
 
 ## What worked
 
-- **Calendar trait and business dates:** `trait BusinessCalendar`, `ExchangeCalendar`, holidays, weekends, forward and backward counting compile and run. Proof: `jet run pkg/time_probe.jet --watch=off` -> `business_forward=2024-01-03; business_backward=2023-12-27; holiday_is_business=false; weekend_is_business=false`.
+- **Calendar trait and business dates:** `BusinessCalendar: trait`, `ExchangeCalendar`, holidays, weekends, forward and backward counting compile and run. Proof: `jet run pkg/time_probe.jet --watch=off` -> `business_forward=2024-01-03; business_backward=2023-12-27; holiday_is_business=false; weekend_is_business=false`.
 - **Recurring local schedule across DST:** `ZonedDateTime.add_period(period_days(1))` keeps 09:30 local while New York changes from `-05:00` to `-04:00` on March 10. The same proof run prints five occurrences with those offsets.
 - **DST gap and fold choices:** `zoned_local` accepts `compatible`, `later`, and `earlier`; the proof run prints `gap_compatible=...03:30...-04:00`, `gap_later=...03:30...-04:00`, `overlap_earlier=...01:30...-04:00`, and `overlap_later=...01:30...-05:00`.
 - **Zone database access:** `time.zone("America/New_York")`, transition lookup, `hours_in_day`, and `start_of_day` work. Unknown names fail with an actionable path: `Error: unknown IANA time zone: Mars/Base; set JET_TZDB_DIR or TZDIR to an IANA TZif database` (`E3002`, `unknown_zone.jet:3`). Core documentation names the same environment override and bundled/system TZif search (`docs/reference/core-library.md:2287-2290`).

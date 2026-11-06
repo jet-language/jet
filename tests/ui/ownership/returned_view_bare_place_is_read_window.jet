@@ -1,30 +1,30 @@
 // A bare parameter or field place returned as `View<T>` is a read window
 // over the whole list, on a plain and on a fallible success edge.
-struct Holder {
+Holder: struct {
     items: [Int]
 }
 
-fn all(items: [Int]) -> View<Int> from items {
+all: fn(items: [Int]) -> View<Int> from items {
     items
 }
 
-fn field(holder: Holder) -> View<Int> from holder {
+field: fn(holder: Holder) -> View<Int> from holder {
     holder.items
 }
 
-fn fixed(values: [Int#3]) -> View<Int> from values {
+fixed: fn(values: [Int#3]) -> View<Int> from values {
     values
 }
 
-fn checked(items: [Int]) -> View<Int> Err! from items {
+checked: fn(items: [Int]) -> View<Int> Err! from items {
     if items.len() == 0 -> return Err("none")
     Ok(items)
 }
 
-fn run() {
-    xs :: [Int]{1, 2, 3}
-    holder :: Holder{items: [Int]{4, 5}}
-    triple :: [Int#3]{6, 7, 8}
+run: fn() {
+    xs: [Int]{1, 2, 3}
+    holder: Holder{items: [Int]{4, 5}}
+    triple: [Int#3]{6, 7, 8}
     print(all(xs))
     print(field(holder))
     print(fixed(triple))

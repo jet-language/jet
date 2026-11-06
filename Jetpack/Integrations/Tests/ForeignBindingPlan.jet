@@ -10,21 +10,21 @@ use {
 }
 
 // Non-overlapping occurrences of `needle` in `text` (`str::matches(..).count()`).
-fn pkg_test_plan_count(text: String, needle: String) -> Int Never! {
+pkg_test_plan_count: fn(text: String, needle: String) -> Int Never! {
     text.split(needle).to_list().len() - 1
 }
 
-// Names of `fn <name>(...)` extern lines whose trimmed text contains every
+// Names of `<name>: fn(...)` extern lines whose trimmed text contains every
 // `markers` entry.
-fn pkg_test_plan_externs(source: String, markers: [String], view_only: Bool) -> [String] Never! {
+pkg_test_plan_externs: fn(source: String, markers: [String], view_only: Bool) -> [String] Never! {
     names := [String]{}
-    lines :: source.split("\n").to_list()
+    lines: source.split("\n").to_list()
     loop raw in lines {
-        line :: raw.trim()
-        if !line.starts_with("fn ") -> next
-        rest :: line.removeprefix("fn ")
-        if !rest.contains("(") -> next
-        name :: rest.split("(").to_list()[0]
+        line: raw.trim()
+        parts: line.split(": fn(").to_list()
+        if parts.len() < 2 -> next
+        name: parts[0]
+        if name == "" || name.contains(" ") || name.contains("(") -> next
         matches := true
         loop marker in markers {
             if !line.contains(marker) -> matches = false
@@ -38,23 +38,23 @@ fn pkg_test_plan_externs(source: String, markers: [String], view_only: Bool) -> 
 // The generated top-level wrapper body that starts at `fn <name>(` (or `<`)
 // at the start of a line (extern declarations are indented), up to the first
 // line holding only `}`.
-fn pkg_test_plan_wrapper_body(source: String, name: String, generic: Bool) -> String Never! {
-    bytes :: source.bytes()
-    start := pkg_cbind_find(bytes, "\nfn {name}(", 0)
-    if start < 0 && generic -> start = pkg_cbind_find(bytes, "\nfn {name}<", 0)
+pkg_test_plan_wrapper_body: fn(source: String, name: String, generic: Bool) -> String Never! {
+    bytes: source.bytes()
+    start := pkg_cbind_find(bytes, "\n{name}: fn(", 0)
+    if start < 0 && generic -> start = pkg_cbind_find(bytes, "\n{name}: fn<", 0)
     if start < 0 -> panic("every response extern has a generated wrapper")
-    tail :: pkg_bytes_text(bytes, start + 1, bytes.len())
-    tail_bytes :: tail.bytes()
-    end :: pkg_cbind_find(tail_bytes, "\n}}\n", 0)
+    tail: pkg_bytes_text(bytes, start + 1, bytes.len())
+    tail_bytes: tail.bytes()
+    end: pkg_cbind_find(tail_bytes, "\n}}\n", 0)
     if end < 0 -> return tail
     pkg_bytes_text(tail_bytes, 0, end)
 }
 
 // Whether generated source lexes and parses without errors.
-fn pkg_test_plan_source_parses(source: String) -> Bool Never! {
-    lexed :: lex_generated(source.bytes())
+pkg_test_plan_source_parses: fn(source: String) -> Bool Never! {
+    lexed: lex_generated(source.bytes())
     if lexed.diagnostics.len() != 0 -> return false
-    parsed :: parse_lexed(^lexed)
+    parsed: parse_lexed(^lexed)
     loop diagnostic in parsed.diagnostics {
         if diagnostic.severity == 1 -> return false
     }
@@ -62,14 +62,14 @@ fn pkg_test_plan_source_parses(source: String) -> Bool Never! {
 }
 
 #Test("binding plan registry covers each message renderer once") {
-    registry :: pkg_generator_registry()
+    registry: pkg_generator_registry()
     registered := 0
     loop renderer in registry {
         if pkg_renderer_canonical_for(renderer) != None -> registered += 1
     }
     // Every generator registry entry matches exactly one canonical active binder.
     assert_eq(registered, registry.len())
-    binders :: pkg_foreign_binders()
+    binders: pkg_foreign_binders()
     matched := 0
     loop descriptor in binders {
         if pkg_renderer_for(descriptor) == .Val(_) -> matched += 1
@@ -90,38 +90,38 @@ fn pkg_test_plan_source_parses(source: String) -> Bool Never! {
                 break
             }
         }
-        descriptor :: found ?? panic("renderer language is missing from the foreign binder table")
+        descriptor: found ?? panic("renderer language is missing from the foreign binder table")
         assert_eq(descriptor.status, BinderStatus.Active)
         assert_eq(descriptor.runtime, renderer.runtime)
         assert_eq(descriptor.stub_kind, renderer.stub_kind)
-        source :: renderer.render_probe()
-        assert_eq(pkg_test_plan_count(source, "fn decode_response("), 1)
+        source: renderer.render_probe()
+        assert_eq(pkg_test_plan_count(source, "decode_response: fn("), 1)
         // The renderer probe lexes and parses.
         assert(pkg_test_plan_source_parses(source))
 
-        response_externs :: pkg_test_plan_externs(source, [String]{"input: String", "deadline_ms: Int) String ="}, false)
+        response_externs: pkg_test_plan_externs(source, [String]{"input: String", "deadline_ms: Int) String ="}, false)
         assert(response_externs.len() > 0)
         loop name in response_externs {
-            body :: pkg_test_plan_wrapper_body(source, name, true)
+            body: pkg_test_plan_wrapper_body(source, name, true)
             // Each operation sequences its raw call, captures its status
             // after it, and decodes through decode_response only.
-            assert_eq(pkg_test_plan_count(body, "raw :: abi.{name}("), 1)
-            assert_eq(pkg_test_plan_count(body, "code :: abi.take_error()"), 1)
+            assert_eq(pkg_test_plan_count(body, "raw: abi.{name}("), 1)
+            assert_eq(pkg_test_plan_count(body, "code: abi.take_error()"), 1)
             assert_eq(pkg_test_plan_count(body, "decode_response(raw, code)"), 1)
             assert(!body.contains("json.parse(raw)"))
             assert(!body.contains("response.field(\"ok\")"))
         }
         if renderer.language == ForeignLanguage.Lua {
-            view_externs :: pkg_test_plan_externs(source, [String]{"deadline_ms: Int) Int ="}, true)
+            view_externs: pkg_test_plan_externs(source, [String]{"deadline_ms: Int) Int ="}, true)
             // The Lua probe has view externs.
             assert(view_externs.len() > 0)
             loop name in view_externs {
-                body :: pkg_test_plan_wrapper_body(source, name, false)
+                body: pkg_test_plan_wrapper_body(source, name, false)
                 assert(body.contains("decode_status(abi.take_error())"))
             }
         }
         // The raw extern path and a typed error domain.
-        assert(source.contains("#Import module c."))
+        assert(source.contains("#Import c."))
         assert(source.contains("#Error"))
         assert_eq(pkg_test_plan_count(source, "json.parse(raw)"), 1)
         if renderer.protocol == {
@@ -131,7 +131,7 @@ fn pkg_test_plan_source_parses(source: String) -> Bool Never! {
             }
             .LuaRawJSON -> {
                 assert_eq(pkg_test_plan_count(source, "response.field(\"ok\")"), 0)
-                assert_eq(pkg_test_plan_count(source, "fn decode_status("), 1)
+                assert_eq(pkg_test_plan_count(source, "decode_status: fn("), 1)
                 assert(source.contains("if code == 4 -> return Err(LuaError.CommandFailed)"))
                 assert(source.contains("if code == 6 -> return Err(LuaError.Protocol)"))
                 // Every Lua status result goes through a named decoder.

@@ -4,518 +4,518 @@
 
 // E3001 Why: The program hit a `panic`, `assert`, or `assert_eq` call that failed, a bounds/key check triggered at runtime, or another program-side stop. The shared report boundary owns the program-side stop; an unhandled entry error is a returned report, not E3001. Jet file and line are shown in Jet terms (I2).
 // Fix: Fix the logic that led to the failure. Program-side stops exit 70 through the shared boundary; unhandled entry errors print their report and exit 1; exit 101 is reserved for Jet defects.
-fn trap_footer_e3001_text() -> I64 { rt_static_text(" Why: The program hit a `panic`, `assert`, or `assert_eq` call that failed, a bounds/key check triggered at runtime, or another program-side stop. The shared report boundary owns the program-side stop; an unhandled entry error is a returned report, not E3001. Jet file and line are shown in Jet terms (I2).\n Fix: Fix the logic that led to the failure. Program-side stops exit 70 through the shared boundary; unhandled entry errors print their report and exit 1; exit 101 is reserved for Jet defects.\nMore: jet-lang.dev/e/E3001\n") }
+trap_footer_e3001_text: fn() -> I64 { rt_static_text(" Why: The program hit a `panic`, `assert`, or `assert_eq` call that failed, a bounds/key check triggered at runtime, or another program-side stop. The shared report boundary owns the program-side stop; an unhandled entry error is a returned report, not E3001. Jet file and line are shown in Jet terms (I2).\n Fix: Fix the logic that led to the failure. Program-side stops exit 70 through the shared boundary; unhandled entry errors print their report and exit 1; exit 101 is reserved for Jet defects.\nMore: jet-lang.dev/e/E3001\n") }
 
-fn trap_footer_e3001() { trap_write_static(trap_footer_e3001_text()) }
+trap_footer_e3001: fn() { trap_write_static(trap_footer_e3001_text()) }
 
-fn trap_build_footer_e3001(builder: I64) { jet_rt_string_builder_push(builder, trap_footer_e3001_text()) }
+trap_build_footer_e3001: fn(builder: I64) { jet_rt_string_builder_push(builder, trap_footer_e3001_text()) }
 
 // E3010 Why: The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data — with Jet file and line.
 // Fix: Check the operands or bounds before the operation, or use a checked operation that returns an outcome.
-fn trap_footer_e3010_text() -> I64 { rt_static_text(" Why: The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data — with Jet file and line.\n Fix: Check the operands or bounds before the operation, or use a checked operation that returns an outcome.\nMore: jet-lang.dev/e/E3010\n") }
+trap_footer_e3010_text: fn() -> I64 { rt_static_text(" Why: The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data — with Jet file and line.\n Fix: Check the operands or bounds before the operation, or use a checked operation that returns an outcome.\nMore: jet-lang.dev/e/E3010\n") }
 
-fn trap_footer_e3010() { trap_write_static(trap_footer_e3010_text()) }
+trap_footer_e3010: fn() { trap_write_static(trap_footer_e3010_text()) }
 
-fn trap_build_footer_e3010(builder: I64) { jet_rt_string_builder_push(builder, trap_footer_e3010_text()) }
+trap_build_footer_e3010: fn(builder: I64) { jet_rt_string_builder_push(builder, trap_footer_e3010_text()) }
 
 // E3011 Why: This code is deliberately incomplete and reached a running program.
 // Fix: Implement the missing code before running the program.
-fn trap_footer_e3011_text() -> I64 { rt_static_text(" Why: This code is deliberately incomplete and reached a running program.\n Fix: Implement the missing code before running the program.\nMore: jet-lang.dev/e/E3011\n") }
+trap_footer_e3011_text: fn() -> I64 { rt_static_text(" Why: This code is deliberately incomplete and reached a running program.\n Fix: Implement the missing code before running the program.\nMore: jet-lang.dev/e/E3011\n") }
 
-fn trap_footer_e3011() { trap_write_static(trap_footer_e3011_text()) }
+trap_footer_e3011: fn() { trap_write_static(trap_footer_e3011_text()) }
 
-fn trap_build_footer_e3011(builder: I64) { jet_rt_string_builder_push(builder, trap_footer_e3011_text()) }
+trap_build_footer_e3011: fn(builder: I64) { jet_rt_string_builder_push(builder, trap_footer_e3011_text()) }
 
 // E0128 Why: Strict `zip` requires every input to end on the same row.
 // Fix: Use `zip_short` to intentionally truncate or `zip_pad` to intentionally pad; neither changes strictness automatically.
-fn trap_footer_e0128_text() -> I64 { rt_static_text(" Why: Strict `zip` requires every input to end on the same row.\n Fix: Use `zip_short` to intentionally truncate or `zip_pad` to intentionally pad; neither changes strictness automatically.\nMore: jet-lang.dev/e/E0128\n") }
+trap_footer_e0128_text: fn() -> I64 { rt_static_text(" Why: Strict `zip` requires every input to end on the same row.\n Fix: Use `zip_short` to intentionally truncate or `zip_pad` to intentionally pad; neither changes strictness automatically.\nMore: jet-lang.dev/e/E0128\n") }
 
-fn trap_footer_e0128() { trap_write_static(trap_footer_e0128_text()) }
+trap_footer_e0128: fn() { trap_write_static(trap_footer_e0128_text()) }
 
-fn trap_build_footer_e0128(builder: I64) { jet_rt_string_builder_push(builder, trap_footer_e0128_text()) }
+trap_build_footer_e0128: fn(builder: I64) { jet_rt_string_builder_push(builder, trap_footer_e0128_text()) }
 
 // E3005 Why: A `#Pre` (argument claim, checked at entry) or `#Post` (`result` claim, checked before return) condition evaluated false at runtime. `{msg}` is the clause's own message string. Checked in every build (not a debug/release split) — with file:line.
 // Fix: Fix the caller (a failed `#Pre` means an argument violated the function's stated contract) or the function body (a failed `#Post` means it broke its own promise about the result).
-fn trap_footer_e3005_head_text() -> I64 { rt_static_text(" Why: A `#Pre` (argument claim, checked at entry) or `#Post` (`result` claim, checked before return) condition evaluated false at runtime. `") }
+trap_footer_e3005_head_text: fn() -> I64 { rt_static_text(" Why: A `#Pre` (argument claim, checked at entry) or `#Post` (`result` claim, checked before return) condition evaluated false at runtime. `") }
 
-fn trap_footer_e3005_head() { trap_write_static(trap_footer_e3005_head_text()) }
+trap_footer_e3005_head: fn() { trap_write_static(trap_footer_e3005_head_text()) }
 
-fn trap_build_footer_e3005_head(builder: I64) { jet_rt_string_builder_push(builder, trap_footer_e3005_head_text()) }
+trap_build_footer_e3005_head: fn(builder: I64) { jet_rt_string_builder_push(builder, trap_footer_e3005_head_text()) }
 
-fn trap_footer_e3005_tail_text() -> I64 { rt_static_text("` is the clause's own message string. Checked in every build (not a debug/release split) — with file:line.\n Fix: Fix the caller (a failed `#Pre` means an argument violated the function's stated contract) or the function body (a failed `#Post` means it broke its own promise about the result).\nMore: jet-lang.dev/e/E3005\n") }
+trap_footer_e3005_tail_text: fn() -> I64 { rt_static_text("` is the clause's own message string. Checked in every build (not a debug/release split) — with file:line.\n Fix: Fix the caller (a failed `#Pre` means an argument violated the function's stated contract) or the function body (a failed `#Post` means it broke its own promise about the result).\nMore: jet-lang.dev/e/E3005\n") }
 
-fn trap_footer_e3005_tail() { trap_write_static(trap_footer_e3005_tail_text()) }
+trap_footer_e3005_tail: fn() { trap_write_static(trap_footer_e3005_tail_text()) }
 
-fn trap_build_footer_e3005_tail(builder: I64) { jet_rt_string_builder_push(builder, trap_footer_e3005_tail_text()) }
+trap_build_footer_e3005_tail: fn(builder: I64) { jet_rt_string_builder_push(builder, trap_footer_e3005_tail_text()) }
 
-fn trap_invalid_layout_head_text() -> I64 { rt_static_text("Stop [E3001]: `panic: invalid box layout`\n  --> <core.prelude>:0\n") }
+trap_invalid_layout_head_text: fn() -> I64 { rt_static_text("Stop [E3001]: `panic: invalid box layout`\n  --> <core.prelude>:0\n") }
 
-fn trap_invalid_layout_head() { trap_write_static(trap_invalid_layout_head_text()) }
+trap_invalid_layout_head: fn() { trap_write_static(trap_invalid_layout_head_text()) }
 
-fn trap_build_invalid_layout_head(builder: I64) { jet_rt_string_builder_push(builder, trap_invalid_layout_head_text()) }
+trap_build_invalid_layout_head: fn(builder: I64) { jet_rt_string_builder_push(builder, trap_invalid_layout_head_text()) }
 
 // E2804 Why: A duplicate route makes dispatch ambiguous — one handler would never be reached. Registered at start-up so the bug surfaces immediately.
 // Fix: Remove one of the duplicate registrations, or make the patterns distinct (e.g. add a static prefix to one).
-fn trap_footer_e2804_text() -> I64 { rt_static_text(" Why: A duplicate route makes dispatch ambiguous — one handler would never be reached. Registered at start-up so the bug surfaces immediately.\n Fix: Remove one of the duplicate registrations, or make the patterns distinct (e.g. add a static prefix to one).\nMore: jet-lang.dev/e/E2804\n") }
+trap_footer_e2804_text: fn() -> I64 { rt_static_text(" Why: A duplicate route makes dispatch ambiguous — one handler would never be reached. Registered at start-up so the bug surfaces immediately.\n Fix: Remove one of the duplicate registrations, or make the patterns distinct (e.g. add a static prefix to one).\nMore: jet-lang.dev/e/E2804\n") }
 
-fn trap_footer_e2804() { trap_write_static(trap_footer_e2804_text()) }
+trap_footer_e2804: fn() { trap_write_static(trap_footer_e2804_text()) }
 
-fn trap_build_footer_e2804(builder: I64) { jet_rt_string_builder_push(builder, trap_footer_e2804_text()) }
+trap_build_footer_e2804: fn(builder: I64) { jet_rt_string_builder_push(builder, trap_footer_e2804_text()) }
 
 // E2805 Why: Route patterns and typed inputs define one checked endpoint contract. Paths bind by handler name, and their types must support Decode.
 // Fix: Use `:name` or final `*name` with a matching decodable handler parameter; fix the path or handler signature before registration.
-fn trap_footer_e2805_text() -> I64 { rt_static_text(" Why: Route patterns and typed inputs define one checked endpoint contract. Paths bind by handler name, and their types must support Decode.\n Fix: Use `:name` or final `*name` with a matching decodable handler parameter; fix the path or handler signature before registration.\nMore: jet-lang.dev/e/E2805\n") }
+trap_footer_e2805_text: fn() -> I64 { rt_static_text(" Why: Route patterns and typed inputs define one checked endpoint contract. Paths bind by handler name, and their types must support Decode.\n Fix: Use `:name` or final `*name` with a matching decodable handler parameter; fix the path or handler signature before registration.\nMore: jet-lang.dev/e/E2805\n") }
 
-fn trap_footer_e2805() { trap_write_static(trap_footer_e2805_text()) }
+trap_footer_e2805: fn() { trap_write_static(trap_footer_e2805_text()) }
 
-fn trap_build_footer_e2805(builder: I64) { jet_rt_string_builder_push(builder, trap_footer_e2805_text()) }
+trap_build_footer_e2805: fn(builder: I64) { jet_rt_string_builder_push(builder, trap_footer_e2805_text()) }
 
-fn trap_coded_registered(code: I64) -> Bool {
+trap_coded_registered: fn(code: I64) -> Bool {
     code == I64{224147288645} || code == I64{228442255941}
 }
 
-fn trap_coded_footer(code: I64) {
+trap_coded_footer: fn(code: I64) {
     if {
         (code == I64{224147288645}) -> trap_footer_e2804()
         else -> trap_footer_e2805()
     }
 }
 
-fn trap_msg_header_panic_text() -> I64 { rt_static_text("Stop [E3001]: `panic: ") }
+trap_msg_header_panic_text: fn() -> I64 { rt_static_text("Stop [E3001]: `panic: ") }
 
-fn trap_msg_header_panic() { trap_write_static(trap_msg_header_panic_text()) }
+trap_msg_header_panic: fn() { trap_write_static(trap_msg_header_panic_text()) }
 
-fn trap_build_msg_header_panic(builder: I64) { jet_rt_string_builder_push(builder, trap_msg_header_panic_text()) }
+trap_build_msg_header_panic: fn(builder: I64) { jet_rt_string_builder_push(builder, trap_msg_header_panic_text()) }
 
-fn trap_msg_header_numeric() {
+trap_msg_header_numeric: fn() {
     trap_write_word(I64{3694459264210793555}, I64{8})
     trap_write_word(I64{27057032807854384}, I64{7})
 }
 
-fn trap_build_msg_header_numeric(builder: I64) {
+trap_build_msg_header_numeric: fn(builder: I64) {
     rt_text_push_word(builder, I64{3694459264210793555}, I64{8})
     rt_text_push_word(builder, I64{27057032807854384}, I64{7})
 }
 
-fn trap_msg_header_todo() {
+trap_msg_header_todo: fn() {
     trap_write_word(I64{3694459264210793555}, I64{8})
     trap_write_word(I64{27057032807919920}, I64{7})
 }
 
-fn trap_build_msg_header_todo(builder: I64) {
+trap_build_msg_header_todo: fn(builder: I64) {
     rt_text_push_word(builder, I64{3694459264210793555}, I64{8})
     rt_text_push_word(builder, I64{27057032807919920}, I64{7})
 }
 
-fn trap_msg_header_contract() {
+trap_msg_header_contract: fn() {
     trap_write_word(I64{3694459264210793555}, I64{8})
     trap_write_word(I64{35435043958832}, I64{6})
 }
 
-fn trap_build_msg_header_contract(builder: I64) {
+trap_build_msg_header_contract: fn(builder: I64) {
     rt_text_push_word(builder, I64{3694459264210793555}, I64{8})
     rt_text_push_word(builder, I64{35435043958832}, I64{6})
 }
 
-fn trap_msg_header_zip_text() -> I64 { rt_static_text("Stop [E0128]: Zip inputs have different lengths under `") }
+trap_msg_header_zip_text: fn() -> I64 { rt_static_text("Stop [E0128]: Zip inputs have different lengths under `") }
 
-fn trap_msg_header_zip() { trap_write_static(trap_msg_header_zip_text()) }
+trap_msg_header_zip: fn() { trap_write_static(trap_msg_header_zip_text()) }
 
-fn trap_build_msg_header_zip(builder: I64) { jet_rt_string_builder_push(builder, trap_msg_header_zip_text()) }
+trap_build_msg_header_zip: fn(builder: I64) { jet_rt_string_builder_push(builder, trap_msg_header_zip_text()) }
 
-fn trap_msg_zip_end() {
+trap_msg_zip_end: fn() {
     trap_write_word(I64{8746950815730638944}, I64{8})
     trap_write_word(I64{10}, I64{1})
 }
 
-fn trap_build_msg_zip_end(builder: I64) {
+trap_build_msg_zip_end: fn(builder: I64) {
     rt_text_push_word(builder, I64{8746950815730638944}, I64{8})
     rt_text_push_word(builder, I64{10}, I64{1})
 }
 
-fn trap_msg_collections_end_text() -> I64 { rt_static_text("`\n  --> <core.collections>:0\n") }
+trap_msg_collections_end_text: fn() -> I64 { rt_static_text("`\n  --> <core.collections>:0\n") }
 
-fn trap_msg_collections_end() { trap_write_static(trap_msg_collections_end_text()) }
+trap_msg_collections_end: fn() { trap_write_static(trap_msg_collections_end_text()) }
 
-fn trap_build_msg_collections_end(builder: I64) { jet_rt_string_builder_push(builder, trap_msg_collections_end_text()) }
+trap_build_msg_collections_end: fn(builder: I64) { jet_rt_string_builder_push(builder, trap_msg_collections_end_text()) }
 
-fn trap_msg_sequence_count_text() -> I64 { rt_static_text("sequence count must be nonnegative") }
+trap_msg_sequence_count_text: fn() -> I64 { rt_static_text("sequence count must be nonnegative") }
 
-fn trap_msg_sequence_count() { trap_write_static(trap_msg_sequence_count_text()) }
+trap_msg_sequence_count: fn() { trap_write_static(trap_msg_sequence_count_text()) }
 
-fn trap_build_msg_sequence_count(builder: I64) { jet_rt_string_builder_push(builder, trap_msg_sequence_count_text()) }
+trap_build_msg_sequence_count: fn(builder: I64) { jet_rt_string_builder_push(builder, trap_msg_sequence_count_text()) }
 
-fn trap_msg_sequence_step_text() -> I64 { rt_static_text("step_by requires a positive step") }
+trap_msg_sequence_step_text: fn() -> I64 { rt_static_text("step_by requires a positive step") }
 
-fn trap_msg_sequence_step() { trap_write_static(trap_msg_sequence_step_text()) }
+trap_msg_sequence_step: fn() { trap_write_static(trap_msg_sequence_step_text()) }
 
-fn trap_build_msg_sequence_step(builder: I64) { jet_rt_string_builder_push(builder, trap_msg_sequence_step_text()) }
+trap_build_msg_sequence_step: fn(builder: I64) { jet_rt_string_builder_push(builder, trap_msg_sequence_step_text()) }
 
-fn trap_msg_sequence_chunks_text() -> I64 { rt_static_text("chunks requires a positive size") }
+trap_msg_sequence_chunks_text: fn() -> I64 { rt_static_text("chunks requires a positive size") }
 
-fn trap_msg_sequence_chunks() { trap_write_static(trap_msg_sequence_chunks_text()) }
+trap_msg_sequence_chunks: fn() { trap_write_static(trap_msg_sequence_chunks_text()) }
 
-fn trap_build_msg_sequence_chunks(builder: I64) { jet_rt_string_builder_push(builder, trap_msg_sequence_chunks_text()) }
+trap_build_msg_sequence_chunks: fn(builder: I64) { jet_rt_string_builder_push(builder, trap_msg_sequence_chunks_text()) }
 
-fn trap_msg_sequence_windows_text() -> I64 { rt_static_text("windows requires a positive size") }
+trap_msg_sequence_windows_text: fn() -> I64 { rt_static_text("windows requires a positive size") }
 
-fn trap_msg_sequence_windows() { trap_write_static(trap_msg_sequence_windows_text()) }
+trap_msg_sequence_windows: fn() { trap_write_static(trap_msg_sequence_windows_text()) }
 
-fn trap_build_msg_sequence_windows(builder: I64) { jet_rt_string_builder_push(builder, trap_msg_sequence_windows_text()) }
+trap_build_msg_sequence_windows: fn(builder: I64) { jet_rt_string_builder_push(builder, trap_msg_sequence_windows_text()) }
 
-fn trap_msg_cursor_step_text() -> I64 { rt_static_text("iterator loop stride must be positive") }
+trap_msg_cursor_step_text: fn() -> I64 { rt_static_text("iterator loop stride must be positive") }
 
-fn trap_msg_cursor_step() { trap_write_static(trap_msg_cursor_step_text()) }
+trap_msg_cursor_step: fn() { trap_write_static(trap_msg_cursor_step_text()) }
 
-fn trap_build_msg_cursor_step(builder: I64) { jet_rt_string_builder_push(builder, trap_msg_cursor_step_text()) }
+trap_build_msg_cursor_step: fn(builder: I64) { jet_rt_string_builder_push(builder, trap_msg_cursor_step_text()) }
 
-fn trap_msg_cursor_exhausted_text() -> I64 { rt_static_text("iterator loop value requested after exhaustion") }
+trap_msg_cursor_exhausted_text: fn() -> I64 { rt_static_text("iterator loop value requested after exhaustion") }
 
-fn trap_msg_cursor_exhausted() { trap_write_static(trap_msg_cursor_exhausted_text()) }
+trap_msg_cursor_exhausted: fn() { trap_write_static(trap_msg_cursor_exhausted_text()) }
 
-fn trap_build_msg_cursor_exhausted(builder: I64) { jet_rt_string_builder_push(builder, trap_msg_cursor_exhausted_text()) }
+trap_build_msg_cursor_exhausted: fn(builder: I64) { jet_rt_string_builder_push(builder, trap_msg_cursor_exhausted_text()) }
 
-fn trap_msg_location() {
+trap_msg_location: fn() {
     trap_write_word(I64{35451417993248}, I64{6})
 }
 
-fn trap_build_msg_location(builder: I64) {
+trap_build_msg_location: fn(builder: I64) {
     rt_text_push_word(builder, I64{35451417993248}, I64{6})
 }
 
-fn trap_msg_colon() {
+trap_msg_colon: fn() {
     trap_write_word(I64{58}, I64{1})
 }
 
-fn trap_build_msg_colon(builder: I64) {
+trap_build_msg_colon: fn(builder: I64) {
     rt_text_push_word(builder, I64{58}, I64{1})
 }
 
-fn trap_msg_in_function() {
+trap_msg_in_function: fn() {
     trap_write_word(I64{544106784}, I64{4})
 }
 
-fn trap_build_msg_in_function(builder: I64) {
+trap_build_msg_in_function: fn(builder: I64) {
     rt_text_push_word(builder, I64{544106784}, I64{4})
 }
 
-fn trap_msg_newline() {
+trap_msg_newline: fn() {
     trap_write_word(I64{10}, I64{1})
 }
 
-fn trap_build_msg_newline(builder: I64) {
+trap_build_msg_newline: fn(builder: I64) {
     rt_text_push_word(builder, I64{10}, I64{1})
 }
 
-fn trap_msg_space() {
+trap_msg_space: fn() {
     trap_write_word(I64{32}, I64{1})
 }
 
-fn trap_build_msg_space(builder: I64) {
+trap_build_msg_space: fn(builder: I64) {
     rt_text_push_word(builder, I64{32}, I64{1})
 }
 
-fn trap_msg_gutter_line() {
+trap_msg_gutter_line: fn() {
     trap_write_word(I64{2684}, I64{2})
 }
 
-fn trap_build_msg_gutter_line(builder: I64) {
+trap_build_msg_gutter_line: fn(builder: I64) {
     rt_text_push_word(builder, I64{2684}, I64{2})
 }
 
-fn trap_msg_gutter_source() {
+trap_msg_gutter_source: fn() {
     trap_write_word(I64{2128928}, I64{3})
 }
 
-fn trap_build_msg_gutter_source(builder: I64) {
+trap_build_msg_gutter_source: fn(builder: I64) {
     rt_text_push_word(builder, I64{2128928}, I64{3})
 }
 
-fn trap_msg_gutter_caret() {
+trap_msg_gutter_caret: fn() {
     trap_write_word(I64{8316}, I64{2})
 }
 
-fn trap_build_msg_gutter_caret(builder: I64) {
+trap_build_msg_gutter_caret: fn(builder: I64) {
     rt_text_push_word(builder, I64{8316}, I64{2})
 }
 
-fn trap_msg_caret() {
+trap_msg_caret: fn() {
     trap_write_word(I64{94}, I64{1})
 }
 
-fn trap_build_msg_caret(builder: I64) {
+trap_build_msg_caret: fn(builder: I64) {
     rt_text_push_word(builder, I64{94}, I64{1})
 }
 
-fn trap_msg_message_end() {
+trap_msg_message_end: fn() {
     trap_write_word(I64{2656}, I64{2})
 }
 
-fn trap_build_msg_message_end(builder: I64) {
+trap_build_msg_message_end: fn(builder: I64) {
     rt_text_push_word(builder, I64{2656}, I64{2})
 }
 
-fn trap_msg_prelude_end_text() -> I64 { rt_static_text("`\n  --> <core.prelude>:0\n") }
+trap_msg_prelude_end_text: fn() -> I64 { rt_static_text("`\n  --> <core.prelude>:0\n") }
 
-fn trap_msg_prelude_end() { trap_write_static(trap_msg_prelude_end_text()) }
+trap_msg_prelude_end: fn() { trap_write_static(trap_msg_prelude_end_text()) }
 
-fn trap_build_msg_prelude_end(builder: I64) { jet_rt_string_builder_push(builder, trap_msg_prelude_end_text()) }
+trap_build_msg_prelude_end: fn(builder: I64) { jet_rt_string_builder_push(builder, trap_msg_prelude_end_text()) }
 
-fn trap_msg_overflow_text() -> I64 { rt_static_text("This arithmetic overflows the value's type (the result is outside its range)") }
+trap_msg_overflow_text: fn() -> I64 { rt_static_text("This arithmetic overflows the value's type (the result is outside its range)") }
 
-fn trap_msg_overflow() { trap_write_static(trap_msg_overflow_text()) }
+trap_msg_overflow: fn() { trap_write_static(trap_msg_overflow_text()) }
 
-fn trap_build_msg_overflow(builder: I64) { jet_rt_string_builder_push(builder, trap_msg_overflow_text()) }
+trap_build_msg_overflow: fn(builder: I64) { jet_rt_string_builder_push(builder, trap_msg_overflow_text()) }
 
-fn trap_msg_divide_zero() {
+trap_msg_divide_zero: fn() {
     trap_write_word(I64{2334101988825262436}, I64{8})
     trap_write_word(I64{31369502581094754}, I64{7})
 }
 
-fn trap_build_msg_divide_zero(builder: I64) {
+trap_build_msg_divide_zero: fn(builder: I64) {
     rt_text_push_word(builder, I64{2334101988825262436}, I64{8})
     rt_text_push_word(builder, I64{31369502581094754}, I64{7})
 }
 
-fn trap_msg_native_index_range_text() -> I64 { rt_static_text("native Int argument exceeds host range") }
+trap_msg_native_index_range_text: fn() -> I64 { rt_static_text("native Int argument exceeds host range") }
 
-fn trap_msg_native_index_range() { trap_write_static(trap_msg_native_index_range_text()) }
+trap_msg_native_index_range: fn() { trap_write_static(trap_msg_native_index_range_text()) }
 
-fn trap_build_msg_native_index_range(builder: I64) { jet_rt_string_builder_push(builder, trap_msg_native_index_range_text()) }
+trap_build_msg_native_index_range: fn(builder: I64) { jet_rt_string_builder_push(builder, trap_msg_native_index_range_text()) }
 
-fn trap_msg_list_head() {
+trap_msg_list_head: fn() {
     trap_write_word(I64{8391166443842267252}, I64{8})
     trap_write_word(I64{139374716960}, I64{5})
 }
 
-fn trap_build_msg_list_head(builder: I64) {
+trap_build_msg_list_head: fn(builder: I64) {
     rt_text_push_word(builder, I64{8391166443842267252}, I64{8})
     rt_text_push_word(builder, I64{139374716960}, I64{5})
 }
 
-fn trap_msg_list_item() {
+trap_msg_list_item: fn() {
     trap_write_word(I64{469853563168}, I64{5})
 }
 
-fn trap_build_msg_list_item(builder: I64) {
+trap_build_msg_list_item: fn(builder: I64) {
     rt_text_push_word(builder, I64{469853563168}, I64{5})
 }
 
-fn trap_msg_list_plural() {
+trap_msg_list_plural: fn() {
     trap_write_word(I64{115}, I64{1})
 }
 
-fn trap_build_msg_list_plural(builder: I64) {
+trap_build_msg_list_plural: fn(builder: I64) {
     rt_text_push_word(builder, I64{115}, I64{1})
 }
 
-fn trap_msg_list_position() {
+trap_msg_list_position: fn() {
     trap_write_word(I64{8317990321387675692}, I64{8})
     trap_write_word(I64{35658687673449}, I64{6})
 }
 
-fn trap_build_msg_list_position(builder: I64) {
+trap_build_msg_list_position: fn(builder: I64) {
     rt_text_push_word(builder, I64{8317990321387675692}, I64{8})
     rt_text_push_word(builder, I64{35658687673449}, I64{6})
 }
 
-fn trap_msg_list_end_text() -> I64 { rt_static_text(" doesn't exist`\n  --> <core.prelude>:0\n") }
+trap_msg_list_end_text: fn() -> I64 { rt_static_text(" doesn't exist`\n  --> <core.prelude>:0\n") }
 
-fn trap_msg_list_end() { trap_write_static(trap_msg_list_end_text()) }
+trap_msg_list_end: fn() { trap_write_static(trap_msg_list_end_text()) }
 
-fn trap_build_msg_list_end(builder: I64) { jet_rt_string_builder_push(builder, trap_msg_list_end_text()) }
+trap_build_msg_list_end: fn(builder: I64) { jet_rt_string_builder_push(builder, trap_msg_list_end_text()) }
 
-fn trap_msg_report_list_head_text() -> I64 { rt_static_text("bounds report: the list has ") }
+trap_msg_report_list_head_text: fn() -> I64 { rt_static_text("bounds report: the list has ") }
 
-fn trap_msg_report_list_head() { trap_write_static(trap_msg_report_list_head_text()) }
+trap_msg_report_list_head: fn() { trap_write_static(trap_msg_report_list_head_text()) }
 
-fn trap_build_msg_report_list_head(builder: I64) { jet_rt_string_builder_push(builder, trap_msg_report_list_head_text()) }
+trap_build_msg_report_list_head: fn(builder: I64) { jet_rt_string_builder_push(builder, trap_msg_report_list_head_text()) }
 
-fn trap_msg_report_list_at() {
+trap_msg_report_list_at: fn() {
     trap_write_word(I64{8369779874393449504}, I64{8})
     trap_write_word(I64{2891438999811417376}, I64{8})
 }
 
-fn trap_build_msg_report_list_at(builder: I64) {
+trap_build_msg_report_list_at: fn(builder: I64) {
     rt_text_push_word(builder, I64{8369779874393449504}, I64{8})
     rt_text_push_word(builder, I64{2891438999811417376}, I64{8})
 }
 
-fn trap_msg_report_list_end() {
+trap_msg_report_list_end: fn() {
     trap_write_word(I64{2601}, I64{2})
 }
 
-fn trap_build_msg_report_list_end(builder: I64) {
+trap_build_msg_report_list_end: fn(builder: I64) {
     rt_text_push_word(builder, I64{2601}, I64{2})
 }
 
-fn trap_msg_unreachable_text() -> I64 { rt_static_text("internal error: entered unreachable code: ") }
+trap_msg_unreachable_text: fn() -> I64 { rt_static_text("internal error: entered unreachable code: ") }
 
-fn trap_msg_unreachable() { trap_write_static(trap_msg_unreachable_text()) }
+trap_msg_unreachable: fn() { trap_write_static(trap_msg_unreachable_text()) }
 
-fn trap_build_msg_unreachable(builder: I64) { jet_rt_string_builder_push(builder, trap_msg_unreachable_text()) }
+trap_build_msg_unreachable: fn(builder: I64) { jet_rt_string_builder_push(builder, trap_msg_unreachable_text()) }
 
-fn trap_msg_locals() {
+trap_msg_locals: fn() {
     trap_write_word(I64{2322295467190480748}, I64{8})
 }
 
-fn trap_build_msg_locals(builder: I64) {
+trap_build_msg_locals: fn(builder: I64) {
     rt_text_push_word(builder, I64{2322295467190480748}, I64{8})
 }
 
-fn trap_msg_todo() {
+trap_msg_todo: fn() {
     trap_write_word(I64{8386019643939050531}, I64{8})
     trap_write_word(I64{32}, I64{1})
 }
 
-fn trap_build_msg_todo(builder: I64) {
+trap_build_msg_todo: fn(builder: I64) {
     rt_text_push_word(builder, I64{8386019643939050531}, I64{8})
     rt_text_push_word(builder, I64{32}, I64{1})
 }
 
-fn trap_msg_todo_expected() {
+trap_msg_todo_expected: fn() {
     trap_write_word(I64{8104338720058040864}, I64{8})
     trap_write_word(I64{35615570944869}, I64{6})
 }
 
-fn trap_build_msg_todo_expected(builder: I64) {
+trap_build_msg_todo_expected: fn(builder: I64) {
     rt_text_push_word(builder, I64{8104338720058040864}, I64{8})
     rt_text_push_word(builder, I64{35615570944869}, I64{6})
 }
 
-fn trap_msg_expected() {
+trap_msg_expected: fn() {
     trap_write_word(I64{7234316346693023845}, I64{8})
     trap_write_word(I64{8250}, I64{2})
 }
 
-fn trap_build_msg_expected(builder: I64) {
+trap_build_msg_expected: fn(builder: I64) {
     rt_text_push_word(builder, I64{7234316346693023845}, I64{8})
     rt_text_push_word(builder, I64{8250}, I64{2})
 }
 
-fn trap_msg_got() {
+trap_msg_got: fn() {
     trap_write_word(I64{9071471014387756}, I64{7})
 }
 
-fn trap_build_msg_got(builder: I64) {
+trap_build_msg_got: fn(builder: I64) {
     rt_text_push_word(builder, I64{9071471014387756}, I64{7})
 }
 
-fn trap_msg_range_head() {
+trap_msg_range_head: fn() {
     trap_write_word(I64{35683249840483}, I64{6})
 }
 
-fn trap_build_msg_range_head(builder: I64) {
+trap_build_msg_range_head: fn(builder: I64) {
     rt_text_push_word(builder, I64{35683249840483}, I64{6})
 }
 
-fn trap_msg_range_slice() {
+trap_msg_range_slice: fn() {
     trap_write_word(I64{435459550323}, I64{5})
 }
 
-fn trap_build_msg_range_slice(builder: I64) {
+trap_build_msg_range_slice: fn(builder: I64) {
     rt_text_push_word(builder, I64{435459550323}, I64{5})
 }
 
-fn trap_msg_range_view() {
+trap_msg_range_view: fn() {
     trap_write_word(I64{2003134838}, I64{4})
 }
 
-fn trap_build_msg_range_view(builder: I64) {
+trap_build_msg_range_view: fn(builder: I64) {
     rt_text_push_word(builder, I64{2003134838}, I64{4})
 }
 
-fn trap_msg_range_items() {
+trap_msg_range_items: fn() {
     trap_write_word(I64{7359008704814147872}, I64{8})
     trap_write_word(I64{544042866}, I64{4})
 }
 
-fn trap_build_msg_range_items(builder: I64) {
+trap_build_msg_range_items: fn(builder: I64) {
     rt_text_push_word(builder, I64{7359008704814147872}, I64{8})
     rt_text_push_word(builder, I64{544042866}, I64{4})
 }
 
-fn trap_msg_range_to() {
+trap_msg_range_to: fn() {
     trap_write_word(I64{544175136}, I64{4})
 }
 
-fn trap_build_msg_range_to(builder: I64) {
+trap_build_msg_range_to: fn(builder: I64) {
     rt_text_push_word(builder, I64{544175136}, I64{4})
 }
 
-fn trap_msg_range_open() {
+trap_msg_range_open: fn() {
     trap_write_word(I64{10272}, I64{2})
 }
 
-fn trap_build_msg_range_open(builder: I64) {
+trap_build_msg_range_open: fn(builder: I64) {
     rt_text_push_word(builder, I64{10272}, I64{2})
 }
 
-fn trap_msg_exclusive() {
+trap_msg_exclusive: fn() {
     trap_write_word(I64{8532477917196941413}, I64{8})
     trap_write_word(I64{101}, I64{1})
 }
 
-fn trap_build_msg_exclusive(builder: I64) {
+trap_build_msg_exclusive: fn(builder: I64) {
     rt_text_push_word(builder, I64{8532477917196941413}, I64{8})
     rt_text_push_word(builder, I64{101}, I64{1})
 }
 
-fn trap_msg_inclusive() {
+trap_msg_inclusive: fn() {
     trap_write_word(I64{8532477917196938857}, I64{8})
     trap_write_word(I64{101}, I64{1})
 }
 
-fn trap_build_msg_inclusive(builder: I64) {
+trap_build_msg_inclusive: fn(builder: I64) {
     rt_text_push_word(builder, I64{8532477917196938857}, I64{8})
     rt_text_push_word(builder, I64{101}, I64{1})
 }
 
-fn trap_msg_range_end() {
+trap_msg_range_end: fn() {
     trap_write_word(I64{679977}, I64{3})
 }
 
-fn trap_build_msg_range_end(builder: I64) {
+trap_build_msg_range_end: fn(builder: I64) {
     rt_text_push_word(builder, I64{679977}, I64{3})
 }
 
-fn trap_msg_native_tls_text() -> I64 { rt_static_text("TLS transport is not available in native builds until Jet's own TLS implementation lands; use plain HTTP or TCP meanwhile") }
+trap_msg_native_tls_text: fn() -> I64 { rt_static_text("TLS transport is not available in native builds until Jet's own TLS implementation lands; use plain HTTP or TCP meanwhile") }
 
-fn trap_msg_native_tls() { trap_write_static(trap_msg_native_tls_text()) }
+trap_msg_native_tls: fn() { trap_write_static(trap_msg_native_tls_text()) }
 
-fn trap_build_msg_native_tls(builder: I64) { jet_rt_string_builder_push(builder, trap_msg_native_tls_text()) }
+trap_build_msg_native_tls: fn(builder: I64) { jet_rt_string_builder_push(builder, trap_msg_native_tls_text()) }
 
-fn trap_msg_inactive_row_head_text() -> I64 { rt_static_text("internal error: runtime stop `") }
+trap_msg_inactive_row_head_text: fn() -> I64 { rt_static_text("internal error: runtime stop `") }
 
-fn trap_msg_inactive_row_head() { trap_write_static(trap_msg_inactive_row_head_text()) }
+trap_msg_inactive_row_head: fn() { trap_write_static(trap_msg_inactive_row_head_text()) }
 
-fn trap_build_msg_inactive_row_head(builder: I64) { jet_rt_string_builder_push(builder, trap_msg_inactive_row_head_text()) }
+trap_build_msg_inactive_row_head: fn(builder: I64) { jet_rt_string_builder_push(builder, trap_msg_inactive_row_head_text()) }
 
-fn trap_msg_inactive_row_tail_text() -> I64 { rt_static_text("` has no active runtime row, so Jet cannot report it; please report this as a Jet defect") }
+trap_msg_inactive_row_tail_text: fn() -> I64 { rt_static_text("` has no active runtime row, so Jet cannot report it; please report this as a Jet defect") }
 
-fn trap_msg_inactive_row_tail() { trap_write_static(trap_msg_inactive_row_tail_text()) }
+trap_msg_inactive_row_tail: fn() { trap_write_static(trap_msg_inactive_row_tail_text()) }
 
-fn trap_build_msg_inactive_row_tail(builder: I64) { jet_rt_string_builder_push(builder, trap_msg_inactive_row_tail_text()) }
+trap_build_msg_inactive_row_tail: fn(builder: I64) { jet_rt_string_builder_push(builder, trap_msg_inactive_row_tail_text()) }
 
-fn trap_msg_coded_head() {
+trap_msg_coded_head: fn() {
     trap_write_word(I64{100194883433555}, I64{6})
 }
 
-fn trap_build_msg_coded_head(builder: I64) {
+trap_build_msg_coded_head: fn(builder: I64) {
     rt_text_push_word(builder, I64{100194883433555}, I64{6})
 }
 
-fn trap_msg_coded_mid() {
+trap_msg_coded_mid: fn() {
     trap_write_word(I64{2112093}, I64{3})
 }
 
-fn trap_build_msg_coded_mid(builder: I64) {
+trap_build_msg_coded_mid: fn(builder: I64) {
     rt_text_push_word(builder, I64{2112093}, I64{3})
 }
 
 // Canonical Text/RustDebug.jet intervals, retyped to machine words.
-TRAP_DEBUG_RANGE_COUNT :: comptime { I64{906} }
-TRAP_DEBUG_RANGES :: comptime { [I64]{
+TRAP_DEBUG_RANGE_COUNT: comptime { I64{906} }
+TRAP_DEBUG_RANGES: comptime { [I64]{
     I64{128}, I64{160}, I64{173}, I64{173}, I64{768}, I64{879}, I64{888}, I64{889}, I64{896}, I64{899}, I64{907}, I64{907},
     I64{909}, I64{909}, I64{930}, I64{930}, I64{1155}, I64{1161}, I64{1328}, I64{1328}, I64{1367}, I64{1368}, I64{1419}, I64{1420},
     I64{1424}, I64{1469}, I64{1471}, I64{1471}, I64{1473}, I64{1474}, I64{1476}, I64{1477}, I64{1479}, I64{1487}, I64{1515}, I64{1518},

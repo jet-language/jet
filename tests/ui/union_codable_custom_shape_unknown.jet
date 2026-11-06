@@ -1,21 +1,21 @@
-struct Token {
+Token: struct {
     raw: String
 }
 
 impl Token.Encode {
-    fn encode(self) -> Dyn { Dyn.Text(self.raw.copy()) }
+    encode: fn(self) -> Dyn { Dyn.Text(self.raw.copy()) }
 }
 
 impl Token.Decode {
-    fn decode(tree: Dyn) -> Token [FieldError]! {
-        raw :: tree.text()?
+    decode: fn(tree: Dyn) -> Token [FieldError]! {
+        raw: tree.text()?
         return Ok(Token{raw: raw})
     }
 }
 
 #Codable
-struct Row {
+Row: struct {
     value: Int | Token
 }
 
-fn run() { print("x") }
+run: fn() { print("x") }

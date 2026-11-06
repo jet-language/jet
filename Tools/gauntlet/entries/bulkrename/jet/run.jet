@@ -1,22 +1,22 @@
 use core.files
 
 #CLI
-struct Args {
+Args: struct {
     path: String
 }
 
-struct Photo {
+Photo: struct {
     number: Int
     name: String
     path: String
 }
 
-fn run(args: Args) {
-    directory :: args.path
-    entries :: files.list_dir(directory) ?? panic("cannot list directory")
-    pattern :: Regex{"^IMG_(\d+)\.jpeg$"}
+run: fn(args: Args) {
+    directory: args.path
+    entries: files.list_dir(directory) ?? panic("cannot list directory")
+    pattern: Regex{"^IMG_(\d+)\.jpeg$"}
     photos := entries.filter(entry -> !entry.is_dir && (pattern.copy()).is_match(entry.name)).map(entry -> {
-        match :: pattern.match(entry.name) ?? panic("bad photo")
+        match: pattern.match(entry.name) ?? panic("bad photo")
         Photo{
             number: Int.parse(match.group(1) ?? panic("bad photo")) ?? panic("bad photo"),
             name: entry.name,
@@ -25,8 +25,8 @@ fn run(args: Args) {
     })
     &photos.sort_by(photo -> photo.number)
     loop (index, photo) in photos {
-        ordinal :: "{index + 1}".pad_start(4, "0")
-        target_name :: "photo-{ordinal}.jpg"
+        ordinal: "{index + 1}".pad_start(4, "0")
+        target_name: "photo-{ordinal}.jpg"
         files.rename(photo.path, Path.from(directory).join(target_name)) ?? panic("cannot rename photo")
         print("renamed {photo.name} -> {target_name}")
     }

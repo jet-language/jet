@@ -34,28 +34,28 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">Top-level commands and jobs must have distinct names, and `jet &lt;name&gt;` must select exactly one function</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Rename the job, e.g. `#Job fn lint_all()`, or give same-named jobs different scopes.</p>
+<p class="diag-copy fix" data-registry-field="fix">Rename the job, e.g. `#Job lint_all: fn()`, or give same-named jobs different scopes.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0928</code>: <code>tests/ui/E0928_job_cli_command_clash.stderr</code>.</p>
 <pre class="diag">Error [jet.JobNameConflict]: Job `serve` clashes with the `#CLI` command `serve`
-  --&gt; E0928_job_cli_command_clash.jet:14:1
+  --&gt; tests/ui/E0928_job_cli_command_clash.jet:14:1
     |
- 14 | #Job(.Ship) fn serve() { print(&quot;job serve&quot;) }
+ 14 | #Job(.Ship) serve: fn() { print(&quot;job serve&quot;) }
     | ^^^^^^^^^^^
-  --&gt; E0928_job_cli_command_clash.jet:5:34
+  --&gt; tests/ui/E0928_job_cli_command_clash.jet:5:31
     |
-  5 |     #Doc(&quot;Start the service&quot;) fn serve(self) { print(&quot;command serve&quot;) }
-    |                                  ^^^^^ the `#CLI` command `serve` is declared here
+  5 |     #Doc(&quot;Start the service&quot;) serve: fn(self) { print(&quot;command serve&quot;) }
+    |                               ^^^^^ the `#CLI` command `serve` is declared here
  Why: `serve` names both a job and a command of this program, so `jet serve` cannot select exactly one function
  Fix: Rename the job or the command; an `.Internal` job never clashes
 More: jet-lang.dev/e/E0928
 
 Error [jet.JobNameConflict]: Job `plan` clashes with the `#CLI` command `plan`
-  --&gt; E0928_job_cli_command_clash.jet:16:1
+  --&gt; tests/ui/E0928_job_cli_command_clash.jet:16:1
     |
- 16 | #Job(.Dev) fn plan() { print(&quot;job plan&quot;) }
+ 16 | #Job(.Dev) plan: fn() { print(&quot;job plan&quot;) }
     | ^^^^^^^^^^
-  --&gt; E0928_job_cli_command_clash.jet:9:29
+  --&gt; tests/ui/E0928_job_cli_command_clash.jet:9:29
     |
   9 |     #Doc(&quot;Preview changes&quot;) plan = plan_impl
     |                             ^^^^ the `#CLI` command `plan` is declared here

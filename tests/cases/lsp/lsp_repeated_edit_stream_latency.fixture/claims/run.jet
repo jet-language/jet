@@ -1,28 +1,28 @@
 // Original assertions tests/lsp.rs3626-3656 over the real collected session frames.
 use {
-    files :: core.files
-    sys :: core.sys
-    json :: core.encoding.json
+    files: core.files
+    sys: core.sys
+    json: core.encoding.json
 }
 
-fn s5_latency_int_member(fields: [String:Dyn], key: String, expected: Int) -> Bool {
+s5_latency_int_member: fn(fields: [String:Dyn], key: String, expected: Int) -> Bool {
     if fields.get(key) == .Val(value) {
         if value == .Int(actual) -> return actual == expected
     }
     false
 }
 
-fn s5_latency_text_member(fields: [String:Dyn], key: String, expected: String) -> Bool {
+s5_latency_text_member: fn(fields: [String:Dyn], key: String, expected: String) -> Bool {
     if fields.get(key) == .Val(value) {
         if value == .Text(actual) -> return actual == expected
     }
     false
 }
 
-fn s5_latency_original_assertions(source: String, marker: String, request_id: Int, version: Int) {
+s5_latency_original_assertions: fn(source: String, marker: String, request_id: Int, version: Int) {
     verdict := false
     loop raw in source.lines() {
-        message :: json.parse(raw) ?? panic("valid LSP message")
+        message: json.parse(raw) ?? panic("valid LSP message")
         if message == .Object(fields) {
             if s5_latency_int_member(fields, "id", request_id) {
                 // Original Debug contains(marker); canonical JSON encodes the same
@@ -42,9 +42,9 @@ fn s5_latency_original_assertions(source: String, marker: String, request_id: In
 }
 
 #Test("edit stream asserts current marker and matching verdict") {
-    root :: sys.get("S5_FRAMES_ROOT") ?? panic("frames root")
+    root: sys.get("S5_FRAMES_ROOT") ?? panic("frames root")
     loop edit in 1..200 {
-        source :: files.read(files.join(root, "frames-{edit}.ndjson")) ?? panic("session frames")
+        source: files.read(files.join(root, "frames-{edit}.ndjson")) ?? panic("session frames")
         s5_latency_original_assertions(source, "marker_{edit}", 1000 + edit, edit + 1)
     }
 }

@@ -19,7 +19,7 @@ use {
     jet_driver.[JET_DRIVER_TARGET_MACHINE_NAMES, jet_driver_target_machine_by_name]
 }
 
-fn target_test_valid_machine() -> TargetMachine Never! {
+target_test_valid_machine: fn() -> TargetMachine Never! {
     machine := jet_target_machine_bare_metal("board.sensor_v1", "thumbv7em-none-eabihf", "0.0.1")
     machine.memory = [MemoryRegion]{
         jet_target_memory_region_new("flash", 0x08000000, ByteSize{bytes: 524288}, .Flash, .Rx),
@@ -39,7 +39,7 @@ fn target_test_valid_machine() -> TargetMachine Never! {
     machine.startup = .Generated{provider: target_test_provider("test.startup", "sha256:test-startup")}
     machine
 }
-fn target_test_provider(name: String, hash: String) -> ProviderContract Never! {
+target_test_provider: fn(name: String, hash: String) -> ProviderContract Never! {
     ProviderContract{provider: name, sha256: hash, provenance: "provider:{name}",
         abi: jet_target_abi_c(), limits: ProviderLimits{max_request_bytes: None, max_response_bytes: None, max_calls: None}}
 }
@@ -56,7 +56,7 @@ fn target_test_provider(name: String, hash: String) -> ProviderContract Never! {
     assert(jet_target_machine_validate(machine, jet_target_machine_use_default()).contains(.InvalidProviderContract{capability: "Target.MMIO", provider: "", sha256: "not-a-digest"}))
 }
 #Test("hosted_default_keeps_full_runtime") {
-    machine :: jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.0.1")
+    machine: jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.0.1")
     usage := jet_target_machine_use_default()
     usage.core_apis = [String]{"core.files", "core.http.client"}
     usage.heap_required = true
@@ -84,7 +84,7 @@ fn target_test_provider(name: String, hash: String) -> ProviderContract Never! {
     assert(jet_target_machine_validate(target_test_valid_machine(), usage).is_empty())
 }
 #Test("validation_reports_missing_required_no_os_facts_in_rust_push_order") {
-    errors :: jet_target_machine_validate(jet_target_machine_bare_metal("", "", "0.0.1"), jet_target_machine_use_default())
+    errors: jet_target_machine_validate(jet_target_machine_bare_metal("", "", "0.0.1"), jet_target_machine_use_default())
     assert_eq(errors, [TargetMachineError]{.MissingTargetTriple, .MissingAllocatorPolicy, .MissingPanicPolicy,
         .MissingMemoryKind{kind: .Flash}, .MissingMemoryKind{kind: .Ram}, .MissingTargetCapability{capability: "Target.MMIO"},
         .MissingTargetCapability{capability: "Time.Wall"}, .MissingTargetCapability{capability: "Time.Monotonic"}, .MissingTargetCapability{capability: "Time.ZoneData"},
@@ -100,7 +100,7 @@ fn target_test_provider(name: String, hash: String) -> ProviderContract Never! {
     usage.heap_required = true
     usage.core_apis = [String]{"core.files"}
     usage.mmio = [MMIOAccess]{MMIOAccess{address: 0x50000000, size: ByteSize{bytes: 4}, unsafe_gate: None}}
-    errors :: jet_target_machine_validate(machine, usage)
+    errors: jet_target_machine_validate(machine, usage)
     assert(errors.contains(.RamOverflow{used_bytes: 163840, ram_bytes: 131072}))
     assert(errors.contains(.HeapRequiresAllocator))
     assert(errors.contains(.CoreAPIUnavailable{api: "core.files", required: .Std, available: .Core}))
@@ -142,7 +142,7 @@ fn target_test_provider(name: String, hash: String) -> ProviderContract Never! {
     machine.startup_abi.version = "bad version"
     usage := jet_target_machine_use_default()
     usage.required_capabilities = [TargetCapability]{.TimeWall, .TimeWall}
-    errors :: jet_target_machine_validate(machine, usage)
+    errors: jet_target_machine_validate(machine, usage)
     assert_eq(errors, [TargetMachineError]{.MissingTargetCapability{capability: "Time.Wall"}, .MissingTargetCapability{capability: "Target.Startup"}, .InvalidProviderContract{capability: "Target.Startup", provider: "test.startup", sha256: "sha256:test-startup"}})
     provider := target_test_provider("test", "sha256:x")
     assert(jet_target_provider_valid(provider))
@@ -167,7 +167,7 @@ fn target_test_provider(name: String, hash: String) -> ProviderContract Never! {
     assert_eq(errors, [TargetMachineError]{.RamOverflow{used_bytes: 18446744073709551615, ram_bytes: 131072}, .MMIOEmptyUnsafeReason{address: 0x40020400}, .MMIOOutsideRegion{address: 18446744073709551615, size_bytes: 1}, .MMIOMissingUnsafeGate{address: 18446744073709551615}})
 }
 #Test("from_core_apis_sorts_dedups_and_derives_capabilities") {
-    usage :: jet_target_machine_use_from_core_apis([String]{"core.time::sleep", "core.term", "core.mem::Atomic", "core.time::sleep", "core.crypto.uuid"})
+    usage: jet_target_machine_use_from_core_apis([String]{"core.time::sleep", "core.term", "core.mem::Atomic", "core.time::sleep", "core.crypto.uuid"})
     assert_eq(usage.core_apis, [String]{"core.crypto.uuid", "core.mem::Atomic", "core.term", "core.time::sleep"})
     assert_eq(usage.required_capabilities, [TargetCapability]{.Entropy, .Atomic64, .IORead, .IOWrite, .TimeSleep})
     assert(usage.heap_required)
@@ -177,9 +177,9 @@ fn target_test_provider(name: String, hash: String) -> ProviderContract Never! {
     assert_eq(jet_target_capabilities_for_core_usage("core.time::now"), [TargetCapability]{.TimeWall})
 }
 #Test("named_wasm_profiles_have_distinct_provider_identities") {
-    browser :: jet_target_machine_wasm_browser("0.0.1")
-    wasi :: jet_target_machine_wasm_wasi("0.0.1")
-    no_os :: jet_target_machine_wasm_no_os("0.0.1")
+    browser: jet_target_machine_wasm_browser("0.0.1")
+    wasi: jet_target_machine_wasm_wasi("0.0.1")
+    no_os: jet_target_machine_wasm_no_os("0.0.1")
     assert_eq(jet_target_environment_identity(browser), "browser")
     assert_eq(jet_target_environment_identity(wasi), "wasi")
     assert_eq(jet_target_environment_identity(no_os), "no-os")
@@ -194,20 +194,20 @@ fn target_test_provider(name: String, hash: String) -> ProviderContract Never! {
 // TargetMachine::provider_identity, board constructors, facts; rustc
 // CARGO_PKG_VERSION=0.0.1. No Jet values fed to the oracle.
 #Test("every_canonical_profile_matches_rust_provider_identity_and_layout") {
-    names :: JET_DRIVER_TARGET_MACHINE_NAMES
-    identities :: [String]{"91827d8e6430e513281c1200b53ff3ec3bef6829af294db02f8299258b9f814a", "a3176d68cdb96a507ab6427d4997aaecb088baa891ad126260737503029e1d4f", "1caa69c38f4fa8fa2c04f9ebe057830c1df020d90e78ae2d69b917f5b418c18d", "5c4637bc8753186471f3c7aa0c338957df243b7bc6f79eb2567f08a88e8ab05c", "d1f16e8bda37e80c3b9156b08516f0eac1a03a8db686d82c451eaa17f6420474", "576249bc8759bb94fecd9179640c856a4b362ae72ff5de3d60e39b4bcb3a3333"}
-    layouts :: [String]{"91a97cc8bacffd938bb13162c2d3e4c0bc8db6dff133b96de5c84e5b922ae1cd", "efd3d02a0853cad8c076a0fa6c46ffd0c1612f49ebaf16c3ad599889ec5d0752", "bea44dc183a1d2224200f3a5a8da632f45499e75718a56aecb3544086db39004", "4967f3046b6afcb4470ab962221dd242835cbe81133eea0c2a95dd24c129bf19", "bea44dc183a1d2224200f3a5a8da632f45499e75718a56aecb3544086db39004", "b6d20f41f9c6b9bd94c3239ffcda1a15252d2054e88e04c0626a301c2e81f8d4"}
+    names: JET_DRIVER_TARGET_MACHINE_NAMES
+    identities: [String]{"91827d8e6430e513281c1200b53ff3ec3bef6829af294db02f8299258b9f814a", "a3176d68cdb96a507ab6427d4997aaecb088baa891ad126260737503029e1d4f", "1caa69c38f4fa8fa2c04f9ebe057830c1df020d90e78ae2d69b917f5b418c18d", "5c4637bc8753186471f3c7aa0c338957df243b7bc6f79eb2567f08a88e8ab05c", "d1f16e8bda37e80c3b9156b08516f0eac1a03a8db686d82c451eaa17f6420474", "576249bc8759bb94fecd9179640c856a4b362ae72ff5de3d60e39b4bcb3a3333"}
+    layouts: [String]{"91a97cc8bacffd938bb13162c2d3e4c0bc8db6dff133b96de5c84e5b922ae1cd", "efd3d02a0853cad8c076a0fa6c46ffd0c1612f49ebaf16c3ad599889ec5d0752", "bea44dc183a1d2224200f3a5a8da632f45499e75718a56aecb3544086db39004", "4967f3046b6afcb4470ab962221dd242835cbe81133eea0c2a95dd24c129bf19", "bea44dc183a1d2224200f3a5a8da632f45499e75718a56aecb3544086db39004", "b6d20f41f9c6b9bd94c3239ffcda1a15252d2054e88e04c0626a301c2e81f8d4"}
     loop index in 0..<names.len() {
-        machine :: jet_driver_target_machine_by_name(names[index], "0.0.1") ?? panic("canonical target missing")
+        machine: jet_driver_target_machine_by_name(names[index], "0.0.1") ?? panic("canonical target missing")
         assert_eq(machine.name, names[index])
         assert(jet_target_machine_validate(machine, jet_target_machine_use_default()).is_empty())
         assert_eq(jet_target_provider_identity(machine), "target-providers-v1:{identities[index]}")
         assert_eq(jet_target_layout_cache_identity(machine.layout), "layout-facts-v2:{layouts[index]}")
     }
-    aliases :: [String]{"firmware", "sensor", "virt"}
+    aliases: [String]{"firmware", "sensor", "virt"}
     loop alias in aliases {
-        machine :: jet_driver_target_machine_by_name(alias, "0.0.1") ?? panic("alias missing")
-        canonical :: if alias == "virt" -> "board.virt_aarch64" else -> "board.sensor_v1"
+        machine: jet_driver_target_machine_by_name(alias, "0.0.1") ?? panic("alias missing")
+        canonical: if alias == "virt" -> "board.virt_aarch64" else -> "board.sensor_v1"
         assert_eq(machine.name, canonical)
     }
     assert_eq(jet_driver_target_machine_by_name("unknown", "0.0.1"), None)
@@ -286,8 +286,8 @@ fn target_test_provider(name: String, hash: String) -> ProviderContract Never! {
 #Test("hardware_validation_preserves_all_fact_errors_in_order") {
     hardware := jet_target_hardware_empty()
     hardware.svd = Val(SVDProvenance{source: "", sha256: "invalid"})
-    empty :: TargetRegisterFact{name: "", offset: 18446744073709551615, width: .U64, access: .ReadWrite, volatile: true}
-    outside :: TargetRegisterFact{name: "", offset: 0, width: .U32, access: .ReadWrite, volatile: true}
+    empty: TargetRegisterFact{name: "", offset: 18446744073709551615, width: .U64, access: .ReadWrite, volatile: true}
+    outside: TargetRegisterFact{name: "", offset: 0, width: .U32, access: .ReadWrite, volatile: true}
     hardware.register_blocks = [TargetRegisterBlockFact]{
         {name: "", base: 18446744073709551615, size: ByteSize{bytes: 1}, registers: [TargetRegisterFact]{empty, outside}},
         {name: "", base: 0, size: ByteSize{bytes: 0}, registers: [TargetRegisterFact]{}},
@@ -300,7 +300,7 @@ fn target_test_provider(name: String, hash: String) -> ProviderContract Never! {
         {name: "", channel: 1, transfer_width: .U8, ownership: .Borrowed, max_transfer_bytes: Val(0)},
         {name: "", channel: 1, transfer_width: .U8, ownership: .Transfer, max_transfer_bytes: None},
     }
-    errors :: jet_target_hardware_validate(hardware, [MemoryRegion]{})
+    errors: jet_target_hardware_validate(hardware, [MemoryRegion]{})
     assert_eq(errors, [TargetMachineError]{
         .InvalidHardwareSVD{source: "", sha256: "invalid"}, .HardwareFactEmptyName{kind: "register block"},
         .RegisterBlockAddressOverflow{name: ""}, .HardwareFactEmptyName{kind: "register in ``"},
@@ -326,7 +326,7 @@ fn target_test_provider(name: String, hash: String) -> ProviderContract Never! {
     machine.scheduler = .HostedDefault
     machine.startup = .HostedDefault
     machine.byte_sink = .HostedDefault
-    errors :: jet_target_machine_validate(machine, jet_target_machine_use_default())
+    errors: jet_target_machine_validate(machine, jet_target_machine_use_default())
     assert_eq(errors, [TargetMachineError]{
         .HostedCapabilityRequiresOS{capability: "Target.MMIO"}, .HostedCapabilityRequiresOS{capability: "Time.Wall"},
         .HostedCapabilityRequiresOS{capability: "Time.Monotonic"}, .HostedCapabilityRequiresOS{capability: "Time.ZoneData"},
@@ -335,7 +335,7 @@ fn target_test_provider(name: String, hash: String) -> ProviderContract Never! {
         .HostedCapabilityRequiresOS{capability: "IO.Read"}, .HostedCapabilityRequiresOS{capability: "IO.Write"}, .HostedCapabilityRequiresOS{capability: "Panic.Report"},
     })
     machine = jet_target_machine_wasm_no_os("0.0.1")
-    invalid :: target_test_provider("", "invalid")
+    invalid: target_test_provider("", "invalid")
     machine.panic = .Report{provider: invalid}
     machine.byte_sink = .Provider{read: Val(invalid), write: Val(invalid), report: None}
     usage := jet_target_machine_use_default()
@@ -349,11 +349,11 @@ fn target_test_provider(name: String, hash: String) -> ProviderContract Never! {
 }
 
 #Test("whitespace_and_split_once_match_rust_unicode_boundaries") {
-    spaces :: [String]{"\t", "\n", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", "　"}
+    spaces: [String]{"\t", "\n", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", "　"}
     loop space in spaces -> assert(!jet_target_no_whitespace("a{space}b"))
-    ascii :: [Int]{9, 10, 11, 12, 13, 32}
+    ascii: [Int]{9, 10, 11, 12, 13, 32}
     loop code in ascii {
-        space :: String.from_bytes([U8]{U8{code}}) ?? panic("ASCII whitespace")
+        space: String.from_bytes([U8]{U8{code}}) ?? panic("ASCII whitespace")
         assert(!jet_target_no_whitespace(space))
     }
     assert(!jet_target_no_whitespace(String.from_bytes([U8]{194, 133}) ?? panic("NEL")))

@@ -1,19 +1,19 @@
 // A compile that runs compile-time code (BIG) reaps its comptime child
 // before `jet run` starts the program, so the program's own `wait()` reaps
 // only the child it forked.
-package {
+package: {
     name: "comptime_child_reaped"
     authority: { allow: [Env, Exec, IO] }
 }
 
-use sys :: core.sys
+use sys: core.sys
 
-BIG :: Float{1.0} / Float{0.0}
+BIG: Float{1.0} / Float{0.0}
 
-fn run() {
+run: fn() {
     print("big {BIG}")
     #Unsafe("fork and reap the child before returning") {
-        child :: sys.fork() ?? return
+        child: sys.fork() ?? return
         if child == 0 -> return
         print("wait status: {sys.wait() ?? return}")
     }

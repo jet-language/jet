@@ -11,34 +11,34 @@ use {
 
 // A rejected environment fact, carrying its exact user-facing message.
 #Error
-struct EnvironmentFactError {
+EnvironmentFactError: struct {
     message: String
 
-    fn new(message: String) -> EnvironmentFactError Never! {
+    new: fn(message: String) -> EnvironmentFactError Never! {
         EnvironmentFactError{message: message}
     }
 }
 
 // The largest value a Rust `u64` duration may carry; debounce arithmetic
 // saturates here.
-ENVMODEL_U64_MAX :: 18446744073709551615
-ENVMODEL_DEFAULT_DEBOUNCE_MS :: 250
+ENVMODEL_U64_MAX: 18446744073709551615
+ENVMODEL_DEFAULT_DEBOUNCE_MS: 250
 
 // ── Presets ──
 
-fn envmodel_presets_from_value(value: CtValue) -> [PresetSpec] EnvironmentFactError! {
+envmodel_presets_from_value: fn(value: CtValue) -> [PresetSpec] EnvironmentFactError! {
     presets := [PresetSpec]{}
     loop entry in envmodel_preset_entries(value) -> &presets.push(envmodel_preset_from_value(entry.name, entry.value))
     Ok(presets)
 }
 
 // One named preset declaration awaiting its record reader.
-struct EnvNamedValue {
+EnvNamedValue: struct {
     name: String
     value: CtValue
 }
 
-fn envmodel_preset_entries(value: CtValue) -> [EnvNamedValue] EnvironmentFactError! {
+envmodel_preset_entries: fn(value: CtValue) -> [EnvNamedValue] EnvironmentFactError! {
     entries := [EnvNamedValue]{}
     if value == {
         .Map(map_entries) -> {
@@ -57,8 +57,8 @@ fn envmodel_preset_entries(value: CtValue) -> [EnvNamedValue] EnvironmentFactErr
         }
         .List(values) -> {
             loop item in values {
-                fields :: envmodel_checked_struct_fields_named(item, "preset")
-                name :: envmodel_optional_string_field(fields, "name") ?? ""
+                fields: envmodel_checked_struct_fields_named(item, "preset")
+                name: envmodel_optional_string_field(fields, "name") ?? ""
                 if name.trim() == "" -> return Err(EnvironmentFactError.new("preset list entries need a non-empty `name`"))
                 &entries.push(EnvNamedValue{name: name, value: item})
             }
@@ -68,8 +68,8 @@ fn envmodel_preset_entries(value: CtValue) -> [EnvNamedValue] EnvironmentFactErr
     Ok(entries)
 }
 
-fn envmodel_preset_from_value(name: String, value: CtValue) -> PresetSpec EnvironmentFactError! {
-    fields :: envmodel_checked_struct_fields_named(value, "preset")
+envmodel_preset_from_value: fn(name: String, value: CtValue) -> PresetSpec EnvironmentFactError! {
+    fields: envmodel_checked_struct_fields_named(value, "preset")
     if envmodel_optional_string_field(fields, "name") == .Val(declared) {
         if declared != name -> return Err(EnvironmentFactError.new("preset map key `{name}` conflicts with its `name: {declared}` field"))
     }
@@ -83,24 +83,24 @@ fn envmodel_preset_from_value(name: String, value: CtValue) -> PresetSpec Enviro
 }
 
 // Preset record fields: de-duplicated and restricted to the preset vocabulary.
-fn envmodel_checked_struct_fields_named(value: CtValue, scope: String) -> [String: CtValue] EnvironmentFactError! {
-    fields :: if value == {
+envmodel_checked_struct_fields_named: fn(value: CtValue, scope: String) -> [String: CtValue] EnvironmentFactError! {
+    fields: if value == {
         .Struct(_, record_fields) -> record_fields
         else -> { return Err(EnvironmentFactError.new("{scope} entries must be typed records")) }
     }
-    unique :: envmodel_checked_unique_fields(fields, scope)
+    unique: envmodel_checked_unique_fields(fields, scope)
     envmodel_require_known_fields(unique, scope, [String]{"name", "extends", "packages", "variables", "hostname", "user"})
     Ok(unique)
 }
 
 // ── Languages ──
 
-fn envmodel_languages_from_value(value: CtValue) -> [LanguageSpec] EnvironmentFactError! {
+envmodel_languages_from_value: fn(value: CtValue) -> [LanguageSpec] EnvironmentFactError! {
     selections := [LanguageSpec]{}
     if value == {
         .Map(entries) -> {
             loop entry in entries {
-                name :: if entry.key == {
+                name: if entry.key == {
                     .Str(text) -> text
                     else -> { return Err(EnvironmentFactError.new("language maps need string language names")) }
                 }
@@ -135,23 +135,23 @@ fn envmodel_languages_from_value(value: CtValue) -> [LanguageSpec] EnvironmentFa
     Ok(unique)
 }
 
-fn envmodel_language_name(name: String) -> LanguageSpec EnvironmentFactError! {
+envmodel_language_name: fn(name: String) -> LanguageSpec EnvironmentFactError! {
     if name.trim() == "" || envmodel_language_key(name) == "" {
         return Err(EnvironmentFactError.new("language pack names cannot be empty"))
     }
     Ok(LanguageSpec{name: name, enable: true})
 }
 
-fn envmodel_language_record(name_hint: String?, value: CtValue) -> LanguageSpec EnvironmentFactError! {
-    type_name :: if value == {
+envmodel_language_record: fn(name_hint: String?, value: CtValue) -> LanguageSpec EnvironmentFactError! {
+    type_name: if value == {
         .Struct(record_type, _) -> record_type
         else -> { return Err(EnvironmentFactError.new("language selections must use typed Lang records")) }
     }
     if envmodel_last_segment(type_name) != "Lang" {
         return Err(EnvironmentFactError.new("language selection must be a Lang record, not `{type_name}`"))
     }
-    fields :: envmodel_checked_unique_fields_named(value, "language selection", [String]{"name", "enable", "version", "channel", "venv", "extra", "extras", "packages"})
-    field_name :: if fields.get("name") == {
+    fields: envmodel_checked_unique_fields_named(value, "language selection", [String]{"name", "enable", "version", "channel", "venv", "extra", "extras", "packages"})
+    field_name: if fields.get("name") == {
         .Val(raw) -> Val(envmodel_string_value(raw) ?? return Err(EnvironmentFactError.new("language selection `name` must be a string")))
         .None -> None
     }
@@ -167,18 +167,18 @@ fn envmodel_language_record(name_hint: String?, value: CtValue) -> LanguageSpec 
         }
         .None -> chosen = field_name ?? return Err(EnvironmentFactError.new("a Lang record needs a language name or a map key"))
     }
-    validated :: envmodel_language_name(chosen)
-    name :: validated.name
-    enable_value :: fields.get("enable") ?? return Err(EnvironmentFactError.new("a Lang record needs a Bool `enable` field"))
-    enable :: if enable_value == {
+    validated: envmodel_language_name(chosen)
+    name: validated.name
+    enable_value: fields.get("enable") ?? return Err(EnvironmentFactError.new("a Lang record needs a Bool `enable` field"))
+    enable: if enable_value == {
         .Bool(flag) -> flag
         else -> { return Err(EnvironmentFactError.new("Lang.enable must be Bool")) }
     }
-    version :: if fields.get("version") == {
+    version: if fields.get("version") == {
         .Val(raw) -> Val(envmodel_language_token(raw, "Lang.version"))
         .None -> None
     }
-    channel :: if fields.get("channel") == {
+    channel: if fields.get("channel") == {
         .Val(raw) -> Val(envmodel_language_token(raw, "Lang.channel"))
         .None -> None
     }
@@ -191,10 +191,10 @@ fn envmodel_language_record(name_hint: String?, value: CtValue) -> LanguageSpec 
     }
     extra_packages := [String]{}
     extra_found := false
-    aliases :: [String]{"extra", "extras", "packages"}
+    aliases: [String]{"extra", "extras", "packages"}
     loop alias in aliases {
-        raw :: fields.get(alias) ?? next
-        packages :: envmodel_list_strings_named(raw, "Lang.{alias}")
+        raw: fields.get(alias) ?? next
+        packages: envmodel_list_strings_named(raw, "Lang.{alias}")
         loop package in packages {
             if package.trim() == "" || envmodel_has_whitespace(package) -> return Err(EnvironmentFactError.new("Lang.{alias} must contain non-empty package refs"))
         }
@@ -211,8 +211,8 @@ fn envmodel_language_record(name_hint: String?, value: CtValue) -> LanguageSpec 
     Ok(LanguageSpec{name: name, enable: enable, version: version, channel: channel, venv: venv, extra_packages: extra_packages})
 }
 
-fn envmodel_language_token(value: CtValue, field: String) -> String EnvironmentFactError! {
-    token :: if value == {
+envmodel_language_token: fn(value: CtValue, field: String) -> String EnvironmentFactError! {
+    token: if value == {
         .Str(text) -> text
         .Enum(_, variant, args) && args.len() == 0 -> envmodel_last_segment(variant)
         else -> { return Err(EnvironmentFactError.new("{field} must be a string or a parameterless enum")) }
@@ -225,7 +225,7 @@ fn envmodel_language_token(value: CtValue, field: String) -> String EnvironmentF
 
 // Apply one lifecycle field to `lifecycle`. Returns false when `name` is not a
 // lifecycle field.
-fn envmodel_lifecycle_from_field(lifecycle: &EnvironmentLifecycle, name: String, value: CtValue) -> Bool EnvironmentFactError! {
+envmodel_lifecycle_from_field: fn(lifecycle: &EnvironmentLifecycle, name: String, value: CtValue) -> Bool EnvironmentFactError! {
     if name == {
         ENV_FIELD_FORMATTER -> lifecycle.formatter = Val(envmodel_formatter_from_value(value))
         "dotenv" -> lifecycle.dotenv = envmodel_dotenv_from_value(value)
@@ -245,20 +245,20 @@ fn envmodel_lifecycle_from_field(lifecycle: &EnvironmentLifecycle, name: String,
 // Parse the one-package formatter fact. `pkgs.nixfmt` is the ratified
 // spelling and names the public Jetpack source; an explicit `name@source`
 // remains the same typed package reference used by `packages:`.
-fn envmodel_formatter_from_value(value: CtValue) -> FormatterSpec EnvironmentFactError! {
-    raw :: envmodel_string_value(value) ?? return Err(EnvironmentFactError.new("formatter must be one typed package reference"))
-    normalized :: if raw.starts_with("pkgs.") -> "{REF_SOURCE_JETPACK}.{raw.removeprefix("pkgs.")}" else -> raw
-    packages :: Pkg.parse_list(normalized)
+envmodel_formatter_from_value: fn(value: CtValue) -> FormatterSpec EnvironmentFactError! {
+    raw: envmodel_string_value(value) ?? return Err(EnvironmentFactError.new("formatter must be one typed package reference"))
+    normalized: if raw.starts_with("pkgs.") -> "{REF_SOURCE_JETPACK}.{raw.removeprefix("pkgs.")}" else -> raw
+    packages: Pkg.parse_list(normalized)
     if packages.len() != 1 -> return Err(EnvironmentFactError.new("formatter must contain exactly one package reference"))
-    package :: envmodel_pkg_ref(packages[0])
+    package: envmodel_pkg_ref(packages[0])
     if package == "" || package.starts_with("@") || envmodel_has_whitespace(package) {
         return Err(EnvironmentFactError.new("formatter must be one non-empty package reference"))
     }
     Ok(FormatterSpec{package: package})
 }
 
-fn envmodel_git_hooks_path_from_value(value: CtValue) -> String EnvironmentFactError! {
-    path :: envmodel_string_value(value) ?? return Err(EnvironmentFactError.new("git_hooks_path must be a string"))
+envmodel_git_hooks_path_from_value: fn(value: CtValue) -> String EnvironmentFactError! {
+    path: envmodel_string_value(value) ?? return Err(EnvironmentFactError.new("git_hooks_path must be a string"))
     if !envmodel_relative_path_is_valid(path, true) {
         return Err(EnvironmentFactError.new("git_hooks_path must be a non-empty project-relative path without `..`"))
     }
@@ -268,24 +268,24 @@ fn envmodel_git_hooks_path_from_value(value: CtValue) -> String EnvironmentFactE
 // Parse both `dotenv: [".env"]` and the expert record form
 // `dotenv: Dotenv{ file: ".env", allow: ["PORT"], secrets: ["TOKEN"] }`. The
 // shape is closed and validated; the result is ordered by file.
-fn envmodel_dotenv_from_value(value: CtValue) -> [DotenvSpec] EnvironmentFactError! {
-    values :: if value == {
+envmodel_dotenv_from_value: fn(value: CtValue) -> [DotenvSpec] EnvironmentFactError! {
+    values: if value == {
         .Str(_) | .Struct(_, _) -> [CtValue]{value}
         .List(items) -> items
         else -> { return Err(EnvironmentFactError.new("dotenv must be a list of files or Dotenv records")) }
     }
     specs := [DotenvSpec]{}
     loop item in values {
-        spec :: if item == {
+        spec: if item == {
             .Str(file) -> DotenvSpec{file: file}
             else -> {
-                fields :: envmodel_checked_dotenv_fields(item)
-                file :: envmodel_optional_string_field(fields, "file") ?? return Err(EnvironmentFactError.new("a Dotenv record needs a string `file`"))
-                allow :: if fields.get("allow") == {
+                fields: envmodel_checked_dotenv_fields(item)
+                file: envmodel_optional_string_field(fields, "file") ?? return Err(EnvironmentFactError.new("a Dotenv record needs a string `file`"))
+                allow: if fields.get("allow") == {
                     .Val(raw) -> envmodel_dotenv_names(raw)
                     .None -> [String]{}
                 }
-                secrets :: if fields.get("secrets") == {
+                secrets: if fields.get("secrets") == {
                     .Val(raw) -> envmodel_dotenv_names(raw)
                     .None -> [String]{}
                 }
@@ -309,7 +309,7 @@ fn envmodel_dotenv_from_value(value: CtValue) -> [DotenvSpec] EnvironmentFactErr
     Ok(ordered)
 }
 
-fn envmodel_validate_dotenv_spec(spec: DotenvSpec) EnvironmentFactError! {
+envmodel_validate_dotenv_spec: fn(spec: DotenvSpec) EnvironmentFactError! {
     if !envmodel_normal_project_path(spec.file) {
         return Err(EnvironmentFactError.new("dotenv file `{spec.file}` must stay inside the project"))
     }
@@ -328,12 +328,12 @@ fn envmodel_validate_dotenv_spec(spec: DotenvSpec) EnvironmentFactError! {
 
 // Dotenv record fields: de-duplicated and restricted to `file`, `allow`, and
 // `secrets`.
-fn envmodel_checked_dotenv_fields(value: CtValue) -> [String: CtValue] EnvironmentFactError! {
-    fields :: if value == {
+envmodel_checked_dotenv_fields: fn(value: CtValue) -> [String: CtValue] EnvironmentFactError! {
+    fields: if value == {
         .Struct(_, record_fields) -> record_fields
         else -> { return Err(EnvironmentFactError.new("dotenv entries must be strings or Dotenv records")) }
     }
-    deduped :: envmodel_dedupe_fields(fields)
+    deduped: envmodel_dedupe_fields(fields)
     if deduped.conflict == .Val(name) -> return Err(EnvironmentFactError.new("Dotenv field `{name}` is declared with conflicting values"))
     loop name in envmodel_sorted_keys(deduped.fields) {
         if name == {
@@ -344,8 +344,8 @@ fn envmodel_checked_dotenv_fields(value: CtValue) -> [String: CtValue] Environme
     Ok(deduped.fields)
 }
 
-fn envmodel_dotenv_names(value: CtValue) -> [String] EnvironmentFactError! {
-    values :: if value == {
+envmodel_dotenv_names: fn(value: CtValue) -> [String] EnvironmentFactError! {
+    values: if value == {
         .List(items) -> items
         else -> { return Err(EnvironmentFactError.new("Dotenv `allow` and `secrets` must be lists of strings")) }
     }
@@ -355,10 +355,10 @@ fn envmodel_dotenv_names(value: CtValue) -> [String] EnvironmentFactError! {
 }
 
 // `[A-Za-z_][A-Za-z0-9_]*`
-fn envmodel_valid_env_name(name: String) -> Bool Never! {
-    raw :: name.bytes()
+envmodel_valid_env_name: fn(name: String) -> Bool Never! {
+    raw: name.bytes()
     if raw.len() == 0 -> return false
-    first :: Int.from_u8(raw[0])
+    first: Int.from_u8(raw[0])
     if !pkg_bytes_is_word(first) || (first >= 48 && first <= 57) -> return false
     loop byte in raw {
         if !pkg_bytes_is_word(Int.from_u8(byte)) -> return false
@@ -368,14 +368,14 @@ fn envmodel_valid_env_name(name: String) -> Bool Never! {
 
 // ── Hooks and reload ──
 
-fn envmodel_hooks_from_value(prefix: String, value: CtValue) -> [HookSpec] EnvironmentFactError! {
-    values :: if value == {
+envmodel_hooks_from_value: fn(prefix: String, value: CtValue) -> [HookSpec] EnvironmentFactError! {
+    values: if value == {
         .List(items) -> items
         else -> { return Err(EnvironmentFactError.new("{prefix} must be a list of commands or hook records")) }
     }
     hooks := [HookSpec]{}
     loop index in 0..<values.len() {
-        item :: values[index]
+        item: values[index]
         if envmodel_string_value(item) == .Val(job) {
             if !envmodel_valid_task_name(job) {
                 return Err(EnvironmentFactError.new("{prefix}[{index}] must name a declared #Job; arbitrary commands need a trusted hook record"))
@@ -383,16 +383,16 @@ fn envmodel_hooks_from_value(prefix: String, value: CtValue) -> [HookSpec] Envir
             &hooks.push(HookSpec{name: "{prefix}.{index}", action: HookAction.Task(job)})
             next
         }
-        fields :: envmodel_checked_unique_fields_named(item, "{prefix}[{index}]", [String]{"name", "command", "cwd", "trusted"})
-        command :: envmodel_optional_string_field(fields, "command") ?? ""
+        fields: envmodel_checked_unique_fields_named(item, "{prefix}[{index}]", [String]{"name", "command", "cwd", "trusted"})
+        command: envmodel_optional_string_field(fields, "command") ?? ""
         if command.trim() == "" -> return Err(EnvironmentFactError.new("{prefix}[{index}] needs a non-empty string `command`"))
         name := "{prefix}.{index}"
         if fields.get("name") == .Val(raw) {
             name = envmodel_string_value(raw) ?? return Err(EnvironmentFactError.new("{prefix}[{index}].name must be a string"))
         }
-        cwd :: if fields.get("cwd") == {
+        cwd: if fields.get("cwd") == {
             .Val(raw) -> {
-                directory :: envmodel_string_value(raw) ?? return Err(EnvironmentFactError.new("{prefix}[{index}].cwd must be a string"))
+                directory: envmodel_string_value(raw) ?? return Err(EnvironmentFactError.new("{prefix}[{index}].cwd must be a string"))
                 if !envmodel_contained_path(directory) -> return Err(EnvironmentFactError.new("{prefix}[{index}].cwd must stay inside the project"))
                 Val(directory)
             }
@@ -411,11 +411,11 @@ fn envmodel_hooks_from_value(prefix: String, value: CtValue) -> [HookSpec] Envir
 }
 
 // A `#Job` name: `[A-Za-z_][A-Za-z0-9_]*`.
-fn envmodel_valid_task_name(name: String) -> Bool Never! {
+envmodel_valid_task_name: fn(name: String) -> Bool Never! {
     envmodel_valid_env_name(name)
 }
 
-fn envmodel_reload_from_value(value: CtValue) -> ReloadPolicy EnvironmentFactError! {
+envmodel_reload_from_value: fn(value: CtValue) -> ReloadPolicy EnvironmentFactError! {
     if value == {
         .Enum(_, variant, args) -> {
             if envmodel_last_segment(variant) == {
@@ -426,12 +426,12 @@ fn envmodel_reload_from_value(value: CtValue) -> ReloadPolicy EnvironmentFactErr
             }
         }
         .Struct(_, _) -> {
-            fields :: envmodel_checked_unique_fields_named(value, "reload", [String]{"watch", "debounce"})
-            paths :: if fields.get("watch") == {
+            fields: envmodel_checked_unique_fields_named(value, "reload", [String]{"watch", "debounce"})
+            paths: if fields.get("watch") == {
                 .Val(raw) -> envmodel_reload_paths(raw)
                 .None -> [String]{}
             }
-            debounce_ms :: if fields.get("debounce") == {
+            debounce_ms: if fields.get("debounce") == {
                 .Val(raw) -> envmodel_duration_ms(raw)
                 .None -> ENVMODEL_DEFAULT_DEBOUNCE_MS
             }
@@ -449,7 +449,7 @@ fn envmodel_reload_from_value(value: CtValue) -> ReloadPolicy EnvironmentFactErr
     }
 }
 
-fn envmodel_reload_watch_from_args(args: [CtEnumArg]) -> ReloadPolicy EnvironmentFactError! {
+envmodel_reload_watch_from_args: fn(args: [CtEnumArg]) -> ReloadPolicy EnvironmentFactError! {
     paths := [String]{}
     debounce_ms := ENVMODEL_DEFAULT_DEBOUNCE_MS
     loop arg in args {
@@ -472,15 +472,15 @@ fn envmodel_reload_watch_from_args(args: [CtEnumArg]) -> ReloadPolicy Environmen
     Ok(ReloadPolicy.Watch{paths: paths, debounce_ms: debounce_ms})
 }
 
-fn envmodel_is_list(value: CtValue) -> Bool Never! {
+envmodel_is_list: fn(value: CtValue) -> Bool Never! {
     if value == {
         .List(_) -> true
         else -> false
     }
 }
 
-fn envmodel_reload_paths(value: CtValue) -> [String] EnvironmentFactError! {
-    paths :: envmodel_list_strings_named(value, "reload.watch")
+envmodel_reload_paths: fn(value: CtValue) -> [String] EnvironmentFactError! {
+    paths: envmodel_list_strings_named(value, "reload.watch")
     loop path in paths {
         if !envmodel_contained_path(path) -> return Err(EnvironmentFactError.new("reload.watch path `{path}` must stay inside the project"))
     }
@@ -489,51 +489,51 @@ fn envmodel_reload_paths(value: CtValue) -> [String] EnvironmentFactError! {
 
 // A positive duration in milliseconds: a bare Int, a `Seconds{value: n}`-style
 // record, or a `Seconds(n)`-style enum. Arithmetic saturates at `u64::MAX`.
-fn envmodel_duration_ms(value: CtValue) -> Int EnvironmentFactError! {
-    raw :: if value == {
+envmodel_duration_ms: fn(value: CtValue) -> Int EnvironmentFactError! {
+    raw: if value == {
         .Int(number) -> envmodel_positive_u64(number)
         .Struct(type_name, fields) -> {
-            unique :: envmodel_checked_unique_fields(fields, "duration")
-            chosen :: if unique.get("value") != None -> unique.get("value") else -> unique.get("milliseconds")
+            unique: envmodel_checked_unique_fields(fields, "duration")
+            chosen: if unique.get("value") != None -> unique.get("value") else -> unique.get("milliseconds")
             envmodel_duration_scaled(envmodel_last_segment(type_name), chosen)
         }
         .Enum(_, variant, args) -> {
-            first :: if args.len() > 0 -> Val(args[0].value) else -> None
+            first: if args.len() > 0 -> Val(args[0].value) else -> None
             envmodel_duration_scaled(envmodel_last_segment(variant), first)
         }
         else -> None
     }
-    milliseconds :: raw ?? return Err(EnvironmentFactError.new("reload debounce must be a positive duration"))
+    milliseconds: raw ?? return Err(EnvironmentFactError.new("reload debounce must be a positive duration"))
     if milliseconds <= 0 -> return Err(EnvironmentFactError.new("reload debounce must be a positive duration"))
     Ok(milliseconds)
 }
 
-fn envmodel_positive_u64(number: Int) -> Int? Never! {
+envmodel_positive_u64: fn(number: Int) -> Int? Never! {
     if number > 0 && number <= ENVMODEL_U64_MAX -> return Val(number)
     None
 }
 
-fn envmodel_duration_scaled(unit: String, value: CtValue?) -> Int? Never! {
-    raw :: value ?? return None
-    amount :: if raw == {
+envmodel_duration_scaled: fn(unit: String, value: CtValue?) -> Int? Never! {
+    raw: value ?? return None
+    amount: if raw == {
         .Int(number) -> envmodel_positive_u64(number) ?? return None
         else -> { return None }
     }
-    factor :: if unit == {
+    factor: if unit == {
         "Seconds" | "Second" -> 1000
         "Minutes" | "Minute" -> 60000
         "Hours" | "Hour" -> 3600000
         else -> 1
     }
-    scaled :: amount * factor
+    scaled: amount * factor
     if scaled > ENVMODEL_U64_MAX -> return Val(ENVMODEL_U64_MAX)
     Val(scaled)
 }
 
 // ── Shared record and list readers ──
 
-fn envmodel_list_strings_named(value: CtValue, scope: String) -> [String] EnvironmentFactError! {
-    values :: if value == {
+envmodel_list_strings_named: fn(value: CtValue, scope: String) -> [String] EnvironmentFactError! {
+    values: if value == {
         .List(items) -> items
         else -> { return Err(EnvironmentFactError.new("{scope} must be a list of strings")) }
     }
@@ -542,20 +542,20 @@ fn envmodel_list_strings_named(value: CtValue, scope: String) -> [String] Enviro
     Ok(strings)
 }
 
-fn envmodel_env_names_named(value: CtValue, scope: String) -> [String] EnvironmentFactError! {
-    names :: envmodel_list_strings_named(value, scope)
+envmodel_env_names_named: fn(value: CtValue, scope: String) -> [String] EnvironmentFactError! {
+    names: envmodel_list_strings_named(value, scope)
     loop name in names {
         if !envmodel_valid_env_name(name) -> return Err(EnvironmentFactError.new("{scope} variable '{name}' is not a valid environment name"))
     }
     Ok(names)
 }
 
-fn envmodel_string_map_named(value: CtValue, scope: String) -> [String: String] EnvironmentFactError! {
+envmodel_string_map_named: fn(value: CtValue, scope: String) -> [String: String] EnvironmentFactError! {
     pairs := [EnvNamedValue]{}
     if value == {
         .Map(entries) -> {
             loop entry in entries {
-                key :: if entry.key == {
+                key: if entry.key == {
                     .Str(text) -> text
                     else -> { return Err(EnvironmentFactError.new("{scope} keys must be strings")) }
                 }
@@ -575,31 +575,31 @@ fn envmodel_string_map_named(value: CtValue, scope: String) -> [String: String] 
     Ok(result)
 }
 
-fn envmodel_optional_string_named(fields: [String: CtValue], name: String, scope: String) -> String? EnvironmentFactError! {
-    raw :: fields.get(name) ?? return Ok(None)
+envmodel_optional_string_named: fn(fields: [String: CtValue], name: String, scope: String) -> String? EnvironmentFactError! {
+    raw: fields.get(name) ?? return Ok(None)
     Ok(Val(envmodel_string_value(raw) ?? return Err(EnvironmentFactError.new("{scope} must be a string"))))
 }
 
-fn envmodel_string_value(value: CtValue) -> String? Never! {
+envmodel_string_value: fn(value: CtValue) -> String? Never! {
     if value == {
         .Str(text) -> Val(text)
         else -> None
     }
 }
 
-fn envmodel_optional_string_field(fields: [String: CtValue], name: String) -> String? Never! {
-    raw :: fields.get(name) ?? return None
+envmodel_optional_string_field: fn(fields: [String: CtValue], name: String) -> String? Never! {
+    raw: fields.get(name) ?? return None
     envmodel_string_value(raw)
 }
 
 // Record fields keyed by name. A repeated name must repeat the same value;
 // `conflict` names the first one that does not.
-struct EnvFieldDedupe {
+EnvFieldDedupe: struct {
     fields: [String: CtValue]
     conflict: String?
 }
 
-fn envmodel_dedupe_fields(fields: [NamedCtValue]) -> EnvFieldDedupe Never! {
+envmodel_dedupe_fields: fn(fields: [NamedCtValue]) -> EnvFieldDedupe Never! {
     result := [String: CtValue]{}
     loop field in fields {
         if result.get(field.name) == {
@@ -612,24 +612,24 @@ fn envmodel_dedupe_fields(fields: [NamedCtValue]) -> EnvFieldDedupe Never! {
     EnvFieldDedupe{fields: result, conflict: None}
 }
 
-fn envmodel_checked_unique_fields(fields: [NamedCtValue], scope: String) -> [String: CtValue] EnvironmentFactError! {
-    deduped :: envmodel_dedupe_fields(fields)
+envmodel_checked_unique_fields: fn(fields: [NamedCtValue], scope: String) -> [String: CtValue] EnvironmentFactError! {
+    deduped: envmodel_dedupe_fields(fields)
     if deduped.conflict == .Val(name) -> return Err(EnvironmentFactError.new("{scope}.{name} is declared with conflicting values"))
     Ok(deduped.fields)
 }
 
-fn envmodel_checked_unique_fields_named(value: CtValue, scope: String, allowed: [String]) -> [String: CtValue] EnvironmentFactError! {
-    fields :: if value == {
+envmodel_checked_unique_fields_named: fn(value: CtValue, scope: String, allowed: [String]) -> [String: CtValue] EnvironmentFactError! {
+    fields: if value == {
         .Struct(_, record_fields) -> record_fields
         else -> { return Err(EnvironmentFactError.new("{scope} must be a typed record")) }
     }
-    unique :: envmodel_checked_unique_fields(fields, scope)
+    unique: envmodel_checked_unique_fields(fields, scope)
     envmodel_require_known_fields(unique, scope, allowed)
     Ok(unique)
 }
 
 // The first field outside `allowed`, in field-name order, is rejected.
-fn envmodel_require_known_fields(fields: [String: CtValue], scope: String, allowed: [String]) EnvironmentFactError! {
+envmodel_require_known_fields: fn(fields: [String: CtValue], scope: String, allowed: [String]) EnvironmentFactError! {
     loop name in envmodel_sorted_keys(fields) {
         if !allowed.contains(name) -> return Err(EnvironmentFactError.new("unknown {scope} field `{name}`"))
     }
@@ -637,24 +637,24 @@ fn envmodel_require_known_fields(fields: [String: CtValue], scope: String, allow
 
 // ── Shared text and path helpers ──
 
-fn envmodel_sorted_keys<V>(map: [String: V]) -> [String] Never! {
+envmodel_sorted_keys: fn<V>(map: [String: V]) -> [String] Never! {
     names := map.keys().to_list()
     &names.sort()
     names
 }
 
-fn envmodel_push_labeled(lines: &[String], label: String, values: [String]) {
+envmodel_push_labeled: fn(lines: &[String], label: String, values: [String]) {
     loop value in values -> &lines.push("{label}={value}\n")
 }
 
-fn envmodel_any_blank(values: [String]) -> Bool Never! {
+envmodel_any_blank: fn(values: [String]) -> Bool Never! {
     loop value in values {
         if value.trim() == "" -> return true
     }
     false
 }
 
-fn envmodel_optional_is(value: String?, expected: String) -> Bool Never! {
+envmodel_optional_is: fn(value: String?, expected: String) -> Bool Never! {
     if value == {
         .Val(candidate) -> candidate == expected
         .None -> false
@@ -662,13 +662,13 @@ fn envmodel_optional_is(value: String?, expected: String) -> Bool Never! {
 }
 
 // The text after the last `.` (the whole text when there is none).
-fn envmodel_last_segment(text: String) -> String Never! {
-    parts :: text.cut_last(".") ?? return text
+envmodel_last_segment: fn(text: String) -> String Never! {
+    parts: text.cut_last(".") ?? return text
     parts.after
 }
 
-fn envmodel_has_whitespace(text: String) -> Bool Never! {
-    raw :: text.bytes()
+envmodel_has_whitespace: fn(text: String) -> Bool Never! {
+    raw: text.bytes()
     loop index in 0..<raw.len() {
         if pkg_bytes_space_width(raw, index) > 0 -> return true
     }
@@ -677,19 +677,19 @@ fn envmodel_has_whitespace(text: String) -> Bool Never! {
 
 // One component of a Unix path as `std::path::Path::components` yields it:
 // separators collapse, `.` survives only as the leading component.
-enum EnvPathComponent {
+EnvPathComponent: enum {
     Root
     CurDir
     ParentDir
     Normal(String)
 }
 
-fn envmodel_path_components(path: String) -> [EnvPathComponent] Never! {
+envmodel_path_components: fn(path: String) -> [EnvPathComponent] Never! {
     components := [EnvPathComponent]{}
     if path.starts_with("/") -> &components.push(EnvPathComponent.Root)
-    segments :: path.split("/").to_list()
+    segments: path.split("/").to_list()
     loop index in 0..<segments.len() {
-        segment :: segments[index]
+        segment: segments[index]
         if {
             segment == "" -> {}
             segment == "." -> {
@@ -703,7 +703,7 @@ fn envmodel_path_components(path: String) -> [EnvPathComponent] Never! {
 }
 
 // A non-empty relative path without `..`; `.` only when `allow_dot`.
-fn envmodel_relative_path_is_valid(value: String, allow_dot: Bool) -> Bool Never! {
+envmodel_relative_path_is_valid: fn(value: String, allow_dot: Bool) -> Bool Never! {
     if value == "" || value.starts_with("/") -> return false
     loop component in envmodel_path_components(value) {
         if component == {
@@ -718,13 +718,13 @@ fn envmodel_relative_path_is_valid(value: String, allow_dot: Bool) -> Bool Never
 }
 
 // A non-empty relative path with no `..` component (hook cwd, reload paths).
-fn envmodel_contained_path(value: String) -> Bool Never! {
+envmodel_contained_path: fn(value: String) -> Bool Never! {
     envmodel_relative_path_is_valid(value, true)
 }
 
 // A project path made only of normal components: relative, no `.`/`..`, no
 // `\`, `:`, or control characters.
-fn envmodel_normal_project_path(value: String) -> Bool Never! {
+envmodel_normal_project_path: fn(value: String) -> Bool Never! {
     if value == "" || value.starts_with("/") || value.contains("\\") || value.contains(":") || pkg_text_has_control(value) -> return false
     loop component in envmodel_path_components(value) {
         if component == {

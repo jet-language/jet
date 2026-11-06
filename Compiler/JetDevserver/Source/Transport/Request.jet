@@ -1,17 +1,17 @@
 use {
-    devserver_http :: core.http
+    devserver_http: core.http
     core.http.[HTTPError, HTTPRequest, Headers]
-    devserver_files :: core.files
-    devserver_text :: core.text
+    devserver_files: core.files
+    devserver_text: core.text
 }
 
-MAX_REQUEST_BODY_BYTES :: 1048576
-MAX_REQUEST_LINE_BYTES :: 8192
-MAX_REQUEST_HEADER_BYTES :: 32768
-MAX_REQUEST_HEADER_COUNT :: 100
+MAX_REQUEST_BODY_BYTES: 1048576
+MAX_REQUEST_LINE_BYTES: 8192
+MAX_REQUEST_HEADER_BYTES: 32768
+MAX_REQUEST_HEADER_COUNT: 100
 
 #Error
-enum DevserverTransportError {
+DevserverTransportError: enum {
     CoreHTTP(error: HTTPError)
     InvalidData(message: String)
     Net(error: NetError)
@@ -25,7 +25,7 @@ enum DevserverTransportError {
 // projection (duplicate Host/conflicting Content-Length/Transfer-Encoding).
 // Foundation Execution/WatchPolicy.jet owns WatchPolicy/watch_policy_from;
 // devserver consumers import that canonical package API, never a local enum.
-struct DevserverRequest {
+DevserverRequest: struct {
     method: String
     target: String
     headers: [String:String]
@@ -36,20 +36,20 @@ struct DevserverRequest {
     // Core's parse_request checks the 1 MiB body cap before it slices the body
     // and keeps that one slice as the wire bytes (#4428). Keep Core's canonical
     // error; never repair a framing gap with a Tools parser fork.
-    fn read(raw: [U8]) -> DevserverRequest? DevserverTransportError! {
+    read: fn(raw: [U8]) -> DevserverRequest? DevserverTransportError! {
         if raw.len() == 0 -> return Ok(None)
-        parsed :: devserver_http.parse_request(raw) ?? return Err(.CoreHTTP{error: err})
-        request :: DevserverRequest.from_http(parsed)
+        parsed: devserver_http.parse_request(raw) ?? return Err(.CoreHTTP{error: err})
+        request: DevserverRequest.from_http(parsed)
         Ok(Val(request))
     }
 
     // #4436 native integration gate: HTTPRequest.headers currently lacks its
     // checked IR owner type. Keep the real carrier API, not a local mirror.
-    fn from_http(parsed: HTTPRequest) -> DevserverRequest DevserverTransportError! {
-        headers :: devserver_request_headers(parsed.headers)
+    from_http: fn(parsed: HTTPRequest) -> DevserverRequest DevserverTransportError! {
+        headers: devserver_request_headers(parsed.headers)
         // #4428: Core keeps the wire body as bytes, so a binary upload arrives
         // byte for byte. The adapter never coerces bytes into text.
-        body :: devserver_http.body_as_bytes(parsed.body)
+        body: devserver_http.body_as_bytes(parsed.body)
         Ok(DevserverRequest{method: parsed.method, target: parsed.path, headers: headers, body: body})
     }
 }
@@ -60,11 +60,11 @@ struct DevserverRequest {
 // #4438: native Core.Headers currently lowers to JetHTTPHeaders{entries},
 // whereas its public source field is fields. Header policy proof awaits that
 // carrier repair; no Tools-local carrier or textual reparse substitutes for it.
-fn devserver_request_headers(parsed: Headers) -> [String:String] DevserverTransportError! {
+devserver_request_headers: fn(parsed: Headers) -> [String:String] DevserverTransportError! {
     headers := [String:String]{}
     loop field in parsed.fields {
-        name :: devserver_text.lower(field.name) // valid HTTP names are ASCII
-        security :: name == "authorization" || name == "content-length" || name == "host" || name == "origin" || name == "transfer-encoding"
+        name: devserver_text.lower(field.name) // valid HTTP names are ASCII
+        security: name == "authorization" || name == "content-length" || name == "host" || name == "origin" || name == "transfer-encoding"
         if security && headers.has_key(name) -> return Err(.InvalidData{message: "duplicate devserver security header"})
         if name == "transfer-encoding" -> return Err(.InvalidData{message: "devserver does not accept transfer-encoded requests"})
         headers[name] = field.value
@@ -74,8 +74,8 @@ fn devserver_request_headers(parsed: Headers) -> [String:String] DevserverTransp
 
 // Provider metadata, not a clock/read-content surrogate. Core exposes the OS
 // modification stamp in milliseconds; failures are None.
-fn devserver_file_mtime(path: String) -[FS.Read]> Int? Never! {
-    metadata :: devserver_files.stat(path) ?? return None
+devserver_file_mtime: fn(path: String) -[FS.Read]> Int? Never! {
+    metadata: devserver_files.stat(path) ?? return None
     Val(metadata.modified_ms)
 }
 
@@ -84,7 +84,7 @@ fn devserver_file_mtime(path: String) -[FS.Read]> Int? Never! {
 // The public tolerant/lossy value decoder and query_param composition are
 // gated by ballot #4428. Neither bounded query_decode nor strict URL decoding
 // is an equivalent substitute; query names must never be decoded.
-fn devserver_query_param_raw_value(target: String, key: String) -> String? Never! {
+devserver_query_param_raw_value: fn(target: String, key: String) -> String? Never! {
     if !target.contains("?") -> return None
     loop part in target.after("?").split("&") {
         if part.contains("=") {

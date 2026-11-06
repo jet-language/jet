@@ -20,9 +20,9 @@ function staticBytes(body) {
 // A literal is either one static text (`<name>_text`) or little-endian
 // signed I64 word rows.
 export function trapLiteral(name) {
-    const text = traps.match(new RegExp(`^fn ${name}_text\\(\\) -> I64 \\{ ${STATIC.source} \\}$`, 'm'))?.[1];
+    const text = traps.match(new RegExp(`^${name}_text: fn\\(\\) -> I64 \\{ ${STATIC.source} \\}$`, 'm'))?.[1];
     if (text !== undefined) return staticBytes(text);
-    const body = traps.match(new RegExp(`^fn ${name}\\(\\) \\{\\n([\\s\\S]*?)^\\}`, 'm'))?.[1];
+    const body = traps.match(new RegExp(`^${name}: fn\\(\\) \\{\\n([\\s\\S]*?)^\\}`, 'm'))?.[1];
     if (!body) throw Error(`missing frozen trap literal ${name}`);
     const bytes = [];
     for (const row of body.matchAll(/trap_write_word\(I64\{(-?\d+)\}, I64\{(\d+)\}\)/g)) {
@@ -33,7 +33,7 @@ export function trapLiteral(name) {
 }
 
 export function schedulerLiteral(name) {
-    const body = scheduler.match(new RegExp(`^fn ${name}\\(\\) -> I64 \\{\\n([\\s\\S]*?)^\\}`, 'm'))?.[1];
+    const body = scheduler.match(new RegExp(`^${name}: fn\\(\\) -> I64 \\{\\n([\\s\\S]*?)^\\}`, 'm'))?.[1];
     const length = body?.match(/scheduler_text_new\(I64\{(\d+)\}\)/)?.[1];
     const text = body?.match(STATIC)?.[1];
     if (length === undefined || text === undefined) throw Error(`missing frozen scheduler literal ${name}`);

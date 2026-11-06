@@ -1,17 +1,17 @@
 #Error
-struct WorkerError {
+WorkerError: struct {
     message: String
 }
-struct Value {
+Value: struct {
     id: String
 }
-fn inner() -> Bool WorkerError! {
+inner: fn() -> Bool WorkerError! {
     return Err(WorkerError{message: "inner"})
 }
-fn fail_after(error: WorkerError) -> Value WorkerError! {
+fail_after: fn(error: WorkerError) -> Value WorkerError! {
     return Err(error)
 }
-fn checked() -> Value WorkerError! {
+checked: fn() -> Value WorkerError! {
     inner() ?? {
         return fail_after(err)
     }

@@ -1,30 +1,30 @@
 
 #Error
-struct ListWasEmpty {
+ListWasEmpty: struct {
     message: String
 }
 
 #Error
-struct BadNumStr {
+BadNumStr: struct {
     message: String
 }
 
-fn first(xs: [String]) -> String ListWasEmpty! {
+first: fn(xs: [String]) -> String ListWasEmpty! {
     if xs.is_empty() -> return Err(ListWasEmpty{message: "empty"})
     Ok(xs[0])
 }
 
-fn to_num(s: String) -> Int BadNumStr! {
+to_num: fn(s: String) -> Int BadNumStr! {
     s.to_int() ?? return Err(BadNumStr{message: "nan"})
 }
 
-fn increment_first(xs: [String]) -> Int (ListWasEmpty | BadNumStr)! {
-    s :: first(xs)
-    n :: to_num(s)
+increment_first: fn(xs: [String]) -> Int (ListWasEmpty | BadNumStr)! {
+    s: first(xs)
+    n: to_num(s)
     Ok(n + 1)
 }
 
-fn run() {
+run: fn() {
     loop xs in [["41"], [], ["x"]] {
         if increment_first(xs) == {
             .Ok(n) -> print(n)

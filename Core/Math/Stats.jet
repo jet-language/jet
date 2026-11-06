@@ -1,6 +1,6 @@
 use {
-    math :: core.math
-    random :: core.math.random
+    math: core.math
+    random: core.math.random
 }
 
 // core.math.stats — descriptive statistics in exact Int / software Float.
@@ -11,17 +11,17 @@ use {
 // for invalid dimensions/parameters. Ties in mode and rank preserve the
 // first-seen order. Random KDE sampling carries the explicit Rand effect.
 
-struct SlopeIntercept {
+SlopeIntercept: struct {
     slope: Float
     intercept: Float
 }
 
-struct NormalDist {
+NormalDist: struct {
     mu: Float
     sigma: Float
 }
 
-struct CovarianceTerms {
+CovarianceTerms: struct {
     x_scale: Float
     y_scale: Float
     sx: Float
@@ -31,52 +31,52 @@ struct CovarianceTerms {
     xy: Float
 }
 
-struct CentralTerms {
+CentralTerms: struct {
     n: Int
     s2: Float
     s3: Float
     s4: Float
 }
 
-fn nonfinite(value: Float) -> Bool Never! {
+nonfinite: fn(value: Float) -> Bool Never! {
     if math.is_finite(value) -> return false
     true
 }
-fn abs_value(value: Float) -> Float Never! {
+abs_value: fn(value: Float) -> Float Never! {
     if value < (Float{0.0}) -> return Float{0.0} - value
     value
 }
-fn sqrt_value(value: Float) -> Float Never! {
+sqrt_value: fn(value: Float) -> Float Never! {
     math.sqrt(value)
 }
-fn ln_value(value: Float) -> Float Never! {
+ln_value: fn(value: Float) -> Float Never! {
     math.ln(value)
 }
-fn exp_value(value: Float) -> Float Never! {
+exp_value: fn(value: Float) -> Float Never! {
     math.exp(value)
 }
 
-fn valid_sample(xs: [Float]) -> Bool Never! {
+valid_sample: fn(xs: [Float]) -> Bool Never! {
     loop x in xs {
         if nonfinite(x) -> return false
     }
     true
 }
-fn invalid_sample(xs: [Float]) -> Bool Never! {
+invalid_sample: fn(xs: [Float]) -> Bool Never! {
     if valid_sample(xs) -> return false
     true
 }
 
-fn copy_floats(xs: [Float]) -> [Float] Never! {
+copy_floats: fn(xs: [Float]) -> [Float] Never! {
     out := [Float]{}
     loop x in xs -> &out.push(x)
     out
 }
-fn stable_mean(xs: [Float]) -> Float? {
+stable_mean: fn(xs: [Float]) -> Float? {
     if xs.len() == 0 || invalid_sample(xs) -> return None
     scale := Float{0.0}
     loop x in xs {
-        magnitude :: abs_value(x)
+        magnitude: abs_value(x)
         if magnitude > scale -> scale = magnitude
     }
     if scale <= (Float{0.0}) -> return Val(Float{0.0})
@@ -86,7 +86,7 @@ fn stable_mean(xs: [Float]) -> Float? {
 }
 
 
-fn compensated_sum(xs: [Float]) -> Float Never! {
+compensated_sum: fn(xs: [Float]) -> Float Never! {
     acc := Float{0.0}
     correction := Float{0.0}
     positive_inf := false
@@ -98,7 +98,7 @@ fn compensated_sum(xs: [Float]) -> Float Never! {
             next
         }
         if math.is_inf(acc) -> next
-        t :: acc + x
+        t: acc + x
         if abs_value(acc) >= abs_value(x) {
             correction = correction + ((acc - t) + x)
         } else {
@@ -112,26 +112,26 @@ fn compensated_sum(xs: [Float]) -> Float Never! {
     acc + correction
 }
 
-fn sift_down(xs: &[Float], start: Int, end: Int) Never! {
+sift_down: fn(xs: &[Float], start: Int, end: Int) Never! {
     root := start
     loop {
-        child :: root * 2 + 1
+        child: root * 2 + 1
         if child > end -> return
         candidate := root
         if xs[candidate] < xs[child] -> candidate = child
-        right :: child + 1
+        right: child + 1
         if right <= end && xs[candidate] < xs[right] -> candidate = right
         if candidate == root -> return
-        tmp :: Float{xs[root]}
+        tmp: Float{xs[root]}
         xs[root] = xs[candidate]
         xs[candidate] = tmp
         root = candidate
     }
 }
 
-fn sorted(xs: [Float]) -> [Float] Never! {
+sorted: fn(xs: [Float]) -> [Float] Never! {
     out := copy_floats(xs)
-    n :: out.len()
+    n: out.len()
     if n < 2 -> return out
     start := (n - 2) /% 2
     loop {
@@ -141,7 +141,7 @@ fn sorted(xs: [Float]) -> [Float] Never! {
     }
     end := n - 1
     loop end > 0 {
-        tmp :: Float{out[0]}
+        tmp: Float{out[0]}
         out[0] = out[end]
         out[end] = tmp
         end = end - 1
@@ -150,31 +150,31 @@ fn sorted(xs: [Float]) -> [Float] Never! {
     out
 }
 
-fn interpolate(a: Float, b: Float, fraction: Float) -> Float Never! {
+interpolate: fn(a: Float, b: Float, fraction: Float) -> Float Never! {
     if (a >= (Float{0.0}) && b >= (Float{0.0})) || (a <= (Float{0.0}) && b <= (Float{0.0})) {
         return a + (b - a) * fraction
     }
     a * ((Float{1.0}) - fraction) + b * fraction
 }
 
-fn quantile_sorted(s: [Float], p: Float) -> Float? {
+quantile_sorted: fn(s: [Float], p: Float) -> Float? {
     if s.len() == 0 || p != p || p < (Float{0.0}) || p > (Float{1.0}) -> return None
     if p <= (Float{0.0}) -> return Val(s[0])
     if p >= (Float{1.0}) -> return Val(s[s.len() - 1])
-    position :: p * (Float{s.len() - 1})
-    lower :: Int.from_float(position) ?? panic("quantile position must be finite")
-    upper :: lower + 1
+    position: p * (Float{s.len() - 1})
+    lower: Int.from_float(position) ?? panic("quantile position must be finite")
+    upper: lower + 1
     if upper >= s.len() -> return Val(s[s.len() - 1])
-    fraction :: position - (Float{lower})
+    fraction: position - (Float{lower})
     Val(interpolate(s[lower], s[upper], fraction))
 }
 
-fn compensated_sum_scaled(xs: [Float], scale: Float) -> Float Never! {
+compensated_sum_scaled: fn(xs: [Float], scale: Float) -> Float Never! {
     acc := Float{0.0}
     correction := Float{0.0}
     loop x in xs {
-        value :: x / scale
-        t :: acc + value
+        value: x / scale
+        t: acc + value
         if abs_value(acc) >= abs_value(value) {
             correction = correction + ((acc - t) + value)
         } else {
@@ -184,29 +184,29 @@ fn compensated_sum_scaled(xs: [Float], scale: Float) -> Float Never! {
     }
     acc + correction
 }
-fn covariance_terms(xs: [Float], ys: [Float]) -> CovarianceTerms? {
-    n :: xs.len()
+covariance_terms: fn(xs: [Float], ys: [Float]) -> CovarianceTerms? {
+    n: xs.len()
     if n == 0 || ys.len() != n || invalid_sample(xs) || invalid_sample(ys) -> return None
     x_scale := Float{0.0}
     y_scale := Float{0.0}
     loop x in xs {
-        magnitude :: abs_value(x)
+        magnitude: abs_value(x)
         if magnitude > x_scale -> x_scale = magnitude
     }
     loop y in ys {
-        magnitude :: abs_value(y)
+        magnitude: abs_value(y)
         if magnitude > y_scale -> y_scale = magnitude
     }
     if x_scale <= (Float{0.0}) || y_scale <= (Float{0.0}) {
         return Val(CovarianceTerms{x_scale: x_scale, y_scale: y_scale, sx: Float{0.0}, sy: Float{0.0}, xx: Float{0.0}, yy: Float{0.0}, xy: Float{0.0}})
     }
-    mx :: compensated_sum_scaled(xs, x_scale) / (Float{n})
-    my :: compensated_sum_scaled(ys, y_scale) / (Float{n})
+    mx: compensated_sum_scaled(xs, x_scale) / (Float{n})
+    my: compensated_sum_scaled(ys, y_scale) / (Float{n})
     sx := Float{0.0}
     sy := Float{0.0}
     loop i in 0..<n {
-        dx :: abs_value(xs[i] / x_scale - mx)
-        dy :: abs_value(ys[i] / y_scale - my)
+        dx: abs_value(xs[i] / x_scale - mx)
+        dy: abs_value(ys[i] / y_scale - my)
         if dx > sx -> sx = dx
         if dy > sy -> sy = dy
     }
@@ -226,22 +226,22 @@ fn covariance_terms(xs: [Float], ys: [Float]) -> CovarianceTerms? {
 }
 
 
-fn central_terms(xs: [Float]) -> CentralTerms? {
-    n :: xs.len()
+central_terms: fn(xs: [Float]) -> CentralTerms? {
+    n: xs.len()
     if n == 0 || invalid_sample(xs) -> return None
     scale := Float{0.0}
     loop x in xs {
-        magnitude :: abs_value(x)
+        magnitude: abs_value(x)
         if magnitude > scale -> scale = magnitude
     }
     if scale <= (Float{0.0}) -> return None
-    m :: compensated_sum_scaled(xs, scale) / (Float{n})
+    m: compensated_sum_scaled(xs, scale) / (Float{n})
     s2 := Float{0.0}
     s3 := Float{0.0}
     s4 := Float{0.0}
     loop x in xs {
-        z :: x / scale - m
-        z2 :: z * z
+        z: x / scale - m
+        z2: z * z
         s2 = s2 + z2
         s3 = s3 + z2 * z
         s4 = s4 + z2 * z2
@@ -249,18 +249,18 @@ fn central_terms(xs: [Float]) -> CentralTerms? {
     Val(CentralTerms{n: n, s2: s2, s3: s3, s4: s4})
 }
 
-fn variance_den(xs: [Float], den: Int) -> Float? {
+variance_den: fn(xs: [Float], den: Int) -> Float? {
     if den <= 0 || xs.len() == 0 || invalid_sample(xs) -> return None
     scale := Float{0.0}
     loop x in xs {
-        magnitude :: abs_value(x)
+        magnitude: abs_value(x)
         if magnitude > scale -> scale = magnitude
     }
     if scale <= (Float{0.0}) -> return Val(Float{0.0})
-    m :: compensated_sum_scaled(xs, scale) / (Float{xs.len()})
+    m: compensated_sum_scaled(xs, scale) / (Float{xs.len()})
     acc := Float{0.0}
     loop x in xs {
-        z :: x / scale - m
+        z: x / scale - m
         acc = acc + z * z
     }
     normalized := acc / (Float{den})
@@ -273,35 +273,35 @@ fn variance_den(xs: [Float], den: Int) -> Float? {
 }
 
 
-fn sum(xs: [Float]) -> Float Never! { compensated_sum(xs) }
+sum: fn(xs: [Float]) -> Float Never! { compensated_sum(xs) }
 
-fn prod(xs: [Float]) -> Float Never! {
+prod: fn(xs: [Float]) -> Float Never! {
     acc := Float{1.0}
     loop x in xs -> acc = acc * x
     acc
 }
 
-fn mean(xs: [Float]) -> Float? Never! {
-    m :: stable_mean(xs) ?? return None
+mean: fn(xs: [Float]) -> Float? Never! {
+    m: stable_mean(xs) ?? return None
     Val(m)
 }
 
-fn fmean(xs: [Float]) -> Float? Never! { mean(xs) }
+fmean: fn(xs: [Float]) -> Float? Never! { mean(xs) }
 
-fn geometric_mean(xs: [Float]) -> Float? Never! {
+geometric_mean: fn(xs: [Float]) -> Float? Never! {
     if xs.len() == 0 || invalid_sample(xs) -> return None
     acc := Float{0.0}
     i := 0
     loop x in xs {
         if x <= (Float{0.0}) -> return None
-        log_x :: ln_value(x)
+        log_x: ln_value(x)
         acc = acc + (log_x - acc) / (Float{i + 1})
         i = i + 1
     }
     Val(exp_value(acc))
 }
 
-fn harmonic_mean(xs: [Float]) -> Float? Never! {
+harmonic_mean: fn(xs: [Float]) -> Float? Never! {
     if xs.len() == 0 || invalid_sample(xs) -> return None
     minimum := xs[0].copy()
     loop x in xs {
@@ -314,25 +314,25 @@ fn harmonic_mean(xs: [Float]) -> Float? Never! {
     Val((Float{xs.len()}) * minimum / acc)
 }
 
-fn median(xs: [Float]) -> Float? Never! {
+median: fn(xs: [Float]) -> Float? Never! {
     if xs.len() == 0 || invalid_sample(xs) -> return None
-    s :: sorted(xs)
-    n :: s.len()
-    mid :: n /% 2
+    s: sorted(xs)
+    n: s.len()
+    mid: n /% 2
     if n % 2 == 1 -> return Val(s[mid])
     Val(interpolate(s[mid - 1], s[mid], (Float{0.5})))
 }
 
-fn median_grouped(xs: [Float], interval: Float) -> Float? Never! {
+median_grouped: fn(xs: [Float], interval: Float) -> Float? Never! {
     if xs.len() == 0 || invalid_sample(xs) || nonfinite(interval) || interval <= (Float{0.0}) {
         return None
     }
-    s :: sorted(xs)
-    n :: s.len()
-    mid :: n /% 2
-    x :: s[mid]
-    lower :: x - interval / (Float{2.0})
-    upper :: lower + interval
+    s: sorted(xs)
+    n: s.len()
+    mid: n /% 2
+    x: s[mid]
+    lower: x - interval / (Float{2.0})
+    upper: lower + interval
     below := 0
     frequency := 0
     loop value in s {
@@ -343,31 +343,31 @@ fn median_grouped(xs: [Float], interval: Float) -> Float? Never! {
     Val(lower + interval * ((Float{n}) / (Float{2.0}) - (Float{below})) / (Float{frequency}))
 }
 
-fn median_low(xs: [Float]) -> Float? Never! {
+median_low: fn(xs: [Float]) -> Float? Never! {
     if xs.len() == 0 || invalid_sample(xs) -> return None
-    s :: sorted(xs)
-    n :: s.len()
+    s: sorted(xs)
+    n: s.len()
     if n % 2 == 1 -> return Val(s[n /% 2])
     Val(s[n /% 2 - 1])
 }
 
-fn median_high(xs: [Float]) -> Float? Never! {
+median_high: fn(xs: [Float]) -> Float? Never! {
     if xs.len() == 0 || invalid_sample(xs) -> return None
-    s :: sorted(xs)
+    s: sorted(xs)
     Val(s[s.len() /% 2])
 }
 
-fn quantile(xs: [Float], p: Float) -> Float? Never! {
+quantile: fn(xs: [Float], p: Float) -> Float? Never! {
     if xs.len() == 0 || invalid_sample(xs) -> return None
     quantile_sorted(sorted(xs), p)
 }
 
-fn percentile(xs: [Float], pct: Float) -> Float? Never! {
+percentile: fn(xs: [Float], pct: Float) -> Float? Never! {
     if pct != pct -> return None
     quantile(xs, pct / (Float{100.0}))
 }
 
-fn mode(xs: [Float]) -> Float? Never! {
+mode: fn(xs: [Float]) -> Float? Never! {
     if xs.len() == 0 || invalid_sample(xs) -> return None
     best := xs[0].copy()
     best_n := 0
@@ -384,7 +384,7 @@ fn mode(xs: [Float]) -> Float? Never! {
     Val(best)
 }
 
-fn multimode(xs: [Float]) -> [Float] Never! {
+multimode: fn(xs: [Float]) -> [Float] Never! {
     out := [Float]{}
     if xs.len() == 0 || invalid_sample(xs) -> return out
     best := 0
@@ -411,27 +411,27 @@ fn multimode(xs: [Float]) -> [Float] Never! {
     out
 }
 
-fn pvariance(xs: [Float]) -> Float? Never! { variance_den(xs, xs.len()) }
+pvariance: fn(xs: [Float]) -> Float? Never! { variance_den(xs, xs.len()) }
 
-fn pstdev(xs: [Float]) -> Float? Never! {
-    v :: pvariance(xs) ?? return None
+pstdev: fn(xs: [Float]) -> Float? Never! {
+    v: pvariance(xs) ?? return None
     Val(sqrt_value(v))
 }
 
-fn variance(xs: [Float]) -> Float? Never! {
+variance: fn(xs: [Float]) -> Float? Never! {
     if xs.len() < 2 -> return None
     variance_den(xs, xs.len() - 1)
 }
 
-fn stdev(xs: [Float]) -> Float? Never! {
-    v :: variance(xs) ?? return None
+stdev: fn(xs: [Float]) -> Float? Never! {
+    v: variance(xs) ?? return None
     Val(sqrt_value(v))
 }
 
-fn covariance(xs: [Float], ys: [Float]) -> Float? Never! {
-    n :: xs.len()
+covariance: fn(xs: [Float], ys: [Float]) -> Float? Never! {
+    n: xs.len()
     if n < 2 || ys.len() != n -> return None
-    t :: covariance_terms(xs, ys) ?? return None
+    t: covariance_terms(xs, ys) ?? return None
     if t.sx <= (Float{0.0}) || t.sy <= (Float{0.0}) -> return Val(Float{0.0})
     x_deviation := t.sx * t.x_scale
     y_deviation := t.sy * t.y_scale
@@ -441,10 +441,10 @@ fn covariance(xs: [Float], ys: [Float]) -> Float? Never! {
     Val(value)
 }
 
-fn correlation(xs: [Float], ys: [Float]) -> Float? Never! {
-    n :: xs.len()
+correlation: fn(xs: [Float], ys: [Float]) -> Float? Never! {
+    n: xs.len()
     if n < 2 || ys.len() != n -> return None
-    t :: covariance_terms(xs, ys) ?? return None
+    t: covariance_terms(xs, ys) ?? return None
     if t.xx <= (Float{0.0}) || t.yy <= (Float{0.0}) -> return None
     value := t.xy / sqrt_value(t.xx * t.yy)
     if nonfinite(value) -> return None
@@ -453,10 +453,10 @@ fn correlation(xs: [Float], ys: [Float]) -> Float? Never! {
     Val(value)
 }
 
-fn linear_regression(xs: [Float], ys: [Float]) -> SlopeIntercept? Never! {
-    n :: xs.len()
+linear_regression: fn(xs: [Float], ys: [Float]) -> SlopeIntercept? Never! {
+    n: xs.len()
     if n < 2 || ys.len() != n -> return None
-    t :: covariance_terms(xs, ys) ?? return None
+    t: covariance_terms(xs, ys) ?? return None
     if t.sx <= (Float{0.0}) || t.xx <= (Float{0.0}) -> return None
     x_deviation := t.sx * t.x_scale
     y_deviation := t.sy * t.y_scale
@@ -464,27 +464,27 @@ fn linear_regression(xs: [Float], ys: [Float]) -> SlopeIntercept? Never! {
         return None
     }
     slope := (t.xy / t.xx) * (y_deviation / x_deviation)
-    mx :: stable_mean(xs) ?? return None
-    my :: stable_mean(ys) ?? return None
+    mx: stable_mean(xs) ?? return None
+    my: stable_mean(ys) ?? return None
     intercept := my - slope * mx
     if nonfinite(slope) || nonfinite(intercept) -> return None
     Val(SlopeIntercept{slope: slope, intercept: intercept})
 }
 
-fn normal_dist(mu: Float, sigma: Float) -> NormalDist Never! {
+normal_dist: fn(mu: Float, sigma: Float) -> NormalDist Never! {
     NormalDist{mu: mu, sigma: sigma}
 }
 
-fn kde(xs: [Float], bandwidth: Float) -> [Float] Never! {
+kde: fn(xs: [Float], bandwidth: Float) -> [Float] Never! {
     out := [Float]{}
     if xs.len() == 0 || invalid_sample(xs) || nonfinite(bandwidth) || bandwidth <= (Float{0.0}) {
         return out
     }
-    normalizer :: (Float{1.0}) / ((Float{xs.len()}) * bandwidth * sqrt_value((Float{2.0}) * math.PI))
+    normalizer: (Float{1.0}) / ((Float{xs.len()}) * bandwidth * sqrt_value((Float{2.0}) * math.PI))
     loop point in xs {
         total := Float{0.0}
         loop value in xs {
-            z :: (point - value) / bandwidth
+            z: (point - value) / bandwidth
             total = total + exp_value((Float{-0.5}) * z * z)
         }
         &out.push(total * normalizer)
@@ -492,13 +492,13 @@ fn kde(xs: [Float], bandwidth: Float) -> [Float] Never! {
     out
 }
 
-fn kde_random(xs: [Float], bandwidth: Float, n: Int) -[Rand]> [Float] Never! {
+kde_random: fn(xs: [Float], bandwidth: Float, n: Int) -[Rand]> [Float] Never! {
     out := [Float]{}
     if xs.len() == 0 || invalid_sample(xs) || nonfinite(bandwidth) || bandwidth <= (Float{0.0}) || n <= 0 {
         return out
     }
     loop _ in 0..<n {
-        index :: random.int(0, xs.len() - 1)
+        index: random.int(0, xs.len() - 1)
         value := xs[index] + random.normal((Float{0.0}), bandwidth)
         if nonfinite(value) -> return [Float]{}
         &out.push(value)
@@ -506,28 +506,28 @@ fn kde_random(xs: [Float], bandwidth: Float, n: Int) -[Rand]> [Float] Never! {
     out
 }
 
-fn zscore(xs: [Float]) -> [Float] Never! {
+zscore: fn(xs: [Float]) -> [Float] Never! {
     out := [Float]{}
     if xs.len() == 0 || invalid_sample(xs) -> return out
     scale := Float{0.0}
     loop x in xs {
-        magnitude :: abs_value(x)
+        magnitude: abs_value(x)
         if magnitude > scale -> scale = magnitude
     }
     if scale <= (Float{0.0}) -> return out
-    m :: compensated_sum_scaled(xs, scale) / (Float{xs.len()})
+    m: compensated_sum_scaled(xs, scale) / (Float{xs.len()})
     acc := Float{0.0}
     loop x in xs {
-        z :: x / scale - m
+        z: x / scale - m
         acc = acc + z * z
     }
-    spread :: sqrt_value(acc / (Float{xs.len()}))
+    spread: sqrt_value(acc / (Float{xs.len()}))
     if spread <= (Float{0.0}) -> return out
     loop x in xs -> &out.push((x / scale - m) / spread)
     out
 }
 
-fn min(xs: [Float]) -> Float? Never! {
+min: fn(xs: [Float]) -> Float? Never! {
     if xs.len() == 0 || invalid_sample(xs) -> return None
     m := xs[0].copy()
     loop x in xs {
@@ -536,7 +536,7 @@ fn min(xs: [Float]) -> Float? Never! {
     Val(m)
 }
 
-fn max(xs: [Float]) -> Float? Never! {
+max: fn(xs: [Float]) -> Float? Never! {
     if xs.len() == 0 || invalid_sample(xs) -> return None
     m := xs[0].copy()
     loop x in xs {
@@ -545,42 +545,42 @@ fn max(xs: [Float]) -> Float? Never! {
     Val(m)
 }
 
-fn range(xs: [Float]) -> Float? Never! {
-    lo :: min(xs) ?? return None
-    hi :: max(xs) ?? return None
+range: fn(xs: [Float]) -> Float? Never! {
+    lo: min(xs) ?? return None
+    hi: max(xs) ?? return None
     value := hi - lo
     if nonfinite(value) -> return None
     Val(value)
 }
-fn cumsum(xs: [Float]) -> [Float] Never! {
+cumsum: fn(xs: [Float]) -> [Float] Never! {
     out := [Float]{}
     if invalid_sample(xs) -> return out
     acc := Float{0.0}
     correction := Float{0.0}
     loop x in xs {
-        t :: acc + x
+        t: acc + x
         if abs_value(acc) >= abs_value(x) {
             correction = correction + ((acc - t) + x)
         } else {
             correction = correction + ((x - t) + acc)
         }
         acc = t
-        value :: acc + correction
+        value: acc + correction
         if nonfinite(value) -> return [Float]{}
         &out.push(value)
     }
     out
 }
 
-fn count(xs: [Float]) -> Int Never! { xs.len() }
+count: fn(xs: [Float]) -> Int Never! { xs.len() }
 
-fn sumprod(xs: [Float], ys: [Float]) -> Float? Never! {
+sumprod: fn(xs: [Float], ys: [Float]) -> Float? Never! {
     if xs.len() != ys.len() || invalid_sample(xs) || invalid_sample(ys) -> return None
     acc := Float{0.0}
     correction := Float{0.0}
     loop i in 0..<xs.len() {
-        x :: xs[i] * ys[i]
-        t :: acc + x
+        x: xs[i] * ys[i]
+        t: acc + x
         if abs_value(acc) >= abs_value(x) {
             correction = correction + ((acc - t) + x)
         } else {
@@ -592,15 +592,15 @@ fn sumprod(xs: [Float], ys: [Float]) -> Float? Never! {
     if nonfinite(value) -> return None
     Val(value)
 }
-fn weighted_mean(xs: [Float], weights: [Float]) -> Float? Never! {
+weighted_mean: fn(xs: [Float], weights: [Float]) -> Float? Never! {
     if xs.len() == 0 || xs.len() != weights.len() || invalid_sample(xs) -> return None
     maximum_weight := Float{0.0}
     value_scale := Float{0.0}
     loop i in 0..<xs.len() {
-        w :: weights[i]
+        w: weights[i]
         if nonfinite(w) || w < (Float{0.0}) -> return None
         if w > maximum_weight -> maximum_weight = w
-        magnitude :: abs_value(xs[i])
+        magnitude: abs_value(xs[i])
         if magnitude > value_scale -> value_scale = magnitude
     }
     if maximum_weight <= (Float{0.0}) -> return None
@@ -608,7 +608,7 @@ fn weighted_mean(xs: [Float], weights: [Float]) -> Float? Never! {
     numerator := Float{0.0}
     denominator := Float{0.0}
     loop i in 0..<xs.len() {
-        scaled_weight :: weights[i] / maximum_weight
+        scaled_weight: weights[i] / maximum_weight
         numerator = numerator + (xs[i] / value_scale) * scaled_weight
         denominator = denominator + scaled_weight
     }
@@ -618,54 +618,54 @@ fn weighted_mean(xs: [Float], weights: [Float]) -> Float? Never! {
     Val(value)
 }
 
-fn quantiles(xs: [Float], n: Int) -> [Float] Never! {
+quantiles: fn(xs: [Float], n: Int) -> [Float] Never! {
     out := [Float]{}
     if n <= 1 || xs.len() == 0 || invalid_sample(xs) -> return out
-    s :: sorted(xs)
+    s: sorted(xs)
     i := 1
     loop i < n {
-        q :: quantile_sorted(s, (Float{i}) / (Float{n})) ?? return [Float]{}
+        q: quantile_sorted(s, (Float{i}) / (Float{n})) ?? return [Float]{}
         &out.push(q)
         i = i + 1
     }
     out
 }
 
-fn iqr(xs: [Float]) -> Float? Never! {
-    q1 :: quantile(xs, (Float{0.25})) ?? return None
-    q3 :: quantile(xs, (Float{0.75})) ?? return None
+iqr: fn(xs: [Float]) -> Float? Never! {
+    q1: quantile(xs, (Float{0.25})) ?? return None
+    q3: quantile(xs, (Float{0.75})) ?? return None
     value := q3 - q1
     if nonfinite(value) -> return None
     Val(value)
 }
 
-fn mad(xs: [Float]) -> Float? Never! {
+mad: fn(xs: [Float]) -> Float? Never! {
     if xs.len() == 0 || invalid_sample(xs) -> return None
-    m :: median(xs) ?? return None
+    m: median(xs) ?? return None
     scale := Float{0.0}
     loop x in xs {
-        magnitude :: abs_value(x)
+        magnitude: abs_value(x)
         if magnitude > scale -> scale = magnitude
     }
     if scale <= (Float{0.0}) -> return Val(Float{0.0})
     center := m / scale
     dev := [Float]{}
     loop x in xs -> &dev.push(abs_value(x / scale - center))
-    d :: median(dev) ?? return None
+    d: median(dev) ?? return None
     value := d * scale
     if nonfinite(value) -> return None
     Val(value)
 }
 
-fn mean_abs_deviation(xs: [Float]) -> Float? Never! {
+mean_abs_deviation: fn(xs: [Float]) -> Float? Never! {
     if xs.len() == 0 || invalid_sample(xs) -> return None
     scale := Float{0.0}
     loop x in xs {
-        magnitude :: abs_value(x)
+        magnitude: abs_value(x)
         if magnitude > scale -> scale = magnitude
     }
     if scale <= (Float{0.0}) -> return Val(Float{0.0})
-    m :: compensated_sum_scaled(xs, scale) / (Float{xs.len()})
+    m: compensated_sum_scaled(xs, scale) / (Float{xs.len()})
     acc := Float{0.0}
     loop x in xs -> acc = acc + abs_value(x / scale - m)
     value := (acc / (Float{xs.len()})) * scale
@@ -673,26 +673,26 @@ fn mean_abs_deviation(xs: [Float]) -> Float? Never! {
     Val(value)
 }
 
-fn skew(xs: [Float]) -> Float? Never! {
-    n :: xs.len()
+skew: fn(xs: [Float]) -> Float? Never! {
+    n: xs.len()
     if n < 3 -> return None
-    t :: central_terms(xs) ?? return None
-    variance :: t.s2 / (Float{t.n})
+    t: central_terms(xs) ?? return None
+    variance: t.s2 / (Float{t.n})
     if variance <= (Float{0.0}) -> return None
-    root :: sqrt_value(variance)
+    root: sqrt_value(variance)
     Val((t.s3 / (Float{t.n})) / (root * root * root))
 }
 
-fn kurtosis(xs: [Float]) -> Float? Never! {
-    n :: xs.len()
+kurtosis: fn(xs: [Float]) -> Float? Never! {
+    n: xs.len()
     if n < 4 -> return None
-    t :: central_terms(xs) ?? return None
-    variance :: t.s2 / (Float{t.n})
+    t: central_terms(xs) ?? return None
+    variance: t.s2 / (Float{t.n})
     if variance <= (Float{0.0}) -> return None
     Val((t.s4 / (Float{t.n})) / (variance * variance) - (Float{3.0}))
 }
 
-fn moving_average(xs: [Float], window: Int) -> [Float] Never! {
+moving_average: fn(xs: [Float], window: Int) -> [Float] Never! {
     out := [Float]{}
     if window <= 0 || invalid_sample(xs) -> return out
     acc := Float{0.0}
@@ -711,7 +711,7 @@ fn moving_average(xs: [Float], window: Int) -> [Float] Never! {
     out
 }
 
-fn ewma(xs: [Float], alpha: Float) -> [Float] Never! {
+ewma: fn(xs: [Float], alpha: Float) -> [Float] Never! {
     out := [Float]{}
     if xs.len() == 0 || invalid_sample(xs) || nonfinite(alpha) -> return out
     a := alpha
@@ -729,7 +729,7 @@ fn ewma(xs: [Float], alpha: Float) -> [Float] Never! {
     out
 }
 
-fn cumprod(xs: [Float]) -> [Float] Never! {
+cumprod: fn(xs: [Float]) -> [Float] Never! {
     out := [Float]{}
     if invalid_sample(xs) -> return out
     acc := Float{1.0}
@@ -741,7 +741,7 @@ fn cumprod(xs: [Float]) -> [Float] Never! {
     out
 }
 
-fn diff(xs: [Float]) -> [Float] Never! {
+diff: fn(xs: [Float]) -> [Float] Never! {
     out := [Float]{}
     if xs.len() < 2 || invalid_sample(xs) -> return out
     i := 1
@@ -754,10 +754,10 @@ fn diff(xs: [Float]) -> [Float] Never! {
     out
 }
 
-fn rank(xs: [Float]) -> [Float] Never! {
+rank: fn(xs: [Float]) -> [Float] Never! {
     out := [Float]{}
     if invalid_sample(xs) -> return out
-    n :: xs.len()
+    n: xs.len()
     loop i in 0..<n {
         before := 1
         ties := 0
@@ -770,23 +770,23 @@ fn rank(xs: [Float]) -> [Float] Never! {
     out
 }
 
-fn spearman(xs: [Float], ys: [Float]) -> Float? Never! {
+spearman: fn(xs: [Float], ys: [Float]) -> Float? Never! {
     if xs.len() != ys.len() -> return None
     correlation(rank(xs), rank(ys))
 }
 
-fn r_squared(xs: [Float], ys: [Float]) -> Float? Never! {
-    n :: xs.len()
+r_squared: fn(xs: [Float], ys: [Float]) -> Float? Never! {
+    n: xs.len()
     if n < 2 || ys.len() != n -> return None
-    _ :: linear_regression(xs, ys) ?? return None
-    r :: correlation(xs, ys) ?? return None
+    _: linear_regression(xs, ys) ?? return None
+    r: correlation(xs, ys) ?? return None
     Val(r * r)
 }
 
-fn residuals(xs: [Float], ys: [Float]) -> [Float] Never! {
+residuals: fn(xs: [Float], ys: [Float]) -> [Float] Never! {
     out := [Float]{}
     if xs.len() != ys.len() || invalid_sample(xs) || invalid_sample(ys) -> return out
-    fit :: linear_regression(xs, ys) ?? return out
+    fit: linear_regression(xs, ys) ?? return out
     loop i in 0..<xs.len() {
         value := ys[i] - (fit.slope * xs[i] + fit.intercept)
         if nonfinite(value) -> return [Float]{}
@@ -795,11 +795,11 @@ fn residuals(xs: [Float], ys: [Float]) -> [Float] Never! {
     out
 }
 
-fn histogram(xs: [Float], bins: Int) -> [Int] Never! {
+histogram: fn(xs: [Float], bins: Int) -> [Int] Never! {
     out := [Int]{}
     if bins <= 0 || xs.len() == 0 || invalid_sample(xs) -> return out
-    lo :: min(xs) ?? return out
-    hi :: max(xs) ?? return out
+    lo: min(xs) ?? return out
+    hi: max(xs) ?? return out
     loop _ in 0..<bins -> &out.push(0)
     if lo == hi {
         out[0] = xs.len()
@@ -810,9 +810,9 @@ fn histogram(xs: [Float], bins: Int) -> [Int] Never! {
     loop x in xs {
         t := Float{0.0}
         if scale > (Float{0.0}) {
-            lower :: lo / scale
-            upper :: hi / scale
-            value :: x / scale
+            lower: lo / scale
+            upper: hi / scale
+            value: x / scale
             t = (value - lower) / (upper - lower)
         }
         idx := Int.from_float(t * (Float{bins})) ?? panic("histogram position must be finite")
@@ -823,7 +823,7 @@ fn histogram(xs: [Float], bins: Int) -> [Int] Never! {
     out
 }
 
-fn describe(xs: [Float]) -> (max: Float, mean: Float, median: Float, min: Float, n: Int, q1: Float, q3: Float, stdev: Float) Never! {
+describe: fn(xs: [Float]) -> (max: Float, mean: Float, median: Float, min: Float, n: Int, q1: Float, q3: Float, stdev: Float) Never! {
     empty := (max: (Float{0.0}), mean: (Float{0.0}), median: (Float{0.0}), min: (Float{0.0}), n: 0, q1: (Float{0.0}), q3: (Float{0.0}), stdev: (Float{0.0}))
     if xs.len() == 0 || invalid_sample(xs) -> return empty
     return (
@@ -838,7 +838,7 @@ fn describe(xs: [Float]) -> (max: Float, mean: Float, median: Float, min: Float,
     )
 }
 
-fn clip(xs: [Float], lo: Float, hi: Float) -> [Float] Never! {
+clip: fn(xs: [Float], lo: Float, hi: Float) -> [Float] Never! {
     out := [Float]{}
     if invalid_sample(xs) || nonfinite(lo) || nonfinite(hi) -> return out
     lower := lo
@@ -857,19 +857,19 @@ fn clip(xs: [Float], lo: Float, hi: Float) -> [Float] Never! {
     out
 }
 
-fn winsorize(xs: [Float], p: Float) -> [Float] Never! {
+winsorize: fn(xs: [Float], p: Float) -> [Float] Never! {
     if invalid_sample(xs) || p != p || p < (Float{0.0}) || p > (Float{0.5}) -> return [Float]{}
-    lo :: quantile(xs, p) ?? return [Float]{}
-    hi :: quantile(xs, (Float{1.0}) - p) ?? return [Float]{}
+    lo: quantile(xs, p) ?? return [Float]{}
+    hi: quantile(xs, (Float{1.0}) - p) ?? return [Float]{}
     clip(xs, lo, hi)
 }
 
-fn pearson(xs: [Float], ys: [Float]) -> Float? Never! { correlation(xs, ys) }
+pearson: fn(xs: [Float], ys: [Float]) -> Float? Never! { correlation(xs, ys) }
 
-fn covariance_population(xs: [Float], ys: [Float]) -> Float? Never! {
-    n :: xs.len()
+covariance_population: fn(xs: [Float], ys: [Float]) -> Float? Never! {
+    n: xs.len()
     if n == 0 || ys.len() != n -> return None
-    t :: covariance_terms(xs, ys) ?? return None
+    t: covariance_terms(xs, ys) ?? return None
     if t.sx <= (Float{0.0}) || t.sy <= (Float{0.0}) -> return Val(Float{0.0})
     x_deviation := t.sx * t.x_scale
     y_deviation := t.sy * t.y_scale

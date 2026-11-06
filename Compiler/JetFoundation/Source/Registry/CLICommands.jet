@@ -1,10 +1,10 @@
 // The shared command registry owns help, completion and semantic job-name
 // reservation. This file is the one command table.
-JET_CLI_JOB_INVOCATION_HELP :: "\nRun a project job: jet [jet flags] <name> [job args...]\nJet flags go before the job name; every word after it belongs to the job.\n"
+JET_CLI_JOB_INVOCATION_HELP: "\nRun a project job: jet [jet flags] <name> [job args...]\nJet flags go before the job name; every word after it belongs to the job.\n"
 
 // One flag. A `With <cmd>[/<cmd>…]: ` help prefix scopes it to those commands;
 // `--json`, `--quiet`, and `--color` apply to every command.
-struct JetCLIFlagSpec {
+JetCLIFlagSpec: struct {
     long: String
     help: String
 }
@@ -12,7 +12,7 @@ struct JetCLIFlagSpec {
 // One dispatcher seam a nested action reaches. `key` names the Rust host's
 // `HandlerKey` variant; `dispatch_word` is the handler word a grouped argv
 // is normalized to unless `keeps_group` keeps the group word in front.
-struct JetCLIHandlerSpec {
+JetCLIHandlerSpec: struct {
     key: String
     dispatch_word: String
     keeps_group: Bool
@@ -20,7 +20,7 @@ struct JetCLIHandlerSpec {
 
 // One canonical nested spelling under a group (`jet registry publish`).
 // `usage` holds one form per line; `handler` is a `JetCLIHandlerSpec.key`.
-struct JetCLIActionSpec {
+JetCLIActionSpec: struct {
     name: String
     usage: String
     summary: String
@@ -33,7 +33,7 @@ struct JetCLIActionSpec {
 // `exhaustive` (groups only) means every subword is modeled by `actions`;
 // `os`, `env`, and `db` expose a wider downstream verb surface.
 // `usage` is the positional shape; None renders the generic `[args]`.
-struct JetCLICommandSpec {
+JetCLICommandSpec: struct {
     name: String
     summary: String
     frequency_rank: Int
@@ -42,7 +42,7 @@ struct JetCLICommandSpec {
     actions: [JetCLIActionSpec]
 }
 
-JET_CLI_HANDLERS :: comptime { [JetCLIHandlerSpec]{
+JET_CLI_HANDLERS: comptime { [JetCLIHandlerSpec]{
     {key: "Publish", dispatch_word: "publish", keeps_group: false},
     {key: "Yank", dispatch_word: "yank", keeps_group: false},
     {key: "Keygen", dispatch_word: "keygen", keeps_group: false},
@@ -89,7 +89,7 @@ JET_CLI_HANDLERS :: comptime { [JetCLIHandlerSpec]{
     {key: "Db", dispatch_word: "db", keeps_group: true},
 } }
 
-JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
+JET_CLI_COMMANDS: comptime { [JetCLICommandSpec]{
     {
         name: "registry",
         summary: "Publish and manage packages",
@@ -686,15 +686,15 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
 // (TestSettings.jet) after `--explain-partition`. A setting whose flag is a
 // fixed row shared with other commands keeps that row; one whose flag is a
 // build option's (`--optimize`) shares that option's row, which says both.
-JET_CLI_FLAGS :: comptime { jet_cli_flag_rows() }
+JET_CLI_FLAGS: comptime { jet_cli_flag_rows() }
 
-fn jet_cli_flag_rows() -> [JetCLIFlagSpec] Never! {
+jet_cli_flag_rows: fn() -> [JetCLIFlagSpec] Never! {
     rows := [JetCLIFlagSpec]{}
     loop spec in JET_CLI_FIXED_FLAGS {
         &rows.push(spec.copy())
         if spec.long == "--profile" {
             loop option in JET_BUILD_OPTIONS {
-                flag :: build_option_flag(option.name)
+                flag: build_option_flag(option.name)
                 help := "With build/run/dev/test/inspect: {option.help}"
                 if jet_cli_test_setting_of_flag(flag) == .Val(row) -> help = "{help}; with test: {jet_cli_test_setting_text(row)}"
                 &rows.push(JetCLIFlagSpec{long: flag, help: help})
@@ -702,11 +702,11 @@ fn jet_cli_flag_rows() -> [JetCLIFlagSpec] Never! {
         }
         if spec.long != "--explain-partition" -> next
         loop setting in JET_TEST_SETTINGS {
-            flag :: test_setting_flag(setting.name)
+            flag: test_setting_flag(setting.name)
             // The lambdas take their own names: a capture moves the name it reads.
-            fixed_flag :: flag.copy() // copy: the fixed-row lambda's own name.
+            fixed_flag: flag.copy() // copy: the fixed-row lambda's own name.
             if JET_CLI_FIXED_FLAGS.any(fixed -> fixed.long == fixed_flag) -> next
-            option_flag :: flag.copy() // copy: the build-option lambda's own name.
+            option_flag: flag.copy() // copy: the build-option lambda's own name.
             if JET_BUILD_OPTIONS.any(option -> build_option_flag(option.name) == option_flag) -> next
             &rows.push(JetCLIFlagSpec{long: flag, help: jet_cli_test_setting_help(setting)})
         }
@@ -715,7 +715,7 @@ fn jet_cli_flag_rows() -> [JetCLIFlagSpec] Never! {
 }
 
 // The `jet test` setting whose flag is `flag`, if one is.
-fn jet_cli_test_setting_of_flag(flag: String) -> TestSettingRow? Never! {
+jet_cli_test_setting_of_flag: fn(flag: String) -> TestSettingRow? Never! {
     loop setting in JET_TEST_SETTINGS {
         if test_setting_flag(setting.name) == flag -> return Val(setting.copy()) // copy: the registry keeps its row.
     }
@@ -723,23 +723,23 @@ fn jet_cli_test_setting_of_flag(flag: String) -> TestSettingRow? Never! {
 }
 
 #Test("--optimize is one flag row that says what it does for a build and for jet test") {
-    rows :: JET_CLI_FLAGS.filter(row -> row.long == "--optimize")
+    rows: JET_CLI_FLAGS.filter(row -> row.long == "--optimize")
     assert_eq(rows.len(), 1)
     assert(rows[0].help.starts_with("With build/run/dev/test/inspect: How hard to optimize: none, basic or full; with test: Run the tests at each listed optimize level"))
 }
 
 // A setting's help line: what it does and its three spellings.
-fn jet_cli_test_setting_help(setting: TestSettingRow) -> String Never! {
+jet_cli_test_setting_help: fn(setting: TestSettingRow) -> String Never! {
     "With test: {jet_cli_test_setting_text(setting)}"
 }
 
 // A setting's help after its `With test: ` scope.
-fn jet_cli_test_setting_text(setting: TestSettingRow) -> String Never! {
-    ported :: if setting.ported -> "" else -> " (not ported to the Jet test runner yet)"
+jet_cli_test_setting_text: fn(setting: TestSettingRow) -> String Never! {
+    ported: if setting.ported -> "" else -> " (not ported to the Jet test runner yet)"
     "{setting.help}{ported}; {test_setting_spellings(setting)}"
 }
 
-JET_CLI_FIXED_FLAGS :: comptime { [JetCLIFlagSpec]{
+JET_CLI_FIXED_FLAGS: comptime { [JetCLIFlagSpec]{
     {long: "--live", help: "With inspect: Process id for a live plane scope"},
     {long: "--observe", help: "With run: Expose bounded live runtime facts for attachment"},
     {long: "--raw-frames", help: "With debug: Show generated Rust frames and scopes (expert)"},

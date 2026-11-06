@@ -1,12 +1,12 @@
 
 use {
-    encoding :: core.encoding
-    json :: core.encoding.json
-    files :: core.files
+    encoding: core.encoding
+    json: core.encoding.json
+    files: core.files
 }
 
-fn run() {
-    output :: files.create("{work}/json/output.data") ?? panic("create")
+run: fn() {
+    output: files.create("{work}/json/output.data") ?? panic("create")
     writer := json.writer(^output) ?? panic("writer")
     &writer.write(encoding.DataEvent.ObjectStart) ?? panic("object")
     &writer.write(encoding.DataEvent.Key("a")) ?? panic("key")

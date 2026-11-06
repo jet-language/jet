@@ -1,18 +1,18 @@
 
-fn kv_put(path: Path, key: String, value: String) -> Bool {
+kv_put: fn(path: Path, key: String, value: String) -> Bool {
     return append_record(path, "put|{key}|{value}")
 }
 
-fn kv_delete(path: Path, key: String) -> Bool { return append_record(path, "del|{key}") }
+kv_delete: fn(path: Path, key: String) -> Bool { return append_record(path, "del|{key}") }
 
-fn kv_replay(path: Path) -> [String:String] {
+kv_replay: fn(path: Path) -> [String:String] {
     state := [String:String]{}
-    records :: read_records(path)
+    records: read_records(path)
     loop record in records {
-        parts :: record.split("|").to_list()
+        parts: record.split("|").to_list()
         if parts.len() >= 2 {
-            op :: parts[0]
-            key :: parts[1]
+            op: parts[0]
+            key: parts[1]
             if op == "put" && parts.len() >= 3 -> state[key] = parts[2]
             if op == "del" -> &state.remove(key).drop("delete tombstone")
         }
@@ -20,13 +20,13 @@ fn kv_replay(path: Path) -> [String:String] {
     return state
 }
 
-fn kv_get(path: Path, key: String) -> String? {
-    state :: kv_replay(path)
+kv_get: fn(path: Path, key: String) -> String? {
+    state: kv_replay(path)
     return state.get(key)
 }
 
-fn kv_compact(path: Path) -> Bool {
-    state :: kv_replay(path)
+kv_compact: fn(path: Path) -> Bool {
+    state: kv_replay(path)
     compacted := [String]{}
     loop (key, value) in state -> &compacted.push("put|{key}|{value}")
     return compact_records(path, compacted)

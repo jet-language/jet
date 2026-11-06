@@ -1,33 +1,33 @@
 // The same program as above.jet, with every marker written as a line in the body.
-struct Pixel {
-    #Layout :: c
+Pixel: struct {
+    #Layout: c
     a: U8
     b: Int
-    #Equatable :: true
+    #Equatable: true
     c: U8
-    #Debug :: false
+    #Debug: false
 }
 
-struct Receipt {
+Receipt: struct {
     id: Int
-    #MustUse :: true
+    #MustUse: true
 }
 
-fn brightness(pixel: Pixel) -> Int {
-    #Inline :: true
+brightness: fn(pixel: Pixel) -> Int {
+    #Inline: true
     pixel.b * 2
-    #MustUse :: true
+    #MustUse: true
 }
 
-PIXEL_SIZE :: comptime { Pixel.$layout.size ?? -1 }
+PIXEL_SIZE: comptime { Pixel.$layout.size ?? -1 }
 
-PIXEL_C :: comptime { Pixel.$layout.fields[2].offset ?? -1 }
+PIXEL_C: comptime { Pixel.$layout.fields[2].offset ?? -1 }
 
-fn issue() -> Receipt { Receipt{id: 4} }
+issue: fn() -> Receipt { Receipt{id: 4} }
 
-fn run() {
+run: fn() {
     print("size {PIXEL_SIZE}, c at {PIXEL_C}")
-    first :: Pixel{a: U8{1}, b: 20, c: U8{3}}
+    first: Pixel{a: U8{1}, b: 20, c: U8{3}}
     print(first == Pixel{a: U8{1}, b: 20, c: U8{3}})
     print(brightness(first))
     print(issue().id)

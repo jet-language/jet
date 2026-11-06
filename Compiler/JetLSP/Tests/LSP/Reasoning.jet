@@ -5,7 +5,7 @@ use {
     jet_semindex.[SymbolDB, SemIndex, SymbolDef, SymbolRef, CallEdge, EffectFact, EffectProvenance, MemberFact, StructuralNode, DefinitionFact, SourceSpan, CallableParameterFact]
 }
 
-fn lsp_reasoning_test_record(id: String, subject: String) -> DerivationRecord Never! {
+lsp_reasoning_test_record: fn(id: String, subject: String) -> DerivationRecord Never! {
     DerivationRecord{id: id, subject: subject, claim: "borrowed value", producer: "sema", method: .StaticDerivation, rule: "checked rule", premises: [String]{"input"}, identity: DerivationIdentity{source: "source", build: "build", run: "run", target: "target"}, assumptions: [String]{}, disposition: .Current, observation: None, payload: None}
 }
 
@@ -17,7 +17,7 @@ fn lsp_reasoning_test_record(id: String, subject: String) -> DerivationRecord Ne
 }
 
 #Test("reasoning summary uses exact canonical identity method disposition and premise count") {
-    record :: lsp_reasoning_test_record("r", "stable")
+    record: lsp_reasoning_test_record("r", "stable")
     assert_eq(lsp_reasoning_summary(record), "Reasoning\n\nclaim: `borrowed value`\nrecord: `r`\nproducer: `sema`\nmethod: `static_derivation`\ndisposition: `current`\npremises: 1\nsource/build/run/target: `source` / `build` / `run` / `target`")
     assert_eq(lsp_reasoning_family(record), "value")
     other := record.copy()
@@ -31,17 +31,17 @@ fn lsp_reasoning_test_record(id: String, subject: String) -> DerivationRecord Ne
 }
 
 #Test("reasoning record caps collections escapes text and never invents an observation") {
-    db :: SymbolDB.new()
+    db: SymbolDB.new()
     record := lsp_reasoning_test_record("r\"", "stable")
     record.premises = [String]{}
     loop i in 0..<129 -> &record.premises.push("p{i}")
-    compact :: lsp_reasoning_record_json(db, record, false)
+    compact: lsp_reasoning_record_json(db, record, false)
     assert(compact.contains("\"id\":{foundation_json_quote(record.id)}"))
     assert(compact.contains("\"premises_truncated\":true"))
     assert(!compact.contains("\"p128\""))
     assert(compact.contains("\"observation\":null,\"payload\":null"))
     assert(!compact.contains("raw_premises"))
-    expanded :: lsp_reasoning_record_json(db, record, true)
+    expanded: lsp_reasoning_record_json(db, record, true)
     assert(expanded.contains("\"raw_premises\":["))
     record.observation = Val(DerivationObservation{event_id: Val("e\""), counterexample_id: None})
     assert(lsp_reasoning_record_json(db, record, false).contains("\"observation\":{{\"event\":{foundation_json_quote("e\"")},\"counterexample\":null}}"))
@@ -52,12 +52,12 @@ fn lsp_reasoning_test_record(id: String, subject: String) -> DerivationRecord Ne
     records := [DerivationRecord]{}
     loop i in 0..<65 -> &records.push(lsp_reasoning_test_record("r{i}", "stable"))
     &db.index.set_derivations(records)
-    view :: lsp_reasoning_view_json(db, "main.jet", None, false)
+    view: lsp_reasoning_view_json(db, "main.jet", None, false)
     assert(view.contains("\"records_truncated\":true"))
     assert(view.contains("\"selection\":\"all\""))
     assert(view.contains("\"name\":\"value\""))
     assert(view.contains("\"name\":\"relationships\",\"records\":[]"))
-    one :: lsp_reasoning_view_json(db, "main.jet", Val("r2"), true)
+    one: lsp_reasoning_view_json(db, "main.jet", Val("r2"), true)
     assert(one.contains("\"records_truncated\":false"))
     assert(one.contains("\"id\":\"r2\""))
     assert(!one.contains("\"id\":\"r1\""))
@@ -74,13 +74,13 @@ fn lsp_reasoning_test_record(id: String, subject: String) -> DerivationRecord Ne
     db := SymbolDB.new()
     db.index = SemIndex.new([SymbolDef]{}, [SymbolRef]{}, [CallEdge]{}, [EffectFact]{}, [MemberFact]{}, [StructuralNode]{}, facts)
     &db.index.set_derivations(records)
-    hints :: lsp_reasoning_inlay_hints(db, "main.jet")
+    hints: lsp_reasoning_inlay_hints(db, "main.jet")
     assert_eq(hints.len(), 64)
     assert_eq(hints[0].label, "reason: borrowed value · current")
     assert_eq(lsp_reasoning_inlay_hints(db, "other.jet").len(), 0)
-    selected :: lsp_reasoning_test_record("selected", "s3")
+    selected: lsp_reasoning_test_record("selected", "s3")
     assert_eq(lsp_reasoning_span_json(db, selected), "{{\"start\":3,\"end\":4}}")
-    missing :: lsp_reasoning_test_record("missing", "not-a-definition")
+    missing: lsp_reasoning_test_record("missing", "not-a-definition")
     assert_eq(lsp_reasoning_span_json(db, missing), "null")
 }
 
@@ -90,21 +90,21 @@ fn lsp_reasoning_test_record(id: String, subject: String) -> DerivationRecord Ne
     signature.parameters = [CallableParameterFact]{CallableParameterFact{name: "out", label: "out", source: SourceSpan{start: 0, end: 0}, default: None, access: .Write, zone: .Either, ty: Type.Int, variadic: false}}
     definition.callable_signature = Val(signature)
     db := lsp_signature_test_db(definition.copy())
-    no_records :: lsp_callable_summary_json(db, Val(definition.identity))
+    no_records: lsp_callable_summary_json(db, Val(definition.identity))
     assert(no_records.contains("\"status\":\"checked_without_derivation\""))
     assert(no_records.contains("\"evidence\":\"declared_parameter\""))
     assert(no_records.contains("no checked effect row"))
     assert(no_records.contains("\"runtime_observation\":\"not_observed\""))
-    facts :: [DefinitionFact]{DefinitionFact{stable_id: "stable", signature_id: "", content_id: "", human_identity: definition.identity, name: "run", kind: "function", module_path: "main.jet", span: SourceSpan{start: 0, end: 20}}}
-    effect_ref :: EffectFact{function: definition.identity, direct: [String]{"FS.Read"}, callees: [String]{"fn:read"}, inferred: [String]{"FS.Read"}, maximal: false, provenance: [EffectProvenance]{EffectProvenance{effect_name: "FS.Read", call_path: [String]{"fn:run", "fn:read"}, spans: [SourceSpan]{SourceSpan{start: 3, end: 6}}}}}
+    facts: [DefinitionFact]{DefinitionFact{stable_id: "stable", signature_id: "", content_id: "", human_identity: definition.identity, name: "run", kind: "function", module_path: "main.jet", span: SourceSpan{start: 0, end: 20}}}
+    effect_ref: EffectFact{function: definition.identity, direct: [String]{"FS.Read"}, callees: [String]{"fn:read"}, inferred: [String]{"FS.Read"}, maximal: false, provenance: [EffectProvenance]{EffectProvenance{effect_name: "FS.Read", call_path: [String]{"fn:run", "fn:read"}, spans: [SourceSpan]{SourceSpan{start: 3, end: 6}}}}}
     db.index = SemIndex.new([SymbolDef]{definition}, [SymbolRef]{}, [CallEdge]{}, [EffectFact]{effect_ref}, [MemberFact]{}, [StructuralNode]{}, facts)
     record := lsp_reasoning_test_record("selected-record", "stable")
     record.disposition = .Stale
     record.observation = Val(DerivationObservation{event_id: Val("e"), counterexample_id: None})
     &db.index.set_derivations([DerivationRecord]{record})
-    selected :: lsp_callable_definition_for_selection(db, Val("selected-record")) ?? panic("stable selection")
+    selected: lsp_callable_definition_for_selection(db, Val("selected-record")) ?? panic("stable selection")
     assert_eq(selected[0].identity, "fn:main::run")
-    summary :: lsp_callable_summary_json(db, Val("selected-record"))
+    summary: lsp_callable_summary_json(db, Val("selected-record"))
     assert(summary.contains("\"status\":\"stale\""))
     assert(summary.contains("\"direct\":[\"FS.Read\"]"))
     assert(summary.contains("\"runtime_observation\":\"present\""))

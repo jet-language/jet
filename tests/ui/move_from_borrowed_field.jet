@@ -4,39 +4,39 @@
 // position reports it: a binding, an assignment, a field initializer, and a
 // result, the last three under an owning expected type that must not turn the
 // mark into a silent copy.
-struct Session {
+Session: struct {
     id: Int
     names: [String]
 }
 
-struct Root {
+Root: struct {
     session: Session
 }
 
-fn consume(s: Session) -> Int {
+consume: fn(s: Session) -> Int {
     s.id
 }
 
-fn take_field(r: &Root) -> Int {
+take_field: fn(r: &Root) -> Int {
     taken := ^r.session
     consume(taken)
 }
 
-fn replace_field(r: &Root) -> Int {
+replace_field: fn(r: &Root) -> Int {
     taken := Session{id: 0, names: [String]{}}
     taken = ^r.session
     consume(taken)
 }
 
-fn wrap_field(r: Root) -> Root {
+wrap_field: fn(r: Root) -> Root {
     Root{session: ^r.session}
 }
 
-fn return_field(r: Root) -> Session {
+return_field: fn(r: Root) -> Session {
     ^r.session
 }
 
-fn run() {
+run: fn() {
     root := Root{session: Session{id: 3, names: [String]{}}}
     print(take_field(&root))
     print(replace_field(&root))

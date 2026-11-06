@@ -44,7 +44,7 @@ test("native O0/O1/O2 are required, with independent output/status/stderr checks
 test("seed-4 model cannot exceed String bounds; Core API programs deterministic and distinct", () => {
   for (let index = 0; index < 200; index++) {
     const c = generateCase(4, index);
-    assert.match(c.source, /fn run\(/u);
+    assert.match(c.source, /run: fn\(/u);
     assert.ok(c.stdout.length < 2_000_000);
   }
   const c = generateCoreCase(4, 0);
@@ -52,7 +52,7 @@ test("seed-4 model cannot exceed String bounds; Core API programs deterministic 
   assert.notDeepEqual(c, generateCoreCase(5, 0));
   assert.match(c.source, /String\.from_bytes/u);
   assert.match(c.source, /m\.pop/u);
-  assert.match(c.source, /saved\d+ :: xs\.copy\(\)/u);
+  assert.match(c.source, /saved\d+: xs\.copy\(\)/u);
   assert.equal(c.stdout.split("\n").filter((line) => line === "invalid").length, 6);
 });
 

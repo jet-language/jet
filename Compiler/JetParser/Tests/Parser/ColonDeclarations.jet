@@ -1,0 +1,196 @@
+// D-DECL-COLON1: every declaration is written `name: value`; the colon
+// pre-pass (Parser/ColonDeclarations.jet) reads each form as the item its
+// retired keyword head was, and reports the retired spellings as E0397.
+use jet_foundation.[Diagnostic, Program]
+
+colon_test_items: fn(program: Program) -> [String] {
+    rows := [String]{}
+    loop item in program.items {
+        row: if item == {
+            .Const(value) -> "const {value.name}"
+            .Struct(value) -> "struct {value.name}"
+            .Enum(value) -> "enum {value.name}"
+            .Trait(value) -> "trait {value.name}"
+            .Impl(value) -> "impl {value.type_name} {value.methods.len()}"
+            .Func(value) -> "fn {value.name}"
+            .Module(value) -> "module {value.name}"
+            .CodeModule(value) -> "code module {value.name}"
+            .GenericModule(value) -> "generic module {value.name}"
+            .ModuleAlias(value) -> "module alias {value.name} = {value.target}"
+            else -> "other"
+        }
+        &rows.push(row)
+    }
+    rows
+}
+
+colon_test_trait: fn(program: Program, name: String) -> String {
+    loop item in program.items {
+        if item == .Trait(value) && value.name == name {
+            return "{value.supertraits.join(",")} / {value.methods.len()}"
+        }
+    }
+    panic("expected trait {name}")
+}
+
+#Test("colon declarations read as the items their keyword heads declared") {
+    program: parser_test_program(
+    `limit: 3
+Point: struct {
+    x: Int
+}
+Mode: enum {
+    A
+}
+Shape: trait {
+    area: fn(self) -> Int
+}
+Named: trait: Shape {
+    name: fn(self) -> String
+}
+Both: trait: [Shape, Named] {}
+impl Point.Shape {
+    area: fn(self) -> Int { self.x }
+}
+math: module {
+    twice: fn(v: Int) -> Int { v * 2 }
+}
+run: fn() {}
+`,
+    )
+    assert_eq(colon_test_items(program).join("; "), "const limit; struct Point; enum Mode; trait Shape; trait Named; trait Both; impl Point 1; code module math; fn run")
+    assert_eq(colon_test_trait(program, "Shape"), " / 1")
+    assert_eq(colon_test_trait(program, "Named"), "Shape / 1")
+    assert_eq(colon_test_trait(program, "Both"), "Shape,Named / 0")
+}
+
+#Test("one-line type, trait and impl bodies hold colon members") {
+    program: parser_test_program(
+    `Point: struct { x: Int, y: Int }
+Shape: trait { area: fn(self) -> Int }
+impl Point.Shape { area: fn(self) -> Int { self.x * self.y } }
+run: fn() {}
+`,
+    )
+    assert_eq(colon_test_items(program).join("; "), "struct Point; trait Shape; impl Point 1; fn run")
+    assert_eq(colon_test_trait(program, "Shape"), " / 1")
+}
+
+#Test("a dashed module name declares a module while a-b in code stays a subtraction") {
+    source: `web-app: module {
+}
+run: fn() {
+    a: 3
+    b: 1
+    print(a-b)
+}
+`
+    assert_eq(colon_test_items(parser_test_program(source)).join("; "), "module web-app; fn run")
+    formatted: parser_test_stable(source)
+    assert(formatted.contains("web-app: module"), formatted)
+    assert(formatted.contains("print(a - b)"), formatted)
+}
+
+#Test("a binding of a module path is an instance or an alias, any other binding a constant") {
+    program: parser_test_program(
+    `cache: module<K>(capacity: Int) {
+    size: fn() -> Int { capacity }
+}
+int_cache: cache<Int>(32)
+short: int_cache
+limit: 4
+other: limit
+run: fn() { print(int_cache.size()) }
+`,
+    )
+    assert_eq(colon_test_items(program).join("; "), "generic module cache; module alias int_cache = cache; module alias short = int_cache; const limit; const other; fn run")
+}
+
+#Test("a block opened after a condition holds bindings, not a record literal") {
+    source: `run: fn() {
+    ready: true
+    if ready {
+        count: 1
+        print(count)
+    }
+}
+`
+    _: parser_test_program(source)
+    assert(parser_test_stable(source).contains("        count: 1\n        print(count)\n"))
+}
+
+#Test("each retired spelling reports E0397 with the edit to its colon spelling") {
+    source: `use math :: core.math
+
+limit :: 3
+
+struct Point {
+    x: Int
+}
+
+enum Mode {
+    Fast
+}
+
+trait Shape {
+    fn area(self) -> Int
+}
+
+impl Point.Shape {
+    fn area(self) -> Int { self.x }
+}
+
+module geometry {
+    fn twice(value: Int) -> Int { value * 2 }
+}
+
+fn run() {
+    point :: Point{x: limit}
+    print("{math.abs(geometry.twice(point.area()))}")
+}
+`
+    fixed: `use math: core.math
+
+limit: 3
+
+Point: struct {
+    x: Int
+}
+
+Mode: enum {
+    Fast
+}
+
+Shape: trait {
+    area: fn(self) -> Int
+}
+
+impl Point.Shape {
+    area: fn(self) -> Int { self.x }
+}
+
+geometry: module {
+    twice: fn(value: Int) -> Int { value * 2 }
+}
+
+run: fn() {
+    point: Point{x: limit}
+    print("{math.abs(geometry.twice(point.area()))}")
+}
+`
+    diagnostics: parser_test_errors(source)
+    edits := [String]{}
+    applied := source
+    loop index in 0..<diagnostics.len() {
+        diagnostic: diagnostics[diagnostics.len() - 1 - index]
+        assert_eq(diagnostic.code, "E0397")
+        edit: diagnostic.edit ?? panic("E0397 carries its edit")
+        &edits.push(edit.new_text)
+        bytes: applied.bytes()
+        applied = "{String.from_bytes_lossy(bytes[0..<edit.span.start])}{edit.new_text}{String.from_bytes_lossy(bytes[edit.span.end..<bytes.len()])}"
+    }
+    &edits.reverse()
+    assert_eq(edits.join(" | "), ": | : | Point: struct | Mode: enum | Shape: trait | area: fn | area: fn | geometry: module | twice: fn | run: fn | :")
+    assert_eq(applied, fixed)
+    _: parser_test_program(fixed)
+}

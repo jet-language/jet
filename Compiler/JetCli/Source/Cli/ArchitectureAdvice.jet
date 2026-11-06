@@ -2,7 +2,7 @@
 // invariant or an automatic refactor.
 use jet_foundation.[Span, type_name]
 
-struct JetCLIArchitectureCall {
+JetCLIArchitectureCall: struct {
     caller_key: String
     caller_name: String
     caller_module: String
@@ -15,13 +15,13 @@ struct JetCLIArchitectureCall {
     call_span: Span
 }
 
-struct JetCLIArchitectureEvidence {
+JetCLIArchitectureEvidence: struct {
     role: String
     module_path: String
     span: Span
 }
 
-struct JetCLIArchitectureRow {
+JetCLIArchitectureRow: struct {
     kind: String
     subject: String
     scope: String
@@ -30,29 +30,29 @@ struct JetCLIArchitectureRow {
     uncertainty: [String]
 }
 
-struct JetCLIArchitectureInspection {
+JetCLIArchitectureInspection: struct {
     rows: [JetCLIArchitectureRow]
     reason: String?
     check: JetCLIStatusValue?
 }
 
-fn jet_cli_architecture_key(definition: JetCLISemDef) -> String Never! {
+jet_cli_architecture_key: fn(definition: JetCLISemDef) -> String Never! {
     "{definition.module_path}:{definition.def_span.start}..{definition.def_span.end}"
 }
 
-fn jet_cli_architecture_calls(index: JetCLISemIndex) -> [JetCLIArchitectureCall] Never! {
+jet_cli_architecture_calls: fn(index: JetCLISemIndex) -> [JetCLIArchitectureCall] Never! {
     calls := [JetCLIArchitectureCall]{}
     loop edge in index.calls {
         caller := JetCLISemDef?{None}
-        short :: edge.caller.split("::").to_list()
+        short: edge.caller.split("::").to_list()
         loop row in index.definitions {
-            definition :: row.def
+            definition: row.def
             if definition.module_path == edge.module_path && (definition.name == edge.caller || (short.len() > 0 && definition.name == short[short.len() - 1])) {
                 caller = Val(definition)
                 break
             }
         }
-        from :: caller ?? next
+        from: caller ?? next
         reference := JetCLISemRef?{None}
         loop candidate in index.references {
             if candidate.module_path != edge.module_path || candidate.target == None || candidate.span.start > edge.span.end || edge.span.start > candidate.span.end -> next
@@ -61,25 +61,25 @@ fn jet_cli_architecture_calls(index: JetCLISemIndex) -> [JetCLIArchitectureCall]
             }
             reference = Val(candidate)
         }
-        selected :: reference ?? next
-        target :: selected.target ?? next
+        selected: reference ?? next
+        target: selected.target ?? next
         callee := JetCLISemDef?{None}
         loop row in index.definitions {
-            definition :: row.def
+            definition: row.def
             if definition.module_path == target.module_path && definition.def_span == target.def_span {
                 callee = Val(definition)
                 break
             }
         }
-        to :: callee ?? next
-        callable :: jet_cli_sem_callable(to) ?? next
-        result :: if callable.return_type == .Val(ty) -> Val(type_name(ty)) else -> String?{None}
+        to: callee ?? next
+        callable: jet_cli_sem_callable(to) ?? next
+        result: if callable.return_type == .Val(ty) -> Val(type_name(ty)) else -> String?{None}
         &calls.push(JetCLIArchitectureCall{caller_key: jet_cli_architecture_key(from), caller_name: from.qualified_name, caller_module: from.module_path, caller_span: from.def_span, callee_key: jet_cli_architecture_key(to), callee_name: to.qualified_name, callee_module: to.module_path, callee_span: to.def_span, callee_return: result, call_span: edge.span})
     }
     calls
 }
 
-fn jet_cli_architecture_unique(values: &[String]) Never! {
+jet_cli_architecture_unique: fn(values: &[String]) Never! {
     &values.sort()
     unique := [String]{}
     loop value in values {
@@ -88,7 +88,7 @@ fn jet_cli_architecture_unique(values: &[String]) Never! {
     values = unique
 }
 
-fn jet_cli_architecture_row(index: JetCLISemIndex, kind: String, subject: String, calls: [JetCLIArchitectureCall], note: String) -> JetCLIArchitectureRow Never! {
+jet_cli_architecture_row: fn(index: JetCLISemIndex, kind: String, subject: String, calls: [JetCLIArchitectureCall], note: String) -> JetCLIArchitectureRow Never! {
     evidence := [JetCLIArchitectureEvidence]{}
     evidence_keys := [String]{}
     boundaries := [String]{}
@@ -96,13 +96,13 @@ fn jet_cli_architecture_row(index: JetCLISemIndex, kind: String, subject: String
     loop call in calls {
         &boundaries.push("{call.caller_module} -> {call.callee_module}")
         if call.caller_module != call.callee_module -> cross_module = true
-        entries :: [JetCLIArchitectureEvidence]{
+        entries: [JetCLIArchitectureEvidence]{
             {role: "caller-definition", module_path: call.caller_module, span: call.caller_span},
             {role: "callee-definition", module_path: call.callee_module, span: call.callee_span},
             {role: "checked-call-site", module_path: call.caller_module, span: call.call_span},
         }
         loop entry in entries {
-            key :: "{entry.role}:{entry.module_path}:{entry.span.start}:{entry.span.end}"
+            key: "{entry.role}:{entry.module_path}:{entry.span.start}:{entry.span.end}"
             if !evidence_keys.contains(key) {
                 &evidence_keys.push(key)
                 &evidence.push(entry)
@@ -119,8 +119,8 @@ fn jet_cli_architecture_row(index: JetCLISemIndex, kind: String, subject: String
     JetCLIArchitectureRow{kind: kind, subject: subject, scope: if cross_module -> "cross-module" else -> "same-module", evidence: evidence, boundaries: boundaries, uncertainty: [String]{note, "the checked call graph proves references, not a business invariant", "operator review may reject this candidate; no refactor or policy is applied"}}
 }
 
-fn jet_cli_architecture_rows(index: JetCLISemIndex) -> [JetCLIArchitectureRow] Never! {
-    calls :: jet_cli_architecture_calls(index)
+jet_cli_architecture_rows: fn(index: JetCLISemIndex) -> [JetCLIArchitectureRow] Never! {
+    calls: jet_cli_architecture_calls(index)
     callee_keys := [String]{}
     caller_keys := [String]{}
     loop call in calls {
@@ -140,8 +140,8 @@ fn jet_cli_architecture_rows(index: JetCLISemIndex) -> [JetCLIArchitectureRow] N
             if !callers.contains(call.caller_key) -> &callers.push(call.caller_key)
         }
         if callers.len() < 2 -> next
-        subject :: group[0].callee_name
-        identity :: "shared-callee:{subject}"
+        subject: group[0].callee_name
+        identity: "shared-callee:{subject}"
         if seen.contains(identity) -> next
         &seen.push(identity)
         &rows.push(jet_cli_architecture_row(index, "shared-callee", subject, group, "one checked callable is consumed by multiple callers; review whether they must preserve one invariant"))
@@ -159,8 +159,8 @@ fn jet_cli_architecture_rows(index: JetCLISemIndex) -> [JetCLIArchitectureRow] N
             }
         }
         if callees.len() < 2 || returns.len() != 1 -> next
-        subject :: group[0].caller_name
-        identity :: "consumer-agreement:{subject}"
+        subject: group[0].caller_name
+        identity: "consumer-agreement:{subject}"
         if seen.contains(identity) -> next
         &seen.push(identity)
         &rows.push(jet_cli_architecture_row(index, "consumer-agreement", subject, group, "one checked consumer joins multiple same-result call paths; review whether their results must agree"))
@@ -170,7 +170,7 @@ fn jet_cli_architecture_rows(index: JetCLISemIndex) -> [JetCLIArchitectureRow] N
     rows
 }
 
-fn jet_cli_architecture_behavior() -> [JetCLIStatusValue] Never! {
+jet_cli_architecture_behavior: fn() -> [JetCLIStatusValue] Never! {
     [JetCLIStatusValue]{
         jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("name", jet_cli_status_text("checked_reference_resolution")), jet_cli_status_field("status", jet_cli_status_text("passed")), jet_cli_status_field("detail", jet_cli_status_text("the compiler semantic index resolved the definitions and call sites"))}),
         jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("name", jet_cli_status_text("consumer_behavior")), jet_cli_status_field("status", jet_cli_status_text("not_run")), jet_cli_status_field("detail", jet_cli_status_text("this read-only inspection does not execute user code"))}),
@@ -178,10 +178,10 @@ fn jet_cli_architecture_behavior() -> [JetCLIStatusValue] Never! {
     }
 }
 
-fn jet_cli_architecture_value(inspection: JetCLIArchitectureInspection) -> JetCLIStatusValue Never! {
+jet_cli_architecture_value: fn(inspection: JetCLIArchitectureInspection) -> JetCLIStatusValue Never! {
     rows := [JetCLIStatusValue]{}
     loop row in inspection.rows {
-        evidence :: loop entry in row.evidence -> jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("role", jet_cli_status_text(entry.role)), jet_cli_status_field("module", jet_cli_status_text(entry.module_path)), jet_cli_status_field("span", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("start", jet_cli_status_int(entry.span.start)), jet_cli_status_field("end", jet_cli_status_int(entry.span.end))}))})
+        evidence: loop entry in row.evidence -> jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("role", jet_cli_status_text(entry.role)), jet_cli_status_field("module", jet_cli_status_text(entry.module_path)), jet_cli_status_field("span", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("start", jet_cli_status_int(entry.span.start)), jet_cli_status_field("end", jet_cli_status_int(entry.span.end))}))})
         &rows.push(jet_cli_status_object([JetCLIStatusField]{
             jet_cli_status_field("kind", jet_cli_status_text(row.kind)),
             jet_cli_status_field("subject", jet_cli_status_text(row.subject)),
@@ -198,7 +198,7 @@ fn jet_cli_architecture_value(inspection: JetCLIArchitectureInspection) -> JetCL
     jet_cli_status_object(fields)
 }
 
-fn jet_cli_architecture_text(inspection: JetCLIArchitectureInspection) -> String Never! {
+jet_cli_architecture_text: fn(inspection: JetCLIArchitectureInspection) -> String Never! {
     output := "architecture advice (advisory, operator may reject):\n"
     if inspection.reason == .Val(reason) {
         output = "{output}  status: unavailable — {reason}\n"

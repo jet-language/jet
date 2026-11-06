@@ -7,26 +7,26 @@
 // the spec before a plan lays out its target files. Game bundles use the same
 // model; `BundleKind` records the intent for receipts.
 
-PACKAGE_BUNDLE_SCHEMA_VERSION :: 1
-PACKAGE_BUNDLE_FORMAT :: "jet.package.bundle"
-PACKAGE_BUNDLE_RECEIPT_SCHEMA :: "jet.package.receipt"
-PACKAGE_UPDATE_MANIFEST_SCHEMA :: "jet.package.update"
+PACKAGE_BUNDLE_SCHEMA_VERSION: 1
+PACKAGE_BUNDLE_FORMAT: "jet.package.bundle"
+PACKAGE_BUNDLE_RECEIPT_SCHEMA: "jet.package.receipt"
+PACKAGE_UPDATE_MANIFEST_SCHEMA: "jet.package.update"
 
 // Canonical bounds shared by the package receipt and the generated game
 // crash reporter. The reporter keeps these in memory and persists at most
 // one latest report; upload stays disabled until an adapter adds a transport.
-GAME_CRASH_MAX_STACKS :: 32
-GAME_CRASH_MAX_LOGS :: 256
-GAME_CRASH_MAX_PERSISTED :: 1
-GAME_CRASH_REPORTER_ABI :: "jet-game-crash-reporter-v1"
+GAME_CRASH_MAX_STACKS: 32
+GAME_CRASH_MAX_LOGS: 256
+GAME_CRASH_MAX_PERSISTED: 1
+GAME_CRASH_REPORTER_ABI: "jet-game-crash-reporter-v1"
 
 // The explicit package target; nothing is inferred from the host process.
-enum BundleTarget {
+BundleTarget: enum {
     LinuxAppImage
     MacOSApp
     WindowsMsix
 
-    fn as_str(self) -> String Never! {
+    as_str: fn(self) -> String Never! {
         if self == {
             .LinuxAppImage -> "linux-appimage"
             .MacOSApp -> "macos-app"
@@ -34,7 +34,7 @@ enum BundleTarget {
         }
     }
 
-    fn parse(value: String) -> BundleTarget? Never! {
+    parse: fn(value: String) -> BundleTarget? Never! {
         if pkg_ascii_lower(value.trim()) == {
             "linux-appimage" | "linux" | "appimage" -> Val(BundleTarget.LinuxAppImage)
             "macos-app" | "macos" | "mac" | "app" -> Val(BundleTarget.MacOSApp)
@@ -43,7 +43,7 @@ enum BundleTarget {
         }
     }
 
-    fn artifact_suffix(self) -> String Never! {
+    artifact_suffix: fn(self) -> String Never! {
         if self == {
             .LinuxAppImage -> ".AppImage"
             .MacOSApp -> ".app"
@@ -53,11 +53,11 @@ enum BundleTarget {
 }
 
 // Whether the shared bundle is for a desktop application or a game.
-enum BundleKind {
+BundleKind: enum {
     Desktop
     Game
 
-    fn as_str(self) -> String Never! {
+    as_str: fn(self) -> String Never! {
         if self == {
             .Desktop -> "desktop"
             .Game -> "game"
@@ -66,7 +66,7 @@ enum BundleKind {
 }
 
 // The executable the compiler/build adapter supplies.
-struct BundleExecutable {
+BundleExecutable: struct {
     // File name inside the target layout.
     name: String
     // Source path recorded in the receipt; this model never resolves it.
@@ -74,18 +74,18 @@ struct BundleExecutable {
     // Exact executable bytes placed in the layout.
     bytes: [U8]
 
-    fn digest(self) -> String Never! {
+    digest: fn(self) -> String Never! {
         pkg_sha256_hex(self.bytes)
     }
 }
 
-enum IconFormat {
+IconFormat: enum {
     PNG
     Icns
     Ico
     SVG
 
-    fn as_str(self) -> String Never! {
+    as_str: fn(self) -> String Never! {
         if self == {
             .PNG -> "png"
             .Icns -> "icns"
@@ -94,7 +94,7 @@ enum IconFormat {
         }
     }
 
-    fn parse(value: String) -> IconFormat? Never! {
+    parse: fn(value: String) -> IconFormat? Never! {
         extension := value.trim()
         loop extension.starts_with(".") -> extension = extension.removeprefix(".")
         if pkg_ascii_lower(extension) == {
@@ -106,12 +106,12 @@ enum IconFormat {
         }
     }
 
-    fn extension(self) -> String Never! {
+    extension: fn(self) -> String Never! {
         self.as_str()
     }
 
     // Declaration order, the reference's derived `Ord`.
-    fn rank(self) -> Int Never! {
+    rank: fn(self) -> Int Never! {
         if self == {
             .PNG -> 0
             .Icns -> 1
@@ -123,44 +123,44 @@ enum IconFormat {
 
 // An icon payload. `source` is receipt provenance only; the bytes are the
 // authority for the emitted artifact.
-struct BundleIcon {
+BundleIcon: struct {
     name: String
     format: IconFormat
     size: Int
     source: String?
     bytes: [U8]
 
-    fn new(name: String, format: IconFormat, size: Int, bytes: [U8]) -> BundleIcon Never! {
+    new: fn(name: String, format: IconFormat, size: Int, bytes: [U8]) -> BundleIcon Never! {
         BundleIcon{name: name, format: format, size: size, source: None, bytes: bytes}
     }
 
-    fn with_source(self, source: String) -> BundleIcon Never! {
+    with_source: fn(self, source: String) -> BundleIcon Never! {
         out := self
         out.source = Val(source)
         out
     }
 
-    fn digest(self) -> String Never! {
+    digest: fn(self) -> String Never! {
         pkg_sha256_hex(self.bytes)
     }
 }
 
 // A signer or verification adapter input; the adapter owns the command.
-struct SigningHookInput {
+SigningHookInput: struct {
     path: String
     digest: String
 
-    fn new(path: String, digest: String) -> SigningHookInput Never! {
+    new: fn(path: String, digest: String) -> SigningHookInput Never! {
         SigningHookInput{path: path, digest: digest}
     }
 }
 
-enum SigningPhase {
+SigningPhase: enum {
     PreSign
     PostSign
     Verify
 
-    fn as_str(self) -> String Never! {
+    as_str: fn(self) -> String Never! {
         if self == {
             .PreSign -> "pre-sign"
             .PostSign -> "post-sign"
@@ -168,7 +168,7 @@ enum SigningPhase {
         }
     }
 
-    fn rank(self) -> Int Never! {
+    rank: fn(self) -> Int Never! {
         if self == {
             .PreSign -> 0
             .PostSign -> 1
@@ -179,14 +179,14 @@ enum SigningPhase {
 }
 
 // A typed signing hook declaration; this module executes none.
-struct SigningHook {
+SigningHook: struct {
     name: String
     phase: SigningPhase
     program: String
     args: [String]
     inputs: [SigningHookInput]
 
-    fn new(name: String, phase: SigningPhase, program: String) -> SigningHook Never! {
+    new: fn(name: String, phase: SigningPhase, program: String) -> SigningHook Never! {
         SigningHook{name: name, phase: phase, program: program, args: [String]{}, inputs: [SigningHookInput]{}}
     }
 
@@ -195,47 +195,47 @@ struct SigningHook {
 // A user-declared updater endpoint. The checked plan fills the manifest's
 // artifact and payload facts from the exact executable payload; the receipt
 // carries the final materialized artifact digest.
-struct UpdaterSpec {
+UpdaterSpec: struct {
     channel: String
     url: String
     signature_url: String?
     release_notes_url: String?
 
-    fn new(channel: String, url: String) -> UpdaterSpec Never! {
+    new: fn(channel: String, url: String) -> UpdaterSpec Never! {
         UpdaterSpec{channel: channel, url: url, signature_url: None, release_notes_url: None}
     }
 }
 
 // Human- and platform-facing metadata. `identifier` is the stable package
 // identity; display text may contain spaces and Unicode.
-struct BundleMetadata {
+BundleMetadata: struct {
     identifier: String
     display_name: String
     publisher: String
     description: String
     categories: [String]
 
-    fn new(identifier: String, display_name: String) -> BundleMetadata Never! {
+    new: fn(identifier: String, display_name: String) -> BundleMetadata Never! {
         BundleMetadata{identifier: identifier, display_name: display_name, publisher: "", description: "", categories: [String]{}}
     }
 }
 
 // One deterministic asset payload carried by a game bundle plan.
-struct GameBundleAsset {
+GameBundleAsset: struct {
     path: String
     mode: Int
     bytes: [U8]
 
-    fn new(path: String, mode: Int, bytes: [U8]) -> GameBundleAsset Never! {
+    new: fn(path: String, mode: Int, bytes: [U8]) -> GameBundleAsset Never! {
         GameBundleAsset{path: path, mode: mode, bytes: bytes}
     }
 
-    fn digest(self) -> String Never! {
+    digest: fn(self) -> String Never! {
         pkg_sha256_hex(self.bytes)
     }
 }
 
-struct GameCrashReporterSpec {
+GameCrashReporterSpec: struct {
     installation: String
     upload_policy: String
     routing: String
@@ -245,21 +245,21 @@ struct GameCrashReporterSpec {
     retention_path: String
     retention_limit: Int
 
-    fn not_installed() -> GameCrashReporterSpec Never! {
+    not_installed: fn() -> GameCrashReporterSpec Never! {
         GameCrashReporterSpec{installation: "not-installed", upload_policy: "never", routing: "local", memory_stacks: GAME_CRASH_MAX_STACKS, memory_logs: GAME_CRASH_MAX_LOGS, retention_mode: "none", retention_path: "", retention_limit: 0}
     }
 
-    fn planned() -> GameCrashReporterSpec Never! {
+    planned: fn() -> GameCrashReporterSpec Never! {
         GameCrashReporterSpec{installation: "planned", upload_policy: "never", routing: "local", memory_stacks: GAME_CRASH_MAX_STACKS, memory_logs: GAME_CRASH_MAX_LOGS, retention_mode: "bounded-persisted", retention_path: "crash-reports", retention_limit: GAME_CRASH_MAX_PERSISTED}
     }
 
-    fn installed() -> GameCrashReporterSpec Never! {
+    installed: fn() -> GameCrashReporterSpec Never! {
         GameCrashReporterSpec{installation: "installed", upload_policy: "never", routing: "local", memory_stacks: GAME_CRASH_MAX_STACKS, memory_logs: GAME_CRASH_MAX_LOGS, retention_mode: "bounded-persisted", retention_path: "crash-reports", retention_limit: GAME_CRASH_MAX_PERSISTED}
     }
 
     // The reporter, consent, and runtime facts agree with the canonical
     // bounds; only an active reporter retains reports.
-    fn validate(self, reporter: String, consent: String) BundleError! {
+    validate: fn(self, reporter: String, consent: String) BundleError! {
         if reporter == {
             "off" | "on" | "opt-in" -> {}
             else -> return Err(BundleError.InvalidField{field: "game.crash_reporter", reason: "must be `off`, `on`, or `opt-in`"})
@@ -296,7 +296,7 @@ struct GameCrashReporterSpec {
 
 // Game-only facts attached to the shared package plan. The package command
 // computes them; the bundler owns their canonical layout and receipt.
-struct GameBundleSpec {
+GameBundleSpec: struct {
     profile_name: String
     export_preset: String
     source_revision: String
@@ -310,7 +310,7 @@ struct GameBundleSpec {
     crash_runtime: GameCrashReporterSpec
     assets: [GameBundleAsset]
 
-    fn new(profile_name: String, export_preset: String, source_revision: String, backend: String, renderer: String, cook_mode: String) -> GameBundleSpec Never! {
+    new: fn(profile_name: String, export_preset: String, source_revision: String, backend: String, renderer: String, cook_mode: String) -> GameBundleSpec Never! {
         GameBundleSpec{
             profile_name: profile_name,
             export_preset: export_preset,
@@ -329,7 +329,7 @@ struct GameBundleSpec {
 }
 
 // All inputs for one target-specific bundle layout.
-struct BundleSpec {
+BundleSpec: struct {
     kind: BundleKind
     target: BundleTarget
     package: String
@@ -341,19 +341,19 @@ struct BundleSpec {
     updater: UpdaterSpec?
     game: GameBundleSpec?
 
-    fn new(kind: BundleKind, target: BundleTarget, package: String, version: String, executable: BundleExecutable, metadata: BundleMetadata) -> BundleSpec Never! {
+    new: fn(kind: BundleKind, target: BundleTarget, package: String, version: String, executable: BundleExecutable, metadata: BundleMetadata) -> BundleSpec Never! {
         BundleSpec{kind: kind, target: target, package: package, version: version, executable: executable, metadata: metadata, icons: [BundleIcon]{}, signing_hooks: [SigningHook]{}, updater: None, game: None}
     }
 
-    fn desktop(target: BundleTarget, package: String, version: String, executable: BundleExecutable, metadata: BundleMetadata) -> BundleSpec Never! {
+    desktop: fn(target: BundleTarget, package: String, version: String, executable: BundleExecutable, metadata: BundleMetadata) -> BundleSpec Never! {
         BundleSpec.new(BundleKind.Desktop, target, package, version, executable, metadata)
     }
 
-    fn game_bundle(target: BundleTarget, package: String, version: String, executable: BundleExecutable, metadata: BundleMetadata) -> BundleSpec Never! {
+    game_bundle: fn(target: BundleTarget, package: String, version: String, executable: BundleExecutable, metadata: BundleMetadata) -> BundleSpec Never! {
         BundleSpec.new(BundleKind.Game, target, package, version, executable, metadata)
     }
 
-    fn validate(self) BundleError! {
+    validate: fn(self) BundleError! {
         pkg_bundle_validate_component("package", self.package)
         pkg_bundle_validate_component("version", self.version)
         pkg_bundle_validate_component("executable.name", self.executable.name)
@@ -427,7 +427,7 @@ struct BundleSpec {
     }
 
     // Target-specific icon formats and identity rules.
-    fn validate_target_metadata(self) BundleError! {
+    validate_target_metadata: fn(self) BundleError! {
         if self.target == {
             .LinuxAppImage -> pkg_bundle_require_icon_formats(self.icons, [IconFormat]{IconFormat.PNG, IconFormat.SVG}, "is not supported by linux-appimage")
             .MacOSApp -> pkg_bundle_require_icon_formats(self.icons, [IconFormat]{IconFormat.Icns}, "macos-app requires icns icons")
@@ -445,14 +445,14 @@ struct BundleSpec {
 }
 
 #Error
-enum BundleError {
+BundleError: enum {
     EmptyField(String)
     InvalidField(field: String, reason: String)
     InvalidPath(field: String, path: String)
     DuplicatePath(String)
     InvalidWindowsVersion(String)
 
-    fn message(self) -> String Never! {
+    message: fn(self) -> String Never! {
         if self == {
             .EmptyField(field) -> "bundle field `{field}` is empty"
             .InvalidField(field, reason) -> "bundle field `{field}` {reason}"
@@ -464,7 +464,7 @@ enum BundleError {
 }
 
 // Every icon uses one of the target's formats.
-fn pkg_bundle_require_icon_formats(icons: [BundleIcon], allowed: [IconFormat], reason: String) BundleError! {
+pkg_bundle_require_icon_formats: fn(icons: [BundleIcon], allowed: [IconFormat], reason: String) BundleError! {
     loop icon in icons {
         if !allowed.contains(icon.format) -> return Err(BundleError.InvalidField{field: "icon.format", reason: reason})
     }
@@ -472,20 +472,20 @@ fn pkg_bundle_require_icon_formats(icons: [BundleIcon], allowed: [IconFormat], r
 
 // ASCII letters, digits, dots, and hyphens, starting alphanumeric, at most
 // 50 bytes.
-fn pkg_bundle_msix_identifier(identifier: String) -> Bool Never! {
-    raw :: identifier.bytes()
+pkg_bundle_msix_identifier: fn(identifier: String) -> Bool Never! {
+    raw: identifier.bytes()
     if raw.len() == 0 || raw.len() > 50 -> return false
-    first :: Int.from_u8(raw[0])
+    first: Int.from_u8(raw[0])
     if !pkg_bytes_is_word(first) || first == 95 -> return false
     loop byte in raw {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         if code == 95 || (!pkg_bytes_is_word(code) && code != 46 && code != 45) -> return false
     }
     true
 }
 
 // A package-relative asset path of plain `/`-separated names.
-fn pkg_bundle_validate_asset_path(path: String) BundleError! {
+pkg_bundle_validate_asset_path: fn(path: String) BundleError! {
     if path == "" || path.contains("\\") || pkg_text_has_control(path) -> return Err(BundleError.InvalidPath{field: "game.asset", path: path})
     loop component in path.split("/") {
         if component == "" || component == "." || component == ".." -> return Err(BundleError.InvalidPath{field: "game.asset", path: path})
@@ -493,12 +493,12 @@ fn pkg_bundle_validate_asset_path(path: String) BundleError! {
 }
 
 // A non-blank file name component without path or control characters.
-fn pkg_bundle_validate_component(field: String, value: String) BundleError! {
+pkg_bundle_validate_component: fn(field: String, value: String) BundleError! {
     if value.trim() == "" -> return Err(BundleError.EmptyField(field))
     if pkg_text_has_control(value) || pkg_bundle_has_path_character(value) -> return Err(BundleError.InvalidField{field: field, reason: "contains a path or control character"})
 }
 
-fn pkg_bundle_has_path_character(value: String) -> Bool Never! {
+pkg_bundle_has_path_character: fn(value: String) -> Bool Never! {
     loop byte in value.bytes() {
         if Int.from_u8(byte) == {
             47 | 92 | 58 | 60 | 62 | 34 | 124 | 63 | 42 -> return true
@@ -508,27 +508,27 @@ fn pkg_bundle_has_path_character(value: String) -> Bool Never! {
     false
 }
 
-fn pkg_bundle_validate_text(field: String, value: String) BundleError! {
+pkg_bundle_validate_text: fn(field: String, value: String) BundleError! {
     if pkg_text_has_control(value) -> return Err(BundleError.InvalidField{field: field, reason: "contains a control character"})
 }
 
 // A non-blank, control-free source path or URL.
-fn pkg_bundle_validate_source(field: String, value: String) BundleError! {
+pkg_bundle_validate_source: fn(field: String, value: String) BundleError! {
     if value.trim() == "" -> return Err(BundleError.EmptyField(field))
     if pkg_text_has_control(value) -> return Err(BundleError.InvalidPath{field: field, path: value})
 }
 
 // A Windows MSIX version: one to four dot-separated decimal parts, each at
 // most 65535, normalized to four parts without leading zeros.
-fn pkg_bundle_windows_version(version: String) -> String BundleError! {
-    parts :: version.split(".").to_list()
+pkg_bundle_windows_version: fn(version: String) -> String BundleError! {
+    parts: version.split(".").to_list()
     if parts.len() == 0 || parts.len() > 4 -> return Err(BundleError.InvalidWindowsVersion(version))
     normalized := [String]{}
     loop part in parts {
         if part == "" -> return Err(BundleError.InvalidWindowsVersion(version))
         value := 0
         loop byte in part.bytes() {
-            code :: Int.from_u8(byte)
+            code: Int.from_u8(byte)
             if code < 48 || code > 57 -> return Err(BundleError.InvalidWindowsVersion(version))
             value = value * 10 + code - 48
             if value > 65535 -> return Err(BundleError.InvalidWindowsVersion(version))

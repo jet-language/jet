@@ -1,20 +1,20 @@
 
 use {
-    tasks :: core.tasks
-    time :: core.time
+    tasks: core.tasks
+    time: core.time
 }
 
-fn run() {
-    (sender, receiver) :: channel<Int>()
-    second_sender :: sender.copy()
+run: fn() {
+    (sender, receiver): channel<Int>()
+    second_sender: sender.copy()
     task.group limited(limit: 1) {
-        first :: task {
+        first: task {
             sender.send(1)
             time.sleep(25ms)
             sender.send(2)
         }
         receiver.receive() ?? 0
-        second :: task {
+        second: task {
             second_sender.send(3)
         }
         print(receiver.receive() ?? 0)

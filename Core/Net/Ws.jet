@@ -1,11 +1,11 @@
 use {
-    core :: core
-    url :: core.net.url
-    http :: core.http
+    core: core
+    url: core.net.url
+    http: core.http
     core.http.[HTTPRequest]
 }
 #Error
-enum WsError {
+WsError: enum {
     InvalidURL
     InvalidHandshake
     Protocol
@@ -21,11 +21,11 @@ enum WsError {
 // URL and handshake shape before crossing the typed boundary. Control bytes
 // and spaces are refused in the text as written: parsing percent-encodes
 // them, which would carry a hostile URL through to the handshake.
-fn connect(url_text: String) -> WsConn WsError! {
+connect: fn(url_text: String) -> WsConn WsError! {
     loop byte in url_text.bytes() {
         if byte <= (U8{32}) || byte == (U8{127}) -> return Err(WsError.InvalidURL)
     }
-    parsed :: url.parse(url_text) ?? return Err(WsError.InvalidURL)
+    parsed: url.parse(url_text) ?? return Err(WsError.InvalidURL)
     if parsed.scheme() != "ws" -> return Err(WsError.UnsupportedTarget)
     if parsed.host() == None || parsed.userinfo().bytes().len() > 0 {
         return Err(WsError.InvalidURL)
@@ -35,28 +35,28 @@ fn connect(url_text: String) -> WsConn WsError! {
     core.net.ws.__connect(url.unparse(parsed))
 }
 
-fn upgrade(request: HTTPRequest) -> WsConn WsError! {
+upgrade: fn(request: HTTPRequest) -> WsConn WsError! {
     if request.method() != "GET" -> return Err(WsError.InvalidHandshake)
-    upgrade_header :: request.header("upgrade") ?? return Err(WsError.InvalidHandshake)
+    upgrade_header: request.header("upgrade") ?? return Err(WsError.InvalidHandshake)
     if !header_has_token(upgrade_header, "websocket") -> return Err(WsError.InvalidHandshake)
-    connection_header :: request.header("connection") ?? return Err(WsError.InvalidHandshake)
+    connection_header: request.header("connection") ?? return Err(WsError.InvalidHandshake)
     if !header_has_token(connection_header, "upgrade") -> return Err(WsError.InvalidHandshake)
-    version :: request.header("sec-websocket-version") ?? return Err(WsError.InvalidHandshake)
+    version: request.header("sec-websocket-version") ?? return Err(WsError.InvalidHandshake)
     if trim_ascii(version) != "13" -> return Err(WsError.InvalidHandshake)
-    key :: request.header("sec-websocket-key") ?? return Err(WsError.InvalidHandshake)
+    key: request.header("sec-websocket-key") ?? return Err(WsError.InvalidHandshake)
     if key.bytes().len() == 0 || key.bytes().len() > 256 -> return Err(WsError.InvalidHandshake)
-    fd :: http.__upgrade_claim(request) ?? return Err(WsError.InvalidHandshake)
+    fd: http.__upgrade_claim(request) ?? return Err(WsError.InvalidHandshake)
     core.net.ws.__upgrade(fd, trim_ascii(key))
 }
 
-fn header_has_token(value: String, wanted: String) -> Bool Never! {
-    raw :: ascii_lower(value).bytes()
-    target :: ascii_lower(wanted)
+header_has_token: fn(value: String, wanted: String) -> Bool Never! {
+    raw: ascii_lower(value).bytes()
+    target: ascii_lower(wanted)
     start := 0
     i := 0
     loop i <= raw.len() {
         if i == raw.len() || raw[i] == (U8{44}) {
-            piece :: trim_ascii(slice(raw, start, i))
+            piece: trim_ascii(slice(raw, start, i))
             if piece == target -> return true
             start = i + 1
         }
@@ -65,32 +65,32 @@ fn header_has_token(value: String, wanted: String) -> Bool Never! {
     false
 }
 
-fn trim_ascii(text: String) -> String Never! {
-    raw :: text.bytes()
+trim_ascii: fn(text: String) -> String Never! {
+    raw: text.bytes()
     start := 0
     end := raw.len()
     loop start < end {
-        n :: Int.from_u8(raw[start])
+        n: Int.from_u8(raw[start])
         if n == 32 || n == 9 || n == 10 || n == 13 -> start = start + 1 else -> break
     }
     loop end > start {
-        n :: Int.from_u8(raw[end - 1])
+        n: Int.from_u8(raw[end - 1])
         if n == 32 || n == 9 || n == 10 || n == 13 -> end = end - 1 else -> break
     }
     if end <= start -> return ""
     slice(raw, start, end)
 }
 
-fn ascii_lower(text: String) -> String Never! {
+ascii_lower: fn(text: String) -> String Never! {
     out := [U8]{}
     loop b in text.bytes() {
-        n :: Int.from_u8(b)
+        n: Int.from_u8(b)
         if n >= 65 && n <= 90 -> &out.push(U8{n + 32}) else -> &out.push(b)
     }
     String.from_bytes(out) ?? ""
 }
 
-fn slice(raw: [U8], start: Int, end: Int) -> String Never! {
+slice: fn(raw: [U8], start: Int, end: Int) -> String Never! {
     out := [U8]{}
     i := start
     loop {

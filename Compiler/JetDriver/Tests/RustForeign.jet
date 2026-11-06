@@ -11,8 +11,8 @@ use {
     ]
 }
 
-fn rust_foreign_test_facts(source: String) -> JetDriverRustForeignFacts {
-    parsed :: parse_source(source.bytes())
+rust_foreign_test_facts: fn(source: String) -> JetDriverRustForeignFacts {
+    parsed: parse_source(source.bytes())
     assert(parsed.diagnostics.len() == 0)
     entries := [JetDriverRustForeignEntry]{}
     records := JetDriverRustForeignRecordIndex{records: [], names: [String:String]{}, aliases: [String:Type]{}}
@@ -20,8 +20,8 @@ fn rust_foreign_test_facts(source: String) -> JetDriverRustForeignFacts {
     JetDriverRustForeignFacts{entries: entries, record_source: "", record_names: records.names}
 }
 #Test("native Rust helpers preserve declared dependency set and slot ABI") {
-    facts :: rust_foreign_test_facts("extern rust \"base64@0.22\" {{ fn encode(s: String) -> String = \"base64::encode\" }}")
-    plan :: jet_driver_rust_foreign_plan(facts, "rustc\nfixture-toolchain", JET_DRIVER_RUST_FOREIGN_TARGET, "direct=;transitive=") ?? panic("helper plan: {err}")
+    facts: rust_foreign_test_facts("extern rust \"base64@0.22\" {{ encode: fn(s: String) -> String = \"base64::encode\" }}")
+    plan: jet_driver_rust_foreign_plan(facts, "rustc\nfixture-toolchain", JET_DRIVER_RUST_FOREIGN_TARGET, "direct=;transitive=") ?? panic("helper plan: {err}")
     assert_eq(plan.dependencies.len(), 1)
     assert_eq(plan.dependencies[0].name, "base64")
     assert_eq(plan.dependencies[0].version, "0.22")
@@ -41,22 +41,22 @@ fn rust_foreign_test_facts(source: String) -> JetDriverRustForeignFacts {
     assert(plan.source.contains("panic: a foreign function panicked"))
 }
 #Test("helper input and shared build identities retain canonical distinctions") {
-    facts :: rust_foreign_test_facts("extern rust \"std\" {{ fn length(s: String) -> Int = \"std::string::String::len\" }}")
-    base :: jet_driver_rust_foreign_plan(facts, "toolchain-a", JET_DRIVER_RUST_FOREIGN_TARGET, "direct=;transitive=") ?? panic("base plan")
-    changed_tool :: jet_driver_rust_foreign_plan(facts, "toolchain-b", JET_DRIVER_RUST_FOREIGN_TARGET, "direct=;transitive=") ?? panic("tool plan")
-    changed_target :: jet_driver_rust_foreign_plan(facts, "toolchain-a", "other-target", "direct=;transitive=") ?? panic("target plan")
-    changed_link :: jet_driver_rust_foreign_plan(facts, "toolchain-a", JET_DRIVER_RUST_FOREIGN_TARGET, "direct=z;transitive=") ?? panic("link plan")
+    facts: rust_foreign_test_facts("extern rust \"std\" {{ length: fn(s: String) -> Int = \"std::string::String::len\" }}")
+    base: jet_driver_rust_foreign_plan(facts, "toolchain-a", JET_DRIVER_RUST_FOREIGN_TARGET, "direct=;transitive=") ?? panic("base plan")
+    changed_tool: jet_driver_rust_foreign_plan(facts, "toolchain-b", JET_DRIVER_RUST_FOREIGN_TARGET, "direct=;transitive=") ?? panic("tool plan")
+    changed_target: jet_driver_rust_foreign_plan(facts, "toolchain-a", "other-target", "direct=;transitive=") ?? panic("target plan")
+    changed_link: jet_driver_rust_foreign_plan(facts, "toolchain-a", JET_DRIVER_RUST_FOREIGN_TARGET, "direct=z;transitive=") ?? panic("link plan")
     assert(base.dependencies.len() == 0 && !base.manifest.contains("[dependencies]"))
     assert(base.key != changed_tool.key && base.shared_key != changed_tool.shared_key)
     assert(base.key != changed_target.key && base.shared_key != changed_target.shared_key)
     assert(base.key != changed_link.key && base.shared_key != changed_link.shared_key)
-    other :: rust_foreign_test_facts("extern rust \"std\" {{ fn other(s: String) -> Int = \"std::string::String::len\" }}")
-    other_plan :: jet_driver_rust_foreign_plan(other, "toolchain-a", JET_DRIVER_RUST_FOREIGN_TARGET, "direct=;transitive=") ?? panic("other plan")
+    other: rust_foreign_test_facts("extern rust \"std\" {{ other: fn(s: String) -> Int = \"std::string::String::len\" }}")
+    other_plan: jet_driver_rust_foreign_plan(other, "toolchain-a", JET_DRIVER_RUST_FOREIGN_TARGET, "direct=;transitive=") ?? panic("other plan")
     assert(base.key != other_plan.key && base.shared_key == other_plan.shared_key)
 }
 #Test("safe ownership signatures do not invent unsupported native trampolines") {
-    facts :: rust_foreign_test_facts("extern rust \"std\" {{ fn take(^s: String) -> String = \"std::convert::identity\"; fn modify(&s: String) = \"std::string::String::clear\" }}")
-    source :: jet_driver_rust_foreign_source(facts)
+    facts: rust_foreign_test_facts("extern rust \"std\" {{ take: fn(^s: String) -> String = \"std::convert::identity\"; modify: fn(&s: String) = \"std::string::String::clear\" }}")
+    source: jet_driver_rust_foreign_source(facts)
     assert(source.contains("pub fn jet_ffi_take(p0: String)"))
     assert(source.contains("pub fn jet_ffi_modify(p0: &mut String)"))
     assert(!source.contains("fn jet_ffi_take_cabi("))
@@ -67,9 +67,9 @@ fn rust_foreign_test_facts(source: String) -> JetDriverRustForeignFacts {
     assert_eq(jet_driver_rust_foreign_type_key(Type.IntN{signed: false, bits: 32}), "U32")
     assert_eq(jet_driver_rust_foreign_type_key(Type.List{element: Type.String}), "List<String>")
     assert_eq(jet_driver_rust_foreign_type_key(Type.Tagged{marker: TagMarker.User{name: "label"}, inner: Type.Int}), "#label:Int")
-    records :: JetDriverRustForeignRecordIndex{records: [], names: [String:String]{}, aliases: [String:Type]{}}
-    pointer :: Type.Apply{name: "Ptr", args: [Type]{Type.Named{name: "Opaque"}}}
+    records: JetDriverRustForeignRecordIndex{records: [], names: [String:String]{}, aliases: [String:Type]{}}
+    pointer: Type.Apply{name: "Ptr", args: [Type]{Type.Named{name: "Opaque"}}}
     assert_eq(jet_driver_rust_foreign_record_type(pointer, records, []), Val("*mut core::ffi::c_void"))
-    array :: Type.FixedList{elem: pointer, len: Measure.Literal{kind: "size", value: U64{3}}}
+    array: Type.FixedList{elem: pointer, len: Measure.Literal{kind: "size", value: U64{3}}}
     assert_eq(jet_driver_rust_foreign_record_type(array, records, []), Val("[*mut core::ffi::c_void; 3]"))
 }

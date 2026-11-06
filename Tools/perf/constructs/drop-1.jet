@@ -1,26 +1,26 @@
-use _scope :: core.mem.scope
+use _scope: core.mem.scope
 
 #Error
-enum Fail {
+Fail: enum {
     Bad
 }
 
-fn with_guards(succeed: Bool) -> Int Fail! {
-    _g1 :: _scope.guard(() -> print("guard 1 runs"))
-    _g2 :: _scope.guard(() -> print("guard 2 runs"))
+with_guards: fn(succeed: Bool) -> Int Fail! {
+    _g1: _scope.guard(() -> print("guard 1 runs"))
+    _g2: _scope.guard(() -> print("guard 2 runs"))
     if succeed -> return Ok(42)
     return Err(Fail.Bad)
 }
 
-fn question_path() -> Int Fail! {
-    _cleanup :: _scope.guard(() -> print("cleanup before ?"))
-    n :: with_guards(false)
+question_path: fn() -> Int Fail! {
+    _cleanup: _scope.guard(() -> print("cleanup before ?"))
+    n: with_guards(false)
     return Ok(n)
 }
 
-fn run() {
-    r1 :: with_guards(true) ?? 0
+run: fn() {
+    r1: with_guards(true) ?? 0
     print(r1)
-    r2 :: question_path() ?? -1
+    r2: question_path() ?? -1
     print(r2)
 }

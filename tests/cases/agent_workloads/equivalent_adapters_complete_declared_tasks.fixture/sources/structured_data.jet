@@ -1,29 +1,29 @@
 use {
-    json :: core.encoding.json
-    fs :: core.files
+    json: core.encoding.json
+    fs: core.files
 }
 
-struct Event {
+Event: struct {
     service: String
     duration_ms: Int
 }
 
-struct Batch {
+Batch: struct {
     events: [Event]
 }
 
-struct Summary {
+Summary: struct {
     service: String
     count: Int
     total_ms: Int
 }
 
-struct Report {
+Report: struct {
     total_events: Int
     summaries: [Summary]
 }
 
-fn summarize(batch: Batch) -> Report {
+summarize: fn(batch: Batch) -> Report {
     services := [String]{}
     loop event in batch.events {
         if !services.contains(event.service) -> &services.push(event.service.copy())
@@ -45,14 +45,14 @@ fn summarize(batch: Batch) -> Report {
 }
 
 #CLI
-struct WorkloadArgs {
+WorkloadArgs: struct {
     input: String
 }
 
-fn run(args: WorkloadArgs) {
-    input :: args.input
-    raw :: fs.read(input) ?? panic("cannot read input")
-    decoded :: json.decode<Batch>(raw) ?? {
+run: fn(args: WorkloadArgs) {
+    input: args.input
+    raw: fs.read(input) ?? panic("cannot read input")
+    decoded: json.decode<Batch>(raw) ?? {
         print("invalid-json")
         return
     }

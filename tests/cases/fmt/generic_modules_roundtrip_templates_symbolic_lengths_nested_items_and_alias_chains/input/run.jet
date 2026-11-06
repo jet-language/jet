@@ -1,12 +1,12 @@
-module ring<T>(capacity: Int, label: String) {
+ring: module<T>(capacity: Int, label: String) {
 #Meta(category: label)
-SIZE :: comptime { capacity }
-struct Buffer { slots: [T#capacity] }
-module nested<U> { fn keep(value: U) -> U { return value.copy() } }
-module inner :: nested<T>
+SIZE: comptime { capacity }
+Buffer: struct { slots: [T#capacity] }
+nested: module<U> { keep: fn(value: U) -> U { return value.copy() } }
+inner: nested<T>
 #Meta(category: label)
-fn adjusted() -> Int { return capacity + 1 }
+adjusted: fn() -> Int { return capacity + 1 }
 }
-module a :: ring<Int>(2 + 2, "ring")
-module b :: a
-fn run() {}
+a: ring<Int>(2 + 2, "ring")
+b: a
+run: fn() {}

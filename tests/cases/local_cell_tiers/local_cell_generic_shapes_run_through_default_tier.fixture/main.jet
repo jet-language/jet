@@ -1,54 +1,54 @@
 
 #Error
-enum CellResultError {
+CellResultError: enum {
     Failed
 }
 
-struct Box<T> {
+Box: struct<T> {
     value: T,
 }
 
-struct Number {
+Number: struct {
     value: Int,
 }
 
-struct Reverse<Value, Alpha> {
+Reverse: struct<Value, Alpha> {
     first: Value,
     second: Alpha,
 }
 
 impl Box {
-    fn new(value: ^T) -> Box<T> {
+    new: fn(value: ^T) -> Box<T> {
         return Box<T>{ value: value }
     }
 }
 
-fn keep_result(value: ^(Int CellResultError!)) {
-    cell :: Cell.new(value)
+keep_result: fn(value: ^(Int CellResultError!)) {
+    cell: Cell.new(value)
     print(cell.read(result -> result ?? 0))
 }
 
-fn ok_result() -> Int CellResultError! {
+ok_result: fn() -> Int CellResultError! {
     return Ok(7)
 }
 
-fn run() {
+run: fn() {
     counts := [String:Int]{}
     counts["jet"] = 3
-    map_cell :: Cell.new(^counts)
+    map_cell: Cell.new(^counts)
     print(map_cell.read(values -> values.get("jet") ?? 0))
 
     keep_result(ok_result())
 
-    handle :: shared 9
-    shared_cell :: Cell.new(handle)
+    handle: shared 9
+    shared_cell: Cell.new(handle)
     print(shared_cell.read(inner -> inner.guard_read().value))
 
-    nested :: Cell.new(Box<Box<Int>>.new(Box<Int>.new(11)))
-    projected :: nested.guard_read().map(value -> value.value.value)
+    nested: Cell.new(Box<Box<Int>>.new(Box<Int>.new(11)))
+    projected: nested.guard_read().map(value -> value.value.value)
     print(projected.get())
 
-    reverse :: Cell.new(Reverse<Float, Number>{
+    reverse: Cell.new(Reverse<Float, Number>{
         first: 1.5,
         second: Number{ value: 13 },
     })

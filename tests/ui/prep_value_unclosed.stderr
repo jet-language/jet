@@ -1,21 +1,30 @@
 Error [jet.InvalidStatement]: Expected a call, binding, assignment, or `return`, found a number
-  --> tests/ui/prep_value_unclosed.jet:4:21
+  --> tests/ui/prep_value_unclosed.jet:4:19
     |
-  4 | LIMIT :: comptime { 4
-    |                     ^
+  4 | LIMIT: comptime { 4
+    |                   ^
  Why: Inside a function body, write a call, binding, assignment, or `return`
- Fix: e.g. print("hello") or x :: 1
+ Fix: e.g. print("hello") or x: 1
 More: jet-lang.dev/e/E0003
 
 Error [jet.UnclosedDelimiter]: `{` opened on line 4 is never closed
-  --> tests/ui/prep_value_unclosed.jet:4:19
+  --> tests/ui/prep_value_unclosed.jet:4:17
     |
-  4 | LIMIT :: comptime { 4
-    |                   ^
-  --> tests/ui/prep_value_unclosed.jet:4:22
+  4 | LIMIT: comptime { 4
+    |                 ^
+  --> tests/ui/prep_value_unclosed.jet:4:20
     |
-  4 | LIMIT :: comptime { 4
-    |                      ^ the binding `WIDTH` comes before the closing `}`
+  4 | LIMIT: comptime { 4
+    |                    ^ the binding `WIDTH` comes before the closing `}`
  Why: Every `{` needs a matching `}`, but the binding `WIDTH` came first
  Fix: Add `}` where the prepared value ends
 More: jet-lang.dev/e/E0083
+
+Error [jet.InvalidStatement]: Expected a name after `fn`, found `(`
+  --> tests/ui/prep_value_unclosed.jet:7:8
+    |
+  7 | run: fn() {
+    |        ^
+ Why: Names start with a letter or `_`
+ Fix: e.g. `main`, `count`, `_tmp`
+More: jet-lang.dev/e/E0003

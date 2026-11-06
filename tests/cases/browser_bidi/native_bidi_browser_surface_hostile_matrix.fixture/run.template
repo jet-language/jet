@@ -1,44 +1,44 @@
 
-use browser :: core.web.browser
+use browser: core.web.browser
 
-fn bad_profile() -> String {
+bad_profile: fn() -> String {
     browser.profile("not-a-profile") ?? return "caught-profile"
     return "unexpected-profile"
 }
 
-fn missing_cdp(endpoint: String) -> String {
-    profile :: browser.profile("bidi-2025.5") ?? return "unexpected-profile"
-    timeout :: browser.timeout(250) ?? return "unexpected-timeout"
-    session :: browser.connect_profile(endpoint, profile, timeout) ?? return "unexpected-connect"
+missing_cdp: fn(endpoint: String) -> String {
+    profile: browser.profile("bidi-2025.5") ?? return "unexpected-profile"
+    timeout: browser.timeout(250) ?? return "unexpected-timeout"
+    session: browser.connect_profile(endpoint, profile, timeout) ?? return "unexpected-connect"
     session.protocol("cdp") ?? return "caught-cdp"
     return "unexpected-cdp"
 }
 
-fn wire_error(endpoint: String) -> String {
-    profile :: browser.profile("bidi-2025.5") ?? return "unexpected-profile"
-    timeout :: browser.timeout(250) ?? return "unexpected-timeout"
-    session :: browser.connect_profile(endpoint, profile, timeout) ?? return "unexpected-connect"
+wire_error: fn(endpoint: String) -> String {
+    profile: browser.profile("bidi-2025.5") ?? return "unexpected-profile"
+    timeout: browser.timeout(250) ?? return "unexpected-timeout"
+    session: browser.connect_profile(endpoint, profile, timeout) ?? return "unexpected-connect"
     session.context() ?? return "caught-wire"
     return "unexpected-wire"
 }
 
-fn closed_ops(endpoint: String) -> String {
-    profile :: browser.profile("bidi-2025.5") ?? return "unexpected-profile"
-    timeout :: browser.timeout(250) ?? return "unexpected-timeout"
-    session :: browser.connect_profile(endpoint, profile, timeout) ?? return "unexpected-connect"
+closed_ops: fn(endpoint: String) -> String {
+    profile: browser.profile("bidi-2025.5") ?? return "unexpected-profile"
+    timeout: browser.timeout(250) ?? return "unexpected-timeout"
+    session: browser.connect_profile(endpoint, profile, timeout) ?? return "unexpected-connect"
     session.close() ?? return "unexpected-close"
     loop attempt in [1] {
         session.context() ?? next
         return "unexpected-open"
     }
-    receipt :: session.receipt()
+    receipt: session.receipt()
     if receipt.cleaned() && receipt.redacted() {
         return "caught-closed"
     }
     return "bad-receipt"
 }
 
-fn run() {
+run: fn() {
     print(bad_profile())
     print(missing_cdp("ws://127.0.0.1:{free-port:no_cdp}/session?token=HOSTILE_SECRET"))
     print(wire_error("ws://127.0.0.1:{free-port:matrix_wire}/session?token=MATRIX_HOSTILE_SECRET"))

@@ -1,19 +1,19 @@
 // D-CONCCOMB1/A: race/any use task completion order, not task-list order.
-package {
+package: {
     name: "completion_order"
     authority: { allow: [IO, Mem.Alloc, Time] }
 }
 
-use time :: core.time
+use time: core.time
 
-fn slow_one() -> Int {
+slow_one: fn() -> Int {
     time.sleep(100ms)
     return 1
 }
 
-fn fast_seven() -> Int { 7 }
+fast_seven: fn() -> Int { 7 }
 
-fn run() {
+run: fn() {
     time.sleep(200ms)
     print(task.race {slow_one(), fast_seven()} ?? panic("race failed"))
     time.sleep(200ms)

@@ -1,5 +1,5 @@
 #Codable
-struct Observation {
+Observation: struct {
     team: String
     segment: String
     x: Float
@@ -8,19 +8,19 @@ struct Observation {
 }
 
 #Codable
-struct Owner {
+Owner: struct {
     team: String
     owner: String
 }
 
 #Codable
-struct Joined {
+Joined: struct {
     team: String
     owner: String
     value: Float
 }
 
-fn join_rows(rows: [Observation], owners: [Owner]) -> [Joined] {
+join_rows: fn(rows: [Observation], owners: [Owner]) -> [Joined] {
     out := [Joined]{}
     loop row in rows {
         loop owner in owners {
@@ -33,9 +33,9 @@ fn join_rows(rows: [Observation], owners: [Owner]) -> [Joined] {
     return out
 }
 
-fn run() {
-    rows :: [Observation]{{team: "A", segment: "s", x: 1.0, y: 2.0, value: 3.0}, {team: "B", segment: "s", x: 2.0, y: 4.0, value: 5.0}}
-    owners :: [Owner]{{team: "A", owner: "Ada"}, {team: "B", owner: "Grace"}}
-    joined :: join_rows(rows, owners)
+run: fn() {
+    rows: [Observation]{{team: "A", segment: "s", x: 1.0, y: 2.0, value: 3.0}, {team: "B", segment: "s", x: 2.0, y: 4.0, value: 5.0}}
+    owners: [Owner]{{team: "A", owner: "Ada"}, {team: "B", owner: "Grace"}}
+    joined: join_rows(rows, owners)
     print("joined={joined.len()} {joined[0].owner} {joined[1].owner}")
 }

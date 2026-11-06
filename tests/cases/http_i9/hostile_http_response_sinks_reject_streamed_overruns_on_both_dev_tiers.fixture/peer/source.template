@@ -1,16 +1,16 @@
 use {
-    net :: core.net
-    files :: core.files
-    time :: core.time
+    net: core.net
+    files: core.files
+    time: core.time
 }
-PEER_CRLF :: comptime { String.from_bytes([U8]{13, 10}) ?? panic("fixture CRLF") }
+PEER_CRLF: comptime { String.from_bytes([U8]{13, 10}) ?? panic("fixture CRLF") }
 
-fn prefix(raw: [U8], want: [U8]) -> Bool {
+prefix: fn(raw: [U8], want: [U8]) -> Bool {
     if raw.len() < want.len() -> return false
     loop i in 0..<want.len() { if raw[i] != want[i] -> return false }
     return true
 }
-fn contains_bytes(raw: [U8], want: [U8], ascii_casefold: Bool) -> Bool {
+contains_bytes: fn(raw: [U8], want: [U8], ascii_casefold: Bool) -> Bool {
     if raw.len() < want.len() -> return false
     loop start in 0..<(raw.len() - want.len() + 1) {
         same := true
@@ -23,37 +23,37 @@ fn contains_bytes(raw: [U8], want: [U8], ascii_casefold: Bool) -> Bool {
     }
     return false
 }
-fn request_head(stream: &TCPStream) -> [U8] {
+request_head: fn(stream: &TCPStream) -> [U8] {
     // Original request_head10-23: persistent 5s read timeout,512-byte reads, positive read, <=64KiB bound, exact CRLFCRLF terminator.
     net.set_read_timeout(&stream, 5000) ?? panic("request timeout")
     request := [U8]{}
     loop !contains_bytes(request, [U8]{13,10,13,10}, false) {
-        block :: stream.read(512) ?? panic("request read")
+        block: stream.read(512) ?? panic("request read")
         if block.len() == 0 -> break
         loop byte in block { &request.push(byte) }
     }
     return request
 }
-fn publish(listener: TCPListener, path: String) {
-    address :: listener.local_addr() ?? panic("address")
+publish: fn(listener: TCPListener, path: String) {
+    address: listener.local_addr() ?? panic("address")
     files.write_atomic(path, address.bytes()) ?? panic("publish address")
 }
 // Literal algorithm port of http_i9.rs132-242; compact valid fixed-DEFLATE witness, not a mock.
-struct DeflateBits {
+DeflateBits: struct {
     bytes: [U8]
     bit: Int
 }
-fn bit_write(bits: &DeflateBits, value: Int, count: Int) {
+bit_write: fn(bits: &DeflateBits, value: Int, count: Int) {
     loop offset in 0..<count {
         if bits.bit == 0 -> &bits.bytes.push(U8{0})
         if value.bit_and(1 << offset) != 0 {
-            last :: bits.bytes.len() - 1
+            last: bits.bytes.len() - 1
             bits.bytes[last] = U8{Int.from_u8(bits.bytes[last]).bit_or(1 << bits.bit)}
         }
         bits.bit = (bits.bit + 1) % 8
     }
 }
-fn reverse_bits(code: Int, count: Int) -> Int {
+reverse_bits: fn(code: Int, count: Int) -> Int {
     current := code
     reversed := 0
     loop i in 0..<count {
@@ -62,7 +62,7 @@ fn reverse_bits(code: Int, count: Int) -> Int {
     }
     return reversed
 }
-fn fixed_code(symbol: Int) -> (code: Int, count: Int) {
+fixed_code: fn(symbol: Int) -> (code: Int, count: Int) {
     code := 0
     count := 0
     if {
@@ -86,26 +86,26 @@ fn fixed_code(symbol: Int) -> (code: Int, count: Int) {
     }
     return (code: reverse_bits(code, count), count: count)
 }
-fn gzip_bomb() -> [U8] {
-    length :: 8388609
+gzip_bomb: fn() -> [U8] {
+    length: 8388609
     frame := [U8]{31, 139, 8, 0, 0, 0, 0, 0, 0, 255}
     bits := DeflateBits{bytes: [U8]{}, bit: 0}
     bit_write(&bits, 1, 1)
     bit_write(&bits, 1, 2)
-    literal :: fixed_code(120)
+    literal: fixed_code(120)
     bit_write(&bits, literal.code, literal.count)
-    bases :: [Int]{3,4,5,6,7,8,9,10,11,13,15,17,19,23,27,31,35,43,51,59,67,83,99,115,131,163,195,227,258}
-    extras :: [Int]{0,0,0,0,0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4,5,5,5,5,0}
+    bases: [Int]{3,4,5,6,7,8,9,10,11,13,15,17,19,23,27,31,35,43,51,59,67,83,99,115,131,163,195,227,258}
+    extras: [Int]{0,0,0,0,0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4,5,5,5,5,0}
     remaining := length - 1
     loop remaining >= 3 {
         count := remaining
         if count > 258 -> count = 258
         selected := false
         loop index in 0..<bases.len() {
-            base :: bases[index]
-            extra :: extras[index]
+            base: bases[index]
+            extra: extras[index]
             if count <= base + ((1 << extra) - 1) {
-                code :: fixed_code(257 + index)
+                code: fixed_code(257 + index)
                 bit_write(&bits, code.code, code.count)
                 bit_write(&bits, count - base, extra)
                 bit_write(&bits, 0, 5)
@@ -117,7 +117,7 @@ fn gzip_bomb() -> [U8] {
         remaining -= count
     }
     loop i in 0..<remaining { bit_write(&bits, literal.code, literal.count) }
-    end :: fixed_code(256)
+    end: fixed_code(256)
     bit_write(&bits, end.code, end.count)
     loop byte in bits.bytes { &frame.push(byte) }
     table := [Int]{}
@@ -136,27 +136,27 @@ fn gzip_bomb() -> [U8] {
     assert(frame.len() < 1048576)
     return frame
 }
-fn run() {
-    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+run: fn() {
+    listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     publish(listener, "{work}/addr.txt")
-    gzip :: gzip_bomb()
+    gzip: gzip_bomb()
     block := [U8]{}
     loop i in 0..<65536 { &block.push(U8{120}) }
     loop connection in 0..<12 {
         stream := &listener.accept() ?? panic("connection")
         net.set_write_timeout(&stream, 10000) ?? panic("write timeout")
-        request :: request_head(&stream)
+        request: request_head(&stream)
         if contains_bytes(request, "/gzip-get".bytes(), false) || contains_bytes(request, "/gzip-request".bytes(), false) {
-    _ :: stream.write_all("HTTP/1.1 200 OK{PEER_CRLF}Content-Encoding: gzip{PEER_CRLF}Content-Length: {gzip.len()}{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}".bytes())
-            _ :: stream.write_all(gzip)
+    _: stream.write_all("HTTP/1.1 200 OK{PEER_CRLF}Content-Encoding: gzip{PEER_CRLF}Content-Length: {gzip.len()}{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}".bytes())
+            _: stream.write_all(gzip)
         } else {
-            chunked :: contains_bytes(request, "/chunked-get".bytes(), false) || contains_bytes(request, "/chunked-request".bytes(), false)
-            close :: contains_bytes(request, "/close-get".bytes(), false) || contains_bytes(request, "/close-request".bytes(), false)
+            chunked: contains_bytes(request, "/chunked-get".bytes(), false) || contains_bytes(request, "/chunked-request".bytes(), false)
+            close: contains_bytes(request, "/close-get".bytes(), false) || contains_bytes(request, "/close-request".bytes(), false)
             assert(chunked || close)
             if chunked {
-    _ :: stream.write_all("HTTP/1.1 200 OK{PEER_CRLF}Transfer-Encoding: chunked{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}".bytes())
+    _: stream.write_all("HTTP/1.1 200 OK{PEER_CRLF}Transfer-Encoding: chunked{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}".bytes())
             } else {
-    _ :: stream.write_all("HTTP/1.1 200 OK{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}".bytes())
+    _: stream.write_all("HTTP/1.1 200 OK{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}".bytes())
             }
             remaining := 67108865
             loop remaining > 0 {
@@ -182,8 +182,8 @@ fn run() {
                 }
                 remaining -= count
             }
-            if chunked && remaining == 0 { _ :: stream.write_all("0{PEER_CRLF}{PEER_CRLF}".bytes()) }
+            if chunked && remaining == 0 { _: stream.write_all("0{PEER_CRLF}{PEER_CRLF}".bytes()) }
         }
-        _ :: stream.close()
+        _: stream.close()
     }
 }

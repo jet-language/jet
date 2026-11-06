@@ -15,51 +15,51 @@
 // Output: the selected shard's suite IDs, one per line, sorted (a set, kept
 // diffable). Standard error reports the predicted load and spread.
 use {
-    process :: core.process
-    term :: core.term
+    process: core.process
+    term: core.term
 }
 
-SUITES :: [String]{"golden", "ui", "cases", "registries"}
+SUITES: [String]{"golden", "ui", "cases", "registries"}
 
 // Seconds charged to a suite with no measured cost.
-DEFAULT_WEIGHT :: 30
+DEFAULT_WEIGHT: 30
 
-struct WeightedItem {
+WeightedItem: struct {
     weight: Int
     item: String
 }
 
-struct ShardPlan {
+ShardPlan: struct {
     selected: [String]
     summary: String
 }
 
 #Error
-struct ShardError {
+ShardError: struct {
     message: String
     code: Int
 }
 
-fn is_digits(text: String) -> Bool Never! {
+is_digits: fn(text: String) -> Bool Never! {
     if text == "" -> return false
     loop byte in text.bytes() {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         if code < 48 || code > 57 -> return false
     }
     true
 }
 
-fn digits_value(text: String) -> Int Never! {
+digits_value: fn(text: String) -> Int Never! {
     value := 0
     loop byte in text.bytes() -> value = value * 10 + Int.from_u8(byte) - 48
     value
 }
 
-fn two_digits(value: Int) -> String Never! { if value < 10 -> "0{value}" else -> "{value}" }
+two_digits: fn(value: Int) -> String Never! { if value < 10 -> "0{value}" else -> "{value}" }
 
 // The items `shard_index` of `shard_count` receives, and the load summary
 // (which names the shard as its arguments spelled it).
-fn weighted_shards(items: [WeightedItem], shard_index: Int, shard_count: Int, index_text: String, count_text: String) -> ShardPlan Never! {
+weighted_shards: fn(items: [WeightedItem], shard_index: Int, shard_count: Int, index_text: String, count_text: String) -> ShardPlan Never! {
     ordered := items
     &ordered.sort_by((left: WeightedItem, right: WeightedItem) -> (right.weight <=> left.weight).then(left.item <=> right.item))
     loads := [Int]{}
@@ -85,34 +85,34 @@ fn weighted_shards(items: [WeightedItem], shard_index: Int, shard_count: Int, in
     }
     spread := "n/a"
     if lightest_load > 0 {
-        hundredths :: heaviest * 100 /% lightest_load
+        hundredths: heaviest * 100 /% lightest_load
         spread = "{hundredths /% 100}.{two_digits(hundredths % 100)}x"
     }
     load_words := [String]{}
     loop load in loads -> &load_words.push("{load}")
-    summary :: "weighted-shards: shard {index_text}/{count_text} selected {selected.len()} of {items.len()} items, predicted {selected_seconds}s (shard loads: {load_words.join(" ")}; spread {heaviest}s/{lightest_load}s = {spread})"
+    summary: "weighted-shards: shard {index_text}/{count_text} selected {selected.len()} of {items.len()} items, predicted {selected_seconds}s (shard loads: {load_words.join(" ")}; spread {heaviest}s/{lightest_load}s = {spread})"
     ShardPlan{selected: selected, summary: summary}
 }
 
-fn shard_plan(args: [String]) -> ShardPlan ShardError! {
+shard_plan: fn(args: [String]) -> ShardPlan ShardError! {
     if args.len() != 2 -> return Err(ShardError{message: "usage: TestShards.jet SHARD_INDEX SHARD_COUNT", code: 64})
-    index_text :: args[0]
-    count_text :: args[1]
+    index_text: args[0]
+    count_text: args[1]
     if !is_digits(count_text) -> return Err(ShardError{message: "error: SHARD_COUNT must be a positive integer, got '{count_text}'", code: 64})
-    shard_count :: digits_value(count_text)
+    shard_count: digits_value(count_text)
     if shard_count < 1 -> return Err(ShardError{message: "error: SHARD_COUNT must be >= 1, got '{count_text}'", code: 64})
     if !is_digits(index_text) -> return Err(ShardError{message: "error: SHARD_INDEX must be a non-negative integer, got '{index_text}'", code: 64})
-    shard_index :: digits_value(index_text)
+    shard_index: digits_value(index_text)
     if shard_index >= shard_count -> return Err(ShardError{message: "error: SHARD_INDEX ({index_text}) must be < SHARD_COUNT ({count_text})", code: 64})
     items := [WeightedItem]{}
     loop suite in SUITES -> &items.push(WeightedItem{weight: DEFAULT_WEIGHT, item: suite})
-    plan :: weighted_shards(items, shard_index, shard_count, index_text, count_text)
+    plan: weighted_shards(items, shard_index, shard_count, index_text, count_text)
     selected := plan.selected
     &selected.sort()
     Ok(ShardPlan{selected: selected, summary: plan.summary})
 }
 
-fn run() {
+run: fn() {
     if shard_plan(process.args()) == {
         .Ok(plan) -> {
             term.eprint(plan.summary)
@@ -125,7 +125,7 @@ fn run() {
     }
 }
 
-fn plan_text(args: [String]) -> String Never! {
+plan_text: fn(args: [String]) -> String Never! {
     if shard_plan(args) == {
         .Ok(plan) -> "{plan.selected.join(",")} | {plan.summary}"
         .Err(error) -> "{error.code}: {error.message}"

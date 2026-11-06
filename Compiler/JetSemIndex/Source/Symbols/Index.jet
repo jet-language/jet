@@ -5,33 +5,33 @@ use jet_foundation.[
 
 // Views are owner-backed windows. Single-result views contain exactly one fact;
 // no request clones signatures, examples, or the symbol index.
-struct SemanticSymbolIndex {
+SemanticSymbolIndex: struct {
     entries: [SemanticSymbol]
 
     // Rust SemanticSymbolIndex::new/default.
-    fn new(symbols: ^[SemanticSymbol]) -> SemanticSymbolIndex Never! {
+    new: fn(symbols: ^[SemanticSymbol]) -> SemanticSymbolIndex Never! {
         index := SemanticSymbolIndex{entries: ^symbols}
         &index.sort()
         index
     }
 
     // Rust SemanticSymbolIndex::language; S16 owns the sole shared catalog.
-    fn language() -> SemanticSymbolIndex Never! {
+    language: fn() -> SemanticSymbolIndex Never! {
         SemanticSymbolIndex.new(semantic_language_symbols())
     }
 
     // Rust SemanticSymbolIndex::symbols.
-    fn symbols(self) -> View<SemanticSymbol> Never! {
+    symbols: fn(self) -> View<SemanticSymbol> Never! {
         self.entries[0..<self.entries.len()]
     }
 
     // Establish the named view before wrapping it in an option/list.
-    fn window(self, index: Int) -> View<SemanticSymbol> Never! {
+    window: fn(self, index: Int) -> View<SemanticSymbol> Never! {
         self.entries[index..index]
     }
 
     // Rust SemanticSymbolIndex::push: replace only the first matching identity.
-    fn push(&self, symbol: ^SemanticSymbol) Never! {
+    push: fn(&self, symbol: ^SemanticSymbol) Never! {
         slot := Int?{None}
         loop index in 0..<self.entries.len() {
             if self.entries[index].identity == symbol.identity {
@@ -47,12 +47,12 @@ struct SemanticSymbolIndex {
     }
 
     // Rust SemanticSymbolIndex::extend; each insertion retains push semantics.
-    fn extend(&self, symbols: ^[SemanticSymbol]) Never! {
+    extend: fn(&self, symbols: ^[SemanticSymbol]) Never! {
         loop symbol in symbols -> &self.push(^symbol)
     }
 
     // Rust SemanticSymbolIndex::lookup_identity.
-    fn lookup_identity(self, identity: String) -> View<SemanticSymbol>? Never! {
+    lookup_identity: fn(self, identity: String) -> View<SemanticSymbol>? Never! {
         loop index in 0..<self.entries.len() {
             if self.entries[index].identity == identity -> return Val(self.window(index))
         }
@@ -60,7 +60,7 @@ struct SemanticSymbolIndex {
     }
 
     // Rust SemanticSymbolIndex::lookup_qualified: ambiguity is absent, not first.
-    fn lookup_qualified(self, name: String) -> View<SemanticSymbol>? Never! {
+    lookup_qualified: fn(self, name: String) -> View<SemanticSymbol>? Never! {
         found := Int?{None}
         loop index in 0..<self.entries.len() {
             if self.entries[index].qualified_name == name {
@@ -77,49 +77,49 @@ struct SemanticSymbolIndex {
     }
 
     // Rust SemanticSymbolIndex::lookup: all plain and qualified collisions.
-    fn lookup(self, name: String) -> [View<SemanticSymbol>] Never! {
+    lookup: fn(self, name: String) -> [View<SemanticSymbol>] Never! {
         matches := [View<SemanticSymbol>]{}
         loop index in 0..<self.entries.len() {
-            symbol :: self.entries[index]
+            symbol: self.entries[index]
             if symbol.name == name || symbol.qualified_name == name -> &matches.push(self.window(index))
         }
         matches
     }
 
     // Rust SemanticSymbolIndex::lookup_member.
-    fn lookup_member(self, owner: String, name: String) -> [View<SemanticSymbol>] Never! {
+    lookup_member: fn(self, owner: String, name: String) -> [View<SemanticSymbol>] Never! {
         matches := [View<SemanticSymbol>]{}
-        wanted_owner :: Val(owner)
+        wanted_owner: Val(owner)
         loop index in 0..<self.entries.len() {
-            symbol :: self.entries[index]
+            symbol: self.entries[index]
             if symbol.owner == wanted_owner && symbol.name == name -> &matches.push(self.window(index))
         }
         matches
     }
 
     // Rust SemanticSymbolIndex::resolve_visible / resolve_visible_in / at.
-    fn resolve_visible(self, name: String) -> View<SemanticSymbol>? Never! {
+    resolve_visible: fn(self, name: String) -> View<SemanticSymbol>? Never! {
         self.resolve_with_anchor(name, None)
     }
 
-    fn resolve_visible_in(self, name: String, module_path: String?) -> View<SemanticSymbol>? Never! {
+    resolve_visible_in: fn(self, name: String, module_path: String?) -> View<SemanticSymbol>? Never! {
         self.resolve_with_anchor(name, semantic_module_anchor(module_path))
     }
 
-    fn resolve_visible_at(self, name: String, anchor: SemanticVisibilityAnchor) -> View<SemanticSymbol>? Never! {
+    resolve_visible_at: fn(self, name: String, anchor: SemanticVisibilityAnchor) -> View<SemanticSymbol>? Never! {
         self.resolve_with_anchor(name, Val(anchor))
     }
 
     // Rust SemanticSymbolIndex::resolve_with_anchor: first sorted minimum wins.
-    fn resolve_with_anchor(self, name: String, anchor: SemanticVisibilityAnchor?) -> View<SemanticSymbol>? Never! {
-        qualified :: name.contains(".")
+    resolve_with_anchor: fn(self, name: String, anchor: SemanticVisibilityAnchor?) -> View<SemanticSymbol>? Never! {
+        qualified: name.contains(".")
         best := Int?{None}
         best_key := SemanticVisibilityKey?{None}
         loop index in 0..<self.entries.len() {
-            symbol :: self.entries[index]
-            matches :: if qualified -> symbol.qualified_name == name else -> symbol.owner == None && symbol.name == name
+            symbol: self.entries[index]
+            matches: if qualified -> symbol.qualified_name == name else -> symbol.owner == None && symbol.name == name
             if !matches -> next
-            key :: semantic_visibility_key(symbol, anchor) ?? next
+            key: semantic_visibility_key(symbol, anchor) ?? next
             if best_key == .Val(current) {
                 if !semantic_visibility_precedes(key, current) -> next
             }
@@ -134,10 +134,10 @@ struct SemanticSymbolIndex {
     }
 
     // Rust SemanticSymbolIndex::complete: no visibility or spelling dedup.
-    fn complete(self, prefix: String, owner: String?) -> [View<SemanticSymbol>] Never! {
+    complete: fn(self, prefix: String, owner: String?) -> [View<SemanticSymbol>] Never! {
         matches := [View<SemanticSymbol>]{}
         loop index in 0..<self.entries.len() {
-            symbol :: self.entries[index]
+            symbol: self.entries[index]
             if symbol.owner == owner && symbol.name.starts_with(prefix) -> &matches.push(self.window(index))
         }
         matches
@@ -145,44 +145,44 @@ struct SemanticSymbolIndex {
 
     // Rust SemanticSymbolIndex::complete_core_module / lookup_core_module_member.
     // S16 owns the checked Core registry projection, never a private copy here.
-    fn complete_core_module(module_name: String, prefix: String, menus: [TAppliedRuleArgumentMenu]) -> [SemanticSymbol] Never! {
+    complete_core_module: fn(module_name: String, prefix: String, menus: [TAppliedRuleArgumentMenu]) -> [SemanticSymbol] Never! {
         semantic_complete_core_module(module_name, prefix, menus)
     }
 
-    fn lookup_core_module_member(module_name: String, name: String, menus: [TAppliedRuleArgumentMenu]) -> SemanticSymbol? Never! {
+    lookup_core_module_member: fn(module_name: String, name: String, menus: [TAppliedRuleArgumentMenu]) -> SemanticSymbol? Never! {
         semantic_lookup_core_module_member(module_name, name, menus)
     }
 
     // Rust SemanticSymbolIndex::complete_visible / in / at.
-    fn complete_visible(self, prefix: String, owner: String?) -> [View<SemanticSymbol>] Never! {
+    complete_visible: fn(self, prefix: String, owner: String?) -> [View<SemanticSymbol>] Never! {
         self.complete_with_anchor(prefix, owner, None)
     }
 
-    fn complete_visible_in(self, prefix: String, owner: String?, module_path: String?) -> [View<SemanticSymbol>] Never! {
+    complete_visible_in: fn(self, prefix: String, owner: String?, module_path: String?) -> [View<SemanticSymbol>] Never! {
         self.complete_with_anchor(prefix, owner, semantic_module_anchor(module_path))
     }
 
-    fn complete_visible_at(self, prefix: String, owner: String?, anchor: SemanticVisibilityAnchor) -> [View<SemanticSymbol>] Never! {
+    complete_visible_at: fn(self, prefix: String, owner: String?, anchor: SemanticVisibilityAnchor) -> [View<SemanticSymbol>] Never! {
         self.complete_with_anchor(prefix, owner, Val(anchor))
     }
 
     // Rust SemanticSymbolIndex::complete_with_anchor. Dedup only the displayed
     // spelling, replacing in place without perturbing first-observed ordering.
-    fn complete_with_anchor(self, prefix: String, owner: String?, anchor: SemanticVisibilityAnchor?) -> [View<SemanticSymbol>] Never! {
-        qualified :: owner == None && prefix.contains(".")
+    complete_with_anchor: fn(self, prefix: String, owner: String?, anchor: SemanticVisibilityAnchor?) -> [View<SemanticSymbol>] Never! {
+        qualified: owner == None && prefix.contains(".")
         keys := [SemanticVisibilityKey]{}
         indices := [Int]{}
         loop index in 0..<self.entries.len() {
-            symbol :: self.entries[index]
+            symbol: self.entries[index]
             if prefix.len() == 0 && classify_identifier(symbol.name) == IdentifierClass.SoftPublic -> next
-            matches :: if qualified -> symbol.qualified_name.starts_with(prefix) else -> symbol.owner == owner && symbol.name.starts_with(prefix)
+            matches: if qualified -> symbol.qualified_name.starts_with(prefix) else -> symbol.owner == owner && symbol.name.starts_with(prefix)
             if !matches -> next
-            key :: semantic_visibility_key(symbol, anchor) ?? next
-            spelling :: if qualified -> symbol.qualified_name else -> symbol.name
+            key: semantic_visibility_key(symbol, anchor) ?? next
+            spelling: if qualified -> symbol.qualified_name else -> symbol.name
             selected_slot := Int?{None}
             loop slot in 0..<indices.len() {
-                current :: self.entries[indices[slot]]
-                current_spelling :: if qualified -> current.qualified_name else -> current.name
+                current: self.entries[indices[slot]]
+                current_spelling: if qualified -> current.qualified_name else -> current.name
                 if spelling == current_spelling {
                     selected_slot = Val(slot)
                     break
@@ -208,9 +208,9 @@ struct SemanticSymbolIndex {
 
     // Rust SemanticSymbolIndex::at: source module must match; end is inclusive
     // here even though SourceSpan declaration extents use an exclusive end.
-    fn at(self, module_path: String, offset: Int) -> View<SemanticSymbol>? Never! {
+    at: fn(self, module_path: String, offset: Int) -> View<SemanticSymbol>? Never! {
         loop index in 0..<self.entries.len() {
-            symbol :: self.entries[index]
+            symbol: self.entries[index]
             if symbol.module_path != module_path -> next
             if symbol.span == .Val(span) {
                 if span.start <= offset && offset <= span.end -> return Val(self.window(index))
@@ -220,38 +220,38 @@ struct SemanticSymbolIndex {
     }
 
     // Rust SemanticSymbolIndex::sort; inline comparator (#4343).
-    fn sort(&self) Never! {
+    sort: fn(&self) Never! {
         &self.entries.sort_by((left: SemanticSymbol, right: SemanticSymbol) -> (left.qualified_name <=> right.qualified_name).then(left.module_path <=> right.module_path).then(left.identity <=> right.identity))
     }
 }
 
 // Rust visibility_key tuple: compare depth/offset descending instead of
 // subtracting from usize::MAX, avoiding an artificial machine-width limit.
-struct SemanticVisibilityKey {
+SemanticVisibilityKey: struct {
     rank: Int
     depth: Int
     declaration_offset: Int
 }
 
-fn semantic_visibility_precedes(left: SemanticVisibilityKey, right: SemanticVisibilityKey) -> Bool Never! {
+semantic_visibility_precedes: fn(left: SemanticVisibilityKey, right: SemanticVisibilityKey) -> Bool Never! {
     if left.rank != right.rank -> return left.rank < right.rank
     if left.depth != right.depth -> return left.depth > right.depth
     left.declaration_offset > right.declaration_offset
 }
 
 // Rust resolve_visible_in/complete_visible_in's module-only anchor conversion.
-fn semantic_module_anchor(module_path: String?) -> SemanticVisibilityAnchor? Never! {
-    path :: module_path ?? return None
+semantic_module_anchor: fn(module_path: String?) -> SemanticVisibilityAnchor? Never! {
+    path: module_path ?? return None
     Val(SemanticVisibilityAnchor{module_path: path, offset: None, session_top_level: false})
 }
 
 // visibility_key, including unscoped-local behavior.
-fn semantic_visibility_key(symbol: SemanticSymbol, anchor: SemanticVisibilityAnchor?) -> SemanticVisibilityKey? Never! {
+semantic_visibility_key: fn(symbol: SemanticSymbol, anchor: SemanticVisibilityAnchor?) -> SemanticVisibilityKey? Never! {
     if symbol.identity.starts_with("session:binding:") -> return Val(SemanticVisibilityKey{rank: 0, depth: 0, declaration_offset: 0})
     if symbol.lexical_scope == .Val(scope) {
-        here :: anchor ?? return None
+        here: anchor ?? return None
         if here.session_top_level || symbol.module_path != here.module_path -> return None
-        offset :: here.offset ?? return None
+        offset: here.offset ?? return None
         if offset < scope.declaration_offset || offset < scope.span.start || scope.span.end < offset -> return None
         return Val(SemanticVisibilityKey{rank: 1, depth: scope.depth, declaration_offset: scope.declaration_offset})
     }
@@ -259,7 +259,7 @@ fn semantic_visibility_key(symbol: SemanticSymbol, anchor: SemanticVisibilityAnc
         if anchor != None -> return None
         return Val(SemanticVisibilityKey{rank: 1, depth: 0, declaration_offset: 0})
     }
-    imported :: symbol.identity.starts_with("import:")
+    imported: symbol.identity.starts_with("import:")
     if !imported {
         if symbol.provenance == {
             .Session -> { return Val(SemanticVisibilityKey{rank: 2, depth: 0, declaration_offset: 0}) }
@@ -285,17 +285,17 @@ fn semantic_visibility_key(symbol: SemanticSymbol, anchor: SemanticVisibilityAnc
 // The caller joins a loaded display/alias to the actual registration/name index
 // once, outside this helper. The checked projection owns generated names,
 // ambiguity and canonical spelling.
-fn semantic_canonical_symbol_name(facts: NameFacts, module_index: Int?, name: String, owner: String?, span: SourceSpan?) -> String Never! {
+semantic_canonical_symbol_name: fn(facts: NameFacts, module_index: Int?, name: String, owner: String?, span: SourceSpan?) -> String Never! {
     if module_index == None {
         if owner == .Val(path) -> return "{path}.{name}"
         return name
     }
-    index :: module_index ?? return name
+    index: module_index ?? return name
     if span == .Val(location) {
         if name_facts_display_path_at(facts, index, location.start, location.end, name, owner, Val(index)) == .Val(path) -> return path
     }
     if owner == .Val(owner_name) {
-        path :: name_facts_display_path(facts, index, owner_name, Val(index)) ?? name_facts_canonical_path(facts, index, owner_name) ?? owner_name
+        path: name_facts_display_path(facts, index, owner_name, Val(index)) ?? name_facts_canonical_path(facts, index, owner_name) ?? owner_name
         return "{path}.{name}"
     }
     name_facts_display_path(facts, index, name, Val(index)) ?? name_facts_canonical_path(facts, index, name) ?? name

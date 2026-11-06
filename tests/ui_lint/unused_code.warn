@@ -1,26 +1,26 @@
 Warning [jet.UnusedParameter]: Parameter `value` is never used.
-  --> unused_code.jet:1:22
+  --> tests/ui_lint/unused_code.jet:1:23
     |
-  1 | fn ignored_parameter(value: Int) -> Int { 1 }
-    |                      ^^^^^
+  1 | ignored_parameter: fn(value: Int) -> Int { 1 }
+    |                       ^^^^^
  Why: An unused parameter often means the function contract or implementation is incomplete; Jet keeps this warning-only so prototypes stay unblocked.
  Fix: Use `value`, rename it to `_value` when it is intentionally unused, or remove it from the function contract.
 More: jet-lang.dev/e/L0102
 
 Warning [jet.UnusedLocalBinding]: Local binding `unused_thing` is never read.
-  --> unused_code.jet:10:5
+  --> tests/ui_lint/unused_code.jet:10:5
     |
- 10 |     unused_thing :: 42
+ 10 |     unused_thing: 42
     |     ^^^^^^^^^^^^
  Why: A binding that no later expression reads adds dead code and may hide a computed result that should have been used.
  Fix: Remove the binding when its initializer is side-effect free, or rename `unused_thing` to `_unused_thing` when the value must be computed.
 More: jet-lang.dev/e/L0101
 
 Warning [jet.UnusedPrivateFn]: Private function `unused_helper` is never called or used as a value.
-  --> unused_code.jet:4:8
+  --> tests/ui_lint/unused_code.jet:4:5
     |
-  4 |     fn unused_helper() -> Int { 1 }
-    |        ^^^^^^^^^^^^^
+  4 |     unused_helper: fn() -> Int { 1 }
+    |     ^^^^^^^^^^^^^
  Why: A private function with no reachable reference is dead code; public functions stay exempt because other modules may use them.
  Fix: Remove the function, or rename `unused_helper` to `_unused_helper` when it is intentional.
 More: jet-lang.dev/e/L0104

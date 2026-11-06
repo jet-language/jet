@@ -3,18 +3,18 @@
 // remain the compiler's Build/BuildPlan/BuildAction/... nominal values.
 // Source owns session mutation, validation and projection on every tier.
 use {
-    build_crypto :: core.crypto
+    build_crypto: core.crypto
     core.build.[BuildGraph, BuildGraphTarget, BuildGraphAction, BuildGraphActionKey, BuildGraphFile, BuildGraphNode, BuildGraphInputDigest]
     jet_foundation.[Span, build_option_accepts, build_option_row, type_name]
 }
 
-struct BuildSessionPolicy {
+BuildSessionPolicy: struct {
     legacy_denied: String?
     plugins_denied: String?
     plugin_grants: [String:[String]]
 }
 
-enum BuildSessionValue {
+BuildSessionValue: enum {
     Unit
     Text(value: String)
     Bool(value: Bool)
@@ -26,7 +26,7 @@ enum BuildSessionValue {
     Span(start: Int, end: Int)
 }
 
-struct BuildSessionDiagnostic {
+BuildSessionDiagnostic: struct {
     code: String
     what: String
     why: String
@@ -36,13 +36,13 @@ struct BuildSessionDiagnostic {
     error: BuildSessionError?{None}
 }
 
-enum BuildSessionReply {
+BuildSessionReply: enum {
     Value(value: BuildSessionValue)
     Failure(error: BuildSessionDiagnostic)
     HostRequest(method: String, args: [BuildSessionValue])
 }
 
-struct BuildSessionGeneratedModule {
+BuildSessionGeneratedModule: struct {
     name: String
     path: String
     source: String
@@ -50,7 +50,7 @@ struct BuildSessionGeneratedModule {
     plugin: Int?
 }
 
-struct BuildSessionContribution {
+BuildSessionContribution: struct {
     key: String
     value: BuildSessionValue
     source: String
@@ -58,7 +58,7 @@ struct BuildSessionContribution {
     end: Int
 }
 
-struct BuildSessionToolchain {
+BuildSessionToolchain: struct {
     name: String
     role: String
     host_triple: String
@@ -68,7 +68,7 @@ struct BuildSessionToolchain {
     sysroot: String?
 }
 
-struct BuildSessionProbe {
+BuildSessionProbe: struct {
     name: String
     kind: String
     value: String
@@ -77,12 +77,12 @@ struct BuildSessionProbe {
     toolchain: Int
 }
 
-struct BuildSessionSigning {
+BuildSessionSigning: struct {
     name: String
     label: String
 }
 
-struct BuildSessionPlugin {
+BuildSessionPlugin: struct {
     name: String
     version: String
     api_version: String
@@ -90,7 +90,7 @@ struct BuildSessionPlugin {
     grants: [String]
 }
 
-struct BuildSessionAction {
+BuildSessionAction: struct {
     name: String
     inputs: [String]
     outputs: [String]
@@ -112,7 +112,7 @@ struct BuildSessionAction {
     variant_identity: String?{None}
 }
 
-struct BuildSessionTarget {
+BuildSessionTarget: struct {
     name: String
     kind: String
     sources: [String]
@@ -127,10 +127,10 @@ struct BuildSessionTarget {
     plugin: Int?
 }
 
-// A build option `fn build` set (`b.optimize(.Full)`) or pinned
+// A build option `build: fn` set (`b.optimize(.Full)`) or pinned
 // (`b.pin(.optimize, .Full)`): its row and value as the option table spells
 // them (JetFoundation BuildOptions.jet), and the call's span.
-struct BuildSessionOption {
+BuildSessionOption: struct {
     name: String
     value: String
     pinned: Bool
@@ -138,7 +138,7 @@ struct BuildSessionOption {
     end: Int
 }
 
-struct BuildSessionState {
+BuildSessionState: struct {
     id: Int
     active: Bool
     package: String
@@ -154,7 +154,7 @@ struct BuildSessionState {
     contributions: [BuildSessionContribution]
     diagnostics: [BuildSessionDiagnostic]
     nodes: [BuildGraphNode]
-    // One row per option `fn build` set, the last call's value.
+    // One row per option `build: fn` set, the last call's value.
     options: [BuildSessionOption]
     // The target `b.default(t)` selected, or -1 for every target.
     default_target: Int
@@ -164,9 +164,9 @@ struct BuildSessionState {
     end: Int
 }
 
-struct BuildSession { storage: Shared<BuildSessionState> }
+BuildSession: struct { storage: Shared<BuildSessionState> }
 
-fn build_session_new(session_id: Int, package: String, compiler_version: String, policy: BuildSessionPolicy) -> BuildSession Never! {
+build_session_new: fn(session_id: Int, package: String, compiler_version: String, policy: BuildSessionPolicy) -> BuildSession Never! {
     {storage: shared BuildSessionState{
         id: session_id, active: true, package: package, compiler_version: compiler_version, policy: policy,
         actions: [BuildSessionAction]{}, targets: [BuildSessionTarget]{},
@@ -177,43 +177,43 @@ fn build_session_new(session_id: Int, package: String, compiler_version: String,
     }}
 }
 
-fn build_session_abort(session: &BuildSession) Never! {
+build_session_abort: fn(session: &BuildSession) Never! {
     permit := session.storage.guard_edit()
     permit.value.active = false
 }
 
 // The words after `--` on `jet build` (`b.args()`); a new session has none.
-fn build_session_set_args(session: &BuildSession, args: [String]) Never! {
+build_session_set_args: fn(session: &BuildSession, args: [String]) Never! {
     permit := session.storage.guard_edit()
     permit.value.args = args.copy()
 }
 
 // `build_diag`: a generated-source cycle is E3511, every other invalid graph
 // fact the E3502 invalid-plan report.
-fn build_session_diag(state: BuildSessionState, what: String) -> BuildSessionDiagnostic {
+build_session_diag: fn(state: BuildSessionState, what: String) -> BuildSessionDiagnostic {
     if what.starts_with("E3511: ") {
-        detail :: what.removeprefix("E3511: ")
+        detail: what.removeprefix("E3511: ")
         return {code: "E3511", what: "build plan is invalid: {detail}", why: "generated source must reach a bounded deterministic order, not loop until quiescent", fix: "break the dependency between these generators or give each generated module one owner", start: state.start, end: state.end}
     }
-    {code: "E3502", what: "build plan is invalid: {what}", why: "`fn build` must describe one deterministic typed graph whose handles all belong to that build", fix: "fix the named target/action/toolchain/probe and run `jet inspect explain-build` to inspect the graph", start: state.start, end: state.end}
+    {code: "E3502", what: "build plan is invalid: {what}", why: "`build: fn` must describe one deterministic typed graph whose handles all belong to that build", fix: "fix the named target/action/toolchain/probe and run `jet inspect explain-build` to inspect the graph", start: state.start, end: state.end}
 }
 
-fn build_session_fail(state: BuildSessionState, what: String) -> BuildSessionReply {
+build_session_fail: fn(state: BuildSessionState, what: String) -> BuildSessionReply {
     return BuildSessionReply.Failure{error: build_session_diag(state, what)}
 }
 
 // `eval_session_method`: an ambient build call outside `#Impure` is its own
 // E3502 report, not an invalid-plan fact.
-fn build_session_impure(state: BuildSessionState, method: String) -> BuildSessionReply {
+build_session_impure: fn(state: BuildSessionState, method: String) -> BuildSessionReply {
     return BuildSessionReply.Failure{error: {code: "E3502", what: "`b.{method}` touches the ambient world and must be inside `#Impure(\"reason\")`", why: "build effects must be declared exactly where an auditor can see them", fix: "wrap the `b.{method}` call in `#Impure(\"why it is needed\")`", start: state.start, end: state.end}}
 }
 
-fn build_session_text(args: [BuildSessionValue], index: Int) -> String? {
+build_session_text: fn(args: [BuildSessionValue], index: Int) -> String? {
     if index < args.len() && args[index] == .Text(text) -> return Val(text)
     None
 }
 
-fn build_session_strings(args: [BuildSessionValue], index: Int) -> [String]? {
+build_session_strings: fn(args: [BuildSessionValue], index: Int) -> [String]? {
     if index >= args.len() -> return None
     if args[index] == .List(values) {
         out := [String]{}
@@ -228,12 +228,12 @@ fn build_session_strings(args: [BuildSessionValue], index: Int) -> [String]? {
     None
 }
 
-fn build_session_handle(state: BuildSessionState, value: BuildSessionValue, kind: String) -> Int? {
+build_session_handle: fn(state: BuildSessionState, value: BuildSessionValue, kind: String) -> Int? {
     if value == .Handle(type_name, session, id) {
         if type_name != kind || session != state.id -> return None
         if kind == "BuildPlan" && id >= -1 && id < state.targets.len() -> return Val(id)
         if id < 0 -> return None
-        count :: if kind == {
+        count: if kind == {
             "BuildAction" -> state.actions.len()
             "BuildTarget" -> state.targets.len()
             "BuildToolchain" -> state.toolchains.len()
@@ -246,7 +246,7 @@ fn build_session_handle(state: BuildSessionState, value: BuildSessionValue, kind
     None
 }
 
-fn build_session_handles(state: BuildSessionState, args: [BuildSessionValue], index: Int, kind: String) -> [Int]? {
+build_session_handles: fn(state: BuildSessionState, args: [BuildSessionValue], index: Int, kind: String) -> [Int]? {
     if index >= args.len() -> return None
     if args[index] == .List(values) {
         out := [Int]{}
@@ -256,45 +256,45 @@ fn build_session_handles(state: BuildSessionState, args: [BuildSessionValue], in
     None
 }
 
-fn build_session_path(path: String) -> Bool {
+build_session_path: fn(path: String) -> Bool {
     if path.trim() == "" || path.starts_with("/") -> return false
     loop part in path.split("/") { if part == ".." -> return false }
     true
 }
-fn build_session_path_error(path: String) -> BuildSessionError? Never! {
+build_session_path_error: fn(path: String) -> BuildSessionError? Never! {
     if path.trim() == "" -> return Val(.EmptyPath)
     if !build_session_path(path) -> return Val(BuildSessionError.InvalidPath{value: path})
     None
 }
 
-fn build_session_paths(paths: [String]) -> Bool {
+build_session_paths: fn(paths: [String]) -> Bool {
     loop path in paths { if !build_session_path(path) -> return false }
     true
 }
 
-fn build_session_map(entries: [String]) -> [String:String]? {
+build_session_map: fn(entries: [String]) -> [String:String]? {
     out := [String:String]{}
     loop entry in entries {
-        parts :: entry.split_once("=") ?? return None
+        parts: entry.split_once("=") ?? return None
         out[parts.before] = parts.after
     }
     Val(out)
 }
 
-fn build_session_unique(values: [String]) -> [String] {
+build_session_unique: fn(values: [String]) -> [String] {
     out := [String]{}
     loop value in values -> build_session_append_unique(&out, value)
     &out.sort()
     out
 }
 
-fn build_session_caps(values: [String]) -> [String]? {
+build_session_caps: fn(values: [String]) -> [String]? {
     // Rust BuildEffect declaration order, not lexical string order.
     out := [String]{}
     normalized := [String]{}
     loop value in values {
         if value.contains(".") -> return None
-        lower :: value.to_lower()
+        lower: value.to_lower()
         if !build_session_contains_string([String]{"net", "fs", "io", "db", "time", "rand", "env", "exec", "log", "gpu"}, lower) -> return None
         build_session_append_unique(&normalized, lower)
     }
@@ -303,7 +303,7 @@ fn build_session_caps(values: [String]) -> [String]? {
     }
     Val(out)
 }
-fn build_session_cap_name(flag: String) -> String Never! {
+build_session_cap_name: fn(flag: String) -> String Never! {
     if flag == {
         "net" -> "Net"
         "fs" -> "FS"
@@ -319,12 +319,12 @@ fn build_session_cap_name(flag: String) -> String Never! {
     }
 }
 
-fn build_session_pools(values: [String]) -> [String] {
-    known :: [String]{"cpu", "memory", "linker", "console", "gpu"}
+build_session_pools: fn(values: [String]) -> [String] {
+    known: [String]{"cpu", "memory", "linker", "console", "gpu"}
     out := [String]{}
     custom := [String]{}
     loop value in values {
-        lower :: value.to_lower()
+        lower: value.to_lower()
         if build_session_contains_string(known, lower) -> build_session_append_unique(&out, lower)
         else -> build_session_append_unique(&custom, value)
     }
@@ -335,22 +335,22 @@ fn build_session_pools(values: [String]) -> [String] {
     ordered
 }
 
-fn build_session_kind(value: String) -> String? {
-    lower :: value.to_lower()
+build_session_kind: fn(value: String) -> String? {
+    lower: value.to_lower()
     if lower == "source_archive" -> return Val("source-archive")
     if build_session_contains_string([String]{"compile", "docs", "debug", "source-archive", "generic"}, lower) -> return Val(lower)
     None
 }
 
-fn build_session_call(session: &BuildSession, method: String, args: [BuildSessionValue], generated_source: String?, in_impure_gate: Bool, start: Int, end: Int) -> BuildSessionReply Never! {
+build_session_call: fn(session: &BuildSession, method: String, args: [BuildSessionValue], generated_source: String?, in_impure_gate: Bool, start: Int, end: Int) -> BuildSessionReply Never! {
     permit := session.storage.guard_edit()
     state := &permit.value
     state.start = start
     state.end = end
     if !state.active -> return build_session_fail(state, "build context expired")
     if method == "action" || method == "legacy" {
-        index :: if method == "action" -> 4 else -> 5
-        caps :: build_session_strings(args, index) ?? return build_session_fail(state, "build action effects must be a list of strings")
+        index: if method == "action" -> 4 else -> 5
+        caps: build_session_strings(args, index) ?? return build_session_fail(state, "build action effects must be a list of strings")
         if caps.len() > 0 && !in_impure_gate -> return build_session_impure(state, method)
         return build_session_add_action(&state, method, args)
     }
@@ -362,9 +362,9 @@ fn build_session_call(session: &BuildSession, method: String, args: [BuildSessio
     if build_option_row(method) != None -> return build_session_set_option(&state, args, false, start, end)
     if method == "generate" {
         if args.len() != 1 -> return build_session_fail(state, "`b.generate` requires a name and typed item block")
-        name :: build_session_text(args, 0) ?? return build_session_fail(state, "generated module name must be a string")
-        source :: generated_source ?? return build_session_fail(state, "`b.generate` requires a typed item block, not a source string")
-        path :: ".jet/generated/{build_session_package_dir(state.package)}/{build_session_safe_name(name)}.jet"
+        name: build_session_text(args, 0) ?? return build_session_fail(state, "generated module name must be a string")
+        source: generated_source ?? return build_session_fail(state, "`b.generate` requires a typed item block, not a source string")
+        path: ".jet/generated/{build_session_package_dir(state.package)}/{build_session_safe_name(name)}.jet"
         return build_session_add_generated(&state, BuildSessionGeneratedModule{name: name, path: path, source: source, source_digest: "", plugin: None})
     }
     if method == "default" {
@@ -384,7 +384,7 @@ fn build_session_call(session: &BuildSession, method: String, args: [BuildSessio
     }
     if method == "contribute" {
         if args.len() != 2 -> return build_session_fail(state, "`b.contribute` requires a fact name and one value")
-        name :: build_session_text(args, 0) ?? return build_session_fail(state, "build fact name must be a string")
+        name: build_session_text(args, 0) ?? return build_session_fail(state, "build fact name must be a string")
         if name.trim() == "" || name.contains(".") -> return build_session_fail(state, "`b.contribute` needs one declared setting name, such as `cache_slots`")
         if args[1] == {.Bool(_) | .Int(_) | .Char(_) | .Text(_) | .Enum(_) -> {} else -> return build_session_fail(state, "`b.contribute` accepts only Bool, Int, Char, String, or a fieldless enum value")}
         // The writer is spelled by the package's name, as `jet explain` and the lock show it.
@@ -406,15 +406,15 @@ fn build_session_call(session: &BuildSession, method: String, args: [BuildSessio
 
 // `b.optimize(.Full)` (args: the row name, the value) or `b.pin(...)`: the
 // last call's value holds; a pinned value can't change in the same fn build.
-fn build_session_set_option(state: &BuildSessionState, args: [BuildSessionValue], pinned: Bool, start: Int, end: Int) -> BuildSessionReply {
+build_session_set_option: fn(state: &BuildSessionState, args: [BuildSessionValue], pinned: Bool, start: Int, end: Int) -> BuildSessionReply {
     if args.len() != 2 -> return build_session_fail(state, "a build option call takes an option and a value")
-    name :: build_session_text(args, 0) ?? return build_session_fail(state, "build option name must be a string")
-    value :: build_session_text(args, 1) ?? return build_session_fail(state, "build option value must be a string")
-    row :: build_option_row(name) ?? return build_session_fail(state, "`{name}` isn't a build option")
+    name: build_session_text(args, 0) ?? return build_session_fail(state, "build option name must be a string")
+    value: build_session_text(args, 1) ?? return build_session_fail(state, "build option value must be a string")
+    row: build_option_row(name) ?? return build_session_fail(state, "`{name}` isn't a build option")
     if !build_option_accepts(row, value) -> return build_session_fail(state, "`{value}` isn't a value of build option `{name}`")
     loop index in 0..<state.options.len() {
         if state.options[index].name != name -> next
-        if state.options[index].pinned && state.options[index].value != value -> return build_session_fail(state, "build option `{name}` is pinned to `{state.options[index].value}`; `fn build` can't change it")
+        if state.options[index].pinned && state.options[index].value != value -> return build_session_fail(state, "build option `{name}` is pinned to `{state.options[index].value}`; `build: fn` can't change it")
         // A pinned option keeps its pin's span: the pin is what a flag meets.
         if state.options[index].pinned && !pinned -> return BuildSessionReply.Value{value: BuildSessionValue.Unit}
         state.options[index] = BuildSessionOption{name: name.copy(), value: value.copy(), pinned: pinned, start: start, end: end}
@@ -427,23 +427,23 @@ fn build_session_set_option(state: &BuildSessionState, args: [BuildSessionValue]
 // The `<package>` directory of `.jet/generated/<package>/`: the package name
 // of a loader identity (`package:15:write_generated:0.1.0`, written by
 // Loader.jet's jet_driver_package_identity), else the session's package as given.
-fn build_session_package_dir(package: String) -> String {
-    parts :: package.split(":").to_list()
+build_session_package_dir: fn(package: String) -> String {
+    parts: package.split(":").to_list()
     if parts.len() >= 3 && parts[0] == "package" && (Int.parse(parts[1]) ?? -1) == parts[2].len() -> return parts[2].copy()
     package.copy()
 }
 
-fn build_session_safe_name(name: String) -> String {
+build_session_safe_name: fn(name: String) -> String {
     bytes := [U8]{}
     loop byte in name.bytes() {
-        n :: Int.from_u8(byte)
+        n: Int.from_u8(byte)
         if (n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 95 || n == 45 -> &bytes.push(byte)
         else if n < 128 || n >= 192 -> &bytes.push(U8{95})
     }
     String.from_bytes(bytes) ?? panic("invalid generated module name")
 }
 
-fn build_session_add_generated(state: &BuildSessionState, generated: BuildSessionGeneratedModule) -> BuildSessionReply {
+build_session_add_generated: fn(state: &BuildSessionState, generated: BuildSessionGeneratedModule) -> BuildSessionReply {
     if generated.name.trim() == "" || generated.path.trim() == "" || generated.source.trim() == "" -> return build_session_error_fail(state, BuildSessionError.EmptyGeneratedModuleField{value: generated.name})
     if !generated.path.starts_with(".jet/generated/") || !generated.path.ends_with(".jet") || !build_session_path(generated.path) -> return build_session_error_fail(state, BuildSessionError.InvalidGeneratedModulePath{value: generated.path})
     loop action in state.actions { if build_session_contains_string(action.outputs, generated.path) -> return build_session_error_fail(state, BuildSessionError.GeneratedModuleCycle{name: generated.name, path: generated.path}) }
@@ -457,38 +457,38 @@ fn build_session_add_generated(state: &BuildSessionState, generated: BuildSessio
     BuildSessionReply.Value{value: BuildSessionValue.Unit}
 }
 
-fn build_session_add_toolchain(state: &BuildSessionState, args: [BuildSessionValue]) -> BuildSessionReply {
+build_session_add_toolchain: fn(state: &BuildSessionState, args: [BuildSessionValue]) -> BuildSessionReply {
     if args.len() < 2 || args.len() > 6 -> return build_session_fail(state, "`b.toolchain` accepts two through six string arguments")
     texts := [String]{}
     loop index in 0..<args.len() -> &texts.push(build_session_text(args, index) ?? return build_session_fail(state, "toolchain fields must be strings"))
-    name :: texts[0]
+    name: texts[0]
     if name.trim() == "" -> return build_session_error_fail(state, .EmptyToolchainName)
     loop old in state.toolchains { if old.name == name -> return build_session_error_fail(state, BuildSessionError.DuplicateToolchainName{value: name}) }
-    host :: if texts.len() >= 3 -> texts[2] else -> "host"
+    host: if texts.len() >= 3 -> texts[2] else -> "host"
     if texts[1].trim() == "" || host.trim() == "" -> return build_session_error_fail(state, BuildSessionError.EmptyToolchainTriple{value: name})
     loop index in 3..<texts.len() { if texts[index].trim() == "" -> return build_session_error_fail(state, BuildSessionError.EmptyIdentityField{value: name}) }
-    id :: state.toolchains.len()
+    id: state.toolchains.len()
     &state.toolchains.push(BuildSessionToolchain{name: name, role: "target", target_triple: texts[1], host_triple: host, sdk: if texts.len() >= 4 -> Val(texts[3]) else -> None, linker: if texts.len() >= 5 -> Val(texts[4]) else -> None, sysroot: if texts.len() >= 6 -> Val(texts[5]) else -> None})
     BuildSessionReply.Value{value: BuildSessionValue.Handle{type_name: "BuildToolchain", session: state.id, id: id}}
 }
 
-fn build_session_add_signing(state: &BuildSessionState, args: [BuildSessionValue]) -> BuildSessionReply {
+build_session_add_signing: fn(state: &BuildSessionState, args: [BuildSessionValue]) -> BuildSessionReply {
     if args.len() != 2 -> return build_session_fail(state, "`b.signing` requires name and label")
-    name :: build_session_text(args, 0) ?? return build_session_fail(state, "signing name must be a string")
-    label :: build_session_text(args, 1) ?? return build_session_fail(state, "signing label must be a string")
+    name: build_session_text(args, 0) ?? return build_session_fail(state, "signing name must be a string")
+    label: build_session_text(args, 1) ?? return build_session_fail(state, "signing label must be a string")
     if name.trim() == "" -> return build_session_error_fail(state, .EmptySigningIdentityName)
     if label.trim() == "" -> return build_session_error_fail(state, BuildSessionError.EmptyIdentityField{value: name})
     loop old in state.signing { if old.name == name -> return build_session_error_fail(state, BuildSessionError.DuplicateSigningIdentityName{value: name}) }
-    id :: state.signing.len()
+    id: state.signing.len()
     &state.signing.push(BuildSessionSigning{name: name, label: label})
     BuildSessionReply.Value{value: BuildSessionValue.Handle{type_name: "BuildSigningIdentity", session: state.id, id: id}}
 }
 
-fn build_session_add_probe(state: &BuildSessionState, args: [BuildSessionValue], in_impure_gate: Bool) -> BuildSessionReply {
+build_session_add_probe: fn(state: &BuildSessionState, args: [BuildSessionValue], in_impure_gate: Bool) -> BuildSessionReply {
     if args.len() < 3 || args.len() > 6 -> return build_session_fail(state, "`b.probe` accepts three through six arguments")
-    name :: build_session_text(args, 0) ?? return build_session_fail(state, "probe name must be a string")
-    kind :: build_session_text(args, 1) ?? return build_session_fail(state, "probe kind must be a string")
-    value :: build_session_text(args, 2) ?? return build_session_fail(state, "probe value must be a string")
+    name: build_session_text(args, 0) ?? return build_session_fail(state, "probe name must be a string")
+    kind: build_session_text(args, 1) ?? return build_session_fail(state, "probe kind must be a string")
+    value: build_session_text(args, 2) ?? return build_session_fail(state, "probe value must be a string")
     reproducible_gate := false
     loop index in 0..<args.len() { if index + 2 >= args.len() && args[index] == .Text(text) { if text.to_lower() == "reproducible" -> reproducible_gate = true } }
     if !reproducible_gate && !in_impure_gate -> return build_session_impure(state, "probe")
@@ -526,12 +526,12 @@ fn build_session_add_probe(state: &BuildSessionState, args: [BuildSessionValue],
     // All source probe constructors use ambient-record provenance without a
     // lock. Rust rejects reproducible classification on these same values.
     if reproducibility == "reproducible" -> return build_session_error_fail(state, BuildSessionError.MissingLockedProvenance{value: name})
-    id :: state.probes.len()
+    id: state.probes.len()
     &state.probes.push(BuildSessionProbe{name: name, kind: kind, value: value, code: code, reproducibility: reproducibility, toolchain: toolchain})
     BuildSessionReply.Value{value: BuildSessionValue.Handle{type_name: "BuildProbe", session: state.id, id: id}}
 }
 
-fn build_session_project_error(state: &BuildSessionState, args: [BuildSessionValue]) -> BuildSessionReply {
+build_session_project_error: fn(state: &BuildSessionState, args: [BuildSessionValue]) -> BuildSessionReply {
     if args.len() != 5 -> return build_session_fail(state, "`b.error` requires SourceSpan, code, what, why, and fix")
     start := state.start
     end := state.end
@@ -542,12 +542,12 @@ fn build_session_project_error(state: &BuildSessionState, args: [BuildSessionVal
         }
         else -> return build_session_fail(state, "argument 1 must be SourceSpan")
     }
-    code :: build_session_text(args, 1) ?? return build_session_fail(state, "build rule code must be a string")
-    what :: build_session_text(args, 2) ?? return build_session_fail(state, "build rule what must be a string")
-    why :: build_session_text(args, 3) ?? return build_session_fail(state, "build rule why must be a string")
-    fix :: build_session_text(args, 4) ?? return build_session_fail(state, "build rule fix must be a string")
+    code: build_session_text(args, 1) ?? return build_session_fail(state, "build rule code must be a string")
+    what: build_session_text(args, 2) ?? return build_session_fail(state, "build rule what must be a string")
+    why: build_session_text(args, 3) ?? return build_session_fail(state, "build rule why must be a string")
+    fix: build_session_text(args, 4) ?? return build_session_fail(state, "build rule fix must be a string")
     reserved := code.len() > 1 && (code.starts_with("E") || code.starts_with("W"))
-    bytes :: code.bytes()
+    bytes: code.bytes()
     loop index in 1..<bytes.len() { if bytes[index] < (U8{48}) || bytes[index] > (U8{57}) -> reserved = false }
     diagnostic := BuildSessionDiagnostic{code: code, what: what, why: why, fix: fix, start: start, end: end}
     if reserved {
@@ -559,18 +559,18 @@ fn build_session_project_error(state: &BuildSessionState, args: [BuildSessionVal
     BuildSessionReply.Value{value: BuildSessionValue.Unit}
 }
 
-fn build_session_contains_string(values: [String], value: String) -> Bool Never! {
+build_session_contains_string: fn(values: [String], value: String) -> Bool Never! {
     loop item in values { if item == value -> return true }
     false
 }
-fn build_session_append_unique(values: &[String], value: String) Never! {
+build_session_append_unique: fn(values: &[String], value: String) Never! {
     if !build_session_contains_string(values, value) -> &values.push(value)
 }
 
 // Build failures are values only for the checked BuildError constructors.
 // Parser/transport/gate failures remain diagnostics; never infer a variant by
 // parsing a diagnostic's display text.
-enum BuildSessionError {
+BuildSessionError: enum {
     EmptyTargetName
     EmptyActionName
     EmptyToolchainName
@@ -621,16 +621,16 @@ enum BuildSessionError {
     ActionDependencyCycle(nodes: [String])
 }
 
-struct BuildSessionErrorField { name: String value: String }
-struct BuildSessionErrorProjection { variant: String text: String fields: [BuildSessionErrorField] }
-fn build_session_error_field(name: String, value: String) -> BuildSessionErrorField Never! {
+BuildSessionErrorField: struct { name: String value: String }
+BuildSessionErrorProjection: struct { variant: String text: String fields: [BuildSessionErrorField] }
+build_session_error_field: fn(name: String, value: String) -> BuildSessionErrorField Never! {
     {name: name, value: build_session_error_json_text(value)}
 }
-fn build_session_error_json_text(value: String) -> String Never! {
+build_session_error_json_text: fn(value: String) -> String Never! {
     bytes := [U8]{U8{34}}
-    digits :: "0123456789abcdef".bytes()
+    digits: "0123456789abcdef".bytes()
     loop byte in value.bytes() {
-        number :: Int.from_u8(byte)
+        number: Int.from_u8(byte)
         escaped := ""
         if number == 34 -> escaped = "\\\""
         else if number == 92 -> escaped = "\\\\"
@@ -638,7 +638,7 @@ fn build_session_error_json_text(value: String) -> String Never! {
         else if number == 13 -> escaped = "\\r"
         else if number == 9 -> escaped = "\\t"
         else if number < 32 {
-            pair :: String.from_bytes([U8]{digits[number /% 16], digits[number % 16]}) ?? panic("invalid hex")
+            pair: String.from_bytes([U8]{digits[number /% 16], digits[number % 16]}) ?? panic("invalid hex")
             escaped = "\\u00{pair}"
         }
         if escaped == "" -> &bytes.push(byte)
@@ -647,24 +647,24 @@ fn build_session_error_json_text(value: String) -> String Never! {
     &bytes.push(U8{34})
     String.from_bytes(bytes) ?? panic("JSON preserves UTF8")
 }
-fn build_session_error_texts(values: [String]) -> String Never! {
-    rows :: loop value in values -> build_session_error_json_text(value)
+build_session_error_texts: fn(values: [String]) -> String Never! {
+    rows: loop value in values -> build_session_error_json_text(value)
     "[{rows.join(",")}]"
 }
-fn build_session_error_plain(variant: String) -> BuildSessionErrorProjection Never! {
+build_session_error_plain: fn(variant: String) -> BuildSessionErrorProjection Never! {
     {variant: variant, text: variant, fields: []}
 }
-fn build_session_error_one(variant: String, value: String, text: String) -> BuildSessionErrorProjection Never! {
+build_session_error_one: fn(variant: String, value: String, text: String) -> BuildSessionErrorProjection Never! {
     {variant: variant, text: text, fields: [BuildSessionErrorField]{build_session_error_field("value", value)}}
 }
-fn build_session_error_debug(variant: String, value: String) -> BuildSessionErrorProjection Never! {
+build_session_error_debug: fn(variant: String, value: String) -> BuildSessionErrorProjection Never! {
     build_session_error_one(variant, value, "{variant}({build_key_debug_text(value)})")
 }
-fn build_session_error_id(variant: String, kind: String, id: Int) -> BuildSessionErrorProjection Never! {
+build_session_error_id: fn(variant: String, kind: String, id: Int) -> BuildSessionErrorProjection Never! {
     {variant: variant, text: "{variant}({kind}({id}))", fields: [BuildSessionErrorField]{{name: "id", value: "{id}"}}}
 }
-fn build_session_error_kind(variant: String, kind: String) -> BuildSessionErrorProjection Never! {
-    wrapper :: if kind == {
+build_session_error_kind: fn(variant: String, kind: String) -> BuildSessionErrorProjection Never! {
+    wrapper: if kind == {
         "cmake" -> "CMake"
         "make" -> "Make"
         "gradle" -> "Gradle"
@@ -674,11 +674,11 @@ fn build_session_error_kind(variant: String, kind: String) -> BuildSessionErrorP
     }
     {variant: variant, text: "{variant}({wrapper})", fields: [BuildSessionErrorField]{build_session_error_field("kind", kind)}}
 }
-fn build_session_error_cycle(variant: String, kind: String, nodes: [String]) -> BuildSessionErrorProjection Never! {
-    chain :: loop node in nodes -> "`{node}`"
+build_session_error_cycle: fn(variant: String, kind: String, nodes: [String]) -> BuildSessionErrorProjection Never! {
+    chain: loop node in nodes -> "`{node}`"
     {variant: variant, text: "{kind} dependency graph contains a cycle: {chain.join(" -> ")}; a cycle has no build order, so no {kind} in it can ever start; remove one dependency from that chain", fields: [BuildSessionErrorField]{{name: "nodes", value: build_session_error_texts(nodes)}}}
 }
-fn build_session_error_projection(error: BuildSessionError) -> BuildSessionErrorProjection Never! {
+build_session_error_projection: fn(error: BuildSessionError) -> BuildSessionErrorProjection Never! {
     if error == {
         .EmptyTargetName -> build_session_error_plain("EmptyTargetName")
         .EmptyActionName -> build_session_error_plain("EmptyActionName")
@@ -723,7 +723,7 @@ fn build_session_error_projection(error: BuildSessionError) -> BuildSessionError
         .DuplicateActionOutput(action, output) -> ({variant: "DuplicateActionOutput", text: "DuplicateActionOutput {{ action: {build_key_debug_text(action)}, output: {build_key_debug_text(output)} }}", fields: [BuildSessionErrorField]{build_session_error_field("action", action), build_session_error_field("output", output)}})
         .DuplicateBuildOutput(output, first, second) -> ({variant: "DuplicateBuildOutput", text: "output `{output}` is owned by both `{first}` and `{second}`", fields: [BuildSessionErrorField]{build_session_error_field("output", output), build_session_error_field("first_action", first), build_session_error_field("second_action", second)}})
         .LegacyWrapperCommandMismatch(wrapper, actual) -> {
-            name :: if wrapper == {
+            name: if wrapper == {
                 "cmake" -> "CMake"
                 "make" -> "Make"
                 "gradle" -> "Gradle"
@@ -739,17 +739,17 @@ fn build_session_error_projection(error: BuildSessionError) -> BuildSessionError
         .ActionDependencyCycle(nodes) -> build_session_error_cycle("ActionDependencyCycle", "action", nodes)
         .PolicyDenied(subject, allowed, reason, caps) -> {
             // PolicyExplanation Debug is part of the reference failed value.
-            names :: loop cap in caps -> build_session_cap_name(cap)
+            names: loop cap in caps -> build_session_cap_name(cap)
             return {variant: "PolicyDenied", text: "PolicyDenied(PolicyExplanation {{ subject: {build_key_debug_text(subject)}, allowed: {allowed}, reason: {build_key_debug_text(reason)}, required_caps: [{names.join(", ")}] }})", fields: [BuildSessionErrorField]{build_session_error_field("subject", subject), {name: "allowed", value: "{allowed}"}, build_session_error_field("reason", reason), {name: "required_caps", value: build_session_error_texts(names)}}}
         }
     }
 }
-fn build_session_error_diag(state: BuildSessionState, error: BuildSessionError) -> BuildSessionDiagnostic Never! {
-    projection :: build_session_error_projection(error)
+build_session_error_diag: fn(state: BuildSessionState, error: BuildSessionError) -> BuildSessionDiagnostic Never! {
+    projection: build_session_error_projection(error)
     diagnostic := build_session_diag(state, projection.text)
     diagnostic.error = Val(error)
     diagnostic
 }
-fn build_session_error_fail(state: BuildSessionState, error: BuildSessionError) -> BuildSessionReply Never! {
+build_session_error_fail: fn(state: BuildSessionState, error: BuildSessionError) -> BuildSessionReply Never! {
     return BuildSessionReply.Failure{error: build_session_error_diag(state, error)}
 }

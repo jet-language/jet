@@ -1,7 +1,7 @@
 
-use testing :: core.testing
+use testing: core.testing
 
-module perf.testing {
+perf.testing: module {
     budgets: [Budget{
         name: "parse",
         scope: .Test("parse"),
@@ -13,13 +13,13 @@ module perf.testing {
     }]
 }
 
-fn run() {
+run: fn() {
     print(testing.fixture("fixture.txt"))
     print(testing.golden("golden.txt", "gold"))
     print(testing.snap("case", "snap"))
     print(testing.corpus("corpus").len())
     print(testing.temp_dir("case").len() > 0)
-    clock :: testing.fake_clock(99)
+    clock: testing.fake_clock(99)
     rng := testing.fake_rng(5)
     print(clock.now())
     print(&rng.int(1, 4) >= 1)

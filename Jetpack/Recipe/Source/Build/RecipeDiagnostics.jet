@@ -9,18 +9,18 @@
 // failures carry their detail as `Update`.
 
 #Error
-struct RecipeDiagnostic {
+RecipeDiagnostic: struct {
     code: String
     what: String
     why: String
     fix: String
 
-    fn new(code: String, what: String, why: String, fix: String) -> RecipeDiagnostic Never! {
+    new: fn(code: String, what: String, why: String, fix: String) -> RecipeDiagnostic Never! {
         RecipeDiagnostic{code, what, why, fix}
     }
 
     // E1236: a build fetch is unlocked or carries credentials in its URL.
-    fn e1236(url: String) -> RecipeDiagnostic Never! {
+    e1236: fn(url: String) -> RecipeDiagnostic Never! {
         if recipe_credentialed_fetch_url(url) -> return RecipeDiagnostic.e1236_credentialed_url()
         RecipeDiagnostic.new(
             "E1236",
@@ -30,7 +30,7 @@ struct RecipeDiagnostic {
         )
     }
 
-    fn e1236_offline(url: String) -> RecipeDiagnostic Never! {
+    e1236_offline: fn(url: String) -> RecipeDiagnostic Never! {
         RecipeDiagnostic.new(
             "E1236",
             "a build step needs the network but the build is offline",
@@ -39,7 +39,7 @@ struct RecipeDiagnostic {
         )
     }
 
-    fn e1236_no_transport(url: String) -> RecipeDiagnostic Never! {
+    e1236_no_transport: fn(url: String) -> RecipeDiagnostic Never! {
         RecipeDiagnostic.new(
             "E1236",
             "a build step needs a remote source with no transport available",
@@ -48,7 +48,7 @@ struct RecipeDiagnostic {
         )
     }
 
-    fn e1236_credentialed_url() -> RecipeDiagnostic Never! {
+    e1236_credentialed_url: fn() -> RecipeDiagnostic Never! {
         RecipeDiagnostic.new(
             "E1236",
             "a build fetch contains embedded credentials",
@@ -57,7 +57,7 @@ struct RecipeDiagnostic {
         )
     }
 
-    fn e1236_fetch(url: String, reason: String) -> RecipeDiagnostic Never! {
+    e1236_fetch: fn(url: String, reason: String) -> RecipeDiagnostic Never! {
         RecipeDiagnostic.new(
             "E1236",
             "a locked build fetch failed",
@@ -66,7 +66,7 @@ struct RecipeDiagnostic {
         )
     }
 
-    fn e1236_mismatch(url: String, want: String, got: String) -> RecipeDiagnostic Never! {
+    e1236_mismatch: fn(url: String, want: String, got: String) -> RecipeDiagnostic Never! {
         RecipeDiagnostic.new(
             "E1236",
             "a locked build fetch did not match its hash",
@@ -75,7 +75,7 @@ struct RecipeDiagnostic {
         )
     }
 
-    fn e1236_invalid_hash(url: String, hash: String) -> RecipeDiagnostic Never! {
+    e1236_invalid_hash: fn(url: String, hash: String) -> RecipeDiagnostic Never! {
         RecipeDiagnostic.new(
             "E1236",
             "a locked build fetch has an invalid sha256",
@@ -85,7 +85,7 @@ struct RecipeDiagnostic {
     }
 
     // E1237: a build step wrote outside the package output root.
-    fn e1237(dest: String) -> RecipeDiagnostic Never! {
+    e1237: fn(dest: String) -> RecipeDiagnostic Never! {
         RecipeDiagnostic.new(
             "E1237",
             "a build step tried to write outside the output root: `{dest}`",
@@ -94,7 +94,7 @@ struct RecipeDiagnostic {
         )
     }
 
-    fn e1237_source(source: String) -> RecipeDiagnostic Never! {
+    e1237_source: fn(source: String) -> RecipeDiagnostic Never! {
         RecipeDiagnostic.new(
             "E1237",
             "a build step tried to read an unsafe recipe source: `{source}`",
@@ -104,12 +104,12 @@ struct RecipeDiagnostic {
     }
 
     // An install step failed while reading or copying its staged source.
-    fn e1237_install(what: String, why: String, fix: String) -> RecipeDiagnostic Never! {
+    e1237_install: fn(what: String, why: String, fix: String) -> RecipeDiagnostic Never! {
         RecipeDiagnostic.new("E1237", what, why, fix)
     }
 
     // The sandbox boundary refused a source or output tree.
-    fn sandbox_copy(what: String, error: RecipeError) -> RecipeDiagnostic Never! {
+    sandbox_copy: fn(what: String, error: RecipeError) -> RecipeDiagnostic Never! {
         RecipeDiagnostic.new(
             "E1237",
             what,
@@ -119,7 +119,7 @@ struct RecipeDiagnostic {
     }
 
     // E1238: a recipe or staged plan violated its declared build graph contract.
-    fn e1238(tool: String) -> RecipeDiagnostic Never! {
+    e1238: fn(tool: String) -> RecipeDiagnostic Never! {
         RecipeDiagnostic.new(
             "E1238",
             "build tool `{tool}` is not a realized dependency",
@@ -128,7 +128,7 @@ struct RecipeDiagnostic {
         )
     }
 
-    fn e1238_plan(detail: String) -> RecipeDiagnostic Never! {
+    e1238_plan: fn(detail: String) -> RecipeDiagnostic Never! {
         RecipeDiagnostic.new(
             "E1238",
             "build recipe or staged plan action is not a valid declared action graph",
@@ -137,13 +137,13 @@ struct RecipeDiagnostic {
         )
     }
 
-    fn e1238_output_conflict(previous: String, previous_step: String, output: String, step: String) -> RecipeDiagnostic Never! {
+    e1238_output_conflict: fn(previous: String, previous_step: String, output: String, step: String) -> RecipeDiagnostic Never! {
         RecipeDiagnostic.e1238_plan("recipe output `{output}` overlaps output `{previous}` owned by `{previous_step}`; `{step}` cannot claim the same staged path")
     }
 
     // A build tool exited unsuccessfully. `detail` is the why text; declared
     // arguments and tool output never reach the diagnostic.
-    fn e1238_tool_failed(tool: String, detail: String) -> RecipeDiagnostic Never! {
+    e1238_tool_failed: fn(tool: String, detail: String) -> RecipeDiagnostic Never! {
         RecipeDiagnostic.new(
             "E1238",
             "build tool `{tool}` exited with an error",
@@ -153,7 +153,7 @@ struct RecipeDiagnostic {
     }
 
     // A build workspace filesystem failure (`recipe_io_error`).
-    fn recipe_io(what: String, error: RecipeError) -> RecipeDiagnostic Never! {
+    recipe_io: fn(what: String, error: RecipeError) -> RecipeDiagnostic Never! {
         RecipeDiagnostic.new(
             "E1238",
             what,
@@ -163,7 +163,7 @@ struct RecipeDiagnostic {
     }
 
     // E1275: executable recipe steps need the native sandbox.
-    fn e1275(detail: String) -> RecipeDiagnostic Never! {
+    e1275: fn(detail: String) -> RecipeDiagnostic Never! {
         RecipeDiagnostic.new(
             "E1275",
             "build sandboxing is required but unavailable",
@@ -174,7 +174,7 @@ struct RecipeDiagnostic {
 }
 
 #Error
-enum RecipeError {
+RecipeError: enum {
     IO(IOError)
     InvalidInput(String)
     InvalidData(String)
@@ -184,7 +184,7 @@ enum RecipeError {
     Other(String)
     Update(String)
 
-    fn message(self) -> String Never! {
+    message: fn(self) -> String Never! {
         if self == {
             .IO(error) -> "{error}"
             .InvalidInput(text) | .InvalidData(text) | .PermissionDenied(text) | .AlreadyExists(text) | .NotFound(text) | .Other(text) | .Update(text) -> text
@@ -192,7 +192,7 @@ enum RecipeError {
     }
 
     // Rust `error.kind() == ErrorKind::NotFound` across both carriers.
-    fn is_not_found(self) -> Bool Never! {
+    is_not_found: fn(self) -> Bool Never! {
         if self == {
             .IO(inner) -> {
                 if inner == {
@@ -206,7 +206,7 @@ enum RecipeError {
     }
 
     // Rust `error.kind() == ErrorKind::AlreadyExists` across both carriers.
-    fn is_already_exists(self) -> Bool Never! {
+    is_already_exists: fn(self) -> Bool Never! {
         if self == {
             .IO(inner) -> {
                 if inner == {

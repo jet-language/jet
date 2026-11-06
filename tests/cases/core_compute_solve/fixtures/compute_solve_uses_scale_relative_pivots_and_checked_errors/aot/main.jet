@@ -1,19 +1,19 @@
 
 use {
-    compute :: core.compute
+    compute: core.compute
     core.compute.[ComputeError]
-    solve :: core.compute.solve
+    solve: core.compute.solve
 }
 
-fn run() {
-    scaled :: compute.full([1, 1], 1e-20) ?? panic("scaled")
-    rhs :: compute.full([1], 2e-20) ?? panic("rhs")
-    solution :: solve.dense(scaled, rhs) ?? panic("scaled dense solve")
+run: fn() {
+    scaled: compute.full([1, 1], 1e-20) ?? panic("scaled")
+    rhs: compute.full([1], 2e-20) ?? panic("rhs")
+    solution: solve.dense(scaled, rhs) ?? panic("scaled dense solve")
     print("dense:{compute.to_list(solution)}")
-    factors :: solve.lu(scaled) ?? panic("scaled LU")
+    factors: solve.lu(scaled) ?? panic("scaled LU")
     print("lu:{factors.pivots}")
 
-    singular :: compute.reshape(compute.from_list([1.0, 2.0, 2.0, 4.0]) ?? panic("singular"), [2, 2]) ?? panic("singular shape")
+    singular: compute.reshape(compute.from_list([1.0, 2.0, 2.0, 4.0]) ?? panic("singular"), [2, 2]) ?? panic("singular shape")
     if solve.lu(singular) == {
         .Ok(_) -> print("singular:accepted")
         .Err(error) -> {
@@ -25,7 +25,7 @@ fn run() {
         }
     }
 
-    wrong_rhs :: compute.from_list([1.0, 2.0]) ?? panic("wrong_rhs")
+    wrong_rhs: compute.from_list([1.0, 2.0]) ?? panic("wrong_rhs")
     if solve.dense(scaled, wrong_rhs) == {
         .Ok(_) -> print("shape:accepted")
         .Err(error) -> {

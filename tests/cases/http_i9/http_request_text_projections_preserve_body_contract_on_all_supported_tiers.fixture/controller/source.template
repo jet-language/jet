@@ -1,16 +1,16 @@
 use {
-    net :: core.net
-    files :: core.files
-    time :: core.time
+    net: core.net
+    files: core.files
+    time: core.time
 }
-PEER_CRLF :: comptime { String.from_bytes([U8]{13, 10}) ?? panic("fixture CRLF") }
+PEER_CRLF: comptime { String.from_bytes([U8]{13, 10}) ?? panic("fixture CRLF") }
 
-fn prefix(raw: [U8], want: [U8]) -> Bool {
+prefix: fn(raw: [U8], want: [U8]) -> Bool {
     if raw.len() < want.len() -> return false
     loop i in 0..<want.len() { if raw[i] != want[i] -> return false }
     return true
 }
-fn contains_bytes(raw: [U8], want: [U8], ascii_casefold: Bool) -> Bool {
+contains_bytes: fn(raw: [U8], want: [U8], ascii_casefold: Bool) -> Bool {
     if raw.len() < want.len() -> return false
     loop start in 0..<(raw.len() - want.len() + 1) {
         same := true
@@ -23,36 +23,36 @@ fn contains_bytes(raw: [U8], want: [U8], ascii_casefold: Bool) -> Bool {
     }
     return false
 }
-fn request_head(stream: &TCPStream) -> [U8] {
+request_head: fn(stream: &TCPStream) -> [U8] {
     // Original request_head10-23: persistent 5s read timeout,512-byte reads, positive read, <=64KiB bound, exact CRLFCRLF terminator.
     net.set_read_timeout(&stream, 5000) ?? panic("request timeout")
     request := [U8]{}
     loop !contains_bytes(request, [U8]{13,10,13,10}, false) {
-        block :: stream.read(512) ?? panic("request read")
+        block: stream.read(512) ?? panic("request read")
         assert(block.len() > 0)
         loop byte in block { &request.push(byte) }
         assert(request.len() <= 65536)
     }
     return request
 }
-fn publish(listener: TCPListener, path: String) {
-    address :: listener.local_addr() ?? panic("address")
+publish: fn(listener: TCPListener, path: String) {
+    address: listener.local_addr() ?? panic("address")
     files.write_atomic(path, address.bytes()) ?? panic("publish address")
 }
-use process :: core.process
-fn subject(mode: String, path: String) -> ProcessReceipt {
+use process: core.process
+subject: fn(mode: String, path: String) -> ProcessReceipt {
     if mode != "aot" {
         argv := [String]{"{jet}", "run"}
         &argv.push(path)
         return process.cmd(argv).run() ?? panic("run subject")
     }
     // Source/CmdCompile.rs482-488 public built: path; compile happens INSIDE runner task.
-    build :: process.cmd([String]{"{jet}", "build", path}).run() ?? panic("build subject")
+    build: process.cmd([String]{"{jet}", "build", path}).run() ?? panic("build subject")
     assert(build.success)
     artifact := ""
     loop line in build.output.split("\n") {
         if line.starts_with("built: ") {
-            rest :: line.slice(7..<line.len()).copy()
+            rest: line.slice(7..<line.len()).copy()
             artifact = rest.split(" (").to_list()[0].trim().copy()
             break
         }
@@ -60,7 +60,7 @@ fn subject(mode: String, path: String) -> ProcessReceipt {
     assert(artifact.len() > 0)
     return process.cmd([String]{artifact}).run() ?? panic("run artifact")
 }
-fn retry_connect(address: String, started: Instant) -> TCPStream {
+retry_connect: fn(address: String, started: Instant) -> TCPStream {
     loop {
         if net.tcp_connect(address) == {
             .Ok(stream) -> return stream
@@ -71,39 +71,39 @@ fn retry_connect(address: String, started: Instant) -> TCPStream {
         }
     }
 }
-use sys :: core.sys
-fn reserve_address() -> String {
-    reservation :: net.tcp_listen("127.0.0.1:0") ?? panic("reserve port")
+use sys: core.sys
+reserve_address: fn() -> String {
+    reservation: net.tcp_listen("127.0.0.1:0") ?? panic("reserve port")
     return reservation.local_addr() ?? panic("address")
     // Returning drops the only listener before the runner is spawned.
 }
-fn reset_errno() -> Int {
+reset_errno: fn() -> Int {
     // std::sys::pal::{unix,windows}::os::decode_error_kind: ONLY ECONNRESET.
     // libc Linux/Android104, Darwin/BSD54; Winsock WSAECONNRESET10054.
-    host :: sys.name()
+    host: sys.name()
     if host == "linux" || host == "android" -> return 104
     if host == "macos" || host == "darwin" || host == "osx" || host == "freebsd" || host == "openbsd" || host == "netbsd" -> return 54
     if host == "windows" -> return 10054
     panic("raw-net-io-kind: host ECONNRESET constant is not mapped")
 }
-fn run() {
-    modes :: [String]{"default", "aot"}
-    paths :: [String]{"/default", "/explicit", "/over", "/consumed", "/binary"}
-    expected :: [String]{"default=hello", "explicit=hello", "over=BodyTooLarge:4", "consumed=BodyConsumed", "binary=UnsupportedEncoding"}
+run: fn() {
+    modes: [String]{"default", "aot"}
+    paths: [String]{"/default", "/explicit", "/over", "/consumed", "/binary"}
+    expected: [String]{"default=hello", "explicit=hello", "over=BodyTooLarge:4", "consumed=BodyConsumed", "binary=UnsupportedEncoding"}
     loop mode in modes {
-        address :: reserve_address()
-        port :: address.split(":").to_list()[1].copy()
-        source :: files.read("{work}/server/main.template") ?? panic("source")
+        address: reserve_address()
+        port: address.split(":").to_list()[1].copy()
+        source: files.read("{work}/server/main.template") ?? panic("source")
         files.write("{work}/server/main.jet", source.replace("__PORT__", port)) ?? panic("stage source")
-        runner :: task { return subject(mode, "{work}/server/main.jet") }
+        runner: task { return subject(mode, "{work}/server/main.jet") }
         // Original clock starts after runner spawn; AOT build is not moved outside the budget.
-        started :: time.instant()
+        started: time.instant()
         loop index in 0..<5 {
             client := retry_connect(address, started)
             net.set_read_timeout(&client, 10000) ?? panic("read timeout")
             body := "hello".bytes()
             if index == 4 -> body = [U8]{0, 255, 1}
-            path :: paths[index]
+            path: paths[index]
             client.write_all("POST {path} HTTP/1.1{PEER_CRLF}Host: local{PEER_CRLF}Content-Length: {body.len()}{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}".bytes()) ?? panic("header")
             client.write_all(body) ?? panic("body")
             response := [U8]{}
@@ -123,10 +123,10 @@ fn run() {
                     }
                 }
             }
-            text :: String.from_bytes(response) ?? panic("UTF-8 HTTP response")
+            text: String.from_bytes(response) ?? panic("UTF-8 HTTP response")
             assert(text.starts_with("HTTP/1.1 200"))
             separator := -1
-            raw :: text.bytes()
+            raw: text.bytes()
             loop offset in 0..<(raw.len() - 3) {
                 if raw[offset] == (U8{13}) && raw[offset + 1] == (U8{10}) && raw[offset + 2] == (U8{13}) && raw[offset + 3] == (U8{10}) {
                     separator = offset
@@ -136,7 +136,7 @@ fn run() {
             assert(separator >= 0)
             assert_eq(text.slice(separator + 4..<text.len()), expected[index])
         }
-        output :: runner.join() ?? panic("server runner")
+        output: runner.join() ?? panic("server runner")
         assert_eq(output.code, 0)
         assert_eq(output.output, "")
         assert_eq(output.errors, "")

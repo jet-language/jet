@@ -3,15 +3,15 @@
 // keyword, one type; consumers are ordinary loops — no async/await coloring.
 // Breaking the loop cancels the producer task at the D-CANCELMODEL1=C wait
 // point and runs deferred cleanup.
-struct CleanupMarker {
+CleanupMarker: struct {
     name: String
 }
 
 impl CleanupMarker.Close {
-    fn close(^self) { print("cleanup: {self.name}") }
+    close: fn(^self) { print("cleanup: {self.name}") }
 }
 
-fn count(n: Int) -> Stream<Int> {
+count: fn(n: Int) -> Stream<Int> {
     i := 0
     loop i < n {
         yield i
@@ -19,20 +19,20 @@ fn count(n: Int) -> Stream<Int> {
     }
 }
 
-fn stop_after_one() -> Stream<Int> {
+stop_after_one: fn() -> Stream<Int> {
     print("producer: before")
     yield 1
     print("producer: after-close")
     yield 2
 }
 
-fn nested() -> Stream<Int> {
+nested: fn() -> Stream<Int> {
     yield 10
     loop value in count(2) -> print("nested: {value + 20}")
     yield 99
 }
 
-fn cleanup_after_break() -> Stream<Int> {
+cleanup_after_break: fn() -> Stream<Int> {
     marker := CleanupMarker{name: "stream"}
     defer close(^marker)
     print("cleanup: before")
@@ -41,7 +41,7 @@ fn cleanup_after_break() -> Stream<Int> {
     yield 8
 }
 
-fn run() {
+run: fn() {
     loop x in count(3) -> print("{x}")
     loop x in stop_after_one() {
         print("consumer: {x}")

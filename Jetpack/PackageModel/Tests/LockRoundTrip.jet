@@ -17,21 +17,21 @@ use {
     ]
     jet_foundation.[Diagnostic, RuntimeLayer]
     jetpack_foundation.[UNIFIED_LOCK_FILE]
-    files :: core.files
+    files: core.files
 }
 
-fn pkg_lock_test_tricky(label: String) -> String Never! {
+pkg_lock_test_tricky: fn(label: String) -> String Never! {
     "{label} \"quoted\" \\ slash"
 }
 
-fn pkg_lock_test_parse_error(raw: String) -> String Never! {
+pkg_lock_test_parse_error: fn(raw: String) -> String Never! {
     if pkg_lock_parse(raw) == {
         .Ok(_) -> panic("lock text must be rejected")
         .Err(error) -> error.message()
     }
 }
 
-fn pkg_lock_test_rejects(raw: String) -> Bool Never! {
+pkg_lock_test_rejects: fn(raw: String) -> Bool Never! {
     if pkg_lock_parse(raw) == {
         .Ok(_) -> false
         .Err(_) -> true
@@ -40,7 +40,7 @@ fn pkg_lock_test_rejects(raw: String) -> Bool Never! {
 
 // The previous-schema lock fixture (tests/fixtures/build-metadata-compat/
 // lock-v0.lock).
-fn pkg_lock_test_v0_fixture() -> String Never! {
+pkg_lock_test_v0_fixture: fn() -> String Never! {
     [String]{
         "version = 0",
         "",
@@ -61,7 +61,7 @@ fn pkg_lock_test_v0_fixture() -> String Never! {
 }
 
 // The reported diagnostic of a failed lock operation.
-fn pkg_lock_test_reported(error: LockError) -> Diagnostic Never! {
+pkg_lock_test_reported: fn(error: LockError) -> Diagnostic Never! {
     if error == {
         .Reported(diagnostic) -> diagnostic
         else -> panic("expected a registered lock diagnostic, got {error.message()}")
@@ -69,8 +69,8 @@ fn pkg_lock_test_reported(error: LockError) -> Diagnostic Never! {
 }
 
 #Test("lock roundtrip escaping is idempotent") {
-    local_nix :: "local-nix:{{\"json\":\"value with \\\\ and \\\"\"}}"
-    output :: pkg_lock_test_nix_digest("a")
+    local_nix: "local-nix:{{\"json\":\"value with \\\\ and \\\"\"}}"
+    output: pkg_lock_test_nix_digest("a")
     envelope := pkg_lock_test_env(output, "x86_64-linux", pkg_lock_test_tricky("signature"), local_nix)
     envelope.catalog_tier = pkg_lock_test_tricky("catalog-tier")
     envelope.catalog_trust = pkg_lock_test_tricky("catalog-trust")
@@ -125,28 +125,28 @@ fn pkg_lock_test_reported(error: LockError) -> Diagnostic Never! {
     lock.browsers = [LockedBrowser]{LockedBrowser{engine: pkg_lock_test_tricky("browser-engine"), version: pkg_lock_test_tricky("browser-version"), binary: pkg_lock_test_tricky("browser-binary"), protocol: pkg_lock_test_tricky("browser-protocol"), size: 42, envelope: envelope}}
     lock.source_channels = [LockedSourceChannel]{LockedSourceChannel{name: pkg_lock_test_tricky("source-name"), channel: pkg_lock_test_tricky("source-channel"), exact: pkg_lock_test_tricky("source-exact")}}
 
-    first :: pkg_lock_write(lock)
-    parsed :: pkg_lock_parse(first) ?? panic("portable Nix closure parses")
+    first: pkg_lock_write(lock)
+    parsed: pkg_lock_parse(first) ?? panic("portable Nix closure parses")
     assert_eq(parsed.packages[0].nix_closure, Val(pkg_lock_test_nix_closure(pkg_lock_test_nix_digest("a"))))
     assert(first.bytes().len() <= PKG_MAX_LOCK_BYTES)
     current := first
     loop cycle in 1..<33 {
-        loaded :: pkg_lock_parse(current) ?? panic("lock must parse on cycle {cycle}")
+        loaded: pkg_lock_parse(current) ?? panic("lock must parse on cycle {cycle}")
         current = pkg_lock_write(loaded)
         assert_eq(current, first)
     }
 }
 
 #Test("nix lock requires complete portable closure") {
-    output :: pkg_lock_test_nix_digest("a")
-    other_output :: pkg_lock_test_nix_digest("b")
+    output: pkg_lock_test_nix_digest("a")
+    other_output: pkg_lock_test_nix_digest("b")
     package := pkg_lock_test_pkg("nix", None)
     package.source = LockSource.Nix{reference: "nixpkgs#hello", output: output}
     assert(pkg_lock_test_rejects(pkg_lock_write(pkg_lock_test_base_lock([LockedPackage]{package}, [LockedToolchain]{}))))
 
     complete := package
     complete.nix_closure = Val(pkg_lock_test_nix_closure(output))
-    complete_raw :: pkg_lock_write(pkg_lock_test_base_lock([LockedPackage]{complete}, [LockedToolchain]{}))
+    complete_raw: pkg_lock_write(pkg_lock_test_base_lock([LockedPackage]{complete}, [LockedToolchain]{}))
     assert(!pkg_lock_test_rejects(complete_raw))
     assert(pkg_lock_test_rejects(complete_raw.replace("nix-references = []\n", "")))
 
@@ -160,8 +160,8 @@ fn pkg_lock_test_reported(error: LockError) -> Diagnostic Never! {
 
 // Exercise Rust PartialPkg::finish directly: its owned parse results must
 // survive validation and retain every field in the completed package.
-fn pkg_lock_test_partial_nix(output: String) -> PartialPackage Never! {
-    record :: pkg_lock_test_nix_closure(output)
+pkg_lock_test_partial_nix: fn(output: String) -> PartialPackage Never! {
+    record: pkg_lock_test_nix_closure(output)
     PartialPackage{
         name: Val("nix-owned"),
         version: Val("1.2.3"),
@@ -184,7 +184,7 @@ fn pkg_lock_test_partial_nix(output: String) -> PartialPackage Never! {
     }
 }
 
-fn pkg_lock_test_finish_error(partial: PartialPackage) -> String Never! {
+pkg_lock_test_finish_error: fn(partial: PartialPackage) -> String Never! {
     if partial.finish() == {
         .Ok(_) -> panic("partial package must be rejected")
         .Err(error) -> error.message()
@@ -192,9 +192,9 @@ fn pkg_lock_test_finish_error(partial: PartialPackage) -> String Never! {
 }
 
 #Test("lock finish keeps owned Nix source closure envelope and all fields") {
-    output :: pkg_lock_test_nix_digest("a")
-    envelope :: pkg_lock_test_env(output, "x86_64-linux", "ed25519:sig", "nix-owned")
-    provenance :: DependencyProvenance{transparency: Val("logged"), publisher: Val("signed"), build: Val("attested")}
+    output: pkg_lock_test_nix_digest("a")
+    envelope: pkg_lock_test_env(output, "x86_64-linux", "ed25519:sig", "nix-owned")
+    provenance: DependencyProvenance{transparency: Val("logged"), publisher: Val("signed"), build: Val("attested")}
     partial := pkg_lock_test_partial_nix(output)
     partial.locked_raw = Val("{{ rev = \"revision\", tree-hash = \"tree\", last-modified = 42 }}")
     partial.fingerprint = Val("fingerprint")
@@ -211,7 +211,7 @@ fn pkg_lock_test_finish_error(partial: PartialPackage) -> String Never! {
     partial.envelope = Val(envelope)
     partial.receipt = Val("receipt")
     partial.provenance = Val(provenance)
-    finished :: partial.finish() ?? panic("matching owned Nix package must finish")
+    finished: partial.finish() ?? panic("matching owned Nix package must finish")
     assert_eq(finished, LockedPackage{
         name: "nix-owned", version: "1.2.3",
         source: LockSource.Nix{reference: "nixpkgs#hello", output: output},
@@ -228,21 +228,21 @@ fn pkg_lock_test_finish_error(partial: PartialPackage) -> String Never! {
 }
 
 #Test("lock finish keeps owned non-Nix source and envelope without closure") {
-    envelope :: pkg_lock_test_env("sha256-path", "aarch64-linux", "", "path")
-    partial :: PartialPackage{
+    envelope: pkg_lock_test_env("sha256-path", "aarch64-linux", "", "path")
+    partial: PartialPackage{
         name: Val("path-owned"), version: Val("2.0.0"),
         source_raw: Val("{{ path = \"../dependency\" }}"),
         envelope: Val(envelope)
     }
-    finished :: partial.finish() ?? panic("non-Nix package without closure must finish")
+    finished: partial.finish() ?? panic("non-Nix package without closure must finish")
     assert_eq(finished.source, LockSource.Path("../dependency"))
     assert_eq(finished.nix_closure, None)
     assert_eq(finished.envelope, Val(envelope))
 }
 
 #Test("lock finish preserves portable closure refusal order and exact messages") {
-    output :: pkg_lock_test_nix_digest("a")
-    other :: pkg_lock_test_nix_digest("b")
+    output: pkg_lock_test_nix_digest("a")
+    other: pkg_lock_test_nix_digest("b")
     partial := pkg_lock_test_partial_nix(output)
     partial.nix_closure = None
     partial.envelope = Val(pkg_lock_test_env(other, "aarch64-linux", "", "mismatch"))
@@ -260,7 +260,7 @@ fn pkg_lock_test_finish_error(partial: PartialPackage) -> String Never! {
 }
 
 #Test("lock finish refuses either Nix envelope identity mismatch") {
-    output :: pkg_lock_test_nix_digest("a")
+    output: pkg_lock_test_nix_digest("a")
     wrong_hash := pkg_lock_test_partial_nix(output)
     wrong_hash.envelope = Val(pkg_lock_test_env(pkg_lock_test_nix_digest("b"), "x86_64-linux", "", "hash"))
     assert_eq(pkg_lock_test_finish_error(wrong_hash), "Nix envelope identity disagrees with its closure record")
@@ -269,35 +269,35 @@ fn pkg_lock_test_finish_error(partial: PartialPackage) -> String Never! {
     wrong_platform.envelope = Val(pkg_lock_test_env(output, "aarch64-linux", "", "platform"))
     assert_eq(pkg_lock_test_finish_error(wrong_platform), "Nix envelope identity disagrees with its closure record")
 
-    unrealized :: pkg_lock_test_partial_nix(output).finish() ?? panic("Nix closure without envelope must finish")
+    unrealized: pkg_lock_test_partial_nix(output).finish() ?? panic("Nix closure without envelope must finish")
     assert_eq(unrealized.nix_closure, Val(pkg_lock_test_nix_closure(output)))
     assert_eq(unrealized.envelope, None)
 }
 
 #Test("lock Nix validation borrows owned records until package construction") {
-    output :: pkg_lock_test_nix_digest("a")
-    source :: LockSource.Nix{reference: "nixpkgs#hello", output: output}
-    closure :: Val(pkg_lock_test_nix_closure(output))
-    envelope :: Val(pkg_lock_test_env(output, "x86_64-linux", "signature", "provenance"))
+    output: pkg_lock_test_nix_digest("a")
+    source: LockSource.Nix{reference: "nixpkgs#hello", output: output}
+    closure: Val(pkg_lock_test_nix_closure(output))
+    envelope: Val(pkg_lock_test_env(output, "x86_64-linux", "signature", "provenance"))
     pkg_lock_validate_package_nix(source, closure, envelope) ?? panic("matching Nix records must validate")
-    package :: LockedPackage{name: "owned", version: "1.0.0", source: source, nix_closure: closure, envelope: envelope}
+    package: LockedPackage{name: "owned", version: "1.0.0", source: source, nix_closure: closure, envelope: envelope}
     assert_eq(package.source, LockSource.Nix{reference: "nixpkgs#hello", output: output})
     assert_eq(package.nix_closure, Val(pkg_lock_test_nix_closure(output)))
     assert_eq(package.envelope, Val(pkg_lock_test_env(output, "x86_64-linux", "signature", "provenance")))
 }
 
 #Test("lock Nix validation borrows non-Nix records until package construction") {
-    source :: LockSource.Path("../dependency")
-    closure :: NixClosureRecord?{None}
-    envelope :: Val(pkg_lock_test_env("sha256-path", "aarch64-linux", "", "path"))
+    source: LockSource.Path("../dependency")
+    closure: NixClosureRecord?{None}
+    envelope: Val(pkg_lock_test_env("sha256-path", "aarch64-linux", "", "path"))
     pkg_lock_validate_package_nix(source, closure, envelope) ?? panic("non-Nix record without closure must validate")
-    package :: LockedPackage{name: "owned", version: "1.0.0", source: source, nix_closure: closure, envelope: envelope}
+    package: LockedPackage{name: "owned", version: "1.0.0", source: source, nix_closure: closure, envelope: envelope}
     assert_eq(package.source, LockSource.Path("../dependency"))
     assert_eq(package.nix_closure, None)
     assert_eq(package.envelope, Val(pkg_lock_test_env("sha256-path", "aarch64-linux", "", "path")))
 }
 
-fn pkg_lock_test_validation_error(source: LockSource, closure: NixClosureRecord?, envelope: LockEnvelope?) -> String Never! {
+pkg_lock_test_validation_error: fn(source: LockSource, closure: NixClosureRecord?, envelope: LockEnvelope?) -> String Never! {
     if pkg_lock_validate_package_nix(source, closure, envelope) == {
         .Ok(_) -> panic("package identities must be rejected")
         .Err(error) -> error.message()
@@ -305,11 +305,11 @@ fn pkg_lock_test_validation_error(source: LockSource, closure: NixClosureRecord?
 }
 
 #Test("lock Nix validation keeps exact refusal messages and precedence") {
-    output :: pkg_lock_test_nix_digest("a")
-    other :: pkg_lock_test_nix_digest("b")
-    source :: LockSource.Nix{reference: "nixpkgs#hello", output: output}
-    closure :: Val(pkg_lock_test_nix_closure(output))
-    wrong_envelope :: Val(pkg_lock_test_env(other, "aarch64-linux", "", "mismatch"))
+    output: pkg_lock_test_nix_digest("a")
+    other: pkg_lock_test_nix_digest("b")
+    source: LockSource.Nix{reference: "nixpkgs#hello", output: output}
+    closure: Val(pkg_lock_test_nix_closure(output))
+    wrong_envelope: Val(pkg_lock_test_env(other, "aarch64-linux", "", "mismatch"))
     assert_eq(pkg_lock_test_validation_error(source, None, wrong_envelope), "Nix package is missing its portable closure record")
     assert_eq(pkg_lock_test_validation_error(LockSource.Nix{reference: "nixpkgs#hello", output: other}, closure, wrong_envelope), "Nix source output disagrees with its closure record")
     assert_eq(pkg_lock_test_validation_error(LockSource.Root, closure, wrong_envelope), "portable Nix closure record attached to a non-Nix package")
@@ -319,16 +319,16 @@ fn pkg_lock_test_validation_error(source: LockSource, closure: NixClosureRecord?
 }
 
 #Test("lock writer deduplicates replayed records and stays bounded") {
-    old :: pkg_lock_test_pkg("duplicate", Val(pkg_lock_test_env("sha256-old", "x86_64-linux", "", "old")))
-    newest :: pkg_lock_test_pkg("duplicate", Val(pkg_lock_test_env("sha256-new", "x86_64-linux", "", "new")))
+    old: pkg_lock_test_pkg("duplicate", Val(pkg_lock_test_env("sha256-old", "x86_64-linux", "", "old")))
+    newest: pkg_lock_test_pkg("duplicate", Val(pkg_lock_test_env("sha256-new", "x86_64-linux", "", "new")))
     lock := pkg_lock_test_base_lock([LockedPackage]{old, newest, pkg_lock_test_pkg("other", None)}, [LockedToolchain]{})
     lock.root_dependencies = [String]{"other", "duplicate", "other"}
-    first :: pkg_lock_write(lock)
+    first: pkg_lock_write(lock)
     assert_eq(first.split("[[package]]").to_list().len() - 1, 2)
     assert(first.bytes().len() <= PKG_MAX_LOCK_BYTES)
-    parsed :: pkg_lock_parse(first) ?? panic("canonical lock must parse")
+    parsed: pkg_lock_parse(first) ?? panic("canonical lock must parse")
     assert_eq(parsed.packages[0].name, "duplicate")
-    envelope :: parsed.packages[0].envelope ?? panic("envelope")
+    envelope: parsed.packages[0].envelope ?? panic("envelope")
     assert_eq(envelope.provenance, "new")
     current := first
     loop cycle in 1..<33 {
@@ -339,7 +339,7 @@ fn pkg_lock_test_validation_error(source: LockSource, closure: NixClosureRecord?
 }
 
 #Test("lock roundtrips the manifest authority shape") {
-    authority :: PackageAuthority{
+    authority: PackageAuthority{
         allow: Val([String]{"Net"}),
         deny: Val([String]{"Exec"}),
         needs: [String]{"FS.Read", "Net.Connect"},
@@ -354,7 +354,7 @@ fn pkg_lock_test_validation_error(source: LockSource, closure: NixClosureRecord?
     }
     lock := pkg_lock_test_base_lock([LockedPackage]{}, [LockedToolchain]{})
     lock.authority = Val(authority)
-    raw :: pkg_lock_write(lock)
+    raw: pkg_lock_write(lock)
     assert(raw.contains("authority = {{"))
     assert(raw.contains("allow: [\"Net\"]"))
     assert(!raw.contains("holds"))
@@ -362,12 +362,12 @@ fn pkg_lock_test_validation_error(source: LockSource, closure: NixClosureRecord?
     assert(raw.contains("grants: {{"))
     assert(raw.contains("trust: {{"))
     assert(raw.contains("providers: {{"))
-    parsed :: pkg_lock_parse(raw) ?? panic("authority lock parses")
+    parsed: pkg_lock_parse(raw) ?? panic("authority lock parses")
     assert_eq(parsed.authority, Val(authority))
 }
 
 #Test("lock roundtrips workspace overlay policy") {
-    policy :: OverlayPolicy{
+    policy: OverlayPolicy{
         overlays: [OverlaySet]{OverlaySet{
             name: "rust",
             provider: Val(ProviderOverride{provider: "nixpkgs", channel: Val("unstable")}),
@@ -390,15 +390,15 @@ fn pkg_lock_test_validation_error(source: LockSource, closure: NixClosureRecord?
     lock := pkg_lock_test_base_lock([LockedPackage]{}, [LockedToolchain]{})
     lock.workspace_source_digest = Val("sha256-workspace")
     lock.workspace_overlay_policy = policy
-    back :: pkg_lock_parse(pkg_lock_write(lock)) ?? panic("workspace overlay lock must parse")
+    back: pkg_lock_parse(pkg_lock_write(lock)) ?? panic("workspace overlay lock must parse")
     assert_eq(back.workspace_source_digest, lock.workspace_source_digest)
     assert_eq(back.workspace_overlay_policy, policy)
 }
 
 #Test("workspace overlay lock rejects missing and duplicate identity") {
-    missing_package :: [String]{"", "version = 1", "", "[[workspace_overlay]]", "name = \"beta\"", "", "[[workspace_overlay_package]]", "overlay = \"beta\"", "priority = 0", ""}.join("\n")
+    missing_package: [String]{"", "version = 1", "", "[[workspace_overlay]]", "name = \"beta\"", "", "[[workspace_overlay_package]]", "overlay = \"beta\"", "priority = 0", ""}.join("\n")
     assert(pkg_lock_test_parse_error(missing_package).contains("missing `package`"))
-    duplicate_package :: [String]{"", "version = 1", "", "[[workspace_overlay]]", "name = \"beta\"", "", "[[workspace_overlay_package]]", "overlay = \"beta\"", "package = \"openssl\"", "priority = 1", "", "[[workspace_overlay_package]]", "overlay = \"beta\"", "package = \"openssl\"", "priority = 2", ""}.join("\n")
+    duplicate_package: [String]{"", "version = 1", "", "[[workspace_overlay]]", "name = \"beta\"", "", "[[workspace_overlay_package]]", "overlay = \"beta\"", "package = \"openssl\"", "priority = 1", "", "[[workspace_overlay_package]]", "overlay = \"beta\"", "package = \"openssl\"", "priority = 2", ""}.join("\n")
     assert(pkg_lock_test_parse_error(duplicate_package).contains("duplicate workspace overlay package"))
 }
 
@@ -411,9 +411,9 @@ fn pkg_lock_test_validation_error(source: LockSource, closure: NixClosureRecord?
 }
 
 #Test("previous lock fixture is rejected with registered diagnostic") {
-    raw :: pkg_lock_test_v0_fixture()
+    raw: pkg_lock_test_v0_fixture()
     assert_eq(pkg_lock_test_parse_error(raw), "unsupported lock version 0; expected 1")
-    diagnostic :: if pkg_lock_parse_with_path(raw, ".jet/lock") == {
+    diagnostic: if pkg_lock_parse_with_path(raw, ".jet/lock") == {
         .Ok(_) -> panic("previous lock schema must map to the lock diagnostic")
         .Err(error) -> pkg_lock_test_reported(error)
     }
@@ -426,7 +426,7 @@ fn pkg_lock_test_validation_error(source: LockSource, closure: NixClosureRecord?
 // The registered E1214 row text (tests/fixtures/jetpack-diagnostics/
 // E1214.stderr); the What/Why/Fix renderer is not part of this unit.
 #Test("unsupported lock version fills the registered E1214 row") {
-    diagnostic :: if pkg_lock_parse_with_path(pkg_lock_test_v0_fixture(), ".jet/lock") == {
+    diagnostic: if pkg_lock_parse_with_path(pkg_lock_test_v0_fixture(), ".jet/lock") == {
         .Ok(_) -> panic("previous lock schema must be rejected")
         .Err(error) -> pkg_lock_test_reported(error)
     }
@@ -439,8 +439,8 @@ fn pkg_lock_test_validation_error(source: LockSource, closure: NixClosureRecord?
 // The registered E1205 row text (tests/fixtures/jetpack-diagnostics/
 // E1205.stderr).
 #Test("oversized lock value returns corrupt lock diagnostic") {
-    raw :: "version = 1\nprovenance = \"{pkg_lock_test_repeat("x", PKG_MAX_LOCK_VALUE_BYTES)}\"\n"
-    diagnostic :: if pkg_lock_parse_with_path(raw, ".jet/lock") == {
+    raw: "version = 1\nprovenance = \"{pkg_lock_test_repeat("x", PKG_MAX_LOCK_VALUE_BYTES)}\"\n"
+    diagnostic: if pkg_lock_parse_with_path(raw, ".jet/lock") == {
         .Ok(_) -> panic("an oversized lock value must stop parsing")
         .Err(error) -> pkg_lock_test_reported(error)
     }
@@ -451,36 +451,36 @@ fn pkg_lock_test_validation_error(source: LockSource, closure: NixClosureRecord?
 }
 
 #Test("lock parser preserves empty array members") {
-    lock :: pkg_lock_parse("version = 1\n[root]\ndependencies = [\"\", \"kept\"]\n") ?? panic("valid lock array")
+    lock: pkg_lock_parse("version = 1\n[root]\ndependencies = [\"\", \"kept\"]\n") ?? panic("valid lock array")
     assert_eq(lock.root_dependencies, [String]{"", "kept"})
 }
 
 #Test("record nix lock uses canonical source exact") {
-    scratch :: pkg_lock_test_project("canonical-source")
-    output :: pkg_lock_test_nix_digest("1")
+    scratch: pkg_lock_test_project("canonical-source")
+    output: pkg_lock_test_nix_digest("1")
     closure := pkg_lock_test_nix_closure(output)
     closure.references = [String]{pkg_lock_test_nix_digest("2")}
     envelope := pkg_lock_test_env(output, "x86_64-linux", "", "canonical-source")
     envelope.catalog_tier = "official-signed"
     envelope.catalog_trust = "verified"
     pkg_lock_record_nix_realization(scratch.path, "ripgrep", "15.2.0", "ripgrep@default", output, closure, envelope) ?? panic("record Nix realization")
-    raw :: files.read(files.join(scratch.path, ".jet/lock")) ?? panic("read lock")
-    lock :: pkg_lock_parse(raw) ?? panic("parse")
-    channel :: lock.find_source_channel("default") ?? panic("recorded Nix source channel")
+    raw: files.read(files.join(scratch.path, ".jet/lock")) ?? panic("read lock")
+    lock: pkg_lock_parse(raw) ?? panic("parse")
+    channel: lock.find_source_channel("default") ?? panic("recorded Nix source channel")
     assert_eq(channel.exact, "github:NixOS/nixpkgs#{pkg_lock_test_repeat("a", 40)}")
-    package :: lock.find_package("ripgrep") ?? panic("recorded package")
+    package: lock.find_package("ripgrep") ?? panic("recorded package")
     assert(package.is_nix())
 }
 
 #Test("record rust bridge projects into the unified lock") {
-    scratch :: pkg_lock_test_project("rust-bridge")
+    scratch: pkg_lock_test_project("rust-bridge")
     first := pkg_lock_test_pkg("base64", None)
     first.version = "0.22.1"
     first.content_hash = Val("sha256-cargo-checksum")
     first.source = LockSource.Foreign{language: ForeignLanguage.Rust, reference: "base64@0.22.1", output: "sha256-bridge"}
     first.provenance = Val(DependencyProvenance{transparency: None, publisher: None, build: Val("{PKG_RUST_BRIDGE_PROVENANCE_PREFIX}bridge-key")})
     pkg_lock_record_rust_bridge(scratch.path, "bridge-key", [LockedPackage]{first}) ?? panic("record bridge")
-    lock :: pkg_lock_load(scratch.path) ?? panic("reload")
+    lock: pkg_lock_load(scratch.path) ?? panic("reload")
     records := [LockedPackage]{}
     loop package in lock.packages {
         if package.name == "base64" -> &records.push(package)
@@ -497,7 +497,7 @@ fn pkg_lock_test_validation_error(source: LockSource, closure: NixClosureRecord?
     second.source = LockSource.Foreign{language: ForeignLanguage.Rust, reference: "base64@0.22.2", output: "sha256-bridge-2"}
     second.provenance = Val(DependencyProvenance{transparency: None, publisher: None, build: Val("{PKG_RUST_BRIDGE_PROVENANCE_PREFIX}bridge-key-2")})
     pkg_lock_record_rust_bridge(scratch.path, "bridge-key-2", [LockedPackage]{second}) ?? panic("record second bridge")
-    relock :: pkg_lock_load(scratch.path) ?? panic("reload")
+    relock: pkg_lock_load(scratch.path) ?? panic("reload")
     versions := [String]{}
     loop package in relock.packages {
         if package.name == "base64" -> &versions.push(package.version)
@@ -506,13 +506,13 @@ fn pkg_lock_test_validation_error(source: LockSource, closure: NixClosureRecord?
 }
 
 #Test("atomic lock writer rejects oversized output without replacing lock") {
-    scratch :: pkg_lock_test_project("lock-writer")
-    path :: files.join(scratch.path, UNIFIED_LOCK_FILE)
-    original :: "version = 1\n[root]\ndependencies = []\n"
+    scratch: pkg_lock_test_project("lock-writer")
+    path: files.join(scratch.path, UNIFIED_LOCK_FILE)
+    original: "version = 1\n[root]\ndependencies = []\n"
     files.write(path, pkg_lock_test_repeat("stale lock bytes\n", 128)) ?? panic("seed stale lock")
     pkg_lock_write_atomically(scratch.path, original.bytes()) ?? panic("small lock write")
     assert_eq(files.read(path) ?? panic("read"), original)
-    oversized :: pkg_lock_test_repeat("x", PKG_MAX_LOCK_BYTES + 1)
+    oversized: pkg_lock_test_repeat("x", PKG_MAX_LOCK_BYTES + 1)
     if pkg_lock_write_atomically(scratch.path, oversized.bytes()) == {
         .Ok(_) -> panic("oversized lock must be refused")
         .Err(error) -> {
@@ -524,10 +524,10 @@ fn pkg_lock_test_validation_error(source: LockSource, closure: NixClosureRecord?
 }
 
 #Test("atomic lock writer rejects preexisting managed directory symlink") {
-    root_scratch :: files.temp_dir("lock-writer-managed-link") ?? panic("root")
-    outside_scratch :: files.temp_dir("lock-writer-managed-link-outside") ?? panic("outside")
-    outside_lock :: files.join(outside_scratch.path, "lock")
-    sentinel :: "external lock must remain unchanged\n"
+    root_scratch: files.temp_dir("lock-writer-managed-link") ?? panic("root")
+    outside_scratch: files.temp_dir("lock-writer-managed-link-outside") ?? panic("outside")
+    outside_lock: files.join(outside_scratch.path, "lock")
+    sentinel: "external lock must remain unchanged\n"
     files.write(outside_lock, sentinel) ?? panic("sentinel")
     files.symlink(outside_scratch.path, files.join(root_scratch.path, ".jet")) ?? panic("managed directory link")
     if pkg_lock_write_atomically(root_scratch.path, "new lock bytes\n".bytes()) == {
@@ -538,14 +538,14 @@ fn pkg_lock_test_validation_error(source: LockSource, closure: NixClosureRecord?
 }
 
 #Test("atomic lock writer rejects swapped ancestor without touching external target") {
-    parent :: files.temp_dir("lock-writer-ancestor-swap") ?? panic("parent")
-    workspace :: files.join(parent.path, "workspace")
-    root :: files.join(workspace, "project")
-    outside :: files.join(parent.path, "outside")
-    outside_lock :: files.join(outside, "project/.jet/lock")
+    parent: files.temp_dir("lock-writer-ancestor-swap") ?? panic("parent")
+    workspace: files.join(parent.path, "workspace")
+    root: files.join(workspace, "project")
+    outside: files.join(parent.path, "outside")
+    outside_lock: files.join(outside, "project/.jet/lock")
     files.create_dir_all(files.join(root, ".jet")) ?? panic("project")
     files.create_dir_all(files.join(outside, "project/.jet")) ?? panic("outside project")
-    sentinel :: "external ancestor target must remain unchanged\n"
+    sentinel: "external ancestor target must remain unchanged\n"
     files.write(outside_lock, sentinel) ?? panic("sentinel")
     files.rename(workspace, files.join(parent.path, "workspace-old")) ?? panic("move workspace")
     files.symlink(outside, workspace) ?? panic("swap ancestor")
@@ -557,13 +557,13 @@ fn pkg_lock_test_validation_error(source: LockSource, closure: NixClosureRecord?
 }
 
 #Test("repeated source channel updates are byte identical and bounded") {
-    scratch :: pkg_lock_test_project("lock-channel-cycles")
-    source :: LockedSourceChannel{name: "stable", channel: "stable", exact: "owner/repo@github#v1"}
-    path :: files.join(scratch.path, UNIFIED_LOCK_FILE)
+    scratch: pkg_lock_test_project("lock-channel-cycles")
+    source: LockedSourceChannel{name: "stable", channel: "stable", exact: "owner/repo@github#v1"}
+    path: files.join(scratch.path, UNIFIED_LOCK_FILE)
     first := [U8]{}
     loop cycle in 1..<33 {
         pkg_lock_record_source_channel(scratch.path, source) ?? panic("valid test lock record")
-        bytes :: files.read_bytes(path) ?? panic("read lock")
+        bytes: files.read_bytes(path) ?? panic("read lock")
         assert(bytes.len() <= PKG_MAX_LOCK_BYTES)
         if cycle == 1 -> first = bytes
         assert_eq(bytes, first)
@@ -571,8 +571,8 @@ fn pkg_lock_test_validation_error(source: LockSource, closure: NixClosureRecord?
 }
 
 #Test("bounded lock reader rejects oversized line") {
-    scratch :: pkg_lock_test_project("lock-reader")
-    path :: files.join(scratch.path, UNIFIED_LOCK_FILE)
+    scratch: pkg_lock_test_project("lock-reader")
+    path: files.join(scratch.path, UNIFIED_LOCK_FILE)
     files.write(path, "version = 1\n{pkg_lock_test_repeat("x", PKG_MAX_LOCK_VALUE_BYTES + 1)}\n") ?? panic("seed")
     if pkg_lock_read_text(path) == {
         .Ok(_) -> panic("oversized line must be rejected")
@@ -582,8 +582,8 @@ fn pkg_lock_test_validation_error(source: LockSource, closure: NixClosureRecord?
 }
 
 #Test("bounded lock reader rejects oversized file") {
-    scratch :: pkg_lock_test_project("lock-file-reader")
-    path :: files.join(scratch.path, UNIFIED_LOCK_FILE)
+    scratch: pkg_lock_test_project("lock-file-reader")
+    path: files.join(scratch.path, UNIFIED_LOCK_FILE)
     files.write(path, "version = 1\n{pkg_lock_test_repeat("x\n", PKG_MAX_LOCK_BYTES /% 2 + 1)}") ?? panic("seed")
     if pkg_lock_read_text(path) == {
         .Ok(_) -> panic("oversized file must be rejected")

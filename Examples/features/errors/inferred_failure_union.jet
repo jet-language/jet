@@ -5,22 +5,22 @@
 // `describe` matches every case by its flat name. The compiler checks that
 // no case is missing.
 
-fn parse_age(raw: String) -> Int {
+parse_age: fn(raw: String) -> Int {
     if raw == "" -> return Err(.BadNumber(raw.copy()))
     42
 }
 
-fn find_person(book: [String:String], name: String) -> String {
+find_person: fn(book: [String:String], name: String) -> String {
     if book.has_key(name) -> return book[name]
     Err(.NotFound(name.copy()))
 }
 
-fn age_of(book: [String:String], name: String) -> Int {
-    raw :: find_person(book, name)
+age_of: fn(book: [String:String], name: String) -> Int {
+    raw: find_person(book, name)
     parse_age(raw)
 }
 
-fn describe(book: [String:String], name: String) -> String {
+describe: fn(book: [String:String], name: String) -> String {
     if age_of(book, name) == {
         .Ok(n) -> "age {n}"
         .Err(.NotFound(who)) -> "no such person: {who}"
@@ -28,8 +28,8 @@ fn describe(book: [String:String], name: String) -> String {
     }
 }
 
-fn run() {
-    book :: ["ada": "36", "bob": ""]
+run: fn() {
+    book: ["ada": "36", "bob": ""]
     print(describe(book, "ada"))
     print(describe(book, "bob"))
     print(describe(book, "zed"))

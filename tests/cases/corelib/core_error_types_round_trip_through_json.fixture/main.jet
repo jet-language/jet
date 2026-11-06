@@ -1,14 +1,14 @@
 use {
-    db :: core.db
-    json :: core.encoding.json
-    time :: core.time
+    db: core.db
+    json: core.encoding.json
+    time: core.time
 }
 
 // Core's #Error structs DBError and TimeError derive their codecs: the JSON
 // encode and decode of each lower whenever a program asks for them.
-fn run() [FieldError]! {
+run: fn() [FieldError]! {
     conn := db.open_memory()
-    policy :: db.policy("tasks", "true") ?? panic("policy")
+    policy: db.policy("tasks", "true") ?? panic("policy")
     scoped := conn.with_policy(policy, "attacker")
     scoped.query(SQL{"SELECT nope FROM missing"}) ? _rows -> {
         print("accepted")
@@ -16,11 +16,11 @@ fn run() [FieldError]! {
         print(json.to_string(error) ?? panic("db json"))
     }
 
-    late :: time.TimeError.new("late")
+    late: time.TimeError.new("late")
     print(json.to_string(late) ?? panic("time json"))
 
-    db_back :: json.decode<db.DBError>("{{\"message\":\"boom\"}}")
+    db_back: json.decode<db.DBError>("{{\"message\":\"boom\"}}")
     print(db_back.message)
-    time_back :: json.decode<time.TimeError>("{{\"reason\":\"early\"}}")
+    time_back: json.decode<time.TimeError>("{{\"reason\":\"early\"}}")
     print(time_back.reason)
 }

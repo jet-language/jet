@@ -4,7 +4,7 @@
 // single verified Store boundary, and print the ledger row (
 
 // How `cli_realize_ref_outcome` reports a successful realization.
-enum RowStyle {
+RowStyle: enum {
     // The state-column ledger row (`✓ name version state`).
     Ledger
     // The tier-1 trivial-op row (`✓ name version`, no state or detail).
@@ -14,7 +14,7 @@ enum RowStyle {
     Silent
 }
 
-enum RefOutcome {
+RefOutcome: enum {
     // The realized entry, its source state, the ledger row text (computed for
     // every style), and the lease that keeps the entry consumable.
     Realized(entry: StoreEntry, state: SourceState, line: String, lease: CacheLease)
@@ -28,7 +28,7 @@ enum RefOutcome {
 // Whose ledger a realization belongs to. A user tool is installed into the
 // user profile and is never reconciled against the lock of whatever project
 // the shell happens to be standing in.
-enum RealizeScope {
+RealizeScope: enum {
     Project
     UserProfile
     Use
@@ -38,13 +38,13 @@ enum RealizeScope {
 // current project's env file (`jetpack use ripgrep@stable`) and any workspace
 // member (`jetpack use logging`, `jetpack use packages/logging`, Slice B,
 // ). Prints the diagnostic on failure.
-fn cli_classify_or_report(cache: &WorkspaceDeclarationCache, theme: Theme, raw: String) -[IO, FS, Env, Exec, Time.Wait]> RefSpec RefError! {
-    table :: cli_cwd_table(&cache)
-    index :: cli_cwd_workspace_index(&cache)
+cli_classify_or_report: fn(cache: &WorkspaceDeclarationCache, theme: Theme, raw: String) -[IO, FS, Env, Exec, Time.Wait]> RefSpec RefError! {
+    table: cli_cwd_table(&cache)
+    index: cli_cwd_workspace_index(&cache)
     if RefSpec.classify_with_workspace(raw, table, index) == {
         .Ok(spec) -> Ok(spec)
         .Err(error) -> {
-            retry_default :: if error == {
+            retry_default: if error == {
                 .MissingSeparator(_) | .UnknownMember(_, _) -> !raw.contains(REF_PROVIDER_AT) && !pkg_is_bare_path(raw)
                 else -> false
             }
@@ -66,14 +66,14 @@ fn cli_classify_or_report(cache: &WorkspaceDeclarationCache, theme: Theme, raw: 
 // The current directory is the project lock context for realization
 // commands, even before the first project file exists. The filesystem root
 // is the one deliberate no-project context and never receives `/.jet/lock`.
-fn cli_current_project_dir() -[FS, Env]> String? Never! {
-    dir :: sys.current_dir() ?? return None
+cli_current_project_dir: fn() -[FS, Env]> String? Never! {
+    dir: sys.current_dir() ?? return None
     if files.dirname(dir) == dir || dir == "/" -> return None
     Val(dir)
 }
 
 // The project lock context a scope realizes against.
-fn cli_scope_project_dir(scope: RealizeScope) -[FS, Env]> String? Never! {
+cli_scope_project_dir: fn(scope: RealizeScope) -[FS, Env]> String? Never! {
     if scope == {
         .Project -> cli_current_project_dir()
         .UserProfile | .Use -> None
@@ -83,12 +83,12 @@ fn cli_scope_project_dir(scope: RealizeScope) -[FS, Env]> String? Never! {
 // Fixtures are a testing/offline mechanism only: `--offline` also honors
 // `JETPACK_FIXTURES`, while an online run honors only an explicit
 // `--fixtures <dir>`.
-fn cli_effective_fixtures(flags: CLIFlags) -[Env]> String? Never! {
+cli_effective_fixtures: fn(flags: CLIFlags) -[Env]> String? Never! {
     if flags.offline -> return cli_fixtures_for(flags)
     flags.fixtures
 }
 
-fn cli_provider_ctx(roots: HangarRoots, flags: CLIFlags, fixtures: String?, project_dir: String?, ^nix_index: NixIndexClient?, nix_roots: HangarRoots?) -[Env]> ProviderCtx Never! {
+cli_provider_ctx: fn(roots: HangarRoots, flags: CLIFlags, fixtures: String?, project_dir: String?, ^nix_index: NixIndexClient?, nix_roots: HangarRoots?) -[Env]> ProviderCtx Never! {
     ProviderCtx{
         fixtures: fixtures,
         store_dir: roots.hangar_dir(),
@@ -101,13 +101,13 @@ fn cli_provider_ctx(roots: HangarRoots, flags: CLIFlags, fixtures: String?, proj
 }
 
 // The signed index client (or the explicit local catalog) for Nix refs.
-fn cli_nix_index_client(roots: HangarRoots, flags: CLIFlags) -[FS, Env, Net, Time]> NixIndexClient NixIndexError! {
+cli_nix_index_client: fn(roots: HangarRoots, flags: CLIFlags) -[FS, Env, Net, Time]> NixIndexClient NixIndexError! {
     if flags.local_nix_catalog == .Val(catalog) -> return NixIndexClient.from_local_catalog(catalog, flags.offline)
     NixIndexClient.from_roots_with_mode(roots, flags.offline)
 }
 
 // A cached plan row for a recorded Hangar entry.
-fn cli_cached_plan_item(spec: RefSpec, entry: StoreEntry) -[FS]> PlanItem Never! {
+cli_cached_plan_item: fn(spec: RefSpec, entry: StoreEntry) -[FS]> PlanItem Never! {
     PlanItem{package: spec.raw, state: PlanState.Cached, download_bytes: Val(0), disk_bytes: Val(store_dir_size(entry.out))}
 }
 
@@ -115,24 +115,24 @@ fn cli_cached_plan_item(spec: RefSpec, entry: StoreEntry) -[FS]> PlanItem Never!
 // read here for its signed closure sizes; payload admission remains behind
 // the caller's single confirmation gate. `progress` is the planning live
 // region's sink (Rust `Store::with_progress`), when one is drawn.
-fn cli_plan_downloads(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, table: SourceTable, specs: [RefSpec], scope: RealizeScope, progress: ProgressHandle?) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> DownloadPlan CLIError! {
-    store_dir :: roots.hangar_dir()
-    project_dir :: cli_scope_project_dir(scope)
-    fixtures :: cli_effective_fixtures(flags)
-    allow_local :: flags.local_nix_catalog != None
+cli_plan_downloads: fn(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, table: SourceTable, specs: [RefSpec], scope: RealizeScope, progress: ProgressHandle?) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> DownloadPlan CLIError! {
+    store_dir: roots.hangar_dir()
+    project_dir: cli_scope_project_dir(scope)
+    fixtures: cli_effective_fixtures(flags)
+    allow_local: flags.local_nix_catalog != None
     pending := [RefSpec]{}
     plan := DownloadPlan.empty()
     loop spec in specs {
-        uses_nix :: provider_uses_nix_provider_for_project(spec, table, flags.offline, store_dir, project_dir)
+        uses_nix: provider_uses_nix_provider_for_project(spec, table, flags.offline, store_dir, project_dir)
         if uses_nix && fixtures != None -> next
         if uses_nix && flags.local_nix_catalog == None && provider_needs_nix_bridge(spec, table, flags.offline, store_dir, project_dir) != None -> next
         // Prompt planning is a routing pass, not the cache authority. A
         // persisted user-profile candidate keeps the fully cached entry path
         // out of closure verification; Store realization still proves the
         // complete closure before reuse.
-        profile_scope :: scope == RealizeScope.Use || scope == RealizeScope.UserProfile
+        profile_scope: scope == RealizeScope.Use || scope == RealizeScope.UserProfile
         if profile_scope && store_find_by_reference_read_only(roots, spec.raw) == .Val(entry) {
-            permitted :: !uses_nix || cli_catalog_permitted(entry, allow_local)
+            permitted: !uses_nix || cli_catalog_permitted(entry, allow_local)
             if permitted {
                 &plan.add_item(cli_cached_plan_item(spec, entry))
                 next
@@ -140,15 +140,15 @@ fn cli_plan_downloads(verification: &StoreVerification, theme: Theme, roots: Han
         }
         // Do not resolve the closure just to decide whether a prompt is
         // needed; `store_realize_verified` remains the final integrity gate.
-        probe :: cli_provider_ctx(roots, flags, fixtures, project_dir, None, Val(roots))
-        expectation :: provider_cache_expectation(&verification, spec, table, probe)
-        cached :: if expectation == {
+        probe: cli_provider_ctx(roots, flags, fixtures, project_dir, None, Val(roots))
+        expectation: provider_cache_expectation(&verification, spec, table, probe)
+        cached: if expectation == {
             .Val(expected) -> store_cache_candidate_matches(roots, spec.raw, expected) && (!uses_nix || cli_nix_catalog_cache_matches(roots, spec.raw, allow_local))
             .None -> false
         }
         // A non-Nix project ref may have a fully verified Hangar closure but
         // no provider metadata left to derive a fresh expectation offline.
-        recorded_project_candidate :: scope == RealizeScope.Project && !uses_nix && expectation == None && store_find_by_reference_read_only(roots, spec.raw) != None
+        recorded_project_candidate: scope == RealizeScope.Project && !uses_nix && expectation == None && store_find_by_reference_read_only(roots, spec.raw) != None
         if cached || recorded_project_candidate {
             if store_find_by_reference_read_only(roots, spec.raw) == .Val(entry) -> &plan.add_item(cli_cached_plan_item(spec, entry))
         } else {
@@ -162,7 +162,7 @@ fn cli_plan_downloads(verification: &StoreVerification, theme: Theme, roots: Han
     }
     nix_index := NixIndexClient?{None}
     if pending_uses_nix && fixtures == None {
-        client :: cli_nix_index_client(roots, flags) ?? {
+        client: cli_nix_index_client(roots, flags) ?? {
             ProviderError.NixIndex(err).report(theme)
             return Err(CLIError.Reported(EXIT_USAGE))
         }
@@ -170,7 +170,7 @@ fn cli_plan_downloads(verification: &StoreVerification, theme: Theme, roots: Han
     }
     ctx := cli_provider_ctx(roots, flags, fixtures, project_dir, ^nix_index, Val(roots))
     ctx.progress = progress
-    downloads :: provider_plan_downloads(&verification, pending, table, ctx) ?? {
+    downloads: provider_plan_downloads(&verification, pending, table, ctx) ?? {
         err.report(theme)
         return Err(CLIError.Reported(EXIT_USAGE))
     }
@@ -180,7 +180,7 @@ fn cli_plan_downloads(verification: &StoreVerification, theme: Theme, roots: Han
 
 // Realize one ref, recording it in the store and printing progress. `table`
 // resolves named sources it is empty for direct CLI refs.
-fn cli_realize_ref(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, table: SourceTable, spec: RefSpec, name_w: Int) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> (entry: StoreEntry, state: SourceState)? Never! {
+cli_realize_ref: fn(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, table: SourceTable, spec: RefSpec, name_w: Int) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> (entry: StoreEntry, state: SourceState)? Never! {
     live := LiveRegion?{None}
     if cli_realize_ref_outcome(&verification, theme, roots, flags, table, spec, name_w, RowStyle.Ledger, &live, RealizeScope.Project) == {
         .Realized(entry, state, _, _) -> Val((entry: entry, state: state))
@@ -193,21 +193,21 @@ fn cli_realize_ref(verification: &StoreVerification, theme: Theme, roots: Hangar
 }
 
 // Erase a caller's live region before a diagnostic or row.
-fn cli_clear_live_region(live: &LiveRegion?) Never! -[IO, Time.Wait]> {
+cli_clear_live_region: fn(live: &LiveRegion?) Never! -[IO, Time.Wait]> {
     if &live == .Val(region) -> &region.clear()
 }
 
 // Stop the resolving spinner, if one is drawn, before any other output.
-fn cli_stop_spinner(spinner: ^Spinner?) Never! -[IO]> {
+cli_stop_spinner: fn(spinner: ^Spinner?) Never! -[IO]> {
     if spinner == .Val(active) -> close(^active)
 }
 
 // Report an offline refusal for a Nix ref that has no Hangar copy.
-fn cli_report_offline_nix(theme: Theme, spec: RefSpec) Never! -[IO, Time.Wait]> {
+cli_report_offline_nix: fn(theme: Theme, spec: RefSpec) Never! -[IO, Time.Wait]> {
     ProviderError.Offline("`{spec.raw}` is not in the hangar and --offline forbids fetching provider output").report(theme)
 }
 
-fn cli_realize_ref_outcome(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, table: SourceTable, spec: RefSpec, name_w: Int, style: RowStyle, live: &LiveRegion?, scope: RealizeScope) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> RefOutcome Never! {
+cli_realize_ref_outcome: fn(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, table: SourceTable, spec: RefSpec, name_w: Int, style: RowStyle, live: &LiveRegion?, scope: RealizeScope) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> RefOutcome Never! {
     // Tier 2 (erase live regions before diagnostics). A `Silent`
     // caller owns the aggregate line, which its progress sink redraws while
     // this call runs; clear only the spinner/ledger path up front.
@@ -224,13 +224,13 @@ fn cli_realize_ref_outcome(verification: &StoreVerification, theme: Theme, roots
     }
     // The hangar dir also seeds the remote probe's source-cache lookup, so
     // it is resolved before the fixtures decision.
-    store_dir :: roots.hangar_dir()
-    project_dir :: cli_scope_project_dir(scope)
-    allow_local :: flags.local_nix_catalog != None
-    offline_fixtures :: cli_fixtures_for(flags)
-    uses_nix :: provider_uses_nix_provider_for_project(spec, table, flags.offline, store_dir, project_dir)
-    recorded_project_candidate :: scope == RealizeScope.Project && !uses_nix && store_find_by_reference_read_only(roots, spec.raw) != None
-    project_metadata_missing :: recorded_project_candidate && provider_cache_expectation(&verification, spec, table, cli_provider_ctx(roots, flags, cli_effective_fixtures(flags), project_dir, None, Val(roots))) == None
+    store_dir: roots.hangar_dir()
+    project_dir: cli_scope_project_dir(scope)
+    allow_local: flags.local_nix_catalog != None
+    offline_fixtures: cli_fixtures_for(flags)
+    uses_nix: provider_uses_nix_provider_for_project(spec, table, flags.offline, store_dir, project_dir)
+    recorded_project_candidate: scope == RealizeScope.Project && !uses_nix && store_find_by_reference_read_only(roots, spec.raw) != None
+    project_metadata_missing: recorded_project_candidate && provider_cache_expectation(&verification, spec, table, cli_provider_ctx(roots, flags, cli_effective_fixtures(flags), project_dir, None, Val(roots))) == None
     recorded_reuse := VerifiedRealization?{None}
     if scope == RealizeScope.Use || project_metadata_missing {
         if store_find_verified_user_profile_by_reference(&verification, roots, spec.raw) == {
@@ -255,12 +255,12 @@ fn cli_realize_ref_outcome(verification: &StoreVerification, theme: Theme, roots
     // diagnostic.
     cache_candidate_ok := recorded_reuse != None
     if !cache_candidate_ok && uses_nix && offline_fixtures == None {
-        probe :: cli_provider_ctx(roots, flags, None, project_dir, None, None)
+        probe: cli_provider_ctx(roots, flags, None, project_dir, None, None)
         if provider_cache_expectation(&verification, spec, table, probe) == .Val(expected) {
             cache_candidate_ok = store_cache_candidate_matches(roots, spec.raw, expected) && cli_nix_catalog_cache_matches(roots, spec.raw, allow_local)
         }
     }
-    indexed_nix :: flags.offline && uses_nix && offline_fixtures == None && (allow_local || provider_needs_nix_bridge(spec, table, flags.offline, store_dir, project_dir) == None)
+    indexed_nix: flags.offline && uses_nix && offline_fixtures == None && (allow_local || provider_needs_nix_bridge(spec, table, flags.offline, store_dir, project_dir) == None)
     // A reference the project lock already pins was realized here before.
     // Preserve that authority during verified reuse or authenticated repair.
     locked_pin := false
@@ -277,7 +277,7 @@ fn cli_realize_ref_outcome(verification: &StoreVerification, theme: Theme, roots
     // Fixtures never override real resolution: a stray `JETPACK_FIXTURES`
     // must not force fixture mode for an ordinary online run, while an
     // explicit `--fixtures <dir>` without `--offline` is still honored.
-    fixtures :: if flags.offline && uses_nix -> offline_fixtures else -> flags.fixtures
+    fixtures: if flags.offline && uses_nix -> offline_fixtures else -> flags.fixtures
     // Build the index client when an unresolved Nix ref may need discovery.
     // A lock-pinned ref is already bound to its project CAS bundle.
     nix_index := NixIndexClient?{None}
@@ -319,12 +319,12 @@ fn cli_realize_ref_outcome(verification: &StoreVerification, theme: Theme, roots
             return RefOutcome.Failed
         }
     }
-    started :: time.start()
+    started: time.start()
     if live == .Val(region) -> ctx.progress = Val(region.progress_handle())
     if cli_reuse_or_realize(&verification, roots, ctx, spec, table, ^recorded_reuse) == {
         .Ok(realized) -> {
             cli_stop_spinner(^spinner)
-            parts :: realized.into_parts()
+            parts: realized.into_parts()
             entry := parts.entry
             // The entry keeps its durable paths; a child reaches them only
             // through the lease the env passes. Revalidate before use.
@@ -337,14 +337,14 @@ fn cli_realize_ref_outcome(verification: &StoreVerification, theme: Theme, roots
             }
             // T4 one ledger row per package — how it was
             // satisfied, and how long a from-source build took.
-            elapsed :: time.elapsed(started)
-            state :: if parts.source_state == SourceState.Built && elapsed.ns >= 1000000000 -> "Built {terminal_human_duration(elapsed)}" else -> parts.source_state.label()
+            elapsed: time.elapsed(started)
+            state: if parts.source_state == SourceState.Built && elapsed.ns >= 1000000000 -> "Built {terminal_human_duration(elapsed)}" else -> parts.source_state.label()
             // Nix-provided packages often carry no version of their own; the
             // store path's `<hash>-<name>-<version>` basename usually does.
-            version :: if entry.version == "" -> cli_version_from_out(entry.name, entry.out) ?? "" else -> entry.version
-            catalog_status :: cli_nix_catalog_status(entry)
-            row :: theme.render_row(entry.name, name_w, version, state)
-            line :: if catalog_status == {
+            version: if entry.version == "" -> cli_version_from_out(entry.name, entry.out) ?? "" else -> entry.version
+            catalog_status: cli_nix_catalog_status(entry)
+            row: theme.render_row(entry.name, name_w, version, state)
+            line: if catalog_status == {
                 .Val(status) -> "{row} [{status}]"
                 .None -> row
             }
@@ -370,7 +370,7 @@ fn cli_realize_ref_outcome(verification: &StoreVerification, theme: Theme, roots
                     // A package the user asked for cannot be provided here
                     // and the coded diagnostic already told them what to do:
                     // the same class as a missing Nix bridge, so exit 2.
-                    unavailable :: if provider_error == {
+                    unavailable: if provider_error == {
                         .NixCache(_) | .NixIndex(_) | .Offline(_) -> true
                         else -> false
                     }
@@ -387,31 +387,31 @@ fn cli_realize_ref_outcome(verification: &StoreVerification, theme: Theme, roots
 }
 
 // The verified recorded reuse, else one Store realization of the ref.
-fn cli_reuse_or_realize(verification: &StoreVerification, roots: HangarRoots, ctx: ProviderCtx, spec: RefSpec, table: SourceTable, ^recorded: VerifiedRealization?) -> VerifiedRealization RealizeError! {
+cli_reuse_or_realize: fn(verification: &StoreVerification, roots: HangarRoots, ctx: ProviderCtx, spec: RefSpec, table: SourceTable, ^recorded: VerifiedRealization?) -> VerifiedRealization RealizeError! {
     if recorded == .Val(reused) -> return Ok(^reused)
     store_realize_verified(&verification, roots, ctx, RealizeRequest.Package{spec: spec, table: table})
 }
 
 // Whether a recorded entry may be reused under this invocation's catalog
 // permission (`--local-nix-catalog` is never a stored grant).
-fn cli_catalog_permitted(entry: StoreEntry, allow_local: Bool) -> Bool Never! {
+cli_catalog_permitted: fn(entry: StoreEntry, allow_local: Bool) -> Bool Never! {
     if store_require_entry_catalog_permission(entry, allow_local) == {
         .Ok(_) -> true
         .Err(_) -> false
     }
 }
 
-fn cli_nix_catalog_cache_matches(roots: HangarRoots, reference: String, allow_local: Bool) -[FS, Env]> Bool Never! {
-    entry :: store_find_by_reference_read_only(roots, reference) ?? return false
+cli_nix_catalog_cache_matches: fn(roots: HangarRoots, reference: String, allow_local: Bool) -[FS, Env]> Bool Never! {
+    entry: store_find_by_reference_read_only(roots, reference) ?? return false
     cli_catalog_permitted(entry, allow_local)
 }
 
 // The `catalog: <tier> (…)` disclosure of a Nix-index-backed entry.
-fn cli_nix_catalog_status(entry: StoreEntry) -> String? Never! {
-    producer :: ProducerRecord.decode(entry.producer_record) ?? return None
-    tier :: producer.facts.get("nix.index.tier") ?? return None
-    trust :: producer.facts.get("nix.index.trust") ?? "unknown"
-    chain :: producer.facts.get("nix.index.signature-chain") ?? "unknown"
+cli_nix_catalog_status: fn(entry: StoreEntry) -> String? Never! {
+    producer: ProducerRecord.decode(entry.producer_record) ?? return None
+    tier: producer.facts.get("nix.index.tier") ?? return None
+    trust: producer.facts.get("nix.index.trust") ?? "unknown"
+    chain: producer.facts.get("nix.index.signature-chain") ?? "unknown"
     if tier != "local-unofficial" -> return Val("catalog: {tier} ({trust}; signature chain {chain})")
     if producer.provider == "jetpackage" && (producer.facts.get("source.kind") ?? "") == "local-unofficial-catalog" {
         return Val("catalog: {tier} ({trust}; signature chain {chain}; native recipe mapping is unverified; artifact bytes remain SHA-256-verified)")
@@ -419,14 +419,14 @@ fn cli_nix_catalog_status(entry: StoreEntry) -> String? Never! {
     Val("catalog: {tier} ({trust}; signature chain {chain}; name-to-store-path mapping is unverified; Nix cache bytes remain signature-verified)")
 }
 
-fn cli_package_fixture_available(flags: CLIFlags, spec: RefSpec) -[FS, Env]> Bool Never! {
-    dir :: cli_effective_fixtures(flags) ?? return false
+cli_package_fixture_available: fn(flags: CLIFlags, spec: RefSpec) -[FS, Env]> Bool Never! {
+    dir: cli_effective_fixtures(flags) ?? return false
     files.is_file(files.join(dir, provider_fixture_name(spec)))
 }
 
 // E1272: packages with no supported Nix compatibility output. Under `--json`
 // the hole list precedes the human diagnostic.
-fn cli_report_nix_bridge_required(theme: Theme, flags: CLIFlags, holes: [NixBridgeNeed], realized_refs: [String]) Never! -[IO, Time.Wait]> {
+cli_report_nix_bridge_required: fn(theme: Theme, flags: CLIFlags, holes: [NixBridgeNeed], realized_refs: [String]) Never! -[IO, Time.Wait]> {
     if flags.json {
         hole_texts := [String]{}
         loop hole in holes -> &hole_texts.push(cli_json_quote(hole.reference))
@@ -434,11 +434,11 @@ fn cli_report_nix_bridge_required(theme: Theme, flags: CLIFlags, holes: [NixBrid
         loop reference in realized_refs -> &realized_texts.push(cli_json_quote(reference))
         print("{{\"code\":\"E1272\",\"realized\":[{realized_texts.join(", ")}],\"holes\":[{hole_texts.join(", ")}]}}")
     }
-    count :: holes.len()
-    subject :: if count == 1 -> "package lacks" else -> "packages lack"
+    count: holes.len()
+    subject: if count == 1 -> "package lacks" else -> "packages lack"
     quoted := [String]{}
     loop hole in holes -> &quoted.push("`{hole.reference}`")
-    fix_ref :: if count == 0 -> "<ref>" else -> holes[0].reference
+    fix_ref: if count == 0 -> "<ref>" else -> holes[0].reference
     theme.error_coded(
         "E1272",
         "{count} {subject} a supported Nix compatibility output",
@@ -449,22 +449,22 @@ fn cli_report_nix_bridge_required(theme: Theme, flags: CLIFlags, holes: [NixBrid
 
 // Realize one U20 adapter package. `consume` pins its executable through the
 // lease so the caller can run it.
-fn cli_realize_adapter(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: AdapterPlan, table: SourceTable, consume: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> (entry: StoreEntry, state: SourceState, lease: CacheLease)? Never! {
+cli_realize_adapter: fn(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: AdapterPlan, table: SourceTable, consume: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> (entry: StoreEntry, state: SourceState, lease: CacheLease)? Never! {
     theme.status("Adapting {theme.bold(plan.name)} …")
-    ctx :: cli_provider_ctx(roots, flags, cli_effective_fixtures(flags), cli_current_project_dir(), None, Val(roots))
-    expectation :: provider_adapter_cache_expectation(plan, table, ctx) ?? {
+    ctx: cli_provider_ctx(roots, flags, cli_effective_fixtures(flags), cli_current_project_dir(), None, Val(roots))
+    expectation: provider_adapter_cache_expectation(plan, table, ctx) ?? {
         err.report(theme)
         return None
     }
     if plan.recipe == .Build(recipe) {
         env_warn_sandbox_fallback(theme)
-        identity :: provider_adapter_action_identity(plan, recipe, expectation.identity.source_fingerprint, expectation.identity.platform, table)
+        identity: provider_adapter_action_identity(plan, recipe, expectation.identity.source_fingerprint, expectation.identity.platform, table)
         if trust_gate_build_identity(theme, trust_store_path(), cli_current_project_dir() ?? ".", identity, flags.trust) != None -> return None
     }
-    request :: RealizeRequest.Adapter{plan: plan, table: table, expectation: expectation}
+    request: RealizeRequest.Adapter{plan: plan, table: table, expectation: expectation}
     if store_realize_verified(&verification, roots, ctx, request) == {
         .Ok(realized) -> {
-            parts :: realized.into_parts()
+            parts: realized.into_parts()
             entry := parts.entry
             if consume && entry.bin != "" {
                 parts.lease.validate() ?? {
@@ -489,7 +489,7 @@ fn cli_realize_adapter(verification: &StoreVerification, theme: Theme, roots: Ha
     }
 }
 
-fn cli_report_realize_error(theme: Theme, error: RealizeError) Never! -[IO, Time.Wait]> {
+cli_report_realize_error: fn(theme: Theme, error: RealizeError) Never! -[IO, Time.Wait]> {
     if error == {
         .Integrity(failure) -> store_report_integrity(theme, failure)
         .LockedNix(inner) -> theme.error_coded(
@@ -499,7 +499,7 @@ fn cli_report_realize_error(theme: Theme, error: RealizeError) Never! -[IO, Time
             "restore the lock-declared project CAS bundle; catalog discovery is disabled for this lock."
         )
         .Store(inner) -> {
-            detail :: inner.message()
+            detail: inner.message()
             if detail.starts_with("unreproducible action") {
                 theme.error_coded(
                     "E1315",
@@ -523,13 +523,13 @@ fn cli_report_realize_error(theme: Theme, error: RealizeError) Never! -[IO, Time
 // Best-effort version out of a store-path basename like
 // `<hash>-ripgrep-14.1.0`: everything after `<name>-`, if it starts with a
 // digit (so `my-tool-src` never masquerades as a version).
-fn cli_version_from_out(name: String, out: String) -> String? Never! {
-    base :: out.cut_last("/")?.after ?? out
-    parts :: base.split_once("-{name}-") ?? return None
-    version :: parts.after
-    raw :: version.bytes()
+cli_version_from_out: fn(name: String, out: String) -> String? Never! {
+    base: out.cut_last("/")?.after ?? out
+    parts: base.split_once("-{name}-") ?? return None
+    version: parts.after
+    raw: version.bytes()
     if raw.len() == 0 -> return None
-    first :: Int.from_u8(raw[0])
+    first: Int.from_u8(raw[0])
     if first < 48 || first > 57 -> return None
     Val(version)
 }

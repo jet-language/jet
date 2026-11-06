@@ -1,25 +1,25 @@
-struct Route {
+Route: struct {
     path: String
     label: String{"route"}
     tags: [String]
 
     impl Marker {
-        sites :: [.Function, .Method]
-        repeatable :: true
+        sites: [.Function, .Method]
+        repeatable: true
 
-        fn expand(self, target: Target) {
+        expand: fn(self, target: Target) {
         }
     }
 }
 
-struct Quick {
+Quick: struct {
     impl Marker {
-        group :: #[Inline(.Always), Scalar]
+        group: #[Inline(.Always), Scalar]
     }
 }
 
-#Route("/orders", "orders", "a", "b") fn orders() -> String { "orders" }
+#Route("/orders", "orders", "a", "b") orders: fn() -> String { "orders" }
 
-#Quick fn bump(value: Int) -> Int { value + 1 }
+#Quick bump: fn(value: Int) -> Int { value + 1 }
 
-fn run() { print("{orders()} {bump(1)}") }
+run: fn() { print("{orders()} {bump(1)}") }

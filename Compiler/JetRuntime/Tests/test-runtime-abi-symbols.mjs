@@ -19,7 +19,7 @@ const type = {runtime:'HTTPClient',jetName:'HTTPClient',source:{path:'Core/Net/h
 assert.ok(nativeHandleExports([type]).some(row => row.name === 'jet_rt_handle_clone_http_client' && row.runtime === 'HTTPClient'));
 assert.ok(nativeRecordExports([type]).some(row => row.name === 'jet_rt_record_new_http_client_not_found' && row.member === 'NotFound'));
 assert.ok(nativeRecordExports([type]).some(row => row.name === 'jet_rt_record_seq_list_byte_new'));
-assert.match(emitRuntimeAbiAtom(), /fn runtime_abi_atom\(name: String\)/);
+assert.match(emitRuntimeAbiAtom(), /runtime_abi_atom: fn\(name: String\)/);
 // The runtime is one source unit: internal calls must not re-import its
 // exported C addresses, and external addresses have one declaration owner.
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
@@ -32,7 +32,7 @@ for (const path of sources) {
   assert.doesNotMatch(source,
     /\b(?:scheduler_observe_(?:register|enter|finish|control|wait|identity|parked|pool|quiescent)|main_(?:env_seed|stdout_flush|stderr_flush|stderr_write|observe_init|observe_start|observe_report)|observe_(?:mem_resources|env_get|env_get_os)|process_errno_location)\s*\(/,
     `${path}: every retired C alias caller must use its actual provider`);
-  for (const match of source.matchAll(/^#Import\(c\)\s+(?:pub\s+)?fn\s+([A-Za-z_]\w*)\s*[^=]*=\s*"([^"]+)"/gm)) {
+  for (const match of source.matchAll(/^#Import\(c\)\s+(?:pub\s+)?([A-Za-z_]\w*): fn\b[^=]*=\s*"([^"]+)"/gm)) {
     const [, name, symbol] = match;
     assert.ok(!exports.has(symbol),
       `${path}:${name} must call the existing Jet provider ${symbol}, not re-import its C symbol`);

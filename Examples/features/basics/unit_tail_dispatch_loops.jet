@@ -1,19 +1,19 @@
 // D-TAIL-RETURN1=A: only a value-expected callable gives its final `if` a
 // value type. In a unit function the trailing dispatch is a statement, so a
 // loop ending an arm is an effect loop, exactly as it is mid-body.
-enum Shape {
+Shape: enum {
     Many(items: [Int])
     Pairs(items: [Int])
     One(item: Int)
 }
 
-struct Writer { bytes: [Int] }
+Writer: struct { bytes: [Int] }
 
-fn put(writer: &Writer, value: Int) {
+put: fn(writer: &Writer, value: Int) {
     &writer.bytes.push(value)
 }
 
-fn write_shape(writer: &Writer, value: Shape) {
+write_shape: fn(writer: &Writer, value: Shape) {
     if value == {
         .Many(items) -> {
             put(&writer, 1)
@@ -30,7 +30,7 @@ fn write_shape(writer: &Writer, value: Shape) {
     }
 }
 
-fn write_checked(writer: &Writer, value: Shape) Never! {
+write_checked: fn(writer: &Writer, value: Shape) Never! {
     if value == {
         .Many(items) -> {
             loop item in items -> put(&writer, item)
@@ -39,7 +39,7 @@ fn write_checked(writer: &Writer, value: Shape) Never! {
     }
 }
 
-fn run() {
+run: fn() {
     writer := Writer{bytes: [Int]{}}
     write_shape(&writer, Shape.Many{items: [Int]{2, 3}})
     write_shape(&writer, Shape.Pairs{items: [Int]{4}})

@@ -1,14 +1,14 @@
 use {
-    ui :: core.ui
-    devtools :: core.devtools
+    ui: core.ui
+    devtools: core.devtools
 }
 
-struct State {
+State: struct {
     selected: String{"none"}
     event_count: Int{0}
 }
 
-fn panel_lines(state: State) -> [UINode] {
+panel_lines: fn(state: State) -> [UINode] {
     return [UINode]{
         ui.text(state.selected),
         ui.text("{state.event_count}")
@@ -16,12 +16,12 @@ fn panel_lines(state: State) -> [UINode] {
 }
 
 #DevPanel
-fn panel(state: State) -> UINode {
+panel: fn(state: State) -> UINode {
     return ui.box(panel_lines(state))
 }
 
-fn run() {
-    selected_value :: "overview"
+run: fn() {
+    selected_value: "overview"
     #Off {
         devtools.publish(field: .selected, value: selected_value)
         devtools.publish(field: .event_count, value: 1)

@@ -3,27 +3,27 @@
 // and values JCS cannot encode are errors naming their path. The ordinary
 // `to_string` / `to_string_pretty` renderers are not canonical forms.
 use {
-    encoding :: core.encoding
-    json :: core.encoding.json
-    math :: core.math
+    encoding: core.encoding
+    json: core.encoding.json
+    math: core.math
 }
 
-fn kind_name(kind: encoding.EncodingErrorKind) -> String {
+kind_name: fn(kind: encoding.EncodingErrorKind) -> String {
     if kind == encoding.EncodingErrorKind.Syntax -> return "Syntax"
     if kind == encoding.EncodingErrorKind.Unsupported -> return "Unsupported"
     if kind == encoding.EncodingErrorKind.Limit -> return "Limit"
     "other"
 }
 
-fn show(label: String, value: Dyn) {
-    text :: json.canonical(value) ?? {
+show: fn(label: String, value: Dyn) {
+    text: json.canonical(value) ?? {
         print("{label}: {kind_name(err.kind)} at `{err.path}`: {err.reason}")
         return
     }
     print("{label}: {text}")
 }
 
-fn run() {
+run: fn() {
     // U+1F600 is the surrogate pair D83D DE00 in UTF-16, so it sorts before
     // U+FF21 even though its UTF-8 bytes sort after.
     show("key order", json.parse("{{\"b\":1,\"a\":2,\"Ａ\":3,\"😀\":4,\"é\":5,\"\":6,\"aa\":{{\"z\":1,\"y\":2}}}}") ?? panic("parse"))
@@ -37,9 +37,9 @@ fn run() {
     show("strings", json.parse("[\"tab\\t\",\"nl\\n\",\"quote\\\"\",\"ctl\\u0001\",\"slash\\/\",\"é\"]") ?? panic("parse"))
     show("literals", json.parse("{{\"t\":true,\"f\":false,\"n\":null,\"e\":[],\"o\":{{}}}}") ?? panic("parse"))
 
-    data :: json.parse(" {{ \"b\" : [ 1 , 2 ] , \"a\" : {{ \"d\" : null , \"c\" : true }} }} ") ?? panic("parse")
-    canon :: json.canonical(data) ?? panic("canonical")
-    again :: json.canonical(json.parse(canon) ?? panic("reparse")) ?? panic("canonical")
+    data: json.parse(" {{ \"b\" : [ 1 , 2 ] , \"a\" : {{ \"d\" : null , \"c\" : true }} }} ") ?? panic("parse")
+    canon: json.canonical(data) ?? panic("canonical")
+    again: json.canonical(json.parse(canon) ?? panic("reparse")) ?? panic("canonical")
     print("round trip: {canon}")
     print("round trip stable: {canon == again}")
     print("pretty is not canonical: {(json.to_string_pretty(data) ?? panic("JSON encode")) != canon}")

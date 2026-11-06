@@ -20,7 +20,7 @@ use jet_foundation.[
     type_name,
 ]
 
-struct SemaCopySite {
+SemaCopySite: struct {
     name: String
     span: Span
     ty: Type
@@ -30,12 +30,12 @@ struct SemaCopySite {
 // `Val(x)`, `Ok(x)` and `Err(x)` are owning constructors: the field rule
 // applies to `x`, not to the carrier, whether the carrier is written in its
 // own expression form, as a bare variant or in call form.
-fn sema_copy_site_payload(value: Expr) -> Expr Never! {
+sema_copy_site_payload: fn(value: Expr) -> Expr Never! {
     sema_copy_site_carrier_payload(value) ?? value
 }
 
 // The payload `x` of a carrier `value` (`Val(x)`, `Ok(x)`, `Err(x)`), or None.
-fn sema_copy_site_carrier_payload(value: Expr) -> Expr? Never! {
+sema_copy_site_carrier_payload: fn(value: Expr) -> Expr? Never! {
     if value == {
         .Present(inner, _, _) | .Ok(inner, _, _) | .Err(inner, _, _) -> Val(inner)
         .EnumLit(type_name, variant, _, args, _, _, _) -> {
@@ -45,14 +45,14 @@ fn sema_copy_site_carrier_payload(value: Expr) -> Expr? Never! {
         }
         // A `^x` argument is the mark's own move.
         .Call(call, _) -> {
-            carrier :: (call.name == "Ok" || call.name == "Err") && call.args.len() == 1 && call.args[0].convention != AccessConvention.Move
+            carrier: (call.name == "Ok" || call.name == "Err") && call.args.len() == 1 && call.args[0].convention != AccessConvention.Move
             if carrier -> Val(call.args[0].expr) else -> None
         }
         else -> None
     }
 }
 
-fn sema_copy_site_is_type_parameter(ty: Type, context: SemaCheckContext) -> Bool Never! {
+sema_copy_site_is_type_parameter: fn(ty: Type, context: SemaCheckContext) -> Bool Never! {
     if ty == .Named(type_parameter) {
         loop parameter in context.generic_params {
             if parameter.name == type_parameter -> return true
@@ -63,18 +63,18 @@ fn sema_copy_site_is_type_parameter(ty: Type, context: SemaCheckContext) -> Bool
 
 // The binding a bare identifier at an owning destination would copy, or
 // None when the site moves, copies a `Copy` value, or is not a copy site.
-fn sema_copy_site_find(value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> SemaCopySite? {
+sema_copy_site_find: fn(value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> SemaCopySite? {
     if !scopes.copies_explicit -> return None
     if sema_copy_site_payload(value) == {
         .Ident(name, span, _) -> {
-            index :: sema_scope_resolve_index(scopes, name) ?? return None
-            binding :: scopes.bindings[index]
+            index: sema_scope_resolve_index(scopes, name) ?? return None
+            binding: scopes.bindings[index]
             // A string view reports its own E2307 under the same policy.
             if binding.string_view -> return None
             if binding.symbol.kind != SymbolKind.Local && binding.symbol.kind != SymbolKind.Parameter -> return None
-            ty :: binding.symbol.ty ?? return None
+            ty: binding.symbol.ty ?? return None
             if sema_ownership_type_is_copy(ty) || sema_copy_site_is_type_parameter(ty, context) -> return None
-            borrowed :: binding.symbol.kind == SymbolKind.Parameter && (binding.access == AccessConvention.Read || binding.access == AccessConvention.Write)
+            borrowed: binding.symbol.kind == SymbolKind.Parameter && (binding.access == AccessConvention.Read || binding.access == AccessConvention.Write)
             if !borrowed && !sema_ownership_name_live_after(name, &tail_store, &context) -> return None
             Val(SemaCopySite{name: name, span: span, ty: ty, borrowed: borrowed})
         }
@@ -84,12 +84,12 @@ fn sema_copy_site_find(value: Expr, environment: SemaScopeEnvironment, program: 
 
 // Rust `with_ownership_copy_edit`: the `.copy()` edit only for a proven
 // cloneable, non-resource type.
-fn sema_copy_site_report(site: SemaCopySite, what: String, why: String, environment: SemaScopeEnvironment, program: SemaProgramTables, context: SemaCheckContext, diagnostics: &[Diagnostic]) {
+sema_copy_site_report: fn(site: SemaCopySite, what: String, why: String, environment: SemaScopeEnvironment, program: SemaProgramTables, context: SemaCheckContext, diagnostics: &[Diagnostic]) {
     sema_copy_site_push(sema_error("E0120", site.span, what, why, "copy it explicitly with `{site.name}.copy()`"), site, environment, program, context, &diagnostics)
 }
 
-fn sema_copy_site_push(diagnostic: Diagnostic, site: SemaCopySite, environment: SemaScopeEnvironment, program: SemaProgramTables, context: SemaCheckContext, diagnostics: &[Diagnostic]) {
-    facts :: sema_copy_classify(site.ty, SemaCopyIntent.Clone, environment, program, context.generic_params, false)
+sema_copy_site_push: fn(diagnostic: Diagnostic, site: SemaCopySite, environment: SemaScopeEnvironment, program: SemaProgramTables, context: SemaCheckContext, diagnostics: &[Diagnostic]) {
+    facts: sema_copy_classify(site.ty, SemaCopyIntent.Clone, environment, program, context.generic_params, false)
     if facts.complete && facts.cloneable && !facts.resource {
         &diagnostics.push(diagnostic_with_edit_grade(diagnostic, TextEdit{span: Span{start: site.span.end, end: site.span.end}, new_text: ".copy()"}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving))
         return
@@ -99,7 +99,7 @@ fn sema_copy_site_push(diagnostic: Diagnostic, site: SemaCopySite, environment: 
 
 // A guard owns the lease, not its payload. Follow typed projections instead
 // of syntax so temporary, named, mapped and edit guards obey the same rule.
-fn sema_copy_site_guard_projection(value: TExpr) -> Bool Never! {
+sema_copy_site_guard_projection: fn(value: TExpr) -> Bool Never! {
     if value.kind == {
         .SharedGuardValue(_) -> true
         .Field(base, _) | .Index(base, _, _, _, _, _) | .OptField(base, _, _) -> sema_copy_site_guard_projection(base)
@@ -112,22 +112,22 @@ fn sema_copy_site_guard_projection(value: TExpr) -> Bool Never! {
 // payload or a value holding a resource read from a place this position
 // does not take with `^` is refused instead of copied. `exact_move` is a
 // `^` mark at the position itself.
-fn sema_copy_site_check_guard_owned(value: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, state: SemaOwnershipState, context: SemaCheckContext, diagnostics: &[Diagnostic], exact_move: Bool) -> Bool {
-    walk :: SemaCopySiteWalk{exact_move: exact_move, taken: exact_move, forwarded: false, binds_view: false}
+sema_copy_site_check_guard_owned: fn(value: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, state: SemaOwnershipState, context: SemaCheckContext, diagnostics: &[Diagnostic], exact_move: Bool) -> Bool {
+    walk: SemaCopySiteWalk{exact_move: exact_move, taken: exact_move, forwarded: false, binds_view: false}
     sema_copy_site_check_owned_walk(value, environment, program, scopes, state, context, &diagnostics, walk)
 }
 
-// A `::` binding that reads its initializer through a view (a field or
+// A `:` binding that reads its initializer through a view (a field or
 // element, `x ?? return` over one, a whole name) holds no value of its own,
 // so the `^` an owning position needs to take a resource out is not asked of
 // it; every other check is the owning position's.
-fn sema_copy_site_check_view_binding(value: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, state: SemaOwnershipState, context: SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
-    walk :: SemaCopySiteWalk{exact_move: false, taken: false, forwarded: false, binds_view: true}
+sema_copy_site_check_view_binding: fn(value: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, state: SemaOwnershipState, context: SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+    walk: SemaCopySiteWalk{exact_move: false, taken: false, forwarded: false, binds_view: true}
     sema_copy_site_check_owned_walk(value, environment, program, scopes, state, context, &diagnostics, walk)
 }
 
 // Where the owned walk is in its owning position's value.
-struct SemaCopySiteWalk {
+SemaCopySiteWalk: struct {
     exact_move: Bool
     // Below a `.Move`: the `^` mark's own checks govern the place.
     taken: Bool
@@ -137,16 +137,16 @@ struct SemaCopySiteWalk {
     // (sema_copy_site_refuse_borrowed_copy, the binding and return E0120)
     // never see, so the walk refuses it.
     forwarded: Bool
-    // The position is a `::` view binding (sema_copy_site_check_view_binding).
+    // The position is a `:` view binding (sema_copy_site_check_view_binding).
     binds_view: Bool
 }
 
-fn sema_copy_site_check_owned_walk(value: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, state: SemaOwnershipState, context: SemaCheckContext, diagnostics: &[Diagnostic], walk: SemaCopySiteWalk) -> Bool {
+sema_copy_site_check_owned_walk: fn(value: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, state: SemaOwnershipState, context: SemaCheckContext, diagnostics: &[Diagnostic], walk: SemaCopySiteWalk) -> Bool {
     if sema_copy_site_guard_projection(value) {
-        // A `::` view binding over `guard.value.f ?? fallback` reads the
+        // A `:` view binding over `guard.value.f ?? fallback` reads the
         // payload where the guard holds it; nothing is copied out.
         if walk.binds_view && walk.forwarded -> return true
-        facts :: sema_copy_classify(value.ty, SemaCopyIntent.Clone, environment, program, context.generic_params, false)
+        facts: sema_copy_classify(value.ty, SemaCopyIntent.Clone, environment, program, context.generic_params, false)
         if facts.copyable -> return true
         // The payload stays owned by the shared storage, which has no hole
         // to leave behind: its other guards and its own cleanup still see
@@ -161,7 +161,7 @@ fn sema_copy_site_check_owned_walk(value: TExpr, environment: SemaScopeEnvironme
         // been reported where it is declared.
         if walk.forwarded && !facts.complete -> return true
         if !scopes.copies_explicit && facts.complete && facts.cloneable && !facts.resource -> return true
-        diagnostic :: sema_error("E0120", value.span, "this guard lends its value, so it cannot be moved into an owning destination", "the value stays owned by the shared storage; moving it would leave the guard and the destination owning the same data", "copy the value explicitly with `.copy()`, or pass it to a read parameter instead")
+        diagnostic: sema_error("E0120", value.span, "this guard lends its value, so it cannot be moved into an owning destination", "the value stays owned by the shared storage; moving it would leave the guard and the destination owning the same data", "copy the value explicitly with `.copy()`, or pass it to a read parameter instead")
         if facts.complete && facts.cloneable && !facts.resource {
             &diagnostics.push(diagnostic_with_edit_grade(diagnostic, TextEdit{span: Span{start: value.span.end, end: value.span.end}, new_text: ".copy()"}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving))
         } else {
@@ -179,15 +179,15 @@ fn sema_copy_site_check_owned_walk(value: TExpr, environment: SemaScopeEnvironme
             sema_copy_site_check_owned_walk(inner, environment, program, scopes, state, context, &diagnostics, taking)
         }
         .IfExpr(condition, _, then_value, _, else_value) -> {
-            left :: sema_copy_site_check_arm_tail(condition, then_value, environment, program, scopes, state, context, &diagnostics, forwarding)
-            right :: sema_copy_site_check_owned_walk(else_value, environment, program, scopes, state, context, &diagnostics, forwarding)
+            left: sema_copy_site_check_arm_tail(condition, then_value, environment, program, scopes, state, context, &diagnostics, forwarding)
+            right: sema_copy_site_check_owned_walk(else_value, environment, program, scopes, state, context, &diagnostics, forwarding)
             left && right
         }
         // `x ?? fallback` yields the payload `x` holds in its place, or the
         // fallback's value.
         .OrFallback(inner, fallback, _) -> {
-            left :: sema_copy_site_check_owned_walk(inner, environment, program, scopes, state, context, &diagnostics, forwarding)
-            right :: if fallback == {
+            left: sema_copy_site_check_owned_walk(inner, environment, program, scopes, state, context, &diagnostics, forwarding)
+            right: if fallback == {
                 .Value(other) -> sema_copy_site_check_owned_walk(other, environment, program, scopes, state, context, &diagnostics, forwarding)
                 else -> true
             }
@@ -223,20 +223,20 @@ fn sema_copy_site_check_owned_walk(value: TExpr, environment: SemaScopeEnvironme
 // pattern's own binding facts say what it is. A subject read in place keeps
 // it (E0211); a live owned subject gives it up only to a written `^`
 // (E0209). The tail is then walked as a forwarded value.
-fn sema_copy_site_check_arm_tail(condition: TIfCond, value: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, state: SemaOwnershipState, context: SemaCheckContext, diagnostics: &[Diagnostic], walk: SemaCopySiteWalk) -> Bool {
+sema_copy_site_check_arm_tail: fn(condition: TIfCond, value: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, state: SemaOwnershipState, context: SemaCheckContext, diagnostics: &[Diagnostic], walk: SemaCopySiteWalk) -> Bool {
     if !sema_copy_site_check_arm_payload(condition, value, environment, program, scopes, state, context, &diagnostics, walk) -> return false
     sema_copy_site_check_owned_walk(value, environment, program, scopes, state, context, &diagnostics, walk)
 }
 
 // The arm payload reads in `value`, through the forms that hand a value on
 // (a carrier constructor, `??`, a block tail); a `^` mark takes its place.
-fn sema_copy_site_check_arm_payload(condition: TIfCond, value: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, state: SemaOwnershipState, context: SemaCheckContext, diagnostics: &[Diagnostic], walk: SemaCopySiteWalk) -> Bool {
+sema_copy_site_check_arm_payload: fn(condition: TIfCond, value: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, state: SemaOwnershipState, context: SemaCheckContext, diagnostics: &[Diagnostic], walk: SemaCopySiteWalk) -> Bool {
     if walk.taken -> return true
     if value.kind == {
         .Present(inner) | .Ok(inner) | .Err(inner) | .TraitBox(inner, _) -> return sema_copy_site_check_arm_payload(condition, inner, environment, program, scopes, state, context, &diagnostics, walk)
         .OrFallback(inner, fallback, _) -> {
-            left :: sema_copy_site_check_arm_payload(condition, inner, environment, program, scopes, state, context, &diagnostics, walk)
-            right :: if fallback == {
+            left: sema_copy_site_check_arm_payload(condition, inner, environment, program, scopes, state, context, &diagnostics, walk)
+            right: if fallback == {
                 .Value(other) -> sema_copy_site_check_arm_payload(condition, other, environment, program, scopes, state, context, &diagnostics, walk)
                 else -> true
             }
@@ -251,11 +251,11 @@ fn sema_copy_site_check_arm_payload(condition: TIfCond, value: TExpr, environmen
         }
         else -> {}
     }
-    root :: sema_copy_site_place_root(value) ?? return true
+    root: sema_copy_site_place_root(value) ?? return true
     if root.kind == .Local(local) {
-        found :: sema_copy_site_pattern_binding(condition, local.name) ?? return true
+        found: sema_copy_site_pattern_binding(condition, local.name) ?? return true
         if sema_ownership_type_is_copy(value.ty) || value.ty == .String -> return true
-        facts :: sema_copy_classify(value.ty, SemaCopyIntent.Clone, environment, program, context.generic_params, false)
+        facts: sema_copy_classify(value.ty, SemaCopyIntent.Clone, environment, program, context.generic_params, false)
         if !facts.complete || !facts.holds_resource -> return true
         if sema_copy_site_subject_reads_in_place(found.subject, scopes) {
             &diagnostics.push(sema_error("E0211", value.span, "`{type_name(value.ty)}` can't be copied out of the place it is read from", "`{local.name}` is a payload of storage this scope does not own; it holds a resource, which has one cleanup owner, and this position takes an owned value, so the copy and the place would both close the same resource", "use `{local.name}` inside its arm, where it reads the matched place, instead of carrying it out"))
@@ -269,7 +269,7 @@ fn sema_copy_site_check_arm_payload(condition: TIfCond, value: TExpr, environmen
 }
 
 // The root name read of a name or field chain (`d`, `d.a.b`), or None.
-fn sema_copy_site_place_root(value: TExpr) -> TExpr? {
+sema_copy_site_place_root: fn(value: TExpr) -> TExpr? {
     if value.kind == {
         .Local(_) -> Val(value)
         .Field(receiver, _) -> sema_copy_site_place_root(receiver)
@@ -277,14 +277,14 @@ fn sema_copy_site_place_root(value: TExpr) -> TExpr? {
     }
 }
 
-struct SemaCopySitePatternBinding {
+SemaCopySitePatternBinding: struct {
     fact: TPatternBindingFact
     subject: TExpr
 }
 
 // The binding fact a condition's pattern declares for `name`, with the
 // subject it binds from, or None.
-fn sema_copy_site_pattern_binding(condition: TIfCond, name: String) -> SemaCopySitePatternBinding? {
+sema_copy_site_pattern_binding: fn(condition: TIfCond, name: String) -> SemaCopySitePatternBinding? {
     if condition == {
         .IfLet(pattern, subject) -> {
             loop binding in pattern.bindings {
@@ -293,7 +293,7 @@ fn sema_copy_site_pattern_binding(condition: TIfCond, name: String) -> SemaCopyS
             None
         }
         .And(left, right) -> {
-            found :: sema_copy_site_pattern_binding(right, name)
+            found: sema_copy_site_pattern_binding(right, name)
             if found != None -> return found
             sema_copy_site_pattern_binding(left, name)
         }
@@ -308,33 +308,33 @@ fn sema_copy_site_pattern_binding(condition: TIfCond, name: String) -> SemaCopyS
 // a resource, taken by an unmarked owning position, is E0209 with the `^`
 // edit; the written move then makes a later use of the original E0121.
 // True when `value` needs no mark.
-fn sema_copy_site_require_move_mark(value: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, state: SemaOwnershipState, context: SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
-    root :: sema_copy_site_owned_root(value, scopes, state) ?? return true
+sema_copy_site_require_move_mark: fn(value: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, state: SemaOwnershipState, context: SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+    root: sema_copy_site_owned_root(value, scopes, state) ?? return true
     if sema_ownership_type_is_copy(value.ty) || value.ty == .String -> return true
-    facts :: sema_copy_classify(value.ty, SemaCopyIntent.Clone, environment, program, context.generic_params, false)
+    facts: sema_copy_classify(value.ty, SemaCopyIntent.Clone, environment, program, context.generic_params, false)
     if !facts.complete || !facts.holds_resource -> return true
     // A payload name (`found`) is its own root: it comes out of its subject.
-    owner :: if value.kind == .Local(_) -> "its matched subject" else if root.kind == .Local(local) -> "`{local.name}`" else -> "its owner"
+    owner: if value.kind == .Local(_) -> "its matched subject" else if root.kind == .Local(local) -> "`{local.name}`" else -> "its owner"
     &diagnostics.push(sema_copy_site_move_mark_diagnostic(sema_copy_site_place_text(value), Span{start: root.span.start, end: value.span.end}, owner))
     false
 }
 
 // `span` is the whole place read; the edit writes `^` at its start.
-fn sema_copy_site_move_mark_diagnostic(name: String, span: Span, owner: String) -> Diagnostic {
-    diagnostic :: sema_error("E0209", span, "implicit move of `{name}`", "`{name}` holds a resource, which has one cleanup owner; this owning position takes it out of {owner}, and a value with cleanup moves only where `^` writes the move", "write the move marker `^` (`^{name}`), or use the value where it is")
+sema_copy_site_move_mark_diagnostic: fn(name: String, span: Span, owner: String) -> Diagnostic {
+    diagnostic: sema_error("E0209", span, "implicit move of `{name}`", "`{name}` holds a resource, which has one cleanup owner; this owning position takes it out of {owner}, and a value with cleanup moves only where `^` writes the move", "write the move marker `^` (`^{name}`), or use the value where it is")
     diagnostic_with_edit_grade(diagnostic, TextEdit{span: Span{start: span.start, end: span.start}, new_text: "^"}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving)
 }
 
 // The root name read of `value` when it is a field chain of an owned
 // variable or a match payload of a live owned subject; None for a
 // temporary, a compiler local, or storage this scope does not own.
-fn sema_copy_site_owned_root(value: TExpr, scopes: SemaScopeTable, state: SemaOwnershipState) -> TExpr? {
+sema_copy_site_owned_root: fn(value: TExpr, scopes: SemaScopeTable, state: SemaOwnershipState) -> TExpr? {
     if value.kind == {
         .Field(receiver, _) -> {
             if receiver.kind == .Local(root) {
                 if root.generated -> return None
-                index :: sema_scope_resolve_index(scopes, root.name) ?? return None
-                binding :: scopes.bindings[index]
+                index: sema_scope_resolve_index(scopes, root.name) ?? return None
+                binding: scopes.bindings[index]
                 if sema_ownership_binding_lends(binding) || binding.place_alias -> return None
                 return Val(receiver)
             }
@@ -342,8 +342,8 @@ fn sema_copy_site_owned_root(value: TExpr, scopes: SemaScopeTable, state: SemaOw
         }
         .Local(local) -> {
             if local.generated -> return None
-            index :: sema_scope_resolve_index(scopes, local.name) ?? return None
-            binding :: scopes.bindings[index]
+            index: sema_scope_resolve_index(scopes, local.name) ?? return None
+            binding: scopes.bindings[index]
             if sema_ownership_binding_lends(binding) || binding.place_alias -> return None
             if !sema_copy_site_payload_of_named_subject(state, sema_ownership_payload_key(binding.symbol.name, binding.symbol.span)) -> return None
             Val(value)
@@ -357,8 +357,8 @@ fn sema_copy_site_owned_root(value: TExpr, scopes: SemaScopeTable, state: SemaOw
 // still owns the payload, so taking it out is written with `^`. A payload of
 // a temporary subject (`if open(path) == { .Ok(file) -> file … }`) is the
 // only owner once the temporary ends, as a call result is (spec.md:1199).
-fn sema_copy_site_payload_of_named_subject(state: SemaOwnershipState, key: String) -> Bool Never! {
-    sources :: state.pattern_sources.get(key) ?? return false
+sema_copy_site_payload_of_named_subject: fn(state: SemaOwnershipState, key: String) -> Bool Never! {
+    sources: state.pattern_sources.get(key) ?? return false
     loop source in sources {
         if sema_copy_site_source_is_named(state, source) -> return true
     }
@@ -370,10 +370,10 @@ fn sema_copy_site_payload_of_named_subject(state: SemaOwnershipState, key: Strin
 // statement switch's `it` from sema_stmt_check_subject_switch) records that
 // subject (sema_copy_site_note_subject), and stands for it: it is named
 // exactly when that subject is.
-fn sema_copy_site_source_is_named(state: SemaOwnershipState, source: Expr) -> Bool Never! {
+sema_copy_site_source_is_named: fn(state: SemaOwnershipState, source: Expr) -> Bool Never! {
     if source == {
         .Ident(name, span, _) -> {
-            subjects :: state.pattern_sources.get(sema_copy_site_subject_key(name, span)) ?? return true
+            subjects: state.pattern_sources.get(sema_copy_site_subject_key(name, span)) ?? return true
             loop subject in subjects {
                 if sema_copy_site_source_is_named(state, subject) -> return true
             }
@@ -388,16 +388,16 @@ fn sema_copy_site_source_is_named(state: SemaOwnershipState, source: Expr) -> Bo
 // local's whole span, the subject's: a written name inside that subject
 // (`it` in `if it.kind() == {`) starts at the same offset but is shorter, so
 // it never reads its own subject back.
-fn sema_copy_site_note_subject(state: &SemaOwnershipState, name: String, span: Span, subject: Expr) Never! {
+sema_copy_site_note_subject: fn(state: &SemaOwnershipState, name: String, span: Span, subject: Expr) Never! {
     state.pattern_sources[sema_copy_site_subject_key(name, span)] = [Expr]{subject}
 }
 
-fn sema_copy_site_subject_key(name: String, span: Span) -> String Never! {
+sema_copy_site_subject_key: fn(name: String, span: Span) -> String Never! {
     "{name}@{span.start}-{span.end}"
 }
 
 // `root.a.b` for a field chain, the name for a local.
-fn sema_copy_site_place_text(value: TExpr) -> String {
+sema_copy_site_place_text: fn(value: TExpr) -> String {
     if value.kind == {
         .Field(receiver, field) -> "{sema_copy_site_place_text(receiver)}.{field.name}"
         .Local(local) -> local.name.copy()
@@ -409,10 +409,10 @@ fn sema_copy_site_place_text(value: TExpr) -> String {
 // not own: a read or write parameter, a name that reads its place in place
 // (a hoisted match subject marked so by sema_expression_if_bind_subject), or
 // a field or element read in place.
-fn sema_copy_site_subject_reads_in_place(subject: TExpr, scopes: SemaScopeTable) -> Bool {
+sema_copy_site_subject_reads_in_place: fn(subject: TExpr, scopes: SemaScopeTable) -> Bool {
     if subject.kind == .Local(local) {
-        index :: sema_scope_resolve_index(scopes, local.name) ?? return false
-        binding :: scopes.bindings[index]
+        index: sema_scope_resolve_index(scopes, local.name) ?? return false
+        binding: scopes.bindings[index]
         return sema_ownership_binding_is_borrowed_param(binding) || binding.place_alias
     }
     sema_copy_site_in_place_fix(subject, scopes) != None
@@ -421,10 +421,10 @@ fn sema_copy_site_subject_reads_in_place(subject: TExpr, scopes: SemaScopeTable)
 // A bare read or write parameter a forwarding form yields holding a
 // resource: its caller keeps the value and its one cleanup duty (E0201, as
 // at a bare owning position). True when `name` is no such parameter.
-fn sema_copy_site_refuse_forwarded_param(value: TExpr, name: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
-    index :: sema_scope_resolve_index(scopes, name) ?? return true
+sema_copy_site_refuse_forwarded_param: fn(value: TExpr, name: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+    index: sema_scope_resolve_index(scopes, name) ?? return true
     if !sema_ownership_binding_is_borrowed_param(scopes.bindings[index]) -> return true
-    facts :: sema_copy_classify(value.ty, SemaCopyIntent.Clone, environment, program, context.generic_params, false)
+    facts: sema_copy_classify(value.ty, SemaCopyIntent.Clone, environment, program, context.generic_params, false)
     if !facts.complete || !facts.holds_resource -> return true
     &diagnostics.push(sema_copy_site_borrowed_diagnostic(SemaCopySite{name: name, span: value.span, ty: value.ty, borrowed: true}, "an owned value"))
     false
@@ -432,7 +432,7 @@ fn sema_copy_site_refuse_forwarded_param(value: TExpr, name: String, environment
 
 // An element read in place (`items[i]`, `items[i].handle`), a field of
 // storage this scope does not own (`self.dirs` on a read or write receiver,
-// `param.handle`), or a name that reads one through a view (`x :: items[i]`,
+// `param.handle`), or a name that reads one through a view (`x: items[i]`,
 // a loop name over a borrowed collection) leaves its place owning the value:
 // an unmarked owning position would copy its bits. A value holding a
 // resource has one cleanup duty, so the copy and the place would both close
@@ -440,10 +440,10 @@ fn sema_copy_site_refuse_forwarded_param(value: TExpr, name: String, environment
 // needs `^`). A field of an owned variable is no copy: lowering moves it out,
 // once its move is written (sema_copy_site_require_move_mark).
 // E0211 here; true when the read is no such copy.
-fn sema_copy_site_refuse_resource_copy(value: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+sema_copy_site_refuse_resource_copy: fn(value: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
     if sema_ownership_type_is_copy(value.ty) || value.ty == .String -> return true
-    fix :: sema_copy_site_in_place_fix(value, scopes) ?? return true
-    facts :: sema_copy_classify(value.ty, SemaCopyIntent.Clone, environment, program, context.generic_params, false)
+    fix: sema_copy_site_in_place_fix(value, scopes) ?? return true
+    facts: sema_copy_classify(value.ty, SemaCopyIntent.Clone, environment, program, context.generic_params, false)
     if !facts.complete || !facts.holds_resource -> return true
     &diagnostics.push(sema_error("E0211", value.span, "`{type_name(value.ty)}` can't be copied out of the place it is read from", "it holds a resource, which has one cleanup owner; this position takes an owned value, so the copy and the place would both close the same resource", fix))
     false
@@ -454,13 +454,13 @@ fn sema_copy_site_refuse_resource_copy(value: TExpr, environment: SemaScopeEnvir
 // lowering moves out) or is not a place read at all. A bare borrowed
 // parameter is the binding and return audits' E0120 and the field rule's
 // E0201 (sema_copy_site_refuse_borrowed_copy), not a place read here.
-fn sema_copy_site_in_place_fix(value: TExpr, scopes: SemaScopeTable) -> String? {
+sema_copy_site_in_place_fix: fn(value: TExpr, scopes: SemaScopeTable) -> String? {
     if value.kind == {
         .Index(_, _, _, _, _, _) -> Val("use the element where it is, or remove it from its collection to own it")
         .Field(base, _) | .OptField(base, _, _) -> {
             if base.kind == .Local(root) {
-                index :: sema_scope_resolve_index(scopes, root.name) ?? return None
-                binding :: scopes.bindings[index]
+                index: sema_scope_resolve_index(scopes, root.name) ?? return None
+                binding: scopes.bindings[index]
                 if sema_ownership_binding_lends(binding) -> return Val("use it where it is, or take `{root.name}` with the move marker `^` (a `^` parameter or receiver) and move the field out with `^`")
                 if binding.place_alias -> return Val("use it where it is: `{root.name}` reads its value in place")
                 return None
@@ -468,7 +468,7 @@ fn sema_copy_site_in_place_fix(value: TExpr, scopes: SemaScopeTable) -> String? 
             sema_copy_site_in_place_fix(base, scopes)
         }
         .Local(local) -> {
-            index :: sema_scope_resolve_index(scopes, local.name) ?? return None
+            index: sema_scope_resolve_index(scopes, local.name) ?? return None
             if scopes.bindings[index].place_alias -> return Val("use `{local.name}` where it is, or move the place it reads with the move marker `^` when this scope owns it")
             None
         }
@@ -481,29 +481,29 @@ fn sema_copy_site_in_place_fix(value: TExpr, scopes: SemaScopeTable) -> String? 
 // refused (E0201) as in a field (sema_copy_site_refuse_copy), since its
 // caller keeps the one cleanup duty. True when the value holds none or is
 // no borrowed parameter.
-fn sema_copy_site_refuse_borrowed_copy(value: Expr, consumer: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
-    site :: sema_copy_site_borrowed_param(sema_copy_site_payload(value), scopes) ?? return true
+sema_copy_site_refuse_borrowed_copy: fn(value: Expr, consumer: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+    site: sema_copy_site_borrowed_param(sema_copy_site_payload(value), scopes) ?? return true
     // An ExpiringSecret loan is refused where it is stored, by its own E0201.
     if sema_contains_expiring_secret_loan(site.ty) -> return true
-    facts :: sema_copy_classify(site.ty, SemaCopyIntent.Clone, environment, program, context.generic_params, false)
+    facts: sema_copy_classify(site.ty, SemaCopyIntent.Clone, environment, program, context.generic_params, false)
     if !facts.complete || !facts.holds_resource -> return true
     &diagnostics.push(sema_copy_site_borrowed_diagnostic(site, consumer))
     false
 }
 
-fn sema_copy_site_borrowed_diagnostic(site: SemaCopySite, consumer: String) -> Diagnostic {
+sema_copy_site_borrowed_diagnostic: fn(site: SemaCopySite, consumer: String) -> Diagnostic {
     sema_error("E0201", site.span, "`{site.name}` cannot be moved from borrowed storage", "`{site.name}` is a read or write parameter, so its caller keeps the value, and `{type_name(site.ty)}` can't be copied into {consumer}", "declare the parameter `^` so the caller hands the value over")
 }
 
 // A bare read or write parameter of a non-scalar type (Rust `is_scalar`, not
 // Copy): the value an owning binding or return would take from storage this
 // function does not own.
-fn sema_copy_site_borrowed_param(value: Expr, scopes: SemaScopeTable) -> SemaCopySite? {
+sema_copy_site_borrowed_param: fn(value: Expr, scopes: SemaScopeTable) -> SemaCopySite? {
     if value == .Ident(name, span, _) {
-        index :: sema_scope_resolve_index(scopes, name) ?? return None
-        binding :: scopes.bindings[index]
+        index: sema_scope_resolve_index(scopes, name) ?? return None
+        binding: scopes.bindings[index]
         if !sema_ownership_binding_is_borrowed_param(binding) -> return None
-        ty :: binding.symbol.ty ?? return None
+        ty: binding.symbol.ty ?? return None
         if sema_ownership_type_is_scalar(ty) -> return None
         return Val(SemaCopySite{name: name, span: span, ty: ty, borrowed: true})
     }
@@ -513,29 +513,29 @@ fn sema_copy_site_borrowed_param(value: Expr, scopes: SemaScopeTable) -> SemaCop
 // Rust `check_binding`: an immutable binding initialized by a bare borrowed
 // parameter is E0120 under every copy policy, before the initializer is
 // checked.
-fn sema_copy_site_check_borrowed_binding(binding: Binding, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic]) {
+sema_copy_site_check_borrowed_binding: fn(binding: Binding, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic]) {
     if binding.mutable -> return
-    site :: sema_copy_site_borrowed_param(binding.init, scopes) ?? return
-    sema_copy_site_push(sema_error("E0120", site.span, "`{site.name}` was not moved here, so it cannot be taken with the move marker `^`", "this function has read access only and does not own the value", "copy it instead: `{binding.name} :: {site.name}.copy()`"), site, environment, program, context, &diagnostics)
+    site: sema_copy_site_borrowed_param(binding.init, scopes) ?? return
+    sema_copy_site_push(sema_error("E0120", site.span, "`{site.name}` was not moved here, so it cannot be taken with the move marker `^`", "this function has read access only and does not own the value", "copy it instead: `{binding.name}: {site.name}.copy()`"), site, environment, program, context, &diagnostics)
 }
 
 // Rust `check_return`: a bare borrowed parameter returned as-is is E0120
 // unless its type is one of the function's generic parameters. A returned
 // carrier owns its payload, so a borrowed resource in it is refused as in
 // any owning position (E0201).
-fn sema_copy_site_check_borrowed_return(value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic]) {
+sema_copy_site_check_borrowed_return: fn(value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic]) {
     if sema_copy_site_carrier_payload(value) != None {
         _ := sema_copy_site_refuse_borrowed_copy(value, "the returned value", environment, program, scopes, context, &diagnostics)
         return
     }
-    site :: sema_copy_site_borrowed_param(value, scopes) ?? return
+    site: sema_copy_site_borrowed_param(value, scopes) ?? return
     if sema_copy_site_is_type_parameter(site.ty, context) -> return
     sema_copy_site_push(sema_error("E0120", site.span, "`{site.name}` was not moved here, so it cannot be returned as-is", "this function has read access only and does not own the value", "return a copy: `return {site.name}.copy()` — or take ownership with the move marker `^`: `{site.name}: ^{type_name(site.ty)}`. To return borrowed data, declare `-> View<T> from {site.name}` and return a view derived from `{site.name}`"), site, environment, program, context, &diagnostics)
 }
 
 // An owned struct or variant field filled from `value`.
-fn sema_copy_site_check_field(value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
-    site :: sema_copy_site_find(value, environment, program, scopes, &tail_store, &context) ?? return
+sema_copy_site_check_field: fn(value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
+    site: sema_copy_site_find(value, environment, program, scopes, &tail_store, &context) ?? return
     if site.borrowed {
         sema_copy_site_report(site, "`{site.name}` was not moved here, so it cannot fill an owned field", "this function has read access only and does not own the value", environment, program, context, &diagnostics)
     } else {
@@ -549,9 +549,9 @@ fn sema_copy_site_check_field(value: Expr, environment: SemaScopeEnvironment, pr
 // resource, a type holding a cleanup duty, or anything else a clone refuses)
 // is never copied into the field (sema_copy_site_refuse_copy). `consumer`
 // names the literal in the report. False when the move is invalid.
-fn sema_copy_site_record_move(value: Expr, consumer: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
-    payload :: sema_copy_site_payload(value)
-    site :: sema_copy_site_owned_ident(payload, scopes, context) ?? return true
+sema_copy_site_record_move: fn(value: Expr, consumer: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+    payload: sema_copy_site_payload(value)
+    site: sema_copy_site_owned_ident(payload, scopes, context) ?? return true
     if site.borrowed || sema_ownership_name_live_after(site.name, &tail_store, &context) {
         // `copies: .Explicit` already reported this copy site (E0120).
         if scopes.copies_explicit -> return true
@@ -560,10 +560,10 @@ fn sema_copy_site_record_move(value: Expr, consumer: String, environment: SemaSc
     // A Copy value (`Complex`, `Range`, a `Ptr`) copies at its last use as at
     // any other: nothing moves, so nothing repeats on a loop's next iteration
     // either. (A share site never takes a Copy type: sema_function_accept_share_sites.)
-    facts :: sema_copy_classify(site.ty, SemaCopyIntent.Clone, environment, program, context.generic_params, false)
+    facts: sema_copy_classify(site.ty, SemaCopyIntent.Clone, environment, program, context.generic_params, false)
     if facts.complete && facts.copyable -> return true
-    first :: state.moved.len()
-    moved :: sema_ownership_mark_unmarked_move(&state, payload, scopes, consumer, &diagnostics)
+    first: state.moved.len()
+    moved: sema_ownership_mark_unmarked_move(&state, payload, scopes, consumer, &diagnostics)
     // Copy facts this check cannot settle (a nominal it cannot resolve here)
     // let a later use copy the value (sema_copy_site_refuse_copy); the next
     // pass of a loop is such a use.
@@ -576,24 +576,24 @@ fn sema_copy_site_record_move(value: Expr, consumer: String, environment: SemaSc
 // An unmarked argument a collection method stores (`&out.push(r)`): the walk
 // records no move for it and lowering shares the value, so a value a clone
 // refuses is refused here as in a literal. False when the move is invalid.
-fn sema_copy_site_record_stored(value: Expr, consumer: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, state: &SemaOwnershipState, context: SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
-    payload :: sema_copy_site_payload(value)
-    site :: sema_copy_site_owned_ident(payload, scopes, context) ?? return true
+sema_copy_site_record_stored: fn(value: Expr, consumer: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, state: &SemaOwnershipState, context: SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+    payload: sema_copy_site_payload(value)
+    site: sema_copy_site_owned_ident(payload, scopes, context) ?? return true
     sema_copy_site_refuse_copy(payload, site, consumer, environment, program, scopes, &state, context, &diagnostics)
 }
 
 // The local or parameter a bare identifier at an owning destination names,
 // or None when it is not a copy candidate (a Copy value, a type parameter, a
 // string view, anything but a local or parameter).
-fn sema_copy_site_owned_ident(payload: Expr, scopes: SemaScopeTable, context: SemaCheckContext) -> SemaCopySite? {
+sema_copy_site_owned_ident: fn(payload: Expr, scopes: SemaScopeTable, context: SemaCheckContext) -> SemaCopySite? {
     if payload == .Ident(name, span, _) {
-        index :: sema_scope_resolve_index(scopes, name) ?? return None
-        binding :: scopes.bindings[index]
+        index: sema_scope_resolve_index(scopes, name) ?? return None
+        binding: scopes.bindings[index]
         if binding.string_view -> return None
         if binding.symbol.kind != SymbolKind.Local && binding.symbol.kind != SymbolKind.Parameter -> return None
-        ty :: binding.symbol.ty ?? return None
+        ty: binding.symbol.ty ?? return None
         if sema_ownership_type_is_copy(ty) || sema_copy_site_is_type_parameter(ty, context) -> return None
-        borrowed :: binding.symbol.kind == SymbolKind.Parameter && (binding.access == AccessConvention.Read || binding.access == AccessConvention.Write)
+        borrowed: binding.symbol.kind == SymbolKind.Parameter && (binding.access == AccessConvention.Read || binding.access == AccessConvention.Write)
         return Val(SemaCopySite{name: name, span: span, ty: ty, borrowed: borrowed})
     }
     None
@@ -603,8 +603,8 @@ fn sema_copy_site_owned_ident(payload: Expr, scopes: SemaScopeTable, context: Se
 // value up instead (spec "Copies, moves, and owned destinations"): a local
 // moves, so a later use is E0121; a read or write parameter has no value to
 // give up and is E0201. True (nothing recorded) for a type that copies.
-fn sema_copy_site_refuse_copy(payload: Expr, site: SemaCopySite, consumer: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, state: &SemaOwnershipState, context: SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
-    facts :: sema_copy_classify(site.ty, SemaCopyIntent.Clone, environment, program, context.generic_params, false)
+sema_copy_site_refuse_copy: fn(payload: Expr, site: SemaCopySite, consumer: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, state: &SemaOwnershipState, context: SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+    facts: sema_copy_classify(site.ty, SemaCopyIntent.Clone, environment, program, context.generic_params, false)
     if !facts.complete || facts.accepted -> return true
     if site.borrowed {
         &diagnostics.push(sema_copy_site_borrowed_diagnostic(site, consumer))
@@ -615,15 +615,15 @@ fn sema_copy_site_refuse_copy(payload: Expr, site: SemaCopySite, consumer: Strin
 
 // Rust assignment audit: a borrowed parameter assigned into an owned place.
 // True when E0120 was reported.
-fn sema_copy_site_check_assignment(value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+sema_copy_site_check_assignment: fn(value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
     if !scopes.copies_explicit -> return false
     if value == {
         .Ident(name, span, _) -> {
-            index :: sema_scope_resolve_index(scopes, name) ?? return false
-            binding :: scopes.bindings[index]
+            index: sema_scope_resolve_index(scopes, name) ?? return false
+            binding: scopes.bindings[index]
             if binding.symbol.kind != SymbolKind.Parameter -> return false
             if binding.access != AccessConvention.Read && binding.access != AccessConvention.Write -> return false
-            ty :: binding.symbol.ty ?? return false
+            ty: binding.symbol.ty ?? return false
             if sema_ownership_type_is_copy(ty) -> return false
             sema_copy_site_report(SemaCopySite{name: name, span: span, ty: ty, borrowed: true}, "`{name}` was not moved here, so it cannot replace an owned value", "this function has read access only and does not own the value", environment, program, context, &diagnostics)
             true
@@ -634,7 +634,7 @@ fn sema_copy_site_check_assignment(value: Expr, environment: SemaScopeEnvironmen
 
 // Rust `materialize_if_arm_local_read`: each arm tail of a value-`if` that
 // fills a non-view binding occupies the owning destination itself.
-fn sema_copy_site_check_conditional(init: Expr, declared: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic]) {
+sema_copy_site_check_conditional: fn(init: Expr, declared: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic]) {
     if !scopes.copies_explicit -> return
     if declared == .Val(declared_ty) {
         if declared_ty == .Apply(name, _) {
@@ -644,7 +644,7 @@ fn sema_copy_site_check_conditional(init: Expr, declared: Type?, environment: Se
     sema_copy_site_check_arms(init, environment, program, scopes, context, &diagnostics)
 }
 
-fn sema_copy_site_check_arms(value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic]) {
+sema_copy_site_check_arms: fn(value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic]) {
     if value == {
         .Paren(inner, _, _) -> sema_copy_site_check_arms(inner, environment, program, scopes, context, &diagnostics)
         .If(_, _, then_value, _, else_value, _, _) -> {
@@ -655,12 +655,12 @@ fn sema_copy_site_check_arms(value: Expr, environment: SemaScopeEnvironment, pro
     }
 }
 
-fn sema_copy_site_check_arm(value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic]) {
+sema_copy_site_check_arm: fn(value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic]) {
     if value == {
         .If(_, _, _, _, _, _, _) -> sema_copy_site_check_arms(value, environment, program, scopes, context, &diagnostics)
         .Ident(name, span, _) -> {
-            index :: sema_scope_resolve_index(scopes, name) ?? return
-            ty :: sema_scope_binding_type(environment, scopes, index) ?? return
+            index: sema_scope_resolve_index(scopes, name) ?? return
+            ty: sema_scope_binding_type(environment, scopes, index) ?? return
             if sema_ownership_type_is_copy(ty) -> return
             sema_copy_site_report(SemaCopySite{name: name, span: span, ty: ty, borrowed: false}, "`{name}` was not copied here, so it cannot fill an owned conditional value", "this arm supplies a non-Copy value to an owning conditional result under `copies: .Explicit`", environment, program, context, &diagnostics)
         }

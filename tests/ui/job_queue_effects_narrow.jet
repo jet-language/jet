@@ -1,12 +1,12 @@
 // A': claiming due queue work consumes DB, Rand, and Time, not DB alone.
 // The composed verifier owns the diagnostic snapshot; it is unobserved here.
-use jobs :: core.jobs
+use jobs: core.jobs
 
-fn narrow(queue: jobs.JobQueue) -[DB]> {
-    _ :: queue.claim("narrow-effects", 1) ?? return
+narrow: fn(queue: jobs.JobQueue) -[DB]> {
+    _: queue.claim("narrow-effects", 1) ?? return
 }
 
-fn run() {
-    queue :: jobs.queue() ?? return
+run: fn() {
+    queue: jobs.queue() ?? return
     narrow(queue)
 }

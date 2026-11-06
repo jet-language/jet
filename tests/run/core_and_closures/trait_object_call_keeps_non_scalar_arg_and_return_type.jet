@@ -1,24 +1,24 @@
-trait Measure {
-    fn measure(self, text: String) -> Int
+Measure: trait {
+    measure: fn(self, text: String) -> Int
 }
-struct Counter {
+Counter: struct {
     bonus: Int
     impl Measure {
-        fn measure(self, text: String) -> Int {
+        measure: fn(self, text: String) -> Int {
             return text.len() + self.bonus
         }
     }
 }
-fn apply_measure(counter: Measure, text: String) -> Int {
+apply_measure: fn(counter: Measure, text: String) -> Int {
     return inspect(counter) + counter.measure(text)
 }
-fn inspect<T>(value: T) -> Int {
+inspect: fn<T>(value: T) -> Int {
     return 1
 }
-fn run() {
-    counters :: [Measure]{ Counter{bonus: 2} }
+run: fn() {
+    counters: [Measure]{ Counter{bonus: 2} }
     counters.each((counter) -> {
-        text :: "read"
+        text: "read"
         print(apply_measure(counter, text))
         print(text)
     })

@@ -15,47 +15,47 @@
 // A, listed first, and no title is required. Exit status is 1 when any
 // payload has a gap.
 use {
-    files :: core.files
-    json :: core.encoding.json
-    process :: core.process
-    term :: core.term
+    files: core.files
+    json: core.encoding.json
+    process: core.process
+    term: core.term
 }
 
 // Tower's ballot process (store.mjs BALLOT_PROCESS_VERSION): one fresh
 // adversarial review pass.
-REVIEW_PASS_KEYS :: [String]{"adversarial"}
+REVIEW_PASS_KEYS: [String]{"adversarial"}
 
 // A payload for a new ballot (`addDecision`) or an edit of one already on
 // the board (`updateDecision`).
-enum Posting {
+Posting: enum {
     New
     Update
 }
 
-PLAIN_SENTENCE_WORDS :: 32
-PLAIN_PARAGRAPH_WORDS :: 90
-SURFACE_MITIGATION_WORDS :: 24
-SURFACE_GIST_WORDS :: 22
-SURFACE_LESSON_WORDS :: 70
-SURFACE_WHY_WORDS :: 40
-SURFACE_SENTENCE_WORDS :: 24
-SURFACE_BULLET_WORDS :: 14
-SURFACE_TOTAL_WORDS :: 430
-SURFACE_CODE_LINES :: 14
-SURFACE_JARGON :: [String]{"ratchet", "seam", "facet", "substrate", "tier-parity", "tier parity", "ring 0", "ring 1", "rings"}
-SITUATION_MIN_CHARS :: 300
-SITUATION_MAX_CHARS :: 1200
-DISSENT_AUTHOR :: "Author model family: "
-DISSENT_ADVERSARIAL :: " Adversarial model family: "
-FRESH_AGENT :: "Fresh agent: "
-TRIO_SIDES :: [String]{"current", "wild"}
-BULLET_LISTS :: [String]{"gains", "losses"}
-OPTION_PARTS :: [String]{"name", "detail", "code"}
+PLAIN_SENTENCE_WORDS: 32
+PLAIN_PARAGRAPH_WORDS: 90
+SURFACE_MITIGATION_WORDS: 24
+SURFACE_GIST_WORDS: 22
+SURFACE_LESSON_WORDS: 70
+SURFACE_WHY_WORDS: 40
+SURFACE_SENTENCE_WORDS: 24
+SURFACE_BULLET_WORDS: 14
+SURFACE_TOTAL_WORDS: 430
+SURFACE_CODE_LINES: 14
+SURFACE_JARGON: [String]{"ratchet", "seam", "facet", "substrate", "tier-parity", "tier parity", "ring 0", "ring 1", "rings"}
+SITUATION_MIN_CHARS: 300
+SITUATION_MAX_CHARS: 1200
+DISSENT_AUTHOR: "Author model family: "
+DISSENT_ADVERSARIAL: " Adversarial model family: "
+FRESH_AGENT: "Fresh agent: "
+TRIO_SIDES: [String]{"current", "wild"}
+BULLET_LISTS: [String]{"gains", "losses"}
+OPTION_PARTS: [String]{"name", "detail", "code"}
 
 // ---- payload values ----------------------------------------------------
 
 // Field `name` of an object, `Dyn.Null` when absent.
-fn field(tree: Dyn, name: String) -> Dyn Never! {
+field: fn(tree: Dyn, name: String) -> Dyn Never! {
     if tree == .Object(entries) {
         loop entry in entries {
             if entry.key == name -> return entry.value.copy()
@@ -65,7 +65,7 @@ fn field(tree: Dyn, name: String) -> Dyn Never! {
 }
 
 // JavaScript `Object.hasOwn`.
-fn has_field(tree: Dyn, name: String) -> Bool Never! {
+has_field: fn(tree: Dyn, name: String) -> Bool Never! {
     if tree == .Object(entries) {
         loop entry in entries {
             if entry.key == name -> return true
@@ -74,7 +74,7 @@ fn has_field(tree: Dyn, name: String) -> Bool Never! {
     false
 }
 
-fn field_names(tree: Dyn) -> [String] Never! {
+field_names: fn(tree: Dyn) -> [String] Never! {
     names := [String]{}
     if tree == .Object(entries) {
         loop entry in entries -> &names.push(entry.key.copy())
@@ -83,41 +83,41 @@ fn field_names(tree: Dyn) -> [String] Never! {
 }
 
 // store.mjs `plainObject`.
-fn is_object(value: Dyn) -> Bool Never! {
+is_object: fn(value: Dyn) -> Bool Never! {
     if value == .Object(_) -> return true
     false
 }
 
-fn is_array(value: Dyn) -> Bool Never! {
+is_array: fn(value: Dyn) -> Bool Never! {
     if value == .Array(_) -> return true
     false
 }
 
-fn is_null(value: Dyn) -> Bool Never! {
+is_null: fn(value: Dyn) -> Bool Never! {
     if value == .Null -> return true
     false
 }
 
-fn is_text(value: Dyn) -> Bool Never! {
+is_text: fn(value: Dyn) -> Bool Never! {
     if value == .Text(_) -> return true
     false
 }
 
 // The items of an array, none for any other value (`Array.isArray(v) ? v : []`).
-fn items(value: Dyn) -> [Dyn] Never! {
+items: fn(value: Dyn) -> [Dyn] Never! {
     if value == .Array(list) -> return list.copy()
     [Dyn]{}
 }
 
 // `typeof v === 'string' ? v : ''`.
-fn string_value(value: Dyn) -> String Never! {
+string_value: fn(value: Dyn) -> String Never! {
     if value == .Text(text) -> return text.copy()
     ""
 }
 
 // JavaScript `String(v || '')` for the values a payload holds: a falsy value
 // gives "".
-fn js_text(value: Dyn) -> String Never! {
+js_text: fn(value: Dyn) -> String Never! {
     if value == {
         .Text(text) -> text.copy()
         .Int(number) -> if number == 0 -> "" else -> "{number}"
@@ -134,11 +134,11 @@ fn js_text(value: Dyn) -> String Never! {
 }
 
 // `v && String(v).trim()`: the value is set and not blank.
-fn present(value: Dyn) -> Bool Never! { js_text(value).trim() != "" }
+present: fn(value: Dyn) -> Bool Never! { js_text(value).trim() != "" }
 
 // `o?.key || fallback`.
-fn key_or(item: Dyn, fallback: String) -> String Never! {
-    key :: js_text(field(item, "key"))
+key_or: fn(item: Dyn, fallback: String) -> String Never! {
+    key: js_text(field(item, "key"))
     if key == "" -> return fallback.copy()
     key
 }
@@ -149,11 +149,11 @@ fn key_or(item: Dyn, fallback: String) -> String Never! {
 // continue through letters, numbers, `'`, `’` and `-`. A letter here is a
 // Unicode Alphabetic scalar, which also takes in the combining vowel signs
 // that JavaScript's `\p{L}` leaves out; English prose counts the same.
-fn word_count(text: String) -> Int Never! {
+word_count: fn(text: String) -> Int Never! {
     count := 0
     inside := false
     loop scalar in text.chars() {
-        piece :: "{scalar}"
+        piece: "{scalar}"
         if inside && (word_scalar(piece) || piece == "'" || piece == "’" || piece == "-") -> next
         inside = false
         if word_scalar(piece) {
@@ -164,23 +164,23 @@ fn word_count(text: String) -> Int Never! {
     count
 }
 
-fn word_scalar(scalar: String) -> Bool Never! { scalar.is_alphabetic() || scalar.is_numeric() }
+word_scalar: fn(scalar: String) -> Bool Never! { scalar.is_alphabetic() || scalar.is_numeric() }
 
 // `text.split(/(?<=[.!?])\s+/).filter(Boolean)`.
-fn sentence_list(text: String) -> [String] Never! {
+sentence_list: fn(text: String) -> [String] Never! {
     out := [String]{}
     current := [String]{}
     last := ""
     in_space := false
     splitting := false
     loop scalar in text.chars() {
-        piece :: "{scalar}"
+        piece: "{scalar}"
         if piece.is_whitespace() {
             if !in_space {
                 in_space = true
                 splitting = last == "." || last == "!" || last == "?"
                 if splitting {
-                    sentence :: current.join("")
+                    sentence: current.join("")
                     if sentence != "" -> &out.push(sentence)
                     current = [String]{}
                 }
@@ -192,17 +192,17 @@ fn sentence_list(text: String) -> [String] Never! {
         &current.push(piece)
         last = piece
     }
-    sentence :: current.join("")
+    sentence: current.join("")
     if sentence != "" -> &out.push(sentence)
     out
 }
 
 // store.mjs `sentences`: the trimmed text's sentences.
-fn sentences(text: String) -> [String] Never! { sentence_list(text.trim()) }
+sentences: fn(text: String) -> [String] Never! { sentence_list(text.trim()) }
 
 // Ends a whitespace run inside `paragraph_list`: a run holding two or more
 // newlines (`\n\s*\n`) closes the current paragraph.
-fn close_run(out: &[String], current: &[String], run: &[String]) Never! {
+close_run: fn(out: &[String], current: &[String], run: &[String]) Never! {
     first := -1
     last := -1
     loop index in 0..<run.len() {
@@ -223,12 +223,12 @@ fn close_run(out: &[String], current: &[String], run: &[String]) Never! {
 }
 
 // `text.split(/\n\s*\n/)`.
-fn paragraph_list(text: String) -> [String] Never! {
+paragraph_list: fn(text: String) -> [String] Never! {
     out := [String]{}
     current := [String]{}
     run := [String]{}
     loop scalar in text.chars() {
-        piece :: "{scalar}"
+        piece: "{scalar}"
         if piece.is_whitespace() {
             &run.push(piece)
             next
@@ -241,7 +241,7 @@ fn paragraph_list(text: String) -> [String] Never! {
     out
 }
 
-struct FenceOpener {
+FenceOpener: struct {
     mark: String
     marker: String
     rest: String
@@ -250,13 +250,13 @@ struct FenceOpener {
 // `/^ {0,3}(`{3,}|~{3,})(.*)$/`: up to three spaces, then three or more of
 // one fence character. `.` stops at CR, U+2028 and U+2029, so a line holding
 // one is not an opener.
-fn fence_opener(line: String) -> FenceOpener? Never! {
+fence_opener: fn(line: String) -> FenceOpener? Never! {
     spaces := 0
     mark := ""
     count := 0
     rest := [String]{}
     loop scalar in line.chars() {
-        piece :: "{scalar}"
+        piece: "{scalar}"
         if mark == "" {
             if piece == " " && spaces < 3 {
                 spaces += 1
@@ -282,15 +282,15 @@ fn fence_opener(line: String) -> FenceOpener? Never! {
 
 // store.mjs `proseDensityGaps`: paragraphs over 90 words and sentences over
 // 32, with fenced code blocks left out.
-fn prose_density_gaps(label: String, value: Dyn) -> [String] Never! {
-    text :: js_text(value)
+prose_density_gaps: fn(label: String, value: Dyn) -> [String] Never! {
+    text: js_text(value)
     gaps := [String]{}
     if text.trim() == "" -> return gaps
     kept := [String]{}
     fence := ""
     fence_mark := ""
     loop line in text.split("\n") {
-        opener :: fence_opener(line)
+        opener: fence_opener(line)
         if fence != "" {
             if opener == .Val(open) && open.mark == fence_mark && open.marker.len() >= fence.len() && open.rest.trim() == "" -> fence = ""
             &kept.push("")
@@ -307,12 +307,12 @@ fn prose_density_gaps(label: String, value: Dyn) -> [String] Never! {
     paragraph_number := 0
     loop paragraph in paragraph_list(kept.join("\n").trim()) {
         paragraph_number += 1
-        paragraph_words :: word_count(paragraph)
+        paragraph_words: word_count(paragraph)
         if paragraph_words > PLAIN_PARAGRAPH_WORDS -> &gaps.push("{label} paragraph {paragraph_number} has {paragraph_words} words (max {PLAIN_PARAGRAPH_WORDS})")
         sentence_number := 0
         loop sentence in sentence_list(paragraph) {
             sentence_number += 1
-            sentence_words :: word_count(sentence)
+            sentence_words: word_count(sentence)
             if sentence_words > PLAIN_SENTENCE_WORDS -> &gaps.push("{label} sentence {sentence_number} has {sentence_words} words (max {PLAIN_SENTENCE_WORDS})")
         }
     }
@@ -320,8 +320,8 @@ fn prose_density_gaps(label: String, value: Dyn) -> [String] Never! {
 }
 
 // store.mjs `exampleProseDensityGaps`: sentences over 32 words, line by line.
-fn example_prose_density_gaps(label: String, value: Dyn) -> [String] Never! {
-    text :: js_text(value)
+example_prose_density_gaps: fn(label: String, value: Dyn) -> [String] Never! {
+    text: js_text(value)
     gaps := [String]{}
     if text.trim() == "" -> return gaps
     line_number := 0
@@ -330,39 +330,39 @@ fn example_prose_density_gaps(label: String, value: Dyn) -> [String] Never! {
         sentence_number := 0
         loop sentence in sentence_list(line) {
             sentence_number += 1
-            sentence_words :: word_count(sentence)
+            sentence_words: word_count(sentence)
             if sentence_words > PLAIN_SENTENCE_WORDS -> &gaps.push("{label} line {line_number} sentence {sentence_number} has {sentence_words} words (max {PLAIN_SENTENCE_WORDS})")
         }
     }
     gaps
 }
 
-fn is_digit(piece: String) -> Bool Never! {
-    bytes :: piece.bytes()
+is_digit: fn(piece: String) -> Bool Never! {
+    bytes: piece.bytes()
     bytes.len() == 1 && Int.from_u8(bytes[0]) >= 48 && Int.from_u8(bytes[0]) <= 57
 }
 
 // U+2028 LINE SEPARATOR or U+2029 PARAGRAPH SEPARATOR.
-fn unicode_line_break(piece: String) -> Bool Never! {
-    bytes :: piece.bytes()
+unicode_line_break: fn(piece: String) -> Bool Never! {
+    bytes: piece.bytes()
     bytes.len() == 3 && Int.from_u8(bytes[0]) == 226 && Int.from_u8(bytes[1]) == 128 && (Int.from_u8(bytes[2]) == 168 || Int.from_u8(bytes[2]) == 169)
 }
 
-fn line_terminator(piece: String) -> Bool Never! { piece == "\n" || piece == "\r" || unicode_line_break(piece) }
+line_terminator: fn(piece: String) -> Bool Never! { piece == "\n" || piece == "\r" || unicode_line_break(piece) }
 
-fn space_at(scalars: [String], position: Int) -> Bool Never! { position < scalars.len() && scalars[position].is_whitespace() }
+space_at: fn(scalars: [String], position: Int) -> Bool Never! { position < scalars.len() && scalars[position].is_whitespace() }
 
 // What a line of `scalars` starts with at `at`, after `^\s*`: "bullet"
 // (`[-*+•]\s`), "number" (`\d+[.)]\s`), "heading" (`#{1,6}\s`), "fence"
 // (three or more backticks or tildes) or "".
-fn line_marker(scalars: [String], at: Int) -> String Never! {
+line_marker: fn(scalars: [String], at: Int) -> String Never! {
     index := at
     loop {
         if index >= scalars.len() || !scalars[index].is_whitespace() -> break
         index += 1
     }
     if index >= scalars.len() -> return ""
-    first :: scalars[index]
+    first: scalars[index]
     if first == "-" || first == "*" || first == "+" || first == "•" {
         if space_at(scalars, index + 1) -> return "bullet"
     }
@@ -390,47 +390,47 @@ fn line_marker(scalars: [String], at: Int) -> String Never! {
             if index + run >= scalars.len() || !is_digit(scalars[index + run]) -> break
             run += 1
         }
-        end :: index + run
+        end: index + run
         if end < scalars.len() && (scalars[end] == "." || scalars[end] == ")") && space_at(scalars, end + 1) -> return "number"
     }
     ""
 }
 
 // The markers some line of `text` starts with (multiline `^`).
-fn line_markers(text: String) -> [String] Never! {
+line_markers: fn(text: String) -> [String] Never! {
     scalars := [String]{}
     loop scalar in text.chars() -> &scalars.push("{scalar}")
     found := [String]{}
     loop index in 0..<(scalars.len() + 1) {
         if index > 0 && !line_terminator(scalars[index - 1]) -> next
-        marker :: line_marker(scalars, index)
+        marker: line_marker(scalars, index)
         if marker != "" && !found.contains(marker) -> &found.push(marker)
     }
     found
 }
 
-fn ascii_lower(text: String) -> String Never! {
+ascii_lower: fn(text: String) -> String Never! {
     bytes := [U8]{}
     loop byte in text.bytes() {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         &bytes.push(if code >= 65 && code <= 90 -> U8.from_int(code + 32) ?? byte else -> byte)
     }
     String.from_bytes(bytes) ?? text.copy()
 }
 
-fn word_byte(bytes: [U8], at: Int) -> Bool Never! {
+word_byte: fn(bytes: [U8], at: Int) -> Bool Never! {
     if at < 0 || at >= bytes.len() -> return false
-    code :: Int.from_u8(bytes[at])
+    code: Int.from_u8(bytes[at])
     (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95
 }
 
 // The first SURFACE_JARGON term (`\b…\b`, any case) in `text`, as written, or "".
-fn jargon_in(text: String) -> String Never! {
-    lower :: ascii_lower(text).bytes()
+jargon_in: fn(text: String) -> String Never! {
+    lower: ascii_lower(text).bytes()
     best := -1
     best_length := 0
     loop term in SURFACE_JARGON {
-        needle :: term.bytes()
+        needle: term.bytes()
         loop start in 0..<(lower.len() - needle.len() + 1) {
             if best >= 0 && start >= best -> break
             matched := true
@@ -452,7 +452,7 @@ fn jargon_in(text: String) -> String Never! {
 
 // ---- review passes ---------------------------------------------------------
 
-struct Dissent {
+Dissent: struct {
     author: String
     adversarial: String
     agent: String
@@ -461,21 +461,21 @@ struct Dissent {
 
 // `/^<prefix>([^.]+)\./`: the text after `prefix` up to the first `.` (at
 // least one character), and the text after that `.`.
-fn prefixed_field(text: String, prefix: String) -> (value: String, rest: String)? Never! {
+prefixed_field: fn(text: String, prefix: String) -> (value: String, rest: String)? Never! {
     if !text.starts_with(prefix) -> return None
-    tail :: text.remove_prefix(prefix)
+    tail: text.remove_prefix(prefix)
     if tail.find(".") <= 0 -> return None
-    parts :: tail.partition(".")
+    parts: tail.partition(".")
     Val((value: parts.head.copy(), rest: parts.tail.copy()))
 }
 
 // store.mjs `dissentMetadata`.
-fn dissent(pass: Dyn) -> Dissent? Never! {
+dissent: fn(pass: Dyn) -> Dissent? Never! {
     if !is_text(pass) -> return None
-    text :: string_value(pass)
-    author :: prefixed_field(text, DISSENT_AUTHOR) ?? return None
-    adversarial :: prefixed_field(author.rest, DISSENT_ADVERSARIAL) ?? return None
-    body :: adversarial.rest.trim()
+    text: string_value(pass)
+    author: prefixed_field(text, DISSENT_AUTHOR) ?? return None
+    adversarial: prefixed_field(author.rest, DISSENT_ADVERSARIAL) ?? return None
+    body: adversarial.rest.trim()
     if prefixed_field(body, FRESH_AGENT) == .Val(reviewer) {
         return Val(Dissent{author: author.value.trim(), adversarial: adversarial.value.trim(), agent: reviewer.value.trim(), summary: reviewer.rest.trim()})
     }
@@ -483,8 +483,8 @@ fn dissent(pass: Dyn) -> Dissent? Never! {
 }
 
 // store.mjs `dissentMetadataGaps` for an open ballot (a fresh reviewer is required).
-fn dissent_metadata_gaps(payload: Dyn) -> [String] Never! {
-    metadata :: dissent(field(field(payload, "reviewPasses"), "adversarial"))
+dissent_metadata_gaps: fn(payload: Dyn) -> [String] Never! {
+    metadata: dissent(field(field(payload, "reviewPasses"), "adversarial"))
     if metadata == .Val(found) && found.author != "" && found.adversarial != "" {
         if found.agent == "" -> return [String]{"reviewPasses.adversarial (model provenance must be followed by `Fresh agent: <agent-id>.`)"}
         return [String]{}
@@ -493,7 +493,7 @@ fn dissent_metadata_gaps(payload: Dyn) -> [String] Never! {
 }
 
 // store.mjs `reviewPassSummary`: an adversarial pass without its provenance.
-fn review_pass_summary(key: String, pass: Dyn) -> Dyn Never! {
+review_pass_summary: fn(key: String, pass: Dyn) -> Dyn Never! {
     if key == "adversarial" && dissent(pass) == .Val(found) && found.summary != "" -> return Dyn.Text(found.summary)
     pass.copy()
 }
@@ -501,16 +501,16 @@ fn review_pass_summary(key: String, pass: Dyn) -> Dyn Never! {
 // ---- gaps ------------------------------------------------------------------
 
 // store.mjs `mitigationGaps`.
-fn mitigation_gaps(label: String, item: Dyn) -> [String] Never! {
+mitigation_gaps: fn(label: String, item: Dyn) -> [String] Never! {
     gaps := [String]{}
     if has_field(item, "whyUnavoidable") -> &gaps.push("{label} (use mitigation, not whyUnavoidable)")
-    mitigation :: field(item, "mitigation")
+    mitigation: field(item, "mitigation")
     if is_text(mitigation) && line_markers(string_value(mitigation)).len() > 0 -> &gaps.push("{label}.mitigation (plain prose, no lists, headings, or code blocks)")
     gaps
 }
 
 // store.mjs `plainLanguageGaps`.
-fn plain_language_gaps(payload: Dyn) -> [String] Never! {
+plain_language_gaps: fn(payload: Dyn) -> [String] Never! {
     gaps := [String]{}
     &gaps.extend(prose_density_gaps("title", field(payload, "title")))
     &gaps.extend(prose_density_gaps("gist", field(payload, "gist")))
@@ -520,16 +520,16 @@ fn plain_language_gaps(payload: Dyn) -> [String] Never! {
     &gaps.extend(example_prose_density_gaps("inWild", field(payload, "inWild")))
     &gaps.extend(prose_density_gaps("detail", field(payload, "detail")))
     loop option in items(field(payload, "options")) {
-        key :: key_or(option, "?")
+        key: key_or(option, "?")
         &gaps.extend(prose_density_gaps("option {key} name", field(option, "name")))
         &gaps.extend(prose_density_gaps("option {key}", field(option, "detail")))
         &gaps.extend(prose_density_gaps("option {key} technical", field(option, "technical")))
     }
     loop comparison in items(field(payload, "comparisons")) {
-        lang :: js_text(field(comparison, "lang"))
+        lang: js_text(field(comparison, "lang"))
         &gaps.extend(prose_density_gaps("comparison {if lang == "" -> "?" else -> lang}", field(comparison, "note")))
     }
-    recommendation :: field(payload, "recommendation")
+    recommendation: field(payload, "recommendation")
     &gaps.extend(prose_density_gaps("recommendation why", field(recommendation, "why")))
     &gaps.extend(prose_density_gaps("recommendation tradeoff", field(recommendation, "tradeoff")))
     loop rejected in items(field(recommendation, "whyNot")) {
@@ -538,43 +538,43 @@ fn plain_language_gaps(payload: Dyn) -> [String] Never! {
     index := 0
     loop item in items(field(recommendation, "losses")) {
         index += 1
-        loss :: if is_object(item) -> field(item, "loss") else -> item.copy()
-        mitigation :: if is_object(item) -> field(item, "mitigation") else -> Dyn.Null
+        loss: if is_object(item) -> field(item, "loss") else -> item.copy()
+        mitigation: if is_object(item) -> field(item, "mitigation") else -> Dyn.Null
         &gaps.extend(prose_density_gaps("recommendation loss {index}", loss))
         &gaps.extend(prose_density_gaps("recommendation loss {index} mitigation", mitigation))
     }
-    hybrid :: field(payload, "hybrid")
+    hybrid: field(payload, "hybrid")
     &gaps.extend(prose_density_gaps("hybrid synthesis", field(hybrid, "synthesis")))
     loop item in items(field(hybrid, "harvest")) {
-        key :: key_or(item, "?")
+        key: key_or(item, "?")
         &gaps.extend(prose_density_gaps("hybrid {key} aspect", field(item, "aspect")))
         &gaps.extend(prose_density_gaps("hybrid {key} use", field(item, "use")))
     }
     loop key in REVIEW_PASS_KEYS {
         &gaps.extend(prose_density_gaps("reviewPasses.{key}", review_pass_summary(key, field(field(payload, "reviewPasses"), key))))
     }
-    check :: field(payload, "checkInstructions")
+    check: field(payload, "checkInstructions")
     if is_text(check) -> &gaps.extend(prose_density_gaps("checkInstructions", check))
     gaps
 }
 
-struct Prose {
+Prose: struct {
     label: String
     text: String
 }
 
 // The option keys of `options[]` that are set, in order.
-fn option_keys(payload: Dyn) -> [String] Never! {
+option_keys: fn(payload: Dyn) -> [String] Never! {
     keys := [String]{}
     loop option in items(field(payload, "options")) {
-        key :: js_text(field(option, "key"))
+        key: js_text(field(option, "key"))
         if key != "" -> &keys.push(key)
     }
     keys
 }
 
 // The `reason` of the `whyNot` entry whose key is `key`.
-fn why_not_reason(why_not: [Dyn], key: String) -> String Never! {
+why_not_reason: fn(why_not: [Dyn], key: String) -> String Never! {
     loop item in why_not {
         if field(item, "key") == .Text(found) && found == key -> return string_value(field(item, "reason")).trim()
     }
@@ -583,48 +583,48 @@ fn why_not_reason(why_not: [Dyn], key: String) -> String Never! {
 
 // One `need` of store.mjs `surfaceGaps`: a missing value is a gap, a present
 // one is prose and may have a word limit (0 for none).
-fn need(gaps: &[String], prose: &[Prose], label: String, value: Dyn, limit: Int) Never! {
-    text :: string_value(value).trim()
+need: fn(gaps: &[String], prose: &[Prose], label: String, value: Dyn, limit: Int) Never! {
+    text: string_value(value).trim()
     if text == "" {
         &gaps.push("surface.{label}")
         return
     }
     &prose.push(Prose{label: label.copy(), text: text.copy()})
-    count :: word_count(text)
+    count: word_count(text)
     if limit > 0 && count > limit -> &gaps.push("surface.{label} has {count} words (max {limit})")
 }
 
 // store.mjs `surfaceGaps`: the short owner-facing reading surface.
-fn surface_gaps(payload: Dyn, posting: Posting) -> [String] Never! {
-    surface :: field(payload, "surface")
+surface_gaps: fn(payload: Dyn, posting: Posting) -> [String] Never! {
+    surface: field(payload, "surface")
     if !is_object(surface) -> return [String]{"surface (object)"}
     gaps := [String]{}
     prose := [Prose]{}
     need(&gaps, &prose, "gist", field(surface, "gist"), SURFACE_GIST_WORDS)
-    gist :: string_value(field(surface, "gist")).trim()
+    gist: string_value(field(surface, "gist")).trim()
     if gist != "" && !gist.ends_with("?") -> &gaps.push("surface.gist (must be a question)")
     need(&gaps, &prose, "lesson", field(surface, "lesson"), SURFACE_LESSON_WORDS)
     if paragraph_list(string_value(field(surface, "lesson")).trim()).len() > 1 -> &gaps.push("surface.lesson (one paragraph maximum)")
-    trio :: field(surface, "trio")
+    trio: field(surface, "trio")
     loop side in TRIO_SIDES {
-        pane :: field(trio, side)
+        pane: field(trio, side)
         need(&gaps, &prose, "trio.{side}.note", field(pane, "note"), 0)
         if string_value(field(pane, "code")).trim() == "" -> &gaps.push("surface.trio.{side}.code")
     }
     if string_value(field(field(trio, "wild"), "lang")).trim() == "" -> &gaps.push("surface.trio.wild.lang")
-    keys :: option_keys(payload)
-    surface_options :: items(field(surface, "options"))
+    keys: option_keys(payload)
+    surface_options: items(field(surface, "options"))
     surface_keys := [String]{}
     loop option in surface_options -> &surface_keys.push(js_text(field(option, "key")))
     // Tower compares the NUL-joined key lists.
-    nul :: String.from_bytes([U8]{U8{0}}) ?? ""
+    nul: String.from_bytes([U8]{U8{0}}) ?? ""
     if surface_keys.join(nul) != keys.join(nul) -> &gaps.push("surface.options (keys must match options[] in order)")
     loop option in surface_options {
-        key :: key_or(option, "?")
+        key: key_or(option, "?")
         need(&gaps, &prose, "options[{key}].name", field(option, "name"), 0)
         need(&gaps, &prose, "options[{key}].gist", field(option, "gist"), 0)
         loop list in BULLET_LISTS {
-            entries :: items(field(option, list))
+            entries: items(field(option, list))
             if entries.len() > 3 || (list == "gains" && entries.len() < 1) {
                 &gaps.push("surface.options[{key}].{list} ({if list == "gains" -> "need 1-3 real items" else -> "at most 3 real items"})")
             }
@@ -632,43 +632,43 @@ fn surface_gaps(payload: Dyn, posting: Posting) -> [String] Never! {
             loop entry in entries {
                 index += 1
                 need(&gaps, &prose, "options[{key}].{list}[{index}]", entry, 0)
-                count :: word_count(string_value(entry).trim())
+                count: word_count(string_value(entry).trim())
                 if count > SURFACE_BULLET_WORDS -> &gaps.push("surface.options[{key}].{list}[{index}] has {count} words (max {SURFACE_BULLET_WORDS})")
             }
         }
-        code :: string_value(field(field(option, "proposed"), "code")).trim()
+        code: string_value(field(field(option, "proposed"), "code")).trim()
         if {
             code == "" -> &gaps.push("surface.options[{key}].proposed.code")
             code.split("\n").to_list().len() > SURFACE_CODE_LINES -> &gaps.push("surface.options[{key}].proposed.code (max {SURFACE_CODE_LINES} lines)")
         }
     }
-    recommendation :: field(surface, "recommendation")
-    rec :: field(payload, "rec")
+    recommendation: field(surface, "recommendation")
+    rec: field(payload, "rec")
     if field(recommendation, "rec") != rec -> &gaps.push("surface.recommendation.rec (must equal rec)")
     if posting == .New && keys.len() > 0 && (keys[0] != "A" || rec != Dyn.Text("A")) -> &gaps.push("rec (new ballots list the recommended option first, as A)")
     need(&gaps, &prose, "recommendation.why", field(recommendation, "why"), SURFACE_WHY_WORDS)
     loop list in BULLET_LISTS {
-        entries :: items(field(recommendation, list))
+        entries: items(field(recommendation, list))
         if list == "gains" && entries.len() == 0 -> &gaps.push("surface.recommendation.gains")
         if entries.len() > 3 -> &gaps.push("surface.recommendation.{list} (at most 3 real items)")
         index := 0
         loop entry in entries {
             index += 1
-            label :: "recommendation.{list}[{index}]"
+            label: "recommendation.{list}[{index}]"
             if list == "losses" {
                 if !is_object(entry) {
-                    shown :: string_value(entry).trim()
+                    shown: string_value(entry).trim()
                     &gaps.push("surface.{label}{if shown == "" -> "" else -> " \"{shown}\""} (must include mitigation)")
                     next
                 }
                 &gaps.extend(mitigation_gaps("surface.{label}", entry))
-                loss :: string_value(field(entry, "loss")).trim()
-                mitigation :: string_value(field(entry, "mitigation")).trim()
+                loss: string_value(field(entry, "loss")).trim()
+                mitigation: string_value(field(entry, "mitigation")).trim()
                 if {
                     loss == "" -> &gaps.push("surface.{label}.loss (required)")
                     else -> {
                         &prose.push(Prose{label: "{label}.loss", text: loss.copy()})
-                        count :: word_count(loss)
+                        count: word_count(loss)
                         if count >= SURFACE_BULLET_WORDS -> &gaps.push("surface.{label}.loss has {count} words (under {SURFACE_BULLET_WORDS} words)")
                     }
                 }
@@ -676,21 +676,21 @@ fn surface_gaps(payload: Dyn, posting: Posting) -> [String] Never! {
                     mitigation == "" -> &gaps.push("surface.{label}.mitigation (required for \"{if loss == "" -> "?" else -> loss}\")")
                     else -> {
                         &prose.push(Prose{label: "{label}.mitigation", text: mitigation.copy()})
-                        count :: word_count(mitigation)
+                        count: word_count(mitigation)
                         if count >= SURFACE_MITIGATION_WORDS -> &gaps.push("surface.{label}.mitigation has {count} words (under {SURFACE_MITIGATION_WORDS} words)")
                     }
                 }
                 next
             }
             need(&gaps, &prose, label, entry, 0)
-            count :: word_count(string_value(entry).trim())
+            count: word_count(string_value(entry).trim())
             if count > SURFACE_BULLET_WORDS -> &gaps.push("surface.{label} has {count} words (max {SURFACE_BULLET_WORDS})")
         }
     }
-    why_not :: items(field(recommendation, "whyNot"))
+    why_not: items(field(recommendation, "whyNot"))
     loop key in keys {
         if rec == Dyn.Text(key) -> next
-        reason :: why_not_reason(why_not, key)
+        reason: why_not_reason(why_not, key)
         if {
             reason == "" -> &gaps.push("surface.recommendation.whyNot[{key}]")
             else -> &prose.push(Prose{label: "recommendation.whyNot[{key}]", text: reason.copy()})
@@ -701,10 +701,10 @@ fn surface_gaps(payload: Dyn, posting: Posting) -> [String] Never! {
     loop entry in prose {
         total += word_count(entry.text)
         loop sentence in sentences(entry.text) {
-            count :: word_count(sentence)
+            count: word_count(sentence)
             if count > SURFACE_SENTENCE_WORDS -> &gaps.push("surface.{entry.label} sentence has {count} words (max {SURFACE_SENTENCE_WORDS})")
         }
-        jargon :: jargon_in(entry.text)
+        jargon: jargon_in(entry.text)
         if jargon != "" -> &gaps.push("surface.{entry.label} uses project jargon \"{jargon}\"")
     }
     if total > SURFACE_TOTAL_WORDS -> &gaps.push("surface prose has {total} words (max {SURFACE_TOTAL_WORDS})")
@@ -712,29 +712,29 @@ fn surface_gaps(payload: Dyn, posting: Posting) -> [String] Never! {
 }
 
 // store.mjs `situationGaps`: 300-1200 characters of plain prose.
-fn situation_gaps(situation: Dyn) -> [String] Never! {
-    text :: string_value(situation).trim()
+situation_gaps: fn(situation: Dyn) -> [String] Never! {
+    text: string_value(situation).trim()
     if text == "" -> return [String]{"situation"}
     gaps := [String]{}
     // JavaScript string length: UTF-16 code units.
     length := 0
     loop scalar in text.chars() -> length += if "{scalar}".count_bytes() == 4 -> 2 else -> 1
     if length < SITUATION_MIN_CHARS || length > SITUATION_MAX_CHARS -> &gaps.push("situation has {length} characters (need {SITUATION_MIN_CHARS}-{SITUATION_MAX_CHARS})")
-    markers :: line_markers(text)
+    markers: line_markers(text)
     if markers.contains("bullet") || markers.contains("number") -> &gaps.push("situation (plain prose, not a bullet list)")
     if markers.contains("heading") -> &gaps.push("situation (plain prose, no headings)")
     if markers.contains("fence") -> &gaps.push("situation (plain prose, no code blocks)")
     index := 0
     loop sentence in sentences(text) {
         index += 1
-        count :: word_count(sentence)
+        count: word_count(sentence)
         if count > PLAIN_SENTENCE_WORDS -> &gaps.push("situation sentence {index} has {count} words (max {PLAIN_SENTENCE_WORDS})")
     }
     gaps
 }
 
 // store.mjs `shortBallotGaps` with the card tags the payload carries.
-fn short_ballot_gaps(payload: Dyn) -> [String] Never! {
+short_ballot_gaps: fn(payload: Dyn) -> [String] Never! {
     gaps := [String]{}
     tags := [String]{}
     loop entry in items(field(payload, "cardTags")) -> &tags.push(ascii_lower(js_text(entry).trim()))
@@ -753,7 +753,7 @@ fn short_ballot_gaps(payload: Dyn) -> [String] Never! {
 
 // The options whose `name` is missing, each shown by its key or else by its
 // place in that list (`#<n>`, as Tower numbers them).
-fn options_missing(options: [Dyn], name: String) -> [String] Never! {
+options_missing: fn(options: [Dyn], name: String) -> [String] Never! {
     missing := [String]{}
     loop option in options {
         if !present(field(option, name)) -> &missing.push(key_or(option, "#{missing.len() + 1}"))
@@ -763,7 +763,7 @@ fn options_missing(options: [Dyn], name: String) -> [String] Never! {
 
 // store.mjs `ballotGaps` for an open ballot of the current process, with
 // the reading surface required.
-fn ballot_gaps(payload: Dyn, posting: Posting) -> [String] Never! {
+ballot_gaps: fn(payload: Dyn, posting: Posting) -> [String] Never! {
     gaps := surface_gaps(payload, posting)
     mode := js_text(field(payload, "ballotMode"))
     if mode == "" -> mode = "full"
@@ -776,8 +776,8 @@ fn ballot_gaps(payload: Dyn, posting: Posting) -> [String] Never! {
     }
     if !present(field(payload, "story")) -> &gaps.push("story")
     if !present(field(payload, "inWild")) -> &gaps.push("inWild")
-    options :: items(field(payload, "options"))
-    keys :: option_keys(payload)
+    options: items(field(payload, "options"))
+    keys: option_keys(payload)
     if options.len() < 2 -> &gaps.push("options (need at least 2)")
     if options.len() >= 2 {
         unkeyed := false
@@ -786,7 +786,7 @@ fn ballot_gaps(payload: Dyn, posting: Posting) -> [String] Never! {
         }
         if unkeyed -> &gaps.push("options[].key")
         loop name in OPTION_PARTS {
-            missing :: options_missing(options, name)
+            missing: options_missing(options, name)
             if missing.len() > 0 -> &gaps.push("options[].{name} (missing on {missing.join(", ")})")
         }
         duplicates := [String]{}
@@ -802,15 +802,15 @@ fn ballot_gaps(payload: Dyn, posting: Posting) -> [String] Never! {
         }
         if duplicates.len() > 0 -> &gaps.push("options[].key (duplicate: {duplicates.join(", ")})")
     }
-    rec :: field(payload, "rec")
+    rec: field(payload, "rec")
     if !present(rec) -> &gaps.push("rec")
     if js_text(rec) != "" && !(is_text(rec) && keys.contains(string_value(rec))) -> &gaps.push("rec (must match an option key)")
-    recommendation :: field(payload, "recommendation")
+    recommendation: field(payload, "recommendation")
     if !is_object(recommendation) && !is_array(recommendation) -> &gaps.push("recommendation")
     if is_object(recommendation) || is_array(recommendation) {
         if !present(field(recommendation, "why")) -> &gaps.push("recommendation.why")
         if !present(field(recommendation, "tradeoff")) -> &gaps.push("recommendation.tradeoff")
-        why_not :: items(field(recommendation, "whyNot"))
+        why_not: items(field(recommendation, "whyNot"))
         loop key in keys {
             if rec == Dyn.Text(key) -> next
             reason := ""
@@ -829,13 +829,13 @@ fn ballot_gaps(payload: Dyn, posting: Posting) -> [String] Never! {
                 &gaps.push("recommendation.losses[{index}] \"{js_text(item).trim()}\" (must include mitigation)")
                 next
             }
-            loss :: string_value(field(item, "loss")).trim()
+            loss: string_value(field(item, "loss")).trim()
             &gaps.extend(mitigation_gaps("recommendation.losses[{index}]", item))
             if loss == "" -> &gaps.push("recommendation.losses[{index}].loss (required)")
             if string_value(field(item, "mitigation")).trim() == "" -> &gaps.push("recommendation.losses[{index}].mitigation (required for \"{if loss == "" -> "?" else -> loss}\")")
         }
     }
-    passes :: field(payload, "reviewPasses")
+    passes: field(payload, "reviewPasses")
     if {
         mode == "full" && !is_object(passes) -> &gaps.push("reviewPasses")
         mode == "full" -> {
@@ -843,7 +843,7 @@ fn ballot_gaps(payload: Dyn, posting: Posting) -> [String] Never! {
                 if !REVIEW_PASS_KEYS.contains(key) -> &gaps.push("reviewPasses.{key} (unexpected)")
             }
             loop key in REVIEW_PASS_KEYS {
-                summary :: string_value(review_pass_summary(key, field(passes, key)))
+                summary: string_value(review_pass_summary(key, field(passes, key)))
                 if {
                     summary.trim() == "" -> &gaps.push("reviewPasses.{key} (need text)")
                     sentences(summary).len() > 2 -> &gaps.push("reviewPasses.{key} (need 1-2 sentences)")
@@ -853,25 +853,25 @@ fn ballot_gaps(payload: Dyn, posting: Posting) -> [String] Never! {
         }
         mode == "short" -> &gaps.extend(short_ballot_gaps(payload))
     }
-    dense :: plain_language_gaps(payload)
+    dense: plain_language_gaps(payload)
     if dense.len() > 0 -> &gaps.push("plain language: {dense.join("; ")}")
     gaps
 }
 
 // The posting rules of store.mjs `addDecision` (or, for `update`,
 // `updateDecision`) that read only the payload, then `ballotGaps`.
-fn payload_gaps(payload: Dyn, posting: Posting) -> [String] Never! {
+payload_gaps: fn(payload: Dyn, posting: Posting) -> [String] Never! {
     if !is_object(payload) -> return [String]{"the payload is not a JSON object"}
     gaps := [String]{}
     if !present(field(payload, "cardId")) -> &gaps.push("cardId")
     if field(payload, "draft") != Dyn.Bool(false) -> &gaps.push("posting payload must set draft:false")
     if posting == .New && !present(field(payload, "title")) -> &gaps.push("E_INVALID: decision needs a title")
-    group :: js_text(field(payload, "group"))
+    group: js_text(field(payload, "group"))
     if group == "acceptance" || js_text(field(payload, "id")).starts_with("D-ACCEPT-") -> &gaps.push("E_INVALID: acceptance ballots are system-generated; use the card acceptance workflow")
-    situation :: field(payload, "situation")
+    situation: field(payload, "situation")
     if !is_null(situation) && !is_text(situation) -> &gaps.push("E_INVALID: decision situation must be a string")
     if group == "verdict" {
-        superseded :: string_value(field(payload, "supersededBy")).trim()
+        superseded: string_value(field(payload, "supersededBy")).trim()
         if superseded == "" -> &gaps.push("E_INVALID: verdict needs a supersession link (`supersededBy`)")
         if superseded != "" && superseded == js_text(field(payload, "id")) -> &gaps.push("E_INVALID: verdict cannot supersede itself")
     }
@@ -879,7 +879,7 @@ fn payload_gaps(payload: Dyn, posting: Posting) -> [String] Never! {
     gaps
 }
 
-fn run() {
+run: fn() {
     posting := Posting.New
     paths := [String]{}
     loop arg in process.args() {
@@ -894,19 +894,19 @@ fn run() {
     }
     failed := 0
     loop path in paths {
-        text :: files.read(path) ?? {
+        text: files.read(path) ?? {
             term.eprint("{path}: cannot read: {err}")
             failed += 1
             next
         }
-        payload :: json.parse(text) ?? {
+        payload: json.parse(text) ?? {
             term.eprint("{path}: not JSON: {err}")
             failed += 1
             next
         }
-        gaps :: payload_gaps(payload, posting)
-        id :: js_text(field(payload, "id"))
-        shown :: if id == "" -> path.copy() else -> "{path} ({id})"
+        gaps: payload_gaps(payload, posting)
+        id: js_text(field(payload, "id"))
+        shown: if id == "" -> path.copy() else -> "{path} ({id})"
         if gaps.len() == 0 {
             print("ok {shown}")
             next
@@ -934,7 +934,7 @@ fn run() {
 #Test("fenced code is not prose, and fences close on a matching bare marker") {
     words := [String]{}
     loop _ in 0..<40 -> &words.push("word")
-    long :: words.join(" ")
+    long: words.join(" ")
     assert_eq(prose_density_gaps("story", Dyn.Text("```jet\n{long}\n```\nshort.")).len(), 0)
     assert_eq(prose_density_gaps("story", Dyn.Text("{long}.")), [String]{"story sentence 1 has 40 words (max 32)"})
     assert(fence_opener("```js `x`") != None)
@@ -955,16 +955,16 @@ fn run() {
 }
 
 #Test("an adversarial pass needs model provenance and a fresh agent") {
-    payload :: json.parse("{{\"reviewPasses\":{{\"adversarial\":\"Author model family: A. Adversarial model family: B. Fresh agent: R1. Fine.\"}}}}") ?? panic("json")
+    payload: json.parse("{{\"reviewPasses\":{{\"adversarial\":\"Author model family: A. Adversarial model family: B. Fresh agent: R1. Fine.\"}}}}") ?? panic("json")
     assert_eq(dissent_metadata_gaps(payload).len(), 0)
     assert_eq(string_value(review_pass_summary("adversarial", field(field(payload, "reviewPasses"), "adversarial"))), "Fine.")
-    stale :: json.parse("{{\"reviewPasses\":{{\"adversarial\":\"Author model family: A. Adversarial model family: B. Fine.\"}}}}") ?? panic("json")
+    stale: json.parse("{{\"reviewPasses\":{{\"adversarial\":\"Author model family: A. Adversarial model family: B. Fine.\"}}}}") ?? panic("json")
     assert_eq(dissent_metadata_gaps(stale), [String]{"reviewPasses.adversarial (model provenance must be followed by `Fresh agent: <agent-id>.`)"})
 }
 
 #Test("an empty payload names every required part") {
-    payload :: json.parse("{{}}") ?? panic("json")
-    gaps :: payload_gaps(payload, .New)
+    payload: json.parse("{{}}") ?? panic("json")
+    gaps: payload_gaps(payload, .New)
     assert(gaps.contains("cardId"))
     assert(gaps.contains("posting payload must set draft:false"))
     assert(gaps.contains("surface (object)"))

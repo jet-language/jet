@@ -5,7 +5,7 @@ use jet_foundation.[
     Type,
 ]
 
-struct IRClosureRoute {
+IRClosureRoute: struct {
     module_name: String
     member: String
     symbol: String
@@ -14,11 +14,11 @@ struct IRClosureRoute {
     effect_kind: Effect?
 }
 
-fn ir_closure_route_row(module_name: String, member: String, symbol: String, arity: Int, borrow_mask: [Bool], route_effect: Effect?) -> IRClosureRoute Never! {
+ir_closure_route_row: fn(module_name: String, member: String, symbol: String, arity: Int, borrow_mask: [Bool], route_effect: Effect?) -> IRClosureRoute Never! {
     IRClosureRoute{module_name: module_name, member: member, symbol: symbol, arity: arity, borrow_mask: borrow_mask, effect_kind: route_effect}
 }
 
-fn ir_closure_receiver_kind(receiver: Type) -> String? {
+ir_closure_receiver_kind: fn(receiver: Type) -> String? {
     if receiver == {
         .Tagged(_, inner) -> return ir_closure_receiver_kind(inner)
         .List(_) | .FixedList(_, _) -> return Val("list")
@@ -34,8 +34,8 @@ fn ir_closure_receiver_kind(receiver: Type) -> String? {
     }
 }
 
-fn ir_collection_closure_route(operation: TClosureOp, receiver: Type) -> IRClosureRoute Never! {
-    kind :: ir_closure_receiver_kind(receiver) ?? panic("checked closure operation has an unsupported receiver type")
+ir_collection_closure_route: fn(operation: TClosureOp, receiver: Type) -> IRClosureRoute Never! {
+    kind: ir_closure_receiver_kind(receiver) ?? panic("checked closure operation has an unsupported receiver type")
     if operation == {
         .Map -> {
             // #4566 slice 5: the eager list map kernels borrow their source.
@@ -127,7 +127,7 @@ fn ir_collection_closure_route(operation: TClosureOp, receiver: Type) -> IRClosu
     panic("checked closure operation has no canonical Prelude route for its receiver")
 }
 
-fn ir_closure_route(operation: TClosureOp, receiver: Type) -> IRClosureRoute Never! {
+ir_closure_route: fn(operation: TClosureOp, receiver: Type) -> IRClosureRoute Never! {
     if operation == {
         .EditDisjoint -> return ir_closure_route_row("core.collections", "edit_disjoint", "jet_edit_disjoint", 3, [Bool]{true, true, false}, None)
         .EachMap -> return ir_closure_route_row("core.map", "each", "jet_map_each", 2, [Bool]{false, false}, None)

@@ -9,42 +9,42 @@ use {
     core.encoding.[Dyn]
 }
 
-MAX_RECORDING_EVENTS :: USize{256}
-MAX_RECORDING_BYTES :: comptime { USize{1024 * 1024} }
-MAX_RECORDING_TEXT_BYTES :: comptime { USize{16 * 1024} }
-MAX_ID_BYTES :: USize{1024}
-struct SessionIdentity { source_id: String; build_id: String }
+MAX_RECORDING_EVENTS: USize{256}
+MAX_RECORDING_BYTES: comptime { USize{1024 * 1024} }
+MAX_RECORDING_TEXT_BYTES: comptime { USize{16 * 1024} }
+MAX_ID_BYTES: USize{1024}
+SessionIdentity: struct { source_id: String; build_id: String }
 impl SessionIdentity {
-    fn new(source_id: String, build_id: String) -> Self RecordingError! {
-        identity :: Self { source_id: ^source_id, build_id: ^build_id }
+    new: fn(source_id: String, build_id: String) -> Self RecordingError! {
+        identity: Self { source_id: ^source_id, build_id: ^build_id }
         validate_id(identity.source_id, "source_id")
         validate_id(identity.build_id, "build_id")
         identity
     }
-    fn matches(self: Self, other: Self) -> Bool { self == other }
+    matches: fn(self: Self, other: Self) -> Bool { self == other }
 }
-struct SessionRecordingLimits { max_events: USize; max_bytes: USize }
+SessionRecordingLimits: struct { max_events: USize; max_bytes: USize }
 impl SessionRecordingLimits {
-    fn new(max_events: USize, max_bytes: USize) -> Self { Self { max_events, max_bytes } }
-    fn validate(self: Self) RecordingError! {
+    new: fn(max_events: USize, max_bytes: USize) -> Self { Self { max_events, max_bytes } }
+    validate: fn(self: Self) RecordingError! {
         if self.max_events == 0 || self.max_events > MAX_RECORDING_EVENTS -> return .Err(.InvalidLimits { max_events: self.max_events, max_bytes: self.max_bytes })
         if self.max_bytes == 0 || self.max_bytes > MAX_RECORDING_BYTES -> return .Err(.InvalidLimits { max_events: self.max_events, max_bytes: self.max_bytes })
     }
-    fn default() -> Self { Self.new(MAX_RECORDING_EVENTS, MAX_RECORDING_BYTES) }
+    default: fn() -> Self { Self.new(MAX_RECORDING_EVENTS, MAX_RECORDING_BYTES) }
 }
-struct SessionEvent {
+SessionEvent: struct {
     sequence: U64; timestamp_ms: U64; source: String; kind: String; entity: String; fields_json: String; payload_json: String?
 }
 impl SessionEvent {
-    fn new(sequence: U64, timestamp_ms: U64, source: String, kind: String, entity: String, fields_json: String, payload_json: String?) -> Self RecordingError! {
+    new: fn(sequence: U64, timestamp_ms: U64, source: String, kind: String, entity: String, fields_json: String, payload_json: String?) -> Self RecordingError! {
         validate_text(source, "event source")
         validate_text(kind, "event kind")
         validate_text(entity, "event entity")
-        fields :: canonical_object(fields_json, "event fields")
-        payload :: if payload_json == {
+        fields: canonical_object(fields_json, "event fields")
+        payload: if payload_json == {
             .None -> .None
             .Val(payload) -> {
-                value :: parse_json_value(payload, "event payload")
+                value: parse_json_value(payload, "event payload")
                 if value == {
                     .Null -> .None
                     .Object(_) -> .Val(canonical_json(&value))
@@ -52,32 +52,32 @@ impl SessionEvent {
                 }
             }
         }
-        event :: Self { sequence, timestamp_ms, source: ^source, kind: ^kind, entity: ^entity, fields_json: ^fields, payload_json: ^payload }
+        event: Self { sequence, timestamp_ms, source: ^source, kind: ^kind, entity: ^entity, fields_json: ^fields, payload_json: ^payload }
         if event.wire_len() > MAX_RECORDING_BYTES -> return .Err(.EventTooLarge { bytes: event.wire_len(), limit: MAX_RECORDING_BYTES })
         event
     }
-    fn sequence(self: Self) -> U64 { self.sequence }
-    fn timestamp_ms(self: Self) -> U64 { self.timestamp_ms }
-    fn source(self: Self) -> String { &self.source }
-    fn kind(self: Self) -> String { &self.kind }
-    fn entity(self: Self) -> String { &self.entity }
-    fn fields_json(self: Self) -> String { &self.fields_json }
-    fn payload_json(self: Self) -> String? { self.payload_json.as_ref() }
-    fn wire_len(self: Self) -> USize {
-        payload :: self.payload_json.as_ref().unwrap_or("null")
+    sequence: fn(self: Self) -> U64 { self.sequence }
+    timestamp_ms: fn(self: Self) -> U64 { self.timestamp_ms }
+    source: fn(self: Self) -> String { &self.source }
+    kind: fn(self: Self) -> String { &self.kind }
+    entity: fn(self: Self) -> String { &self.entity }
+    fields_json: fn(self: Self) -> String { &self.fields_json }
+    payload_json: fn(self: Self) -> String? { self.payload_json.as_ref() }
+    wire_len: fn(self: Self) -> USize {
+        payload: self.payload_json.as_ref().unwrap_or("null")
         "{{\"sequence\":{self.sequence},\"timestamp_ms\":{self.timestamp_ms},\"source\":{quoted(self.source)},\"kind\":{quoted(self.kind)},\"entity\":{quoted(self.entity)},\"fields\":{self.fields_json},\"payload\":{payload}}}".len()
     }
 }
-struct TruncationFacts {
+TruncationFacts: struct {
     event_limit: USize; byte_limit: USize; retained_events: USize; retained_bytes: USize
     dropped_events: U64; dropped_bytes: U64; event_limit_reached: Bool; byte_limit_reached: Bool
     first_dropped_sequence: U64?; last_dropped_sequence: U64?; first_retained_sequence: U64?; last_retained_sequence: U64?
 }
 impl TruncationFacts {
-    fn truncated(self: Self) -> Bool { self.dropped_events != 0 }
+    truncated: fn(self: Self) -> Bool { self.dropped_events != 0 }
 }
 #Error
-enum RecordingError {
+RecordingError: enum {
     InvalidIdentity(String); InvalidLimits { max_events: USize; max_bytes: USize }; InvalidEnvelope(String); InvalidEvent(String)
     EnvelopeTooLarge { bytes: USize; limit: USize }; EventTooLarge { bytes: USize; limit: USize }
     NonMonotonicSequence { previous: U64; next: U64 }; NonMonotonicTime { previous: U64; next: U64 }
@@ -85,7 +85,7 @@ enum RecordingError {
     RecordingChanged; CheckpointUnavailable; CursorUnavailable { sequence: U64 }; ReplayAtBeginning; ReplayAtEnd
 }
 impl RecordingError {
-    fn fmt(self: Self, formatter: fmt.Formatter) -> fmt.Error! {
+    fmt: fn(self: Self, formatter: fmt.Formatter) -> fmt.Error! {
         if self == {
             .InvalidIdentity(message) -> formatter.write_str("invalid session identity: {message}")
             .InvalidLimits { max_events, max_bytes } -> formatter.write_str("session recording limits are outside the bounded policy: events={max_events}, bytes={max_bytes}")
@@ -104,90 +104,90 @@ impl RecordingError {
         }
     }
 }
-enum ReplayStep { Forward; Backward }
-struct ReplayCursor { identity: SessionIdentity; generation: U64; position: USize; sequence: U64? }
+ReplayStep: enum { Forward; Backward }
+ReplayCursor: struct { identity: SessionIdentity; generation: U64; position: USize; sequence: U64? }
 impl ReplayCursor {
-    fn identity(self: Self) -> SessionIdentity { &self.identity }
-    fn position(self: Self) -> USize { self.position }
-    fn sequence(self: Self) -> U64? { self.sequence }
-    fn generation(self: Self) -> U64 { self.generation }
-    fn seek(self: Self, recording: SessionRecording, sequence: U64) -> ReplayProjection RecordingError! {
+    identity: fn(self: Self) -> SessionIdentity { &self.identity }
+    position: fn(self: Self) -> USize { self.position }
+    sequence: fn(self: Self) -> U64? { self.sequence }
+    generation: fn(self: Self) -> U64 { self.generation }
+    seek: fn(self: Self, recording: SessionRecording, sequence: U64) -> ReplayProjection RecordingError! {
         self.check(recording)
-        index :: recording.events.iter().position((event) -> event.sequence == sequence) ?? return .Err(.CursorUnavailable { sequence })
+        index: recording.events.iter().position((event) -> event.sequence == sequence) ?? return .Err(.CursorUnavailable { sequence })
         self.position = index + 1
         self.sequence = .Val(sequence)
         recording.projection(self)
     }
-    fn seek_time(self: Self, recording: SessionRecording, timestamp_ms: U64) -> ReplayProjection RecordingError! {
+    seek_time: fn(self: Self, recording: SessionRecording, timestamp_ms: U64) -> ReplayProjection RecordingError! {
         self.check(recording)
         if recording.events.front() == .Val(first) {
             if timestamp_ms < first.timestamp_ms && recording.dropped_events != 0 -> return .Err(.CursorUnavailable { sequence: first.sequence })
         }
-        position :: recording.events.iter().enumerate().filter(((_0: _, _1: event)) -> event.timestamp_ms <= timestamp_ms).map(((index, _)) -> index + 1).last().unwrap_or(0)
+        position: recording.events.iter().enumerate().filter(((_0: _, _1: event)) -> event.timestamp_ms <= timestamp_ms).map(((index, _)) -> index + 1).last().unwrap_or(0)
         self.position = position
         self.sequence = position.checked_sub(1).and_then((index) -> recording.events.get(index)).map((event) -> event.sequence)
         recording.projection(self)
     }
-    fn step(self: Self, recording: SessionRecording, direction: ReplayStep) -> ReplayProjection RecordingError! {
+    step: fn(self: Self, recording: SessionRecording, direction: ReplayStep) -> ReplayProjection RecordingError! {
         if direction == {
             .Forward -> self.step_forward(recording)
             .Backward -> self.step_backward(recording)
         }
     }
-    fn step_forward(self: Self, recording: SessionRecording) -> ReplayProjection RecordingError! {
+    step_forward: fn(self: Self, recording: SessionRecording) -> ReplayProjection RecordingError! {
         self.check(recording)
-        event :: recording.events.get(self.position) ?? return .Err(.ReplayAtEnd)
+        event: recording.events.get(self.position) ?? return .Err(.ReplayAtEnd)
         self.position += 1
         self.sequence = .Val(event.sequence)
         recording.projection(self)
     }
-    fn step_backward(self: Self, recording: SessionRecording) -> ReplayProjection RecordingError! {
+    step_backward: fn(self: Self, recording: SessionRecording) -> ReplayProjection RecordingError! {
         self.check(recording)
         if self.position == 0 -> return .Err(.ReplayAtBeginning)
         self.position -= 1
         self.sequence = self.position.checked_sub(1).and_then((index) -> recording.events.get(index)).map((event) -> event.sequence)
         recording.projection(self)
     }
-    fn check(self: &Self, recording: &SessionRecording) RecordingError! {
+    check: fn(self: &Self, recording: &SessionRecording) RecordingError! {
         if !self.identity.matches(&recording.identity) -> return .Err(.IdentityMismatch { expected: self.identity.copy(), found: recording.identity.copy() })
         if self.generation != recording.generation -> return .Err(.RecordingChanged)
         if self.position > recording.events.len() -> return .Err(.CheckpointUnavailable)
     }
 }
-struct SessionCheckpoint {
+SessionCheckpoint: struct {
     identity: SessionIdentity; generation: U64; position: USize; sequence: U64?; timestamp_ms: U64?
     first_retained_sequence: U64?; last_retained_sequence: U64?
 }
 impl SessionCheckpoint {
-    fn identity(self: Self) -> SessionIdentity { &self.identity }
-    fn position(self: Self) -> USize { self.position }
-    fn sequence(self: Self) -> U64? { self.sequence }
-    fn generation(self: Self) -> U64 { self.generation }
-    fn timestamp_ms(self: Self) -> U64? { self.timestamp_ms }
+    identity: fn(self: Self) -> SessionIdentity { &self.identity }
+    position: fn(self: Self) -> USize { self.position }
+    sequence: fn(self: Self) -> U64? { self.sequence }
+    generation: fn(self: Self) -> U64 { self.generation }
+    timestamp_ms: fn(self: Self) -> U64? { self.timestamp_ms }
 }
-struct ReplayProjection {
+ReplayProjection: struct {
     identity: SessionIdentity; position: USize; sequence: U64?; timestamp_ms: U64?; event: SessionEvent?
     previous_sequence: U64?; next_sequence: U64?; limits: SessionRecordingLimits; truncation: TruncationFacts
 }
 impl ReplayProjection {
-    fn identity(self: Self) -> SessionIdentity { &self.identity }
-    fn position(self: Self) -> USize { self.position }
-    fn sequence(self: Self) -> U64? { self.sequence }
-    fn timestamp_ms(self: Self) -> U64? { self.timestamp_ms }
-    fn event(self: Self) -> SessionEvent? { self.event.as_ref() }
-    fn previous_sequence(self: Self) -> U64? { self.previous_sequence }
-    fn next_sequence(self: Self) -> U64? { self.next_sequence }
-    fn limits(self: Self) -> SessionRecordingLimits { self.limits }
-    fn truncation(self: Self) -> TruncationFacts { &self.truncation }
+    identity: fn(self: Self) -> SessionIdentity { &self.identity }
+    position: fn(self: Self) -> USize { self.position }
+    sequence: fn(self: Self) -> U64? { self.sequence }
+    timestamp_ms: fn(self: Self) -> U64? { self.timestamp_ms }
+    event: fn(self: Self) -> SessionEvent? { self.event.as_ref() }
+    previous_sequence: fn(self: Self) -> U64? { self.previous_sequence }
+    next_sequence: fn(self: Self) -> U64? { self.next_sequence }
+    limits: fn(self: Self) -> SessionRecordingLimits { self.limits }
+    truncation: fn(self: Self) -> TruncationFacts { &self.truncation }
 }
-struct SessionRecording {
+SessionRecording: struct {
     identity: SessionIdentity; limits: SessionRecordingLimits; events: VecDeque<SessionEvent>; retained_bytes: USize
     dropped_events: U64; dropped_bytes: U64; event_limit_reached: Bool; byte_limit_reached: Bool
     first_dropped_sequence: U64?; last_dropped_sequence: U64?; last_sequence: U64?; last_timestamp_ms: U64?; generation: U64
 }
 impl SessionRecording {
-    fn new(identity: SessionIdentity) -> Self RecordingError! { Self.with_limits(^identity, SessionRecordingLimits.default()) }
-    fn with_limits(identity: SessionIdentity, limits: SessionRecordingLimits) -> Self RecordingError! {
+    new: fn(identity: SessionIdentity) -> Self RecordingError! { Self.with_limits(^identity, SessionRecordingLimits.default()) }
+    with_limits: fn(identity: SessionIdentity, limits: SessionRecordingLimits) -> Self RecordingError! {
         validate_id(identity.source_id, "source_id")
         validate_id(identity.build_id, "build_id")
         limits.validate()
@@ -195,63 +195,63 @@ impl SessionRecording {
             event_limit_reached: false, byte_limit_reached: false, first_dropped_sequence: .None, last_dropped_sequence: .None,
             last_sequence: .None, last_timestamp_ms: .None, generation: 0 }
     }
-    fn identity(self: Self) -> SessionIdentity { &self.identity }
-    fn limits(self: Self) -> SessionRecordingLimits { self.limits }
-    fn event_count(self: Self) -> USize { self.events.len() }
-    fn generation(self: Self) -> U64 { self.generation }
-    fn retained_bytes(self: Self) -> USize { self.retained_bytes }
-    fn events(self: Self) -> Iterator<SessionEvent> { self.events.iter() }
-    fn truncation(self: Self) -> TruncationFacts {
+    identity: fn(self: Self) -> SessionIdentity { &self.identity }
+    limits: fn(self: Self) -> SessionRecordingLimits { self.limits }
+    event_count: fn(self: Self) -> USize { self.events.len() }
+    generation: fn(self: Self) -> U64 { self.generation }
+    retained_bytes: fn(self: Self) -> USize { self.retained_bytes }
+    events: fn(self: Self) -> Iterator<SessionEvent> { self.events.iter() }
+    truncation: fn(self: Self) -> TruncationFacts {
         TruncationFacts { event_limit: self.limits.max_events, byte_limit: self.limits.max_bytes,
             retained_events: self.events.len(), retained_bytes: self.retained_bytes, dropped_events: self.dropped_events,
             dropped_bytes: self.dropped_bytes, event_limit_reached: self.event_limit_reached, byte_limit_reached: self.byte_limit_reached,
             first_dropped_sequence: self.first_dropped_sequence, last_dropped_sequence: self.last_dropped_sequence,
             first_retained_sequence: self.events.front().map((event) -> event.sequence), last_retained_sequence: self.events.back().map((event) -> event.sequence) }
     }
-    fn append_event(self: Self, event: SessionEvent) -> U64 RecordingError! {
+    append_event: fn(self: Self, event: SessionEvent) -> U64 RecordingError! {
         self.validate_next(&event)
-        sequence :: event.sequence
+        sequence: event.sequence
         self.append_event_unchecked(^event)
         sequence
     }
-    fn record_envelope(self: Self, bytes: [U8]) -> USize RecordingError! {
+    record_envelope: fn(self: Self, bytes: [U8]) -> USize RecordingError! {
         if bytes.len() > MAX_RECORDING_BYTES -> return .Err(.EnvelopeTooLarge { bytes: bytes.len(), limit: MAX_RECORDING_BYTES })
-        events :: parse_envelope(bytes, &self.identity)
+        events: parse_envelope(bytes, &self.identity)
         self.preflight(&events)
-        count :: events.len()
+        count: events.len()
         loop event in events -> self.append_event_unchecked(^event)
         count
     }
-    fn replay(self: Self) -> ReplayCursor { ReplayCursor { identity: self.identity.copy(), generation: self.generation, position: 0, sequence: .None } }
-    fn replay_for(self: Self, identity: SessionIdentity) -> ReplayCursor RecordingError! {
+    replay: fn(self: Self) -> ReplayCursor { ReplayCursor { identity: self.identity.copy(), generation: self.generation, position: 0, sequence: .None } }
+    replay_for: fn(self: Self, identity: SessionIdentity) -> ReplayCursor RecordingError! {
         validate_id(identity.source_id, "source_id")
         validate_id(identity.build_id, "build_id")
         if !self.identity.matches(identity) -> return .Err(.IdentityMismatch { expected: self.identity.copy(), found: identity.copy() })
         self.replay()
     }
-    fn projection(self: Self, cursor: ReplayCursor) -> ReplayProjection RecordingError! {
+    projection: fn(self: Self, cursor: ReplayCursor) -> ReplayProjection RecordingError! {
         cursor.check(self)
         self.make_projection(cursor)
     }
-    fn checkpoint(self: Self, cursor: ReplayCursor) -> SessionCheckpoint RecordingError! {
+    checkpoint: fn(self: Self, cursor: ReplayCursor) -> SessionCheckpoint RecordingError! {
         cursor.check(self)
-        timestamp_ms :: cursor.position.checked_sub(1).and_then((index) -> self.events.get(index)).map((event) -> event.timestamp_ms)
+        timestamp_ms: cursor.position.checked_sub(1).and_then((index) -> self.events.get(index)).map((event) -> event.timestamp_ms)
         SessionCheckpoint { identity: self.identity.copy(), generation: self.generation, position: cursor.position, sequence: cursor.sequence, timestamp_ms,
             first_retained_sequence: self.events.front().map((event) -> event.sequence), last_retained_sequence: self.events.back().map((event) -> event.sequence) }
     }
-    fn restore_checkpoint(self: Self, checkpoint: SessionCheckpoint) -> ReplayCursor RecordingError! {
+    restore_checkpoint: fn(self: Self, checkpoint: SessionCheckpoint) -> ReplayCursor RecordingError! {
         if !self.identity.matches(&checkpoint.identity) -> return .Err(.IdentityMismatch { expected: self.identity.copy(), found: checkpoint.identity.copy() })
         if checkpoint.generation != self.generation || checkpoint.first_retained_sequence != self.events.front().map((event) -> event.sequence)
             || checkpoint.last_retained_sequence != self.events.back().map((event) -> event.sequence) || checkpoint.position > self.events.len() -> return .Err(.CheckpointUnavailable)
-        actual_sequence :: checkpoint.position.checked_sub(1).and_then((index) -> self.events.get(index)).map((event) -> event.sequence)
+        actual_sequence: checkpoint.position.checked_sub(1).and_then((index) -> self.events.get(index)).map((event) -> event.sequence)
         if actual_sequence != checkpoint.sequence -> return .Err(.CheckpointUnavailable)
         ReplayCursor { identity: self.identity.copy(), generation: self.generation, position: checkpoint.position, sequence: checkpoint.sequence }
     }
-    fn preflight(self: &Self, events: &[SessionEvent]) RecordingError! {
+    preflight: fn(self: &Self, events: &[SessionEvent]) RecordingError! {
         previous_sequence := self.last_sequence
         previous_time := self.last_timestamp_ms
         loop event in events {
-            bytes :: event.wire_len()
+            bytes: event.wire_len()
             if bytes > self.limits.max_bytes -> return .Err(.EventTooLarge { bytes, limit: self.limits.max_bytes })
             if previous_sequence == .Val(previous) {
                 if event.sequence <= previous -> return .Err(.NonMonotonicSequence { previous, next: event.sequence })
@@ -263,8 +263,8 @@ impl SessionRecording {
             previous_time = .Val(event.timestamp_ms)
         }
     }
-    fn validate_next(self: &Self, event: &SessionEvent) RecordingError! {
-        bytes :: event.wire_len()
+    validate_next: fn(self: &Self, event: &SessionEvent) RecordingError! {
+        bytes: event.wire_len()
         if bytes > self.limits.max_bytes -> return .Err(.EventTooLarge { bytes, limit: self.limits.max_bytes })
         if self.last_sequence == .Val(previous) {
             if event.sequence <= previous -> return .Err(.NonMonotonicSequence { previous, next: event.sequence })
@@ -273,8 +273,8 @@ impl SessionRecording {
             if event.timestamp_ms < previous -> return .Err(.NonMonotonicTime { previous, next: event.timestamp_ms })
         }
     }
-    fn append_event_unchecked(self: Self, event: SessionEvent) -> Unit {
-        bytes :: event.wire_len()
+    append_event_unchecked: fn(self: Self, event: SessionEvent) -> Unit {
+        bytes: event.wire_len()
         self.last_sequence = .Val(event.sequence)
         self.last_timestamp_ms = .Val(event.timestamp_ms)
         self.events.push_back(^event)
@@ -283,8 +283,8 @@ impl SessionRecording {
         loop self.events.len() > self.limits.max_events || self.retained_bytes > self.limits.max_bytes {
             if self.events.len() > self.limits.max_events -> self.event_limit_reached = true
             if self.retained_bytes > self.limits.max_bytes -> self.byte_limit_reached = true
-            evicted :: self.events.pop_front() ?? break
-            evicted_bytes :: evicted.wire_len()
+            evicted: self.events.pop_front() ?? break
+            evicted_bytes: evicted.wire_len()
             self.retained_bytes = self.retained_bytes.saturating_sub(evicted_bytes)
             self.dropped_events = self.dropped_events.saturating_add(1)
             self.dropped_bytes = self.dropped_bytes.saturating_add(U64{evicted_bytes})
@@ -293,71 +293,71 @@ impl SessionRecording {
         }
         self.generation = self.generation.wrapping_add(1)
     }
-    fn make_projection(self: Self, cursor: ReplayCursor) -> ReplayProjection {
-        current_index :: cursor.position.checked_sub(1)
-        event :: current_index.and_then((index) -> self.events.get(index)).cloned()
-        previous_sequence :: cursor.position.checked_sub(2).and_then((index) -> self.events.get(index)).map((event) -> event.sequence)
-        next_sequence :: self.events.get(cursor.position).map((event) -> event.sequence)
+    make_projection: fn(self: Self, cursor: ReplayCursor) -> ReplayProjection {
+        current_index: cursor.position.checked_sub(1)
+        event: current_index.and_then((index) -> self.events.get(index)).cloned()
+        previous_sequence: cursor.position.checked_sub(2).and_then((index) -> self.events.get(index)).map((event) -> event.sequence)
+        next_sequence: self.events.get(cursor.position).map((event) -> event.sequence)
         ReplayProjection { identity: self.identity.copy(), position: cursor.position, sequence: cursor.sequence,
             timestamp_ms: event.as_ref().map((event) -> event.timestamp_ms), event: ^event, previous_sequence, next_sequence,
             limits: self.limits, truncation: self.truncation() }
     }
 }
-fn parse_envelope(bytes: [U8], expected_identity: SessionIdentity) -> [SessionEvent] RecordingError! {
-    text :: std.str.from_utf8(bytes) ?? return .Err(.InvalidEnvelope("envelope is not UTF-8"))
-    root :: parse_json_value(text, "devtools envelope")
-    object :: [String:Dyn]{if root == {
+parse_envelope: fn(bytes: [U8], expected_identity: SessionIdentity) -> [SessionEvent] RecordingError! {
+    text: std.str.from_utf8(bytes) ?? return .Err(.InvalidEnvelope("envelope is not UTF-8"))
+    root: parse_json_value(text, "devtools envelope")
+    object: [String:Dyn]{if root == {
         .Object(object) -> object.into_iter().collect()
         else -> { return .Err(.InvalidEnvelope("envelope must be an object")) }
     }}
-    protocol :: object.get("protocol").and_then((value) -> if value == {
+    protocol: object.get("protocol").and_then((value) -> if value == {
         .Text(protocol) -> .Val(protocol)
         else -> .None
     })
         ?? return .Err(.InvalidEnvelope("missing string `protocol`"))
     if protocol != JET_DEVTOOLS_PROTOCOL -> return .Err(.InvalidEnvelope("protocol is `{protocol}`, expected `{JET_DEVTOOLS_PROTOCOL}`"))
     validate_optional_envelope_identity(&object, expected_identity)
-    values :: object.get("events") ?? return .Err(.InvalidEnvelope("missing `events` array"))
+    values: object.get("events") ?? return .Err(.InvalidEnvelope("missing `events` array"))
     if values == .Array(values) {
         events := [SessionEvent]{}
         loop value in values -> events.push(parse_event(value)?)
         events
     } else { .Err(.InvalidEnvelope("envelope `events` must be an array")) }
 }
-fn parse_event(value: Dyn) -> SessionEvent RecordingError! {
-    object :: [String:Dyn]{if value == {
+parse_event: fn(value: Dyn) -> SessionEvent RecordingError! {
+    object: [String:Dyn]{if value == {
         .Object(object) -> object.iter().cloned().collect()
         else -> { return .Err(.InvalidEvent("event must be an object")) }
     }}
-    sequence :: required_u64(&object, "sequence")
-    timestamp_ms :: required_u64(&object, "timestamp_ms")
-    source :: required_string(&object, "source")
-    kind :: required_string(&object, "kind")
-    entity :: required_string(&object, "entity")
-    fields :: object.get("fields") ?? return .Err(.InvalidEvent("missing event `fields`"))
-    fields_json :: if fields == {
+    sequence: required_u64(&object, "sequence")
+    timestamp_ms: required_u64(&object, "timestamp_ms")
+    source: required_string(&object, "source")
+    kind: required_string(&object, "kind")
+    entity: required_string(&object, "entity")
+    fields: object.get("fields") ?? return .Err(.InvalidEvent("missing event `fields`"))
+    fields_json: if fields == {
         .Object(_) -> canonical_json(fields)
         else -> { return .Err(.InvalidEvent("event fields must be an object")) }
     }
-    payload_json :: if object.get("payload") == {
+    payload_json: if object.get("payload") == {
         .None | .Val(.Null) -> .None
         .Val(value) && value == .Object(_) -> .Val(canonical_json(value))
         .Val(_) -> { return .Err(.InvalidEvent("event payload must be an object or null")) }
     }
     SessionEvent.new(sequence, timestamp_ms, ^source, ^kind, ^entity, ^fields_json, ^payload_json)
 }
-fn parse_json_value(text: String, label: String) -> Dyn RecordingError! {
+parse_json_value: fn(text: String, label: String) -> Dyn RecordingError! {
     if text.len() > MAX_RECORDING_BYTES -> return .Err(.InvalidEvent("{label} exceeds the {MAX_RECORDING_BYTES}-byte limit"))
     parse_json_with_limit(text, MAX_RECORDING_BYTES).map_err((_) ->
         if label == "devtools envelope" -> RecordingError.InvalidEnvelope("{label} is not valid bounded JSON") else -> RecordingError.InvalidEvent("{label} is not valid bounded JSON"))
 }
-fn canonical_object(text: String, label: String) -> String RecordingError! {
+canonical_object: fn(text: String, label: String) -> String RecordingError! {
     if text.len() > MAX_RECORDING_TEXT_BYTES -> return .Err(.InvalidEvent("{label} exceeds the {MAX_RECORDING_TEXT_BYTES}-byte JSON object limit"))
-    value :: parse_json_value(text, label)
+    value: parse_json_value(text, label)
     if value == .Object(_) -> canonical_json(&value) else -> .Err(.InvalidEvent("{label} must be an object"))
 }
-fn required_string(object: [String:Dyn], key: String) -> String RecordingError! {
-    value :: object.get(key).and_then((value) -> if value == {
+required_string: fn(object: [String:Dyn], key: String) -> String RecordingError! {
+    value: object.get(key).and_then((value) -> if value == {
         .Text(value) -> .Val(value.copy())
         else -> .None
     })
@@ -365,38 +365,38 @@ fn required_string(object: [String:Dyn], key: String) -> String RecordingError! 
     validate_text(value, "event {key}")
     value
 }
-fn required_u64(object: [String:Dyn], key: String) -> U64 RecordingError! {
+required_u64: fn(object: [String:Dyn], key: String) -> U64 RecordingError! {
     if object.get(key) == {
         .Val(.Int(value)) -> U64.try_from(*value) ?? return .Err(.InvalidEvent("event `{key}` must be a non-negative integer"))
         .Val(_) -> .Err(.InvalidEvent("event `{key}` must be an exact integer"))
         .None -> .Err(.InvalidEvent("missing integer `{key}`"))
     }
 }
-fn validate_optional_envelope_identity(object: &[String:Dyn], expected: &SessionIdentity) RecordingError! {
-    source :: object.get("source_id")
-    build :: object.get("build_id")
+validate_optional_envelope_identity: fn(object: &[String:Dyn], expected: &SessionIdentity) RecordingError! {
+    source: object.get("source_id")
+    build: object.get("build_id")
     if source.is_none() && build.is_none() -> return
-    source_text :: source.and_then((value) -> if value == {
+    source_text: source.and_then((value) -> if value == {
         .Text(value) -> .Val(value.copy())
         else -> .None
     })
         ?? return .Err(.InvalidEnvelope("envelope `source_id` must be a string"))
-    build_text :: build.and_then((value) -> if value == {
+    build_text: build.and_then((value) -> if value == {
         .Text(value) -> .Val(value.copy())
         else -> .None
     })
         ?? return .Err(.InvalidEnvelope("envelope `build_id` must be a string"))
-    found :: SessionIdentity.new(^source_text, ^build_text) ?? return .Err(.InvalidEnvelope("invalid envelope identity: {err}"))
+    found: SessionIdentity.new(^source_text, ^build_text) ?? return .Err(.InvalidEnvelope("invalid envelope identity: {err}"))
     if !expected.matches(&found) -> return .Err(.IdentityMismatch { expected: expected.copy(), found: ^found })
 }
-fn validate_id(value: String, label: String) RecordingError! {
+validate_id: fn(value: String, label: String) RecordingError! {
     if value.is_empty() || value.len() > MAX_ID_BYTES || value.bytes().any((byte) -> byte.is_ascii_control()) -> return .Err(.InvalidIdentity("{label} must contain 1..={MAX_ID_BYTES} bytes and no control characters"))
 }
-fn validate_text(value: String, label: String) RecordingError! {
+validate_text: fn(value: String, label: String) RecordingError! {
     if value.len() > MAX_RECORDING_TEXT_BYTES -> return .Err(.InvalidEvent("{label} exceeds the {MAX_RECORDING_TEXT_BYTES}-byte text limit"))
 }
-fn quoted(value: String) -> String { "\"{foundation_json_escape(value)}\"" }
-fn canonical_json(value: Dyn) -> String {
+quoted: fn(value: String) -> String { "\"{foundation_json_escape(value)}\"" }
+canonical_json: fn(value: Dyn) -> String {
     if value == {
         .Null -> "null"
         .Bool(value) -> value.to_string()

@@ -6,7 +6,7 @@
 // Option or Result result comes back as the adapter's tag word plus one out
 // slot. The lowering builds its own List, Option or Result box from them.
 
-fn ir_route_nested_carrier(carrier: IRRouteCarrier) -> Bool Never! {
+ir_route_nested_carrier: fn(carrier: IRRouteCarrier) -> Bool Never! {
     if carrier == .List(elem) -> return elem == .List(_)
     false
 }
@@ -19,7 +19,7 @@ fn ir_route_nested_carrier(carrier: IRRouteCarrier) -> Bool Never! {
 // so no provider may hand back inline rows. Jet providers that return a
 // record List (jet_std_fs_list_dir_raw, jet_dyn_field, the codec failures)
 // build that handle buffer; the handles are converted and dropped here.
-fn ir_route_nested(route: IRRoute) -> Bool Never! {
+ir_route_nested: fn(route: IRRoute) -> Bool Never! {
     loop param in route.params {
         if ir_route_nested_carrier(param) -> return true
     }
@@ -39,7 +39,7 @@ fn ir_route_nested(route: IRRoute) -> Bool Never! {
 // The one definition of the native TLS refusal text. gen-runtime-trap-messages
 // projects this literal into TrapMessages.jet (trap_msg_native_tls), which the
 // runtime's jet_rt_http_tls_refuse stop reports verbatim.
-fn ir_tls_transport_message() -> String Never! {
+ir_tls_transport_message: fn() -> String Never! {
     "TLS transport is not available in native builds until Jet's own TLS implementation lands; use plain HTTP or TCP meanwhile"
 }
 
@@ -50,6 +50,6 @@ fn ir_tls_transport_message() -> String Never! {
 // `GameScene`/`GameFrame` are the runtime's game carriers (Game.jet).
 // Validate canonical identity and actual member types before lending their
 // storage to the typed read/clone glue.
-fn ir_native_runtime_carrier(handle: IRRuntimeHandle, name: String) -> Bool Never! {
+ir_native_runtime_carrier: fn(handle: IRRuntimeHandle, name: String) -> Bool Never! {
     (handle.runtime == "ProcessReceipt" || handle.runtime == "ProcessPlan" || handle.runtime == "ProcessChild" || handle.runtime == "JetTestSuite" || handle.runtime == "JetGameScene" || handle.runtime == "JetGameFrame") && name == handle.jet_name
 }

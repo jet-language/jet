@@ -8,7 +8,7 @@
 // not a decimal approximation: NativeInt supplies private base1e9 workspaces.
 // No Rust/libc parse operation, fixed digit cap, or host floating-point mode.
 
-fn numeric_node_shift(node: I64, bits: I64) {
+numeric_node_shift: fn(node: I64, bits: I64) {
     count := bits
     loop count >= (I64{29}) {
         int_scale(node, I64{536870912}, I64{0})
@@ -17,7 +17,7 @@ fn numeric_node_shift(node: I64, bits: I64) {
     if (count != I64{0}) -> int_scale(node, I64{1} << count, I64{0})
 }
 
-fn numeric_node_power10(node: I64, power: I64) {
+numeric_node_power10: fn(node: I64, power: I64) {
     count := power
     loop count >= (I64{9}) {
         int_scale(node, I64{1000000000}, I64{0})
@@ -33,17 +33,17 @@ fn numeric_node_power10(node: I64, power: I64) {
 
 // Compare a with 2*b without allocating/copying a third workspace. A base1e9
 // doubling has carry-in exactly (previous limb>=5e8), even at the high limb.
-fn numeric_node_compare_twice(a: I64, b: I64) -> I64 {
-    al :: int_load(wrapping(a + I64{32}))
-    bl :: int_load(wrapping(b + I64{32}))
-    doubled :: bl + (if (int_get(b, bl - I64{1}) >= I64{500000000}) -> I64{1} else -> I64{0})
+numeric_node_compare_twice: fn(a: I64, b: I64) -> I64 {
+    al: int_load(wrapping(a + I64{32}))
+    bl: int_load(wrapping(b + I64{32}))
+    doubled: bl + (if (int_get(b, bl - I64{1}) >= I64{500000000}) -> I64{1} else -> I64{0})
     if (al != doubled) -> return if (al < doubled) -> I64{-1} else -> I64{1}
     at := al
     loop at > (I64{0}) {
         at -= I64{1}
-        carry :: if (at > I64{0} && int_get(b, at - I64{1}) >= I64{500000000}) -> I64{1} else -> I64{0}
-        rhs :: if (at == bl) -> I64{1} else -> (int_get(b, at) * I64{2} + carry) % I64{1000000000}
-        lhs :: int_get(a, at)
+        carry: if (at > I64{0} && int_get(b, at - I64{1}) >= I64{500000000}) -> I64{1} else -> I64{0}
+        rhs: if (at == bl) -> I64{1} else -> (int_get(b, at) * I64{2} + carry) % I64{1000000000}
+        lhs: int_get(a, at)
         if (lhs != rhs) -> return if (lhs < rhs) -> I64{-1} else -> I64{1}
     }
     I64{0}
@@ -52,7 +52,7 @@ fn numeric_node_compare_twice(a: I64, b: I64) -> I64 {
 // Both nodes are positive private workspaces with 40 spare limbs. Normalize
 // ratio to [1,2), then extract only the target's significand/subnormal quanta.
 // Exact remainder comparison supplies guard+sticky together, including ties.
-fn numeric_float_ratio_bits(numerator: I64, denominator: I64, decimal_exponent: I64) -> I64 {
+numeric_float_ratio_bits: fn(numerator: I64, denominator: I64, decimal_exponent: I64) -> I64 {
     exponent := decimal_exponent * I64{3322} /% I64{1000}
     if (exponent < I64{0}) -> numeric_node_shift(numerator, -exponent) else -> numeric_node_shift(denominator, exponent)
     loop int_compare_abs(int_tag(numerator), int_tag(denominator)) < (I64{0}) {
@@ -69,8 +69,8 @@ fn numeric_float_ratio_bits(numerator: I64, denominator: I64, decimal_exponent: 
         // Exactly half a minimum subnormal rounds to even zero.
         return if (int_compare_abs(int_tag(numerator), int_tag(denominator)) == I64{0}) -> I64{0} else -> I64{1}
     }
-    normal :: exponent >= I64{-1022}
-    count :: if normal -> I64{53} else -> exponent + I64{1075}
+    normal: exponent >= I64{-1022}
+    count: if normal -> I64{53} else -> exponent + I64{1075}
     mantissa := I64{0}
     at := I64{0}
     loop at < count {
@@ -82,7 +82,7 @@ fn numeric_float_ratio_bits(numerator: I64, denominator: I64, decimal_exponent: 
         at += I64{1}
         if (at < count) -> int_scale(numerator, I64{2}, I64{0})
     }
-    halfway :: numeric_node_compare_twice(denominator, numerator)
+    halfway: numeric_node_compare_twice(denominator, numerator)
     if (halfway < I64{0} || (halfway == I64{0} && (mantissa.bit_and(I64{1})) != I64{0})) -> mantissa += I64{1}
     if !normal -> return mantissa
     if (mantissa == I64{9007199254740992}) {
@@ -93,28 +93,28 @@ fn numeric_float_ratio_bits(numerator: I64, denominator: I64, decimal_exponent: 
     ((exponent + I64{1023}) << I64{52}).bit_or((mantissa - I64{4503599627370496}))
 }
 
-fn numeric_float_error(text: I64, err: I64) -> I64 {
+numeric_float_error: fn(text: I64, err: I64) -> I64 {
     sync_store(err, numeric_parse_error(text, false))
     I64{0}
 }
 
 // Native LowerRoute1110 Float/Text Result: raw IEEE word into ok, OWNED E4
 // error into err. Only the selected 8B output is initialized; inputs borrow.
-#Export(c) fn jet_float_parse(text: I64, ok: I64, err: I64) -> I64 {
-    start :: numeric_trim_start(text)
-    end :: numeric_trim_end(text, start)
-    data :: rt_text_data(text)
+#Export(c) jet_float_parse: fn(text: I64, ok: I64, err: I64) -> I64 {
+    start: numeric_trim_start(text)
+    end: numeric_trim_end(text, start)
+    data: rt_text_data(text)
     at := start
     sign := I64{0}
     if (at < end) {
-        byte :: rt_text_byte(wrapping(data + at))
+        byte: rt_text_byte(wrapping(data + at))
         if (byte == I64{43} || byte == I64{45}) {
             if (byte == I64{45}) -> sign = I64{-9223372036854775808}
             at += I64{1}
         }
     }
     // Rust's case-insensitive specials have exactly 3 or 8 bytes after sign.
-    length :: end - at
+    length: end - at
     if (length == I64{3} || length == I64{8}) {
         special := I64{0}
         i := I64{0}
@@ -139,7 +139,7 @@ fn numeric_float_error(text: I64, err: I64) -> I64 {
     last_nonzero := I64{-1}
     dot := false
     loop at < end {
-        byte :: rt_text_byte(wrapping(data + at))
+        byte: rt_text_byte(wrapping(data + at))
         if (byte == I64{46} && !dot) {
             dot = true
             at += I64{1}
@@ -167,9 +167,9 @@ fn numeric_float_error(text: I64, err: I64) -> I64 {
             negative = rt_text_byte(wrapping(data + at)) == I64{45}
             at += I64{1}
         }
-        exponent_start :: at
+        exponent_start: at
         loop at < end {
-            byte :: rt_text_byte(wrapping(data + at))
+            byte: rt_text_byte(wrapping(data + at))
             if (byte < I64{48} || byte > I64{57}) -> break
             // Matches Rust parse_scientific: stop accumulating only AFTER the
             // previous magnitude reaches 0x10000; still validate every digit.
@@ -187,9 +187,9 @@ fn numeric_float_error(text: I64, err: I64) -> I64 {
     // Magnitude bounds are exact and follow full grammar validation. Keeping
     // trailing decimal zeros in this proof, then dropping them from both
     // rational components, avoids huge needless power-of-ten workspaces.
-    power :: explicit - fractional + trailing
-    significant_digits :: significant - trailing
-    adjusted :: power + significant_digits - I64{1}
+    power: explicit - fractional + trailing
+    significant_digits: significant - trailing
+    adjusted: power + significant_digits - I64{1}
     if (adjusted > I64{308}) {
         sync_store(ok, sign.bit_or(I64{9218868437227405312}))
         return I64{1}
@@ -207,7 +207,7 @@ fn numeric_float_error(text: I64, err: I64) -> I64 {
         whole := I64{0}
         at = first_nonzero
         loop at <= last_nonzero {
-            byte :: rt_text_byte(wrapping(data + at))
+            byte: rt_text_byte(wrapping(data + at))
             if (byte != I64{46}) -> whole = whole * I64{10} + byte - I64{48}
             at += I64{1}
         }
@@ -218,22 +218,22 @@ fn numeric_float_error(text: I64, err: I64) -> I64 {
                 scale = scale * Float{10.0}
                 count -= I64{1}
             }
-            value :: if (power < I64{0}) -> Float{whole} / scale else -> Float{whole} * scale
+            value: if (power < I64{0}) -> Float{whole} / scale else -> Float{whole} * scale
             sync_store(ok, sign.bit_or(rt_f64_bits(value)))
             return I64{1}
         }
     }
-    numerator :: int_new(significant_digits /% I64{9} + I64{40} + (if (power > I64{0}) -> power /% I64{9} else -> I64{0}))
+    numerator: int_new(significant_digits /% I64{9} + I64{40} + (if (power > I64{0}) -> power /% I64{9} else -> I64{0}))
     at = first_nonzero
     loop at <= last_nonzero {
-        byte :: rt_text_byte(wrapping(data + at))
+        byte: rt_text_byte(wrapping(data + at))
         if (byte != I64{46}) -> int_scale(numerator, I64{10}, byte - I64{48})
         at += I64{1}
     }
-    denominator :: int_new(I64{40} + (if (power < I64{0}) -> -power /% I64{9} else -> I64{0}))
+    denominator: int_new(I64{40} + (if (power < I64{0}) -> -power /% I64{9} else -> I64{0}))
     int_set(denominator, I64{0}, I64{1})
     if (power >= I64{0}) -> numeric_node_power10(numerator, power) else -> numeric_node_power10(denominator, -power)
-    bits :: numeric_float_ratio_bits(numerator, denominator, adjusted)
+    bits: numeric_float_ratio_bits(numerator, denominator, adjusted)
     int_free_node(numerator)
     int_free_node(denominator)
     sync_store(ok, sign.bit_or(bits))

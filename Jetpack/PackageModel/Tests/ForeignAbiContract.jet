@@ -7,10 +7,10 @@ use jet_pkg_model.[
 
 // Rust: tests/ffi_rust.rs:123
 #Test("c rust python and javascript share the typed scalar contract") {
-    languages :: [ForeignLanguage]{ForeignLanguage.C, ForeignLanguage.Rust, ForeignLanguage.Py, ForeignLanguage.JS}
+    languages: [ForeignLanguage]{ForeignLanguage.C, ForeignLanguage.Rust, ForeignLanguage.Py, ForeignLanguage.JS}
     loop language in languages {
-        descriptor :: pkg_binder_descriptor(language) ?? panic("conformance language descriptor")
-        contract :: descriptor.contract
+        descriptor: pkg_binder_descriptor(language) ?? panic("conformance language descriptor")
+        contract: descriptor.contract
         assert_eq(contract.version, FOREIGN_ABI_CONTRACT_VERSION)
         assert(contract.integer == ForeignScalar.Int)
         assert(contract.floating == ForeignScalar.Float)

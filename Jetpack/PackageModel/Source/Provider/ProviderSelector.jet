@@ -7,7 +7,7 @@
 // carrier can report it instead of guessing.
 
 // The selector facts a provider reference may carry after `#`.
-struct ProviderSelector {
+ProviderSelector: struct {
     raw: String
     version: String
     revision: String
@@ -16,17 +16,17 @@ struct ProviderSelector {
     digest: String
     platform: String
 
-    fn empty(raw: String) -> ProviderSelector Never! {
+    empty: fn(raw: String) -> ProviderSelector Never! {
         ProviderSelector{raw: raw, version: "", revision: "", baseline: "", features: [String]{}, digest: "", platform: ""}
     }
 
-    fn parse(raw: String) -> ProviderSelector Never! {
+    parse: fn(raw: String) -> ProviderSelector Never! {
         ProviderSelectorDetails.parse(raw).selector
     }
 
     // At least one exact version, revision, or digest, and no inexact one.
-    fn is_exact(self) -> Bool Never! {
-        identities :: [(field: ProviderSelectorField, value: String)]{
+    is_exact: fn(self) -> Bool Never! {
+        identities: [(field: ProviderSelectorField, value: String)]{
             (field: ProviderSelectorField.Version, value: self.version),
             (field: ProviderSelectorField.Revision, value: self.revision),
             (field: ProviderSelectorField.Digest, value: self.digest)
@@ -43,7 +43,7 @@ struct ProviderSelector {
     }
 
     // The single-valued fact `field` holds; features are not single-valued.
-    fn value(self, field: ProviderSelectorField) -> String Never! {
+    value: fn(self, field: ProviderSelectorField) -> String Never! {
         if field == {
             .Version -> self.version
             .Revision -> self.revision
@@ -54,7 +54,7 @@ struct ProviderSelector {
         }
     }
 
-    fn set_value(&self, field: ProviderSelectorField, value: String) Never! {
+    set_value: fn(&self, field: ProviderSelectorField, value: String) Never! {
         if field == {
             .Version -> self.version = value
             .Revision -> self.revision = value
@@ -67,7 +67,7 @@ struct ProviderSelector {
 
     // `version=…&revision=…&baseline=…&features=a+b&digest=…&platform=…`,
     // empty facts omitted.
-    fn canonical(self) -> String Never! {
+    canonical: fn(self) -> String Never! {
         parts := [String]{}
         if self.version != "" -> &parts.push("version={self.version}")
         if self.revision != "" -> &parts.push("revision={self.revision}")
@@ -79,7 +79,7 @@ struct ProviderSelector {
     }
 
     // The carrier's `selector` object, fields in schema order.
-    fn to_json_tree(self) -> Dyn Never! {
+    to_json_tree: fn(self) -> Dyn Never! {
         features := [Dyn]{}
         loop feature in self.features -> &features.push(Dyn.Text(feature))
         object := [String: Dyn]{}
@@ -94,10 +94,10 @@ struct ProviderSelector {
     }
 
     // Read the carrier's `selector` object; every field is required.
-    fn from_json_tree(value: Dyn?) -> ProviderSelector ProviderFactsError! {
-        object :: pkg_json_object(value ?? Dyn.Null) ?? return Err(ProviderFactsError{message: "provider facts `selector` is not an object"})
-        raw_features :: object.get("features") ?? return Err(ProviderFactsError{message: "provider selector lacks `features`"})
-        feature_values :: pkg_json_array(raw_features) ?? return Err(ProviderFactsError{message: PKG_JSON_NOT_ARRAY})
+    from_json_tree: fn(value: Dyn?) -> ProviderSelector ProviderFactsError! {
+        object: pkg_json_object(value ?? Dyn.Null) ?? return Err(ProviderFactsError{message: "provider facts `selector` is not an object"})
+        raw_features: object.get("features") ?? return Err(ProviderFactsError{message: "provider selector lacks `features`"})
+        feature_values: pkg_json_array(raw_features) ?? return Err(ProviderFactsError{message: PKG_JSON_NOT_ARRAY})
         features := [String]{}
         loop feature in feature_values {
             &features.push(pkg_json_text(feature) ?? return Err(ProviderFactsError{message: PKG_JSON_NOT_STRING}))
@@ -116,7 +116,7 @@ struct ProviderSelector {
 
 // One selector fact key. `rev`, `feature`, `hash`/`sha256`, and `target` are
 // accepted spellings of their canonical keys.
-enum ProviderSelectorField {
+ProviderSelectorField: enum {
     Version
     Revision
     Baseline
@@ -124,7 +124,7 @@ enum ProviderSelectorField {
     Digest
     Platform
 
-    fn parse(key: String) -> ProviderSelectorField? Never! {
+    parse: fn(key: String) -> ProviderSelectorField? Never! {
         if key == {
             "version" -> Val(ProviderSelectorField.Version)
             "revision" | "rev" -> Val(ProviderSelectorField.Revision)
@@ -136,7 +136,7 @@ enum ProviderSelectorField {
         }
     }
 
-    fn name(self) -> String Never! {
+    name: fn(self) -> String Never! {
         if self == {
             .Version -> "version"
             .Revision -> "revision"
@@ -149,8 +149,8 @@ enum ProviderSelectorField {
 
     // Whether `value` pins an exact identity for this fact. Only version,
     // revision, and digest can be exact.
-    fn is_exact_value(self, input: String) -> Bool Never! {
-        value :: input.trim()
+    is_exact_value: fn(self, input: String) -> Bool Never! {
+        value: input.trim()
         if value == "" -> return false
         if self == {
             .Version -> {
@@ -169,7 +169,7 @@ enum ProviderSelectorField {
 }
 
 // A selector with the facts it could not normalize losslessly.
-struct ProviderSelectorDetails {
+ProviderSelectorDetails: struct {
     selector: ProviderSelector
     unknown: [String]
     conflicts: [(key: String, left: String, right: String)]
@@ -177,15 +177,15 @@ struct ProviderSelectorDetails {
 
     // Facts separate on `&`, and on a `,` that starts another known
     // `key=value` fact; a fact without `=` is a version.
-    fn parse(raw: String) -> ProviderSelectorDetails Never! {
+    parse: fn(raw: String) -> ProviderSelectorDetails Never! {
         details := ProviderSelectorDetails{selector: ProviderSelector.empty(raw), unknown: [String]{}, conflicts: [(key: String, left: String, right: String)]{}, duplicates: [String]{}}
-        body :: raw.removeprefix("#")
+        body: raw.removeprefix("#")
         if raw != "" && body.trim() == "" {
             &details.unknown.push("empty selector")
             return details
         }
         loop group in body.split("&") {
-            bytes :: group.bytes()
+            bytes: group.bytes()
             start := 0
             loop offset in 0..<bytes.len() {
                 if Int.from_u8(bytes[offset]) == 44 && pkg_provider_is_selector_assignment(pkg_bytes_text(bytes, offset + 1, bytes.len()).trim_start()) {
@@ -198,22 +198,22 @@ struct ProviderSelectorDetails {
         details
     }
 
-    fn add_part(&self, part: String) Never! {
+    add_part: fn(&self, part: String) Never! {
         if part == "" -> return
-        pair :: part.split_once("=")
-        key :: (pair?.before ?? "version").trim()
-        value :: (pair?.after ?? part).trim()
+        pair: part.split_once("=")
+        key: (pair?.before ?? "version").trim()
+        value: (pair?.after ?? part).trim()
         if value == "" {
             &self.unknown.push("empty selector fact `{part}`")
             return
         }
-        field :: ProviderSelectorField.parse(key) ?? {
+        field: ProviderSelectorField.parse(key) ?? {
             &self.unknown.push(part)
             return
         }
         if field == ProviderSelectorField.Features {
             loop piece in value.replace("+", ",").split(",") {
-                feature :: piece.trim()
+                feature: piece.trim()
                 if feature == "" -> next
                 if {
                     self.selector.features.contains(feature) -> &self.duplicates.push("{key}={feature}")
@@ -223,7 +223,7 @@ struct ProviderSelectorDetails {
             &self.selector.features.sort()
             return
         }
-        current :: self.selector.value(field)
+        current: self.selector.value(field)
         if current == "" {
             &self.selector.set_value(field, value)
             return
@@ -235,54 +235,54 @@ struct ProviderSelectorDetails {
     }
 }
 
-fn pkg_provider_is_selector_assignment(part: String) -> Bool Never! {
-    pair :: part.split_once("=") ?? return false
+pkg_provider_is_selector_assignment: fn(part: String) -> Bool Never! {
+    pair: part.split_once("=") ?? return false
     ProviderSelectorField.parse(pair.before.trim()) != None
 }
 
 // `sha256-`/`sha256:`/`sha512-`/`sha512:` followed by hex or base64 of the
 // algorithm's length, or bare hex of 64 or 128 digits.
-fn pkg_provider_exact_digest(input: String) -> Bool Never! {
-    value :: input.trim()
+pkg_provider_exact_digest: fn(input: String) -> Bool Never! {
+    value: input.trim()
     if pkg_provider_digest_payload(value, "sha256") == {
         .Val(payload) -> {
-            length :: payload.bytes().len()
+            length: payload.bytes().len()
             return (length == 64 && pkg_provider_is_hex(payload)) || ((length == 43 || length == 44) && pkg_provider_is_base64(payload))
         }
         .None -> {}
     }
     if pkg_provider_digest_payload(value, "sha512") == {
         .Val(payload) -> {
-            length :: payload.bytes().len()
+            length: payload.bytes().len()
             return (length == 128 && pkg_provider_is_hex(payload)) || ((length == 86 || length == 88) && pkg_provider_is_base64(payload))
         }
         .None -> {}
     }
-    length :: value.bytes().len()
+    length: value.bytes().len()
     pkg_provider_is_hex(value) && (length == 64 || length == 128)
 }
 
 // The digest after `<algorithm>-` or `<algorithm>:`, if `value` has one.
-fn pkg_provider_digest_payload(value: String, algorithm: String) -> String? Never! {
+pkg_provider_digest_payload: fn(value: String, algorithm: String) -> String? Never! {
     if value.starts_with("{algorithm}-") -> return Val(value.removeprefix("{algorithm}-"))
     if value.starts_with("{algorithm}:") -> return Val(value.removeprefix("{algorithm}:"))
     None
 }
 
-fn pkg_provider_is_hex(value: String) -> Bool Never! {
+pkg_provider_is_hex: fn(value: String) -> Bool Never! {
     if value == "" -> return false
     loop byte in value.bytes() {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         if !((code >= 48 && code <= 57) || (code >= 65 && code <= 70) || (code >= 97 && code <= 102)) -> return false
     }
     true
 }
 
 // ASCII letters, digits, `_`, and `+ / = -`.
-fn pkg_provider_is_base64(value: String) -> Bool Never! {
+pkg_provider_is_base64: fn(value: String) -> Bool Never! {
     if value == "" -> return false
     loop byte in value.bytes() {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         if !pkg_bytes_is_word(code) && code != 43 && code != 47 && code != 61 && code != 45 -> return false
     }
     true

@@ -13,7 +13,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { compilerSources } from "../../Tools/agent/compiler-packages.mjs";
 
-const DECLARATION = /^(?:pub\s+)?(fn|struct|enum|trait|type)\s+([A-Za-z_][A-Za-z0-9_]*)|^([A-Z][A-Z0-9_]*)\s*::/gm;
+const DECLARATION = /^(?:pub\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(fn|struct|enum|trait|type)\b|^([A-Z][A-Z0-9_]*)\s*:(?!=)/gm;
 
 function listed(text) {
   return text.split(/\r?\n/).map((line) => line.trim()).filter((line) => line !== "" && !line.startsWith("#"));
@@ -54,13 +54,13 @@ function code(text) {
 }
 
 function declarations(text) {
-  return [...code(text).matchAll(DECLARATION)].map((match) => ({ name: match[2] ?? match[3], fn: match[1] === "fn" }));
+  return [...code(text).matchAll(DECLARATION)].map((match) => ({ name: match[1] ?? match[3], fn: match[2] === "fn" }));
 }
 
 // An enum's variants: the names that open its body's top-level entries.
 function variants(source) {
   const names = [];
-  for (const body of source.matchAll(/^(?:pub\s+)?enum\s+[A-Za-z_][A-Za-z0-9_]*[^{\n]*\{\n([\s\S]*?)^\}/gm)) {
+  for (const body of source.matchAll(/^(?:pub\s+)?[A-Za-z_][A-Za-z0-9_]*:\s*enum\b[^{\n]*\{\n([\s\S]*?)^\}/gm)) {
     let depth = 0;
     let entry = true;
     for (const token of body[1].matchAll(/[A-Za-z_][A-Za-z0-9_]*|[(){}[\],\n]/g)) {

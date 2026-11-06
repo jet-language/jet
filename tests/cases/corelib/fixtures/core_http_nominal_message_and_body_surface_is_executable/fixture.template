@@ -1,11 +1,11 @@
 
 use {
-    http :: core.http
-    mime :: core.net.mime
-    files :: core.files
+    http: core.http
+    mime: core.net.mime
+    files: core.files
 }
 
-fn run() {
+run: fn() {
     print(http.Method.custom("PURGE") ?? panic("method"))
     print(http.Status.new(299) ?? panic("status"))
     print(http.Version.http_1_1())
@@ -17,8 +17,8 @@ fn run() {
     print(http.Body.text("hello", mime.parse("text/custom") ?? panic("mime")).text(5) ?? panic("custom"))
     print(http.Body.form(["a": "b"]).text(16) ?? panic("form"))
     print(http.Body.json(42).json<Int>(16) ?? panic("json"))
-    input :: files.open("{work}/input") ?? panic("open")
-    body :: http.Body.reader(^input, 6) ?? panic("reader")
-    output :: files.create("{work}/output") ?? panic("create")
+    input: files.open("{work}/input") ?? panic("open")
+    body: http.Body.reader(^input, 6) ?? panic("reader")
+    output: files.create("{work}/output") ?? panic("create")
     print(body.copy_to(^output, 6) ?? panic("copy"))
 }

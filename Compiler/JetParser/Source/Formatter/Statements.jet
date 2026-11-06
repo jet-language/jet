@@ -39,7 +39,7 @@ use {
 
 // Rust `jet_foundation::Registry::MarkerArgument`: the typed values a
 // dedicated block-construct node carries for its marker row.
-enum JetFmtMarkerArgument {
+JetFmtMarkerArgument: enum {
     Expr(label: String?, value: Expr)
     Ident(value: String)
     Idents(label: String?, values: [String])
@@ -49,20 +49,20 @@ enum JetFmtMarkerArgument {
 
 // Rust `jet_foundation::Registry::MarkerRowAndArgs`. Every block construct
 // names a registered marker row, so the row is its canonical name.
-struct JetFmtBlockMarker {
+JetFmtBlockMarker: struct {
     name: String
     negated: Bool
     args: [JetFmtMarkerArgument]
 }
 
 // Rust `AST::ReadinessHead`.
-enum JetFmtReadinessHead {
+JetFmtReadinessHead: enum {
     Receive(binding: String, source: Expr)
     After(duration: Expr)
 }
 
 // Rust `Stmt::span`.
-fn jfmt_stmt_span(stmt: Stmt) -> Span Never! {
+jfmt_stmt_span: fn(stmt: Stmt) -> Span Never! {
     if stmt == {
         .Expr(e) -> expr_span(e)
         .DeferClose(_, span) -> span
@@ -103,7 +103,7 @@ fn jfmt_stmt_span(stmt: Stmt) -> Span Never! {
 }
 
 // Rust `LValue::span`.
-fn jfmt_lvalue_span(target: LValue) -> Span Never! {
+jfmt_lvalue_span: fn(target: LValue) -> Span Never! {
     if target == {
         .Local(_, name_span) -> name_span
         .Index(_, _, span, _) -> span
@@ -111,34 +111,34 @@ fn jfmt_lvalue_span(target: LValue) -> Span Never! {
     }
 }
 
-fn jfmt_is_loop_exit_stmt(stmt: Stmt) -> Bool Never! {
+jfmt_is_loop_exit_stmt: fn(stmt: Stmt) -> Bool Never! {
     if stmt == {
         .Break(_) | .BreakValue(_, _) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .Continue(_) | .ContinueLabel(_, _) -> true
         else -> false
     }
 }
 
-fn jfmt_is_loop_break_stmt(stmt: Stmt) -> Bool Never! {
+jfmt_is_loop_break_stmt: fn(stmt: Stmt) -> Bool Never! {
     if stmt == {
         .Break(_) | .BreakValue(_, _) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) -> true
         else -> false
     }
 }
 
-fn jfmt_bin_op_is_comparison(op: BinOp) -> Bool Never! {
+jfmt_bin_op_is_comparison: fn(op: BinOp) -> Bool Never! {
     if op == {
         .Eq | .Ne | .Lt | .Gt | .Le | .Ge -> true
         else -> false
     }
 }
 
-fn jfmt_is_ascii_space(byte: U8) -> Bool Never! {
-    code :: Int.from_u8(byte)
+jfmt_is_ascii_space: fn(byte: U8) -> Bool Never! {
+    code: Int.from_u8(byte)
     code == 32 || code == 9 || code == 10 || code == 13 || code == 11 || code == 12
 }
 
 // Rust `Policy::PolicyKey::name`.
-fn jfmt_policy_key_name(key: PolicyKey) -> String Never! {
+jfmt_policy_key_name: fn(key: PolicyKey) -> String Never! {
     if key == {
         .Unsafe -> "unsafe"
         .Impure -> "impure"
@@ -164,7 +164,7 @@ fn jfmt_policy_key_name(key: PolicyKey) -> String Never! {
 }
 
 // Rust `Policy::PolicyValue::display`.
-fn jfmt_policy_value_display(value: PolicyValue) -> String Never! {
+jfmt_policy_value_display: fn(value: PolicyValue) -> String Never! {
     if value == {
         .Enabled -> "true"
         .Limit(limit) -> "{limit}"
@@ -185,7 +185,7 @@ fn jfmt_policy_value_display(value: PolicyValue) -> String Never! {
 
 // One `#Policy(…)` declaration entry, shared by block markers and the
 // standalone policy rule (Rust repeats this match in both places).
-fn jfmt_fmt_policy_entry(f: &JetFmt, declaration: PolicyDeclaration) {
+jfmt_fmt_policy_entry: fn(f: &JetFmt, declaration: PolicyDeclaration) {
     jfmt_write(&f, jfmt_policy_key_name(declaration.key))
     if declaration.value == {
         .Limit(limit) -> jfmt_write(&f, "({limit})")
@@ -199,7 +199,7 @@ fn jfmt_fmt_policy_entry(f: &JetFmt, declaration: PolicyDeclaration) {
 
 // Rust `jet_foundation::Registry::block_marker`: the registry row and typed
 // argument values for every dedicated block-construct node.
-fn jfmt_block_marker(stmt: Stmt, policies: [PolicyDeclaration]) -> JetFmtBlockMarker? Never! {
+jfmt_block_marker: fn(stmt: Stmt, policies: [PolicyDeclaration]) -> JetFmtBlockMarker? Never! {
     if stmt == {
         .Unsafe(audit, audit_expr, _, span) -> {
             args := [JetFmtMarkerArgument]{}
@@ -210,9 +210,9 @@ fn jfmt_block_marker(stmt: Stmt, policies: [PolicyDeclaration]) -> JetFmtBlockMa
             }
             loop declaration in policies {
                 if declaration.key != PolicyKey.Unsafe -> next
-                target :: declaration.target ?? next
+                target: declaration.target ?? next
                 if target != span -> next
-                tracked :: if declaration.value == {
+                tracked: if declaration.value == {
                     .Track | .Skip -> true
                     else -> false
                 }
@@ -238,7 +238,7 @@ fn jfmt_block_marker(stmt: Stmt, policies: [PolicyDeclaration]) -> JetFmtBlockMa
         .AuthorityScope(caps, _, binding, _, _) -> {
             values := [String]{}
             loop cap in caps -> &values.push(cap.name)
-            label :: if binding == .Val(named) -> Val(named.name) else -> None
+            label: if binding == .Val(named) -> Val(named.name) else -> None
             Val(JetFmtBlockMarker{name: "FX", negated: false, args: [JetFmtMarkerArgument]{JetFmtMarkerArgument.Idents{label: label, values: values}}})
         }
         .ContextBlock(fields, _, _) -> {
@@ -259,7 +259,7 @@ fn jfmt_block_marker(stmt: Stmt, policies: [PolicyDeclaration]) -> JetFmtBlockMa
 }
 
 // Rust `AST::readiness_head`.
-fn jfmt_readiness_head_of(expr: Expr) -> JetFmtReadinessHead? Never! {
+jfmt_readiness_head_of: fn(expr: Expr) -> JetFmtReadinessHead? Never! {
     if expr == {
         .TupleLit(fields, _, _, _) -> {
             if fields.len() != 1 -> return None
@@ -272,13 +272,13 @@ fn jfmt_readiness_head_of(expr: Expr) -> JetFmtReadinessHead? Never! {
 
 // Rust `AST::uses_classic_if_spelling`: only significant source between the
 // `if` token and the first condition decides; comment braces are trivia.
-fn jfmt_uses_classic_if_spelling(bytes: [U8], if_span: Span, first_condition: Span) -> Bool Never! {
+jfmt_uses_classic_if_spelling: fn(bytes: [U8], if_span: Span, first_condition: Span) -> Bool Never! {
     if if_span.end > first_condition.start || first_condition.start > bytes.len() -> return false
     index := if_span.end
-    end :: first_condition.start
+    end: first_condition.start
     loop index < end {
-        code :: Int.from_u8(bytes[index])
-        next_code :: if index + 1 < end -> Int.from_u8(bytes[index + 1]) else -> -1
+        code: Int.from_u8(bytes[index])
+        next_code: if index + 1 < end -> Int.from_u8(bytes[index + 1]) else -> -1
         if {
             jfmt_is_ascii_space(bytes[index]) -> index += 1
             code == 47 && next_code == 47 -> {
@@ -289,8 +289,8 @@ fn jfmt_uses_classic_if_spelling(bytes: [U8], if_span: Span, first_condition: Sp
                 index += 2
                 depth := 1
                 loop index < end && depth > 0 {
-                    here :: Int.from_u8(bytes[index])
-                    after :: if index + 1 < end -> Int.from_u8(bytes[index + 1]) else -> -1
+                    here: Int.from_u8(bytes[index])
+                    after: if index + 1 < end -> Int.from_u8(bytes[index + 1]) else -> -1
                     if {
                         here == 47 && after == 42 -> {
                             depth += 1
@@ -312,7 +312,7 @@ fn jfmt_uses_classic_if_spelling(bytes: [U8], if_span: Span, first_condition: Sp
 }
 
 // Rust `Expr::without_parens`.
-fn jfmt_expr_without_parens(expr: Expr) -> Expr Never! {
+jfmt_expr_without_parens: fn(expr: Expr) -> Expr Never! {
     current := expr
     loop {
         if current == .Paren(inner, _, _) {
@@ -325,19 +325,19 @@ fn jfmt_expr_without_parens(expr: Expr) -> Expr Never! {
 }
 
 // `self.out.trim_end().ends_with('}')`.
-fn jfmt_out_trimmed_ends_with_close(f: JetFmt) -> Bool Never! {
+jfmt_out_trimmed_ends_with_close: fn(f: JetFmt) -> Bool Never! {
     index := f.out.len() - 1
     loop index >= 0 && jfmt_is_ascii_space(f.out[index]) -> index -= 1
     index >= 0 && Int.from_u8(f.out[index]) == 125
 }
 
 // Rust `src.get(start..end).is_some()`.
-fn jfmt_src_range_valid(f: JetFmt, start: Int, end: Int) -> Bool Never! {
+jfmt_src_range_valid: fn(f: JetFmt, start: Int, end: Int) -> Bool Never! {
     start >= 0 && start <= end && end <= f.src_bytes.len()
 }
 
-fn jfmt_fmt_statement_switch_attr(f: &JetFmt, marker: Marker, body: [Stmt]) {
-    body_start :: if body.len() > 0 -> jfmt_stmt_start(body[0]) else -> marker.span.end
+jfmt_fmt_statement_switch_attr: fn(f: &JetFmt, marker: Marker, body: [Stmt]) {
+    body_start: if body.len() > 0 -> jfmt_stmt_start(body[0]) else -> marker.span.end
     body_is_block := false
     loop token in f.source_toks {
         if token.span.start < marker.span.end || token.span.start >= body_start -> next
@@ -359,25 +359,25 @@ fn jfmt_fmt_statement_switch_attr(f: &JetFmt, marker: Marker, body: [Stmt]) {
     jfmt_write(&f, "#")
     jfmt_fmt_marker(&f, marker)
     jfmt_write(&f, " ")
-    saved_force_control_braces :: f.force_control_braces
+    saved_force_control_braces: f.force_control_braces
     f.force_control_braces = true
     jfmt_fmt_stmt(&f, body[0])
     f.force_control_braces = saved_force_control_braces
 }
 
-fn jfmt_fmt_block_stmts(f: &JetFmt, body: [Stmt]) {
+jfmt_fmt_block_stmts: fn(f: &JetFmt, body: [Stmt]) {
     jfmt_fmt_block_lines(&f, body, [Marker]{})
 }
 
-// A block's statements and, for a function body, its `#X :: value` marker
+// A block's statements and, for a function body, its `#X: value` marker
 // lines, each printed where it was written.
-fn jfmt_fmt_block_lines(f: &JetFmt, body: [Stmt], markers: [Marker]) {
+jfmt_fmt_block_lines: fn(f: &JetFmt, body: [Stmt], markers: [Marker]) {
     index := 0
     marker_index := 0
     previous_end := Int?{None}
     loop index < body.len() || marker_index < markers.len() {
         if marker_index < markers.len() && (index >= body.len() || markers[marker_index].span.start < jfmt_stmt_start(body[index])) {
-            marker :: markers[marker_index]
+            marker: markers[marker_index]
             if previous_end == .Val(end) {
                 jfmt_newline(&f)
                 jfmt_emit_leading_statement_gap(&f, end, marker.span.start)
@@ -390,9 +390,9 @@ fn jfmt_fmt_block_lines(f: &JetFmt, body: [Stmt], markers: [Marker]) {
             marker_index += 1
             next
         }
-        stmt :: body[index]
-        fence :: jfmt_fenced_statement_for(f, stmt)
-        source_start :: if fence == .Val(fact) -> fact.span.start else -> jfmt_stmt_start(stmt)
+        stmt: body[index]
+        fence: jfmt_fenced_statement_for(f, stmt)
+        source_start: if fence == .Val(fact) -> fact.span.start else -> jfmt_stmt_start(stmt)
         if previous_end == .Val(end) {
             jfmt_newline(&f)
             jfmt_emit_leading_statement_gap(&f, end, source_start)
@@ -406,7 +406,7 @@ fn jfmt_fmt_block_lines(f: &JetFmt, body: [Stmt], markers: [Marker]) {
             index += fact.copies
         } else {
             jfmt_fmt_stmt(&f, stmt)
-            end :: jfmt_statement_source_end(f, stmt)
+            end: jfmt_statement_source_end(f, stmt)
             jfmt_emit_trailing(&f, end)
             previous_end = Val(end)
             index += 1
@@ -414,8 +414,8 @@ fn jfmt_fmt_block_lines(f: &JetFmt, body: [Stmt], markers: [Marker]) {
     }
 }
 
-fn jfmt_fenced_statement_for(f: JetFmt, stmt: Stmt) -> FencedStatement? Never! {
-    start :: jfmt_stmt_start(stmt)
+jfmt_fenced_statement_for: fn(f: JetFmt, stmt: Stmt) -> FencedStatement? Never! {
+    start: jfmt_stmt_start(stmt)
     // Nested statements inside a fenced RHS (lambda/block bodies) share the
     // outer fact span. Only the statement that begins at the fence itself
     // should re-emit the fence; inner statements format normally.
@@ -427,7 +427,7 @@ fn jfmt_fenced_statement_for(f: JetFmt, stmt: Stmt) -> FencedStatement? Never! {
     None
 }
 
-fn jfmt_fmt_fenced_statement(f: &JetFmt, fact: FencedStatement) {
+jfmt_fmt_fenced_statement: fn(f: &JetFmt, fact: FencedStatement) {
     preserve_layout := false
     loop comment in f.comments {
         if fact.span.start <= comment.span.start && comment.span.start < fact.span.end {
@@ -445,7 +445,7 @@ fn jfmt_fmt_fenced_statement(f: &JetFmt, fact: FencedStatement) {
     if preserve_layout -> jfmt_skip_verbatim_comments(&f, fact.span.end)
 }
 
-fn jfmt_fmt_fenced_names(f: &JetFmt, fence: FencedNames) {
+jfmt_fmt_fenced_names: fn(f: &JetFmt, fence: FencedNames) {
     if fence.range == .Val(range) {
         jfmt_write(&f, "<: {range.start}..{range.end} :>")
         return
@@ -454,7 +454,7 @@ fn jfmt_fmt_fenced_names(f: &JetFmt, fence: FencedNames) {
     // Integer-range fences expand to N entries that all
     // point at the same `start..end` source span. Re-emit that range once.
     if fence.names.len() > 1 {
-        first_span :: fence.names[0].span
+        first_span: fence.names[0].span
         same := true
         loop entry in fence.names {
             if entry.span.start != first_span.start || entry.span.end != first_span.end {
@@ -463,7 +463,7 @@ fn jfmt_fmt_fenced_names(f: &JetFmt, fence: FencedNames) {
             }
         }
         if same && jfmt_src_range_valid(f, first_span.start, first_span.end) {
-            range_text :: jfmt_src_text(f, first_span.start, first_span.end)
+            range_text: jfmt_src_text(f, first_span.start, first_span.end)
             jfmt_write(&f, "<: {range_text} :>")
             return
         }
@@ -487,7 +487,7 @@ fn jfmt_fmt_fenced_names(f: &JetFmt, fence: FencedNames) {
             &names.push(entry.name)
         }
     }
-    inline :: "<: {names.join(", ")} :>"
+    inline: "<: {names.join(", ")} :>"
     if f.col + jfmt_char_count(inline) <= JFMT_MAX_WIDTH {
         jfmt_write(&f, inline)
         return
@@ -505,10 +505,10 @@ fn jfmt_fmt_fenced_names(f: &JetFmt, fence: FencedNames) {
     jfmt_write(&f, ":>")
 }
 
-fn jfmt_write_fence_fragment(f: &JetFmt, start: Int, end: Int, preserve_layout: Bool) {
+jfmt_write_fence_fragment: fn(f: &JetFmt, start: Int, end: Int, preserve_layout: Bool) {
     if preserve_layout {
         if jfmt_src_range_valid(f, start, end) {
-            text :: jfmt_src_text(f, start, end)
+            text: jfmt_src_text(f, start, end)
             jfmt_write(&f, text)
         }
         return
@@ -520,25 +520,25 @@ fn jfmt_write_fence_fragment(f: &JetFmt, start: Int, end: Int, preserve_layout: 
     cursor := start
     loop span in literal_spans {
         if jfmt_src_range_valid(f, cursor, span.start) {
-            fragment :: jfmt_src_text(f, cursor, span.start)
+            fragment: jfmt_src_text(f, cursor, span.start)
             jfmt_write_normalized_source_fragment(&f, fragment)
         }
         if jfmt_src_range_valid(f, span.start, span.end) {
-            literal :: jfmt_src_text(f, span.start, span.end)
+            literal: jfmt_src_text(f, span.start, span.end)
             jfmt_write(&f, literal)
         }
         cursor = span.end
     }
     if jfmt_src_range_valid(f, cursor, end) {
-        fragment :: jfmt_src_text(f, cursor, end)
+        fragment: jfmt_src_text(f, cursor, end)
         jfmt_write_normalized_source_fragment(&f, fragment)
     }
 }
 
-fn jfmt_write_normalized_source_fragment(f: &JetFmt, fragment: String) {
-    bytes :: fragment.bytes()
-    starts_with_space :: bytes.len() > 0 && jfmt_is_ascii_space(bytes[0])
-    ends_with_space :: bytes.len() > 0 && jfmt_is_ascii_space(bytes[bytes.len() - 1])
+jfmt_write_normalized_source_fragment: fn(f: &JetFmt, fragment: String) {
+    bytes: fragment.bytes()
+    starts_with_space: bytes.len() > 0 && jfmt_is_ascii_space(bytes[0])
+    ends_with_space: bytes.len() > 0 && jfmt_is_ascii_space(bytes[bytes.len() - 1])
     words := [String]{}
     word := [U8]{}
     loop byte in bytes {
@@ -565,11 +565,11 @@ fn jfmt_write_normalized_source_fragment(f: &JetFmt, fragment: String) {
 // Emit leading comments and preserve section breaks on either side of,
 // and between, comment groups. A single boolean for the whole gap can move
 // a comment across a section boundary and attach it to the wrong phase.
-fn jfmt_emit_leading_statement_gap(f: &JetFmt, start: Int, end: Int) {
+jfmt_emit_leading_statement_gap: fn(f: &JetFmt, start: Int, end: Int) {
     cursor := start
     loop f.comment_i < f.comments.len() {
-        text :: f.comments[f.comment_i].text.copy()
-        span :: f.comments[f.comment_i].span.copy()
+        text: f.comments[f.comment_i].text.copy()
+        span: f.comments[f.comment_i].span.copy()
         if span.start >= end -> break
         if span.start < start {
             jfmt_emit_comment_line(&f, text)
@@ -588,11 +588,11 @@ fn jfmt_emit_leading_statement_gap(f: &JetFmt, start: Int, end: Int) {
 }
 
 // Rust `source_has_blank_line` over `src[start..end]`.
-fn jfmt_source_has_blank_line(bytes: [U8], start: Int, end: Int) -> Bool Never! {
+jfmt_source_has_blank_line: fn(bytes: [U8], start: Int, end: Int) -> Bool Never! {
     saw_newline := false
     only_space_since_newline := true
     loop index in start..<end {
-        byte :: bytes[index]
+        byte: bytes[index]
         if Int.from_u8(byte) == 10 {
             if saw_newline && only_space_since_newline -> return true
             saw_newline = true
@@ -606,11 +606,11 @@ fn jfmt_source_has_blank_line(bytes: [U8], start: Int, end: Int) -> Bool Never! 
 
 // Render a single simple statement (no leading indent/newline) for
 // the inline brace-body path. The caller guarantees `is_simple_stmt`.
-fn jfmt_fmt_stmt_inline(f: &JetFmt, stmt: Stmt) {
+jfmt_fmt_stmt_inline: fn(f: &JetFmt, stmt: Stmt) {
     jfmt_fmt_stmt(&f, stmt)
 }
 
-fn jfmt_fmt_marker_arg_separator(f: &JetFmt, first: &Bool, multiline: Bool) {
+jfmt_fmt_marker_arg_separator: fn(f: &JetFmt, first: &Bool, multiline: Bool) {
     if first {
         first = false
     } else if multiline {
@@ -621,14 +621,14 @@ fn jfmt_fmt_marker_arg_separator(f: &JetFmt, first: &Bool, multiline: Bool) {
     }
 }
 
-fn jfmt_fmt_block_marker(f: &JetFmt, marker: JetFmtBlockMarker, source_start: Int) {
+jfmt_fmt_block_marker: fn(f: &JetFmt, marker: JetFmtBlockMarker, source_start: Int) {
     jfmt_write(&f, "#")
     if marker.negated -> jfmt_write(&f, "!")
     jfmt_write(&f, marker.name)
     if marker.args.len() > 0 {
         jfmt_write(&f, "(")
-        source :: jfmt_source_list_span_after(f, source_start, JFMT_DELIM_PAREN)
-        multiline :: if source == .Val(list) -> jfmt_source_span_multiline(f, list.span) else -> false
+        source: jfmt_source_list_span_after(f, source_start, JFMT_DELIM_PAREN)
+        multiline: if source == .Val(list) -> jfmt_source_span_multiline(f, list.span) else -> false
         if multiline -> jfmt_newline(&f)
         first := true
         loop argument in marker.args {
@@ -673,13 +673,13 @@ fn jfmt_fmt_block_marker(f: &JetFmt, marker: JetFmtBlockMarker, source_start: In
     jfmt_write(&f, " {{")
 }
 
-fn jfmt_fmt_loop_label(f: &JetFmt, label: NamedSpan?) {
+jfmt_fmt_loop_label: fn(f: &JetFmt, label: NamedSpan?) {
     // Loop labels use declaration spelling.
-    if label == .Val(named) -> jfmt_write(&f, "{named.name} :: ")
+    if label == .Val(named) -> jfmt_write(&f, "{named.name}: ")
 }
 
-fn jfmt_fmt_stmt(f: &JetFmt, stmt: Stmt) {
-    is_switched :: if stmt == {
+jfmt_fmt_stmt: fn(f: &JetFmt, stmt: Stmt) {
+    is_switched: if stmt == {
         .Switched(_, _, _) -> true
         else -> false
     }
@@ -692,7 +692,7 @@ fn jfmt_fmt_stmt(f: &JetFmt, stmt: Stmt) {
             jfmt_fmt_expr(&f, close, JFMT_PREC_OR_FALLBACK)
         }
         .Expr(e) -> {
-            unsafe_assert :: if e == {
+            unsafe_assert: if e == {
                 .Call(call, _) -> call.name == "__jet_unsafe_assert"
                 else -> false
             }
@@ -801,9 +801,9 @@ fn jfmt_fmt_stmt(f: &JetFmt, stmt: Stmt) {
         .CountedLoop(init, cond, step, body, _, arrow_body, label) -> {
             jfmt_fmt_loop_label(&f, label)
             jfmt_write(&f, "loop ")
-            step_width :: if step == .Val(step_stmt) -> jfmt_saturating_sub(jfmt_stmt_end(step_stmt), jfmt_stmt_start(step_stmt)) + 2 else -> 0
-            header_width :: jfmt_saturating_sub(expr_span(init.init).end, init.name_span.start) + jfmt_saturating_sub(expr_span(cond).end, expr_span(cond).start) + step_width + 5
-            wrap :: f.col + header_width > JFMT_MAX_WIDTH
+            step_width: if step == .Val(step_stmt) -> jfmt_saturating_sub(jfmt_stmt_end(step_stmt), jfmt_stmt_start(step_stmt)) + 2 else -> 0
+            header_width: jfmt_saturating_sub(expr_span(init.init).end, init.name_span.start) + jfmt_saturating_sub(expr_span(cond).end, expr_span(cond).start) + step_width + 5
+            wrap: f.col + header_width > JFMT_MAX_WIDTH
             jfmt_fmt_binding(&f, init)
             jfmt_loop_clause_separator(&f, expr_span(cond).start, wrap)
             jfmt_fmt_cond(&f, cond)
@@ -812,7 +812,7 @@ fn jfmt_fmt_stmt(f: &JetFmt, stmt: Stmt) {
                 jfmt_fmt_stmt(&f, step_stmt)
             }
             if wrap && step == None -> jfmt_write(&f, ",")
-            header_end :: if step == .Val(step_stmt) -> jfmt_stmt_span(step_stmt).end else -> expr_span(cond).end
+            header_end: if step == .Val(step_stmt) -> jfmt_stmt_span(step_stmt).end else -> expr_span(cond).end
             jfmt_fmt_effect_loop_body(&f, body, header_end, arrow_body)
         }
         .Loop(inner, _, arrow_body, label) -> {
@@ -846,19 +846,19 @@ fn jfmt_fmt_stmt(f: &JetFmt, stmt: Stmt) {
             f.indent -= 1
             jfmt_end_block(&f)
         }
-        // `name :: Layout{ … }` — typed-literal element
+        // `name: Layout{ … }` — typed-literal element
         // body (comma-separated Constraints). Re-sugar `h`/`v` calls back
         // to `box.anchor` / `self.anchor`.
         .Layout(name, _, body, span) -> {
-            jfmt_write(&f, "{name} :: Layout{{")
+            jfmt_write(&f, "{name}: Layout{{")
             resugared := [Stmt]{}
             loop statement in body -> &resugared.push(jfmt_resugar_layout_stmt(name, statement))
-            source :: jfmt_source_list_span_after(f, span.start, JFMT_DELIM_BRACE)
-            multiline :: if source == .Val(list) -> jfmt_source_span_multiline(f, list.span) else -> false
+            source: jfmt_source_list_span_after(f, span.start, JFMT_DELIM_BRACE)
+            multiline: if source == .Val(list) -> jfmt_source_span_multiline(f, list.span) else -> false
             if !multiline && resugared.len() > 0 -> jfmt_write(&f, " ")
-            comma_multiline :: jfmt_comma_begin(&f, resugared.len(), source)
+            comma_multiline: jfmt_comma_begin(&f, resugared.len(), source)
             loop index in 0..<resugared.len() {
-                item_span :: jfmt_stmt_span(resugared[index])
+                item_span: jfmt_stmt_span(resugared[index])
                 jfmt_comma_before(&f, index, comma_multiline, item_span.start)
                 jfmt_fmt_stmt(&f, resugared[index])
                 jfmt_comma_after(&f, comma_multiline, item_span.end)
@@ -931,11 +931,11 @@ fn jfmt_fmt_stmt(f: &JetFmt, stmt: Stmt) {
             }
             if args.len() > 0 {
                 jfmt_write(&f, "(")
-                source :: if args_span == .Val(span) -> jfmt_source_list_span_after(f, span.start, JFMT_DELIM_PAREN) else -> None
-                multiline :: jfmt_comma_begin(&f, args.len(), source)
+                source: if args_span == .Val(span) -> jfmt_source_list_span_after(f, span.start, JFMT_DELIM_PAREN) else -> None
+                multiline: jfmt_comma_begin(&f, args.len(), source)
                 loop index in 0..<args.len() {
-                    arg :: args[index]
-                    arg_span :: expr_span(arg)
+                    arg: args[index]
+                    arg_span: expr_span(arg)
                     jfmt_comma_before(&f, index, multiline, arg_span.start)
                     single_field := false
                     if arg == .TupleLit(fields, _, _, _) {
@@ -962,21 +962,21 @@ fn jfmt_fmt_stmt(f: &JetFmt, stmt: Stmt) {
     }
 }
 
-fn jfmt_fmt_for_stmt(f: &JetFmt, var: String, var_span: Span, var2: NamedSpan?, kind: ForKind, body: [Stmt], span: Span, arrow_body: Bool, label: NamedSpan?) {
+jfmt_fmt_for_stmt: fn(f: &JetFmt, var: String, var_span: Span, var2: NamedSpan?, kind: ForKind, body: [Stmt], span: Span, arrow_body: Bool, label: NamedSpan?) {
     jfmt_fmt_loop_label(&f, label)
     jfmt_write(&f, "loop ")
     // The bindingless form writes its subject bare. The
     // parser records the implicit binding as `it`, so printing the name back
     // produces `loop it in words`, which is not a spelling the parser
     // accepts — `it` is a keyword, not a name.
-    bindingless :: var2 == None && var == "it"
+    bindingless: var2 == None && var == "it"
     if !bindingless {
         if var2 == .Val(second) {
             jfmt_write(&f, "(")
-            source :: jfmt_source_list_span_after(f, span.start, JFMT_DELIM_PAREN)
-            names :: [String]{var, second.name}
-            spans :: [Span]{var_span, second.span}
-            multiline :: jfmt_comma_begin(&f, 2, source)
+            source: jfmt_source_list_span_after(f, span.start, JFMT_DELIM_PAREN)
+            names: [String]{var, second.name}
+            spans: [Span]{var_span, second.span}
+            multiline: jfmt_comma_begin(&f, 2, source)
             loop index in 0..<2 {
                 jfmt_comma_before(&f, index, multiline, spans[index].start)
                 jfmt_write(&f, names[index])
@@ -988,18 +988,18 @@ fn jfmt_fmt_for_stmt(f: &JetFmt, var: String, var_span: Span, var2: NamedSpan?, 
             jfmt_write(&f, var)
         }
     }
-    clause_width :: if kind == {
+    clause_width: if kind == {
         .Range(start, end, step, exclusive) -> {
-            step_width :: if step == .Val(value) -> expr_span(value).end - expr_span(value).start + 2 else -> 0
+            step_width: if step == .Val(value) -> expr_span(value).end - expr_span(value).start + 2 else -> 0
             expr_span(start).end - expr_span(start).start + expr_span(end).end - expr_span(end).start + step_width + (if exclusive -> 6 else -> 5)
         }
         .In(collection, step) -> {
-            step_width :: if step == .Val(value) -> expr_span(value).end - expr_span(value).start + 2 else -> 0
+            step_width: if step == .Val(value) -> expr_span(value).end - expr_span(value).start + 2 else -> 0
             expr_span(collection).end - expr_span(collection).start + step_width + 3
         }
     }
-    wrap :: f.col + clause_width > JFMT_MAX_WIDTH
-    first_clause_start :: if kind == {
+    wrap: f.col + clause_width > JFMT_MAX_WIDTH
+    first_clause_start: if kind == {
         .Range(start, _, _, _) -> expr_span(start).start
         .In(collection, _) -> expr_span(collection).start
     }
@@ -1038,7 +1038,7 @@ fn jfmt_fmt_for_stmt(f: &JetFmt, var: String, var_span: Span, var2: NamedSpan?, 
 // outermost expression in redundant parens. A condition is its own statement
 // slot, so it renders at the lowest precedence; precedence-required parens on
 // nested sub-expressions are still added by `fmt_expr`.
-fn jfmt_fmt_cond(f: &JetFmt, cond: Expr) {
+jfmt_fmt_cond: fn(f: &JetFmt, cond: Expr) {
     jfmt_fmt_expr(&f, cond, JFMT_PREC_OR_FALLBACK)
 }
 
@@ -1046,7 +1046,7 @@ fn jfmt_fmt_cond(f: &JetFmt, cond: Expr) {
 // When `inline` is set and the branch holds only its value
 // expression (no leading statements, no inner comment, author wrote it on
 // one line, fits width 100), keep it as `{ value }`. Otherwise expand.
-fn jfmt_fmt_value_block(f: &JetFmt, stmts: [Stmt], value: Expr, inline: Bool) {
+jfmt_fmt_value_block: fn(f: &JetFmt, stmts: [Stmt], value: Expr, inline: Bool) {
     jfmt_write(&f, "{{")
     if inline && jfmt_try_inline_value_block(&f, stmts, value) -> return
     jfmt_newline(&f)
@@ -1060,9 +1060,9 @@ fn jfmt_fmt_value_block(f: &JetFmt, stmts: [Stmt], value: Expr, inline: Bool) {
 
 // Is this if-expression branch (no statements, just `value`)
 // eligible to stay on one line? Mirrors `body_inline_eligible`.
-fn jfmt_value_block_inlineable(f: JetFmt, stmts: [Stmt], value: Expr) -> Bool {
+jfmt_value_block_inlineable: fn(f: JetFmt, stmts: [Stmt], value: Expr) -> Bool {
     if stmts.len() > 0 -> return false
-    braces :: jfmt_value_block_braces(f, value) ?? return false
+    braces: jfmt_value_block_braces(f, value) ?? return false
     if jfmt_span_has_comment(f, braces.open, braces.close) -> return false
     if !jfmt_src_range_valid(f, braces.open, braces.close) -> return false
     loop index in braces.open..<braces.close {
@@ -1071,9 +1071,9 @@ fn jfmt_value_block_inlineable(f: JetFmt, stmts: [Stmt], value: Expr) -> Bool {
     true
 }
 
-fn jfmt_fmt_effect_loop_body(f: &JetFmt, body: [Stmt], header_end: Int, arrow_body: Bool) {
+jfmt_fmt_effect_loop_body: fn(f: &JetFmt, body: [Stmt], header_end: Int, arrow_body: Bool) {
     if arrow_body && body.len() == 1 {
-        mark :: jfmt_mark(f)
+        mark: jfmt_mark(f)
         jfmt_write(&f, " ")
         jfmt_write(&f, "->")
         jfmt_write(&f, " ")
@@ -1086,20 +1086,20 @@ fn jfmt_fmt_effect_loop_body(f: &JetFmt, body: [Stmt], header_end: Int, arrow_bo
     // to `->` could make the next check reject a dropped value. Keep the existing brace
     // as the conservative spelling; bare bodies still take the canonical
     // arrow path below.
-    single_expr :: body.len() == 1 && (if body[0] == {
+    single_expr: body.len() == 1 && (if body[0] == {
         .Expr(_) -> true
         else -> false
     })
-    preserve_braced_expr :: !arrow_body && single_expr && jfmt_single_stmt_braces(f, body[0]) != None
-    force_braces :: preserve_braced_expr || (!arrow_body && body.len() == 1 && jfmt_is_loop_exit_stmt(body[0]))
+    preserve_braced_expr: !arrow_body && single_expr && jfmt_single_stmt_braces(f, body[0]) != None
+    force_braces: preserve_braced_expr || (!arrow_body && body.len() == 1 && jfmt_is_loop_exit_stmt(body[0]))
     jfmt_fmt_control_body_after_header(&f, body, force_braces)
 }
 
 // Render a dispatch body
 // `OP { arm -> … [else -> …] }` (the caller has already written the `if` /
 // `comptime if` lead). Shared by `Stmt::Switch` and `Stmt::ComptimeSwitch`.
-fn jfmt_fmt_dispatch(f: &JetFmt, subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, force_arm_blocks: Bool) {
-    table_op :: jfmt_dispatch_op_from_source(f, subject) ?? jfmt_dispatch_op(f, subject, arms)
+jfmt_fmt_dispatch: fn(f: &JetFmt, subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, force_arm_blocks: Bool) {
+    table_op: jfmt_dispatch_op_from_source(f, subject) ?? jfmt_dispatch_op(f, subject, arms)
     jfmt_fmt_expr(&f, subject, JFMT_PREC_OR_FALLBACK)
     jfmt_write(&f, " ")
     jfmt_write(&f, jfmt_bin_op_spell(table_op))
@@ -1107,14 +1107,14 @@ fn jfmt_fmt_dispatch(f: &JetFmt, subject: Expr, arms: [SwitchArm], else_body: [S
     jfmt_newline(&f)
     f.indent += 1
     loop index in 0..<arms.len() {
-        arm :: arms[index]
+        arm: arms[index]
         if index > 0 {
             jfmt_newline(&f)
             jfmt_emit_leading_statement_gap(&f, arms[index - 1].span.end, arm.span.start)
         } else {
             jfmt_emit_leading(&f, arm.span.start)
         }
-        next_starts_with_dot :: index + 1 < arms.len() && jfmt_arm_head_starts_with_dot(arms[index + 1].cond)
+        next_starts_with_dot: index + 1 < arms.len() && jfmt_arm_head_starts_with_dot(arms[index + 1].cond)
         jfmt_fmt_switch_arm(&f, subject, table_op, arm, force_arm_blocks || next_starts_with_dot)
         jfmt_emit_trailing(&f, arm.span.end)
     }
@@ -1130,22 +1130,22 @@ fn jfmt_fmt_dispatch(f: &JetFmt, subject: Expr, arms: [SwitchArm], else_body: [S
 }
 
 // The trivia before an `else ->` arm, shared by both dispatch shapes.
-fn jfmt_fmt_dispatch_else_lead(f: &JetFmt, arms: [SwitchArm]) {
+jfmt_fmt_dispatch_else_lead: fn(f: &JetFmt, arms: [SwitchArm]) {
     if arms.len() > 0 {
         jfmt_newline(&f)
-        last :: arms[arms.len() - 1]
+        last: arms[arms.len() - 1]
         if jfmt_dispatch_else_start(f, last.span.end) == .Val(else_start) -> jfmt_emit_leading_statement_gap(&f, last.span.end, else_start)
     } else if jfmt_dispatch_else_start(f, 0) == .Val(else_start) {
         jfmt_emit_leading(&f, else_start)
     }
 }
 
-fn jfmt_fmt_guard_dispatch(f: &JetFmt, arms: [SwitchArm], else_body: [Stmt]?) {
+jfmt_fmt_guard_dispatch: fn(f: &JetFmt, arms: [SwitchArm], else_body: [Stmt]?) {
     jfmt_write(&f, "{{")
     jfmt_newline(&f)
     f.indent += 1
     loop index in 0..<arms.len() {
-        arm :: arms[index]
+        arm: arms[index]
         if index > 0 {
             jfmt_newline(&f)
             jfmt_emit_leading_statement_gap(&f, arms[index - 1].span.end, arm.span.start)
@@ -1173,8 +1173,8 @@ fn jfmt_fmt_guard_dispatch(f: &JetFmt, arms: [SwitchArm], else_body: [Stmt]?) {
 // tuple so the existing arm IR can carry it through sema and IR lowering. That carrier is
 // not user syntax; always print its canonical arm-table spelling instead of
 // leaking the tuple or its sentinel field.
-fn jfmt_fmt_readiness_head(f: &JetFmt, cond: Expr) -> Bool {
-    head :: jfmt_readiness_head_of(cond) ?? return false
+jfmt_fmt_readiness_head: fn(f: &JetFmt, cond: Expr) -> Bool {
+    head: jfmt_readiness_head_of(cond) ?? return false
     if head == {
         .Receive(binding, source) -> {
             jfmt_write(&f, binding)
@@ -1190,12 +1190,12 @@ fn jfmt_fmt_readiness_head(f: &JetFmt, cond: Expr) -> Bool {
     true
 }
 
-fn jfmt_switch_was_classic_if(f: JetFmt, arms: [SwitchArm], span: Span) -> Bool Never! {
+jfmt_switch_was_classic_if: fn(f: JetFmt, arms: [SwitchArm], span: Span) -> Bool Never! {
     if arms.len() == 0 -> return false
     jfmt_uses_classic_if_spelling(f.src_bytes, span, expr_span(arms[0].cond))
 }
 
-fn jfmt_consecutive_expr_int_range(f: JetFmt, fence: FencedNames) -> NameRange? {
+jfmt_consecutive_expr_int_range: fn(f: JetFmt, fence: FencedNames) -> NameRange? {
     if fence.names.len() < 2 -> return None
     if jfmt_span_has_comment(f, fence.span.start, fence.span.end) -> return None
     values := [Int]{}
@@ -1203,9 +1203,9 @@ fn jfmt_consecutive_expr_int_range(f: JetFmt, fence: FencedNames) -> NameRange? 
     loop entry in fence.names {
         if entry.name.len() > 0 -> return None
         if !jfmt_src_range_valid(f, entry.span.start, entry.span.end) -> return None
-        text :: jfmt_src_text(f, entry.span.start, entry.span.end)
+        text: jfmt_src_text(f, entry.span.start, entry.span.end)
         if text.contains(".") -> return None
-        value :: jfmt_parse_decimal_i64(text.replace("_", "")) ?? return None
+        value: jfmt_parse_decimal_i64(text.replace("_", "")) ?? return None
         &values.push(value)
         &texts.push(text)
     }
@@ -1216,8 +1216,8 @@ fn jfmt_consecutive_expr_int_range(f: JetFmt, fence: FencedNames) -> NameRange? 
 }
 
 // Rust `str::parse::<i64>`: an optional sign, then one or more ASCII digits.
-fn jfmt_parse_decimal_i64(text: String) -> Int? Never! {
-    bytes :: text.bytes()
+jfmt_parse_decimal_i64: fn(text: String) -> Int? Never! {
+    bytes: text.bytes()
     index := 0
     negative := false
     if bytes.len() > 0 && (Int.from_u8(bytes[0]) == 43 || Int.from_u8(bytes[0]) == 45) {
@@ -1227,7 +1227,7 @@ fn jfmt_parse_decimal_i64(text: String) -> Int? Never! {
     if index >= bytes.len() -> return None
     value := 0
     loop index < bytes.len() {
-        code :: Int.from_u8(bytes[index])
+        code: Int.from_u8(bytes[index])
         if code < 48 || code > 57 -> return None
         value = value * 10 + (code - 48)
         index += 1
@@ -1235,35 +1235,35 @@ fn jfmt_parse_decimal_i64(text: String) -> Int? Never! {
     Val(if negative -> -value else -> value)
 }
 
-fn jfmt_fmt_classic_switch(f: &JetFmt, arms: [SwitchArm], else_body: [Stmt]?) {
+jfmt_fmt_classic_switch: fn(f: &JetFmt, arms: [SwitchArm], else_body: [Stmt]?) {
     if arms.len() == 0 -> return
     loop index in 0..<arms.len() {
-        arm :: arms[index]
+        arm: arms[index]
         if index > 0 -> jfmt_write(&f, " else if ")
         jfmt_emit_classic_if_condition_trivia(&f, expr_span(arm.cond).start)
-        preserve_loop_exit_braces :: jfmt_authored_braced_loop_exit(f, arm.body)
+        preserve_loop_exit_braces: jfmt_authored_braced_loop_exit(f, arm.body)
         jfmt_fmt_cond(&f, arm.cond)
-        paren_cond :: if arm.cond == {
+        paren_cond: if arm.cond == {
             .Paren(_, _, _) -> true
             else -> false
         }
         jfmt_fmt_control_body_after_header(&f, arm.body, paren_cond || preserve_loop_exit_braces)
     }
     if else_body == .Val(body) {
-        then_used_braces :: jfmt_out_trimmed_ends_with_close(f)
+        then_used_braces: jfmt_out_trimmed_ends_with_close(f)
         jfmt_write(&f, " else")
-        braced_exit :: jfmt_authored_braced_loop_exit(f, body)
+        braced_exit: jfmt_authored_braced_loop_exit(f, body)
         jfmt_fmt_control_body_after_header(&f, body, then_used_braces || braced_exit)
     }
 }
 
-fn jfmt_authored_braced_loop_exit(f: JetFmt, body: [Stmt]) -> Bool {
+jfmt_authored_braced_loop_exit: fn(f: JetFmt, body: [Stmt]) -> Bool {
     body.len() == 1 && jfmt_is_loop_break_stmt(body[0]) && jfmt_single_stmt_braces(f, body[0]) != None
 }
 
-fn jfmt_emit_classic_if_condition_trivia(f: &JetFmt, condition_start: Int) {
+jfmt_emit_classic_if_condition_trivia: fn(f: &JetFmt, condition_start: Int) {
     loop f.comment_i < f.comments.len() && f.comments[f.comment_i].span.start < condition_start {
-        text :: f.comments[f.comment_i].text.copy()
+        text: f.comments[f.comment_i].text.copy()
         jfmt_write(&f, text)
         f.comment_i += 1
         if text.starts_with("//") {
@@ -1274,14 +1274,14 @@ fn jfmt_emit_classic_if_condition_trivia(f: &JetFmt, condition_start: Int) {
     }
 }
 
-fn jfmt_fmt_switch_arm(f: &JetFmt, subject: Expr, table_op: BinOp, arm: SwitchArm, force_braces: Bool) {
+jfmt_fmt_switch_arm: fn(f: &JetFmt, subject: Expr, table_op: BinOp, arm: SwitchArm, force_braces: Bool) {
     jfmt_fmt_switch_cond(&f, subject, table_op, arm.cond, JFMT_PREC_OR_FALLBACK)
     jfmt_write(&f, " ")
     jfmt_write(&f, "->")
     jfmt_fmt_arm_body(&f, arm.body, force_braces)
 }
 
-fn jfmt_dispatch_else_start(f: JetFmt, after: Int) -> Int? Never! {
+jfmt_dispatch_else_start: fn(f: JetFmt, after: Int) -> Int? Never! {
     loop token in f.source_toks {
         if token.span.start >= after && token.kind == TOKEN_KW_ELSE -> return Val(token.span.start)
     }
@@ -1293,22 +1293,22 @@ fn jfmt_dispatch_else_start(f: JetFmt, after: Int) -> Int? Never! {
 // their explicit scope. Add concise braces when the next leading-dot arm
 // would otherwise parse as a chain on an expression body; direct returns
 // already provide an unambiguous arm boundary.
-fn jfmt_fmt_arm_body(f: &JetFmt, body: [Stmt], force_braces: Bool) {
+jfmt_fmt_arm_body: fn(f: &JetFmt, body: [Stmt], force_braces: Bool) {
     if body.len() == 0 {
         jfmt_write(&f, " {{}}")
         return
     }
-    was_braceless :: jfmt_arm_body_was_braceless(f, body)
+    was_braceless: jfmt_arm_body_was_braceless(f, body)
     // A direct return is already a complete arm boundary. Keeping it
     // braceless is the canonical shape and avoids making the enclosing
     // dispatch unreadable when the next arm starts with a leading dot.
-    first_is_return :: if body[0] == {
+    first_is_return: if body[0] == {
         .Return(_, _) -> true
         else -> false
     }
-    force :: force_braces && !first_is_return
+    force: force_braces && !first_is_return
     if was_braceless && force {
-        mark :: jfmt_mark(f)
+        mark: jfmt_mark(f)
         jfmt_write(&f, " {{ ")
         jfmt_fmt_stmt_inline(&f, body[0])
         jfmt_write(&f, " }}")
@@ -1319,7 +1319,7 @@ fn jfmt_fmt_arm_body(f: &JetFmt, body: [Stmt], force_braces: Bool) {
         return
     }
     if was_braceless {
-        mark :: jfmt_mark(f)
+        mark: jfmt_mark(f)
         jfmt_write(&f, " ")
         jfmt_fmt_stmt_inline(&f, body[0])
         if f.col <= JFMT_MAX_WIDTH -> return
@@ -1335,20 +1335,20 @@ fn jfmt_fmt_arm_body(f: &JetFmt, body: [Stmt], force_braces: Bool) {
 // One simple effect-control
 // statement uses `->` when it fits. Braces remain the canonical shape for
 // multiple statements, scoped blocks, comments, and marked controls.
-fn jfmt_fmt_control_body_after_header(f: &JetFmt, body: [Stmt], force_braces: Bool) {
+jfmt_fmt_control_body_after_header: fn(f: &JetFmt, body: [Stmt], force_braces: Bool) {
     if force_braces || f.force_control_braces {
         jfmt_write(&f, " {{")
         jfmt_fmt_control_body(&f, body)
         return
     }
     if body.len() == 1 && jfmt_is_simple_stmt(body[0]) {
-        comment_free :: if jfmt_single_stmt_braces(f, body[0]) == .Val(braces) -> !jfmt_span_has_comment(f, braces.open, braces.close) else -> true
+        comment_free: if jfmt_single_stmt_braces(f, body[0]) == .Val(braces) -> !jfmt_span_has_comment(f, braces.open, braces.close) else -> true
         if !comment_free {
             jfmt_write(&f, " {{")
             jfmt_fmt_control_body(&f, body)
             return
         }
-        mark :: jfmt_mark(f)
+        mark: jfmt_mark(f)
         jfmt_write(&f, " ")
         jfmt_write(&f, "->")
         jfmt_write(&f, " ")
@@ -1360,7 +1360,7 @@ fn jfmt_fmt_control_body_after_header(f: &JetFmt, body: [Stmt], force_braces: Bo
     jfmt_fmt_control_body(&f, body)
 }
 
-fn jfmt_arm_head_starts_with_dot(cond: Expr) -> Bool Never! {
+jfmt_arm_head_starts_with_dot: fn(cond: Expr) -> Bool Never! {
     if cond == {
         .PatternTest(_, pattern, _, _) -> if pattern == {
             .Variant(_, _, _, _) -> true
@@ -1374,20 +1374,20 @@ fn jfmt_arm_head_starts_with_dot(cond: Expr) -> Bool Never! {
 // The nearest source `->` belongs to this arm. No opening brace or line
 // break between it and the lone simple statement means the body was the
 // concise braceless form.
-fn jfmt_arm_body_was_braceless(f: JetFmt, body: [Stmt]) -> Bool {
+jfmt_arm_body_was_braceless: fn(f: JetFmt, body: [Stmt]) -> Bool {
     if body.len() != 1 || !jfmt_is_simple_stmt(body[0]) -> return false
-    start :: jfmt_stmt_start(body[0])
+    start: jfmt_stmt_start(body[0])
     if start < 0 || start > f.src_bytes.len() -> return false
     // Rust `prefix.rfind("->")` over `src[..start]`.
     arrow := start - 2
     loop arrow >= 0 && !(Int.from_u8(f.src_bytes[arrow]) == 45 && Int.from_u8(f.src_bytes[arrow + 1]) == 62) -> arrow -= 1
     if arrow < 0 -> return false
-    between_start :: arrow + 2
+    between_start: arrow + 2
     loop index in between_start..<start {
-        code :: Int.from_u8(f.src_bytes[index])
+        code: Int.from_u8(f.src_bytes[index])
         if code == 123 || code == 10 -> return false
     }
-    source_end :: jfmt_statement_source_end(f, body[0])
+    source_end: jfmt_statement_source_end(f, body[0])
     if !jfmt_src_range_valid(f, start, source_end) -> return false
     loop index in start..<source_end {
         if Int.from_u8(f.src_bytes[index]) == 10 -> return false
@@ -1395,12 +1395,12 @@ fn jfmt_arm_body_was_braceless(f: JetFmt, body: [Stmt]) -> Bool {
     !jfmt_span_has_comment(f, between_start, source_end)
 }
 
-fn jfmt_fmt_switch_cond(f: &JetFmt, subject: Expr, table_op: BinOp, cond: Expr, prec: Int) {
+jfmt_fmt_switch_cond: fn(f: &JetFmt, subject: Expr, table_op: BinOp, cond: Expr, prec: Int) {
     // If the whole expression is an Or of
     // subject-table_op atoms, emit it with `|` alternation syntax instead of `||`.
     if jfmt_is_all_subject_alts(f, subject, table_op, cond) {
         // Parens required when inside && or || context.
-        needs_paren :: prec > JFMT_PREC_OR_FALLBACK
+        needs_paren: prec > JFMT_PREC_OR_FALLBACK
         if needs_paren -> jfmt_write(&f, "(")
         jfmt_fmt_arm_alternates(&f, subject, table_op, cond)
         if needs_paren -> jfmt_write(&f, ")")
@@ -1409,13 +1409,13 @@ fn jfmt_fmt_switch_cond(f: &JetFmt, subject: Expr, table_op: BinOp, cond: Expr, 
     if cond == {
         .Binary(op, lhs, rhs, _, _) -> {
             if op == BinOp.And || op == BinOp.Or {
-                my_prec :: jfmt_prec_of_bin(op)
-                needs_paren :: prec > my_prec
+                my_prec: jfmt_prec_of_bin(op)
+                needs_paren: prec > my_prec
                 if needs_paren -> jfmt_write(&f, "(")
                 // E0082 (amendment): an `&&` operand of `||`
                 // always prints with its grouping parentheses.
-                lhs_slot :: jfmt_switch_cond_slot(op, lhs, my_prec)
-                rhs_slot :: jfmt_switch_cond_slot(op, rhs, jfmt_prec_add_rhs(my_prec))
+                lhs_slot: jfmt_switch_cond_slot(op, lhs, my_prec)
+                rhs_slot: jfmt_switch_cond_slot(op, rhs, jfmt_prec_add_rhs(my_prec))
                 jfmt_fmt_switch_cond(&f, subject, table_op, lhs, lhs_slot)
                 jfmt_write(&f, " ")
                 jfmt_write(&f, jfmt_bin_op_spell(op))
@@ -1437,7 +1437,7 @@ fn jfmt_fmt_switch_cond(f: &JetFmt, subject: Expr, table_op: BinOp, cond: Expr, 
     }
 }
 
-fn jfmt_switch_cond_slot(op: BinOp, child: Expr, base: Int) -> Int Never! {
+jfmt_switch_cond_slot: fn(op: BinOp, child: Expr, base: Int) -> Int Never! {
     if op == BinOp.Or {
         if child == .Binary(child_op, _, _, _, _) {
             if child_op == BinOp.And -> return jfmt_prec_add_rhs(jfmt_prec_of_bin(BinOp.And))
@@ -1447,13 +1447,13 @@ fn jfmt_switch_cond_slot(op: BinOp, child: Expr, base: Int) -> Int Never! {
 }
 
 // Read the comparison marker from source between the subject and `{`.
-fn jfmt_dispatch_op_from_source(f: JetFmt, subject: Expr) -> BinOp? Never! {
+jfmt_dispatch_op_from_source: fn(f: JetFmt, subject: Expr) -> BinOp? Never! {
     index := expr_span(subject).end
     if index < 0 || index > f.src_bytes.len() -> return None
     loop index < f.src_bytes.len() && jfmt_is_ascii_space(f.src_bytes[index]) -> index += 1
     if index >= f.src_bytes.len() -> return None
-    first :: Int.from_u8(f.src_bytes[index])
-    second :: if index + 1 < f.src_bytes.len() -> Int.from_u8(f.src_bytes[index + 1]) else -> -1
+    first: Int.from_u8(f.src_bytes[index])
+    second: if index + 1 < f.src_bytes.len() -> Int.from_u8(f.src_bytes[index + 1]) else -> -1
     if {
         first == 61 && second == 61 -> Val(BinOp.Eq)
         first == 33 && second == 61 -> Val(BinOp.Ne)
@@ -1467,13 +1467,13 @@ fn jfmt_dispatch_op_from_source(f: JetFmt, subject: Expr) -> BinOp? Never! {
 
 // Infer the table's distributed comparison from subject-`table_op` leaves.
 // Prefers a consistent OP across pure distributed leaves; defaults to `==`.
-fn jfmt_dispatch_op(f: JetFmt, subject: Expr, arms: [SwitchArm]) -> BinOp Never! {
+jfmt_dispatch_op: fn(f: JetFmt, subject: Expr, arms: [SwitchArm]) -> BinOp Never! {
     found := BinOp?{None}
     loop arm in arms -> jfmt_collect_dispatch_ops(f, subject, arm.cond, &found)
     found ?? BinOp.Eq
 }
 
-fn jfmt_collect_dispatch_ops(f: JetFmt, subject: Expr, e: Expr, found: &BinOp?) Never! {
+jfmt_collect_dispatch_ops: fn(f: JetFmt, subject: Expr, e: Expr, found: &BinOp?) Never! {
     if e == .Binary(op, lhs, rhs, _, _) {
         if jfmt_bin_op_is_comparison(op) && jfmt_same_subject(f, lhs, subject) {
             // Mixed predicate + distributed leaves keep the first distributed
@@ -1487,14 +1487,14 @@ fn jfmt_collect_dispatch_ops(f: JetFmt, subject: Expr, e: Expr, found: &BinOp?) 
 }
 
 // True when `e` is an Or tree whose every leaf is `subject table_op value`.
-fn jfmt_is_all_subject_alts(f: JetFmt, subject: Expr, table_op: BinOp, e: Expr) -> Bool Never! {
+jfmt_is_all_subject_alts: fn(f: JetFmt, subject: Expr, table_op: BinOp, e: Expr) -> Bool Never! {
     if e == .Binary(op, lhs, rhs, _, _) {
         if op == BinOp.Or -> return jfmt_is_subject_alt_leaf(f, subject, table_op, lhs) && jfmt_is_subject_alt_leaf(f, subject, table_op, rhs)
     }
     false
 }
 
-fn jfmt_is_subject_alt_leaf(f: JetFmt, subject: Expr, table_op: BinOp, e: Expr) -> Bool Never! {
+jfmt_is_subject_alt_leaf: fn(f: JetFmt, subject: Expr, table_op: BinOp, e: Expr) -> Bool Never! {
     if e == .Binary(op, lhs, rhs, _, _) {
         if op == table_op -> return jfmt_same_subject(f, lhs, subject)
         if op == BinOp.Or -> return jfmt_is_subject_alt_leaf(f, subject, table_op, lhs) && jfmt_is_subject_alt_leaf(f, subject, table_op, rhs)
@@ -1503,7 +1503,7 @@ fn jfmt_is_subject_alt_leaf(f: JetFmt, subject: Expr, table_op: BinOp, e: Expr) 
 }
 
 // Emit alternates with `|` separators (caller adds outer parens if needed).
-fn jfmt_fmt_arm_alternates(f: &JetFmt, subject: Expr, table_op: BinOp, e: Expr) {
+jfmt_fmt_arm_alternates: fn(f: &JetFmt, subject: Expr, table_op: BinOp, e: Expr) {
     if e == .Binary(op, lhs, rhs, _, _) {
         if op == BinOp.Or {
             jfmt_fmt_arm_alternates(&f, subject, table_op, lhs)
@@ -1528,14 +1528,14 @@ fn jfmt_fmt_arm_alternates(f: &JetFmt, subject: Expr, table_op: BinOp, e: Expr) 
 // `other.` deleted, because a matching subject is elided from the table. The
 // right edge is still the anchor's end, which truncates a call's argument
 // list, so two heads differing only inside those parens still compare equal.
-fn jfmt_same_subject(f: JetFmt, a: Expr, subject: Expr) -> Bool Never! {
+jfmt_same_subject: fn(f: JetFmt, a: Expr, subject: Expr) -> Bool Never! {
     if a == .Ident(name, _, _) {
         if name == "it" -> return true
     }
-    a_start :: jfmt_expr_start(a)
-    a_end :: expr_span(a).end
-    subject_start :: jfmt_expr_start(subject)
-    subject_end :: expr_span(subject).end
+    a_start: jfmt_expr_start(a)
+    a_end: expr_span(a).end
+    subject_start: jfmt_expr_start(subject)
+    subject_end: expr_span(subject).end
     if !jfmt_src_range_valid(f, a_start, a_end) || !jfmt_src_range_valid(f, subject_start, subject_end) -> return false
     jfmt_src_text(f, a_start, a_end) == jfmt_src_text(f, subject_start, subject_end)
 }
@@ -1543,9 +1543,9 @@ fn jfmt_same_subject(f: JetFmt, a: Expr, subject: Expr) -> Bool Never! {
 // Subject-first test-binds own their `==` delimiter, so outer parens around an
 // already-postfix subject are redundant. Keep grouping inside the subject:
 // `(left + right).method()` still needs its receiver parens.
-fn jfmt_fmt_refutable_subject(f: &JetFmt, expr: Expr) {
-    unwrapped :: jfmt_expr_without_parens(expr)
-    postfix :: if unwrapped == {
+jfmt_fmt_refutable_subject: fn(f: &JetFmt, expr: Expr) {
+    unwrapped: jfmt_expr_without_parens(expr)
+    postfix: if unwrapped == {
         .Call(_, _) | .CallValue(_, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) -> true
         else -> false
     }
@@ -1556,17 +1556,17 @@ fn jfmt_fmt_refutable_subject(f: &JetFmt, expr: Expr) {
     }
 }
 
-fn jfmt_fmt_binding(f: &JetFmt, b: Binding) {
+jfmt_fmt_binding: fn(f: &JetFmt, b: Binding) {
     if b.meta == .Val(meta) {
         jfmt_fmt_meta_attr(&f, meta)
         jfmt_write(&f, " ")
     }
     loop marker in b.markers -> jfmt_write(&f, "#{marker.name} ")
     // Compile time is always the explicit
-    // `name :: comptime { value }`.
+    // `name: comptime { value }`.
     if b.is_comptime {
         jfmt_write(&f, b.name)
-        jfmt_write(&f, " :: ")
+        jfmt_write(&f, ": ")
         jfmt_fmt_prepared_value(&f, b.init)
         return
     }
@@ -1586,13 +1586,11 @@ fn jfmt_fmt_binding(f: &JetFmt, b: Binding) {
         // S74: a destructuring target stands in for the name.
         jfmt_fmt_bind_pattern(&f, pattern_value)
     } else {
-        // Bindings are always bare (`name :: …` / `name := …`).
+        // Bindings are always bare (`name: …` / `name := …`).
         // Types ride the value (`Type{ … }`), never the binding name.
         jfmt_write(&f, b.name)
     }
-    jfmt_write(&f, " ")
-    jfmt_write(&f, if b.mutable -> ":=" else -> "::")
-    jfmt_write(&f, " ")
+    jfmt_write(&f, if b.mutable -> " := " else -> ": ")
     // Print `Type{ uninit }` from the binding's type.
     if b.uninit {
         if b.ty == .Val(ty) {
@@ -1610,20 +1608,20 @@ fn jfmt_fmt_binding(f: &JetFmt, b: Binding) {
 
 // The prepared value of a compile-time binding,
 // `comptime { value }`.
-fn jfmt_fmt_prepared_value(f: &JetFmt, value: Expr) {
+jfmt_fmt_prepared_value: fn(f: &JetFmt, value: Expr) {
     jfmt_write(&f, "comptime {{ ")
     jfmt_fmt_expr(&f, value, JFMT_PREC_OR_FALLBACK)
     jfmt_write(&f, " }}")
 }
 
-fn jfmt_fmt_bind_names(f: &JetFmt, elems: [BindName]) {
+jfmt_fmt_bind_names: fn(f: &JetFmt, elems: [BindName]) {
     loop index in 0..<elems.len() {
         if index > 0 -> jfmt_write(&f, ", ")
         jfmt_write(&f, elems[index].name)
     }
 }
 
-fn jfmt_fmt_bind_pattern(f: &JetFmt, pat: BindPattern) {
+jfmt_fmt_bind_pattern: fn(f: &JetFmt, pat: BindPattern) {
     if pat == {
         .Struct(type_name, _, fields, rest, _) -> {
             // Emit `Type{x, y}`.
@@ -1676,7 +1674,7 @@ fn jfmt_fmt_bind_pattern(f: &JetFmt, pat: BindPattern) {
     }
 }
 
-fn jfmt_fmt_lvalue(f: &JetFmt, lv: LValue) {
+jfmt_fmt_lvalue: fn(f: &JetFmt, lv: LValue) {
     if lv == {
         .Local(name, _) -> jfmt_write(&f, name)
         .Index(base, index, _, _) -> {
@@ -1700,7 +1698,7 @@ fn jfmt_fmt_lvalue(f: &JetFmt, lv: LValue) {
 // on the EXACT shape the parser's desugar produces (receiver is a bare
 // `Ident` equal to `layout_name`, method is `h`/`v`, exactly two
 // single-literal `Str` args); anything else is left as-is.
-fn jfmt_single_str_lit(e: Expr) -> String? Never! {
+jfmt_single_str_lit: fn(e: Expr) -> String? Never! {
     if e == .Str(parts, _, _) {
         if parts.len() == 1 {
             if parts[0] == .Lit(text) -> return Val(text)
@@ -1709,7 +1707,7 @@ fn jfmt_single_str_lit(e: Expr) -> String? Never! {
     None
 }
 
-fn jfmt_resugar_layout_stmt(layout_name: String, stmt: Stmt) -> Stmt Never! {
+jfmt_resugar_layout_stmt: fn(layout_name: String, stmt: Stmt) -> Stmt Never! {
     if stmt == {
         .Expr(e) -> Stmt.Expr{expr: jfmt_resugar_layout_expr(layout_name, e)}
         .DeferClose(close, span) -> Stmt.DeferClose{close: jfmt_resugar_layout_expr(layout_name, close), span: span}
@@ -1726,7 +1724,7 @@ fn jfmt_resugar_layout_stmt(layout_name: String, stmt: Stmt) -> Stmt Never! {
     }
 }
 
-fn jfmt_resugar_layout_args(layout_name: String, args: [CallArg]) -> [CallArg] Never! {
+jfmt_resugar_layout_args: fn(layout_name: String, args: [CallArg]) -> [CallArg] Never! {
     out := [CallArg]{}
     loop arg in args {
         a2 := arg
@@ -1736,16 +1734,16 @@ fn jfmt_resugar_layout_args(layout_name: String, args: [CallArg]) -> [CallArg] N
     out
 }
 
-fn jfmt_resugar_layout_expr(layout_name: String, e: Expr) -> Expr Never! {
+jfmt_resugar_layout_expr: fn(layout_name: String, e: Expr) -> Expr Never! {
     if e == .MethodCall(receiver, method, method_span, _, _, args, _) {
         if (method == "h" || method == "v") && args.len() == 2 {
             if receiver == .Ident(recv_name, recv_span, _) {
                 if recv_name == layout_name {
-                    box_name :: jfmt_single_str_lit(args[0].expr)
-                    anchor :: jfmt_single_str_lit(args[1].expr)
+                    box_name: jfmt_single_str_lit(args[0].expr)
+                    anchor: jfmt_single_str_lit(args[1].expr)
                     if box_name == .Val(box_text) {
                         if anchor == .Val(anchor_text) {
-                            shown :: if box_text == layout_name -> "self" else -> box_text
+                            shown: if box_text == layout_name -> "self" else -> box_text
                             return Expr.Field{base: Expr.Ident{name: shown, span: recv_span, id: AST_NODE_GENERATED}, member: anchor_text, span: method_span, id: AST_NODE_GENERATED}
                         }
                     }

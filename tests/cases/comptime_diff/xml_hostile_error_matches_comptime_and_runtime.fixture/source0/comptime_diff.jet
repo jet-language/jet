@@ -1,9 +1,9 @@
 use {
-    comptime_diff_hex :: core.encoding.hex
-    xml :: core.encoding.xml
+    comptime_diff_hex: core.encoding.hex
+    xml: core.encoding.xml
 }
 
-fn show(result: Dyn XMLError!) -> String {
+show: fn(result: Dyn XMLError!) -> String {
     if result == {
         .Ok(_) -> return "ok"
         .Err(e) -> {
@@ -13,15 +13,15 @@ fn show(result: Dyn XMLError!) -> String {
     return "unreachable"
 }
 
-EXPECTED_MISMATCH :: comptime { show(xml.parse("<root>\n<a></root>")) }
+EXPECTED_MISMATCH: comptime { show(xml.parse("<root>\n<a></root>")) }
 
-fn run() {
-    actual_mismatch :: show(xml.parse("<root>\n<a></root>"))
+run: fn() {
+    actual_mismatch: show(xml.parse("<root>\n<a></root>"))
     comptime_diff_frame("{EXPECTED_MISMATCH}", "{actual_mismatch}")
 
 }
 
-fn comptime_diff_frame(expected_text: String, actual_text: String) {
+comptime_diff_frame: fn(expected_text: String, actual_text: String) {
     print("{comptime_diff_hex.encode(expected_text.bytes())}")
     print("{comptime_diff_hex.encode(actual_text.bytes())}")
 }

@@ -342,7 +342,9 @@ function distance(a, b) {
 const DECL = {
   jet: [
     [/^\s*(?:(?:pub|private|public|extern|export|unsafe|async|const|comptime|inline)\s+|#\w+(?:\([^)]*\))?\s+)*fn\s+([A-Za-z_][\w]*)/, "fn"],
+    [/^\s*(?:(?:pub|priv)\s+|#\w+(?:\([^)]*\))?\s+)*(?:[A-Za-z_]\w*\.)?([A-Za-z_]\w*):\s*fn\b/, "fn"],
     [/^\s*(?:(?:pub|private|public)\s+)*(?:struct|enum|trait|effect|protocol|class|type|choice|union)\s+([A-Z][\w]*)/, "type"],
+    [/^\s*(?:(?:pub|priv)\s+)*([A-Z]\w*)(?:<[^>\n]*>)?:\s*(?:struct|enum|trait|effect|tag)\b/, "type"],
     [/^\s*#Test\("((?:[^"\\]|\\.)*)"/, "test"],
   ],
   rust: [

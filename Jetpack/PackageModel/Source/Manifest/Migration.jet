@@ -2,19 +2,19 @@
 
 // Why a Package/Config source cannot be formatted (Rust `String` errors).
 #Error
-struct PackageFormatError {
+PackageFormatError: struct {
     message: String
 }
 
 // Format one canonical Package or Config source file after validating it
 // with the same model that loads it.
 // Files with comments fail closed.
-fn pkg_format_source(text: String, origin: String) -> String PackageFormatError! {
-    stripped :: pkg_strip_comments(text)
-    trimmed :: stripped.trim()
+pkg_format_source: fn(text: String, origin: String) -> String PackageFormatError! {
+    stripped: pkg_strip_comments(text)
+    trimmed: stripped.trim()
     if trimmed == "" -> return Err(PackageFormatError{message: "Package or Config source is empty"})
     if stripped != text -> return Err(PackageFormatError{message: "Package or Config formatter cannot safely rewrite comments in `{origin}`"})
-    is_config :: if pkg_config_wrapper(trimmed) == {
+    is_config: if pkg_config_wrapper(trimmed) == {
         .Ok(wrapper) -> wrapper != None || trimmed.starts_with("Config")
         .Err(error) -> {
             return Err(PackageFormatError{message: error.message()})
@@ -25,16 +25,16 @@ fn pkg_format_source(text: String, origin: String) -> String PackageFormatError!
     } else {
         if PackageFacts.parse(text, origin) == .Err(error) -> return Err(PackageFormatError{message: error.message()})
     }
-    entries :: pkg_top_level_entries(text)
+    entries: pkg_top_level_entries(text)
     if entries.len() == 0 -> return Err(PackageFormatError{message: "Package or Config source has no fields"})
-    separator :: if pkg_package_top_level_comma(text) != None -> ",\n" else -> "\n"
+    separator: if pkg_package_top_level_comma(text) != None -> ",\n" else -> "\n"
     // A blank line between two top-level fields stays (one at most): it
     // groups the manifest the way its author wrote it (`deps: {}` apart).
     body := ""
     cursor := 0
     loop (index, entry) in entries {
-        found :: pkg_binder_tail(text, cursor).find(entry)
-        start :: if found < 0 -> cursor else -> cursor + found
+        found: pkg_binder_tail(text, cursor).find(entry)
+        start: if found < 0 -> cursor else -> cursor + found
         if index > 0 {
             body = "{body}{separator}"
             if pkg_format_newlines(pkg_binder_slice(text, cursor, start)) > 1 -> body = "{body}\n"
@@ -46,7 +46,7 @@ fn pkg_format_source(text: String, origin: String) -> String PackageFormatError!
     Ok("{body}\n")
 }
 
-fn pkg_format_newlines(gap: String) -> Int Never! {
+pkg_format_newlines: fn(gap: String) -> Int Never! {
     count := 0
     loop byte in gap.bytes() {
         if byte == (U8{10}) -> count += 1
@@ -54,48 +54,47 @@ fn pkg_format_newlines(gap: String) -> Int Never! {
     count
 }
 
-fn pkg_trim_entry_terminators(value: String) -> String Never! {
+pkg_trim_entry_terminators: fn(value: String) -> String Never! {
     pkg_binder_trim_end_matches(pkg_binder_trim_end_matches(value.trim(), ","), ";").trim()
 }
 
-fn pkg_format_package_entry(input: String, indent: Int) -> String Never! {
-    entry :: pkg_trim_entry_terminators(input)
-    binding :: pkg_split_package_binding(entry) ?? return pkg_format_package_value(entry, indent)
-    left :: pkg_binder_words(binding.left).join(" ")
-    separator :: if binding.operator == ":" -> ": " else -> " :: "
-    "{left}{separator}{pkg_format_package_value(binding.right, indent)}"
+pkg_format_package_entry: fn(input: String, indent: Int) -> String Never! {
+    entry: pkg_trim_entry_terminators(input)
+    binding: pkg_split_package_binding(entry) ?? return pkg_format_package_value(entry, indent)
+    left: pkg_binder_words(binding.left).join(" ")
+    "{left}: {pkg_format_package_value(binding.right, indent)}"
 }
 
-fn pkg_format_package_value(input: String, indent: Int) -> String Never! {
-    value :: pkg_trim_entry_terminators(input)
-    bounds :: pkg_package_record_bounds(value) ?? return value
-    prefix :: pkg_binder_slice(value, 0, bounds.start).trim_end()
-    suffix :: pkg_binder_tail(value, bounds.end + 1).trim()
-    inner :: pkg_binder_slice(value, bounds.start + 1, bounds.end)
-    entries :: pkg_top_level_entries(inner)
+pkg_format_package_value: fn(input: String, indent: Int) -> String Never! {
+    value: pkg_trim_entry_terminators(input)
+    bounds: pkg_package_record_bounds(value) ?? return value
+    prefix: pkg_binder_slice(value, 0, bounds.start).trim_end()
+    suffix: pkg_binder_tail(value, bounds.end + 1).trim()
+    inner: pkg_binder_slice(value, bounds.start + 1, bounds.end)
+    entries: pkg_top_level_entries(inner)
     if entries.len() == 0 -> return "{prefix}{{}}{suffix}"
     lines := [String]{}
     loop entry in entries -> &lines.push("{" ".repeat(indent + 4)}{pkg_format_package_entry(entry, indent + 4)}")
-    separator :: if pkg_package_top_level_comma(inner) != None -> ",\n" else -> "\n"
+    separator: if pkg_package_top_level_comma(inner) != None -> ",\n" else -> "\n"
     body := lines.join(separator)
     if pkg_package_has_trailing_top_level_comma(inner) -> body = "{body},"
     "{prefix}{{\n{body}\n{" ".repeat(indent)}}}{suffix}"
 }
 
-fn pkg_package_has_trailing_top_level_comma(value: String) -> Bool Never! {
-    comma :: pkg_package_top_level_comma(value) ?? return false
+pkg_package_has_trailing_top_level_comma: fn(value: String) -> Bool Never! {
+    comma: pkg_package_top_level_comma(value) ?? return false
     pkg_binder_tail(value, comma + 1).trim() == ""
 }
 
 // The byte offset of the last top-level comma.
-fn pkg_package_top_level_comma(value: String) -> Int? Never! {
-    raw :: value.bytes()
+pkg_package_top_level_comma: fn(value: String) -> Int? Never! {
+    raw: value.bytes()
     depth := 0
     quoted := false
     escaped := false
     comma := Int?{None}
     loop index in 0..<raw.len() {
-        code :: Int.from_u8(raw[index])
+        code: Int.from_u8(raw[index])
         if quoted {
             if {
                 escaped -> escaped = false
@@ -119,14 +118,14 @@ fn pkg_package_top_level_comma(value: String) -> Int? Never! {
 }
 
 // The outermost `{ … }` of a value that ends at its closing brace.
-fn pkg_package_record_bounds(value: String) -> EditSpan? Never! {
-    raw :: value.bytes()
+pkg_package_record_bounds: fn(value: String) -> EditSpan? Never! {
+    raw: value.bytes()
     open := -1
     depth := 0
     quoted := false
     escaped := false
     loop index in 0..<raw.len() {
-        code :: Int.from_u8(raw[index])
+        code: Int.from_u8(raw[index])
         if quoted {
             if {
                 escaped -> escaped = false

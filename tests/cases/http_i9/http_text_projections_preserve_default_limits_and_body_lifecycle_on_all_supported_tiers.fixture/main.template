@@ -1,7 +1,7 @@
 
-use http :: core.http.client
+use http: core.http.client
 
-fn response_text_default(response: HTTPResponse) -> String Never! {
+response_text_default: fn(response: HTTPResponse) -> String Never! {
     if response.text() == {
         .Ok(text) -> return "ok:{text.len()}"
         .Err(error) -> {
@@ -17,7 +17,7 @@ fn response_text_default(response: HTTPResponse) -> String Never! {
     }
 }
 
-fn response_text_explicit(response: HTTPResponse) -> String Never! {
+response_text_explicit: fn(response: HTTPResponse) -> String Never! {
     if response.text(5) == {
         .Ok(text) -> return "ok:{text}"
         .Err(error) -> {
@@ -31,7 +31,7 @@ fn response_text_explicit(response: HTTPResponse) -> String Never! {
     }
 }
 
-fn response_text_consumed(response: HTTPResponse) -> String Never! {
+response_text_consumed: fn(response: HTTPResponse) -> String Never! {
     if response.text() == {
         .Ok(_) -> {
             if response.text() == {
@@ -50,7 +50,7 @@ fn response_text_consumed(response: HTTPResponse) -> String Never! {
     }
 }
 
-fn response_text_stream(response: HTTPResponse) -> String Never! {
+response_text_stream: fn(response: HTTPResponse) -> String Never! {
     if response.text() == {
         .Ok(text) -> return "ok:{text}"
         .Err(error) -> {
@@ -63,7 +63,7 @@ fn response_text_stream(response: HTTPResponse) -> String Never! {
     }
 }
 
-fn run() {
+run: fn() {
     if http.get("http://{cap:addr}/default") == {
         .Ok(response) -> print("default={response_text_default(response)}")
         .Err(_) -> print("default=request-error")

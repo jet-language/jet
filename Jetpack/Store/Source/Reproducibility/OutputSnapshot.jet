@@ -7,7 +7,7 @@
 // in path order; the first disagreement becomes the durable evidence.
 
 // Which property two outputs of one action first disagreed on.
-enum DifferenceKind {
+DifferenceKind: enum {
     ActionIdentity
     CanonicalOutput
     NodeKind
@@ -29,7 +29,7 @@ enum DifferenceKind {
     ProducerProvenance
     References
 
-    fn label(self) -> String Never! {
+    label: fn(self) -> String Never! {
         if self == {
             .ActionIdentity -> "action-identity"
             .CanonicalOutput -> "canonical-output"
@@ -55,19 +55,19 @@ enum DifferenceKind {
     }
 }
 
-struct FirstDifference {
+FirstDifference: struct {
     path: String
     kind: DifferenceKind
     left: String
     right: String
 }
 
-enum ObservedNodeKind {
+ObservedNodeKind: enum {
     Directory
     Symlink
     File
 
-    fn label(self) -> String Never! {
+    label: fn(self) -> String Never! {
         if self == {
             .Directory -> "directory"
             .Symlink -> "symlink"
@@ -76,7 +76,7 @@ enum ObservedNodeKind {
     }
 }
 
-struct NodeObservation {
+NodeObservation: struct {
     kind: ObservedNodeKind
     mode: Int
     digest: String?
@@ -85,29 +85,29 @@ struct NodeObservation {
     xattrs: [String]
 
     // `kind=…;mode=…;digest=…;target=…;hardlink=…;xattrs=…` evidence text.
-    fn value(self) -> String Never! {
-        digest :: self.digest ?? "<none>"
-        target :: self.target ?? "<none>"
-        hardlink :: self.hardlink ?? "<none>"
+    value: fn(self) -> String Never! {
+        digest: self.digest ?? "<none>"
+        target: self.target ?? "<none>"
+        hardlink: self.hardlink ?? "<none>"
         "kind={self.kind.label()};mode={self.mode};digest={digest};target={target};hardlink={hardlink};xattrs={self.xattrs.join(",")}"
     }
 }
 
 // One output's canonical digest plus every observed node, keyed by the
 // node's path relative to the output root (`""` is the root itself).
-struct OutputSnapshot {
+OutputSnapshot: struct {
     digest: String
     nodes: [String: NodeObservation]
 }
 
-fn store_repro_invalid(detail: String) -> StoreError Never! { StoreError.InvalidData(detail) }
+store_repro_invalid: fn(detail: String) -> StoreError Never! { StoreError.InvalidData(detail) }
 
 // Verify both outputs, then compare their canonical trees and entry metadata.
-fn store_repro_compare_entries(verification: &StoreVerification, left_roots: HangarRoots, left: StoreEntry, right_roots: HangarRoots, right: StoreEntry) -[FS, Env]> FirstDifference? StoreError! {
+store_repro_compare_entries: fn(verification: &StoreVerification, left_roots: HangarRoots, left: StoreEntry, right_roots: HangarRoots, right: StoreEntry) -[FS, Env]> FirstDifference? StoreError! {
     store_repro_verify_existing_output(&verification, left_roots, left)
     store_repro_verify_existing_output(&verification, right_roots, right)
-    left_snapshot :: store_repro_snapshot_for_entry(left_roots, left)
-    right_snapshot :: store_repro_snapshot_for_entry(right_roots, right)
+    left_snapshot: store_repro_snapshot_for_entry(left_roots, left)
+    right_snapshot: store_repro_snapshot_for_entry(right_roots, right)
     if left_snapshot.digest != right_snapshot.digest {
         if store_repro_first_node_difference(left_snapshot, right_snapshot) == {
             .Val(difference) -> return Ok(Val(difference))
@@ -117,17 +117,17 @@ fn store_repro_compare_entries(verification: &StoreVerification, left_roots: Han
     Ok(store_repro_metadata_difference(left, right))
 }
 
-fn store_repro_snapshot_for_entry(roots: HangarRoots, entry: StoreEntry) -[FS, Env]> OutputSnapshot StoreError! {
-    hangar :: roots.hangar_dir()
-    canonical_hangar :: files.canonicalize(hangar) ?? hangar
-    hangar_root :: if store_path_starts_with(entry.out, canonical_hangar) -> Val(canonical_hangar) else -> None
+store_repro_snapshot_for_entry: fn(roots: HangarRoots, entry: StoreEntry) -[FS, Env]> OutputSnapshot StoreError! {
+    hangar: roots.hangar_dir()
+    canonical_hangar: files.canonicalize(hangar) ?? hangar
+    hangar_root: if store_path_starts_with(entry.out, canonical_hangar) -> Val(canonical_hangar) else -> None
     store_repro_snapshot_output(entry.out, hangar_root, entry.platform_artifact_kind != "")
 }
 
-fn store_repro_snapshot_output(path: String, hangar_root: String?, allow_semantic_xattrs: Bool) -[FS, Env]> OutputSnapshot StoreError! {
-    canonical :: files.canonicalize(path)
+store_repro_snapshot_output: fn(path: String, hangar_root: String?, allow_semantic_xattrs: Bool) -[FS, Env]> OutputSnapshot StoreError! {
+    canonical: files.canonicalize(path)
     hook := EnvelopeWalkHook.recording()
-    digest :: if hangar_root == {
+    digest: if hangar_root == {
         .Val(root) -> pkg_try_output_hash_of_in_hangar_with_policy(path, root, allow_semantic_xattrs, &hook) ?? return Err(StoreError.Other(err.message()))
         else -> pkg_try_output_hash_of_with_policy(path, allow_semantic_xattrs, &hook) ?? return Err(StoreError.Other(err.message()))
     }
@@ -135,12 +135,12 @@ fn store_repro_snapshot_output(path: String, hangar_root: String?, allow_semanti
     hardlink_first := [String: String]{}
     loop event in hook.events {
         if event.stage != EnvelopeWalkStage.Node -> next
-        relative :: store_path_strip_prefix(event.path, canonical) ?? return Err(store_repro_invalid("reproducibility observation escaped its output root"))
-        observation :: store_repro_observe_node(event.path, relative, &hardlink_first)
+        relative: store_path_strip_prefix(event.path, canonical) ?? return Err(store_repro_invalid("reproducibility observation escaped its output root"))
+        observation: store_repro_observe_node(event.path, relative, &hardlink_first)
         if nodes.has_key(relative) -> return Err(store_repro_invalid("reproducibility observed one output node twice"))
         nodes[relative] = observation
     }
-    confirmed_digest :: if hangar_root == {
+    confirmed_digest: if hangar_root == {
         .Val(root) -> pkg_try_output_hash_of_in_hangar(path, root, allow_semantic_xattrs) ?? return Err(StoreError.Other(err.message()))
         else -> pkg_try_output_hash_of(path) ?? return Err(StoreError.Other(err.message()))
     }
@@ -148,9 +148,9 @@ fn store_repro_snapshot_output(path: String, hangar_root: String?, allow_semanti
     Ok(OutputSnapshot{digest, nodes})
 }
 
-fn store_repro_observe_node(path: String, relative: String, hardlink_first: &[String: String]) -[FS]> NodeObservation StoreError! {
-    info :: files.stat(path)
-    names :: pkg_list_xattr_names(path) ?? return Err(StoreError.Other(err.message()))
+store_repro_observe_node: fn(path: String, relative: String, hardlink_first: &[String: String]) -[FS]> NodeObservation StoreError! {
+    info: files.stat(path)
+    names: pkg_list_xattr_names(path) ?? return Err(StoreError.Other(err.message()))
     xattrs := [String]{}
     loop name in names {
         if !pkg_is_excluded_xattr(name) -> &xattrs.push(name)
@@ -159,13 +159,13 @@ fn store_repro_observe_node(path: String, relative: String, hardlink_first: &[St
         return Ok(NodeObservation{kind: .Directory, mode: info.mode, digest: None, target: None, hardlink: None, xattrs})
     }
     if info.is_symlink {
-        target :: files.read_link(path)
+        target: files.read_link(path)
         return Ok(NodeObservation{kind: .Symlink, mode: info.mode, digest: None, target: Val(store_repro_path_display(target)), hardlink: None, xattrs})
     }
     if !info.is_file -> return Err(store_repro_invalid("reproducibility observed an unsupported special file"))
     hardlink := String?{None}
     if info.links > 1 {
-        identity :: "{info.id.device}:{info.id.inode}"
+        identity: "{info.id.device}:{info.id.inode}"
         if hardlink_first.get(identity) == {
             .Val(first) -> hardlink = Val(store_repro_path_display(first))
             else -> {}
@@ -177,27 +177,27 @@ fn store_repro_observe_node(path: String, relative: String, hardlink_first: &[St
 
 // `sha256-<hex>` of a file read through a no-follow handle whose metadata
 // must not change while it is read.
-fn store_repro_read_file_digest(path: String) -[FS]> String StoreError! {
-    file :: files.open(path, links: .Refuse)
-    before :: store_repro_metadata_fingerprint(file.stat())
+store_repro_read_file_digest: fn(path: String) -[FS]> String StoreError! {
+    file: files.open(path, links: .Refuse)
+    before: store_repro_metadata_fingerprint(file.stat())
     bytes := [U8]{}
     loop {
-        chunk :: file.read(65536)
+        chunk: file.read(65536)
         if chunk.len() == 0 -> break
         loop byte in chunk -> &bytes.push(byte)
     }
-    after :: store_repro_metadata_fingerprint(file.stat())
+    after: store_repro_metadata_fingerprint(file.stat())
     if before != after -> return Err(store_repro_invalid("file changed while collecting reproducibility evidence"))
     Ok("sha256-{crypto.sha256(bytes).hex()}")
 }
 
-fn store_repro_metadata_fingerprint(info: files.Stat) -> String Never! {
-    modified :: info.modified.to_unix_ns() ?? panic("file times fit Unix nanoseconds")
-    changed :: info.changed.to_unix_ns() ?? panic("file times fit Unix nanoseconds")
+store_repro_metadata_fingerprint: fn(info: files.Stat) -> String Never! {
+    modified: info.modified.to_unix_ns() ?? panic("file times fit Unix nanoseconds")
+    changed: info.changed.to_unix_ns() ?? panic("file times fit Unix nanoseconds")
     "{info.id.device}:{info.id.inode}:{info.size}:{modified /% 1000000000}:{modified % 1000000000}:{changed /% 1000000000}:{changed % 1000000000}:{info.mode}"
 }
 
-fn store_repro_first_node_difference(left: OutputSnapshot, right: OutputSnapshot) -> FirstDifference? Never! {
+store_repro_first_node_difference: fn(left: OutputSnapshot, right: OutputSnapshot) -> FirstDifference? Never! {
     paths := left.nodes.keys().to_list()
     loop path in right.nodes.keys() {
         if !left.nodes.has_key(path) -> &paths.push(path)
@@ -214,7 +214,7 @@ fn store_repro_first_node_difference(left: OutputSnapshot, right: OutputSnapshot
                 }
             }
             else -> {
-                right_node :: right.nodes[path]
+                right_node: right.nodes[path]
                 return Val(FirstDifference{path: store_repro_path_display(path), kind: .MissingLeft, left: "<missing>", right: right_node.value()})
             }
         }
@@ -222,8 +222,8 @@ fn store_repro_first_node_difference(left: OutputSnapshot, right: OutputSnapshot
     None
 }
 
-fn store_repro_node_difference(path: String, left: NodeObservation, right: NodeObservation) -> FirstDifference Never! {
-    kind :: if {
+store_repro_node_difference: fn(path: String, left: NodeObservation, right: NodeObservation) -> FirstDifference Never! {
+    kind: if {
         left.kind != right.kind -> DifferenceKind.NodeKind
         left.mode != right.mode -> DifferenceKind.Mode
         left.digest != right.digest -> DifferenceKind.Bytes
@@ -234,8 +234,8 @@ fn store_repro_node_difference(path: String, left: NodeObservation, right: NodeO
     FirstDifference{path: store_repro_path_display(path), kind, left: left.value(), right: right.value()}
 }
 
-fn store_repro_metadata_difference(left: StoreEntry, right: StoreEntry) -> FirstDifference? Never! {
-    checks :: [(kind: DifferenceKind, left: String, right: String)]{
+store_repro_metadata_difference: fn(left: StoreEntry, right: StoreEntry) -> FirstDifference? Never! {
+    checks: [(kind: DifferenceKind, left: String, right: String)]{
         (kind: .Provenance, left: left.envelope.provenance, right: right.envelope.provenance),
         (kind: .SourceFingerprint, left: left.cache_identity.source_fingerprint, right: right.cache_identity.source_fingerprint),
         (kind: .RecipeFingerprint, left: left.cache_identity.recipe_fingerprint, right: right.cache_identity.recipe_fingerprint),
@@ -252,17 +252,17 @@ fn store_repro_metadata_difference(left: StoreEntry, right: StoreEntry) -> First
     }
     &names.sort()
     loop name in names {
-        left_digest :: left.named_outputs.get(name)
-        right_digest :: right.named_outputs.get(name)
+        left_digest: left.named_outputs.get(name)
+        right_digest: right.named_outputs.get(name)
         if left_digest != right_digest {
             return Val(FirstDifference{path: "output/{name}", kind: .NamedOutput, left: left_digest ?? "<missing>", right: right_digest ?? "<missing>"})
         }
     }
-    left_provenance :: if ProducerRecord.decode(left.producer_record) == {
+    left_provenance: if ProducerRecord.decode(left.producer_record) == {
         .Ok(producer) -> Val(store_repro_producer_provenance_facts(producer))
         .Err(_) -> None
     }
-    right_provenance :: if ProducerRecord.decode(right.producer_record) == {
+    right_provenance: if ProducerRecord.decode(right.producer_record) == {
         .Ok(producer) -> Val(store_repro_producer_provenance_facts(producer))
         .Err(_) -> None
     }
@@ -279,7 +279,7 @@ fn store_repro_metadata_difference(left: StoreEntry, right: StoreEntry) -> First
 
 // The producer facts that identify an action's provenance, excluding the
 // realized-output facts that legitimately differ between agreeing builds.
-fn store_repro_producer_provenance_facts(producer: ProducerRecord) -> [String: String] Never! {
+store_repro_producer_provenance_facts: fn(producer: ProducerRecord) -> [String: String] Never! {
     facts := [String: String]{
         "provider": producer.provider,
         "immutable_source": producer.immutable_source,
@@ -298,26 +298,26 @@ fn store_repro_producer_provenance_facts(producer: ProducerRecord) -> [String: S
     facts
 }
 
-fn store_repro_is_output_fact(key: String) -> Bool Never! {
+store_repro_is_output_fact: fn(key: String) -> Bool Never! {
     key.starts_with("output.") || key.starts_with("nix.output.") || key == "cache.output"
 }
 
-fn store_repro_is_action_ignored_fact(provider: String, key: String) -> Bool Never! {
+store_repro_is_action_ignored_fact: fn(provider: String, key: String) -> Bool Never! {
     store_repro_is_output_fact(key) || key == "cache.reproducibility" || (provider == "nix" && key == "nix.reference")
 }
 
 // A sorted-key JSON object of string values (Rust `json_map`).
-fn store_repro_json_map(map: [String: String]) -> String Never! {
+store_repro_json_map: fn(map: [String: String]) -> String Never! {
     json.canonical(store_repro_text_object(map)) ?? panic("value is not canonical JSON")
 }
 
-fn store_repro_text_object(map: [String: String]) -> Dyn Never! {
+store_repro_text_object: fn(map: [String: String]) -> Dyn Never! {
     object := [String: Dyn]{}
     loop entry in map -> object[entry.key] = Dyn.Text(entry.value)
     Dyn.Object(object)
 }
 
-fn store_repro_path_display(path: String) -> String Never! {
+store_repro_path_display: fn(path: String) -> String Never! {
     if path == "" -> return "."
     path.copy()
 }

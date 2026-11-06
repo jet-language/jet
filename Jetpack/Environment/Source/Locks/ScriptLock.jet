@@ -18,25 +18,25 @@
 
 use {
     jet_pkg_model.[pkg_binder_trim_matches]
-    files :: core.files
+    files: core.files
 }
 
-SCRIPT_LOCK_VERSION :: 1
-SCRIPT_LOCK_DEP_HEADER :: "[[dep]]"
-SCRIPT_LOCK_U32_MAX :: 4294967295
+SCRIPT_LOCK_VERSION: 1
+SCRIPT_LOCK_DEP_HEADER: "[[dep]]"
+SCRIPT_LOCK_U32_MAX: 4294967295
 
-struct LockedInlineDep {
+LockedInlineDep: struct {
     name: String
     selector: String
     resolved: String
     content_hash: String
 
-    fn empty() -> LockedInlineDep Never! {
+    empty: fn() -> LockedInlineDep Never! {
         LockedInlineDep{name: "", selector: "", resolved: "", content_hash: ""}
     }
 }
 
-struct ScriptLockFile {
+ScriptLockFile: struct {
     version: Int
     script_hash: String
     deps: [LockedInlineDep]
@@ -44,15 +44,15 @@ struct ScriptLockFile {
 
 // `stats.jet` -> `stats.jet.lock`, right next to the script and never inside
 // a `.jet/` folder, since a bare script may not have one yet.
-fn env_script_lock_sidecar_path(script_path: String) -> String Never! {
+env_script_lock_sidecar_path: fn(script_path: String) -> String Never! {
     "{script_path}.lock"
 }
 
-fn env_script_lock_write(script_path: String, lock: ScriptLockFile) IOError! -[FS]> {
+env_script_lock_write: fn(script_path: String, lock: ScriptLockFile) IOError! -[FS]> {
     files.write(env_script_lock_sidecar_path(script_path), env_script_lock_render(lock))
 }
 
-fn env_script_lock_render(lock: ScriptLockFile) -> String Never! {
+env_script_lock_render: fn(lock: ScriptLockFile) -> String Never! {
     out := [String]{"version = {lock.version}\n", "script_hash = \"{lock.script_hash}\"\n"}
     loop dep in lock.deps {
         &out.push("\n{SCRIPT_LOCK_DEP_HEADER}\n")
@@ -65,12 +65,12 @@ fn env_script_lock_render(lock: ScriptLockFile) -> String Never! {
 }
 
 // The sidecar next to `script_path`, if present and well formed.
-fn env_script_lock_load(script_path: String) -[FS]> ScriptLockFile? Never! {
-    raw :: files.read(env_script_lock_sidecar_path(script_path)) ?? return None
+env_script_lock_load: fn(script_path: String) -[FS]> ScriptLockFile? Never! {
+    raw: files.read(env_script_lock_sidecar_path(script_path)) ?? return None
     Val(env_script_lock_parse(raw) ?? return None)
 }
 
-fn env_script_lock_parse(raw: String) -> ScriptLockFile EnvironmentError! {
+env_script_lock_parse: fn(raw: String) -> ScriptLockFile EnvironmentError! {
     version := SCRIPT_LOCK_VERSION
     script_hash := ""
     deps := [LockedInlineDep]{}
@@ -78,7 +78,7 @@ fn env_script_lock_parse(raw: String) -> ScriptLockFile EnvironmentError! {
     in_dep := false
     current := LockedInlineDep.empty()
     loop raw_line in raw.split("\n") {
-        line :: raw_line.trim()
+        line: raw_line.trim()
         if line == "" || line.starts_with("#") -> next
         if line == SCRIPT_LOCK_DEP_HEADER {
             if in_dep -> &deps.push(current)
@@ -86,9 +86,9 @@ fn env_script_lock_parse(raw: String) -> ScriptLockFile EnvironmentError! {
             in_dep = true
             next
         }
-        pair :: line.split_once("=") ?? return Err(EnvironmentError.InvalidData("malformed line in script lock: `{line}`"))
-        key :: pair.before.trim()
-        value :: pkg_binder_trim_matches(pair.after.trim(), "\"")
+        pair: line.split_once("=") ?? return Err(EnvironmentError.InvalidData("malformed line in script lock: `{line}`"))
+        key: pair.before.trim()
+        value: pkg_binder_trim_matches(pair.after.trim(), "\"")
         if in_dep {
             if key == {
                 "name" -> current.name = value
@@ -110,13 +110,13 @@ fn env_script_lock_parse(raw: String) -> ScriptLockFile EnvironmentError! {
 }
 
 // Rust `str::parse::<u32>`: an optional `+`, then decimal digits in range.
-fn env_script_lock_parse_version(text: String) -> Int? Never! {
-    digits :: text.removeprefix("+")
+env_script_lock_parse_version: fn(text: String) -> Int? Never! {
+    digits: text.removeprefix("+")
     if digits == "" -> return None
     loop byte in digits.bytes() {
         if byte < 48 || byte > 57 -> return None
     }
-    value :: Int.parse(digits) ?? return None
+    value: Int.parse(digits) ?? return None
     if value > SCRIPT_LOCK_U32_MAX -> return None
     Val(value)
 }

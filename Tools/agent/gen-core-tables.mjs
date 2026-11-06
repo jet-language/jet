@@ -54,8 +54,8 @@ function fail(message) {
   throw new Error(message);
 }
 
-// Effects.jet declares each effect as a type: `struct Name {` or `enum Name {`
-// heads an effect root, and a type whose `fn irreversible` body is not
+// Effects.jet declares each effect as a type: `Name: struct {` or `Name: enum {`
+// heads an effect root, and a type whose `irreversible: fn` body is not
 // `false` holds an effect a rollback can't take back. Tools/agent/CoreSourceRows.jet
 // reads the full rows; this checks the roots the build and policy tables name.
 function parseEffects(source) {
@@ -65,20 +65,20 @@ function parseEffects(source) {
   for (const [index, raw] of source.split(/\r?\n/).entries()) {
     const line = raw.replace(/\/\/.*$/, "").trim();
     if (!line) continue;
-    const head = /^(struct|enum) ([A-Z][A-Za-z0-9]*) \{$/.exec(line);
+    const head = /^([A-Z][A-Za-z0-9]*): (?:struct|enum) \{$/.exec(line);
     if (head) {
       if (current !== null) fail(`${EFFECT_SOURCE_PATH}:${index + 1}: ${current} is not closed`);
-      if (roots.includes(head[2])) {
-        fail(`${EFFECT_SOURCE_PATH}:${index + 1}: duplicate effect declaration ${head[2]}`);
+      if (roots.includes(head[1])) {
+        fail(`${EFFECT_SOURCE_PATH}:${index + 1}: duplicate effect declaration ${head[1]}`);
       }
-      current = head[2];
+      current = head[1];
       roots.push(current);
       continue;
     }
     if (current === null) {
       fail(`${EFFECT_SOURCE_PATH}:${index + 1}: expected an effect type declaration`);
     }
-    const fact = /^fn irreversible\(self\) -> Bool \{ (.*) \}$/.exec(line);
+    const fact = /^irreversible: fn\(self\) -> Bool \{ (.*) \}$/.exec(line);
     if (fact && fact[1] !== "false") irreversible.push(current);
     if (raw === "}") current = null;
   }

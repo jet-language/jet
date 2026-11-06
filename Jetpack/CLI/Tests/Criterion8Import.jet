@@ -9,16 +9,16 @@
 // (tests/jetpack_criterion8.rs:189-310) is the testkit case
 // tests/cases/jetpack_criterion8/local_nix_fallback_imports_exact_lock_once_then_uses_jetpack.case.
 
-CRITERION8_LOCK :: "version = 1\n\n[[source_channel]]\nname = \"jetpack\"\nchannel = \"jetpack\"\nexact = \"github:NixOS/nixpkgs#0123456789abcdef0123456789abcdef01234567\"\n\n[root]\ndependencies = []\n"
+CRITERION8_LOCK: "version = 1\n\n[[source_channel]]\nname = \"jetpack\"\nchannel = \"jetpack\"\nexact = \"github:NixOS/nixpkgs#0123456789abcdef0123456789abcdef01234567\"\n\n[root]\ndependencies = []\n"
 
-fn cli_test_criterion8_jetpack(args: [String], cwd: String, env: [(name: String, value: String)], unset: [String]) -[Env, Exec]> ProcessReceipt {
+cli_test_criterion8_jetpack: fn(args: [String], cwd: String, env: [(name: String, value: String)], unset: [String]) -[Env, Exec]> ProcessReceipt {
     spec := cli_test_jetpack(args).cwd(cwd)
     loop name in unset -> spec = spec.env_remove(name)
     loop pair in env -> spec = spec.env(pair.name, pair.value)
     spec.run() ?? panic("run jetpack {args}: {err}")
 }
 
-fn cli_test_criterion8_shell(script: String, args: [String], cwd: String, env: [(name: String, value: String)]) -[Env, Exec]> ProcessReceipt {
+cli_test_criterion8_shell: fn(script: String, args: [String], cwd: String, env: [(name: String, value: String)]) -[Env, Exec]> ProcessReceipt {
     argv := [String]{"/bin/sh", "-c", script, "sh"}
     &argv.extend(args)
     spec := process.cmd(argv).stdout(.Capture).stderr(.Capture).cwd(cwd).env("JETPACK_BIN", cli_test_jetpack_bin()).env_remove("JETPACK_FIXTURES")
@@ -26,29 +26,29 @@ fn cli_test_criterion8_shell(script: String, args: [String], cwd: String, env: [
     spec.run() ?? panic("run sh -c {script}: {err}")
 }
 
-fn cli_test_criterion8_executable(path: String, text: String) -[FS]> {
+cli_test_criterion8_executable: fn(path: String, text: String) -[FS]> {
     files.write(path, text) ?? panic("write {path}")
     files.set_mode(path, 493) ?? panic("chmod {path}")
 }
 
 #Test("imported_locked_package_runs_builds_and_restores_without_nix") {
-    base :: files.tmpdir("jet-criterion8-import-reuse-") ?? panic("criterion 8 scratch")
-    project :: files.join(base, "project")
-    root :: files.join(base, "root")
-    restored_root :: files.join(base, "restored-root")
-    fixtures :: files.join(base, "fixtures")
-    staging :: files.join(base, "staging")
-    tools :: files.join(base, "tools")
-    marker :: files.join(base, "nix-invoked")
-    tmp :: files.join(base, "tmp")
+    base: files.tmpdir("jet-criterion8-import-reuse-") ?? panic("criterion 8 scratch")
+    project: files.join(base, "project")
+    root: files.join(base, "root")
+    restored_root: files.join(base, "restored-root")
+    fixtures: files.join(base, "fixtures")
+    staging: files.join(base, "staging")
+    tools: files.join(base, "tools")
+    marker: files.join(base, "nix-invoked")
+    tmp: files.join(base, "tmp")
     loop dir in ([String]{files.join(project, ".jet"), files.join(staging, "bin"), fixtures, tools, tmp}) -> files.create_dir_all(dir) ?? panic("create {dir}")
     files.write(files.join(project, ".jet/lock"), CRITERION8_LOCK) ?? panic("write lock")
     cli_test_criterion8_executable(files.join(staging, "bin/greet"), "#!/bin/sh\nprintf '%s\\n' 'hello from imported jetpack'\n")
     store_seal_local_output(staging) ?? panic("seal staging: {err.message()}")
-    output_hash :: pkg_try_output_hash_of(staging) ?? panic("hash staging: {err.message()}")
+    output_hash: pkg_try_output_hash_of(staging) ?? panic("hash staging: {err.message()}")
     files.write(files.join(fixtures, "jetpack-greet.json"), "[{{\"drvPath\":\"/nix/store/0fixture00000000000000000000-greet.drv\",\"outputs\":{{\"out\":\"{staging}\"}},\"jetpackImport\":{{\"closedGraph\":{{\"root\":{{\"dependencies\":[]}}}},\"selectedOutputs\":{{\"out\":\"{staging}\"}},\"dependencies\":[],\"sources\":[],\"hashes\":{{\"out\":\"{output_hash}\"}},\"losses\":[],\"proof\":{{\"source\":\"criterion-8\"}},\"recipe\":{{\"kind\":\"compatibility\"}},\"lock\":{{\"system\":\"x86_64-linux\"}}}}}}]") ?? panic("write fixture")
     cli_test_criterion8_executable(files.join(tools, "nix"), "#!/bin/sh\nprintf '%s' invoked > \"{marker}\"\nexit 91\n")
-    neutral :: [(name: String, value: String)]{(name: "TMPDIR", value: tmp), (name: "TMP", value: tmp), (name: "TEMP", value: tmp)}
+    neutral: [(name: String, value: String)]{(name: "TMPDIR", value: tmp), (name: "TMP", value: tmp), (name: "TEMP", value: tmp)}
     cached := neutral
     &cached.push((name: "JETPACK_ROOT", value: root))
     &cached.push((name: "PATH", value: tools))
@@ -57,40 +57,40 @@ fn cli_test_criterion8_executable(path: String, text: String) -[FS]> {
     &import_env.push((name: "JETPACK_ROOT", value: root))
     &import_env.push((name: "JETPACK_FIXTURES", value: fixtures))
     &import_env.push((name: "PATH", value: ""))
-    imported :: cli_test_criterion8_jetpack([String]{"use", "--prep", "greet@jetpack", "--offline", "--no-color"}, project, import_env, [String]{})
+    imported: cli_test_criterion8_jetpack([String]{"use", "--prep", "greet@jetpack", "--offline", "--no-color"}, project, import_env, [String]{})
     assert(imported.success, "import stderr: {imported.errors}")
     verification := StoreVerification.new()
-    imported_entry :: store_find_by_reference(&verification, HangarRoots.at(root), "greet@jetpack") ?? panic("successful import must publish the Jetpack package")
+    imported_entry: store_find_by_reference(&verification, HangarRoots.at(root), "greet@jetpack") ?? panic("successful import must publish the Jetpack package")
     assert(imported_entry.out.starts_with(files.join(root, "hangar/objects")), "out: {imported_entry.out}")
-    producer :: ProducerRecord.decode(imported_entry.producer_record) ?? panic("decode producer record")
+    producer: ProducerRecord.decode(imported_entry.producer_record) ?? panic("decode producer record")
     assert_eq(producer.facts.get("nix.fallback.schema"), Val("jetpack.nix-fallback.v1"))
     // `use --prep` realizes a user profile independent of the project lock.
-    lock :: files.read(files.join(project, ".jet/lock")) ?? panic("read lock")
+    lock: files.read(files.join(project, ".jet/lock")) ?? panic("read lock")
     assert(!lock.contains("greet@jetpack"), "lock: {lock}")
 
-    build :: cli_test_criterion8_jetpack([String]{"use", "--prep", "greet@jetpack", "--no-color"}, project, cached, [String]{"JETPACK_FIXTURES"})
+    build: cli_test_criterion8_jetpack([String]{"use", "--prep", "greet@jetpack", "--no-color"}, project, cached, [String]{"JETPACK_FIXTURES"})
     assert(build.success, "cached build stderr: {build.errors}")
 
-    run :: cli_test_criterion8_jetpack([String]{"use", "greet@jetpack", "--no-color"}, project, cached, [String]{"JETPACK_FIXTURES"})
+    run: cli_test_criterion8_jetpack([String]{"use", "greet@jetpack", "--no-color"}, project, cached, [String]{"JETPACK_FIXTURES"})
     assert(run.success, "cached run stderr: {run.errors}")
     assert_eq(run.output.trim(), "hello from imported jetpack")
     assert(!files.exists(marker), "cached Jetpack operations invoked Nix")
 
-    archive :: files.join(base, "greet.archive")
-    dumped :: cli_test_criterion8_shell("exec \"$JETPACK_BIN\" hangar dump greet@jetpack --no-color > \"$1\"", [String]{archive}, project, cached)
+    archive: files.join(base, "greet.archive")
+    dumped: cli_test_criterion8_shell("exec \"$JETPACK_BIN\" hangar dump greet@jetpack --no-color > \"$1\"", [String]{archive}, project, cached)
     assert(dumped.success, "dump stderr: {dumped.errors}")
-    key :: files.join(root, "trust/hangar.key")
+    key: files.join(root, "trust/hangar.key")
     assert(files.is_file(key), "Jetpack dump must publish its Hangar key")
     restored_env := neutral
     &restored_env.push((name: "JETPACK_ROOT", value: restored_root))
     &restored_env.push((name: "PATH", value: tools))
-    restored :: cli_test_criterion8_shell("exec \"$JETPACK_BIN\" hangar restore --key \"$1\" --yes --no-color < \"$2\"", [String]{key, archive}, project, restored_env)
+    restored: cli_test_criterion8_shell("exec \"$JETPACK_BIN\" hangar restore --key \"$1\" --yes --no-color < \"$2\"", [String]{key, archive}, project, restored_env)
     assert(restored.success, "restore stderr: {restored.errors}")
-    restored_entry :: store_find_by_reference(&verification, HangarRoots.at(restored_root), "greet@jetpack") ?? panic("Jetpack restore must preserve the locked package ref")
+    restored_entry: store_find_by_reference(&verification, HangarRoots.at(restored_root), "greet@jetpack") ?? panic("Jetpack restore must preserve the locked package ref")
     assert_eq(restored_entry.envelope.output_hash, imported_entry.envelope.output_hash)
     assert(!files.exists(marker), "Jetpack restore invoked Nix")
 
-    restored_run :: cli_test_criterion8_jetpack([String]{"use", "greet@jetpack", "--no-color"}, project, restored_env, [String]{"JETPACK_FIXTURES"})
+    restored_run: cli_test_criterion8_jetpack([String]{"use", "greet@jetpack", "--no-color"}, project, restored_env, [String]{"JETPACK_FIXTURES"})
     assert(restored_run.success, "restored run stderr: {restored_run.errors}")
     assert_eq(restored_run.output.trim(), "hello from imported jetpack")
     assert(!files.exists(marker), "restored package execution invoked Nix")

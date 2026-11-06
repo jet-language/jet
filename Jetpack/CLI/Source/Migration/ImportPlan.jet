@@ -6,7 +6,7 @@
 // fact that could not be carried losslessly stays a visible finding.
 
 // The importer's editable result.
-struct ImportPlan {
+ImportPlan: struct {
     source_kind: String
     packages: [ImportedPackage]
     deps: [ImportedDep]
@@ -20,7 +20,7 @@ struct ImportPlan {
     // unresolved fact.
     provider_facts: [String: ProviderFacts]
 
-    fn empty(kind: String) -> ImportPlan Never! {
+    empty: fn(kind: String) -> ImportPlan Never! {
         ImportPlan{
             source_kind: kind,
             packages: [ImportedPackage]{},
@@ -34,25 +34,25 @@ struct ImportPlan {
         }
     }
 
-    fn retain_provider_facts(&self, facts: ProviderFacts) Never! {
+    retain_provider_facts: fn(&self, facts: ProviderFacts) Never! {
         &self.retain_provider_facts_with_source(facts, "")
     }
 
     // Keep `facts` under its reference, merging into an existing record, and
     // surface every loss and conflict as a finding at `source_path`.
-    fn retain_provider_facts_with_source(&self, facts: ProviderFacts, source_path: String) Never! {
+    retain_provider_facts_with_source: fn(&self, facts: ProviderFacts, source_path: String) Never! {
         &self.record_fact_findings(facts, source_path)
-        reference :: facts.reference
+        reference: facts.reference
         existing := self.provider_facts.get(reference) ?? {
             self.provider_facts[reference] = facts
             return
         }
         if existing.provider != facts.provider {
-            previous_provider :: existing.provider.copy()
+            previous_provider: existing.provider.copy()
             &existing.add_conflict("provider", previous_provider, facts.provider, "provider.import")
         }
         if existing.target != facts.target {
-            previous_target :: existing.target.copy()
+            previous_target: existing.target.copy()
             &existing.add_conflict("target", previous_target, facts.target, "provider.import")
         }
         if facts.resolved_source != "" -> &existing.set_resolved_source(facts.resolved_source)
@@ -60,7 +60,7 @@ struct ImportPlan {
         keys := facts.facts.keys().to_list()
         &keys.sort()
         loop key in keys {
-            source :: facts.provenance.get(key) ?? "provider.import"
+            source: facts.provenance.get(key) ?? "provider.import"
             &existing.add_fact(key, facts.facts[key], source)
         }
         loop loss in facts.losses {
@@ -74,7 +74,7 @@ struct ImportPlan {
     }
 
     // One finding per loss and conflict of `facts`.
-    fn record_fact_findings(&self, facts: ProviderFacts, source_path: String) Never! {
+    record_fact_findings: fn(&self, facts: ProviderFacts, source_path: String) Never! {
         loop loss in facts.losses {
             &self.record_provider_finding(cli_import_source_path_for_finding(loss.source, source_path), "provider fact `{loss.key}` is lossy: {loss.reason}; migration remains unresolved")
         }
@@ -84,18 +84,18 @@ struct ImportPlan {
     }
 
     // A data-only finding, recorded once.
-    fn record_provider_finding(&self, source_path: String, message: String) Never! {
-        todo :: ImportTodo{source_path: source_path, message: message, suggested_surface: None}
+    record_provider_finding: fn(&self, source_path: String, message: String) Never! {
+        todo: ImportTodo{source_path: source_path, message: message, suggested_surface: None}
         if !self.todos.contains(todo) -> &self.todos.push(todo)
     }
 
     // The canonical editable `package.jet`. Only lossless runtime
     // dependencies become source; while the root itself is unresolved the
     // dependency block stays empty.
-    fn emit_pkg_jet(self) -> String Never! {
-        first :: self.packages.get(0)
-        name :: first?.name ?? "imported-app"
-        version :: first?.version ?? "0.1.0"
+    emit_pkg_jet: fn(self) -> String Never! {
+        first: self.packages.get(0)
+        name: first?.name ?? "imported-app"
+        version: first?.version ?? "0.1.0"
         out := "payload: {{\n    name: \"{name}\",\n    version: \"{version}\",\n    jet: \">=0.1.0\",\n    description: \"Imported from {self.source_kind}\",\n    license: \"\",\n    repository: \"\",\n}}\n"
         out = "{out}\ndeps: {{\n"
         unresolved_root := false
@@ -111,7 +111,7 @@ struct ImportPlan {
         deps := self.deps
         &deps.sort_by((left: ImportedDep, right: ImportedDep) -> left.name <=> right.name)
         loop dep in deps {
-            facts :: self.provider_facts.get(dep.provider_ref) ?? next
+            facts: self.provider_facts.get(dep.provider_ref) ?? next
             // A mutable foreign selector belongs in the source-linked
             // migration finding, never in generated Jet source. The canonical
             // manifest has no dev/optional/peer dependency section, so those
@@ -125,43 +125,43 @@ struct ImportPlan {
     }
 }
 
-struct ImportedPackage {
+ImportedPackage: struct {
     name: String
     version: String
 }
 
-struct ImportedDep {
+ImportedDep: struct {
     name: String
     provider_ref: String
     locked_version: String
     dev: Bool
 }
 
-struct GeneratedFile {
+GeneratedFile: struct {
     path: String
     contents: String
     owned: Bool
 }
 
-struct AdapterDraft {
+AdapterDraft: struct {
     name: String
     source: String
     recipe: String
 }
 
-struct FFIStub {
+FFIStub: struct {
     path: String
     symbol: String
 }
 
-struct ImportTodo {
+ImportTodo: struct {
     source_path: String
     message: String
     suggested_surface: String?
 }
 
 // Where one imported package stands on the way to a native replacement.
-enum MigrationStatus {
+MigrationStatus: enum {
     ForeignDependencyRetained(name: String)
     AdapterWrapped(name: String)
     FFIStubGenerated(name: String)
@@ -172,10 +172,10 @@ enum MigrationStatus {
 
 // A regenerated file would overwrite a user edit.
 #Error
-enum ImportConflict {
+ImportConflict: enum {
     UserEditedGeneratedLine(path: String)
 
-    fn message(self) -> String Never! {
+    message: fn(self) -> String Never! {
         if self == {
             .UserEditedGeneratedLine(path) -> "generated file `{path}` was edited by the user"
         }
@@ -183,22 +183,22 @@ enum ImportConflict {
 }
 
 // TODO diagnostic codes await a ballot.
-fn cli_todo_diagnostics_need_ballot() -> Bool Never! {
+cli_todo_diagnostics_need_ballot: fn() -> Bool Never! {
     true
 }
 
 // The generated contents when the file is new or unchanged; a user-edited
 // file is a conflict.
-fn cli_merge_generated_file(existing: String?, generated: GeneratedFile) -> String ImportConflict! {
-    current :: existing ?? return Ok(generated.contents)
+cli_merge_generated_file: fn(existing: String?, generated: GeneratedFile) -> String ImportConflict! {
+    current: existing ?? return Ok(generated.contents)
     if current == generated.contents -> return Ok(generated.contents)
     Err(ImportConflict.UserEditedGeneratedLine{path: generated.path})
 }
 
 // The finding path for a fact recorded at `source`: provider-internal
 // sources point at the imported document instead.
-fn cli_import_source_path_for_finding(source: String, fallback: String) -> String Never! {
-    internal :: if source == {
+cli_import_source_path_for_finding: fn(source: String, fallback: String) -> String Never! {
+    internal: if source == {
         "" | "provider.native_document" | "reference.provider" | "reference.selector" -> true
         else -> source.starts_with("package.json.")
     }

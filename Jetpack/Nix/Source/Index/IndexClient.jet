@@ -3,40 +3,40 @@
 // content-addressed index target, caching both under the Hangar root, or
 // against an explicit local (unsigned) catalog directory.
 use {
-    files :: core.files
-    process :: core.process
-    time :: core.time
-    crypto :: core.crypto
-    http_client :: core.http.client
-    base64 :: core.encoding.base64
+    files: core.files
+    process: core.process
+    time: core.time
+    crypto: core.crypto
+    http_client: core.http.client
+    base64: core.encoding.base64
     jet_pkg_model.[HangarRoots, pkg_ascii_lower, pkg_sha256_hex]
     jetpack_nix_eval.[nixeval_is_ascii_digit, nixeval_is_ascii_hexdigit]
     jetpack_foundation.[ProcessSequence, process_sequence_take]
 }
 
-NIX_INDEX_TEST_KEY_ID :: "jet-test-index-v1"
-NIX_INDEX_ROOT :: "hangar/nix-index/v1"
-NIX_INDEX_LOCAL_INDEX_ROOT :: "index-v1"
-NIX_INDEX_LOCAL_NATIVE_RECIPE_ROOT :: "recipes-v1.json"
-NIX_INDEX_TRUST_CONFIG :: "trust/nix-index-v1.ed25519.pub"
-NIX_INDEX_ENDPOINT_CONFIG :: "config/nix-index-v1.endpoint"
-NIX_INDEX_TRANSPORT_TIMEOUT_MS :: 120000
-NIX_INDEX_MAX_LOCAL_REVISIONS :: 128
+NIX_INDEX_TEST_KEY_ID: "jet-test-index-v1"
+NIX_INDEX_ROOT: "hangar/nix-index/v1"
+NIX_INDEX_LOCAL_INDEX_ROOT: "index-v1"
+NIX_INDEX_LOCAL_NATIVE_RECIPE_ROOT: "recipes-v1.json"
+NIX_INDEX_TRUST_CONFIG: "trust/nix-index-v1.ed25519.pub"
+NIX_INDEX_ENDPOINT_CONFIG: "config/nix-index-v1.endpoint"
+NIX_INDEX_TRANSPORT_TIMEOUT_MS: 120000
+NIX_INDEX_MAX_LOCAL_REVISIONS: 128
 
-NIX_INDEX_TEMP_SEQUENCE :: shared ProcessSequence{next: 1}
+NIX_INDEX_TEMP_SEQUENCE: shared ProcessSequence{next: 1}
 
 // Bounded GET of one index URL. The native transport holds one HTTP client
 // whose destination rule pins every host's checked addresses for the
 // client's lifetime; tests supply fixed responses.
-struct NixIndexTransport {
+NixIndexTransport: struct {
     get_bounded: fn(String, Int) -[Net, Time.Wait]> [U8] NixIndexError!
 }
 
-enum NixIndexClock {
+NixIndexClock: enum {
     System
     Fixed(Int)
 
-    fn now_unix(self) -[Time]> Int Never! {
+    now_unix: fn(self) -[Time]> Int Never! {
         if self == {
             .System -> time.unix_ns() /% 1000000000
             .Fixed(unix) -> unix
@@ -44,7 +44,7 @@ enum NixIndexClock {
     }
 }
 
-struct NixIndexClient {
+NixIndexClient: struct {
     priv endpoint: String
     priv root: String
     priv key_id: String
@@ -54,46 +54,46 @@ struct NixIndexClient {
     priv clock: NixIndexClock
     priv transport: NixIndexTransport
 
-    fn from_roots(roots: HangarRoots) -[FS, Env, Net]> NixIndexClient NixIndexError! {
+    from_roots: fn(roots: HangarRoots) -[FS, Env, Net]> NixIndexClient NixIndexError! {
         NixIndexClient.from_roots_with_mode(roots, false)
     }
 
     // The configured official index: an explicit endpoint and trust key must
     // both be installed under the Hangar root, and the test key is refused.
-    fn from_roots_with_mode(roots: HangarRoots, offline: Bool) -[FS, Env, Net]> NixIndexClient NixIndexError! {
+    from_roots_with_mode: fn(roots: HangarRoots, offline: Bool) -[FS, Env, Net]> NixIndexClient NixIndexError! {
         nix_index_ensure_real_directory(roots.root)
-        trust_path :: files.join(roots.root, NIX_INDEX_TRUST_CONFIG)
-        endpoint_path :: files.join(roots.root, NIX_INDEX_ENDPOINT_CONFIG)
-        parents :: [String]{files.dirname(trust_path), files.dirname(endpoint_path)}
+        trust_path: files.join(roots.root, NIX_INDEX_TRUST_CONFIG)
+        endpoint_path: files.join(roots.root, NIX_INDEX_ENDPOINT_CONFIG)
+        parents: [String]{files.dirname(trust_path), files.dirname(endpoint_path)}
         loop parent in parents {
             if nix_index_path_exists(parent) -> nix_index_ensure_real_directory(parent)
         }
-        trust_exists :: nix_index_path_exists(trust_path)
-        endpoint_exists :: nix_index_path_exists(endpoint_path)
+        trust_exists: nix_index_path_exists(trust_path)
+        endpoint_exists: nix_index_path_exists(endpoint_path)
         if !trust_exists && !endpoint_exists -> return Err(NixIndexError.Invalid("signed nixpkgs index endpoint and public key must be configured explicitly"))
         if !trust_exists || !endpoint_exists -> return Err(NixIndexError.Invalid("nix index endpoint and public-key overrides must be installed together"))
-        trust :: nix_index_read_regular(trust_path, 4096)
-        text :: String.from_bytes(trust) ?? return Err(NixIndexError.Invalid("nix index public key is not UTF-8"))
-        parts :: text.trim().split_once(":") ?? return Err(NixIndexError.Invalid("nix index public key must be key-id:base64-public-key"))
-        key_id :: nix_index_nonempty_text(parts.before, "nix index key id")
+        trust: nix_index_read_regular(trust_path, 4096)
+        text: String.from_bytes(trust) ?? return Err(NixIndexError.Invalid("nix index public key is not UTF-8"))
+        parts: text.trim().split_once(":") ?? return Err(NixIndexError.Invalid("nix index public key must be key-id:base64-public-key"))
+        key_id: nix_index_nonempty_text(parts.before, "nix index key id")
         if key_id == NIX_INDEX_TEST_KEY_ID {
             return Err(NixIndexError.Invalid("nix index trust root `{NIX_INDEX_TEST_KEY_ID}` is test-only and cannot be used for official signed indexes"))
         }
-        key_bytes :: base64.decode(parts.after) ?? return Err(NixIndexError.Invalid("nix index public key is not base64"))
+        key_bytes: base64.decode(parts.after) ?? return Err(NixIndexError.Invalid("nix index public key is not base64"))
         if key_bytes.len() != 32 -> return Err(NixIndexError.Invalid("nix index public key must be 32 bytes"))
-        endpoint_bytes :: nix_index_read_regular(endpoint_path, 4096)
-        endpoint_text :: String.from_bytes(endpoint_bytes) ?? return Err(NixIndexError.Invalid("nix index endpoint is not UTF-8"))
-        endpoint :: nix_index_parse_endpoint(endpoint_text.trim())
-        public_key :: crypto.VerifyKey.from_bytes(key_bytes) ?? return Err(NixIndexError.Invalid("nix index public key is invalid"))
-        transport :: nix_index_native_transport(endpoint)
+        endpoint_bytes: nix_index_read_regular(endpoint_path, 4096)
+        endpoint_text: String.from_bytes(endpoint_bytes) ?? return Err(NixIndexError.Invalid("nix index endpoint is not UTF-8"))
+        endpoint: nix_index_parse_endpoint(endpoint_text.trim())
+        public_key: crypto.VerifyKey.from_bytes(key_bytes) ?? return Err(NixIndexError.Invalid("nix index public key is invalid"))
+        transport: nix_index_native_transport(endpoint)
         Ok(NixIndexClient{endpoint, root: roots.root, key_id, public_key: Val(public_key), local_catalog: false, offline, clock: NixIndexClock.System, transport})
     }
 
     // An explicit local, unsigned catalog directory.
-    fn from_local_catalog(catalog: String, offline: Bool) -[FS]> NixIndexClient NixIndexError! {
+    from_local_catalog: fn(catalog: String, offline: Bool) -[FS]> NixIndexClient NixIndexError! {
         if !nix_index_path_exists(catalog) -> return Err(NixIndexError.Invalid("local unofficial nixpkgs catalog `{catalog}` does not exist"))
         nix_index_ensure_real_directory(catalog)
-        transport :: NixIndexTransport{get_bounded: (url: String, max_bytes: Int) -[Net, Time.Wait]> {
+        transport: NixIndexTransport{get_bounded: (url: String, max_bytes: Int) -[Net, Time.Wait]> {
             nix_index_unconfigured_get(url, max_bytes)
         }}
         Ok(NixIndexClient{endpoint: "", root: catalog, key_id: "", public_key: None, local_catalog: true, offline, clock: NixIndexClock.System, transport})
@@ -101,23 +101,23 @@ struct NixIndexClient {
 
     // A signed client over an explicit transport and clock (the Rust test
     // seam `for_test`).
-    fn with_transport(root: String, endpoint: String, key_id: String, public_key: [U8], transport: ^NixIndexTransport, clock: NixIndexClock, offline: Bool) -> NixIndexClient NixIndexError! {
-        parsed :: nix_index_parse_endpoint(endpoint)
-        key :: crypto.VerifyKey.from_bytes(public_key) ?? return Err(NixIndexError.Invalid("test index public key is invalid"))
+    with_transport: fn(root: String, endpoint: String, key_id: String, public_key: [U8], transport: ^NixIndexTransport, clock: NixIndexClock, offline: Bool) -> NixIndexClient NixIndexError! {
+        parsed: nix_index_parse_endpoint(endpoint)
+        key: crypto.VerifyKey.from_bytes(public_key) ?? return Err(NixIndexError.Invalid("test index public key is invalid"))
         Ok(NixIndexClient{endpoint: parsed, root, key_id, public_key: Val(key), local_catalog: false, offline, clock, transport: ^transport})
     }
 
-    fn resolve(self, key: NixIndexKey) -[FS, Env, Net, Time, Time.Wait]> NixVerifiedIndexRecord NixIndexError! {
+    resolve: fn(self, key: NixIndexKey) -[FS, Env, Net, Time, Time.Wait]> NixVerifiedIndexRecord NixIndexError! {
         nix_index_validate_key(key)
         if self.local_catalog -> return self.resolve_local_catalog(key)
-        now :: self.clock.now_unix()
-        manifest :: self.current_manifest(key.channel, now)
+        now: self.clock.now_unix()
+        manifest: self.current_manifest(key.channel, now)
         if manifest.manifest.issued_unix > now + NIX_INDEX_MAX_MANIFEST_FUTURE_SKEW_SECONDS {
             return Err(NixIndexError.Invalid("signed nixpkgs channel manifest is too far in the future"))
         }
         if manifest.manifest.expires_unix <= now -> return Err(NixIndexError.Invalid("signed nixpkgs channel manifest is expired"))
-        target :: manifest.manifest.target_for(key.revision, key.system) ?? return Err(NixIndexError.Invalid("manifest has no target for {key.channel}@{key.revision} on {key.system}"))
-        cached :: self.load_target(key, target)
+        target: manifest.manifest.target_for(key.revision, key.system) ?? return Err(NixIndexError.Invalid("manifest has no target for {key.channel}@{key.revision} on {key.system}"))
+        cached: self.load_target(key, target)
         compressed := [U8]{}
         signature_bytes := [U8]{}
         if cached == {
@@ -135,12 +135,12 @@ struct NixIndexClient {
                 }
             }
         }
-        decoded :: nix_index_zstd_decode_bounded(compressed, NIX_INDEX_MAX_DECODED_BYTES)
+        decoded: nix_index_zstd_decode_bounded(compressed, NIX_INDEX_MAX_DECODED_BYTES)
         if decoded.len() != target.decoded_length -> return Err(NixIndexError.Invalid("nix index decoded length disagrees with manifest"))
-        signature :: NixIndexSignature.parse(signature_bytes)
-        public_key :: self.public_key ?? return Err(NixIndexError.Invalid("signed index has no verifier"))
+        signature: NixIndexSignature.parse(signature_bytes)
+        public_key: self.public_key ?? return Err(NixIndexError.Invalid("signed index has no verifier"))
         nix_index_verify_index_signature(public_key, self.key_id, signature, decoded)
-        document :: NixIndexDocument.parse(decoded)
+        document: NixIndexDocument.parse(decoded)
         document.validate()
         if document.channel != key.channel || document.revision != key.revision || document.system != key.system {
             return Err(NixIndexError.Invalid("signed nixpkgs index target disagrees with its requested key"))
@@ -148,8 +148,8 @@ struct NixIndexClient {
         if document.records.len() != target.record_count -> return Err(NixIndexError.Invalid("nix index record count disagrees with manifest"))
         if cached == None -> self.cache_target_atomically(key, target, compressed, signature_bytes)
         self.cache_manifest_atomically(key.channel, manifest)
-        record :: document.record_for(key.attrpath) ?? return Err(document.not_indexed(key))
-        proof :: NixIndexProof{
+        record: document.record_for(key.attrpath) ?? return Err(document.not_indexed(key))
+        proof: NixIndexProof{
             schema: NIX_INDEX_SCHEMA,
             channel: key.channel,
             revision: key.revision,
@@ -167,7 +167,7 @@ struct NixIndexClient {
 
     // A cached manifest while it is unexpired; otherwise a fresh signed one.
     // Offline, a missing or expired manifest is an offline refusal.
-    fn current_manifest(self, channel: String, now: Int) -[FS, Env, Net, Time.Wait]> NixIndexCachedManifest NixIndexError! {
+    current_manifest: fn(self, channel: String, now: Int) -[FS, Env, Net, Time.Wait]> NixIndexCachedManifest NixIndexError! {
         if self.load_manifest(channel) == {
             .Ok(found) -> {
                 if found == {
@@ -190,46 +190,46 @@ struct NixIndexClient {
     // Resolve a local channel's revision from its explicit manifest, or from
     // its single immutable index target. More than one matching revision
     // requires a manifest.
-    fn local_channel_revision(self, channel: String, system: String) -[FS]> String NixIndexError! {
+    local_channel_revision: fn(self, channel: String, system: String) -[FS]> String NixIndexError! {
         if !self.local_catalog -> return Err(NixIndexError.Invalid("channel revision lookup requires a local nixpkgs catalog"))
         nix_index_validate_channel(channel)
         nix_index_validate_system(system)
-        path :: files.join(files.join(files.join(self.root, "v1"), channel), "manifest.json")
+        path: files.join(files.join(files.join(self.root, "v1"), channel), "manifest.json")
         if nix_index_path_exists(path) {
-            bytes :: nix_index_read_regular(path, NIX_INDEX_MAX_MANIFEST_BYTES)
-            manifest :: NixIndexChannelManifest.parse(bytes)
+            bytes: nix_index_read_regular(path, NIX_INDEX_MAX_MANIFEST_BYTES)
+            manifest: NixIndexChannelManifest.parse(bytes)
             if manifest.channel != channel -> return Err(NixIndexError.Invalid("local nixpkgs channel manifest disagrees with its requested channel"))
             loop target in manifest.targets {
                 if target.system == system -> return Ok(target.revision)
             }
             return Err(NixIndexError.Invalid("local nixpkgs channel manifest has no target for {channel} on {system}"))
         }
-        index_root :: files.join(self.root, NIX_INDEX_LOCAL_INDEX_ROOT)
+        index_root: files.join(self.root, NIX_INDEX_LOCAL_INDEX_ROOT)
         nix_index_ensure_real_directory(index_root)
-        entries :: files.list_dir(index_root) ?? return Err(NixIndexError.Transport("read local index: {err}"))
+        entries: files.list_dir(index_root) ?? return Err(NixIndexError.Transport("read local index: {err}"))
         revision := String?{None}
         loop index in 0..<entries.len() {
             if index >= NIX_INDEX_MAX_LOCAL_REVISIONS -> return Err(NixIndexError.Invalid("local catalog has too many revisions"))
-            candidate :: entries[index].name
+            candidate: entries[index].name
             nix_index_validate_revision(candidate)
             nix_index_ensure_real_directory(entries[index].path)
             if !nix_index_path_exists(files.join(entries[index].path, system)) -> next
-            _ :: self.load_local_index(NixIndexKey{channel, revision: candidate, system, attrpath: [String]{}})
+            _: self.load_local_index(NixIndexKey{channel, revision: candidate, system, attrpath: [String]{}})
             if revision != None -> return Err(NixIndexError.Invalid("local catalog has multiple revisions; provide an explicit channel manifest"))
             revision = Val(candidate)
         }
-        found :: revision ?? return Err(NixIndexError.Invalid("local catalog has no index for {channel} on {system}"))
+        found: revision ?? return Err(NixIndexError.Invalid("local catalog has no index for {channel} on {system}"))
         Ok(found)
     }
 
     // A native recipe from the explicit local catalog. Signed sources never
     // consult it, so a bad signed index cannot become an unsigned source.
     // `package` may pin a version as `name#version=<version>`.
-    fn resolve_native_recipe(self, package: String) -[FS]> NixNativeRecipe? NixIndexError! {
+    resolve_native_recipe: fn(self, package: String) -[FS]> NixNativeRecipe? NixIndexError! {
         if !self.local_catalog -> return Ok(None)
-        path :: files.join(self.root, NIX_INDEX_LOCAL_NATIVE_RECIPE_ROOT)
+        path: files.join(self.root, NIX_INDEX_LOCAL_NATIVE_RECIPE_ROOT)
         if !nix_index_path_exists(path) -> return Ok(None)
-        recipes :: nix_index_parse_local_native_recipes(nix_index_read_regular(path, NIX_INDEX_MAX_NATIVE_RECIPE_BYTES))
+        recipes: nix_index_parse_local_native_recipes(nix_index_read_regular(path, NIX_INDEX_MAX_NATIVE_RECIPE_BYTES))
         name := package
         requested := String?{None}
         if package.split_once("#version=") == {
@@ -263,23 +263,23 @@ struct NixIndexClient {
 
     // The one intact target of a local catalog revision/system directory and
     // its digest.
-    fn load_local_index(self, key: NixIndexKey) -[FS]> (digest: String, document: NixIndexDocument) NixIndexError! {
-        target_dir :: files.join(files.join(files.join(self.root, NIX_INDEX_LOCAL_INDEX_ROOT), key.revision), key.system)
+    load_local_index: fn(self, key: NixIndexKey) -[FS]> (digest: String, document: NixIndexDocument) NixIndexError! {
+        target_dir: files.join(files.join(files.join(self.root, NIX_INDEX_LOCAL_INDEX_ROOT), key.revision), key.system)
         if !nix_index_path_exists(target_dir) -> return Err(NixIndexError.Invalid("local unofficial nixpkgs catalog has no target for {key.revision} on {key.system}"))
         nix_index_ensure_real_directory(target_dir)
-        entries :: files.list_dir(target_dir) ?? return Err(NixIndexError.Transport("read local unofficial nixpkgs catalog target directory {target_dir}: {err}"))
+        entries: files.list_dir(target_dir) ?? return Err(NixIndexError.Transport("read local unofficial nixpkgs catalog target directory {target_dir}: {err}"))
         found_digest := String?{None}
         found_document := NixIndexDocument?{None}
         loop entry in entries {
-            info :: files.stat(entry.path) ?? return Err(NixIndexError.Transport("inspect local catalog entry: {err}"))
+            info: files.stat(entry.path) ?? return Err(NixIndexError.Transport("inspect local catalog entry: {err}"))
             if info.is_symlink -> return Err(NixIndexError.Invalid("local unofficial nixpkgs catalog contains a symlink"))
             if !entry.name.ends_with(".json.zst") -> next
-            digest :: entry.name.removesuffix(".json.zst")
+            digest: entry.name.removesuffix(".json.zst")
             if !nix_is_lower_hex(digest, 64) -> return Err(NixIndexError.Invalid("local unofficial nixpkgs catalog target digest is malformed"))
-            compressed :: nix_index_read_regular(entry.path, NIX_INDEX_MAX_COMPRESSED_BYTES)
+            compressed: nix_index_read_regular(entry.path, NIX_INDEX_MAX_COMPRESSED_BYTES)
             nix_index_verify_digest_and_length(compressed, compressed.len(), digest, "local unofficial nixpkgs catalog target")
-            decoded :: nix_index_zstd_decode_bounded(compressed, NIX_INDEX_MAX_DECODED_BYTES)
-            document :: NixIndexDocument.parse(decoded)
+            decoded: nix_index_zstd_decode_bounded(compressed, NIX_INDEX_MAX_DECODED_BYTES)
+            document: NixIndexDocument.parse(decoded)
             document.validate()
             if document.channel != key.channel || document.revision != key.revision || document.system != key.system {
                 return Err(NixIndexError.Invalid("local unofficial nixpkgs catalog target disagrees with its requested key"))
@@ -288,15 +288,15 @@ struct NixIndexClient {
             found_digest = Val(digest)
             found_document = Val(document)
         }
-        digest :: found_digest ?? return Err(NixIndexError.Invalid("local unofficial nixpkgs catalog has no target file in {target_dir}"))
-        document :: found_document ?? return Err(NixIndexError.Invalid("local unofficial nixpkgs catalog has no target file in {target_dir}"))
+        digest: found_digest ?? return Err(NixIndexError.Invalid("local unofficial nixpkgs catalog has no target file in {target_dir}"))
+        document: found_document ?? return Err(NixIndexError.Invalid("local unofficial nixpkgs catalog has no target file in {target_dir}"))
         Ok((digest: digest, document: document))
     }
 
-    fn resolve_local_catalog(self, key: NixIndexKey) -[FS]> NixVerifiedIndexRecord NixIndexError! {
-        target :: self.load_local_index(key)
-        record :: target.document.record_for(key.attrpath) ?? return Err(target.document.not_indexed(key))
-        proof :: NixIndexProof{
+    resolve_local_catalog: fn(self, key: NixIndexKey) -[FS]> NixVerifiedIndexRecord NixIndexError! {
+        target: self.load_local_index(key)
+        record: target.document.record_for(key.attrpath) ?? return Err(target.document.not_indexed(key))
+        proof: NixIndexProof{
             schema: NIX_INDEX_SCHEMA,
             channel: key.channel,
             revision: key.revision,
@@ -312,33 +312,33 @@ struct NixIndexClient {
         Ok(NixVerifiedIndexRecord{record, proof, trust: NixIndexTrustTier.LocalUnofficial})
     }
 
-    fn load_manifest(self, channel: String) -[FS]> NixIndexCachedManifest? NixIndexError! {
-        directory :: self.manifest_dir(channel)
-        bytes_path :: files.join(directory, "current.json")
-        signature_path :: files.join(directory, "current.sig.json")
-        bytes_exists :: nix_index_path_exists(bytes_path)
-        signature_exists :: nix_index_path_exists(signature_path)
+    load_manifest: fn(self, channel: String) -[FS]> NixIndexCachedManifest? NixIndexError! {
+        directory: self.manifest_dir(channel)
+        bytes_path: files.join(directory, "current.json")
+        signature_path: files.join(directory, "current.sig.json")
+        bytes_exists: nix_index_path_exists(bytes_path)
+        signature_exists: nix_index_path_exists(signature_path)
         if !bytes_exists && !signature_exists -> return Ok(None)
         if !bytes_exists || !signature_exists -> return Err(NixIndexError.Invalid("cached nix index manifest is missing its signature pair"))
-        bytes :: nix_index_read_regular(bytes_path, NIX_INDEX_MAX_MANIFEST_BYTES)
-        signature_bytes :: nix_index_read_regular(signature_path, NIX_INDEX_MAX_SIGNATURE_BYTES)
-        manifest :: NixIndexChannelManifest.parse(bytes)
+        bytes: nix_index_read_regular(bytes_path, NIX_INDEX_MAX_MANIFEST_BYTES)
+        signature_bytes: nix_index_read_regular(signature_path, NIX_INDEX_MAX_SIGNATURE_BYTES)
+        manifest: NixIndexChannelManifest.parse(bytes)
         manifest.validate()
         if manifest.channel != channel -> return Err(NixIndexError.Invalid("cached nixpkgs channel manifest disagrees with requested channel"))
-        public_key :: self.public_key ?? return Err(NixIndexError.Invalid("signed index has no verifier"))
+        public_key: self.public_key ?? return Err(NixIndexError.Invalid("signed index has no verifier"))
         nix_index_verify_manifest_signature(public_key, self.key_id, signature_bytes, bytes)
         self.check_generation(channel, manifest, bytes)
         Ok(Val(NixIndexCachedManifest{manifest, bytes, signature_bytes}))
     }
 
-    fn fetch_manifest(self, channel: String) -[FS, Net, Time.Wait]> NixIndexCachedManifest NixIndexError! {
-        base :: "{self.endpoint}/v1/{channel}/manifest.json"
-        bytes :: self.transport.get_bounded(base, NIX_INDEX_MAX_MANIFEST_BYTES)
-        signature_bytes :: self.transport.get_bounded("{base}.sig.json", NIX_INDEX_MAX_SIGNATURE_BYTES)
-        manifest :: NixIndexChannelManifest.parse(bytes)
+    fetch_manifest: fn(self, channel: String) -[FS, Net, Time.Wait]> NixIndexCachedManifest NixIndexError! {
+        base: "{self.endpoint}/v1/{channel}/manifest.json"
+        bytes: self.transport.get_bounded(base, NIX_INDEX_MAX_MANIFEST_BYTES)
+        signature_bytes: self.transport.get_bounded("{base}.sig.json", NIX_INDEX_MAX_SIGNATURE_BYTES)
+        manifest: NixIndexChannelManifest.parse(bytes)
         manifest.validate()
         if manifest.channel != channel -> return Err(NixIndexError.Invalid("signed nixpkgs channel manifest disagrees with requested channel"))
-        public_key :: self.public_key ?? return Err(NixIndexError.Invalid("signed index has no verifier"))
+        public_key: self.public_key ?? return Err(NixIndexError.Invalid("signed index has no verifier"))
         nix_index_verify_manifest_signature(public_key, self.key_id, signature_bytes, bytes)
         self.check_generation(channel, manifest, bytes)
         Ok(NixIndexCachedManifest{manifest, bytes, signature_bytes})
@@ -346,34 +346,34 @@ struct NixIndexClient {
 
     // Refuse a manifest older than the recorded highest generation, or a
     // different manifest at that same generation.
-    fn check_generation(self, channel: String, manifest: NixIndexChannelManifest, bytes: [U8]) NixIndexError! -[FS]> {
-        found :: self.load_highest_generation(channel)
-        highest :: found ?? return
+    check_generation: fn(self, channel: String, manifest: NixIndexChannelManifest, bytes: [U8]) NixIndexError! -[FS]> {
+        found: self.load_highest_generation(channel)
+        highest: found ?? return
         if manifest.generation < highest.generation || (manifest.generation == highest.generation && pkg_sha256_hex(bytes) != highest.digest) {
             return Err(NixIndexError.Invalid("signed nixpkgs channel manifest rolled back or forked"))
         }
     }
 
-    fn load_target(self, key: NixIndexKey, target: NixIndexManifestTarget) -[FS]> (compressed: [U8], signature: [U8])? NixIndexError! {
-        bytes_path :: self.target_path(key, target.sha256)
-        signature_path :: "{bytes_path}.sig.json"
-        bytes_exists :: nix_index_path_exists(bytes_path)
-        signature_exists :: nix_index_path_exists(signature_path)
+    load_target: fn(self, key: NixIndexKey, target: NixIndexManifestTarget) -[FS]> (compressed: [U8], signature: [U8])? NixIndexError! {
+        bytes_path: self.target_path(key, target.sha256)
+        signature_path: "{bytes_path}.sig.json"
+        bytes_exists: nix_index_path_exists(bytes_path)
+        signature_exists: nix_index_path_exists(signature_path)
         if !bytes_exists && !signature_exists -> return Ok(None)
         if !bytes_exists || !signature_exists -> return Err(NixIndexError.Invalid("cached nix index target is missing its signature pair"))
-        bytes :: nix_index_read_regular(bytes_path, NIX_INDEX_MAX_COMPRESSED_BYTES)
+        bytes: nix_index_read_regular(bytes_path, NIX_INDEX_MAX_COMPRESSED_BYTES)
         nix_index_verify_digest_and_length(bytes, target.compressed_length, target.sha256, "cached nix index target")
-        signature :: nix_index_read_regular(signature_path, NIX_INDEX_MAX_SIGNATURE_BYTES)
+        signature: nix_index_read_regular(signature_path, NIX_INDEX_MAX_SIGNATURE_BYTES)
         if pkg_sha256_hex(signature) != target.signature_sha256 {
             return Err(NixIndexError.Invalid("cached nix index signature sidecar digest disagrees with manifest"))
         }
         Ok(Val((compressed: bytes, signature: signature)))
     }
 
-    fn cache_manifest_atomically(self, channel: String, manifest: NixIndexCachedManifest) NixIndexError! -[FS, Env]> {
-        directory :: self.manifest_dir(channel)
+    cache_manifest_atomically: fn(self, channel: String, manifest: NixIndexCachedManifest) NixIndexError! -[FS, Env]> {
+        directory: self.manifest_dir(channel)
         nix_index_ensure_real_directory(directory)
-        generation :: manifest.manifest.generation
+        generation: manifest.manifest.generation
         nix_index_write_atomic(files.join(directory, "{generation}.json"), manifest.bytes, false)
         nix_index_write_atomic(files.join(directory, "{generation}.sig.json"), manifest.signature_bytes, false)
         // Advance the monotonic replay floor before exposing the new current
@@ -384,28 +384,28 @@ struct NixIndexClient {
         nix_index_write_atomic(files.join(directory, "current.sig.json"), manifest.signature_bytes, true)
     }
 
-    fn cache_target_atomically(self, key: NixIndexKey, target: NixIndexManifestTarget, bytes: [U8], signature: [U8]) NixIndexError! -[FS, Env]> {
-        path :: self.target_path(key, target.sha256)
+    cache_target_atomically: fn(self, key: NixIndexKey, target: NixIndexManifestTarget, bytes: [U8], signature: [U8]) NixIndexError! -[FS, Env]> {
+        path: self.target_path(key, target.sha256)
         nix_index_ensure_real_directory(files.dirname(path))
         nix_index_write_atomic(path, bytes, false)
         nix_index_write_atomic("{path}.sig.json", signature, false)
     }
 
-    fn record_highest_generation_atomically(self, channel: String, manifest: NixIndexChannelManifest, bytes: [U8]) NixIndexError! -[FS, Env]> {
-        directory :: self.generation_dir(channel)
+    record_highest_generation_atomically: fn(self, channel: String, manifest: NixIndexChannelManifest, bytes: [U8]) NixIndexError! -[FS, Env]> {
+        directory: self.generation_dir(channel)
         nix_index_ensure_real_directory(directory)
-        state :: "{manifest.generation}\n{pkg_sha256_hex(bytes)}\n"
+        state: "{manifest.generation}\n{pkg_sha256_hex(bytes)}\n"
         nix_index_write_atomic(files.join(directory, "highest"), state.bytes(), true)
     }
 
-    fn load_highest_generation(self, channel: String) -[FS]> (generation: Int, digest: String)? NixIndexError! {
-        path :: files.join(self.generation_dir(channel), "highest")
+    load_highest_generation: fn(self, channel: String) -[FS]> (generation: Int, digest: String)? NixIndexError! {
+        path: files.join(self.generation_dir(channel), "highest")
         if !nix_index_path_exists(path) -> return Ok(None)
-        bytes :: nix_index_read_regular(path, 256)
-        text :: String.from_bytes(bytes) ?? return Err(NixIndexError.Invalid("nix index rollback state is not UTF-8"))
-        lines :: nix_text_lines(text)
+        bytes: nix_index_read_regular(path, 256)
+        text: String.from_bytes(bytes) ?? return Err(NixIndexError.Invalid("nix index rollback state is not UTF-8"))
+        lines: nix_text_lines(text)
         if lines.len() == 0 -> return Err(NixIndexError.Invalid("nix index rollback generation is malformed"))
-        generation :: nix_index_parse_generation(lines[0]) ?? return Err(NixIndexError.Invalid("nix index rollback generation is malformed"))
+        generation: nix_index_parse_generation(lines[0]) ?? return Err(NixIndexError.Invalid("nix index rollback generation is malformed"))
         if lines.len() < 2 || lines[1].bytes().len() != 64 || !nix_index_is_hex(lines[1]) {
             return Err(NixIndexError.Invalid("nix index rollback digest is malformed"))
         }
@@ -413,26 +413,26 @@ struct NixIndexClient {
         Ok(Val((generation: generation, digest: lines[1])))
     }
 
-    fn manifest_dir(self, channel: String) -> String NixIndexError! {
+    manifest_dir: fn(self, channel: String) -> String NixIndexError! {
         nix_index_validate_channel(channel)
         Ok(files.join(files.join(files.join(self.root, NIX_INDEX_ROOT), "manifests"), channel))
     }
 
-    fn generation_dir(self, channel: String) -> String NixIndexError! {
+    generation_dir: fn(self, channel: String) -> String NixIndexError! {
         nix_index_validate_channel(channel)
         Ok(files.join(files.join(files.join(self.root, NIX_INDEX_ROOT), "generations"), channel))
     }
 
-    fn target_path(self, key: NixIndexKey, digest: String) -> String NixIndexError! {
+    target_path: fn(self, key: NixIndexKey, digest: String) -> String NixIndexError! {
         nix_index_validate_key(key)
         if !nix_is_lower_hex(digest, 64) -> return Err(NixIndexError.Invalid("nix index target digest is malformed"))
-        targets :: files.join(files.join(self.root, NIX_INDEX_ROOT), "targets")
+        targets: files.join(files.join(self.root, NIX_INDEX_ROOT), "targets")
         Ok(files.join(files.join(files.join(targets, key.revision), key.system), "{digest}.json.zst"))
     }
 }
 
 // A manifest with the exact bytes and signature sidecar it was verified from.
-struct NixIndexCachedManifest {
+NixIndexCachedManifest: struct {
     manifest: NixIndexChannelManifest
     bytes: [U8]
     signature_bytes: [U8]
@@ -441,56 +441,56 @@ struct NixIndexCachedManifest {
 // The native transport: never following redirects and never changing the
 // configured scheme. Core's HTTP client has no destination-address policy,
 // so the Rust public-address and loopback-only pins are not enforced here.
-fn nix_index_native_transport(endpoint: String) -> NixIndexTransport NixIndexError! {
-    configured :: nix_index_parse_network_url(endpoint)
-    scheme :: configured.scheme
+nix_index_native_transport: fn(endpoint: String) -> NixIndexTransport NixIndexError! {
+    configured: nix_index_parse_network_url(endpoint)
+    scheme: configured.scheme
     Ok(NixIndexTransport{get_bounded: (url: String, max_bytes: Int) -[Net, Time.Wait]> {
         nix_index_native_get(scheme, url, max_bytes)
     }})
 }
 
-fn nix_index_native_get(scheme: String, url: String, max_bytes: Int) -[Net, Time.Wait]> [U8] NixIndexError! {
-    requested :: nix_index_parse_network_url(url)
+nix_index_native_get: fn(scheme: String, url: String, max_bytes: Int) -[Net, Time.Wait]> [U8] NixIndexError! {
+    requested: nix_index_parse_network_url(url)
     if requested.scheme != scheme -> return Err(NixIndexError.Transport("signed nix index target changes the endpoint scheme"))
-    request :: http_client.request("GET", url).total_timeout(NIX_INDEX_TRANSPORT_TIMEOUT_MS).redirects(0)
-    response :: http_client.send(request) ?? return Err(NixIndexError.Transport("{err}"))
-    status :: response.status()
+    request: http_client.request("GET", url).total_timeout(NIX_INDEX_TRANSPORT_TIMEOUT_MS).redirects(0)
+    response: http_client.send(request) ?? return Err(NixIndexError.Transport("{err}"))
+    status: response.status()
     if status != 200 -> return Err(NixIndexError.Transport("index endpoint returned HTTP {status}"))
-    declared :: nix_index_content_length(response)
+    declared: nix_index_content_length(response)
     if (declared ?? 0) > max_bytes -> return Err(NixIndexError.Invalid("index response exceeds its bound"))
-    bytes :: response.body().bytes(max_bytes + 1) ?? return Err(NixIndexError.Transport("read index endpoint: {err}"))
+    bytes: response.body().bytes(max_bytes + 1) ?? return Err(NixIndexError.Transport("read index endpoint: {err}"))
     if bytes.len() > max_bytes -> return Err(NixIndexError.Invalid("index response exceeds its bound"))
     if declared == .Val(length) && length != bytes.len() -> return Err(NixIndexError.Transport("index response Content-Length disagrees"))
     Ok(bytes)
 }
 
 // The transport of a local catalog client: it never reaches the network.
-fn nix_index_unconfigured_get(url: String, max_bytes: Int) -[Net, Time.Wait]> [U8] NixIndexError! {
+nix_index_unconfigured_get: fn(url: String, max_bytes: Int) -[Net, Time.Wait]> [U8] NixIndexError! {
     Err(NixIndexError.Transport("native index transport has no configured endpoint"))
 }
 
-fn nix_index_content_length(response: HTTPResponse) -> Int? Never! {
-    text :: response.header("content-length") ?? return None
+nix_index_content_length: fn(response: HTTPResponse) -> Int? Never! {
+    text: response.header("content-length") ?? return None
     Int.parse(text.trim()) ? value -> Val(value) ! failed -> None
 }
 
 // The scheme, host and port of an index URL.
-fn nix_index_parse_network_url(url: String) -> (scheme: String, host: String, port: Int) NixIndexError! {
-    parts :: url.split_once("://") ?? return Err(NixIndexError.Invalid("nix index URL has no scheme"))
-    scheme :: pkg_ascii_lower(parts.before)
+nix_index_parse_network_url: fn(url: String) -> (scheme: String, host: String, port: Int) NixIndexError! {
+    parts: url.split_once("://") ?? return Err(NixIndexError.Invalid("nix index URL has no scheme"))
+    scheme: pkg_ascii_lower(parts.before)
     if scheme != "http" && scheme != "https" -> return Err(NixIndexError.Invalid("nix index URL must use HTTP or HTTPS"))
     authority := parts.after
-    separators :: [String]{"/", "?", "#"}
+    separators: [String]{"/", "?", "#"}
     loop separator in separators {
         authority = authority.split(separator).to_list()[0]
     }
     if authority == "" || authority.contains("@") -> return Err(NixIndexError.Invalid("nix index URL authority is malformed"))
-    default_port :: if scheme == "https" -> 443 else -> 80
+    default_port: if scheme == "https" -> 443 else -> 80
     host := ""
     port := default_port
-    bracketed :: authority.starts_with("[")
+    bracketed: authority.starts_with("[")
     if bracketed {
-        inner :: authority.removeprefix("[").split_once("]") ?? return Err(NixIndexError.Invalid("nix index IPv6 host is malformed"))
+        inner: authority.removeprefix("[").split_once("]") ?? return Err(NixIndexError.Invalid("nix index IPv6 host is malformed"))
         host = inner.before
         if inner.after.starts_with(":") -> port = nix_index_parse_index_port(inner.after.removeprefix(":"))
     } else {
@@ -506,20 +506,20 @@ fn nix_index_parse_network_url(url: String) -> (scheme: String, host: String, po
     Ok((scheme: scheme, host: host, port: port))
 }
 
-fn nix_index_parse_index_port(text: String) -> Int NixIndexError! {
-    port :: nix_index_parse_decimal(text) ?? return Err(NixIndexError.Invalid("nix index port is malformed"))
+nix_index_parse_index_port: fn(text: String) -> Int NixIndexError! {
+    port: nix_index_parse_decimal(text) ?? return Err(NixIndexError.Invalid("nix index port is malformed"))
     if port > 65535 -> return Err(NixIndexError.Invalid("nix index port is malformed"))
     if port == 0 -> return Err(NixIndexError.Invalid("nix index port must not be zero"))
     Ok(port)
 }
 
 // Rust `str::parse::<u64>`: ASCII digits with an optional leading `+`.
-fn nix_index_parse_decimal(text: String) -> Int? Never! {
-    digits :: text.removeprefix("+").bytes()
+nix_index_parse_decimal: fn(text: String) -> Int? Never! {
+    digits: text.removeprefix("+").bytes()
     if digits.len() == 0 -> return None
     value := 0
     loop byte in digits {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         if !nixeval_is_ascii_digit(code) -> return None
         value = value * 10 + code - 48
     }
@@ -527,32 +527,32 @@ fn nix_index_parse_decimal(text: String) -> Int? Never! {
     Val(value)
 }
 
-fn nix_index_parse_generation(line: String) -> Int? Never! {
+nix_index_parse_generation: fn(line: String) -> Int? Never! {
     nix_index_parse_decimal(line)
 }
 
-fn nix_index_is_hex(text: String) -> Bool Never! {
+nix_index_is_hex: fn(text: String) -> Bool Never! {
     loop byte in text.bytes() {
         if !nixeval_is_ascii_hexdigit(Int.from_u8(byte)) -> return false
     }
     true
 }
 
-fn nix_io_is_not_found(error: IOError) -> Bool Never! {
+nix_io_is_not_found: fn(error: IOError) -> Bool Never! {
     if error == {
         .NotFound(_) -> true
         else -> false
     }
 }
 
-fn nix_io_is_already_exists(error: IOError) -> Bool Never! {
+nix_io_is_already_exists: fn(error: IOError) -> Bool Never! {
     if error == {
         .AlreadyExists(_) -> true
         else -> false
     }
 }
 
-fn nix_index_path_exists(path: String) -[FS]> Bool NixIndexError! {
+nix_index_path_exists: fn(path: String) -[FS]> Bool NixIndexError! {
     if files.stat(path) == {
         .Ok(_) -> return Ok(true)
         .Err(error) -> {
@@ -564,9 +564,9 @@ fn nix_index_path_exists(path: String) -[FS]> Bool NixIndexError! {
 
 // Every existing component of `path` must be a real directory; missing ones
 // are created one at a time.
-fn nix_index_ensure_real_directory(path: String) NixIndexError! -[FS]> {
+nix_index_ensure_real_directory: fn(path: String) NixIndexError! -[FS]> {
     current := if path.starts_with("/") -> "/" else -> ""
-    segments :: path.split("/").to_list()
+    segments: path.split("/").to_list()
     loop segment in segments {
         if segment == "" -> next
         current = if current == "" -> segment else -> files.join(current, segment)
@@ -584,21 +584,21 @@ fn nix_index_ensure_real_directory(path: String) NixIndexError! -[FS]> {
 
 // A bounded no-follow read of one regular file whose identity is unchanged
 // from before the open to after the read.
-fn nix_index_read_regular(path: String, limit: Int) -[FS]> [U8] NixIndexError! {
-    expected :: files.stat(path) ?? return Err(NixIndexError.Transport("read {path}: {err}"))
+nix_index_read_regular: fn(path: String, limit: Int) -[FS]> [U8] NixIndexError! {
+    expected: files.stat(path) ?? return Err(NixIndexError.Transport("read {path}: {err}"))
     if expected.is_symlink || !expected.is_file -> return Err(NixIndexError.Invalid("read {path}: file is not a regular file"))
     if expected.size > limit -> return Err(NixIndexError.Invalid("read {path}: file exceeds its read bound"))
     reader := files.open(path, links: .Refuse) ?? return Err(NixIndexError.Transport("read {path}: {err}"))
-    opened :: reader.stat() ?? return Err(NixIndexError.Transport("read {path}: {err}"))
+    opened: reader.stat() ?? return Err(NixIndexError.Transport("read {path}: {err}"))
     if !opened.is_file || opened.id != expected.id -> return Err(NixIndexError.Transport("read {path}: file changed before reading"))
     bytes := [U8]{}
     loop {
-        chunk :: &reader.read(65536) ?? return Err(NixIndexError.Transport("read {path}: {err}"))
+        chunk: &reader.read(65536) ?? return Err(NixIndexError.Transport("read {path}: {err}"))
         if chunk.len() == 0 -> break
         loop byte in chunk -> &bytes.push(byte)
         if bytes.len() > limit -> return Err(NixIndexError.Invalid("read {path}: file exceeds its read bound"))
     }
-    after :: files.stat(path) ?? return Err(NixIndexError.Transport("read {path}: {err}"))
+    after: files.stat(path) ?? return Err(NixIndexError.Transport("read {path}: {err}"))
     if bytes.len() != expected.size || after.id != expected.id -> return Err(NixIndexError.Transport("read {path}: file changed while reading"))
     Ok(bytes)
 }
@@ -606,25 +606,25 @@ fn nix_index_read_regular(path: String, limit: Int) -[FS]> [U8] NixIndexError! {
 // Publish `bytes` at `path` through a private, fsynced, no-follow temporary:
 // a rename for replaceable state, a hard link for an immutable object (an
 // existing object must already hold exactly these bytes).
-fn nix_index_write_atomic(path: String, bytes: [U8], replace: Bool) NixIndexError! -[FS, Env]> {
-    parent :: files.dirname(path)
+nix_index_write_atomic: fn(path: String, bytes: [U8], replace: Bool) NixIndexError! -[FS, Env]> {
+    parent: files.dirname(path)
     if parent == "" -> return Err(NixIndexError.Invalid("nix index state file has no parent"))
     nix_index_ensure_real_directory(parent)
     if files.stat(path) == {
         .Ok(info) -> {
             if info.is_symlink || !info.is_file -> return Err(NixIndexError.Invalid("nix index state file `{path}` is not regular"))
             if !replace {
-                current :: nix_index_read_regular(path, bytes.len())
+                current: nix_index_read_regular(path, bytes.len())
                 if current == bytes -> return
                 return Err(NixIndexError.Invalid("immutable nix index object `{path}` changed"))
             }
         }
         else -> {}
     }
-    sequence :: process_sequence_take(NIX_INDEX_TEMP_SEQUENCE)
-    basename :: files.basename(path)
-    name :: if basename == "" -> "index" else -> basename
-    temporary :: files.join(parent, ".{name}.partial-{process.current_pid()}-{sequence}")
+    sequence: process_sequence_take(NIX_INDEX_TEMP_SEQUENCE)
+    basename: files.basename(path)
+    name: if basename == "" -> "index" else -> basename
+    temporary: files.join(parent, ".{name}.partial-{process.current_pid()}-{sequence}")
     if nix_index_publish(temporary, path, parent, bytes, replace) == {
         .Ok(_) -> return
         .Err(error) -> {
@@ -634,7 +634,7 @@ fn nix_index_write_atomic(path: String, bytes: [U8], replace: Bool) NixIndexErro
     }
 }
 
-fn nix_index_publish(temporary: String, path: String, parent: String, bytes: [U8], replace: Bool) NixIndexError! -[FS]> {
+nix_index_publish: fn(temporary: String, path: String, parent: String, bytes: [U8], replace: Bool) NixIndexError! -[FS]> {
     out := files.create(temporary, if_exists: .Refuse, mode: 0o600, links: .Refuse) ?? return Err(NixIndexError.Transport("write {path}: {err}"))
     &out.write_all(bytes) ?? return Err(NixIndexError.Transport("write {path}: {err}"))
     &out.fsync() ?? return Err(NixIndexError.Transport("write {path}: {err}"))
@@ -650,9 +650,9 @@ fn nix_index_publish(temporary: String, path: String, parent: String, bytes: [U8
         }
         .Err(error) -> {
             if !nix_io_is_already_exists(error) -> return Err(NixIndexError.Transport("write {path}: {error}"))
-            info :: files.stat(path) ?? return Err(NixIndexError.Transport("write {path}: {err}"))
+            info: files.stat(path) ?? return Err(NixIndexError.Transport("write {path}: {err}"))
             if info.is_symlink || !info.is_file -> return Err(NixIndexError.Transport("write {path}: immutable nix index object is not a regular file"))
-            current :: nix_index_read_regular(path, bytes.len()) ?? return Err(NixIndexError.Transport("write {path}: {err.message()}"))
+            current: nix_index_read_regular(path, bytes.len()) ?? return Err(NixIndexError.Transport("write {path}: {err.message()}"))
             if current != bytes -> return Err(NixIndexError.Transport("write {path}: immutable nix index object changed"))
             files.remove(temporary).drop("the published object already holds these bytes")
         }

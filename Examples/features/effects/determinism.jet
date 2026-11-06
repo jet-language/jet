@@ -1,4 +1,4 @@
-package {
+package: {
     name: "effects_determinism"
     version: "0.1.0"
     authority: { allow: [Exec, IO, Mem.Alloc, Time, Time.Wait] }
@@ -13,33 +13,33 @@ package {
 //
 // For the rare case where you KNOW a construct is deterministic but the checker
 // can't prove it, `assume_deterministic { … }` is the expert escape hatch.
-use random :: core.math.random
+use random: core.math.random
 
 // Pure: reads time + randomness only through the injected inputs.
 // `clock` is read-only (`now`); `rng` advances its stream, so it is `&Rng`.
-fn roll_at(clock: Clock, rng: &RNG) -[]> String {
-    ts :: clock.now()
-    die :: &rng.int(1, 6)
+roll_at: fn(clock: Clock, rng: &RNG) -[]> String {
+    ts: clock.now()
+    die: &rng.int(1, 6)
     return "t={ts} rolled {die}"
 }
 
 // Pure: same injected inputs, deterministic stream — call it twice, get two draws.
-fn two_rolls(rng: &RNG) -[]> String {
-    a :: &rng.int(1, 6)
-    b :: &rng.int(1, 6)
+two_rolls: fn(rng: &RNG) -[]> String {
+    a: &rng.int(1, 6)
+    b: &rng.int(1, 6)
     return "{a} then {b}"
 }
 
 // D-DET-CAPAPI: the widened `Rng` surface — a coin and a uniform choice — read
 // through the same injected, seeded handle, so still pure + reproducible.
-fn coin_and_card(rng: &RNG) -[]> String {
-    flip :: &rng.bool()
-    cards :: ["A", "K", "Q", "J"]
-    drawn :: &rng.pick(cards) ?? "none"
+coin_and_card: fn(rng: &RNG) -[]> String {
+    flip: &rng.bool()
+    cards: ["A", "K", "Q", "J"]
+    drawn: &rng.pick(cards) ?? "none"
     return "flip={flip} card={drawn}"
 }
 
-fn run() {
+run: fn() {
     clock := Clock.new(1000)
     rng := random.rng(42)
     print(roll_at(clock, &rng))
@@ -54,8 +54,8 @@ fn run() {
     // `wait`. Fixed waits use exact duration literals.
     print("now={clock.now()}")
     print("advanced={&clock.advance(5000)}")
-    span :: 2s
-    span_ms :: span.in(.Milliseconds)
+    span: 2s
+    span_ms: span.in(.Milliseconds)
     print("span={span_ms}ms waited={&clock.wait(span)}")
     // The expert escape: inside this block the determinism check is suspended.
     // A footgun — use only when you can guarantee reproducibility yourself.

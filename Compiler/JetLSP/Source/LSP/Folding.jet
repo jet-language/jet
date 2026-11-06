@@ -1,25 +1,25 @@
 // Position owns UTF-16 conversion.
 use jet_foundation.[Span, diagnostic_utf8_width, foundation_json_quote]
 
-struct LSPFoldingRange {
+LSPFoldingRange: struct {
     start_line: Int
     start_character: Int
     end_line: Int
     end_character: Int
     kind: String?
 }
-fn lsp_folding_range_json(fold: LSPFoldingRange) -> String Never! {
-    kind :: if fold.kind == { .Val(value) -> ",\"kind\":{foundation_json_quote(value)}"; None -> "" }
+lsp_folding_range_json: fn(fold: LSPFoldingRange) -> String Never! {
+    kind: if fold.kind == { .Val(value) -> ",\"kind\":{foundation_json_quote(value)}"; None -> "" }
     "{{\"startLine\":{fold.start_line},\"startCharacter\":{fold.start_character},\"endLine\":{fold.end_line},\"endCharacter\":{fold.end_character}{kind}}}"
 }
-fn lsp_compute_folding_ranges(src: String) -> [LSPFoldingRange] Never! {
+lsp_compute_folding_ranges: fn(src: String) -> [LSPFoldingRange] Never! {
     folds := lsp_brace_folding_ranges(src)
     loop fold in lsp_line_group_folds(src, lsp_is_comment_line, "comment") -> &folds.push(fold)
     loop fold in lsp_line_group_folds(src, lsp_is_import_line, "imports") -> &folds.push(fold)
     &folds.sort_by((left: LSPFoldingRange, right: LSPFoldingRange) -> (left.start_line <=> right.start_line).then(left.start_character <=> right.start_character).then(left.end_line <=> right.end_line))
     folds
 }
-fn lsp_brace_folding_ranges(src: String) -> [LSPFoldingRange] Never! {
+lsp_brace_folding_ranges: fn(src: String) -> [LSPFoldingRange] Never! {
     stack := [LSPPos]{}
     folds := [LSPFoldingRange]{}
     // ASCII braces cannot be UTF-8 continuation bytes. Scan bytes without
@@ -28,15 +28,15 @@ fn lsp_brace_folding_ranges(src: String) -> [LSPFoldingRange] Never! {
         if byte == (U8{123}) -> &stack.push(lsp_byte_offset_to_lsp(src, offset))
         else if byte == (U8{125}) {
             if &stack.pop() == .Val(start) {
-                end :: lsp_byte_offset_to_lsp(src, offset)
+                end: lsp_byte_offset_to_lsp(src, offset)
                 if end.line > start.line -> &folds.push(LSPFoldingRange{start_line: start.line, start_character: start.character, end_line: end.line, end_character: end.character, kind: Val("region")})
             }
         }
     }
     folds
 }
-fn lsp_line_group_folds(src: String, predicate: fn(String) -> Bool Never!, kind: String) -> [LSPFoldingRange] Never! {
-    lines :: lsp_source_lines(src)
+lsp_line_group_folds: fn(src: String, predicate: fn(String) -> Bool Never!, kind: String) -> [LSPFoldingRange] Never! {
+    lines: lsp_source_lines(src)
     folds := [LSPFoldingRange]{}
     start := Int?{None}
     loop (index, span) in lines {
@@ -53,11 +53,11 @@ fn lsp_line_group_folds(src: String, predicate: fn(String) -> Bool Never!, kind:
     if start == .Val(first) -> lsp_push_line_group_fold(src, lines, first, lines.len() - 1, kind, &folds)
     folds
 }
-fn lsp_push_line_group_fold(src: String, lines: [Span], start: Int, end: Int, kind: String, folds: &[LSPFoldingRange]) Never! {
+lsp_push_line_group_fold: fn(src: String, lines: [Span], start: Int, end: Int, kind: String, folds: &[LSPFoldingRange]) Never! {
     if end <= start -> return
     first := src.slice(lines[start].start, lines[start].end) // #4303
     last := src.slice(lines[end].start, lines[end].end) // #4303
-    bytes :: last.bytes()
+    bytes: last.bytes()
     count := 0
     index := 0
     loop index < bytes.len() {

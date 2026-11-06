@@ -1,15 +1,15 @@
-use c :: c.cb
+use c: c.cb
 
-fn increment(x: I32) -[]> I32 {
+increment: fn(x: I32) -[]> I32 {
     return x + 1
 }
 
-#Import module c.cb {
-    fn call_twice(cb: fn(I32) -[]> I32, x: I32) -> I32 = "call_twice"
-    fn call_parallel(cb: fn(I32) -[]> I32) -> I32 = "call_parallel"
+#Import c.cb: module {
+    call_twice: fn(cb: fn(I32) -[]> I32, x: I32) -> I32 = "call_twice"
+    call_parallel: fn(cb: fn(I32) -[]> I32) -> I32 = "call_parallel"
 }
 
-fn run() {
+run: fn() {
     print(c.call_twice(increment, 40))
     print(c.call_parallel(increment))
     print(c.call_twice((x) -> x + x, 10))

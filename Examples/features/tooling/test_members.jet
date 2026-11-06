@@ -1,14 +1,14 @@
 // D-DOTSCOPE1 — contextual scope members inside a `#Test` block.
 // `.setup` / `.expect_fail` / `.timeout` / `.skip` are the vocabulary a
 // `#Test` block declares; each is a `.name { … }` region, run by `jet test`.
-fn double(n: Int) -> Int { (n * 2) }
+double: fn(n: Int) -> Int { (n * 2) }
 
-fn run() { print("{double(3)}") }
+run: fn() { print("{double(3)}") }
 
 // `.setup` runs first and its bindings are visible to the rest of the test.
 #Test("setup runs first") {
     .setup {
-        base :: double(21)
+        base: double(21)
     }
     assert_eq(base, 42)
 }
@@ -33,7 +33,7 @@ fn run() { print("{double(3)}") }
 // `.timeout` accepts the same canonical Time value in a literal or binding.
 #Test("timeout bounds a region") {
     .setup {
-        wait :: 500ms
+        wait: 500ms
     }
     .timeout(wait) {
         assert_eq(double(5), 10)

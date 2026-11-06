@@ -1,9 +1,9 @@
-// D-CMD-OVERRIDE1=C (card #1451): `fn test` owns command policy while the
+// D-CMD-OVERRIDE1=C (card #1451): `test: fn` owns command policy while the
 // compiler-owned Test remains an ordinary value. `jet test --show-default`
 // selects the stock harness instead.
-use testing :: core.testing
+use testing: core.testing
 
-fn test(suite: Test) {
+test: fn(suite: Test) {
     print("test setup")
     print("test suite {suite.iteration}:{suite.result}")
     suite.run()
@@ -14,4 +14,4 @@ fn test(suite: Test) {
     print("test body")
 }
 
-fn run() { test(testing.test_suite()) }
+run: fn() { test(testing.test_suite()) }

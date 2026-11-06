@@ -1,5 +1,5 @@
 use {
-    core :: core
+    core: core
     core.ui.[UINode]
     core.ui.host.[UIAccessibility, UIAccessibilityProjection, UIHostError, UINodeID]
 }
@@ -7,13 +7,13 @@ use {
 // core.ui.host.accessibility — node metadata on the canonical UINode, once the
 // provider reports accessibility available (capability code 5). There is no
 // second provider tree.
-fn attach(node: UINode, metadata: UIAccessibility) -[IO, Browser]> UINode UIHostError! {
+attach: fn(node: UINode, metadata: UIAccessibility) -[IO, Browser]> UINode UIHostError! {
     if !core.ui.host.__capability(5) -> return Err(UIHostError.CapabilityUnavailable{capability: "Accessibility"})
     Ok(core.ui.node_accessibility(node, metadata))
 }
 
-fn project(node: UINode, node_id: UINodeID) -[IO]> UIAccessibilityProjection? UIHostError! {
+project: fn(node: UINode, node_id: UINodeID) -[IO]> UIAccessibilityProjection? UIHostError! {
     if !core.ui.host.__capability(5) -> return Err(UIHostError.CapabilityUnavailable{capability: "Accessibility"})
-    metadata :: node.accessibility ?? return Ok(None)
+    metadata: node.accessibility ?? return Ok(None)
     Ok(Val(UIAccessibilityProjection{node: node_id, metadata: metadata}))
 }

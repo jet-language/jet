@@ -2,30 +2,30 @@
 // is free again afterwards, a value it reads is not captured or consumed, and
 // the statements around it type and run as if it were absent (the debug body
 // still runs in a debug build).
-fn traced(value: Int) -> Int {
+traced: fn(value: Int) -> Int {
     #DebugOnly print("traced {value}")
     value + 1
 }
 
-fn run() {
+run: fn() {
     #Off if true {
-        hidden :: 1
+        hidden: 1
         print("off {hidden}")
     }
-    hidden :: 2
+    hidden: 2
     print("hidden {hidden}")
     #DebugOnly if true {
-        scratch :: 3
+        scratch: 3
         print("debug {scratch}")
     }
-    scratch :: 4
+    scratch: 4
     print("scratch {scratch}")
     names := ["ada", "lin"]
     #DebugOnly print("names {names.len()}")
     &names.push("kay")
     print(names)
     total := 0
-    add :: (n: Int) -> {
+    add: (n: Int) -> {
         #DebugOnly print("adding {n}")
         n * 2
     }

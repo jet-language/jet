@@ -2,7 +2,7 @@
 // UUIDv5/legacy digest only; not selected for new authentication.
 // Borrowed input, disjoint output20, exclusive aligned scratch680; no padded
 // message copy, allocation, secret-indexed table, or content-dependent branch.
-fn rt_crypto_sha1(input: I64, length: I64, output: I64, scratch: I64) {
+rt_crypto_sha1: fn(input: I64, length: I64, output: I64, scratch: I64) {
     if (length < I64{0} || length > I64{9223372036854775735}) {
         jet_rt_unreachable(I64{0}, I64{0})
         return
@@ -12,8 +12,8 @@ fn rt_crypto_sha1(input: I64, length: I64, output: I64, scratch: I64) {
     rt_text_store(wrapping(scratch + I64{16}), I64{0x98badcfe})
     rt_text_store(wrapping(scratch + I64{24}), I64{0x10325476})
     rt_text_store(wrapping(scratch + I64{32}), I64{0xc3d2e1f0})
-    schedule :: wrapping(scratch + I64{40})
-    end :: ((length + I64{8}) / I64{64} + I64{1}) * I64{64}
+    schedule: wrapping(scratch + I64{40})
+    end: ((length + I64{8}) / I64{64} + I64{1}) * I64{64}
     off := I64{0}
     loop off < end {
         t := I64{0}
@@ -28,7 +28,7 @@ fn rt_crypto_sha1(input: I64, length: I64, output: I64, scratch: I64) {
             t += I64{1}
         }
         loop t < (I64{80}) {
-            mixed :: rt_text_word(wrapping(schedule + (t - I64{3}) * I64{8})).bit_xor(rt_text_word(wrapping(schedule + (t - I64{8}) * I64{8}))).bit_xor(rt_text_word(wrapping(schedule + (t - I64{14}) * I64{8}))).bit_xor(rt_text_word(wrapping(schedule + (t - I64{16}) * I64{8})))
+            mixed: rt_text_word(wrapping(schedule + (t - I64{3}) * I64{8})).bit_xor(rt_text_word(wrapping(schedule + (t - I64{8}) * I64{8}))).bit_xor(rt_text_word(wrapping(schedule + (t - I64{14}) * I64{8}))).bit_xor(rt_text_word(wrapping(schedule + (t - I64{16}) * I64{8})))
             rt_text_store(wrapping(schedule + t * I64{8}), rt_sha256_rotate(mixed, I64{31}))
             t += I64{1}
         }
@@ -59,7 +59,7 @@ fn rt_crypto_sha1(input: I64, length: I64, output: I64, scratch: I64) {
                     k = I64{0xca62c1d6}
                 }
             }
-            temp :: (rt_sha256_rotate(a, I64{27}) + f + e + k + rt_text_word(wrapping(schedule + t * I64{8}))).bit_and(I64{0xffffffff})
+            temp: (rt_sha256_rotate(a, I64{27}) + f + e + k + rt_text_word(wrapping(schedule + t * I64{8}))).bit_and(I64{0xffffffff})
             e = d
             d = c
             c = rt_sha256_rotate(b, I64{2})
@@ -76,7 +76,7 @@ fn rt_crypto_sha1(input: I64, length: I64, output: I64, scratch: I64) {
     }
     at := I64{0}
     loop at < (I64{20}) {
-        word :: rt_text_word(wrapping(scratch + (at / I64{4}) * I64{8}))
+        word: rt_text_word(wrapping(scratch + (at / I64{4}) * I64{8}))
         rt_text_put(wrapping(output + at), (word >> (I64{24} - (at % I64{4}) * I64{8})).bit_and(I64{255}))
         at += I64{1}
     }

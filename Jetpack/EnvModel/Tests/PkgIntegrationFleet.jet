@@ -4,43 +4,43 @@
 use jet_env_model.[envmodel_evaluate_env, envmodel_evaluate_source]
 
 #Test("fleet_host_unknown_system_is_e1242") {
-    source :: "module fleet.prod {{ hosts: {{ web1: system.ghost }} }}"
-    error :: envmodel_test_env_error(envmodel_evaluate_env(source, envmodel_test_base_dir()))
+    source: "fleet.prod: module {{ hosts: {{ web1: system.ghost }} }}"
+    error: envmodel_test_env_error(envmodel_evaluate_env(source, envmodel_test_base_dir()))
     assert_eq(error.code, "E1242")
-    rendered :: envmodel_test_render("env.jet", source, error)
+    rendered: envmodel_test_render("env.jet", source, error)
     assert(rendered.contains("host `web1` names an unknown system `ghost`"))
 }
 
 #Test("fleet_unknown_field_is_e1244") {
-    source :: "module fleet.prod {{ region: \"us\" }}"
-    error :: envmodel_test_env_error(envmodel_evaluate_env(source, envmodel_test_base_dir()))
+    source: "fleet.prod: module {{ region: \"us\" }}"
+    error: envmodel_test_env_error(envmodel_evaluate_env(source, envmodel_test_base_dir()))
     assert_eq(error.code, "E1244")
 }
 
 #Test("fleet_missing_hosts_is_e1245") {
-    source :: "module fleet.prod {{ }}"
-    error :: envmodel_test_env_error(envmodel_evaluate_env(source, envmodel_test_base_dir()))
+    source: "fleet.prod: module {{ }}"
+    error: envmodel_test_env_error(envmodel_evaluate_env(source, envmodel_test_base_dir()))
     assert_eq(error.code, "E1245")
 }
 
 #Test("fleet valid independent host projection; overrides remain ledger-only") {
-    source :: "\nmodule system.web {{ target: linux.x64 }}\nmodule fleet.prod {{\n    hosts: {{\n        web1: system.web{{ region: \"us-east\" }},\n        web2: system.web,\n    }}\n}}\n"
-    fleets :: envmodel_test_host_groups(source, false)
+    source: "\nsystem.web: module {{ target: linux.x64 }}\nfleet.prod: module {{\n    hosts: {{\n        web1: system.web{{ region: \"us-east\" }},\n        web2: system.web,\n    }}\n}}\n"
+    fleets: envmodel_test_host_groups(source, false)
     assert_eq(fleets.len(), 1)
-    fleet :: fleets[0]
+    fleet: fleets[0]
     assert_eq(fleet.name, "prod")
     assert_eq(fleet.hosts.len(), 2)
     assert_eq(fleet.hosts[0].system, "web")
 }
 
-fn s5_fleet_committed_claim(root: String) {
-    base :: files.join(root, "tests/fixtures/jetpack-typed")
-    source :: files.read(files.join(base, "fleet.jet")) ?? panic("read committed fleet fixture")
-    plan :: envmodel_evaluate_env(source, base) ?? panic("committed fleet evaluates")
+s5_fleet_committed_claim: fn(root: String) {
+    base: files.join(root, "tests/fixtures/jetpack-typed")
+    source: files.read(files.join(base, "fleet.jet")) ?? panic("read committed fleet fixture")
+    plan: envmodel_evaluate_env(source, base) ?? panic("committed fleet evaluates")
     assert_eq(plan.systems.len(), 1)
     assert_eq(plan.systems[0].name, "web")
     // EnvPlan carries no fleet captures; the evaluated modules keep them.
-    modules :: envmodel_evaluate_source(source, base) ?? panic("committed fleet source evaluates")
+    modules: envmodel_evaluate_source(source, base) ?? panic("committed fleet source evaluates")
     fleets := [FleetPlan]{}
     loop evaluated in modules {
         loop group in evaluated.fleets -> &fleets.push(group)

@@ -1,17 +1,17 @@
 
-module box(capacity: Int) {
-    BASE :: comptime { capacity }
-    fn shadowed() -> Int {
-        base :: comptime { 5 }
+box: module(capacity: Int) {
+    BASE: comptime { capacity }
+    shadowed: fn() -> Int {
+        base: comptime { 5 }
         return base
     }
-    fn plain_shadowed() -> Int {
+    plain_shadowed: fn() -> Int {
         capacity := 5
         return capacity
     }
 }
-module b32 :: box(32)
-fn run() {
+b32: box(32)
+run: fn() {
     print(b32.shadowed())
     print(b32.plain_shadowed())
 }

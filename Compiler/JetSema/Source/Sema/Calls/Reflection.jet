@@ -16,7 +16,7 @@ use jet_foundation.[
     type_name,
 ]
 
-fn sema_call_reflection_leaf_name(name: String) -> String Never! {
+sema_call_reflection_leaf_name: fn(name: String) -> String Never! {
     parts := name.split("::").to_list()
     canonical := if parts.len() > 0 -> parts[parts.len() - 1] else -> name
     dotted := canonical.split(".").to_list()
@@ -27,14 +27,14 @@ fn sema_call_reflection_leaf_name(name: String) -> String Never! {
 // value: the type name and canonical path (`module.Type`, the ledger
 // `T.reflect()` reads), then each stored struct field's name, type name and
 // path.
-fn sema_call_reflection_name_args(ty: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> [TExpr] {
-    names :: sema_call_reflection_type_names(ty, environment, program)
+sema_call_reflection_name_args: fn(ty: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> [TExpr] {
+    names: sema_call_reflection_type_names(ty, environment, program)
     args := [TExpr]{sema_call_reflection_text(names.type_name, span), sema_call_reflection_text(names.path, span)}
-    definition :: sema_http_route_find_struct(environment, program, ty, environment.module_identity) ?? return args
+    definition: sema_http_route_find_struct(environment, program, ty, environment.module_identity) ?? return args
     loop field in definition.fields {
         if field.computed != None -> next
-        field_ty :: sema_shared_access_field_type(ty, field.name, environment, program, &scopes) ?? next
-        field_names :: sema_call_reflection_type_names(field_ty, environment, program)
+        field_ty: sema_shared_access_field_type(ty, field.name, environment, program, &scopes) ?? next
+        field_names: sema_call_reflection_type_names(field_ty, environment, program)
         &args.push(sema_call_reflection_text(field.name, span))
         &args.push(sema_call_reflection_text(field_names.type_name, span))
         &args.push(sema_call_reflection_text(field_names.path, span))
@@ -45,30 +45,30 @@ fn sema_call_reflection_name_args(ty: Type, span: Span, environment: SemaScopeEn
 // A nominal type reflects as its declared name and `module.Name` path (the
 // module path as an identifier: `reflect-value.jet` is `reflect_value`); any
 // other type as its written spelling for both.
-fn sema_call_reflection_type_names(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> (type_name: String, path: String) {
+sema_call_reflection_type_names: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> (type_name: String, path: String) {
     if program.registration_graph == .Val(graph) {
         if sema_type_resolve_nominal_row(graph, ty, environment.module_identity) == .Val(row) {
-            name :: graph.modules[row.module_index].nominals[row.row].symbol.name
+            name: graph.modules[row.module_index].nominals[row.row].symbol.name
             if graph.modules[row.module_index].module_path == "" -> return (type_name: name, path: name)
             return (type_name: name, path: "{graph.modules[row.module_index].module_path.replace("-", "_")}.{name}")
         }
     }
-    shown :: type_name(ty)
+    shown: type_name(ty)
     (type_name: shown, path: shown)
 }
 
-fn sema_call_reflection_text(text: String, span: Span) -> TExpr Never! {
+sema_call_reflection_text: fn(text: String, span: Span) -> TExpr Never! {
     sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: text}}}, span)
 }
 
-fn sema_call_reflection_secret_leaf(name: String) -> Bool Never! {
-    leaf :: sema_call_reflection_leaf_name(name)
+sema_call_reflection_secret_leaf: fn(name: String) -> Bool Never! {
+    leaf: sema_call_reflection_leaf_name(name)
     leaf == "Secret" || leaf == "SigningKey" || leaf == "X25519SecretKey" || leaf == "SharedSecret"
 }
 
 // A Core crypto secret: tagged by a registry signature, or named by its
 // canonical source identity (`<corelib>/core.crypto::Secret`).
-fn sema_call_reflection_secret_bearing(ty: Type) -> Bool Never! {
+sema_call_reflection_secret_bearing: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Tagged(marker, inner) -> {
             if marker == (TagMarker.Internal{internal_tag: InternalTag.CoreCryptoNominal}) {
@@ -85,39 +85,39 @@ fn sema_call_reflection_secret_bearing(ty: Type) -> Bool Never! {
 // A source that can be read once: an iterator or stream, or core.http's
 // request `Body` and its chunk reader (by their Core identity, so a user type
 // with the same name is an ordinary value).
-fn sema_call_reflection_one_pass(ty: Type) -> Bool Never! {
+sema_call_reflection_one_pass: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Apply(name, _) -> {
-            leaf :: sema_call_reflection_leaf_name(name)
+            leaf: sema_call_reflection_leaf_name(name)
             leaf == "Iter" || leaf == "ViewIter" || leaf == "Stream"
         }
         .Named(name) -> {
-            leaf :: sema_call_reflection_leaf_name(name)
+            leaf: sema_call_reflection_leaf_name(name)
             core_identity_in_module(name, "core.http") && (leaf == "Body" || leaf == "HTTPBodyChunks")
         }
         else -> false
     }
 }
 
-fn sema_call_reflection_core_shown(name: String) -> Bool Never! {
-    leaf :: sema_call_reflection_leaf_name(name)
+sema_call_reflection_core_shown: fn(name: String) -> Bool Never! {
+    leaf: sema_call_reflection_leaf_name(name)
     leaf == "Decimal" || leaf == "Fraction" || leaf == "MIME" || leaf == "ServiceUpgradeReceipt" || leaf == "ServiceWorkflow" || leaf == "TaskOutcome" || leaf == "TaskStatus" || leaf == "Complex" || leaf == "URL" || leaf == "Path" || leaf == "Date" || leaf == "Duration" || leaf == "LocalDate" || leaf == "LocalTime" || leaf == "DateTime" || leaf == "Instant" || leaf == "Period" || leaf == "Zone" || leaf == "ZonedDateTime" || leaf == "DataTracked" || leaf == "DataWatch" || leaf == "DataWatchStatus" || leaf == "DBValue" || leaf == "DBLease" || leaf == "DBPoolReceipt" || sema_core_error_family_member(name)
 }
 
-fn sema_call_reflection_bound(ty: Type, bound: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
+sema_call_reflection_bound: fn(ty: Type, bound: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     if program.registration_graph == .Val(graph) {
         if sema_type_bound_satisfied_at(graph, ty, bound, sema_scope_caller_row(environment, graph), environment.generic_params) == (Val(true)) -> return true
         // Imported nominal capabilities belong to their declaring registry. A
         // caller need not import the trait name as well as the displayed type.
-        owner :: sema_type_resolve_nominal_row_at(graph, ty, sema_scope_caller_row(environment, graph)) ?? return false
-        nominal :: graph.modules[owner.module_index].nominals[owner.row]
+        owner: sema_type_resolve_nominal_row_at(graph, ty, sema_scope_caller_row(environment, graph)) ?? return false
+        nominal: graph.modules[owner.module_index].nominals[owner.row]
         sema_type_bound_satisfied_with_generics(graph, nominal.ty, bound, nominal.symbol.module_name, environment.generic_params) ?? false
     } else {
         return false
     }
 }
 
-fn sema_call_reflection_named_displayable(name: String, ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
+sema_call_reflection_named_displayable: fn(name: String, ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     // S80 the Prelude-owned default error shows its message.
     if sema_call_reflection_core_shown(name) || sema_call_reflection_leaf_name(name) == "Err" -> return true
     if sema_call_reflection_synthetic_printable(name) -> return true
@@ -133,8 +133,8 @@ fn sema_call_reflection_named_displayable(name: String, ty: Type, environment: S
 // trait registry admits as `Printable` with no source impl (their Prelude
 // `JetShow` hooks, every SIMD lane and the linear-algebra values), and the
 // Core types it registers a `Display` impl for.
-fn sema_call_reflection_synthetic_printable(name: String) -> Bool Never! {
-    leaf :: sema_call_reflection_leaf_name(name)
+sema_call_reflection_synthetic_printable: fn(name: String) -> Bool Never! {
+    leaf: sema_call_reflection_leaf_name(name)
     if sema_core_is_math_type(leaf) -> return true
     if leaf == {
         "ArgsSpec" | "AriaRole" | "Bits" | "BuildError" | "BrowserError" | "Bytes" | "Clock" | "DataError" |
@@ -155,7 +155,7 @@ fn sema_call_reflection_synthetic_printable(name: String) -> Bool Never! {
     }
 }
 
-fn sema_call_reflection_is_displayable(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
+sema_call_reflection_is_displayable: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     if sema_call_reflection_secret_bearing(ty) || sema_call_reflection_one_pass(ty) -> return false
     if ty == {
         .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 -> return true
@@ -168,9 +168,9 @@ fn sema_call_reflection_is_displayable(ty: Type, environment: SemaScopeEnvironme
         .Apply(name, args) -> {
             // A string view shows its text, as the String it borrows from.
             if sema_stmt_string_view_type(ty) -> return true
-            leaf :: sema_call_reflection_leaf_name(name)
+            leaf: sema_call_reflection_leaf_name(name)
             if sema_call_reflection_bound(ty, "Display", environment, program) -> return true
-            native_composite :: leaf == "List" || leaf == "Set" || leaf == "Rank" || leaf == "PriorityQueue" || leaf == "Queue" || leaf == "LRU" || leaf == "ExpiringValue" || leaf == "Loadable" || leaf == "View"
+            native_composite: leaf == "List" || leaf == "Set" || leaf == "Rank" || leaf == "PriorityQueue" || leaf == "Queue" || leaf == "LRU" || leaf == "ExpiringValue" || leaf == "Loadable" || leaf == "View"
             if !native_composite && !sema_call_reflection_named_displayable(name, ty, environment, program) -> return false
             loop argument in args {
                 if !sema_call_reflection_is_displayable(argument, environment, program) -> return false
@@ -195,7 +195,7 @@ fn sema_call_reflection_is_displayable(ty: Type, environment: SemaScopeEnvironme
     }
 }
 
-fn sema_call_reflection_has_name(names: [String], wanted: String) -> Bool Never! {
+sema_call_reflection_has_name: fn(names: [String], wanted: String) -> Bool Never! {
     loop name in names {
         if name == wanted || sema_call_reflection_leaf_name(name) == wanted -> return true
     }
@@ -206,7 +206,7 @@ fn sema_call_reflection_has_name(names: [String], wanted: String) -> Bool Never!
 // inferred the value. This keeps argument evaluation and ownership in the
 // ordinary call path while centralizing secret/display diagnostics. A value
 // reflects exactly where bare `"{x}"` interpolation shows it.
-fn sema_call_reflection_validate_value(value: TExpr, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool {
+sema_call_reflection_validate_value: fn(value: TExpr, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool {
     if sema_expression_displayable(value.ty, environment, program) -> return true
     if value.ty == .Named(name) && sema_call_reflection_leaf_name(name) == "Unit" -> return true
     if {
@@ -221,7 +221,7 @@ fn sema_call_reflection_validate_value(value: TExpr, span: Span, environment: Se
 }
 
 // Runtime handle method contracts shared by direct method dispatch.
-fn sema_call_reflection_method_return(type_name: String, method: String, args: [Type]) -> Type? {
+sema_call_reflection_method_return: fn(type_name: String, method: String, args: [Type]) -> Type? {
     if type_name == "Value" {
         if args.len() != 0 -> return None
         if method == "type_name" || method == "path" || method == "display" -> return Val(Type.String)
@@ -242,7 +242,7 @@ fn sema_call_reflection_method_return(type_name: String, method: String, args: [
     None
 }
 
-fn sema_call_reflection_metadata_owner(ty: Type) -> String? {
+sema_call_reflection_metadata_owner: fn(ty: Type) -> String? {
     if ty == {
         .Tagged(_, inner) -> return sema_call_reflection_metadata_owner(inner)
         .Named(name) | .Apply(name, _) -> return Val(sema_call_reflection_leaf_name(name))
@@ -250,13 +250,13 @@ fn sema_call_reflection_metadata_owner(ty: Type) -> String? {
     }
 }
 
-fn sema_call_reflection_metadata_method(owner: String, method: String) -> Bool Never! {
+sema_call_reflection_metadata_method: fn(owner: String, method: String) -> Bool Never! {
     if owner == "TypeInfo" -> return method == "has_marker" || method == "implements" || method == "has_method"
     if owner == "FieldInfo" || owner == "MethodInfo" -> return method == "has_marker"
     false
 }
 
-fn sema_call_try_reflection_metadata_method(
+sema_call_try_reflection_metadata_method: fn(
     receiver: Expr,
     receiver_value: TExpr,
     method: String,
@@ -270,7 +270,7 @@ fn sema_call_try_reflection_metadata_method(
     context: &SemaCheckContext,
     diagnostics: &[Diagnostic],
 ) -> SemaMethodSpecialCheck {
-    owner :: sema_call_reflection_metadata_owner(receiver_value.ty) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    owner: sema_call_reflection_metadata_owner(receiver_value.ty) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     if !sema_call_reflection_metadata_method(owner, method) -> return SemaMethodSpecialCheck{handled: false, value: None}
     if args.len() != 1 {
         loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -280,20 +280,20 @@ fn sema_call_try_reflection_metadata_method(
     }
     params := [SemaCallParam]{SemaCallParam{label: "name", name: "name", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(Type.String), variadic: false}}
     checked_args := args
-    binding :: sema_call_bind_args("{owner}.{method}", params, &checked_args, span, &diagnostics) ?? {
+    binding: sema_call_bind_args("{owner}.{method}", params, &checked_args, span, &diagnostics) ?? {
         loop argument in checked_args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    typed :: sema_call_typecheck_bound_arguments("{owner}.{method}", params, None, false, binding, &checked_args, environment, program, &scopes, &state, &tail_store, &context, span, &diagnostics, true) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    typed: sema_call_typecheck_bound_arguments("{owner}.{method}", params, None, false, binding, &checked_args, environment, program, &scopes, &state, &tail_store, &context, span, &diagnostics, true) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     ownership := sema_ownership_check_method_call(&state, "{owner}.{method}", receiver, AccessConvention.Read, params, &checked_args, scopes, span, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
     if !sema_effect_record_intrinsic_effects(environment, program, &scopes, &context, "{owner}.{method}", span, [EffectRowEntry]{}, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-    result_type :: sema_call_reflection_method_return(owner, method, [Type]{Type.String}) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    result_type: sema_call_reflection_method_return(owner, method, [Type]{Type.String}) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     value := sema_tree_node(result_type, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: method, args: typed.values}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
 }
 
-fn sema_call_reflection_handle_operation(owner: String, method: String) -> THandleOp? {
+sema_call_reflection_handle_operation: fn(owner: String, method: String) -> THandleOp? {
     if owner == "Value" {
         if method == "type_name" -> return Val(THandleOp.ReflectValueTypeName)
         if method == "path" -> return Val(THandleOp.ReflectValuePath)
@@ -307,7 +307,7 @@ fn sema_call_reflection_handle_operation(owner: String, method: String) -> THand
     None
 }
 
-fn sema_call_try_reflection_handle_method(
+sema_call_try_reflection_handle_method: fn(
     receiver: Expr,
     receiver_value: TExpr,
     method: String,
@@ -323,11 +323,11 @@ fn sema_call_try_reflection_handle_method(
 ) -> SemaMethodSpecialCheck {
     metadata := sema_call_try_reflection_metadata_method(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if metadata.handled -> return metadata
-    owner :: if receiver_value.ty == {
+    owner: if receiver_value.ty == {
         .Named(name) -> name
         else -> ""
     }
-    operation :: sema_call_reflection_handle_operation(owner, method)
+    operation: sema_call_reflection_handle_operation(owner, method)
     if operation == None -> return SemaMethodSpecialCheck{handled: false, value: None}
     if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) {
         return SemaMethodSpecialCheck{handled: true, value: None}
@@ -337,7 +337,7 @@ fn sema_call_try_reflection_handle_method(
         &diagnostics.push(sema_error("E0104", span, "`{owner}.{method}` takes no arguments, got {args.len()}", "reflection handle accessors only inspect their existing value", "call `.{method}()` with no arguments"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    result_type :: sema_call_reflection_method_return(owner, method, [Type]{}) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    result_type: sema_call_reflection_method_return(owner, method, [Type]{}) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     value := sema_tree_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
 }

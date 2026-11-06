@@ -73,7 +73,7 @@ const sizes = [];
 for (const report of reports) {
   const bytes = assemble(report.source);
   sizes.push(`${report.name} ${bytes.length} bytes`);
-  out += `\n${report.doc}${report.name} :: [U8]{\n`;
+  out += `\n${report.doc}${report.name}: [U8]{\n`;
   for (let at = 0; at < bytes.length; at += 16) out += `    ${bytes.slice(at, at + 16).join(", ")},\n`;
   out += "}\n";
 }

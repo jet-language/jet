@@ -11,21 +11,21 @@ stdout: ~ "definitionProvider" # original predicate
 stdout: ~ "referencesProvider" # original predicate
 stdout: ~ "renameProvider" # original predicate
 send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
-send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{tmp}/lsp_checked_text_test.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"#Error\\nenum PatternError { Bad }\\nPattern :: distinct String\\nimpl Pattern.CheckedText {\\n    type Error = PatternError\\n    fn check(text: String) PatternError! -[]> {\\n        return\\n    }\\n    fn encode_hole<T: Printable>(value: T) -[]> String {\\n        return \\\"\\\"\\n    }\\n}\\nfn use_pattern(value: Pattern) {\\n    return\\n}\\nfn run() {\\n    \\n}\\n\"}}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{tmp}/lsp_checked_text_test.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"#Error\\nPatternError: enum { Bad }\\nPattern: distinct String\\nimpl Pattern.CheckedText {\\n    Error: PatternError\\n    check: fn(text: String) PatternError! -[]> {\\n        return\\n    }\\n    encode_hole: fn<T: Printable>(value: T) -[]> String {\\n        return \\\"\\\"\\n    }\\n}\\nuse_pattern: fn(value: Pattern) {\\n    return\\n}\\nrun: fn() {\\n    \\n}\\n\"}}}"
 recv lsp
 stdout: ~ "publishDiagnostics" # original predicate
 send lsp: "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"file://{tmp}/lsp_checked_text_test.jet\"},\"position\":{\"line\":2,\"character\":1}}}"
 recv lsp
-stdout: ~ "type Pattern :: distinct String" # original predicate
+stdout: ~ "type Pattern: distinct String" # original predicate
 stdout: ~ "implements CheckedText" # original predicate
 stdout: ~ "type Error = PatternError" # original predicate
 stdout: ~ "encode_hole" # original predicate
-send lsp: "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"textDocument/completion\",\"params\":{\"textDocument\":{\"uri\":\"file://{tmp}/lsp_checked_text_test.jet\"},\"position\":{\"line\":15,\"character\":4}}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"textDocument/completion\",\"params\":{\"textDocument\":{\"uri\":\"file://{tmp}/lsp_checked_text_test.jet\"},\"position\":{\"line\":15,\"character\":1}}}"
 recv lsp
 stdout: ~ "Pattern" # original predicate
 stdout: ~ "implements CheckedText" # original predicate
 stdout: ~ "encode_hole" # original predicate
-send lsp: "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"textDocument/definition\",\"params\":{\"textDocument\":{\"uri\":\"file://{tmp}/lsp_checked_text_test.jet\"},\"position\":{\"line\":12,\"character\":23}}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"textDocument/definition\",\"params\":{\"textDocument\":{\"uri\":\"file://{tmp}/lsp_checked_text_test.jet\"},\"position\":{\"line\":12,\"character\":24}}}"
 recv lsp
 stdout: ~ "range" # original predicate
 stdout: ~ "nominal_base" # original predicate

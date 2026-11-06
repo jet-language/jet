@@ -1,28 +1,28 @@
 use jet_foundation.[CoreLeafKind, CoreModuleTypeExport, CoreModuleDeclaration]
 
-struct JetCLICoreBootstrap {
+JetCLICoreBootstrap: struct {
     name: String
     dependencies: [String]
 }
-struct JetCLIStructureRegistryRow {
+JetCLIStructureRegistryRow: struct {
     name: String
     safe_direction: String
     gates: [String]
 }
 
-JET_CLI_STRUCTURE_ROWS :: [JetCLIStructureRegistryRow]{
+JET_CLI_STRUCTURE_ROWS: [JetCLIStructureRegistryRow]{
     {name: "Structure.Liveness", safe_direction: "gain", gates: [String]{"_name"}},
     {name: "Structure.Lifecycle", safe_direction: "shrink", gates: [String]{"policy allow"}},
     {name: "Structure.ImportEdge", safe_direction: "shrink", gates: [String]{"manifest rule edit"}},
 }
-JET_CLI_CORE_BOOTSTRAP :: [JetCLICoreBootstrap]{
+JET_CLI_CORE_BOOTSTRAP: [JetCLICoreBootstrap]{
     {name: "Syntax", dependencies: [String]{}},
     {name: "Effects", dependencies: [String]{"Syntax"}},
     {name: "Core", dependencies: [String]{"Effects"}},
     {name: "Derives", dependencies: [String]{"Core"}},
 }
-JET_CLI_CORE_ROOT_TYPES :: [String]{"Date", "LocalDate", "LocalTime", "Decimal", "Fraction", "Duration", "Instant", "Authority"}
-JET_CLI_CORE_DECLARATIONS :: [CoreModuleDeclaration]{
+JET_CLI_CORE_ROOT_TYPES: [String]{"Date", "LocalDate", "LocalTime", "Decimal", "Fraction", "Duration", "Instant", "Authority"}
+JET_CLI_CORE_DECLARATIONS: [CoreModuleDeclaration]{
     {module_name: "app", members: [String]{"AppError", "Auth", "Session", "__live_arg", "__live_bind", "__live_invalidate", "__live_invalidate_all", "__live_poll", "__live_push", "auth", "auth_oauth", "auth_routes", "auth_show", "invalidate", "live", "live_stats", "push", "state", "subscribe", "sync"}, type_exports: [CoreModuleTypeExport]{CoreModuleTypeExport{name: "AppError", kind: CoreLeafKind.Enum{variants: [String]{"Invalid", "Unsupported"}}}, CoreModuleTypeExport{name: "Auth", kind: CoreLeafKind.Plain}, CoreModuleTypeExport{name: "Session", kind: CoreLeafKind.Plain}}, dependencies: [String]{"core.web"}},
     {module_name: "core", members: [String]{}, type_exports: [CoreModuleTypeExport]{}, dependencies: [String]{}},
     {module_name: "core.devtools", members: [String]{"publish"}, type_exports: [CoreModuleTypeExport]{}, dependencies: [String]{"core"}},

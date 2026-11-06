@@ -6,7 +6,7 @@
 // verb can't read is a usage error on stderr (exit 2); a check that can't
 // load its sources keeps that refusal's stderr and status.
 use {
-    cli_term :: core.term
+    cli_term: core.term
     jet_driver.[
         JetDriverCompileMode,
         JetDriverVerbOutput,
@@ -27,27 +27,27 @@ use {
     ]
 }
 
-fn jet_cli_compiler_service_refused(what: String) -> JetDriverVerbOutput Never! {
+jet_cli_compiler_service_refused: fn(what: String) -> JetDriverVerbOutput Never! {
     jet_cli_report_output("", "E2104", what, jet_cli_why("E2104"), "`jet {JET_COMPILER_SERVICE_VERB}` is spoken by `jetpack`; run the jetpack command instead", false, JET_DRIVER_EXIT_USAGE)
 }
 
 // Answer one service request read from stdin.
-fn jet_cli_compiler_service(op: String) -> JetDriverVerbOutput {
+jet_cli_compiler_service: fn(op: String) -> JetDriverVerbOutput {
     if op != JET_COMPILER_SERVICE_COMPTIME_EVALUATE && op != JET_COMPILER_SERVICE_CHECK_ENTRY {
         return jet_cli_compiler_service_refused("`{op}` is not a compiler service operation")
     }
-    text :: cli_term.read_all_input() ?? return jet_cli_compiler_service_refused("the compiler service request could not be read from stdin: {err}")
+    text: cli_term.read_all_input() ?? return jet_cli_compiler_service_refused("the compiler service request could not be read from stdin: {err}")
     jet_cli_compiler_service_answer(op, text)
 }
 
 // The response to one request: `op` is a known operation.
-fn jet_cli_compiler_service_answer(op: String, text: String) -> JetDriverVerbOutput {
-    request :: foundation_parse_protocol_json(text) ?? return jet_cli_compiler_service_refused("the `{op}` request is not valid protocol JSON")
+jet_cli_compiler_service_answer: fn(op: String, text: String) -> JetDriverVerbOutput {
+    request: foundation_parse_protocol_json(text) ?? return jet_cli_compiler_service_refused("the `{op}` request is not valid protocol JSON")
     if op == JET_COMPILER_SERVICE_COMPTIME_EVALUATE {
-        fields :: compiler_service_comptime_request_from(request) ?? return jet_cli_compiler_service_refused("the `{op}` request needs the text fields `program` and `base_dir`")
+        fields: compiler_service_comptime_request_from(request) ?? return jet_cli_compiler_service_refused("the `{op}` request needs the text fields `program` and `base_dir`")
         return JetDriverVerbOutput{stdout: compiler_service_comptime_response(jet_config_evaluate_program(fields.program, fields.base_dir)), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     }
-    fields :: compiler_service_check_request_from(request) ?? return jet_cli_compiler_service_refused("the `{op}` request needs the text fields `file` and `source`")
+    fields: compiler_service_check_request_from(request) ?? return jet_cli_compiler_service_refused("the `{op}` request needs the text fields `file` and `source`")
     jet_cli_compiler_service_check(fields.file, fields.source)
 }
 
@@ -56,9 +56,9 @@ fn jet_cli_compiler_service_answer(op: String, text: String) -> JetDriverVerbOut
 // are the ones the requester reads its job registry from. Every presented
 // diagnostic is returned in compiler order; a run with no error whose
 // compile still failed internally is one E2105 row.
-fn jet_cli_compiler_service_check(file: String, source: String) -> JetDriverVerbOutput {
+jet_cli_compiler_service_check: fn(file: String, source: String) -> JetDriverVerbOutput {
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    compiled :: jet_cli_compile_entry(file, false, None, JetDriverCompileMode.Program, Val(source), None)
+    compiled: jet_cli_compile_entry(file, false, None, JetDriverCompileMode.Program, Val(source), None)
     if compiled == {
         .Refused(refusal) -> output = ^refusal
         .Compiled(result, snapshot) -> {

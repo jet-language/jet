@@ -1,22 +1,22 @@
 // A Close value taken out of an owned carrier's payload has one owner: the
 // held directory stays open for the new owner after the carrier it came from
 // ends, and a borrowed holder reads it in place without closing it.
-use files :: core.files
+use files: core.files
 
-struct Res { name: String }
+Res: struct { name: String }
 impl Res.Close {
-    fn close(^self) { print("close {self.name}") }
+    close: fn(^self) { print("close {self.name}") }
 }
 
-struct Held {
+Held: struct {
     tracer: Res
     directory: Directory?
 
     // Reads the held directory where it is: a borrowed receiver never closes it.
-    fn is_open(self) -> Bool Never! {
+    is_open: fn(self) -> Bool Never! {
         if self.directory == {
             .Val(directory) -> {
-                info :: directory.stat() ?? return false
+                info: directory.stat() ?? return false
                 info.is_dir
             }
             .None -> false
@@ -24,16 +24,16 @@ struct Held {
     }
 }
 
-struct Wrappers {
+Wrappers: struct {
     root: String
     held: Held
 }
 
-struct Lease {
+Lease: struct {
     root: String?
     handle: Held?
 
-    fn is_open(self) -> Bool Never! {
+    is_open: fn(self) -> Bool Never! {
         if self.handle == {
             .Val(held) -> held.is_open()
             .None -> false
@@ -41,20 +41,20 @@ struct Lease {
     }
 }
 
-fn held_at(name: String) -> Held? {
-    directory :: files.open_directory(".") ?? return None
+held_at: fn(name: String) -> Held? {
+    directory: files.open_directory(".") ?? return None
     Val(Held{tracer: Res{name: name}, directory: Val(directory)})
 }
 
-fn wrappers_at(name: String) -> Wrappers? {
-    held :: held_at(name) ?? return None
+wrappers_at: fn(name: String) -> Wrappers? {
+    held: held_at(name) ?? return None
     Val(Wrappers{root: ".", held: ^held})
 }
 
 // The Store shape: the payload's field moves out of the owned carrier with a
 // written `^`, and the carrier then ends with this function.
-fn lease_from_payload() -> Lease {
-    wrappers :: wrappers_at("payload")
+lease_from_payload: fn() -> Lease {
+    wrappers: wrappers_at("payload")
     root := String?{None}
     handle := Held?{None}
     if wrappers == {
@@ -68,29 +68,29 @@ fn lease_from_payload() -> Lease {
 }
 
 // `??` on an owned carrier moves its payload to the new binding.
-fn held_from_unwrap() -> Held? {
-    carrier :: held_at("unwrap")
-    found :: carrier ?? return None
+held_from_unwrap: fn() -> Held? {
+    carrier: held_at("unwrap")
+    found: carrier ?? return None
     Val(^found)
 }
 
 // A match arm tail on an owned carrier moves its payload out with `^`.
-fn held_from_arm() -> Held? {
-    carrier :: held_at("arm")
-    found :: if carrier == {
+held_from_arm: fn() -> Held? {
+    carrier: held_at("arm")
+    found: if carrier == {
         .Val(held) -> ^held
         .None -> panic("no held directory")
     }
     Val(^found)
 }
 
-fn check_lease() {
-    lease :: lease_from_payload()
+check_lease: fn() {
+    lease: lease_from_payload()
     print("payload open {lease.is_open()}")
     print("payload open again {lease.is_open()}")
 }
 
-fn check(label: String, held: Held?) {
+check: fn(label: String, held: Held?) {
     if held == {
         .Val(found) -> {
             print("{label} open {found.is_open()}")
@@ -101,20 +101,20 @@ fn check(label: String, held: Held?) {
 }
 
 // Each new owner is a named local, so it ends, and closes, with its function.
-fn check_unwrap() {
-    held :: held_from_unwrap()
+check_unwrap: fn() {
+    held: held_from_unwrap()
     check("unwrap", held)
 }
 
-fn check_arm() {
-    held :: held_from_arm()
+check_arm: fn() {
+    held: held_from_arm()
     check("arm", held)
 }
 
 // A `^` drive hands the loop each element: pushing it moves it to the new
 // list, which then closes each tracer once.
-fn check_loop() {
-    list :: [Res{name: "loop a"}, Res{name: "loop b"}]
+check_loop: fn() {
+    list: [Res{name: "loop a"}, Res{name: "loop b"}]
     out := [Res]{}
     loop item in ^list {
         &out.push(item)
@@ -122,7 +122,7 @@ fn check_loop() {
     print("loop moved {out.len()}")
 }
 
-fn run() {
+run: fn() {
     check_lease()
     check_unwrap()
     check_arm()

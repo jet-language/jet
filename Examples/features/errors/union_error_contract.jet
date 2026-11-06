@@ -2,26 +2,26 @@
 // one callable fail with any listed error domain. Each `Err(member)` widens
 // into the union; callers recover with `??` or match the member they got.
 #Error
-enum DBError {
+DBError: enum {
     Down
 }
 
 #Error
-enum TimeoutError {
+TimeoutError: enum {
     Late(Int)
 }
 
-struct Entry {
+Entry: struct {
     id: Int
 }
 
-fn fetch(id: Int) -> Entry (DBError | TimeoutError)! {
+fetch: fn(id: Int) -> Entry (DBError | TimeoutError)! {
     if id < 0 -> return Err(DBError.Down)
     if id > 100 -> return Err(TimeoutError.Late(id))
     return Entry{id: id}
 }
 
-fn describe(id: Int) -> String {
+describe: fn(id: Int) -> String {
     if fetch(id) == {
         .Ok(entry) -> { return "got {entry.id}" }
         .Err(error) -> {
@@ -35,10 +35,10 @@ fn describe(id: Int) -> String {
     return "unreachable"
 }
 
-fn run() {
-    entry :: fetch(3) ?? return
+run: fn() {
+    entry: fetch(3) ?? return
     print("got {entry.id}")
-    fallback :: fetch(-1) ?? Entry{id: 0}
+    fallback: fetch(-1) ?? Entry{id: 0}
     print("fallback {fallback.id}")
     print(describe(7))
     print(describe(-1))

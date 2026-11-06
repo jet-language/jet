@@ -1,6 +1,6 @@
 
-fn find(xs: [Int]) -> Int {
-    found :: loop {
+find: fn(xs: [Int]) -> Int {
+    found: loop {
         loop x in xs {
             if x > 2 -> break(found, x)
         }
@@ -9,9 +9,9 @@ fn find(xs: [Int]) -> Int {
     found
 }
 
-fn outer_result() -> Int {
-    result :: loop {
-        ignored :: loop {
+outer_result: fn() -> Int {
+    result: loop {
+        ignored: loop {
             break(result, 9)
         }
         break 0
@@ -19,11 +19,11 @@ fn outer_result() -> Int {
     result
 }
 
-fn identity(value: Int) -> Int { value }
+identity: fn(value: Int) -> Int { value }
 
-fn nested_binary_exit() -> Int {
-    result :: loop {
-        ignored :: (loop {
+nested_binary_exit: fn() -> Int {
+    result: loop {
+        ignored: (loop {
             break(result, 11)
             break 1
         }) + 2
@@ -32,9 +32,9 @@ fn nested_binary_exit() -> Int {
     result
 }
 
-fn nested_call_exit() -> Int {
-    result :: loop {
-        ignored :: identity(loop {
+nested_call_exit: fn() -> Int {
+    result: loop {
+        ignored: identity(loop {
             break(result, 12)
             break 1
         })
@@ -43,8 +43,8 @@ fn nested_call_exit() -> Int {
     result
 }
 
-fn nested_condition_exit() -> Int {
-    result :: loop {
+nested_condition_exit: fn() -> Int {
+    result: loop {
         if (loop {
             break(result, 13)
             break 1
@@ -56,8 +56,8 @@ fn nested_condition_exit() -> Int {
     result
 }
 
-fn counted_init_exit() -> Int {
-    result :: loop {
+counted_init_exit: fn() -> Int {
+    result: loop {
         loop i := (loop {
             break(result, 14)
             break 0
@@ -69,8 +69,8 @@ fn counted_init_exit() -> Int {
     result
 }
 
-fn counted_step_exit() -> Int {
-    result :: loop {
+counted_step_exit: fn() -> Int {
+    result: loop {
         loop i := 0, i < 2 {
             i = (loop {
                 break(result, 15)
@@ -82,9 +82,9 @@ fn counted_step_exit() -> Int {
     result
 }
 
-fn value_if_exit() -> Int {
-    result :: loop {
-        ignored :: if true -> {
+value_if_exit: fn() -> Int {
+    result: loop {
+        ignored: if true -> {
             break(result, 16)
             0
         } else -> 0
@@ -93,18 +93,18 @@ fn value_if_exit() -> Int {
     result
 }
 
-fn run() {
-    xs :: [Int]{ 1, 2, 3, 4 }
-    prefix :: loop x in xs -> {
+run: fn() {
+    xs: [Int]{ 1, 2, 3, 4 }
+    prefix: loop x in xs -> {
         if x > 3 -> break
         x * 2
     }
-    rows :: loop x in xs, y in [10, 20] -> {
+    rows: loop x in xs, y in [10, 20] -> {
         if x == 2 && y == 20 -> break
         x + y
     }
-    outer :: loop x in xs {
-        ignored :: loop {
+    outer: loop x in xs {
+        ignored: loop {
             if x == 1 -> next(outer)
             if x == 2 -> break(outer)
             break 0

@@ -1,24 +1,24 @@
 // D-COREIO1=A / D-IO-PROMPT1=A: terminal facts, streams, and interactive prompts.
-package {
+package: {
     name: "terminal_parity"
     authority: { allow: [Env, IO, Mem.Alloc, Time.Wait] }
 }
 
 use {
-    env :: core.sys
-    io :: core.term
+    env: core.sys
+    io: core.term
 }
 
-fn run() {
+run: fn() {
     env.set("COLUMNS", "100")
     env.set("LINES", "40")
     env.set("NO_COLOR", "1")
-    confirmed :: io.confirm("Continue?")
+    confirmed: io.confirm("Continue?")
     print("confirm: {confirmed}")
     // A closed input stream, or ten rejected answers, stops `choose` instead of
     // asking again without end. That makes every non-interactive run finish, and
     // this program answers such a stop with the documented "staging" default.
-    choice :: io.choose("Choose a target:", ["staging", "production"]) ?? "staging"
+    choice: io.choose("Choose a target:", ["staging", "production"]) ?? "staging"
     print("choice: {choice}")
     if io.input_secret("Secret: ") == {
         .Ok(secret) -> { print("secret length: {secret.len()}") }
@@ -35,7 +35,7 @@ fn run() {
     &out.write(" stream") ?? panic("stdout write failed")
     &out.flush() ?? panic("stdout flush failed")
     &out.write_line("") ?? panic("stdout newline failed")
-    bytes :: [U8]{114, 97, 119, 10}
+    bytes: [U8]{114, 97, 119, 10}
     &out.write_bytes(bytes) ?? panic("stdout bytes failed")
     print("stdout tty: {out.is_tty()}")
     print("stderr tty: {err_stream.is_tty()}")

@@ -1,10 +1,10 @@
 // Claims for `jetpack tool` and the user-tools profile (Rust CLI/tool.rs tests).
 
-fn cli_tools_test_digest(fill: String) -> String {
+cli_tools_test_digest: fn(fill: String) -> String {
     "sha256-{fill.repeat(64)}"
 }
 
-fn cli_tools_test_tool(name: String, reference: String, bin: String, member: String) -> InstalledUserTool {
+cli_tools_test_tool: fn(name: String, reference: String, bin: String, member: String) -> InstalledUserTool {
     InstalledUserTool{
         name: name,
         version: "1",
@@ -18,7 +18,7 @@ fn cli_tools_test_tool(name: String, reference: String, bin: String, member: Str
     }
 }
 
-fn cli_tools_test_generation_rows(tools: [InstalledUserTool]) -> [ToolGenerationTool] {
+cli_tools_test_generation_rows: fn(tools: [InstalledUserTool]) -> [ToolGenerationTool] {
     rows := [ToolGenerationTool]{}
     loop entry in tools {
         &rows.push(ToolGenerationTool{
@@ -37,19 +37,17 @@ fn cli_tools_test_generation_rows(tools: [InstalledUserTool]) -> [ToolGeneration
 }
 
 // Rust `str::replacen(from, to, 1)`.
-fn cli_tools_test_replace_first(text: String, from: String, to: String) -> String {
-    parts :: text.split_once(from) ?? return text
+cli_tools_test_replace_first: fn(text: String, from: String, to: String) -> String {
+    parts: text.split_once(from) ?? return text
     "{parts.before}{to}{parts.after}"
 }
 
 #Test("task names parse plain and every") {
-    src :: "\n#Job fn serve() {{ }}\n#Every(5min) #Job fn lint() {{ }}\nfn run() {{ }}\n"
-    names :: cli_task_names_in(src)
+    src: "\n#Job serve: fn() {{ }}\n#Every(5min) #Job lint: fn() {{ }}\nrun: fn() {{ }}\n"
+    names: cli_task_names_in(src)
     assert(names.contains("serve"), "{names}")
     assert(names.contains("lint"), "{names}")
     assert(!names.contains("run"))
-    colon :: cli_task_names_in("\n#Job serve: fn() {{ }}\n#Every(5min) #Job lint: fn() {{ }}\nrun: fn() {{ }}\n")
-    assert_eq(colon, [String]{"serve", "lint"})
 }
 
 #Test("external provider list covers ballot examples") {
@@ -59,9 +57,9 @@ fn cli_tools_test_replace_first(text: String, from: String, to: String) -> Strin
 }
 
 #Test("profile witness binds immutable metadata and sorted digests") {
-    left :: [String]{cli_tools_test_digest("b"), cli_tools_test_digest("a")}
-    right :: [String]{cli_tools_test_digest("a"), cli_tools_test_digest("b")}
-    witness :: cli_profile_generation_witness("immutable", left)
+    left: [String]{cli_tools_test_digest("b"), cli_tools_test_digest("a")}
+    right: [String]{cli_tools_test_digest("a"), cli_tools_test_digest("b")}
+    witness: cli_profile_generation_witness("immutable", left)
     assert_eq(witness, cli_profile_generation_witness("immutable", right))
     assert(witness != cli_profile_generation_witness("changed", left))
     assert(witness.starts_with("sha256-"))
@@ -69,46 +67,46 @@ fn cli_tools_test_replace_first(text: String, from: String, to: String) -> Strin
 }
 
 #Test("generation metadata roundtrips original store digest") {
-    tools :: [InstalledUserTool]{cli_tools_test_tool("tool", "./tool", "tool", "tool")}
-    metadata :: cli_format_tool_generation_meta(7, tools) ?? panic("format metadata")
-    parsed :: cli_parse_tool_generation_meta(metadata, 7) ?? panic("parse metadata")
+    tools: [InstalledUserTool]{cli_tools_test_tool("tool", "./tool", "tool", "tool")}
+    metadata: cli_format_tool_generation_meta(7, tools) ?? panic("format metadata")
+    parsed: cli_parse_tool_generation_meta(metadata, 7) ?? panic("parse metadata")
     assert_eq(parsed.len(), 1)
     assert_eq(parsed[0].output_hash, cli_tools_test_digest("d"))
     assert(metadata.contains("\"generation\": 7"))
 }
 
 #Test("profile metadata rejects unknown fields and duplicate bins") {
-    tool :: cli_tools_test_tool("left", "./left", "same", "left")
-    metadata :: cli_format_tool_generation_meta(1, [InstalledUserTool]{tool}) ?? panic("format metadata")
-    corrupted :: cli_tools_test_replace_first(metadata, "{{\n", "{{\n  \"unknown\": true,\n")
+    tool: cli_tools_test_tool("left", "./left", "same", "left")
+    metadata: cli_format_tool_generation_meta(1, [InstalledUserTool]{tool}) ?? panic("format metadata")
+    corrupted: cli_tools_test_replace_first(metadata, "{{\n", "{{\n  \"unknown\": true,\n")
     assert(cli_parse_tool_generation_meta(corrupted, 1) == .Err(_))
 
     right := tool
     right.name = "right"
     right.reference = "./right"
     right.members = [String]{"right"}
-    duplicate :: ToolGenerationMetadata{generation: 1, created_at: 1, tools: cli_tools_test_generation_rows([InstalledUserTool]{tool, right})}
+    duplicate: ToolGenerationMetadata{generation: 1, created_at: 1, tools: cli_tools_test_generation_rows([InstalledUserTool]{tool, right})}
     assert(duplicate.format() == .Err(_))
 }
 
 #Test("current pointer checksum rejects bitflips and truncation") {
-    record :: ToolProfilePointer{generation: 9, witness: cli_tools_test_digest("f")}
-    pointer :: record.format() ?? panic("format pointer")
+    record: ToolProfilePointer{generation: 9, witness: cli_tools_test_digest("f")}
+    pointer: record.format() ?? panic("format pointer")
     assert_eq(ToolProfilePointer.parse(pointer) ?? panic("parse pointer"), record)
     assert(ToolProfilePointer.parse(pointer.replace("generation\t9", "generation\t8")) == .Err(_))
     assert(ToolProfilePointer.parse(pointer.trim_end()) == .Err(_))
 }
 
 #Test("tool manifest round-trips canonical refs") {
-    reference :: "can1357/oh-my-pi@github#auto"
-    resolved :: "can1357/oh-my-pi@github#v18.0.4"
-    text :: "{{\n  \"profile\":\"tools\",\n  \"schema\":\"jet-user-tools-v1\",\n  \"sources\":[{{\"name\":\"releases\",\"policy\":\"pinned\",\"provider\":\"jetpackage\",\"raw\":{cli_json_quote(reference)},\"upstream\":\"github:can1357/oh-my-pi#v18.0.4\"}}],\n  \"tools\":[{{\"bins\":[\"omp\"],\"members\":[\"omp\"],\"name\":\"omp\",\"reference\":{cli_json_quote(reference)},\"resolved\":{cli_json_quote(resolved)},\"tier\":\"pinned\"}}]\n}}"
-    manifest :: ToolManifest.parse(text) ?? panic("tool manifest parses")
+    reference: "can1357/oh-my-pi@github#auto"
+    resolved: "can1357/oh-my-pi@github#v18.0.4"
+    text: "{{\n  \"profile\":\"tools\",\n  \"schema\":\"jet-user-tools-v1\",\n  \"sources\":[{{\"name\":\"releases\",\"policy\":\"pinned\",\"provider\":\"jetpackage\",\"raw\":{cli_json_quote(reference)},\"upstream\":\"github:can1357/oh-my-pi#v18.0.4\"}}],\n  \"tools\":[{{\"bins\":[\"omp\"],\"members\":[\"omp\"],\"name\":\"omp\",\"reference\":{cli_json_quote(reference)},\"resolved\":{cli_json_quote(resolved)},\"tier\":\"pinned\"}}]\n}}"
+    manifest: ToolManifest.parse(text) ?? panic("tool manifest parses")
     assert_eq(manifest.sources[0].policy, ChannelPolicy.Automatic)
     assert_eq(manifest.tools[0].tier, ChannelPolicy.Automatic)
     assert_eq(manifest.tools[0].reference, reference)
     assert_eq(manifest.tools[0].resolved, resolved)
-    formatted :: manifest.format()
+    formatted: manifest.format()
     assert(formatted.contains("\"reference\":{cli_json_quote(reference)}"))
     assert_eq((ToolManifest.parse(formatted) ?? panic("formatted manifest parses")).format(), formatted)
 
@@ -116,6 +114,6 @@ fn cli_tools_test_replace_first(text: String, from: String, to: String) -> Strin
     installed.version = "18.0.4"
     installed.source = "github"
     installed.output_hash = cli_tools_test_digest("f")
-    metadata :: cli_format_tool_generation_meta(7, [InstalledUserTool]{installed}) ?? panic("generation metadata formats")
+    metadata: cli_format_tool_generation_meta(7, [InstalledUserTool]{installed}) ?? panic("generation metadata formats")
     assert(metadata.contains(resolved))
 }

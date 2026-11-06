@@ -1,4 +1,4 @@
-package {
+package: {
     name: "crypto_random_api_split"
     version: "0.1.0"
     authority: { allow: [Exec, IO, Mem.Alloc, Rand] }
@@ -7,34 +7,34 @@ package {
 // core.math.random.bytes — fast, seedable, NOT cryptographically secure.
 // core.crypto.random.bytes — cryptographically secure (/dev/urandom).
 use {
-    random :: core.math.random
-    crypto_rand :: core.crypto.random
+    random: core.math.random
+    crypto_rand: core.crypto.random
     // D-ONCE-LAYER1=B: core.crypto is the typed rung; core.crypto.expert is the raw-byte rung.
-    crypto :: core.crypto
-    expert :: core.crypto.expert
+    crypto: core.crypto
+    expert: core.crypto.expert
 }
 
-fn run() {
+run: fn() {
     // PRNG bytes: simulation, testing, shuffles.
-    noise :: random.bytes(8)
+    noise: random.bytes(8)
     print("prng bytes: {noise.len()}")
     // CSPRNG bytes: tokens, keys, nonces, secrets.
-    token :: crypto_rand.bytes(16) ?? return
+    token: crypto_rand.bytes(16) ?? return
     print("crypto bytes: {token.len()}")
     // PRNG is seedable for reproducibility.
     random.seed(42)
-    a :: random.bytes(4)
+    a: random.bytes(4)
     random.seed(42)
-    b :: random.bytes(4)
+    b: random.bytes(4)
     print("prng reproducible: {a == b}")
 
-    ikm :: [U8]{1, 2, 3, 4}
-    salt :: [U8]{5, 6}
-    info :: [U8]{7, 8}
+    ikm: [U8]{1, 2, 3, 4}
+    salt: [U8]{5, 6}
+    info: [U8]{7, 8}
     rungs_agree := false
     #Unsafe("compare the typed and raw HKDF rungs") {
-        raw :: expert.hkdf_sha256_raw(ikm, salt, info, 16) ?? return
-        typed :: crypto.hkdf_sha256(ikm, salt, info, 16) ?? return
+        raw: expert.hkdf_sha256_raw(ikm, salt, info, 16) ?? return
+        typed: crypto.hkdf_sha256(ikm, salt, info, 16) ?? return
         rungs_agree = crypto.constant_time_equal(typed, raw)
     }
     print("crypto rungs agree: {rungs_agree}")

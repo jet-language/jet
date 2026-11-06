@@ -16,36 +16,36 @@
 // jet.hardening.repro.v1 bundle.
 
 use {
-    crypto :: core.crypto
-    json :: core.encoding.json
-    files :: core.files
+    crypto: core.crypto
+    json: core.encoding.json
+    files: core.files
     jet_parser.[parse_source]
     jet_foundation.[Expr, ast_visit_body]
 }
 
-GENERATOR_SEED :: "2342"
-GENERATOR_CASES :: 16
-GENERATOR_MAX_CASES :: 128
-GENERATOR_MAX_CONTEXT :: 2
-GENERATOR_SOURCE_LIMIT :: 65536
-GENERATOR_MUTATOR :: "construct-generator/1"
-GENERATOR_ORACLE :: "tier-agreement"
-GENERATOR_ORACLE_VERSION :: "1"
-CHECK_STAGE :: "check"
+GENERATOR_SEED: "2342"
+GENERATOR_CASES: 16
+GENERATOR_MAX_CASES: 128
+GENERATOR_MAX_CONTEXT: 2
+GENERATOR_SOURCE_LIMIT: 65536
+GENERATOR_MUTATOR: "construct-generator/1"
+GENERATOR_ORACLE: "tier-agreement"
+GENERATOR_ORACLE_VERSION: "1"
+CHECK_STAGE: "check"
 
 // The families the generated programs must reach (c36).
-CONSTRUCT_FAMILIES :: [String]{"expressions", "statements", "control-flow", "patterns", "generics", "traits", "effects", "views", "comptime", "nested-places"}
-HOLE_INTS :: [String]{"A", "B", "C"}
-HOLE_WORDS :: [String]{"one", "two", "three"}
+CONSTRUCT_FAMILIES: [String]{"expressions", "statements", "control-flow", "patterns", "generics", "traits", "effects", "views", "comptime", "nested-places"}
+HOLE_INTS: [String]{"A", "B", "C"}
+HOLE_WORDS: [String]{"one", "two", "three"}
 
 // What one generated case showed.
-AGREEMENT :: "agreement"
-REJECTED_VALID :: "rejected-valid"
-UNLOWERED :: "admitted-but-unlowered"
-OPTIMIZER_ONLY :: "optimizer-only-meaning-change"
-OBSERVERLESS :: "observerless"
+AGREEMENT: "agreement"
+REJECTED_VALID: "rejected-valid"
+UNLOWERED: "admitted-but-unlowered"
+OPTIMIZER_ONLY: "optimizer-only-meaning-change"
+OBSERVERLESS: "observerless"
 
-struct Production {
+Production: struct {
     family: String
     name: String
     markers: [String]
@@ -54,7 +54,7 @@ struct Production {
 }
 
 // One production with its holes filled, numbered `slot` in its program.
-struct Instance {
+Instance: struct {
     construct_id: String
     family: String
     slot: Int
@@ -63,7 +63,7 @@ struct Instance {
     body: String
 }
 
-struct Generated {
+Generated: struct {
     case_id: String
     seed: String
     index: Int
@@ -73,35 +73,35 @@ struct Generated {
 }
 
 // The check stage, then each tier (none when the check refused the source).
-struct CaseRun {
+CaseRun: struct {
     check: TierRun
     runs: [TierRun]
 }
 
 // `mismatch` names the class, the tier and what it showed, with no path or
 // time in it, so a rerun of the same failure gives the same text.
-struct Verdict {
+Verdict: struct {
     class: String
     tier: String
     mismatch: String
 }
 
-struct Minimized {
+Minimized: struct {
     program: Generated
     run: CaseRun
     dropped: [String]
 }
 
-fn productions() -> [Production] Never! {
+productions: fn() -> [Production] Never! {
     [Production]{
         Production{
             family: "expressions",
             name: "arith-call",
-            markers: [String]{"fn mix_$K(left: Int, right: Int)", "left * $A + right - $B"},
-            decls: `fn mix_$K(left: Int, right: Int) -> Int Never! {
+            markers: [String]{"mix_$K: fn(left: Int, right: Int)", "left * $A + right - $B"},
+            decls: `mix_$K: fn(left: Int, right: Int) -> Int Never! {
     left * $A + right - $B
 }`,
-            body: `value_$K :: mix_$K($C, $A) + $B * 2
+            body: `value_$K: mix_$K($C, $A) + $B * 2
 print("value_$K {value_$K}")`,
         },
         Production{
@@ -109,8 +109,8 @@ print("value_$K {value_$K}")`,
             name: "text-method",
             markers: [String]{"text_$K.len()"},
             decls: "",
-            body: `text_$K :: "jet-$W"
-value_$K :: "{text_$K.len()}:{text_$K}"
+            body: `text_$K: "jet-$W"
+value_$K: "{text_$K.len()}:{text_$K}"
 print("value_$K {value_$K}")`,
         },
         Production{
@@ -127,11 +127,11 @@ print("value_$K {value_$K}")`,
             family: "statements",
             name: "early-return",
             markers: [String]{"if n > $A -> return $A"},
-            decls: `fn clamp_$K(n: Int) -> Int Never! {
+            decls: `clamp_$K: fn(n: Int) -> Int Never! {
     if n > $A -> return $A
     n
 }`,
-            body: `value_$K :: clamp_$K($B) + clamp_$K($C)
+            body: `value_$K: clamp_$K($B) + clamp_$K($C)
 print("value_$K {value_$K}")`,
         },
         Production{
@@ -141,7 +141,7 @@ print("value_$K {value_$K}")`,
             decls: "",
             body: `sum_$K := 0
 loop i_$K in 0..<$A -> sum_$K += i_$K * $B
-value_$K :: if sum_$K > $C -> sum_$K else -> -sum_$K
+value_$K: if sum_$K > $C -> sum_$K else -> -sum_$K
 print("value_$K {value_$K}")`,
         },
         Production{
@@ -149,7 +149,7 @@ print("value_$K {value_$K}")`,
             name: "arm-table",
             markers: [String]{"$A > $B -> $A - $B"},
             decls: "",
-            body: `value_$K :: if {
+            body: `value_$K: if {
     $A > $B -> $A - $B
     $A < $B -> $B - $A
     else -> 0
@@ -160,18 +160,18 @@ print("value_$K {value_$K}")`,
             family: "patterns",
             name: "enum-destructure",
             markers: [String]{".Rect(width, height) -> width * height"},
-            decls: `enum Shape$K {
+            decls: `Shape$K: enum {
     Circle(radius: Int)
     Rect(width: Int, height: Int)
 }
 
-fn measure_$K(shape: Shape$K) -> Int Never! {
+measure_$K: fn(shape: Shape$K) -> Int Never! {
     if shape == {
         .Circle(radius) -> radius * 3
         .Rect(width, height) -> width * height
     }
 }`,
-            body: `value_$K :: measure_$K(Shape$K.Rect{width: $A, height: $B}) + measure_$K(Shape$K.Circle{radius: $C})
+            body: `value_$K: measure_$K(Shape$K.Rect{width: $A, height: $B}) + measure_$K(Shape$K.Circle{radius: $C})
 print("value_$K {value_$K}")`,
         },
         Production{
@@ -179,8 +179,8 @@ print("value_$K {value_$K}")`,
             name: "literal-alternatives",
             markers: [String]{"\"two\" | \"three\" -> $B"},
             decls: "",
-            body: `text_$K :: "$W"
-value_$K :: if text_$K == {
+            body: `text_$K: "$W"
+value_$K: if text_$K == {
     "one" -> $A
     "two" | "three" -> $B
     else -> 0
@@ -190,137 +190,137 @@ print("value_$K {value_$K}")`,
         Production{
             family: "generics",
             name: "generic-struct",
-            markers: [String]{"fn swap_$K<T>(pair: Pair$K<T>)", `Pair$K<Int>{first: $A, second: $B}`},
-            decls: `struct Pair$K<T> {
+            markers: [String]{"swap_$K: fn<T>(pair: Pair$K<T>)", `Pair$K<Int>{first: $A, second: $B}`},
+            decls: `Pair$K: struct<T> {
     first: T
     second: T
 }
 
-fn swap_$K<T>(pair: Pair$K<T>) -> Pair$K<T> Never! {
+swap_$K: fn<T>(pair: Pair$K<T>) -> Pair$K<T> Never! {
     Pair$K<T>{first: pair.second, second: pair.first}
 }`,
-            body: `pair_$K :: swap_$K(Pair$K<Int>{first: $A, second: $B})
-value_$K :: pair_$K.first * 10 + pair_$K.second
+            body: `pair_$K: swap_$K(Pair$K<Int>{first: $A, second: $B})
+value_$K: pair_$K.first * 10 + pair_$K.second
 print("value_$K {value_$K}")`,
         },
         Production{
             family: "generics",
             name: "type-argument",
             markers: [String]{"count_$K<String>("},
-            decls: `fn count_$K<T>(values: [T]) -> Int Never! {
+            decls: `count_$K: fn<T>(values: [T]) -> Int Never! {
     values.len()
 }`,
-            body: `value_$K :: count_$K<String>([String]{"$W", "jet"}) + $A
+            body: `value_$K: count_$K<String>([String]{"$W", "jet"}) + $A
 print("value_$K {value_$K}")`,
         },
         Production{
             family: "traits",
             name: "impl-method",
             markers: [String]{"impl Square$K.Area$K", "square_$K.area()"},
-            decls: `trait Area$K {
-    fn area(self) -> Int Never!
+            decls: `Area$K: trait {
+    area: fn(self) -> Int Never!
 }
 
-struct Square$K {
+Square$K: struct {
     side: Int
 }
 
 impl Square$K.Area$K {
-    fn area(self) -> Int Never! {
+    area: fn(self) -> Int Never! {
         self.side * self.side
     }
 }`,
-            body: `square_$K :: Square$K{side: $A}
-value_$K :: square_$K.area() + $B
+            body: `square_$K: Square$K{side: $A}
+value_$K: square_$K.area() + $B
 print("value_$K {value_$K}")`,
         },
         Production{
             family: "traits",
             name: "trait-bound",
-            markers: [String]{"fn doubled_$K<T: Area$K>(shape: T)"},
-            decls: `trait Area$K {
-    fn area(self) -> Int Never!
+            markers: [String]{"doubled_$K: fn<T: Area$K>(shape: T)"},
+            decls: `Area$K: trait {
+    area: fn(self) -> Int Never!
 }
 
-struct Square$K {
+Square$K: struct {
     side: Int
 }
 
 impl Square$K.Area$K {
-    fn area(self) -> Int Never! {
+    area: fn(self) -> Int Never! {
         self.side * self.side
     }
 }
 
-fn doubled_$K<T: Area$K>(shape: T) -> Int Never! {
+doubled_$K: fn<T: Area$K>(shape: T) -> Int Never! {
     shape.area() * 2
 }`,
-            body: `value_$K :: doubled_$K(Square$K{side: $A}) - $B
+            body: `value_$K: doubled_$K(Square$K{side: $A}) - $B
 print("value_$K {value_$K}")`,
         },
         Production{
             family: "effects",
             name: "error-effect",
-            markers: [String]{"fn half_$K(n: Int) -> Int Err!", "?? -$C"},
-            decls: `fn half_$K(n: Int) -> Int Err! {
+            markers: [String]{"half_$K: fn(n: Int) -> Int Err!", "?? -$C"},
+            decls: `half_$K: fn(n: Int) -> Int Err! {
     if n % 2 != 0 -> return Err("odd {n}")
     Ok(n /% 2)
 }`,
-            body: `value_$K :: half_$K($A * $B) ?? -$C
+            body: `value_$K: half_$K($A * $B) ?? -$C
 print("value_$K {value_$K}")`,
         },
         Production{
             family: "effects",
             name: "io-effect",
-            markers: [String]{"fn shout_$K(n: Int) -[IO]> Int"},
-            decls: `fn shout_$K(n: Int) -[IO]> Int Never! {
+            markers: [String]{"shout_$K: fn(n: Int) -[IO]> Int"},
+            decls: `shout_$K: fn(n: Int) -[IO]> Int Never! {
     print("shout_$K {n}")
     n + $A
 }`,
-            body: `value_$K :: shout_$K($B)
+            body: `value_$K: shout_$K($B)
 print("value_$K {value_$K}")`,
         },
         Production{
             family: "views",
             name: "returned-view",
             markers: [String]{"-> View<Int> from values"},
-            decls: `fn first_$K(values: [Int]) -> View<Int> from values {
+            decls: `first_$K: fn(values: [Int]) -> View<Int> from values {
     values[0..<2]
 }`,
-            body: `values_$K :: [Int]{$A, $B, $C}
-value_$K :: first_$K(values_$K)[1]
+            body: `values_$K: [Int]{$A, $B, $C}
+value_$K: first_$K(values_$K)[1]
 print("value_$K {value_$K}")`,
         },
         Production{
             family: "views",
             name: "view-param",
-            markers: [String]{"fn total_$K(values: View<Int>)"},
-            decls: `fn total_$K(values: View<Int>) -> Int Never! {
+            markers: [String]{"total_$K: fn(values: View<Int>)"},
+            decls: `total_$K: fn(values: View<Int>) -> Int Never! {
     sum := 0
     loop item in values -> sum += item
     sum
 }`,
-            body: `values_$K :: [Int]{$A, $B, $C}
-value_$K :: total_$K(values_$K[0..<2])
+            body: `values_$K: [Int]{$A, $B, $C}
+value_$K: total_$K(values_$K[0..<2])
 print("value_$K {value_$K}")`,
         },
         Production{
             family: "comptime",
             name: "comptime-call",
-            markers: [String]{`SCALE_$K :: comptime { scale_$K($B) }`},
-            decls: `fn scale_$K(n: Int) -> Int Never! {
+            markers: [String]{`SCALE_$K: comptime { scale_$K($B) }`},
+            decls: `scale_$K: fn(n: Int) -> Int Never! {
     n * $A
 }
 
-SCALE_$K :: comptime { scale_$K($B) }`,
-            body: `value_$K :: SCALE_$K + $C
+SCALE_$K: comptime { scale_$K($B) }`,
+            body: `value_$K: SCALE_$K + $C
 print("value_$K {value_$K}")`,
         },
         Production{
             family: "comptime",
             name: "comptime-if",
-            markers: [String]{`FLAG_$K :: comptime { $F }`, "comptime if FLAG_$K"},
-            decls: `FLAG_$K :: comptime { $F }`,
+            markers: [String]{`FLAG_$K: comptime { $F }`, "comptime if FLAG_$K"},
+            decls: `FLAG_$K: comptime { $F }`,
             body: `value_$K := 0
 comptime if FLAG_$K {
     value_$K = $A
@@ -333,13 +333,13 @@ print("value_$K {value_$K}")`,
             family: "nested-places",
             name: "indexed-field",
             markers: [String]{"points_$K[1].y = $A"},
-            decls: `struct Point$K {
+            decls: `Point$K: struct {
     x: Int
     y: Int
 }`,
             body: `points_$K := [Point$K]{Point$K{x: $B, y: 2}, Point$K{x: 3, y: $C}}
 points_$K[1].y = $A
-value_$K :: points_$K[1].y * 10 + points_$K[0].x
+value_$K: points_$K[1].y * 10 + points_$K[0].x
 print("value_$K {value_$K}")`,
         },
         Production{
@@ -349,34 +349,34 @@ print("value_$K {value_$K}")`,
             decls: "",
             body: `grid_$K := [[Int]]{[Int]{$A, $B}, [Int]{$C, 4}}
 grid_$K[1][0] = grid_$K[1][0] + $A
-value_$K :: grid_$K[1][0] * 10 + grid_$K[0][1]
+value_$K: grid_$K[1][0] * 10 + grid_$K[0][1]
 print("value_$K {value_$K}")`,
         },
         Production{
             family: "nested-places",
             name: "field-of-field",
             markers: [String]{"outer_$K.inner.count = outer_$K.inner.count + $B"},
-            decls: `struct Inner$K {
+            decls: `Inner$K: struct {
     count: Int
 }
 
-struct Outer$K {
+Outer$K: struct {
     inner: Inner$K
     label: String
 }`,
             body: `outer_$K := Outer$K{inner: Inner$K{count: $A}, label: "$W"}
 outer_$K.inner.count = outer_$K.inner.count + $B
-value_$K :: "{outer_$K.label}:{outer_$K.inner.count}"
+value_$K: "{outer_$K.label}:{outer_$K.inner.count}"
 print("value_$K {value_$K}")`,
         },
     }
 }
 
-fn construct_id(row: Production) -> String Never! {
+construct_id: fn(row: Production) -> String Never! {
     "construct:{row.family}/{row.name}"
 }
 
-fn of_family(rows: [Production], family: String) -> [Production] Never! {
+of_family: fn(rows: [Production], family: String) -> [Production] Never! {
     out := [Production]{}
     loop row in rows {
         if row.family == family -> &out.push(row.copy())
@@ -387,22 +387,22 @@ fn of_family(rows: [Production], family: String) -> [Production] Never! {
 // A number below `bound` drawn from the seed. Each draw hashes its own
 // name, so one draw never shifts another and a seed always gives the same
 // program.
-fn draw(seed: String, index: Int, what: String, bound: Int) -> Int Never! {
-    bytes :: crypto.sha256("{seed}|{index}|{what}").bytes
+draw: fn(seed: String, index: Int, what: String, bound: Int) -> Int Never! {
+    bytes: crypto.sha256("{seed}|{index}|{what}").bytes
     value := 0
     loop at in 0..<6 -> value = value * 256 + Int.from_u8(bytes[at])
     value % bound
 }
 
-fn filled(text: String, seed: String, index: Int, slot: Int) -> String Never! {
+filled: fn(text: String, seed: String, index: Int, slot: Int) -> String Never! {
     out := text.replace("$K", "{slot}")
     loop name in HOLE_INTS -> out = out.replace("${name}", "{1 + draw(seed, index, "{slot}{name}", 9)}")
-    flag :: if draw(seed, index, "{slot}F", 2) == 0 -> "false" else -> "true"
+    flag: if draw(seed, index, "{slot}F", 2) == 0 -> "false" else -> "true"
     out = out.replace("$F", flag)
     out.replace("$W", HOLE_WORDS[draw(seed, index, "{slot}W", HOLE_WORDS.len())])
 }
 
-fn instance(row: Production, seed: String, index: Int, slot: Int) -> Instance Never! {
+instance: fn(row: Production, seed: String, index: Int, slot: Int) -> Instance Never! {
     markers := [String]{}
     loop marker in row.markers -> &markers.push(filled(marker, seed, index, slot))
     Instance{
@@ -415,7 +415,7 @@ fn instance(row: Production, seed: String, index: Int, slot: Int) -> Instance Ne
     }
 }
 
-fn case_name(index: Int) -> String Never! {
+case_name: fn(index: Int) -> String Never! {
     digits := "{index}"
     loop digits.len() < 4 -> digits = "0{digits}"
     "case-{digits}"
@@ -423,12 +423,12 @@ fn case_name(index: Int) -> String Never! {
 
 // The program text: each instance's items under a comment naming it, then
 // `run` with each instance's statements in slot order.
-fn render(case_id: String, instances: [Instance]) -> String Never! {
+render: fn(case_id: String, instances: [Instance]) -> String Never! {
     out := "// {case_id}: written by the Tools/hardening construct generator\n"
     loop item in instances {
         if item.decls != "" -> out = "{out}\n// {item.construct_id} #{item.slot}\n{item.decls}\n"
     }
-    out = "{out}\nfn run() {{\n"
+    out = "{out}\nrun: fn() {{\n"
     loop item in instances {
         out = "{out}    // {item.construct_id} #{item.slot}\n"
         loop line in item.body.split("\n").to_list() -> out = "{out}    {line}\n"
@@ -436,11 +436,11 @@ fn render(case_id: String, instances: [Instance]) -> String Never! {
     "{out}}}\n"
 }
 
-fn program_of(case_id: String, seed: String, index: Int, primary: Int, instances: [Instance]) -> Generated Never! {
+program_of: fn(case_id: String, seed: String, index: Int, primary: Int, instances: [Instance]) -> Generated Never! {
     Generated{case_id: case_id.copy(), seed: seed.copy(), index: index, primary: primary, instances: instances.copy(), source: render(case_id, instances)}
 }
 
-fn primary_instance(program: Generated) -> Instance Never! {
+primary_instance: fn(program: Generated) -> Instance Never! {
     loop item in program.instances {
         if item.slot == program.primary -> return item.copy()
     }
@@ -450,15 +450,15 @@ fn primary_instance(program: Generated) -> Instance Never! {
 // Case `index` of `seed`. The first cases take each family in turn as the
 // primary; then the family is drawn. Up to two context instances, drawn from
 // every production, sit before or after it.
-fn generate_program(rows: [Production], seed: String, index: Int) -> Generated Never! {
-    family :: if index < CONSTRUCT_FAMILIES.len() -> CONSTRUCT_FAMILIES[index].copy() else -> CONSTRUCT_FAMILIES[draw(seed, index, "family", CONSTRUCT_FAMILIES.len())].copy()
-    family_rows :: of_family(rows, family)
-    primary :: family_rows[draw(seed, index, "primary", family_rows.len())].copy()
-    count :: draw(seed, index, "context", GENERATOR_MAX_CONTEXT + 1)
-    position :: draw(seed, index, "position", count + 1)
+generate_program: fn(rows: [Production], seed: String, index: Int) -> Generated Never! {
+    family: if index < CONSTRUCT_FAMILIES.len() -> CONSTRUCT_FAMILIES[index].copy() else -> CONSTRUCT_FAMILIES[draw(seed, index, "family", CONSTRUCT_FAMILIES.len())].copy()
+    family_rows: of_family(rows, family)
+    primary: family_rows[draw(seed, index, "primary", family_rows.len())].copy()
+    count: draw(seed, index, "context", GENERATOR_MAX_CONTEXT + 1)
+    position: draw(seed, index, "position", count + 1)
     instances := [Instance]{}
     loop slot in 0..<count + 1 {
-        row :: if slot == position -> primary.copy() else -> rows[draw(seed, index, "context{slot}", rows.len())].copy()
+        row: if slot == position -> primary.copy() else -> rows[draw(seed, index, "context{slot}", rows.len())].copy()
         &instances.push(instance(row, seed, index, slot))
     }
     program_of(case_name(index), "{seed}:{index}", index, position, instances)
@@ -466,7 +466,7 @@ fn generate_program(rows: [Production], seed: String, index: Int) -> Generated N
 
 // Every production once, in table order, in one program: one compile proves
 // every template is admitted and runs on every tier.
-fn coverage_program(seed: String) -> Generated Never! {
+coverage_program: fn(seed: String) -> Generated Never! {
     instances := [Instance]{}
     loop (slot, row) in productions() -> &instances.push(instance(row, seed, GENERATOR_MAX_CASES, slot))
     program_of("coverage", "{seed}:coverage", GENERATOR_MAX_CASES, 0, instances)
@@ -475,20 +475,20 @@ fn coverage_program(seed: String) -> Generated Never! {
 // The production table is the generator's grammar: every family must have a
 // production, and every production must name its construct and print its
 // value.
-fn validate_productions(rows: [Production]) -> [String] Never! {
+validate_productions: fn(rows: [Production]) -> [String] Never! {
     problems := [String]{}
     loop family in CONSTRUCT_FAMILIES {
         if of_family(rows, family).len() == 0 -> &problems.push("missing production: no template generates {family}")
     }
     seen := [String]{}
-    sink :: "print(\"value_$K {{value_$K}}\")"
+    sink: "print(\"value_$K {{value_$K}}\")"
     loop row in rows {
-        id :: construct_id(row)
+        id: construct_id(row)
         if !CONSTRUCT_FAMILIES.contains(row.family) -> &problems.push("{id}: `{row.family}` is not a construct family")
         if seen.contains(id) -> &problems.push("{id}: the production is listed twice")
         &seen.push(id.copy())
         if row.markers.len() == 0 -> &problems.push("{id}: the production names no construct marker")
-        template :: "{row.decls}\n{row.body}"
+        template: "{row.decls}\n{row.body}"
         loop marker in row.markers {
             if !template.contains(marker) -> &problems.push("{id}: marker `{marker}` is not in the template")
         }
@@ -498,27 +498,27 @@ fn validate_productions(rows: [Production]) -> [String] Never! {
     problems
 }
 
-fn note_call(names: &[String], expression: Expr) Never! {
+note_call: fn(names: &[String], expression: Expr) Never! {
     if expression == .Call(call, _) -> &names.push(call.name.copy())
 }
 
-// Typed holes, a parse with no error, `fn run`, loops that only iterate,
+// Typed holes, a parse with no error, `run: fn`, loops that only iterate,
 // no function that calls itself, and each instance's construct present and
 // its value traced through the parser to an observer.
-fn validate_program(program: Generated) -> [String] Never! {
+validate_program: fn(program: Generated) -> [String] Never! {
     problems := [String]{}
-    id :: program.case_id
-    source :: program.source
+    id: program.case_id
+    source: program.source
     if source.len() > GENERATOR_SOURCE_LIMIT -> &problems.push("{id}: {source.len()} bytes is over the {GENERATOR_SOURCE_LIMIT}-byte limit")
     if source.contains("$") -> &problems.push("{id}: a hole is left unfilled")
-    parsed :: parse_source(source.bytes())
+    parsed: parse_source(source.bytes())
     loop diagnostic in parsed.diagnostics {
         if diagnostic.code.starts_with("E") {
             &problems.push("{id}: does not parse: {diagnostic.code} {diagnostic.what}")
             return problems
         }
     }
-    tree :: parsed.program
+    tree: parsed.program
     run_found := false
     loop item in tree.items {
         if item == .Func(function) {
@@ -528,31 +528,31 @@ fn validate_program(program: Generated) -> [String] Never! {
             if calls.contains(function.name) -> &problems.push("{id}: `{function.name}` calls itself, so it may not end")
         }
     }
-    if !run_found -> &problems.push("{id}: no `fn run()` executes the program")
+    if !run_found -> &problems.push("{id}: no `run: fn()` executes the program")
     loop line in source.split("\n").to_list() {
-        trimmed :: line.trim()
+        trimmed: line.trim()
         if trimmed.starts_with("loop ") && !trimmed.contains(" in ") -> &problems.push("{id}: `{trimmed}` is not a bounded loop")
     }
     loop item in program.instances {
         loop marker in item.markers {
             if !source.contains(marker) -> &problems.push("{id}: {item.construct_id} #{item.slot} lost its construct `{marker}`")
         }
-        name :: "value_{item.slot}"
+        name: "value_{item.slot}"
         if trace(tree, name, "", "value", 0, name) == None -> &problems.push("{id}: {item.construct_id} #{item.slot}: `{name}` never reaches an observer")
     }
     problems
 }
 
 // `cases` programs from `seed`, in case order, each validated.
-fn generate_programs(seed: String, cases: Int) -> [Generated] Err! {
+generate_programs: fn(seed: String, cases: Int) -> [Generated] Err! {
     if cases < 1 || cases > GENERATOR_MAX_CASES -> return Err("the case count must be 1 to {GENERATOR_MAX_CASES}, not {cases}")
-    rows :: productions()
-    table :: validate_productions(rows)
+    rows: productions()
+    table: validate_productions(rows)
     if table.len() > 0 -> return Err(table.join("\n"))
     out := [Generated]{}
     loop index in 0..<cases {
-        program :: generate_program(rows, seed, index)
-        problems :: validate_program(program)
+        program: generate_program(rows, seed, index)
+        problems: validate_program(program)
         if problems.len() > 0 -> return Err(problems.join("\n"))
         &out.push(program)
     }
@@ -560,7 +560,7 @@ fn generate_programs(seed: String, cases: Int) -> [Generated] Err! {
 }
 
 // The program without instance `slot`; every other instance keeps its number.
-fn without(program: Generated, slot: Int) -> Generated Never! {
+without: fn(program: Generated, slot: Int) -> Generated Never! {
     kept := [Instance]{}
     loop item in program.instances {
         if item.slot != slot -> &kept.push(item.copy())
@@ -572,7 +572,7 @@ fn without(program: Generated, slot: Int) -> Generated Never! {
 // compiler it runs on, so the release tier's real result is replaced. An
 // optimizer-only change marks the primary's printed value; an unlowered
 // construct makes the release build fail.
-fn planted(run: TierRun, program: Generated, plant: String) -> TierRun Never! {
+planted: fn(run: TierRun, program: Generated, plant: String) -> TierRun Never! {
     if plant == "" || run.tier != AOT_RELEASE -> return run.copy()
     out := run.copy()
     if plant == UNLOWERED {
@@ -581,7 +581,7 @@ fn planted(run: TierRun, program: Generated, plant: String) -> TierRun Never! {
         out.exit = Val(1)
         return out
     }
-    prefix :: "value_{program.primary} "
+    prefix: "value_{program.primary} "
     lines := [String]{}
     loop line in run.stdout.split("\n").to_list() -> &lines.push(if line.starts_with(prefix) -> "{line}~" else -> line.copy())
     out.stdout = lines.join("\n")
@@ -589,17 +589,17 @@ fn planted(run: TierRun, program: Generated, plant: String) -> TierRun Never! {
 }
 
 // The plant `--invert` puts in case `index`: the two kinds take turns.
-fn plant_for(index: Int) -> String Never! {
+plant_for: fn(index: Int) -> String Never! {
     if index % 2 == 0 -> return OPTIMIZER_ONLY
     UNLOWERED
 }
 
-fn run_case(program: Generated, jet: String, scratch: String, plant: String) -[FS, Exec, Time.Wait]> CaseRun Err! {
-    dir :: files.join(scratch, program.case_id)
+run_case: fn(program: Generated, jet: String, scratch: String, plant: String) -[FS, Exec, Time.Wait]> CaseRun Err! {
+    dir: files.join(scratch, program.case_id)
     files.create_dir_all(dir) ?? return Err("cannot create {dir}: {err}")
-    path :: files.join(dir, "case.jet")
+    path: files.join(dir, "case.jet")
     files.write(path, program.source) ?? return Err("cannot write {path}: {err}")
-    check :: run_tier(jet, CHECK_STAGE, path, "")
+    check: run_tier(jet, CHECK_STAGE, path, "")
     runs := [TierRun]{}
     if check.exit == Val(0) && !check.timeout {
         loop tier in regression_tiers() -> &runs.push(planted(run_tier(jet, tier, path, ""), program, plant))
@@ -607,35 +607,35 @@ fn run_case(program: Generated, jet: String, scratch: String, plant: String) -[F
     Ok(CaseRun{check: check, runs: runs})
 }
 
-fn first_error(run: TierRun) -> String Never! {
+first_error: fn(run: TierRun) -> String Never! {
     loop line in run.stderr.split("\n").to_list() {
         if line.starts_with("Error") || line.starts_with("error") || line.starts_with("planted") -> return line.trim().copy()
     }
     ""
 }
 
-fn ending(run: TierRun) -> String Never! {
+ending: fn(run: TierRun) -> String Never! {
     if run.timeout -> return "timeout"
-    signal :: run.signal
+    signal: run.signal
     if signal == .Val(name) -> return "signal {name}"
-    code :: run.exit
+    code: run.exit
     if code == .Val(number) -> return "exit {number} {first_error(run)}"
     "no exit"
 }
 
-fn first_difference(left: String, right: String) -> String Never! {
-    a :: left.split("\n").to_list()
-    b :: right.split("\n").to_list()
-    longest :: if a.len() > b.len() -> a.len() else -> b.len()
+first_difference: fn(left: String, right: String) -> String Never! {
+    a: left.split("\n").to_list()
+    b: right.split("\n").to_list()
+    longest: if a.len() > b.len() -> a.len() else -> b.len()
     loop at in 0..<longest {
-        one :: if at < a.len() -> a[at].copy() else -> "<end>"
-        two :: if at < b.len() -> b[at].copy() else -> "<end>"
+        one: if at < a.len() -> a[at].copy() else -> "<end>"
+        two: if at < b.len() -> b[at].copy() else -> "<end>"
         if one != two -> return "`{one}` became `{two}`"
     }
     ""
 }
 
-fn finished_cleanly(run: TierRun) -> Bool Never! {
+finished_cleanly: fn(run: TierRun) -> Bool Never! {
     run.exit == Val(0) && !run.timeout && run.signal == None
 }
 
@@ -644,7 +644,7 @@ fn finished_cleanly(run: TierRun) -> Bool Never! {
 // build or run is admitted-but-unlowered; a tier printing other bytes than
 // `jet run` is an optimizer-only meaning change; and a value line missing
 // from the output is observerless.
-fn classify(program: Generated, run: CaseRun) -> Verdict Never! {
+classify: fn(program: Generated, run: CaseRun) -> Verdict Never! {
     if !finished_cleanly(run.check) -> return Verdict{class: REJECTED_VALID, tier: CHECK_STAGE, mismatch: "{REJECTED_VALID}|{CHECK_STAGE}|{ending(run.check)}"}
     loop tier in regression_tiers() {
         found := false
@@ -663,9 +663,9 @@ fn classify(program: Generated, run: CaseRun) -> Verdict Never! {
     loop tier_run in run.runs {
         if tier_run.stdout != reference -> return Verdict{class: OPTIMIZER_ONLY, tier: tier_run.tier.copy(), mismatch: "{OPTIMIZER_ONLY}|{tier_run.tier}|{first_difference(reference, tier_run.stdout)}"}
     }
-    lines :: reference.split("\n").to_list()
+    lines: reference.split("\n").to_list()
     loop item in program.instances {
-        prefix :: "value_{item.slot} "
+        prefix: "value_{item.slot} "
         seen := false
         loop line in lines {
             if line.starts_with(prefix) -> seen = true
@@ -677,23 +677,23 @@ fn classify(program: Generated, run: CaseRun) -> Verdict Never! {
 
 // A case passes the layer only when the program is valid and every tier
 // agrees.
-fn case_passes(program: Generated, run: CaseRun) -> Bool Never! {
+case_passes: fn(program: Generated, run: CaseRun) -> Bool Never! {
     validate_program(program).len() == 0 && classify(program, run).class == AGREEMENT
 }
 
 // Drop context instances, one at a time in slot order, while the program
 // stays valid and shows the same mismatch. The primary instance is never
 // dropped, so the construct and its number stay.
-fn minimize(program: Generated, first: CaseRun, jet: String, scratch: String, plant: String) -[FS, Exec, Time.Wait]> Minimized Err! {
-    target :: classify(program, first).mismatch
+minimize: fn(program: Generated, first: CaseRun, jet: String, scratch: String, plant: String) -[FS, Exec, Time.Wait]> Minimized Err! {
+    target: classify(program, first).mismatch
     kept := program.copy()
     kept_run := first.copy()
     dropped := [String]{}
     loop item in program.instances {
         if item.slot == program.primary -> next
-        candidate :: without(kept, item.slot)
+        candidate: without(kept, item.slot)
         if validate_program(candidate).len() > 0 -> next
-        run :: run_case(candidate, jet, scratch, plant) ?? return Err(err)
+        run: run_case(candidate, jet, scratch, plant) ?? return Err(err)
         if classify(candidate, run).mismatch != target -> next
         kept = candidate.copy()
         kept_run = run.copy()
@@ -703,18 +703,18 @@ fn minimize(program: Generated, first: CaseRun, jet: String, scratch: String, pl
 }
 
 // Silent wrong data and a lost value are P0; a loud refusal is P1.
-fn generated_severity(class: String) -> String Never! {
+generated_severity: fn(class: String) -> String Never! {
     if class == OPTIMIZER_ONLY || class == OBSERVERLESS -> return "P0"
     "P1"
 }
 
-fn generator_commands() -> [TierCommand] Never! {
+generator_commands: fn() -> [TierCommand] Never! {
     commands := [TierCommand]{TierCommand{tier: CHECK_STAGE, command: tier_command(CHECK_STAGE)}}
     loop tier in regression_tiers() -> &commands.push(TierCommand{tier: tier.copy(), command: tier_command(tier)})
     commands
 }
 
-fn production_dyn(row: Production) -> Dyn Never! {
+production_dyn: fn(row: Production) -> Dyn Never! {
     Dyn.Object([String: Dyn]{
         "body": Dyn.Text(row.body.copy()),
         "decls": Dyn.Text(row.decls.copy()),
@@ -726,12 +726,12 @@ fn production_dyn(row: Production) -> Dyn Never! {
 
 // The configuration a finding was found under: every production, the
 // limits and every command.
-fn generator_config_hash() -> String Never! {
+generator_config_hash: fn() -> String Never! {
     rows := [Dyn]{}
     loop row in productions() -> &rows.push(production_dyn(row))
     commands := [Dyn]{}
     loop command in generator_commands() -> &commands.push(Dyn.Text("{command.tier}: {command.command}"))
-    config :: Dyn.Object([String: Dyn]{
+    config: Dyn.Object([String: Dyn]{
         "commands": Dyn.Array(commands),
         "max_context": Dyn.Int(GENERATOR_MAX_CONTEXT),
         "productions": Dyn.Array(rows),
@@ -740,7 +740,7 @@ fn generator_config_hash() -> String Never! {
     digest(json.canonical(config) ?? "")
 }
 
-fn instance_ids(program: Generated) -> [String] Never! {
+instance_ids: fn(program: Generated) -> [String] Never! {
     out := [String]{}
     loop item in program.instances -> &out.push("{item.construct_id} #{item.slot}")
     out
@@ -749,9 +749,9 @@ fn instance_ids(program: Generated) -> [String] Never! {
 // The sealed bundle for a (minimized) finding: the failing stage's raw
 // channels, every command, the construct as the stable surface, and the
 // mismatch and the dropped instances as the actual relation.
-fn finding_bundle(found: Minimized, identity: RunIdentity, mutation_arm: String) -> Dyn Err! {
-    program :: found.program
-    verdict :: classify(program, found.run)
+finding_bundle: fn(found: Minimized, identity: RunIdentity, mutation_arm: String) -> Dyn Err! {
+    program: found.program
+    verdict: classify(program, found.run)
     if verdict.class == AGREEMENT -> return Err("{program.case_id} has no mismatch to seal")
     failing := found.run.check.copy()
     reference := ""
@@ -759,14 +759,14 @@ fn finding_bundle(found: Minimized, identity: RunIdentity, mutation_arm: String)
         if tier_run.tier == verdict.tier -> failing = tier_run.copy()
         if tier_run.tier == JET_RUN -> reference = tier_run.stdout.copy()
     }
-    primary :: primary_instance(program)
-    oracle_input :: json.canonical(Dyn.Object([String: Dyn]{
+    primary: primary_instance(program)
+    oracle_input: json.canonical(Dyn.Object([String: Dyn]{
         "construct_id": Dyn.Text(primary.construct_id.copy()),
         "instances": text_list(instance_ids(program)),
         "seed": Dyn.Text(program.seed.copy()),
         "source_sha256": Dyn.Text(digest(program.source)),
     })) ?? return Err("{program.case_id} has no canonical form: {err}")
-    input :: ReproInput{
+    input: ReproInput{
         run_id: "{identity.run_id}/{program.case_id}",
         started: identity.started.copy(),
         finished: identity.finished.copy(),
@@ -808,22 +808,22 @@ fn finding_bundle(found: Minimized, identity: RunIdentity, mutation_arm: String)
 
 // A bundle without the fields that only say when it ran. Two runs of one
 // seed on one compiler give the same stable digests in the same order.
-fn stable_digest(bundle: Dyn) -> String Err! {
+stable_digest: fn(bundle: Dyn) -> String Err! {
     kept := [String: Dyn]{}
     if bundle == .Object(entries) {
         loop entry in entries {
             if entry.key != "started" && entry.key != "finished" && entry.key != "run_id" && entry.key != "content_digest" -> kept[entry.key] = entry.value.copy()
         }
     }
-    text :: json.canonical(Dyn.Object(kept)) ?? return Err("the bundle has no canonical form: {err}")
+    text: json.canonical(Dyn.Object(kept)) ?? return Err("the bundle has no canonical form: {err}")
     Ok(digest(text))
 }
 
-fn clean_runs(program: Generated) -> CaseRun Never! {
+clean_runs: fn(program: Generated) -> CaseRun Never! {
     lines := [String]{}
     loop item in program.instances -> &lines.push("value_{item.slot} 1")
-    stdout :: "{lines.join("\n")}\n"
-    check :: TierRun{tier: CHECK_STAGE, command: tier_command(CHECK_STAGE), stdout: "", stderr: "", exit: Val(0), signal: None, timeout: false}
+    stdout: "{lines.join("\n")}\n"
+    check: TierRun{tier: CHECK_STAGE, command: tier_command(CHECK_STAGE), stdout: "", stderr: "", exit: Val(0), signal: None, timeout: false}
     runs := [TierRun]{}
     loop tier in regression_tiers() -> &runs.push(TierRun{tier: tier.copy(), command: tier_command(tier), stdout: stdout.copy(), stderr: "", exit: Val(0), signal: None, timeout: false})
     CaseRun{check: check, runs: runs}
@@ -832,16 +832,16 @@ fn clean_runs(program: Generated) -> CaseRun Never! {
 // The negative controls (c37). Each feeds the layer one known fault and
 // names the control if the layer still passes. An empty list means every
 // control failed the layer, as it must.
-fn layer_controls() -> [String] Never! {
+layer_controls: fn() -> [String] Never! {
     survived := [String]{}
-    rows :: productions()
+    rows: productions()
     missing := [Production]{}
     loop row in rows {
         if row.family != "views" -> &missing.push(row.copy())
     }
     if !validate_productions(missing).contains("missing production: no template generates views") -> &survived.push("missing-production")
-    program :: generate_program(rows, GENERATOR_SEED, 0)
-    clean :: clean_runs(program)
+    program: generate_program(rows, GENERATOR_SEED, 0)
+    clean: clean_runs(program)
     if !case_passes(program, clean) -> &survived.push("clean-baseline")
     unlowered := clean.copy()
     unlowered.runs = [TierRun]{}
@@ -851,14 +851,14 @@ fn layer_controls() -> [String] Never! {
     optimizer.runs = [TierRun]{}
     loop tier_run in clean.runs -> &optimizer.runs.push(planted(tier_run, program, OPTIMIZER_ONLY))
     if case_passes(program, optimizer) || classify(program, optimizer).class != OPTIMIZER_ONLY -> &survived.push("optimizer-only-meaning-change")
-    primary :: primary_instance(program)
+    primary: primary_instance(program)
     silent := [Instance]{}
     loop item in program.instances {
         quiet := item.copy()
-        if item.slot == primary.slot -> quiet.body = item.body.replace("print(\"value_{item.slot} {{value_{item.slot}}}\")", "_ :: value_{item.slot}")
+        if item.slot == primary.slot -> quiet.body = item.body.replace("print(\"value_{item.slot} {{value_{item.slot}}}\")", "_: value_{item.slot}")
         &silent.push(quiet)
     }
-    observerless :: program_of(program.case_id, program.seed, program.index, program.primary, silent)
+    observerless: program_of(program.case_id, program.seed, program.index, program.primary, silent)
     if case_passes(observerless, clean_runs(observerless)) || !validate_program(observerless).join("\n").contains("never reaches an observer") -> &survived.push("observerless-generation")
     quiet_run := clean.copy()
     quiet_run.runs = [TierRun]{}

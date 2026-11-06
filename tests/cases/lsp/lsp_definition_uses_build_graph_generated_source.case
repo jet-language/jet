@@ -7,10 +7,10 @@ send lsp: "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\
 recv lsp
 stdout: ~ "definitionProvider" # original predicate
 send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
-send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"fn build(b: Build) {\\n    b.generate(\\\"made\\\") {\\n        fn generated_value() -> String { \\\"hi\\\" }\\n    }\\n    app :: b.add_executable(\\\"app\\\", [\\\"main.jet\\\", \\\".jet/generated/main/made.jet\\\"], [])\\n    b.default(app)\\n}\\nfn run() { print(generated_value()) }\\n\"}}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"build: fn(b: Build) {\\n    b.generate(\\\"made\\\") {\\n        generated_value: fn() -> String { \\\"hi\\\" }\\n    }\\n    app: b.add_executable(\\\"app\\\", [\\\"main.jet\\\", \\\".jet/generated/main/made.jet\\\"], [])\\n    b.default(app)\\n}\\nrun: fn() { print(generated_value()) }\\n\"}}}"
 recv lsp
 stdout: ~ "publishDiagnostics" # original predicate
-send lsp: "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/definition\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\"},\"position\":{\"line\":7,\"character\":20}}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/definition\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\"},\"position\":{\"line\":7,\"character\":21}}}"
 recv lsp
 stdout: ~ ".jet/generated/main/made.jet" # original predicate
 stdout: ~ "range" # original predicate

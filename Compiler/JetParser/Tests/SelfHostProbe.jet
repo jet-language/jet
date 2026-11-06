@@ -8,7 +8,7 @@ use {
     jet_parser.[parse_source]
 }
 
-fn selfhost_parser_text(facts: &[Int], text: String) {
+selfhost_parser_text: fn(facts: &[Int], text: String) {
     bytes := text.bytes()
     &facts.push(bytes.len())
     index := 0
@@ -18,7 +18,7 @@ fn selfhost_parser_text(facts: &[Int], text: String) {
     }
 }
 
-fn selfhost_parser_label(facts: &[Int], label: CallLabel?) {
+selfhost_parser_label: fn(facts: &[Int], label: CallLabel?) {
     if label == {
         .Val(value) -> {
             &facts.push(1)
@@ -30,7 +30,7 @@ fn selfhost_parser_label(facts: &[Int], label: CallLabel?) {
     }
 }
 
-fn selfhost_parser_expr(facts: &[Int], expression: Expr) {
+selfhost_parser_expr: fn(facts: &[Int], expression: Expr) {
     if expression == {
         .Ident(name, span, _) -> {
             &facts.push(1)
@@ -82,7 +82,7 @@ fn selfhost_parser_expr(facts: &[Int], expression: Expr) {
     }
 }
 
-fn selfhost_parser_call_arg(facts: &[Int], argument: CallArg) {
+selfhost_parser_call_arg: fn(facts: &[Int], argument: CallArg) {
     convention := 0
     if argument.convention == AccessConvention.Write -> convention = 1
     if argument.convention == AccessConvention.Move -> convention = 2
@@ -96,7 +96,7 @@ fn selfhost_parser_call_arg(facts: &[Int], argument: CallArg) {
     selfhost_parser_expr(&facts, argument.expr)
 }
 
-fn selfhost_parser_marker(facts: &[Int], marker: Marker) {
+selfhost_parser_marker: fn(facts: &[Int], marker: Marker) {
     &facts.push(marker.args.len())
     index := 0
     loop index < marker.args.len() {
@@ -115,7 +115,7 @@ fn selfhost_parser_marker(facts: &[Int], marker: Marker) {
     }
 }
 
-fn selfhost_parser_diagnostic(facts: &[Int], diagnostic: Diagnostic) {
+selfhost_parser_diagnostic: fn(facts: &[Int], diagnostic: Diagnostic) {
     selfhost_parser_text(&facts, diagnostic.code)
     &facts.push(diagnostic.severity)
     selfhost_parser_text(&facts, diagnostic.what)
@@ -161,11 +161,11 @@ fn selfhost_parser_diagnostic(facts: &[Int], diagnostic: Diagnostic) {
     }
 }
 
-fn selfhost_parser_probe(source: [U8]) -> [Int] {
+selfhost_parser_probe: fn(source: [U8]) -> [Int] {
     selfhost_parser_result_facts(parse_source(source))
 }
 
-fn selfhost_parser_result_facts(parsed: ParseResult) -> [Int] {
+selfhost_parser_result_facts: fn(parsed: ParseResult) -> [Int] {
     facts := [Int]{}
     &facts.push(parsed.diagnostics.len())
     index := 0

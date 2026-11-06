@@ -61,18 +61,18 @@ use jet_foundation.[
 // is named by its row index, and a Flat node is its own row. A nested check's
 // arena continues its enclosing check's (sema_check_context_snapshot): its
 // tree starts at row `node_base` and statement `stmt_base`.
-struct BodyFlat {
+BodyFlat: struct {
     tree: BodyTree
     arena: BodyTree
     into_arena: Bool
 }
 
 // The FnBody of checked function `value`, whose Flat nodes are rows of `arena`.
-fn body_flat_function(value: TFunc, arena: BodyTree) -> FnBody Never! {
+body_flat_function: fn(value: TFunc, arena: BodyTree) -> FnBody Never! {
     flat := BodyFlat{tree: body_tree_new(), arena: arena, into_arena: false}
-    params :: body_flat_list_parameter(value.params, &flat)
-    body :: body_flat_list_stmt(value.body, &flat)
-    pre :: body_flat_list_contract(value.pre, &flat)
+    params: body_flat_list_parameter(value.params, &flat)
+    body: body_flat_list_stmt(value.body, &flat)
+    pre: body_flat_list_contract(value.pre, &flat)
     tree := ^flat.tree
     body_tree_finish(&tree)
     sema_body_fact_types(&tree, params, value.ret, value.kind, value.failure_carrier)
@@ -123,7 +123,7 @@ fn body_flat_function(value: TFunc, arena: BodyTree) -> FnBody Never! {
 }
 
 // Sorts the rows by node id. A node a desugaring placed twice keeps one row.
-fn body_tree_finish(tree: &BodyTree) Never! {
+body_tree_finish: fn(tree: &BodyTree) Never! {
     &tree.nodes.sort_by((left: BodyNode, right: BodyNode) -> left.id <=> right.id)
     &tree.expr_types.sort_by((left: TExprType, right: TExprType) -> left.id <=> right.id)
     nodes := [BodyNode]{}
@@ -141,7 +141,7 @@ fn body_tree_finish(tree: &BodyTree) Never! {
 // how a parent names it. Into the output tree a node the checker gave no id
 // (AST_NODE_GENERATED) takes the next flat-local id below TEXPR_FIRST_FLAT_ID:
 // one per row, so no two such nodes share one.
-fn body_flat_expr(value: TExpr, flat: &BodyFlat) -> Int Never! {
+body_flat_expr: fn(value: TExpr, flat: &BodyFlat) -> Int Never! {
     if value.kind == .Flat(index) -> return body_flat_arena_node(value, index, &flat)
     if value.kind == .Binary(_, _, _, lhs, _) {
         if lhs.kind == .Binary(_, _, _, _, _) -> return body_flat_binary_chain(value, &flat)
@@ -150,10 +150,10 @@ fn body_flat_expr(value: TExpr, flat: &BodyFlat) -> Int Never! {
 }
 
 // Files `value`'s row of kind `kind` (body_flat_expr).
-fn body_flat_row(value: TExpr, kind: NodeKind, flat: &BodyFlat) -> Int Never! {
-    id :: if value.id == AST_NODE_GENERATED && !flat.into_arena -> TEXPR_FIRST_FLAT_ID - flat.tree.nodes.len() else -> value.id
+body_flat_row: fn(value: TExpr, kind: NodeKind, flat: &BodyFlat) -> Int Never! {
+    id: if value.id == AST_NODE_GENERATED && !flat.into_arena -> TEXPR_FIRST_FLAT_ID - flat.tree.nodes.len() else -> value.id
     &flat.tree.nodes.push(BodyNode{id: id, kind: kind, span: value.span})
-    ty :: type_table_intern(&flat.tree.types, value.ty)
+    ty: type_table_intern(&flat.tree.types, value.ty)
     &flat.tree.expr_types.push(TExprType{id: id, ty: ty})
     if flat.into_arena -> return flat.tree.node_base + flat.tree.nodes.len() - 1
     id
@@ -162,7 +162,7 @@ fn body_flat_row(value: TExpr, kind: NodeKind, flat: &BodyFlat) -> Int Never! {
 // A left-leaning chain (`a + b + c …`) files in this one frame, so its
 // length costs no stack: the innermost left operand, then each level's right
 // operand and its own row, innermost first, as body_flat_expr files them.
-fn body_flat_binary_chain(value: TExpr, flat: &BodyFlat) -> Int Never! {
+body_flat_binary_chain: fn(value: TExpr, flat: &BodyFlat) -> Int Never! {
     levels := [TExpr]{}
     operand := value
     loop {
@@ -177,7 +177,7 @@ fn body_flat_binary_chain(value: TExpr, flat: &BodyFlat) -> Int Never! {
     index := levels.len() - 1
     loop index >= 0 {
         if levels[index].kind == .Binary(op, overflow, line, _, rhs) {
-            right :: body_flat_expr(rhs, &flat)
+            right: body_flat_expr(rhs, &flat)
             child = body_flat_row(levels[index], NodeKind.Binary{op: op, overflow: overflow, line: line, lhs: child, rhs: right}, &flat)
         }
         index -= 1
@@ -187,63 +187,63 @@ fn body_flat_binary_chain(value: TExpr, flat: &BodyFlat) -> Int Never! {
 
 // A Flat node: arena row `index` under the handle's own id and type (a
 // retype, or an id filed after the row was built, lives on the handle).
-fn body_flat_arena_node(value: TExpr, index: Int, flat: &BodyFlat) -> Int Never! {
+body_flat_arena_node: fn(value: TExpr, index: Int, flat: &BodyFlat) -> Int Never! {
     if flat.into_arena {
         // A nested check never files a node of the check that encloses it,
         // whose rows this arena does not hold.
-        row_index :: index - flat.tree.node_base
+        row_index: index - flat.tree.node_base
         if row_index < 0 -> panic("body_flat_arena_node: arena row {index} precedes this check's rows")
         if flat.tree.nodes[row_index].id == value.id && flat.tree.types.types[flat.tree.expr_types[row_index].ty] == value.ty -> return index
-        row :: flat.tree.nodes[row_index]
+        row: flat.tree.nodes[row_index]
         &flat.tree.nodes.push(BodyNode{id: value.id, kind: row.kind, span: value.span})
-        ty :: type_table_intern(&flat.tree.types, value.ty)
+        ty: type_table_intern(&flat.tree.types, value.ty)
         &flat.tree.expr_types.push(TExprType{id: value.id, ty: ty})
         return flat.tree.node_base + flat.tree.nodes.len() - 1
     }
-    row :: flat.arena.nodes[index]
-    kind :: body_copy_expr_kind(row.kind, &flat)
-    id :: if value.id == AST_NODE_GENERATED -> TEXPR_FIRST_FLAT_ID - flat.tree.nodes.len() else -> value.id
+    row: flat.arena.nodes[index]
+    kind: body_copy_expr_kind(row.kind, &flat)
+    id: if value.id == AST_NODE_GENERATED -> TEXPR_FIRST_FLAT_ID - flat.tree.nodes.len() else -> value.id
     &flat.tree.nodes.push(BodyNode{id: id, kind: kind, span: value.span})
-    ty :: type_table_intern(&flat.tree.types, value.ty)
+    ty: type_table_intern(&flat.tree.types, value.ty)
     &flat.tree.expr_types.push(TExprType{id: id, ty: ty})
     id
 }
 
-fn body_flat_stmt(value: TStmt, flat: &BodyFlat) -> Int Never! {
-    kind :: body_flat_stmt_kind(value, &flat)
+body_flat_stmt: fn(value: TStmt, flat: &BodyFlat) -> Int Never! {
+    kind: body_flat_stmt_kind(value, &flat)
     &flat.tree.stmts.push(kind)
     flat.tree.stmt_base + flat.tree.stmts.len() - 1
 }
 
 // Arena row `index` copied into the output tree, children first; returns its
 // node id there.
-fn body_copy_expr(index: Int, flat: &BodyFlat) -> Int Never! {
-    row :: flat.arena.nodes[index]
+body_copy_expr: fn(index: Int, flat: &BodyFlat) -> Int Never! {
+    row: flat.arena.nodes[index]
     if row.kind == .Binary(_, _, _, lhs, _) {
-        inner :: flat.arena.nodes[lhs]
+        inner: flat.arena.nodes[lhs]
         if inner.kind == .Binary(_, _, _, _, _) -> return body_copy_binary_chain(index, &flat)
     }
     body_copy_row(index, body_copy_expr_kind(row.kind, &flat), &flat)
 }
 
 // Files arena row `index` into the output tree as kind `kind` (body_copy_expr).
-fn body_copy_row(index: Int, kind: NodeKind, flat: &BodyFlat) -> Int Never! {
-    row :: flat.arena.nodes[index]
-    id :: if row.id == AST_NODE_GENERATED -> TEXPR_FIRST_FLAT_ID - flat.tree.nodes.len() else -> row.id
+body_copy_row: fn(index: Int, kind: NodeKind, flat: &BodyFlat) -> Int Never! {
+    row: flat.arena.nodes[index]
+    id: if row.id == AST_NODE_GENERATED -> TEXPR_FIRST_FLAT_ID - flat.tree.nodes.len() else -> row.id
     &flat.tree.nodes.push(BodyNode{id: id, kind: kind, span: row.span})
-    arena_type :: flat.arena.types.types[flat.arena.expr_types[index].ty]
-    ty :: type_table_intern(&flat.tree.types, arena_type)
+    arena_type: flat.arena.types.types[flat.arena.expr_types[index].ty]
+    ty: type_table_intern(&flat.tree.types, arena_type)
     &flat.tree.expr_types.push(TExprType{id: id, ty: ty})
     id
 }
 
 // A left-leaning chain of arena rows copies in this one frame, in
 // body_copy_expr's order (body_flat_binary_chain).
-fn body_copy_binary_chain(index: Int, flat: &BodyFlat) -> Int Never! {
+body_copy_binary_chain: fn(index: Int, flat: &BodyFlat) -> Int Never! {
     levels := [Int]{}
     operand := index
     loop {
-        row :: flat.arena.nodes[operand]
+        row: flat.arena.nodes[operand]
         if row.kind == .Binary(_, _, _, lhs, _) {
             &levels.push(operand)
             operand = lhs
@@ -254,9 +254,9 @@ fn body_copy_binary_chain(index: Int, flat: &BodyFlat) -> Int Never! {
     child := body_copy_expr(operand, &flat)
     at := levels.len() - 1
     loop at >= 0 {
-        level :: flat.arena.nodes[levels[at]]
+        level: flat.arena.nodes[levels[at]]
         if level.kind == .Binary(op, overflow, line, _, rhs) {
-            right :: body_copy_expr(rhs, &flat)
+            right: body_copy_expr(rhs, &flat)
             child = body_copy_row(levels[at], NodeKind.Binary{op: op, overflow: overflow, line: line, lhs: child, rhs: right}, &flat)
         }
         at -= 1
@@ -265,21 +265,21 @@ fn body_copy_binary_chain(index: Int, flat: &BodyFlat) -> Int Never! {
 }
 
 // Arena statement `index` copied into the output tree; returns its index there.
-fn body_copy_stmt(index: Int, flat: &BodyFlat) -> Int Never! {
-    statement :: flat.arena.stmts[index]
-    kind :: body_copy_stmt_kind(statement, &flat)
+body_copy_stmt: fn(index: Int, flat: &BodyFlat) -> Int Never! {
+    statement: flat.arena.stmts[index]
+    kind: body_copy_stmt_kind(statement, &flat)
     &flat.tree.stmts.push(kind)
     flat.tree.stmts.len() - 1
 }
 
-fn body_flat_str_part(value: TStrPart, flat: &BodyFlat) -> BodyStrPart Never! {
+body_flat_str_part: fn(value: TStrPart, flat: &BodyFlat) -> BodyStrPart Never! {
     if value == {
         .Literal(f_text) -> BodyStrPart.Literal{text: f_text}
         .Interpolation(f_value, f_format) -> BodyStrPart.Interpolation{value: body_flat_expr(f_value, &flat), format: f_format}
     }
 }
 
-fn body_flat_call_arg(value: TCallArg, flat: &BodyFlat) -> BodyCallArg Never! {
+body_flat_call_arg: fn(value: TCallArg, flat: &BodyFlat) -> BodyCallArg Never! {
     BodyCallArg{
         value: body_flat_expr(value.value, &flat),
         template_items: value.template_items,
@@ -294,13 +294,13 @@ fn body_flat_call_arg(value: TCallArg, flat: &BodyFlat) -> BodyCallArg Never! {
     }
 }
 
-fn body_flat_enum_arg(value: TEnumArg, flat: &BodyFlat) -> BodyEnumArg Never! {
+body_flat_enum_arg: fn(value: TEnumArg, flat: &BodyFlat) -> BodyEnumArg Never! {
     BodyEnumArg{
         value: body_flat_expr(value.value, &flat),
     }
 }
 
-fn body_flat_enum_payload(value: TEnumPayload, flat: &BodyFlat) -> BodyEnumPayload Never! {
+body_flat_enum_payload: fn(value: TEnumPayload, flat: &BodyFlat) -> BodyEnumPayload Never! {
     if value == {
         .Unit -> BodyEnumPayload.Unit
         .Positional(f_args) -> BodyEnumPayload.Positional{args: body_flat_list_enum_arg(f_args, &flat)}
@@ -308,14 +308,14 @@ fn body_flat_enum_payload(value: TEnumPayload, flat: &BodyFlat) -> BodyEnumPaylo
     }
 }
 
-fn body_flat_named_enum_arg(value: TNamedEnumArg, flat: &BodyFlat) -> BodyNamedEnumArg Never! {
+body_flat_named_enum_arg: fn(value: TNamedEnumArg, flat: &BodyFlat) -> BodyNamedEnumArg Never! {
     BodyNamedEnumArg{
         name: value.name,
         value: body_flat_enum_arg(value.value, &flat),
     }
 }
 
-fn body_flat_pattern_shape(value: TPatternShape, flat: &BodyFlat) -> BodyPatternShape Never! {
+body_flat_pattern_shape: fn(value: TPatternShape, flat: &BodyFlat) -> BodyPatternShape Never! {
     if value == {
         .Variant(f_variant, f_bindings, f_leading_dot, f_span) -> BodyPatternShape.Variant{variant: f_variant, bindings: body_flat_list_pattern_binding(f_bindings, &flat), leading_dot: f_leading_dot, span: f_span}
         .Present(f_binding, f_binding_span, f_inner, f_span) -> BodyPatternShape.Present{binding: f_binding, binding_span: f_binding_span, inner: body_flat_opt_nested_pattern(f_inner, &flat), span: f_span}
@@ -332,14 +332,14 @@ fn body_flat_pattern_shape(value: TPatternShape, flat: &BodyFlat) -> BodyPattern
     }
 }
 
-fn body_flat_nested_pattern(value: TNestedPattern, flat: &BodyFlat) -> BodyNestedPattern Never! {
+body_flat_nested_pattern: fn(value: TNestedPattern, flat: &BodyFlat) -> BodyNestedPattern Never! {
     BodyNestedPattern{
         shape: body_flat_pattern_shape(value.shape, &flat),
         enum_type: value.enum_type,
     }
 }
 
-fn body_flat_pattern(value: TPattern, flat: &BodyFlat) -> BodyPattern Never! {
+body_flat_pattern: fn(value: TPattern, flat: &BodyFlat) -> BodyPattern Never! {
     BodyPattern{
         shape: body_flat_pattern_shape(value.shape, &flat),
         bindings: value.bindings,
@@ -350,7 +350,7 @@ fn body_flat_pattern(value: TPattern, flat: &BodyFlat) -> BodyPattern Never! {
     }
 }
 
-fn body_flat_pattern_binding(value: TPatternBinding, flat: &BodyFlat) -> BodyPatternBinding Never! {
+body_flat_pattern_binding: fn(value: TPatternBinding, flat: &BodyFlat) -> BodyPatternBinding Never! {
     if value == {
         .Wildcard -> BodyPatternBinding.Wildcard
         .Bind(f_name, f_span) -> BodyPatternBinding.Bind{name: f_name, span: f_span}
@@ -360,7 +360,7 @@ fn body_flat_pattern_binding(value: TPatternBinding, flat: &BodyFlat) -> BodyPat
     }
 }
 
-fn body_flat_pattern_field(value: TPatternField, flat: &BodyFlat) -> BodyPatternField Never! {
+body_flat_pattern_field: fn(value: TPatternField, flat: &BodyFlat) -> BodyPatternField Never! {
     if value == {
         .Bind(f_field, f_local, f_span) -> BodyPatternField.Bind{field: f_field, local: f_local, span: f_span}
         .Value(f_field, f_value, f_span) -> BodyPatternField.Value{field: f_field, value: body_flat_expr(f_value, &flat), span: f_span}
@@ -368,7 +368,7 @@ fn body_flat_pattern_field(value: TPatternField, flat: &BodyFlat) -> BodyPattern
     }
 }
 
-fn body_flat_map_pattern_entry(value: TMapPatternEntry, flat: &BodyFlat) -> BodyMapPatternEntry Never! {
+body_flat_map_pattern_entry: fn(value: TMapPatternEntry, flat: &BodyFlat) -> BodyMapPatternEntry Never! {
     BodyMapPatternEntry{
         key: body_flat_expr(value.key, &flat),
         optional: value.optional,
@@ -377,14 +377,14 @@ fn body_flat_map_pattern_entry(value: TMapPatternEntry, flat: &BodyFlat) -> Body
     }
 }
 
-fn body_flat_match_arm(value: TMatchArm, flat: &BodyFlat) -> BodyMatchArm Never! {
+body_flat_match_arm: fn(value: TMatchArm, flat: &BodyFlat) -> BodyMatchArm Never! {
     BodyMatchArm{
         pattern: body_flat_pattern(value.pattern, &flat),
         body: body_flat_list_stmt(value.body, &flat),
     }
 }
 
-fn body_flat_if_cond(value: TIfCond, flat: &BodyFlat) -> BodyIfCond Never! {
+body_flat_if_cond: fn(value: TIfCond, flat: &BodyFlat) -> BodyIfCond Never! {
     if value == {
         .Plain(f_value) -> BodyIfCond.Plain{value: body_flat_expr(f_value, &flat)}
         .And(f_left, f_right) -> BodyIfCond.And{left: body_flat_if_cond(f_left, &flat), right: body_flat_if_cond(f_right, &flat)}
@@ -392,7 +392,7 @@ fn body_flat_if_cond(value: TIfCond, flat: &BodyFlat) -> BodyIfCond Never! {
     }
 }
 
-fn body_flat_contract(value: TContract, flat: &BodyFlat) -> BodyContract Never! {
+body_flat_contract: fn(value: TContract, flat: &BodyFlat) -> BodyContract Never! {
     BodyContract{
         kind: value.kind,
         condition: body_flat_expr(value.condition, &flat),
@@ -405,7 +405,7 @@ fn body_flat_contract(value: TContract, flat: &BodyFlat) -> BodyContract Never! 
     }
 }
 
-fn body_flat_stmt_kind(value: TStmt, flat: &BodyFlat) -> StmtKind Never! {
+body_flat_stmt_kind: fn(value: TStmt, flat: &BodyFlat) -> StmtKind Never! {
     if value == {
         .Contract(f_contract) -> StmtKind.Contract{contract: body_flat_contract(f_contract, &flat)}
         .ContractScope(f_pre, f_body, f_post, f_result, f_span) -> StmtKind.ContractScope{pre: body_flat_list_contract(f_pre, &flat), body: body_flat_list_stmt(f_body, &flat), post: body_flat_list_contract(f_post, &flat), result: f_result, span: f_span}
@@ -451,7 +451,7 @@ fn body_flat_stmt_kind(value: TStmt, flat: &BodyFlat) -> StmtKind Never! {
     }
 }
 
-fn body_flat_range_arm(value: TRangeArm, flat: &BodyFlat) -> BodyRangeArm Never! {
+body_flat_range_arm: fn(value: TRangeArm, flat: &BodyFlat) -> BodyRangeArm Never! {
     BodyRangeArm{
         lo: value.lo,
         hi: value.hi,
@@ -459,21 +459,21 @@ fn body_flat_range_arm(value: TRangeArm, flat: &BodyFlat) -> BodyRangeArm Never!
     }
 }
 
-fn body_flat_mixed_arm(value: TMixedArm, flat: &BodyFlat) -> BodyMixedArm Never! {
+body_flat_mixed_arm: fn(value: TMixedArm, flat: &BodyFlat) -> BodyMixedArm Never! {
     BodyMixedArm{
         condition: body_flat_expr(value.condition, &flat),
         body: body_flat_list_stmt(value.body, &flat),
     }
 }
 
-fn body_flat_context_guard(value: TContextGuard, flat: &BodyFlat) -> BodyContextGuard Never! {
+body_flat_context_guard: fn(value: TContextGuard, flat: &BodyFlat) -> BodyContextGuard Never! {
     BodyContextGuard{
         field: value.field,
         value: body_flat_expr(value.value, &flat),
     }
 }
 
-fn body_flat_expr_kind(value: TExprKind, flat: &BodyFlat) -> NodeKind Never! {
+body_flat_expr_kind: fn(value: TExprKind, flat: &BodyFlat) -> NodeKind Never! {
     if value == {
         .IntLit(f_value, f_width) -> NodeKind.IntLit{value: f_value, width: f_width}
         .StrLit(f_parts) -> NodeKind.StrLit{parts: body_flat_list_str_part(f_parts, &flat)}
@@ -556,7 +556,7 @@ fn body_flat_expr_kind(value: TExprKind, flat: &BodyFlat) -> NodeKind Never! {
     }
 }
 
-fn body_flat_struct_field_value(value: TStructFieldValue, flat: &BodyFlat) -> BodyStructFieldValue Never! {
+body_flat_struct_field_value: fn(value: TStructFieldValue, flat: &BodyFlat) -> BodyStructFieldValue Never! {
     BodyStructFieldValue{
         field: value.field,
         value: body_flat_expr(value.value, &flat),
@@ -564,21 +564,21 @@ fn body_flat_struct_field_value(value: TStructFieldValue, flat: &BodyFlat) -> Bo
     }
 }
 
-fn body_flat_map_entry(value: TMapEntry, flat: &BodyFlat) -> BodyMapEntry Never! {
+body_flat_map_entry: fn(value: TMapEntry, flat: &BodyFlat) -> BodyMapEntry Never! {
     BodyMapEntry{
         key: body_flat_expr(value.key, &flat),
         value: body_flat_expr(value.value, &flat),
     }
 }
 
-fn body_flat_list_spread_part(value: TListSpreadPart, flat: &BodyFlat) -> BodyListSpreadPart Never! {
+body_flat_list_spread_part: fn(value: TListSpreadPart, flat: &BodyFlat) -> BodyListSpreadPart Never! {
     if value == {
         .Element(f_value) -> BodyListSpreadPart.Element{value: body_flat_expr(f_value, &flat)}
         .Spread(f_value) -> BodyListSpreadPart.Spread{value: body_flat_expr(f_value, &flat)}
     }
 }
 
-fn body_flat_scope_member_kind(value: TScopeMemberKind, flat: &BodyFlat) -> BodyScopeMemberKind Never! {
+body_flat_scope_member_kind: fn(value: TScopeMemberKind, flat: &BodyFlat) -> BodyScopeMemberKind Never! {
     if value == {
         .Setup -> BodyScopeMemberKind.Setup
         .ExpectFail(f_code, f_message) -> BodyScopeMemberKind.ExpectFail{code: f_code, message: f_message}
@@ -588,7 +588,7 @@ fn body_flat_scope_member_kind(value: TScopeMemberKind, flat: &BodyFlat) -> Body
     }
 }
 
-fn body_flat_or_fallback(value: TOrFallback, flat: &BodyFlat) -> BodyOrFallback Never! {
+body_flat_or_fallback: fn(value: TOrFallback, flat: &BodyFlat) -> BodyOrFallback Never! {
     if value == {
         .Value(f_value) -> BodyOrFallback.Value{value: body_flat_expr(f_value, &flat)}
         .Return(f_value) -> BodyOrFallback.Return{value: body_flat_opt_expr(f_value, &flat)}
@@ -600,7 +600,7 @@ fn body_flat_or_fallback(value: TOrFallback, flat: &BodyFlat) -> BodyOrFallback 
     }
 }
 
-fn body_flat_host_call(value: THostCall, flat: &BodyFlat) -> BodyHostCall Never! {
+body_flat_host_call: fn(value: THostCall, flat: &BodyFlat) -> BodyHostCall Never! {
     if value == {
         .Method(f_receiver, f_method, f_args) -> BodyHostCall.Method{receiver: body_flat_expr(f_receiver, &flat), method: f_method, args: body_flat_list_expr(f_args, &flat)}
         .CellGuardProject(f_receiver, f_paths, f_result_type, f_editable, f_edit_paths_disjoint) -> BodyHostCall.CellGuardProject{receiver: body_flat_expr(f_receiver, &flat), paths: f_paths, result_type: f_result_type, editable: f_editable, edit_paths_disjoint: f_edit_paths_disjoint}
@@ -614,7 +614,7 @@ fn body_flat_host_call(value: THostCall, flat: &BodyFlat) -> BodyHostCall Never!
     }
 }
 
-fn body_flat_core_closure_kind(value: TCoreClosureKind, flat: &BodyFlat) -> BodyCoreClosureKind Never! {
+body_flat_core_closure_kind: fn(value: TCoreClosureKind, flat: &BodyFlat) -> BodyCoreClosureKind Never! {
     if value == {
         .Spawn(f_group, f_site, f_label, f_executable) -> BodyCoreClosureKind.Spawn{group: body_flat_opt_expr(f_group, &flat), site: f_site, label: f_label, executable: body_flat_lambda(f_executable, &flat)}
         .Realtime(f_rate, f_frames, f_executable) -> BodyCoreClosureKind.Realtime{rate: body_flat_expr(f_rate, &flat), frames: body_flat_expr(f_frames, &flat), executable: body_flat_lambda(f_executable, &flat)}
@@ -629,7 +629,7 @@ fn body_flat_core_closure_kind(value: TCoreClosureKind, flat: &BodyFlat) -> Body
     }
 }
 
-fn body_flat_fn_value_kind(value: TFnValueKind, flat: &BodyFlat) -> BodyFnValueKind Never! {
+body_flat_fn_value_kind: fn(value: TFnValueKind, flat: &BodyFlat) -> BodyFnValueKind Never! {
     if value == {
         .NamedFn(f_function, f_lambda) -> BodyFnValueKind.NamedFn{function: f_function, lambda: body_flat_opt_lambda(f_lambda, &flat)}
         .Policy(f_fn_type, f_policy_args, f_policy_conventions, f_wrapper, f_captures, f_callee) -> BodyFnValueKind.Policy{fn_type: f_fn_type, policy_args: body_flat_list_call_arg(f_policy_args, &flat), policy_conventions: f_policy_conventions, wrapper: f_wrapper, captures: f_captures, callee: body_flat_expr(f_callee, &flat)}
@@ -638,7 +638,7 @@ fn body_flat_fn_value_kind(value: TFnValueKind, flat: &BodyFlat) -> BodyFnValueK
     }
 }
 
-fn body_flat_handle_op(value: THandleOp, flat: &BodyFlat) -> BodyHandleOp Never! {
+body_flat_handle_op: fn(value: THandleOp, flat: &BodyFlat) -> BodyHandleOp Never! {
     if value == {
         .Hardware(f_operation) -> BodyHandleOp.Hardware{operation: f_operation}
         .DurationNew(f_unit, f_float) -> BodyHandleOp.DurationNew{unit: f_unit, float: f_float}
@@ -763,7 +763,7 @@ fn body_flat_handle_op(value: THandleOp, flat: &BodyFlat) -> BodyHandleOp Never!
     }
 }
 
-fn body_flat_handle_op_1(value: THandleOp, flat: &BodyFlat) -> BodyHandleOp Never! {
+body_flat_handle_op_1: fn(value: THandleOp, flat: &BodyFlat) -> BodyHandleOp Never! {
     if value == {
         .UnixStreamReadDeadline -> BodyHandleOp.UnixStreamReadDeadline
         .UnixStreamWriteAllDeadline -> BodyHandleOp.UnixStreamWriteAllDeadline
@@ -867,7 +867,7 @@ fn body_flat_handle_op_1(value: THandleOp, flat: &BodyFlat) -> BodyHandleOp Neve
     }
 }
 
-fn body_flat_handle_op_2(value: THandleOp, flat: &BodyFlat) -> BodyHandleOp Never! {
+body_flat_handle_op_2: fn(value: THandleOp, flat: &BodyFlat) -> BodyHandleOp Never! {
     if value == {
         .JSONToText -> BodyHandleOp.JSONToText
         .JSONEqualUnordered -> BodyHandleOp.JSONEqualUnordered
@@ -918,7 +918,7 @@ fn body_flat_handle_op_2(value: THandleOp, flat: &BodyFlat) -> BodyHandleOp Neve
     }
 }
 
-fn body_flat_require_kind(value: TRequireKind, flat: &BodyFlat) -> BodyRequireKind Never! {
+body_flat_require_kind: fn(value: TRequireKind, flat: &BodyFlat) -> BodyRequireKind Never! {
     if value == {
         .Require(f_cond, f_msg) -> BodyRequireKind.Require{cond: body_flat_expr(f_cond, &flat), msg: body_flat_opt_expr(f_msg, &flat)}
         .RequireEq(f_left, f_right, f_hook) -> BodyRequireKind.RequireEq{left: body_flat_expr(f_left, &flat), right: body_flat_expr(f_right, &flat), hook: f_hook}
@@ -926,7 +926,7 @@ fn body_flat_require_kind(value: TRequireKind, flat: &BodyFlat) -> BodyRequireKi
     }
 }
 
-fn body_flat_lambda(value: TLambda, flat: &BodyFlat) -> BodyLambda Never! {
+body_flat_lambda: fn(value: TLambda, flat: &BodyFlat) -> BodyLambda Never! {
     BodyLambda{
         executable: body_flat_lambda_body(value.executable, &flat),
         source_span: value.source_span,
@@ -950,14 +950,14 @@ fn body_flat_lambda(value: TLambda, flat: &BodyFlat) -> BodyLambda Never! {
     }
 }
 
-fn body_flat_lambda_body(value: TLambdaBody, flat: &BodyFlat) -> BodyLambdaBody Never! {
+body_flat_lambda_body: fn(value: TLambdaBody, flat: &BodyFlat) -> BodyLambdaBody Never! {
     if value == {
         .Expr(f_value) -> BodyLambdaBody.Expr{value: body_flat_expr(f_value, &flat)}
         .Block(f_body) -> BodyLambdaBody.Block{body: body_flat_list_stmt(f_body, &flat)}
     }
 }
 
-fn body_flat_parameter(value: TParameter, flat: &BodyFlat) -> BodyParameter Never! {
+body_flat_parameter: fn(value: TParameter, flat: &BodyFlat) -> BodyParameter Never! {
     BodyParameter{
         local: value.local,
         name: value.name,
@@ -971,167 +971,167 @@ fn body_flat_parameter(value: TParameter, flat: &BodyFlat) -> BodyParameter Neve
     }
 }
 
-fn body_flat_place(value: TPlace, flat: &BodyFlat) -> BodyPlace Never! {
+body_flat_place: fn(value: TPlace, flat: &BodyFlat) -> BodyPlace Never! {
     if value == {
         .Local(f_local) -> BodyPlace.Local{local: f_local}
         .Expr(f_value) -> BodyPlace.Expr{value: body_flat_expr(f_value, &flat)}
     }
 }
 
-fn body_flat_list_parameter(values: [TParameter], flat: &BodyFlat) -> [BodyParameter] Never! {
+body_flat_list_parameter: fn(values: [TParameter], flat: &BodyFlat) -> [BodyParameter] Never! {
     result := [BodyParameter]{}
     loop value in values -> &result.push(body_flat_parameter(value, &flat))
     result
 }
 
-fn body_flat_list_stmt(values: [TStmt], flat: &BodyFlat) -> [Int] Never! {
+body_flat_list_stmt: fn(values: [TStmt], flat: &BodyFlat) -> [Int] Never! {
     result := [Int]{}
     loop value in values -> &result.push(body_flat_stmt(value, &flat))
     result
 }
 
-fn body_flat_list_enum_arg(values: [TEnumArg], flat: &BodyFlat) -> [BodyEnumArg] Never! {
+body_flat_list_enum_arg: fn(values: [TEnumArg], flat: &BodyFlat) -> [BodyEnumArg] Never! {
     result := [BodyEnumArg]{}
     loop value in values -> &result.push(body_flat_enum_arg(value, &flat))
     result
 }
 
-fn body_flat_list_named_enum_arg(values: [TNamedEnumArg], flat: &BodyFlat) -> [BodyNamedEnumArg] Never! {
+body_flat_list_named_enum_arg: fn(values: [TNamedEnumArg], flat: &BodyFlat) -> [BodyNamedEnumArg] Never! {
     result := [BodyNamedEnumArg]{}
     loop value in values -> &result.push(body_flat_named_enum_arg(value, &flat))
     result
 }
 
-fn body_flat_list_pattern_binding(values: [TPatternBinding], flat: &BodyFlat) -> [BodyPatternBinding] Never! {
+body_flat_list_pattern_binding: fn(values: [TPatternBinding], flat: &BodyFlat) -> [BodyPatternBinding] Never! {
     result := [BodyPatternBinding]{}
     loop value in values -> &result.push(body_flat_pattern_binding(value, &flat))
     result
 }
 
-fn body_flat_opt_nested_pattern(value: TNestedPattern?, flat: &BodyFlat) -> BodyNestedPattern? Never! {
+body_flat_opt_nested_pattern: fn(value: TNestedPattern?, flat: &BodyFlat) -> BodyNestedPattern? Never! {
     if value == .Val(inner) -> return Val(body_flat_nested_pattern(inner, &flat))
     None
 }
 
-fn body_flat_list_pattern_shape(values: [TPatternShape], flat: &BodyFlat) -> [BodyPatternShape] Never! {
+body_flat_list_pattern_shape: fn(values: [TPatternShape], flat: &BodyFlat) -> [BodyPatternShape] Never! {
     result := [BodyPatternShape]{}
     loop value in values -> &result.push(body_flat_pattern_shape(value, &flat))
     result
 }
 
-fn body_flat_list_pattern_field(values: [TPatternField], flat: &BodyFlat) -> [BodyPatternField] Never! {
+body_flat_list_pattern_field: fn(values: [TPatternField], flat: &BodyFlat) -> [BodyPatternField] Never! {
     result := [BodyPatternField]{}
     loop value in values -> &result.push(body_flat_pattern_field(value, &flat))
     result
 }
 
-fn body_flat_list_map_pattern_entry(values: [TMapPatternEntry], flat: &BodyFlat) -> [BodyMapPatternEntry] Never! {
+body_flat_list_map_pattern_entry: fn(values: [TMapPatternEntry], flat: &BodyFlat) -> [BodyMapPatternEntry] Never! {
     result := [BodyMapPatternEntry]{}
     loop value in values -> &result.push(body_flat_map_pattern_entry(value, &flat))
     result
 }
 
-fn body_flat_list_contract(values: [TContract], flat: &BodyFlat) -> [BodyContract] Never! {
+body_flat_list_contract: fn(values: [TContract], flat: &BodyFlat) -> [BodyContract] Never! {
     result := [BodyContract]{}
     loop value in values -> &result.push(body_flat_contract(value, &flat))
     result
 }
 
-fn body_flat_opt_stmt(value: TStmt?, flat: &BodyFlat) -> Int? Never! {
+body_flat_opt_stmt: fn(value: TStmt?, flat: &BodyFlat) -> Int? Never! {
     if value == .Val(inner) -> return Val(body_flat_stmt(inner, &flat))
     None
 }
 
-fn body_flat_opt_expr(value: TExpr?, flat: &BodyFlat) -> Int? Never! {
+body_flat_opt_expr: fn(value: TExpr?, flat: &BodyFlat) -> Int? Never! {
     if value == .Val(inner) -> return Val(body_flat_expr(inner, &flat))
     None
 }
 
-fn body_flat_opt_unit_rounding(value: TUnitRounding?, flat: &BodyFlat) -> BodyUnitRounding? Never! {
+body_flat_opt_unit_rounding: fn(value: TUnitRounding?, flat: &BodyFlat) -> BodyUnitRounding? Never! {
     if value == .Val(inner) -> return Val(BodyUnitRounding{mode: inner.mode, digits: body_flat_expr(inner.digits, &flat)})
     None
 }
 
-fn body_flat_opt_list_stmt(value: [TStmt]?, flat: &BodyFlat) -> [Int]? Never! {
+body_flat_opt_list_stmt: fn(value: [TStmt]?, flat: &BodyFlat) -> [Int]? Never! {
     if value == .Val(inner) -> return Val(body_flat_list_stmt(inner, &flat))
     None
 }
 
-fn body_flat_list_match_arm(values: [TMatchArm], flat: &BodyFlat) -> [BodyMatchArm] Never! {
+body_flat_list_match_arm: fn(values: [TMatchArm], flat: &BodyFlat) -> [BodyMatchArm] Never! {
     result := [BodyMatchArm]{}
     loop value in values -> &result.push(body_flat_match_arm(value, &flat))
     result
 }
 
-fn body_flat_list_range_arm(values: [TRangeArm], flat: &BodyFlat) -> [BodyRangeArm] Never! {
+body_flat_list_range_arm: fn(values: [TRangeArm], flat: &BodyFlat) -> [BodyRangeArm] Never! {
     result := [BodyRangeArm]{}
     loop value in values -> &result.push(body_flat_range_arm(value, &flat))
     result
 }
 
-fn body_flat_list_mixed_arm(values: [TMixedArm], flat: &BodyFlat) -> [BodyMixedArm] Never! {
+body_flat_list_mixed_arm: fn(values: [TMixedArm], flat: &BodyFlat) -> [BodyMixedArm] Never! {
     result := [BodyMixedArm]{}
     loop value in values -> &result.push(body_flat_mixed_arm(value, &flat))
     result
 }
 
-fn body_flat_list_context_guard(values: [TContextGuard], flat: &BodyFlat) -> [BodyContextGuard] Never! {
+body_flat_list_context_guard: fn(values: [TContextGuard], flat: &BodyFlat) -> [BodyContextGuard] Never! {
     result := [BodyContextGuard]{}
     loop value in values -> &result.push(body_flat_context_guard(value, &flat))
     result
 }
 
-fn body_flat_list_str_part(values: [TStrPart], flat: &BodyFlat) -> [BodyStrPart] Never! {
+body_flat_list_str_part: fn(values: [TStrPart], flat: &BodyFlat) -> [BodyStrPart] Never! {
     result := [BodyStrPart]{}
     loop value in values -> &result.push(body_flat_str_part(value, &flat))
     result
 }
 
-fn body_flat_list_call_arg(values: [TCallArg], flat: &BodyFlat) -> [BodyCallArg] Never! {
+body_flat_list_call_arg: fn(values: [TCallArg], flat: &BodyFlat) -> [BodyCallArg] Never! {
     result := [BodyCallArg]{}
     loop value in values -> &result.push(body_flat_call_arg(value, &flat))
     result
 }
 
-fn body_flat_list_expr(values: [TExpr], flat: &BodyFlat) -> [Int] Never! {
+body_flat_list_expr: fn(values: [TExpr], flat: &BodyFlat) -> [Int] Never! {
     result := [Int]{}
     loop value in values -> &result.push(body_flat_expr(value, &flat))
     result
 }
 
-fn body_flat_list_struct_field_value(values: [TStructFieldValue], flat: &BodyFlat) -> [BodyStructFieldValue] Never! {
+body_flat_list_struct_field_value: fn(values: [TStructFieldValue], flat: &BodyFlat) -> [BodyStructFieldValue] Never! {
     result := [BodyStructFieldValue]{}
     loop value in values -> &result.push(body_flat_struct_field_value(value, &flat))
     result
 }
 
-fn body_flat_list_map_entry(values: [TMapEntry], flat: &BodyFlat) -> [BodyMapEntry] Never! {
+body_flat_list_map_entry: fn(values: [TMapEntry], flat: &BodyFlat) -> [BodyMapEntry] Never! {
     result := [BodyMapEntry]{}
     loop value in values -> &result.push(body_flat_map_entry(value, &flat))
     result
 }
 
-fn body_flat_list_list_spread_part(values: [TListSpreadPart], flat: &BodyFlat) -> [BodyListSpreadPart] Never! {
+body_flat_list_list_spread_part: fn(values: [TListSpreadPart], flat: &BodyFlat) -> [BodyListSpreadPart] Never! {
     result := [BodyListSpreadPart]{}
     loop value in values -> &result.push(body_flat_list_spread_part(value, &flat))
     result
 }
 
-fn body_flat_opt_lambda(value: TLambda?, flat: &BodyFlat) -> BodyLambda? Never! {
+body_flat_opt_lambda: fn(value: TLambda?, flat: &BodyFlat) -> BodyLambda? Never! {
     if value == .Val(inner) -> return Val(body_flat_lambda(inner, &flat))
     None
 }
 
 // The arena copier: a Body value whose expression children are arena row
 // indices, rewritten with its children copied into the output tree (body_copy_expr).
-fn body_copy_str_part(value: BodyStrPart, flat: &BodyFlat) -> BodyStrPart Never! {
+body_copy_str_part: fn(value: BodyStrPart, flat: &BodyFlat) -> BodyStrPart Never! {
     if value == {
         .Literal(f_text) -> BodyStrPart.Literal{text: f_text}
         .Interpolation(f_value, f_format) -> BodyStrPart.Interpolation{value: body_copy_expr(f_value, &flat), format: f_format}
     }
 }
 
-fn body_copy_call_arg(value: BodyCallArg, flat: &BodyFlat) -> BodyCallArg Never! {
+body_copy_call_arg: fn(value: BodyCallArg, flat: &BodyFlat) -> BodyCallArg Never! {
     BodyCallArg{
         value: body_copy_expr(value.value, &flat),
         template_items: value.template_items,
@@ -1146,13 +1146,13 @@ fn body_copy_call_arg(value: BodyCallArg, flat: &BodyFlat) -> BodyCallArg Never!
     }
 }
 
-fn body_copy_enum_arg(value: BodyEnumArg, flat: &BodyFlat) -> BodyEnumArg Never! {
+body_copy_enum_arg: fn(value: BodyEnumArg, flat: &BodyFlat) -> BodyEnumArg Never! {
     BodyEnumArg{
         value: body_copy_expr(value.value, &flat),
     }
 }
 
-fn body_copy_enum_payload(value: BodyEnumPayload, flat: &BodyFlat) -> BodyEnumPayload Never! {
+body_copy_enum_payload: fn(value: BodyEnumPayload, flat: &BodyFlat) -> BodyEnumPayload Never! {
     if value == {
         .Unit -> BodyEnumPayload.Unit
         .Positional(f_args) -> BodyEnumPayload.Positional{args: body_copy_list_enum_arg(f_args, &flat)}
@@ -1160,14 +1160,14 @@ fn body_copy_enum_payload(value: BodyEnumPayload, flat: &BodyFlat) -> BodyEnumPa
     }
 }
 
-fn body_copy_named_enum_arg(value: BodyNamedEnumArg, flat: &BodyFlat) -> BodyNamedEnumArg Never! {
+body_copy_named_enum_arg: fn(value: BodyNamedEnumArg, flat: &BodyFlat) -> BodyNamedEnumArg Never! {
     BodyNamedEnumArg{
         name: value.name,
         value: body_copy_enum_arg(value.value, &flat),
     }
 }
 
-fn body_copy_pattern_shape(value: BodyPatternShape, flat: &BodyFlat) -> BodyPatternShape Never! {
+body_copy_pattern_shape: fn(value: BodyPatternShape, flat: &BodyFlat) -> BodyPatternShape Never! {
     if value == {
         .Variant(f_variant, f_bindings, f_leading_dot, f_span) -> BodyPatternShape.Variant{variant: f_variant, bindings: body_copy_list_pattern_binding(f_bindings, &flat), leading_dot: f_leading_dot, span: f_span}
         .Present(f_binding, f_binding_span, f_inner, f_span) -> BodyPatternShape.Present{binding: f_binding, binding_span: f_binding_span, inner: body_copy_opt_nested_pattern(f_inner, &flat), span: f_span}
@@ -1184,14 +1184,14 @@ fn body_copy_pattern_shape(value: BodyPatternShape, flat: &BodyFlat) -> BodyPatt
     }
 }
 
-fn body_copy_nested_pattern(value: BodyNestedPattern, flat: &BodyFlat) -> BodyNestedPattern Never! {
+body_copy_nested_pattern: fn(value: BodyNestedPattern, flat: &BodyFlat) -> BodyNestedPattern Never! {
     BodyNestedPattern{
         shape: body_copy_pattern_shape(value.shape, &flat),
         enum_type: value.enum_type,
     }
 }
 
-fn body_copy_pattern(value: BodyPattern, flat: &BodyFlat) -> BodyPattern Never! {
+body_copy_pattern: fn(value: BodyPattern, flat: &BodyFlat) -> BodyPattern Never! {
     BodyPattern{
         shape: body_copy_pattern_shape(value.shape, &flat),
         bindings: value.bindings,
@@ -1202,7 +1202,7 @@ fn body_copy_pattern(value: BodyPattern, flat: &BodyFlat) -> BodyPattern Never! 
     }
 }
 
-fn body_copy_pattern_binding(value: BodyPatternBinding, flat: &BodyFlat) -> BodyPatternBinding Never! {
+body_copy_pattern_binding: fn(value: BodyPatternBinding, flat: &BodyFlat) -> BodyPatternBinding Never! {
     if value == {
         .Wildcard -> BodyPatternBinding.Wildcard
         .Bind(f_name, f_span) -> BodyPatternBinding.Bind{name: f_name, span: f_span}
@@ -1212,7 +1212,7 @@ fn body_copy_pattern_binding(value: BodyPatternBinding, flat: &BodyFlat) -> Body
     }
 }
 
-fn body_copy_pattern_field(value: BodyPatternField, flat: &BodyFlat) -> BodyPatternField Never! {
+body_copy_pattern_field: fn(value: BodyPatternField, flat: &BodyFlat) -> BodyPatternField Never! {
     if value == {
         .Bind(f_field, f_local, f_span) -> BodyPatternField.Bind{field: f_field, local: f_local, span: f_span}
         .Value(f_field, f_value, f_span) -> BodyPatternField.Value{field: f_field, value: body_copy_expr(f_value, &flat), span: f_span}
@@ -1220,7 +1220,7 @@ fn body_copy_pattern_field(value: BodyPatternField, flat: &BodyFlat) -> BodyPatt
     }
 }
 
-fn body_copy_map_pattern_entry(value: BodyMapPatternEntry, flat: &BodyFlat) -> BodyMapPatternEntry Never! {
+body_copy_map_pattern_entry: fn(value: BodyMapPatternEntry, flat: &BodyFlat) -> BodyMapPatternEntry Never! {
     BodyMapPatternEntry{
         key: body_copy_expr(value.key, &flat),
         optional: value.optional,
@@ -1229,14 +1229,14 @@ fn body_copy_map_pattern_entry(value: BodyMapPatternEntry, flat: &BodyFlat) -> B
     }
 }
 
-fn body_copy_match_arm(value: BodyMatchArm, flat: &BodyFlat) -> BodyMatchArm Never! {
+body_copy_match_arm: fn(value: BodyMatchArm, flat: &BodyFlat) -> BodyMatchArm Never! {
     BodyMatchArm{
         pattern: body_copy_pattern(value.pattern, &flat),
         body: body_copy_list_stmt(value.body, &flat),
     }
 }
 
-fn body_copy_if_cond(value: BodyIfCond, flat: &BodyFlat) -> BodyIfCond Never! {
+body_copy_if_cond: fn(value: BodyIfCond, flat: &BodyFlat) -> BodyIfCond Never! {
     if value == {
         .Plain(f_value) -> BodyIfCond.Plain{value: body_copy_expr(f_value, &flat)}
         .And(f_left, f_right) -> BodyIfCond.And{left: body_copy_if_cond(f_left, &flat), right: body_copy_if_cond(f_right, &flat)}
@@ -1244,7 +1244,7 @@ fn body_copy_if_cond(value: BodyIfCond, flat: &BodyFlat) -> BodyIfCond Never! {
     }
 }
 
-fn body_copy_contract(value: BodyContract, flat: &BodyFlat) -> BodyContract Never! {
+body_copy_contract: fn(value: BodyContract, flat: &BodyFlat) -> BodyContract Never! {
     BodyContract{
         kind: value.kind,
         condition: body_copy_expr(value.condition, &flat),
@@ -1257,7 +1257,7 @@ fn body_copy_contract(value: BodyContract, flat: &BodyFlat) -> BodyContract Neve
     }
 }
 
-fn body_copy_stmt_kind(value: StmtKind, flat: &BodyFlat) -> StmtKind Never! {
+body_copy_stmt_kind: fn(value: StmtKind, flat: &BodyFlat) -> StmtKind Never! {
     if value == {
         .Contract(f_contract) -> StmtKind.Contract{contract: body_copy_contract(f_contract, &flat)}
         .ContractScope(f_pre, f_body, f_post, f_result, f_span) -> StmtKind.ContractScope{pre: body_copy_list_contract(f_pre, &flat), body: body_copy_list_stmt(f_body, &flat), post: body_copy_list_contract(f_post, &flat), result: f_result, span: f_span}
@@ -1303,7 +1303,7 @@ fn body_copy_stmt_kind(value: StmtKind, flat: &BodyFlat) -> StmtKind Never! {
     }
 }
 
-fn body_copy_range_arm(value: BodyRangeArm, flat: &BodyFlat) -> BodyRangeArm Never! {
+body_copy_range_arm: fn(value: BodyRangeArm, flat: &BodyFlat) -> BodyRangeArm Never! {
     BodyRangeArm{
         lo: value.lo,
         hi: value.hi,
@@ -1311,21 +1311,21 @@ fn body_copy_range_arm(value: BodyRangeArm, flat: &BodyFlat) -> BodyRangeArm Nev
     }
 }
 
-fn body_copy_mixed_arm(value: BodyMixedArm, flat: &BodyFlat) -> BodyMixedArm Never! {
+body_copy_mixed_arm: fn(value: BodyMixedArm, flat: &BodyFlat) -> BodyMixedArm Never! {
     BodyMixedArm{
         condition: body_copy_expr(value.condition, &flat),
         body: body_copy_list_stmt(value.body, &flat),
     }
 }
 
-fn body_copy_context_guard(value: BodyContextGuard, flat: &BodyFlat) -> BodyContextGuard Never! {
+body_copy_context_guard: fn(value: BodyContextGuard, flat: &BodyFlat) -> BodyContextGuard Never! {
     BodyContextGuard{
         field: value.field,
         value: body_copy_expr(value.value, &flat),
     }
 }
 
-fn body_copy_expr_kind(value: NodeKind, flat: &BodyFlat) -> NodeKind Never! {
+body_copy_expr_kind: fn(value: NodeKind, flat: &BodyFlat) -> NodeKind Never! {
     if value == {
         .IntLit(f_value, f_width) -> NodeKind.IntLit{value: f_value, width: f_width}
         .FloatLit(f_value) -> NodeKind.FloatLit{value: f_value}
@@ -1427,7 +1427,7 @@ fn body_copy_expr_kind(value: NodeKind, flat: &BodyFlat) -> NodeKind Never! {
     }
 }
 
-fn body_copy_struct_field_value(value: BodyStructFieldValue, flat: &BodyFlat) -> BodyStructFieldValue Never! {
+body_copy_struct_field_value: fn(value: BodyStructFieldValue, flat: &BodyFlat) -> BodyStructFieldValue Never! {
     BodyStructFieldValue{
         field: value.field,
         value: body_copy_expr(value.value, &flat),
@@ -1435,21 +1435,21 @@ fn body_copy_struct_field_value(value: BodyStructFieldValue, flat: &BodyFlat) ->
     }
 }
 
-fn body_copy_map_entry(value: BodyMapEntry, flat: &BodyFlat) -> BodyMapEntry Never! {
+body_copy_map_entry: fn(value: BodyMapEntry, flat: &BodyFlat) -> BodyMapEntry Never! {
     BodyMapEntry{
         key: body_copy_expr(value.key, &flat),
         value: body_copy_expr(value.value, &flat),
     }
 }
 
-fn body_copy_list_spread_part(value: BodyListSpreadPart, flat: &BodyFlat) -> BodyListSpreadPart Never! {
+body_copy_list_spread_part: fn(value: BodyListSpreadPart, flat: &BodyFlat) -> BodyListSpreadPart Never! {
     if value == {
         .Element(f_value) -> BodyListSpreadPart.Element{value: body_copy_expr(f_value, &flat)}
         .Spread(f_value) -> BodyListSpreadPart.Spread{value: body_copy_expr(f_value, &flat)}
     }
 }
 
-fn body_copy_scope_member_kind(value: BodyScopeMemberKind, flat: &BodyFlat) -> BodyScopeMemberKind Never! {
+body_copy_scope_member_kind: fn(value: BodyScopeMemberKind, flat: &BodyFlat) -> BodyScopeMemberKind Never! {
     if value == {
         .Setup -> BodyScopeMemberKind.Setup
         .ExpectFail(f_code, f_message) -> BodyScopeMemberKind.ExpectFail{code: f_code, message: f_message}
@@ -1459,7 +1459,7 @@ fn body_copy_scope_member_kind(value: BodyScopeMemberKind, flat: &BodyFlat) -> B
     }
 }
 
-fn body_copy_or_fallback(value: BodyOrFallback, flat: &BodyFlat) -> BodyOrFallback Never! {
+body_copy_or_fallback: fn(value: BodyOrFallback, flat: &BodyFlat) -> BodyOrFallback Never! {
     if value == {
         .Value(f_value) -> BodyOrFallback.Value{value: body_copy_expr(f_value, &flat)}
         .Return(f_value) -> BodyOrFallback.Return{value: body_copy_opt_expr(f_value, &flat)}
@@ -1471,7 +1471,7 @@ fn body_copy_or_fallback(value: BodyOrFallback, flat: &BodyFlat) -> BodyOrFallba
     }
 }
 
-fn body_copy_host_call(value: BodyHostCall, flat: &BodyFlat) -> BodyHostCall Never! {
+body_copy_host_call: fn(value: BodyHostCall, flat: &BodyFlat) -> BodyHostCall Never! {
     if value == {
         .Method(f_receiver, f_method, f_args) -> BodyHostCall.Method{receiver: body_copy_expr(f_receiver, &flat), method: f_method, args: body_copy_list_expr(f_args, &flat)}
         .CellGuardProject(f_receiver, f_paths, f_result_type, f_editable, f_edit_paths_disjoint) -> BodyHostCall.CellGuardProject{receiver: body_copy_expr(f_receiver, &flat), paths: f_paths, result_type: f_result_type, editable: f_editable, edit_paths_disjoint: f_edit_paths_disjoint}
@@ -1485,7 +1485,7 @@ fn body_copy_host_call(value: BodyHostCall, flat: &BodyFlat) -> BodyHostCall Nev
     }
 }
 
-fn body_copy_core_closure_kind(value: BodyCoreClosureKind, flat: &BodyFlat) -> BodyCoreClosureKind Never! {
+body_copy_core_closure_kind: fn(value: BodyCoreClosureKind, flat: &BodyFlat) -> BodyCoreClosureKind Never! {
     if value == {
         .Spawn(f_group, f_site, f_label, f_executable) -> BodyCoreClosureKind.Spawn{group: body_copy_opt_expr(f_group, &flat), site: f_site, label: f_label, executable: body_copy_lambda(f_executable, &flat)}
         .Realtime(f_rate, f_frames, f_executable) -> BodyCoreClosureKind.Realtime{rate: body_copy_expr(f_rate, &flat), frames: body_copy_expr(f_frames, &flat), executable: body_copy_lambda(f_executable, &flat)}
@@ -1500,7 +1500,7 @@ fn body_copy_core_closure_kind(value: BodyCoreClosureKind, flat: &BodyFlat) -> B
     }
 }
 
-fn body_copy_fn_value_kind(value: BodyFnValueKind, flat: &BodyFlat) -> BodyFnValueKind Never! {
+body_copy_fn_value_kind: fn(value: BodyFnValueKind, flat: &BodyFlat) -> BodyFnValueKind Never! {
     if value == {
         .NamedFn(f_function, f_lambda) -> BodyFnValueKind.NamedFn{function: f_function, lambda: body_copy_opt_lambda(f_lambda, &flat)}
         .Policy(f_fn_type, f_policy_args, f_policy_conventions, f_wrapper, f_captures, f_callee) -> BodyFnValueKind.Policy{fn_type: f_fn_type, policy_args: body_copy_list_call_arg(f_policy_args, &flat), policy_conventions: f_policy_conventions, wrapper: f_wrapper, captures: f_captures, callee: body_copy_expr(f_callee, &flat)}
@@ -1509,7 +1509,7 @@ fn body_copy_fn_value_kind(value: BodyFnValueKind, flat: &BodyFlat) -> BodyFnVal
     }
 }
 
-fn body_copy_handle_op(value: BodyHandleOp, flat: &BodyFlat) -> BodyHandleOp Never! {
+body_copy_handle_op: fn(value: BodyHandleOp, flat: &BodyFlat) -> BodyHandleOp Never! {
     if value == {
         .Hardware(f_operation) -> BodyHandleOp.Hardware{operation: f_operation}
         .DurationNew(f_unit, f_float) -> BodyHandleOp.DurationNew{unit: f_unit, float: f_float}
@@ -1634,7 +1634,7 @@ fn body_copy_handle_op(value: BodyHandleOp, flat: &BodyFlat) -> BodyHandleOp Nev
     }
 }
 
-fn body_copy_handle_op_1(value: BodyHandleOp, flat: &BodyFlat) -> BodyHandleOp Never! {
+body_copy_handle_op_1: fn(value: BodyHandleOp, flat: &BodyFlat) -> BodyHandleOp Never! {
     if value == {
         .UnixStreamReadDeadline -> BodyHandleOp.UnixStreamReadDeadline
         .UnixStreamWriteAllDeadline -> BodyHandleOp.UnixStreamWriteAllDeadline
@@ -1738,7 +1738,7 @@ fn body_copy_handle_op_1(value: BodyHandleOp, flat: &BodyFlat) -> BodyHandleOp N
     }
 }
 
-fn body_copy_require_kind(value: BodyRequireKind, flat: &BodyFlat) -> BodyRequireKind Never! {
+body_copy_require_kind: fn(value: BodyRequireKind, flat: &BodyFlat) -> BodyRequireKind Never! {
     if value == {
         .Require(f_cond, f_msg) -> BodyRequireKind.Require{cond: body_copy_expr(f_cond, &flat), msg: body_copy_opt_expr(f_msg, &flat)}
         .RequireEq(f_left, f_right, f_hook) -> BodyRequireKind.RequireEq{left: body_copy_expr(f_left, &flat), right: body_copy_expr(f_right, &flat), hook: f_hook}
@@ -1746,7 +1746,7 @@ fn body_copy_require_kind(value: BodyRequireKind, flat: &BodyFlat) -> BodyRequir
     }
 }
 
-fn body_copy_lambda(value: BodyLambda, flat: &BodyFlat) -> BodyLambda Never! {
+body_copy_lambda: fn(value: BodyLambda, flat: &BodyFlat) -> BodyLambda Never! {
     BodyLambda{
         executable: body_copy_lambda_body(value.executable, &flat),
         source_span: value.source_span,
@@ -1770,154 +1770,154 @@ fn body_copy_lambda(value: BodyLambda, flat: &BodyFlat) -> BodyLambda Never! {
     }
 }
 
-fn body_copy_lambda_body(value: BodyLambdaBody, flat: &BodyFlat) -> BodyLambdaBody Never! {
+body_copy_lambda_body: fn(value: BodyLambdaBody, flat: &BodyFlat) -> BodyLambdaBody Never! {
     if value == {
         .Expr(f_value) -> BodyLambdaBody.Expr{value: body_copy_expr(f_value, &flat)}
         .Block(f_body) -> BodyLambdaBody.Block{body: body_copy_list_stmt(f_body, &flat)}
     }
 }
 
-fn body_copy_place(value: BodyPlace, flat: &BodyFlat) -> BodyPlace Never! {
+body_copy_place: fn(value: BodyPlace, flat: &BodyFlat) -> BodyPlace Never! {
     if value == {
         .Local(f_local) -> BodyPlace.Local{local: f_local}
         .Expr(f_value) -> BodyPlace.Expr{value: body_copy_expr(f_value, &flat)}
     }
 }
 
-fn body_copy_list_stmt(values: [Int], flat: &BodyFlat) -> [Int] Never! {
+body_copy_list_stmt: fn(values: [Int], flat: &BodyFlat) -> [Int] Never! {
     result := [Int]{}
     loop value in values -> &result.push(body_copy_stmt(value, &flat))
     result
 }
 
-fn body_copy_list_enum_arg(values: [BodyEnumArg], flat: &BodyFlat) -> [BodyEnumArg] Never! {
+body_copy_list_enum_arg: fn(values: [BodyEnumArg], flat: &BodyFlat) -> [BodyEnumArg] Never! {
     result := [BodyEnumArg]{}
     loop value in values -> &result.push(body_copy_enum_arg(value, &flat))
     result
 }
 
-fn body_copy_list_named_enum_arg(values: [BodyNamedEnumArg], flat: &BodyFlat) -> [BodyNamedEnumArg] Never! {
+body_copy_list_named_enum_arg: fn(values: [BodyNamedEnumArg], flat: &BodyFlat) -> [BodyNamedEnumArg] Never! {
     result := [BodyNamedEnumArg]{}
     loop value in values -> &result.push(body_copy_named_enum_arg(value, &flat))
     result
 }
 
-fn body_copy_list_pattern_binding(values: [BodyPatternBinding], flat: &BodyFlat) -> [BodyPatternBinding] Never! {
+body_copy_list_pattern_binding: fn(values: [BodyPatternBinding], flat: &BodyFlat) -> [BodyPatternBinding] Never! {
     result := [BodyPatternBinding]{}
     loop value in values -> &result.push(body_copy_pattern_binding(value, &flat))
     result
 }
 
-fn body_copy_opt_nested_pattern(value: BodyNestedPattern?, flat: &BodyFlat) -> BodyNestedPattern? Never! {
+body_copy_opt_nested_pattern: fn(value: BodyNestedPattern?, flat: &BodyFlat) -> BodyNestedPattern? Never! {
     if value == .Val(inner) -> return Val(body_copy_nested_pattern(inner, &flat))
     None
 }
 
-fn body_copy_list_pattern_shape(values: [BodyPatternShape], flat: &BodyFlat) -> [BodyPatternShape] Never! {
+body_copy_list_pattern_shape: fn(values: [BodyPatternShape], flat: &BodyFlat) -> [BodyPatternShape] Never! {
     result := [BodyPatternShape]{}
     loop value in values -> &result.push(body_copy_pattern_shape(value, &flat))
     result
 }
 
-fn body_copy_list_pattern_field(values: [BodyPatternField], flat: &BodyFlat) -> [BodyPatternField] Never! {
+body_copy_list_pattern_field: fn(values: [BodyPatternField], flat: &BodyFlat) -> [BodyPatternField] Never! {
     result := [BodyPatternField]{}
     loop value in values -> &result.push(body_copy_pattern_field(value, &flat))
     result
 }
 
-fn body_copy_list_map_pattern_entry(values: [BodyMapPatternEntry], flat: &BodyFlat) -> [BodyMapPatternEntry] Never! {
+body_copy_list_map_pattern_entry: fn(values: [BodyMapPatternEntry], flat: &BodyFlat) -> [BodyMapPatternEntry] Never! {
     result := [BodyMapPatternEntry]{}
     loop value in values -> &result.push(body_copy_map_pattern_entry(value, &flat))
     result
 }
 
-fn body_copy_list_contract(values: [BodyContract], flat: &BodyFlat) -> [BodyContract] Never! {
+body_copy_list_contract: fn(values: [BodyContract], flat: &BodyFlat) -> [BodyContract] Never! {
     result := [BodyContract]{}
     loop value in values -> &result.push(body_copy_contract(value, &flat))
     result
 }
 
-fn body_copy_opt_stmt(value: Int?, flat: &BodyFlat) -> Int? Never! {
+body_copy_opt_stmt: fn(value: Int?, flat: &BodyFlat) -> Int? Never! {
     if value == .Val(inner) -> return Val(body_copy_stmt(inner, &flat))
     None
 }
 
-fn body_copy_opt_expr(value: Int?, flat: &BodyFlat) -> Int? Never! {
+body_copy_opt_expr: fn(value: Int?, flat: &BodyFlat) -> Int? Never! {
     if value == .Val(inner) -> return Val(body_copy_expr(inner, &flat))
     None
 }
 
-fn body_copy_opt_unit_rounding(value: BodyUnitRounding?, flat: &BodyFlat) -> BodyUnitRounding? Never! {
+body_copy_opt_unit_rounding: fn(value: BodyUnitRounding?, flat: &BodyFlat) -> BodyUnitRounding? Never! {
     if value == .Val(inner) -> return Val(BodyUnitRounding{mode: inner.mode, digits: body_copy_expr(inner.digits, &flat)})
     None
 }
 
-fn body_copy_opt_list_stmt(value: [Int]?, flat: &BodyFlat) -> [Int]? Never! {
+body_copy_opt_list_stmt: fn(value: [Int]?, flat: &BodyFlat) -> [Int]? Never! {
     if value == .Val(inner) -> return Val(body_copy_list_stmt(inner, &flat))
     None
 }
 
-fn body_copy_list_match_arm(values: [BodyMatchArm], flat: &BodyFlat) -> [BodyMatchArm] Never! {
+body_copy_list_match_arm: fn(values: [BodyMatchArm], flat: &BodyFlat) -> [BodyMatchArm] Never! {
     result := [BodyMatchArm]{}
     loop value in values -> &result.push(body_copy_match_arm(value, &flat))
     result
 }
 
-fn body_copy_list_range_arm(values: [BodyRangeArm], flat: &BodyFlat) -> [BodyRangeArm] Never! {
+body_copy_list_range_arm: fn(values: [BodyRangeArm], flat: &BodyFlat) -> [BodyRangeArm] Never! {
     result := [BodyRangeArm]{}
     loop value in values -> &result.push(body_copy_range_arm(value, &flat))
     result
 }
 
-fn body_copy_list_mixed_arm(values: [BodyMixedArm], flat: &BodyFlat) -> [BodyMixedArm] Never! {
+body_copy_list_mixed_arm: fn(values: [BodyMixedArm], flat: &BodyFlat) -> [BodyMixedArm] Never! {
     result := [BodyMixedArm]{}
     loop value in values -> &result.push(body_copy_mixed_arm(value, &flat))
     result
 }
 
-fn body_copy_list_context_guard(values: [BodyContextGuard], flat: &BodyFlat) -> [BodyContextGuard] Never! {
+body_copy_list_context_guard: fn(values: [BodyContextGuard], flat: &BodyFlat) -> [BodyContextGuard] Never! {
     result := [BodyContextGuard]{}
     loop value in values -> &result.push(body_copy_context_guard(value, &flat))
     result
 }
 
-fn body_copy_list_str_part(values: [BodyStrPart], flat: &BodyFlat) -> [BodyStrPart] Never! {
+body_copy_list_str_part: fn(values: [BodyStrPart], flat: &BodyFlat) -> [BodyStrPart] Never! {
     result := [BodyStrPart]{}
     loop value in values -> &result.push(body_copy_str_part(value, &flat))
     result
 }
 
-fn body_copy_list_call_arg(values: [BodyCallArg], flat: &BodyFlat) -> [BodyCallArg] Never! {
+body_copy_list_call_arg: fn(values: [BodyCallArg], flat: &BodyFlat) -> [BodyCallArg] Never! {
     result := [BodyCallArg]{}
     loop value in values -> &result.push(body_copy_call_arg(value, &flat))
     result
 }
 
-fn body_copy_list_expr(values: [Int], flat: &BodyFlat) -> [Int] Never! {
+body_copy_list_expr: fn(values: [Int], flat: &BodyFlat) -> [Int] Never! {
     result := [Int]{}
     loop value in values -> &result.push(body_copy_expr(value, &flat))
     result
 }
 
-fn body_copy_list_struct_field_value(values: [BodyStructFieldValue], flat: &BodyFlat) -> [BodyStructFieldValue] Never! {
+body_copy_list_struct_field_value: fn(values: [BodyStructFieldValue], flat: &BodyFlat) -> [BodyStructFieldValue] Never! {
     result := [BodyStructFieldValue]{}
     loop value in values -> &result.push(body_copy_struct_field_value(value, &flat))
     result
 }
 
-fn body_copy_list_map_entry(values: [BodyMapEntry], flat: &BodyFlat) -> [BodyMapEntry] Never! {
+body_copy_list_map_entry: fn(values: [BodyMapEntry], flat: &BodyFlat) -> [BodyMapEntry] Never! {
     result := [BodyMapEntry]{}
     loop value in values -> &result.push(body_copy_map_entry(value, &flat))
     result
 }
 
-fn body_copy_list_list_spread_part(values: [BodyListSpreadPart], flat: &BodyFlat) -> [BodyListSpreadPart] Never! {
+body_copy_list_list_spread_part: fn(values: [BodyListSpreadPart], flat: &BodyFlat) -> [BodyListSpreadPart] Never! {
     result := [BodyListSpreadPart]{}
     loop value in values -> &result.push(body_copy_list_spread_part(value, &flat))
     result
 }
 
-fn body_copy_opt_lambda(value: BodyLambda?, flat: &BodyFlat) -> BodyLambda? Never! {
+body_copy_opt_lambda: fn(value: BodyLambda?, flat: &BodyFlat) -> BodyLambda? Never! {
     if value == .Val(inner) -> return Val(body_copy_lambda(inner, &flat))
     None
 }

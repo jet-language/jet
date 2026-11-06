@@ -18,7 +18,7 @@ use jet_foundation.[
 
 // One allowance in its module's aggregate coordinates, keyed by the source
 // file segment it sits in (the same key a located diagnostic carries).
-struct SemaLintAllowance {
+SemaLintAllowance: struct {
     lint: String
     source_path: String
     source_offset: Int
@@ -27,7 +27,7 @@ struct SemaLintAllowance {
 
 // The lint type path an `#Allow` marker names (`jet.UnusedParameter`), if it
 // is one.
-fn sema_lint_allowance_name(marker: Marker) -> String? Never! {
+sema_lint_allowance_name: fn(marker: Marker) -> String? Never! {
     if marker.name != "Allow" || marker.negated || marker.args.len() == 0 -> return None
     if marker.args[0] == .Expr(expr) {
         if expr == .Field(base, member, _, _) {
@@ -37,19 +37,19 @@ fn sema_lint_allowance_name(marker: Marker) -> String? Never! {
     None
 }
 
-fn sema_lint_allowance_push(markers: [Marker], target: Span, segments: [SemaSourceSegment], allowances: &[SemaLintAllowance]) Never! {
+sema_lint_allowance_push: fn(markers: [Marker], target: Span, segments: [SemaSourceSegment], allowances: &[SemaLintAllowance]) Never! {
     loop marker in markers {
-        lint :: sema_lint_allowance_name(marker) ?? next
-        location :: sema_source_location_at(segments, target) ?? next
+        lint: sema_lint_allowance_name(marker) ?? next
+        location: sema_source_location_at(segments, target) ?? next
         &allowances.push(SemaLintAllowance{lint: lint, source_path: location.source_path, source_offset: location.aggregate_start, target: target})
     }
 }
 
-fn sema_lint_allowance_functions(functions: [Func], segments: [SemaSourceSegment], allowances: &[SemaLintAllowance]) Never! {
+sema_lint_allowance_functions: fn(functions: [Func], segments: [SemaSourceSegment], allowances: &[SemaLintAllowance]) Never! {
     loop function in functions -> sema_lint_allowance_push(function.markers, function.span, segments, &allowances)
 }
 
-fn sema_lint_allowance_item(item: Item, segments: [SemaSourceSegment], allowances: &[SemaLintAllowance]) Never! {
+sema_lint_allowance_item: fn(item: Item, segments: [SemaSourceSegment], allowances: &[SemaLintAllowance]) Never! {
     if item == {
         .Func(function) -> sema_lint_allowance_push(function.markers, function.span, segments, &allowances)
         .Struct(definition) -> {
@@ -78,22 +78,22 @@ fn sema_lint_allowance_item(item: Item, segments: [SemaSourceSegment], allowance
 
 // Every allowance a module's program writes: the statement rung is the
 // parser's applied rule with its statement target.
-fn sema_lint_allowances(program: Program, segments: [SemaSourceSegment], allowances: &[SemaLintAllowance]) Never! {
+sema_lint_allowances: fn(program: Program, segments: [SemaSourceSegment], allowances: &[SemaLintAllowance]) Never! {
     loop application in program.applied_rules {
         if application.site != Val(RuleSite.Statement) -> next
-        target :: application.target ?? next
+        target: application.target ?? next
         sema_lint_allowance_push([Marker]{application.marker}, target, segments, &allowances)
     }
     loop item in program.items -> sema_lint_allowance_item(item, segments, &allowances)
 }
 
 // Whether a located lint diagnostic falls inside an allowance for its lint.
-fn sema_lint_allowed(diagnostic: Diagnostic, allowances: [SemaLintAllowance]) -> Bool Never! {
+sema_lint_allowed: fn(diagnostic: Diagnostic, allowances: [SemaLintAllowance]) -> Bool Never! {
     if diagnostic.severity != DIAGNOSTIC_LINT || allowances.len() == 0 -> return false
-    span :: diagnostic.span ?? return false
-    path :: diagnostic.source_path ?? return false
-    offset :: diagnostic.source_offset ?? return false
-    lint :: diagnostic_display_name(diagnostic.code)
+    span: diagnostic.span ?? return false
+    path: diagnostic.source_path ?? return false
+    offset: diagnostic.source_offset ?? return false
+    lint: diagnostic_display_name(diagnostic.code)
     loop allowance in allowances {
         if allowance.lint == lint && allowance.source_path == path && allowance.source_offset == offset && allowance.target.start <= span.start && span.end <= allowance.target.end -> return true
     }

@@ -3,9 +3,9 @@
 // failures collapse into one card per root cause, run the verb, and flush
 // the collected cards when the invocation closes.
 
-fn cli_run(args: [String]) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
-    invocation :: terminal_begin_invocation()
-    code :: cli_main(args, invocation)
+cli_run: fn(args: [String]) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+    invocation: terminal_begin_invocation()
+    code: cli_main(args, invocation)
     close(^invocation)
     code
 }

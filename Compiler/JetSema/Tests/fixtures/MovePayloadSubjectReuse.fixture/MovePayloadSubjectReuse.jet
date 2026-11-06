@@ -1,17 +1,17 @@
 // `^p` takes the payload out of its subject: the subject is partially moved,
 // so reading it whole afterwards is E0121.
-enum Slot {
+Slot: enum {
     Full(items: [Int])
     Empty
 }
 
-fn keep(items: ^[Int]) -> Int { items.len() }
+keep: fn(items: ^[Int]) -> Int { items.len() }
 
-fn reuse(slot: ^Slot) -> Int {
+reuse: fn(slot: ^Slot) -> Int {
     total := 0
     if slot == .Full(items) -> total = keep(^items)
     if slot == .Full(again) -> total += again.len()
     total
 }
 
-fn run() { print(reuse(Slot.Full{items: [Int]{1}})) }
+run: fn() { print(reuse(Slot.Full{items: [Int]{1}})) }

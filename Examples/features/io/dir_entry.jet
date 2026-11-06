@@ -1,25 +1,25 @@
 // 86 — D-LSDIR1: fs.list_dir returns [DirEntry] ({name, path, is_dir}).
 // Path.join(name) builds portable paths for experts who need finer control.
-package {
+package: {
     name: "dir_entry"
     authority: { allow: [FS.Read, FS.Write, IO, Mem.Alloc] }
 }
 
-use fs :: core.files
+use fs: core.files
 
-fn run() {
-    dir :: "/tmp/jet_lsdir_demo"
+run: fn() {
+    dir: "/tmp/jet_lsdir_demo"
     fs.create_dir(dir)
     fs.write(Path.from(dir).join("hello.txt"), "hi")
-    sub :: Path.from(dir).join("sub")
+    sub: Path.from(dir).join("sub")
     fs.create_dir(sub)
-    entries :: fs.list_dir(dir)
+    entries: fs.list_dir(dir)
     loop entry in entries {
         if {
             entry.is_dir -> { print("dir:  {entry.name}") }
             else -> { print("file: {entry.name}") }
         }
     }
-    joined :: Path.from(dir).join("hello.txt")
+    joined: Path.from(dir).join("hello.txt")
     print(fs.exists(joined))
 }

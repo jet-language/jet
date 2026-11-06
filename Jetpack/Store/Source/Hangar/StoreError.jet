@@ -7,7 +7,7 @@
 // Hangar callers lift those failures through the canonical IO conversion.
 
 #Error
-enum StoreError {
+StoreError: enum {
     IO(IOError)
     NotFound(String)
     InvalidData(String)
@@ -21,7 +21,7 @@ enum StoreError {
     LifecycleConflict(expected: String?, current: String?)
     Other(String)
 
-    fn message(self) -> String Never! {
+    message: fn(self) -> String Never! {
         if self == {
             .IO(error) -> "{error}"
             .NotFound(text) -> text
@@ -37,7 +37,7 @@ enum StoreError {
     }
 
     // Rust `error.kind() == ErrorKind::NotFound`.
-    fn is_not_found(self) -> Bool Never! {
+    is_not_found: fn(self) -> Bool Never! {
         if self == {
             .NotFound(_) -> true
             .IO(error) -> if error == {
@@ -49,7 +49,7 @@ enum StoreError {
     }
 
     // Rust `error.kind() == ErrorKind::AlreadyExists`.
-    fn is_already_exists(self) -> Bool Never! {
+    is_already_exists: fn(self) -> Bool Never! {
         if self == {
             .AlreadyExists(_) -> true
             .LifecycleConflict(_, _) -> true
@@ -63,7 +63,7 @@ enum StoreError {
 
     // Rust `io::Error::new(error.kind(), text)`: keep the kind, replace the
     // message.
-    fn with_message(self, text: String) -> StoreError Never! {
+    with_message: fn(self, text: String) -> StoreError Never! {
         if self == {
             .NotFound(_) -> StoreError.NotFound(text)
             .InvalidData(_) -> StoreError.InvalidData(text)

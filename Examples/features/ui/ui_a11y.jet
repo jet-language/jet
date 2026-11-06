@@ -1,4 +1,4 @@
-package {
+package: {
     name: "ui_ui_a11y"
     version: "0.1.0"
     authority: { allow: [Browser, Exec, IO, Mem.Alloc] }
@@ -10,22 +10,22 @@ package {
 // interactive node has a distinct, non-empty label — so `jet lint --a11y`
 // on this file finds nothing. See tests/ui_lint/a11y_* for what a real
 // violation looks like (E2930 unlabeled control, E2931 duplicate label).
-use ui :: core.ui
+use ui: core.ui
 
-fn run() {
-    backend :: ui.null_backend()
-    save :: ui.node_role("Save", 40.0, 10.0, ui.aria_role_button())
-    cancel :: ui.node_role("Cancel", 40.0, 10.0, ui.aria_role_button())
+run: fn() {
+    backend: ui.null_backend()
+    save: ui.node_role("Save", 40.0, 10.0, ui.aria_role_button())
+    cancel: ui.node_role("Cancel", 40.0, 10.0, ui.aria_role_button())
     backend.set_focus_group([save, cancel])
     print(backend.focused_label())
-    tab :: ui.key_event("Tab")
+    tab: ui.key_event("Tab")
     backend.on_event(tab)
     print(backend.focused_label())
     backend.on_event(tab)
     print(backend.focused_label())
     backend.on_event(tab)
     print(backend.focused_label())
-    enter :: ui.key_event("enter")
-    result :: backend.on_event(enter)
+    enter: ui.key_event("enter")
+    result: backend.on_event(enter)
     print(result)
 }

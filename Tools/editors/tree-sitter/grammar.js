@@ -21,9 +21,9 @@ const JET_HIGHLIGHT_LITERAL = ["Cancelled", "DeadlineBlown", "None", "Panicked",
 const JET_HIGHLIGHT_TYPE_BUILTIN = ["()", "BTreeMap", "Bits", "Bool", "Budget", "BudgetApplies", "Bytes", "CSV", "Cache", "Char", "Complex", "Computed", "Condition", "DBValue", "Decimal", "Derived", "Duration", "Dyn", "Effect", "EncodingError", "Err", "Event", "EventPolicy", "EventScope", "EventTrace", "F32", "F64", "Float", "HashMap", "Hook", "I16", "I32", "I64", "I8", "IOError", "Instant", "Int", "Iter", "JSON", "Key", "Measurement", "MemoStats", "PriorityQueue", "Ptr", "Queue", "Rank", "Receiver", "Sender", "Set", "Shared", "Shared.Weak", "SharedGuard", "SharedRevisionError", "SharedSnapshot", "Signal", "Stream", "String", "Subscription", "TOML", "Task", "TaskFailure", "U16", "U32", "U64", "U8", "UTF8Error", "ViewIter", "WatchEvent", "WatchHandle", "WatchSet", "YAML"];
 const JET_HIGHLIGHT_BUILTIN = ["assert", "assert_eq", "channel", "check", "freeze", "input", "join", "print"];
 const JET_HIGHLIGHT_MARKER_RULE = ["ABI", "Allow", "Arithmetic", "Bindgen", "CLI", "Close", "Codable", "CodableAsBase", "Commutative", "Comparable", "Context", "Debug", "DebugOnly", "Decode", "DenyUnknownFields", "Deprecated", "DevPanel", "Discriminant", "Doc", "Encode", "Env", "Equatable", "Error", "Every", "FFI", "FX", "Flag", "Flatten", "HTML", "Impure", "Inline", "Interrupt", "Job", "Kernel", "Layout", "Live", "Local", "Memo", "Meta", "MustUse", "NoPrelude", "Nondeterministic", "Numeric", "Off", "Patchable", "Persist", "Policy", "Post", "Pre", "Printable", "PublishedSchema", "Reactive", "Receipt", "Redact", "Region", "Rename", "RenameAll", "Replayable", "Root", "SQL", "Scalar", "Scrub", "Shared", "Shield", "Short", "SingleUse", "Skip", "State", "Static", "Target", "Test", "Todo", "Track", "Transact", "Transition", "Undo", "UnitFamily", "Unsafe", "Untagged", "WasmExport", "wire"];
-const JET_HIGHLIGHT_SIGIL = ["#", "$", "&", "...", "::", ":=", ":>", "<:", "^"];
+const JET_HIGHLIGHT_SIGIL = ["#", "$", "&", "...", ":", ":=", ":>", "<:", "^"];
 const JET_HIGHLIGHT_OPERATOR = ["!", "!=", "%", "%%", "%%=", "%=", "&&", "*", "*=", "+", "+=", "-", "-=", "->", "..", "..<", ".[", "/", "/%", "/%=", "/=", "<", "<<", "<<=", "<=", "<=>", "==", ">", ">=", ">>", ">>=", "?", "?.", "??", "|", "||"];
-const JET_MARKER_INBODY_SEPARATOR = "::";
+const JET_MARKER_INBODY_SEPARATOR = ":";
 // END GENERATED JET SYNTAX HIGHLIGHTS
 
 
@@ -76,6 +76,11 @@ module.exports = grammar({
   extras: ($) => [/\s/, ";", $.line_comment, $.doc_comment, $.block_comment],
 
   conflicts: ($) => [
+    // Before a kind word, `name:` and `owner.name:` head a declaration;
+    // elsewhere `name:` is a label and `owner.name` a member read.
+    [$._element, $._decl_label],
+    [$._label_name, $._decl_label],
+    [$.label, $._decl_label],
     // `[K: V]` is a map type; any other bracket group is a list/index/type list.
     [$._type, $._element],
     // `subject ? ok -> … ! error -> …` versus a lone postfix `?` (`T?`) that
@@ -149,20 +154,16 @@ module.exports = grammar({
       ),
 
     // ── Declarations ─────────────────────────────────────────────────────────
-    // `fn name<T>(params) -> Ret E! -[Effects]> { body }`; a signature with no
+    // Every declaration is `name: value` (D-DECL-COLON1=A).
+    // `name: fn<T>(params) -> Ret E! -[Effects]> { body }`; a signature with no
     // body (trait methods) or an extern `= "symbol"` ends at the first
     // non-signature element. `fn(Int) -> Int` is the anonymous function type.
     function_def: ($) =>
       prec.right(
         seq(
+          // `Point.render: fn(self)` defines a method of an existing type.
+          optional($._decl_label),
           "fn",
-          optional(
-            seq(
-              // `fn Point.render(self)` defines a method of an existing type.
-              optional(seq(field("owner", $.type_identifier), ".")),
-              field("name", choice($.identifier, $.type_identifier, $.meta_name)),
-            ),
-          ),
           optional(field("type_parameters", $.type_parameters)),
           field("parameters", $.parameters),
           repeat($._signature_part),
@@ -241,16 +242,21 @@ module.exports = grammar({
         ),
       ),
 
-    // `module name { … }`, `module name<types>(values) { … }`.
-    module_def: ($) =>
-      prec.right(
+    // `name: module { … }`, `name: module<types>(values) { … }`, and the C
+    // import `#Import c.lib: module { … }`.
+    module_def: ($) => declaration($, "module"),
+
+    // `name:`, `Type.name:`, `c.lib:` before a declaration kind word.
+    _decl_label: ($) =>
+      prec.dynamic(PREC.binding, choice(
+        prec(PREC.label, seq(field("name", choice($._label_name, $.type_identifier, $.meta_name)), ":")),
         seq(
-          "module",
-          field("name", choice($.identifier, $.type_identifier)),
-          repeat($._head_part),
-          optional(field("body", $.block)),
+          field("owner", choice($.type_identifier, $.identifier)),
+          ".",
+          field("name", choice($._label_name, $.type_identifier, $.meta_name)),
+          ":",
         ),
-      ),
+      )),
 
     _head_name: ($) => choice($.type_identifier, $.primitive_type, $.identifier, $.meta_name),
 
@@ -266,23 +272,24 @@ module.exports = grammar({
       ),
 
     // ── Bindings, labels, calls, members ─────────────────────────────────────
-    // `name :: value`, `name := value`, `LIMIT :: comptime { … }`, `outer :: loop`.
+    // `name := value`; the immutable `name: value`, `LIMIT: comptime { … }` and
+    // `outer: loop` are labels.
     binding: ($) =>
       prec(
         PREC.binding,
         seq(
           field("name", choice($.identifier, $.type_identifier, $.lower_attribute, $.meta_name)),
-          choice("::", ":="),
+          ":=",
         ),
       ),
 
-    // `#X :: value` written inside a declaration's body: one of that
+    // `#X: value` written inside a declaration's body: one of that
     // declaration's markers, the same as `#X(value)` above it.
     inbody_marker: ($) =>
       prec(PREC.binding, seq(field("name", $.attribute), JET_MARKER_INBODY_SEPARATOR)),
 
-    // `field: Type`, `key: value`, named arguments and manifest keys.
-    label: ($) => prec(PREC.label, seq(field("name", $._label_name), ":")),
+    // `field: Type`, `key: value`, `LIMIT: 10`, named arguments and manifest keys.
+    label: ($) => prec(PREC.label, seq(field("name", choice($._label_name, $.type_identifier)), ":")),
 
     // Reserved words still name record fields and arguments (`tag: "x"`).
     _label_name: ($) =>
@@ -524,7 +531,7 @@ module.exports = grammar({
   },
 });
 
-// A delimiter that must touch the previous token (`f(`, `Type{`, `fn f<T>`),
+// A delimiter that must touch the previous token (`f(`, `Type{`, `f: fn<T>`),
 // shown in the tree as the ordinary delimiter.
 function IMM(text) {
   return alias(token.immediate(text), text);
@@ -542,12 +549,12 @@ function LBRACE() {
   return choice("{", IMM("{"));
 }
 
-// `struct Name<T>: Bound { … }` — keyword, name, head parts, optional body.
+// `Name: struct<T> { … }` — name path, keyword, head parts, optional body.
 function declaration($, keyword) {
   return prec.right(
     seq(
+      optional($._decl_label),
       keyword,
-      field("name", $._head_name),
       repeat($._head_part),
       optional(field("body", $.block)),
     ),

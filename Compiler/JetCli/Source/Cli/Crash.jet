@@ -9,21 +9,21 @@
 // the side file's location table (JetBackend Image/Jetline.jet). The text
 // before and after the report passes through.
 use {
-    cli_files :: core.files
-    cli_term :: core.term
+    cli_files: core.files
+    cli_term: core.term
     jet_backend.[X64Jetline, X64JetlineFunction, x64_jetline_find, x64_jetline_line, x64_jetline_read]
     jet_driver.[JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR]
     jet_foundation.[diagnostic_registry_row, diagnostic_stop_footer, diagnostic_stop_line]
 }
 
-JET_CLI_CRASH_BUILD :: "Build "
-JET_CLI_CRASH_NAMES :: " (names and lines: jet crash)"
-JET_CLI_CRASH_FRAME :: "  0x"
+JET_CLI_CRASH_BUILD: "Build "
+JET_CLI_CRASH_NAMES: " (names and lines: jet crash)"
+JET_CLI_CRASH_FRAME: "  0x"
 
-fn jet_cli_crash(args: [String], color: Bool) -[FS, Env, IO]> JetCLIPlan Never! {
+jet_cli_crash: fn(args: [String], color: Bool) -[FS, Env, IO]> JetCLIPlan Never! {
     if args.len() > 1 -> return jet_cli_fail("E2104", "`jet crash` takes no arguments, but got `{args[1]}`", jet_cli_why("E2104"), "Pipe the report in instead: `jet crash < report.txt`.", color, JET_DRIVER_EXIT_USAGE)
-    text :: cli_term.read_all_input() ?? return jet_cli_fail("E2105", "failed to read from stdin", jet_cli_why("E2105"), "correct the named problem, then run the command again", color, JET_DRIVER_EXIT_USAGE)
-    lines :: text.split("\n").to_list()
+    text: cli_term.read_all_input() ?? return jet_cli_fail("E2105", "failed to read from stdin", jet_cli_why("E2105"), "correct the named problem, then run the command again", color, JET_DRIVER_EXIT_USAGE)
+    lines: text.split("\n").to_list()
     build := -1
     loop k in 1..<lines.len() {
         if jet_cli_crash_build_id(lines[k]) != .None {
@@ -32,14 +32,14 @@ fn jet_cli_crash(args: [String], color: Bool) -[FS, Env, IO]> JetCLIPlan Never! 
         }
     }
     if build < 0 {
-        row :: diagnostic_registry_row("E2114") ?? panic("E2114 is not registered")
+        row: diagnostic_registry_row("E2114") ?? panic("E2114 is not registered")
         return jet_cli_fail("E2114", row.what, row.why, row.fix, color, JET_DRIVER_EXIT_USER_ERROR)
     }
-    id :: jet_cli_crash_build_id(lines[build]) ?? ""
-    store :: ".jet/symbols/.build-id/{id.slice(0, 2)}/{id.slice(2, id.len())}.debug"
-    side :: jet_cli_crash_side(store) ?? return jet_cli_crash_missing(id, color)
-    bytes :: cli_files.read_bytes(side) ?? return jet_cli_fail("E2105", "couldn't read the debug info `{side}`: {err}", jet_cli_why("E2105"), "check that the file is readable, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
-    table :: x64_jetline_read(bytes) ?? return jet_cli_fail("E2105", "the debug info `{side}` has no `.debug_jetline` location table", jet_cli_why("E2105"), "rebuild the program with `jet build --release` to save its debug info again", color, JET_DRIVER_EXIT_USER_ERROR)
+    id: jet_cli_crash_build_id(lines[build]) ?? ""
+    store: ".jet/symbols/.build-id/{id.slice(0, 2)}/{id.slice(2, id.len())}.debug"
+    side: jet_cli_crash_side(store) ?? return jet_cli_crash_missing(id, color)
+    bytes: cli_files.read_bytes(side) ?? return jet_cli_fail("E2105", "couldn't read the debug info `{side}`: {err}", jet_cli_why("E2105"), "check that the file is readable, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
+    table: x64_jetline_read(bytes) ?? return jet_cli_fail("E2105", "the debug info `{side}` has no `.debug_jetline` location table", jet_cli_why("E2105"), "rebuild the program with `jet build --release` to save its debug info again", color, JET_DRIVER_EXIT_USER_ERROR)
     // The report's frames: its backtrace's addresses, the first the faulting
     // instruction, the rest return addresses.
     at := build + 1
@@ -49,49 +49,49 @@ fn jet_cli_crash(args: [String], color: Bool) -[FS, Env, IO]> JetCLIPlan Never! 
         backtrace = true
         at += 1
         loop at < lines.len() {
-            address :: jet_cli_crash_frame(lines[at]) ?? break
+            address: jet_cli_crash_frame(lines[at]) ?? break
             &addresses.push(address)
             at += 1
         }
     }
-    head :: lines[build - 1]
-    report :: if head.starts_with(jet_cli_crash_stop_head()) -> jet_cli_crash_stop(head, addresses, table) else -> jet_cli_crash_fault(head, backtrace, addresses, table)
-    before :: jet_cli_prefix(lines, build - 1)
-    after :: jet_cli_tail(lines, at)
-    leading :: if before.len() == 0 -> "" else -> "{before.join("\n")}\n"
+    head: lines[build - 1]
+    report: if head.starts_with(jet_cli_crash_stop_head()) -> jet_cli_crash_stop(head, addresses, table) else -> jet_cli_crash_fault(head, backtrace, addresses, table)
+    before: jet_cli_prefix(lines, build - 1)
+    after: jet_cli_tail(lines, at)
+    leading: if before.len() == 0 -> "" else -> "{before.join("\n")}\n"
     jet_cli_done("{leading}{report}{after.join("\n")}", "", JET_DRIVER_EXIT_OK)
 }
 
-fn jet_cli_crash_missing(id: String, color: Bool) -> JetCLIPlan Never! {
-    row :: diagnostic_registry_row("E2115") ?? panic("E2115 is not registered")
+jet_cli_crash_missing: fn(id: String, color: Bool) -> JetCLIPlan Never! {
+    row: diagnostic_registry_row("E2115") ?? panic("E2115 is not registered")
     jet_cli_fail("E2115", row.what.replace("{{build}}", id), row.why, row.fix, color, JET_DRIVER_EXIT_USER_ERROR)
 }
 
 // The address of a backtrace line, `  0x<hex>`.
-fn jet_cli_crash_frame(line: String) -> Int? Never! {
+jet_cli_crash_frame: fn(line: String) -> Int? Never! {
     if !line.starts_with(JET_CLI_CRASH_FRAME) -> return None
     jet_cli_crash_hex(line.slice(JET_CLI_CRASH_FRAME.len(), line.len()))
 }
 
 // The build id of a `Build <id> (names and lines: jet crash)` line: 40
 // lowercase hex digits.
-fn jet_cli_crash_build_id(line: String) -> String? Never! {
+jet_cli_crash_build_id: fn(line: String) -> String? Never! {
     if !line.starts_with(JET_CLI_CRASH_BUILD) || !line.ends_with(JET_CLI_CRASH_NAMES) -> return None
-    id :: line.slice(JET_CLI_CRASH_BUILD.len(), line.len() - JET_CLI_CRASH_NAMES.len())
+    id: line.slice(JET_CLI_CRASH_BUILD.len(), line.len() - JET_CLI_CRASH_NAMES.len())
     if id.len() != 40 -> return None
     loop byte in id.bytes() {
-        digit :: Int.from_u8(byte)
+        digit: Int.from_u8(byte)
         if !(digit >= 48 && digit <= 57) && !(digit >= 97 && digit <= 102) -> return None
     }
     Val(id)
 }
 
 // The value of lowercase hex digits; None for any other text.
-fn jet_cli_crash_hex(text: String) -> Int? Never! {
+jet_cli_crash_hex: fn(text: String) -> Int? Never! {
     if text.len() == 0 || text.len() > 16 -> return None
     value := 0
     loop byte in text.bytes() {
-        digit :: Int.from_u8(byte)
+        digit: Int.from_u8(byte)
         if digit >= 48 && digit <= 57 {
             value = value * 16 + digit - 48
         } else if digit >= 97 && digit <= 102 {
@@ -105,25 +105,25 @@ fn jet_cli_crash_hex(text: String) -> Int? Never! {
 
 // `store` under the working directory or the nearest directory above it
 // that has it.
-fn jet_cli_crash_side(store: String) -[FS, Env]> String? Never! {
+jet_cli_crash_side: fn(store: String) -[FS, Env]> String? Never! {
     current := cli_files.cwd() ?? "."
     loop {
-        path :: jet_cli_entry_join(current, store)
+        path: jet_cli_entry_join(current, store)
         if cli_files.is_file(path) -> return Val(path)
         current = jet_cli_parent(current) ?? return None
     }
 }
 
 // The E3012 row's What, for the function `name`.
-fn jet_cli_crash_stop_what(name: String) -> String Never! {
-    row :: diagnostic_registry_row("E3012") ?? panic("E3012 is not registered")
+jet_cli_crash_stop_what: fn(name: String) -> String Never! {
+    row: diagnostic_registry_row("E3012") ?? panic("E3012 is not registered")
     if !row.what.ends_with(" in `{{fn_name}}`") -> panic("E3012's What no longer ends in its function")
     row.what.replace("{{fn_name}}", name)
 }
 
 // The first words of every E3012 stop: the row's What before its function.
-fn jet_cli_crash_stop_head() -> String Never! {
-    with_name :: jet_cli_crash_stop_what("")
+jet_cli_crash_stop_head: fn() -> String Never! {
+    with_name: jet_cli_crash_stop_what("")
     diagnostic_stop_line("E3012", with_name.slice(0, with_name.len() - " in ``".len()))
 }
 
@@ -131,18 +131,18 @@ fn jet_cli_crash_stop_head() -> String Never! {
 // instruction or else at the nearest named caller, with its declaration
 // and that source line. Unnamed, or with no backtrace (`fault_report:
 // off`), the release line is the dev line.
-fn jet_cli_crash_stop(head: String, addresses: [Int], table: X64Jetline) -[FS]> String Never! {
-    footer :: diagnostic_stop_footer("E3012")
+jet_cli_crash_stop: fn(head: String, addresses: [Int], table: X64Jetline) -[FS]> String Never! {
+    footer: diagnostic_stop_footer("E3012")
     found := -1
     loop (k, address) in addresses {
         found = x64_jetline_find(table, if k == 0 -> address else -> address - 1)
         if found >= 0 -> break
     }
     if found < 0 -> return "{head}\n{footer}"
-    function :: table.functions[found]
+    function: table.functions[found]
     out := "{diagnostic_stop_line("E3012", jet_cli_crash_stop_what(function.name))}\n  --> {function.file}:{function.decl} in {function.name}\n"
     if jet_cli_crash_source(function) == .Val(source) {
-        gutter :: " ".repeat("{function.decl}".len() + 3)
+        gutter: " ".repeat("{function.decl}".len() + 3)
         out = "{out}{gutter}|\n{function.decl} | {source}\n{gutter}| ^\n"
     }
     "{out}{footer}"
@@ -150,17 +150,17 @@ fn jet_cli_crash_stop(head: String, addresses: [Int], table: X64Jetline) -[FS]> 
 
 // report.S's signal report: the first line, then, with a backtrace, the
 // faulting instruction's frame and the named callers.
-fn jet_cli_crash_fault(head: String, backtrace: Bool, addresses: [Int], table: X64Jetline) -> String Never! {
+jet_cli_crash_fault: fn(head: String, backtrace: Bool, addresses: [Int], table: X64Jetline) -> String Never! {
     if !backtrace -> return "{head}\n"
     out := "{head}\nBacktrace:\n"
     loop (k, address) in addresses {
-        pc :: if k == 0 -> address else -> address - 1
-        found :: x64_jetline_find(table, pc)
+        pc: if k == 0 -> address else -> address - 1
+        found: x64_jetline_find(table, pc)
         if found < 0 {
             if k == 0 -> out = "{out}  ??\n"
             next
         }
-        function :: table.functions[found]
+        function: table.functions[found]
         if x64_jetline_line(table, function, pc) == .Val(line) {
             out = "{out}  {function.name} at {function.file}:{line}\n"
         } else {
@@ -173,12 +173,12 @@ fn jet_cli_crash_fault(head: String, backtrace: Bool, addresses: [Int], table: X
 // `function`'s declaration line in its source file (the file under the
 // compilation directory, else as written), without trailing blanks; None
 // when it can't be read.
-fn jet_cli_crash_source(function: X64JetlineFunction) -[FS]> String? Never! {
+jet_cli_crash_source: fn(function: X64JetlineFunction) -[FS]> String? Never! {
     if function.decl < 1 -> return None
-    full :: if function.file.starts_with("/") || function.dir == "" || function.dir == "." -> function.file else -> "{function.dir}/{function.file}"
+    full: if function.file.starts_with("/") || function.dir == "" || function.dir == "." -> function.file else -> "{function.dir}/{function.file}"
     found := jet_cli_crash_bytes(full)
     if found == .None -> found = jet_cli_crash_bytes(function.file)
-    bytes :: found ?? return None
+    bytes: found ?? return None
     start := 0
     line := 1
     loop line < function.decl {
@@ -194,10 +194,10 @@ fn jet_cli_crash_source(function: X64JetlineFunction) -[FS]> String? Never! {
     Val(String.from_bytes(bytes[start..<end]) ?? return None)
 }
 
-fn jet_cli_crash_blank(byte: Int) -> Bool Never! {
+jet_cli_crash_blank: fn(byte: Int) -> Bool Never! {
     byte == 32 || byte == 9 || byte == 13
 }
 
-fn jet_cli_crash_bytes(path: String) -[FS]> [U8]? Never! {
+jet_cli_crash_bytes: fn(path: String) -[FS]> [U8]? Never! {
     Val(cli_files.read_bytes(path) ?? return None)
 }

@@ -4,28 +4,28 @@
 // those markers expanded to. Neither list is folded into the other; a capability marker
 // such as `Comparable` expands to itself.
 #Codable
-struct Order {
+Order: struct {
     id: Int
     total: Int
 }
 
 #Comparable
-OrderID :: distinct Int
+OrderID: distinct Int
 
-fn names(markers: [MarkerInfo]) -> String {
+names: fn(markers: [MarkerInfo]) -> String {
     written := [String]{}
     loop marker in markers -> &written.push(marker.name)
     written.join(",")
 }
 
-ORDER_WRITTEN :: comptime { names(Order.reflect().markers) }
-ORDER_EXPANDED :: comptime { names(Order.reflect().expanded_markers) }
-ORDER_HAS_CODABLE :: comptime { Order.reflect().has_marker("Codable") }
-ORDER_HAS_ENCODE :: comptime { Order.reflect().has_marker("Encode") }
-ID_WRITTEN :: comptime { names(OrderID.reflect().markers) }
-ID_EXPANDED :: comptime { names(OrderID.reflect().expanded_markers) }
+ORDER_WRITTEN: comptime { names(Order.reflect().markers) }
+ORDER_EXPANDED: comptime { names(Order.reflect().expanded_markers) }
+ORDER_HAS_CODABLE: comptime { Order.reflect().has_marker("Codable") }
+ORDER_HAS_ENCODE: comptime { Order.reflect().has_marker("Encode") }
+ID_WRITTEN: comptime { names(OrderID.reflect().markers) }
+ID_EXPANDED: comptime { names(OrderID.reflect().expanded_markers) }
 
-fn run() {
+run: fn() {
     print("Order written: {ORDER_WRITTEN}")
     print("Order expanded: {ORDER_EXPANDED}")
     print("Order has_marker(Codable): {ORDER_HAS_CODABLE}")

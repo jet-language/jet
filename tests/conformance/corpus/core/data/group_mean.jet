@@ -1,17 +1,17 @@
 // core-conformance: core.data.query.group_by.mean
-use data :: core.data
+use data: core.data
 
-struct Ticket {
+Ticket: struct {
     team: String
     minutes: Float
 }
 
-fn run() {
-    rows :: [Ticket]{
+run: fn() {
+    rows: [Ticket]{
         Ticket{team: "Core", minutes: 4.0},
         Ticket{team: "Core", minutes: 8.0}
     }
-    groups :: data.query(rows)
+    groups: data.query(rows)
         .group_by(ticket -> ticket.team)
         .mean(ticket -> ticket.minutes)
         .collect() ?? panic("group mean")

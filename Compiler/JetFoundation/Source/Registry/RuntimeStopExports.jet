@@ -3,7 +3,7 @@
 // Direct named calls and stop-rail hooks (_rail_code words) only; other foreign/dynamic callback effects are separate.
 // Both compiler halves consume these Panic stop facts, not returned Results.
 // The symbols land as literal data: no compile-time execution host is needed.
-RUNTIME_STOP_EXPORTS :: comptime { [String]{
+RUNTIME_STOP_EXPORTS: comptime { [String]{
     "after_value",
     "interval",
     "jet_arena_new",
@@ -2543,7 +2543,7 @@ RUNTIME_STOP_EXPORTS :: comptime { [String]{
     "rt_text_push_rust_debug_str",
 } }
 
-fn runtime_export_can_stop(symbol: String) -> Bool Never! {
+runtime_export_can_stop: fn(symbol: String) -> Bool Never! {
     loop candidate in RUNTIME_STOP_EXPORTS {
         if candidate == symbol -> return true
     }

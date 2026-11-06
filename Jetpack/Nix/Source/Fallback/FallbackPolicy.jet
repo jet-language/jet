@@ -4,31 +4,31 @@
 // publication. The gate runs before executable discovery, so `--offline`
 // cannot even inspect a Nix executable.
 use {
-    files :: core.files
-    sys :: core.sys
-    process :: core.process
-    term :: core.term
+    files: core.files
+    sys: core.sys
+    process: core.process
+    term: core.term
     jet_pkg_model.[pkg_bytes_text, pkg_json_render, pkg_lock_load]
     jetpack_nix_eval.[nixeval_key_ordered]
     jetpack_foundation.[REF_SOURCE_NIXPKGS]
 }
 
-NIX_FALLBACK_POLICY_ENV :: "JETPACK_NIX_FALLBACK_POLICY"
-NIX_FALLBACK_BIN_ENV :: "JETPACK_NIX_FALLBACK_BIN"
-NIX_FALLBACK_ALLOW_VALUE :: "allow"
-NIX_FALLBACK_RECEIPT_SCHEMA :: "jetpack.nix-fallback-policy.v1"
-NIX_FALLBACK_MAX_STDOUT_BYTES :: 67108864
-NIX_FALLBACK_MAX_STDERR_BYTES :: 16384
+NIX_FALLBACK_POLICY_ENV: "JETPACK_NIX_FALLBACK_POLICY"
+NIX_FALLBACK_BIN_ENV: "JETPACK_NIX_FALLBACK_BIN"
+NIX_FALLBACK_ALLOW_VALUE: "allow"
+NIX_FALLBACK_RECEIPT_SCHEMA: "jetpack.nix-fallback-policy.v1"
+NIX_FALLBACK_MAX_STDOUT_BYTES: 67108864
+NIX_FALLBACK_MAX_STDERR_BYTES: 16384
 // Nix environment the one-shot build must not inherit.
-NIX_FALLBACK_SCRUBBED_ENV :: [String]{"NIX_PATH", "NIX_CONFIG", "NIX_USER_CONF_FILES", "NIX_REMOTE"}
+NIX_FALLBACK_SCRUBBED_ENV: [String]{"NIX_PATH", "NIX_CONFIG", "NIX_USER_CONF_FILES", "NIX_REMOTE"}
 
-enum NixFallbackMode {
+NixFallbackMode: enum {
     Offline
     CI
     NonInteractive
     Interactive
 
-    fn label(self) -> String Never! {
+    label: fn(self) -> String Never! {
         if self == {
             .Offline -> "offline"
             .CI -> "ci"
@@ -39,7 +39,7 @@ enum NixFallbackMode {
 }
 
 // The machine-readable decision of one policy check.
-struct NixFallbackPolicyReceipt {
+NixFallbackPolicyReceipt: struct {
     mode: NixFallbackMode
     allowed: Bool
     explicit: Bool
@@ -47,7 +47,7 @@ struct NixFallbackPolicyReceipt {
     reason: String
     invocations: Int
 
-    fn json(self) -> String Never! {
+    json: fn(self) -> String Never! {
         pkg_json_render(Dyn.Object([
             "schema": Dyn.Text(NIX_FALLBACK_RECEIPT_SCHEMA),
             "mode": Dyn.Text(self.mode.label()),
@@ -60,7 +60,7 @@ struct NixFallbackPolicyReceipt {
     }
 
     // Receipt facts retained with the producer record, key-ordered.
-    fn facts(self) -> [String: String] Never! {
+    facts: fn(self) -> [String: String] Never! {
         facts := [String: String]{}
         facts["nix.fallback.policy.schema"] = NIX_FALLBACK_RECEIPT_SCHEMA
         facts["nix.fallback.policy.mode"] = self.mode.label()
@@ -74,30 +74,30 @@ struct NixFallbackPolicyReceipt {
     }
 
     // The refusal carried by a denied receipt.
-    fn refusal(self) -> NixError Never! {
+    refusal: fn(self) -> NixError Never! {
         NixError.Fallback("{self.reason}; receipt={self.json()}")
     }
 }
 
 // The captured output of one permitted local Nix build and its facts.
-struct NixFallbackRun {
+NixFallbackRun: struct {
     stdout: String
     facts: [String: String]
 }
 
 // The pure policy decision for the observed offline, CI, terminal and
 // policy-variable state.
-fn nix_fallback_decide(offline: Bool, ci: Bool, interactive: Bool, policy: String) -> NixFallbackPolicyReceipt Never! {
-    explicit :: policy != ""
-    mode :: if {
+nix_fallback_decide: fn(offline: Bool, ci: Bool, interactive: Bool, policy: String) -> NixFallbackPolicyReceipt Never! {
+    explicit: policy != ""
+    mode: if {
         offline -> NixFallbackMode.Offline
         ci -> NixFallbackMode.CI
         interactive -> NixFallbackMode.Interactive
         else -> NixFallbackMode.NonInteractive
     }
-    valid_allow :: policy == NIX_FALLBACK_ALLOW_VALUE
-    allowed :: !offline && (valid_allow || (!explicit && !ci && interactive))
-    reason :: if {
+    valid_allow: policy == NIX_FALLBACK_ALLOW_VALUE
+    allowed: !offline && (valid_allow || (!explicit && !ci && interactive))
+    reason: if {
         offline -> "--offline forbids local Nix fallback; no executable was inspected or invoked"
         policy == "deny" -> "{NIX_FALLBACK_POLICY_ENV}=deny forbids local Nix fallback"
         (ci || !interactive) && !valid_allow -> "CI and non-interactive local Nix fallback require {NIX_FALLBACK_POLICY_ENV}={NIX_FALLBACK_ALLOW_VALUE}"
@@ -115,16 +115,16 @@ fn nix_fallback_decide(offline: Bool, ci: Bool, interactive: Bool, policy: Strin
 }
 
 // The policy decision for this process's environment and terminals.
-fn nix_fallback_authorize_from_environment(offline: Bool) -[Env, IO]> NixFallbackPolicyReceipt NixError! {
-    ci :: (sys.get("CI") ?? "") != ""
-    interactive :: term.stdin().is_tty() && term.stdout().is_tty()
-    policy :: sys.get(NIX_FALLBACK_POLICY_ENV) ?? ""
-    receipt :: nix_fallback_decide(offline, ci, interactive, policy)
+nix_fallback_authorize_from_environment: fn(offline: Bool) -[Env, IO]> NixFallbackPolicyReceipt NixError! {
+    ci: (sys.get("CI") ?? "") != ""
+    interactive: term.stdin().is_tty() && term.stdout().is_tty()
+    policy: sys.get(NIX_FALLBACK_POLICY_ENV) ?? ""
+    receipt: nix_fallback_decide(offline, ci, interactive, policy)
     if !receipt.allowed -> return Err(receipt.refusal())
     Ok(receipt)
 }
 
-fn nix_fallback_allowed_from_environment(offline: Bool) -[Env, IO]> Bool Never! {
+nix_fallback_allowed_from_environment: fn(offline: Bool) -[Env, IO]> Bool Never! {
     if nix_fallback_authorize_from_environment(offline) == {
         .Ok(_) -> true
         else -> false
@@ -133,24 +133,24 @@ fn nix_fallback_allowed_from_environment(offline: Bool) -[Env, IO]> Bool Never! 
 
 // Run one exact-lock compatibility evaluation after the policy gate passes.
 // The only Nix build process is spawned after the gate.
-fn nix_fallback_run(project: String, source_name: String, revision: String, system: String, attr: [String], offline: Bool) -[FS, Env, Exec, Time.Wait, IO]> NixFallbackRun NixError! {
-    policy :: nix_fallback_authorize_from_environment(offline)
-    executable :: nix_fallback_discover_executable()
-    locked_source :: nix_fallback_locked_source_name(project, source_name, revision)
-    identity :: NixFallbackIdentity.from_project(project, locked_source, executable, system, attr)
+nix_fallback_run: fn(project: String, source_name: String, revision: String, system: String, attr: [String], offline: Bool) -[FS, Env, Exec, Time.Wait, IO]> NixFallbackRun NixError! {
+    policy: nix_fallback_authorize_from_environment(offline)
+    executable: nix_fallback_discover_executable()
+    locked_source: nix_fallback_locked_source_name(project, source_name, revision)
+    identity: NixFallbackIdentity.from_project(project, locked_source, executable, system, attr)
     if identity.nixpkgs_revision != revision -> return Err(NixError.Fallback("local Nix fallback revision differs from the catalog miss"))
-    lock_sha256 :: NixFallbackIdentity.project_lock_sha256(project, locked_source)
+    lock_sha256: NixFallbackIdentity.project_lock_sha256(project, locked_source)
     identity.validate_request(identity.locked_nixpkgs_input(), system, attr, lock_sha256)
 
     // The lock stores the exact revision as provenance; Nix's flake CLI uses
     // the same immutable revision in the path component before the attr.
-    input :: "github:NixOS/nixpkgs/{identity.nixpkgs_revision}#{identity.attrpath()}"
+    input: "github:NixOS/nixpkgs/{identity.nixpkgs_revision}#{identity.attrpath()}"
     spec := process.cmd([String]{identity.executable, "build", "--json", "--no-link", "--no-write-lock-file", "--system", identity.system, input})
     loop name in NIX_FALLBACK_SCRUBBED_ENV -> spec = spec.env_remove(name)
-    receipt :: spec.stdout(.Capture).stderr(.Capture).run() ?? return Err(NixError.Fallback("could not invoke the bound Nix executable: {err}"))
+    receipt: spec.stdout(.Capture).stderr(.Capture).run() ?? return Err(NixError.Fallback("could not invoke the bound Nix executable: {err}"))
     if receipt.output.bytes().len() > NIX_FALLBACK_MAX_STDOUT_BYTES -> return Err(NixError.Fallback("local Nix fallback output exceeded {NIX_FALLBACK_MAX_STDOUT_BYTES} bytes"))
     if !receipt.success {
-        stderr :: nix_truncate_utf8(receipt.errors.trim(), NIX_FALLBACK_MAX_STDERR_BYTES)
+        stderr: nix_truncate_utf8(receipt.errors.trim(), NIX_FALLBACK_MAX_STDERR_BYTES)
         return Err(NixError.Fallback("local Nix fallback failed with status exit status: {receipt.code}; {stderr}"))
     }
 
@@ -169,9 +169,9 @@ fn nix_fallback_run(project: String, source_name: String, revision: String, syst
 }
 
 // The lock source (`preferred`, then `nixpkgs`) pinned exactly to `revision`.
-fn nix_fallback_locked_source_name(project: String, preferred: String, revision: String) -[FS]> String NixError! {
-    expected :: "{NIX_LOCKED_NIXPKGS_PREFIX}{revision}"
-    lock :: pkg_lock_load(project) ?? return Err(NixError.Fallback("project lock is unavailable for local Nix fallback"))
+nix_fallback_locked_source_name: fn(project: String, preferred: String, revision: String) -[FS]> String NixError! {
+    expected: "{NIX_LOCKED_NIXPKGS_PREFIX}{revision}"
+    lock: pkg_lock_load(project) ?? return Err(NixError.Fallback("project lock is unavailable for local Nix fallback"))
     candidates := [String]{preferred}
     if preferred != REF_SOURCE_NIXPKGS -> &candidates.push(REF_SOURCE_NIXPKGS)
     loop name in candidates {
@@ -183,7 +183,7 @@ fn nix_fallback_locked_source_name(project: String, preferred: String, revision:
 }
 
 // `JETPACK_NIX_FALLBACK_BIN`, else the first `nix` regular file on PATH.
-fn nix_fallback_discover_executable() -[FS, Env]> String NixError! {
+nix_fallback_discover_executable: fn() -[FS, Env]> String NixError! {
     if sys.get(NIX_FALLBACK_BIN_ENV) == {
         .Val(path) -> {
             if path == "" -> return Err(NixError.Fallback("{NIX_FALLBACK_BIN_ENV} is empty"))
@@ -191,13 +191,13 @@ fn nix_fallback_discover_executable() -[FS, Env]> String NixError! {
         }
         else -> {}
     }
-    found :: files.which("nix") ?? return Err(NixError.Fallback("local Nix fallback requires an installed `nix` executable on PATH"))
+    found: files.which("nix") ?? return Err(NixError.Fallback("local Nix fallback requires an installed `nix` executable on PATH"))
     Ok(found)
 }
 
 // At most `limit` bytes of `text`, cut back to a UTF-8 scalar boundary.
-fn nix_truncate_utf8(text: String, limit: Int) -> String Never! {
-    raw :: text.bytes()
+nix_truncate_utf8: fn(text: String, limit: Int) -> String Never! {
+    raw: text.bytes()
     if raw.len() <= limit -> return text.copy()
     end := limit
     loop end > 0 && ((Int.from_u8(raw[end])).bit_and(192)) == 128 -> end -= 1

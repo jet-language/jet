@@ -1,10 +1,10 @@
 // Tests that `change note: String -> Label via { … }` (D-MIGRATE2E) unblocks a
 // type change with an inline converter. The .published.snapshot has `note: String`.
-struct Label {
+Label: struct {
     text: String
 }
 
-#PublishedSchema struct Order {
+#PublishedSchema Order: struct {
     id: Int
     note: Label
 }
@@ -13,7 +13,7 @@ migration Order {
     change note: String -> Label via { (s) -> Label{ text: s } }
 }
 
-fn run() {
-    o :: Order{id: 1, note: Label{text: "rush"}}
+run: fn() {
+    o: Order{id: 1, note: Label{text: "rush"}}
     print("{o.id}")
 }

@@ -11,24 +11,24 @@ use jetpack_publication.[
     publication_precedence, publication_semver_display, publication_version_req_display,
 ]
 
-fn publication_test_sv(text: String) -> PublicationSemVer Never! {
+publication_test_sv: fn(text: String) -> PublicationSemVer Never! {
     publication_parse_semver(text) ?? panic("invalid test version: {text}")
 }
 
-fn publication_test_req(text: String) -> PublicationVersionReq Never! {
+publication_test_req: fn(text: String) -> PublicationVersionReq Never! {
     publication_parse_version_req(text) ?? panic("invalid test requirement: {text}")
 }
 
-fn publication_test_matches(range: String, version: String) -> Bool Never! {
+publication_test_matches: fn(range: String, version: String) -> Bool Never! {
     publication_matches(publication_test_req(range), publication_test_sv(version))
 }
 
-fn publication_test_intersects(left: String, right: String) -> Bool Never! {
+publication_test_intersects: fn(left: String, right: String) -> Bool Never! {
     publication_intersects(publication_test_req(left), publication_test_req(right))
 }
 
-fn publication_test_comparator(range: String, index: Int, op: PublicationOp, version: String) Never! {
-    req :: publication_test_req(range)
+publication_test_comparator: fn(range: String, index: Int, op: PublicationOp, version: String) Never! {
+    req: publication_test_req(range)
     assert_eq(req.sets.len(), 1)
     assert_eq(req.sets[0][index].op, op)
     assert_eq(req.sets[0][index].version, publication_test_sv(version))
@@ -37,7 +37,7 @@ fn publication_test_comparator(range: String, index: Int, op: PublicationOp, ver
 }
 
 #Test("publication semver_parse_basic") {
-    v :: publication_test_sv("1.2.3")
+    v: publication_test_sv("1.2.3")
     assert_eq(v.major, 1)
     assert_eq(v.minor, 2)
     assert_eq(v.patch, 3)
@@ -48,7 +48,7 @@ fn publication_test_comparator(range: String, index: Int, op: PublicationOp, ver
 }
 
 #Test("publication semver_parse_with_pre") {
-    v :: publication_test_sv("1.0.0-alpha.1")
+    v: publication_test_sv("1.0.0-alpha.1")
     assert_eq(v.major, 1)
     assert_eq(v.pre, Val("alpha.1"))
 }
@@ -60,14 +60,14 @@ fn publication_test_comparator(range: String, index: Int, op: PublicationOp, ver
 }
 
 #Test("publication semver_compatible") {
-    v100 :: publication_test_sv("1.0.0")
-    v120 :: publication_test_sv("1.2.0")
+    v100: publication_test_sv("1.0.0")
+    v120: publication_test_sv("1.2.0")
     assert(publication_is_compatible_with(v120, v100))
     assert(!publication_is_compatible_with(v100, v120))
 }
 
 #Test("publication classify_bump_kinds") {
-    old :: publication_test_sv("1.0.0")
+    old: publication_test_sv("1.0.0")
     assert_eq(publication_classify_bump(old, publication_test_sv("2.0.0")), PublicationBumpKind.Major)
     assert_eq(publication_classify_bump(old, publication_test_sv("1.1.0")), PublicationBumpKind.Minor)
     assert_eq(publication_classify_bump(old, publication_test_sv("1.0.1")), PublicationBumpKind.Patch)
@@ -91,10 +91,10 @@ fn publication_test_comparator(range: String, index: Int, op: PublicationOp, ver
 }
 
 #Test("publication semver_parses_build_metadata") {
-    v :: publication_test_sv("1.2.3+build.5")
+    v: publication_test_sv("1.2.3+build.5")
     assert_eq(v.build, Val("build.5"))
     assert_eq(v.pre, None)
-    v2 :: publication_test_sv("1.2.3-rc.1+exp.sha.5114f85")
+    v2: publication_test_sv("1.2.3-rc.1+exp.sha.5114f85")
     assert_eq(v2.pre, Val("rc.1"))
     assert_eq(v2.build, Val("exp.sha.5114f85"))
     assert_eq(publication_semver_display(v2), "1.2.3-rc.1+exp.sha.5114f85")
@@ -106,7 +106,7 @@ fn publication_test_comparator(range: String, index: Int, op: PublicationOp, ver
 }
 
 #Test("publication semver_rejects_leading_zeros") {
-    invalid :: [String]{"01.2.3", "1.02.3", "1.2.3-01", "1.2", "1.2.3.4"}
+    invalid: [String]{"01.2.3", "1.02.3", "1.2.3-01", "1.2", "1.2.3.4"}
     loop text in invalid -> assert_eq(publication_parse_semver(text), None)
     assert(publication_parse_semver("1.2.3+0010") != None)
 }
@@ -115,7 +115,7 @@ fn publication_test_comparator(range: String, index: Int, op: PublicationOp, ver
     huge := ""
     loop _ in 0..<200 -> huge = "{huge}9"
     assert(publication_test_sv("1.0.0-{huge}") > publication_test_sv("1.0.0-2"))
-    invalid :: [String]{
+    invalid: [String]{
         "1 ||", "|| 1", "1 || || 2", "^18446744073709551615",
         "~1.18446744073709551615", "18446744073709551615.x",
         ">=", ">", "<", "=", "^", "~", "~>", "~>1.2"
@@ -125,13 +125,13 @@ fn publication_test_comparator(range: String, index: Int, op: PublicationOp, ver
 
 #Test("publication semver_leading_v_is_consistent_across_versions_and_ranges") {
     assert_eq(publication_parse_semver("v1.2.3"), Val(publication_test_sv("1.2.3")))
-    ranges :: [String]{"v1.2", "=v1.2.3", ">=v1.2.3", "^v1.2.3", "~v1.2.3"}
+    ranges: [String]{"v1.2", "=v1.2.3", ">=v1.2.3", "^v1.2.3", "~v1.2.3"}
     loop range in ranges -> assert(publication_test_matches(range, "1.2.3"))
     assert(publication_test_matches("v1.2.3 - v2.0.0", "1.5.0"))
 }
 
 #Test("publication semver_prerelease_precedence") {
-    chain :: [String]{"1.0.0-alpha", "1.0.0-alpha.1", "1.0.0-alpha.beta", "1.0.0-beta", "1.0.0-beta.2", "1.0.0-beta.11", "1.0.0-rc.1", "1.0.0"}
+    chain: [String]{"1.0.0-alpha", "1.0.0-alpha.1", "1.0.0-alpha.beta", "1.0.0-beta", "1.0.0-beta.2", "1.0.0-beta.11", "1.0.0-rc.1", "1.0.0"}
     loop index in 0..<(chain.len() - 1) -> assert(publication_test_sv(chain[index]) < publication_test_sv(chain[index + 1]))
 }
 
@@ -186,7 +186,7 @@ fn publication_test_comparator(range: String, index: Int, op: PublicationOp, ver
 }
 
 #Test("publication strict identifiers and full u64 component limits") {
-    invalid :: [String]{
+    invalid: [String]{
         "", "v", "vv1.2.3", "1", "1.2", "1.2.3.4", "1.2.03", "+1.2.3",
         "-1.2.3", "1.2.3-", "1.2.3+", "1.2.3-a..b", "1.2.3+a..b",
         "1.2.3-alpha_1", "1.2.3+bad_1", "1.2.3+one+two", "1.2.3-α",
@@ -194,7 +194,7 @@ fn publication_test_comparator(range: String, index: Int, op: PublicationOp, ver
         "0.0.18446744073709551616", "999999999999999999999999999.0.0"
     }
     loop text in invalid -> assert_eq(publication_parse_semver(text), None)
-    max :: publication_test_sv("18446744073709551615.18446744073709551615.18446744073709551615")
+    max: publication_test_sv("18446744073709551615.18446744073709551615.18446744073709551615")
     assert_eq(max.major, PUBLICATION_U64_MAX)
     assert_eq(max.minor, PUBLICATION_U64_MAX)
     assert_eq(max.patch, PUBLICATION_U64_MAX)
@@ -266,18 +266,18 @@ fn publication_test_comparator(range: String, index: Int, op: PublicationOp, ver
 }
 
 #Test("publication wildcards whitespace raw display and OR gate isolation") {
-    wildcards :: [String]{"", " ", "*", "x", "X", "^*", "~x", ">*", "<=x", ">=X"}
+    wildcards: [String]{"", " ", "*", "x", "X", "^*", "~x", ">*", "<=x", ">=X"}
     loop range in wildcards {
         assert(publication_test_matches(range, "0.0.0"))
         assert(publication_test_matches(range, "99.99.99"))
         assert(!publication_test_matches(range, "1.0.0-a"))
     }
-    major_ranges :: [String]{"1.x", "1.X", "1.*", "1.", "1.."}
+    major_ranges: [String]{"1.x", "1.X", "1.*", "1.", "1.."}
     loop range in major_ranges -> assert(publication_test_matches(range, "1.9.9"))
-    minor_ranges :: [String]{"1.2.x", "1.2.X", "1.2.*", "1.2."}
+    minor_ranges: [String]{"1.2.x", "1.2.X", "1.2.*", "1.2."}
     loop range in minor_ranges -> assert(publication_test_matches(range, "1.2.99"))
-    vertical_tab :: String.from_bytes([U8]{U8{11}}) ?? panic("ASCII vertical tab must decode")
-    spaced :: [String]{"^ 1.2.3", "~ 1.2.3", "= 1.2.3", ">= 1.2.3", ">={vertical_tab}1.2.3"}
+    vertical_tab: String.from_bytes([U8]{U8{11}}) ?? panic("ASCII vertical tab must decode")
+    spaced: [String]{"^ 1.2.3", "~ 1.2.3", "= 1.2.3", ">= 1.2.3", ">={vertical_tab}1.2.3"}
     loop range in spaced -> assert(publication_test_matches(range, "1.2.3"))
     assert_eq(publication_version_req_display(publication_test_req(" \t ")), "*")
     assert_eq(publication_version_req_display(publication_test_req("  >= 1.2.3  <2.0.0  ")), ">= 1.2.3  <2.0.0")
@@ -287,7 +287,7 @@ fn publication_test_comparator(range: String, index: Int, op: PublicationOp, ver
 }
 
 #Test("publication malformed ranges and every checked range upper-bound overflow") {
-    invalid :: [String]{
+    invalid: [String]{
         "v", "vv1.2.3", "1.x.3", "*.2", "1..3", "1.2.3.4", "01.2", "1.02",
         "1.2.3-01", "1.2.3-a_1", "1.2.3+", "1.2.3+a+b", "1,2", "1 | 2",
         "1.2.3 - *", "1.2.3 - 2.3.4 - 3.0.0", ">= >=1.2.3",

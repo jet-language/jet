@@ -1,6 +1,6 @@
 // This rule declared effect leaves (E0750).
 //
-// A root that has declared leaves (`effect Log.Audit`, or a Prelude leaf such
+// A root that has declared leaves (`Log.Audit: effect`, or a Prelude leaf such
 // as `FS.Read`) is closed below it: every leaf written in an effect row, a
 // callback type or a trait method row must resolve to one declared name. A
 // root with no declared leaves stays open. Every module except the canonical
@@ -20,23 +20,23 @@ use jet_foundation.[
     diagnostic_with_rights,
 ]
 
-struct SemaEffectLeaf {
+SemaEffectLeaf: struct {
     root: String
     member: String
 }
 
 // The name a leaf check reads: parameters (`Mem.Alloc(above: N)`) and a
 // resource qualifier (`FS.Read:/data`) are not part of the leaf name.
-fn sema_effect_leaf_name(name: String) -> String Never! {
+sema_effect_leaf_name: fn(name: String) -> String Never! {
     name.split("(").to_list()[0].split(":").to_list()[0].trim()
 }
 
 // A dotted right under a root whose leaves Prelude/Effects.jet closes
 // (`FS.Bogus`) names no declared leaf (D-EFF2).
-fn sema_effect_builtin_leaf_unknown(name: String) -> Bool Never! {
-    bare :: sema_effect_leaf_name(name)
-    member :: sema_effect_leaf_member(bare) ?? return false
-    root :: sema_effect_root(bare)
+sema_effect_builtin_leaf_unknown: fn(name: String) -> Bool Never! {
+    bare: sema_effect_leaf_name(name)
+    member: sema_effect_leaf_member(bare) ?? return false
+    root: sema_effect_root(bare)
     closed := false
     loop leaf in EFFECT_VOCABULARY_LEAVES {
         if leaf == bare -> return false
@@ -45,19 +45,19 @@ fn sema_effect_builtin_leaf_unknown(name: String) -> Bool Never! {
     closed && member != ""
 }
 
-fn sema_effect_leaf_member(name: String) -> String? {
-    root :: sema_effect_root(name)
-    prefix :: "{root}."
+sema_effect_leaf_member: fn(name: String) -> String? {
+    root: sema_effect_root(name)
+    prefix: "{root}."
     if !name.starts_with(prefix) -> return None
     Val(name.slice(prefix.len(), name.len()))
 }
 
-fn sema_effect_leaf_add(leaves: &[SemaEffectLeaf], name: String) Never! {
-    member :: sema_effect_leaf_member(name) ?? return
+sema_effect_leaf_add: fn(leaves: &[SemaEffectLeaf], name: String) Never! {
+    member: sema_effect_leaf_member(name) ?? return
     &leaves.push(SemaEffectLeaf{root: sema_effect_root(name), member: member})
 }
 
-fn sema_effect_leaf_collect(leaves: &[SemaEffectLeaf], items: [Item]) Never! {
+sema_effect_leaf_collect: fn(leaves: &[SemaEffectLeaf], items: [Item]) Never! {
     loop item in items {
         if item == {
             .EffectDecl(declaration) -> sema_effect_leaf_add(&leaves, declaration.name)
@@ -70,11 +70,11 @@ fn sema_effect_leaf_collect(leaves: &[SemaEffectLeaf], items: [Item]) Never! {
     }
 }
 
-fn sema_effect_leaf_check_name(leaves: [SemaEffectLeaf], name: String, span: Span, diagnostics: &[Diagnostic]) {
+sema_effect_leaf_check_name: fn(leaves: [SemaEffectLeaf], name: String, span: Span, diagnostics: &[Diagnostic]) {
     if sema_effect_parse_name(name) == None -> return
-    bare :: sema_effect_leaf_name(name)
-    member :: sema_effect_leaf_member(bare) ?? return
-    root :: sema_effect_root(bare)
+    bare: sema_effect_leaf_name(name)
+    member: sema_effect_leaf_member(bare) ?? return
+    root: sema_effect_root(bare)
     members := [String]{}
     loop leaf in leaves {
         if leaf.root == root -> &members.push(leaf.member)
@@ -88,11 +88,11 @@ fn sema_effect_leaf_check_name(leaves: [SemaEffectLeaf], name: String, span: Spa
 
 // A dotted package-budget right under a root Prelude/Effects.jet closes that
 // names none of its leaves; a package budget names leaves exactly (E0750).
-fn sema_effect_builtin_leaf_diagnostic(name: String, span: Span) -> Diagnostic? {
+sema_effect_builtin_leaf_diagnostic: fn(name: String, span: Span) -> Diagnostic? {
     if !sema_effect_builtin_leaf_unknown(name) -> return None
-    bare :: sema_effect_leaf_name(name)
-    member :: sema_effect_leaf_member(bare) ?? return None
-    root :: sema_effect_root(bare)
+    bare: sema_effect_leaf_name(name)
+    member: sema_effect_leaf_member(bare) ?? return None
+    root: sema_effect_root(bare)
     members := [String]{}
     loop leaf in EFFECT_VOCABULARY_LEAVES {
         if sema_effect_root(leaf) == root {
@@ -102,14 +102,14 @@ fn sema_effect_builtin_leaf_diagnostic(name: String, span: Span) -> Diagnostic? 
     Val(sema_effect_leaf_unknown_diagnostic(name, root, member, members, span))
 }
 
-fn sema_effect_leaf_unknown_diagnostic(name: String, root: String, member: String, members: [String], span: Span) -> Diagnostic {
+sema_effect_leaf_unknown_diagnostic: fn(name: String, root: String, member: String, members: [String], span: Span) -> Diagnostic {
     suggestion := String?{None}
     closest_member := String?{None}
     if sema_taint_closest(member, members) == .Val(closest) {
         suggestion = Val("{root}.{closest}")
         closest_member = Val(closest)
     }
-    fix :: if suggestion == .Val(candidate) -> "did you mean `{candidate}`?" else -> "declare it with `effect {name}`, or use a declared leaf"
+    fix: if suggestion == .Val(candidate) -> "did you mean `{candidate}`?" else -> "declare it with `{name}: effect`, or use a declared leaf"
     diagnostic := sema_error("E0750", span, "`{name}` isn't a declared effect", "the `{root}` root has declared leaves, so every leaf under it must resolve to one declared name", fix)
     if suggestion == .Val(candidate) {
         // A span over the leaf alone takes the leaf; a span over the written
@@ -121,14 +121,14 @@ fn sema_effect_leaf_unknown_diagnostic(name: String, root: String, member: Strin
     diagnostic_with_rights(^diagnostic, "vocabulary", [String]{name}, [String]{}, None)
 }
 
-fn sema_effect_leaf_check_row(leaves: [SemaEffectLeaf], row: [EffectRowEntry], diagnostics: &[Diagnostic]) {
+sema_effect_leaf_check_row: fn(leaves: [SemaEffectLeaf], row: [EffectRowEntry], diagnostics: &[Diagnostic]) {
     loop entry in row {
         if entry.name.starts_with("..") -> next
         sema_effect_leaf_check_name(leaves, entry.name, entry.span, &diagnostics)
     }
 }
 
-fn sema_effect_leaf_check_type(leaves: [SemaEffectLeaf], ty: Type, diagnostics: &[Diagnostic]) {
+sema_effect_leaf_check_type: fn(leaves: [SemaEffectLeaf], ty: Type, diagnostics: &[Diagnostic]) {
     if ty == {
         .Fn(params, ret, effect_bound, _, _, _) -> {
             loop parameter in params -> sema_effect_leaf_check_type(leaves, parameter, &diagnostics)
@@ -154,7 +154,7 @@ fn sema_effect_leaf_check_type(leaves: [SemaEffectLeaf], ty: Type, diagnostics: 
     }
 }
 
-fn sema_effect_leaf_check_statements(leaves: [SemaEffectLeaf], statements: [Stmt], diagnostics: &[Diagnostic]) {
+sema_effect_leaf_check_statements: fn(leaves: [SemaEffectLeaf], statements: [Stmt], diagnostics: &[Diagnostic]) {
     loop statement in statements {
         if statement == {
             .Val(binding) -> {
@@ -199,7 +199,7 @@ fn sema_effect_leaf_check_statements(leaves: [SemaEffectLeaf], statements: [Stmt
     }
 }
 
-fn sema_effect_leaf_check_function(leaves: [SemaEffectLeaf], function: Func, diagnostics: &[Diagnostic]) {
+sema_effect_leaf_check_function: fn(leaves: [SemaEffectLeaf], function: Func, diagnostics: &[Diagnostic]) {
     if function.declared_effects == .Val(row) {
         loop entry in row {
             name := entry.name
@@ -213,7 +213,7 @@ fn sema_effect_leaf_check_function(leaves: [SemaEffectLeaf], function: Func, dia
     sema_effect_leaf_check_statements(leaves, function.body, &diagnostics)
 }
 
-fn sema_effect_leaf_check_items(leaves: [SemaEffectLeaf], items: [Item], diagnostics: &[Diagnostic]) {
+sema_effect_leaf_check_items: fn(leaves: [SemaEffectLeaf], items: [Item], diagnostics: &[Diagnostic]) {
     loop item in items {
         if item == {
             .EffectDecl(declaration) -> {
@@ -267,7 +267,7 @@ fn sema_effect_leaf_check_items(leaves: [SemaEffectLeaf], items: [Item], diagnos
 
 // Validate every effect name written in the source modules against the
 // declared leaves of its root. Returns true when a diagnostic was reported.
-fn sema_effect_check_declared_leaves(graph: SemaRegistrationGraph, diagnostics: &[Diagnostic]) -> Bool {
+sema_effect_check_declared_leaves: fn(graph: SemaRegistrationGraph, diagnostics: &[Diagnostic]) -> Bool {
     leaves := [SemaEffectLeaf]{}
     loop name in EFFECT_VOCABULARY_LEAVES -> sema_effect_leaf_add(&leaves, name)
     loop source_module_index in 0..<graph.modules.len() {
@@ -277,7 +277,7 @@ fn sema_effect_check_declared_leaves(graph: SemaRegistrationGraph, diagnostics: 
     found := false
     loop source_module_index in 0..<graph.modules.len() {
         if graph.modules[source_module_index].module_identity == graph.canonical_effect_module_identity -> next
-        start :: diagnostics.len()
+        start: diagnostics.len()
         sema_effect_leaf_check_items(leaves, graph.modules[source_module_index].program.items, &diagnostics)
         if diagnostics.len() > start {
             sema_attach_diagnostic_source_locations(&diagnostics, start, graph.modules[source_module_index].source_segments)
@@ -287,7 +287,7 @@ fn sema_effect_check_declared_leaves(graph: SemaRegistrationGraph, diagnostics: 
     found
 }
 
-fn sema_effect_trait_bound_set(bounds: &[SemaEffectTraitBound], trait_name: String, method: String, bound: [String]) Never! {
+sema_effect_trait_bound_set: fn(bounds: &[SemaEffectTraitBound], trait_name: String, method: String, bound: [String]) Never! {
     loop index in 0..<bounds.len() {
         if bounds[index].trait_name == trait_name && bounds[index].method == method {
             bounds[index].bound = bound
@@ -300,7 +300,7 @@ fn sema_effect_trait_bound_set(bounds: &[SemaEffectTraitBound], trait_name: Stri
 // The trait-method effect ceilings one module declares. The operator
 // hooks are pure; a trait method bounds its impls when it is pure or writes a
 // closed row of known effects. An un-annotated method leaves each impl free.
-fn sema_effect_trait_bounds(items: [Item]) -> [SemaEffectTraitBound] Never! {
+sema_effect_trait_bounds: fn(items: [Item]) -> [SemaEffectTraitBound] Never! {
     bounds := [SemaEffectTraitBound]{}
     loop owned in OWNED_TRAITS {
         if owned.contract == .Operator(hook, _) -> &bounds.push(SemaEffectTraitBound{trait_name: owned.name, method: hook, bound: [String]{}})
@@ -313,7 +313,7 @@ fn sema_effect_trait_bounds(items: [Item]) -> [SemaEffectTraitBound] Never! {
                         sema_effect_trait_bound_set(&bounds, definition.name, method.name, [String]{})
                         next
                     }
-                    row :: method.declared_effects ?? next
+                    row: method.declared_effects ?? next
                     bound := [String]{}
                     closed := true
                     loop entry in row {
@@ -321,7 +321,7 @@ fn sema_effect_trait_bounds(items: [Item]) -> [SemaEffectTraitBound] Never! {
                             closed = false
                             next
                         }
-                        effect_name :: sema_effect_parse_name(entry.name) ?? {
+                        effect_name: sema_effect_parse_name(entry.name) ?? {
                             closed = false
                             next
                         }
@@ -344,7 +344,7 @@ fn sema_effect_trait_bounds(items: [Item]) -> [SemaEffectTraitBound] Never! {
 // `{trait}::{owner}` pair one module declares, through an `impl Owner.Trait`
 // block or a struct/enum trait-impl block, whether or not the owner writes
 // each method itself.
-fn sema_effect_trait_implementers(items: [Item]) -> [String] Never! {
+sema_effect_trait_implementers: fn(items: [Item]) -> [String] Never! {
     rows := [String]{}
     loop item in items {
         if item == {

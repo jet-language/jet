@@ -6,23 +6,23 @@
 // in and is range-checked at compile time. A value widens implicitly only when
 // the destination type accepts every possible source value. `I64`/`F64` are
 // fixed-width expert types, separate from exact `Int` and `Float`.
-fn run() {
+run: fn() {
     // A literal takes the width of its binding, checked to fit at compile time.
-    red :: U8{255}
-    channel :: I32{100000}
-    depth :: I8{-120}
+    red: U8{255}
+    channel: I32{100000}
+    depth: I8{-120}
     print(red)
     print(channel)
     print(depth)
     // `Int` is exact; I64 is a separate fixed-width expert type.
-    total :: 9000000000
+    total: 9000000000
     print(total + 1)
     // Arithmetic stays within one width and keeps that width.
-    half :: U8{100}
+    half: U8{100}
     print(half + half)
     // A list expected at a fixed width elaborates every element to it — this is
     // what binary/byte APIs work in.
-    bytes :: [U8]{104, 105, 33}
+    bytes: [U8]{104, 105, 33}
     print(bytes)
     // Every integer width can index a list; narrowing to the host index is
     // checked rather than wrapping a wide unsigned value.
@@ -39,19 +39,19 @@ fn run() {
     wide := Int{0}
     wide = red
     print(wide)
-    clamped :: U8.from_i32(channel) ?? 255
+    clamped: U8.from_i32(channel) ?? 255
     print(clamped)
     // Numeric surface (D-NUMOPS1): per-type bounds, bit queries, float consts.
     print(U8.MAX)
     print(I32.MIN)
-    flags :: U8{13}
+    flags: U8{13}
     print(flags.count_ones())
     print(Float.INFINITY.is_infinite())
     // Bit methods (D-SIGIL-ALGEBRA1=B) keep the operand
     // width; a shift's count may be any integer (it's a bit-count, not a value
     // of the same width), and an over-width count traps cleanly.
-    mask :: U8{12}
-    bits :: U8{10}
+    mask: U8{12}
+    bits: U8{10}
     print((mask).bit_and(bits))
     combined := U8{mask}
     combined = (combined).bit_or(bits)
@@ -66,10 +66,10 @@ fn run() {
     print(Float.EPSILON.is_finite())
     // Fixed-width overflow traps by default — `200 + 100` as a U8 would trap.
     // Use receiver methods to wrap, saturate, or get a checked `?T`.
-    hi :: U8{200}
-    lo :: U8{100}
+    hi: U8{200}
+    lo: U8{100}
     print(wrapping(hi + lo))
     print(saturating(hi + lo))
-    fallback :: U8{0}
+    fallback: U8{0}
     print(hi.checked_add(lo) ?? fallback)
 }

@@ -1,4 +1,4 @@
-package {
+package: {
     name: "core.sys"
     version: "0.0.1"
     edition: "2026"
@@ -9,27 +9,27 @@ package {
     }
 }
 use {
-    core :: core
-    net :: core.net
-    files :: core.files
-    process_api :: core.process
-    text_parse :: core.text.parse
+    core: core
+    net: core.net
+    files: core.files
+    process_api: core.process
+    text_parse: core.text.parse
 
     core.encoding.[Dyn]
     core.sys.[EnvError]
-    host_path :: __core_files_path_components
+    host_path: __core_files_path_components
     __core_files_path_components.[PathPlatform]
 }
 // Reused from Foundation CLISchema/TargetWidth (a736ba79d). This pointer
 // record measures the selected build target, never the compiler host.
 #Layout(c)
-struct SysTargetPointer { pointer: *Int }
+SysTargetPointer: struct { pointer: *Int }
 
 // Layout facts must be evaluated inside the selected-target comptime boundary,
 // not through an ordinary function checked outside compile-time context.
 // Each prepared binding has one final expression.
-SYS_TARGET_POINTER_BYTES :: comptime { SysTargetPointer.$layout.size ?? panic("selected target has no concrete pointer layout") }
-SYS_TARGET_USIZE_MAX :: comptime {
+SYS_TARGET_POINTER_BYTES: comptime { SysTargetPointer.$layout.size ?? panic("selected target has no concrete pointer layout") }
+SYS_TARGET_USIZE_MAX: comptime {
     if {
         SYS_TARGET_POINTER_BYTES <= 0 || SYS_TARGET_POINTER_BYTES > 8 -> panic("selected target pointer width does not fit the U64 carrier")
         SYS_TARGET_POINTER_BYTES == 8 -> U64{0xffffffffffffffff}
@@ -37,11 +37,11 @@ SYS_TARGET_USIZE_MAX :: comptime {
     }
 }
 
-fn usize_max() -> U64 Never! { SYS_TARGET_USIZE_MAX }
+usize_max: fn() -> U64 Never! { SYS_TARGET_USIZE_MAX }
 
 #Test("usize maximum follows the selected target pointer layout") {
-    size :: comptime { SysTargetPointer.$layout.size ?? panic("selected target pointer layout") }
-    maximum :: usize_max()
+    size: comptime { SysTargetPointer.$layout.size ?? panic("selected target pointer layout") }
+    maximum: usize_max()
     assert((maximum >> (8 * (size - 1))) == U64{255})
     assert((maximum.bit_and(U64{255})) == U64{255})
 }
@@ -49,11 +49,11 @@ fn usize_max() -> U64 Never! { SYS_TARGET_USIZE_MAX }
 
 // Source owns validation, Unicode policy and child overlays. The existing
 // process cell remains the sole writer until the pinned Shared root lands.
-fn get(name: String) -[Env]> String? Never! {
+get: fn(name: String) -[Env]> String? Never! {
     decode_host_env(core.sys.__env_value(name))
 }
 
-fn set(name: String, value: String) Never! -[Env]> {
+set: fn(name: String, value: String) Never! -[Env]> {
     if validate_env_name(name) == {
         .Err(error) -> panic("core.sys.set: {error}")
         .Ok(_) -> {}
@@ -65,30 +65,30 @@ fn set(name: String, value: String) Never! -[Env]> {
     }
 }
 
-fn unset(name: String) -[Env]> Bool EnvError! {
+unset: fn(name: String) -[Env]> Bool EnvError! {
     validate_env_name(name)
     core.sys.__env_remove(name)
 }
 
-fn vars() -[Env]> [String] EnvError! {
+vars: fn() -[Env]> [String] EnvError! {
     entry_names(__env_snapshot())
 }
 
 // Immutable host bytes are not the logical process environment.
-fn __startup_env() -> [(name: [U8], value: [U8])] Never! {
+__startup_env: fn() -> [(name: [U8], value: [U8])] Never! {
     env_columns(core.sys.__startup_env_columns())
 }
 
 // Snapshot once, under the existing host cell's lock. No per-name rereads.
-fn __env_snapshot() -> [(name: [U8], value: [U8])] Never! {
+__env_snapshot: fn() -> [(name: [U8], value: [U8])] Never! {
     env_columns(core.sys.__env_columns())
 }
 
-fn __env_present(name: String) -[Env]> Bool Never! {
+__env_present: fn(name: String) -[Env]> Bool Never! {
     core.sys.__env_value(name) != None
 }
 
-fn env_columns(columns: [[U8]]) -> [(name: [U8], value: [U8])] Never! {
+env_columns: fn(columns: [[U8]]) -> [(name: [U8], value: [U8])] Never! {
     entries := [(name: [U8], value: [U8])]{}
     index := 0
     loop index < columns.len() {
@@ -100,17 +100,17 @@ fn env_columns(columns: [[U8]]) -> [(name: [U8], value: [U8])] Never! {
 
 // Prepare the child environment entirely in source. Explicit sets are applied
 // in order, then every removal.
-fn __env_compose(snapshot: [(name: [U8], value: [U8])], clear: Bool,
+__env_compose: fn(snapshot: [(name: [U8], value: [U8])], clear: Bool,
     names: [String], values: [String], removals: [String]) -> [(name: [U8], value: [U8])] IOError! {
     assert(names.len() == values.len())
     entries := if clear -> [(name: [U8], value: [U8])]{} else -> snapshot.copy()
     loop index in 0..<names.len() {
-        name :: names[index]
+        name: names[index]
         if validate_env_name(name) == {
             .Err(error) -> return Err(env_process_error(name, error))
             .Ok(_) -> {}
         }
-        value :: values[index]
+        value: values[index]
         if has_nul(value) -> return Err(env_process_error(name, EnvError.InvalidValue))
         remove_process_entries(&entries, name.bytes())
         &entries.push((name: name.bytes(), value: value.bytes()))
@@ -125,19 +125,19 @@ fn __env_compose(snapshot: [(name: [U8], value: [U8])], clear: Bool,
     Ok(entries)
 }
 
-fn env_process_error(name: String, error: EnvError) -> IOError Never! {
+env_process_error: fn(name: String, error: EnvError) -> IOError Never! {
     IOError.InvalidInput(IOContext{
         operation: .Resolve, resource: Val(name), os_code: None, cause: Val("{error}"),
     })
 }
 
-fn remove_process_entries(entries: &[(name: [U8], value: [U8])], name: [U8]) Never! {
+remove_process_entries: fn(entries: &[(name: [U8], value: [U8])], name: [U8]) Never! {
     loop {
         if !remove_entry(&entries, name) -> return
     }
 }
 
-fn validate_env_name(name: String) EnvError! {
+validate_env_name: fn(name: String) EnvError! {
     if name.bytes().len() == 0 || has_nul(name) -> return Err(EnvError.InvalidName)
     loop byte in name.bytes() {
         if byte == (U8{61}) -> return Err(EnvError.InvalidName)
@@ -145,41 +145,41 @@ fn validate_env_name(name: String) EnvError! {
     Ok()
 }
 
-fn env_key_compare(left: [U8], right: [U8]) -> Int Never! {
+env_key_compare: fn(left: [U8], right: [U8]) -> Int Never! {
     core.sys.__env_key_compare(left, right)
 }
 
-fn entry_index(entries: [(name: [U8], value: [U8])], key: [U8]) -> Int Never! {
+entry_index: fn(entries: [(name: [U8], value: [U8])], key: [U8]) -> Int Never! {
     loop index in 0..<entries.len() {
         if env_key_compare(entries[index].name, key) == 0 -> return index
     }
     -1
 }
 
-fn read_entry(entries: [(name: [U8], value: [U8])], key: [U8]) -> String? Never! {
-    index :: entry_index(entries, key)
+read_entry: fn(entries: [(name: [U8], value: [U8])], key: [U8]) -> String? Never! {
+    index: entry_index(entries, key)
     if index < 0 -> return None
     Val(String.from_bytes(entries[index].value) ?? return None)
 }
 
-fn remove_entry(entries: &[(name: [U8], value: [U8])], key: [U8]) -> Bool Never! {
-    index :: entry_index(entries, key)
+remove_entry: fn(entries: &[(name: [U8], value: [U8])], key: [U8]) -> Bool Never! {
+    index: entry_index(entries, key)
     if index < 0 -> return false
-    _ :: &entries.remove(index, .Slot)
+    _: &entries.remove(index, .Slot)
     true
 }
 
-fn replace_entry(entries: &[(name: [U8], value: [U8])], key: [U8], value: [U8]) Never! {
-    _ :: remove_entry(&entries, key)
+replace_entry: fn(entries: &[(name: [U8], value: [U8])], key: [U8], value: [U8]) Never! {
+    _: remove_entry(&entries, key)
     &entries.push((name: key, value: value))
 }
 
-fn entry_names(entries: [(name: [U8], value: [U8])]) -> [String] EnvError! {
+entry_names: fn(entries: [(name: [U8], value: [U8])]) -> [String] EnvError! {
     raw := [[U8]]{}
     names := [String]{}
     loop entry in entries {
-        name :: String.from_bytes(entry.name) ?? return Err(EnvError.NonUnicode)
-        _ :: String.from_bytes(entry.value) ?? return Err(EnvError.NonUnicode)
+        name: String.from_bytes(entry.name) ?? return Err(EnvError.NonUnicode)
+        _: String.from_bytes(entry.value) ?? return Err(EnvError.NonUnicode)
         &raw.push(entry.name)
         &names.push(name)
     }
@@ -190,8 +190,8 @@ fn entry_names(entries: [(name: [U8], value: [U8])]) -> [String] EnvError! {
 
 // The indexes of `keys` in env_key_compare order, equal keys in their
 // given order: a bottom-up merge sort, n log n host compares.
-fn env_key_order(keys: [[U8]]) -> [Int] Never! {
-    count :: keys.len()
+env_key_order: fn(keys: [[U8]]) -> [Int] Never! {
+    count: keys.len()
     order := [Int]{}
     loop index in 0..<count -> &order.push(index)
     merged := order.copy()
@@ -199,8 +199,8 @@ fn env_key_order(keys: [[U8]]) -> [Int] Never! {
     loop width < count {
         start := 0
         loop start < count {
-            middle :: if start + width < count -> start + width else -> count
-            end :: if start + 2 * width < count -> start + 2 * width else -> count
+            middle: if start + width < count -> start + width else -> count
+            end: if start + 2 * width < count -> start + 2 * width else -> count
             left := start
             right := middle
             loop out in start..<end {
@@ -240,7 +240,7 @@ fn env_key_order(keys: [[U8]]) -> [Int] Never! {
 }
 
 #Test("logical environment presence and Unicode enumeration differ") {
-    entries :: [(name: [U8], value: [U8])]{(name: "NO_COLOR".bytes(), value: [U8]{255})}
+    entries: [(name: [U8], value: [U8])]{(name: "NO_COLOR".bytes(), value: [U8]{255})}
     assert_eq(entry_index(entries, "NO_COLOR".bytes()), 0)
     assert_eq(read_entry(entries, "NO_COLOR".bytes()), None)
     if entry_names(entries) == {
@@ -252,7 +252,7 @@ fn env_key_order(keys: [[U8]]) -> [Int] Never! {
 #Test("logical environment validates names and sorts names, not values") {
     if validate_env_name("") == { .Err(_) -> {} .Ok(_) -> assert(false) }
     if validate_env_name("A=B") == { .Err(_) -> {} .Ok(_) -> assert(false) }
-    entries :: [(name: [U8], value: [U8])]{
+    entries: [(name: [U8], value: [U8])]{
         (name: "JET_ENV_Z".bytes(), value: "".bytes()),
         (name: "JET_ENV_A".bytes(), value: "z".bytes())
     }
@@ -260,68 +260,68 @@ fn env_key_order(keys: [[U8]]) -> [Int] Never! {
 }
 
 #Test("child environment applies sets before removals and retains raw values") {
-    snapshot :: [(name: [U8], value: [U8])]{
+    snapshot: [(name: [U8], value: [U8])]{
         (name: "JET_ENV_A".bytes(), value: [U8]{255}),
         (name: "JET_ENV_B".bytes(), value: "old".bytes()),
     }
-    composed :: __env_compose(snapshot, false, [String]{"JET_ENV_B", "JET_ENV_B"},
+    composed: __env_compose(snapshot, false, [String]{"JET_ENV_B", "JET_ENV_B"},
         [String]{"first", "second"}, [String]{"JET_ENV_B"}) ?? panic("valid overlay")
     assert_eq(composed, [(name: [U8], value: [U8])]{snapshot[0]})
     assert_eq(__env_compose(snapshot, true, [String]{}, [String]{}, [String]{}) ?? panic("clear"), [(name: [U8], value: [U8])]{})
 }
 
-fn current_dir() -[FS, Env]> String IOError! {
+current_dir: fn() -[FS, Env]> String IOError! {
     if core.sys.__current_dir() == {
         .Ok(path) -> Ok(path)
         .Err(cause) -> Err(syscall_input(.Resolve, None, cause))
     }
 }
 
-fn home_dir() -[Env]> String? Never! {
-    home :: get("HOME")
+home_dir: fn() -[Env]> String? Never! {
+    home: get("HOME")
     if home != None -> return Val(home)
     get("USERPROFILE")
 }
 
-fn name() -[Env]> String Never! { core.sys.name() }
+name: fn() -[Env]> String Never! { core.sys.name() }
 
-fn family() -[Env]> String Never! { core.sys.__family_os() }
+family: fn() -[Env]> String Never! { core.sys.__family_os() }
 
-fn arch() -[Env]> String Never! { core.sys.arch() }
+arch: fn() -[Env]> String Never! { core.sys.arch() }
 
-fn temp_dir() -[Env]> String Never! {
-    tmp :: get("TMPDIR")
+temp_dir: fn() -[Env]> String Never! {
+    tmp: get("TMPDIR")
     if tmp != None -> return tmp
-    temp :: get("TEMP")
+    temp: get("TEMP")
     if temp != None -> return temp
-    fallback :: get("TMP")
+    fallback: get("TMP")
     if fallback != None -> return fallback
     "/tmp"
 }
 
 // The running program's path: the built binary, or under `jet run` the
 // script's absolute path. Launching it runs the program again either way.
-fn executable() -[Env]> String Never! { core.sys.__executable() ?? "" }
+executable: fn() -[Env]> String Never! { core.sys.__executable() ?? "" }
 
-fn hostname() -[Env, FS]> String Never! { net.gethostname() }
+hostname: fn() -[Env, FS]> String Never! { net.gethostname() }
 
-fn username() -[Env]> String Never! {
-    user :: get("USER")
+username: fn() -[Env]> String Never! {
+    user: get("USER")
     if user != None -> return user
-    username :: get("USERNAME")
+    username: get("USERNAME")
     if username != None -> return username
-    host_user :: host_env("USER")
+    host_user: host_env("USER")
     if host_user != None -> return host_user
     host_env("USERNAME") ?? ""
 }
 
-fn release() -[Env, FS, Exec, Time.Wait]> String Never! {
-    platform :: name()
+release: fn() -[Env, FS, Exec, Time.Wait]> String Never! {
+    platform: name()
     if platform == "linux" {
-        kernel :: files.read("/proc/sys/kernel/osrelease") ?? ""
-        trimmed :: core.text.trim(kernel)
+        kernel: files.read("/proc/sys/kernel/osrelease") ?? ""
+        trimmed: core.text.trim(kernel)
         if trimmed != "" -> return trimmed
-        config :: files.read("/etc/os-release") ?? return ""
+        config: files.read("/etc/os-release") ?? return ""
         return release_field(config, "VERSION_ID=") ?? ""
     }
     if platform == "macos" -> return command_fact([String]{"uname", "-r"})
@@ -329,16 +329,16 @@ fn release() -[Env, FS, Exec, Time.Wait]> String Never! {
     ""
 }
 
-fn version() -[Env, FS, Exec, Time.Wait]> String Never! {
-    platform :: name()
+version: fn() -[Env, FS, Exec, Time.Wait]> String Never! {
+    platform: name()
     if platform == "linux" {
-        config :: files.read("/etc/os-release") ?? ""
-        value :: release_field(config, "PRETTY_NAME=")
+        config: files.read("/etc/os-release") ?? ""
+        value: release_field(config, "PRETTY_NAME=")
         if value != None -> return value
         return release()
     }
     if platform == "macos" {
-        value :: command_fact([String]{"sw_vers", "-productVersion"})
+        value: command_fact([String]{"sw_vers", "-productVersion"})
         if value != "" -> return "macOS {value}"
         return release()
     }
@@ -348,15 +348,15 @@ fn version() -[Env, FS, Exec, Time.Wait]> String Never! {
 
 /// Expands `$VAR`, `${VAR}` and `%VAR%` from the environment; `$$` is a literal `$`.
 /// An unset `$` name expands to nothing, an unset `%VAR%` and any other text stay as written.
-fn expand(value: String) -[Env]> String Never! {
-    raw :: value.bytes()
+expand: fn(value: String) -[Env]> String Never! {
+    raw: value.bytes()
     out := [U8]{}
     i := 0
     loop {
         if i >= raw.len() -> return String.from_bytes(out) ?? ""
-        byte :: raw[i]
+        byte: raw[i]
         if byte == (U8{36}) && i + 1 < raw.len() {
-            after :: raw[i + 1]
+            after: raw[i + 1]
             if after == (U8{36}) {
                 &out.push(byte)
                 i = i + 2
@@ -366,7 +366,7 @@ fn expand(value: String) -[Env]> String Never! {
                 close := i + 2
                 loop close < raw.len() && raw[close] != (U8{125}) -> close = close + 1
                 if close < raw.len() {
-                    replacement :: get(slice_ascii(raw, i + 2, close)) ?? ""
+                    replacement: get(slice_ascii(raw, i + 2, close)) ?? ""
                     loop item in replacement.bytes() -> &out.push(item)
                     i = close + 1
                     next
@@ -375,7 +375,7 @@ fn expand(value: String) -[Env]> String Never! {
             end := i + 1
             loop end < raw.len() && is_env_ident(raw[end]) -> end = end + 1
             if end > i + 1 {
-                replacement :: get(slice_ascii(raw, i + 1, end)) ?? ""
+                replacement: get(slice_ascii(raw, i + 1, end)) ?? ""
                 loop item in replacement.bytes() -> &out.push(item)
                 i = end
                 next
@@ -385,7 +385,7 @@ fn expand(value: String) -[Env]> String Never! {
             close := i + 1
             loop close < raw.len() && is_env_ident(raw[close]) -> close = close + 1
             if close > i + 1 && close < raw.len() && raw[close] == (U8{37}) {
-                found :: get(slice_ascii(raw, i + 1, close))
+                found: get(slice_ascii(raw, i + 1, close))
                 if found != None {
                     loop item in found.bytes() -> &out.push(item)
                     i = close + 1
@@ -398,55 +398,55 @@ fn expand(value: String) -[Env]> String Never! {
     }
 }
 
-fn pid() -[Env]> Int Never! { getpid() }
+pid: fn() -[Env]> Int Never! { getpid() }
 
-fn getpid() -[Env]> Int Never! { core.sys.__pid_os() }
+getpid: fn() -[Env]> Int Never! { core.sys.__pid_os() }
 
-fn cpu_count() -[Env]> Int Never! {
-    count :: core.sys.__cpu_count() ?? 1
+cpu_count: fn() -[Env]> Int Never! {
+    count: core.sys.__cpu_count() ?? 1
     if count < 1 -> return 1
     count
 }
 
-fn getppid() -[Env]> Int Never! { posix_identity(core.sys.__getppid()) }
+getppid: fn() -[Env]> Int Never! { posix_identity(core.sys.__getppid()) }
 
-fn getuid() -[Env]> Int Never! { posix_identity(core.sys.__getuid()) }
+getuid: fn() -[Env]> Int Never! { posix_identity(core.sys.__getuid()) }
 
-fn geteuid() -[Env]> Int Never! { posix_identity(core.sys.__geteuid()) }
+geteuid: fn() -[Env]> Int Never! { posix_identity(core.sys.__geteuid()) }
 
-fn getgid() -[Env]> Int Never! { posix_identity(core.sys.__getgid()) }
+getgid: fn() -[Env]> Int Never! { posix_identity(core.sys.__getgid()) }
 
-fn getegid() -[Env]> Int Never! { posix_identity(core.sys.__getegid()) }
+getegid: fn() -[Env]> Int Never! { posix_identity(core.sys.__getegid()) }
 
-fn getpgrp() -[Env]> Int Never! { posix_identity(core.sys.__getpgrp()) }
+getpgrp: fn() -[Env]> Int Never! { posix_identity(core.sys.__getpgrp()) }
 
-#Unsafe("posix umask: the caller owns the process file-creation mask and restores it when other code relies on it") fn umask(mask: Int) -[FS, Env]> Int Never! {
+#Unsafe("posix umask: the caller owns the process file-creation mask and restores it when other code relies on it") umask: fn(mask: Int) -[FS, Env]> Int Never! {
     core.sys.__umask(mask) ?? 0
 }
-fn exitcode(code: Int) -> Int Never! { code }
+exitcode: fn(code: Int) -> Int Never! { code }
 
-fn success(code: Int) -> Bool Never! { code == 0 }
+success: fn(code: Int) -> Bool Never! { code == 0 }
 
-fn uptime() -[Time, Env, FS]> Float Never! {
+uptime: fn() -[Time, Env, FS]> Float Never! {
     if name() != "linux" -> return 0.0
-    contents :: files.read("/proc/uptime") ?? return 0.0
-    fields :: text_parse.split_ws(contents)
+    contents: files.read("/proc/uptime") ?? return 0.0
+    fields: text_parse.split_ws(contents)
     if fields.len() == 0 -> return 0.0
     Float.parse(fields[0]) ?? 0.0
 }
 
-fn getgroups() -[Env]> [Int] Never! {
-    count :: core.sys.__groups_count() ?? return [Int]{}
+getgroups: fn() -[Env]> [Int] Never! {
+    count: core.sys.__groups_count() ?? return [Int]{}
     if count < 0 || count > 2147483647 -> return [Int]{}
-    row :: core.sys.__groups_fill(count)
+    row: core.sys.__groups_fill(count)
     if row[0] < 0 -> return [Int]{}
     out := [Int]{}
     loop index in 0..<row[0] -> &out.push(row[index + 1])
     out
 }
 
-fn loadavg() -[Env]> [Float] Never! {
-    row :: core.sys.__loadavg()
+loadavg: fn() -[Env]> [Float] Never! {
+    row: core.sys.__loadavg()
     if !row.available || row.count < 0 -> return [Float]{0.0, 0.0, 0.0}
     out := [Float]{}
     if row.count > 0 -> &out.push(row.first)
@@ -455,11 +455,11 @@ fn loadavg() -[Env]> [Float] Never! {
     out
 }
 
-fn times() -[Env]> [Float] Never! {
-    row :: core.sys.__times()
+times: fn() -[Env]> [Float] Never! {
+    row: core.sys.__times()
     if !row.available -> return [Float]{0.0, 0.0, 0.0, 0.0, 0.0}
-    ticks :: if row.ticks < 1 -> 1 else -> row.ticks
-    elapsed :: if row.elapsed < 0 -> 0 else -> row.elapsed
+    ticks: if row.ticks < 1 -> 1 else -> row.ticks
+    elapsed: if row.elapsed < 0 -> 0 else -> row.elapsed
     [Float]{Float{row.user} / Float{ticks}, Float{row.system} / Float{ticks},
         Float{row.child_user} / Float{ticks}, Float{row.child_system} / Float{ticks},
         Float{elapsed} / Float{ticks}}
@@ -467,11 +467,11 @@ fn times() -[Env]> [Float] Never! {
 
 /// Which processes `usage` measures: this program, or every child it has
 /// waited for (D-CORE-RLIMIT-NAME1).
-enum UsageOf { Program Children }
+UsageOf: enum { Program Children }
 
 /// CPU time in user code and in the kernel, and the peak resident memory in
 /// bytes on every platform (Linux reports KiB; Core converts once).
-struct ResourceUsage {
+ResourceUsage: struct {
     user: Duration
     system: Duration
     peak_memory: Int
@@ -479,99 +479,99 @@ struct ResourceUsage {
 
 // Linux RLIMIT_* numbers of the five limits core.sys reads and sets.
 // memory is the address-space limit, the one ProcessSpec.memory_limit sets.
-SYS_LIMIT_CPU :: 0
-SYS_LIMIT_STACK :: 3
-SYS_LIMIT_CORE :: 4
-SYS_LIMIT_NOFILE :: 7
-SYS_LIMIT_AS :: 9
+SYS_LIMIT_CPU: 0
+SYS_LIMIT_STACK: 3
+SYS_LIMIT_CORE: 4
+SYS_LIMIT_NOFILE: 7
+SYS_LIMIT_AS: 9
 
 /// This program's CPU-time limit; None is unlimited. The kernel counts whole
 /// seconds, so a fractional Duration rounds up when set.
-fn cpu_time_limit() -[Env]> (soft: Duration?, hard: Duration?) IOError! {
-    row :: limit_read(SYS_LIMIT_CPU, "cpu_time_limit")
+cpu_time_limit: fn() -[Env]> (soft: Duration?, hard: Duration?) IOError! {
+    row: limit_read(SYS_LIMIT_CPU, "cpu_time_limit")
     Ok((soft: limit_duration(row.soft), hard: limit_duration(row.hard)))
 }
 
 /// This program's address-space limit in bytes; None is unlimited.
-fn memory_limit() -[Env]> (soft: Int?, hard: Int?) IOError! { limit_read(SYS_LIMIT_AS, "memory_limit") }
+memory_limit: fn() -[Env]> (soft: Int?, hard: Int?) IOError! { limit_read(SYS_LIMIT_AS, "memory_limit") }
 
 /// This program's open-file limit; None is unlimited.
-fn open_file_limit() -[Env]> (soft: Int?, hard: Int?) IOError! { limit_read(SYS_LIMIT_NOFILE, "open_file_limit") }
+open_file_limit: fn() -[Env]> (soft: Int?, hard: Int?) IOError! { limit_read(SYS_LIMIT_NOFILE, "open_file_limit") }
 
 /// This program's core-file size limit in bytes; None is unlimited.
-fn core_file_limit() -[Env]> (soft: Int?, hard: Int?) IOError! { limit_read(SYS_LIMIT_CORE, "core_file_limit") }
+core_file_limit: fn() -[Env]> (soft: Int?, hard: Int?) IOError! { limit_read(SYS_LIMIT_CORE, "core_file_limit") }
 
 /// This program's stack size limit in bytes; None is unlimited.
-fn stack_limit() -[Env]> (soft: Int?, hard: Int?) IOError! { limit_read(SYS_LIMIT_STACK, "stack_limit") }
+stack_limit: fn() -[Env]> (soft: Int?, hard: Int?) IOError! { limit_read(SYS_LIMIT_STACK, "stack_limit") }
 
 /// Set this program's CPU-time limit; children inherit it. None is unlimited.
-fn set_cpu_time_limit(soft: Duration?, hard: Duration?) IOError! -[Env, Exec]> {
-    low :: limit_seconds(soft, "set_cpu_time_limit")
-    high :: limit_seconds(hard, "set_cpu_time_limit")
+set_cpu_time_limit: fn(soft: Duration?, hard: Duration?) IOError! -[Env, Exec]> {
+    low: limit_seconds(soft, "set_cpu_time_limit")
+    high: limit_seconds(hard, "set_cpu_time_limit")
     limit_write(SYS_LIMIT_CPU, low, high, "set_cpu_time_limit")
 }
 
 /// Set this program's address-space limit in bytes; children inherit it.
-fn set_memory_limit(soft: Int?, hard: Int?) IOError! -[Env, Exec]> { limit_write(SYS_LIMIT_AS, soft, hard, "set_memory_limit") }
+set_memory_limit: fn(soft: Int?, hard: Int?) IOError! -[Env, Exec]> { limit_write(SYS_LIMIT_AS, soft, hard, "set_memory_limit") }
 
 /// Set this program's open-file limit; children inherit it.
-fn set_open_file_limit(soft: Int?, hard: Int?) IOError! -[Env, Exec]> { limit_write(SYS_LIMIT_NOFILE, soft, hard, "set_open_file_limit") }
+set_open_file_limit: fn(soft: Int?, hard: Int?) IOError! -[Env, Exec]> { limit_write(SYS_LIMIT_NOFILE, soft, hard, "set_open_file_limit") }
 
 /// Set this program's core-file size limit in bytes; `(0, hard)` turns off
 /// core dumps for this program and the children it starts afterwards.
-fn set_core_file_limit(soft: Int?, hard: Int?) IOError! -[Env, Exec]> { limit_write(SYS_LIMIT_CORE, soft, hard, "set_core_file_limit") }
+set_core_file_limit: fn(soft: Int?, hard: Int?) IOError! -[Env, Exec]> { limit_write(SYS_LIMIT_CORE, soft, hard, "set_core_file_limit") }
 
 /// Set this program's stack size limit in bytes; children inherit it.
-fn set_stack_limit(soft: Int?, hard: Int?) IOError! -[Env, Exec]> { limit_write(SYS_LIMIT_STACK, soft, hard, "set_stack_limit") }
+set_stack_limit: fn(soft: Int?, hard: Int?) IOError! -[Env, Exec]> { limit_write(SYS_LIMIT_STACK, soft, hard, "set_stack_limit") }
 
 /// CPU time and peak memory of this program, or the sum over every child it
 /// has waited for.
-fn usage(of: UsageOf{.Program}) -[Env]> ResourceUsage IOError! {
-    who :: if of == {
+usage: fn(of: UsageOf{.Program}) -[Env]> ResourceUsage IOError! {
+    who: if of == {
         .Program -> 0
         .Children -> -1
     }
-    row :: core.sys.__rusage(who)
+    row: core.sys.__rusage(who)
     if !row.available -> return Err(unsupported("usage"))
     if row.errno != 0 -> return Err(limit_error(.Read, "usage", row.errno))
-    user :: Duration.microseconds(row.user) ?? return Err(syscall_input(.Read, Val("usage"), "user CPU time is outside Duration's range"))
-    system :: Duration.microseconds(row.system) ?? return Err(syscall_input(.Read, Val("usage"), "system CPU time is outside Duration's range"))
+    user: Duration.microseconds(row.user) ?? return Err(syscall_input(.Read, Val("usage"), "user CPU time is outside Duration's range"))
+    system: Duration.microseconds(row.system) ?? return Err(syscall_input(.Read, Val("usage"), "system CPU time is outside Duration's range"))
     Ok(ResourceUsage{user: user, system: system, peak_memory: row.peak})
 }
 
-fn limit_read(resource: Int, operation: String) -[Env]> (soft: Int?, hard: Int?) IOError! {
-    row :: core.sys.__rlimit(resource)
+limit_read: fn(resource: Int, operation: String) -[Env]> (soft: Int?, hard: Int?) IOError! {
+    row: core.sys.__rlimit(resource)
     if !row.available -> return Err(unsupported(operation))
     if row.errno != 0 -> return Err(limit_error(.Read, operation, row.errno))
     Ok((soft: limit_value(row.soft), hard: limit_value(row.hard)))
 }
 
-fn limit_write(resource: Int, soft: Int?, hard: Int?, operation: String) IOError! {
+limit_write: fn(resource: Int, soft: Int?, hard: Int?, operation: String) IOError! {
     if (soft ?? 0) < 0 || (hard ?? 0) < 0 {
         return Err(IOError.InvalidInput(IOContext{operation: .Write, resource: Val(operation), os_code: None,
             cause: Val("a limit cannot be negative; pass None for unlimited")}))
     }
-    row :: core.sys.__set_rlimit(resource, soft ?? -1, hard ?? -1)
+    row: core.sys.__set_rlimit(resource, soft ?? -1, hard ?? -1)
     if !row.available -> return Err(unsupported(operation))
     if row.value != 0 -> return Err(limit_error(.Write, operation, row.errno))
     Ok()
 }
 
 // The route reads RLIM_INFINITY as -1.
-fn limit_value(raw: Int) -> Int? { if raw < 0 -> None else -> Val(raw) }
+limit_value: fn(raw: Int) -> Int? { if raw < 0 -> None else -> Val(raw) }
 
 // A CPU limit past Duration's range (about 292 years) is unlimited in effect.
-fn limit_duration(raw: Int?) -> Duration? {
-    seconds :: raw ?? return None
+limit_duration: fn(raw: Int?) -> Duration? {
+    seconds: raw ?? return None
     if Duration.seconds(seconds) == {
         .Ok(span) -> Val(span)
         .Err(_) -> None
     }
 }
 
-fn limit_seconds(value: Duration?, operation: String) -> Int? IOError! {
-    span :: value ?? return Ok(None)
-    nanos :: span.in(.Nanoseconds) ?? 0
+limit_seconds: fn(value: Duration?, operation: String) -> Int? IOError! {
+    span: value ?? return Ok(None)
+    nanos: span.in(.Nanoseconds) ?? 0
     if nanos < 0 {
         return Err(IOError.InvalidInput(IOContext{operation: .Write, resource: Val(operation), os_code: None,
             cause: Val("a CPU-time limit cannot be negative; pass None for unlimited")}))
@@ -581,167 +581,167 @@ fn limit_seconds(value: Duration?, operation: String) -> Int? IOError! {
 
 // EPERM (raising a hard limit without privilege) and EINVAL (soft above
 // hard) get their own IOError kinds; the rest keep the errno text.
-fn limit_error(kind: IOOperation, operation: String, errno: Int) -> IOError {
-    context :: IOContext{operation: kind, resource: Val(operation), os_code: Val(errno), cause: Val(core.sys.__errno_text(errno))}
+limit_error: fn(kind: IOOperation, operation: String, errno: Int) -> IOError {
+    context: IOContext{operation: kind, resource: Val(operation), os_code: Val(errno), cause: Val(core.sys.__errno_text(errno))}
     if errno == 1 -> return IOError.PermissionDenied(context)
     if errno == 22 -> return IOError.InvalidInput(context)
     IOError.Other(context)
 }
 
-fn getpgid(pid: Int) -[Env]> Int IOError! {
+getpgid: fn(pid: Int) -[Env]> Int IOError! {
     #Unsafe("posix getpgid: inspect a process group") {
         return call_value(core.sys.__getpgid(pid), "getpgid", .Resolve, None)
     }
 }
 
-fn getsid(pid: Int) -[Env]> Int IOError! {
+getsid: fn(pid: Int) -[Env]> Int IOError! {
     #Unsafe("posix getsid: inspect a process session") {
         return call_value(core.sys.__getsid(pid), "getsid", .Resolve, None)
     }
 }
 
-#Unsafe("posix getpriority: the caller vouches that `which` names this process or one it controls") fn getpriority(which: Int) -[Env]> Int IOError! {
-    row :: core.sys.__getpriority(which)
+#Unsafe("posix getpriority: the caller vouches that `which` names this process or one it controls") getpriority: fn(which: Int) -[Env]> Int IOError! {
+    row: core.sys.__getpriority(which)
     if !row.available -> return Err(unsupported("getpriority"))
     if row.value == -1 && row.errno != 0 -> return Err(syscall_error(.Resolve, None, row.errno))
     Ok(row.value)
 }
 
-#Unsafe("posix setpriority: the caller owns the scheduling priority of the process it changes") fn setpriority(which: Int, priority: Int) IOError! -[Env]> {
+#Unsafe("posix setpriority: the caller owns the scheduling priority of the process it changes") setpriority: fn(which: Int, priority: Int) IOError! -[Env]> {
     call_unit(core.sys.__setpriority(which, priority), "setpriority", .Write, None)
 }
 
-#Unsafe("posix utime: the caller owns the file whose timestamps it rewrites") fn utime(path: String, atime: Int, mtime: Int) IOError! -[FS, Env]> {
+#Unsafe("posix utime: the caller owns the file whose timestamps it rewrites") utime: fn(path: String, atime: Int, mtime: Int) IOError! -[FS, Env]> {
     if is_unix() && has_nul(path) -> return Err(syscall_input(.Write, Val(path), "path contains NUL"))
     call_unit(core.sys.__utime(path, atime, mtime), "utime", .Write, Val(path))
 }
 
-fn sync() Never! -[FS, Env]> { core.sys.__sync_os() }
+sync: fn() Never! -[FS, Env]> { core.sys.__sync_os() }
 
-#Unsafe("posix stop: the caller accepts that the process ends here after the shared cleanup boundary") fn stop(code: Int) Never! -[Env, Exec]> {
+#Unsafe("posix stop: the caller accepts that the process ends here after the shared cleanup boundary") stop: fn(code: Int) Never! -[Env, Exec]> {
     process_api.exit(code)
 }
 
-fn set_current_dir(path: String) IOError! -[FS, Env]> {
+set_current_dir: fn(path: String) IOError! -[FS, Env]> {
     if core.sys.__set_current_dir(path) == {
         .Ok(_) -> Ok(())
         .Err(cause) -> Err(syscall_input(.Resolve, Val(path), cause))
     }
 }
-#Unsafe("posix pipe: the caller owns both returned descriptors and closes each exactly once") fn pipe() -[FS, Env]> [Int] IOError! {
-    row :: core.sys.__pipe()
-    _ :: call_value((available: row.available, value: row.value, errno: row.errno), "pipe", .Resolve, None)
+#Unsafe("posix pipe: the caller owns both returned descriptors and closes each exactly once") pipe: fn() -[FS, Env]> [Int] IOError! {
+    row: core.sys.__pipe()
+    _: call_value((available: row.available, value: row.value, errno: row.errno), "pipe", .Resolve, None)
     Ok([Int]{row.read_fd, row.write_fd})
 }
 
-#Unsafe("posix close_fd: the caller owns `fd` and nothing uses it after this call") fn close_fd(fd: Int) Never! -[FS, Env]> {
+#Unsafe("posix close_fd: the caller owns `fd` and nothing uses it after this call") close_fd: fn(fd: Int) Never! -[FS, Env]> {
     core.sys.__close_fd_os(fd)
 }
 
-fn atexit(handler: fn()) Never! -[Env]> {
+atexit: fn(handler: fn()) Never! -[Env]> {
     core.sys.__atexit_os(handler)
 }
 
 // Every registered handler runs, in registration order, once per SIGINT the
 // process receives, each under its own stop boundary on the runtime's signal
 // dispatcher thread (ProcessSignal.jet jet_rt_native_interrupt).
-fn on_interrupt(handler: fn()) Never! -[Env]> {
+on_interrupt: fn(handler: fn()) Never! -[Env]> {
     core.sys.__interrupt_os(handler)
 }
 
-#Unsafe("posix mkfifo: the caller owns `path` and removes the named pipe it creates") fn mkfifo(path: String, mode: Int) IOError! -[FS, Env]> {
+#Unsafe("posix mkfifo: the caller owns `path` and removes the named pipe it creates") mkfifo: fn(path: String, mode: Int) IOError! -[FS, Env]> {
     if is_unix() && has_nul(path) -> return Err(syscall_input(.Resolve, Val(path), "path contains NUL"))
     call_unit(core.sys.__mkfifo(path, mode), "mkfifo", .Resolve, Val(path))
 }
 
-#Unsafe("posix fork: the caller handles both the parent and the child return and reaps the child") fn fork() -[Env, Exec]> Int IOError! {
+#Unsafe("posix fork: the caller handles both the parent and the child return and reaps the child") fork: fn() -[Env, Exec]> Int IOError! {
     call_value(core.sys.__fork(), "fork", .Resolve, None)
 }
 
-#Unsafe("posix setsid: the caller owns the process session topology it changes") fn setsid() -[Env, Exec]> Int IOError! {
+#Unsafe("posix setsid: the caller owns the process session topology it changes") setsid: fn() -[Env, Exec]> Int IOError! {
     call_value(core.sys.__setsid(), "setsid", .Write, None)
 }
 
-#Unsafe("posix wait: the caller owns the child processes it reaps") fn wait() -[Env, Time.Wait]> Int IOError! {
-    row :: core.sys.__wait()
-    _ :: call_value((available: row.available, value: row.value, errno: row.errno), "wait", .Close, None)
+#Unsafe("posix wait: the caller owns the child processes it reaps") wait: fn() -[Env, Time.Wait]> Int IOError! {
+    row: core.sys.__wait()
+    _: call_value((available: row.available, value: row.value, errno: row.errno), "wait", .Close, None)
     Ok(row.status)
 }
 
-#Unsafe("posix waitpid: the caller owns the child process it reaps") fn waitpid(pid: Int, options: Int) -[Env, Time.Wait]> Int IOError! {
-    row :: core.sys.__waitpid(pid, options)
-    _ :: call_value((available: row.available, value: row.value, errno: row.errno), "waitpid", .Close, None)
+#Unsafe("posix waitpid: the caller owns the child process it reaps") waitpid: fn(pid: Int, options: Int) -[Env, Time.Wait]> Int IOError! {
+    row: core.sys.__waitpid(pid, options)
+    _: call_value((available: row.available, value: row.value, errno: row.errno), "waitpid", .Close, None)
     Ok(row.status)
 }
 
-#Unsafe("posix setuid: the caller drops or changes process credentials deliberately") fn setuid(uid: Int) IOError! -[Env]> {
+#Unsafe("posix setuid: the caller drops or changes process credentials deliberately") setuid: fn(uid: Int) IOError! -[Env]> {
     call_unit(core.sys.__setuid(uid), "setuid", .Write, None)
 }
 
-#Unsafe("posix setgid: the caller drops or changes process credentials deliberately") fn setgid(gid: Int) IOError! -[Env]> {
+#Unsafe("posix setgid: the caller drops or changes process credentials deliberately") setgid: fn(gid: Int) IOError! -[Env]> {
     call_unit(core.sys.__setgid(gid), "setgid", .Write, None)
 }
 
-#Unsafe("posix setpgrp: the caller owns the process group topology it changes") fn setpgrp() IOError! -[Env]> {
+#Unsafe("posix setpgrp: the caller owns the process group topology it changes") setpgrp: fn() IOError! -[Env]> {
     call_unit(core.sys.__setpgrp(), "setpgrp", .Write, None)
 }
 
-#Unsafe("posix setpgid: the caller owns the process group topology it changes") fn setpgid(pid: Int, pgid: Int) IOError! -[Env]> {
+#Unsafe("posix setpgid: the caller owns the process group topology it changes") setpgid: fn(pid: Int, pgid: Int) IOError! -[Env]> {
     call_unit(core.sys.__setpgid(pid, pgid), "setpgid", .Write, None)
 }
 
-#Unsafe("posix kill: the caller owns or is entitled to signal the target process") fn kill(pid: Int, signal: Int) IOError! -[Env]> {
+#Unsafe("posix kill: the caller owns or is entitled to signal the target process") kill: fn(pid: Int, signal: Int) IOError! -[Env]> {
     call_unit(core.sys.__kill(pid, signal), "kill", .Write, None)
 }
 
-#Unsafe("posix initgroups: the caller changes supplementary groups deliberately") fn initgroups(user: String, group: Int) IOError! -[Env]> {
+#Unsafe("posix initgroups: the caller changes supplementary groups deliberately") initgroups: fn(user: String, group: Int) IOError! -[Env]> {
     if is_unix() && has_nul(user) -> return Err(syscall_input(.Write, None, "username contains NUL"))
     call_unit(core.sys.__initgroups(user, group), "initgroups", .Write, None)
 }
 
 
-fn platform() -[Env]> String Never! { "{name()}-{arch()}" }
+platform: fn() -[Env]> String Never! { "{name()}-{arch()}" }
 
-fn is_windows() -[Env]> Bool Never! { family() == "windows" }
+is_windows: fn() -[Env]> Bool Never! { family() == "windows" }
 
-fn is_unix() -[Env]> Bool Never! { family() == "unix" }
+is_unix: fn() -[Env]> Bool Never! { family() == "unix" }
 
-fn is_linux() -[Env]> Bool Never! {
-    platform_name :: ascii_lower(name())
+is_linux: fn() -[Env]> Bool Never! {
+    platform_name: ascii_lower(name())
     platform_name == "linux"
 }
 
-fn is_macos() -[Env]> Bool Never! {
-    platform_name :: ascii_lower(name())
+is_macos: fn() -[Env]> Bool Never! {
+    platform_name: ascii_lower(name())
     platform_name == "macos" || platform_name == "darwin" || platform_name == "osx"
 }
 
-fn uname() -[Env, FS, Exec, Time.Wait]> String Never! { "{name()} {release()} {version()} {arch()}" }
+uname: fn() -[Env, FS, Exec, Time.Wait]> String Never! { "{name()} {release()} {version()} {arch()}" }
 
-fn sysname() -[Env]> String Never! { name() }
+sysname: fn() -[Env]> String Never! { name() }
 
-fn machine() -[Env]> String Never! { arch() }
+machine: fn() -[Env]> String Never! { arch() }
 
-fn getenv(name: String) -[Env]> String? Never! { get(name) }
+getenv: fn(name: String) -[Env]> String? Never! { get(name) }
 
-fn pathsep() -[Env]> String Never! {
+pathsep: fn() -[Env]> String Never! {
     if is_windows() -> return ";"
     ":"
 }
 
-fn linesep() -[Env]> String Never! {
+linesep: fn() -[Env]> String Never! {
     if is_windows() -> return String.from_bytes([U8]{13, 10}) ?? ""
     "\n"
 }
-fn is_env_ident(byte: U8) -> Bool {
-    n :: byte
+is_env_ident: fn(byte: U8) -> Bool {
+    n: byte
     if n >= 65 && n <= 90 -> return true
     if n >= 97 && n <= 122 -> return true
     if n >= 48 && n <= 57 -> return true
     n == 95
 }
 
-fn slice_ascii(raw: [U8], start: Int, end: Int) -> String {
+slice_ascii: fn(raw: [U8], start: Int, end: Int) -> String {
     out := [U8]{}
     i := start
     loop {
@@ -751,10 +751,10 @@ fn slice_ascii(raw: [U8], start: Int, end: Int) -> String {
     }
 }
 
-fn ascii_lower(text: String) -> String {
+ascii_lower: fn(text: String) -> String {
     out := [U8]{}
     loop byte in text.bytes() {
-        n :: byte
+        n: byte
         if n >= 65 && n <= 90 -> &out.push(U8{n + 32}) else -> &out.push(byte)
     }
     String.from_bytes(out) ?? text
@@ -762,7 +762,7 @@ fn ascii_lower(text: String) -> String {
 
 // A platform with no POSIX identity syscall keeps the public zero fact.
 // The provider reports availability, never supplies this fallback.
-fn posix_identity(value: Int?) -> Int Never! { value ?? 0 }
+posix_identity: fn(value: Int?) -> Int Never! { value ?? 0 }
 
 #Test("POSIX identity policy keeps the public zero fact") {
     assert(posix_identity(None) == 0)
@@ -777,19 +777,19 @@ fn posix_identity(value: Int?) -> Int Never! { value ?? 0 }
     assert(expand("é") == "é")
 }
 
-fn host_env(name: String) -[Env]> String? Never! {
+host_env: fn(name: String) -[Env]> String? Never! {
     decode_host_env(core.sys.__host_env(name))
 }
 
-fn decode_host_env(raw: [U8]?) -> String? Never! {
-    bytes :: raw ?? return None
+decode_host_env: fn(raw: [U8]?) -> String? Never! {
+    bytes: raw ?? return None
     Val(String.from_bytes(bytes) ?? return None)
 }
 
 #Test("host environment bytes decode as UTF-8 text") {
     assert(decode_host_env(None) == None)
-    empty :: Val("")
-    accented :: Val("é")
+    empty: Val("")
+    accented: Val("é")
     assert(decode_host_env(Val([U8]{})) == empty)
     assert(decode_host_env(Val([U8]{195, 169})) == accented)
     assert(decode_host_env(Val([U8]{255})) == None)
@@ -797,9 +797,9 @@ fn decode_host_env(raw: [U8]?) -> String? Never! {
 
 // os-release keeps the first matching field, including an explicitly empty
 // value. Only surrounding double quotes are stripped; this is not a shell parser.
-fn release_field(config: String, key: String) -> String? Never! {
-    raw :: config.bytes()
-    wanted :: key.bytes()
+release_field: fn(config: String, key: String) -> String? Never! {
+    raw: config.bytes()
+    wanted: key.bytes()
     start := 0
     loop start < raw.len() {
         end := start
@@ -825,8 +825,8 @@ fn release_field(config: String, key: String) -> String? Never! {
     None
 }
 
-fn command_fact(argv: [String]) -[Exec, Time.Wait]> String Never! {
-    receipt :: process_api.cmd(argv).run() ?? return ""
+command_fact: fn(argv: [String]) -[Exec, Time.Wait]> String Never! {
+    receipt: process_api.cmd(argv).run() ?? return ""
     core.text.trim(receipt.output)
 }
 
@@ -835,38 +835,38 @@ fn command_fact(argv: [String]) -[Exec, Time.Wait]> String Never! {
     assert_eq(release_field("PRETTY_NAME=\"\"\n", "PRETTY_NAME="), Val(""))
     assert_eq(release_field("VERSION_ID='literal'", "VERSION_ID="), Val("'literal'"))
     assert(release_field(" VERSION_ID=indented", "VERSION_ID=") == None)
-    carriage :: String.from_bytes([U8]{13}) ?? panic("ASCII carriage return")
+    carriage: String.from_bytes([U8]{13}) ?? panic("ASCII carriage return")
     assert_eq(release_field("VERSION_ID=\"6.1\"{carriage}\n", "VERSION_ID="), Val("6.1"))
     assert_eq(release_field("VERSION_ID=6.1{carriage}", "VERSION_ID="), Val("6.1{carriage}"))
 }
 
-fn call_value(row: (available: Bool, value: Int, errno: Int), operation: String, kind: IOOperation, resource: String?) -> Int IOError! {
+call_value: fn(row: (available: Bool, value: Int, errno: Int), operation: String, kind: IOOperation, resource: String?) -> Int IOError! {
     if !row.available -> return Err(unsupported(operation))
     if row.value < 0 -> return Err(syscall_error(kind, resource, row.errno))
     Ok(row.value)
 }
 
-fn call_unit(row: (available: Bool, value: Int, errno: Int), operation: String, kind: IOOperation, resource: String?) IOError! {
+call_unit: fn(row: (available: Bool, value: Int, errno: Int), operation: String, kind: IOOperation, resource: String?) IOError! {
     if !row.available -> return Err(unsupported(operation))
     if row.value != 0 -> return Err(syscall_error(kind, resource, row.errno))
     Ok()
 }
 
-fn unsupported(operation: String) -> IOError {
+unsupported: fn(operation: String) -> IOError {
     syscall_input(.Resolve, None, "{operation} is POSIX-only")
 }
 
-fn syscall_error(operation: IOOperation, resource: String?, errno: Int) -> IOError {
+syscall_error: fn(operation: IOOperation, resource: String?, errno: Int) -> IOError {
     syscall_input(operation, resource, core.sys.__errno_text(errno))
 }
 
-fn syscall_input(operation: IOOperation, resource: String?, cause: String) -> IOError {
+syscall_input: fn(operation: IOOperation, resource: String?, cause: String) -> IOError {
     // Preserve the existing Other context: the host's cause string includes
     // errno, while the public os_code field was historically absent.
     IOError.Other(IOContext{operation: operation, resource: resource, os_code: None, cause: Val(cause)})
 }
 
-fn has_nul(value: String) -> Bool {
+has_nul: fn(value: String) -> Bool {
     loop byte in value.bytes() {
         if byte == (U8{0}) -> return true
     }
@@ -885,9 +885,9 @@ fn has_nul(value: String) -> Bool {
 // environment value is text). Everything between metadata and codec, and
 // error provenance afterwards, is source policy rather than a second codec or
 // host environment writer.
-fn decode<Target: Decode>(prefix: String, file: String, allow: [String], names: [(env_name: String, key: String)]) -[FS, Env, Exec]> Target [FieldError]! {
-    found :: __decode_tree(prefix, file, allow, names) ?? return Err(err)
-    previous :: core.encoding.__text_cells_enter()
+decode: fn<Target: Decode>(prefix: String, file: String, allow: [String], names: [(env_name: String, key: String)]) -[FS, Env, Exec]> Target [FieldError]! {
+    found: __decode_tree(prefix, file, allow, names) ?? return Err(err)
+    previous: core.encoding.__text_cells_enter()
     if found.tree.decode<Target>() == {
         .Ok(value) -> {
             core.encoding.__text_cells_leave(previous)
@@ -900,13 +900,13 @@ fn decode<Target: Decode>(prefix: String, file: String, allow: [String], names: 
     }
 }
 
-fn __decode_tree(prefix: String, file: String, allow: [String], names: [(env_name: String, key: String)]) -[FS, Env, Exec]> (tree: Dyn, origins: [(name: String, path: String)]) [FieldError]! {
-    platform :: if core.files.__path_windows() -> PathPlatform.Windows else -> PathPlatform.Unix
-    path :: host_path.from_text(file, platform)
+__decode_tree: fn(prefix: String, file: String, allow: [String], names: [(env_name: String, key: String)]) -[FS, Env, Exec]> (tree: Dyn, origins: [(name: String, path: String)]) [FieldError]! {
+    platform: if core.files.__path_windows() -> PathPlatform.Windows else -> PathPlatform.Unix
+    path: host_path.from_text(file, platform)
     if host_path.is_absolute(path) -> return Err(config_error("E2416: Dotenv.file must be project-relative"))
     cursor := host_path.components(path)
     loop {
-        part :: host_path.next(path, &cursor) ?? break
+        part: host_path.next(path, &cursor) ?? break
         if part.kind == .ParentDir -> return Err(config_error("E2416: Dotenv.file must be project-relative"))
     }
     dotenv := String?{None}
@@ -920,18 +920,18 @@ fn __decode_tree(prefix: String, file: String, allow: [String], names: [(env_nam
     }
     process := [(name: String, value: String)]{}
     loop entry in __env_snapshot() {
-        name :: String.from_bytes(entry.name) ?? next
-        value :: String.from_bytes(entry.value) ?? next
+        name: String.from_bytes(entry.name) ?? next
+        value: String.from_bytes(entry.value) ?? next
         &process.push((name: name, value: value))
     }
-    values :: config_entries(prefix, dotenv, allow, process) ?? return Err(err)
+    values: config_entries(prefix, dotenv, allow, process) ?? return Err(err)
     tree := ConfigTree.Object([(key: String, value: ConfigTree)]{})
     origins := [(name: String, path: String)]{}
     loop entry in values {
         segments := entry.segments
         loop rename in names {
-            full_match :: ascii_lower(entry.name) == ascii_lower(rename.env_name)
-            suffix_match :: ascii_lower(slice_ascii(entry.name.bytes(), prefix.bytes().len(), entry.name.bytes().len())) == ascii_lower(rename.env_name)
+            full_match: ascii_lower(entry.name) == ascii_lower(rename.env_name)
+            suffix_match: ascii_lower(slice_ascii(entry.name.bytes(), prefix.bytes().len(), entry.name.bytes().len())) == ascii_lower(rename.env_name)
             if full_match || suffix_match {
                 segments = [String]{rename.key}
                 break
@@ -943,16 +943,16 @@ fn __decode_tree(prefix: String, file: String, allow: [String], names: [(env_nam
     Ok((tree: config_tree(^tree), origins: origins))
 }
 
-fn __decode_errors(errors: [FieldError], origins: [(name: String, path: String)]) -> [FieldError] Never! {
+__decode_errors: fn(errors: [FieldError], origins: [(name: String, path: String)]) -> [FieldError] Never! {
     framed := [FieldError]{}
     loop error in errors {
         reason := error.reason
-        raw :: error.path.bytes()
+        raw: error.path.bytes()
         start := 0
         loop at in 0..<raw.len() + 1 {
-            separator :: at == raw.len() || raw[at] == (U8{46}) || raw[at] == (U8{91}) || raw[at] == (U8{93})
+            separator: at == raw.len() || raw[at] == (U8{46}) || raw[at] == (U8{91}) || raw[at] == (U8{93})
             if separator {
-                part :: ascii_lower(slice_ascii(raw, start, at))
+                part: ascii_lower(slice_ascii(raw, start, at))
                 if part == "secret" || part == "password" || part == "token" || part == "key" -> reason = "secret value rejected"
                 start = at + 1
             }
@@ -964,7 +964,7 @@ fn __decode_errors(errors: [FieldError], origins: [(name: String, path: String)]
                 break
             }
         }
-        message :: if origin == {
+        message: if origin == {
             .Val(name) -> "E2416: env var {name} -> {error.path}: {reason}"
             .None -> "E2416: config field {error.path}: {reason}"
         }
@@ -973,16 +973,16 @@ fn __decode_errors(errors: [FieldError], origins: [(name: String, path: String)]
     framed
 }
 
-fn config_error(reason: String) -> [FieldError] Never! { [FieldError]{FieldError{path: "", reason: reason}} }
+config_error: fn(reason: String) -> [FieldError] Never! { [FieldError]{FieldError{path: "", reason: reason}} }
 
-struct ConfigEntry { name: String value: String segments: [String] }
-struct ConfigValue { folded: String name: String value: String }
-enum ConfigTree {
+ConfigEntry: struct { name: String value: String segments: [String] }
+ConfigValue: struct { folded: String name: String value: String }
+ConfigTree: enum {
     Text(String)
     Object([(key: String, value: ConfigTree)])
 }
 
-fn ascii_upper(value: String) -> String Never! {
+ascii_upper: fn(value: String) -> String Never! {
     out := [U8]{}
     loop byte in value.bytes() {
         if byte >= (U8{97}) && byte <= (U8{122}) -> &out.push(U8{Int.from_u8(byte) - 32}) else -> &out.push(byte)
@@ -990,17 +990,17 @@ fn ascii_upper(value: String) -> String Never! {
     String.from_bytes(out) ?? panic("ASCII fold preserves UTF-8")
 }
 
-fn config_allowed(name: String, allow: [String]) -> Bool Never! {
+config_allowed: fn(name: String, allow: [String]) -> Bool Never! {
     if name.len() == 0 -> return false
     loop byte in name.bytes() { if byte == (U8{61}) || byte == (U8{0}) -> return false }
     if allow.len() == 0 -> return true
-    folded :: ascii_lower(name)
+    folded: ascii_lower(name)
     loop candidate in allow { if ascii_lower(candidate) == folded -> return true }
     false
 }
 
-fn config_put(values: &[ConfigValue], name: String, value: String) Never! {
-    folded :: ascii_upper(name)
+config_put: fn(values: &[ConfigValue], name: String, value: String) Never! {
+    folded: ascii_upper(name)
     loop index in 0..<values.len() {
         if values[index].folded == folded {
             values[index] = ConfigValue{folded: folded, name: name, value: value}
@@ -1010,7 +1010,7 @@ fn config_put(values: &[ConfigValue], name: String, value: String) Never! {
     &values.push(ConfigValue{folded: folded, name: name, value: value})
 }
 
-fn config_find(raw: [U8], needle: [U8]) -> Int? Never! {
+config_find: fn(raw: [U8], needle: [U8]) -> Int? Never! {
     if needle.len() > raw.len() -> return None
     loop at in 0..<raw.len() - needle.len() + 1 {
         matched := true
@@ -1020,23 +1020,23 @@ fn config_find(raw: [U8], needle: [U8]) -> Int? Never! {
     None
 }
 
-fn config_dotenv_value(value: String) -> String Never! {
-    trimmed :: core.text.trim(value)
-    raw :: trimmed.bytes()
+config_dotenv_value: fn(value: String) -> String Never! {
+    trimmed: core.text.trim(value)
+    raw: trimmed.bytes()
     if raw.len() >= 2 {
-        double_quote :: raw[0] == (U8{34}) && raw[raw.len() - 1] == (U8{34})
-        single_quote :: raw[0] == (U8{39}) && raw[raw.len() - 1] == (U8{39})
+        double_quote: raw[0] == (U8{34}) && raw[raw.len() - 1] == (U8{34})
+        single_quote: raw[0] == (U8{39}) && raw[raw.len() - 1] == (U8{39})
         if double_quote || single_quote -> return slice_ascii(raw, 1, raw.len() - 1)
     }
-    comment :: config_find(raw, " #".bytes()) ?? return trimmed
+    comment: config_find(raw, " #".bytes()) ?? return trimmed
     core.text.trim_end(slice_ascii(raw, 0, comment))
 }
 // Dotenv syntax joins the same typed FieldError domain as Decode failures.
 
-fn config_entries(prefix: String, dotenv: String?, allow: [String], process: [(name: String, value: String)]) -> [ConfigEntry] [FieldError]! {
+config_entries: fn(prefix: String, dotenv: String?, allow: [String], process: [(name: String, value: String)]) -> [ConfigEntry] [FieldError]! {
     values := [ConfigValue]{}
     if dotenv == .Val(contents) {
-        raw :: contents.bytes()
+        raw: contents.bytes()
         start := 0
         line_index := 0
         loop start < raw.len() {
@@ -1047,12 +1047,12 @@ fn config_entries(prefix: String, dotenv: String?, allow: [String], process: [(n
             line := core.text.trim(slice_ascii(raw, start, line_end))
             line_index += 1
             if line.len() > 0 && line.bytes()[0] != (U8{35}) {
-                bytes :: line.bytes()
+                bytes: line.bytes()
                 if bytes.len() >= 7 && slice_ascii(bytes, 0, 7) == "export " -> line = slice_ascii(bytes, 7, bytes.len())
-                equal :: config_find(line.bytes(), "=".bytes()) ?? return Err(config_error("E2416: invalid .env line {line_index}"))
-                name :: core.text.trim(slice_ascii(line.bytes(), 0, equal))
+                equal: config_find(line.bytes(), "=".bytes()) ?? return Err(config_error("E2416: invalid .env line {line_index}"))
+                name: core.text.trim(slice_ascii(line.bytes(), 0, equal))
                 if config_allowed(name, allow) {
-                    value :: config_dotenv_value(slice_ascii(line.bytes(), equal + 1, line.bytes().len()))
+                    value: config_dotenv_value(slice_ascii(line.bytes(), equal + 1, line.bytes().len()))
                     config_put(&values, name, value)
                 }
             }
@@ -1070,17 +1070,17 @@ fn config_entries(prefix: String, dotenv: String?, allow: [String], process: [(n
         }
     }
     out := [ConfigEntry]{}
-    prefix_bytes :: prefix.bytes()
+    prefix_bytes: prefix.bytes()
     loop entry in values {
-        name_bytes :: entry.name.bytes()
+        name_bytes: entry.name.bytes()
         if name_bytes.len() >= prefix_bytes.len() && ascii_lower(slice_ascii(name_bytes, 0, prefix_bytes.len())) == ascii_lower(prefix) {
-            rest :: slice_ascii(name_bytes, prefix_bytes.len(), name_bytes.len())
+            rest: slice_ascii(name_bytes, prefix_bytes.len(), name_bytes.len())
             segments := [String]{}
-            bytes :: rest.bytes()
+            bytes: rest.bytes()
             start := 0
             loop start < bytes.len() {
-                found :: config_find(bytes[start..<bytes.len()], "__".bytes())
-                end :: if found == {
+                found: config_find(bytes[start..<bytes.len()], "__".bytes())
+                end: if found == {
                     .Val(relative) -> start + relative
                     .None -> bytes.len()
                 }
@@ -1093,14 +1093,14 @@ fn config_entries(prefix: String, dotenv: String?, allow: [String], process: [(n
     Ok(out)
 }
 
-fn config_insert(^tree: ConfigTree, segments: [String], at: Int, value: String) -> ConfigTree Never! {
+config_insert: fn(^tree: ConfigTree, segments: [String], at: Int, value: String) -> ConfigTree Never! {
     owned := ^tree
     if ^owned == {
         .Object(pairs) -> {
             out := ^pairs
-            segment :: segments[at]
+            segment: segments[at]
             loop index in 0..<out.len() {
-                matches :: ascii_lower(out[index].key) == ascii_lower(segment)
+                matches: ascii_lower(out[index].key) == ascii_lower(segment)
                 if matches && at + 1 == segments.len() {
                     pair := &out.remove(index, .Slot) ?? panic("checked config entry")
                     &out.insert(index, (key: ^pair.key, value: ConfigTree.Text(value)))
@@ -1108,12 +1108,12 @@ fn config_insert(^tree: ConfigTree, segments: [String], at: Int, value: String) 
                 }
                 if matches && out[index].value == .Object(_) {
                     pair := &out.remove(index, .Slot) ?? panic("checked config entry")
-                    child :: config_insert(^pair.value, segments, at + 1, value)
+                    child: config_insert(^pair.value, segments, at + 1, value)
                     &out.insert(index, (key: ^pair.key, value: ^child))
                     return ConfigTree.Object(^out)
                 }
             }
-            child :: if at + 1 == segments.len() -> ConfigTree.Text(value) else -> config_insert(ConfigTree.Object([(key: String, value: ConfigTree)]{}), segments, at + 1, value)
+            child: if at + 1 == segments.len() -> ConfigTree.Text(value) else -> config_insert(ConfigTree.Object([(key: String, value: ConfigTree)]{}), segments, at + 1, value)
             &out.push((key: segment, value: ^child))
             ConfigTree.Object(^out)
         }
@@ -1121,7 +1121,7 @@ fn config_insert(^tree: ConfigTree, segments: [String], at: Int, value: String) 
     }
 }
 
-fn config_tree(^tree: ConfigTree) -> Dyn Never! {
+config_tree: fn(^tree: ConfigTree) -> Dyn Never! {
     owned := ^tree
     if ^owned == {
         .Text(text) -> Dyn.Text(^text)
@@ -1136,8 +1136,8 @@ fn config_tree(^tree: ConfigTree) -> Dyn Never! {
 }
 
 #Test("Dotenv overlay preserves folded order, process precedence, empty values and nested names") {
-    process :: [(name: String, value: String)]{(name: "App_PORT", value: "9000")}
-    entries :: config_entries("APP_", Val("APP_PORT=8000\nAPP_DB__HOST='local'\nAPP_EMPTY=\n"), [String]{}, process) ?? panic("valid config")
+    process: [(name: String, value: String)]{(name: "App_PORT", value: "9000")}
+    entries: config_entries("APP_", Val("APP_PORT=8000\nAPP_DB__HOST='local'\nAPP_EMPTY=\n"), [String]{}, process) ?? panic("valid config")
     assert_eq(entries[0].name, "APP_DB__HOST")
     assert_eq(entries[0].segments, [String]{"db", "host"})
     assert_eq(entries[0].value, "local")
@@ -1150,7 +1150,7 @@ fn config_tree(^tree: ConfigTree) -> Dyn Never! {
         .Err(errors) -> assert_eq(errors[0].reason, "E2416: invalid .env line 1")
         .Ok(_) -> assert(false)
     }
-    errors :: __decode_errors([FieldError]{FieldError{path: "db.password", reason: "rejected supersecret"}}, [(name: String, path: String)]{(name: "APP_DB__PASSWORD", path: "db.password")})
+    errors: __decode_errors([FieldError]{FieldError{path: "db.password", reason: "rejected supersecret"}}, [(name: String, path: String)]{(name: "APP_DB__PASSWORD", path: "db.password")})
     assert_eq(errors[0].reason, "E2416: env var APP_DB__PASSWORD -> db.password: secret value rejected")
 }
 

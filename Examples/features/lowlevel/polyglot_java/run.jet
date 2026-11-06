@@ -1,9 +1,9 @@
 // Run `jet inspect bind java Counter.java --pkg counter`, then `jet run run.jet`.
-use counter :: java.counter
+use counter: java.counter
 
 // Panic is deny-only; this demo handles the fallible bridge results locally.
-fn run() {
-    handle :: counter.new(40) ?? panic("JVM create failed")
+run: fn() {
+    handle: counter.new(40) ?? panic("JVM create failed")
     print(counter.add(handle, 2) ?? -1)
     print(counter.twice(2.5) ?? -1.0)
     print(counter.explode(handle, -1) ?? -7)

@@ -1,12 +1,12 @@
 
 use {
-    json :: core.encoding.json
-    data :: core.data
-    fs :: core.files
+    json: core.encoding.json
+    data: core.data
+    fs: core.files
 }
 
 #Codable
-struct ExactNumbers {
+ExactNumbers: struct {
     amount: Decimal
     exponent: Decimal
     whole: Decimal
@@ -20,21 +20,21 @@ struct ExactNumbers {
 }
 
 #Codable
-struct SmallI64 {
+SmallI64: struct {
     value: I64
 }
 
 #Codable
-struct ExactIntRow {
+ExactIntRow: struct {
     adjacent_hi: Int
     large: Int
 }
 
-LIMITED_TEXT :: comptime { "1{"0".repeat(1000000)}" }
+LIMITED_TEXT: comptime { "1{"0".repeat(1000000)}" }
 
-fn run() {
-    exact_text :: fs.read("@DIR@/exact.json") ?? panic("exact JSON read")
-    value :: json.decode<ExactNumbers>(exact_text) ?? panic("exact JSON decode")
+run: fn() {
+    exact_text: fs.read("@DIR@/exact.json") ?? panic("exact JSON read")
+    value: json.decode<ExactNumbers>(exact_text) ?? panic("exact JSON decode")
     print(value.amount.to_string())
     print(value.exponent.to_string())
     print(value.whole.to_string())
@@ -46,8 +46,8 @@ fn run() {
     print(value.large.to_string())
     print(value.large_exp.to_string())
 
-    stream_raw :: "{{\"adjacent_hi\":9007199254740993,\"large\":12345678901234567890123456789012345678901234567890}}"
-    rows :: data.json<ExactIntRow>("[{stream_raw}]") ?? panic("stream decode")
+    stream_raw: "{{\"adjacent_hi\":9007199254740993,\"large\":12345678901234567890123456789012345678901234567890}}"
+    rows: data.json<ExactIntRow>("[{stream_raw}]") ?? panic("stream decode")
     loop row in rows {
         print(row.adjacent_hi.to_string())
         print(row.large.to_string())
@@ -59,9 +59,9 @@ fn run() {
     json.decode<Decimal>("Infinity") ? _value -> { print("accepted") } ! _error -> { print("infinity-rejected") }
     json.decode<Int>("1.5") ? _value -> { print("accepted") } ! _error -> { print("fractional-rejected") }
     json.decode<Decimal>("1e1000001") ? _value -> { print("accepted") } ! _error -> { print("exponent-limit") }
-    mismatch_text :: fs.read("@DIR@/mismatch.json") ?? panic("mismatch JSON read")
+    mismatch_text: fs.read("@DIR@/mismatch.json") ?? panic("mismatch JSON read")
     json.decode<ExactNumbers>(mismatch_text) ? _value -> { print("accepted") } ! _error -> { print("file-mismatch") }
-    mismatch_raw :: "{{\"amount\":\"12.340\",\"exponent\":1E-5,\"whole\":100,\"tenth\":0.1,\"tenth_with_zero\":0.10,\"scientific_tenth\":1e-1,\"adjacent_lo\":1,\"adjacent_hi\":1,\"large\":1,\"large_exp\":1}}"
+    mismatch_raw: "{{\"amount\":\"12.340\",\"exponent\":1E-5,\"whole\":100,\"tenth\":0.1,\"tenth_with_zero\":0.10,\"scientific_tenth\":1e-1,\"adjacent_lo\":1,\"adjacent_hi\":1,\"large\":1,\"large_exp\":1}}"
     json.decode<ExactNumbers>(mismatch_raw) ? _value -> { print("accepted") } ! _error -> { print("mismatch") }
     data.json<ExactNumbers>("[{mismatch_raw}]") ? _value -> { print("accepted") } ! _error -> { print("stream-mismatch") }
     json.decode<String>("123") ? _value -> { print("accepted") } ! _error -> { print("string-mismatch") }

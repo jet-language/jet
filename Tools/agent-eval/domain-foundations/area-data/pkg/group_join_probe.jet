@@ -1,18 +1,18 @@
-use data :: core.data
+use data: core.data
 
 #Codable
-struct Row { team: String value: Float }
+Row: struct { team: String value: Float }
 
 #Codable
-struct Owner { team: String owner: String }
+Owner: struct { team: String owner: String }
 
 #Codable
-struct Summary { team: String mean: Float }
+Summary: struct { team: String mean: Float }
 
 #Codable
-struct Joined { team: String owner: String mean: Float }
+Joined: struct { team: String owner: String mean: Float }
 
-fn join_summaries(rows: [Summary], owners: [Owner]) -> [Joined] {
+join_summaries: fn(rows: [Summary], owners: [Owner]) -> [Joined] {
     out := [Joined]{}
     loop row in rows {
         loop owner in owners {
@@ -25,9 +25,9 @@ fn join_summaries(rows: [Summary], owners: [Owner]) -> [Joined] {
     return out
 }
 
-fn run() {
-    rows :: data.csv<Row>("team,value\nA,2.0\nB,4.0\nA,6.0\n") ?? panic("csv")
-    groups :: data.query(rows)
+run: fn() {
+    rows: data.csv<Row>("team,value\nA,2.0\nB,4.0\nA,6.0\n") ?? panic("csv")
+    groups: data.query(rows)
         .group_by(row -> row.team)
         .mean(row -> row.value)
         .collect() ?? panic("groups")
@@ -35,7 +35,7 @@ fn run() {
     loop group in groups {
         &summaries.push(Summary{team: group.key, mean: group.value})
     }
-    owners :: [Owner]{{team: "A", owner: "Ada"}, {team: "B", owner: "Grace"}}
-    joined :: join_summaries(summaries, owners)
+    owners: [Owner]{{team: "A", owner: "Ada"}, {team: "B", owner: "Grace"}}
+    joined: join_summaries(summaries, owners)
     print("groups={groups.len()} joined={joined.len()} {joined[0].owner} {joined[1].mean}")
 }

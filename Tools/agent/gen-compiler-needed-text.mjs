@@ -84,10 +84,10 @@ for (const name of ['ALPHABETIC', 'NUMERIC']) {
       const helper = `${symbol}_${index}`;
       chunks.push([part[0][0], part.at(-1)[1], helper]);
       writeFileSync(root + `Compiler/JetRuntime/Source/CompilerNeededText${label}${index}.jet`,
-        header + `fn ${helper}(cp: I64) -> Bool Never! {\n${tree(part)}}\n`);
+        header + `${helper}: fn(cp: I64) -> Bool Never! {\n${tree(part)}}\n`);
     }
   }
   const body = chunks.length ? tree(chunks, '    ', row => `${row[2]}(cp)`) : tree(rows);
   writeFileSync(root + `Compiler/JetRuntime/Source/CompilerNeededText${label}.jet`,
-    header + `fn ${symbol}(cp: I64) -> Bool Never! {\n${body}}\n`);
+    header + `${symbol}: fn(cp: I64) -> Bool Never! {\n${body}}\n`);
 }

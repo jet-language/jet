@@ -4,20 +4,20 @@
 // field order, so equal locks always produce equal bytes.
 use jet_foundation.[Record]
 
-SEMANTIC_LOCK_VERSION_KEY :: "semantic-lock-version"
-SEMANTIC_LOCK_RECORD_HEADER :: "[[semantic_record]]"
-SEMANTIC_LOCK_RATIONALE_HEADER :: "[[semantic_record.rationale]]"
-SEMANTIC_LOCK_INPUT_HEADER :: "[[lock_input]]"
-SEMANTIC_LOCK_SOURCE_MAP_HEADER :: "[[source_map]]"
+SEMANTIC_LOCK_VERSION_KEY: "semantic-lock-version"
+SEMANTIC_LOCK_RECORD_HEADER: "[[semantic_record]]"
+SEMANTIC_LOCK_RATIONALE_HEADER: "[[semantic_record.rationale]]"
+SEMANTIC_LOCK_INPUT_HEADER: "[[lock_input]]"
+SEMANTIC_LOCK_SOURCE_MAP_HEADER: "[[source_map]]"
 
 // The block a header line opens.
-enum SemanticLockSection {
+SemanticLockSection: enum {
     Record
     Rationale
     Input
     SourceMap
 
-    fn from_header(line: String) -> SemanticLockSection? Never! {
+    from_header: fn(line: String) -> SemanticLockSection? Never! {
         if line == {
             SEMANTIC_LOCK_RECORD_HEADER -> Val(SemanticLockSection.Record)
             SEMANTIC_LOCK_RATIONALE_HEADER -> Val(SemanticLockSection.Rationale)
@@ -29,17 +29,17 @@ enum SemanticLockSection {
 }
 
 // `key = "value"` with `\` and `"` escaped.
-fn trust_lock_line(key: String, value: String) -> String Never! {
+trust_lock_line: fn(key: String, value: String) -> String Never! {
     "{key} = \"{trust_lock_escape(value)}\"\n"
 }
 
-fn trust_lock_escape(value: String) -> String Never! {
+trust_lock_escape: fn(value: String) -> String Never! {
     trust_text_replace_all(trust_text_replace_all(value, "\\", "\\\\"), "\"", "\\\"")
 }
 
 // Source maps in Rust's derived `Ord` order: pattern, then sources. A stable
 // insertion keeps equal entries in their given order.
-fn trust_lock_sorted_source_maps(maps: [SourceMapEntry]) -> [SourceMapEntry] Never! {
+trust_lock_sorted_source_maps: fn(maps: [SourceMapEntry]) -> [SourceMapEntry] Never! {
     sorted := [SourceMapEntry]{}
     loop map in maps {
         at := sorted.len()
@@ -49,31 +49,31 @@ fn trust_lock_sorted_source_maps(maps: [SourceMapEntry]) -> [SourceMapEntry] Nev
     sorted
 }
 
-fn trust_lock_source_map_before(left: SourceMapEntry, right: SourceMapEntry) -> Bool Never! {
+trust_lock_source_map_before: fn(left: SourceMapEntry, right: SourceMapEntry) -> Bool Never! {
     if left.pattern != right.pattern -> return left.pattern < right.pattern
     trust_text_compare_lists(left.sources, right.sources) < 0
 }
 
 // Rust `parse_string_list`: the items of a `["a", "b"]` value.
-fn trust_lock_string_list(raw: String) -> [String] Never! {
+trust_lock_string_list: fn(raw: String) -> [String] Never! {
     inner := raw.trim()
     loop inner.starts_with("[") -> inner = inner.removeprefix("[")
     loop inner.ends_with("]") -> inner = inner.removesuffix("]")
     if inner == "" -> return [String]{}
     items := [String]{}
     loop piece in trust_text_split(inner, TRUST_COMMA) {
-        item :: trust_text_trim_byte(piece.trim(), TRUST_QUOTE)
+        item: trust_text_trim_byte(piece.trim(), TRUST_QUOTE)
         if item != "" -> &items.push(item)
     }
     items
 }
 
 // Strip the semantic sections so the machine lock keeps its own bytes.
-fn trust_strip_semantic_sections(raw: String) -> String Never! {
+trust_strip_semantic_sections: fn(raw: String) -> String Never! {
     out := [String]{}
     skipping := false
     loop line in trust_text_lines(raw) {
-        trimmed :: line.trim()
+        trimmed: line.trim()
         if trimmed.starts_with("[") {
             skipping = SemanticLockSection.from_header(trimmed) != None
             if skipping -> next
@@ -86,7 +86,7 @@ fn trust_strip_semantic_sections(raw: String) -> String Never! {
 }
 
 // A record under construction; `finish` requires `kind` and `key`.
-struct PartialSemanticRecord {
+PartialSemanticRecord: struct {
     kind: LockRecordKind?
     key: String?
     exact: String?
@@ -95,11 +95,11 @@ struct PartialSemanticRecord {
     rationales: [LockRationale]
     future_fields: [String: String]
 
-    fn empty() -> PartialSemanticRecord Never! {
+    empty: fn() -> PartialSemanticRecord Never! {
         PartialSemanticRecord{kind: None, key: None, exact: None, hash: None, platform: None, rationales: [LockRationale]{}, future_fields: [String: String]{}}
     }
 
-    fn set(&self, key: String, value: String) Never! {
+    set: fn(&self, key: String, value: String) Never! {
         if key == {
             "kind" -> self.kind = Val(LockRecordKind.parse(value))
             "key" -> self.key = Val(value)
@@ -111,20 +111,20 @@ struct PartialSemanticRecord {
         }
     }
 
-    fn finish(self) -> SemanticRecord? Never! {
-        kind :: self.kind ?? return None
-        key :: self.key ?? return None
-        identity :: LockIdentity{kind, key, exact: self.exact ?? "", hash: self.hash ?? "", platform: self.platform ?? ""}
+    finish: fn(self) -> SemanticRecord? Never! {
+        kind: self.kind ?? return None
+        key: self.key ?? return None
+        identity: LockIdentity{kind, key, exact: self.exact ?? "", hash: self.hash ?? "", platform: self.platform ?? ""}
         Val(SemanticRecord{identity, rationales: self.rationales, future_fields: self.future_fields})
     }
 }
 
-struct PartialLockInput {
+PartialLockInput: struct {
     name: String?
     url: String?
     follows: String
 
-    fn set(&self, key: String, value: String) Never! {
+    set: fn(&self, key: String, value: String) Never! {
         if key == {
             "name" -> self.name = Val(value)
             "url" -> self.url = Val(value)
@@ -133,17 +133,17 @@ struct PartialLockInput {
         }
     }
 
-    fn finish(self) -> LockInput? Never! {
-        name :: self.name ?? return None
+    finish: fn(self) -> LockInput? Never! {
+        name: self.name ?? return None
         Val(LockInput{name, url: self.url ?? "", follows: self.follows})
     }
 }
 
-struct PartialSourceMap {
+PartialSourceMap: struct {
     pattern: String?
     sources: [String]
 
-    fn set(&self, key: String, value: String) Never! {
+    set: fn(&self, key: String, value: String) Never! {
         if key == {
             "pattern" -> self.pattern = Val(value)
             "sources" -> self.sources = trust_lock_string_list(value)
@@ -152,14 +152,14 @@ struct PartialSourceMap {
         }
     }
 
-    fn finish(self) -> SourceMapEntry? Never! {
-        pattern :: self.pattern ?? return None
+    finish: fn(self) -> SourceMapEntry? Never! {
+        pattern: self.pattern ?? return None
         Val(SourceMapEntry{pattern, sources: self.sources})
     }
 }
 
 // Line-driven reader state. Each `in_*` flag says whether that block is open.
-struct SemanticLockReader {
+SemanticLockReader: struct {
     lock: SemanticLockFile
     record: PartialSemanticRecord
     in_record: Bool
@@ -170,7 +170,7 @@ struct SemanticLockReader {
     source_map: PartialSourceMap
     in_source_map: Bool
 
-    fn new() -> SemanticLockReader Never! {
+    new: fn() -> SemanticLockReader Never! {
         SemanticLockReader{
             lock: SemanticLockFile.empty(),
             record: PartialSemanticRecord.empty(),
@@ -185,13 +185,13 @@ struct SemanticLockReader {
     }
 
     // An open rationale always closes; it attaches only to an open record.
-    fn flush_rationale(&self) Never! {
+    flush_rationale: fn(&self) Never! {
         if self.in_record && self.in_rationale -> &self.record.rationales.push(self.rationale)
         self.in_rationale = false
         self.rationale = LockRationale.empty()
     }
 
-    fn flush_blocks(&self) Never! {
+    flush_blocks: fn(&self) Never! {
         &self.flush_rationale()
         if self.in_record {
             if self.record.finish() == {
@@ -219,7 +219,7 @@ struct SemanticLockReader {
         }
     }
 
-    fn open(&self, section: SemanticLockSection) Never! {
+    open: fn(&self, section: SemanticLockSection) Never! {
         if section == {
             .Rationale -> {
                 &self.flush_rationale()
@@ -242,7 +242,7 @@ struct SemanticLockReader {
 
     // A field goes to the innermost open block: rationale, input, source
     // map, then record.
-    fn field(&self, key: String, value: String) Never! {
+    field: fn(&self, key: String, value: String) Never! {
         if {
             self.in_rationale -> &self.rationale.set_field(key, value)
             self.in_input -> &self.input.set(key, value)
@@ -255,10 +255,10 @@ struct SemanticLockReader {
 
 // Rust `SemanticLock::parse`: blank and `#` lines are skipped, unknown
 // lines ignored, and incomplete blocks dropped.
-fn trust_parse_semantic_lock(raw: String) -> SemanticLockFile Never! {
+trust_parse_semantic_lock: fn(raw: String) -> SemanticLockFile Never! {
     reader := SemanticLockReader.new()
     loop raw_line in trust_text_lines(raw) {
-        line :: raw_line.trim()
+        line: raw_line.trim()
         if line == "" || line.starts_with("#") -> next
         if SemanticLockSection.from_header(line) == {
             .Val(section) -> {
@@ -267,10 +267,10 @@ fn trust_parse_semantic_lock(raw: String) -> SemanticLockFile Never! {
             }
             .None -> {}
         }
-        parts :: trust_text_split_first(line, TRUST_EQUALS) ?? next
-        key :: parts.before.trim()
-        unquoted :: trust_text_trim_byte(parts.after.trim(), TRUST_QUOTE)
-        value :: trust_text_replace_all(trust_text_replace_all(unquoted, "\\\"", "\""), "\\\\", "\\")
+        parts: trust_text_split_first(line, TRUST_EQUALS) ?? next
+        key: parts.before.trim()
+        unquoted: trust_text_trim_byte(parts.after.trim(), TRUST_QUOTE)
+        value: trust_text_replace_all(trust_text_replace_all(unquoted, "\\\"", "\""), "\\\\", "\\")
         &reader.field(key, value)
     }
     &reader.flush_blocks()
@@ -278,12 +278,12 @@ fn trust_parse_semantic_lock(raw: String) -> SemanticLockFile Never! {
 }
 
 // Rust `SemanticLock::write`.
-fn trust_write_semantic_lock(lock: SemanticLockFile) -> String Never! {
+trust_write_semantic_lock: fn(lock: SemanticLockFile) -> String Never! {
     records := lock.records
     &records.sort_by(record -> record.identity.semantic_key())
     inputs := lock.inputs
     &inputs.sort_by((left: LockInput, right: LockInput) -> (left.name <=> right.name).then(left.url <=> right.url).then(left.follows <=> right.follows))
-    source_maps :: trust_lock_sorted_source_maps(lock.source_maps)
+    source_maps: trust_lock_sorted_source_maps(lock.source_maps)
     out := [String]{"{SEMANTIC_LOCK_VERSION_KEY} = 1\n"}
     loop input in inputs {
         &out.push("\n{SEMANTIC_LOCK_INPUT_HEADER}\n")

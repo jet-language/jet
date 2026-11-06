@@ -11,16 +11,16 @@ use {
     jetpack_foundation.[BUILTIN_FIND]
 }
 
-fn envmodel_evaluate_integration_imports(imports: [Expr], scope: ModuleEvalScope, globals: [String: CtValue]) -> [EnvironmentIntegration] EnvModelEvalError! {
+envmodel_evaluate_integration_imports: fn(imports: [Expr], scope: ModuleEvalScope, globals: [String: CtValue]) -> [EnvironmentIntegration] EnvModelEvalError! {
     leaves := [Expr]{}
     loop import in imports -> envmodel_collect_import_leaves(import, &leaves)
     integrations := [EnvironmentIntegration]{}
     loop import in leaves {
-        name :: envmodel_qualified_call_name(import) ?? next
+        name: envmodel_qualified_call_name(import) ?? next
         if name == BUILTIN_FIND -> next
-        kind :: IntegrationKind.from_call(name) ?? return Err(envmodel_bad_import_directive(expr_span(import)))
-        call :: envmodel_integration_call_parts(import) ?? next
-        integration :: envmodel_evaluate_integration_call(name, call.args, kind, scope, globals)
+        kind: IntegrationKind.from_call(name) ?? return Err(envmodel_bad_import_directive(expr_span(import)))
+        call: envmodel_integration_call_parts(import) ?? next
+        integration: envmodel_evaluate_integration_call(name, call.args, kind, scope, globals)
         existing := EnvironmentIntegration?{None}
         loop item in integrations {
             if item.name == integration.name -> existing = Val(item)
@@ -37,7 +37,7 @@ fn envmodel_evaluate_integration_imports(imports: [Expr], scope: ModuleEvalScope
 
 // The arguments and name span of an integration call leaf; None for a leaf
 // that is not a call.
-fn envmodel_integration_call_parts(import: Expr) -> (args: [CallArg], name_span: Span)? Never! {
+envmodel_integration_call_parts: fn(import: Expr) -> (args: [CallArg], name_span: Span)? Never! {
     if import == {
         .Call(call, _) -> Val((args: call.args, name_span: call.name_span))
         .MethodCall(_, _, method_span, _, _, args, _) -> Val((args: args, name_span: method_span))
@@ -46,7 +46,7 @@ fn envmodel_integration_call_parts(import: Expr) -> (args: [CallArg], name_span:
 }
 
 // `imports: [a, [b, c]]` flattens to its non-list leaves in source order.
-fn envmodel_collect_import_leaves(expr: Expr, out: &[Expr]) Never! {
+envmodel_collect_import_leaves: fn(expr: Expr, out: &[Expr]) Never! {
     if expr == {
         .ListLit(items, _, _) -> {
             loop item in items -> envmodel_collect_import_leaves(item, &out)
@@ -56,14 +56,14 @@ fn envmodel_collect_import_leaves(expr: Expr, out: &[Expr]) Never! {
 }
 
 // The secret-bearing integrations whose inputs must be named references.
-fn envmodel_integration_takes_secrets(kind: IntegrationKind) -> Bool Never! {
+envmodel_integration_takes_secrets: fn(kind: IntegrationKind) -> Bool Never! {
     if kind == {
         .Certificates | .CloudCredentials | .Vault -> true
         else -> false
     }
 }
 
-fn envmodel_evaluate_integration_call(name: String, args: [CallArg], kind: IntegrationKind, scope: ModuleEvalScope, globals: [String: CtValue]) -> EnvironmentIntegration EnvModelEvalError! {
+envmodel_evaluate_integration_call: fn(name: String, args: [CallArg], kind: IntegrationKind, scope: ModuleEvalScope, globals: [String: CtValue]) -> EnvironmentIntegration EnvModelEvalError! {
     integration := EnvironmentIntegration{kind: kind, name: name, preset: kind.as_str()}
     if kind == {
         .Android -> {
@@ -120,19 +120,19 @@ fn envmodel_evaluate_integration_call(name: String, args: [CallArg], kind: Integ
         }
     }
     loop index in 0..<args.len() {
-        arg :: args[index]
-        key :: arg.label?.name ?? "arg{index}"
+        arg: args[index]
+        key: arg.label?.name ?? "arg{index}"
         // Do not evaluate an invalid secret expression. Comptime values can
         // contain the caller's plaintext, while the only accepted secret
         // shape is a named reference already visible in the AST.
-        skip_value :: envmodel_integration_takes_secrets(kind) && envmodel_integration_reference_names(arg.expr) == None
-        value :: if skip_value -> CtValue.Int{value: 0} else -> envmodel_integration_arg_value(arg.expr, scope, globals)
+        skip_value: envmodel_integration_takes_secrets(kind) && envmodel_integration_reference_names(arg.expr) == None
+        value: if skip_value -> CtValue.Int{value: 0} else -> envmodel_integration_arg_value(arg.expr, scope, globals)
         envmodel_lower_integration_arg(&integration, key, arg.expr, value)
     }
     Ok(integration)
 }
 
-fn envmodel_integration_arg_value(expr: Expr, scope: ModuleEvalScope, globals: [String: CtValue]) -> CtValue EnvModelEvalError! {
+envmodel_integration_arg_value: fn(expr: Expr, scope: ModuleEvalScope, globals: [String: CtValue]) -> CtValue EnvModelEvalError! {
     if envmodel_record_literal(expr) == .Val(record) -> return Ok(envmodel_integration_arg_value(record, scope, globals))
     if expr == {
         .Ident(name, _, _) -> Ok(CtValue.Str{value: name})
@@ -145,9 +145,9 @@ fn envmodel_integration_arg_value(expr: Expr, scope: ModuleEvalScope, globals: [
         .MapLit(pairs, _, _) -> {
             lowered := [CtMapEntry]{}
             loop pair in pairs {
-                key_value :: envmodel_integration_arg_value(pair.key, scope, globals)
-                value :: envmodel_integration_arg_value(pair.value, scope, globals)
-                key :: envmodel_scalar_ct_key(key_value) ?? return Err(envmodel_error("E1335", "integration map keys must be deterministic scalar values", "host mappings and integration selections become named graph facts; arbitrary values cannot be used as stable keys", "use a string, integer, boolean, or character key", Val(expr_span(expr))))
+                key_value: envmodel_integration_arg_value(pair.key, scope, globals)
+                value: envmodel_integration_arg_value(pair.value, scope, globals)
+                key: envmodel_scalar_ct_key(key_value) ?? return Err(envmodel_error("E1335", "integration map keys must be deterministic scalar values", "host mappings and integration selections become named graph facts; arbitrary values cannot be used as stable keys", "use a string, integer, boolean, or character key", Val(expr_span(expr))))
                 if !envmodel_ct_map_insert(&lowered, key, value) {
                     return Err(envmodel_error("E1335", "integration map contains a duplicate key", "one integration fact graph cannot silently choose between two values for the same host or secret name", "remove the duplicate key or merge its values", Val(expr_span(expr))))
                 }
@@ -176,11 +176,11 @@ fn envmodel_integration_arg_value(expr: Expr, scope: ModuleEvalScope, globals: [
     }
 }
 
-fn envmodel_lower_integration_arg(integration: &EnvironmentIntegration, key: String, expr: Expr, value: CtValue) Never! {
-    display :: envmodel_integration_value_text(value)
+envmodel_lower_integration_arg: fn(integration: &EnvironmentIntegration, key: String, expr: Expr, value: CtValue) Never! {
+    display: envmodel_integration_value_text(value)
     if integration.kind == {
         .Certificates | .CloudCredentials | .Vault -> {
-            names :: envmodel_integration_reference_names(expr) ?? [String]{}
+            names: envmodel_integration_reference_names(expr) ?? [String]{}
             if names.len() == 0 {
                 &integration.losses.push("{key}: secret input must be a named reference; value was redacted")
             } else {
@@ -209,18 +209,18 @@ fn envmodel_lower_integration_arg(integration: &EnvironmentIntegration, key: Str
 
 // The named references a secret input spells (a name, a field path, or a
 // list of them), or None when any element is not a reference.
-fn envmodel_integration_reference_names(expr: Expr) -> [String]? Never! {
-    unwrapped :: envmodel_unparen(expr)
+envmodel_integration_reference_names: fn(expr: Expr) -> [String]? Never! {
+    unwrapped: envmodel_unparen(expr)
     if unwrapped == {
         .Ident(name, _, _) -> Val([String]{name})
         .Field(_, _, _, _) -> {
-            path :: envmodel_integration_reference_path(unwrapped) ?? return None
+            path: envmodel_integration_reference_path(unwrapped) ?? return None
             Val([String]{path})
         }
         .ListLit(values, _, _) -> {
             names := [String]{}
             loop value in values {
-                found :: envmodel_integration_reference_names(value) ?? return None
+                found: envmodel_integration_reference_names(value) ?? return None
                 loop name in found -> &names.push(name)
             }
             Val(names)
@@ -229,19 +229,19 @@ fn envmodel_integration_reference_names(expr: Expr) -> [String]? Never! {
     }
 }
 
-fn envmodel_integration_reference_path(expr: Expr) -> String? Never! {
-    unwrapped :: envmodel_unparen(expr)
+envmodel_integration_reference_path: fn(expr: Expr) -> String? Never! {
+    unwrapped: envmodel_unparen(expr)
     if unwrapped == {
         .Ident(name, _, _) -> Val(name)
         .Field(base, member, _, _) -> {
-            prefix :: envmodel_integration_reference_path(base) ?? return None
+            prefix: envmodel_integration_reference_path(base) ?? return None
             Val("{prefix}.{member}")
         }
         else -> None
     }
 }
 
-fn envmodel_integration_value_text(value: CtValue) -> String Never! {
+envmodel_integration_value_text: fn(value: CtValue) -> String Never! {
     if value == {
         .Str(text) -> text
         .Int(number) -> "{number}"
@@ -270,7 +270,7 @@ fn envmodel_integration_value_text(value: CtValue) -> String Never! {
     }
 }
 
-fn envmodel_integration_key_text(key: CtKey) -> String Never! {
+envmodel_integration_key_text: fn(key: CtKey) -> String Never! {
     if key == {
         .Int(number) -> "{number}"
         .BigInt(decimal) -> decimal

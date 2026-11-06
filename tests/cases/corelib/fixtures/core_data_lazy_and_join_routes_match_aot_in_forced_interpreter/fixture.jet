@@ -1,28 +1,28 @@
 
-use data :: core.data
+use data: core.data
 
-struct LeftRow {
+LeftRow: struct {
     key: String
     value: Int
 }
 
-struct RightRow {
+RightRow: struct {
     key: String
     owner: String
 }
 
-fn run() {
-    left :: [LeftRow]{LeftRow{key: "a", value: 1}, LeftRow{key: "b", value: 2}}
-    right :: [RightRow]{RightRow{key: "b", owner: "Ada"}, RightRow{key: "c", owner: "Lin"}}
-    query :: data.query(left)
+run: fn() {
+    left: [LeftRow]{LeftRow{key: "a", value: 1}, LeftRow{key: "b", value: 2}}
+    right: [RightRow]{RightRow{key: "b", owner: "Ada"}, RightRow{key: "c", owner: "Lin"}}
+    query: data.query(left)
         .filter(row -> row.value > 1)
         .sort_by(row -> row.key)
-    collected :: query.collect() ?? panic("collect")
+    collected: query.collect() ?? panic("collect")
     print(collected.len())
     print(query.plan()[2])
-    joined :: data.inner_join(left, right, row -> row.key, row -> row.key) ?? panic("join")
+    joined: data.inner_join(left, right, row -> row.key, row -> row.key) ?? panic("join")
     print(joined.len())
-    lefted :: data.left_join(left, right, row -> row.key, row -> row.key) ?? panic("left")
+    lefted: data.left_join(left, right, row -> row.key, row -> row.key) ?? panic("left")
     print(lefted.len())
     loop pair in lefted {
         if pair.right == {

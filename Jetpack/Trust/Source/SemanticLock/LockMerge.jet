@@ -4,7 +4,7 @@
 // conflict only when one owner package explains both.
 use jet_pkg_model.[pkg_overlay_sorted_unique]
 
-struct LockConflict {
+LockConflict: struct {
     semantic_key: String
     owner_package: String
     left_identity: String
@@ -13,12 +13,12 @@ struct LockConflict {
     right_reason: String
 }
 
-struct MergeOutcome {
+MergeOutcome: struct {
     merged: SemanticLockFile
     conflicts: [LockConflict]
 }
 
-struct ExplainFact {
+ExplainFact: struct {
     semantic_key: String
     owners: [String]
     // Every rationale that competed for this resolved record. The first
@@ -34,15 +34,15 @@ struct ExplainFact {
 }
 
 // The resolution of one semantic key present on both sides.
-enum LockMergeStep {
+LockMergeStep: enum {
     Keep(SemanticRecord)
     Conflict(LockConflict)
 }
 
-fn trust_merge_semantic_locks(base: SemanticLockFile, left: SemanticLockFile, right: SemanticLockFile) -> MergeOutcome Never! {
-    base_by_key :: trust_lock_records_by_key(base)
-    left_by_key :: trust_lock_records_by_key(left)
-    right_by_key :: trust_lock_records_by_key(right)
+trust_merge_semantic_locks: fn(base: SemanticLockFile, left: SemanticLockFile, right: SemanticLockFile) -> MergeOutcome Never! {
+    base_by_key: trust_lock_records_by_key(base)
+    left_by_key: trust_lock_records_by_key(left)
+    right_by_key: trust_lock_records_by_key(right)
     keys := left_by_key.keys().to_list()
     loop key in right_by_key.keys() -> &keys.push(key)
     merged := [SemanticRecord]{}
@@ -76,13 +76,13 @@ fn trust_merge_semantic_locks(base: SemanticLockFile, left: SemanticLockFile, ri
 
 // Equal identities union rationales; a side still at the base identity
 // yields; otherwise a shared owner package is a conflict.
-fn trust_merge_record_pair(base: SemanticRecord?, left: SemanticRecord, right: SemanticRecord) -> LockMergeStep Never! {
-    left_identity :: left.identity.machine_identity()
-    right_identity :: right.identity.machine_identity()
+trust_merge_record_pair: fn(base: SemanticRecord?, left: SemanticRecord, right: SemanticRecord) -> LockMergeStep Never! {
+    left_identity: left.identity.machine_identity()
+    right_identity: right.identity.machine_identity()
     if left_identity == right_identity -> return LockMergeStep.Keep(trust_merge_rationales(left, right.rationales))
     if base == {
         .Val(base_record) -> {
-            base_identity :: base_record.identity.machine_identity()
+            base_identity: base_record.identity.machine_identity()
             if left_identity == base_identity -> return LockMergeStep.Keep(right)
             if right_identity == base_identity -> return LockMergeStep.Keep(left)
         }
@@ -95,14 +95,14 @@ fn trust_merge_record_pair(base: SemanticRecord?, left: SemanticRecord, right: S
 }
 
 // Records by semantic key; a later duplicate replaces an earlier one.
-fn trust_lock_records_by_key(lock: SemanticLockFile) -> [String: SemanticRecord] Never! {
+trust_lock_records_by_key: fn(lock: SemanticLockFile) -> [String: SemanticRecord] Never! {
     by_key := [String: SemanticRecord]{}
     loop record in lock.records -> by_key[record.identity.semantic_key()] = record.copy()
     by_key
 }
 
 // Right over left over base for one input name, in name order.
-fn trust_merge_lock_inputs(base: SemanticLockFile, left: SemanticLockFile, right: SemanticLockFile) -> [LockInput] Never! {
+trust_merge_lock_inputs: fn(base: SemanticLockFile, left: SemanticLockFile, right: SemanticLockFile) -> [LockInput] Never! {
     by_name := [String: LockInput]{}
     loop input in base.inputs -> by_name[input.name] = input.copy()
     loop input in left.inputs -> by_name[input.name] = input.copy()
@@ -115,7 +115,7 @@ fn trust_merge_lock_inputs(base: SemanticLockFile, left: SemanticLockFile, right
 }
 
 // Right over left over base for one pattern, in pattern order.
-fn trust_merge_source_maps(base: SemanticLockFile, left: SemanticLockFile, right: SemanticLockFile) -> [SourceMapEntry] Never! {
+trust_merge_source_maps: fn(base: SemanticLockFile, left: SemanticLockFile, right: SemanticLockFile) -> [SourceMapEntry] Never! {
     by_pattern := [String: SourceMapEntry]{}
     loop map in base.source_maps -> by_pattern[map.pattern] = map.copy()
     loop map in left.source_maps -> by_pattern[map.pattern] = map.copy()
@@ -128,7 +128,7 @@ fn trust_merge_source_maps(base: SemanticLockFile, left: SemanticLockFile, right
 }
 
 // `existing` plus each incoming rationale whose (owner, reason) is new.
-fn trust_merge_rationales(existing: SemanticRecord, incoming: [LockRationale]) -> SemanticRecord Never! {
+trust_merge_rationales: fn(existing: SemanticRecord, incoming: [LockRationale]) -> SemanticRecord Never! {
     merged := existing
     loop rationale in incoming {
         seen := false
@@ -144,7 +144,7 @@ fn trust_merge_rationales(existing: SemanticRecord, incoming: [LockRationale]) -
 }
 
 // The first owner package that explains both sides.
-fn trust_lock_conflict(left: SemanticRecord, right: SemanticRecord) -> LockConflict? Never! {
+trust_lock_conflict: fn(left: SemanticRecord, right: SemanticRecord) -> LockConflict? Never! {
     loop left_rationale in left.rationales {
         loop right_rationale in right.rationales {
             if left_rationale.owner_package == right_rationale.owner_package {
@@ -163,14 +163,14 @@ fn trust_lock_conflict(left: SemanticRecord, right: SemanticRecord) -> LockConfl
 }
 
 // Rust `SemanticLock::explain`.
-fn trust_explain_semantic_lock(lock: SemanticLockFile, key: String) -> ExplainFact? Never! {
+trust_explain_semantic_lock: fn(lock: SemanticLockFile, key: String) -> ExplainFact? Never! {
     loop record in lock.records {
         if record.identity.semantic_key() != key -> next
         owners := [String]{}
         loop rationale in record.rationales {
             if rationale.owner_package != "" -> &owners.push(rationale.owner_package)
         }
-        first :: if record.rationales.len() > 0 -> record.rationales[0] else -> LockRationale.empty()
+        first: if record.rationales.len() > 0 -> record.rationales[0] else -> LockRationale.empty()
         return Val(ExplainFact{
             semantic_key: key,
             owners: pkg_overlay_sorted_unique(owners),

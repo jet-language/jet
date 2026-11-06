@@ -9,7 +9,7 @@
 // built-in method. Parameter and result types may name two placeholders:
 // `Self` is the (untagged) receiver type and `T` is the `Atomic<T>` scalar.
 
-enum BuiltinMethodReceiver {
+BuiltinMethodReceiver: enum {
     String
     Bytes
     // Int, Float, Bool, Char, the fixed widths, F32 and inline ranges.
@@ -32,7 +32,7 @@ enum BuiltinMethodReceiver {
     AtomicInt
 }
 
-enum BuiltinMethodLowering {
+BuiltinMethodLowering: enum {
     Builtin(operation: TBuiltinOp)
     // `s.slice(a, b)`: TBuiltinOp.Slice carrying the receiver line.
     StringSlice
@@ -62,7 +62,7 @@ enum BuiltinMethodLowering {
     RegexSource(member: String)
 }
 
-struct BuiltinMethodRow {
+BuiltinMethodRow: struct {
     receiver: BuiltinMethodReceiver
     name: String
     parameters: [Type]
@@ -76,7 +76,7 @@ struct BuiltinMethodRow {
 // execution host. A `TBuiltinOp.StringMethod` row's route name is the method
 // spelling; an overflow row's checked form returns `Self?`.
 
-BUILTIN_METHOD_ROWS :: comptime { [BuiltinMethodRow]{
+BUILTIN_METHOD_ROWS: comptime { [BuiltinMethodRow]{
     // String: measures and predicates. `len` counts characters, as the
     // bootstrap's `LenString` does; `count_bytes` counts UTF-8 bytes.
     {receiver: BuiltinMethodReceiver.String, name: "len", parameters: [Type]{}, result: Type.Int, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.LenString}},
@@ -147,7 +147,7 @@ BUILTIN_METHOD_ROWS :: comptime { [BuiltinMethodRow]{
     {receiver: BuiltinMethodReceiver.String, name: "slice", parameters: [Type]{Type.Int, Type.Int}, result: Type.String, access: AccessConvention.Read, lowering: BuiltinMethodLowering.StringSlice},
     {receiver: BuiltinMethodReceiver.String, name: "slice", parameters: [Type]{Type.Named{name: "Range"}}, result: Type.String, access: AccessConvention.Read, lowering: BuiltinMethodLowering.StringRangeSlice},
     // First-occurrence substring split; an absent separator
-    // yields the whole original string. A `::` binding of `trim`/`after`/
+    // yields the whole original string. A `:` binding of `trim`/`after`/
     // `before` becomes a zero-copy view (Ownership/StringViews.jet).
     {receiver: BuiltinMethodReceiver.String, name: "after", parameters: [Type]{Type.String}, result: Type.String, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.After}},
     {receiver: BuiltinMethodReceiver.String, name: "before", parameters: [Type]{Type.String}, result: Type.String, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.Before}},
@@ -303,7 +303,7 @@ BUILTIN_METHOD_ROWS :: comptime { [BuiltinMethodRow]{
     {receiver: BuiltinMethodReceiver.Atomic, name: "compare_exchange", parameters: [Type]{Type.Named{name: "T"}, Type.Named{name: "T"}}, result: Type.Bool, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Atomic}
 } }
 
-fn builtin_method_strip_tags(ty: Type) -> Type Never! {
+builtin_method_strip_tags: fn(ty: Type) -> Type Never! {
     if ty == {
         .Tagged(_, inner) -> builtin_method_strip_tags(inner)
         else -> ty
@@ -311,7 +311,7 @@ fn builtin_method_strip_tags(ty: Type) -> Type Never! {
 }
 
 // The `Atomic<T>` scalar a receiver carries, if it is a lock-free atomic.
-fn builtin_method_atomic_scalar(receiver: Type) -> Type? {
+builtin_method_atomic_scalar: fn(receiver: Type) -> Type? {
     if builtin_method_strip_tags(receiver) == {
         .Apply(name, args) -> {
             if name == "Atomic" && args.len() == 1 && jet_target_layout_atomic_scalar_type(args[0]) -> return Val(args[0])
@@ -321,7 +321,7 @@ fn builtin_method_atomic_scalar(receiver: Type) -> Type? {
     }
 }
 
-fn builtin_method_receiver_accepts(family: BuiltinMethodReceiver, receiver: Type) -> Bool Never! {
+builtin_method_receiver_accepts: fn(family: BuiltinMethodReceiver, receiver: Type) -> Bool Never! {
     ty := builtin_method_strip_tags(receiver)
     if family == {
         .String -> ty == Type.String
@@ -344,23 +344,23 @@ fn builtin_method_receiver_accepts(family: BuiltinMethodReceiver, receiver: Type
         .Range -> ty == (Type.Named{name: "Range"})
         .Atomic -> builtin_method_atomic_scalar(ty) != None
         .AtomicAdd -> {
-            scalar :: builtin_method_atomic_scalar(ty) ?? return false
+            scalar: builtin_method_atomic_scalar(ty) ?? return false
             jet_target_layout_atomic_add_type(scalar)
         }
         .AtomicInt -> {
-            scalar :: builtin_method_atomic_scalar(ty) ?? return false
+            scalar: builtin_method_atomic_scalar(ty) ?? return false
             builtin_method_strip_tags(scalar) == Type.Int && jet_target_layout_atomic_add_type(scalar)
         }
     }
 }
 
 // The one lookup: the row for this receiver, method and argument count.
-fn builtin_method_row(receiver: Type, method: String, argument_count: Int) -> BuiltinMethodRow? {
+builtin_method_row: fn(receiver: Type, method: String, argument_count: Int) -> BuiltinMethodRow? {
     builtin_method_row_in(BUILTIN_METHOD_ROWS, receiver, method, argument_count)
 }
 
 // The table is a read parameter, so the scan reads its rows in place.
-fn builtin_method_row_in(rows: [BuiltinMethodRow], receiver: Type, method: String, argument_count: Int) -> BuiltinMethodRow? {
+builtin_method_row_in: fn(rows: [BuiltinMethodRow], receiver: Type, method: String, argument_count: Int) -> BuiltinMethodRow? {
     loop row in rows {
         if row.name == method && row.parameters.len() == argument_count && builtin_method_receiver_accepts(row.receiver, receiver) -> return Val(row)
     }
@@ -368,7 +368,7 @@ fn builtin_method_row_in(rows: [BuiltinMethodRow], receiver: Type, method: Strin
 }
 
 // Replace the `Self` and `T` placeholders with the receiver's types.
-fn builtin_method_bind(ty: Type, receiver: Type) -> Type Never! {
+builtin_method_bind: fn(ty: Type, receiver: Type) -> Type Never! {
     self_type := builtin_method_strip_tags(receiver)
     if ty == {
         .Named(name) -> {

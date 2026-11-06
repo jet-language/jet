@@ -8,8 +8,8 @@ use {
     jet_foundation.[DIAGNOSTIC_ERROR]
 }
 
-fn move_mark_fixture_reject(file: String, code: String) {
-    checked :: jet_cli_compile_file(file, false, None, JetDriverCompileMode.Program)
+move_mark_fixture_reject: fn(file: String, code: String) {
+    checked: jet_cli_compile_file(file, false, None, JetDriverCompileMode.Program)
     if checked == {
         .Refused(refusal) -> {
             if !refusal.stderr.contains(code) -> panic("{file}: refusal lost {code}")
@@ -25,8 +25,8 @@ fn move_mark_fixture_reject(file: String, code: String) {
     }
 }
 
-fn move_mark_fixture_accept(file: String) {
-    checked :: jet_cli_compile_file(file, false, None, JetDriverCompileMode.Program)
+move_mark_fixture_accept: fn(file: String) {
+    checked: jet_cli_compile_file(file, false, None, JetDriverCompileMode.Program)
     if checked == {
         .Refused(refusal) -> panic("{file}: {refusal.stderr}")
         .Compiled(result, snapshot) -> {
@@ -39,7 +39,7 @@ fn move_mark_fixture_accept(file: String) {
 }
 
 #Test("move_mark_fixtures") {
-    root :: "Compiler/JetSema/Tests/fixtures"
+    root: "Compiler/JetSema/Tests/fixtures"
     move_mark_fixture_reject("{root}/MoveReadParamArgument.fixture/MoveReadParamArgument.jet", "E0201")
     move_mark_fixture_reject("{root}/MoveReadParamFieldArgument.fixture/MoveReadParamFieldArgument.jet", "E0201")
     move_mark_fixture_reject("{root}/MoveReadParamPush.fixture/MoveReadParamPush.jet", "E0201")

@@ -1,7 +1,7 @@
 
-use api :: core.encoding.base64
+use api: core.encoding.base64
 
-fn report_standard(text: String, expected: U8) {
+report_standard: fn(text: String, expected: U8) {
     if api.decode(text) == {
         .Ok(bytes) -> {
             print(bytes.len())
@@ -12,7 +12,7 @@ fn report_standard(text: String, expected: U8) {
     }
 }
 
-fn report_url(text: String, expected: U8) {
+report_url: fn(text: String, expected: U8) {
     if api.decode_url(text) == {
         .Ok(bytes) -> {
             print(bytes.len())
@@ -23,7 +23,7 @@ fn report_url(text: String, expected: U8) {
     }
 }
 
-fn run() {
+run: fn() {
     print(api.is_base64("jet"))
     print(api.is_base64("Zg=="))
     report_standard("Zg==", U8{102})

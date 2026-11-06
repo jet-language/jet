@@ -1,4 +1,4 @@
-package {
+package: {
     name: "ui_preview_viewport"
     version: "0.1.0"
     authority: { allow: [Browser, IO, Mem.Alloc] }
@@ -7,15 +7,15 @@ package {
 // `ui.preview(name, body, viewport: v)` is the Core preview constructor
 // itself: the callback is a lambda the preview registry retains and renders
 // on demand, and omitting `viewport:` keeps the default desktop viewport.
-use ui :: core.ui
+use ui: core.ui
 
-fn card() -> UINode Never! {
+card: fn() -> UINode Never! {
     ui.box([ui.text("Card title"), ui.node("Card body", 160.0, 48.0)])
 }
 
-fn describe(entry: UIPreview) -> String Never! {
-    kind :: if entry.kind == .Playground -> "playground" else -> "preview"
-    device :: if entry.viewport.device == {
+describe: fn(entry: UIPreview) -> String Never! {
+    kind: if entry.kind == .Playground -> "playground" else -> "preview"
+    device: if entry.viewport.device == {
         .Phone -> "phone"
         .Tablet -> "tablet"
         .Desktop -> "desktop"
@@ -23,10 +23,10 @@ fn describe(entry: UIPreview) -> String Never! {
     "{kind} {entry.name}: {device} {entry.viewport.width}x{entry.viewport.height} @{entry.viewport.scale}x"
 }
 
-fn run() {
-    phone :: ui.preview("card-phone", () -> card(), viewport: ui.phone())
-    fallback :: ui.preview("card-default", () -> card())
-    lab :: ui.playground("card-lab", () -> card(), viewport: ui.tablet())
+run: fn() {
+    phone: ui.preview("card-phone", () -> card(), viewport: ui.phone())
+    fallback: ui.preview("card-default", () -> card())
+    lab: ui.playground("card-lab", () -> card(), viewport: ui.tablet())
     print(describe(phone))
     print(describe(fallback))
     print(describe(lab))

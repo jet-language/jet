@@ -1,4 +1,4 @@
-package {
+package: {
     name: "ui_host_provider"
     version: "0.1.0"
     authority: {
@@ -11,35 +11,35 @@ package {
 // provider only answers primitives. Native has no provider, so each capability
 // is absent; the web harness stubs one.
 use {
-    ui :: core.ui
-    host :: core.ui.host
-    accessibility :: core.ui.host.accessibility
-    clipboard :: core.ui.host.clipboard
-    drag_drop :: core.ui.host.drag_drop
-    ime :: core.ui.host.ime
-    shortcuts :: core.ui.host.shortcuts
+    ui: core.ui
+    host: core.ui.host
+    accessibility: core.ui.host.accessibility
+    clipboard: core.ui.host.clipboard
+    drag_drop: core.ui.host.drag_drop
+    ime: core.ui.host.ime
+    shortcuts: core.ui.host.shortcuts
 }
 
-fn show_ime() {
+show_ime: fn() {
     if ime.poll() == {
         .Ok(event) -> print("ime: {event}")
         .Err(error) -> print("ime: {error}")
     }
 }
 
-fn show_drop() {
+show_drop: fn() {
     if drag_drop.poll() == {
         .Ok(event) -> print("drop: {event}")
         .Err(error) -> print("drop: {error}")
     }
 }
 
-fn run() {
-    facts :: host.capabilities()
+run: fn() {
+    facts: host.capabilities()
     loop fact in facts.facts -> print("capability {fact.capability}: {fact.available}")
 
-    grant :: host.fs_grant(".", host.fs_rights_read_write()) ?? panic("the working directory grant is valid")
-    multiple :: UIFileDialogRequest{kind: .Save, title: "Save", grant: grant.copy(), initial_directory: None, filters: [UIFileFilter]{}, allow_multiple: true}
+    grant: host.fs_grant(".", host.fs_rights_read_write()) ?? panic("the working directory grant is valid")
+    multiple: UIFileDialogRequest{kind: .Save, title: "Save", grant: grant.copy(), initial_directory: None, filters: [UIFileFilter]{}, allow_multiple: true}
     if host.save_file(multiple) == {
         .Ok(selection) -> print("save multiple: {selection.files.len()} files")
         .Err(error) -> print("save multiple: {error}")
@@ -76,7 +76,7 @@ fn run() {
     show_drop()
     show_drop()
 
-    save :: UIShortcut.cmd("s")
+    save: UIShortcut.cmd("s")
     if shortcuts.register(shortcuts.binding(save.copy(), "save") ?? panic("the save binding is valid")) == {
         .Ok(binding) -> print("register: {binding.action}")
         .Err(error) -> print("register: {error}")
@@ -90,8 +90,8 @@ fn run() {
         .Err(error) -> print("dispatch: {error}")
     }
 
-    metadata :: host.accessibility("Notes", "The notes editor") ?? panic("the metadata is valid")
-    node :: ui.text("Notes")
+    metadata: host.accessibility("Notes", "The notes editor") ?? panic("the metadata is valid")
+    node: ui.text("Notes")
     if accessibility.attach(node.copy(), metadata) == {
         .Ok(attached) -> print("attach: {attached.accessibility != None}")
         .Err(error) -> print("attach: {error}")

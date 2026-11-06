@@ -1,11 +1,11 @@
 
-use process :: core.process
-tag Stored { from: [Store.read], deny: [Exec] }
-struct Store {
+use process: core.process
+Stored: tag { from: [Store.read], deny: [Exec] }
+Store: struct {
     value: String
-    fn read(self) -> String { self.value }
+    read: fn(self) -> String { self.value }
 }
-fn run() {
+run: fn() {
     store := Store{ value: "Ada" }
     process.run(["echo", store.read()]) ?? return Err("test")
 }

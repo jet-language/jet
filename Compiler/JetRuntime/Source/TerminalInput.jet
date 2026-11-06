@@ -13,11 +13,11 @@
 // lines on a pipe alike, while a pipe-to-pipe copy still writes stdout once
 // per buffer.
 terminal_input_root := I64{0}
-TERM_INPUT_CAPACITY :: I64{65536}
+TERM_INPUT_CAPACITY: I64{65536}
 // runtime-init: 4 when terminal_input_root
-#Export(c) fn jet_rt_terminal_input_init() {
+#Export(c) jet_rt_terminal_input_init: fn() {
     if (terminal_input_root != I64{0}) -> return
-    root :: jet_rt_alloc(I64{32}, I64{8})
+    root: jet_rt_alloc(I64{32}, I64{8})
     thread_zero(root, I64{32})
     #Unsafe("runtime-init runs before any other thread exists") {
         terminal_input_root = root
@@ -25,17 +25,17 @@ TERM_INPUT_CAPACITY :: I64{65536}
 }
 
 // Caller holds the stdin lock: the number of buffered unread bytes.
-fn term_input_buffered() -> I64 {
+term_input_buffered: fn() -> I64 {
     rt_text_word(wrapping(terminal_input_root + I64{24})) - rt_text_word(wrapping(terminal_input_root + I64{16}))
 }
 
 // Caller holds the stdin lock: the address of the next unread byte.
-fn term_input_next() -> I64 {
+term_input_next: fn() -> I64 {
     rt_text_word(wrapping(terminal_input_root + I64{8})) + rt_text_word(wrapping(terminal_input_root + I64{16}))
 }
 
 // Caller holds the stdin lock: marks `count` buffered bytes read.
-fn term_input_consume(count: I64) {
+term_input_consume: fn(count: I64) {
     rt_text_store(wrapping(terminal_input_root + I64{16}), rt_text_word(wrapping(terminal_input_root + I64{16})) + count)
 }
 
@@ -43,11 +43,11 @@ fn term_input_consume(count: I64) {
 // `count` when they hold none: the stdin line reader's and the terminal
 // stdout's line split. Eight bytes a step: a word holds an LF exactly when
 // its xor with 0x0A..0A has a zero byte (the SWAR zero-byte test).
-fn rt_line_run(start: I64, count: I64) -> I64 {
+rt_line_run: fn(start: I64, count: I64) -> I64 {
     at := I64{0}
-    words :: count - count % I64{8}
+    words: count - count % I64{8}
     loop at < words {
-        word :: rt_text_word(wrapping(start + at)).bit_xor(I64{723401728380766730})
+        word: rt_text_word(wrapping(start + at)).bit_xor(I64{723401728380766730})
         if (wrapping(word - I64{72340172838076673}).bit_and(word.bit_xor(I64{-1})).bit_and(I64{-9187201950435737472}) != I64{0}) -> break
         at += I64{8}
     }
@@ -62,8 +62,8 @@ fn rt_line_run(start: I64, count: I64) -> I64 {
 // refills the buffer. Returns the count read, 0 at end of input, or -errno;
 // EINTR is retried when `retry`, and EBADF is end of input when `ebadf_eof`
 // (std's stdin handle_ebadf).
-fn term_input_fill(retry: Bool, ebadf_eof: Bool) -> I64 {
-    root :: terminal_input_root
+term_input_fill: fn(retry: Bool, ebadf_eof: Bool) -> I64 {
+    root: terminal_input_root
     buffer := rt_text_word(wrapping(root + I64{8}))
     if (buffer == I64{0}) {
         buffer = jet_rt_alloc(TERM_INPUT_CAPACITY, I64{8})
@@ -73,7 +73,7 @@ fn term_input_fill(retry: Bool, ebadf_eof: Bool) -> I64 {
     rt_text_store(wrapping(root + I64{24}), I64{0})
     jet_rt_stdout_flush()
     loop {
-        got :: rt_prove_stdin_read(buffer, TERM_INPUT_CAPACITY)
+        got: rt_prove_stdin_read(buffer, TERM_INPUT_CAPACITY)
         if (got == I64{-4} && retry) -> next
         if (got == I64{-9} && ebadf_eof) -> return I64{0}
         if (got > I64{0}) -> rt_text_store(wrapping(root + I64{24}), got)
@@ -85,10 +85,10 @@ fn term_input_fill(retry: Bool, ebadf_eof: Bool) -> I64 {
 // buffer when it holds any, else from one direct read of stdin (no EINTR
 // retry), as read() would return them. The count, 0 at end of input, or
 // -errno (EBADF included: each caller maps it as before).
-fn term_input_take(into: I64, capacity: I64) -> I64 {
-    buffered :: term_input_buffered()
+term_input_take: fn(into: I64, capacity: I64) -> I64 {
+    buffered: term_input_buffered()
     if (buffered > I64{0}) {
-        count :: if (buffered < capacity) -> buffered else -> capacity
+        count: if (buffered < capacity) -> buffered else -> capacity
         rt_text_bytes_copy(into, term_input_next(), count)
         term_input_consume(count)
         return count
@@ -100,18 +100,18 @@ fn term_input_take(into: I64, capacity: I64) -> I64 {
 // Locked stdin read_to_string, publishing either owned UTF-8 text or empty text
 // plus an owned IO error. Tuple<String, Option<String>>: text, optional-error
 // tag and payload slots.
-#Export(c) fn jet_terminal8_read_all(output: I64, error_tag: I64, error: I64) {
+#Export(c) jet_terminal8_read_all: fn(output: I64, error_tag: I64, error: I64) {
     if (jet_scheduler_native_propagate() != I64{0}) -> return
-    value :: jet_rt_string_builder_new()
+    value: jet_rt_string_builder_new()
     failure := I64{0}
     sync_mutex_lock(terminal_input_root)
     loop {
-        buffered :: term_input_buffered()
+        buffered: term_input_buffered()
         if (buffered > I64{0}) {
             rt_text_append(value, term_input_next(), buffered)
             term_input_consume(buffered)
         }
-        got :: term_input_fill(true, false)
+        got: term_input_fill(true, false)
         if (got == I64{0}) -> break
         if (got < I64{0}) {
             failure = host_errno_cause(-got)
@@ -119,7 +119,7 @@ fn term_input_take(into: I64, capacity: I64) -> I64 {
         }
     }
     sync_mutex_unlock(terminal_input_root)
-    invalid :: text_bytes_utf8_error(rt_text_data(value), rt_text_len(value))
+    invalid: text_bytes_utf8_error(rt_text_data(value), rt_text_len(value))
     if (invalid != I64{0}) {
         jet_rt_string_drop(invalid)
         if (failure != I64{0}) -> jet_rt_string_drop(failure)

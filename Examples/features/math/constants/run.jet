@@ -1,19 +1,19 @@
 // core.math constants: PI, E, TAU, INFINITY and NAN are comptime values,
 // read as `math.PI`, never called. `circle` reads them from another module.
-use math :: core.math
-module circle
+use math: core.math
+circle: module
 
 // A comptime block can read them like any other constant.
-EULER_SQUARED :: comptime { math.E * math.E }
+EULER_SQUARED: comptime { math.E * math.E }
 
 // A generic call in a comptime block infers its type argument from them too.
-LARGER :: comptime { larger(math.PI, math.E) }
+LARGER: comptime { larger(math.PI, math.E) }
 
-fn larger<T: Comparable>(first: T, second: T) -> T {
+larger: fn<T: Comparable>(first: T, second: T) -> T {
     if first > second -> first else -> second
 }
 
-fn run() {
+run: fn() {
     print(math.PI)
     print(math.E)
     print(math.TAU == Float{2.0} * math.PI)
@@ -36,7 +36,7 @@ fn run() {
     print(math.is_finite(math.INFINITY))
 
     // NaN compares unequal to everything, itself included: test it with is_nan.
-    nan :: math.NAN
+    nan: math.NAN
     print(nan == nan)
     print(nan != nan)
     print(nan < Float{1.0} || nan >= Float{1.0})

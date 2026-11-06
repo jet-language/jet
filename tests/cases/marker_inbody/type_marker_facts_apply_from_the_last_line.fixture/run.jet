@@ -1,45 +1,45 @@
 // A type's marker lines may come after everything else in its body; the
 // type's facts are settled once the whole body is read, so the layout, the
 // derived `==` and the methods written before the lines all see them.
-struct Header {
+Header: struct {
     kind: U8
     length: Int
     flag: U8
 
-    fn longer(self, other: Header) -> Bool { self.length > other.length }
+    longer: fn(self, other: Header) -> Bool { self.length > other.length }
 
-    #Layout :: c
+    #Layout: c
 }
 
-struct Loose {
+Loose: struct {
     kind: U8
     length: Int
     flag: U8
 }
 
-enum Mode {
+Mode: enum {
     Fast
     Slow
 
-    fn label(self) -> String {
+    label: fn(self) -> String {
         if self == .Fast -> return "fast"
         "slow"
     }
 
-    #Debug :: false
+    #Debug: false
 }
 
-HEADER_SIZE :: comptime { Header.$layout.size ?? -1 }
+HEADER_SIZE: comptime { Header.$layout.size ?? -1 }
 
-HEADER_FLAG :: comptime { Header.$layout.fields[2].offset ?? -1 }
+HEADER_FLAG: comptime { Header.$layout.fields[2].offset ?? -1 }
 
-LOOSE_SIZE :: comptime { Loose.$layout.size ?? -1 }
+LOOSE_SIZE: comptime { Loose.$layout.size ?? -1 }
 
-fn run() {
+run: fn() {
     print("Header: size {HEADER_SIZE}, flag at {HEADER_FLAG}")
     print("Loose: size {LOOSE_SIZE}")
-    short :: Header{kind: U8{1}, length: 4, flag: U8{0}}
-    long :: Header{kind: U8{2}, length: 9, flag: U8{1}}
+    short: Header{kind: U8{1}, length: 4, flag: U8{0}}
+    long: Header{kind: U8{2}, length: 9, flag: U8{1}}
     print(long.longer(short))
     print(Mode.Slow.label())
 }

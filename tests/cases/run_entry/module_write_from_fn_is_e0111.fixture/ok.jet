@@ -1,16 +1,16 @@
-struct Count { value: Int }
+Count: struct { value: Int }
 
-HITS :: shared Count{value: 0}
+HITS: shared Count{value: 0}
 raw := 0
 
-fn bump() {
+bump: fn() {
     HITS.value += 1
     #Unsafe("this program starts no task, so nothing else writes `raw`") {
         raw += 2
     }
 }
 
-fn run() {
+run: fn() {
     bump()
     bump()
     print("{HITS.value} {raw}")

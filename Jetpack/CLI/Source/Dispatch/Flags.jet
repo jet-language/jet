@@ -5,7 +5,7 @@
 // takes, and `cli_unknown_flag` refuses any other flag before the command runs.
 
 // Parsed global flags shared by every command.
-struct CLIFlags {
+CLIFlags: struct {
     color: ColorChoice
     fixtures: String?
     // Explicit local unofficial nixpkgs catalog. It has no publisher
@@ -79,7 +79,7 @@ struct CLIFlags {
     // `split|fold --check` previews the transition without writing.
     transition_check: Bool
 
-    fn empty() -> CLIFlags Never! {
+    empty: fn() -> CLIFlags Never! {
         CLIFlags{
             color: ColorChoice.Auto,
             fixtures: None,
@@ -126,7 +126,7 @@ struct CLIFlags {
 }
 
 // Flags, positional arguments, and the command after a `--`.
-struct CLIParsed {
+CLIParsed: struct {
     flags: CLIFlags
     positional: [String]
     // Everything after a `--`, if present.
@@ -134,14 +134,14 @@ struct CLIParsed {
 }
 
 // `args[start..]` as an owned list.
-fn cli_tail(args: [String], start: Int) -> [String] Never! {
+cli_tail: fn(args: [String], start: Int) -> [String] Never! {
     out := [String]{}
     loop index in start..<args.len() -> &out.push(args[index])
     out
 }
 
 // Rust `str::trim_start_matches`: strip every leading copy of `prefix`.
-fn cli_trim_start_matches(text: String, prefix: String) -> String Never! {
+cli_trim_start_matches: fn(text: String, prefix: String) -> String Never! {
     if prefix == "" -> return text.copy()
     rest := text
     loop rest.starts_with(prefix) -> rest = rest.removeprefix(prefix)
@@ -149,26 +149,26 @@ fn cli_trim_start_matches(text: String, prefix: String) -> String Never! {
 }
 
 // The value after a flag at `args[index]`, when present.
-fn cli_flag_argument(args: [String], index: Int) -> String? Never! {
+cli_flag_argument: fn(args: [String], index: Int) -> String? Never! {
     if index < args.len() -> return Val(args[index])
     None
 }
 
 // Verb-agnostic parse.
-fn cli_parse_args(args: [String]) -> CLIParsed Never! {
+cli_parse_args: fn(args: [String]) -> CLIParsed Never! {
     cli_parse_args_for("", args)
 }
 
 // Verb-aware parse: `update` and `lock` own their scope flags.
-fn cli_parse_args_for(verb: String, args: [String]) -> CLIParsed Never! {
-    lock_verb :: verb == JETPACK_LOCK_VERB
-    lock_against_prefix :: "{LOCK_DIFF_FLAG_AGAINST}="
+cli_parse_args_for: fn(verb: String, args: [String]) -> CLIParsed Never! {
+    lock_verb: verb == JETPACK_LOCK_VERB
+    lock_against_prefix: "{LOCK_DIFF_FLAG_AGAINST}="
     flags := CLIFlags.empty()
     positional := [String]{}
     command := [String]?{None}
     index := 0
     loop index < args.len() {
-        arg :: args[index]
+        arg: args[index]
         if arg == "--" {
             command = Val(cli_tail(args, index + 1))
             break
@@ -208,7 +208,7 @@ fn cli_parse_args_for(verb: String, args: [String]) -> CLIParsed Never! {
             arg == "--json" -> flags.json = true
             arg == BUILD_FLAG_SHELL_ON_FAIL -> flags.shell_on_fail = true
             arg == TRUST_FLAG_SCOPE -> {
-                scope :: cli_flag_argument(args, index + 1) ?? ""
+                scope: cli_flag_argument(args, index + 1) ?? ""
                 if scope != "" && !scope.starts_with("-") {
                     index += 1
                     flags.trust_scope = Val(scope)
@@ -236,7 +236,7 @@ fn cli_parse_args_for(verb: String, args: [String]) -> CLIParsed Never! {
                 // U16 enter: `-p <pkg>...` greedily consumes bare tokens.
                 index += 1
                 loop index < args.len() {
-                    package :: args[index]
+                    package: args[index]
                     if package == "--" || package.starts_with("-") -> break
                     &flags.packages.push(package)
                     index += 1
@@ -293,7 +293,7 @@ fn cli_parse_args_for(verb: String, args: [String]) -> CLIParsed Never! {
 
 // The arguments before the first `--`; invocation checks never read the
 // child command.
-fn cli_before_argument_separator(args: [String]) -> [String] Never! {
+cli_before_argument_separator: fn(args: [String]) -> [String] Never! {
     out := [String]{}
     loop arg in args {
         if arg == "--" -> break
@@ -304,18 +304,18 @@ fn cli_before_argument_separator(args: [String]) -> [String] Never! {
 
 // The flags every verb takes: color, machine output, the network policy,
 // captured fixtures, and the confirmation bypass.
-CLI_COMMON_FLAGS :: comptime { [String]{"--color=<when>", "--no-color", "--json", "--offline", "--fixtures <dir>", CLI_FLAG_YES_SHORT, CLI_FLAG_YES_LONG} }
+CLI_COMMON_FLAGS: comptime { [String]{"--color=<when>", "--no-color", "--json", "--offline", "--fixtures <dir>", CLI_FLAG_YES_SHORT, CLI_FLAG_YES_LONG} }
 // The flags of every verb that realizes packages.
-CLI_REALIZE_FLAGS :: comptime { [String]{TRUST_BYPASS_FLAG, "--local-nix-catalog <dir>", BUILD_FLAG_SHELL_ON_FAIL} }
+CLI_REALIZE_FLAGS: comptime { [String]{TRUST_BYPASS_FLAG, "--local-nix-catalog <dir>", BUILD_FLAG_SHELL_ON_FAIL} }
 // The environment selectors.
-CLI_SCOPE_FLAGS :: comptime { [String]{"{ENV_FLAG_ENV} <name>", "{ENV_FLAG_PRESET} <name>"} }
+CLI_SCOPE_FLAGS: comptime { [String]{"{ENV_FLAG_ENV} <name>", "{ENV_FLAG_PRESET} <name>"} }
 
 // The flags `verb` takes, each written as the flag, then ` <value>` when it
 // takes the next argument or `=<value>` when the value joins it.
-fn cli_verb_flags(verb: String) -> [String] Never! {
-    realize :: verb == "env" || verb == "use" || verb == JETPACK_IMPORT_VERB || verb == "add" || verb == "update" || verb == "outdated" || verb == "search" || verb == "info" || verb == "explain" || verb == JETPACK_WHY || verb == "__service-probe" || verb == IMAGE_SUBCOMMAND || verb == BRIDGE_SUBCOMMAND || verb == SERVICES_SUBCOMMAND || verb == TOOL_SUBCOMMAND || verb == PROFILE_SUBCOMMAND || verb == BROWSER_SUBCOMMAND
-    scoped :: verb == "env" || verb == "update" || verb == "__service-probe" || verb == IMAGE_SUBCOMMAND || verb == SERVICES_SUBCOMMAND
-    own :: if verb == {
+cli_verb_flags: fn(verb: String) -> [String] Never! {
+    realize: verb == "env" || verb == "use" || verb == JETPACK_IMPORT_VERB || verb == "add" || verb == "update" || verb == "outdated" || verb == "search" || verb == "info" || verb == "explain" || verb == JETPACK_WHY || verb == "__service-probe" || verb == IMAGE_SUBCOMMAND || verb == BRIDGE_SUBCOMMAND || verb == SERVICES_SUBCOMMAND || verb == TOOL_SUBCOMMAND || verb == PROFILE_SUBCOMMAND || verb == BROWSER_SUBCOMMAND
+    scoped: verb == "env" || verb == "update" || verb == "__service-probe" || verb == IMAGE_SUBCOMMAND || verb == SERVICES_SUBCOMMAND
+    own: if verb == {
         "doctor" -> [String]{"--online"}
         "env" -> [String]{"{ENV_FLAG_PACKAGE} <pkg>...", ENV_FLAG_FLAKE, ENV_FLAG_PURE, ENV_FLAG_PREP, ENV_FLAG_EXPLAIN}
         "use" -> [String]{ENV_FLAG_PREP, ENV_FLAG_EXPLAIN}
@@ -346,7 +346,7 @@ fn cli_verb_flags(verb: String) -> [String] Never! {
 
 // The flag a spelling matches: `--env` for `--env <name>`, `--color=` for
 // `--color=<when>`.
-fn cli_flag_spelling_head(spelling: String) -> String Never! {
+cli_flag_spelling_head: fn(spelling: String) -> String Never! {
     if spelling.split_once(" ") == .Val(halves) -> return halves.before.copy()
     if spelling.split_once("=") == .Val(halves) -> return "{halves.before}="
     spelling.copy()
@@ -355,18 +355,18 @@ fn cli_flag_spelling_head(spelling: String) -> String Never! {
 // The first flag before the argument separator that `verb` does not take, or
 // None. A value-taking flag's value is never read as a flag, as the parser
 // consumes it; only `--scope` leaves a following flag in place.
-fn cli_unknown_flag(verb: String, args: [String]) -> String? Never! {
-    legal :: cli_verb_flags(verb)
+cli_unknown_flag: fn(verb: String, args: [String]) -> String? Never! {
+    legal: cli_verb_flags(verb)
     index := 0
     loop index < args.len() {
-        arg :: args[index]
+        arg: args[index]
         if arg == "--" -> break
         index += 1
         if !arg.starts_with("-") || arg == "-" -> next
         takes_value := false
         matched := false
         loop spelling in legal {
-            head :: cli_flag_spelling_head(spelling)
+            head: cli_flag_spelling_head(spelling)
             if head.ends_with("=") {
                 matched = arg.starts_with(head)
             } else {
@@ -376,7 +376,7 @@ fn cli_unknown_flag(verb: String, args: [String]) -> String? Never! {
             if matched -> break
         }
         if !matched -> return Val(arg.copy())
-        scope_without_value :: arg == TRUST_FLAG_SCOPE && (args.get(index) ?? "-").starts_with("-")
+        scope_without_value: arg == TRUST_FLAG_SCOPE && (args.get(index) ?? "-").starts_with("-")
         if takes_value && !scope_without_value -> index += 1
     }
     None

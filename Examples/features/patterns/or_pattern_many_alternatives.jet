@@ -1,7 +1,7 @@
 // D-PATO: an or-pattern arm covers every alternative it lists, however many.
 // Both tables below are else-less, so exhaustiveness (E0307) must count the
 // third and fourth alternatives, on one line or split across lines.
-enum Op {
+Op: enum {
     A(x: Int, ys: [Int])
     B(x: Int, ys: [Int])
     C(x: Int, zs: [Int])
@@ -9,14 +9,14 @@ enum Op {
     E
 }
 
-fn head(op: Op) -> Int {
+head: fn(op: Op) -> Int {
     if op == {
         .A(x, _) | .B(x, _) | .C(x, _) | .D(x, _) -> x
         .E -> 0
     }
 }
 
-fn total(op: Op) -> Int {
+total: fn(op: Op) -> Int {
     sum := 0
     if op == {
         .A(_, values)
@@ -30,7 +30,7 @@ fn total(op: Op) -> Int {
     sum
 }
 
-fn run() {
+run: fn() {
     print(head(Op.C{x: 7, zs: [Int]{1}}))
     print(head(Op.E))
     print(total(Op.D{x: 1, ws: [Int]{2, 3, 4}}))

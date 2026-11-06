@@ -1,34 +1,34 @@
 
-use json :: core.encoding.json
+use json: core.encoding.json
 
-struct WriteOnly {
+WriteOnly: struct {
     marker: Int
 }
 
 impl WriteOnly.Encode {
-    fn encode(self) -> Dyn {
+    encode: fn(self) -> Dyn {
         return Dyn.Text("write")
     }
 }
 
 #Encode
-struct Output {
+Output: struct {
     value: Int | WriteOnly
 }
 
 #Decode
-struct ReadOnly {
+ReadOnly: struct {
     marker: Int
 }
 
 #Decode
-struct Input {
+Input: struct {
     value: Int | ReadOnly
 }
 
-fn run() {
-    output :: Output{ value: WriteOnly{ marker: 1 } }
+run: fn() {
+    output: Output{ value: WriteOnly{ marker: 1 } }
     print(json.to_string(output))
-    _ :: json.decode<Input>("{{\"value\":7}}") ?? panic("input")
+    _: json.decode<Input>("{{\"value\":7}}") ?? panic("input")
     print("ok")
 }

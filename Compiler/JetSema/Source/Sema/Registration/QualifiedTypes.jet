@@ -14,11 +14,11 @@ use jet_foundation.[
     type_identity_equal,
 ]
 
-fn sema_registration_canonicalize_qualified_types(graph: &SemaRegistrationGraph) Never! {
+sema_registration_canonicalize_qualified_types: fn(graph: &SemaRegistrationGraph) Never! {
     module_keys := [[String:Type]]{}
     loop module_index in 0..<graph.modules.len() -> &module_keys.push(sema_registration_module_qualified_keys(graph, module_index))
     loop module_index in 0..<graph.modules.len() {
-        keys :: module_keys[module_index]
+        keys: module_keys[module_index]
         if keys.len() > 0 {
             sema_registration_canonical_functions(&graph.modules[module_index].functions, keys)
             loop nominal in 0..<graph.modules[module_index].nominals.len() -> sema_registration_canonical_functions(&graph.modules[module_index].nominals[nominal].methods, keys)
@@ -29,8 +29,8 @@ fn sema_registration_canonicalize_qualified_types(graph: &SemaRegistrationGraph)
         // in that module's names.
         loop import_index in 0..<graph.modules[module_index].imports.len() {
             loop binding in 0..<graph.modules[module_index].imports[import_index].bindings.len() {
-                source :: graph.modules[module_index].imports[import_index].bindings[binding].symbol.module_name
-                source_index :: sema_registration_module_index(graph, source) ?? next
+                source: graph.modules[module_index].imports[import_index].bindings[binding].symbol.module_name
+                source_index: sema_registration_module_index(graph, source) ?? next
                 if module_keys[source_index].len() == 0 -> next
                 sema_registration_canonical_symbol(&graph.modules[module_index].imports[import_index].bindings[binding].symbol, module_keys[source_index])
             }
@@ -42,7 +42,7 @@ fn sema_registration_canonicalize_qualified_types(graph: &SemaRegistrationGraph)
 // write, mapped to the type it resolves to in that module (the checker's own
 // resolution). A bare name keys only an import binding of a user package's
 // type: local names and Core types keep their spelling.
-fn sema_registration_module_qualified_keys(graph: SemaRegistrationGraph, module_index: Int) -> [String:Type] Never! {
+sema_registration_module_qualified_keys: fn(graph: SemaRegistrationGraph, module_index: Int) -> [String:Type] Never! {
     names := [String]{}
     loop function in graph.modules[module_index].functions -> sema_registration_function_qualified_names(function, &names)
     loop nominal in graph.modules[module_index].nominals {
@@ -55,30 +55,30 @@ fn sema_registration_module_qualified_keys(graph: SemaRegistrationGraph, module_
         if symbol.ty == .Val(ty) -> sema_registration_type_qualified_names(ty, &names)
     }
     keys := [String:Type]{}
-    identity :: graph.modules[module_index].module_identity
+    identity: graph.modules[module_index].module_identity
     loop name in names {
         if !name.contains(".") && !sema_registration_imported_user_type(graph, module_index, identity, name) -> next
-        written :: Type.Named{name: name}
-        resolved :: sema_type_resolve_declared(graph, written, identity)
+        written: Type.Named{name: name}
+        resolved: sema_type_resolve_declared(graph, written, identity)
         if !type_identity_equal(resolved, written) -> keys[name] = resolved
     }
     keys
 }
 
-fn sema_registration_imported_user_type(graph: SemaRegistrationGraph, module_index: Int, identity: String, name: String) -> Bool Never! {
-    found :: sema_registration_lookup_name_at(graph, module_index, identity, name) ?? return false
+sema_registration_imported_user_type: fn(graph: SemaRegistrationGraph, module_index: Int, identity: String, name: String) -> Bool Never! {
+    found: sema_registration_lookup_name_at(graph, module_index, identity, name) ?? return false
     if found.place == {
         .Imported(_, _, _) -> !found.source_module_identity.starts_with("<corelib>/")
         else -> false
     }
 }
 
-fn sema_registration_function_qualified_names(function: SemaRegistrationFunction, names: &[String]) Never! {
+sema_registration_function_qualified_names: fn(function: SemaRegistrationFunction, names: &[String]) Never! {
     sema_registration_type_qualified_names(function.signature, &names)
     loop parameter in function.parameters -> sema_registration_type_qualified_names(parameter.ty, &names)
 }
 
-fn sema_registration_canonical_functions(functions: &[SemaRegistrationFunction], keys: [String:Type]) Never! {
+sema_registration_canonical_functions: fn(functions: &[SemaRegistrationFunction], keys: [String:Type]) Never! {
     loop row in 0..<functions.len() {
         functions[row].signature = sema_registration_canonical_type(functions[row].signature, keys)
         sema_registration_canonical_symbol(&functions[row].symbol, keys)
@@ -89,17 +89,17 @@ fn sema_registration_canonical_functions(functions: &[SemaRegistrationFunction],
     }
 }
 
-fn sema_registration_canonical_symbol(symbol: &Symbol, keys: [String:Type]) Never! {
+sema_registration_canonical_symbol: fn(symbol: &Symbol, keys: [String:Type]) Never! {
     if symbol.ty == .Val(ty) -> symbol.ty = Val(sema_registration_canonical_type(ty, keys))
 }
 
-fn sema_registration_canonical_type(ty: Type, keys: [String:Type]) -> Type Never! {
+sema_registration_canonical_type: fn(ty: Type, keys: [String:Type]) -> Type Never! {
     names := [String]{}
     sema_registration_type_qualified_names(ty, &names)
     found := [String]{}
     actuals := [Type]{}
     loop name in names {
-        resolved :: keys.get(name) ?? next
+        resolved: keys.get(name) ?? next
         &found.push(name)
         &actuals.push(resolved)
     }
@@ -110,7 +110,7 @@ fn sema_registration_canonical_type(ty: Type, keys: [String:Type]) -> Type Never
 // `ty` with each alias-qualified generic head (`alias.Name<T>`, #6410)
 // spelled by the key its `Named` spelling resolves to; the arguments are
 // already canonical.
-fn sema_registration_canonical_heads(ty: Type, keys: [String:Type]) -> Type Never! {
+sema_registration_canonical_heads: fn(ty: Type, keys: [String:Type]) -> Type Never! {
     if ty == {
         .List(inner) -> Type.List{element: sema_registration_canonical_heads(inner, keys)}
         // copy: `key_span` is a payload of read parameter `ty`; field `key_span` of the new Type.Map owns this one
@@ -119,12 +119,12 @@ fn sema_registration_canonical_heads(ty: Type, keys: [String:Type]) -> Type Neve
         .Option(inner) -> Type.Option{inner: sema_registration_canonical_heads(inner, keys)}
         .Result(ok, err) -> Type.Result{ok: sema_registration_canonical_heads(ok, keys), err: sema_registration_canonical_heads(err, keys)}
         .Fn(params, ret, effects, contract, metadata, provenance) -> {
-            canonical :: loop param in params -> sema_registration_canonical_heads(param, keys)
-            canonical_ret :: if ret == .Val(declared) -> Val(sema_registration_canonical_heads(declared, keys)) else -> None
+            canonical: loop param in params -> sema_registration_canonical_heads(param, keys)
+            canonical_ret: if ret == .Val(declared) -> Val(sema_registration_canonical_heads(declared, keys)) else -> None
             Type.Fn{params: canonical, ret: canonical_ret, effect_bound: effects, param_contract: contract, call_metadata: metadata, return_view_provenance: provenance}
         }
         .Apply(name, args) -> {
-            canonical :: loop arg in args -> sema_registration_canonical_heads(arg, keys)
+            canonical: loop arg in args -> sema_registration_canonical_heads(arg, keys)
             head := name.copy()
             if keys.get(name) == .Val(resolved) {
                 if resolved == .Named(key) -> head = key.copy()
@@ -147,7 +147,7 @@ fn sema_registration_canonical_heads(ty: Type, keys: [String:Type]) -> Type Neve
 // The alias-qualified type names in `ty`: `Named` types and generic heads
 // (`alias.Name`, `alias.Name<T>`; a canonical key holds `::` and is already
 // resolved).
-fn sema_registration_type_qualified_names(ty: Type, names: &[String]) Never! {
+sema_registration_type_qualified_names: fn(ty: Type, names: &[String]) Never! {
     if ty == {
         .Named(name) -> sema_registration_push_qualified_name(name, &names)
         .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> sema_registration_type_qualified_names(inner, &names)
@@ -175,6 +175,6 @@ fn sema_registration_type_qualified_names(ty: Type, names: &[String]) Never! {
 
 // An alias-qualified name, or a bare one an import may bind; a canonical key
 // holds `::` and is already resolved.
-fn sema_registration_push_qualified_name(name: String, names: &[String]) Never! {
+sema_registration_push_qualified_name: fn(name: String, names: &[String]) Never! {
     if name != "" && !name.contains("::") && !name.starts_with("type:") && !names.contains(name) -> &names.push(name)
 }

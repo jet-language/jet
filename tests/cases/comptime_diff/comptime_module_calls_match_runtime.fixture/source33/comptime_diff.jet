@@ -1,17 +1,17 @@
 use {
-    comptime_diff_hex :: core.encoding.hex
-    json :: core.encoding.json
-    cbor :: core.encoding.cbor
+    comptime_diff_hex: core.encoding.hex
+    json: core.encoding.json
+    cbor: core.encoding.cbor
 }
-COMPTIME_VALUE :: comptime { json.to_string(cbor.parse(cbor.to_bytes(json.parse("{{\"a\":1,\"b\":[1,2,3]}}") ?? panic("bad")) ?? panic("bad")) ?? panic("bad")) ?? panic("JSON encode") }
+COMPTIME_VALUE: comptime { json.to_string(cbor.parse(cbor.to_bytes(json.parse("{{\"a\":1,\"b\":[1,2,3]}}") ?? panic("bad")) ?? panic("bad")) ?? panic("bad")) ?? panic("JSON encode") }
 
-fn run() {
-    r :: json.to_string(cbor.parse(cbor.to_bytes(json.parse("{{\"a\":1,\"b\":[1,2,3]}}") ?? panic("bad")) ?? panic("bad")) ?? panic("bad")) ?? panic("JSON encode")
+run: fn() {
+    r: json.to_string(cbor.parse(cbor.to_bytes(json.parse("{{\"a\":1,\"b\":[1,2,3]}}") ?? panic("bad")) ?? panic("bad")) ?? panic("bad")) ?? panic("JSON encode")
     comptime_diff_frame("{COMPTIME_VALUE}", "{r}")
 
 }
 
-fn comptime_diff_frame(expected_text: String, actual_text: String) {
+comptime_diff_frame: fn(expected_text: String, actual_text: String) {
     print("{comptime_diff_hex.encode(expected_text.bytes())}")
     print("{comptime_diff_hex.encode(actual_text.bytes())}")
 }

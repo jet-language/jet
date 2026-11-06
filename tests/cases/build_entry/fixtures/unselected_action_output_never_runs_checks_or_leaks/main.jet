@@ -1,10 +1,10 @@
 
-fn build(b: Build) -[Exec, FS]> {
+build: fn(b: Build) -[Exec, FS]> {
     #Impure("declare selected closure") {
-    bad :: b.action("unselected", [], ["missing-generated.jet"], ["sh", "-c", "exit 77"], ["Exec", "FS"])
-    ignored :: b.add_executable("ignored", ["missing-generated.jet"], [bad])
-    app :: b.add_executable("app", ["main.jet"], [])
+    bad: b.action("unselected", [], ["missing-generated.jet"], ["sh", "-c", "exit 77"], ["Exec", "FS"])
+    ignored: b.add_executable("ignored", ["missing-generated.jet"], [bad])
+    app: b.add_executable("app", ["main.jet"], [])
     b.default(app)
     }
 }
-fn run() {}
+run: fn() {}

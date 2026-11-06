@@ -2,23 +2,23 @@
 // (#6096 grammar-highlight). The Rust gates read `jet::Syntax`; the Jet
 // registry is the Data/Syntax text that `jet self devtools grammars` renders
 // from, so these read the same rows the generator reads.
-use gh_files :: core.files
+use gh_files: core.files
 
-GH_SYNTAX_DIR :: "Compiler/JetFoundation/Data/Syntax"
-GH_VSCODE :: "Tools/editors/vscode/syntaxes/jet.tmLanguage.json"
-GH_TREE_SITTER :: "Tools/editors/tree-sitter/grammar.js"
-GH_ZED :: "Tools/editors/zed/languages/jet/highlights.scm"
-GH_NODE_TYPES :: "Tools/editors/tree-sitter/src/node-types.json"
+GH_SYNTAX_DIR: "Compiler/JetFoundation/Data/Syntax"
+GH_VSCODE: "Tools/editors/vscode/syntaxes/jet.tmLanguage.json"
+GH_TREE_SITTER: "Tools/editors/tree-sitter/grammar.js"
+GH_ZED: "Tools/editors/zed/languages/jet/highlights.scm"
+GH_NODE_TYPES: "Tools/editors/tree-sitter/src/node-types.json"
 
-struct GhToken {
+GhToken: struct {
     text: String
     class: String
 }
 
-fn gh_read(path: String) -> String { gh_files.read(path) ?? panic("read {path}: {err}") }
+gh_read: fn(path: String) -> String { gh_files.read(path) ?? panic("read {path}: {err}") }
 
-fn gh_slice(text: String, start: Int, end: Int) -> String {
-    raw :: text.bytes()
+gh_slice: fn(text: String, start: Int, end: Int) -> String {
+    raw: text.bytes()
     if start >= end -> return ""
     String.from_bytes(raw[start..(end - 1)]) ?? panic("grammar slice must end on UTF-8 boundaries")
 }
@@ -26,25 +26,25 @@ fn gh_slice(text: String, start: Int, end: Int) -> String {
 // The byte offset of the first `needle` in `text`, for gh_slice. `String.index`
 // counts Unicode scalars, so its offset only matches gh_slice while every byte
 // before the needle is ASCII.
-fn gh_index(text: String, needle: String) -> Int? {
-    parts :: text.split(needle).to_list()
+gh_index: fn(text: String, needle: String) -> Int? {
+    parts: text.split(needle).to_list()
     if parts.len() < 2 -> return None
     Val(parts[0].count_bytes())
 }
 
-fn gh_has(values: [String], value: String) -> Bool {
+gh_has: fn(values: [String], value: String) -> Bool {
     loop item in values {
         if item == value -> return true
     }
     false
 }
 
-fn gh_is_ident(text: String) -> Bool {
-    bytes :: text.bytes()
+gh_is_ident: fn(text: String) -> Bool {
+    bytes: text.bytes()
     if bytes.len() == 0 -> return false
     loop (index, byte) in bytes {
-        letter :: (byte >= (U8{65}) && byte <= (U8{90})) || (byte >= (U8{97}) && byte <= (U8{122})) || byte == (U8{95})
-        digit :: byte >= (U8{48}) && byte <= (U8{57})
+        letter: (byte >= (U8{65}) && byte <= (U8{90})) || (byte >= (U8{97}) && byte <= (U8{122})) || byte == (U8{95})
+        digit: byte >= (U8{48}) && byte <= (U8{57})
         if !letter && !(digit && index > 0) -> return false
     }
     true
@@ -52,27 +52,27 @@ fn gh_is_ident(text: String) -> Bool {
 
 // A Jet string literal body as the generator decodes it: `{{`/`}}` braces and
 // the backslash escapes the registry uses.
-fn gh_unescape(body: String) -> String {
+gh_unescape: fn(body: String) -> String {
     body.replace("{{{{", "{{").replace("}}}}", "}}").replace("\\\"", "\"").replace("\\\\", "\\")
 }
 
-fn gh_strip_comma(text: String) -> String {
-    trimmed :: text.trim().copy()
+gh_strip_comma: fn(text: String) -> String {
+    trimmed: text.trim().copy()
     if trimmed.ends_with(",") -> return gh_slice(trimmed, 0, trimmed.count_bytes() - 1).trim().copy()
     trimmed
 }
 
-// Every `NAME :: "literal"` constant in the syntax registry directory
+// Every `NAME: "literal"` constant in the syntax registry directory
 // (EditorGrammars.jet `jet_cli_grammar_constants`).
-fn gh_constants() -> [(name: String, value: String)] {
+gh_constants: fn() -> [(name: String, value: String)] {
     constants := [(name: String, value: String)]{}
     loop child in (gh_files.list_dir(GH_SYNTAX_DIR) ?? panic("list {GH_SYNTAX_DIR}: {err}")) {
         if child.is_dir || !child.name.ends_with(".jet") -> next
         loop line in gh_read(child.path).split("\n") {
-            at :: gh_index(line, " :: \"") ?? next
-            name :: gh_slice(line, 0, at)
+            at: gh_index(line, ": \"") ?? next
+            name: gh_slice(line, 0, at)
             if !gh_is_ident(name) -> next
-            rest :: gh_slice(line, at + 5, line.count_bytes())
+            rest: gh_slice(line, at + 3, line.count_bytes())
             close := -1
             escaped := false
             loop (index, byte) in rest.bytes() {
@@ -86,7 +86,7 @@ fn gh_constants() -> [(name: String, value: String)] {
                 }
             }
             if close < 0 -> next
-            tail :: gh_slice(rest, close + 1, rest.count_bytes()).trim().copy()
+            tail: gh_slice(rest, close + 1, rest.count_bytes()).trim().copy()
             if tail != "" && !tail.starts_with("//") -> next
             &constants.push((name: name, value: gh_unescape(gh_slice(rest, 0, close))))
         }
@@ -95,7 +95,7 @@ fn gh_constants() -> [(name: String, value: String)] {
     constants
 }
 
-fn gh_resolve(constants: [(name: String, value: String)], written: String) -> String {
+gh_resolve: fn(constants: [(name: String, value: String)], written: String) -> String {
     if written.starts_with("\"") -> return gh_unescape(gh_slice(written, 1, written.count_bytes() - 1))
     loop constant in constants {
         if constant.name == written -> return constant.value
@@ -105,13 +105,14 @@ fn gh_resolve(constants: [(name: String, value: String)], written: String) -> St
 
 // Active marker rule names (EditorGrammars.jet `jet_cli_grammar_markers`): every
 // top-level struct in the Prelude marker source with an `impl Marker` block.
-fn gh_active_markers() -> [String] {
+gh_active_markers: fn() -> [String] {
     names := [String]{}
     current := String?{None}
     loop line in gh_read("Compiler/Prelude/Markers.jet").split("\n") {
-        if line.starts_with("struct ") {
-            open :: gh_index(line, "{{") ?? panic("marker struct without a body: {line}")
-            current = Val(gh_slice(line, 7, open).trim().copy())
+        if !line.starts_with(" ") && line.contains(": struct") {
+            _: gh_index(line, "{{") ?? panic("marker struct without a body: {line}")
+            colon: gh_index(line, ": struct") ?? panic("marker struct without a name: {line}")
+            current = Val(gh_slice(line, 0, colon).trim().copy())
         } else if line.starts_with("}}") {
             current = None
         } else if current == .Val(name) && line.trim().starts_with("impl Marker") {
@@ -125,20 +126,20 @@ fn gh_active_markers() -> [String] {
 
 // `jet::Syntax::highlighted_tokens_sorted`: the JET_HIGHLIGHT_TOKENS rows plus
 // every active marker rule.
-fn gh_tokens() -> [GhToken] {
-    source :: gh_read("{GH_SYNTAX_DIR}/Highlights.jet")
-    start :: gh_index(source, "JET_HIGHLIGHT_TOKENS :: [HighlightToken]{{") ?? panic("missing JET_HIGHLIGHT_TOKENS table")
-    table :: gh_slice(source, start, source.count_bytes())
-    end :: gh_index(table, "\n}}") ?? panic("unterminated JET_HIGHLIGHT_TOKENS table")
-    constants :: gh_constants()
+gh_tokens: fn() -> [GhToken] {
+    source: gh_read("{GH_SYNTAX_DIR}/Highlights.jet")
+    start: gh_index(source, "JET_HIGHLIGHT_TOKENS: [HighlightToken]{{") ?? panic("missing JET_HIGHLIGHT_TOKENS table")
+    table: gh_slice(source, start, source.count_bytes())
+    end: gh_index(table, "\n}}") ?? panic("unterminated JET_HIGHLIGHT_TOKENS table")
+    constants: gh_constants()
     tokens := [GhToken]{}
     pending := String?{None}
     loop raw in gh_slice(table, 0, end).split("\n") {
-        line :: raw.trim()
+        line: raw.trim()
         if line.starts_with("text:") {
             pending = Val(gh_resolve(constants, gh_strip_comma(gh_slice(line, 5, line.count_bytes()))))
         } else if line.starts_with("class: HighlightClass.") {
-            text :: pending ?? panic("highlight class without text: {line}")
+            text: pending ?? panic("highlight class without text: {line}")
             &tokens.push(GhToken{text: text, class: gh_strip_comma(gh_slice(line, 22, line.count_bytes()))})
             pending = None
         }
@@ -150,15 +151,15 @@ fn gh_tokens() -> [GhToken] {
 
 // tests/grammar.rs:20-39: the generated block, from the start marker's line
 // through the end marker's line.
-fn gh_generated_section(path: String) -> String {
-    text :: gh_read(path)
-    start :: gh_index(text, "BEGIN GENERATED JET SYNTAX HIGHLIGHTS") ?? panic("{path} is missing the generated start")
-    end :: gh_index(text, "END GENERATED JET SYNTAX HIGHLIGHTS") ?? panic("{path} is missing the generated end")
+gh_generated_section: fn(path: String) -> String {
+    text: gh_read(path)
+    start: gh_index(text, "BEGIN GENERATED JET SYNTAX HIGHLIGHTS") ?? panic("{path} is missing the generated start")
+    end: gh_index(text, "END GENERATED JET SYNTAX HIGHLIGHTS") ?? panic("{path} is missing the generated end")
     assert(end > start, "{path} generated end precedes its start")
     gh_slice(text, start, end)
 }
 
-fn gh_regex_escape(text: String) -> String {
+gh_regex_escape: fn(text: String) -> String {
     out := ""
     loop ch in text.chars() {
         if "\\.+*?^$()[]{{}}|/-".contains("{ch}") -> out = "{out}\\"
@@ -167,28 +168,28 @@ fn gh_regex_escape(text: String) -> String {
     out
 }
 
-fn gh_section_has_token(section: String, token: String) -> Bool {
-    escaped :: gh_regex_escape(token)
+gh_section_has_token: fn(section: String, token: String) -> Bool {
+    escaped: gh_regex_escape(token)
     section.contains(token) || section.contains(escaped) || section.contains(escaped.replace("\\", "\\\\"))
 }
 
-fn gh_bracket(text: String) -> Bool { gh_has(["{{", "}}", "[", "]", "(", ")"], text) }
+gh_bracket: fn(text: String) -> Bool { gh_has(["{{", "}}", "[", "]", "(", ")"], text) }
 
 // tests/grammar.rs:274-299.
-fn gh_anonymous_node_types() -> [String] {
+gh_anonymous_node_types: fn() -> [String] {
     out := [String]{}
     current := String?{None}
     named := 0
     loop line in gh_read(GH_NODE_TYPES).split("\n") {
-        trimmed :: line.trim()
+        trimmed: line.trim()
         if line.starts_with("  {{") {
             current = None
             named = 0
         } else if trimmed.starts_with("\"type\":") && current == None {
-            colon :: gh_index(trimmed, ":") ?? next
-            value :: gh_slice(trimmed, colon + 1, trimmed.count_bytes()).trim().copy()
+            colon: gh_index(trimmed, ":") ?? next
+            value: gh_slice(trimmed, colon + 1, trimmed.count_bytes()).trim().copy()
             if value.starts_with("\"") {
-                close :: gh_index(gh_slice(value, 1, value.count_bytes()), "\"") ?? next
+                close: gh_index(gh_slice(value, 1, value.count_bytes()), "\"") ?? next
                 current = Val(gh_slice(value, 1, close + 1))
             }
         } else if trimmed.starts_with("\"named\":") && named == 0 {
@@ -205,12 +206,12 @@ fn gh_anonymous_node_types() -> [String] {
 }
 
 // tests/grammar.rs:301-319.
-fn gh_query_string_literals(query: String) -> [String] {
+gh_query_string_literals: fn(query: String) -> [String] {
     out := [String]{}
     loop line in query.split("\n") {
-        trimmed :: line.trim()
+        trimmed: line.trim()
         if trimmed.starts_with(";") -> next
-        parts :: trimmed.split("\"").to_list()
+        parts: trimmed.split("\"").to_list()
         index := 1
         loop index + 1 < parts.len() {
             &out.push(parts[index].copy())
@@ -220,16 +221,16 @@ fn gh_query_string_literals(query: String) -> [String] {
     out
 }
 
-fn gh_keyword_list() -> [String] {
-    source :: gh_read("{GH_SYNTAX_DIR}/PackageFiles.jet")
-    start :: gh_index(source, "JET_KEYWORD_LIST :: [String]{{") ?? panic("missing JET_KEYWORD_LIST")
-    body :: gh_slice(source, start, source.count_bytes())
-    end :: gh_index(body, "\n}}") ?? panic("unterminated JET_KEYWORD_LIST")
-    constants :: gh_constants()
+gh_keyword_list: fn() -> [String] {
+    source: gh_read("{GH_SYNTAX_DIR}/PackageFiles.jet")
+    start: gh_index(source, "JET_KEYWORD_LIST: [String]{{") ?? panic("missing JET_KEYWORD_LIST")
+    body: gh_slice(source, start, source.count_bytes())
+    end: gh_index(body, "\n}}") ?? panic("unterminated JET_KEYWORD_LIST")
+    constants: gh_constants()
     words := [String]{}
     loop raw in gh_slice(body, 0, end).split("\n") {
-        if raw.contains(" :: ") -> next
-        line :: gh_strip_comma(raw.copy())
+        if raw.contains(": ") -> next
+        line: gh_strip_comma(raw.copy())
         if line == "" || line.starts_with("//") -> next
         &words.push(gh_resolve(constants, line.copy()))
     }
@@ -239,31 +240,31 @@ fn gh_keyword_list() -> [String] {
 
 // tests/grammar.rs:366-436: the words of every `(a|b|c)` alternation in the
 // `match` patterns of the VS Code grammar's `keywords` block.
-fn gh_grammar_keyword_words() -> [String] {
+gh_grammar_keyword_words: fn() -> [String] {
     words := [String]{}
     inside := false
     depth := 0
     loop raw in gh_read(GH_VSCODE).split("\n") {
-        line :: raw.trim()
+        line: raw.trim()
         if line.contains("\"keywords\"") -> inside = true
         if !inside -> next
         depth += line.bytes().count(U8{123})
         depth -= line.bytes().count(U8{125})
         if depth <= 0 && !line.contains("\"keywords\"") -> inside = false
-        at :: gh_index(line, "\"match\"") ?? next
-        after :: gh_slice(line, at + 7, line.count_bytes())
-        colon :: gh_index(after, ":") ?? next
-        value :: gh_slice(after, colon + 1, after.count_bytes()).trim().copy()
+        at: gh_index(line, "\"match\"") ?? next
+        after: gh_slice(line, at + 7, line.count_bytes())
+        colon: gh_index(after, ":") ?? next
+        value: gh_slice(after, colon + 1, after.count_bytes()).trim().copy()
         if !value.starts_with("\"") -> next
         rest := gh_slice(value, 1, value.count_bytes())
         loop {
-            open :: gh_index(rest, "(") ?? break
-            tail :: gh_slice(rest, open + 1, rest.count_bytes())
-            close :: gh_index(tail, ")") ?? break
-            group :: gh_slice(tail, 0, close)
+            open: gh_index(rest, "(") ?? break
+            tail: gh_slice(rest, open + 1, rest.count_bytes())
+            close: gh_index(tail, ")") ?? break
+            group: gh_slice(tail, 0, close)
             if !group.contains("(") && !group.contains("\\") {
                 loop word in group.split("|") {
-                    trimmed :: word.trim().copy()
+                    trimmed: word.trim().copy()
                     if gh_is_ident(trimmed) && !gh_has(words, trimmed) -> &words.push(trimmed)
                 }
             }
@@ -276,7 +277,7 @@ fn gh_grammar_keyword_words() -> [String] {
 
 // tests/grammar.rs:176.
 #Test("every_highlight_token_is_in_each_generated_section") {
-    sections :: [GH_VSCODE, GH_TREE_SITTER].map(path -> (path: path, section: gh_generated_section(path)))
+    sections: [GH_VSCODE, GH_TREE_SITTER].map(path -> (path: path, section: gh_generated_section(path)))
     missing := [String]{}
     loop token in gh_tokens() {
         if gh_bracket(token.text) -> next
@@ -287,7 +288,7 @@ fn gh_grammar_keyword_words() -> [String] {
     assert_eq(missing.join("\n"), "")
 }
 
-// The `#X :: value` marker line: the tree-sitter section renders the
+// The `#X: value` marker line: the tree-sitter section renders the
 // registry's separator, and the grammar's `inbody_marker` rule parses it.
 #Test("tree_sitter_parses_the_inbody_marker_line_with_the_registry_separator") {
     separator := ""
@@ -303,7 +304,7 @@ fn gh_grammar_keyword_words() -> [String] {
 // tests/grammar.rs:204: the Zed generated block names exactly the word tokens
 // (other than marker rules) that tree-sitter parses as anonymous literals.
 #Test("zed_generated_query_covers_anonymous_highlight_words") {
-    anonymous :: gh_anonymous_node_types()
+    anonymous: gh_anonymous_node_types()
     actual := [String]{}
     loop literal in gh_query_string_literals(gh_generated_section(GH_ZED)) {
         if !gh_has(actual, literal) -> &actual.push(literal)
@@ -319,7 +320,7 @@ fn gh_grammar_keyword_words() -> [String] {
 
 // tests/grammar.rs:225.
 #Test("syntax_keyword_list_tokens_are_classified_for_highlighting") {
-    texts :: gh_tokens().map(token -> token.text)
+    texts: gh_tokens().map(token -> token.text)
     missing := [String]{}
     loop keyword in gh_keyword_list() {
         if !gh_has(texts, keyword) -> &missing.push(keyword)
@@ -329,7 +330,7 @@ fn gh_grammar_keyword_words() -> [String] {
 
 // tests/grammar.rs:465.
 #Test("grammar_covers_jet_keyword_list") {
-    words :: gh_grammar_keyword_words()
+    words: gh_grammar_keyword_words()
     missing := [String]{}
     loop keyword in gh_keyword_list() {
         if !gh_has(words, keyword) -> &missing.push(keyword)
@@ -340,8 +341,8 @@ fn gh_grammar_keyword_words() -> [String] {
 // tests/grammar.rs:493: FOREIGN_* teaching words never appear in the VS Code
 // keyword patterns unless they are real Jet keywords.
 #Test("grammar_excludes_foreign_words") {
-    words :: gh_grammar_keyword_words()
-    keywords :: gh_keyword_list()
+    words: gh_grammar_keyword_words()
+    keywords: gh_keyword_list()
     intruders := [String]{}
     loop constant in gh_constants() {
         if !constant.name.starts_with("FOREIGN_") || !gh_is_ident(constant.value) -> next

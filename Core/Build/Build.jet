@@ -1,4 +1,4 @@
-package {
+package: {
     name: "core.build"
     version: "0.0.1"
     edition: "2026"
@@ -9,17 +9,17 @@ package {
     }
 }
 
-BUILD_MAX_TARGETS :: 65536
-BUILD_MAX_ACTIONS :: 262144
-BUILD_MAX_FILES :: 524288
-BUILD_MAX_NODES :: 524288
+BUILD_MAX_TARGETS: 65536
+BUILD_MAX_ACTIONS: 262144
+BUILD_MAX_FILES: 524288
+BUILD_MAX_NODES: 524288
 
 // core.build is the read-only boundary for checked BuildPlan facts.  The
 // compiler owns graph(plan); receipt_diff is also available to the source
 // evaluator for already-materialized graph values.  Neither operation reads
 // the filesystem or consults a cache, so equal graph values always compare
 // equal and output order is canonical.
-struct BuildGraphTarget {
+BuildGraphTarget: struct {
     id: Int
     name: String
     kind: String
@@ -29,7 +29,7 @@ struct BuildGraphTarget {
     plugin: Int?
 }
 
-struct BuildGraphAction {
+BuildGraphAction: struct {
     id: Int
     name: String
     kind: String
@@ -45,19 +45,19 @@ struct BuildGraphAction {
     cache_hit: Bool?
 }
 
-struct BuildGraphActionKey {
+BuildGraphActionKey: struct {
     action: String
     key: String
 }
 
-struct BuildGraphFile {
+BuildGraphFile: struct {
     path: String
     owner: Int?
     consumers: [Int]
     targets: [Int]
 }
 
-struct BuildGraphNode {
+BuildGraphNode: struct {
     kind: String
     key: String
     subject: String
@@ -65,37 +65,37 @@ struct BuildGraphNode {
     input_digests: [BuildGraphInputDigest]
 }
 
-struct BuildGraphInputDigest {
+BuildGraphInputDigest: struct {
     name: String
     digest: String
 }
 
-struct BuildGraphFileDelta {
+BuildGraphFileDelta: struct {
     path: String
     before: BuildGraphFile?
     after: BuildGraphFile?
 }
 
-struct BuildGraphKeyDelta {
+BuildGraphKeyDelta: struct {
     action: String
     before: String?
     after: String?
 }
 
-struct BuildGraphCacheDelta {
+BuildGraphCacheDelta: struct {
     action: String
     before: Bool?
     after: Bool?
 }
 
-struct BuildGraphDiff {
+BuildGraphDiff: struct {
     file_deltas: [BuildGraphFileDelta]
     affected_files: [String]
     key_deltas: [BuildGraphKeyDelta]
     cache_deltas: [BuildGraphCacheDelta]
 }
 
-struct BuildGraph {
+BuildGraph: struct {
     targets: [BuildGraphTarget]
     actions: [BuildGraphAction]
     action_keys: [BuildGraphActionKey]
@@ -109,7 +109,7 @@ struct BuildGraph {
 /// BuildPlan, so failing closed here is preferable to returning an empty
 /// graph that looks like a successful build.  The comptime dispatcher replaces
 /// this body with the checked projection.
-fn graph(_plan: BuildPlan) -> BuildGraph Never! {
+graph: fn(_plan: BuildPlan) -> BuildGraph Never! {
     panic("core.build.graph requires a checked BuildPlan in build/comptime code")
 }
 
@@ -117,12 +117,12 @@ fn graph(_plan: BuildPlan) -> BuildGraph Never! {
 /// making cache policy decisions.  All deltas are ordered lexicographically;
 /// action keys compare recipe identity, while affected files follow changed
 /// actions through declared outputs, consumers, and target dependencies.
-fn receipt_diff(before: BuildGraph, after: BuildGraph) -> BuildGraphDiff Never! {
+receipt_diff: fn(before: BuildGraph, after: BuildGraph) -> BuildGraphDiff Never! {
     if !valid_graph(before) || !valid_graph(after) {
         panic("core.build.receipt_diff requires canonical BuildGraph values")
     }
 
-    file_deltas :: diff_files(before, after)
+    file_deltas: diff_files(before, after)
     action_names := [String]{}
     loop action in before.actions -> append_unique(&action_names, action.name)
     loop action in after.actions -> append_unique(&action_names, action.name)
@@ -132,18 +132,18 @@ fn receipt_diff(before: BuildGraph, after: BuildGraph) -> BuildGraphDiff Never! 
     cache_deltas := [BuildGraphCacheDelta]{}
     changed_actions := [String]{}
     loop name in action_names {
-        before_action :: find_action_name(before, name)
-        after_action :: find_action_name(after, name)
+        before_action: find_action_name(before, name)
+        after_action: find_action_name(after, name)
         if action_changed(before_action, after_action) -> append_unique(&changed_actions, name)
 
-        before_key :: action_key(before_action)
-        after_key :: action_key(after_action)
+        before_key: action_key(before_action)
+        after_key: action_key(after_action)
         if before_key != after_key {
             &key_deltas.push(BuildGraphKeyDelta{action: name.copy(), before: before_key, after: after_key})
         }
 
-        before_hit :: action_cache_hit(before_action)
-        after_hit :: action_cache_hit(after_action)
+        before_hit: action_cache_hit(before_action)
+        after_hit: action_cache_hit(after_action)
         if before_hit != after_hit {
             &cache_deltas.push(BuildGraphCacheDelta{action: name.copy(), before: before_hit, after: after_hit})
         }
@@ -160,7 +160,7 @@ fn receipt_diff(before: BuildGraph, after: BuildGraph) -> BuildGraphDiff Never! 
     }
 }
 
-fn diff_files(before: BuildGraph, after: BuildGraph) -> [BuildGraphFileDelta] {
+diff_files: fn(before: BuildGraph, after: BuildGraph) -> [BuildGraphFileDelta] {
     paths := [String]{}
     loop file in before.files -> append_unique(&paths, file.path)
     loop file in after.files -> append_unique(&paths, file.path)
@@ -168,8 +168,8 @@ fn diff_files(before: BuildGraph, after: BuildGraph) -> [BuildGraphFileDelta] {
 
     out := [BuildGraphFileDelta]{}
     loop path in paths {
-        before_file :: find_file(before.files, path)
-        after_file :: find_file(after.files, path)
+        before_file: find_file(before.files, path)
+        after_file: find_file(after.files, path)
         if file_identity(before, before_file) != file_identity(after, after_file) {
             &out.push(BuildGraphFileDelta{path: path, before: before_file, after: after_file})
         }
@@ -177,7 +177,7 @@ fn diff_files(before: BuildGraph, after: BuildGraph) -> [BuildGraphFileDelta] {
     out
 }
 
-fn affected_files(graph: BuildGraph, changed_actions: [String]) -> [String] {
+affected_files: fn(graph: BuildGraph, changed_actions: [String]) -> [String] {
     pending_actions := [String]{}
     loop action in graph.actions {
         if contains_string(changed_actions, action.name) -> append_unique(&pending_actions, action.name)
@@ -191,18 +191,18 @@ fn affected_files(graph: BuildGraph, changed_actions: [String]) -> [String] {
 
     loop action_index < pending_actions.len() || target_index < pending_targets.len() {
         loop action_index < pending_actions.len() {
-            action_name :: pending_actions[action_index]
+            action_name: pending_actions[action_index]
             action_index += 1
             if contains_string(seen_actions, action_name) -> next
             append_unique(&seen_actions, action_name)
-            action :: find_action_name(graph, action_name) ?? next
+            action: find_action_name(graph, action_name) ?? next
             loop output in action.outputs {
                 append_unique(&affected, output)
-                file :: find_file(graph.files, output) ?? next
+                file: find_file(graph.files, output) ?? next
                 loop consumer_id in file.consumers {
-                    consumer :: find_action_id(graph, consumer_id)
+                    consumer: find_action_id(graph, consumer_id)
                     if consumer != .None {
-                        consumer_action :: consumer
+                        consumer_action: consumer
                         append_unique(&pending_actions, consumer_action.name)
                     }
                 }
@@ -213,16 +213,16 @@ fn affected_files(graph: BuildGraph, changed_actions: [String]) -> [String] {
         }
 
         loop target_index < pending_targets.len() {
-            target_id :: pending_targets[target_index]
+            target_id: pending_targets[target_index]
             target_index += 1
             if contains_int(seen_targets, target_id) -> next
             append_unique_int(&seen_targets, target_id)
             loop target in graph.targets {
                 if contains_int(target.deps, target_id) {
                     loop action_id in target.actions {
-                        action :: find_action_id(graph, action_id)
+                        action: find_action_id(graph, action_id)
                         if action != .None {
-                            named :: action
+                            named: action
                             append_unique(&pending_actions, named.name)
                         }
                     }
@@ -234,79 +234,79 @@ fn affected_files(graph: BuildGraph, changed_actions: [String]) -> [String] {
     affected
 }
 
-fn file_identity(graph: BuildGraph, file: BuildGraphFile?) -> String {
-    current :: file ?? return "<missing>"
+file_identity: fn(graph: BuildGraph, file: BuildGraphFile?) -> String {
+    current: file ?? return "<missing>"
     owner := ""
     if current.owner != .None {
-        owner_id :: current.owner ?? -1
+        owner_id: current.owner ?? -1
         owner = action_name(graph, owner_id)
     }
     consumers := [String]{}
     loop id in current.consumers {
-        name :: action_name(graph, id)
+        name: action_name(graph, id)
         if name != "" -> append_unique(&consumers, name)
     }
     &consumers.sort()
     targets := [String]{}
     loop id in current.targets {
-        name :: target_name(graph, id)
+        name: target_name(graph, id)
         if name != "" -> append_unique(&targets, name)
     }
     &targets.sort()
     "{owner}|{consumers.join(",")}|{targets.join(",")}"
 }
 
-fn action_changed(before: BuildGraphAction?, after: BuildGraphAction?) -> Bool {
+action_changed: fn(before: BuildGraphAction?, after: BuildGraphAction?) -> Bool {
     if before == .None || after == .None -> return true
-    left :: before ?? return true
-    right :: after ?? return true
+    left: before ?? return true
+    right: after ?? return true
     left.key != right.key || left.inputs != right.inputs
 }
 
-fn action_key(action: BuildGraphAction?) -> String? {
-    value :: action ?? return None
+action_key: fn(action: BuildGraphAction?) -> String? {
+    value: action ?? return None
     Val(value.key)
 }
 
-fn action_cache_hit(action: BuildGraphAction?) -> Bool? {
-    value :: action ?? return None
+action_cache_hit: fn(action: BuildGraphAction?) -> Bool? {
+    value: action ?? return None
     value.cache_hit
 }
 
-fn find_action_name(graph: BuildGraph, name: String) -> BuildGraphAction? {
+find_action_name: fn(graph: BuildGraph, name: String) -> BuildGraphAction? {
     loop action in graph.actions {
         if action.name == name -> return Val(action)
     }
     None
 }
 
-fn find_action_id(graph: BuildGraph, id: Int) -> BuildGraphAction? {
+find_action_id: fn(graph: BuildGraph, id: Int) -> BuildGraphAction? {
     loop action in graph.actions {
         if action.id == id -> return Val(action)
     }
     None
 }
 
-fn find_file(files: [BuildGraphFile], path: String) -> BuildGraphFile? {
+find_file: fn(files: [BuildGraphFile], path: String) -> BuildGraphFile? {
     loop file in files {
         if file.path == path -> return Val(file)
     }
     None
 }
 
-fn action_name(graph: BuildGraph, id: Int) -> String {
-    action :: find_action_id(graph, id) ?? return ""
+action_name: fn(graph: BuildGraph, id: Int) -> String {
+    action: find_action_id(graph, id) ?? return ""
     action.name
 }
 
-fn target_name(graph: BuildGraph, id: Int) -> String {
+target_name: fn(graph: BuildGraph, id: Int) -> String {
     loop target in graph.targets {
         if target.id == id -> return target.name
     }
     ""
 }
 
-fn valid_graph(graph: BuildGraph) -> Bool {
+valid_graph: fn(graph: BuildGraph) -> Bool {
     if graph.targets.len() > BUILD_MAX_TARGETS ||
         graph.actions.len() > BUILD_MAX_ACTIONS ||
         graph.files.len() > BUILD_MAX_FILES ||
@@ -346,11 +346,11 @@ fn valid_graph(graph: BuildGraph) -> Bool {
             if !valid_graph_text(pool, 128) -> return false
         }
         if action.legacy_wrapper != .None {
-            wrapper :: action.legacy_wrapper ?? ""
+            wrapper: action.legacy_wrapper ?? ""
             if !valid_graph_text(wrapper, 1024) -> return false
         }
         if action.target != .None {
-            target_id :: action.target ?? -1
+            target_id: action.target ?? -1
             if !contains_int(target_ids, target_id) -> return false
         }
     }
@@ -360,7 +360,7 @@ fn valid_graph(graph: BuildGraph) -> Bool {
         if !valid_graph_path(file.path) || contains_string(file_paths, file.path) -> return false
         &file_paths.push(file.path.copy())
         if file.owner != .None {
-            owner_id :: file.owner ?? -1
+            owner_id: file.owner ?? -1
             if !contains_int(action_ids, owner_id) -> return false
         }
         loop consumer_id in file.consumers {
@@ -411,37 +411,37 @@ fn valid_graph(graph: BuildGraph) -> Bool {
     true
 }
 
-fn valid_graph_path(value: String) -> Bool {
+valid_graph_path: fn(value: String) -> Bool {
     valid_graph_text(value, 4096)
 }
 
-fn valid_graph_text(value: String, max: Int) -> Bool {
+valid_graph_text: fn(value: String, max: Int) -> Bool {
     if value == "" || value.len() > max -> return false
     loop byte in value.bytes() {
-        n :: Int.from_u8(byte)
+        n: Int.from_u8(byte)
         if n < 32 || n == 127 -> return false
     }
     true
 }
 
-fn contains_string(values: [String], value: String) -> Bool {
+contains_string: fn(values: [String], value: String) -> Bool {
     loop item in values {
         if item == value -> return true
     }
     false
 }
 
-fn contains_int(values: [Int], value: Int) -> Bool {
+contains_int: fn(values: [Int], value: Int) -> Bool {
     loop item in values {
         if item == value -> return true
     }
     false
 }
 
-fn append_unique(values: &[String], value: String) {
+append_unique: fn(values: &[String], value: String) {
     if !contains_string(values, value) -> &values.push(value)
 }
 
-fn append_unique_int(values: &[Int], value: Int) {
+append_unique_int: fn(values: &[Int], value: Int) {
     if !contains_int(values, value) -> &values.push(value)
 }

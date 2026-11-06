@@ -1,11 +1,11 @@
 // core-conformance: core.db.transaction
-use db :: core.db
+use db: core.db
 
-fn run() {
-    connection :: db.open_memory()
-    policy :: db.policy("items", "true") ?? panic("policy")
-    scope :: connection.with_policy(policy, "owner")
-    migration :: db.migrate(scope, "items-v1", [SQL{"CREATE TABLE items (i INTEGER)"}])
+run: fn() {
+    connection: db.open_memory()
+    policy: db.policy("items", "true") ?? panic("policy")
+    scope: connection.with_policy(policy, "owner")
+    migration: db.migrate(scope, "items-v1", [SQL{"CREATE TABLE items (i INTEGER)"}])
         ?? panic("migrate")
     print("schema={migration}")
     print(db.transaction(scope, "seed-v1", [SQL{"INSERT INTO items (i) VALUES (7)"}]) ?? panic("transaction"))

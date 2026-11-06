@@ -6,21 +6,21 @@
 // declares no host imports; a Component that does declare one is preflighted
 // against this host's narrowed Authority before guest execution. Plugin
 // calls run guest code, so the package grants `Exec`.
-use plugin :: core.plugin
+use plugin: core.plugin
 
-fn run() {
-    policy :: Authority.from_rights(["FS.Read:repo"])
-    mathkit :: plugin.load("mathkit.wasm", policy)
-    area :: mathkit.scale(6.0, 7.0) ?? panic("scale failed")
+run: fn() {
+    policy: Authority.from_rights(["FS.Read:repo"])
+    mathkit: plugin.load("mathkit.wasm", policy)
+    area: mathkit.scale(6.0, 7.0) ?? panic("scale failed")
     print("scale(6, 7) = {area}")
-    diag :: mathkit.hypot(3.0, 4.0) ?? panic("hypot failed")
+    diag: mathkit.hypot(3.0, 4.0) ?? panic("hypot failed")
     print("hypot(3, 4) = {diag}")
-    divisor :: mathkit.gcd(48, 18) ?? panic("gcd failed")
+    divisor: mathkit.gcd(48, 18) ?? panic("gcd failed")
     print("gcd(48, 18) = {divisor}")
-    enabled :: mathkit.is_enabled(true) ?? panic("is_enabled failed")
+    enabled: mathkit.is_enabled(true) ?? panic("is_enabled failed")
     print("is-enabled(true) = {enabled}")
-    greeting :: mathkit.greet("Ada") ?? panic("greet failed")
+    greeting: mathkit.greet("Ada") ?? panic("greet failed")
     print("greet(Ada) = {greeting}")
-    unicode :: mathkit.greet("Zoë👍") ?? panic("Unicode greet failed")
+    unicode: mathkit.greet("Zoë👍") ?? panic("Unicode greet failed")
     print("greet(Zoë👍) = {unicode}")
 }

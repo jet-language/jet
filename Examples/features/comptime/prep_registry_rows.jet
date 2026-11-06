@@ -6,17 +6,17 @@
 // parameter, a user enum that shares its name with a Core enum (`Effect`),
 // and a leading-dot `return .Less` that takes its enum from the declared
 // `-> Ordering` return type.
-enum Shape {
+Shape: enum {
     Int
     Float
     Union(members: [Shape])
 }
 
-enum Sink {
+Sink: enum {
     Credential
     Other
 
-    fn label(self) -> String {
+    label: fn(self) -> String {
         if self == {
             .Credential -> "credential"
             .Other -> "other"
@@ -24,20 +24,20 @@ enum Sink {
     }
 }
 
-enum Effect {
+Effect: enum {
     Time
     GPU
 }
 
-fn numeric_union() -> [Shape] Never! {
+numeric_union: fn() -> [Shape] Never! {
     [Shape]{Shape.Union{members: [Shape]{Shape.Int, Shape.Float}}}
 }
 
-fn sink_for(module_name: String) -> Sink? {
+sink_for: fn(module_name: String) -> Sink? {
     if module_name == "core.log" -> Val(Sink.Credential) else -> None
 }
 
-fn sink_rank(module_name: String) -> Int {
+sink_rank: fn(module_name: String) -> Int {
     if sink_for(module_name) == {
         .Val(.Credential) -> 2
         .Val(_) -> 1
@@ -45,18 +45,18 @@ fn sink_rank(module_name: String) -> Int {
     }
 }
 
-fn label_of(sink: Sink) -> String {
+label_of: fn(sink: Sink) -> String {
     sink.label()
 }
 
-fn shape_width(shape: Shape) -> Int {
+shape_width: fn(shape: Shape) -> Int {
     if shape == {
         .Union(members) -> members.len()
         else -> 1
     }
 }
 
-fn effect_for(module_name: String) -> Effect? {
+effect_for: fn(module_name: String) -> Effect? {
     if {
         module_name == "core.time" -> Val(Effect.Time)
         module_name == "core.compute" -> Val(Effect.GPU)
@@ -64,14 +64,14 @@ fn effect_for(module_name: String) -> Effect? {
     }
 }
 
-fn effect_label(module_name: String) -> String {
+effect_label: fn(module_name: String) -> String {
     if effect_for(module_name) == {
         .Val(root) -> "{root}"
         .None -> "none"
     }
 }
 
-fn sink_order(sink: Sink) -> Ordering {
+sink_order: fn(sink: Sink) -> Ordering {
     if sink == {
         .Credential -> return .Less
         else -> {}
@@ -79,7 +79,7 @@ fn sink_order(sink: Sink) -> Ordering {
     return .Equal
 }
 
-fn order_rank(order: Ordering) -> Int {
+order_rank: fn(order: Ordering) -> Int {
     if order == {
         .Less -> 1
         .Equal -> 2
@@ -87,14 +87,14 @@ fn order_rank(order: Ordering) -> Int {
     }
 }
 
-SHAPES :: comptime { numeric_union() }
-RANKS :: comptime { [Int]{sink_rank("core.log"), sink_rank("core.term")} }
-IS_CREDENTIAL :: comptime { [Bool]{Sink.Credential == Sink.Credential, Sink.Other == Sink.Credential} }
-LABELS :: comptime { [String]{label_of(Sink.Credential), label_of(Sink.Other)} }
-EFFECTS :: comptime { [String]{effect_label("core.time"), effect_label("core.compute"), effect_label("core.text")} }
-ORDERS :: comptime { [Int]{order_rank(sink_order(Sink.Credential)), order_rank(sink_order(Sink.Other))} }
+SHAPES: comptime { numeric_union() }
+RANKS: comptime { [Int]{sink_rank("core.log"), sink_rank("core.term")} }
+IS_CREDENTIAL: comptime { [Bool]{Sink.Credential == Sink.Credential, Sink.Other == Sink.Credential} }
+LABELS: comptime { [String]{label_of(Sink.Credential), label_of(Sink.Other)} }
+EFFECTS: comptime { [String]{effect_label("core.time"), effect_label("core.compute"), effect_label("core.text")} }
+ORDERS: comptime { [Int]{order_rank(sink_order(Sink.Credential)), order_rank(sink_order(Sink.Other))} }
 
-fn run() {
+run: fn() {
     print("shapes {SHAPES.len()} width {shape_width(SHAPES[0])}")
     print("ranks {RANKS[0]} {RANKS[1]}")
     print("credential {IS_CREDENTIAL[0]} {IS_CREDENTIAL[1]}")

@@ -1,7 +1,7 @@
 // Locked provider objects and the fetch authority they grant, ported from
 // jetpack::ProviderGraph.
 
-struct ProviderObject {
+ProviderObject: struct {
     family: ProviderFamily
     ref_key: String
     exact_identity: String
@@ -14,10 +14,10 @@ struct ProviderObject {
 
     // A binary artifact: its hash and platform are its identity, and it runs
     // no build.
-    fn binary(name: String, hash: String, platform: String, signature: String) -> ProviderObject ProviderGraphError! {
+    binary: fn(name: String, hash: String, platform: String, signature: String) -> ProviderObject ProviderGraphError! {
         if hash.trim() == "" -> return Err(ProviderGraphError{message: "binary provider requires a hash"})
         if platform.trim() == "" -> return Err(ProviderGraphError{message: "binary provider requires a platform"})
-        exact_identity :: "binary:{name}:{platform}:{hash}"
+        exact_identity: "binary:{name}:{platform}:{hash}"
         Ok(ProviderObject{
             family: ProviderFamily.Binary,
             ref_key: name,
@@ -32,7 +32,7 @@ struct ProviderObject {
     }
 }
 
-struct ProviderRequest {
+ProviderRequest: struct {
     family: ProviderFamily
     ref_key: String
     exact_identity: String
@@ -41,7 +41,7 @@ struct ProviderRequest {
     offline: Bool
 }
 
-enum FetchDecision {
+FetchDecision: enum {
     AllowedOfflineSatisfied
     AllowedNetworkWithGrant(authority: String)
     DeniedOfflineMissingLock
@@ -49,25 +49,25 @@ enum FetchDecision {
 
 // Why a provider object or report cannot be formed.
 #Error
-struct ProviderGraphError {
+ProviderGraphError: struct {
     message: String
 }
 
-struct AuthorityGraph {
+AuthorityGraph: struct {
     locked_objects: [ProviderObject]
 
-    fn empty() -> AuthorityGraph Never! {
+    empty: fn() -> AuthorityGraph Never! {
         AuthorityGraph{locked_objects: [ProviderObject]{}}
     }
 
-    fn add_locked(&self, object: ProviderObject) Never! {
+    add_locked: fn(&self, object: ProviderObject) Never! {
         &self.locked_objects.push(object)
     }
 
     // Offline, a request is satisfied only by a locked object with the same
     // family, ref, identity, hash, and platform; online it needs the family's
     // fetch grant.
-    fn fetch_allowed(self, request: ProviderRequest) -> FetchDecision Never! {
+    fetch_allowed: fn(self, request: ProviderRequest) -> FetchDecision Never! {
         if !request.offline -> return FetchDecision.AllowedNetworkWithGrant{authority: "provider.fetch.{request.family.label()}"}
         loop object in self.locked_objects {
             if object.family == request.family && object.ref_key == request.ref_key && object.exact_identity == request.exact_identity && object.hash == request.hash && object.platform == request.platform {

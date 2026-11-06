@@ -6,7 +6,7 @@ use jet_foundation.[
     Type,
 ]
 
-struct IRBuiltinRoute {
+IRBuiltinRoute: struct {
     module_name: String
     member: String
     symbol: String
@@ -15,15 +15,15 @@ struct IRBuiltinRoute {
     effect_kind: Effect?
 }
 
-fn ir_builtin_route_row(module_name: String, member: String, symbol: String, arity: Int, borrow_mask: [Bool], route_effect: Effect?) -> IRBuiltinRoute Never! {
+ir_builtin_route_row: fn(module_name: String, member: String, symbol: String, arity: Int, borrow_mask: [Bool], route_effect: Effect?) -> IRBuiltinRoute Never! {
     IRBuiltinRoute{module_name: module_name, member: member, symbol: symbol, arity: arity, borrow_mask: borrow_mask, effect_kind: route_effect}
 }
 
-fn ir_builtin_plain_route(member: String, symbol: String, arity: Int, borrow_mask: [Bool], route_effect: Effect?) -> IRBuiltinRoute Never! {
+ir_builtin_plain_route: fn(member: String, symbol: String, arity: Int, borrow_mask: [Bool], route_effect: Effect?) -> IRBuiltinRoute Never! {
     ir_builtin_route_row("core.builtin", member, symbol, arity, borrow_mask, route_effect)
 }
 
-fn ir_builtin_untag(ty: Type) -> Type Never! {
+ir_builtin_untag: fn(ty: Type) -> Type Never! {
     if ty == {
         .Tagged(_, inner) -> return ir_builtin_untag(inner)
         // copy: the untagged type is a new owned Type. Otherwise it equals `ty`, the caller's
@@ -32,18 +32,18 @@ fn ir_builtin_untag(ty: Type) -> Type Never! {
     }
 }
 
-fn ir_builtin_string_receiver(ty: Type) -> Bool Never! {
+ir_builtin_string_receiver: fn(ty: Type) -> Bool Never! {
     ir_builtin_untag(ty) == Type.String
 }
 
-fn ir_builtin_iter_receiver(ty: Type) -> Bool Never! {
+ir_builtin_iter_receiver: fn(ty: Type) -> Bool Never! {
     if ir_builtin_untag(ty) == {
         .Apply(name, args) -> return args.len() == 1 && (name == "Iter" || name == "ViewIter")
         else -> return false
     }
 }
 
-fn ir_builtin_route_for_receiver(operation: TBuiltinOp, receiver: Type, carrier: TFailureCarrier) -> IRBuiltinRoute Never! {
+ir_builtin_route_for_receiver: fn(operation: TBuiltinOp, receiver: Type, carrier: TFailureCarrier) -> IRBuiltinRoute Never! {
     ty := ir_builtin_untag(receiver)
     if operation == {
         .Clear -> {
@@ -310,7 +310,7 @@ fn ir_builtin_route_for_receiver(operation: TBuiltinOp, receiver: Type, carrier:
     panic("checked receiver-sensitive TBuiltinOp has no canonical route for its receiver type")
 }
 
-fn ir_builtin_container_route(operation: TBuiltinOp) -> IRBuiltinRoute Never! {
+ir_builtin_container_route: fn(operation: TBuiltinOp) -> IRBuiltinRoute Never! {
     if operation == {
         .SetFrom -> return ir_builtin_plain_route("set_from", "jet_set_from", 1, [Bool]{false}, None)
         .SetToList -> return ir_builtin_plain_route("set_to_list", "jet_set_to_list", 1, [Bool]{true}, None)
@@ -386,7 +386,7 @@ fn ir_builtin_container_route(operation: TBuiltinOp) -> IRBuiltinRoute Never! {
     panic("checked container TBuiltinOp has no canonical Prelude route")
 }
 
-fn ir_builtin_route_plan(operation: TBuiltinOp, receiver: Type, result: Type, carrier: TFailureCarrier) -> IRBuiltinRoute Never! {
+ir_builtin_route_plan: fn(operation: TBuiltinOp, receiver: Type, result: Type, carrier: TFailureCarrier) -> IRBuiltinRoute Never! {
     if operation == {
         .AtomicMethod(method) -> {
             if method == "load" -> return ir_builtin_route_row("core.mem", "load", "jet_atomic_load", 1, [Bool]{true}, None)
@@ -548,7 +548,7 @@ fn ir_builtin_route_plan(operation: TBuiltinOp, receiver: Type, result: Type, ca
     ir_builtin_route_for_receiver(operation, receiver, carrier)
 }
 
-fn ir_builtin_iter_route(operation: TBuiltinOp, receiver: Type, carrier: TFailureCarrier) -> IRBuiltinRoute Never! {
+ir_builtin_iter_route: fn(operation: TBuiltinOp, receiver: Type, carrier: TFailureCarrier) -> IRBuiltinRoute Never! {
     if operation == {
         .ListLazy -> {
             is_list_receiver := if ir_builtin_untag(receiver) == {
@@ -589,7 +589,7 @@ fn ir_builtin_iter_route(operation: TBuiltinOp, receiver: Type, carrier: TFailur
     }
 }
 
-fn ir_builtin_string_method_route(method: String, result: Type, carrier: TFailureCarrier) -> IRBuiltinRoute Never! {
+ir_builtin_string_method_route: fn(method: String, result: Type, carrier: TFailureCarrier) -> IRBuiltinRoute Never! {
     if method == "equal" -> return ir_builtin_route_row("core.compare", "eq", "jet_eq", 2, [Bool]{true, true}, None)
     if method == "expandtabs" -> return ir_builtin_plain_route("expandtabs", "jet_text_expandtabs", 2, [Bool]{true, false}, None)
     if method == "find" -> return ir_builtin_plain_route("find", "jet_text_parse_find", 2, [Bool]{true, true}, None)
@@ -636,7 +636,7 @@ fn ir_builtin_string_method_route(method: String, result: Type, carrier: TFailur
     panic("checked StringMethod has no canonical route")
 }
 
-fn ir_builtin_byte_buffer_method_route(method: String) -> IRBuiltinRoute Never! {
+ir_builtin_byte_buffer_method_route: fn(method: String) -> IRBuiltinRoute Never! {
     if method == "capacity" -> return ir_builtin_plain_route("byte_buffer_capacity", "JetByteBuffer::capacity", 1, [Bool]{true}, None)
     arity := 0
     if method == "len" || method == "is_empty" || method == "clear" || method == "position" || method == "eof" || method == "rewind" || method == "flush" || method == "close" || method == "shutdown" || method == "get_buffer" || method == "buffer" || method == "to_string" || method == "string" || method == "trim" || method == "trim_start" || method == "trim_end" || method == "to_lower" || method == "to_upper" || method == "to_title" || method == "title" || method == "clone" || method == "lines" || method == "first" || method == "next" || method == "read_byte" || method == "read" || method == "is_ascii" || method == "parse" -> arity = 1

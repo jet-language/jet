@@ -1,34 +1,34 @@
 // A run-time hole whose complete text fails the type check stops the program
 // at the literal, so no unchecked Token value can exist.
 #Error
-enum TokenError { Empty TooLong }
+TokenError: enum { Empty TooLong }
 
-Token :: distinct String
+Token: distinct String
 
 impl Token.CheckedText {
-    type Error = TokenError
+    Error: TokenError
 
-    fn check(text: String) TokenError! -[]> {
+    check: fn(text: String) TokenError! -[]> {
         if text == "" -> return Err(TokenError.Empty)
         if text.len() > 10 -> return Err(TokenError.TooLong)
         return Ok(())
     }
 
-    fn encode_hole<T: Printable>(value: T) -[]> String {
+    encode_hole: fn<T: Printable>(value: T) -[]> String {
         return "[{value}]"
     }
 }
 
-fn show(value: Token) {
+show: fn(value: Token) {
     #Unsafe("checked text example output") {
         print(value.raw())
     }
 }
 
-fn run() {
-    name :: "Ada Lovelace"
+run: fn() {
+    name: "Ada Lovelace"
     print("before")
-    token :: Token{"hi {name}"}
+    token: Token{"hi {name}"}
     show(token)
     print("unreachable")
 }

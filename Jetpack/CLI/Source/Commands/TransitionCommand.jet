@@ -4,40 +4,40 @@
 // and applied by Jetpack/Environment Transition. `--check` previews the plan
 // without writing; `--json` prints the status object.
 
-fn cli_cmd_split(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time, Time.Wait]> Int Never! {
+cli_cmd_split: fn(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time, Time.Wait]> Int Never! {
     if parsed.positional.len() == 0 {
         theme.error_coded("E2104", "`jet split` needs a target", "a split moves one named fact out of `package.jet`, so it has to know which one", "use `jet split env`, `jet split package <name>`, or `jet split hosts <name>`")
         return EXIT_USAGE
     }
-    kind :: parsed.positional[0]
+    kind: parsed.positional[0]
     if kind != "env" && kind != "package" && kind != "hosts" {
         theme.error_coded("E2101", "unknown split target `{kind}`", "`jet split` moves an environment, a member Package, or a host System out of `package.jet`", "use `jet split env`, `jet split package <name>`, or `jet split hosts <name>`")
         return EXIT_USAGE
     }
     if kind != "env" && parsed.positional.len() < 2 {
-        role :: if kind == "package" -> "a Package name" else -> "a host name"
+        role: if kind == "package" -> "a Package name" else -> "a host name"
         theme.error_coded("E2104", "`jet split {kind}` needs {role}", "a split moves one named fact out of `package.jet`, so it has to know which one", "use `jet split {kind} <name>`")
         return EXIT_USAGE
     }
-    target :: if kind == {
+    target: if kind == {
         "env" -> SplitTarget.Environment
         "package" -> SplitTarget.Package(parsed.positional[1])
         else -> SplitTarget.Hosts(parsed.positional[1])
     }
-    check_only :: parsed.flags.transition_check
+    check_only: parsed.flags.transition_check
     if env_transition_split(cli_current_dir(), target, check_only) == {
         .Ok(result) -> cli_transition_result(TRANSITION_SPLIT_VERB, result, check_only, parsed.flags.json)
         .Err(error) -> cli_transition_error(theme, error)
     }
 }
 
-fn cli_cmd_fold(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time, Time.Wait]> Int Never! {
+cli_cmd_fold: fn(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time, Time.Wait]> Int Never! {
     if parsed.positional.len() == 0 {
         theme.error_coded("E2104", "`jet fold` needs a generated transition path", "a fold reverses the one split that generated that file", "use `jet fold package/env.jet` or `jet fold packages/<name>/package.jet`")
         return EXIT_USAGE
     }
-    path :: parsed.positional[0]
-    check_only :: parsed.flags.transition_check
+    path: parsed.positional[0]
+    check_only: parsed.flags.transition_check
     if env_transition_fold(cli_current_dir(), path, check_only) == {
         .Ok(result) -> cli_transition_result(TRANSITION_FOLD_VERB, result, check_only, parsed.flags.json)
         .Err(error) -> cli_transition_error(theme, error)
@@ -46,8 +46,8 @@ fn cli_cmd_fold(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time, Time.Wait]
 
 // The changed files, the package graph fingerprints, and either the preview
 // notice or the journal that a later fold reverses.
-fn cli_transition_result(verb: String, result: TransitionResult, check_only: Bool, json: Bool) -[IO]> Int Never! {
-    summary :: result.summary
+cli_transition_result: fn(verb: String, result: TransitionResult, check_only: Bool, json: Bool) -[IO]> Int Never! {
+    summary: result.summary
     if json {
         changes := [Dyn]{}
         loop change in summary.changes {
@@ -63,7 +63,7 @@ fn cli_transition_result(verb: String, result: TransitionResult, check_only: Boo
         return EXIT_OK
     }
     loop change in summary.changes {
-        action :: change.action.as_str()
+        action: change.action.as_str()
         if check_only -> print("Would {action}: {change.path}") else -> print("{action}d {change.path}.")
     }
     if summary.before_fingerprint == summary.after_fingerprint {
@@ -80,8 +80,8 @@ fn cli_transition_result(verb: String, result: TransitionResult, check_only: Boo
 // (E1226), a destination that already exists (E1252), a journal that no
 // longer matches the files (E1204), or a Package input without the required
 // typed shape (E1215).
-fn cli_transition_error(theme: Theme, error: EnvironmentError) -[IO, Time.Wait]> Int Never! {
-    message :: error.message()
+cli_transition_error: fn(theme: Theme, error: EnvironmentError) -[IO, Time.Wait]> Int Never! {
+    message: error.message()
     if message.contains("pkg.jet") || message.contains("retired") {
         theme.error_coded("E1226", message, "the package transition accepts only the current package manifest and its recorded migration path", "rename the retired manifest to `package.jet` in the project root")
     } else if message.contains("already exists") {

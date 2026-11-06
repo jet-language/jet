@@ -12,7 +12,7 @@ use {
 }
 
 #Error
-enum TrustError {
+TrustError: enum {
     // ── SemanticLock flake graph ──
     EmptyInputName
     DuplicateInput(String)
@@ -33,7 +33,7 @@ enum TrustError {
     // ── Self-toolchain pin diagnostics (JetPin.rs `Diagnostic`) ──
     Pin(Diagnostic)
 
-    fn message(self) -> String Never! {
+    message: fn(self) -> String Never! {
         if self == {
             .EmptyInputName -> "flake input has an empty name"
             .DuplicateInput(name) -> "flake input `{name}` is declared more than once"
@@ -63,4 +63,4 @@ impl IOError -> TrustError { TrustError.IO("{self}") }
 // carry IOError, so an edge from either would give IOError two routes
 // (E2419). Their calls convert at the call site: `trust_lock_error(err)`,
 // `TrustError.Root(err)`.
-fn trust_lock_error(error: LockError) -> TrustError Never! { TrustError.IO(error.message()) }
+trust_lock_error: fn(error: LockError) -> TrustError Never! { TrustError.IO(error.message()) }

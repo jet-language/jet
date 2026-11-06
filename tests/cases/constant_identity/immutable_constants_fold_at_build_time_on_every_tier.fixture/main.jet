@@ -1,34 +1,34 @@
-package {
+package: {
     name: "fold_tiers"
     authority: { allow: [Env, IO] }
 }
 
-use env :: core.sys
+use env: core.sys
 
-LIMIT :: 6 * 7 + 1
-GREETING :: env.get("JET_FOLD_TIERS_GREETING") ?? "hello"
+LIMIT: 6 * 7 + 1
+GREETING: env.get("JET_FOLD_TIERS_GREETING") ?? "hello"
 
-fn local_fold() -> Int Never! {
-    lanes :: 8 * 4 + 2
-    wide :: lanes * 2 - -1
+local_fold: fn() -> Int Never! {
+    lanes: 8 * 4 + 2
+    wide: lanes * 2 - -1
     wide + 1
 }
 
-fn overflow_kept(start: Int) -> Int Never! {
-    big :: 9223372036854775807 - 1
-    near :: big + start
+overflow_kept: fn(start: Int) -> Int Never! {
+    big: 9223372036854775807 - 1
+    near: big + start
     near
 }
 
-fn mutable_kept() -> Int Never! {
+mutable_kept: fn() -> Int Never! {
     count := 2 + 3
     count += 1
     count
 }
 
-fn module_read() -> Int Never! { LIMIT }
+module_read: fn() -> Int Never! { LIMIT }
 
-fn run() {
+run: fn() {
     print(local_fold())
     print(overflow_kept(1))
     print(mutable_kept())

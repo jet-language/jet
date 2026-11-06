@@ -5,22 +5,22 @@ use {
 }
 
 // (`Lexer::lex` inserts the line terminators, as `lex` does)
-fn value_block_parsed(source: String) -> Program {
-    lexed :: lex(source.bytes())
+value_block_parsed: fn(source: String) -> Program {
+    lexed: lex(source.bytes())
     assert(lexed.diagnostics.is_empty(), "lex diagnostics for valid source")
-    admission :: parse_tokens(lexed.tokens, lexed.tables)
+    admission: parse_tokens(lexed.tokens, lexed.tables)
     loop diagnostic in admission.diagnostics -> assert(diagnostic.severity != 1, "parse diagnostics")
     admission.program
 }
 // (`parse(..).expect_err`: the parse reports an error)
-fn value_block_rejected(source: String) -> [Diagnostic] {
-    lexed :: lex(source.bytes())
+value_block_rejected: fn(source: String) -> [Diagnostic] {
+    lexed: lex(source.bytes())
     assert(lexed.diagnostics.is_empty(), "lex diagnostics for parser rejection")
-    admission :: parser_test_result(source)
+    admission: parser_test_result(source)
     assert(loop diagnostic in admission.diagnostics { if diagnostic.severity == 1 -> break true } ?? false, "source should be rejected")
     admission.diagnostics
 }
-fn value_block_binding_init(program: Program, function_name: String) -> Expr {
+value_block_binding_init: fn(program: Program, function_name: String) -> Expr {
     loop item in program.items {
         if item == .Func(function) && function.name == function_name {
             assert(function.body.len() > 0, "function does not start with a value binding")
@@ -32,7 +32,7 @@ fn value_block_binding_init(program: Program, function_name: String) -> Expr {
 }
 
 #Test("value_block_accepts_control_statement_before_tail") {
-    program :: value_block_parsed("\nfn run() {{\n    result :: if ready -> {{\n        loop {{\n            break\n        }}\n        1\n    }} else -> 0\n}}\n")
+    program: value_block_parsed("\nrun: fn() {{\n    result: if ready -> {{\n        loop {{\n            break\n        }}\n        1\n    }} else -> 0\n}}\n")
     assert(if value_block_binding_init(program, "run") == {
         .If(_, then_body, then_value, _, else_value, _, _) -> {
             assert(then_body.len() == 1)
@@ -48,7 +48,7 @@ fn value_block_binding_init(program: Program, function_name: String) -> Expr {
     }, "binding initializer is not an if expression")
 }
 #Test("value_block_accepts_multiple_nested_control_statements_before_tail") {
-    program :: value_block_parsed("\nfn run() {{\n    result :: if ready -> {{\n        loop {{\n            if done {{\n                break\n            }}\n        }}\n        if fallback {{\n            notify()\n        }}\n        7\n    }} else -> 0\n}}\n")
+    program: value_block_parsed("\nrun: fn() {{\n    result: if ready -> {{\n        loop {{\n            if done {{\n                break\n            }}\n        }}\n        if fallback {{\n            notify()\n        }}\n        7\n    }} else -> 0\n}}\n")
     assert(if value_block_binding_init(program, "run") == {
         .If(_, then_body, then_value, _, _, _, _) -> {
             assert(then_body.len() == 2)
@@ -64,14 +64,14 @@ fn value_block_binding_init(program: Program, function_name: String) -> Expr {
     }, "binding initializer is not an if expression")
 }
 #Test("value_block_preserves_non_value_and_diverging_tail_rules") {
-    diagnostics :: value_block_rejected("\nfn run() {{\n    result :: if ready -> {{\n        loop {{\n            break\n        }}\n        side :: 1\n    }} else -> 0\n}}\n")
+    diagnostics: value_block_rejected("\nrun: fn() {{\n    result: if ready -> {{\n        loop {{\n            break\n        }}\n        side: 1\n    }} else -> 0\n}}\n")
     e0114 := false
     loop diagnostic in diagnostics {
         if diagnostic.code == "E0114" -> e0114 = true
         assert(diagnostic.code != "E0003", "synthetic terminator must not create a spurious E0003")
     }
     assert(e0114, "expected E0114 for a non-value tail")
-    loop_value :: value_block_parsed("\nfn run() {{\n    result :: if ready -> {{\n        loop {{\n            break\n        }}\n    }} else -> 0\n}}\n")
+    loop_value: value_block_parsed("\nrun: fn() {{\n    result: if ready -> {{\n        loop {{\n            break\n        }}\n    }} else -> 0\n}}\n")
     assert(if value_block_binding_init(loop_value, "run") == {
         .If(_, then_body, then_value, _, _, _, _) -> {
             assert(then_body.is_empty())
@@ -81,7 +81,7 @@ fn value_block_binding_init(program: Program, function_name: String) -> Expr {
         }
         else -> false
     }, "loop branch must retain its result-loop lambda")
-    program :: value_block_parsed("\nfn run() {{\n    result :: if ready -> {{\n        return\n    }} else -> 0\n}}\n")
+    program: value_block_parsed("\nrun: fn() {{\n    result: if ready -> {{\n        return\n    }} else -> 0\n}}\n")
     assert(if value_block_binding_init(program, "run") == {
         .If(_, then_body, then_value, _, _, _, _) -> {
             assert(then_body.len() == 1)
@@ -94,11 +94,11 @@ fn value_block_binding_init(program: Program, function_name: String) -> Expr {
     }, "return-only branch must diverge")
 }
 #Test("value_block_rejects_authored_semicolon_and_incomplete_input") {
-    diagnostics :: value_block_rejected("\nfn run() {{\n    result :: if ready -> {{\n        1;\n    }} else -> 0\n}}\n")
+    diagnostics: value_block_rejected("\nrun: fn() {{\n    result: if ready -> {{\n        1;\n    }} else -> 0\n}}\n")
     found := false
     loop diagnostic in diagnostics { if diagnostic.code == "E0114" -> found = true }
     assert(found, "authored semicolon must keep the value-tail rejection")
-    incomplete :: value_block_rejected("\nfn run() {{\n    result :: if ready -> {{\n        1\n    }} else -> {{\n        0\n")
+    incomplete: value_block_rejected("\nrun: fn() {{\n    result: if ready -> {{\n        1\n    }} else -> {{\n        0\n")
     rejected := false
     loop diagnostic in incomplete {
         if diagnostic.code == "E0003" && diagnostic.what.contains("Expected `}}` to close this `if` branch") -> rejected = true
@@ -106,7 +106,7 @@ fn value_block_binding_init(program: Program, function_name: String) -> Expr {
     assert(rejected, "incomplete value branch must remain rejected")
 }
 #Test("result_handler_value_block_accepts_control_statement_before_tail") {
-    program :: value_block_parsed("\nfn run() {{\n    result :: fetch() ? ok -> {{\n        loop {{\n            break\n        }}\n        ok\n    }}\n    ! err -> err\n}}\n")
+    program: value_block_parsed("\nrun: fn() {{\n    result: fetch() ? ok -> {{\n        loop {{\n            break\n        }}\n        ok\n    }}\n    ! err -> err\n}}\n")
     assert(if value_block_binding_init(program, "run") == {
         .If(_, then_body, then_value, _, _, _, _) -> {
             assert(then_body.len() == 1)
@@ -119,8 +119,8 @@ fn value_block_binding_init(program: Program, function_name: String) -> Expr {
     }, "binding initializer is not a Result handler")
 }
 #Test("fallback_block_accepts_nested_control_before_bind_call_return_and_following_declaration") {
-    source :: "\nfn run(value: Int?) {{\n    result :: value ?? {{\n        loop {{\n            if done {{\n                break\n            }}\n        }}\n        if ready {{\n            observe()\n        }}\n        bound :: 1\n        notify()\n        return\n    }}\n    after :: 2\n}}\n"
-    program :: value_block_parsed(source)
+    source: "\nrun: fn(value: Int?) {{\n    result: value ?? {{\n        loop {{\n            if done {{\n                break\n            }}\n        }}\n        if ready {{\n            observe()\n        }}\n        bound: 1\n        notify()\n        return\n    }}\n    after: 2\n}}\n"
+    program: value_block_parsed(source)
     assert(if program.items[0] == {
         .Func(function) -> {
             assert(function.body.len() == 2, "fallback must leave the following declaration in the function body")
@@ -163,9 +163,9 @@ fn value_block_binding_init(program: Program, function_name: String) -> Expr {
 // terminator: it is reported as the explicit-semicolon diagnostic E0373 at
 // exactly that `;` (Rust `report_explicit_semicolon`).
 #Test("fallback_block_rejects_authored_semicolon_after_nested_control") {
-    source :: "\nfn run(value: Int?) {{\n    result :: value ?? {{\n        loop {{\n            break\n        }};\n        1\n    }}\n}}\n"
-    diagnostics :: value_block_rejected(source)
-    semicolon :: parser_test_find(source, "}};")
+    source: "\nrun: fn(value: Int?) {{\n    result: value ?? {{\n        loop {{\n            break\n        }};\n        1\n    }}\n}}\n"
+    diagnostics: value_block_rejected(source)
+    semicolon: parser_test_find(source, "}};")
     found := false
     loop diagnostic in diagnostics {
         if diagnostic.code == "E0373" && diagnostic.span == (Val(Span{start: semicolon + 1, end: semicolon + 2})) -> found = true
@@ -173,14 +173,14 @@ fn value_block_binding_init(program: Program, function_name: String) -> Expr {
     assert(found, "authored semicolon must not be treated as a synthetic terminator")
 }
 
-fn arm_table_checked(source: String) -> [Diagnostic] {
-    lexed :: lex(source.bytes())
+arm_table_checked: fn(source: String) -> [Diagnostic] {
+    lexed: lex(source.bytes())
     assert(lexed.diagnostics.is_empty(), "lex")
-    admission :: parser_test_result(source)
+    admission: parser_test_result(source)
     loop diagnostic in admission.diagnostics -> assert(diagnostic.severity != 1, "parse")
     admission.diagnostics
 }
-fn arm_table_edits(diagnostics: [Diagnostic]) -> [TextEdit] {
+arm_table_edits: fn(diagnostics: [Diagnostic]) -> [TextEdit] {
     edits := [TextEdit]{}
     loop diagnostic in diagnostics {
         if diagnostic.code != "L0507" -> next
@@ -191,9 +191,9 @@ fn arm_table_edits(diagnostics: [Diagnostic]) -> [TextEdit] {
     }
     edits
 }
-fn arm_table_applied(source: String, edit: TextEdit) -> String {
+arm_table_applied: fn(source: String, edit: TextEdit) -> String {
     out := [U8]{}
-    bytes :: source.bytes()
+    bytes: source.bytes()
     loop index in 0..<edit.span.start -> &out.push(bytes[index])
     loop byte in edit.new_text.bytes() -> &out.push(byte)
     loop index in edit.span.end..<bytes.len() -> &out.push(bytes[index])
@@ -202,44 +202,44 @@ fn arm_table_applied(source: String, edit: TextEdit) -> String {
 // Not ported: fix_all's same_tree assertion is blocked on the production
 // JetParser port gap: canonical_program/CanonicalAST. Source/edit/diagnostic
 // checks remain.
-fn arm_table_fix_all(source: String) -> String {
+arm_table_fix_all: fn(source: String) -> String {
     text := source
     loop _ in 0..<8 {
-        diagnostics :: arm_table_checked(text)
-        edits :: arm_table_edits(diagnostics)
+        diagnostics: arm_table_checked(text)
+        edits: arm_table_edits(diagnostics)
         if edits.is_empty() -> break
         text = arm_table_applied(text, edits[0])
     }
-    diagnostics :: arm_table_checked(text)
+    diagnostics: arm_table_checked(text)
     loop diagnostic in diagnostics -> assert(diagnostic.code != "L0507" && diagnostic.severity != 1, "fixed source still warns or fails")
     text
 }
 #Test("braced_else_if_chain_becomes_one_arm_table") {
-    source :: "fn show(score: Int) {{\n    if score >= 90 {{\n        print(\"a\")\n    }} else if score >= 80 {{\n        print(\"b\")\n    }} else {{\n        print(\"c\")\n    }}\n    print(\"done\")\n}}\n"
-    assert(arm_table_fix_all(source) == "fn show(score: Int) {{\n    if {{\n        score >= 90 -> {{\n            print(\"a\")\n        }}\n        score >= 80 -> {{\n            print(\"b\")\n        }}\n        else -> {{\n            print(\"c\")\n        }}\n    }}\n    print(\"done\")\n}}\n")
+    source: "show: fn(score: Int) {{\n    if score >= 90 {{\n        print(\"a\")\n    }} else if score >= 80 {{\n        print(\"b\")\n    }} else {{\n        print(\"c\")\n    }}\n    print(\"done\")\n}}\n"
+    assert(arm_table_fix_all(source) == "show: fn(score: Int) {{\n    if {{\n        score >= 90 -> {{\n            print(\"a\")\n        }}\n        score >= 80 -> {{\n            print(\"b\")\n        }}\n        else -> {{\n            print(\"c\")\n        }}\n    }}\n    print(\"done\")\n}}\n")
 }
 #Test("value_tail_chain_becomes_the_function_value_table") {
-    source :: "fn grade(score: Int) -> String {{\n    if score >= 90 {{\n        return \"a\"\n    }} else if score >= 80 {{\n        return \"b\"\n    }} else {{\n        return \"c\"\n    }}\n}}\n"
-    assert(arm_table_fix_all(source) == "fn grade(score: Int) -> String {{\n    if {{\n        score >= 90 -> {{\n            return \"a\"\n        }}\n        score >= 80 -> {{\n            return \"b\"\n        }}\n        else -> {{\n            return \"c\"\n        }}\n    }}\n}}\n")
+    source: "grade: fn(score: Int) -> String {{\n    if score >= 90 {{\n        return \"a\"\n    }} else if score >= 80 {{\n        return \"b\"\n    }} else {{\n        return \"c\"\n    }}\n}}\n"
+    assert(arm_table_fix_all(source) == "grade: fn(score: Int) -> String {{\n    if {{\n        score >= 90 -> {{\n            return \"a\"\n        }}\n        score >= 80 -> {{\n            return \"b\"\n        }}\n        else -> {{\n            return \"c\"\n        }}\n    }}\n}}\n")
 }
 #Test("arrow_else_if_chain_becomes_one_arm_table") {
-    source :: "fn run() {{\n    if false -> print(\"a\") else if true -> print(\"b\") else -> print(\"c\")\n}}\n"
-    assert(arm_table_fix_all(source) == "fn run() {{\n    if {{\n        false -> print(\"a\")\n        true -> print(\"b\")\n        else -> print(\"c\")\n    }}\n}}\n")
+    source: "run: fn() {{\n    if false -> print(\"a\") else if true -> print(\"b\") else -> print(\"c\")\n}}\n"
+    assert(arm_table_fix_all(source) == "run: fn() {{\n    if {{\n        false -> print(\"a\")\n        true -> print(\"b\")\n        else -> print(\"c\")\n    }}\n}}\n")
 }
 #Test("multi_line_value_branch_becomes_a_value_table") {
-    source :: "fn run() {{\n    answer :: if true -> {{\n        value :: 40 + 2\n        value\n    }} else -> 0\n    print(answer)\n}}\n"
-    assert(arm_table_fix_all(source) == "fn run() {{\n    answer :: if {{\n        true -> {{\n            value :: 40 + 2\n            value\n        }}\n        else -> 0\n    }}\n    print(answer)\n}}\n")
+    source: "run: fn() {{\n    answer: if true -> {{\n        value: 40 + 2\n        value\n    }} else -> 0\n    print(answer)\n}}\n"
+    assert(arm_table_fix_all(source) == "run: fn() {{\n    answer: if {{\n        true -> {{\n            value: 40 + 2\n            value\n        }}\n        else -> 0\n    }}\n    print(answer)\n}}\n")
 }
 #Test("nested_chains_converge_across_fix_rounds") {
-    source :: "fn run(a: Bool, b: Bool) {{\n    if a {{\n        if b {{\n            print(\"1\")\n        }} else if a {{\n            print(\"2\")\n        }}\n    }} else if b {{\n        print(\"3\")\n    }}\n}}\n"
-    diagnostics :: arm_table_checked(source)
+    source: "run: fn(a: Bool, b: Bool) {{\n    if a {{\n        if b {{\n            print(\"1\")\n        }} else if a {{\n            print(\"2\")\n        }}\n    }} else if b {{\n        print(\"3\")\n    }}\n}}\n"
+    diagnostics: arm_table_checked(source)
     assert(arm_table_edits(diagnostics).len() == 2)
-    fixed :: arm_table_fix_all(source)
+    fixed: arm_table_fix_all(source)
     assert(fixed.contains("            b -> {{"))
 }
 #Test("comment_between_branches_keeps_the_warning_without_an_edit") {
-    source :: "fn run(a: Bool) {{\n    if a {{\n        print(\"x\")\n    }} /* keep */ else if !a {{\n        print(\"y\")\n    }}\n}}\n"
-    diagnostics :: arm_table_checked(source)
+    source: "run: fn(a: Bool) {{\n    if a {{\n        print(\"x\")\n    }} /* keep */ else if !a {{\n        print(\"y\")\n    }}\n}}\n"
+    diagnostics: arm_table_checked(source)
     found := false
     loop diagnostic in diagnostics {
         if diagnostic.code == "L0507" {
@@ -253,22 +253,22 @@ fn arm_table_fix_all(source: String) -> String {
 // A module binding whose value only lints (L0507) is still a declaration, as
 // Rust `module_binding_def` keeps every binding that parsed without an error.
 #Test("linted_else_if_module_binding_stays_a_declaration") {
-    source :: "LIMIT :: if 1 <= 0 -> 4 else if 2 == 8 -> 5 else -> 6\nNEXT :: LIMIT + 1\n"
-    diagnostics :: arm_table_checked(source)
+    source: "LIMIT: if 1 <= 0 -> 4 else if 2 == 8 -> 5 else -> 6\nNEXT: LIMIT + 1\n"
+    diagnostics: arm_table_checked(source)
     found := false
     loop diagnostic in diagnostics {
         if diagnostic.code == "L0507" -> found = true
     }
     assert(found, "the chain warns")
-    program :: parser_test_program(source)
+    program: parser_test_program(source)
     assert(program.items.len() == 2 && program.script_body.len() == 0, "both bindings are declarations")
     assert(if program.items[0] == .Const(value) -> value.name == "LIMIT" else -> false, "the linted binding is kept")
     assert(if program.items[1] == .Const(value) -> value.name == "NEXT" else -> false, "the following binding is kept")
 }
 
 #Test("marked_result_handler_line_is_an_effect_statement") {
-    program :: value_block_parsed("\nfn run() {{\n    &writer.write(1) ? done -> print(done) ! err -> {{\n        print(err)\n    }}\n}}\n")
-    handler :: loop item in program.items {
+    program: value_block_parsed("\nrun: fn() {{\n    &writer.write(1) ? done -> print(done) ! err -> {{\n        print(err)\n    }}\n}}\n")
+    handler: loop item in program.items {
         if item == .Func(function) && function.name == "run" {
             assert(function.body.len() == 1, "the handler is one statement")
             if function.body[0] == .Expr(expr) -> break expr

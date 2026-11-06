@@ -1,14 +1,14 @@
 // #3787: a task spawned inside `task.group` runs its body (its output appears
 // between the owner's lines) and the owner continues after the group closes.
-package {
+package: {
     name: "task_group_worker_output"
     authority: { allow: [IO, Time.Wait] }
 }
 
-fn run() {
+run: fn() {
     print("owner before")
     task.group g {
-        worker :: task {
+        worker: task {
             print("worker ran")
         }
         worker.join() ?? panic("worker failed")

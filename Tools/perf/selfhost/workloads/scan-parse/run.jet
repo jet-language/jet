@@ -1,15 +1,15 @@
-struct Token {
+Token: struct {
     kind: String
     text: String
     width: Int
 }
 
-struct Node {
+Node: struct {
     kind: String
     children: Int
 }
 
-fn parse(tokens: &[Token]) -> [Node] {
+parse: fn(tokens: &[Token]) -> [Node] {
     nodes := [Node]{}
     loop token in tokens {
         child_count := 0
@@ -20,8 +20,8 @@ fn parse(tokens: &[Token]) -> [Node] {
     return nodes
 }
 
-fn run() {
-    tokens :: [Token]{
+run: fn() {
+    tokens: [Token]{
         {kind: "keyword", text: "fn", width: 2},
         {kind: "identifier", text: "add", width: 3},
         {kind: "identifier", text: "left", width: 4},
@@ -31,7 +31,7 @@ fn run() {
         {kind: "operator", text: "+", width: 1},
         {kind: "identifier", text: "right", width: 5}
     }
-    nodes :: parse(&tokens)
+    nodes: parse(&tokens)
     lexeme_bytes := 0
     identifiers := 0
     loop token in tokens {

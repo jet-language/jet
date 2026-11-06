@@ -1,17 +1,17 @@
 Error [jet.ViewOutlivesOwner]: A returned view cannot borrow from a temporary argument
-  --> tests/ui/task_detach_view_capture.jet:6:20
+  --> tests/ui/task_detach_view_capture.jet:6:18
     |
-  6 |     t :: task peek([1, 2, 3])
-    |                    ^^^^^^^^^
+  6 |     t: task peek([1, 2, 3])
+    |                  ^^^^^^^^^
  Why: The temporary owner is dropped at the end of this statement, while the returned view remains live
  Fix: Store the owner in a named binding first, then pass that binding to the view-returning call
 More: jet-lang.dev/e/E2305
 
 Error [jet.ValueNotSendable]: This task returns a view that cannot be shared — it does not live long enough to cross into a task
-  --> tests/ui/task_detach_view_capture.jet:6:15
+  --> tests/ui/task_detach_view_capture.jet:6:13
     |
-  6 |     t :: task peek([1, 2, 3])
-    |               ^^^^
+  6 |     t: task peek([1, 2, 3])
+    |             ^^^^
  Why: A view is a borrow, not an owned value; tasks and channels move owned values between threads
  Fix: Give the task plain owned data, or rebuild the value as an owned copy before spawning
 More: jet-lang.dev/e/E1102

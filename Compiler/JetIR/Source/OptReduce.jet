@@ -84,20 +84,20 @@ use {
 // one-byte (Word or Bool), Int and 8-byte word elements, and of unsigned
 // bytes widened to Int (`Int.from_u8(b) == v`); the fills of 1-, 2-, 4- and
 // 8-byte words (IR_REDUCE_FILL + log2 of the width) and of Ints.
-IR_REDUCE_SUM :: 0
-IR_REDUCE_COUNT_BYTES :: 1
-IR_REDUCE_COUNT_INTS :: 2
-IR_REDUCE_COUNT_WORDS :: 3
-IR_REDUCE_COUNT_WIDENED :: 4
-IR_REDUCE_FILL :: 5
-IR_REDUCE_FILL_INTS :: 9
-IR_REDUCE_KINDS :: 10
+IR_REDUCE_SUM: 0
+IR_REDUCE_COUNT_BYTES: 1
+IR_REDUCE_COUNT_INTS: 2
+IR_REDUCE_COUNT_WORDS: 3
+IR_REDUCE_COUNT_WIDENED: 4
+IR_REDUCE_FILL: 5
+IR_REDUCE_FILL_INTS: 9
+IR_REDUCE_KINDS: 10
 
 // A Loop a leaf takes: where it starts (`at`), which leaf (`kind`), its
 // total (-1 for a fill), index, bound, element base and counted or stored
 // value (-1 for a sum), and the limit its fault tests check the index
 // against when that is not the bound (-1 for none).
-struct IRReduceLoop {
+IRReduceLoop: struct {
     at: Int
     kind: Int
     total: Int
@@ -109,7 +109,7 @@ struct IRReduceLoop {
 }
 
 // The leaf's function name; its key is "jet_<name>#asm".
-fn ir_reduce_leaf_name(kind: Int) -> String Never! {
+ir_reduce_leaf_name: fn(kind: Int) -> String Never! {
     if kind == IR_REDUCE_COUNT_BYTES -> return "rt_count_bytes"
     if kind == IR_REDUCE_COUNT_INTS -> return "rt_count_ints"
     if kind == IR_REDUCE_COUNT_WORDS -> return "rt_count_words"
@@ -119,16 +119,16 @@ fn ir_reduce_leaf_name(kind: Int) -> String Never! {
     "rt_int_sum"
 }
 
-fn ir_reduce_key(kind: Int) -> String Never! {
+ir_reduce_key: fn(kind: Int) -> String Never! {
     "jet_{ir_reduce_leaf_name(kind)}#asm"
 }
 
-fn ir_reduce_is_fill(kind: Int) -> Bool Never! {
+ir_reduce_is_fill: fn(kind: Int) -> Bool Never! {
     kind >= IR_REDUCE_FILL
 }
 
 // The bytes of one element the leaf steps over.
-fn ir_reduce_width(kind: Int) -> Int Never! {
+ir_reduce_width: fn(kind: Int) -> Int Never! {
     if kind == IR_REDUCE_COUNT_BYTES || kind == IR_REDUCE_COUNT_WIDENED -> return 1
     if ir_reduce_is_fill(kind) && kind != IR_REDUCE_FILL_INTS -> return 1 << (kind - IR_REDUCE_FILL)
     8
@@ -138,23 +138,23 @@ fn ir_reduce_width(kind: Int) -> Int Never! {
 // after the last body). The report gets one note per Loop with an Int
 // total fed by a load or by an equality test of a loaded element, and per
 // Loop that stores one value. Returns the bodies the pass changed.
-fn ir_opt_reduce_module(m: &IRModule, functions: &[IRFunction], report: &IROptReport) -> [Int] Never! {
-    word_row :: ir_word_row(&m)
+ir_opt_reduce_module: fn(m: &IRModule, functions: &[IRFunction], report: &IROptReport) -> [Int] Never! {
+    word_row: ir_word_row(&m)
     // Per kind its leaf's function row (-1 until a Loop calls it); `made`
     // the kinds whose leaf is new, in the order of their rows.
     leaves := [Int]{}
     loop kind in 0..<IR_REDUCE_KINDS -> &leaves.push(name_rows_value(m.function_rows, ir_reduce_key(kind)) ?? -1)
     made := [Int]{}
-    bodies :: functions.len()
+    bodies: functions.len()
     changed := [Int]{}
     loop id in 0..<bodies {
         if functions[id].asm != None -> next
         if ir_opt_reduce_loops(m, &functions[id], &leaves, &made, bodies, word_row, &report) > 0 -> &changed.push(id)
     }
     loop kind in made {
-        name :: ir_reduce_leaf_name(kind)
+        name: ir_reduce_leaf_name(kind)
         f := ir_function_new(name, ir_reduce_key(kind), "jet_{name}__asm", "", 0)
-        fill :: ir_reduce_is_fill(kind)
+        fill: ir_reduce_is_fill(kind)
         names := [String]{"data", "first", "end", if fill -> "value" else -> "total"}
         regs := [Int]{X64_RDI, X64_RSI, X64_RDX, X64_RCX}
         if kind != IR_REDUCE_SUM && !fill {
@@ -163,8 +163,8 @@ fn ir_opt_reduce_module(m: &IRModule, functions: &[IRFunction], report: &IROptRe
         }
         loop param in names -> _ := ir_slot(&f, word_row, IRSlotKind.Param, ir_intern_name(&m, param), 0)
         f.result = word_row
-        exact :: kind == IR_REDUCE_COUNT_INTS || kind == IR_REDUCE_COUNT_WIDENED || kind == IR_REDUCE_FILL_INTS
-        code :: if {
+        exact: kind == IR_REDUCE_COUNT_INTS || kind == IR_REDUCE_COUNT_WIDENED || kind == IR_REDUCE_FILL_INTS
+        code: if {
             kind == IR_REDUCE_SUM -> x64_int_sum_code()
             fill -> x64_fill_code(ir_reduce_width(kind), exact)
             else -> x64_count_code(ir_reduce_width(kind), exact)
@@ -179,7 +179,7 @@ fn ir_opt_reduce_module(m: &IRModule, functions: &[IRFunction], report: &IROptRe
 // The Loops of `f` a leaf takes, each with its leaf call in front; returns
 // how many. A leaf no Loop called before gets the next row after the
 // module's `bodies` (`leaves`, `made`).
-fn ir_opt_reduce_loops(m: IRModule, f: &IRFunction, leaves: &[Int], made: &[Int], bodies: Int, word_row: Int, report: &IROptReport) -> Int Never! {
+ir_opt_reduce_loops: fn(m: IRModule, f: &IRFunction, leaves: &[Int], made: &[Int], bodies: Int, word_row: Int, report: &IROptReport) -> Int Never! {
     has_loop := false
     loop op in f.op {
         if op == .Loop {
@@ -199,7 +199,7 @@ fn ir_opt_reduce_loops(m: IRModule, f: &IRFunction, leaves: &[Int], made: &[Int]
     reads := [Int]{}
     loop k in 0..<f.op.len() {
         ir_x64_reads_into(f, k, &reads)
-        written :: ir_x64_write(f, k)
+        written: ir_x64_write(f, k)
         if written >= 0 -> &reads.push(written)
         loop slot in reads {
             if slot < 0 -> next
@@ -210,8 +210,8 @@ fn ir_opt_reduce_loops(m: IRModule, f: &IRFunction, leaves: &[Int], made: &[Int]
     taken := [IRReduceLoop]{}
     loop at in 0..<f.op.len() {
         if f.op[at] != .Loop -> next
-        found :: ir_reduce_loop(m, f, at, first, latest)
-        what :: if {
+        found: ir_reduce_loop(m, f, at, first, latest)
+        what: if {
             found.plan.kind == IR_REDUCE_SUM -> "sum"
             ir_reduce_is_fill(found.plan.kind) -> "fill"
             else -> "count"
@@ -253,12 +253,12 @@ fn ir_opt_reduce_loops(m: IRModule, f: &IRFunction, leaves: &[Int], made: &[Int]
 // "-" when the Loop has no Int total fed by a load or by an equality test
 // of a loaded element and stores no one value, else why the leaf
 // (`plan.kind`) does not take it.
-struct IRReduceFound {
+IRReduceFound: struct {
     plan: IRReduceLoop
     reason: String
 }
 
-fn ir_reduce_declined(kind: Int, reason: String) -> IRReduceFound Never! {
+ir_reduce_declined: fn(kind: Int, reason: String) -> IRReduceFound Never! {
     IRReduceFound{plan: IRReduceLoop{at: -1, kind: kind, total: -1, index: -1, bound: -1, base: -1, value: -1, limit: -1}, reason: reason}
 }
 
@@ -269,7 +269,7 @@ fn ir_reduce_declined(kind: Int, reason: String) -> IRReduceFound Never! {
 // unsigned byte element is widened to (`widened`, -1 for none); for a
 // fill, the Store (`store`), the stored value and the Int clone the Store
 // stores (`clone`, -1 for none). `reason` as in IRReduceFound.
-struct IRReduceUpdate {
+IRReduceUpdate: struct {
     kind: Int
     add: Int
     total: Int
@@ -283,13 +283,13 @@ struct IRReduceUpdate {
     reason: String
 }
 
-fn ir_reduce_no_update(kind: Int, reason: String) -> IRReduceUpdate Never! {
+ir_reduce_no_update: fn(kind: Int, reason: String) -> IRReduceUpdate Never! {
     IRReduceUpdate{kind: kind, add: -1, total: -1, element: -1, carry: -1, match: -1, value: -1, widened: -1, store: -1, clone: -1, reason: reason}
 }
 
 // The Loop at `at`, against the shape the header comment gives.
-fn ir_reduce_loop(m: IRModule, f: IRFunction, at: Int, first: [Int], latest: [Int]) -> IRReduceFound Never! {
-    end :: f.a[at]
+ir_reduce_loop: fn(m: IRModule, f: IRFunction, at: Int, first: [Int], latest: [Int]) -> IRReduceFound Never! {
+    end: f.a[at]
     if f.op[end - 1] != .Br || f.a[end - 1] != 0 -> return ir_reduce_declined(IR_REDUCE_SUM, "-")
     // The Loop's own instructions, without the bodies of its fault tests
     // (an If with no Else whose body ends in `unreachable`; `faults`) or of
@@ -315,56 +315,56 @@ fn ir_reduce_loop(m: IRModule, f: IRFunction, at: Int, first: [Int], latest: [In
     update := ir_reduce_sum_update(m, f, at, end, body)
     if update.reason == "-" -> update = ir_reduce_count_update(m, f, at, end, body, faults, guards)
     if update.reason == "-" -> update = ir_reduce_fill_update(m, f, at, end, body)
-    kind :: update.kind
+    kind: update.kind
     if update.reason != "" -> return ir_reduce_declined(kind, update.reason)
-    add :: update.add
-    total :: update.total
-    element :: update.element
-    carry :: update.carry
-    fill :: update.store >= 0
+    add: update.add
+    total: update.total
+    element: update.element
+    carry: update.carry
+    fill: update.store >= 0
     // The element access: the load of a sum or count, the Store of a fill.
-    access :: if fill -> update.store else -> ir_reduce_def(f, at, end, element)
+    access: if fill -> update.store else -> ir_reduce_def(f, at, end, element)
     loop k in body {
-        dropped :: f.op[k] == .Drop && carry >= 0 && f.a[k] == total && add < k && k < carry
+        dropped: f.op[k] == .Drop && carry >= 0 && f.a[k] == total && add < k && k < carry
         // The widened element is an Int in 0..=255, inline, so its drop
         // frees nothing.
-        inline_drop :: f.op[k] == .Drop && update.widened >= 0 && f.a[k] == update.widened
-        closes :: f.op[k] == .End && update.match >= 0 && k == f.c[update.match]
-        stored :: k == update.store || k == update.clone
+        inline_drop: f.op[k] == .Drop && update.widened >= 0 && f.a[k] == update.widened
+        closes: f.op[k] == .End && update.match >= 0 && k == f.c[update.match]
+        stored: k == update.store || k == update.clone
         // Nothing a fill's run stands for reads memory, so its stores
         // change no value the passes see.
         if fill && f.op[k] == .Load -> return ir_reduce_declined(kind, "a load in a Loop that stores")
         if !ir_reduce_allowed(f.op[k]) && !dropped && !inline_drop && !closes && !stored && !(f.op[k] == .If && (faults.contains(k) || guards.contains(k) || k == update.match)) -> return ir_reduce_declined(kind, "the Loop holds a {ir_op_name(f.op[k])}")
     }
     if f.b[access] != 0 || (kind == IR_REDUCE_SUM && m.types[f.slot_type[element]].kind != .Int) -> return ir_reduce_declined(kind, "the element is not a whole {if kind == IR_REDUCE_SUM -> "Int word" else -> "element"}")
-    stride :: ir_reduce_width(kind)
+    stride: ir_reduce_width(kind)
     // The address: data + index * stride, or data + index for one-byte
     // elements. `user` reads the (scaled) index for it.
-    address :: ir_reduce_def(f, at, end, f.a[access])
+    address: ir_reduce_def(f, at, end, f.a[access])
     if address < 0 || f.op[address] != .Add || f.c[address] != IR_OVERFLOW_WRAP -> return ir_reduce_declined(kind, "the element address")
     scaled := -1
     base := -1
     scaled_index := -1
     if stride != 1 {
-        left_offset :: ir_reduce_def(f, at, end, f.a[address])
+        left_offset: ir_reduce_def(f, at, end, f.a[address])
         scaled = if left_offset >= 0 && f.op[left_offset] == .Mul -> left_offset else -> ir_reduce_def(f, at, end, f.b[address])
         if scaled < 0 || f.op[scaled] != .Mul || f.c[scaled] != IR_OVERFLOW_WRAP -> return ir_reduce_declined(kind, "the element address")
         base = if scaled == left_offset -> f.b[address] else -> f.a[address]
-        stride_right :: ir_reduce_is_const(f, at, end, f.b[scaled], stride)
+        stride_right: ir_reduce_is_const(f, at, end, f.b[scaled], stride)
         if !stride_right && !ir_reduce_is_const(f, at, end, f.a[scaled], stride) -> return ir_reduce_declined(kind, "the element stride")
         scaled_index = if stride_right -> f.a[scaled] else -> f.b[scaled]
     } else {
-        base_left :: ir_reduce_invariant(m, f, at, end, f.a[address], 0)
+        base_left: ir_reduce_invariant(m, f, at, end, f.a[address], 0)
         base = if base_left -> f.a[address] else -> f.b[address]
         scaled_index = if base_left -> f.b[address] else -> f.a[address]
     }
-    user :: if scaled >= 0 -> scaled else -> address
+    user: if scaled >= 0 -> scaled else -> address
     if !ir_reduce_invariant(m, f, at, end, base, 0) -> return ir_reduce_declined(kind, "the List's data changes in the Loop")
     // The index: written once, by `i <- i + 1`; the scaled slot is it or a
     // Move or Copy of it.
-    widen :: ir_reduce_def(f, at, end, scaled_index)
-    index :: if widen >= 0 && (f.op[widen] == .Move || f.op[widen] == .Copy) -> f.a[widen] else -> scaled_index
-    step :: ir_reduce_def(f, at, end, index)
+    widen: ir_reduce_def(f, at, end, scaled_index)
+    index: if widen >= 0 && (f.op[widen] == .Move || f.op[widen] == .Copy) -> f.a[widen] else -> scaled_index
+    step: ir_reduce_def(f, at, end, index)
     if step < 0 || f.op[step] != .Add || f.a[step] != index || !ir_reduce_is_const(f, at, end, f.b[step], 1) -> return ir_reduce_declined(kind, "the index does not step by 1")
     if !ir_reduce_counter(m, f, index) -> return ir_reduce_declined(kind, "the index is not an Int or a word")
     if !fill && ir_reduce_def(f, at, end, total) != (if carry >= 0 -> carry else -> add) -> return ir_reduce_declined(kind, "the total has another write")
@@ -379,11 +379,11 @@ fn ir_reduce_loop(m: IRModule, f: IRFunction, at: Int, first: [Int], latest: [In
     loop k in body {
         if f.op[k] != .BrIf && !guards.contains(k) -> next
         if (f.op[k] == .BrIf && f.b[k] < 1) || k > access -> return ir_reduce_declined(kind, "an exit after the element {if fill -> "store" else -> "load"}")
-        test :: ir_reduce_def(f, at, end, f.a[k])
+        test: ir_reduce_def(f, at, end, f.a[k])
         if test < 0 -> return ir_reduce_declined(kind, "an exit")
         if f.op[test] == .IntBig && (f.a[test] == total || f.a[test] == index) -> next
         if f.op[k] == .If -> return ir_reduce_declined(kind, "an exit other than the index test")
-        found :: ir_reduce_bound(f, at, end, test, index)
+        found: ir_reduce_bound(f, at, end, test, index)
         if found < 0 || bound >= 0 -> return ir_reduce_declined(kind, "an exit other than the index test")
         bound = found
     }
@@ -397,9 +397,9 @@ fn ir_reduce_loop(m: IRModule, f: IRFunction, at: Int, first: [Int], latest: [In
     // stands for has 0 <= i < bound.
     limit := -1
     loop k in faults {
-        test :: ir_reduce_def(f, at, end, f.a[k])
+        test: ir_reduce_def(f, at, end, f.a[k])
         if test < 0 || test > k || k > step || f.op[test] != .Ge || !ir_reduce_from_index(f, at, end, f.a[test], index, step, 0) -> return ir_reduce_declined(kind, "a fault test the run does not rule out")
-        checked :: f.b[test]
+        checked: f.b[test]
         if ir_reduce_same(m, f, at, end, checked, bound, 0) || (limit >= 0 && ir_reduce_same(m, f, at, end, checked, limit, 0)) -> next
         if limit >= 0 || !ir_reduce_invariant(m, f, at, end, checked, 0) || m.types[f.slot_type[checked]].kind != .Word || m.types[f.slot_type[checked]].size != 8 -> return ir_reduce_declined(kind, "a fault test the run does not rule out")
         limit = checked
@@ -413,7 +413,7 @@ fn ir_reduce_loop(m: IRModule, f: IRFunction, at: Int, first: [Int], latest: [In
             if total >= 0 && slot == total && k != add && f.op[k] != .IntBig && f.op[k] != .Drop -> return ir_reduce_declined(kind, "the total is read in the Loop")
             if slot == index && k != step && k != user && k != widen && f.op[k] != .IntBig && !ir_reduce_is_test(f, k, index) -> return ir_reduce_declined(kind, "the index is read in the Loop")
         }
-        written :: ir_x64_write(f, k)
+        written: ir_x64_write(f, k)
         if written < 0 || written == total || written == index -> next
         if written < f.param_count || first[written] < at || latest[written] > end || first[written] != k -> return ir_reduce_declined(kind, "a slot lives past one pass")
     }
@@ -423,15 +423,15 @@ fn ir_reduce_loop(m: IRModule, f: IRFunction, at: Int, first: [Int], latest: [In
 // A sum's update: an Int Add `t <- t + e` (either order) with `e` loaded
 // in the Loop, or `s <- t + e` carried back by `move t <- s` (`carry`; an
 // owned total, which the Loop may drop in between).
-fn ir_reduce_sum_update(m: IRModule, f: IRFunction, at: Int, end: Int, body: [Int]) -> IRReduceUpdate Never! {
+ir_reduce_sum_update: fn(m: IRModule, f: IRFunction, at: Int, end: Int, body: [Int]) -> IRReduceUpdate Never! {
     found := ir_reduce_no_update(IR_REDUCE_SUM, "-")
     adds := 0
     loop k in body {
         if f.op[k] != .Add || f.dst[k] < 0 || m.types[f.slot_type[f.dst[k]]].kind != .Int -> next
-        total :: ir_reduce_total(f, body, k)
+        total: ir_reduce_total(f, body, k)
         if total < 0 -> next
-        other :: if f.a[k] == total -> f.b[k] else -> f.a[k]
-        def :: ir_reduce_def(f, at, end, other)
+        other: if f.a[k] == total -> f.b[k] else -> f.a[k]
+        def: ir_reduce_def(f, at, end, other)
         if def < 0 || f.op[def] != .Load -> next
         adds += 1
         found = IRReduceUpdate{kind: IR_REDUCE_SUM, add: k, total: total, element: other, carry: if total == f.dst[k] -> -1 else -> ir_reduce_carry(f, body, k, total), match: -1, value: -1, widened: -1, store: -1, clone: -1, reason: ""}
@@ -443,8 +443,8 @@ fn ir_reduce_sum_update(m: IRModule, f: IRFunction, at: Int, end: Int, body: [In
 // The total the Int Add at `k` adds into: its own operand and result
 // (`t <- t + x`), or the operand a `move t <- s` (s its result) carries
 // back; -1 for none.
-fn ir_reduce_total(f: IRFunction, body: [Int], k: Int) -> Int Never! {
-    sum :: f.dst[k]
+ir_reduce_total: fn(f: IRFunction, body: [Int], k: Int) -> Int Never! {
+    sum: f.dst[k]
     if f.a[k] == sum || f.b[k] == sum -> return sum
     if ir_reduce_carry(f, body, k, f.a[k]) >= 0 -> return f.a[k]
     if ir_reduce_carry(f, body, k, f.b[k]) >= 0 -> return f.b[k]
@@ -457,16 +457,16 @@ fn ir_reduce_total(f: IRFunction, body: [Int], k: Int) -> Int Never! {
 // carry), on `t <- e == v` (either order) with `e` loaded in the Loop, or
 // an Int an unsigned byte loaded in the Loop is widened to, and `v` of e's
 // type, unchanged by the Loop. The element's type picks the leaf.
-fn ir_reduce_count_update(m: IRModule, f: IRFunction, at: Int, end: Int, body: [Int], faults: [Int], guards: [Int]) -> IRReduceUpdate Never! {
+ir_reduce_count_update: fn(m: IRModule, f: IRFunction, at: Int, end: Int, body: [Int], faults: [Int], guards: [Int]) -> IRReduceUpdate Never! {
     found := ir_reduce_no_update(IR_REDUCE_COUNT_BYTES, "-")
     counts := 0
     loop k in body {
         if f.op[k] != .If || f.b[k] >= 0 || faults.contains(k) || guards.contains(k) -> next
         loop j in (k + 1)..<f.c[k] {
             if f.op[j] != .Add || f.dst[j] < 0 || m.types[f.slot_type[f.dst[j]]].kind != .Int -> next
-            total :: ir_reduce_total(f, body, j)
+            total: ir_reduce_total(f, body, j)
             if total < 0 -> next
-            one :: if f.a[j] == total -> f.b[j] else -> f.a[j]
+            one: if f.a[j] == total -> f.b[j] else -> f.a[j]
             if !ir_reduce_is_const(f, at, end, one, 1) -> next
             counts += 1
             found = IRReduceUpdate{kind: IR_REDUCE_COUNT_BYTES, add: j, total: total, element: -1, carry: if total == f.dst[j] -> -1 else -> ir_reduce_carry(f, body, j, total), match: k, value: -1, widened: -1, store: -1, clone: -1, reason: ""}
@@ -474,7 +474,7 @@ fn ir_reduce_count_update(m: IRModule, f: IRFunction, at: Int, end: Int, body: [
     }
     if counts == 0 -> return found
     if counts > 1 -> return ir_reduce_no_update(IR_REDUCE_COUNT_BYTES, "more than one total")
-    k :: found.match
+    k: found.match
     loop j in (k + 1)..<f.c[k] {
         if j == found.add || j == found.carry -> next
         if f.op[j] == .Const && (f.dst[j] == f.a[found.add] || f.dst[j] == f.b[found.add]) -> next
@@ -483,10 +483,10 @@ fn ir_reduce_count_update(m: IRModule, f: IRFunction, at: Int, end: Int, body: [
         return ir_reduce_no_update(IR_REDUCE_COUNT_BYTES, "-")
     }
     if found.carry > f.c[k] -> return ir_reduce_no_update(IR_REDUCE_COUNT_BYTES, "the total is carried after the count's If")
-    test :: ir_reduce_def(f, at, end, f.a[k])
+    test: ir_reduce_def(f, at, end, f.a[k])
     if test < 0 || test > k || f.op[test] != .Eq -> return ir_reduce_no_update(IR_REDUCE_COUNT_BYTES, "the count's test is not an equality")
-    left :: ir_reduce_element(m, f, at, end, f.a[test])
-    right :: ir_reduce_element(m, f, at, end, f.b[test])
+    left: ir_reduce_element(m, f, at, end, f.a[test])
+    right: ir_reduce_element(m, f, at, end, f.b[test])
     // `operand` the test's element side: the loaded element or its Int.
     operand := -1
     element := -1
@@ -502,10 +502,10 @@ fn ir_reduce_count_update(m: IRModule, f: IRFunction, at: Int, end: Int, body: [
     } else {
         return ir_reduce_no_update(IR_REDUCE_COUNT_BYTES, "the count's test is not element == value")
     }
-    ty :: m.types[f.slot_type[operand]]
-    vt :: m.types[f.slot_type[value]]
+    ty: m.types[f.slot_type[operand]]
+    vt: m.types[f.slot_type[value]]
     if ty.kind != vt.kind || ty.size != vt.size -> return ir_reduce_no_update(IR_REDUCE_COUNT_BYTES, "the element and the value differ in type")
-    kind :: if {
+    kind: if {
         operand != element -> IR_REDUCE_COUNT_WIDENED
         (ty.kind == .Word || ty.kind == .Bool) && ty.size == 1 -> IR_REDUCE_COUNT_BYTES
         ty.kind == .Int -> IR_REDUCE_COUNT_INTS
@@ -525,7 +525,7 @@ fn ir_reduce_count_update(m: IRModule, f: IRFunction, at: Int, end: Int, body: [
 // the pass. A Store of a value the Loop changes is not a fill. A Bool,
 // Char or word of no drop picks the fill of its stored width
 // (X64Select.jet ir_x64_value_width), an Int the fill of Ints.
-fn ir_reduce_fill_update(m: IRModule, f: IRFunction, at: Int, end: Int, body: [Int]) -> IRReduceUpdate Never! {
+ir_reduce_fill_update: fn(m: IRModule, f: IRFunction, at: Int, end: Int, body: [Int]) -> IRReduceUpdate Never! {
     store := -1
     loop k in body {
         if f.op[k] != .Store -> next
@@ -533,22 +533,22 @@ fn ir_reduce_fill_update(m: IRModule, f: IRFunction, at: Int, end: Int, body: [I
         store = k
     }
     if store < 0 -> return ir_reduce_no_update(IR_REDUCE_FILL, "-")
-    stored :: f.c[store]
+    stored: f.c[store]
     value := stored
     clone := -1
-    def :: ir_reduce_def(f, at, end, stored)
+    def: ir_reduce_def(f, at, end, stored)
     if def >= 0 && ir_opt_calls_route(m, f, def, "jet_rt_int_clone") && f.c[def] == 1 {
         clone = def
         value = f.args[f.b[def]]
     }
     if !ir_reduce_invariant(m, f, at, end, value, 0) -> return ir_reduce_no_update(IR_REDUCE_FILL, "-")
-    ty :: m.types[f.slot_type[stored]]
-    plain :: (ty.kind == .Bool || ty.kind == .Char || ty.kind == .Word) && ty.drop == ""
+    ty: m.types[f.slot_type[stored]]
+    plain: (ty.kind == .Bool || ty.kind == .Char || ty.kind == .Word) && ty.drop == ""
     if ty.kind != .Int && !plain -> return ir_reduce_no_update(IR_REDUCE_FILL, "the stored value is not a Bool, a Char, an Int or a word")
     // The stored width's log2: 1, 2, 4 or 8 bytes.
-    width :: ir_x64_value_width(ir_x64_shape(ty))
-    shift :: if width == 1 -> 0 else if width == 2 -> 1 else if width == 4 -> 2 else -> 3
-    kind :: if ty.kind == .Int -> IR_REDUCE_FILL_INTS else -> IR_REDUCE_FILL + shift
+    width: ir_x64_value_width(ir_x64_shape(ty))
+    shift: if width == 1 -> 0 else if width == 2 -> 1 else if width == 4 -> 2 else -> 3
+    kind: if ty.kind == .Int -> IR_REDUCE_FILL_INTS else -> IR_REDUCE_FILL + shift
     found := ir_reduce_no_update(kind, "")
     found.store = store
     found.clone = clone
@@ -560,21 +560,21 @@ fn ir_reduce_fill_update(m: IRModule, f: IRFunction, at: Int, end: Int, body: [I
 // when the Loop loads it, or the unsigned byte the Loop loads and Copies
 // or Moves into the Int `slot` (`Int.from_u8(b)`: an Int in 0..=255);
 // -1 for neither.
-fn ir_reduce_element(m: IRModule, f: IRFunction, at: Int, end: Int, slot: Int) -> Int Never! {
-    def :: ir_reduce_def(f, at, end, slot)
+ir_reduce_element: fn(m: IRModule, f: IRFunction, at: Int, end: Int, slot: Int) -> Int Never! {
+    def: ir_reduce_def(f, at, end, slot)
     if def < 0 -> return -1
     if f.op[def] == .Load -> return slot
     if (f.op[def] != .Copy && f.op[def] != .Move) || m.types[f.slot_type[slot]].kind != .Int -> return -1
-    source :: f.a[def]
-    loaded :: ir_reduce_def(f, at, end, source)
-    byte :: m.types[f.slot_type[source]]
+    source: f.a[def]
+    loaded: ir_reduce_def(f, at, end, source)
+    byte: m.types[f.slot_type[source]]
     if loaded < 0 || f.op[loaded] != .Load || byte.kind != .Word || byte.size != 1 || byte.signed -> return -1
     source
 }
 
 // The one `move total <- s` after the Add at `k` (whose result is `s`) at
 // the Loop's top level, or -1.
-fn ir_reduce_carry(f: IRFunction, body: [Int], k: Int, total: Int) -> Int Never! {
+ir_reduce_carry: fn(f: IRFunction, body: [Int], k: Int, total: Int) -> Int Never! {
     if total < 0 || total == f.dst[k] -> return -1
     found := -1
     loop j in body {
@@ -587,8 +587,8 @@ fn ir_reduce_carry(f: IRFunction, body: [Int], k: Int, total: Int) -> Int Never!
 
 // Whether the body of the If at `k` (a pass's top level) only moves slots
 // and then leaves the Loop: a `br` past the If and the Loop.
-fn ir_reduce_leaves(f: IRFunction, k: Int) -> Bool Never! {
-    last :: f.c[k] - 1
+ir_reduce_leaves: fn(f: IRFunction, k: Int) -> Bool Never! {
+    last: f.c[k] - 1
     if last <= k || f.op[last] != .Br || f.a[last] < 2 -> return false
     loop j in (k + 1)..<last {
         if f.op[j] != .Move -> return false
@@ -598,7 +598,7 @@ fn ir_reduce_leaves(f: IRFunction, k: Int) -> Bool Never! {
 
 // The one write of `slot` inside the Loop at..end, or -1 (none, or more
 // than one).
-fn ir_reduce_def(f: IRFunction, at: Int, end: Int, slot: Int) -> Int Never! {
+ir_reduce_def: fn(f: IRFunction, at: Int, end: Int, slot: Int) -> Int Never! {
     if slot < 0 -> return -1
     def := -1
     loop k in (at + 1)..<end {
@@ -612,7 +612,7 @@ fn ir_reduce_def(f: IRFunction, at: Int, end: Int, slot: Int) -> Int Never! {
 // Whether `slot` holds `value` in the Loop: the Loop writes it once with
 // that Const, or never writes it and its one write anywhere is that Const,
 // before the Loop.
-fn ir_reduce_is_const(f: IRFunction, at: Int, end: Int, slot: Int, value: Int) -> Bool Never! {
+ir_reduce_is_const: fn(f: IRFunction, at: Int, end: Int, slot: Int, value: Int) -> Bool Never! {
     if slot < f.param_count -> return false
     def := ir_reduce_def(f, at, end, slot)
     if def < 0 {
@@ -624,14 +624,14 @@ fn ir_reduce_is_const(f: IRFunction, at: Int, end: Int, slot: Int, value: Int) -
 }
 
 // The instructions a Loop the leaf takes may hold.
-fn ir_reduce_allowed(op: IROp) -> Bool Never! {
+ir_reduce_allowed: fn(op: IROp) -> Bool Never! {
     if op == {
         .Nop | .Const | .Move | .Copy | .Add | .Sub | .Mul | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Not | .IntBig | .Load | .BrIf -> true
         else -> false
     }
 }
 
-fn ir_reduce_writes(f: IRFunction, at: Int, end: Int, slot: Int) -> Int Never! {
+ir_reduce_writes: fn(f: IRFunction, at: Int, end: Int, slot: Int) -> Int Never! {
     count := 0
     loop k in (at + 1)..<end {
         if ir_x64_write(f, k) == slot -> count += 1
@@ -643,30 +643,30 @@ fn ir_reduce_writes(f: IRFunction, at: Int, end: Int, slot: Int) -> Int Never! {
 // writes it, or writes it once with a Const, a load from such a slot (the
 // Loop stores nothing), or a Move of one (a Copy, but not of an Int, which
 // may copy a big Int).
-fn ir_reduce_invariant(m: IRModule, f: IRFunction, at: Int, end: Int, slot: Int, depth: Int) -> Bool Never! {
+ir_reduce_invariant: fn(m: IRModule, f: IRFunction, at: Int, end: Int, slot: Int, depth: Int) -> Bool Never! {
     if slot < 0 || depth > 3 -> return false
     if ir_reduce_writes(f, at, end, slot) == 0 -> return true
-    def :: ir_reduce_def(f, at, end, slot)
+    def: ir_reduce_def(f, at, end, slot)
     if def < 0 -> return false
     if f.op[def] == .Const -> return true
-    copies :: f.op[def] == .Move || (f.op[def] == .Copy && m.types[f.slot_type[slot]].kind != .Int)
+    copies: f.op[def] == .Move || (f.op[def] == .Copy && m.types[f.slot_type[slot]].kind != .Int)
     (f.op[def] == .Load || copies) && ir_reduce_invariant(m, f, at, end, f.a[def], depth + 1)
 }
 
 // An index or bound the leaf reads as a raw word: an Int, or an 8-byte
 // word.
-fn ir_reduce_counter(m: IRModule, f: IRFunction, slot: Int) -> Bool Never! {
-    ty :: m.types[f.slot_type[slot]]
+ir_reduce_counter: fn(m: IRModule, f: IRFunction, slot: Int) -> Bool Never! {
+    ty: m.types[f.slot_type[slot]]
     ty.kind == .Int || (ty.kind == .Word && ty.size == 8)
 }
 
 // Whether `slot` holds the index's value of the current pass: it is the
 // index, or the Loop writes it once, before the step, with a Move or Copy
 // of such a slot.
-fn ir_reduce_from_index(f: IRFunction, at: Int, end: Int, slot: Int, index: Int, step: Int, depth: Int) -> Bool Never! {
+ir_reduce_from_index: fn(f: IRFunction, at: Int, end: Int, slot: Int, index: Int, step: Int, depth: Int) -> Bool Never! {
     if slot == index -> return true
     if depth > 3 -> return false
-    def :: ir_reduce_def(f, at, end, slot)
+    def: ir_reduce_def(f, at, end, slot)
     if def < 0 || def > step || (f.op[def] != .Move && f.op[def] != .Copy) -> return false
     ir_reduce_from_index(f, at, end, f.a[def], index, step, depth + 1)
 }
@@ -675,44 +675,44 @@ fn ir_reduce_from_index(f: IRFunction, at: Int, end: Int, slot: Int, index: Int,
 // slot, or each loaded once in the Loop, with the same width, from the
 // same offset of such slots (the Loop stores nothing). An Int and a word
 // load of one field read the same bits.
-fn ir_reduce_same(m: IRModule, f: IRFunction, at: Int, end: Int, left: Int, right: Int, depth: Int) -> Bool Never! {
+ir_reduce_same: fn(m: IRModule, f: IRFunction, at: Int, end: Int, left: Int, right: Int, depth: Int) -> Bool Never! {
     if left == right -> return left >= 0
     if depth > 3 -> return false
-    l :: ir_reduce_def(f, at, end, left)
-    r :: ir_reduce_def(f, at, end, right)
+    l: ir_reduce_def(f, at, end, left)
+    r: ir_reduce_def(f, at, end, right)
     if l < 0 || r < 0 || f.op[l] != .Load || f.op[r] != .Load || f.b[l] != f.b[r] || m.types[f.slot_type[left]].size != m.types[f.slot_type[right]].size -> return false
     ir_reduce_invariant(m, f, at, end, f.a[l], 0) && ir_reduce_same(m, f, at, end, f.a[l], f.a[r], depth + 1)
 }
 
 // The bound `test` (the Bool a BrIf leaves on) compares `index` with: `i >=
 // n`, `n <= i`, `i == n`, or `!(i < n)`; -1 for any other test.
-fn ir_reduce_bound(f: IRFunction, at: Int, end: Int, test: Int, index: Int) -> Int Never! {
-    op :: f.op[test]
+ir_reduce_bound: fn(f: IRFunction, at: Int, end: Int, test: Int, index: Int) -> Int Never! {
+    op: f.op[test]
     if (op == .Ge || op == .Eq) && f.a[test] == index -> return f.b[test]
     if op == .Le && f.b[test] == index -> return f.a[test]
     if op != .Not -> return -1
-    less :: ir_reduce_def(f, at, end, f.a[test])
+    less: ir_reduce_def(f, at, end, f.a[test])
     if less < 0 || f.op[less] != .Lt || f.a[less] != index -> return -1
     f.b[less]
 }
 
 // Whether instruction `k` is part of the index test (a compare of `index`).
-fn ir_reduce_is_test(f: IRFunction, k: Int, index: Int) -> Bool Never! {
-    op :: f.op[k]
+ir_reduce_is_test: fn(f: IRFunction, k: Int, index: Int) -> Bool Never! {
+    op: f.op[k]
     (op == .Ge || op == .Eq || op == .Lt || op == .Le) && (f.a[k] == index || f.b[k] == index)
 }
 
 // The leaf call in front of the Loop `plan.at`, as the header comment shows.
-fn ir_reduce_call(f: &IRFunction, code: &IROptCode, plan: IRReduceLoop, leaf: Int, word_row: Int) Never! {
-    line :: f.code_line[plan.at]
-    end :: f.a[plan.at]
-    data_value :: ir_reduce_value(&f, &code, plan.at, end, plan.base, line)
-    data :: ir_reduce_word(&f, &code, data_value, word_row, line)
-    bound_value :: ir_reduce_value(&f, &code, plan.at, end, plan.bound, line)
-    bound :: ir_reduce_word(&f, &code, bound_value, word_row, line)
-    first :: ir_reduce_word(&f, &code, plan.index, word_row, line)
+ir_reduce_call: fn(f: &IRFunction, code: &IROptCode, plan: IRReduceLoop, leaf: Int, word_row: Int) Never! {
+    line: f.code_line[plan.at]
+    end: f.a[plan.at]
+    data_value: ir_reduce_value(&f, &code, plan.at, end, plan.base, line)
+    data: ir_reduce_word(&f, &code, data_value, word_row, line)
+    bound_value: ir_reduce_value(&f, &code, plan.at, end, plan.bound, line)
+    bound: ir_reduce_word(&f, &code, bound_value, word_row, line)
+    first: ir_reduce_word(&f, &code, plan.index, word_row, line)
     // A fill has no total.
-    total :: if plan.total >= 0 -> ir_reduce_word(&f, &code, plan.total, word_row, line) else -> -1
+    total: if plan.total >= 0 -> ir_reduce_word(&f, &code, plan.total, word_row, line) else -> -1
     // The Bool row of the Loop's index test.
     bool_row := -1
     loop k in (plan.at + 1)..<end {
@@ -722,24 +722,24 @@ fn ir_reduce_call(f: &IRFunction, code: &IROptCode, plan: IRReduceLoop, leaf: In
         }
     }
     if plan.limit >= 0 {
-        limit_value :: ir_reduce_value(&f, &code, plan.at, end, plan.limit, line)
-        limit :: ir_reduce_word(&f, &code, limit_value, word_row, line)
-        within :: ir_slot(&f, bool_row, IRSlotKind.Temp, -1, line)
+        limit_value: ir_reduce_value(&f, &code, plan.at, end, plan.limit, line)
+        limit: ir_reduce_word(&f, &code, limit_value, word_row, line)
+        within: ir_slot(&f, bool_row, IRSlotKind.Temp, -1, line)
         ir_opt_code_put(&code, .Le, within, bound, limit, -1, line)
         ir_opt_code_put(&code, .If, -1, within, -1, -1, line)
     }
-    sum :: ir_slot(&f, word_row, IRSlotKind.Temp, -1, line)
+    sum: ir_slot(&f, word_row, IRSlotKind.Temp, -1, line)
     args := [Int]{data, first, bound}
     if total >= 0 -> &args.push(total)
     if plan.value >= 0 {
-        value_value :: ir_reduce_value(&f, &code, plan.at, end, plan.value, line)
+        value_value: ir_reduce_value(&f, &code, plan.at, end, plan.value, line)
         &args.push(ir_reduce_word(&f, &code, value_value, word_row, line))
     }
-    start :: ir_args(&f, args)
+    start: ir_args(&f, args)
     ir_opt_code_put(&code, .Call, sum, leaf, start, args.len(), line)
-    declined :: ir_slot(&f, word_row, IRSlotKind.Temp, -1, line)
+    declined: ir_slot(&f, word_row, IRSlotKind.Temp, -1, line)
     ir_opt_code_put(&code, .Const, declined, X64_INT_SUM_DECLINED, -1, -1, line)
-    taken :: ir_slot(&f, bool_row, IRSlotKind.Temp, -1, line)
+    taken: ir_slot(&f, bool_row, IRSlotKind.Temp, -1, line)
     ir_opt_code_put(&code, .Ne, taken, sum, declined, -1, line)
     ir_opt_code_put(&code, .If, -1, taken, -1, -1, line)
     if plan.total >= 0 -> ir_opt_code_put(&code, .Move, plan.total, sum, -1, -1, line)
@@ -750,15 +750,15 @@ fn ir_reduce_call(f: &IRFunction, code: &IROptCode, plan: IRReduceLoop, leaf: In
 
 // `slot`'s value before the Loop: the slot itself when the Loop never
 // writes it, else its Const, load or Move again into a fresh slot.
-fn ir_reduce_value(f: &IRFunction, code: &IROptCode, at: Int, end: Int, slot: Int, line: Int) -> Int Never! {
-    def :: ir_reduce_def(f, at, end, slot)
+ir_reduce_value: fn(f: &IRFunction, code: &IROptCode, at: Int, end: Int, slot: Int, line: Int) -> Int Never! {
+    def: ir_reduce_def(f, at, end, slot)
     if def < 0 -> return slot
-    fresh :: ir_slot(&f, f.slot_type[slot], IRSlotKind.Temp, -1, line)
+    fresh: ir_slot(&f, f.slot_type[slot], IRSlotKind.Temp, -1, line)
     if f.op[def] == .Const {
         ir_opt_code_put(&code, .Const, fresh, f.a[def], -1, -1, line)
         return fresh
     }
-    source :: ir_reduce_value(&f, &code, at, end, f.a[def], line)
+    source: ir_reduce_value(&f, &code, at, end, f.a[def], line)
     if f.op[def] == .Load {
         ir_opt_code_put(&code, .Load, fresh, source, f.b[def], f.c[def], line)
     } else {
@@ -768,9 +768,9 @@ fn ir_reduce_value(f: &IRFunction, code: &IROptCode, at: Int, end: Int, slot: In
 }
 
 // `slot` as a word of `word_row`: itself, or moved into a fresh one.
-fn ir_reduce_word(f: &IRFunction, code: &IROptCode, slot: Int, word_row: Int, line: Int) -> Int Never! {
+ir_reduce_word: fn(f: &IRFunction, code: &IROptCode, slot: Int, word_row: Int, line: Int) -> Int Never! {
     if f.slot_type[slot] == word_row -> return slot
-    fresh :: ir_slot(&f, word_row, IRSlotKind.Temp, -1, line)
+    fresh: ir_slot(&f, word_row, IRSlotKind.Temp, -1, line)
     ir_opt_code_put(&code, .Move, fresh, slot, -1, -1, line)
     fresh
 }

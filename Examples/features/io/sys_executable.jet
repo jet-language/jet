@@ -2,20 +2,20 @@
 // under `jet run`, the built binary after `jet build`. Launching that path
 // runs the same program again on either tier; under `jet run` it runs
 // through the same jet at the same level.
-package {
+package: {
     name: "sys_executable"
     authority: { allow: [Env, Exec, Exec.Args, FS.Read, IO, Mem.Alloc] }
 }
 
 use {
-    files :: core.files
-    process :: core.process
-    os :: core.sys
+    files: core.files
+    process: core.process
+    os: core.sys
 }
 
-fn run() {
-    exe :: os.executable()
-    args :: process.args()
+run: fn() {
+    exe: os.executable()
+    args: process.args()
     if (args.get(0) ?? "") == "again" {
         print("again: {(args.get(1) ?? "") == exe}")
         process.exit(4)
@@ -24,7 +24,7 @@ fn run() {
     print("absolute: {exe.starts_with("/")}")
     print("exists: {files.exists(exe)}")
     print("stable: {os.executable() == exe}")
-    receipt :: process.run_spec(process.cmd([exe, "again", exe]).stdout(.Capture)) ?? panic("relaunching {exe} failed")
+    receipt: process.run_spec(process.cmd([exe, "again", exe]).stdout(.Capture)) ?? panic("relaunching {exe} failed")
     print("relaunched: exit {receipt.code}")
     loop line in process.stdout_lines(receipt) -> print("  {line}")
 }

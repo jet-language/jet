@@ -1,28 +1,28 @@
 // An else-less table over `User? DBError!` covers its
 // three states `.Val`, `.None` and `.Err`; E0307 names the missing one.
-struct User {
+User: struct {
     name: String
 }
 
 #Error
-enum DBError {
+DBError: enum {
     Down
 }
 
-fn read_user(id: Int) -> User? DBError! {
+read_user: fn(id: Int) -> User? DBError! {
     if id == 0 -> return Err(DBError.Down)
     if id == 7 -> return Ok(Val(User{name: "priya"}))
     Ok(None)
 }
 
-fn describe(id: Int) -> String {
+describe: fn(id: Int) -> String {
     if read_user(id) == {
         .None -> "no such user"
         .Err(_) -> "database down"
     }
 }
 
-fn run() {
+run: fn() {
     if read_user(7) == {
         .Val(user) -> print(user.name)
         .Err(_) -> print("database down")

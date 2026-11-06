@@ -4,55 +4,55 @@
 // each returned segment is an owned String exactly as Rust materializes one
 // String per segment. Borrowed word views remain held on #4392.
 use {
-    text_asset :: core.text.runtime.unicode_assets
-    text_string :: core.text.runtime.kernel_unicode_string
-    text_word_break :: core.text.runtime.assets.unicode_word_break
-    text_sentence_break :: core.text.runtime.assets.unicode_sentence_break
-    text_pictographic :: core.text.runtime.assets.unicode_extended_pictographic
-    text_alphabetic :: core.text.runtime.assets.unicode_alphabetic
-    text_numeric :: core.text.runtime.assets.unicode_numeric
+    text_asset: core.text.runtime.unicode_assets
+    text_string: core.text.runtime.kernel_unicode_string
+    text_word_break: core.text.runtime.assets.unicode_word_break
+    text_sentence_break: core.text.runtime.assets.unicode_sentence_break
+    text_pictographic: core.text.runtime.assets.unicode_extended_pictographic
+    text_alphabetic: core.text.runtime.assets.unicode_alphabetic
+    text_numeric: core.text.runtime.assets.unicode_numeric
 }
 
 // Word_Break tags, generator WORD_TAGS order.
-WB_CR :: 1
-WB_LF :: 2
-WB_NEWLINE :: 3
-WB_EXTEND :: 4
-WB_ZWJ :: 5
-WB_RI :: 6
-WB_FORMAT :: 7
-WB_KATAKANA :: 8
-WB_HEBREW :: 9
-WB_ALETTER :: 10
-WB_SINGLEQUOTE :: 11
-WB_DOUBLEQUOTE :: 12
-WB_MIDNUMLET :: 13
-WB_MIDLETTER :: 14
-WB_MIDNUM :: 15
-WB_NUMERIC :: 16
-WB_EXTENDNUMLET :: 17
-WB_WSEGSPACE :: 18
+WB_CR: 1
+WB_LF: 2
+WB_NEWLINE: 3
+WB_EXTEND: 4
+WB_ZWJ: 5
+WB_RI: 6
+WB_FORMAT: 7
+WB_KATAKANA: 8
+WB_HEBREW: 9
+WB_ALETTER: 10
+WB_SINGLEQUOTE: 11
+WB_DOUBLEQUOTE: 12
+WB_MIDNUMLET: 13
+WB_MIDLETTER: 14
+WB_MIDNUM: 15
+WB_NUMERIC: 16
+WB_EXTENDNUMLET: 17
+WB_WSEGSPACE: 18
 
 // Sentence_Break tags, generator SENTENCE_TAGS order.
-SB_CR :: 1
-SB_LF :: 2
-SB_EXTEND :: 3
-SB_SEP :: 4
-SB_FORMAT :: 5
-SB_SP :: 6
-SB_LOWER :: 7
-SB_UPPER :: 8
-SB_OLETTER :: 9
-SB_NUMERIC :: 10
-SB_ATERM :: 11
-SB_SCONTINUE :: 12
-SB_STERM :: 13
-SB_CLOSE :: 14
+SB_CR: 1
+SB_LF: 2
+SB_EXTEND: 3
+SB_SEP: 4
+SB_FORMAT: 5
+SB_SP: 6
+SB_LOWER: 7
+SB_UPPER: 8
+SB_OLETTER: 9
+SB_NUMERIC: 10
+SB_ATERM: 11
+SB_SCONTINUE: 12
+SB_STERM: 13
+SB_CLOSE: 14
 
 // Rust jet_text_word_reduce:583-603 (WB4) unit: base Word_Break class, first
 // scalar (WB3c lookahead), class of the last attached scalar (WB3c/WB3d) and
 // exclusive end byte. Rust stores (class, char) units plus scalar end indexes.
-struct WordUnit {
+WordUnit: struct {
     class: Int
     first: Int
     last: Int
@@ -61,19 +61,19 @@ struct WordUnit {
 
 // Rust jet_text_word_reduce:583-603. Extend, Format and ZWJ attach to the
 // preceding unit unless it is CR, LF or Newline.
-fn word_reduce(raw: [U8]) -> [WordUnit] Never! {
-    word_asset :: text_word_break.UNICODE_WORD_BREAK
+word_reduce: fn(raw: [U8]) -> [WordUnit] Never! {
+    word_asset: text_word_break.UNICODE_WORD_BREAK
     units := [WordUnit]{}
     at := 0
     loop at < raw.len() {
-        cp :: text_string.scalar_at(raw, at)
-        class :: text_asset.asset_tag(word_asset, cp, 0)
+        cp: text_string.scalar_at(raw, at)
+        class: text_asset.asset_tag(word_asset, cp, 0)
         at = at + text_string.utf8_width_at(raw, at)
-        count :: units.len()
+        count: units.len()
         if count > 0 && (class == WB_EXTEND || class == WB_FORMAT || class == WB_ZWJ) {
-            base :: units[count - 1].class
+            base: units[count - 1].class
             if !is_word_newline(base) {
-                first :: units[count - 1].first
+                first: units[count - 1].first
                 units[count - 1] = WordUnit{class: base, first: first, last: class, end: at}
                 next
             }
@@ -83,23 +83,23 @@ fn word_reduce(raw: [U8]) -> [WordUnit] Never! {
     units
 }
 
-fn is_ahletter(class: Int) -> Bool { class == WB_ALETTER || class == WB_HEBREW }
+is_ahletter: fn(class: Int) -> Bool { class == WB_ALETTER || class == WB_HEBREW }
 
-fn is_midletter_q(class: Int) -> Bool {
+is_midletter_q: fn(class: Int) -> Bool {
     class == WB_MIDLETTER || class == WB_MIDNUMLET || class == WB_SINGLEQUOTE
 }
 
-fn is_midnum_q(class: Int) -> Bool {
+is_midnum_q: fn(class: Int) -> Bool {
     class == WB_MIDNUM || class == WB_MIDNUMLET || class == WB_SINGLEQUOTE
 }
 
-fn is_word_newline(class: Int) -> Bool { class == WB_NEWLINE || class == WB_CR || class == WB_LF }
+is_word_newline: fn(class: Int) -> Bool { class == WB_NEWLINE || class == WB_CR || class == WB_LF }
 
 // Rust jet_text_word_break_at:605-652, WB3-WB13b and WB999 between units i, i+1.
-fn word_break_at(units: [WordUnit], i: Int, pictographic: [U8]) -> Bool Never! {
-    pc :: units[i].class
-    cc :: units[i + 1].class
-    n :: units.len()
+word_break_at: fn(units: [WordUnit], i: Int, pictographic: [U8]) -> Bool Never! {
+    pc: units[i].class
+    cc: units[i + 1].class
+    n: units.len()
     if pc == WB_CR && cc == WB_LF -> return false // WB3
     if is_word_newline(pc) -> return true // WB3a
     if is_word_newline(cc) -> return true // WB3b
@@ -124,18 +124,18 @@ fn word_break_at(units: [WordUnit], i: Int, pictographic: [U8]) -> Bool Never! {
 
 // Rust jet_text_word_segments:654-687 boundary pass: WB15/WB16 regional
 // indicator parity, otherwise word_break_at. Returns each segment's end byte.
-fn word_boundaries(raw: [U8]) -> [Int] Never! {
+word_boundaries: fn(raw: [U8]) -> [Int] Never! {
     out := [Int]{}
     if raw.len() == 0 -> return out
-    units :: word_reduce(raw)
-    pictographic :: text_pictographic.UNICODE_EXTENDED_PICTOGRAPHIC
-    n :: units.len()
+    units: word_reduce(raw)
+    pictographic: text_pictographic.UNICODE_EXTENDED_PICTOGRAPHIC
+    n: units.len()
     ri_run := 0
     loop i in 0..<n {
-        class :: units[i].class
+        class: units[i].class
         ri_run = if class == WB_RI -> ri_run + 1 else -> 0
         if i + 1 < n {
-            split :: if class == WB_RI && units[i + 1].class == WB_RI -> ri_run % 2 == 0 else -> word_break_at(units, i, pictographic)
+            split: if class == WB_RI && units[i + 1].class == WB_RI -> ri_run % 2 == 0 else -> word_break_at(units, i, pictographic)
             if split -> &out.push(units[i].end)
         }
     }
@@ -144,15 +144,15 @@ fn word_boundaries(raw: [U8]) -> [Int] Never! {
 }
 
 // Owned copy of one segment's validated UTF-8 byte range.
-fn owned_segment(raw: [U8], start: Int, end: Int) -> String Never! {
+owned_segment: fn(raw: [U8], start: Int, end: Int) -> String Never! {
     out := [U8]{}
     loop at in start..<end -> &out.push(raw[at])
     String.from_bytes(out) ?? panic("Unicode segment split a UTF-8 scalar")
 }
 
 // Rust jet_text_word_segments:654-687: every UAX #29 word segment, owned.
-fn word_segments(text: String) -> [String] Never! {
-    raw :: text_string.utf8_bytes(text)
+word_segments: fn(text: String) -> [String] Never! {
+    raw: text_string.utf8_bytes(text)
     out := [String]{}
     start := 0
     loop end in word_boundaries(raw) {
@@ -164,16 +164,16 @@ fn word_segments(text: String) -> [String] Never! {
 
 // Rust jet_text_words:689-694: keep segments containing an Alphabetic or
 // Numeric (Nd/Nl/No) scalar; other segments are rejected before materializing.
-fn words(text: String) -> [String] Never! {
-    raw :: text_string.utf8_bytes(text)
-    alphabetic :: text_alphabetic.UNICODE_ALPHABETIC
-    numeric :: text_numeric.UNICODE_NUMERIC
+words: fn(text: String) -> [String] Never! {
+    raw: text_string.utf8_bytes(text)
+    alphabetic: text_alphabetic.UNICODE_ALPHABETIC
+    numeric: text_numeric.UNICODE_NUMERIC
     out := [String]{}
     start := 0
     loop end in word_boundaries(raw) {
         at := start
         loop at < end {
-            cp :: text_string.scalar_at(raw, at)
+            cp: text_string.scalar_at(raw, at)
             if text_asset.asset_contains(alphabetic, cp) || text_asset.asset_contains(numeric, cp) {
                 &out.push(owned_segment(raw, start, end))
                 break
@@ -185,24 +185,24 @@ fn words(text: String) -> [String] Never! {
     out
 }
 
-fn is_sentence_para(class: Int) -> Bool { class == SB_SEP || class == SB_CR || class == SB_LF }
+is_sentence_para: fn(class: Int) -> Bool { class == SB_SEP || class == SB_CR || class == SB_LF }
 
 // Rust jet_text_sentence_segments:847-861 unit: Sentence_Break class and
 // exclusive end byte. Rust stores the classes and scalar end indexes.
-struct SentenceUnit {
+SentenceUnit: struct {
     class: Int
     end: Int
 }
 
 // Rust jet_text_sentence_breaks:794-842 (SB3-SB11). SB998/SB999 do not break;
 // SB11 places the break after ATerm/STerm Close* Sp* unless SB8/SB8a/SB9/SB10.
-fn sentence_breaks(units: [SentenceUnit]) -> [Bool] Never! {
-    n :: units.len()
+sentence_breaks: fn(units: [SentenceUnit]) -> [Bool] Never! {
+    n: units.len()
     breaks := [Bool]{}
     loop _ in 1..<n -> &breaks.push(false)
     i := 0
     loop i + 1 < n {
-        current :: units[i].class
+        current: units[i].class
         if current == SB_CR && units[i + 1].class == SB_LF {
             i = i + 1 // SB3
             next
@@ -223,13 +223,13 @@ fn sentence_breaks(units: [SentenceUnit]) -> [Bool] Never! {
             }
             j := i + 1
             loop j < n && units[j].class == SB_CLOSE -> j = j + 1
-            close_end :: j
+            close_end: j
             loop j < n && units[j].class == SB_SP -> j = j + 1
-            sp_end :: j
-            sb9 :: close_end < n && is_sentence_para(units[close_end].class)
-            sb10 :: sp_end < n && (units[sp_end].class == SB_SP || is_sentence_para(units[sp_end].class))
-            sb8a :: sp_end < n && (units[sp_end].class == SB_SCONTINUE || units[sp_end].class == SB_STERM || units[sp_end].class == SB_ATERM)
-            sb8 :: current == SB_ATERM && sentence_lower_follows(units, sp_end)
+            sp_end: j
+            sb9: close_end < n && is_sentence_para(units[close_end].class)
+            sb10: sp_end < n && (units[sp_end].class == SB_SP || is_sentence_para(units[sp_end].class))
+            sb8a: sp_end < n && (units[sp_end].class == SB_SCONTINUE || units[sp_end].class == SB_STERM || units[sp_end].class == SB_ATERM)
+            sb8: current == SB_ATERM && sentence_lower_follows(units, sp_end)
             if !(sb9 || sb10 || sb8a || sb8) && sp_end > 0 && sp_end - 1 < breaks.len() -> breaks[sp_end - 1] = true // SB11
             i = if sp_end > i -> sp_end else -> i + 1
             next
@@ -241,10 +241,10 @@ fn sentence_breaks(units: [SentenceUnit]) -> [Bool] Never! {
 
 // SB8 lookahead: ATerm Close* Sp* × (¬(OLetter|Upper|
 // Lower|ParaSep|SATerm))* Lower.
-fn sentence_lower_follows(units: [SentenceUnit], from: Int) -> Bool Never! {
+sentence_lower_follows: fn(units: [SentenceUnit], from: Int) -> Bool Never! {
     k := from
     loop k < units.len() {
-        class :: units[k].class
+        class: units[k].class
         if class == SB_LOWER -> return true
         if class == SB_OLETTER || class == SB_UPPER || is_sentence_para(class) || class == SB_STERM || class == SB_ATERM -> return false
         k = k + 1
@@ -254,18 +254,18 @@ fn sentence_lower_follows(units: [SentenceUnit], from: Int) -> Bool Never! {
 
 // Rust jet_text_sentence_segments:844-878 boundary pass. Extend and Format
 // attach to the preceding unit unless it is CR, LF or Sep (SB5).
-fn sentence_boundaries(raw: [U8]) -> [Int] Never! {
+sentence_boundaries: fn(raw: [U8]) -> [Int] Never! {
     out := [Int]{}
     if raw.len() == 0 -> return out
-    sentence_asset :: text_sentence_break.UNICODE_SENTENCE_BREAK
+    sentence_asset: text_sentence_break.UNICODE_SENTENCE_BREAK
     units := [SentenceUnit]{}
     at := 0
     loop at < raw.len() {
-        class :: text_asset.asset_tag(sentence_asset, text_string.scalar_at(raw, at), 0)
+        class: text_asset.asset_tag(sentence_asset, text_string.scalar_at(raw, at), 0)
         at = at + text_string.utf8_width_at(raw, at)
-        count :: units.len()
+        count: units.len()
         if count > 0 && (class == SB_EXTEND || class == SB_FORMAT) {
-            base :: units[count - 1].class
+            base: units[count - 1].class
             if !is_sentence_para(base) {
                 units[count - 1] = SentenceUnit{class: base, end: at}
                 next
@@ -273,7 +273,7 @@ fn sentence_boundaries(raw: [U8]) -> [Int] Never! {
         }
         &units.push(SentenceUnit{class: class, end: at})
     }
-    breaks :: sentence_breaks(units)
+    breaks: sentence_breaks(units)
     loop i in 0..<breaks.len() {
         if breaks[i] -> &out.push(units[i].end)
     }
@@ -282,8 +282,8 @@ fn sentence_boundaries(raw: [U8]) -> [Int] Never! {
 }
 
 // Rust jet_text_sentence_segments:844-878: every UAX #29 sentence segment, owned.
-fn sentence_segments(text: String) -> [String] Never! {
-    raw :: text_string.utf8_bytes(text)
+sentence_segments: fn(text: String) -> [String] Never! {
+    raw: text_string.utf8_bytes(text)
     out := [String]{}
     start := 0
     loop end in sentence_boundaries(raw) {
@@ -295,8 +295,8 @@ fn sentence_segments(text: String) -> [String] Never! {
 
 // Rust jet_text_sentences:880-885: pinned White_Space trim of each segment;
 // segments that trim to empty are dropped.
-fn sentences(text: String) -> [String] Never! {
-    raw :: text_string.utf8_bytes(text)
+sentences: fn(text: String) -> [String] Never! {
+    raw: text_string.utf8_bytes(text)
     out := [String]{}
     start := 0
     loop end in sentence_boundaries(raw) {

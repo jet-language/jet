@@ -1,12 +1,12 @@
-struct Door {
+Door: struct {
     state { Open, Closed }
 }
 impl Door {
-    #Transition(_, Open) fn begin() -[]> Door { return Door{} }
-    #Transition(Open, Closed) fn close(self: ^Door) -[]> Door { return self }
+    #Transition(_, Open) begin: fn() -[]> Door { return Door{} }
+    #Transition(Open, Closed) close: fn(self: ^Door) -[]> Door { return self }
 }
-STATE_INFO :: comptime { Door.reflect() }
-fn run() {
+STATE_INFO: comptime { Door.reflect() }
+run: fn() {
     
     // Original tests/reflect.rs:289-292 first terminal false.
     print(STATE_INFO.states[0].terminal)

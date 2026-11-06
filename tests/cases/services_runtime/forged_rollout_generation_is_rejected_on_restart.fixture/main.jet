@@ -1,24 +1,24 @@
 use {
-    env :: core.sys
-    services :: core.service
+    env: core.sys
+    services: core.service
 }
 
-fn rollout_worker() {}
+rollout_worker: fn() {}
 
-fn run() {
-    store_path :: env.get("JET_SERVICE_AUTH_STORE") ?? panic("store")
-    phase :: env.get("JET_SERVICE_AUTH_PHASE") ?? panic("phase")
+run: fn() {
+    store_path: env.get("JET_SERVICE_AUTH_STORE") ?? panic("store")
+    phase: env.get("JET_SERVICE_AUTH_PHASE") ?? panic("phase")
     tree := services.tree("rollout-restart")
-    store :: services.state_store(store_path) ?? panic("state store")
+    store: services.state_store(store_path) ?? panic("state store")
     &tree.set_state_event_log(^store, "rollout-events", 1, "reversible") ?? panic("state")
-    endpoint :: &tree.worker("api", rollout_worker, capacity: 1) ?? panic("worker")
+    endpoint: &tree.worker("api", rollout_worker, capacity: 1) ?? panic("worker")
     &tree.start() ?? panic("start")
     if phase == "write" {
         &tree.directory_register("api", endpoint.copy()) ?? panic("directory")
         &tree.drain_worker(endpoint) ?? panic("drain")
         print("handoff:{&tree.handoff_generation() ?? panic("handoff")}")
     } else {
-        current :: tree.directory_resolve("api") ?? panic("resolve")
+        current: tree.directory_resolve("api") ?? panic("resolve")
         print("generation:{tree.directory_generation()}")
         print("current:{current.show()}")
         print("receipt:{tree.upgrade_receipt() ?? panic("receipt")}")

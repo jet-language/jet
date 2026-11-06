@@ -1,27 +1,27 @@
 
-struct Snapshot { value: Int }
+Snapshot: struct { value: Int }
 
-fn run() {
+run: fn() {
     source := Snapshot{ value: 41 }
-    frozen :: freeze(source)
-    twice :: freeze(freeze(source))
+    frozen: freeze(source)
+    twice: freeze(freeze(source))
     task.group snapshots {
-        first :: task { frozen.value }
-        second :: task { frozen.value }
+        first: task { frozen.value }
+        second: task { frozen.value }
         print(first.join() ?? 0)
         print(second.join() ?? 0)
     }
 
     owned := Snapshot{ value: 7 }
     task.group moved {
-        child :: task ^owned { owned.value }
+        child: task ^owned { owned.value }
         print(child.join() ?? 0)
     }
     print(twice.value)
 }
 
-FOLDED :: comptime { freeze(41) }
+FOLDED: comptime { freeze(41) }
 
-fn show() {
+show: fn() {
     print(FOLDED)
 }

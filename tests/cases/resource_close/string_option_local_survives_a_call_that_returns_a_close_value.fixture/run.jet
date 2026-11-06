@@ -2,21 +2,21 @@
 // keeps its value across a call that opens and returns a Close value (a held
 // directory), when the local is passed by value or by reference to calls
 // around it, and the lease built from both reads it afterwards.
-use files :: core.files
+use files: core.files
 
-struct Res { name: String }
+Res: struct { name: String }
 impl Res.Close {
-    fn close(^self) { print("close {self.name}") }
+    close: fn(^self) { print("close {self.name}") }
 }
 
-struct Held {
+Held: struct {
     tracer: Res
     directory: Directory?
 
-    fn is_open(self) -> Bool Never! {
+    is_open: fn(self) -> Bool Never! {
         if self.directory == {
             .Val(directory) -> {
-                info :: directory.stat() ?? return false
+                info: directory.stat() ?? return false
                 info.is_dir
             }
             .None -> false
@@ -24,17 +24,17 @@ struct Held {
     }
 }
 
-struct Wrappers {
+Wrappers: struct {
     root: String
     held: Held
 }
 
-struct Output {
+Output: struct {
     output_root: String
     lease_root: String
 }
 
-struct Lease {
+Lease: struct {
     bin_relative: String?
     bin_output_root: String?
     projected_bin_root: String?
@@ -42,13 +42,13 @@ struct Lease {
     executables: [String]
     handle: Held?
 
-    fn bin_path(self, name: String) -> String? Never! {
-        root :: self.projected_bin_root ?? return None
-        bin :: self.bin_relative ?? return None
+    bin_path: fn(self, name: String) -> String? Never! {
+        root: self.projected_bin_root ?? return None
+        bin: self.bin_relative ?? return None
         Val("{root}/{bin}/{name}")
     }
 
-    fn is_open(self) -> Bool Never! {
+    is_open: fn(self) -> Bool Never! {
         if self.handle == {
             .Val(held) -> held.is_open()
             .None -> false
@@ -56,33 +56,33 @@ struct Lease {
     }
 }
 
-fn strip_prefix(path: String, prefix: String) -> String? Never! {
+strip_prefix: fn(path: String, prefix: String) -> String? Never! {
     if path.starts_with("{prefix}/") -> return Val(path.slice(prefix.len() + 1, path.len()))
     None
 }
 
-fn open_executables(root: String, bin: String?) -> [String] Never! {
+open_executables: fn(root: String, bin: String?) -> [String] Never! {
     names := [String]{}
-    relative :: bin ?? return names
+    relative: bin ?? return names
     &names.push("{root}/{relative}/tool")
     &names.push("{root}/{relative}/helper")
     names
 }
 
-fn bin_length(bin: &String?) -> Int Never! {
-    found :: bin ?? return -1
+bin_length: fn(bin: &String?) -> Int Never! {
+    found: bin ?? return -1
     found.len()
 }
 
-fn create_wrappers(snapshot_root: String, executables: [String]) -> Wrappers? {
+create_wrappers: fn(snapshot_root: String, executables: [String]) -> Wrappers? {
     if executables.len() == 0 -> return None
     mounts := [String]{}
     loop executable in executables -> &mounts.push("{snapshot_root}.exec-mount/{executable}")
-    directory :: files.open_directory(".") ?? return None
+    directory: files.open_directory(".") ?? return None
     Val(Wrappers{root: "{snapshot_root}/wrappers/{mounts.len()}", held: Held{tracer: Res{name: "wrappers"}, directory: Val(directory)}})
 }
 
-fn build_lease(bin: String, outputs: [Output], direct: Bool) -> Lease {
+build_lease: fn(bin: String, outputs: [Output], direct: Bool) -> Lease {
     bin_output_root := String?{None}
     bin_relative := String?{None}
     projected_bin_root := String?{None}
@@ -101,7 +101,7 @@ fn build_lease(bin: String, outputs: [Output], direct: Bool) -> Lease {
     }
     print("before: {bin_relative ?? "null"} ({bin_length(&bin_relative)})")
     executables := open_executables(projected_bin_root ?? "/snapshot", bin_relative)
-    wrappers :: if direct -> Wrappers?{None} else -> create_wrappers("/lease", executables)
+    wrappers: if direct -> Wrappers?{None} else -> create_wrappers("/lease", executables)
     print("after: {bin_relative ?? "null"} ({bin_length(&bin_relative)})")
     wrapper_root := String?{None}
     handle := Held?{None}
@@ -115,19 +115,19 @@ fn build_lease(bin: String, outputs: [Output], direct: Bool) -> Lease {
     Lease{bin_relative: bin_relative, bin_output_root: bin_output_root, projected_bin_root: projected_bin_root, wrapper_root: wrapper_root, executables: executables, handle: handle}
 }
 
-fn check(label: String, direct: Bool) {
-    outputs :: [Output]{
+check: fn(label: String, direct: Bool) {
+    outputs: [Output]{
         Output{output_root: "/store/doc", lease_root: "/lease/doc"},
         Output{output_root: "/store/out", lease_root: "/lease/out"},
     }
-    lease :: build_lease("/store/out/bin", outputs, direct)
+    lease: build_lease("/store/out/bin", outputs, direct)
     print("{label} bin {lease.bin_relative ?? "null"}")
     print("{label} path {lease.bin_path("tool") ?? "null"}")
     print("{label} output {lease.bin_output_root ?? "null"} wrappers {lease.wrapper_root ?? "none"}")
     print("{label} executables {lease.executables.len()} open {lease.is_open()}")
 }
 
-fn run() {
+run: fn() {
     check("wrapped", false)
     check("direct", true)
     print("done")

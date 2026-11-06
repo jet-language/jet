@@ -1,60 +1,60 @@
-package {
+package: {
     name: "tooling_data_pipeline"
     version: "0.1.0"
     authority: { allow: [IO, Mem.Alloc] }
 }
 
-use data :: core.data
+use data: core.data
 
 #Codable
-struct Ticket {
+Ticket: struct {
     team: String
     minutes: Float
 }
 
 #Codable
-struct Budget {
+Budget: struct {
     team: String
     owner: String
 }
 
-fn must_stay_deferred(ticket: Ticket) -> Bool Never! {
+must_stay_deferred: fn(ticket: Ticket) -> Bool Never! {
     panic("lazy filter ran before collect")
     return false
 }
 
-fn no_minutes() -> Float? { None }
+no_minutes: fn() -> Float? { None }
 
-fn run() {
-    raw :: "team,minutes\nCore,4.0\nTools,5.0\nCore,8.0\nDocs,3.0"
-    rows :: data.csv<Ticket>(raw) ?? panic("bad csv")
-    budget_raw :: "team,owner\nCore,Ada\nCore,Lin\nTools,Grace"
-    budgets :: data.csv<Budget>(budget_raw) ?? panic("bad budget")
+run: fn() {
+    raw: "team,minutes\nCore,4.0\nTools,5.0\nCore,8.0\nDocs,3.0"
+    rows: data.csv<Ticket>(raw) ?? panic("bad csv")
+    budget_raw: "team,owner\nCore,Ada\nCore,Lin\nTools,Grace"
+    budgets: data.csv<Budget>(budget_raw) ?? panic("bad budget")
 
-    deferred :: data.query(rows).filter(t -> must_stay_deferred(t))
+    deferred: data.query(rows).filter(t -> must_stay_deferred(t))
     print("deferred: {deferred.plan()[1]}")
-    planned :: data.query(rows)
+    planned: data.query(rows)
         .filter(t -> t.minutes >= 4.0)
         .sort_by(t -> t.team)
-    planned_rows :: planned.collect() ?? panic("collect")
-    focused :: data.query(rows).filter(t -> t.minutes >= 4.0).collect() ?? panic("filter")
-    sorted :: data.query(focused).sort_by(t -> t.team).collect() ?? panic("sort")
-    groups :: data.query(sorted)
+    planned_rows: planned.collect() ?? panic("collect")
+    focused: data.query(rows).filter(t -> t.minutes >= 4.0).collect() ?? panic("filter")
+    sorted: data.query(focused).sort_by(t -> t.team).collect() ?? panic("sort")
+    groups: data.query(sorted)
         .group_by(t -> t.team)
         .sum(t -> t.minutes)
         .collect() ?? panic("group_sum")
-    counts :: data.query(sorted)
+    counts: data.query(sorted)
         .group_by(t -> t.team)
         .count()
         .collect() ?? panic("count")
-    joined :: data.inner_join(sorted, budgets, t -> t.team, b -> b.team) ?? panic("join")
-    left :: data.left_join(rows, budgets, t -> t.team, b -> b.team) ?? panic("left")
-    pivot :: data.pivot_sum(rows, t -> t.team, t -> if t.minutes >= 5.0 -> "long" else -> "short", t -> t.minutes) ?? panic("pivot")
-    values :: [Float]{4.0, 5.0, 8.0, 3.0}
-    summary :: data.describe(values) ?? panic("describe")
-    rolling :: data.rolling_mean(values, 2) ?? panic("rolling")
-    maybe_minutes :: [Val(Float{4.0}), no_minutes(), Val(Float{8.0}), no_minutes()]
-    series :: maybe_minutes
+    joined: data.inner_join(sorted, budgets, t -> t.team, b -> b.team) ?? panic("join")
+    left: data.left_join(rows, budgets, t -> t.team, b -> b.team) ?? panic("left")
+    pivot: data.pivot_sum(rows, t -> t.team, t -> if t.minutes >= 5.0 -> "long" else -> "short", t -> t.minutes) ?? panic("pivot")
+    values: [Float]{4.0, 5.0, 8.0, 3.0}
+    summary: data.describe(values) ?? panic("describe")
+    rolling: data.rolling_mean(values, 2) ?? panic("rolling")
+    maybe_minutes: [Val(Float{4.0}), no_minutes(), Val(Float{8.0}), no_minutes()]
+    series: maybe_minutes
     print(sorted.len())
     print(rows.len())
     print(planned_rows.len())

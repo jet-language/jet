@@ -1,34 +1,34 @@
 // Qualified Core IO remains available for #NoPrelude and explicit IO work.
-package {
+package: {
     name: "io_surface"
     authority: { allow: [FS, IO, Mem.Alloc] }
 }
 
-use io :: core.term
+use io: core.term
 
-fn run() {
+run: fn() {
     // `print` is the beginner default. `io.print` is its #NoPrelude twin.
     print("print-ok")
     io.print("qualified-ok")
 
     // Interpolation builds text; `Debug` selects the representation form.
-    value :: "sprint-ok"
+    value: "sprint-ok"
     print("{value}")
     print("{value:Debug}")
 
-    path :: "/tmp/jet_1480_io_surface.bin"
+    path: "/tmp/jet_1480_io_surface.bin"
     io.binwrite(path, [65, 66, 67])
-    bytes :: io.binread(path)
+    bytes: io.binread(path)
     print(bytes)
 
-    _ :: io.buffered()
+    _: io.buffered()
     print("buffered_ok")
 
     // Empty stdin (golden harness): readline/take/read_until stay deterministic.
-    line :: io.readline()
+    line: io.readline()
     print("readline_len:{line.len()}")
-    chunk :: io.take(0)
+    chunk: io.take(0)
     print("take_len:{chunk.len()}")
-    until :: io.read_until("X")
+    until: io.read_until("X")
     print("until_len:{until.len()}")
 }

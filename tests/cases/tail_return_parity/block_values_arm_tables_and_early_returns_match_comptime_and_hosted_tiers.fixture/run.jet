@@ -1,24 +1,24 @@
 
-fn label(value: Int) -> String Never! {
+label: fn(value: Int) -> String Never! {
     if value == {
         1 -> { "one" }
         else -> { "other" }
     }
 }
 
-fn early(flag: Bool) -> String Never! {
+early: fn(flag: Bool) -> String Never! {
     if flag { return "early" }
     "late"
 }
 
-enum Packet {
+Packet: enum {
     Data(Int)
     Retry(Int)
     Empty
     Ignore(Int)
 }
 
-fn packet_value(packet: Packet) -> Int Never! {
+packet_value: fn(packet: Packet) -> Int Never! {
     if packet == {
         .Data(10..19) -> { 100 }
         .Data(value) | .Retry(value) -> {
@@ -31,17 +31,17 @@ fn packet_value(packet: Packet) -> Int Never! {
     }
 }
 
-EXPECTED_ONE :: comptime { label(1) }
-EXPECTED_OTHER :: comptime { label(2) }
-EXPECTED_EARLY :: comptime { early(true) }
-EXPECTED_LATE :: comptime { early(false) }
-EXPECTED_RANGE :: comptime { packet_value(Packet.Data(12)) }
-EXPECTED_OR :: comptime { packet_value(Packet.Retry(2)) }
-EXPECTED_NESTED_RETURN :: comptime { packet_value(Packet.Data(0)) }
-EXPECTED_EMPTY :: comptime { packet_value(Packet.Empty) }
-EXPECTED_WILDCARD :: comptime { packet_value(Packet.Ignore(17)) }
+EXPECTED_ONE: comptime { label(1) }
+EXPECTED_OTHER: comptime { label(2) }
+EXPECTED_EARLY: comptime { early(true) }
+EXPECTED_LATE: comptime { early(false) }
+EXPECTED_RANGE: comptime { packet_value(Packet.Data(12)) }
+EXPECTED_OR: comptime { packet_value(Packet.Retry(2)) }
+EXPECTED_NESTED_RETURN: comptime { packet_value(Packet.Data(0)) }
+EXPECTED_EMPTY: comptime { packet_value(Packet.Empty) }
+EXPECTED_WILDCARD: comptime { packet_value(Packet.Ignore(17)) }
 
-fn run() {
+run: fn() {
     print(EXPECTED_ONE)
     print(EXPECTED_OTHER)
     print(EXPECTED_EARLY)

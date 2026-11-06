@@ -17,11 +17,11 @@ use {
     jetpack_foundation.[
         FoundationDirectoryAuthority, TreeHashError, foundation_open_directory_authority,
     ]
-    cli_files :: core.files
-    cli_sys :: core.sys
+    cli_files: core.files
+    cli_sys: core.sys
 }
 
-fn jet_cli_script_dependency_error(path: String, source: String, dep: InlineDep, reason: InlineDepUnresolved, color: Bool) -> JetDriverVerbOutput Never! {
+jet_cli_script_dependency_error: fn(path: String, source: String, dep: InlineDep, reason: InlineDepUnresolved, color: Bool) -> JetDriverVerbOutput Never! {
     JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all(path, source, [Diagnostic]{pkg_inline_deps_e1253(dep, reason)}, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
 }
 
@@ -32,17 +32,17 @@ fn jet_cli_script_dependency_error(path: String, source: String, dep: InlineDep,
 // sidecar). Every later run resolves from that copy without the engine or
 // the network. A local package stays authoritative, and admission
 // (jet_cli_script_dependency_roots) owns every other failure.
-fn jet_cli_script_dependency_fetch(file: String, source: String, color: Bool, json: Bool) -[FS, Env, Exec, Time.Wait]> JetDriverVerbOutput? Never! {
+jet_cli_script_dependency_fetch: fn(file: String, source: String, color: Bool, json: Bool) -[FS, Env, Exec, Time.Wait]> JetDriverVerbOutput? Never! {
     if !source.contains("#") -> return None
-    entry_path :: cli_files.realpath(file) ?? return None
-    script_dir :: jet_cli_parent(entry_path) ?? return None
+    entry_path: cli_files.realpath(file) ?? return None
+    script_dir: jet_cli_parent(entry_path) ?? return None
     if cli_files.exists(cli_files.join(script_dir, "package.jet")) -> return None
-    inline :: if PackageFacts.parse_inline(source, entry_path) == {
+    inline: if PackageFacts.parse_inline(source, entry_path) == {
         .Ok(value) -> { value }
         .Err(_) -> { return None }
     }
     if inline == .Val(_) -> return None
-    program :: jet_cli_parsed_program(source) ?? return None
+    program: jet_cli_parsed_program(source) ?? return None
     missing := false
     loop dep in pkg_inline_deps_collect(program) {
         if !pkg_inline_deps_valid_package_name(dep.name) || pkg_inline_deps_numeric_version(dep.selector) == None -> next
@@ -54,53 +54,53 @@ fn jet_cli_script_dependency_fetch(file: String, source: String, color: Bool, js
         }
     }
     if !missing -> return None
-    argv :: [String]{JET_CLI_PACKAGE_ENGINE_VERB, script_dir, "", if color -> "1" else -> "0", if json -> "1" else -> "0", "fetch", "--lock", entry_path, "--quiet"}
-    fetched :: jet_cli_engine_dispatch(JET_CLI_JETPACK_BINARY, "run", argv)
+    argv: [String]{JET_CLI_PACKAGE_ENGINE_VERB, script_dir, "", if color -> "1" else -> "0", if json -> "1" else -> "0", "fetch", "--lock", entry_path, "--quiet"}
+    fetched: jet_cli_engine_dispatch(JET_CLI_JETPACK_BINARY, "run", argv)
     if fetched.exit_code != JET_DRIVER_EXIT_OK -> return Val(fetched)
     None
 }
 
 // Hold every ancestor before the shared path-based resolver may inspect it.
 // A missing root is not an error; an existing hostile root fails closed.
-fn jet_cli_script_dependency_authority(root: String, name: String) -[FS, Env]> FoundationDirectoryAuthority? InlineDepUnresolved! {
-    info :: cli_files.stat(root) ?? {
+jet_cli_script_dependency_authority: fn(root: String, name: String) -[FS, Env]> FoundationDirectoryAuthority? InlineDepUnresolved! {
+    info: cli_files.stat(root) ?? {
         if err == .NotFound(_) -> return Ok(None)
         return Err(InlineDepUnresolved.InvalidTree(TreeHashError.IO{path: root, detail: "{err}"}))
     }
     if info.is_symlink -> return Err(InlineDepUnresolved.InvalidTree(TreeHashError.Symlink(root)))
     if !info.is_dir -> return Ok(None)
-    held :: foundation_open_directory_authority(root) ?? {
+    held: foundation_open_directory_authority(root) ?? {
         if err == .NotFound(_) -> return Ok(None)
         return Err(InlineDepUnresolved.InvalidTree(TreeHashError.IO{path: root, detail: "{err}"}))
     }
-    stat :: held.entry_stat(name) ?? {
+    stat: held.entry_stat(name) ?? {
         if err == .NotFound(_) -> return Ok(None)
         return Err(InlineDepUnresolved.InvalidTree(TreeHashError.IO{path: root, detail: "{err}"}))
     }
-    path :: cli_files.join(root, name)
+    path: cli_files.join(root, name)
     if stat.is_symlink -> return Err(InlineDepUnresolved.InvalidTree(TreeHashError.Symlink(path)))
     if !stat.is_dir -> return Ok(None)
-    package :: held.child(name) ?? return Err(InlineDepUnresolved.InvalidTree(TreeHashError.IO{path: path, detail: "{err}"}))
+    package: held.child(name) ?? return Err(InlineDepUnresolved.InvalidTree(TreeHashError.IO{path: path, detail: "{err}"}))
     Ok(Val(package))
 }
 
-fn jet_cli_script_dependency_roots(roots: &[JetDriverAuthorizedSourceRoot], entry_path: String, admitted: &[JetDriverScriptDependency], color: Bool) -[FS, Env]> JetDriverVerbOutput? Never! {
-    entry_root :: roots[0]
+jet_cli_script_dependency_roots: fn(roots: &[JetDriverAuthorizedSourceRoot], entry_path: String, admitted: &[JetDriverScriptDependency], color: Bool) -[FS, Env]> JetDriverVerbOutput? Never! {
+    entry_root: roots[0]
     loop file in entry_root.files {
         if file.relative_path == "package.jet" -> return None
         if file.path == entry_path || JET_CLI_STOCK_ENTRIES.contains(file.relative_path) {
             // The normal package loader owns malformed-carrier diagnostics;
             // do not attempt manifestless resolution before it reports them.
-            inline :: if PackageFacts.parse_inline(file.source, file.path) == {
+            inline: if PackageFacts.parse_inline(file.source, file.path) == {
                 .Ok(value) -> { value }
                 .Err(_) -> { return None }
             }
             if inline == .Val(_) -> return None
         }
     }
-    entry :: loop file in entry_root.files { if file.path == entry_path -> break file } ?? return None
-    program :: jet_cli_parsed_program(entry.source) ?? return None
-    script_dir :: jet_cli_parent(entry_path) ?? "/"
+    entry: loop file in entry_root.files { if file.path == entry_path -> break file } ?? return None
+    program: jet_cli_parsed_program(entry.source) ?? return None
+    script_dir: jet_cli_parent(entry_path) ?? "/"
     loop dep in pkg_inline_deps_collect(program) {
         // Name/selector validation belongs to the shared resolver. Do not
         // interpret an invalid import as a pathname even for a preflight.
@@ -110,7 +110,7 @@ fn jet_cli_script_dependency_roots(roots: &[JetDriverAuthorizedSourceRoot], entr
         if pkg_inline_deps_numeric_version(dep.selector) == None {
             return Val(jet_cli_script_dependency_error(entry_path, entry.source, dep, .InvalidSelector, color))
         }
-        local_root :: cli_files.join(script_dir, ".jet/inline-deps")
+        local_root: cli_files.join(script_dir, ".jet/inline-deps")
         authority := if jet_cli_script_dependency_authority(local_root, dep.name) == {
             .Val(held) -> Val(held)
             .None -> None
@@ -123,16 +123,16 @@ fn jet_cli_script_dependency_roots(roots: &[JetDriverAuthorizedSourceRoot], entr
                 .Err(error) -> { return Val(jet_cli_script_dependency_error(entry_path, entry.source, dep, error, color)) }
             }
         }
-        resolved :: pkg_inline_deps_resolve(dep, script_dir) ?? return Val(jet_cli_script_dependency_error(entry_path, entry.source, dep, err, color))
+        resolved: pkg_inline_deps_resolve(dep, script_dir) ?? return Val(jet_cli_script_dependency_error(entry_path, entry.source, dep, err, color))
         if authority == .Val(held) {
             held.revalidate() ?? return Val(jet_cli_script_dependency_error(entry_path, entry.source, dep, .InvalidTree(TreeHashError.IO{path: resolved.dir, detail: "{err}"}), color))
         }
-        selected :: foundation_open_directory_authority(resolved.dir) ?? return Val(jet_cli_script_dependency_error(entry_path, entry.source, dep, .InvalidTree(TreeHashError.IO{path: resolved.dir, detail: "{err}"}), color))
-        selected_id :: selected.identity() ?? return Val(jet_cli_script_dependency_error(entry_path, entry.source, dep, .InvalidTree(TreeHashError.IO{path: resolved.dir, detail: "{err}"}), color))
-        canonical :: selected.path()
-        stat :: cli_files.stat(canonical) ?? return Val(jet_cli_script_dependency_error(entry_path, entry.source, dep, .InvalidTree(TreeHashError.IO{path: canonical, detail: "{err}"}), color))
+        selected: foundation_open_directory_authority(resolved.dir) ?? return Val(jet_cli_script_dependency_error(entry_path, entry.source, dep, .InvalidTree(TreeHashError.IO{path: resolved.dir, detail: "{err}"}), color))
+        selected_id: selected.identity() ?? return Val(jet_cli_script_dependency_error(entry_path, entry.source, dep, .InvalidTree(TreeHashError.IO{path: resolved.dir, detail: "{err}"}), color))
+        canonical: selected.path()
+        stat: cli_files.stat(canonical) ?? return Val(jet_cli_script_dependency_error(entry_path, entry.source, dep, .InvalidTree(TreeHashError.IO{path: canonical, detail: "{err}"}), color))
         if stat.id != selected_id -> return Val(jet_cli_script_dependency_error(entry_path, entry.source, dep, .InvalidTree(TreeHashError.IO{path: canonical, detail: "source root changed while held"}), color))
-        root_identity :: jet_cli_identity_key("directory", stat)
+        root_identity: jet_cli_identity_key("directory", stat)
         found := false
         loop root in roots { if root.identity == root_identity -> found = true }
         if !found {
@@ -146,7 +146,7 @@ fn jet_cli_script_dependency_roots(roots: &[JetDriverAuthorizedSourceRoot], entr
         }
         // The same full tree identity must survive source snapshot capture.
         // Held hashing rejects hardlinks and links, including ancestor swaps.
-        content_hash :: selected.tree_hash(true) ?? return Val(jet_cli_script_dependency_error(entry_path, entry.source, dep, .InvalidTree(TreeHashError.IO{path: canonical, detail: "{err}"}), color))
+        content_hash: selected.tree_hash(true) ?? return Val(jet_cli_script_dependency_error(entry_path, entry.source, dep, .InvalidTree(TreeHashError.IO{path: canonical, detail: "{err}"}), color))
         if content_hash != resolved.content_hash -> return Val(jet_cli_script_dependency_error(entry_path, entry.source, dep, .InvalidTree(TreeHashError.IO{path: canonical, detail: "source tree changed while admitted"}), color))
         &admitted.push(JetDriverScriptDependency{name: dep.name, selector: dep.selector, resolved_version: resolved.resolved_version, content_hash: content_hash, root_identity: root_identity, span: dep.span})
     }

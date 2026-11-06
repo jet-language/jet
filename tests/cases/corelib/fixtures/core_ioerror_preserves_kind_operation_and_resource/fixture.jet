@@ -1,15 +1,15 @@
 
 use {
-    fs :: core.files
-    net :: core.net
-    process :: core.process
+    fs: core.files
+    net: core.net
+    process: core.process
 }
 
-fn receive<T: Reader>(&stream: T, limit: Int) -[IO]> [U8] IOError! {
+receive: fn<T: Reader>(&stream: T, limit: Int) -[IO]> [U8] IOError! {
     return stream.read(limit)
 }
 
-fn operation_name(operation: IOOperation) -[]> String {
+operation_name: fn(operation: IOOperation) -[]> String {
     if operation == {
         .Read -> return "read"
         .Write -> return "write"
@@ -22,9 +22,9 @@ fn operation_name(operation: IOOperation) -[]> String {
     }
 }
 
-fn run() -[Exec, FS, IO, Net, Time.Wait]> {
-    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
-    address :: net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("address"))
+run: fn() -[Exec, FS, IO, Net, Time.Wait]> {
+    listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    address: net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("address"))
     client := net.tcp_connect(address) ?? panic("connect")
     if receive(&client, 0) == {
         .Ok(_) -> panic("zero read succeeded")

@@ -5,19 +5,19 @@
 // current one by `5` to clear_refs) must not grow by half a SIZE-byte string
 // during the second fill. A value another owner still holds, or a static
 // one, keeps its bytes.
-package {
+package: {
     name: "strings_refill_in_place"
     authority: { allow: [FS.Read, FS.Write] }
 }
 
-use files :: core.files
+use files: core.files
 
-CHUNK :: 1000000
-CHUNKS :: 50
-SIZE :: CHUNK * CHUNKS
+CHUNK: 1000000
+CHUNKS: 50
+SIZE: CHUNK * CHUNKS
 
-fn status_kb(field: String) -> Int {
-    status :: files.read("/proc/self/status") ?? panic("read /proc/self/status")
+status_kb: fn(field: String) -> Int {
+    status: files.read("/proc/self/status") ?? panic("read /proc/self/status")
     loop line in status.split("\n") {
         if !line.starts_with(field) -> next
         loop part in line.slice(field.len(), line.len()).trim().split(" ") {
@@ -27,35 +27,35 @@ fn status_kb(field: String) -> Int {
     panic("no {field} line")
 }
 
-fn fill(out: &String, chunk: String) {
+fill: fn(out: &String, chunk: String) {
     out = ""
     loop _ in 0..<CHUNKS {
         out += chunk
     }
 }
 
-fn render_into(out: &String, seed: Int) {
+render_into: fn(out: &String, seed: Int) {
     out = ""
     loop i in 0..<(3 + seed % 4) {
         if (seed + i) % 2 == 0 -> out += "ab" else -> out += "xyz"
     }
 }
 
-fn twice(out: &String) {
+twice: fn(out: &String) {
     out += out
 }
 
-fn run() {
+run: fn() {
     text := ""
     loop i in 0..<4 {
         render_into(&text, i)
         print(text)
     }
     // Other owners keep their text when the place is emptied or grown.
-    keep :: text.copy()
+    keep: text.copy()
     render_into(&text, 5)
     print("{keep} {text}")
-    shared :: text
+    shared: text
     render_into(&text, 6)
     print("{shared} {text}")
     twice(&text)
@@ -74,14 +74,14 @@ fn run() {
     s += "x"
     print(s)
     // The second fill reuses the first fill's buffer.
-    chunk :: "c".repeat(CHUNK)
+    chunk: "c".repeat(CHUNK)
     out := ""
     fill(&out, chunk)
     print(out.len())
     files.write("/proc/self/clear_refs", "5") ?? panic("reset the peak resident set")
-    start :: status_kb("VmRSS:")
+    start: status_kb("VmRSS:")
     fill(&out, chunk)
-    grown :: status_kb("VmHWM:") - start
+    grown: status_kb("VmHWM:") - start
     print(out.len())
     if grown * 2048 > SIZE -> panic("refill: peak grew {grown} kB, more than half a string of {SIZE} bytes")
     print("refill: the buffer was reused")

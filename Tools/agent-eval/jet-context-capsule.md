@@ -8,16 +8,16 @@ ship this file as an artifact named `jet-context-capsule`.
 
 ## 1. Program shape
 
-A Jet executable has a `fn run` entry point. A statement ends at a newline; use
-braces for a multi-statement body. `::` creates an immutable binding, `:=`
+A Jet executable has a `run: fn` entry point. A statement ends at a newline; use
+braces for a multi-statement body. `:` creates an immutable binding, `:=`
 creates a mutable binding, and `=` reassigns a mutable binding. `->` introduces
 a concise body or a closure. The primitive types are `Int`, `Float`, `Bool`,
 `String`, and `Char`; lists are `[T]`; optional values are `?T`; a fallible
 value is `T ! E`.
 
 ```jet
-fn run() {
-    message :: "Hello, Jet"
+run: fn() {
+    message: "Hello, Jet"
     print(message)
 }
 ```
@@ -26,9 +26,9 @@ Functions name parameter and return types. A block function can return with
 `return`; a concise function uses `->`.
 
 ```jet
-fn twice(n: Int) -> Int { n * 2 }
+twice: fn(n: Int) -> Int { n * 2 }
 
-fn run() {
+run: fn() {
     print(twice(21))
 }
 ```
@@ -39,7 +39,7 @@ until the condition is false. `loop item in collection { ... }` iterates values;
 `break` exits and `next` skips an iteration.
 
 ```jet
-fn run() {
+run: fn() {
     total := 0
     loop i in 1..5 -> total += i
     if total == 10 -> print("sum={total}") else -> print("wrong")
@@ -51,15 +51,15 @@ Methods and fields use the dot rule: put the value on the left of `.`, and put
 an operation or field after it. Module functions also use a dotted alias.
 
 ```jet
-fn run() {
+run: fn() {
     values := [Int]{3, 1, 2}
     values.sort()
     print(values[0])
 }
 ```
 
-Use `use alias :: core.module` at the top of a file. Do not invent a module
-alias or a `::` method call. A record is declared with `struct Name { field:
+Use `use alias: core.module` at the top of a file. Do not invent a module
+alias or a `:` method call. A record is declared with `Name: struct { field:
 Type }` and constructed with `Name{field: value}`.
 
 ## 2. Dot rule and common calls
@@ -68,13 +68,13 @@ The left side of a dot is always the receiver or module alias:
 
 ```jet
 use {
-    files :: core.files
-    process :: core.process
+    files: core.files
+    process: core.process
 }
 
-fn run() {
-    path :: process.args().get(0) ?? panic("missing path")
-    text :: files.read(path) ?? panic("read failed")
+run: fn() {
+    path: process.args().get(0) ?? panic("missing path")
+    text: files.read(path) ?? panic("read failed")
     print(text.trim())
 }
 ```
@@ -92,8 +92,8 @@ line.trim().to_lower())`. Then call `lines.sort()` and loop over the list.
 ## 3. Memory and ownership verbs
 
 - A bare parameter type `T` is read. `&T` gives exclusive write access, and
-  `^T` takes ownership. The sigil is on the type: `fn edit(x: &T)` and
-  `fn consume(x: ^T)`.
+  `^T` takes ownership. The sigil is on the type: `edit: fn(x: &T)` and
+  `consume: fn(x: ^T)`.
 - Call sites mirror access: `edit(&value)` writes `value`; `consume(^value)`
   explicitly moves `value` into the callee. An unmarked `consume(value)` also
   moves an eligible whole local at its last use. Read parameters take no mark.
@@ -111,7 +111,7 @@ line.trim().to_lower())`. Then call `lines.sort()` and loop over the list.
 
 A fallible return type uses `T !(E1 | E2)`; a unit-fallible return uses `!E`.
 The ordinary `T` return uses Jet's implicit error route. An effect arrow declares
-the allowed effects: `fn load() String -[FS, IO]> { ... }`. Pure code can use
+the allowed effects: `load: fn() String -[FS, IO]> { ... }`. Pure code can use
 `-[]>`. Common effects include `FS`, `IO`, `Net`, `Exec`, `Env`, `Mem.Alloc`,
 `Mem.Rc`, `Panic`, and `Task`.
 
@@ -126,13 +126,13 @@ the allowed effects: `fn load() String -[FS, IO]> { ... }`. Pure code can use
   `false`, not a binding.
 
 ```jet
-fn lookup(flag: Bool) -> Int? {
+lookup: fn(flag: Bool) -> Int? {
     if flag -> return Val(7)
     return None
 }
 
-fn run() {
-    value :: lookup(true) ?? 0
+run: fn() {
+    value: lookup(true) ?? 0
     print(value)
 }
 ```
@@ -143,7 +143,7 @@ program and preserve the original error when propagation is intended.
 ## 5. Forty common library verbs
 
 These are the common operation names to reach for. Import the shown core module
-with `use <alias> :: core.<module>` and call `<alias>.<verb>(...)`. The ordered
+with `use <alias>: core.<module>` and call `<alias>.<verb>(...)`. The ordered
 extrema `min`, `max` and `clamp` are prelude names and need no import.
 
 1. `term.print`  2. `term.eprint`  3. `term.input`  4. `term.readline`
@@ -164,7 +164,7 @@ Useful module aliases are `term` for `core.term`, `files` for `core.files`,
 `regex` for `core.regex`, `math` for `core.math`, `time` for `core.time`, `net`
 for `core.net`, and `http` for `core.http`.
 
-HTTP services use `use server :: core.http.server` and `use net :: core.net`.
+HTTP services use `use server: core.http.server` and `use net: core.net`.
 Create a router with `server.mux()`, register `mux.get(path, handler)`, and
 return `Ok(server.response(status, body))` from the handler. A request route
 parameter is `request.param("name")`. `net.tcp_listen(address)` plus
@@ -173,14 +173,14 @@ a loop when the service must stay up.
 
 ## 6. Ten runnable canonical programs
 
-Each block is a complete source file with a `fn run` entry point. Save one block
+Each block is a complete source file with a `run: fn` entry point. Save one block
 as `program.jet` and run it with the normal Jet launcher. Programs that read a
 path or listen on a port receive that value as their first argument.
 
 ### 1. Hello
 
 ```jet
-fn run() {
+run: fn() {
     print("Hello, Jet")
 }
 ```
@@ -188,8 +188,8 @@ fn run() {
 ### 2. Arithmetic
 
 ```jet
-fn run() {
-    answer :: 6 * 7
+run: fn() {
+    answer: 6 * 7
     print(answer)
 }
 ```
@@ -197,9 +197,9 @@ fn run() {
 ### 3. Function call
 
 ```jet
-fn triple(n: Int) -> Int { n * 3 }
+triple: fn(n: Int) -> Int { n * 3 }
 
-fn run() {
+run: fn() {
     print(triple(14))
 }
 ```
@@ -207,8 +207,8 @@ fn run() {
 ### 4. Branching
 
 ```jet
-fn run() {
-    score :: 8
+run: fn() {
+    score: 8
     if score >= 5 -> print("pass") else -> print("retry")
 }
 ```
@@ -216,7 +216,7 @@ fn run() {
 ### 5. Loop and mutation
 
 ```jet
-fn run() {
+run: fn() {
     total := 0
     loop i in 1..5 -> total += i
     print(total)
@@ -226,7 +226,7 @@ fn run() {
 ### 6. List ordering
 
 ```jet
-fn run() {
+run: fn() {
     values := [Int]{3, 1, 2}
     values.sort()
     print(values[0])
@@ -236,12 +236,12 @@ fn run() {
 ### 7. Optional fallback
 
 ```jet
-fn maybe(flag: Bool) -> Int? {
+maybe: fn(flag: Bool) -> Int? {
     if flag -> return Val(7)
     return None
 }
 
-fn run() {
+run: fn() {
     print(maybe(false) ?? 0)
 }
 ```
@@ -249,10 +249,10 @@ fn run() {
 ### 8. Command-line argument
 
 ```jet
-use process :: core.process
+use process: core.process
 
-fn run() {
-    name :: process.args().get(0) ?? "world"
+run: fn() {
+    name: process.args().get(0) ?? "world"
     print("hello, {name}")
 }
 ```
@@ -261,13 +261,13 @@ fn run() {
 
 ```jet
 use {
-    files :: core.files
-    process :: core.process
+    files: core.files
+    process: core.process
 }
 
-fn run() {
-    path :: process.args().get(0) ?? panic("missing path")
-    text :: files.read(path) ?? panic("read failed")
+run: fn() {
+    path: process.args().get(0) ?? panic("missing path")
+    text: files.read(path) ?? panic("read failed")
     print(text.trim())
 }
 ```
@@ -276,23 +276,23 @@ fn run() {
 
 ```jet
 use {
-    server :: core.http.server
-    net :: core.net
-    process :: core.process
+    server: core.http.server
+    net: core.net
+    process: core.process
 }
 
-struct State {
+State: struct {
     done: Bool
 }
 
-fn run() (HTTPError | NetError | IOError)! {
-    port :: process.args().get(0) ?? "18080"
-    listener :: net.tcp_listen("127.0.0.1:{port}")
-    state :: shared State{done: false}
-    mux :: server.mux()
+run: fn() (HTTPError | NetError | IOError)! {
+    port: process.args().get(0) ?? "18080"
+    listener: net.tcp_listen("127.0.0.1:{port}")
+    state: shared State{done: false}
+    mux: server.mux()
     mux.get("/health", (_req: HTTPRequest) -> Ok(server.response(200, "{{\"status\":\"ok\"}}").header("content-type", "application/json")))
     mux.get("/hello/:name", (req: HTTPRequest) -> {
-        name :: req.param("name") ?? ""
+        name: req.param("name") ?? ""
         Ok(server.response(200, "Hello, {name}").header("content-type", "text/plain"))
     })
     mux.get("/shutdown", (_req: HTTPRequest) -> {

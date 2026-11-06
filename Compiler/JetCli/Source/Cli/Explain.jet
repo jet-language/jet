@@ -5,11 +5,11 @@ use {
     jet_driver.[JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR, JetDriverSourceQueryResult, jet_driver_explain_code]
 }
 
-fn jet_cli_explanation_output(explanation: DiagnosticExplanation, color: Bool, json: Bool) -> JetCLIPlan Never! {
+jet_cli_explanation_output: fn(explanation: DiagnosticExplanation, color: Bool, json: Bool) -> JetCLIPlan Never! {
     if !json -> return jet_cli_renderable(diagnostic_explanation_render(explanation, color), false)
     // A retired or reserved row runs in no stage: its stage is null.
-    stage :: if explanation.stage == "" -> None else -> Val(explanation.stage)
-    fields :: [JetCLIStatusField]{
+    stage: if explanation.stage == "" -> None else -> Val(explanation.stage)
+    fields: [JetCLIStatusField]{
         jet_cli_status_field("code", jet_cli_status_text(explanation.code)),
         jet_cli_status_field("stage", jet_cli_status_optional_text(stage)),
         jet_cli_status_field("what", jet_cli_status_text(explanation.what ?? explanation.meaning)),
@@ -22,31 +22,31 @@ fn jet_cli_explanation_output(explanation: DiagnosticExplanation, color: Bool, j
 
 // None means this is not a diagnostic-registry query: the caller continues
 // through its syntax/policy/build-fact lookup rather than inventing a row.
-fn jet_cli_explain_diagnostic(args: [String], color: Bool, json: Bool) -> JetCLIPlan? Never! {
+jet_cli_explain_diagnostic: fn(args: [String], color: Bool, json: Bool) -> JetCLIPlan? Never! {
     if args.len() < 2 {
         return Val(jet_cli_done("", "usage: jet explain <CODE|FACT> [file]\n       jet explain marker <file>:<line> <policy-key>\n", JET_DRIVER_EXIT_USAGE))
     }
-    explanation :: diagnostic_explanation(args[1]) ?? return None
+    explanation: diagnostic_explanation(args[1]) ?? return None
     Val(jet_cli_explanation_output(explanation, color, json))
 }
 
 // `web.BadPath`: a module path and an UpperCamel type name, the default code
 // of a library `Diagnostic` type.
-fn jet_cli_is_diagnostic_type_path(value: String) -> Bool Never! {
-    parts :: value.split(".").to_list()
+jet_cli_is_diagnostic_type_path: fn(value: String) -> Bool Never! {
+    parts: value.split(".").to_list()
     if parts.len() < 2 -> return false
     loop (index, part) in parts {
-        bytes :: part.bytes()
+        bytes: part.bytes()
         if bytes.len() == 0 -> return false
-        first :: Int.from_u8(bytes[0])
+        first: Int.from_u8(bytes[0])
         if index == parts.len() - 1 {
             if first < 65 || first > 90 -> return false
         } else if first < 97 || first > 122 {
             return false
         }
         loop byte in bytes {
-            code :: Int.from_u8(byte)
-            word :: (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95
+            code: Int.from_u8(byte)
+            word: (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95
             if !word -> return false
         }
     }
@@ -56,15 +56,15 @@ fn jet_cli_is_diagnostic_type_path(value: String) -> Bool Never! {
 // `jet explain web.BadPath`: module `web`'s `impl Diagnostic` for `BadPath`,
 // nested in the type's body or written beside it, each text printed as its
 // literal with the `{self.field}` holes it fills.
-fn jet_cli_explain_loaded_diagnostic_type(name: String, loaded: JetDriverSourceQueryResult, color: Bool, json: Bool) -> JetCLIPlan Never! {
+jet_cli_explain_loaded_diagnostic_type: fn(name: String, loaded: JetDriverSourceQueryResult, color: Bool, json: Bool) -> JetCLIPlan Never! {
     if !loaded.complete {
         stderr := ""
         loop diagnostic in loaded.diagnostics -> stderr = "{stderr}{diagnostic.what}\n"
         return jet_cli_done("", stderr, JET_DRIVER_EXIT_USER_ERROR)
     }
-    parts :: name.split(".").to_list()
-    type_name :: parts[parts.len() - 1]
-    module_name :: name.slice(0..<(name.len() - type_name.len() - 1))
+    parts: name.split(".").to_list()
+    type_name: parts[parts.len() - 1]
+    module_name: name.slice(0..<(name.len() - type_name.len() - 1))
     loop source_module in loaded.modules {
         if source_module.module_name != module_name -> next
         loop item in source_module.program.items {
@@ -73,8 +73,8 @@ fn jet_cli_explain_loaded_diagnostic_type(name: String, loaded: JetDriverSourceQ
             if item == .Struct(definition) && definition.name == type_name -> methods = jet_cli_nested_diagnostic_methods(definition.trait_impls)
             if item == .Enum(definition) && definition.name == type_name -> methods = jet_cli_nested_diagnostic_methods(definition.trait_impls)
             if methods == .Val(found) {
-                what :: jet_cli_diagnostic_type_literal(source_module.source, found, "what")
-                explanation :: DiagnosticExplanation{code: name, stage: "library", meaning: what ?? "", what: what, why: jet_cli_diagnostic_type_literal(source_module.source, found, "why"), fix: jet_cli_diagnostic_type_literal(source_module.source, found, "fix"), example: None}
+                what: jet_cli_diagnostic_type_literal(source_module.source, found, "what")
+                explanation: DiagnosticExplanation{code: name, stage: "library", meaning: what ?? "", what: what, why: jet_cli_diagnostic_type_literal(source_module.source, found, "why"), fix: jet_cli_diagnostic_type_literal(source_module.source, found, "fix"), example: None}
                 return jet_cli_explanation_output(explanation, color, json)
             }
         }
@@ -83,7 +83,7 @@ fn jet_cli_explain_loaded_diagnostic_type(name: String, loaded: JetDriverSourceQ
 }
 
 // The methods of a type body's nested `impl Diagnostic { … }` block.
-fn jet_cli_nested_diagnostic_methods(blocks: [TraitImplBlock]) -> [Func]? Never! {
+jet_cli_nested_diagnostic_methods: fn(blocks: [TraitImplBlock]) -> [Func]? Never! {
     loop block in blocks {
         if block.trait_name == "Diagnostic" -> return Val(block.methods)
     }
@@ -91,7 +91,7 @@ fn jet_cli_nested_diagnostic_methods(blocks: [TraitImplBlock]) -> [Func]? Never!
 }
 
 // One `Diagnostic` text method's literal as written, without its quotes.
-fn jet_cli_diagnostic_type_literal(source: String, methods: [Func], name: String) -> String? Never! {
+jet_cli_diagnostic_type_literal: fn(source: String, methods: [Func], name: String) -> String? Never! {
     loop method in methods {
         if method.name != name || method.body.len() != 1 -> next
         if method.body[0] == .Expr(literal) {

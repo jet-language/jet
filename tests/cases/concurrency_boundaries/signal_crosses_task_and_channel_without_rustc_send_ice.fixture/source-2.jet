@@ -1,12 +1,12 @@
 
 use {
-    reactive :: core.reactive
-    tasks :: core.tasks
+    reactive: core.reactive
+    tasks: core.tasks
 }
-fn run() {
+run: fn() {
     pending := reactive.signal(0)
-    { sender: tx, receiver: rx } :: channel<Signal<Int>>()
+    { sender: tx, receiver: rx }: channel<Signal<Int>>()
     tx.send(pending.copy())
-    got :: rx.receive() ?? panic("recv")
+    got: rx.receive() ?? panic("recv")
     print(got.get())
 }

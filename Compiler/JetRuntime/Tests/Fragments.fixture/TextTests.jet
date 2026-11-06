@@ -1,5 +1,5 @@
 // Runtime-only ownership/UTF-8 witnesses; no String-valued test scaffolding.
-fn text_test_require(ok: Bool) {
+text_test_require: fn(ok: Bool) {
     if ok {
         return
     }
@@ -11,22 +11,22 @@ fn text_test_require(ok: Bool) {
     }
 }
 
-fn text_test_word(word: I64, len: I64) -> I64 {
-    value :: jet_rt_string_builder_new()
+text_test_word: fn(word: I64, len: I64) -> I64 {
+    value: jet_rt_string_builder_new()
     rt_text_push_word(value, word, len)
     value
 }
 
-fn text_test_piece(state: I64, expected: I64) {
-    slot :: text_iter_pull(state)
+text_test_piece: fn(state: I64, expected: I64) {
+    slot: text_iter_pull(state)
     text_test_require(slot != I64{0})
-    value :: rt_text_word(slot)
+    value: rt_text_word(slot)
     text_test_require(jet_rt_string_eq(value, expected))
     jet_rt_string_drop(value)
     jet_rt_free(slot, I64{8}, I64{8})
 }
 
-fn text_test_find_reference(data: I64, len: I64, pattern: I64, n: I64, start: I64, last: Bool) -> I64 {
+text_test_find_reference: fn(data: I64, len: I64, pattern: I64, n: I64, start: I64, last: Bool) -> I64 {
     if n > len - start -> return I64{-1}
     at := if last -> len - n else -> start
     loop at >= start && at <= len - n {
@@ -36,11 +36,11 @@ fn text_test_find_reference(data: I64, len: I64, pattern: I64, n: I64, start: I6
     I64{-1}
 }
 
-fn text_test_search() {
+text_test_search: fn() {
     // Exhaust short binary-alphabet haystacks and needles, both directions
     // and every start offset: exercise periodic/nonperiodic factorization.
-    data :: jet_rt_alloc(I64{6}, I64{1})
-    pattern :: jet_rt_alloc(I64{3}, I64{1})
+    data: jet_rt_alloc(I64{6}, I64{1})
+    pattern: jet_rt_alloc(I64{3}, I64{1})
     len := I64{0}
     loop len <= (I64{6}) {
         bits := I64{0}
@@ -78,10 +78,10 @@ fn text_test_search() {
 }
 
 // Bounded, single-threaded cases do not fill a slab or allocate directly.
-fn text_test_live(width: I64) -> I64 { alloc_live_blocks(width) }
+text_test_live: fn(width: I64) -> I64 { alloc_live_blocks(width) }
 
-fn text_test_concat() {
-    snapshot :: jet_rt_alloc(I64{64}, I64{8})
+text_test_concat: fn() {
+    snapshot: jet_rt_alloc(I64{64}, I64{8})
     width := I64{32}
     at := I64{0}
     loop at < (I64{8}) {
@@ -91,8 +91,8 @@ fn text_test_concat() {
     }
     case := I64{0}
     loop case < (I64{7}) {
-        left :: jet_rt_string_builder_new()
-        right :: if (case == I64{5}) -> left else -> jet_rt_string_builder_new()
+        left: jet_rt_string_builder_new()
+        right: if (case == I64{5}) -> left else -> jet_rt_string_builder_new()
         if (case == I64{0} || case == I64{3} || case == I64{5}) {
             rt_text_push_word(left, I64{6513249}, I64{3})
         }
@@ -106,19 +106,19 @@ fn text_test_concat() {
             rt_text_push_scalar(left, I64{0})
             rt_text_push_scalar(right, I64{98})
         }
-        left_len :: rt_text_len(left)
-        right_len :: rt_text_len(right)
-        len :: left_len + right_len
-        joined :: jet_rt_string_concat(left, right)
+        left_len: rt_text_len(left)
+        right_len: rt_text_len(right)
+        len: left_len + right_len
+        joined: jet_rt_string_concat(left, right)
         text_test_require(joined != left && joined != right)
         text_test_require(rt_text_len(joined) == len && rt_text_word(joined + I64{16}) == len)
-        data :: rt_text_data(joined)
+        data: rt_text_data(joined)
         if (len == I64{0}) { text_test_require(data == I64{1}) } else {
             text_test_require(data != rt_text_data(left) && data != rt_text_data(right))
         }
         at = I64{0}
         loop at < len {
-            expected :: if (at < left_len) -> rt_text_byte(rt_text_data(left) + at) else -> rt_text_byte(rt_text_data(right) + at - left_len)
+            expected: if (at < left_len) -> rt_text_byte(rt_text_data(left) + at) else -> rt_text_byte(rt_text_data(right) + at - left_len)
             text_test_require(rt_text_byte(data + at) == expected)
             at += I64{1}
         }
@@ -141,22 +141,22 @@ fn text_test_concat() {
     jet_rt_free(snapshot, I64{64}, I64{8})
 }
 
-fn text_test_routes() {
-    empty :: jet_rt_string_builder_new()
-    unicode :: jet_rt_string_builder_new()
+text_test_routes: fn() {
+    empty: jet_rt_string_builder_new()
+    unicode: jet_rt_string_builder_new()
     rt_text_push_scalar(unicode, I64{65})
     rt_text_push_scalar(unicode, I64{233})
     rt_text_push_scalar(unicode, I64{128512})
-    copied :: jet_string_copy(unicode)
+    copied: jet_string_copy(unicode)
     text_test_require(copied != unicode && jet_rt_string_eq(copied, unicode))
     text_test_require(jet_int_owned_to_i64(jet_string_count_bytes(unicode)) == I64{7})
-    slot :: jet_rt_alloc(I64{8}, I64{8})
+    slot: jet_rt_alloc(I64{8}, I64{8})
     text_test_require(jet_string_chars(unicode, slot) == I64{3})
-    column :: rt_text_word(slot)
+    column: rt_text_word(slot)
     text_test_require(rt_text_word(column) == I64{65} && rt_text_word(column + I64{8}) == I64{233} && rt_text_word(column + I64{16}) == I64{128512})
     jet_rt_free(column, I64{24}, I64{8})
     text_test_require(jet_string_chars(empty, slot) == I64{0} && rt_text_word(slot) == I64{0})
-    lines :: jet_rt_string_builder_new()
+    lines: jet_rt_string_builder_new()
     rt_text_push_scalar(lines, I64{13})
     rt_text_push_scalar(lines, I64{10})
     jet_rt_string_builder_push(lines, unicode)
@@ -164,10 +164,10 @@ fn text_test_routes() {
     rt_text_push_scalar(lines, I64{10})
     rt_text_push_scalar(lines, I64{13})
     text_test_require(jet_string_lines(lines, slot) == I64{3})
-    column2 :: rt_text_word(slot)
-    first :: rt_text_word(column2)
-    second :: rt_text_word(column2 + I64{8})
-    last :: rt_text_word(column2 + I64{16})
+    column2: rt_text_word(slot)
+    first: rt_text_word(column2)
+    second: rt_text_word(column2 + I64{8})
+    last: rt_text_word(column2 + I64{16})
     text_test_require(jet_string_is_empty(first) && jet_rt_string_eq(second, unicode))
     text_test_require(rt_text_len(last) == I64{1} && rt_text_byte(rt_text_data(last)) == I64{13})
     jet_rt_string_drop(first)
@@ -175,34 +175,34 @@ fn text_test_routes() {
     jet_rt_string_drop(last)
     jet_rt_free(column2, I64{24}, I64{8})
     text_test_require(jet_string_lines(empty, slot) == I64{0} && rt_text_word(slot) == I64{0})
-    newline :: text_test_word(I64{10}, I64{1})
+    newline: text_test_word(I64{10}, I64{1})
     text_test_require(jet_string_lines(newline, slot) == I64{1})
-    column3 :: rt_text_word(slot)
+    column3: rt_text_word(slot)
     text_test_require(jet_string_is_empty(rt_text_word(column3)))
     jet_rt_string_drop(rt_text_word(column3))
     jet_rt_free(column3, I64{8}, I64{8})
-    repeated :: jet_string_repeat(unicode, jet_int_owned_from_i64(I64{3}))
+    repeated: jet_string_repeat(unicode, jet_int_owned_from_i64(I64{3}))
     text_test_require(rt_text_len(repeated) == I64{21} && jet_char_len(repeated) == I64{9})
     text_test_require(rt_text_equal_bytes(rt_text_data(repeated) + I64{14}, rt_text_data(unicode), I64{7}))
-    negative :: jet_string_repeat(unicode, jet_int_owned_from_i64(I64{-1}))
-    huge :: jet_int_owned_from_i64(I64{9223372036854775807})
-    huge_empty :: jet_string_repeat(empty, huge)
+    negative: jet_string_repeat(unicode, jet_int_owned_from_i64(I64{-1}))
+    huge: jet_int_owned_from_i64(I64{9223372036854775807})
+    huge_empty: jet_string_repeat(empty, huge)
     int_discard(huge)
     text_test_require(jet_string_is_empty(negative) && jet_string_is_empty(huge_empty))
-    ascii :: text_test_word(I64{65}, I64{1})
-    changed :: jet_string_replace(unicode, ascii, empty)
+    ascii: text_test_word(I64{65}, I64{1})
+    changed: jet_string_replace(unicode, ascii, empty)
     text_test_require(jet_char_len(changed) == I64{2} && rt_text_decode(rt_text_data(changed)) == I64{233})
-    inserted :: jet_string_replace(unicode, empty, ascii)
+    inserted: jet_string_replace(unicode, empty, ascii)
     text_test_require(jet_char_len(inserted) == I64{7} && rt_text_len(inserted) == I64{11})
-    unchanged :: jet_string_replace(unicode, newline, ascii)
+    unchanged: jet_string_replace(unicode, newline, ascii)
     text_test_require(unchanged != unicode && jet_rt_string_eq(unchanged, unicode))
-    lower :: jet_text_ascii_lower(unicode)
-    upper :: jet_text_ascii_upper(lower)
+    lower: jet_text_ascii_lower(unicode)
+    upper: jet_text_ascii_upper(lower)
     text_test_require(rt_text_byte(rt_text_data(lower)) == I64{97} && jet_rt_string_eq(upper, unicode))
     text_test_require(rt_text_equal_bytes(rt_text_data(lower) + I64{1}, rt_text_data(unicode) + I64{1}, I64{6}))
-    sliced :: jet_string_slice_builtin(unicode, jet_int_owned_from_i64(I64{1}), jet_int_owned_from_i64(I64{3}))
-    located :: jet_string_slice(unicode, jet_int_owned_from_i64(I64{1}), jet_int_owned_from_i64(I64{3}), empty, jet_int_owned_from_i64(I64{0}))
-    exhausted :: jet_string_slice_builtin(unicode, jet_int_owned_from_i64(I64{3}), jet_int_owned_from_i64(I64{3}))
+    sliced: jet_string_slice_builtin(unicode, jet_int_owned_from_i64(I64{1}), jet_int_owned_from_i64(I64{3}))
+    located: jet_string_slice(unicode, jet_int_owned_from_i64(I64{1}), jet_int_owned_from_i64(I64{3}), empty, jet_int_owned_from_i64(I64{0}))
+    exhausted: jet_string_slice_builtin(unicode, jet_int_owned_from_i64(I64{3}), jet_int_owned_from_i64(I64{3}))
     text_test_require(jet_rt_string_eq(sliced, changed) && jet_rt_string_eq(located, sliced) && jet_string_is_empty(exhausted))
     jet_rt_string_drop(exhausted)
     jet_rt_string_drop(located)
@@ -224,27 +224,27 @@ fn text_test_routes() {
     jet_rt_string_drop(empty)
 }
 
-fn text_tests() {
+text_tests: fn() {
     jet_rt_alloc_init()
     text_test_concat()
     text_test_search()
     text_test_routes()
-    empty :: jet_rt_string_builder_new()
+    empty: jet_rt_string_builder_new()
     text_test_require(rt_text_data(empty) == I64{1} && rt_text_word(empty + I64{16}) == I64{0})
     text_test_require(jet_string_is_empty(empty) && jet_char_len(empty) == I64{0})
-    word :: text_test_word(I64{6513249}, I64{3})  // abc
-    clone :: jet_rt_string_clone(word)
+    word: text_test_word(I64{6513249}, I64{3})  // abc
+    clone: jet_rt_string_clone(word)
     text_test_require(word != clone && rt_text_data(word) != rt_text_data(clone))
     text_test_require(jet_rt_string_eq(word, clone) && jet_rt_string_compare(word, clone) == I64{0})
-    suffix :: text_test_word(I64{25442}, I64{2})  // bc
+    suffix: text_test_word(I64{25442}, I64{2})  // bc
     text_test_require(jet_string_contains(word, suffix) && jet_string_ends_with(word, suffix))
     text_test_require(!jet_string_starts_with(word, suffix) && jet_string_starts_with(word, empty) && jet_string_ends_with(word, empty))
     text_test_require(jet_rt_string_compare(word, suffix) == I64{-1} && jet_rt_string_compare(suffix, word) == I64{1})
-    after :: jet_string_after(word, suffix)
-    before :: jet_string_before(word, suffix)
+    after: jet_string_after(word, suffix)
+    before: jet_string_before(word, suffix)
     text_test_require(jet_string_is_empty(after) && rt_text_len(before) == I64{1} && rt_text_byte(rt_text_data(before)) == I64{97})
-    miss :: text_test_word(I64{122}, I64{1})
-    unchanged :: jet_string_after(word, miss)
+    miss: text_test_word(I64{122}, I64{1})
+    unchanged: jet_string_after(word, miss)
     text_test_require(jet_rt_string_eq(unchanged, word) && unchanged != word)
     // Self-alias append must work both with and without buffer relocation.
     jet_rt_string_builder_push(clone, clone)
@@ -256,65 +256,65 @@ fn text_tests() {
         text_test_require(rt_text_byte(rt_text_data(clone) + at) == I64{97} + at % I64{3})
         at += I64{1}
     }
-    unicode :: jet_rt_string_builder_new()
+    unicode: jet_rt_string_builder_new()
     rt_text_push_scalar(unicode, I64{65})
     rt_text_push_scalar(unicode, I64{233})
     rt_text_push_scalar(unicode, I64{8364})
     rt_text_push_scalar(unicode, I64{128512})
     text_test_require(jet_char_len(unicode) == I64{4} && rt_text_len(unicode) == I64{10})
-    packed :: jet_rt_c_string_pack(unicode)
+    packed: jet_rt_c_string_pack(unicode)
     text_test_require(packed != I64{0} && rt_text_byte(packed + I64{10}) == I64{0})
-    unpacked :: jet_rt_c_string_unpack(packed)
-    unpacked_suffix :: jet_rt_c_string_unpack(packed + I64{1})
-    expected_suffix :: rt_text_slice(unicode, I64{1}, I64{10})
+    unpacked: jet_rt_c_string_unpack(packed)
+    unpacked_suffix: jet_rt_c_string_unpack(packed + I64{1})
+    expected_suffix: rt_text_slice(unicode, I64{1}, I64{10})
     jet_rt_c_string_free(packed, I64{11})
     text_test_require(jet_rt_string_eq(unpacked, unicode))
     text_test_require(jet_rt_string_eq(unpacked_suffix, expected_suffix))
     jet_rt_string_drop(unpacked)
     jet_rt_string_drop(unpacked_suffix)
     jet_rt_string_drop(expected_suffix)
-    packed_empty :: jet_rt_c_string_pack(empty)
+    packed_empty: jet_rt_c_string_pack(empty)
     text_test_require(packed_empty != I64{0} && rt_text_byte(packed_empty) == I64{0})
-    unpacked_empty :: jet_rt_c_string_unpack(packed_empty)
+    unpacked_empty: jet_rt_c_string_unpack(packed_empty)
     jet_rt_c_string_free(packed_empty, I64{1})
     text_test_require(rt_text_len(unpacked_empty) == I64{0} && rt_text_data(unpacked_empty) == I64{1})
     jet_rt_string_drop(unpacked_empty)
-    sliced :: jet_rt_string_slice_range(unicode, I64{1}, I64{3}, U8{1}, I64{1}, I64{0}, I64{0})
+    sliced: jet_rt_string_slice_range(unicode, I64{1}, I64{3}, U8{1}, I64{1}, I64{0}, I64{0})
     text_test_require(jet_char_len(sliced) == I64{2} && rt_text_len(sliced) == I64{5})
     text_test_require(rt_text_decode(rt_text_data(sliced)) == I64{233} && rt_text_decode(rt_text_data(sliced) + I64{2}) == I64{8364})
-    padded :: jet_rt_string_builder_new()
+    padded: jet_rt_string_builder_new()
     rt_text_push_scalar(padded, I64{8195})
     jet_rt_string_builder_push(padded, unicode)
     rt_text_push_scalar(padded, I64{160})
-    trimmed :: rt_text_trim(padded)
+    trimmed: rt_text_trim(padded)
     text_test_require(jet_rt_string_eq(trimmed, unicode))
-    raw :: jet_rt_alloc(I64{5}, I64{1})
+    raw: jet_rt_alloc(I64{5}, I64{1})
     rt_text_put(raw, I64{240})
     rt_text_put(raw + I64{1}, I64{144})
     rt_text_put(raw + I64{2}, I64{65})
     rt_text_put(raw + I64{3}, I64{226})
     rt_text_put(raw + I64{4}, I64{130})
-    lossy :: jet_rt_string_from_static(raw, I64{5})
+    lossy: jet_rt_string_from_static(raw, I64{5})
     text_test_require(jet_char_len(lossy) == I64{3} && rt_text_len(lossy) == I64{7})
     text_test_require(rt_text_decode(rt_text_data(lossy)) == I64{65533})
     text_test_require(rt_text_byte(rt_text_data(lossy) + I64{3}) == I64{65})
     text_test_require(rt_text_decode(rt_text_data(lossy) + I64{4}) == I64{65533})
     jet_rt_free(raw, I64{5}, I64{1})
     // Empty delimiter: leading empty, each scalar, trailing empty, then None.
-    state :: text_iter_state(sliced, empty)
+    state: text_iter_state(sliced, empty)
     text_test_piece(state, empty)
-    scalar :: jet_rt_string_builder_new()
+    scalar: jet_rt_string_builder_new()
     rt_text_push_scalar(scalar, I64{233})
     text_test_piece(state, scalar)
     jet_rt_string_drop(scalar)
-    euro :: jet_rt_string_builder_new()
+    euro: jet_rt_string_builder_new()
     rt_text_push_scalar(euro, I64{8364})
     text_test_piece(state, euro)
     text_test_piece(state, empty)
     text_test_require(text_iter_pull(state) == I64{0} && text_iter_pull(state) == I64{0})
     text_iter_drop(state)
     // Nonempty delimiter: trailing empty is preserved and source is cloned.
-    state2 :: text_iter_state(word, suffix)
+    state2: text_iter_state(word, suffix)
     jet_rt_string_drop(word)
     text_test_piece(state2, before)
     text_test_piece(state2, empty)
@@ -336,38 +336,38 @@ fn text_tests() {
     jet_rt_string_drop(I64{0})
 }
 
-fn text_c_string_nul_stop() {
+text_c_string_nul_stop: fn() {
     jet_rt_alloc_init()
-    value :: jet_rt_string_builder_new()
+    value: jet_rt_string_builder_new()
     rt_text_push_scalar(value, I64{65})
     rt_text_push_scalar(value, I64{0})
-    _packed :: jet_rt_c_string_pack(value)
+    _packed: jet_rt_c_string_pack(value)
 }
 
-fn text_c_string_invalid_stop() {
+text_c_string_invalid_stop: fn() {
     jet_rt_alloc_init()
-    ptr :: jet_rt_alloc(I64{2}, I64{1})
+    ptr: jet_rt_alloc(I64{2}, I64{1})
     rt_text_put(ptr, I64{240})
     rt_text_put(ptr + I64{1}, I64{0})
-    _unpacked :: jet_rt_c_string_unpack(ptr)
+    _unpacked: jet_rt_c_string_unpack(ptr)
 }
 
-fn text_c_string_null_stop() {
+text_c_string_null_stop: fn() {
     jet_rt_alloc_init()
-    _unpacked :: jet_rt_c_string_unpack(I64{0})
+    _unpacked: jet_rt_c_string_unpack(I64{0})
 }
 
-fn text_concat_capacity_stop() {
+text_concat_capacity_stop: fn() {
     jet_rt_alloc_init()
     // Synthetic boundary headers exercise the size guard without allocating
     // impossible buffers. Their data must never be inspected on this edge.
-    left :: jet_rt_alloc(I64{24}, I64{8})
-    right :: jet_rt_alloc(I64{24}, I64{8})
+    left: jet_rt_alloc(I64{24}, I64{8})
+    right: jet_rt_alloc(I64{24}, I64{8})
     rt_text_store(left, I64{1})
     rt_text_store(left + I64{8}, I64{9223372036854775807})
     rt_text_store(left + I64{16}, I64{9223372036854775807})
     rt_text_store(right, I64{1})
     rt_text_store(right + I64{8}, I64{1})
     rt_text_store(right + I64{16}, I64{1})
-    _joined :: jet_rt_string_concat(left, right)
+    _joined: jet_rt_string_concat(left, right)
 }

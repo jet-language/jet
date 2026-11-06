@@ -1,54 +1,54 @@
 #Error
-enum VisitError {
+VisitError: enum {
     Stop
 }
-trait Shape {
-    fn name(self) -[]> String
+Shape: trait {
+    name: fn(self) -[]> String
 }
-struct Circle {
+Circle: struct {
     radius: Float
     impl Shape {
-        fn name(self) -[]> String {
+        name: fn(self) -[]> String {
             return "circle"
         }
     }
 }
-struct Square {
+Square: struct {
     side: Float
 }
 impl Square.Shape {
-    fn name(self) -[]> String {
+    name: fn(self) -[]> String {
         return "square"
     }
 }
-fn visit_ok(s: Shape) VisitError! {
-    name :: s.name()
+visit_ok: fn(s: Shape) VisitError! {
+    name: s.name()
     print(name)
     return
 }
-fn visit_fail(s: Shape) VisitError! {
-    name :: s.name()
+visit_fail: fn(s: Shape) VisitError! {
+    name: s.name()
     print(name)
     if name == "circle" {
         return Err(VisitError.Stop)
     }
     return
 }
-fn consume_plain() -[]> Unit {
-    shapes :: [Shape]{ Circle{radius: 1.0}, Square{side: 2.0} }
+consume_plain: fn() -[]> Unit {
+    shapes: [Shape]{ Circle{radius: 1.0}, Square{side: 2.0} }
     shapes.each((s) -> {})
 }
-fn consume_ok() VisitError! {
-    shapes :: [Shape]{ Circle{radius: 1.0}, Square{side: 2.0} }
+consume_ok: fn() VisitError! {
+    shapes: [Shape]{ Circle{radius: 1.0}, Square{side: 2.0} }
     shapes.each((s) -> visit_ok(s))
     return
 }
-fn consume_fail() VisitError! {
-    shapes :: [Shape]{ Circle{radius: 1.0}, Square{side: 2.0} }
+consume_fail: fn() VisitError! {
+    shapes: [Shape]{ Circle{radius: 1.0}, Square{side: 2.0} }
     shapes.each((s) -> visit_fail(s))
     return
 }
-fn run() {
+run: fn() {
     consume_ok() ? ok -> { print("callback-ok") } ! error -> { print("callback-ok-failed") }
     consume_fail() ? ok -> { print("callback-failed-missed") } ! error -> { print("callback-failed") }
     consume_plain()

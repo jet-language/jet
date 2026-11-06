@@ -38,11 +38,11 @@
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E2404</code>: <code>tests/ui/callback_error_generic_mismatch.stderr</code>.</p>
 <pre class="diag">Error [jet.ErrorNotPropagatable]: `sort_by` fails with `PriceError`, which can&#39;t propagate into `KeyError` here
-  --&gt; callback_error_generic_mismatch.jet:30:5
+  --&gt; tests/ui/callback_error_generic_mismatch.jet:30:5
     |
  30 |     sort_by(names, parse_price)
     |     ^^^^^^^
- Why: `sort_by` is defined at `callback_error_generic_mismatch.jet:15:4` with effective failure contract `explicit E!`; the caller&#39;s `explicit KeyError!` contract has no route from `PriceError` to `KeyError`
+ Why: `sort_by` is defined at `callback_error_generic_mismatch.jet:15:1` with effective failure contract `explicit E!`; the caller&#39;s `explicit KeyError!` contract has no route from `PriceError` to `KeyError`
  Fix: Declare the caller with `PriceError` as its failure domain, or add `impl PriceError -&gt; KeyError { … }`; otherwise handle `sort_by` locally with `??`
 More: jet-lang.dev/e/E2404
 </pre>

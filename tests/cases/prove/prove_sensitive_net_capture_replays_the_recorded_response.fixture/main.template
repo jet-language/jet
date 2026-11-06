@@ -1,12 +1,12 @@
 use {
-    http :: core.http.client
-    http_core :: core.http
+    http: core.http.client
+    http_core: core.http
 }
 
 #Test("recorded response") {
-    reply :: http.get("http://{cap:addr}/greeting") ?? panic("request")
-    text :: http_core.body_as_text(reply.body)
-    position :: if text == "replayed-text" -> 13 else -> 0
-    items :: [Int]{1}
-    _missing :: items[position]
+    reply: http.get("http://{cap:addr}/greeting") ?? panic("request")
+    text: http_core.body_as_text(reply.body)
+    position: if text == "replayed-text" -> 13 else -> 0
+    items: [Int]{1}
+    _missing: items[position]
 }

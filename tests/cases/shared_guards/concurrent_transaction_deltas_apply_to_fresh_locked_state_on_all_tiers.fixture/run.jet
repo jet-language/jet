@@ -1,16 +1,16 @@
 
-struct Counter {
+Counter: struct {
     value: Int
 }
 
-fn increment(counter: Shared<Counter>) {
+increment: fn(counter: Shared<Counter>) {
     #Transact(tx) {
         print("transaction-body")
         counter.value += 1
     }
 }
 
-fn run() {
+run: fn() {
     counter := shared Counter{ value: 0 }
     task.group workers {
         first := task increment(counter)

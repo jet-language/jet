@@ -1,9 +1,9 @@
 use {
-    counter :: "counter.h"
+    counter: "counter.h"
     c.pthread
 }
 
-fn foreign_work() -> Int {
+foreign_work: fn() -> Int {
     return counter.mixed_c_threaded(41)
 }
 
@@ -12,10 +12,10 @@ fn foreign_work() -> Int {
     assert_eq(counter.mixed_c_threaded(41), 42)
 }
 
-fn run() {
+run: fn() {
     print(counter.mixed_c_value(41))
     task.group c_workers {
-        worker :: task foreign_work()
+        worker: task foreign_work()
         print(worker.join() ?? panic("C worker failed"))
     }
 }

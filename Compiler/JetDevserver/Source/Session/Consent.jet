@@ -2,13 +2,13 @@
 // preflight outcomes. Runtime policy is C3.
 use {
     jet_foundation.[sha256_hex_bytes, sha256_bytes]
-    capture_consent_text :: core.text
+    capture_consent_text: core.text
     jet_pkg_model.[PackagePolicy]
 }
 
 // Rust CaptureIdentity.exact/is_exact/matches. The sole constructor takes all
 // seven canonical facts; there is no three-field compatibility constructor.
-struct CaptureIdentity {
+CaptureIdentity: struct {
     target_inputs_sha256: String
     tool_version: String
     engine: String
@@ -16,17 +16,17 @@ struct CaptureIdentity {
     source_id: String
     build_id: String
     revision: String
-    fn exact(target_inputs_sha256: ^String, tool_version: ^String, engine: ^String, session_id: ^String, source_id: ^String, build_id: ^String, revision: ^String) -> CaptureIdentity Never! {
+    exact: fn(target_inputs_sha256: ^String, tool_version: ^String, engine: ^String, session_id: ^String, source_id: ^String, build_id: ^String, revision: ^String) -> CaptureIdentity Never! {
         CaptureIdentity{target_inputs_sha256: ^target_inputs_sha256, tool_version: ^tool_version, engine: ^engine, session_id: ^session_id, source_id: ^source_id, build_id: ^build_id, revision: ^revision}
     }
     // #4437: proposed Core Cc predicate is unratified and not delivered. This
     // intended callee and full validation remain gated, never locally replaced.
-    fn is_exact(self) -> Bool Never! {
+    is_exact: fn(self) -> Bool Never! {
         capture_identity_field_is_exact(self.target_inputs_sha256) && capture_identity_field_is_exact(self.tool_version) && capture_identity_field_is_exact(self.engine) && capture_identity_field_is_exact(self.session_id) && capture_identity_field_is_exact(self.source_id) && capture_identity_field_is_exact(self.build_id) && capture_identity_field_is_exact(self.revision)
     }
-    fn matches(self, other: CaptureIdentity) -> Bool Never! { self == other }
+    matches: fn(self, other: CaptureIdentity) -> Bool Never! { self == other }
 }
-fn capture_identity_field_is_exact(value: String) -> Bool Never! {
+capture_identity_field_is_exact: fn(value: String) -> Bool Never! {
     if value.len() == 0 -> return false
     loop index in 0..<value.len() {
         if capture_consent_text.is_control(value.slice(index..<(index + 1))) -> return false
@@ -36,7 +36,7 @@ fn capture_identity_field_is_exact(value: String) -> Bool Never! {
 
 // Rust CaptureConsentScope.default/new/for_budget/canonicalize/digest and
 // frame/frame_vec. Scope defaults legitimately have no disclosure lineage.
-struct CaptureConsentScope {
+CaptureConsentScope: struct {
     authorities: [String]
     hosts: [String]
     streams: [String]
@@ -45,28 +45,28 @@ struct CaptureConsentScope {
     byte_limit: U64
     mode: CaptureMode
     source_kinds: [CaptureSource]
-    fn default() -> CaptureConsentScope Never! {
+    default: fn() -> CaptureConsentScope Never! {
         CaptureConsentScope{authorities: [String]{}, hosts: [String]{}, streams: [String]{}, disclosures: [String]{}, destination: "", byte_limit: DEFAULT_CAPTURE_BUDGET_BYTES, mode: CaptureMode.Development, source_kinds: [CaptureSource]{}}
     }
-    fn new(authorities: ^[String], hosts: ^[String], streams: ^[String], disclosures: ^[String], destination: ^String, byte_limit: U64) -> CaptureConsentScope Never! {
+    new: fn(authorities: ^[String], hosts: ^[String], streams: ^[String], disclosures: ^[String], destination: ^String, byte_limit: U64) -> CaptureConsentScope Never! {
         scope := CaptureConsentScope{authorities: ^authorities, hosts: ^hosts, streams: ^streams, disclosures: ^disclosures, destination: ^destination, byte_limit, mode: CaptureMode.Development, source_kinds: [CaptureSource]{}}
         &scope.canonicalize()
         scope
     }
-    fn for_budget(budget: CaptureBudget) -> CaptureConsentScope Never! {
+    for_budget: fn(budget: CaptureBudget) -> CaptureConsentScope Never! {
         scope := CaptureConsentScope.default()
         scope.byte_limit = budget.max_bytes
         scope
     }
     // Same-package C3 calls this after applying policy mode and budget.
-    fn canonicalize(&self) Never! {
+    canonicalize: fn(&self) Never! {
         capture_consent_sort_unique(&self.authorities)
         capture_consent_sort_unique(&self.hosts)
         capture_consent_sort_unique(&self.streams)
         capture_consent_sort_unique(&self.disclosures)
         // Rust's derived enum order, not lexical order of Time/Rand/Input/Net.
         loop index in 1..<self.source_kinds.len() {
-            value :: self.source_kinds[index].copy()
+            value: self.source_kinds[index].copy()
             cursor := index
             loop cursor > 0 && capture_consent_source_rank(self.source_kinds[cursor - 1]) > capture_consent_source_rank(value) {
                 self.source_kinds[cursor] = self.source_kinds[cursor - 1]
@@ -83,7 +83,7 @@ struct CaptureConsentScope {
         }
         loop self.source_kinds.len() > count -> (&self.source_kinds.pop()).drop("discard canonical duplicate")
     }
-    fn digest(self) -> String Never! {
+    digest: fn(self) -> String Never! {
         bytes := "capture-consent-scope-v1".bytes()
         &bytes.push(U8{0})
         capture_consent_frame_vec(&bytes, "authorities", self.authorities)
@@ -98,7 +98,7 @@ struct CaptureConsentScope {
         sha256_hex_bytes(sha256_bytes(bytes))
     }
 }
-fn capture_consent_sort_unique(values: &[String]) Never! {
+capture_consent_sort_unique: fn(values: &[String]) Never! {
     &values.sort()
     count := 0
     loop index in 0..<values.len() {
@@ -109,7 +109,7 @@ fn capture_consent_sort_unique(values: &[String]) Never! {
     }
     loop values.len() > count -> (&values.pop()).drop("discard canonical duplicate")
 }
-fn capture_consent_source_rank(source: CaptureSource) -> Int Never! {
+capture_consent_source_rank: fn(source: CaptureSource) -> Int Never! {
     if source == {
         .Clock -> 0
         .Randomness -> 1
@@ -117,13 +117,13 @@ fn capture_consent_source_rank(source: CaptureSource) -> Int Never! {
         .Network -> 3
     }
 }
-fn capture_consent_frame(output: &[U8], key: String, value: String) Never! {
-    bytes :: value.bytes()
+capture_consent_frame: fn(output: &[U8], key: String, value: String) Never! {
+    bytes: value.bytes()
     loop byte in "{key}:{bytes.len()}:".bytes() -> &output.push(byte)
     loop byte in bytes -> &output.push(byte)
     &output.push(U8{59})
 }
-fn capture_consent_frame_vec(output: &[U8], key: String, values: [String]) Never! {
+capture_consent_frame_vec: fn(output: &[U8], key: String, values: [String]) Never! {
     capture_consent_frame(&output, "{key}.count", "{values.len()}")
     loop (index, value) in values -> capture_consent_frame(&output, "{key}.{index}", value)
 }
@@ -132,19 +132,19 @@ fn capture_consent_frame_vec(output: &[U8], key: String, values: [String]) Never
 // binding cannot be changed through getters. Matching deliberately does NOT
 // require is_exact(): live consent and receipt validation are separate seams.
 #!Printable
-struct SensitiveCaptureConsent {
+SensitiveCaptureConsent: struct {
     _identity: CaptureIdentity
     _scope: CaptureConsentScope
-    fn new(identity: ^CaptureIdentity, scope: ^CaptureConsentScope) -> SensitiveCaptureConsent Never! {
+    new: fn(identity: ^CaptureIdentity, scope: ^CaptureConsentScope) -> SensitiveCaptureConsent Never! {
         canonical := ^scope
         &canonical.canonicalize()
         SensitiveCaptureConsent{_identity: ^identity, _scope: ^canonical}
     }
     // #4446: sema rejects scalar field places at named View<T> boundaries.
     // Keep receiver-backed borrows; no copied getter or heap-vector substitute.
-    fn identity(self) -> View<CaptureIdentity> Never! from self { return self._identity }
-    fn scope(self) -> View<CaptureConsentScope> Never! from self { return self._scope }
-    fn digest(self) -> String Never! {
+    identity: fn(self) -> View<CaptureIdentity> Never! from self { return self._identity }
+    scope: fn(self) -> View<CaptureConsentScope> Never! from self { return self._scope }
+    digest: fn(self) -> String Never! {
         bytes := "capture-sensitive-consent-v1".bytes()
         &bytes.push(U8{0})
         capture_consent_frame(&bytes, "target_inputs_sha256", self._identity.target_inputs_sha256)
@@ -157,14 +157,14 @@ struct SensitiveCaptureConsent {
         capture_consent_frame(&bytes, "scope", self._scope.digest())
         sha256_hex_bytes(sha256_bytes(bytes))
     }
-    fn matches(self, identity: CaptureIdentity, scope: CaptureConsentScope) -> Bool Never! {
+    matches: fn(self, identity: CaptureIdentity, scope: CaptureConsentScope) -> Bool Never! {
         self._identity == identity && self._scope == scope
     }
 }
 // Rust fmt::Debug: do not derive a raw private-scope formatter.
 impl SensitiveCaptureConsent.Debug {
-    fn debug(self) -> String {
-        digest :: self.digest()
+    debug: fn(self) -> String {
+        digest: self.digest()
         "SensitiveCaptureConsent {{ identity: {self._identity:Debug}, digest: {digest:Debug} }}"
     }
 }
@@ -173,31 +173,31 @@ impl SensitiveCaptureConsent.Debug {
 // #4449: native auto-Debug needs the Rust bridge for consent's custom Debug.
 // Production keeps the exact carrier and protected formatter. Even #!Debug is
 // ignored for native derives, so the focused proof excludes this carrier closure.
-struct CaptureAttempt {
+CaptureAttempt: struct {
     identity: CaptureIdentity
     sources: [CaptureSourceFact]
     scope: CaptureConsentScope
     consent: SensitiveCaptureConsent?
     terminal_available: Bool
-    fn new(identity: ^CaptureIdentity) -> CaptureAttempt Never! {
+    new: fn(identity: ^CaptureIdentity) -> CaptureAttempt Never! {
         CaptureAttempt{identity: ^identity, sources: [CaptureSourceFact]{}, scope: CaptureConsentScope.default(), consent: None, terminal_available: true}
     }
-    fn safe_clock(identity: ^CaptureIdentity) -> CaptureAttempt Never! {
+    safe_clock: fn(identity: ^CaptureIdentity) -> CaptureAttempt Never! {
         CaptureAttempt.new(^identity).with_source(CaptureSourceFact{source: CaptureSource.Clock, location: None})
     }
     // Rust builders consume `mut self`: move every retained field once.
-    fn with_sources(^self, sources: ^[CaptureSourceFact]) -> CaptureAttempt Never! {
+    with_sources: fn(^self, sources: ^[CaptureSourceFact]) -> CaptureAttempt Never! {
         updated := ^self
         updated.sources = ^sources
         ^updated
     }
-    fn with_source(^self, source: ^CaptureSourceFact) -> CaptureAttempt Never! {
+    with_source: fn(^self, source: ^CaptureSourceFact) -> CaptureAttempt Never! {
         updated := ^self
         &updated.sources.push(^source)
         ^updated
     }
     // Copy only the retained scope fields; stale scope kinds are never cloned.
-    fn base_consent_scope(self) -> CaptureConsentScope Never! {
+    base_consent_scope: fn(self) -> CaptureConsentScope Never! {
         scope := CaptureConsentScope{authorities: self.scope.authorities.copy(), hosts: self.scope.hosts.copy(), streams: self.scope.streams.copy(), disclosures: self.scope.disclosures.copy(), destination: self.scope.destination.copy(), byte_limit: self.scope.byte_limit, mode: self.scope.mode, source_kinds: [CaptureSource]{}}
         loop fact in self.sources -> &scope.source_kinds.push(fact.source)
         &scope.canonicalize()
@@ -207,7 +207,7 @@ struct CaptureAttempt {
 
 // Rust CaptureSkipReason.source/code/reason_text/Display and CaptureSkip
 // requires_sensitive_consent/reason_text/status_line; source location survives.
-enum CaptureSkipReason {
+CaptureSkipReason: enum {
     ReleaseMode
     PackagePolicy
     NoCaptureOverride
@@ -216,14 +216,14 @@ enum CaptureSkipReason {
     SensitiveConsentScopeChanged(source: CaptureSourceFact)
     // #4444: sema treats this receiver-owned enum payload as a temporary
     // argument when returning its borrow. Preserve the no-copy public seam.
-    fn source(self) -> View<CaptureSourceFact>? Never! from self {
+    source: fn(self) -> View<CaptureSourceFact>? Never! from self {
         if self == {
             .UnsafeSource(source) -> Val(capture_consent_source_view(source))
             .SensitiveConsentScopeChanged(source) -> Val(capture_consent_source_view(source))
             else -> None
         }
     }
-    fn code(self) -> String Never! {
+    code: fn(self) -> String Never! {
         if self == {
             .ReleaseMode -> "release"
             .PackagePolicy -> "package_policy"
@@ -233,7 +233,7 @@ enum CaptureSkipReason {
             .SensitiveConsentScopeChanged(_) -> "consent_scope_changed"
         }
     }
-    fn reason_text(self) -> String Never! {
+    reason_text: fn(self) -> String Never! {
         if self == {
             .ReleaseMode -> "release mode"
             .PackagePolicy -> "package policy"
@@ -245,21 +245,21 @@ enum CaptureSkipReason {
     }
 }
 // #4446: scalar parameter place -> View<T> is also rejected by sema.
-fn capture_consent_source_view(source: CaptureSourceFact) -> View<CaptureSourceFact> Never! from source { return source }
+capture_consent_source_view: fn(source: CaptureSourceFact) -> View<CaptureSourceFact> Never! from source { return source }
 // #4403: sema currently requires ^self while the native Display ABI borrows.
-impl CaptureSkipReason.Display { fn display(^self) -> String { self.reason_text() } }
-struct CaptureSkip {
+impl CaptureSkipReason.Display { display: fn(^self) -> String { self.reason_text() } }
+CaptureSkip: struct {
     reason: CaptureSkipReason
     terminal_available: Bool
-    fn requires_sensitive_consent(self) -> Bool Never! {
+    requires_sensitive_consent: fn(self) -> Bool Never! {
         if self.reason == {
             .UnsafeSource(_) -> true
             .SensitiveConsentScopeChanged(_) -> true
             else -> false
         }
     }
-    fn reason_text(self) -> String Never! { self.reason.reason_text() }
-    fn status_line(self) -> String Never! {
+    reason_text: fn(self) -> String Never! { self.reason.reason_text() }
+    status_line: fn(self) -> String Never! {
         if self.reason == {
             .UnsafeSource(source) -> {
                 if !self.terminal_available -> return "capture: skipped ({source.reason_text()}); no terminal to consent"
@@ -272,30 +272,30 @@ struct CaptureSkip {
 }
 
 // Rust CaptureEligibility.is_allowed/is_sensitive/kind/budget/skip.
-enum CaptureEligibility {
+CaptureEligibility: enum {
     SafeClock(budget: CaptureBudget)
     Sensitive(budget: CaptureBudget)
     Skipped(skip: CaptureSkip)
-    fn is_allowed(self) -> Bool Never! {
+    is_allowed: fn(self) -> Bool Never! {
         if self == {
             .Skipped(_) -> false
             else -> true
         }
     }
-    fn is_sensitive(self) -> Bool Never! {
+    is_sensitive: fn(self) -> Bool Never! {
         if self == {
             .Sensitive(_) -> true
             else -> false
         }
     }
-    fn kind(self) -> CaptureKind? Never! {
+    kind: fn(self) -> CaptureKind? Never! {
         if self == {
             .SafeClock(_) -> Val(CaptureKind.SafeClock)
             .Sensitive(_) -> Val(CaptureKind.Sensitive)
             .Skipped(_) -> None
         }
     }
-    fn budget(self) -> CaptureBudget? Never! {
+    budget: fn(self) -> CaptureBudget? Never! {
         if self == {
             .SafeClock(budget) -> Val(budget)
             .Sensitive(budget) -> Val(budget)
@@ -303,7 +303,7 @@ enum CaptureEligibility {
         }
     }
     // #4444: same receiver-owned optional enum-payload borrowing gate as source().
-    fn skip(self) -> View<CaptureSkip>? Never! from self {
+    skip: fn(self) -> View<CaptureSkip>? Never! from self {
         if self == {
             .Skipped(skip) -> Val(capture_consent_skip_view(skip))
             else -> None
@@ -311,4 +311,4 @@ enum CaptureEligibility {
     }
 }
 // #4446: preserve this no-copy scalar-parameter borrow with the enum seam.
-fn capture_consent_skip_view(skip: CaptureSkip) -> View<CaptureSkip> Never! from skip { return skip }
+capture_consent_skip_view: fn(skip: CaptureSkip) -> View<CaptureSkip> Never! from skip { return skip }

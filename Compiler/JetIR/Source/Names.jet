@@ -6,11 +6,11 @@
 use jet_foundation.[TBuiltinOp, NodeKind, BodyHostCall, BodyPatternBinding, BodyPatternShape, TTryConvert, Type, type_carrier_identity]
 
 // A checked type's carrier spelling (function types without their metadata).
-fn ir_type_name(ty: Type) -> String Never! {
+ir_type_name: fn(ty: Type) -> String Never! {
     type_carrier_identity(ty)
 }
 
-fn ir_expr_kind_name(kind: NodeKind) -> String Never! {
+ir_expr_kind_name: fn(kind: NodeKind) -> String Never! {
     if kind == {
         .IntLit(_, _) -> "IntLit"
         .FloatLit(_) -> "FloatLit"
@@ -112,7 +112,7 @@ fn ir_expr_kind_name(kind: NodeKind) -> String Never! {
     }
 }
 
-fn ir_shape_name(shape: BodyPatternShape) -> String Never! {
+ir_shape_name: fn(shape: BodyPatternShape) -> String Never! {
     if shape == {
         .Variant(_, _, _, _) -> "Variant"
         .Present(_, _, _, _) -> "Present"
@@ -129,7 +129,7 @@ fn ir_shape_name(shape: BodyPatternShape) -> String Never! {
     }
 }
 
-fn ir_binding_name(binding: BodyPatternBinding) -> String Never! {
+ir_binding_name: fn(binding: BodyPatternBinding) -> String Never! {
     if binding == {
         .Wildcard -> "Wildcard"
         .Bind(_, _) -> "Bind"
@@ -139,12 +139,12 @@ fn ir_binding_name(binding: BodyPatternBinding) -> String Never! {
     }
 }
 
-fn ir_conversion_name(conversion: TTryConvert) -> String Never! {
+ir_conversion_name: fn(conversion: TTryConvert) -> String Never! {
     if conversion == .Typed(fn_name, _, _) -> return "Typed {fn_name}"
     "{conversion}"
 }
 
-fn ir_host_call_name(call: BodyHostCall) -> String Never! {
+ir_host_call_name: fn(call: BodyHostCall) -> String Never! {
     if call == {
         .Method(_, method, _) -> "Method {method}"
         .CellGuardProject(_, _, _, _, _) -> "CellGuardProject"
@@ -159,13 +159,13 @@ fn ir_host_call_name(call: BodyHostCall) -> String Never! {
 }
 
 // The variant name of a builtin operation (a zip's field types unspelled).
-fn ir_builtin_name(operation: TBuiltinOp) -> String Never! {
+ir_builtin_name: fn(operation: TBuiltinOp) -> String Never! {
     if operation == .Zip(_, _, _, _, _, _) -> return "Zip"
     if operation == .OptionZip(_) -> return "OptionZip"
     text := "{operation}"
-    separators :: [String]{"(", "{{", " "}
+    separators: [String]{"(", "{{", " "}
     loop separator in separators {
-        parts :: text.split(separator).to_list()
+        parts: text.split(separator).to_list()
         text = parts[0]
     }
     text

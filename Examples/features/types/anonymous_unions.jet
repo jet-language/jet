@@ -1,12 +1,12 @@
 // D-UNIONTYPE1=A: anonymous unions are structural enum sugar.
 // Named enums stay the documenting public form; convert with match.
-enum Payload {
+Payload: enum {
     Name(String)
     Count(Int)
 }
 
-fn describe(value: Int | String) -> String {
-    copied :: value.copy()
+describe: fn(value: Int | String) -> String {
+    copied: value.copy()
     if copied == {
         .Int(n) -> { return "n={n}" }
         .String(s) -> { return "s={s}" }
@@ -14,10 +14,10 @@ fn describe(value: Int | String) -> String {
     return "unknown"
 }
 
-fn take_number(n: Int | String) -> String { describe(n) }
+take_number: fn(n: Int | String) -> String { describe(n) }
 
-fn as_named(value: Int | String) -> Payload {
-    copied :: value.copy()
+as_named: fn(value: Int | String) -> Payload {
+    copied: value.copy()
     if copied == {
         .Int(n) -> {
             return .Count(n)
@@ -30,7 +30,7 @@ fn as_named(value: Int | String) -> Payload {
     }
 }
 
-fn from_named(payload: Payload) -> Int | String {
+from_named: fn(payload: Payload) -> Int | String {
     if payload == {
         .Count(n) -> {
             return n
@@ -43,23 +43,23 @@ fn from_named(payload: Payload) -> Int | String {
     }
 }
 
-fn hold(v: Int | String) -> Int | String { v.copy() }
+hold: fn(v: Int | String) -> Int | String { v.copy() }
 
 #Codable
-struct Box {
+Box: struct {
     value: Int | String
 }
 
-fn run() {
+run: fn() {
     print(describe(7))
     print(take_number("hi"))
-    mixed :: hold(3)
+    mixed: hold(3)
     print(describe(mixed))
-    named :: as_named("x")
-    value :: from_named(named)
+    named: as_named("x")
+    value: from_named(named)
     print(describe(value))
-    packed :: Box{value: 9}
-    boxed :: packed.value
+    packed: Box{value: 9}
+    boxed: packed.value
     if boxed == {
         .Int(n) -> print("box={n}")
         .String(s) -> print("box={s}")

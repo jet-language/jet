@@ -1,22 +1,22 @@
 #Target(Web)
 #Error
-enum StoreErr { Missing }
+StoreErr: enum { Missing }
 
 impl StoreErr -> Err {
     return Err("store unavailable")
 }
 
-fn read_store() -> Int StoreErr! {
+read_store: fn() -> Int StoreErr! {
     return Err(StoreErr.Missing)
 }
 
-fn get_user() -> Int Err! {
-    value :: read_store()
+get_user: fn() -> Int Err! {
+    value: read_store()
     return Ok(value)
 }
 
 #Target(Wasm)
-fn run() {
+run: fn() {
     if get_user() == {
         .Ok(value) -> { print(value) }
         .Err(error) -> { print(error.message) }

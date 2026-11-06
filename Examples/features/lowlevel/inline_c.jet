@@ -1,21 +1,21 @@
-package {
+package: {
     name: "lowlevel_inline_c"
     version: "0.1.0"
     authority: { allow: [Exec, FFI, IO, Mem.Alloc] }
 }
 #[Unsafe("the scalar ABI contract matches the C definition"), FFI(c)]
-fn add(a: Int, b: Int) -> Int {
+add: fn(a: Int, b: Int) -> Int {
     """int64_t add(int64_t a, int64_t b) { return a + b; }"""
 }
 
-fn jet_add(a: Int, b: Int) -> Int { (a + b) }
+jet_add: fn(a: Int, b: Int) -> Int { (a + b) }
 
 #[Unsafe("the scalar ABI contract deliberately returns a mismatched result"), FFI(c)]
-fn wrong_add(a: Int, b: Int) -> Int {
+wrong_add: fn(a: Int, b: Int) -> Int {
     """int64_t wrong_add(int64_t a, int64_t b) { return a + b + 1; }"""
 }
 
-fn run() {
+run: fn() {
     #Unsafe("call the audited inline C contract") {
         print(add(20, 22))
     }

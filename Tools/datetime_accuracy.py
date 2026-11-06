@@ -244,11 +244,11 @@ class Corpus:
         self.rows: list[Vector] = []
         self.source: list[str] = []
         if batch == "epoch_parse":
-            self.source.append("use time :: core.time")
+            self.source.append("use time: core.time")
             self.source.extend(
                 [
                     "",
-                    "fn parse_status(text: String) String -> {",
+                    "parse_status: fn(text: String) String -> {",
                     "    if time.parse_rfc3339(text) == {",
                     '        .Ok(value) -> { return "accepted|{value.format_rfc3339()}" }',
                     '        .Err(_) -> { return "rejected" }',
@@ -258,14 +258,14 @@ class Corpus:
                 ]
             )
         elif batch == "civil_arithmetic":
-            self.source.append("use date :: core.time")
+            self.source.append("use date: core.time")
         else:
-            self.source.append("use time :: core.time")
-        self.source.extend(["", "fn run() {"])
+            self.source.append("use time: core.time")
+        self.source.extend(["", "run: fn() {"])
         self._value_number = 0
 
     def declare(self, name: str, expression: str) -> str:
-        self.source.append(f"    {name} :: {expression}")
+        self.source.append(f"    {name}: {expression}")
         return name
 
     def add(
@@ -281,7 +281,7 @@ class Corpus:
             raise ValueError(f"invalid vector metadata for {ident}")
         value = f"v_{self._value_number:04d}"
         self._value_number += 1
-        self.source.append(f"    {value} :: {expression}")
+        self.source.append(f"    {value}: {expression}")
         self.source.append(f'    print("CASE\\t{ident}\\t{operation}\\t{{{value}}}")')
         self.rows.append(Vector(self.batch, family, ident, operation, metadata, str(oracle)))
 
@@ -727,15 +727,15 @@ def build_corpora() -> tuple[list[Corpus], str]:
 
 def _table_block(rows: list[Vector]) -> str:
     body = "\n".join(f"{row.ident}\t{row.operation}\t{row.metadata}" for row in rows)
-    return f'    table :: """\n{body}\n    """'
+    return f'    table: """\n{body}\n    """'
 
 
 def compact_source(batch: str, rows: list[Vector]) -> str:
     table = _table_block(rows)
     if batch == "epoch_parse":
-        text = """use time :: core.time
+        text = """use time: core.time
 
-fn parse_status(text: String) String -> {
+parse_status: fn(text: String) String -> {
     if time.parse_rfc3339(text) == {
         .Ok(value) -> { return "accepted|{value.format_rfc3339()}" }
         .Err(_) -> { return "rejected" }
@@ -743,50 +743,50 @@ fn parse_status(text: String) String -> {
     return "rejected"
 }
 
-fn field(meta: String, key: String) String -> {
+field: fn(meta: String, key: String) String -> {
     loop part in meta.split(";") {
-        pair :: part.split_once("=") ?? next
+        pair: part.split_once("=") ?? next
         if pair.before == key -> return pair.after
     }
     return ""
 }
 
-fn i(meta: String, key: String) Int -> Int.parse(field(meta, key)) ?? panic(key)
+i: fn(meta: String, key: String) Int -> Int.parse(field(meta, key)) ?? panic(key)
 
-fn shown(op: String, meta: String) String -> {
+shown: fn(op: String, meta: String) String -> {
     if op == "parse_status" -> return parse_status(field(meta, "text"))
-    ms :: i(meta, "epoch_ms")
+    ms: i(meta, "epoch_ms")
     if op == "format" -> return time.from_unix_ms(ms).format_rfc3339()
     if op == "to_timestamp" {
-        value :: time.from_unix_ms(ms).to_timestamp()
+        value: time.from_unix_ms(ms).to_timestamp()
         return "{value}"
     }
     if op == "roundtrip_ms" {
-        dt :: time.from_unix_ms(ms)
-        value :: time.from_unix_ms(dt.to_unix_ms()).to_unix_ms()
+        dt: time.from_unix_ms(ms)
+        value: time.from_unix_ms(dt.to_unix_ms()).to_unix_ms()
         return "{value}"
     }
     if op == "format_parse_format" {
-        dt :: time.from_unix_ms(ms)
-        parsed :: time.parse_rfc3339(dt.format_rfc3339()) ?? panic("f5")
+        dt: time.from_unix_ms(ms)
+        parsed: time.parse_rfc3339(dt.format_rfc3339()) ?? panic("f5")
         return parsed.format_rfc3339()
     }
     if op == "parse_format_round_trip" {
-        dt :: time.from_unix_ms(ms)
-        text :: dt.format_rfc3339()
-        parsed :: time.parse_rfc3339(text) ?? panic("parse")
+        dt: time.from_unix_ms(ms)
+        text: dt.format_rfc3339()
+        parsed: time.parse_rfc3339(text) ?? panic("parse")
         return "{parsed.format_rfc3339() == text}"
     }
     panic(op)
 }
 
-fn run() {
+run: fn() {
 @@TABLE@@
     loop line in table.lines() {
         if line != "" {
-            id_rest :: line.split_once("\\t") ?? panic("row")
-            op_rest :: id_rest.after.split_once("\\t") ?? panic("row")
-            result :: shown(op_rest.before, op_rest.after)
+            id_rest: line.split_once("\\t") ?? panic("row")
+            op_rest: id_rest.after.split_once("\\t") ?? panic("row")
+            result: shown(op_rest.before, op_rest.after)
             print("CASE\\t{id_rest.before}\\t{op_rest.before}\\t{result}")
         }
     }
@@ -794,58 +794,58 @@ fn run() {
 """
         return text.replace("@@TABLE@@", table) + "\n"
     if batch == "civil_arithmetic":
-        text = """use date :: core.time
+        text = """use date: core.time
 
-fn field(meta: String, key: String) String -> {
+field: fn(meta: String, key: String) String -> {
     loop part in meta.split(";") {
-        pair :: part.split_once("=") ?? next
+        pair: part.split_once("=") ?? next
         if pair.before == key -> return pair.after
     }
     return ""
 }
 
-fn i(meta: String, key: String) Int -> Int.parse(field(meta, key)) ?? panic(key)
+i: fn(meta: String, key: String) Int -> Int.parse(field(meta, key)) ?? panic(key)
 
-fn parse_date(iso: String) LocalDate -> {
-    y :: Int.parse(iso.before("-")) ?? panic("y")
-    rest :: iso.after("-")
-    m :: Int.parse(rest.before("-")) ?? panic("m")
-    d :: Int.parse(rest.after("-")) ?? panic("d")
+parse_date: fn(iso: String) LocalDate -> {
+    y: Int.parse(iso.before("-")) ?? panic("y")
+    rest: iso.after("-")
+    m: Int.parse(rest.before("-")) ?? panic("m")
+    d: Int.parse(rest.after("-")) ?? panic("d")
     return date.new(y, m, d)
 }
 
-fn civil_date(meta: String) LocalDate -> {
-    y :: field(meta, "year")
+civil_date: fn(meta: String) LocalDate -> {
+    y: field(meta, "year")
     if y != "" -> return date.new(Int.parse(y) ?? panic("y"), i(meta, "month"), i(meta, "day"))
     return parse_date(field(meta, "date"))
 }
 
-fn shown(id: String, op: String, meta: String) String -> {
+shown: fn(id: String, op: String, meta: String) String -> {
     if op == "diff_days" {
-        left :: parse_date(field(meta, "a"))
-        right :: parse_date(field(meta, "b"))
+        left: parse_date(field(meta, "a"))
+        right: parse_date(field(meta, "b"))
         if id.split_once("diff_b") == {
             return "{left.diff_days(right)}"
         }
         return "{right.diff_days(left)}"
     }
     if op == "diff_days_antisymmetry" {
-        left :: parse_date(field(meta, "a"))
-        right :: parse_date(field(meta, "b"))
+        left: parse_date(field(meta, "a"))
+        right: parse_date(field(meta, "b"))
         return "{left.diff_days(right) == (0 - right.diff_days(left))}"
     }
     if op == "add_days_composition" {
-        first :: i(meta, "first")
-        second :: i(meta, "second")
-        src :: parse_date(field(meta, "source_date"))
+        first: i(meta, "first")
+        second: i(meta, "second")
+        src: parse_date(field(meta, "source_date"))
         return "{src.add_days(first).add_days(second).to_string() == src.add_days(first + second).to_string()}"
     }
     if op == "add_months_clamping" {
-        got :: parse_date(field(meta, "date")).add_months(i(meta, "months")).to_string()
-        want :: field(meta, "expected")
+        got: parse_date(field(meta, "date")).add_months(i(meta, "months")).to_string()
+        want: field(meta, "expected")
         return "{got == want}"
     }
-    d :: civil_date(meta)
+    d: civil_date(meta)
     if op == "weekday" -> return "{d.weekday()}"
     if op == "iso_weekday" -> return "{d.iso_weekday()}"
     if op == "day_of_year" -> return "{d.day_of_year()}"
@@ -856,84 +856,84 @@ fn shown(id: String, op: String, meta: String) String -> {
     if op == "add_days" -> return d.add_days(i(meta, "days")).to_string()
     if op == "add_months" -> return d.add_months(i(meta, "months")).to_string()
     if op == "path_vs_direct" {
-        a :: i(meta, "a")
-        b :: i(meta, "b")
+        a: i(meta, "a")
+        b: i(meta, "b")
         return "path={d.add_months(a).add_months(b).to_string()}|direct={d.add_months(a + b).to_string()}"
     }
     panic(op)
 }
 
-fn run() {
+run: fn() {
 @@TABLE@@
     loop line in table.lines() {
         if line != "" {
-            id_rest :: line.split_once("\\t") ?? panic("row")
-            op_rest :: id_rest.after.split_once("\\t") ?? panic("row")
-            result :: shown(id_rest.before, op_rest.before, op_rest.after)
+            id_rest: line.split_once("\\t") ?? panic("row")
+            op_rest: id_rest.after.split_once("\\t") ?? panic("row")
+            result: shown(id_rest.before, op_rest.before, op_rest.after)
             print("CASE\\t{id_rest.before}\\t{op_rest.before}\\t{result}")
         }
     }
 }
 """
         return text.replace("@@TABLE@@", table) + "\n"
-    text = """use time :: core.time
+    text = """use time: core.time
 
-fn field(meta: String, key: String) String -> {
+field: fn(meta: String, key: String) String -> {
     loop part in meta.split(";") {
-        pair :: part.split_once("=") ?? next
+        pair: part.split_once("=") ?? next
         if pair.before == key -> return pair.after
     }
     return ""
 }
 
-fn i(meta: String, key: String) Int -> Int.parse(field(meta, key)) ?? panic(key)
+i: fn(meta: String, key: String) Int -> Int.parse(field(meta, key)) ?? panic(key)
 
-fn unix_ms(meta: String) Int -> {
-    raw :: field(meta, "utc_ms")
+unix_ms: fn(meta: String) Int -> {
+    raw: field(meta, "utc_ms")
     if raw != "" -> return Int.parse(raw) ?? panic("utc_ms")
-    resolved :: field(meta, "resolved_utc_ms")
+    resolved: field(meta, "resolved_utc_ms")
     if resolved != "" -> return Int.parse(resolved) ?? panic("resolved_utc_ms")
-    sec :: field(meta, "utc_seconds")
+    sec: field(meta, "utc_seconds")
     if sec != "" -> return (Int.parse(sec) ?? panic("sec")) * 1000
     return i(meta, "base_utc_ms")
 }
 
-fn shown(op: String, meta: String) String -> {
-    zone :: time.zone(field(meta, "zone")) ?? panic("zone")
-    pattern :: "yyyy-MM-dd HH:mm:ss VV XXX"
+shown: fn(op: String, meta: String) String -> {
+    zone: time.zone(field(meta, "zone")) ?? panic("zone")
+    pattern: "yyyy-MM-dd HH:mm:ss VV XXX"
     if op == "view_format" || op == "skipped_format" -> return time.zoned(time.from_unix_ms(unix_ms(meta)), zone).format(pattern)
     if op == "view_offset" || op == "skipped_offset" -> return "{time.zoned(time.from_unix_ms(unix_ms(meta)), zone).offset_seconds()}"
     if op == "view_dst" || op == "skipped_dst" -> return "{time.zoned(time.from_unix_ms(unix_ms(meta)), zone).is_dst()}"
     if op == "duration_format" || op == "duration_offset" || op == "duration_dst" || op == "duration_utc_ms" {
-        zoned :: time.zoned(time.from_unix_ms(i(meta, "base_utc_ms")), zone)
-        value :: zoned.add_duration(Duration.hours(24) ?? panic("duration"))
+        zoned: time.zoned(time.from_unix_ms(i(meta, "base_utc_ms")), zone)
+        value: zoned.add_duration(Duration.hours(24) ?? panic("duration"))
         if op == "duration_format" -> return value.format(pattern)
         if op == "duration_offset" -> return "{value.offset_seconds()}"
         if op == "duration_dst" -> return "{value.is_dst()}"
         return "{value.to_datetime().to_unix_ms()}"
     }
     if op == "period_format" || op == "period_offset" || op == "period_dst" || op == "period_utc_ms" || op == "period_candidate_valid" {
-        zoned :: time.zoned(time.from_unix_ms(i(meta, "base_utc_ms")), zone)
-        value :: zoned.add_period(time.period_days(1))
+        zoned: time.zoned(time.from_unix_ms(i(meta, "base_utc_ms")), zone)
+        value: zoned.add_period(time.period_days(1))
         if op == "period_format" -> return value.format(pattern)
         if op == "period_offset" -> return "{value.offset_seconds()}"
         if op == "period_dst" -> return "{value.is_dst()}"
         if op == "period_utc_ms" -> return "{value.to_datetime().to_unix_ms()}"
-        ms :: value.to_datetime().to_unix_ms()
-        first :: i(meta, "candidate_fold0_ms")
-        second :: i(meta, "candidate_fold1_ms")
+        ms: value.to_datetime().to_unix_ms()
+        first: i(meta, "candidate_fold0_ms")
+        second: i(meta, "candidate_fold1_ms")
         return "{(ms == first) || (ms == second)}"
     }
     panic(op)
 }
 
-fn run() {
+run: fn() {
 @@TABLE@@
     loop line in table.lines() {
         if line != "" {
-            id_rest :: line.split_once("\\t") ?? panic("row")
-            op_rest :: id_rest.after.split_once("\\t") ?? panic("row")
-            result :: shown(op_rest.before, op_rest.after)
+            id_rest: line.split_once("\\t") ?? panic("row")
+            op_rest: id_rest.after.split_once("\\t") ?? panic("row")
+            result: shown(op_rest.before, op_rest.after)
             print("CASE\\t{id_rest.before}\\t{op_rest.before}\\t{result}")
         }
     }

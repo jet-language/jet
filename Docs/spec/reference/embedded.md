@@ -89,7 +89,7 @@ A loadable package can expose a C entry point with the current function syntax:
 
 ```jet
 #Export(c)
-fn on_tick(dt: Int) -> Int {
+on_tick: fn(dt: Int) -> Int {
     dt + 1
 }
 ```
@@ -102,9 +102,9 @@ signature alone is not a license to reinterpret an opaque value.
 For a package-level loadable artifact, the canonical Jet-side loader is:
 
 ```jet
-use library :: core.mod
+use library: core.mod
 
-loaded :: library.load(
+loaded: library.load(
     ".jet/build/loadable.jetlib",
     grant: { read: [".jet/build"] },
 )

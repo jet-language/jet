@@ -1,15 +1,15 @@
 // D-VALIDATE-DECODE1=B / D-MIGRATE4=A — canonical typed decode with silent
 // published-schema migration and accumulated FieldError results.
-use json :: core.encoding.json
+use json: core.encoding.json
 
 #Codable
-struct Point {
+Point: struct {
     x: Int
     y: Int
 }
 
 #[PublishedSchema, Codable]
-struct UserRecord {
+UserRecord: struct {
     id: Int
     display_name: String
     verified: Bool
@@ -20,16 +20,16 @@ migration UserRecord {
     add verified: Bool = false
 }
 
-fn run() [FieldError]! {
-    p_raw :: "{{\"x\": 3, \"y\": 4}}"
-    p :: json.decode<Point>(p_raw)
+run: fn() [FieldError]! {
+    p_raw: "{{\"x\": 3, \"y\": 4}}"
+    p: json.decode<Point>(p_raw)
     print("point: ({p.x}, {p.y})")
 
-    fresh_raw :: "{{\"id\": 7, \"display_name\": \"Betty\", \"verified\": true}}"
-    fresh :: json.decode<UserRecord>(fresh_raw)
+    fresh_raw: "{{\"id\": 7, \"display_name\": \"Betty\", \"verified\": true}}"
+    fresh: json.decode<UserRecord>(fresh_raw)
     print("record {fresh.id} arrived fresh")
 
-    old_raw :: "{{\"id\": 3, \"name\": \"Ada\"}}"
-    user :: json.decode<UserRecord>(old_raw)
+    old_raw: "{{\"id\": 3, \"name\": \"Ada\"}}"
+    user: json.decode<UserRecord>(old_raw)
     print("name: {user.display_name}, verified: {user.verified}")
 }

@@ -57,14 +57,14 @@ use {
     jet_eval.[JetEvalConfig]
 }
 
-struct JetDriverAuthorizedSourceFile {
+JetDriverAuthorizedSourceFile: struct {
     path: String
     relative_path: String
     identity: String
     source: String
 }
 
-struct JetDriverAuthorizedSourceRoot {
+JetDriverAuthorizedSourceRoot: struct {
     canonical_path: String
     identity: String
     allow_hardlinks: Bool
@@ -75,7 +75,7 @@ struct JetDriverAuthorizedSourceRoot {
 
 // An offline script admission binds an import to an already opened root.
 // The selector and full tree hash remain distinct from package manifests.
-struct JetDriverScriptDependency {
+JetDriverScriptDependency: struct {
     name: String
     selector: String
     resolved_version: String
@@ -84,14 +84,14 @@ struct JetDriverScriptDependency {
     span: Span
 }
 
-struct JetDriverAuthorizedSourceSnapshot {
+JetDriverAuthorizedSourceSnapshot: struct {
     roots: [JetDriverAuthorizedSourceRoot]
     entry_root_identity: String
     entry_path: String
     script_dependencies: [JetDriverScriptDependency]{[JetDriverScriptDependency]{}}
 }
 
-struct JetDriverHostFacts {
+JetDriverHostFacts: struct {
     target_triple: String?
     active_os: String?
     compiler_identity: String?
@@ -114,7 +114,7 @@ struct JetDriverHostFacts {
 // `Check` is `jet check`: the Program checks, then it stops before lowering.
 // No Core reachability pruning and no C export rows; the entry and the
 // foreign facts are still resolved, so their diagnostics are the same.
-enum JetDriverCompileMode {
+JetDriverCompileMode: enum {
     Program
     Check
     Test
@@ -133,7 +133,7 @@ enum JetDriverCompileMode {
 // which machine reports name. `module_name`, `functions`, `name_references`,
 // and `call_facts` are the module's checked rows (Rust `SemIndexEffectFacts`
 // summaries and the name ledger's references).
-struct JetDriverDocModule {
+JetDriverDocModule: struct {
     path: String
     physical_path: String
     alias: String
@@ -165,7 +165,7 @@ struct JetDriverDocModule {
 // functions that crossed the Core cutover. Runtime units retain every function
 // and may import other runtime units; only an exact runtime entry keeps tests.
 // `text` holds the module's source; read it with `source()`.
-struct JetDriverCoreSource {
+JetDriverCoreSource: struct {
     module_name: String
     alias: String
     path: String
@@ -173,11 +173,11 @@ struct JetDriverCoreSource {
     owned_members: [String]
     runtime: Bool
     text: Shared<JetDriverCoreText>
-    fn source(self) -> String Never! {
-        permit :: self.text.guard_edit()
+    source: fn(self) -> String Never! {
+        permit: self.text.guard_edit()
         if permit.value.text == .Val(text) -> return text
-        reader :: permit.value.reader ?? panic("the Core source `{self.path}` has neither text nor reader")
-        text :: reader.read(permit.value.file) ?? panic("can't read the Core library source `{permit.value.file}`")
+        reader: permit.value.reader ?? panic("the Core source `{self.path}` has neither text nor reader")
+        text: reader.read(permit.value.file) ?? panic("can't read the Core library source `{permit.value.file}`")
         permit.value.text = Val(text)
         text
     }
@@ -190,7 +190,7 @@ struct JetDriverCoreSource {
 // its imports schedule; `jet run` of hello reads none of the 169 files, not
 // all 9.7 MB. Copies of a row share this cell, so each file is read at most
 // once.
-struct JetDriverCoreText {
+JetDriverCoreText: struct {
     file: String
     reader: JetDriverCoreSourceReader?
     text: String?
@@ -199,29 +199,29 @@ struct JetDriverCoreText {
 // The host's read of one Core file; `None` when it can't be read. A Core
 // file's comptime inputs (`embed_bytes`, `embed_file`) are files beside it,
 // read with `read_bytes`.
-trait JetDriverCoreSourceReader {
-    fn read(self, file: String) -[FS.Read]> String?
-    fn read_bytes(self, file: String) -[FS.Read]> [U8] JetDriverBuildInputError!
+JetDriverCoreSourceReader: trait {
+    read: fn(self, file: String) -[FS.Read]> String?
+    read_bytes: fn(self, file: String) -[FS.Read]> [U8] JetDriverBuildInputError!
 }
 
-fn jet_driver_core_text(text: String) -> Shared<JetDriverCoreText> Never! {
+jet_driver_core_text: fn(text: String) -> Shared<JetDriverCoreText> Never! {
     shared JetDriverCoreText{file: "", reader: None, text: Val(text)}
 }
 
-fn jet_driver_core_text_file(file: String, ^reader: JetDriverCoreSourceReader) -> Shared<JetDriverCoreText> Never! {
+jet_driver_core_text_file: fn(file: String, ^reader: JetDriverCoreSourceReader) -> Shared<JetDriverCoreText> Never! {
     shared JetDriverCoreText{file: file, reader: Val(reader), text: None}
 }
 
 // Selected build output is compiler-produced source, never a fabricated
 // authorized disk file. The loader keeps its exact bytes and virtual origin.
-struct JetDriverGeneratedModule {
+JetDriverGeneratedModule: struct {
     package_identity: String
     name: String
     relative_path: String
     source: String
 }
 
-struct JetDriverCompileRequest {
+JetDriverCompileRequest: struct {
     authorized_sources: JetDriverAuthorizedSourceSnapshot
     canonical_effect_source: String
     core_sources: [JetDriverCoreSource]
@@ -278,7 +278,7 @@ struct JetDriverCompileRequest {
     // (jet_driver_build_facts).
     build_stamp: BuildStamp?{None}
     // The `[[build.contribution]]` rows of that lock (D-CONF-SPLIT1): what
-    // `fn build` contributed to declared settings, which
+    // `build: fn` contributed to declared settings, which
     // jet_driver_build_settings folds over the defaults and profile values.
     build_contributions: [LockedBuildContribution]{[LockedBuildContribution]{}}
     // The `--set name=value` writers, the command-line layer of that fold
@@ -286,7 +286,7 @@ struct JetDriverCompileRequest {
     setting_overrides: [BuildSettingOverride]{[BuildSettingOverride]{}}
 }
 
-struct JetDriverGatePolicy {
+JetDriverGatePolicy: struct {
     package_identity: String
     declarations: [PolicyDeclaration]{[PolicyDeclaration]{}}
     unsafe_paths: [String]?{None}
@@ -302,13 +302,13 @@ struct JetDriverGatePolicy {
 // file can skip rehashing; a stamp never decides freshness. The host reads and
 // writes the store's files, so each call declares that row (an undeclared
 // dynamic dispatch is the maximal row).
-trait JetDriverRecordStore {
-    fn record(self, schema: String, key: String) -[FS]> [U8]?
-    fn put_record(self, schema: String, key: String, bytes: [U8]) -[FS]> Bool
-    fn stamp(self, path: String) -[FS]> String?
+JetDriverRecordStore: trait {
+    record: fn(self, schema: String, key: String) -[FS]> [U8]?
+    put_record: fn(self, schema: String, key: String, bytes: [U8]) -[FS]> Bool
+    stamp: fn(self, path: String) -[FS]> String?
 }
 
-// The raw build-input transport a host supplies for checked `fn build` input
+// The raw build-input transport a host supplies for checked `build: fn` input
 // services (`b.find`, `b.embed`, and `b.fetch` of a `file://` URL). It
 // answers raw filesystem facts only: where an absolute path resolves, one
 // directory's entries described without following links, and a bounded read
@@ -316,73 +316,73 @@ trait JetDriverRecordStore {
 // and every diagnostic stay in the build adapter; an error is the host's
 // own text for the failed operation.
 #Error
-struct JetDriverBuildInputError {
+JetDriverBuildInputError: struct {
     message: String
 }
 
-trait JetDriverBuildInputs {
-    fn resolve(self, path: String) -[FS.Read]> JetDriverBuildPath JetDriverBuildInputError!
-    fn entries(self, directory: String) -[FS.Read]> [JetDriverBuildEntry] JetDriverBuildInputError!
-    fn read(self, path: String, limit: Int) -[FS.Read]> [U8] JetDriverBuildInputError!
+JetDriverBuildInputs: trait {
+    resolve: fn(self, path: String) -[FS.Read]> JetDriverBuildPath JetDriverBuildInputError!
+    entries: fn(self, directory: String) -[FS.Read]> [JetDriverBuildEntry] JetDriverBuildInputError!
+    read: fn(self, path: String, limit: Int) -[FS.Read]> [U8] JetDriverBuildInputError!
     // Open each component relative to one retained root with nofollow; read
     // the same opened regular file, bounded before and during the read.
-    fn read_rooted(self, root: String, relative: String, limit: Int) -[FS.Read]> [U8] JetDriverBuildInputError!
+    read_rooted: fn(self, root: String, relative: String, limit: Int) -[FS.Read]> [U8] JetDriverBuildInputError!
 }
 
 // A single raw HTTP GET. No redirects, status interpretation, digest checks
 // or decoding occur here; Jet owns those rules. Timeout and body bound are
 // supplied by the checked-build consumer, not chosen by a provider.
 #Error
-struct JetDriverBuildHTTPError {
+JetDriverBuildHTTPError: struct {
     message: String
 }
 
-trait JetDriverBuildHTTPInputs {
-    fn resolve(self, host: String, port: Int) -[Net, Time.Wait]> [[U8]] JetDriverBuildHTTPError!
-    fn get(self, url: String, addresses: [[U8]], port: Int, timeout_ms: Int, limit: Int) -[Net, Time.Wait]> JetDriverBuildHTTPResponse JetDriverBuildHTTPError!
+JetDriverBuildHTTPInputs: trait {
+    resolve: fn(self, host: String, port: Int) -[Net, Time.Wait]> [[U8]] JetDriverBuildHTTPError!
+    get: fn(self, url: String, addresses: [[U8]], port: Int, timeout_ms: Int, limit: Int) -[Net, Time.Wait]> JetDriverBuildHTTPResponse JetDriverBuildHTTPError!
 }
 
 // The invocation owns each raw transport once. Adapter clones share that
 // same authority cell; they never duplicate or mint a raw host trait value.
-struct JetDriverBuildInputsStorage { transport: JetDriverBuildInputs }
-struct JetDriverSharedBuildInputs {
+JetDriverBuildInputsStorage: struct { transport: JetDriverBuildInputs }
+JetDriverSharedBuildInputs: struct {
     storage: Shared<JetDriverBuildInputsStorage>
-    fn resolve(self, path: String) -[FS.Read]> JetDriverBuildPath JetDriverBuildInputError! {
-        permit :: self.storage.guard_read()
+    resolve: fn(self, path: String) -[FS.Read]> JetDriverBuildPath JetDriverBuildInputError! {
+        permit: self.storage.guard_read()
         permit.value.transport.resolve(path)
     }
-    fn entries(self, directory: String) -[FS.Read]> [JetDriverBuildEntry] JetDriverBuildInputError! {
-        permit :: self.storage.guard_read()
+    entries: fn(self, directory: String) -[FS.Read]> [JetDriverBuildEntry] JetDriverBuildInputError! {
+        permit: self.storage.guard_read()
         permit.value.transport.entries(directory)
     }
-    fn read(self, path: String, limit: Int) -[FS.Read]> [U8] JetDriverBuildInputError! {
-        permit :: self.storage.guard_read()
+    read: fn(self, path: String, limit: Int) -[FS.Read]> [U8] JetDriverBuildInputError! {
+        permit: self.storage.guard_read()
         permit.value.transport.read(path, limit)
     }
-    fn read_rooted(self, root: String, relative: String, limit: Int) -[FS.Read]> [U8] JetDriverBuildInputError! {
-        permit :: self.storage.guard_read()
+    read_rooted: fn(self, root: String, relative: String, limit: Int) -[FS.Read]> [U8] JetDriverBuildInputError! {
+        permit: self.storage.guard_read()
         permit.value.transport.read_rooted(root, relative, limit)
     }
 }
-fn jet_driver_shared_build_inputs(transport: ^JetDriverBuildInputs) -> JetDriverSharedBuildInputs Never! {
+jet_driver_shared_build_inputs: fn(transport: ^JetDriverBuildInputs) -> JetDriverSharedBuildInputs Never! {
     JetDriverSharedBuildInputs{storage: shared JetDriverBuildInputsStorage{transport: ^transport}}
 }
-struct JetDriverBuildHTTPInputsStorage { transport: JetDriverBuildHTTPInputs }
-struct JetDriverSharedBuildHTTPInputs {
+JetDriverBuildHTTPInputsStorage: struct { transport: JetDriverBuildHTTPInputs }
+JetDriverSharedBuildHTTPInputs: struct {
     storage: Shared<JetDriverBuildHTTPInputsStorage>
-    fn resolve(self, host: String, port: Int) -[Net, Time.Wait]> [[U8]] JetDriverBuildHTTPError! {
-        permit :: self.storage.guard_read()
+    resolve: fn(self, host: String, port: Int) -[Net, Time.Wait]> [[U8]] JetDriverBuildHTTPError! {
+        permit: self.storage.guard_read()
         permit.value.transport.resolve(host, port)
     }
-    fn get(self, url: String, addresses: [[U8]], port: Int, timeout_ms: Int, limit: Int) -[Net, Time.Wait]> JetDriverBuildHTTPResponse JetDriverBuildHTTPError! {
-        permit :: self.storage.guard_read()
+    get: fn(self, url: String, addresses: [[U8]], port: Int, timeout_ms: Int, limit: Int) -[Net, Time.Wait]> JetDriverBuildHTTPResponse JetDriverBuildHTTPError! {
+        permit: self.storage.guard_read()
         permit.value.transport.get(url, addresses, port, timeout_ms, limit)
     }
 }
-fn jet_driver_shared_build_http_inputs(transport: ^JetDriverBuildHTTPInputs) -> JetDriverSharedBuildHTTPInputs Never! {
+jet_driver_shared_build_http_inputs: fn(transport: ^JetDriverBuildHTTPInputs) -> JetDriverSharedBuildHTTPInputs Never! {
     JetDriverSharedBuildHTTPInputs{storage: shared JetDriverBuildHTTPInputsStorage{transport: ^transport}}
 }
-struct JetDriverBuildHTTPResponse {
+JetDriverBuildHTTPResponse: struct {
     status: Int
     headers: [[U8]]
     body: [U8]
@@ -390,7 +390,7 @@ struct JetDriverBuildHTTPResponse {
 
 // Where an absolute path resolves with every link followed (`exists` false
 // when it names nothing), and what it is there.
-struct JetDriverBuildPath {
+JetDriverBuildPath: struct {
     exists: Bool
     path: String
     file: Bool
@@ -398,13 +398,13 @@ struct JetDriverBuildPath {
 }
 
 // One directory entry, described without following a link.
-struct JetDriverBuildEntry {
+JetDriverBuildEntry: struct {
     name: String
     directory: Bool
     file: Bool
 }
 
-struct JetDriverSourceUnit {
+JetDriverSourceUnit: struct {
     root_index: Int
     file_index: Int
     root_identity: String
@@ -420,7 +420,7 @@ struct JetDriverSourceUnit {
     in_namespace: Bool
 }
 
-struct JetDriverPackageDependency {
+JetDriverPackageDependency: struct {
     name: String
     source: String
     source_path: String
@@ -429,7 +429,7 @@ struct JetDriverPackageDependency {
     script_version: String?{None}
 }
 
-struct JetDriverPackageEntry {
+JetDriverPackageEntry: struct {
     module_alias: String?
     function_name: String
     source_path: String
@@ -438,7 +438,7 @@ struct JetDriverPackageEntry {
 
 // One declared `settings:` entry of a manifest (`tls: Bool = true`): its
 // type as written and its default's text (a string's decoded text).
-struct JetDriverPackageSetting {
+JetDriverPackageSetting: struct {
     name: String
     ty: String
     default: String
@@ -446,13 +446,13 @@ struct JetDriverPackageSetting {
 
 // One `build: { <profile>: Build{ settings: { key: value } } }` entry: the
 // value the profile gives a declared setting, as text.
-struct JetDriverProfileSetting {
+JetDriverProfileSetting: struct {
     profile: String
     name: String
     value: String
 }
 
-struct JetDriverPackageInfo {
+JetDriverPackageInfo: struct {
     root_index: Int
     root_path: String
     identity: String
@@ -476,14 +476,14 @@ struct JetDriverPackageInfo {
     policy_expert: Bool?{None}
     // `policy.lints.deny`: lint names that fail this package's build (E1293).
     policy_lints_deny: [String]{[String]{}}
-    // The Package comes from a leading inline `package { … }` block (its
+    // The Package comes from a leading inline `package: { … }` block (its
     // carrier file is `manifest_path`), not from `package.jet`.
     inline_package: Bool
     // Manifest inputs compose package facts, never ordinary source bindings.
     configs: [String]
     dependencies: [JetDriverPackageDependency]
     // The kinds the manifest's `outputs:` declare. A package
-    // that declares a Library and no Executable has no `fn run` (E0625).
+    // that declares a Library and no Executable has no `run: fn` (E0625).
     outputs: JetDriverPackageOutputs
     // The declared `settings:` and the values `build:` profiles give them
     // (`$build.settings.*`, jet_driver_build_facts).
@@ -494,7 +494,7 @@ struct JetDriverPackageInfo {
     boundaries: [ImportBoundary]{[ImportBoundary]{}}
 }
 
-struct JetDriverPackageOutputs {
+JetDriverPackageOutputs: struct {
     library: Bool
     executable: Bool
     // Owner ruling B: each Executable `entry: stem.run` names a member file
@@ -502,26 +502,26 @@ struct JetDriverPackageOutputs {
     entry_modules: [String]
 }
 
-struct JetDriverSourceIndex {
+JetDriverSourceIndex: struct {
     by_identity: [String:Int]
     by_module_name: [String:Int]
     ambiguous_module_names: [String:Bool]
     by_path: [String:Int]
 }
 
-struct JetDriverSourceIndexResult {
+JetDriverSourceIndexResult: struct {
     index: JetDriverSourceIndex
     diagnostics: [Diagnostic]
     complete: Bool
 }
 
-struct JetDriverSourceFileCollection {
+JetDriverSourceFileCollection: struct {
     files: [SourceFile]
     diagnostics: [Diagnostic]
     complete: Bool
 }
 
-struct JetDriverSourceCatalogResult {
+JetDriverSourceCatalogResult: struct {
     packages: [JetDriverPackageInfo]
     source_units: [JetDriverSourceUnit]
     entry_package_identity: String
@@ -529,7 +529,7 @@ struct JetDriverSourceCatalogResult {
     complete: Bool
 }
 
-enum JetDriverStage {
+JetDriverStage: enum {
     Collect
     Parse
     Load
@@ -541,7 +541,7 @@ enum JetDriverStage {
     Emit
 }
 
-struct JetDriverLoadedModule {
+JetDriverLoadedModule: struct {
     source_unit_index: Int
     source_identity: String
     package_identity: String
@@ -559,14 +559,14 @@ struct JetDriverLoadedModule {
     namespace_refs: [String]{[String]{}}
 }
 
-struct JetDriverCompileTrace {
+JetDriverCompileTrace: struct {
     stdout: [String]
     stderr: [String]
     soft_stop: Bool
     exit_code: Int?
 }
 
-struct JetDriverLoadResult {
+JetDriverLoadResult: struct {
     package_identity: String
     packages: [JetDriverPackageInfo]
     source_units: [JetDriverSourceUnit]
@@ -586,7 +586,7 @@ struct JetDriverLoadResult {
     doc_modules: [JetDriverDocModule]{[JetDriverDocModule]{}}
     build_program: TComptimeValue?{None}
     build_nodes: [BuildGraphNode]?{None}
-    // The entry package's member files that declare a top-level `fn run`
+    // The entry package's member files that declare a top-level `run: fn`
     // (Loader.jet `jet_driver_run_member_paths`).
     run_member_paths: [String]{[String]{}}
 }
@@ -594,9 +594,9 @@ struct JetDriverLoadResult {
 // The entry package's written authority policy, for the host's application
 // authority check. `manifest_path` is None for a file with no `package.jet`;
 // `allow`/`deny` are None when the manifest writes no `authority` row.
-// `inline_package` marks a leading `package { … }` block, whose carrier file is
+// `inline_package` marks a leading `package: { … }` block, whose carrier file is
 // `manifest_path`.
-struct JetDriverAuthorityPolicy {
+JetDriverAuthorityPolicy: struct {
     manifest_path: String?
     inline_package: Bool
     allow: [String]?
@@ -605,7 +605,7 @@ struct JetDriverAuthorityPolicy {
     subject: String{""}
 }
 
-struct JetDriverCompileResult {
+JetDriverCompileResult: struct {
     diagnostics: [Diagnostic]
     generated_source_files: [SourceFile]
     package_identity: String
@@ -653,7 +653,7 @@ struct JetDriverCompileResult {
     // (JetCli Request.jet `jet_cli_compile_prepared`) so the native backend
     // route after it compiles on the same threads.
     compiler_threads: CompilerThreads{compiler_threads_single()}
-    // The entry package's member files that declare a top-level `fn run`,
+    // The entry package's member files that declare a top-level `run: fn`,
     // from the load's parse (JetDriverLoadResult.run_member_paths).
     run_member_paths: [String]{[String]{}}
     // The entry package's `allocator:` policy (jet_driver_entry_allocator).
@@ -662,7 +662,7 @@ struct JetDriverCompileResult {
 
 // The `allocator:` policy of the entry package of `load`
 // (jet_driver_parse_program_allocator); the system heap when it has none.
-fn jet_driver_entry_allocator(load: JetDriverLoadResult) -> AllocatorPolicy Never! {
+jet_driver_entry_allocator: fn(load: JetDriverLoadResult) -> AllocatorPolicy Never! {
     loop package in load.packages {
         if package.identity == load.package_identity -> return package.allocator_policy
     }
@@ -672,7 +672,7 @@ fn jet_driver_entry_allocator(load: JetDriverLoadResult) -> AllocatorPolicy Neve
 // The compiler-internal all-phases diagnostic mode (`JET_KEEP_GOING=1`, read
 // by the CLI). Its output is never shipped: a failed item is
 // recorded and replaced by a typed trap so every later phase still runs.
-struct JetDriverKeepGoing {
+JetDriverKeepGoing: struct {
     // Traps an earlier run asked for after it crashed inside one function,
     // `<phase>:<name>@<position>`: `lower` positions index the lowering
     // list, `emit` positions the optimized program's functions (the
@@ -680,16 +680,16 @@ struct JetDriverKeepGoing {
     skip: [String]
 }
 
-fn jet_driver_source_identity(package_identity: String, path: String) -> String Never! {
+jet_driver_source_identity: fn(package_identity: String, path: String) -> String Never! {
     "source:{package_identity.len()}:{package_identity}:{path}"
 }
 
-fn jet_driver_module_identity(package_identity: String, path: String) -> String Never! {
+jet_driver_module_identity: fn(package_identity: String, path: String) -> String Never! {
     "module:{package_identity.len()}:{package_identity}:{path}"
 }
 
-fn jet_driver_source_segments(path: String, source: String) -> [SemaSourceSegment] Never! {
-    bytes :: source.bytes()
+jet_driver_source_segments: fn(path: String, source: String) -> [SemaSourceSegment] Never! {
+    bytes: source.bytes()
     line_starts := [Int]{0}
     loop index in 0..<bytes.len() {
         if bytes[index] == (U8{10}) -> &line_starts.push(index + 1)
@@ -701,7 +701,7 @@ fn jet_driver_source_segments(path: String, source: String) -> [SemaSourceSegmen
 // `line_starts` stays empty until the parse wave hands over the lexer's
 // newline table (Loader `jet_driver_take_line_starts`), so the catalog
 // never scans a file.
-fn jet_driver_unparsed_source_segments(path: String, length: Int, origin: SemaSourceOrigin) -> [SemaSourceSegment] Never! {
+jet_driver_unparsed_source_segments: fn(path: String, length: Int, origin: SemaSourceOrigin) -> [SemaSourceSegment] Never! {
     [SemaSourceSegment{generated: Span{start: 0, end: length}, source_file: path, source_start: 0, line_starts: [Int]{}, origin: origin}]
 }
 
@@ -711,17 +711,17 @@ fn jet_driver_unparsed_source_segments(path: String, length: Int, origin: SemaSo
 // outside it (a path dependency beside the entry package) relative to the
 // root through `..` segments, so compiler output never depends on where the
 // project is checked out. A relative path is returned unchanged.
-fn jet_driver_display_path(entry_root: String, path: String) -> String Never! {
+jet_driver_display_path: fn(entry_root: String, path: String) -> String Never! {
     // copy: the display path is a new owned String. With no entry root it equals `path`, a read
     // parameter that the caller keeps (a source-file row), so the result needs its own text.
     if entry_root.len() == 0 -> return path.copy()
     if path == entry_root -> return ""
-    prefix :: if entry_root.ends_with("/") -> entry_root else -> "{entry_root}/"
+    prefix: if entry_root.ends_with("/") -> entry_root else -> "{entry_root}/"
     if path.starts_with(prefix) -> return path.slice(prefix.len(), path.len())
     // copy: a path the entry root cannot name relatively stays as the caller's text.
     if !path.starts_with("/") || !entry_root.starts_with("/") -> return path.copy()
-    root_parts :: jet_driver_path_segments(entry_root)
-    path_parts :: jet_driver_path_segments(path)
+    root_parts: jet_driver_path_segments(entry_root)
+    path_parts: jet_driver_path_segments(path)
     common := 0
     loop common < root_parts.len() && common < path_parts.len() && root_parts[common] == path_parts[common] -> common += 1
     parts := [String]{}
@@ -731,7 +731,7 @@ fn jet_driver_display_path(entry_root: String, path: String) -> String Never! {
 }
 
 // The non-empty `/`-separated segments of a path.
-fn jet_driver_path_segments(path: String) -> [String] Never! {
+jet_driver_path_segments: fn(path: String) -> [String] Never! {
     segments := [String]{}
     loop segment in path.split("/").to_list() {
         if segment.len() > 0 -> &segments.push(segment)
@@ -741,7 +741,7 @@ fn jet_driver_path_segments(path: String) -> [String] Never! {
 
 // The canonical path a display path names (the inverse of
 // `jet_driver_display_path`); authority checks compare physical paths.
-fn jet_driver_physical_path(entry_root: String, display: String) -> String Never! {
+jet_driver_physical_path: fn(entry_root: String, display: String) -> String Never! {
     // copy: the physical path is a new owned String. For an absolute display it equals `display`, a
     // read parameter that the caller keeps, so the result needs its own text.
     if entry_root.len() == 0 || display.starts_with("/") -> return display.copy()
@@ -757,56 +757,56 @@ fn jet_driver_physical_path(entry_root: String, display: String) -> String Never
             _ := &parts.pop()
         }
     }
-    joined :: parts.join("/")
+    joined: parts.join("/")
     "/{joined}"
 }
 
 // The canonical path of the snapshot's entry root, or "" when it names none.
-fn jet_driver_entry_root_path(snapshot: JetDriverAuthorizedSourceSnapshot) -> String Never! {
+jet_driver_entry_root_path: fn(snapshot: JetDriverAuthorizedSourceSnapshot) -> String Never! {
     loop root in snapshot.roots {
         if root.identity == snapshot.entry_root_identity -> return root.canonical_path
     }
     ""
 }
 
-fn jet_driver_diagnostic(code: String, span: Span, what: String, why: String, fix: String) -> Diagnostic {
+jet_driver_diagnostic: fn(code: String, span: Span, what: String, why: String, fix: String) -> Diagnostic {
     diagnostic_from_registry(code, Val(span), what, why, fix)
 }
 
-fn jet_driver_diagnostic_without_span(code: String, what: String, why: String, fix: String) -> Diagnostic {
+jet_driver_diagnostic_without_span: fn(code: String, what: String, why: String, fix: String) -> Diagnostic {
     diagnostic_from_registry(code, None, what, why, fix)
 }
 
 // A diagnostic worded entirely by its registry row (Rust
 // `Diagnostic::from_row` with no holes).
-fn jet_driver_row_diagnostic(code: String, span: Span?) -> Diagnostic {
-    row :: diagnostic_registry_row(code) ?? panic("diagnostic `{code}` has no generated Source registry row")
+jet_driver_row_diagnostic: fn(code: String, span: Span?) -> Diagnostic {
+    row: diagnostic_registry_row(code) ?? panic("diagnostic `{code}` has no generated Source registry row")
     diagnostic_from_registry(code, span, row.what, row.why, row.fix)
 }
 
-fn jet_driver_diagnostic_at_source(code: String, span: Span?, source_path: String, aggregate_source_offset: Int, what: String, why: String, fix: String) -> Diagnostic {
-    diagnostic :: diagnostic_from_registry(code, span, what, why, fix)
+jet_driver_diagnostic_at_source: fn(code: String, span: Span?, source_path: String, aggregate_source_offset: Int, what: String, why: String, fix: String) -> Diagnostic {
+    diagnostic: diagnostic_from_registry(code, span, what, why, fix)
     diagnostic_with_source_path(^diagnostic, source_path, aggregate_source_offset)
 }
 
-fn jet_driver_lint_diagnostic_at_source(code: String, span: Span?, source_path: String, aggregate_source_offset: Int, what: String, why: String, fix: String) -> Diagnostic {
-    diagnostic :: diagnostic_from_registry(code, span, what, why, fix)
+jet_driver_lint_diagnostic_at_source: fn(code: String, span: Span?, source_path: String, aggregate_source_offset: Int, what: String, why: String, fix: String) -> Diagnostic {
+    diagnostic: diagnostic_from_registry(code, span, what, why, fix)
     diagnostic_with_source_path(^diagnostic, source_path, aggregate_source_offset)
 }
 
-fn jet_driver_module_index_key(package_identity: String, module_name: String) -> String Never! {
+jet_driver_module_index_key: fn(package_identity: String, module_name: String) -> String Never! {
     "{package_identity.len()}:{package_identity}:{module_name}"
 }
 
-fn jet_driver_build_source_index(source_units: [JetDriverSourceUnit]) -> JetDriverSourceIndexResult {
+jet_driver_build_source_index: fn(source_units: [JetDriverSourceUnit]) -> JetDriverSourceIndexResult {
     by_identity := [String:Int]{}
     by_module_name := [String:Int]{}
     ambiguous_module_names := [String:Bool]{}
     by_path := [String:Int]{}
     diagnostics := [Diagnostic]{}
     loop (index, unit) in source_units {
-        identity :: jet_driver_source_identity(unit.package_identity, unit.path)
-        module_key :: jet_driver_module_index_key(unit.package_identity, unit.module_name)
+        identity: jet_driver_source_identity(unit.package_identity, unit.path)
+        module_key: jet_driver_module_index_key(unit.package_identity, unit.module_name)
         valid := true
         if unit.package_identity.len() == 0 {
             &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a source unit has no package identity", "module identities must be scoped to the package selected by the loader", "resolve the package identity from its authorized manifest"))
@@ -839,7 +839,7 @@ fn jet_driver_build_source_index(source_units: [JetDriverSourceUnit]) -> JetDriv
             }
         }
     }
-    complete :: diagnostics.len() == 0
+    complete: diagnostics.len() == 0
     JetDriverSourceIndexResult{
         index: JetDriverSourceIndex{
             by_identity: by_identity,
@@ -858,34 +858,34 @@ fn jet_driver_build_source_index(source_units: [JetDriverSourceUnit]) -> JetDriv
 // option that changes what the verb checks, and each authorized source's
 // root identity, root-relative path, and SHA-256 of its exact bytes. Equal
 // digests mean the recorded diagnostics are this request's diagnostics.
-struct JetDriverReceipt {
+JetDriverReceipt: struct {
     closure: String
     diagnostics: [Diagnostic]
 }
 
-fn jet_driver_receipt_field(label: String, value: String) -> String Never! {
+jet_driver_receipt_field: fn(label: String, value: String) -> String Never! {
     "{label.len()}:{label}{value.len()}:{value}"
 }
 
-fn jet_driver_receipt_closure(verb: String, request: JetDriverCompileRequest, options: [String]) -> String Never! {
-    compiler :: request.host_facts.compiler_identity ?? ""
-    target :: request.host_facts.target_triple ?? ""
+jet_driver_receipt_closure: fn(verb: String, request: JetDriverCompileRequest, options: [String]) -> String Never! {
+    compiler: request.host_facts.compiler_identity ?? ""
+    target: request.host_facts.target_triple ?? ""
     closure := jet_driver_receipt_field("schema", "jet.receipt-closure/v1")
-    verb_field :: jet_driver_receipt_field("verb", verb)
-    compiler_field :: jet_driver_receipt_field("compiler", compiler)
-    target_field :: jet_driver_receipt_field("target", target)
-    entry_field :: jet_driver_receipt_field("entry", request.authorized_sources.entry_path)
+    verb_field: jet_driver_receipt_field("verb", verb)
+    compiler_field: jet_driver_receipt_field("compiler", compiler)
+    target_field: jet_driver_receipt_field("target", target)
+    entry_field: jet_driver_receipt_field("entry", request.authorized_sources.entry_path)
     closure = "{closure}{verb_field}{compiler_field}{target_field}{entry_field}"
     loop option in options {
-        option_field :: jet_driver_receipt_field("option", option)
+        option_field: jet_driver_receipt_field("option", option)
         closure = "{closure}{option_field}"
     }
     loop root in request.authorized_sources.roots {
-        root_field :: jet_driver_receipt_field("root", root.identity)
+        root_field: jet_driver_receipt_field("root", root.identity)
         closure = "{closure}{root_field}"
         loop file in root.files {
-            path_field :: jet_driver_receipt_field("module", file.relative_path)
-            digest_field :: jet_driver_receipt_field("sha256", sha256_hex(file.source))
+            path_field: jet_driver_receipt_field("module", file.relative_path)
+            digest_field: jet_driver_receipt_field("sha256", sha256_hex(file.source))
             closure = "{closure}{path_field}{digest_field}"
         }
     }
@@ -897,11 +897,11 @@ fn jet_driver_receipt_closure(verb: String, request: JetDriverCompileRequest, op
 
 // A recorded Receipt answers the request only when its closure is the
 // request's closure; anything else checks fresh.
-fn jet_driver_receipt_answers(receipt: JetDriverReceipt, verb: String, request: JetDriverCompileRequest, options: [String]) -> Bool Never! {
+jet_driver_receipt_answers: fn(receipt: JetDriverReceipt, verb: String, request: JetDriverCompileRequest, options: [String]) -> Bool Never! {
     receipt.closure == jet_driver_receipt_closure(verb, request, options)
 }
 
-fn jet_driver_script_dependency_identity(dependency: JetDriverScriptDependency) -> String Never! {
+jet_driver_script_dependency_identity: fn(dependency: JetDriverScriptDependency) -> String Never! {
     "{jet_driver_receipt_field("inline_name", dependency.name)}{jet_driver_receipt_field("inline_selector", dependency.selector)}{jet_driver_receipt_field("inline_version", dependency.resolved_version)}{jet_driver_receipt_field("inline_hash", dependency.content_hash)}"
 }
 
@@ -910,14 +910,14 @@ fn jet_driver_script_dependency_identity(dependency: JetDriverScriptDependency) 
 // The facts self-hosted sema reads from the request for one package: the
 // active OS, the target triple and the package edition. The build clock and
 // root policy never enter.
-fn jet_driver_package_target_facts(request: JetDriverCompileRequest, package: JetDriverPackageInfo) -> [PackageKeyTargetFact] Never! {
+jet_driver_package_target_facts: fn(request: JetDriverCompileRequest, package: JetDriverPackageInfo) -> [PackageKeyTargetFact] Never! {
     facts := [PackageKeyTargetFact]{
         {name: "active_os", value: request.host_facts.active_os ?? ""},
         {name: "edition", value: package.edition},
         {name: "target_triple", value: request.host_facts.target_triple ?? ""},
     }
     loop dependency in request.authorized_sources.script_dependencies {
-        root :: request.authorized_sources.roots[package.root_index]
+        root: request.authorized_sources.roots[package.root_index]
         if root.identity == request.authorized_sources.entry_root_identity || root.identity == dependency.root_identity {
             &facts.push(PackageKeyTargetFact{name: "inline:{dependency.name}", value: jet_driver_script_dependency_identity(dependency)})
         }
@@ -926,7 +926,7 @@ fn jet_driver_package_target_facts(request: JetDriverCompileRequest, package: Je
 }
 
 // The package.jet source of a package that has a manifest.
-fn jet_driver_package_manifest_source(package: JetDriverPackageInfo, snapshot: JetDriverAuthorizedSourceSnapshot) -> String? Never! {
+jet_driver_package_manifest_source: fn(package: JetDriverPackageInfo, snapshot: JetDriverAuthorizedSourceSnapshot) -> String? Never! {
     if package.manifest_path == .None -> return None
     loop file in snapshot.roots[package.root_index].files {
         if file.relative_path == "package.jet" -> return Val(file.source)
@@ -936,11 +936,11 @@ fn jet_driver_package_manifest_source(package: JetDriverPackageInfo, snapshot: J
 
 // The package's exact loaded source bytes, including selected generated
 // modules, and its authorized package.jet manifest.
-fn jet_driver_package_source_digest(package: JetDriverPackageInfo, request: JetDriverCompileRequest, source_units: [JetDriverSourceUnit]) -> String? Never! {
+jet_driver_package_source_digest: fn(package: JetDriverPackageInfo, request: JetDriverCompileRequest, source_units: [JetDriverSourceUnit]) -> String? Never! {
     files := [PackageKeySourceFile]{}
     loop unit in source_units {
         if unit.package_identity != package.identity -> next
-        source :: jet_driver_source_unit_text(request, unit) ?? return None
+        source: jet_driver_source_unit_text(request, unit) ?? return None
         &files.push(PackageKeySourceFile{relative_path: unit.relative_path, source: source})
     }
     Val(package_key_source_digest(files, jet_driver_package_manifest_source(package, request.authorized_sources)))
@@ -949,27 +949,27 @@ fn jet_driver_package_source_digest(package: JetDriverPackageInfo, request: JetD
 // The package check key: `None` when the host names no compiler identity or
 // a direct dependency has no interface digest yet (it must be checked
 // first). `interface_digests` maps package identity to interface digest.
-fn jet_driver_package_check_key(package: JetDriverPackageInfo, packages: [JetDriverPackageInfo], interface_digests: [String:String], request: JetDriverCompileRequest, source_units: [JetDriverSourceUnit]) -> String? Never! {
-    compiler :: request.host_facts.compiler_identity ?? return None
+jet_driver_package_check_key: fn(package: JetDriverPackageInfo, packages: [JetDriverPackageInfo], interface_digests: [String:String], request: JetDriverCompileRequest, source_units: [JetDriverSourceUnit]) -> String? Never! {
+    compiler: request.host_facts.compiler_identity ?? return None
     dependencies := [PackageKeyDependency]{}
     loop dependency in package.dependencies {
         loop candidate in packages {
             if candidate.root_index != dependency.target_root_index -> next
-            digest :: interface_digests.get(candidate.identity) ?? return None
+            digest: interface_digests.get(candidate.identity) ?? return None
             &dependencies.push(PackageKeyDependency{identity: candidate.identity, interface_digest: digest})
         }
     }
-    target :: package_key_target_facts_digest(jet_driver_package_target_facts(request, package))
-    source :: jet_driver_package_source_digest(package, request, source_units) ?? return None
+    target: package_key_target_facts_digest(jet_driver_package_target_facts(request, package))
+    source: jet_driver_package_source_digest(package, request, source_units) ?? return None
     Val(package_key_check_key(compiler, target, package.identity, source, dependencies))
 }
 
 // Read one record through the host store. A missing store, a missing record,
 // or bytes that do not open under `schema` are all a miss.
-fn jet_driver_load_record(request: JetDriverCompileRequest, schema: String, key: String) -> Record? Never! {
+jet_driver_load_record: fn(request: JetDriverCompileRequest, schema: String, key: String) -> Record? Never! {
     if request.record_store == .Val(store) {
-        bytes :: store.record(schema, key) ?? return None
-        record :: record_decode(bytes).record ?? return None
+        bytes: store.record(schema, key) ?? return None
+        record: record_decode(bytes).record ?? return None
         if record.schema != schema -> return None
         return Val(record)
     }
@@ -980,12 +980,12 @@ fn jet_driver_load_record(request: JetDriverCompileRequest, schema: String, key:
 // `None` and are addressed by their content. Returns the key published
 // under, or `None` when there is no store or the record cannot be encoded
 // or written.
-fn jet_driver_publish_record(request: JetDriverCompileRequest, schema: String, key: String?, sections: [RecordSection]) -> String? Never! {
+jet_driver_publish_record: fn(request: JetDriverCompileRequest, schema: String, key: String?, sections: [RecordSection]) -> String? Never! {
     if request.record_store == .Val(store) {
-        encoded :: record_encode(schema, sections)
-        bytes :: encoded.bytes ?? return None
-        view :: bytes[0..<bytes.len()]
-        address :: key ?? record_blob_key(view)
+        encoded: record_encode(schema, sections)
+        bytes: encoded.bytes ?? return None
+        view: bytes[0..<bytes.len()]
+        address: key ?? record_blob_key(view)
         if !store.put_record(schema, address, bytes) -> return None
         return Val(address)
     }

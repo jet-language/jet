@@ -9,13 +9,13 @@
 // Each pipe is the Pipe40 cell the child lends as `child.stdout` /
 // `child.stderr`, made on first use; each At is how far its readers have
 // consumed that capture.
-PROCESS_EXECUTION_BYTES :: I64{160}
-PROCESS_EXECUTION_STDOUT :: I64{128}
-PROCESS_EXECUTION_STDERR :: I64{136}
-fn rt_process_execution_worker_address() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
-fn process_execution_native(child: I64) -> I64 { fd_word(child, I64{16}) }
-fn process_execution_now() -> I64 { sync_now_ns() }
-fn process_execution_launch(spec: I64, collect: Bool, err: I64) -> I64 {
+PROCESS_EXECUTION_BYTES: I64{160}
+PROCESS_EXECUTION_STDOUT: I64{128}
+PROCESS_EXECUTION_STDERR: I64{136}
+rt_process_execution_worker_address: fn() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
+process_execution_native: fn(child: I64) -> I64 { fd_word(child, I64{16}) }
+process_execution_now: fn() -> I64 { sync_now_ns() }
+process_execution_launch: fn(spec: I64, collect: Bool, err: I64) -> I64 {
     jet_rt_world_reject_uncontrolled(I64{0})
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     sandboxed := I64{0}
@@ -23,10 +23,10 @@ fn process_execution_launch(spec: I64, collect: Bool, err: I64) -> I64 {
         sandboxed = process_authority_sandbox(spec, err)
         if (sandboxed == I64{0}) -> return I64{0}
     }
-    native :: process_execution_launch_native(if (sandboxed == I64{0}) -> spec else -> sandboxed, err)
+    native: process_execution_launch_native(if (sandboxed == I64{0}) -> spec else -> sandboxed, err)
     jet_rt_handle_drop_process_spec(sandboxed)
     if (native == I64{0}) -> return I64{0}
-    child :: jet_rt_alloc(PROCESS_EXECUTION_BYTES, I64{8})
+    child: jet_rt_alloc(PROCESS_EXECUTION_BYTES, I64{8})
     coll_zero(child, PROCESS_EXECUTION_BYTES)
     fd_put(child, I64{8}, I64{1})
     fd_put(child, I64{16}, native)
@@ -40,76 +40,76 @@ fn process_execution_launch(spec: I64, collect: Bool, err: I64) -> I64 {
     }
     child
 }
-fn process_execution_launch_input(spec: I64, input: I64, collect: Bool, err: I64) -> I64 {
+process_execution_launch_input: fn(spec: I64, input: I64, collect: Bool, err: I64) -> I64 {
     if (input == I64{0}) -> return process_execution_launch(spec, collect, err)
-    prepared :: jet_rt_handle_clone_process_spec(spec)
+    prepared: jet_rt_handle_clone_process_spec(spec)
     dirs := fd_word(prepared, PROCESS_SPEC_DIRECTORIES)
     if (dirs == I64{0}) {
         dirs = data_sequence_new(I64{1}, I64{24})
         fd_put(prepared, PROCESS_SPEC_DIRECTORIES, dirs)
     }
-    row :: data_sequence_reserve(dirs, I64{24})
+    row: data_sequence_reserve(dirs, I64{24})
     fd_put(row, I64{0}, jet_fd_retain_raw(input))
     fd_put(row, I64{8}, I64{0})
     fd_put(row, I64{16}, I64{0})
     fd_put(dirs, I64{0}, fd_word(dirs, I64{0}) + I64{1})
     encoding_enum_drop(fd_word(prepared, PROCESS_SPEC_STDIN))
     fd_put(prepared, PROCESS_SPEC_STDIN, process_raw_box(HOST_PROCESS_STREAM_INHERIT))
-    child :: process_execution_launch(prepared, collect, err)
+    child: process_execution_launch(prepared, collect, err)
     jet_rt_handle_drop_process_spec(prepared)
     child
 }
-#Export(c) fn jet_process_spec_plan(spec: I64, ok: I64, err: I64) -> I64 {
+#Export(c) jet_process_spec_plan: fn(spec: I64, ok: I64, err: I64) -> I64 {
     if !process_authority_bound(spec) -> return process_execution_invalid(spec, rt_static_text("ProcessSpec.plan() requires an authority policy from .under(...)"), err)
-    plan :: process_authority_plan(spec, I64{0}, err)
+    plan: process_authority_plan(spec, I64{0}, err)
     if (plan == I64{0}) -> return I64{0}
     fd_put(ok, I64{0}, plan)
     I64{1}
 }
-#Export(c) fn jet_process_spec_spawn(spec: I64, ok: I64, err: I64) -> I64 {
-    child :: process_execution_launch(spec, true, err)
+#Export(c) jet_process_spec_spawn: fn(spec: I64, ok: I64, err: I64) -> I64 {
+    child: process_execution_launch(spec, true, err)
     if (child == I64{0}) -> return I64{0}
     fd_put(ok, I64{0}, child)
     I64{1}
 }
-#Export(c) fn jet_process_spec_run(spec: I64, ok: I64, err: I64) -> I64 {
-    child :: process_execution_launch(spec, true, err)
+#Export(c) jet_process_spec_run: fn(spec: I64, ok: I64, err: I64) -> I64 {
+    child: process_execution_launch(spec, true, err)
     if (child == I64{0}) -> return I64{0}
-    result :: process_execution_wait(child, ok, err)
+    result: process_execution_wait(child, ok, err)
     jet_rt_handle_drop_process_child(child)
     result
 }
-#Export(c) fn jet_process_spec_run_checked(spec: I64, ok: I64, err: I64) -> I64 {
-    scratch :: jet_rt_alloc(I64{8}, I64{8})
-    result :: jet_process_spec_run(spec, scratch, err)
+#Export(c) jet_process_spec_run_checked: fn(spec: I64, ok: I64, err: I64) -> I64 {
+    scratch: jet_rt_alloc(I64{8}, I64{8})
+    result: jet_process_spec_run(spec, scratch, err)
     if (result == I64{0}) {
         jet_rt_free(scratch, I64{8}, I64{8})
         return I64{0}
     }
-    receipt :: fd_word(scratch, I64{0})
+    receipt: fd_word(scratch, I64{0})
     jet_rt_free(scratch, I64{8}, I64{8})
     if (fd_word(receipt, I64{24}) != I64{0}) {
         fd_put(ok, I64{0}, receipt)
         return I64{1}
     }
-    cause :: jet_rt_string_builder_new()
+    cause: jet_rt_string_builder_new()
     jet_rt_string_builder_push(cause, rt_static_text("process exited unsuccessfully: code="))
     rt_text_push_number(cause, jet_int_owned_to_i64(fd_word(receipt, I64{0})))
-    signal :: fd_word(receipt, I64{32})
+    signal: fd_word(receipt, I64{32})
     if (signal != INT_OPTION_NONE) {
         jet_rt_string_builder_push(cause, rt_static_text(", signal="))
         rt_text_push_number(cause, jet_int_owned_to_i64(signal))
     }
     jet_rt_string_builder_push(cause, rt_static_text(", stderr="))
-    errors :: fd_word(receipt, I64{16})
+    errors: fd_word(receipt, I64{16})
     end := if (rt_text_len(errors) > I64{4096}) -> { I64{4096} } else -> { rt_text_len(errors) }
     loop end > (I64{0}) && end < rt_text_len(errors) && rt_text_byte(wrapping(rt_text_data(errors) + end)).bit_and(I64{192}) == (I64{128}) -> end -= I64{1}
     rt_text_append(cause, rt_text_data(errors), end)
     jet_rt_handle_drop_process_receipt(receipt)
     process_execution_error(spec, HOST_IO_OP_CLOSE, jet_rt_string_builder_finish(cause), err)
 }
-#Export(c) fn jet_process_child_wait(child: I64, ok: I64, err: I64) -> I64 { process_execution_wait(child, ok, err) }
-#Export(c) fn jet_process_child_id(child: I64) -> I64 {
+#Export(c) jet_process_child_wait: fn(child: I64, ok: I64, err: I64) -> I64 { process_execution_wait(child, ok, err) }
+#Export(c) jet_process_child_id: fn(child: I64) -> I64 {
     jet_int_owned_from_i64(if (fd_word(child, I64{120}).bit_and(I64{2}) != I64{0}) -> { I64{0} } else -> { fd_word(process_execution_native(child), I64{8}) })
 }
-#Export(c) fn jet_rt_handle_show_process_child(_child: I64) -> I64 { jet_rt_string_clone(rt_static_text("ProcessChild")) }
+#Export(c) jet_rt_handle_show_process_child: fn(_child: I64) -> I64 { jet_rt_string_clone(rt_static_text("ProcessChild")) }

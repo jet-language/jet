@@ -7,15 +7,15 @@ use {
     jet_parser.[jfmt_format_program_with_tokens]
 }
 
-struct SemaGateContext {
+SemaGateContext: struct {
     checked_text_types: [String:Bool]
     unsafe_gates: [UnsafeGateInspection]
 }
 
-fn sema_gate_ledger_collect(modules: [SemaGateModule], names: NameLedger, gates: GateSet, external: [GateEntry], checked_text_types: [String:Bool]) -> GateLedger Never! {
+sema_gate_ledger_collect: fn(modules: [SemaGateModule], names: NameLedger, gates: GateSet, external: [GateEntry], checked_text_types: [String:Bool]) -> GateLedger Never! {
     inspection := sema_unsafe_inspect(modules, gates)
-    context :: shared SemaGateContext{checked_text_types: checked_text_types, unsafe_gates: ^inspection.gates}
-    context_permit :: context.guard_read()
+    context: shared SemaGateContext{checked_text_types: checked_text_types, unsafe_gates: ^inspection.gates}
+    context_permit: context.guard_read()
     ledger := GateLedger{}
     loop gate in context_permit.value.unsafe_gates {
         discharged := true
@@ -39,10 +39,10 @@ fn sema_gate_ledger_collect(modules: [SemaGateModule], names: NameLedger, gates:
         sema_gate_items(row.source, row.program.items, &ledger, context)
         loop application in row.program.rule_facts {
             if application.marker.name != "Allow" -> next
-            reason_expr :: sema_gate_marker_expr(application.marker, 1)
-            reason :: if sema_gate_literal_text(reason_expr) == .Val(literal) -> Val(literal) else -> reason_expr.map((expression) -> sema_gate_expression_text(expression))
-            detail :: if sema_gate_marker_expr(application.marker, 0) == .Val(value) -> sema_gate_expression_text(value) else -> "None"
-            scope :: if application.site == .Val(site) -> sema_gate_rule_site_name(site) else -> "source"
+            reason_expr: sema_gate_marker_expr(application.marker, 1)
+            reason: if sema_gate_literal_text(reason_expr) == .Val(literal) -> Val(literal) else -> reason_expr.map((expression) -> sema_gate_expression_text(expression))
+            detail: if sema_gate_marker_expr(application.marker, 0) == .Val(value) -> sema_gate_expression_text(value) else -> "None"
+            scope: if application.site == .Val(site) -> sema_gate_rule_site_name(site) else -> "source"
             gate_ledger_push(&ledger, gate_source_entry(GateKind.LintAllow, "lint", scope, row.source, application.marker.span, "#Allow", reason, detail, if reason_expr != None -> "recorded" else -> "missing"))
         }
     }
@@ -56,14 +56,14 @@ fn sema_gate_ledger_collect(modules: [SemaGateModule], names: NameLedger, gates:
     ledger
 }
 
-fn sema_gate_invocation(ledger: &GateLedger, kind: GateKind, scope: String) Never! {
+sema_gate_invocation: fn(ledger: &GateLedger, kind: GateKind, scope: String) Never! {
     gate_ledger_push(&ledger, GateEntry{kind: kind, domain: "security", scope: scope, source: "command line", span: None, subject: "invocation flags", reason: None, status: Val("recorded"), detail: "written invocation choice", provenance: ["command line"], operations: []})
 }
 
-fn sema_gate_append_structure(ledger: &GateLedger, names: NameLedger) Never! {
+sema_gate_append_structure: fn(ledger: &GateLedger, names: NameLedger) Never! {
     loop fact in names.facts.structure_facts {
-        reason :: fact.gate ?? next
-        scope :: if fact.kind == {
+        reason: fact.gate ?? next
+        scope: if fact.kind == {
             .Liveness -> "liveness"
             .Lifecycle -> "lifecycle"
             .ImportEdge -> "import-edge"
@@ -72,14 +72,14 @@ fn sema_gate_append_structure(ledger: &GateLedger, names: NameLedger) Never! {
     }
 }
 
-fn sema_gate_structure_name(source: String, name: String, span: Span, ledger: &GateLedger) Never! {
+sema_gate_structure_name: fn(source: String, name: String, span: Span, ledger: &GateLedger) Never! {
     if name.starts_with("_") && !name.starts_with("__jet_") {
         gate_ledger_push(&ledger, gate_source_entry(GateKind.Structure, "structure", "liveness", source, span, name, None, "written underscore name suppresses unused-name guidance", "recorded"))
     }
 }
 
 // CheckedText is a declared local trait, not an automatic structural derive.
-fn sema_gate_checked_text_names(programs: [Program]) -> [String:Bool] Never! {
+sema_gate_checked_text_names: fn(programs: [Program]) -> [String:Bool] Never! {
     names := [String:Bool]{}
     loop program in programs {
         distinct := [String:Bool]{}
@@ -92,7 +92,7 @@ fn sema_gate_checked_text_names(programs: [Program]) -> [String:Bool] Never! {
     names
 }
 
-fn sema_gate_checked_text_items(items: [Item], distinct: &[String:Bool], implementations: &[String:Bool]) Never! {
+sema_gate_checked_text_items: fn(items: [Item], distinct: &[String:Bool], implementations: &[String:Bool]) Never! {
     loop item in items {
         if item == {
             .Distinct(definition) -> {
@@ -119,7 +119,7 @@ fn sema_gate_checked_text_items(items: [Item], distinct: &[String:Bool], impleme
     }
 }
 
-fn sema_gate_items(source: String, items: [Item], ledger: &GateLedger, context: Shared<SemaGateContext>) Never! {
+sema_gate_items: fn(source: String, items: [Item], ledger: &GateLedger, context: Shared<SemaGateContext>) Never! {
     loop item in items {
         if item == {
             .Func(function) -> { sema_gate_function(source, function, &ledger, context) }
@@ -184,7 +184,7 @@ fn sema_gate_items(source: String, items: [Item], ledger: &GateLedger, context: 
     }
 }
 
-fn sema_gate_template(source: String, body: [DeriveBodyItem], ledger: &GateLedger, context: Shared<SemaGateContext>) Never! {
+sema_gate_template: fn(source: String, body: [DeriveBodyItem], ledger: &GateLedger, context: Shared<SemaGateContext>) Never! {
     loop body_item in body {
         if body_item == {
             .Stmt(statement) -> { sema_gate_statements(source, [statement], &ledger, context) }
@@ -197,7 +197,7 @@ fn sema_gate_template(source: String, body: [DeriveBodyItem], ledger: &GateLedge
     }
 }
 
-fn sema_gate_function(source: String, function: Func, ledger: &GateLedger, context: Shared<SemaGateContext>) Never! {
+sema_gate_function: fn(source: String, function: Func, ledger: &GateLedger, context: Shared<SemaGateContext>) Never! {
     if !function.compiler_generated {
         sema_gate_structure_name(source, function.name, function.name_span, &ledger)
     }
@@ -205,8 +205,8 @@ fn sema_gate_function(source: String, function: Func, ledger: &GateLedger, conte
         sema_gate_structure_name(source, function.params[parameter_index].name, function.params[parameter_index].name_span, &ledger)
     }
     if function.state_transition == .Val(transition) {
-        from :: transition.from ?? "_"
-        spelling :: "#Transition({from}, {transition.to})"
+        from: transition.from ?? "_"
+        spelling: "#Transition({from}, {transition.to})"
         gate_ledger_push(&ledger, gate_source_entry(GateKind.StateTransition, "knowledge", "function", source, transition.span, spelling, Val(spelling), "state transition {from} -> {transition.to}", "recorded"))
     }
     if function.scrub_tag == .Val(scrubbed) {
@@ -233,44 +233,44 @@ fn sema_gate_function(source: String, function: Func, ledger: &GateLedger, conte
     sema_gate_statements(source, function.body, &ledger, context)
 }
 
-struct SemaGateVisitor {
+SemaGateVisitor: struct {
     source: String
     ledger: GateLedger
     context: Shared<SemaGateContext>
-    fn visit(&self, expression: Expr) Never! -[Mem.Alloc, Mem.Rc, Time.Wait]> {
-        permit :: self.context.guard_read()
+    visit: fn(&self, expression: Expr) Never! -[Mem.Alloc, Mem.Rc, Time.Wait]> {
+        permit: self.context.guard_read()
         sema_gate_expression_value(self.source, expression, &self.ledger, permit.value)
     }
 }
 
-fn sema_gate_statements(source: String, body: [Stmt], ledger: &GateLedger, context: Shared<SemaGateContext>) Never! {
+sema_gate_statements: fn(source: String, body: [Stmt], ledger: &GateLedger, context: Shared<SemaGateContext>) Never! {
     visitor := SemaGateVisitor{source: source, ledger: GateLedger{rows: []}, context: context}
     loop statement in body -> ast_visit_statement(statement, (expression: Expr) -> &visitor.visit(expression), false)
     &visitor.ledger.rows.reverse()
     loop visitor.ledger.rows.len() > 0 {
-        entry :: &visitor.ledger.rows.pop() ?? break
+        entry: &visitor.ledger.rows.pop() ?? break
         gate_ledger_push(&ledger, ^entry)
     }
     sema_gate_statement_gates(source, body, &ledger)
 }
 
-fn sema_gate_expression(source: String, expression: Expr, ledger: &GateLedger, context: Shared<SemaGateContext>) Never! {
+sema_gate_expression: fn(source: String, expression: Expr, ledger: &GateLedger, context: Shared<SemaGateContext>) Never! {
     visitor := SemaGateVisitor{source: source, ledger: GateLedger{rows: []}, context: context}
     ast_visit_expr(expression, (value: Expr) -> &visitor.visit(value))
     &visitor.ledger.rows.reverse()
     loop visitor.ledger.rows.len() > 0 {
-        entry :: &visitor.ledger.rows.pop() ?? break
+        entry: &visitor.ledger.rows.pop() ?? break
         gate_ledger_push(&ledger, ^entry)
     }
 }
 
-fn sema_gate_expression_value(source: String, expression: Expr, ledger: &GateLedger, context: SemaGateContext) Never! {
+sema_gate_expression_value: fn(source: String, expression: Expr, ledger: &GateLedger, context: SemaGateContext) Never! {
     if expression == {
         .Call(call, _) -> {
             if call.name == "approx" {
                 gate_ledger_push(&ledger, gate_source_entry(GateKind.PrecisionDemotion, "knowledge", "expression", source, call.name_span, "approx", None, "exact value widened to an approximation", "recorded"))
             } else if call.name == "wrapping" || call.name == "saturating" || call.name == "checked" {
-                detail :: if call.name == {
+                detail: if call.name == {
                     "saturating" -> "overflow fact replaced by saturating arithmetic"
                     "checked" -> "overflow fact represented as an optional result"
                     else -> "overflow fact replaced by wrapping arithmetic"
@@ -284,7 +284,7 @@ fn sema_gate_expression_value(source: String, expression: Expr, ledger: &GateLed
                     gate_ledger_push(&ledger, gate_source_entry(GateKind.PrecisionDemotion, "knowledge", "expression", source, span, method, None, "unit conversion rounded with an explicit mode", "recorded"))
                 }
                 method == "drop" -> {
-                    reason :: if args.len() > 0 -> sema_gate_literal_text(Val(args[0].expr)) else -> None
+                    reason: if args.len() > 0 -> sema_gate_literal_text(Val(args[0].expr)) else -> None
                     gate_ledger_push(&ledger, gate_source_entry(GateKind.DutyDrop, "duty", "expression", source, span, ".drop", reason, "result duty explicitly discharged", "discharged"))
                 }
                 method == "raw" && sema_gate_checked_receiver(receiver, context.checked_text_types) -> {
@@ -306,7 +306,7 @@ fn sema_gate_expression_value(source: String, expression: Expr, ledger: &GateLed
     }
 }
 
-fn sema_gate_checked_receiver(receiver: Expr, names: [String:Bool]) -> Bool Never! {
+sema_gate_checked_receiver: fn(receiver: Expr, names: [String:Bool]) -> Bool Never! {
     candidate := String?{None}
     if receiver == {
         .Ident(name, _, _) -> { candidate = Val(name) }
@@ -315,26 +315,26 @@ fn sema_gate_checked_receiver(receiver: Expr, names: [String:Bool]) -> Bool Neve
         }
         else -> {}
     }
-    name :: candidate ?? return false
+    name: candidate ?? return false
     if names.get(name) != None -> return true
-    parts :: name.split("::").to_list()
+    parts: name.split("::").to_list()
     names.get(parts[parts.len() - 1]) != None
 }
 
-fn sema_gate_checked_raw(source: String, span: Span, context: SemaGateContext) -> GateEntry Never! {
+sema_gate_checked_raw: fn(source: String, span: Span, context: SemaGateContext) -> GateEntry Never! {
     enclosing := UnsafeGateInspection?{None}
     loop gate in context.unsafe_gates {
         if gate.source != source || gate.span.start > span.start || span.end > gate.span.end -> next
         if enclosing == .Val(previous) {
-            width :: gate.span.end - gate.span.start
-            previous_width :: previous.span.end - previous.span.start
+            width: gate.span.end - gate.span.start
+            previous_width: previous.span.end - previous.span.start
             if width > previous_width || (width == previous_width && gate.span.start >= previous.span.start) {
                 next
             }
         }
         enclosing = Val(gate)
     }
-    reason :: if enclosing == .Val(enclosing_gate) -> enclosing_gate.reason else -> String?{None}
+    reason: if enclosing == .Val(enclosing_gate) -> enclosing_gate.reason else -> String?{None}
     entry := gate_source_entry(GateKind.Unsafe, "security", "expression", source, span, "Type.raw", reason, "checked text raw construction requires an audited unsafe region", if reason != None -> "recorded" else -> "missing")
     if enclosing == .Val(gate) {
         &entry.provenance.push("unsafe gate {gate.source}:{gate.span.start}..{gate.span.end}")
@@ -342,7 +342,7 @@ fn sema_gate_checked_raw(source: String, span: Span, context: SemaGateContext) -
     entry
 }
 
-fn sema_gate_rounded_conversion(method: String, args: [CallArg]) -> Bool Never! {
+sema_gate_rounded_conversion: fn(method: String, args: [CallArg]) -> Bool Never! {
     if !method.starts_with("from_") || !method.ends_with("_rounded") || args.len() != 3 {
         return false
     }
@@ -354,7 +354,7 @@ fn sema_gate_rounded_conversion(method: String, args: [CallArg]) -> Bool Never! 
     false
 }
 
-fn sema_gate_marker_expr(marker: Marker, position: Int) -> Expr? Never! {
+sema_gate_marker_expr: fn(marker: Marker, position: Int) -> Expr? Never! {
     if position >= marker.args.len() -> return None
     if marker.args[position] == {
         // copy: `value` is a payload of read parameter `marker`, which keeps the original; the Val carrier owns this one
@@ -363,9 +363,9 @@ fn sema_gate_marker_expr(marker: Marker, position: Int) -> Expr? Never! {
     }
 }
 
-fn sema_gate_literal_text(expression: Expr?) -> String? Never! {
-    value :: expression ?? return None
-    parts :: (if value == .Str(str_parts, _, _) -> Val(str_parts) else -> [StrPart]?{None}) ?? return None
+sema_gate_literal_text: fn(expression: Expr?) -> String? Never! {
+    value: expression ?? return None
+    parts: (if value == .Str(str_parts, _, _) -> Val(str_parts) else -> [StrPart]?{None}) ?? return None
     text := ""
     loop part in parts {
         if part == {
@@ -376,13 +376,13 @@ fn sema_gate_literal_text(expression: Expr?) -> String? Never! {
     Val(text)
 }
 
-fn sema_gate_expression_text(expression: Expr) -> String Never! {
+sema_gate_expression_text: fn(expression: Expr) -> String Never! {
     program := ast_program()
     program.script_body = [Stmt.Expr{expr: expression}]
     jfmt_format_program_with_tokens(program, "", [Token]{}, false).trim()
 }
 
-fn sema_gate_rule_site_name(site: RuleSite) -> String Never! {
+sema_gate_rule_site_name: fn(site: RuleSite) -> String Never! {
     if site == {
         .Package -> "package"
         .File -> "file"
@@ -406,7 +406,7 @@ fn sema_gate_rule_site_name(site: RuleSite) -> String Never! {
     }
 }
 
-fn sema_gate_statement_gates(source: String, body: [Stmt], ledger: &GateLedger) Never! {
+sema_gate_statement_gates: fn(source: String, body: [Stmt], ledger: &GateLedger) Never! {
     loop statement in body {
         if statement == {
             .Val(binding) -> {
@@ -438,10 +438,10 @@ fn sema_gate_statement_gates(source: String, body: [Stmt], ledger: &GateLedger) 
 // The ledger's refusal of every audited gate an owning policy forbids
 // (D-GATE-LAW1=A). `#Unsafe` keeps its obligation pass as its writer
 // (sema_unsafe_visit_gate), which resolves it with the invocation gates.
-fn sema_gate_policy_diagnostics(ledger: GateLedger, modules: [SemaGateModule], entry_module: Int) -> [GateDiagnostic] Never! {
+sema_gate_policy_diagnostics: fn(ledger: GateLedger, modules: [SemaGateModule], entry_module: Int) -> [GateDiagnostic] Never! {
     result := [GateDiagnostic]{}
     loop entry in ledger.rows {
-        key :: gate_kind_policy_key(entry.kind)
+        key: gate_kind_policy_key(entry.kind)
         if key == PolicyKey.Unsafe -> next
         selected := entry_module
         loop (index, row) in modules {
@@ -451,11 +451,11 @@ fn sema_gate_policy_diagnostics(ledger: GateLedger, modules: [SemaGateModule], e
             }
         }
         if selected < 0 || selected >= modules.len() -> next
-        row :: modules[selected]
+        row: modules[selected]
         declarations := row.declarations
         loop declaration in row.program.policy_declarations -> &declarations.push(declaration)
-        policy :: policy_gate_forbidding(key, declarations) ?? next
-        site :: if entry.span == .Val(span) -> "{entry.source}:{span.start}..{span.end}" else -> "{entry.source} ({entry.subject})"
+        policy: policy_gate_forbidding(key, declarations) ?? next
+        site: if entry.span == .Val(span) -> "{entry.source}:{span.start}..{span.end}" else -> "{entry.source} ({entry.subject})"
         &result.push(GateDiagnostic{source: row.source, diagnostic: sema_gate_denied(key, site, entry.span, policy.source)})
     }
     result
@@ -465,8 +465,8 @@ fn sema_gate_policy_diagnostics(ledger: GateLedger, modules: [SemaGateModule], e
 // forbids, the organization's included: the source rows of the shared ledger,
 // read before registration as the obligation pass is. Only a module under
 // some `.Forbid` is walked.
-fn sema_gate_source_policy_diagnostics(modules: [SemaGateModule]) -> [GateDiagnostic] Never! {
-    context :: shared SemaGateContext{checked_text_types: [String:Bool]{}, unsafe_gates: [UnsafeGateInspection]{}}
+sema_gate_source_policy_diagnostics: fn(modules: [SemaGateModule]) -> [GateDiagnostic] Never! {
+    context: shared SemaGateContext{checked_text_types: [String:Bool]{}, unsafe_gates: [UnsafeGateInspection]{}}
     ledger := GateLedger{}
     loop row in modules {
         if !sema_gate_module_forbids(row) -> next
@@ -476,7 +476,7 @@ fn sema_gate_source_policy_diagnostics(modules: [SemaGateModule]) -> [GateDiagno
     sema_gate_policy_diagnostics(ledger, modules, -1)
 }
 
-fn sema_gate_module_forbids(row: SemaGateModule) -> Bool Never! {
+sema_gate_module_forbids: fn(row: SemaGateModule) -> Bool Never! {
     loop declaration in row.declarations {
         if declaration.value == PolicyValue.Forbid -> return true
     }
@@ -488,8 +488,8 @@ fn sema_gate_module_forbids(row: SemaGateModule) -> Bool Never! {
 
 // The registered E3415 refusal of the `key` gate at `site`, which `policy`
 // forbids.
-fn sema_gate_denied(key: PolicyKey, site: String, span: Span?, policy: String) -> Diagnostic Never! {
-    row :: diagnostic_registry_row("E3415") ?? panic("E3415 has no registry row")
-    what :: row.what.replace("{{gate}}", policy_key_name(key)).replace("{{site}}", site).replace("{{policy}}", policy)
+sema_gate_denied: fn(key: PolicyKey, site: String, span: Span?, policy: String) -> Diagnostic Never! {
+    row: diagnostic_registry_row("E3415") ?? panic("E3415 has no registry row")
+    what: row.what.replace("{{gate}}", policy_key_name(key)).replace("{{site}}", site).replace("{{policy}}", policy)
     sema_error_optional("E3415", span, what, row.why, row.fix.replace("{{policy}}", policy))
 }

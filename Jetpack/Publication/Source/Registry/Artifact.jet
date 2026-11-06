@@ -3,50 +3,50 @@
 use {
     jet_pkg_model.[LockFile, PKG_API_SNAPSHOT_VERSION, PKG_MAX_LOCK_BYTES, PackageCapabilitySnapshot, PackageSourceSnapshot, pkg_api_snapshot_line_name, pkg_capability_snapshot_parse, pkg_lock_parse, pkg_lock_write, pkg_source_snapshot_into]
     jetpack_foundation.[FoundationDirectoryAuthority, UNIFIED_LOCK_FILE, foundation_open_directory_authority, foundation_read_file_nofollow_at_root, foundation_write_file_nofollow_at_root]
-    files :: core.files
+    files: core.files
 }
 
-fn publication_artifact_path(repo: String, name: String, version: String) -> String IOError! {
+publication_artifact_path: fn(repo: String, name: String, version: String) -> String IOError! {
     publication_validate_index_component(name, "package name")
     publication_validate_index_component(version, "package version")
     Ok(files.join(files.join(files.join(repo, "artifacts"), name), version))
 }
-fn publication_ensure_real_directory(path: String, label: String) IOError! -[FS, Env]> {
-    info :: files.stat(path)
+publication_ensure_real_directory: fn(path: String, label: String) IOError! -[FS, Env]> {
+    info: files.stat(path)
     if info.is_symlink || !info.is_dir -> return Err(publication_read_error(.InvalidInput, path, "{label} is not a real directory"))
-    _ :: foundation_open_directory_authority(path)
+    _: foundation_open_directory_authority(path)
 }
-fn publication_load_publish_lock(source: String) -[FS, Env]> LockFile? IOError! {
-    bytes :: foundation_read_file_nofollow_at_root(source, UNIFIED_LOCK_FILE, PKG_MAX_LOCK_BYTES) ?? {
+publication_load_publish_lock: fn(source: String) -[FS, Env]> LockFile? IOError! {
+    bytes: foundation_read_file_nofollow_at_root(source, UNIFIED_LOCK_FILE, PKG_MAX_LOCK_BYTES) ?? {
         if err == .NotFound(_) -> return Ok(None)
         return Err(err)
     }
-    text :: String.from_bytes(bytes) ?? return Err(publication_invalid_oci("published lock is not UTF-8"))
-    parsed :: pkg_lock_parse(text) ?? return Err(publication_invalid_oci("published lock is invalid: {err.message()}"))
+    text: String.from_bytes(bytes) ?? return Err(publication_invalid_oci("published lock is not UTF-8"))
+    parsed: pkg_lock_parse(text) ?? return Err(publication_invalid_oci("published lock is invalid: {err.message()}"))
     Ok(Val(parsed))
 }
-fn publication_registry_artifact_hash(root: String) -[FS, Env]> String IOError! {
-    held :: foundation_open_directory_authority(root)
+publication_registry_artifact_hash: fn(root: String) -[FS, Env]> String IOError! {
+    held: foundation_open_directory_authority(root)
     held.tree_hash()
 }
-struct PublicationArtifactSnapshot {
+PublicationArtifactSnapshot: struct {
     source: PackageSourceSnapshot
-    fn path(self) -> String Never! { self.source.path() }
+    path: fn(self) -> String Never! { self.source.path() }
 }
 impl PublicationArtifactSnapshot.Close {
-    fn close(^self) -[FS]> { close(^self.source) }
+    close: fn(^self) -[FS]> { close(^self.source) }
 }
-fn publication_snapshot_verified_artifact(repo: String, entry: PublicationIndexEntry) -[FS, Env, Time]> PublicationArtifactSnapshot IOError! {
-    path :: publication_artifact_path(repo, entry.name, entry.version)
-    held :: foundation_open_directory_authority(repo)
-    artifacts :: held.child("artifacts")
-    package :: artifacts.child(entry.name)
-    source :: package.child(entry.version)
-    before :: source.tree_hash()
+publication_snapshot_verified_artifact: fn(repo: String, entry: PublicationIndexEntry) -[FS, Env, Time]> PublicationArtifactSnapshot IOError! {
+    path: publication_artifact_path(repo, entry.name, entry.version)
+    held: foundation_open_directory_authority(repo)
+    artifacts: held.child("artifacts")
+    package: artifacts.child(entry.name)
+    source: package.child(entry.version)
+    before: source.tree_hash()
     if entry.content_hash != "" && before != entry.content_hash -> return Err(publication_invalid_oci("registry source artifact for {entry.name} {entry.version} failed its content hash"))
     publication_verify_oci_referrers(repo, entry)
     // Keep the private snapshot on the checkout's disk rather than /tmp.
-    snapshot :: pkg_source_snapshot_into(source, ^held) ?? return Err(publication_invalid_oci(err.diagnostic.what))
+    snapshot: pkg_source_snapshot_into(source, ^held) ?? return Err(publication_invalid_oci(err.diagnostic.what))
     if entry.content_hash != "" && snapshot.content_hash != entry.content_hash {
         close(^snapshot)
         return Err(publication_invalid_oci("registry source artifact for {entry.name} {entry.version} changed while being snapshotted"))
@@ -74,7 +74,7 @@ fn publication_snapshot_verified_artifact(repo: String, entry: PublicationIndexE
 // staged in a private sibling, re-hashed and renamed into place. An existing
 // artifact must hold the same bytes. A failure removes the stage and any OCI
 // referrer state this publish created.
-fn publication_ensure_real_directory_if_present(path: String, label: String) IOError! -[FS, Env]> {
+publication_ensure_real_directory_if_present: fn(path: String, label: String) IOError! -[FS, Env]> {
     if files.stat(path) == {
         .Ok(_) -> publication_ensure_real_directory(path, label)
         .Err(error) -> if error == {
@@ -83,21 +83,21 @@ fn publication_ensure_real_directory_if_present(path: String, label: String) IOE
         }
     }
 }
-fn publication_publish_artifact(repo: String, source: String, name: String, version: String, expected_hash: String) -[FS, Env, Time]> String IOError! {
-    destination :: publication_artifact_path(repo, name, version)
+publication_publish_artifact: fn(repo: String, source: String, name: String, version: String, expected_hash: String) -[FS, Env, Time]> String IOError! {
+    destination: publication_artifact_path(repo, name, version)
     publication_ensure_real_directory(repo, "registry checkout")
-    held :: foundation_open_directory_authority(repo)
-    snapshot :: pkg_source_snapshot_into(foundation_open_directory_authority(source), ^held) ?? return Err(publication_invalid_oci(err.diagnostic.what))
-    result :: publication_publish_snapshot(repo, snapshot.parent, source, snapshot.directory, snapshot.content_hash, name, version, expected_hash, destination)
+    held: foundation_open_directory_authority(repo)
+    snapshot: pkg_source_snapshot_into(foundation_open_directory_authority(source), ^held) ?? return Err(publication_invalid_oci(err.diagnostic.what))
+    result: publication_publish_snapshot(repo, snapshot.parent, source, snapshot.directory, snapshot.content_hash, name, version, expected_hash, destination)
     close(^snapshot)
     result
 }
-fn publication_publish_snapshot(repo: String, held: FoundationDirectoryAuthority, source: String, snapshot: FoundationDirectoryAuthority, actual: String, name: String, version: String, expected_hash: String, destination: String) -[FS, Env, Time]> String IOError! {
+publication_publish_snapshot: fn(repo: String, held: FoundationDirectoryAuthority, source: String, snapshot: FoundationDirectoryAuthority, actual: String, name: String, version: String, expected_hash: String, destination: String) -[FS, Env, Time]> String IOError! {
     publication_validate_registry_metadata_file(snapshot.path(), name, version)
     if expected_hash != "" && actual != expected_hash -> return Err(publication_read_error(.InvalidInput, source, "registry source hash changed during publish: expected {expected_hash}, got {actual}"))
     publication_ensure_real_directory_if_present(files.join(repo, "artifacts"), "registry artifact root")
     publication_ensure_real_directory_if_present(files.dirname(destination), "registry artifact package directory")
-    package :: held.child("artifacts", true).child(name, true)
+    package: held.child("artifacts", true).child(name, true)
     if package.child(version) == {
         .Ok(existing) -> {
             if existing.tree_hash() != actual -> return Err(publication_read_error(.AlreadyExists, destination, "registry artifact already exists with conflicting source bytes"))
@@ -110,12 +110,12 @@ fn publication_publish_snapshot(repo: String, held: FoundationDirectoryAuthority
             else -> { return Err(error) }
         }
     }
-    subject_root :: files.join(files.join(repo, "referrers"), actual)
-    subject_root_existed :: files.stat(subject_root) == .Ok(_)
-    pending :: files.join(subject_root, PUBLICATION_OCI_PENDING_SBOM)
-    pending_existed :: files.stat(pending) == .Ok(_)
-    stage :: package.private_child("artifact")
-    stage_name :: files.basename(stage.path())
+    subject_root: files.join(files.join(repo, "referrers"), actual)
+    subject_root_existed: files.stat(subject_root) == .Ok(_)
+    pending: files.join(subject_root, PUBLICATION_OCI_PENDING_SBOM)
+    pending_existed: files.stat(pending) == .Ok(_)
+    stage: package.private_child("artifact")
+    stage_name: files.basename(stage.path())
     published := false
     failure := IOError?{None}
     if publication_publish_stage(repo, source, name, version, actual, stage, snapshot) == .Err(stage_error) {
@@ -135,7 +135,7 @@ fn publication_publish_snapshot(repo: String, held: FoundationDirectoryAuthority
     }
     Ok(destination)
 }
-fn publication_publish_stage(repo: String, source: String, name: String, version: String, actual: String, stage: FoundationDirectoryAuthority, snapshot: FoundationDirectoryAuthority) IOError! -[FS, Env, Time]> {
+publication_publish_stage: fn(repo: String, source: String, name: String, version: String, actual: String, stage: FoundationDirectoryAuthority, snapshot: FoundationDirectoryAuthority) IOError! -[FS, Env, Time]> {
     publication_stage_oci_sbom(repo, source, name, version, actual)
     stage.copy_tree_from(snapshot)
     if stage.tree_hash() != actual -> return Err(publication_read_error(.InvalidInput, stage.path(), "staged registry artifact does not match its source hash"))
@@ -144,12 +144,12 @@ fn publication_publish_stage(repo: String, source: String, name: String, version
         foundation_write_file_nofollow_at_root(stage.path(), UNIFIED_LOCK_FILE, pkg_lock_write(lock).bytes(), None) ?? return Err(err.error)
     }
 }
-fn publication_verify_artifact(repo: String, entry: PublicationIndexEntry) -[FS, Env]> String IOError! {
-    path :: publication_artifact_path(repo, entry.name, entry.version)
+publication_verify_artifact: fn(repo: String, entry: PublicationIndexEntry) -[FS, Env]> String IOError! {
+    path: publication_artifact_path(repo, entry.name, entry.version)
     publication_ensure_real_directory_if_present(repo, "registry checkout")
     publication_ensure_real_directory_if_present(files.join(repo, "artifacts"), "registry artifact root")
     publication_ensure_real_directory_if_present(files.dirname(path), "registry artifact package directory")
-    info :: files.stat(path) ?? {
+    info: files.stat(path) ?? {
         if err == .NotFound(_) -> return Err(publication_read_error(.NotFound, path, "registry has no source artifact for {entry.name} {entry.version}"))
         return Err(err)
     }
@@ -162,26 +162,26 @@ fn publication_verify_artifact(repo: String, entry: PublicationIndexEntry) -[FS,
 // Each published version's public API snapshot (sema_public_api rows) sits
 // at `apis/<name>/<version>.api`, written once beside the source artifact;
 // the next publish's SemVer gate (E1218) diffs against it.
-fn publication_api_snapshot_path(repo: String, name: String, version: String) -> String IOError! {
+publication_api_snapshot_path: fn(repo: String, name: String, version: String) -> String IOError! {
     publication_validate_index_component(name, "package name")
     publication_validate_index_component(version, "package version")
     Ok(files.join(files.join(files.join(repo, "apis"), name), "{version}.api"))
 }
-fn publication_write_api_snapshot(repo: String, name: String, version: String, text: String) -[FS, Env, Time]> String IOError! {
-    path :: publication_api_snapshot_path(repo, name, version)
+publication_write_api_snapshot: fn(repo: String, name: String, version: String, text: String) -[FS, Env, Time]> String IOError! {
+    path: publication_api_snapshot_path(repo, name, version)
     publication_write_oci_file(path, text.bytes(), "registry API snapshot")
     Ok(path)
 }
 // None when the version has no snapshot; a present snapshot must be this
 // format version, name this package and version, and hold only signature rows.
-fn publication_read_api_snapshot(repo: String, name: String, version: String) -[FS, Env]> PackageCapabilitySnapshot? IOError! {
-    path :: publication_api_snapshot_path(repo, name, version)
-    bytes :: foundation_read_file_nofollow_at_root(files.dirname(path), files.basename(path), PUBLICATION_MAX_OCI_REFERRER_BYTES) ?? {
+publication_read_api_snapshot: fn(repo: String, name: String, version: String) -[FS, Env]> PackageCapabilitySnapshot? IOError! {
+    path: publication_api_snapshot_path(repo, name, version)
+    bytes: foundation_read_file_nofollow_at_root(files.dirname(path), files.basename(path), PUBLICATION_MAX_OCI_REFERRER_BYTES) ?? {
         if err == .NotFound(_) -> return Ok(None)
         return Err(err)
     }
-    text :: String.from_bytes(bytes) ?? return Err(publication_read_error(.InvalidInput, path, "registry API snapshot is not UTF-8"))
-    snapshot :: pkg_capability_snapshot_parse(text) ?? return Err(publication_read_error(.InvalidInput, path, "registry API snapshot is malformed"))
+    text: String.from_bytes(bytes) ?? return Err(publication_read_error(.InvalidInput, path, "registry API snapshot is not UTF-8"))
+    snapshot: pkg_capability_snapshot_parse(text) ?? return Err(publication_read_error(.InvalidInput, path, "registry API snapshot is malformed"))
     if snapshot.api_version != PKG_API_SNAPSHOT_VERSION || snapshot.package != name || snapshot.published_version != version {
         return Err(publication_read_error(.InvalidInput, path, "registry API snapshot is not api_version {PKG_API_SNAPSHOT_VERSION} for {name} {version}"))
     }

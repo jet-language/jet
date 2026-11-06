@@ -13,25 +13,25 @@
 // directory the runtime can't resolve) is not stored. Reads under /proc,
 // /sys and /dev are the host's own and key nothing.
 use {
-    test_reuse_files :: core.files
-    test_reuse_sys :: core.sys
-    test_reuse_crypto :: core.crypto
+    test_reuse_files: core.files
+    test_reuse_sys: core.sys
+    test_reuse_crypto: core.crypto
 }
 
-JET_CLI_TEST_READS_ENV :: "JET_TEST_READS_PATH"
-JET_CLI_TEST_REUSE_HEADER :: "JET_TEST_RESULTS 1"
+JET_CLI_TEST_READS_ENV: "JET_TEST_READS_PATH"
+JET_CLI_TEST_REUSE_HEADER: "JET_TEST_RESULTS 1"
 
 // Where one `jet test` run keeps its results: `store` the record file,
 // `reads` the harness's read log.
-struct JetCLITestReuse { store: String, reads: String }
+JetCLITestReuse: struct { store: String, reads: String }
 
 // One recorded read: `kind` (F, S, E, A), `name`, and its fingerprint.
-struct JetCLITestRead { kind: String, name: String, print: String }
+JetCLITestRead: struct { kind: String, name: String, print: String }
 
 // The store of a run of the harness `binary` with the selection `settings`
 // under `root`'s `.jet/test-results`, or None when the harness can't be read.
-fn jet_cli_test_reuse_at(root: String, binary: String, settings: String, records_path: String) -> JetCLITestReuse? Never! {
-    bytes :: test_reuse_files.read_bytes(binary) ?? return None
+jet_cli_test_reuse_at: fn(root: String, binary: String, settings: String, records_path: String) -> JetCLITestReuse? Never! {
+    bytes: test_reuse_files.read_bytes(binary) ?? return None
     framed := [U8]{}
     jet_cli_receipt_frame(&framed, "jet-test-results-v1".bytes())
     jet_cli_receipt_frame(&framed, test_reuse_crypto.sha256(bytes).hex().bytes())
@@ -42,18 +42,18 @@ fn jet_cli_test_reuse_at(root: String, binary: String, settings: String, records
         if !name.starts_with("JET_") || name == JET_CLI_TEST_READS_ENV -> next
         jet_cli_receipt_frame(&framed, "{name}={test_reuse_sys.get(name) ?? ""}".bytes())
     }
-    key :: test_reuse_crypto.sha256(framed).hex()
+    key: test_reuse_crypto.sha256(framed).hex()
     Val(JetCLITestReuse{store: "{root}/.jet/test-results/{key}", reads: "{records_path}.reads"})
 }
 
 // How jet_cli_test_reuse_run came by its outcomes.
-enum JetCLITestReuseHow { Plain Reused Logged }
+JetCLITestReuseHow: enum { Plain Reused Logged }
 
 // `jet_cli_native_test_run` through the store: the stored outcomes when
 // `reuse` has them and its reads are unchanged (unless `fresh`), else a run
 // whose reads are logged for jet_cli_test_reuse_keep. No `reuse` runs the
 // tests plainly.
-fn jet_cli_test_reuse_run(reuse: JetCLITestReuse?, fresh: Bool, how: &JetCLITestReuseHow, spec: ProcessSpec, tests: [JetNativeTestCase], check_names: [String], unrun_check_report: fn() -> String Never!, serial: Bool, records_path: String, time_limit: Duration?) -> JetNativeTestOutcomes Err! {
+jet_cli_test_reuse_run: fn(reuse: JetCLITestReuse?, fresh: Bool, how: &JetCLITestReuseHow, spec: ProcessSpec, tests: [JetNativeTestCase], check_names: [String], unrun_check_report: fn() -> String Never!, serial: Bool, records_path: String, time_limit: Duration?) -> JetNativeTestOutcomes Err! {
     if reuse == .Val(store) {
         if !fresh {
             if jet_cli_test_reuse_lookup(store) == .Val(kept) {
@@ -62,7 +62,7 @@ fn jet_cli_test_reuse_run(reuse: JetCLITestReuse?, fresh: Bool, how: &JetCLITest
             }
         }
         if test_reuse_files.write(store.reads, "") == .Ok(_) {
-            run :: jet_cli_native_test_run(spec.env(JET_CLI_TEST_READS_ENV, store.reads), tests, check_names, unrun_check_report, serial, records_path, time_limit) ?? {
+            run: jet_cli_native_test_run(spec.env(JET_CLI_TEST_READS_ENV, store.reads), tests, check_names, unrun_check_report, serial, records_path, time_limit) ?? {
                 test_reuse_files.remove(store.reads).drop("the run already failed")
                 return Err(err)
             }
@@ -74,31 +74,31 @@ fn jet_cli_test_reuse_run(reuse: JetCLITestReuse?, fresh: Bool, how: &JetCLITest
 }
 
 // The stored outcomes of `reuse` when every read they keep is unchanged.
-fn jet_cli_test_reuse_lookup(reuse: JetCLITestReuse) -> JetNativeTestOutcomes? Never! {
-    bytes :: test_reuse_files.read_bytes(reuse.store) ?? return None
+jet_cli_test_reuse_lookup: fn(reuse: JetCLITestReuse) -> JetNativeTestOutcomes? Never! {
+    bytes: test_reuse_files.read_bytes(reuse.store) ?? return None
     cursor := JetNativeTestCursor{bytes: bytes, at: 0}
     if jet_native_test_line(&cursor) != .Val(JET_CLI_TEST_REUSE_HEADER) -> return None
-    reads :: jet_cli_test_reuse_count(&cursor) ?? return None
+    reads: jet_cli_test_reuse_count(&cursor) ?? return None
     loop _ in 0..<reads {
-        kind :: jet_cli_test_reuse_field(&cursor) ?? return None
-        name :: jet_cli_test_reuse_field(&cursor) ?? return None
-        print :: jet_cli_test_reuse_field(&cursor) ?? return None
+        kind: jet_cli_test_reuse_field(&cursor) ?? return None
+        name: jet_cli_test_reuse_field(&cursor) ?? return None
+        print: jet_cli_test_reuse_field(&cursor) ?? return None
         if jet_cli_test_reuse_print(kind, name) != .Val(print) -> return None
     }
-    wires :: jet_cli_test_reuse_fields(&cursor) ?? return None
-    outputs :: jet_cli_test_reuse_fields(&cursor) ?? return None
-    errors :: jet_cli_test_reuse_fields(&cursor) ?? return None
-    count :: jet_cli_test_reuse_count(&cursor) ?? return None
+    wires: jet_cli_test_reuse_fields(&cursor) ?? return None
+    outputs: jet_cli_test_reuse_fields(&cursor) ?? return None
+    errors: jet_cli_test_reuse_fields(&cursor) ?? return None
+    count: jet_cli_test_reuse_count(&cursor) ?? return None
     contracts := [JetNativeTestContract]{}
     loop _ in 0..<count {
-        held :: jet_cli_test_reuse_field(&cursor) ?? return None
-        site :: jet_cli_test_reuse_field(&cursor) ?? return None
-        id :: jet_cli_test_reuse_field(&cursor) ?? return None
-        test :: jet_cli_test_reuse_field(&cursor) ?? return None
-        last :: jet_cli_test_reuse_field(&cursor) ?? return None
+        held: jet_cli_test_reuse_field(&cursor) ?? return None
+        site: jet_cli_test_reuse_field(&cursor) ?? return None
+        id: jet_cli_test_reuse_field(&cursor) ?? return None
+        test: jet_cli_test_reuse_field(&cursor) ?? return None
+        last: jet_cli_test_reuse_field(&cursor) ?? return None
         test_id := U64?{None}
         if id != "-" {
-            number :: Int.parse(id) ?? return None
+            number: Int.parse(id) ?? return None
             test_id = Val(U64.from_int(number) ?? return None)
         }
         &contracts.push(JetNativeTestContract{held: held == "1", site: site, test_id: test_id, test: test, last: last == "1"})
@@ -110,18 +110,18 @@ fn jet_cli_test_reuse_lookup(reuse: JetCLITestReuse) -> JetNativeTestOutcomes? N
 // After a passing logged run: stores `outcomes` with the fingerprints of the
 // reads the run logged. A read that can't be keyed, or a store that can't be
 // written, keeps nothing. Removes the read log either way.
-fn jet_cli_test_reuse_keep(reuse: JetCLITestReuse, outcomes: JetNativeTestOutcomes, passed: Bool) Never! {
-    log :: test_reuse_files.read_bytes(reuse.reads) ?? return
+jet_cli_test_reuse_keep: fn(reuse: JetCLITestReuse, outcomes: JetNativeTestOutcomes, passed: Bool) Never! {
+    log: test_reuse_files.read_bytes(reuse.reads) ?? return
     test_reuse_files.remove(reuse.reads).drop("the read log is one-shot")
     if !passed -> return
-    reads :: jet_cli_test_reuse_reads(log) ?? return
+    reads: jet_cli_test_reuse_reads(log) ?? return
     out := "{JET_CLI_TEST_REUSE_HEADER}\n{reads.len()}\n"
     loop read in reads -> out = "{out}{jet_cli_test_reuse_put(read.kind)}{jet_cli_test_reuse_put(read.name)}{jet_cli_test_reuse_put(read.print)}"
     out = "{out}{jet_cli_test_reuse_group(outcomes.wires)}{jet_cli_test_reuse_group(outcomes.outputs)}{jet_cli_test_reuse_group(outcomes.errors)}{outcomes.contracts.len()}\n"
     loop contract in outcomes.contracts {
-        id :: if contract.test_id == .Val(number) -> "{number}" else -> "-"
-        held :: if contract.held -> "1" else -> "0"
-        last :: if contract.last -> "1" else -> "0"
+        id: if contract.test_id == .Val(number) -> "{number}" else -> "-"
+        held: if contract.held -> "1" else -> "0"
+        last: if contract.last -> "1" else -> "0"
         out = "{out}{jet_cli_test_reuse_put(held)}{jet_cli_test_reuse_put(contract.site)}{jet_cli_test_reuse_put(id)}{jet_cli_test_reuse_put(contract.test)}{jet_cli_test_reuse_put(last)}"
     }
     test_reuse_files.create_dir_all(test_reuse_files.dirname(reuse.store)) ?? return
@@ -130,21 +130,21 @@ fn jet_cli_test_reuse_keep(reuse: JetCLITestReuse, outcomes: JetNativeTestOutcom
 
 // The distinct reads of a log, in first-read order, each fingerprinted; None
 // when one can't be keyed (`U`, a malformed record, an unknown kind).
-fn jet_cli_test_reuse_reads(log: [U8]) -> [JetCLITestRead]? Never! {
+jet_cli_test_reuse_reads: fn(log: [U8]) -> [JetCLITestRead]? Never! {
     reads := [JetCLITestRead]{}
     seen := [String:Int]{}
     start := 0
     loop at in 0..<log.len() {
         if log[at] != (U8{0}) -> next
         if at == start -> return None
-        record :: String.from_bytes(log.slice(start, at)) ?? return None
+        record: String.from_bytes(log.slice(start, at)) ?? return None
         start = at + 1
         if seen.get(record) != None -> next
         &seen.add(record.copy(), reads.len()).drop("unseen records are new")
-        kind :: record.slice(0..<1)
-        name :: record.slice(1..<record.len())
+        kind: record.slice(0..<1)
+        name: record.slice(1..<record.len())
         if kind == "U" -> return None
-        print :: jet_cli_test_reuse_print(kind, name) ?? return None
+        print: jet_cli_test_reuse_print(kind, name) ?? return None
         &reads.push(JetCLITestRead{kind: kind, name: name, print: print})
     }
     if start != log.len() -> return None
@@ -152,7 +152,7 @@ fn jet_cli_test_reuse_reads(log: [U8]) -> [JetCLITestRead]? Never! {
 }
 
 // A read's fingerprint now; None for a kind this store doesn't know.
-fn jet_cli_test_reuse_print(kind: String, name: String) -> String? Never! {
+jet_cli_test_reuse_print: fn(kind: String, name: String) -> String? Never! {
     if kind == "E" -> return Val(if test_reuse_sys.get(name) == .Val(value) -> "={value}" else -> "unset")
     if kind == "A" {
         names := test_reuse_sys.vars() ?? return None
@@ -168,7 +168,7 @@ fn jet_cli_test_reuse_print(kind: String, name: String) -> String? Never! {
     if name.starts_with("/proc/") || name.starts_with("/sys/") || name.starts_with("/dev/") -> return Val("host")
     if test_reuse_files.is_dir(name) {
         if kind == "S" -> return Val("dir")
-        entries :: test_reuse_files.list_dir(name) ?? return Val("unreadable dir")
+        entries: test_reuse_files.list_dir(name) ?? return Val("unreadable dir")
         listed := [String]{}
         loop entry in entries -> &listed.push(if entry.is_dir -> "{entry.name}/" else -> entry.name.copy())
         &listed.sort()
@@ -176,46 +176,46 @@ fn jet_cli_test_reuse_print(kind: String, name: String) -> String? Never! {
     }
     if !test_reuse_files.exists(name) -> return Val("absent")
     if kind == "S" {
-        info :: test_reuse_files.stat(name) ?? return Val("unreadable")
+        info: test_reuse_files.stat(name) ?? return Val("unreadable")
         return Val("{info.kind} {info.size} {info.mode} {info.modified}")
     }
     if !test_reuse_files.is_file(name) -> return Val("special")
-    bytes :: test_reuse_files.read_bytes(name) ?? return Val("unreadable")
+    bytes: test_reuse_files.read_bytes(name) ?? return Val("unreadable")
     Val(test_reuse_crypto.sha256(bytes).hex())
 }
 
-fn jet_cli_test_reuse_put(text: String) -> String Never! {
+jet_cli_test_reuse_put: fn(text: String) -> String Never! {
     "{text.bytes().len()}\n{text}\n"
 }
 
-fn jet_cli_test_reuse_group(texts: [String]) -> String Never! {
+jet_cli_test_reuse_group: fn(texts: [String]) -> String Never! {
     out := "{texts.len()}\n"
     loop text in texts -> out = "{out}{jet_cli_test_reuse_put(text)}"
     out
 }
 
-fn jet_cli_test_reuse_count(cursor: &JetNativeTestCursor) -> Int? Never! {
-    line :: jet_native_test_line(&cursor) ?? return None
-    count :: Int.parse(line) ?? return None
+jet_cli_test_reuse_count: fn(cursor: &JetNativeTestCursor) -> Int? Never! {
+    line: jet_native_test_line(&cursor) ?? return None
+    count: Int.parse(line) ?? return None
     if count < 0 -> return None
     Val(count)
 }
 
-fn jet_cli_test_reuse_field(cursor: &JetNativeTestCursor) -> String? Never! {
-    length :: jet_cli_test_reuse_count(&cursor) ?? return None
+jet_cli_test_reuse_field: fn(cursor: &JetNativeTestCursor) -> String? Never! {
+    length: jet_cli_test_reuse_count(&cursor) ?? return None
     if length >= cursor.bytes.len() - cursor.at -> return None
-    end :: cursor.at + length
+    end: cursor.at + length
     if cursor.bytes[end] != (U8{10}) -> return None
-    text :: String.from_bytes(cursor.bytes.slice(cursor.at, end)) ?? return None
+    text: String.from_bytes(cursor.bytes.slice(cursor.at, end)) ?? return None
     cursor.at = end + 1
     Val(text)
 }
 
-fn jet_cli_test_reuse_fields(cursor: &JetNativeTestCursor) -> [String]? Never! {
-    count :: jet_cli_test_reuse_count(&cursor) ?? return None
+jet_cli_test_reuse_fields: fn(cursor: &JetNativeTestCursor) -> [String]? Never! {
+    count: jet_cli_test_reuse_count(&cursor) ?? return None
     texts := [String]{}
     loop _ in 0..<count {
-        text :: jet_cli_test_reuse_field(&cursor) ?? return None
+        text: jet_cli_test_reuse_field(&cursor) ?? return None
         &texts.push(text)
     }
     Val(texts)

@@ -1,41 +1,41 @@
-use math :: core.math
+use math: core.math
 
 // core.math.combinatorics — counting, ranking, and generation.
 //
 // `permutations` / `combinations` / `product` materialise the full
 // collection (Python `itertools` without lazy iterators). Counts use
 // exact `Int`. Generation is return-based so array values stay consistent.
-fn factorial(n: Int) -> Int? Never! { math.factorial(n) }
+factorial: fn(n: Int) -> Int? Never! { math.factorial(n) }
 
-fn binomial(n: Int, k: Int) -> Int? Never! { math.binomial(n, k) }
+binomial: fn(n: Int, k: Int) -> Int? Never! { math.binomial(n, k) }
 
-fn permutations_count(n: Int, k: Int) -> Int? Never! {
+permutations_count: fn(n: Int, k: Int) -> Int? Never! {
     if n < 0 || k < 0 || k > n -> return None
     math.perm(n, k)
 }
 
-fn combinations_count(n: Int, k: Int) -> Int? Never! { math.binomial(n, k) }
+combinations_count: fn(n: Int, k: Int) -> Int? Never! { math.binomial(n, k) }
 
-fn permutations(items: [Int], k: Int) -> [[Int]] Never! {
-    n :: items.len()
+permutations: fn(items: [Int], k: Int) -> [[Int]] Never! {
+    n: items.len()
     if k < 0 || k > n -> return [[Int]]{}
     used := [Bool]{}
     loop i in 0..<n -> &used.push(false)
     perm_rec(items, k, used, [Int]{})
 }
 
-fn combinations(items: [Int], k: Int) -> [[Int]] Never! {
-    n :: items.len()
+combinations: fn(items: [Int], k: Int) -> [[Int]] Never! {
+    n: items.len()
     if k < 0 || k > n -> return [[Int]]{}
     comb_rec(items, k, 0, [Int]{})
 }
 
-fn combinations_with_replacement(items: [Int], k: Int) -> [[Int]] Never! {
+combinations_with_replacement: fn(items: [Int], k: Int) -> [[Int]] Never! {
     if k < 0 -> return [[Int]]{}
     comb_rep_rec(items, k, 0, [Int]{})
 }
 
-fn product(items: [Int], repeat: Int) -> [[Int]] Never! {
+product: fn(items: [Int], repeat: Int) -> [[Int]] Never! {
     if repeat <= 0 -> return [[Int]]{[Int]{}}
     out := [[Int]]{[Int]{}}
     r := 0
@@ -55,7 +55,7 @@ fn product(items: [Int], repeat: Int) -> [[Int]] Never! {
     out
 }
 
-fn cartesian(left: [Int], right: [Int]) -> [[Int]] Never! {
+cartesian: fn(left: [Int], right: [Int]) -> [[Int]] Never! {
     out := [[Int]]{}
     loop a in left {
         loop b in right -> &out.push([Int]{a, b})
@@ -63,7 +63,7 @@ fn cartesian(left: [Int], right: [Int]) -> [[Int]] Never! {
     out
 }
 
-fn perm_rec(items: [Int], k: Int, used: [Bool], cur: [Int]) -> [[Int]] {
+perm_rec: fn(items: [Int], k: Int, used: [Bool], cur: [Int]) -> [[Int]] {
     if cur.len() == k {
         cloned := [Int]{}
         loop v in cur -> &cloned.push(v)
@@ -79,7 +79,7 @@ fn perm_rec(items: [Int], k: Int, used: [Bool], cur: [Int]) -> [[Int]] {
             next_cur := [Int]{}
             loop v in cur -> &next_cur.push(v)
             &next_cur.push(items[i])
-            kids :: perm_rec(items, k, next_used, next_cur)
+            kids: perm_rec(items, k, next_used, next_cur)
             loop row in kids -> &out.push(row)
         }
         i = i + 1
@@ -87,7 +87,7 @@ fn perm_rec(items: [Int], k: Int, used: [Bool], cur: [Int]) -> [[Int]] {
     out
 }
 
-fn comb_rec(items: [Int], k: Int, start: Int, cur: [Int]) -> [[Int]] {
+comb_rec: fn(items: [Int], k: Int, start: Int, cur: [Int]) -> [[Int]] {
     if cur.len() == k {
         cloned := [Int]{}
         loop v in cur -> &cloned.push(v)
@@ -99,14 +99,14 @@ fn comb_rec(items: [Int], k: Int, start: Int, cur: [Int]) -> [[Int]] {
         next_cur := [Int]{}
         loop v in cur -> &next_cur.push(v)
         &next_cur.push(items[i])
-        kids :: comb_rec(items, k, i + 1, next_cur)
+        kids: comb_rec(items, k, i + 1, next_cur)
         loop row in kids -> &out.push(row)
         i = i + 1
     }
     out
 }
 
-fn comb_rep_rec(items: [Int], k: Int, start: Int, cur: [Int]) -> [[Int]] {
+comb_rep_rec: fn(items: [Int], k: Int, start: Int, cur: [Int]) -> [[Int]] {
     if cur.len() == k {
         cloned := [Int]{}
         loop v in cur -> &cloned.push(v)
@@ -118,18 +118,18 @@ fn comb_rep_rec(items: [Int], k: Int, start: Int, cur: [Int]) -> [[Int]] {
         next_cur := [Int]{}
         loop v in cur -> &next_cur.push(v)
         &next_cur.push(items[i])
-        kids :: comb_rep_rec(items, k, i, next_cur)
+        kids: comb_rep_rec(items, k, i, next_cur)
         loop row in kids -> &out.push(row)
         i = i + 1
     }
     out
 }
 
-fn npr(n: Int, k: Int) -> Int? Never! { permutations_count(n, k) }
+npr: fn(n: Int, k: Int) -> Int? Never! { permutations_count(n, k) }
 
-fn ncr(n: Int, k: Int) -> Int? Never! { combinations_count(n, k) }
+ncr: fn(n: Int, k: Int) -> Int? Never! { combinations_count(n, k) }
 
-fn multinomial(parts: [Int]) -> Int? Never! {
+multinomial: fn(parts: [Int]) -> Int? Never! {
     n := 0
     loop p in parts {
         if p < 0 -> return None
@@ -137,16 +137,16 @@ fn multinomial(parts: [Int]) -> Int? Never! {
     }
     acc := 1
     loop p in parts {
-        c :: math.binomial(n, p) ?? return None
+        c: math.binomial(n, p) ?? return None
         acc = acc * c
         n = n - p
     }
     Val(acc)
 }
 
-fn falling_factorial(n: Int, k: Int) -> Int? Never! { permutations_count(n, k) }
+falling_factorial: fn(n: Int, k: Int) -> Int? Never! { permutations_count(n, k) }
 
-fn rising_factorial(n: Int, k: Int) -> Int? Never! {
+rising_factorial: fn(n: Int, k: Int) -> Int? Never! {
     if k < 0 -> return None
     acc := 1
     i := 0
@@ -157,7 +157,7 @@ fn rising_factorial(n: Int, k: Int) -> Int? Never! {
     Val(acc)
 }
 
-fn pairwise(items: [Int]) -> [[Int]] Never! {
+pairwise: fn(items: [Int]) -> [[Int]] Never! {
     out := [[Int]]{}
     if items.len() < 2 -> return out
     i := 0
@@ -168,7 +168,7 @@ fn pairwise(items: [Int]) -> [[Int]] Never! {
     out
 }
 
-fn batched(items: [Int], n: Int) -> [[Int]] Never! {
+batched: fn(items: [Int], n: Int) -> [[Int]] Never! {
     out := [[Int]]{}
     if n <= 0 -> return out
     batch := [Int]{}
@@ -183,14 +183,14 @@ fn batched(items: [Int], n: Int) -> [[Int]] Never! {
     out
 }
 
-fn chain(left: [Int], right: [Int]) -> [Int] Never! {
+chain: fn(left: [Int], right: [Int]) -> [Int] Never! {
     out := [Int]{}
     loop x in left -> &out.push(x)
     loop x in right -> &out.push(x)
     out
 }
 
-fn chain_from(groups: [[Int]]) -> [Int] Never! {
+chain_from: fn(groups: [[Int]]) -> [Int] Never! {
     out := [Int]{}
     loop g in groups {
         loop x in g -> &out.push(x)
@@ -198,7 +198,7 @@ fn chain_from(groups: [[Int]]) -> [Int] Never! {
     out
 }
 
-fn compress(items: [Int], mask: [Bool]) -> [Int] Never! {
+compress: fn(items: [Int], mask: [Bool]) -> [Int] Never! {
     out := [Int]{}
     i := 0
     loop i < items.len() {
@@ -208,7 +208,7 @@ fn compress(items: [Int], mask: [Bool]) -> [Int] Never! {
     out
 }
 
-fn drop(items: [Int], n: Int) -> [Int] Never! {
+drop: fn(items: [Int], n: Int) -> [Int] Never! {
     out := [Int]{}
     skip := n
     if skip < 0 -> skip = 0
@@ -219,7 +219,7 @@ fn drop(items: [Int], n: Int) -> [Int] Never! {
     }
     out
 }
-fn take_n(items: [Int], n: Int) -> [Int] Never! {
+take_n: fn(items: [Int], n: Int) -> [Int] Never! {
     out := [Int]{}
     if n <= 0 -> return out
     limit := n
@@ -230,7 +230,7 @@ fn take_n(items: [Int], n: Int) -> [Int] Never! {
 // `take` is retired because it is a Jet keyword; use `take_n`.
 
 
-fn takewhile(items: [Int], pred_nonneg: Bool) -> [Int] Never! {
+takewhile: fn(items: [Int], pred_nonneg: Bool) -> [Int] Never! {
     out := [Int]{}
     loop x in items {
         ok := x >= 0
@@ -243,7 +243,7 @@ fn takewhile(items: [Int], pred_nonneg: Bool) -> [Int] Never! {
     out
 }
 
-fn dropwhile(items: [Int], pred_nonneg: Bool) -> [Int] Never! {
+dropwhile: fn(items: [Int], pred_nonneg: Bool) -> [Int] Never! {
     out := [Int]{}
     skipping := true
     loop x in items {
@@ -258,7 +258,7 @@ fn dropwhile(items: [Int], pred_nonneg: Bool) -> [Int] Never! {
     out
 }
 
-fn unique(items: [Int]) -> [Int] Never! {
+unique: fn(items: [Int]) -> [Int] Never! {
     out := [Int]{}
     loop x in items {
         seen := false
@@ -270,7 +270,7 @@ fn unique(items: [Int]) -> [Int] Never! {
     out
 }
 
-fn repeat(value: Int, times: Int) -> [Int] Never! {
+repeat: fn(value: Int, times: Int) -> [Int] Never! {
     out := [Int]{}
     i := 0
     loop i < times {
@@ -280,7 +280,7 @@ fn repeat(value: Int, times: Int) -> [Int] Never! {
     out
 }
 
-fn count_from(start: Int, step: Int, n: Int) -> [Int] Never! {
+count_from: fn(start: Int, step: Int, n: Int) -> [Int] Never! {
     out := [Int]{}
     v := start
     i := 0
@@ -291,9 +291,9 @@ fn count_from(start: Int, step: Int, n: Int) -> [Int] Never! {
     }
     out
 }
-fn count(start: Int, step: Int, n: Int) -> [Int] Never! { count_from(start, step, n) }
+count: fn(start: Int, step: Int, n: Int) -> [Int] Never! { count_from(start, step, n) }
 
-fn filterfalse(items: [Int], pred_nonneg: Bool) -> [Int] Never! {
+filterfalse: fn(items: [Int], pred_nonneg: Bool) -> [Int] Never! {
     out := [Int]{}
     loop x in items {
         selected := if pred_nonneg -> x < 0 else -> x >= 0
@@ -302,7 +302,7 @@ fn filterfalse(items: [Int], pred_nonneg: Bool) -> [Int] Never! {
     out
 }
 
-fn islice(items: [Int], start: Int, stop: Int, step: Int) -> [Int] Never! {
+islice: fn(items: [Int], start: Int, stop: Int, step: Int) -> [Int] Never! {
     out := [Int]{}
     stride := step
     if stride <= 0 -> return out
@@ -317,7 +317,7 @@ fn islice(items: [Int], start: Int, stop: Int, step: Int) -> [Int] Never! {
     out
 }
 
-fn groupby(items: [Int]) -> [[Int]] Never! {
+groupby: fn(items: [Int]) -> [[Int]] Never! {
     out := [[Int]]{}
     if items.len() == 0 -> return out
     group := [Int]{items[0]}
@@ -336,7 +336,7 @@ fn groupby(items: [Int]) -> [[Int]] Never! {
     out
 }
 
-fn starmap(items: [[Int]]) -> [Int] Never! {
+starmap: fn(items: [[Int]]) -> [Int] Never! {
     out := [Int]{}
     loop row in items {
         total := 0
@@ -346,7 +346,7 @@ fn starmap(items: [[Int]]) -> [Int] Never! {
     out
 }
 
-fn tee(items: [Int], copies: Int) -> [[Int]] Never! {
+tee: fn(items: [Int], copies: Int) -> [[Int]] Never! {
     out := [[Int]]{}
     if copies <= 0 -> return out
     loop _ in 0..<copies {
@@ -357,7 +357,7 @@ fn tee(items: [Int], copies: Int) -> [[Int]] Never! {
     out
 }
 
-fn cycle(items: [Int], times: Int) -> [Int] Never! {
+cycle: fn(items: [Int], times: Int) -> [Int] Never! {
     out := [Int]{}
     t := 0
     loop t < times {
@@ -367,7 +367,7 @@ fn cycle(items: [Int], times: Int) -> [Int] Never! {
     out
 }
 
-fn zip_longest(left: [Int], right: [Int], fill: Int) -> [[Int]] Never! {
+zip_longest: fn(left: [Int], right: [Int], fill: Int) -> [[Int]] Never! {
     out := [[Int]]{}
     n := left.len()
     if right.len() > n -> n = right.len()
@@ -383,7 +383,7 @@ fn zip_longest(left: [Int], right: [Int], fill: Int) -> [[Int]] Never! {
     out
 }
 
-fn accumulate(items: [Int]) -> [Int] Never! {
+accumulate: fn(items: [Int]) -> [Int] Never! {
     out := [Int]{}
     acc := 0
     loop x in items {
@@ -393,7 +393,7 @@ fn accumulate(items: [Int]) -> [Int] Never! {
     out
 }
 
-fn powerset(items: [Int]) -> [[Int]] Never! {
+powerset: fn(items: [Int]) -> [[Int]] Never! {
     out := [[Int]]{[Int]{}}
     loop x in items {
         nxt := [[Int]]{}
@@ -411,7 +411,7 @@ fn powerset(items: [Int]) -> [[Int]] Never! {
     out
 }
 
-fn windows(items: [Int], size: Int) -> [[Int]] Never! {
+windows: fn(items: [Int], size: Int) -> [[Int]] Never! {
     out := [[Int]]{}
     if size <= 0 || size > items.len() -> return out
     i := 0
@@ -428,7 +428,7 @@ fn windows(items: [Int], size: Int) -> [[Int]] Never! {
     out
 }
 
-fn reverse(items: [Int]) -> [Int] Never! {
+reverse: fn(items: [Int]) -> [Int] Never! {
     out := [Int]{}
     i := items.len() - 1
     loop i >= 0 {
@@ -438,4 +438,4 @@ fn reverse(items: [Int]) -> [Int] Never! {
     out
 }
 
-fn flatten(groups: [[Int]]) -> [Int] Never! { chain_from(groups) }
+flatten: fn(groups: [[Int]]) -> [Int] Never! { chain_from(groups) }

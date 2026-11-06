@@ -1,30 +1,30 @@
-use server :: core.http.server
+use server: core.http.server
 
-fn cross_task(cell: Cell<Int>) {
-    worker :: task {
-        _ :: cell.get()
+cross_task: fn(cell: Cell<Int>) {
+    worker: task {
+        _: cell.get()
     }
     worker.join() ?? panic("task failed")
 }
 
-fn cross_shared(cell: Cell<Int>) {
-    _ :: shared cell
+cross_shared: fn(cell: Cell<Int>) {
+    _: shared cell
 }
 
-struct LocalCache {
+LocalCache: struct {
     cell: Cell<Int>,
 }
 
-fn cross_shared_nested(cache: LocalCache) {
-    _ :: shared cache
+cross_shared_nested: fn(cache: LocalCache) {
+    _: shared cache
 }
 
-fn cross_http() {
-    cell :: Cell.new(0)
-    mux :: server.mux()
+cross_http: fn() {
+    cell: Cell.new(0)
+    mux: server.mux()
     mux.get("/", (req: HTTPRequest) -> {
         return Ok(server.response(200, "{cell.get()}"))
     })
 }
 
-fn run() {}
+run: fn() {}

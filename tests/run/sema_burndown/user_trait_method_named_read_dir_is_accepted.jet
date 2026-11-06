@@ -1,33 +1,33 @@
 // #4430: the retired raw `read_dir` refusal applies only to the Core target;
 // a user trait or struct method of that name is an ordinary method.
-trait Lister {
-    fn read_dir(self, path: String) -> [String]
+Lister: trait {
+    read_dir: fn(self, path: String) -> [String]
 }
 
-struct Fake {
+Fake: struct {
     root: String
 }
 
 impl Fake.Lister {
-    fn read_dir(self, path: String) -> [String] {
+    read_dir: fn(self, path: String) -> [String] {
         [String]{self.root, path}
     }
 }
 
-struct Plain {
+Plain: struct {
     count: Int
 }
 
 impl Plain {
-    fn read_dir(self) -> Int { self.count }
+    read_dir: fn(self) -> Int { self.count }
 }
 
-fn list_all(host: Fake) -> Int {
+list_all: fn(host: Fake) -> Int {
     host.read_dir("x").len()
 }
 
-fn run() {
-    f :: Fake{ root: "r" }
+run: fn() {
+    f: Fake{ root: "r" }
     print(list_all(f))
     print(f.read_dir("y")[1])
     print(Plain{ count: 4 }.read_dir())

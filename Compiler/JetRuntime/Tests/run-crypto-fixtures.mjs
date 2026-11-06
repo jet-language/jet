@@ -31,7 +31,7 @@ if (mode === 'assemble') {
         let importing = false;
         const lines = unblockUses(readFileSync(join(root, path), 'utf8')).split('\n').filter(line => {
             if (line.startsWith('use ')) {
-                if (/^use (?:\w+ :: )?core\./u.test(line)) imports.add(line);
+                if (/^use (?:\w+: )?core\./u.test(line)) imports.add(line);
                 importing = line.includes('[') && !line.includes(']');
                 return false;
             }
@@ -45,9 +45,9 @@ if (mode === 'assemble') {
     writeFileSync(join(unit, 'package.jet'), readFileSync(join(root, 'Compiler/JetRuntime/package.jet')));
     // The runtime's own exports and the fixtures' KAT exports, as
     // run-residue-fixtures.mjs derives them from the same sources.
-    const names = [...source.matchAll(/^#Export\(c\)\s+fn\s+(\w+)\(/gmu)].map(match => match[1]);
+    const names = [...source.matchAll(/^#Export\(c\)\s+(\w+): fn\(/gmu)].map(match => match[1]);
     if (new Set(names).size !== names.length) throw Error('duplicate fixture export');
-    const init = new Map([...source.matchAll(/^\/\/ runtime-init: (\d+)(?: when \S+)?\n#Export\(c\) fn (\w+)/gmu)].map(match => [match[2], match[1]]));
+    const init = new Map([...source.matchAll(/^\/\/ runtime-init: (\d+)(?: when \S+)?\n#Export\(c\) (\w+): fn\b/gmu)].map(match => [match[2], match[1]]));
     init.set('jet_rt_alloc_init', '0');
     writeFileSync(join(unit, 'exports.list'), names.sort().map(name => name === 'jet_rt_panic_list_bounds' ? `${name} int-index-seam` : init.has(name) ? `${name} init ${init.get(name)}` : name).join('\n') + '\n');
     writeFileSync(join(out, 'sources.receipt.json'), JSON.stringify({paths}, null, 2) + '\n');
@@ -62,7 +62,7 @@ if (mode === 'assemble') {
     for (const line of imports.trim().split('\n').filter(Boolean)) if (!allowed.has(line.split(/\s+/u)[0])) throw Error(`unledgered import ${line}`);
     const definitions = command('definitions', 'nm', ['--defined-only', '--format=posix', object]).stdout;
     const strong = new Set(definitions.trim().split('\n').filter(Boolean).filter(line => line.split(/\s+/u)[1] === 'T').map(line => line.split(/\s+/u)[0]));
-    for (const name of fixtures) for (const match of readFileSync(join(root, `Compiler/JetRuntime/Tests/Fragments.fixture/${name}Tests.jet`), 'utf8').matchAll(/#Export\(c\)\s+fn\s+(\w+)\(/gu)) if (!strong.has(match[1])) throw Error(`missing strong Jet fixture export ${match[1]}`);
+    for (const name of fixtures) for (const match of readFileSync(join(root, `Compiler/JetRuntime/Tests/Fragments.fixture/${name}Tests.jet`), 'utf8').matchAll(/#Export\(c\)\s+(\w+):\s*fn\s*\(/gu)) if (!strong.has(match[1])) throw Error(`missing strong Jet fixture export ${match[1]}`);
     command('disassembly', 'objdump', ['-dr', object]);
 } else if (mode === 'link') {
     for (const name of fixtures) command(`link-${name}`, nativeCCompiler, ['-std=c11', '-Wall', '-Wextra', '-Werror', join(root, `Compiler/JetRuntime/Tests/${name}Witness.c`), join(unit, 'fixture.o'), '-lpthread', '-ldl', '-lm', '-o', join(out, name)]);

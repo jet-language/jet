@@ -1,4 +1,4 @@
-package {
+package: {
     name: "core.perf"
     version: "0.0.1"
     edition: "2026"
@@ -8,40 +8,40 @@ package {
         perf: .Library{ entry: perf }
     }
 }
-use core :: core
+use core: core
 
 // core.perf — a process-global 0.0..=1.0 fidelity knob for adaptive work.
 // Values outside the unit interval are rejected with `PerfError.OutOfRange`.
 // The host stores one atomic word; validation, defaults and encoding are Jet.
-struct Perf {
+Perf: struct {
     fidelity: Float
 }
 
 /// The one way to set fidelity wrongly is a number outside
 /// 0.0..=1.0 (NaN included); the case carries the rejected number.
 #Error
-enum PerfError {
+PerfError: enum {
     OutOfRange(Float)
 }
 
-fn fidelity() -[Env]> Float Never! {
-    encoded :: core.perf.__read_bits()
+fidelity: fn() -[Env]> Float Never! {
+    encoded: core.perf.__read_bits()
     if encoded == 0 -> return default_fidelity()
     core.math.from_bits(encoded - 1)
 }
 
-fn default_fidelity() -> Float Never! { 1.0 }
+default_fidelity: fn() -> Float Never! { 1.0 }
 
-fn override_fidelity(value: Float) PerfError! -[Env]> {
+override_fidelity: fn(value: Float) PerfError! -[Env]> {
     if core.math.is_nan(value) || value < 0.0 || value > 1.0 -> return Err(PerfError.OutOfRange(value))
     // Preserve the existing f32 precision, including a negative zero.
-    rounded :: Float.from_f32(F32.from_float(value) ?? panic("validated fidelity cannot overflow F32"))
+    rounded: Float.from_f32(F32.from_float(value) ?? panic("validated fidelity cannot overflow F32"))
     core.perf.__write_bits(core.math.to_bits(rounded) + 1)
 }
 
-fn reset_fidelity() Never! -[Env]> { core.perf.__write_bits(0) }
+reset_fidelity: fn() Never! -[Env]> { core.perf.__write_bits(0) }
 
-fn of(fidelity: Float) -> Perf Never! {
+of: fn(fidelity: Float) -> Perf Never! {
     v := fidelity
     if core.math.is_nan(v) -> v = 1.0
     if v < 0.0 -> v = 0.0
@@ -49,12 +49,12 @@ fn of(fidelity: Float) -> Perf Never! {
     {fidelity: v}
 }
 
-fn is_full(perf: Perf) -> Bool Never! { perf.fidelity >= 1.0 }
+is_full: fn(perf: Perf) -> Bool Never! { perf.fidelity >= 1.0 }
 
-fn is_low(perf: Perf) -> Bool Never! { perf.fidelity < 0.25 }
+is_low: fn(perf: Perf) -> Bool Never! { perf.fidelity < 0.25 }
 
-fn scale(perf: Perf, work: Int) -> Int Never! {
-    n :: Int.from_float((Float{work}) * perf.fidelity) ?? panic("scaled work must be finite")
+scale: fn(perf: Perf, work: Int) -> Int Never! {
+    n: Int.from_float((Float{work}) * perf.fidelity) ?? panic("scaled work must be finite")
     if n < 0 -> return 0
     n
 }
@@ -63,7 +63,7 @@ fn scale(perf: Perf, work: Int) -> Int Never! {
     reset_fidelity()
     assert(fidelity() == 1.0)
     override_fidelity(0.1) ?? panic("valid fidelity")
-    expected :: Float.from_f32(F32.from_float(0.1) ?? panic("valid F32"))
+    expected: Float.from_f32(F32.from_float(0.1) ?? panic("valid F32"))
     assert(fidelity() == expected)
     override_fidelity(-0.0) ?? panic("valid negative zero")
     assert(core.math.to_bits(fidelity()) == core.math.to_bits(-0.0))
@@ -73,11 +73,11 @@ fn scale(perf: Perf, work: Int) -> Int Never! {
 
 #Test("perf fidelity rejection keeps state") {
     override_fidelity(0.5) ?? panic("valid fidelity")
-    rejected :: if override_fidelity(core.math.NAN) == {
+    rejected: if override_fidelity(core.math.NAN) == {
         .Ok(_) -> false
         .Err(_) -> true
     }
-    unchanged :: fidelity() == 0.5
+    unchanged: fidelity() == 0.5
     reset_fidelity()
     assert(rejected && unchanged)
 }

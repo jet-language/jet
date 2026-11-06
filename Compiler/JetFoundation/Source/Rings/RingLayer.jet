@@ -2,17 +2,17 @@
 // classify conservatively; namespace spelling alone never adds a dependency beyond the
 // checked closure table below.
 
-struct JetRingLayerFact {
+JetRingLayerFact: struct {
     key: String
     layer: RuntimeLayer
 }
 
-struct JetRingDependencyRow {
+JetRingDependencyRow: struct {
     module_name: String
     dependencies: [String]
 }
 
-fn jet_ring_dependency_rows() -> [JetRingDependencyRow] Never! {
+jet_ring_dependency_rows: fn() -> [JetRingDependencyRow] Never! {
     [JetRingDependencyRow]{
         {module_name: "app", dependencies: [String]{"core.web"}},
         {module_name: "core.devtools", dependencies: [String]{"core"}},
@@ -113,18 +113,18 @@ fn jet_ring_dependency_rows() -> [JetRingDependencyRow] Never! {
     }
 }
 
-fn jet_ring_is_namespace_only(module_name: String) -> Bool Never! {
+jet_ring_is_namespace_only: fn(module_name: String) -> Bool Never! {
     if module_name == {
         "core.mem.scope" | "core.net.mime" | "core.net.url" | "core.time.expiring" -> true
         else -> false
     }
 }
 
-fn jet_ring_is_closure_marker(usage: String) -> Bool Never! {
+jet_ring_is_closure_marker: fn(usage: String) -> Bool Never! {
     usage.starts_with("__core_source::") || usage.starts_with("__core_intrinsic::")
 }
 
-fn jet_ring_layer_rank(layer: RuntimeLayer) -> Int Never! {
+jet_ring_layer_rank: fn(layer: RuntimeLayer) -> Int Never! {
     if layer == {
         .Core -> 0
         .Alloc -> 1
@@ -132,7 +132,7 @@ fn jet_ring_layer_rank(layer: RuntimeLayer) -> Int Never! {
     }
 }
 
-fn jet_ring_layer_name(layer: RuntimeLayer) -> String Never! {
+jet_ring_layer_name: fn(layer: RuntimeLayer) -> String Never! {
     if layer == {
         .Core -> "core"
         .Alloc -> "alloc"
@@ -140,8 +140,8 @@ fn jet_ring_layer_name(layer: RuntimeLayer) -> String Never! {
     }
 }
 
-fn jet_ring_parse_manifest_layer(value: String) -> RuntimeLayer? {
-    trimmed :: value.trim()
+jet_ring_parse_manifest_layer: fn(value: String) -> RuntimeLayer? {
+    trimmed: value.trim()
     if trimmed == {
         "core" -> Val(RuntimeLayer.Core)
         "alloc" -> Val(RuntimeLayer.Alloc)
@@ -150,7 +150,7 @@ fn jet_ring_parse_manifest_layer(value: String) -> RuntimeLayer? {
     }
 }
 
-fn jet_ring_layer_of_module(module_name: String) -> RuntimeLayer Never! {
+jet_ring_layer_of_module: fn(module_name: String) -> RuntimeLayer Never! {
     if module_name == {
         "core" | "core.prelude" | "core.math" | "core.units" | "core.perf" | "core.mem.scope" -> RuntimeLayer.Core
         "core.mem" | "core.math.random" | "core.crypto" | "core.crypto.random" | "core.crypto.uuid" | "core.crypto.vault" | "core.encoding" | "core.encoding.json" | "core.encoding.jsonl" | "core.encoding.csv" | "core.encoding.toml" | "core.encoding.validate" | "core.encoding.yaml" | "core.encoding.xml" | "core.encoding.cbor" | "core.encoding.hex" | "core.encoding.base64" | "core.encoding.base32" | "core.text" | "core.text.fmt" | "core.reflect" | "core.compiler" | "core.game" | "core.reactive.loadable" | "core.event" | "core.compute" | "core.compute.solve" | "core.time.expiring" | "core.reactive" | "core.data" | "core.data.plot" | "core.data.sketch.hll" | "core.data.sketch.tdigest" | "core.data.sketch.cms" | "core.data.sketch.reservoir" | "core.log" | "core.regex" | "core.net.url" | "core.net.mime" -> RuntimeLayer.Alloc
@@ -158,11 +158,11 @@ fn jet_ring_layer_of_module(module_name: String) -> RuntimeLayer Never! {
     }
 }
 
-fn jet_ring_core_module_layer(module_name: String) -> RuntimeLayer Never! {
+jet_ring_core_module_layer: fn(module_name: String) -> RuntimeLayer Never! {
     jet_ring_layer_of_module(module_name)
 }
 
-fn jet_ring_helper_layer(module_name: String, helper: String) -> RuntimeLayer? {
+jet_ring_helper_layer: fn(module_name: String, helper: String) -> RuntimeLayer? {
     if helper.len() == 0 -> return None
     if module_name == {
         "core.math" | "core.units" | "core.perf" | "core.mem.scope" -> Val(RuntimeLayer.Core)
@@ -200,10 +200,10 @@ fn jet_ring_helper_layer(module_name: String, helper: String) -> RuntimeLayer? {
     }
 }
 
-fn jet_ring_core_usage_layer(usage: String) -> RuntimeLayer Never! {
+jet_ring_core_usage_layer: fn(usage: String) -> RuntimeLayer Never! {
     if usage.starts_with("core::") {
-        bytes :: usage.bytes()
-        rest :: String.from_bytes(bytes.slice(6, bytes.len())) ?? ""
+        bytes: usage.bytes()
+        rest: String.from_bytes(bytes.slice(6, bytes.len())) ?? ""
         return if rest == {
             "json" | "bytes" -> RuntimeLayer.Alloc
             "from_bytes" | "from_bytes_lossy" -> RuntimeLayer.Core
@@ -221,7 +221,7 @@ fn jet_ring_core_usage_layer(usage: String) -> RuntimeLayer Never! {
     jet_ring_helper_layer(module_name, helper) ?? jet_ring_layer_of_module(module_name)
 }
 
-fn jet_ring_dependency_keys(usage: String) -> [String] Never! {
+jet_ring_dependency_keys: fn(usage: String) -> [String] Never! {
     parts := usage.split("::").to_list()
     module_name := parts[0]
     helper := ""
@@ -253,7 +253,7 @@ fn jet_ring_dependency_keys(usage: String) -> [String] Never! {
     dependencies
 }
 
-fn jet_ring_insert_string(rows: &[String], value: String) Never! {
+jet_ring_insert_string: fn(rows: &[String], value: String) Never! {
     index := 0
     loop index < rows.len() {
         if rows[index] == value -> return
@@ -270,7 +270,7 @@ fn jet_ring_insert_string(rows: &[String], value: String) Never! {
 }
 
 // Stable scalar-position ordering, using the same key comparison as publication.
-fn jet_ring_closure_order(rows: [JetRingLayerFact]) -> [Int] Never! {
+jet_ring_closure_order: fn(rows: [JetRingLayerFact]) -> [Int] Never! {
     order := [Int]{}
     loop index in 0..<rows.len() -> &order.push(index)
     width := 1
@@ -278,8 +278,8 @@ fn jet_ring_closure_order(rows: [JetRingLayerFact]) -> [Int] Never! {
         merged := [Int]{}
         start := 0
         loop start < order.len() {
-            middle :: if start + width < order.len() -> start + width else -> order.len()
-            end :: if start + 2 * width < order.len() -> start + 2 * width else -> order.len()
+            middle: if start + width < order.len() -> start + width else -> order.len()
+            end: if start + 2 * width < order.len() -> start + 2 * width else -> order.len()
             left := start
             right := middle
             loop left < middle || right < end {
@@ -299,7 +299,7 @@ fn jet_ring_closure_order(rows: [JetRingLayerFact]) -> [Int] Never! {
     order
 }
 
-fn jet_ring_classify_prelude_closure(roots: [String]) -> [JetRingLayerFact] Never! {
+jet_ring_classify_prelude_closure: fn(roots: [String]) -> [JetRingLayerFact] Never! {
     pending := [String]{}
     pending_keys := [String:Bool]{}
     classified := [String:Bool]{}
@@ -312,7 +312,7 @@ fn jet_ring_classify_prelude_closure(roots: [String]) -> [JetRingLayerFact] Neve
     closure := [JetRingLayerFact]{}
     cursor := 0
     loop cursor < pending.len() {
-        current :: pending[cursor]
+        current: pending[cursor]
         cursor += 1
         pending_keys[current] = false
         classified[current] = true
@@ -324,21 +324,21 @@ fn jet_ring_classify_prelude_closure(roots: [String]) -> [JetRingLayerFact] Neve
             }
         }
     }
-    ordered :: loop index in jet_ring_closure_order(closure) -> closure[index]
+    ordered: loop index in jet_ring_closure_order(closure) -> closure[index]
     ordered
 }
 
-fn jet_ring_prelude_closure_keys(roots: [String]) -> [String] Never! {
-    keys :: loop row in jet_ring_classify_prelude_closure(roots) -> row.key
+jet_ring_prelude_closure_keys: fn(roots: [String]) -> [String] Never! {
+    keys: loop row in jet_ring_classify_prelude_closure(roots) -> row.key
     keys
 }
 
-fn jet_ring_prelude_closure_layer(roots: [String]) -> RuntimeLayer Never! {
+jet_ring_prelude_closure_layer: fn(roots: [String]) -> RuntimeLayer Never! {
     jet_ring_closure_rows_layer(jet_ring_classify_prelude_closure(roots))
 }
 
 // The highest layer among classified closure rows.
-fn jet_ring_closure_rows_layer(rows: [JetRingLayerFact]) -> RuntimeLayer Never! {
+jet_ring_closure_rows_layer: fn(rows: [JetRingLayerFact]) -> RuntimeLayer Never! {
     layer := RuntimeLayer.Core
     loop row in rows {
         if jet_ring_layer_rank(row.layer) > jet_ring_layer_rank(layer) -> layer = row.layer

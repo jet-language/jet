@@ -1,23 +1,23 @@
 
 use {
-    service :: core.service
-    testing :: core.testing
+    service: core.service
+    testing: core.testing
 }
 
-fn worker() {}
+worker: fn() {}
 
-fn run() {
+run: fn() {
     temp := testing.temp_dir("rollout-rollback")
-    path :: Path.from(temp).join("events.log").to_string()
+    path: Path.from(temp).join("events.log").to_string()
     tree := service.tree("rollback")
-    store :: service.state_store(path) ?? panic("store")
+    store: service.state_store(path) ?? panic("store")
     &tree.set_state_event_log(store, "events", 1, "reversible") ?? panic("state")
-    endpoint :: &tree.worker("api", worker, capacity: 1) ?? panic("worker")
+    endpoint: &tree.worker("api", worker, capacity: 1) ?? panic("worker")
     &tree.start() ?? panic("start")
     &tree.append_event("before") ?? panic("before")
     &tree.drain_worker(endpoint) ?? panic("drain")
     &tree.handoff_generation() ?? panic("handoff")
-    receipt :: tree.upgrade_receipt() ?? panic("receipt")
+    receipt: tree.upgrade_receipt() ?? panic("receipt")
     print("receipt:{receipt}")
     &tree.append_event("after") ?? panic("after")
     if &tree.rollback_generation() == {

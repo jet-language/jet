@@ -1,33 +1,33 @@
 
-use json :: core.encoding.json
+use json: core.encoding.json
 
 #CLI
-struct Args {
+Args: struct {
     #Doc("count") count: Int{1}
 }
 
-struct Pair {
+Pair: struct {
     left: Int
     right: Int
 }
 
-enum Mark {
+Mark: enum {
     Low
     High
 }
 
 #Codable
-struct Envelope<T> {
+Envelope: struct<T> {
     value: T
 }
 
-fn run(args: Args) {
-    pair :: Pair{left: args.count, right: 2}
-    other :: Pair{left: 2, right: 3}
+run: fn(args: Args) {
+    pair: Pair{left: args.count, right: 2}
+    other: Pair{left: 2, right: 3}
     print(pair == other)
     print(pair < other)
     print(Mark.Low == Mark.Low)
-    wire :: json.to_string(Envelope<Int>{value: args.count})
-    decoded :: json.decode<Envelope<Int>>(wire) ?? panic("decode")
+    wire: json.to_string(Envelope<Int>{value: args.count})
+    decoded: json.decode<Envelope<Int>>(wire) ?? panic("decode")
     print(decoded.value)
 }

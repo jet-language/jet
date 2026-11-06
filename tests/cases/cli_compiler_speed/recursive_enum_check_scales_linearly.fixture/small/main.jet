@@ -1,27 +1,27 @@
-enum Tree {
+Tree: enum {
     Leaf(Int)
     Branch(left: Tree, right: Forest)
     Tagged(label: String, body: Node)
 }
 
-enum Forest {
+Forest: enum {
     Empty
     Trees([Tree])
     Linked(head: Tree, rest: Forest)
 }
 
-enum Node {
+Node: enum {
     Plain(Int)
     Holds(Tree?)
     Grows(Forest)
 }
 
-struct Layer0 {
+Layer0: struct {
     tree: Tree
     node: Node
 }
 
-fn use_0(layer: Layer0) -> Int {
+use_0: fn(layer: Layer0) -> Int {
     if layer.tree == {
         .Leaf(value) -> value
         .Branch(_, _) -> 1
@@ -29,14 +29,14 @@ fn use_0(layer: Layer0) -> Int {
     }
 }
 
-struct Layer1 {
+Layer1: struct {
     left: Layer0
     right: Layer0
     tree: Tree
 }
 
-fn use_1(layer: Layer1) -> Int {
-    inner :: layer.left
+use_1: fn(layer: Layer1) -> Int {
+    inner: layer.left
     if layer.tree == {
         .Leaf(value) -> value + use_0(inner)
         .Branch(_, _) -> 1
@@ -48,14 +48,14 @@ fn use_1(layer: Layer1) -> Int {
     }
 }
 
-struct Layer2 {
+Layer2: struct {
     left: Layer1
     right: Layer1
     tree: Tree
 }
 
-fn use_2(layer: Layer2) -> Int {
-    inner :: layer.left
+use_2: fn(layer: Layer2) -> Int {
+    inner: layer.left
     if layer.tree == {
         .Leaf(value) -> value + use_1(inner)
         .Branch(_, _) -> 2
@@ -67,14 +67,14 @@ fn use_2(layer: Layer2) -> Int {
     }
 }
 
-struct Layer3 {
+Layer3: struct {
     left: Layer2
     right: Layer2
     tree: Tree
 }
 
-fn use_3(layer: Layer3) -> Int {
-    inner :: layer.left
+use_3: fn(layer: Layer3) -> Int {
+    inner: layer.left
     if layer.tree == {
         .Leaf(value) -> value + use_2(inner)
         .Branch(_, _) -> 3
@@ -86,14 +86,14 @@ fn use_3(layer: Layer3) -> Int {
     }
 }
 
-struct Layer4 {
+Layer4: struct {
     left: Layer3
     right: Layer3
     tree: Tree
 }
 
-fn use_4(layer: Layer4) -> Int {
-    inner :: layer.left
+use_4: fn(layer: Layer4) -> Int {
+    inner: layer.left
     if layer.tree == {
         .Leaf(value) -> value + use_3(inner)
         .Branch(_, _) -> 4
@@ -105,14 +105,14 @@ fn use_4(layer: Layer4) -> Int {
     }
 }
 
-struct Layer5 {
+Layer5: struct {
     left: Layer4
     right: Layer4
     tree: Tree
 }
 
-fn use_5(layer: Layer5) -> Int {
-    inner :: layer.left
+use_5: fn(layer: Layer5) -> Int {
+    inner: layer.left
     if layer.tree == {
         .Leaf(value) -> value + use_4(inner)
         .Branch(_, _) -> 5
@@ -124,14 +124,14 @@ fn use_5(layer: Layer5) -> Int {
     }
 }
 
-struct Layer6 {
+Layer6: struct {
     left: Layer5
     right: Layer5
     tree: Tree
 }
 
-fn use_6(layer: Layer6) -> Int {
-    inner :: layer.left
+use_6: fn(layer: Layer6) -> Int {
+    inner: layer.left
     if layer.tree == {
         .Leaf(value) -> value + use_5(inner)
         .Branch(_, _) -> 6
@@ -143,6 +143,6 @@ fn use_6(layer: Layer6) -> Int {
     }
 }
 
-fn run() {
+run: fn() {
     print(use_0(Layer0{tree: Tree.Leaf(1), node: Node.Plain(2)}))
 }

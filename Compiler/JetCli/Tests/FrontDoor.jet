@@ -7,7 +7,7 @@ use {
     jet_driver.[JET_DRIVER_EXIT_USAGE]
 }
 
-fn cli_front_fixture_done(plan: JetCLIPlan, stdout: String, stderr: String, code: Int) Never! {
+cli_front_fixture_done: fn(plan: JetCLIPlan, stdout: String, stderr: String, code: Int) Never! {
     if plan == {
         .Done(output) -> {
             if output.stdout != stdout || output.stderr != stderr || output.exit_code != code -> panic("front-door streams/status")
@@ -16,7 +16,7 @@ fn cli_front_fixture_done(plan: JetCLIPlan, stdout: String, stderr: String, code
     }
 }
 
-fn cli_front_fixture_engine(plan: JetCLIPlan, verb: String, argv: [String]) Never! {
+cli_front_fixture_engine: fn(plan: JetCLIPlan, verb: String, argv: [String]) Never! {
     if plan == {
         .InspectB(.Engine(engine, actual_verb, actual_argv)) -> {
             if engine != JET_CLI_JETPACK_BINARY || actual_verb != verb || actual_argv != argv -> panic("opaque engine dispatch must retain argv exactly")
@@ -27,16 +27,16 @@ fn cli_front_fixture_engine(plan: JetCLIPlan, verb: String, argv: [String]) Neve
 
 #Test("front_door") {
     loop verb in ([String]{"cc", "c++"}) {
-        argv :: [String]{verb, "--version", "--help", "--unknown-compiler-option", "--", "source with spaces.c", "-Werror"}
+        argv: [String]{verb, "--version", "--help", "--unknown-compiler-option", "--", "source with spaces.c", "-Werror"}
         cli_front_fixture_engine(jet_cli_plan(argv), verb, argv)
     }
     loop verb in ([String]{"shared-store", "trust", "image", "os", "search", "clean"}) {
-        argv :: [String]{verb, "--unknown-engine-option", "--", "argument with spaces", "--json"}
-        forwarded :: jet_cli_engine_commands(verb, argv) ?? panic("registered engine verb")
+        argv: [String]{verb, "--unknown-engine-option", "--", "argument with spaces", "--json"}
+        forwarded: jet_cli_engine_commands(verb, argv) ?? panic("registered engine verb")
         cli_front_fixture_engine(forwarded, verb, argv)
     }
-    env_argv :: [String]{"--quiet", "env", "run", "--", "--help", "argument with spaces"}
-    forwarded_env :: jet_cli_engine_commands("env", env_argv) ?? panic("env forwarding")
+    env_argv: [String]{"--quiet", "env", "run", "--", "--help", "argument with spaces"}
+    forwarded_env: jet_cli_engine_commands("env", env_argv) ?? panic("env forwarding")
     cli_front_fixture_engine(forwarded_env, "env", [String]{"env", "--quiet", "run", "--", "--help", "argument with spaces"})
     if jet_cli_engine_commands("check", [String]{"check", "source.jet"}) != None -> panic("compiler verbs must not become engine dispatch")
     cli_front_fixture_done(jet_cli_renderable("human\n", false), "human\n", "", 0)
@@ -45,7 +45,7 @@ fn cli_front_fixture_engine(plan: JetCLIPlan, verb: String, argv: [String]) Neve
     cli_front_fixture_done(jet_cli_plan([String]{"help", "--json"}), "", "", 0)
     cli_front_fixture_done(jet_cli_plan([String]{"--version", "--json"}), "", "", 0)
     cli_front_fixture_done(jet_cli_plan([String]{"help", "diff"}), jet_cli_structural_help("diff") ?? panic("diff help"), "", 0)
-    invalid :: jet_cli_help([String]{"help", "--sort=not-an-order"}, [String]{"help"}, None, false, true)
+    invalid: jet_cli_help([String]{"help", "--sort=not-an-order"}, [String]{"help"}, None, false, true)
     if invalid == {
         .Refused(report, _, code, _) -> {
             if report.code != "E2104" || code != 2 -> panic("machine mode never hides invalid help ordering")
@@ -55,7 +55,7 @@ fn cli_front_fixture_engine(plan: JetCLIPlan, verb: String, argv: [String]) Neve
 }
 
 #Test("try front door carries exact plan keep and JSON selections") {
-    cases :: [(keep: Bool, json: Bool, quiet: Bool)]{(keep: false, json: false, quiet: false), (keep: true, json: false, quiet: false), (keep: false, json: true, quiet: false), (keep: true, json: true, quiet: true)}
+    cases: [(keep: Bool, json: Bool, quiet: Bool)]{(keep: false, json: false, quiet: false), (keep: true, json: false, quiet: false), (keep: false, json: true, quiet: false), (keep: true, json: true, quiet: true)}
     loop selected in cases {
         argv := [String]{"try", "plan with spaces.json", "ignored-extra-target"}
         if selected.keep -> &argv.push("--keep")
@@ -75,8 +75,8 @@ fn cli_front_fixture_engine(plan: JetCLIPlan, verb: String, argv: [String]) Neve
     cli_front_fixture_done(jet_cli_plan([String]{"try", "--json"}), "", "", JET_DRIVER_EXIT_USAGE)
 }
 
-fn cli_front_alias_fixture(alias: String, verb: String) Never! {
-    tail :: [String]{"-c", "main.c", "--", "source with spaces.c"}
+cli_front_alias_fixture: fn(alias: String, verb: String) Never! {
+    tail: [String]{"-c", "main.c", "--", "source with spaces.c"}
     argv := [String]{alias}
     expected := [String]{}
     if verb != "" -> &expected.push(verb)

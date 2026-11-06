@@ -18,23 +18,23 @@ or cross an unsafe foreign boundary without an enclosing audited gate. Write
 the gate with Pascal-case `Unsafe` and a string reason:
 
 ```jet
-cell :: 1
+cell: 1
 #Unsafe("`cell` is live on this stack frame and the pointer never escapes") {
-    ptr :: *cell
-    value :: ptr.*
+    ptr: *cell
+    value: ptr.*
 }
 ```
 
 The same contract applies to a whole function:
 
 ```jet
-#Unsafe("the foreign ABI preserves the scalar contract") fn add(a: Int, b: Int) -> Int {
+#Unsafe("the foreign ABI preserves the scalar contract") add: fn(a: Int, b: Int) -> Int {
     a + b
 }
 ```
 
 The reason belongs to `#Unsafe` itself. Bare `#Unsafe { … }` and
-`#Unsafe fn …` are rejected (E3112). Lowercase `unsafe` is recognized only to
+`#Unsafe name: fn …` are rejected (E3112). Lowercase `unsafe` is recognized only to
 teach the foreign-spelling diagnostic; it is not Jet syntax. An unsafe function
 body is an audited region, but calling an unsafe function still requires an
 enclosing `#Unsafe` region.
@@ -9263,7 +9263,7 @@ sema. Two rules hold there:
   below as a safe abstraction with its proof, it fails: a plain public `fn`
   around a gated operation would let safe code reach that operation with no
   gate of its own. A wrapper whose caller must vouch for the operation is
-  written `#Unsafe("<caller contract>") fn …` instead, so every call needs its own
+  written `#Unsafe("<caller contract>") name: fn …` instead, so every call needs its own
   `#Unsafe` region (E3103), whether it goes through the module alias or a
   direct import. `core.mem.from_addr`, `volatile_read`, `volatile_write` and
   the `core.sys` POSIX controls are such functions.

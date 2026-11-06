@@ -13,7 +13,7 @@ use jet_foundation.[Diagnostic, EffectRowEntry, EnumDef, Func, Item, NamedSpan, 
 
 // One function's partition inputs, read from its declaration and its checked
 // body (`slot`/`row` in the module results; row -1 when it has none).
-struct SemaWebMeta {
+SemaWebMeta: struct {
     key: String
     name: String
     name_span: Span
@@ -28,23 +28,23 @@ struct SemaWebMeta {
 
 // The struct and enum declarations of every module, by name, for the
 // `#Codable` ABI rule.
-struct SemaWebTypes {
+SemaWebTypes: struct {
     structs: [String:StructDef]
     enums: [String:EnumDef]
 }
 
-fn sema_web_partition_check(modules: &[SemaGraphModuleResult], graph: SemaRegistrationGraph, diagnostics: &[Diagnostic]) Never! {
+sema_web_partition_check: fn(modules: &[SemaGraphModuleResult], graph: SemaRegistrationGraph, diagnostics: &[Diagnostic]) Never! {
     metas := [SemaWebMeta]{}
     types := SemaWebTypes{structs: [String:StructDef]{}, enums: [String:EnumDef]{}}
     loop module_index in 0..<modules.len() {
-        registration :: sema_registration_module_index(graph, modules[module_index].module_identity) ?? next
-        program :: graph.modules[registration].program
-        is_entry :: graph.modules[registration].module_identity == graph.entry_module_identity
-        file_prefix :: if is_entry -> String?{None} else -> Val(graph.modules[registration].module_name)
+        registration: sema_registration_module_index(graph, modules[module_index].module_identity) ?? next
+        program: graph.modules[registration].program
+        is_entry: graph.modules[registration].module_identity == graph.entry_module_identity
+        file_prefix: if is_entry -> String?{None} else -> Val(graph.modules[registration].module_name)
         sema_web_collect(program.items, program.web_target_ceiling, None, None, file_prefix, module_index, registration, modules, &metas, &types)
     }
     if metas.len() == 0 -> return
-    active :: sema_web_partition_active(graph)
+    active: sema_web_partition_active(graph)
     rows := [String:Int]{}
     loop at in 0..<metas.len() {
         if metas[at].row >= 0 -> rows[modules[metas[at].slot].functions[metas[at].row].key] = at
@@ -60,7 +60,7 @@ fn sema_web_partition_check(modules: &[SemaGraphModuleResult], graph: SemaRegist
         loop caller in 0..<metas.len() {
             if metas[caller].row < 0 -> next
             loop edge in modules[metas[caller].slot].functions[metas[caller].row].effects.call_edges {
-                callee :: rows.get(edge) ?? next
+                callee: rows.get(edge) ?? next
                 if buckets[caller] == .Wasm && buckets[callee] == .JS && metas[caller].marker == None && metas[caller].ceiling == None {
                     buckets[caller] = WebBucket.JS
                     changed = true
@@ -76,7 +76,7 @@ fn sema_web_partition_check(modules: &[SemaGraphModuleResult], graph: SemaRegist
     }
     if !active -> return
     loop at in 0..<metas.len() {
-        meta :: metas[at]
+        meta: metas[at]
         found := [Diagnostic]{}
         if meta.marker == .Val(.WasmExport) {
             loop param in meta.params {
@@ -86,13 +86,13 @@ fn sema_web_partition_check(modules: &[SemaGraphModuleResult], graph: SemaRegist
                 if !sema_web_abi_safe(ret, types) -> &found.push(sema_web_abi_type(ret, "as a `#WasmExport` return type", meta.name_span))
             }
         }
-        uses_browser :: buckets[at] == .Wasm && sema_web_has_root(sema_web_solved(modules, meta), "Browser")
+        uses_browser: buckets[at] == .Wasm && sema_web_has_root(sema_web_solved(modules, meta), "Browser")
         if uses_browser {
             &found.push(sema_error("E-WEB-TARGET-BROWSER", meta.name_span, "`{meta.name}` is pinned to Wasm but uses the `Browser` effect", "the web backend keeps DOM/view code in JS and compute in WASM; a Wasm-pinned function cannot call browser APIs directly", "remove the `#Target(Wasm)` pin, move browser work into a `#Target(JS)` function, or drop the browser API calls"))
         }
         if meta.row >= 0 {
             loop edge in modules[meta.slot].functions[meta.row].effects.call_edges {
-                callee :: rows.get(edge) ?? next
+                callee: rows.get(edge) ?? next
                 if buckets[at] == buckets[callee] -> next
                 // The one sanctioned crossing: JS calling a `#WasmExport`.
                 if buckets[at] == .JS && metas[callee].marker == .Val(.WasmExport) -> next
@@ -112,7 +112,7 @@ fn sema_web_partition_check(modules: &[SemaGraphModuleResult], graph: SemaRegist
 // `#Target` ceiling or a function a web marker. Before it does, the partition
 // only stamps buckets, so a check that leaves some bodies unchecked
 // (CoreDemand.jet) reports what checking every body would.
-fn sema_web_partition_active(graph: SemaRegistrationGraph) -> Bool Never! {
+sema_web_partition_active: fn(graph: SemaRegistrationGraph) -> Bool Never! {
     loop module_index in 0..<graph.modules.len() {
         if graph.modules[module_index].program.web_target_ceiling != None || sema_web_items_marked(graph.modules[module_index].program.items) -> return true
     }
@@ -120,7 +120,7 @@ fn sema_web_partition_active(graph: SemaRegistrationGraph) -> Bool Never! {
 }
 
 // Whether a function sema_web_collect visits in `items` has a web marker.
-fn sema_web_items_marked(items: [Item]) -> Bool Never! {
+sema_web_items_marked: fn(items: [Item]) -> Bool Never! {
     loop item in items {
         if item == {
             .Func(function) -> {
@@ -152,14 +152,14 @@ fn sema_web_items_marked(items: [Item]) -> Bool Never! {
     false
 }
 
-fn sema_web_methods_marked(methods: [Func]) -> Bool Never! {
+sema_web_methods_marked: fn(methods: [Func]) -> Bool Never! {
     loop method in methods {
         if method.web_marker != None -> return true
     }
     false
 }
 
-fn sema_web_collect(items: [Item], file_ceiling: WebBucket?, module_ceiling: WebBucket?, module_prefix: String?, file_prefix: String?, module_index: Int, registration: Int, modules: [SemaGraphModuleResult], metas: &[SemaWebMeta], types: &SemaWebTypes) Never! {
+sema_web_collect: fn(items: [Item], file_ceiling: WebBucket?, module_ceiling: WebBucket?, module_prefix: String?, file_prefix: String?, module_index: Int, registration: Int, modules: [SemaGraphModuleResult], metas: &[SemaWebMeta], types: &SemaWebTypes) Never! {
     loop item in items {
         if item == {
             .Func(function) -> sema_web_push(function, None, file_ceiling, module_ceiling, module_prefix, file_prefix, module_index, registration, modules, &metas)
@@ -182,7 +182,7 @@ fn sema_web_collect(items: [Item], file_ceiling: WebBucket?, module_ceiling: Web
             }
             .CodeModule(code_module) -> {
                 if code_module.body == .Val(body) {
-                    inner :: sema_web_ceiling_or(code_module.web_target, sema_web_ceiling_or(module_ceiling, file_ceiling))
+                    inner: sema_web_ceiling_or(code_module.web_target, sema_web_ceiling_or(module_ceiling, file_ceiling))
                     sema_web_collect(body, file_ceiling, inner, Val(code_module.name), file_prefix, module_index, registration, modules, &metas, &types)
                 }
             }
@@ -191,8 +191,8 @@ fn sema_web_collect(items: [Item], file_ceiling: WebBucket?, module_ceiling: Web
     }
 }
 
-fn sema_web_push(function: Func, owner: String?, file_ceiling: WebBucket?, module_ceiling: WebBucket?, module_prefix: String?, file_prefix: String?, module_index: Int, registration: Int, modules: [SemaGraphModuleResult], metas: &[SemaWebMeta]) Never! {
-    name :: if owner == .Val(owner_name) -> "{owner_name}::{function.name}" else -> function.name
+sema_web_push: fn(function: Func, owner: String?, file_ceiling: WebBucket?, module_ceiling: WebBucket?, module_prefix: String?, file_prefix: String?, module_index: Int, registration: Int, modules: [SemaGraphModuleResult], metas: &[SemaWebMeta]) Never! {
+    name: if owner == .Val(owner_name) -> "{owner_name}::{function.name}" else -> function.name
     key := name
     if module_prefix == .Val(module_name) {
         key = "{module_name}::{name}"
@@ -200,7 +200,7 @@ fn sema_web_push(function: Func, owner: String?, file_ceiling: WebBucket?, modul
         key = "{alias}::{name}"
     }
     row := -1
-    functions :: modules[module_index].functions
+    functions: modules[module_index].functions
     loop at in 0..<functions.len() {
         if functions[at].source_span == function.span {
             row = at
@@ -209,23 +209,23 @@ fn sema_web_push(function: Func, owner: String?, file_ceiling: WebBucket?, modul
     }
     params := [Type]{}
     loop param in function.params -> &params.push(param.ty)
-    ceiling :: sema_web_ceiling_or(module_ceiling, file_ceiling)
+    ceiling: sema_web_ceiling_or(module_ceiling, file_ceiling)
     &metas.push(SemaWebMeta{key: key, name: name, name_span: function.name_span, marker: function.web_marker, ceiling: ceiling, params: params, ret: function.return_type, slot: module_index, row: row, registration: registration})
 }
 
-fn sema_web_ceiling_or(first: WebBucket?, second: WebBucket?) -> WebBucket? Never! {
+sema_web_ceiling_or: fn(first: WebBucket?, second: WebBucket?) -> WebBucket? Never! {
     if first != None -> return first.copy()
     second.copy()
 }
 
-fn sema_web_solved(modules: [SemaGraphModuleResult], meta: SemaWebMeta) -> [String] Never! {
+sema_web_solved: fn(modules: [SemaGraphModuleResult], meta: SemaWebMeta) -> [String] Never! {
     if meta.row < 0 -> return [String]{}
     modules[meta.slot].functions[meta.row].effects.solved
 }
 
 // Rust `checked_web_bucket`: the marker, the `Browser` effect, the ceiling,
 // a `Stream` result (a JS generator), then Wasm.
-fn sema_web_bucket(meta: SemaWebMeta, solved: [String]) -> WebBucket Never! {
+sema_web_bucket: fn(meta: SemaWebMeta, solved: [String]) -> WebBucket Never! {
     if meta.marker == .Val(marker) {
         if marker == .JS -> return WebBucket.JS
         return WebBucket.Wasm
@@ -240,26 +240,26 @@ fn sema_web_bucket(meta: SemaWebMeta, solved: [String]) -> WebBucket Never! {
     WebBucket.Wasm
 }
 
-fn sema_web_has_root(effects: [String], root: String) -> Bool Never! {
+sema_web_has_root: fn(effects: [String], root: String) -> Bool Never! {
     loop row in effects {
         if row == root || row.starts_with("{root}.") -> return true
     }
     false
 }
 
-fn sema_web_bucket_name(bucket: WebBucket) -> String Never! {
+sema_web_bucket_name: fn(bucket: WebBucket) -> String Never! {
     if bucket == .JS -> return "JS"
     "Wasm"
 }
 
-fn sema_web_abi_type(ty: Type, context: String, span: Span) -> Diagnostic Never! {
+sema_web_abi_type: fn(ty: Type, context: String, span: Span) -> Diagnostic Never! {
     sema_error("E-WEB-ABI-TYPE", span, "`{sema_web_type_show(ty)}` cannot cross the JS/WASM boundary {context}", "web exports and imports only admit ABI-safe types (scalars, `String`, `List`/`Map` of ABI-safe values, and `#[Codable]` structs/enums)", "use a scalar, `String`, a `List`/`Map` of ABI-safe values, or a `#[Codable]` struct/enum whose fields are ABI-safe")
 }
 
 // D-JSBIND1=A: scalars, `String`, lists, options and shared cells of ABI-safe
 // values, `String`-keyed maps of them, and `#Codable` structs and enums whose
 // fields (or applied arguments) are ABI-safe.
-fn sema_web_abi_safe(ty: Type, types: SemaWebTypes) -> Bool Never! {
+sema_web_abi_safe: fn(ty: Type, types: SemaWebTypes) -> Bool Never! {
     if ty == {
         .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 -> true
         .List(inner) | .Option(inner) | .Shared(inner) -> sema_web_abi_safe(inner, types)
@@ -271,7 +271,7 @@ fn sema_web_abi_safe(ty: Type, types: SemaWebTypes) -> Bool Never! {
     }
 }
 
-fn sema_web_codable_named(name: String, args: [Type], types: SemaWebTypes) -> Bool Never! {
+sema_web_codable_named: fn(name: String, args: [Type], types: SemaWebTypes) -> Bool Never! {
     if types.structs.get(name) == .Val(structure) {
         if !sema_web_codable(structure.derives) -> return false
         if structure.type_params.len() > 0 && args.len() > 0 {
@@ -315,10 +315,10 @@ fn sema_web_codable_named(name: String, args: [Type], types: SemaWebTypes) -> Bo
 
 // Whether the derives give the type every codec trait: each one named, or a
 // family marker (`Codable`) that derives them.
-fn sema_web_codable(derives: [NamedSpan]) -> Bool Never! {
+sema_web_codable: fn(derives: [NamedSpan]) -> Bool Never! {
     covered := [String]{}
     loop marker in derives {
-        family :: owned_trait_family(marker.name, false)
+        family: owned_trait_family(marker.name, false)
         if family.len() == 0 -> &covered.push(marker.name.copy())
         loop member in family -> &covered.push(member.copy())
     }
@@ -330,7 +330,7 @@ fn sema_web_codable(derives: [NamedSpan]) -> Bool Never! {
 
 // Rust `type_show`: source spellings for the common types; any other type
 // is shown in the Rust reference's derived `Debug` form.
-fn sema_web_type_show(ty: Type) -> String Never! {
+sema_web_type_show: fn(ty: Type) -> String Never! {
     if ty == {
         .Int -> "Int"
         .Float -> "Float"
@@ -345,20 +345,20 @@ fn sema_web_type_show(ty: Type) -> String Never! {
     }
 }
 
-fn sema_web_type_debug_list(types: [Type]) -> String Never! {
+sema_web_type_debug_list: fn(types: [Type]) -> String Never! {
     shown := [String]{}
     loop ty in types -> &shown.push(sema_web_type_debug(ty))
     "[{shown.join(", ")}]"
 }
 
-fn sema_web_type_debug_option(ty: Type?) -> String Never! {
+sema_web_type_debug_option: fn(ty: Type?) -> String Never! {
     if ty == .Val(inner) -> return "Some({sema_web_type_debug(inner)})"
     "None"
 }
 
 // The Rust reference's derived `Debug` of its `Type`, for the variants an
 // ABI check can meet.
-fn sema_web_type_debug(ty: Type) -> String Never! {
+sema_web_type_debug: fn(ty: Type) -> String Never! {
     if ty == {
         .Int -> "Int"
         .Float -> "Float"
@@ -378,7 +378,7 @@ fn sema_web_type_debug(ty: Type) -> String Never! {
     }
 }
 
-fn sema_web_fn_debug(params: [Type], ret: Type?, effect_bound: [EffectRowEntry]?) -> String Never! {
-    bound :: if effect_bound == None -> "None" else -> "Some(..)"
+sema_web_fn_debug: fn(params: [Type], ret: Type?, effect_bound: [EffectRowEntry]?) -> String Never! {
+    bound: if effect_bound == None -> "None" else -> "Some(..)"
     "Fn {{ params: {sema_web_type_debug_list(params)}, ret: {sema_web_type_debug_option(ret)}, effect_bound: {bound} }}"
 }

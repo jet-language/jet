@@ -1,36 +1,36 @@
 // Claims ported from crates/jetpack/src/Doctor.rs #[cfg(test)].
 
-fn cli_doctor_test_scratch(label: String) -[FS]> String {
+cli_doctor_test_scratch: fn(label: String) -[FS]> String {
     files.tmpdir("doctor-{label}-") ?? panic("claim doctor scratch")
 }
 
-fn cli_doctor_test_roots(root: String) -> HangarRoots {
+cli_doctor_test_roots: fn(root: String) -> HangarRoots {
     HangarRoots{root: root, dev_mode: false}
 }
 
 // One observed node: its path relative to the scratch root, its kind, and
 // its bytes (a symlink's target for links).
-struct DoctorTreeNode {
+DoctorTreeNode: struct {
     relative: String
     kind: String
     bytes: [U8]
 }
 
 // Every node under `root` in sorted path order, without following links.
-fn cli_doctor_test_tree(root: String) -[FS]> [DoctorTreeNode] {
+cli_doctor_test_tree: fn(root: String) -[FS]> [DoctorTreeNode] {
     out := [DoctorTreeNode]{}
     if files.lexists(root) -> cli_doctor_test_walk(root, root, &out)
     out
 }
 
-fn cli_doctor_test_walk(root: String, path: String, out: &[DoctorTreeNode]) -[FS]> {
-    info :: files.stat(path) ?? return
-    relative :: files.relative(path, root)
+cli_doctor_test_walk: fn(root: String, path: String, out: &[DoctorTreeNode]) -[FS]> {
+    info: files.stat(path) ?? return
+    relative: files.relative(path, root)
     if {
         info.is_symlink -> &out.push(DoctorTreeNode{relative: relative, kind: "symlink", bytes: (files.read_link(path) ?? panic("read link")).bytes()})
         info.is_dir -> {
             &out.push(DoctorTreeNode{relative: relative, kind: "dir", bytes: [U8]{}})
-            entries :: files.list_dir(path) ?? panic("list scratch directory")
+            entries: files.list_dir(path) ?? panic("list scratch directory")
             children := [String]{}
             loop entry in entries -> &children.push(entry.path)
             &children.sort()
@@ -40,7 +40,7 @@ fn cli_doctor_test_walk(root: String, path: String, out: &[DoctorTreeNode]) -[FS
     }
 }
 
-fn cli_doctor_test_trees_equal(left: [DoctorTreeNode], right: [DoctorTreeNode]) -> Bool {
+cli_doctor_test_trees_equal: fn(left: [DoctorTreeNode], right: [DoctorTreeNode]) -> Bool {
     if left.len() != right.len() -> return false
     loop i in 0..<left.len() {
         if left[i].relative != right[i].relative || left[i].kind != right[i].kind || left[i].bytes != right[i].bytes -> return false
@@ -50,8 +50,8 @@ fn cli_doctor_test_trees_equal(left: [DoctorTreeNode], right: [DoctorTreeNode]) 
 
 #Test("doctor hangar enumeration rejects missing and malformed metadata") {
     verification := StoreVerification.new()
-    root :: cli_doctor_test_scratch("enumeration")
-    roots :: cli_doctor_test_roots(root)
+    root: cli_doctor_test_scratch("enumeration")
+    roots: cli_doctor_test_roots(root)
     files.create_dir_all(files.join(roots.hangar_dir(), "missing-meta")) ?? panic("create object")
     assert(cli_doctor_check_hangar(&verification, roots).detail.contains("has no metadata"))
     files.remove_all(files.join(roots.hangar_dir(), "missing-meta")) ?? panic("remove object")
@@ -62,18 +62,18 @@ fn cli_doctor_test_trees_equal(left: [DoctorTreeNode], right: [DoctorTreeNode]) 
 }
 
 #Test("doctor lock health uses kernel state not pid or file contents") {
-    root :: cli_doctor_test_scratch("locks")
+    root: cli_doctor_test_scratch("locks")
     files.create_dir_all(files.join(root, ".locks")) ?? panic("create locks")
     files.write(files.join(root, ".locks/stale.lock"), "pid=4294967294\n") ?? panic("write stale lock")
-    roots :: cli_doctor_test_roots(root)
+    roots: cli_doctor_test_roots(root)
     assert_eq(cli_doctor_check_locks(root, roots).health, DoctorHealth.Healthy)
-    guard :: env_acquire_lock(root, "held") ?? panic("acquire held lock")
+    guard: env_acquire_lock(root, "held") ?? panic("acquire held lock")
     assert_eq(cli_doctor_check_locks(root, roots).health, DoctorHealth.Degraded)
     close(^guard)
 
-    policy_root :: cli_doctor_test_scratch("lock-read-errors")
+    policy_root: cli_doctor_test_scratch("lock-read-errors")
     files.write(files.join(policy_root, ".locks"), "not a directory") ?? panic("write lock file")
-    policy_roots :: cli_doctor_test_roots(policy_root)
+    policy_roots: cli_doctor_test_roots(policy_root)
     assert(cli_doctor_check_locks(root, policy_roots).detail.contains("directory unreadable"))
     files.remove(files.join(policy_root, ".locks")) ?? panic("remove lock file")
     files.create_dir_all(files.join(policy_root, ".locks")) ?? panic("create locks")
@@ -86,17 +86,17 @@ fn cli_doctor_test_trees_equal(left: [DoctorTreeNode], right: [DoctorTreeNode]) 
 }
 
 #Test("doctor lease health uses kernel state and is read only") {
-    root :: cli_doctor_test_scratch("leases")
-    leases :: files.join(root, "leases")
-    live :: files.join(leases, "{process.current_pid()}-1-live")
+    root: cli_doctor_test_scratch("leases")
+    leases: files.join(root, "leases")
+    live: files.join(leases, "{process.current_pid()}-1-live")
     files.create_dir_all(live) ?? panic("create live lease")
-    live_lock :: env_acquire_lease_lock(live, "live") ?? panic("hold live lease")
-    stale :: files.join(leases, "4294967294-2-stale")
+    live_lock: env_acquire_lease_lock(live, "live") ?? panic("hold live lease")
+    stale: files.join(leases, "4294967294-2-stale")
     files.create_dir_all(files.join(stale, "snapshot")) ?? panic("create stale lease")
     files.write(files.join(stale, "snapshot/partial"), "interrupted") ?? panic("write partial snapshot")
-    roots :: cli_doctor_test_roots(root)
-    before :: cli_doctor_test_tree(root)
-    check :: cli_doctor_check_leases(roots)
+    roots: cli_doctor_test_roots(root)
+    before: cli_doctor_test_tree(root)
+    check: cli_doctor_check_leases(roots)
     assert_eq(check.health, DoctorHealth.Degraded)
     assert(check.detail.contains("1 stale executable lease"))
     assert(check.detail.contains("1 active lease"))
@@ -107,25 +107,25 @@ fn cli_doctor_test_trees_equal(left: [DoctorTreeNode], right: [DoctorTreeNode]) 
 
 #Test("doctor hangar check is byte for byte read only") {
     verification := StoreVerification.new()
-    root :: cli_doctor_test_scratch("read-only")
-    roots :: cli_doctor_test_roots(root)
+    root: cli_doctor_test_scratch("read-only")
+    roots: cli_doctor_test_roots(root)
     files.create_dir_all(roots.hangar_dir()) ?? panic("create hangar")
-    before :: cli_doctor_test_tree(root)
+    before: cli_doctor_test_tree(root)
     cli_doctor_check_hangar(&verification, roots)
     assert(cli_doctor_test_trees_equal(cli_doctor_test_tree(root), before))
     assert(!files.exists(files.join(root, ".locks")))
 
     files.create_dir_all(files.join(root, ".locks")) ?? panic("create locks")
-    guard :: env_acquire_lock(root, "hangar") ?? panic("hold hangar lock")
-    held_before :: cli_doctor_test_tree(root)
+    guard: env_acquire_lock(root, "hangar") ?? panic("hold hangar lock")
+    held_before: cli_doctor_test_tree(root)
     assert_eq(cli_doctor_check_hangar(&verification, roots).health, DoctorHealth.Degraded)
     assert(cli_doctor_test_trees_equal(cli_doctor_test_tree(root), held_before))
     close(^guard)
 
-    journal :: files.join(roots.hangar_dir(), "closure-db/journal")
+    journal: files.join(roots.hangar_dir(), "closure-db/journal")
     files.create_dir_all(journal) ?? panic("create journal")
     files.write(files.join(journal, "00000000000000000001-corrupt.txn"), "corrupt") ?? panic("write corrupt journal")
-    journal_before :: cli_doctor_test_tree(root)
+    journal_before: cli_doctor_test_tree(root)
     assert_eq(cli_doctor_check_hangar(&verification, roots).health, DoctorHealth.Degraded)
     assert(cli_doctor_test_trees_equal(cli_doctor_test_tree(root), journal_before))
     files.remove_all(root) ?? panic("remove scratch")
@@ -133,9 +133,9 @@ fn cli_doctor_test_trees_equal(left: [DoctorTreeNode], right: [DoctorTreeNode]) 
 
 #Test("doctor absent hangar check does not initialize store") {
     verification := StoreVerification.new()
-    scratch :: cli_doctor_test_scratch("absent")
-    root :: files.join(scratch, "root")
-    roots :: cli_doctor_test_roots(root)
+    scratch: cli_doctor_test_scratch("absent")
+    root: files.join(scratch, "root")
+    roots: cli_doctor_test_roots(root)
     // A never-initialized store is a normal fresh-machine state, not a
     // health finding; the check must stay read-only either way.
     assert_eq(cli_doctor_check_hangar(&verification, roots).health, DoctorHealth.Healthy)
@@ -144,11 +144,11 @@ fn cli_doctor_test_trees_equal(left: [DoctorTreeNode], right: [DoctorTreeNode]) 
 }
 
 #Test("doctor key pair check derives the public key with Core Ed25519") {
-    scratch :: cli_doctor_test_scratch("signing")
-    secret :: files.join(scratch, "jet.ed25519")
+    scratch: cli_doctor_test_scratch("signing")
+    secret: files.join(scratch, "jet.ed25519")
     // RFC 8032 section 7.1 TEST 1 seed and public key; TEST 2's public key
     // is a well-formed key that does not belong to this seed.
-    seed :: hex.decode("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60") ?? panic("decode seed")
+    seed: hex.decode("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60") ?? panic("decode seed")
     files.write_bytes(secret, seed) ?? panic("write seed")
     assert_eq(cli_doctor_key_pair_matches(secret, "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a") ?? panic("check matching pair"), true)
     assert_eq(cli_doctor_key_pair_matches(secret, "3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c") ?? panic("check mismatched pair"), false)

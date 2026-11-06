@@ -1,12 +1,12 @@
 
 use {
-    encoding :: core.encoding
-    json :: core.encoding.json
-    files :: core.files
+    encoding: core.encoding
+    json: core.encoding.json
+    files: core.files
 }
 
-fn run() {
-    output :: files.create("{work}/canonical.json") ?? panic("create")
+run: fn() {
+    output: files.create("{work}/canonical.json") ?? panic("create")
     writer := json.writer(^output, encoding.EncodingLimits.safe(), true) ?? panic("writer")
     &writer.write(encoding.DataEvent.ObjectStart) ?? panic("object")
     &writer.write(encoding.DataEvent.Key("z")) ?? panic("key")
@@ -31,7 +31,7 @@ fn run() {
     ])
     print(json.canonical(data) ?? panic("value is not canonical JSON"))
 
-    duplicate_output :: files.create("{work}/duplicate.json") ?? panic("duplicate create")
+    duplicate_output: files.create("{work}/duplicate.json") ?? panic("duplicate create")
     duplicate_writer := json.writer(^duplicate_output, encoding.EncodingLimits.safe(), true) ?? panic("duplicate writer")
     &duplicate_writer.write(encoding.DataEvent.ObjectStart) ?? panic("duplicate object")
     &duplicate_writer.write(encoding.DataEvent.Key("same")) ?? panic("first key")
@@ -48,7 +48,7 @@ fn run() {
 
     limits := encoding.EncodingLimits.safe()
     limits.max_item_bytes = 8
-    limited_output :: files.create("{work}/limited.json") ?? panic("limited create")
+    limited_output: files.create("{work}/limited.json") ?? panic("limited create")
     limited_writer := json.writer(^limited_output, limits, true) ?? panic("limited writer")
     &limited_writer.write(encoding.DataEvent.ObjectStart) ?? panic("limited object")
     &limited_writer.write(encoding.DataEvent.Key("long")) ?? panic("limited key")

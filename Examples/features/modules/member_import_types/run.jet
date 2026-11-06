@@ -5,40 +5,40 @@ use {
     types.[Span, Kind, Named, make_span]
 }
 
-struct Holder {
+Holder: struct {
     kind: types.Kind
 }
 
-struct Local { n: Int }
+Local: struct { n: Int }
 
 impl Local.Named {
-    fn label(self) -> String { "local {self.n}" }
+    label: fn(self) -> String { "local {self.n}" }
 }
 
-fn width(span: Span) -> Int { span.end - span.start }
+width: fn(span: Span) -> Int { span.end - span.start }
 
-fn value(kind: types.Kind) -> Int {
+value: fn(kind: types.Kind) -> Int {
     if kind == {
         .Alpha -> 0
         .Beta(v) -> v
     }
 }
 
-fn held(h: Holder) -> Int {
+held: fn(h: Holder) -> Int {
     if h.kind == {
         .Alpha -> 0
         .Beta(v) -> v
     }
 }
 
-fn run() {
+run: fn() {
     print(width(make_span(2, 7)))
-    beta :: types.Kind.Beta(3)
+    beta: types.Kind.Beta(3)
     print(value(beta))
     print(value(.Beta(4)))
     print(held(Holder{kind: .Alpha}))
     print(beta == types.Kind.Alpha)
-    first :: Kind.Beta(9)
+    first: Kind.Beta(9)
     print(value(first))
     print(Local{n: 1}.label())
 }

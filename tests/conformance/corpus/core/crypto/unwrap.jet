@@ -1,10 +1,10 @@
 // core-conformance: core.crypto.unwrap
-use crypto :: core.crypto
+use crypto: core.crypto
 
-fn run() {
-    secret :: crypto.Secret.from_bytes([U8]{0x01, 0x02, 0x03})
-    recipient :: crypto.X25519SecretKey.new_random() ?? panic("recipient")
-    wrapped :: crypto.wrap(secret, recipient.public_key()) ?? panic("wrap")
-    result :: crypto.unwrap(recipient, wrapped) ?? panic("unwrap")
+run: fn() {
+    secret: crypto.Secret.from_bytes([U8]{0x01, 0x02, 0x03})
+    recipient: crypto.X25519SecretKey.new_random() ?? panic("recipient")
+    wrapped: crypto.wrap(secret, recipient.public_key()) ?? panic("wrap")
+    result: crypto.unwrap(recipient, wrapped) ?? panic("unwrap")
     print(crypto.constant_time_equal(result, secret))
 }

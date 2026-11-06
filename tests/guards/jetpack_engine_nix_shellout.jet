@@ -4,7 +4,7 @@
 // "curl" and "wget". This scans the Jet successors of those files for the same
 // four tools as a spawned argv head (`cmd([String]{"tool"`) or a PATH lookup
 // (`which("tool")`), the Jet spellings of Command::new with a literal name.
-use jens_files :: core.files
+use jens_files: core.files
 
 // The Jet successors of the Rust list: Bridge.rs and Provider.rs are
 // Provider/Source, NixIndex.rs is Nix/Source/Index, CLI/realize.rs is
@@ -13,7 +13,7 @@ use jens_files :: core.files
 // CLI/Source/Tools, CLI/trust_env_build.rs is CLI/Source/Env/ComposeEnv.jet
 // and CLI/Source/Commands/TrustCommand.jet, and Store.rs and Store/NixCache.rs
 // are Store/Source.
-JENS_ROOTS :: [String]{
+JENS_ROOTS: [String]{
     "Jetpack/Provider/Source",
     "Jetpack/Nix/Source/Index",
     "Jetpack/CLI/Source/Realize",
@@ -27,18 +27,18 @@ JENS_ROOTS :: [String]{
 
 // Store/Source/Cache is the successor of Store/Cache.rs, the HTTP binary-cache
 // transport. The Rust list did not include it (Store/Cache.rs ran curl too).
-JENS_EXCLUDED :: [String]{"Jetpack/Store/Source/Cache"}
+JENS_EXCLUDED: [String]{"Jetpack/Store/Source/Cache"}
 
-JENS_TOOLS :: [String]{"nix", "nix-store", "curl", "wget"}
+JENS_TOOLS: [String]{"nix", "nix-store", "curl", "wget"}
 
-fn jens_excluded(path: String) -> Bool {
+jens_excluded: fn(path: String) -> Bool {
     loop excluded in JENS_EXCLUDED {
         if path == excluded -> return true
     }
     false
 }
 
-fn jens_walk(path: String, out: &[String]) {
+jens_walk: fn(path: String, out: &[String]) {
     if jens_excluded(path) {
         return
     }
@@ -51,9 +51,9 @@ fn jens_walk(path: String, out: &[String]) {
     }
 }
 
-fn jens_offenders(path: String, source: String, offenders: &[String]) {
+jens_offenders: fn(path: String, source: String, offenders: &[String]) {
     loop tool in JENS_TOOLS {
-        needles :: [String]{"cmd([String]{{\"{tool}\"", "which(\"{tool}\")"}
+        needles: [String]{"cmd([String]{{\"{tool}\"", "which(\"{tool}\")"}
         loop needle in needles {
             if source.contains(needle) {
                 &offenders.push("{path} must not shell out to installed {tool} via {needle}")
@@ -66,7 +66,7 @@ fn jens_offenders(path: String, source: String, offenders: &[String]) {
     sources := [String]{}
     loop root in JENS_ROOTS {
         assert(jens_files.exists(root), "the scanned successor {root} must exist")
-        before :: sources.len()
+        before: sources.len()
         jens_walk(root, &sources)
         assert(sources.len() > before, "{root} holds no Jet source to scan")
     }
@@ -78,6 +78,6 @@ fn jens_offenders(path: String, source: String, offenders: &[String]) {
     // The needles see the Jet spellings: a seeded spawn and a seeded PATH lookup
     // each report once.
     seeded := [String]{}
-    jens_offenders("synthetic.jet", "receipt :: process.cmd([String]{{\"nix\", \"build\"}}).run()\nfound :: files.which(\"wget\")\n", &seeded)
+    jens_offenders("synthetic.jet", "receipt: process.cmd([String]{{\"nix\", \"build\"}}).run()\nfound: files.which(\"wget\")\n", &seeded)
     assert_eq(seeded.len(), 2)
 }

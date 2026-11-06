@@ -1,9 +1,9 @@
 
-module cache<K>(capacity: Int) {
-    struct Buffer { items: [K#capacity] }
-    fn slots() -> Int { capacity }
+cache: module<K>(capacity: Int) {
+    Buffer: struct { items: [K#capacity] }
+    slots: fn() -> Int { capacity }
 }
-PROFILE_SLOTS :: comptime { $build.settings.cache_slots }
-module tuned :: cache<Int>($build.settings.cache_slots)
-module chained :: cache<Int>(PROFILE_SLOTS)
-fn run() { print(tuned.slots()) }
+PROFILE_SLOTS: comptime { $build.settings.cache_slots }
+tuned: cache<Int>($build.settings.cache_slots)
+chained: cache<Int>(PROFILE_SLOTS)
+run: fn() { print(tuned.slots()) }

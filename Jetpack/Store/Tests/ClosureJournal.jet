@@ -3,25 +3,25 @@
 
 // Shared by journal validation and tree ingest (Rust valid_output_name).
 #Test("store output name accepts exactly one normal component") {
-    valid :: [String]{"out", "dev", "a.b", "é", " space "}
+    valid: [String]{"out", "dev", "a.b", "é", " space "}
     loop name in valid {
         assert(store_valid_output_name(name))
     }
-    invalid :: [String]{"", ".", "..", "/", "\\", "a/b", "a\\b", "./out", "out/"}
+    invalid: [String]{"", ".", "..", "/", "\\", "a/b", "a\\b", "./out", "out/"}
     loop name in invalid {
         assert(!store_valid_output_name(name))
     }
 }
 
-fn store_test_checked(body: String) -> String Never! {
+store_test_checked: fn(body: String) -> String Never! {
     "{body}checksum\t{store_sha256_hex(body.bytes())}\n"
 }
 
-fn store_test_nix_projection_record(id: String, output_name: String, digest: String, reference: String) -> ClosureRecord Never! {
-    drv :: "/nix/store/canonical-action.drv"
-    output_path :: "/nix/store/{digest}"
-    plan :: ProviderPlanFacts.from_facts([String: String]{"nix.drv_path": drv, "nix.reference": reference, "nix.output.{output_name}": output_path}) ?? panic("plan facts must build")
-    producer :: ProducerRecord.new("nix", drv, store_sha256_hex(drv.bytes()), plan, "nix-derivation:{drv}", "policy=test\nplatform=test", [String: String]{"nix.drv_path": drv, "nix.output.{output_name}": output_path}) ?? panic("producer must build")
+store_test_nix_projection_record: fn(id: String, output_name: String, digest: String, reference: String) -> ClosureRecord Never! {
+    drv: "/nix/store/canonical-action.drv"
+    output_path: "/nix/store/{digest}"
+    plan: ProviderPlanFacts.from_facts([String: String]{"nix.drv_path": drv, "nix.reference": reference, "nix.output.{output_name}": output_path}) ?? panic("plan facts must build")
+    producer: ProducerRecord.new("nix", drv, store_sha256_hex(drv.bytes()), plan, "nix-derivation:{drv}", "policy=test\nplatform=test", [String: String]{"nix.drv_path": drv, "nix.output.{output_name}": output_path}) ?? panic("producer must build")
     ClosureRecord{
         id: id,
         primary: digest,
@@ -34,16 +34,16 @@ fn store_test_nix_projection_record(id: String, output_name: String, digest: Str
 }
 
 #Test("store canonical action merges multi-output alias projections and rejects conflicting bytes") {
-    out :: store_test_nix_projection_record("alias-out", "out", "sha256-out", "pkg@nixpkgs")
-    dev :: store_test_nix_projection_record("alias-dev", "dev", "sha256-dev", "pkg.dev@stable")
+    out: store_test_nix_projection_record("alias-out", "out", "sha256-out", "pkg@nixpkgs")
+    dev: store_test_nix_projection_record("alias-dev", "dev", "sha256-dev", "pkg.dev@stable")
     objects := [ClosureObject]{}
-    digests :: [String]{"sha256-out", "sha256-dev"}
+    digests: [String]{"sha256-out", "sha256-dev"}
     loop digest in digests -> &objects.push(ClosureObject{digest: digest, path: "/nix/store/{digest}", external: true})
     graph := ClosureGraph.empty()
     store_apply_entry(&graph, ClosureJournalEntry{kind: ClosureJournalKind.Delta, objects: objects, records: [ClosureRecord]{out, dev}, deleted_records: [String]{}}) ?? panic("delta must apply")
     assert(graph.action_outputs("sha256-same-action") == [String: String]{"dev": "sha256-dev", "out": "sha256-out"})
 
-    conflict :: store_test_nix_projection_record("alias-dev-conflict", "dev", "sha256-other-dev", "other:pkg.dev")
+    conflict: store_test_nix_projection_record("alias-dev-conflict", "dev", "sha256-other-dev", "other:pkg.dev")
     actions := [String: CanonicalActionRecord]{}
     loop record in graph.sorted_records() {
         store_merge_action_record(&actions, record) ?? panic("existing records must merge")
@@ -55,16 +55,16 @@ fn store_test_nix_projection_record(id: String, output_name: String, digest: Str
 }
 
 #Test("store journal parser rejects duplicate record ids and output names") {
-    id :: store_hex_text("record")
-    primary :: store_hex_text("sha256-primary")
-    action :: store_hex_text("sha256-action")
-    duplicate_record :: store_test_checked("jet-closure-journal-v1\nkind\tdelta\nrecord\t{id}\t{primary}\t{action}\nrecord\t{id}\t{primary}\t{action}\n")
+    id: store_hex_text("record")
+    primary: store_hex_text("sha256-primary")
+    action: store_hex_text("sha256-action")
+    duplicate_record: store_test_checked("jet-closure-journal-v1\nkind\tdelta\nrecord\t{id}\t{primary}\t{action}\nrecord\t{id}\t{primary}\t{action}\n")
     if store_parse_journal_entry(duplicate_record) == {
         .Ok(_) -> panic("duplicate record must be refused")
         .Err(error) -> assert(error.message().contains("duplicate closure record"))
     }
-    out :: store_hex_text("out")
-    duplicate_output :: store_test_checked("jet-closure-journal-v1\nkind\tdelta\nrecord\t{id}\t{primary}\t{action}\noutput\t{id}\t{out}\t{primary}\noutput\t{id}\t{out}\t{primary}\n")
+    out: store_hex_text("out")
+    duplicate_output: store_test_checked("jet-closure-journal-v1\nkind\tdelta\nrecord\t{id}\t{primary}\t{action}\noutput\t{id}\t{out}\t{primary}\noutput\t{id}\t{out}\t{primary}\n")
     if store_parse_journal_entry(duplicate_output) == {
         .Ok(_) -> panic("duplicate output must be refused")
         .Err(error) -> assert(error.message().contains("duplicate output"))
@@ -72,7 +72,7 @@ fn store_test_nix_projection_record(id: String, output_name: String, digest: Str
 }
 
 #Test("store journal parser requires exact checksum framing") {
-    valid :: store_test_checked("jet-closure-journal-v1\nkind\tdelta\n")
+    valid: store_test_checked("jet-closure-journal-v1\nkind\tdelta\n")
     assert(store_parse_journal_entry(valid) == .Ok(_))
     if store_parse_journal_entry(valid.trim_end()) == {
         .Ok(_) -> panic("unterminated checksum must be refused")
@@ -82,7 +82,7 @@ fn store_test_nix_projection_record(id: String, output_name: String, digest: Str
         .Ok(_) -> panic("trailing newline must be refused")
         .Err(error) -> assert(error.message().contains("invalid checksum frame"))
     }
-    halves :: store_text_split_last(valid, "checksum\t") ?? panic("valid entry has a checksum")
+    halves: store_text_split_last(valid, "checksum\t") ?? panic("valid entry has a checksum")
     if store_parse_journal_entry("{halves.before}checksum\t{halves.after.upper()}") == {
         .Ok(_) -> panic("uppercase checksum must be refused")
         .Err(error) -> assert(error.message().contains("invalid checksum frame"))
@@ -91,10 +91,10 @@ fn store_test_nix_projection_record(id: String, output_name: String, digest: Str
 
 #Test("store graph validation rejects external and relation inconsistency") {
     verification := StoreVerification.new()
-    roots :: HangarRoots{root: files.join(sys.temp_dir(), "jet-closure-integrity-{process.current_pid()}"), dev_mode: true}
-    digest :: "sha256-primary"
-    object :: ClosureObject{digest: digest, path: files.join(files.join(roots.hangar_dir(), STORE_OBJECTS_DIR), digest), external: true}
-    record :: ClosureRecord{id: "record", primary: digest, action_key: "sha256-action", outputs: [String: String]{"out": digest}, references: [String]{}, producer_record: "", package_meta: ""}
+    roots: HangarRoots{root: files.join(sys.temp_dir(), "jet-closure-integrity-{process.current_pid()}"), dev_mode: true}
+    digest: "sha256-primary"
+    object: ClosureObject{digest: digest, path: files.join(files.join(roots.hangar_dir(), STORE_OBJECTS_DIR), digest), external: true}
+    record: ClosureRecord{id: "record", primary: digest, action_key: "sha256-action", outputs: [String: String]{"out": digest}, references: [String]{}, producer_record: "", package_meta: ""}
     graph := ClosureGraph{objects: [String: ClosureObject]{digest: object}, records: [String: ClosureRecord]{"record": record}, deleted_records: [String]{}}
     if store_validate_graph(&verification, roots, graph) == {
         .Ok(_) -> panic("wrong external marker must be refused")

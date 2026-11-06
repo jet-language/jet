@@ -25,11 +25,11 @@ use jet_foundation.[
     type_name,
 ]
 
-fn sema_call_collections_arity_error(method: String, expected: SemaCollectionMethodContract, actual: Int, span: Span) -> Diagnostic {
+sema_call_collections_arity_error: fn(method: String, expected: SemaCollectionMethodContract, actual: Int, span: Span) -> Diagnostic {
     sema_error("E0104", span, "`{method}` expects {if expected.minimum_arity == expected.maximum_arity -> "{expected.minimum_arity}" else -> "{expected.minimum_arity} to {expected.maximum_arity}"} arguments, got {actual}", "the collection contract fixes the callback and structural argument shape", "pass the arguments accepted by `.{method}`")
 }
 
-fn sema_call_collections_success_type(ty: Type) -> Type Never! {
+sema_call_collections_success_type: fn(ty: Type) -> Type Never! {
     return if ty == {
         .Result(ok, _) | .Option(ok) -> ok
         else -> ty
@@ -41,9 +41,9 @@ fn sema_call_collections_success_type(ty: Type) -> Type Never! {
 // 1})`) take their type from it. A self-typed numeric read (`map.get(id)` with `id: Int` on a
 // `[U64:V]`) checks on its own and then widens into the slot, as Rust `widen_numeric_argument` does
 // after inference.
-fn sema_call_collections_check_argument(argument: CallArg, method: String, index: Int, required: Type, callback: Bool, lending: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    reported :: diagnostics.len()
-    previous_lending :: context.lambda_lending_views
+sema_call_collections_check_argument: fn(argument: CallArg, method: String, index: Int, required: Type, callback: Bool, lending: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    reported: diagnostics.len()
+    previous_lending: context.lambda_lending_views
     context.lambda_lending_views = lending
     // Rust `open_ret`: a callback slot whose result type is still open
     // (`fn(T)` with no return) accepts any function value; the method's own
@@ -58,7 +58,7 @@ fn sema_call_collections_check_argument(argument: CallArg, method: String, index
         }
         open_slot = required_ret == None && !is_lambda
     }
-    self_typed :: !callback && sema_stmt_numeric_slot_self_typed(argument.expr, required)
+    self_typed: !callback && sema_stmt_numeric_slot_self_typed(argument.expr, required)
     checked := if {
         open_slot || self_typed -> sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         callback -> {
@@ -71,7 +71,7 @@ fn sema_call_collections_check_argument(argument: CallArg, method: String, index
     }
     context.lambda_lending_views = previous_lending
     if !callback && !open_slot && !self_typed -> sema_value_method_replace_mismatch(argument.expr, method, index, required, reported, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-    value :: checked ?? return None
+    value: checked ?? return None
     if self_typed -> return sema_stmt_numeric_slot_value(value, required, environment, program, &diagnostics)
     if open_slot {
         if value.ty == .Fn(_, _, _, _, _, _) -> return Val(value)
@@ -84,7 +84,7 @@ fn sema_call_collections_check_argument(argument: CallArg, method: String, index
     }
     if compatible == (Val(true)) -> return Val(value)
     if !callback && sema_expr_numeric_value_widening(value, required) == (Val(true)) {
-        line :: sema_source_line_at(environment.source_segments, value.span) ?? 0
+        line: sema_source_line_at(environment.source_segments, value.span) ?? 0
         return sema_expr_numeric_literal_conversion(value, required, value.span, line, &diagnostics)
     }
     &diagnostics.push(if callback -> sema_type_mismatch(required, value.ty, argument.span) else -> sema_value_method_argument_mismatch(method, index, required, value.ty, argument.span))
@@ -93,8 +93,8 @@ fn sema_call_collections_check_argument(argument: CallArg, method: String, index
 
 // A total callback value (`T Never!`, a lambda bound without an expected
 // type) cannot fail: the adapter takes its success, as a direct call does.
-fn sema_call_collections_callback_return(value: TExpr) -> Type Never! {
-    returned :: sema_call_signature_return(value.ty) ?? Type.Named{name: "Unit"}
+sema_call_collections_callback_return: fn(value: TExpr) -> Type Never! {
+    returned: sema_call_signature_return(value.ty) ?? Type.Named{name: "Unit"}
     if returned == .Result(ok, err) {
         if err == (Type.Named{name: "Never"}) -> return ok.copy()
     }
@@ -106,14 +106,14 @@ fn sema_call_collections_callback_return(value: TExpr) -> Type Never! {
 // propagates each element's failure exactly as a direct `f(item)` would. A
 // literal lambda records its own propagation, and a written `Result` return is
 // projected onto the collection result.
-fn sema_call_collections_callback_takes_default_route(receiver: Type, method: String, callback: TExpr) -> Bool Never! {
+sema_call_collections_callback_takes_default_route: fn(receiver: Type, method: String, callback: TExpr) -> Bool Never! {
     if callback.kind == .Lambda(_) -> return false
-    receiver_ty :: sema_expr_unwrap_tag(receiver)
-    sequence :: if receiver_ty == {.Option(_) | .Map(_, _, _) -> false else -> true}
-    list :: if receiver_ty == {.List(_) | .FixedList(_, _) -> true else -> false}
+    receiver_ty: sema_expr_unwrap_tag(receiver)
+    sequence: if receiver_ty == {.Option(_) | .Map(_, _, _) -> false else -> true}
+    list: if receiver_ty == {.List(_) | .FixedList(_, _) -> true else -> false}
     return if callback.ty == {
         .Fn(params, ret, _, _, _, _) -> {
-            eager :: if {
+            eager: if {
                 method == "map" || method == "filter" -> sequence
                 method == "sort_by" || method == "sort_by_desc" -> list && params.len() == 1
                 else -> false
@@ -126,8 +126,8 @@ fn sema_call_collections_callback_takes_default_route(receiver: Type, method: St
 
 // `FailureContract::from_return_type(ret).is_default()`: no written failure
 // domain, optional success, or `Never` return.
-fn sema_call_collections_return_takes_default_route(ret: Type?) -> Bool Never! {
-    declared :: ret ?? return true
+sema_call_collections_return_takes_default_route: fn(ret: Type?) -> Bool Never! {
+    declared: ret ?? return true
     return if declared == {
         .Named(name) -> name != "Never"
         .Option(_) | .Result(_, _) -> false
@@ -135,7 +135,7 @@ fn sema_call_collections_return_takes_default_route(ret: Type?) -> Bool Never! {
     }
 }
 
-fn sema_call_collections_reject_callback_shape(method: String, callback_return: Type, span: Span, diagnostics: &[Diagnostic]) -> Bool {
+sema_call_collections_reject_callback_shape: fn(method: String, callback_return: Type, span: Span, diagnostics: &[Diagnostic]) -> Bool {
     if method == "filter" {
         accepted := if callback_return == {.Result(ok, _) -> ok == Type.Bool else -> callback_return == Type.Bool}
         if accepted -> return false
@@ -163,7 +163,7 @@ fn sema_call_collections_reject_callback_shape(method: String, callback_return: 
     return false
 }
 
-fn sema_call_collections_ownership_params(required_types: [Type]) -> [SemaCallParam] Never! {
+sema_call_collections_ownership_params: fn(required_types: [Type]) -> [SemaCallParam] Never! {
     params := [SemaCallParam]{}
     loop (index, ty) in required_types {
         &params.push(SemaCallParam{label: "arg{index}", name: "arg{index}", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(ty), variadic: false})
@@ -174,7 +174,7 @@ fn sema_call_collections_ownership_params(required_types: [Type]) -> [SemaCallPa
 // F: a literal `RemoveBy` selector of a two-argument `remove` fixes the removal
 // mode before argument inference, so `.Slot` takes an Int position and `.Val`
 // an element; any other selector stays a run-time choice.
-fn sema_call_collections_literal_remove_mode(method: String, args: [CallArg]) -> TListRemoveMode? {
+sema_call_collections_literal_remove_mode: fn(method: String, args: [CallArg]) -> TListRemoveMode? {
     if method != "remove" || args.len() != 2 -> return None
     return if args[1].expr == {
         .EnumLit(_, variant, _, _, _, _, _) -> if {
@@ -186,7 +186,7 @@ fn sema_call_collections_literal_remove_mode(method: String, args: [CallArg]) ->
     }
 }
 
-fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_call_try_builtin_collections: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     updated_args := args
     if method == "zip" || method == "zip_short" || method == "zip_pad" || method == "para_map" || method == "para_filter" || method == "para_partition" || method == "para_fold" -> return SemaMethodSpecialCheck{handled: false, value: None}
     // E0964: length-changing methods are forbidden on a fixed-size `[T#N]`.
@@ -195,7 +195,7 @@ fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, meth
         loop argument in updated_args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    contract :: sema_collection_method_contract(receiver_value.ty, method) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    contract: sema_collection_method_contract(receiver_value.ty, method) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     if method != "len" && method != "is_empty" && method != "push" && sema_columnar_list_element(environment, program, receiver_value.ty) == .Val(element) {
         &diagnostics.push(sema_error("E1108", span, "`.{method}()` isn't supported on a columnar list `{sema_type_show(sema_expr_unwrap_tag(receiver_value.ty))}` yet", "`#Layout(columnar)` lists support the core surface in v1: indexing, field access, `len`, `is_empty`, `push`, and iteration", "drop `#Layout(columnar)` from `{element}` to use `.{method}()`, or rewrite the loop with indexing"))
         loop argument in updated_args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -243,7 +243,7 @@ fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, meth
             }
         }
         if index == 0 && literal_remove_mode == (Val(TListRemoveMode.Slot)) -> required = Type.Int
-        value :: if {
+        value: if {
             seed_argument -> {
                 sema_check_expression(updated_args[index].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
             }
@@ -289,13 +289,13 @@ fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, meth
         // parameter or its field has no storage to give up: the mark is
         // E0201, and an element stays owned by its collection (E0225): never
         // a silent copy.
-        stores_argument :: (contract.row.law == CollectionLaw.Mutate || contract.row.law == CollectionLaw.TryMutate) && contract.row.name != "remove"
-        consuming_mark :: stores_argument && updated_args[index].convention == AccessConvention.Move && !sema_ownership_type_is_copy(value.ty)
+        stores_argument: (contract.row.law == CollectionLaw.Mutate || contract.row.law == CollectionLaw.TryMutate) && contract.row.name != "remove"
+        consuming_mark: stores_argument && updated_args[index].convention == AccessConvention.Move && !sema_ownership_type_is_copy(value.ty)
         if consuming_mark && sema_call_reject_element_move(updated_args[index].expr, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
         taken_place := consuming_mark && sema_call_marked_move_place(updated_args[index].expr, value)
         if taken_place && (sema_ownership_reject_read_param_move(&state, updated_args[index].expr, scopes, &diagnostics) || sema_ownership_reject_place_alias_move(&state, updated_args[index].expr, scopes, "`.{method}()`", &diagnostics)) -> return SemaMethodSpecialCheck{handled: true, value: None}
         if taken_place && sema_ownership_binding_for_expr(&state, updated_args[index].expr, scopes) == .Val(root) -> taken_place = !sema_ownership_binding_is_borrowed_param(root)
-        stored :: sema_call_marked_move_value(&state, taken_place, updated_args[index].expr, ^value, scopes, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+        stored: sema_call_marked_move_value(&state, taken_place, updated_args[index].expr, ^value, scopes, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         &typed.push(stored)
     }
 
@@ -311,17 +311,17 @@ fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, meth
     if callback_return == .Val(return_type) && !(is_map && method == "flat_map") && sema_call_collections_reject_callback_shape(method, return_type, span, &diagnostics) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    result_type :: sema_collection_method_result_type(contract, callback_return, seed) ?? {
+    result_type: sema_collection_method_result_type(contract, callback_return, seed) ?? {
         &diagnostics.push(sema_error("E0108", span, "the callback result is not valid for `.{method}`", "the collection result type must follow the callback's checked return type", "return the item shape required by this collection adapter"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    line :: sema_source_line_at(environment.source_segments, span) ?? 0
+    line: sema_source_line_at(environment.source_segments, span) ?? 0
     operation := sema_collection_method_operation(contract, updated_args.len(), literal_remove_mode, line, callback_return, callback_mutable, comparator)
     // The Rust original runs no convention check on a collection argument: `^`
     // on one (`&to.push(^item)`) is neither rejected (E0203) nor recorded as a
     // move here, so the ownership walk reads it like an unmarked argument. A
     // marked field still lowers as its exact-place move.
-    marked :: loop argument in updated_args -> argument.convention == AccessConvention.Move
+    marked: loop argument in updated_args -> argument.convention == AccessConvention.Move
     loop index in 0..<updated_args.len() {
         if updated_args[index].convention == AccessConvention.Move -> updated_args[index].convention = AccessConvention.Read
     }
@@ -364,12 +364,12 @@ fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, meth
             sema_tree_node(result_type, TExprKind.BuiltinMethod{receiver: lazy, operation: TBuiltinOp.IterShuffle, args: [TExpr]{}}, span)
         }
         .SetClosure(closure) -> {
-            element :: sema_collection_receiver_element(receiver_value.ty) ?? Type.Int
+            element: sema_collection_receiver_element(receiver_value.ty) ?? Type.Int
             list_type := Type.List{element: element}
             set_list := sema_tree_node(list_type, TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.SetToList, args: [TExpr]{}}, span)
             if {
                 closure == TClosureOp.FlatMap -> {
-                    inner :: if result_type == {
+                    inner: if result_type == {
                         .Apply(name, apply_args) -> {
                             if name == "Iter" && apply_args.len() == 1 -> apply_args[0] else -> Type.Int
                         }
@@ -385,14 +385,14 @@ fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, meth
             }
         }
         .SetMinimum -> {
-            element :: sema_collection_receiver_element(receiver_value.ty) ?? Type.Int
+            element: sema_collection_receiver_element(receiver_value.ty) ?? Type.Int
             set_list := sema_tree_node(Type.List{element: element}, TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.SetToList, args: [TExpr]{}}, span)
             sema_tree_node(result_type, TExprKind.BuiltinMethod{receiver: set_list, operation: TBuiltinOp.Min{float: false}, args: [TExpr]{}}, span)
         }
         .IterToSet -> {
             // #4009: `Set.from` collects a list; drain the iterator through the
             // same `.to_list()` a user would write before building the set.
-            element :: sema_collection_receiver_element(receiver_value.ty) ?? Type.Int
+            element: sema_collection_receiver_element(receiver_value.ty) ?? Type.Int
             drained := sema_tree_node(Type.List{element: element}, TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.IterToList, args: [TExpr]{}}, span)
             sema_tree_node(result_type, TExprKind.BuiltinMethod{receiver: drained, operation: TBuiltinOp.SetFrom, args: [TExpr]{}}, span)
         }
@@ -404,20 +404,20 @@ fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, meth
 // Rust lower_method_call: the lazy and iterator-kernel builtins run on
 // `Iter<T>`, so a List or FixedList receiver (and `compare`'s other side) is
 // wrapped as its `lazy()` iterator (wrap_list_as_iter).
-fn sema_call_collections_runs_on_iter(operation: TBuiltinOp) -> Bool Never! {
+sema_call_collections_runs_on_iter: fn(operation: TBuiltinOp) -> Bool Never! {
     if operation == {
         .StepBy | .Take | .Skip | .Dedup | .Chunks | .Windows | .Intersperse | .IterRepeat | .IterCycle | .IterDropLast | .IterShuffle | .IterIsSorted | .IterLastIndexOf | .IterAverage(_) | .IterCompare -> true
         else -> false
     }
 }
 
-fn sema_call_collections_list_as_iter(value: TExpr, span: Span) -> TExpr Never! {
-    element :: sema_call_collections_list_element(value.ty) ?? return value
+sema_call_collections_list_as_iter: fn(value: TExpr, span: Span) -> TExpr Never! {
+    element: sema_call_collections_list_element(value.ty) ?? return value
     sema_tree_node(Type.Apply{name: "Iter", args: [Type]{element}}, TExprKind.BuiltinMethod{receiver: value, operation: TBuiltinOp.ListLazy, args: [TExpr]{}}, span)
 }
 
 // Rust Type::without_user_tags, then a List or FixedList element.
-fn sema_call_collections_list_element(ty: Type) -> Type? Never! {
+sema_call_collections_list_element: fn(ty: Type) -> Type? Never! {
     return if ty == {
         .Tagged(marker, inner) -> if marker == {
             .User(_) -> sema_call_collections_list_element(inner)
@@ -433,7 +433,7 @@ fn sema_call_collections_list_element(ty: Type) -> Type? Never! {
 
 // Rust CheckerOwnership::view_call_sources: a successful runtime proof gives
 // each output slot a distinct Fresh projection on the original owner.
-fn sema_call_collections_record_disjoint_views(receiver: Expr, method: String, args: [CallArg], span: Span, scopes: SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext) {
+sema_call_collections_record_disjoint_views: fn(receiver: Expr, method: String, args: [CallArg], span: Span, scopes: SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext) {
     proof_spans := [Span]{}
     slots := [[String]]{}
     if method == "split_write" {
@@ -452,7 +452,7 @@ fn sema_call_collections_record_disjoint_views(receiver: Expr, method: String, a
             &slots.push([String]{"[]"})
         }
     }
-    bases :: sema_ownership_places_from_expr_in_state(receiver, scopes, &state)
+    bases: sema_ownership_places_from_expr_in_state(receiver, scopes, &state)
     facts := [SemaCallReturnViewFact]{}
     loop index in 0..<proof_spans.len() {
         places := [SemaOwnershipPlace]{}
@@ -471,13 +471,13 @@ fn sema_call_collections_record_disjoint_views(receiver: Expr, method: String, a
 // Rust `builtin_receiver_borrow`: a mutating collection method reserves its
 // receiver two-phase, except iterator `next` and the list helpers lowered
 // with an explicit eager `&mut receiver` first argument.
-fn sema_call_collections_receiver_two_phase(receiver_ty: Type, method: String) -> Bool Never! {
+sema_call_collections_receiver_two_phase: fn(receiver_ty: Type, method: String) -> Bool Never! {
     if method == "next" -> return false
     if method == "remove" || method == "sort_by" || method == "sort_desc" || method == "sort_by_desc" || method == "update_first" || method == "edit_disjoint" -> return !sema_call_collections_list_receiver(receiver_ty)
     true
 }
 
-fn sema_call_collections_list_receiver(ty: Type) -> Bool Never! {
+sema_call_collections_list_receiver: fn(ty: Type) -> Bool Never! {
     if ty == {
         .List(_) | .FixedList(_, _) -> true
         .Tagged(_, inner) -> sema_call_collections_list_receiver(inner)

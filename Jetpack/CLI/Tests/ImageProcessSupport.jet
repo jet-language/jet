@@ -6,31 +6,31 @@
 // A minimal project: `package.jet` declaring `<pkg_kind>` for `app`, `env.jet`
 // declaring `image.server { … }`, and, when `built`, a fake executable staged
 // at `.jet/build/app` (the `jet build` output `jet image` reads).
-fn cli_test_image_project(dir: String, pkg_kind: String, built: Bool) -[FS]> {
+cli_test_image_project: fn(dir: String, pkg_kind: String, built: Bool) -[FS]> {
     files.write(files.join(dir, "package.jet"), "name: \"demo\"\nversion: \"0.1.0\"\npackages: {{ app: {pkg_kind} }}\n") ?? panic("write package.jet")
-    files.write(files.join(dir, "env.jet"), "module image.server {{\n    kind: .Oci\n    from: packages.app\n    expose: [8080]\n    env_vars: [\"RUST_LOG\": \"info\"]\n}}\n") ?? panic("write env.jet")
+    files.write(files.join(dir, "env.jet"), "image.server: module {{\n    kind: .Oci\n    from: packages.app\n    expose: [8080]\n    env_vars: [\"RUST_LOG\": \"info\"]\n}}\n") ?? panic("write env.jet")
     if built {
-        build :: files.join(dir, ".jet/build")
+        build: files.join(dir, ".jet/build")
         files.create_dir_all(build) ?? panic("create build dir")
         cli_test_write_script(files.join(build, "app"), "#!/bin/sh\necho hi\n")
     }
 }
 
-fn cli_test_image_scratch(label: String) -[FS]> String {
+cli_test_image_scratch: fn(label: String) -[FS]> String {
     files.tmpdir("jet-image-{label}-") ?? panic("claim image scratch")
 }
 
-fn cli_test_ingest_executable(verification: &StoreVerification, root: String, name: String, reference: String, binary: String) -[FS, Env, Time]> {
+cli_test_ingest_executable: fn(verification: &StoreVerification, root: String, name: String, reference: String, binary: String) -[FS, Env, Time]> {
     cli_test_ingest_executable_for_platform(&verification, root, name, reference, binary, pkg_host_platform())
 }
 
 // Ingest one fake executable package into the Hangar under `root`.
-fn cli_test_ingest_executable_for_platform(verification: &StoreVerification, root: String, name: String, reference: String, binary: String, platform: String) -[FS, Env, Time]> {
-    source :: files.join(root, "source-{name}")
+cli_test_ingest_executable_for_platform: fn(verification: &StoreVerification, root: String, name: String, reference: String, binary: String, platform: String) -[FS, Env, Time]> {
+    source: files.join(root, "source-{name}")
     files.create_dir_all(files.join(source, "bin")) ?? panic("create source bin")
     cli_test_write_script(files.join(files.join(source, "bin"), binary), "#!/bin/sh\necho image\n")
-    roots :: HangarRoots{root: root, dev_mode: false}
-    request :: IngestRequest{
+    roots: HangarRoots{root: root, dev_mode: false}
+    request: IngestRequest{
         name: name,
         version: "1.0.0",
         reference: reference,
@@ -46,15 +46,15 @@ fn cli_test_ingest_executable_for_platform(verification: &StoreVerification, roo
         provenance: "image-test",
         platform_artifact_kind: ""
     }
-    _ :: store_ingest_tree(&verification, roots, request) ?? panic("ingest {name}: {err.message()}")
+    _: store_ingest_tree(&verification, roots, request) ?? panic("ingest {name}: {err.message()}")
 }
 
 // Whether `needle` occurs in `haystack`.
-fn cli_test_bytes_contain(haystack: [U8], needle: [U8]) -> Bool {
+cli_test_bytes_contain: fn(haystack: [U8], needle: [U8]) -> Bool {
     cli_test_bytes_position(haystack, needle) != None
 }
 
-fn cli_test_bytes_position(haystack: [U8], needle: [U8]) -> Int? {
+cli_test_bytes_position: fn(haystack: [U8], needle: [U8]) -> Int? {
     if needle.len() == 0 -> return Val(0)
     if needle.len() > haystack.len() -> return None
     loop start in 0..<(haystack.len() - needle.len() + 1) {
@@ -71,16 +71,16 @@ fn cli_test_bytes_position(haystack: [U8], needle: [U8]) -> Int? {
 }
 
 // Every blob of the OCI layout at `root`.
-fn cli_test_image_blobs(root: String) -[FS]> [[U8]] {
-    entries :: files.list_dir(files.join(root, "blobs/sha256")) ?? panic("list image blobs")
+cli_test_image_blobs: fn(root: String) -[FS]> [[U8]] {
+    entries: files.list_dir(files.join(root, "blobs/sha256")) ?? panic("list image blobs")
     blobs := [[U8]]{}
     loop entry in entries -> &blobs.push(files.read_bytes(entry.path) ?? panic("read image blob"))
     blobs
 }
 
 // The first blob containing `needle`.
-fn cli_test_image_blob_containing(root: String, needle: [U8]) -[FS]> [U8] {
-    blobs :: cli_test_image_blobs(root)
+cli_test_image_blob_containing: fn(root: String, needle: [U8]) -[FS]> [U8] {
+    blobs: cli_test_image_blobs(root)
     loop blob in blobs {
         if cli_test_bytes_contain(blob, needle) -> return blob
     }
@@ -88,9 +88,9 @@ fn cli_test_image_blob_containing(root: String, needle: [U8]) -[FS]> [U8] {
 }
 
 // The first ustar tar layer blob.
-fn cli_test_image_layer(root: String) -[FS]> [U8] {
-    magic :: "ustar".bytes()
-    blobs :: cli_test_image_blobs(root)
+cli_test_image_layer: fn(root: String) -[FS]> [U8] {
+    magic: "ustar".bytes()
+    blobs: cli_test_image_blobs(root)
     loop blob in blobs {
         if blob.len() >= 263 && blob.slice(257, 262) == magic && Int.from_u8(blob[262]) == 0 -> return blob
     }
@@ -98,7 +98,7 @@ fn cli_test_image_layer(root: String) -[FS]> [U8] {
 }
 
 // One request the fake registry saw.
-struct RegistryTestRequest {
+RegistryTestRequest: struct {
     method: String
     path: String
     body: [U8]
@@ -106,41 +106,41 @@ struct RegistryTestRequest {
 
 // Serve `expected_requests` OCI Distribution requests: HEAD misses, POST
 // opens an upload at `/test-upload`, PUT to an upload or manifest succeeds.
-fn cli_test_registry_server(listener: net.TCPListener, expected_requests: Int) -[Net, Time, Time.Wait]> [RegistryTestRequest] {
+cli_test_registry_server: fn(listener: net.TCPListener, expected_requests: Int) -[Net, Time, Time.Wait]> [RegistryTestRequest] {
     requests := [RegistryTestRequest]{}
-    watch :: time.start()
+    watch: time.start()
     loop requests.len() < expected_requests && time.elapsed(watch).ns < 20000000000 {
         stream := net.tcp_accept(listener) ?? next
         net.set_read_timeout(&stream, 2000) ?? panic("set registry read timeout")
         request := [U8]{}
         header_end := -1
         loop header_end < 0 {
-            chunk :: net.tcp_read_bytes(&stream, 4096) ?? panic("read registry request")
+            chunk: net.tcp_read_bytes(&stream, 4096) ?? panic("read registry request")
             if chunk.len() == 0 -> break
             &request.extend(chunk)
             header_end = (cli_test_bytes_position(request, "{cli_test_crlf()}{cli_test_crlf()}".bytes()) ?? -5) + 4
             assert(request.len() < 131072, "registry test request headers are unbounded")
         }
         if header_end < 0 -> next
-        header_text :: String.from_bytes(request.slice(0, header_end)) ?? ""
-        lines :: header_text.lines()
-        request_parts :: (lines.get(0) ?? "").split(" ").to_list()
-        method :: request_parts.get(0) ?? ""
-        path :: request_parts.get(1) ?? ""
+        header_text: String.from_bytes(request.slice(0, header_end)) ?? ""
+        lines: header_text.lines()
+        request_parts: (lines.get(0) ?? "").split(" ").to_list()
+        method: request_parts.get(0) ?? ""
+        path: request_parts.get(1) ?? ""
         content_length := 0
         loop index in 1..<lines.len() {
-            pair :: lines[index].split_once(":") ?? next
+            pair: lines[index].split_once(":") ?? next
             if pair.before.lower() == "content-length" {
                 content_length = Int.parse(pair.after.trim()) ?? panic("content-length is an integer")
                 break
             }
         }
         loop request.len() < header_end + content_length {
-            chunk :: net.tcp_read_bytes(&stream, 4096) ?? panic("read registry body")
+            chunk: net.tcp_read_bytes(&stream, 4096) ?? panic("read registry body")
             if chunk.len() == 0 -> break
             &request.extend(chunk)
         }
-        body_end :: if request.len() < header_end + content_length -> request.len() else -> header_end + content_length
+        body_end: if request.len() < header_end + content_length -> request.len() else -> header_end + content_length
         &requests.push(RegistryTestRequest{method: method, path: path, body: request.slice(header_end, body_end)})
         status := 404
         extra_headers := ""
@@ -155,8 +155,8 @@ fn cli_test_registry_server(listener: net.TCPListener, expected_requests: Int) -
             }
             else -> {}
         }
-        crlf :: cli_test_crlf()
-        response :: "HTTP/1.1 {status} Test{crlf}{extra_headers}Content-Length: 0{crlf}Connection: close{crlf}{crlf}"
+        crlf: cli_test_crlf()
+        response: "HTTP/1.1 {status} Test{crlf}{extra_headers}Content-Length: 0{crlf}Connection: close{crlf}{crlf}"
         net.tcp_write_all_bytes(&stream, response.bytes()) ?? panic("write registry response")
         net.tcp_close(&stream).drop("the registry response is complete")
     }
@@ -164,18 +164,18 @@ fn cli_test_registry_server(listener: net.TCPListener, expected_requests: Int) -
 }
 
 // An HTTP line ending (carriage return, line feed).
-fn cli_test_crlf() -> String {
+cli_test_crlf: fn() -> String {
     String.from_bytes([U8]{U8{13}, U8{10}}) ?? panic("CRLF is ASCII")
 }
 
 // `jetpack <args>` for an image claim, run in `project` with NO_COLOR.
-fn cli_test_image_jetpack(project: String, args: [String]) -[Env, Exec]> ProcessSpec {
+cli_test_image_jetpack: fn(project: String, args: [String]) -[Env, Exec]> ProcessSpec {
     cli_test_jetpack(args).cwd(project).env("NO_COLOR", "1")
 }
 
 // The repository root the committed fixtures are read from: JET_TOOLCHAIN_ROOT,
 // which check.sh exports as the Jet tree it runs from. The claims run inside
 // an assembled scratch project, so the working directory is never that tree.
-fn cli_test_repo_root() -[Env]> String {
+cli_test_repo_root: fn() -[Env]> String {
     sys.get("JET_TOOLCHAIN_ROOT") ?? panic("JET_TOOLCHAIN_ROOT must name the Jet repository whose committed fixtures the claims read")
 }

@@ -1,26 +1,26 @@
-use files :: core.files
+use files: core.files
 
 // Lock descriptors this process holds open (fds whose target ends `.lk`).
-fn held() -[FS]> Int {
+held: fn() -[FS]> Int {
     count := 0
-    names :: files.list_dir("/proc/self/fd") ?? panic("list /proc/self/fd")
+    names: files.list_dir("/proc/self/fd") ?? panic("list /proc/self/fd")
     loop entry in names {
-        target :: files.read_link(entry.path) ?? ""
+        target: files.read_link(entry.path) ?? ""
         if target.ends_with(".lk") -> count += 1
     }
     count
 }
 
-fn lock(name: String) -[FS, Env]> FileLock {
+lock: fn(name: String) -[FS, Env]> FileLock {
     files.lock(name) ?? panic("lock {name}")
 }
 
-struct Holder {
+Holder: struct {
     note: String
     lock: FileLock
 }
 
-struct Outer {
+Outer: struct {
     name: String
     owner: Holder
     spare: FileLock
@@ -28,38 +28,38 @@ struct Outer {
 
 impl Holder {
     // Owns self: its lock closes when this returns.
-    fn finish(^self) -[FS]> Int {
+    finish: fn(^self) -[FS]> Int {
         held()
     }
 }
 
-fn consume_holder(^h: Holder) -[FS]> Int {
+consume_holder: fn(^h: Holder) -[FS]> Int {
     held()
 }
 
-fn consume_lock(^l: FileLock) -[FS]> Int {
+consume_lock: fn(^l: FileLock) -[FS]> Int {
     held()
 }
 
-fn outer(name: String) -[FS, Env]> Outer {
+outer: fn(name: String) -[FS, Env]> Outer {
     Outer{name: name, owner: Holder{note: name, lock: lock("{name}-owner.lk")}, spare: lock("{name}-spare.lk")}
 }
 
-fn receiver() -[IO, FS, Env]> {
-    h :: Holder{note: "a", lock: lock("a.lk")}
-    inside :: ^h.finish()
+receiver: fn() -[IO, FS, Env]> {
+    h: Holder{note: "a", lock: lock("a.lk")}
+    inside: ^h.finish()
     print("receiver {inside} {held()}")
 }
 
-fn member_receiver() -[IO, FS, Env]> {
-    o :: outer("b")
-    inside :: ^o.owner.finish()
+member_receiver: fn() -[IO, FS, Env]> {
+    o: outer("b")
+    inside: ^o.owner.finish()
     print("member receiver {inside} {held()}")
 }
 
-fn member_argument() -[IO, FS, Env]> {
+member_argument: fn() -[IO, FS, Env]> {
     o := outer("c")
-    inside :: consume_holder(^o.owner)
+    inside: consume_holder(^o.owner)
     print("member argument {inside} {held()}")
     close(^o.spare)
     print("member close {held()}")
@@ -67,7 +67,7 @@ fn member_argument() -[IO, FS, Env]> {
     print("member reinitialized {held()}")
 }
 
-fn branch(moved: Bool) -[IO, FS, Env]> {
+branch: fn(moved: Bool) -[IO, FS, Env]> {
     o := outer("d")
     if moved {
         close(^o.spare)
@@ -75,19 +75,19 @@ fn branch(moved: Bool) -[IO, FS, Env]> {
     print("branch {moved} {held()}")
 }
 
-fn adopt(^h: Holder) -[IO, FS]> {
+adopt: fn(^h: Holder) -[IO, FS]> {
     me := ^h
-    inside :: consume_holder(^me)
+    inside: consume_holder(^me)
     print("adopted {inside} {held()}")
 }
 
-fn whole_lock() -[IO, FS, Env]> {
-    l :: lock("e.lk")
-    inside :: consume_lock(^l)
+whole_lock: fn() -[IO, FS, Env]> {
+    l: lock("e.lk")
+    inside: consume_lock(^l)
     print("whole lock {inside} {held()}")
 }
 
-fn run() -[IO, FS, Env]> {
+run: fn() -[IO, FS, Env]> {
     loop name in ["a", "b-owner", "b-spare", "c-owner", "c-spare", "c-again", "d-owner", "d-spare", "e", "f"] {
         files.write("{name}.lk", "") ?? panic("write {name}")
     }

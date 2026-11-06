@@ -6,15 +6,15 @@ import { scratchRoot } from "./roots.mjs";
 import { callSites, census, embeddedPrograms, main, moduleName, publicFunctions, ratchetDecision } from "./core-coverage-census.mjs";
 
 const rows = [
-  ...publicFunctions("Core/Text/Text.jet", `fn trim(x: String) -> String Never! { x }
-    fn split<T>(x: T) -> String Never! { "" }
-    fn unused() {}`),
-  ...publicFunctions("Core/Math/Math.jet", "fn trim() -> Int Never! { 1 }"),
-  ...publicFunctions("Core/Crypto/Crypto.jet", `struct Hasher {
-    fn new() -> Hasher Never! { {} }
-    fn digest(self) -> String Never! { "" }
+  ...publicFunctions("Core/Text/Text.jet", `trim: fn(x: String) -> String Never! { x }
+    split: fn<T>(x: T) -> String Never! { "" }
+    unused: fn() {}`),
+  ...publicFunctions("Core/Math/Math.jet", "trim: fn() -> Int Never! { 1 }"),
+  ...publicFunctions("Core/Crypto/Crypto.jet", `Hasher: struct {
+    new: fn() -> Hasher Never! { {} }
+    digest: fn(self) -> String Never! { "" }
   }
-  fn new() -> Hasher Never! { Hasher.new() }`),
+  new: fn() -> Hasher Never! { Hasher.new() }`),
 ];
 const ids = (source, context) => callSites(source, rows, context).map((call) => call.id);
 
@@ -29,42 +29,42 @@ test("module layout matches Core module keys, including app and nested roots", (
 });
 
 test("every public function, including same-named methods, is inventoried", () => {
-  const found = publicFunctions("Core/demo/demo.jet", `// fn fake() {}
-    /* nested /* fn fake2() {} */ comment */
-    priv module internal { fn hidden() {} }
-    struct A { fn new() -> A Never! { {} } }
-    struct B<T> {}
-    impl B<T> { fn new<T>(f: fn(Int) -> Int) -[FS]> B Never! { {} } }
-    fn new() -> A Never! { A.new() }
-    fn generic<T: [Encode, Decode]>(f: fn(T) -> Int) -> B<T> Never! { {} }
-    label :: "fn fake3() {}"
+  const found = publicFunctions("Core/demo/demo.jet", `// fake: fn() {}
+    /* nested /* fake2: fn() {} */ comment */
+    priv internal: module { hidden: fn() {} }
+    A: struct { new: fn() -> A Never! { {} } }
+    B: struct<T> {}
+    impl B<T> { new: fn<T>(f: fn(Int) -> Int) -[FS]> B Never! { {} } }
+    new: fn() -> A Never! { A.new() }
+    generic: fn<T: [Encode, Decode]>(f: fn(T) -> Int) -> B<T> Never! { {} }
+    label: "fake3: fn() {}"
   `);
   assert.deepEqual(found.map((row) => row.id), ["core.demo.A.new", "core.demo.B.new", "core.demo.new", "core.demo.generic"]);
   assert.deepEqual(found.map((row) => row.returnType), ["core.demo.A", "core.demo.B", "core.demo.A", "B<T>"]);
 });
 
 test("a bare impl inside a type belongs to it, and operator overloads share one row", () => {
-  const found = publicFunctions("Core/Demo/Demo.jet", `enum Kind {
+  const found = publicFunctions("Core/Demo/Demo.jet", `Kind: enum {
       One
-      impl Display { fn display(self) -> String Never! { "" } }
+      impl Display { display: fn(self) -> String Never! { "" } }
     }
-    struct Vec { impl Debug { fn debug(^self) -> String Never! { "" } } }
-    impl Vec.Mul { fn mul(self, rhs: Vec) -> Vec Never! { rhs } }
-    impl Vec.Mul(Float) { fn mul(self, rhs: Float) -> Vec Never! { self } }
+    Vec: struct { impl Debug { debug: fn(^self) -> String Never! { "" } } }
+    impl Vec.Mul { mul: fn(self, rhs: Vec) -> Vec Never! { rhs } }
+    impl Vec.Mul(Float) { mul: fn(self, rhs: Float) -> Vec Never! { self } }
   `);
   assert.deepEqual(found.map((row) => row.id), ["core.demo.Kind.display", "core.demo.Vec.debug", "core.demo.Vec.mul"]);
 });
 
 test("return types preserve builtin, prelude and compound spellings", () => {
-  const found = publicFunctions("Core/demo/demo.jet", `fn flag() -> Bool Never! { true }
-    fn count() -> Int Never! { 1 }
-    fn text() -> String Never! { "" }
-    fn number() -> Float Never! { Float{1.0} }
-    fn items() -> [String] Never! { [] }
-    fn lookup() -> [String: Int] Never! { {} }
-    fn maybe() -> Int? Never! { None }
-    fn limits() -> Duration Never! { 1ms }
-    fn pair() -> (name: String, n: Int) Never! { ("", 1) }
+  const found = publicFunctions("Core/demo/demo.jet", `flag: fn() -> Bool Never! { true }
+    count: fn() -> Int Never! { 1 }
+    text: fn() -> String Never! { "" }
+    number: fn() -> Float Never! { Float{1.0} }
+    items: fn() -> [String] Never! { [] }
+    lookup: fn() -> [String: Int] Never! { {} }
+    maybe: fn() -> Int? Never! { None }
+    limits: fn() -> Duration Never! { 1ms }
+    pair: fn() -> (name: String, n: Int) Never! { ("", 1) }
   `);
   assert.deepEqual(found.map((row) => row.returnType),
     ["Bool", "Int", "String", "Float", "[String]", "[String: Int]", "Int?", "Duration", "(name: String, n: Int)"]);
@@ -72,40 +72,40 @@ test("return types preserve builtin, prelude and compound spellings", () => {
 
 test("calls resolve fully qualified, alias rows, member imports, use blocks and generics", () => {
   assert.deepEqual(ids(`use {
-        words :: core.text
-        pieces :: core.text.split
+        words: core.text
+        pieces: core.text.split
         core.math.[trim]
     }
-    fn run() { words.trim("a"); core.text.trim("b"); pieces<Int>(1); trim() }`),
+    run: fn() { words.trim("a"); core.text.trim("b"); pieces<Int>(1); trim() }`),
   ["core.text.trim", "core.text.trim", "core.text.split", "core.math.trim"]);
-  assert.deepEqual(ids("use core.text\nfn trim() {}\nfn run() { text.trim(\"a\") }"), ["core.text.trim"]);
+  assert.deepEqual(ids("use core.text\ntrim: fn() {}\nrun: fn() { text.trim(\"a\") }"), ["core.text.trim"]);
 });
 
 test("comments, strings, references and declarations do not count as calls", () => {
-  assert.deepEqual(ids(`use t :: core.text
+  assert.deepEqual(ids(`use t: core.text
     // t.unused()
     /* t.unused() */
-    text :: "t.unused()"
-    reference :: t.unused
-    fn unused() {}
-    fn run() { print("{t.trim(\"actual call\")}") }
+    text: "t.unused()"
+    reference: t.unused
+    unused: fn() {}
+    run: fn() { print("{t.trim(\"actual call\")}") }
   `), ["core.text.trim"]);
 });
 
 test("scoped aliases do not escape a block or credit a same-named module", () => {
-  assert.deepEqual(ids(`use t :: core.text
-    fn run() {
-      { use t :: core.math; t.trim() }
+  assert.deepEqual(ids(`use t: core.text
+    run: fn() {
+      { use t: core.math; t.trim() }
       t.trim("a")
     }`), ["core.math.trim", "core.text.trim"]);
 });
 
 test("qualified types, typed receivers, inferred constructors and chained calls", () => {
-  assert.deepEqual(ids(`use crypto :: core.crypto
+  assert.deepEqual(ids(`use crypto: core.crypto
     use core.crypto.[Hasher]
-    fn run(h: Hasher) {
+    run: fn(h: Hasher) {
       h.digest()
-      value :: crypto.new()
+      value: crypto.new()
       value.digest()
       Hasher.new().digest()
       unknown.digest()
@@ -113,14 +113,14 @@ test("qualified types, typed receivers, inferred constructors and chained calls"
 });
 
 test("embedded host programs isolate alias environments and ignore host comments", () => {
-  const programs = embeddedPrograms(`// r#"use t :: core.text; t.unused()"#
-    let first = r#"use t :: core.text
-      fn run() { t.trim(\"a\") }"#;
-    let second = r##"use t :: core.math
-      fn run() { t.trim() }"##;
-    let third = "use t :: core.text\\nfn run() { t.split<Int>(1) }";
+  const programs = embeddedPrograms(`// r#"use t: core.text; t.unused()"#
+    let first = r#"use t: core.text
+      run: fn() { t.trim(\"a\") }"#;
+    let second = r##"use t: core.math
+      run: fn() { t.trim() }"##;
+    let third = "use t: core.text\\nrun: fn() { t.split<Int>(1) }";
     let message = "core.text.unused()";
-    let fourth = r"fn run() { core.text.trim() }";
+    let fourth = r"run: fn() { core.text.trim() }";
   `);
   assert.equal(programs.length, 4);
   assert.deepEqual(programs.flatMap((program) => ids(program)), ["core.text.trim", "core.math.trim", "core.text.split", "core.text.trim"]);
@@ -137,16 +137,16 @@ function fixture(t) {
   };
   put("Core/demo/demo.jet", `/// Text mentioning unused() is not a doctest.
     /// \`\`\`jet
-    /// fn run() { used() }
+    /// run: fn() { used() }
     /// \`\`\`
-    fn used() {}
-    fn unused() {}
-    fn example_only() {}
-    fn test_only() {}
+    used: fn() {}
+    unused: fn() {}
+    example_only: fn() {}
+    test_only: fn() {}
   `);
-  put("Examples/features/basics/demo.jet", "use d :: core.demo\nfn run() { d.example_only(); d.example_only() }");
-  put("Examples/features/expected/fake.jet", "fn run() { core.demo.unused() }");
-  put("tests/demo.rs", 'let program = r#"fn run() { core.demo.test_only() }"#;');
+  put("Examples/features/basics/demo.jet", "use d: core.demo\nrun: fn() { d.example_only(); d.example_only() }");
+  put("Examples/features/expected/fake.jet", "run: fn() { core.demo.unused() }");
+  put("tests/demo.rs", 'let program = r#"run: fn() { core.demo.test_only() }"#;');
   return { root, put };
 }
 
@@ -161,12 +161,12 @@ test("census joins doctests, examples and embedded tests once per declaration", 
 });
 
 test("signatures keep generics, parameters and the result type, without comments or layout", () => {
-  const found = publicFunctions("Core/Demo/Demo.jet", `fn plain() {}
-    fn pick<T: [Encode, Decode]>(
+  const found = publicFunctions("Core/Demo/Demo.jet", `plain: fn() {}
+    pick: fn<T: [Encode, Decode]>(
         items: [T], // the source
         at: Int,
     ) -> T? Never! { None }
-    struct Box { fn put(&self, value: fn(Int) -> Int) -[FS]> Bool Never! { true } }
+    Box: struct { put: fn(&self, value: fn(Int) -> Int) -[FS]> Bool Never! { true } }
   `);
   assert.deepEqual(found.map((row) => row.signature),
     ["()", "<T: [Encode, Decode]>(items: [T], at: Int) -> T?", "(&self, value: fn(Int) -> Int) -> Bool"]);
@@ -217,12 +217,12 @@ test("CLI initializes, checks without rewriting, only removes, and refuses unlis
     assert.equal(baseline.split("\n")[4].trim(), '{"name":"unused","signature":"()"}');
     assert.equal(main(["--check"], root), 0);
     assert.equal(readFileSync(path, "utf8"), baseline);
-    put("tests/extra.jet", "fn run() { core.demo.unused() }");
+    put("tests/extra.jet", "run: fn() { core.demo.unused() }");
     assert.equal(main(["--check"], root), 0);
     assert.equal(readFileSync(path, "utf8"), baseline);
     assert.equal(main(["--write"], root), 0);
     assert.deepEqual(JSON.parse(readFileSync(path, "utf8")), listed({}));
-    put("tests/extra.jet", "fn run() {}");
+    put("tests/extra.jet", "run: fn() {}");
     assert.equal(main(["--check"], root), 1);
     assert.equal(main(["--write"], root), 1);
     assert.deepEqual(JSON.parse(readFileSync(path, "utf8")), listed({}));

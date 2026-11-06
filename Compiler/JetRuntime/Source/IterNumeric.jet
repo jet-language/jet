@@ -1,17 +1,17 @@
 // Numeric terminals retain the reference's collect-before-reduce ordering.
 // Fixed-width integers sum into two machine words, then round only once.
-fn iter_unsigned(word: I64) -> U64 {
+iter_unsigned: fn(word: I64) -> U64 {
     wrapping(U64{word.bit_and(I64{9223372036854775807})}).bit_or((if (word < I64{0}) -> U64{9223372036854775808} else -> U64{0}))
 }
 
-fn iter_signed(word: U64) -> I64 {
+iter_signed: fn(word: U64) -> I64 {
     wrapping(I64{word.bit_and(U64{9223372036854775807})}).bit_or((if (word >= U64{9223372036854775808}) -> I64{-9223372036854775808} else -> I64{0}))
 }
 
 // Signed i128-as-f64 rounding, ties to even. Per-element Float conversion
 // would lose cancellation and round the total more than once.
-fn iter_wide_float(high: I64, low: U64) -> Float {
-    negative :: high < I64{0}
+iter_wide_float: fn(high: I64, low: U64) -> Float {
+    negative: high < I64{0}
     hi := iter_unsigned(high)
     lo := low
     if negative {
@@ -52,12 +52,12 @@ fn iter_wide_float(high: I64, low: U64) -> Float {
     if negative -> -value else -> value
 }
 
-#Export(c) fn jet_rt_native_iter_average_float(source: I64) -> Float {
-    node :: iter_collect_node(source)
+#Export(c) jet_rt_native_iter_average_float: fn(source: I64) -> Float {
+    node: iter_collect_node(source)
     if (node == I64{0}) { return Float{0.0} }
-    header :: trap_word(wrapping(node + I64{112}))
-    data :: trap_word(wrapping(header + I64{16}))
-    length :: trap_word(header)
+    header: trap_word(wrapping(node + I64{112}))
+    data: trap_word(wrapping(header + I64{16}))
+    length: trap_word(header)
     at := I64{0}
     sum := Float{-0.0}
     loop at < length {
@@ -68,22 +68,22 @@ fn iter_wide_float(high: I64, low: U64) -> Float {
     if (length == I64{0}) -> Float{0.0} else -> sum / iter_wide_float(I64{0}, wrapping(U64{length}))
 }
 
-#Export(c) fn jet_rt_native_iter_average_int(source: I64) -> Float {
-    node :: iter_collect_node(source)
+#Export(c) jet_rt_native_iter_average_int: fn(source: I64) -> Float {
+    node: iter_collect_node(source)
     if (node == I64{0}) { return Float{0.0} }
-    meta :: iter_meta(node)
-    kind :: trap_word(wrapping(meta + I64{48})).bit_and(I64{4294967295})
-    width :: trap_word(wrapping(meta + I64{48})) >> I64{32}
-    header :: trap_word(wrapping(node + I64{112}))
-    data :: trap_word(wrapping(header + I64{16}))
-    length :: trap_word(header)
+    meta: iter_meta(node)
+    kind: trap_word(wrapping(meta + I64{48})).bit_and(I64{4294967295})
+    width: trap_word(wrapping(meta + I64{48})) >> I64{32}
+    header: trap_word(wrapping(node + I64{112}))
+    data: trap_word(wrapping(header + I64{16}))
+    length: trap_word(header)
     at := I64{0}
     sum := Float{0.0}
     if (kind == I64{1}) {
-        accumulator :: coll_slot_new(meta)
+        accumulator: coll_slot_new(meta)
         trap_store(accumulator, jet_int_owned_from_i64(I64{0}))
         loop at < length {
-            next_sum :: jet_int_add(trap_word(accumulator), trap_word(wrapping(data + at * trap_word(meta))))
+            next_sum: jet_int_add(trap_word(accumulator), trap_word(wrapping(data + at * trap_word(meta))))
             int_discard(trap_word(accumulator))
             trap_store(accumulator, next_sum)
             at += I64{1}
@@ -101,7 +101,7 @@ fn iter_wide_float(high: I64, low: U64) -> Float {
             }
             bits := iter_unsigned(word)
             if (width < I64{64} && kind == I64{3}) { bits = bits.bit_and((U64{1} << wrapping(U64{width})) - U64{1}) }
-            added :: wrapping(lo + bits)
+            added: wrapping(lo + bits)
             hi = wrapping(hi + (if (kind == I64{2} && word < I64{0}) -> I64{-1} else -> I64{0}) + (if added < lo -> I64{1} else -> I64{0}))
             lo = added
             at += I64{1}
@@ -114,7 +114,7 @@ fn iter_wide_float(high: I64, low: U64) -> Float {
 
 // Seed lane zero, source i in lane i&7, then the fixed eight-lane tree. Scalar
 // locals need no scratch allocation.
-fn coll_f64_fixed(data: I64, length: I64, seed: Float) -> Float {
+coll_f64_fixed: fn(data: I64, length: I64, seed: Float) -> Float {
     if (length == I64{0}) { return seed }
     a0 := seed
     a1 := Float{0.0}
@@ -143,8 +143,8 @@ fn coll_f64_fixed(data: I64, length: I64, seed: Float) -> Float {
     if (at + I64{4} < length) { a4 += rt_f64_from_bits(trap_word(wrapping(data + (at + I64{4}) * I64{8}))) }
     if (at + I64{5} < length) { a5 += rt_f64_from_bits(trap_word(wrapping(data + (at + I64{5}) * I64{8}))) }
     if (at + I64{6} < length) { a6 += rt_f64_from_bits(trap_word(wrapping(data + (at + I64{6}) * I64{8}))) }
-    left :: (a0 + a1) + (a2 + a3)
-    right :: (a4 + a5) + (a6 + a7)
+    left: (a0 + a1) + (a2 + a3)
+    right: (a4 + a5) + (a6 + a7)
     left + right
 }
 
@@ -152,17 +152,17 @@ fn coll_f64_fixed(data: I64, length: I64, seed: Float) -> Float {
 // fixed-tree merges with zero seed and odd carry. No callback or external side
 // effect exists here; scheduling cannot change the indexed partials or merge
 // order. The boundary borrows the input slots.
-#Export(c) fn jet_list_para_fold_add_fixed_f64(data: I64, length: I64, seed: Float) -> Float {
+#Export(c) jet_list_para_fold_add_fixed_f64: fn(data: I64, length: I64, seed: Float) -> Float {
     if (length <= I64{0}) { return seed }
     if (length <= I64{64}) { return coll_f64_fixed(data, length, seed) }
-    count :: length / I64{64} + (if (length % I64{64} == I64{0}) -> I64{0} else -> I64{1})
-    partials :: jet_rt_alloc(count * I64{8}, I64{8})
+    count: length / I64{64} + (if (length % I64{64} == I64{0}) -> I64{0} else -> I64{1})
+    partials: jet_rt_alloc(count * I64{8}, I64{8})
     chunk := I64{0}
     loop chunk < count {
-        start :: chunk * I64{64}
-        remaining :: length - start
-        width :: if (remaining < I64{64}) -> remaining else -> I64{64}
-        value :: coll_f64_fixed(wrapping(data + start * I64{8}), width, seed)
+        start: chunk * I64{64}
+        remaining: length - start
+        width: if (remaining < I64{64}) -> remaining else -> I64{64}
+        value: coll_f64_fixed(wrapping(data + start * I64{8}), width, seed)
         trap_store(wrapping(partials + chunk * I64{8}), rt_f64_bits(value))
         chunk += I64{1}
     }
@@ -172,7 +172,7 @@ fn coll_f64_fixed(data: I64, length: I64, seed: Float) -> Float {
         write := I64{0}
         loop read < active {
             if (read + I64{1} < active) {
-                value :: coll_f64_fixed(wrapping(partials + read * I64{8}), I64{2}, Float{0.0})
+                value: coll_f64_fixed(wrapping(partials + read * I64{8}), I64{2}, Float{0.0})
                 trap_store(wrapping(partials + write * I64{8}), rt_f64_bits(value))
             } else { trap_store(wrapping(partials + write * I64{8}), trap_word(wrapping(partials + read * I64{8}))) }
             read += I64{2}
@@ -180,7 +180,7 @@ fn coll_f64_fixed(data: I64, length: I64, seed: Float) -> Float {
         }
         active = write
     }
-    result :: rt_f64_from_bits(trap_word(partials))
+    result: rt_f64_from_bits(trap_word(partials))
     jet_rt_free(partials, count * I64{8}, I64{8})
     result
 }

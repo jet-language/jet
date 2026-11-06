@@ -1,9 +1,9 @@
 
-use process :: core.process
+use process: core.process
 
-fn run() {
-    policy :: process.workspace()
-    spec :: process.cmd(["/bin/sh", "-c", "printf '%s' \"$SECRET_TOKEN\" >&2; exit 17"])
+run: fn() {
+    policy: process.workspace()
+    spec: process.cmd(["/bin/sh", "-c", "printf '%s' \"$SECRET_TOKEN\" >&2; exit 17"])
         .env_clear()
         .env("SECRET_TOKEN", "authority-failure-secret")
         .stdout(.Capture)
@@ -12,7 +12,7 @@ fn run() {
         .under(policy)
     if spec.plan() == {
         .Ok(_) -> {
-            receipt :: spec.run() ?? panic("authority-bound failed receipt missing")
+            receipt: spec.run() ?? panic("authority-bound failed receipt missing")
             print(receipt.success)
             print(receipt.code == 17)
             print(receipt.errors)

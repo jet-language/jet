@@ -2,9 +2,9 @@ policy audit(topic: String) {
     wrap(call) { return "{topic}:{call()}" }
 }
 
-fn load_user() -> String { "ok" }
+load_user: fn() -> String { "ok" }
 
-fn run() {
-    selected :: apply(audit("users.load"), load_user)
+run: fn() {
+    selected: apply(audit("users.load"), load_user)
     print(selected())
 }

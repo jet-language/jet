@@ -8,8 +8,8 @@ use {
     core.encoding.hex
     core.encoding.json
 }
-fn visit(root: String, path: String) {
-    info :: files.stat(path.copy())
+visit: fn(root: String, path: String) {
+    info: files.stat(path.copy())
     kind := 4
     if info.is_symlink -> kind = 3
     else if info.is_dir -> kind = 1
@@ -24,16 +24,16 @@ fn visit(root: String, path: String) {
     // Hex is injective over bytes; JSON quoting is injective over relative paths.
     relative := ""
     if path != root -> relative = files.relative(path.copy(), root.copy())
-    shown :: json.to_string(Dyn.Text(relative))
-    modified :: info.modified.to_unix_ns() ?? panic("mtime outside Unix nanosecond range")
+    shown: json.to_string(Dyn.Text(relative))
+    modified: info.modified.to_unix_ns() ?? panic("mtime outside Unix nanosecond range")
     print("{shown}\t{kind}\t{info.size}\t{mode}\tsome:{modified}\t{bytes}")
     if !info.is_dir -> return
-    entries :: files.list_dir(path)
+    entries: files.list_dir(path)
     children := [String]{}
     loop entry in entries -> &children.push(entry.path)
     &children.sort()
     loop child in children -> visit(root.copy(), child)
 }
-fn run(root: String) {
+run: fn(root: String) {
     visit(root.copy(), root)
 }

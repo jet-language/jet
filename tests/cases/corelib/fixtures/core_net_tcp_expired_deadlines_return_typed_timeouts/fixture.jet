@@ -1,15 +1,15 @@
-package { name: "tcp-expired-deadlines" authority: { allow: [Net, Time] } }
+package: { name: "tcp-expired-deadlines" authority: { allow: [Net, Time] } }
 use {
-    net :: core.net
-    tasks :: core.tasks
-    time :: core.time
+    net: core.net
+    tasks: core.tasks
+    time: core.time
 }
 
-fn run() {
-    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
-    typed_address :: net.listener_local_socket_addr(listener) ?? panic("address")
-    address :: net.socket_to_string(typed_address)
-    server :: task {
+run: fn() {
+    listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    typed_address: net.listener_local_socket_addr(listener) ?? panic("address")
+    address: net.socket_to_string(typed_address)
+    server: task {
         first := net.tcp_accept(listener) ?? return
         time.sleep(100ms)
         first.close() ?? return

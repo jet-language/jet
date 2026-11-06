@@ -13,7 +13,7 @@ use {
 
 // The declared IR program (ir_program_declared) over the type, impl and
 // constant rows of every module of a run's graph (jet_driver_comptime_stage).
-fn jet_driver_comptime_declared(modules: [SemaGraphModuleResult]) -> IRProgram Never! {
+jet_driver_comptime_declared: fn(modules: [SemaGraphModuleResult]) -> IRProgram Never! {
     type_defs := [TTypeDef]{}
     impls := [TImplDef]{}
     constants := [TConstantDef]{}
@@ -32,11 +32,11 @@ fn jet_driver_comptime_declared(modules: [SemaGraphModuleResult]) -> IRProgram N
 // with none; any other builds over the run's declared program, whose
 // constant rows the values landed since its last build take over first (a
 // key's first landed value stands).
-fn jet_driver_comptime_ir_build(batch: JetDriverComptimeBatch, start: Int, staging: &JetDriverComptimeStaging, values: [SemaComptimeItemValue], decls: DeclTable) -> JetEvalIRComptime {
+jet_driver_comptime_ir_build: fn(batch: JetDriverComptimeBatch, start: Int, staging: &JetDriverComptimeStaging, values: [SemaComptimeItemValue], decls: DeclTable) -> JetEvalIRComptime {
     functions := batch.functions.copy()
     keys := [String]{}
     loop index in start..<batch.entries.len() {
-        entry :: batch.entries[index]
+        entry: batch.entries[index]
         if entry.plain != None -> next
         item := ir_comptime_item_function(entry.request, entry.request.module_identity)
         // The request's expression carries its own function-local ids
@@ -50,7 +50,7 @@ fn jet_driver_comptime_ir_build(batch: JetDriverComptimeBatch, start: Int, stagi
     if batch.bare -> return jet_eval_ir_comptime_build(^functions, decls, keys, [TTypeDef]{}, [TImplDef]{}, [TConstantDef]{}, true)
     landed := [TConstantDef]{}
     loop index in staging.landed..<values.len() {
-        value :: values[index]
+        value: values[index]
         // A startup value has no build-time value; no evaluation reads it
         // (a reader of it is computed at startup too: jet_driver_comptime_demote).
         if value.startup -> next
@@ -62,7 +62,7 @@ fn jet_driver_comptime_ir_build(batch: JetDriverComptimeBatch, start: Int, stagi
 }
 
 // The constant row of landed value `value` under `key`.
-fn jet_driver_comptime_value_row(value: SemaComptimeItemValue, key: String) -> TConstantDef Never! {
+jet_driver_comptime_value_row: fn(value: SemaComptimeItemValue, key: String) -> TConstantDef Never! {
     TConstantDef{module_identity: value.module_identity.copy(), key: key.copy(), name: key.copy(), span: Span{start: 0, end: 0}, visibility: TVisibility.Private, ty: value.ty.copy(), is_comptime: true, is_storage: false, value: value.value.copy()}
 }
 
@@ -71,12 +71,12 @@ fn jet_driver_comptime_value_row(value: SemaComptimeItemValue, key: String) -> T
 // values out by, run on its context `args`, the config carrying the
 // invocation's build host. Without a result, `problem` says what kept the
 // entry from running.
-struct JetDriverInvocationRun {
+JetDriverInvocationRun: struct {
     result: JetEvalIRResult?
     problem: String?
 }
 
-fn jet_driver_invocation_run(inputs: ^JetDriverLoweringInputs, args: [TComptimeValue], config: JetEvalConfig, span: Span) -> JetDriverInvocationRun {
+jet_driver_invocation_run: fn(inputs: ^JetDriverLoweringInputs, args: [TComptimeValue], config: JetEvalConfig, span: Span) -> JetDriverInvocationRun {
     checked := ^inputs
     keys := [String]{}
     if checked.entry_key == .Val(key) -> &keys.push(key.copy())
@@ -96,9 +96,9 @@ fn jet_driver_invocation_run(inputs: ^JetDriverLoweringInputs, args: [TComptimeV
 // that waits for it (ir_constant). Its effects are its call sites' rows and
 // callees, so the application's required authority covers what startup
 // reads (jet_driver_required_effects).
-fn jet_driver_comptime_startup_function(request: SemaComptimeItemRequest) -> FnBody Never! {
+jet_driver_comptime_startup_function: fn(request: SemaComptimeItemRequest) -> FnBody Never! {
     init := ir_comptime_item_function(request, request.module_identity)
-    parts :: request.key.split(":").to_list()
+    parts: request.key.split(":").to_list()
     init.name = "{IR_STARTUP_FUNCTION_PREFIX}{if parts.len() > 0 -> parts[parts.len() - 1] else -> request.key}"
     init.key = "{request.module_identity}::__startup::{request.key}"
     init.tree = request.expression.tree.copy()
@@ -119,7 +119,7 @@ fn jet_driver_comptime_startup_function(request: SemaComptimeItemRequest) -> FnB
     init
 }
 
-fn jet_driver_comptime_add_name(names: &[String], name: String) Never! {
+jet_driver_comptime_add_name: fn(names: &[String], name: String) Never! {
     loop previous in names {
         if previous == name -> return
     }

@@ -25,11 +25,11 @@ import { fileURLToPath } from "node:url";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
 const BATTERIES = {
-  json: { use: "use m :: core.encoding.json", call: "m.to_string(Dyn.Int(42)) ?? panic(err.reason)" },
-  regex: { use: "use m :: core.regex", call: "m.escape(\"4.2\")" },
-  time: { use: "use m :: core.time", call: "m.datetime(2024, 3, 1, 12, 34, 56)" },
-  data: { use: "use m :: core.data", call: "m.sum([40.0, 2.0])" },
-  http: { use: "use m :: core.http", call: "m.status_ok()" },
+  json: { use: "use m: core.encoding.json", call: "m.to_string(Dyn.Int(42)) ?? panic(err.reason)" },
+  regex: { use: "use m: core.regex", call: "m.escape(\"4.2\")" },
+  time: { use: "use m: core.time", call: "m.datetime(2024, 3, 1, 12, 34, 56)" },
+  data: { use: "use m: core.data", call: "m.sum([40.0, 2.0])" },
+  http: { use: "use m: core.http", call: "m.status_ok()" },
 };
 
 function parseArgs(argv) {
@@ -70,9 +70,9 @@ function sha256(path) {
 
 function program(battery, arm) {
   const b = BATTERIES[battery];
-  if (arm === "control") return `fn run() {\n    print("42")\n}\n`;
-  if (arm === "import") return `${b.use}\n\nfn run() {\n    print("42")\n}\n`;
-  return `${b.use}\n\nfn run() {\n    print(${b.call})\n}\n`;
+  if (arm === "control") return `run: fn() {\n    print("42")\n}\n`;
+  if (arm === "import") return `${b.use}\n\nrun: fn() {\n    print("42")\n}\n`;
+  return `${b.use}\n\nrun: fn() {\n    print(${b.call})\n}\n`;
 }
 
 function sections(binary) {

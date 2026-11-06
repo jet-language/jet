@@ -7,23 +7,23 @@ use jet_foundation.[BodyUnitRounding, Dimension, Span, Type, measure_signed_valu
 // `UnitConvert`: the magnitude times `scale`, plus `offset` (each a checked
 // "numerator/denominator" ratio). The identity conversion is the value
 // itself. A fallible conversion is checked exactly (ir_unit_convert_checked).
-fn ir_unit_convert(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, argument: Int, scale: String, offset: String, rounding: BodyUnitRounding?, fallible: Bool, span: Span) -> Int Never! {
+ir_unit_convert: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, argument: Int, scale: String, offset: String, rounding: BodyUnitRounding?, fallible: Bool, span: Span) -> Int Never! {
     if fallible -> return ir_unit_convert_checked(&m, p, &b, ty, argument, scale, offset, rounding, span)
     if rounding != None -> return ir_fail_slot(&b, span, "infallible rounded unit conversion to {ir_type_name(ty)}")
-    value :: ir_expr(&m, p, &b, argument)
+    value: ir_expr(&m, p, &b, argument)
     if ir_failed(b) -> return -1
     if scale == "1/1" && offset == "0/1" -> return value
     if ir_kind_of(m, b, value) != .Float -> return ir_fail_slot(&b, span, "unit conversion to {ir_type_name(ty)}")
-    parts :: scale.split("/").to_list()
+    parts: scale.split("/").to_list()
     if parts.len() != 2 -> return ir_fail_slot(&b, span, "unit scale {scale}")
     scaled := value
-    one :: Float{1.0}
-    numerator :: ir_unit_ratio_part(parts[0])
+    one: Float{1.0}
+    numerator: ir_unit_ratio_part(parts[0])
     if numerator != one -> scaled = ir_unit_float_op(&m, &b, IROp.Mul, scaled, numerator)
-    denominator :: ir_unit_ratio_part(parts[1])
+    denominator: ir_unit_ratio_part(parts[1])
     if denominator != one -> scaled = ir_unit_float_op(&m, &b, IROp.Div, scaled, denominator)
     if offset != "0/1" {
-        shift :: offset.split("/").to_list()
+        shift: offset.split("/").to_list()
         if shift.len() != 2 -> return ir_fail_slot(&b, span, "unit offset {offset}")
         scaled = ir_unit_float_op(&m, &b, IROp.Add, scaled, ir_unit_ratio_part(shift[0]) / ir_unit_ratio_part(shift[1]))
     }
@@ -34,65 +34,65 @@ fn ir_unit_convert(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, argument
 // its Core/Math/Math.jet helper proves the converted value exact with
 // rational arithmetic, failing with the conversion's String reason. The
 // helper's `Float String!` result is this node's Result of the unit.
-fn ir_unit_convert_checked(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, argument: Int, scale: String, offset: String, rounding: BodyUnitRounding?, span: Span) -> Int Never! {
-    helper :: ir_unit_conversion_helper(rounding != None)
-    row :: ir_function_row(p, "function:<corelib>/core.math::{helper}") ?? return ir_fail_slot(&b, span, "unit conversion to {ir_type_name(ty)} without core.math")
-    value :: ir_expr(&m, p, &b, argument)
+ir_unit_convert_checked: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, argument: Int, scale: String, offset: String, rounding: BodyUnitRounding?, span: Span) -> Int Never! {
+    helper: ir_unit_conversion_helper(rounding != None)
+    row: ir_function_row(p, "function:<corelib>/core.math::{helper}") ?? return ir_fail_slot(&b, span, "unit conversion to {ir_type_name(ty)} without core.math")
+    value: ir_expr(&m, p, &b, argument)
     if ir_failed(b) -> return -1
     values := [Int]{value}
     &values.push(ir_unit_const_text(&m, &b, scale))
     &values.push(ir_unit_const_text(&m, &b, offset))
     failure := "unit conversion is not exactly representable"
     if rounding == .Val(rounded) {
-        int_row :: ir_value_type(&m, p, Type.Int) ?? return ir_type_fail(&b, span, Type.Int)
-        mode :: if rounded.mode == {
+        int_row: ir_value_type(&m, p, Type.Int) ?? return ir_type_fail(&b, span, Type.Int)
+        mode: if rounded.mode == {
             .TowardZero -> 0
             .Floor -> 1
             .Ceiling -> 2
             .NearestEven -> 3
         }
         &values.push(ir_int_constant(&m, &b, int_row, mode))
-        digits :: ir_expr(&m, p, &b, rounded.digits)
+        digits: ir_expr(&m, p, &b, rounded.digits)
         if ir_failed(b) -> return -1
         &values.push(digits)
         &values.push(ir_unit_const_text(&m, &b, "rounded unit conversion needs nonnegative digits"))
         failure = "unit conversion overflows its runtime representation"
     }
     &values.push(ir_unit_const_text(&m, &b, failure))
-    result :: ir_call_row_typed_values(&m, p, &b, row, [Type]{Type.String}, values, span)
+    result: ir_call_row_typed_values(&m, p, &b, row, [Type]{Type.String}, values, span)
     if ir_failed(b) || result < 0 -> return result
-    want :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    want: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
     ir_adapt(&m, p, &b, result, want, span)
 }
 
 // The Core/Math/Math.jet helper of a fallible unit conversion.
-fn ir_unit_conversion_helper(rounded: Bool) -> String Never! {
+ir_unit_conversion_helper: fn(rounded: Bool) -> String Never! {
     if rounded -> "__unit_conversion_rounded" else -> "__unit_conversion_exact"
 }
 
 // A String constant of static `text`.
-fn ir_unit_const_text(m: &IRModule, b: &IRBuilder, text: String) -> Int Never! {
-    string_row :: ir_string_row(&m)
-    slot :: ir_temp(&m, &b, string_row)
+ir_unit_const_text: fn(m: &IRModule, b: &IRBuilder, text: String) -> Int Never! {
+    string_row: ir_string_row(&m)
+    slot: ir_temp(&m, &b, string_row)
     ir_emit(&b.f, IROp.ConstText, slot, ir_intern_text(&m, text), -1, -1, b.line)
     slot
 }
 
 // `slot op constant`, in `slot`'s Float row.
-fn ir_unit_float_op(m: &IRModule, b: &IRBuilder, op: IROp, slot: Int, constant: Float) -> Int Never! {
-    operand :: ir_temp_like(&m, &b, slot)
+ir_unit_float_op: fn(m: &IRModule, b: &IRBuilder, op: IROp, slot: Int, constant: Float) -> Int Never! {
+    operand: ir_temp_like(&m, &b, slot)
     ir_emit(&b.f, IROp.Const, operand, ir_float_constant_bits(constant, false), -1, -1, b.line)
-    dst :: ir_temp_like(&m, &b, slot)
+    dst: ir_temp_like(&m, &b, slot)
     ir_emit(&b.f, op, dst, slot, operand, -1, b.line)
     dst
 }
 
 // One signed decimal side of a checked unit ratio.
-fn ir_unit_ratio_part(text: String) -> Float Never! {
+ir_unit_ratio_part: fn(text: String) -> Float Never! {
     negative := false
     total := Float{0.0}
     loop byte in text.bytes() {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         if {
             code == 45 -> negative = true
             code >= 48 && code <= 57 -> total = total * Float{10.0} + Float.from_int(code - 48)
@@ -105,14 +105,14 @@ fn ir_unit_ratio_part(text: String) -> Float Never! {
 // The text a unit value shows: its magnitude (jet_fmt_quantity, which drops
 // only an incidental `.0`) and its unit label, or -1 when `ty` carries no
 // unit.
-fn ir_unit_text(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, slot: Int) -> Int Never! {
-    label :: ir_unit_label(p, ty) ?? return -1
-    string_row :: ir_string_row(&m)
-    magnitude :: ir_runtime(&m, &b, "jet_fmt_quantity", [Int]{slot}, string_row)
-    pointer :: ir_pointer_row(&m)
-    builder :: ir_runtime(&m, &b, "jet_rt_string_builder_new", [Int]{}, pointer)
+ir_unit_text: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, slot: Int) -> Int Never! {
+    label: ir_unit_label(p, ty) ?? return -1
+    string_row: ir_string_row(&m)
+    magnitude: ir_runtime(&m, &b, "jet_fmt_quantity", [Int]{slot}, string_row)
+    pointer: ir_pointer_row(&m)
+    builder: ir_runtime(&m, &b, "jet_rt_string_builder_new", [Int]{}, pointer)
     b.fresh[builder] = false
-    _ :: ir_runtime(&m, &b, "jet_rt_string_builder_push", [Int]{builder, magnitude}, -1)
+    _: ir_runtime(&m, &b, "jet_rt_string_builder_push", [Int]{builder, magnitude}, -1)
     ir_release(&m, &b, magnitude)
     ir_push_static(&m, &b, builder, " {label}")
     ir_runtime(&m, &b, "jet_rt_string_builder_finish", [Int]{builder}, string_row)
@@ -120,7 +120,7 @@ fn ir_unit_text(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, slot: Int) 
 
 // A unit type's label is the member that minted it; a dimensioned quantity
 // spells each axis in its family's base unit.
-fn ir_unit_label(p: IRProgram, ty: Type) -> String? Never! {
+ir_unit_label: fn(p: IRProgram, ty: Type) -> String? Never! {
     if ty == {
         .Quantity(_, dimension) -> Val(ir_quantity_label(p, dimension))
         .Named(name) -> ir_unit_member_label(p, name)
@@ -129,21 +129,21 @@ fn ir_unit_label(p: IRProgram, ty: Type) -> String? Never! {
     }
 }
 
-fn ir_unit_member_label(p: IRProgram, name: String) -> String? Never! {
-    row :: ir_type_def(p, name) ?? return None
+ir_unit_member_label: fn(p: IRProgram, name: String) -> String? Never! {
+    row: ir_type_def(p, name) ?? return None
     if p.types[row].kind == {
         .Distinct(_, _) -> {}
         else -> return None
     }
-    owner :: p.types[row].module_identity
-    type_name :: p.types[row].name
+    owner: p.types[row].module_identity
+    type_name: p.types[row].name
     loop index in 0..<p.types.len() {
         if p.types[index].module_identity != owner -> next
         if p.types[index].kind == .UnitFamily(members, _) {
             loop member in members {
-                minted :: unit_family_type_name(member)
+                minted: unit_family_type_name(member)
                 if !type_name.starts_with(minted) -> next
-                rest :: type_name.len() - minted.len()
+                rest: type_name.len() - minted.len()
                 if rest == 0 || (rest == 5 && (type_name.ends_with("Point") || type_name.ends_with("Delta"))) -> return Val(member)
             }
         }
@@ -154,24 +154,24 @@ fn ir_unit_member_label(p: IRProgram, name: String) -> String? Never! {
 // Rust `quantity_unit_label`: the positive axes over the negative ones, each
 // its family's base unit with any power past one (`meter*kilogram/ns^2`).
 // An axis with no visible family is Time's `ns` or its lowercase name.
-fn ir_quantity_label(p: IRProgram, dimension: Dimension) -> String Never! {
+ir_quantity_label: fn(p: IRProgram, dimension: Dimension) -> String Never! {
     numerator := [String]{}
     denominator := [String]{}
     loop axis in dimension.axes {
-        exponent :: measure_signed_value(axis.exponent) ?? 0
+        exponent: measure_signed_value(axis.exponent) ?? 0
         if exponent == 0 -> next
-        family :: ir_short_name(axis.name)
-        label :: ir_unit_family_base(p, family) ?? if family == "Time" -> "ns" else -> family.to_lower()
-        power :: if exponent < 0 -> -exponent else -> exponent
-        part :: if power == 1 -> label else -> "{label}^{power}"
+        family: ir_short_name(axis.name)
+        label: ir_unit_family_base(p, family) ?? if family == "Time" -> "ns" else -> family.to_lower()
+        power: if exponent < 0 -> -exponent else -> exponent
+        part: if power == 1 -> label else -> "{label}^{power}"
         if exponent > 0 -> &numerator.push(part) else -> &denominator.push(part)
     }
-    top :: if numerator.len() == 0 -> "1" else -> numerator.join("*")
+    top: if numerator.len() == 0 -> "1" else -> numerator.join("*")
     if denominator.len() == 0 -> return top
     "{top}/{denominator.join("*")}"
 }
 
-fn ir_unit_family_base(p: IRProgram, family: String) -> String? Never! {
+ir_unit_family_base: fn(p: IRProgram, family: String) -> String? Never! {
     loop index in 0..<p.types.len() {
         if p.types[index].name != family -> next
         if p.types[index].kind == .UnitFamily(_, base) {

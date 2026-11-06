@@ -1,20 +1,20 @@
 // Checked semantic-identity diff and merge.
 use {
-    cli_files :: core.files
-    cli_process :: core.process
-    cli_struct_text :: core.text
+    cli_files: core.files
+    cli_process: core.process
+    cli_struct_text: core.text
     jet_driver.[JetDriverCompileMode, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR]
     jet_foundation.[Diagnostic, sha256_hex]
     jet_parser.[jet_format_source]
 }
 
-struct JetCLIStructUnit {
+JetCLIStructUnit: struct {
     fact: JetCLISemDefinitionFact
     source: String
     leading: String
 }
 
-struct JetCLIStructDocument {
+JetCLIStructDocument: struct {
     path: String
     units: [JetCLIStructUnit]
     suffix: String
@@ -22,17 +22,17 @@ struct JetCLIStructDocument {
     operations: [JetCLISemOp]
 }
 
-enum JetCLIStructLoaded {
+JetCLIStructLoaded: enum {
     Document(document: JetCLIStructDocument)
     Failed(output: JetDriverVerbOutput)
 }
 
-struct JetCLIStructMatches {
+JetCLIStructMatches: struct {
     matched: [Int]
     ambiguous: [[Int]]
 }
 
-struct JetCLIStructChange {
+JetCLIStructChange: struct {
     rank: Int
     kind: String
     stable_id: String
@@ -41,7 +41,7 @@ struct JetCLIStructChange {
     operation: JetCLISemOp?
 }
 
-struct JetCLIStructConflict {
+JetCLIStructConflict: struct {
     kind: String
     stable_id: String
     identity: String
@@ -49,12 +49,12 @@ struct JetCLIStructConflict {
     theirs: String
 }
 
-struct JetCLIStructMerged {
+JetCLIStructMerged: struct {
     source: String
     conflicts: [JetCLIStructConflict]
 }
 
-fn jet_cli_structural_help(command: String) -> String? Never! {
+jet_cli_structural_help: fn(command: String) -> String? Never! {
     if command == "diff" {
         return Val("usage: jet diff --structural <before.jet> <after.jet> [--json]\n\nCompares checked Jet definitions by semantic identity.\n")
     }
@@ -64,18 +64,18 @@ fn jet_cli_structural_help(command: String) -> String? Never! {
     None
 }
 
-fn jet_cli_struct_fail(what: String, fix: String) -> JetDriverVerbOutput Never! {
+jet_cli_struct_fail: fn(what: String, fix: String) -> JetDriverVerbOutput Never! {
     jet_cli_report_output("", "E2104", what, jet_cli_why("E2104"), fix, false, JET_DRIVER_EXIT_USAGE)
 }
 
-fn jet_cli_struct_index_error(context: String, diagnostics: [Diagnostic]) -> JetDriverVerbOutput Never! {
+jet_cli_struct_index_error: fn(context: String, diagnostics: [Diagnostic]) -> JetDriverVerbOutput Never! {
     output := jet_cli_report_output("", "E2105", context, jet_cli_why("E2105"), "correct source errors; structural tools never merge unchecked code", false, JET_DRIVER_EXIT_USER_ERROR)
     loop diagnostic in diagnostics -> output.stderr = "{output.stderr}  {diagnostic.code}: {diagnostic.what}\n"
     output
 }
 
-fn jet_cli_struct_load(path: String) -> JetCLIStructLoaded {
-    source :: cli_files.read(path) ?? return JetCLIStructLoaded.Failed{output: jet_cli_struct_fail("could not read `{path}`: {jet_cli_io_error_text(err)}", "pass a readable Jet source file")}
+jet_cli_struct_load: fn(path: String) -> JetCLIStructLoaded {
+    source: cli_files.read(path) ?? return JetCLIStructLoaded.Failed{output: jet_cli_struct_fail("could not read `{path}`: {jet_cli_io_error_text(err)}", "pass a readable Jet source file")}
     if jet_cli_compile_file(path, false, None, JetDriverCompileMode.Doc) == {
         .Refused(refusal) -> return JetCLIStructLoaded.Failed{output: refusal}
         .Compiled(result, _) -> {
@@ -85,9 +85,9 @@ fn jet_cli_struct_load(path: String) -> JetCLIStructLoaded {
             if result.internal_problem == .Val(problem) {
                 return JetCLIStructLoaded.Failed{output: jet_cli_ice(problem)}
             }
-            index :: jet_cli_checked_semindex(result)
+            index: jet_cli_checked_semindex(result)
             units := [JetCLIStructUnit]{}
-            absolute :: jet_cli_report_path(jet_cli_report_cwd(), path)
+            absolute: jet_cli_report_path(jet_cli_report_cwd(), path)
             loop fact in index.definition_facts {
                 if jet_cli_report_path(jet_cli_report_cwd(), fact.module_path) != absolute -> next
                 if fact.span.start < 0 || fact.span.start > fact.span.end || fact.span.end > source.bytes().len() {
@@ -101,13 +101,13 @@ fn jet_cli_struct_load(path: String) -> JetCLIStructLoaded {
                 units[row].leading = if cursor <= units[row].fact.span.start -> jet_cli_doc_text(source.bytes(), cursor, units[row].fact.span.start) else -> ""
                 cursor = units[row].fact.span.end
             }
-            hash :: sha256_hex(source)
+            hash: sha256_hex(source)
             return JetCLIStructLoaded.Document{document: JetCLIStructDocument{path: absolute, units: units, suffix: jet_cli_doc_text(source.bytes(), cursor, source.bytes().len()), source_hash: hash, operations: jet_cli_sem_ops_for_file(path, hash)}}
         }
     }
 }
 
-fn jet_cli_struct_transition(before: JetCLIStructDocument, after: JetCLIStructDocument) -> [JetCLISemOp] {
+jet_cli_struct_transition: fn(before: JetCLIStructDocument, after: JetCLIStructDocument) -> [JetCLISemOp] {
     output := [JetCLISemOp]{}
     combined := before.operations
     loop operation in after.operations -> &combined.push(operation)
@@ -119,7 +119,7 @@ fn jet_cli_struct_transition(before: JetCLIStructDocument, after: JetCLIStructDo
     output
 }
 
-fn jet_cli_struct_rename(before: JetCLIStructUnit, after: JetCLIStructUnit, operations: [JetCLISemOp]) -> JetCLISemOp? Never! {
+jet_cli_struct_rename: fn(before: JetCLIStructUnit, after: JetCLIStructUnit, operations: [JetCLISemOp]) -> JetCLISemOp? Never! {
     loop operation in operations {
         if operation.kind != "rename" || operation.from != Val(before.fact.name) || operation.to != Val(after.fact.name) {
             next
@@ -134,11 +134,11 @@ fn jet_cli_struct_rename(before: JetCLIStructUnit, after: JetCLIStructUnit, oper
     None
 }
 
-fn jet_cli_struct_exact(left: JetCLIStructUnit, right: JetCLIStructUnit) -> Bool Never! {
+jet_cli_struct_exact: fn(left: JetCLIStructUnit, right: JetCLIStructUnit) -> Bool Never! {
     left.fact.kind == right.fact.kind && left.fact.name == right.fact.name
 }
 
-fn jet_cli_struct_match(base: [JetCLIStructUnit], side: [JetCLIStructUnit], operations: [JetCLISemOp]) -> JetCLIStructMatches Never! {
+jet_cli_struct_match: fn(base: [JetCLIStructUnit], side: [JetCLIStructUnit], operations: [JetCLISemOp]) -> JetCLIStructMatches Never! {
     result := (loop _ in base -> -1)
     ambiguous := (loop _ in base -> [Int]{})
     used := (loop _ in side -> false)
@@ -163,7 +163,7 @@ fn jet_cli_struct_match(base: [JetCLIStructUnit], side: [JetCLIStructUnit], oper
         loop stage in 0..<3 {
             loop (index, candidate) in side {
                 if used[index] -> next
-                matches :: if stage == {
+                matches: if stage == {
                     0 -> jet_cli_struct_rename(unit, candidate, operations) != None
                     1 -> candidate.fact.signature_id == unit.fact.signature_id
                     else -> candidate.fact.stable_id == unit.fact.stable_id
@@ -180,29 +180,29 @@ fn jet_cli_struct_match(base: [JetCLIStructUnit], side: [JetCLIStructUnit], oper
     JetCLIStructMatches{matched: result, ambiguous: ambiguous}
 }
 
-fn jet_cli_struct_change(rank: Int, kind: String, before: JetCLIStructUnit, after: JetCLIStructUnit?, operation: JetCLISemOp?) -> JetCLIStructChange Never! {
+jet_cli_struct_change: fn(rank: Int, kind: String, before: JetCLIStructUnit, after: JetCLIStructUnit?, operation: JetCLISemOp?) -> JetCLIStructChange Never! {
     stable := if after == .Val(unit) -> unit.fact.stable_id else -> before.fact.stable_id
     if operation == .Val(op) && op.targets.len() > 0 -> stable = op.targets[0].stable_id
-    identity :: if after == .Val(unit) -> Val(unit.fact.human_identity) else -> None
+    identity: if after == .Val(unit) -> Val(unit.fact.human_identity) else -> None
     JetCLIStructChange{rank: rank, kind: kind, stable_id: stable, before: Val(before.fact.human_identity), after: identity, operation: operation}
 }
 
-fn jet_cli_struct_diff(before: JetCLIStructDocument, after: JetCLIStructDocument) -> [JetCLIStructChange] {
-    operations :: jet_cli_struct_transition(before, after)
-    matches :: jet_cli_struct_match(before.units, after.units, operations)
+jet_cli_struct_diff: fn(before: JetCLIStructDocument, after: JetCLIStructDocument) -> [JetCLIStructChange] {
+    operations: jet_cli_struct_transition(before, after)
+    matches: jet_cli_struct_match(before.units, after.units, operations)
     used := (loop _ in after.units -> false)
     changes := [JetCLIStructChange]{}
     loop (row, left) in before.units {
-        right_row :: matches.matched[row]
+        right_row: matches.matched[row]
         if right_row < 0 {
             &changes.push(jet_cli_struct_change(1, "removed", left, None, None))
             next
         }
         used[right_row] = true
-        right :: after.units[right_row]
-        rename :: jet_cli_struct_rename(left, right, operations)
-        signature :: left.fact.signature_id != right.fact.signature_id
-        content :: left.fact.content_id != right.fact.content_id
+        right: after.units[right_row]
+        rename: jet_cli_struct_rename(left, right, operations)
+        signature: left.fact.signature_id != right.fact.signature_id
+        content: left.fact.content_id != right.fact.content_id
         if rename != None {
             &changes.push(jet_cli_struct_change(2, "renamed", left, Val(right), rename))
         }
@@ -222,11 +222,11 @@ fn jet_cli_struct_diff(before: JetCLIStructDocument, after: JetCLIStructDocument
     changes
 }
 
-fn jet_cli_struct_conflict(kind: String, base: JetCLIStructUnit, ours: JetCLIStructUnit, theirs: JetCLIStructUnit) -> JetCLIStructConflict Never! {
+jet_cli_struct_conflict: fn(kind: String, base: JetCLIStructUnit, ours: JetCLIStructUnit, theirs: JetCLIStructUnit) -> JetCLIStructConflict Never! {
     JetCLIStructConflict{kind: kind, stable_id: base.fact.stable_id, identity: base.fact.human_identity, ours: ours.fact.content_id, theirs: theirs.fact.content_id}
 }
 
-fn jet_cli_struct_merge_text(kind: String, stable: String, identity: String, base: String, ours: String, theirs: String, conflicts: &[JetCLIStructConflict]) -> String Never! {
+jet_cli_struct_merge_text: fn(kind: String, stable: String, identity: String, base: String, ours: String, theirs: String, conflicts: &[JetCLIStructConflict]) -> String Never! {
     // copy: `ours` stays with the caller (`ours` is a read parameter: no move out of it, E0201) and
     // the new value owns its own.
     if ours == theirs -> return ours.copy()
@@ -242,28 +242,28 @@ fn jet_cli_struct_merge_text(kind: String, stable: String, identity: String, bas
     base.copy()
 }
 
-fn jet_cli_struct_ambiguous(base: JetCLIStructUnit, side: String, rows: [Int], units: [JetCLIStructUnit]) -> JetCLIStructConflict Never! {
-    identities :: loop row in rows -> units[row].fact.human_identity
-    text :: "ambiguous:{identities.join(",")}"
+jet_cli_struct_ambiguous: fn(base: JetCLIStructUnit, side: String, rows: [Int], units: [JetCLIStructUnit]) -> JetCLIStructConflict Never! {
+    identities: loop row in rows -> units[row].fact.human_identity
+    text: "ambiguous:{identities.join(",")}"
     JetCLIStructConflict{kind: "ambiguous_identity", stable_id: base.fact.stable_id, identity: base.fact.human_identity, ours: if side == "ours" -> text else -> base.fact.content_id, theirs: if side == "theirs" -> text else -> base.fact.content_id}
 }
 
-fn jet_cli_struct_ident_scalar(bytes: [U8], offset: Int, previous: Bool) -> Bool Never! {
+jet_cli_struct_ident_scalar: fn(bytes: [U8], offset: Int, previous: Bool) -> Bool Never! {
     start := if previous -> offset - 1 else -> offset
     if previous {
         loop start > 0 && Int.from_u8(bytes[start]) >= 128 && Int.from_u8(bytes[start]) <= 191 -> start -= 1
     }
     end := start + 1
     loop end < bytes.len() && Int.from_u8(bytes[end]) >= 128 && Int.from_u8(bytes[end]) <= 191 -> end += 1
-    scalar :: jet_cli_doc_text(bytes, start, end)
+    scalar: jet_cli_doc_text(bytes, start, end)
     scalar == "_" || cli_struct_text.is_alphabetic(scalar) || cli_struct_text.is_numeric(scalar)
 }
 
-fn jet_cli_struct_rename_source(source: String, from: String, to: String) -> String? Never! {
-    bytes :: source.bytes()
-    width :: from.bytes().len()
+jet_cli_struct_rename_source: fn(source: String, from: String, to: String) -> String? Never! {
+    bytes: source.bytes()
+    width: from.bytes().len()
     loop start in 0..<bytes.len() {
-        end :: start + width
+        end: start + width
         if end > bytes.len() -> break
         if jet_cli_doc_text(bytes, start, end) != from -> next
         if start > 0 && jet_cli_struct_ident_scalar(bytes, start, true) -> next
@@ -273,17 +273,17 @@ fn jet_cli_struct_rename_source(source: String, from: String, to: String) -> Str
     None
 }
 
-fn jet_cli_struct_merge_rename(base: JetCLIStructUnit, ours: JetCLIStructUnit, theirs: JetCLIStructUnit, ours_ops: [JetCLISemOp], theirs_ops: [JetCLISemOp]) -> String? Never! {
-    ours_rename :: jet_cli_struct_rename(base, ours, ours_ops)
-    theirs_rename :: jet_cli_struct_rename(base, theirs, theirs_ops)
+jet_cli_struct_merge_rename: fn(base: JetCLIStructUnit, ours: JetCLIStructUnit, theirs: JetCLIStructUnit, ours_ops: [JetCLISemOp], theirs_ops: [JetCLISemOp]) -> String? Never! {
+    ours_rename: jet_cli_struct_rename(base, ours, ours_ops)
+    theirs_rename: jet_cli_struct_rename(base, theirs, theirs_ops)
     to := String?{None}
     if ours_rename == .Val(operation) -> to = operation.to
     if theirs_rename == .Val(operation) {
         if ours_rename != None && to != operation.to -> return None
         to = operation.to
     }
-    destination :: to ?? return None
-    renamed_base :: jet_cli_struct_rename_source(base.source, base.fact.name, destination) ?? return None
+    destination: to ?? return None
+    renamed_base: jet_cli_struct_rename_source(base.source, base.fact.name, destination) ?? return None
     other := theirs.source
     if ours_rename != None && theirs_rename == .None {
         other = jet_cli_struct_rename_source(theirs.source, base.fact.name, destination) ?? return None
@@ -297,11 +297,11 @@ fn jet_cli_struct_merge_rename(base: JetCLIStructUnit, ours: JetCLIStructUnit, t
     None
 }
 
-fn jet_cli_struct_merge_units(base: JetCLIStructDocument, ours: JetCLIStructDocument, theirs: JetCLIStructDocument) -> JetCLIStructMerged {
-    ours_ops :: jet_cli_struct_transition(base, ours)
-    theirs_ops :: jet_cli_struct_transition(base, theirs)
-    ours_matches :: jet_cli_struct_match(base.units, ours.units, ours_ops)
-    theirs_matches :: jet_cli_struct_match(base.units, theirs.units, theirs_ops)
+jet_cli_struct_merge_units: fn(base: JetCLIStructDocument, ours: JetCLIStructDocument, theirs: JetCLIStructDocument) -> JetCLIStructMerged {
+    ours_ops: jet_cli_struct_transition(base, ours)
+    theirs_ops: jet_cli_struct_transition(base, theirs)
+    ours_matches: jet_cli_struct_match(base.units, ours.units, ours_ops)
+    theirs_matches: jet_cli_struct_match(base.units, theirs.units, theirs_ops)
     ours_used := (loop _ in ours.units -> false)
     theirs_used := (loop _ in theirs.units -> false)
     text := ""
@@ -317,21 +317,21 @@ fn jet_cli_struct_merge_units(base: JetCLIStructDocument, ours: JetCLIStructDocu
             &conflicts.push(jet_cli_struct_ambiguous(original, "theirs", theirs_matches.ambiguous[row], theirs.units))
             next
         }
-        oi :: ours_matches.matched[row]
-        ti :: theirs_matches.matched[row]
+        oi: ours_matches.matched[row]
+        ti: theirs_matches.matched[row]
         if oi >= 0 -> ours_used[oi] = true
         if ti >= 0 -> theirs_used[ti] = true
         if oi < 0 && ti < 0 -> next
         if oi < 0 || ti < 0 {
-            surviving :: if oi >= 0 -> ours.units[oi] else -> theirs.units[ti]
+            surviving: if oi >= 0 -> ours.units[oi] else -> theirs.units[ti]
             if surviving.fact.content_id != original.fact.content_id {
                 &conflicts.push(jet_cli_struct_conflict("delete_edit", original, surviving, surviving))
             }
             next
         }
-        o :: ours.units[oi]
-        t :: theirs.units[ti]
-        leading :: jet_cli_struct_merge_text("inter_item_trivia", original.fact.stable_id, original.fact.human_identity, original.leading, o.leading, t.leading, &conflicts)
+        o: ours.units[oi]
+        t: theirs.units[ti]
+        leading: jet_cli_struct_merge_text("inter_item_trivia", original.fact.stable_id, original.fact.human_identity, original.leading, o.leading, t.leading, &conflicts)
         chosen := String?{None}
         if o.fact.content_id == t.fact.content_id -> chosen = Val(o.source) else if o.fact.content_id == original.fact.content_id {
             chosen = Val(t.source)
@@ -352,13 +352,13 @@ fn jet_cli_struct_merge_units(base: JetCLIStructDocument, ours: JetCLIStructDocu
             }
         }
         if candidates.len() == 0 -> text = "{text}{o.leading}{o.source}" else if candidates.len() == 1 {
-            index :: candidates[0]
+            index: candidates[0]
             theirs_paired[index] = true
-            t :: theirs.units[index]
+            t: theirs.units[index]
             if o.fact.content_id != t.fact.content_id {
                 &conflicts.push(jet_cli_struct_conflict("competing_add", o, o, t))
             } else {
-                leading :: jet_cli_struct_merge_text("inter_item_trivia", o.fact.stable_id, o.fact.human_identity, "", o.leading, t.leading, &conflicts)
+                leading: jet_cli_struct_merge_text("inter_item_trivia", o.fact.stable_id, o.fact.human_identity, "", o.leading, t.leading, &conflicts)
                 text = "{text}{leading}{o.source}"
             }
         } else {
@@ -368,14 +368,14 @@ fn jet_cli_struct_merge_units(base: JetCLIStructDocument, ours: JetCLIStructDocu
     loop (row, t) in theirs.units {
         if !theirs_used[row] && !theirs_paired[row] -> text = "{text}{t.leading}{t.source}"
     }
-    suffix :: jet_cli_struct_merge_text("file_scope_edit", "file:suffix", "file suffix", base.suffix, ours.suffix, theirs.suffix, &conflicts)
+    suffix: jet_cli_struct_merge_text("file_scope_edit", "file:suffix", "file suffix", base.suffix, ours.suffix, theirs.suffix, &conflicts)
     JetCLIStructMerged{source: "{text}{suffix}", conflicts: conflicts}
 }
 
-fn jet_cli_struct_conflicts(conflicts: [JetCLIStructConflict], json: Bool) -> JetDriverVerbOutput Never! {
+jet_cli_struct_conflicts: fn(conflicts: [JetCLIStructConflict], json: Bool) -> JetDriverVerbOutput Never! {
     stderr := ""
     if json {
-        rows :: loop conflict in conflicts -> jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("kind", jet_cli_status_text(conflict.kind)), jet_cli_status_field("stable_id", jet_cli_status_text(conflict.stable_id)), jet_cli_status_field("human_identity", jet_cli_status_text(conflict.identity)), jet_cli_status_field("ours", jet_cli_status_text(conflict.ours)), jet_cli_status_field("theirs", jet_cli_status_text(conflict.theirs))})
+        rows: loop conflict in conflicts -> jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("kind", jet_cli_status_text(conflict.kind)), jet_cli_status_field("stable_id", jet_cli_status_text(conflict.stable_id)), jet_cli_status_field("human_identity", jet_cli_status_text(conflict.identity)), jet_cli_status_field("ours", jet_cli_status_text(conflict.ours)), jet_cli_status_field("theirs", jet_cli_status_text(conflict.theirs))})
         stderr = "{jet_cli_status_render("merge.structural", false, [JetCLIStatusField]{jet_cli_status_field("structural_merge", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("conflicts", jet_cli_status_array(rows))}))})}\n"
     } else {
         loop conflict in conflicts {
@@ -386,29 +386,29 @@ fn jet_cli_struct_conflicts(conflicts: [JetCLIStructConflict], json: Bool) -> Je
     JetDriverVerbOutput{stdout: "", stderr: stderr, exit_code: JET_DRIVER_EXIT_USER_ERROR}
 }
 
-fn jet_cli_struct_install(argv: [String]) -> JetDriverVerbOutput {
-    repo :: jet_cli_option_value(argv, "--repo") ?? "."
-    receipt :: cli_process.cmd([String]{"git", "-C", repo, "rev-parse", "--git-path", "config"}).run() ?? return jet_cli_struct_fail("could not run Git: {jet_cli_io_error_text(err)}", "install Git before enabling its merge driver")
+jet_cli_struct_install: fn(argv: [String]) -> JetDriverVerbOutput {
+    repo: jet_cli_option_value(argv, "--repo") ?? "."
+    receipt: cli_process.cmd([String]{"git", "-C", repo, "rev-parse", "--git-path", "config"}).run() ?? return jet_cli_struct_fail("could not run Git: {jet_cli_io_error_text(err)}", "install Git before enabling its merge driver")
     if !receipt.success {
         return jet_cli_struct_fail("`{repo}` is not a Git worktree", "run inside a Git repository or pass --repo <path>")
     }
-    raw :: receipt.output.trim()
-    config :: jet_cli_report_path(jet_cli_report_cwd(), if raw.starts_with("/") -> raw else -> "{repo}/{raw}")
+    raw: receipt.output.trim()
+    config: jet_cli_report_path(jet_cli_report_cwd(), if raw.starts_with("/") -> raw else -> "{repo}/{raw}")
     if !cli_files.is_file(config) {
         return jet_cli_struct_fail("`{repo}` has no Git config", "repair the Git worktree metadata")
     }
-    keys :: [String]{"merge.jetstruct.name", "merge.jetstruct.driver"}
-    values :: [String]{"Jet structural merge", "jet merge --structural %O %A %B --out %A"}
+    keys: [String]{"merge.jetstruct.name", "merge.jetstruct.driver"}
+    values: [String]{"Jet structural merge", "jet merge --structural %O %A %B --out %A"}
     loop row in 0..<keys.len() {
-        key :: keys[row]
-        written :: cli_process.cmd([String]{"git", "config", "--file", config, "--replace-all", key, values[row]}).run() ?? return jet_cli_struct_fail("could not run Git: {jet_cli_io_error_text(err)}", "install Git before enabling its merge driver")
+        key: keys[row]
+        written: cli_process.cmd([String]{"git", "config", "--file", config, "--replace-all", key, values[row]}).run() ?? return jet_cli_struct_fail("could not run Git: {jet_cli_io_error_text(err)}", "install Git before enabling its merge driver")
         if !written.success {
             return jet_cli_struct_fail("could not update Git config `{key}`", "fix repository config permissions")
         }
     }
     loop row in 0..<keys.len() {
-        key :: keys[row]
-        read :: cli_process.cmd([String]{"git", "config", "--file", config, "--get", key}).run() ?? return jet_cli_struct_fail("could not run Git: {jet_cli_io_error_text(err)}", "install Git before enabling its merge driver")
+        key: keys[row]
+        read: cli_process.cmd([String]{"git", "config", "--file", config, "--get", key}).run() ?? return jet_cli_struct_fail("could not run Git: {jet_cli_io_error_text(err)}", "install Git before enabling its merge driver")
         if !read.success {
             return jet_cli_struct_fail("could not read back Git config `{key}`", "repair the repository config")
         }
@@ -416,9 +416,9 @@ fn jet_cli_struct_install(argv: [String]) -> JetDriverVerbOutput {
             return jet_cli_struct_fail("Git did not retain `{key}` exactly", "check repository config permissions and includes")
         }
     }
-    path :: "{repo}/.gitattributes"
+    path: "{repo}/.gitattributes"
     attrs := cli_files.read(path) ?? ""
-    line :: "*.jet merge=jetstruct"
+    line: "*.jet merge=jetstruct"
     found := false
     loop existing in attrs.lines() {
         if existing.trim() == line -> found = true
@@ -432,7 +432,7 @@ fn jet_cli_struct_install(argv: [String]) -> JetDriverVerbOutput {
 
 // argv starts with the command; normalization and registry validation stay
 // in Front.jet. Source tools own their bespoke help before normal dispatch.
-fn jet_cli_structural(argv: [String], command: String, json: Bool) -> JetDriverVerbOutput {
+jet_cli_structural: fn(argv: [String], command: String, json: Bool) -> JetDriverVerbOutput {
     if argv.contains("--help") || argv.contains("-h") || (argv.len() > 1 && argv[1] == "help") {
         return JetDriverVerbOutput{stdout: jet_cli_structural_help(command) ?? "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     }
@@ -463,19 +463,19 @@ fn jet_cli_structural(argv: [String], command: String, json: Bool) -> JetDriverV
     }
     documents := [JetCLIStructDocument]{}
     loop path in paths {
-        loaded :: jet_cli_struct_load(path)
+        loaded: jet_cli_struct_load(path)
         if loaded == {
             .Failed(output) -> return ^output
             .Document(document) -> &documents.push(^document)
         }
     }
     if command == "diff" {
-        changes :: jet_cli_struct_diff(documents[0], documents[1])
+        changes: jet_cli_struct_diff(documents[0], documents[1])
         stdout := ""
         if json {
             rows := [JetCLIStatusValue]{}
             loop change in changes {
-                operation :: if change.operation == .Val(op) -> jet_cli_sem_op_value(op) else -> JetCLIStatusValue.Null
+                operation: if change.operation == .Val(op) -> jet_cli_sem_op_value(op) else -> JetCLIStatusValue.Null
                 &rows.push(jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("kind", jet_cli_status_text(change.kind)), jet_cli_status_field("stable_id", jet_cli_status_text(change.stable_id)), jet_cli_status_field("before", jet_cli_status_optional_text(change.before)), jet_cli_status_field("after", jet_cli_status_optional_text(change.after)), jet_cli_status_field("semantic_op", operation)}))
             }
             stdout = "{jet_cli_status_render("diff.structural", true, [JetCLIStatusField]{jet_cli_status_field("structural_diff", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("changes", jet_cli_status_array(rows))}))})}\n"
@@ -487,14 +487,14 @@ fn jet_cli_structural(argv: [String], command: String, json: Bool) -> JetDriverV
         }
         return JetDriverVerbOutput{stdout: stdout, stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     }
-    merged :: jet_cli_struct_merge_units(documents[0], documents[1], documents[2])
+    merged: jet_cli_struct_merge_units(documents[0], documents[1], documents[2])
     if merged.conflicts.len() > 0 -> return jet_cli_struct_conflicts(merged.conflicts, json)
-    formatted :: jet_format_source(merged.source, false)
+    formatted: jet_format_source(merged.source, false)
     if !formatted.ok {
         return jet_cli_struct_fail("structural merge produced source that does not parse", "resolve edits manually; no output was written")
     }
-    output :: jet_cli_report_path(jet_cli_report_cwd(), jet_cli_option_value(argv, "--out") ?? paths[1])
-    compiled :: jet_cli_compile_overlays(paths[1], output, [JetCLIOverlay]{JetCLIOverlay{path: output, source: formatted.text}}, false, None, JetDriverCompileMode.Doc, None)
+    output: jet_cli_report_path(jet_cli_report_cwd(), jet_cli_option_value(argv, "--out") ?? paths[1])
+    compiled: jet_cli_compile_overlays(paths[1], output, [JetCLIOverlay]{JetCLIOverlay{path: output, source: formatted.text}}, false, None, JetDriverCompileMode.Doc, None)
     if compiled == {
         .Refused(refusal) -> return ^refusal
         .Compiled(result, _) -> {
@@ -505,6 +505,6 @@ fn jet_cli_structural(argv: [String], command: String, json: Bool) -> JetDriverV
         }
     }
     cli_files.write(output, formatted.text) ?? return jet_cli_struct_fail("could not write `{output}`: {jet_cli_io_error_text(err)}", "choose a writable --out path")
-    stdout :: if json -> "{jet_cli_status_render("merge.structural", true, [JetCLIStatusField]{jet_cli_status_field("structural_merge", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("output", jet_cli_status_text(output))}))})}\n" else -> "merged: {output}\n"
+    stdout: if json -> "{jet_cli_status_render("merge.structural", true, [JetCLIStatusField]{jet_cli_status_field("structural_merge", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("output", jet_cli_status_text(output))}))})}\n" else -> "merged: {output}\n"
     JetDriverVerbOutput{stdout: stdout, stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }

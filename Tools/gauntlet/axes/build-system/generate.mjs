@@ -6,7 +6,7 @@
 // one checksum line), split into one source file per 10 units so a one-file
 // edit is a real incremental change:
 //   OUT/jet  a Jet package: package.jet, the build program @build.jet
-//            (`fn build` registers one executable), run.jet, units_0..8.jet
+//            (`build: fn` registers one executable), run.jet, units_0..8.jet
 //   OUT/nix  a flake: flake.nix (stdenv.mkDerivation over src/), flake.lock
 //            pinning the repository's own nixpkgs, src/Makefile, src/main.c,
 //            src/units.h, src/units_0..8.c
@@ -97,8 +97,8 @@ function jetFiles() {
   const folds = Array.from({ length: UNITS }, (_, i) => `    total = (total * 31 + unit_${i}(${seed(i)})) % ${MODULUS}`).join("\n");
   const files = {
     "package.jet": `// ${HEADER}\nname: "medium"\nversion: "0.1.0"\nedition: "2026"\n`,
-    "@build.jet": `// ${HEADER}\nfn build(b: Build) {\n    app :: b.add_executable("medium", [${sources.map((s) => JSON.stringify(s)).join(", ")}], [])\n    b.default(app)\n}\n`,
-    "run.jet": `// ${HEADER}\nfn run() {\n    total := 0\n${folds}\n    print("checksum {total}")\n}\n`,
+    "@build.jet": `// ${HEADER}\nbuild: fn(b: Build) {\n    app: b.add_executable("medium", [${sources.map((s) => JSON.stringify(s)).join(", ")}], [])\n    b.default(app)\n}\n`,
+    "run.jet": `// ${HEADER}\nrun: fn() {\n    total := 0\n${folds}\n    print("checksum {total}")\n}\n`,
   };
   unitNames.forEach((name, file) => {
     files[`${name}.jet`] = `// ${HEADER}\n${fileUnits(file).map(jetUnit).join("\n")}`;

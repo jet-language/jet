@@ -38,7 +38,7 @@ def prepare(row, out):
         subprocess.run(['node', str(REPO / 'Tools/perf/scaling/generate.mjs'),
                         row['generator'], str(row['n']), str(root)], check=True)
     elif row.get('startup'):
-        (root / entry).write_text('fn run() {}\n')
+        (root / entry).write_text('run: fn() {}\n')
     elif 'project' in row:
         project = REPO / row['project']
         for source in sorted(project.rglob('*.jet')):

@@ -5,23 +5,23 @@
 // signed metadata to open the dependency frontier immediately; a rejected
 // plan still acquires no payload.
 
-STORE_NIX_INT_MAX :: 9223372036854775807
-STORE_NIX_THROUGHPUT_CONFIG :: "config/nix-cache-v1.throughput"
+STORE_NIX_INT_MAX: 9223372036854775807
+STORE_NIX_THROUGHPUT_CONFIG: "config/nix-cache-v1.throughput"
 
-enum NixPlanState {
+NixPlanState: enum {
     New
     Cached
     Repaired
 }
 
-struct NixPlanItem {
+NixPlanItem: struct {
     package: String
     state: NixPlanState
     download_bytes: Int
     disk_bytes: Int
 }
 
-struct NixDownloadPlan {
+NixDownloadPlan: struct {
     new: Int
     cached: Int
     repaired: Int
@@ -30,21 +30,21 @@ struct NixDownloadPlan {
     estimated_seconds: Int?
     items: [NixPlanItem]
 
-    fn empty() -> NixDownloadPlan Never! {
+    empty: fn() -> NixDownloadPlan Never! {
         NixDownloadPlan{new: 0, cached: 0, repaired: 0, download_bytes: 0, disk_bytes: 0, estimated_seconds: None, items: [NixPlanItem]{}}
     }
 }
 
-fn store_nix_checked_add(left: Int, right: Int, overflow: String) -> Int NixCacheError! {
+store_nix_checked_add: fn(left: Int, right: Int, overflow: String) -> Int NixCacheError! {
     if right > 0 && left > STORE_NIX_INT_MAX - right -> return Err(NixCacheError.new(.Metadata, overflow))
     Ok(left + right)
 }
 
 // The first `limit` queued paths, removed from the queue, in sorted order.
-fn store_nix_take_wave(queue: &Rank<String>, limit: Int) -> [String] Never! {
+store_nix_take_wave: fn(queue: &Rank<String>, limit: Int) -> [String] Never! {
     wave := [String]{}
     loop wave.len() < limit {
-        store_path :: queue.first() ?? break
+        store_path: queue.first() ?? break
         &queue.remove(store_path)
         &wave.push(store_path)
     }
@@ -54,11 +54,11 @@ fn store_nix_take_wave(queue: &Rank<String>, limit: Int) -> [String] Never! {
 // Resolve and verify closure metadata without downloading or publishing any
 // NAR. Rust fans each wave out over OS threads; the cooperative port walks the
 // same waves in the same sorted order, so results and first failures agree.
-fn store_plan_nix_downloads(verification: &StoreVerification, roots: HangarRoots, store_paths: [String], offline: Bool, progress: ProgressHandle?) -[IO, FS, Net, Env, Time, Time.Wait]> NixDownloadPlan NixCacheError! {
-    endpoint :: NixCacheEndpoint.from_roots(roots)
+store_plan_nix_downloads: fn(verification: &StoreVerification, roots: HangarRoots, store_paths: [String], offline: Bool, progress: ProgressHandle?) -[IO, FS, Net, Env, Time, Time.Wait]> NixDownloadPlan NixCacheError! {
+    endpoint: NixCacheEndpoint.from_roots(roots)
     store_dir := "/nix/store"
     cache_info_loaded := offline
-    existing_entries :: store_nix_entries_by_store_path(store_list_checked(&verification, roots) ?? return Err(store_nix_store_error(err)))
+    existing_entries: store_nix_entries_by_store_path(store_list_checked(&verification, roots) ?? return Err(store_nix_store_error(err)))
     queue := Rank<String>.new()
     loop store_path in store_paths {
         store_nix_validate_store_path(store_path, store_dir)
@@ -72,7 +72,7 @@ fn store_plan_nix_downloads(verification: &StoreVerification, roots: HangarRoots
     store_nix_progress_objects(progress, 0, scheduled.len())
 
     loop queue.len() > 0 {
-        wave :: store_nix_take_wave(&queue, STORE_NIX_MAX_PARALLEL_METADATA_FETCHES)
+        wave: store_nix_take_wave(&queue, STORE_NIX_MAX_PARALLEL_METADATA_FETCHES)
         pending := [String]{}
         loop store_path in wave {
             if store_nix_existing_object(&verification, roots, existing_entries, store_path, store_dir) == {
@@ -105,7 +105,7 @@ fn store_plan_nix_downloads(verification: &StoreVerification, roots: HangarRoots
         fetched := [String: FetchedInfo]{}
         first_error := NixCacheError?{None}
         loop store_path in pending {
-            lookup :: endpoint.narinfo(store_path, store_dir) ? found -> found ! error -> {
+            lookup: endpoint.narinfo(store_path, store_dir) ? found -> found ! error -> {
                 if first_error == None -> first_error = Val(error)
                 next
             }
@@ -117,20 +117,20 @@ fn store_plan_nix_downloads(verification: &StoreVerification, roots: HangarRoots
         names := fetched.keys().to_list()
         &names.sort()
         loop store_path in names {
-            info :: fetched[store_path]
+            info: fetched[store_path]
             planned[store_path] = info.copy()
-            file_size :: info.info.file_size ?? return Err(NixCacheError.new(.Metadata, "Nix narinfo has no signed FileSize for download planning"))
+            file_size: info.info.file_size ?? return Err(NixCacheError.new(.Metadata, "Nix narinfo has no signed FileSize for download planning"))
             plan.download_bytes = store_nix_checked_add(plan.download_bytes, file_size, "Nix closure download size overflowed")
             plan.disk_bytes = store_nix_checked_add(plan.disk_bytes, info.info.nar_size, "Nix closure on-disk size overflowed")
-            repaired :: existing_entries.has_key(store_path)
+            repaired: existing_entries.has_key(store_path)
             if {
                 repaired -> plan.repaired = store_nix_checked_add(plan.repaired, 1, "Nix closure repaired package count overflowed")
                 else -> plan.new = store_nix_checked_add(plan.new, 1, "Nix closure new package count overflowed")
             }
-            state :: if repaired -> NixPlanState.Repaired else -> NixPlanState.New
+            state: if repaired -> NixPlanState.Repaired else -> NixPlanState.New
             &plan.items.push(NixPlanItem{package: store_nix_store_name(store_path), state, download_bytes: file_size, disk_bytes: info.info.nar_size})
             loop name in info.info.references {
-                reference :: "{store_dir}/{name}"
+                reference: "{store_dir}/{name}"
                 store_nix_validate_store_path(reference, store_dir)
                 if !scheduled.has(reference) {
                     &scheduled.add(reference)
@@ -152,19 +152,19 @@ fn store_plan_nix_downloads(verification: &StoreVerification, roots: HangarRoots
 // endpoint (Rust thread-local `PLANNED_NARINFOS`), carried by the verification
 // owner like the proven-member memo. An endpoint URL never holds a tab, so the
 // joined key is unambiguous.
-fn store_nix_planned_key(roots: HangarRoots, endpoint: NixCacheEndpoint) -> String Never! {
+store_nix_planned_key: fn(roots: HangarRoots, endpoint: NixCacheEndpoint) -> String Never! {
     "{endpoint.endpoint}\t{roots.root}"
 }
 
-fn store_nix_remember_planned_narinfos(verification: &StoreVerification, roots: HangarRoots, endpoint: NixCacheEndpoint, infos: [String: FetchedInfo]) Never! {
-    state :: verification.state
+store_nix_remember_planned_narinfos: fn(verification: &StoreVerification, roots: HangarRoots, endpoint: NixCacheEndpoint, infos: [String: FetchedInfo]) Never! {
+    state: verification.state
     permit := state.guard_edit()
     permit.value.planned_narinfos[store_nix_planned_key(roots, endpoint)] = infos
 }
 
-fn store_nix_planned_narinfos(verification: &StoreVerification, roots: HangarRoots, endpoint: NixCacheEndpoint) -> [String: FetchedInfo] Never! {
-    state :: verification.state
-    permit :: state.guard_read()
+store_nix_planned_narinfos: fn(verification: &StoreVerification, roots: HangarRoots, endpoint: NixCacheEndpoint) -> [String: FetchedInfo] Never! {
+    state: verification.state
+    permit: state.guard_read()
     if permit.value.planned_narinfos.get(store_nix_planned_key(roots, endpoint)) == {
         .Val(infos) -> infos.copy()
         .None -> [String: FetchedInfo]{}
@@ -173,13 +173,13 @@ fn store_nix_planned_narinfos(verification: &StoreVerification, roots: HangarRoo
 
 // Schedule every reference reachable through planned narinfos up front, so
 // admission opens the planned dependency frontier without refetching it.
-fn store_nix_expand_planned_closure(queue: &Rank<String>, scheduled: &Rank<String>, infos: [String: FetchedInfo], store_dir: String) NixCacheError! {
+store_nix_expand_planned_closure: fn(queue: &Rank<String>, scheduled: &Rank<String>, infos: [String: FetchedInfo], store_dir: String) NixCacheError! {
     frontier := queue.to_list()
     loop frontier.len() > 0 {
-        store_path :: &frontier.pop() ?? break
-        info :: infos.get(store_path) ?? next
+        store_path: &frontier.pop() ?? break
+        info: infos.get(store_path) ?? next
         loop name in info.info.references {
-            reference :: "{store_dir}/{name}"
+            reference: "{store_dir}/{name}"
             store_nix_validate_store_path(reference, store_dir)
             if !scheduled.has(reference) {
                 &scheduled.add(reference)
@@ -191,33 +191,33 @@ fn store_nix_expand_planned_closure(queue: &Rank<String>, scheduled: &Rank<Strin
 }
 
 // Whole seconds to download `bytes` at `rate` bytes/second, rounded up.
-fn store_nix_estimated_seconds(bytes: Int, rate: Int?) -> Int? Never! {
-    per_second :: rate ?? return None
+store_nix_estimated_seconds: fn(bytes: Int, rate: Int?) -> Int? Never! {
+    per_second: rate ?? return None
     if bytes > STORE_NIX_INT_MAX - (per_second - 1) -> return None
     Val((bytes + per_second - 1) /% per_second)
 }
 
-fn store_nix_throughput_path(roots: HangarRoots) -> String Never! {
+store_nix_throughput_path: fn(roots: HangarRoots) -> String Never! {
     files.join(roots.root, STORE_NIX_THROUGHPUT_CONFIG)
 }
 
 // Bytes per second from the last admission, when a sane value is recorded.
-fn store_nix_recent_throughput(roots: HangarRoots) -[FS]> Int? Never! {
-    bytes :: files.read_bytes(store_nix_throughput_path(roots)) ?? return None
+store_nix_recent_throughput: fn(roots: HangarRoots) -[FS]> Int? Never! {
+    bytes: files.read_bytes(store_nix_throughput_path(roots)) ?? return None
     if bytes.len() > 32 -> return None
-    text :: String.from_bytes(bytes) ?? return None
-    rate :: Int.parse(text.trim()) ?? return None
+    text: String.from_bytes(bytes) ?? return None
+    rate: Int.parse(text.trim()) ?? return None
     if rate > 0 -> return Val(rate)
     None
 }
 
 // Record the observed download rate; recording failures never fail admission.
-fn store_nix_remember_throughput(roots: HangarRoots, bytes: Int, elapsed: time.Duration) Never! -[FS]> {
+store_nix_remember_throughput: fn(roots: HangarRoots, bytes: Int, elapsed: time.Duration) Never! -[FS]> {
     if bytes == 0 || elapsed.ns <= 0 -> return
-    millis :: elapsed.ns /% 1000000
-    rate :: if millis > 0 -> (bytes /% millis) * 1000 + ((bytes % millis) * 1000) /% millis else -> bytes * 1000000000 /% elapsed.ns
+    millis: elapsed.ns /% 1000000
+    rate: if millis > 0 -> (bytes /% millis) * 1000 + ((bytes % millis) * 1000) /% millis else -> bytes * 1000000000 /% elapsed.ns
     if rate == 0 -> return
-    path :: store_nix_throughput_path(roots)
+    path: store_nix_throughput_path(roots)
     files.create_dir_all(files.dirname(path)) ?? return
     files.write(path, "{rate}\n") ?? return
 }

@@ -1,10 +1,10 @@
 
-use browser :: core.web.browser
+use browser: core.web.browser
 
-fn run() {
-    profile :: browser.profile("bidi-2025.5") ?? panic("profile")
-    timeout :: browser.timeout(200) ?? panic("timeout")
-    session :: browser.connect_profile("ws://127.0.0.1:{free-port:network_hostile}/session?token=HOSTILE_NETWORK_SECRET", profile, timeout) ?? panic("connect")
+run: fn() {
+    profile: browser.profile("bidi-2025.5") ?? panic("profile")
+    timeout: browser.timeout(200) ?? panic("timeout")
+    session: browser.connect_profile("ws://127.0.0.1:{free-port:network_hostile}/session?token=HOSTILE_NETWORK_SECRET", profile, timeout) ?? panic("connect")
 
     loop attempt in [1] {
         session.add_intercept("not-a-phase") ?? next

@@ -1,53 +1,53 @@
-use date :: core.time
+use date: core.time
 
-fn field(meta: String, key: String) -> String {
+field: fn(meta: String, key: String) -> String {
     loop part in meta.split(";") {
-        pair :: part.split_once("=") ?? next
+        pair: part.split_once("=") ?? next
         if pair.before == key -> return pair.after
     }
     return ""
 }
 
-fn i(meta: String, key: String) -> Int { Int.parse(field(meta, key)) ?? panic(key) }
+i: fn(meta: String, key: String) -> Int { Int.parse(field(meta, key)) ?? panic(key) }
 
-fn parse_date(iso: String) -> LocalDate {
-    y :: Int.parse(iso.before("-")) ?? panic("y")
-    rest :: iso.after("-")
-    m :: Int.parse(rest.before("-")) ?? panic("m")
-    d :: Int.parse(rest.after("-")) ?? panic("d")
+parse_date: fn(iso: String) -> LocalDate {
+    y: Int.parse(iso.before("-")) ?? panic("y")
+    rest: iso.after("-")
+    m: Int.parse(rest.before("-")) ?? panic("m")
+    d: Int.parse(rest.after("-")) ?? panic("d")
     return date.new(y, m, d)
 }
 
-fn civil_date(meta: String) -> LocalDate {
-    y :: field(meta, "year")
+civil_date: fn(meta: String) -> LocalDate {
+    y: field(meta, "year")
     if y != "" -> return date.new(Int.parse(y) ?? panic("y"), i(meta, "month"), i(meta, "day"))
     return parse_date(field(meta, "date"))
 }
 
-fn shown(id: String, op: String, meta: String) -> String {
+shown: fn(id: String, op: String, meta: String) -> String {
     if op == "diff_days" {
-        left :: parse_date(field(meta, "a"))
-        right :: parse_date(field(meta, "b"))
+        left: parse_date(field(meta, "a"))
+        right: parse_date(field(meta, "b"))
         if id.contains("diff_b") -> return "{right.diff_days(left)}"
         return "{left.diff_days(right)}"
     }
     if op == "diff_days_antisymmetry" {
-        left :: parse_date(field(meta, "a"))
-        right :: parse_date(field(meta, "b"))
+        left: parse_date(field(meta, "a"))
+        right: parse_date(field(meta, "b"))
         return "{left.diff_days(right) == (0 - right.diff_days(left))}"
     }
     if op == "add_days_composition" {
-        first :: i(meta, "first")
-        second :: i(meta, "second")
-        src :: parse_date(field(meta, "source_date"))
+        first: i(meta, "first")
+        second: i(meta, "second")
+        src: parse_date(field(meta, "source_date"))
         return "{src.add_days(first).add_days(second).to_string() == src.add_days(first + second).to_string()}"
     }
     if op == "add_months_clamping" {
-        got :: parse_date(field(meta, "date")).add_months(i(meta, "months")).to_string()
-        want :: field(meta, "expected")
+        got: parse_date(field(meta, "date")).add_months(i(meta, "months")).to_string()
+        want: field(meta, "expected")
         return "{got == want}"
     }
-    d :: civil_date(meta)
+    d: civil_date(meta)
     if op == "weekday" -> return "{d.weekday()}"
     if op == "iso_weekday" -> return "{d.iso_weekday()}"
     if op == "day_of_year" -> return "{d.day_of_year()}"
@@ -58,15 +58,15 @@ fn shown(id: String, op: String, meta: String) -> String {
     if op == "add_days" -> return d.add_days(i(meta, "days")).to_string()
     if op == "add_months" -> return d.add_months(i(meta, "months")).to_string()
     if op == "path_vs_direct" {
-        a :: i(meta, "a")
-        b :: i(meta, "b")
+        a: i(meta, "a")
+        b: i(meta, "b")
         return "path={d.add_months(a).add_months(b).to_string()}|direct={d.add_months(a + b).to_string()}"
     }
     panic(op)
 }
 
-fn run() {
-    table :: """
+run: fn() {
+    table: """
 cal_000	weekday	date=2024-02-26;known=weekday
 cal_000	iso_weekday	date=2024-02-26;known=weekday
 cal_001	weekday	date=2024-02-27;known=weekday
@@ -1510,9 +1510,9 @@ clamp_027	add_months_clamping	source=F3 clamp;expected=2026-12-31;date=2024-12-3
     """
     loop line in table.lines() {
         if line != "" {
-            id_rest :: line.split_once("\t") ?? panic("row")
-            op_rest :: id_rest.after.split_once("\t") ?? panic("row")
-            result :: shown(id_rest.before, op_rest.before, op_rest.after)
+            id_rest: line.split_once("\t") ?? panic("row")
+            op_rest: id_rest.after.split_once("\t") ?? panic("row")
+            result: shown(id_rest.before, op_rest.before, op_rest.after)
             print("CASE\t{id_rest.before}\t{op_rest.before}\t{result}")
         }
     }

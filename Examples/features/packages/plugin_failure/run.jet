@@ -2,16 +2,16 @@
 // Copy fixture-state/cache/api to .jet/cache/api before the first host build.
 // Run this host unchanged with jet run and jet build, from this directory:
 // the artifact paths name files in the package root.
-use plugin :: core.plugin
+use plugin: core.plugin
 
-fn run() {
-    policy :: Authority.from_rights(["FS.Read:."])
-    guest :: plugin.load("failure_guest.wat", policy)
+run: fn() {
+    policy: Authority.from_rights(["FS.Read:."])
+    guest: plugin.load("failure_guest.wat", policy)
     if guest.trap() == {
         .Err(.Guest(fault)) -> {
             assert(fault.export == "trap")
             assert(fault.frames.len() > 0 && fault.frames.len() <= 32)
-            frame :: fault.frames[0]
+            frame: fault.frames[0]
             assert(frame.function == "trap")
             assert(frame.component == "failure_guest")
             assert(frame.offset > 0)
@@ -19,7 +19,7 @@ fn run() {
         }
         else -> assert(false)
     }
-    reader :: plugin.load("failure_guest.wat", policy)
+    reader: plugin.load("failure_guest.wat", policy)
     if reader.read() == {
         .Err(.Denied(fault)) -> {
             assert(fault.export == "read")
@@ -28,7 +28,7 @@ fn run() {
         }
         else -> assert(false)
     }
-    spinner :: plugin.load("failure_guest.wat", policy)
+    spinner: plugin.load("failure_guest.wat", policy)
     if spinner.spin() == {
         .Err(.Budget(.Fuel, fault)) -> {
             assert(fault.export == "spin")
@@ -37,11 +37,11 @@ fn run() {
         }
         else -> assert(false)
     }
-    normal :: plugin.load("failure_guest.wat", policy)
-    value :: normal.normal()
+    normal: plugin.load("failure_guest.wat", policy)
+    value: normal.normal()
     assert(value == 42)
     print("normal:Ok {value}")
-    malformed :: plugin.load("malformed_guest.wasm", policy)
+    malformed: plugin.load("malformed_guest.wasm", policy)
     if malformed.normal() == {
         .Err(.Guest(fault)) -> {
             assert(fault.export == "load")

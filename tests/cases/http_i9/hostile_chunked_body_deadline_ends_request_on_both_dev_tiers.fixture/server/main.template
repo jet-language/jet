@@ -1,17 +1,17 @@
 
 use {
-    server :: core.http.server
-    net :: core.net
+    server: core.http.server
+    net: core.net
 }
 
-fn run() (HTTPError | NetError | TaskFailure)! {
-    listener :: net.tcp_listen("127.0.0.1:__PORT__") ?? panic("listen")
-    mux :: server.mux()
+run: fn() (HTTPError | NetError | TaskFailure)! {
+    listener: net.tcp_listen("127.0.0.1:__PORT__") ?? panic("listen")
+    mux: server.mux()
     mux.post("/", (req: HTTPRequest) -> {
-        body :: req.body().text(1024) ?? "rejected"
+        body: req.body().text(1024) ?? "rejected"
         return Ok(server.response(200, body))
     })
-    server_task :: task {
+    server_task: task {
         server.serve_once_listener(listener, mux) ?? panic("serve")
     }
     server_task.join() ?? panic("serve")

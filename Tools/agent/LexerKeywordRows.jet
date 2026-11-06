@@ -3,38 +3,38 @@
 // Spellings remain Jet Syntax constants; Jet token tags own the kinds.
 // Usage: jet Tools/agent/LexerKeywordRows.jet [--check|--write]
 use {
-    json :: core.encoding.json
-    files :: core.files
-    process :: core.process
-    regex :: core.regex
-    term :: core.term
+    json: core.encoding.json
+    files: core.files
+    process: core.process
+    regex: core.regex
+    term: core.term
 }
 
-SCAN_PATH :: "Compiler/JetLexer/Source/Lexer/Scan.jet"
-OPEN :: "// BEGIN GENERATED LEXER KEYWORD SPANS"
-CLOSE :: "// END GENERATED LEXER KEYWORD SPANS"
+SCAN_PATH: "Compiler/JetLexer/Source/Lexer/Scan.jet"
+OPEN: "// BEGIN GENERATED LEXER KEYWORD SPANS"
+CLOSE: "// END GENERATED LEXER KEYWORD SPANS"
 
-LINE_COMMENT :: Regex{"//[^\n]*"}
+LINE_COMMENT: Regex{"//[^\n]*"}
 // The LEXER_KEYWORDS body: from its opening line to the first line that
 // starts with `}`. Matched against the text after a leading newline, so a
 // newline marks every line start.
-KEYWORD_TABLE :: Regex{"\nLEXER_KEYWORDS :: \[LexerKeyword\]\{{([\s\S]*?)\n\}}"}
-KEYWORD_ARM :: Regex{"^(?:LexerKeyword)?\{{constant: \x22(\w+)\x22, kind: \x22(Kw\w+)\x22, tag: \x22(K_\w+)\x22\}},$"}
-// One line each: `NAME :: "literal"` with an optional trailing comment, a
+KEYWORD_TABLE: Regex{"\nLEXER_KEYWORDS: \[LexerKeyword\]\{{([\s\S]*?)\n\}}"}
+KEYWORD_ARM: Regex{"^(?:LexerKeyword)?\{{constant: \x22(\w+)\x22, kind: \x22(Kw\w+)\x22, tag: \x22(K_\w+)\x22\}},$"}
+// One line each: `NAME: "literal"` with an optional trailing comment, a
 // keyword token number, and a token tag.
-SYNTAX_CONSTANT :: Regex{"^\s*(\w+)\s*::\s*(\x22(?:[^\x22\\]|\\.)*\x22)[^\S\n]*(?://[^\n]*)?$"}
-KEYWORD_TOKEN :: Regex{"^TOKEN_(KW_\w+|TRUE|FALSE|SELF|NULL|BREAK|RETURN) :: \d+\s*$"}
-TOKEN_TAG :: Regex{"^(K_\w+) ::"}
-SPELLING :: Regex{"^[A-Za-z][A-Za-z0-9_]*$"}
-WORD_BREAK :: Regex{"([a-z0-9])([A-Z])"}
-SPAN_BLOCK :: Regex{"// BEGIN GENERATED LEXER KEYWORD SPANS\n[\s\S]*?// END GENERATED LEXER KEYWORD SPANS"}
+SYNTAX_CONSTANT: Regex{"^\s*(\w+)\s*:\s*(\x22(?:[^\x22\\]|\\.)*\x22)[^\S\n]*(?://[^\n]*)?$"}
+KEYWORD_TOKEN: Regex{"^TOKEN_(KW_\w+|TRUE|FALSE|SELF|NULL|BREAK|RETURN): \d+\s*$"}
+TOKEN_TAG: Regex{"^(K_\w+): "}
+SPELLING: Regex{"^[A-Za-z][A-Za-z0-9_]*$"}
+WORD_BREAK: Regex{"([a-z0-9])([A-Z])"}
+SPAN_BLOCK: Regex{"// BEGIN GENERATED LEXER KEYWORD SPANS\n[\s\S]*?// END GENERATED LEXER KEYWORD SPANS"}
 
 #Error
-struct KeywordRowsError {
+KeywordRowsError: struct {
     message: String
 }
 
-struct KeywordRow {
+KeywordRow: struct {
     constant: String
     kind: String
     tag: String
@@ -42,13 +42,13 @@ struct KeywordRow {
     bytes: [Int]
 }
 
-fn rows_fail(message: String) -> KeywordRowsError Never! {
+rows_fail: fn(message: String) -> KeywordRowsError Never! {
     KeywordRowsError{message: "lexer keyword rows: {message}"}
 }
 
 // The value of a Jet string literal, read as the JSON string it also is.
-fn literal_value(literal: String) -> String? Never! {
-    parsed :: json.parse(literal) ?? return None
+literal_value: fn(literal: String) -> String? Never! {
+    parsed: json.parse(literal) ?? return None
     if parsed == {
         .Text(text) -> Val(text)
         else -> None
@@ -56,22 +56,22 @@ fn literal_value(literal: String) -> String? Never! {
 }
 
 // `KwSelfType` -> `K_SELF_TYPE`.
-fn kind_tag(kind: String) -> String Never! {
+kind_tag: fn(kind: String) -> String Never! {
     "K_{WORD_BREAK.replace(kind.remove_prefix("Kw"), "$1_$2").upper()}"
 }
 
-fn keyword_rows(mapping: String, syntax: String, tokens: String, tags: String) -> [KeywordRow] KeywordRowsError! {
-    table :: KEYWORD_TABLE.match("\n{LINE_COMMENT.replace(mapping, "")}") ?? return Err(rows_fail("unrecognized LEXER_KEYWORDS table"))
+keyword_rows: fn(mapping: String, syntax: String, tokens: String, tags: String) -> [KeywordRow] KeywordRowsError! {
+    table: KEYWORD_TABLE.match("\n{LINE_COMMENT.replace(mapping, "")}") ?? return Err(rows_fail("unrecognized LEXER_KEYWORDS table"))
     constants := [String: [String]]{}
     loop line in syntax.split("\n") {
-        row :: SYNTAX_CONSTANT.match(line) ?? next
+        row: SYNTAX_CONSTANT.match(line) ?? next
         values := constants.get(row.groups[0]) ?? [String]{}
         &values.push(row.groups[1])
         constants[row.groups[0].copy()] = values
     }
     token_tags := [String]{}
     loop line in tokens.split("\n") {
-        token :: KEYWORD_TOKEN.match(line) ?? next
+        token: KEYWORD_TOKEN.match(line) ?? next
         &token_tags.push("K_{token.groups[0].remove_prefix("KW_")}")
     }
     distinct := [String]{}
@@ -81,7 +81,7 @@ fn keyword_rows(mapping: String, syntax: String, tokens: String, tags: String) -
     if token_tags.len() == 0 || distinct.len() != token_tags.len() -> return Err(rows_fail("unparsed/ambiguous keyword token kinds"))
     tag_names := [String]{}
     loop line in tags.split("\n") {
-        tag_line :: TOKEN_TAG.match(line) ?? next
+        tag_line: TOKEN_TAG.match(line) ?? next
         &tag_names.push(tag_line.groups[0])
     }
     rows := [KeywordRow]{}
@@ -89,15 +89,15 @@ fn keyword_rows(mapping: String, syntax: String, tokens: String, tags: String) -
     kinds := [String]{}
     mapped := [String]{}
     loop raw in table.groups[0].split("\n") {
-        line :: raw.trim()
+        line: raw.trim()
         if line == "" -> next
-        arm :: KEYWORD_ARM.match(line) ?? return Err(rows_fail("unparsed keyword row: {line}"))
-        constant :: arm.groups[0]
-        kind :: arm.groups[1]
-        token_tag :: arm.groups[2]
-        values :: constants.get(constant) ?? [String]{}
+        arm: KEYWORD_ARM.match(line) ?? return Err(rows_fail("unparsed keyword row: {line}"))
+        constant: arm.groups[0]
+        kind: arm.groups[1]
+        token_tag: arm.groups[2]
+        values: constants.get(constant) ?? [String]{}
         if values.len() != 1 -> return Err(rows_fail("unresolved/ambiguous literal Syntax::{constant}"))
-        spelling :: literal_value(values[0]) ?? return Err(rows_fail("unsupported Jet literal Syntax::{constant}"))
+        spelling: literal_value(values[0]) ?? return Err(rows_fail("unsupported Jet literal Syntax::{constant}"))
         if !SPELLING.is_match(spelling) -> return Err(rows_fail("unsupported keyword spelling Syntax::{constant}"))
         tag_count := 0
         loop name in tag_names {
@@ -108,7 +108,7 @@ fn keyword_rows(mapping: String, syntax: String, tokens: String, tags: String) -
         &spellings.push(spelling)
         &kinds.push(kind)
         &mapped.push(token_tag)
-        bytes :: loop byte in spelling.bytes() -> Int.from_u8(byte)
+        bytes: loop byte in spelling.bytes() -> Int.from_u8(byte)
         &rows.push(KeywordRow{constant: constant, kind: kind, tag: token_tag, spelling: spelling, bytes: bytes})
     }
     if rows.len() == 0 -> return Err(rows_fail("incomplete keyword mapping/token coverage"))
@@ -119,10 +119,10 @@ fn keyword_rows(mapping: String, syntax: String, tokens: String, tags: String) -
 }
 
 // The source files the rows are read from, in the generator's order.
-fn read_keyword_rows() -[FS]> [KeywordRow] KeywordRowsError! {
-    directory :: "Compiler/JetFoundation/Data/Syntax"
+read_keyword_rows: fn() -[FS]> [KeywordRow] KeywordRowsError! {
+    directory: "Compiler/JetFoundation/Data/Syntax"
     names := [String]{}
-    listed :: files.list_dir(directory) ?? return Err(rows_fail("cannot list {directory}: {err}"))
+    listed: files.list_dir(directory) ?? return Err(rows_fail("cannot list {directory}: {err}"))
     loop entry in listed {
         if entry.name.ends_with(".jet") -> &names.push(entry.name)
     }
@@ -131,15 +131,15 @@ fn read_keyword_rows() -[FS]> [KeywordRow] KeywordRowsError! {
     loop name in names {
         &parts.push(files.read("{directory}/{name}") ?? return Err(rows_fail("cannot read {directory}/{name}: {err}")))
     }
-    mapping :: files.read("Compiler/JetLexer/Data/Lexer/Keywords.jet") ?? return Err(rows_fail("cannot read the keyword table: {err}"))
-    tokens :: files.read("Compiler/JetLexer/Source/Lexer/Tokens.jet") ?? return Err(rows_fail("cannot read the token kinds: {err}"))
-    tags :: files.read("Compiler/JetLexer/Source/Lexer/Terminators.jet") ?? return Err(rows_fail("cannot read the token tags: {err}"))
+    mapping: files.read("Compiler/JetLexer/Data/Lexer/Keywords.jet") ?? return Err(rows_fail("cannot read the keyword table: {err}"))
+    tokens: files.read("Compiler/JetLexer/Source/Lexer/Tokens.jet") ?? return Err(rows_fail("cannot read the token kinds: {err}"))
+    tags: files.read("Compiler/JetLexer/Source/Lexer/Terminators.jet") ?? return Err(rows_fail("cannot read the token tags: {err}"))
     keyword_rows(mapping, parts.join("\n"), tokens, tags)
 }
 
-fn branches(rows: [KeywordRow], offset: Int, indent: String) -> String Never! {
+branches: fn(rows: [KeywordRow], offset: Int, indent: String) -> String Never! {
     if rows.len() == 1 {
-        row :: rows[0]
+        row: rows[0]
         checks := [String]{}
         loop index in offset..<row.bytes.len() -> &checks.push("byte_at(source, start + {index}) == {row.bytes[index]}")
         return "{indent}if {checks.join(" && ")} -> {row.tag} else -> K_IDENT // Syntax::{row.constant}\n"
@@ -147,7 +147,7 @@ fn branches(rows: [KeywordRow], offset: Int, indent: String) -> String Never! {
     order := [Int]{}
     groups := [Int: [KeywordRow]]{}
     loop row in rows {
-        byte :: row.bytes[offset]
+        byte: row.bytes[offset]
         group := groups.get(byte) ?? [KeywordRow]{}
         if group.len() == 0 -> &order.push(byte)
         &group.push(row)
@@ -156,7 +156,7 @@ fn branches(rows: [KeywordRow], offset: Int, indent: String) -> String Never! {
     &order.sort()
     out := "{indent}if byte_at(source, start + {offset}) == {{\n"
     loop byte in order {
-        group :: groups.get(byte) ?? [KeywordRow]{}
+        group: groups.get(byte) ?? [KeywordRow]{}
         out = "{out}{indent}    {byte} -> {{\n"
         if offset + 1 == group[0].bytes.len() {
             out = "{out}{indent}        {group[0].tag} // Syntax::{group[0].constant}\n"
@@ -168,37 +168,37 @@ fn branches(rows: [KeywordRow], offset: Int, indent: String) -> String Never! {
     "{out}{indent}    else -> K_IDENT\n{indent}}}\n"
 }
 
-fn render_keyword_spans(rows: [KeywordRow]) -> String Never! {
+render_keyword_spans: fn(rows: [KeywordRow]) -> String Never! {
     order := [Int]{}
     lengths := [Int: [KeywordRow]]{}
     loop row in rows {
-        length :: row.bytes.len()
+        length: row.bytes.len()
         group := lengths.get(length) ?? [KeywordRow]{}
         if group.len() == 0 -> &order.push(length)
         &group.push(row)
         lengths[length] = group
     }
     &order.sort()
-    out := "{OPEN}\n// Derived from Jet Lexer/Keywords and Syntax literals; do not hand edit.\n// No spelling ownership here: Payload still builds the exact token text.\nfn word_kind(source: [U8], start: Int, end: Int, previous_kind: Int) -> Int Never! {{\n    kind :: if end - start == {{\n"
+    out := "{OPEN}\n// Derived from Jet Lexer/Keywords and Syntax literals; do not hand edit.\n// No spelling ownership here: Payload still builds the exact token text.\nword_kind: fn(source: [U8], start: Int, end: Int, previous_kind: Int) -> Int Never! {{\n    kind: if end - start == {{\n"
     loop length in order {
-        group :: lengths.get(length) ?? [KeywordRow]{}
+        group: lengths.get(length) ?? [KeywordRow]{}
         out = "{out}        {length} -> {{\n{branches(group, 0, "            ")}        }}\n"
     }
     "{out}        else -> K_IDENT\n    }}\n    // Only exact in becomes a member after a postfix dot.\n    if kind == K_IN && (previous_kind == K_DOT || previous_kind == K_QUESTION_DOT) -> return K_IDENT\n    kind\n}}\n{CLOSE}"
 }
 
-fn replace_keyword_spans(source: String, generated: String) -> String KeywordRowsError! {
-    blocks :: SPAN_BLOCK.matches(source)
+replace_keyword_spans: fn(source: String, generated: String) -> String KeywordRowsError! {
+    blocks: SPAN_BLOCK.matches(source)
     if blocks.len() != 1 -> return Err(rows_fail("expected exactly one generated keyword span block"))
     Ok("{source.slice(0, blocks[0].start)}{generated}{source.slice(blocks[0].end, source.len())}")
 }
 
-fn keyword_rows_main(args: [String]) -[FS]> String KeywordRowsError! {
-    mode :: if args.len() == 0 -> "--check" else -> args[0]
+keyword_rows_main: fn(args: [String]) -[FS]> String KeywordRowsError! {
+    mode: if args.len() == 0 -> "--check" else -> args[0]
     if args.len() > 1 || (mode != "--check" && mode != "--write") -> return Err(rows_fail("usage: LexerKeywordRows.jet [--check|--write]"))
-    source :: files.read(SCAN_PATH) ?? return Err(rows_fail("cannot read {SCAN_PATH}: {err}"))
-    rows :: read_keyword_rows() ?? return Err(err)
-    next_source :: replace_keyword_spans(source, render_keyword_spans(rows)) ?? return Err(err)
+    source: files.read(SCAN_PATH) ?? return Err(rows_fail("cannot read {SCAN_PATH}: {err}"))
+    rows: read_keyword_rows() ?? return Err(err)
+    next_source: replace_keyword_spans(source, render_keyword_spans(rows)) ?? return Err(err)
     if mode == "--write" {
         files.write(SCAN_PATH, next_source) ?? return Err(rows_fail("cannot write {SCAN_PATH}: {err}"))
         return Ok("lexer keyword rows written")
@@ -207,7 +207,7 @@ fn keyword_rows_main(args: [String]) -[FS]> String KeywordRowsError! {
     Ok("lexer keyword rows check passed")
 }
 
-fn run() {
+run: fn() {
     if keyword_rows_main(process.args()) == {
         .Ok(message) -> print(message)
         .Err(error) -> {
@@ -218,7 +218,7 @@ fn run() {
 }
 
 // The error text keyword_rows reports for these inputs, or "" when it accepts them.
-fn keyword_rows_error(mapping: String, syntax: String, tokens: String, tags: String) -> String Never! {
+keyword_rows_error: fn(mapping: String, syntax: String, tokens: String, tags: String) -> String Never! {
     if keyword_rows(mapping, syntax, tokens, tags) == {
         .Ok(_) -> ""
         .Err(error) -> error.message
@@ -226,33 +226,33 @@ fn keyword_rows_error(mapping: String, syntax: String, tokens: String, tags: Str
 }
 
 #Test("canonical keyword projection is current and rejects incomplete authority") {
-    rows :: read_keyword_rows() ?? panic("the keyword rows did not read: {err.message}")
-    source :: files.read(SCAN_PATH) ?? panic("the scanner source did not read")
-    generated :: render_keyword_spans(rows)
+    rows: read_keyword_rows() ?? panic("the keyword rows did not read: {err.message}")
+    source: files.read(SCAN_PATH) ?? panic("the scanner source did not read")
+    generated: render_keyword_spans(rows)
     assert_eq(replace_keyword_spans(source, generated) ?? panic("the generated block did not splice"), source)
     assert(!generated.contains("slice_text") && !generated.contains(".bytes(") && !generated.contains("String.from_bytes") && !generated.contains("[U8]{{"))
     loop row in rows {
         assert_eq(generated.split("// Syntax::{row.constant}\n").to_list().len() - 1, 1)
         assert(generated.contains(row.tag))
     }
-    doubled :: if replace_keyword_spans("{source}{source}", generated) == {
+    doubled: if replace_keyword_spans("{source}{source}", generated) == {
         .Ok(_) -> ""
         .Err(error) -> error.message
     }
     assert(doubled.contains("exactly one"))
-    mapping :: "LEXER_KEYWORDS :: [LexerKeyword]{{\n    LexerKeyword{{constant: \"KW_FN\", kind: \"KwFn\", tag: \"K_FN\"}},\n}}"
-    syntax :: "KW_FN :: \"fn\""
-    tokens :: "TOKEN_KW_FN :: 57\n"
-    tags :: "K_FN :: 57\n"
-    parsed :: keyword_rows(mapping, syntax, tokens, tags) ?? panic("the minimal table did not parse: {err.message}")
+    mapping: "LEXER_KEYWORDS: [LexerKeyword]{{\n    LexerKeyword{{constant: \"KW_FN\", kind: \"KwFn\", tag: \"K_FN\"}},\n}}"
+    syntax: "KW_FN: \"fn\""
+    tokens: "TOKEN_KW_FN: 57\n"
+    tags: "K_FN: 57\n"
+    parsed: keyword_rows(mapping, syntax, tokens, tags) ?? panic("the minimal table did not parse: {err.message}")
     assert_eq(parsed[0].spelling, "fn")
     assert(keyword_rows_error(mapping.replace("\n}}", "\n    invalid row,\n}}"), syntax, tokens, tags).contains("unparsed keyword row"))
-    assert(keyword_rows_error("LEXER_KEYWORDS :: [LexerKeyword]{{\n}}", syntax, tokens, tags).contains("incomplete"))
+    assert(keyword_rows_error("LEXER_KEYWORDS: [LexerKeyword]{{\n}}", syntax, tokens, tags).contains("incomplete"))
     assert(keyword_rows_error(mapping.replace("KwFn", "KwNew"), syntax, tokens, tags).contains("unresolved token kind"))
-    assert(keyword_rows_error(mapping, syntax, "{tokens}TOKEN_KW_NEW :: 58\n", tags).contains("incomplete"))
+    assert(keyword_rows_error(mapping, syntax, "{tokens}TOKEN_KW_NEW: 58\n", tags).contains("incomplete"))
     assert(keyword_rows_error(mapping.replace("KwFn", "KwFn(String)"), syntax, tokens, tags).contains("unparsed"))
     assert(keyword_rows_error(mapping, "{syntax}\n{syntax}", tokens, tags).contains("ambiguous"))
-    assert(keyword_rows_error(mapping, "KW_FN :: OTHER", tokens, tags).contains("unresolved"))
-    assert(keyword_rows_error(mapping, "KW_FN :: \"fñ\"", tokens, tags).contains("unsupported keyword"))
+    assert(keyword_rows_error(mapping, "KW_FN: OTHER", tokens, tags).contains("unresolved"))
+    assert(keyword_rows_error(mapping, "KW_FN: \"fñ\"", tokens, tags).contains("unsupported keyword"))
     assert(keyword_rows_error(mapping, syntax, tokens, "").contains("unresolved token kind"))
 }

@@ -3,18 +3,18 @@
 // holds the copy. Each case edits a copy through a window and prints the
 // original, then the copy.
 
-enum Expr {
+Expr: enum {
     Lit(n: Int)
     Pair(left: Expr, n: Int)
     Many(items: [Int])
 }
 
-struct Holder {
+Holder: struct {
     expr: Expr
     note: String?
 }
 
-fn show(e: Expr) -> String {
+show: fn(e: Expr) -> String {
     if e == {
         .Lit(n) -> "lit {n}"
         .Pair(left, n) -> "pair({show(left)}, {n})"
@@ -23,7 +23,7 @@ fn show(e: Expr) -> String {
 }
 
 // Writes through the write parameter's own window.
-fn bump(e: &Expr) {
+bump: fn(e: &Expr) {
     if &e == {
         .Pair(_, n) -> n = n + 100
         .Many(items) -> &items.push(7)
@@ -32,20 +32,20 @@ fn bump(e: &Expr) {
 }
 
 // Writes through the recursive edge `left`, a window inside the window.
-fn bump_left(e: &Expr) {
+bump_left: fn(e: &Expr) {
     if &e == {
         .Pair(left, _) -> bump(&left)
         else -> {}
     }
 }
 
-fn sample() -> Expr {
+sample: fn() -> Expr {
     Expr.Pair{left: Expr.Lit{n: 1}, n: 2}
 }
 
-fn run() {
+run: fn() {
     // An owned local.
-    a :: sample()
+    a: sample()
     local := a
     if &local == {
         .Pair(_, n) -> n = 7
@@ -64,13 +64,13 @@ fn run() {
     print("nested: {show(a)} / {show(nested)}")
 
     // A list inside the payload.
-    many :: Expr.Many{items: [Int]{1, 2}}
+    many: Expr.Many{items: [Int]{1, 2}}
     pushed := many
     bump(&pushed)
     print("payload list: {show(many)} / {show(pushed)}")
 
     // A field place.
-    holder :: Holder{expr: sample(), note: Val("kept")}
+    holder: Holder{expr: sample(), note: Val("kept")}
     field := holder
     if &field.expr == {
         .Pair(_, n) -> n = 30
@@ -83,14 +83,14 @@ fn run() {
     print("field: {show(holder.expr)} {holder.note ?? "none"} / {show(field.expr)} {field.note ?? "none"}")
 
     // An index place, written through a write parameter's window.
-    list :: [Expr]{sample(), Expr.Lit{n: 5}}
+    list: [Expr]{sample(), Expr.Lit{n: 5}}
     index := list
     bump(&index[1])
     bump_left(&index[0])
     print("index: {show(list[0])} {show(list[1])} / {show(index[0])} {show(index[1])}")
 
     // A Map value, written through a write parameter's window.
-    map :: [String:Expr]{"k": sample()}
+    map: [String:Expr]{"k": sample()}
     entry := map
     bump(&entry["k"])
     print("map: {show(map["k"])} / {show(entry["k"])}")

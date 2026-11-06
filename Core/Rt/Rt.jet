@@ -1,5 +1,5 @@
 
-package {
+package: {
     name: "core.rt"
     version: "0.0.1"
     edition: "2026"
@@ -10,12 +10,12 @@ package {
     }
 }
 use {
-    core :: core
-    time :: core.time
+    core: core
+    time: core.time
 }
 
 // Positional field order is the existing provider receipt schema.
-struct RealtimeReceipt {
+RealtimeReceipt: struct {
     requested_rate_hz: Int
     requested_frames: Int
     completed_callbacks: Int
@@ -26,22 +26,22 @@ struct RealtimeReceipt {
     end_identity: Int
 
     // Fixed JSON key order, no whitespace.
-    fn render_json(self) -> String Never! {
+    render_json: fn(self) -> String Never! {
         "{{\"requested_rate_hz\":{self.requested_rate_hz},\"requested_frames\":{self.requested_frames},\"completed_callbacks\":{self.completed_callbacks},\"completed_frames\":{self.completed_frames},\"missed\":{self.missed},\"max_lateness_ns\":{self.max_lateness_ns},\"start_identity\":{self.start_identity},\"end_identity\":{self.end_identity}}}"
     }
 
     // Preserve every label, comma and space.
-    fn render(self) -> String Never! {
+    render: fn(self) -> String Never! {
         "RealtimeReceipt(rate_hz={self.requested_rate_hz}, frames={self.requested_frames}, callbacks={self.completed_callbacks}, completed_frames={self.completed_frames}, missed={self.missed}, max_lateness_ns={self.max_lateness_ns}, start_identity={self.start_identity}, end_identity={self.end_identity})"
     }
 
-    fn frames_per_buffer(self) -> Int Never! {
+    frames_per_buffer: fn(self) -> Int Never! {
         self.requested_frames
     }
 }
 
 #Test("realtime receipts preserve all eight bounded callback facts") {
-    receipt :: RealtimeReceipt{requested_rate_hz: 1, requested_frames: 2,
+    receipt: RealtimeReceipt{requested_rate_hz: 1, requested_frames: 2,
         completed_callbacks: 3, completed_frames: 4, missed: 5,
         max_lateness_ns: 6, start_identity: 7, end_identity: 8}
     assert(receipt.requested_rate_hz == 1)
@@ -55,7 +55,7 @@ struct RealtimeReceipt {
 }
 
 #Test("realtime receipt renderers retain the native byte spelling") {
-    receipt :: RealtimeReceipt{requested_rate_hz: 48000, requested_frames: 128,
+    receipt: RealtimeReceipt{requested_rate_hz: 48000, requested_frames: 128,
         completed_callbacks: 3, completed_frames: 384, missed: 1,
         max_lateness_ns: 25, start_identity: 7, end_identity: 8}
     assert_eq(receipt.render_json(), "{{\"requested_rate_hz\":48000,\"requested_frames\":128,\"completed_callbacks\":3,\"completed_frames\":384,\"missed\":1,\"max_lateness_ns\":25,\"start_identity\":7,\"end_identity\":8}}")
@@ -65,7 +65,7 @@ struct RealtimeReceipt {
 
 /// Start a fixed-rate callback stream. The callback receives one reusable
 /// sample buffer per invocation and must keep its work bounded.
-fn callback(rate_hz: Int, frames_per_buffer: Int, callback: fn([Float]) -[]>) -> RealtimeStream Never! {
+callback: fn(rate_hz: Int, frames_per_buffer: Int, callback: fn([Float]) -[]>) -> RealtimeStream Never! {
     if rate_hz <= 0 -> panic("real-time callback rate must be positive")
     core.rt.__callback(rate_hz, frames_per_buffer, callback)
 }
@@ -73,19 +73,19 @@ fn callback(rate_hz: Int, frames_per_buffer: Int, callback: fn([Float]) -[]>) ->
 // Atomic observations and cancellation joining belong to the provider stream,
 // not a source DTO: copying this handle retains the same worker.
 impl RealtimeStream {
-    fn next_deadline(self) -> time.Instant Never! {
+    next_deadline: fn(self) -> time.Instant Never! {
         core.rt.__next_deadline(self)
     }
 
-    fn receipt(self) -> RealtimeReceipt Never! {
+    receipt: fn(self) -> RealtimeReceipt Never! {
         core.rt.__receipt(self)
     }
 
-    fn cancel(&self) Never! {
+    cancel: fn(&self) Never! {
         core.rt.__cancel(&self)
     }
 
-    fn is_cancelled(self) -> Bool Never! {
+    is_cancelled: fn(self) -> Bool Never! {
         core.rt.__is_cancelled(self)
     }
 }

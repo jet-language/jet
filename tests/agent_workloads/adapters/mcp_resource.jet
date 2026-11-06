@@ -1,24 +1,24 @@
 use {
-    process :: core.process
-    env :: core.sys
+    process: core.process
+    env: core.sys
 }
 
-fn frame(body: String) -> String {
+frame: fn(body: String) -> String {
     return "Content-Length: {body.len()}\n\n{body}"
 }
 
 #CLI
-struct WorkloadArgs {
+WorkloadArgs: struct {
     root: String
 }
 
-fn run(args: WorkloadArgs) {
-    root :: args.root
-    case_name :: env.get("JET_CORPUS_TASK") ?? panic("missing task identity")
-    jet :: env.get("JET_CORPUS_JET") ?? panic("missing Jet binary")
+run: fn(args: WorkloadArgs) {
+    root: args.root
+    case_name: env.get("JET_CORPUS_TASK") ?? panic("missing task identity")
+    jet: env.get("JET_CORPUS_JET") ?? panic("missing Jet binary")
     project := "{root}/readonly"
     if case_name == "mcp-environment-denied" -> project = "{root}/denied"
-    root_uri :: "file://{project}"
+    root_uri: "file://{project}"
     bodies := [
         "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"rootUri\":\"{root_uri}\",\"capabilities\":{{}}}}}}",
         "{{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\",\"params\":{{}}}}",
@@ -29,15 +29,15 @@ fn run(args: WorkloadArgs) {
     ]
     payload := ""
     loop body in bodies -> payload += frame(body)
-    duration :: Duration.seconds(10) ?? panic("duration")
-    child :: process.cmd([jet, "self", "lsp"])
+    duration: Duration.seconds(10) ?? panic("duration")
+    child: process.cmd([jet, "self", "lsp"])
         .cwd(project)
         .env("HOME", "/agent-secret")
         .stdin(.Stream)
         .timeout(duration)
         .spawn() ?? panic("MCP server failed to launch")
     child.stdin.write_text(payload) ?? panic("MCP request failed to write")
-    result :: child.wait() ?? panic("MCP server failed to wait")
+    result: child.wait() ?? panic("MCP server failed to wait")
     if !result.success {
         panic("MCP server failed: {result.code} {result.errors}")
     }

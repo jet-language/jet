@@ -1,4 +1,4 @@
-package {
+package: {
     name: "core.web"
     version: "0.0.1"
     edition: "2026"
@@ -10,12 +10,12 @@ package {
 }
 
 use {
-    core :: core
+    core: core
     core.http.[HTTPRequest, HTTPResponse, HTTPRouter]
-    web_http :: core.http
+    web_http: core.http
     core.http.server.[HTTPMux]
-    http_server :: core.http.server
-    live_json :: core.encoding.json
+    http_server: core.http.server
+    live_json: core.encoding.json
     core.encoding.[Dyn]
     core.reactive.loadable.[Loadable]
     // `web.form(Model, action: handler)` elaborates (in sema) into
@@ -29,15 +29,15 @@ use {
 // own router, store, forms, table, virtual windows, storage, and browser
 // tests. Nothing here talks to a browser; `core.http` is the wire.
 
-module browser
-module devserver
-module forms
-module query
-module router
-module storage
-module store
-module table
-module virtual
+browser: module
+devserver: module
+forms: module
+query: module
+router: module
+storage: module
+store: module
+table: module
+virtual: module
 
 // ── App: the full-stack application builder ──────────────────────────────
 //
@@ -52,21 +52,21 @@ module virtual
 // and the first assets root `/assets`.
 
 /// A rendered page: its document title and its body markup.
-struct WebPage {
+WebPage: struct {
     title: String
     body: String
 }
 
-fn page(title: String, body: String) -> WebPage Never! { WebPage{title: title, body: body} }
+page: fn(title: String, body: String) -> WebPage Never! { WebPage{title: title, body: body} }
 
 // One request into a handler adapter: the matched request and the route's
 // encoded loader data ("" when the route has no loader).
-struct __AppCall {
+__AppCall: struct {
     request: HTTPRequest
     data: String
 }
 
-enum __AppReply {
+__AppReply: enum {
     Page(WebPage)
     JSON(String)
     Rejected(String)
@@ -74,60 +74,60 @@ enum __AppReply {
 }
 
 impl __AppCall {
-    fn __input<Target: Decode>(self, name: String) -> Target? { self.request.__route_input<Target>(name) }
+    __input: fn<Target: Decode>(self, name: String) -> Target? { self.request.__route_input<Target>(name) }
 
-    fn __body<Target: Decode>(self) -[Net]> Target? Never! {
+    __body: fn<Target: Decode>(self) -[Net]> Target? Never! {
         if self.request.json<Target>() == .Ok(value) -> return Val(value)
         None
     }
 
-    fn __data<Target: Decode>(self) -> Target? {
+    __data: fn<Target: Decode>(self) -> Target? {
         if self.data == "" -> return None
         if live_json.decode<Target>(self.data) == .Ok(value) -> return Val(value)
         None
     }
 
-    fn __path(self) -> String Never! { self.request.path() }
+    __path: fn(self) -> String Never! { self.request.path() }
 
-    fn __page(self, page: WebPage) -> __AppReply Never! { __AppReply.Page(page) }
+    __page: fn(self, page: WebPage) -> __AppReply Never! { __AppReply.Page(page) }
 
-    fn __json<Value: Encode>(self, value: Value) -> __AppReply Never! {
-        text :: live_json.to_string(value.encode()) ?? return __AppReply.Failed("the handler result does not encode as JSON: {err}")
+    __json: fn<Value: Encode>(self, value: Value) -> __AppReply Never! {
+        text: live_json.to_string(value.encode()) ?? return __AppReply.Failed("the handler result does not encode as JSON: {err}")
         __AppReply.JSON(text)
     }
 
-    fn __done(self) -> __AppReply Never! { __AppReply.JSON("null") }
+    __done: fn(self) -> __AppReply Never! { __AppReply.JSON("null") }
 
-    fn __rejected(self, input: String) -> __AppReply Never! { __AppReply.Rejected("the {input} input is missing or does not decode") }
+    __rejected: fn(self, input: String) -> __AppReply Never! { __AppReply.Rejected("the {input} input is missing or does not decode") }
 
-    fn __failed(self, message: String) -> __AppReply Never! { __AppReply.Failed(message) }
+    __failed: fn(self, message: String) -> __AppReply Never! { __AppReply.Failed(message) }
 }
 
-struct __AppHandlerCell {
+__AppHandlerCell: struct {
     call: fn(__AppCall) -[Net, FS.Read]> __AppReply Err!
 }
 
 // A registered adapter. Copies share the one handler.
-struct __AppHandler {
+__AppHandler: struct {
     __cell: Shared<__AppHandlerCell>
 }
 
 impl __AppHandler {
     // A handler failure is the route's 500 answer, never the server's.
-    fn run(self, call: __AppCall) -[Net, FS.Read]> __AppReply Never! {
-        guard :: self.__cell.guard_read()
-        reply :: guard.value.call(call) ?? return __AppReply.Failed("the handler failed: {err}")
+    run: fn(self, call: __AppCall) -[Net, FS.Read]> __AppReply Never! {
+        guard: self.__cell.guard_read()
+        reply: guard.value.call(call) ?? return __AppReply.Failed("the handler failed: {err}")
         reply
     }
 }
 
-fn __app_handler(call: ^fn(__AppCall) -[Net, FS.Read]> __AppReply Err!) -> __AppHandler Never! {
+__app_handler: fn(call: ^fn(__AppCall) -[Net, FS.Read]> __AppReply Err!) -> __AppHandler Never! {
     __AppHandler{__cell: shared __AppHandlerCell{call: ^call}}
 }
 
 // One route and the facts its registration fixed. An empty identity string
 // is an absent boundary, loader or form.
-struct __AppRoute {
+__AppRoute: struct {
     path: String
     handler: __AppHandler
     identity: String
@@ -147,21 +147,21 @@ struct __AppRoute {
 
 // A server function (`handler` set) or the loader dependency row a loader
 // registration adds (`handler` None).
-struct __AppAction {
+__AppAction: struct {
     name: String
     kind: String
     handler: __AppHandler?
     preload: Bool
 }
 
-struct __AppMount {
+__AppMount: struct {
     prefix: String
     handler: __AppHandler
     effects: [String]
     security: [String]
 }
 
-struct __AppState {
+__AppState: struct {
     routes: [__AppRoute]
     actions: [__AppAction]
     mounts: [__AppMount]
@@ -181,11 +181,11 @@ struct __AppState {
 
 /// One application graph: routes, server functions, mounts and policies.
 /// Copies share the one graph.
-struct App {
+App: struct {
     __state: Shared<__AppState>
 }
 
-fn app() -> App Never! {
+app: fn() -> App Never! {
     App{__state: shared __AppState{
         routes: [__AppRoute]{},
         actions: [__AppAction]{},
@@ -207,11 +207,11 @@ fn app() -> App Never! {
 impl App {
     // `route`, `page` and `layout` land here with the handler's adapter, its
     // name and its typed input binding.
-    fn __route(self, path: String, handler: ^fn(__AppCall) -[Net, FS.Read]> __AppReply Err!, identity: String, binding: String) -> App Never! {
+    __route: fn(self, path: String, handler: ^fn(__AppCall) -[Net, FS.Read]> __AppReply Err!, identity: String, binding: String) -> App Never! {
         guard := self.__state.guard_edit()
-        mode :: guard.value.mode.copy()
-        explicit :: guard.value.explicit_mode
-        route :: __AppRoute{
+        mode: guard.value.mode.copy()
+        explicit: guard.value.explicit_mode
+        route: __AppRoute{
             path: path, handler: __app_handler(^handler), identity: identity, binding: binding,
             mode: mode, explicit_mode: explicit,
             loader: None, loader_identity: "", loader_data_type: "", preload: false,
@@ -224,14 +224,14 @@ impl App {
     // `pending`, `error` and `not_found`. A pending or error boundary belongs
     // to the route registered just before it; not-found answers every
     // unmatched navigation.
-    fn __boundary(self, kind: String, handler: ^fn(__AppCall) -[Net, FS.Read]> __AppReply Err!, identity: String) -> App Never! {
+    __boundary: fn(self, kind: String, handler: ^fn(__AppCall) -[Net, FS.Read]> __AppReply Err!, identity: String) -> App Never! {
         guard := self.__state.guard_edit()
-        boundary :: __app_handler(^handler)
+        boundary: __app_handler(^handler)
         if kind == "not_found" {
             guard.value.not_found = Val(boundary)
             return self.copy()
         }
-        last :: guard.value.routes.len() - 1
+        last: guard.value.routes.len() - 1
         if last < 0 -> panic("app boundary `{identity}` has no preceding route")
         route := guard.value.routes[last].copy()
         if kind == "pending" {
@@ -247,9 +247,9 @@ impl App {
 
     // `action`, `form` and `data`: one POST server function each. The first
     // action or form after a route is that route's form.
-    fn __action(self, kind: String, name: String, handler: ^fn(__AppCall) -[Net, FS.Read]> __AppReply Err!) -> App Never! {
+    __action: fn(self, kind: String, name: String, handler: ^fn(__AppCall) -[Net, FS.Read]> __AppReply Err!) -> App Never! {
         guard := self.__state.guard_edit()
-        last :: guard.value.routes.len() - 1
+        last: guard.value.routes.len() - 1
         if last >= 0 && (kind == "action" || kind == "form") && guard.value.routes[last].form == "" {
             route := guard.value.routes[last].copy()
             route.form = name.copy()
@@ -261,16 +261,16 @@ impl App {
 
     // `loader(route_handler, loader, preload)`: the route registered just
     // before it loads its data through `handler` first.
-    fn __loader(self, handler: ^fn(__AppCall) -[Net, FS.Read]> __AppReply Err!, identity: String, data_type: String, preload: Bool) -> App Never! {
+    __loader: fn(self, handler: ^fn(__AppCall) -[Net, FS.Read]> __AppReply Err!, identity: String, data_type: String, preload: Bool) -> App Never! {
         guard := self.__state.guard_edit()
-        last :: guard.value.routes.len() - 1
+        last: guard.value.routes.len() - 1
         if last < 0 -> panic("app loader `{identity}` has no preceding route")
         route := guard.value.routes[last].copy()
         route.loader = Val(__app_handler(^handler))
         route.loader_identity = identity
         route.loader_data_type = data_type
         route.preload = preload
-        dependency :: route.identity.copy()
+        dependency: route.identity.copy()
         guard.value.routes[last] = route
         &guard.value.actions.push(__AppAction{name: dependency, kind: "loader", handler: None, preload: preload})
         self.copy()
@@ -278,7 +278,7 @@ impl App {
 
     // `mount(prefix, handler[, effect[, policy]])`; "" is an absent effect or
     // policy.
-    fn __mount(self, prefix: String, handler: ^fn(__AppCall) -[Net, FS.Read]> __AppReply Err!, effect_name: String, policy: String) -> App Never! {
+    __mount: fn(self, prefix: String, handler: ^fn(__AppCall) -[Net, FS.Read]> __AppReply Err!, effect_name: String, policy: String) -> App Never! {
         effects := [String]{}
         if effect_name != "" -> &effects.push(effect_name)
         security := [String]{}
@@ -288,105 +288,105 @@ impl App {
         self.copy()
     }
 
-    fn routes(self, from: String) -> App Never! {
+    routes: fn(self, from: String) -> App Never! {
         guard := self.__state.guard_edit()
         &guard.value.routes_from.push(from)
         self.copy()
     }
 
-    fn csr(self) -> App Never! { __app_mode(self, "csr") }
-    fn ssr(self) -> App Never! { __app_mode(self, "ssr") }
-    fn ssg(self) -> App Never! { __app_mode(self, "ssg") }
-    fn stream(self) -> App Never! { __app_mode(self, "stream") }
-    fn streaming(self) -> App Never! { __app_mode(self, "stream") }
-    fn island(self) -> App Never! { __app_mode(self, "island") }
+    csr: fn(self) -> App Never! { __app_mode(self, "csr") }
+    ssr: fn(self) -> App Never! { __app_mode(self, "ssr") }
+    ssg: fn(self) -> App Never! { __app_mode(self, "ssg") }
+    stream: fn(self) -> App Never! { __app_mode(self, "stream") }
+    streaming: fn(self) -> App Never! { __app_mode(self, "stream") }
+    island: fn(self) -> App Never! { __app_mode(self, "island") }
 
-    fn hydration_dev(self) -> App Never! {
+    hydration_dev: fn(self) -> App Never! {
         guard := self.__state.guard_edit()
         guard.value.hydration = "dev-overlay"
         self.copy()
     }
 
-    fn hydration_release(self) -> App Never! {
+    hydration_release: fn(self) -> App Never! {
         guard := self.__state.guard_edit()
         guard.value.hydration = "release-keep-server"
         self.copy()
     }
 
-    fn security(self, policy: String) -> App Never! {
+    security: fn(self, policy: String) -> App Never! {
         guard := self.__state.guard_edit()
         &guard.value.security.push(policy)
         self.copy()
     }
 
-    fn assets(self, path: String) -> App Never! {
+    assets: fn(self, path: String) -> App Never! {
         guard := self.__state.guard_edit()
         &guard.value.assets.push(path)
         self.copy()
     }
 
-    fn split(self, name: String) -> App Never! {
+    split: fn(self, name: String) -> App Never! {
         guard := self.__state.guard_edit()
         &guard.value.split.push(name)
         self.copy()
     }
 
-    fn code_split(self, name: String) -> App Never! { self.split(name) }
+    code_split: fn(self, name: String) -> App Never! { self.split(name) }
 
-    fn cache(self, policy: String) -> App Never! {
+    cache: fn(self, policy: String) -> App Never! {
         guard := self.__state.guard_edit()
         &guard.value.cache.push(policy)
         self.copy()
     }
 
-    fn a11y(self, policy: String) -> App Never! {
+    a11y: fn(self, policy: String) -> App Never! {
         guard := self.__state.guard_edit()
         &guard.value.a11y.push(policy)
         self.copy()
     }
 
-    fn adapter(self, name: String) -> App Never! {
+    adapter: fn(self, name: String) -> App Never! {
         guard := self.__state.guard_edit()
         &guard.value.adapters.push(name)
         self.copy()
     }
 
-    fn facts_json(self) -> String Never! { __app_facts_json(self) }
+    facts_json: fn(self) -> String Never! { __app_facts_json(self) }
 
     // Serve on 127.0.0.1 until the process stops: on `JET_APP_PORT` when it
     // holds a port, else on `port` (8080 for `serve()`).
-    fn serve(self, port: Int{8080}) Never! -[Env, Net, FS.Read, Time]> { __app_serve(self, __app_port(port)) }
+    serve: fn(self, port: Int{8080}) Never! -[Env, Net, FS.Read, Time]> { __app_serve(self, __app_port(port)) }
 
-    fn serve_on(self, port: Int) Never! -[Env, Net, FS.Read, Time]> { __app_serve(self, __app_port(port)) }
+    serve_on: fn(self, port: Int) Never! -[Env, Net, FS.Read, Time]> { __app_serve(self, __app_port(port)) }
 }
 
-fn __app_mode(app: App, mode: String) -> App Never! {
+__app_mode: fn(app: App, mode: String) -> App Never! {
     guard := app.__state.guard_edit()
     guard.value.mode = mode
     guard.value.explicit_mode = true
     app.copy()
 }
 
-fn __app_state(app: App) -> __AppState Never! {
-    guard :: app.__state.guard_read()
+__app_state: fn(app: App) -> __AppState Never! {
+    guard: app.__state.guard_read()
     guard.value.copy()
 }
 
-fn __app_port(fallback: Int) -> Int Never! {
-    raw :: core.sys.__env_value("JET_APP_PORT") ?? return fallback
-    text :: String.from_bytes(raw) ?? return fallback
-    port :: Int.parse(text) ?? return fallback
+__app_port: fn(fallback: Int) -> Int Never! {
+    raw: core.sys.__env_value("JET_APP_PORT") ?? return fallback
+    text: String.from_bytes(raw) ?? return fallback
+    port: Int.parse(text) ?? return fallback
     if port < 1 || port > 65535 -> return fallback
     port
 }
 
-fn __app_serve(app: App, port: Int) Never! -[Net, FS.Read, Time]> {
+__app_serve: fn(app: App, port: Int) Never! -[Net, FS.Read, Time]> {
     if port < 1 || port > 65535 -> panic("web app port {port} is out of range")
-    state :: __app_state(app)
-    mux :: http_server.mux()
+    state: __app_state(app)
+    mux: http_server.mux()
     loop route in state.routes {
-        target :: app.copy()
-        path :: route.path.copy()
+        target: app.copy()
+        path: route.path.copy()
         mux.__route("GET", route.path, (request: HTTPRequest) -> Ok(__app_page_response(target, path, request)), "")
     }
     loop action in state.actions {
@@ -395,20 +395,20 @@ fn __app_serve(app: App, port: Int) Never! -[Net, FS.Read, Time]> {
         }
     }
     loop mount in state.mounts {
-        base :: __app_trim_slashes(mount.prefix)
-        handler :: mount.handler.copy()
+        base: __app_trim_slashes(mount.prefix)
+        handler: mount.handler.copy()
         mux.__route("GET", "{base}/*jet_app_mount_path", (request: HTTPRequest) -> Ok(__app_mount_response(handler, request)), "")
         mux.__route("POST", "{base}/*jet_app_mount_path", (request: HTTPRequest) -> Ok(__app_mount_response(handler, request)), "")
     }
     if state.assets.len() > 0 -> http_server.static_files(mux, "/assets", state.assets[0])
-    fallback :: app.copy()
+    fallback: app.copy()
     mux.__route("GET", "/*jet_app_unmatched", (request: HTTPRequest) -> Ok(__app_not_found_response(fallback, request)), "")
-    server :: http_server.__bind_entry("127.0.0.1:{port}", mux, None, None) ?? panic("web app could not listen on 127.0.0.1:{port}: {err}")
-    _ :: server.serve() ?? panic("web app server failed: {err}")
+    server: http_server.__bind_entry("127.0.0.1:{port}", mux, None, None) ?? panic("web app could not listen on 127.0.0.1:{port}: {err}")
+    _: server.serve() ?? panic("web app server failed: {err}")
 }
 
-fn __app_route(app: App, path: String) -> __AppRoute? Never! {
-    guard :: app.__state.guard_read()
+__app_route: fn(app: App, path: String) -> __AppRoute? Never! {
+    guard: app.__state.guard_read()
     loop route in guard.value.routes {
         if route.path == path -> return Val(route.copy())
     }
@@ -417,8 +417,8 @@ fn __app_route(app: App, path: String) -> __AppRoute? Never! {
 
 // A route request: run the route's loader, then its handler with the
 // loader's data; a failure renders the route's error boundary.
-fn __app_page_response(app: App, path: String, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
-    route :: __app_route(app, path) ?? return __app_html(500, WebPage{title: "Route error", body: "route `{path}` is not registered on the app graph"}, "")
+__app_page_response: fn(app: App, path: String, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
+    route: __app_route(app, path) ?? return __app_html(500, WebPage{title: "Route error", body: "route `{path}` is not registered on the app graph"}, "")
     call := __AppCall{request: request, data: ""}
     if route.loader == .Val(loader) {
         if loader.run(call) == {
@@ -436,15 +436,15 @@ fn __app_page_response(app: App, path: String, request: HTTPRequest) -[Net, FS.R
     }
 }
 
-fn __app_not_found_response(app: App, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
-    state :: __app_state(app)
+__app_not_found_response: fn(app: App, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
+    state: __app_state(app)
     __app_boundary(404, state.not_found, "Not found", "no web route matches `{request.path}`", __AppCall{request: request, data: ""})
 }
 
 // The boundary's page, or a page of `title` and `message` without one; a
 // boundary that fails itself shows both messages.
-fn __app_boundary(status: Int, boundary: __AppHandler?, title: String, message: String, call: __AppCall) -[Net, FS.Read]> HTTPResponse Never! {
-    handler :: boundary ?? return __app_html(status, WebPage{title: title, body: message}, "")
+__app_boundary: fn(status: Int, boundary: __AppHandler?, title: String, message: String, call: __AppCall) -[Net, FS.Read]> HTTPResponse Never! {
+    handler: boundary ?? return __app_html(status, WebPage{title: title, body: message}, "")
     if handler.run(call) == {
         .Page(rendered) -> __app_html(status, rendered, "")
         .Rejected(failure) -> __app_html(status, WebPage{title: title, body: "{message}\n{failure}"}, "")
@@ -453,23 +453,23 @@ fn __app_boundary(status: Int, boundary: __AppHandler?, title: String, message: 
     }
 }
 
-fn __app_html(status: Int, rendered: WebPage, route_data: String) -> HTTPResponse Never! {
-    document :: "<!doctype html><html><head><meta charset=\"utf-8\"><title>{rendered.title}</title></head><body>{rendered.body}{route_data}</body></html>"
-    fields :: core.http.headers_set(core.http.headers(), "content-type", "text/html; charset=utf-8")
-    payload :: core.http.body_text(document)
+__app_html: fn(status: Int, rendered: WebPage, route_data: String) -> HTTPResponse Never! {
+    document: "<!doctype html><html><head><meta charset=\"utf-8\"><title>{rendered.title}</title></head><body>{rendered.body}{route_data}</body></html>"
+    fields: core.http.headers_set(core.http.headers(), "content-type", "text/html; charset=utf-8")
+    payload: core.http.body_text(document)
     http_server.response_body(status, ^payload, ^fields)
 }
 
 // The route identity and navigation status a served page publishes; the
 // body is the route's encoded loader data, `null` without a loader.
-fn __app_route_data(route: String, url: String, data: String) -> String Never! {
-    body :: if data == "" -> "null" else -> __app_script_safe(data)
+__app_route_data: fn(route: String, url: String, data: String) -> String Never! {
+    body: if data == "" -> "null" else -> __app_script_safe(data)
     "<script type=\"application/json\" id=\"jet-route-data\" data-route=\"{__app_html_attr(route)}\" data-url=\"{__app_html_attr(url)}\" data-status=\"ready\">{body}</script>"
 }
 
 // A server function call: same-origin POST only; the JSON result answers
 // with a content security policy.
-fn __app_action_response(handler: __AppHandler, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
+__app_action_response: fn(handler: __AppHandler, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
     if !__app_same_origin(request) -> return __app_json(403, __app_error_json("cross-origin server function call"))
     if handler.run(__AppCall{request: request, data: ""}) == {
         .JSON(text) -> __app_json(200, text)
@@ -479,7 +479,7 @@ fn __app_action_response(handler: __AppHandler, request: HTTPRequest) -[Net, FS.
     }
 }
 
-fn __app_mount_response(handler: __AppHandler, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
+__app_mount_response: fn(handler: __AppHandler, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
     if handler.run(__AppCall{request: request, data: ""}) == {
         .JSON(text) -> __app_json(200, text)
         .Page(rendered) -> __app_html(200, rendered, "")
@@ -488,45 +488,45 @@ fn __app_mount_response(handler: __AppHandler, request: HTTPRequest) -[Net, FS.R
     }
 }
 
-fn __app_json(status: Int, text: String) -> HTTPResponse Never! {
-    typed :: core.http.headers_set(core.http.headers(), "content-type", "application/json")
-    fields :: core.http.headers_set(typed, "content-security-policy", "default-src 'self'")
-    payload :: core.http.body_text(text)
+__app_json: fn(status: Int, text: String) -> HTTPResponse Never! {
+    typed: core.http.headers_set(core.http.headers(), "content-type", "application/json")
+    fields: core.http.headers_set(typed, "content-security-policy", "default-src 'self'")
+    payload: core.http.body_text(text)
     http_server.response_body(status, ^payload, ^fields)
 }
 
-fn __app_error_json(message: String) -> String Never! { "{{\"error\":{__app_json_string(message)}}}" }
+__app_error_json: fn(message: String) -> String Never! { "{{\"error\":{__app_json_string(message)}}}" }
 
 // A request without an Origin header is same-origin; one with it must name
 // the Host it was sent to.
-fn __app_same_origin(request: HTTPRequest) -> Bool Never! {
-    origin :: request.header("origin") ?? return true
-    host :: request.header("host") ?? return false
-    plain :: "http://{host}"
-    secure :: "https://{host}"
+__app_same_origin: fn(request: HTTPRequest) -> Bool Never! {
+    origin: request.header("origin") ?? return true
+    host: request.header("host") ?? return false
+    plain: "http://{host}"
+    secure: "https://{host}"
     origin == plain || origin == secure
 }
 
-fn __app_trim_slashes(prefix: String) -> String Never! {
-    raw :: prefix.bytes()
+__app_trim_slashes: fn(prefix: String) -> String Never! {
+    raw: prefix.bytes()
     end := raw.len()
     loop end > 0 && raw[end - 1] == (U8{47}) -> end = end - 1
     String.from_bytes(raw.slice(0, end)) ?? ""
 }
 
-fn __app_push(out: &[U8], text: String) Never! {
+__app_push: fn(out: &[U8], text: String) Never! {
     loop byte in text.bytes() -> &out.push(byte)
 }
 
-fn __app_hex_digit(value: Int) -> U8 Never! {
-    digits :: "0123456789abcdef".bytes()
+__app_hex_digit: fn(value: Int) -> U8 Never! {
+    digits: "0123456789abcdef".bytes()
     digits[value]
 }
 
-fn __app_json_string(value: String) -> String Never! {
+__app_json_string: fn(value: String) -> String Never! {
     out := [U8]{34}
     loop byte in value.bytes() {
-        n :: Int.from_u8(byte)
+        n: Int.from_u8(byte)
         if n == 34 || n == 92 {
             &out.push(U8{92})
             &out.push(byte)
@@ -548,10 +548,10 @@ fn __app_json_string(value: String) -> String Never! {
     String.from_bytes(out) ?? ""
 }
 
-fn __app_html_attr(value: String) -> String Never! {
+__app_html_attr: fn(value: String) -> String Never! {
     out := [U8]{}
     loop byte in value.bytes() {
-        n :: Int.from_u8(byte)
+        n: Int.from_u8(byte)
         if n == 38 {
             __app_push(&out, "&amp;")
         } else if n == 60 {
@@ -568,7 +568,7 @@ fn __app_html_attr(value: String) -> String Never! {
 }
 
 // JSON inside a `<script>` element: every `<` as `\u003c`.
-fn __app_script_safe(text: String) -> String Never! {
+__app_script_safe: fn(text: String) -> String Never! {
     out := [U8]{}
     loop byte in text.bytes() {
         if byte == (U8{60}) {
@@ -580,26 +580,26 @@ fn __app_script_safe(text: String) -> String Never! {
     String.from_bytes(out) ?? ""
 }
 
-fn __app_json_list(values: [String]) -> String Never! {
+__app_json_list: fn(values: [String]) -> String Never! {
     items := [String]{}
     loop value in values -> &items.push(__app_json_string(value))
     "[{items.join(",")}]"
 }
 
 // The debug spelling of a string list (`["a", "b"]`) the policy rows use.
-fn __app_debug_list(values: [String]) -> String Never! {
+__app_debug_list: fn(values: [String]) -> String Never! {
     items := [String]{}
     loop value in values -> &items.push(__app_json_string(value))
     "[{items.join(", ")}]"
 }
 
-fn __app_json_or_null(value: String) -> String Never! {
+__app_json_or_null: fn(value: String) -> String Never! {
     if value == "" -> return "null"
     __app_json_string(value)
 }
 
 // FNV-1a 64 of `path\0handler`: the route's cache identity.
-fn __app_route_identity(path: String, handler: String) -> String Never! {
+__app_route_identity: fn(path: String, handler: String) -> String Never! {
     hash := U64{14695981039346656037}
     bytes := path.bytes()
     &bytes.push(U8{0})
@@ -617,33 +617,33 @@ fn __app_route_identity(path: String, handler: String) -> String Never! {
 // One route field of the binding sema serialized: `p:<name>=<Type>` is a
 // path parameter, `s=<codec>:<name>=<Type>[?],…` the search fields, `d` the
 // loader data.
-fn __app_field_json(name: String, ty: String, codec: String, required: Bool) -> String Never! {
+__app_field_json: fn(name: String, ty: String, codec: String, required: Bool) -> String Never! {
     "{{\"name\":{__app_json_string(name)},\"ty\":{__app_json_string(ty)},\"codec\":{__app_json_string(codec)},\"required\":{required},\"default\":null}}"
 }
 
-fn __app_search_field_json(item: String, codec: String) -> String Never! {
-    parts :: item.split("=").to_list()
+__app_search_field_json: fn(item: String, codec: String) -> String Never! {
+    parts: item.split("=").to_list()
     if parts.len() != 2 -> panic("invalid app search field binding `{item}`")
-    raw :: parts[1].bytes()
-    optional :: raw.len() > 0 && raw[raw.len() - 1] == (U8{63})
-    ty :: if optional -> String.from_bytes(raw.slice(0, raw.len() - 1)) ?? "" else -> parts[1].copy()
+    raw: parts[1].bytes()
+    optional: raw.len() > 0 && raw[raw.len() - 1] == (U8{63})
+    ty: if optional -> String.from_bytes(raw.slice(0, raw.len() - 1)) ?? "" else -> parts[1].copy()
     __app_field_json(parts[0], ty, codec, !optional)
 }
 
-fn __app_route_facts_json(route: __AppRoute) -> String Never! {
+__app_route_facts_json: fn(route: __AppRoute) -> String Never! {
     path_params := [String]{}
     search_params := [String]{}
     search_codec := "query"
     loop item in route.binding.split(";") {
         if item == "" || item == "d" -> next
         if item.starts_with("p:") {
-            field :: String.from_bytes(item.bytes().slice(2, item.bytes().len())) ?? ""
-            parts :: field.split("=").to_list()
+            field: String.from_bytes(item.bytes().slice(2, item.bytes().len())) ?? ""
+            parts: field.split("=").to_list()
             if parts.len() != 2 -> panic("invalid app path binding `{item}`")
             &path_params.push(__app_field_json(parts[0], parts[1], "path", true))
         } else if item.starts_with("s=") {
-            spec :: String.from_bytes(item.bytes().slice(2, item.bytes().len())) ?? ""
-            pieces :: spec.split(":").to_list()
+            spec: String.from_bytes(item.bytes().slice(2, item.bytes().len())) ?? ""
+            pieces: spec.split(":").to_list()
             if pieces.len() != 2 -> panic("invalid app search binding `{item}`")
             search_codec = pieces[0].copy()
             loop field in pieces[1].split(",") {
@@ -653,55 +653,55 @@ fn __app_route_facts_json(route: __AppRoute) -> String Never! {
             panic("invalid app route binding `{item}`")
         }
     }
-    identity :: __app_route_identity(route.path, route.identity)
-    loader_contract :: if route.loader_identity == "" -> "null" else -> "{{\"handler\":{__app_json_string(route.loader_identity)},\"data_type\":{__app_json_string(route.loader_data_type)},\"dependency\":{__app_json_string(route.identity)},\"preload\":{route.preload},\"cache_identity\":{__app_json_string(identity)}}}"
-    reason :: if route.explicit_mode -> __app_json_list([String]{"explicit render mode `{route.mode}`"}) else -> "[]"
-    override_mode :: if route.explicit_mode -> __app_json_string(route.mode) else -> "null"
+    identity: __app_route_identity(route.path, route.identity)
+    loader_contract: if route.loader_identity == "" -> "null" else -> "{{\"handler\":{__app_json_string(route.loader_identity)},\"data_type\":{__app_json_string(route.loader_data_type)},\"dependency\":{__app_json_string(route.identity)},\"preload\":{route.preload},\"cache_identity\":{__app_json_string(identity)}}}"
+    reason: if route.explicit_mode -> __app_json_list([String]{"explicit render mode `{route.mode}`"}) else -> "[]"
+    override_mode: if route.explicit_mode -> __app_json_string(route.mode) else -> "null"
     "{{\"route_identity\":{__app_json_string(identity)},\"path_params\":[{path_params.join(",")}],\"search_params\":[{search_params.join(",")}],\"search_codec\":{__app_json_string(search_codec)},\"loader_contract\":{loader_contract},\"pending_boundary\":{__app_json_or_null(route.pending_identity)},\"not_found_boundary\":null,\"error_boundary\":{__app_json_or_null(route.error_identity)},\"mode\":{__app_json_string(route.mode)},\"reason\":{reason},\"effects\":[],\"interactive\":false,\"loader\":{__app_json_or_null(route.loader_identity)},\"form\":{__app_json_or_null(route.form)},\"cache\":\"unspecified\",\"override_mode\":{override_mode},\"pending_boundary_id\":null,\"island\":null}}"
 }
 
-fn __app_facts_json(app: App) -> String Never! {
-    state :: __app_state(app)
+__app_facts_json: fn(app: App) -> String Never! {
+    state: __app_state(app)
     routes := [String]{}
     loop route in state.routes {
         &routes.push("    {{\"path\": {__app_json_string(route.path)}, \"handler\": {__app_json_string(route.identity)}, \"provenance\": \"runtime\", \"render_facts\": {__app_route_facts_json(route)}}}")
     }
     actions := [String]{}
     loop action in state.actions {
-        server :: if action.handler == None -> "null" else -> "{{\"name\":{__app_json_string(action.name)},\"endpoint\":{__app_json_string("/actions/{action.name}")},\"method\":\"POST\",\"csrf\":\"same-origin\",\"middleware\":[]}}"
+        server: if action.handler == None -> "null" else -> "{{\"name\":{__app_json_string(action.name)},\"endpoint\":{__app_json_string("/actions/{action.name}")},\"method\":\"POST\",\"csrf\":\"same-origin\",\"middleware\":[]}}"
         &actions.push("    {{\"name\": {__app_json_string(action.name)}, \"handler\": \"callable\", \"kind\": {__app_json_string(action.kind)}, \"preload\": {action.preload}, \"server_function\": {server}}}")
     }
-    route_rows :: if routes.len() == 0 -> "" else -> "{routes.join(",\n")}\n"
-    action_rows :: if actions.len() == 0 -> "" else -> "{actions.join(",\n")}\n"
+    route_rows: if routes.len() == 0 -> "" else -> "{routes.join(",\n")}\n"
+    action_rows: if actions.len() == 0 -> "" else -> "{actions.join(",\n")}\n"
     // The Jet query module keeps no process-wide registry, so the graph
     // names no queries.
     "{{\n  \"hydration\": {__app_json_string(state.hydration)},\n  \"shared_tir\": true,\n  \"routes\": [\n{route_rows}  ],\n  \"actions\": [\n{action_rows}  ],\n  \"queries\": [],\n  \"security\": {__app_debug_list(state.security)},\n  \"assets\": {__app_debug_list(state.assets)},\n  \"split\": {__app_debug_list(state.split)},\n  \"cache\": {__app_debug_list(state.cache)},\n  \"a11y\": {__app_debug_list(state.a11y)},\n  \"adapters\": {__app_debug_list(state.adapters)}\n}}"
 }
 
 
-struct WebEvent {
+WebEvent: struct {
     path: String
     title: String
     payload: String
 }
 
-struct Context {
+Context: struct {
     path: String
     method: String
     session: String
 }
 
-struct Mount {
+Mount: struct {
     path: String
     page: String
 }
 
-struct Auth {
+Auth: struct {
     kind: String
     client_id: String
 }
 
-struct Session {
+Session: struct {
     id: String
     user_id: String
 }
@@ -709,7 +709,7 @@ struct Session {
 // A live binding: one source function applied to one argument list. The
 // compiler builds it from `live(source, args...)` or
 // `subscribe(source, args...)`; `state` reads it.
-struct Live<T, E> {
+Live: struct<T, E> {
     id: Int
     run: fn() -> T E!
 }
@@ -718,7 +718,7 @@ struct Live<T, E> {
 // argument list. `value` is the last result, `ok:` or `err:` then its JSON,
 // and empty before the first run; `every_ns` is the poll interval (0: none)
 // and `ran_ns` the monotonic time of the last run.
-struct LiveRecord {
+LiveRecord: struct {
     id: Int
     source: String
     key: String
@@ -728,7 +728,7 @@ struct LiveRecord {
     ran_ns: Int
 }
 
-struct LiveRegistry {
+LiveRegistry: struct {
     next_id: Int
     invalidations: Int
     changes: Int
@@ -746,13 +746,13 @@ struct LiveRegistry {
 // registry entries but no Rust implementation in this repository; this
 // forwarding declaration is not a Rust-to-Jet implementation or cutover.
 // Native callback admission must keep the actual backend contract.
-fn on(path: String, title: String, handler: fn(WebEvent)) Never! -[Browser]> {
+on: fn(path: String, title: String, handler: fn(WebEvent)) Never! -[Browser]> {
     core.web.on(path, title, handler)
 }
 
 // `web.openapi(mux)` checks as `__openapi_mux(mux)` below (sema
 // sema_call_http_web_openapi_mux); a router renders its route table the same way.
-fn openapi(router: HTTPRouter) -> String Never! {
+openapi: fn(router: HTTPRouter) -> String Never! {
     __openapi_mux(web_http.__router_mux(router))
 }
 
@@ -761,19 +761,19 @@ fn openapi(router: HTTPRouter) -> String Never! {
 // (jet_openapi_contract_input) and checked against the route registered, then
 // the routes are canonicalized and checked as one document
 // (JetOpenApiDocument::with_openapi) and rendered (::json).
-fn __openapi_mux(routes: HTTPMux) -> String Never! {
+__openapi_mux: fn(routes: HTTPMux) -> String Never! {
     __openapi_mux_document(routes) ?? core.web.__contract_stop(err.message)
 }
 
 // An OpenAPI contract or document problem: `web.openapi` stops with it.
 #Error
-struct __OpenAPIFault { message: String }
-impl __OpenAPIFault.Display { fn display(self) -> String { self.message.copy() } }
-impl __OpenAPIFault.Debug { fn debug(^self) -> String { self.message } }
+__OpenAPIFault: struct { message: String }
+impl __OpenAPIFault.Display { display: fn(self) -> String { self.message.copy() } }
+impl __OpenAPIFault.Debug { debug: fn(^self) -> String { self.message } }
 
-fn __openapi_fault(message: String) -> __OpenAPIFault Never! { __OpenAPIFault{message: message} }
+__openapi_fault: fn(message: String) -> __OpenAPIFault Never! { __OpenAPIFault{message: message} }
 
-struct __OpenAPIParameter {
+__OpenAPIParameter: struct {
     // Index into __openapi_locations(): path, query, header, cookie.
     location: Int
     name: String
@@ -784,14 +784,14 @@ struct __OpenAPIParameter {
     catch_all: Bool
 }
 
-struct __OpenAPIBody {
+__OpenAPIBody: struct {
     required: Bool
     content_type: String
     schema: String
     schema_errors: [String]
 }
 
-struct __OpenAPIResponse {
+__OpenAPIResponse: struct {
     status: Int
     description: String
     schema: String?
@@ -799,12 +799,12 @@ struct __OpenAPIResponse {
     content_type: String?
 }
 
-struct __OpenAPISecurity {
+__OpenAPISecurity: struct {
     scheme: String
     scopes: [String]
 }
 
-struct __OpenAPIPattern {
+__OpenAPIPattern: struct {
     path: String
     // The parsed segments, kind and name: equal keys are equal patterns.
     key: String
@@ -812,7 +812,7 @@ struct __OpenAPIPattern {
     catch_alls: [String]
 }
 
-struct __OpenAPIRoute {
+__OpenAPIRoute: struct {
     // Index into __openapi_methods(), JetOpenApiHttpMethod order.
     method: Int
     path: String
@@ -826,11 +826,11 @@ struct __OpenAPIRoute {
     security: [__OpenAPISecurity]
 }
 
-fn __openapi_methods() -> [String] Never! { [String]{"get", "put", "post", "delete", "options", "head", "patch", "trace"} }
+__openapi_methods: fn() -> [String] Never! { [String]{"get", "put", "post", "delete", "options", "head", "patch", "trace"} }
 
-fn __openapi_locations() -> [String] Never! { [String]{"path", "query", "header", "cookie"} }
+__openapi_locations: fn() -> [String] Never! { [String]{"path", "query", "header", "cookie"} }
 
-fn __openapi_index(values: [String], value: String) -> Int? {
+__openapi_index: fn(values: [String], value: String) -> Int? {
     loop index in 0..<values.len() {
         if values[index] == value -> return Val(index)
     }
@@ -838,22 +838,22 @@ fn __openapi_index(values: [String], value: String) -> Int? {
 }
 
 // A method name in any ASCII case.
-fn __openapi_method(value: String) -> Int? {
+__openapi_method: fn(value: String) -> Int? {
     lower := [U8]{}
     loop byte in value.bytes() {
-        n :: Int.from_u8(byte)
+        n: Int.from_u8(byte)
         &lower.push(if n >= 65 && n <= 90 -> U8{n + 32} else -> byte)
     }
-    text :: String.from_bytes(lower) ?? return None
+    text: String.from_bytes(lower) ?? return None
     __openapi_index(__openapi_methods(), text)
 }
 
-fn __openapi_problem(path: String, reason: String) -> String Never! {
+__openapi_problem: fn(path: String, reason: String) -> String Never! {
     if path == "" -> return reason.copy()
     "{path}: {reason}"
 }
 
-fn __openapi_mux_document(mux: HTTPMux) -> String __OpenAPIFault! {
+__openapi_mux_document: fn(mux: HTTPMux) -> String __OpenAPIFault! {
     routes := [__OpenAPIRoute]{}
     loop route in http_server.__mux_routes(mux) {
         &routes.push(__openapi_route_input(route.contract, route.method, route.pattern) ?? return Err(err))
@@ -861,8 +861,8 @@ fn __openapi_mux_document(mux: HTTPMux) -> String __OpenAPIFault! {
     __openapi_document(routes, "Jet HTTP Router", "1")
 }
 
-fn __openapi_pattern(pattern: String) -> __OpenAPIPattern __OpenAPIFault! {
-    parsed :: http_server.__route_parse(pattern)
+__openapi_pattern: fn(pattern: String) -> __OpenAPIPattern __OpenAPIFault! {
+    parsed: http_server.__route_parse(pattern)
     if parsed.problem != "" -> return Err(__openapi_fault("E2805: invalid HTTP route `{pattern}`: {parsed.problem}"))
     key := ""
     names := [String]{}
@@ -884,42 +884,42 @@ fn __openapi_pattern(pattern: String) -> __OpenAPIPattern __OpenAPIFault! {
     Ok(__OpenAPIPattern{path: http_server.__route_openapi_path(parsed.segments), key: key, names: names, catch_alls: catch_alls})
 }
 
-fn __openapi_object(value: Dyn) -> [(key: String, value: Dyn)] __OpenAPIFault! {
+__openapi_object: fn(value: Dyn) -> [(key: String, value: Dyn)] __OpenAPIFault! {
     if value == {
         .Object(members) -> return Ok(members)
         else -> return Err(__openapi_fault("OpenAPI route contract must be an object"))
     }
 }
 
-fn __openapi_is_object(value: Dyn) -> Bool Never! {
+__openapi_is_object: fn(value: Dyn) -> Bool Never! {
     if value == {
         .Object(_) -> true
         else -> false
     }
 }
 
-fn __openapi_member(fields: [(key: String, value: Dyn)], name: String) -> Dyn? {
+__openapi_member: fn(fields: [(key: String, value: Dyn)], name: String) -> Dyn? {
     loop pair in fields {
         if pair.key == name -> return Val(pair.value)
     }
     None
 }
 
-fn __openapi_field(fields: [(key: String, value: Dyn)], name: String) -> Dyn __OpenAPIFault! {
-    value :: __openapi_member(fields, name) ?? return Err(__openapi_fault("OpenAPI route contract is missing `{name}`"))
+__openapi_field: fn(fields: [(key: String, value: Dyn)], name: String) -> Dyn __OpenAPIFault! {
+    value: __openapi_member(fields, name) ?? return Err(__openapi_fault("OpenAPI route contract is missing `{name}`"))
     Ok(value)
 }
 
-fn __openapi_text(fields: [(key: String, value: Dyn)], name: String) -> String __OpenAPIFault! {
-    value :: __openapi_field(fields, name) ?? return Err(err)
+__openapi_text: fn(fields: [(key: String, value: Dyn)], name: String) -> String __OpenAPIFault! {
+    value: __openapi_field(fields, name) ?? return Err(err)
     if value == {
         .Text(text) -> return Ok(text)
         else -> return Err(__openapi_fault("OpenAPI route contract field `{name}` must be text"))
     }
 }
 
-fn __openapi_optional_text(fields: [(key: String, value: Dyn)], name: String) -> String? __OpenAPIFault! {
-    value :: __openapi_field(fields, name) ?? return Err(err)
+__openapi_optional_text: fn(fields: [(key: String, value: Dyn)], name: String) -> String? __OpenAPIFault! {
+    value: __openapi_field(fields, name) ?? return Err(err)
     if value == {
         .Null -> return Ok(String?{None})
         .Text(text) -> return Ok(Val(text))
@@ -927,28 +927,28 @@ fn __openapi_optional_text(fields: [(key: String, value: Dyn)], name: String) ->
     }
 }
 
-fn __openapi_bool(fields: [(key: String, value: Dyn)], name: String) -> Bool __OpenAPIFault! {
-    value :: __openapi_field(fields, name) ?? return Err(err)
+__openapi_bool: fn(fields: [(key: String, value: Dyn)], name: String) -> Bool __OpenAPIFault! {
+    value: __openapi_field(fields, name) ?? return Err(err)
     if value == {
         .Bool(flag) -> return Ok(flag)
         else -> return Err(__openapi_fault("OpenAPI route contract field `{name}` must be boolean"))
     }
 }
 
-fn __openapi_array(fields: [(key: String, value: Dyn)], name: String) -> [Dyn] __OpenAPIFault! {
-    value :: __openapi_field(fields, name) ?? return Err(err)
+__openapi_array: fn(fields: [(key: String, value: Dyn)], name: String) -> [Dyn] __OpenAPIFault! {
+    value: __openapi_field(fields, name) ?? return Err(err)
     if value == {
         .Array(items) -> return Ok(items)
         else -> return Err(__openapi_fault("OpenAPI route contract field `{name}` must be an array"))
     }
 }
 
-fn __openapi_integer(fields: [(key: String, value: Dyn)], name: String) -> Int __OpenAPIFault! {
-    value :: __openapi_field(fields, name) ?? return Err(err)
+__openapi_integer: fn(fields: [(key: String, value: Dyn)], name: String) -> Int __OpenAPIFault! {
+    value: __openapi_field(fields, name) ?? return Err(err)
     if value == {
         .Int(number) -> return Ok(number)
         .Number(text) -> {
-            number :: Int.parse(text) ?? return Err(__openapi_fault("OpenAPI route contract field `{name}` is out of range"))
+            number: Int.parse(text) ?? return Err(__openapi_fault("OpenAPI route contract field `{name}` is out of range"))
             return Ok(number)
         }
         else -> return Err(__openapi_fault("OpenAPI route contract field `{name}` must be an integer"))
@@ -958,25 +958,25 @@ fn __openapi_integer(fields: [(key: String, value: Dyn)], name: String) -> Int _
 // jet_openapi_contract_schema then render_json: the schema rendered canonically
 // (object properties by name). Definition problems (validate_definition) are
 // collected in `errors` under `path`.
-fn __openapi_schema(value: Dyn, path: String, errors: &[String]) -> String __OpenAPIFault! {
-    fields :: __openapi_object(value) ?? return Err(err)
+__openapi_schema: fn(value: Dyn, path: String, errors: &[String]) -> String __OpenAPIFault! {
+    fields: __openapi_object(value) ?? return Err(err)
     if __openapi_member(fields, "type") == .Val(kind) -> return __openapi_typed_schema(kind, fields, path, &errors)
     if __openapi_member(fields, "anyOf") == .Val(any_of) {
-        items :: if any_of == {
+        items: if any_of == {
             .Array(entries) -> entries
             else -> { return Err(__openapi_fault("OpenAPI schema `anyOf` must be an array")) }
         }
         if items.len() == 2 && __openapi_is_object(items[1]) {
             probe := [String]{}
-            second :: __openapi_schema(items[1], path, &probe) ?? return Err(err)
+            second: __openapi_schema(items[1], path, &probe) ?? return Err(err)
             if second == "{{\"type\":\"null\"}}" {
-                inner :: __openapi_schema(items[0], path, &errors) ?? return Err(err)
+                inner: __openapi_schema(items[0], path, &errors) ?? return Err(err)
                 return Ok("{{\"anyOf\":[{inner},{{\"type\":\"null\"}}]}}")
             }
         }
     }
     if __openapi_member(fields, "oneOf") == .Val(one_of) {
-        items :: if one_of == {
+        items: if one_of == {
             .Array(entries) -> entries
             else -> { return Err(__openapi_fault("OpenAPI schema `oneOf` must be an array")) }
         }
@@ -990,8 +990,8 @@ fn __openapi_schema(value: Dyn, path: String, errors: &[String]) -> String __Ope
     Ok("{{}}")
 }
 
-fn __openapi_typed_schema(kind: Dyn, fields: [(key: String, value: Dyn)], path: String, errors: &[String]) -> String __OpenAPIFault! {
-    name :: if kind == {
+__openapi_typed_schema: fn(kind: Dyn, fields: [(key: String, value: Dyn)], path: String, errors: &[String]) -> String __OpenAPIFault! {
+    name: if kind == {
         .Text(text) -> text
         else -> { return Err(__openapi_fault("OpenAPI schema `type` must be text")) }
     }
@@ -1001,19 +1001,19 @@ fn __openapi_typed_schema(kind: Dyn, fields: [(key: String, value: Dyn)], path: 
     if name == "number" -> return Ok("{{\"type\":\"number\",\"format\":\"double\"}}")
     if name == "string" -> return Ok("{{\"type\":\"string\"}}")
     if name == "array" {
-        items :: __openapi_field(fields, "items") ?? return Err(err)
-        item :: __openapi_schema(items, path, &errors) ?? return Err(err)
+        items: __openapi_field(fields, "items") ?? return Err(err)
+        item: __openapi_schema(items, path, &errors) ?? return Err(err)
         return Ok("{{\"type\":\"array\",\"items\":{item}}}")
     }
     if name != "object" -> return Err(__openapi_fault("unsupported OpenAPI schema type `{name}`"))
-    declared :: __openapi_field(fields, "properties") ?? return Err(err)
+    declared: __openapi_field(fields, "properties") ?? return Err(err)
     properties := if declared == {
         .Object(members) -> members
         else -> { return Err(__openapi_fault("OpenAPI object schema `properties` must be an object")) }
     }
     required := [String]{}
     if __openapi_member(fields, "required") == .Val(listed) {
-        entries :: if listed == {
+        entries: if listed == {
             .Array(items) -> items
             else -> { return Err(__openapi_fault("OpenAPI schema `required` must be an array")) }
         }
@@ -1024,8 +1024,8 @@ fn __openapi_typed_schema(kind: Dyn, fields: [(key: String, value: Dyn)], path: 
             }
         }
     }
-    additional :: __openapi_field(fields, "additionalProperties") ?? return Err(err)
-    open :: if additional == {
+    additional: __openapi_field(fields, "additionalProperties") ?? return Err(err)
+    open: if additional == {
         .Bool(flag) -> flag
         else -> { return Err(__openapi_fault("OpenAPI object schema `additionalProperties` must be boolean")) }
     }
@@ -1033,7 +1033,7 @@ fn __openapi_typed_schema(kind: Dyn, fields: [(key: String, value: Dyn)], path: 
     rendered := [String]{}
     required_names := [String]{}
     loop property in properties {
-        schema :: __openapi_schema(property.value, "{path}.{property.key}", &errors) ?? return Err(err)
+        schema: __openapi_schema(property.value, "{path}.{property.key}", &errors) ?? return Err(err)
         &rendered.push("{__app_json_string(property.key)}:{schema}")
         if required.contains(property.key) -> &required_names.push(__app_json_string(property.key))
     }
@@ -1042,48 +1042,48 @@ fn __openapi_typed_schema(kind: Dyn, fields: [(key: String, value: Dyn)], path: 
     Ok("{out}}}")
 }
 
-fn __openapi_parameter(value: Dyn) -> __OpenAPIParameter __OpenAPIFault! {
-    fields :: __openapi_object(value) ?? return Err(err)
-    location_text :: __openapi_text(fields, "in") ?? return Err(err)
-    location :: __openapi_index(__openapi_locations(), location_text) ?? return Err(__openapi_fault("unsupported OpenAPI parameter location `{location_text}`"))
-    name :: __openapi_text(fields, "name") ?? return Err(err)
-    schema_value :: __openapi_field(fields, "schema") ?? return Err(err)
+__openapi_parameter: fn(value: Dyn) -> __OpenAPIParameter __OpenAPIFault! {
+    fields: __openapi_object(value) ?? return Err(err)
+    location_text: __openapi_text(fields, "in") ?? return Err(err)
+    location: __openapi_index(__openapi_locations(), location_text) ?? return Err(__openapi_fault("unsupported OpenAPI parameter location `{location_text}`"))
+    name: __openapi_text(fields, "name") ?? return Err(err)
+    schema_value: __openapi_field(fields, "schema") ?? return Err(err)
     schema_errors := [String]{}
-    schema :: __openapi_schema(schema_value, name, &schema_errors) ?? return Err(err)
-    required :: __openapi_bool(fields, "required") ?? return Err(err)
-    catch_all :: __openapi_bool(fields, "catch_all") ?? return Err(err)
+    schema: __openapi_schema(schema_value, name, &schema_errors) ?? return Err(err)
+    required: __openapi_bool(fields, "required") ?? return Err(err)
+    catch_all: __openapi_bool(fields, "catch_all") ?? return Err(err)
     Ok(__OpenAPIParameter{location: location, name: name, schema: schema, schema_errors: schema_errors, required: required, catch_all: catch_all})
 }
 
-fn __openapi_body(value: Dyn) -> __OpenAPIBody __OpenAPIFault! {
-    fields :: __openapi_object(value) ?? return Err(err)
-    required :: __openapi_bool(fields, "required") ?? return Err(err)
-    content_type :: __openapi_text(fields, "content_type") ?? return Err(err)
-    schema_value :: __openapi_field(fields, "schema") ?? return Err(err)
+__openapi_body: fn(value: Dyn) -> __OpenAPIBody __OpenAPIFault! {
+    fields: __openapi_object(value) ?? return Err(err)
+    required: __openapi_bool(fields, "required") ?? return Err(err)
+    content_type: __openapi_text(fields, "content_type") ?? return Err(err)
+    schema_value: __openapi_field(fields, "schema") ?? return Err(err)
     schema_errors := [String]{}
-    schema :: __openapi_schema(schema_value, "requestBody", &schema_errors) ?? return Err(err)
+    schema: __openapi_schema(schema_value, "requestBody", &schema_errors) ?? return Err(err)
     Ok(__OpenAPIBody{required: required, content_type: content_type, schema: schema, schema_errors: schema_errors})
 }
 
-fn __openapi_response(value: Dyn) -> __OpenAPIResponse __OpenAPIFault! {
-    fields :: __openapi_object(value) ?? return Err(err)
-    status :: __openapi_integer(fields, "status") ?? return Err(err)
+__openapi_response: fn(value: Dyn) -> __OpenAPIResponse __OpenAPIFault! {
+    fields: __openapi_object(value) ?? return Err(err)
+    status: __openapi_integer(fields, "status") ?? return Err(err)
     if status < 0 || status > 65535 -> return Err(__openapi_fault("OpenAPI response status is outside the u16 range"))
-    schema_value :: __openapi_field(fields, "schema") ?? return Err(err)
+    schema_value: __openapi_field(fields, "schema") ?? return Err(err)
     schema_errors := [String]{}
     schema := String?{None}
     if !(schema_value == Dyn.Null) -> schema = Val(__openapi_schema(schema_value, "response", &schema_errors) ?? return Err(err))
-    description :: __openapi_text(fields, "description") ?? return Err(err)
-    content_type :: if __openapi_optional_text(fields, "content_type") == {
+    description: __openapi_text(fields, "description") ?? return Err(err)
+    content_type: if __openapi_optional_text(fields, "content_type") == {
         .Ok(text) -> text
         .Err(fault) -> { return Err(fault) }
     }
     Ok(__OpenAPIResponse{status: status, description: description, schema: schema, schema_errors: schema_errors, content_type: content_type})
 }
 
-fn __openapi_security(value: Dyn) -> __OpenAPISecurity __OpenAPIFault! {
-    fields :: __openapi_object(value) ?? return Err(err)
-    listed :: __openapi_array(fields, "scopes") ?? return Err(err)
+__openapi_security: fn(value: Dyn) -> __OpenAPISecurity __OpenAPIFault! {
+    fields: __openapi_object(value) ?? return Err(err)
+    listed: __openapi_array(fields, "scopes") ?? return Err(err)
     scopes := [String]{}
     loop scope in listed {
         if scope == {
@@ -1091,56 +1091,56 @@ fn __openapi_security(value: Dyn) -> __OpenAPISecurity __OpenAPIFault! {
             else -> return Err(__openapi_fault("OpenAPI security scopes must be text"))
         }
     }
-    scheme :: __openapi_text(fields, "scheme") ?? return Err(err)
+    scheme: __openapi_text(fields, "scheme") ?? return Err(err)
     Ok(__OpenAPISecurity{scheme: scheme, scopes: scopes})
 }
 
 // jet_openapi_contract_input and JetOpenApiRouteFact::from_input, checked
 // against the method and pattern the mux registered.
-fn __openapi_route_input(contract: String, method: String, pattern: String) -> __OpenAPIRoute __OpenAPIFault! {
-    value :: live_json.parse(contract) ?? return Err(__openapi_fault("invalid checked OpenAPI route contract: {err.reason}"))
-    fields :: __openapi_object(value) ?? return Err(err)
-    method_text :: __openapi_text(fields, "method") ?? return Err(err)
-    rank :: __openapi_method(method_text) ?? return Err(__openapi_fault("unsupported OpenAPI HTTP method `{method_text}`"))
-    pattern_text :: __openapi_text(fields, "pattern") ?? return Err(err)
-    parsed :: __openapi_pattern(pattern_text) ?? return Err(err)
-    path :: __openapi_text(fields, "path") ?? return Err(err)
+__openapi_route_input: fn(contract: String, method: String, pattern: String) -> __OpenAPIRoute __OpenAPIFault! {
+    value: live_json.parse(contract) ?? return Err(__openapi_fault("invalid checked OpenAPI route contract: {err.reason}"))
+    fields: __openapi_object(value) ?? return Err(err)
+    method_text: __openapi_text(fields, "method") ?? return Err(err)
+    rank: __openapi_method(method_text) ?? return Err(__openapi_fault("unsupported OpenAPI HTTP method `{method_text}`"))
+    pattern_text: __openapi_text(fields, "pattern") ?? return Err(err)
+    parsed: __openapi_pattern(pattern_text) ?? return Err(err)
+    path: __openapi_text(fields, "path") ?? return Err(err)
     if path != parsed.path -> return Err(__openapi_fault("checked OpenAPI route path does not match its route pattern"))
-    parameter_values :: __openapi_array(fields, "parameters") ?? return Err(err)
+    parameter_values: __openapi_array(fields, "parameters") ?? return Err(err)
     parameters := [__OpenAPIParameter]{}
     loop item in parameter_values {
         &parameters.push(__openapi_parameter(item) ?? return Err(err))
     }
-    response_values :: __openapi_array(fields, "responses") ?? return Err(err)
+    response_values: __openapi_array(fields, "responses") ?? return Err(err)
     responses := [__OpenAPIResponse]{}
     loop item in response_values {
         &responses.push(__openapi_response(item) ?? return Err(err))
     }
     if responses.len() == 0 -> return Err(__openapi_fault("checked OpenAPI route contract has no responses"))
-    security_values :: __openapi_array(fields, "security") ?? return Err(err)
+    security_values: __openapi_array(fields, "security") ?? return Err(err)
     security := [__OpenAPISecurity]{}
     loop item in security_values {
         &security.push(__openapi_security(item) ?? return Err(err))
     }
-    operation_id :: __openapi_text(fields, "operation_id") ?? return Err(err)
-    body_value :: __openapi_field(fields, "request_body") ?? return Err(err)
+    operation_id: __openapi_text(fields, "operation_id") ?? return Err(err)
+    body_value: __openapi_field(fields, "request_body") ?? return Err(err)
     body := __OpenAPIBody?{None}
     if !(body_value == Dyn.Null) -> body = Val(__openapi_body(body_value) ?? return Err(err))
-    _ :: __openapi_text(fields, "provenance") ?? return Err(err)
-    summary :: if __openapi_optional_text(fields, "summary") == {
+    _: __openapi_text(fields, "provenance") ?? return Err(err)
+    summary: if __openapi_optional_text(fields, "summary") == {
         .Ok(text) -> text
         .Err(fault) -> { return Err(fault) }
     }
-    registered :: __openapi_pattern(pattern) ?? return Err(err)
+    registered: __openapi_pattern(pattern) ?? return Err(err)
     if (__openapi_method(method) ?? -1) != rank || registered.key != parsed.key -> return Err(__openapi_fault("checked OpenAPI contract does not match route `{method} {pattern}`"))
-    id :: if operation_id == "" -> __openapi_operation_id(rank, parsed.path) else -> operation_id
+    id: if operation_id == "" -> __openapi_operation_id(rank, parsed.path) else -> operation_id
     Ok(__OpenAPIRoute{method: rank, path: parsed.path, names: parsed.names, catch_alls: parsed.catch_alls, operation_id: id, summary: summary, parameters: parameters, body: body, responses: responses, security: security})
 }
 
 // jet_openapi_operation_id_for_path: FNV-1a 64 of
 // `jet-openapi-operation-v1:<method>\0<path>`.
-fn __openapi_operation_id(method: Int, path: String) -> String Never! {
-    name :: __openapi_methods()[method]
+__openapi_operation_id: fn(method: Int, path: String) -> String Never! {
+    name: __openapi_methods()[method]
     bytes := "jet-openapi-operation-v1:".bytes()
     loop byte in name.bytes() -> &bytes.push(byte)
     &bytes.push(U8{0})
@@ -1156,15 +1156,15 @@ fn __openapi_operation_id(method: Int, path: String) -> String Never! {
     "jet_{name}_{String.from_bytes(out) ?? ""}"
 }
 
-fn __openapi_compare_lists(left: [String], right: [String]) -> Ordering Never! {
-    common :: if left.len() < right.len() -> left.len() else -> right.len()
+__openapi_compare_lists: fn(left: [String], right: [String]) -> Ordering Never! {
+    common: if left.len() < right.len() -> left.len() else -> right.len()
     loop index in 0..<common {
         if left[index] != right[index] -> return left[index] <=> right[index]
     }
     left.len() <=> right.len()
 }
 
-fn __openapi_canonical(route: __OpenAPIRoute) -> __OpenAPIRoute Never! {
+__openapi_canonical: fn(route: __OpenAPIRoute) -> __OpenAPIRoute Never! {
     out := route
     &out.parameters.sort_by((left: __OpenAPIParameter, right: __OpenAPIParameter) -> {
         if left.location != right.location -> return left.location <=> right.location
@@ -1190,7 +1190,7 @@ fn __openapi_canonical(route: __OpenAPIRoute) -> __OpenAPIRoute Never! {
 
 // JetOpenApiDocument::with_openapi then ::json, with no security schemes: a mux
 // declares none.
-fn __openapi_document(inputs: [__OpenAPIRoute], title: String, version: String) -> String __OpenAPIFault! {
+__openapi_document: fn(inputs: [__OpenAPIRoute], title: String, version: String) -> String __OpenAPIFault! {
     routes := [__OpenAPIRoute]{}
     loop input in inputs -> &routes.push(__openapi_canonical(input))
     &routes.sort_by((left: __OpenAPIRoute, right: __OpenAPIRoute) -> {
@@ -1210,7 +1210,7 @@ fn __openapi_document(inputs: [__OpenAPIRoute], title: String, version: String) 
         } else {
             &operation_ids.push(route.operation_id.copy())
         }
-        key :: "{__openapi_methods()[route.method]} {route.path}"
+        key: "{__openapi_methods()[route.method]} {route.path}"
         if keys.contains(key) {
             &errors.push("duplicate OpenAPI route `{key}`")
         } else {
@@ -1220,8 +1220,8 @@ fn __openapi_document(inputs: [__OpenAPIRoute], title: String, version: String) 
         parameter_keys := [String]{}
         declared := [String]{}
         loop parameter in route.parameters {
-            location :: __openapi_locations()[parameter.location]
-            parameter_key :: "{location}:{parameter.name}"
+            location: __openapi_locations()[parameter.location]
+            parameter_key: "{location}:{parameter.name}"
             if parameter_keys.contains(parameter_key) {
                 &schema_errors.push("parameter: duplicate {location} parameter `{parameter.name}`")
             } else {
@@ -1269,7 +1269,7 @@ fn __openapi_document(inputs: [__OpenAPIRoute], title: String, version: String) 
     paths := [String]{}
     index := 0
     loop index < routes.len() {
-        path :: routes[index].path.copy()
+        path: routes[index].path.copy()
         methods := [String]{}
         loop index < routes.len() && routes[index].path == path {
             &methods.push("{__app_json_string(__openapi_methods()[routes[index].method])}:{__openapi_route_json(routes[index])}")
@@ -1281,13 +1281,13 @@ fn __openapi_document(inputs: [__OpenAPIRoute], title: String, version: String) 
 }
 
 // jet_openapi_route_json and jet_openapi_parameter_json.
-fn __openapi_route_json(route: __OpenAPIRoute) -> String Never! {
+__openapi_route_json: fn(route: __OpenAPIRoute) -> String Never! {
     out := "{{\"operationId\":{__app_json_string(route.operation_id)}"
     if route.summary == .Val(summary) -> out = "{out},\"summary\":{__app_json_string(summary)}"
     if route.parameters.len() > 0 {
         rendered := [String]{}
         loop parameter in route.parameters {
-            required :: parameter.required || parameter.location == 0
+            required: parameter.required || parameter.location == 0
             &rendered.push("{{\"name\":{__app_json_string(parameter.name)},\"in\":{__app_json_string(__openapi_locations()[parameter.location])},\"required\":{required},\"schema\":{parameter.schema}}}")
         }
         out = "{out},\"parameters\":[{rendered.join(",")}]"
@@ -1314,24 +1314,24 @@ fn __openapi_route_json(route: __OpenAPIRoute) -> String Never! {
     "{out}}}"
 }
 
-fn value(key: String) -[Browser]> String Never! { core.web.value(key) }
+value: fn(key: String) -[Browser]> String Never! { core.web.value(key) }
 
-fn storage() -> String Never! { "local" }
+storage: fn() -> String Never! { "local" }
 
-fn auth(kind: String) -> Auth Never! { Auth{kind: kind, client_id: ""} }
+auth: fn(kind: String) -> Auth Never! { Auth{kind: kind, client_id: ""} }
 
-fn auth_oauth(auth: Auth, client_id: String) -> Auth Never! {
+auth_oauth: fn(auth: Auth, client_id: String) -> Auth Never! {
     Auth{kind: "oauth", client_id: client_id}
 }
 
-fn auth_routes(auth: Auth) -> [String] Never! {
+auth_routes: fn(auth: Auth) -> [String] Never! {
     if {
         auth.kind == "oauth" -> return [String]{"/auth/login", "/auth/callback", "/auth/logout"}
         else -> [String]{"/login", "/logout"}
     }
 }
 
-fn auth_show(auth: Auth) -> String Never! { "{auth.kind}:{auth.client_id}" }
+auth_show: fn(auth: Auth) -> String Never! { "{auth.kind}:{auth.client_id}" }
 
 // Live bindings. `app` and `core.web` share this one registry. It lives in a
 // process-wide runtime byte cell; every update reads the cell, edits the
@@ -1344,12 +1344,12 @@ fn auth_show(auth: Auth) -> String Never! { "{auth.kind}:{auth.client_id}" }
 // The binding's current state. The source re-runs when the binding has no
 // result yet, was invalidated, or its poll interval has passed; the stored
 // result changes only when the re-run's encoding differs.
-fn state<T: [Encode, Decode], E: [Encode, Decode]>(binding: Live<T, E>) -> Loadable<T, E> Never! {
-    now :: core.time.__clock_mono_ns()
+state: fn<T: [Encode, Decode], E: [Encode, Decode]>(binding: Live<T, E>) -> Loadable<T, E> Never! {
+    now: core.time.__clock_mono_ns()
     if live_current(binding.id, now) == .Val(text) {
         if live_value_state<T, E>(text) == .Val(current) -> return current
     }
-    value :: binding.run() ?? {
+    value: binding.run() ?? {
         if live_json.to_string<E>(err) == .Ok(encoded) -> live_store(binding.id, "err:{encoded}", now)
         return Loadable.Failed(err)
     }
@@ -1359,13 +1359,13 @@ fn state<T: [Encode, Decode], E: [Encode, Decode]>(binding: Live<T, E>) -> Loada
 
 // `changes` counts stored results that differed from the one before;
 // `ws_pushes` counts the invalidations published to the WebSocket live hub.
-fn live_stats() -> String Never! {
-    registry :: live_decode(live_cell_load()) ?? return "LiveStats(error=live registry unavailable)"
+live_stats: fn() -> String Never! {
+    registry: live_decode(live_cell_load()) ?? return "LiveStats(error=live registry unavailable)"
     "LiveStats(queries={live_query_count(registry)}, limit={LIVE_MAX_QUERIES}, evictions={registry.evictions}, invalidations={registry.invalidations}, changes={registry.changes}, ws_pushes={registry.ws_pushes})"
 }
 
 // The live bindings of `registry`; app.sync's session records are not queries.
-fn live_query_count(registry: LiveRegistry) -> Int {
+live_query_count: fn(registry: LiveRegistry) -> Int {
     count := 0
     loop record in registry.records {
         if record.source != LIVE_SYNC_SOURCE -> count += 1
@@ -1374,12 +1374,12 @@ fn live_query_count(registry: LiveRegistry) -> Int {
 }
 
 // `live(source, args...)`: `args` are the encoded arguments.
-fn __live_bind<T: [Encode, Decode], E: [Encode, Decode]>(source: String, args: [String], run: ^fn() -> T E!) -> Live<T, E> Never! {
+__live_bind: fn<T: [Encode, Decode], E: [Encode, Decode]>(source: String, args: [String], run: ^fn() -> T E!) -> Live<T, E> Never! {
     Live<T, E>{id: live_register(source, live_key(args), 0), run: run}
 }
 
 // `subscribe(source, args..., every:)`: a binding polled every `every`.
-fn __live_poll<T: [Encode, Decode], E: [Encode, Decode]>(source: String, args: [String], every: Duration?, run: ^fn() -> T E!) -> Live<T, E> Never! {
+__live_poll: fn<T: [Encode, Decode], E: [Encode, Decode]>(source: String, args: [String], every: Duration?, run: ^fn() -> T E!) -> Live<T, E> Never! {
     every_ns := 0
     if every == .Val(interval) && interval.ns > 0 -> every_ns = interval.ns
     Live<T, E>{id: live_register(source, live_key(args), every_ns), run: run}
@@ -1387,50 +1387,50 @@ fn __live_poll<T: [Encode, Decode], E: [Encode, Decode]>(source: String, args: [
 
 // `push(source, args..., value:)` stores `value` as that binding's result,
 // registering the binding when nothing has read it yet.
-fn __live_push<T: Encode>(source: String, args: [String], value: T) Never! {
-    encoded :: live_json.to_string<T>(value) ?? return
-    key :: live_key(args)
-    id :: live_register(source, key, 0)
+__live_push: fn<T: Encode>(source: String, args: [String], value: T) Never! {
+    encoded: live_json.to_string<T>(value) ?? return
+    key: live_key(args)
+    id: live_register(source, key, 0)
     live_store(id, "ok:{encoded}", -1)
 }
 
 // `invalidate(source, args...)`: exactly that argument list re-runs.
-fn __live_invalidate(source: String, args: [String]) Never! { live_invalidate(source, Val(live_key(args))) }
+__live_invalidate: fn(source: String, args: [String]) Never! { live_invalidate(source, Val(live_key(args))) }
 
 // `invalidate(source)`: every binding of `source` re-runs.
-fn __live_invalidate_all(source: String) Never! { live_invalidate(source, None) }
+__live_invalidate_all: fn(source: String) Never! { live_invalidate(source, None) }
 
 // One argument's part of a binding's identity.
-fn __live_arg<A: Encode>(value: A) -> String Never! { live_json.to_string<A>(value) ?? "_" }
+__live_arg: fn<A: Encode>(value: A) -> String Never! { live_json.to_string<A>(value) ?? "_" }
 
-fn sync(key: String, data: String) -> String Never! {
+sync: fn(key: String, data: String) -> String Never! {
     "{key}:{data}"
 }
 
-LIVE_MAX_QUERIES :: 1024
-LIVE_MAX_PAYLOAD :: 4194304
+LIVE_MAX_QUERIES: 1024
+LIVE_MAX_PAYLOAD: 4194304
 // The registry source of app.sync's session records (Core/App/App.jet): a
 // session keeps its generation and document as the record's value.
-LIVE_SYNC_SOURCE :: "app.sync"
+LIVE_SYNC_SOURCE: "app.sync"
 
-fn live_cell_load() -> [U8] { core.web.__live_load() }
+live_cell_load: fn() -> [U8] { core.web.__live_load() }
 
-fn live_cell_replace(expected: [U8], replacement: ^[U8]) -> Bool { core.web.__live_replace(expected, ^replacement) }
+live_cell_replace: fn(expected: [U8], replacement: ^[U8]) -> Bool { core.web.__live_replace(expected, ^replacement) }
 
-fn live_key(args: [String]) -> String { "[{args.join(",")}]" }
+live_key: fn(args: [String]) -> String { "[{args.join(",")}]" }
 
 // The id of the binding named by `source` and `key`, registered when absent;
 // a full registry evicts its oldest binding. Two registrations of one
 // binding poll at the shorter interval. 0 when the registry is unavailable.
-fn live_register(source: String, key: String, every_ns: Int) -> Int {
+live_register: fn(source: String, key: String, every_ns: Int) -> Int {
     loop {
-        seen :: live_cell_load()
+        seen: live_cell_load()
         registry := live_decode(seen) ?? return 0
         found := 0
         loop index in 0..<registry.records.len() {
             if registry.records[index].source != source || registry.records[index].key != key -> next
             found = registry.records[index].id
-            current :: registry.records[index].every_ns
+            current: registry.records[index].every_ns
             if every_ns <= 0 || (current > 0 && current <= every_ns) -> return found
             registry.records[index].every_ns = every_ns
         }
@@ -1459,33 +1459,33 @@ fn live_register(source: String, key: String, every_ns: Int) -> Int {
 
 // The stored result of binding `id` when it is current at `now`; None when
 // the binding must re-run.
-fn live_current(id: Int, now: Int) -> String? {
-    registry :: live_decode(live_cell_load()) ?? return None
-    index :: live_index(registry, id) ?? return None
-    record :: registry.records[index]
+live_current: fn(id: Int, now: Int) -> String? {
+    registry: live_decode(live_cell_load()) ?? return None
+    index: live_index(registry, id) ?? return None
+    record: registry.records[index]
     if record.value == "" || record.dirty -> return None
     if record.every_ns > 0 && now - record.ran_ns >= record.every_ns -> return None
     Val(record.value.copy()) // copy: the registry snapshot is dropped here
 }
 
-fn live_value_state<T: [Encode, Decode], E: [Encode, Decode]>(text: String) -> Loadable<T, E>? {
+live_value_state: fn<T: [Encode, Decode], E: [Encode, Decode]>(text: String) -> Loadable<T, E>? {
     if text.starts_with("ok:") {
-        value :: live_json.decode<T>(text.slice(3, text.len())) ?? return None
+        value: live_json.decode<T>(text.slice(3, text.len())) ?? return None
         return Val(Loadable.Loaded(value))
     }
     if !text.starts_with("err:") -> return None
-    reason :: live_json.decode<E>(text.slice(4, text.len())) ?? return None
+    reason: live_json.decode<E>(text.slice(4, text.len())) ?? return None
     Val(Loadable.Failed(reason))
 }
 
 // Stores `value` as binding `id`'s result, clean; a value that differs from
 // the stored one counts as a change. `now` < 0 keeps the last run time.
-fn live_store(id: Int, value: String, now: Int) {
+live_store: fn(id: Int, value: String, now: Int) {
     if value.len() > LIVE_MAX_PAYLOAD -> return
     loop {
-        seen :: live_cell_load()
+        seen: live_cell_load()
         registry := live_decode(seen) ?? return
-        index :: live_index(registry, id) ?? return
+        index: live_index(registry, id) ?? return
         if registry.records[index].value != value {
             registry.records[index].value = value.copy() // copy: a lost race retries with the same value
             registry.changes += 1
@@ -1500,9 +1500,9 @@ fn live_store(id: Int, value: String, now: Int) {
 // then publishes the invalidation to the WebSocket live hub (D-LIVEQUERY1):
 // topic `live:<source>`, a JSON event every joined server connection receives
 // and a connection that joins later gets replayed as the topic's latest.
-fn live_invalidate(source: String, key: String?) {
+live_invalidate: fn(source: String, key: String?) {
     loop {
-        seen :: live_cell_load()
+        seen: live_cell_load()
         registry := live_decode(seen) ?? return
         hit := 0
         loop index in 0..<registry.records.len() {
@@ -1515,14 +1515,14 @@ fn live_invalidate(source: String, key: String?) {
         registry.invalidations += hit
         registry.ws_pushes += 1
         if live_cell_replace(seen, live_encode(registry)) {
-            key_json :: if key == .Val(only) -> __app_json_string(only) else -> "null"
+            key_json: if key == .Val(only) -> __app_json_string(only) else -> "null"
             core.web.__live_publish("live:{source}", "{{\"live\":\"invalidate\",\"source\":{__app_json_string(source)},\"key\":{key_json},\"invalidations\":{registry.invalidations}}}")
             return
         }
     }
 }
 
-fn live_index(registry: LiveRegistry, id: Int) -> Int? {
+live_index: fn(registry: LiveRegistry, id: Int) -> Int? {
     loop index in 0..<registry.records.len() {
         if registry.records[index].id == id -> return Val(index)
     }
@@ -1532,7 +1532,7 @@ fn live_index(registry: LiveRegistry, id: Int) -> Int? {
 // The cell holds the registry as length-prefixed fields: next id,
 // invalidations, changes, evictions, WebSocket pushes, then seven fields per
 // binding.
-fn live_encode(registry: LiveRegistry) -> [U8] {
+live_encode: fn(registry: LiveRegistry) -> [U8] {
     out := [U8]{}
     live_put(&out, "{registry.next_id}")
     live_put(&out, "{registry.invalidations}")
@@ -1551,27 +1551,27 @@ fn live_encode(registry: LiveRegistry) -> [U8] {
     out
 }
 
-fn live_put(out: &[U8], text: String) {
+live_put: fn(out: &[U8], text: String) {
     loop byte in "{text.len()}:".bytes() -> &out.push(byte)
     loop byte in text.bytes() -> &out.push(byte)
 }
 
 // An empty cell is the empty registry; None when the bytes are malformed.
-fn live_decode(raw: [U8]) -> LiveRegistry? {
+live_decode: fn(raw: [U8]) -> LiveRegistry? {
     if raw.len() == 0 -> return Val(LiveRegistry{next_id: 0, invalidations: 0, changes: 0, evictions: 0, ws_pushes: 0, records: [LiveRecord]{}})
-    fields :: live_fields(raw) ?? return None
+    fields: live_fields(raw) ?? return None
     if fields.len() < 5 || (fields.len() - 5) % 7 != 0 -> return None
-    next_id :: Int.parse(fields[0]) ?? return None
-    invalidations :: Int.parse(fields[1]) ?? return None
-    changes :: Int.parse(fields[2]) ?? return None
-    evictions :: Int.parse(fields[3]) ?? return None
-    ws_pushes :: Int.parse(fields[4]) ?? return None
+    next_id: Int.parse(fields[0]) ?? return None
+    invalidations: Int.parse(fields[1]) ?? return None
+    changes: Int.parse(fields[2]) ?? return None
+    evictions: Int.parse(fields[3]) ?? return None
+    ws_pushes: Int.parse(fields[4]) ?? return None
     records := [LiveRecord]{}
     at := 5
     loop at < fields.len() {
-        id :: Int.parse(fields[at]) ?? return None
-        every_ns :: Int.parse(fields[at + 5]) ?? return None
-        ran_ns :: Int.parse(fields[at + 6]) ?? return None
+        id: Int.parse(fields[at]) ?? return None
+        every_ns: Int.parse(fields[at + 5]) ?? return None
+        ran_ns: Int.parse(fields[at + 6]) ?? return None
         &records.push(LiveRecord{id: id, source: fields[at + 1], key: fields[at + 2], value: fields[at + 3], dirty: fields[at + 4] == "1", every_ns: every_ns, ran_ns: ran_ns})
         at += 7
     }
@@ -1579,14 +1579,14 @@ fn live_decode(raw: [U8]) -> LiveRegistry? {
 }
 
 // The length-prefixed fields (`<decimal byte length>:<bytes>`) of `raw`.
-fn live_fields(raw: [U8]) -> [String]? {
+live_fields: fn(raw: [U8]) -> [String]? {
     fields := [String]{}
     at := 0
     loop at < raw.len() {
         length := 0
         loop {
             if at >= raw.len() -> return None
-            n :: Int.from_u8(raw[at])
+            n: Int.from_u8(raw[at])
             at += 1
             if n == 58 -> break
             if n < 48 || n > 57 -> return None

@@ -15,34 +15,34 @@
 // acquisition in CcToolchainAcquisition.jet and the pack in
 // CcToolchainPack.jet.
 
-CC_TOOLCHAIN_PACKAGE :: "cc-toolchain"
-CC_TOOLCHAIN_SOURCE :: "jetpack"
-CC_TOOLCHAIN_RECIPE_ID :: "jet-cc-toolchain-v1"
-CC_TOOLCHAIN_PRODUCER :: "jet-cc"
-CC_TOOLCHAIN_SCHEMA :: "1"
-CC_TOOLCHAIN_FIXTURE_MANIFEST :: "jet-cc-toolchain"
-CC_TOOLCHAIN_FIXTURE_LAYOUT :: "fixture-v1"
-CC_TOOLCHAIN_VIRTUAL_BASE :: "/jet/toolchains"
-CC_TOOLCHAIN_MAX_MANIFEST_BYTES :: 1048576
-CC_TOOLCHAIN_MAX_BUNDLE_NODES :: 250000
-CC_TOOLCHAIN_MAX_BUNDLE_BYTES :: 8589934592
-CC_TOOLCHAIN_MAX_TARGET_BYTES :: 128
+CC_TOOLCHAIN_PACKAGE: "cc-toolchain"
+CC_TOOLCHAIN_SOURCE: "jetpack"
+CC_TOOLCHAIN_RECIPE_ID: "jet-cc-toolchain-v1"
+CC_TOOLCHAIN_PRODUCER: "jet-cc"
+CC_TOOLCHAIN_SCHEMA: "1"
+CC_TOOLCHAIN_FIXTURE_MANIFEST: "jet-cc-toolchain"
+CC_TOOLCHAIN_FIXTURE_LAYOUT: "fixture-v1"
+CC_TOOLCHAIN_VIRTUAL_BASE: "/jet/toolchains"
+CC_TOOLCHAIN_MAX_MANIFEST_BYTES: 1048576
+CC_TOOLCHAIN_MAX_BUNDLE_NODES: 250000
+CC_TOOLCHAIN_MAX_BUNDLE_BYTES: 8589934592
+CC_TOOLCHAIN_MAX_TARGET_BYTES: 128
 
 // How a descriptor's bytes are laid out in Hangar: one fixture bundle
 // directory, or a target entry holding the sysroot whose tools live in the
 // C toolchain pack object.
-enum CcToolchainLayout {
+CcToolchainLayout: enum {
     Fixture
     Pack
 
-    fn label(self) -> String Never! {
+    label: fn(self) -> String Never! {
         if self == {
             .Fixture -> CC_TOOLCHAIN_FIXTURE_LAYOUT
             .Pack -> CC_TOOLCHAIN_PACK_LAYOUT
         }
     }
 
-    fn parse(text: String) -> CcToolchainLayout? Never! {
+    parse: fn(text: String) -> CcToolchainLayout? Never! {
         if text == {
             CC_TOOLCHAIN_FIXTURE_LAYOUT -> Val(CcToolchainLayout.Fixture)
             CC_TOOLCHAIN_PACK_LAYOUT -> Val(CcToolchainLayout.Pack)
@@ -53,11 +53,11 @@ enum CcToolchainLayout {
 
 // The mounted role roots of a pack-layout toolchain under its virtual root:
 // the pack (compiler, linker and their resources) and the target sysroot.
-enum CcToolchainRole {
+CcToolchainRole: enum {
     Compiler
     Sysroot
 
-    fn label(self) -> String Never! {
+    label: fn(self) -> String Never! {
         if self == {
             .Compiler -> "compiler"
             .Sysroot -> "sysroot"
@@ -70,13 +70,13 @@ enum CcToolchainRole {
 // `UncoveredTarget` names a target no pack covers; `PackHashMismatch` is a
 // pack copy (origin, expected, actual) that was refused and deleted.
 #Error
-enum CcToolchainError {
+CcToolchainError: enum {
     MissingDescriptor(String)
     Invalid(String)
     UncoveredTarget(String)
     PackHashMismatch(origin: String, expected: String, actual: String)
 
-    fn message(self) -> String Never! {
+    message: fn(self) -> String Never! {
         if self == {
             .MissingDescriptor(target) -> "Hangar has no verified C/C++ toolchain descriptor for target `{target}`"
             .Invalid(text) -> text
@@ -86,7 +86,7 @@ enum CcToolchainError {
     }
 
     // Whether this is the miss for `target` (and not a corrupt record).
-    fn is_missing_descriptor(self, target: String) -> Bool Never! {
+    is_missing_descriptor: fn(self, target: String) -> Bool Never! {
         if self == {
             .MissingDescriptor(missing) -> missing == target
             else -> false
@@ -94,14 +94,14 @@ enum CcToolchainError {
     }
 }
 
-struct CcMount {
+CcMount: struct {
     store_path: String
     digest: String
     source: String
     destination: String
 }
 
-struct CcToolchainDescriptor {
+CcToolchainDescriptor: struct {
     entry_id: String
     root: String
     host: String
@@ -127,62 +127,62 @@ struct CcToolchainDescriptor {
     envelope: Envelope
     producer: ProducerRecord
 
-    fn virtual_root(self) -> String Never! {
+    virtual_root: fn(self) -> String Never! {
         files.join(CC_TOOLCHAIN_VIRTUAL_BASE, self.bundle_sha256)
     }
 
-    fn virtual_bin(self) -> String Never! {
+    virtual_bin: fn(self) -> String Never! {
         if self.is_pack_layout() -> return files.join(self.role_virtual_root(CcToolchainRole.Compiler), "bin")
         files.join(self.virtual_root(), "bin")
     }
 
-    fn sysroot_path(self) -> String Never! {
+    sysroot_path: fn(self) -> String Never! {
         if self.is_pack_layout() -> return self.role_virtual_root(CcToolchainRole.Sysroot)
         files.join(self.virtual_root(), self.sysroot)
     }
 
     // The pack clang's resource directory (builtin headers, compiler-rt and
     // crtbegin/crtend); the binary's built-in default names its build tree.
-    fn resource_dir_path(self) -> String Never! {
+    resource_dir_path: fn(self) -> String Never! {
         files.join(self.role_virtual_root(CcToolchainRole.Compiler), CC_PACK_RESOURCE_DIR)
     }
 
-    fn identity(self) -> String Never! {
+    identity: fn(self) -> String Never! {
         "{CC_TOOLCHAIN_RECIPE_ID}\n{self.source_fingerprint()}"
     }
 
-    fn cache_identity(self, ctx: ProviderCtx) -[FS, Env]> CacheIdentity Never! {
+    cache_identity: fn(self, ctx: ProviderCtx) -[FS, Env]> CacheIdentity Never! {
         provider_plain_cache_identity(self.source_fingerprint(), CC_TOOLCHAIN_RECIPE_ID, ctx)
     }
 
-    fn is_pack_layout(self) -> Bool Never! {
+    is_pack_layout: fn(self) -> Bool Never! {
         self.layout == CcToolchainLayout.Pack
     }
 
-    fn role_virtual_root(self, role: CcToolchainRole) -> String Never! {
+    role_virtual_root: fn(self, role: CcToolchainRole) -> String Never! {
         files.join(self.virtual_root(), role.label())
     }
 
-    fn compiler_virtual_path(self) -> String Never! {
+    compiler_virtual_path: fn(self) -> String Never! {
         if self.is_pack_layout() -> return files.join(self.role_virtual_root(CcToolchainRole.Compiler), self.compiler)
         files.join(self.virtual_root(), self.compiler)
     }
 
-    fn cxx_virtual_path(self) -> String Never! {
+    cxx_virtual_path: fn(self) -> String Never! {
         if self.is_pack_layout() -> return files.join(self.role_virtual_root(CcToolchainRole.Compiler), self.cxx)
         files.join(self.virtual_root(), self.cxx)
     }
 
-    fn linker_virtual_path(self) -> String Never! {
+    linker_virtual_path: fn(self) -> String Never! {
         if self.is_pack_layout() -> return files.join(self.role_virtual_root(CcToolchainRole.Compiler), self.linker)
         files.join(self.virtual_root(), self.linker)
     }
 
     // The cache source identity: every field that names the toolchain bytes.
-    fn source_fingerprint(self) -> String Never! {
+    source_fingerprint: fn(self) -> String Never! {
         mounts := [String]{}
         loop mount in self.mounts -> &mounts.push("{mount.store_path}={mount.digest}")
-        lines :: [String]{
+        lines: [String]{
             CC_TOOLCHAIN_RECIPE_ID,
             "layout={self.layout.label()}",
             "source={self.producer.immutable_source}",
@@ -208,7 +208,7 @@ struct CcToolchainDescriptor {
 
 // A fixture bundle manifest (`jet-cc-toolchain[-<target>].json`), already
 // shape-checked by `parse`.
-struct CcBundleManifest {
+CcBundleManifest: struct {
     host: String
     target: String
     version: String
@@ -227,14 +227,14 @@ struct CcBundleManifest {
 
     // Parse and validate manifest text read from `file_name` for the
     // normalized `target`. `host` is this machine's target triple.
-    fn parse(text: String, file_name: String, target: String, host: String) -[Env]> CcBundleManifest CcToolchainError! {
-        value :: json.parse(text) ?? {
+    parse: fn(text: String, file_name: String, target: String, host: String) -[Env]> CcBundleManifest CcToolchainError! {
+        value: json.parse(text) ?? {
             return Err(CcToolchainError.Invalid("parse C toolchain manifest: {err.reason}"))
         }
-        object :: provider_cc_manifest_object(value) ?? return Err(CcToolchainError.Invalid("C toolchain manifest: expected a Dyn object"))
-        schema :: provider_cc_manifest_number(object, "schema")
+        object: provider_cc_manifest_object(value) ?? return Err(CcToolchainError.Invalid("C toolchain manifest: expected a Dyn object"))
+        schema: provider_cc_manifest_number(object, "schema")
         if schema != 1 -> return Err(CcToolchainError.Invalid("unsupported C toolchain manifest schema"))
-        manifest :: CcBundleManifest{
+        manifest: CcBundleManifest{
             host: provider_cc_manifest_string(object, "host"),
             target: provider_cc_normalize_target(provider_cc_manifest_string(object, "target")),
             version: provider_cc_manifest_string(object, "version"),
@@ -261,9 +261,9 @@ struct CcBundleManifest {
         Ok(manifest)
     }
 
-    fn validate_shape(self) CcToolchainError! {
+    validate_shape: fn(self) CcToolchainError! {
         provider_cc_validate_relative_path(self.bundle)
-        relative_paths :: [String]{self.compiler, self.cxx, self.linker, self.sysroot}
+        relative_paths: [String]{self.compiler, self.cxx, self.linker, self.sysroot}
         loop path in relative_paths {
             provider_cc_validate_relative_path(path)
         }
@@ -277,7 +277,7 @@ struct CcBundleManifest {
     }
 
     // The fixture-layout producer facts.
-    fn facts(self) -> [String: String] Never! {
+    facts: fn(self) -> [String: String] Never! {
         [String: String]{
             "cc.schema": CC_TOOLCHAIN_SCHEMA,
             "cc.producer": CC_TOOLCHAIN_PRODUCER,
@@ -306,12 +306,12 @@ struct CcBundleManifest {
     }
 
     // The fixture descriptor rooted at the published bundle directory.
-    fn descriptor(self, root: String, entry_id: String) -> CcToolchainDescriptor Never! {
-        plan :: ProviderPlanFacts.from_facts([String: String]{
+    descriptor: fn(self, root: String, entry_id: String) -> CcToolchainDescriptor Never! {
+        plan: ProviderPlanFacts.from_facts([String: String]{
             "action.kind": "cc-toolchain-provision",
             "action.recipe": CC_TOOLCHAIN_RECIPE_ID
         }) ?? panic("static C toolchain plan facts are valid")
-        producer :: ProducerRecord.new(CC_TOOLCHAIN_PRODUCER, self.source, self.bundle_sha256, plan, CC_TOOLCHAIN_RECIPE_ID, "policy=content-addressed\nplatform=host", self.facts()) ?? panic("validated C toolchain manifest facts are valid")
+        producer: ProducerRecord.new(CC_TOOLCHAIN_PRODUCER, self.source, self.bundle_sha256, plan, CC_TOOLCHAIN_RECIPE_ID, "policy=content-addressed\nplatform=host", self.facts()) ?? panic("validated C toolchain manifest facts are valid")
         CcToolchainDescriptor{
             entry_id: entry_id,
             root: root,
@@ -342,14 +342,14 @@ struct CcBundleManifest {
 }
 
 // The single mount of a fixture bundle: its root at the virtual root.
-fn provider_cc_fixture_mount(root: String, bundle_sha256: String) -> CcMount Never! {
+provider_cc_fixture_mount: fn(root: String, bundle_sha256: String) -> CcMount Never! {
     CcMount{store_path: "", digest: bundle_sha256, source: root, destination: files.join(CC_TOOLCHAIN_VIRTUAL_BASE, bundle_sha256)}
 }
 
 // Whether a package ref names the one C/C++ toolchain package. It stays in
 // the existing native provider rather than adding a second ProviderKind.
-fn provider_cc_toolchain_is_reference(spec: RefSpec) -> Bool Never! {
-    package :: spec.package.split_once("#")?.before ?? spec.package
+provider_cc_toolchain_is_reference: fn(spec: RefSpec) -> Bool Never! {
+    package: spec.package.split_once("#")?.before ?? spec.package
     if package != CC_TOOLCHAIN_PACKAGE -> return false
     if spec.source == {
         .Jetpack -> true
@@ -360,8 +360,8 @@ fn provider_cc_toolchain_is_reference(spec: RefSpec) -> Bool Never! {
 
 // The normalized target a ref selects: the host without a selector, or the
 // explicit `#target=<target-triple>`.
-fn provider_cc_toolchain_requested_target(spec: RefSpec) -[Env]> String CcToolchainError! {
-    selector :: spec.package.split_once("#")?.after ?? ""
+provider_cc_toolchain_requested_target: fn(spec: RefSpec) -[Env]> String CcToolchainError! {
+    selector: spec.package.split_once("#")?.after ?? ""
     if selector == "" -> return provider_cc_normalize_target(provider_cc_toolchain_host_target_triple())
     if !selector.starts_with("target=") || selector == "target=" {
         return Err(CcToolchainError.Invalid("C toolchain selectors must use `#target=<target-triple>`"))
@@ -369,12 +369,12 @@ fn provider_cc_toolchain_requested_target(spec: RefSpec) -[Env]> String CcToolch
     provider_cc_normalize_target(selector.removeprefix("target="))
 }
 
-fn provider_cc_toolchain_host_target_triple() -[Env]> String Never! {
+provider_cc_toolchain_host_target_triple: fn() -[Env]> String Never! {
     provider_cc_target_triple_for(PlatformKey.host())
 }
 
 // The target triple Rust spells for an `arch`/`os` host key.
-fn provider_cc_target_triple_for(host: PlatformKey) -> String Never! {
+provider_cc_target_triple_for: fn(host: PlatformKey) -> String Never! {
     if host.os == {
         OS_LINUX -> "{host.arch}-unknown-linux-gnu"
         OS_MACOS -> "{host.arch}-apple-darwin"
@@ -386,8 +386,8 @@ fn provider_cc_target_triple_for(host: PlatformKey) -> String Never! {
 // `native`/`host` select the host and a covered target's short spelling
 // (`aarch64-linux-musl`) selects its canonical triple; any other target must
 // be a short token of ASCII letters, digits, `.`, `_`, and `-`.
-fn provider_cc_normalize_target(target: String) -[Env]> String CcToolchainError! {
-    normalized :: if target == {
+provider_cc_normalize_target: fn(target: String) -[Env]> String CcToolchainError! {
+    normalized: if target == {
         "native" | "host" -> provider_cc_toolchain_host_target_triple()
         else -> target
     }
@@ -396,32 +396,32 @@ fn provider_cc_normalize_target(target: String) -[Env]> String CcToolchainError!
     Ok(normalized)
 }
 
-fn provider_cc_is_target_token(target: String) -> Bool Never! {
-    raw :: target.bytes()
+provider_cc_is_target_token: fn(target: String) -> Bool Never! {
+    raw: target.bytes()
     if raw.len() == 0 || raw.len() > CC_TOOLCHAIN_MAX_TARGET_BYTES -> return false
     loop byte in raw {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         if !provider_cc_is_ascii_alnum(code) && code != 46 && code != 95 && code != 45 -> return false
     }
     true
 }
 
-fn provider_cc_is_ascii_alnum(code: Int) -> Bool Never! {
+provider_cc_is_ascii_alnum: fn(code: Int) -> Bool Never! {
     (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
 }
 
 // Whether a Hangar producer record was written by this provider, in either
 // layout.
-fn provider_cc_is_cc_record(producer: ProducerRecord) -> Bool Never! {
-    layout :: producer.facts.get("cc.layout") ?? ""
+provider_cc_is_cc_record: fn(producer: ProducerRecord) -> Bool Never! {
+    layout: producer.facts.get("cc.layout") ?? ""
     producer.provider == CC_TOOLCHAIN_PRODUCER && (layout == CC_TOOLCHAIN_FIXTURE_LAYOUT || layout == CC_TOOLCHAIN_PACK_LAYOUT)
 }
 
 // `Path::components` over a validated relative path: its normal parts, with
 // empty and `.` segments dropped.
-fn provider_cc_path_parts(path: String) -> [String] Never! {
+provider_cc_path_parts: fn(path: String) -> [String] Never! {
     parts := [String]{}
-    segments :: path.split("/").to_list()
+    segments: path.split("/").to_list()
     loop part in segments {
         if part == "" || part == "." -> next
         &parts.push(part)
@@ -429,20 +429,20 @@ fn provider_cc_path_parts(path: String) -> [String] Never! {
     parts
 }
 
-fn provider_cc_validate_relative_path(path: String) CcToolchainError! {
+provider_cc_validate_relative_path: fn(path: String) CcToolchainError! {
     if provider_cc_is_relative_path(path) -> return
     Err(CcToolchainError.Invalid("`{path}` is not a normalized relative path"))
 }
 
 // Non-empty, not absolute, no leading `.` component, no `..` component, and
 // no NUL byte.
-fn provider_cc_is_relative_path(path: String) -> Bool Never! {
+provider_cc_is_relative_path: fn(path: String) -> Bool Never! {
     if path == "" || path.starts_with("/") -> return false
-    raw :: path.bytes()
+    raw: path.bytes()
     loop byte in raw {
         if Int.from_u8(byte) == 0 -> return false
     }
-    segments :: path.split("/").to_list()
+    segments: path.split("/").to_list()
     if segments[0] == "." -> return false
     loop segment in segments {
         if segment == ".." -> return false
@@ -452,47 +452,47 @@ fn provider_cc_is_relative_path(path: String) -> Bool Never! {
 
 // Version and ABI text: non-blank, with no control byte or path separator,
 // so it can never escape a publication path.
-fn provider_cc_validate_text_field(value: String, label: String) CcToolchainError! {
+provider_cc_validate_text_field: fn(value: String, label: String) CcToolchainError! {
     if value.trim() == "" -> return Err(CcToolchainError.Invalid("{label}: value is empty"))
-    raw :: value.bytes()
+    raw: value.bytes()
     loop byte in raw {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         if code < 32 || code == 127 || code == 47 || code == 92 {
             return Err(CcToolchainError.Invalid("{label}: value contains a control character or path separator"))
         }
     }
 }
 
-fn provider_cc_validate_sha256(value: String, label: String) CcToolchainError! {
-    raw :: value.bytes()
+provider_cc_validate_sha256: fn(value: String, label: String) CcToolchainError! {
+    raw: value.bytes()
     if raw.len() != 64 -> return Err(CcToolchainError.Invalid("{label} is not a lowercase SHA-256 digest"))
     loop byte in raw {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         if !((code >= 48 && code <= 57) || (code >= 97 && code <= 102)) {
             return Err(CcToolchainError.Invalid("{label} is not a lowercase SHA-256 digest"))
         }
     }
 }
 
-fn provider_cc_validate_tree_digest(value: String, label: String) CcToolchainError! {
+provider_cc_validate_tree_digest: fn(value: String, label: String) CcToolchainError! {
     if !value.starts_with("sha256-") -> return Err(CcToolchainError.Invalid("{label} is not a Hangar SHA-256 digest"))
     provider_cc_validate_sha256(value.removeprefix("sha256-"), label)
 }
 
-fn provider_cc_manifest_string(object: [String: Dyn], field: String) -> String CcToolchainError! {
-    value :: object.get(field) ?? return Err(CcToolchainError.Invalid("C toolchain manifest misses `{field}`"))
+provider_cc_manifest_string: fn(object: [String: Dyn], field: String) -> String CcToolchainError! {
+    value: object.get(field) ?? return Err(CcToolchainError.Invalid("C toolchain manifest misses `{field}`"))
     if value == {
         .Text(text) -> Ok(text)
         else -> Err(CcToolchainError.Invalid("C toolchain manifest field `{field}`: expected a Dyn string"))
     }
 }
 
-fn provider_cc_manifest_number(object: [String: Dyn], field: String) -> Int CcToolchainError! {
-    number :: foundation_json_integer(object.get(field) ?? Dyn.Null) ?? return Err(CcToolchainError.Invalid("C toolchain manifest field `{field}` is not a number"))
+provider_cc_manifest_number: fn(object: [String: Dyn], field: String) -> Int CcToolchainError! {
+    number: foundation_json_integer(object.get(field) ?? Dyn.Null) ?? return Err(CcToolchainError.Invalid("C toolchain manifest field `{field}` is not a number"))
     Ok(number)
 }
 
-fn provider_cc_manifest_object(value: Dyn) -> [String: Dyn]? Never! {
+provider_cc_manifest_object: fn(value: Dyn) -> [String: Dyn]? Never! {
     if value == {
         // The object's ordered pairs, indexed by name.
         .Object(fields) -> {

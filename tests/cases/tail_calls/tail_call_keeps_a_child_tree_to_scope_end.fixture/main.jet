@@ -3,23 +3,23 @@
 // returns and the call is not a tail jump. The callee sees the tree write
 // `later` (it waits up to 30 s, for a loaded machine); dropping the Child
 // before the call would kill the tree first, and the callee print "killed".
-package {
+package: {
     name: "tail_call_child"
     authority: { allow: [Exec, FS, IO] }
 }
 
 use {
-    fs :: core.files
-    process :: core.process
-    time :: core.time
+    fs: core.files
+    process: core.process
+    time: core.time
 }
 
-fn hold() {
-    child :: process.cmd(["/bin/sh", "-c", "sleep 0.1; : > later; sleep 60"]).spawn() ?? panic("cannot spawn the tree")
+hold: fn() {
+    child: process.cmd(["/bin/sh", "-c", "sleep 0.1; : > later; sleep 60"]).spawn() ?? panic("cannot spawn the tree")
     wait_later(3000)
 }
 
-fn wait_later(left: Int) {
+wait_later: fn(left: Int) {
     if fs.exists("later") {
         print("kept")
     } else if left == 0 {
@@ -30,7 +30,7 @@ fn wait_later(left: Int) {
     }
 }
 
-fn run() {
+run: fn() {
     if fs.exists("later") -> fs.remove_all("later") ?? panic("cannot clean later")
     hold()
 }

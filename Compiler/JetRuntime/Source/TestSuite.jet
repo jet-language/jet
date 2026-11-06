@@ -6,18 +6,18 @@
 // first and inline pair output second. TLS uses the one dynamic-key mechanism,
 // with detach owning its state free.
 test_suite_key := I64{0}
-// 1 once `fn test` called `t.run()`: a later `t.<setting>(…)` plan line is
+// 1 once `test: fn` called `t.run()`: a later `t.<setting>(…)` plan line is
 // marked, and `jet test` refuses it (Registry/TestSettings.jet).
 test_suite_ran := I64{0}
 
-fn rt_test_suite_state_drop_address() -> I64 {
+rt_test_suite_state_drop_address: fn() -> I64 {
     loop { jet_rt_unreachable(I64{0}, I64{0}) }
 }
 
 // runtime-init: 3 when test_suite_key
-#Export(c) fn jet_rt_test_suite_init() {
+#Export(c) jet_rt_test_suite_init: fn() {
     if (test_suite_key != I64{0}) -> return
-    closure :: jet_rt_alloc(I64{24}, I64{8})
+    closure: jet_rt_alloc(I64{24}, I64{8})
     trap_store(closure, I64{1})
     trap_store(wrapping(closure + I64{8}), rt_test_suite_state_drop_address())
     trap_store(wrapping(closure + I64{16}), I64{0})
@@ -26,9 +26,9 @@ fn rt_test_suite_state_drop_address() -> I64 {
     }
 }
 
-fn test_suite_state() -> I64 { jet_rt_tls_get(test_suite_key) }
+test_suite_state: fn() -> I64 { jet_rt_tls_get(test_suite_key) }
 
-fn test_suite_state_ensure() -> I64 {
+test_suite_state_ensure: fn() -> I64 {
     state := test_suite_state()
     if (state == I64{0}) {
         state = jet_rt_alloc(I64{24}, I64{8})
@@ -44,17 +44,17 @@ fn test_suite_state_ensure() -> I64 {
 // seed's static fn pointer: old snapshots remain valid even after reinstall.
 // Match the generated non-atomic clone (Closures.jet:432-447); do not introduce
 // an atomic/non-atomic mix or duplicate its unref/release logic (:407-427).
-#Export(c) fn jet_test_suite_install(runner: I64) {
+#Export(c) jet_test_suite_install: fn(runner: I64) {
     trap_store(runner, trap_word(runner) + I64{1})
-    state :: test_suite_state_ensure()
+    state: test_suite_state_ensure()
     trap_store(state, I64{0})
     trap_store(wrapping(state + I64{8}), I64{0})
     trap_store(wrapping(state + I64{16}), runner)
 }
 
-#Export(c) fn jet_test_suite_new() -> I64 {
-    suite :: jet_rt_alloc(I64{24}, I64{8})
-    state :: test_suite_state()
+#Export(c) jet_test_suite_new: fn() -> I64 {
+    suite: jet_rt_alloc(I64{24}, I64{8})
+    state: test_suite_state()
     if (state == I64{0}) {
         thread_zero(suite, I64{24})
     } else {
@@ -65,27 +65,27 @@ fn test_suite_state_ensure() -> I64 {
     suite
 }
 
-#Export(c) fn jet_rt_handle_clone_jet_test_suite(suite: I64) -> I64 {
-    cloned :: jet_rt_alloc(I64{24}, I64{8})
+#Export(c) jet_rt_handle_clone_jet_test_suite: fn(suite: I64) -> I64 {
+    cloned: jet_rt_alloc(I64{24}, I64{8})
     trap_store(cloned, jet_rt_int_clone(trap_word(suite)))
     trap_store(wrapping(cloned + I64{8}), jet_rt_int_clone(trap_word(wrapping(suite + I64{8}))))
     trap_store(wrapping(cloned + I64{16}), trap_word(wrapping(suite + I64{16})))
     cloned
 }
 
-#Export(c) fn jet_rt_handle_drop_jet_test_suite(suite: I64) {
+#Export(c) jet_rt_handle_drop_jet_test_suite: fn(suite: I64) {
     jet_rt_int_drop(trap_word(suite))
     jet_rt_int_drop(trap_word(wrapping(suite + I64{8})))
     jet_rt_free(suite, I64{24}, I64{8})
 }
 
-#Export(c) fn jet_test_suite_run(suite: I64) -> I64 {
-    #Unsafe("`fn test` calls `t.run()` on the harness's main thread, before any test task exists") {
+#Export(c) jet_test_suite_run: fn(suite: I64) -> I64 {
+    #Unsafe("`test: fn` calls `t.run()` on the harness's main thread, before any test task exists") {
         test_suite_ran = I64{1}
     }
-    runner :: trap_word(wrapping(suite + I64{16}))
+    runner: trap_word(wrapping(suite + I64{16}))
     if (runner == I64{0}) { return jet_rt_int_clone(trap_word(wrapping(suite + I64{8}))) }
-    state :: test_suite_state_ensure()
+    state: test_suite_state_ensure()
     // The two inline result words go directly to TLS, never to the receiver.
     // Tuple result stores happen on return, after the runner's user code, so
     // no extra heap workspace or Rust/C pair-return convention is needed.
@@ -95,8 +95,8 @@ fn test_suite_state_ensure() -> I64 {
     jet_int_owned_from_i64(trap_word(wrapping(state + I64{8})))
 }
 
-#Export(c) fn jet_test_suite_status() -> I64 {
-    state :: test_suite_state()
+#Export(c) jet_test_suite_status: fn() -> I64 {
+    state: test_suite_state()
     if (state == I64{0}) -> I64{0} else -> trap_word(wrapping(state + I64{8}))
 }
 
@@ -106,21 +106,21 @@ fn test_suite_state_ensure() -> I64 {
 // TEST_SETTING_AFTER_RUN mark `!`; any other run ignores the call. A plan
 // the parent cannot read whole is a protocol failure (exit 103), as for the
 // harness's own records (TestContracts.jet).
-#Export(c) fn jet_test_setting(_suite: I64, key: I64, line: I64) {
-    path :: rt_env_get(key)
+#Export(c) jet_test_setting: fn(_suite: I64, key: I64, line: I64) {
+    path: rt_env_get(key)
     if (path == I64{0}) -> return
-    error :: jet_rt_alloc(I64{8}, I64{8})
+    error: jet_rt_alloc(I64{8}, I64{8})
     trap_store(error, I64{0})
     appended := I64{1}
     if (test_suite_ran != I64{0}) {
-        mark :: jet_rt_alloc(I64{8}, I64{8})
+        mark: jet_rt_alloc(I64{8}, I64{8})
         trap_store(mark, I64{0x21})
         appended = jet_files_append_bytes_os(path, mark, I64{1}, error)
         jet_rt_free(mark, I64{8}, I64{8})
     }
     if (appended != I64{0}) -> appended = jet_files_append_bytes_os(path, rt_text_data(line), rt_text_len(line), error)
     if (appended == I64{0}) {
-        message :: jet_rt_handle_show_io_error(trap_word(error))
+        message: jet_rt_handle_show_io_error(trap_word(error))
         jet_rt_test_eprint(message)
         jet_std_process_exit_owned(I64{103})
     }
@@ -128,15 +128,15 @@ fn test_suite_state_ensure() -> I64 {
     jet_rt_string_drop(path)
 }
 
-#Export(c) fn jet_rt_test_suite_state_drop(_closure: I64, state: I64) -> I64 {
+#Export(c) jet_rt_test_suite_state_drop: fn(_closure: I64, state: I64) -> I64 {
     // Thread clears the cell before this callback; only its state is owned.
     // The runner's intentional process-lifetime pin is never released here.
     jet_rt_free(state, I64{24}, I64{8})
     I64{0}
 }
 
-#Export(c) fn jet_rt_handle_show_jet_test_suite(suite: I64) -> I64 {
-    text :: jet_rt_string_builder_new()
+#Export(c) jet_rt_handle_show_jet_test_suite: fn(suite: I64) -> I64 {
+    text: jet_rt_string_builder_new()
     rt_text_push_word(text, I64{0x69207b2074736554}, I64{8})
     rt_text_push_word(text, I64{0x6e6f697461726574}, I64{8})
     rt_text_push_word(text, I64{0x203a}, I64{2})

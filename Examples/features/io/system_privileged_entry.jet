@@ -1,12 +1,12 @@
 // D-SYS-PRIV1: audited identity/session controls for a disposable user namespace only.
-package {
+package: {
     name: "system_privileged_entry"
     authority: { allow: [Env, Exec] }
 }
 
-use sys :: core.sys
+use sys: core.sys
 
-fn run() {
+run: fn() {
     #Unsafe("run only inside a disposable user namespace with a dedicated test identity") {
         sys.setuid(0) ?? return
         sys.setgid(0) ?? return

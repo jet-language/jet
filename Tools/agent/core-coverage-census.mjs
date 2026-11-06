@@ -115,14 +115,17 @@ export function publicFunctions(path, source) {
   const module = moduleName(path);
   const tokens = lex(source);
   const localTypes = new Set(tokens.flatMap((token, index) =>
-    ["struct", "enum", "trait"].includes(token.value) ? [tokens[index + 1]?.value] : []));
+    ["struct", "enum", "trait"].includes(token.value) && tokens[index - 1]?.value === ":" ? [tokens[index - 2]?.value] : []));
   const rows = [];
   const seen = new Set();
   const scopes = [];
   let pendingOwner = null;
+  let parens = 0;
   for (let i = 0; i < tokens.length; i++) {
     const value = tokens[i].value;
-    if (["struct", "enum", "trait"].includes(value)) pendingOwner = { name: tokens[i + 1]?.value, kind: value };
+    if (value === "(") parens++;
+    if (value === ")") parens--;
+    if (["struct", "enum", "trait"].includes(value) && tokens[i - 1]?.value === ":") pendingOwner = { name: tokens[i - 2]?.value, kind: value };
     // `impl Type.Trait(Arg) {` names its type; a bare `impl Trait {` inside a
     // type's body belongs to that type.
     if (value === "impl") {
@@ -131,27 +134,33 @@ export function publicFunctions(path, source) {
       pendingOwner = { name: nested ? enclosing.name : tokens[i + 1]?.value, kind: value };
     }
     if (value === "module") {
-      const qualified = tokens[i - 1]?.value === ")" && tokens[i - 4]?.value === "priv";
-      pendingOwner = tokens[i - 1]?.value === "priv" || qualified ? PRIVATE_SCOPE : { name: null, kind: "module" };
+      // `priv name: module {` or `priv(scope) name: module {`; the name may be dotted.
+      let start = tokens[i - 1]?.value === ":" ? i - 2 : i;
+      while (tokens[start - 1]?.value === "." && identifier.test(tokens[start - 2]?.value ?? "")) start -= 2;
+      const qualified = tokens[start - 1]?.value === ")" && tokens[start - 4]?.value === "priv";
+      pendingOwner = tokens[start - 1]?.value === "priv" || qualified ? PRIVATE_SCOPE : { name: null, kind: "module" };
     }
     if (value === "{") { scopes.push(pendingOwner); pendingOwner = null; }
     if (value === "}") scopes.pop();
-    if (value !== "fn" || !identifier.test(tokens[i + 1]?.value ?? "") || !["(", "<"].includes(tokens[i + 2]?.value)) continue;
+    // `name: fn(…) {`: a dotted `Owner.name: fn` head, a parameter typed
+    // `fn(…)` and a field or binding typed `fn(…)` (no body) are not declarations here.
+    if (value !== "fn" || tokens[i - 1]?.value !== ":" || !identifier.test(tokens[i - 2]?.value ?? "") || tokens[i - 3]?.value === "." || parens !== 0 || !["(", "<"].includes(tokens[i + 1]?.value)) continue;
     const scope = scopes.at(-1);
     if (scopes.includes(PRIVATE_SCOPE) || (scopes.length > 0 && (!scope || scope.kind === "trait"))) continue;
-    const name = tokens[i + 1].value;
+    const name = tokens[i - 2].value;
     const owner = scope?.name;
-    let at = afterGenerics(tokens, i + 2);
+    let at = afterGenerics(tokens, i + 1);
     let depth = 0;
     do {
       if (tokens[at]?.value === "(") depth++;
       if (tokens[at]?.value === ")") depth--;
       at++;
     } while (at < tokens.length && depth > 0);
+    if (!declaresBody(source, tokens[at - 1].offset)) continue;
     // The ratchet's signature: generics and parameters as written, comments
     // and layout removed, then the declared result type.
     const close = tokens[at - 1];
-    const parameters = source.slice(tokens[i + 2].offset, close.offset + close.value.length)
+    const parameters = source.slice(tokens[i + 1].offset, close.offset + close.value.length)
       .replace(/\/\/[^\n]*/g, "").replace(/\s+/g, " ").replace(/([(<]) /g, "$1").replace(/,? ([)>])/g, "$1");
     let result = null;
     if (tokens[at]?.value === "->") result = resultType(source, tokens, at + 1, module, localTypes);
@@ -192,6 +201,13 @@ function afterGenerics(tokens, at) {
   return at;
 }
 
+// Whether the head line closing at `close` opens a body (`{`) or binds an
+// extern member (`= "path"`), which a field or binding typed `fn(…)` does not.
+function declaresBody(source, close) {
+  const end = source.indexOf("\n", close);
+  return /\{|=\s*"/.test(source.slice(close, end < 0 ? source.length : end).replace(/\/\/.*$/, ""));
+}
+
 export function callSites(source, functions, context = null) {
   const byId = new Map(functions.map((row) => [row.id, row]));
   const types = new Set(functions.filter((row) => row.name.includes(".")).map((row) => row.id.slice(0, row.id.lastIndexOf("."))));
@@ -211,13 +227,13 @@ export function callSites(source, functions, context = null) {
     if (value === "{") { scopes.push({ aliases: new Map(scope.aliases), receivers: new Map(scope.receivers) }); continue; }
     if (value === "}") { if (scopes.length > 1) scopes.pop(); continue; }
     if (value === "use") {
-      // `use row` or `use { row row … }`; a row is `path`, `path.[a, b]` or `alias :: path`.
+      // `use row` or `use { row row … }`; a row is `path`, `path.[a, b]` or `alias: path`.
       let at = i + 1;
       const block = tokens[at]?.value === "{";
       if (block) at++;
       do {
         let alias = null;
-        if (identifier.test(tokens[at]?.value ?? "") && tokens[at + 1]?.value === "::") { alias = tokens[at].value; at += 2; }
+        if (identifier.test(tokens[at]?.value ?? "") && tokens[at + 1]?.value === ":") { alias = tokens[at].value; at += 2; }
         const imported = chain(tokens, at);
         if (!imported) { at++; continue; }
         const path = expand(imported.parts, scope.aliases);
@@ -239,7 +255,7 @@ export function callSites(source, functions, context = null) {
     }
     // Explicit parameter/local types and constructor/function initializers make
     // receiver calls attributable without guessing by the method's spelling.
-    if (identifier.test(value) && [":", "::", ":="].includes(tokens[i + 1]?.value)) {
+    if (identifier.test(value) && [":", ":="].includes(tokens[i + 1]?.value)) {
       let at = i + 2;
       while (["&", "^", "~", "comptime"].includes(tokens[at]?.value)) at++;
       const rhs = chain(tokens, at);
@@ -314,7 +330,7 @@ export function embeddedPrograms(source) {
     else {
       try { text = JSON.parse(literal); } catch { continue; }
     }
-    if (/\bfn\s+\w+|\buse\s+(?:\{\s*)?(?:\w+\s*::\s*)?(?:core|app)\b/.test(text)) programs.push(text);
+    if (/\b\w+:\s*fn\b|\buse\s+(?:\{\s*)?(?:\w+\s*:\s*)?(?:core|app)\b/.test(text)) programs.push(text);
   }
   return programs;
 }

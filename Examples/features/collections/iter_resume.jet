@@ -1,34 +1,34 @@
 // D-ITER-RESUME1=A: `next` pulls one item from the same source and leaves the
 // exact remainder. Built-in and user iterators share one exclusive receiver.
-struct Crate {
+Crate: struct {
     data: [Int]
 }
 
-struct BagIter {
+BagIter: struct {
     bag: Crate
     idx: Int
 }
 
 impl BagIter.Iterator {
-    type Item = Int
+    Item: Int
 
-    fn next(&self) -> Int? {
+    next: fn(&self) -> Int? {
         if self.idx >= self.bag.data.len() -> return None
-        v :: self.bag.data[self.idx]
+        v: self.bag.data[self.idx]
         self.idx += 1
         return Val(v)
     }
 }
 
 // Stops at the first item above `limit`; everything after it stays unread.
-fn first_over(items: &Iter<Int>, limit: Int) -> Int? {
+first_over: fn(items: &Iter<Int>, limit: Int) -> Int? {
     loop {
-        item :: (&items.next()) ?? return None
+        item: (&items.next()) ?? return None
         if item > limit -> return Val(item)
     }
 }
 
-fn run() {
+run: fn() {
     items := [1, 2, 3].lazy()
     print(&items.next())
     print(&items.next())

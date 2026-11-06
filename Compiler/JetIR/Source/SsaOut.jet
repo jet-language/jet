@@ -24,7 +24,7 @@
 // and leaving SSA, values of one slot can interfere and get fresh homes;
 // the optimizer (Opt.jet ir_opt_ssa) leaves SSA only for verify and stress.
 
-struct IRSsaOutStats {
+IRSsaOutStats: struct {
     changed: Bool
     moves: Int
     fresh: Int
@@ -32,9 +32,9 @@ struct IRSsaOutStats {
 
 // The slot instruction operand `slot` reads as value `used` (-1: not a
 // read), given each value's home.
-fn ir_ssa_home(s: IRSsa, homes: [Int], used: Int, slot: Int) -> Int Never! {
+ir_ssa_home: fn(s: IRSsa, homes: [Int], used: Int, slot: Int) -> Int Never! {
     if used < 0 -> return slot
-    value :: ir_ssa_find(s, used)
+    value: ir_ssa_find(s, used)
     if s.val_kind[value] == .Undef -> return slot
     homes[value]
 }
@@ -42,14 +42,14 @@ fn ir_ssa_home(s: IRSsa, homes: [Int], used: Int, slot: Int) -> Int Never! {
 // The moves of edge `edge`: (destination home, source home) per phi of its
 // join that is read, skipping Undef arguments, Unit slots and moves within
 // one home.
-fn ir_ssa_edge_moves(m: IRModule, f: IRFunction, s: IRSsa, live: [Bool], homes: [Int], edge: Int, dsts: &[Int], srcs: &[Int]) Never! {
+ir_ssa_edge_moves: fn(m: IRModule, f: IRFunction, s: IRSsa, live: [Bool], homes: [Int], edge: Int, dsts: &[Int], srcs: &[Int]) Never! {
     &dsts.clear()
     &srcs.clear()
-    join :: s.edge_join[edge]
-    k :: ir_ssa_edge_index(s, edge)
+    join: s.edge_join[edge]
+    k: ir_ssa_edge_index(s, edge)
     loop phi_value in s.join_phis[join] {
         if s.repl[phi_value] != phi_value || !live[phi_value] -> next
-        arg :: ir_ssa_find(s, ir_ssa_phi_arg(s, s.val_at[phi_value], k))
+        arg: ir_ssa_find(s, ir_ssa_phi_arg(s, s.val_at[phi_value], k))
         if s.val_kind[arg] == .Undef -> next
         if m.types[f.slot_type[s.val_slot[phi_value]]].kind == .Unit -> next
         if homes[arg] == homes[phi_value] -> next
@@ -59,12 +59,12 @@ fn ir_ssa_edge_moves(m: IRModule, f: IRFunction, s: IRSsa, live: [Bool], homes: 
 }
 
 // Edge `edge`'s position among its join's edges.
-fn ir_ssa_edge_index(s: IRSsa, edge: Int) -> Int Never! {
+ir_ssa_edge_index: fn(s: IRSsa, edge: Int) -> Int Never! {
     s.edge_pos[edge]
 }
 
 // The code being written back.
-struct IRSsaCode {
+IRSsaCode: struct {
     op: [IROp]
     dst: [Int]
     a: [Int]
@@ -74,7 +74,7 @@ struct IRSsaCode {
     args: [Int]
 }
 
-fn ir_ssa_put(code: &IRSsaCode, op: IROp, dst: Int, a: Int, b: Int, c: Int, line: Int) Never! {
+ir_ssa_put: fn(code: &IRSsaCode, op: IROp, dst: Int, a: Int, b: Int, c: Int, line: Int) Never! {
     &code.op.push(op)
     &code.dst.push(dst)
     &code.a.push(a)
@@ -86,7 +86,7 @@ fn ir_ssa_put(code: &IRSsaCode, op: IROp, dst: Int, a: Int, b: Int, c: Int, line
 // A parallel copy as Moves: a move whose destination no pending move still
 // reads goes first; a cycle saves one destination in a temporary (one per
 // type row, `temps`) and reads it from there.
-fn ir_ssa_put_moves(f: &IRFunction, code: &IRSsaCode, temps: &[Int:Int], dsts: [Int], srcs_in: [Int], line: Int) -> Int Never! {
+ir_ssa_put_moves: fn(f: &IRFunction, code: &IRSsaCode, temps: &[Int:Int], dsts: [Int], srcs_in: [Int], line: Int) -> Int Never! {
     srcs := srcs_in.copy()
     done := [Bool]{}
     loop _ in dsts -> &done.push(false)
@@ -117,7 +117,7 @@ fn ir_ssa_put_moves(f: &IRFunction, code: &IRSsaCode, temps: &[Int:Int], dsts: [
         }
         first := 0
         loop done[first] -> first += 1
-        row :: f.slot_type[dsts[first]]
+        row: f.slot_type[dsts[first]]
         temp := temps.get(row) ?? -1
         if temp < 0 {
             temp = ir_slot(&f, row, IRSlotKind.Temp, -1, 0)
@@ -135,16 +135,16 @@ fn ir_ssa_put_moves(f: &IRFunction, code: &IRSsaCode, temps: &[Int:Int], dsts: [
 // Whether `value` is a stop point's Bool (Build.jet ir_stop_point): a
 // call with no arguments whose result the next instruction, an If with no
 // Else, tests. A user call of that shape keeps its slot as well.
-fn ir_ssa_out_poll(f: IRFunction, s: IRSsa, value: Int) -> Bool Never! {
+ir_ssa_out_poll: fn(f: IRFunction, s: IRSsa, value: Int) -> Bool Never! {
     if s.val_kind[value] != .Def -> return false
-    at :: s.val_at[value]
+    at: s.val_at[value]
     if f.op[at] != .Call || f.c[at] != 0 || f.dst[at] < 0 || at + 1 >= f.op.len() -> return false
     f.op[at + 1] == .If && f.a[at + 1] == f.dst[at] && f.b[at + 1] < 0
 }
 
-fn ir_ssa_out(m: IRModule, f: &IRFunction, s: IRSsa, stress: Bool) -> IRSsaOutStats Never! {
-    count :: f.slot_type.len()
-    values :: s.val_slot.len()
+ir_ssa_out: fn(m: IRModule, f: &IRFunction, s: IRSsa, stress: Bool) -> IRSsaOutStats Never! {
+    count: f.slot_type.len()
+    values: s.val_slot.len()
     live := ir_ssa_live(s, f)
     // The layout: each edge's moves as an item before the instruction they
     // go before; an If without an Else's false-branch moves after its
@@ -177,7 +177,7 @@ fn ir_ssa_out(m: IRModule, f: &IRFunction, s: IRSsa, stress: Bool) -> IRSsaOutSt
     if 4 * item_inst.len() + 4 >= IR_SSA_POSITION_LIMIT -> panic("ir_ssa_out: {f.key} has too many instructions")
     // Each block's first and last item. An If's false-edge moves belong to
     // none: they run in no block's straight line.
-    blocks :: s.preds.len()
+    blocks: s.preds.len()
     first := [Int]{}
     last := [Int]{}
     loop _ in 0..<blocks {
@@ -185,7 +185,7 @@ fn ir_ssa_out(m: IRModule, f: &IRFunction, s: IRSsa, stress: Bool) -> IRSsaOutSt
         &last.push(-1)
     }
     loop k in 0..<item_inst.len() {
-        at :: item_inst[k]
+        at: item_inst[k]
         block := -1
         if at >= 0 {
             block = s.block[at]
@@ -203,7 +203,7 @@ fn ir_ssa_out(m: IRModule, f: &IRFunction, s: IRSsa, stress: Bool) -> IRSsaOutSt
     def_pos := [Int]{}
     ranges := [[Int]]{}
     loop value in 0..<values {
-        kind :: s.val_kind[value]
+        kind: s.val_kind[value]
         block := -1
         pos := -1
         need := false
@@ -238,26 +238,26 @@ fn ir_ssa_out(m: IRModule, f: &IRFunction, s: IRSsa, stress: Bool) -> IRSsaOutSt
     use_block := [Int]{}
     use_pos := [Int]{}
     loop k in 0..<item_inst.len() {
-        at :: item_inst[k]
+        at: item_inst[k]
         if at >= 0 {
-            block :: s.block[at]
+            block: s.block[at]
             if block < 0 -> next
             ir_ssa_use(s, &use_head, &use_next, &use_block, &use_pos, s.use_a[at], block, 4 * k)
             ir_ssa_use(s, &use_head, &use_next, &use_block, &use_pos, s.use_b[at], block, 4 * k)
             ir_ssa_use(s, &use_head, &use_next, &use_block, &use_pos, s.use_c[at], block, 4 * k)
-            op :: f.op[at]
+            op: f.op[at]
             if op == .Call || op == .CallRuntime || op == .CallIndirect {
                 loop index in f.b[at]..<(f.b[at] + f.c[at]) -> ir_ssa_use(s, &use_head, &use_next, &use_block, &use_pos, s.use_args[index], block, 4 * k)
             }
             next
         }
-        edge :: item_edge[k]
-        index :: ir_ssa_edge_index(s, edge)
-        block :: s.edge_block[edge]
-        pos :: if s.edge_kind[edge] == .IfFalse -> 4 * last[block] else -> 4 * k
+        edge: item_edge[k]
+        index: ir_ssa_edge_index(s, edge)
+        block: s.edge_block[edge]
+        pos: if s.edge_kind[edge] == .IfFalse -> 4 * last[block] else -> 4 * k
         loop phi_value in s.join_phis[s.edge_join[edge]] {
             if !needed[phi_value] -> next
-            arg :: ir_ssa_find(s, ir_ssa_phi_arg(s, s.val_at[phi_value], index))
+            arg: ir_ssa_find(s, ir_ssa_phi_arg(s, s.val_at[phi_value], index))
             if s.val_kind[arg] == .Undef -> next
             ir_ssa_use(s, &use_head, &use_next, &use_block, &use_pos, arg, block, pos)
             &ranges[phi_value].push(4 * k + 1)
@@ -290,15 +290,15 @@ fn ir_ssa_out(m: IRModule, f: &IRFunction, s: IRSsa, stress: Bool) -> IRSsaOutSt
     loop value in 0..<values {
         &homes.push(-1)
         if !needed[value] -> next
-        slot :: s.val_slot[value]
-        own :: ir_ssa_sorted(ranges[value])
+        slot: s.val_slot[value]
+        own: ir_ssa_sorted(ranges[value])
         home := -1
         // A stop point's Bool keeps a slot of its own (its slot, else a
         // fresh one no other value shares): selection takes the If after the
         // poll as the stop edge only when nothing else reads that slot
         // (X64Select ir_x64_stop_point), and only that edge leaves with the
         // stop reported to the caller.
-        poll :: ir_ssa_out_poll(f, s, value)
+        poll: ir_ssa_out_poll(f, s, value)
         if s.val_kind[value] == .Param || ((poll || !stress) && !ir_ssa_overlap(taken[slot], own)) {
             home = slot
         } else if poll {
@@ -307,8 +307,8 @@ fn ir_ssa_out(m: IRModule, f: &IRFunction, s: IRSsa, stress: Bool) -> IRSsaOutSt
             &taken.push([Int]{})
             changed = true
         } else {
-            row :: f.slot_type[slot]
-            known :: fresh_by_row.get(row) ?? [Int]{}
+            row: f.slot_type[slot]
+            known: fresh_by_row.get(row) ?? [Int]{}
             tried := 0
             k := known.len() - 1
             loop k >= 0 && tried < 8 {
@@ -352,9 +352,9 @@ fn ir_ssa_out(m: IRModule, f: &IRFunction, s: IRSsa, stress: Bool) -> IRSsaOutSt
     pending_dsts := [Int]{}
     pending_srcs := [Int]{}
     loop k in 0..<item_inst.len() {
-        at :: item_inst[k]
+        at: item_inst[k]
         if at < 0 {
-            edge :: item_edge[k]
+            edge: item_edge[k]
             ir_ssa_edge_moves(m, f, s, live, homes, edge, &dsts, &srcs)
             if s.edge_kind[edge] == .BrIf {
                 pending_dsts = dsts.copy()
@@ -362,13 +362,13 @@ fn ir_ssa_out(m: IRModule, f: &IRFunction, s: IRSsa, stress: Bool) -> IRSsaOutSt
                 next
             }
             if dsts.len() == 0 -> next
-            line :: f.code_line[s.edge_at[edge]]
+            line: f.code_line[s.edge_at[edge]]
             if s.edge_kind[edge] == .IfFalse -> ir_ssa_put(&code, .Else, -1, -1, -1, -1, line)
             moves += ir_ssa_put_moves(&f, &code, &temps, dsts, srcs, line)
             next
         }
-        op :: f.op[at]
-        line :: f.code_line[at]
+        op: f.op[at]
+        line: f.code_line[at]
         if s.block[at] < 0 {
             // Unreachable: as it was.
             b := f.b[at]
@@ -379,7 +379,7 @@ fn ir_ssa_out(m: IRModule, f: &IRFunction, s: IRSsa, stress: Bool) -> IRSsaOutSt
             ir_ssa_put(&code, op, f.dst[at], f.a[at], b, f.c[at], line)
             next
         }
-        a :: ir_ssa_home(s, homes, s.use_a[at], f.a[at])
+        a: ir_ssa_home(s, homes, s.use_a[at], f.a[at])
         if op == .BrIf && pending_dsts.len() > 0 {
             ir_ssa_put(&code, .If, -1, a, -1, -1, line)
             moves += ir_ssa_put_moves(&f, &code, &temps, pending_dsts, pending_srcs, line)
@@ -391,9 +391,9 @@ fn ir_ssa_out(m: IRModule, f: &IRFunction, s: IRSsa, stress: Bool) -> IRSsaOutSt
         }
         &pending_dsts.clear()
         &pending_srcs.clear()
-        dst :: if s.def[at] >= 0 -> homes[s.def[at]] else -> f.dst[at]
+        dst: if s.def[at] >= 0 -> homes[s.def[at]] else -> f.dst[at]
         b := ir_ssa_home(s, homes, s.use_b[at], f.b[at])
-        c :: ir_ssa_home(s, homes, s.use_c[at], f.c[at])
+        c: ir_ssa_home(s, homes, s.use_c[at], f.c[at])
         if op == .Call || op == .CallRuntime || op == .CallIndirect {
             b = code.args.len()
             loop index in f.b[at]..<(f.b[at] + f.c[at]) -> &code.args.push(ir_ssa_home(s, homes, s.use_args[index], f.args[index]))
@@ -412,12 +412,12 @@ fn ir_ssa_out(m: IRModule, f: &IRFunction, s: IRSsa, stress: Bool) -> IRSsaOutSt
 }
 
 // Positions are below this (a range key holds two).
-IR_SSA_POSITION_LIMIT :: 1073741824
+IR_SSA_POSITION_LIMIT: 1073741824
 
 // Records that value `used` (-1: no read) is read at `pos` in `block`.
-fn ir_ssa_use(s: IRSsa, head: &[Int], next_use: &[Int], blocks: &[Int], positions: &[Int], used: Int, block: Int, pos: Int) Never! {
+ir_ssa_use: fn(s: IRSsa, head: &[Int], next_use: &[Int], blocks: &[Int], positions: &[Int], used: Int, block: Int, pos: Int) Never! {
     if used < 0 -> return
-    value :: ir_ssa_find(s, used)
+    value: ir_ssa_find(s, used)
     if s.val_kind[value] == .Undef -> return
     &next_use.push(head[value])
     &blocks.push(block)
@@ -432,7 +432,7 @@ fn ir_ssa_use(s: IRSsa, head: &[Int], next_use: &[Int], blocks: &[Int], position
 // range covers the whole block (the reading block's too, when a path from
 // the write reaches it again, as around a loop) / leaves the write's block
 // through it.
-fn ir_ssa_walk(s: IRSsa, first: [Int], last: [Int], home: Int, start: Int, value: Int, block: Int, pos: Int, entered: &[Int], left: &[Int], work: &[Int], ranges: &[Int]) Never! {
+ir_ssa_walk: fn(s: IRSsa, first: [Int], last: [Int], home: Int, start: Int, value: Int, block: Int, pos: Int, entered: &[Int], left: &[Int], work: &[Int], ranges: &[Int]) Never! {
     if block == home && start <= pos {
         &ranges.push(start)
         &ranges.push(pos)
@@ -446,7 +446,7 @@ fn ir_ssa_walk(s: IRSsa, first: [Int], last: [Int], home: Int, start: Int, value
     &work.clear()
     &work.push(block)
     loop work.len() > 0 {
-        b :: &work.pop() ?? break
+        b: &work.pop() ?? break
         loop p in s.preds[b] {
             if p == home {
                 if left[p] != value {
@@ -468,7 +468,7 @@ fn ir_ssa_walk(s: IRSsa, first: [Int], last: [Int], home: Int, start: Int, value
 }
 
 // `ranges` (start, end pairs) sorted by start, overlapping ones merged.
-fn ir_ssa_sorted(ranges: [Int]) -> [Int] Never! {
+ir_ssa_sorted: fn(ranges: [Int]) -> [Int] Never! {
     keys := [Int]{}
     k := 0
     loop k < ranges.len() {
@@ -478,9 +478,9 @@ fn ir_ssa_sorted(ranges: [Int]) -> [Int] Never! {
     &keys.sort()
     out := [Int]{}
     loop key in keys {
-        start :: key /% IR_SSA_POSITION_LIMIT - 1
-        end :: key %% IR_SSA_POSITION_LIMIT - 1
-        top :: out.len() - 1
+        start: key /% IR_SSA_POSITION_LIMIT - 1
+        end: key %% IR_SSA_POSITION_LIMIT - 1
+        top: out.len() - 1
         if top > 0 && start <= out[top] {
             if end > out[top] -> out[top] = end
             next
@@ -492,7 +492,7 @@ fn ir_ssa_sorted(ranges: [Int]) -> [Int] Never! {
 }
 
 // Whether two sorted, merged range lists share a position.
-fn ir_ssa_overlap(a: [Int], b: [Int]) -> Bool Never! {
+ir_ssa_overlap: fn(a: [Int], b: [Int]) -> Bool Never! {
     i := 0
     j := 0
     loop i < a.len() && j < b.len() {
@@ -508,16 +508,16 @@ fn ir_ssa_overlap(a: [Int], b: [Int]) -> Bool Never! {
 }
 
 // The union of two sorted, merged range lists, sorted and merged.
-fn ir_ssa_union(a: [Int], b: [Int]) -> [Int] Never! {
+ir_ssa_union: fn(a: [Int], b: [Int]) -> [Int] Never! {
     out := [Int]{}
     i := 0
     j := 0
     loop i < a.len() || j < b.len() {
-        take_a :: j >= b.len() || (i < a.len() && a[i] <= b[j])
-        start :: if take_a -> a[i] else -> b[j]
-        end :: if take_a -> a[i + 1] else -> b[j + 1]
+        take_a: j >= b.len() || (i < a.len() && a[i] <= b[j])
+        start: if take_a -> a[i] else -> b[j]
+        end: if take_a -> a[i + 1] else -> b[j + 1]
         if take_a -> i += 2 else -> j += 2
-        top :: out.len() - 1
+        top: out.len() - 1
         if top > 0 && start <= out[top] {
             if end > out[top] -> out[top] = end
             next

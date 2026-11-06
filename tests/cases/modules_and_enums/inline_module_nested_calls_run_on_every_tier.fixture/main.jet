@@ -1,15 +1,15 @@
-module math {
-    fn visible(n: Int) -> Int { return inner.helper(n) + 1 }
-    module inner {
-        fn helper(n: Int) -> Int { return n * 10 }
-        fn sibling(n: Int) -> Int { return helper(n) + deep.twice(n) }
-        priv module deep {
-            fn twice(n: Int) -> Int { return n * 2 }
+math: module {
+    visible: fn(n: Int) -> Int { return inner.helper(n) + 1 }
+    inner: module {
+        helper: fn(n: Int) -> Int { return n * 10 }
+        sibling: fn(n: Int) -> Int { return helper(n) + deep.twice(n) }
+        priv deep: module {
+            twice: fn(n: Int) -> Int { return n * 2 }
         }
     }
 }
 
-fn run() {
+run: fn() {
     print(math.visible(1))
     print(math.inner.helper(2))
     print(math.inner.sibling(3))

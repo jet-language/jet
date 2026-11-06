@@ -1,4 +1,4 @@
-use files :: core.files
+use files: core.files
 
 // A handle a pattern binds out of a call's Result or Option, then closes
 // with `close(^name)` inside the arm, has exactly one owner: the arm's close
@@ -8,17 +8,17 @@ use files :: core.files
 // hung `jet self doctor`. Every round leaves no descriptor open, and the
 // file written in the arm holds exactly what the arm wrote.
 
-fn open_fds() -> Int {
-    entries :: files.list_dir("/proc/self/fd") ?? panic("list fds")
+open_fds: fn() -> Int {
+    entries: files.list_dir("/proc/self/fd") ?? panic("list fds")
     entries.len()
 }
 
-fn maybe_reader(path: String) -> FileReader? {
+maybe_reader: fn(path: String) -> FileReader? {
     files.open(path) ? reader -> Val(reader) ! error -> None
 }
 
 // The arm closes the writer and falls through to the match's end.
-fn write_in_arm(path: String, round: Int) -> Bool {
+write_in_arm: fn(path: String, round: Int) -> Bool {
     wrote := false
     if files.create(path, if_exists: .Refuse) == {
         .Ok(writer) -> {
@@ -32,7 +32,7 @@ fn write_in_arm(path: String, round: Int) -> Bool {
 }
 
 // The arm closes the writer and returns out of the loop around the match.
-fn write_and_return(path: String) -> Int {
+write_and_return: fn(path: String) -> Int {
     loop {
         if files.create(path, if_exists: .Refuse) == {
             .Ok(writer) -> {
@@ -47,7 +47,7 @@ fn write_and_return(path: String) -> Int {
 }
 
 // An Option payload consumed in the arm.
-fn read_in_arm(path: String) -> Int {
+read_in_arm: fn(path: String) -> Int {
     count := 0
     if maybe_reader(path) == {
         .Val(reader) -> {
@@ -59,9 +59,9 @@ fn read_in_arm(path: String) -> Int {
     count
 }
 
-fn run() {
-    path :: "written.txt"
-    before :: open_fds()
+run: fn() {
+    path: "written.txt"
+    before: open_fds()
     loop round in 1..<4 {
         files.remove(path).drop("start empty")
         print("arm {round} wrote {write_in_arm(path, round)}")

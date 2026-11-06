@@ -1,9 +1,9 @@
-struct Row {
+Row: struct {
     code: String
     meaning: String
 }
 
-ROWS :: comptime { [Row]{
+ROWS: comptime { [Row]{
     Row{code: "E0000", meaning: "meaning number 0 padded so the table is large"},
     Row{code: "E0001", meaning: "meaning number 1 padded so the table is large"},
     Row{code: "E0002", meaning: "meaning number 2 padded so the table is large"},
@@ -406,14 +406,14 @@ ROWS :: comptime { [Row]{
     Row{code: "E0399", meaning: "meaning number 399 padded so the table is large"},
 } }
 
-fn find_in(rows: [Row], code: String) -> Bool {
+find_in: fn(rows: [Row], code: String) -> Bool {
     loop row in rows {
         if row.code == code -> return true
     }
     false
 }
 
-fn run() {
+run: fn() {
     if find_in(ROWS, "E0399") -> print(ROWS[3].meaning)
     print("{ROWS.len()}")
 }

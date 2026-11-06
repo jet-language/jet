@@ -1,11 +1,11 @@
 // core-conformance: core.crypto.vault.error_identity
 // D-CRYPTO-VAULT1=A: the closed case order and named redacted payloads.
 use {
-    crypto :: core.crypto
-    vault :: core.crypto.vault
+    crypto: core.crypto
+    vault: core.crypto.vault
 }
 
-fn error_name(error: vault.VaultError) -> String Never! {
+error_name: fn(error: vault.VaultError) -> String Never! {
     if error == {
         .InvalidName -> "InvalidName"
         .NotFound -> "NotFound"
@@ -35,7 +35,7 @@ fn error_name(error: vault.VaultError) -> String Never! {
     }
 }
 
-fn status_name(status: vault.KeyStatus) -> String Never! {
+status_name: fn(status: vault.KeyStatus) -> String Never! {
     if status == {
         .Active -> "Active"
         .Retired -> "Retired"
@@ -43,15 +43,15 @@ fn status_name(status: vault.KeyStatus) -> String Never! {
     }
 }
 
-fn run() {
-    cases :: [vault.VaultError]{
+run: fn() {
+    cases: [vault.VaultError]{
         .InvalidName, .NotFound, .WrongType, .Revoked, .Locked,
         .AuthorityDenied, .Conflict, .UnsupportedProvider, .InvalidEncoding,
         .DurabilityUnknown, .Crypto(crypto.CryptoError.Unavailable),
         .IO{operation: "read", redacted_path: "<vault>"},
         .Internal{incident_id: "vault-4835"}
     }
-    names :: [String]{
+    names: [String]{
         "InvalidName", "NotFound", "WrongType", "Revoked", "Locked",
         "AuthorityDenied", "Conflict", "UnsupportedProvider", "InvalidEncoding",
         "DurabilityUnknown", "Crypto", "IO", "Internal"

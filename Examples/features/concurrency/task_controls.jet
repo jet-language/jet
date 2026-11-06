@@ -1,25 +1,25 @@
 // 157 — D-COROUTINE1: coroutine-grade control via task handles (internal substrate).
 // Task failure uses the canonical `TaskFailure` rail.
-package {
+package: {
     name: "task_controls"
     authority: { allow: [IO, Mem.Alloc, Time.Wait] }
 }
 
 use {
-    tasks :: core.tasks
-    time :: core.time
+    tasks: core.tasks
+    time: core.time
 }
 
-fn slow_two() -> Int {
+slow_two: fn() -> Int {
     time.sleep(50ms)
     return 2
 }
 
-fn run() {
+run: fn() {
     print(tasks.current_task())
     tasks.yield_now()
 
-    t :: task 7
+    t: task 7
     t.pause()
     t.resume()
     t.cancel()
@@ -27,7 +27,7 @@ fn run() {
 
     print(task.any {slow_two(), 1} ?? panic("any failed"))
 
-    { sender: tx, receiver: rx } :: channel<Int>()
+    { sender: tx, receiver: rx }: channel<Int>()
     tx.send(9)
     tx.close()
     rx.close()

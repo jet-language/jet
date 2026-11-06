@@ -1,9 +1,9 @@
 // core-conformance: core.crypto.vault.commit_import_signing
-use vault :: core.crypto.vault
+use vault: core.crypto.vault
 
-fn run() -[Secret, IO]> {
+run: fn() -[Secret, IO]> {
     #Unsafe("restore a fixed signing key into the vault") {
-        bytes :: [U8]{
+        bytes: [U8]{
             0x00,
             0x01,
             0x02,
@@ -37,9 +37,9 @@ fn run() -[Secret, IO]> {
             0x1e,
             0x1f
         }
-        plan :: vault.prepare_import_signing("__core_conformance_import_signing", ^bytes) ?? return
-        write :: vault.authorize_write(plan, "fixed signing-import authorization") ?? return
-        result :: vault.commit_import_signing(^write, ^plan) ?? return
+        plan: vault.prepare_import_signing("__core_conformance_import_signing", ^bytes) ?? return
+        write: vault.authorize_write(plan, "fixed signing-import authorization") ?? return
+        result: vault.commit_import_signing(^write, ^plan) ?? return
         print(result)
     }
 }

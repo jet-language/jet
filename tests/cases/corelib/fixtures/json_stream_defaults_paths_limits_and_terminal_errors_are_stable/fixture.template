@@ -1,16 +1,16 @@
 
 use {
-    encoding :: core.encoding
-    json :: core.encoding.json
-    files :: core.files
+    encoding: core.encoding
+    json: core.encoding.json
+    files: core.files
 }
 
-fn run() {
-    default_output :: files.create("{work}/default.json") ?? panic("create")
+run: fn() {
+    default_output: files.create("{work}/default.json") ?? panic("create")
     default_writer := json.writer(^default_output) ?? panic("default writer")
     &default_writer.write(encoding.DataEvent.Null) ?? panic("default write")
     &default_writer.finish() ?? panic("default finish")
-    default_input :: files.open("{work}/default.json") ?? panic("default open")
+    default_input: files.open("{work}/default.json") ?? panic("default open")
     default_reader := json.reader(^default_input) ?? panic("default reader")
     if &default_reader.next() == {
         .Ok(_) -> { print(true) }
@@ -19,7 +19,7 @@ fn run() {
 
     limits := encoding.EncodingLimits.safe()
     limits.max_item_bytes = 2
-    input :: files.open("{work}/hostile.json") ?? panic("open")
+    input: files.open("{work}/hostile.json") ?? panic("open")
     reader := json.reader(^input, limits) ?? panic("reader")
     count := 0
     loop count < 8 {
@@ -38,7 +38,7 @@ fn run() {
         }
     }
 
-    finished_output :: files.create("{work}/limited.json") ?? panic("create")
+    finished_output: files.create("{work}/limited.json") ?? panic("create")
     finished_writer := json.writer(^finished_output) ?? panic("writer")
     &finished_writer.write(encoding.DataEvent.Null) ?? panic("write")
     &finished_writer.finish() ?? panic("finish")
@@ -54,7 +54,7 @@ fn run() {
 
     escaped_limits := encoding.EncodingLimits.safe()
     escaped_limits.max_item_bytes = 1
-    escaped_output :: files.create("{work}/limited.json") ?? panic("create")
+    escaped_output: files.create("{work}/limited.json") ?? panic("create")
     escaped_writer := json.writer(^escaped_output, escaped_limits) ?? panic("writer")
     if &escaped_writer.write(encoding.DataEvent.Text("\n")) == {
         .Ok(_) -> { print("escape-missed") }

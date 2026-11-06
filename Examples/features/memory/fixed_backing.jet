@@ -8,24 +8,24 @@
 // the buffer's end, and an allocation fails before the two meet.
 use core.mem
 
-struct Point {
+Point: struct {
     x: Int
     y: Int
 }
 
-fn run() {
+run: fn() {
     bytes := [U8#128]{ uninit }
-    fixed :: mem.Fixed.over(&bytes)
+    fixed: mem.Fixed.over(&bytes)
 
     // Typed allocation: the control witness is payload 9.
-    value :: fixed.alloc(9)
-    point :: fixed.alloc(Point{x: 3, y: 4})
+    value: fixed.alloc(9)
+    point: fixed.alloc(Point{x: 3, y: 4})
     print("value {value}")
     print("point {point.x},{point.y}")
 
     // Last use of both views is above, so reset is accepted.
     &fixed.reset()
-    again :: fixed.alloc(10)
+    again: fixed.alloc(10)
     print("after reset {again}")
     &fixed.reset()
 

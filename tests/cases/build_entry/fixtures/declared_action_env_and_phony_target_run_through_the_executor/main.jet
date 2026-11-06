@@ -1,8 +1,8 @@
-fn build(b: Build) -[Exec, FS]> {
+build: fn(b: Build) -[Exec, FS]> {
     #Impure("run declared actions") {
-        tc :: b.toolchain("native", "x86_64-linux")
-        signer :: b.signing("dev", "Developer")
-        greet :: b.action(
+        tc: b.toolchain("native", "x86_64-linux")
+        signer: b.signing("dev", "Developer")
+        greet: b.action(
             "greet",
             ["greeting.txt"],
             ["greet.txt"],
@@ -19,7 +19,7 @@ fn build(b: Build) -[Exec, FS]> {
             [],
             "cached"
         )
-        announce :: b.action(
+        announce: b.action(
             "announce",
             ["gate.txt"],
             [],
@@ -36,9 +36,9 @@ fn build(b: Build) -[Exec, FS]> {
             [],
             "phony"
         )
-        app :: b.add_executable("app", ["main.jet"], [greet, announce])
+        app: b.add_executable("app", ["main.jet"], [greet, announce])
         b.default(app)
     }
 }
 
-fn run() {}
+run: fn() {}

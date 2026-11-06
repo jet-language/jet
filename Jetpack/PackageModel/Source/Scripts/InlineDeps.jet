@@ -18,29 +18,29 @@ use {
     jetpack_foundation.[
         FOUNDATION_U64_SHIFTS, TreeHashError, foundation_sha256_file_hex, foundation_try_tree_hash,
     ]
-    files :: core.files
-    sys :: core.sys
+    files: core.files
+    sys: core.sys
 }
 
-PKG_INLINE_DEPS_FIXTURES_ENV :: "JET_INLINE_DEPS_FIXTURES"
+PKG_INLINE_DEPS_FIXTURES_ENV: "JET_INLINE_DEPS_FIXTURES"
 
 // One `use pkg#version;` ref collected from a manifest-less script.
-struct InlineDep {
+InlineDep: struct {
     name: String
     selector: String
     span: Span
 }
 
 // Every inline dependency ref among a parsed program's top-level imports.
-fn pkg_inline_deps_collect(program: Program) -> [InlineDep] Never! {
+pkg_inline_deps_collect: fn(program: Program) -> [InlineDep] Never! {
     pkg_inline_deps_collect_from_imports(program.imports)
 }
 
 // Only a single-segment module import carries an inline version.
-fn pkg_inline_deps_collect_from_imports(imports: [ImportDecl]) -> [InlineDep] Never! {
+pkg_inline_deps_collect_from_imports: fn(imports: [ImportDecl]) -> [InlineDep] Never! {
     out := [InlineDep]{}
     loop decl in imports {
-        version :: decl.inline_version ?? next
+        version: decl.inline_version ?? next
         if decl.kind == {
             .Module(name, _) -> &out.push(InlineDep{name: name, selector: version.text, span: version.span})
             else -> {}
@@ -52,8 +52,8 @@ fn pkg_inline_deps_collect_from_imports(imports: [ImportDecl]) -> [InlineDep] Ne
 // A selector is pinned when it names an exact three-part version (`1.4.2`).
 // Anything looser (`1.4`, `1`, `latest`, `*`) is L0203: fine to write, but
 // not reproducible without `jet fetch --lock`.
-fn pkg_inline_deps_is_pinned(selector: String) -> Bool Never! {
-    parts :: pkg_inline_deps_numeric_version(selector) ?? return false
+pkg_inline_deps_is_pinned: fn(selector: String) -> Bool Never! {
+    parts: pkg_inline_deps_numeric_version(selector) ?? return false
     parts.len() == 3
 }
 
@@ -61,7 +61,7 @@ fn pkg_inline_deps_is_pinned(selector: String) -> Bool Never! {
 // lock, a package lift, or a build cache. The selector is kept apart from
 // the selected version: changing a loose selector is a semantic change even
 // when it selects the same source today.
-struct ScriptDependencyIdentity {
+ScriptDependencyIdentity: struct {
     name: String
     selector: String
     resolved_version: String
@@ -71,7 +71,7 @@ struct ScriptDependencyIdentity {
 // The facts that identify a prepared script result. Paths and ambient
 // process state are absent: only recorded source/dependency content plus
 // the selected toolchain and target can authorize reuse.
-struct ScriptCacheIdentity {
+ScriptCacheIdentity: struct {
     source_hash: String
     dependencies: [ScriptDependencyIdentity]
     toolchain: String
@@ -79,7 +79,7 @@ struct ScriptCacheIdentity {
 
     // Dependencies are held in (name, selector, resolved_version,
     // content_hash) order so the identity is order independent.
-    fn new(source_hash: String, dependencies: [ScriptDependencyIdentity], toolchain: String, target: String) -> ScriptCacheIdentity Never! {
+    new: fn(source_hash: String, dependencies: [ScriptDependencyIdentity], toolchain: String, target: String) -> ScriptCacheIdentity Never! {
         sorted := dependencies
         sorted = loop fresh_item in sorted -> fresh_item
         &sorted.sort_by(identity -> identity.content_hash)
@@ -94,7 +94,7 @@ struct ScriptCacheIdentity {
 
     // Stable cache key. Length framing keeps distinct fields distinct even
     // when a name, hash, or toolchain contains delimiters.
-    fn digest(self) -> String Never! {
+    digest: fn(self) -> String Never! {
         bytes := [U8]{}
         pkg_inline_deps_framed(&bytes, "jet-script-cache.v1")
         pkg_inline_deps_framed(&bytes, self.source_hash)
@@ -114,7 +114,7 @@ struct ScriptCacheIdentity {
 // The identity of a resolved script, computed without reading or running
 // any dependency source, so callers can recompute it after a source edit
 // and reject a stale prepared result before execution.
-fn pkg_inline_deps_cache_identity(source_hash: String, dependencies: [InlineDepResolved], toolchain: String, target: String) -> ScriptCacheIdentity Never! {
+pkg_inline_deps_cache_identity: fn(source_hash: String, dependencies: [InlineDepResolved], toolchain: String, target: String) -> ScriptCacheIdentity Never! {
     identities := [ScriptDependencyIdentity]{}
     loop dependency in dependencies -> &identities.push(dependency.dependency_identity())
     ScriptCacheIdentity.new(source_hash, identities, toolchain, target)
@@ -122,7 +122,7 @@ fn pkg_inline_deps_cache_identity(source_hash: String, dependencies: [InlineDepR
 
 // A resolved inline dependency: `dir` is the module search root that
 // satisfies it.
-struct InlineDepResolved {
+InlineDepResolved: struct {
     name: String
     selector: String
     resolved_version: String
@@ -131,14 +131,14 @@ struct InlineDepResolved {
 
     // The portable dependency identity. `dir` is not part of it: the same
     // prepared source identifies the same way after a clone moves.
-    fn dependency_identity(self) -> ScriptDependencyIdentity Never! {
+    dependency_identity: fn(self) -> ScriptDependencyIdentity Never! {
         ScriptDependencyIdentity{name: self.name, selector: self.selector, resolved_version: self.resolved_version, content_hash: self.content_hash}
     }
 }
 
 // Why an inline dependency did not resolve (E1253's reason half).
 #Error
-enum InlineDepUnresolved {
+InlineDepUnresolved: enum {
     // The import name would escape the local dependency root.
     InvalidName
     // The selector is not the supported dotted numeric form.
@@ -150,7 +150,7 @@ enum InlineDepUnresolved {
     // A matching source exists, but its contents cannot be hashed safely.
     InvalidTree(TreeHashError)
 
-    fn message(self) -> String Never! {
+    message: fn(self) -> String Never! {
         if self == {
             .InvalidName -> "invalid inline dependency name"
             .InvalidSelector -> "invalid inline dependency selector"
@@ -165,7 +165,7 @@ enum InlineDepUnresolved {
 // copy, then (when set) `JET_INLINE_DEPS_FIXTURES`, hashing the selected
 // tree. The project-local source is authoritative: when it has the package
 // but not a matching version, no later root is consulted.
-fn pkg_inline_deps_resolve(dep: InlineDep, script_dir: String) -[FS, Env]> InlineDepResolved InlineDepUnresolved! {
+pkg_inline_deps_resolve: fn(dep: InlineDep, script_dir: String) -[FS, Env]> InlineDepResolved InlineDepUnresolved! {
     if !pkg_inline_deps_valid_package_name(dep.name) -> return Err(InlineDepUnresolved.InvalidName)
     if pkg_inline_deps_numeric_version(dep.selector) == None -> return Err(InlineDepUnresolved.InvalidSelector)
     roots := [String]{files.join(files.join(script_dir, ".jet"), "inline-deps")}
@@ -174,11 +174,11 @@ fn pkg_inline_deps_resolve(dep: InlineDep, script_dir: String) -[FS, Env]> Inlin
         .None -> {}
     }
     loop root in roots {
-        candidates :: pkg_inline_deps_list_versions(root, dep.name) ?? next
-        chosen :: pkg_inline_deps_best_match(dep.selector, candidates) ?? return Err(InlineDepUnresolved.NoMatch)
+        candidates: pkg_inline_deps_list_versions(root, dep.name) ?? next
+        chosen: pkg_inline_deps_best_match(dep.selector, candidates) ?? return Err(InlineDepUnresolved.NoMatch)
         // The same `sha256-<hex>` shape as `LockedPackage.content_hash`;
         // a hostile-tree failure stays typed for the caller.
-        content_hash :: if foundation_try_tree_hash(chosen.dir) == {
+        content_hash: if foundation_try_tree_hash(chosen.dir) == {
             .Ok(hash) -> hash
             .Err(error) -> { return Err(InlineDepUnresolved.InvalidTree(error)) }
         }
@@ -190,8 +190,8 @@ fn pkg_inline_deps_resolve(dep: InlineDep, script_dir: String) -[FS, Env]> Inlin
 // Every version directory under `<root>/<name>`, or None when `<name>` does
 // not exist under `root`. File-system errors and links fail closed: a
 // missing source is not interchangeable with another source root.
-fn pkg_inline_deps_list_versions(root: String, name: String) -[FS]> [(version: String, dir: String)]? InlineDepUnresolved! {
-    root_stat :: if files.stat(root) == {
+pkg_inline_deps_list_versions: fn(root: String, name: String) -[FS]> [(version: String, dir: String)]? InlineDepUnresolved! {
+    root_stat: if files.stat(root) == {
         .Ok(stat) -> stat
         .Err(error) -> if error == {
             .NotFound(_) -> { return Ok(None) }
@@ -201,8 +201,8 @@ fn pkg_inline_deps_list_versions(root: String, name: String) -[FS]> [(version: S
     if root_stat.is_symlink -> return Err(InlineDepUnresolved.InvalidTree(TreeHashError.Symlink(root)))
     if !root_stat.is_dir -> return Ok(None)
 
-    package_dir :: files.join(root, name)
-    package_stat :: if files.stat(package_dir) == {
+    package_dir: files.join(root, name)
+    package_stat: if files.stat(package_dir) == {
         .Ok(stat) -> stat
         .Err(error) -> if error == {
             .NotFound(_) -> { return Ok(None) }
@@ -212,13 +212,13 @@ fn pkg_inline_deps_list_versions(root: String, name: String) -[FS]> [(version: S
     if package_stat.is_symlink -> return Err(InlineDepUnresolved.InvalidTree(TreeHashError.Symlink(package_dir)))
     if !package_stat.is_dir -> return Ok(None)
 
-    entries :: if files.list_dir(package_dir) == {
+    entries: if files.list_dir(package_dir) == {
         .Ok(listed) -> listed
         .Err(error) -> { return Err(InlineDepUnresolved.InvalidTree(TreeHashError.IO{path: package_dir, detail: "{error}"})) }
     }
     out := [(dir: String, version: String)]{}
     loop entry in entries {
-        stat :: if files.stat(entry.path) == {
+        stat: if files.stat(entry.path) == {
             .Ok(found) -> found
             .Err(error) -> { return Err(InlineDepUnresolved.InvalidTree(TreeHashError.IO{path: entry.path, detail: "{error}"})) }
         }
@@ -229,12 +229,12 @@ fn pkg_inline_deps_list_versions(root: String, name: String) -[FS]> [(version: S
 
 // The highest version whose dotted prefix matches `selector` (`1.4` matches
 // `1.4.2`); an exact `1.4.2` selector matches only that version.
-fn pkg_inline_deps_best_match(selector: String, candidates: [(version: String, dir: String)]) -> (version: String, dir: String)? Never! {
-    selector_parts :: pkg_inline_deps_numeric_version(selector) ?? return None
+pkg_inline_deps_best_match: fn(selector: String, candidates: [(version: String, dir: String)]) -> (version: String, dir: String)? Never! {
+    selector_parts: pkg_inline_deps_numeric_version(selector) ?? return None
     matches := [(dir: String, version: String)]{}
     loop candidate in candidates {
-        version_parts :: pkg_inline_deps_numeric_version(candidate.version) ?? next
-        accepted :: if selector_parts.len() == 3 -> version_parts == selector_parts else -> version_parts.len() == 3 && pkg_inline_deps_has_prefix(version_parts, selector_parts)
+        version_parts: pkg_inline_deps_numeric_version(candidate.version) ?? next
+        accepted: if selector_parts.len() == 3 -> version_parts == selector_parts else -> version_parts.len() == 3 && pkg_inline_deps_has_prefix(version_parts, selector_parts)
         if accepted -> &matches.push(candidate)
     }
     if matches.len() == 0 -> return None
@@ -247,14 +247,14 @@ fn pkg_inline_deps_best_match(selector: String, candidates: [(version: String, d
 
 // The same numeric matching law for one admitted version, without a
 // temporary candidate list or sorting at the driver's import seam.
-fn pkg_inline_deps_version_matches(selector: String, version: String) -> Bool Never! {
-    selector_parts :: pkg_inline_deps_numeric_version(selector) ?? return false
-    version_parts :: pkg_inline_deps_numeric_version(version) ?? return false
+pkg_inline_deps_version_matches: fn(selector: String, version: String) -> Bool Never! {
+    selector_parts: pkg_inline_deps_numeric_version(selector) ?? return false
+    version_parts: pkg_inline_deps_numeric_version(version) ?? return false
     if selector_parts.len() == 3 -> version_parts == selector_parts else -> version_parts.len() == 3 && pkg_inline_deps_has_prefix(version_parts, selector_parts)
 }
 
 // Whether `parts` begins with every element of `prefix`.
-fn pkg_inline_deps_has_prefix(parts: [U64], prefix: [U64]) -> Bool Never! {
+pkg_inline_deps_has_prefix: fn(parts: [U64], prefix: [U64]) -> Bool Never! {
     loop index in 0..<prefix.len() {
         if index >= parts.len() || parts[index] != prefix[index] -> return false
     }
@@ -262,25 +262,25 @@ fn pkg_inline_deps_has_prefix(parts: [U64], prefix: [U64]) -> Bool Never! {
 }
 
 // One numeric component of a version key, 0 when absent or malformed.
-fn pkg_inline_deps_version_part(version: String, index: Int) -> U64 Never! {
-    parts :: pkg_inline_deps_numeric_version(version) ?? return U64{0}
+pkg_inline_deps_version_part: fn(version: String, index: Int) -> U64 Never! {
+    parts: pkg_inline_deps_numeric_version(version) ?? return U64{0}
     if index >= parts.len() -> return U64{0}
     parts[index]
 }
 
 // Rust ScriptDeps::numeric_version uses the full unsigned 64-bit domain.
-fn pkg_inline_deps_numeric_version(value: String) -> [U64]? Never! {
-    parts :: value.split(".").to_list()
+pkg_inline_deps_numeric_version: fn(value: String) -> [U64]? Never! {
+    parts: value.split(".").to_list()
     if parts.len() < 1 || parts.len() > 3 -> return None
     out := [U64]{}
     loop part in parts {
         if part == "" || (part.bytes().len() > 1 && part.starts_with("0")) -> return None
-        digits :: if part.starts_with("+") -> part.slice(1..<part.len()) else -> part
+        digits: if part.starts_with("+") -> part.slice(1..<part.len()) else -> part
         if digits == "" -> return None
         number := U64{0}
         loop byte in digits.bytes() {
             if byte < (U8{48}) || byte > (U8{57}) -> return None
-            digit :: U64.from_u8(byte - U8{48})
+            digit: U64.from_u8(byte - U8{48})
             if number > (U64{1844674407370955161}) || (number == (U64{1844674407370955161}) && digit > (U64{5})) -> return None
             number = number * U64{10} + digit
         }
@@ -290,31 +290,31 @@ fn pkg_inline_deps_numeric_version(value: String) -> [U64]? Never! {
 }
 
 // A single safe package name: no path separators, NUL, `.`, or `..`.
-fn pkg_inline_deps_valid_package_name(name: String) -> Bool Never! {
+pkg_inline_deps_valid_package_name: fn(name: String) -> Bool Never! {
     if name == "" || name == "." || name == ".." -> return false
     loop byte in name.bytes() {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         if code == 47 || code == 92 || code == 0 -> return false
     }
     true
 }
 
 // A big-endian 64-bit length prefix, then the UTF-8 bytes.
-fn pkg_inline_deps_framed(bytes: &[U8], value: String) Never! {
-    raw :: value.bytes()
+pkg_inline_deps_framed: fn(bytes: &[U8], value: String) Never! {
+    raw: value.bytes()
     pkg_inline_deps_framed_count(&bytes, raw.len())
     loop byte in raw -> &bytes.push(byte)
 }
 
-fn pkg_inline_deps_framed_count(bytes: &[U8], count: Int) Never! {
+pkg_inline_deps_framed_count: fn(bytes: &[U8], count: Int) Never! {
     loop shift in FOUNDATION_U64_SHIFTS -> &bytes.push(U8{((count >> shift)).bit_and(255)})
 }
 
 // E1253 an inline `use pkg#version;` ref that cannot
 // be resolved: unknown package, unreachable or unsafe source tree, or no
 // version satisfies the selector.
-fn pkg_inline_deps_e1253(dep: InlineDep, reason: InlineDepUnresolved) -> Diagnostic Never! {
-    explanation :: if reason == {
+pkg_inline_deps_e1253: fn(dep: InlineDep, reason: InlineDepUnresolved) -> Diagnostic Never! {
+    explanation: if reason == {
         .InvalidName -> (fix: "use a single package name without path separators.", why: "`{dep.name}` is not a safe local package name.")
         .InvalidSelector -> (fix: "use `major`, `major.minor`, or `major.minor.patch`.", why: "`{dep.selector}` is not a supported dotted numeric version selector.")
         .UnknownPackage -> (fix: "run the script with `jet run`, which fetches and locks `{dep.name}` from the configured package registry on its first run, or commit a copy at `.jet/inline-deps/{dep.name}/<version>/`.", why: "no local copy under `.jet/inline-deps/{dep.name}/` holds `{dep.name}`, and only `jet run` and `jet fetch --lock` fetch a missing inline dependency.")
@@ -326,12 +326,12 @@ fn pkg_inline_deps_e1253(dep: InlineDep, reason: InlineDepUnresolved) -> Diagnos
 
 // L0203 an inline dependency with a loose selector
 // (anything but an exact `major.minor.patch`).
-fn pkg_inline_deps_l0203_unpinned(dep: InlineDep) -> Diagnostic Never! {
+pkg_inline_deps_l0203_unpinned: fn(dep: InlineDep) -> Diagnostic Never! {
     pkg_diagnostic_from_row("L0203", [(name: String, value: String)]{(name: "name", value: dep.name), (name: "selector", value: dep.selector)}, Val(dep.span))
 }
 
 // SHA-256 of a script file's bytes as `sha256-<hex>`: the `content_hash`
 // shape `jet fetch --lock` and `jet run` use to detect an edited script.
-fn pkg_inline_deps_file_hash(path: String) -[FS]> String IOError! {
+pkg_inline_deps_file_hash: fn(path: String) -[FS]> String IOError! {
     Ok("sha256-{foundation_sha256_file_hex(path)}")
 }

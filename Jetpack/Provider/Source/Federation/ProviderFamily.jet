@@ -4,7 +4,7 @@
 // External provider prefixes and trust-root configuration remain
 // owner-gated. A contract records the surface this build actually owns.
 
-enum ProviderFamily {
+ProviderFamily: enum {
     Core
     Nix
     Path
@@ -21,7 +21,7 @@ enum ProviderFamily {
     Homebrew
     Binary
 
-    fn label(self) -> String Never! {
+    label: fn(self) -> String Never! {
         if self == {
             .Core -> "core"
             .Nix -> "nix"
@@ -42,7 +42,7 @@ enum ProviderFamily {
     }
 
     // Core, Nix, Path, and the Jet registry are local or first party.
-    fn is_local_or_first_party(self) -> Bool Never! {
+    is_local_or_first_party: fn(self) -> Bool Never! {
         if self == {
             .Core | .Nix | .Path | .JetRegistry -> true
             else -> false
@@ -50,7 +50,7 @@ enum ProviderFamily {
     }
 }
 
-struct ProviderFamilyContract {
+ProviderFamilyContract: struct {
     family: ProviderFamily
     parses_refs: Bool
     probes_metadata: Bool
@@ -63,9 +63,9 @@ struct ProviderFamilyContract {
     // The surface this build owns for `family`. Metadata normalization does
     // not imply Jet can fetch or lock bytes from a foreign ecosystem, so those
     // capabilities stay false until a real provider adapter supplies them.
-    fn for_family(family: ProviderFamily) -> ProviderFamilyContract Never! {
-        first_party :: family.is_local_or_first_party()
-        byte_owner :: first_party || family == ProviderFamily.Binary
+    for_family: fn(family: ProviderFamily) -> ProviderFamilyContract Never! {
+        first_party: family.is_local_or_first_party()
+        byte_owner: first_party || family == ProviderFamily.Binary
         ProviderFamilyContract{
             family: family,
             parses_refs: true,
@@ -79,8 +79,8 @@ struct ProviderFamilyContract {
     }
 
     // The contract of every built-in family, in family order.
-    fn built_in() -> [ProviderFamilyContract] Never! {
-        families :: [ProviderFamily]{
+    built_in: fn() -> [ProviderFamilyContract] Never! {
+        families: [ProviderFamily]{
             ProviderFamily.Core, ProviderFamily.Nix, ProviderFamily.Path, ProviderFamily.Github,
             ProviderFamily.JetRegistry, ProviderFamily.Npm, ProviderFamily.PyPI, ProviderFamily.Cargo,
             ProviderFamily.SwiftPM, ProviderFamily.Maven, ProviderFamily.NuGet, ProviderFamily.Conan,

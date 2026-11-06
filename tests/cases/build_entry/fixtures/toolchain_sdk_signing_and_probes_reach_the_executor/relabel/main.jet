@@ -1,9 +1,9 @@
-fn build(b: Build) -[Exec, FS]> {
+build: fn(b: Build) -[Exec, FS]> {
     #Impure("probe the declared toolchain and run its action") {
-        native :: b.toolchain("native", "x86_64-unknown-linux-gnu", "x86_64-unknown-linux-gnu", "sdk-15.0", "lld", "sysroot/x86_64")
-        signer :: b.signing("release", "developer-id:OTHER")
-        shell :: b.probe("shell", "find_program", "sh", native)
-        stamp :: b.action(
+        native: b.toolchain("native", "x86_64-unknown-linux-gnu", "x86_64-unknown-linux-gnu", "sdk-15.0", "lld", "sysroot/x86_64")
+        signer: b.signing("release", "developer-id:OTHER")
+        shell: b.probe("shell", "find_program", "sh", native)
+        stamp: b.action(
             "stamp",
             [],
             ["stamp.txt"],
@@ -13,9 +13,9 @@ fn build(b: Build) -[Exec, FS]> {
             [shell],
             signer
         )
-        app :: b.add_executable("app", ["main.jet"], [stamp])
+        app: b.add_executable("app", ["main.jet"], [stamp])
         b.default(app)
     }
 }
 
-fn run() {}
+run: fn() {}

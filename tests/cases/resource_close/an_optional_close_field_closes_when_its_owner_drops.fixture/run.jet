@@ -1,28 +1,28 @@
-struct Resource {
+Resource: struct {
     name: String
 }
 
 impl Resource.Close {
-    fn close(^self) { print("close {self.name}") }
+    close: fn(^self) { print("close {self.name}") }
 }
 
-struct Holder {
+Holder: struct {
     item: Resource?
 }
 
-struct Pair {
+Pair: struct {
     first: Resource?
     second: Resource?
 }
 
-fn hold(name: String) -> Holder { Holder{item: Val(Resource{name: name})} }
+hold: fn(name: String) -> Holder { Holder{item: Val(Resource{name: name})} }
 
-fn scoped() {
+scoped: fn() {
     holder := Holder{item: Val(Resource{name: "scoped"})}
     print("scope end")
 }
 
-fn run() {
+run: fn() {
     scoped()
     returned := hold("returned")
     pair := Pair{first: Val(Resource{name: "first"}), second: None}

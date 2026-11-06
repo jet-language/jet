@@ -11,42 +11,42 @@
 // Each producer prints one line per call, so the golden records call counts.
 // Breaking the consumer loop cancels the producer at its yield point
 // (D-CANCELMODEL1=C): no value after the last pulled one is ever built.
-struct Ticket {
+Ticket: struct {
     id: Int
 }
 
 impl Ticket.Close {
-    fn close(^self) { print("  closed ticket {self.id}") }
+    close: fn(^self) { print("  closed ticket {self.id}") }
 }
 
-fn never() -> Stream<Int> {
+never: fn() -> Stream<Int> {
     if false -> yield 0
 }
 
-fn make_ticket(id: Int) -> Ticket {
+make_ticket: fn(id: Int) -> Ticket {
     print("  make ticket {id}")
     Ticket{id: id}
 }
 
-fn once_ticket(id: Int) -> Stream<Ticket> {
+once_ticket: fn(id: Int) -> Stream<Ticket> {
     print("  once: started")
     yield make_ticket(id)
     print("  once: finished")
 }
 
-fn fibonacci() -> Stream<Int> {
+fibonacci: fn() -> Stream<Int> {
     a := 0
     b := 1
     loop {
         print("  fib step")
         yield a
-        next :: a + b
+        next: a + b
         a = b
         b = next
     }
 }
 
-fn doublings(start: Int, limit: Int) -> Stream<Int> {
+doublings: fn(start: Int, limit: Int) -> Stream<Int> {
     value := start
     loop value <= limit {
         yield value
@@ -54,12 +54,12 @@ fn doublings(start: Int, limit: Int) -> Stream<Int> {
     }
 }
 
-fn stamp(n: Int) -> Int {
+stamp: fn(n: Int) -> Int {
     print("  stamp {n}")
     n * 10
 }
 
-fn stamps() -> Stream<Int> {
+stamps: fn() -> Stream<Int> {
     n := 0
     loop {
         yield stamp(n)
@@ -67,7 +67,7 @@ fn stamps() -> Stream<Int> {
     }
 }
 
-fn run() {
+run: fn() {
     // empty
     print("empty lazy: {[Int]{}.lazy().to_list()}")
     count := 0
@@ -76,7 +76,7 @@ fn run() {
 
     // once_with: nothing is built until the first pull; the ticket moves out.
     print("once:")
-    source :: once_ticket(7)
+    source: once_ticket(7)
     print("  source created")
     loop ticket in source {
         print("  got ticket {ticket.id}")

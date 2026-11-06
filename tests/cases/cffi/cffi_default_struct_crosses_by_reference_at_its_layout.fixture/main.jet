@@ -1,8 +1,8 @@
-use c :: c.mixed
+use c: c.mixed
 
 // No `#Layout`: the compiler places the fields, and c/mixed.c declares the
 // struct from the `$layout` checked below.
-struct Mixed {
+Mixed: struct {
     a: U8
     b: I64
     c: U8
@@ -10,27 +10,27 @@ struct Mixed {
     e: U8
 }
 
-#Import module c.mixed {
-    fn layout_fact(which: I64) -> I64 = "jet_mixed_layout_fact"
-    fn bump(value: &Mixed) = "jet_mixed_bump"
-    fn sum(value: &Mixed) -> I64 = "jet_mixed_sum"
-    fn remember(value: &Mixed) = "jet_mixed_remember"
-    fn same(value: &Mixed) -> Bool = "jet_mixed_same"
+#Import c.mixed: module {
+    layout_fact: fn(which: I64) -> I64 = "jet_mixed_layout_fact"
+    bump: fn(value: &Mixed) = "jet_mixed_bump"
+    sum: fn(value: &Mixed) -> I64 = "jet_mixed_sum"
+    remember: fn(value: &Mixed) = "jet_mixed_remember"
+    same: fn(value: &Mixed) -> Bool = "jet_mixed_same"
 }
 
-SIZE :: comptime { Mixed.$layout.size ?? -1 }
-ALIGNMENT :: comptime { Mixed.$layout.alignment ?? -1 }
-AT_A :: comptime { Mixed.$layout.fields[0].offset ?? -1 }
-AT_B :: comptime { Mixed.$layout.fields[1].offset ?? -1 }
-AT_C :: comptime { Mixed.$layout.fields[2].offset ?? -1 }
-AT_D :: comptime { Mixed.$layout.fields[3].offset ?? -1 }
-AT_E :: comptime { Mixed.$layout.fields[4].offset ?? -1 }
+SIZE: comptime { Mixed.$layout.size ?? -1 }
+ALIGNMENT: comptime { Mixed.$layout.alignment ?? -1 }
+AT_A: comptime { Mixed.$layout.fields[0].offset ?? -1 }
+AT_B: comptime { Mixed.$layout.fields[1].offset ?? -1 }
+AT_C: comptime { Mixed.$layout.fields[2].offset ?? -1 }
+AT_D: comptime { Mixed.$layout.fields[3].offset ?? -1 }
+AT_E: comptime { Mixed.$layout.fields[4].offset ?? -1 }
 
-fn run() {
-    facts :: [Int]{SIZE, ALIGNMENT, AT_A, AT_B, AT_C, AT_D, AT_E}
-    names :: [String]{"size", "alignment", "a", "b", "c", "d", "e"}
+run: fn() {
+    facts: [Int]{SIZE, ALIGNMENT, AT_A, AT_B, AT_C, AT_D, AT_E}
+    names: [String]{"size", "alignment", "a", "b", "c", "d", "e"}
     loop index in 0..<facts.len() {
-        native :: c.layout_fact(I64{index})
+        native: c.layout_fact(I64{index})
         if (native != I64{facts[index]}) -> panic("C {names[index]} is {native}, Mixed.$layout says {facts[index]}")
     }
     print("C agrees with Mixed.$layout: size {SIZE}, alignment {ALIGNMENT}, a {AT_A}, b {AT_B}, c {AT_C}, d {AT_D}, e {AT_E}")

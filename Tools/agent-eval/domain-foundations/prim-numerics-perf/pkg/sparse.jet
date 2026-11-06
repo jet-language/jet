@@ -1,16 +1,16 @@
-package {
+package: {
     name: "sparse"
     authority: { allow: [IO, Mem.Alloc, Time] }
 }
 
-use time :: core.time
+use time: core.time
 
-fn csr_matvec(data: [Float], indices: [Int], indptr: [Int], x: [Float], rows: Int) -> [Float] {
+csr_matvec: fn(data: [Float], indices: [Int], indptr: [Int], x: [Float], rows: Int) -> [Float] {
     out := [Float]{}
     row := 0
     loop row < rows {
-        start :: indptr[row]
-        finish :: indptr[row + 1]
+        start: indptr[row]
+        finish: indptr[row + 1]
         acc := Float{0.0}
         p := start
         loop p < finish {
@@ -23,17 +23,17 @@ fn csr_matvec(data: [Float], indices: [Int], indptr: [Int], x: [Float], rows: In
     return out
 }
 
-fn sum_values(values: [Float]) -> Float {
+sum_values: fn(values: [Float]) -> Float {
     total := Float{0.0}
     loop value in values -> total += value
     return total
 }
 
-fn run() {
-    rows :: 100000
-    cols :: 1000
-    entries_per_row :: 10
-    nnz :: rows * entries_per_row
+run: fn() {
+    rows: 100000
+    cols: 1000
+    entries_per_row: 10
+    nnz: rows * entries_per_row
 
     data := [Float]{}
     indices := [Int]{}
@@ -52,11 +52,11 @@ fn run() {
         &indptr.push(offset)
     }
 
-    started :: time.instant()
-    y :: csr_matvec(data, indices, indptr, x, rows)
-    finished :: time.instant()
-    duration :: finished - started
-    elapsed :: duration.in(.Nanoseconds)
-    total :: sum_values(y)
+    started: time.instant()
+    y: csr_matvec(data, indices, indptr, x, rows)
+    finished: time.instant()
+    duration: finished - started
+    elapsed: duration.in(.Nanoseconds)
+    total: sum_values(y)
     print("csr_rows:{rows} cols:{cols} nnz:{nnz} ns:{elapsed} checksum:{total} first:{y[0]} last:{y[rows - 1]}")
 }

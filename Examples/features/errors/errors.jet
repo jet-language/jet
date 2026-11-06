@@ -2,12 +2,12 @@
 // `#Error` makes this application-owned family eligible for a typed failure
 // contract. `Err` and `Ok` are the only result constructors shown here.
 #Error
-enum ParseError {
+ParseError: enum {
     Empty
     BadDigit(String)
 }
 
-fn parse_age(raw: String) -> Int ParseError! {
+parse_age: fn(raw: String) -> Int ParseError! {
     // An explicit `Err` exits this function. A plain fallible call in a
     // caller propagates that result; final `Ok` is the success expression.
     if raw == "" -> return Err(ParseError.Empty)
@@ -15,19 +15,19 @@ fn parse_age(raw: String) -> Int ParseError! {
     Ok(42)
 }
 
-fn load() -> Int ParseError! {
+load: fn() -> Int ParseError! {
     // This unmarked call either binds the successful age or returns the
     // ParseError from `load`; the final expression runs only on success.
-    age :: parse_age("7")
+    age: parse_age("7")
     Ok((age * 2))
 }
 
-fn run() {
+run: fn() {
     // `??` is local fallback recovery: a parse failure becomes 0 and the
     // entry continues. It is not the same exit as propagation from `load`.
-    parsed_age :: parse_age("42") ?? 0
+    parsed_age: parse_age("42") ?? 0
     print(parsed_age)
-    doubled_age :: load() ?? 0
+    doubled_age: load() ?? 0
     print(doubled_age)
 
     // A pattern table observes both result routes and handles the error

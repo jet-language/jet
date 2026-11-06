@@ -1,9 +1,9 @@
 
-fn build(b: Build) -[Exec, FS]> {
+build: fn(b: Build) -[Exec, FS]> {
     #Impure("reject unsupported CMake import") {
-        tc :: b.toolchain("native", "x86_64-linux")
-        identity :: b.signing("builder", "ci")
-        imported :: b.legacy(
+        tc: b.toolchain("native", "x86_64-linux")
+        identity: b.signing("builder", "ci")
+        imported: b.legacy(
             "cmake",
             "cmake-import",
             ["CMakeLists.txt"],
@@ -22,8 +22,8 @@ fn build(b: Build) -[Exec, FS]> {
             "cached",
             "CMakeLists.txt"
         )
-        app :: b.add_executable("app", ["main.jet"], [imported])
+        app: b.add_executable("app", ["main.jet"], [imported])
         b.default(app)
     }
 }
-fn run() {}
+run: fn() {}

@@ -1,12 +1,12 @@
-use closeout_files :: core.files
+use closeout_files: core.files
 
 // Port of tests/hostile_closeout_ledger.rs. The two Rust-source evidence
 // scans retire; audit receipts, Jet fixtures, ledger rows and snapshots remain.
-struct S2CloseoutEvidence {
+S2CloseoutEvidence: struct {
     path: String
     markers: [String]
 }
-struct S2CloseoutFinding {
+S2CloseoutFinding: struct {
     code: String
     finding: String
     owner: String
@@ -19,7 +19,7 @@ struct S2CloseoutFinding {
 // The ledger is dated evidence, moved intact from `docs/` to `Docs/`: its rows
 // name each raw witness with the `docs/audits/...` spelling of their date, while
 // the evidence entries read the witness files where they live now.
-fn s2_closeout_specs() -> [S2CloseoutFinding] {
+s2_closeout_specs: fn() -> [S2CloseoutFinding] {
     [S2CloseoutFinding]{
         S2CloseoutFinding{code: "L0520", finding: "F50", owner: "#2417", raw_witness: "docs/audits/raw/2393-r1/A03/T4/jet.json", fixture: "tests/ui/ioerror_display_migration.jet", evidence: [S2CloseoutEvidence]{S2CloseoutEvidence{path: "Docs/audits/raw/2393-r1/A03/T4/jet.json", markers: [String]{}}, S2CloseoutEvidence{path: "tests/ui/ioerror_display_migration.jet", markers: [String]{}}}, row_requirements: [String]{}},
         S2CloseoutFinding{code: "L0503", finding: "F51", owner: "#2416", raw_witness: "docs/audits/raw/2393-r1/A01/T2/jet.json", fixture: "tests/ui_lint/prefer_compound_assign.jet", evidence: [S2CloseoutEvidence]{S2CloseoutEvidence{path: "Docs/audits/raw/2393-r1/A01/T2/jet.json", markers: [String]{}}, S2CloseoutEvidence{path: "tests/ui_lint/prefer_compound_assign.jet", markers: [String]{}}}, row_requirements: [String]{}},
@@ -40,11 +40,11 @@ fn s2_closeout_specs() -> [S2CloseoutFinding] {
     }
 }
 
-fn s2_closeout_receipts(directory: String) -> [String] {
+s2_closeout_receipts: fn(directory: String) -> [String] {
     result := [String]{}
-    entries :: closeout_files.list_dir(directory) ?? panic("cannot read {directory}")
+    entries: closeout_files.list_dir(directory) ?? panic("cannot read {directory}")
     loop entry in entries {
-        metadata :: closeout_files.stat(entry.path) ?? next
+        metadata: closeout_files.stat(entry.path) ?? next
         if metadata.is_dir {
             loop path in s2_closeout_receipts(entry.path) -> &result.push(path)
         } else if entry.name == "jet.json" {
@@ -54,15 +54,15 @@ fn s2_closeout_receipts(directory: String) -> [String] {
     result
 }
 
-fn s2_closeout_observed() -> [String:Int] {
+s2_closeout_observed: fn() -> [String:Int] {
     counts := [String:Int]{}
     paths := s2_closeout_receipts("Docs/audits/raw/2393-r1")
     &paths.sort()
     loop path in paths {
-        text :: closeout_files.read(path) ?? panic("cannot read {path}")
+        text: closeout_files.read(path) ?? panic("cannot read {path}")
         in_codes := false
         loop line in text.lines() {
-            trimmed :: line.trim().copy()
+            trimmed: line.trim().copy()
             if !in_codes {
                 if trimmed.starts_with("\"codes\": [") -> in_codes = true
                 next
@@ -72,98 +72,98 @@ fn s2_closeout_observed() -> [String:Int] {
                 next
             }
             if !trimmed.starts_with("\"") -> next
-            parts :: trimmed.split("\"").to_list()
-            code :: parts[1]
+            parts: trimmed.split("\"").to_list()
+            code: parts[1]
             counts[code] = (counts.get(code) ?? 0) + 1
         }
     }
     counts
 }
 
-fn s2_closeout_rows(ledger: String, finding: String) -> [String] {
+s2_closeout_rows: fn(ledger: String, finding: String) -> [String] {
     rows := [String]{}
     loop line in ledger.lines() {
-        columns :: line.split("|").to_list()
+        columns: line.split("|").to_list()
         if columns.len() > 1 && columns[1].trim().starts_with(finding) -> &rows.push(line.copy())
     }
     rows
 }
 
 // Empty string is Ok(()); a nonempty string is the original Err identity.
-fn s2_closeout_validate(ledger: String, observed: [String:Int]) -> String {
+s2_closeout_validate: fn(ledger: String, observed: [String:Int]) -> String {
     loop spec in s2_closeout_specs() {
-        observed_name :: if spec.code == "" -> spec.finding else -> spec.code
+        observed_name: if spec.code == "" -> spec.finding else -> spec.code
         if spec.code != "" && (observed.get(spec.code) ?? 0) == 0 -> return "closeout diagnostic {spec.code} was not observed in the fresh-agent receipts"
         loop evidence in spec.evidence {
-            text :: closeout_files.read(evidence.path) ?? return "cannot read {evidence.path}"
+            text: closeout_files.read(evidence.path) ?? return "cannot read {evidence.path}"
             loop marker in evidence.markers {
                 if !text.contains(marker) -> return "evidence {evidence.path} for {spec.finding} lacks {marker}"
             }
         }
-        rows :: s2_closeout_rows(ledger, spec.finding)
+        rows: s2_closeout_rows(ledger, spec.finding)
         if rows.is_empty() -> return "observed finding {observed_name} has no canonical ledger row {spec.finding}"
         if rows.len() != 1 -> return "observed finding {spec.finding} must have one canonical ledger row, found {rows.len()}"
-        row :: rows[0]
+        row: rows[0]
         required := [String]{spec.owner, spec.raw_witness, spec.fixture}
         loop value in spec.row_requirements -> &required.push(value)
         loop value in required {
             if !row.contains(value) -> return "ledger row {spec.finding} for observed {observed_name} lacks {value}"
         }
-        closed :: "Closed by `{spec.owner}`"
+        closed: "Closed by `{spec.owner}`"
         if !row.contains("State: `open`") && !row.contains(closed) -> return "ledger row {spec.finding} for observed {observed_name} must stay open until focused proof or close under {spec.owner}"
     }
     ""
 }
 
-fn s2_closeout_test_owner_row() {
-    ledger :: closeout_files.read("Docs/audits/dogfood-jet-experience-5-of-5.md") ?? panic("read closeout ledger")
-    error :: s2_closeout_validate(ledger, s2_closeout_observed())
+s2_closeout_test_owner_row: fn() {
+    ledger: closeout_files.read("Docs/audits/dogfood-jet-experience-5-of-5.md") ?? panic("read closeout ledger")
+    error: s2_closeout_validate(ledger, s2_closeout_observed())
     assert(error == "", "hostile closeout ledger is incomplete: {error}")
 }
 
-fn s2_closeout_test_missing_row() {
-    ledger :: closeout_files.read("Docs/audits/dogfood-jet-experience-5-of-5.md") ?? panic("read closeout ledger")
-    observed :: s2_closeout_observed()
+s2_closeout_test_missing_row: fn() {
+    ledger: closeout_files.read("Docs/audits/dogfood-jet-experience-5-of-5.md") ?? panic("read closeout ledger")
+    observed: s2_closeout_observed()
     loop spec in s2_closeout_specs() {
         kept := [String]{}
         loop line in ledger.lines() {
             if !line.contains("| {spec.finding} ") -> &kept.push(line.copy())
         }
-        error :: s2_closeout_validate(kept.join("\n"), observed)
+        error: s2_closeout_validate(kept.join("\n"), observed)
         assert(error != "", "an observed finding without its owner row must fail closed")
-        observed_name :: if spec.code == "" -> spec.finding else -> spec.code
+        observed_name: if spec.code == "" -> spec.finding else -> spec.code
         assert(error.contains(observed_name) && error.contains(spec.finding), "missing-row error lost identity for {spec.finding}: {error}")
     }
 }
 
-fn s2_closeout_test_mismatched_row() {
-    ledger :: closeout_files.read("Docs/audits/dogfood-jet-experience-5-of-5.md") ?? panic("read closeout ledger")
-    observed :: s2_closeout_observed()
+s2_closeout_test_mismatched_row: fn() {
+    ledger: closeout_files.read("Docs/audits/dogfood-jet-experience-5-of-5.md") ?? panic("read closeout ledger")
+    observed: s2_closeout_observed()
     loop spec in s2_closeout_specs() {
-        rows :: s2_closeout_rows(ledger, spec.finding)
+        rows: s2_closeout_rows(ledger, spec.finding)
         assert(!rows.is_empty(), "every finding has a source row")
-        row :: rows[0]
-        requirements :: [String]{spec.owner, spec.raw_witness, spec.fixture}
+        row: rows[0]
+        requirements: [String]{spec.owner, spec.raw_witness, spec.fixture}
         loop required in requirements {
-            mismatched :: row.replace(required, "__mismatched__")
+            mismatched: row.replace(required, "__mismatched__")
             lines := [String]{}
             loop line in ledger.lines() -> &lines.push(if line == row -> mismatched else -> line.copy())
-            error :: s2_closeout_validate(lines.join("\n"), observed)
+            error: s2_closeout_validate(lines.join("\n"), observed)
             assert(error != "", "a mismatched owner or witness must fail closed")
             assert(error.contains(spec.finding) && error.contains(required), "mismatch error lost {spec.finding} identity: {error}")
         }
     }
 }
 
-fn s2_closeout_test_l0503_fixture() {
-    fixture :: closeout_files.read("tests/ui_lint/prefer_compound_assign.jet") ?? panic("L0503 fixture")
-    snapshot :: closeout_files.read("tests/ui_lint/prefer_compound_assign.warn") ?? panic("L0503 snapshot")
-    fixture_markers :: [String]{"p.hp = p.hp - amount", "n = (n + 1)", "Indexed compound is E0164"}
+s2_closeout_test_l0503_fixture: fn() {
+    fixture: closeout_files.read("tests/ui_lint/prefer_compound_assign.jet") ?? panic("L0503 fixture")
+    snapshot: closeout_files.read("tests/ui_lint/prefer_compound_assign.warn") ?? panic("L0503 snapshot")
+    fixture_markers: [String]{"p.hp = p.hp - amount", "n = (n + 1)", "Indexed compound is E0164"}
     loop expected in fixture_markers {
         assert(fixture.contains(expected), "L0503 fixture lost {expected}")
     }
     assert(snapshot.split("Warning [jet.CompoundAssignment]").to_list().len() - 1 == 4, "L0503 snapshot warning count changed: {snapshot}")
-    snapshot_markers :: [String]{"Prefer `p.hp -= …` instead of repeating the left side", "Prefer `p.hp += …` instead of repeating the left side", "Why: Compound assignment updates a place in one step without restating it", "Fix: Write `p.hp -= …`", "More: jet-lang.dev/e/L0503"}
+    snapshot_markers: [String]{"Prefer `p.hp -= …` instead of repeating the left side", "Prefer `p.hp += …` instead of repeating the left side", "Why: Compound assignment updates a place in one step without restating it", "Fix: Write `p.hp -= …`", "More: jet-lang.dev/e/L0503"}
     loop expected in snapshot_markers {
         assert(snapshot.contains(expected), "L0503 snapshot lost {expected}")
     }

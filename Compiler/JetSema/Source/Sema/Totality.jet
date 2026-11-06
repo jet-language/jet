@@ -5,7 +5,7 @@
 // instead of one whole-graph stop.
 
 // One function a check left incomplete, with one recorded cause.
-struct SemaTotalityRow {
+SemaTotalityRow: struct {
     // The module: its source file, or its identity when it has none.
     owner: String
     // The function's label as its check wrote it ("function `name`",
@@ -21,11 +21,11 @@ struct SemaTotalityRow {
 // the backticked name; any other line is a module-wide cause. A module that
 // is incomplete with no recorded cause is one row saying so: that stop is
 // itself the break of the law.
-fn sema_totality_rows(modules: [SemaGraphModuleResult]) -> [SemaTotalityRow] Never! {
+sema_totality_rows: fn(modules: [SemaGraphModuleResult]) -> [SemaTotalityRow] Never! {
     rows := [SemaTotalityRow]{}
     loop graph_module in modules {
         if graph_module.complete -> next
-        owner :: if graph_module.source_file != "" -> graph_module.source_file.copy() else -> graph_module.module_identity.copy()
+        owner: if graph_module.source_file != "" -> graph_module.source_file.copy() else -> graph_module.module_identity.copy()
         if graph_module.incomplete_reasons.len() == 0 {
             &rows.push(SemaTotalityRow{owner: owner, function: "-", reason: "incomplete with no recorded cause"})
             next
@@ -36,8 +36,8 @@ fn sema_totality_rows(modules: [SemaGraphModuleResult]) -> [SemaTotalityRow] Nev
 }
 
 // One recorded cause of the module `owner` as its row.
-fn sema_totality_reason_row(owner: String, reason: String) -> SemaTotalityRow Never! {
-    at :: reason.find("`: ")
+sema_totality_reason_row: fn(owner: String, reason: String) -> SemaTotalityRow Never! {
+    at: reason.find("`: ")
     if at < 0 -> return SemaTotalityRow{owner: owner.copy(), function: "-", reason: reason.copy()}
     SemaTotalityRow{owner: owner.copy(), function: reason.slice(0..<at + 1), reason: reason.slice(at + 3..<reason.len())}
 }

@@ -1,5 +1,5 @@
 // Source scanning for package entries (Package/mod.rs): top-level function
-// lines, the compiler-owned `fn build` shape, and the in-project import graph
+// lines, the compiler-owned `build: fn` shape, and the in-project import graph
 // that output references follow. Paths are `/`-separated strings.
 use {
     jet_foundation.[Func, ImportDecl, ImportKind, Program, Type]
@@ -9,7 +9,7 @@ use {
 }
 
 // One parsed package source file.
-struct ParsedSource {
+ParsedSource: struct {
     path: String
     program: Program
 }
@@ -17,15 +17,15 @@ struct ParsedSource {
 // Parse every checked source file with the compiler front end (inline
 // package carriers masked); None when any file fails to read, lex, or parse.
 // A listing's `package.jet` is the manifest, not a source, and is skipped.
-fn pkg_parse_sources(source_files: [CheckedFile]) -> [ParsedSource]? Never! {
+pkg_parse_sources: fn(source_files: [CheckedFile]) -> [ParsedSource]? Never! {
     out := [ParsedSource]{}
     loop file in source_files {
         if pkg_path_file_name(file.relative) == PACKAGE_FILE -> next
-        text :: file.text() ?? return None
-        masked :: pkg_mask_inline_package_source(text) ?? return None
-        lexed :: lex(masked.source.bytes())
+        text: file.text() ?? return None
+        masked: pkg_mask_inline_package_source(text) ?? return None
+        lexed: lex(masked.source.bytes())
         if lexed.diagnostics.len() > 0 -> return None
-        parsed :: parse_lexed(^lexed)
+        parsed: parse_lexed(^lexed)
         if parsed.diagnostics.len() > 0 -> return None
         &out.push(ParsedSource{path: file.path, program: parsed.program})
     }
@@ -33,7 +33,7 @@ fn pkg_parse_sources(source_files: [CheckedFile]) -> [ParsedSource]? Never! {
 }
 
 // The one top-level function named `wanted`, or None when absent or repeated.
-fn pkg_unique_top_level_function(program: Program, wanted: String) -> Func? Never! {
+pkg_unique_top_level_function: fn(program: Program, wanted: String) -> Func? Never! {
     found := Func?{None}
     loop item in program.items {
         if item == .Func(function) {
@@ -47,7 +47,7 @@ fn pkg_unique_top_level_function(program: Program, wanted: String) -> Func? Neve
 
 // `ImportDecl::import_alias`: the written alias, else the default derived
 // from the import kind.
-fn pkg_import_alias(import: ImportDecl) -> String Never! {
+pkg_import_alias: fn(import: ImportDecl) -> String Never! {
     if import.alias != "" -> return import.alias
     if import.kind == {
         .File(path, _) -> path.cut_last("/")?.after ?? path
@@ -56,7 +56,7 @@ fn pkg_import_alias(import: ImportDecl) -> String Never! {
     }
 }
 
-fn pkg_import_is_unqualified(import: ImportDecl) -> Bool Never! {
+pkg_import_is_unqualified: fn(import: ImportDecl) -> Bool Never! {
     if import.kind == {
         .Unqualified(_, _, _, _, _) -> true
         else -> false
@@ -64,18 +64,18 @@ fn pkg_import_is_unqualified(import: ImportDecl) -> Bool Never! {
 }
 
 // The parent directory of a `/` path (`Path::parent`), "" for a bare name.
-fn pkg_path_parent(path: String) -> String Never! {
-    parts :: path.cut_last("/") ?? return ""
+pkg_path_parent: fn(path: String) -> String Never! {
+    parts: path.cut_last("/") ?? return ""
     if parts.before == "" && path.starts_with("/") -> return "/"
     parts.before
 }
 
-fn pkg_path_file_name(path: String) -> String Never! {
-    parts :: path.cut_last("/") ?? return path
+pkg_path_file_name: fn(path: String) -> String Never! {
+    parts: path.cut_last("/") ?? return path
     parts.after
 }
 
-fn pkg_path_join(base: String, tail: String) -> String Never! {
+pkg_path_join: fn(base: String, tail: String) -> String Never! {
     if tail.starts_with("/") -> return tail.copy()
     if base == "" -> return tail.copy()
     if base.ends_with("/") -> return "{base}{tail}"
@@ -83,8 +83,8 @@ fn pkg_path_join(base: String, tail: String) -> String Never! {
 }
 
 // Lexical normalization: drop `.`, resolve `..` by popping.
-fn pkg_normalize_discovery_path(path: String) -> String Never! {
-    absolute :: path.starts_with("/")
+pkg_normalize_discovery_path: fn(path: String) -> String Never! {
+    absolute: path.starts_with("/")
     parts := [String]{}
     loop part in path.split("/") {
         if part == "" || part == "." -> next
@@ -94,17 +94,17 @@ fn pkg_normalize_discovery_path(path: String) -> String Never! {
         }
         &parts.push(part)
     }
-    joined :: parts.join("/")
+    joined: parts.join("/")
     if absolute -> return "/{joined}"
     joined
 }
 
 // `path` normalized under `root`, refusing any `..` component or segment.
-fn pkg_normalize_safe_import_path(root: String, path: String) -> String? Never! {
-    base :: pkg_normalize_discovery_path(root)
-    prefix :: if base.ends_with("/") -> base else -> "{base}/"
+pkg_normalize_safe_import_path: fn(root: String, path: String) -> String? Never! {
+    base: pkg_normalize_discovery_path(root)
+    prefix: if base.ends_with("/") -> base else -> "{base}/"
     if path != base && !path.starts_with(prefix) -> return None
-    relative :: if path == base -> "" else -> path.removeprefix(prefix)
+    relative: if path == base -> "" else -> path.removeprefix(prefix)
     normalized := base
     loop part in relative.split("/") {
         if part == "" || part == "." -> next
@@ -116,8 +116,8 @@ fn pkg_normalize_safe_import_path(root: String, path: String) -> String? Never! 
 
 // Candidate files for one import: the base path, `<base>.jet` when it has no
 // `.jet` extension, and `<base>/module.jet`, sorted and deduplicated.
-fn pkg_import_target_paths(root: String, importer: String, kind: ImportKind) -> [String] Never! {
-    base :: if kind == {
+pkg_import_target_paths: fn(root: String, importer: String, kind: ImportKind) -> [String] Never! {
+    base: if kind == {
         .File(path, _) -> pkg_path_join(pkg_path_parent(importer), path)
         .Module(name, _) -> pkg_path_join(root, name.split(".").to_list().join("/"))
         .Unqualified(_, _, _, _, _) -> {
@@ -135,18 +135,18 @@ fn pkg_import_target_paths(root: String, importer: String, kind: ImportKind) -> 
 }
 
 // `Path::with_extension`'s stem: the path without its final `.ext`.
-fn pkg_path_without_extension(path: String) -> String Never! {
-    name :: pkg_path_file_name(path)
-    dot :: name.cut_last(".") ?? return path
+pkg_path_without_extension: fn(path: String) -> String Never! {
+    name: pkg_path_file_name(path)
+    dot: name.cut_last(".") ?? return path
     if dot.before == "" -> return path.copy()
-    stem :: pkg_binder_slice(path, 0, path.bytes().len() - name.bytes().len())
+    stem: pkg_binder_slice(path, 0, path.bytes().len() - name.bytes().len())
     "{stem}{dot.before}"
 }
 
-fn pkg_resolved_import_targets(root: String, source: ParsedSource, kind: ImportKind, sources: [ParsedSource]) -> [String] Never! {
+pkg_resolved_import_targets: fn(root: String, source: ParsedSource, kind: ImportKind, sources: [ParsedSource]) -> [String] Never! {
     out := [String]{}
     loop candidate in pkg_import_target_paths(root, source.path, kind) {
-        safe :: pkg_normalize_safe_import_path(root, candidate) ?? next
+        safe: pkg_normalize_safe_import_path(root, candidate) ?? next
         loop other in sources {
             if pkg_normalize_discovery_path(other.path) == safe {
                 &out.push(other.path)
@@ -159,7 +159,7 @@ fn pkg_resolved_import_targets(root: String, source: ParsedSource, kind: ImportK
 
 // Every import target whose alias is `wanted`, following the in-project
 // import graph from root-level files.
-fn pkg_reachable_import_module_targets(root: String, wanted: String, sources: [ParsedSource]) -> [String] Never! {
+pkg_reachable_import_module_targets: fn(root: String, wanted: String, sources: [ParsedSource]) -> [String] Never! {
     pending := [String]{}
     loop source in sources {
         if pkg_path_parent(source.path) == root -> &pending.push(source.path)
@@ -167,15 +167,15 @@ fn pkg_reachable_import_module_targets(root: String, wanted: String, sources: [P
     visited := [String]{}
     targets := [String]{}
     loop pending.len() > 0 {
-        path :: pending[pending.len() - 1].copy()
+        path: pending[pending.len() - 1].copy()
         pending = pending[0..<pending.len() - 1]
-        normalized :: pkg_normalize_discovery_path(path)
+        normalized: pkg_normalize_discovery_path(path)
         if visited.contains(normalized) -> next
         &visited.push(normalized)
-        source :: pkg_find_parsed_source(sources, path) ?? next
+        source: pkg_find_parsed_source(sources, path) ?? next
         loop import in source.program.imports {
             if pkg_import_is_unqualified(import) -> next
-            resolved :: pkg_resolved_import_targets(root, source, import.kind, sources)
+            resolved: pkg_resolved_import_targets(root, source, import.kind, sources)
             if pkg_import_alias(import) == wanted {
                 loop target in resolved -> &targets.push(target)
             }
@@ -189,7 +189,7 @@ fn pkg_reachable_import_module_targets(root: String, wanted: String, sources: [P
     out
 }
 
-fn pkg_find_parsed_source(sources: [ParsedSource], path: String) -> ParsedSource? Never! {
+pkg_find_parsed_source: fn(sources: [ParsedSource], path: String) -> ParsedSource? Never! {
     loop source in sources {
         if source.path == path -> return Val(source)
     }
@@ -197,21 +197,21 @@ fn pkg_find_parsed_source(sources: [ParsedSource], path: String) -> ParsedSource
 }
 
 // Every file transitively imported by `source`, normalized and sorted.
-fn pkg_imported_source_paths(root: String, source: ParsedSource, sources: [ParsedSource]) -> [String] Never! {
+pkg_imported_source_paths: fn(root: String, source: ParsedSource, sources: [ParsedSource]) -> [String] Never! {
     pending := [String]{source.path}
     visited := [String]{}
     imported := [String]{}
     loop pending.len() > 0 {
-        path :: pending[pending.len() - 1].copy()
+        path: pending[pending.len() - 1].copy()
         pending = pending[0..<pending.len() - 1]
-        normalized :: pkg_normalize_discovery_path(path)
+        normalized: pkg_normalize_discovery_path(path)
         if visited.contains(normalized) -> next
         &visited.push(normalized)
-        current :: pkg_find_parsed_source(sources, path) ?? next
+        current: pkg_find_parsed_source(sources, path) ?? next
         loop import in current.program.imports {
             if pkg_import_is_unqualified(import) -> next
             loop target in pkg_resolved_import_targets(root, current, import.kind, sources) {
-                key :: pkg_normalize_discovery_path(target)
+                key: pkg_normalize_discovery_path(target)
                 if !imported.contains(key) {
                     &imported.push(key)
                     &pending.push(target)
@@ -222,14 +222,13 @@ fn pkg_imported_source_paths(root: String, source: ParsedSource, sources: [Parse
     pkg_manifest_sorted(imported)
 }
 
-// 1-based lines of every top-level `<wanted>: fn` (or the retired
-// `fn <wanted>`), skipping strings and comments.
-fn pkg_top_level_function_lines(source: String, wanted: String) -> [Int] Never! {
-    raw :: "{source} ".bytes()
+// 1-based lines of every top-level `<wanted>: fn`, skipping strings and
+// comments.
+pkg_top_level_function_lines: fn(source: String, wanted: String) -> [Int] Never! {
+    raw: "{source} ".bytes()
     depth := 0
     token_start := -1
     token_line := 1
-    saw_fn := false
     candidate := false
     candidate_line := 1
     colon_seen := false
@@ -242,9 +241,9 @@ fn pkg_top_level_function_lines(source: String, wanted: String) -> [Int] Never! 
     matches := [Int]{}
     index := 0
     loop index < raw.len() {
-        width :: pkg_scalar_width(raw, index)
-        code :: Int.from_u8(raw[index])
-        current :: index
+        width: pkg_scalar_width(raw, index)
+        code: Int.from_u8(raw[index])
+        current: index
         index += width
         if line_comment {
             if code == 10 {
@@ -304,10 +303,8 @@ fn pkg_top_level_function_lines(source: String, wanted: String) -> [Int] Never! 
             next
         }
         if token_start >= 0 {
-            token :: pkg_bytes_text(raw, token_start, current)
-            if depth == 0 && saw_fn && token == wanted -> &matches.push(token_line)
+            token: pkg_bytes_text(raw, token_start, current)
             if depth == 0 && candidate && colon_seen && token == "fn" -> &matches.push(candidate_line)
-            saw_fn = depth == 0 && token == "fn"
             candidate = depth == 0 && token == wanted && previous != 46
             candidate_line = token_line
             colon_seen = false
@@ -327,8 +324,8 @@ fn pkg_top_level_function_lines(source: String, wanted: String) -> [Int] Never! 
 }
 
 // The byte width of the UTF-8 scalar at `at`.
-fn pkg_scalar_width(raw: [U8], at: Int) -> Int Never! {
-    lead :: Int.from_u8(raw[at])
+pkg_scalar_width: fn(raw: [U8], at: Int) -> Int Never! {
+    lead: Int.from_u8(raw[at])
     if {
         lead >= 240 -> 4
         lead >= 224 -> 3
@@ -337,8 +334,8 @@ fn pkg_scalar_width(raw: [U8], at: Int) -> Int Never! {
     }
 }
 
-// `Sema::is_build_entry`: `fn build(b: Build)`.
-fn pkg_is_build_entry(function: Func) -> Bool Never! {
+// `Sema::is_build_entry`: `build: fn(b: Build)`.
+pkg_is_build_entry: fn(function: Func) -> Bool Never! {
     function.name == BUILD_ENTRY_FN && function.params.len() == 1 && function.params[0].ty == Type.Named{name: TYPE_BUILD_CONTEXT}
 }
 
@@ -346,12 +343,12 @@ fn pkg_is_build_entry(function: Func) -> Bool Never! {
 // shape; None when the source does not lex (the Driver reports it). The
 // check-mode parse keeps its recovered program even with parser diagnostics
 // (Rust `parse_for_check_with_source`).
-fn pkg_real_build_entry_lines(source: String, candidates: [Int]) -> [Int]? Never! {
-    masked :: pkg_mask_inline_package_source(source) ?? return None
-    text :: masked.source
-    lexed :: lex(text.bytes())
+pkg_real_build_entry_lines: fn(source: String, candidates: [Int]) -> [Int]? Never! {
+    masked: pkg_mask_inline_package_source(source) ?? return None
+    text: masked.source
+    lexed: lex(text.bytes())
     if lexed.diagnostics.len() > 0 -> return None
-    parsed :: parse_lexed(^lexed)
+    parsed: parse_lexed(^lexed)
     real := [Int]{}
     loop item in parsed.program.items {
         if item == .Func(function) {
@@ -365,8 +362,8 @@ fn pkg_real_build_entry_lines(source: String, candidates: [Int]) -> [Int]? Never
     Val(out)
 }
 
-fn pkg_source_line_at(source: String, offset: Int) -> Int Never! {
-    raw :: source.bytes()
+pkg_source_line_at: fn(source: String, offset: Int) -> Int Never! {
+    raw: source.bytes()
     count := 1
     loop index in 0..<offset {
         if index < raw.len() && Int.from_u8(raw[index]) == 10 -> count += 1

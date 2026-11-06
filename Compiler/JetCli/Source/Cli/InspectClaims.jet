@@ -6,22 +6,22 @@ use {
     jet_foundation.[evidence_report_read, sha256_hex]
     jet_driver.[JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
     jet_pkg_model.[ClaimsGrade, ClaimsProjection, ManifestError, PackageFacts, WorkspaceDeclarationCache]
-    cli_files :: core.files
-    cli_sys :: core.sys
-    claims_crypto :: core.crypto
+    cli_files: core.files
+    cli_sys: core.sys
+    claims_crypto: core.crypto
 }
 
 // The claims grade of one target: the strongest rung its newest evidence
 // report reaches (D-GRADE1=D), whether that report has failing evidence,
 // the report's id (None when no report covers the current source), and the
 // package floor.
-struct JetCLIClaimsGradeView {
+JetCLIClaimsGradeView: struct {
     grade: ClaimsGrade
     failed: Bool
     report: String?
     floor: ClaimsGrade?
 
-    fn floor_met(self) -> Bool Never! {
+    floor_met: fn(self) -> Bool Never! {
         if self.failed -> return false
         if self.floor == .Val(required) -> return self.grade.meets(required)
         true
@@ -31,14 +31,14 @@ struct JetCLIClaimsGradeView {
 // `file`'s claims grade against `floor`. Evidence is indexed by the SHA-256
 // of the source it ran, so a report of an older source never grades the
 // current one.
-fn jet_cli_inspect_claims_grade(file: String, floor: ClaimsGrade?) -[FS, Env, Time]> JetCLIClaimsGradeView Never! {
-    view :: JetCLIClaimsGradeView{grade: ClaimsGrade.Unchecked, failed: false, report: None, floor: floor.copy()}
-    bytes :: cli_files.read_bytes(file) ?? return view
-    revision :: claims_crypto.sha256(bytes).hex()
-    cwd :: cli_sys.current_dir() ?? return view
+jet_cli_inspect_claims_grade: fn(file: String, floor: ClaimsGrade?) -[FS, Env, Time]> JetCLIClaimsGradeView Never! {
+    view: JetCLIClaimsGradeView{grade: ClaimsGrade.Unchecked, failed: false, report: None, floor: floor.copy()}
+    bytes: cli_files.read_bytes(file) ?? return view
+    revision: claims_crypto.sha256(bytes).hex()
+    cwd: cli_sys.current_dir() ?? return view
     cache := WorkspaceDeclarationCache.new()
-    project :: jet_cli_selected_project_root(&cache, cwd) ?? return view
-    index :: jet_cli_record_index_load(project) ?? return view
+    project: jet_cli_selected_project_root(&cache, cwd) ?? return view
+    index: jet_cli_record_index_load(project) ?? return view
     newest := JetCLIRecordIndexEntry?{None}
     loop entry in jet_cli_record_index_query_kind(index, "evidence", true) {
         if entry.identity.target_inputs_sha256 != revision -> next
@@ -47,21 +47,21 @@ fn jet_cli_inspect_claims_grade(file: String, floor: ClaimsGrade?) -[FS, Env, Ti
         }
         newest = Val(entry.copy())
     }
-    entry :: newest ?? return view
-    report :: evidence_report_read(jet_cli_entry_join(project, entry.path)) ?? return view
-    projection :: ClaimsProjection.from_records(report.records)
+    entry: newest ?? return view
+    report: evidence_report_read(jet_cli_entry_join(project, entry.path)) ?? return view
+    projection: ClaimsProjection.from_records(report.records)
     JetCLIClaimsGradeView{grade: projection.grade.copy(), failed: projection.failed, report: Val(entry.artifact_id.copy()), floor: floor}
 }
 
 // The package's `policy.claims.min`, held to its Package root's as `jet test`
 // holds it.
-fn jet_cli_inspect_claims_floor(root: String) -[FS, Env]> ClaimsGrade? ManifestError! {
-    text :: cli_files.read("{root}/package.jet") ?? return Ok(None)
-    facts :: PackageFacts.parse_uncomposed(text, "{root}/package.jet") ?? return Ok(None)
+jet_cli_inspect_claims_floor: fn(root: String) -[FS, Env]> ClaimsGrade? ManifestError! {
+    text: cli_files.read("{root}/package.jet") ?? return Ok(None)
+    facts: PackageFacts.parse_uncomposed(text, "{root}/package.jet") ?? return Ok(None)
     jet_cli_member_claims_floor(cli_files.realpath(root) ?? root, facts)
 }
 
-fn jet_cli_claims_grade_json(view: JetCLIClaimsGradeView) -> JetCLIStatusValue Never! {
+jet_cli_claims_grade_json: fn(view: JetCLIClaimsGradeView) -> JetCLIStatusValue Never! {
     floor_text := String?{None}
     if view.floor == .Val(required) -> floor_text = Val(required.render())
     jet_cli_status_object([JetCLIStatusField]{
@@ -73,26 +73,26 @@ fn jet_cli_claims_grade_json(view: JetCLIClaimsGradeView) -> JetCLIStatusValue N
     })
 }
 
-fn jet_cli_claims_grade_text(view: JetCLIClaimsGradeView, file: String) -> String Never! {
-    grade :: if view.failed -> "{view.grade.render()} (with failing evidence)" else -> view.grade.render()
-    floor :: if view.floor == {
+jet_cli_claims_grade_text: fn(view: JetCLIClaimsGradeView, file: String) -> String Never! {
+    grade: if view.failed -> "{view.grade.render()} (with failing evidence)" else -> view.grade.render()
+    floor: if view.floor == {
         .Val(required) -> "{required.render()} ({if view.floor_met() -> "met" else -> "below"})"
         .None -> "none"
     }
-    evidence :: if view.report == {
+    evidence: if view.report == {
         .Val(id) -> id.copy()
         .None -> "none for the current source; run `jet test {file}`"
     }
     "claims grade: {grade}\nclaims floor: {floor}\nclaims evidence: {evidence}\n"
 }
 
-JET_CLI_CLAIM_DISPOSITIONS :: [String]{"planned", "implemented-unqualified", "passed", "failed", "stale", "unavailable", "unsupported", "owner-ratified-not-applicable"}
+JET_CLI_CLAIM_DISPOSITIONS: [String]{"planned", "implemented-unqualified", "passed", "failed", "stale", "unavailable", "unsupported", "owner-ratified-not-applicable"}
 
-fn jet_cli_claim_digest(value: JetCLIStatusValue?) -> String? Never! {
-    text :: jet_cli_status_string(value) ?? return None
+jet_cli_claim_digest: fn(value: JetCLIStatusValue?) -> String? Never! {
+    text: jet_cli_status_string(value) ?? return None
     if !text.starts_with("sha256:") || text.len() != 71 -> return None
     loop byte in text.slice(7..<text.len()).bytes() {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         if !((code >= 48 && code <= 57) || (code >= 65 && code <= 70) || (code >= 97 && code <= 102)) {
             return None
         }
@@ -100,7 +100,7 @@ fn jet_cli_claim_digest(value: JetCLIStatusValue?) -> String? Never! {
     Val(text)
 }
 
-fn jet_cli_claim_canonical(value: JetCLIStatusValue, root: Bool) -> String JetCLIReadError! {
+jet_cli_claim_canonical: fn(value: JetCLIStatusValue, root: Bool) -> String JetCLIReadError! {
     if value == {
         .Float(_) -> Err(jet_cli_read_error("canonical capability metadata cannot contain floating-point numbers"))
         .Array(values) -> {
@@ -120,7 +120,7 @@ fn jet_cli_claim_canonical(value: JetCLIStatusValue, root: Bool) -> String JetCL
             rendered := [String]{}
             loop name in names {
                 if root && name == "content_digest" -> next
-                child :: jet_cli_status_get(value, name) ?? JetCLIStatusValue.Null
+                child: jet_cli_status_get(value, name) ?? JetCLIStatusValue.Null
                 &rendered.push("{jet_cli_json_string(name)}:{jet_cli_claim_canonical(child, false)}")
             }
             Ok("{{{rendered.join(",")}}}")
@@ -129,15 +129,15 @@ fn jet_cli_claim_canonical(value: JetCLIStatusValue, root: Bool) -> String JetCL
     }
 }
 
-fn jet_cli_claim_validate_digest(value: JetCLIStatusValue, label: String) -> String? Never! {
-    actual :: jet_cli_claim_digest(jet_cli_status_get(value, "content_digest")) ?? return Val("{label} content_digest is missing or invalid")
-    canonical :: jet_cli_claim_canonical(value, true) ?? return Val(err.message)
-    expected :: "sha256:{sha256_hex(canonical)}"
+jet_cli_claim_validate_digest: fn(value: JetCLIStatusValue, label: String) -> String? Never! {
+    actual: jet_cli_claim_digest(jet_cli_status_get(value, "content_digest")) ?? return Val("{label} content_digest is missing or invalid")
+    canonical: jet_cli_claim_canonical(value, true) ?? return Val(err.message)
+    expected: "sha256:{sha256_hex(canonical)}"
     if actual != expected -> return Val("{label} content_digest does not match canonical content")
     None
 }
 
-fn jet_cli_claim_validate_manifest(manifest: JetCLIStatusValue) -> String? Never! {
+jet_cli_claim_validate_manifest: fn(manifest: JetCLIStatusValue) -> String? Never! {
     errors := [String]{}
     if jet_cli_status_string(jet_cli_status_get(manifest, "schema")) != Val("jet.hardening.surface.v1") {
         &errors.push("schema must be jet.hardening.surface.v1")
@@ -148,7 +148,7 @@ fn jet_cli_claim_validate_manifest(manifest: JetCLIStatusValue) -> String? Never
     if jet_cli_claim_validate_digest(manifest, "hardening manifest") == .Val(error) {
         &errors.push(error)
     }
-    snapshot :: jet_cli_status_get(manifest, "source_snapshot") ?? {
+    snapshot: jet_cli_status_get(manifest, "source_snapshot") ?? {
         &errors.push("source_snapshot is required")
         return Val(errors.join("; "))
     }
@@ -162,12 +162,12 @@ fn jet_cli_claim_validate_manifest(manifest: JetCLIStatusValue) -> String? Never
     Val(errors.join("; "))
 }
 
-fn jet_cli_claim_nonempty(value: JetCLIStatusValue?) -> Bool Never! {
-    text :: jet_cli_status_string(value) ?? return false
+jet_cli_claim_nonempty: fn(value: JetCLIStatusValue?) -> Bool Never! {
+    text: jet_cli_status_string(value) ?? return false
     text.trim() != ""
 }
 
-fn jet_cli_claim_validate_relation(manifest: JetCLIStatusValue, relation: JetCLIStatusValue) -> String? Never! {
+jet_cli_claim_validate_relation: fn(manifest: JetCLIStatusValue, relation: JetCLIStatusValue) -> String? Never! {
     errors := [String]{}
     if jet_cli_status_string(jet_cli_status_get(relation, "schema")) != Val(JET_CLI_CAPABILITY_RELATION_SCHEMA) {
         &errors.push("schema must be {JET_CLI_CAPABILITY_RELATION_SCHEMA}")
@@ -178,22 +178,22 @@ fn jet_cli_claim_validate_relation(manifest: JetCLIStatusValue, relation: JetCLI
     if jet_cli_claim_validate_digest(relation, "capability relation") == .Val(error) {
         &errors.push(error)
     }
-    relation_source :: jet_cli_claim_digest(jet_cli_status_get(relation, "source_snapshot_hash"))
-    manifest_source :: jet_cli_claim_digest(jet_cli_status_nested(manifest, "source_snapshot", "hash"))
+    relation_source: jet_cli_claim_digest(jet_cli_status_get(relation, "source_snapshot_hash"))
+    manifest_source: jet_cli_claim_digest(jet_cli_status_nested(manifest, "source_snapshot", "hash"))
     if relation_source == .None -> &errors.push("source_snapshot_hash is missing or invalid") else if relation_source != manifest_source {
         &errors.push("source_snapshot_hash does not match the manifest")
     }
     if !jet_cli_claim_nonempty(jet_cli_status_get(relation, "revision_rule")) {
         &errors.push("revision_rule is missing or empty")
     }
-    identities :: jet_cli_status_list(jet_cli_status_get(relation, "identities")) ?? {
+    identities: jet_cli_status_list(jet_cli_status_get(relation, "identities")) ?? {
         &errors.push("identities are required")
         [JetCLIStatusValue]{}
     }
     identity_names := [String]{}
     identity_modes := [[String]]{}
     loop identity in identities {
-        id :: jet_cli_status_string(jet_cli_status_get(identity, "capability_id")) ?? {
+        id: jet_cli_status_string(jet_cli_status_get(identity, "capability_id")) ?? {
             &errors.push("identity capability_id is missing")
             next
         }
@@ -206,13 +206,13 @@ fn jet_cli_claim_validate_relation(manifest: JetCLIStatusValue, relation: JetCLI
             if old == id -> old_index = Val(index)
         }
         if old_index != None -> &errors.push("duplicate identity: {id}")
-        modes :: jet_cli_status_list(jet_cli_status_get(identity, "applicable_modes")) ?? {
+        modes: jet_cli_status_list(jet_cli_status_get(identity, "applicable_modes")) ?? {
             &errors.push("identity has no applicable modes: {id}")
             [JetCLIStatusValue]{}
         }
         mode_set := [String]{}
         loop value in modes {
-            mode :: jet_cli_status_string(Val(value)) ?? {
+            mode: jet_cli_status_string(Val(value)) ?? {
                 &errors.push("identity mode is malformed: {id}")
                 next
             }
@@ -229,7 +229,7 @@ fn jet_cli_claim_validate_relation(manifest: JetCLIStatusValue, relation: JetCLI
             &identity_modes.push(mode_set)
         }
     }
-    rows :: jet_cli_status_list(jet_cli_status_get(relation, "rows")) ?? {
+    rows: jet_cli_status_list(jet_cli_status_get(relation, "rows")) ?? {
         &errors.push("rows are required")
         [JetCLIStatusValue]{}
     }
@@ -237,7 +237,7 @@ fn jet_cli_claim_validate_relation(manifest: JetCLIStatusValue, relation: JetCLI
     dispositions := [String]{}
     counted := 0
     loop (index, row) in rows {
-        id :: jet_cli_status_string(jet_cli_status_get(row, "row_id")) ?? {
+        id: jet_cli_status_string(jet_cli_status_get(row, "row_id")) ?? {
             &errors.push("row#{index} row_id is missing")
             next
         }
@@ -245,8 +245,8 @@ fn jet_cli_claim_validate_relation(manifest: JetCLIStatusValue, relation: JetCLI
             &errors.push("duplicate or empty row_id: {id}")
         }
         if !row_ids.contains(id) -> &row_ids.push(id)
-        capability :: jet_cli_status_string(jet_cli_status_get(row, "capability_id"))
-        mode :: jet_cli_status_string(jet_cli_status_get(row, "mode"))
+        capability: jet_cli_status_string(jet_cli_status_get(row, "capability_id"))
+        mode: jet_cli_status_string(jet_cli_status_get(row, "mode"))
         if capability == .Val(capability_name) && mode == .Val(mode_name) {
             if id != "{capability_name}@{mode_name}" {
                 &errors.push("row identity is not canonical: {id}")
@@ -274,19 +274,19 @@ fn jet_cli_claim_validate_relation(manifest: JetCLIStatusValue, relation: JetCLI
                 &errors.push("non-pass row has no owner link: {id}")
             }
             if disposition == "passed" {
-                passed :: jet_cli_status_string(jet_cli_status_nested(row, "evidence", "status")) == (Val("passed"))
-                oracle :: jet_cli_status_boolean(jet_cli_status_nested(row, "oracle", "independent_expected_behavior")) == (Val(true))
-                observable :: jet_cli_status_boolean(jet_cli_status_nested(row, "observable", "value_consuming")) == (Val(true))
+                passed: jet_cli_status_string(jet_cli_status_nested(row, "evidence", "status")) == (Val("passed"))
+                oracle: jet_cli_status_boolean(jet_cli_status_nested(row, "oracle", "independent_expected_behavior")) == (Val(true))
+                observable: jet_cli_status_boolean(jet_cli_status_nested(row, "observable", "value_consuming")) == (Val(true))
                 if !passed || !oracle || !observable {
                     &errors.push("passed row lacks evidence, independent oracle, or observable value: {id}")
                 }
-                identity :: jet_cli_status_get(row, "identity") ?? JetCLIStatusValue.Null
-                exact :: jet_cli_status_string(jet_cli_status_nested(identity, "candidate", "status")) == (Val("available"))
+                identity: jet_cli_status_get(row, "identity") ?? JetCLIStatusValue.Null
+                exact: jet_cli_status_string(jet_cli_status_nested(identity, "candidate", "status")) == (Val("available"))
                 concrete := true
                 loop field in ([String]{"compiler_identity", "tool_identity", "target_identity"}) {
                     if !jet_cli_status_is_object(jet_cli_status_get(row, field)) -> concrete = false
                 }
-                candidate :: jet_cli_status_string(jet_cli_status_nested(row, "candidate_identity", "status"))
+                candidate: jet_cli_status_string(jet_cli_status_nested(row, "candidate_identity", "status"))
                 if !exact || !concrete || candidate != Val("available") {
                     &errors.push("passed row lacks exact candidate identity: {id}")
                 }
@@ -326,12 +326,12 @@ fn jet_cli_claim_validate_relation(manifest: JetCLIStatusValue, relation: JetCLI
             modes := identity_modes[index].copy()
             &modes.sort()
             loop mode in modes {
-                id :: "{identity_name}@{mode}"
+                id: "{identity_name}@{mode}"
                 if !row_ids.contains(id) -> &errors.push("missing applicable mode row: {id}")
             }
         }
     }
-    denominator :: jet_cli_status_get(relation, "denominator") ?? JetCLIStatusValue.Null
+    denominator: jet_cli_status_get(relation, "denominator") ?? JetCLIStatusValue.Null
     if !jet_cli_status_is_object(Val(denominator)) {
         &errors.push("denominator is required")
         return Val(errors.join("; "))
@@ -364,7 +364,7 @@ fn jet_cli_claim_validate_relation(manifest: JetCLIStatusValue, relation: JetCLI
     if jet_cli_status_integer(jet_cli_status_get(denominator, "identity_count")) != Val(identity_names.len()) || stale_ids {
         &errors.push("denominator identities are stale")
     }
-    disposition_values :: jet_cli_status_get(denominator, "dispositions") ?? JetCLIStatusValue.Null
+    disposition_values: jet_cli_status_get(denominator, "dispositions") ?? JetCLIStatusValue.Null
     if disposition_values == .Object(fields) {
         loop field in fields {
             if !JET_CLI_CLAIM_DISPOSITIONS.contains(field.name) {
@@ -382,7 +382,7 @@ fn jet_cli_claim_validate_relation(manifest: JetCLIStatusValue, relation: JetCLI
         }
     } else { &errors.push("denominator dispositions are required") }
     loop consumer in ([String]{"inspect", "hardening", "release"}) {
-        value :: jet_cli_status_nested(relation, "consumers", consumer) ?? {
+        value: jet_cli_status_nested(relation, "consumers", consumer) ?? {
             &errors.push("consumer metadata is missing: {consumer}")
             next
         }
@@ -397,7 +397,7 @@ fn jet_cli_claim_validate_relation(manifest: JetCLIStatusValue, relation: JetCLI
     Val(errors.join("; "))
 }
 
-fn jet_cli_claim_unavailable(path: String, reason: String) -> JetCLIStatusValue Never! {
+jet_cli_claim_unavailable: fn(path: String, reason: String) -> JetCLIStatusValue Never! {
     jet_cli_status_object(
     [JetCLIStatusField]{
         jet_cli_status_field("schema", jet_cli_status_text(JET_CLI_CAPABILITY_RELATION_SCHEMA)),
@@ -410,18 +410,18 @@ fn jet_cli_claim_unavailable(path: String, reason: String) -> JetCLIStatusValue 
     )
 }
 
-fn jet_cli_capability_relation(root: String) -[FS]> JetCLIStatusValue JetCLIReadError! {
-    path :: "{root}/.jet/hardening-manifest.json"
+jet_cli_capability_relation: fn(root: String) -[FS]> JetCLIStatusValue JetCLIReadError! {
+    path: "{root}/.jet/hardening-manifest.json"
     if !cli_files.exists(path) {
         return Ok(jet_cli_claim_unavailable(path, "capability relation source `{path}` is absent"))
     }
-    raw :: cli_files.read(path) ?? return Err(jet_cli_read_error("can't read canonical capability relation source `{path}`: {jet_cli_io_error_text(err)}"))
-    tree :: report_status_value_parse(raw) ?? return Err(jet_cli_read_error("can't parse canonical manifest `{path}`: {err.message}"))
-    manifest :: jet_cli_status_from_tree(tree)
+    raw: cli_files.read(path) ?? return Err(jet_cli_read_error("can't read canonical capability relation source `{path}`: {jet_cli_io_error_text(err)}"))
+    tree: report_status_value_parse(raw) ?? return Err(jet_cli_read_error("can't parse canonical manifest `{path}`: {err.message}"))
+    manifest: jet_cli_status_from_tree(tree)
     if jet_cli_claim_validate_manifest(manifest) == .Val(error) {
         return Err(jet_cli_read_error("canonical manifest `{path}` is invalid: {error}"))
     }
-    relation :: jet_cli_status_get(manifest, "capability_relation") ?? return Ok(jet_cli_claim_unavailable(path, "manifest has no capability_relation evidence"))
+    relation: jet_cli_status_get(manifest, "capability_relation") ?? return Ok(jet_cli_claim_unavailable(path, "manifest has no capability_relation evidence"))
     if !jet_cli_status_is_object(Val(relation)) {
         return Err(jet_cli_read_error("canonical manifest `{path}` has a non-object capability_relation"))
     }
@@ -441,14 +441,14 @@ fn jet_cli_capability_relation(root: String) -[FS]> JetCLIStatusValue JetCLIRead
     Ok(jet_cli_status_object(projection))
 }
 
-fn jet_cli_claim_rows(relation: JetCLIStatusValue) -> [JetCLIStatusValue] Never! {
-    rows :: jet_cli_status_list(jet_cli_status_get(relation, "rows")) ?? return [JetCLIStatusValue]{}
+jet_cli_claim_rows: fn(relation: JetCLIStatusValue) -> [JetCLIStatusValue] Never! {
+    rows: jet_cli_status_list(jet_cli_status_get(relation, "rows")) ?? return [JetCLIStatusValue]{}
     claims := [JetCLIStatusValue]{}
     loop row in rows {
-        id :: jet_cli_status_string(jet_cli_status_get(row, "row_id")) ?? next
-        capability :: jet_cli_status_string(jet_cli_status_get(row, "capability_id")) ?? next
-        mode :: jet_cli_status_string(jet_cli_status_get(row, "mode")) ?? next
-        disposition :: jet_cli_status_string(jet_cli_status_get(row, "disposition")) ?? next
+        id: jet_cli_status_string(jet_cli_status_get(row, "row_id")) ?? next
+        capability: jet_cli_status_string(jet_cli_status_get(row, "capability_id")) ?? next
+        mode: jet_cli_status_string(jet_cli_status_get(row, "mode")) ?? next
+        disposition: jet_cli_status_string(jet_cli_status_get(row, "disposition")) ?? next
         &claims.push(
         jet_cli_status_object(
         [JetCLIStatusField]{
@@ -467,12 +467,12 @@ fn jet_cli_claim_rows(relation: JetCLIStatusValue) -> [JetCLIStatusValue] Never!
     claims
 }
 
-fn jet_cli_claim_candidate_evidence(relation: JetCLIStatusValue) -> Bool Never! {
-    rows :: jet_cli_status_list(jet_cli_status_get(relation, "rows")) ?? return false
+jet_cli_claim_candidate_evidence: fn(relation: JetCLIStatusValue) -> Bool Never! {
+    rows: jet_cli_status_list(jet_cli_status_get(relation, "rows")) ?? return false
     if rows.len() == 0 -> return false
     loop row in rows {
         if jet_cli_status_boolean(jet_cli_status_get(row, "counted")) != Val(true) -> return false
-        disposition :: jet_cli_status_string(jet_cli_status_get(row, "disposition")) ?? return false
+        disposition: jet_cli_status_string(jet_cli_status_get(row, "disposition")) ?? return false
         if disposition == "owner-ratified-not-applicable" -> next
         if disposition != "passed" -> return false
         if jet_cli_status_string(jet_cli_status_nested(row, "evidence", "status")) != Val("passed") || jet_cli_status_string(jet_cli_status_nested(row, "candidate_identity", "status")) != Val("available") {
@@ -482,23 +482,23 @@ fn jet_cli_claim_candidate_evidence(relation: JetCLIStatusValue) -> Bool Never! 
     true
 }
 
-fn jet_cli_inspect_claims_manifest(file: String, json: Bool, color: Bool) -[FS, Env, Time]> JetCLIPlan Never! {
+jet_cli_inspect_claims_manifest: fn(file: String, json: Bool, color: Bool) -[FS, Env, Time]> JetCLIPlan Never! {
     base := jet_cli_parent(file) ?? "."
     if base == "" -> base = "."
-    root :: jet_cli_inspect_package_root(base) ?? base
-    relation :: jet_cli_capability_relation(root) ?? return jet_cli_fail("E2105", err.message, jet_cli_why("E2105"), "regenerate the canonical `.jet/hardening-manifest.json` and rerun inspect claims", color, JET_DRIVER_EXIT_USER_ERROR)
-    claims :: jet_cli_claim_rows(relation)
-    relation_status :: jet_cli_status_string(jet_cli_status_get(relation, "status")) ?? "unavailable"
-    relation_ready :: relation_status == "available" && jet_cli_claim_candidate_evidence(relation)
-    release_ready :: JET_CLI_RELEASE_POLICY_ACTIVE && JET_CLI_RELEASE_READINESS == "ready" && relation_ready
+    root: jet_cli_inspect_package_root(base) ?? base
+    relation: jet_cli_capability_relation(root) ?? return jet_cli_fail("E2105", err.message, jet_cli_why("E2105"), "regenerate the canonical `.jet/hardening-manifest.json` and rerun inspect claims", color, JET_DRIVER_EXIT_USER_ERROR)
+    claims: jet_cli_claim_rows(relation)
+    relation_status: jet_cli_status_string(jet_cli_status_get(relation, "status")) ?? "unavailable"
+    relation_ready: relation_status == "available" && jet_cli_claim_candidate_evidence(relation)
+    release_ready: JET_CLI_RELEASE_POLICY_ACTIVE && JET_CLI_RELEASE_READINESS == "ready" && relation_ready
     floor := ClaimsGrade?{None}
     if jet_cli_inspect_claims_floor(root) == {
         .Ok(found) -> floor = found
         .Err(error) -> return JetCLIPlan.Refused{report: error.diagnostic, color: color, exit_code: JET_DRIVER_EXIT_USER_ERROR, notice: ""}
     }
-    grade :: jet_cli_inspect_claims_grade(file, floor)
+    grade: jet_cli_inspect_claims_grade(file, floor)
     if json {
-        release :: jet_cli_status_object(
+        release: jet_cli_status_object(
         [JetCLIStatusField]{
             jet_cli_status_field("version", jet_cli_status_text(JET_CLI_VERSION)),
             jet_cli_status_field("status", jet_cli_status_text(JET_CLI_RELEASE_CHANNEL)),
@@ -509,7 +509,7 @@ fn jet_cli_inspect_claims_manifest(file: String, json: Bool, color: Bool) -[FS, 
             jet_cli_status_field("compatibility_policy_active", jet_cli_status_bool(JET_CLI_RELEASE_POLICY_ACTIVE)),
         },
         )
-        fields :: [JetCLIStatusField]{
+        fields: [JetCLIStatusField]{
             jet_cli_status_field("file", jet_cli_status_text(file)),
             jet_cli_status_field("source", jet_cli_status_text(JET_CLI_RELEASE_CLAIM_SOURCE)),
             jet_cli_status_field("release", release),
@@ -520,14 +520,14 @@ fn jet_cli_inspect_claims_manifest(file: String, json: Bool, color: Bool) -[FS, 
         }
         return jet_cli_done("{jet_cli_status_render("inspect.claims", release_ready, fields)}\n", "", JET_DRIVER_EXIT_OK)
     }
-    active :: if JET_CLI_RELEASE_POLICY_ACTIVE -> "active" else -> "not active"
-    ready :: if release_ready -> "yes" else -> "no"
+    active: if JET_CLI_RELEASE_POLICY_ACTIVE -> "active" else -> "not active"
+    ready: if release_ready -> "yes" else -> "no"
     out := "claims\nrelease: {JET_CLI_RELEASE_CHANNEL} (disposition: {JET_CLI_RELEASE_DISPOSITION}; readiness: {JET_CLI_RELEASE_READINESS}; 1.0 compatibility policy: {JET_CLI_RELEASE_POLICY} [{JET_CLI_RELEASE_POLICY_DISPOSITION}; {active}])\nclaim source: {JET_CLI_RELEASE_CLAIM_SOURCE}\nrelease ready: {ready}\ncapability relation: {relation_status}\n"
     if claims.len() == 0 -> out = "{out}none\n" else {
         loop claim in claims {
-            id :: jet_cli_status_string(jet_cli_status_get(claim, "claim")) ?? "unknown"
-            mode :: jet_cli_status_string(jet_cli_status_get(claim, "mode")) ?? "unknown"
-            disposition :: jet_cli_status_string(jet_cli_status_get(claim, "disposition")) ?? "unknown"
+            id: jet_cli_status_string(jet_cli_status_get(claim, "claim")) ?? "unknown"
+            mode: jet_cli_status_string(jet_cli_status_get(claim, "mode")) ?? "unknown"
+            disposition: jet_cli_status_string(jet_cli_status_get(claim, "disposition")) ?? "unknown"
             out = "{out}{id} {mode} {disposition}\n"
         }
     }

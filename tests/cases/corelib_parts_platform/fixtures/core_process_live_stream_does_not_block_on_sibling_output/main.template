@@ -1,8 +1,8 @@
 
-use process :: core.process
+use process: core.process
 
-fn run() {
-    child :: process.cmd(["{work}/slow.sh"]).stdout(.Stream).stderr(.Stream).spawn() ?? panic("spawn failed")
+run: fn() {
+    child: process.cmd(["{work}/slow.sh"]).stdout(.Stream).stderr(.Stream).spawn() ?? panic("spawn failed")
     loop line in child.stdout.lines() {
         print(line)
     }

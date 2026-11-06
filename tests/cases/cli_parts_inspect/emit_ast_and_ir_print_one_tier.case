@@ -1,15 +1,15 @@
 # `jet emit` prints one compiler tier of a file: the parsed tree or the slot IR.
-write: main.jet = "fn add(a: Int, b: Int) -> Int {\n    a + b\n}\n\nfn run() {\n    print(add(1, 2))\n}\n"
+write: main.jet = "add: fn(a: Int, b: Int) -> Int {\n    a + b\n}\n\nrun: fn() {\n    print(add(1, 2))\n}\n"
 step: jet emit --ast main.jet
 exit: 0
-stdout: ~ "fn add(a: Int, b: Int) -> Int" # the parsed tree names each function header
+stdout: ~ "add: fn(a: Int, b: Int) -> Int" # the parsed tree names each function header
 stdout: ~ "binary +" # the body expression is printed as tree nodes
 stdout: ~ "call add" # a call node names its callee
 step: jet emit --ir main.jet --fn add
 exit: 0
-stdout: ~ "fn add [" # the slot IR of the selected function
+stdout: ~ "add: fn [" # the slot IR of the selected function
 stdout: ~ "s0 param a: Int" # its parameter slots are listed
-stdout: !~ "fn run" # --fn keeps the dump to the named function
+stdout: !~ "run: fn" # --fn keeps the dump to the named function
 step: jet emit main.jet
 exit: 2
 stderr: ~ "E2102" # a missing tier flag is a usage error

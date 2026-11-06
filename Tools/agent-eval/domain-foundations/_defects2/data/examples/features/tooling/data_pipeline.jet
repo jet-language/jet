@@ -1,47 +1,47 @@
-use data :: core.data
+use data: core.data
 
 #Codable
-struct Ticket {
+Ticket: struct {
     team: String
     minutes: Float
 }
 
 #Codable
-struct Budget {
+Budget: struct {
     team: String
     owner: String
 }
 
-fn must_stay_deferred(ticket: Ticket) -> Bool {
+must_stay_deferred: fn(ticket: Ticket) -> Bool {
     panic("lazy filter ran before collect")
     return false
 }
 
-fn no_minutes() -> Float? { None }
+no_minutes: fn() -> Float? { None }
 
-fn run() {
-    raw :: "team,minutes\nCore,4.0\nTools,5.0\nCore,8.0\nDocs,3.0"
-    rows :: data.csv<Ticket>(raw) ?? panic("bad csv")
-    budget_raw :: "team,owner\nCore,Ada\nCore,Lin\nTools,Grace"
-    budgets :: data.csv<Budget>(budget_raw) ?? panic("bad budget")
-    table :: data.table(rows)
-    lazy :: data.lazy(table)
-    deferred :: data.lazy_filter(lazy, t -> must_stay_deferred(t))
+run: fn() {
+    raw: "team,minutes\nCore,4.0\nTools,5.0\nCore,8.0\nDocs,3.0"
+    rows: data.csv<Ticket>(raw) ?? panic("bad csv")
+    budget_raw: "team,owner\nCore,Ada\nCore,Lin\nTools,Grace"
+    budgets: data.csv<Budget>(budget_raw) ?? panic("bad budget")
+    table: data.table(rows)
+    lazy: data.lazy(table)
+    deferred: data.lazy_filter(lazy, t -> must_stay_deferred(t))
     print("deferred: {data.plan(deferred)[1]}")
-    planned :: data.lazy_sort_by(data.lazy_filter(lazy, t -> t.minutes >= 4.0), t -> t.team)
-    collected :: data.collect(planned) ?? panic("collect")
-    planned_rows :: data.rows(collected)
-    focused :: data.filter(rows, t -> t.minutes >= 4.0)
-    sorted :: data.sort_by(focused, t -> t.team) ?? panic("sort")
-    groups :: data.group_sum(sorted, t -> t.team, t -> t.minutes) ?? panic("group_sum")
-    joined :: data.inner_join(sorted, budgets, t -> t.team, b -> b.team) ?? panic("join")
-    left :: data.left_join(rows, budgets, t -> t.team, b -> b.team) ?? panic("left")
-    pivot :: data.pivot_sum(rows, t -> t.team, t -> if t.minutes >= 5.0 -> "long" else -> "short", t -> t.minutes) ?? panic("pivot")
-    values :: [Float]{4.0, 5.0, 8.0, 3.0}
-    summary :: data.describe(values) ?? panic("describe")
-    rolling :: data.rolling_mean(values, 2) ?? panic("rolling")
-    maybe_minutes :: [Val(Float{4.0}), no_minutes(), Val(Float{8.0}), no_minutes()]
-    series :: data.series(maybe_minutes)
+    planned: data.lazy_sort_by(data.lazy_filter(lazy, t -> t.minutes >= 4.0), t -> t.team)
+    collected: data.collect(planned) ?? panic("collect")
+    planned_rows: data.rows(collected)
+    focused: data.filter(rows, t -> t.minutes >= 4.0)
+    sorted: data.sort_by(focused, t -> t.team) ?? panic("sort")
+    groups: data.group_sum(sorted, t -> t.team, t -> t.minutes) ?? panic("group_sum")
+    joined: data.inner_join(sorted, budgets, t -> t.team, b -> b.team) ?? panic("join")
+    left: data.left_join(rows, budgets, t -> t.team, b -> b.team) ?? panic("left")
+    pivot: data.pivot_sum(rows, t -> t.team, t -> if t.minutes >= 5.0 -> "long" else -> "short", t -> t.minutes) ?? panic("pivot")
+    values: [Float]{4.0, 5.0, 8.0, 3.0}
+    summary: data.describe(values) ?? panic("describe")
+    rolling: data.rolling_mean(values, 2) ?? panic("rolling")
+    maybe_minutes: [Val(Float{4.0}), no_minutes(), Val(Float{8.0}), no_minutes()]
+    series: data.series(maybe_minutes)
     print(data.count(sorted))
     print(data.count(table))
     print(data.count(planned))

@@ -11,22 +11,22 @@
 // host fails closed after the package and request checks: no guest code
 // runs.
 
-BUILD_PLUGIN_HOST_UNSUPPORTED :: "build plugins are not available: this jetpack cannot load a runtime WebAssembly component against a pinned digest under fuel, memory, table, and time limits"
+BUILD_PLUGIN_HOST_UNSUPPORTED: "build plugins are not available: this jetpack cannot load a runtime WebAssembly component against a pinned digest under fuel, memory, table, and time limits"
 
-fn cli_run_build_plugin_host(args: [String]) -[IO, FS]> Int Never! {
+cli_run_build_plugin_host: fn(args: [String]) -[IO, FS]> Int Never! {
     if args.len() != 4 {
         term.eprint("build-plugin host requires manifest, component, and expected digests")
         return EXIT_USAGE
     }
-    manifest_path :: args[0]
-    component_path :: args[1]
-    expected_manifest_digest :: args[2]
-    expected_component_digest :: args[3]
-    manifest :: cli_read_packaged_file_bounded(manifest_path, "manifest", BUILD_PLUGIN_MAX_MANIFEST_BYTES) ?? {
+    manifest_path: args[0]
+    component_path: args[1]
+    expected_manifest_digest: args[2]
+    expected_component_digest: args[3]
+    manifest: cli_read_packaged_file_bounded(manifest_path, "manifest", BUILD_PLUGIN_MAX_MANIFEST_BYTES) ?? {
         term.eprint("couldn't read build-plugin manifest: {err.message}")
         return EXIT_USAGE
     }
-    component :: cli_read_packaged_file_bounded(component_path, "component", BUILD_PLUGIN_MAX_COMPONENT_BYTES) ?? {
+    component: cli_read_packaged_file_bounded(component_path, "component", BUILD_PLUGIN_MAX_COMPONENT_BYTES) ?? {
         term.eprint("couldn't read build-plugin component: {err.message}")
         return EXIT_USAGE
     }
@@ -34,7 +34,7 @@ fn cli_run_build_plugin_host(args: [String]) -[IO, FS]> Int Never! {
         term.eprint("build-plugin manifest changed after verification")
         return EXIT_USAGE
     }
-    spec :: WasmComponentPluginSpec.load_packaged_bytes(manifest, component) ?? {
+    spec: WasmComponentPluginSpec.load_packaged_bytes(manifest, component) ?? {
         term.eprint("couldn't verify build-plugin package: {err.message}")
         return EXIT_USAGE
     }
@@ -42,7 +42,7 @@ fn cli_run_build_plugin_host(args: [String]) -[IO, FS]> Int Never! {
         term.eprint("build-plugin component changed after verification")
         return EXIT_USAGE
     }
-    request :: term.take(BUILD_PLUGIN_MAX_REQUEST_BYTES + 1) ?? {
+    request: term.take(BUILD_PLUGIN_MAX_REQUEST_BYTES + 1) ?? {
         term.eprint("couldn't read build-plugin request: {err}")
         return EXIT_USAGE
     }

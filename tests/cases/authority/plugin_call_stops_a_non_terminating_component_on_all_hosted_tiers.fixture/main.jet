@@ -1,10 +1,10 @@
 
-use plugin :: core.plugin
+use plugin: core.plugin
 
-fn run() {
-    policy :: Authority.from_rights(["FS.Read:."])
-    hostile :: plugin.load("non_terminating.wat", policy)
-    _result :: hostile.spin() ?? {
+run: fn() {
+    policy: Authority.from_rights(["FS.Read:."])
+    hostile: plugin.load("non_terminating.wat", policy)
+    _result: hostile.spin() ?? {
         print("execution-bound-failure")
         if err == {
             .Budget(.Fuel, fault) -> {

@@ -33,25 +33,25 @@ use jet_foundation.[name_rows_value]
 // One function's moved Drops: per Drop the slot, the instruction it now goes
 // before and its line; and per instruction whether it goes (a moved Drop at
 // its old place, or a stop poll's Drop of a String already dropped).
-struct IRDropPlan {
+IRDropPlan: struct {
     slots: [Int]
     to: [Int]
     lines: [Int]
     kill: [Bool]
 }
 
-fn ir_drop_early(m: &IRModule) Never! {
-    poll :: name_rows_value(m.function_rows, IR_STOP_POLL_KEY) ?? -1
-    trap :: name_rows_value(m.function_rows, IR_STOP_TRAP_KEY) ?? -1
+ir_drop_early: fn(m: &IRModule) Never! {
+    poll: name_rows_value(m.function_rows, IR_STOP_POLL_KEY) ?? -1
+    trap: name_rows_value(m.function_rows, IR_STOP_TRAP_KEY) ?? -1
     loop id in 0..<m.functions.len() {
         if m.functions[id].asm != None -> next
-        plan :: ir_drop_plan(m, m.functions[id], poll, trap)
+        plan: ir_drop_plan(m, m.functions[id], poll, trap)
         if plan.slots.len() > 0 -> ir_drop_apply(&m.functions[id], plan)
     }
 }
 
-fn ir_drop_plan(m: IRModule, f: IRFunction, poll: Int, trap: Int) -> IRDropPlan Never! {
-    n :: f.op.len()
+ir_drop_plan: fn(m: IRModule, f: IRFunction, poll: Int, trap: Int) -> IRDropPlan Never! {
+    n: f.op.len()
     plan := IRDropPlan{slots: [Int]{}, to: [Int]{}, lines: [Int]{}, kill: [Bool]{}}
     // Per instruction: the If of the stop poll holding it, -1 for none.
     stop := [Int]{}
@@ -63,11 +63,11 @@ fn ir_drop_plan(m: IRModule, f: IRFunction, poll: Int, trap: Int) -> IRDropPlan 
         loop inner in at..<(f.c[at] + 1) -> stop[inner] = at
     }
     if !found -> return plan
-    count :: f.slot_type.len()
+    count: f.slot_type.len()
     eligible := [Bool]{}
     dropped := [Bool]{}
     loop slot in 0..<count {
-        row :: m.types[f.slot_type[slot]]
+        row: m.types[f.slot_type[slot]]
         &eligible.push(row.kind == .String && row.drop != "")
         &dropped.push(false)
     }
@@ -76,7 +76,7 @@ fn ir_drop_plan(m: IRModule, f: IRFunction, poll: Int, trap: Int) -> IRDropPlan 
     loop at in 0..<n {
         if stop[at] >= 0 -> next
         if f.op[at] == .Drop {
-            slot :: f.a[at]
+            slot: f.a[at]
             if slot >= 0 && slot < count && eligible[slot] {
                 dropped[slot] = true
                 any = true
@@ -99,7 +99,7 @@ fn ir_drop_plan(m: IRModule, f: IRFunction, poll: Int, trap: Int) -> IRDropPlan 
         loop slot in reads {
             if slot >= 0 && slot < count && eligible[slot] && dropped[slot] -> &refs[slot].push(at)
         }
-        written :: ir_x64_write(f, at)
+        written: ir_x64_write(f, at)
         if written >= 0 && written < count && eligible[written] && dropped[written] -> &refs[written].push(at)
     }
     // Per construct opener: whether the construct branches or returns
@@ -111,7 +111,7 @@ fn ir_drop_plan(m: IRModule, f: IRFunction, poll: Int, trap: Int) -> IRDropPlan 
         if f.op[at] == {
             .Block | .Loop | .If -> &open.push(at)
             .End -> {
-                _ :: &open.pop()
+                _: &open.pop()
             }
             .Br | .BrIf | .Return | .Unreachable -> {
                 if stop[at] < 0 {
@@ -124,13 +124,13 @@ fn ir_drop_plan(m: IRModule, f: IRFunction, poll: Int, trap: Int) -> IRDropPlan 
     loop _ in 0..<n -> &plan.kill.push(false)
     loop at in 0..<n {
         if f.op[at] != .Drop || stop[at] >= 0 -> next
-        slot :: f.a[at]
+        slot: f.a[at]
         if slot < 0 || slot >= count || !eligible[slot] -> next
         previous := -1
         loop reference in refs[slot] {
             if reference < at -> previous = reference
         }
-        reached :: ir_drop_target(f, stop, blocked, previous, at)
+        reached: ir_drop_target(f, stop, blocked, previous, at)
         // After the stop poll of the last reference, not between them.
         to := reached
         if to < at && f.op[to] == .Call && (f.a[to] == poll || f.a[to] == trap) && to + 1 < n && stop[to + 1] == to + 1 -> to = f.c[to + 1] + 1
@@ -150,13 +150,13 @@ fn ir_drop_plan(m: IRModule, f: IRFunction, poll: Int, trap: Int) -> IRDropPlan 
 // it: it is not a Copy, Move, Store, StreamStore, Return, Load, Offset,
 // CopyBytes or indirect call, and its result is nothing, a plain value or a
 // new String.
-fn ir_drop_borrows_only(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
+ir_drop_borrows_only: fn(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
     if f.op[at] == {
         .Copy | .Move | .Store | .StreamStore | .Return | .Load | .Offset | .CopyBytes | .CallIndirect -> return false
         .Concat -> return true
         else -> {}
     }
-    dst :: f.dst[at]
+    dst: f.dst[at]
     if dst < 0 -> return true
     if m.types[f.slot_type[dst]].kind == {
         .Unit | .Bool | .Int | .Float | .Float32 | .Char -> true
@@ -171,13 +171,13 @@ fn ir_drop_borrows_only(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
 //     it, OptSplit.jet), which touch no String;
 //   - it leaves by a Return of nothing, or by a Br when an inlined call's
 //     poll leaves the inlined body.
-fn ir_drop_stop_edge(m: IRModule, f: IRFunction, opener: Int, poll: Int, trap: Int) -> Bool Never! {
+ir_drop_stop_edge: fn(m: IRModule, f: IRFunction, opener: Int, poll: Int, trap: Int) -> Bool Never! {
     if opener < 1 || f.b[opener] >= 0 -> return false
-    check :: opener - 1
+    check: opener - 1
     if f.op[check] != .Call || (f.a[check] != poll && f.a[check] != trap) || f.dst[check] != f.a[opener] -> return false
-    end :: f.c[opener]
+    end: f.c[opener]
     if end - 1 <= opener -> return false
-    last :: end - 1
+    last: end - 1
     if f.op[last] != .Br && (f.op[last] != .Return || f.a[last] >= 0) -> return false
     loop at in (opener + 1)..<last {
         if f.op[at] == .Drop -> next
@@ -189,7 +189,7 @@ fn ir_drop_stop_edge(m: IRModule, f: IRFunction, opener: Int, poll: Int, trap: I
 }
 
 // Whether `slot` holds a word (a Bool, an Int, a Word or a Pointer).
-fn ir_drop_word(m: IRModule, f: IRFunction, slot: Int) -> Bool Never! {
+ir_drop_word: fn(m: IRModule, f: IRFunction, slot: Int) -> Bool Never! {
     if slot < 0 || slot >= f.slot_type.len() -> return false
     if m.types[f.slot_type[slot]].kind == {
         .Bool | .Int | .Word | .Pointer -> true
@@ -201,12 +201,12 @@ fn ir_drop_word(m: IRModule, f: IRFunction, slot: Int) -> Bool Never! {
 // back over its block's instructions after `previous` (its slot's last
 // reference before it) that are not branches, returns or openers, and over
 // stop polls and constructs that neither branch nor hold `previous`.
-fn ir_drop_target(f: IRFunction, stop: [Int], blocked: [Bool], previous: Int, at: Int) -> Int Never! {
+ir_drop_target: fn(f: IRFunction, stop: [Int], blocked: [Bool], previous: Int, at: Int) -> Int Never! {
     back := at - 1
     loop back > previous {
         if f.op[back] == {
             .End -> {
-                opener :: f.a[back]
+                opener: f.a[back]
                 if stop[back] < 0 && (blocked[opener] || opener <= previous) -> return back + 1
                 back = opener - 1
             }
@@ -219,8 +219,8 @@ fn ir_drop_target(f: IRFunction, stop: [Int], blocked: [Bool], previous: Int, at
 
 // Rewrites `f` by `plan`: each moved Drop goes before its new instruction,
 // and every instruction the plan kills goes.
-fn ir_drop_apply(f: &IRFunction, plan: IRDropPlan) Never! {
-    n :: f.op.len()
+ir_drop_apply: fn(f: &IRFunction, plan: IRDropPlan) Never! {
+    n: f.op.len()
     // Per instruction the moved Drops before it, chained.
     head := [Int]{}
     loop _ in 0..<n -> &head.push(-1)

@@ -1,25 +1,25 @@
-trait Producer {
-    fn produce(self) -> Int Never!
+Producer: trait {
+    produce: fn(self) -> Int Never!
 }
-struct CanonicalProducer { values: [Int] }
+CanonicalProducer: struct { values: [Int] }
 impl CanonicalProducer.Producer {
-    fn produce(self) -> Int Never! { self.values[0] }
+    produce: fn(self) -> Int Never! { self.values[0] }
 }
-enum Preparation { Prepared(producer: CanonicalProducer) }
-struct Host { parent: Int }
+Preparation: enum { Prepared(producer: CanonicalProducer) }
+Host: struct { parent: Int }
 
-fn admit(parent: &Int, producer: Producer) -> Int Never! {
+admit: fn(parent: &Int, producer: Producer) -> Int Never! {
     parent + producer.produce()
 }
-fn attach(host: &Host, prepared: Preparation) -> Int Never! {
+attach: fn(host: &Host, prepared: Preparation) -> Int Never! {
     if prepared == .Prepared(producer) {
         return admit(&host.parent, producer)
     }
     0
 }
-fn run() {
+run: fn() {
     host := Host{parent: 10}
-    prepared :: Preparation.Prepared{producer: CanonicalProducer{values: [Int]{7}}}
+    prepared: Preparation.Prepared{producer: CanonicalProducer{values: [Int]{7}}}
     print(attach(&host, prepared))
     print(attach(&host, prepared))
     print(host.parent)

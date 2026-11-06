@@ -1,26 +1,26 @@
-use files :: core.files
+use files: core.files
 
 // Word counts, ranked as main.rs ranks them: every entry collected, then a
 // full sort by count (descending) and word, the first 20 printed. The
 // collection reads the Map through to_list (its ordered copy).
 #CLI
-struct Args {
+Args: struct {
     path: String
 }
 
-fn run(args: Args) IOError! {
-    bytes :: files.read_bytes(args.path) ?? return
+run: fn(args: Args) IOError! {
+    bytes: files.read_bytes(args.path) ?? return
     counts := [String:Int]{}
     total := 0
     token := [U8]{}
-    ascii_space :: U8{32}
-    ascii_ws_start :: U8{9}
-    ascii_ws_end :: U8{13}
+    ascii_space: U8{32}
+    ascii_ws_start: U8{9}
+    ascii_ws_end: U8{13}
     loop byte in bytes {
         if {
             byte == ascii_space || (byte >= ascii_ws_start && byte <= ascii_ws_end) -> {
                 if !token.is_empty() {
-                    word :: String.from_bytes(token) ?? panic("invalid utf8")
+                    word: String.from_bytes(token) ?? panic("invalid utf8")
                     counts[word] = (counts.get(word) ?? 0) + 1
                     total += 1
                     &token.clear()
@@ -30,7 +30,7 @@ fn run(args: Args) IOError! {
         }
     }
     if !token.is_empty() {
-        word :: String.from_bytes(token) ?? panic("invalid utf8")
+        word: String.from_bytes(token) ?? panic("invalid utf8")
         counts[word] = (counts.get(word) ?? 0) + 1
         total += 1
     }

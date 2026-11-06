@@ -3,33 +3,33 @@
 #Policy(gc)
 
 #!Equatable
-enum Link {
+Link: enum {
     End(Int)
     Next(Link)
 }
 
-fn promoted_cycle() -> Link {
+promoted_cycle: fn() -> Link {
     // The payloads remain finite value snapshots. Their promoted identities
     // form the cycle: second -> first at construction, then first -> second.
     first := Link.End(1)
-    second :: Link.Next(first.copy())
+    second: Link.Next(first.copy())
     first = Link.Next(second.copy())
     return first
 }
 
-fn promoted_replacement() -> Link {
-    stale :: Link.End(2)
+promoted_replacement: fn() -> Link {
+    stale: Link.End(2)
     current := Link.Next(stale.copy())
-    fresh :: Link.End(3)
+    fresh: Link.End(3)
     // Whole-value replacement removes current -> stale before adding
     // current -> fresh; the trace must not retain the stale identity.
     current = Link.Next(fresh.copy())
     return current
 }
 
-fn run() {
-    cycle :: promoted_cycle()
+run: fn() {
+    cycle: promoted_cycle()
     print(cycle)
-    replacement :: promoted_replacement()
+    replacement: promoted_replacement()
     print(replacement)
 }

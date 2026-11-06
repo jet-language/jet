@@ -5,79 +5,79 @@
 // types, and an Option `map` whose callback calls a named function yields
 // that callback's success (or passes its failure up).
 
-fn lower(s: String) -> String { s.to_lower() }
+lower: fn(s: String) -> String { s.to_lower() }
 
-fn upper(s: String) -> String { s.to_upper() }
+upper: fn(s: String) -> String { s.to_upper() }
 
-fn double(x: Int) -> Int { x * 2 }
+double: fn(x: Int) -> Int { x * 2 }
 
-fn triple(x: Int) -> Int { x * 3 }
+triple: fn(x: Int) -> Int { x * 3 }
 
-struct Pair { count: Int, label: String }
+Pair: struct { count: Int, label: String }
 
-enum Shape {
+Shape: enum {
     Circle(r: Int)
     Rect(w: Int, h: Int)
 }
 
-fn area(shape: Shape) -> Int {
+area: fn(shape: Shape) -> Int {
     if shape == {
         .Circle(r) -> r * r * 3
         .Rect(w, h) -> w * h
     }
 }
 
-fn find_shape(present: Bool) -> Shape? {
+find_shape: fn(present: Bool) -> Shape? {
     if present -> return Val(Shape.Rect{w: 2, h: 5})
     None
 }
 
-fn even_tens(x: Int) -> Int Err! {
+even_tens: fn(x: Int) -> Int Err! {
     if x % 2 != 0 -> return Err("odd {x}")
     Ok(x * 10)
 }
 
-fn mapped_tens(value: Int?) -> Int Err! {
-    mapped :: value.map(x -> even_tens(x))
+mapped_tens: fn(value: Int?) -> Int Err! {
+    mapped: value.map(x -> even_tens(x))
     Ok(mapped ?? -1)
 }
 
-fn find(present: Bool) -> (fn(Int) -> Int)? {
+find: fn(present: Bool) -> (fn(Int) -> Int)? {
     if present -> return Val(double)
     None
 }
 
-fn find_pair(present: Bool) -> Pair? {
+find_pair: fn(present: Bool) -> Pair? {
     if present -> return Val(Pair{count: 7, label: "seven"})
     None
 }
 
-fn make(present: Bool) -> (fn(Int) -> Int) Err! {
+make: fn(present: Bool) -> (fn(Int) -> Int) Err! {
     if present -> return Ok(double)
     Err("no handler")
 }
 
-fn apply(present: Bool) -> Int Err! {
-    handler :: make(present)
+apply: fn(present: Bool) -> Int Err! {
+    handler: make(present)
     Ok(handler(21))
 }
 
-fn pick<T>(value: T?) -> T Err! {
+pick: fn<T>(value: T?) -> T Err! {
     return if value == {
         .Val(payload) -> Ok(payload)
         .None -> Err("absent")
     }
 }
 
-fn run() {
-    commands :: [String:fn(String) -> String]{"lower": lower, "upper": upper}
-    shout :: commands.get("upper").or_err("missing upper handler") ?? lower
-    quiet :: commands.get("quiet").or_err("missing quiet handler") ?? lower
-    fallback :: commands.get("quiet") ?? upper
+run: fn() {
+    commands: [String:fn(String) -> String]{"lower": lower, "upper": upper}
+    shout: commands.get("upper").or_err("missing upper handler") ?? lower
+    quiet: commands.get("quiet").or_err("missing quiet handler") ?? lower
+    fallback: commands.get("quiet") ?? upper
     print("map: {shout("Hi")} {quiet("Hi")} {fallback("Hi")}")
 
-    found :: find(true).or_err("none") ?? triple
-    missing :: find(false).or_err("none") ?? triple
+    found: find(true).or_err("none") ?? triple
+    missing: find(false).or_err("none") ?? triple
     print("option or_err: {found(10)} {missing(10)}")
     print("option ??: {(find(true) ?? triple)(5)} {(find(false) ?? triple)(5)}")
     print("option map: {find(true).map(f -> f(4)) ?? -1} {find(false).map(f -> f(4)) ?? -1}")
@@ -87,19 +87,19 @@ fn run() {
         .None -> print("match: none")
     }
 
-    made :: make(true) ?? triple
-    unmade :: make(false) ?? triple
+    made: make(true) ?? triple
+    unmade: make(false) ?? triple
     print("result: {made(10)} {unmade(10)}")
     print("propagate: {apply(true) ?? -1} {apply(false) ?? -1}")
-    picked :: pick(find(true)) ?? triple
-    unpicked :: pick(find(false)) ?? triple
+    picked: pick(find(true)) ?? triple
+    unpicked: pick(find(false)) ?? triple
     print("generic: {picked(50)} {unpicked(50)}")
 
-    pair :: find_pair(true).or_err("none") ?? Pair{count: 0, label: "zero"}
-    no_pair :: find_pair(false).or_err("none") ?? Pair{count: 0, label: "zero"}
+    pair: find_pair(true).or_err("none") ?? Pair{count: 0, label: "zero"}
+    no_pair: find_pair(false).or_err("none") ?? Pair{count: 0, label: "zero"}
     print("struct: {pair.count} {pair.label} {no_pair.count} {no_pair.label}")
     print("struct map: {find_pair(true).map(p -> p.label) ?? "none"}")
-    generic_pair :: pick(find_pair(true)) ?? Pair{count: 0, label: "zero"}
+    generic_pair: pick(find_pair(true)) ?? Pair{count: 0, label: "zero"}
     print("struct generic: {generic_pair.label}")
     print("enum map: {find_shape(true).map(s -> area(s)) ?? -1} {find_shape(false).map(s -> area(s)) ?? -1}")
     print("named map: {Int?{Val(41)}.map(x -> triple(x)) ?? -1}")

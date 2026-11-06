@@ -3,7 +3,7 @@
 // Loads Package membership from the canonical `package.jet` root. During the
 // reversible split/fold migration, roots that have not yet folded membership
 // still evaluate the old declaration-resolved `workspace.jet` index
-// `module workspace { members: <expr> }`. Arbitrary top-level authority
+// `workspace: module { members: <expr> }`. Arbitrary top-level authority
 // declarations are resolved separately for policy and boundary purposes; they
 // never supply members. The migration index `members:` expression may be:
 //   - `find("./packages")`: discovers package directories under the path
@@ -14,7 +14,7 @@
 // from checked canonical `package.jet` manifests and their relative paths.
 //
 // Diagnostics:
-//   E0995: the file has no `module workspace { … }` body
+//   E0995: the file has no `workspace: module { … }` body
 //   E0996: `members:` evaluated to something other than a list of strings
 //   E0997: `find("…")` in `members:` points at a missing directory
 use {
@@ -41,11 +41,11 @@ use {
     jet_lexer.[lex]
     jet_parser.[parse_lexed_with_source, parser_line_starts]
     jetpack_foundation.[BUILTIN_FIND, NS_WORKSPACE, PACKAGE_FILE]
-    files :: core.files
+    files: core.files
 }
 
 // A workspace source and the plan evaluated from its still-open snapshot.
-struct WorkspaceSnapshot {
+WorkspaceSnapshot: struct {
     source: WorkspaceSource
     plan: WorkspacePlan
 }
@@ -61,20 +61,20 @@ impl AuthorityError -> EnvModelEvalError {
 // file declares an index (an authority-only source is not an index); an error
 // when a declaring file exists but is malformed.
 //
-// (A2): `module workspace { … }` is discovered by
+// (A2): `workspace: module { … }` is discovered by
 // declaration and may live in any top-level `.jet` file. The shared resolver
 // owns candidate scanning, ambiguity, and source I/O diagnostics.
 // The caller owns the session cache and shares it with discovery and lock I/O.
-fn envmodel_workspace_load(cache: &WorkspaceDeclarationCache, dir: String) -[FS, Env, Exec, Time.Wait]> WorkspacePlan? EnvModelEvalError! {
-    loaded :: envmodel_workspace_load_checked(&cache, dir)
-    snapshot :: loaded ?? return Ok(None)
+envmodel_workspace_load: fn(cache: &WorkspaceDeclarationCache, dir: String) -[FS, Env, Exec, Time.Wait]> WorkspacePlan? EnvModelEvalError! {
+    loaded: envmodel_workspace_load_checked(&cache, dir)
+    snapshot: loaded ?? return Ok(None)
     Ok(Val(snapshot.plan))
 }
 
 // Load the source and retain the checked authority snapshot through
 // evaluation. This is the only workspace read path that may produce a plan.
-fn envmodel_workspace_load_checked(cache: &WorkspaceDeclarationCache, dir: String) -[FS, Env, Exec, Time.Wait]> WorkspaceSnapshot? EnvModelEvalError! {
-    resolver :: if AuthorityResolver.open(dir) == {
+envmodel_workspace_load_checked: fn(cache: &WorkspaceDeclarationCache, dir: String) -[FS, Env, Exec, Time.Wait]> WorkspaceSnapshot? EnvModelEvalError! {
+    resolver: if AuthorityResolver.open(dir) == {
         .Ok(opened) -> opened
         .Err(error) -> {
             if error.is_missing() -> return Ok(None)
@@ -87,12 +87,12 @@ fn envmodel_workspace_load_checked(cache: &WorkspaceDeclarationCache, dir: Strin
 // Load and evaluate the index selected by an already-open authority root. The
 // resolver and source snapshot cross the evaluation boundary together; this
 // never reopens the selected source by pathname.
-fn envmodel_workspace_load_checked_with_resolver(cache: &WorkspaceDeclarationCache, resolver: AuthorityResolver) -[FS, Env, Exec, Time.Wait]> WorkspaceSnapshot? EnvModelEvalError! {
-    resolved :: if resolver.resolve_workspace_source(&cache) == {
+envmodel_workspace_load_checked_with_resolver: fn(cache: &WorkspaceDeclarationCache, resolver: AuthorityResolver) -[FS, Env, Exec, Time.Wait]> WorkspaceSnapshot? EnvModelEvalError! {
+    resolved: if resolver.resolve_workspace_source(&cache) == {
         .Ok(found) -> found
         .Err(error) -> { return Err(EnvModelEvalError{diagnostic: error.workspace_diagnostic()}) }
     }
-    source :: resolved ?? return Ok(None)
+    source: resolved ?? return Ok(None)
     resolver.revalidate_source(source)
     if source.role != WorkspaceSourceRole.Index -> return Ok(None)
     Ok(Val(envmodel_workspace_load_checked_source(resolver, ^source)))
@@ -101,12 +101,12 @@ fn envmodel_workspace_load_checked_with_resolver(cache: &WorkspaceDeclarationCac
 // Evaluate an index from the same checked source snapshot selected by a
 // caller. The caller transfers the snapshot after selecting it; no second
 // authority read can silently replace its path, bytes, role, or identity.
-fn envmodel_workspace_load_checked_source(resolver: AuthorityResolver, expected: ^WorkspaceSource) -[FS, Env, Exec, Time.Wait]> WorkspaceSnapshot EnvModelEvalError! {
+envmodel_workspace_load_checked_source: fn(resolver: AuthorityResolver, expected: ^WorkspaceSource) -[FS, Env, Exec, Time.Wait]> WorkspaceSnapshot EnvModelEvalError! {
     if expected.role != WorkspaceSourceRole.Index {
         return Err(EnvModelEvalError{diagnostic: envmodel_changed_workspace_source_diagnostic(resolver.root)})
     }
     resolver.revalidate_source(expected)
-    plan :: envmodel_workspace_evaluate_checked_source(expected, resolver)
+    plan: envmodel_workspace_evaluate_checked_source(expected, resolver)
     resolver.revalidate_source(expected)
     Ok(WorkspaceSnapshot{source: expected, plan: plan})
 }
@@ -114,20 +114,20 @@ fn envmodel_workspace_load_checked_source(resolver: AuthorityResolver, expected:
 // Project Package membership into the historical workspace-plan read model.
 // The Package parser and checked member resolver remain the sole authority;
 // this is a view for callers that still need member ordering/selection.
-fn envmodel_workspace_evaluate_package_source(source: WorkspaceSource, resolver: AuthorityResolver) -[FS, Env]> WorkspacePlan EnvModelEvalError! {
-    package :: resolver.checked_package(".")
-    checked_members :: package.facts.checked_members_in(resolver, package.member.directory)
+envmodel_workspace_evaluate_package_source: fn(source: WorkspaceSource, resolver: AuthorityResolver) -[FS, Env]> WorkspacePlan EnvModelEvalError! {
+    package: resolver.checked_package(".")
+    checked_members: package.facts.checked_members_in(resolver, package.member.directory)
     members := [WorkspacePlanMember]{}
     loop member in checked_members {
         resolver.revalidate_member(member.member)
-        canonical_path :: resolver.relative_identity(member.member.directory)
+        canonical_path: resolver.relative_identity(member.member.directory)
         &members.push(WorkspacePlanMember{name: member.facts.name, path: canonical_path, canonical_path: canonical_path})
     }
     resolver.revalidate_source(source)
     Ok(WorkspacePlan{members: members, comptime_inputs: [ComptimeInput]{}, overlay_policy: OverlayPolicy.empty(), source_digest: pkg_sha256_hex(source.source.bytes())})
 }
 
-fn envmodel_changed_workspace_source_diagnostic(dir: String) -> Diagnostic Never! {
+envmodel_changed_workspace_source_diagnostic: fn(dir: String) -> Diagnostic Never! {
     diagnostic_from_registry(
         "E1334",
         None,
@@ -140,14 +140,14 @@ fn envmodel_changed_workspace_source_diagnostic(dir: String) -> Diagnostic Never
 // Whether a workspace source declares the optional top-level build authority.
 // This is a discovery helper for the CLI; full diagnostics and execution still
 // go through the normal Driver loader and sema pass.
-fn envmodel_workspace_has_build_entry(src: String) -> Bool Never! {
+envmodel_workspace_has_build_entry: fn(src: String) -> Bool Never! {
     // Workspace policy is an evaluated overlay, not a Jet item. Keep this
     // probe on the same source shape as `evaluate`, otherwise a valid
     // workspace build entry disappears as soon as policy is present.
-    source :: pkg_strip_overlay_policy(src)
-    lexed :: lex(source.bytes())
+    source: pkg_strip_overlay_policy(src)
+    lexed: lex(source.bytes())
     if lexed.diagnostics.len() > 0 -> return false
-    parsed :: parse_lexed_with_source(^lexed, source.bytes(), parser_line_starts(source.bytes()))
+    parsed: parse_lexed_with_source(^lexed, source.bytes(), parser_line_starts(source.bytes()))
     if parsed.diagnostics.len() > 0 -> return false
     loop item in parsed.program.items {
         if item == {
@@ -159,51 +159,51 @@ fn envmodel_workspace_has_build_entry(src: String) -> Bool Never! {
 }
 
 // Evaluate a resolved workspace source string to a `WorkspacePlan`.
-fn envmodel_workspace_evaluate(src: String, base_dir: String) -[FS, Env, Exec, Time.Wait]> WorkspacePlan EnvModelEvalError! {
+envmodel_workspace_evaluate: fn(src: String, base_dir: String) -[FS, Env, Exec, Time.Wait]> WorkspacePlan EnvModelEvalError! {
     envmodel_workspace_evaluate_source(src, base_dir, WorkspaceSourceRole.Index)
 }
 
 // Evaluate a resolved source according to its classified role. Arbitrary
 // authority modules contribute policy and a boundary only; they never become
 // the member index.
-fn envmodel_workspace_evaluate_source(src: String, base_dir: String, role: WorkspaceSourceRole) -[FS, Env, Exec, Time.Wait]> WorkspacePlan EnvModelEvalError! {
-    resolver :: AuthorityResolver.open(base_dir)
+envmodel_workspace_evaluate_source: fn(src: String, base_dir: String, role: WorkspaceSourceRole) -[FS, Env, Exec, Time.Wait]> WorkspacePlan EnvModelEvalError! {
+    resolver: AuthorityResolver.open(base_dir)
     envmodel_workspace_evaluate_with_resolver(src, base_dir, role, resolver)
 }
 
 // Evaluate an already-resolved source without reopening it by pathname.
-fn envmodel_workspace_evaluate_checked_source(source: WorkspaceSource, resolver: AuthorityResolver) -[FS, Env, Exec, Time.Wait]> WorkspacePlan EnvModelEvalError! {
+envmodel_workspace_evaluate_checked_source: fn(source: WorkspaceSource, resolver: AuthorityResolver) -[FS, Env, Exec, Time.Wait]> WorkspacePlan EnvModelEvalError! {
     resolver.revalidate_source(source)
-    plan :: if envmodel_workspace_file_name(source.path) == PACKAGE_FILE -> envmodel_workspace_evaluate_package_source(source, resolver) else -> envmodel_workspace_evaluate_with_resolver(source.source, resolver.root, source.role, resolver)
+    plan: if envmodel_workspace_file_name(source.path) == PACKAGE_FILE -> envmodel_workspace_evaluate_package_source(source, resolver) else -> envmodel_workspace_evaluate_with_resolver(source.source, resolver.root, source.role, resolver)
     resolver.revalidate_source(source)
     Ok(plan)
 }
 
 // The final component of a path (`Path::file_name`).
-fn envmodel_workspace_file_name(path: String) -> String Never! {
+envmodel_workspace_file_name: fn(path: String) -> String Never! {
     trimmed := path
     loop trimmed.ends_with("/") -> trimmed = trimmed.removesuffix("/")
-    parts :: trimmed.cut_last("/") ?? return trimmed
+    parts: trimmed.cut_last("/") ?? return trimmed
     parts.after
 }
 
-fn envmodel_workspace_evaluate_with_resolver(src: String, base_dir: String, role: WorkspaceSourceRole, resolver: AuthorityResolver) -[FS, Env, Exec, Time.Wait]> WorkspacePlan EnvModelEvalError! {
-    overlay_policy :: if pkg_parse_workspace_policy(src) == {
+envmodel_workspace_evaluate_with_resolver: fn(src: String, base_dir: String, role: WorkspaceSourceRole, resolver: AuthorityResolver) -[FS, Env, Exec, Time.Wait]> WorkspacePlan EnvModelEvalError! {
+    overlay_policy: if pkg_parse_workspace_policy(src) == {
         .Ok(policy) -> policy
         .Err(error) -> { return Err(EnvModelEvalError{diagnostic: envmodel_workspace_policy_diagnostic(error)}) }
     }
-    eval_src :: pkg_strip_overlay_policy(src)
-    lexed :: lex(eval_src.bytes())
+    eval_src: pkg_strip_overlay_policy(src)
+    lexed: lex(eval_src.bytes())
     if lexed.diagnostics.len() > 0 -> return Err(EnvModelEvalError{diagnostic: lexed.diagnostics[0]})
-    parsed :: parse_lexed_with_source(^lexed, eval_src.bytes(), parser_line_starts(eval_src.bytes()))
+    parsed: parse_lexed_with_source(^lexed, eval_src.bytes(), parser_line_starts(eval_src.bytes()))
     if parsed.diagnostics.len() > 0 -> return Err(EnvModelEvalError{diagnostic: parsed.diagnostics[parsed.diagnostics.len() - 1]})
-    program :: parsed.program
+    program: parsed.program
 
-    // Find `module workspace { … }`. An authority-only source has no required
+    // Find `workspace: module { … }`. An authority-only source has no required
     // `members:` field, so policy stripping may leave it as an ordinary code
-    // module (`module workspace {}`); that still proves the declaration was
+    // module (`workspace: module {}`); that still proves the declaration was
     // syntactically present without turning it into an index.
-    ws_module :: envmodel_workspace_module(program.items)
+    ws_module: envmodel_workspace_module(program.items)
     code_workspace := false
     workspace_declarations := 0
     loop item in program.items {
@@ -225,14 +225,14 @@ fn envmodel_workspace_evaluate_with_resolver(src: String, base_dir: String, role
     }
 
     if workspace_declarations != 1 -> return Err(EnvModelEvalError{diagnostic: pkg_e0995_no_workspace_module()})
-    workspace_module :: ws_module ?? return Err(EnvModelEvalError{diagnostic: pkg_e0995_no_workspace_module()})
+    workspace_module: ws_module ?? return Err(EnvModelEvalError{diagnostic: pkg_e0995_no_workspace_module()})
     if workspace_module.members.len() == 0 -> return Err(EnvModelEvalError{diagnostic: pkg_e0995_no_workspace_module()})
 
     // The comptime context a `members:` expression evaluates against: every
     // top-level `fn` (callable) and every top-level `const`/`comptime`
     // binding (referenceable), evaluated in source order so a later binding
     // can build on an earlier one. This lets `members:` compose a sibling
-    // `PACKAGES :: […]` or call a local helper `fn`, not only inline
+    // `PACKAGES: […]` or call a local helper `fn`, not only inline
     // literals and the `find("./dir")` fast path.
     funcs := [String: Func]{}
     loop item in program.items {
@@ -253,10 +253,10 @@ fn envmodel_workspace_evaluate_with_resolver(src: String, base_dir: String, role
     members := [WorkspacePlanMember]{}
     comptime_inputs := [ComptimeInput]{}
     loop expr in workspace_module.members {
-        evaluated :: envmodel_workspace_eval_members_expr(expr, src, base_dir, resolver, funcs, globals)
+        evaluated: envmodel_workspace_eval_members_expr(expr, src, base_dir, resolver, funcs, globals)
         &comptime_inputs.extend(evaluated.inputs)
         loop member_path in evaluated.paths {
-            identity :: envmodel_workspace_validate_member_path(member_path.path, resolver, members, Val(member_path.span))
+            identity: envmodel_workspace_validate_member_path(member_path.path, resolver, members, Val(member_path.span))
             &members.push(WorkspacePlanMember{name: identity.name, path: member_path.path, canonical_path: identity.canonical_path})
         }
     }
@@ -264,8 +264,8 @@ fn envmodel_workspace_evaluate_with_resolver(src: String, base_dir: String, role
     Ok(WorkspacePlan{members: members, comptime_inputs: comptime_inputs, overlay_policy: overlay_policy, source_digest: pkg_sha256_hex(src.bytes())})
 }
 
-// The first auto-discovered `module workspace { … }` declaration.
-fn envmodel_workspace_module(items: [Item]) -> ModuleDecl? Never! {
+// The first auto-discovered `workspace: module { … }` declaration.
+envmodel_workspace_module: fn(items: [Item]) -> ModuleDecl? Never! {
     loop item in items {
         if item == {
             .Module(declaration) && declaration.name == NS_WORKSPACE && declaration.auto_discovered -> { return Val(declaration) }
@@ -277,12 +277,12 @@ fn envmodel_workspace_module(items: [Item]) -> ModuleDecl? Never! {
 
 // Workspace policy failures: an unsupported field or a malformed `policy.deny`
 // is the E3503 build-authority diagnostic; any other overlay fault is E0998.
-fn envmodel_workspace_policy_diagnostic(error: OverlayError) -> Diagnostic Never! {
-    unsupported_policy :: if error == {
+envmodel_workspace_policy_diagnostic: fn(error: OverlayError) -> Diagnostic Never! {
+    unsupported_policy: if error == {
         .UnsupportedPolicy(_) -> true
         else -> false
     }
-    malformed_build_policy :: if error == {
+    malformed_build_policy: if error == {
         .Malformed(detail) -> detail.contains("policy.deny")
         else -> false
     }
@@ -312,14 +312,14 @@ fn envmodel_workspace_policy_diagnostic(error: OverlayError) -> Diagnostic Never
 }
 
 // A member's validated physical identity.
-struct WorkspaceMemberIdentity {
+WorkspaceMemberIdentity: struct {
     name: String
     canonical_path: String
 }
 
 // Membership law: member paths are physical identities inside the root,
 // names are unique, and a member cannot introduce another member list.
-fn envmodel_workspace_validate_member_path(rel_path: String, resolver: AuthorityResolver, members: [WorkspacePlanMember], span: Span?) -[FS, Env]> WorkspaceMemberIdentity EnvModelEvalError! {
+envmodel_workspace_validate_member_path: fn(rel_path: String, resolver: AuthorityResolver, members: [WorkspacePlanMember], span: Span?) -[FS, Env]> WorkspaceMemberIdentity EnvModelEvalError! {
     if envmodel_workspace_escapes_root(rel_path) {
         return Err(envmodel_error(
             "E1322",
@@ -329,15 +329,15 @@ fn envmodel_workspace_validate_member_path(rel_path: String, resolver: Authority
             span
         ))
     }
-    member :: if resolver.checked_member(rel_path) == {
+    member: if resolver.checked_member(rel_path) == {
         .Ok(checked) -> checked
         .Err(error) -> { return Err(envmodel_workspace_authority_error(error, span)) }
     }
     if resolver.revalidate_member(member) == .Err(error) -> return Err(envmodel_workspace_authority_error(error, span))
-    path :: member.manifest.file.path
-    has_members :: member.manifest.facts.members.len() > 0
-    name :: member.manifest.facts.name
-    canonical_path :: if resolver.relative_identity(member.directory) == {
+    path: member.manifest.file.path
+    has_members: member.manifest.facts.members.len() > 0
+    name: member.manifest.facts.name
+    canonical_path: if resolver.relative_identity(member.directory) == {
         .Ok(identity) -> identity
         .Err(error) -> { return Err(envmodel_workspace_authority_error(error, span)) }
     }
@@ -376,7 +376,7 @@ fn envmodel_workspace_validate_member_path(rel_path: String, resolver: Authority
 }
 
 // An absolute path, or one with a `..` component.
-fn envmodel_workspace_escapes_root(path: String) -> Bool Never! {
+envmodel_workspace_escapes_root: fn(path: String) -> Bool Never! {
     if path.starts_with("/") -> return true
     loop component in envmodel_path_components(path) {
         if component == .ParentDir -> return true
@@ -385,7 +385,7 @@ fn envmodel_workspace_escapes_root(path: String) -> Bool Never! {
 }
 
 // The authority diagnostic re-anchored at the `members:` span.
-fn envmodel_workspace_authority_error(error: AuthorityError, span: Span?) -> EnvModelEvalError Never! {
+envmodel_workspace_authority_error: fn(error: AuthorityError, span: Span?) -> EnvModelEvalError Never! {
     diagnostic := error.diagnostic()
     diagnostic.span = span
     EnvModelEvalError{diagnostic: diagnostic}
@@ -394,12 +394,12 @@ fn envmodel_workspace_authority_error(error: AuthorityError, span: Span?) -> Env
 // ── Expression evaluation ──
 
 // One member path and the source span that produced it.
-struct WorkspaceMemberPath {
+WorkspaceMemberPath: struct {
     path: String
     span: Span
 }
 
-struct WorkspaceMembersValue {
+WorkspaceMembersValue: struct {
     paths: [WorkspaceMemberPath]
     inputs: [ComptimeInput]
 }
@@ -408,13 +408,13 @@ struct WorkspaceMembersValue {
 // any Tier-1 comptime inputs it recorded. `find("./dir")` is the fast path (no
 // comptime inputs); anything else evaluates through the Compiler's comptime
 // path against the workspace file's top-level `fn`s and `const`s.
-fn envmodel_workspace_eval_members_expr(expr: Expr, src: String, base_dir: String, resolver: AuthorityResolver, funcs: [String: Func], globals: [String: CtValue]) -[FS, Env, Exec, Time.Wait]> WorkspaceMembersValue EnvModelEvalError! {
+envmodel_workspace_eval_members_expr: fn(expr: Expr, src: String, base_dir: String, resolver: AuthorityResolver, funcs: [String: Func], globals: [String: CtValue]) -[FS, Env, Exec, Time.Wait]> WorkspaceMembersValue EnvModelEvalError! {
     // Fast path: workspace `find("./dir")` scans for package directories. This
     // manifest helper is separate from comptime `find(glob) -> [String]`,
     // which records matched file hashes for ordinary Jet comptime bindings.
     if expr == {
         .Call(call, _) && call.name == BUILTIN_FIND -> {
-            span :: call.name_span
+            span: call.name_span
             if call.args.len() == 0 {
                 return Err(envmodel_error(
                     "E0996",
@@ -424,13 +424,13 @@ fn envmodel_workspace_eval_members_expr(expr: Expr, src: String, base_dir: Strin
                     Val(span)
                 ))
             }
-            arg :: call.args[0]
+            arg: call.args[0]
             // A non-literal `find` argument (e.g. `find(base + "/pkgs")`) is a
             // computed path: it falls through to the comptime evaluator, which
             // resolves the argument against `globals`/`funcs` before scanning.
             if envmodel_workspace_literal_string(arg.expr) == .Val(dir) {
-                scan_dir :: envmodel_workspace_validate_find_scan_dir(dir, resolver, span)
-                arg_span :: expr_span(arg.expr)
+                scan_dir: envmodel_workspace_validate_find_scan_dir(dir, resolver, span)
+                arg_span: expr_span(arg.expr)
                 paths := [WorkspaceMemberPath]{}
                 loop found in envmodel_workspace_find_package_dirs(scan_dir, resolver, span) -> &paths.push(WorkspaceMemberPath{path: found, span: arg_span})
                 return Ok(WorkspaceMembersValue{paths: paths, inputs: [ComptimeInput]{}})
@@ -448,19 +448,19 @@ fn envmodel_workspace_eval_members_expr(expr: Expr, src: String, base_dir: Strin
     // `embed_bytes`, `find`, `fetch`) the expression reads and
     // the comptime bridge does not report its reads yet, so an expression
     // that reaches one is refused rather than locked without its inputs.
-    span :: expr_span(expr)
+    span: expr_span(expr)
     loop site in comptime_walk_calls(expr) {
         if site.name == "embed_file" || site.name == "embed_bytes" || site.name == BUILTIN_FIND || site.name == "fetch" {
             return Err(envmodel_error("E2104", "`members:` reads the build-time input `{site.name}`, which the workspace lock cannot record yet", "the workspace lock pins every file or URL a `members:` expression reads, and this evaluator does not report those reads", "list the member paths directly, or use the `find(\"./dir\")` fast path", Val(site.span)))
         }
     }
-    value :: comptime_evaluate(expr, src, funcs, base_dir, globals) ?? return Err(EnvModelEvalError{diagnostic: err.diagnostic})
+    value: comptime_evaluate(expr, src, funcs, base_dir, globals) ?? return Err(EnvModelEvalError{diagnostic: err.diagnostic})
     paths := [WorkspaceMemberPath]{}
     loop path in envmodel_workspace_string_list(value, span) -> &paths.push(WorkspaceMemberPath{path: path, span: span})
     Ok(WorkspaceMembersValue{paths: paths, inputs: [ComptimeInput]{}})
 }
 
-fn envmodel_workspace_member_path_string(value: CtValue) -> String? Never! {
+envmodel_workspace_member_path_string: fn(value: CtValue) -> String? Never! {
     if value == {
         .Str(text) -> Val(text)
         .Present(inner) -> envmodel_workspace_member_path_string(inner)
@@ -473,8 +473,8 @@ fn envmodel_workspace_member_path_string(value: CtValue) -> String? Never! {
 }
 
 // A plain string literal with no interpolation.
-fn envmodel_workspace_literal_string(expr: Expr) -> String? Never! {
-    parts :: if expr == {
+envmodel_workspace_literal_string: fn(expr: Expr) -> String? Never! {
+    parts: if expr == {
         .Str(literal_parts, _, _) -> literal_parts
         else -> { return None }
     }
@@ -489,8 +489,8 @@ fn envmodel_workspace_literal_string(expr: Expr) -> String? Never! {
 }
 
 // `[String]` from a comptime list of strings; any other value is E0996.
-fn envmodel_workspace_string_list(value: CtValue, span: Span) -> [String] EnvModelEvalError! {
-    items :: if value == {
+envmodel_workspace_string_list: fn(value: CtValue, span: Span) -> [String] EnvModelEvalError! {
+    items: if value == {
         .List(values) -> values
         else -> {
             return Err(envmodel_error(
@@ -504,7 +504,7 @@ fn envmodel_workspace_string_list(value: CtValue, span: Span) -> [String] EnvMod
     }
     out := [String]{}
     loop item in items {
-        path :: envmodel_workspace_member_path_string(item) ?? return Err(envmodel_error(
+        path: envmodel_workspace_member_path_string(item) ?? return Err(envmodel_error(
             "E0996",
             "`members:` list must contain strings (package paths)",
             "Each element should be a relative path to a package directory",
@@ -518,7 +518,7 @@ fn envmodel_workspace_string_list(value: CtValue, span: Span) -> [String] EnvMod
 
 // ── find("./dir"): package discovery ──
 
-fn envmodel_workspace_validate_find_scan_dir(raw: String, resolver: AuthorityResolver, span: Span) -[FS, Env]> String EnvModelEvalError! {
+envmodel_workspace_validate_find_scan_dir: fn(raw: String, resolver: AuthorityResolver, span: Span) -[FS, Env]> String EnvModelEvalError! {
     if raw == "" || envmodel_workspace_escapes_root(raw) {
         return Err(envmodel_error(
             "E1322",
@@ -528,7 +528,7 @@ fn envmodel_workspace_validate_find_scan_dir(raw: String, resolver: AuthorityRes
             Val(span)
         ))
     }
-    relative :: envmodel_workspace_strip_cur_dir(raw)
+    relative: envmodel_workspace_strip_cur_dir(raw)
     if resolver.checked_directory(relative) == {
         .Ok(directory) -> Ok(directory.path)
         .Err(error) -> {
@@ -539,8 +539,8 @@ fn envmodel_workspace_validate_find_scan_dir(raw: String, resolver: AuthorityRes
 }
 
 // `Path::strip_prefix("./")`: drop one leading `.` component, else unchanged.
-fn envmodel_workspace_strip_cur_dir(raw: String) -> String Never! {
-    components :: envmodel_path_components(raw)
+envmodel_workspace_strip_cur_dir: fn(raw: String) -> String Never! {
+    components: envmodel_path_components(raw)
     if components.len() == 0 || components[0] != EnvPathComponent.CurDir -> return raw.copy()
     rest := [String]{}
     loop component in components {
@@ -551,8 +551,8 @@ fn envmodel_workspace_strip_cur_dir(raw: String) -> String Never! {
 
 // Immediate subdirectories of `scan_dir` holding a canonical `package.jet`,
 // as workspace-relative paths in the resolver's deterministic order.
-fn envmodel_workspace_find_package_dirs(scan_dir: String, resolver: AuthorityResolver, span: Span) -[FS, Env]> [String] EnvModelEvalError! {
-    discovered :: if resolver.discover_members(scan_dir) == {
+envmodel_workspace_find_package_dirs: fn(scan_dir: String, resolver: AuthorityResolver, span: Span) -[FS, Env]> [String] EnvModelEvalError! {
+    discovered: if resolver.discover_members(scan_dir) == {
         .Ok(found) -> found
         .Err(error) -> { return Err(envmodel_workspace_authority_error(error, Val(span))) }
     }
@@ -564,7 +564,7 @@ fn envmodel_workspace_find_package_dirs(scan_dir: String, resolver: AuthorityRes
 // ── Diagnostics ──
 
 // E0997: `find("…")` in `members:` points at a directory that doesn't exist.
-fn envmodel_workspace_e0997_find_dir_missing(dir: String, span: Span) -> Diagnostic Never! {
+envmodel_workspace_e0997_find_dir_missing: fn(dir: String, span: Span) -> Diagnostic Never! {
     diagnostic_from_registry(
         "E0997",
         Val(span),

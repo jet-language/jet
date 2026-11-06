@@ -1,17 +1,17 @@
 use core.encoding.[Dyn]
 
 // A move ends only the current path; a reset restores the next iteration.
-fn consume(value: ^[Int]) -[]> Int { value.len() }
+consume: fn(value: ^[Int]) -[]> Int { value.len() }
 
-fn move_then_return() -[]> Int {
+move_then_return: fn() -[]> Int {
     out := [1, 2]
     loop {
-        count :: consume(^out)
+        count: consume(^out)
         return count
     }
 }
 
-fn move_then_break() -[]> Int {
+move_then_break: fn() -[]> Int {
     out := [1, 2, 3]
     count := 0
     loop {
@@ -21,7 +21,7 @@ fn move_then_break() -[]> Int {
     count
 }
 
-fn move_then_reset() -[]> Int {
+move_then_reset: fn() -[]> Int {
     current := [1]
     total := 0
     loop i in 0..<3 {
@@ -32,12 +32,12 @@ fn move_then_reset() -[]> Int {
     total
 }
 
-enum Tree {
+Tree: enum {
     Object([Int])
     Text(String)
 }
 
-fn owned_payload(tree: ^Tree) -[]> Int {
+owned_payload: fn(tree: ^Tree) -[]> Int {
     owned := ^tree
     if ^owned == {
         .Object(entries) -> return consume(^entries)
@@ -46,18 +46,18 @@ fn owned_payload(tree: ^Tree) -[]> Int {
 }
 
 
-fn owned_dyn_payload(tree: ^Dyn) -[]> Int {
+owned_dyn_payload: fn(tree: ^Dyn) -[]> Int {
     owned := ^tree
     if ^owned == {
         .Text(text) -> {
-            rebuilt :: Dyn.Text(^text)
-            value :: rebuilt.text() ?? ""
+            rebuilt: Dyn.Text(^text)
+            value: rebuilt.text() ?? ""
             return value.count_bytes()
         }
         else -> return 0
     }
 }
-fn run() {
+run: fn() {
     print(move_then_return())
     print(move_then_break())
     print(move_then_reset())

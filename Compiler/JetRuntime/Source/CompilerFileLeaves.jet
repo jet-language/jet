@@ -1,7 +1,7 @@
 // read_until('\n') on the one shared reader. No fault checkpoint, UTF-8
 // validation or line trimming belongs to this leaf. FD72 owns refill/position;
 // HostFiles read/seek consume this same state.
-#Export(c) fn jet_file_reader_line_bytes_raw(reader: I64, output: I64, length: I64, error: I64) -> I64 {
+#Export(c) jet_file_reader_line_bytes_raw: fn(reader: I64, output: I64, length: I64, error: I64) -> I64 {
     bytes := I64{0}
     capacity := I64{0}
     used := I64{0}
@@ -11,12 +11,12 @@
         failure = I64{-9}
     } else {
         fd_put(reader, I64{40}, I64{8192})
-        buffer :: fd_buffer(reader)
+        buffer: fd_buffer(reader)
         loop {
             position := fd_word(reader, I64{56})
             filled := fd_word(reader, I64{48})
             if (position == filled) {
-                count :: host_call(I64{0}, fd_word(reader, I64{8}), buffer, I64{8192})
+                count: host_call(I64{0}, fd_word(reader, I64{8}), buffer, I64{8192})
                 if (count == I64{-4}) -> next
                 if (count <= I64{0}) {
                     failure = count
@@ -27,18 +27,18 @@
                 fd_put(reader, I64{56}, I64{0})
                 fd_put(reader, I64{48}, filled)
             }
-            newline :: rt_text_find_byte(buffer, filled, I64{10}, position, false)
-            found :: newline >= I64{0}
-            end :: if found -> newline + I64{1} else -> filled
-            count :: end - position
-            required :: used + count
+            newline: rt_text_find_byte(buffer, filled, I64{10}, position, false)
+            found: newline >= I64{0}
+            end: if found -> newline + I64{1} else -> filled
+            count: end - position
+            required: used + count
             if (required > capacity) {
                 // A line found whole in the buffer gets exactly its bytes,
                 // which compiler_fs_bytes_take hands on without a copy.
                 grown := if (capacity == I64{0}) -> I64{128} else -> capacity
                 if (capacity == I64{0} && found) { grown = count }
                 loop grown < required -> grown *= I64{2}
-                next_bytes :: jet_rt_alloc_8(grown)
+                next_bytes: jet_rt_alloc_8(grown)
                 if (used != I64{0}) -> rt_text_bytes_copy(next_bytes, bytes, used)
                 if (capacity != I64{0}) -> jet_rt_free_8(bytes, capacity)
                 bytes = next_bytes

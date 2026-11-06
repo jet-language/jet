@@ -7,27 +7,27 @@ use {
         publication_read_public_key, publication_sign_base64_decode, publication_sign_bytes,
         publication_sign_hex_decode, publication_verify, publication_write_private_seed,
     ]
-    base64 :: core.encoding.base64
-    crypto :: core.crypto
-    files :: core.files
-    hex :: core.encoding.hex
-    sys :: core.sys
+    base64: core.encoding.base64
+    crypto: core.crypto
+    files: core.files
+    hex: core.encoding.hex
+    sys: core.sys
 }
 
 // The text of tests/fixtures/jetpack-diagnostics/keygen_entropy_unavailable.stderr,
 // which the CLI keygen cases compare their stderr with. It is written here because an
 // embed may not leave this package (E0957).
-PUBLICATION_SIGN_E1292_SNAPSHOT :: "Error [jet.MissingRandomness]: Jet could not create the package-signing key.\n Why: The operating system could not provide cryptographic randomness.\n Fix: Retry as a new operation on a supported host; no key files were created.\nMore: jet-lang.dev/e/E1292\n"
+PUBLICATION_SIGN_E1292_SNAPSHOT: "Error [jet.MissingRandomness]: Jet could not create the package-signing key.\n Why: The operating system could not provide cryptographic randomness.\n Fix: Retry as a new operation on a supported host; no key files were created.\nMore: jet-lang.dev/e/E1292\n"
 
 #Test("publication sign hex_roundtrips") {
-    data :: [U8]{0, 1, 2, 250, 255, 16, 128}
-    encoded :: hex.encode(data)
+    data: [U8]{0, 1, 2, 250, 255, 16, 128}
+    encoded: hex.encode(data)
     assert_eq(encoded, "000102faff1080")
     assert_eq(publication_sign_hex_decode(encoded) ?? panic("hex"), data)
 }
 #Test("publication sign base64_roundtrips_all_pad_lengths") {
     loop input in ([String]{"", "f", "fo", "foo", "foob", "fooba", "foobar"}) {
-        encoded :: base64.encode(input.bytes())
+        encoded: base64.encode(input.bytes())
         assert_eq(publication_sign_base64_decode(encoded) ?? panic("base64"), input.bytes())
     }
     assert_eq(base64.encode("foobar".bytes()), "Zm9vYmFy")
@@ -35,12 +35,12 @@ PUBLICATION_SIGN_E1292_SNAPSHOT :: "Error [jet.MissingRandomness]: Jet could not
 // #4427: Core sys.set claims Never!/unit, but its runtime returns
 // Result<(),EnvError>; the original environment override test stays intact.
 #Test("publication sign keys_dir_honors_env_override") {
-    previous :: sys.get("JET_KEYS_DIR")
+    previous: sys.get("JET_KEYS_DIR")
     sys.set("JET_KEYS_DIR", "/tmp/jet_keys_test_dir")
-    actual :: publication_keys_dir()
+    actual: publication_keys_dir()
     if previous == {
         .Val(value) -> sys.set("JET_KEYS_DIR", value)
-        .None -> { _ :: sys.unset("JET_KEYS_DIR") ?? panic("restore env") }
+        .None -> { _: sys.unset("JET_KEYS_DIR") ?? panic("restore env") }
     }
     assert_eq(actual, "/tmp/jet_keys_test_dir")
 }
@@ -50,8 +50,8 @@ PUBLICATION_SIGN_E1292_SNAPSHOT :: "Error [jet.MissingRandomness]: Jet could not
     assert_eq(publication_e1292().code, "E1292")
 }
 #Test("publication sign entropy diagnostic uses canonical registry and renderer") {
-    row :: diagnostic_registry_row("E1292") ?? panic("E1292 registry row")
-    diagnostic :: publication_e1292()
+    row: diagnostic_registry_row("E1292") ?? panic("E1292 registry row")
+    diagnostic: publication_e1292()
     assert_eq(diagnostic.what, row.what)
     assert_eq(diagnostic.why, row.why)
     assert_eq(diagnostic.fix, row.fix)
@@ -75,29 +75,29 @@ PUBLICATION_SIGN_E1292_SNAPSHOT :: "Error [jet.MissingRandomness]: Jet could not
     }
 }
 
-fn publication_sign_test_seed(byte: Int) -> [U8] Never! {
+publication_sign_test_seed: fn(byte: Int) -> [U8] Never! {
     seed := [U8]{}
     loop _ in 0..<32 -> &seed.push(U8{byte})
     seed
 }
 #Test("publication sign real Ed25519 roundtrip tamper and wrong key") {
-    seed :: publication_sign_test_seed(7)
-    key :: crypto.SigningKey.from_bytes(seed) ?? panic("seed")
-    public :: hex.encode(key.public_key().bytes)
-    message :: "sha256-0011223344556677"
-    signature :: publication_sign_bytes(seed, message) ?? panic("sign")
+    seed: publication_sign_test_seed(7)
+    key: crypto.SigningKey.from_bytes(seed) ?? panic("seed")
+    public: hex.encode(key.public_key().bytes)
+    message: "sha256-0011223344556677"
+    signature: publication_sign_bytes(seed, message) ?? panic("sign")
     assert_eq((publication_sign_base64_decode(signature) ?? panic("signature wire")).len(), 64)
     assert(publication_verify(public, message, signature) ?? panic("verify"))
     assert(!(publication_verify(public, "sha256-tampered", signature) ?? panic("verify tamper")))
-    other :: crypto.SigningKey.from_bytes(publication_sign_test_seed(8)) ?? panic("other seed")
+    other: crypto.SigningKey.from_bytes(publication_sign_test_seed(8)) ?? panic("other seed")
     assert(!(publication_verify(hex.encode(other.public_key().bytes), message, signature) ?? panic("wrong key")))
     close(^key)
     close(^other)
 }
 #Test("publication sign RFC8032 empty message wire") {
-    seed :: publication_sign_hex_decode("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60") ?? panic("seed vector")
-    signature :: publication_sign_bytes(seed, "") ?? panic("RFC signing")
-    expected :: publication_sign_hex_decode("e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b") ?? panic("signature vector")
+    seed: publication_sign_hex_decode("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60") ?? panic("seed vector")
+    signature: publication_sign_bytes(seed, "") ?? panic("RFC signing")
+    expected: publication_sign_hex_decode("e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b") ?? panic("signature vector")
     assert_eq(publication_sign_base64_decode(signature) ?? panic("wire"), expected)
     assert(publication_verify(" d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a ", "", signature) ?? panic("RFC verify"))
 }
@@ -107,24 +107,24 @@ fn publication_sign_test_seed(byte: Int) -> [U8] Never! {
     loop key in ([String]{"", "gg", "00", "01".repeat(32), "00".repeat(32)}) {
         assert(!(publication_verify(key, "sha256-x", base64.encode(zeros)) ?? panic("invalid key")))
     }
-    public :: "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a"
+    public: "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a"
     loop signature in ([String]{"", "Zg=", "Zh==", "====", "_w==", "AAAA\n"}) {
         assert(!(publication_verify(public, "", signature) ?? panic("malformed signature")))
     }
     assert(!(publication_verify(public, "", base64.encode(zeros)) ?? panic("invalid point")))
 }
 #Test("publication sign e1248 keeps orphaned TOFU refusal") {
-    diagnostic :: publication_e1248("/keys/jet.ed25519")
+    diagnostic: publication_e1248("/keys/jet.ed25519")
     assert_eq(diagnostic.code, "E1248")
     assert(diagnostic.what.contains("`/keys/jet.ed25519`"))
     assert(diagnostic.why.contains("TOFU"))
     assert(diagnostic.fix.contains("--force"))
 }
 
-fn publication_sign_test_root(label: String) -[FS, Env]> String Never! {
-    home :: sys.get("HOME") ?? panic("signing fixtures require HOME")
-    scratch :: sys.get("JET_SCRATCH_ROOT") ?? (sys.get("JET_STATE_ROOT") ?? files.join(sys.get("XDG_CACHE_HOME") ?? files.join(home, ".cache"), "jet-dev"))
-    root :: files.join(scratch, "jet-sign-{label}-{sys.pid()}")
+publication_sign_test_root: fn(label: String) -[FS, Env]> String Never! {
+    home: sys.get("HOME") ?? panic("signing fixtures require HOME")
+    scratch: sys.get("JET_SCRATCH_ROOT") ?? (sys.get("JET_STATE_ROOT") ?? files.join(sys.get("XDG_CACHE_HOME") ?? files.join(home, ".cache"), "jet-dev"))
+    root: files.join(scratch, "jet-sign-{label}-{sys.pid()}")
     files.remove_all(root).drop("stale fixture may be absent")
     files.create_dir_all(root) ?? panic("create fixture")
     root
@@ -132,12 +132,12 @@ fn publication_sign_test_root(label: String) -[FS, Env]> String Never! {
 // Original Sign.rs :507. #3593: canonical protected publication needs force
 // replacement of the symlink BINDING, never following its attacker target.
 #Test("publication sign force_keygen_replaces_a_symlink_without_following_it") {
-    root :: publication_sign_test_root("seed")
-    target :: files.join(root, "attacker-target")
-    path :: files.join(root, "key.ed25519")
+    root: publication_sign_test_root("seed")
+    target: files.join(root, "attacker-target")
+    path: files.join(root, "key.ed25519")
     files.write(target, "sentinel") ?? panic("sentinel")
     files.symlink(target, path) ?? panic("symlink")
-    seed :: publication_sign_test_seed(90)
+    seed: publication_sign_test_seed(90)
     publication_write_private_seed(path, seed, true) ?? panic("protected force seed")
     assert_eq(files.read(target) ?? panic("sentinel read"), "sentinel")
     assert_eq(files.read_bytes(path) ?? panic("seed read"), seed)
@@ -147,22 +147,22 @@ fn publication_sign_test_root(label: String) -[FS, Env]> String Never! {
 // Original tests/pkg.rs :9148. Entropy #3597 and exact held-directory
 // create-new/0600/0644/force contracts #3593; no cargo-existence skip.
 #Test("publication sign keygen_refuses_existing_key_e1248") {
-    root :: publication_sign_test_root("keygen")
-    previous :: sys.get("JET_KEYS_DIR")
+    root: publication_sign_test_root("keygen")
+    previous: sys.get("JET_KEYS_DIR")
     sys.set("JET_KEYS_DIR", files.join(root, "keys"))
-    first :: publication_keygen("jet", false) ?? panic("first keygen")
+    first: publication_keygen("jet", false) ?? panic("first keygen")
     assert_eq(((files.stat(first.seed_path) ?? panic("private mode")).mode).bit_and(4095), 384)
     assert_eq(((files.stat(first.public_key_path) ?? panic("public mode")).mode).bit_and(4095), 420)
     if publication_keygen("jet", false) == {
         .Err(error) -> assert_eq(error.diagnostic.code, "E1248")
         .Ok(_) -> panic("existing key overwritten")
     }
-    replacement :: publication_keygen("jet", true) ?? panic("force keygen")
+    replacement: publication_keygen("jet", true) ?? panic("force keygen")
     assert(replacement.public_key_hex != first.public_key_hex)
     assert_eq(publication_read_public_key("jet"), Val(replacement.public_key_hex))
     if previous == {
         .Val(value) -> sys.set("JET_KEYS_DIR", value)
-        .None -> { _ :: sys.unset("JET_KEYS_DIR") ?? panic("restore env") }
+        .None -> { _: sys.unset("JET_KEYS_DIR") ?? panic("restore env") }
     }
     files.remove_all(root) ?? panic("cleanup")
 }

@@ -1,24 +1,24 @@
 // A typed Person form renders its canonical progressive endpoint and feeds the
 // matching App action with the same checked model contract.
-use web :: core.web
+use web: core.web
 #Target(Web)
 
-struct Person {
+Person: struct {
     id: Int
     name: String
     active: Bool
 }
 
-fn save(input: Person) -> String { "saved {input.name}" }
+save: fn(input: Person) -> String { "saved {input.name}" }
 
-fn home() -> WebPage {
-    form :: web.form(Person, action: save)
+home: fn() -> WebPage {
+    form: web.form(Person, action: save)
     form.set("id", "7") ?? panic("id set")
     form.set("name", "Ada") ?? panic("name set")
     web.page("People", form.render())
 }
 
-fn run() {
+run: fn() {
     web.app()
         .route("/", home)
         .form("save", save)

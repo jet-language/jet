@@ -1,20 +1,20 @@
 // Quantile, median and describe by rank selection: exact interpolated values on
 // sorted, reversed, repeated and signed-zero inputs, the same errors for an
 // invalid q, NaN, infinity and empty data, and the caller's list unchanged.
-use data :: core.data
+use data: core.data
 
-fn show(label: String, values: [Float], q: Float) {
+show: fn(label: String, values: [Float], q: Float) {
     if data.quantile(values, q) == {
         .Ok(value) -> { print("{label} q={q}: {value}") }
         .Err(error) -> print("{label} q={q}: {error}")
     }
 }
 
-fn run() {
-    sorted :: [Float]{1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0}
-    reversed :: [Float]{11.0, 10.0, 9.0, 8.0, 7.0, 6.0, 5.0, 4.0, 3.0, 2.0, 1.0}
-    repeated :: [Float]{4.0, 1.0, 4.0, 4.0, 2.0, 4.0, 9.0, 4.0}
-    levels :: [Float]{0.0, 0.1, 0.25, 0.5, 0.75, 0.9, 1.0}
+run: fn() {
+    sorted: [Float]{1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0}
+    reversed: [Float]{11.0, 10.0, 9.0, 8.0, 7.0, 6.0, 5.0, 4.0, 3.0, 2.0, 1.0}
+    repeated: [Float]{4.0, 1.0, 4.0, 4.0, 2.0, 4.0, 9.0, 4.0}
+    levels: [Float]{0.0, 0.1, 0.25, 0.5, 0.75, 0.9, 1.0}
     loop q in levels {
         show("sorted", sorted, q)
         show("reversed", reversed, q)
@@ -31,7 +31,7 @@ fn run() {
     show("value infinity", [Float]{1.0, Float{1.0} / Float{0.0}}, Float{0.5})
     show("empty", [Float]{}, Float{0.5})
 
-    input :: [Float]{5.0, 3.0, 9.0, 1.0, 7.0, 2.0}
+    input: [Float]{5.0, 3.0, 9.0, 1.0, 7.0, 2.0}
     print("median: {data.median(input) ?? Float{-1.0}}")
     print("input after median: {input}")
     print("describe: {data.describe(input) ?? panic("describe")}")

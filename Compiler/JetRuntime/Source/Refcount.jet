@@ -24,41 +24,41 @@
 //   exclusive access to its own reference, so a count of 1 it observes stays
 //   1 until that writer itself clones.
 
-RC_ZERO_MARK :: I64{4611686018427387904}
-RC_OWNER_BITS :: I64{4611686018427387903}
+RC_ZERO_MARK: I64{4611686018427387904}
+RC_OWNER_BITS: I64{4611686018427387903}
 
-fn rc_load(count: I64) -> I64 {
+rc_load: fn(count: I64) -> I64 {
     #Unsafe("count addresses the aligned prefix word of a live refcounted block the caller holds") {
         return os_load_i64(count)
     }
 }
 
-fn rc_store(count: I64, value: I64) {
+rc_store: fn(count: I64, value: I64) {
     #Unsafe("count addresses the aligned prefix word of a block the caller just allocated and still owns exclusively") {
         os_store_i64(count, value)
     }
 }
 
-fn rc_add(count: I64, delta: I64) -> I64 {
+rc_add: fn(count: I64, delta: I64) -> I64 {
     #Unsafe("LOCK XADD on the aligned prefix word of a live refcounted block; the caller's reference keeps it live") {
         return os_fetch_add_i64(count, delta)
     }
 }
 
 // Publishes the first owner of a freshly allocated block.
-fn rc_init(count: I64) { rc_store(count, I64{1}) }
+rc_init: fn(count: I64) { rc_store(count, I64{1}) }
 
-#Export(c) fn jet_rt_rc_retain(count: I64) {
+#Export(c) jet_rt_rc_retain: fn(count: I64) {
     if (rc_load(count) < I64{0}) -> return
-    old :: rc_add(count, I64{1})
+    old: rc_add(count, I64{1})
     if (old == I64{9223372036854775807}) -> jet_rt_panic_overflow()
 }
 
 // An ending process gives up no owner, so no last owner frees (#5478,
 // Main.jet main_process_ending): a later unique test of a shared block stays
 // false and its writer copies, as for any other shared block.
-#Export(c) fn jet_rt_rc_release(count: I64) -> Bool {
-    word :: rc_load(count)
+#Export(c) jet_rt_rc_release: fn(count: I64) -> Bool {
+    word: rc_load(count)
     if (word < I64{0} || main_process_ending != I64{0}) -> return false
     if (word.bit_and(RC_OWNER_BITS) == I64{1}) {
         // The sole owner, as in unique: no other thread holds a reference
@@ -75,17 +75,17 @@ fn rc_init(count: I64) { rc_store(count, I64{1}) }
     rc_add(count, I64{-1}).bit_and(RC_OWNER_BITS) == I64{1}
 }
 
-#Export(c) fn jet_rt_rc_unique(count: I64) -> Bool {
-    word :: rc_load(count)
+#Export(c) jet_rt_rc_unique: fn(count: I64) -> Bool {
+    word: rc_load(count)
     word >= I64{0} && word.bit_and(RC_OWNER_BITS) == I64{1}
 }
 
 // Sets the zero-at-free mark of a live non-immortal block the caller holds a
 // reference to. Other owners may retain or release meanwhile; the exchange
 // keeps their count changes.
-fn rc_mark_zero(count: I64) {
+rc_mark_zero: fn(count: I64) {
     loop {
-        word :: rc_load(count)
+        word: rc_load(count)
         if (word < I64{0} || word.bit_and(RC_ZERO_MARK) != I64{0}) -> return
         #Unsafe("LOCK CMPXCHG on the aligned prefix word of a live refcounted block; the caller's reference keeps it live") {
             if (os_cas_i64(count, word, word.bit_or(RC_ZERO_MARK)) == word) -> return
@@ -99,16 +99,16 @@ fn rc_mark_zero(count: I64) {
 // entries whatever allocated them. `block` is the payload address an owner
 // holds; callers never pass a static (frozen) buffer: lowering tests cap == 0
 // for lists, and static boxes carry an immortal (negative) word there.
-#Export(c) fn jet_rt_block_retain(block: I64) { jet_rt_rc_retain(wrapping(block - I64{24})) }
+#Export(c) jet_rt_block_retain: fn(block: I64) { jet_rt_rc_retain(wrapping(block - I64{24})) }
 
-#Export(c) fn jet_rt_block_release(block: I64) -> Bool { jet_rt_rc_release(wrapping(block - I64{24})) }
+#Export(c) jet_rt_block_release: fn(block: I64) -> Bool { jet_rt_rc_release(wrapping(block - I64{24})) }
 
-#Export(c) fn jet_rt_block_unique(block: I64) -> Bool { jet_rt_rc_unique(wrapping(block - I64{24})) }
+#Export(c) jet_rt_block_unique: fn(block: I64) -> Bool { jet_rt_rc_unique(wrapping(block - I64{24})) }
 
-#Export(c) fn jet_rt_block_mark_zero(block: I64) { rc_mark_zero(wrapping(block - I64{24})) }
+#Export(c) jet_rt_block_mark_zero: fn(block: I64) { rc_mark_zero(wrapping(block - I64{24})) }
 
 // `replica` is a fresh block the caller owns holding bytes of `block`: a copy
 // of a block marked zero-at-free carries the mark too.
-#Export(c) fn jet_rt_block_inherit_zero(block: I64, replica: I64) {
+#Export(c) jet_rt_block_inherit_zero: fn(block: I64, replica: I64) {
     if (rc_load(wrapping(block - I64{24})).bit_and(RC_ZERO_MARK) != I64{0}) -> rc_mark_zero(wrapping(replica - I64{24}))
 }

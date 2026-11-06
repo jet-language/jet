@@ -3,27 +3,27 @@
 // loop, an interval timer never ends so the consumer bounds it, and a file
 // reader surfaces a typed IOError instead of an empty stream.
 // No Tokio runtime or tokio-stream bridge is linked.
-package {
+package: {
     name: "native_resource_streams"
     authority: { allow: [FS.Read, FS.Write, IO, Mem.Alloc, Time.Wait] }
 }
 
 use {
-    tasks :: core.tasks
-    files :: core.files
+    tasks: core.tasks
+    files: core.files
 }
 
-fn count_lines(src: String) -> Int IOError! {
-    handle :: files.open(src.copy())
+count_lines: fn(src: String) -> Int IOError! {
+    handle: files.open(src.copy())
     n := 0
     loop line in handle.lines() -> n += 1
     return Ok(n)
 }
 
-fn run() {
+run: fn() {
     task.group g {
-        { sender, receiver: ch } :: channel<Int>(1)
-        producer :: task ^sender {
+        { sender, receiver: ch }: channel<Int>(1)
+        producer: task ^sender {
             sender.send(10)
             sender.send(20)
             sender.send(30)
@@ -42,13 +42,13 @@ fn run() {
         print("interval ticks taken: {seen}")
     }
 
-    path :: Path.from("/tmp").join("jet_native_stream_lines.txt").to_string()
+    path: Path.from("/tmp").join("jet_native_stream_lines.txt").to_string()
     files.write(path, "alpha\nbeta\ngamma") ?? panic("write failed")
-    n :: count_lines(path) ?? panic("count failed")
+    n: count_lines(path) ?? panic("count failed")
     print("file lines: {n}")
     files.remove(path) ?? panic("remove failed")
 
-    missing :: count_lines("/nonexistent/jet_native_stream_missing.txt") ?? {
+    missing: count_lines("/nonexistent/jet_native_stream_missing.txt") ?? {
         print("reader error: {err}")
         0
     }

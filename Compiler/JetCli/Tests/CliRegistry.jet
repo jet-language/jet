@@ -15,17 +15,17 @@ use {
     jet_foundation.[JET_CLI_COMMANDS, JET_CLI_FLAGS, JET_CLI_HANDLERS, marker_source_read]
 }
 
-fn cli_registry_require(ok: Bool, what: String) Never! {
+cli_registry_require: fn(ok: Bool, what: String) Never! {
     if !ok -> panic(what)
 }
 
-fn cli_registry_is_command(name: String) -> Bool Never! { jet_cli_command_index(name) != None }
+cli_registry_is_command: fn(name: String) -> Bool Never! { jet_cli_command_index(name) != None }
 
-fn cli_registry_tables() Never! {
+cli_registry_tables: fn() Never! {
     loop group in JET_CLI_COMMANDS {
         loop action in group.actions {
-            handler_index :: jet_cli_handler_index(action.handler) ?? panic("action {group.name} {action.name} names an unregistered handler")
-            handler :: JET_CLI_HANDLERS[handler_index]
+            handler_index: jet_cli_handler_index(action.handler) ?? panic("action {group.name} {action.name} names an unregistered handler")
+            handler: JET_CLI_HANDLERS[handler_index]
             // #1659: a moved-only dispatch word has no second top-level row.
             if !handler.keeps_group && !action.also_canonical_top_level {
                 cli_registry_require(!cli_registry_is_command(handler.dispatch_word), "`{handler.dispatch_word}` is declared both as a `{group.name}` nested action and again as a top-level command")
@@ -33,12 +33,12 @@ fn cli_registry_tables() Never! {
         }
     }
     // `jet inspect bind` and `jet bind` are both canonical.
-    bind :: jet_cli_nested_command("inspect", "bind") ?? panic("inspect bind is registered")
+    bind: jet_cli_nested_command("inspect", "bind") ?? panic("inspect bind is registered")
     cli_registry_require(JET_CLI_COMMANDS[bind.group].actions[bind.action].also_canonical_top_level, "inspect bind is also canonical at the top level")
     cli_registry_require(jet_cli_is_canonical_top_level("bind") && jet_cli_moved_command("bind") == .None, "bare bind is canonical")
 }
 
-fn cli_registry_moved_commands() Never! {
+cli_registry_moved_commands: fn() Never! {
     loop group in JET_CLI_COMMANDS {
         loop action in group.actions {
             if action.also_canonical_top_level || cli_registry_is_command(action.name) {
@@ -47,25 +47,25 @@ fn cli_registry_moved_commands() Never! {
                 next
             }
             cli_registry_require(!jet_cli_is_canonical_top_level(action.name), "moved bare command leaked: {action.name}")
-            moved :: jet_cli_moved_command(action.name) ?? panic("missing moved owner for {action.name}")
-            owner :: JET_CLI_COMMANDS[moved.group]
+            moved: jet_cli_moved_command(action.name) ?? panic("missing moved owner for {action.name}")
+            owner: JET_CLI_COMMANDS[moved.group]
             cli_registry_require(owner.actions[moved.action].name == action.name, "{action.name} moved to the wrong action of {owner.name}")
         }
     }
     // `gc report` is nested only. Retired roots and their teaching are gone
     // (greenfield), so bare `report` is the moved word of that nested action.
-    report :: jet_cli_nested_command("gc", "report") ?? panic("gc report is registered")
+    report: jet_cli_nested_command("gc", "report") ?? panic("gc report is registered")
     cli_registry_require(!JET_CLI_COMMANDS[report.group].actions[report.action].also_canonical_top_level, "gc report is not canonical at the top level")
-    moved_report :: jet_cli_moved_command("report") ?? panic("bare report names its nested owner")
+    moved_report: jet_cli_moved_command("report") ?? panic("bare report names its nested owner")
     cli_registry_require(moved_report.group == report.group && moved_report.action == report.action && !jet_cli_is_canonical_top_level("report"), "bare report teaches gc report, not a top-level root")
 }
 
-fn cli_registry_typo_suggestions() Never! {
+cli_registry_typo_suggestions: fn() Never! {
     loop group in JET_CLI_COMMANDS {
         loop action in group.actions {
             // A canonical top-level row may be suggested by its own name
             // (`env` is canonical even though `inspect env` is nested).
-            canonical_top_level :: cli_registry_is_command(action.name) && jet_cli_is_canonical_top_level(action.name)
+            canonical_top_level: cli_registry_is_command(action.name) && jet_cli_is_canonical_top_level(action.name)
             if action.also_canonical_top_level || canonical_top_level -> next
             cli_registry_require(jet_cli_closest_command(action.name) != .Val(action.name), "typo suggestion advertises moved bare action {action.name}")
         }
@@ -73,7 +73,7 @@ fn cli_registry_typo_suggestions() Never! {
     cli_registry_require((jet_cli_closest_command("env") ?? "") == "env", "env is a canonical group")
 }
 
-fn cli_registry_completions() Never! {
+cli_registry_completions: fn() Never! {
     count := 0
     loop flag in JET_CLI_FLAGS {
         if flag.long == "--allow-unofficial" -> count += 1
@@ -87,7 +87,7 @@ fn cli_registry_completions() Never! {
     cli_registry_require(jet_cli_completions_zsh().contains("--allow-unofficial"), "zsh completion lacks --allow-unofficial")
     cli_registry_require(jet_cli_completions_fish().contains("-l allow-unofficial"), "fish completion lacks -l allow-unofficial")
     cli_registry_require(jet_cli_completions_powershell().contains("--allow-unofficial"), "powershell completion lacks --allow-unofficial")
-    scripts :: [String]{jet_cli_completions_bash(), jet_cli_completions_zsh(), jet_cli_completions_fish(), jet_cli_completions_powershell()}
+    scripts: [String]{jet_cli_completions_bash(), jet_cli_completions_zsh(), jet_cli_completions_fish(), jet_cli_completions_powershell()}
     loop script in scripts {
         loop command in JET_CLI_COMMANDS {
             if jet_cli_is_canonical_top_level(command.name) {
@@ -101,55 +101,55 @@ fn cli_registry_completions() Never! {
 }
 
 // Palette law: flag help is user-facing copy, never planning vocabulary.
-fn cli_registry_flag_copy() Never! {
-    words :: [String]{"milestone", "requirement", "epoch", "ratified"}
+cli_registry_flag_copy: fn() Never! {
+    words: [String]{"milestone", "requirement", "epoch", "ratified"}
     loop flag in JET_CLI_FLAGS {
-        lower :: flag.help.to_lower()
+        lower: flag.help.to_lower()
         loop word in words -> cli_registry_require(!lower.contains(word), "help for {flag.long} exposes planning term {word}")
     }
 }
 
 // #6603: a flag's registry row is the one place that says which commands take
 // it; the front's flag check and `jet help <command>` both read it.
-fn cli_registry_flag_scopes() Never! {
+cli_registry_flag_scopes: fn() Never! {
     loop flag in JET_CLI_FLAGS {
-        commands :: jet_cli_flag_commands(flag.help) ?? next
+        commands: jet_cli_flag_commands(flag.help) ?? next
         cli_registry_require(commands.len() > 0, "the scope of {flag.long} names no jet command: {flag.help}")
     }
-    check :: jet_cli_flag_spec("--check=x") ?? panic("--check is registered")
+    check: jet_cli_flag_spec("--check=x") ?? panic("--check is registered")
     cli_registry_require((jet_cli_flag_commands(check.help) ?? [String]{}) == [String]{"fmt", "doc", "split", "fold"}, "--check belongs to fmt, doc, split and fold")
     cli_registry_require(jet_cli_flag_takes(check, "fmt") && !jet_cli_flag_takes(check, "init"), "init does not take --check")
-    json :: jet_cli_flag_spec("--json") ?? panic("--json is registered")
+    json: jet_cli_flag_spec("--json") ?? panic("--json is registered")
     cli_registry_require(jet_cli_flag_commands(json.help) == None && jet_cli_flag_takes(json, "init"), "--json goes with every command")
-    verbose :: jet_cli_flag_spec("--verbose") ?? panic("--verbose is registered")
+    verbose: jet_cli_flag_spec("--verbose") ?? panic("--verbose is registered")
     cli_registry_require(jet_cli_flag_takes(verbose, "check") && jet_cli_flag_takes(verbose, "explain"), "every `with` clause of --verbose scopes it")
-    topic :: jet_cli_flag_spec("--topic") ?? panic("--topic is registered")
+    topic: jet_cli_flag_spec("--topic") ?? panic("--topic is registered")
     cli_registry_require(jet_cli_flag_takes(topic, "inspect") && !jet_cli_flag_takes(topic, "build"), "`inspect digest` scopes --topic to inspect")
     cli_registry_require(jet_cli_flags_for_command("doc").any(row -> row.long == "--check"), "jet help doc lists --check")
 }
 
 // Prelude/Markers.jet marker types through the one rule explanation. A
 // comment, a variadic last field and a group exercise the reader's shape.
-fn cli_registry_explain_markers() Never! {
-    rules :: marker_source_read("struct Pure {{\n    impl Marker {{\n        sites :: [.Function, .Method]\n    }}\n}}\n\n// struct Hidden {{ impl Marker {{ sites :: [.Block] }} }}\nstruct Inline {{\n    mode: InlineMode{{.Hint}}\n\n    impl Marker {{\n        sites :: [.Function, .Method, .Constant]\n    }}\n}}\n\nstruct Scope {{\n    effects: [Effect]\n\n    impl Marker {{\n        sites :: [.Block]\n        repeatable :: true\n    }}\n}}\n\nstruct Fast {{\n    impl Marker {{\n        group :: #[Inline(.Always)]\n    }}\n}}\n")
+cli_registry_explain_markers: fn() Never! {
+    rules: marker_source_read("Pure: struct {{\n    impl Marker {{\n        sites: [.Function, .Method]\n    }}\n}}\n\n// Hidden: struct {{ impl Marker {{ sites: [.Block] }} }}\nInline: struct {{\n    mode: InlineMode{{.Hint}}\n\n    impl Marker {{\n        sites: [.Function, .Method, .Constant]\n    }}\n}}\n\nScope: struct {{\n    effects: [Effect]\n\n    impl Marker {{\n        sites: [.Block]\n        repeatable: true\n    }}\n}}\n\nFast: struct {{\n    impl Marker {{\n        group: #[Inline(.Always)]\n    }}\n}}\n")
     cli_registry_require(rules.len() == 3, "the reader keeps the three rule types and skips the comment and the group")
-    pure :: jet_cli_rule_named(rules, "Pure") ?? panic("Pure rule row")
-    inline :: jet_cli_rule_named(rules, "Inline") ?? panic("Inline rule row")
-    scope :: jet_cli_rule_named(rules, "Scope") ?? panic("Scope rule row")
-    inline_explanation :: jet_cli_rule_explanation(inline)
+    pure: jet_cli_rule_named(rules, "Pure") ?? panic("Pure rule row")
+    inline: jet_cli_rule_named(rules, "Inline") ?? panic("Inline rule row")
+    scope: jet_cli_rule_named(rules, "Scope") ?? panic("Scope rule row")
+    inline_explanation: jet_cli_rule_explanation(inline)
     cli_registry_require(inline_explanation.meaning == "`#Inline(mode: InlineMode{{.Hint}})`", "Inline typed signature")
     cli_registry_require(inline_explanation.stage == "rule applicability", "Inline is a rule")
     cli_registry_require((inline_explanation.what ?? "") == "arguments: optional; repeatable: false; attachment sites: [Function, Method, Constant]. Argument declarations: `core.compiler.lang.InlineMode`.", "Inline rule facts")
-    pure_explanation :: jet_cli_rule_explanation(pure)
+    pure_explanation: jet_cli_rule_explanation(pure)
     cli_registry_require((pure_explanation.what ?? "") == "arguments: none; repeatable: false; attachment sites: [Function, Method].", "Pure rule facts")
     cli_registry_require((pure_explanation.why ?? "") == "resolution is SiteBound; site-bound authority never becomes ambient policy", "site-bound resolution")
-    scope_explanation :: jet_cli_rule_explanation(scope)
+    scope_explanation: jet_cli_rule_explanation(scope)
     cli_registry_require(scope_explanation.meaning == "`#Scope(Effect...)`", "Scope variadic signature")
     cli_registry_require((scope_explanation.what ?? "").starts_with("arguments: required; repeatable: true; attachment sites: [Block]."), "Scope rule facts")
     // The dictionary rows route to the rule row, never to the placeholder.
-    names :: [String]{"Pure", "#Pure", "Inline"}
+    names: [String]{"Pure", "#Pure", "Inline"}
     loop name in names {
-        index :: jet_cli_syntax_lookup(name) ?? panic("{name} is a syntax row")
+        index: jet_cli_syntax_lookup(name) ?? panic("{name} is a syntax row")
         cli_registry_require(JET_CLI_SYNTAX_ROWS[index].kind == JetCLISyntaxKind.Marker, "{name} is a marker row")
     }
 }

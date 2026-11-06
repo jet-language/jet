@@ -6,22 +6,22 @@
 // as the Rust char scanners do; Unicode whitespace follows `char::is_whitespace`.
 
 // One `key: value` entry of a record body.
-struct ManifestEntry {
+ManifestEntry: struct {
     key: String
     value: String
 }
 
 // `Blocks::top_level_commas`: split on commas not nested in `()`/`[]`/`{}`
 // or a quoted string. Interior empty pieces are kept; a blank tail is not.
-fn pkg_top_level_commas(body: String) -> [String] Never! {
-    raw :: body.bytes()
+pkg_top_level_commas: fn(body: String) -> [String] Never! {
+    raw: body.bytes()
     out := [String]{}
     depth := 0
     start := 0
     quoted := false
     escaped := false
     loop index in 0..<raw.len() {
-        code :: Int.from_u8(raw[index])
+        code: Int.from_u8(raw[index])
         if quoted {
             if {
                 escaped -> escaped = false
@@ -42,27 +42,27 @@ fn pkg_top_level_commas(body: String) -> [String] Never! {
             else -> {}
         }
     }
-    tail :: pkg_bytes_text(raw, start, raw.len())
+    tail: pkg_bytes_text(raw, start, raw.len())
     if tail.trim() != "" -> &out.push(tail)
     out
 }
 
 // `Blocks::key_value_entries`: `key: value` pieces of a `{ … }` body split
 // at top-level commas and at each piece's first `:`.
-fn pkg_key_value_entries(body: String) -> [ManifestEntry] PackageParseError! {
+pkg_key_value_entries: fn(body: String) -> [ManifestEntry] PackageParseError! {
     entries := [ManifestEntry]{}
     loop piece in pkg_top_level_commas(body) {
-        entry :: piece.trim()
+        entry: piece.trim()
         if entry == "" -> next
-        parts :: entry.split_once(":") ?? return Err(PackageParseError.Composition("malformed metadata field `{entry}`"))
+        parts: entry.split_once(":") ?? return Err(PackageParseError.Composition("malformed metadata field `{entry}`"))
         &entries.push(ManifestEntry{key: parts.before.trim(), value: parts.after.trim()})
     }
     Ok(entries)
 }
 
 // `Blocks::unquote`: strip one pair of surrounding double quotes.
-fn pkg_unquote(value: String) -> String Never! {
-    text :: value.trim()
+pkg_unquote: fn(value: String) -> String Never! {
+    text: value.trim()
     if text.bytes().len() >= 2 && text.starts_with("\"") && text.ends_with("\"") {
         return pkg_binder_slice(text, 1, text.bytes().len() - 1)
     }
@@ -70,23 +70,23 @@ fn pkg_unquote(value: String) -> String Never! {
 }
 
 // `value.strip_prefix(prefix).and_then(|rest| rest.strip_suffix(suffix))`.
-fn pkg_strip_wrapped(value: String, prefix: String, suffix: String) -> String? Never! {
+pkg_strip_wrapped: fn(value: String, prefix: String, suffix: String) -> String? Never! {
     if !value.starts_with(prefix) -> return None
-    rest :: value.removeprefix(prefix)
+    rest: value.removeprefix(prefix)
     if !rest.ends_with(suffix) -> return None
     Val(rest.removesuffix(suffix))
 }
 
 // `str::trim_start_matches(pattern)` for a non-empty pattern.
-fn pkg_trim_start_matches(text: String, pattern: String) -> String Never! {
+pkg_trim_start_matches: fn(text: String, pattern: String) -> String Never! {
     out := text
     loop pattern != "" && out.starts_with(pattern) -> out = out.removeprefix(pattern)
     out
 }
 
 // The byte offset of the first `code` byte, if any.
-fn pkg_text_find_byte(text: String, code: Int) -> Int? Never! {
-    raw :: text.bytes()
+pkg_text_find_byte: fn(text: String, code: Int) -> Int? Never! {
+    raw: text.bytes()
     loop index in 0..<raw.len() {
         if Int.from_u8(raw[index]) == code -> return Val(index)
     }
@@ -94,8 +94,8 @@ fn pkg_text_find_byte(text: String, code: Int) -> Int? Never! {
 }
 
 // The byte offset of the last `code` byte, if any.
-fn pkg_text_rfind_byte(text: String, code: Int) -> Int? Never! {
-    raw :: text.bytes()
+pkg_text_rfind_byte: fn(text: String, code: Int) -> Int? Never! {
+    raw: text.bytes()
     index := raw.len() - 1
     loop index >= 0 {
         if Int.from_u8(raw[index]) == code -> return Val(index)
@@ -105,7 +105,7 @@ fn pkg_text_rfind_byte(text: String, code: Int) -> Int? Never! {
 }
 
 // How many times `needle` occurs (`str::matches(..).count()`).
-fn pkg_text_count(text: String, needle: String) -> Int Never! {
+pkg_text_count: fn(text: String, needle: String) -> Int Never! {
     count := 0
     at := pkg_binder_find(text, needle, 0)
     loop at >= 0 {
@@ -116,8 +116,8 @@ fn pkg_text_count(text: String, needle: String) -> Int Never! {
 }
 
 // Whether `text` holds any Unicode whitespace scalar.
-fn pkg_text_has_space(text: String) -> Bool Never! {
-    raw :: text.bytes()
+pkg_text_has_space: fn(text: String) -> Bool Never! {
+    raw: text.bytes()
     loop index in 0..<raw.len() {
         if pkg_bytes_space_width(raw, index) > 0 -> return true
     }
@@ -126,14 +126,14 @@ fn pkg_text_has_space(text: String) -> Bool Never! {
 
 // `mod::strip_comments`: drop `//` line comments outside strings, keeping
 // the newline that ends each comment.
-fn pkg_strip_comments(value: String) -> String Never! {
-    raw :: value.bytes()
+pkg_strip_comments: fn(value: String) -> String Never! {
+    raw: value.bytes()
     out := [U8]{}
     quoted := false
     escaped := false
     index := 0
     loop index < raw.len() {
-        code :: Int.from_u8(raw[index])
+        code: Int.from_u8(raw[index])
         if quoted {
             &out.push(raw[index])
             if {
@@ -171,10 +171,10 @@ fn pkg_strip_comments(value: String) -> String Never! {
 
 // `mod::scalar`: a trimmed value with one trailing comma removed and one
 // surrounding quote pair decoded (`\"` and `\\` only).
-fn pkg_scalar(value: String) -> String Never! {
-    text :: pkg_binder_trim_end_matches(value.trim(), ",").trim()
+pkg_scalar: fn(value: String) -> String Never! {
+    text: pkg_binder_trim_end_matches(value.trim(), ",").trim()
     if text.bytes().len() >= 2 && text.starts_with("\"") && text.ends_with("\"") {
-        inner :: pkg_binder_slice(text, 1, text.bytes().len() - 1)
+        inner: pkg_binder_slice(text, 1, text.bytes().len() - 1)
         return inner.replace("\\\"", "\"").replace("\\\\", "\\")
     }
     text
@@ -182,11 +182,11 @@ fn pkg_scalar(value: String) -> String Never! {
 
 // `mod::parse_list`: the non-empty scalars of `[a, "b"]` (or of a bare
 // comma list).
-fn pkg_parse_list(value: String) -> [String] Never! {
-    text :: value.trim()
+pkg_parse_list: fn(value: String) -> [String] Never! {
+    text: value.trim()
     body := text
     if text.starts_with("[") {
-        rest :: text.removeprefix("[")
+        rest: text.removeprefix("[")
         if pkg_text_rfind_byte(rest, 93) == {
             .Val(end) -> body = pkg_binder_slice(rest, 0, end)
             .None -> {}
@@ -194,20 +194,20 @@ fn pkg_parse_list(value: String) -> [String] Never! {
     }
     out := [String]{}
     loop entry in pkg_top_level_entries(body) {
-        item :: pkg_scalar(entry)
+        item: pkg_scalar(entry)
         if item != "" -> &out.push(item)
     }
     out
 }
 
 // `mod::split_field`: split at the first top-level `:` into trimmed halves.
-fn pkg_split_field(value: String) -> ManifestEntry? Never! {
-    raw :: value.bytes()
+pkg_split_field: fn(value: String) -> ManifestEntry? Never! {
+    raw: value.bytes()
     depth := 0
     quoted := false
     escaped := false
     loop index in 0..<raw.len() {
-        code :: Int.from_u8(raw[index])
+        code: Int.from_u8(raw[index])
         if quoted {
             if {
                 escaped -> escaped = false
@@ -230,22 +230,22 @@ fn pkg_split_field(value: String) -> ManifestEntry? Never! {
     None
 }
 
-// One top-level `left :: right` or `left: right` binding (untrimmed halves).
-struct ManifestBinding {
+// One top-level `left: right` or `left: right` binding (untrimmed halves).
+ManifestBinding: struct {
     left: String
     operator: String
     right: String
 }
 
 // `mod::split_package_binding`: the first top-level `::` or `:`.
-fn pkg_split_package_binding(entry: String) -> ManifestBinding? Never! {
-    raw :: entry.bytes()
+pkg_split_package_binding: fn(entry: String) -> ManifestBinding? Never! {
+    raw: entry.bytes()
     depth := 0
     quoted := false
     escaped := false
     index := 0
     loop index < raw.len() {
-        code :: Int.from_u8(raw[index])
+        code: Int.from_u8(raw[index])
         if quoted {
             if {
                 escaped -> escaped = false
@@ -274,8 +274,8 @@ fn pkg_split_package_binding(entry: String) -> ManifestBinding? Never! {
 // `mod::top_level_entries`: record entries split at top-level commas,
 // newlines, and the implicit boundary between a complete `field: value`
 // and the next `ident:` separated only by whitespace.
-fn pkg_top_level_entries(value: String) -> [String] Never! {
-    raw :: value.bytes()
+pkg_top_level_entries: fn(value: String) -> [String] Never! {
+    raw: value.bytes()
     entries := [String]{}
     start := 0
     depth := 0
@@ -283,7 +283,7 @@ fn pkg_top_level_entries(value: String) -> [String] Never! {
     escaped := false
     index := 0
     loop index < raw.len() {
-        code :: Int.from_u8(raw[index])
+        code: Int.from_u8(raw[index])
         if quoted {
             if {
                 escaped -> escaped = false
@@ -310,15 +310,15 @@ fn pkg_top_level_entries(value: String) -> [String] Never! {
             next
         }
         if depth == 0 && (code == 44 || code == 10) {
-            current :: pkg_bytes_text(raw, start, index)
+            current: pkg_bytes_text(raw, start, index)
             if current.trim() != "" -> &entries.push(current)
             start = index + 1
             index += 1
             next
         }
-        width :: pkg_bytes_space_width(raw, index)
+        width: pkg_bytes_space_width(raw, index)
         if depth == 0 && width > 0 && pkg_implicit_field_start(raw, index, pkg_bytes_text(raw, start, index)) {
-            current :: pkg_bytes_text(raw, start, index)
+            current: pkg_bytes_text(raw, start, index)
             if current.trim() != "" -> &entries.push(current)
             index = pkg_bytes_skip_space(raw, index)
             start = index
@@ -326,7 +326,7 @@ fn pkg_top_level_entries(value: String) -> [String] Never! {
         }
         index += if width > 0 -> width else -> 1
     }
-    tail :: pkg_bytes_text(raw, start, raw.len())
+    tail: pkg_bytes_text(raw, start, raw.len())
     if tail.trim() != "" -> &entries.push(tail)
     entries
 }
@@ -334,14 +334,14 @@ fn pkg_top_level_entries(value: String) -> [String] Never! {
 // `mod::implicit_field_start`: `current` is a complete `field: value` ending
 // in an identifier character or closer, and the next non-space text is
 // `ident` followed by `:`.
-fn pkg_implicit_field_start(raw: [U8], index: Int, current: String) -> Bool Never! {
+pkg_implicit_field_start: fn(raw: [U8], index: Int, current: String) -> Bool Never! {
     if pkg_split_field(current) == None -> return false
-    trimmed :: current.trim_end().bytes()
+    trimmed: current.trim_end().bytes()
     if trimmed.len() == 0 -> return false
-    last :: Int.from_u8(trimmed[trimmed.len() - 1])
+    last: Int.from_u8(trimmed[trimmed.len() - 1])
     if !((pkg_bytes_is_word(last) && last != 95) || last == 125 || last == 93 || last == 41 || last == 34) -> return false
     cursor := pkg_bytes_skip_space(raw, index)
-    first :: pkg_bytes_code(raw, cursor)
+    first: pkg_bytes_code(raw, cursor)
     if !((first >= 65 && first <= 90) || (first >= 97 && first <= 122) || first == 95) -> return false
     cursor += 1
     loop pkg_bytes_is_word(pkg_bytes_code(raw, cursor)) -> cursor += 1
@@ -350,15 +350,15 @@ fn pkg_implicit_field_start(raw: [U8], index: Int, current: String) -> Bool Neve
 }
 
 // `Blocks::top_level_lines_or_commas`: split at top-level commas and newlines.
-fn pkg_top_level_lines_or_commas(body: String) -> [String] Never! {
-    raw :: body.bytes()
+pkg_top_level_lines_or_commas: fn(body: String) -> [String] Never! {
+    raw: body.bytes()
     out := [String]{}
     depth := 0
     start := 0
     quoted := false
     escaped := false
     loop index in 0..<raw.len() {
-        code :: Int.from_u8(raw[index])
+        code: Int.from_u8(raw[index])
         if quoted {
             if {
                 escaped -> escaped = false
@@ -373,31 +373,31 @@ fn pkg_top_level_lines_or_commas(body: String) -> [String] Never! {
             40 | 91 | 123 -> depth += 1
             41 | 93 | 125 -> depth -= 1
             44 | 10 -> if depth == 0 {
-                current :: pkg_bytes_text(raw, start, index)
+                current: pkg_bytes_text(raw, start, index)
                 if current.trim() != "" -> &out.push(current)
                 start = index + 1
             }
             else -> {}
         }
     }
-    tail :: pkg_bytes_text(raw, start, raw.len())
+    tail: pkg_bytes_text(raw, start, raw.len())
     if tail.trim() != "" -> &out.push(tail)
     out
 }
 
 // `mod::record_body`: the text between the first `{` and the last `}`.
-fn pkg_record_body(value: String, field: String) -> String PackageParseError! {
-    open :: pkg_text_find_byte(value, 123) ?? return Err(PackageParseError.MissingRecord(field))
-    close :: pkg_text_rfind_byte(value, 125) ?? return Err(PackageParseError.MissingRecord(field))
+pkg_record_body: fn(value: String, field: String) -> String PackageParseError! {
+    open: pkg_text_find_byte(value, 123) ?? return Err(PackageParseError.MissingRecord(field))
+    close: pkg_text_rfind_byte(value, 125) ?? return Err(PackageParseError.MissingRecord(field))
     Ok(pkg_binder_slice(value, open + 1, close))
 }
 
 // `mod::named_entries_checked`: split-field entries with duplicate refusal.
-fn pkg_named_entries_checked(body: String, scope: String) -> [ManifestEntry] PackageParseError! {
+pkg_named_entries_checked: fn(body: String, scope: String) -> [ManifestEntry] PackageParseError! {
     entries := [ManifestEntry]{}
     seen := [String]{}
     loop entry in pkg_top_level_entries(body) {
-        field :: pkg_split_field(entry) ?? return Err(PackageParseError.MalformedField("{scope}: {entry}"))
+        field: pkg_split_field(entry) ?? return Err(PackageParseError.MalformedField("{scope}: {entry}"))
         if seen.contains(field.key) -> return Err(PackageParseError.Composition("`{scope}.{field.key}` is declared more than once"))
         &seen.push(field.key)
         &entries.push(field)
@@ -406,17 +406,17 @@ fn pkg_named_entries_checked(body: String, scope: String) -> [ManifestEntry] Pac
 }
 
 // `mod::record_entries`.
-fn pkg_record_entries(value: String, field: String) -> [ManifestEntry] PackageParseError! {
+pkg_record_entries: fn(value: String, field: String) -> [ManifestEntry] PackageParseError! {
     pkg_named_entries_checked(pkg_record_body(value, field), field)
 }
 
 // `Blocks::parse_string_list`: the unquoted items of a `[…]` list, or None
 // when the value is not bracketed.
-fn pkg_parse_string_list(value: String) -> [String]? Never! {
-    inner :: pkg_strip_wrapped(value.trim(), "[", "]") ?? return None
+pkg_parse_string_list: fn(value: String) -> [String]? Never! {
+    inner: pkg_strip_wrapped(value.trim(), "[", "]") ?? return None
     out := [String]{}
     loop piece in pkg_top_level_commas(inner) {
-        entry :: piece.trim()
+        entry: piece.trim()
         if entry == "" -> next
         &out.push(pkg_unquote(entry))
     }
@@ -424,10 +424,10 @@ fn pkg_parse_string_list(value: String) -> [String]? Never! {
 }
 
 // `[A-Za-z_][A-Za-z0-9_]*`.
-fn pkg_is_ascii_identifier(value: String) -> Bool Never! {
-    raw :: value.bytes()
+pkg_is_ascii_identifier: fn(value: String) -> Bool Never! {
+    raw: value.bytes()
     if raw.len() == 0 -> return false
-    first :: Int.from_u8(raw[0])
+    first: Int.from_u8(raw[0])
     if !((first >= 65 && first <= 90) || (first >= 97 && first <= 122) || first == 95) -> return false
     loop index in 1..<raw.len() {
         if !pkg_bytes_is_word(Int.from_u8(raw[index])) -> return false
@@ -436,7 +436,7 @@ fn pkg_is_ascii_identifier(value: String) -> Bool Never! {
 }
 
 // `mod::is_identifier`: a non-empty dotted path of ASCII identifiers.
-fn pkg_is_identifier(value: String) -> Bool Never! {
+pkg_is_identifier: fn(value: String) -> Bool Never! {
     if value == "" -> return false
     loop part in value.split(".") {
         if !pkg_is_ascii_identifier(part) -> return false
@@ -445,7 +445,7 @@ fn pkg_is_identifier(value: String) -> Bool Never! {
 }
 
 // Map keys in ascending byte order, the iteration order of a Rust BTreeMap.
-fn pkg_manifest_sorted(keys: [String]) -> [String] Never! {
+pkg_manifest_sorted: fn(keys: [String]) -> [String] Never! {
     out := keys
     &out.sort()
     out

@@ -1,4 +1,4 @@
-package {
+package: {
     name: "lowlevel_inline_asm"
     version: "0.1.0"
     authority: { allow: [Exec, FFI, IO, Mem.Alloc] }
@@ -6,7 +6,7 @@ package {
 use core.mem
 
 #[Unsafe("the operands are scalar registers and the early-written r10 clobber does not overlap live inputs"), FFI(asm)]
-fn add_registers(a: Int, b: Int) -> Int {
+add_registers: fn(a: Int, b: Int) -> Int {
     """
     mov r10, {a}
     add r10, {b}
@@ -15,7 +15,7 @@ fn add_registers(a: Int, b: Int) -> Int {
     """
 }
 
-fn run() {
+run: fn() {
     #Unsafe("call the audited register-only assembly contract") {
         print(add_registers(20, 22))
     }

@@ -1,15 +1,15 @@
 use {
-    compute :: core.compute
-    math :: core.math
+    compute: core.compute
+    math: core.math
 }
 
 // Every real and imaginary scalar must be within this absolute tolerance.
 #CLI
-struct Args {}
-fn run(args: Args) {
-    n :: 4096
-    scalar_count :: n * 2
-    tolerance :: Float{0.000000001}
+Args: struct {}
+run: fn(args: Args) {
+    n: 4096
+    scalar_count: n * 2
+    tolerance: Float{0.000000001}
 
     values := [Float]{}
     loop i in 0..<n {
@@ -19,9 +19,9 @@ fn run(args: Args) {
         }
     }
 
-    signal :: compute.from_list(values) ?? panic("from_list")
-    spectrum :: compute.fft(signal) ?? panic("fft")
-    output :: compute.to_list(spectrum)
+    signal: compute.from_list(values) ?? panic("from_list")
+    spectrum: compute.fft(signal) ?? panic("fft")
+    output: compute.to_list(spectrum)
 
     failures := 0
     if {

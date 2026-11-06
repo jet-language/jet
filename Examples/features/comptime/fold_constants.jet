@@ -1,17 +1,17 @@
-// `::` asks for build-time evaluation as an optimization; `comptime` forces
+// `:` asks for build-time evaluation as an optimization; `comptime` forces
 // it. `CELLS`, `lanes` and `wide` fold while building on every tier, so the
 // program stores their values instead of computing them. `width` is forced:
-// had `grid_width` failed, the build would have stopped. A `::` value that
+// had `grid_width` failed, the build would have stopped. A `:` value that
 // cannot fold is computed at run time instead (startup_constants.jet shows
 // the module-level form, computed at startup).
-CELLS :: 6 * 7 + 1
+CELLS: 6 * 7 + 1
 
-fn grid_width() -> Int { 12 }
+grid_width: fn() -> Int { 12 }
 
-fn run() {
-    lanes :: 8 * 4 + 2
-    wide :: lanes * 2 - 1
-    width :: comptime { grid_width() * 2 }
+run: fn() {
+    lanes: 8 * 4 + 2
+    wide: lanes * 2 - 1
+    width: comptime { grid_width() * 2 }
     print("cells {CELLS}")
     print("lanes {lanes}, wide {wide}")
     print("width {width}")

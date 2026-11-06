@@ -1,27 +1,27 @@
 // c81 / D-PLUGIN1=B: the sandbox's own source, committed as `../mathkit.wasm`
-// rather than run directly — no `fn run()`,
+// rather than run directly — no `run: fn()`,
 // this package is loaded, not executed. v1 sandbox exports use one homogeneous
 // Component Model scalar shape: Int, Float, Bool, or Text
 // (D-PLUGIN-EXPORT1=A) and may not use any effect — the plugin
 // host that loads this registers zero host imports (D-PLUGIN1=B: safe by
 // default, no `#Unsafe` gate anywhere in this story).
-use math :: core.math
+use math: core.math
 
-fn scale(a: Float, b: Float) -> Float { a * b }
+scale: fn(a: Float, b: Float) -> Float { a * b }
 
-fn hypot(a: Float, b: Float) -> Float { math.sqrt(a * a + b * b) }
+hypot: fn(a: Float, b: Float) -> Float { math.sqrt(a * a + b * b) }
 
-fn gcd(a: Int, b: Int) -> Int {
+gcd: fn(a: Int, b: Int) -> Int {
     x := a
     y := b
     loop y != 0 {
-        t :: y.copy()
+        t: y.copy()
         y = x % y
         x = t
     }
     return x
 }
 
-fn is_enabled(flag: Bool) -> Bool { flag }
+is_enabled: fn(flag: Bool) -> Bool { flag }
 
-fn greet(name: String) -> String { "hello, {name}!" }
+greet: fn(name: String) -> String { "hello, {name}!" }

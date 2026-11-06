@@ -14,42 +14,42 @@
 // the gate proves both runs agree, emit a JSON finding array and leave the
 // store byte-for-byte unchanged. Exit 1 unless every check passes.
 use {
-    crypto :: core.crypto
-    files :: core.files
-    json :: core.encoding.json
-    process :: core.process
-    sys :: core.sys
-    term :: core.term
+    crypto: core.crypto
+    files: core.files
+    json: core.encoding.json
+    process: core.process
+    sys: core.sys
+    term: core.term
 }
 
-struct Lint {
+Lint: struct {
     status: String
     output: String
     errors: String
 }
 
-fn env_or(name: String, fallback: String) -[Env]> String Never! {
-    value :: process.env_get(name) ?? return fallback.copy()
+env_or: fn(name: String, fallback: String) -[Env]> String Never! {
+    value: process.env_get(name) ?? return fallback.copy()
     if value == "" -> return fallback.copy()
     value
 }
 
 // The checkout holding this tool, else the working directory.
-fn repo_root() -[Env, FS]> String Never! {
-    tool :: "/Tools/ci/TowerHygiene.jet"
-    script :: sys.executable()
+repo_root: fn() -[Env, FS]> String Never! {
+    tool: "/Tools/ci/TowerHygiene.jet"
+    script: sys.executable()
     if script.ends_with(tool) -> return script.removesuffix(tool)
     files.cwd() ?? "."
 }
 
-fn absolute(root: String, path: String) -> String Never! {
+absolute: fn(root: String, path: String) -> String Never! {
     if path.starts_with("/") -> return path.copy()
     "{root}/{path}"
 }
 
 // `uname -s` spelling of the running system: Linux, Darwin, FreeBSD ...
-fn system_name() -[Env]> String Never! {
-    name :: sys.sysname()
+system_name: fn() -[Env]> String Never! {
+    name: sys.sysname()
     if {
         name == "macos" || name == "darwin" -> "Darwin"
         name == "freebsd" -> "FreeBSD"
@@ -59,7 +59,7 @@ fn system_name() -[Env]> String Never! {
 }
 
 // `realpath -m`: resolve every existing link, then the rest lexically.
-fn canonical(path: String) -[FS]> String Never! {
+canonical: fn(path: String) -[FS]> String Never! {
     current := ""
     loop part in path.split("/") {
         if part == "" || part == "." -> next
@@ -68,31 +68,31 @@ fn canonical(path: String) -[FS]> String Never! {
             if current == "/" -> current = ""
             next
         }
-        candidate :: "{current}/{part}"
+        candidate: "{current}/{part}"
         current = if files.is_symlink(candidate) -> files.realpath(candidate) ?? candidate else -> candidate
         if current == "/" -> current = ""
     }
     if current == "" -> "/" else -> current
 }
 
-fn physical(dir: String) -[FS]> String Never! { files.realpath(dir) ?? dir.copy() }
+physical: fn(dir: String) -[FS]> String Never! { files.realpath(dir) ?? dir.copy() }
 
-fn inside(path: String, dir: String) -> Bool Never! { path == dir || path.starts_with("{dir}/") }
+inside: fn(path: String, dir: String) -> Bool Never! { path == dir || path.starts_with("{dir}/") }
 
-fn append_text(buffer: &[U8], text: String) Never! {
+append_text: fn(buffer: &[U8], text: String) Never! {
     &buffer.extend(text.bytes())
     &buffer.push(U8{0})
 }
 
-fn walk(root: String, dir: String, buffer: &[U8]) -[FS]> Bool Never! {
-    entries :: files.list_dir(dir) ?? return false
+walk: fn(root: String, dir: String, buffer: &[U8]) -[FS]> Bool Never! {
+    entries: files.list_dir(dir) ?? return false
     names := loop entry in entries -> entry.name
     &names.sort()
     loop name in names {
-        path :: "{dir}/{name}"
-        relative :: path.removeprefix("{root}/")
-        info :: files.stat(path) ?? return false
-        kind :: if {
+        path: "{dir}/{name}"
+        relative: path.removeprefix("{root}/")
+        info: files.stat(path) ?? return false
+        kind: if {
             info.is_dir -> "d"
             info.is_file -> "f"
             info.is_symlink -> "l"
@@ -114,14 +114,14 @@ fn walk(root: String, dir: String, buffer: &[U8]) -[FS]> Bool Never! {
 
 // A fingerprint of every name, kind, mode and byte under `dir`; `missing`
 // when it is not a directory, None when it cannot be read.
-fn hash_tree(dir: String) -[FS]> String? Never! {
+hash_tree: fn(dir: String) -[FS]> String? Never! {
     if !files.is_dir(dir) -> return Val("missing")
     buffer := [U8]{}
     if !walk(dir, dir, &buffer) -> return None
     Val(crypto.sha256(buffer).hex())
 }
 
-fn text_field(fields: [(key: String, value: Dyn)], key: String) -> Bool Never! {
+text_field: fn(fields: [(key: String, value: Dyn)], key: String) -> Bool Never! {
     loop field in fields {
         if field.key != key -> next
         return if field.value == {
@@ -133,20 +133,20 @@ fn text_field(fields: [(key: String, value: Dyn)], key: String) -> Bool Never! {
 }
 
 // The trimmed stdout of a command that exits 0, else None.
-fn output_of(argv: [String]) -[Exec, Time.Wait]> String? Never! {
-    receipt :: process.cmd(argv).stderr(.Capture).run() ?? return None
+output_of: fn(argv: [String]) -[Exec, Time.Wait]> String? Never! {
+    receipt: process.cmd(argv).stderr(.Capture).run() ?? return None
     if receipt.code != 0 -> return None
     Val(receipt.output.trim())
 }
 
-fn abort(text: String) Never! -[Exec, IO]> {
+abort: fn(text: String) Never! -[Exec, IO]> {
     term.eprint(text)
     process.exit(1)
 }
 
 // Tower lint's `--json` shape: an array of {rule, ref, msg} text findings.
-fn finding_array(text: String) -> Bool Never! {
-    parsed :: json.parse(text) ?? return false
+finding_array: fn(text: String) -> Bool Never! {
+    parsed: json.parse(text) ?? return false
     if parsed == {
         .Array(items) -> {
             loop item in items {
@@ -163,18 +163,18 @@ fn finding_array(text: String) -> Bool Never! {
     }
 }
 
-fn lint(node: String, tower: String, root: String, docs_root: String) -[Exec, Time.Wait]> Lint Never! {
-    spec :: process.cmd([String]{node, tower, "lint", "--docs", "--docs-root", docs_root, "--json"}).cwd(root).stdin(.Inherit).stdout(.Capture).stderr(.Capture).output_limit(1073741824)
-    results :: process.run_all([ProcessSpec]{spec}, 1) ?? return Lint{status: "127", output: "", errors: "{err}\n"}
-    receipt :: results[0] ?? return Lint{status: "127", output: "", errors: "{err}\n"}
-    code :: if receipt.signal == .Val(number) -> 128 + number else -> receipt.code
+lint: fn(node: String, tower: String, root: String, docs_root: String) -[Exec, Time.Wait]> Lint Never! {
+    spec: process.cmd([String]{node, tower, "lint", "--docs", "--docs-root", docs_root, "--json"}).cwd(root).stdin(.Inherit).stdout(.Capture).stderr(.Capture).output_limit(1073741824)
+    results: process.run_all([ProcessSpec]{spec}, 1) ?? return Lint{status: "127", output: "", errors: "{err}\n"}
+    receipt: results[0] ?? return Lint{status: "127", output: "", errors: "{err}\n"}
+    code: if receipt.signal == .Val(number) -> 128 + number else -> receipt.code
     Lint{status: "{code}", output: receipt.output, errors: receipt.errors}
 }
 
-fn run() -[Env, Exec, FS, IO, Time.Wait]> {
-    root :: repo_root()
-    tower :: "{root}/Tools/tower/tower.mjs"
-    scope_input :: env_or("JET_TOWER_LINT_SCOPE", "docs")
+run: fn() -[Env, Exec, FS, IO, Time.Wait]> {
+    root: repo_root()
+    tower: "{root}/Tools/tower/tower.mjs"
+    scope_input: env_or("JET_TOWER_LINT_SCOPE", "docs")
     runner_os := env_or("RUNNER_OS", "")
     runner_arch := env_or("RUNNER_ARCH", "")
     if runner_os == "" -> runner_os = system_name()
@@ -190,18 +190,18 @@ fn run() -[Env, Exec, FS, IO, Time.Wait]> {
     }
 
     docs_root := absolute(root, scope_input)
-    data_path :: absolute(root, env_or("TOWER_DATA", "{root}/Tools/tower/.tower"))
+    data_path: absolute(root, env_or("TOWER_DATA", "{root}/Tools/tower/.tower"))
     tower_file := if data_path.ends_with(".json") -> data_path.copy() else -> "{data_path}/tower.json"
     tower_dir := if data_path.ends_with(".json") -> files.dirname(data_path) else -> data_path.copy()
     if files.is_dir(tower_dir) {
-        store_name :: files.basename(tower_file)
+        store_name: files.basename(tower_file)
         tower_dir = physical(tower_dir)
         tower_file = "{tower_dir}/{store_name}"
     }
 
-    report_input :: env_or("JET_TOWER_HYGIENE_REPORT", "")
+    report_input: env_or("JET_TOWER_HYGIENE_REPORT", "")
     report_path := if report_input == "" -> "{root}/.tmp/tower-hygiene/{candidate}-{env_or("JET_TEST_SHARD", "local")}.txt" else -> absolute(root, report_input)
-    canonical_report :: canonical(report_path)
+    canonical_report: canonical(report_path)
     if inside(canonical_report, canonical("{root}/Tools/tower")) || inside(canonical_report, canonical(tower_dir)) {
         &errors.push("audit report may not be written under Tower data")
         report_path = "{root}/.tmp/tower-hygiene/unsafe-report.txt"
@@ -226,8 +226,8 @@ fn run() -[Env, Exec, FS, IO, Time.Wait]> {
     if !files.is_file(tower_file) -> &errors.push("Tower store is missing: {tower_file}")
 
     lint_blocked := false
-    repair_journal :: "{tower_dir}/backups/repair-transaction.json"
-    store_lock :: "{tower_file}.lock"
+    repair_journal: "{tower_dir}/backups/repair-transaction.json"
+    store_lock: "{tower_file}.lock"
     if files.exists(repair_journal) || files.is_symlink(repair_journal) {
         lint_blocked = true
         &errors.push("Tower store has a pending repair transaction: {repair_journal}")
@@ -241,7 +241,7 @@ fn run() -[Env, Exec, FS, IO, Time.Wait]> {
         docs_root = physical(docs_root)
         spec_root = "{docs_root}/spec"
     }
-    report_parent :: files.dirname(report_path)
+    report_parent: files.dirname(report_path)
     files.create_dir_all(report_parent) ?? return abort("cannot create the report directory {report_parent}: {err}")
 
     tower_before := "unavailable"
@@ -324,8 +324,8 @@ fn run() -[Env, Exec, FS, IO, Time.Wait]> {
         "errors={errors.len()}",
     }
     loop error in errors -> &lines.push("error={error}")
-    report :: "{lines.join("\n")}\nlint_stdout_begin\n{first.output}lint_stdout_end\nlint_stderr_begin\n{first.errors}lint_stderr_end\nlint_repeat_stdout_begin\n{repeat.output}lint_repeat_stdout_end\nlint_repeat_stderr_begin\n{repeat.errors}lint_repeat_stderr_end\n"
-    temporary :: "{report_path}.tmp.{sys.pid()}"
+    report: "{lines.join("\n")}\nlint_stdout_begin\n{first.output}lint_stdout_end\nlint_stderr_begin\n{first.errors}lint_stderr_end\nlint_repeat_stdout_begin\n{repeat.output}lint_repeat_stdout_end\nlint_repeat_stderr_begin\n{repeat.errors}lint_repeat_stderr_end\n"
+    temporary: "{report_path}.tmp.{sys.pid()}"
     files.write(temporary, report) ?? return abort("cannot write the report {temporary}: {err}")
     files.rename(temporary, report_path) ?? {
         files.remove(temporary) ?? ()

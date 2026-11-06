@@ -2,17 +2,17 @@
 // stay inside one field; ragged rows, unterminated quotes, missing columns and
 // wrong-typed cells each have one declared result. A typed record must have
 // the header's cell count: no cell is padded in or dropped.
-use csv :: core.encoding.csv
+use csv: core.encoding.csv
 
-struct Item {
+Item: struct {
     name: String
     qty: Int
     note: String?
 }
 
-fn show_rows(label: String, raw: String) {
-    rows :: csv.rows(raw) ?? {
-        kind :: if err.kind == {
+show_rows: fn(label: String, raw: String) {
+    rows: csv.rows(raw) ?? {
+        kind: if err.kind == {
             .Syntax -> "Syntax"
             .Truncated -> "Truncated"
             .Unsupported -> "Unsupported"
@@ -26,15 +26,15 @@ fn show_rows(label: String, raw: String) {
     loop row in rows -> print("{label}: line {row.line} fields {row.fields.len()} {row.fields}")
 }
 
-fn show_typed(label: String, raw: String) {
-    items :: csv.decode<Item>(raw) ?? {
+show_typed: fn(label: String, raw: String) {
+    items: csv.decode<Item>(raw) ?? {
         print("{label}: {err}")
         return
     }
     loop item in items -> print("{label}: {item.name} {item.qty} {item.note ?? "(none)"}")
 }
 
-fn run() {
+run: fn() {
     show_rows("quoted delimiter", "a,\"b,c\",d")
     show_rows("embedded newline", "id,text\n1,\"two\nlines\"\n2,plain")
     show_rows("doubled quote", "\"say \"\"hi\"\"\",x")

@@ -1,24 +1,24 @@
 #Error
-enum ValidationError {
+ValidationError: enum {
     Invalid
 }
 
-fn validate(n: Int) ValidationError! {
+validate: fn(n: Int) ValidationError! {
     if n < 0 -> return Err(ValidationError.Invalid)
 }
 
-fn measure(n: Int) -> Int ValidationError! {
+measure: fn(n: Int) -> Int ValidationError! {
     if n < 0 -> return Err(ValidationError.Invalid)
     Ok(n)
 }
 
-fn check(n: Int) -> Int ValidationError! {
-    _ :: validate(n)
+check: fn(n: Int) -> Int ValidationError! {
+    _: validate(n)
     validate(n)
-    _ :: measure(n)
+    _: measure(n)
     Ok(n)
 }
 
-fn run() {
+run: fn() {
     print(check(3) ?? 0)
 }

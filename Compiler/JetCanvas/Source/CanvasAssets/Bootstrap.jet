@@ -4,8 +4,8 @@ use jet_foundation.[foundation_json_escape]
 // the script-src position. This is deliberately not HTML escaping, URL
 // normalization, or a script-end filter; changing that historical contract
 // requires the asset/host owner's ruling.
-fn canvas_bootstrap_for(base: String) -> String Never! {
-    escaped :: foundation_json_escape(base)
+canvas_bootstrap_for: fn(base: String) -> String Never! {
+    escaped: foundation_json_escape(base)
     "<script>window.__JET_CANVAS_BASE__ = \"{escaped}\";</script>\n<script src=\"{escaped}/app.js?canvas_ui=blueprint23\"></script>"
 }
 
@@ -13,6 +13,6 @@ fn canvas_bootstrap_for(base: String) -> String Never! {
 // transport routes, not client-derived semantic facts or a session copy.
 // Session-secret injection belongs to the serving host, not these
 // dependency-free public asset functions.
-fn canvas_bootstrap_query() -> String Never! {
+canvas_bootstrap_query: fn() -> String Never! {
     "<script>window.__JET_CANVAS_BASE__ = \"\"; window.__JET_CANVAS_GRAPH__ = \"/?jet_panel_graph=1\"; window.__JET_CANVAS_TX__ = \"/canvas/transaction\"; window.__JET_CANVAS_QUERY__ = \"/canvas/query\"; window.__JET_CANVAS_SCM__ = \"/canvas/source-control\"; window.__JET_CANVAS_PROOF__ = \"/canvas/proof\"; window.__JET_CANVAS_COMMAND__ = \"/canvas/command\";</script>\n<script src=\"/?jet_panel_app=1&canvas_ui=blueprint23\"></script>"
 }

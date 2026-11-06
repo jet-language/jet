@@ -1,11 +1,11 @@
 
 use {
-    encoding :: core.encoding
-    xml :: core.encoding.xml
-    files :: core.files
+    encoding: core.encoding
+    xml: core.encoding.xml
+    files: core.files
 }
 
-fn xml_name(local: String) -> Dyn {
+xml_name: fn(local: String) -> Dyn {
     return Dyn.Object([
         "raw": Dyn.Text(local.copy()),
         "prefix": Dyn.Null,
@@ -14,7 +14,7 @@ fn xml_name(local: String) -> Dyn {
     ])
 }
 
-fn document_start() -> Dyn {
+document_start: fn() -> Dyn {
     return Dyn.Object([
         "$xml_event": Dyn.Text("document_start"),
         "encoding": Dyn.Null,
@@ -22,11 +22,11 @@ fn document_start() -> Dyn {
     ])
 }
 
-fn document_end() -> Dyn {
+document_end: fn() -> Dyn {
     return Dyn.Object(["$xml_event": Dyn.Text("document_end")])
 }
 
-fn element_start(empty_style: String) -> Dyn {
+element_start: fn(empty_style: String) -> Dyn {
     return Dyn.Object([
         "$xml_event": Dyn.Text("element_start"),
         "name": xml_name("r"),
@@ -46,8 +46,8 @@ fn element_start(empty_style: String) -> Dyn {
     ])
 }
 
-fn write_unfinished(path: String) {
-    output :: files.create(path) ?? panic("create partial")
+write_unfinished: fn(path: String) {
+    output: files.create(path) ?? panic("create partial")
     writer := xml.writer(^output) ?? panic("writer")
     &writer.write(document_start()) ?? panic("document_start")
     &writer.write(element_start("explicit")) ?? panic("open root")
@@ -55,19 +55,19 @@ fn write_unfinished(path: String) {
     // no element_end / document_end / finish — Drop leaves incomplete open tag
 }
 
-fn run() {
+run: fn() {
     write_unfinished("{work}/partial.xml")
     // Same-path reopen after Drop: incomplete open element still here.
-    leftover :: files.read("{work}/partial.xml") ?? panic("same-path read after Drop")
+    leftover: files.read("{work}/partial.xml") ?? panic("same-path read after Drop")
     print(leftover == "<r>")
     // Same-path recreate: Drop must have released the unfinished writer handle.
-    reopen_out :: files.create("{work}/partial.xml") ?? panic("same-path recreate after Drop")
+    reopen_out: files.create("{work}/partial.xml") ?? panic("same-path recreate after Drop")
     reopen_writer := xml.writer(^reopen_out) ?? panic("reopen writer")
     &reopen_writer.write(document_start()) ?? panic("reopen start")
     &reopen_writer.write(element_start("empty")) ?? panic("reopen empty root")
     &reopen_writer.write(document_end()) ?? panic("reopen end")
     &reopen_writer.finish() ?? panic("reopen finish")
-    finished :: files.read("{work}/partial.xml") ?? panic("same-path read after finish")
+    finished: files.read("{work}/partial.xml") ?? panic("same-path read after finish")
     print(finished == "<r/>")
     // Honesty: unfinished Drop wire ≠ finished complete document.
     print(leftover != finished)
@@ -77,7 +77,7 @@ fn run() {
     limits.max_depth = 1
     limits.max_item_bytes = 150000
     limits.max_expansion_bytes = 0
-    input :: files.open("{work}/heap.xml") ?? panic("heap open")
+    input: files.open("{work}/heap.xml") ?? panic("heap open")
     reader := xml.reader(^input, limits) ?? panic("heap reader")
     count := 0
     loop count < 8 {

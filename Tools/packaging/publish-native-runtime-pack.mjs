@@ -159,7 +159,7 @@ function lifecycle(wt, manifest, subject, blob, directory) {
   const declarations = new Map();
   for (const file of readFileSync(manifest.artifacts.runtime_sources, 'utf8').split(/\r?\n/).map(line => line.trim()).filter(line => line && !line.startsWith('#'))) {
     const path = resolve(wt, file);
-    for (const match of readFileSync(path, 'utf8').matchAll(/^\/\/ runtime-(init|fini): (\d+)(?: when ([A-Za-z_]\w*(?:,[A-Za-z_]\w*)*))?\n#Export\(c\)\s+(?:pub\s+)?fn\s+([A-Za-z_]\w*)\s*\(/gm)) {
+    for (const match of readFileSync(path, 'utf8').matchAll(/^\/\/ runtime-(init|fini): (\d+)(?: when ([A-Za-z_]\w*(?:,[A-Za-z_]\w*)*))?\n#Export\(c\)\s+(?:pub\s+)?([A-Za-z_]\w*):\s*fn\s*\(/gm)) {
       insist(!declarations.has(match[4]), `duplicate lifecycle declaration ${match[4]}`);
       insist(providers.has(path), `lifecycle provider missing from admitted subject: ${file}`);
       declarations.set(match[4], { phase: match[1], priority: match[2], guard: match[3] ?? '', provider: providers.get(path) });

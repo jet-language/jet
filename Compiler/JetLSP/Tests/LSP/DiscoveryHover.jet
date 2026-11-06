@@ -1,7 +1,7 @@
 // Typed real PackageIndex inputs, no provider catalogue.
 use jetpack_provider.[PackageIndex, PackageIndexEntry, PackageOptionField]
 
-fn lsp_discovery_test_record() -> PackageIndexEntry Never! {
+lsp_discovery_test_record: fn() -> PackageIndexEntry Never! {
     PackageIndexEntry{source: "npm", name: "react", reference: "npm:react@19", version: "19", platforms: [String]{"linux", "windows"}, docs: "Render interfaces", provenance: "local", tier: "native", gate_status: "signed;liveness=alive", options: [PackageOptionField]{PackageOptionField{name: "enable", default: "required", docs: "Service switch"}}}
 }
 
@@ -29,10 +29,10 @@ fn lsp_discovery_test_record() -> PackageIndexEntry Never! {
 }
 
 #Test("discovery hover consumes exact local index and rejects unknown packages") {
-    index :: PackageIndex{packages: [PackageIndexEntry]{lsp_discovery_test_record()}}
+    index: PackageIndex{packages: [PackageIndexEntry]{lsp_discovery_test_record()}}
     assert_eq(lsp_compute_discovery_hover("npm.react", 9, index), Val(lsp_package_hover(index.packages[0])))
     assert_eq(lsp_compute_discovery_hover("npm.missing", 9, index), None)
     assert_eq(lsp_compute_discovery_hover("react", 2, index), None)
-    empty :: PackageIndex{packages: [PackageIndexEntry]{}}
+    empty: PackageIndex{packages: [PackageIndexEntry]{}}
     assert_eq(lsp_compute_discovery_hover("npm.react", 9, empty), None)
 }

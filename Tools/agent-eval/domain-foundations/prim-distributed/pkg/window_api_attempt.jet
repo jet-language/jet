@@ -1,15 +1,15 @@
 // Deliberately probes the missing unbounded stream surface.
-struct Event {
+Event: struct {
     key: String
     timestamp: Int
     value: Int
 }
 
-fn source() -> Stream<Event> {
+source: fn() -> Stream<Event> {
     yield Event{key: "a", timestamp: 1, value: 1}
 }
 
-fn run() {
-    keyed :: source().key_by((event: Event) -> event.key)
+run: fn() {
+    keyed: source().key_by((event: Event) -> event.key)
     print(keyed)
 }

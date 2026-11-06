@@ -1,10 +1,10 @@
 // Claims ported from crates/jetpack/src/MigrationCoverage.rs #[cfg(test)].
 
-fn cli_test_coverage_package(name: String) -> CoveragePackage {
+cli_test_coverage_package: fn(name: String) -> CoveragePackage {
     CoveragePackage.new(name, "1.0.0", "{name}@jetpack")
 }
 
-fn cli_test_coverage_error(input: CoverageInput) -> CoverageError {
+cli_test_coverage_error: fn(input: CoverageInput) -> CoverageError {
     if CoverageReport.from_input(input) == {
         .Ok(_) -> panic("expected a coverage error")
         .Err(error) -> error
@@ -17,7 +17,7 @@ fn cli_test_coverage_error(input: CoverageInput) -> CoverageError {
     input.native_recipes = [CoveragePackage]{cli_test_coverage_package("omp")}
     input.centrally_imported_recipes = [CoveragePackage]{cli_test_coverage_package("ripgrep")}
     input.local_imports = [CoveragePackage]{cli_test_coverage_package("fd")}
-    report :: CoverageReport.from_input(input) ?? panic("valid migration coverage")
+    report: CoverageReport.from_input(input) ?? panic("valid migration coverage")
     assert_eq(report.native_recipes.len(), 1)
     assert_eq(report.centrally_imported_recipes.len(), 1)
     assert_eq(report.local_imports.len(), 1)

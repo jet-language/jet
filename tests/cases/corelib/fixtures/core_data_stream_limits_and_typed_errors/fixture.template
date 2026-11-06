@@ -1,24 +1,24 @@
 
 use {
-    data :: core.data
-    stream :: core.data.stream
-    files :: core.files
+    data: core.data
+    stream: core.data.stream
+    files: core.files
 }
 
 #Codable
-struct Event {
+Event: struct {
     service: String
     latency_ms: Float
 }
 
-fn run() {
-    input :: files.open("{work}/events.csv") ?? panic("open")
+run: fn() {
+    input: files.open("{work}/events.csv") ?? panic("open")
     limits := data.DataLimits.safe()
     limits.max_groups = 1
     reader := data.csv_reader<Event>(^input, limits) ?? panic("reader")
-    first :: stream.next(&reader) ?? panic("next")
+    first: stream.next(&reader) ?? panic("next")
     print("first:{first.service}")
-    rows :: stream.collect(&reader) ?? panic("collect")
+    rows: stream.collect(&reader) ?? panic("collect")
     if data.query(rows)
         .group_by((e) -> e.service)
         .mean((e) -> e.latency_ms)

@@ -3,17 +3,17 @@
 // (jet_pkg_model::*Bind). Each Rust binder carried private copies of these;
 // the Jet port keeps one.
 use {
-    sys :: core.sys
-    files :: core.files
+    sys: core.sys
+    files: core.files
 }
 
 
 // A C string-literal body: quote, backslash, and the common control escapes;
 // other bytes outside printable ASCII become three-digit octal escapes.
-fn pkg_binder_c_escape(value: String) -> String Never! {
+pkg_binder_c_escape: fn(value: String) -> String Never! {
     out := [String]{}
     loop byte in value.bytes() {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         if code == {
             92 -> &out.push("\\\\")
             34 -> &out.push("\\\"")
@@ -33,8 +33,8 @@ fn pkg_binder_c_escape(value: String) -> String Never! {
 
 // Fill `@@name@@` holes in a raw template. Values are inserted verbatim and
 // never rescanned, so a path that happens to spell a hole stays literal.
-fn pkg_binder_fill_template(template: String, slots: [String: String]) -> String Never! {
-    parts :: template.split("@@").to_list()
+pkg_binder_fill_template: fn(template: String, slots: [String: String]) -> String Never! {
+    parts: template.split("@@").to_list()
     out := [String]{}
     loop index in 0..<parts.len() {
         if index % 2 == 0 {
@@ -48,7 +48,7 @@ fn pkg_binder_fill_template(template: String, slots: [String: String]) -> String
 
 // The SHA-256 of the binder identity preimage: every part, NUL-separated
 // (`b"jet-<lang>-bind-v1\0" + source + b"\0" + ...`).
-fn pkg_binder_identity_digest(parts: [String]) -> String Never! {
+pkg_binder_identity_digest: fn(parts: [String]) -> String Never! {
     identity := [U8]{}
     loop index in 0..<parts.len() {
         if index > 0 -> &identity.push(U8{0})
@@ -58,30 +58,30 @@ fn pkg_binder_identity_digest(parts: [String]) -> String Never! {
 }
 
 // Rust `{:?}` of an identifier-shaped string.
-fn pkg_binder_debug_quote(value: String) -> String Never! {
+pkg_binder_debug_quote: fn(value: String) -> String Never! {
     "\"{value.replace("\\", "\\\\").replace("\"", "\\\"")}\""
 }
 
 // The detail after the last `separator`, or the whole line (`rsplit_once`).
-fn pkg_binder_after_last(line: String, separator: String) -> String Never! {
-    at :: pkg_binder_rfind(line, separator)
+pkg_binder_after_last: fn(line: String, separator: String) -> String Never! {
+    at: pkg_binder_rfind(line, separator)
     if at < 0 -> return line.copy()
     pkg_binder_tail(line, at + separator.bytes().len())
 }
 
 // Whether the host has the POSIX process supervisor the worker bridges need
 // (Rust `cfg!(unix)`).
-fn pkg_binder_host_is_unix() -[Env]> Bool {
+pkg_binder_host_is_unix: fn() -[Env]> Bool {
     sys.family() == "unix"
 }
 
 // The host operating system in the binder's shared-library vocabulary.
-enum BinderHostOS {
+BinderHostOS: enum {
     Linux
     MacOS
     Windows
 
-    fn current() -[Env]> BinderHostOS Never! {
+    current: fn() -[Env]> BinderHostOS Never! {
         if pkg_ascii_lower(sys.name()) == {
             "macos" | "darwin" | "osx" -> BinderHostOS.MacOS
             "windows" -> BinderHostOS.Windows
@@ -90,7 +90,7 @@ enum BinderHostOS {
     }
 
     // `lib<name>.so` / `.dylib` / the Windows DLL spelling.
-    fn shared_library(self, stem: String, windows: String) -> String Never! {
+    shared_library: fn(self, stem: String, windows: String) -> String Never! {
         if self == {
             .Linux -> "lib{stem}.so"
             .MacOS -> "lib{stem}.dylib"
@@ -98,7 +98,7 @@ enum BinderHostOS {
         }
     }
 
-    fn shared_ext(self) -> String Never! {
+    shared_ext: fn(self) -> String Never! {
         if self == {
             .Linux -> ".so"
             .MacOS -> ".dylib"
@@ -107,7 +107,7 @@ enum BinderHostOS {
     }
 
     // The JDK's platform include directory (`include/<os>`).
-    fn java_include(self) -> String Never! {
+    java_include: fn(self) -> String Never! {
         if self == {
             .Linux -> "linux"
             .MacOS -> "darwin"
@@ -117,14 +117,14 @@ enum BinderHostOS {
 }
 
 // The registered descriptor for `language`; `label` names it in the error.
-fn pkg_binder_descriptor_for(language: ForeignLanguage, label: String) -> BinderDescriptor ForeignBindError! {
-    descriptor :: pkg_binder_descriptor(language) ?? return Err(ForeignBindError.Source("{label} binder descriptor is not registered"))
+pkg_binder_descriptor_for: fn(language: ForeignLanguage, label: String) -> BinderDescriptor ForeignBindError! {
+    descriptor: pkg_binder_descriptor(language) ?? return Err(ForeignBindError.Source("{label} binder descriptor is not registered"))
     Ok(descriptor)
 }
 
 // Append the standard boundary record for one built archive.
-fn pkg_binder_append_artifact_boundary(provenance: &String, language: ForeignLanguage, label: String, lib: String, source: String, archive: String, toolchain: String) ForeignBindError! -[FS, Env, Exec, Time.Wait]> {
-    descriptor :: pkg_binder_descriptor_for(language, label)
+pkg_binder_append_artifact_boundary: fn(provenance: &String, language: ForeignLanguage, label: String, lib: String, source: String, archive: String, toolchain: String) ForeignBindError! -[FS, Env, Exec, Time.Wait]> {
+    descriptor: pkg_binder_descriptor_for(language, label)
     if pkg_bridge_append_boundary_for_artifact(&provenance, descriptor, lib, source, archive, toolchain) == {
         .Ok(_) -> {}
         .Err(error) -> return Err(pkg_binder_bridge_error(error))
@@ -132,34 +132,34 @@ fn pkg_binder_append_artifact_boundary(provenance: &String, language: ForeignLan
 }
 
 // `cc=<identity>;ar=<identity>` for a toolchain record.
-fn pkg_binder_cc_ar_identity() -[FS, Env, Exec, Time.Wait]> String {
+pkg_binder_cc_ar_identity: fn() -[FS, Env, Exec, Time.Wait]> String {
     "cc={pkg_bridge_tool_identity("cc")};ar={pkg_bridge_tool_identity("ar")}"
 }
 
 // The first `tool` on PATH, canonicalized (the persistent and Pascal
 // binders' `tool_path`); a path that cannot be resolved counts as missing.
-fn pkg_binder_resolved_tool_path(tool: String) -[FS, Env]> String? Never! {
-    found :: pkg_bridge_tool_path(tool) ?? return None
-    resolved :: files.canonicalize(found) ?? return None
+pkg_binder_resolved_tool_path: fn(tool: String) -[FS, Env]> String? Never! {
+    found: pkg_bridge_tool_path(tool) ?? return None
+    resolved: files.canonicalize(found) ?? return None
     Val(resolved)
 }
 
 // The runtime prefix two directories above the canonical `tool` path
 // (`<prefix>/bin/<tool>`), or None when it cannot be resolved.
-fn pkg_binder_tool_root(tool: String) -[FS, Env]> String? Never! {
-    exe :: files.canonicalize(tool) ?? return None
-    bin :: files.dirname(exe)
+pkg_binder_tool_root: fn(tool: String) -[FS, Env]> String? Never! {
+    exe: files.canonicalize(tool) ?? return None
+    bin: files.dirname(exe)
     if bin == "" || bin == exe -> return None
-    root :: files.dirname(bin)
+    root: files.dirname(bin)
     if root == "" || root == bin -> return None
     Val(root)
 }
 
 // A failing tool's detail: the first non-empty stderr line after its last
 // `: `, at most 160 characters (the Lua, Tcl, and JVM binders' laundering).
-fn pkg_binder_launder_last_detail(bytes: [U8]) -> String Never! {
+pkg_binder_launder_last_detail: fn(bytes: [U8]) -> String Never! {
     loop line in pkg_binder_lines(String.from_bytes_lossy(bytes)) {
-        trimmed :: line.trim()
+        trimmed: line.trim()
         if trimmed != "" -> return pkg_binder_take_chars(pkg_binder_after_last(trimmed, ": "), 160)
     }
     BINDER_TOOL_FAILURE_DETAIL
@@ -167,14 +167,14 @@ fn pkg_binder_launder_last_detail(bytes: [U8]) -> String Never! {
 
 // Run one build tool; a failing status is `ToolFailed` with the laundered
 // stderr detail. Returns the captured output on success.
-fn pkg_binder_run_reporting_detail(argv: [String], tool: String, action: String) -[Exec, Time.Wait]> BinderToolOutput ForeignBindError! {
-    output :: pkg_binder_capture(argv, None, tool, action)
+pkg_binder_run_reporting_detail: fn(argv: [String], tool: String, action: String) -[Exec, Time.Wait]> BinderToolOutput ForeignBindError! {
+    output: pkg_binder_capture(argv, None, tool, action)
     if !output.success -> return Err(ForeignBindError.ToolFailed{tool: tool, action: action, detail: pkg_binder_launder_last_detail(output.stderr)})
     Ok(output)
 }
 
 // Whether the host uses 64-bit pointers (Rust `size_of::<usize>() == 8`).
-fn pkg_binder_host_is_64_bit() -[Env]> Bool {
+pkg_binder_host_is_64_bit: fn() -[Env]> Bool {
     if pkg_ascii_lower(sys.arch()) == {
         "x86_64" | "amd64" | "x64" | "aarch64" | "arm64" | "riscv64" | "ppc64" | "ppc64le" | "powerpc64" | "powerpc64le" | "s390x" | "loongarch64" | "mips64" | "mips64el" | "sparc64" | "wasm64" -> true
         else -> false
@@ -182,7 +182,7 @@ fn pkg_binder_host_is_64_bit() -[Env]> Bool {
 }
 
 // A scalar-sidecar binding (Python, JavaScript) also names its worker script.
-struct ScalarBindResult {
+ScalarBindResult: struct {
     source: String
     bound: [String]
     archive: String
@@ -191,12 +191,12 @@ struct ScalarBindResult {
 }
 
 // The scalar sidecar reports its failures as binding-source errors.
-fn pkg_binder_scalar_bridge_error(error: ForeignBridgeError) -> ForeignBindError Never! {
+pkg_binder_scalar_bridge_error: fn(error: ForeignBridgeError) -> ForeignBindError Never! {
     ForeignBindError.Source(error.message)
 }
 
 // Read a declared source file as text; `context` names it in a failure.
-fn pkg_binder_read_text(path: String, context: String) -[FS]> String ForeignBindError! {
+pkg_binder_read_text: fn(path: String, context: String) -[FS]> String ForeignBindError! {
     if files.read(path) == {
         .Ok(text) -> Ok(text)
         .Err(error) -> Err(ForeignBindError.IO("{context}: {error}"))
@@ -204,7 +204,7 @@ fn pkg_binder_read_text(path: String, context: String) -[FS]> String ForeignBind
 }
 
 // The quoted scalar-kind rows a sidecar worker's `KINDS` table lists.
-fn pkg_binder_scalar_kind(scalar: ForeignScalar) -> String Never! {
+pkg_binder_scalar_kind: fn(scalar: ForeignScalar) -> String Never! {
     if scalar == {
         .Int -> "int"
         .Float -> "float"

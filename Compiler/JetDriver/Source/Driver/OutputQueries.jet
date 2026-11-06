@@ -5,24 +5,24 @@ use {
     jet_sema.[SemaOutputIntent, SemaLayoutProjectionRow]
 }
 
-struct JetDriverOutputLayoutRow {
+JetDriverOutputLayoutRow: struct {
     module_identity: String
     source_path: String
     fact: SemaLayoutProjectionRow
 }
-struct JetDriverOutputQueryResult {
+JetDriverOutputQueryResult: struct {
     compile: JetDriverCompileResult
     outputs: [ResolvedOutput]
     layouts: [JetDriverOutputLayoutRow]
     target_triple: String
     target_layout: JetTargetLayout?
 }
-fn jet_driver_output_query(request: ^JetDriverCompileRequest, address: String?) -> JetDriverOutputQueryResult {
+jet_driver_output_query: fn(request: ^JetDriverCompileRequest, address: String?) -> JetDriverOutputQueryResult {
     selected := ^request
     selected.mode = JetDriverCompileMode.Doc
     selected.output_intent = SemaOutputIntent.Run
     selected.output_address = address
-    compile :: jet_driver_compile(^selected)
+    compile: jet_driver_compile(^selected)
     outputs := [ResolvedOutput]{}
     layouts := [JetDriverOutputLayoutRow]{}
     target_triple := ""

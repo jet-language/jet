@@ -1,4 +1,4 @@
-package {
+package: {
     name: "core.encoding.ini"
     version: "0.0.1"
     edition: "2026"
@@ -16,43 +16,43 @@ package {
 // `DEFAULT` is a section name, not a magic fallback, unless `get_or` is used
 // with a caller-supplied default. This codec is pure.
 #Error
-struct INIError {
+INIError: struct {
     line: Int
     reason: String
 }
 
 impl INIError {
-    fn new(line: Int, reason: String) -> INIError Never! {
+    new: fn(line: Int, reason: String) -> INIError Never! {
         INIError{line: line, reason: reason}
     }
 }
 
 
-struct Pair {
+Pair: struct {
     key: String
     value: String
 }
 
-struct Section {
+Section: struct {
     name: String
     pairs: [Pair]
 }
 
-struct Ini {
+Ini: struct {
     sections: [Section]
 }
 
-fn empty() -> Ini Never! { Ini{sections: [Section]{}} }
+empty: fn() -> Ini Never! { Ini{sections: [Section]{}} }
 
-fn parse(text: String) -> Ini INIError! {
+parse: fn(text: String) -> Ini INIError! {
     doc := empty()
     current := ""
     line := 0
     loop raw_line in split_lines(text) {
         line += 1
-        trimmed :: trim(strip_comment(raw_line))
+        trimmed: trim(strip_comment(raw_line))
         if trimmed.bytes().len() == 0 -> next
-        raw :: trimmed.bytes()
+        raw: trimmed.bytes()
         if raw[0] == (U8{91}) {
             if raw[raw.len() - 1] != (U8{93}) -> return Err(INIError{line: line, reason: "ini section is missing a closing bracket"})
             current = trim(String.from_bytes(slice_b(raw, 1, raw.len() - 1)) ?? "")
@@ -60,20 +60,20 @@ fn parse(text: String) -> Ini INIError! {
             doc = ensure_section(doc, current)
             next
         }
-        eq :: index_of(raw, 61)
+        eq: index_of(raw, 61)
         colon := index_of(raw, 58)
         sep := eq
         if sep < 0 || (colon >= 0 && colon < sep) -> sep = colon
         if sep <= 0 -> return Err(INIError{line: line, reason: "ini line is not a key=value pair"})
-        key :: trim(String.from_bytes(slice_b(raw, 0, sep)) ?? "")
-        value_text :: trim(String.from_bytes(slice_b(raw, sep + 1, raw.len())) ?? "")
-        value_raw :: value_text.bytes()
+        key: trim(String.from_bytes(slice_b(raw, 0, sep)) ?? "")
+        value_text: trim(String.from_bytes(slice_b(raw, sep + 1, raw.len())) ?? "")
+        value_raw: value_text.bytes()
         if value_raw.len() > 0 && (value_raw[0] == (U8{34}) || value_raw[0] == (U8{39})) {
             if value_raw.len() < 2 || value_raw[value_raw.len() - 1] != value_raw[0] {
                 return Err(INIError{line: line, reason: "ini quoted value is missing its closing quote"})
             }
         }
-        value :: unquote(value_text)
+        value: unquote(value_text)
         if key.bytes().len() == 0 -> return Err(INIError{line: line, reason: "ini key is empty"})
         if current.bytes().len() == 0 -> current = "DEFAULT"
         doc = set(doc, current, key, value)
@@ -81,7 +81,7 @@ fn parse(text: String) -> Ini INIError! {
     Ok(doc)
 }
 
-fn to_string(doc: Ini) -> String Never! {
+to_string: fn(doc: Ini) -> String Never! {
     out := ""
     loop section in doc.sections {
         out = "{out}[{section.name}]\n"
@@ -91,22 +91,22 @@ fn to_string(doc: Ini) -> String Never! {
     out
 }
 
-fn sections(doc: Ini) -> [String] Never! {
+sections: fn(doc: Ini) -> [String] Never! {
     names := [String]{}
     loop s in doc.sections -> &names.push(s.name)
     names
 }
 
-fn has_section(doc: Ini, name: String) -> Bool Never! {
+has_section: fn(doc: Ini, name: String) -> Bool Never! {
     loop s in doc.sections {
         if s.name == name -> return true
     }
     false
 }
 
-fn has_option(doc: Ini, section: String, key: String) -> Bool Never! { get(doc, section, key) != None }
+has_option: fn(doc: Ini, section: String, key: String) -> Bool Never! { get(doc, section, key) != None }
 
-fn get(doc: Ini, section: String, key: String) -> String? Never! {
+get: fn(doc: Ini, section: String, key: String) -> String? Never! {
     loop s in doc.sections {
         if s.name == section {
             loop p in s.pairs {
@@ -117,16 +117,16 @@ fn get(doc: Ini, section: String, key: String) -> String? Never! {
     None
 }
 
-fn get_or(doc: Ini, section: String, key: String, fallback: String) -> String Never! { get(doc, section, key) ?? fallback }
+get_or: fn(doc: Ini, section: String, key: String, fallback: String) -> String Never! { get(doc, section, key) ?? fallback }
 
-fn get_int(doc: Ini, section: String, key: String) -> Int? Never! {
-    text :: get(doc, section, key) ?? return None
+get_int: fn(doc: Ini, section: String, key: String) -> Int? Never! {
+    text: get(doc, section, key) ?? return None
     parse_int(text)
 }
 
-fn get_bool(doc: Ini, section: String, key: String) -> Bool? Never! {
-    text :: get(doc, section, key) ?? return None
-    t :: ascii_lower(trim(text))
+get_bool: fn(doc: Ini, section: String, key: String) -> Bool? Never! {
+    text: get(doc, section, key) ?? return None
+    t: ascii_lower(trim(text))
     if t == {
         "1" | "true" | "yes" | "on" -> return Val(true)
         "0" | "false" | "no" | "off" -> return Val(false)
@@ -134,25 +134,25 @@ fn get_bool(doc: Ini, section: String, key: String) -> Bool? Never! {
     }
 }
 
-fn get_float(doc: Ini, section: String, key: String) -> Float? Never! {
-    text :: get(doc, section, key) ?? return None
+get_float: fn(doc: Ini, section: String, key: String) -> Float? Never! {
+    text: get(doc, section, key) ?? return None
     parse_float(text)
 }
 
-fn items(doc: Ini, section: String) -> [Pair] Never! {
+items: fn(doc: Ini, section: String) -> [Pair] Never! {
     loop s in doc.sections {
         if s.name == section -> return s.pairs
     }
     [Pair]{}
 }
 
-fn options(doc: Ini, section: String) -> [String] Never! {
+options: fn(doc: Ini, section: String) -> [String] Never! {
     keys := [String]{}
     loop p in items(doc, section) -> &keys.push(p.key)
     keys
 }
 
-fn set(doc: Ini, section: String, key: String, value: String) -> Ini Never! {
+set: fn(doc: Ini, section: String, key: String, value: String) -> Ini Never! {
     sections := [Section]{}
     found_section := false
     loop s in doc.sections {
@@ -180,7 +180,7 @@ fn set(doc: Ini, section: String, key: String, value: String) -> Ini Never! {
     Ini{sections: sections}
 }
 
-fn remove_option(doc: Ini, section: String, key: String) -> Ini Never! {
+remove_option: fn(doc: Ini, section: String, key: String) -> Ini Never! {
     sections := [Section]{}
     loop s in doc.sections {
         if s.name == section {
@@ -196,7 +196,7 @@ fn remove_option(doc: Ini, section: String, key: String) -> Ini Never! {
     Ini{sections: sections}
 }
 
-fn remove_section(doc: Ini, section: String) -> Ini Never! {
+remove_section: fn(doc: Ini, section: String) -> Ini Never! {
     sections := [Section]{}
     loop s in doc.sections {
         if s.name != section -> &sections.push(s)
@@ -204,9 +204,9 @@ fn remove_section(doc: Ini, section: String) -> Ini Never! {
     Ini{sections: sections}
 }
 
-fn defaults(doc: Ini) -> [Pair] Never! { items(doc, "DEFAULT") }
+defaults: fn(doc: Ini) -> [Pair] Never! { items(doc, "DEFAULT") }
 
-fn ensure_section(doc: Ini, name: String) -> Ini Never! {
+ensure_section: fn(doc: Ini, name: String) -> Ini Never! {
     if has_section(doc, name) -> return doc.copy()
     sections := [Section]{}
     loop s in doc.sections -> &sections.push(s)
@@ -214,13 +214,13 @@ fn ensure_section(doc: Ini, name: String) -> Ini Never! {
     Ini{sections: sections}
 }
 
-fn strip_comment(line: String) -> String Never! {
-    raw :: line.bytes()
+strip_comment: fn(line: String) -> String Never! {
+    raw: line.bytes()
     i := 0
     in_quote := false
     q := 0
     loop i < raw.len() {
-        n :: raw[i]
+        n: raw[i]
         if in_quote {
             if n == q -> in_quote = false
         } else if n == 34 || n == 39 {
@@ -234,11 +234,11 @@ fn strip_comment(line: String) -> String Never! {
     line.copy()
 }
 
-fn unquote(text: String) -> String Never! {
-    raw :: text.bytes()
+unquote: fn(text: String) -> String Never! {
+    raw: text.bytes()
     if raw.len() >= 2 {
-        a :: raw[0]
-        b :: raw[raw.len() - 1]
+        a: raw[0]
+        b: raw[raw.len() - 1]
         if (a == 34 && b == 34) || (a == 39 && b == 39) {
             body := [U8]{}
             i := 1
@@ -260,12 +260,12 @@ fn unquote(text: String) -> String Never! {
     text.copy()
 }
 
-fn ini_value(text: String) -> String {
-    raw :: text.bytes()
+ini_value: fn(text: String) -> String {
+    raw: text.bytes()
     quote := raw.len() == 0
     i := 0
     loop i < raw.len() {
-        n :: raw[i]
+        n: raw[i]
         if n == 32 || n == 9 || n == 35 || n == 59 || n == 34 || n == 39 || n == 10 || n == 13 || n == 92 -> quote = true
         i += 1
     }
@@ -282,8 +282,8 @@ fn ini_value(text: String) -> String {
     "{out}\""
 }
 
-fn split_lines(text: String) -> [String] Never! {
-    raw :: text.bytes()
+split_lines: fn(text: String) -> [String] Never! {
+    raw: text.bytes()
     out := [String]{}
     start := 0
     i := 0
@@ -300,32 +300,32 @@ fn split_lines(text: String) -> [String] Never! {
     out
 }
 
-fn trim(text: String) -> String Never! {
-    raw :: text.bytes()
+trim: fn(text: String) -> String Never! {
+    raw: text.bytes()
     a := 0
     b := raw.len()
     loop a < b {
-        n :: raw[a]
+        n: raw[a]
         if n == 32 || n == 9 -> a = a + 1
         else -> break
     }
     loop b > a {
-        n :: raw[b - 1]
+        n: raw[b - 1]
         if n == 32 || n == 9 -> b = b - 1
         else -> break
     }
     String.from_bytes(slice_b(raw, a, b)) ?? ""
 }
 
-fn index_of(raw: [U8], code: Int) -> Int Never! {
+index_of: fn(raw: [U8], code: Int) -> Int Never! {
     loop i in 0..<raw.len() {
-        n :: raw[i]
+        n: raw[i]
         if n == code -> return i
     }
     -1
 }
 
-fn slice_b(raw: [U8], start: Int, end: Int) -> [U8] Never! {
+slice_b: fn(raw: [U8], start: Int, end: Int) -> [U8] Never! {
     out := [U8]{}
     i := start
     loop i < end && i >= 0 && i < raw.len() {
@@ -335,10 +335,10 @@ fn slice_b(raw: [U8], start: Int, end: Int) -> [U8] Never! {
     out
 }
 
-fn ascii_lower(text: String) -> String Never! {
+ascii_lower: fn(text: String) -> String Never! {
     out := [U8]{}
     loop b in text.bytes() {
-        n :: b
+        n: b
         if n >= 65 && n <= 90 {
             &out.push(U8{n + 32})
         } else {
@@ -348,8 +348,8 @@ fn ascii_lower(text: String) -> String Never! {
     String.from_bytes(out) ?? text.copy()
 }
 
-fn parse_int(text: String) -> Int? {
-    raw :: trim(text).bytes()
+parse_int: fn(text: String) -> Int? {
+    raw: trim(text).bytes()
     if raw.len() == 0 -> return None
     i := 0
     sign := 1
@@ -360,7 +360,7 @@ fn parse_int(text: String) -> Int? {
     if i >= raw.len() -> return None
     n := 0
     loop i < raw.len() {
-        d :: raw[i]
+        d: raw[i]
         if d < 48 || d > 57 -> return None
         n = n * 10 + (d - 48)
         i = i + 1
@@ -368,9 +368,9 @@ fn parse_int(text: String) -> Int? {
     Val(n * sign)
 }
 
-fn parse_float(text: String) -> Float? {
-    t :: trim(text)
-    raw :: t.bytes()
+parse_float: fn(text: String) -> Float? {
+    t: trim(text)
+    raw: t.bytes()
     if raw.len() == 0 -> return None
     i := 0
     sign := Float{1}
@@ -381,7 +381,7 @@ fn parse_float(text: String) -> Float? {
     whole := Float{0}
     seen := false
     loop i < raw.len() {
-        d :: raw[i]
+        d: raw[i]
         if d == 46 -> break
         if d < 48 || d > 57 -> return None
         whole = whole * Float{10} + Float{d - 48}
@@ -393,7 +393,7 @@ fn parse_float(text: String) -> Float? {
     if i < raw.len() && raw[i] == (U8{46}) {
         i = i + 1
         loop i < raw.len() {
-            d :: raw[i]
+            d: raw[i]
             if d < 48 || d > 57 -> return None
             frac = frac + Float{d - 48} * place
             place = place * (Float{1} / Float{10})

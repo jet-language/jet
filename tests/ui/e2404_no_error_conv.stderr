@@ -1,17 +1,17 @@
 Error [jet.FailureDomainNotErrorType]: Explicit failure domain `FileErr` is not an Error type
-  --> tests/ui/e2404_no_error_conv.jet:11:15
+  --> tests/ui/e2404_no_error_conv.jet:11:16
     |
- 11 | fn inner() -> String FileErr! { Ok("hi") }
-    |               ^^^^^^^^^^^^^^^
+ 11 | inner: fn() -> String FileErr! { Ok("hi") }
+    |                ^^^^^^^^^^^^^^^
  Why: A `!` contract may name `Err`, a Core error, a type marked `#Error`, an all-error union, or `Never`; arbitrary value types do not describe failures.
  Fix: Use a Core error, add `#Error` to a local error type, or remove the explicit error contract.
 More: jet-lang.dev/e/E2417
 
 Error [jet.FailureDomainNotErrorType]: Explicit failure domain `AppErr` is not an Error type
-  --> tests/ui/e2404_no_error_conv.jet:13:15
+  --> tests/ui/e2404_no_error_conv.jet:13:16
     |
- 13 | fn outer() -> String AppErr! {
-    |               ^^^^^^^^^^^^^^
+ 13 | outer: fn() -> String AppErr! {
+    |                ^^^^^^^^^^^^^^
  Why: A `!` contract may name `Err`, a Core error, a type marked `#Error`, an all-error union, or `Never`; arbitrary value types do not describe failures.
  Fix: Use a Core error, add `#Error` to a local error type, or remove the explicit error contract.
 More: jet-lang.dev/e/E2417
@@ -21,6 +21,6 @@ Error [jet.ErrorNotPropagatable]: `inner` fails with `FileErr`, which can't prop
     |
  14 |     inner()
     |     ^^^^^
- Why: `inner` is defined at `e2404_no_error_conv.jet:11:4` with effective failure contract `explicit FileErr!`; the caller's `explicit AppErr!` contract has no route from `FileErr` to `AppErr`
+ Why: `inner` is defined at `e2404_no_error_conv.jet:11:1` with effective failure contract `explicit FileErr!`; the caller's `explicit AppErr!` contract has no route from `FileErr` to `AppErr`
  Fix: Declare the caller with `FileErr` as its failure domain, or add `impl FileErr -> AppErr { … }`; otherwise handle `inner` locally with `??`
 More: jet-lang.dev/e/E2404

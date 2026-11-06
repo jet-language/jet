@@ -12,10 +12,10 @@ use jet_pkg_model.[
     pkg_binder_descriptor,
 ]
 
-fn flr_route(root: String, language: ForeignLanguage, status: BinderStatus, runtime: BinderRuntime, stub_kind: BindingStubKind, type_stub: ForeignStubFile) {
-    found :: ForeignLanguage.from_root(root) ?? panic("{root} is a registered foreign root")
+flr_route: fn(root: String, language: ForeignLanguage, status: BinderStatus, runtime: BinderRuntime, stub_kind: BindingStubKind, type_stub: ForeignStubFile) {
+    found: ForeignLanguage.from_root(root) ?? panic("{root} is a registered foreign root")
     assert(found == language, "{root} routes to {language.debug_name()}, found {found.debug_name()}")
-    descriptor :: pkg_binder_descriptor(language) ?? panic("{root} has a registered binder")
+    descriptor: pkg_binder_descriptor(language) ?? panic("{root} has a registered binder")
     assert(descriptor.language == language, "{root} descriptor language")
     assert(descriptor.surface == BinderSurface.Namespace, "{root} binds a namespace")
     assert_eq(descriptor.status.debug_name(), status.debug_name())
@@ -28,7 +28,7 @@ fn flr_route(root: String, language: ForeignLanguage, status: BinderStatus, runt
 
 // tests/cffi.rs:488
 #Test("unified_foreign_binder_registry_routes_active_and_planned_languages") {
-    expected :: [(language: ForeignLanguage, root: String, status: BinderStatus)]{
+    expected: [(language: ForeignLanguage, root: String, status: BinderStatus)]{
         (language: ForeignLanguage.C, root: "c", status: BinderStatus.Active),
         (language: ForeignLanguage.Rust, root: "rust", status: BinderStatus.Planned),
         (language: ForeignLanguage.Py, root: "py", status: BinderStatus.Active),
@@ -51,11 +51,11 @@ fn flr_route(root: String, language: ForeignLanguage, status: BinderStatus, runt
         (language: ForeignLanguage.Com, root: "com", status: BinderStatus.Active),
     }
     loop entry in expected {
-        found :: ForeignLanguage.from_root(entry.root) ?? panic("{entry.root} is a registered root")
+        found: ForeignLanguage.from_root(entry.root) ?? panic("{entry.root} is a registered root")
         assert(found == entry.language, "{entry.root} maps to {entry.language.debug_name()}")
         assert_eq(entry.language.root(), entry.root)
         assert_eq(entry.language.bindings_subdir(), "bindings/{entry.root}")
-        binder :: pkg_binder_descriptor(entry.language) ?? panic("{entry.root} has a registered binder")
+        binder: pkg_binder_descriptor(entry.language) ?? panic("{entry.root} has a registered binder")
         assert(binder.surface == BinderSurface.Namespace, "{entry.root} binds a namespace")
         assert_eq(binder.status.debug_name(), entry.status.debug_name())
     }
@@ -65,7 +65,7 @@ fn flr_route(root: String, language: ForeignLanguage, status: BinderStatus, runt
 // display round trip; Jet has no dotted foreign-path model beside the root
 // table, so the port checks the root table and its declaration order.
 #Test("unified_foreign_namespace_model_recognizes_every_registered_root") {
-    roots :: [(root: String, language: ForeignLanguage)]{
+    roots: [(root: String, language: ForeignLanguage)]{
         (root: "c", language: ForeignLanguage.C),
         (root: "cpp", language: ForeignLanguage.Cpp),
         (root: "rust", language: ForeignLanguage.Rust),
@@ -90,11 +90,11 @@ fn flr_route(root: String, language: ForeignLanguage, status: BinderStatus, runt
         (root: "octave", language: ForeignLanguage.Octave),
         (root: "com", language: ForeignLanguage.Com),
     }
-    all :: ForeignLanguage.all()
+    all: ForeignLanguage.all()
     assert_eq(all.len(), roots.len())
     loop (index, entry) in roots {
         assert(all[index] == entry.language, "ForeignLanguage.all() keeps {entry.root} at {index}")
-        found :: ForeignLanguage.from_root(entry.root) ?? panic("{entry.root} namespace")
+        found: ForeignLanguage.from_root(entry.root) ?? panic("{entry.root} namespace")
         assert(found == entry.language, "{entry.root} maps to {entry.language.debug_name()}")
         assert(ForeignLanguage.from_root("{entry.root}.lib") == None, "{entry.root}.lib is not a root")
     }

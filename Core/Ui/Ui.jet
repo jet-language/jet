@@ -1,4 +1,4 @@
-package {
+package: {
     name: "core.ui"
     version: "0.0.1"
     edition: "2026"
@@ -9,8 +9,8 @@ package {
     }
 }
 use {
-    core :: core
-    tui_text :: core.tui
+    core: core
+    tui_text: core.tui
 }
 
 // core.ui — one portable tree consumed by every backend.
@@ -18,32 +18,32 @@ use {
 // Geometry and node values are deliberately backend-neutral.  Opening a
 // window, painting, and event delivery remain provider operations; these
 // constructors only build values that can be measured and rendered.
-module host
+host: module
 
-enum UIPreviewDevice {
+UIPreviewDevice: enum {
     Phone
     Tablet
     Desktop
 }
 
-enum UIPreviewKind {
+UIPreviewKind: enum {
     Preview
     Playground
 }
 
-enum UIIMEMode {
+UIIMEMode: enum {
     Native
     Disabled
 }
 
-enum UIAriaRole {
+UIAriaRole: enum {
     Button
     Container
     Label
     TextInput
 }
 
-enum UINodeKind {
+UINodeKind: enum {
     Custom
     Text
     Box
@@ -51,24 +51,24 @@ enum UINodeKind {
     TextInput
 }
 
-struct Point {
+Point: struct {
     x: Float
     y: Float
 }
 
-struct Size {
+Size: struct {
     width: Float
     height: Float
 }
 
-struct Rect {
+Rect: struct {
     x: Float
     y: Float
     width: Float
     height: Float
 }
 
-struct SizeConstraint {
+SizeConstraint: struct {
     min_width: Float
     min_height: Float
     max_width: Float
@@ -77,7 +77,7 @@ struct SizeConstraint {
 
 // The size a preview or playground renders at and the device class it
 // stands for; `phone`, `tablet` and `desktop` build the presets.
-struct UIPreviewViewport {
+UIPreviewViewport: struct {
     device: UIPreviewDevice
     width: Int
     height: Int
@@ -86,7 +86,7 @@ struct UIPreviewViewport {
 
 // A named preview or playground. Its registry keeps `body` and calls it each
 // time the preview renders.
-struct UIPreview {
+UIPreview: struct {
     kind: UIPreviewKind
     name: String
     viewport: UIPreviewViewport
@@ -94,19 +94,19 @@ struct UIPreview {
 }
 
 // One program's previews or playgrounds: at most 64, each with its own name.
-struct UIPreviewRegistry {
+UIPreviewRegistry: struct {
     entries: [UIPreview]
 }
 
 #Error
-enum UIPreviewError {
+UIPreviewError: enum {
     EmptyName
     TooManyPreviews
     DuplicatePreview(String)
     UnknownPreview(String)
 }
 
-enum InputEvent {
+InputEvent: enum {
     Key(code: String)
     Resize(size: Size)
 }
@@ -114,22 +114,22 @@ enum InputEvent {
 
 
 
-fn point(x: Float, y: Float) -> Point Never! { Point{x: x, y: y} }
-fn size(width: Float, height: Float) -> Size Never! {
+point: fn(x: Float, y: Float) -> Point Never! { Point{x: x, y: y} }
+size: fn(width: Float, height: Float) -> Size Never! {
     Size{width: width, height: height}
 }
-fn rect(x: Float, y: Float, width: Float, height: Float) -> Rect Never! {
+rect: fn(x: Float, y: Float, width: Float, height: Float) -> Rect Never! {
     Rect{x: x, y: y, width: width, height: height}
 }
-fn constraint(min_width: Float, min_height: Float, max_width: Float, max_height: Float) -> SizeConstraint Never! {
+constraint: fn(min_width: Float, min_height: Float, max_width: Float, max_height: Float) -> SizeConstraint Never! {
     SizeConstraint{min_width: min_width, min_height: min_height, max_width: max_width, max_height: max_height}
 }
 
-fn node(label: String, width: Float, height: Float) -> UINode Never! {
+node: fn(label: String, width: Float, height: Float) -> UINode Never! {
     transfer_node(label, width, height, None, UINodeKind.Custom, [UINode]{}, None)
 }
 
-fn box(children: [UINode]) -> UINode Never! {
+box: fn(children: [UINode]) -> UINode Never! {
     width := Float{0.0}
     height := Float{0.0}
     loop child in children {
@@ -140,45 +140,45 @@ fn box(children: [UINode]) -> UINode Never! {
     transfer_node("", width, height, Val(UIAriaRole.Container), UINodeKind.Box, children, None)
 }
 
-fn text(value: String) -> UINode Never! {
-    width :: Float{tui_text.display_width(value)}
+text: fn(value: String) -> UINode Never! {
+    width: Float{tui_text.display_width(value)}
     transfer_node(value, width, 1.0, Val(UIAriaRole.Label), UINodeKind.Text, [UINode]{}, None)
 }
 
 // A button sized to its label plus two cells of padding on each side. The
 // callback form `button(display) { … }` registers its click handler through
 // the compiler's retained-closure emission.
-fn button(display: String) -> UINode Never! {
-    width :: Float{tui_text.display_width(display)} + 4.0
+button: fn(display: String) -> UINode Never! {
+    width: Float{tui_text.display_width(display)} + 4.0
     transfer_node(display, width, 1.0, Val(UIAriaRole.Button), UINodeKind.Button, [UINode]{}, None)
 }
 
 // A text input over `state` with its IME mode. The host provider fills the
 // IME slot, which the audited node transfer leaves absent.
-fn text_input(state: String, ime: UIIMEMode) -> UINode Never! {
+text_input: fn(state: String, ime: UIIMEMode) -> UINode Never! {
     #Unsafe("Core UI text input: the provider sets the explicitly requested IME slot") {
         return core.ui.__text_input(state, ime)
     }
 }
 
-fn desktop() -> UIPreviewViewport Never! { UIPreviewViewport{device: .Desktop, width: 1280, height: 800, scale: 1} }
-fn phone() -> UIPreviewViewport Never! { UIPreviewViewport{device: .Phone, width: 390, height: 844, scale: 2} }
-fn tablet() -> UIPreviewViewport Never! { UIPreviewViewport{device: .Tablet, width: 834, height: 1119, scale: 2} }
+desktop: fn() -> UIPreviewViewport Never! { UIPreviewViewport{device: .Desktop, width: 1280, height: 800, scale: 1} }
+phone: fn() -> UIPreviewViewport Never! { UIPreviewViewport{device: .Phone, width: 390, height: 844, scale: 2} }
+tablet: fn() -> UIPreviewViewport Never! { UIPreviewViewport{device: .Tablet, width: 834, height: 1119, scale: 2} }
 
 // A preview renders in the desktop viewport unless `viewport:` names another.
-fn preview(name: String, ^body: fn() -> UINode, *, viewport: UIPreviewViewport?{None}) -> UIPreview Never! {
+preview: fn(name: String, ^body: fn() -> UINode, *, viewport: UIPreviewViewport?{None}) -> UIPreview Never! {
     UIPreview{kind: .Preview, name: name, viewport: viewport ?? desktop(), body: body}
 }
-fn playground(name: String, ^body: fn() -> UINode, *, viewport: UIPreviewViewport?{None}) -> UIPreview Never! {
+playground: fn(name: String, ^body: fn() -> UINode, *, viewport: UIPreviewViewport?{None}) -> UIPreview Never! {
     UIPreview{kind: .Playground, name: name, viewport: viewport ?? desktop(), body: body}
 }
 
-fn previews(^entries: [UIPreview]) -> UIPreviewRegistry UIPreviewError! { preview_registry(^entries) }
-fn playgrounds(^entries: [UIPreview]) -> UIPreviewRegistry UIPreviewError! { preview_registry(^entries) }
+previews: fn(^entries: [UIPreview]) -> UIPreviewRegistry UIPreviewError! { preview_registry(^entries) }
+playgrounds: fn(^entries: [UIPreview]) -> UIPreviewRegistry UIPreviewError! { preview_registry(^entries) }
 
 impl UIPreviewRegistry {
     // Builds the node tree of the preview named `name`.
-    fn render(self, name: String) -> UINode UIPreviewError! {
+    render: fn(self, name: String) -> UINode UIPreviewError! {
         loop entry in self.entries {
             if entry.name == name -> return Ok((entry.body)())
         }
@@ -186,58 +186,58 @@ impl UIPreviewRegistry {
     }
 }
 
-fn key_event(code: String) -> InputEvent Never! { InputEvent.Key{code: code} }
-fn resize_event(width: Float, height: Float) -> InputEvent Never! {
+key_event: fn(code: String) -> InputEvent Never! { InputEvent.Key{code: code} }
+resize_event: fn(width: Float, height: Float) -> InputEvent Never! {
     InputEvent.Resize{size: size(width, height)}
 }
 
 
-fn gtk_backend() -[Browser]> GtkBackend Never! {
+gtk_backend: fn() -[Browser]> GtkBackend Never! {
     #Unsafe("Core creates the real retained GTK renderer through the registered host allocation boundary") {
         return core.ui.__gtk_backend()
     }
 }
-fn tui_backend() -[Browser]> TUIBackend Never! {
+tui_backend: fn() -[Browser]> TUIBackend Never! {
     #Unsafe("Core creates the real retained terminal renderer through the registered host allocation boundary") {
         return core.ui.__tui_backend()
     }
 }
-fn null_backend() -[Browser]> NullBackend Never! {
+null_backend: fn() -[Browser]> NullBackend Never! {
     #Unsafe("Core creates the real retained null renderer through the registered host allocation boundary") {
         return core.ui.__null_backend()
     }
 }
 
-fn aria_role_button() -> UIAriaRole Never! { UIAriaRole.Button }
-fn aria_role_container() -> UIAriaRole Never! { UIAriaRole.Container }
-fn aria_role_label() -> UIAriaRole Never! { UIAriaRole.Label }
-fn aria_role_text_input() -> UIAriaRole Never! { UIAriaRole.TextInput }
+aria_role_button: fn() -> UIAriaRole Never! { UIAriaRole.Button }
+aria_role_container: fn() -> UIAriaRole Never! { UIAriaRole.Container }
+aria_role_label: fn() -> UIAriaRole Never! { UIAriaRole.Label }
+aria_role_text_input: fn() -> UIAriaRole Never! { UIAriaRole.TextInput }
 
-fn node_accessibility(n: UINode, metadata: UIAccessibility) -> UINode Never! {
+node_accessibility: fn(n: UINode, metadata: UIAccessibility) -> UINode Never! {
     #Unsafe("Core UI accessibility slot transfer: explicitly present validated metadata") {
         return core.ui.__accessibility_transfer(n, metadata, true)
     }
 }
 
-fn node_color(label: String, width: Float, height: Float, color: String) -> UINode Never! {
+node_color: fn(label: String, width: Float, height: Float, color: String) -> UINode Never! {
     transfer_node(label, width, height, Val(UIAriaRole.Label), UINodeKind.Custom, [UINode]{}, Val(color))
 }
 
-fn node_role(label: String, width: Float, height: Float, role: UIAriaRole) -> UINode Never! {
+node_role: fn(label: String, width: Float, height: Float, role: UIAriaRole) -> UINode Never! {
     kind := UINodeKind.Custom
     if role == .Button -> kind = UINodeKind.Button
     if role == .TextInput -> kind = UINodeKind.TextInput
     transfer_node(label, width, height, Val(role), kind, [UINode]{}, None)
 }
 
-fn node_shortcut(n: UINode, shortcut: UIShortcut) -> UINode Never! {
+node_shortcut: fn(n: UINode, shortcut: UIShortcut) -> UINode Never! {
     #Unsafe("Core UI shortcut slot transfer: explicitly present validated shortcut") {
         return core.ui.__shortcut_transfer(n, shortcut, true)
     }
 }
 
 
-fn transfer_node(label: String, width: Float, height: Float, role: UIAriaRole?, kind: UINodeKind, children: [UINode], color: String?) -> UINode Never! {
+transfer_node: fn(label: String, width: Float, height: Float, role: UIAriaRole?, kind: UINodeKind, children: [UINode], color: String?) -> UINode Never! {
     // Policy chooses the absent metadata slots here. The wire explicitly
     // carries their six absence bits, rather than asking the host for defaults.
     role_tag := -1
@@ -263,7 +263,7 @@ fn transfer_node(label: String, width: Float, height: Float, role: UIAriaRole?, 
     }
 }
 
-fn preview_registry(^entries: [UIPreview]) -> UIPreviewRegistry UIPreviewError! {
+preview_registry: fn(^entries: [UIPreview]) -> UIPreviewRegistry UIPreviewError! {
     if entries.len() > 64 -> return Err(UIPreviewError.TooManyPreviews)
     loop (index, entry) in entries {
         if entry.name == "" -> return Err(UIPreviewError.EmptyName)
@@ -289,7 +289,7 @@ fn preview_registry(^entries: [UIPreview]) -> UIPreviewRegistry UIPreviewError! 
 #Test("UI previews keep their viewport and registries reject unusable names") {
     assert(phone() == UIPreviewViewport{device: .Phone, width: 390, height: 844, scale: 2})
     assert(preview("card", () -> text("card")).viewport == desktop())
-    lab :: playground("lab", () -> text("lab"), viewport: tablet())
+    lab: playground("lab", () -> text("lab"), viewport: tablet())
     assert(lab.kind == UIPreviewKind.Playground && lab.viewport == tablet())
     if previews([preview("card", () -> text("a")), preview("card", () -> text("b"))]) == {
         .Ok(_) -> assert(false)

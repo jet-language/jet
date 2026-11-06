@@ -1,30 +1,30 @@
 //! Partially moving an owned result keeps the omitted fields at their
 //! aggregate owner's cleanup position, in the original field order.
-use scope :: core.mem.scope
+use scope: core.mem.scope
 
-struct Bundle<T> {
+Bundle: struct<T> {
     retained: T
     omitted_first: T
     omitted_second: T
 }
 
-fn pass<T>(value: ^T) -> T { ^value }
+pass: fn<T>(value: ^T) -> T { ^value }
 
-fn ordered(early: Bool) {
-    _before :: pass(
+ordered: fn(early: Bool) {
+    _before: pass(
     (
         first: scope.guard(() -> print("before first")),
         second: scope.guard(() -> print("before second")),
     ),
     )
-    Bundle{retained: _retained, ..} :: pass(
+    Bundle{retained: _retained, ..}: pass(
     Bundle<ScopeGuard>{
         retained: scope.guard(() -> print("retained")),
         omitted_first: scope.guard(() -> print("omitted first")),
         omitted_second: scope.guard(() -> print("omitted second")),
     },
     )
-    _after :: pass(
+    _after: pass(
     (
         first: scope.guard(() -> print("after first")),
         second: scope.guard(() -> print("after second")),
@@ -37,20 +37,20 @@ fn ordered(early: Bool) {
     print("normal")
 }
 
-struct Closing {
+Closing: struct {
     name: String
     payload: String
 }
 
 impl Closing.Close {
-    fn close(^self) { print("close {self.name} {self.payload}") }
+    close: fn(^self) { print("close {self.name} {self.payload}") }
 }
 
-fn closing_result() -> Closing { Closing{name: "call", payload: "intact"} }
+closing_result: fn() -> Closing { Closing{name: "call", payload: "intact"} }
 
-fn closing(early: Bool) {
-    Closing{name: call_name, ..} :: closing_result()
-    Closing{name: literal_name, ..} :: Closing{name: "literal", payload: "intact"}
+closing: fn(early: Bool) {
+    Closing{name: call_name, ..}: closing_result()
+    Closing{name: literal_name, ..}: Closing{name: "literal", payload: "intact"}
     print("names {call_name} {literal_name}")
     if early {
         return
@@ -58,7 +58,7 @@ fn closing(early: Bool) {
     print("close normal")
 }
 
-fn run() {
+run: fn() {
     ordered(false)
     ordered(true)
     closing(false)

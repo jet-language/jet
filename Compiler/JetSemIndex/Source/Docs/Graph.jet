@@ -7,17 +7,17 @@
 // facts, never cwd or a display-text re-resolution. Authored bytes come from
 // loaded_source, not the registration's comptime-masked source.
 use {
-    doc_text :: core.text
-    doc_os_path :: core.files.runtime.kernel_path_components
+    doc_text: core.text
+    doc_os_path: core.files.runtime.kernel_path_components
     jet_foundation.[Span, foundation_json_quote]
     jet_sema.[SemaCompilerModuleSource, SemaRegistrationGraph, sema_registration_module_index]
     jet_pkg_model.[EffectProjection, pkg_render_effect_projection_object]
     jetpack_foundation.[StatusEnvelope, StatusFields]
 }
 
-DOC_SCHEMA_VERSION :: 1
+DOC_SCHEMA_VERSION: 1
 
-struct DocSource {
+DocSource: struct {
     path: String
     start: Int
     end: Int
@@ -25,7 +25,7 @@ struct DocSource {
     column: Int
     link: String
 }
-struct DocItem {
+DocItem: struct {
     kind: String
     name: String
     qualified_name: String
@@ -42,14 +42,14 @@ struct DocItem {
     markers: [String]
     source: DocSource
 }
-struct DocModule {
+DocModule: struct {
     name: String
     path: String
     public: Bool
     summary: String
     source: DocSource
 }
-struct DocImpl {
+DocImpl: struct {
     kind: String
     type_name: String
     trait_name: String?
@@ -58,18 +58,18 @@ struct DocImpl {
     methods: [String]
     source: DocSource
 }
-struct DocExpectation {
+DocExpectation: struct {
     expression: String
     expected: String
 }
-struct DocTest {
+DocTest: struct {
     module_path: String
     line: Int
     setup: [String]
     expectations: [DocExpectation]
     source: DocSource
 }
-struct DocGraph {
+DocGraph: struct {
     schema_version: Int
     root: String
     // The same application-boundary projection as inspect; never re-solve it.
@@ -83,10 +83,10 @@ struct DocGraph {
 // Identity joins select checked AST rows, never a positional source/name zip.
 // Loaded metadata retains Core displays/aliases/pub_file verbatim. All original
 // modules participate in the protocol prepass BEFORE any item collection.
-fn build_doc_graph(registration: SemaRegistrationGraph, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int], project_root: doc_os_path.OsPath?, path_platform: doc_os_path.PathPlatform, index: SemIndex) -> DocGraph Never! {
+build_doc_graph: fn(registration: SemaRegistrationGraph, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int], project_root: doc_os_path.OsPath?, path_platform: doc_os_path.PathPlatform, index: SemIndex) -> DocGraph Never! {
     protocol_names := [String:Bool]{}
     loop source_index in loaded_module_rows {
-        module_index :: doc_loaded_registration_index(registration, module_sources[source_index])
+        module_index: doc_loaded_registration_index(registration, module_sources[source_index])
         doc_collect_protocol_names(registration.modules[module_index].program.items, &protocol_names)
     }
     graph := DocGraph{
@@ -97,11 +97,11 @@ fn build_doc_graph(registration: SemaRegistrationGraph, module_sources: [SemaCom
         impls: [DocImpl]{}, doctests: [DocTest]{},
     }
     loop source_index in loaded_module_rows {
-        loaded :: module_sources[source_index]
-        module_index :: doc_loaded_registration_index(registration, loaded)
-        registered :: registration.modules[module_index]
-        source :: loaded.loaded_source
-        path :: doc_stable_module_path(project_root, loaded.physical_path, loaded.display)
+        loaded: module_sources[source_index]
+        module_index: doc_loaded_registration_index(registration, loaded)
+        registered: registration.modules[module_index]
+        source: loaded.loaded_source
+        path: doc_stable_module_path(project_root, loaded.physical_path, loaded.display)
         &graph.modules.push(DocModule{
             name: doc_module_name(path, loaded.alias, path_platform), path: path,
             public: loaded.pub_file,
@@ -111,7 +111,7 @@ fn build_doc_graph(registration: SemaRegistrationGraph, module_sources: [SemaCom
         tests := doc_discover_doctests(project_root, loaded.physical_path, loaded.display, source, path)
         &tests.reverse()
         loop tests.len() > 0 {
-            test :: &tests.pop() ?? panic("nonempty documentation tests")
+            test: &tests.pop() ?? panic("nonempty documentation tests")
             &graph.doctests.push(^test)
         }
         doc_collect_items(registered.program.items, path, "", loaded.pub_file, loaded.physical_path, loaded.display, source, project_root, protocol_names, &graph.items, &graph.impls)
@@ -124,27 +124,27 @@ fn build_doc_graph(registration: SemaRegistrationGraph, module_sources: [SemaCom
     doc_sort_tests(&graph.doctests)
     graph
 }
-fn doc_loaded_registration_index(registration: SemaRegistrationGraph, source: SemaCompilerModuleSource) -> Int Never! {
+doc_loaded_registration_index: fn(registration: SemaRegistrationGraph, source: SemaCompilerModuleSource) -> Int Never! {
     sema_registration_module_index(registration, source.module_identity) ?? panic("loaded documentation module must be registered")
 }
 
 // Stable rendering order is separate from checked module/source collection
 // order. Equal keys keep authored order (the native stable list sort).
-fn doc_sort_modules(rows: &[DocModule]) Never! {
+doc_sort_modules: fn(rows: &[DocModule]) Never! {
     &rows.sort_by((left: DocModule, right: DocModule) -> (left.path <=> right.path).then(left.name <=> right.name))
 }
-fn doc_sort_items(rows: &[DocItem]) Never! {
+doc_sort_items: fn(rows: &[DocItem]) Never! {
     &rows.sort_by((left: DocItem, right: DocItem) -> (left.module_path <=> right.module_path).then(left.qualified_name <=> right.qualified_name).then(doc_kind_rank(left.kind) <=> doc_kind_rank(right.kind)).then(left.source.start <=> right.source.start))
 }
-fn doc_sort_impls(rows: &[DocImpl]) Never! {
+doc_sort_impls: fn(rows: &[DocImpl]) Never! {
     &rows.sort_by((left: DocImpl, right: DocImpl) -> (left.module_path <=> right.module_path).then(left.type_name <=> right.type_name).then(doc_trait_name_order(left.trait_name, right.trait_name)).then(left.source.start <=> right.source.start))
 }
-fn doc_sort_tests(rows: &[DocTest]) Never! {
+doc_sort_tests: fn(rows: &[DocTest]) Never! {
     &rows.sort_by((left: DocTest, right: DocTest) -> (left.module_path <=> right.module_path).then(left.line <=> right.line))
 }
 // Rust Option orders None before Some; Jet's enum declaration order is not
 // that contract. Match the optional strings explicitly, without cloning them.
-fn doc_trait_name_order(left: String?, right: String?) -> Ordering Never! {
+doc_trait_name_order: fn(left: String?, right: String?) -> Ordering Never! {
     if left == {
         .Val(left_name) -> if right == {
             .Val(right_name) -> left_name <=> right_name
@@ -159,8 +159,8 @@ fn doc_trait_name_order(left: String?, right: String?) -> Ordering Never! {
 
 impl DocGraph {
     // Owner-backed one-row windows; never clone documented item vectors.
-    fn item_window(self, index: Int) -> View<DocItem> Never! { self.items[index..index] }
-    fn undocumented_public(self) -> [View<DocItem>] Never! {
+    item_window: fn(self, index: Int) -> View<DocItem> Never! { self.items[index..index] }
+    undocumented_public: fn(self) -> [View<DocItem>] Never! {
         rows := [View<DocItem>]{}
         loop index in 0..<self.items.len() {
             if self.items[index].public && self.items[index].summary == "" -> &rows.push(self.item_window(index))
@@ -171,8 +171,8 @@ impl DocGraph {
     // Rust to_status_envelope: one typed canonical Foundation report.
     // No local value model or parse of our own JSON.
     // Foundation owns constructor/with_field visibility (CP-REPORT-STATUS-API).
-    fn to_status_envelope(self) -> StatusEnvelope Never! {
-        projection :: pkg_effect_projection_status_value(self.effect_projection)
+    to_status_envelope: fn(self) -> StatusEnvelope Never! {
+        projection: pkg_effect_projection_status_value(self.effect_projection)
         modules := [StatusValue]{}
         loop row in self.modules -> &modules.push(doc_module_value(row))
         items := [StatusValue]{}
@@ -181,7 +181,7 @@ impl DocGraph {
         loop row in self.impls -> &impls.push(doc_impl_value(row))
         tests := [StatusValue]{}
         loop row in self.doctests -> &tests.push(doc_test_value(row))
-        doc :: StatusFields.new()
+        doc: StatusFields.new()
             .with("schema_version", StatusValue.Integer{value: self.schema_version})
             .with("root", StatusValue.String{value: self.root.copy()})
             .with("effect_projection", projection)
@@ -194,7 +194,7 @@ impl DocGraph {
 
     // Raw artifact JSON, NOT the command's jet.status/v1 envelope. Explicit
     // field order and canonical Foundation quote, not RFC8785 canonicalization.
-    fn to_json(self) -> String Never! {
+    to_json: fn(self) -> String Never! {
         modules := [String]{}
         loop row in self.modules -> &modules.push(doc_module_json(row))
         items := [String]{}
@@ -203,11 +203,11 @@ impl DocGraph {
         loop row in self.impls -> &impls.push(doc_impl_json(row))
         tests := [String]{}
         loop row in self.doctests -> &tests.push(doc_test_json(row))
-        projection :: pkg_render_effect_projection_object(self.effect_projection)
+        projection: pkg_render_effect_projection_object(self.effect_projection)
         "{{\"schema_version\":{self.schema_version},\"root\":{foundation_json_quote(self.root)},\"effect_projection\":{projection},\"modules\":[{modules.join(",")}],\"items\":[{items.join(",")}],\"impls\":[{impls.join(",")}],\"doctests\":[{tests.join(",")}]}}"
     }
 }
-fn doc_status_strings(values: [String]) -> StatusValue Never! {
+doc_status_strings: fn(values: [String]) -> StatusValue Never! {
     rows := [StatusValue]{}
     loop value in values -> &rows.push(StatusValue.String{value: value.copy()})
     StatusValue.Array{values: ^rows}
@@ -215,24 +215,24 @@ fn doc_status_strings(values: [String]) -> StatusValue Never! {
 
 // Parent helper family shared by S23 and S24. Byte spans/columns stay Rust
 // UTF8 byte counts, independently of Jet's scalar-indexed String.slice.
-fn doc_source_for(root: doc_os_path.OsPath?, file_path: doc_os_path.OsPath?, display_path: String, source: String, span: Span) -> DocSource Never! {
-    path :: doc_stable_module_path(root, file_path, display_path)
-    bytes :: source.bytes()
-    start :: if span.start < bytes.len() -> span.start else -> bytes.len()
-    clipped_end :: if span.end < bytes.len() -> span.end else -> bytes.len()
-    end :: if clipped_end > start -> clipped_end else -> start
+doc_source_for: fn(root: doc_os_path.OsPath?, file_path: doc_os_path.OsPath?, display_path: String, source: String, span: Span) -> DocSource Never! {
+    path: doc_stable_module_path(root, file_path, display_path)
+    bytes: source.bytes()
+    start: if span.start < bytes.len() -> span.start else -> bytes.len()
+    clipped_end: if span.end < bytes.len() -> span.end else -> bytes.len()
+    end: if clipped_end > start -> clipped_end else -> start
     line := 1
     column := 1
     doc_line_column_bytes(bytes, start, &line, &column)
     DocSource{path: path, start: start, end: end, line: line, column: column, link: "{path}#L{line}"}
 }
-fn doc_declaration_text(source: String, span: Span) -> String Never! {
-    bytes :: source.bytes()
-    start :: if span.start < bytes.len() -> span.start else -> bytes.len()
-    clipped_end :: if span.end < bytes.len() -> span.end else -> bytes.len()
-    end :: if clipped_end > start -> clipped_end else -> start
+doc_declaration_text: fn(source: String, span: Span) -> String Never! {
+    bytes: source.bytes()
+    start: if span.start < bytes.len() -> span.start else -> bytes.len()
+    clipped_end: if span.end < bytes.len() -> span.end else -> bytes.len()
+    end: if clipped_end > start -> clipped_end else -> start
     selected := bytes[start..<end] // #4303: byte view flows to String API.
-    raw :: String.from_bytes(selected) ?? panic("documentation declaration span must select source text")
+    raw: String.from_bytes(selected) ?? panic("documentation declaration span must select source text")
     out := [U8]{}
     pending_space := false
     loop index in 0..<raw.len() {
@@ -248,17 +248,17 @@ fn doc_declaration_text(source: String, span: Span) -> String Never! {
     }
     String.from_bytes(out) ?? panic("documentation declaration preserves UTF8")
 }
-fn doc_stable_root(root: doc_os_path.OsPath?) -> String Never! { "." }
+doc_stable_root: fn(root: doc_os_path.OsPath?) -> String Never! { "." }
 
 // Native component identity decides prefix membership BEFORE lossy display.
 // Separator replacement is OUTPUT-only, as in Rust Docs. Missing physical
 // paths/roots and empty remainders preserve virtual display metadata; no cwd.
-fn doc_stable_module_path(root: doc_os_path.OsPath?, path: doc_os_path.OsPath?, display: String) -> String Never! {
+doc_stable_module_path: fn(root: doc_os_path.OsPath?, path: doc_os_path.OsPath?, display: String) -> String Never! {
     if root == .Val(base) {
         if path == .Val(physical) {
             if doc_os_path.strip_prefix_span(physical, base) == .Val(relative_span) {
                 if relative_span.start != relative_span.end {
-                    relative :: doc_os_path.display_span(physical, relative_span)
+                    relative: doc_os_path.display_span(physical, relative_span)
                     if relative != "." -> return relative.replace("\\", "/")
                 }
             }
@@ -271,16 +271,16 @@ fn doc_stable_module_path(root: doc_os_path.OsPath?, path: doc_os_path.OsPath?, 
 // This byte conversion is presentation-only; it never resolves a source or
 // participates in root/prefix authority. The caller supplies its retained
 // native platform (entry_path.platform even when project_root is None).
-fn doc_module_name(path: String, alias: String, platform: doc_os_path.PathPlatform) -> String Never! {
+doc_module_name: fn(path: String, alias: String, platform: doc_os_path.PathPlatform) -> String Never! {
     if alias != "" -> return alias.copy()
-    rendered :: doc_os_path.from_encoded(path.bytes(), platform)
+    rendered: doc_os_path.from_encoded(path.bytes(), platform)
     if doc_os_path.file_stem_span(rendered) == .Val(stem) -> return doc_os_path.display_span(rendered, stem)
     path.copy()
 }
-fn doc_qualified(parent: String, name: String) -> String Never! {
+doc_qualified: fn(parent: String, name: String) -> String Never! {
     if parent == "" -> name.copy() else -> "{parent}::{name}"
 }
-fn doc_kind_rank(kind: String) -> Int Never! {
+doc_kind_rank: fn(kind: String) -> Int Never! {
     if kind == {
         "module" -> 0
         "marker" | "fact" -> 1
@@ -293,13 +293,13 @@ fn doc_kind_rank(kind: String) -> Int Never! {
 }
 // #4357: output receivers retain the Rust pair without an allocated list or
 // extra schema record. Columns count UTF8 bytes, NOT Unicode/display cells.
-fn doc_line_column(source: String, offset: Int, line: &Int, column: &Int) Never! {
+doc_line_column: fn(source: String, offset: Int, line: &Int, column: &Int) Never! {
     doc_line_column_bytes(source.bytes(), offset, &line, &column)
 }
-fn doc_line_column_bytes(bytes: [U8], offset: Int, line: &Int, column: &Int) Never! {
+doc_line_column_bytes: fn(bytes: [U8], offset: Int, line: &Int, column: &Int) Never! {
     line = 1
     column = 1
-    end :: if offset < bytes.len() -> offset else -> bytes.len()
+    end: if offset < bytes.len() -> offset else -> bytes.len()
     loop index in 0..<end {
         if bytes[index] == 10 {
             line += 1
@@ -309,9 +309,9 @@ fn doc_line_column_bytes(bytes: [U8], offset: Int, line: &Int, column: &Int) Nev
         }
     }
 }
-fn doc_line_offset(source: String, line: Int) -> Int Never! {
+doc_line_offset: fn(source: String, line: Int) -> Int Never! {
     if line <= 1 -> return 0
-    bytes :: source.bytes()
+    bytes: source.bytes()
     remaining := line - 1
     loop index in 0..<bytes.len() {
         if bytes[index] == 10 {

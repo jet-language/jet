@@ -3,13 +3,13 @@
 // sees only `T`'s bounds. Every instance keeps just its own arm.
 
 #Printable
-struct Point {
+Point: struct {
     x: Int
     y: Int
 }
 
 // Value position: the table is the function's result.
-fn describe<T: Printable>(value: T) -> String {
+describe: fn<T: Printable>(value: T) -> String {
     if T == {
         Int -> "whole number {value + 1} after {value}"
         String -> "text of {value.len()} bytes"
@@ -20,19 +20,19 @@ fn describe<T: Printable>(value: T) -> String {
 
 // Matching is exact type identity: a bare `2.5` is a Decimal, so only a
 // value typed `Float` takes the `Float` arm.
-fn scale<T>(value: T) -> String {
+scale: fn<T>(value: T) -> String {
     if T == {
         Float -> "float {value * 2.0} doubled"
         else -> "not a Float"
     }
 }
 
-fn as_float(value: Float) -> Float {
+as_float: fn(value: Float) -> Float {
     value
 }
 
 // Statement position: arms run statements.
-fn weigh<T>(value: T) -> Int {
+weigh: fn<T>(value: T) -> Int {
     weight := 0
     if T == {
         Int -> weight = value * 10
@@ -46,7 +46,7 @@ fn weigh<T>(value: T) -> Int {
 }
 
 // Inside an arm the return type reads `T` as the arm's type too.
-fn bump<T>(value: T) -> T {
+bump: fn<T>(value: T) -> T {
     if T == {
         Int -> value + 100
         String -> "{value}!"
@@ -55,7 +55,7 @@ fn bump<T>(value: T) -> T {
 }
 
 // The one-arm test: `if T == Int { … }`, as `if x == .A { … }` is for enums.
-fn double_ints<T>(value: T) -> Int {
+double_ints: fn<T>(value: T) -> Int {
     result := 0
     if T == Int {
         result = value * 2
@@ -64,14 +64,14 @@ fn double_ints<T>(value: T) -> Int {
 }
 
 // `comptime` changes nothing: every type table already folds per instance.
-fn text_size<T>(value: T) -> Int {
+text_size: fn<T>(value: T) -> Int {
     comptime if T == String {
         return value.len()
     }
     -1
 }
 
-fn run() {
+run: fn() {
     print(describe(41))
     print(describe("hello"))
     print(describe(Point{x: 3, y: 4}))

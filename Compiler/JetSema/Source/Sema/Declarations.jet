@@ -26,7 +26,7 @@ use jet_foundation.[
     ViewProvenanceMap,
 ]
 
-fn sema_effective_return_type(return_type: Type?) -> Type Never! {
+sema_effective_return_type: fn(return_type: Type?) -> Type Never! {
     // Imported declarations and local calls use the same canonical failure
     // projection; a written success type is not the callable's Result type.
     failure_contract_effective_type(failure_contract_from_return_type(return_type))
@@ -36,15 +36,15 @@ fn sema_effective_return_type(return_type: Type?) -> Type Never! {
 // ABIs (String, Bool, Ordering, Dyn, and same-type arithmetic), never the
 // implicit failure carrier, for user and derived impls alike (the Rust
 // reference's `uses_raw_protocol_return`).
-fn sema_raw_protocol_trait(trait_name: String?) -> Bool Never! {
-    name :: trait_name ?? return false
-    owned :: owned_trait(name) ?? return false
+sema_raw_protocol_trait: fn(trait_name: String?) -> Bool Never! {
+    name: trait_name ?? return false
+    owned: owned_trait(name) ?? return false
     owned.raw_return
 }
 
 // Whether a trait-impl method keeps its declared return raw (the Rust
 // reference's `uses_raw_protocol_function_return`).
-fn sema_raw_protocol_function_return(trait_name: String?, implementation_generated: Bool, func: Func) -> Bool Never! {
+sema_raw_protocol_function_return: fn(trait_name: String?, implementation_generated: Bool, func: Func) -> Bool Never! {
     if sema_raw_protocol_trait(trait_name) -> return true
     func.compiler_generated && (implementation_generated || func.state_transition != None)
 }
@@ -52,7 +52,7 @@ fn sema_raw_protocol_function_return(trait_name: String?, implementation_generat
 // A callable's checked return: a raw protocol return keeps its declared type
 // (Unit when omitted); every other return projects through the failure rail
 // (the Rust reference's `checked_return_types`).
-fn sema_checked_return_type(return_type: Type?, raw_protocol_return: Bool) -> Type Never! {
+sema_checked_return_type: fn(return_type: Type?, raw_protocol_return: Bool) -> Type Never! {
     if raw_protocol_return -> return return_type ?? Type.Named{name: "Unit"}
     sema_effective_return_type(return_type)
 }
@@ -60,20 +60,20 @@ fn sema_checked_return_type(return_type: Type?, raw_protocol_return: Bool) -> Ty
 // The stable provenance of a callable's effective failure route, projected
 // from its written return type (the Rust reference's
 // `FailureContract::from_return_type(..).source()`).
-fn sema_failure_contract_source(return_type: Type?) -> String Never! {
+sema_failure_contract_source: fn(return_type: Type?) -> String Never! {
     failure_contract_source(failure_contract_from_return_type(return_type))
 }
 
 // Whether `return_type` keeps the implicit default failure route (its
 // sema_failure_contract_source is "implicit default !Err"), read without
 // rendering the contract.
-fn sema_failure_contract_is_default(return_type: Type?) -> Bool Never! {
+sema_failure_contract_is_default: fn(return_type: Type?) -> Bool Never! {
     failure_contract_from_return_type(return_type) == .Default(_, _)
 }
 // `export_signature`: failure inference's infallible rail is not a second
 // Component value. Keep genuinely fallible and diverging returns.
-fn sema_guest_export_value_type(return_type: Type?) -> Type? Never! {
-    value :: return_type ?? return None
+sema_guest_export_value_type: fn(return_type: Type?) -> Type? Never! {
+    value: return_type ?? return None
     if value == .Result(ok, err) && err == .Named(name) && name == "Never" {
         if ok == .Named(success_name) && success_name == "Never" -> return Val(value)
         return Val(ok)
@@ -81,7 +81,7 @@ fn sema_guest_export_value_type(return_type: Type?) -> Type? Never! {
     Val(value)
 }
 
-fn sema_callable_policy_string_text(parts: [StrPart]) -> String Never! {
+sema_callable_policy_string_text: fn(parts: [StrPart]) -> String Never! {
     if parts.len() != 1 -> return "<string>"
     if parts[0] == {
         .Lit(text) -> "\"{text}\""
@@ -89,12 +89,12 @@ fn sema_callable_policy_string_text(parts: [StrPart]) -> String Never! {
     }
 }
 
-fn sema_callable_policy_call_text(call: Call) -> String Never! {
-    args :: loop argument_index in 0..<call.args.len() -> sema_callable_policy_argument_text(call.args[argument_index].expr)
+sema_callable_policy_call_text: fn(call: Call) -> String Never! {
+    args: loop argument_index in 0..<call.args.len() -> sema_callable_policy_argument_text(call.args[argument_index].expr)
     "{call.name}({args.join(", ")})"
 }
 
-fn sema_callable_policy_argument_text(expr: Expr) -> String Never! {
+sema_callable_policy_argument_text: fn(expr: Expr) -> String Never! {
     if expr == {
         .Str(parts, _, _) -> sema_callable_policy_string_text(parts)
         .Int(value, _, _, raw, _) -> raw ?? "{value}"
@@ -108,14 +108,14 @@ fn sema_callable_policy_argument_text(expr: Expr) -> String Never! {
     }
 }
 
-fn sema_callable_policies(func: Func) -> CallablePolicyChain Never! {
+sema_callable_policies: fn(func: Func) -> CallablePolicyChain Never! {
     policies := [CallablePolicy]{}
     loop marker in func.markers {
         if marker.name == "Policy" {
             loop argument in marker.args {
                 if argument == .Expr(value) {
                     if value == .Call(call, _) {
-                        arguments :: loop call_argument in call.args -> sema_callable_policy_argument_text(call_argument.expr)
+                        arguments: loop call_argument in call.args -> sema_callable_policy_argument_text(call_argument.expr)
                         &policies.push(CallablePolicy{name: call.name, arguments: arguments})
                     }
                 }
@@ -125,21 +125,21 @@ fn sema_callable_policies(func: Func) -> CallablePolicyChain Never! {
     CallablePolicyChain{policies: policies}
 }
 
-fn sema_function_param_types(func: Func) -> [Type] Never! {
+sema_function_param_types: fn(func: Func) -> [Type] Never! {
     params := [Type]{}
     loop parameter_index in 0..<func.params.len() {
-        ty :: type_with_effective_fn_returns(func.params[parameter_index].ty)
+        ty: type_with_effective_fn_returns(func.params[parameter_index].ty)
         if func.params[parameter_index].variadic -> &params.push(Type.List{element: ty}) else -> &params.push(ty)
     }
     params
 }
 
-fn sema_function_param_contract(func: Func) -> [CallContractRow]? {
+sema_function_param_contract: fn(func: Func) -> [CallContractRow]? {
     contract := [CallContractRow]{}
     has_contract := false
     loop parameter_index in 0..<func.params.len() {
         label := func.params[parameter_index].name
-        implicit_local_label :: func.params[parameter_index].zone == ParamZone.Either && func.params[parameter_index].public_label == None
+        implicit_local_label: func.params[parameter_index].zone == ParamZone.Either && func.params[parameter_index].public_label == None
         if func.params[parameter_index].public_label != None -> label = (func.params[parameter_index].public_label ?? CallLabel{name: "", span: func.params[parameter_index].name_span}).name
         if func.params[parameter_index].zone == ParamZone.PositionalOnly || implicit_local_label -> label = ""
         &contract.push(CallContractRow{label: label, zone: func.params[parameter_index].zone})
@@ -148,7 +148,7 @@ fn sema_function_param_contract(func: Func) -> [CallContractRow]? {
     if has_contract -> Val(contract) else -> None
 }
 
-fn sema_function_call_metadata(func: Func, owner: SymbolID, fallback_source_file: String, fallback_source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment]) -> FunctionCallMetadata {
+sema_function_call_metadata: fn(func: Func, owner: SymbolID, fallback_source_file: String, fallback_source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment]) -> FunctionCallMetadata {
     names := [String]{}
     defaults := [FunctionDefaultRef?]{}
     variadic := [Bool]{}
@@ -159,8 +159,8 @@ fn sema_function_call_metadata(func: Func, owner: SymbolID, fallback_source_file
         &conventions.push(parameter.convention)
         if parameter.default == {
             .Val(default_expr) -> {
-                span :: expr_span(default_expr)
-                source_file :: sema_source_file_at(source_segments, fallback_source_file, fallback_source_origin, span)
+                span: expr_span(default_expr)
+                source_file: sema_source_file_at(source_segments, fallback_source_file, fallback_source_origin, span)
                 &defaults.push(Val(FunctionDefaultRef{source_file: source_file, owner_key: owner.key, parameter_index: index, span: span}))
             }
             else -> &defaults.push(None)
@@ -179,8 +179,8 @@ fn sema_function_call_metadata(func: Func, owner: SymbolID, fallback_source_file
 // calls bind to its raw scalar ABI return, which codegen emits unwrapped (the
 // Rust reference's `checked_return_types(.., sig.is_extern)` with
 // `is_extern: f.inline_foreign.is_some()`).
-fn sema_function_symbol_type(func: Func, raw_protocol_return: Bool, owner: SymbolID, fallback_source_file: String, fallback_source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment]) -> Type {
-    effect_bound :: if func.is_pure -> Val([EffectRowEntry]{}) else -> None
+sema_function_symbol_type: fn(func: Func, raw_protocol_return: Bool, owner: SymbolID, fallback_source_file: String, fallback_source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment]) -> Type {
+    effect_bound: if func.is_pure -> Val([EffectRowEntry]{}) else -> None
     Type.Fn{
         params: sema_function_param_types(func),
         ret: Val(sema_checked_return_type(func.return_type, raw_protocol_return || func.inline_foreign != None)),
@@ -196,12 +196,12 @@ fn sema_function_symbol_type(func: Func, raw_protocol_return: Bool, owner: Symbo
 // sources with access taken from the return type's view
 // leaves. Another module's caller reads this registered signature, so the
 // declared contract is published here, before any body check runs.
-fn sema_function_signature_view_provenance(func: Func) -> ViewProvenanceMap? {
+sema_function_signature_view_provenance: fn(func: Func) -> ViewProvenanceMap? {
     // copy: the signature publishes its own provenance map, while the inferred map stays on `func`
     // (a read parameter, the registered declaration).
     if func.return_view_provenance != None -> return func.return_view_provenance.copy()
-    declared :: func.declared_return_view_provenance ?? return None
-    mutable :: if func.return_type == .Val(ret) -> sema_ownership_is_window_type(ret) else -> false
+    declared: func.declared_return_view_provenance ?? return None
+    mutable: if func.return_type == .Val(ret) -> sema_ownership_is_window_type(ret) else -> false
     // copy: `published` gets its mutable flags rewritten, while the declared map stays on `func`,
     // the caller's registered declaration.
     published := declared.copy()

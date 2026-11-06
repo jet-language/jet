@@ -1,49 +1,49 @@
 // D-JSON-INT-FIDELITY1: JSON keeps full integer values through dynamic and
 // typed Codable paths, rejects trailing commas, and decodes unit enum wires.
-use json :: core.encoding.json
+use json: core.encoding.json
 
-struct IntegerRecord {
+IntegerRecord: struct {
     min: Int
     max: Int
     first: Int?
     second: String?
 }
 
-enum Switch {
+Switch: enum {
     On
     Off
 }
 
-RAW :: comptime { "{{\"min\":-9223372036854775808,\"max\":9223372036854775807,\"first\":123456789012345678901234567890,\"second\":\"ready\"}}" }
+RAW: comptime { "{{\"min\":-9223372036854775808,\"max\":9223372036854775807,\"first\":123456789012345678901234567890,\"second\":\"ready\"}}" }
 
-fn direct_min_encode() -[]> String { return json.to_string(Dyn.Int(-9223372036854775808)) ?? panic("JSON encode") }
+direct_min_encode: fn() -[]> String { return json.to_string(Dyn.Int(-9223372036854775808)) ?? panic("JSON encode") }
 
-fn dynamic_roundtrip() -[]> String {
-    value :: json.parse(RAW) ?? panic("dynamic parse")
+dynamic_roundtrip: fn() -[]> String {
+    value: json.parse(RAW) ?? panic("dynamic parse")
     return json.to_string(value) ?? panic("JSON encode")
 }
 
-fn typed_roundtrip() -[]> String {
-    value :: json.decode<IntegerRecord>(RAW) ?? return "typed-rejected"
+typed_roundtrip: fn() -[]> String {
+    value: json.decode<IntegerRecord>(RAW) ?? return "typed-rejected"
     return json.to_string(value) ?? panic("JSON encode")
 }
 
-fn unit_roundtrip() -[]> String {
-    value :: json.decode<Switch>("\"On\"") ?? return "unit-rejected"
+unit_roundtrip: fn() -[]> String {
+    value: json.decode<Switch>("\"On\"") ?? return "unit-rejected"
     return json.to_string(value) ?? panic("JSON encode")
 }
 
-fn trailing_comma() -[]> String {
+trailing_comma: fn() -[]> String {
     json.parse("{{\"a\":1,}}") ?? return "trailing-rejected"
     return "trailing-accepted"
 }
 
-fn nonfinite_number() -[]> String {
+nonfinite_number: fn() -[]> String {
     json.decode<Float>("1e400") ?? return "nonfinite-rejected"
     return "nonfinite-accepted"
 }
 
-fn run() {
+run: fn() {
     print(direct_min_encode())
     print(dynamic_roundtrip())
     print(typed_roundtrip())

@@ -3,39 +3,39 @@
 // serve_once_listener drives one connection at a time so golden output order
 // stays fixed.
 use {
-    http :: core.http.client
-    server :: core.http.server
-    net :: core.net
-    tasks :: core.tasks
+    http: core.http.client
+    server: core.http.server
+    net: core.net
+    tasks: core.tasks
 }
 
-fn handle_root(req: HTTPRequest) -> HTTPResponse HTTPError! { Ok(server.response(200, "welcome")) }
+handle_root: fn(req: HTTPRequest) -> HTTPResponse HTTPError! { Ok(server.response(200, "welcome")) }
 
-fn handle_user(id: String) -> HTTPResponse HTTPError! {
+handle_user: fn(id: String) -> HTTPResponse HTTPError! {
     return Ok(server.response(200, "user={id}"))
 }
 
-fn handle_create(req: HTTPRequest) -> HTTPResponse HTTPError! { Ok(server.response(201, "created")) }
+handle_create: fn(req: HTTPRequest) -> HTTPResponse HTTPError! { Ok(server.response(201, "created")) }
 
-fn run() {
-    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind failed")
-    addr :: listener.local_addr() ?? panic("address failed")
-    mux :: server.mux()
+run: fn() {
+    listener: net.tcp_listen("127.0.0.1:0") ?? panic("bind failed")
+    addr: listener.local_addr() ?? panic("address failed")
+    mux: server.mux()
     mux.get("/", (req: HTTPRequest) -> handle_root(req))
     mux.get("/users/:id", (id: String) -> handle_user(id))
     mux.post("/users", (req: HTTPRequest) -> handle_create(req))
-    t :: task {
+    t: task {
         loop i in [0, 1, 2, 3] {
             server.serve_once_listener(listener, mux) ?? panic("serve failed")
         }
     }
-    r1 :: http.get("http://{addr}/") ?? panic("GET / failed")
+    r1: http.get("http://{addr}/") ?? panic("GET / failed")
     print(r1.body().text(8388608) ?? panic("body failed"))
-    r2 :: http.get("http://{addr}/users/42") ?? panic("GET /users/42 failed")
+    r2: http.get("http://{addr}/users/42") ?? panic("GET /users/42 failed")
     print(r2.body().text(8388608) ?? panic("body failed"))
-    r3 :: http.post("http://{addr}/users", "") ?? panic("POST /users failed")
+    r3: http.post("http://{addr}/users", "") ?? panic("POST /users failed")
     print(r3.body().text(8388608) ?? panic("body failed"))
-    r4 :: http.get("http://{addr}/missing") ?? panic("GET /missing failed")
+    r4: http.get("http://{addr}/missing") ?? panic("GET /missing failed")
     print(r4.status())
     t.join() ?? panic("server failed")
 }

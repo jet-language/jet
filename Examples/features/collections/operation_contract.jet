@@ -1,20 +1,20 @@
 // D-ONE-OPERATIONS1=A: each collection operation follows its checked row in
 // the operation contract (Docs/spec/reference/core-library.md).
-fn parse_int(s: String) -> Int Err! {
-    n :: Int.parse(s) ?? return Err("not a number: {s}")
+parse_int: fn(s: String) -> Int Err! {
+    n: Int.parse(s) ?? return Err("not a number: {s}")
     return Ok(n)
 }
 
-fn report(words: [String]) {
+report: fn(words: [String]) {
     if words.map((w: String) -> parse_int(w)) == {
         .Ok(values) -> print(values)
         .Err(e) -> print("first failure: {e.message}")
     }
 }
 
-fn run() {
+run: fn() {
     // Empty inputs follow the logical identities.
-    empty :: [Int]{}
+    empty: [Int]{}
     print(empty.all((x) -> x > 0))
     print(empty.any((x) -> x > 0))
     print(empty.sum())

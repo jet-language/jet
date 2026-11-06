@@ -1,18 +1,18 @@
 // D-SERDE2=A: hand-written and derived codecs share one public protocol.
 // Email owns a bare-string wire form; Signup's generated codec composes it.
-use json :: core.encoding.json
+use json: core.encoding.json
 
-struct Email {
+Email: struct {
     address: String
 }
 
 impl Email.Encode {
-    fn encode(self) -> Dyn { Dyn.Text(self.address.copy()) }
+    encode: fn(self) -> Dyn { Dyn.Text(self.address.copy()) }
 }
 
 impl Email.Decode {
-    fn decode(tree: Dyn) -> Email [FieldError]! {
-        address :: tree.text()
+    decode: fn(tree: Dyn) -> Email [FieldError]! {
+        address: tree.text()
         if !address.contains("@") {
             return Err([FieldError{path: "", reason: "not a valid email: {address}"}])
         }
@@ -20,15 +20,15 @@ impl Email.Decode {
     }
 }
 
-struct Signup {
+Signup: struct {
     name: String
     email: Email
 }
 
-fn run() [FieldError]! {
-    signup :: Signup{name: "Ada", email: Email{address: "ada@lovelace.org"}}
-    wire :: json.to_string(signup) ?? panic("JSON encode")
+run: fn() [FieldError]! {
+    signup: Signup{name: "Ada", email: Email{address: "ada@lovelace.org"}}
+    wire: json.to_string(signup) ?? panic("JSON encode")
     print(wire)
-    decoded :: json.decode<Signup>(wire)
+    decoded: json.decode<Signup>(wire)
     print(decoded.email.address)
 }

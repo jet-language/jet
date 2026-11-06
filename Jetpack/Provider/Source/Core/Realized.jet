@@ -9,20 +9,20 @@
 // The stable recipe id of a Nix-provider realization. Hashed
 // into the cache identity's recipe fingerprint and recomputed offline, so a
 // lock-backed reuse reproduces it without any Nix or network call.
-PROVIDER_NIX_RECIPE_ID :: "nix-compat-v1"
+PROVIDER_NIX_RECIPE_ID: "nix-compat-v1"
 
 // The shared provider-facts carrier kept in every producer record.
-PROVIDER_SHARED_FACTS :: "provider-facts"
-PROVIDER_SHARED_FACTS_DIGEST :: "provider-facts-digest"
+PROVIDER_SHARED_FACTS: "provider-facts"
+PROVIDER_SHARED_FACTS_DIGEST: "provider-facts-digest"
 // The native document a Nix producer retained verbatim.
-PROVIDER_NIX_NATIVE_FORMAT :: "nix.native.format"
-PROVIDER_NIX_NATIVE_DOCUMENT :: "nix.native.document"
+PROVIDER_NIX_NATIVE_FORMAT: "nix.native.format"
+PROVIDER_NIX_NATIVE_DOCUMENT: "nix.native.document"
 
 // What a provider needs to acquire and realize a ref beyond the ref and its
 // source table: offline fixtures, the store to materialize into, the project
 // whose lock records Nix identities, the signed index, and the Hangar roots
 // used by native cache admission.
-struct ProviderCtx {
+ProviderCtx: struct {
     fixtures: String?
     store_dir: String
     offline: Bool
@@ -46,7 +46,7 @@ struct ProviderCtx {
 
 // A realized package: where its bytes are and what to put on PATH. `bin` is
 // the directory to prepend to PATH, or empty for a library package (U10).
-struct Realized {
+Realized: struct {
     name: String
     // Package version for the hangar id (`<name>-<version>-<fp>`), or
     // empty when the provider cannot determine one.
@@ -71,7 +71,7 @@ struct Realized {
 
 // How a dependency was realized, for the `jet build` per-package report
 // (`Built | Substituted | Cached`).
-enum SourceState {
+SourceState: enum {
     // Compiled from source by a first-party provider this run.
     Built
     // Downloaded from a verified native release artifact.
@@ -81,7 +81,7 @@ enum SourceState {
     // Realized through the Nix compatibility provider.
     Substituted
 
-    fn label(self) -> String Never! {
+    label: fn(self) -> String Never! {
         if self == {
             .Built -> "Built"
             .Downloaded -> "Downloaded"
@@ -94,7 +94,7 @@ enum SourceState {
 // What can go wrong realizing a ref through a provider. Each variant renders
 // one friendly diagnostic (`report`).
 #Error
-enum ProviderError {
+ProviderError: enum {
     // A compatibility provider failed; carries a trimmed reason.
     BuildFailed(String)
     // The provider output did not have the expected shape.
@@ -135,7 +135,7 @@ enum ProviderError {
     NixCache(String)
 
     // The registered diagnostic code, for the errors that carry one.
-    fn code(self) -> String? Never! {
+    code: fn(self) -> String? Never! {
         if self == {
             .MonorepoFetch(_) -> Val("E1232")
             .MemberOutsideWorkspace(_) -> Val("E1233")
@@ -153,7 +153,7 @@ enum ProviderError {
     }
 
     // The carried reason.
-    fn message(self) -> String Never! {
+    message: fn(self) -> String Never! {
         if self == {
             .BuildFailed(reason) | .BadOutput(reason) | .Ingest(reason) | .FixtureMissing(reason) | .Unsupported(reason) -> reason
             .ForeignProjection(reason) | .CoreBuild(reason) | .Cran(reason) | .LuaRocks(reason) -> reason
@@ -167,7 +167,7 @@ enum ProviderError {
     // Render the one friendly diagnostic for this failure (Rust CLI
     // `report_provider_error`; it lives with the carrier so Provider callers
     // below the CLI can report without reaching up).
-    fn report(self, theme: Theme) Never! -[IO, Time.Wait]> {
+    report: fn(self, theme: Theme) Never! -[IO, Time.Wait]> {
         if self == {
             .BuildFailed(reason) -> theme.error("the provider failed to build that package", reason, "check the package name, e.g. `fastfetch@jetpack`.")
             .BadOutput(reason) -> theme.error("couldn't understand the provider's output", reason, "this is likely a Jetpack bug — please report it.")
@@ -193,7 +193,7 @@ enum ProviderError {
 }
 
 // The registered code of a signed-index failure.
-fn provider_nix_index_code(error: NixIndexError) -> String Never! {
+provider_nix_index_code: fn(error: NixIndexError) -> String Never! {
     if error.code() == {
         1349 -> "E1349"
         1276 -> "E1276"
@@ -206,23 +206,23 @@ fn provider_nix_index_code(error: NixIndexError) -> String Never! {
 // provider JSON accessors). Callers wrap it in the `ProviderError` variant
 // their boundary owns.
 #Error
-struct ProviderReason {
+ProviderReason: struct {
     message: String
 }
 
 // A package ref that needs an explicit Nix compatibility bridge output.
-struct NixBridgeNeed {
+NixBridgeNeed: struct {
     reference: String
     package: String
 }
 
-enum PlanState {
+PlanState: enum {
     New
     Cached
     Repaired
 }
 
-struct PlanItem {
+PlanItem: struct {
     package: String
     state: PlanState
     download_bytes: Int?
@@ -231,7 +231,7 @@ struct PlanItem {
 
 // Acquisition metadata resolved before realization. A byte total stays unknown
 // (None) as soon as one item's size is unknown or the sum overflows.
-struct DownloadPlan {
+DownloadPlan: struct {
     new: Int
     cached: Int
     repaired: Int
@@ -240,11 +240,11 @@ struct DownloadPlan {
     estimated_seconds: Int?
     items: [PlanItem]
 
-    fn empty() -> DownloadPlan Never! {
+    empty: fn() -> DownloadPlan Never! {
         DownloadPlan{new: 0, cached: 0, repaired: 0, download_bytes: Val(0), disk_bytes: Val(0), estimated_seconds: None, items: [PlanItem]{}}
     }
 
-    fn add_item(&self, item: PlanItem) Never! {
+    add_item: fn(&self, item: PlanItem) Never! {
         if item.state == {
             .New -> self.new = math.saturating_add(self.new, 1)
             .Cached -> self.cached = math.saturating_add(self.cached, 1)
@@ -255,15 +255,15 @@ struct DownloadPlan {
         &self.items.push(item)
     }
 
-    fn extend(&self, other: DownloadPlan) Never! {
+    extend: fn(&self, other: DownloadPlan) Never! {
         if other.estimated_seconds != None -> self.estimated_seconds = other.estimated_seconds
         loop item in other.items -> &self.add_item(item)
     }
 
-    fn add_nix(&self, nix: NixDownloadPlan) Never! {
+    add_nix: fn(&self, nix: NixDownloadPlan) Never! {
         self.estimated_seconds = nix.estimated_seconds
         loop item in nix.items {
-            state :: if item.state == {
+            state: if item.state == {
                 .New -> PlanState.New
                 .Cached -> PlanState.Cached
                 .Repaired -> PlanState.Repaired
@@ -273,8 +273,8 @@ struct DownloadPlan {
     }
 }
 
-fn provider_plan_sum(left: Int?, right: Int?) -> Int? Never! {
-    total :: left ?? return None
-    extra :: right ?? return None
+provider_plan_sum: fn(left: Int?, right: Int?) -> Int? Never! {
+    total: left ?? return None
+    extra: right ?? return None
     math.checked_add(total, extra)
 }

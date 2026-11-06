@@ -69,7 +69,7 @@ stderr; completion arguments retain their exact command-specific grammar.
 
 ## Project jobs
 
-Write a named chore as `#Job fn deploy(region: String) { … }`, then run
+Write a named chore as `#Job deploy: fn(region: String) { … }`, then run
 `jet deploy --region eu`. Jet flags come before the job name:
 `jet --release deploy --region eu`. Every word after the name belongs to
 the job; a separator immediately after the name is optional.
@@ -89,7 +89,7 @@ the same checked job dispatch.
 
 The compiler request selects a job or generator by its declared callable in
 the authorized entry module. It does not rename that function or manufacture
-`fn run`. Evaluation uses the same selection and checks transitive purity
+`run: fn`. Evaluation uses the same selection and checks transitive purity
 through sema's checked call graph before execution.
 
 ## Published schemas
@@ -496,7 +496,7 @@ directories from source-file names or reopens ambient filesystem paths.
 ### Checked build inspection
 
 `inspect build`, `inspect graph`, and `inspect query build` evaluate the
-selected package's checked `fn build` in one invocation-owned context. They
+selected package's checked `build: fn` in one invocation-owned context. They
 finish and validate its graph without executing actions or publishing generated
 files. An absent root build entry reports the default pipeline (`build: null`
 in the `inspect.build` status envelope), not an invented empty BuildPlan.
@@ -628,7 +628,7 @@ are not treated as missing. Existing manifests and source files retain their
 checked handles and are revalidated before invoking the compiler.
 
 `jet build` writes `.jet/build/<stem>` in that source root. Every profile uses
-the Jet-native backend: the IR builder builds the functions `fn run` reaches,
+the Jet-native backend: the IR builder builds the functions `run: fn` reaches,
 x86-64 selection compiles them to a relocatable object, and the in-process
 linker binds it to the runtime pack shipped beside `jet` into a static x86-64
 executable. The default build is O1; `--release` (or `--profile release`) is
@@ -698,7 +698,7 @@ Before `jet build` or `jet run` writes anything, the Jet host checks the
 application authority ([`Authority.jet`](../../../Compiler/JetCli/Source/Cli/Authority.jet)):
 the checked entry's solved effect row against the beginner floor (`IO`,
 `Mem.Alloc`, `Exec.Args`), the entry package's `authority` (from
-`package.jet` or the entry's leading inline `package { … }` block, which the
+`package.jet` or the entry's leading inline `package: { … }` block, which the
 Jet loader reads with the same field parser and masks before parsing), and the
 `--allow=`/`--deny=` rows of the invocation, where `-A` allows every right and
 a script (a file whose first line is a `#!/...` launch line) answers as `-A`
@@ -709,8 +709,8 @@ receipts, and lint-policy enforcement are not ported yet: the Jet host always
 answers as a non-interactive run.
 
 `jet doc --check [<file.jet|dir>]` exits 1 when a public API item has no `///`
-summary (L2201). Command entries are not library API: a module-level `fn run`,
-`fn build`, `fn test` or `fn dev` (a `#CLI` program's entry is its `fn run`)
+summary (L2201). Command entries are not library API: a module-level `run: fn`,
+`build: fn`, `test: fn` or `dev: fn` (a `#CLI` program's entry is its `run: fn`)
 and a `#Job fn` are exempt, in a loose script and a package alike.
 
 `jet test <file> [<filter>]` compiles the file in test mode: each named
@@ -737,11 +737,11 @@ Each test setting (D-TEST-INVOKE1=A, the `JET_TEST_SETTINGS` table in
 `Compiler/JetFoundation/Source/Registry/TestSettings.jet`) has three
 spellings from one row: the flag `--shard=3/8`, the TestProfile field
 `shard: 3/8` and the call `t.shard(3, 8)` on the `Test` value of test.jet's
-`fn test`. The layers are the selected test profile, then `fn test`, then the
-flags, each replacing the earlier; `jet test` runs `fn test` once in a plan
+`test: fn`. The layers are the selected test profile, then `test: fn`, then the
+flags, each replacing the earlier; `jet test` runs `test: fn` once in a plan
 step (the harness runs no test while `JET_TEST_PLAN` names the plan file)
 before any test runs, and prints the settings it used and the layer each came
-from whenever a profile or `fn test` wrote one. The settings are `fresh`,
+from whenever a profile or `test: fn` wrote one. The settings are `fresh`,
 `docs`, `filter`, `capture`, `update_snapshots` (`-u`), `shuffle=<seed>`,
 `serial`, `measure`, `trace_tiers`, `optimize=<levels>` (one run per level
 when it lists more than one), `time_limit=<duration>`, `opt_in`,
@@ -764,7 +764,7 @@ a shard beside `-u`, a shard outside `1 <= i <= n`, `jobs`, `memory`,
 `diagnostic_coverage` in a profile with no ui suite, a
 `cases` file that can't be read and a `results` file that can't be written are
 refused with E2104 before any test runs, as is a `t.<setting>(…)` call that
-`fn test` makes after `t.run()`. A child run gets the decided settings in
+`test: fn` makes after `t.run()`. A child run gets the decided settings in
 `JET_TEST_SETTINGS` and decides nothing again; the parent keeps `compiler`,
 `optimize`, `results` and the corpus-pool settings.
 It also honors
@@ -778,7 +778,7 @@ unless `--profile` names one. It prints one record per claim, as a `measure
 NAME:` line or, with `--json`, as one JSON object line with the same fields.
 It also evaluates the claim's `.Test(name)` budgets against that record
 (D-CLAIM-BENCH1). A directory target (or none, inside a package) tests the
-package through its own `fn test(t: Test)` when it declares one, else through
+package through its own `test: fn(t: Test)` when it declares one, else through
 its stock entry. At a workspace root, each member
 that can run `jet test` runs as its own child `jet test <member>` with the
 same flags, one child per core, fewer while free memory can't hold 1 GiB for
@@ -888,9 +888,9 @@ its E1215 manifest diagnostic, and a layout the model declines (authored
 comments) is left as written. `--changed` formats the `.jet` files git reports
 changed against `HEAD` or staged (exit 2 outside a git worktree).
 Ordinary-source formatting preserves declaration meaning: a raw
-`#Import(c) fn name(args) -> T = "symbol"` retains its symbol assignment
+`#Import(c) name: fn(args) -> T = "symbol"` retains its symbol assignment
 (also when the result type is omitted or other attributes are present), and
-module bindings retain `:=` for mutable values and `::` for immutable ones.
+module bindings retain `:=` for mutable values and `:` for immutable ones.
 These are not `--simplify` rewrites.
 `--explicit-copies` checks each file, then writes `.copy()` at every implicit copy
 site: the Safe `.copy()` edits sema gives the same source under
@@ -1133,7 +1133,7 @@ static key, so it cannot serve as a native artifact cache identity. A compile
 observation never stamps an unexecuted check or link action.
 
 Decision inspection builds the checked program into the slot IR from its
-`fn run` and runs the IR optimizer at the level `jet build` uses: O1, or O2
+`run: fn` and runs the IR optimizer at the level `jet build` uses: O1, or O2
 under `--release` or the `release`/`hardened` profiles. It reports what the
 passes changed (instructions before and after, inlined and direct calls, folds,
 fused compares, short circuits branched, coalesced copies, removed dead and unreachable code, scalar
@@ -1235,7 +1235,7 @@ retained. Receipt consumers must not substitute all authorized sources for
 that missing read set.
 
 Checked build-input HTTP fetches use a build-only transport, not the ordinary
-comptime host adapter. The selected `fn build` must explicitly declare both
+comptime host adapter. The selected `build: fn` must explicitly declare both
 `Net` and `Time.Wait`. Jet checks every DNS answer against the existing public
 destination rule (including IPv4-mapped IPv6) and passes only that checked answer
 set to the connection leaf. The leaf performs no second DNS lookup and retains

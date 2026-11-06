@@ -1,13 +1,13 @@
 
 use {
-    encoding :: core.encoding
-    cbor :: core.encoding.cbor
+    encoding: core.encoding
+    cbor: core.encoding.cbor
 }
 
 #Codable
-struct Packet { name: String, data: [U8] }
+Packet: struct { name: String, data: [U8] }
 
-fn run() {
+run: fn() {
     array := [Int]{ cbor.decode<[Int]>([159, 1, 2, 255]) ?? panic("indefinite array") }
     text := cbor.parse([127, 97, 97, 98, 98, 99, 255]) ?? panic("indefinite text")
     print(array)

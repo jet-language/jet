@@ -5,23 +5,23 @@ use {
     jet_foundation.[Span, TextEdit]
 }
 
-fn fix_require(ok: Bool, detail: String) Never! {
+fix_require: fn(ok: Bool, detail: String) Never! {
     if !ok -> panic("FixEngine: {detail}")
 }
 #Test("fix_engine") {
-    unchanged :: jet_driver_apply_edits("abc", [TextEdit]{}) ?? panic("empty edits")
+    unchanged: jet_driver_apply_edits("abc", [TextEdit]{}) ?? panic("empty edits")
     fix_require(unchanged == "abc", "empty edits preserve bytes")
-    inserted :: jet_driver_apply_edits("abc", [TextEdit]{
+    inserted: jet_driver_apply_edits("abc", [TextEdit]{
         TextEdit{span: Span{start: 1, end: 1}, new_text: "first"},
         TextEdit{span: Span{start: 1, end: 1}, new_text: "second"},
     }) ?? panic("same-point inserts")
     fix_require(inserted == "afirstsecondbc", "stable insertion order")
-    replaced :: jet_driver_apply_edits("héllo", [TextEdit]{
+    replaced: jet_driver_apply_edits("héllo", [TextEdit]{
         TextEdit{span: Span{start: 5, end: 6}, new_text: "!"},
         TextEdit{span: Span{start: 1, end: 3}, new_text: "e"},
     }) ?? panic("ordered UTF-8 replacement")
     fix_require(replaced == "hell!", "original UTF-8 byte spans, source order")
-    clamped :: jet_driver_apply_edits("abc", [TextEdit]{TextEdit{span: Span{start: 10, end: 20}, new_text: "!"}}) ?? panic("clamped edit")
+    clamped: jet_driver_apply_edits("abc", [TextEdit]{TextEdit{span: Span{start: 10, end: 20}, new_text: "!"}}) ?? panic("clamped edit")
     fix_require(clamped == "abc!", "out-of-bounds insertion clamps once")
     overlap := false
     if jet_driver_apply_edits("abc", [TextEdit]{

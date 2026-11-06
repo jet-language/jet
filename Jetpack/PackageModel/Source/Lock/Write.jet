@@ -4,7 +4,7 @@
 use jet_foundation.[jet_ring_layer_name]
 
 // Render `lock` as canonical lock text.
-fn pkg_lock_write(input: LockFile) -> String Never! {
+pkg_lock_write: fn(input: LockFile) -> String Never! {
     lock := input
     pkg_lock_canonicalize(&lock)
     out := [String]{}
@@ -102,7 +102,7 @@ fn pkg_lock_write(input: LockFile) -> String Never! {
     out.join("")
 }
 
-fn pkg_lock_write_package(out: &[String], package: LockedPackage) Never! {
+pkg_lock_write_package: fn(out: &[String], package: LockedPackage) Never! {
     &out.push("\n[[package]]\n")
     &out.push(pkg_lock_string_field("name", package.name))
     &out.push(pkg_lock_string_field("version", package.version))
@@ -133,8 +133,8 @@ fn pkg_lock_write_package(out: &[String], package: LockedPackage) Never! {
     // Per-dependency effect provenance and audited grants.
     if package.effects.len() > 0 -> &out.push("effects = {pkg_lock_string_array(package.effects)}\n")
     if package.effect_grants.len() > 0 -> &out.push("effect-grants = {pkg_lock_string_array(package.effect_grants)}\n")
-    required :: package.required_effect_roles()
-    granted :: package.granted_effect_roles()
+    required: package.required_effect_roles()
+    granted: package.granted_effect_roles()
     if required.len() > 0 -> &out.push("required-effects = {pkg_lock_string_array(required)}\n")
     if granted.len() > 0 -> &out.push("granted-effects = {pkg_lock_string_array(granted)}\n")
     if package.denied_effects.len() > 0 -> &out.push("denied-effects = {pkg_lock_string_array(package.denied_effects)}\n")
@@ -173,7 +173,7 @@ fn pkg_lock_write_package(out: &[String], package: LockedPackage) Never! {
 
 // The inline table written for `source = …`. Git selectors are stored
 // pre-rendered (`tag = "…"`) and written verbatim.
-fn pkg_lock_source_value(source: LockSource) -> String Never! {
+pkg_lock_source_value: fn(source: LockSource) -> String Never! {
     if source == {
         .Root -> "{{ root = \".\" }}"
         .Path(path) -> "{{ path = \"{pkg_lock_escape(path)}\" }}"
@@ -186,7 +186,7 @@ fn pkg_lock_source_value(source: LockSource) -> String Never! {
     }
 }
 
-fn pkg_lock_write_nix_closure(out: &[String], closure: NixClosureRecord) Never! {
+pkg_lock_write_nix_closure: fn(out: &[String], closure: NixClosureRecord) Never! {
     &out.push(pkg_lock_string_field("nix-channel", closure.channel))
     &out.push(pkg_lock_string_field("nix-revision", closure.revision))
     &out.push(pkg_lock_string_field("nix-system", closure.system))
@@ -205,7 +205,7 @@ fn pkg_lock_write_nix_closure(out: &[String], closure: NixClosureRecord) Never! 
 // (A4): the envelope field set shared by `[[package]]`,
 // `[[toolchain]]`, and `[[browser]]` blocks. `output-hash`, `platform`, and
 // `provenance` are always emitted; the other slots only when filled.
-fn pkg_lock_write_envelope(out: &[String], envelope: LockEnvelope) Never! {
+pkg_lock_write_envelope: fn(out: &[String], envelope: LockEnvelope) Never! {
     &out.push(pkg_lock_string_field("output-hash", envelope.output_hash))
     &out.push(pkg_lock_string_field("platform", envelope.platform))
     if envelope.signature != "" -> &out.push(pkg_lock_string_field("signature", envelope.signature))
@@ -214,7 +214,7 @@ fn pkg_lock_write_envelope(out: &[String], envelope: LockEnvelope) Never! {
     &out.push(pkg_lock_string_field("provenance", envelope.provenance))
 }
 
-fn pkg_lock_write_workspace_overlay_policy(out: &[String], policy: OverlayPolicy) Never! {
+pkg_lock_write_workspace_overlay_policy: fn(out: &[String], policy: OverlayPolicy) Never! {
     if policy.allow_unfree.len() > 0 -> &out.push("workspace_policy_allow_unfree = {pkg_lock_string_array(policy.allow_unfree)}\n")
     if policy.build_deny.len() > 0 -> &out.push("workspace_policy_build_deny = {pkg_lock_string_array(policy.build_deny)}\n")
     loop grant in policy.build_grants {
@@ -269,7 +269,7 @@ fn pkg_lock_write_workspace_overlay_policy(out: &[String], policy: OverlayPolicy
 }
 
 // The manifest-shaped `authority = { … }` value.
-fn pkg_lock_authority_value(authority: PackageAuthority) -> String Never! {
+pkg_lock_authority_value: fn(authority: PackageAuthority) -> String Never! {
     fields := [String]{}
 
     if authority.allow == {
@@ -328,7 +328,7 @@ fn pkg_lock_authority_value(authority: PackageAuthority) -> String Never! {
     "{{ {fields.join(", ")} }}"
 }
 
-fn pkg_lock_trust_decision(decision: TrustDecision) -> String Never! {
+pkg_lock_trust_decision: fn(decision: TrustDecision) -> String Never! {
     if decision == {
         .Allow -> "allow"
         .Prompt -> "prompt"
@@ -339,7 +339,7 @@ fn pkg_lock_trust_decision(decision: TrustDecision) -> String Never! {
 // Normalize the model before every serialization. Lock updates are read,
 // changed, and rewritten; a canonical boundary makes a replayed record
 // replace its prior identity.
-fn pkg_lock_canonicalize(lock: &LockFile) Never! {
+pkg_lock_canonicalize: fn(lock: &LockFile) Never! {
     lock.root_dependencies = pkg_overlay_sorted_unique(lock.root_dependencies)
     loop index in 0..<lock.packages.len() {
         package := lock.packages[index]
@@ -378,7 +378,7 @@ fn pkg_lock_canonicalize(lock: &LockFile) Never! {
 
 // Keep one package per name at the position of its first record, holding
 // the last record's value.
-fn pkg_lock_last_by_name_in_order(values: [LockedPackage]) -> [LockedPackage] Never! {
+pkg_lock_last_by_name_in_order: fn(values: [LockedPackage]) -> [LockedPackage] Never! {
     positions := [String: Int]{}
     canonical := [LockedPackage]{}
     loop value in values {
@@ -394,7 +394,7 @@ fn pkg_lock_last_by_name_in_order(values: [LockedPackage]) -> [LockedPackage] Ne
 }
 
 // Keep the last record per name, ordered by name.
-fn pkg_lock_last_members(values: [LockedWorkspaceMember]) -> [LockedWorkspaceMember] Never! {
+pkg_lock_last_members: fn(values: [LockedWorkspaceMember]) -> [LockedWorkspaceMember] Never! {
     by_key := [String: LockedWorkspaceMember]{}
     loop value in values -> by_key[value.name] = value
     out := [LockedWorkspaceMember]{}
@@ -403,7 +403,7 @@ fn pkg_lock_last_members(values: [LockedWorkspaceMember]) -> [LockedWorkspaceMem
 }
 
 // Keep the last toolchain per id, ordered by id.
-fn pkg_lock_last_toolchains(values: [LockedToolchain]) -> [LockedToolchain] Never! {
+pkg_lock_last_toolchains: fn(values: [LockedToolchain]) -> [LockedToolchain] Never! {
     by_key := [String: LockedToolchain]{}
     loop value in values -> by_key[value.id] = value
     out := [LockedToolchain]{}
@@ -412,7 +412,7 @@ fn pkg_lock_last_toolchains(values: [LockedToolchain]) -> [LockedToolchain] Neve
 }
 
 // Keep the last browser per engine, ordered by engine.
-fn pkg_lock_last_browsers(values: [LockedBrowser]) -> [LockedBrowser] Never! {
+pkg_lock_last_browsers: fn(values: [LockedBrowser]) -> [LockedBrowser] Never! {
     by_key := [String: LockedBrowser]{}
     loop value in values -> by_key[value.engine] = value
     out := [LockedBrowser]{}
@@ -421,7 +421,7 @@ fn pkg_lock_last_browsers(values: [LockedBrowser]) -> [LockedBrowser] Never! {
 }
 
 // Keep the last source channel per name, ordered by name.
-fn pkg_lock_last_source_channels(values: [LockedSourceChannel]) -> [LockedSourceChannel] Never! {
+pkg_lock_last_source_channels: fn(values: [LockedSourceChannel]) -> [LockedSourceChannel] Never! {
     by_key := [String: LockedSourceChannel]{}
     loop value in values -> by_key[value.name] = value
     out := [LockedSourceChannel]{}
@@ -430,7 +430,7 @@ fn pkg_lock_last_source_channels(values: [LockedSourceChannel]) -> [LockedSource
 }
 
 // Keep the last comptime input per path, ordered by path.
-fn pkg_lock_last_comptime_inputs(values: [ComptimeInput]) -> [ComptimeInput] Never! {
+pkg_lock_last_comptime_inputs: fn(values: [ComptimeInput]) -> [ComptimeInput] Never! {
     by_key := [String: ComptimeInput]{}
     loop value in values -> by_key[value.path] = value
     out := [ComptimeInput]{}
@@ -438,7 +438,7 @@ fn pkg_lock_last_comptime_inputs(values: [ComptimeInput]) -> [ComptimeInput] Nev
     out
 }
 
-fn pkg_lock_sorted_keys(keys: [String]) -> [String] Never! {
+pkg_lock_sorted_keys: fn(keys: [String]) -> [String] Never! {
     sorted := keys
     &sorted.sort()
     sorted
@@ -446,7 +446,7 @@ fn pkg_lock_sorted_keys(keys: [String]) -> [String] Never! {
 
 // Build contributions ordered by (package, key, layer, scope, source, value,
 // reason): stable passes from the least significant field.
-fn pkg_lock_sorted_contributions(values: [LockedBuildContribution]) -> [LockedBuildContribution] Never! {
+pkg_lock_sorted_contributions: fn(values: [LockedBuildContribution]) -> [LockedBuildContribution] Never! {
     sorted := values
     sorted = loop fresh_item in sorted -> fresh_item
     &sorted.sort_by(record -> record.reason)
@@ -466,7 +466,7 @@ fn pkg_lock_sorted_contributions(values: [LockedBuildContribution]) -> [LockedBu
 }
 
 // Drop consecutive equal records.
-fn pkg_lock_dedup_contributions(values: [LockedBuildContribution]) -> [LockedBuildContribution] Never! {
+pkg_lock_dedup_contributions: fn(values: [LockedBuildContribution]) -> [LockedBuildContribution] Never! {
     out := [LockedBuildContribution]{}
     loop value in values {
         if out.len() > 0 && out[out.len() - 1] == value -> next
@@ -476,7 +476,7 @@ fn pkg_lock_dedup_contributions(values: [LockedBuildContribution]) -> [LockedBui
 }
 
 // Comptime inputs ordered by (path, hash).
-fn pkg_lock_sorted_comptime_inputs(values: [ComptimeInput]) -> [ComptimeInput] Never! {
+pkg_lock_sorted_comptime_inputs: fn(values: [ComptimeInput]) -> [ComptimeInput] Never! {
     sorted := values
     sorted = loop fresh_item in sorted -> fresh_item
     &sorted.sort_by(input -> input.hash)
@@ -486,7 +486,7 @@ fn pkg_lock_sorted_comptime_inputs(values: [ComptimeInput]) -> [ComptimeInput] N
 }
 
 // Drop consecutive equal comptime inputs.
-fn pkg_lock_dedup_comptime_inputs(values: [ComptimeInput]) -> [ComptimeInput] Never! {
+pkg_lock_dedup_comptime_inputs: fn(values: [ComptimeInput]) -> [ComptimeInput] Never! {
     out := [ComptimeInput]{}
     loop value in values {
         if out.len() > 0 && out[out.len() - 1] == value -> next
@@ -495,21 +495,21 @@ fn pkg_lock_dedup_comptime_inputs(values: [ComptimeInput]) -> [ComptimeInput] Ne
     out
 }
 
-fn pkg_lock_string_field(key: String, value: String) -> String Never! {
+pkg_lock_string_field: fn(key: String, value: String) -> String Never! {
     "{key} = \"{pkg_lock_escape(value)}\"\n"
 }
 
-fn pkg_lock_string_array(values: [String]) -> String Never! {
+pkg_lock_string_array: fn(values: [String]) -> String Never! {
     quoted := [String]{}
     loop value in values -> &quoted.push("\"{pkg_lock_escape(value)}\"")
     "[{quoted.join(", ")}]"
 }
 
-fn pkg_lock_bool(value: Bool) -> String Never! {
+pkg_lock_bool: fn(value: Bool) -> String Never! {
     if value -> "true" else -> "false"
 }
 
 // Backslash, quote, newline, carriage return, and tab escapes.
-fn pkg_lock_escape(value: String) -> String Never! {
+pkg_lock_escape: fn(value: String) -> String Never! {
     value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace(pkg_lock_carriage_return(), "\\r").replace("\t", "\\t")
 }

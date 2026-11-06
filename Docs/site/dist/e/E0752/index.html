@@ -38,10 +38,10 @@
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0752</code>: <code>tests/ui/atomic_inside_transact.stderr</code>.</p>
 <pre class="diag">Error [jet.AtomicInsideTransaction]: `Atomic` cannot be used inside `#Transact`
-  --&gt; tests/ui/atomic_inside_transact.jet:5:22
+  --&gt; tests/ui/atomic_inside_transact.jet:5:20
     |
-  5 |         _ :: counter.add(1)
-    |                      ^^^
+  5 |         _: counter.add(1)
+    |                    ^^^
  Why: `Shared&lt;T&gt;` is the lock-guarded family for multi-value transactions; `Atomic&lt;T&gt;` is one lock-free scalar and has no transaction commit semantics
  Fix: Move the atomic operation outside `#Transact`, or use `Shared&lt;T&gt;` when several values must commit together
 More: jet-lang.dev/e/E0752

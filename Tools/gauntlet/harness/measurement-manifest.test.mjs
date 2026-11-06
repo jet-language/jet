@@ -767,7 +767,7 @@ test("measurement manifest covers every corpus entry and source pair", async () 
   const project = generateBuildSystemProject();
   assert.deepEqual(buildSystem.project.edit_files, EDIT_FILES);
   for (const file of Object.values(EDIT_FILES)) assert.equal(typeof project[file], "string", `${file}: not generated`);
-  assert.ok(project["jet/@build.jet"].includes("fn build(b: Build)"));
+  assert.ok(project["jet/@build.jet"].includes("build: fn(b: Build)"));
   assert.ok(project["nix/flake.nix"].includes("stdenv.mkDerivation"));
 
   const matrix = JSON.parse(await fs.readFile(matrixPath, "utf8"));

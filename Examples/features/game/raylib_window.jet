@@ -1,4 +1,4 @@
-package {
+package: {
     name: "devtools_dogfood"
     authority: {
     allow: [IO, GPU, Mem.Alloc]
@@ -7,14 +7,14 @@ package {
 // D-FLAGSHIP-RAYLIB1=A + D-GAME-LOOP1=A: typed `core.game.raylib` bridge with a
 // real frame loop, keyboard input, and audio play. Headless by default; set
 // JET_RAYLIB_DISPLAY=1 with raylib installed to open a native window.
-use rl :: core.game.raylib
+use rl: core.game.raylib
 
-fn run() {
-    window :: rl.window_open(640, 480, "Jet raylib")
+run: fn() {
+    window: rl.window_open(640, 480, "Jet raylib")
     rl.set_target_fps(60)
-    dark :: rl.color(20, 24, 32, 255)
-    white :: rl.color(245, 245, 245, 255)
-    blip :: rl.load_sound("assets/jump.wav")
+    dark: rl.color(20, 24, 32, 255)
+    white: rl.color(245, 245, 245, 255)
+    blip: rl.load_sound("assets/jump.wav")
     frames := 0
     last_space := false
     audio_ok := false
@@ -22,7 +22,7 @@ fn run() {
         // Headless: window_should_close is true immediately, so draw one frame
         // then exit. Native: keep looping until the user closes the window.
         if frames > 0 && rl.window_should_close(window) -> break
-        space :: rl.key_down("Space")
+        space: rl.key_down("Space")
         last_space = space
         if space -> audio_ok = rl.play_sound(blip)
         rl.begin_drawing(window)

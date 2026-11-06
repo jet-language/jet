@@ -8,71 +8,71 @@
 // Registry/EffectVocabulary.jet carries it to the compiler), so an effect
 // exists exactly when it is written here. The types' order is the canonical
 // order of a written effect row.
-// `fn irreversible(self) -> Bool` says which effects a `#Transact` rollback
+// `irreversible: fn(self) -> Bool` says which effects a `#Transact` rollback
 // can't take back; a family is irreversible when any of its cases is.
 // `Panic`, `Mem` and `Time.Wait` are deny-only: a policy may refuse them but
 // never has to grant them.
 
-struct Net {
+Net: struct {
     impl Effect {
-        fn irreversible(self) -> Bool { true }
+        irreversible: fn(self) -> Bool { true }
     }
 }
 
-enum FS {
+FS: enum {
     Read
     Write
 
     impl Effect {
-        fn irreversible(self) -> Bool { self == .Write }
+        irreversible: fn(self) -> Bool { self == .Write }
     }
 }
 
-struct IO {
+IO: struct {
     impl Effect {}
 }
 
-enum DB {
+DB: enum {
     Read
     Write
 
     impl Effect {}
 }
 
-enum Time {
+Time: enum {
     Wait
 
     impl Effect {}
 }
 
-enum Rand {
+Rand: enum {
     Draw
 
     impl Effect {}
 }
 
-struct Env {
+Env: struct {
     impl Effect {}
 }
 
-enum Exec {
+Exec: enum {
     Exit
     Args
 
     impl Effect {
-        fn irreversible(self) -> Bool { true }
+        irreversible: fn(self) -> Bool { true }
     }
 }
 
-struct Log {
+Log: struct {
     impl Effect {}
 }
 
-struct GPU {
+GPU: struct {
     impl Effect {}
 }
 
-enum FFI {
+FFI: enum {
     Go
     Java
     DotNet
@@ -96,23 +96,23 @@ enum FFI {
     Octave
 
     impl Effect {
-        fn irreversible(self) -> Bool { true }
+        irreversible: fn(self) -> Bool { true }
     }
 }
 
-struct Browser {
+Browser: struct {
     impl Effect {}
 }
 
-struct Secret {
+Secret: struct {
     impl Effect {}
 }
 
-struct Panic {
+Panic: struct {
     impl Effect {}
 }
 
-enum Mem {
+Mem: enum {
     Alloc
     Rc
 

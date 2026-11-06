@@ -34,14 +34,14 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">A value tag must name a declared `tag`; Prelude declares `Input`, `PII`, `Secret`, and `Credential`.</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Declare it with `tag {tag} { deny: [Effect] }`, check the spelling, or use the suggested tag.</p>
+<p class="diag-copy fix" data-registry-field="fix">Declare it with `{tag}: tag { deny: [Effect] }`, check the spelling, or use the suggested tag.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0733</code>: <code>tests/ui/undeclared_value_tag.stderr</code>.</p>
 <pre class="diag">Error [jet.UnknownTag]: There&#39;s no tag called `Sanitizd`
-  --&gt; tests/ui/undeclared_value_tag.jet:3:17
+  --&gt; tests/ui/undeclared_value_tag.jet:3:18
     |
-  3 | fn clean(input: #Sanitizd String) -&gt; String { input.copy() }
-    |                 ^^^^^^^^^^^^^^^^
+  3 | clean: fn(input: #Sanitizd String) -&gt; String { input.copy() }
+    |                  ^^^^^^^^^^^^^^^^
  Why: A value tag must name a declared `tag`
  Fix: Did you mean `Sanitized`?
 More: jet-lang.dev/e/E0733

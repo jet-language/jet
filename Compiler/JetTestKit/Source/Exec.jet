@@ -1,25 +1,25 @@
 use {
-    process :: core.process
-    files :: core.files
-    sys :: core.sys
-    time :: core.time
+    process: core.process
+    files: core.files
+    sys: core.sys
+    time: core.time
 }
 
 // A step that runs longer than a minute declares its own `limit: time=`.
-fn kit_exec_defaults() -> KitOptions {
+kit_exec_defaults: fn() -> KitOptions {
     KitOptions{suite: "golden", jet: sys.get("JET") ?? "", jetpack: "", tiers: ["o0", "o1", "o2"], filter: "", cases: "", shard_index: 1, shard_count: 1, sharded: false, timeout: 60, scratch: "", results: "", list: false, coverage: false, bless: KitBless{ids: [], all: false, reason: "", allow_shrink: [], first_tier: true}, error: ""}
 }
 
 
 // The corpus ids `options` selects of `all_ids`. A `cases` file names only
 // corpus ids, unless others_selected lets it name the run's other tests too.
-fn kit_exec_select_ids(all_ids: [String], options: KitOptions) -> KitSelection {
+kit_exec_select_ids: fn(all_ids: [String], options: KitOptions) -> KitSelection {
     requested := [String]{}
-    listed :: options.cases != ""
+    listed: options.cases != ""
     if listed {
-        text :: files.read(options.cases) ?? return KitSelection{ids: [], error: "read cases file: {err}"}
+        text: files.read(options.cases) ?? return KitSelection{ids: [], error: "read cases file: {err}"}
         loop raw in text.split("\n") {
-            id :: raw.trim().copy()
+            id: raw.trim().copy()
             if id == "" || id.starts_with("#") -> next
             if kit_expect_named(requested, id) -> return KitSelection{ids: [], error: "duplicate case ID: {id}"}
             if !kit_expect_named(all_ids, id) {
@@ -46,26 +46,26 @@ fn kit_exec_select_ids(all_ids: [String], options: KitOptions) -> KitSelection {
     KitSelection{ids: selected, error: ""}
 }
 
-fn kit_exec_failed(message: String) -> KitRun {
+kit_exec_failed: fn(message: String) -> KitRun {
     KitRun{stdout: "", stderr: "", code: -1, signal: None, timed_out: false, error: message}
 }
 
-fn kit_exec_refused(message: String) -> KitRun {
+kit_exec_refused: fn(message: String) -> KitRun {
     KitRun{stdout: "", stderr: "", code: -1, signal: None, timed_out: false, error: message, refused: true}
 }
 
 // Each case's children get a home of their own under its scratch: HOME,
 // JET_HOME and the XDG roots, so no case reads or writes the invoking user's
 // ~/.jet, configuration or caches.
-fn kit_exec_home(scratch: String) -> String { files.join(scratch, "home") }
+kit_exec_home: fn(scratch: String) -> String { files.join(scratch, "home") }
 
 // The invoking user's home from the password database; HOME only when the
 // database has no row for this user, and "" when neither is known.
-fn kit_exec_user_home() -> String {
-    uid :: "{sys.getuid()}"
+kit_exec_user_home: fn() -> String {
+    uid: "{sys.getuid()}"
     if files.read("/etc/passwd") == .Ok(text) {
         loop line in text.split("\n") {
-            fields :: line.split(":").to_list()
+            fields: line.split(":").to_list()
             if fields.len() >= 6 && fields[2] == uid -> return fields[5].copy()
         }
     }
@@ -74,30 +74,30 @@ fn kit_exec_user_home() -> String {
 
 // `value` resolved from `cwd`, through its symbolic links; a path that does
 // not exist yet resolves through its parent.
-fn kit_exec_resolved(value: String?, cwd: String) -> String? {
-    path :: value ?? return None
+kit_exec_resolved: fn(value: String?, cwd: String) -> String? {
+    path: value ?? return None
     if path == "" -> return None
-    absolute :: if path.starts_with("/") -> path.copy() else -> files.join(cwd, path)
+    absolute: if path.starts_with("/") -> path.copy() else -> files.join(cwd, path)
     if files.canonicalize(absolute) == .Ok(resolved) -> return Val(resolved)
-    parent :: files.canonicalize(files.dirname(absolute)) ?? return Val(absolute)
+    parent: files.canonicalize(files.dirname(absolute)) ?? return Val(absolute)
     Val(files.join(parent, files.basename(absolute)))
 }
 
 // A child whose HOME or JET_HOME is the invoking user's own would write that
 // user's ~/.jet; the kit refuses to start it and names why.
-fn kit_exec_home_refusal(env: KitEnv, cwd: String, scratch: String, overlay: [KitEnvVar]) -> String? {
-    user :: kit_exec_resolved(Val(kit_exec_user_home()), "/") ?? return None
+kit_exec_home_refusal: fn(env: KitEnv, cwd: String, scratch: String, overlay: [KitEnvVar]) -> String? {
+    user: kit_exec_resolved(Val(kit_exec_user_home()), "/") ?? return None
     if (kit_exec_resolved(kit_steps_env_value("HOME", env, scratch, overlay), cwd) ?? "") == user {
         return Val("refused: the child's HOME is the invoking user's home {user}")
     }
-    user_jet :: kit_exec_resolved(Val(files.join(user, ".jet")), "/") ?? return None
+    user_jet: kit_exec_resolved(Val(files.join(user, ".jet")), "/") ?? return None
     if (kit_exec_resolved(kit_steps_env_value("JET_HOME", env, scratch, overlay), cwd) ?? "") == user_jet {
         return Val("refused: the child's JET_HOME is the invoking user's {user_jet}")
     }
     None
 }
 
-fn kit_exec_base_value(name: String, env: KitEnv, scratch: String) -> String? {
+kit_exec_base_value: fn(name: String, env: KitEnv, scratch: String) -> String? {
     if env.env_clear -> return None
     if {
         name == "JET_COMPILER_EXTENSION" -> None
@@ -128,8 +128,8 @@ fn kit_exec_base_value(name: String, env: KitEnv, scratch: String) -> String? {
 // Inherit the caller's environment, removing only the compiler-extension hook.
 // Cache roots are run-wide; temporary, schema, jetpack and home roots are
 // case-local. Callers check kit_exec_home_refusal before spawning.
-fn kit_exec_spec(env: KitEnv, argv: [String], cwd: String, scratch: String, overlay: [KitEnvVar]) -> ProcessSpec {
-    commands :: if env.trace_node != "" && env.trace_case != "" -> {
+kit_exec_spec: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, overlay: [KitEnvVar]) -> ProcessSpec {
+    commands: if env.trace_node != "" && env.trace_case != "" -> {
         cache_override := kit_exec_base_value("JET_FFI_CACHE_DIR", env, scratch) ?? ""
         loop variable in overlay {
             if variable.name == "JET_FFI_CACHE_DIR" -> cache_override = variable.value ?? ""
@@ -176,15 +176,15 @@ fn kit_exec_spec(env: KitEnv, argv: [String], cwd: String, scratch: String, over
 
 // Refuses a child that would run in the invoking user's home and creates the
 // case's temporary and home directories: the run that stops the spawn, or None.
-fn kit_exec_prepare(env: KitEnv, cwd: String, scratch: String, overlay: [KitEnvVar]) -> KitRun? {
+kit_exec_prepare: fn(env: KitEnv, cwd: String, scratch: String, overlay: [KitEnvVar]) -> KitRun? {
     if kit_exec_home_refusal(env, cwd, scratch, overlay) == .Val(reason) -> return Val(kit_exec_refused(reason))
     files.create_dir_all(files.join(scratch, "tmp")) ?? return Val(kit_exec_failed("create child temp directory: {err}"))
     files.create_dir_all(kit_exec_home(scratch)) ?? return Val(kit_exec_failed("create child home directory: {err}"))
     None
 }
 
-fn kit_exec_receipt(receipt: ProcessReceipt, elapsed_ns: Int, input_error: String) -> KitRun {
-    limit_hit :: if receipt.limit_hit == {
+kit_exec_receipt: fn(receipt: ProcessReceipt, elapsed_ns: Int, input_error: String) -> KitRun {
+    limit_hit: if receipt.limit_hit == {
         .Val(limit) -> if limit == {
             .WallTime -> "time"
             .CpuTime -> "cpu"
@@ -201,7 +201,7 @@ fn kit_exec_receipt(receipt: ProcessReceipt, elapsed_ns: Int, input_error: Strin
 
 // A child that exits before reading its input breaks the pipe; name its exit
 // and first stderr line so the row shows why it stopped reading.
-fn kit_exec_input_detail(error: String, code: Int, errors: String) -> String {
+kit_exec_input_detail: fn(error: String, code: Int, errors: String) -> String {
     first := ""
     loop line in errors.lines() {
         if line.trim() == "" -> next
@@ -213,7 +213,7 @@ fn kit_exec_input_detail(error: String, code: Int, errors: String) -> String {
     "{error}; child exited {code} without reading it: {first}"
 }
 
-fn kit_exec_invoke_with_env(env: KitEnv, argv: [String], cwd: String, scratch: String, stdin: String, overlay: [KitEnvVar]) -> KitRun {
+kit_exec_invoke_with_env: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, stdin: String, overlay: [KitEnvVar]) -> KitRun {
     kit_exec_run(env, argv, cwd, scratch, stdin, overlay, None)
 }
 
@@ -221,18 +221,18 @@ fn kit_exec_invoke_with_env(env: KitEnv, argv: [String], cwd: String, scratch: S
 // stdout is the terminal transcript. `stdin` is typed at spawn and each event
 // at its time from spawn. Input never closes the terminal, which would hang
 // up the child; a close event types the end-of-file character instead.
-fn kit_exec_invoke_terminal(env: KitEnv, argv: [String], cwd: String, scratch: String, stdin: String, overlay: [KitEnvVar], terminal: KitTerminal) -> KitRun {
+kit_exec_invoke_terminal: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, stdin: String, overlay: [KitEnvVar], terminal: KitTerminal) -> KitRun {
     kit_exec_run(env, argv, cwd, scratch, stdin, overlay, Val(terminal))
 }
 
 // Events by time; events at the same time keep their line order.
-fn kit_exec_terminal_order(events: [KitTerminalEvent]) -> [KitTerminalEvent] {
+kit_exec_terminal_order: fn(events: [KitTerminalEvent]) -> [KitTerminalEvent] {
     ordered := [KitTerminalEvent]{}
     loop event in events {
         &ordered.push(event)
         position := ordered.len() - 1
         loop position > 0 && ordered[position - 1].at > ordered[position].at {
-            earlier :: ordered[position - 1]
+            earlier: ordered[position - 1]
             ordered[position - 1] = ordered[position]
             ordered[position] = earlier
             position -= 1
@@ -241,9 +241,9 @@ fn kit_exec_terminal_order(events: [KitTerminalEvent]) -> [KitTerminalEvent] {
     ordered
 }
 
-fn kit_exec_run(env: KitEnv, argv: [String], cwd: String, scratch: String, stdin: String, overlay: [KitEnvVar], terminal: KitTerminal?) -> KitRun {
+kit_exec_run: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, stdin: String, overlay: [KitEnvVar], terminal: KitTerminal?) -> KitRun {
     if kit_exec_prepare(env, cwd, scratch, overlay) == .Val(stopped) -> return stopped
-    started :: time.instant()
+    started: time.instant()
     spec := kit_exec_spec(env, argv, cwd, scratch, overlay)
     if terminal == .Val(shape) {
         spec = spec.terminal(TerminalPolicy{size: TerminalSize{cols: shape.cols, rows: shape.rows}, mode: .Cooked})
@@ -261,11 +261,11 @@ fn kit_exec_run(env: KitEnv, argv: [String], cwd: String, scratch: String, stdin
     }
     if terminal == {
         .Val(shape) -> {
-            eof :: String.from_bytes([U8{4}]) ?? panic("EOF character")
+            eof: String.from_bytes([U8{4}]) ?? panic("EOF character")
             loop event in kit_exec_terminal_order(shape.events) {
                 kit_exec_wait(child, &watched, started, event.at)
                 if event.kind == "resize" {
-                    session :: child.terminal ?? {
+                    session: child.terminal ?? {
                         if input_error == "" -> input_error = "terminal resize: no terminal session"
                         next
                     }
@@ -288,7 +288,7 @@ fn kit_exec_run(env: KitEnv, argv: [String], cwd: String, scratch: String, stdin
         .None -> child.stdin.close()
     }
     kit_exec_wait(child, &watched, started, -1)
-    receipt :: child.wait() ?? return kit_exec_failed("wait: {err}")
+    receipt: child.wait() ?? return kit_exec_failed("wait: {err}")
     if env.peaks != "" && watched.peak > 0 {
         files.append_all(env.peaks, "{watched.peak}\n").drop("a missing peak only loses one scheduling weight")
     }
@@ -302,12 +302,12 @@ fn kit_exec_run(env: KitEnv, argv: [String], cwd: String, scratch: String, stdin
 // memory meanwhile. A watcher task of its own would need a second scheduler
 // worker beside this waiting one: a pool whose workers all wait on watchers
 // that never get a worker stops.
-fn kit_exec_wait(child: ProcessChild, watched: &KitResident, started: time.Instant, until: Int) {
+kit_exec_wait: fn(child: ProcessChild, watched: &KitResident, started: time.Instant, until: Int) {
     pause := 1
     loop {
-        at :: started.elapsed().ns
+        at: started.elapsed().ns
         if until >= 0 && at >= until -> return
-        exited :: child.exited() ?? return
+        exited: child.exited() ?? return
         if exited -> return
         kit_exec_watch_resident(&watched, at)
         time.sleep(if until >= 0 && until - at < pause * 1000000 -> time.duration_ns(until - at) else -> time.duration_ms(pause))
@@ -319,7 +319,7 @@ fn kit_exec_wait(child: ProcessChild, watched: &KitResident, started: time.Insta
 // its limit in bytes, whether it counts the child's live descendants (`tree`),
 // when it samples next in ns after spawn, whether it stopped the child, and
 // the largest resident size it sampled, in bytes.
-struct KitResident {
+KitResident: struct {
     pid: Int
     limit: Int
     tree: Bool
@@ -334,11 +334,11 @@ struct KitResident {
 // the child above `limit` bytes. Under `tree` (a case's `limit: resident=`) it
 // sums the child and its live descendants and kills them all. A case's
 // `limit: memory=` keeps Core memory_limit.
-fn kit_exec_watch_resident(watched: &KitResident, at: Int) Never! {
+kit_exec_watch_resident: fn(watched: &KitResident, at: Int) Never! {
     if watched.pid <= 0 || watched.killed || at < watched.due -> return
     watched.due = at + 100000000
     pids := [Int]{}
-    used :: kit_exec_tree_resident(watched.pid, watched.tree, &pids)
+    used: kit_exec_tree_resident(watched.pid, watched.tree, &pids)
     if pids.len() == 0 -> return
     if used > watched.peak -> watched.peak = used
     if used <= watched.limit -> return
@@ -354,22 +354,22 @@ fn kit_exec_watch_resident(watched: &KitResident, at: Int) Never! {
 // The resident bytes of `pid`, plus under `tree` those of its live descendants
 // (`/proc/<pid>/task/<tid>/children`); `pids` lists every process counted,
 // none when `pid` itself is gone.
-fn kit_exec_tree_resident(pid: Int, tree: Bool, pids: &[Int]) -> Int Never! {
+kit_exec_tree_resident: fn(pid: Int, tree: Bool, pids: &[Int]) -> Int Never! {
     used := 0
     queue := [Int]{pid}
     at := 0
     loop at < queue.len() {
-        current :: queue[at]
+        current: queue[at]
         at += 1
-        status :: files.read("/proc/{current}/status") ?? next
+        status: files.read("/proc/{current}/status") ?? next
         used += kit_exec_resident_bytes(status)
         &pids.push(current)
         if !tree -> next
-        threads :: files.list_dir("/proc/{current}/task") ?? next
+        threads: files.list_dir("/proc/{current}/task") ?? next
         loop thread in threads {
-            children :: files.read(files.join(thread.path, "children")) ?? next
+            children: files.read(files.join(thread.path, "children")) ?? next
             loop word in children.split(" ") {
-                child :: Int.parse(word.trim().copy()) ?? next
+                child: Int.parse(word.trim().copy()) ?? next
                 &queue.push(child)
             }
         }
@@ -377,10 +377,10 @@ fn kit_exec_tree_resident(pid: Int, tree: Bool, pids: &[Int]) -> Int Never! {
     used
 }
 
-fn kit_exec_resident_bytes(status: String) -> Int { kit_exec_kib_field(status, "VmRSS:") }
+kit_exec_resident_bytes: fn(status: String) -> Int { kit_exec_kib_field(status, "VmRSS:") }
 
 // The byte value of a `/proc` "<field> <n> kB" row, or 0 when the row is absent.
-fn kit_exec_kib_field(text: String, field: String) -> Int {
+kit_exec_kib_field: fn(text: String, field: String) -> Int {
     loop line in text.split("\n") {
         if !line.starts_with(field) -> next
         loop value in line.slice(field.len(), line.len()).trim().split(" ") {
@@ -395,16 +395,16 @@ fn kit_exec_kib_field(text: String, field: String) -> Int {
 // memory.high and memory.max on the cgroup path this process runs in: a build-slot scope
 // caps its suites far below the host, and a pool sized from the host alone overruns the cap
 // and drives the machine into swap.
-fn kit_exec_available_memory() -> Int {
-    meminfo :: files.read("/proc/meminfo") ?? return 0
+kit_exec_available_memory: fn() -> Int {
+    meminfo: files.read("/proc/meminfo") ?? return 0
     available := kit_exec_host_room(kit_exec_kib_field(meminfo, "MemAvailable:"), kit_exec_kib_field(meminfo, "MemTotal:"))
-    membership :: files.read("/proc/self/cgroup") ?? return available
+    membership: files.read("/proc/self/cgroup") ?? return available
     prefix := ""
     loop part in kit_exec_cgroup_path(membership).split("/") {
         if part == "" -> next
         prefix = "{prefix}/{part}"
-        dir :: "/sys/fs/cgroup{prefix}"
-        current :: kit_exec_cgroup_value(files.read("{dir}/memory.current") ?? "")
+        dir: "/sys/fs/cgroup{prefix}"
+        current: kit_exec_cgroup_value(files.read("{dir}/memory.current") ?? "")
         available = kit_exec_room(available, kit_exec_cgroup_value(files.read("{dir}/memory.high") ?? ""), current)
         available = kit_exec_room(available, kit_exec_cgroup_value(files.read("{dir}/memory.max") ?? ""), current)
     }
@@ -412,7 +412,7 @@ fn kit_exec_available_memory() -> Int {
 }
 
 // The unified-hierarchy path in a /proc/self/cgroup listing (its `0::` row), or "".
-fn kit_exec_cgroup_path(membership: String) -> String {
+kit_exec_cgroup_path: fn(membership: String) -> String {
     loop line in membership.split("\n") {
         if line.starts_with("0::") -> return line.slice(3, line.len()).trim().copy()
     }
@@ -420,11 +420,11 @@ fn kit_exec_cgroup_path(membership: String) -> String {
 }
 
 // A cgroup memory file's byte count; 0 for `max`, an empty read or anything unreadable.
-fn kit_exec_cgroup_value(text: String) -> Int { Int.parse(text.trim().copy()) ?? 0 }
+kit_exec_cgroup_value: fn(text: String) -> Int { Int.parse(text.trim().copy()) ?? 0 }
 
 // `available` lowered to the room under `limit` once `current` is in use. A 0 limit is no
 // limit and a 0 `available` is unknown; a full cgroup leaves one byte, so the pool runs one.
-fn kit_exec_room(available: Int, limit: Int, current: Int) -> Int {
+kit_exec_room: fn(available: Int, limit: Int, current: Int) -> Int {
     if limit <= 0 -> return available
     room := limit - current
     if room < 1 -> room = 1
@@ -435,7 +435,7 @@ fn kit_exec_room(available: Int, limit: Int, current: Int) -> Int {
 // The host's MemAvailable `available` less the headroom the kit leaves the rest of the
 // machine: a tenth of MemTotal `total`, at least 1 GiB. 0 (unknown) stays 0; a host with
 // no room past the headroom leaves one byte, so the pool runs one entry.
-fn kit_exec_host_room(available: Int, total: Int) -> Int {
+kit_exec_host_room: fn(available: Int, total: Int) -> Int {
     if available <= 0 -> return 0
     headroom := total /% 10
     if headroom < 1073741824 -> headroom = 1073741824
@@ -443,11 +443,11 @@ fn kit_exec_host_room(available: Int, total: Int) -> Int {
     available - headroom
 }
 
-fn kit_exec_invoke(env: KitEnv, argv: [String], cwd: String, scratch: String, stdin: String) -> KitRun {
+kit_exec_invoke: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, stdin: String) -> KitRun {
     kit_exec_invoke_with_env(env, argv, cwd, scratch, stdin, [KitEnvVar]{})
 }
 
-fn kit_exec_process_failure(run: KitRun) -> KitVerdict? {
+kit_exec_process_failure: fn(run: KitRun) -> KitVerdict? {
     if run.refused -> return Val(kit_expect_verdict("REFUSED", run.error))
     if run.error != "" -> return Val(kit_expect_verdict("ERROR", run.error))
     if run.timed_out -> return Val(kit_expect_verdict("TIMEOUT", "wall-clock limit"))
@@ -457,23 +457,23 @@ fn kit_exec_process_failure(run: KitRun) -> KitVerdict? {
     None
 }
 
-fn kit_exec_write(path: String, contents: String) {
+kit_exec_write: fn(path: String, contents: String) {
     files.create_dir_all(files.dirname(path)) ?? panic("mkdir {path}: {err}")
     files.write(path, contents) ?? panic("write {path}: {err}")
 }
 
-fn kit_exec_copy_file(source: String, destination: String) {
-    bytes :: files.read_bytes(source) ?? panic("read {source}: {err}")
+kit_exec_copy_file: fn(source: String, destination: String) {
+    bytes: files.read_bytes(source) ?? panic("read {source}: {err}")
     files.create_dir_all(files.dirname(destination)) ?? panic("mkdir {destination}: {err}")
     files.write_bytes(destination, bytes) ?? panic("copy {source}: {err}")
-    info :: files.stat(source) ?? panic("stat {source}: {err}")
+    info: files.stat(source) ?? panic("stat {source}: {err}")
     files.chmod(destination, info.mode % 512) ?? panic("copy mode {source}: {err}")
 }
 
 // Case scratch may hold trees a tool made read-only on purpose (Hangar objects
 // and seals). Removal restores owner access on directories, never following a
 // link, then retries.
-fn kit_exec_remove_tree(path: String) -> Bool Err! {
+kit_exec_remove_tree: fn(path: String) -> Bool Err! {
     if files.remove_all(path) == .Ok(_) -> return Ok(true)
     kit_exec_make_writable(path)
     files.remove_all(path) ?? return Err("{err}")
@@ -483,17 +483,17 @@ fn kit_exec_remove_tree(path: String) -> Bool Err! {
 // A case's descendants that moved to a process group of their own outlive the
 // step that started them. Before its scratch goes, stop every process still
 // running an executable from that scratch or working inside it.
-fn kit_exec_stop_strays(scratch: String) {
+kit_exec_stop_strays: fn(scratch: String) {
     if sys.name() != "linux" -> return
-    root :: files.canonicalize(scratch) ?? return
-    inside :: "{root}/"
-    own :: process.current_pid()
-    entries :: files.list_dir("/proc") ?? return
+    root: files.canonicalize(scratch) ?? return
+    inside: "{root}/"
+    own: process.current_pid()
+    entries: files.list_dir("/proc") ?? return
     loop entry in entries {
-        pid :: Int.parse(files.basename(entry.path)) ?? next
+        pid: Int.parse(files.basename(entry.path)) ?? next
         if pid == own -> next
-        executable :: files.read_link("/proc/{pid}/exe") ?? ""
-        directory :: files.read_link("/proc/{pid}/cwd") ?? ""
+        executable: files.read_link("/proc/{pid}/exe") ?? ""
+        directory: files.read_link("/proc/{pid}/cwd") ?? ""
         if !executable.starts_with(inside) && !directory.starts_with(inside) && directory != root -> next
         #Unsafe("the testkit stops a process its own case left running in the case scratch") {
             sys.kill(pid, 9).drop("a stray may exit before its signal")
@@ -501,16 +501,16 @@ fn kit_exec_stop_strays(scratch: String) {
     }
 }
 
-fn kit_exec_make_writable(path: String) {
-    info :: files.stat(path) ?? return
+kit_exec_make_writable: fn(path: String) {
+    info: files.stat(path) ?? return
     if info.is_symlink || !info.is_dir -> return
     files.chmod(path, info.mode % 64 + 448) ?? return
-    entries :: files.list_dir(path) ?? return
+    entries: files.list_dir(path) ?? return
     loop entry in entries -> kit_exec_make_writable(entry.path)
 }
 
 
-fn kit_exec_optional(path: String) -> String? {
+kit_exec_optional: fn(path: String) -> String? {
     if !files.exists(path) -> return None
     Val(files.read(path) ?? panic("read {path}: {err}"))
 }
@@ -519,31 +519,31 @@ fn kit_exec_optional(path: String) -> String? {
 // `fixture-state/` as `.jet`. `authored_jet` copies `.jet` itself: a case
 // fixture's `.jet` is authored test data (locks, binding caches), while golden
 // and UI source trees may hold local compiler caches, so they skip it.
-fn kit_exec_copy_tree(source: String, destination: String, fixture_state: Bool, authored_jet: Bool) {
+kit_exec_copy_tree: fn(source: String, destination: String, fixture_state: Bool, authored_jet: Bool) {
     files.create_dir_all(destination) ?? panic("mkdir {destination}: {err}")
-    entries :: files.list_dir(source) ?? panic("list {source}: {err}")
+    entries: files.list_dir(source) ?? panic("list {source}: {err}")
     loop entry in entries {
         if entry.name == ".git" || (entry.name == ".jet" && !authored_jet) -> next
-        name :: if fixture_state && (entry.name == "state" || entry.name == "fixture-state") -> ".jet" else -> entry.name
-        target :: files.join(destination, name)
+        name: if fixture_state && (entry.name == "state" || entry.name == "fixture-state") -> ".jet" else -> entry.name
+        target: files.join(destination, name)
         if entry.is_dir -> kit_exec_copy_tree(entry.path, target, fixture_state, authored_jet)
         else -> kit_exec_copy_file(entry.path, target)
     }
 }
 
-fn kit_exec_requires(requirement: String, env: KitEnv, work: String, scratch: String) -> KitVerdict? {
+kit_exec_requires: fn(requirement: String, env: KitEnv, work: String, scratch: String) -> KitVerdict? {
     if requirement.starts_with("first-existing ") -> return None
     if requirement.starts_with("path-exists:") {
-        path :: kit_steps_expand(requirement.slice(12, requirement.len()), env, work, scratch, "")
+        path: kit_steps_expand(requirement.slice(12, requirement.len()), env, work, scratch, "")
         if !files.exists(files.join(work, path)) -> return Val(kit_expect_verdict("SKIP-HOST", requirement))
         return None
     }
     if requirement.starts_with("env:") {
-        assignment :: requirement.slice(4, requirement.len())
-        equals :: assignment.index("=") ?? -1
+        assignment: requirement.slice(4, requirement.len())
+        equals: assignment.index("=") ?? -1
         if equals <= 0 -> return Val(kit_expect_verdict("REFUSED", "invalid requires: {requirement}"))
-        name :: assignment.slice(0, equals)
-        value :: assignment.slice(equals + 1, assignment.len())
+        name: assignment.slice(0, equals)
+        value: assignment.slice(equals + 1, assignment.len())
         if (sys.get(name) ?? "") != value -> return Val(kit_expect_verdict("SKIP-HOST", requirement))
     } else if requirement.starts_with("os:") {
         if !kit_steps_host_matches(sys.family(), requirement.slice(3, requirement.len())) -> return Val(kit_expect_verdict("SKIP-HOST", requirement))
@@ -552,25 +552,25 @@ fn kit_exec_requires(requirement: String, env: KitEnv, work: String, scratch: St
     } else if requirement.starts_with("arch:") {
         if !kit_steps_host_matches(kit_steps_host_arch(), requirement.slice(5, requirement.len())) -> return Val(kit_expect_verdict("SKIP-HOST", requirement))
     } else if requirement.starts_with("probe ") {
-        matched :: kit_steps_probe(requirement.slice(6, requirement.len()), env, work, scratch)
+        matched: kit_steps_probe(requirement.slice(6, requirement.len()), env, work, scratch)
         if !matched -> return Val(kit_expect_verdict("SKIP-HOST", requirement))
     } else if requirement.starts_with("tools-any ") || requirement.starts_with("probes-any ") {
-        probes :: requirement.starts_with("probes-any ")
-        body :: requirement.slice(if probes -> 11 else -> 10, requirement.len())
-        matched :: kit_steps_capability_any(body, probes, env, work, scratch)
+        probes: requirement.starts_with("probes-any ")
+        body: requirement.slice(if probes -> 11 else -> 10, requirement.len())
+        matched: kit_steps_capability_any(body, probes, env, work, scratch)
         if !matched -> return Val(kit_expect_verdict("FAIL", requirement))
     } else {
         argv := [String]{}
         if {
             requirement == "gtk4" -> argv = ["pkg-config", "--exists", "gtk4"]
             requirement.starts_with("tool:") -> {
-                name :: requirement.slice(5, requirement.len())
+                name: requirement.slice(5, requirement.len())
                 if kit_steps_tool(name) == None -> return Val(kit_expect_verdict("SKIP-HOST", requirement))
                 return None
             }
             else -> return Val(kit_expect_verdict("REFUSED", "unknown host requirement: {requirement}"))
         }
-        run :: kit_exec_invoke(env, argv, work, scratch, "")
+        run: kit_exec_invoke(env, argv, work, scratch, "")
         if run.code != 0 || run.error != "" -> return Val(kit_expect_verdict("SKIP-HOST", requirement))
     }
     None

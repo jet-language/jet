@@ -26,15 +26,15 @@
 // Exit: 0 done, 1 blocked, 2 the run could not start.
 
 use {
-    files :: core.files
-    process :: core.process
-    term :: core.term
+    files: core.files
+    process: core.process
+    term: core.term
     jetpack_publication.[publication_key_paths, publication_read_public_key]
 }
 
-RELEASE_KEY :: "jet-release"
+RELEASE_KEY: "jet-release"
 
-struct Options {
+Options: struct {
     command: String
     dir: String
     evidence: [String]
@@ -42,18 +42,18 @@ struct Options {
     dry_run: Bool
 }
 
-fn usage() -> String Never! {
+usage: fn() -> String Never! {
     "usage: jet run Tools/release/Main.jet -- candidate DIR [--evidence EVDIR]... [--key REGISTRY]\n       jet run Tools/release/Main.jet -- publish DIR [--key REGISTRY] [--dry-run]"
 }
 
-fn parse_args(args: [String]) -> Options Problem! {
+parse_args: fn(args: [String]) -> Options Problem! {
     options := Options{command: "", dir: "", evidence: [String]{}, key: RELEASE_KEY, dry_run: false}
     if args.len() == 0 -> return Err(problem(INPUT, usage()))
     options.command = args[0].copy()
     if options.command != "candidate" && options.command != "publish" -> return Err(problem(INPUT, "unknown command {options.command}: want candidate or publish\n{usage()}"))
     index := 1
     loop index < args.len() {
-        arg :: args[index]
+        arg: args[index]
         if {
             arg == "--evidence" || arg == "--key" -> {
                 if index + 1 >= args.len() -> return Err(problem(INPUT, "{arg} needs a value"))
@@ -75,17 +75,17 @@ fn parse_args(args: [String]) -> Options Problem! {
 }
 
 // What origin and GitHub say, asked with git and gh.
-fn gather_remote(root: String, commit: String, programs: Programs) -[Exec, Time.Wait]> Remote Never! {
+gather_remote: fn(root: String, commit: String, programs: Programs) -[Exec, Time.Wait]> Remote Never! {
     remote := Remote{slug: "", origin_tags: [Tag]{}, local_tags: [String]{}, released: [String]{}, on_origin_dev: false, tree: "", problems: [Problem]{}}
     remote.slug = github_slug(run_argv([String]{"git", "-C", root, "remote", "get-url", "origin"}, root).output)
-    listed :: run_argv([String]{"git", "-C", root, "ls-remote", "--tags", "origin", "a0_*"}, root)
+    listed: run_argv([String]{"git", "-C", root, "ls-remote", "--tags", "origin", "a0_*"}, root)
     if listed.code != 0 -> &remote.problems.push(problem(REMOTE, "git ls-remote origin failed: {listed.errors.trim()}"))
     remote.origin_tags = remote_tags(listed.output)
     loop line in run_argv([String]{"git", "-C", root, "tag", "-l", "a0_*"}, root).output.split("\n").to_list() {
         if line.trim() != "" -> &remote.local_tags.push(line.trim().copy())
     }
     if remote.slug != "" {
-        released :: run_argv(with_args(programs.gh, [String]{"release", "list", "-R", remote.slug, "--limit", "1000", "--json", "tagName", "--jq", ".[].tagName"}), root)
+        released: run_argv(with_args(programs.gh, [String]{"release", "list", "-R", remote.slug, "--limit", "1000", "--json", "tagName", "--jq", ".[].tagName"}), root)
         if released.code != 0 -> &remote.problems.push(problem(REMOTE, "gh release list failed: {released.errors.trim()}"))
         loop line in released.output.split("\n").to_list() {
             if line.trim() != "" -> &remote.released.push(line.trim().copy())
@@ -98,12 +98,12 @@ fn gather_remote(root: String, commit: String, programs: Programs) -[Exec, Time.
     remote
 }
 
-fn release_main(args: [String]) -[FS, Env, Exec, IO, Time, Time.Wait]> Int Never! {
-    options :: parse_args(args) ?? {
+release_main: fn(args: [String]) -[FS, Env, Exec, IO, Time, Time.Wait]> Int Never! {
+    options: parse_args(args) ?? {
         term.eprint("release: {err.text}")
         return 2
     }
-    root :: files.absolute(".") ?? {
+    root: files.absolute(".") ?? {
         term.eprint("release: cannot resolve the checkout: {err}")
         return 2
     }
@@ -111,7 +111,7 @@ fn release_main(args: [String]) -[FS, Env, Exec, IO, Time, Time.Wait]> Int Never
         term.eprint("release: run from the checkout root: {SUPPORT_MATRIX_PATH} is not here")
         return 2
     }
-    dir :: files.absolute(options.dir) ?? {
+    dir: files.absolute(options.dir) ?? {
         term.eprint("release: cannot resolve {options.dir}: {err}")
         return 2
     }
@@ -119,16 +119,16 @@ fn release_main(args: [String]) -[FS, Env, Exec, IO, Time, Time.Wait]> Int Never
         term.eprint("release: {dir} is not a directory")
         return 2
     }
-    programs :: Programs{gh: [String]{"gh"}, jet: [String]{"jet"}}
-    remote :: gather_remote(root, read_release(dir).commit, programs)
-    trusted :: publication_read_public_key(options.key) ?? ""
-    outcome :: if options.command == "candidate" -> candidate_step(dir, root, options.evidence, Signer{seed_path: publication_key_paths(options.key).seed_path, public_key: trusted}, remote, programs) else -> publish_step(dir, root, trusted, remote, programs, dry_run: options.dry_run)
+    programs: Programs{gh: [String]{"gh"}, jet: [String]{"jet"}}
+    remote: gather_remote(root, read_release(dir).commit, programs)
+    trusted: publication_read_public_key(options.key) ?? ""
+    outcome: if options.command == "candidate" -> candidate_step(dir, root, options.evidence, Signer{seed_path: publication_key_paths(options.key).seed_path, public_key: trusted}, remote, programs) else -> publish_step(dir, root, trusted, remote, programs, dry_run: options.dry_run)
     loop line in outcome.report {
         if outcome.problems.len() == 0 -> print(line) else -> term.eprint(line)
     }
     if outcome.problems.len() == 0 -> 0 else -> 1
 }
 
-fn run() {
+run: fn() {
     process.exit(release_main(process.args()))
 }

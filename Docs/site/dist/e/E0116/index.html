@@ -36,23 +36,14 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Use a value-producing call here, or discard the valueless call as a statement.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0116</code>: <code>tests/ui/cffi_abi_function_value.stderr</code>.</p>
-<pre class="diag">Error [jet.NonCAbiType]: `fn(I32) I32` is not a C-compatible type for a foreign function parameter or return.
-  --&gt; tests/ui/cffi_abi_function_value.jet:8:19
+<p>First UI snapshot mentioning <code>E0116</code>: <code>tests/ui/qq_unit_call_tail.stderr</code>.</p>
+<pre class="diag">Error [jet.ValuelessCallUsedAsValue]: `print` doesn&#39;t hand back a value
+  --&gt; tests/ui/qq_unit_call_tail.jet:4:19
     |
-  8 |     callback :: c.ping
-    |                   ^^^^
- Why: `#Import` / `#Export` functions must use types with a stable C ABI at the edge.
- Fix: Use scalars, `String`, or a struct with C layout; pointers only through the gated tier.
-More: jet-lang.dev/e/E3203
-
-Error [jet.ValuelessCallUsedAsValue]: `callback` doesn&#39;t hand back a value
-  --&gt; tests/ui/cffi_abi_function_value.jet:9:11
-    |
-  9 |     print(callback(1))
-    |           ^^^^^^^^
- Why: A call is a value only when its function declares a return type after `-&gt;`
- Fix: Inside an arm, wrap the call in `{ … }`; otherwise put `callback` on its own line, or declare it as `fn callback(…) -&gt; Type { … }`
+  4 |     save(&quot;&quot;) ?? { print(&quot;save failed&quot;) }
+    |                   ^^^^^
+ Why: A `??` fallback block ends with a value or leaves the enclosing function; a call that returns nothing is only a statement
+ Fix: End the block with `()` after the call, or use `return` to leave the enclosing function
 More: jet-lang.dev/e/E0116
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

@@ -1,32 +1,32 @@
 // Retained recipe transport/provenance carriers and pure URL/digest checks.
 // The hosted runner refuses before graph admission; no fetch step is executed.
 
-RECIPE_MAX_READ_BYTES :: 536870912
+RECIPE_MAX_READ_BYTES: 536870912
 
 // The credential field names a build-hook fetch URL may never carry.
-RECIPE_CREDENTIAL_KEYS :: comptime { [String]{
+RECIPE_CREDENTIAL_KEYS: comptime { [String]{
     "auth", "authorization", "api_key", "apikey", "credential", "credentials", "password",
     "passwd", "secret", "sig", "signature", "token", "access_token", "refresh_token",
     "oauth_token", "client_secret", "private_key", "x_amz_credential", "x_amz_signature"
 } }
 
 // Credential-shaped suffixes of a field name.
-RECIPE_CREDENTIAL_SUFFIXES :: [String]{"_token", "_secret", "_credential", "_signature", "_password", "_api_key"}
+RECIPE_CREDENTIAL_SUFFIXES: [String]{"_token", "_secret", "_credential", "_signature", "_password", "_api_key"}
 
 // A caller-injected remote transport: given a URL, the fetched bytes.
-struct RecipeTransport {
+RecipeTransport: struct {
     fetch: fn(String) -[Net]> [U8] RecipeError!
 }
 
 // A locked source fetch recorded for `.jet/lock` provenance.
-struct FetchRecord {
+FetchRecord: struct {
     url: String
     sha256: String
 }
 
 // Exactly 64 ASCII hexadecimal characters.
-fn recipe_valid_sha256(value: String) -> Bool Never! {
-    raw :: value.bytes()
+recipe_valid_sha256: fn(value: String) -> Bool Never! {
+    raw: value.bytes()
     if raw.len() != 64 -> return false
     loop byte in raw {
         if !recipe_is_hex_digit(Int.from_u8(byte)) -> return false
@@ -34,13 +34,13 @@ fn recipe_valid_sha256(value: String) -> Bool Never! {
     true
 }
 
-fn recipe_is_hex_digit(code: Int) -> Bool Never! {
+recipe_is_hex_digit: fn(code: Int) -> Bool Never! {
     (code >= 48 && code <= 57) || (code >= 97 && code <= 102) || (code >= 65 && code <= 70)
 }
 
 // A declared input digest names `actual_hex` bare or with a `sha256-` /
 // `sha256:` prefix.
-fn recipe_digest_matches(declared: String, actual_hex: String) -> Bool Never! {
+recipe_digest_matches: fn(declared: String, actual_hex: String) -> Bool Never! {
     if declared == actual_hex -> return true
     if declared.starts_with("sha256-") && declared.removeprefix("sha256-") == actual_hex -> return true
     declared.starts_with("sha256:") && declared.removeprefix("sha256:") == actual_hex
@@ -49,16 +49,16 @@ fn recipe_digest_matches(declared: String, actual_hex: String) -> Bool Never! {
 // Build hooks cannot receive a credential provider. URL userinfo and
 // credential query or fragment fields are refused at the recipe boundary so
 // the secret never reaches transport, cache metadata, diagnostics, or logs.
-fn recipe_credentialed_fetch_url(url: String) -> Bool Never! {
+recipe_credentialed_fetch_url: fn(url: String) -> Bool Never! {
     if pkg_text_has_control(url) -> return true
-    scheme :: url.split_once("://") ?? return false
-    rest :: scheme.after
-    authority :: recipe_until_any(rest, "/?#")
+    scheme: url.split_once("://") ?? return false
+    rest: scheme.after
+    authority: recipe_until_any(rest, "/?#")
     if authority.contains("@") -> return true
-    query_and_fragment :: rest.split_once("?")
+    query_and_fragment: rest.split_once("?")
     if query_and_fragment == {
         .None -> {
-            fragment :: rest.split_once("#") ?? return false
+            fragment: rest.split_once("#") ?? return false
             return recipe_credential_fields(fragment.after)
         }
         .Val(parts) -> {
@@ -71,9 +71,9 @@ fn recipe_credentialed_fetch_url(url: String) -> Bool Never! {
 }
 
 // The prefix of `text` before the first byte listed in `stops`.
-fn recipe_until_any(text: String, stops: String) -> String Never! {
-    raw :: text.bytes()
-    stop_bytes :: stops.bytes()
+recipe_until_any: fn(text: String, stops: String) -> String Never! {
+    raw: text.bytes()
+    stop_bytes: stops.bytes()
     loop index in 0..<raw.len() {
         if stop_bytes.contains(raw[index]) -> return pkg_bytes_text(raw, 0, index)
     }
@@ -81,18 +81,18 @@ fn recipe_until_any(text: String, stops: String) -> String Never! {
 }
 
 // `&`/`;`-separated fields, any of whose keys is credential-shaped.
-fn recipe_credential_fields(fields: String) -> Bool Never! {
+recipe_credential_fields: fn(fields: String) -> Bool Never! {
     loop group in fields.split("&") {
         loop field in group.split(";") {
-            key :: field.split_once("=")?.before ?? field
+            key: field.split_once("=")?.before ?? field
             if recipe_credential_field_key(key) -> return true
         }
     }
     false
 }
 
-fn recipe_credential_field_key(raw: String) -> Bool Never! {
-    key :: pkg_ascii_lower(recipe_percent_decode_ascii(raw.trim())).replace("-", "_")
+recipe_credential_field_key: fn(raw: String) -> Bool Never! {
+    key: pkg_ascii_lower(recipe_percent_decode_ascii(raw.trim())).replace("-", "_")
     if RECIPE_CREDENTIAL_KEYS.contains(key) -> return true
     loop suffix in RECIPE_CREDENTIAL_SUFFIXES {
         if key.ends_with(suffix) -> return true
@@ -102,14 +102,14 @@ fn recipe_credential_field_key(raw: String) -> Bool Never! {
 
 // Decode `%XX` escapes byte by byte; each decoded byte becomes the scalar of
 // the same value (Rust `byte as char`), undecodable escapes stay literal.
-fn recipe_percent_decode_ascii(value: String) -> String Never! {
-    bytes :: value.bytes()
+recipe_percent_decode_ascii: fn(value: String) -> String Never! {
+    bytes: value.bytes()
     decoded := [U8]{}
     index := 0
     loop index < bytes.len() {
         if Int.from_u8(bytes[index]) == 37 && index + 2 < bytes.len() {
-            high :: recipe_hex_value(Int.from_u8(bytes[index + 1]))
-            low :: recipe_hex_value(Int.from_u8(bytes[index + 2]))
+            high: recipe_hex_value(Int.from_u8(bytes[index + 1]))
+            low: recipe_hex_value(Int.from_u8(bytes[index + 2]))
             if high >= 0 && low >= 0 {
                 recipe_push_latin1(&decoded, high * 16 + low)
                 index += 3
@@ -123,7 +123,7 @@ fn recipe_percent_decode_ascii(value: String) -> String Never! {
 }
 
 // Append the UTF-8 encoding of the scalar U+0000..U+00FF with value `code`.
-fn recipe_push_latin1(out: &[U8], code: Int) Never! {
+recipe_push_latin1: fn(out: &[U8], code: Int) Never! {
     if code < 128 {
         &out.push(U8{code})
         return
@@ -133,7 +133,7 @@ fn recipe_push_latin1(out: &[U8], code: Int) Never! {
 }
 
 // The value of one hexadecimal digit, or -1.
-fn recipe_hex_value(code: Int) -> Int Never! {
+recipe_hex_value: fn(code: Int) -> Int Never! {
     if {
         code >= 48 && code <= 57 -> code - 48
         code >= 97 && code <= 102 -> code - 87
@@ -145,7 +145,7 @@ fn recipe_hex_value(code: Int) -> Int Never! {
 // The only environment a recipe tool may observe. The native backend clears
 // the inherited environment and maps `JET_BUILD_OUTPUT` to the private output
 // mount; this map carries only declared deterministic values, in key order.
-fn recipe_build_env() -> [String: String] Never! {
+recipe_build_env: fn() -> [String: String] Never! {
     env := [String: String]{}
     env["JET_PROFILE"] = "default"
     env["SOURCE_DATE_EPOCH"] = "0"

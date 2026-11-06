@@ -13,17 +13,17 @@ input directory itself must be left unchanged.
 The input directory contains exactly this, with small files shown inline:
 
     denied/
-    denied/env.jet  (33 bytes)
-      | module env.dev {
+    denied/env.jet  (34 bytes)
+      | env.dev: module {
       |     packages: [
       | 
-    denied/run.jet  (22 bytes)
+    denied/run.jet  (23 bytes)
       | #Job
-      | fn lint_all() {}
+      | lint_all: fn() {}
       | 
     readonly/
-    readonly/env.jet  (463 bytes)
-      | module env.dev {
+    readonly/env.jet  (464 bytes)
+      | env.dev: module {
       |     prompt: $HOME
       |     imports: [env.agent.codex(mcp: [repo_server])]
       |     services: {
@@ -40,9 +40,9 @@ The input directory contains exactly this, with small files shown inline:
       |     files: ["config/generated.txt": File{ content: "generated\n", mode: .Copy }]
       | }
       | 
-    readonly/run.jet  (22 bytes)
+    readonly/run.jet  (23 bytes)
       | #Job
-      | fn lint_all() {}
+      | lint_all: fn() {}
       | 
 
 ## Required output

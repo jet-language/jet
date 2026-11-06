@@ -1,19 +1,19 @@
 
-use time :: core.time
+use time: core.time
 
-fn boom() -> Int {
+boom: fn() -> Int {
     panic("boom")
     return 0
 }
-fn deadline() -> Int {
+deadline: fn() -> Int {
     #Context(deadline: 0) {
         time.sleep(1ms)
     }
     return 0
 }
-fn panic_rail() {
+panic_rail: fn() {
     task.group workers {
-        failed :: task boom()
+        failed: task boom()
         if failed.join() == {
             .Err(error) -> {
                 if error == {
@@ -26,7 +26,7 @@ fn panic_rail() {
         }
     }
 }
-fn all_rail() {
+all_rail: fn() {
     task.group workers {
         if (task.all { boom(), 2 }) == {
             .Err(error) -> {
@@ -40,9 +40,9 @@ fn all_rail() {
         }
     }
 }
-fn deadline_rail() {
+deadline_rail: fn() {
     task.group workers {
-        expired :: task deadline()
+        expired: task deadline()
         if expired.join() == {
             .Err(error) -> {
                 if error == {
@@ -55,9 +55,9 @@ fn deadline_rail() {
         }
     }
 }
-fn cancel_rail() {
+cancel_rail: fn() {
     task.group workers {
-        cancelled :: task {
+        cancelled: task {
             time.sleep(1000ms)
         }
         cancelled.cancel()
@@ -73,7 +73,7 @@ fn cancel_rail() {
         }
     }
 }
-fn run() {
+run: fn() {
     panic_rail()
     all_rail()
     deadline_rail()

@@ -1,52 +1,52 @@
-#Import module c.jet_cs_counter {
-    fn new(arg0: Int) -> Int = "jet_cs_counter_new"
-    fn take_error() -> Int = "jet_cs_counter_take_error"
-    fn close(handle: Int) = "jet_cs_counter_close"
-    fn add(handle: Int, arg0: Int) -> Int = "jet_cs_counter_add"
-    fn explode(handle: Int, arg0: Int) -> Int = "jet_cs_counter_explode"
-    fn twice(arg0: Float) -> Float = "jet_cs_counter_twice"
+#Import c.jet_cs_counter: module {
+    new: fn(arg0: Int) -> Int = "jet_cs_counter_new"
+    take_error: fn() -> Int = "jet_cs_counter_take_error"
+    close: fn(handle: Int) = "jet_cs_counter_close"
+    add: fn(handle: Int, arg0: Int) -> Int = "jet_cs_counter_add"
+    explode: fn(handle: Int, arg0: Int) -> Int = "jet_cs_counter_explode"
+    twice: fn(arg0: Float) -> Float = "jet_cs_counter_twice"
 }
-use abi :: c.jet_cs_counter
+use abi: c.jet_cs_counter
 
-struct Handle { priv value: Int }
+Handle: struct { priv value: Int }
 #Error
-enum DotNetError { Exception InvalidHandle ResourceLimit }
+DotNetError: enum { Exception InvalidHandle ResourceLimit }
 
-fn error(code: Int) -[]> DotNetError Never! { if code == 2 { return DotNetError.InvalidHandle } if code == 3 { return DotNetError.ResourceLimit } return DotNetError.Exception }
+error: fn(code: Int) -[]> DotNetError Never! { if code == 2 { return DotNetError.InvalidHandle } if code == 3 { return DotNetError.ResourceLimit } return DotNetError.Exception }
 
-fn new(arg0: Int) -[FFI.DotNet]> Handle DotNetError! {
-    value :: abi.new(arg0)
-    code :: abi.take_error()
+new: fn(arg0: Int) -[FFI.DotNet]> Handle DotNetError! {
+    value: abi.new(arg0)
+    code: abi.take_error()
     if code != 0 { return Err(error(code)) }
     return Ok(Handle{ value: value })
 }
 
-fn close(^handle: Handle) -[FFI.DotNet]> {}
+close: fn(^handle: Handle) -[FFI.DotNet]> {}
 
 impl Handle.Close {
-    fn close(^self) {
+    close: fn(^self) {
         abi.close(self.value)
         if abi.take_error() != 0 { panic(".NET handle close failed") }
     }
 }
 
-fn add(handle: Handle, arg0: Int) -[FFI.DotNet]> Int DotNetError! {
-    value :: abi.add(handle.value, arg0)
-    code :: abi.take_error()
+add: fn(handle: Handle, arg0: Int) -[FFI.DotNet]> Int DotNetError! {
+    value: abi.add(handle.value, arg0)
+    code: abi.take_error()
     if code != 0 { return Err(error(code)) }
     return Ok(value)
 }
 
-fn explode(handle: Handle, arg0: Int) -[FFI.DotNet]> Int DotNetError! {
-    value :: abi.explode(handle.value, arg0)
-    code :: abi.take_error()
+explode: fn(handle: Handle, arg0: Int) -[FFI.DotNet]> Int DotNetError! {
+    value: abi.explode(handle.value, arg0)
+    code: abi.take_error()
     if code != 0 { return Err(error(code)) }
     return Ok(value)
 }
 
-fn twice(arg0: Float) -[FFI.DotNet]> Float DotNetError! {
-    value :: abi.twice(arg0)
-    code :: abi.take_error()
+twice: fn(arg0: Float) -[FFI.DotNet]> Float DotNetError! {
+    value: abi.twice(arg0)
+    code: abi.take_error()
     if code != 0 { return Err(error(code)) }
     return Ok(value)
 }

@@ -2,7 +2,7 @@
 // value shape and every response row survives the JSON round trip exactly,
 // and anything else is refused rather than guessed.
 use {
-    math :: core.math
+    math: core.math
     jet_foundation.[
         CtEnumArg, CtFloat, CtKey, CtMapEntry, CtReport, CtValue, Diagnostic, JetConfigOutcome,
         NamedCtKey, NamedCtValue, Span, compiler_service_check_diagnostics,
@@ -15,15 +15,15 @@ use {
     ]
 }
 
-fn compiler_service_test_round_trip(value: CtValue) Never! {
-    wire :: compiler_service_value_wire(value) ?? panic("a config value has a wire spelling")
-    text :: compiler_service_render(wire)
-    parsed :: foundation_parse_protocol_json(text) ?? panic("the wire spelling is protocol JSON")
-    back :: compiler_service_value_from_wire(parsed) ?? panic("the wire spelling reads back")
+compiler_service_test_round_trip: fn(value: CtValue) Never! {
+    wire: compiler_service_value_wire(value) ?? panic("a config value has a wire spelling")
+    text: compiler_service_render(wire)
+    parsed: foundation_parse_protocol_json(text) ?? panic("the wire spelling is protocol JSON")
+    back: compiler_service_value_from_wire(parsed) ?? panic("the wire spelling reads back")
     assert(back == value, "round trip changed {text}")
 }
 
-fn compiler_service_test_response(text: String) -> Dyn Never! {
+compiler_service_test_response: fn(text: String) -> Dyn Never! {
     foundation_parse_protocol_json(text) ?? panic("a service response is protocol JSON")
 }
 
@@ -53,16 +53,16 @@ fn compiler_service_test_response(text: String) -> Dyn Never! {
     assert(compiler_service_value_from_wire(compiler_service_test_response("{{\"Bytes\":[256]}}")) == None, "an out-of-range byte is refused")
 
     // comptime-evaluate request and responses.
-    request :: compiler_service_test_response(compiler_service_comptime_request("JET_CONFIG_VALUE :: comptime {{ 1 + 2 }}\n", "/tmp/project"))
-    fields :: compiler_service_comptime_request_from(request) ?? panic("the comptime request reads back")
-    assert_eq(fields.program, "JET_CONFIG_VALUE :: comptime {{ 1 + 2 }}\n")
+    request: compiler_service_test_response(compiler_service_comptime_request("JET_CONFIG_VALUE: comptime {{ 1 + 2 }}\n", "/tmp/project"))
+    fields: compiler_service_comptime_request_from(request) ?? panic("the comptime request reads back")
+    assert_eq(fields.program, "JET_CONFIG_VALUE: comptime {{ 1 + 2 }}\n")
     assert_eq(fields.base_dir, "/tmp/project")
     assert(compiler_service_comptime_request_from(compiler_service_test_response("{{\"program\":\"x\"}}")) == None, "a request without base_dir is refused")
     if compiler_service_comptime_outcome(compiler_service_test_response(compiler_service_comptime_response(JetConfigOutcome.Value{value: CtValue.Int{value: 3}}))) == {
         .Val(.Value(value)) -> assert(value == CtValue.Int{value: 3})
         else -> panic("a value response reads back as the value")
     }
-    refusal :: jet_config_eval_diagnostic(None, "this config value produced no build-time value")
+    refusal: jet_config_eval_diagnostic(None, "this config value produced no build-time value")
     if compiler_service_comptime_outcome(compiler_service_test_response(compiler_service_comptime_response(JetConfigOutcome.Refused{diagnostic: refusal}))) == {
         .Val(.Refused(diagnostic)) -> {
             assert_eq(diagnostic.code, "E0956")
@@ -81,11 +81,11 @@ fn compiler_service_test_response(text: String) -> Dyn Never! {
     assert(compiler_service_comptime_outcome(compiler_service_test_response("{{}}")) == None, "an empty response is not an outcome")
 
     // check-entry request and responses.
-    check :: compiler_service_check_request_from(compiler_service_test_response(compiler_service_check_request("/p/main.jet", "fn run() {{ }}\n"))) ?? panic("the check request reads back")
+    check: compiler_service_check_request_from(compiler_service_test_response(compiler_service_check_request("/p/main.jet", "run: fn() {{ }}\n"))) ?? panic("the check request reads back")
     assert_eq(check.file, "/p/main.jet")
-    assert_eq(check.source, "fn run() {{ }}\n")
-    placed :: diagnostic_from_registry("E2105", Val(Span{start: 3, end: 9}), "first", "why", "fix")
-    rows :: compiler_service_check_diagnostics(compiler_service_test_response(compiler_service_check_response([Diagnostic]{placed, refusal}))) ?? panic("the check response reads back")
+    assert_eq(check.source, "run: fn() {{ }}\n")
+    placed: diagnostic_from_registry("E2105", Val(Span{start: 3, end: 9}), "first", "why", "fix")
+    rows: compiler_service_check_diagnostics(compiler_service_test_response(compiler_service_check_response([Diagnostic]{placed, refusal}))) ?? panic("the check response reads back")
     assert_eq(rows.len(), 2)
     assert_eq(rows[0].code, "E2105")
     assert_eq(rows[0].span, Val(Span{start: 3, end: 9}))

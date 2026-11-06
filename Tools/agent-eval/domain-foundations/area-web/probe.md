@@ -45,7 +45,7 @@ The server has no typed form decoder and field-validation result. Exact proof: t
 
 ## Friction
 
-- `response.header(name, value)` is a response builder that returns a new response; discarding that value made the handler return 500. The working form is `with_cookie :: response.header(...)`, an easy-to-miss call-site rule.
+- `response.header(name, value)` is a response builder that returns a new response; discarding that value made the handler return 500. The working form is `with_cookie: response.header(...)`, an easy-to-miss call-site rule.
 - The query result can be counted, but rendering each `[Row]` by looping caused a 500 in the default HTTP evaluator. The working route renders `rows.len()` and detail uses `query_one`; this is recorded as a runtime defect risk rather than hidden.
 - The basic cache is library code only: the app manually increments a `Cell` after mutation and reruns the SQL query. No automatic query cache/refetch lifecycle was available.
 - `jet-env` emitted a scratch-cwd warning about a missing relative `clean-nix-tmp.sh`; it did not prevent the checks or runs.

@@ -8,23 +8,23 @@
 // returns the value or every collected failure. Each step consumes the builder
 // it is called on. The bare name `Validate` loads this module on demand, so a
 // program that never builds a rule set never loads it.
-struct Validate<T> {
+Validate: struct<T> {
     value: T
     errors: [FieldError]
 
-    fn over(value: T) -> Validate<T> Never! {
+    over: fn(value: T) -> Validate<T> Never! {
         // copy: the builder owns the checked value; the caller keeps its own
         Validate<T>{value: value.copy(), errors: [FieldError]{}}
     }
 
-    fn check(^self, holds: Bool, at: String, reason: String) -> Validate<T> Never! {
+    check: fn(^self, holds: Bool, at: String, reason: String) -> Validate<T> Never! {
         if holds -> return self
         errors := self.errors
         &errors.push(FieldError{path: at, reason: reason})
         Validate<T>{value: self.value, errors: errors}
     }
 
-    fn finish(^self) -> T [FieldError]! {
+    finish: fn(^self) -> T [FieldError]! {
         if !self.errors.is_empty() -> return Err(self.errors)
         self.value
     }

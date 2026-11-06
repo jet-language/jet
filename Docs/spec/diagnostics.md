@@ -33,7 +33,7 @@ raises its own type with `reject(Value)`. The CLI, LSP, machine reports, web
 pages, and backends project those rows rather than defining a second message or
 exposing raw backend text.
 
-Known declaration heads such as `#Import module c.<lib>` are parsed as items
+Known declaration heads such as `#Import c.<lib>: module` are parsed as items
 before unresolved library marker heads are retained as file-level rule facts.
 
 Lexical recovery does not end diagnostic collection: the retained token stream
@@ -193,10 +193,10 @@ target. The exact rendered snapshot is part of the contract and is kept in
 
 ```text
 Error [jet.OsApiOnNoOsTarget]: `files.read` is not available on a no-OS target.
-  --> tests/ui/freestanding_e3301.jet:5:13
+  --> tests/ui/freestanding_e3301.jet:5:11
     |
-  5 |     _ :: fs.read("config.txt")
-    |             ^^^^
+  5 |     _: fs.read("config.txt")
+    |           ^^^^
  Why: No-OS targets have no OS; only `core`-level APIs are available.
  Fix: Embed the data at compile time with `@embed("file")`, or select a hosted target.
 More: jet-lang.dev/e/E3301

@@ -1,11 +1,11 @@
 
-use fs :: core.files
+use fs: core.files
 
-fn need(value: Int) {
+need: fn(value: Int) {
     print(value)
 }
 
-fn erased_refinement(value: Int?) {
+erased_refinement: fn(value: Int?) {
     #Off {
         if value == .None {
             return
@@ -15,20 +15,20 @@ fn erased_refinement(value: Int?) {
     need(value)
 }
 
-fn erased_effect() -[IO]> {
+erased_effect: fn() -[IO]> {
     #Off {
         #FX(authority: FS) {
-            _text :: fs.read("missing") ?? ""
+            _text: fs.read("missing") ?? ""
         }
     }
     print("erased")
 }
 
-fn active_effect() -[IO]> {
+active_effect: fn() -[IO]> {
     #FX(authority: FS) {
-        _text :: fs.read("missing") ?? ""
+        _text: fs.read("missing") ?? ""
     }
     print("active")
 }
 
-fn run() {}
+run: fn() {}

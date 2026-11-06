@@ -3,16 +3,16 @@
 // data.snapshot<T>(loader). There is no Parquet-specific typed-row/DataQuery
 // constructor yet, so this fixture consumes the existing canonical Dyn
 // row projection instead of naming an unshipped API.
-use data :: core.data
+use data: core.data
 
-fn run() {
+run: fn() {
     int_loader := data.file<[Dyn]>(
         "tests/fixtures/parquet_reader/int32_with_null_pages.parquet",
         "parquet",
         data.DataLimits.safe()
     ) ?? panic("int32 loader")
-    int_snapshot :: data.snapshot<[Dyn]>(&int_loader) ?? panic("int32 snapshot")
-    int_rows :: int_snapshot.value
+    int_snapshot: data.snapshot<[Dyn]>(&int_loader) ?? panic("int32 snapshot")
+    int_rows: int_snapshot.value
 
     // The upstream column index documents rows 200..299 as an all-null page.
     // Scan for a non-null value so the ordinary INT32 path is checked without
@@ -20,16 +20,16 @@ fn run() {
     index := 0
     saw_nonnull := false
     loop index < int_rows.len() {
-        row :: int_rows[index]
-        cell :: &row.field("int32_field") ?? panic("int32 field")
+        row: int_rows[index]
+        cell: &row.field("int32_field") ?? panic("int32 field")
         if !cell.equal_unordered(Dyn.Null) {
             saw_nonnull = true
             break
         }
         index += 1
     }
-    null_page_row :: int_rows[200]
-    null_page_cell :: &null_page_row.field("int32_field") ?? panic("int32 null-page field")
+    null_page_row: int_rows[200]
+    null_page_cell: &null_page_row.field("int32_field") ?? panic("int32 null-page field")
     print("int32 rows={int_rows.len()} nonnull={saw_nonnull} null_page={null_page_cell.equal_unordered(Dyn.Null)}")
 
     dictionary_loader := data.file<[Dyn]>(
@@ -37,13 +37,13 @@ fn run() {
         "parquet",
         data.DataLimits.safe()
     ) ?? panic("dictionary loader")
-    dictionary_snapshot :: data.snapshot<[Dyn]>(&dictionary_loader) ?? panic("dictionary snapshot")
-    dictionary_rows :: dictionary_snapshot.value
-    first_dictionary_row :: dictionary_rows[0]
+    dictionary_snapshot: data.snapshot<[Dyn]>(&dictionary_loader) ?? panic("dictionary snapshot")
+    dictionary_rows: dictionary_snapshot.value
+    first_dictionary_row: dictionary_rows[0]
     // `string_col` is dictionary encoded in the upstream Impala alltypes file.
     // Accessing it through Dyn keeps this fixture independent of a missing
     // provider-specific typed-row constructor.
-    _dictionary_value :: &first_dictionary_row.field("string_col") ?? panic("dictionary string_col")
+    _dictionary_value: &first_dictionary_row.field("string_col") ?? panic("dictionary string_col")
     print("dictionary: decoded string_col")
 
     malformed_loader := data.file<[Dyn]>(

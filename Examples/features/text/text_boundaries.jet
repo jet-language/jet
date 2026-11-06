@@ -1,14 +1,14 @@
 use {
-    text :: core.text
-    parse :: core.text.parse
-    fmt :: core.text.fmt
+    text: core.text
+    parse: core.text.parse
+    fmt: core.text.fmt
 }
 
 // Tab stops use decoded scalar columns, including wide and combining scalars.
 // Scientific notation needs digits on both sides of the exponent marker.
 // Normalization is not transliteration, and titlecase requires cased text.
 // Human durations use whole units, not fractional division.
-fn run() {
+run: fn() {
     print("tabs")
     print("|{parse.expandtabs("界\tx", 4)}|")
     print("|{parse.expandtabs("é😀\tx", 4)}|")
@@ -19,7 +19,7 @@ fn run() {
     print("|{parse.expandtabs("界\tx", -4)}|")
     print("|{parse.expandtabs("", 4)}|")
     print(parse.expandtabs("界\tx\ny\tz", 4) == "界   x\ny   z")
-    cr :: String.from_bytes([U8]{13}) ?? ""
+    cr: String.from_bytes([U8]{13}) ?? ""
     print(parse.expandtabs("界\tx{cr}y\tz", 4) == ("界   x{cr}y   z"))
     print(parse.expandtabs("界\tx{cr}\ny\tz", 4) == ("界   x{cr}\ny   z"))
 

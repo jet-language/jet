@@ -1,38 +1,38 @@
 // #6542: `use { … }` lists several imports, one row per line, and
-// `alias :: path` names one module or item under a local name. A row is any
+// `alias: path` names one module or item under a local name. A row is any
 // import: a module path, a member list, a "file" path, each after an
-// optional `alias ::`. `jet fmt` writes two or more imports as one block.
+// optional `alias:`. `jet fmt` writes two or more imports as one block.
 use {
     numeric.clamp
-    absolute :: numeric.abs
-    js :: core.encoding.json
+    absolute: numeric.abs
+    js: core.encoding.json
     core.math
 }
 
-module numeric {
-    fn clamp(x: Int, lo: Int, hi: Int) -> Int {
+numeric: module {
+    clamp: fn(x: Int, lo: Int, hi: Int) -> Int {
         if x < lo -> return lo
         if x > hi -> return hi
         return x
     }
 
-    fn abs(x: Int) -> Int {
+    abs: fn(x: Int) -> Int {
         if x < 0 -> return -x
         return x
     }
 }
 
 // An inline module takes its own block.
-module report {
+report: module {
     use {
-        top :: numeric.clamp
+        top: numeric.clamp
         numeric.abs
     }
 
-    fn line(x: Int) -> String { "{top(x, 0, 10)} {abs(x)} {math.abs(x)}" }
+    line: fn(x: Int) -> String { "{top(x, 0, 10)} {abs(x)} {math.abs(x)}" }
 }
 
-fn run() {
+run: fn() {
     print(clamp(15, 0, 10))
     print(absolute(-7))
     print(math.abs(-3))

@@ -1,29 +1,29 @@
 // 181 — D-INDEX-HOOK: expert `mytype[k]` via Index + IndexMut
-struct Tile {
+Tile: struct {
     value: Int
 }
 
-struct Grid {
+Grid: struct {
     cells: [Tile]
 }
 
 impl Grid.Index {
-    type Key = Int
-    type Value = Int
+    Key: Int
+    Value: Int
 
-    fn get(self, k: Int) -> Int? {
+    get: fn(self, k: Int) -> Int? {
         if k < 0 || k >= self.cells.len() -> return None
         return Val(self.cells[k].value)
     }
 }
 
 impl Grid.IndexMut {
-    fn set(&self, k: Int, v: Int) {
+    set: fn(&self, k: Int, v: Int) {
         if k >= 0 && k < self.cells.len() -> self.cells[k].value = v
     }
 }
 
-fn run() {
+run: fn() {
     g := Grid{cells: [Tile]{{value: 1}, {value: 2}}}
     g[1] = 99
     print("g[1]: {g[1]}")

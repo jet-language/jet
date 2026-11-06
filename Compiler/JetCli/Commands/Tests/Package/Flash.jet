@@ -29,27 +29,27 @@ use {
         jet_cli_flash_status_value, jet_cli_flash_tool_argv, jet_cli_flash_tool_from_facts,
         jet_cli_flash_utf8_lossy, jet_cli_flash_verify_audit,
     ]
-    flash_paths :: core.files.path
+    flash_paths: core.files.path
 }
 
-fn flash_test_facts(adapter: TargetProgrammerAdapter) -> TargetProgrammerFacts Never! {
+flash_test_facts: fn(adapter: TargetProgrammerAdapter) -> TargetProgrammerFacts Never! {
     TargetProgrammerFacts{adapter: adapter, executable: "tool", chip: Val("chip"), interface: Val("iface"), config: [String]{"board.cfg"}, speed_khz: Val(1000), reset: true, machine: Val("machine"), cpu: Val("cpu")}
 }
-fn flash_test_plan() -> JetCLIFlashPlan Never! {
+flash_test_plan: fn() -> JetCLIFlashPlan Never! {
     JetCLIFlashPlan{schema: "jet.flash.plan", target: "board.test", target_triple: "thumbv7em-none-eabi", target_identity: "target-id", hardware_identity: "hardware-id", adapter: JetCLIFlashAdapter.ProbeRs, programmer: flash_test_facts(TargetProgrammerAdapter.ProbeRs), tool: "tool", tool_identity: "tool-id", executable: flash_paths.of("/bin/tool"), image: flash_paths.of("/out/firmware.elf"), audit: flash_paths.of("/out/firmware.target.json"), audit_sha256: "audit-id", image_bytes: 17, image_sha256: "image-id", argv: [String]{"tool", "download", "firmware.elf"}, authority: "Build.native_sandboxed"}
 }
-fn flash_test_profile(tools: [JetCLIFlashToolDeclaration]) -> JetCLIFlashProfile Never! {
+flash_test_profile: fn(tools: [JetCLIFlashToolDeclaration]) -> JetCLIFlashProfile Never! {
     JetCLIFlashProfile{target: "board", target_triple: "triple", target_identity: "target-id", hardware_identity: "hardware-id", tools: tools}
 }
 #Test("flash adapters and exact argv preserve optional facts and reset") {
     assert(jet_cli_flash_adapter_parse("Probe-Rs") == None)
-    adapters :: [JetCLIFlashAdapter]{JetCLIFlashAdapter.Emulator, JetCLIFlashAdapter.ProbeRs, JetCLIFlashAdapter.OpenOcd}
+    adapters: [JetCLIFlashAdapter]{JetCLIFlashAdapter.Emulator, JetCLIFlashAdapter.ProbeRs, JetCLIFlashAdapter.OpenOcd}
     loop adapter in adapters -> assert(jet_cli_flash_adapter_parse(jet_cli_flash_adapter_name(adapter)) == Val((adapter)))
-    emulator :: jet_cli_flash_tool_from_facts(flash_test_facts(TargetProgrammerAdapter.Emulator))
+    emulator: jet_cli_flash_tool_from_facts(flash_test_facts(TargetProgrammerAdapter.Emulator))
     assert_eq(jet_cli_flash_tool_argv(emulator, "evil; file.elf") ?? panic("argv"), [String]{"-machine", "machine", "-cpu", "cpu", "-nographic", "-kernel", "evil; file.elf"})
-    probe :: jet_cli_flash_tool_from_facts(flash_test_facts(TargetProgrammerAdapter.ProbeRs))
+    probe: jet_cli_flash_tool_from_facts(flash_test_facts(TargetProgrammerAdapter.ProbeRs))
     assert_eq(jet_cli_flash_tool_argv(probe, "firmware.elf") ?? panic("argv"), [String]{"download", "--chip", "chip", "--probe", "iface", "--speed", "1000", "--connect-under-reset", "firmware.elf"})
-    open :: jet_cli_flash_tool_from_facts(flash_test_facts(TargetProgrammerAdapter.OpenOcd))
+    open: jet_cli_flash_tool_from_facts(flash_test_facts(TargetProgrammerAdapter.OpenOcd))
     assert_eq(jet_cli_flash_tool_argv(open, "firmware.elf") ?? panic("argv"), [String]{"-f", "iface", "-f", "board.cfg", "-c", "adapter speed 1000", "-c", "program firmware.elf verify reset exit"})
     facts := flash_test_facts(TargetProgrammerAdapter.ProbeRs)
     facts.interface = None
@@ -62,7 +62,7 @@ fn flash_test_profile(tools: [JetCLIFlashToolDeclaration]) -> JetCLIFlashProfile
     facts.interface = Val("iface")
     facts.config = [String]{}
     assert_eq(jet_cli_flash_tool_argv(jet_cli_flash_tool_from_facts(facts), "a") ?? panic("argv"), [String]{"-f", "iface", "-c", "program a verify exit"})
-    _ :: jet_cli_flash_tool_argv(open, "evil;file") ?? {
+    _: jet_cli_flash_tool_argv(open, "evil;file") ?? {
         assert_eq(err.message, "image filename `evil;file` cannot be passed to OpenOCD safely")
         return
     }
@@ -95,21 +95,21 @@ fn flash_test_profile(tools: [JetCLIFlashToolDeclaration]) -> JetCLIFlashProfile
 #Test("profile selects first usable matching declaration before reporting a missing fact") {
     facts := flash_test_facts(TargetProgrammerAdapter.ProbeRs)
     facts.chip = None
-    invalid :: jet_cli_flash_tool_from_facts(facts)
-    valid :: jet_cli_flash_tool_from_facts(flash_test_facts(TargetProgrammerAdapter.ProbeRs))
-    profile :: flash_test_profile([JetCLIFlashToolDeclaration]{invalid, valid})
+    invalid: jet_cli_flash_tool_from_facts(facts)
+    valid: jet_cli_flash_tool_from_facts(flash_test_facts(TargetProgrammerAdapter.ProbeRs))
+    profile: flash_test_profile([JetCLIFlashToolDeclaration]{invalid, valid})
     assert_eq(jet_cli_flash_profile_select(profile, None) ?? panic("select"), 1)
     assert_eq(jet_cli_flash_profile_select(profile, Val(JetCLIFlashAdapter.ProbeRs)) ?? panic("select"), 1)
-    _ :: jet_cli_flash_profile_select(flash_test_profile([JetCLIFlashToolDeclaration]{invalid}), None) ?? {
+    _: jet_cli_flash_profile_select(flash_test_profile([JetCLIFlashToolDeclaration]{invalid}), None) ?? {
         assert_eq(err.message, "target `board` `probe-rs` programmer is missing explicit `chip` fact")
         return
     }
     panic("invalid programmer selected")
 }
 #Test("profile unavailable adapter and empty declarations are exact errors") {
-    profile :: flash_test_profile([JetCLIFlashToolDeclaration]{jet_cli_flash_tool_from_facts(flash_test_facts(TargetProgrammerAdapter.ProbeRs))})
+    profile: flash_test_profile([JetCLIFlashToolDeclaration]{jet_cli_flash_tool_from_facts(flash_test_facts(TargetProgrammerAdapter.ProbeRs))})
     error := ""
-    _ :: jet_cli_flash_profile_select(profile, Val(JetCLIFlashAdapter.OpenOcd)) ?? {
+    _: jet_cli_flash_profile_select(profile, Val(JetCLIFlashAdapter.OpenOcd)) ?? {
         // copy: the message stays with the failed result the handler reads (owner: that temporary
         // result, dropped after the handler) and `error` (owner: this test's local) keeps the text
         // past it.
@@ -117,7 +117,7 @@ fn flash_test_profile(tools: [JetCLIFlashToolDeclaration]) -> JetCLIFlashProfile
         0
     }
     assert_eq(error, "target `board` does not declare the `openocd` adapter (declared: probe-rs)")
-    _ :: jet_cli_flash_profile_select(flash_test_profile([JetCLIFlashToolDeclaration]{}), None) ?? {
+    _: jet_cli_flash_profile_select(flash_test_profile([JetCLIFlashToolDeclaration]{}), None) ?? {
         // copy: the message stays with the failed result the handler reads (owner: that temporary
         // result, dropped after the handler) and `error` (owner: this test's local) keeps the text
         // past it.
@@ -127,7 +127,7 @@ fn flash_test_profile(tools: [JetCLIFlashToolDeclaration]) -> JetCLIFlashProfile
     assert_eq(error, "target `board` declares no usable programmer ()")
     facts := flash_test_facts(TargetProgrammerAdapter.OpenOcd)
     facts.executable = " "
-    _ :: jet_cli_flash_tool_argv(jet_cli_flash_tool_from_facts(facts), "evil;") ?? {
+    _: jet_cli_flash_tool_argv(jet_cli_flash_tool_from_facts(facts), "evil;") ?? {
         // copy: the message stays with the failed result the handler reads (owner: that temporary
         // result, dropped after the handler) and `error` (owner: this test's local) keeps the text
         // past it.
@@ -136,7 +136,7 @@ fn flash_test_profile(tools: [JetCLIFlashToolDeclaration]) -> JetCLIFlashProfile
     }
     assert_eq(error, "target programmer `openocd` is missing explicit `executable` fact")
     machine := jet_target_machine_hosted("x86_64-unknown-linux-gnu", "test")
-    _ :: jet_cli_flash_profile_from_machine(machine) ?? {
+    _: jet_cli_flash_profile_from_machine(machine) ?? {
         // copy: the message stays with the failed result the handler reads (owner: that temporary
         // result, dropped after the handler) and `error` (owner: this test's local) keeps the text
         // past it.
@@ -145,20 +145,20 @@ fn flash_test_profile(tools: [JetCLIFlashToolDeclaration]) -> JetCLIFlashProfile
     }
     assert_eq(error, "target `hosted` has no owner-approved programmer facts; declare an adapter plus chip for probe-rs, interface/config for OpenOCD, or machine/cpu for an emulator")
     machine.programmers = [TargetProgrammerFacts]{flash_test_facts(TargetProgrammerAdapter.ProbeRs)}
-    projected :: jet_cli_flash_profile_from_machine(machine) ?? panic("profile")
+    projected: jet_cli_flash_profile_from_machine(machine) ?? panic("profile")
     assert_eq(projected.target_identity, jet_target_provider_identity(machine))
     assert_eq(projected.hardware_identity, sha256_hex(jet_target_hardware_json(machine.hardware)))
 }
 #Test("OpenOCD filename allowlist is ASCII and excludes dot paths") {
-    good :: [String]{"a", "a.elf", "a-1_b.elf", ".hidden"}
-    bad :: [String]{"", ".", "..", "a b", "é.elf", "a/elf", "a\\elf", "a;exit", "{{a}}", "a\n"}
+    good: [String]{"a", "a.elf", "a-1_b.elf", ".hidden"}
+    bad: [String]{"", ".", "..", "a b", "é.elf", "a/elf", "a\\elf", "a;exit", "{{a}}", "a\n"}
     loop name in good -> assert(jet_cli_flash_safe_openocd_image_name(name))
     loop name in bad -> assert(!jet_cli_flash_safe_openocd_image_name(name))
 }
-struct FlashTestParseError { args: [String], message: String }
+FlashTestParseError: struct { args: [String], message: String }
 // #4381 PATH BEGIN: original args test retained; optional Core Path must have one nominal identity.
 #Test("flash bespoke args every branch and help short circuit") {
-    failures :: [FlashTestParseError]{
+    failures: [FlashTestParseError]{
         {args: [String]{"--target"}, message: "`--target` needs a value"},
         {args: [String]{"--image="}, message: "`--image` needs a value"},
         {args: [String]{"--audit", "--quiet"}, message: "`--audit` needs a value"},
@@ -171,7 +171,7 @@ struct FlashTestParseError { args: [String], message: String }
     }
     loop row in failures {
         error := ""
-        _ :: jet_cli_flash_parse_args(row.args) ?? {
+        _: jet_cli_flash_parse_args(row.args) ?? {
             // copy: the message stays with the failed result the handler reads (owner: that
             // temporary result, dropped after the handler) and `error` (owner: this test's local)
             // keeps the text past it.
@@ -180,11 +180,11 @@ struct FlashTestParseError { args: [String], message: String }
         }
         assert_eq(error, row.message)
     }
-    help :: jet_cli_flash_parse_args([String]{"flash", "--json", "--quiet", "--help", "bad"}) ?? panic("parse")
+    help: jet_cli_flash_parse_args([String]{"flash", "--json", "--quiet", "--help", "bad"}) ?? panic("parse")
     assert(help == .Help)
-    bare_help :: jet_cli_flash_parse_args([String]{"help"}) ?? panic("parse")
+    bare_help: jet_cli_flash_parse_args([String]{"help"}) ?? panic("parse")
     assert(bare_help == .Help)
-    parsed :: jet_cli_flash_parse_args([String]{"flash", "--target", "first", "--target=é", "--image=-a=b", "--audit", "audit.json", "--adapter=emulator"}) ?? panic("parse")
+    parsed: jet_cli_flash_parse_args([String]{"flash", "--target", "first", "--target=é", "--image=-a=b", "--audit", "audit.json", "--adapter=emulator"}) ?? panic("parse")
     if parsed == .Options(options) {
         assert_eq(options.target, Val("é"))
         // #4376: exact Core Path projection avoids external nominal owner-field lowering.
@@ -194,7 +194,7 @@ struct FlashTestParseError { args: [String], message: String }
     } else {
         panic("expected options")
     }
-    empty :: jet_cli_flash_parse_args([String]{}) ?? panic("parse")
+    empty: jet_cli_flash_parse_args([String]{}) ?? panic("parse")
     if empty == .Options(options) {
         assert(options.target == None)
         assert(options.image == None)
@@ -209,9 +209,9 @@ struct FlashTestParseError { args: [String], message: String }
     assert_eq(jet_cli_flash_help(), "jet flash --target <board.name> [--image <firmware.elf>] [--audit <target.json>] [--adapter <probe-rs|openocd|emulator>]")
 }
 // #4381 PATH END
-struct FlashTestAuditError { text: String, message: String }
+FlashTestAuditError: struct { text: String, message: String }
 #Test("private raw audit scanner preserves tokens and rejects malformed top-level fields") {
-    rows :: [FlashTestAuditError]{
+    rows: [FlashTestAuditError]{
         {text: "[]", message: "top-level value is not an object"},
         {text: "{{1:2}}", message: "expected a JSON string"},
         {text: "{{\"\\u006eame\":\"a\"}}", message: "escaped object keys are not supported"},
@@ -230,7 +230,7 @@ struct FlashTestAuditError { text: String, message: String }
     }
     loop row in rows {
         error := ""
-        _ :: jet_cli_flash_parse_top_level_string_fields(row.text) ?? {
+        _: jet_cli_flash_parse_top_level_string_fields(row.text) ?? {
             // copy: the message stays with the failed result the handler reads (owner: that
             // temporary result, dropped after the handler) and `error` (owner: this test's local)
             // keeps the text past it.
@@ -239,26 +239,26 @@ struct FlashTestAuditError { text: String, message: String }
         }
         assert_eq(error, row.message)
     }
-    suffix :: String.from_bytes([U8]{U8{13}, U8{10}}) ?? panic("whitespace")
-    tokens :: jet_cli_flash_parse_top_level_string_fields(" \t{{\"a\":\"é\\u000a\\q\",\"b\":[{{\"a\":\"[\\\"\"}}],\"c\":garbage}}{suffix}") ?? panic("scan")
+    suffix: String.from_bytes([U8]{U8{13}, U8{10}}) ?? panic("whitespace")
+    tokens: jet_cli_flash_parse_top_level_string_fields(" \t{{\"a\":\"é\\u000a\\q\",\"b\":[{{\"a\":\"[\\\"\"}}],\"c\":garbage}}{suffix}") ?? panic("scan")
     assert_eq(tokens.get("a"), Val("é\\u000a\\q"))
     assert_eq(tokens.get("b"), Val(""))
     assert_eq(tokens.get("c"), Val(""))
-    control :: String.from_bytes([U8]{U8{1}}) ?? panic("control")
+    control: String.from_bytes([U8]{U8{1}}) ?? panic("control")
     assert_eq(jet_cli_flash_json_string_token("é\n\"\\{control}"), "é\\n\\\"\\\\\\u0001")
     invalid := JetCLIFlashTokenCursor{bytes: [U8]{U8{34}, U8{255}, U8{34}}, at: 0}
-    _ :: jet_cli_flash_parse_json_string_token(&invalid) ?? {
+    _: jet_cli_flash_parse_json_string_token(&invalid) ?? {
         assert_eq(err.message, "JSON string is not UTF-8")
         return
     }
     panic("invalid UTF-8 accepted")
 }
-fn flash_test_audit_fields(machine: TargetMachine) -> [String:String] Never! {
+flash_test_audit_fields: fn(machine: TargetMachine) -> [String:String] Never! {
     [String:String]{"name": jet_cli_flash_json_string_token(machine.name), "triple": jet_cli_flash_json_string_token(machine.triple), "environment": jet_cli_flash_json_string_token(jet_target_environment_identity(machine)), "provider_identity": jet_cli_flash_json_string_token(jet_target_provider_identity(machine))}
 }
 #Test("audit identity exact escaped tokens and first present image digest precedence") {
-    machine :: jet_target_machine_hosted("x86_64-unknown-linux-gnu", "test")
-    keys :: [String]{"name", "triple", "environment", "provider_identity"}
+    machine: jet_target_machine_hosted("x86_64-unknown-linux-gnu", "test")
+    keys: [String]{"name", "triple", "environment", "provider_identity"}
     loop key in keys {
         fields := flash_test_audit_fields(machine)
         fields[key] = "bad"
@@ -279,7 +279,7 @@ fn flash_test_audit_fields(machine: TargetMachine) -> [String:String] Never! {
         if jet_cli_flash_verify_audit(partial, machine, "hash") == .Err(failure) -> error = failure.message.copy()
         assert_eq(error, "target audit has no `{key}` identity field")
     }
-    digest_keys :: [String]{"image_sha256", "artifact_sha256", "image_digest"}
+    digest_keys: [String]{"image_sha256", "artifact_sha256", "image_digest"}
     loop key in digest_keys {
         fields := flash_test_audit_fields(machine)
         fields[key] = "hash"
@@ -308,7 +308,7 @@ fn flash_test_audit_fields(machine: TargetMachine) -> [String:String] Never! {
     assert_eq(error, "target audit `name` does not match selected target `hosted`")
 }
 // #4376: original host fixture retained; trait/impl Core Path owner identities must agree after compiler fix.
-struct FlashTestFile {
+FlashTestFile: struct {
     metadata: JetCLIFlashMetadata
     canonical: Path
     text: String
@@ -319,12 +319,12 @@ struct FlashTestFile {
     hash_error: String?
     non_utf8_name: Bool
 }
-struct FlashTestHost {
+FlashTestHost: struct {
     files: [String:FlashTestFile]
     path: [Path]?
     impl JetCLIFlashHost {
-    fn symlink_metadata(&self, path: Path) -> JetCLIFlashMetadata JetCLIFlashError! {
-        file :: self.files.get(path.raw) ?? return Err(jet_cli_flash_error("missing"))
+    symlink_metadata: fn(&self, path: Path) -> JetCLIFlashMetadata JetCLIFlashError! {
+        file: self.files.get(path.raw) ?? return Err(jet_cli_flash_error("missing"))
         // copy: `failure` is a payload view of a file in the host table (owner: self.files, which
         // keeps it); the error owns its own.
         if file.inspect_error == .Val(failure) -> return Err(failure.copy())
@@ -332,70 +332,70 @@ struct FlashTestHost {
         // result owns its own.
         Ok(file.metadata.copy())
     }
-    fn canonicalize(&self, path: Path) -> Path JetCLIFlashError! {
-        file :: self.files.get(path.raw) ?? return Err(jet_cli_flash_error("missing"))
+    canonicalize: fn(&self, path: Path) -> Path JetCLIFlashError! {
+        file: self.files.get(path.raw) ?? return Err(jet_cli_flash_error("missing"))
         if file.canonical_error == .Val(message) -> return Err(jet_cli_flash_error(message))
         // copy: `file` is a view of the host table entry (owner: self.files, which keeps it); the
         // result owns its own.
         Ok(file.canonical.copy())
     }
-    fn metadata(&self, path: Path) -> JetCLIFlashMetadata JetCLIFlashError! {
-        file :: self.files.get(path.raw) ?? return Err(jet_cli_flash_error("missing"))
+    metadata: fn(&self, path: Path) -> JetCLIFlashMetadata JetCLIFlashError! {
+        file: self.files.get(path.raw) ?? return Err(jet_cli_flash_error("missing"))
         if file.metadata_error == .Val(message) -> return Err(jet_cli_flash_error(message))
         // copy: `file` is a view of the host table entry (owner: self.files, which keeps it); the
         // result owns its own.
         Ok(file.metadata.copy())
     }
-    fn read_audit_text(&self, path: Path) -> String JetCLIFlashError! {
-        file :: self.files.get(path.raw) ?? return Err(jet_cli_flash_error("missing"))
+    read_audit_text: fn(&self, path: Path) -> String JetCLIFlashError! {
+        file: self.files.get(path.raw) ?? return Err(jet_cli_flash_error("missing"))
         if file.read_error == .Val(message) -> return Err(jet_cli_flash_error(message))
         // copy: `file` is a view of the host table entry (owner: self.files, which keeps it); the
         // result owns its own.
         Ok(file.text.copy())
     }
-    fn sha256_file(&self, path: Path) -> String JetCLIFlashError! {
-        file :: self.files.get(path.raw) ?? return Err(jet_cli_flash_error("missing"))
+    sha256_file: fn(&self, path: Path) -> String JetCLIFlashError! {
+        file: self.files.get(path.raw) ?? return Err(jet_cli_flash_error("missing"))
         if file.hash_error == .Val(message) -> return Err(jet_cli_flash_error(message))
         Ok(sha256_hex(path.raw))
     }
     // copy: `self.path` stays with the receiver (`self` is read-only here; no move out of it) and
     // the new `Ok` value owns its own.
-    fn path_snapshot(&self) -> [Path]? JetCLIFlashError! { Ok(self.path.copy()) }
-    fn utf8_filename(&self, path: Path) -> String? JetCLIFlashError! {
-        file :: self.files.get(path.raw) ?? return Ok(flash_test_no_text())
+    path_snapshot: fn(&self) -> [Path]? JetCLIFlashError! { Ok(self.path.copy()) }
+    utf8_filename: fn(&self, path: Path) -> String? JetCLIFlashError! {
+        file: self.files.get(path.raw) ?? return Ok(flash_test_no_text())
         if file.non_utf8_name -> return Err(jet_cli_flash_non_utf8_error(2))
         Ok(Val(flash_paths.name(path)))
     }
 }
 }
-fn flash_test_file(path: String) -> FlashTestFile Never! {
+flash_test_file: fn(path: String) -> FlashTestFile Never! {
     FlashTestFile{metadata: JetCLIFlashMetadata{symlink: false, regular: true, bytes: 2}, canonical: flash_paths.of(path), text: "{{}}", inspect_error: None, canonical_error: None, metadata_error: None, read_error: None, hash_error: None, non_utf8_name: false}
 }
 // #4316: route the same generic host behavior through an ordinary typed test caller.
 // The original direct-call failing unit is retained in the CLI-36 scratch evidence.
-fn flash_test_regular_file(host: &FlashTestHost, path: Path, label: String) -> Path JetCLIFlashError! {
+flash_test_regular_file: fn(host: &FlashTestHost, path: Path, label: String) -> Path JetCLIFlashError! {
     jet_cli_flash_regular_file(&host, path, label)
 }
-fn flash_test_resolve_audit(host: &FlashTestHost, image: Path, target: String, explicit: Path?) -> Path JetCLIFlashError! {
+flash_test_resolve_audit: fn(host: &FlashTestHost, image: Path, target: String, explicit: Path?) -> Path JetCLIFlashError! {
     jet_cli_flash_resolve_audit(&host, image, target, explicit)
 }
-fn flash_test_read_audit(host: &FlashTestHost, path: Path) -> String JetCLIFlashError! {
+flash_test_read_audit: fn(host: &FlashTestHost, path: Path) -> String JetCLIFlashError! {
     jet_cli_flash_read_audit(&host, path)
 }
-fn flash_test_resolve_tool(host: &FlashTestHost, name: String) -> Path JetCLIFlashError! {
+flash_test_resolve_tool: fn(host: &FlashTestHost, name: String) -> Path JetCLIFlashError! {
     jet_cli_flash_resolve_tool(&host, name)
 }
-fn flash_test_from_machine(host: &FlashTestHost, machine: TargetMachine, adapter: JetCLIFlashAdapter?) -> JetCLIFlashPlan JetCLIFlashError! {
+flash_test_from_machine: fn(host: &FlashTestHost, machine: TargetMachine, adapter: JetCLIFlashAdapter?) -> JetCLIFlashPlan JetCLIFlashError! {
     jet_cli_flash_plan_from_machine<FlashTestHost>(&host, machine, flash_paths.of("/out/firmware.elf"), flash_test_no_path(), adapter)
 }
-fn flash_test_from_target(host: &FlashTestHost, target: String, image: Path) -> JetCLIFlashPlan JetCLIFlashError! {
+flash_test_from_target: fn(host: &FlashTestHost, target: String, image: Path) -> JetCLIFlashPlan JetCLIFlashError! {
     jet_cli_flash_plan_from_target_and_image(&host, target, image, flash_test_no_path(), flash_test_adapter_none(), "test")
 }
 // #4376 HOST BEGIN: original host tests retained; Core Path IR owner prevents lowering.
 #Test("host regular file preserves no-follow and canonicalize error order through typed caller") {
     host := FlashTestHost{files: [String:FlashTestFile]{}, path: None}
     error := ""
-    _ :: flash_test_regular_file(&host, flash_paths.of("image"), "flash image") ?? {
+    _: flash_test_regular_file(&host, flash_paths.of("image"), "flash image") ?? {
         // copy: the message stays with the failed result the handler reads (owner: that temporary
         // result, dropped after the handler) and `error` (owner: this test's local) keeps the text
         // past it.
@@ -409,7 +409,7 @@ fn flash_test_from_target(host: &FlashTestHost, target: String, image: Path) -> 
     // copy: `file` stays with `file`, which is read again later on this line, and the new value
     // owns its own.
     host.files["image"] = file.copy()
-    _ :: flash_test_regular_file(&host, flash_paths.of("image"), "flash image") ?? {
+    _: flash_test_regular_file(&host, flash_paths.of("image"), "flash image") ?? {
         // copy: the message stays with the failed result the handler reads (owner: that temporary
         // result, dropped after the handler) and `error` (owner: this test's local) keeps the text
         // past it.
@@ -422,7 +422,7 @@ fn flash_test_from_target(host: &FlashTestHost, target: String, image: Path) -> 
     // copy: `file` stays with `file`, which is read again later on this line, and the new value
     // owns its own.
     host.files["image"] = file.copy()
-    _ :: flash_test_regular_file(&host, flash_paths.of("image"), "target audit") ?? {
+    _: flash_test_regular_file(&host, flash_paths.of("image"), "target audit") ?? {
         // copy: the message stays with the failed result the handler reads (owner: that temporary
         // result, dropped after the handler) and `error` (owner: this test's local) keeps the text
         // past it.
@@ -434,7 +434,7 @@ fn flash_test_from_target(host: &FlashTestHost, target: String, image: Path) -> 
     // copy: `file` stays with `file`, which is read again later on this line, and the new value
     // owns its own.
     host.files["image"] = file.copy()
-    _ :: flash_test_regular_file(&host, flash_paths.of("image"), "flash image") ?? {
+    _: flash_test_regular_file(&host, flash_paths.of("image"), "flash image") ?? {
         // copy: the message stays with the failed result the handler reads (owner: that temporary
         // result, dropped after the handler) and `error` (owner: this test's local) keeps the text
         // past it.
@@ -448,12 +448,12 @@ fn flash_test_from_target(host: &FlashTestHost, target: String, image: Path) -> 
     host.files["image"] = file.copy()
     assert_eq(flash_paths.show(flash_test_regular_file(&host, flash_paths.of("image"), "flash image") ?? panic("regular")), "/image")
 }
-fn flash_test_no_text() -> String? Never! { None }
-fn flash_test_no_path() -> Path? Never! { None }
+flash_test_no_text: fn() -> String? Never! { None }
+flash_test_no_path: fn() -> Path? Never! { None }
 #Test("audit sidecar candidates explicit selection Unicode sanitization and duplicate names through typed caller") {
     host := FlashTestHost{files: [String:FlashTestFile]{}, path: None}
     error := ""
-    _ :: flash_test_resolve_audit(&host, flash_paths.of("/out/image.elf"), "board", flash_test_no_path()) ?? {
+    _: flash_test_resolve_audit(&host, flash_paths.of("/out/image.elf"), "board", flash_test_no_path()) ?? {
         // copy: the message stays with the failed result the handler reads (owner: that temporary
         // result, dropped after the handler) and `error` (owner: this test's local) keeps the text
         // past it.
@@ -465,7 +465,7 @@ fn flash_test_no_path() -> Path? Never! { None }
     assert_eq(flash_paths.show(flash_test_resolve_audit(&host, flash_paths.of("/out/image.elf"), "board", flash_test_no_path()) ?? panic("audit")), "/out/image.target.json")
     assert_eq(flash_paths.show(flash_test_resolve_audit(&host, flash_paths.of("/out/image.elf"), "image", flash_test_no_path()) ?? panic("same candidate")), "/out/image.target.json")
     host.files["/out/board.target.json"] = flash_test_file("/out/board.target.json")
-    _ :: flash_test_resolve_audit(&host, flash_paths.of("/out/image.elf"), "board", flash_test_no_path()) ?? {
+    _: flash_test_resolve_audit(&host, flash_paths.of("/out/image.elf"), "board", flash_test_no_path()) ?? {
         // copy: the message stays with the failed result the handler reads (owner: that temporary
         // result, dropped after the handler) and `error` (owner: this test's local) keeps the text
         // past it.
@@ -477,7 +477,7 @@ fn flash_test_no_path() -> Path? Never! { None }
     file := flash_test_file("/out/board.target.json")
     file.metadata.symlink = true
     host.files["/out/board.target.json"] = file
-    _ :: flash_test_resolve_audit(&host, flash_paths.of("/out/image.elf"), "board", flash_test_no_path()) ?? {
+    _: flash_test_resolve_audit(&host, flash_paths.of("/out/image.elf"), "board", flash_test_no_path()) ?? {
         // copy: the message stays with the failed result the handler reads (owner: that temporary
         // result, dropped after the handler) and `error` (owner: this test's local) keeps the text
         // past it.
@@ -498,7 +498,7 @@ fn flash_test_no_path() -> Path? Never! { None }
     // owns its own.
     host.files["audit"] = file.copy()
     error := ""
-    _ :: flash_test_read_audit(&host, flash_paths.of("audit")) ?? {
+    _: flash_test_read_audit(&host, flash_paths.of("audit")) ?? {
         // copy: the message stays with the failed result the handler reads (owner: that temporary
         // result, dropped after the handler) and `error` (owner: this test's local) keeps the text
         // past it.
@@ -510,7 +510,7 @@ fn flash_test_no_path() -> Path? Never! { None }
     // copy: `file` stays with `file`, which is read again later on this line, and the new value
     // owns its own.
     host.files["audit"] = file.copy()
-    _ :: flash_test_read_audit(&host, flash_paths.of("audit")) ?? {
+    _: flash_test_read_audit(&host, flash_paths.of("audit")) ?? {
         // copy: the message stays with the failed result the handler reads (owner: that temporary
         // result, dropped after the handler) and `error` (owner: this test's local) keeps the text
         // past it.
@@ -525,7 +525,7 @@ fn flash_test_no_path() -> Path? Never! { None }
     assert_eq(flash_test_read_audit(&host, flash_paths.of("audit")) ?? panic("read"), "{{}}")
     file.metadata_error = Val("stat failed")
     host.files["audit"] = file
-    _ :: flash_test_read_audit(&host, flash_paths.of("audit")) ?? {
+    _: flash_test_read_audit(&host, flash_paths.of("audit")) ?? {
         // copy: the message stays with the failed result the handler reads (owner: that temporary
         // result, dropped after the handler) and `error` (owner: this test's local) keeps the text
         // past it.
@@ -536,10 +536,10 @@ fn flash_test_no_path() -> Path? Never! { None }
 }
 #Test("declared tool captured PATH skips errors symlinks directories and stops at first canonicalization") {
     host := FlashTestHost{files: [String:FlashTestFile]{}, path: None}
-    names :: [String]{"", "a/b", "a\\b"}
+    names: [String]{"", "a/b", "a\\b"}
     loop name in names {
         error := ""
-        _ :: flash_test_resolve_tool(&host, name) ?? {
+        _: flash_test_resolve_tool(&host, name) ?? {
             // copy: the message stays with the failed result the handler reads (owner: that
             // temporary result, dropped after the handler) and `error` (owner: this test's local)
             // keeps the text past it.
@@ -549,7 +549,7 @@ fn flash_test_no_path() -> Path? Never! { None }
         assert_eq(error, "declared flash tool `{name}` is not a bare executable")
     }
     error := ""
-    _ :: flash_test_resolve_tool(&host, "tool") ?? {
+    _: flash_test_resolve_tool(&host, "tool") ?? {
         // copy: the message stays with the failed result the handler reads (owner: that temporary
         // result, dropped after the handler) and `error` (owner: this test's local) keeps the text
         // past it.
@@ -574,7 +574,7 @@ fn flash_test_no_path() -> Path? Never! { None }
     // owns its own.
     host.files["/first/tool"] = file.copy()
     host.files["/second/tool"] = flash_test_file("/real/tool")
-    _ :: flash_test_resolve_tool(&host, "tool") ?? {
+    _: flash_test_resolve_tool(&host, "tool") ?? {
         // copy: the message stays with the failed result the handler reads (owner: that temporary
         // result, dropped after the handler) and `error` (owner: this test's local) keeps the text
         // past it.
@@ -589,7 +589,7 @@ fn flash_test_no_path() -> Path? Never! { None }
     host.files["/first/tool"] = file.copy()
     assert_eq(flash_paths.show(flash_test_resolve_tool(&host, "tool") ?? panic("tool")), "/real/first")
     host.path = Val([Path]{})
-    _ :: flash_test_resolve_tool(&host, "tool") ?? {
+    _: flash_test_resolve_tool(&host, "tool") ?? {
         // copy: the message stays with the failed result the handler reads (owner: that temporary
         // result, dropped after the handler) and `error` (owner: this test's local) keeps the text
         // past it.
@@ -602,11 +602,11 @@ fn flash_test_no_path() -> Path? Never! { None }
 #Test("capture exact boundary truncation marker and Rust UTF-8 lossy sequences") {
     bytes := [U8]{}
     loop _ in 0..<65536 -> &bytes.push(U8{97})
-    capture :: jet_cli_flash_bound_capture(bytes)
+    capture: jet_cli_flash_bound_capture(bytes)
     assert(!capture.truncated)
     assert_eq(capture.bytes, bytes)
     &bytes.push(U8{98})
-    bounded :: jet_cli_flash_bound_capture(bytes)
+    bounded: jet_cli_flash_bound_capture(bytes)
     assert(bounded.truncated)
     assert_eq(bounded.bytes.len(), 65536)
     // copy: a sub-range of `bounded` (which keeps its whole list) is copied out into the new
@@ -619,23 +619,23 @@ fn flash_test_no_path() -> Path? Never! { None }
 }
 // #4381 PATH BEGIN: original receipt/plan tests retained; Core Path nominal identity must unify.
 #Test("receipt status does not override explicit execution failure and sections use shared codec") {
-    plan :: flash_test_plan()
-    failed :: jet_cli_flash_execution_failed("launch", "denied", "sandbox", "strict")
-    receipt :: jet_cli_flash_receipt_from_execution(plan, ^failed)
+    plan: flash_test_plan()
+    failed: jet_cli_flash_execution_failed("launch", "denied", "sandbox", "strict")
+    receipt: jet_cli_flash_receipt_from_execution(plan, ^failed)
     assert(!receipt.success)
     assert(receipt.status == None)
-    section :: jet_cli_flash_receipt_section(receipt) ?? panic("section")
+    section: jet_cli_flash_receipt_section(receipt) ?? panic("section")
     assert_eq(section.name, "flash")
     assert_eq(section.type_name, "FlashReceipt")
     assert_eq(section.bytes, canonical_json_bytes(jet_cli_flash_receipt_to_json(receipt)))
-    execution :: JetCLIFlashExecution{status: Val(9), stdout: "ok\n".bytes(), stderr: [U8]{}, mechanism: "sandbox", policy: "strict", failure: None}
-    success :: jet_cli_flash_receipt_from_execution(plan, ^execution)
+    execution: JetCLIFlashExecution{status: Val(9), stdout: "ok\n".bytes(), stderr: [U8]{}, mechanism: "sandbox", policy: "strict", failure: None}
+    success: jet_cli_flash_receipt_from_execution(plan, ^execution)
     assert(success.success)
     assert_eq(success.status, Val(9))
     assert(!success.stdout_truncated)
-    status :: jet_cli_flash_plan_value(plan)
+    status: jet_cli_flash_plan_value(plan)
     if status == .Object(_) {
-        cell :: status["image_bytes"]
+        cell: status["image_bytes"]
         if cell == .Int(value) -> assert_eq(value, 17) else -> panic("integer status")
     } else {
         panic("plan status")
@@ -646,21 +646,21 @@ fn flash_test_no_path() -> Path? Never! { None }
 // compiled with rustc (no Cargo). Fixture above is synthetic: contains no Flash
 // receipt/plan cases.
 #Test("flash plan identity and success failure receipt digests match Rust") {
-    plan :: flash_test_plan()
+    plan: flash_test_plan()
     assert_eq(sha256_hex(jet_cli_flash_plan_identity(plan)), "1459f83d21b5bc686b503b5aceafeb165fdbd0acd4a5859ae399d59647ae5128")
-    success :: jet_cli_flash_receipt_from_execution(plan, JetCLIFlashExecution{status: Val(9), stdout: "ok\n".bytes(), stderr: [U8]{}, mechanism: "sandbox", policy: "strict", failure: None})
+    success: jet_cli_flash_receipt_from_execution(plan, JetCLIFlashExecution{status: Val(9), stdout: "ok\n".bytes(), stderr: [U8]{}, mechanism: "sandbox", policy: "strict", failure: None})
     assert_eq(success.result_identity, "flash-result-v1:8b4aeaea61404f9724ab07728e887e892be5c4d89ebfa8f2d00014e77ae9bdd1")
     assert_eq(canonical_json_sha256(jet_cli_flash_receipt_to_json(success)), "977767e9d16000a35172ec5319b1b5458c2f294c869e0b22c08c122fdd56d719")
-    failed :: jet_cli_flash_receipt_from_execution(plan, jet_cli_flash_execution_failed("launch", "denied", "sandbox", "strict"))
+    failed: jet_cli_flash_receipt_from_execution(plan, jet_cli_flash_execution_failed("launch", "denied", "sandbox", "strict"))
     assert_eq(failed.result_identity, "flash-result-v1:add820c2a6679fbe6e902c6dce12e17176c74ce99b888ea6bb64bd284aa094c3")
     assert_eq(canonical_json_sha256(jet_cli_flash_receipt_to_json(failed)), "e1748d0de32851824b7ee9bf7f271bedc48adb871edf31e4eb82a7463f93e1d1")
 }
 // #4381 PATH END
-fn flash_test_adapter_none() -> JetCLIFlashAdapter? Never! { None }
-fn flash_test_build(host: &FlashTestHost, machine: TargetMachine) -> JetCLIFlashPlan JetCLIFlashError! {
+flash_test_adapter_none: fn() -> JetCLIFlashAdapter? Never! { None }
+flash_test_build: fn(host: &FlashTestHost, machine: TargetMachine) -> JetCLIFlashPlan JetCLIFlashError! {
     jet_cli_flash_plan_from_machine<FlashTestHost>(&host, machine, flash_paths.of("/out/firmware.elf"), flash_test_no_path(), flash_test_adapter_none())
 }
-fn flash_test_build_error(host: &FlashTestHost, machine: TargetMachine) -> String Never! {
+flash_test_build_error: fn(host: &FlashTestHost, machine: TargetMachine) -> String Never! {
     if flash_test_build(&host, machine) == {
         .Ok(_) -> panic("expected plan refusal")
         // copy: the message stays with the failed result (owner: the temporary matched here) and
@@ -668,36 +668,36 @@ fn flash_test_build_error(host: &FlashTestHost, machine: TargetMachine) -> Strin
         .Err(failure) -> failure.message.copy()
     }
 }
-fn flash_test_machine() -> TargetMachine Never! {
+flash_test_machine: fn() -> TargetMachine Never! {
     machine := jet_target_machine_board_sensor_v1("test")
     machine.programmers = [TargetProgrammerFacts]{flash_test_facts(TargetProgrammerAdapter.ProbeRs)}
     machine
 }
-fn flash_test_host_for_machine(machine: TargetMachine) -> FlashTestHost Never! {
+flash_test_host_for_machine: fn(machine: TargetMachine) -> FlashTestHost Never! {
     audit := flash_test_file("/out/firmware.target.json")
-    digest :: sha256_hex("/out/firmware.elf")
+    digest: sha256_hex("/out/firmware.elf")
     audit.text = "{{\"name\":{jet_target_json_quote(machine.name)},\"triple\":{jet_target_json_quote(machine.triple)},\"environment\":{jet_target_json_quote(jet_target_environment_identity(machine))},\"provider_identity\":{jet_target_json_quote(jet_target_provider_identity(machine))},\"image_sha256\":\"{digest}\"}}"
     FlashTestHost{files: [String:FlashTestFile]{"/out/firmware.elf": flash_test_file("/out/firmware.elf"), "/out/firmware.target.json": audit, "/bin/tool": flash_test_file("/bin/tool")}, path: Val([Path]{flash_paths.of("/bin")})}
 }
 // #4316 PLAN BEGIN: original plan tests; full proof owed after generic target lowering is fixed.
 #Test("flash builder hosted and canonical validation precede filesystem effects") {
     empty := FlashTestHost{files: [String:FlashTestFile]{}, path: None}
-    hosted :: jet_target_machine_hosted("x86_64-unknown-linux-gnu", "test")
+    hosted: jet_target_machine_hosted("x86_64-unknown-linux-gnu", "test")
     assert_eq(flash_test_build_error(&empty, hosted), "target `hosted` is hosted; flashing requires a no-OS board or emulator profile")
     machine := flash_test_machine()
     machine.triple = ""
-    validation :: jet_target_machine_validate(machine, jet_target_machine_use_default())
+    validation: jet_target_machine_validate(machine, jet_target_machine_use_default())
     assert(!validation.is_empty())
     assert_eq(flash_test_build_error(&empty, machine), "target `board.sensor_v1` failed canonical profile validation: {jet_target_machine_errors_debug(validation)}")
     machine = flash_test_machine()
     machine.memory[0].kind = MemoryKind.Reserved
-    validation_no_flash :: jet_target_machine_validate(machine, jet_target_machine_use_default())
+    validation_no_flash: jet_target_machine_validate(machine, jet_target_machine_use_default())
     // No-flash branch in FlashPlan is defensive: canonical validation reports
     // MissingMemoryKind(Flash) first, so it cannot be reached with real facts.
     assert_eq(flash_test_build_error(&empty, machine), "target `board.sensor_v1` failed canonical profile validation: {jet_target_machine_errors_debug(validation_no_flash)}")
 }
 #Test("flash builder immutable image metadata size hash and UTF-8 filename order") {
-    machine :: flash_test_machine()
+    machine: flash_test_machine()
     host := flash_test_host_for_machine(machine)
     image := flash_test_file("/out/firmware.elf")
     image.metadata_error = Val("stat failed")
@@ -727,7 +727,7 @@ fn flash_test_host_for_machine(machine: TargetMachine) -> FlashTestHost Never! {
     // copy: the fixture file (owner: this test's local) is edited and stored again by the following
     // cases, and the host table (owner: host.files) holds its own copy of each version.
     host.files["/out/firmware.elf"] = image.copy()
-    plan :: flash_test_build(&host, machine) ?? panic("plan")
+    plan: flash_test_build(&host, machine) ?? panic("plan")
     assert_eq(plan.image_bytes, 4194304)
     assert_eq(plan.image_sha256, sha256_hex("/out/firmware.elf"))
     assert_eq(plan.tool_identity, sha256_hex("/bin/tool"))
@@ -763,7 +763,7 @@ fn flash_test_host_for_machine(machine: TargetMachine) -> FlashTestHost Never! {
     host.files["/bin/tool"] = tool
     assert_eq(flash_test_build_error(&host, machine), "cannot hash declared flash tool `/bin/tool`: hash failed")
     error := ""
-    _ :: flash_test_from_machine(&host, machine, Val(JetCLIFlashAdapter.OpenOcd)) ?? {
+    _: flash_test_from_machine(&host, machine, Val(JetCLIFlashAdapter.OpenOcd)) ?? {
         // copy: the message stays with the failed result the handler reads (owner: that temporary
         // result, dropped after the handler) and `error` (owner: this test's local) keeps the text
         // past it.
@@ -777,7 +777,7 @@ fn flash_test_host_for_machine(machine: TargetMachine) -> FlashTestHost Never! {
     assert_eq(flash_paths.show(jet_cli_flash_default_image("unknown", "test")), ".jet/target/unknown/firmware.elf")
     host := FlashTestHost{files: [String:FlashTestFile]{}, path: None}
     error := ""
-    _ :: flash_test_from_target(&host, "unknown", flash_paths.of("image")) ?? {
+    _: flash_test_from_target(&host, "unknown", flash_paths.of("image")) ?? {
         // copy: the message stays with the failed result the handler reads (owner: that temporary
         // result, dropped after the handler) and `error` (owner: this test's local) keeps the text
         // past it.
@@ -785,12 +785,12 @@ fn flash_test_host_for_machine(machine: TargetMachine) -> FlashTestHost Never! {
         flash_test_plan()
     }
     assert_eq(error, "unknown target machine `unknown`")
-    machine :: flash_test_machine()
+    machine: flash_test_machine()
     host = flash_test_host_for_machine(machine)
     // Real selected sensor profile has no programmer facts, unlike fixture above.
-    selected :: jet_driver_target_machine_by_name("sensor", "test") ?? panic("target")
+    selected: jet_driver_target_machine_by_name("sensor", "test") ?? panic("target")
     host = flash_test_host_for_machine(selected)
-    _ :: flash_test_from_target(&host, "sensor", flash_paths.of("/out/firmware.elf")) ?? {
+    _: flash_test_from_target(&host, "sensor", flash_paths.of("/out/firmware.elf")) ?? {
         // copy: the message stays with the failed result the handler reads (owner: that temporary
         // result, dropped after the handler) and `error` (owner: this test's local) keeps the text
         // past it.
@@ -801,12 +801,12 @@ fn flash_test_host_for_machine(machine: TargetMachine) -> FlashTestHost Never! {
 }
 // #4316 PLAN END
 #Test("raw audit scanner Rust ASCII whitespace excludes vertical tab") {
-    form_feed :: String.from_bytes([U8]{U8{12}}) ?? panic("form feed")
-    fields :: jet_cli_flash_parse_top_level_string_fields("{form_feed}{{}}{form_feed}") ?? panic("ASCII whitespace")
+    form_feed: String.from_bytes([U8]{U8{12}}) ?? panic("form feed")
+    fields: jet_cli_flash_parse_top_level_string_fields("{form_feed}{{}}{form_feed}") ?? panic("ASCII whitespace")
     assert(fields.is_empty())
-    vertical_tab :: String.from_bytes([U8]{U8{11}}) ?? panic("vertical tab")
+    vertical_tab: String.from_bytes([U8]{U8{11}}) ?? panic("vertical tab")
     error := ""
-    _ :: jet_cli_flash_parse_top_level_string_fields("{vertical_tab}{{}}") ?? {
+    _: jet_cli_flash_parse_top_level_string_fields("{vertical_tab}{{}}") ?? {
         // copy: the message stays with the failed result the handler reads (owner: that temporary
         // result, dropped after the handler) and `error` (owner: this test's local) keeps the text
         // past it.
@@ -825,7 +825,7 @@ fn flash_test_host_for_machine(machine: TargetMachine) -> FlashTestHost Never! {
     // copy: the fixture file (owner: this test's local) is edited and stored again by the following
     // cases, and the host table (owner: host.files) holds its own copy of each version.
     host.files["/out/firmware.elf"] = image.copy()
-    plan :: flash_test_build(&host, machine) ?? panic("largest capacity")
+    plan: flash_test_build(&host, machine) ?? panic("largest capacity")
     assert_eq(plan.image_bytes, 8388608)
     image.metadata.bytes = 8388609
     // copy: the fixture file (owner: this test's local) is edited and stored again by the following
@@ -834,7 +834,7 @@ fn flash_test_host_for_machine(machine: TargetMachine) -> FlashTestHost Never! {
     assert_eq(flash_test_build_error(&host, machine), "flash image `/out/firmware.elf` is 8388609 bytes but target `board.sensor_v1` declares only 8388608 flash bytes")
     machine.programmers = [TargetProgrammerFacts]{flash_test_facts(TargetProgrammerAdapter.OpenOcd)}
     host = flash_test_host_for_machine(machine)
-    unsafe_image :: "/out/evil;file.elf"
+    unsafe_image: "/out/evil;file.elf"
     image = flash_test_file(unsafe_image)
     // copy: the fixture file (owner: this test's local) is edited and stored again by the following
     // cases, and the host table (owner: host.files) holds its own copy of each version.
@@ -862,8 +862,8 @@ fn flash_test_host_for_machine(machine: TargetMachine) -> FlashTestHost Never! {
     // copy: `output` stays with `output`, which is read again later on this line, and the field
     // `stdout` owns its own. `output` stays with `output`, which is read again later on this line,
     // and the field `stderr` owns its own.
-    execution :: JetCLIFlashExecution{status: Val(0), stdout: output.copy(), stderr: output.copy(), mechanism: "sandbox", policy: "strict", failure: None}
-    receipt :: jet_cli_flash_receipt_from_execution(flash_test_plan(), ^execution)
+    execution: JetCLIFlashExecution{status: Val(0), stdout: output.copy(), stderr: output.copy(), mechanism: "sandbox", policy: "strict", failure: None}
+    receipt: jet_cli_flash_receipt_from_execution(flash_test_plan(), ^execution)
     assert(receipt.stdout_truncated)
     assert(receipt.stderr_truncated)
     assert_eq(receipt.stdout.len(), 65536)
@@ -889,7 +889,7 @@ fn flash_test_host_for_machine(machine: TargetMachine) -> FlashTestHost Never! {
 // #4378: Core raw OS-byte addresses remain gated. The scripted native seam
 // refuses them with exact byte provenance; policy never converts/join lossy text.
 #Test("UTF-8-only flash seam preserves nonUTF byte-position refusal without skipping it") {
-    raw :: [U8]{U8{97}, U8{47}, U8{255}, U8{98}}
+    raw: [U8]{U8{97}, U8{47}, U8{255}, U8{98}}
     assert(String.from_bytes(raw) == .Err(_))
     host := FlashTestHost{files: [String:FlashTestFile]{}, path: Val([Path]{flash_paths.of("/bin")})}
     file := flash_test_file("/bin/tool")
@@ -929,7 +929,7 @@ fn flash_test_host_for_machine(machine: TargetMachine) -> FlashTestHost Never! {
 #Test("host regular file preserves no-follow and canonicalize error order") {
     host := FlashTestHost{files: [String:FlashTestFile]{}, path: None}
     error := ""
-    _ :: jet_cli_flash_regular_file(&host, flash_paths.of("image"), "flash image") ?? {
+    _: jet_cli_flash_regular_file(&host, flash_paths.of("image"), "flash image") ?? {
         // copy: the message stays with the failed result the handler reads (owner: that temporary
         // result, dropped after the handler) and `error` (owner: this test's local) keeps the text
         // past it.
@@ -943,7 +943,7 @@ fn flash_test_host_for_machine(machine: TargetMachine) -> FlashTestHost Never! {
     // copy: `file` stays with `file`, which is read again later on this line, and the new value
     // owns its own.
     host.files["image"] = file.copy()
-    _ :: jet_cli_flash_regular_file(&host, flash_paths.of("image"), "flash image") ?? {
+    _: jet_cli_flash_regular_file(&host, flash_paths.of("image"), "flash image") ?? {
         // copy: the message stays with the failed result the handler reads (owner: that temporary
         // result, dropped after the handler) and `error` (owner: this test's local) keeps the text
         // past it.
@@ -956,7 +956,7 @@ fn flash_test_host_for_machine(machine: TargetMachine) -> FlashTestHost Never! {
     // copy: `file` stays with `file`, which is read again later on this line, and the new value
     // owns its own.
     host.files["image"] = file.copy()
-    _ :: jet_cli_flash_regular_file(&host, flash_paths.of("image"), "target audit") ?? {
+    _: jet_cli_flash_regular_file(&host, flash_paths.of("image"), "target audit") ?? {
         // copy: the message stays with the failed result the handler reads (owner: that temporary
         // result, dropped after the handler) and `error` (owner: this test's local) keeps the text
         // past it.
@@ -968,7 +968,7 @@ fn flash_test_host_for_machine(machine: TargetMachine) -> FlashTestHost Never! {
     // copy: `file` stays with `file`, which is read again later on this line, and the new value
     // owns its own.
     host.files["image"] = file.copy()
-    _ :: jet_cli_flash_regular_file(&host, flash_paths.of("image"), "flash image") ?? {
+    _: jet_cli_flash_regular_file(&host, flash_paths.of("image"), "flash image") ?? {
         // copy: the message stays with the failed result the handler reads (owner: that temporary
         // result, dropped after the handler) and `error` (owner: this test's local) keeps the text
         // past it.
@@ -985,7 +985,7 @@ fn flash_test_host_for_machine(machine: TargetMachine) -> FlashTestHost Never! {
 #Test("audit sidecar candidates explicit selection Unicode sanitization and duplicate names") {
     host := FlashTestHost{files: [String:FlashTestFile]{}, path: None}
     error := ""
-    _ :: jet_cli_flash_resolve_audit(&host, flash_paths.of("/out/image.elf"), "board", flash_test_no_path()) ?? {
+    _: jet_cli_flash_resolve_audit(&host, flash_paths.of("/out/image.elf"), "board", flash_test_no_path()) ?? {
         // copy: the message stays with the failed result the handler reads (owner: that temporary
         // result, dropped after the handler) and `error` (owner: this test's local) keeps the text
         // past it.
@@ -997,7 +997,7 @@ fn flash_test_host_for_machine(machine: TargetMachine) -> FlashTestHost Never! {
     assert_eq(flash_paths.show(jet_cli_flash_resolve_audit(&host, flash_paths.of("/out/image.elf"), "board", flash_test_no_path()) ?? panic("audit")), "/out/image.target.json")
     assert_eq(flash_paths.show(jet_cli_flash_resolve_audit(&host, flash_paths.of("/out/image.elf"), "image", flash_test_no_path()) ?? panic("same candidate")), "/out/image.target.json")
     host.files["/out/board.target.json"] = flash_test_file("/out/board.target.json")
-    _ :: jet_cli_flash_resolve_audit(&host, flash_paths.of("/out/image.elf"), "board", flash_test_no_path()) ?? {
+    _: jet_cli_flash_resolve_audit(&host, flash_paths.of("/out/image.elf"), "board", flash_test_no_path()) ?? {
         // copy: the message stays with the failed result the handler reads (owner: that temporary
         // result, dropped after the handler) and `error` (owner: this test's local) keeps the text
         // past it.
@@ -1009,7 +1009,7 @@ fn flash_test_host_for_machine(machine: TargetMachine) -> FlashTestHost Never! {
     file := flash_test_file("/out/board.target.json")
     file.metadata.symlink = true
     host.files["/out/board.target.json"] = file
-    _ :: jet_cli_flash_resolve_audit(&host, flash_paths.of("/out/image.elf"), "board", flash_test_no_path()) ?? {
+    _: jet_cli_flash_resolve_audit(&host, flash_paths.of("/out/image.elf"), "board", flash_test_no_path()) ?? {
         // copy: the message stays with the failed result the handler reads (owner: that temporary
         // result, dropped after the handler) and `error` (owner: this test's local) keeps the text
         // past it.
@@ -1023,13 +1023,13 @@ fn flash_test_host_for_machine(machine: TargetMachine) -> FlashTestHost Never! {
 // #4316 END
 
 #Test("flash canonical status projection retains ordered nested object pairs") {
-    tree :: CanonicalJSON.Object([CanonicalJSONField]{
+    tree: CanonicalJSON.Object([CanonicalJSONField]{
         {key: "z", value: CanonicalJSON.Array([CanonicalJSON]{
             CanonicalJSON.Object([CanonicalJSONField]{
                 {key: "z", value: CanonicalJSON.Bool(true)},
                 {key: "a", value: CanonicalJSON.Integer("17")}})})},
         CanonicalJSONField{key: "a", value: CanonicalJSON.Null}})
-    projected :: jet_cli_flash_status_value(tree)
+    projected: jet_cli_flash_status_value(tree)
     if projected == .Object(fields) {
         assert_eq(fields.len(), 2)
         assert_eq(fields[0].key, "z")

@@ -10,7 +10,7 @@
 // Packages here come from a first-party `core` source (a local repo carrying a
 // `package.jet`), so `jet os build devhost` realizes the whole machine
 // offline with no Nix.
-module devhost {
+devhost: module {
     sources: {
         mine: ./jet-pkgs,
     }
@@ -151,7 +151,7 @@ module devhost {
 }
 
 
-module vmtest.ssh-smoke {
+vmtest.ssh-smoke: module {
     hosts: { devhost: system.devhost }
     run: test {
         devhost.wait_for_boot()

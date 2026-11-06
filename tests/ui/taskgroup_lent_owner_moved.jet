@@ -1,19 +1,19 @@
-struct Particle {
+Particle: struct {
     position: Int
     velocity: Int
 }
 
-fn eat(ps: ^[Particle]) -> Int { ps.len() }
+eat: fn(ps: ^[Particle]) -> Int { ps.len() }
 
-fn run() {
+run: fn() {
     particles := [Particle]{{position: 10, velocity: 2}, {position: 20, velocity: 3}}
     task.group g {
-        left :: &particles[0]
-        a :: task {
+        left: &particles[0]
+        a: task {
             left.position += left.velocity
             left.position
         }
-        n :: eat(^particles)
+        n: eat(^particles)
         print(n)
     }
 }

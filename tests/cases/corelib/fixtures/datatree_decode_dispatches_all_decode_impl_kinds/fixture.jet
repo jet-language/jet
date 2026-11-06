@@ -1,15 +1,15 @@
 
 #Codable
-struct Point { x: Int }
-struct Email { addr: String }
+Point: struct { x: Int }
+Email: struct { addr: String }
 impl Email.Decode {
-    fn decode(tree: Dyn) -> Email [FieldError]! {
+    decode: fn(tree: Dyn) -> Email [FieldError]! {
         value := &tree.field("address") ?? Dyn.Text("")
         return Ok(Email{ addr: value.text() ?? "" })
     }
 }
 
-fn run() {
+run: fn() {
     i_tree := Dyn.Int(41)
     xs_tree := Dyn.Array([Dyn.Int(1), Dyn.Int(2)])
     p_tree := Dyn.Object(["x": Dyn.Int(7)])

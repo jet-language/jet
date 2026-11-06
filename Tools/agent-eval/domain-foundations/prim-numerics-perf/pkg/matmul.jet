@@ -1,15 +1,15 @@
-package {
+package: {
     name: "matmul"
     authority: { allow: [IO, Mem.Alloc, Time] }
 }
 
-use time :: core.time
+use time: core.time
 
-fn dense_matmul(a: [Float], b: [Float], n: Int) -> [Float] {
+dense_matmul: fn(a: [Float], b: [Float], n: Int) -> [Float] {
     out := [Float]{}
     i := 0
     loop i < n {
-        base_a :: i * n
+        base_a: i * n
         j := 0
         loop j < n {
             idx_a := base_a
@@ -30,26 +30,26 @@ fn dense_matmul(a: [Float], b: [Float], n: Int) -> [Float] {
     return out
 }
 
-fn sum_values(values: [Float]) -> Float {
+sum_values: fn(values: [Float]) -> Float {
     total := Float{0.0}
     loop value in values -> total += value
     return total
 }
 
-fn run() {
-    n :: 512
-    count :: n * n
+run: fn() {
+    n: 512
+    count: n * n
     a := [Float]{}
     b := [Float]{}
     loop _i in 0..<count {
         &a.push(Float{1.0})
         &b.push(Float{2.0})
     }
-    started :: time.instant()
-    c :: dense_matmul(a, b, n)
-    finished :: time.instant()
-    duration :: finished - started
-    elapsed :: duration.in(.Nanoseconds)
-    total :: sum_values(c)
+    started: time.instant()
+    c: dense_matmul(a, b, n)
+    finished: time.instant()
+    duration: finished - started
+    elapsed: duration.in(.Nanoseconds)
+    total: sum_values(c)
     print("matmul_n:{n} ns:{elapsed} checksum:{total} first:{c[0]} last:{c[count - 1]}")
 }

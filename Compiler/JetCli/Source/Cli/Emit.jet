@@ -21,7 +21,7 @@ use {
     jet_parser.[parse_source]
 }
 
-fn jet_cli_emit_check_failure(file: String, source: String, errors: [Diagnostic], color: Bool, json: Bool) -[FS, Env]> JetDriverVerbOutput Never! {
+jet_cli_emit_check_failure: fn(file: String, source: String, errors: [Diagnostic], color: Bool, json: Bool) -[FS, Env]> JetDriverVerbOutput Never! {
     if json {
         return JetDriverVerbOutput{stdout: jet_cli_reports_status_json("diagnostics", false, jet_cli_report_base(file), file, source, errors), stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
     }
@@ -29,22 +29,22 @@ fn jet_cli_emit_check_failure(file: String, source: String, errors: [Diagnostic]
 }
 
 // `--fn NAME` named no function of the tier.
-fn jet_cli_emit_missing_function(file: String, source: String, tier: String, name: String, color: Bool, json: Bool) -[FS, Env]> JetDriverVerbOutput Never! {
-    report :: diagnostic_from_registry("E2104", None, "`{file}` has no function named `{name}`", "`--fn` selects a function the file declares", "check the spelling, or run `jet emit --{tier} {file}` without `--fn` to see every function")
+jet_cli_emit_missing_function: fn(file: String, source: String, tier: String, name: String, color: Bool, json: Bool) -[FS, Env]> JetDriverVerbOutput Never! {
+    report: diagnostic_from_registry("E2104", None, "`{file}` has no function named `{name}`", "`--fn` selects a function the file declares", "check the spelling, or run `jet emit --{tier} {file}` without `--fn` to see every function")
     jet_cli_emit_check_failure(file, source, [Diagnostic]{report}, color, json)
 }
 
-fn jet_cli_emit_printed(tier: String, file: String, function: String?, json: Bool, nodes: [JetCLIEmitNode], stderr: String) -> JetDriverVerbOutput Never! {
+jet_cli_emit_printed: fn(tier: String, file: String, function: String?, json: Bool, nodes: [JetCLIEmitNode], stderr: String) -> JetDriverVerbOutput Never! {
     JetDriverVerbOutput{stdout: jet_cli_emit_tree_output(tier, file, function, json, nodes), stderr: stderr, exit_code: JET_DRIVER_EXIT_OK}
 }
 
 // `jet emit --ast <file>`: the parsed entry file. Parsing is the whole tier,
 // so a syntax error stops it and nothing is checked.
-fn jet_cli_emit_ast(file: String, source: String, color: Bool, json: Bool, function: String?) -[FS, Env]> JetDriverVerbOutput Never! {
-    parsed :: parse_source(source.bytes())
-    errors :: jet_cli_errors(parsed.diagnostics)
+jet_cli_emit_ast: fn(file: String, source: String, color: Bool, json: Bool, function: String?) -[FS, Env]> JetDriverVerbOutput Never! {
+    parsed: parse_source(source.bytes())
+    errors: jet_cli_errors(parsed.diagnostics)
     if errors.len() > 0 -> return jet_cli_emit_check_failure(file, source, errors, color, json)
-    nodes :: jet_cli_emit_ast_program(parsed.program, function)
+    nodes: jet_cli_emit_ast_program(parsed.program, function)
     if function == .Val(name) {
         if nodes.len() == 0 -> return jet_cli_emit_missing_function(file, source, "ast", name, color, json)
     }
@@ -56,10 +56,10 @@ fn jet_cli_emit_ast(file: String, source: String, color: Bool, json: Bool, funct
 // the checked functions (every checked function for a program without an
 // entry), one `fn` node per function of the entry package, or the functions
 // `--fn` names.
-fn jet_cli_emit_ir_result(file: String, source: String, color: Bool, json: Bool, function: String?, result: JetDriverCompileResult, inputs: ^JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot) -> JetDriverVerbOutput {
+jet_cli_emit_ir_result: fn(file: String, source: String, color: Bool, json: Bool, function: String?, result: JetDriverCompileResult, inputs: ^JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot) -> JetDriverVerbOutput {
     // Sema reports a program that selects no entry (E0101) among them.
-    diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
-    errors :: jet_cli_errors(diagnostics)
+    diagnostics: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
+    errors: jet_cli_errors(diagnostics)
     if errors.len() > 0 -> return jet_cli_emit_check_failure(file, source, errors, color, json)
     if result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
     if !result.complete -> return jet_cli_ice("the Jet compiler stopped before finishing `{file}`")
@@ -67,20 +67,20 @@ fn jet_cli_emit_ir_result(file: String, source: String, color: Bool, json: Bool,
     loop diagnostic in diagnostics {
         if !jet_driver_is_a11y_lint(diagnostic.code) -> &lints.push(diagnostic)
     }
-    stderr :: if lints.len() > 0 -> diagnostic_render_all(file, source, lints, color) else -> ""
+    stderr: if lints.len() > 0 -> diagnostic_render_all(file, source, lints, color) else -> ""
     checked := ^inputs ?? return jet_cli_ice("the Jet compiler finished `{file}` without its checked functions")
     declarations := jet_driver_checked_declarations(&checked)
-    built :: if checked.entry_key == .Val(entry_key) -> ir_build_program(^checked.functions, checked.decls, ^declarations.type_defs, ^declarations.impls, ^checked.sources, ^declarations.constants, ^declarations.foreign, entry_key, ir_checks_stock(), result.compiler_threads) else -> ir_build_all(^checked.functions, checked.decls, ^declarations.type_defs, ^declarations.impls, ^checked.sources, ^declarations.constants, ^declarations.foreign, result.compiler_threads)
+    built: if checked.entry_key == .Val(entry_key) -> ir_build_program(^checked.functions, checked.decls, ^declarations.type_defs, ^declarations.impls, ^checked.sources, ^declarations.constants, ^declarations.foreign, entry_key, ir_checks_stock(), result.compiler_threads) else -> ir_build_all(^checked.functions, checked.decls, ^declarations.type_defs, ^declarations.impls, ^checked.sources, ^declarations.constants, ^declarations.foreign, result.compiler_threads)
     if built.failures.len() > 0 {
         census := [JetDriverIceRow]{}
         loop failure in built.failures -> jet_driver_ice_record(&census, "{failure.name} [{failure.key}]", "ir.build", "unlowered", "{failure.message} at {failure.source_file}:{failure.span.start}..{failure.span.end}")
         return jet_cli_ice("the Jet backend failed on `{file}`: {jet_driver_ice_text(census)}")
     }
-    selected :: jet_cli_emit_ir_selected(built, result.package_identity, function)
+    selected: jet_cli_emit_ir_selected(built, result.package_identity, function)
     if function == .Val(name) {
         if selected.len() == 0 -> return jet_cli_emit_missing_function(file, source, "ir", name, color, json)
     }
-    nodes :: loop row in selected -> jet_cli_emit_ir_function(built, built.program.functions[row])
+    nodes: loop row in selected -> jet_cli_emit_ir_function(built, built.program.functions[row])
     jet_cli_emit_printed("ir", file, function, json, nodes, stderr)
 }
 
@@ -89,8 +89,8 @@ fn jet_cli_emit_ir_result(file: String, source: String, color: Bool, json: Bool,
 // entry package has none); otherwise every function the entry package
 // declares. A function's key starts with its package's `function:` prefix
 // (jet_driver_module_identity under the package identity).
-fn jet_cli_emit_ir_selected(built: IRBuildResult, package: String, function: String?) -> [Int] Never! {
-    prefix :: "function:module:{package.len()}:{package}:"
+jet_cli_emit_ir_selected: fn(built: IRBuildResult, package: String, function: String?) -> [Int] Never! {
+    prefix: "function:module:{package.len()}:{package}:"
     selected := [Int]{}
     others := [Int]{}
     loop (row, candidate) in built.program.functions {
@@ -107,11 +107,11 @@ fn jet_cli_emit_ir_selected(built: IRBuildResult, package: String, function: Str
 
 // One `fn` node: ir_function_text's header line, each later line a child
 // (the tree's two-space indent is the text's own first level).
-fn jet_cli_emit_ir_function(built: IRBuildResult, ir_function: IRFunction) -> JetCLIEmitNode Never! {
-    lines :: ir_function_text(built.program, ir_function).split("\n").to_list()
+jet_cli_emit_ir_function: fn(built: IRBuildResult, ir_function: IRFunction) -> JetCLIEmitNode Never! {
+    lines: ir_function_text(built.program, ir_function).split("\n").to_list()
     children := [JetCLIEmitNode]{}
     loop index in 1..<lines.len() {
-        line :: lines[index]
+        line: lines[index]
         &children.push(jet_cli_emit_leaf("ir", if line.starts_with("  ") -> String.from_bytes_lossy(line.bytes()[2..<line.bytes().len()]) else -> line))
     }
     jet_cli_emit_node("fn", if lines.len() > 0 -> lines[0] else -> "", children)

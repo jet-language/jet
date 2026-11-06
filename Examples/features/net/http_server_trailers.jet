@@ -1,28 +1,28 @@
 // D-HTTP-TRAILER-API1=A: trailers live on HTTP messages, not Body.
-package {
+package: {
     name: "http_server_trailers"
     authority: { allow: [FS.Read, IO, Mem.Alloc, Net, Time, Time.Wait] }
 }
 
 use {
-    http_server :: core.http.server
-    net :: core.net
+    http_server: core.http.server
+    net: core.net
 }
 
-fn handle_trailers(req: HTTPRequest) -> HTTPResponse HTTPError! {
-    body :: req.body().text(1024) ?? panic("body")
+handle_trailers: fn(req: HTTPRequest) -> HTTPResponse HTTPError! {
+    body: req.body().text(1024) ?? panic("body")
     // Request trailers are available only after Body reaches EOF.
-    trailers :: req.trailers()
-    response :: http_server.response(200, body)
+    trailers: req.trailers()
+    response: http_server.response(200, body)
     return response.trailers(^trailers)
 }
 
-fn run() (HTTPError | NetError | TaskFailure)! {
-    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
-    addr :: listener.local_addr() ?? panic("address")
-    mux :: http_server.mux()
+run: fn() (HTTPError | NetError | TaskFailure)! {
+    listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    addr: listener.local_addr() ?? panic("address")
+    mux: http_server.mux()
     mux.post("/", (req: HTTPRequest) -> handle_trailers(req))
-    wire_stream :: net.tcp_connect(addr) ?? panic("connect")
+    wire_stream: net.tcp_connect(addr) ?? panic("connect")
     raw_request := "".bytes()
     loop line in
         ["POST / HTTP/1.1", "Host: local", "Transfer-Encoding: chunked", "Trailer: X-Trace", "Connection: close", "", "4", "body", "0", "X-Trace: first", "x-trace: second", ""] {
@@ -32,7 +32,7 @@ fn run() (HTTPError | NetError | TaskFailure)! {
     }
     raw_response := ""
     chunk := ""
-    server_task :: task {
+    server_task: task {
         http_server.serve_once_listener(listener, mux) ?? panic("serve")
     }
     wire_stream.write_all(raw_request) ?? panic("request")

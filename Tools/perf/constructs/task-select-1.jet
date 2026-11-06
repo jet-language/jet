@@ -1,21 +1,21 @@
-package {
+package: {
     name: "task-select-1"
     authority: { allow: [IO, Mem.Alloc, Time.Wait] }
 }
 
-fn send_generic(tx: Sender<String>) { tx.send("generic") }
+send_generic: fn(tx: Sender<String>) { tx.send("generic") }
 
-fn receive_generic(rx: ^Receiver<String>) -> Receiver<String> { return rx }
-fn one() -> Int { 1 }
+receive_generic: fn(rx: ^Receiver<String>) -> Receiver<String> { return rx }
+one: fn() -> Int { 1 }
 
-fn run() {
-    (sender, receiver) :: channel<String>()
+run: fn() {
+    (sender, receiver): channel<String>()
     send_generic(sender)
     if {
         value, receive_generic(^receiver) -> { print(value) }
     }
     task.group group {
-        results :: task.all {one()} ?? panic("task.all failed")
+        results: task.all {one()} ?? panic("task.all failed")
         print(results[0])
     }
 }

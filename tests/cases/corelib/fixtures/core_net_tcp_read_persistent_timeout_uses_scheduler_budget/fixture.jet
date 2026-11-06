@@ -1,15 +1,15 @@
 
 use {
-    net :: core.net
-    tasks :: core.tasks
-    time :: core.time
+    net: core.net
+    tasks: core.tasks
+    time: core.time
 }
 
-fn run() {
-    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
-    typed_address :: net.listener_local_socket_addr(listener) ?? panic("address")
-    address :: net.socket_to_string(typed_address)
-    client :: task {
+run: fn() {
+    listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    typed_address: net.listener_local_socket_addr(listener) ?? panic("address")
+    address: net.socket_to_string(typed_address)
+    client: task {
         stream := net.tcp_connect(address) ?? panic("connect")
         time.sleep(100ms)
         stream.close() ?? panic("close")

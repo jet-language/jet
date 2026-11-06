@@ -8,32 +8,32 @@
 // integer-list lowering, while the outer repeat range keeps cancellation polls.
 // Measure with `jet run` and `jet run --release`; compile/setup time is outside
 // the timed region.
-use time :: core.time
+use time: core.time
 
-fn sum_all(xs: [Int]) -> Int {
+sum_all: fn(xs: [Int]) -> Int {
     total := 0
     loop x in xs -> total += x
     return total
 }
 
-fn input() -> [Int] {
+input: fn() -> [Int] {
     xs := [Int]{}
     loop i in 0..<2000000 -> &xs.push(1)
     return xs
 }
 
-fn repeat_sum(xs: [Int]) -> Int {
+repeat_sum: fn(xs: [Int]) -> Int {
     total := 0
     loop i in 0..<16 -> total += sum_all(xs)
     return total
 }
 
-fn run() {
-    xs :: input()
-    first :: sum_all(xs)
-    started :: time.now()
-    repeated :: repeat_sum(xs)
-    elapsed :: time.now() - started
+run: fn() {
+    xs: input()
+    first: sum_all(xs)
+    started: time.now()
+    repeated: repeat_sum(xs)
+    elapsed: time.now() - started
     print(first)
     print(repeated)
     print(elapsed)

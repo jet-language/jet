@@ -7,14 +7,14 @@ use {
 }
 
 // The method leaf of an impl method key, without an operator `<Rhs>` suffix.
-fn ir_impl_method_leaf(key: String) -> String Never! {
-    bytes :: key.bytes()
+ir_impl_method_leaf: fn(key: String) -> String Never! {
+    bytes: key.bytes()
     end := bytes.len()
     if end > 0 && Int.from_u8(bytes[end - 1]) == 62 {
         depth := 0
         position := end - 1
         loop position >= 0 {
-            byte :: Int.from_u8(bytes[position])
+            byte: Int.from_u8(bytes[position])
             if byte == 62 -> depth += 1
             if byte == 60 {
                 depth -= 1
@@ -38,7 +38,7 @@ fn ir_impl_method_leaf(key: String) -> String Never! {
     String.from_bytes(bytes[start..<end].copy()) ?? ""
 }
 
-fn ir_string_rows_equal(left: [String], right: [String]) -> Bool Never! {
+ir_string_rows_equal: fn(left: [String], right: [String]) -> Bool Never! {
     if left.len() != right.len() -> return false
     index := 0
     loop index < left.len() {
@@ -48,7 +48,7 @@ fn ir_string_rows_equal(left: [String], right: [String]) -> Bool Never! {
     true
 }
 
-fn ir_bool_rows_equal(left: [Bool], right: [Bool]) -> Bool Never! {
+ir_bool_rows_equal: fn(left: [Bool], right: [Bool]) -> Bool Never! {
     if left.len() != right.len() -> return false
     index := 0
     loop index < left.len() {
@@ -58,7 +58,7 @@ fn ir_bool_rows_equal(left: [Bool], right: [Bool]) -> Bool Never! {
     true
 }
 
-fn ir_core_markers_equal(left: CoreMarkerApplication?, right: CoreMarkerApplication?) -> Bool Never! {
+ir_core_markers_equal: fn(left: CoreMarkerApplication?, right: CoreMarkerApplication?) -> Bool Never! {
     if left == {
         None -> right == None
         Val(first) -> {
@@ -70,7 +70,7 @@ fn ir_core_markers_equal(left: CoreMarkerApplication?, right: CoreMarkerApplicat
     }
 }
 
-fn ir_core_access_rows_equal(left: [CoreCallResourceAccess], right: [CoreCallResourceAccess]) -> Bool Never! {
+ir_core_access_rows_equal: fn(left: [CoreCallResourceAccess], right: [CoreCallResourceAccess]) -> Bool Never! {
     if left.len() != right.len() -> return false
     index := 0
     loop index < left.len() {
@@ -80,7 +80,7 @@ fn ir_core_access_rows_equal(left: [CoreCallResourceAccess], right: [CoreCallRes
     true
 }
 
-fn ir_core_completion_equal(left: CoreCallCompletion?, right: CoreCallCompletion?) -> Bool Never! {
+ir_core_completion_equal: fn(left: CoreCallCompletion?, right: CoreCallCompletion?) -> Bool Never! {
     if left == {
         None -> right == None
         Val(first) -> {
@@ -92,14 +92,14 @@ fn ir_core_completion_equal(left: CoreCallCompletion?, right: CoreCallCompletion
     }
 }
 
-fn ir_core_capability_equal(left: CoreCapabilityContract, right: CoreCapabilityContract) -> Bool Never! {
+ir_core_capability_equal: fn(left: CoreCapabilityContract, right: CoreCapabilityContract) -> Bool Never! {
     left.kind == right.kind && left.provider == right.provider && left.fallback == right.fallback && left.failure == right.failure
 }
-fn ir_authority_decisions_equal(left: AuthorityDecision?, right: AuthorityDecision?) -> Bool Never! {
+ir_authority_decisions_equal: fn(left: AuthorityDecision?, right: AuthorityDecision?) -> Bool Never! {
     if left == None -> return right == None
     if right == None -> return false
-    first :: left
-    second :: right
+    first: left
+    second: right
     first.import.id == second.import.id
         && first.import.operation == second.import.operation
         && first.import.required_right == second.import.required_right
@@ -109,7 +109,7 @@ fn ir_authority_decisions_equal(left: AuthorityDecision?, right: AuthorityDecisi
         && first.inherited == second.inherited
 }
 
-fn ir_core_records_match(left: CoreCallRecord, right: CoreCallRecord) -> Bool Never! {
+ir_core_records_match: fn(left: CoreCallRecord, right: CoreCallRecord) -> Bool Never! {
     if left.module_name != right.module_name || left.member != right.member || !ir_string_rows_equal(left.receiver_types, right.receiver_types) -> return false
     if left.signature.arity != right.signature.arity || left.signature.max_arity != right.signature.max_arity || !ir_bool_rows_equal(left.signature.borrow_mask, right.signature.borrow_mask) -> return false
     if left.fallibility != right.fallibility || left.effect_kind != right.effect_kind || left.effect_leaf != right.effect_leaf || left.sink_class != right.sink_class -> return false
@@ -119,12 +119,12 @@ fn ir_core_records_match(left: CoreCallRecord, right: CoreCallRecord) -> Bool Ne
     ir_authority_decisions_equal(left.authority, right.authority) && ir_core_markers_equal(left.marker, right.marker)
 }
 
-fn ir_canonical_core_record(record: CoreCallRecord) -> CoreCallRecord Never! {
+ir_canonical_core_record: fn(record: CoreCallRecord) -> CoreCallRecord Never! {
     ir_canonical_core_record_in(CORE_CALLS, record)
 }
 
 // The registry is a read parameter, so the scan reads its rows in place.
-fn ir_canonical_core_record_in(rows: [CoreCallRecord], record: CoreCallRecord) -> CoreCallRecord Never! {
+ir_canonical_core_record_in: fn(rows: [CoreCallRecord], record: CoreCallRecord) -> CoreCallRecord Never! {
     key := core_call_key(record)
     found := CoreCallRecord?{None}
     loop candidate in rows {
@@ -133,15 +133,15 @@ fn ir_canonical_core_record_in(rows: [CoreCallRecord], record: CoreCallRecord) -
             found = Val(candidate)
         }
     }
-    canonical :: found ?? panic("checked Core-call record is absent from the canonical registry")
+    canonical: found ?? panic("checked Core-call record is absent from the canonical registry")
     if !ir_core_records_match(canonical, record) -> panic("checked Core-call metadata disagrees with the canonical registry")
     canonical
 }
 
-fn ir_lambda_function_type(lambda: BodyLambda) -> Type Never! {
+ir_lambda_function_type: fn(lambda: BodyLambda) -> Type Never! {
     metadata := FunctionCallMetadata?{None}
     if lambda.host_param_conventions != None {
-        conventions :: lambda.host_param_conventions ?? [AccessConvention]{}
+        conventions: lambda.host_param_conventions ?? [AccessConvention]{}
         metadata = Val(FunctionCallMetadata{
             names: [String]{},
             defaults: [FunctionDefaultRef?]{},
@@ -155,7 +155,7 @@ fn ir_lambda_function_type(lambda: BodyLambda) -> Type Never! {
 
 // The synthetic function a comptime item lowers as, with an empty body the
 // caller fills with the item's expression.
-fn ir_comptime_item_shell(module_identity: String, module_name: String, key: String, source_file: String, span: Span, result_type: Type) -> FnBody Never! {
+ir_comptime_item_shell: fn(module_identity: String, module_name: String, key: String, source_file: String, span: Span, result_type: Type) -> FnBody Never! {
     FnBody{
         name: "__comptime_item",
         module_name: module_name,
@@ -198,10 +198,10 @@ fn ir_comptime_item_shell(module_identity: String, module_name: String, key: Str
 }
 
 // `module_name` is the name of the item's module.
-fn ir_comptime_item_function(request: SemaComptimeItemRequest, module_name: String) -> FnBody {
+ir_comptime_item_function: fn(request: SemaComptimeItemRequest, module_name: String) -> FnBody {
     result_type := body_type(request.expression.tree, request.expression.root)
     if request.expected_type != None {
-        expected :: request.expected_type ?? panic("checked comptime item lost its expected type")
+        expected: request.expected_type ?? panic("checked comptime item lost its expected type")
         if type_identity_key(expected) != type_identity_key(result_type) -> panic("checked comptime item result disagrees with its expected type")
         result_type = expected
     }
@@ -211,6 +211,6 @@ fn ir_comptime_item_function(request: SemaComptimeItemRequest, module_name: Stri
 // The next unclaimed part of a dynamically scheduled lowering: a claiming
 // thread takes a read guard once and claims part after part with one atomic
 // add.
-struct IRPartQueue {
+IRPartQueue: struct {
     next: Atomic<Int>
 }

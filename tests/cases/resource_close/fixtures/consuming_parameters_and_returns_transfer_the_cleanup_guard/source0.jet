@@ -1,14 +1,14 @@
 
-struct Resource { name: String }
+Resource: struct { name: String }
 impl Resource.Close {
-    fn close(^self) { print("close {self.name}") }
+    close: fn(^self) { print("close {self.name}") }
 }
 impl Resource {
-    fn handoff(^self) -> Resource { return self }
+    handoff: fn(^self) -> Resource { return self }
 }
-fn relay(^resource: Resource) -> Resource { return resource }
-fn consume(^resource: Resource) { print("consume {resource.name}") }
-fn run() {
+relay: fn(^resource: Resource) -> Resource { return resource }
+consume: fn(^resource: Resource) { print("consume {resource.name}") }
+run: fn() {
     first := Resource{ name: "transfer" }
     second := relay(^first)
     third := second.handoff()

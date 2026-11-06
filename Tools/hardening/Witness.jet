@@ -16,10 +16,10 @@ use {
     jet_foundation.[Program, Stmt, Expr, CallArg, OrFallback, ast_visit_body]
 }
 
-OBSERVERS :: [String]{"print", "eprint", "assert"}
-TRACE_DEPTH :: 8
+OBSERVERS: [String]{"print", "eprint", "assert"}
+TRACE_DEPTH: 8
 
-struct Sink {
+Sink: struct {
     kind: String
     operation: String
     follow_up: String
@@ -27,12 +27,12 @@ struct Sink {
     result_class: String
 }
 
-struct WitnessCheck {
+WitnessCheck: struct {
     sink: Sink?
     errors: [String]
 }
 
-enum Probe {
+Probe: enum {
     Member(alias: String, member: String)
     Local(name: String)
     Name(name: String)
@@ -42,14 +42,14 @@ enum Probe {
 // the match, whether a later statement observes anything, and the function.
 // `at` is the byte offset of the call's name: a desugared form such as
 // `x ? ok -> a ! error -> b` reaches one call through two paths.
-struct Hit {
+Hit: struct {
     chain: [String]
     later: Bool
     function: String
     at: Int
 }
 
-fn hit_at(expression: Expr) -> Int Never! {
+hit_at: fn(expression: Expr) -> Int Never! {
     if expression == {
         .MethodCall(_, _, method_span, _, _, _, _) -> method_span.start
         .Call(call, _) -> call.name_span.start
@@ -58,15 +58,15 @@ fn hit_at(expression: Expr) -> Int Never! {
     }
 }
 
-// The driver reads an inline `package { … }` carrier, the first item after
+// The driver reads an inline `package: { … }` carrier, the first item after
 // leading comments, and blanks it before the parser runs
 // (jet_driver_mask_inline_package in Compiler/JetDriver). Blank it the same
 // way, keeping every newline so diagnostics keep their lines.
-fn mask_inline_package(text: String) -> String Never! {
+mask_inline_package: fn(text: String) -> String Never! {
     bytes := text.bytes()
     at := 0
     loop at < bytes.len() {
-        byte :: bytes[at]
+        byte: bytes[at]
         if byte == (U8{32}) || byte == (U8{9}) || byte == (U8{10}) || byte == (U8{13}) {
             at += 1
             next
@@ -77,7 +77,7 @@ fn mask_inline_package(text: String) -> String Never! {
         }
         break
     }
-    word :: "package".bytes()
+    word: "package".bytes()
     if at + word.len() > bytes.len() -> return text.copy()
     loop index in 0..<word.len() {
         if bytes[at + index] != word[index] -> return text.copy()
@@ -92,7 +92,7 @@ fn mask_inline_package(text: String) -> String Never! {
     end := -1
     index := open
     loop index < bytes.len() && end < 0 {
-        byte :: bytes[index]
+        byte: bytes[index]
         if {
             quoted && byte == (U8{92}) -> index += 1
             quoted && byte == (U8{34}) -> quoted = false
@@ -113,7 +113,7 @@ fn mask_inline_package(text: String) -> String Never! {
     String.from_bytes(bytes) ?? text.copy()
 }
 
-fn offset_line(text: String, offset: Int) -> Int Never! {
+offset_line: fn(text: String, offset: Int) -> Int Never! {
     line := 1
     loop (index, byte) in text.bytes() {
         if index >= offset -> break
@@ -122,15 +122,15 @@ fn offset_line(text: String, offset: Int) -> Int Never! {
     line
 }
 
-fn observed_chain(chain: [String]) -> Bool Never! {
+observed_chain: fn(chain: [String]) -> Bool Never! {
     loop frame in chain {
-        parts :: frame.partition(":")
+        parts: frame.partition(":")
         if parts.head == "arg" && is_observer(parts.tail) -> return true
     }
     false
 }
 
-struct Reading {
+Reading: struct {
     end: String
     name: String
     follow_up: String
@@ -138,14 +138,14 @@ struct Reading {
     propagated: Bool
 }
 
-fn is_observer(name: String) -> Bool Never! {
+is_observer: fn(name: String) -> Bool Never! {
     loop observer in OBSERVERS {
         if observer == name -> return true
     }
     false
 }
 
-fn observes(body: [Stmt]) -> Bool Never! {
+observes: fn(body: [Stmt]) -> Bool Never! {
     names := [String]{}
     ast_visit_body(body, (expression: Expr) -> note_call_name(&names, expression), true)
     loop name in names {
@@ -154,24 +154,24 @@ fn observes(body: [Stmt]) -> Bool Never! {
     false
 }
 
-fn observes_from(body: [Stmt], start: Int) -> Bool Never! {
+observes_from: fn(body: [Stmt], start: Int) -> Bool Never! {
     loop index in start..<body.len() {
         if observes([Stmt]{body[index].copy()}) -> return true
     }
     false
 }
 
-fn note_call_name(names: &[String], expression: Expr) Never! {
+note_call_name: fn(names: &[String], expression: Expr) Never! {
     if expression == .Call(call, _) -> &names.push(call.name.copy())
 }
 
-fn with_frame(chain: [String], frame: String) -> [String] Never! {
+with_frame: fn(chain: [String], frame: String) -> [String] Never! {
     out := chain.copy()
     &out.push(frame)
     out
 }
 
-fn probe_matches(expression: Expr, probe: Probe) -> Bool Never! {
+probe_matches: fn(expression: Expr, probe: Probe) -> Bool Never! {
     if probe == {
         .Member(alias, member) -> {
             if expression == .MethodCall(receiver, method, _, _, _, _, _) {
@@ -196,7 +196,7 @@ fn probe_matches(expression: Expr, probe: Probe) -> Bool Never! {
     }
 }
 
-fn fallback_frame(fallback: OrFallback) -> String Never! {
+fallback_frame: fn(fallback: OrFallback) -> String Never! {
     if fallback == {
         .Panic(_, _) -> "fallback:panic"
         .Value(_) -> "fallback:value"
@@ -216,24 +216,24 @@ fn fallback_frame(fallback: OrFallback) -> String Never! {
 
 // What one walk looks for, whether an observer runs after the current
 // statement, and which function holds the walked code.
-struct Walk {
+Walk: struct {
     probe: Probe
     later: Bool
     function: String
 }
 
-fn observed_later(walk: Walk) -> Walk Never! {
+observed_later: fn(walk: Walk) -> Walk Never! {
     Walk{probe: walk.probe.copy(), later: true, function: walk.function.copy()}
 }
 
-fn walk_args(args: [CallArg], frame: String, chain: [String], walk: Walk, hits: &[Hit]) Never! {
-    inner :: with_frame(chain, frame)
+walk_args: fn(args: [CallArg], frame: String, chain: [String], walk: Walk, hits: &[Hit]) Never! {
+    inner: with_frame(chain, frame)
     loop argument in args -> walk_expr(argument.expr, inner, walk, &hits)
 }
 
-fn walk_expr(expression: Expr, chain: [String], walk: Walk, hits: &[Hit]) Never! {
+walk_expr: fn(expression: Expr, chain: [String], walk: Walk, hits: &[Hit]) Never! {
     if probe_matches(expression, walk.probe) {
-        at :: hit_at(expression)
+        at: hit_at(expression)
         known := false
         loop old in hits {
             if at >= 0 && old.at == at -> known = true
@@ -286,7 +286,7 @@ fn walk_expr(expression: Expr, chain: [String], walk: Walk, hits: &[Hit]) Never!
         .CallValue(callee, args, _, _) -> {
             // `print((() -> { call ?? panic(..); true })())`: the observer
             // runs after the invoked body, so the body's effects are observed.
-            invoked :: if !walk.later && observed_chain(chain) -> observed_later(walk) else -> walk.copy()
+            invoked: if !walk.later && observed_chain(chain) -> observed_later(walk) else -> walk.copy()
             walk_expr(callee, with_frame(chain, "recv:()"), invoked, &hits)
             walk_args(args, "arg:()", chain, walk, &hits)
         }
@@ -308,7 +308,7 @@ fn walk_expr(expression: Expr, chain: [String], walk: Walk, hits: &[Hit]) Never!
         .PatternTest(subject, _, _, _) -> walk_expr(subject, with_frame(chain, "op"), walk, &hits)
         .OrFallback(value, fallback, _, _, _) -> {
             walk_expr(value, with_frame(chain, fallback_frame(fallback)), walk, &hits)
-            other :: with_frame(chain, "other")
+            other: with_frame(chain, "other")
             if fallback == {
                 .Value(alternative) -> walk_expr(alternative, other, walk, &hits)
                 .Block(body, tail, _) -> {
@@ -322,7 +322,7 @@ fn walk_expr(expression: Expr, chain: [String], walk: Walk, hits: &[Hit]) Never!
         }
         .If(condition, then_body, then_value, else_body, else_value, _, _) -> {
             walk_expr(condition, with_frame(chain, "cond:{observes(then_body) || observes(else_body)}"), walk, &hits)
-            block :: with_frame(chain, "block")
+            block: with_frame(chain, "block")
             walk_body(then_body, block, walk, &hits)
             walk_expr(then_value, block, walk, &hits)
             walk_body(else_body, block, walk, &hits)
@@ -337,15 +337,15 @@ fn walk_expr(expression: Expr, chain: [String], walk: Walk, hits: &[Hit]) Never!
     }
 }
 
-fn walk_body(body: [Stmt], chain: [String], walk: Walk, hits: &[Hit]) Never! {
+walk_body: fn(body: [Stmt], chain: [String], walk: Walk, hits: &[Hit]) Never! {
     loop index in 0..<body.len() {
-        step :: if !walk.later && observes_from(body, index + 1) -> observed_later(walk) else -> walk.copy()
+        step: if !walk.later && observes_from(body, index + 1) -> observed_later(walk) else -> walk.copy()
         walk_statement(body[index], chain, step, &hits)
     }
 }
 
-fn walk_statement(statement: Stmt, chain: [String], walk: Walk, hits: &[Hit]) Never! {
-    block :: with_frame(chain, "block")
+walk_statement: fn(statement: Stmt, chain: [String], walk: Walk, hits: &[Hit]) Never! {
+    block: with_frame(chain, "block")
     if statement == {
         .Expr(value) | .DeferClose(value, _) -> walk_expr(value, with_frame(chain, "stmt"), walk, &hits)
         .Val(binding) -> walk_expr(binding.init, with_frame(chain, "bind:{binding.name}"), walk, &hits)
@@ -357,7 +357,7 @@ fn walk_statement(statement: Stmt, chain: [String], walk: Walk, hits: &[Hit]) Ne
             walk_body(body, block, walk, &hits)
         }
         .For(_, _, _, kind, body, _, _, _, _) -> {
-            iterated :: with_frame(chain, "cond:{observes(body)}")
+            iterated: with_frame(chain, "cond:{observes(body)}")
             if kind == {
                 .Range(start, end, step, _) -> {
                     walk_expr(start, iterated, walk, &hits)
@@ -402,7 +402,7 @@ fn walk_statement(statement: Stmt, chain: [String], walk: Walk, hits: &[Hit]) Ne
     }
 }
 
-fn scan(program: Program, probe: Probe) -> [Hit] Never! {
+scan: fn(program: Program, probe: Probe) -> [Hit] Never! {
     hits := [Hit]{}
     loop item in program.items {
         if item == .Func(function) -> walk_body(function.body, [String]{}, Walk{probe: probe.copy(), later: false, function: function.name.copy()}, &hits)
@@ -412,14 +412,14 @@ fn scan(program: Program, probe: Probe) -> [Hit] Never! {
 
 // Read a chain from the match outward, collecting the first follow-up
 // operation, until something ends the value's life.
-fn read_chain(chain: [String]) -> Reading Never! {
+read_chain: fn(chain: [String]) -> Reading Never! {
     follow := ""
     propagated := false
     index := chain.len() - 1
     loop index >= 0 {
-        frame :: chain[index].partition(":")
-        kind :: frame.head
-        name :: frame.tail
+        frame: chain[index].partition(":")
+        kind: frame.head
+        name: frame.tail
         if kind == {
             "fallback" -> {
                 if name == "panic" || name == "try" {
@@ -451,11 +451,11 @@ fn read_chain(chain: [String]) -> Reading Never! {
 
 // Follow a bound name to an observer. An opaque result counts only when an
 // operation reads it on the way, at the binding or at the use.
-fn trace(program: Program, name: String, follow: String, result_class: String, depth: Int, via: String) -> Sink? Never! {
+trace: fn(program: Program, name: String, follow: String, result_class: String, depth: Int, via: String) -> Sink? Never! {
     if depth > TRACE_DEPTH -> return None
     loop hit in scan(program, Probe.Name{name: name.copy()}) {
-        reading :: read_chain(hit.chain)
-        merged :: if reading.follow_up != "" -> reading.follow_up.copy() else -> follow.copy()
+        reading: read_chain(hit.chain)
+        merged: if reading.follow_up != "" -> reading.follow_up.copy() else -> follow.copy()
         if reading.end == "observed" {
             if result_class == "opaque" && merged == "" -> next
             return Val(Sink{kind: "bound", operation: reading.operation.copy(), follow_up: merged, via: via.copy(), result_class: result_class.copy()})
@@ -467,7 +467,7 @@ fn trace(program: Program, name: String, follow: String, result_class: String, d
     None
 }
 
-fn module_probes(program: Program, module_name: String, member: String) -> [Probe] Never! {
+module_probes: fn(program: Program, module_name: String, member: String) -> [Probe] Never! {
     probes := [Probe]{}
     loop decl in program.imports {
         if decl.kind == {
@@ -478,7 +478,7 @@ fn module_probes(program: Program, module_name: String, member: String) -> [Prob
                 if module_alias == module_name {
                     loop item in items {
                         if item.original == member {
-                            local :: if item.alias == .Val(alias) -> alias.copy() else -> item.original.copy()
+                            local: if item.alias == .Val(alias) -> alias.copy() else -> item.original.copy()
                             &probes.push(Probe.Local{name: local})
                         }
                     }
@@ -490,37 +490,37 @@ fn module_probes(program: Program, module_name: String, member: String) -> [Prob
     probes
 }
 
-fn inspect_witness(key: String, text: String, module_name: String, member: String, result_class: String) -> WitnessCheck Never! {
+inspect_witness: fn(key: String, text: String, module_name: String, member: String, result_class: String) -> WitnessCheck Never! {
     errors := [String]{}
-    marker :: "// core-conformance: {key}"
-    lines :: text.split("\n").to_list()
+    marker: "// core-conformance: {key}"
+    lines: text.split("\n").to_list()
     if lines.len() == 0 || lines[0].trim_end() != marker -> &errors.push("first line must be `{marker}`")
     markers := 0
     loop line in lines {
         if line.trim() == marker -> markers += 1
     }
     if markers > 1 -> &errors.push("expected one `{marker}` marker, found {markers}")
-    source :: mask_inline_package(text)
-    parsed :: parse_source(source.bytes())
+    source: mask_inline_package(text)
+    parsed: parse_source(source.bytes())
     loop diagnostic in parsed.diagnostics {
         if diagnostic.code.starts_with("E") {
-            line :: if diagnostic.span == .Val(span) -> offset_line(source, span.start) else -> 0
+            line: if diagnostic.span == .Val(span) -> offset_line(source, span.start) else -> 0
             &errors.push("witness does not parse: line {line}: {diagnostic.code} {diagnostic.what}")
             return WitnessCheck{sink: None, errors: errors}
         }
     }
-    program :: parsed.program
-    probes :: module_probes(program, module_name, member)
+    program: parsed.program
+    probes: module_probes(program, module_name, member)
     if probes.len() != 1 {
         &errors.push("expected one import of `{member}` from `{module_name}`, found {probes.len()}")
         return WitnessCheck{sink: None, errors: errors}
     }
-    hits :: scan(program, probes[0])
+    hits: scan(program, probes[0])
     if hits.len() != 1 {
         &errors.push("expected one call of `{key}`, found {hits.len()}")
         return WitnessCheck{sink: None, errors: errors}
     }
-    hit :: hits[0]
+    hit: hits[0]
     run_unit := false
     run_found := false
     run_calls := [String]{}
@@ -534,7 +534,7 @@ fn inspect_witness(key: String, text: String, module_name: String, member: Strin
         }
     }
     if !run_found {
-        &errors.push("compile-only witness: no `fn run()` executes the call")
+        &errors.push("compile-only witness: no `run: fn()` executes the call")
         return WitnessCheck{sink: None, errors: errors}
     }
     if hit.function != "run" {
@@ -555,7 +555,7 @@ fn inspect_witness(key: String, text: String, module_name: String, member: Strin
             }
         }
     }
-    verdict :: judge(program, hit, result_class, 0)
+    verdict: judge(program, hit, result_class, 0)
     loop problem in verdict.errors -> &errors.push(problem.copy())
     if errors.len() > 0 -> return WitnessCheck{sink: None, errors: errors}
     verdict
@@ -563,9 +563,9 @@ fn inspect_witness(key: String, text: String, module_name: String, member: Strin
 
 // Name the sink for one hit, or say why there is none. A result returned
 // from a helper is judged again at the helper's single call site.
-fn judge(program: Program, hit: Hit, result_class: String, depth: Int) -> WitnessCheck Never! {
+judge: fn(program: Program, hit: Hit, result_class: String, depth: Int) -> WitnessCheck Never! {
     errors := [String]{}
-    reading :: read_chain(hit.chain)
+    reading: read_chain(hit.chain)
     sink := Sink?{None}
     if reading.end == {
         "observed" -> {
@@ -593,15 +593,15 @@ fn judge(program: Program, hit: Hit, result_class: String, depth: Int) -> Witnes
         }
         "returned" -> {
             if hit.function == "run" || depth >= TRACE_DEPTH -> return WitnessCheck{sink: None, errors: [String]{"result is returned, not observed"}}
-            sites :: scan(program, Probe.Local{name: hit.function.copy()})
+            sites: scan(program, Probe.Local{name: hit.function.copy()})
             if sites.len() != 1 -> return WitnessCheck{sink: None, errors: [String]{"result is returned from `{hit.function}`, which is called {sites.len()} times; a witness observes one call"}}
             // An operation applied before the return already reached
             // into an opaque result.
-            next_class :: if result_class == "opaque" && reading.follow_up != "" -> "value" else -> result_class.copy()
-            outer :: judge(program, sites[0], next_class, depth + 1)
+            next_class: if result_class == "opaque" && reading.follow_up != "" -> "value" else -> result_class.copy()
+            outer: judge(program, sites[0], next_class, depth + 1)
             if outer.sink == .Val(found) {
-                via :: if found.via == "" -> "return of {hit.function}" else -> "return of {hit.function}, {found.via}"
-                follow :: if reading.follow_up != "" -> reading.follow_up.copy() else -> found.follow_up.copy()
+                via: if found.via == "" -> "return of {hit.function}" else -> "return of {hit.function}, {found.via}"
+                follow: if reading.follow_up != "" -> reading.follow_up.copy() else -> found.follow_up.copy()
                 return WitnessCheck{sink: Val(Sink{kind: found.kind.copy(), operation: found.operation.copy(), follow_up: follow, via: via, result_class: result_class.copy()}), errors: [String]{}}
             }
             return outer

@@ -10,17 +10,17 @@ use {
         publication_registry_git_command, publication_registry_host, publication_registry_host_and_port,
         publication_registry_http_config, publication_registry_remote, publication_validate_registry_transport,
     ]
-    sys :: core.sys
+    sys: core.sys
 }
 
 #Test("publication registry default and private config") {
-    public :: PublicationRegistryConfig.public_default()
+    public: PublicationRegistryConfig.public_default()
     assert_eq(public.name, "jet")
     assert_eq(public.url, "https://github.com/jet-lang/registry")
     assert(!public.mirror)
     assert(!public.require_signed)
     assert_eq(public.tier, PublicationRegistryTier.Core)
-    private :: PublicationRegistryConfig.private("INTERNAL", "https://registry.acme.corp/jet", true)
+    private: PublicationRegistryConfig.private("INTERNAL", "https://registry.acme.corp/jet", true)
     assert_eq(private.name, "INTERNAL")
     assert_eq(private.url, "https://registry.acme.corp/jet")
     assert(private.mirror)
@@ -28,26 +28,26 @@ use {
     assert_eq(private.tier, PublicationRegistryTier.Core)
 }
 #Test("publication registries_from_env original embedded mirror") {
-    env :: [String: String]{"JET_REGISTRY_PRIVATE_URL": "https://my.company/jet", "JET_REGISTRY_PRIVATE_MIRROR": "true"}
-    regs :: publication_parse_registries_from_env(env)
+    env: [String: String]{"JET_REGISTRY_PRIVATE_URL": "https://my.company/jet", "JET_REGISTRY_PRIVATE_MIRROR": "true"}
+    regs: publication_parse_registries_from_env(env)
     assert_eq(regs.len(), 1)
     assert_eq(regs[0].name, "private")
     assert_eq(regs[0].url, "https://my.company/jet")
     assert(regs[0].mirror)
 }
 #Test("publication private_registry_from_env original integration case") {
-    regs :: publication_parse_registries_from_env([String: String]{"JET_REGISTRY_INTERNAL_URL": "https://registry.acme.corp/jet"})
+    regs: publication_parse_registries_from_env([String: String]{"JET_REGISTRY_INTERNAL_URL": "https://registry.acme.corp/jet"})
     assert_eq(regs.len(), 1)
     assert_eq(regs[0].name, "internal")
     assert_eq(regs[0].url, "https://registry.acme.corp/jet")
     assert(!regs[0].mirror)
 }
 #Test("publication registry env fallback and exact case-sensitive mirror") {
-    defaults :: publication_parse_registries_from_env([String: String]{"JET_REGISTRY_URL": "https://ignored.test", "JET_REGISTRY_MIRROR": "true", "OTHER_URL": "x"})
+    defaults: publication_parse_registries_from_env([String: String]{"JET_REGISTRY_URL": "https://ignored.test", "JET_REGISTRY_MIRROR": "true", "OTHER_URL": "x"})
     assert_eq(defaults.len(), 1)
     assert_eq(defaults[0].name, "jet")
     assert_eq(defaults[0].url, "https://github.com/jet-lang/registry")
-    regs :: publication_parse_registries_from_env([String: String]{"JET_REGISTRY_ÜBER_URL": "", "JET_REGISTRY_ÜBER_MIRROR": "TRUE", "JET_REGISTRY__URL": "file:///tmp/index"})
+    regs: publication_parse_registries_from_env([String: String]{"JET_REGISTRY_ÜBER_URL": "", "JET_REGISTRY_ÜBER_MIRROR": "TRUE", "JET_REGISTRY__URL": "file:///tmp/index"})
     assert_eq(regs.len(), 2)
     loop registry in regs {
         assert(!registry.mirror)
@@ -73,20 +73,20 @@ use {
     loop url in ([String]{"https://u:p@host.test/r", "file:///tmp/r?token", "file:///tmp/r#token", "relative?token", "https://host.test?", "https://host.test#"}) -> assert(publication_registry_url_has_credentials(url))
     loop url in ([String]{"https://host.test/path@segment", "file:///tmp/r", "user@host:path", "git://host.test/r"}) -> assert(!publication_registry_url_has_credentials(url))
 }
-fn publication_transport_test_bad_authority(value: String, expected: String) Never! {
+publication_transport_test_bad_authority: fn(value: String, expected: String) Never! {
     if publication_registry_host_and_port(value) == {
         .Err(error) -> assert_eq(error.detail, expected)
         .Ok(_) -> panic("invalid authority accepted: {value}")
     }
 }
 #Test("publication registry authority IPv6 and explicit ports") {
-    bare :: publication_registry_host_and_port("example.test") ?? panic("bare")
+    bare: publication_registry_host_and_port("example.test") ?? panic("bare")
     assert_eq(bare.host, "example.test")
     assert_eq(bare.port, None)
-    explicit :: publication_registry_host_and_port("example.test:65535") ?? panic("maximum port")
+    explicit: publication_registry_host_and_port("example.test:65535") ?? panic("maximum port")
     assert_eq(explicit.host, "example.test")
     assert_eq(explicit.port, Val(65535))
-    ipv6 :: publication_registry_host_and_port("[2001:4860:4860::8888]:443") ?? panic("ipv6")
+    ipv6: publication_registry_host_and_port("[2001:4860:4860::8888]:443") ?? panic("ipv6")
     assert_eq(ipv6.host, "2001:4860:4860::8888")
     assert_eq(ipv6.port, Val(443))
     assert_eq((publication_registry_host_and_port("[2001:4860::1]") ?? panic("no ipv6 port")).port, None)
@@ -129,7 +129,7 @@ fn publication_transport_test_bad_authority(value: String, expected: String) Nev
         }
     }
     loop scheme in ([String]{"https", "http", "git", "ssh"}) {
-        endpoint :: publication_parse_registry_endpoint(PublicationRegistryConfig.private("x", "{scheme}://example.test/repo", false)) ?? panic("endpoint")
+        endpoint: publication_parse_registry_endpoint(PublicationRegistryConfig.private("x", "{scheme}://example.test/repo", false)) ?? panic("endpoint")
         if endpoint == {
             .Network(parsed, host, port, explicit) -> {
                 assert_eq(parsed, scheme)
@@ -153,7 +153,7 @@ fn publication_transport_test_bad_authority(value: String, expected: String) Nev
             .Ok(_) -> panic("credential-bearing registry accepted")
         }
     }
-    diagnostic :: publication_e1235("https://example.invalid/registry.git", "git helper failed after receiving password super-secret")
+    diagnostic: publication_e1235("https://example.invalid/registry.git", "git helper failed after receiving password super-secret")
     assert(!diagnostic.what.contains("super-secret"))
     assert(!diagnostic.why.contains("super-secret"))
     assert(!diagnostic.fix.contains("super-secret"))
@@ -164,7 +164,7 @@ fn publication_transport_test_bad_authority(value: String, expected: String) Nev
     // #4262: ensure_index_clone is the actual Trust/Cache closure, not a local
     // ProcessSpec pretending to be DNS-pinned. Original test/pkg paths retained.
     loop url in ([String]{"https://user:super-secret@example.invalid/registry.git", "https://example.invalid/registry.git?access_token=super-secret", "file:///tmp/registry.git?access_token=super-secret"}) {
-        registry :: PublicationRegistryConfig.private("scratch", url, false)
+        registry: PublicationRegistryConfig.private("scratch", url, false)
         if publication_ensure_index_clone(registry) == {
             .Err(error) -> {
                 assert_eq(error.diagnostic.code, "E1235")
@@ -175,23 +175,23 @@ fn publication_transport_test_bad_authority(value: String, expected: String) Nev
             .Ok(_) -> panic("credential-bearing clone accepted")
         }
     }
-    endpoint :: publication_validate_registry_transport(PublicationRegistryConfig.private("jet", "https://github.com/jet-lang/registry", false)) ?? panic("real public registry resolution")
-    command :: publication_registry_git_command(endpoint) ?? panic("registry Git environment enumeration")
-    receipt :: command.arg("--version").run() ?? panic("real hardened Exec closure")
+    endpoint: publication_validate_registry_transport(PublicationRegistryConfig.private("jet", "https://github.com/jet-lang/registry", false)) ?? panic("real public registry resolution")
+    command: publication_registry_git_command(endpoint) ?? panic("registry Git environment enumeration")
+    receipt: command.arg("--version").run() ?? panic("real hardened Exec closure")
     assert(receipt.success)
 }
 #Test("publication publish registry environment sets community signed policy") {
-    previous_url :: sys.get("JET_REGISTRY_URL")
-    previous_tier :: sys.get("JET_REGISTRY_TIER")
+    previous_url: sys.get("JET_REGISTRY_URL")
+    previous_tier: sys.get("JET_REGISTRY_TIER")
     sys.set("JET_REGISTRY_URL", "")
     sys.set("JET_REGISTRY_TIER", "community")
-    defaults :: publication_resolve_publish_registry()
+    defaults: publication_resolve_publish_registry()
     assert_eq(defaults.url, "https://github.com/jet-lang/registry")
     assert_eq(defaults.tier, PublicationRegistryTier.Community)
     assert(defaults.require_signed)
     sys.set("JET_REGISTRY_URL", "file:///tmp/registry")
     sys.set("JET_REGISTRY_TIER", "core")
-    private :: publication_resolve_publish_registry()
+    private: publication_resolve_publish_registry()
     assert_eq(private.url, "file:///tmp/registry")
     assert_eq(private.tier, PublicationRegistryTier.Core)
     assert(!private.require_signed)

@@ -1,20 +1,20 @@
 
-struct Order {
+Order: struct {
     state { Draft, Confirmed, Cancelled, Closed }
     id: Int
 }
 
 impl Order {
-    #Transition(_, Draft) fn start(id: Int) -[]> Order { return Order{ id: id } }
-    #Transition(Draft, Confirmed) fn confirm(self: ^Order) -[]> Order { return self }
-    #Transition(Draft, Cancelled) fn cancel(self: ^Order) -[]> Order { return self }
-    #Transition(Confirmed, Closed) fn close(self: ^Order) -[]> Order { return self }
-    #Transition(Cancelled, Closed) fn archive(self: ^Order) -[]> Order { return self }
-    #State(Confirmed) fn ship(self) -[]> Int { return self.id }
+    #Transition(_, Draft) start: fn(id: Int) -[]> Order { return Order{ id: id } }
+    #Transition(Draft, Confirmed) confirm: fn(self: ^Order) -[]> Order { return self }
+    #Transition(Draft, Cancelled) cancel: fn(self: ^Order) -[]> Order { return self }
+    #Transition(Confirmed, Closed) close: fn(self: ^Order) -[]> Order { return self }
+    #Transition(Cancelled, Closed) archive: fn(self: ^Order) -[]> Order { return self }
+    #State(Confirmed) ship: fn(self) -[]> Int { return self.id }
 }
 
-enum Mode { Fast Slow }
-fn decide(m: Mode) {
+Mode: enum { Fast Slow }
+decide: fn(m: Mode) {
   order := Order.start(1)
   if m == {
     .Fast -> order = ^order.confirm()
@@ -22,4 +22,4 @@ fn decide(m: Mode) {
   }
   print(order.ship())
 }
-fn run() { decide(Mode.Fast) }
+run: fn() { decide(Mode.Fast) }

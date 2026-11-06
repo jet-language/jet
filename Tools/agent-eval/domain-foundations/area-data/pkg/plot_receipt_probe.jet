@@ -1,39 +1,39 @@
-package {
+package: {
     name: "plot_receipt_probe"
     authority: { allow: [FS.Write, IO, Mem.Alloc] }
 }
 
 use {
-    data :: core.data
-    files :: core.files
-    json :: core.encoding.json
+    data: core.data
+    files: core.files
+    json: core.encoding.json
 }
 
 #Codable
-struct Row {
+Row: struct {
     team: String
     value: Float
 }
 
 #Codable
-struct Receipt {
+Receipt: struct {
     rows: Int
     groups: Int
     svg_bytes: Int
 }
 
-fn run() {
-    raw :: "team,value\nA,2.0\nB,4.0\nA,6.0\n"
-    rows :: data.csv<Row>(raw) ?? panic("csv")
-    groups :: data.query(rows)
+run: fn() {
+    raw: "team,value\nA,2.0\nB,4.0\nA,6.0\n"
+    rows: data.csv<Row>(raw) ?? panic("csv")
+    groups: data.query(rows)
         .group_by(row -> row.team)
         .mean(row -> row.value)
         .collect() ?? panic("group")
-    svg :: data.bar_svg(groups) ?? panic("plot")
-    svg_path :: "$JET_STATE_ROOT/dx3/area-data/output.svg"
+    svg: data.bar_svg(groups) ?? panic("plot")
+    svg_path: "$JET_STATE_ROOT/dx3/area-data/output.svg"
     files.write(svg_path, svg) ?? panic("write svg")
-    receipt :: Receipt{rows: rows.len(), groups: groups.len(), svg_bytes: svg.len()}
-    receipt_json :: json.to_string(receipt) ?? panic(err.reason)
+    receipt: Receipt{rows: rows.len(), groups: groups.len(), svg_bytes: svg.len()}
+    receipt_json: json.to_string(receipt) ?? panic(err.reason)
     files.write("$JET_STATE_ROOT/dx3/area-data/receipt.json", receipt_json) ?? panic("write receipt")
     print("rows={receipt.rows} groups={receipt.groups} svg={receipt.svg_bytes}")
 }

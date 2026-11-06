@@ -1,12 +1,12 @@
 // Ports of the registry-row gates from the deleted (#6096, #5902 C4), run
 // against the Jet registries that replaced the Rust ones.
 use {
-    registry_coverage_files :: core.files
+    registry_coverage_files: core.files
     jet_foundation.[DIAGNOSTIC_ERROR, DIAGNOSTIC_LINT, DiagnosticRegistryStatus, FOUNDATION_FACT_READ_ROWS, FactRead, MARKER_SOURCE, REGISTRATION_FACT_ROWS, REGISTRATION_TRUTH_ROWS, RegistrationFactTarget, diagnostic_explanation, diagnostic_registry_row, diagnostic_registry_rows, diagnostic_stage_is_registered, fact_read_reflection_kind, lint_code_for_name, lint_name_for_code, lint_registered_lints, marker_source_read]
 }
 
-fn registry_coverage_is_snake_case(name: String) -> Bool Never! {
-    bytes :: name.bytes()
+registry_coverage_is_snake_case: fn(name: String) -> Bool Never! {
+    bytes: name.bytes()
     if bytes.len() == 0 -> return false
     previous_underscore := false
     loop (index, byte) in bytes {
@@ -22,7 +22,7 @@ fn registry_coverage_is_snake_case(name: String) -> Bool Never! {
     !previous_underscore
 }
 
-fn registry_coverage_has(values: [String], value: String) -> Bool Never! {
+registry_coverage_has: fn(values: [String], value: String) -> Bool Never! {
     loop item in values {
         if item == value -> return true
     }
@@ -31,11 +31,11 @@ fn registry_coverage_has(values: [String], value: String) -> Bool Never! {
 
 #Test("registered_codes_keep_explicit_severity_and_lint_names") {
     loop expected in [(code: "E2930", severity: DIAGNOSTIC_LINT), (code: "W0410", severity: DIAGNOSTIC_LINT), (code: "R0801", severity: DIAGNOSTIC_ERROR), (code: "E0003", severity: DIAGNOSTIC_ERROR)] {
-        row :: diagnostic_registry_row(expected.code) ?? panic("{expected.code} must stay registered")
+        row: diagnostic_registry_row(expected.code) ?? panic("{expected.code} must stay registered")
         assert(row.severity == expected.severity, "{expected.code} must keep the registry row's explicit severity")
     }
     loop lint in lint_registered_lints() {
-        name :: lint.lint_name ?? panic("lint {lint.code} needs a stable name")
+        name: lint.lint_name ?? panic("lint {lint.code} needs a stable name")
         assert(registry_coverage_is_snake_case(name), "lint {lint.code} has an unstable selector name `{name}`")
     }
 }
@@ -52,7 +52,7 @@ fn registry_coverage_has(values: [String], value: String) -> Bool Never! {
         (code: "L0523", name: "repeated_list_head"),
         (code: "L0524", name: "raw_multiline_html"),
     ] {
-        row :: diagnostic_registry_row(expected.code) ?? panic("{expected.code} must stay registered")
+        row: diagnostic_registry_row(expected.code) ?? panic("{expected.code} must stay registered")
         assert(row.severity == DIAGNOSTIC_LINT, "{expected.code} is a lint")
         assert((row.lint_name ?? "") == expected.name, "{expected.code} keeps its lint name")
         assert(!row.what.is_empty(), "{expected.code} needs What copy")
@@ -71,13 +71,13 @@ fn registry_coverage_has(values: [String], value: String) -> Bool Never! {
     names := [String]{}
     codes := [String]{}
     loop lint in lint_registered_lints() {
-        name :: lint.lint_name ?? panic("every registered lint must carry a stable name")
+        name: lint.lint_name ?? panic("every registered lint must carry a stable name")
         assert(registry_coverage_is_snake_case(name), "lint `{name}` is not a stable snake_case name")
         assert(!registry_coverage_has(names, name), "lint name `{name}` is duplicated")
         &names.push(name)
         assert(!registry_coverage_has(codes, lint.code), "lint code `{lint.code}` is duplicated")
         &codes.push(lint.code)
-        registered_row :: diagnostic_registry_row(lint.code) ?? panic("lint `{lint.code}` is not a registered diagnostic row")
+        registered_row: diagnostic_registry_row(lint.code) ?? panic("lint `{lint.code}` is not a registered diagnostic row")
         assert(registered_row.severity == DIAGNOSTIC_LINT, "lint `{lint.code}` is not a registered lint diagnostic row")
         assert((lint_name_for_code(lint.code) ?? "") == name, "lint `{lint.code}` does not round-trip through the name registry")
         assert((lint_code_for_name(name) ?? "") == lint.code, "lint name `{name}` does not resolve to its registered code")
@@ -100,7 +100,7 @@ fn registry_coverage_has(values: [String], value: String) -> Bool Never! {
 
 // Jet teaches no foreign or retired spelling, so no Active row is named for
 // one. The FFI rows name the foreign-function boundary itself.
-REGISTRY_COVERAGE_FFI_ROWS :: [String]{"E0064", "E0704", "E0705", "E3014", "E3215", "E3216", "E3220", "E3222"}
+REGISTRY_COVERAGE_FFI_ROWS: [String]{"E0064", "E0704", "E0705", "E3014", "E3215", "E3216", "E3220", "E3222"}
 
 #Test("no_active_row_teaches_a_foreign_or_retired_spelling") {
     teaching := [String]{}
@@ -126,12 +126,12 @@ REGISTRY_COVERAGE_FFI_ROWS :: [String]{"E0064", "E0704", "E0705", "E3014", "E321
         }
         if !diagnostic_stage_is_registered(row.stage) -> &unknown.push("{row.code}: `{row.stage}`")
     }
-    source :: registry_coverage_files.read("Compiler/Prelude/Diagnostics.jet") ?? panic("read Compiler/Prelude/Diagnostics.jet: {err}")
+    source: registry_coverage_files.read("Compiler/Prelude/Diagnostics.jet") ?? panic("read Compiler/Prelude/Diagnostics.jet: {err}")
     count := 0
     loop line in source.split("\n") {
         if line == "    impl Diagnostic {{" -> count += 1
-        if !line.starts_with("        stage :: [") -> next
-        stage :: line.remove_prefix("        stage :: [").remove_suffix("]").replace(", .", "/").remove_prefix(".").lower()
+        if !line.starts_with("        stage: [") -> next
+        stage: line.remove_prefix("        stage: [").remove_suffix("]").replace(", .", "/").remove_prefix(".").lower()
         if !diagnostic_stage_is_registered(stage) -> &unknown.push("Prelude impl {count}: `{stage}`")
     }
     assert(count > 100, "the Prelude diagnostic impls must be readable")
@@ -169,7 +169,7 @@ REGISTRY_COVERAGE_FFI_ROWS :: [String]{"E0064", "E0704", "E0705", "E3014", "E321
 // rows, value planes, scope rights, build facts, corpus truths and diagnostic
 // rows; each marker row is one declaration with at least one site.
 #Test("the_one_table_holds_every_kind") {
-    rules :: marker_source_read(MARKER_SOURCE)
+    rules: marker_source_read(MARKER_SOURCE)
     assert(rules.len() > 0, "the one table holds no Marker row")
     names := [String]{}
     loop rule in rules {
@@ -227,10 +227,10 @@ REGISTRY_COVERAGE_FFI_ROWS :: [String]{"E0064", "E0704", "E0705", "E3014", "E321
             &violations.push("`{row.name}` names the guard file `{row.guard_file}`, which cannot be read")
             next
         }
-        source :: registry_coverage_files.read(row.guard_file) ?? panic("read {row.guard_file}: {err}")
-        words :: row.guard_test.split(" ").to_list()
-        flag :: words[words.len() - 1]
-        defined :: if flag.starts_with("--") -> source.contains(flag) else -> source.contains("#Test(\"{row.guard_test}\")")
+        source: registry_coverage_files.read(row.guard_file) ?? panic("read {row.guard_file}: {err}")
+        words: row.guard_test.split(" ").to_list()
+        flag: words[words.len() - 1]
+        defined: if flag.starts_with("--") -> source.contains(flag) else -> source.contains("#Test(\"{row.guard_test}\")")
         if !defined -> &violations.push("`{row.name}` names the guard `{row.guard_test}`, which `{row.guard_file}` does not define")
     }
     assert_eq(violations.join("\n"), "")
@@ -297,11 +297,11 @@ REGISTRY_COVERAGE_FFI_ROWS :: [String]{"E0064", "E0704", "E0705", "E3014", "E321
             &violations.push("plane `{row.name}` has no FactRead projection")
             next
         }
-        kind :: projection ?? {
+        kind: projection ?? {
             &violations.push("plane `{row.name}` resolves to a FactRead row with no reflection kind")
             next
         }
-        source_kind :: fact_read_reflection_kind(FactRead.RegisteredPlane{name: row.name}) ?? ""
+        source_kind: fact_read_reflection_kind(FactRead.RegisteredPlane{name: row.name}) ?? ""
         if source_kind != kind -> &violations.push("plane `{row.name}`: source read reflects `{source_kind}`, projection row reflects `{kind}`")
     }
     assert(planes > 0, "the registry holds no value plane")

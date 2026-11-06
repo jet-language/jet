@@ -1,4 +1,4 @@
-package {
+package: {
     name: "files_handle_io"
     authority: { allow: [FS, FS.Read, FS.Write, IO, Mem.Alloc] }
 }
@@ -8,31 +8,31 @@ package {
 // handle, then read back in bounded chunks while the reader's fstat identity
 // is compared with the path's.
 
-use files :: core.files
+use files: core.files
 
-fn run() {
-    scratch :: files.temp_dir("handle-io")
-    path :: files.join(scratch.path, "blob.bin")
+run: fn() {
+    scratch: files.temp_dir("handle-io")
+    path: files.join(scratch.path, "blob.bin")
 
-    writer :: files.create(path, if_exists: .Refuse)
+    writer: files.create(path, if_exists: .Refuse)
     writer.write_all("hello ".bytes())
     writer.write_all("world, bytes".bytes())
     writer.fsync()
     writer.set_mode(0o640)
-    written :: writer.stat()
+    written: writer.stat()
     print("written size {written.size} mode {written.mode} file {written.is_file}")
     close(^writer)
-    held_dir :: files.open_directory(scratch.path)
+    held_dir: files.open_directory(scratch.path)
     loop entry in held_dir.list() -> print("entry {entry.name} unicode={entry.name_is_unicode} raw bytes={entry.raw_name.len()} dir={entry.is_dir}")
 
-    reader :: files.open(path, links: .Refuse)
-    held :: reader.stat()
-    now :: files.stat(path)
+    reader: files.open(path, links: .Refuse)
+    held: reader.stat()
+    now: files.stat(path)
     print("same file as the path: {held.id.device == now.id.device && held.id.inode == now.id.inode}")
     total := 0
     chunks := 0
     loop {
-        chunk :: reader.read(5)
+        chunk: reader.read(5)
         if chunk.len() == 0 -> break
         total += chunk.len()
         chunks += 1
@@ -46,11 +46,11 @@ fn run() {
 
     // A read union borrows both alternatives; neither the Path nor its source
     // text is consumed when Core selects the path spelling.
-    text :: path
-    borrowed_path :: Path.from(text)
-    first :: files.stat(borrowed_path) ?? panic("path stat")
-    second :: files.stat(text) ?? panic("text stat")
-    canonical :: files.canonicalize(borrowed_path) ?? panic("canonicalize")
+    text: path
+    borrowed_path: Path.from(text)
+    first: files.stat(borrowed_path) ?? panic("path stat")
+    second: files.stat(text) ?? panic("text stat")
+    canonical: files.canonicalize(borrowed_path) ?? panic("canonicalize")
     print(first.size == second.size)
     print(canonical.contains("blob.bin"))
     print(text.contains("blob.bin"))

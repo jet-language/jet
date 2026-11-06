@@ -1,7 +1,7 @@
 
-use http :: core.http.client
+use http: core.http.client
 
-fn consume(response: HTTPResponse) -> String Never! {
+consume: fn(response: HTTPResponse) -> String Never! {
     loop chunk in response.body().chunks(65536) {
         if chunk == {
             .Ok(_) -> {}
@@ -15,13 +15,13 @@ fn consume(response: HTTPResponse) -> String Never! {
     return "accepted"
 }
 
-fn run() {
+run: fn() {
     if http.get("http://{cap:addr}/close-get") == {
         .Ok(response) -> print("close-get={consume(response)}")
         .Err(_) -> print("close-get=request-error")
         else -> print("close-get=unexpected")
     }
-    close_request :: http.request("GET", "http://{cap:addr}/close-request").read_timeout(30000)
+    close_request: http.request("GET", "http://{cap:addr}/close-request").read_timeout(30000)
     if close_request.send() == {
         .Ok(response) -> print("close-request={consume(response)}")
         .Err(_) -> print("close-request=request-error")
@@ -32,7 +32,7 @@ fn run() {
         .Err(_) -> print("chunked-get=request-error")
         else -> print("chunked-get=unexpected")
     }
-    chunked_request :: http.request("GET", "http://{cap:addr}/chunked-request").read_timeout(30000)
+    chunked_request: http.request("GET", "http://{cap:addr}/chunked-request").read_timeout(30000)
     if chunked_request.send() == {
         .Ok(response) -> print("chunked-request={consume(response)}")
         .Err(_) -> print("chunked-request=request-error")
@@ -43,7 +43,7 @@ fn run() {
         .Err(_) -> print("gzip-get=request-error")
         else -> print("gzip-get=unexpected")
     }
-    gzip_request :: http.request("GET", "http://{cap:addr}/gzip-request").read_timeout(30000)
+    gzip_request: http.request("GET", "http://{cap:addr}/gzip-request").read_timeout(30000)
     if gzip_request.send() == {
         .Ok(response) -> print("gzip-request={consume(response)}")
         .Err(_) -> print("gzip-request=request-error")

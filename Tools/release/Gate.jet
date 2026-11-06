@@ -1,13 +1,13 @@
 // What blocks a release. Every check reads facts gathered elsewhere and
 // returns problems; none stops early, so one run names every blocker.
 
-struct Tag {
+Tag: struct {
     name: String
     commit: String
 }
 
 // What origin and GitHub say about the candidate.
-struct Remote {
+Remote: struct {
     slug: String
     origin_tags: [Tag]
     local_tags: [String]
@@ -18,8 +18,8 @@ struct Remote {
 }
 
 // owner/name of a GitHub remote URL (https or ssh), or "".
-fn github_slug(url: String) -> String Never! {
-    text :: url.trim()
+github_slug: fn(url: String) -> String Never! {
+    text: url.trim()
     rest := ""
     if {
         text.starts_with("git@github.com:") -> rest = text.slice(15..<text.len()).copy()
@@ -29,20 +29,20 @@ fn github_slug(url: String) -> String Never! {
     }
     if rest.ends_with("/") -> rest = rest.slice(0..<rest.len() - 1).copy()
     if rest.ends_with(".git") -> rest = rest.slice(0..<rest.len() - 4).copy()
-    parts :: rest.split("/").to_list()
+    parts: rest.split("/").to_list()
     if parts.len() != 2 || parts[0] == "" || parts[1] == "" -> return ""
     "{parts[0]}/{parts[1]}"
 }
 
 // Each tag `git ls-remote --tags` prints, with the commit it names: the peeled
 // `^{}` row of an annotated tag wins over the tag object.
-fn remote_tags(text: String) -> [Tag] Never! {
+remote_tags: fn(text: String) -> [Tag] Never! {
     tags := [Tag]{}
     loop line in text.split("\n").to_list() {
-        cells :: line.split("\t").to_list()
+        cells: line.split("\t").to_list()
         if cells.len() != 2 || !cells[1].starts_with("refs/tags/") -> next
         name := cells[1].slice(10..<cells[1].len()).copy()
-        peeled :: name.ends_with("^{{}}")
+        peeled: name.ends_with("^{{}}")
         if peeled -> name = name.slice(0..<name.len() - 3).copy()
         found := -1
         loop (index, known) in tags {
@@ -56,18 +56,18 @@ fn remote_tags(text: String) -> [Tag] Never! {
     tags
 }
 
-fn tag_commit(tags: [Tag], name: String) -> String? Never! {
+tag_commit: fn(tags: [Tag], name: String) -> String? Never! {
     loop known in tags {
         if known.name == name -> return Val(known.commit.copy())
     }
     None
 }
 
-fn release_number(name: String) -> Int? Never! {
+release_number: fn(name: String) -> Int? Never! {
     if name.len() != 6 || !name.starts_with("a0_") -> return None
     value := 0
     loop byte in name.slice(3..<6).bytes() {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         if code < 48 || code > 57 -> return None
         value = value * 10 + code - 48
     }
@@ -75,12 +75,12 @@ fn release_number(name: String) -> Int? Never! {
 }
 
 // The next release name after every a0_NNN in `names`.
-fn next_release_name(names: [String]) -> String Never! {
+next_release_name: fn(names: [String]) -> String Never! {
     highest := 0
     loop name in names {
         if release_number(name) == .Val(number) && number > highest -> highest = number
     }
-    next :: highest + 1
+    next: highest + 1
     if {
         next < 10 -> "a0_00{next}"
         next < 100 -> "a0_0{next}"
@@ -88,7 +88,7 @@ fn next_release_name(names: [String]) -> String Never! {
     }
 }
 
-fn contains_text(list: [String], text: String) -> Bool Never! {
+contains_text: fn(list: [String], text: String) -> Bool Never! {
     loop item in list {
         if item == text -> return true
     }
@@ -97,7 +97,7 @@ fn contains_text(list: [String], text: String) -> Bool Never! {
 
 // The release directory itself: identity, checksums, runtime pack and the
 // fixed point of the bootstrap chain.
-fn release_problems(release: Release) -> [Problem] Never! {
+release_problems: fn(release: Release) -> [Problem] Never! {
     problems := [Problem]{}
     if !release.identity.starts_with("jet@") || !is_hex(identity_sha(release.identity), 64) -> &problems.push(problem(INPUT, "IDENTITY `{release.identity}` is not jet@VERSION#SHA256"))
     if identity_sha(release.identity) != release.jet_sha256 -> &problems.push(problem(STALE, "IDENTITY {release.identity} does not name jet (sha256 {release.jet_sha256})"))
@@ -118,12 +118,12 @@ fn release_problems(release: Release) -> [Problem] Never! {
 
 // What publish requires of RELEASE.json: a full, passing gate of the
 // release's own identity.
-fn admission_problems(record: Dyn, identity: String) -> [Problem] Never! {
+admission_problems: fn(record: Dyn, identity: String) -> [Problem] Never! {
     problems := [Problem]{}
-    schema :: text_field(record, "schema")
-    verdict :: text_field(record, "verdict")
-    scope :: text_field(record, "scope")
-    admitted :: text_field(record, "identity")
+    schema: text_field(record, "schema")
+    verdict: text_field(record, "verdict")
+    scope: text_field(record, "scope")
+    admitted: text_field(record, "identity")
     if schema != "jet-release/v1" -> &problems.push(problem(ADMISSION, "RELEASE.json schema is {schema}, not jet-release/v1"))
     if verdict != "PASS" -> &problems.push(problem(ADMISSION, "RELEASE.json verdict is {verdict}, not PASS"))
     if scope != "full" -> &problems.push(problem(ADMISSION, "RELEASE.json scope is {scope}, not full: a filtered gate is not a release"))
@@ -135,7 +135,7 @@ fn admission_problems(record: Dyn, identity: String) -> [Problem] Never! {
 // A row's blocking class, or "" for a check that ran and passed. NOTE is a
 // release-compiler.mjs check that ran and reports a fact, such as a loss
 // with a recorded disposition.
-fn row_class(status: String) -> String Never! {
+row_class: fn(status: String) -> String Never! {
     if {
         status == "PASS" || status == "NOTE" -> ""
         status == "" || status == "SKIP" || status == "SKIPPED" || status == "BLOCKED" || status == "NOT_RUN" -> SKIPPED
@@ -148,7 +148,7 @@ fn row_class(status: String) -> String Never! {
 // target needs a receipt from each of its shards, every row must pass, every
 // receipt must be pinned to this commit and this jet, and a check may not
 // pass in one run and fail in another.
-fn receipt_problems(release: Release, receipts: [Receipt], matrix: [MatrixRow]) -> [Problem] Never! {
+receipt_problems: fn(release: Release, receipts: [Receipt], matrix: [MatrixRow]) -> [Problem] Never! {
     problems := [Problem]{}
     targets := [String]{}
     loop row in matrix -> &targets.push(row.target.copy())
@@ -163,7 +163,7 @@ fn receipt_problems(release: Release, receipts: [Receipt], matrix: [MatrixRow]) 
             &problems.push(problem(MISSING_RUNNER, "no runner reported for {row.target} ({row.name})"))
             next
         }
-        shards :: mine[0].shards
+        shards: mine[0].shards
         loop receipt in mine {
             if receipt.shards != shards -> &problems.push(problem(MISSING_RUNNER, "{row.target} receipts disagree on the shard count ({receipt.file} says {receipt.shards}, {mine[0].file} says {shards})"))
         }
@@ -183,16 +183,16 @@ fn receipt_problems(release: Release, receipts: [Receipt], matrix: [MatrixRow]) 
         if receipt.jet_sha256 != "" && receipt.jet_sha256 != release.jet_sha256 -> &problems.push(problem(STALE, "{receipt.file} ran jet {receipt.jet_sha256}, not the release's jet ({release.jet_sha256})"))
         if receipt.rows.len() == 0 -> &problems.push(problem(SKIPPED, "{receipt.file} has no rows: the gate ran nothing"))
         if receipt.status != "PASS" && row_class(receipt.status) != "" -> &problems.push(problem(row_class(receipt.status), "{receipt.file} status is {receipt.status}, not PASS"))
-        shard_key :: "{receipt.target}\t\tshard {receipt.shard}"
+        shard_key: "{receipt.target}\t\tshard {receipt.shard}"
         if outcomes.get(shard_key) == .Val(before) && before != receipt.status -> &problems.push(problem(FLAKY, "{receipt.target} shard {receipt.shard + 1} was {before} in one run and {receipt.status} in {receipt.file}: a flaky gate"))
         if outcomes.get(shard_key) == None -> outcomes[shard_key] = receipt.status.copy()
         loop row in receipt.rows {
-            class :: row_class(row.status)
+            class: row_class(row.status)
             if class != "" -> &problems.push(problem(class, "{receipt.file}: {row.scope} is {if row.status == "" -> "unreported" else -> row.status}"))
             // A manifest row reports only its inventory size (`total`); a row
             // that ran cases reports both counts, and every case must pass.
             if row.total == .Val(total) && row.passed == .Val(passed) && passed != total -> &problems.push(problem(SKIPPED, "{receipt.file}: {row.scope} passed {passed} of {total} cases"))
-            key :: "{receipt.target}\t{row.scope}"
+            key: "{receipt.target}\t{row.scope}"
             if outcomes.get(key) == .Val(before) && before != row.status -> &problems.push(problem(FLAKY, "{row.scope} on {receipt.target} was {before} in one run and {row.status} in {receipt.file}: a flaky check"))
             if outcomes.get(key) == None -> outcomes[key] = row.status.copy()
         }
@@ -204,11 +204,11 @@ fn receipt_problems(release: Release, receipts: [Receipt], matrix: [MatrixRow]) 
 // already name it, and a build's name must still be free. Whether GitHub
 // already holds the release is the caller's question: candidate refuses
 // the name, while publish checks for a partial upload.
-fn remote_problems(release: Release, remote: Remote, name: String) -> [Problem] Never! {
+remote_problems: fn(release: Release, remote: Remote, name: String) -> [Problem] Never! {
     problems := [Problem]{}
     &problems.extend(remote.problems)
     if remote.slug == "" -> &problems.push(problem(REMOTE, "origin is not a GitHub remote"))
-    tagged :: tag_commit(remote.origin_tags, name) ?? ""
+    tagged: tag_commit(remote.origin_tags, name) ?? ""
     if release.kind == "build" {
         if !remote.on_origin_dev -> &problems.push(problem(REMOTE, "{release.commit} is not on origin/dev: push dev first, so GitHub has the commit the tag names"))
         if tagged != "" && tagged != release.commit -> &problems.push(problem(REMOTE, "origin's tag {name} already names {tagged}, not {release.commit}"))

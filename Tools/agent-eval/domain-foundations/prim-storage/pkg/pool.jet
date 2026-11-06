@@ -1,26 +1,26 @@
-use time :: core.time
+use time: core.time
 
-fn pool_health(token: Int) -> Bool { token > 0 }
+pool_health: fn(token: Int) -> Bool { token > 0 }
 
-fn pool_worker(token: Int, returned: Sender<Int>) -> Int {
+pool_worker: fn(token: Int, returned: Sender<Int>) -> Int {
     if !pool_health(token) -> panic("unhealthy connection")
     time.sleep(1ms)
     returned.send(token)
     return token
 }
-fn pool_demo() -> [Int] {
-    { sender: returned, receiver: available } :: channel<Int>(capacity: 2)
+pool_demo: fn() -> [Int] {
+    { sender: returned, receiver: available }: channel<Int>(capacity: 2)
     returned.send(1)
     returned.send(2)
 
-    first_token :: available.receive() ?? panic("pool closed")
-    first :: task pool_worker(first_token, returned)
-    second_token :: available.receive() ?? panic("pool closed")
-    second_returned :: returned.copy()
-    second :: task pool_worker(second_token, second_returned)
-    third_token :: available.receive() ?? panic("pool closed")
-    third_returned :: returned.copy()
-    third :: task pool_worker(third_token, third_returned)
+    first_token: available.receive() ?? panic("pool closed")
+    first: task pool_worker(first_token, returned)
+    second_token: available.receive() ?? panic("pool closed")
+    second_returned: returned.copy()
+    second: task pool_worker(second_token, second_returned)
+    third_token: available.receive() ?? panic("pool closed")
+    third_returned: returned.copy()
+    third: task pool_worker(third_token, third_returned)
 
     leases := [
         first.join() ?? panic("first worker failed"),

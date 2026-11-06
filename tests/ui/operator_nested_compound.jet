@@ -1,31 +1,31 @@
-struct Vec2 {
+Vec2: struct {
     x: Int
     y: Int
 }
 
-struct Inner {
+Inner: struct {
     value: Vec2
 }
 
-struct Outer {
+Outer: struct {
     inner: Inner
 }
 
-struct GenericInner<T> {
+GenericInner: struct<T> {
     value: T
 }
 
-struct GenericOuter<T> {
+GenericOuter: struct<T> {
     inner: GenericInner<T>
 }
 
 impl Vec2.Add {
-    fn add(self, rhs: Vec2) -> Vec2 { return Vec2{x: self.x + rhs.x, y: self.y + rhs.y} }
+    add: fn(self, rhs: Vec2) -> Vec2 { return Vec2{x: self.x + rhs.x, y: self.y + rhs.y} }
 }
 
-fn run() {
+run: fn() {
     outer := Outer{inner: Inner{value: Vec2{x: 1, y: 2}}}
     outer.inner.value += Vec2{x: 3, y: 4}
 }
 
-fn update_generic<T: Add>(outer: &GenericOuter<T>, delta: T) { outer.inner.value += delta }
+update_generic: fn<T: Add>(outer: &GenericOuter<T>, delta: T) { outer.inner.value += delta }

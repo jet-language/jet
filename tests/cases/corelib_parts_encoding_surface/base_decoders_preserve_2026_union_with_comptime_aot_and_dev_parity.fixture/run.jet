@@ -1,10 +1,10 @@
 
 use {
-    base64 :: core.encoding.base64
-    base32 :: core.encoding.base32
+    base64: core.encoding.base64
+    base32: core.encoding.base32
 }
 
-fn show64(text: String) -> String {
+show64: fn(text: String) -> String {
     if base64.decode(text) == {
         .Ok(bytes) -> { return "OK:{bytes}" }
         .Err(reason) -> { return "ERR:{reason}" }
@@ -12,7 +12,7 @@ fn show64(text: String) -> String {
     return "unreachable"
 }
 
-fn show64url(text: String) -> String {
+show64url: fn(text: String) -> String {
     if base64.decode_url(text) == {
         .Ok(bytes) -> { return "OK:{bytes}" }
         .Err(reason) -> { return "ERR:{reason}" }
@@ -20,7 +20,7 @@ fn show64url(text: String) -> String {
     return "unreachable"
 }
 
-fn show32(text: String) -> String {
+show32: fn(text: String) -> String {
     if base32.decode(text) == {
         .Ok(bytes) -> { return "OK:{bytes}" }
         .Err(reason) -> { return "ERR:{reason}" }
@@ -28,26 +28,26 @@ fn show32(text: String) -> String {
     return "unreachable"
 }
 
-STANDARD_WS :: comptime { show64("Z g = =\n") }
-STANDARD_UNPADDED :: comptime { show64("Zg") }
-STANDARD_INTERIOR :: comptime { show64("Zg=A") }
-STANDARD_EXCESS :: comptime { show64("Zg====") }
-STANDARD_BITS :: comptime { show64("Zh==") }
-STANDARD_PADDING :: comptime { show64("=AAA") }
-STANDARD_ALPHABET :: comptime { show64("Zg-=") }
-STANDARD_SIZE :: comptime { show64("A") }
-URL_OUTER_WS :: comptime { show64url(" \tZg==\n") }
-URL_INTERIOR :: comptime { show64url("Zg=A") }
-URL_STANDARD_ALPHABET :: comptime { show64url("+w") }
-URL_BITS :: comptime { show64url("Zh") }
-URL_PADDING :: comptime { show64url("=AAA") }
-URL_SIZE :: comptime { show64url("A") }
-BASE32_LOOSE :: comptime { show32("m=y======\n") }
-BASE32_BITS :: comptime { show32("MZ======") }
-BASE32_SHORT :: comptime { show32("A") }
-BASE32_ALPHABET :: comptime { show32("M0======") }
+STANDARD_WS: comptime { show64("Z g = =\n") }
+STANDARD_UNPADDED: comptime { show64("Zg") }
+STANDARD_INTERIOR: comptime { show64("Zg=A") }
+STANDARD_EXCESS: comptime { show64("Zg====") }
+STANDARD_BITS: comptime { show64("Zh==") }
+STANDARD_PADDING: comptime { show64("=AAA") }
+STANDARD_ALPHABET: comptime { show64("Zg-=") }
+STANDARD_SIZE: comptime { show64("A") }
+URL_OUTER_WS: comptime { show64url(" \tZg==\n") }
+URL_INTERIOR: comptime { show64url("Zg=A") }
+URL_STANDARD_ALPHABET: comptime { show64url("+w") }
+URL_BITS: comptime { show64url("Zh") }
+URL_PADDING: comptime { show64url("=AAA") }
+URL_SIZE: comptime { show64url("A") }
+BASE32_LOOSE: comptime { show32("m=y======\n") }
+BASE32_BITS: comptime { show32("MZ======") }
+BASE32_SHORT: comptime { show32("A") }
+BASE32_ALPHABET: comptime { show32("M0======") }
 
-fn run() {
+run: fn() {
     r_standard_ws := show64("Z g = =\n")
     r_standard_unpadded := show64("Zg")
     r_standard_interior := show64("Zg=A")

@@ -2,33 +2,33 @@
 // expected type of its arms only; the scrutinee's call chain is checked on
 // its own.
 #Error
-struct Fault {
+Fault: struct {
     reason: String
 }
 
-struct Spec {
+Spec: struct {
     text: String
 }
 
 impl Spec {
-    fn run(self) -> Int Fault! {
+    run: fn(self) -> Int Fault! {
         if self.text == "" -> return Err(Fault{reason: "empty"})
         self.text.len()
     }
 }
 
-fn make(text: String) -> Spec {
+make: fn(text: String) -> Spec {
     Spec{text: text}
 }
 
-fn succeeded(text: String) -> Bool Never! {
+succeeded: fn(text: String) -> Bool Never! {
     if make(text).run() == {
         .Ok(n) -> n > 2
         .Err(_) -> false
     }
 }
 
-fn run() {
+run: fn() {
     print(succeeded("abc"))
     print(succeeded("ab"))
     print(succeeded(""))

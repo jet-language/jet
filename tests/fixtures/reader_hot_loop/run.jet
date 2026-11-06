@@ -1,15 +1,15 @@
 #CLI
-struct ReaderArgs {
+ReaderArgs: struct {
     n: Int{1000000}
 }
 
-fn run(args: ReaderArgs) Err! {
-    n :: args.n
-    data :: "A".repeat(n).bytes()
-    reader :: Reader.over(data)
+run: fn(args: ReaderArgs) Err! {
+    n: args.n
+    data: "A".repeat(n).bytes()
+    reader: Reader.over(data)
     total := Int{0}
     loop _ in 0..<n {
-        byte :: reader.read_u8() ?? return
+        byte: reader.read_u8() ?? return
         total += Int.from_u8(byte)
     }
     keep(total)

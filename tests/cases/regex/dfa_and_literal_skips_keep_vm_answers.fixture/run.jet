@@ -1,21 +1,21 @@
-use re :: core.regex
+use re: core.regex
 
 // Each line pairs a query with the answer the leftmost-first VM gives. The
 // patterns reach the DFA (ASCII text), its hand-back to the VM (a byte
 // above 127, `\b`), the required-literal check and the prefix skip.
-fn check(name: String, ok: Bool) { print("{name}: {ok}") }
+check: fn(name: String, ok: Bool) { print("{name}: {ok}") }
 
-fn run() {
-    plain :: re.flags(false, false, false)
-    multiline :: re.flags(false, true, false)
-    folded :: re.flags(true, false, false)
+run: fn() {
+    plain: re.flags(false, false, false)
+    multiline: re.flags(false, true, false)
+    folded: re.flags(true, false, false)
 
-    word :: Regex{"struct"}
-    check("prefix skip finds every occurrence", word.find_all("struct S {{ struct T }} structure").len() == 3)
-    starts :: word.matches("struct S {{ struct T }} structure").map(m -> m.start)
+    word: Regex{"struct"}
+    check("prefix skip finds every occurrence", word.find_all("S: struct {{ T: struct }} structure").len() == 3)
+    starts: word.matches("S: struct {{ T: struct }} structure").map(m -> m.start)
     check("prefix skip keeps the starts", starts == [Int]{0, 11, 22})
 
-    photo :: Regex{"^IMG_(\d+)\.jpeg$"}
+    photo: Regex{"^IMG_(\d+)\.jpeg$"}
     check("dfa accepts an anchored name", photo.is_match("IMG_1.jpeg"))
     check("dfa full match", photo.full_match("IMG_1.jpeg"))
     check("dfa rejects another extension", !photo.is_match("IMG_12.png"))
@@ -23,57 +23,57 @@ fn run() {
     check("dfa rejects a later start", !photo.is_match("xIMG_1.jpeg"))
     check("captures still come from the vm", (photo.match("IMG_42.jpeg") ?? panic("no match")).group(1) == Val("42"))
 
-    loose :: Regex{"IMG_(\d+)\.jpeg"}
+    loose: Regex{"IMG_(\d+)\.jpeg"}
     check("missing needle finds nothing", loose.find_all("IMG_12.png notes.txt").len() == 0)
     check("needle present but no match", loose.find("IMG_.jpeg") == None)
-    groups :: Regex{"IMG_(\d+)"}.matches("a IMG_1 b IMG_22")
+    groups: Regex{"IMG_(\d+)"}.matches("a IMG_1 b IMG_22")
     check("prefix skip keeps capture starts", groups.map(m -> m.start) == [Int]{2, 10})
     check("prefix skip keeps capture text", groups.map(m -> m.group(1) ?? "") == [String]{"1", "22"})
 
-    accent :: Regex{"é+"}
+    accent: Regex{"é+"}
     check("a byte above 127 hands over to the vm", accent.is_match("café"))
     check("vm answer after hand-over", accent.find("caféé!") == Val("éé"))
     check("dfa still rejects ascii text", !accent.is_match("cafe"))
 
-    lines :: re.compile_with("^foo$", multiline) ?? panic("bad pattern")
+    lines: re.compile_with("^foo$", multiline) ?? panic("bad pattern")
     check("multiline caret after a newline", lines.is_match("x\nfoo"))
     check("multiline dollar is still the text end", !lines.is_match("x\nfoo\n"))
     check("multiline caret needs a line start", !lines.is_match("xfoo"))
 
-    boundary :: Regex{"\bcat\b"}
+    boundary: Regex{"\bcat\b"}
     check("word boundary uses the vm", boundary.is_match("concat cat"))
     check("word boundary rejects", !boundary.is_match("concat"))
 
-    folding :: re.compile_with("img_\\d", folded) ?? panic("bad pattern")
+    folding: re.compile_with("img_\\d", folded) ?? panic("bad pattern")
     check("ignore case through the dfa", folding.is_match("IMG_7"))
     check("ignore case full match", folding.full_match("Img_7"))
 
-    common :: Regex{"foo(bar|baz)"}
+    common: Regex{"foo(bar|baz)"}
     check("alternation keeps the common prefix", common.find_all("foobaz foobar fooqux") == [String]{"foobaz", "foobar"})
 
-    empty :: re.compile_with("", plain) ?? panic("bad pattern")
+    empty: re.compile_with("", plain) ?? panic("bad pattern")
     check("empty pattern matches between characters", empty.find_all("ab").len() == 3)
     check("empty pattern matches empty text", empty.full_match(""))
 
-    first :: Regex{"a|ab"}
+    first: Regex{"a|ab"}
     check("leftmost-first prefers the earlier arm", first.find("ab") == Val("a"))
-    longer :: Regex{"(foo|foobar)baz"}
+    longer: Regex{"(foo|foobar)baz"}
     check("leftmost-first backs into the later arm", longer.find("foobarbaz") == Val("foobarbaz"))
 
-    log :: Regex{"^([0-9.]+) - - \[[^]]+\] \"GET /api/[^ ]+ HTTP/1\.1\" 5[0-9][0-9] "}
+    log: Regex{"^([0-9.]+) - - \[[^]]+\] \"GET /api/[^ ]+ HTTP/1\.1\" 5[0-9][0-9] "}
     check("log line with a 5xx api request", log.is_match("192.0.2.1 - - [01/Jan/2026:00:00:00 +0000] \"GET /api/v1/x HTTP/1.1\" 503 12"))
     check("log line with a 2xx api request", !log.is_match("192.0.2.1 - - [01/Jan/2026:00:00:00 +0000] \"GET /api/v1/x HTTP/1.1\" 200 12"))
     check("log line with a static request", !log.is_match("192.0.2.1 - - [01/Jan/2026:00:00:00 +0000] \"GET /static/x HTTP/1.1\" 503 12"))
 
     // The first pattern needs 2^13 DFA states, past the budget, so it has no
     // DFA and the VM answers; the second is the ambiguous-star shape.
-    blowup :: Regex{"(a|b)*a(a|b){{12}}"}
+    blowup: Regex{"(a|b)*a(a|b){{12}}"}
     check("blowup: an a twelve before the end", blowup.is_match("aaaaaaaaaaaaaa"))
     check("blowup: no a twelve before the end", !blowup.is_match("abbbbbbbbbbb"))
     check("blowup: no a at all", !blowup.is_match("bbbbbbbbbbbbb"))
     check("blowup: the VM span", blowup.find("babbbbbbbbbbbb") == Val("babbbbbbbbbbbb"))
     check("blowup: full match", blowup.full_match("abbbbbbbbbbbb"))
-    pairs :: Regex{"(a|aa)*b"}
+    pairs: Regex{"(a|aa)*b"}
     check("ambiguous star without its b", !pairs.is_match("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
     check("ambiguous star with its b", pairs.find("xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab") == Val("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaab"))
 }

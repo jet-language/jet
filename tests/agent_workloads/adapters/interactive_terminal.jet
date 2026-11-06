@@ -1,16 +1,16 @@
 use {
-    process :: core.process
-    env :: core.sys
+    process: core.process
+    env: core.sys
 }
 
 #CLI
-struct WorkloadArgs {
+WorkloadArgs: struct {
     root: String
 }
 
-fn run(args: WorkloadArgs) {
-    root :: args.root
-    case_name :: env.get("JET_CORPUS_TASK") ?? panic("missing task identity")
+run: fn(args: WorkloadArgs) {
+    root: args.root
+    case_name: env.get("JET_CORPUS_TASK") ?? panic("missing task identity")
     if case_name == "interactive-terminal-closed" {
         run_closed(root)
     } else {
@@ -18,16 +18,16 @@ fn run(args: WorkloadArgs) {
     }
 }
 
-fn run_dialogue(root: String) {
-    jet :: process.cmd(["sh", "-c", "printf 'Ada\\nblue\\n' | sh terminal_session.sh"])
+run_dialogue: fn(root: String) {
+    jet: process.cmd(["sh", "-c", "printf 'Ada\\nblue\\n' | sh terminal_session.sh"])
         .cwd(root)
         .terminal(TerminalPolicy{
             size: TerminalSize{cols: 100, rows: 30},
             mode: .Cooked
         })
     if !jet.abilities().has("terminal") -> panic("terminal capability missing")
-    child :: jet.spawn() ?? panic("terminal spawn failed")
-    session :: child.terminal ?? panic("terminal session missing")
+    child: jet.spawn() ?? panic("terminal spawn failed")
+    session: child.terminal ?? panic("terminal session missing")
     session.resize(TerminalSize{cols: 120, rows: 40}) ?? panic("terminal resize failed")
     if child.wait() == {
         .Ok(result) -> {
@@ -41,9 +41,9 @@ fn run_dialogue(root: String) {
     print("terminal=pty\nresize=ok\nprompt=ok\nreply=ok")
 }
 
-fn run_closed(root: String) {
-    duration :: Duration.seconds(5) ?? panic("duration")
-    result :: process.cmd(["sh", "terminal_closed.sh"])
+run_closed: fn(root: String) {
+    duration: Duration.seconds(5) ?? panic("duration")
+    result: process.cmd(["sh", "terminal_closed.sh"])
         .cwd(root)
         .terminal(TerminalPolicy{
             size: TerminalSize{cols: 100, rows: 30},

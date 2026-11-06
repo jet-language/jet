@@ -4,9 +4,9 @@
 // bit-preserving IR Bitcast and excludes these reference bodies from reach.
 // Other compilation paths execute Core's conversion, so the reference has
 // no zero/default result, payload canonicalization or numeric approximation.
-use float_bits_math :: core.math
+use float_bits_math: core.math
 
-fn rt_f64_bits(value: Float) -> I64 Never! {
+rt_f64_bits: fn(value: Float) -> I64 Never! {
     bits := float_bits_math.to_bits(value)
     // Core returns the complete IEEE word as signed exact Int. The Rust
     // original uses `value.to_bits() as i64`; the Rust original wraps that
@@ -14,4 +14,4 @@ fn rt_f64_bits(value: Float) -> I64 Never! {
     I64.from_int(bits) ?? panic("a complete IEEE word must fit signed I64")
 }
 
-fn rt_f64_from_bits(bits: I64) -> Float Never! { float_bits_math.from_bits(Int{bits}) }
+rt_f64_from_bits: fn(bits: I64) -> Float Never! { float_bits_math.from_bits(Int{bits}) }

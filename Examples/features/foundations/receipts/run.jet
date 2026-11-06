@@ -1,10 +1,10 @@
 use {
-    json :: core.encoding.json
-    math :: core.math
+    json: core.encoding.json
+    math: core.math
 }
 
 #[Receipt("regression"), Codable]
-struct RegressionEvidence {
+RegressionEvidence: struct {
     slope: Float
     intercept: Float
     residuals: [Float]
@@ -13,29 +13,29 @@ struct RegressionEvidence {
     passed: Bool
 }
 
-fn fit() -> RegressionEvidence {
-    x1 :: Float{1.0}
-    x2 :: Float{2.0}
-    x3 :: Float{3.0}
-    x4 :: Float{4.0}
-    y1 :: Float{2.1}
-    y2 :: Float{3.9}
-    y3 :: Float{6.1}
-    y4 :: Float{7.8}
-    slope :: (y4 - y1) / (x4 - x1)
-    intercept :: y1 - slope * x1
-    residuals :: [Float]{
+fit: fn() -> RegressionEvidence {
+    x1: Float{1.0}
+    x2: Float{2.0}
+    x3: Float{3.0}
+    x4: Float{4.0}
+    y1: Float{2.1}
+    y2: Float{3.9}
+    y3: Float{6.1}
+    y4: Float{7.8}
+    slope: (y4 - y1) / (x4 - x1)
+    intercept: y1 - slope * x1
+    residuals: [Float]{
         y1 - (intercept + slope * x1),
         y2 - (intercept + slope * x2),
         y3 - (intercept + slope * x3),
         y4 - (intercept + slope * x4),
     }
-    max_residual :: math.max_float(
+    max_residual: math.max_float(
     math.max_float(math.abs_float(residuals[0]), math.abs_float(residuals[1])),
     math.max_float(math.abs_float(residuals[2]), math.abs_float(residuals[3])),
     )
-    tolerance :: Float{0.25}
-    passed :: max_residual <= tolerance
+    tolerance: Float{0.25}
+    passed: max_residual <= tolerance
     RegressionEvidence{
         slope: slope,
         intercept: intercept,
@@ -46,8 +46,8 @@ fn fit() -> RegressionEvidence {
     }
 }
 
-fn run() {
-    evidence :: fit()
+run: fn() {
+    evidence: fit()
     receipt.attach(evidence)
     print("receipt:regression")
     print("evidence:{json.to_string(evidence) ?? panic("JSON encode")}")

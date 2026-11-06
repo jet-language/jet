@@ -1,10 +1,10 @@
 
-use process :: core.process
+use process: core.process
 
-fn run() {
-    policy :: process.workspace()
+run: fn() {
+    policy: process.workspace()
 
-    limited :: process.cmd(["sh", "-c", "printf 123456"])
+    limited: process.cmd(["sh", "-c", "printf 123456"])
         .stdout(.Capture)
         .stderr(.Capture)
         .output_limit(3)
@@ -20,8 +20,8 @@ fn run() {
         .Err(_) -> print("unsupported")
     }
 
-    timeout :: Duration.milliseconds(50) ?? panic("timeout duration")
-    slow :: process.cmd(["sh", "-c", "while true; do :; done"])
+    timeout: Duration.milliseconds(50) ?? panic("timeout duration")
+    slow: process.cmd(["sh", "-c", "while true; do :; done"])
         .timeout(timeout)
         .cwd("/tmp")
         .under(policy)
@@ -35,14 +35,14 @@ fn run() {
         .Err(_) -> print("unsupported")
     }
 
-    secret :: process.cmd(["sh", "-c", "printf '%s' \"$SECRET_TOKEN\""])
+    secret: process.cmd(["sh", "-c", "printf '%s' \"$SECRET_TOKEN\""])
         .env_clear()
         .env("SECRET_TOKEN", "agent-receipt-secret")
         .cwd("/tmp")
         .under(policy)
     if secret.plan() == {
         .Ok(plan) -> {
-            receipt :: secret.run() ?? panic("secret receipt")
+            receipt: secret.run() ?? panic("secret receipt")
             print(receipt.output)
             print(receipt.redacted)
             print(plan.policy_digest == receipt.policy_digest)

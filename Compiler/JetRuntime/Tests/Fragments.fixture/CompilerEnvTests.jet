@@ -1,15 +1,15 @@
 // Link with the composed Jet-only runtime and CompilerEnvTests.c. C supplies
 // raw startup rows, duplicate names, non-Unicode bytes and expected ABI headers.
-fn compiler_env_fixture_equal(left: I64, right: I64) -> Bool {
+compiler_env_fixture_equal: fn(left: I64, right: I64) -> Bool {
     if (rt_text_word(left) != rt_text_word(right)) -> return false
-    length :: rt_text_word(left)
+    length: rt_text_word(left)
     if (rt_text_word(left + I64{8}) != length) -> return false
-    data :: rt_text_word(left + I64{16})
-    expected :: rt_text_word(right + I64{16})
+    data: rt_text_word(left + I64{16})
+    expected: rt_text_word(right + I64{16})
     at := I64{0}
     loop at < length {
-        row :: data + at * I64{24}
-        other :: expected + at * I64{24}
+        row: data + at * I64{24}
+        other: expected + at * I64{24}
         if (rt_text_word(row + I64{8}) != rt_text_word(row)) -> return false
         if (jet_rt_env_key_compare(row, other) != I64{0}) -> return false
         if (rt_text_word(row) == I64{0} && rt_text_word(row + I64{16}) != I64{0}) -> return false
@@ -18,23 +18,23 @@ fn compiler_env_fixture_equal(left: I64, right: I64) -> Bool {
     if (length == I64{0} && data != I64{0}) -> return false
     true
 }
-fn compiler_env_fixture_drop(columns: I64) {
-    length :: rt_text_word(columns)
-    data :: rt_text_word(columns + I64{16})
+compiler_env_fixture_drop: fn(columns: I64) {
+    length: rt_text_word(columns)
+    data: rt_text_word(columns + I64{16})
     at := I64{0}
     loop at < length {
-        row :: data + at * I64{24}
+        row: data + at * I64{24}
         if (rt_text_word(row) != I64{0}) -> jet_rt_free(rt_text_word(row + I64{16}), rt_text_word(row), I64{8})
         at += I64{1}
     }
     if (length != I64{0}) -> jet_rt_free(data, length * I64{24}, I64{8})
 }
-#Export(c) fn jet_rt_compiler_env_fixture(startup_expected: I64, logical_expected: I64, changed_expected: I64) -> I64 {
-    scratch :: jet_rt_alloc(I64{96}, I64{8})
-    startup :: scratch
-    logical :: scratch + I64{24}
-    again :: scratch + I64{48}
-    changed :: scratch + I64{72}
+#Export(c) jet_rt_compiler_env_fixture: fn(startup_expected: I64, logical_expected: I64, changed_expected: I64) -> I64 {
+    scratch: jet_rt_alloc(I64{96}, I64{8})
+    startup: scratch
+    logical: scratch + I64{24}
+    again: scratch + I64{48}
+    changed: scratch + I64{72}
     jet_rt_startup_env_columns(startup)
     jet_rt_logical_env_columns(logical)
     if !compiler_env_fixture_equal(startup, startup_expected) -> return I64{1}
@@ -51,7 +51,7 @@ fn compiler_env_fixture_drop(columns: I64) {
     if !compiler_env_fixture_equal(again, startup_expected) -> return I64{8}
     // Modifying a returned raw buffer cannot mutate the startup cell or a
     // separately returned buffer. This first key is always the nonempty Z.
-    data :: rt_text_word(startup + I64{16})
+    data: rt_text_word(startup + I64{16})
     rt_text_put(rt_text_word(data + I64{16}), I64{88})
     if !compiler_env_fixture_equal(again, startup_expected) -> return I64{9}
     compiler_env_fixture_drop(startup)
@@ -61,8 +61,8 @@ fn compiler_env_fixture_drop(columns: I64) {
     jet_rt_free(scratch, I64{96}, I64{8})
     I64{0}
 }
-#Export(c) fn jet_rt_compiler_env_empty_fixture() -> I64 {
-    scratch :: jet_rt_alloc(I64{48}, I64{8})
+#Export(c) jet_rt_compiler_env_empty_fixture: fn() -> I64 {
+    scratch: jet_rt_alloc(I64{48}, I64{8})
     jet_rt_startup_env_columns(scratch)
     jet_rt_logical_env_columns(scratch + I64{24})
     at := I64{0}

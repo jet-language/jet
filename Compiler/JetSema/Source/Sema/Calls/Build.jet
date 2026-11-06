@@ -6,22 +6,22 @@ use {
     jet_lexer.[Token]
 }
 
-struct SemaBuildContextMethodContract {
+SemaBuildContextMethodContract: struct {
     parameters: [Type]
     result: Type
 }
 
-fn sema_build_result(name: String) -> Type Never! {
+sema_build_result: fn(name: String) -> Type Never! {
     Type.Result{ok: Type.Named{name: name}, err: Type.Named{name: "BuildError"}}
 }
 
-fn sema_build_context_method_contract(method: String, arity: Int) -> SemaBuildContextMethodContract? {
-    strings :: Type.List{element: Type.String}
-    action :: Type.Named{name: "BuildAction"}
-    target :: Type.Named{name: "BuildTarget"}
-    toolchain :: Type.Named{name: "BuildToolchain"}
-    signing :: Type.Named{name: "BuildSigningIdentity"}
-    probes :: Type.List{element: Type.Named{name: "BuildProbe"}}
+sema_build_context_method_contract: fn(method: String, arity: Int) -> SemaBuildContextMethodContract? {
+    strings: Type.List{element: Type.String}
+    action: Type.Named{name: "BuildAction"}
+    target: Type.Named{name: "BuildTarget"}
+    toolchain: Type.Named{name: "BuildToolchain"}
+    signing: Type.Named{name: "BuildSigningIdentity"}
+    probes: Type.List{element: Type.Named{name: "BuildProbe"}}
     parameters := [Type]{}
     result := Type.Named{name: "Unit"}
     if {
@@ -40,19 +40,19 @@ fn sema_build_context_method_contract(method: String, arity: Int) -> SemaBuildCo
         method == "contribute" && arity == 2 -> parameters = [Type]{Type.String}
         method == "action" && (arity == 5 || (arity >= 7 && arity <= 15)) -> {
             parameters = [Type]{Type.String, strings, strings, strings, strings}
-            trailing :: [Type]{toolchain, probes, signing, Type.String, strings, strings, strings, strings, strings, Type.String}
+            trailing: [Type]{toolchain, probes, signing, Type.String, strings, strings, strings, strings, strings, Type.String}
             loop index in 0..<arity - 5 -> &parameters.push(trailing[index])
             result = sema_build_result("BuildAction")
         }
         method == "legacy" && arity >= 6 && arity <= 17 -> {
             parameters = [Type]{Type.String, Type.String, strings, strings, strings, strings}
-            trailing :: [Type]{toolchain, probes, signing, Type.String, strings, strings, strings, strings, strings, Type.String, Type.String}
+            trailing: [Type]{toolchain, probes, signing, Type.String, strings, strings, strings, strings, strings, Type.String, Type.String}
             loop index in 0..<arity - 6 -> &parameters.push(trailing[index])
             result = sema_build_result("BuildAction")
         }
         sema_build_context_target_method(method) && arity >= 3 && arity <= 7 -> {
             parameters = [Type]{Type.String, strings, Type.List{element: action}}
-            trailing :: [Type]{Type.List{element: target}, probes, toolchain, signing}
+            trailing: [Type]{Type.List{element: target}, probes, toolchain, signing}
             loop index in 0..<arity - 3 -> &parameters.push(trailing[index])
             result = sema_build_result("BuildTarget")
         }
@@ -71,7 +71,7 @@ fn sema_build_context_method_contract(method: String, arity: Int) -> SemaBuildCo
                 &parameters.push(Type.String)
                 &parameters.push(toolchain)
             } else {
-                union :: Type.Union{members: [Type]{Type.String, toolchain}}
+                union: Type.Union{members: [Type]{Type.String, toolchain}}
                 loop _ in 3..<arity -> &parameters.push(union)
             }
             result = sema_build_result("BuildProbe")
@@ -88,11 +88,11 @@ fn sema_build_context_method_contract(method: String, arity: Int) -> SemaBuildCo
     Val(SemaBuildContextMethodContract{parameters: parameters, result: result})
 }
 
-fn sema_build_context_target_method(method: String) -> Bool Never! {
+sema_build_context_target_method: fn(method: String) -> Bool Never! {
     method == "add_executable" || method == "add_library" || method == "add_test" || method == "add_asset_bundle" || method == "add_doc" || method == "add_install" || method == "add_package" || method == "add_publish"
 }
 
-fn sema_build_context_arity_description(method: String) -> String Never! {
+sema_build_context_arity_description: fn(method: String) -> String Never! {
     if method == "action" -> return "5 or 7 to 15"
     if method == "legacy" -> return "6 to 17"
     if sema_build_context_target_method(method) -> return "3 to 7"
@@ -106,15 +106,15 @@ fn sema_build_context_arity_description(method: String) -> String Never! {
     "2"
 }
 
-fn sema_call_try_build_context_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+sema_call_try_build_context_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if receiver_value.ty != (Type.Named{name: "Build"}) -> return SemaMethodSpecialCheck{handled: false, value: None}
-    failed :: SemaMethodSpecialCheck{handled: true, value: None}
+    failed: SemaMethodSpecialCheck{handled: true, value: None}
     if build_option_refusal(method) == .Val(refusal) {
         &diagnostics.push(sema_error("E3502", span, "`b.{method}` isn't a build option", refusal.law, "remove the `b.{method}` call"))
         return failed
     }
     if method == "pin" || build_option_row(method) != None -> return sema_call_build_option(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &diagnostics)
-    contract :: sema_build_context_method_contract(method, args.len()) ?? {
+    contract: sema_build_context_method_contract(method, args.len()) ?? {
         loop argument in args {
             if argument.flags.template_items == None -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         }
@@ -138,9 +138,9 @@ fn sema_call_try_build_context_method(receiver: Expr, receiver_value: TExpr, met
         &ordinary.push(argument)
         required := Type?{None}
         if ordinary.len() <= contract.parameters.len() -> required = Val(contract.parameters[ordinary.len() - 1])
-        value :: sema_check_expression(argument.expr, required, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return failed
+        value: sema_check_expression(argument.expr, required, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return failed
         if required == .Val(ty) {
-            compatible :: sema_call_type_assignable(ty, value.ty, environment, program) ?? return failed
+            compatible: sema_call_type_assignable(ty, value.ty, environment, program) ?? return failed
             if !compatible {
                 &diagnostics.push(sema_type_mismatch(ty, value.ty, argument.span))
                 return failed
@@ -153,22 +153,22 @@ fn sema_call_try_build_context_method(receiver: Expr, receiver_value: TExpr, met
         &values.push(value)
         &params.push(SemaCallParam{label: "", name: "", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(value.ty), variadic: false})
     }
-    ownership :: sema_ownership_check_method_call(&state, "Build.{method}", receiver, AccessConvention.Read, params, &ordinary, scopes, span, &diagnostics)
+    ownership: sema_ownership_check_method_call(&state, "Build.{method}", receiver, AccessConvention.Read, params, &ordinary, scopes, span, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return failed
     if method == "generate" {
         // Rust lower_build_generate also expands/formats the typed body under
         // an empty compile-time scope before sending private host payload text.
         loop argument in args {
             if argument.flags.template_items == .Val(body) {
-                items :: sema_derive_expand_template_body(body, [NamedCtValue]{}, &diagnostics) ?? return failed
+                items: sema_derive_expand_template_body(body, [NamedCtValue]{}, &diagnostics) ?? return failed
                 generated_program := ast_program()
                 generated_program.items = items
-                source :: jfmt_format_program_with_tokens(generated_program, "", [Token]{}, false)
+                source: jfmt_format_program_with_tokens(generated_program, "", [Token]{}, false)
                 &values.push(sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: source}}}, argument.span))
             }
         }
     }
-    value :: sema_tree_node(contract.result, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: method, args: values}}, span)
+    value: sema_tree_node(contract.result, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: method, args: values}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
 }
 
@@ -176,12 +176,12 @@ fn sema_call_try_build_context_method(receiver: Expr, receiver_value: TExpr, met
 // `b.debug_info(false)` sets a row's value in fn build; `b.pin(.optimize,
 // .Full)` sets and pins it, so a flag can't change it. The session receives
 // the row name and the value's table spelling (`optimize`, `full`).
-fn sema_call_build_option(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
-    failed :: SemaMethodSpecialCheck{handled: true, value: None}
-    pinned :: method == "pin"
-    wanted :: if pinned -> 2 else -> 1
-    shape :: if pinned -> "b.pin(.optimize, .Full)" else -> sema_build_option_call_shape(method, method, false)
-    takes :: if pinned -> "a build option and one of its values" else -> "one value"
+sema_call_build_option: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    failed: SemaMethodSpecialCheck{handled: true, value: None}
+    pinned: method == "pin"
+    wanted: if pinned -> 2 else -> 1
+    shape: if pinned -> "b.pin(.optimize, .Full)" else -> sema_build_option_call_shape(method, method, false)
+    takes: if pinned -> "a build option and one of its values" else -> "one value"
     if args.len() != wanted {
         &diagnostics.push(sema_error("E3502", span, "`b.{method}` takes {takes}, got {args.len()} arguments", "a build option call names one value of the option's row", "write `{shape}`"))
         return failed
@@ -211,10 +211,10 @@ fn sema_call_build_option(receiver: Expr, receiver_value: TExpr, method: String,
             return failed
         }
     }
-    row :: build_option_row(name) ?? return failed
-    argument :: args[wanted - 1]
-    shape_fix :: "write `{sema_build_option_call_shape(method, name, pinned)}`"
-    value :: sema_build_option_value(row, argument.expr) ?? {
+    row: build_option_row(name) ?? return failed
+    argument: args[wanted - 1]
+    shape_fix: "write `{sema_build_option_call_shape(method, name, pinned)}`"
+    value: sema_build_option_value(row, argument.expr) ?? {
         &diagnostics.push(sema_error("E3502", argument.span, "this isn't a value of build option `{name}`", "`{name}` takes {build_option_variants_text(row)}", shape_fix))
         return failed
     }
@@ -225,23 +225,23 @@ fn sema_call_build_option(receiver: Expr, receiver_value: TExpr, method: String,
     // Only the value is an ordinary argument: a pin's option name is a row
     // name, not an expression of the body; a List row's literal reads nothing.
     if row.kind != BuildOptionKind.List {
-        params :: [SemaCallParam]{SemaCallParam{label: "", name: "", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(Type.String), variadic: false}}
+        params: [SemaCallParam]{SemaCallParam{label: "", name: "", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(Type.String), variadic: false}}
         ordinary := [CallArg]{argument.copy()}
-        ownership :: sema_ownership_check_method_call(&state, "Build.{method}", receiver, AccessConvention.Read, params, &ordinary, scopes, span, &diagnostics)
+        ownership: sema_ownership_check_method_call(&state, "Build.{method}", receiver, AccessConvention.Read, params, &ordinary, scopes, span, &diagnostics)
         if !ownership.accepted || !ownership.complete -> return failed
     }
-    values :: [TExpr]{
+    values: [TExpr]{
         sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: name}}}, args[0].span),
         sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: value}}}, argument.span),
     }
-    result :: sema_tree_node(Type.Named{name: "Unit"}, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: method, args: values}}, span)
+    result: sema_tree_node(Type.Named{name: "Unit"}, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: method, args: values}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(result, expected, environment, program, &diagnostics)}
 }
 
 // The row value `expr` writes: `false` for a Bool row, `.Full` for a Choice
 // row, and, since the value reaches the build session as text, a string
 // literal for a Text row and a list literal of them for a List row.
-fn sema_build_option_value(row: BuildOptionRow, expr: Expr) -> String? {
+sema_build_option_value: fn(row: BuildOptionRow, expr: Expr) -> String? {
     if row.kind == {
         .Bool -> {
             if expr == .Bool(written, _, _) -> return Val("{written}")
@@ -256,7 +256,7 @@ fn sema_build_option_value(row: BuildOptionRow, expr: Expr) -> String? {
             if expr == .ListLit(elements, _, _) {
                 items := [String]{}
                 loop element in elements {
-                    item :: sema_build_option_literal(element) ?? return None
+                    item: sema_build_option_literal(element) ?? return None
                     &items.push(item)
                 }
                 return Val(build_option_list_value(items))
@@ -267,7 +267,7 @@ fn sema_build_option_value(row: BuildOptionRow, expr: Expr) -> String? {
 }
 
 // The text of a string literal without interpolation.
-fn sema_build_option_literal(expr: Expr) -> String? {
+sema_build_option_literal: fn(expr: Expr) -> String? {
     if expr == .Str(parts, _, _) {
         text := ""
         loop part in parts {
@@ -285,10 +285,10 @@ fn sema_build_option_literal(expr: Expr) -> String? {
 // `b.debug_info(false)`, `b.pin(.optimize, .Full)`, `b.output_dir("dist")`,
 // `b.libs(["z"])`: a call of `method` that sets row `name` to an example
 // value, as the fix of a malformed call.
-fn sema_build_option_call_shape(method: String, name: String, pinned: Bool) -> String Never! {
-    row :: build_option_row(name) ?? return "b.pin(.optimize, .Full)"
-    values :: build_option_method_values(row)
-    example :: if row.kind == {
+sema_build_option_call_shape: fn(method: String, name: String, pinned: Bool) -> String Never! {
+    row: build_option_row(name) ?? return "b.pin(.optimize, .Full)"
+    values: build_option_method_values(row)
+    example: if row.kind == {
         .Text -> "\"dist\""
         .List -> "[\"z\"]"
         else -> build_option_argument(row, values[values.len() - 1])

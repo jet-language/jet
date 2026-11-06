@@ -1,15 +1,15 @@
 // core-conformance: core.encoding.jsonl.writer
 use {
-    jsonl :: core.encoding.jsonl
-    files :: core.files
-    testing :: core.testing
+    jsonl: core.encoding.jsonl
+    files: core.files
+    testing: core.testing
 }
 
-fn run() {
-    root :: testing.temp_dir("jsonl-writer")
-    path :: Path.from(root).join("values.jsonl")
-    output :: files.create(path) ?? panic("create")
-    writer :: jsonl.writer(^output) ?? panic("writer")
+run: fn() {
+    root: testing.temp_dir("jsonl-writer")
+    path: Path.from(root).join("values.jsonl")
+    output: files.create(path) ?? panic("create")
+    writer: jsonl.writer(^output) ?? panic("writer")
     writer.write(Dyn.Object(["a": Dyn.Int(1)])) ?? panic("write")
     writer.finish()
     print(true)

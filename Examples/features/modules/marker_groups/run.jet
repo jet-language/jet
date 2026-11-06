@@ -1,22 +1,22 @@
 // Fixed groups keep the original rules; imported applications name their alias.
-use policy :: policies
+use policy: policies
 
-struct Checked {
+Checked: struct {
     impl Marker {
-        group :: #[Inline(.Always), Scalar]
+        group: #[Inline(.Always), Scalar]
     }
 }
 
 #Checked
-fn local(value: Int) -> Int { return value + 1 }
+local: fn(value: Int) -> Int { return value + 1 }
 
 #Policy.Fast
-fn imported(value: Int) -> Int { return value * 2 }
+imported: fn(value: Int) -> Int { return value * 2 }
 
 #Policy.Inner.Traced
-fn nested(value: Int) -> Int { return value + 3 }
+nested: fn(value: Int) -> Int { return value + 3 }
 
-fn run() {
+run: fn() {
     print("local:{local(6)}")
     print("imported:{imported(6)}")
     print("nested:{nested(6)}")

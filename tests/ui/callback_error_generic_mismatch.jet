@@ -3,16 +3,16 @@
 // function fails with, so a `PriceError` key reaching a `KeyError!` caller is
 // E2404 at the call.
 #Error
-enum PriceError {
+PriceError: enum {
     Missing
 }
 
 #Error
-enum KeyError {
+KeyError: enum {
     Blank
 }
 
-fn sort_by<T, E>(rows: [T], key_fn: fn(T) -> String E!) -> [T] E! {
+sort_by: fn<T, E>(rows: [T], key_fn: fn(T) -> String E!) -> [T] E! {
     out := [T]{ }
     loop row in rows {
         _ := key_fn(row)
@@ -21,15 +21,15 @@ fn sort_by<T, E>(rows: [T], key_fn: fn(T) -> String E!) -> [T] E! {
     out
 }
 
-fn parse_price(name: String) -> String PriceError! {
+parse_price: fn(name: String) -> String PriceError! {
     if name == "" -> return Err(PriceError.Missing)
     Ok(name.copy())
 }
 
-fn sorted(names: [String]) -> [String] KeyError! {
+sorted: fn(names: [String]) -> [String] KeyError! {
     sort_by(names, parse_price)
 }
 
-fn run() {
+run: fn() {
 
 }

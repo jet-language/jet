@@ -10,64 +10,64 @@
 //   comparator closure returning `Ordering`.
 // - `max_by` keeps the LAST tied item (#2298): a separate policy from stable
 //   sort order.
-struct Job {
+Job: struct {
     name: String
     team: Int
     cost: Int
 }
 
 #Error
-struct KeyError {
+KeyError: struct {
     message: String
 }
 
-fn show(jobs: [Job]) -> String {
+show: fn(jobs: [Job]) -> String {
     jobs.map((j: Job) -> "{j.name}:{j.team}:{j.cost}").join(" ")
 }
 
-fn traced_key(n: Int) -> Int {
+traced_key: fn(n: Int) -> Int {
     print("  key({n})")
     n % 3
 }
 
-fn failing_key(n: Int) -> Int KeyError! {
+failing_key: fn(n: Int) -> Int KeyError! {
     print("  try-key({n})")
     if n == 30 -> return Err(KeyError{message: "no key for {n}"})
     Ok(n)
 }
 
-fn unit() {}
+unit: fn() {}
 
 // #4884: records carry owning text, not only scalar sort positions.
-struct NamedKey {
+NamedKey: struct {
     team: Int
     label: String
 }
 
-struct OwnedNamedKey {
+OwnedNamedKey: struct {
     team: Int
     label: String
 }
 
 impl OwnedNamedKey.Close {
-    fn close(^self) { print("close named key: {self.label}") }
+    close: fn(^self) { print("close named key: {self.label}") }
 }
 
-fn tuple_key(j: Job) -> (team: Int, cost: Int) KeyError! {
+tuple_key: fn(j: Job) -> (team: Int, cost: Int) KeyError! {
     Ok((team: j.team, cost: j.cost))
 }
 
-fn named_key(j: Job) -> NamedKey KeyError! {
+named_key: fn(j: Job) -> NamedKey KeyError! {
     Ok(NamedKey{team: j.team, label: j.name})
 }
 
-fn named_key_failure(j: Job, calls: &Int) -> OwnedNamedKey KeyError! {
+named_key_failure: fn(j: Job, calls: &Int) -> OwnedNamedKey KeyError! {
     calls += 1
     if j.name == "c" -> return Err(KeyError{message: "named key refused c"})
     Ok(OwnedNamedKey{team: j.team, label: "label-{j.name}"})
 }
 
-fn large_rows(count: Int, equal: Bool) -> [Job] {
+large_rows: fn(count: Int, equal: Bool) -> [Job] {
     rows := [Job]{}
     loop index in 0..<count {
         row := Job{name: "job-{index}", team: if equal -> 0 else -> (count - index - 1) % 17, cost: index}
@@ -76,29 +76,29 @@ fn large_rows(count: Int, equal: Bool) -> [Job] {
     ^rows
 }
 
-fn large_key(j: Job, calls: &Int) -> Int {
+large_key: fn(j: Job, calls: &Int) -> Int {
     calls += 1
     j.team
 }
 
-fn large_compare(a: Job, b: Job, calls: &Int) -> Ordering {
+large_compare: fn(a: Job, b: Job, calls: &Int) -> Ordering {
     calls += 1
     a.team <=> b.team
 }
 
-fn large_stable(rows: [Job], count: Int, equal: Bool) -> Bool {
+large_stable: fn(rows: [Job], count: Int, equal: Bool) -> Bool {
     if rows.len() != count -> return false
     seen := [Bool]{}
     loop index in 0..<count -> &seen.push(false)
     previous_team := -1
     previous_cost := -1
     loop index in 0..<rows.len() {
-        team :: rows[index].team
-        cost :: rows[index].cost
+        team: rows[index].team
+        cost: rows[index].cost
         if cost < 0 || cost >= count -> return false
         if seen[cost] -> return false
         seen[cost] = true
-        expected_team :: if equal -> 0 else -> (count - cost - 1) % 17
+        expected_team: if equal -> 0 else -> (count - cost - 1) % 17
         if team != expected_team -> return false
         if team < previous_team || (team == previous_team && cost <= previous_cost) -> return false
         if rows[index].name != "job-{cost}" -> return false
@@ -108,7 +108,7 @@ fn large_stable(rows: [Job], count: Int, equal: Bool) -> Bool {
     true
 }
 
-fn run() {
+run: fn() {
     // (a) stable order: equal keys keep their input order.
     jobs := [Job]{
         {name: "a", team: 2, cost: 5},
@@ -149,7 +149,7 @@ fn run() {
 
     // (e) extrema ties are a separate policy: max_by keeps the LAST tie,
     // while stable sort keeps the FIRST tie first.
-    last :: jobs.max_by((j: Job) -> j.team) ?? Job{name: "-", team: 0, cost: 0}
+    last: jobs.max_by((j: Job) -> j.team) ?? Job{name: "-", team: 0, cost: 0}
     print("max_by team tie: {last.name}")
     print("stable first of team 2: {stable[2].name}")
 

@@ -22,14 +22,14 @@ use jet_foundation.[name_rows_value]
 // `jet inspect decisions` names each call in a Loop: `unique <function>
 // <list type>: made unique before the Loop`, or `declined (<why>)`.
 
-fn ir_opt_hoist_unique(m: IRModule, f: &IRFunction, keys: [String], notes: &[String]) -> Int Never! {
-    count :: f.slot_type.len()
-    facts :: ir_opt_facts(f)
+ir_opt_hoist_unique: fn(m: IRModule, f: &IRFunction, keys: [String], notes: &[String]) -> Int Never! {
+    count: f.slot_type.len()
+    facts: ir_opt_facts(f)
     // The header each slot names (-1: none).
     root := [Int]{}
     loop slot in 0..<count -> &root.push(if slot < f.param_count && facts.defs[slot] == 1 -> slot else -> -1)
     loop at in 0..<f.op.len() {
-        dst :: f.dst[at]
+        dst: f.dst[at]
         if dst < f.param_count || dst >= count || facts.defs[dst] != 1 -> next
         if f.op[at] == .StackAddress {
             root[dst] = dst
@@ -44,11 +44,11 @@ fn ir_opt_hoist_unique(m: IRModule, f: &IRFunction, keys: [String], notes: &[Str
     open := [Int]{}
     loops := [Int]{}
     loop at in 0..<f.op.len() {
-        op :: f.op[at]
+        op: f.op[at]
         &outer.push(-1)
         &ends.push(-1)
         if op == .End || op == .Else {
-            opener :: &open.pop() ?? panic("ir_opt_hoist_unique: End without an open construct")
+            opener: &open.pop() ?? panic("ir_opt_hoist_unique: End without an open construct")
             if f.op[opener] == .Loop {
                 _ := &loops.pop()
                 ends[opener] = at
@@ -69,9 +69,9 @@ fn ir_opt_hoist_unique(m: IRModule, f: &IRFunction, keys: [String], notes: &[Str
     moved := 0
     rows := [String]{}
     loop at in 0..<f.op.len() {
-        header :: ir_opt_unique_header(f, keys, root, at)
+        header: ir_opt_unique_header(f, keys, root, at)
         if header < 0 -> next
-        slot :: f.args[f.b[at]]
+        slot: f.args[f.b[at]]
         place := -1
         candidate := inner[at]
         why := ""
@@ -86,8 +86,8 @@ fn ir_opt_hoist_unique(m: IRModule, f: &IRFunction, keys: [String], notes: &[Str
             candidate = outer[candidate]
         }
         if place >= 0 || why != "" {
-            list :: ir_opt_unique_list(keys[f.a[at]])
-            row :: if place >= 0 -> "unique {f.name} {list}: made unique before the Loop" else -> "unique {f.name} {list}: declined ({why})"
+            list: ir_opt_unique_list(keys[f.a[at]])
+            row: if place >= 0 -> "unique {f.name} {list}: made unique before the Loop" else -> "unique {f.name} {list}: declined ({why})"
             if !rows.contains(row) -> &rows.push(row)
         }
         if place < 0 -> next
@@ -103,7 +103,7 @@ fn ir_opt_hoist_unique(m: IRModule, f: &IRFunction, keys: [String], notes: &[Str
             done := [Int]{}
             loop k in 0..<f.op.len() {
                 if target[k] != at -> next
-                header :: root[f.args[f.b[k]]]
+                header: root[f.args[f.b[k]]]
                 if done.contains(header) -> next
                 &done.push(header)
                 ir_opt_code_put(&code, f.op[k], f.dst[k], f.a[k], f.b[k], f.c[k], f.code_line[k])
@@ -123,9 +123,9 @@ fn ir_opt_hoist_unique(m: IRModule, f: &IRFunction, keys: [String], notes: &[Str
 }
 
 // The list type a `#unique<..>` helper's key names, as `[U8]`, for a row.
-fn ir_opt_unique_list(key: String) -> String Never! {
-    bytes :: key.bytes()
-    open :: U8{91}
+ir_opt_unique_list: fn(key: String) -> String Never! {
+    bytes: key.bytes()
+    open: U8{91}
     loop at in 0..<bytes.len() {
         if bytes[at] == open -> return String.from_bytes(bytes.slice(at, bytes.len() - 1)) ?? key.copy()
     }
@@ -134,11 +134,11 @@ fn ir_opt_unique_list(key: String) -> String Never! {
 
 // The header instruction `at` makes unique when it calls a `#unique<..>`
 // helper on a frame header, else -1.
-fn ir_opt_unique_header(f: IRFunction, keys: [String], root: [Int], at: Int) -> Int Never! {
+ir_opt_unique_header: fn(f: IRFunction, keys: [String], root: [Int], at: Int) -> Int Never! {
     if f.op[at] != .Call || f.c[at] != 1 || f.dst[at] >= 0 -> return -1
-    callee :: f.a[at]
+    callee: f.a[at]
     if callee < 0 || callee >= keys.len() || !keys[callee].starts_with("#unique<") -> return -1
-    slot :: f.args[f.b[at]]
+    slot: f.args[f.b[at]]
     if slot < 0 || slot >= root.len() -> return -1
     root[slot]
 }
@@ -147,11 +147,11 @@ fn ir_opt_unique_header(f: IRFunction, keys: [String], root: [Int], at: Int) -> 
 // a region around it, by a Store of it or a CopyBytes of a whole list
 // header into it (`l := other`); a parameter's header holds one from the
 // start.
-fn ir_opt_header_ready(f: IRFunction, facts: OptFacts, root: [Int], header: Int, opener: Int) -> Bool Never! {
+ir_opt_header_ready: fn(f: IRFunction, facts: OptFacts, root: [Int], header: Int, opener: Int) -> Bool Never! {
     if header < f.param_count -> return true
     loop at in 0..<opener {
-        stores :: f.op[at] == .Store && f.b[at] == 16
-        copies :: f.op[at] == .CopyBytes && f.c[at] >= 24
+        stores: f.op[at] == .Store && f.b[at] == 16
+        copies: f.op[at] == .CopyBytes && f.c[at] >= 24
         if (!stores && !copies) || f.a[at] < 0 || root[f.a[at]] != header -> next
         if ir_opt_encloses(facts, facts.region[at], facts.region[opener]) -> return true
     }
@@ -161,8 +161,8 @@ fn ir_opt_header_ready(f: IRFunction, facts: OptFacts, root: [Int], header: Int,
 // Why the Loop at `opener` (End at `end`) can make the buffer of `header`
 // shared again, or "" when it cannot. What a dead end in it reads
 // (ir_opt_dead_end: a failure's cleanup) never reaches its next iteration.
-fn ir_opt_reshares(m: IRModule, f: IRFunction, facts: OptFacts, keys: [String], root: [Int], header: Int, opener: Int, end: Int) -> String Never! {
-    count :: f.slot_type.len()
+ir_opt_reshares: fn(m: IRModule, f: IRFunction, facts: OptFacts, keys: [String], root: [Int], header: Int, opener: Int, end: Int) -> String Never! {
+    count: f.slot_type.len()
     // The slots holding the buffer pointer loaded from the header.
     buffer := [Int]{}
     reads := [Int]{}
@@ -171,13 +171,13 @@ fn ir_opt_reshares(m: IRModule, f: IRFunction, facts: OptFacts, keys: [String], 
     }
     at := opener + 1
     loop at < end {
-        exit :: ir_opt_dead_end(f, at)
+        exit: ir_opt_dead_end(f, at)
         if exit > at {
             at = exit
             next
         }
-        op :: f.op[at]
-        unique :: ir_opt_unique_header(f, keys, root, at) == header
+        op: f.op[at]
+        unique: ir_opt_unique_header(f, keys, root, at) == header
         ir_x64_reads_into(f, at, &reads)
         loop slot in reads {
             if slot < 0 || slot >= count -> next
@@ -194,7 +194,7 @@ fn ir_opt_reshares(m: IRModule, f: IRFunction, facts: OptFacts, keys: [String], 
                 if (op == .Store || op == .StreamStore) && f.c[at] == slot -> return "the Loop stores the buffer"
             }
         }
-        written :: ir_x64_write(f, at)
+        written: ir_x64_write(f, at)
         if written >= 0 && written < count && root[written] == header -> return "the Loop rebinds the list"
         at += 1
     }
@@ -208,9 +208,9 @@ fn ir_opt_reshares(m: IRModule, f: IRFunction, facts: OptFacts, keys: [String], 
 // loads its zero mark and marks only the replica; and jet_string_from_bytes
 // and jet_string_from_bytes_lossy, which copy its bytes into a new text
 // (TextBytes.jet: text_bytes_owned, rt_text_builder_with_capacity).
-fn ir_opt_buffer_reader(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
+ir_opt_buffer_reader: fn(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
     if f.op[at] != .CallRuntime -> return false
-    readers :: [String]{"jet_rt_mem_move", "jet_rt_block_release", "jet_rt_free", "jet_rt_block_unique", "jet_rt_block_inherit_zero", "jet_string_from_bytes", "jet_string_from_bytes_lossy"}
+    readers: [String]{"jet_rt_mem_move", "jet_rt_block_release", "jet_rt_free", "jet_rt_block_unique", "jet_rt_block_inherit_zero", "jet_string_from_bytes", "jet_string_from_bytes_lossy"}
     loop route in readers {
         if ir_opt_calls_route(m, f, at, route) -> return true
     }
@@ -220,9 +220,9 @@ fn ir_opt_buffer_reader(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
 // The End of the If at `at` when its then-part, with no Else, never comes
 // back: it ends in Return or Unreachable and branches nowhere (a stop's or
 // panic's cleanup); else -1.
-fn ir_opt_dead_end(f: IRFunction, at: Int) -> Int Never! {
+ir_opt_dead_end: fn(f: IRFunction, at: Int) -> Int Never! {
     if f.op[at] != .If || f.b[at] >= 0 -> return -1
-    end :: f.c[at]
+    end: f.c[at]
     if end <= at + 1 || (f.op[end - 1] != .Return && f.op[end - 1] != .Unreachable) -> return -1
     loop k in (at + 1)..<end {
         if f.op[k] == .Br || f.op[k] == .BrIf -> return -1
@@ -232,10 +232,10 @@ fn ir_opt_dead_end(f: IRFunction, at: Int) -> Int Never! {
 
 // Whether the header Store at `at` keeps its buffer the header's own: a
 // length or capacity, or a buffer fresh from jet_rt_alloc (a growth).
-fn ir_opt_header_store_keeps(m: IRModule, f: IRFunction, facts: OptFacts, at: Int) -> Bool Never! {
+ir_opt_header_store_keeps: fn(m: IRModule, f: IRFunction, facts: OptFacts, at: Int) -> Bool Never! {
     if f.b[at] == 0 || f.b[at] == 8 -> return true
     if f.b[at] != 16 -> return false
-    value :: f.c[at]
+    value: f.c[at]
     if value < f.param_count || facts.defs[value] != 1 -> return false
     ir_opt_calls_route(m, f, facts.def_at[value], "jet_rt_alloc")
 }
@@ -253,16 +253,16 @@ fn ir_opt_header_store_keeps(m: IRModule, f: IRFunction, facts: OptFacts, at: In
 // FunctionAddress; and every Call of it passes a header of the parameter's
 // own type row.
 // Returns the calls ir_opt_hoist_unique moved on the way.
-fn ir_opt_unique_to_callers(m: IRModule, functions: &[IRFunction], keys: [String], notes: &[String]) -> Int Never! {
-    count :: functions.len()
+ir_opt_unique_to_callers: fn(m: IRModule, functions: &[IRFunction], keys: [String], notes: &[String]) -> Int Never! {
+    count: functions.len()
     if m.entry < 0 || m.entry >= count -> return 0
     addressed := [Bool]{}
     loop _ in 0..<count -> &addressed.push(false)
     addressed[m.entry] = true
     loop ty in m.types {
-        drop :: if ty.drop == "" -> -1 else -> name_rows_value(m.function_rows, ty.drop) ?? -1
+        drop: if ty.drop == "" -> -1 else -> name_rows_value(m.function_rows, ty.drop) ?? -1
         if drop >= 0 && drop < count -> addressed[drop] = true
-        clone :: if ty.clone == "" -> -1 else -> name_rows_value(m.function_rows, ty.clone) ?? -1
+        clone: if ty.clone == "" -> -1 else -> name_rows_value(m.function_rows, ty.clone) ?? -1
         if clone >= 0 && clone < count -> addressed[clone] = true
     }
     loop f in functions {
@@ -289,12 +289,12 @@ fn ir_opt_unique_to_callers(m: IRModule, functions: &[IRFunction], keys: [String
             if g.op[at] != .Call -> next
             loop k in 0..<callees.len() {
                 if callees[k] != g.a[at] || !ok[k] -> next
-                callee :: callees[k]
+                callee: callees[k]
                 if g.c[at] != functions[callee].param_count {
                     ok[k] = false
                     next
                 }
-                arg :: g.args[g.b[at] + params[k]]
+                arg: g.args[g.b[at] + params[k]]
                 if arg < 0 || g.slot_type[arg] != functions[callee].slot_type[params[k]] -> ok[k] = false
             }
         }
@@ -313,17 +313,17 @@ fn ir_opt_unique_to_callers(m: IRModule, functions: &[IRFunction], keys: [String
 }
 
 // The parameter instruction `at` makes unique by a `#unique<..>` call, else -1.
-fn ir_opt_unique_param(f: IRFunction, keys: [String], at: Int) -> Int Never! {
+ir_opt_unique_param: fn(f: IRFunction, keys: [String], at: Int) -> Int Never! {
     if f.op[at] != .Call || f.c[at] != 1 || f.dst[at] >= 0 -> return -1
-    callee :: f.a[at]
+    callee: f.a[at]
     if callee < 0 || callee >= keys.len() || !keys[callee].starts_with("#unique<") -> return -1
-    slot :: f.args[f.b[at]]
+    slot: f.args[f.b[at]]
     if slot < 0 || slot >= f.param_count -> return -1
     slot
 }
 
 // Whether `f` makes a parameter unique anywhere.
-fn ir_opt_unique_on_param(f: IRFunction, keys: [String]) -> Bool Never! {
+ir_opt_unique_on_param: fn(f: IRFunction, keys: [String]) -> Bool Never! {
     loop at in 0..<f.op.len() {
         if ir_opt_unique_param(f, keys, at) >= 0 -> return true
     }
@@ -333,7 +333,7 @@ fn ir_opt_unique_on_param(f: IRFunction, keys: [String]) -> Bool Never! {
 // The `#unique<..>` calls on parameters that function `id` (`f`) makes
 // first (ir_opt_unique_to_callers), appended to the candidate columns. A
 // parameter any instruction writes is never one.
-fn ir_opt_entry_uniques(m: IRModule, f: IRFunction, keys: [String], id: Int, callees: &[Int], params: &[Int], sites: &[Int], helpers: &[Int]) Never! {
+ir_opt_entry_uniques: fn(m: IRModule, f: IRFunction, keys: [String], id: Int, callees: &[Int], params: &[Int], sites: &[Int], helpers: &[Int]) Never! {
     taken := [Int]{}
     at := 0
     loop at < f.op.len() {
@@ -341,7 +341,7 @@ fn ir_opt_entry_uniques(m: IRModule, f: IRFunction, keys: [String], id: Int, cal
             at += 1
             next
         }
-        param :: ir_opt_unique_param(f, keys, at)
+        param: ir_opt_unique_param(f, keys, at)
         if param >= 0 {
             if !taken.contains(param) && !ir_opt_param_written(f, param) {
                 &taken.push(param)
@@ -358,7 +358,7 @@ fn ir_opt_entry_uniques(m: IRModule, f: IRFunction, keys: [String], id: Int, cal
     }
 }
 
-fn ir_opt_param_written(f: IRFunction, param: Int) -> Bool Never! {
+ir_opt_param_written: fn(f: IRFunction, param: Int) -> Bool Never! {
     loop at in 0..<f.op.len() {
         if f.dst[at] == param -> return true
     }
@@ -367,7 +367,7 @@ fn ir_opt_param_written(f: IRFunction, param: Int) -> Bool Never! {
 
 // Puts the `#unique<..>` call of each accepted candidate (`ok`) before each
 // Call of its callee in `f`, on that Call's argument. Returns whether any went in.
-fn ir_opt_put_uniques(f: &IRFunction, callees: [Int], params: [Int], helpers: [Int], ok: [Bool]) -> Bool Never! {
+ir_opt_put_uniques: fn(f: &IRFunction, callees: [Int], params: [Int], helpers: [Int], ok: [Bool]) -> Bool Never! {
     found := false
     loop at in 0..<f.op.len() {
         if f.op[at] != .Call -> next
@@ -382,8 +382,8 @@ fn ir_opt_put_uniques(f: &IRFunction, callees: [Int], params: [Int], helpers: [I
         if f.op[at] == .Call {
             loop k in 0..<callees.len() {
                 if !ok[k] || callees[k] != f.a[at] -> next
-                arg :: f.args[f.b[at] + params[k]]
-                start :: ir_args(&f, [Int]{arg})
+                arg: f.args[f.b[at] + params[k]]
+                start: ir_args(&f, [Int]{arg})
                 ir_opt_code_put(&code, IROp.Call, -1, helpers[k], start, 1, f.code_line[at])
             }
         }

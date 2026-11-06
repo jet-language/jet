@@ -25,9 +25,9 @@ if (mode === 'assemble') {
   writeFileSync(join(dir, 'Source/Fixture.jet'), unit);
   // The runtime's own exports and the fixture's, as run-residue-fixtures.mjs
   // derives them from the same assembled sources.
-  const names = [...unit.matchAll(/^#Export\(c\)\s+fn\s+(\w+)\(/gm)].map(match => match[1]);
+  const names = [...unit.matchAll(/^#Export\(c\)\s+(\w+): fn\(/gm)].map(match => match[1]);
   if (new Set(names).size !== names.length) throw Error('duplicate fixture export');
-  const init = new Map([...unit.matchAll(/^\/\/ runtime-init: (\d+)(?: when \S+)?\n#Export\(c\) fn (\w+)/gm)].map(match => [match[2], match[1]]));
+  const init = new Map([...unit.matchAll(/^\/\/ runtime-init: (\d+)(?: when \S+)?\n#Export\(c\) (\w+): fn\b/gm)].map(match => [match[2], match[1]]));
   init.set('jet_rt_alloc_init', '0');
   writeFileSync(join(dir, 'exports.list'), names.sort().map(name => name === 'jet_rt_panic_list_bounds' ? `${name} int-index-seam` : init.has(name) ? `${name} init ${init.get(name)}` : name).join('\n') + '\n');
 } else if (mode === 'lower') {

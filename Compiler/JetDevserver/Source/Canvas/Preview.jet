@@ -3,79 +3,79 @@ use {
     std.collections.[BTreeSet]
     std.time.[Duration, Instant] // GATE #4494: native monotonic clock.
     jet_foundation.Devtools.[JetDevtoolsFreshnessState, JetDevtoolsSourceSpan]
-    preview_json_escape :: jet_foundation.JSON.json_escape
+    preview_json_escape: jet_foundation.JSON.json_escape
     jet_foundation.[JetDevtoolsSourceSpan]
 }
 
-CANVAS_PREVIEW_SCHEMA_VERSION :: U32{1}
-CANVAS_PREVIEW_MAX_PREVIEWS :: USize{64}
-CANVAS_PREVIEW_MAX_SELECTED :: USize{16}
-CANVAS_PREVIEW_MAX_CONTEXTS :: USize{16}
-CANVAS_PREVIEW_MAX_INPUTS :: USize{32}
-CANVAS_PREVIEW_MAX_INPUT_BYTES :: comptime { USize{16 * 1024} }
-CANVAS_PREVIEW_MAX_TEXT_BYTES :: comptime { USize{16 * 1024} }
-CANVAS_PREVIEW_MAX_DIAGNOSTIC_BYTES :: comptime { USize{16 * 1024} }
-CANVAS_PREVIEW_MAX_FRAME_BYTES :: comptime { USize{4 * 1024 * 1024} }
-CANVAS_PREVIEW_MAX_RESIDENT_BYTES :: comptime { USize{16 * 1024 * 1024} }
-CANVAS_PREVIEW_MAX_CLIENTS :: USize{16}
-CANVAS_PREVIEW_CLIENT_IDLE_SECS :: U64{60}
-CANVAS_PREVIEW_MAX_DIMENSION :: U32{16_384}
-CANVAS_PREVIEW_MAX_SCALE :: U16{8}
+CANVAS_PREVIEW_SCHEMA_VERSION: U32{1}
+CANVAS_PREVIEW_MAX_PREVIEWS: USize{64}
+CANVAS_PREVIEW_MAX_SELECTED: USize{16}
+CANVAS_PREVIEW_MAX_CONTEXTS: USize{16}
+CANVAS_PREVIEW_MAX_INPUTS: USize{32}
+CANVAS_PREVIEW_MAX_INPUT_BYTES: comptime { USize{16 * 1024} }
+CANVAS_PREVIEW_MAX_TEXT_BYTES: comptime { USize{16 * 1024} }
+CANVAS_PREVIEW_MAX_DIAGNOSTIC_BYTES: comptime { USize{16 * 1024} }
+CANVAS_PREVIEW_MAX_FRAME_BYTES: comptime { USize{4 * 1024 * 1024} }
+CANVAS_PREVIEW_MAX_RESIDENT_BYTES: comptime { USize{16 * 1024 * 1024} }
+CANVAS_PREVIEW_MAX_CLIENTS: USize{16}
+CANVAS_PREVIEW_CLIENT_IDLE_SECS: U64{60}
+CANVAS_PREVIEW_MAX_DIMENSION: U32{16_384}
+CANVAS_PREVIEW_MAX_SCALE: U16{8}
 // The Rust `CanvasPreviewSourceSpan` is `JetDevtoolsSourceSpan`
-struct CanvasPreviewSourceIdentity {
+CanvasPreviewSourceIdentity: struct {
     source_id: String; build_id: String; revision: String; span: JetDevtoolsSourceSpan
 }
 impl CanvasPreviewSourceIdentity {
-    fn new(source_id: String, build_id: String, revision: String, span: JetDevtoolsSourceSpan) -> Self {
+    new: fn(source_id: String, build_id: String, revision: String, span: JetDevtoolsSourceSpan) -> Self {
         Self { source_id: source_id, build_id: build_id, revision: revision, span: span }
     }
-    fn validate(&self) CanvasPreviewError! {
+    validate: fn(&self) CanvasPreviewError! {
         preview_text(self.source_id, "source id", CANVAS_PREVIEW_MAX_TEXT_BYTES)
         preview_text(self.build_id, "build id", CANVAS_PREVIEW_MAX_TEXT_BYTES)
         preview_text(self.revision, "revision", CANVAS_PREVIEW_MAX_TEXT_BYTES)
         self.span.validate() ?? {
-            _ :: err
+            _: err
             throw .InvalidSource("source span is invalid")
         }
         if self.span.source_id != self.source_id -> throw .InvalidSource("source span identity does not match preview source")
     }
 }
-enum CanvasPreviewKind { Preview; Playground }
+CanvasPreviewKind: enum { Preview; Playground }
 impl CanvasPreviewKind {
-    fn as_str(self) -> String { if self == {
+    as_str: fn(self) -> String { if self == {
         .Preview -> "preview"
         .Playground -> "playground"
     } }
 }
-enum CanvasPreviewDevice { Phone; Tablet; Desktop; Custom(String) }
+CanvasPreviewDevice: enum { Phone; Tablet; Desktop; Custom(String) }
 impl CanvasPreviewDevice {
-    fn as_str(&self) -> String { if self == {
+    as_str: fn(&self) -> String { if self == {
         .Phone -> "phone"
         .Tablet -> "tablet"
         .Desktop -> "desktop"
         .Custom(value) -> value
     } }
 }
-struct CanvasPreviewViewport { device: CanvasPreviewDevice; width: U32; height: U32; scale: U16 }
+CanvasPreviewViewport: struct { device: CanvasPreviewDevice; width: U32; height: U32; scale: U16 }
 impl CanvasPreviewViewport {
-    fn new(device: CanvasPreviewDevice, width: U32, height: U32, scale: U16) -> Self CanvasPreviewError! {
+    new: fn(device: CanvasPreviewDevice, width: U32, height: U32, scale: U16) -> Self CanvasPreviewError! {
         viewport := Self { device: device, width: width, height: height, scale: scale }
         viewport.validate()
         viewport
     }
-    fn phone() -> Self { Self { device: .Phone, width: 390, height: 844, scale: 2 } }
-    fn tablet() -> Self { Self { device: .Tablet, width: 834, height: 1_119, scale: 2 } }
-    fn desktop() -> Self { Self { device: .Desktop, width: 1_280, height: 800, scale: 1 } }
-    fn validate(&self) CanvasPreviewError! {
+    phone: fn() -> Self { Self { device: .Phone, width: 390, height: 844, scale: 2 } }
+    tablet: fn() -> Self { Self { device: .Tablet, width: 834, height: 1_119, scale: 2 } }
+    desktop: fn() -> Self { Self { device: .Desktop, width: 1_280, height: 800, scale: 1 } }
+    validate: fn(&self) CanvasPreviewError! {
         if self.width == 0 || self.height == 0 -> throw .InvalidViewport("viewport dimensions must be positive")
         if self.width > CANVAS_PREVIEW_MAX_DIMENSION || self.height > CANVAS_PREVIEW_MAX_DIMENSION -> throw .InvalidViewport("viewport dimension exceeds the preview bound")
         if self.scale == 0 || self.scale > CANVAS_PREVIEW_MAX_SCALE -> throw .InvalidViewport("viewport scale is outside the preview bound")
         if self.device == .Custom(name) -> preview_text(name, "viewport device", 128)
     }
 }
-enum CanvasPreviewTheme { System; Light; Dark; HighContrast; Custom(String) }
+CanvasPreviewTheme: enum { System; Light; Dark; HighContrast; Custom(String) }
 impl CanvasPreviewTheme {
-    fn as_str(&self) -> String { if self == {
+    as_str: fn(&self) -> String { if self == {
         .System -> "system"
         .Light -> "light"
         .Dark -> "dark"
@@ -83,9 +83,9 @@ impl CanvasPreviewTheme {
         .Custom(value) -> value
     } }
 }
-enum CanvasPreviewAccessibility { Default; ReducedMotion; LargeText; HighContrast; ScreenReader; Custom(String) }
+CanvasPreviewAccessibility: enum { Default; ReducedMotion; LargeText; HighContrast; ScreenReader; Custom(String) }
 impl CanvasPreviewAccessibility {
-    fn as_str(&self) -> String { if self == {
+    as_str: fn(&self) -> String { if self == {
         .Default -> "default"
         .ReducedMotion -> "reduced-motion"
         .LargeText -> "large-text"
@@ -94,9 +94,9 @@ impl CanvasPreviewAccessibility {
         .Custom(value) -> value
     } }
 }
-enum CanvasPreviewLifecycle { Initial; Loading; Loaded; Empty; Error; Offline; Custom(String) }
+CanvasPreviewLifecycle: enum { Initial; Loading; Loaded; Empty; Error; Offline; Custom(String) }
 impl CanvasPreviewLifecycle {
-    fn as_str(&self) -> String { if self == {
+    as_str: fn(&self) -> String { if self == {
         .Initial -> "initial"
         .Loading -> "loading"
         .Loaded -> "loaded"
@@ -106,41 +106,41 @@ impl CanvasPreviewLifecycle {
         .Custom(value) -> value
     } }
 }
-struct CanvasPreviewTraits { theme: CanvasPreviewTheme; locale: String; accessibility: CanvasPreviewAccessibility; lifecycle: CanvasPreviewLifecycle }
+CanvasPreviewTraits: struct { theme: CanvasPreviewTheme; locale: String; accessibility: CanvasPreviewAccessibility; lifecycle: CanvasPreviewLifecycle }
 impl CanvasPreviewTraits {
-    fn default() -> Self { Self { theme: .System, locale: "en-US", accessibility: .Default, lifecycle: .Initial } }
-    fn validate(&self) CanvasPreviewError! {
+    default: fn() -> Self { Self { theme: .System, locale: "en-US", accessibility: .Default, lifecycle: .Initial } }
+    validate: fn(&self) CanvasPreviewError! {
         preview_text(self.locale, "locale", 128)
         loop (value, field) in [(_0: self.theme.as_str(), _1: "theme"), (_0: self.accessibility.as_str(), _1: "accessibility"), (_0: self.lifecycle.as_str(), _1: "lifecycle")] -> preview_text(value, field, 128)
     }
 }
-enum CanvasPreviewEffect { Read(String); Write(String); Network(String); Clock; Custom(String) }
+CanvasPreviewEffect: enum { Read(String); Write(String); Network(String); Clock; Custom(String) }
 impl CanvasPreviewEffect {
-    fn capability(&self) -> String { if self == {
+    capability: fn(&self) -> String { if self == {
         .Read(value) -> value
         .Write(value) -> value
         .Network(value) -> value
         .Clock -> "Clock.Read"
         .Custom(value) -> value
     } }
-    fn validate(&self) CanvasPreviewError! { preview_text(self.capability(), "preview effect", 256) }
+    validate: fn(&self) CanvasPreviewError! { preview_text(self.capability(), "preview effect", 256) }
 }
-struct CanvasPreviewAuthority { loopback_only: Bool; capabilities: BTreeSet<String> }
+CanvasPreviewAuthority: struct { loopback_only: Bool; capabilities: BTreeSet<String> }
 impl CanvasPreviewAuthority {
-    fn development() -> Self { Self.new(true) }
-    fn new(loopback_only: Bool) -> Self { Self { loopback_only: loopback_only, capabilities: BTreeSet.new() } }
-    fn loopback_only(&self) -> Bool { self.loopback_only }
-    fn capabilities(&self) -> Iterator<String> { self.capabilities.iter() }
-    fn with_capability(self, capability: String) -> Self CanvasPreviewError! {
+    development: fn() -> Self { Self.new(true) }
+    new: fn(loopback_only: Bool) -> Self { Self { loopback_only: loopback_only, capabilities: BTreeSet.new() } }
+    loopback_only: fn(&self) -> Bool { self.loopback_only }
+    capabilities: fn(&self) -> Iterator<String> { self.capabilities.iter() }
+    with_capability: fn(self, capability: String) -> Self CanvasPreviewError! {
         preview_text(capability, "authority capability", 256)
         self.capabilities.insert(capability)
         self
     }
-    fn allows_capability(&self, requested: String) -> Bool {
+    allows_capability: fn(&self, requested: String) -> Bool {
         self.capabilities.iter().any((held) -> held == requested || requested.strip_prefix(held).is_some_and((tail) -> tail.starts_with('.') || tail.starts_with(':') || tail.starts_with('/')))
     }
-    fn allows_effect(&self, effect_ref: &CanvasPreviewEffect, loopback: Bool) -> Bool { (!self.loopback_only || loopback) && self.allows_capability(effect_ref.capability()) }
-    fn attenuate(&self, capabilities: [String]) -> Self CanvasPreviewError! {
+    allows_effect: fn(&self, effect_ref: &CanvasPreviewEffect, loopback: Bool) -> Bool { (!self.loopback_only || loopback) && self.allows_capability(effect_ref.capability()) }
+    attenuate: fn(&self, capabilities: [String]) -> Self CanvasPreviewError! {
         narrowed := Self.new(self.loopback_only)
         loop capability in capabilities {
             preview_text(capability, "authority capability", 256)
@@ -150,31 +150,31 @@ impl CanvasPreviewAuthority {
         narrowed
     }
 }
-enum CanvasPreviewInput { Text(String); Bool(Bool); Integer(I64); Float(F64) }
+CanvasPreviewInput: enum { Text(String); Bool(Bool); Integer(I64); Float(F64) }
 impl CanvasPreviewInput {
-    fn validate(&self) CanvasPreviewError! {
+    validate: fn(&self) CanvasPreviewError! {
         if self == {
             .Text(value) -> preview_text(value, "preview input", CANVAS_PREVIEW_MAX_INPUT_BYTES)
             .Float(value) -> if !value.is_finite() -> throw .InvalidInput("preview float input must be finite") else -> {}
         }
     }
-    fn encoded_len(&self) -> USize { if self == {
+    encoded_len: fn(&self) -> USize { if self == {
         .Text(value) -> value.len()
         .Bool(_) -> 1
         .Integer(_) -> 8
         .Float(_) -> 8
     } }
 }
-struct CanvasPreviewInputOverride { name: String; value: CanvasPreviewInput }
+CanvasPreviewInputOverride: struct { name: String; value: CanvasPreviewInput }
 impl CanvasPreviewInputOverride {
-    fn new(name: String, value: CanvasPreviewInput) -> Self CanvasPreviewError! {
+    new: fn(name: String, value: CanvasPreviewInput) -> Self CanvasPreviewError! {
         input := Self { name: name, value: value }; input.validate()?; input
     }
-    fn validate(&self) CanvasPreviewError! { preview_text(self.name, "preview input name", 256)?; self.value.validate() }
+    validate: fn(&self) CanvasPreviewError! { preview_text(self.name, "preview input name", 256)?; self.value.validate() }
 }
-struct CanvasPreviewContext { id: String; source: CanvasPreviewSourceIdentity; values: [String:CanvasPreviewInput]; resident_bytes: USize }
+CanvasPreviewContext: struct { id: String; source: CanvasPreviewSourceIdentity; values: [String:CanvasPreviewInput]; resident_bytes: USize }
 impl CanvasPreviewContext {
-    fn new(id: String, source: CanvasPreviewSourceIdentity, values: [CanvasPreviewInputOverride]) -> Self CanvasPreviewError! {
+    new: fn(id: String, source: CanvasPreviewSourceIdentity, values: [CanvasPreviewInputOverride]) -> Self CanvasPreviewError! {
         preview_text(id, "preview context id", 256)
         source.validate()
         context := Self { id: id, source: source, values: {}, resident_bytes: 0 }
@@ -188,44 +188,44 @@ impl CanvasPreviewContext {
         }
         context
     }
-    fn values(&self) -> [String:CanvasPreviewInput] { &self.values }
-    fn resident_bytes(&self) -> USize { self.resident_bytes }
+    values: fn(&self) -> [String:CanvasPreviewInput] { &self.values }
+    resident_bytes: fn(&self) -> USize { self.resident_bytes }
 }
-struct CanvasPreviewCallback { id: String }
+CanvasPreviewCallback: struct { id: String }
 impl CanvasPreviewCallback {
-    fn checked(id: String) -> Self CanvasPreviewError! { preview_text(id, "preview callback id", 256)?; Self { id: id } }
+    checked: fn(id: String) -> Self CanvasPreviewError! { preview_text(id, "preview callback id", 256)?; Self { id: id } }
 }
-struct CanvasPreviewDescriptor {
+CanvasPreviewDescriptor: struct {
     kind: CanvasPreviewKind; name: String; callback: CanvasPreviewCallback; source: CanvasPreviewSourceIdentity
     viewport: CanvasPreviewViewport; traits: CanvasPreviewTraits
     effects: BTreeSet<CanvasPreviewEffect> // GATE #4499: retain enum equality/order.
     authority: CanvasPreviewAuthority; inputs: [String:CanvasPreviewInput]; context_id: String?
 }
 impl CanvasPreviewDescriptor {
-    fn new(kind: CanvasPreviewKind, name: String, callback: CanvasPreviewCallback, source: CanvasPreviewSourceIdentity) -> Self {
+    new: fn(kind: CanvasPreviewKind, name: String, callback: CanvasPreviewCallback, source: CanvasPreviewSourceIdentity) -> Self {
         Self { kind: kind, name: name, callback: callback, source: source, viewport: CanvasPreviewViewport.desktop(), traits: CanvasPreviewTraits.default(), effects: BTreeSet.new(), authority: CanvasPreviewAuthority.development(), inputs: {}, context_id: .None }
     }
-    fn preview(name: String, callback: CanvasPreviewCallback, source: CanvasPreviewSourceIdentity) -> Self { Self.new(.Preview, name, callback, source) }
-    fn playground(name: String, callback: CanvasPreviewCallback, source: CanvasPreviewSourceIdentity) -> Self { Self.new(.Playground, name, callback, source) }
-    fn kind(&self) -> CanvasPreviewKind { self.kind }
-    fn name(&self) -> String { self.name }
-    fn callback(&self) -> CanvasPreviewCallback { &self.callback }
-    fn source(&self) -> CanvasPreviewSourceIdentity { &self.source }
-    fn viewport(&self) -> CanvasPreviewViewport { &self.viewport }
-    fn traits(&self) -> CanvasPreviewTraits { &self.traits }
-    fn effects(&self) -> Iterator<CanvasPreviewEffect> { self.effects.iter() }
-    fn authority(&self) -> CanvasPreviewAuthority { &self.authority }
-    fn inputs(&self) -> [String:CanvasPreviewInput] { &self.inputs }
-    fn context_id(&self) -> String? { self.context_id }
-    fn set_viewport(&self, viewport: CanvasPreviewViewport) CanvasPreviewError! { viewport.validate()?; self.viewport = viewport }
-    fn set_authority(&self, authority: CanvasPreviewAuthority) -> Unit { self.authority = authority }
-    fn add_effect(&self, effect_ref: CanvasPreviewEffect) CanvasPreviewError! { effect_ref.validate()?; self.effects.insert(effect_ref) }
-    fn set_input(&self, input: CanvasPreviewInputOverride) CanvasPreviewError! {
+    preview: fn(name: String, callback: CanvasPreviewCallback, source: CanvasPreviewSourceIdentity) -> Self { Self.new(.Preview, name, callback, source) }
+    playground: fn(name: String, callback: CanvasPreviewCallback, source: CanvasPreviewSourceIdentity) -> Self { Self.new(.Playground, name, callback, source) }
+    kind: fn(&self) -> CanvasPreviewKind { self.kind }
+    name: fn(&self) -> String { self.name }
+    callback: fn(&self) -> CanvasPreviewCallback { &self.callback }
+    source: fn(&self) -> CanvasPreviewSourceIdentity { &self.source }
+    viewport: fn(&self) -> CanvasPreviewViewport { &self.viewport }
+    traits: fn(&self) -> CanvasPreviewTraits { &self.traits }
+    effects: fn(&self) -> Iterator<CanvasPreviewEffect> { self.effects.iter() }
+    authority: fn(&self) -> CanvasPreviewAuthority { &self.authority }
+    inputs: fn(&self) -> [String:CanvasPreviewInput] { &self.inputs }
+    context_id: fn(&self) -> String? { self.context_id }
+    set_viewport: fn(&self, viewport: CanvasPreviewViewport) CanvasPreviewError! { viewport.validate()?; self.viewport = viewport }
+    set_authority: fn(&self, authority: CanvasPreviewAuthority) -> Unit { self.authority = authority }
+    add_effect: fn(&self, effect_ref: CanvasPreviewEffect) CanvasPreviewError! { effect_ref.validate()?; self.effects.insert(effect_ref) }
+    set_input: fn(&self, input: CanvasPreviewInputOverride) CanvasPreviewError! {
         input.validate()
         if self.inputs.len() >= CANVAS_PREVIEW_MAX_INPUTS && !self.inputs.contains_key(input.name) -> throw .TooManyInputs
         self.inputs.insert(input.name, input.value)
     }
-    fn validate(&self) CanvasPreviewError! {
+    validate: fn(&self) CanvasPreviewError! {
         preview_text(self.name, "preview name", 256)
         self.callback.checked_id()?; self.source.validate()?; self.viewport.validate()?; self.traits.validate()
         loop effect_ref in self.effects {
@@ -239,24 +239,24 @@ impl CanvasPreviewDescriptor {
     }
 }
 impl CanvasPreviewCallback {
-    fn checked_id(&self) CanvasPreviewError! { preview_text(self.id, "preview callback id", 256) }
+    checked_id: fn(&self) CanvasPreviewError! { preview_text(self.id, "preview callback id", 256) }
 }
-struct CanvasPreviewPolicy {
+CanvasPreviewPolicy: struct {
     max_previews: USize; max_selected: USize; max_contexts: USize; max_inputs: USize
     max_frame_bytes: USize; max_resident_bytes: USize; max_diagnostic_bytes: USize; max_clients: USize; client_idle_secs: U64
 }
 impl CanvasPreviewPolicy {
-    fn default() -> Self {
+    default: fn() -> Self {
         Self { max_previews: CANVAS_PREVIEW_MAX_PREVIEWS, max_selected: CANVAS_PREVIEW_MAX_SELECTED, max_contexts: CANVAS_PREVIEW_MAX_CONTEXTS, max_inputs: CANVAS_PREVIEW_MAX_INPUTS, max_frame_bytes: CANVAS_PREVIEW_MAX_FRAME_BYTES, max_resident_bytes: CANVAS_PREVIEW_MAX_RESIDENT_BYTES, max_diagnostic_bytes: CANVAS_PREVIEW_MAX_DIAGNOSTIC_BYTES, max_clients: CANVAS_PREVIEW_MAX_CLIENTS, client_idle_secs: CANVAS_PREVIEW_CLIENT_IDLE_SECS }
     }
-    fn validate(&self) CanvasPreviewError! {
+    validate: fn(&self) CanvasPreviewError! {
         if self.max_previews == 0 || self.max_previews > CANVAS_PREVIEW_MAX_PREVIEWS || self.max_selected == 0 || self.max_selected > CANVAS_PREVIEW_MAX_SELECTED || self.max_contexts > CANVAS_PREVIEW_MAX_CONTEXTS || self.max_inputs > CANVAS_PREVIEW_MAX_INPUTS || self.max_frame_bytes == 0 || self.max_frame_bytes > CANVAS_PREVIEW_MAX_FRAME_BYTES || self.max_resident_bytes == 0 || self.max_resident_bytes > CANVAS_PREVIEW_MAX_RESIDENT_BYTES || self.max_diagnostic_bytes == 0 || self.max_diagnostic_bytes > CANVAS_PREVIEW_MAX_DIAGNOSTIC_BYTES || self.max_clients == 0 || self.max_clients > CANVAS_PREVIEW_MAX_CLIENTS || self.client_idle_secs == 0 -> throw .InvalidPolicy
     }
 }
 
-enum CanvasPreviewStatus { Unrendered; Building; Ready; Error; Stale; Closed }
+CanvasPreviewStatus: enum { Unrendered; Building; Ready; Error; Stale; Closed }
 impl CanvasPreviewStatus {
-    fn as_str(&self) -> String { if self == {
+    as_str: fn(&self) -> String { if self == {
         .Unrendered -> "unrendered"
         .Building -> "building"
         .Ready -> "ready"
@@ -265,9 +265,9 @@ impl CanvasPreviewStatus {
         .Closed -> "closed"
     } }
 }
-struct CanvasPreviewDiagnostic { code: String; message: String; source: CanvasPreviewSourceIdentity }
+CanvasPreviewDiagnostic: struct { code: String; message: String; source: CanvasPreviewSourceIdentity }
 impl CanvasPreviewDiagnostic {
-    fn new(code: String, message: String, source: CanvasPreviewSourceIdentity, max_bytes: USize) -> Self CanvasPreviewError! {
+    new: fn(code: String, message: String, source: CanvasPreviewSourceIdentity, max_bytes: USize) -> Self CanvasPreviewError! {
         diagnostic := Self { code: code, message: message, source: source }
         preview_text(diagnostic.code, "preview diagnostic code", 128)
         preview_text(diagnostic.message, "preview diagnostic", max_bytes)
@@ -275,117 +275,117 @@ impl CanvasPreviewDiagnostic {
         diagnostic
     }
 }
-struct CanvasPreviewRendered<T> { value: T; bytes: USize }
+CanvasPreviewRendered: struct<T> { value: T; bytes: USize }
 impl<T> CanvasPreviewRendered<T> {
-    fn new(value: T, bytes: USize) -> Self { Self { value: value, bytes: bytes } }
+    new: fn(value: T, bytes: USize) -> Self { Self { value: value, bytes: bytes } }
 }
-struct CanvasPreviewRenderError { code: String; message: String }
+CanvasPreviewRenderError: struct { code: String; message: String }
 impl CanvasPreviewRenderError {
-    fn new(code: String, message: String) -> Self CanvasPreviewError! {
+    new: fn(code: String, message: String) -> Self CanvasPreviewError! {
         error := Self { code: code, message: message }
         preview_text(error.code, "preview render error code", 128)
         preview_text(error.message, "preview render error", CANVAS_PREVIEW_MAX_DIAGNOSTIC_BYTES)
         error
     }
 }
-struct CanvasPreviewFrame<T> { value: T; source: CanvasPreviewSourceIdentity; bytes: USize; sequence: U64 }
-struct CanvasPreviewSnapshot<T> {
+CanvasPreviewFrame: struct<T> { value: T; source: CanvasPreviewSourceIdentity; bytes: USize; sequence: U64 }
+CanvasPreviewSnapshot: struct<T> {
     session_id: String; name: String; kind: CanvasPreviewKind; source: CanvasPreviewSourceIdentity
     status: CanvasPreviewStatus; freshness: JetDevtoolsFreshnessState
     current: CanvasPreviewFrame<T>?; last_good: CanvasPreviewFrame<T>?; diagnostic: CanvasPreviewDiagnostic?; sequence: U64
 }
 impl<T: Clone> CanvasPreviewSnapshot<T> {
-    fn to_json(&self) -> String {
+    to_json: fn(&self) -> String {
         diagnostic := self.diagnostic.as_ref().map((value) -> "{{\"code\":\"{preview_json_escape(value.code)}\",\"message\":\"{preview_json_escape(value.message)}\",\"source\":{preview_source_json(value.source)}}}").unwrap_or_else(() -> "null")
         current_source := self.current.as_ref().map((frame) -> preview_source_json(frame.source)).unwrap_or_else(() -> "null")
         last_good_source := self.last_good.as_ref().map((frame) -> preview_source_json(frame.source)).unwrap_or_else(() -> "null")
         "{{\"schema_version\":{CANVAS_PREVIEW_SCHEMA_VERSION},\"session_id\":\"{preview_json_escape(self.session_id)}\",\"name\":\"{preview_json_escape(self.name)}\",\"kind\":\"{self.kind.as_str()}\",\"status\":\"{self.status.as_str()}\",\"freshness\":\"{self.freshness.as_str()}\",\"current\":{self.current.is_some()},\"last_good\":{self.last_good.is_some()},\"current_source\":{current_source},\"last_good_source\":{last_good_source},\"diagnostic\":{diagnostic},\"sequence\":{self.sequence}}}"
     }
 }
-struct PreviewRecord<T> {
+PreviewRecord: struct<T> {
     descriptor: CanvasPreviewDescriptor; status: CanvasPreviewStatus; freshness: JetDevtoolsFreshnessState
     last_good: CanvasPreviewFrame<T>?; diagnostic: CanvasPreviewDiagnostic?; sequence: U64
 }
-struct CanvasPreviewConnection { session_id: String; client_id: String; generation: U64; cursor: U64 }
-struct PreviewClientLease { generation: U64; cursor: U64; loopback: Bool; last_seen: Instant }
-struct CanvasPreviewSession<T: Clone> {
+CanvasPreviewConnection: struct { session_id: String; client_id: String; generation: U64; cursor: U64 }
+PreviewClientLease: struct { generation: U64; cursor: U64; loopback: Bool; last_seen: Instant }
+CanvasPreviewSession: struct<T: Clone> {
     id: String; secret: String; authority: CanvasPreviewAuthority; policy: CanvasPreviewPolicy
     registry: CanvasPreviewRegistry; records: [String:PreviewRecord<T>]; clients: [String:PreviewClientLease]
     resident_bytes: USize; sequence: U64; closed: Bool
 }
 impl<T: Clone> CanvasPreviewSession<T> {
-    fn new(id: String, secret: String, authority: CanvasPreviewAuthority) -> Self CanvasPreviewError! { Self.with_policy(id, secret, authority, CanvasPreviewPolicy.default()) }
-    fn with_policy(id: String, secret: String, authority: CanvasPreviewAuthority, policy: CanvasPreviewPolicy) -> Self CanvasPreviewError! {
+    new: fn(id: String, secret: String, authority: CanvasPreviewAuthority) -> Self CanvasPreviewError! { Self.with_policy(id, secret, authority, CanvasPreviewPolicy.default()) }
+    with_policy: fn(id: String, secret: String, authority: CanvasPreviewAuthority, policy: CanvasPreviewPolicy) -> Self CanvasPreviewError! {
         preview_text(id, "preview session id", 256)?; preview_text(secret, "preview session secret", 256)?; policy.validate()
         Self { id: id, secret: secret, authority: authority, policy: policy, registry: CanvasPreviewRegistry.default(), records: {}, clients: {}, resident_bytes: 0, sequence: 0, closed: false }
     }
-    fn id(&self) -> String { self.id }
-    fn authority(&self) -> CanvasPreviewAuthority { &self.authority }
-    fn policy(&self) -> CanvasPreviewPolicy { &self.policy }
-    fn registry(&self) -> CanvasPreviewRegistry { &self.registry }
-    fn resident_bytes(&self) -> USize { self.resident_bytes }
-    fn register_context(&self, context: CanvasPreviewContext) CanvasPreviewError! {
+    id: fn(&self) -> String { self.id }
+    authority: fn(&self) -> CanvasPreviewAuthority { &self.authority }
+    policy: fn(&self) -> CanvasPreviewPolicy { &self.policy }
+    registry: fn(&self) -> CanvasPreviewRegistry { &self.registry }
+    resident_bytes: fn(&self) -> USize { self.resident_bytes }
+    register_context: fn(&self, context: CanvasPreviewContext) CanvasPreviewError! {
         self.ensure_open()
         if self.registry.contexts_len() >= self.policy.max_contexts -> throw .TooManyContexts
         self.registry.insert_context(context)
     }
-    fn select(&self, name: String) CanvasPreviewError! {
+    select: fn(&self, name: String) CanvasPreviewError! {
         self.ensure_open()
         if self.registry.selected_len() >= self.policy.max_selected && !self.registry.is_selected(name) -> throw .TooManySelected
         self.registry.select(name)
     }
-    fn select_many(&self, names: [String]) CanvasPreviewError! {
+    select_many: fn(&self, names: [String]) CanvasPreviewError! {
         self.ensure_open()
         if names.len() > self.policy.max_selected -> throw .TooManySelected
         self.registry.select_many(names)
     }
-    fn clear_selection(&self) -> Unit { self.registry.clear_selection() }
-    fn selected_names(&self) -> [String] { self.registry.selected_names() }
-    fn descriptor(&self, name: String) -> CanvasPreviewDescriptor CanvasPreviewError! {
+    clear_selection: fn(&self) -> Unit { self.registry.clear_selection() }
+    selected_names: fn(&self) -> [String] { self.registry.selected_names() }
+    descriptor: fn(&self, name: String) -> CanvasPreviewDescriptor CanvasPreviewError! {
         record := self.records.get(name).ok_or_else(() -> CanvasPreviewError.UnknownPreview(name.to_string()))
         &record.descriptor
     }
-    fn snapshot(&self, name: String) -> CanvasPreviewSnapshot<T> CanvasPreviewError! {
+    snapshot: fn(&self, name: String) -> CanvasPreviewSnapshot<T> CanvasPreviewError! {
         record := self.records.get(name).ok_or_else(() -> CanvasPreviewError.UnknownPreview(name.to_string()))
         self.snapshot_record(name, record)
     }
-    fn snapshots(&self) -> [CanvasPreviewSnapshot<T>] {
+    snapshots: fn(&self) -> [CanvasPreviewSnapshot<T>] {
         keys := self.records.keys().collect(); keys.sort()
         keys.iter().map((name) -> self.snapshot_record(name, self.records[name])).collect()
     }
-    fn mark_building(&self, name: String) CanvasPreviewError! {
+    mark_building: fn(&self, name: String) CanvasPreviewError! {
         self.ensure_open()
         sequence := self.bump_sequence(); record := self.record_mut(name)
         record.status = .Building
         record.freshness = if record.last_good.is_some() -> .Stale else -> .Unknown
         record.diagnostic = .None; record.sequence = sequence
     }
-    fn mark_stale(&self, name: String, code: String, message: String) CanvasPreviewError! {
+    mark_stale: fn(&self, name: String, code: String, message: String) CanvasPreviewError! {
         self.ensure_open()
         source := self.descriptor(name)?.source().clone()
         diagnostic := CanvasPreviewDiagnostic.new(code, message, source, self.policy.max_diagnostic_bytes)
         sequence := self.bump_sequence(); record := self.record_mut(name)
         record.status = .Stale; record.freshness = .Stale; record.diagnostic = .Val(diagnostic); record.sequence = sequence
     }
-    fn mark_error(&self, name: String, code: String, message: String) CanvasPreviewError! {
+    mark_error: fn(&self, name: String, code: String, message: String) CanvasPreviewError! {
         self.ensure_open()
         source := self.descriptor(name)?.source().clone()
         diagnostic := CanvasPreviewDiagnostic.new(code, message, source, self.policy.max_diagnostic_bytes)
         sequence := self.bump_sequence(); record := self.record_mut(name)
         record.status = .Error; record.freshness = .Stale; record.diagnostic = .Val(diagnostic); record.sequence = sequence
     }
-    fn evaluate(&self, name: String, render: (&CanvasPreviewDescriptor, CanvasPreviewContext?) -> CanvasPreviewRendered<T> Err! CanvasPreviewRenderError) -> CanvasPreviewSnapshot<T> CanvasPreviewError! {
+    evaluate: fn(&self, name: String, render: (&CanvasPreviewDescriptor, CanvasPreviewContext?) -> CanvasPreviewRendered<T> Err! CanvasPreviewRenderError) -> CanvasPreviewSnapshot<T> CanvasPreviewError! {
         descriptor := self.descriptor(name)?.clone()
         if descriptor.effects().next().is_some() -> throw .AuthorityRequired
         self.evaluate_inner(name, descriptor, render)
     }
-    fn evaluate_authorized(&self, connection: &CanvasPreviewConnection, name: String, requested_effects: [CanvasPreviewEffect], render: (&CanvasPreviewDescriptor, CanvasPreviewContext?) -> CanvasPreviewRendered<T> Err! CanvasPreviewRenderError) -> CanvasPreviewSnapshot<T> CanvasPreviewError! {
+    evaluate_authorized: fn(&self, connection: &CanvasPreviewConnection, name: String, requested_effects: [CanvasPreviewEffect], render: (&CanvasPreviewDescriptor, CanvasPreviewContext?) -> CanvasPreviewRendered<T> Err! CanvasPreviewRenderError) -> CanvasPreviewSnapshot<T> CanvasPreviewError! {
         self.touch(connection)?
         descriptor := self.descriptor(name)?.clone()
         self.authorize_descriptor(descriptor, connection, requested_effects)?
         self.evaluate_inner(name, descriptor, render)
     }
-    fn evaluate_inner(&self, name: String, descriptor: CanvasPreviewDescriptor, render: (&CanvasPreviewDescriptor, CanvasPreviewContext?) -> CanvasPreviewRendered<T> Err! CanvasPreviewRenderError) -> CanvasPreviewSnapshot<T> CanvasPreviewError! {
+    evaluate_inner: fn(&self, name: String, descriptor: CanvasPreviewDescriptor, render: (&CanvasPreviewDescriptor, CanvasPreviewContext?) -> CanvasPreviewRendered<T> Err! CanvasPreviewRenderError) -> CanvasPreviewSnapshot<T> CanvasPreviewError! {
         self.mark_building(name)?
         context := descriptor.context_id().and_then((id) -> self.registry.context(id).cloned())
         // GATE #4494: native panic boundary, no fabricated render on unwind.
@@ -396,12 +396,12 @@ impl<T: Clone> CanvasPreviewSession<T> {
             .Err(_) -> { self.mark_error(name, "E_PREVIEW_PANIC", "preview callback panicked")?; throw .RenderFailed }
         }
     }
-    fn publish(&self, name: String, source: CanvasPreviewSourceIdentity, rendered: CanvasPreviewRendered<T>) -> CanvasPreviewSnapshot<T> CanvasPreviewError! {
+    publish: fn(&self, name: String, source: CanvasPreviewSourceIdentity, rendered: CanvasPreviewRendered<T>) -> CanvasPreviewSnapshot<T> CanvasPreviewError! {
         descriptor := self.descriptor(name)
         if descriptor.effects().next().is_some() -> throw .AuthorityRequired
         self.publish_inner(name, source, rendered)
     }
-    fn publish_inner(&self, name: String, source: CanvasPreviewSourceIdentity, rendered: CanvasPreviewRendered<T>) -> CanvasPreviewSnapshot<T> CanvasPreviewError! {
+    publish_inner: fn(&self, name: String, source: CanvasPreviewSourceIdentity, rendered: CanvasPreviewRendered<T>) -> CanvasPreviewSnapshot<T> CanvasPreviewError! {
         source.validate()
         descriptor := self.descriptor(name)
         if source != descriptor.source() -> throw .SourceMismatch
@@ -416,7 +416,7 @@ impl<T: Clone> CanvasPreviewSession<T> {
         self.resident_bytes = new_resident
         self.snapshot(name)
     }
-    fn authorize_descriptor(&self, descriptor: &CanvasPreviewDescriptor, connection: &CanvasPreviewConnection, requested_effects: [CanvasPreviewEffect]) CanvasPreviewError! {
+    authorize_descriptor: fn(&self, descriptor: &CanvasPreviewDescriptor, connection: &CanvasPreviewConnection, requested_effects: [CanvasPreviewEffect]) CanvasPreviewError! {
         if connection.session_id != self.id -> throw .Unauthorized
         if !connection_is_loopback(self.clients.get(connection.client_id)) -> throw .LoopbackRequired
         requested := BTreeSet<&CanvasPreviewEffect>{requested_effects.iter().collect()} // GATE #4499
@@ -426,128 +426,128 @@ impl<T: Clone> CanvasPreviewSession<T> {
             if !descriptor.authority.allows_effect(effect_ref, true) || !self.authority.allows_effect(effect_ref, true) -> throw .CapabilityDenied(effect_ref.capability().to_string())
         }
     }
-    fn connect(&self, client_id: String, presented_secret: String, loopback: Bool) -> CanvasPreviewConnection CanvasPreviewError! {
+    connect: fn(&self, client_id: String, presented_secret: String, loopback: Bool) -> CanvasPreviewConnection CanvasPreviewError! {
         self.ensure_open()
-        _ :: self.prune_expired_at(Instant.now())
+        _: self.prune_expired_at(Instant.now())
         preview_text(client_id, "preview client id", 256)
         self.authorize_connection(presented_secret, loopback)
         self.open_client(client_id, loopback, 0)
     }
-    fn reconnect(&self, connection: &CanvasPreviewConnection, presented_secret: String, loopback: Bool) -> CanvasPreviewConnection CanvasPreviewError! {
+    reconnect: fn(&self, connection: &CanvasPreviewConnection, presented_secret: String, loopback: Bool) -> CanvasPreviewConnection CanvasPreviewError! {
         self.ensure_open()?; self.authorize_connection(presented_secret, loopback)
         generation := self.clients.get(connection.client_id).ok_or(CanvasPreviewError.StaleConnection)?.generation
         if generation != connection.generation || connection.session_id != self.id -> throw .StaleConnection
         self.open_client(connection.client_id.clone(), loopback, connection.cursor.min(self.sequence))
     }
-    fn touch(&self, connection: &CanvasPreviewConnection) CanvasPreviewError! {
+    touch: fn(&self, connection: &CanvasPreviewConnection) CanvasPreviewError! {
         self.ensure_open()
         if connection.session_id != self.id -> throw .StaleConnection
         lease := self.clients.get_mut(connection.client_id).ok_or(CanvasPreviewError.StaleConnection)
         if lease.generation != connection.generation -> throw .StaleConnection
         lease.last_seen = Instant.now()
     }
-    fn acknowledge(&self, connection: &CanvasPreviewConnection, cursor: U64) CanvasPreviewError! {
+    acknowledge: fn(&self, connection: &CanvasPreviewConnection, cursor: U64) CanvasPreviewError! {
         self.touch(connection)
         if cursor > self.sequence -> throw .InvalidCursor
         lease := self.clients.get_mut(connection.client_id).ok_or(CanvasPreviewError.StaleConnection)
         lease.cursor = cursor
     }
-    fn disconnect(&self, connection: &CanvasPreviewConnection) CanvasPreviewError! {
+    disconnect: fn(&self, connection: &CanvasPreviewConnection) CanvasPreviewError! {
         lease := self.clients.get(connection.client_id).ok_or(CanvasPreviewError.StaleConnection)
         if connection.session_id != self.id || lease.generation != connection.generation -> throw .StaleConnection
-        _ :: self.clients.remove(connection.client_id)
+        _: self.clients.remove(connection.client_id)
     }
-    fn prune_expired(&self) -> USize { self.prune_expired_at(Instant.now()) }
-    fn prune_expired_at(&self, now: Instant) -> USize {
+    prune_expired: fn(&self) -> USize { self.prune_expired_at(Instant.now()) }
+    prune_expired_at: fn(&self, now: Instant) -> USize {
         timeout := Duration.from_secs(self.policy.client_idle_secs); before := self.clients.len()
         self.clients.retain((_, lease) -> now.saturating_duration_since(lease.last_seen) <= timeout)
         before.saturating_sub(self.clients.len())
     }
-    fn close(&self) -> Unit {
+    close: fn(&self) -> Unit {
         self.closed = true; self.clients.clear(); self.records.clear(); self.registry = CanvasPreviewRegistry.default(); self.resident_bytes = 0
     }
-    fn is_closed(&self) -> Bool { self.closed }
-    fn to_json(&self) -> String {
+    is_closed: fn(&self) -> Bool { self.closed }
+    to_json: fn(&self) -> String {
         snapshots := self.snapshots().iter().map((snapshot) -> snapshot.to_json()).collect().join(",")
         selected := self.registry.selected_names().iter().map((name) -> "\"{preview_json_escape(name)}\"").collect().join(",")
         "{{\"schema_version\":{CANVAS_PREVIEW_SCHEMA_VERSION},\"session_id\":\"{preview_json_escape(self.id)}\",\"closed\":{self.closed},\"selected\":[{selected}],\"resident_bytes\":{self.resident_bytes},\"sequence\":{self.sequence},\"previews\":[{snapshots}]}}"
     }
-    fn open_client(&self, client_id: String, loopback: Bool, cursor: U64) -> CanvasPreviewConnection CanvasPreviewError! {
+    open_client: fn(&self, client_id: String, loopback: Bool, cursor: U64) -> CanvasPreviewConnection CanvasPreviewError! {
         generation := self.clients.get(client_id).map_or(1, (lease) -> lease.generation.saturating_add(1))
         if !self.clients.contains_key(client_id) && self.clients.len() >= self.policy.max_clients -> throw .TooManyClients
         self.clients.insert(client_id.clone(), PreviewClientLease { generation: generation, cursor: cursor, loopback: loopback, last_seen: Instant.now() })
         CanvasPreviewConnection { session_id: self.id.clone(), client_id: client_id, generation: generation, cursor: cursor }
     }
-    fn authorize_connection(&self, presented_secret: String, loopback: Bool) CanvasPreviewError! {
+    authorize_connection: fn(&self, presented_secret: String, loopback: Bool) CanvasPreviewError! {
         if !constant_time_equal(self.secret, presented_secret) -> throw .Unauthorized
         if self.authority.loopback_only() && !loopback -> throw .LoopbackRequired
     }
-    fn record_mut(&self, name: String) -> PreviewRecord<T> CanvasPreviewError! { self.records.get_mut(name).ok_or_else(() -> CanvasPreviewError.UnknownPreview(name.to_string())) }
-    fn snapshot_record(&self, name: String, record: &PreviewRecord<T>) -> CanvasPreviewSnapshot<T> {
+    record_mut: fn(&self, name: String) -> PreviewRecord<T> CanvasPreviewError! { self.records.get_mut(name).ok_or_else(() -> CanvasPreviewError.UnknownPreview(name.to_string())) }
+    snapshot_record: fn(&self, name: String, record: &PreviewRecord<T>) -> CanvasPreviewSnapshot<T> {
         CanvasPreviewSnapshot<T> { session_id: self.id.clone(), name: name.to_string(), kind: record.descriptor.kind(), source: record.descriptor.source().clone(), status: record.status.clone(), freshness: record.freshness,
             current: if record.freshness == .Fresh -> record.last_good.clone() else -> .None,
             last_good: record.last_good.clone(), diagnostic: record.diagnostic.clone(), sequence: record.sequence }
     }
-    fn bump_sequence(&self) -> U64 { self.sequence = self.sequence.saturating_add(1); self.sequence }
-    fn ensure_open(&self) CanvasPreviewError! { if self.closed -> throw .SessionClosed }
+    bump_sequence: fn(&self) -> U64 { self.sequence = self.sequence.saturating_add(1); self.sequence }
+    ensure_open: fn(&self) CanvasPreviewError! { if self.closed -> throw .SessionClosed }
 }
 impl<T: Clone> Drop for CanvasPreviewSession<T> {
-    fn drop(&self) -> Unit { self.clients.clear(); self.records.clear(); self.registry.clear(); self.resident_bytes = 0 }
+    drop: fn(&self) -> Unit { self.clients.clear(); self.records.clear(); self.registry.clear(); self.resident_bytes = 0 }
 }
 
-struct CanvasPreviewRegistry { descriptors: [String:CanvasPreviewDescriptor]; contexts: [String:CanvasPreviewContext]; selected: BTreeSet<String> }
+CanvasPreviewRegistry: struct { descriptors: [String:CanvasPreviewDescriptor]; contexts: [String:CanvasPreviewContext]; selected: BTreeSet<String> }
 impl CanvasPreviewRegistry {
-    fn default() -> Self { Self { descriptors: {}, contexts: {}, selected: BTreeSet.new() } }
-    fn new(descriptors: [CanvasPreviewDescriptor]) -> Self CanvasPreviewError! {
+    default: fn() -> Self { Self { descriptors: {}, contexts: {}, selected: BTreeSet.new() } }
+    new: fn(descriptors: [CanvasPreviewDescriptor]) -> Self CanvasPreviewError! {
         registry := Self.default()
         loop descriptor in descriptors -> registry.insert(descriptor)
         registry
     }
-    fn insert(&self, descriptor: CanvasPreviewDescriptor) CanvasPreviewError! {
+    insert: fn(&self, descriptor: CanvasPreviewDescriptor) CanvasPreviewError! {
         descriptor.validate()
         if self.descriptors.len() >= CANVAS_PREVIEW_MAX_PREVIEWS -> throw .TooManyPreviews
         if self.descriptors.contains_key(descriptor.name()) -> throw .DuplicatePreview(descriptor.name().to_string())
         self.descriptors.insert(descriptor.name().to_string(), descriptor)
     }
-    fn replace(&self, descriptor: CanvasPreviewDescriptor) CanvasPreviewError! {
+    replace: fn(&self, descriptor: CanvasPreviewDescriptor) CanvasPreviewError! {
         descriptor.validate()
         if !self.descriptors.contains_key(descriptor.name()) -> return self.insert(descriptor)
         self.descriptors.insert(descriptor.name().to_string(), descriptor)
     }
-    fn remove(&self, name: String) CanvasPreviewError! {
-        _ :: self.descriptors.remove(name).ok_or_else(() -> CanvasPreviewError.UnknownPreview(name.to_string()))
+    remove: fn(&self, name: String) CanvasPreviewError! {
+        _: self.descriptors.remove(name).ok_or_else(() -> CanvasPreviewError.UnknownPreview(name.to_string()))
         self.selected.remove(name)
     }
-    fn get(&self, name: String) -> CanvasPreviewDescriptor? { self.descriptors.get(name) }
-    fn descriptors(&self) -> Iterator<CanvasPreviewDescriptor> {
+    get: fn(&self, name: String) -> CanvasPreviewDescriptor? { self.descriptors.get(name) }
+    descriptors: fn(&self) -> Iterator<CanvasPreviewDescriptor> {
         keys := self.descriptors.keys().collect(); keys.sort()
         keys.into_iter().map((key) -> &self.descriptors[key])
     }
-    fn len(&self) -> USize { self.descriptors.len() }
-    fn is_empty(&self) -> Bool { self.descriptors.is_empty() }
-    fn select(&self, name: String) CanvasPreviewError! {
+    len: fn(&self) -> USize { self.descriptors.len() }
+    is_empty: fn(&self) -> Bool { self.descriptors.is_empty() }
+    select: fn(&self, name: String) CanvasPreviewError! {
         if !self.descriptors.contains_key(name) -> throw .UnknownPreview(name.to_string())
         if self.selected.len() >= CANVAS_PREVIEW_MAX_SELECTED && !self.selected.contains(name) -> throw .TooManySelected
         self.selected.insert(name.to_string())
     }
-    fn select_many(&self, names: [String]) CanvasPreviewError! {
+    select_many: fn(&self, names: [String]) CanvasPreviewError! {
         if names.len() > CANVAS_PREVIEW_MAX_SELECTED -> throw .TooManySelected
         loop name in names { if !self.descriptors.contains_key(name) -> throw .UnknownPreview(name.clone()) }
         self.selected.clear(); self.selected.extend(names)
     }
-    fn clear_selection(&self) -> Unit { self.selected.clear() }
-    fn selected_names(&self) -> [String] { self.selected.iter().cloned().collect() }
-    fn selected_len(&self) -> USize { self.selected.len() }
-    fn is_selected(&self, name: String) -> Bool { self.selected.contains(name) }
-    fn insert_context(&self, context: CanvasPreviewContext) CanvasPreviewError! {
+    clear_selection: fn(&self) -> Unit { self.selected.clear() }
+    selected_names: fn(&self) -> [String] { self.selected.iter().cloned().collect() }
+    selected_len: fn(&self) -> USize { self.selected.len() }
+    is_selected: fn(&self, name: String) -> Bool { self.selected.contains(name) }
+    insert_context: fn(&self, context: CanvasPreviewContext) CanvasPreviewError! {
         if self.contexts.len() >= CANVAS_PREVIEW_MAX_CONTEXTS -> throw .TooManyContexts
         if self.contexts.contains_key(context.id) -> throw .DuplicateContext(context.id)
         context.source.validate()
         self.contexts.insert(context.id.clone(), context)
     }
-    fn context(&self, id: String) -> CanvasPreviewContext? { self.contexts.get(id) }
-    fn contexts_len(&self) -> USize { self.contexts.len() }
-    fn validate(&self) CanvasPreviewError! {
+    context: fn(&self, id: String) -> CanvasPreviewContext? { self.contexts.get(id) }
+    contexts_len: fn(&self) -> USize { self.contexts.len() }
+    validate: fn(&self) CanvasPreviewError! {
         loop descriptor in self.descriptors() {
             descriptor.validate()
             if descriptor.context_id() == .Val(context_id) {
@@ -556,17 +556,17 @@ impl CanvasPreviewRegistry {
             }
         }
     }
-    fn to_json(&self) -> String {
+    to_json: fn(&self) -> String {
         descriptors := self.descriptors().map((descriptor) -> {
             "{{\"name\":\"{preview_json_escape(descriptor.name())}\",\"kind\":\"{descriptor.kind().as_str()}\",\"callback\":\"{preview_json_escape(descriptor.callback().id)}\",\"source\":{preview_source_json(descriptor.source())},\"viewport\":{{\"device\":\"{preview_json_escape(descriptor.viewport().device.as_str())}\",\"width\":{descriptor.viewport().width},\"height\":{descriptor.viewport().height},\"scale\":{descriptor.viewport().scale}}},\"selected\":{self.selected.contains(descriptor.name())}}}"
         }).collect().join(",")
         selected := self.selected.iter().map((name) -> "\"{preview_json_escape(name)}\"").collect().join(",")
         "{{\"schema_version\":{CANVAS_PREVIEW_SCHEMA_VERSION},\"selected\":[{selected}],\"contexts\":{self.contexts.len()},\"descriptors\":[{descriptors}]}}"
     }
-    fn clear(&self) -> Unit { self.descriptors.clear(); self.contexts.clear(); self.selected.clear() }
+    clear: fn(&self) -> Unit { self.descriptors.clear(); self.contexts.clear(); self.selected.clear() }
 }
 #Error
-enum CanvasPreviewError {
+CanvasPreviewError: enum {
     InvalidText { field: String, reason: String }; InvalidSource(String); InvalidViewport(String); InvalidInput(String)
     InvalidPolicy; TooManyPreviews; TooManySelected; TooManyContexts; TooManyInputs
     DuplicatePreview(String); UnknownPreview(String); DuplicateContext(String); UnknownContext(String); DuplicateInput(String)
@@ -575,7 +575,7 @@ enum CanvasPreviewError {
     ResidentBudgetExceeded; SourceMismatch; ContextSourceMismatch; RenderFailed; SessionClosed
 }
 impl CanvasPreviewError {
-    fn to_string(&self) -> String {
+    to_string: fn(&self) -> String {
         if self == {
             .InvalidText { field, reason } -> "invalid {field}: {reason}"
             .InvalidSource(reason) -> "invalid preview source: {reason}"
@@ -610,16 +610,16 @@ impl CanvasPreviewError {
         }
     }
 }
-fn preview_text(value: String, field: String, max_bytes: USize) CanvasPreviewError! {
+preview_text: fn(value: String, field: String, max_bytes: USize) CanvasPreviewError! {
     trimmed := value.trim() // #4303
     if trimmed.is_empty() -> throw .InvalidText { field: field, reason: "must not be empty" }
     if value.len() > max_bytes -> throw .InvalidText { field: field, reason: "exceeds the bounded text size" }
     if value.chars().any((ch) -> ch.is_control()) -> throw .InvalidText { field: field, reason: "must not contain control characters" }
 }
-fn preview_source_json(source: CanvasPreviewSourceIdentity) -> String {
+preview_source_json: fn(source: CanvasPreviewSourceIdentity) -> String {
     "{{\"source_id\":\"{preview_json_escape(source.source_id)}\",\"build_id\":\"{preview_json_escape(source.build_id)}\",\"revision\":\"{preview_json_escape(source.revision)}\",\"span\":{{\"source_id\":\"{preview_json_escape(source.span.source_id)}\",\"file\":\"{preview_json_escape(source.span.file)}\",\"start_line\":{source.span.start_line},\"start_column\":{source.span.start_column},\"end_line\":{source.span.end_line},\"end_column\":{source.span.end_column}}}}}"
 }
-fn constant_time_equal(left: String, right: String) -> Bool {
+constant_time_equal: fn(left: String, right: String) -> Bool {
     difference := left.len().bit_xor(right.len())
     width := left.len().max(right.len())
     loop index in 0..width {
@@ -629,4 +629,4 @@ fn constant_time_equal(left: String, right: String) -> Bool {
     }
     difference == 0
 }
-fn connection_is_loopback(lease: PreviewClientLease?) -> Bool { lease.is_some_and((lease) -> lease.loopback) }
+connection_is_loopback: fn(lease: PreviewClientLease?) -> Bool { lease.is_some_and((lease) -> lease.loopback) }

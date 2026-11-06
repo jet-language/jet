@@ -1,30 +1,30 @@
 // D-TAIL-CALL1=A: a call the function returns is a jump on every level, so
 // self and mutual recursion 10 million deep runs in constant stack. A frame
 // per level would stop with E3012 near a million levels.
-fn walk(n: Int, acc: Int) -> Int {
+walk: fn(n: Int, acc: Int) -> Int {
     if n == 0 -> return acc
     walk(n - 1, acc + n)
 }
 
-fn is_even(n: Int) -> Bool {
+is_even: fn(n: Int) -> Bool {
     if n == 0 -> return true
     is_odd(n - 1)
 }
 
-fn is_odd(n: Int) -> Bool {
+is_odd: fn(n: Int) -> Bool {
     if n == 0 -> return false
     is_even(n - 1)
 }
 
 // A String argument the caller drops after the call is handed to the callee,
 // which drops it before its own tail jump.
-fn hop(n: Int, data: String) -> Int {
+hop: fn(n: Int, data: String) -> Int {
     if n == 0 -> return data.len()
-    next :: "x".repeat(n.bit_and(7) + 1)
+    next: "x".repeat(n.bit_and(7) + 1)
     hop(n - 1, next)
 }
 
-fn run() {
+run: fn() {
     print(walk(10000000, 0))
     print(is_even(10000000))
     print(is_odd(7))

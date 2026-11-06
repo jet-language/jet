@@ -57,7 +57,7 @@ A cross-tier executable Tensor autodiff path is missing: named `compute.gradient
 
 Evidence:
 
-- `Tools/agent/jet-env jet run $JET_STATE_ROOT/dx3/area-ai/evidence/mini.jet` -> `Error [E0956]: \`Tensor\` isn't supported by the current evaluator yet` at `mini.jet:6`, the named `(dw, dx) :: compute.gradient(...)` call.
+- `Tools/agent/jet-env jet run $JET_STATE_ROOT/dx3/area-ai/evidence/mini.jet` -> `Error [E0956]: \`Tensor\` isn't supported by the current evaluator yet` at `mini.jet:6`, the named `(dw, dx): compute.gradient(...)` call.
 - `Tools/agent/jet-env jet build $JET_STATE_ROOT/dx3/area-ai/evidence/mini.jet --verbose` -> exit `101`: `internal compiler error: the generated Rust did not compile`, generated `$HOME/Projects/Github/jet/build/mini.rs`.
 - `Tools/agent/jet-env jet run Examples/features/tooling/compute_autodiff.jet` -> `E0112` at `compute_autodiff.jet:18` (`compute.gradient` needs named Tensor parameters), then `E0102` at line 19 because `curvature` was not defined.
 

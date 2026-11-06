@@ -1,17 +1,17 @@
-use process :: core.process
-fn subject(mode: String, path: String) -> ProcessReceipt {
+use process: core.process
+subject: fn(mode: String, path: String) -> ProcessReceipt {
     if mode != "aot" {
         argv := [String]{"{jet}", "run"}
         &argv.push(path)
         return process.cmd(argv).run() ?? panic("run subject")
     }
     // Source/CmdCompile.rs482-488 public built: path; compile happens INSIDE runner task.
-    build :: process.cmd([String]{"{jet}", "build", path}).run() ?? panic("build subject")
+    build: process.cmd([String]{"{jet}", "build", path}).run() ?? panic("build subject")
     assert(build.success)
     artifact := ""
     loop line in build.output.split("\n") {
         if line.starts_with("built: ") {
-            rest :: line.slice(7..<line.len()).copy()
+            rest: line.slice(7..<line.len()).copy()
             artifact = rest.split(" (").to_list()[0].trim().copy()
             break
         }
@@ -19,12 +19,12 @@ fn subject(mode: String, path: String) -> ProcessReceipt {
     assert(artifact.len() > 0)
     return process.cmd([String]{artifact}).run() ?? panic("run artifact")
 }
-use time :: core.time
-fn run() {
-    modes :: [String]{"default"}
+use time: core.time
+run: fn() {
+    modes: [String]{"default"}
     loop mode in modes {
-        started :: time.instant()
-        output :: subject(mode, "{work}/server/main.jet")
+        started: time.instant()
+        output: subject(mode, "{work}/server/main.jet")
         assert(time.instant() < started + 45s)
         assert_eq(output.output, "close-get=rejected:InvalidFraming\nclose-request=rejected:InvalidFraming\nchunked-get=rejected:InvalidFraming\nchunked-request=rejected:InvalidFraming\ngzip-get=rejected:InvalidFraming\ngzip-request=rejected:InvalidFraming\n")
         assert_eq(output.errors, "")

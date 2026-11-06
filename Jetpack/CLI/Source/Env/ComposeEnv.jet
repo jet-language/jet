@@ -6,30 +6,30 @@
 // here and travels as `CliError.Reported(code)`.
 
 // Realization facts for the env-entry banner and the receipt stamp.
-struct EnvReadyStats {
+EnvReadyStats: struct {
     total: Int
     cache_hits: Int
     realized: [EnvironmentSelection]
 
-    fn empty() -> EnvReadyStats Never! {
+    empty: fn() -> EnvReadyStats Never! {
         EnvReadyStats{total: 0, cache_hits: 0, realized: [EnvironmentSelection]{}}
     }
 
     // A local reuse and a verified binary-cache substitution both avoid
     // fresh work for the user entering the environment.
-    fn record(&self, entry: StoreEntry, state: SourceState) Never! {
+    record: fn(&self, entry: StoreEntry, state: SourceState) Never! {
         self.total += 1
         if state == SourceState.Cached || state == SourceState.Substituted -> self.cache_hits += 1
         &self.realized.push(store_environment_entry_selection(entry))
     }
 
     // Refresh each selection to the most recently used matching entry.
-    fn canonicalize(&self, roots: HangarRoots) Never! -[FS, Env]> {
+    canonicalize: fn(&self, roots: HangarRoots) Never! -[FS, Env]> {
         if self.realized.len() == 0 -> return
         latest := [String: StoreEntry]{}
         loop entry in store_list_read_only(roots) {
-            key :: "{entry.reference}\t{entry.name}\t{entry.version}\t{entry.envelope.output_hash}"
-            replace :: if latest.get(key) == {
+            key: "{entry.reference}\t{entry.name}\t{entry.version}\t{entry.envelope.output_hash}"
+            replace: if latest.get(key) == {
                 .Val(current) -> entry.last_used_at > current.last_used_at || (entry.last_used_at == current.last_used_at && entry.id > current.id)
                 .None -> true
             }
@@ -40,24 +40,24 @@ struct EnvReadyStats {
         }
     }
 
-    fn cache_hit_percent(self) -> Int Never! {
+    cache_hit_percent: fn(self) -> Int Never! {
         if self.total == 0 -> return 100
         self.cache_hits * 100 /% self.total
     }
 
     // The distinct realized `(name, version)` pairs in order.
-    fn realized_set(self) -> [(name: String, version: String)] Never! {
+    realized_set: fn(self) -> [(name: String, version: String)] Never! {
         pairs := [(name: String, version: String)]{}
         loop selection in self.realized {
-            version :: if selection.version == "" -> cli_version_from_out(selection.name, selection.output_hash) ?? "" else -> selection.version
-            pair :: (name: selection.name, version: version)
+            version: if selection.version == "" -> cli_version_from_out(selection.name, selection.output_hash) ?? "" else -> selection.version
+            pair: (name: selection.name, version: version)
             if !pairs.contains(pair) -> &pairs.push(pair)
         }
         &pairs.sort_by((left: (name: String, version: String), right: (name: String, version: String)) -> (left.name <=> right.name).then(left.version <=> right.version))
         pairs
     }
 
-    fn realized_entries(self) -> [EnvironmentSelection] Never! {
+    realized_entries: fn(self) -> [EnvironmentSelection] Never! {
         entries := self.realized
         &entries.sort_by((left: EnvironmentSelection, right: EnvironmentSelection) -> left.key() <=> right.key())
         entries
@@ -67,8 +67,8 @@ struct EnvReadyStats {
 // Seal every provider record against the final project lock after all
 // package publications; only this post-pass writes the digest that later
 // online and offline replays use.
-fn cli_seal_project_producer_records(verification: &StoreVerification, roots: HangarRoots, project_root: String, ready_stats: EnvReadyStats) CLIError! -[FS, Env, Time]> {
-    lock_digest :: provider_project_lock_digest(Val(project_root)) ?? return Err(CLIError.Other(err.message()))
+cli_seal_project_producer_records: fn(verification: &StoreVerification, roots: HangarRoots, project_root: String, ready_stats: EnvReadyStats) CLIError! -[FS, Env, Time]> {
+    lock_digest: provider_project_lock_digest(Val(project_root)) ?? return Err(CLIError.Other(err.message()))
     if lock_digest == "" -> return
     references := [String]{}
     loop selection in ready_stats.realized {
@@ -76,8 +76,8 @@ fn cli_seal_project_producer_records(verification: &StoreVerification, roots: Ha
     }
     &references.sort()
     loop reference in references {
-        entry :: store_find_by_reference_read_only(roots, reference) ?? next
-        producer :: ProducerRecord.decode(entry.producer_record) ?? return Err(CLIError.Other("could not decode `{reference}` producer record: {err.message()}"))
+        entry: store_find_by_reference_read_only(roots, reference) ?? next
+        producer: ProducerRecord.decode(entry.producer_record) ?? return Err(CLIError.Other("could not decode `{reference}` producer record: {err.message()}"))
         if producer.provider != "nix" && producer.provider != "jetpackage" -> next
         store_refresh_lock_digest(&verification, roots, entry, lock_digest) ?? return Err(CLIError.Other("could not seal `{reference}` producer record: {err.message()}"))
     }
@@ -88,10 +88,10 @@ fn cli_seal_project_producer_records(verification: &StoreVerification, roots: Ha
 
 // Warm verified realizations by their original reference, taken over from
 // the receipt's list.
-fn cli_index_warm_realizations(^warm: [VerifiedRealization]) -> [String: [VerifiedRealization]] Never! {
+cli_index_warm_realizations: fn(^warm: [VerifiedRealization]) -> [String: [VerifiedRealization]] Never! {
     indexed := [String: [VerifiedRealization]]{}
     loop realized in ^warm {
-        reference :: realized.original_reference()
+        reference: realized.original_reference()
         bucket := &indexed.remove(reference) ?? [VerifiedRealization]{}
         &bucket.push(^realized)
         indexed[reference] = bucket
@@ -100,27 +100,27 @@ fn cli_index_warm_realizations(^warm: [VerifiedRealization]) -> [String: [Verifi
 }
 
 // Take the last warm realization recorded for `reference`.
-fn cli_take_warm_realization(warm: &[String: [VerifiedRealization]], reference: String) -> VerifiedRealization? Never! {
+cli_take_warm_realization: fn(warm: &[String: [VerifiedRealization]], reference: String) -> VerifiedRealization? Never! {
     bucket := &warm.remove(reference) ?? return None
-    realized :: &bucket.pop() ?? return None
+    realized: &bucket.pop() ?? return None
     if bucket.len() > 0 -> warm[reference] = bucket
     Val(realized)
 }
 
 // A native dev tool: the flake definition name, the command, and the
 // environment variable naming the admitted binary it projects.
-struct NativeDevTool {
+NativeDevTool: struct {
     definition: String
     command: String
     variable: String
 }
 
 // The target condition of a native output fact.
-enum NativeOutputPlatform {
+NativeOutputPlatform: enum {
     Any
     Linux
 
-    fn applies(self) -[Env]> Bool Never! {
+    applies: fn(self) -[Env]> Bool Never! {
         if self == {
             .Any -> true
             .Linux -> sys.name() == "linux"
@@ -130,14 +130,14 @@ enum NativeOutputPlatform {
 
 // A realized package output selected by the native shell contract: the
 // package, the relative output, the variable, and its target condition.
-struct NativeOutputFact {
+NativeOutputFact: struct {
     package: String
     relative: String
     variable: String
     platform: NativeOutputPlatform
 }
 
-CLI_NATIVE_OUTPUT_FACTS :: comptime { [NativeOutputFact]{
+CLI_NATIVE_OUTPUT_FACTS: comptime { [NativeOutputFact]{
     {package: "tzdata", relative: "share/zoneinfo", variable: "TZDIR", platform: NativeOutputPlatform.Any},
     {package: "vulkan-loader", relative: "lib", variable: "LD_LIBRARY_PATH", platform: NativeOutputPlatform.Linux},
     {package: "raylib", relative: "lib", variable: "LD_LIBRARY_PATH", platform: NativeOutputPlatform.Linux}
@@ -146,16 +146,16 @@ CLI_NATIVE_OUTPUT_FACTS :: comptime { [NativeOutputFact]{
 // The two repo dev tools project the admitted native binaries named by $JET
 // and $JETPACK (flake.nix `mkJetDevBin`), not realized packages, and get no
 // generated shell wrapper.
-CLI_NATIVE_DEV_TOOLS :: comptime { [NativeDevTool]{
+CLI_NATIVE_DEV_TOOLS: comptime { [NativeDevTool]{
     {definition: "jetDev", command: "jet", variable: "JET"},
     {definition: "jetpackDev", command: "jetpack", variable: "JETPACK"}
 } }
 
-enum NativeActivation {
+NativeActivation: enum {
     Disabled
 }
 
-enum NixShellScratch {
+NixShellScratch: enum {
     NotCreated
 }
 
@@ -163,7 +163,7 @@ enum NixShellScratch {
 // are only the child-process adapter; paths and markers stay typed until
 // then. Paths inside realized outputs are lease text the shell renders for
 // the child its leases are passed to.
-struct NativeEnvironmentProjection {
+NativeEnvironmentProjection: struct {
     project_root: String
     native_bin_dirs: [String]
     tzdir: LeaseText?
@@ -171,16 +171,16 @@ struct NativeEnvironmentProjection {
     activation: NativeActivation
     nix_shell_scratch: NixShellScratch
 
-    fn from_realized(project_root: String, realized: [(name: String, output: LeaseText)], dev_tools: [(command: String, binary: String)], inherited_loader_path: String?) -[Env]> NativeEnvironmentProjection Never! {
+    from_realized: fn(project_root: String, realized: [(name: String, output: LeaseText)], dev_tools: [(command: String, binary: String)], inherited_loader_path: String?) -[Env]> NativeEnvironmentProjection Never! {
         native_bin_dirs := [String]{}
         loop tool in dev_tools {
-            directory :: files.dirname(tool.binary)
+            directory: files.dirname(tool.binary)
             if !native_bin_dirs.contains(directory) -> &native_bin_dirs.push(directory)
         }
         tzdir := LeaseText?{None}
         loader_paths := [LeaseText]{}
         loop fact in CLI_NATIVE_OUTPUT_FACTS {
-            path :: cli_native_output_path(realized, fact) ?? next
+            path: cli_native_output_path(realized, fact) ?? next
             if fact.variable == {
                 "TZDIR" -> {
                     if tzdir == None -> tzdir = Val(path)
@@ -190,7 +190,7 @@ struct NativeEnvironmentProjection {
             }
         }
         if sys.name() == "linux" {
-            inherited :: inherited_loader_path ?? ""
+            inherited: inherited_loader_path ?? ""
             loop path in inherited.split(pkg_path_separator_for_os(sys.name())) {
                 if path != "" -> &loader_paths.push(LeaseText.plain(path))
             }
@@ -200,11 +200,11 @@ struct NativeEnvironmentProjection {
         NativeEnvironmentProjection{project_root, native_bin_dirs, tzdir, loader_paths, activation: NativeActivation.Disabled, nix_shell_scratch: NixShellScratch.NotCreated}
     }
 
-    fn bin_dirs(self) -> [String] Never! {
+    bin_dirs: fn(self) -> [String] Never! {
         self.native_bin_dirs
     }
 
-    fn env_vars(self) -[Env]> [String: String] Never! {
+    env_vars: fn(self) -[Env]> [String: String] Never! {
         vars := [String: String]{"JET_ROOT": self.project_root}
         if self.activation == {
             .Disabled -> vars[ENV_DISABLE_VAR] = "1"
@@ -216,7 +216,7 @@ struct NativeEnvironmentProjection {
     }
 
     // The variables naming paths inside realized outputs.
-    fn lease_vars(self) -[Env]> [String: LeaseText] Never! {
+    lease_vars: fn(self) -[Env]> [String: LeaseText] Never! {
         vars := [String: LeaseText]{}
         if self.tzdir == .Val(tzdir) -> vars["TZDIR"] = tzdir
         if sys.name() == "linux" && self.loader_paths.len() > 0 {
@@ -226,7 +226,7 @@ struct NativeEnvironmentProjection {
     }
 }
 
-fn cli_native_output_path(realized: [(name: String, output: LeaseText)], fact: NativeOutputFact) -[Env]> LeaseText? Never! {
+cli_native_output_path: fn(realized: [(name: String, output: LeaseText)], fact: NativeOutputFact) -[Env]> LeaseText? Never! {
     if !fact.platform.applies() -> return None
     loop pair in realized {
         if pair.name == fact.package -> return Val(pair.output.child(fact.relative))
@@ -236,17 +236,17 @@ fn cli_native_output_path(realized: [(name: String, output: LeaseText)], fact: N
 
 // The admitted dev tool binaries among `bound` (variable -> binary); an unset
 // or empty variable projects nothing.
-fn cli_native_dev_tool_paths(bound: [String: String]) -> [(command: String, binary: String)] Never! {
+cli_native_dev_tool_paths: fn(bound: [String: String]) -> [(command: String, binary: String)] Never! {
     tools := [(command: String, binary: String)]{}
     loop tool in CLI_NATIVE_DEV_TOOLS {
-        binary :: bound.get(tool.variable) ?? next
+        binary: bound.get(tool.variable) ?? next
         if binary != "" -> &tools.push((command: tool.command, binary: binary))
     }
     tools
 }
 
 // The dev tool variables as the host binds them.
-fn cli_native_dev_tool_bindings() -[Env]> [String: String] Never! {
+cli_native_dev_tool_bindings: fn() -[Env]> [String: String] Never! {
     bound := [String: String]{}
     loop tool in CLI_NATIVE_DEV_TOOLS {
         if sys.get(tool.variable) == .Val(binary) -> bound[tool.variable] = binary
@@ -256,33 +256,33 @@ fn cli_native_dev_tool_bindings() -[Env]> [String: String] Never! {
 
 // Native projection for the repository dev-shell contract, derived from
 // the project root, the admitted dev tools, and realized package outputs.
-fn cli_native_environment_projection(project_root: String, realized: [(name: String, output: LeaseText)], dev_tools: [(command: String, binary: String)], inherited_loader_path: String?) -[Env]> NativeEnvironmentProjection Never! {
+cli_native_environment_projection: fn(project_root: String, realized: [(name: String, output: LeaseText)], dev_tools: [(command: String, binary: String)], inherited_loader_path: String?) -[Env]> NativeEnvironmentProjection Never! {
     NativeEnvironmentProjection.from_realized(project_root, realized, dev_tools, inherited_loader_path)
 }
 
 // Realize every ref in `plan` and compose the shell env. A realization
 // failure is reported here and travels as `Reported(code)`.
-fn cli_compose_env(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: RunPlan) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> ShellEnv CLIError! {
+cli_compose_env: fn(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: RunPlan) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> ShellEnv CLIError! {
     cli_compose_env_scoped(&verification, theme, roots, flags, plan, RealizeScope.Project, false)
 }
 
 // A user tool installs into the user profile, so it is never reconciled
 // against the project the shell happens to stand in.
-fn cli_compose_env_scoped(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: RunPlan, scope: RealizeScope, confirm_download: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> ShellEnv CLIError! {
-    composed :: cli_compose_env_scoped_with_stats(&verification, theme, roots, flags, plan, scope, confirm_download)
+cli_compose_env_scoped: fn(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: RunPlan, scope: RealizeScope, confirm_download: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> ShellEnv CLIError! {
+    composed: cli_compose_env_scoped_with_stats(&verification, theme, roots, flags, plan, scope, confirm_download)
     Ok(^composed.env)
 }
 
-fn cli_compose_env_scoped_with_stats(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: RunPlan, scope: RealizeScope, confirm_download: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> (env: ShellEnv, stats: EnvReadyStats) CLIError! {
+cli_compose_env_scoped_with_stats: fn(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: RunPlan, scope: RealizeScope, confirm_download: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> (env: ShellEnv, stats: EnvReadyStats) CLIError! {
     cli_compose_env_scoped_with_warm(&verification, theme, roots, flags, plan, scope, confirm_download, None, true)
 }
 
 // Whether the warm realizations cover every ref and adapter of the plan.
-fn cli_warm_complete(warm: [String: [VerifiedRealization]], plan: RunPlan) -> Bool Never! {
+cli_warm_complete: fn(warm: [String: [VerifiedRealization]], plan: RunPlan) -> Bool Never! {
     required := [String: Int]{}
     loop spec in plan.refs -> required[spec.raw] = (required.get(spec.raw) ?? 0) + 1
     loop adapter in plan.adapters {
-        reference :: "adapt:{adapter.name}:{adapter.source}"
+        reference: "adapt:{adapter.name}:{adapter.source}"
         required[reference] = (required.get(reference) ?? 0) + 1
     }
     loop entry in required {
@@ -294,15 +294,15 @@ fn cli_warm_complete(warm: [String: [VerifiedRealization]], plan: RunPlan) -> Bo
 // The composer with optional warm realizations from a verified environment
 // receipt. Cold or partial project composition still collects selections
 // for the receipt and producer sealing.
-fn cli_compose_env_scoped_with_warm(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: RunPlan, scope: RealizeScope, confirm_download: Bool, ^warm: [VerifiedRealization]?, collect_stats: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> (env: ShellEnv, stats: EnvReadyStats) CLIError! {
-    warm_given :: warm != None
+cli_compose_env_scoped_with_warm: fn(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: RunPlan, scope: RealizeScope, confirm_download: Bool, ^warm: [VerifiedRealization]?, collect_stats: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> (env: ShellEnv, stats: EnvReadyStats) CLIError! {
+    warm_given: warm != None
     warm_pool := if ^warm == {
         .Val(list) -> cli_index_warm_realizations(^list)
         .None -> [String: [VerifiedRealization]]{}
     }
-    warm_complete :: warm_given && cli_warm_complete(warm_pool, plan)
-    project_scope :: scope == RealizeScope.Project
-    needs_stats :: collect_stats || (project_scope && !warm_complete)
+    warm_complete: warm_given && cli_warm_complete(warm_pool, plan)
+    project_scope: scope == RealizeScope.Project
+    needs_stats: collect_stats || (project_scope && !warm_complete)
     lock_diff := if project_scope && !warm_complete -> CLILockDiffGuard.new(theme, plan.project_root) else -> CLILockDiffGuard.inactive(theme)
     if confirm_download && !warm_complete {
         if cli_reject_unprompted_acquisition(&verification, theme, roots, flags, plan, scope) == {
@@ -344,30 +344,30 @@ fn cli_compose_env_scoped_with_warm(verification: &StoreVerification, theme: The
     unavailable := false
     cache_leases := [CacheLease]{}
     ready_stats := EnvReadyStats.empty()
-    name_w :: if warm_complete -> 0 else -> cli_name_column_width(plan.refs)
+    name_w: if warm_complete -> 0 else -> cli_name_column_width(plan.refs)
     // Multi-package realization gets one pinned aggregate on a TTY and one
     // settled row per package; plain output keeps only the settled rows.
-    total_steps :: plan.refs.len() + plan.adapters.len()
-    live_mode :: total_steps > 1 && !warm_complete
-    live_tty :: live_mode && theme.live_enabled()
+    total_steps: plan.refs.len() + plan.adapters.len()
+    live_mode: total_steps > 1 && !warm_complete
+    live_tty: live_mode && theme.live_enabled()
     live := theme.live_region()
     completed_steps := 0
-    phase_timing :: sys.get("JETPACK_TIMING") != None
-    compose_started :: time.start()
+    phase_timing: sys.get("JETPACK_TIMING") != None
+    compose_started: time.start()
     if phase_timing -> term.eprint("TIMING compose-preamble: {time.elapsed(compose_started)}")
     loop spec in plan.refs {
         if live_tty -> &live.set_aggregate_status("Resolving", completed_steps, total_steps)
-        style :: if live_mode -> RowStyle.Silent else -> RowStyle.Ready
-        warm_hit :: cli_take_warm_realization(&warm_pool, spec.raw)
-        step_outcome :: if warm_hit == {
+        style: if live_mode -> RowStyle.Silent else -> RowStyle.Ready
+        warm_hit: cli_take_warm_realization(&warm_pool, spec.raw)
+        step_outcome: if warm_hit == {
             .Val(realized) -> {
-                parts :: ^realized.into_parts()
+                parts: ^realized.into_parts()
                 RefOutcome.Realized{entry: parts.entry, state: parts.source_state, line: "", lease: ^parts.lease}
             }
             .None -> {
-                step_started :: time.start()
+                step_started: time.start()
                 slot := if live_tty -> Val(live) else -> None
-                outcome :: cli_realize_ref_outcome(&verification, theme, roots, flags, plan.table, spec, name_w, style, &slot, scope)
+                outcome: cli_realize_ref_outcome(&verification, theme, roots, flags, plan.table, spec, name_w, style, &slot, scope)
                 if slot == .Val(updated) -> live = updated
                 if phase_timing -> term.eprint("TIMING step {spec.package}: {time.elapsed(step_started)}")
                 outcome
@@ -380,7 +380,7 @@ fn cli_compose_env_scoped_with_warm(verification: &StoreVerification, theme: The
                 if needs_stats -> &ready_stats.record(entry, state)
                 // The child names the output below the descriptor its lease
                 // passes; this process reads metadata through the held handle.
-                leased_output :: lease.child_path(entry.out) ?? {
+                leased_output: lease.child_path(entry.out) ?? {
                     &live.clear()
                     theme.error_coded("E1335", "the realized package output could not be confined to its executable lease", "{err}", "re-realize the package so Jetpack can hand only its verified lease to the child")
                     failed = true
@@ -388,8 +388,8 @@ fn cli_compose_env_scoped_with_warm(verification: &StoreVerification, theme: The
                 }
                 invalid_metadata := String?{None}
                 loop meta in CLI_PROVIDER_METADATA_FILES {
-                    raw :: lease.read_output(meta.file) ?? next
-                    value :: raw.trim()
+                    raw: lease.read_output(meta.file) ?? next
+                    value: raw.trim()
                     if value == "" -> next
                     if cli_resolve_provider_paths(leased_output, meta.file, value) == {
                         .Val(resolved) -> {
@@ -419,14 +419,14 @@ fn cli_compose_env_scoped_with_warm(verification: &StoreVerification, theme: The
         }
     }
     loop index in 0..<plan.adapters.len() {
-        adapter :: plan.adapters[index]
+        adapter: plan.adapters[index]
         &live.clear()
         if total_steps > 1 && !warm_complete -> theme.progress_chain("Adapt", plan.refs.len() + index + 1, total_steps, adapter.name, "adapter")
-        warm_reference :: "adapt:{adapter.name}:{adapter.source}"
-        warm_hit :: cli_take_warm_realization(&warm_pool, warm_reference)
-        adapter_outcome :: if warm_hit == {
+        warm_reference: "adapt:{adapter.name}:{adapter.source}"
+        warm_hit: cli_take_warm_realization(&warm_pool, warm_reference)
+        adapter_outcome: if warm_hit == {
             .Val(realized) -> {
-                parts :: ^realized.into_parts()
+                parts: ^realized.into_parts()
                 Val((entry: parts.entry, state: parts.source_state, lease: ^parts.lease))
             }
             .None -> cli_realize_adapter(&verification, theme, roots, flags, adapter, plan.table, true)
@@ -450,7 +450,7 @@ fn cli_compose_env_scoped_with_warm(verification: &StoreVerification, theme: The
     missing_language_tools := [String]{}
     loop pack in plan.environment.language_packs {
         loop tool in pack.required_tools {
-            command :: pack.commands.get(tool) ?? next
+            command: pack.commands.get(tool) ?? next
             present := false
             loop dir in bin_dirs {
                 if files.is_file(files.join(dir, command)) -> present = true
@@ -466,7 +466,7 @@ fn cli_compose_env_scoped_with_warm(verification: &StoreVerification, theme: The
         theme.error_coded("E1333", "a language pack tool is missing from the realized environment", "missing required language tools: {missing_language_tools.join(", ")}", "realize the pack's declared packages again, or remove the language selection until its tools are available")
         return Err(CLIError.Reported(EXIT_USAGE))
     }
-    native_projection :: if project_scope -> Val(cli_native_environment_projection(plan.project_root, realized_outputs, cli_native_dev_tool_paths(cli_native_dev_tool_bindings()), sys.get("LD_LIBRARY_PATH"))) else -> None
+    native_projection: if project_scope -> Val(cli_native_environment_projection(plan.project_root, realized_outputs, cli_native_dev_tool_paths(cli_native_dev_tool_bindings()), sys.get("LD_LIBRARY_PATH"))) else -> None
     if native_projection == .Val(projection) {
         loop dir in projection.bin_dirs() -> &bin_dirs.push(dir)
     }
@@ -482,7 +482,7 @@ fn cli_compose_env_scoped_with_warm(verification: &StoreVerification, theme: The
         loop entry in pack.variables -> composed_vars[entry.key] = entry.value
     }
     loop dotenv in plan.environment.lifecycle.dotenv {
-        values :: cli_read_dotenv_snapshot(plan.project_root, dotenv.file, dotenv.allow) ?? {
+        values: cli_read_dotenv_snapshot(plan.project_root, dotenv.file, dotenv.allow) ?? {
             &live.clear()
             theme.error("couldn't load dotenv file", "{dotenv.file}: {err.message()}", "fix the dotenv path and keep each assignment in KEY=value form.")
             return Err(CLIError.Reported(EXIT_USAGE))
@@ -497,7 +497,7 @@ fn cli_compose_env_scoped_with_warm(verification: &StoreVerification, theme: The
                 return Err(CLIError.Reported(EXIT_USAGE))
             }
         }
-        hooks :: env_hook_git_hooks_environment(plan.project_root, relative) ?? {
+        hooks: env_hook_git_hooks_environment(plan.project_root, relative) ?? {
             &live.clear()
             theme.error_coded("E1333", "the environment Git hook path is not usable", err.message(), "create an in-project hook directory and set `git_hooks_path` to its project-relative path")
             return Err(CLIError.Reported(EXIT_USAGE))
@@ -509,7 +509,7 @@ fn cli_compose_env_scoped_with_warm(verification: &StoreVerification, theme: The
     lease_vars := [String: LeaseText]{}
     loop name in provider_var_order {
         if composed_vars.has_key(name) -> next
-        values :: provider_vars.get(name) ?? next
+        values: provider_vars.get(name) ?? next
         lease_vars[name] = if name == {
             "LUA_PATH" | "LUA_CPATH" -> LeaseText.join(values, ";").append(";;")
             "GEM_HOME" -> values[0]
@@ -541,7 +541,7 @@ fn cli_compose_env_scoped_with_warm(verification: &StoreVerification, theme: The
     // Warm reuse already carries the exact entries selected under the Hangar
     // lock; cold realizations refresh selections after publication.
     if !warm_complete -> &ready_stats.canonicalize(roots)
-    env :: ShellEnv{
+    env: ShellEnv{
         bin_dirs: bin_dirs,
         vars: composed_vars,
         unset_vars: plan.environment.lifecycle.unset,
@@ -556,12 +556,12 @@ fn cli_compose_env_scoped_with_warm(verification: &StoreVerification, theme: The
 }
 
 // One provider metadata file and the variable it feeds.
-struct ProviderMetadataFile {
+ProviderMetadataFile: struct {
     file: String
     variable: String
 }
 
-CLI_PROVIDER_METADATA_FILES :: comptime { [ProviderMetadataFile]{
+CLI_PROVIDER_METADATA_FILES: comptime { [ProviderMetadataFile]{
     {file: "lua-path", variable: "LUA_PATH"},
     {file: "lua-cpath", variable: "LUA_CPATH"},
     {file: "gem-home", variable: "GEM_HOME"},
@@ -574,12 +574,12 @@ CLI_PROVIDER_METADATA_FILES :: comptime { [ProviderMetadataFile]{
 // A piped `jetpack env`/`use` must not start realization without an explicit
 // `-y`. Existing Hangar entries pass so fully cached environments stay
 // silent; every missing package is refused before acquisition.
-fn cli_reject_unprompted_acquisition(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: RunPlan, scope: RealizeScope) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> DownloadPlan CLIError! {
+cli_reject_unprompted_acquisition: fn(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: RunPlan, scope: RealizeScope) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> DownloadPlan CLIError! {
     specs := [RefSpec]{}
     loop spec in plan.refs {
         if provider_requires_acquisition(spec, plan.table, flags.offline, roots.hangar_dir()) -> &specs.push(spec)
     }
-    label :: if scope == {
+    label: if scope == {
         .Project -> if plan.environment.active_environment == {
             .Val(name) -> "env.{name}"
             .None -> "env"
@@ -587,16 +587,16 @@ fn cli_reject_unprompted_acquisition(verification: &StoreVerification, theme: Th
         .Use -> "use"
         .UserProfile -> "tool"
     }
-    planning :: specs.len() > 0 || plan.adapters.len() > 0
-    planning_live :: planning && theme.live_enabled()
+    planning: specs.len() > 0 || plan.adapters.len() > 0
+    planning_live: planning && theme.live_enabled()
     live := theme.live_region()
     if {
         planning_live -> &live.set_aggregate_status("Planning", 0, specs.len() + plan.adapters.len())
         planning -> theme.status("Resolving {label} package plan...")
         else -> {}
     }
-    progress :: if planning_live -> Val(live.progress_handle()) else -> None
-    planned :: cli_plan_downloads(&verification, theme, roots, flags, plan.table, specs, scope, progress) ?? {
+    progress: if planning_live -> Val(live.progress_handle()) else -> None
+    planned: cli_plan_downloads(&verification, theme, roots, flags, plan.table, specs, scope, progress) ?? {
         &live.clear()
         return Err(err)
     }
@@ -612,14 +612,14 @@ fn cli_reject_unprompted_acquisition(verification: &StoreVerification, theme: Th
 
 // Every integration fact must still be executable: disclosed tasks keep their
 // packages, secrets, providers, grants, and host checks.
-fn cli_validate_integration_facts(plan: RunPlan) CLIError! -[Env]> {
-    facts :: plan.environment.integration_facts
+cli_validate_integration_facts: fn(plan: RunPlan) CLIError! -[Env]> {
+    facts: plan.environment.integration_facts
     if facts.validate() == {
         .Err(error) -> return Err(CLIError.InvalidData(error.message))
         .Ok(_) -> {}
     }
-    os :: if sys.name() == "macos" -> "darwin" else -> sys.name()
-    target :: sys.get("JET_TARGET") ?? "{sys.arch()}-{os}"
+    os: if sys.name() == "macos" -> "darwin" else -> sys.name()
+    target: sys.get("JET_TARGET") ?? "{sys.arch()}-{os}"
     loop fact in facts.task_facts {
         if !facts.tasks.contains(fact.name) -> return Err(CLIError.InvalidData("integration task `{fact.name}` is not disclosed by its fact projection"))
         loop package in fact.packages {
@@ -630,7 +630,7 @@ fn cli_validate_integration_facts(plan: RunPlan) CLIError! -[Env]> {
             if !kept -> return Err(CLIError.InvalidData("integration task `{fact.name}` lost package `{package}` before realization"))
         }
         loop secret in fact.secrets -> cli_validate_task_secret_allowlist(fact.name, secret, plan.secrets)
-        expected_provider :: if fact.integration == {
+        expected_provider: if fact.integration == {
             .Android | .Apple | .Editor -> "nixpkgs"
             .Certificates | .Vault -> "vault"
             .CloudCredentials -> "credential-store"
@@ -665,17 +665,17 @@ fn cli_validate_integration_facts(plan: RunPlan) CLIError! -[Env]> {
     }
 }
 
-fn cli_validate_task_secret_allowlist(task_name: String, secret: String, declared: [SecretSpec]) CLIError! {
+cli_validate_task_secret_allowlist: fn(task_name: String, secret: String, declared: [SecretSpec]) CLIError! {
     loop spec in declared {
         if spec.name == secret -> return
     }
     Err(CLIError.InvalidData("integration task `{task_name}` lost secret `{secret}` before activation"))
 }
 
-fn cli_validate_integration_host_check(check: String, target: String) CLIError! {
+cli_validate_integration_host_check: fn(check: String, target: String) CLIError! {
     if !check.starts_with("target:") -> return
-    expected :: check.removeprefix("target:")
-    lowered :: target.to_lower()
+    expected: check.removeprefix("target:")
+    lowered: target.to_lower()
     loop candidate in expected.split("-or-") {
         if lowered.contains(candidate.to_lower()) -> return
     }
@@ -683,9 +683,9 @@ fn cli_validate_integration_host_check(check: String, target: String) CLIError! 
 }
 
 // A checked dotenv snapshot, narrowed to `allow` when it names keys.
-fn cli_read_dotenv_snapshot(root: String, relative: String, allow: [String]) -[FS, Env]> [String: String] CLIError! {
-    bytes :: envmodel_checked_dotenv_snapshot(root, relative) ?? return Err(CLIError.InvalidData(err.message))
-    values :: cli_read_dotenv(bytes)
+cli_read_dotenv_snapshot: fn(root: String, relative: String, allow: [String]) -[FS, Env]> [String: String] CLIError! {
+    bytes: envmodel_checked_dotenv_snapshot(root, relative) ?? return Err(CLIError.InvalidData(err.message))
+    values: cli_read_dotenv(bytes)
     if allow.len() == 0 -> return Ok(values)
     kept := [String: String]{}
     loop entry in values {
@@ -696,16 +696,16 @@ fn cli_read_dotenv_snapshot(root: String, relative: String, allow: [String]) -[F
 
 // `KEY=value` lines; `#` comments and blank lines are skipped, a matched
 // pair of surrounding quotes is removed.
-fn cli_read_dotenv(bytes: [U8]) -> [String: String] CLIError! {
-    text :: String.from_bytes(bytes) ?? return Err(CLIError.InvalidData("invalid utf-8 sequence"))
+cli_read_dotenv: fn(bytes: [U8]) -> [String: String] CLIError! {
+    text: String.from_bytes(bytes) ?? return Err(CLIError.InvalidData("invalid utf-8 sequence"))
     values := [String: String]{}
-    lines :: text.split("\n").to_list()
+    lines: text.split("\n").to_list()
     loop index in 0..<lines.len() {
         // Rust `str::lines` drops a trailing `\r`; `trim` removes it too.
-        line :: lines[index].trim()
+        line: lines[index].trim()
         if line == "" || line.starts_with("#") -> next
-        pair :: line.split_once("=") ?? return Err(CLIError.InvalidData("line {index + 1} has no '='"))
-        name :: pair.before.trim()
+        pair: line.split_once("=") ?? return Err(CLIError.InvalidData("line {index + 1} has no '='"))
+        name: pair.before.trim()
         if !cli_dotenv_valid_name(name) -> return Err(CLIError.InvalidData("line {index + 1} has an invalid variable name"))
         value := pair.after.trim()
         if value.len() >= 2 && ((value.starts_with("\"") && value.ends_with("\"")) || (value.starts_with("'") && value.ends_with("'"))) {
@@ -717,13 +717,13 @@ fn cli_read_dotenv(bytes: [U8]) -> [String: String] CLIError! {
 }
 
 // `[A-Za-z_][A-Za-z0-9_]*`.
-fn cli_dotenv_valid_name(name: String) -> Bool Never! {
-    raw :: name.bytes()
+cli_dotenv_valid_name: fn(name: String) -> Bool Never! {
+    raw: name.bytes()
     if raw.len() == 0 -> return false
     loop index in 0..<raw.len() {
-        code :: Int.from_u8(raw[index])
-        letter :: (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95
-        digit :: code >= 48 && code <= 57
+        code: Int.from_u8(raw[index])
+        letter: (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95
+        digit: code >= 48 && code <= 57
         if !(letter || (index > 0 && digit)) -> return false
     }
     true
@@ -731,16 +731,16 @@ fn cli_dotenv_valid_name(name: String) -> Bool Never! {
 
 // Relative provider metadata paths resolve inside the realized output;
 // absolute legacy paths stay as written, and a parent escape is refused.
-fn cli_resolve_provider_paths(entry_out: LeaseText, file: String, value: String) -[Env]> LeaseText? Never! {
+cli_resolve_provider_paths: fn(entry_out: LeaseText, file: String, value: String) -[Env]> LeaseText? Never! {
     if !cli_is_provider_metadata_file(file) -> return Val(LeaseText.plain(value))
-    separator :: if file == "lua-path" || file == "lua-cpath" -> ";" else -> pkg_path_separator_for_os(sys.name())
+    separator: if file == "lua-path" || file == "lua-cpath" -> ";" else -> pkg_path_separator_for_os(sys.name())
     resolved := [LeaseText]{}
     loop path in value.split(separator) {
         if files.is_absolute(path) {
             &resolved.push(LeaseText.plain(path))
             next
         }
-        parts :: path.split("/").to_list()
+        parts: path.split("/").to_list()
         components := 0
         loop part in parts {
             if part == ".." -> return None
@@ -752,7 +752,7 @@ fn cli_resolve_provider_paths(entry_out: LeaseText, file: String, value: String)
     Val(LeaseText.join(resolved, separator))
 }
 
-fn cli_is_provider_metadata_file(file: String) -> Bool Never! {
+cli_is_provider_metadata_file: fn(file: String) -> Bool Never! {
     loop meta in CLI_PROVIDER_METADATA_FILES {
         if meta.file == file -> return true
     }
@@ -761,7 +761,7 @@ fn cli_is_provider_metadata_file(file: String) -> Bool Never! {
 
 // The ledger's name-column width (at least 8, so one short name does not
 // collapse the table).
-fn cli_name_column_width(refs: [RefSpec]) -> Int Never! {
+cli_name_column_width: fn(refs: [RefSpec]) -> Int Never! {
     width := 8
     loop spec in refs {
         if spec.package.len() > width -> width = spec.package.len()
@@ -771,7 +771,7 @@ fn cli_name_column_width(refs: [RefSpec]) -> Int Never! {
 
 // The `config sandbox require` policy refuses composition when no native
 // sandbox is available.
-fn cli_enforce_required_sandbox_policy(theme: Theme, json_output: Bool) CLIError! -[IO, FS, Env, Exec, Time.Wait]> {
+cli_enforce_required_sandbox_policy: fn(theme: Theme, json_output: Bool) CLIError! -[IO, FS, Env, Exec, Time.Wait]> {
     if env_read_sandbox_policy() != SandboxPolicy.Require -> return
     if env_enforce_sandbox_policy(theme, json_output) == .Val(code) -> return Err(CLIError.Reported(code))
 }

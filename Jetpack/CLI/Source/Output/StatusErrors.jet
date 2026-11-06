@@ -2,10 +2,10 @@
 // `--json`, as one failed `jet.status/v1` line carrying the `jet.report/v3`
 // finding (the Rust `why_error` / `explain_error` shape).
 
-fn cli_status_error(theme: Theme, json_output: Bool, action: String, code: String, what: String, why: String, fix: String) -[IO, FS, Env, Time.Wait]> Int Never! {
+cli_status_error: fn(theme: Theme, json_output: Bool, action: String, code: String, what: String, why: String, fix: String) -[IO, FS, Env, Time.Wait]> Int Never! {
     if json_output {
-        report :: cli_diagnostic_report(code, what, why, fix)
-        line :: StatusEnvelope.new(action, false).with_reports([ReportEnvelope]{report}).json_line() ?? return cli_status_encoding_error(err)
+        report: cli_diagnostic_report(code, what, why, fix)
+        line: StatusEnvelope.new(action, false).with_reports([ReportEnvelope]{report}).json_line() ?? return cli_status_encoding_error(err)
         stdout_handle := term.stdout()
         &stdout_handle.write(line).drop("status output is best-effort")
     } else {
@@ -15,7 +15,7 @@ fn cli_status_error(theme: Theme, json_output: Bool, action: String, code: Strin
 }
 
 // A status envelope's wire encoder failed before any stdout was written.
-fn cli_status_encoding_error(error: ReportError) -[IO]> Int Never! {
+cli_status_encoding_error: fn(error: ReportError) -[IO]> Int Never! {
     eprint("status JSON: {error.message}")
     EXIT_USAGE
 }

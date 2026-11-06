@@ -1,26 +1,26 @@
-package {
+package: {
     name: "context_task_inherit"
     authority: { allow: [IO, Time, Time.Wait] }
 }
 
-use time :: core.time
+use time: core.time
 
 // A task carries the context it was spawned under, even after the spawning
 // `#Context` block ends; tasks spawned before or after the block do not.
 
-fn nap(value: Int) -> Int {
+nap: fn(value: Int) -> Int {
     time.sleep(1ms)
     value
 }
 
-fn spawn_expired() -> Task<Int> {
+spawn_expired: fn() -> Task<Int> {
     #Context(deadline: 0) {
         return task nap(0)
     }
     task nap(-1)
 }
 
-fn report(name: String, ^handle: Task<Int>) {
+report: fn(name: String, ^handle: Task<Int>) {
     if ^handle.join() == {
         .Ok(value) -> { print("{name}: finished {value}") }
         .Err(error) -> {
@@ -33,10 +33,10 @@ fn report(name: String, ^handle: Task<Int>) {
     }
 }
 
-fn run() {
-    before :: task nap(1)
-    inside :: spawn_expired()
-    after :: task nap(2)
+run: fn() {
+    before: task nap(1)
+    inside: spawn_expired()
+    after: task nap(2)
     report("inside", ^inside)
     report("before", ^before)
     report("after", ^after)

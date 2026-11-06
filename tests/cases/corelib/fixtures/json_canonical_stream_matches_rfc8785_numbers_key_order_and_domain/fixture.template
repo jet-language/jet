@@ -1,12 +1,12 @@
 
 use {
-    encoding :: core.encoding
-    json :: core.encoding.json
-    files :: core.files
+    encoding: core.encoding
+    json: core.encoding.json
+    files: core.files
 }
 
-fn run() {
-    output :: files.create("{work}/canonical.json") ?? panic("create canonical")
+run: fn() {
+    output: files.create("{work}/canonical.json") ?? panic("create canonical")
     writer := json.writer(^output, encoding.EncodingLimits.safe(), true) ?? panic("writer canonical")
     &writer.write(encoding.DataEvent.ObjectStart) ?? panic("object")
     &writer.write(encoding.DataEvent.Key("𐀀")) ?? panic("astral key")
@@ -22,29 +22,29 @@ fn run() {
     &writer.write(encoding.DataEvent.ObjectEnd) ?? panic("object end")
     &writer.finish() ?? panic("finish")
 
-    int_output :: files.create("{work}/int.json") ?? panic("create int")
+    int_output: files.create("{work}/int.json") ?? panic("create int")
     int_writer := json.writer(^int_output, encoding.EncodingLimits.safe(), true) ?? panic("int writer")
     if &int_writer.write(encoding.DataEvent.Int(9007199254740993)) == {
         .Ok(_) -> print("int accepted")
         .Err(error) -> print(error.reason)
     }
 
-    bytes_output :: files.create("{work}/bytes.json") ?? panic("create bytes")
+    bytes_output: files.create("{work}/bytes.json") ?? panic("create bytes")
     bytes_writer := json.writer(^bytes_output, encoding.EncodingLimits.safe(), true) ?? panic("bytes writer")
-    bytes :: [U8]{ U8.from_int(1) ?? panic("byte") }
+    bytes: [U8]{ U8.from_int(1) ?? panic("byte") }
     if &bytes_writer.write(encoding.DataEvent.Bytes(bytes)) == {
         .Ok(_) -> print("bytes accepted")
         .Err(error) -> print(error.reason)
     }
 
-    nonfinite_output :: files.create("{work}/nonfinite.json") ?? panic("create nonfinite")
+    nonfinite_output: files.create("{work}/nonfinite.json") ?? panic("create nonfinite")
     nonfinite_writer := json.writer(^nonfinite_output, encoding.EncodingLimits.safe(), true) ?? panic("nonfinite writer")
     if &nonfinite_writer.write(encoding.DataEvent.Float(0.0 / 0.0)) == {
         .Ok(_) -> print("nonfinite accepted")
         .Err(error) -> print(error.reason)
     }
 
-    duplicate_output :: files.create("{work}/duplicate.json") ?? panic("create duplicate")
+    duplicate_output: files.create("{work}/duplicate.json") ?? panic("create duplicate")
     duplicate_writer := json.writer(^duplicate_output, encoding.EncodingLimits.safe(), true) ?? panic("duplicate writer")
     &duplicate_writer.write(encoding.DataEvent.ObjectStart) ?? panic("duplicate object")
     &duplicate_writer.write(encoding.DataEvent.Key("same")) ?? panic("first key")

@@ -1,18 +1,18 @@
 
 #Error
-enum PatternError { Rejected }
+PatternError: enum { Rejected }
 
-Pattern :: distinct String
+Pattern: distinct String
 
 impl Pattern.CheckedText {
-    type Error = PatternError
+    Error: PatternError
 
-    fn check(text: String) PatternError! -[]> {
+    check: fn(text: String) PatternError! -[]> {
         if text == "bad" { return Err(PatternError.Rejected) }
         return Ok()
     }
 
-    fn encode_hole<T: Printable>(value: T) -[]> String {
+    encode_hole: fn<T: Printable>(value: T) -[]> String {
         return ""
     }
 }
@@ -21,16 +21,16 @@ impl PatternError -> Err {
     return Err("pattern rejected", code: "E_PATTERN", cause: Err("invalid shape"))
 }
 
-fn parse(text: String) -[]> Pattern {
-    pattern :: Pattern.from(text)
+parse: fn(text: String) -[]> Pattern {
+    pattern: Pattern.from(text)
     return Ok(pattern)
 }
 
-fn load(text: String) -[]> Pattern {
-    pattern :: parse(text)?("loading pattern")
+load: fn(text: String) -[]> Pattern {
+    pattern: parse(text)?("loading pattern")
     return Ok(pattern)
 }
 
-fn run() {
-    _ :: load("bad")
+run: fn() {
+    _: load("bad")
 }

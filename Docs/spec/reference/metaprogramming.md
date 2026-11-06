@@ -17,12 +17,12 @@ become part of a program. The boundary is visible in source:
 
 - `comptime { ... }` is the explicit shared-preparation block (D-PREP-SURFACE2=A).
   Its body runs while building and emits no runtime code. In the binding form
-  `name :: comptime { ... }`, the final expression supplies the prepared value.
+  `name: comptime { ... }`, the final expression supplies the prepared value.
   That value retains its checked initializer type: numeric widths, empty-list
   element types, optional elements, and function return types are not inferred
   again from the evaluator's erased value representation. The retired
   `@ { ... }` spelling teaches `comptime { ... }` (E0388).
-- `@name :: expression` binds a value evaluated during compilation.
+- `@name: expression` binds a value evaluated during compilation.
 - Compiler facts carry `$`: members of their subject such as `T.$fields`, or
   the roots `$build`, `$package`, `$phase` and `$program`. They do not replace
   preparation or compile-time bindings.
@@ -37,14 +37,14 @@ checks `@cells` while compiling and then uses the resulting value in an
 ordinary runtime expression:
 
 ```jet
-@WIDTH :: 12
-@HEIGHT :: 5
+@WIDTH: 12
+@HEIGHT: 5
 
-fn area(width: Int, height: Int) -> Int { width * height }
+area: fn(width: Int, height: Int) -> Int { width * height }
 
-fn run() {
+run: fn() {
     comptime {
-        @cells :: area(@WIDTH, @HEIGHT)
+        @cells: area(@WIDTH, @HEIGHT)
         if @cells > 100 -> panic("the grid is too large")
     }
     print("cells: {@cells}")
@@ -59,7 +59,7 @@ introduce a second type-position syntax or a runtime reflection object.
 Pure expressions are evaluated without a host authority grant. The examples
 cover literal and arithmetic constants, Core math, parsing, and collection
 construction. [`comptime_table.jet`](../../../Examples/features/comptime/comptime_table.jet)
-computes a list once and prints the baked value from `fn run()`.
+computes a list once and prints the baked value from `run: fn()`.
 
 `@if` performs compile-time selection. The selected arm is type-checked and
 emitted; the other arm is name-resolved so misspelled names are still found.
@@ -72,7 +72,7 @@ uses it to create methods from `T.$fields`, to emit an `impl` for each type,
 and to create measured test declarations from `CASES`.
 
 Inside a template the fact sigil also splices a template binding
-(D-NAME-SPLICE1=B). `fn $method(self)` and `impl $type_name` name a
+(D-NAME-SPLICE1=B). `$method: fn(self)` and `impl $type_name` name a
 declaration from the binding's text, `self.$field` reads the member a loop
 value names, `.$left` matches the variant it names, and `{$count}` or a bare
 `$count` reads the binding's build-time value. A `$` word that names no
@@ -106,12 +106,12 @@ compile-time expression. A compile-time ambient read needs both the source
 gate and the command-line grant:
 
 ```jet
-use fs :: core.files
+use fs: core.files
 
-fn run() {
+run: fn() {
     comptime {
         #Impure("read an explicitly approved ambient input") {
-            @CONFIG :: fs.read("config.txt")
+            @CONFIG: fs.read("config.txt")
         }
     }
     print(@CONFIG)
@@ -130,7 +130,7 @@ the [syntax registry](../../../Compiler/JetFoundation/Data/Syntax/).
 
 ## Build entries and typed generation
 
-A package may expose an ordinary `fn build` that takes `Build` and
+A package may expose an ordinary `build: fn` that takes `Build` and
 returns a `BuildPlan`. It inspects typed build facts, registers typed graph
 nodes, and returns the plan; it does not become a second configuration
 language. `Build` exposes typed graph operations: `b.add_executable`,
@@ -145,7 +145,7 @@ The checked example in [`distinct_reflect.jet`](../../../Examples/features/compt
 uses the current return-arrow form:
 
 ```jet
-fn build(b: Build) {
+build: fn(b: Build) {
     loop info in b.program.types() {
         if {
             info.name == "CustomerID" -> {
@@ -161,7 +161,7 @@ fn build(b: Build) {
             else -> { next }
         }
     }
-    app :: b.add_executable("distinct_reflect", ["distinct_reflect.jet"], [])
+    app: b.add_executable("distinct_reflect", ["distinct_reflect.jet"], [])
     b.default(app)
 }
 ```
@@ -197,17 +197,17 @@ fact reads with `T.reflect()`. [`reflect-value.jet`](../../../Examples/features/
 shows the runtime floor:
 
 ```jet
-use reflect :: core.reflect
+use reflect: core.reflect
 
-struct Point {
+Point: struct {
     x: Int(0..10)
     y: Int
     level: Int(0..10)
 }
 
-fn run() {
-    point :: Point{x: 3, y: 4, level: 2}
-    value :: reflect.of(point)
+run: fn() {
+    point: Point{x: 3, y: 4, level: 2}
+    value: reflect.of(point)
     print(value.type_name())
     print(value.path())
     print(value.display())

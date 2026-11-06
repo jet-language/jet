@@ -8,25 +8,25 @@
 
 #UnitFamily(Length, dimension, base: meter) { meter }
 
-fn subtotal(price: Usd, qty: Int) -> Usd { Usd.from_float(price.raw() * Float.from_int(qty)) }
+subtotal: fn(price: Usd, qty: Int) -> Usd { Usd.from_float(price.raw() * Float.from_int(qty)) }
 
-fn scaled(value: Meter, factor: Int) -> Meter { value * factor }
+scaled: fn(value: Meter, factor: Int) -> Meter { value * factor }
 
-fn run() {
-    unit :: Usd.from_float(9.99)
-    total :: subtotal(unit, 3)
+run: fn() {
+    unit: Usd.from_float(9.99)
+    total: subtotal(unit, 3)
     print("total {(total.raw())}")
     // Same-unit arithmetic stays in the unit.
-    tax :: Usd.from_float(2.5)
-    grand :: total + tax
+    tax: Usd.from_float(2.5)
+    grand: total + tax
     print("grand {(grand.raw())}")
     // A different family member is a different type.
-    budget :: Eur.from_float(20.0)
+    budget: Eur.from_float(20.0)
     print("budget {(budget.raw())}")
     // `.raw()` drops back to the base Float.
-    bare :: grand.raw()
+    bare: grand.raw()
     print("bare {(bare)}")
-    distance :: 3meter
+    distance: 3meter
     print("scaled {(scaled(distance, 2).raw())}")
 }
 // --- expected output --------------------------------------------------

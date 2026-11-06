@@ -112,7 +112,7 @@ test('startup filesystem cell reads matching immutable trial evidence and reject
   try {
     const inputRoot = path.join(root, 'inputs');
     fs.mkdirSync(inputRoot);
-    fs.writeFileSync(path.join(inputRoot, entry), 'fn run() {}');
+    fs.writeFileSync(path.join(inputRoot, entry), 'run: fn() {}');
     fs.writeFileSync(path.join(inputRoot, 'package.jet'), 'name: "startup_fixture"');
     const source_sha256 = startupInputHash(inputRoot);
     fs.writeFileSync(path.join(root, 'pair.json'), JSON.stringify({ schema: 'jet.native-host-shape-pair.v1', source_sha256, entry, machine: { cpu: 'fixture' }, build_profile: 'same-profile' }));
@@ -156,7 +156,7 @@ test('startup filesystem cell reads matching immutable trial evidence and reject
     fs.writeFileSync(invocation, JSON.stringify({ source_root: inputRoot, source_sha256: 'd'.repeat(64) }));
     assert.throws(() => compareStartupDirectory(root), /actual matched input snapshot/);
     fs.writeFileSync(invocation, originalInvocation);
-    fs.writeFileSync(path.join(inputRoot, entry), 'fn run() { print("different"); }');
+    fs.writeFileSync(path.join(inputRoot, entry), 'run: fn() { print("different"); }');
     assert.throws(() => compareStartupDirectory(root), /input snapshot differs/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

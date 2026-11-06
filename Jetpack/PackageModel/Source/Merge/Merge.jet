@@ -13,11 +13,11 @@
 
 // A package value (`Pkg`, §5) with its source identity preserved, so
 // de-duplication keeps `default.ripgrep` distinct from `unstable.ripgrep`.
-struct Pkg {
+Pkg: struct {
     source: String
     name: String
 
-    fn new(source: String, name: String) -> Pkg Never! {
+    new: fn(source: String, name: String) -> Pkg Never! {
         Pkg{source: source, name: name}
     }
 
@@ -33,7 +33,7 @@ struct Pkg {
     //
     // Lenient: empty items are skipped. The split is bracket-aware, so a nested
     // list value never splits mid-item.
-    fn parse_list(body: String) -> [Pkg] Never! {
+    parse_list: fn(body: String) -> [Pkg] Never! {
         out := [Pkg]{}
         loop item in pkg_merge_split_top_level(body) {
             loop pkg in Pkg.parse_item(item.trim()) -> &out.push(pkg)
@@ -41,7 +41,7 @@ struct Pkg {
         out
     }
 
-    fn parse_item(item: String) -> [Pkg] Never! {
+    parse_item: fn(item: String) -> [Pkg] Never! {
         if item == "" -> return [Pkg]{}
         // Escape-hatch quoted string: keep verbatim, source unresolved.
         if item.starts_with("\"") {
@@ -53,11 +53,11 @@ struct Pkg {
         }
         if item.split_once(".") == {
             .Val(parts) -> {
-                rest :: parts.after.trim()
+                rest: parts.after.trim()
                 if rest.starts_with("[") && rest.ends_with("]") {
                     members := [Pkg]{}
                     loop name in rest.removeprefix("[").removesuffix("]").split(",") {
-                        member :: name.trim()
+                        member: name.trim()
                         if member != "" -> &members.push(Pkg.new(parts.before, member))
                     }
                     return members
@@ -73,7 +73,7 @@ struct Pkg {
 
 // Why a merge could not be reconciled (§6 conflict diagnostics).
 #Error
-enum MergeError {
+MergeError: enum {
     // Two `sources` declarations share a name but resolve to different refs.
     SourceConflict(name: String, a: String, b: String)
     // A fact setting failed the canonical contribution law.
@@ -82,13 +82,13 @@ enum MergeError {
 
 // Split on commas not nested inside `()`/`[]`/`{}` (so `["a", "b"]` is one
 // item). Returns the raw, untrimmed pieces; a trailing comma adds no piece.
-fn pkg_merge_split_top_level(body: String) -> [String] Never! {
-    raw :: body.bytes()
+pkg_merge_split_top_level: fn(body: String) -> [String] Never! {
+    raw: body.bytes()
     out := [String]{}
     depth := 0
     start := 0
     loop index in 0..<raw.len() {
-        code :: Int.from_u8(raw[index])
+        code: Int.from_u8(raw[index])
         if code == {
             40 | 91 | 123 -> depth += 1
             41 | 93 | 125 -> depth -= 1
@@ -107,11 +107,11 @@ fn pkg_merge_split_top_level(body: String) -> [String] Never! {
 
 // Merge `sources` maps by key: identical refs de-duplicate; the same name with
 // different refs is a conflict (§6). Each map is read in key order.
-fn pkg_merge_sources(contribs: [[String: String]]) -> [String: String] MergeError! {
+pkg_merge_sources: fn(contribs: [[String: String]]) -> [String: String] MergeError! {
     out := [String: String]{}
     loop map in contribs {
         loop name in pkg_merge_sorted_names(map) {
-            reference :: map[name]
+            reference: map[name]
             if out.get(name) == {
                 .Val(existing) -> {
                     if existing != reference -> return Err(MergeError.SourceConflict{name: name, a: existing, b: reference})
@@ -123,7 +123,7 @@ fn pkg_merge_sources(contribs: [[String: String]]) -> [String: String] MergeErro
     Ok(out)
 }
 
-fn pkg_merge_sorted_names(map: [String: String]) -> [String] Never! {
+pkg_merge_sorted_names: fn(map: [String: String]) -> [String] Never! {
     names := map.keys().to_list()
     &names.sort()
     names
@@ -131,7 +131,7 @@ fn pkg_merge_sorted_names(map: [String: String]) -> [String] Never! {
 
 // Concatenate package lists, de-duplicate while preserving source identity,
 // and keep first-seen order (§6).
-fn pkg_merge_packages(lists: [[Pkg]]) -> [Pkg] Never! {
+pkg_merge_packages: fn(lists: [[Pkg]]) -> [Pkg] Never! {
     out := [Pkg]{}
     loop list in lists {
         loop pkg in list {
@@ -145,13 +145,13 @@ fn pkg_merge_packages(lists: [[Pkg]]) -> [Pkg] Never! {
 // `env.dev`). Package lists combine; fact settings reconcile through the
 // canonical contribution law. Each writer already carries its layer, scope,
 // span, and source.
-struct EntryContribution {
+EntryContribution: struct {
     packages: [Pkg]{[Pkg]{}}
     settings: [String: [FactContribution]]{[String: [FactContribution]]{}}
 }
 
 // A fully merged namespace entry: deduped packages + resolved text facts.
-struct MergedEntry {
+MergedEntry: struct {
     packages: [Pkg]{[Pkg]{}}
     settings: [String: String]{[String: String]{}}
 }
@@ -159,7 +159,7 @@ struct MergedEntry {
 // Merge several contributions to one namespace entry: packages combine and
 // de-duplicate, fact settings reconcile through the one resolver (§6). Only
 // text facts surface as settings.
-fn pkg_merge_entry(contribs: [EntryContribution]) -> MergedEntry MergeError! {
+pkg_merge_entry: fn(contribs: [EntryContribution]) -> MergedEntry MergeError! {
     lists := [[Pkg]]{}
     loop contribution in contribs -> &lists.push(contribution.packages)
     by_key := [String: [FactContribution]]{}
@@ -190,7 +190,7 @@ fn pkg_merge_entry(contribs: [EntryContribution]) -> MergedEntry MergeError! {
     Ok(MergedEntry{packages: pkg_merge_packages(lists), settings: settings})
 }
 
-fn pkg_merge_sorted_setting_keys(settings: [String: [FactContribution]]) -> [String] Never! {
+pkg_merge_sorted_setting_keys: fn(settings: [String: [FactContribution]]) -> [String] Never! {
     names := settings.keys().to_list()
     &names.sort()
     names

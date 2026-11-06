@@ -1,30 +1,30 @@
 
-use data :: core.data
+use data: core.data
 
 #Codable
-struct Ticket {
+Ticket: struct {
     team: String
     minutes: Float
 }
 
-struct Empty {}
+Empty: struct {}
 
-struct Box<T> {
+Box: struct<T> {
     value: T
 }
 
-fn run() {
+run: fn() {
     empty_rows := [Ticket]{}
     loop c in data.schema(empty_rows) {
         print("empty:{c.name}:{c.type_name}")
     }
 
-    nums :: [Float]{1.0, 2.0}
+    nums: [Float]{1.0, 2.0}
     loop c in data.schema(nums) {
         print("float:{c.name}:{c.type_name}")
     }
 
-    tickets :: [Ticket]{Ticket{team: "Core", minutes: 4.0}}
+    tickets: [Ticket]{Ticket{team: "Core", minutes: 4.0}}
     loop c in data.schema(tickets) {
         print("struct:{c.name}:{c.type_name}")
     }

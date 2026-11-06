@@ -1,12 +1,12 @@
 
-use process :: core.process
+use process: core.process
 
-fn run() {
-    spec :: process.cmd(["sh", "-c", "printf out; printf err >&2"])
+run: fn() {
+    spec: process.cmd(["sh", "-c", "printf out; printf err >&2"])
         .stdout(.Capture)
         .stderr(.Capture)
-    child :: spec.spawn() ?? panic("spawn failed")
-    receipt :: child.wait() ?? panic("wait failed")
+    child: spec.spawn() ?? panic("spawn failed")
+    receipt: child.wait() ?? panic("wait failed")
     print(receipt.output)
     print(receipt.errors)
     print(receipt.success)

@@ -1,17 +1,17 @@
-use compute :: core.compute
+use compute: core.compute
 
-struct Coordinate {
+Coordinate: struct {
     name: String
     labels: [String]
 }
 
-struct LabeledArray {
+LabeledArray: struct {
     values: Tensor
     dims: [String]
     coords: [Coordinate]
 }
 
-fn find_text(xs: [String], needle: String) -> Int? {
+find_text: fn(xs: [String], needle: String) -> Int? {
     i := 0
     loop i < xs.len() {
         if xs[i] == needle -> return Val(i)
@@ -22,9 +22,9 @@ fn find_text(xs: [String], needle: String) -> Int? {
 
 
  
-fn coordinate(name: String, labels: [String]) -> Coordinate { Coordinate{name: name, labels: labels} }
+coordinate: fn(name: String, labels: [String]) -> Coordinate { Coordinate{name: name, labels: labels} }
 
-fn make(values: Tensor, dims: [String], coords: [Coordinate]) -> LabeledArray { LabeledArray{
+make: fn(values: Tensor, dims: [String], coords: [Coordinate]) -> LabeledArray { LabeledArray{
     values: values,
     dims: dims,
     coords: coords

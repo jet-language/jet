@@ -1,7 +1,7 @@
 use {
-    crypto :: core.crypto
-    expert :: core.crypto.expert
-    files :: core.files
+    crypto: core.crypto
+    expert: core.crypto.expert
+    files: core.files
 }
 
 // tests/fixtures/crypto_bridge_entropy.rs:661-760. KNOWN-FAILING #4821.
@@ -17,11 +17,11 @@ use {
     nonce := [U8]{}
     loop i in 0..<32 -> &key.push((U8{i}))
     loop i in 0..<12 -> &nonce.push((U8{i}))
-    plaintext :: "historical migration payload".bytes()
-    recipient :: crypto.X25519SecretKey.new_random() ?? panic("recipient")
-    recipients :: [recipient.public_key()]
+    plaintext: "historical migration payload".bytes()
+    recipient: crypto.X25519SecretKey.new_random() ?? panic("recipient")
+    recipients: [recipient.public_key()]
     #Unsafe("crypto expert: the fixture seals a pinned JETC v1 envelope and migrates it") {
-        ciphertext :: expert.aes256gcm_seal(key, nonce, plaintext, [U8]{}) ?? panic("AES v1")
+        ciphertext: expert.aes256gcm_seal(key, nonce, plaintext, [U8]{}) ?? panic("AES v1")
         v1 := "JETC".bytes()
         &v1.push(U8{1})
         &v1.push(U8{2})
@@ -29,18 +29,18 @@ use {
         loop b in ciphertext -> &v1.push(b)
         files.write_bytes("source-2.jetc", v1) ?? panic("source2")
         loop algorithm in [1, 2] {
-            source :: "source-{algorithm}.jetc"
-            migrated :: "migrated-{algorithm}.jetc"
-            restored :: "restored-{algorithm}.bin"
-            original :: files.read_bytes(source) ?? panic("v1 bytes")
+            source: "source-{algorithm}.jetc"
+            migrated: "migrated-{algorithm}.jetc"
+            restored: "restored-{algorithm}.bin"
+            original: files.read_bytes(source) ?? panic("v1 bytes")
             expert.migrate_v1(key, Path.from(source), recipients, Path.from(migrated)) ?? panic("migrate")
             assert_eq(files.read_bytes(source) ?? panic("source"), original)
-            encoded :: files.read_bytes(migrated) ?? panic("migrated")
+            encoded: files.read_bytes(migrated) ?? panic("migrated")
             assert_eq(encoded[0..<8], [U8]{74, 69, 84, 67, 2, 1, 1, 0})
             crypto.file_open(recipient, Path.from(migrated), Path.from(restored)) ?? panic("open")
             assert_eq(files.read_bytes(restored) ?? panic("restored"), plaintext)
         }
-        original :: files.read_bytes("source-1.jetc") ?? panic("original")
+        original: files.read_bytes("source-1.jetc") ?? panic("original")
         files.write_bytes("existing.jetc", "keep".bytes()) ?? panic("existing")
         if expert.migrate_v1(key, Path.from("source-1.jetc"), recipients, Path.from("existing.jetc")) == {
             .Ok(_) -> panic("migration overwrote an existing destination")

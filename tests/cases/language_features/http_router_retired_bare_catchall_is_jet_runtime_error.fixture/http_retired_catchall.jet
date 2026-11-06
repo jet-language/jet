@@ -1,14 +1,14 @@
 use {
-    http :: core.http
-    server :: core.http.server
-    env :: core.sys
+    http: core.http
+    server: core.http.server
+    env: core.sys
 }
-fn handle(req: HTTPRequest) -> HTTPResponse HTTPError! {
+handle: fn(req: HTTPRequest) -> HTTPResponse HTTPError! {
     return Ok(server.response(200, "ok"))
 }
-fn run() {
-    router :: http.router()
-    dynamic :: env.get("JET_HTTP_TEST_MARKER") ?? "*"
-    pattern :: "/assets/{dynamic}"
+run: fn() {
+    router: http.router()
+    dynamic: env.get("JET_HTTP_TEST_MARKER") ?? "*"
+    pattern: "/assets/{dynamic}"
     router.get(pattern, handle)
 }

@@ -3,7 +3,7 @@
 // manager that checks the production flags, per-claim scratch trees, and
 // bounded waits.
 
-CLI_TEST_FAKE_SYSTEMD_RUN :: comptime { ``#!/bin/sh
+CLI_TEST_FAKE_SYSTEMD_RUN: comptime { ``#!/bin/sh
 set -eu
 state=${JETPACK_FAKE_SYSTEMD_STATE:-$(dirname "$0")/../state}
 unit=
@@ -43,7 +43,7 @@ printf '%s\n' "$$" > "$state/$unit.pid"
 exec "$@"
 `` }
 
-CLI_TEST_FAKE_SYSTEMCTL :: comptime { ``#!/bin/sh
+CLI_TEST_FAKE_SYSTEMCTL: comptime { ``#!/bin/sh
 set -eu
 state=${JETPACK_FAKE_SYSTEMD_STATE:-$(dirname "$0")/../state}
 signal=TERM
@@ -78,7 +78,7 @@ exit 0
 
 // The catalog tool fixture: one script answering for every service binary
 // and readiness probe by its own name.
-CLI_TEST_CATALOG_TOOL :: comptime { ``#!/bin/sh
+CLI_TEST_CATALOG_TOOL: comptime { ``#!/bin/sh
 set -eu
 name=${0##*/}
 case "$name" in
@@ -293,13 +293,13 @@ esac
 `` }
 
 // The fake systemd `bin` and `state` directories.
-struct FakeSystemd {
+FakeSystemd: struct {
     bin: String
     state: String
 
-    fn install() -[FS]> FakeSystemd {
-        root :: files.tmpdir("jpk-fake-systemd-") ?? panic("claim fake systemd scratch")
-        fake :: FakeSystemd{bin: files.join(root, "bin"), state: files.join(root, "state")}
+    install: fn() -[FS]> FakeSystemd {
+        root: files.tmpdir("jpk-fake-systemd-") ?? panic("claim fake systemd scratch")
+        fake: FakeSystemd{bin: files.join(root, "bin"), state: files.join(root, "state")}
         files.create_dir_all(fake.bin) ?? panic("create fake systemd bin")
         files.create_dir_all(fake.state) ?? panic("create fake systemd state")
         cli_test_write_script(files.join(fake.bin, "systemd-run"), CLI_TEST_FAKE_SYSTEMD_RUN)
@@ -308,25 +308,25 @@ struct FakeSystemd {
     }
 
     // PATH with the fake systemd first.
-    fn path(self) -[Env]> String {
+    path: fn(self) -[Env]> String {
         "{self.bin}:{sys.get("PATH") ?? ""}"
     }
 }
 
-fn cli_test_write_script(path: String, contents: String) -[FS]> {
+cli_test_write_script: fn(path: String, contents: String) -[FS]> {
     files.write(path, contents) ?? panic("write script {path}")
     files.set_mode(path, 0o755) ?? panic("chmod script {path}")
 }
 
 // One claim's project, Jetpack root, and home scratch directories plus the
 // fake systemd (Linux only) every `jetpack` call runs under.
-struct ServicesClaim {
+ServicesClaim: struct {
     project: String
     root: String
     home: String
     fake: FakeSystemd?
 
-    fn new(label: String) -[FS, Env]> ServicesClaim {
+    new: fn(label: String) -[FS, Env]> ServicesClaim {
         ServicesClaim{
             project: files.tmpdir("jet-{label}-") ?? panic("claim project scratch"),
             root: files.tmpdir("jet-{label}-root-") ?? panic("claim root scratch"),
@@ -339,21 +339,21 @@ struct ServicesClaim {
     // a typed environment, so the gated verbs (`up`, `restart`, `watch`,
     // `health`, `wait`) need trust: each claim pre-authorizes its own project
     // in its own HOME through `config trust add`, as a user would.
-    fn write_project(self, services_body: String, main_src: String) -[FS, Env, Exec, Time.Wait]> {
+    write_project: fn(self, services_body: String, main_src: String) -[FS, Env, Exec, Time.Wait]> {
         self.write_untrusted_project(services_body, main_src)
-        trusted :: self.run([String]{"config", "trust", "add", self.project}, cli_test_no_env())
+        trusted: self.run([String]{"config", "trust", "add", self.project}, cli_test_no_env())
         assert(trusted.success, "trust the claim project: {trusted.errors}")
     }
 
     // The same project with no trust decision recorded.
-    fn write_untrusted_project(self, services_body: String, main_src: String) -[FS]> {
-        files.write(files.join(self.project, "env.jet"), "module env.dev {{ services: {{ {services_body} }} }}\n") ?? panic("write env.jet")
+    write_untrusted_project: fn(self, services_body: String, main_src: String) -[FS]> {
+        files.write(files.join(self.project, "env.jet"), "env.dev: module {{ services: {{ {services_body} }} }}\n") ?? panic("write env.jet")
         files.write(files.join(self.project, "run.jet"), main_src) ?? panic("write run.jet")
     }
 
     // `jetpack <args>` from `cwd` with this claim's root, home, and fake
     // systemd; `extra` adds environment pairs.
-    fn jetpack_in(self, cwd: String, args: [String], extra: [(name: String, value: String)]) -[Env, Exec]> ProcessSpec {
+    jetpack_in: fn(self, cwd: String, args: [String], extra: [(name: String, value: String)]) -[Env, Exec]> ProcessSpec {
         spec := cli_test_jetpack(args).cwd(cwd).env("JETPACK_ROOT", self.root).env("HOME", self.home)
         if self.fake == {
             .Val(fake) -> spec = spec.env("PATH", fake.path()).env("JETPACK_FAKE_SYSTEMD_STATE", fake.state)
@@ -363,50 +363,50 @@ struct ServicesClaim {
         spec
     }
 
-    fn run(self, args: [String], extra: [(name: String, value: String)]) -[Env, Exec, Time.Wait]> ProcessReceipt {
+    run: fn(self, args: [String], extra: [(name: String, value: String)]) -[Env, Exec, Time.Wait]> ProcessReceipt {
         self.jetpack_in(self.project, args, extra).run() ?? panic("run jetpack {args}")
     }
 
-    fn service_dir(self, name: String) -> String {
+    service_dir: fn(self, name: String) -> String {
         files.join(self.project, ".jet/services/{name}")
     }
 
-    fn remove(self) -[FS]> {
-        dirs :: [String]{self.project, self.root, self.home}
+    remove: fn(self) -[FS]> {
+        dirs: [String]{self.project, self.root, self.home}
         loop dir in dirs -> files.remove_all(dir).drop("scratch cleanup is best-effort")
     }
 }
 
-fn cli_test_no_env() -> [(name: String, value: String)] {
+cli_test_no_env: fn() -> [(name: String, value: String)] {
     [(name: String, value: String)]{}
 }
 
-fn cli_test_health_timeout(ms: String) -> [(name: String, value: String)] {
+cli_test_health_timeout: fn(ms: String) -> [(name: String, value: String)] {
     [(name: String, value: String)]{(name: "JETPACK_SERVICE_HEALTH_TIMEOUT_MS", value: ms)}
 }
 
-fn cli_test_wait_for_file_lines(path: String, minimum: Int) -[FS, Time]> {
-    watch :: time.start()
+cli_test_wait_for_file_lines: fn(path: String, minimum: Int) -[FS, Time]> {
+    watch: time.start()
     loop {
-        text :: files.read(path) ?? ""
+        text: files.read(path) ?? ""
         if text.lines().len() >= minimum -> return
         assert(time.elapsed(watch).ns < 5000000000, "timed out waiting for {minimum} lines in {path}")
         time.sleep(time.duration_ms(50))
     }
 }
 
-fn cli_test_wait_for_missing(path: String) -[FS, Time]> {
-    watch :: time.start()
+cli_test_wait_for_missing: fn(path: String) -[FS, Time]> {
+    watch: time.start()
     loop files.exists(path) {
         assert(time.elapsed(watch).ns < 5000000000, "timed out waiting for {path} to disappear")
         time.sleep(time.duration_ms(50))
     }
 }
 
-fn cli_test_wait_for_file_contains(path: String, expected: String) -[FS, Time]> {
-    watch :: time.start()
+cli_test_wait_for_file_contains: fn(path: String, expected: String) -[FS, Time]> {
+    watch: time.start()
     loop {
-        text :: files.read(path) ?? ""
+        text: files.read(path) ?? ""
         if text.contains(expected) -> return
         assert(time.elapsed(watch).ns < 5000000000, "timed out waiting for `{expected}` in {path}")
         time.sleep(time.duration_ms(50))
@@ -414,11 +414,11 @@ fn cli_test_wait_for_file_contains(path: String, expected: String) -[FS, Time]> 
 }
 
 // Whether `pid` is a live, non-zombie process.
-fn cli_test_process_is_alive(pid: Int) -[FS, Exec, Time.Wait]> Bool {
-    stat :: files.read("/proc/{pid}/stat") ?? ""
-    rest :: stat.cut_last(")")?.after ?? ""
-    state :: rest.trim().split(" ").to_list().get(0) ?? ""
+cli_test_process_is_alive: fn(pid: Int) -[FS, Exec, Time.Wait]> Bool {
+    stat: files.read("/proc/{pid}/stat") ?? ""
+    rest: stat.cut_last(")")?.after ?? ""
+    state: rest.trim().split(" ").to_list().get(0) ?? ""
     if state == "Z" -> return false
-    receipt :: process.cmd([String]{"kill", "-0", "{pid}"}).stdout(.Capture).stderr(.Capture).run() ?? return false
+    receipt: process.cmd([String]{"kill", "-0", "{pid}"}).stdout(.Capture).stderr(.Capture).run() ?? return false
     receipt.success
 }

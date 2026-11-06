@@ -1,20 +1,20 @@
 
 use {
-    cbor :: core.encoding.cbor
-    hex :: core.encoding.hex
-    text :: core.text
+    cbor: core.encoding.cbor
+    hex: core.encoding.hex
+    text: core.text
 }
 
 #Codable
-struct Packet {
+Packet: struct {
     id: Int
     payload: [U8]
 }
 
-ROOT :: comptime { hex.encode(cbor.to_bytes_canonical([U8]{222, 173}) ?? panic("root")) }
-PACKET :: comptime { hex.encode(cbor.to_bytes_canonical(Packet{ id: 7, payload: [222, 173] }) ?? panic("packet")) }
+ROOT: comptime { hex.encode(cbor.to_bytes_canonical([U8]{222, 173}) ?? panic("root")) }
+PACKET: comptime { hex.encode(cbor.to_bytes_canonical(Packet{ id: 7, payload: [222, 173] }) ?? panic("packet")) }
 
-fn gap() -[]> String {
+gap: fn() -[]> String {
     folded := text.casefold("Straße")
     if folded != "strasse" { panic("casefold") }
     actual_root := hex.encode(cbor.to_bytes_canonical([U8]{222, 173}) ?? panic("root"))
@@ -22,7 +22,7 @@ fn gap() -[]> String {
     return "{actual_root}|{actual_packet}"
 }
 
-fn run() {
+run: fn() {
     print("{ROOT}|{PACKET}")
     print(gap())
 }

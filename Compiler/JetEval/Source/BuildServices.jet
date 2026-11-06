@@ -7,7 +7,7 @@ use {
     jet_build_session.[BuildSessionDiagnostic, BuildSessionValue, build_session_error_projection]
 }
 
-fn jet_eval_build_field(data: TComptimeValue, name: String) -> TComptimeValue? Never! {
+jet_eval_build_field: fn(data: TComptimeValue, name: String) -> TComptimeValue? Never! {
     if data == .Struct(_, fields) {
         loop field in fields {
             if field.name == name -> return Val(field.value)
@@ -16,21 +16,21 @@ fn jet_eval_build_field(data: TComptimeValue, name: String) -> TComptimeValue? N
     None
 }
 
-fn jet_eval_build_context_value(session: Int, program: TComptimeValue) -> TComptimeValue Never! {
+jet_eval_build_context_value: fn(session: Int, program: TComptimeValue) -> TComptimeValue Never! {
     TComptimeValue.Struct{type_name: "Build", fields: [TComptimeField]{
         {name: "__session", value: TComptimeValue.Int{value: session}},
         {name: "program", value: program},
     }}
 }
 
-fn jet_eval_build_context_id(data: TComptimeValue) -> Int? Never! {
+jet_eval_build_context_id: fn(data: TComptimeValue) -> Int? Never! {
     if data == .Struct(name, _) {
         if name == "Build" && jet_eval_build_field(data, "__session") == .Val(.Int(id)) -> return Val(id)
     }
     None
 }
 
-fn jet_eval_build_session_input(data: TComptimeValue) -> BuildSessionValue? Never! {
+jet_eval_build_session_input: fn(data: TComptimeValue) -> BuildSessionValue? Never! {
     if data == {
         .Unit -> return Val(BuildSessionValue.Unit)
         .String(value) -> return Val(BuildSessionValue.Text{value: value})
@@ -38,7 +38,7 @@ fn jet_eval_build_session_input(data: TComptimeValue) -> BuildSessionValue? Neve
         .Int(value) -> return Val(BuildSessionValue.Int{value: value})
         .Char(value) -> {
             if value < 0 || value > 1114111 || (value >= 55296 && value <= 57343) -> return None
-            chars :: jet_eval_format_char_text(value).chars()
+            chars: jet_eval_format_char_text(value).chars()
             if chars.len() == 1 -> return Val(BuildSessionValue.Char{value: chars[0]})
             return None
         }
@@ -53,13 +53,13 @@ fn jet_eval_build_session_input(data: TComptimeValue) -> BuildSessionValue? Neve
         .Present(value) -> return jet_eval_build_session_input(value)
         .Struct(name, _) -> {
             if name == "SourceSpan" {
-                start :: jet_eval_build_field(data, "start") ?? return None
-                end :: jet_eval_build_field(data, "end") ?? return None
+                start: jet_eval_build_field(data, "start") ?? return None
+                end: jet_eval_build_field(data, "end") ?? return None
                 if start == .Int(first) && end == .Int(last) -> return Val(BuildSessionValue.Span{start: first, end: last})
                 return None
             }
-            session :: jet_eval_build_field(data, "session") ?? return None
-            id :: jet_eval_build_field(data, "id") ?? return None
+            session: jet_eval_build_field(data, "session") ?? return None
+            id: jet_eval_build_field(data, "id") ?? return None
             if session == .Int(owner) && id == .Int(index) -> return Val(BuildSessionValue.Handle{type_name: name, session: owner, id: index})
         }
         else -> {}
@@ -67,7 +67,7 @@ fn jet_eval_build_session_input(data: TComptimeValue) -> BuildSessionValue? Neve
     None
 }
 
-fn jet_eval_build_session_output(value: BuildSessionValue) -> TComptimeValue Never! {
+jet_eval_build_session_output: fn(value: BuildSessionValue) -> TComptimeValue Never! {
     if value == {
         .Unit -> TComptimeValue.Unit
         .Text(text) -> TComptimeValue.String{value: text}
@@ -87,8 +87,8 @@ fn jet_eval_build_session_output(value: BuildSessionValue) -> TComptimeValue Nev
     }
 }
 
-fn jet_eval_build_session_diagnostic(error: BuildSessionDiagnostic) -> Diagnostic Never! {
-    span :: Val(Span{start: error.start, end: error.end})
+jet_eval_build_session_diagnostic: fn(error: BuildSessionDiagnostic) -> Diagnostic Never! {
+    span: Val(Span{start: error.start, end: error.end})
     // A project build rule (`b.error`) reports under its own code, which
     // build_session_project_error kept out of the compiler's E/W range,
     // through the build-rule row's metadata. Its prose is the project's,
@@ -103,7 +103,7 @@ fn jet_eval_build_session_diagnostic(error: BuildSessionDiagnostic) -> Diagnosti
     }
     diagnostic := diagnostic_from_registry(error.code, span, error.what, error.why, error.fix)
     if error.error == .Val(typed) {
-        projection :: build_session_error_projection(typed)
+        projection: build_session_error_projection(typed)
         diagnostic.structured = Val(DiagnosticStructured.BuildError{report: DiagnosticBuildError{
             code: Val("E3502"), message: projection.text, typed_identity: Val("BuildError::{projection.variant}"),
             details: Val(DiagnosticErrorDetails{variant: projection.variant, fields: loop field in projection.fields -> DiagnosticErrorField{name: field.name, value: field.value}, source_span: Val(DiagnosticErrorSpan{start: error.start, end: error.end})}),
@@ -114,29 +114,29 @@ fn jet_eval_build_session_diagnostic(error: BuildSessionDiagnostic) -> Diagnosti
 
 // Lossless CtValue::from_jet_err adapter shape. Semantic identity and fields
 // come from the typed Core error, never its human-readable diagnostic.
-fn jet_eval_build_failed_value(error: BuildSessionDiagnostic) -> TComptimeValue? Never! {
-    typed :: error.error ?? return None
-    projection :: build_session_error_projection(typed)
-    fields :: loop field in projection.fields -> TComptimeValue.Struct{type_name: "__jet_ErrorField", fields: [TComptimeField]{
+jet_eval_build_failed_value: fn(error: BuildSessionDiagnostic) -> TComptimeValue? Never! {
+    typed: error.error ?? return None
+    projection: build_session_error_projection(typed)
+    fields: loop field in projection.fields -> TComptimeValue.Struct{type_name: "__jet_ErrorField", fields: [TComptimeField]{
         {name: "name", value: jet_eval_build_graph_text(field.name)},
         {name: "value", value: jet_eval_build_graph_text(field.value)},
     }}
-    span :: TComptimeValue.Struct{type_name: "__jet_ErrorSpan", fields: [TComptimeField]{
+    span: TComptimeValue.Struct{type_name: "__jet_ErrorSpan", fields: [TComptimeField]{
         {name: "start", value: jet_eval_build_graph_int(error.start)},
         {name: "end", value: jet_eval_build_graph_int(error.end)},
     }}
-    details :: TComptimeValue.Struct{type_name: "__jet_ErrorDetails", fields: [TComptimeField]{
+    details: TComptimeValue.Struct{type_name: "__jet_ErrorDetails", fields: [TComptimeField]{
         {name: "variant", value: jet_eval_build_graph_text(projection.variant)},
         {name: "fields", value: TComptimeValue.List{values: fields}},
         {name: "source_span", value: TComptimeValue.Present{value: span}},
     }}
-    metadata :: TComptimeValue.Struct{type_name: "__jet_ErrorMetadata", fields: [TComptimeField]{
+    metadata: TComptimeValue.Struct{type_name: "__jet_ErrorMetadata", fields: [TComptimeField]{
         {name: "typed_identity", value: TComptimeValue.Present{value: jet_eval_build_graph_text("BuildError::{projection.variant}")}},
         {name: "context_frames", value: TComptimeValue.List{values: []}},
         {name: "conversion_history", value: TComptimeValue.List{values: []}},
         {name: "details", value: TComptimeValue.Present{value: details}},
     }}
-    value :: TComptimeValue.Struct{type_name: "Err", fields: [TComptimeField]{
+    value: TComptimeValue.Struct{type_name: "Err", fields: [TComptimeField]{
         {name: "message", value: jet_eval_build_graph_text(projection.text)},
         {name: "code", value: TComptimeValue.Present{value: jet_eval_build_graph_text("E3502")}},
         {name: "cause", value: TComptimeValue.Failed{report: .Clean{ty: Type.Named{name: "Err"}}}},
@@ -145,25 +145,25 @@ fn jet_eval_build_failed_value(error: BuildSessionDiagnostic) -> TComptimeValue?
     Val(TComptimeValue.Failed{report: TComptimeReport.Told{value: value}})
 }
 
-fn jet_eval_build_field_text(data: TComptimeValue, name: String) -> String? Never! {
-    value :: jet_eval_build_field(data, name) ?? return None
+jet_eval_build_field_text: fn(data: TComptimeValue, name: String) -> String? Never! {
+    value: jet_eval_build_field(data, name) ?? return None
     if value == .String(text) -> return Val(text)
     None
 }
 
-fn jet_eval_build_field_int(data: TComptimeValue, name: String) -> Int? Never! {
-    value :: jet_eval_build_field(data, name) ?? return None
+jet_eval_build_field_int: fn(data: TComptimeValue, name: String) -> Int? Never! {
+    value: jet_eval_build_field(data, name) ?? return None
     if value == .Int(number) -> return Val(number)
     None
 }
 
-fn jet_eval_build_field_present(data: TComptimeValue, name: String) -> TComptimeValue? Never! {
-    value :: jet_eval_build_field(data, name) ?? return None
+jet_eval_build_field_present: fn(data: TComptimeValue, name: String) -> TComptimeValue? Never! {
+    value: jet_eval_build_field(data, name) ?? return None
     if value == .Present(present) -> return Val(present)
     None
 }
 
-fn jet_eval_build_failed_diagnostic(value: TComptimeValue, fallback: Span) -> Diagnostic? Never! {
+jet_eval_build_failed_diagnostic: fn(value: TComptimeValue, fallback: Span) -> Diagnostic? Never! {
     if value == .Failed(.Told(told)) {
         // An error union member keeps its record as the union case's payload.
         error := told
@@ -171,32 +171,32 @@ fn jet_eval_build_failed_diagnostic(value: TComptimeValue, fallback: Span) -> Di
         if error == .Struct(name, _) {
             if name != "Err" -> return None
         } else { return None }
-        metadata :: jet_eval_build_field(error, "__jet___memo_error_metadata") ?? return None
-        identity_value :: jet_eval_build_field_present(metadata, "typed_identity") ?? return None
-        identity :: if identity_value == {.String(text) -> text else -> { return None }}
-        details :: jet_eval_build_field_present(metadata, "details") ?? return None
-        variant :: jet_eval_build_field_text(details, "variant") ?? return None
+        metadata: jet_eval_build_field(error, "__jet___memo_error_metadata") ?? return None
+        identity_value: jet_eval_build_field_present(metadata, "typed_identity") ?? return None
+        identity: if identity_value == {.String(text) -> text else -> { return None }}
+        details: jet_eval_build_field_present(metadata, "details") ?? return None
+        variant: jet_eval_build_field_text(details, "variant") ?? return None
         if identity != "BuildError::{variant}" -> return None
-        message :: jet_eval_build_field_text(error, "message") ?? return None
-        rows_value :: jet_eval_build_field(details, "fields") ?? return None
-        rows :: if rows_value == {.List(values) -> values else -> { return None }}
+        message: jet_eval_build_field_text(error, "message") ?? return None
+        rows_value: jet_eval_build_field(details, "fields") ?? return None
+        rows: if rows_value == {.List(values) -> values else -> { return None }}
         fields := [DiagnosticErrorField]{}
         loop field in rows {
-            name :: jet_eval_build_field_text(field, "name") ?? return None
-            data :: jet_eval_build_field_text(field, "value") ?? return None
+            name: jet_eval_build_field_text(field, "name") ?? return None
+            data: jet_eval_build_field_text(field, "value") ?? return None
             &fields.push(DiagnosticErrorField{name: name, value: data})
         }
         span := fallback
         if jet_eval_build_field_present(details, "source_span") == .Val(source) {
-            first :: jet_eval_build_field_int(source, "start") ?? return None
-            last :: jet_eval_build_field_int(source, "end") ?? return None
+            first: jet_eval_build_field_int(source, "start") ?? return None
+            last: jet_eval_build_field_int(source, "end") ?? return None
             span = Span{start: first, end: last}
         }
-        cycle :: message.starts_with("E3511: ")
-        code :: if cycle -> "E3511" else -> "E3502"
-        text :: if cycle -> message.removeprefix("E3511: ") else -> message
-        why :: if cycle -> "generated source must reach a bounded deterministic order, not loop until quiescent" else -> "`fn build` must return one deterministic typed graph whose handles all belong to that build"
-        fix :: if cycle -> "break the dependency between these generators or give each generated module one owner" else -> "fix the named target/action/toolchain/probe and run `jet inspect explain-build` to inspect the graph"
+        cycle: message.starts_with("E3511: ")
+        code: if cycle -> "E3511" else -> "E3502"
+        text: if cycle -> message.removeprefix("E3511: ") else -> message
+        why: if cycle -> "generated source must reach a bounded deterministic order, not loop until quiescent" else -> "`build: fn` must return one deterministic typed graph whose handles all belong to that build"
+        fix: if cycle -> "break the dependency between these generators or give each generated module one owner" else -> "fix the named target/action/toolchain/probe and run `jet inspect explain-build` to inspect the graph"
         diagnostic := diagnostic_from_registry(code, Val(span), "build plan is invalid: {text}", why, fix)
         diagnostic.structured = Val(DiagnosticStructured.BuildError{report: DiagnosticBuildError{
             code: Val("E3502"), message: message, typed_identity: Val("BuildError::{variant}"),
@@ -207,21 +207,21 @@ fn jet_eval_build_failed_diagnostic(value: TComptimeValue, fallback: Span) -> Di
     None
 }
 
-fn jet_eval_build_graph_int(value: Int) -> TComptimeValue Never! { TComptimeValue.Int{value: value} }
-fn jet_eval_build_graph_text(value: String) -> TComptimeValue Never! { TComptimeValue.String{value: value} }
-fn jet_eval_build_graph_ints(values: [Int]) -> TComptimeValue Never! { TComptimeValue.List{values: loop value in values -> jet_eval_build_graph_int(value)} }
-fn jet_eval_build_graph_texts(values: [String]) -> TComptimeValue Never! { TComptimeValue.List{values: loop value in values -> jet_eval_build_graph_text(value)} }
-fn jet_eval_build_graph_optional_int(value: Int?) -> TComptimeValue Never! {
+jet_eval_build_graph_int: fn(value: Int) -> TComptimeValue Never! { TComptimeValue.Int{value: value} }
+jet_eval_build_graph_text: fn(value: String) -> TComptimeValue Never! { TComptimeValue.String{value: value} }
+jet_eval_build_graph_ints: fn(values: [Int]) -> TComptimeValue Never! { TComptimeValue.List{values: loop value in values -> jet_eval_build_graph_int(value)} }
+jet_eval_build_graph_texts: fn(values: [String]) -> TComptimeValue Never! { TComptimeValue.List{values: loop value in values -> jet_eval_build_graph_text(value)} }
+jet_eval_build_graph_optional_int: fn(value: Int?) -> TComptimeValue Never! {
     if value == {.Val(number) -> TComptimeValue.Present{value: jet_eval_build_graph_int(number)} else -> TComptimeValue.Failed{report: .Clean{ty: Type.Int}}}
 }
-fn jet_eval_build_graph_optional_text(value: String?) -> TComptimeValue Never! {
+jet_eval_build_graph_optional_text: fn(value: String?) -> TComptimeValue Never! {
     if value == {.Val(text) -> TComptimeValue.Present{value: jet_eval_build_graph_text(text)} else -> TComptimeValue.Failed{report: .Clean{ty: Type.String}}}
 }
-fn jet_eval_build_graph_optional_bool(value: Bool?) -> TComptimeValue Never! {
+jet_eval_build_graph_optional_bool: fn(value: Bool?) -> TComptimeValue Never! {
     if value == {.Val(flag) -> TComptimeValue.Present{value: TComptimeValue.Bool{value: flag}} else -> TComptimeValue.Failed{report: .Clean{ty: Type.Bool}}}
 }
 
-fn jet_eval_build_graph_action(value: BuildGraphAction) -> TComptimeValue Never! {
+jet_eval_build_graph_action: fn(value: BuildGraphAction) -> TComptimeValue Never! {
     TComptimeValue.Struct{type_name: "BuildGraphAction", fields: [TComptimeField]{
         {name: "id", value: jet_eval_build_graph_int(value.id)},
         {name: "name", value: jet_eval_build_graph_text(value.name)},
@@ -239,7 +239,7 @@ fn jet_eval_build_graph_action(value: BuildGraphAction) -> TComptimeValue Never!
     }}
 }
 
-fn jet_eval_build_graph_file(value: BuildGraphFile) -> TComptimeValue Never! {
+jet_eval_build_graph_file: fn(value: BuildGraphFile) -> TComptimeValue Never! {
     TComptimeValue.Struct{type_name: "BuildGraphFile", fields: [TComptimeField]{
         {name: "path", value: jet_eval_build_graph_text(value.path)},
         {name: "owner", value: jet_eval_build_graph_optional_int(value.owner)},
@@ -248,7 +248,7 @@ fn jet_eval_build_graph_file(value: BuildGraphFile) -> TComptimeValue Never! {
     }}
 }
 
-fn jet_eval_build_graph_value(graph: BuildGraph) -> TComptimeValue Never! {
+jet_eval_build_graph_value: fn(graph: BuildGraph) -> TComptimeValue Never! {
     targets := [TComptimeValue]{}
     loop row in graph.targets -> &targets.push(TComptimeValue.Struct{type_name: "BuildGraphTarget", fields: [TComptimeField]{
         {name: "id", value: jet_eval_build_graph_int(row.id)},

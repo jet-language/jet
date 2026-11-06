@@ -135,8 +135,8 @@ keeps pure calculation separate from host interaction and lets types carry
 stable identities and valid-state constraints.
 
 ```jet
-fn parse(input: String) -> ParseResult { … }
-fn write(path: Path, text: String) -[FS]> WriteResult { … }
+parse: fn(input: String) -> ParseResult { … }
+write: fn(path: Path, text: String) -[FS]> WriteResult { … }
 ```
 
 The effect row is part of the signature. A result type names failure; a bare

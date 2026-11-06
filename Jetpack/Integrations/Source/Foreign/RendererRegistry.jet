@@ -9,7 +9,7 @@ use jet_pkg_model.[
 
 // Shared response protocol used by generated worker bindings: a
 // machine-readable response plus a human-readable explanation for the CLI.
-enum DecoderProtocol {
+DecoderProtocol: enum {
     // Supervised workers return `{ok, value}` and use the shared status map.
     StandardEnvelope
     // The embedded Lua VM returns the encoded function value directly.
@@ -17,10 +17,10 @@ enum DecoderProtocol {
 }
 
 // The one response decoder a generated binding uses.
-fn pkg_render_decode_response(error: String, protocol: DecoderProtocol) -> String Never! {
-    lines :: if protocol == {
+pkg_render_decode_response: fn(error: String, protocol: DecoderProtocol) -> String Never! {
+    lines: if protocol == {
         .StandardEnvelope -> [String]{
-            "fn decode_response(raw: String, code: Int) -> Dyn {error}! {{",
+            "decode_response: fn(raw: String, code: Int) -> Dyn {error}! {{",
             "    if code == {{",
             "        1 -> {{ return Err({error}.NotRunning) }}",
             "        2 -> {{ return Err({error}.Timeout) }}",
@@ -36,7 +36,7 @@ fn pkg_render_decode_response(error: String, protocol: DecoderProtocol) -> Strin
             "}}"
         }
         .LuaRawJSON -> [String]{
-            "fn decode_response(raw: String, code: Int) -> Dyn {error}! {{",
+            "decode_response: fn(raw: String, code: Int) -> Dyn {error}! {{",
             "    decode_status(code)",
             "    value := json.parse(raw) ?? return Err({error}.Protocol)",
             "    return Ok(value)",
@@ -47,9 +47,9 @@ fn pkg_render_decode_response(error: String, protocol: DecoderProtocol) -> Strin
 }
 
 // The Lua status adapter shared by response and table-view calls.
-fn pkg_render_lua_decode_status(error: String) -> String Never! {
-    lines :: [String]{
-        "fn decode_status(code: Int) -> Bool {error}! {{",
+pkg_render_lua_decode_status: fn(error: String) -> String Never! {
+    lines: [String]{
+        "decode_status: fn(code: Int) -> Bool {error}! {{",
         "    if code == 1 -> return Err({error}.NotRunning)",
         "    if code == 2 -> return Err({error}.Timeout)",
         "    if code == 3 -> return Err({error}.Cancelled)",
@@ -65,7 +65,7 @@ fn pkg_render_lua_decode_status(error: String) -> String Never! {
 
 // One active generated response binder: its canonical descriptor key, its
 // response protocol, and the probe that renders a representative binding.
-struct RendererDescriptor {
+RendererDescriptor: struct {
     language: ForeignLanguage
     runtime: BinderRuntime
     stub_kind: BindingStubKind
@@ -75,7 +75,7 @@ struct RendererDescriptor {
 
 // One entry per active generated response binder. A function, not a `comptime`
 // table: its rows hold function values, which no comptime value can carry.
-fn pkg_generator_registry() -> [RendererDescriptor] Never! { [RendererDescriptor]{
+pkg_generator_registry: fn() -> [RendererDescriptor] Never! { [RendererDescriptor]{
     {language: ForeignLanguage.Lua, runtime: BinderRuntime.EmbeddedLua, stub_kind: BindingStubKind.LuaScript, protocol: DecoderProtocol.LuaRawJSON, render_probe: pkg_lua_render_probe},
     {language: ForeignLanguage.PowerShell, runtime: BinderRuntime.SupervisedPowerShell, stub_kind: BindingStubKind.PowerShellScript, protocol: DecoderProtocol.StandardEnvelope, render_probe: pkg_powershell_render_probe},
     {language: ForeignLanguage.Perl, runtime: BinderRuntime.SupervisedPerl, stub_kind: BindingStubKind.PerlScript, protocol: DecoderProtocol.StandardEnvelope, render_probe: pkg_perl_render_probe},
@@ -88,7 +88,7 @@ fn pkg_generator_registry() -> [RendererDescriptor] Never! { [RendererDescriptor
 // The response renderer for one canonical binder descriptor. The descriptor
 // table is the denominator; the registry supplies the renderer-owned probe and
 // protocol without a second match list.
-fn pkg_renderer_for(descriptor: BinderDescriptor) -> RendererDescriptor? Never! {
+pkg_renderer_for: fn(descriptor: BinderDescriptor) -> RendererDescriptor? Never! {
     if descriptor.status != BinderStatus.Active -> return None
     loop renderer in pkg_generator_registry() {
         if renderer.language == descriptor.language && renderer.stub_kind == descriptor.stub_kind -> return Val(renderer)
@@ -98,7 +98,7 @@ fn pkg_renderer_for(descriptor: BinderDescriptor) -> RendererDescriptor? Never! 
 
 // The single active canonical descriptor a renderer entry names, if exactly
 // one matches.
-fn pkg_renderer_canonical_for(renderer: RendererDescriptor) -> BinderDescriptor? Never! {
+pkg_renderer_canonical_for: fn(renderer: RendererDescriptor) -> BinderDescriptor? Never! {
     found := [BinderDescriptor]{}
     loop descriptor in pkg_foreign_binders() {
         if descriptor.status == BinderStatus.Active && descriptor.language == renderer.language && descriptor.stub_kind == renderer.stub_kind -> &found.push(descriptor)

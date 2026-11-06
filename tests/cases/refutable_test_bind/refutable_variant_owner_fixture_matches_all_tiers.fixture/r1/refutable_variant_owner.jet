@@ -1,18 +1,18 @@
 // #4772: a checked enum owner survives a refutable guard and its miss route.
-enum Choice {
+Choice: enum {
     Value(Int)
     Empty
 }
 
-struct Owner { items: [Choice] }
+Owner: struct { items: [Choice] }
 
-fn choose(choice: Choice) -> Int {
+choose: fn(choice: Choice) -> Int {
     choice == .Value(value) ?? return 0
     return value
 }
 
-fn run() {
-    owner :: Owner{items: [Choice]{Choice.Value(7)}}
+run: fn() {
+    owner: Owner{items: [Choice]{Choice.Value(7)}}
     owner.items[0] == .Value(value) ?? panic("variant")
     print(value)
     print(choose(Choice.Empty))

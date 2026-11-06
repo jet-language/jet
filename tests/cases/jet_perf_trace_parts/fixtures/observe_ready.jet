@@ -1,23 +1,23 @@
 // ALGORITHM capture_attach.rs77-97 through the real public LiveInspect read/render CLI.
 // Source/CmdInspect.rs4217-4230 uses the same LiveInspect::read(pid); no raw .jet-live path oracle.
 use {
-    process :: core.process
-    sys :: core.sys
-    time :: core.time
+    process: core.process
+    sys: core.sys
+    time: core.time
 }
 
-fn s6_observe_probe(jet: String, pid: String) -> Bool {
-    receipt :: process.cmd([String]{jet, "inspect", "types", "--live", pid}).run() ?? return false
+s6_observe_probe: fn(jet: String, pid: String) -> Bool {
+    receipt: process.cmd([String]{jet, "inspect", "types", "--live", pid}).run() ?? return false
     if receipt.code != 0 -> return false
-    rendered :: receipt.output.copy()
+    rendered: receipt.output.copy()
     // Renderer LiveInspect.rs823/846/857 projects these exact original raw snapshot fields.
     rendered.contains("arena_allocations=") && !rendered.contains("arena_allocations=0") && rendered.contains("parent 1") && rendered.contains("recv=1") && (rendered.contains("wait=tcp accept deadline=") || rendered.contains("wait=tcp accept readiness deadline="))
 }
 
-fn s6_observe_readiness() {
-    jet :: sys.get("S6_JET_BIN") ?? panic("real jet executable")
-    pid :: sys.get("S6_LIVE_PID") ?? panic("live child PID")
-    started :: time.instant()
+s6_observe_readiness: fn() {
+    jet: sys.get("S6_JET_BIN") ?? panic("real jet executable")
+    pid: sys.get("S6_LIVE_PID") ?? panic("live child PID")
+    started: time.instant()
     loop {
         if s6_observe_probe(jet, pid) -> break
         assert(time.instant() - started < 5s, "observe snapshot never readable with allocs+child+contention+io")

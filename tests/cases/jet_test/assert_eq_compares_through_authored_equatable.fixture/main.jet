@@ -1,30 +1,30 @@
 // Versions equal by precedence: build metadata does not take part.
-struct Version {
+Version: struct {
     number: Int
     build: String
 }
 
 impl Version.Equatable {
-    fn equal(self, rhs: Version) -> Bool {
+    equal: fn(self, rhs: Version) -> Bool {
         self.number == rhs.number
     }
 }
 
 // Equal by size, ordered by label: the two authored hooks disagree, and `==`
 // (and so assert_eq) is Equatable's operator, so `equal` answers.
-struct Box {
+Box: struct {
     size: Int
     label: String
 }
 
 impl Box.Equatable {
-    fn equal(self, rhs: Box) -> Bool {
+    equal: fn(self, rhs: Box) -> Bool {
         self.size == rhs.size
     }
 }
 
 impl Box.Comparable {
-    fn compare(self, rhs: Box) -> Ordering {
+    compare: fn(self, rhs: Box) -> Ordering {
         if {
             self.label < rhs.label -> Ordering.Less
             self.label > rhs.label -> Ordering.Greater
@@ -34,13 +34,13 @@ impl Box.Comparable {
 }
 
 // Ordered by rank alone with a derived `equal`: the authored `compare` answers.
-struct Ranked {
+Ranked: struct {
     rank: Int
     note: String
 }
 
 impl Ranked.Comparable {
-    fn compare(self, rhs: Ranked) -> Ordering {
+    compare: fn(self, rhs: Ranked) -> Ordering {
         if {
             self.rank < rhs.rank -> Ordering.Less
             self.rank > rhs.rank -> Ordering.Greater
@@ -49,16 +49,16 @@ impl Ranked.Comparable {
     }
 }
 
-fn version(number: Int, build: String) -> Version {
+version: fn(number: Int, build: String) -> Version {
     Version{number: number, build: build}
 }
 
 // Calls, not literals: `x == Box{…}` is a struct pattern test.
-fn sized(size: Int, label: String) -> Box {
+sized: fn(size: Int, label: String) -> Box {
     Box{size: size, label: label}
 }
 
-fn ranked(rank: Int, note: String) -> Ranked {
+ranked: fn(rank: Int, note: String) -> Ranked {
     Ranked{rank: rank, note: note}
 }
 

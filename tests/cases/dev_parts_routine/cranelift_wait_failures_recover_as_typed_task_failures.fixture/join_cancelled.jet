@@ -1,13 +1,13 @@
-use time :: core.time
-fn failure_label(error: TaskFailure) -> String {
+use time: core.time
+failure_label: fn(error: TaskFailure) -> String {
     if error == {
         .Cancelled -> { return "cancelled" }
         .DeadlineBlown -> { return "deadline" }
         .Panicked(_) -> { return "panicked" }
     }
 }
-fn run() {
-    child :: task {
+run: fn() {
+    child: task {
         time.sleep(200ms)
     }
     child.cancel()

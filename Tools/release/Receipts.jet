@@ -5,20 +5,20 @@
 // never reported shows up as a gap in the matrix.
 
 use {
-    files :: core.files
-    json :: core.encoding.json
+    files: core.files
+    json: core.encoding.json
 }
 
-SUPPORT_MATRIX_PATH :: "Tools/release/support-matrix.tsv"
+SUPPORT_MATRIX_PATH: "Tools/release/support-matrix.tsv"
 
-struct Row {
+Row: struct {
     scope: String
     status: String
     total: Int?
     passed: Int?
 }
 
-struct Receipt {
+Receipt: struct {
     // "verify-full" or "release-compiler".
     kind: String
     // Where the copy lives, relative to the release directory.
@@ -34,26 +34,26 @@ struct Receipt {
     problems: [Problem]
 }
 
-struct MatrixRow {
+MatrixRow: struct {
     target: String
     name: String
 }
 
-fn receipt_rows(items: [Dyn], scope_key: String) -> [Row] Never! {
+receipt_rows: fn(items: [Dyn], scope_key: String) -> [Row] Never! {
     rows := [Row]{}
     loop item in items -> &rows.push(Row{scope: text_field(item, scope_key), status: text_field(item, "status"), total: int_field(item, "total"), passed: int_field(item, "passed")})
     rows
 }
 
-fn empty_receipt(kind: String, file: String, bytes: [U8]) -> Receipt Never! {
+empty_receipt: fn(kind: String, file: String, bytes: [U8]) -> Receipt Never! {
     Receipt{kind: kind.copy(), file: file.copy(), sha256: sha256_hex(bytes), target: "", shard: 0, shards: 0, head: "", jet_sha256: "", status: "", rows: [Row]{}, problems: [Problem]{}}
 }
 
 // A verify-full.json: its pin, the sha256 of the compiler it ran, its target,
 // its shard and its rows.
-fn parse_verify_full(file: String, bytes: [U8]) -> Receipt Never! {
+parse_verify_full: fn(file: String, bytes: [U8]) -> Receipt Never! {
     receipt := empty_receipt("verify-full", file, bytes)
-    tree :: json.parse(String.from_bytes_lossy(bytes)) ?? {
+    tree: json.parse(String.from_bytes_lossy(bytes)) ?? {
         &receipt.problems.push(problem(INPUT, "{file} is not JSON: {err}"))
         return receipt
     }
@@ -62,7 +62,7 @@ fn parse_verify_full(file: String, bytes: [U8]) -> Receipt Never! {
     receipt.target = text_field(tree, "target")
     receipt.status = text_field(tree, "status")
     receipt.rows = receipt_rows(array_field(tree, "rows"), "scope")
-    shard :: field(tree, "shard")
+    shard: field(tree, "shard")
     receipt.shard = int_field(shard, "index") ?? -1
     receipt.shards = int_field(shard, "count") ?? 0
     if receipt.target == "" -> &receipt.problems.push(problem(MISSING_RUNNER, "{file} names no target: it predates runner targets, so rerun Tools/agent/VerifyFull.jet"))
@@ -73,9 +73,9 @@ fn parse_verify_full(file: String, bytes: [U8]) -> Receipt Never! {
 
 // The RELEASE.json of an admitted release, read as the one receipt of its
 // runner: release-compiler.mjs runs every suite itself, so it is shard 0 of 1.
-fn parse_admission_receipt(file: String, bytes: [U8]) -> Receipt Never! {
+parse_admission_receipt: fn(file: String, bytes: [U8]) -> Receipt Never! {
     receipt := empty_receipt("release-compiler", file, bytes)
-    tree :: json.parse(String.from_bytes_lossy(bytes)) ?? {
+    tree: json.parse(String.from_bytes_lossy(bytes)) ?? {
         &receipt.problems.push(problem(INPUT, "{file} is not JSON: {err}"))
         return receipt
     }
@@ -90,8 +90,8 @@ fn parse_admission_receipt(file: String, bytes: [U8]) -> Receipt Never! {
     receipt
 }
 
-fn read_receipt(dir: String, file: String, kind: String) -[FS]> Receipt Never! {
-    bytes :: files.read_bytes(files.join(dir, file)) ?? {
+read_receipt: fn(dir: String, file: String, kind: String) -[FS]> Receipt Never! {
+    bytes: files.read_bytes(files.join(dir, file)) ?? {
         receipt := empty_receipt(kind, file, [U8]{})
         &receipt.problems.push(problem(MISSING_RUNNER, "the receipt {file} is missing: {err}"))
         return receipt
@@ -101,12 +101,12 @@ fn read_receipt(dir: String, file: String, kind: String) -[FS]> Receipt Never! {
 }
 
 // support-matrix.tsv: one `target<TAB>name` row per supported target.
-fn parse_matrix(text: String) -> [MatrixRow] Problem! {
+parse_matrix: fn(text: String) -> [MatrixRow] Problem! {
     rows := [MatrixRow]{}
     loop (index, raw) in text.split("\n").to_list() {
-        line :: raw.trim()
+        line: raw.trim()
         if line == "" || line.starts_with("#") -> next
-        cells :: raw.trim_end().split("\t").to_list()
+        cells: raw.trim_end().split("\t").to_list()
         if cells.len() != 2 || cells[0].trim() == "" || cells[1].trim() == "" -> return Err(problem(MATRIX, "{SUPPORT_MATRIX_PATH}:{index + 1}: a row needs a target and a name separated by a tab"))
         &rows.push(MatrixRow{target: cells[0].trim().copy(), name: cells[1].trim().copy()})
     }

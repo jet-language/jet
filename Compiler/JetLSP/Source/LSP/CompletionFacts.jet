@@ -7,21 +7,21 @@ use {
     jet_semindex.[SymbolDB, SymKind, DefinitionAnchor, SemanticSymbol, SemanticVisibilityAnchor]
 }
 
-LSP_COMPLETION_METHOD :: 2
-LSP_COMPLETION_FUNCTION :: 3
-LSP_COMPLETION_FIELD :: 5
-LSP_COMPLETION_VARIABLE :: 6
-LSP_COMPLETION_CLASS :: 7
-LSP_COMPLETION_MODULE :: 9
-LSP_COMPLETION_PROPERTY :: 10
-LSP_COMPLETION_VALUE :: 12
-LSP_COMPLETION_KEYWORD :: 14
-LSP_COMPLETION_SNIPPET :: 15
-LSP_COMPLETION_ENUM_MEMBER :: 20
-LSP_COMPLETION_CONSTANT :: 21
+LSP_COMPLETION_METHOD: 2
+LSP_COMPLETION_FUNCTION: 3
+LSP_COMPLETION_FIELD: 5
+LSP_COMPLETION_VARIABLE: 6
+LSP_COMPLETION_CLASS: 7
+LSP_COMPLETION_MODULE: 9
+LSP_COMPLETION_PROPERTY: 10
+LSP_COMPLETION_VALUE: 12
+LSP_COMPLETION_KEYWORD: 14
+LSP_COMPLETION_SNIPPET: 15
+LSP_COMPLETION_ENUM_MEMBER: 20
+LSP_COMPLETION_CONSTANT: 21
 
 // Sole original completion carrier.
-struct CompletionItem {
+CompletionItem: struct {
     label: String
     kind: Int
     detail: String?
@@ -30,9 +30,9 @@ struct CompletionItem {
     insert_text_format: Int
     auto_import: String?
 
-    fn to_json(self) -> String Never! { lsp_to_json(self) }
+    to_json: fn(self) -> String Never! { lsp_to_json(self) }
 }
-fn lsp_to_json(item: CompletionItem) -> String Never! {
+lsp_to_json: fn(item: CompletionItem) -> String Never! {
     fields := [String]{"\"label\":{foundation_json_quote(item.label)}", "\"kind\":{item.kind}"}
     if item.detail == .Val(value) -> &fields.push("\"detail\":{foundation_json_quote(value)}")
     if item.documentation == .Val(value) -> &fields.push("\"documentation\":{foundation_json_quote(value)}")
@@ -43,8 +43,8 @@ fn lsp_to_json(item: CompletionItem) -> String Never! {
     if item.auto_import == .Val(statement) -> &fields.push("\"additionalTextEdits\":[{{\"range\":{{\"start\":{{\"line\":0,\"character\":0}},\"end\":{{\"line\":0,\"character\":0}}}},\"newText\":{foundation_json_quote(statement)}}}]")
     "{{{fields.join(",")}}}"
 }
-fn lsp_semantic_documentation(symbol: SemanticSymbol) -> String Never! {
-    provenance :: if symbol.provenance == {
+lsp_semantic_documentation: fn(symbol: SemanticSymbol) -> String Never! {
+    provenance: if symbol.provenance == {
         .Source(path) -> path
         .Builtin(module_name) -> module_name
         .CommandRegistry -> "command registry"
@@ -55,7 +55,7 @@ fn lsp_semantic_documentation(symbol: SemanticSymbol) -> String Never! {
 // Rust keyword/type aliases102/108 map directly to Foundation jet_keyword_names /
 // jet_type_names; no second completion language catalog is defined here.
 
-fn lsp_completion_type_name_from_kind(kind: SymKind) -> String? Never! {
+lsp_completion_type_name_from_kind: fn(kind: SymKind) -> String? Never! {
     if kind == {
         .Local(_, .Val(ty)) -> lsp_completion_nominal_type_name(ty)
         .Param(ty) -> lsp_completion_nominal_type_name(ty)
@@ -63,16 +63,16 @@ fn lsp_completion_type_name_from_kind(kind: SymKind) -> String? Never! {
         else -> None
     }
 }
-fn lsp_completion_nominal_type_name(ty: Type) -> String? Never! {
+lsp_completion_nominal_type_name: fn(ty: Type) -> String? Never! {
     if ty == {
         .Named(name) -> Val(name.copy())
         .Apply(name, _) -> Val(name.copy())
         else -> None
     }
 }
-fn lsp_completion_method_owner_from_scope(scope: String) -> String? Never! {
+lsp_completion_method_owner_from_scope: fn(scope: String) -> String? Never! {
     if !scope.starts_with("method:") -> return None
-    bytes :: scope.bytes()
+    bytes: scope.bytes()
     separator := -1
     dot := -1
     loop i in 7..<bytes.len() {
@@ -83,7 +83,7 @@ fn lsp_completion_method_owner_from_scope(scope: String) -> String? Never! {
     if dot < 0 -> return None
     Val(lsp_completion_slice(scope, separator + 2, dot))
 }
-fn lsp_completion_checked_anchor_identity(db: SymbolDB, target: DefinitionAnchor) -> String? Never! {
+lsp_completion_checked_anchor_identity: fn(db: SymbolDB, target: DefinitionAnchor) -> String? Never! {
     if target.semantic_identity == .Val(identity) { if !identity.is_empty() -> return Val(identity.copy()) }
     identity := String?{None}
     loop definition in db.defs {
@@ -93,18 +93,18 @@ fn lsp_completion_checked_anchor_identity(db: SymbolDB, target: DefinitionAnchor
     }
     identity
 }
-fn lsp_completion_subject_type_name(db: SymbolDB, tokens: [Token], path: String, subject_index: Int) -> String? Never! {
+lsp_completion_subject_type_name: fn(db: SymbolDB, tokens: [Token], path: String, subject_index: Int) -> String? Never! {
     if subject_index < 0 || subject_index >= tokens.len() -> return None
-    span :: tokens[subject_index].span
+    span: tokens[subject_index].span
     selected := -1
     width := 0
     loop (index, reference) in db.refs {
         if reference.module_path != path || reference.span.start > span.start || span.end > reference.span.end -> next
-        size :: if reference.span.end >= reference.span.start -> reference.span.end - reference.span.start else -> 0
+        size: if reference.span.end >= reference.span.start -> reference.span.end - reference.span.start else -> 0
         if selected < 0 || size < width { selected = index; width = size }
     }
     if selected < 0 -> return None
-    reference :: db.refs[selected]
+    reference: db.refs[selected]
     if reference.target == .Val(target) {
         if lsp_completion_checked_anchor_identity(db, target) == .Val(identity) {
             loop definition in db.defs {
@@ -118,14 +118,14 @@ fn lsp_completion_subject_type_name(db: SymbolDB, tokens: [Token], path: String,
     None
 }
 // Return retained db.defs row index.
-fn lsp_completion_enum_definition_for_type(db: SymbolDB, type_name: String, current_path: String, offset: Int) -> Int? Never! {
-    anchor :: SemanticVisibilityAnchor{module_path: current_path, offset: Val(offset), session_top_level: false}
+lsp_completion_enum_definition_for_type: fn(db: SymbolDB, type_name: String, current_path: String, offset: Int) -> Int? Never! {
+    anchor: SemanticVisibilityAnchor{module_path: current_path, offset: Val(offset), session_top_level: false}
     if db.symbols.resolve_visible_at(type_name, anchor) == .Val(symbol) {
         loop (index, definition) in db.defs {
             if definition.identity == symbol[0].identity && definition.kind == .Enum(_, _) -> return Val(index)
         }
     }
-    leaf :: type_name.rsplit(".")[0]
+    leaf: type_name.rsplit(".")[0]
     identity := String?{None}
     selected := -1
     loop (index, definition) in db.defs {
@@ -137,7 +137,7 @@ fn lsp_completion_enum_definition_for_type(db: SymbolDB, type_name: String, curr
 }
 // A single prefix pass records the active brace stack + previous code tokens;
 // no repeated brace-suffix depth scans.
-fn lsp_detect_switch_enum_type(tokens: [Token], offset: Int, current_path: String, db: SymbolDB) -> Int? Never! {
+lsp_detect_switch_enum_type: fn(tokens: [Token], offset: Int, current_path: String, db: SymbolDB) -> Int? Never! {
     active := [Int]{}
     previous := [Int]{}
     last := -1
@@ -145,29 +145,29 @@ fn lsp_detect_switch_enum_type(tokens: [Token], offset: Int, current_path: Strin
         &previous.push(last)
         if token.span.start >= offset -> break
         if token.kind == TOKEN_LBRACE -> &active.push(index)
-        if token.kind == TOKEN_RBRACE && !active.is_empty() -> _ :: &active.pop()
+        if token.kind == TOKEN_RBRACE && !active.is_empty() -> _: &active.pop()
         if token.kind != TOKEN_LINE_COMMENT && token.kind != TOKEN_BLOCK_COMMENT -> last = index
     }
     at := active.len()
     loop at > 0 {
         at -= 1
-        brace :: active[at]
-        eq :: previous[brace]
+        brace: active[at]
+        eq: previous[brace]
         if eq < 0 -> next
-        kind :: tokens[eq].kind
+        kind: tokens[eq].kind
         if kind != TOKEN_EQ_EQ && kind != TOKEN_NOT_EQ && kind != TOKEN_LT && kind != TOKEN_GT && kind != TOKEN_LE && kind != TOKEN_GE -> next
-        subject :: previous[eq]
+        subject: previous[eq]
         if subject < 0 -> next
-        condition :: previous[subject]
+        condition: previous[subject]
         if condition < 0 || tokens[condition].kind != TOKEN_KW_IF -> next
         // Rust commits to the first canonical active dispatch, even if its
         // subject is unresolved; outer scopes must not invent an enum.
-        name :: lsp_completion_subject_type_name(db, tokens, current_path, subject) ?? return None
+        name: lsp_completion_subject_type_name(db, tokens, current_path, subject) ?? return None
         return lsp_completion_enum_definition_for_type(db, name, current_path, offset)
     }
     None
 }
-fn lsp_semantic_owner(ty: Type) -> String? Never! {
+lsp_semantic_owner: fn(ty: Type) -> String? Never! {
     if ty == {
         .Named(name) -> Val(name.copy())
         .List(_) | .FixedList(_, _) -> Val("List")
@@ -176,17 +176,17 @@ fn lsp_semantic_owner(ty: Type) -> String? Never! {
         else -> None
     }
 }
-fn lsp_state_plane_owner(db: SymbolDB, type_name: String) -> String? Never! {
-    owner :: "{type_name}.State"
+lsp_state_plane_owner: fn(db: SymbolDB, type_name: String) -> String? Never! {
+    owner: "{type_name}.State"
     loop member in db.members { if member.owner == owner -> return Val(owner) }
-    prefix :: "{type_name}.State."
+    prefix: "{type_name}.State."
     loop symbol in db.symbols.symbols() {
         if symbol.qualified_name.starts_with(prefix) -> return symbol.owner.copy()
     }
     None
 }
-fn lsp_has_state_plane(db: SymbolDB, type_name: String) -> Bool Never! { lsp_state_plane_owner(db, type_name) != None }
-fn lsp_semantic_member_owner(db: SymbolDB, receiver: String) -> String? Never! {
+lsp_has_state_plane: fn(db: SymbolDB, type_name: String) -> Bool Never! { lsp_state_plane_owner(db, type_name) != None }
+lsp_semantic_member_owner: fn(db: SymbolDB, receiver: String) -> String? Never! {
     loop definition in db.defs {
         if definition.name != receiver -> next
         if definition.kind == {
@@ -197,11 +197,11 @@ fn lsp_semantic_member_owner(db: SymbolDB, receiver: String) -> String? Never! {
         break
     }
     if lsp_state_plane_owner(db, receiver) == .Val(owner) -> return Val(owner.removesuffix(".State"))
-    prefix :: "{receiver}."
+    prefix: "{receiver}."
     loop symbol in db.symbols.symbols() { if symbol.qualified_name.starts_with(prefix) -> return symbol.owner.copy() }
     None
 }
-fn lsp_semantic_completion_kind(symbol: SemanticSymbol) -> Int Never! {
+lsp_semantic_completion_kind: fn(symbol: SemanticSymbol) -> Int Never! {
     if symbol.kind == {
         .Module -> LSP_COMPLETION_MODULE
         .Function -> if symbol.owner != None -> LSP_COMPLETION_METHOD else -> LSP_COMPLETION_FUNCTION
@@ -215,7 +215,7 @@ fn lsp_semantic_completion_kind(symbol: SemanticSymbol) -> Int Never! {
 }
 // METHOD_CALL is the canonical builtin declaration name; call is not a local
 // language catalog.
-fn lsp_function_value_call_completion(prefix: String) -> CompletionItem? Never! {
+lsp_function_value_call_completion: fn(prefix: String) -> CompletionItem? Never! {
     if !"call".starts_with(prefix) -> return None
     Val(CompletionItem{label: "call", kind: LSP_COMPLETION_METHOD, detail: Val("call(...)"), documentation: Val("Invoke this function value."), insert_text: None, insert_text_format: 1, auto_import: None})
 }

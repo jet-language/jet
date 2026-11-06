@@ -11,23 +11,23 @@ use {
         DiagnosticErrorSpan, diagnostic_from_registry, diagnostic_registry_row, diagnostic_render, foundation_json_integer, foundation_json_quote,
     ]
     jet_pkg_model.[pkg_json_array, pkg_json_object, pkg_json_render, pkg_json_text]
-    files :: core.files
-    json :: core.encoding.json
-    random :: core.crypto.random
-    sys :: core.sys
+    files: core.files
+    json: core.encoding.json
+    random: core.crypto.random
+    sys: core.sys
 }
 
 // Host reads of build files (declared inputs, work-tree outputs, published
 // outputs) are bounded: one file at most 512 MiB and one action's files at
 // most 1 GiB together, checked against the opened file's size before any
 // byte is read and enforced again while reading.
-BUILD_MAX_ACTION_FILE_BYTES :: 536870912
-BUILD_MAX_ACTION_TOTAL_BYTES :: 1073741824
-BUILD_READ_CHUNK_BYTES :: 1048576
+BUILD_MAX_ACTION_FILE_BYTES: 536870912
+BUILD_MAX_ACTION_TOTAL_BYTES: 1073741824
+BUILD_READ_CHUNK_BYTES: 1048576
 
 // Rust `io::Error`: the kind the cache decisions branch on, and the message
 // `io_action` reports.
-enum BuildIOKind {
+BuildIOKind: enum {
     NotFound
     InvalidInput
     InvalidData
@@ -39,17 +39,17 @@ enum BuildIOKind {
 }
 
 #Error
-struct BuildIOError {
+BuildIOError: struct {
     kind: BuildIOKind
     message: String
 
-    fn new(kind: BuildIOKind, message: String) -> BuildIOError Never! {
+    new: fn(kind: BuildIOKind, message: String) -> BuildIOError Never! {
         BuildIOError{kind, message}
     }
 
     // An operating-system error from Core, keeping its kind and text.
-    fn from(error: IOError) -> BuildIOError Never! {
-        kind :: if error == {
+    from: fn(error: IOError) -> BuildIOError Never! {
+        kind: if error == {
             .NotFound(_) -> BuildIOKind.NotFound
             .AlreadyExists(_) -> BuildIOKind.AlreadyExists
             .PermissionDenied(_) -> BuildIOKind.PermissionDenied
@@ -60,7 +60,7 @@ struct BuildIOError {
     }
 }
 
-struct ActionInputSnapshot {
+ActionInputSnapshot: struct {
     path: String
     digest: ContentDigest
     byte_len: Int
@@ -69,29 +69,29 @@ struct ActionInputSnapshot {
 // One declared input as it was hashed: the snapshot the action key uses and
 // the exact bytes the work tree receives, so execution never reads the input
 // a second time.
-struct ActionInputCapture {
+ActionInputCapture: struct {
     snapshot: ActionInputSnapshot
     bytes: [U8]
 }
 
-struct ActionOutputRecord {
+ActionOutputRecord: struct {
     path: String
     digest: ContentDigest
     byte_len: Int
 }
 
-enum ActionOutcome {
+ActionOutcome: enum {
     Succeeded(exit_code: Int)
     Failed(exit_code: Int)
     RestoredFromCache
 }
 
-enum CacheHitReason {
+CacheHitReason: enum {
     LocalActionRecordMatched
     DeclaredOutputsRestored
 }
 
-enum CacheMissReason {
+CacheMissReason: enum {
     NoLocalActionRecord
     ActionKeyChanged
     DeclaredOutputMissing
@@ -102,14 +102,14 @@ enum CacheMissReason {
     FrontEndIncomplete
 }
 
-enum ActionCacheStatus {
+ActionCacheStatus: enum {
     Hit(CacheHitReason)
     Miss(CacheMissReason)
 }
 
 // A local action record (Rust `ActionResultRecord`). A failed record carries
 // the structured report that reached the build edge; success never does.
-struct ActionResultRecord {
+ActionResultRecord: struct {
     key: String
     outcome: ActionOutcome
     outputs: [ActionOutputRecord]
@@ -120,28 +120,28 @@ struct ActionResultRecord {
 // Rust `snapshot_declared_inputs`: every declared input read without
 // following links, bounded, and published to the CAS. The captured bytes are
 // the ones the work tree receives.
-fn build_snapshot_declared_inputs(store: BuildArtifactStoreHandle, base: String, action: HermeticBuildAction) -[FS, Env, Exec, Time, Rand]> [ActionInputCapture] BuildIOError! {
+build_snapshot_declared_inputs: fn(store: BuildArtifactStoreHandle, base: String, action: HermeticBuildAction) -[FS, Env, Exec, Time, Rand]> [ActionInputCapture] BuildIOError! {
     inputs := [ActionInputCapture]{}
     total := 0
     loop input in action.inputs {
-        path :: build_resolve_under(base, input)
-        bytes :: build_secure_read_file(base, path, build_read_budget(total))
+        path: build_resolve_under(base, input)
+        bytes: build_secure_read_file(base, path, build_read_budget(total))
         total += bytes.len()
-        digest :: store.put_blob(bytes)
+        digest: store.put_blob(bytes)
         &inputs.push(ActionInputCapture{snapshot: ActionInputSnapshot{path: input, digest, byte_len: bytes.len()}, bytes})
     }
     Ok(inputs)
 }
 
 // Rust `capture_declared_outputs`.
-fn build_capture_declared_outputs(store: BuildArtifactStoreHandle, base: String, action: HermeticBuildAction, key: String, outcome: ActionOutcome, status: ActionCacheStatus) -[FS, Env, Exec, Time, Rand]> ActionResultRecord BuildIOError! {
+build_capture_declared_outputs: fn(store: BuildArtifactStoreHandle, base: String, action: HermeticBuildAction, key: String, outcome: ActionOutcome, status: ActionCacheStatus) -[FS, Env, Exec, Time, Rand]> ActionResultRecord BuildIOError! {
     outputs := [ActionOutputRecord]{}
     total := 0
     loop output in action.outputs {
-        path :: build_resolve_under(base, output)
-        bytes :: build_secure_read_file(base, path, build_read_budget(total))
+        path: build_resolve_under(base, output)
+        bytes: build_secure_read_file(base, path, build_read_budget(total))
         total += bytes.len()
-        digest :: store.put_blob(bytes)
+        digest: store.put_blob(bytes)
         &outputs.push(ActionOutputRecord{path: output, digest, byte_len: bytes.len()})
     }
     Ok(ActionResultRecord{key, outcome, outputs, failure_report: None, status})
@@ -149,14 +149,14 @@ fn build_capture_declared_outputs(store: BuildArtifactStoreHandle, base: String,
 
 // The byte limit of the next file of one action after `used` bytes: the
 // per-file limit, lowered to what remains of the per-action limit.
-fn build_read_budget(used: Int) -> Int Never! {
-    remaining :: BUILD_MAX_ACTION_TOTAL_BYTES - used
+build_read_budget: fn(used: Int) -> Int Never! {
+    remaining: BUILD_MAX_ACTION_TOTAL_BYTES - used
     if remaining < BUILD_MAX_ACTION_FILE_BYTES -> remaining else -> BUILD_MAX_ACTION_FILE_BYTES
 }
 
 // Rust `restore_action_outputs`: the record must name exactly the declared
 // outputs, in order, before any byte is restored.
-fn build_restore_action_outputs(store: BuildArtifactStoreHandle, base: String, action: HermeticBuildAction, record: ActionResultRecord) BuildIOError! -[FS, Env, Exec, Time, Rand]> {
+build_restore_action_outputs: fn(store: BuildArtifactStoreHandle, base: String, action: HermeticBuildAction, record: ActionResultRecord) BuildIOError! -[FS, Env, Exec, Time, Rand]> {
     matches := record.outputs.len() == action.outputs.len()
     if matches {
         loop index in 0..<record.outputs.len() {
@@ -165,8 +165,8 @@ fn build_restore_action_outputs(store: BuildArtifactStoreHandle, base: String, a
     }
     if !matches -> return Err(BuildIOError.new(.InvalidData, "cached output record does not exactly match action declarations"))
     loop output in record.outputs {
-        path :: build_resolve_under(base, output.path)
-        found :: if store.get_blob(output.digest) == {
+        path: build_resolve_under(base, output.path)
+        found: if store.get_blob(output.digest) == {
             .Val(blob) -> blob
             .None -> { return Err(BuildIOError.new(.NotFound, "CAS blob is missing")) }
             .Err(error) -> { return Err(error) }
@@ -177,7 +177,7 @@ fn build_restore_action_outputs(store: BuildArtifactStoreHandle, base: String, a
 
 // `path` relative to `base` as its normal components (Rust `strip_prefix`
 // then `Component::Normal`).
-fn build_relative_components(base: String, path: String, escape: String) -> [String] BuildIOError! {
+build_relative_components: fn(base: String, path: String, escape: String) -> [String] BuildIOError! {
     relative := ""
     if path == base {
         relative = ""
@@ -202,26 +202,26 @@ fn build_relative_components(base: String, path: String, escape: String) -> [Str
 // pattern), and the opened file must be that same inode. Its size is checked
 // against `limit` before any byte is read, and the read stops one byte past
 // `limit`.
-fn build_secure_read_file(base: String, path: String, limit: Int) -[FS]> [U8] BuildIOError! {
-    parts :: build_relative_components(base, path, "cache path escapes root")
+build_secure_read_file: fn(base: String, path: String, limit: Int) -[FS]> [U8] BuildIOError! {
+    parts: build_relative_components(base, path, "cache path escapes root")
     if parts.len() == 0 -> return Err(BuildIOError.new(.InvalidInput, "cache path has no file name"))
     directory := files.open_directory(base) ?? return Err(BuildIOError.from(err))
     loop index in 0..<parts.len() - 1 {
         directory = directory.open_directory(parts[index]) ?? return Err(BuildIOError.from(err))
     }
-    name :: parts[parts.len() - 1]
-    entry :: directory.entry_stat(name) ?? return Err(BuildIOError.from(err))
+    name: parts[parts.len() - 1]
+    entry: directory.entry_stat(name) ?? return Err(BuildIOError.from(err))
     if entry.is_symlink || !entry.is_file -> return Err(BuildIOError.new(.PermissionDenied, "cache entry is not a regular file"))
     if entry.size > limit -> return Err(BuildIOError.new(.InvalidData, "cache entry exceeds its byte limit"))
-    reader :: files.jet_std_files_open_reader_nonblocking(files.join(directory.path, name)) ?? return Err(BuildIOError.from(err))
-    info :: reader.stat() ?? return Err(BuildIOError.from(err))
+    reader: files.jet_std_files_open_reader_nonblocking(files.join(directory.path, name)) ?? return Err(BuildIOError.from(err))
+    info: reader.stat() ?? return Err(BuildIOError.from(err))
     if !info.is_file -> return Err(BuildIOError.new(.PermissionDenied, "cache entry is not a regular file"))
     if info.id != entry.id -> return Err(BuildIOError.new(.PermissionDenied, "cache entry changed while it was opened"))
     if info.size > limit -> return Err(BuildIOError.new(.InvalidData, "cache entry exceeds its byte limit"))
     bytes := [U8]{}
     loop bytes.len() <= limit {
-        want :: limit + 1 - bytes.len()
-        chunk :: reader.read(if want < BUILD_READ_CHUNK_BYTES -> want else -> BUILD_READ_CHUNK_BYTES) ?? return Err(BuildIOError.from(err))
+        want: limit + 1 - bytes.len()
+        chunk: reader.read(if want < BUILD_READ_CHUNK_BYTES -> want else -> BUILD_READ_CHUNK_BYTES) ?? return Err(BuildIOError.from(err))
         if chunk.len() == 0 -> break
         &bytes.extend(chunk)
     }
@@ -232,12 +232,12 @@ fn build_secure_read_file(base: String, path: String, limit: Int) -[FS]> [U8] Bu
 // Rust `atomic_restore_file`: walk (creating 0755) every parent without
 // following links, write a fresh `.jet-restore-<nonce>` exclusively (0600),
 // fsync it, then rename it over the final name inside the held directory.
-fn build_atomic_restore_file(base: String, path: String, bytes: [U8]) BuildIOError! -[FS, Rand]> {
-    parts :: build_relative_components(base, path, "build output escapes root")
+build_atomic_restore_file: fn(base: String, path: String, bytes: [U8]) BuildIOError! -[FS, Rand]> {
+    parts: build_relative_components(base, path, "build output escapes root")
     if parts.len() == 0 -> return Err(BuildIOError.new(.InvalidInput, "build output has no file name"))
     directory := files.open_directory(base) ?? return Err(BuildIOError.from(err))
     loop index in 0..<parts.len() - 1 {
-        part :: parts[index]
+        part: parts[index]
         if directory.open_directory(part) == {
             .Ok(child) -> directory = child
             .Err(error) -> {
@@ -250,10 +250,10 @@ fn build_atomic_restore_file(base: String, path: String, bytes: [U8]) BuildIOErr
             }
         }
     }
-    final_name :: parts[parts.len() - 1]
+    final_name: parts[parts.len() - 1]
     loop {
-        random_bytes :: random.bytes(16) ?? return Err(BuildIOError.new(.Other, "{err}"))
-        temp_name :: ".jet-restore-{build_hex_encode(random_bytes)}"
+        random_bytes: random.bytes(16) ?? return Err(BuildIOError.new(.Other, "{err}"))
+        temp_name: ".jet-restore-{build_hex_encode(random_bytes)}"
         if directory.create(temp_name, if_exists: .Refuse, mode: Val(0o600)) == {
             .Ok(writer) -> {
                 writer.write_all(bytes) ?? return Err(BuildIOError.from(err))
@@ -274,7 +274,7 @@ fn build_atomic_restore_file(base: String, path: String, bytes: [U8]) BuildIOErr
 
 // Rust `ensure_real_directory`: create a directory tree without ever
 // following an existing link; `..` is refused.
-fn build_ensure_real_directory(path: String) BuildIOError! -[FS]> {
+build_ensure_real_directory: fn(path: String) BuildIOError! -[FS]> {
     current := if path.starts_with("/") -> "/" else -> ""
     loop part in path.split("/") {
         if part == "" || part == "." -> next
@@ -287,7 +287,7 @@ fn build_ensure_real_directory(path: String) BuildIOError! -[FS]> {
 // One component of a no-follow directory walk: an existing link or
 // non-directory is refused; a missing name is created, and a concurrent
 // creator must have made a real directory.
-fn build_ensure_real_directory_step(current: String, symlink: String, not_directory: String, not_real: String) BuildIOError! -[FS]> {
+build_ensure_real_directory_step: fn(current: String, symlink: String, not_directory: String, not_real: String) BuildIOError! -[FS]> {
     if files.stat(current) == {
         .Ok(info) -> {
             if info.is_symlink -> return Err(BuildIOError.new(.PermissionDenied, symlink))
@@ -299,7 +299,7 @@ fn build_ensure_real_directory_step(current: String, symlink: String, not_direct
                 .Ok(_) -> {}
                 .Err(created) -> {
                     if !(created == .AlreadyExists(_)) -> return Err(BuildIOError.from(created))
-                    again :: files.stat(current) ?? return Err(BuildIOError.from(err))
+                    again: files.stat(current) ?? return Err(BuildIOError.from(err))
                     if again.is_symlink || !again.is_dir -> return Err(BuildIOError.new(.PermissionDenied, not_real))
                 }
             }
@@ -310,9 +310,9 @@ fn build_ensure_real_directory_step(current: String, symlink: String, not_direct
 // Rust `prepare_output_destination`: every parent of `output` below `root`
 // is a real directory (created when missing); a final link is removed so the
 // restore never writes through it.
-fn build_prepare_output_destination(root: String, output: String) BuildIOError! -[FS]> {
-    parent :: files.dirname(output)
-    parts :: build_relative_components(root, if parent == "" -> root else -> parent, "build output parent escapes project root")
+build_prepare_output_destination: fn(root: String, output: String) BuildIOError! -[FS]> {
+    parent: files.dirname(output)
+    parts: build_relative_components(root, if parent == "" -> root else -> parent, "build output parent escapes project root")
     current := root
     loop part in parts {
         current = files.join(current, part)
@@ -324,11 +324,11 @@ fn build_prepare_output_destination(root: String, output: String) BuildIOError! 
     }
 }
 
-fn build_hex_encode(bytes: [U8]) -> String Never! {
-    digits :: "0123456789abcdef".bytes()
+build_hex_encode: fn(bytes: [U8]) -> String Never! {
+    digits: "0123456789abcdef".bytes()
     out := [U8]{}
     loop byte in bytes {
-        value :: Int.from_u8(byte)
+        value: Int.from_u8(byte)
         &out.push(digits[value >> 4])
         &out.push(digits[value.bit_and(15)])
     }
@@ -336,22 +336,22 @@ fn build_hex_encode(bytes: [U8]) -> String Never! {
 }
 
 // Rust `hex_decode` (`RemoteCacheError::InvalidRecord` messages).
-fn build_hex_decode(value: String) -> [U8] BuildIOError! {
-    raw :: value.bytes()
+build_hex_decode: fn(value: String) -> [U8] BuildIOError! {
+    raw: value.bytes()
     if raw.len() % 2 != 0 -> return Err(BuildIOError.new(.InvalidData, "hex field has odd length"))
     out := [U8]{}
     index := 0
     loop index < raw.len() {
-        high :: build_hex_digit(raw[index]) ?? return Err(BuildIOError.new(.InvalidData, "hex field contains a non-hex digit"))
-        low :: build_hex_digit(raw[index + 1]) ?? return Err(BuildIOError.new(.InvalidData, "hex field contains a non-hex digit"))
+        high: build_hex_digit(raw[index]) ?? return Err(BuildIOError.new(.InvalidData, "hex field contains a non-hex digit"))
+        low: build_hex_digit(raw[index + 1]) ?? return Err(BuildIOError.new(.InvalidData, "hex field contains a non-hex digit"))
         &out.push(U8{high * 16 + low})
         index += 2
     }
     Ok(out)
 }
 
-fn build_hex_digit(byte: U8) -> Int? Never! {
-    code :: Int.from_u8(byte)
+build_hex_digit: fn(byte: U8) -> Int? Never! {
+    code: Int.from_u8(byte)
     if {
         code >= 48 && code <= 57 -> Val(code - 48)
         code >= 97 && code <= 102 -> Val(code - 87)
@@ -360,7 +360,7 @@ fn build_hex_digit(byte: U8) -> Int? Never! {
     }
 }
 
-fn build_encode_outcome(outcome: ActionOutcome) -> String Never! {
+build_encode_outcome: fn(outcome: ActionOutcome) -> String Never! {
     if outcome == {
         .Succeeded(exit_code) -> "succeeded:{exit_code}"
         .Failed(exit_code) -> "failed:{exit_code}"
@@ -368,10 +368,10 @@ fn build_encode_outcome(outcome: ActionOutcome) -> String Never! {
     }
 }
 
-fn build_parse_outcome(value: String) -> ActionOutcome BuildIOError! {
+build_parse_outcome: fn(value: String) -> ActionOutcome BuildIOError! {
     if value == "restored" -> return Ok(ActionOutcome.RestoredFromCache)
-    parts :: value.split_once(":") ?? return Err(BuildIOError.new(.InvalidData, "action record outcome is malformed"))
-    exit_code :: build_parse_i32(parts.after) ?? return Err(BuildIOError.new(.InvalidData, "action record outcome exit code is not a number"))
+    parts: value.split_once(":") ?? return Err(BuildIOError.new(.InvalidData, "action record outcome is malformed"))
+    exit_code: build_parse_i32(parts.after) ?? return Err(BuildIOError.new(.InvalidData, "action record outcome exit code is not a number"))
     if parts.before == {
         "succeeded" -> Ok(ActionOutcome.Succeeded{exit_code})
         "failed" -> Ok(ActionOutcome.Failed{exit_code})
@@ -380,40 +380,40 @@ fn build_parse_outcome(value: String) -> ActionOutcome BuildIOError! {
 }
 
 // Rust `str::parse::<i32>`: optional sign, ASCII digits, in range.
-fn build_parse_i32(text: String) -> Int? Never! {
-    digits :: if text.starts_with("+") || text.starts_with("-") -> text.slice(1, text.len()) else -> text
+build_parse_i32: fn(text: String) -> Int? Never! {
+    digits: if text.starts_with("+") || text.starts_with("-") -> text.slice(1, text.len()) else -> text
     if digits == "" -> return None
     loop byte in digits.bytes() {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         if code < 48 || code > 57 -> return None
     }
     if digits.len() > 10 -> return None
-    value :: Int.parse(text.removeprefix("+")) ?? return None
+    value: Int.parse(text.removeprefix("+")) ?? return None
     if value < -2147483648 || value > 2147483647 -> return None
     Val(value)
 }
 
 // Rust `str::parse::<u64>`.
-fn build_parse_u64(text: String) -> Int? Never! {
+build_parse_u64: fn(text: String) -> Int? Never! {
     if text == "" || text.len() > 20 -> return None
     loop byte in text.bytes() {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         if code < 48 || code > 57 -> return None
     }
-    value :: Int.parse(text) ?? return None
+    value: Int.parse(text) ?? return None
     if value < 0 -> return None
     Val(value)
 }
 
 // Rust `write_action_record`.
-fn build_write_action_record(store: BuildArtifactStoreHandle, key: String, record: ActionResultRecord) BuildIOError! -[FS, Env, Exec, Time, Rand]> {
+build_write_action_record: fn(store: BuildArtifactStoreHandle, key: String, record: ActionResultRecord) BuildIOError! -[FS, Env, Exec, Time, Rand]> {
     text := "{record.key}\noutcome={build_encode_outcome(record.outcome)}\n"
     if record.failure_report == .Val(report) -> text = "{text}failure={build_hex_encode(build_report_to_json(report).bytes())}\n"
     loop output in record.outputs -> text = "{text}{output.path}\t{output.digest.as_str()}\t{output.byte_len}\n"
     store.put_record(key, text.bytes())
 }
 
-fn build_cache_restore_miss_reason(error: BuildIOError) -> CacheMissReason Never! {
+build_cache_restore_miss_reason: fn(error: BuildIOError) -> CacheMissReason Never! {
     if error.kind == {
         .NotFound -> CacheMissReason.DeclaredOutputMissing
         .InvalidData -> CacheMissReason.CacheRecordInvalid
@@ -423,40 +423,40 @@ fn build_cache_restore_miss_reason(error: BuildIOError) -> CacheMissReason Never
 
 // Rust `read_action_record`: the first line names the key; one outcome; a
 // failure report exactly when the outcome failed, and then no outputs.
-fn build_read_action_record(store: BuildArtifactStoreHandle, key: String) -[FS, Env, Exec, Time, Rand]> ActionResultRecord? BuildIOError! {
-    stored :: store.get_record(key)
-    bytes :: stored ?? return Ok(None)
-    text :: String.from_bytes(bytes) ?? return Err(BuildIOError.new(.InvalidData, "action record is not UTF-8"))
-    lines :: build_record_lines(text)
+build_read_action_record: fn(store: BuildArtifactStoreHandle, key: String) -[FS, Env, Exec, Time, Rand]> ActionResultRecord? BuildIOError! {
+    stored: store.get_record(key)
+    bytes: stored ?? return Ok(None)
+    text: String.from_bytes(bytes) ?? return Err(BuildIOError.new(.InvalidData, "action record is not UTF-8"))
+    lines: build_record_lines(text)
     if lines.len() == 0 || lines[0] != key -> return Err(BuildIOError.new(.InvalidData, "action record key does not match its cache path"))
     outcome := ActionOutcome?{None}
     failure_report := DiagnosticBuildError?{None}
     outputs := [ActionOutputRecord]{}
     loop index in 1..<lines.len() {
-        line :: lines[index]
+        line: lines[index]
         if line.starts_with("outcome=") {
             if outcome != None -> return Err(BuildIOError.new(.InvalidData, "action record has duplicate outcome"))
             outcome = Val(build_parse_outcome(line.removeprefix("outcome=")))
             next
         }
         if line.starts_with("failure=") {
-            value :: line.removeprefix("failure=")
+            value: line.removeprefix("failure=")
             if failure_report != None || value == "" -> return Err(BuildIOError.new(.InvalidData, "action record has an invalid failure report"))
-            decoded :: build_hex_decode(value)
-            report_text :: String.from_bytes(decoded) ?? return Err(BuildIOError.new(.InvalidData, "action failure report is not UTF-8"))
-            report :: build_report_from_json(report_text) ?? return Err(BuildIOError.new(.InvalidData, "action failure report is invalid: {err.message}"))
+            decoded: build_hex_decode(value)
+            report_text: String.from_bytes(decoded) ?? return Err(BuildIOError.new(.InvalidData, "action failure report is not UTF-8"))
+            report: build_report_from_json(report_text) ?? return Err(BuildIOError.new(.InvalidData, "action failure report is invalid: {err.message}"))
             failure_report = Val(report)
             next
         }
-        fields :: line.split("\t").to_list()
+        fields: line.split("\t").to_list()
         if fields.len() != 3 -> return Err(BuildIOError.new(.InvalidData, "malformed action output record"))
-        path :: build_path_new(fields[0]) ?? return Err(BuildIOError.new(.InvalidData, "malformed action output record"))
-        digest :: ContentDigest.parse(fields[1]) ?? return Err(BuildIOError.new(.InvalidData, err.message))
-        byte_len :: build_parse_u64(fields[2]) ?? return Err(BuildIOError.new(.InvalidData, "malformed action output record"))
+        path: build_path_new(fields[0]) ?? return Err(BuildIOError.new(.InvalidData, "malformed action output record"))
+        digest: ContentDigest.parse(fields[1]) ?? return Err(BuildIOError.new(.InvalidData, err.message))
+        byte_len: build_parse_u64(fields[2]) ?? return Err(BuildIOError.new(.InvalidData, "malformed action output record"))
         &outputs.push(ActionOutputRecord{path, digest, byte_len})
     }
-    found :: outcome ?? return Err(BuildIOError.new(.InvalidData, "action record has no outcome"))
-    failed :: if found == {
+    found: outcome ?? return Err(BuildIOError.new(.InvalidData, "action record has no outcome"))
+    failed: if found == {
         .Failed(_) -> true
         else -> false
     }
@@ -467,10 +467,10 @@ fn build_read_action_record(store: BuildArtifactStoreHandle, key: String) -[FS, 
 
 // Rust `str::lines`: split on `\n`, drop one trailing empty line and a `\r`
 // before each `\n`.
-fn build_record_lines(text: String) -> [String] Never! {
+build_record_lines: fn(text: String) -> [String] Never! {
     lines := [String]{}
     loop line in text.split("\n") {
-        raw :: line.bytes()
+        raw: line.bytes()
         // A CR (13) before the LF belongs to the line ending.
         if raw.len() > 0 && Int.from_u8(raw[raw.len() - 1]) == 13 -> &lines.push(String.from_bytes(raw.slice(0, raw.len() - 1)) ?? line) else -> &lines.push(line)
     }
@@ -483,15 +483,15 @@ fn build_record_lines(text: String) -> [String] Never! {
 // `$HOME/.cache`. A `.` or `..` component is refused, so the prefix check
 // confines the path, and a final link is never followed. It never supplies
 // or influences a cache decision.
-fn build_record_cache_event(action: String, key: String, status: ActionCacheStatus, phase: String, outcome: ActionOutcome?) -[FS, Env]> {
-    path :: sys.get("JET_COMPTIME_CACHE_OBSERVATION_PATH") ?? return
-    home :: sys.get("HOME") ?? return
-    allowed_root :: files.join(home, ".cache")
+build_record_cache_event: fn(action: String, key: String, status: ActionCacheStatus, phase: String, outcome: ActionOutcome?) -[FS, Env]> {
+    path: sys.get("JET_COMPTIME_CACHE_OBSERVATION_PATH") ?? return
+    home: sys.get("HOME") ?? return
+    allowed_root: files.join(home, ".cache")
     if !path.starts_with("/") || !(path == allowed_root || path.starts_with("{allowed_root}/")) -> return
     loop part in path.split("/") {
         if part == "." || part == ".." -> return
     }
-    labels :: if status == {
+    labels: if status == {
         .Hit(.LocalActionRecordMatched) -> (status: "hit", reason: "local_action_record_matched")
         .Hit(.DeclaredOutputsRestored) -> (status: "hit", reason: "declared_outputs_restored")
         .Miss(.NoLocalActionRecord) -> (status: "miss", reason: "no_local_action_record")
@@ -503,16 +503,16 @@ fn build_record_cache_event(action: String, key: String, status: ActionCacheStat
         .Miss(.UncachedAction) -> (status: "miss", reason: "uncached_action")
         .Miss(.FrontEndIncomplete) -> (status: "miss", reason: "front_end_incomplete")
     }
-    rendered_outcome :: if outcome == {
+    rendered_outcome: if outcome == {
         .Val(value) -> foundation_json_quote(build_encode_outcome(value))
         .None -> "null"
     }
-    mode :: sys.get("JET_COMPTIME_MODE") ?? "unknown"
-    operation_id :: sys.get("JET_COMPTIME_OPERATION_ID") ?? "unknown"
-    payload :: "{{\"schema\":\"jet.comptime-cache-event.v1\",\"mode\":{foundation_json_quote(mode)},\"operation_id\":{foundation_json_quote(operation_id)},\"action\":{foundation_json_quote(action)},\"key\":{foundation_json_quote(key)},\"phase\":{foundation_json_quote(phase)},\"status\":{foundation_json_quote(labels.status)},\"reason\":{foundation_json_quote(labels.reason)},\"outcome\":{rendered_outcome}}}\n"
-    parent :: files.dirname(path)
+    mode: sys.get("JET_COMPTIME_MODE") ?? "unknown"
+    operation_id: sys.get("JET_COMPTIME_OPERATION_ID") ?? "unknown"
+    payload: "{{\"schema\":\"jet.comptime-cache-event.v1\",\"mode\":{foundation_json_quote(mode)},\"operation_id\":{foundation_json_quote(operation_id)},\"action\":{foundation_json_quote(action)},\"key\":{foundation_json_quote(key)},\"phase\":{foundation_json_quote(phase)},\"status\":{foundation_json_quote(labels.status)},\"reason\":{foundation_json_quote(labels.reason)},\"outcome\":{rendered_outcome}}}\n"
+    parent: files.dirname(path)
     if parent != "" -> files.create_dir_all(parent).drop("cache observation evidence is best-effort")
-    writer :: files.append(path, links: .Refuse) ?? return
+    writer: files.append(path, links: .Refuse) ?? return
     writer.write_all(payload.bytes()).drop("cache observation evidence is best-effort")
     writer.flush().drop("cache observation evidence is best-effort")
 }
@@ -520,34 +520,34 @@ fn build_record_cache_event(action: String, key: String, status: ActionCacheStat
 // The `jet.err/v1` wire of one structured report (Rust
 // `JetErrorReport::to_json`). The report type carries no origin frame, and
 // the executor's reports never carry a journey, so neither field is written.
-fn build_report_to_json(report: DiagnosticBuildError) -> String Never! {
+build_report_to_json: fn(report: DiagnosticBuildError) -> String Never! {
     fields := [String]{"\"schema\":\"jet.err/v1\"", "\"message\":{foundation_json_quote(report.message)}"}
-    code :: if report.code == {
+    code: if report.code == {
         .Val(text) -> foundation_json_quote(text)
         .None -> "null"
     }
     &fields.push("\"code\":{code}")
-    cause :: if report.causes.len() == {
+    cause: if report.causes.len() == {
         0 -> "null"
         1 -> build_report_to_json(report.causes[0])
         else -> {
-            rendered :: loop item in report.causes -> build_report_to_json(item)
+            rendered: loop item in report.causes -> build_report_to_json(item)
             "[{rendered.join(",")}]"
         }
     }
     &fields.push("\"cause\":{cause}")
     if report.typed_identity == .Val(identity) -> &fields.push("\"typed_identity\":{foundation_json_quote(identity)}")
     if report.context_frames.len() > 0 {
-        frames :: loop frame in report.context_frames -> "{{\"text\":{foundation_json_quote(frame.text)},\"file\":{foundation_json_quote(frame.file)},\"line\":{frame.line}}}"
+        frames: loop frame in report.context_frames -> "{{\"text\":{foundation_json_quote(frame.text)},\"file\":{foundation_json_quote(frame.file)},\"line\":{frame.line}}}"
         &fields.push("\"context_frames\":[{frames.join(",")}]")
     }
     if report.conversion_history.len() > 0 {
-        conversions :: loop conversion in report.conversion_history -> "{{\"source\":{foundation_json_quote(conversion.source)},\"target\":{foundation_json_quote(conversion.target)}}}"
+        conversions: loop conversion in report.conversion_history -> "{{\"source\":{foundation_json_quote(conversion.source)},\"target\":{foundation_json_quote(conversion.target)}}}"
         &fields.push("\"conversion_history\":[{conversions.join(",")}]")
     }
     if report.details == .Val(details) {
-        detail_fields :: loop field in details.fields -> "{foundation_json_quote(field.name)}:{field.value}"
-        span :: if details.source_span == {
+        detail_fields: loop field in details.fields -> "{foundation_json_quote(field.name)}:{field.value}"
+        span: if details.source_span == {
             .Val(range) -> "{{\"start\":{range.start},\"end\":{range.end}}}"
             .None -> "null"
         }
@@ -558,45 +558,45 @@ fn build_report_to_json(report: DiagnosticBuildError) -> String Never! {
 
 // Rust `JetErrorReport::from_json`: decode the canonical wire and refuse any
 // spelling `build_report_to_json` would not write back byte for byte.
-fn build_report_from_json(text: String) -> DiagnosticBuildError BuildIOError! {
-    tree :: json.parse(text) ?? return Err(build_report_invalid("invalid error report: {err.reason}"))
-    report :: build_report_from_tree(tree)
+build_report_from_json: fn(text: String) -> DiagnosticBuildError BuildIOError! {
+    tree: json.parse(text) ?? return Err(build_report_invalid("invalid error report: {err.reason}"))
+    report: build_report_from_tree(tree)
     if build_report_to_json(report) != text -> return Err(build_report_invalid("error report is not canonical"))
     Ok(report)
 }
 
-fn build_report_invalid(message: String) -> BuildIOError Never! {
+build_report_invalid: fn(message: String) -> BuildIOError Never! {
     BuildIOError.new(.InvalidData, message)
 }
 
-fn build_report_object(value: Dyn, name: String) -> [String: Dyn] BuildIOError! {
+build_report_object: fn(value: Dyn, name: String) -> [String: Dyn] BuildIOError! {
     pkg_json_object(value) ?? return Err(build_report_invalid("error report {name} is not an object"))
 }
 
-fn build_report_text(value: Dyn, name: String) -> String BuildIOError! {
+build_report_text: fn(value: Dyn, name: String) -> String BuildIOError! {
     pkg_json_text(value) ?? return Err(build_report_invalid("error report {name} is not text"))
 }
 
-fn build_report_field(fields: [String: Dyn], name: String) -> Dyn BuildIOError! {
+build_report_field: fn(fields: [String: Dyn], name: String) -> Dyn BuildIOError! {
     fields.get(name) ?? return Err(build_report_invalid("error report lacks {name}"))
 }
 
-fn build_report_u32(value: Dyn, name: String) -> Int BuildIOError! {
-    number :: foundation_json_integer(value) ?? return Err(build_report_invalid("error report {name} is not an integer"))
+build_report_u32: fn(value: Dyn, name: String) -> Int BuildIOError! {
+    number: foundation_json_integer(value) ?? return Err(build_report_invalid("error report {name} is not an integer"))
     if number < 0 || number > 4294967295 -> return Err(build_report_invalid("error report {name} is not a u32"))
     Ok(number)
 }
 
-fn build_report_from_tree(value: Dyn) -> DiagnosticBuildError BuildIOError! {
-    fields :: build_report_object(value, "report")
+build_report_from_tree: fn(value: Dyn) -> DiagnosticBuildError BuildIOError! {
+    fields: build_report_object(value, "report")
     if build_report_text(build_report_field(fields, "schema"), "schema") != "jet.err/v1" -> return Err(build_report_invalid("unsupported error report schema"))
-    message :: build_report_text(build_report_field(fields, "message"), "message")
-    code_value :: build_report_field(fields, "code")
-    code :: if code_value == {
+    message: build_report_text(build_report_field(fields, "message"), "message")
+    code_value: build_report_field(fields, "code")
+    code: if code_value == {
         .Null -> String?{None}
         else -> Val(build_report_text(code_value, "code"))
     }
-    cause_value :: build_report_field(fields, "cause")
+    cause_value: build_report_field(fields, "cause")
     causes := [DiagnosticBuildError]{}
     if cause_value == {
         .Null -> {}
@@ -608,9 +608,9 @@ fn build_report_from_tree(value: Dyn) -> DiagnosticBuildError BuildIOError! {
     if fields.get("typed_identity") == .Val(identity) -> typed_identity = Val(build_report_text(identity, "typed_identity"))
     context_frames := [DiagnosticErrorContextFrame]{}
     if fields.get("context_frames") == .Val(raw) {
-        items :: pkg_json_array(raw) ?? return Err(build_report_invalid("error report context_frames is not an array"))
+        items: pkg_json_array(raw) ?? return Err(build_report_invalid("error report context_frames is not an array"))
         loop item in items {
-            frame :: build_report_object(item, "context frame")
+            frame: build_report_object(item, "context frame")
             &context_frames.push(DiagnosticErrorContextFrame{
                 text: build_report_text(build_report_field(frame, "text"), "context text"),
                 file: build_report_text(build_report_field(frame, "file"), "context file"),
@@ -623,9 +623,9 @@ fn build_report_from_tree(value: Dyn) -> DiagnosticBuildError BuildIOError! {
     if fields.has_key("origin") || fields.has_key("source_journey") -> return Err(build_report_invalid("error report is not canonical"))
     conversion_history := [DiagnosticErrorConversion]{}
     if fields.get("conversion_history") == .Val(raw) {
-        items :: pkg_json_array(raw) ?? return Err(build_report_invalid("error report conversion_history is not an array"))
+        items: pkg_json_array(raw) ?? return Err(build_report_invalid("error report conversion_history is not an array"))
         loop item in items {
-            conversion :: build_report_object(item, "conversion")
+            conversion: build_report_object(item, "conversion")
             &conversion_history.push(DiagnosticErrorConversion{
                 source: build_report_text(build_report_field(conversion, "source"), "conversion source"),
                 target: build_report_text(build_report_field(conversion, "target"), "conversion target"),
@@ -634,17 +634,17 @@ fn build_report_from_tree(value: Dyn) -> DiagnosticBuildError BuildIOError! {
     }
     details := DiagnosticErrorDetails?{None}
     if fields.get("details") == .Val(raw) {
-        detail :: build_report_object(raw, "details")
-        values :: build_report_field(detail, "fields")
-        pairs :: if values == {
+        detail: build_report_object(raw, "details")
+        values: build_report_field(detail, "fields")
+        pairs: if values == {
             .Object(entries) -> entries
             else -> { return Err(build_report_invalid("error report detail fields is not an object")) }
         }
-        detail_fields :: loop pair in pairs -> DiagnosticErrorField{name: pair.key, value: build_report_encode_value(pair.value)}
-        span_value :: build_report_field(detail, "source_span")
+        detail_fields: loop pair in pairs -> DiagnosticErrorField{name: pair.key, value: build_report_encode_value(pair.value)}
+        span_value: build_report_field(detail, "source_span")
         source_span := DiagnosticErrorSpan?{None}
         if span_value != .Null {
-            span :: build_report_object(span_value, "source span")
+            span: build_report_object(span_value, "source span")
             source_span = Val(DiagnosticErrorSpan{start: build_report_u32(build_report_field(span, "start"), "span start"), end: build_report_u32(build_report_field(span, "end"), "span end")})
         }
         details = Val(DiagnosticErrorDetails{variant: build_report_text(build_report_field(detail, "variant"), "detail variant"), fields: detail_fields, source_span})
@@ -653,18 +653,18 @@ fn build_report_from_tree(value: Dyn) -> DiagnosticBuildError BuildIOError! {
 }
 
 // Rust `jet_error_json_encode_value`: one detail value back to JSON text.
-fn build_report_encode_value(value: Dyn) -> String Never! {
+build_report_encode_value: fn(value: Dyn) -> String Never! {
     if value == {
         .Null -> "null"
         .Bool(flag) -> if flag -> "true" else -> "false"
         .Int(number) -> "{number}"
         .Text(text) -> foundation_json_quote(text)
         .Array(items) -> {
-            rendered :: loop item in items -> build_report_encode_value(item)
+            rendered: loop item in items -> build_report_encode_value(item)
             "[{rendered.join(",")}]"
         }
         .Object(pairs) -> {
-            rendered :: loop pair in pairs -> "{foundation_json_quote(pair.key)}:{build_report_encode_value(pair.value)}"
+            rendered: loop pair in pairs -> "{foundation_json_quote(pair.key)}:{build_report_encode_value(pair.value)}"
             "{{{rendered.join(",")}}}"
         }
         else -> pkg_json_render(value)
@@ -675,23 +675,23 @@ fn build_report_encode_value(value: Dyn) -> String Never! {
 // process): the E3015 entry report through its registry row, with the
 // structured rows as its detail. The executor's reports carry no journey, so
 // no journey block is written.
-fn build_report_render(report: DiagnosticBuildError) -> String Never! {
-    row :: diagnostic_registry_row("E3015") ?? panic("registered entry error row is missing")
-    message :: build_terminal_text(report.message)
+build_report_render: fn(report: DiagnosticBuildError) -> String Never! {
+    row: diagnostic_registry_row("E3015") ?? panic("registered entry error row is missing")
+    message: build_terminal_text(report.message)
     diagnostic := diagnostic_from_registry("E3015", None, row.what.replace("{{msg}}", message), row.why.replace("{{msg}}", message), row.fix.replace("{{msg}}", message))
-    rows :: build_report_render_rows(report, 0)
+    rows: build_report_render_rows(report, 0)
     if rows != "" -> diagnostic.detail = Val(rows)
     diagnostic_render(diagnostic, "", "", false)
 }
 
-fn build_report_render_rows(report: DiagnosticBuildError, depth: Int) -> String Never! {
+build_report_render_rows: fn(report: DiagnosticBuildError, depth: Int) -> String Never! {
     out := ""
     if depth == 0 {
         if report.code == .Val(code) -> out = "{out}error code: {build_terminal_text(code)}\n"
         if report.typed_identity == .Val(identity) -> out = "{out}type: {build_terminal_text(identity)}\n"
     } else {
         out = "{out}{build_indent(depth)}cause: {build_terminal_text(report.message)}"
-        suffix :: if report.typed_identity == {
+        suffix: if report.typed_identity == {
             .Val(identity) -> if report.code == {
                 .Val(code) -> " (type: {build_terminal_text(identity)}; error code: {build_terminal_text(code)})"
                 .None -> " (type: {build_terminal_text(identity)})"
@@ -704,7 +704,7 @@ fn build_report_render_rows(report: DiagnosticBuildError, depth: Int) -> String 
         out = "{out}{suffix}\n"
     }
     loop cause in report.causes -> out = "{out}{build_report_render_rows(cause, depth + 1)}"
-    inner :: build_indent(depth + 1)
+    inner: build_indent(depth + 1)
     loop frame in report.context_frames -> out = "{out}{inner}context ({build_terminal_text(frame.file)}:{frame.line}): {build_terminal_text(frame.text)}\n"
     loop conversion in report.conversion_history -> out = "{out}{inner}conversion: {build_terminal_text(conversion.source)} -> {build_terminal_text(conversion.target)}\n"
     if report.details == .Val(details) {
@@ -715,7 +715,7 @@ fn build_report_render_rows(report: DiagnosticBuildError, depth: Int) -> String 
     out
 }
 
-fn build_indent(depth: Int) -> String Never! {
+build_indent: fn(depth: Int) -> String Never! {
     out := ""
     loop _ in 0..<depth -> out = "{out}  "
     out
@@ -723,11 +723,11 @@ fn build_indent(depth: Int) -> String Never! {
 
 // Rust `jet_write_terminal_text`: `\n`, `\r`, `\t` short escapes; every other
 // control scalar and U+2028/U+2029 as `\u{xxxx}`.
-fn build_terminal_text(value: String) -> String Never! {
+build_terminal_text: fn(value: String) -> String Never! {
     out := ""
     loop scalar in value.chars() {
-        text :: "{scalar}"
-        code :: build_scalar_code(text)
+        text: "{scalar}"
+        code: build_scalar_code(text)
         out = if {
             code == 10 -> "{out}\\n"
             code == 13 -> "{out}\\r"
@@ -740,9 +740,9 @@ fn build_terminal_text(value: String) -> String Never! {
 }
 
 // The Unicode scalar value of one UTF-8 encoded scalar.
-fn build_scalar_code(text: String) -> Int Never! {
-    raw :: text.bytes()
-    first :: Int.from_u8(raw[0])
+build_scalar_code: fn(text: String) -> Int Never! {
+    raw: text.bytes()
+    first: Int.from_u8(raw[0])
     if raw.len() == 1 -> return first
     if raw.len() == 2 -> return (first.bit_and(31) << 6) + Int.from_u8(raw[1]).bit_and(63)
     if raw.len() == 3 -> return (first.bit_and(15) << 12) + (Int.from_u8(raw[1]).bit_and(63) << 6) + Int.from_u8(raw[2]).bit_and(63)
@@ -750,8 +750,8 @@ fn build_scalar_code(text: String) -> Int Never! {
 }
 
 // Rust `{:04x}`: lowercase hex, at least four digits.
-fn build_hex4(value: Int) -> String Never! {
-    digits :: "0123456789abcdef"
+build_hex4: fn(value: Int) -> String Never! {
+    digits: "0123456789abcdef"
     out := ""
     rest := value
     loop rest > 0 {

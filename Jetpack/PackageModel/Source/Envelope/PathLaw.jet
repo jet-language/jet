@@ -4,7 +4,7 @@
 // representable on every tier-one platform. Unicode normalization is never
 // implicit: NFC and NFD spellings that differ in bytes are distinct names.
 
-PATH_LAW_RESERVED_NAMES :: comptime { [String]{
+PATH_LAW_RESERVED_NAMES: comptime { [String]{
     "CON", "PRN", "AUX", "NUL",
     "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
     "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"
@@ -12,36 +12,36 @@ PATH_LAW_RESERVED_NAMES :: comptime { [String]{
 
 // Path-law failure (E1299) with a stable code the CLI and tests match on.
 #Error
-struct PathLawError {
+PathLawError: struct {
     code: String
     path: String
     detail: String
 
-    fn what(self) -> String Never! {
+    what: fn(self) -> String Never! {
         "store path rejected: `{self.path}`"
     }
 
-    fn why(self) -> String Never! {
+    why: fn(self) -> String Never! {
         "Hangar Store v2 path law ({self.code}) forbids this name: {self.detail}."
     }
 
-    fn fix(self) -> String Never! {
+    fix: fn(self) -> String Never! {
         "Rename the entry to a portable store path: no reserved Windows names, no trailing `.`/` `, no case-fold collisions with a sibling, and no `.`/`..` components."
     }
 
-    fn message(self) -> String Never! {
+    message: fn(self) -> String Never! {
         "{self.what()} — {self.detail}"
     }
 }
 
 // Reject one path component under the native ingest law.
-fn pkg_validate_path_component(name: [U8]) PathLawError! {
+pkg_validate_path_component: fn(name: [U8]) PathLawError! {
     pkg_validate_path_component_with_mode(name, false)
 }
 
 // Validate one component; Nix admission (`allow_nix_store_symlinks`) accepts
 // exactly Nix's own component law: any byte except `/` and NUL, not `.`/`..`.
-fn pkg_validate_path_component_with_mode(name: [U8], allow_nix_store_symlinks: Bool) PathLawError! {
+pkg_validate_path_component_with_mode: fn(name: [U8], allow_nix_store_symlinks: Bool) PathLawError! {
     if name.len() == 0 -> return Err(PathLawError{code: "empty", path: "", detail: "empty path component"})
     if name.contains(U8{0}) -> return Err(PathLawError{code: "nul", path: pkg_lossy_text(name), detail: "NUL byte in path component"})
     if name == ".".bytes() || name == "..".bytes() {
@@ -51,7 +51,7 @@ fn pkg_validate_path_component_with_mode(name: [U8], allow_nix_store_symlinks: B
     if name.contains(U8{92}) {
         return Err(PathLawError{code: "backslash", path: pkg_lossy_text(name), detail: "backslash is not a portable path component outside Nix admission"})
     }
-    last :: Int.from_u8(name[name.len() - 1])
+    last: Int.from_u8(name[name.len() - 1])
     if last == 46 || last == 32 {
         return Err(PathLawError{code: "trailing-alias", path: pkg_lossy_text(name), detail: "trailing `.` or space is a Windows alias and is rejected"})
     }
@@ -61,18 +61,18 @@ fn pkg_validate_path_component_with_mode(name: [U8], allow_nix_store_symlinks: B
 }
 
 // Validate every component of a relative store path under the native law.
-fn pkg_validate_rel_path(rel: String) PathLawError! {
+pkg_validate_rel_path: fn(rel: String) PathLawError! {
     pkg_validate_rel_path_with_mode(rel, false)
 }
 
 // Validate a relative store path; the empty path is the output root itself.
 // Like Rust `Path::components`, an interior `.` is skipped while a leading
 // `.` and every `..` are rejected.
-fn pkg_validate_rel_path_with_mode(rel: String, allow_nix_store_symlinks: Bool) PathLawError! {
+pkg_validate_rel_path_with_mode: fn(rel: String, allow_nix_store_symlinks: Bool) PathLawError! {
     if rel.starts_with("/") -> return Err(PathLawError{code: "absolute", path: rel, detail: "store paths must be relative"})
-    parts :: rel.split("/").to_list()
+    parts: rel.split("/").to_list()
     loop index in 0..<parts.len() {
-        part :: parts[index]
+        part: parts[index]
         if part == "" -> next
         if part == "." {
             if index == 0 -> return Err(PathLawError{code: "dot", path: rel, detail: "`.` and `..` are not store path components"})
@@ -84,10 +84,10 @@ fn pkg_validate_rel_path_with_mode(rel: String, allow_nix_store_symlinks: Bool) 
 }
 
 // Reject case-fold collisions among sibling directory entry names.
-fn pkg_reject_casefold_collisions(names: [[U8]]) PathLawError! {
+pkg_reject_casefold_collisions: fn(names: [[U8]]) PathLawError! {
     folded := [String: [U8]]{}
     loop name in names {
-        key :: pkg_hex_bytes(pkg_ascii_fold(name))
+        key: pkg_hex_bytes(pkg_ascii_fold(name))
         if folded.get(key) == {
             .Val(prior) -> {
                 if prior != name {
@@ -99,16 +99,16 @@ fn pkg_reject_casefold_collisions(names: [[U8]]) PathLawError! {
     }
 }
 
-fn pkg_ascii_fold(bytes: [U8]) -> [U8] Never! {
+pkg_ascii_fold: fn(bytes: [U8]) -> [U8] Never! {
     out := [U8]{}
     loop byte in bytes {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         &out.push(if code >= 65 && code <= 90 -> U8{code + 32} else -> byte)
     }
     out
 }
 
-fn pkg_path_law_is_windows_reserved(name: [U8]) -> Bool Never! {
+pkg_path_law_is_windows_reserved: fn(name: [U8]) -> Bool Never! {
     stem_end := name.len()
     loop index in 0..<name.len() {
         if Int.from_u8(name[index]) == 46 {
@@ -118,21 +118,21 @@ fn pkg_path_law_is_windows_reserved(name: [U8]) -> Bool Never! {
     }
     upper := [U8]{}
     loop index in 0..<stem_end {
-        code :: Int.from_u8(name[index])
+        code: Int.from_u8(name[index])
         &upper.push(if code >= 97 && code <= 122 -> U8{code - 32} else -> name[index])
     }
-    text :: String.from_bytes(upper) ?? return false
+    text: String.from_bytes(upper) ?? return false
     PATH_LAW_RESERVED_NAMES.contains(text)
 }
 
 // `String::from_utf8_lossy`: each invalid byte becomes U+FFFD.
-fn pkg_lossy_text(bytes: [U8]) -> String Never! {
-    whole :: String.from_bytes(bytes) ?? {
+pkg_lossy_text: fn(bytes: [U8]) -> String Never! {
+    whole: String.from_bytes(bytes) ?? {
         out := [U8]{}
         index := 0
         loop index < bytes.len() {
-            lead :: Int.from_u8(bytes[index])
-            width :: if {
+            lead: Int.from_u8(bytes[index])
+            width: if {
                 lead < 0x80 -> 1
                 lead >= 0xC2 && lead <= 0xDF -> 2
                 lead >= 0xE0 && lead <= 0xEF -> 3
@@ -155,11 +155,11 @@ fn pkg_lossy_text(bytes: [U8]) -> String Never! {
 }
 
 // Lowercase hex of `bytes`.
-fn pkg_hex_bytes(bytes: [U8]) -> String Never! {
-    digits :: "0123456789abcdef".bytes()
+pkg_hex_bytes: fn(bytes: [U8]) -> String Never! {
+    digits: "0123456789abcdef".bytes()
     out := [U8]{}
     loop byte in bytes {
-        value :: Int.from_u8(byte)
+        value: Int.from_u8(byte)
         &out.push(digits[value >> 4])
         &out.push(digits[(value).bit_and(15)])
     }

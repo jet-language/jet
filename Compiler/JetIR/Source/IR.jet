@@ -89,7 +89,7 @@
 
 use jet_foundation.[NameRows, TComptimeValue, Type, TypeTable, name_rows, name_rows_get, name_rows_hash, name_rows_set, name_rows_set_hashed, name_rows_value, sha256_bytes, sha256_hex, sha256_hex_bytes, stable_id]
 
-enum IROp {
+IROp: enum {
     Nop
     Const
     ConstText
@@ -150,33 +150,33 @@ enum IROp {
 // the result is tested. IR_OVERFLOW_LEFT and IR_OVERFLOW_RIGHT mark one
 // whose left or right operand alone is proven inline: that operand's test
 // goes, the other's and the result's stay.
-IR_OVERFLOW_TRAP :: 0
-IR_OVERFLOW_WRAP :: 1
-IR_OVERFLOW_OPERANDS :: 2
-IR_OVERFLOW_LEFT :: 3
-IR_OVERFLOW_RIGHT :: 4
+IR_OVERFLOW_TRAP: 0
+IR_OVERFLOW_WRAP: 1
+IR_OVERFLOW_OPERANDS: 2
+IR_OVERFLOW_LEFT: 3
+IR_OVERFLOW_RIGHT: 4
 
 // The stop polls (Build.jet ir_stop_poll): after a call, and after a user
 // operation whose slow path can publish a numeric stop.
-IR_STOP_POLL_KEY :: "jet_ir_stop_poll#asm"
-IR_STOP_TRAP_KEY :: "jet_ir_stop_trap#asm"
+IR_STOP_POLL_KEY: "jet_ir_stop_poll#asm"
+IR_STOP_TRAP_KEY: "jet_ir_stop_trap#asm"
 
 // What a slot holds. `Int` is Jet's exact integer (an inline word whose bits
 // 63 and 62 agree, else a big-integer handle); `Word` a fixed-width integer
 // (IRType.bits, IRType.signed); `Pointer` a raw address or an owned heap
 // carrier the runtime manages (String, List, boxes); `Aggregate` bytes
 // passed by hidden pointer (IRType.size).
-enum IRTypeKind { Unit Bool Int Word Float Float32 Char String Pointer Aggregate }
+IRTypeKind: enum { Unit Bool Int Word Float Float32 Char String Pointer Aggregate }
 
 // The System V class of one value.
-enum IRClass { Integer Pointer Float Memory }
+IRClass: enum { Integer Pointer Float Memory }
 
 // One interned type row: the checked type and its machine layout.
 // `drop` is the runtime symbol that ends a value's life ("" when trivial);
 // `clone` the one that makes an owned copy of it ("" when none: a value
 // with a drop and no clone only moves). `option_word` marks an Option laid
 // out as one word, not a box (Build.jet IR_OPTION_INT_NONE).
-struct IRType {
+IRType: struct {
     ty: Type
     kind: IRTypeKind
     size: Int
@@ -189,11 +189,11 @@ struct IRType {
     option_word: Bool{false}
 }
 
-enum IRSlotKind { Param Local Temp }
+IRSlotKind: enum { Param Local Temp }
 
 // IntBig's width for the test that an exact Int is inline at all (its
 // bits 63 and 62 agree).
-IR_INT_INLINE_BITS :: 63
+IR_INT_INLINE_BITS: 63
 
 // One function's arena. Slots 0..<param_count are the parameters in order.
 // `slot_name` is an interned name (-1 for a temporary); `slot_line` the
@@ -206,7 +206,7 @@ IR_INT_INLINE_BITS :: 63
 // callees the `inline: always_marked` build option inlines (OptInline.jet).
 // `symbol_hash` is the stable id of `key` that ends `symbol` (0: the symbol
 // carries no hash; ir_hashed_function).
-struct IRFunction {
+IRFunction: struct {
     name: String
     key: String
     symbol: String
@@ -247,7 +247,7 @@ struct IRFunction {
 // their place at every call (JetWeb Select.jet web_direct_call). Inlining
 // never takes one (OptInline.jet), so every call stays one the host can
 // replace.
-IR_HOST_PROVIDER :: [String]{
+IR_HOST_PROVIDER: [String]{
     "jet_ui_provider_capability", "jet_ui_provider_clipboard_get", "jet_ui_provider_clipboard_set",
     "jet_ui_provider_dialog_request", "jet_ui_provider_dialog_result", "jet_ui_provider_event_pop", "jet_ui_provider_key_claim", "jet_ui_provider_take",
 }
@@ -257,7 +257,7 @@ IR_HOST_PROVIDER :: [String]{
 // the facts sema recorded, how many list accesses sema proved in bounds
 // (`recorded`) and how many of those the build lowered with no bounds check
 // (`lowered`). A loop lowers one scalar round per index.
-struct IRLoopProof {
+IRLoopProof: struct {
     line: Int
     local: String
     extent: Int
@@ -273,11 +273,11 @@ struct IRLoopProof {
 // One row per loop proof of `m`'s functions (`jet inspect decisions`, taken
 // before the optimizer inlines any): where the loop is, the facts sema
 // recorded, and how it lowered.
-fn ir_loop_proof_rows(m: IRModule) -> [String] Never! {
+ir_loop_proof_rows: fn(m: IRModule) -> [String] Never! {
     rows := [String]{}
     loop function in m.functions {
         loop proof in function.loop_proofs {
-            facts :: "aliasing-free {proof.no_aliasing}, no early exit {proof.no_early_exit}, effect-free {proof.effect_free}, independent {proof.independent}"
+            facts: "aliasing-free {proof.no_aliasing}, no early exit {proof.no_early_exit}, effect-free {proof.effect_free}, independent {proof.independent}"
             &rows.push("loop {function.name} {function.source_file}:{proof.line} `{proof.local}` below {proof.extent} of {proof.element}: {facts}; lowered scalar, proven accesses {proof.recorded}, unchecked {proof.lowered}")
         }
     }
@@ -286,7 +286,7 @@ fn ir_loop_proof_rows(m: IRModule) -> [String] Never! {
 
 // An assembled `#FFI(asm)` template: its bytes, the register operand i is
 // bound to (`regs[i]`), and the register holding its result (-1 for none).
-struct IRAsmLeaf {
+IRAsmLeaf: struct {
     code: [U8]
     regs: [Int]
     result: Int
@@ -295,7 +295,7 @@ struct IRAsmLeaf {
 // A word of a static object (IRModule.data_relocs) that holds an address:
 // data row `target` plus `addend` bytes, or (`text`) the immortal String of
 // data row `target`'s bytes, the same value a ConstText of that row gives.
-struct IRDataReloc { offset: Int, target: Int, addend: Int, text: Bool }
+IRDataReloc: struct { offset: Int, target: Int, addend: Int, text: Bool }
 
 // The program: interned types and names, read-only data rows, functions.
 // Every String-keyed table is a hashed `NameRows` (JetFoundation AST/Names:
@@ -309,7 +309,7 @@ struct IRDataReloc { offset: Int, target: Int, addend: Int, text: Bool }
 // `constant_rows` maps "<constant key>|<type key>" to the static object
 // holding that constant's value (-1: it is built at each read).
 // `function_rows` maps a function key to its id (row of `functions`);
-// `entry` is the program entry (`fn run`), -1 for a library. `layouts`,
+// `entry` is the program entry (`run: fn`), -1 for a library. `layouts`,
 // `layout_low`, `struct_members`, `variant_members`, `enum_sizes`,
 // `handle_rows`, `value_types` and `value_rows` are the builder's layout memo
 // (BuildTypes.jet ir_struct_row, ir_struct_members, ir_variant_members,
@@ -347,7 +347,7 @@ struct IRDataReloc { offset: Int, target: Int, addend: Int, text: Bool }
 // report's) resolve from. `host_literals`: the compile-time literals that are
 // compiler values (BuildTypes.jet ir_host_literal), by the key their host
 // route names, which the compiler answers from the built module.
-struct IRModule {
+IRModule: struct {
     types: [IRType]
     type_keys: [String]
     type_rows: NameRows
@@ -392,11 +392,11 @@ struct IRModule {
     host_literals: [String:TComptimeValue]{[String:TComptimeValue]{}}
 }
 
-fn ir_module_new() -> IRModule Never! {
+ir_module_new: fn() -> IRModule Never! {
     IRModule{types: [IRType]{}, type_keys: [String]{}, type_rows: name_rows(), key_rows: name_rows(), key_lists: [[Int]]{}, names: [String]{}, name_rows: name_rows(), data: [[U8]]{}, data_rows: name_rows(), data_relocs: [Int:[IRDataReloc]]{}, constant_rows: name_rows(), functions: [IRFunction]{}, function_rows: name_rows(), entry: -1, layouts: name_rows(), layout_low: 0, struct_members: name_rows(), variant_members: name_rows(), member_lists: [[IRMember]]{}, enum_sizes: name_rows(), handle_rows: name_rows(), close_free: [Int:Bool]{}, scalar_rows: [Int]{}, ids: [Int]{}, instances: name_rows(), queue: [IRQueued]{}, lambdas: [IRLambdaJob]{}, close_glue: name_rows(), helper_errors: name_rows(), helper_messages: [String]{}, trait_keys: name_rows()}
 }
 
-fn ir_kind_name(kind: IRTypeKind) -> String Never! {
+ir_kind_name: fn(kind: IRTypeKind) -> String Never! {
     if kind == {
         .Unit -> "Unit"
         .Bool -> "Bool"
@@ -412,16 +412,16 @@ fn ir_kind_name(kind: IRTypeKind) -> String Never! {
 }
 
 // The row of `row`'s type, interned by its kind, layout and display key.
-fn ir_intern_type(m: &IRModule, key: String, row: IRType) -> Int Never! {
-    hash :: name_rows_hash(key)
-    listed :: name_rows_get(m.key_rows, key, hash) ?? -1
+ir_intern_type: fn(m: &IRModule, key: String, row: IRType) -> Int Never! {
+    hash: name_rows_hash(key)
+    listed: name_rows_get(m.key_rows, key, hash) ?? -1
     if listed >= 0 {
         loop index in m.key_lists[listed] {
             if m.types[index].kind == row.kind && m.types[index].size == row.size && m.types[index].bits == row.bits && m.types[index].signed == row.signed -> return index
         }
     }
-    full :: "{ir_kind_name(row.kind)}:{row.size}:{row.bits}:{row.signed}:{key}"
-    full_hash :: name_rows_hash(full)
+    full: "{ir_kind_name(row.kind)}:{row.size}:{row.bits}:{row.signed}:{key}"
+    full_hash: name_rows_hash(full)
     found := name_rows_get(m.type_rows, full, full_hash) ?? -1
     if found < 0 {
         found = m.types.len()
@@ -441,7 +441,7 @@ fn ir_intern_type(m: &IRModule, key: String, row: IRType) -> Int Never! {
 // A type row's identity by content (its ir_intern_type key): the same in
 // every module that interns the type, whatever row it got there. Helper
 // keys spell a type row by it, never by the row.
-fn ir_row_key(m: IRModule, row: Int) -> String Never! {
+ir_row_key: fn(m: IRModule, row: Int) -> String Never! {
     m.type_keys[row].copy()
 }
 
@@ -449,15 +449,15 @@ fn ir_row_key(m: IRModule, row: Int) -> String Never! {
 // FNV-1a id as 16 lowercase hex digits, so a helper's or instance's symbol
 // does not depend on the order the build reached it in. Two keys can hash
 // alike; ir_merge stops the build when two merged functions do.
-fn ir_hashed_function(name: String, key: String, prefix: String, source_file: String, line: Int) -> IRFunction Never! {
-    hash :: stable_id("ir.symbol", key)
+ir_hashed_function: fn(name: String, key: String, prefix: String, source_file: String, line: Int) -> IRFunction Never! {
+    hash: stable_id("ir.symbol", key)
     symbol := List<U8>.try_with_capacity(prefix.len() + 16) ?? panic("symbol allocation failed")
     loop byte in prefix.bytes() -> &symbol.push(byte)
     // Most significant nibble first: each rotate brings the next one down.
     rest := hash
     loop _ in 0..<16 {
         rest = rest.rotate_left(4)
-        nibble :: Int.from_u64(rest.bit_and(U64{15}))
+        nibble: Int.from_u64(rest.bit_and(U64{15}))
         &symbol.push(if nibble < 10 -> U8{48 + nibble} else -> U8{87 + nibble})
     }
     made := ir_function_new(name, key, String.from_bytes(symbol) ?? panic("symbol bytes are UTF-8"), source_file, line)
@@ -465,22 +465,22 @@ fn ir_hashed_function(name: String, key: String, prefix: String, source_file: St
     made
 }
 
-fn ir_intern_name(m: &IRModule, text: String) -> Int Never! {
-    hash :: name_rows_hash(text)
-    found :: name_rows_get(m.name_rows, text, hash) ?? -1
+ir_intern_name: fn(m: &IRModule, text: String) -> Int Never! {
+    hash: name_rows_hash(text)
+    found: name_rows_get(m.name_rows, text, hash) ?? -1
     if found >= 0 -> return found
-    id :: m.names.len()
+    id: m.names.len()
     name_rows_set_hashed(&m.name_rows, text, hash, id)
     &m.names.push(text)
     id
 }
 
 // A read-only data row holding `text`'s bytes (shared by equal texts).
-fn ir_intern_text(m: &IRModule, text: String) -> Int Never! {
-    hash :: name_rows_hash(text)
-    found :: name_rows_get(m.data_rows, text, hash) ?? -1
+ir_intern_text: fn(m: &IRModule, text: String) -> Int Never! {
+    hash: name_rows_hash(text)
+    found: name_rows_get(m.data_rows, text, hash) ?? -1
     if found >= 0 -> return found
-    id :: m.data.len()
+    id: m.data.len()
     &m.data.push(text.bytes())
     name_rows_set_hashed(&m.data_rows, text, hash, id)
     id
@@ -488,12 +488,12 @@ fn ir_intern_text(m: &IRModule, text: String) -> Int Never! {
 
 // A read-only data row holding `bytes` (shared by equal byte strings: keyed
 // by length and digest, linear in the bytes however large the table).
-fn ir_intern_bytes(m: &IRModule, bytes: [U8]) -> Int Never! {
-    key :: "bytes:{bytes.len()}:{sha256_hex_bytes(sha256_bytes(bytes[0..<bytes.len()]))}"
-    hash :: name_rows_hash(key)
-    found :: name_rows_get(m.data_rows, key, hash) ?? -1
+ir_intern_bytes: fn(m: &IRModule, bytes: [U8]) -> Int Never! {
+    key: "bytes:{bytes.len()}:{sha256_hex_bytes(sha256_bytes(bytes[0..<bytes.len()]))}"
+    hash: name_rows_hash(key)
+    found: name_rows_get(m.data_rows, key, hash) ?? -1
     if found >= 0 -> return found
-    id :: m.data.len()
+    id: m.data.len()
     &m.data.push(bytes)
     name_rows_set_hashed(&m.data_rows, key, hash, id)
     id
@@ -501,24 +501,24 @@ fn ir_intern_bytes(m: &IRModule, bytes: [U8]) -> Int Never! {
 
 // Records `message` as the failure of helper `key`, which every later use
 // of the helper reports again (ir_helper_error).
-fn ir_helper_failed(m: &IRModule, key: String, message: String) Never! {
+ir_helper_failed: fn(m: &IRModule, key: String, message: String) Never! {
     name_rows_set(&m.helper_errors, key, m.helper_messages.len())
     &m.helper_messages.push(message)
 }
 
-fn ir_helper_error(m: IRModule, key: String) -> String? Never! {
-    index :: name_rows_value(m.helper_errors, key) ?? return None
+ir_helper_error: fn(m: IRModule, key: String) -> String? Never! {
+    index: name_rows_value(m.helper_errors, key) ?? return None
     Val(m.helper_messages[index].copy())
 }
 
 // The members memoized under `memo` in `table` (an index into
 // m.member_lists), if any.
-fn ir_members_memo(m: IRModule, table: NameRows, memo: String) -> [IRMember]? Never! {
-    index :: name_rows_value(table, memo) ?? return None
+ir_members_memo: fn(m: IRModule, table: NameRows, memo: String) -> [IRMember]? Never! {
+    index: name_rows_value(table, memo) ?? return None
     Val(m.member_lists[index].copy())
 }
 
-fn ir_function_new(name: String, key: String, symbol: String, source_file: String, line: Int) -> IRFunction Never! {
+ir_function_new: fn(name: String, key: String, symbol: String, source_file: String, line: Int) -> IRFunction Never! {
     IRFunction{
         name: name, key: key, symbol: symbol, source_file: source_file, line: line,
         param_count: 0, result: -1,
@@ -529,8 +529,8 @@ fn ir_function_new(name: String, key: String, symbol: String, source_file: Strin
 }
 
 // A new slot of type row `ty`; parameters must be added first, in order.
-fn ir_slot(f: &IRFunction, ty: Int, kind: IRSlotKind, name: Int, line: Int) -> Int Never! {
-    id :: f.slot_type.len()
+ir_slot: fn(f: &IRFunction, ty: Int, kind: IRSlotKind, name: Int, line: Int) -> Int Never! {
+    id: f.slot_type.len()
     &f.slot_type.push(ty)
     &f.slot_kind.push(kind)
     &f.slot_name.push(name)
@@ -539,8 +539,8 @@ fn ir_slot(f: &IRFunction, ty: Int, kind: IRSlotKind, name: Int, line: Int) -> I
     id
 }
 
-fn ir_emit(f: &IRFunction, op: IROp, dst: Int, a: Int, b: Int, c: Int, line: Int) -> Int Never! {
-    at :: f.op.len()
+ir_emit: fn(f: &IRFunction, op: IROp, dst: Int, a: Int, b: Int, c: Int, line: Int) -> Int Never! {
+    at: f.op.len()
     &f.op.push(op)
     &f.dst.push(dst)
     &f.a.push(a)
@@ -551,34 +551,34 @@ fn ir_emit(f: &IRFunction, op: IROp, dst: Int, a: Int, b: Int, c: Int, line: Int
 }
 
 // Appends an operand list to the args pool; returns its start.
-fn ir_args(f: &IRFunction, values: [Int]) -> Int Never! {
-    start :: f.args.len()
+ir_args: fn(f: &IRFunction, values: [Int]) -> Int Never! {
+    start: f.args.len()
     loop value in values -> &f.args.push(value)
     start
 }
 
 // Opens a Block or Loop; ir_end closes the innermost open construct.
-fn ir_open(f: &IRFunction, op: IROp, line: Int) -> Int Never! {
-    at :: ir_emit(&f, op, -1, -1, -1, -1, line)
+ir_open: fn(f: &IRFunction, op: IROp, line: Int) -> Int Never! {
+    at: ir_emit(&f, op, -1, -1, -1, -1, line)
     &f.open.push(at)
     at
 }
 
-fn ir_open_if(f: &IRFunction, condition: Int, line: Int) -> Int Never! {
-    at :: ir_emit(&f, IROp.If, -1, condition, -1, -1, line)
+ir_open_if: fn(f: &IRFunction, condition: Int, line: Int) -> Int Never! {
+    at: ir_emit(&f, IROp.If, -1, condition, -1, -1, line)
     &f.open.push(at)
     at
 }
 
 // The Else of the innermost open If.
-fn ir_else(f: &IRFunction, line: Int) Never! {
-    opener :: f.open[f.open.len() - 1]
+ir_else: fn(f: &IRFunction, line: Int) Never! {
+    opener: f.open[f.open.len() - 1]
     f.b[opener] = ir_emit(&f, IROp.Else, -1, -1, -1, -1, line)
 }
 
-fn ir_end(f: &IRFunction, line: Int) Never! {
-    opener :: &f.open.pop() ?? panic("ir_end without an open construct")
-    end :: ir_emit(&f, IROp.End, -1, opener, -1, -1, line)
+ir_end: fn(f: &IRFunction, line: Int) Never! {
+    opener: &f.open.pop() ?? panic("ir_end without an open construct")
+    end: ir_emit(&f, IROp.End, -1, opener, -1, -1, line)
     if f.op[opener] == .If {
         f.c[opener] = end
         if f.b[opener] >= 0 -> f.a[f.b[opener]] = end
@@ -588,7 +588,7 @@ fn ir_end(f: &IRFunction, line: Int) Never! {
 }
 
 // The Br depth that reaches the open construct at instruction `target`.
-fn ir_depth(f: IRFunction, target: Int) -> Int Never! {
+ir_depth: fn(f: IRFunction, target: Int) -> Int Never! {
     depth := 0
     index := f.open.len() - 1
     loop index >= 0 {
@@ -599,7 +599,7 @@ fn ir_depth(f: IRFunction, target: Int) -> Int Never! {
     panic("ir_depth: {target} is not open")
 }
 
-fn ir_op_name(op: IROp) -> String Never! {
+ir_op_name: fn(op: IROp) -> String Never! {
     if op == {
         .Nop -> "nop"
         .Const -> "const"
@@ -657,7 +657,7 @@ fn ir_op_name(op: IROp) -> String Never! {
 }
 
 // The op's position in IROp, for keys built of Ints.
-fn ir_op_code(op: IROp) -> Int Never! {
+ir_op_code: fn(op: IROp) -> Int Never! {
     if op == {
         .Nop -> 0
         .Const -> 1
@@ -717,26 +717,26 @@ fn ir_op_code(op: IROp) -> Int Never! {
 // Text form for dumps and diffs: one line per slot, then one per
 // instruction, indented by structured nesting. Names and data resolve
 // through `m`, so the text is the function's content.
-fn ir_function_text(m: IRModule, f: IRFunction) -> String Never! {
+ir_function_text: fn(m: IRModule, f: IRFunction) -> String Never! {
     lines := [String]{"fn {f.name} [{f.key}] params={f.param_count} result={f.result}"}
     if f.asm == .Val(leaf) {
-        code :: loop byte in leaf.code -> "{byte}"
-        regs :: loop register in leaf.regs -> "{register}"
+        code: loop byte in leaf.code -> "{byte}"
+        regs: loop register in leaf.regs -> "{register}"
         &lines.push("  asm regs=[{regs.join(",")}] result={leaf.result} code=[{code.join(",")}]")
     }
     loop slot in 0..<f.slot_type.len() {
-        name :: if f.slot_name[slot] >= 0 -> m.names[f.slot_name[slot]] else -> "_"
-        kind :: if f.slot_kind[slot] == {
+        name: if f.slot_name[slot] >= 0 -> m.names[f.slot_name[slot]] else -> "_"
+        kind: if f.slot_kind[slot] == {
             .Param -> "param"
             .Local -> "local"
             .Temp -> "temp"
         }
-        ty :: m.types[f.slot_type[slot]]
+        ty: m.types[f.slot_type[slot]]
         &lines.push("  s{slot} {kind} {name}: {ir_kind_name(ty.kind)}/{ty.size}")
     }
     depth := 1
     loop at in 0..<f.op.len() {
-        op :: f.op[at]
+        op: f.op[at]
         if op == .End || op == .Else -> depth -= 1
         pad := ""
         loop _ in 0..<depth -> pad = "{pad}  "
@@ -757,6 +757,6 @@ fn ir_function_text(m: IRModule, f: IRFunction) -> String Never! {
 
 // The function's content key: SHA-256 of its text form, which spells every
 // interned id by content.
-fn ir_function_hash(m: IRModule, f: IRFunction) -> String Never! {
+ir_function_hash: fn(m: IRModule, f: IRFunction) -> String Never! {
     sha256_hex(ir_function_text(m, f))
 }

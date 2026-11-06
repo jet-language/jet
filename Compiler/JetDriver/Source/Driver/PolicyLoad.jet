@@ -9,40 +9,40 @@ use {
     ]
 }
 
-fn jet_driver_read_package_policy(value: String) -> PackagePolicy PackageParseError! {
+jet_driver_read_package_policy: fn(value: String) -> PackagePolicy PackageParseError! {
     // PackageFacts.parse rejects this shape before reading any fields. Retain
     // that same refusal when the driver asks for just the policy field.
     if pkg_retired_record_head_spans(value).len() > 0 -> return Err(PackageParseError.RetiredRecordHead)
-    policy :: pkg_parse_package_policy(pkg_record_body(value, "policy"))
+    policy: pkg_parse_package_policy(pkg_record_body(value, "policy"))
     Ok(policy)
 }
 
 // E0355 for a refused ladder, naming the outer rung it collides with: a
 // label on that declaration when it is in this file, else an `Outer:` line
 // naming its file (the package manifest, the organization policy).
-fn jet_driver_policy_ladder_diagnostic(key: PolicyKey, error: PolicyError, path: String) -> Diagnostic Never! {
-    diagnostic :: diagnostic_with_source_path(jet_driver_diagnostic("E0355", jet_driver_policy_error_span(error), "invalid effective `{policy_key_name(key)}` policy", "package, module, function, and block declarations share one ladder; inner declarations may not conflict with or widen an outer safety constraint", "remove the conflict or tighten the inner declaration"), path, 0)
-    outer :: if error == {
+jet_driver_policy_ladder_diagnostic: fn(key: PolicyKey, error: PolicyError, path: String) -> Diagnostic Never! {
+    diagnostic: diagnostic_with_source_path(jet_driver_diagnostic("E0355", jet_driver_policy_error_span(error), "invalid effective `{policy_key_name(key)}` policy", "package, module, function, and block declarations share one ladder; inner declarations may not conflict with or widen an outer safety constraint", "remove the conflict or tighten the inner declaration"), path, 0)
+    outer: if error == {
         .ProhibitedScope(_, _, _) -> { return diagnostic }
         .Conflict(_, _, _, _, outer_site) | .Widening(_, _, _, _, outer_site) -> outer_site
     }
-    rung :: "the {policy_scope_name(outer.scope)} rung sets `{policy_key_name(key)}: {policy_value_display(outer.value)}`"
+    rung: "the {policy_scope_name(outer.scope)} rung sets `{policy_key_name(key)}: {policy_value_display(outer.value)}`"
     if outer.source == path && outer.span.end > outer.span.start -> return diagnostic_with_label(^diagnostic, outer.span, "{rung} here")
     diagnostic_with_detail(^diagnostic, " Outer: {rung} in {outer.source}")
 }
 
-fn jet_driver_policy_error_span(error: PolicyError) -> Span Never! {
+jet_driver_policy_error_span: fn(error: PolicyError) -> Span Never! {
     if error == {
         .ProhibitedScope(_, _, span) | .Widening(_, _, _, span, _) -> span
         .Conflict(_, _, _, second, _) -> second
     }
 }
 
-fn jet_driver_policy_outer(scope: PolicyScope) -> Bool Never! {
+jet_driver_policy_outer: fn(scope: PolicyScope) -> Bool Never! {
     scope == PolicyScope.Organization || scope == PolicyScope.Package || scope == PolicyScope.Module
 }
 
-fn jet_driver_load_policy(program: &Program, package_policy: [PolicyDeclaration], path: String, diagnostics: &[Diagnostic]) -> Bool Never! {
+jet_driver_load_policy: fn(program: &Program, package_policy: [PolicyDeclaration], path: String, diagnostics: &[Diagnostic]) -> Bool Never! {
     if program.policy_declarations.len() == 0 && package_policy.len() == 0 -> return true
     // Rewrite only source-authored declarations, then prepend the package
     // chain. Package declarations retain their absolute manifest/carrier path.
@@ -66,7 +66,7 @@ fn jet_driver_load_policy(program: &Program, package_policy: [PolicyDeclaration]
         // that exact function/block target, not a CLI reconstruction by line.
         loop declaration in program.policy_declarations {
             if jet_driver_policy_outer(declaration.scope) || declaration.key != rule.key -> next
-            target :: declaration.target ?? next
+            target: declaration.target ?? next
             // copy: each target's chain extends its own copy of the shared outer prefix, and
             // `outer` is reused for the next declaration and rule.
             chain := outer.copy()

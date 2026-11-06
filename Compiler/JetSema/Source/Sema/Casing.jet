@@ -36,17 +36,17 @@ use jet_foundation.[
     expr_binary_operands,
 ]
 
-fn sema_casing_check(name: String, span: Span, category: String, case: SemaNameCase, diagnostics: &[Diagnostic]) {
+sema_casing_check: fn(name: String, span: Span, category: String, case: SemaNameCase, diagnostics: &[Diagnostic]) {
     // Compiler-reserved names have their own diagnostic.
     if name == "" || name.starts_with("__") || sema_casing_has_case(name, case) -> return
-    expected :: if case == {
+    expected: if case == {
         .Pascal -> "PascalCase"
         .Snake -> "snake_case"
         .Screaming -> "ALL_CAPS"
     }
-    fixed :: sema_casing_canonical(name, case)
+    fixed: sema_casing_canonical(name, case)
     // The respelling can equal the name (`type_`): never suggest identical text.
-    fix :: if fixed == name -> "rename it: a name can't end with `_`, so pick another word" else -> "rename it to `{fixed}`"
+    fix: if fixed == name -> "rename it: a name can't end with `_`, so pick another word" else -> "rename it to `{fixed}`"
     &diagnostics.push(sema_error(
         "E0357",
         span,
@@ -58,22 +58,22 @@ fn sema_casing_check(name: String, span: Span, category: String, case: SemaNameC
 
 // E0358: a type-like declaration keeps every lexicon acronym
 // in caps. The edit replaces the whole written name when the span covers it.
-fn sema_casing_acronyms(name: String, span: Span, diagnostics: &[Diagnostic]) {
+sema_casing_acronyms: fn(name: String, span: Span, diagnostics: &[Diagnostic]) {
     if sema_casing_acronym_diagnostic(name, span) == .Val(diagnostic) -> &diagnostics.push(diagnostic)
 }
 
 // The E0358 for a type-like name that writes a lexicon acronym word-cased,
 // in a declaration or in a type position (`Id<Node>`, `HttpRequest`).
-fn sema_casing_acronym_diagnostic(name: String, span: Span) -> Diagnostic? {
+sema_casing_acronym_diagnostic: fn(name: String, span: Span) -> Diagnostic? {
     if span.start == span.end -> return None
     parts := [String]{}
     loop segment in name.split(".") {
         if !sema_casing_has_case(segment, SemaNameCase.Pascal) -> return None
         &parts.push(sema_casing_acronym_name(segment))
     }
-    canonical :: parts.join(".")
+    canonical: parts.join(".")
     if canonical == name -> return None
-    diagnostic :: sema_error(
+    diagnostic: sema_error(
         "E0358",
         span,
         "`{name}` is spelled `{canonical}`",
@@ -84,12 +84,12 @@ fn sema_casing_acronym_diagnostic(name: String, span: Span) -> Diagnostic? {
     Val(diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: canonical}))
 }
 
-fn sema_casing_pascal(name: String, span: Span, category: String, diagnostics: &[Diagnostic]) {
+sema_casing_pascal: fn(name: String, span: Span, category: String, diagnostics: &[Diagnostic]) {
     loop segment in name.split(".") -> sema_casing_check(segment, span, category, SemaNameCase.Pascal, &diagnostics)
     sema_casing_acronyms(name, span, &diagnostics)
 }
 
-fn sema_casing_snake(name: String, span: Span, category: String, diagnostics: &[Diagnostic]) {
+sema_casing_snake: fn(name: String, span: Span, category: String, diagnostics: &[Diagnostic]) {
     // Most names have no `.` or `-` to split on.
     if !name.contains(".") && !name.contains("-") {
         sema_casing_check(name, span, category, SemaNameCase.Snake, &diagnostics)
@@ -100,7 +100,7 @@ fn sema_casing_snake(name: String, span: Span, category: String, diagnostics: &[
     }
 }
 
-fn sema_casing_screaming(name: String, span: Span, category: String, diagnostics: &[Diagnostic]) {
+sema_casing_screaming: fn(name: String, span: Span, category: String, diagnostics: &[Diagnostic]) {
     loop part in name.split(".") {
         loop segment in part.split("-") -> sema_casing_check(segment, span, category, SemaNameCase.Screaming, &diagnostics)
     }
@@ -112,7 +112,7 @@ fn sema_casing_screaming(name: String, span: Span, category: String, diagnostics
 // substitution, instance identity and layout belong to card #3505, so it is
 // rejected here, once per written parameter, and registration never treats
 // `N` as a type.
-fn sema_casing_type_parameter(parameter: TypeParam, diagnostics: &[Diagnostic]) {
+sema_casing_type_parameter: fn(parameter: TypeParam, diagnostics: &[Diagnostic]) {
     if parameter.prep != None {
         &diagnostics.push(sema_error("E0390", parameter.name_span, "`{parameter.name}` is a compile-time number parameter, which this compiler does not support yet.", "`<comptime N: Int>` is the ratified declaration grammar, but number-parameter substitution, instance identity and layout are not implemented.", "use a type parameter, or pass the number as an ordinary argument or field until number parameters ship."))
         return
@@ -120,14 +120,14 @@ fn sema_casing_type_parameter(parameter: TypeParam, diagnostics: &[Diagnostic]) 
     sema_casing_pascal(parameter.name, parameter.name_span, "type parameter", &diagnostics)
 }
 
-fn sema_casing_parameters(parameters: [Param], diagnostics: &[Diagnostic]) {
+sema_casing_parameters: fn(parameters: [Param], diagnostics: &[Diagnostic]) {
     loop parameter in parameters {
         if parameter.name != "self" -> sema_casing_snake(parameter.name, parameter.name_span, "parameter", &diagnostics)
         if parameter.default == .Val(value) -> sema_casing_expr(value, &diagnostics)
     }
 }
 
-fn sema_casing_function(function: Func, category: String, diagnostics: &[Diagnostic]) {
+sema_casing_function: fn(function: Func, category: String, diagnostics: &[Diagnostic]) {
     // Result constructors are contextual spellings, not reserved words. A
     // user function may own either name; the call/variant checker decides
     // which meaning applies at each use site.
@@ -137,19 +137,19 @@ fn sema_casing_function(function: Func, category: String, diagnostics: &[Diagnos
     sema_casing_stmts(function.body, &diagnostics)
 }
 
-fn sema_casing_trait_method(method: TraitMethodSig, diagnostics: &[Diagnostic]) {
+sema_casing_trait_method: fn(method: TraitMethodSig, diagnostics: &[Diagnostic]) {
     sema_casing_snake(method.name, method.name_span, "method", &diagnostics)
     sema_casing_parameters(method.params, &diagnostics)
     if method.default_body == .Val(body) -> sema_casing_stmts(body, &diagnostics)
 }
 
-fn sema_casing_trait_impl_methods(blocks: [TraitImplBlock], diagnostics: &[Diagnostic]) {
+sema_casing_trait_impl_methods: fn(blocks: [TraitImplBlock], diagnostics: &[Diagnostic]) {
     loop block in blocks {
         loop method in block.methods -> sema_casing_function(method, "method", &diagnostics)
     }
 }
 
-fn sema_casing_item(item: Item, diagnostics: &[Diagnostic]) {
+sema_casing_item: fn(item: Item, diagnostics: &[Diagnostic]) {
     if item == {
         .Func(function) -> sema_casing_function(function, "function", &diagnostics)
         .Struct(definition) -> {
@@ -203,7 +203,7 @@ fn sema_casing_item(item: Item, diagnostics: &[Diagnostic]) {
             // `defaults: { run: … }` is the Output defaults record
             // (syntax-decisions.md:7425), not a user binding: its fixed
             // lowercase name has no casing to check.
-            output_defaults :: definition.ty == (Val(Type.Named{name: "__OutputDefaults"}))
+            output_defaults: definition.ty == (Val(Type.Named{name: "__OutputDefaults"}))
             // Owner ruling (2026-09-30): an immutable module binding is
             // ALL_CAPS; a mutable one is never ALL_CAPS.
             if {
@@ -257,7 +257,7 @@ fn sema_casing_item(item: Item, diagnostics: &[Diagnostic]) {
     }
 }
 
-fn sema_casing_derive_body(body: [DeriveBodyItem], diagnostics: &[Diagnostic]) {
+sema_casing_derive_body: fn(body: [DeriveBodyItem], diagnostics: &[Diagnostic]) {
     loop entry in body {
         if entry == {
             .Item(value) -> sema_casing_item(value, &diagnostics)
@@ -270,7 +270,7 @@ fn sema_casing_derive_body(body: [DeriveBodyItem], diagnostics: &[Diagnostic]) {
     }
 }
 
-fn sema_casing_bind_names(pattern: BindPattern) -> [BindName] Never! {
+sema_casing_bind_names: fn(pattern: BindPattern) -> [BindName] Never! {
     if pattern == {
         .Struct(_, _, fields, _, _) -> fields
         .List(elems, _) | .Tuple(elems, _) -> elems
@@ -278,12 +278,12 @@ fn sema_casing_bind_names(pattern: BindPattern) -> [BindName] Never! {
     }
 }
 
-fn sema_casing_bind_name(entry: BindName, diagnostics: &[Diagnostic]) {
+sema_casing_bind_name: fn(entry: BindName, diagnostics: &[Diagnostic]) {
     if entry.rename == .Val(rename) -> return sema_casing_snake(rename.name, rename.span, "local", &diagnostics)
     sema_casing_snake(entry.name, entry.span, "local", &diagnostics)
 }
 
-fn sema_casing_binding(binding: Binding, diagnostics: &[Diagnostic]) {
+sema_casing_binding: fn(binding: Binding, diagnostics: &[Diagnostic]) {
     if binding.pattern == .Val(pattern) {
         loop entry in sema_casing_bind_names(pattern) -> sema_casing_bind_name(entry, &diagnostics)
         return
@@ -292,19 +292,19 @@ fn sema_casing_binding(binding: Binding, diagnostics: &[Diagnostic]) {
     sema_casing_snake(binding.name, binding.name_span, "local", &diagnostics)
 }
 
-fn sema_casing_loop_label(label: NamedSpan?, diagnostics: &[Diagnostic]) {
+sema_casing_loop_label: fn(label: NamedSpan?, diagnostics: &[Diagnostic]) {
     if label == .Val(value) -> sema_casing_snake(value.name, value.span, "loop label", &diagnostics)
 }
 
 // Each arm is read in place.
-fn sema_casing_switch_arms(arms: [SwitchArm], diagnostics: &[Diagnostic]) {
+sema_casing_switch_arms: fn(arms: [SwitchArm], diagnostics: &[Diagnostic]) {
     loop arm in arms {
         sema_casing_expr(arm.cond, &diagnostics)
         sema_casing_stmts(arm.body, &diagnostics)
     }
 }
 
-fn sema_casing_stmts(statements: [Stmt], diagnostics: &[Diagnostic]) {
+sema_casing_stmts: fn(statements: [Stmt], diagnostics: &[Diagnostic]) {
     loop statement in statements {
         if statement == {
             .Expr(value) | .Yield(value, _) | .DeferClose(value, _) -> sema_casing_expr(value, &diagnostics)
@@ -407,19 +407,19 @@ fn sema_casing_stmts(statements: [Stmt], diagnostics: &[Diagnostic]) {
     }
 }
 
-fn sema_casing_str_match_holes(parts: [StrMatchPart], diagnostics: &[Diagnostic]) {
+sema_casing_str_match_holes: fn(parts: [StrMatchPart], diagnostics: &[Diagnostic]) {
     loop part in parts {
         if part == .Hole(name, _, span) -> sema_casing_snake(name, span, "pattern binding", &diagnostics)
     }
 }
 
-fn sema_casing_bin_match_holes(parts: [BinMatchPart], diagnostics: &[Diagnostic]) {
+sema_casing_bin_match_holes: fn(parts: [BinMatchPart], diagnostics: &[Diagnostic]) {
     loop part in parts {
         if part == .Hole(name, _, span) -> sema_casing_snake(name, span, "pattern binding", &diagnostics)
     }
 }
 
-fn sema_casing_pattern(pattern: Pattern, diagnostics: &[Diagnostic]) {
+sema_casing_pattern: fn(pattern: Pattern, diagnostics: &[Diagnostic]) {
     if pattern == {
         .Variant(_, bindings, _, _) -> {
             loop slot in bindings -> sema_casing_pattern_slot(slot, &diagnostics)
@@ -457,7 +457,7 @@ fn sema_casing_pattern(pattern: Pattern, diagnostics: &[Diagnostic]) {
     }
 }
 
-fn sema_casing_pattern_slot(slot: PatSlot, diagnostics: &[Diagnostic]) {
+sema_casing_pattern_slot: fn(slot: PatSlot, diagnostics: &[Diagnostic]) {
     if slot == {
         .Bind(name, span) -> sema_casing_snake(name, span, "pattern binding", &diagnostics)
         .Nested(nested) -> sema_casing_pattern(nested, &diagnostics)
@@ -468,11 +468,11 @@ fn sema_casing_pattern_slot(slot: PatSlot, diagnostics: &[Diagnostic]) {
     }
 }
 
-fn sema_casing_call_args(args: [CallArg], diagnostics: &[Diagnostic]) {
+sema_casing_call_args: fn(args: [CallArg], diagnostics: &[Diagnostic]) {
     loop arg in args -> sema_casing_expr(arg.expr, &diagnostics)
 }
 
-fn sema_casing_typed_literal(body: TypedLitBody, diagnostics: &[Diagnostic]) {
+sema_casing_typed_literal: fn(body: TypedLitBody, diagnostics: &[Diagnostic]) {
     if body == {
         .Fields(fields) -> {
             loop field in fields -> sema_casing_expr(field.value, &diagnostics)
@@ -491,7 +491,7 @@ fn sema_casing_typed_literal(body: TypedLitBody, diagnostics: &[Diagnostic]) {
     }
 }
 
-fn sema_casing_expr(expr: Expr, diagnostics: &[Diagnostic]) {
+sema_casing_expr: fn(expr: Expr, diagnostics: &[Diagnostic]) {
     if expr == {
         .Str(parts, _, _) -> {
             loop part in parts {
@@ -598,7 +598,7 @@ fn sema_casing_expr(expr: Expr, diagnostics: &[Diagnostic]) {
 
 // Every E0357 for one parsed source file: import aliases, declarations and
 // every binding site reachable from their bodies.
-fn sema_casing_program(program: Program, diagnostics: &[Diagnostic]) {
+sema_casing_program: fn(program: Program, diagnostics: &[Diagnostic]) {
     loop declaration in program.imports {
         if declaration.alias != "" -> sema_casing_snake(declaration.alias, declaration.alias_span, "module alias", &diagnostics)
         if declaration.kind == {

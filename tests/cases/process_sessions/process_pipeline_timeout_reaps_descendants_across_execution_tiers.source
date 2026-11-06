@@ -1,21 +1,21 @@
 
-use process :: core.process
+use process: core.process
 
-fn run() {
+run: fn() {
     // The timeout must outlast the tree's and its descendant's starts, or the
     // kill can come before the descendant has published its pid file.
-    timeout :: Duration.milliseconds(5000) ?? panic("duration failed")
-    first :: process.pipeline([
+    timeout: Duration.milliseconds(5000) ?? panic("duration failed")
+    first: process.pipeline([
         process.cmd(["{work}/session_fixture", "tree", "{work}/aot.pid"]).timeout(timeout),
         process.cmd(["cat"])
     ]) ?? panic("aot-shaped pipeline failed")
     print(first.timed_out)
-    second :: process.pipeline([
+    second: process.pipeline([
         process.cmd(["{work}/session_fixture", "tree", "{work}/jit.pid"]).timeout(timeout),
         process.cmd(["cat"])
     ]) ?? panic("jit-shaped pipeline failed")
     print(second.timed_out)
-    third :: process.pipeline([
+    third: process.pipeline([
         process.cmd(["{work}/session_fixture", "tree", "{work}/interp.pid"]).timeout(timeout),
         process.cmd(["cat"])
     ]) ?? panic("interpreter-shaped pipeline failed")

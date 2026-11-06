@@ -1,8 +1,8 @@
 // Iterator counts, sums, products, and averages follow Jet's exact Int law on
 // every tier: no host counter or accumulator narrows or wraps the result.
-fn run() {
-    half :: 4611686018427387904
-    big :: [Int]{half, half, half}
+run: fn() {
+    half: 4611686018427387904
+    big: [Int]{half, half, half}
     print("operator sum: {half + half + half}")
     print("list sum: {big.sum()}")
     print("lazy sum: {big.lazy().sum()}")
@@ -13,25 +13,25 @@ fn run() {
     print("lazy len: {big.lazy().len()}")
 
     // The exact sum is 4, although every partial sum leaves the i64 range.
-    wide :: [Int]{Int.MAX, Int.MAX, Int.MIN + 1, Int.MIN + 5}
+    wide: [Int]{Int.MAX, Int.MAX, Int.MIN + 1, Int.MIN + 5}
     print("wide sum: {wide.sum()}")
     print("wide average: {wide.average()} {wide.lazy().average()}")
-    xs :: [Int]{1, 2, 3, 4, 5}
+    xs: [Int]{1, 2, 3, 4, 5}
     print("int average: {xs.average()} {xs.lazy().average()}")
-    fs :: [Float]{1.0, 2.0, 4.5}
+    fs: [Float]{1.0, 2.0, 4.5}
     print("float average: {fs.average()} {fs.lazy().average()}")
     print("negative zero average: {[Float]{-0.0, -0.0}.lazy().average()}")
 
     // Empty reductions: sum and product keep their identities; average is
     // 0.0; min and max have no value.
-    empty :: [Int]{}
+    empty: [Int]{}
     print("empty sum: {empty.sum()} product: {empty.product()}")
     print("empty average: {empty.average()}")
     print("empty min absent: {empty.min() == None} max absent: {empty.max() == None}")
 
     // Float extrema use the collection sort order: NaN is the greatest item.
-    with_nan :: [Float]{1.0, 0.0 / 0.0, 3.0}
-    top :: with_nan.max() ?? 0.0
+    with_nan: [Float]{1.0, 0.0 / 0.0, 3.0}
+    top: with_nan.max() ?? 0.0
     print("float min: {with_nan.min() ?? 0.0} max is NaN: {top != top}")
     print("float max: {[Float]{1.0, 3.0, 2.0}.max() ?? 0.0}")
 

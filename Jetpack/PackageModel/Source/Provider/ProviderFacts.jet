@@ -6,12 +6,12 @@
 // native document or hide a field it cannot prove. This record is the one
 // identity/provenance seam consumed by package profiles and semantic locks.
 
-use pkg_provider_json_core :: core.encoding.json
+use pkg_provider_json_core: core.encoding.json
 
-PROVIDER_FACTS_SCHEMA :: "jet-provider-facts-v1"
-PROVIDER_EXACT_SELECTOR_LOSS :: "external provider references must retain an exact version, revision, or digest"
+PROVIDER_FACTS_SCHEMA: "jet-provider-facts-v1"
+PROVIDER_EXACT_SELECTOR_LOSS: "external provider references must retain an exact version, revision, or digest"
 
-enum ProviderFactValue {
+ProviderFactValue: enum {
     Null
     Bool(Bool)
     Number(String)
@@ -20,7 +20,7 @@ enum ProviderFactValue {
     Map([String: ProviderFactValue])
 
     // The value as a tree; map keys in byte order.
-    fn to_json_tree(self) -> Dyn Never! {
+    to_json_tree: fn(self) -> Dyn Never! {
         if self == {
             .Null -> Dyn.Null
             .Bool(value) -> Dyn.Bool(value)
@@ -40,12 +40,12 @@ enum ProviderFactValue {
     }
 
     // Compact JSON; map keys in byte order.
-    fn to_json(self) -> String Never! {
+    to_json: fn(self) -> String Never! {
         pkg_json_render(self.to_json_tree())
     }
 
     // Every tree is a fact value; numbers keep their decimal text.
-    fn from_json_tree(value: Dyn) -> ProviderFactValue Never! {
+    from_json_tree: fn(value: Dyn) -> ProviderFactValue Never! {
         if value == {
             .Null -> ProviderFactValue.Null
             .Bool(flag) -> ProviderFactValue.Bool(flag)
@@ -70,12 +70,12 @@ enum ProviderFactValue {
     }
 }
 
-struct ProviderLoss {
+ProviderLoss: struct {
     key: String
     reason: String
     source: String
 
-    fn to_json_tree(self) -> Dyn Never! {
+    to_json_tree: fn(self) -> Dyn Never! {
         object := [String: Dyn]{}
         object["key"] = Dyn.Text(self.key.copy())
         object["reason"] = Dyn.Text(self.reason.copy())
@@ -83,8 +83,8 @@ struct ProviderLoss {
         Dyn.Object(object)
     }
 
-    fn from_json_tree(value: Dyn) -> ProviderLoss ProviderFactsError! {
-        object :: pkg_json_object(value) ?? return Err(ProviderFactsError{message: PKG_JSON_NOT_OBJECT})
+    from_json_tree: fn(value: Dyn) -> ProviderLoss ProviderFactsError! {
+        object: pkg_json_object(value) ?? return Err(ProviderFactsError{message: PKG_JSON_NOT_OBJECT})
         Ok(ProviderLoss{
             key: pkg_provider_required_text(object, "key", "loss lacks key"),
             reason: pkg_provider_required_text(object, "reason", "loss lacks reason"),
@@ -93,13 +93,13 @@ struct ProviderLoss {
     }
 }
 
-struct ProviderConflict {
+ProviderConflict: struct {
     key: String
     left: String
     right: String
     source: String
 
-    fn to_json_tree(self) -> Dyn Never! {
+    to_json_tree: fn(self) -> Dyn Never! {
         object := [String: Dyn]{}
         object["key"] = Dyn.Text(self.key.copy())
         object["left"] = Dyn.Text(self.left.copy())
@@ -108,8 +108,8 @@ struct ProviderConflict {
         Dyn.Object(object)
     }
 
-    fn from_json_tree(value: Dyn) -> ProviderConflict ProviderFactsError! {
-        object :: pkg_json_object(value) ?? return Err(ProviderFactsError{message: PKG_JSON_NOT_OBJECT})
+    from_json_tree: fn(value: Dyn) -> ProviderConflict ProviderFactsError! {
+        object: pkg_json_object(value) ?? return Err(ProviderFactsError{message: PKG_JSON_NOT_OBJECT})
         Ok(ProviderConflict{
             key: pkg_provider_required_text(object, "key", "conflict lacks key"),
             left: pkg_provider_required_text(object, "left", "conflict lacks left"),
@@ -122,11 +122,11 @@ struct ProviderConflict {
 // Why a provider-fact carrier fails its lossless identity contract or its
 // JSON form.
 #Error
-struct ProviderFactsError {
+ProviderFactsError: struct {
     message: String
 }
 
-struct ProviderFacts {
+ProviderFacts: struct {
     provider: String
     reference: String
     target: String
@@ -142,22 +142,22 @@ struct ProviderFacts {
     conflicts: [ProviderConflict]
 
     // Rust `Default`: the core profile carrier.
-    fn core_profile() -> ProviderFacts Never! {
+    core_profile: fn() -> ProviderFacts Never! {
         ProviderFacts.for_reference("core", "profile@core")
     }
 
     // The carrier for `provider_name` and a `target[#selector]@authority`
     // reference. An empty provider takes the reference's authority.
-    fn for_reference(provider_name: String, reference: String) -> ProviderFacts Never! {
-        split :: pkg_provider_split_reference_selector(reference)
-        authority :: pkg_provider_split_reference_authority(split.root)
-        explicit_provider :: provider_name.trim()
-        provider :: if explicit_provider == "" -> authority.provider else -> provider_name
-        selector_raw :: if split.selector == {
+    for_reference: fn(provider_name: String, reference: String) -> ProviderFacts Never! {
+        split: pkg_provider_split_reference_selector(reference)
+        authority: pkg_provider_split_reference_authority(split.root)
+        explicit_provider: provider_name.trim()
+        provider: if explicit_provider == "" -> authority.provider else -> provider_name
+        selector_raw: if split.selector == {
             .Val(selector) -> "#{selector}"
             .None -> ""
         }
-        details :: ProviderSelectorDetails.parse(selector_raw)
+        details: ProviderSelectorDetails.parse(selector_raw)
         facts := ProviderFacts{
             provider: provider,
             reference: reference,
@@ -173,11 +173,11 @@ struct ProviderFacts {
             losses: [ProviderLoss]{},
             conflicts: [ProviderConflict]{}
         }
-        name :: facts.provider.copy()
-        target :: facts.target.copy()
+        name: facts.provider.copy()
+        target: facts.target.copy()
         &facts.add_fact("provider.name", ProviderFactValue.Text(name), "ref")
         &facts.add_fact("provider.target", ProviderFactValue.Text(target), "ref")
-        selector_text :: facts.selector.raw.copy()
+        selector_text: facts.selector.raw.copy()
         if selector_text != "" -> &facts.add_fact("provider.selector", ProviderFactValue.Text(selector_text), "ref")
         if explicit_provider != "" && authority.provider.trim() != "" && explicit_provider != authority.provider {
             // Named sources such as `@default` are source authorities, not
@@ -202,9 +202,9 @@ struct ProviderFacts {
         loop duplicate in details.duplicates {
             &facts.add_loss("provider.selector", "duplicate selector fact `{duplicate}` cannot be normalized losslessly", "reference.selector")
         }
-        identity_fields :: [ProviderSelectorField]{ProviderSelectorField.Version, ProviderSelectorField.Revision, ProviderSelectorField.Digest}
+        identity_fields: [ProviderSelectorField]{ProviderSelectorField.Version, ProviderSelectorField.Revision, ProviderSelectorField.Digest}
         loop field in identity_fields {
-            value :: details.selector.value(field)
+            value: details.selector.value(field)
             if value != "" && !field.is_exact_value(value) {
                 &facts.add_loss("provider.selector.{field.name()}", "mutable {field.name()} selector `{value}` is not an exact provider identity", "reference.selector")
             }
@@ -214,14 +214,14 @@ struct ProviderFacts {
 
     // Record a fact. A different value for a known key is a conflict; the
     // same value from a new source extends its provenance.
-    fn add_fact(&self, key: String, value: ProviderFactValue, source: String) Never! {
+    add_fact: fn(&self, key: String, value: ProviderFactValue, source: String) Never! {
         if self.facts.get(key) == {
             .Val(existing) -> {
                 if existing != value {
                     &self.conflicts.push(ProviderConflict{key: key, left: existing.to_json(), right: value.to_json(), source: source})
                     return
                 }
-                known :: self.provenance.get(key) ?? return
+                known: self.provenance.get(key) ?? return
                 if known != source && !known.split(" | ").to_list().contains(source) -> self.provenance[key] = "{known} | {source}"
                 return
             }
@@ -231,30 +231,30 @@ struct ProviderFacts {
         self.provenance[key] = source
     }
 
-    fn add_loss(&self, key: String, reason: String, source: String) Never! {
+    add_loss: fn(&self, key: String, reason: String, source: String) Never! {
         &self.losses.push(ProviderLoss{key: key, reason: reason, source: source})
     }
 
-    fn add_conflict(&self, key: String, left: String, right: String, source: String) Never! {
+    add_conflict: fn(&self, key: String, left: String, right: String, source: String) Never! {
         &self.conflicts.push(ProviderConflict{key: key, left: left, right: right, source: source})
     }
 
-    fn set_profile(&self, profile: String, provenance: String) Never! {
+    set_profile: fn(&self, profile: String, provenance: String) Never! {
         self.profile = profile
         self.profile_provenance = provenance
         &self.add_fact("profile.name", ProviderFactValue.Text(profile), "profile.source")
         &self.add_fact("profile.provenance", ProviderFactValue.Text(provenance), "profile.source")
     }
 
-    fn set_resolved_source(&self, source: String) Never! {
+    set_resolved_source: fn(&self, source: String) Never! {
         self.resolved_source = source
         &self.add_fact("provider.resolved_source", ProviderFactValue.Text(source), "resolver")
     }
 
     // Retain the exact selector a named source authority resolved while the
     // user's intentionally unpinned reference stays unchanged.
-    fn set_resolved_selector(&self, selector: String, source: String) Never! {
-        details :: ProviderSelectorDetails.parse(selector)
+    set_resolved_selector: fn(&self, selector: String, source: String) Never! {
+        details: ProviderSelectorDetails.parse(selector)
         loop unknown in details.unknown {
             &self.add_loss("provider.resolved_selector", "unsupported resolved selector fact `{unknown}` cannot be normalized losslessly", source)
         }
@@ -264,7 +264,7 @@ struct ProviderFacts {
         loop duplicate in details.duplicates {
             &self.add_loss("provider.resolved_selector", "duplicate resolved selector fact `{duplicate}` cannot be normalized losslessly", source)
         }
-        resolved :: details.selector
+        resolved: details.selector
         &self.add_fact("provider.resolved_selector", ProviderFactValue.Text(selector), source)
         if !resolved.is_exact() {
             &self.add_loss("provider.resolved_selector", "resolved provider selector is not an exact version, revision, or digest", source)
@@ -284,11 +284,11 @@ struct ProviderFacts {
 
     // Retain the provider's native document once; a different second
     // document is a conflict named by both digests.
-    fn set_native_document(&self, format: String, document: String) Never! {
+    set_native_document: fn(&self, format: String, document: String) Never! {
         if self.native_format != "" || self.native_document != "" {
             if self.native_format != format || self.native_document != document {
-                left :: "{self.native_format}:sha256-{pkg_sha256_hex(self.native_document.bytes())}"
-                right :: "{format}:sha256-{pkg_sha256_hex(document.bytes())}"
+                left: "{self.native_format}:sha256-{pkg_sha256_hex(self.native_document.bytes())}"
+                right: "{format}:sha256-{pkg_sha256_hex(document.bytes())}"
                 &self.add_conflict("provider.native_document", left, right, "provider.native_document")
             }
             return
@@ -297,13 +297,13 @@ struct ProviderFacts {
         self.native_document = document
     }
 
-    fn is_lossless(self) -> Bool Never! {
+    is_lossless: fn(self) -> Bool Never! {
         self.losses.len() == 0 && self.conflicts.len() == 0
     }
 
     // The text value of a fact, or None when absent or not text.
-    fn text_fact(self, key: String) -> String? Never! {
-        value :: self.facts.get(key) ?? return None
+    text_fact: fn(self, key: String) -> String? Never! {
+        value: self.facts.get(key) ?? return None
         if value == {
             .Text(text) -> Val(text)
             else -> None
@@ -312,39 +312,39 @@ struct ProviderFacts {
 
     // Every identity, selector, and provenance fact agrees with the
     // reference it came from, and nothing was lost.
-    fn validate(self) ProviderFactsError! {
+    validate: fn(self) ProviderFactsError! {
         if self.conflicts.len() > 0 {
-            conflict :: self.conflicts[0]
+            conflict: self.conflicts[0]
             return Err(ProviderFactsError{message: "provider fact `{conflict.key}` conflicts: {conflict.left} vs {conflict.right} ({conflict.source})"})
         }
         if self.losses.len() > 0 {
-            loss :: self.losses[0]
+            loss: self.losses[0]
             return Err(ProviderFactsError{message: "provider fact `{loss.key}` is lossy: {loss.reason} ({loss.source})"})
         }
         if self.provider.trim() == "" || self.reference.trim() == "" || self.target.trim() == "" {
             return Err(ProviderFactsError{message: "provider facts need a provider, target, and fully qualified reference"})
         }
-        split :: pkg_provider_split_reference_selector(self.reference)
-        authority :: pkg_provider_split_reference_authority(split.root)
+        split: pkg_provider_split_reference_selector(self.reference)
+        authority: pkg_provider_split_reference_authority(split.root)
         if authority.target != self.target {
             return Err(ProviderFactsError{message: "provider fact target `{self.target}` disagrees with reference target `{authority.target}`"})
         }
-        expected_raw :: if split.selector == {
+        expected_raw: if split.selector == {
             .Val(selector) -> "#{selector}"
             .None -> ""
         }
         if self.selector.raw != expected_raw {
             return Err(ProviderFactsError{message: "provider fact selector raw spelling disagrees with its fully qualified reference"})
         }
-        details :: ProviderSelectorDetails.parse(self.selector.raw)
+        details: ProviderSelectorDetails.parse(self.selector.raw)
         pkg_provider_check_details(details, "provider fact selector")
-        parsed :: details.selector
+        parsed: details.selector
         if parsed.version != self.selector.version || parsed.revision != self.selector.revision || parsed.baseline != self.selector.baseline || parsed.features != self.selector.features || parsed.digest != self.selector.digest || parsed.platform != self.selector.platform {
             return Err(ProviderFactsError{message: "provider fact selector fields disagree with their raw spelling"})
         }
         if {
             authority.provider != "" && authority.provider != self.provider -> {
-                recorded :: self.text_fact("provider.authority") ?? return Err(ProviderFactsError{message: "provider authority differs from the provider and lacks a typed authority fact"})
+                recorded: self.text_fact("provider.authority") ?? return Err(ProviderFactsError{message: "provider authority differs from the provider and lacks a typed authority fact"})
                 if recorded != authority.provider -> return Err(ProviderFactsError{message: "provider authority fact disagrees with its reference"})
             }
             self.facts.has_key("provider.authority") -> return Err(ProviderFactsError{message: "provider authority fact is not present in its reference"})
@@ -358,10 +358,10 @@ struct ProviderFacts {
             if !self.effective_selector().is_exact() -> return Err(ProviderFactsError{message: "external provider `{self.provider}` requires an exact version, revision, or digest"})
         }
         if self.facts.has_key("provider.resolved_selector") {
-            raw :: self.text_fact("provider.resolved_selector") ?? return Err(ProviderFactsError{message: "resolved provider selector fact must be text"})
-            resolved_details :: ProviderSelectorDetails.parse(raw)
+            raw: self.text_fact("provider.resolved_selector") ?? return Err(ProviderFactsError{message: "resolved provider selector fact must be text"})
+            resolved_details: ProviderSelectorDetails.parse(raw)
             pkg_provider_check_details(resolved_details, "resolved provider selector")
-            resolved :: resolved_details.selector
+            resolved: resolved_details.selector
             if !resolved.is_exact() -> return Err(ProviderFactsError{message: "resolved provider selector must be an exact version, revision, or digest"})
             if self.selector.is_exact() && self.selector.canonical() != resolved.canonical() {
                 return Err(ProviderFactsError{message: "resolved provider selector conflicts with the requested selector"})
@@ -373,7 +373,7 @@ struct ProviderFacts {
         loop key in pkg_provider_sorted_keys(self.provenance.keys().to_list()) {
             if !self.facts.has_key(key) -> return Err(ProviderFactsError{message: "provider provenance `{key}` has no fact"})
         }
-        identities :: [(expected: String, key: String)]{
+        identities: [(expected: String, key: String)]{
             (expected: self.provider, key: "provider.name"),
             (expected: self.target, key: "provider.target"),
             (expected: self.selector.raw, key: "provider.selector")
@@ -386,7 +386,7 @@ struct ProviderFacts {
         if self.selector.raw == "" && self.facts.has_key("provider.selector") {
             return Err(ProviderFactsError{message: "provider selector fact is present without a selector"})
         }
-        fields :: [(expected: String, key: String)]{
+        fields: [(expected: String, key: String)]{
             (expected: self.resolved_source, key: "provider.resolved_source"),
             (expected: self.profile, key: "profile.name"),
             (expected: self.profile_provenance, key: "profile.provenance")
@@ -403,28 +403,28 @@ struct ProviderFacts {
 
     // The canonical `target@provider#selector` spelling used by locks and
     // generated output; the original source spelling stays in `reference`.
-    fn qualified_reference(self) -> String Never! {
-        root :: pkg_provider_split_reference_selector(self.reference).root
-        selector :: self.effective_selector().canonical()
+    qualified_reference: fn(self) -> String Never! {
+        root: pkg_provider_split_reference_selector(self.reference).root
+        selector: self.effective_selector().canonical()
         if selector == "" -> return root
         "{root}#{selector}"
     }
 
     // The requested selector when exact, else the selector a declared source
     // authority resolved. The raw and resolved selectors stay separate facts.
-    fn effective_selector(self) -> ProviderSelector Never! {
+    effective_selector: fn(self) -> ProviderSelector Never! {
         if self.selector.is_exact() -> return self.selector
-        raw :: self.text_fact("provider.resolved_selector") ?? return self.selector
+        raw: self.text_fact("provider.resolved_selector") ?? return self.selector
         ProviderSelector.parse(raw)
     }
 
-    fn digest(self) -> String Never! {
+    digest: fn(self) -> String Never! {
         "sha256-{pkg_sha256_hex(self.to_json().bytes())}"
     }
 
     // The carrier as a tree: fields in schema order, facts and provenance
     // keyed in byte order.
-    fn to_json_tree(self) -> Dyn Never! {
+    to_json_tree: fn(self) -> Dyn Never! {
         facts := [String: Dyn]{}
         loop key in pkg_provider_sorted_keys(self.facts.keys().to_list()) -> facts[key] = self.facts[key].to_json_tree()
         provenance := [String: Dyn]{}
@@ -451,27 +451,27 @@ struct ProviderFacts {
         Dyn.Object(object)
     }
 
-    fn to_json(self) -> String Never! {
+    to_json: fn(self) -> String Never! {
         pkg_json_render(self.to_json_tree())
     }
 
-    fn from_json_tree(value: Dyn) -> ProviderFacts ProviderFactsError! {
-        root :: pkg_json_object(value) ?? return Err(ProviderFactsError{message: PKG_JSON_NOT_OBJECT})
-        schema :: pkg_provider_required_text(root, "schema", "provider facts lack `schema`")
+    from_json_tree: fn(value: Dyn) -> ProviderFacts ProviderFactsError! {
+        root: pkg_json_object(value) ?? return Err(ProviderFactsError{message: PKG_JSON_NOT_OBJECT})
+        schema: pkg_provider_required_text(root, "schema", "provider facts lack `schema`")
         if schema != PROVIDER_FACTS_SCHEMA -> return Err(ProviderFactsError{message: "provider facts have an unsupported schema"})
-        selector :: ProviderSelector.from_json_tree(root.get("selector"))
-        fact_fields :: pkg_json_object(root.get("facts") ?? Dyn.Null) ?? return Err(ProviderFactsError{message: "provider facts `facts` is not an object"})
+        selector: ProviderSelector.from_json_tree(root.get("selector"))
+        fact_fields: pkg_json_object(root.get("facts") ?? Dyn.Null) ?? return Err(ProviderFactsError{message: "provider facts `facts` is not an object"})
         facts := [String: ProviderFactValue]{}
         loop key in pkg_provider_sorted_keys(fact_fields.keys().to_list()) -> facts[key] = ProviderFactValue.from_json_tree(fact_fields[key])
-        provenance_fields :: pkg_json_object(root.get("provenance") ?? Dyn.Null) ?? return Err(ProviderFactsError{message: "provider facts `provenance` is not an object"})
+        provenance_fields: pkg_json_object(root.get("provenance") ?? Dyn.Null) ?? return Err(ProviderFactsError{message: "provider facts `provenance` is not an object"})
         provenance := [String: String]{}
         loop key in pkg_provider_sorted_keys(provenance_fields.keys().to_list()) {
             provenance[key] = pkg_json_text(provenance_fields[key]) ?? return Err(ProviderFactsError{message: PKG_JSON_NOT_STRING})
         }
-        loss_values :: pkg_json_array(root.get("losses") ?? Dyn.Null) ?? return Err(ProviderFactsError{message: "provider facts `losses` is not an array"})
+        loss_values: pkg_json_array(root.get("losses") ?? Dyn.Null) ?? return Err(ProviderFactsError{message: "provider facts `losses` is not an array"})
         losses := [ProviderLoss]{}
         loop item in loss_values -> &losses.push(ProviderLoss.from_json_tree(item))
-        conflict_values :: pkg_json_array(root.get("conflicts") ?? Dyn.Null) ?? return Err(ProviderFactsError{message: "provider facts `conflicts` is not an array"})
+        conflict_values: pkg_json_array(root.get("conflicts") ?? Dyn.Null) ?? return Err(ProviderFactsError{message: "provider facts `conflicts` is not an array"})
         conflicts := [ProviderConflict]{}
         loop item in conflict_values -> &conflicts.push(ProviderConflict.from_json_tree(item))
         Ok(ProviderFacts{
@@ -491,7 +491,7 @@ struct ProviderFacts {
         })
     }
 
-    fn explain_lines(self) -> [String] Never! {
+    explain_lines: fn(self) -> [String] Never! {
         lines := [String]{"provider: {self.provider}", "reference: {self.reference}", "target: {self.target}"}
         if self.resolved_source != "" -> &lines.push("resolved-source: {self.resolved_source}")
         if self.profile != "" {
@@ -514,26 +514,26 @@ struct ProviderFacts {
 
 // The first unsupported, conflicting, or duplicate fact of a parsed
 // selector, named for `owner`.
-fn pkg_provider_check_details(details: ProviderSelectorDetails, owner: String) ProviderFactsError! {
+pkg_provider_check_details: fn(details: ProviderSelectorDetails, owner: String) ProviderFactsError! {
     if details.unknown.len() > 0 -> return Err(ProviderFactsError{message: "{owner} contains unsupported fact `{details.unknown[0]}`"})
     if details.conflicts.len() > 0 {
-        conflict :: details.conflicts[0]
+        conflict: details.conflicts[0]
         return Err(ProviderFactsError{message: "{owner} `{conflict.key}` conflicts: {conflict.left} vs {conflict.right}"})
     }
     if details.duplicates.len() > 0 -> return Err(ProviderFactsError{message: "{owner} contains duplicate fact `{details.duplicates[0]}`"})
 }
 
 // The text at `key`; `missing` names an absent key.
-fn pkg_provider_required_text(object: [String: Dyn], key: String, missing: String) -> String ProviderFactsError! {
-    value :: object.get(key) ?? return Err(ProviderFactsError{message: missing})
-    text :: pkg_json_text(value) ?? return Err(ProviderFactsError{message: PKG_JSON_NOT_STRING})
+pkg_provider_required_text: fn(object: [String: Dyn], key: String, missing: String) -> String ProviderFactsError! {
+    value: object.get(key) ?? return Err(ProviderFactsError{message: missing})
+    text: pkg_json_text(value) ?? return Err(ProviderFactsError{message: PKG_JSON_NOT_STRING})
     Ok(text)
 }
 
 // A number fact's tree: an integer, else a float, else the JSON reader's
 // exact-number carrier for its lexical text (Core builds that carrier only
 // through the reader), else the text itself.
-fn pkg_provider_number_tree(text: String) -> Dyn Never! {
+pkg_provider_number_tree: fn(text: String) -> Dyn Never! {
     if Int.parse(text) == {
         .Ok(number) -> return Dyn.Int(number)
         .Err(_) -> {}
@@ -548,28 +548,28 @@ fn pkg_provider_number_tree(text: String) -> Dyn Never! {
     }
 }
 
-fn pkg_provider_sorted_keys(keys: [String]) -> [String] Never! {
+pkg_provider_sorted_keys: fn(keys: [String]) -> [String] Never! {
     out := keys
     &out.sort()
     out
 }
 
 // `target@provider#selector`: the selector follows the source authority.
-fn pkg_provider_split_reference_selector(reference: String) -> (root: String, selector: String?) Never! {
-    halves :: reference.split_once("#") ?? return (root: reference, selector: None)
+pkg_provider_split_reference_selector: fn(reference: String) -> (root: String, selector: String?) Never! {
+    halves: reference.split_once("#") ?? return (root: reference, selector: None)
     (root: halves.before, selector: Val(halves.after))
 }
 
 // `target@authority`; a leading or trailing `@` names no authority.
-fn pkg_provider_split_reference_authority(reference: String) -> (target: String, provider: String) Never! {
-    halves :: reference.cut_last("@") ?? return (provider: "", target: reference)
+pkg_provider_split_reference_authority: fn(reference: String) -> (target: String, provider: String) Never! {
+    halves: reference.cut_last("@") ?? return (provider: "", target: reference)
     if halves.before == "" || halves.after == "" -> return (provider: "", target: reference)
     (provider: halves.after, target: halves.before)
 }
 
 // The external ecosystems whose references must name their provider and an
 // exact identity.
-fn pkg_provider_is_external(provider: String) -> Bool Never! {
+pkg_provider_is_external: fn(provider: String) -> Bool Never! {
     if provider == {
         "jet-registry" | "npm" | "pypi" | "cargo" | "swiftpm" | "maven" | "nuget" | "conan" | "vcpkg" | "github" | "homebrew" | "binary" | "cran" | "luarocks" | "ruby" | "perl" | "php" -> true
         else -> false

@@ -1,8 +1,8 @@
 // jetpack::BuildDebug unit tests: attempt JSON round trip with redaction,
 // symlink-safe scratch preservation, and staging-only crash recovery.
 
-fn recipe_debug_test_root(label: String) -[Env, Rand]> String {
-    token :: random.token_hex(8) ?? panic("draw a build-debug test name")
+recipe_debug_test_root: fn(label: String) -[Env, Rand]> String {
+    token: random.token_hex(8) ?? panic("draw a build-debug test name")
     files.join(sys.temp_dir(), "jet-build-{label}-{sys.pid()}-{token}")
 }
 
@@ -18,7 +18,7 @@ fn recipe_debug_test_root(label: String) -[Env, Rand]> String {
         stdout: "ok",
         stderr: "SECRET=value"
     })
-    parsed :: recipe_debug_parse_attempt(attempt.to_json()) ?? panic("the attempt parses back")
+    parsed: recipe_debug_parse_attempt(attempt.to_json()) ?? panic("the attempt parses back")
     assert_eq(parsed.package, "weirdctl")
     assert_eq(parsed.failed_step, 1)
     assert(parsed.to_json().contains("<redacted>"))
@@ -26,9 +26,9 @@ fn recipe_debug_test_root(label: String) -[Env, Rand]> String {
 
 #Test("build scratch preservation rejects a symlink without recording a path") {
     if sys.is_windows() -> return
-    root :: recipe_debug_test_root("debug")
-    source :: files.join(root, "source")
-    outside :: files.join(root, "outside")
+    root: recipe_debug_test_root("debug")
+    source: files.join(root, "source")
+    outside: files.join(root, "outside")
     files.create_dir_all(source) ?? panic("source")
     files.create_dir_all(outside) ?? panic("outside")
     files.write(files.join(outside, "live"), "must survive") ?? panic("live file")
@@ -45,10 +45,10 @@ fn recipe_debug_test_root(label: String) -[Env, Rand]> String {
 }
 
 #Test("build scratch recovery removes only unpublished stages") {
-    root :: recipe_debug_test_root("recover")
-    hangar :: files.join(root, "hangar")
-    stage :: files.join(files.join(hangar, BUILD_DEBUG_SCRATCH_ROOT), ".jet-build-stage-orphan")
-    published :: files.join(files.join(hangar, BUILD_DEBUG_SCRATCH_ROOT), "pkg-1")
+    root: recipe_debug_test_root("recover")
+    hangar: files.join(root, "hangar")
+    stage: files.join(files.join(hangar, BUILD_DEBUG_SCRATCH_ROOT), ".jet-build-stage-orphan")
+    published: files.join(files.join(hangar, BUILD_DEBUG_SCRATCH_ROOT), "pkg-1")
     files.create_dir_all(stage) ?? panic("stage")
     files.create_dir_all(published) ?? panic("published")
     files.write(files.join(stage, "partial"), "partial") ?? panic("partial")

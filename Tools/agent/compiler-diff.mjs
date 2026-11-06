@@ -624,7 +624,7 @@ async function requireReady(compiler, options) {
   const dir = join(compiler.sideRoot, "ready");
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, `ready.${EXT}`), `fn run() {\n    print("${READY_TEXT}")\n}\n`);
+  writeFileSync(join(dir, `ready.${EXT}`), `run: fn() {\n    print("${READY_TEXT}")\n}\n`);
   const run = await invoke(compiler, { args: ["run", `ready.${EXT}`], stdin: null }, dir, sideEnv(compiler.sideRoot), options);
   rmSync(dir, { recursive: true, force: true });
   if (run.spawnError) throw new Unavailable(`${compiler.role} compiler could not start: ${run.spawnError}`);

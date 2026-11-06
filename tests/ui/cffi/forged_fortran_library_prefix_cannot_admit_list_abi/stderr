@@ -1,8 +1,8 @@
 Error [jet.NonCAbiType]: `[Float]` is not a C-compatible type for a foreign function parameter or return.
-  --> run.jet:2:51
+  --> tests/ui/cffi/forged_fortran_library_prefix_cannot_admit_list_abi/run.jet:2:53
     |
-  2 | #Import module c.jet_fortran_forged { fn probe(a: [Float]) -> Float = "probe" }
-    |                                                   ^^^^^^^
+  2 | #Import c.jet_fortran_forged: module { probe: fn(a: [Float]) -> Float = "probe" }
+    |                                                     ^^^^^^^
  Why: `#Import` / `#Export` functions must use types with a stable C ABI at the edge.
  Fix: Use scalars, `String`, or a struct with C layout; pointers only through the gated tier.
 More: jet-lang.dev/e/E3203

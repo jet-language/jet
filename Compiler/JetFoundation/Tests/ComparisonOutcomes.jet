@@ -12,7 +12,7 @@ use {
     ]
 }
 
-fn outcome_sample(case_id: String, reference: ComparisonObservation, candidate: ComparisonObservation) -> ComparisonSample Never! {
+outcome_sample: fn(case_id: String, reference: ComparisonObservation, candidate: ComparisonObservation) -> ComparisonSample Never! {
     ComparisonSample{
         identity: ComparisonIdentity{case_id: case_id, input_id: "input-{case_id}", seed: None, source: "fixture", tool: "test", target: "host"},
         reference: reference,
@@ -23,11 +23,11 @@ fn outcome_sample(case_id: String, reference: ComparisonObservation, candidate: 
     }
 }
 
-fn outcome_value_sample(case_id: String, reference: String, candidate: String) -> ComparisonSample Never! {
+outcome_value_sample: fn(case_id: String, reference: String, candidate: String) -> ComparisonSample Never! {
     outcome_sample(case_id, comparison_observation_value(reference), comparison_observation_value(candidate))
 }
 
-fn outcome_with_replays(sample: ComparisonSample, reference: String, candidate: String) -> ComparisonSample Never! {
+outcome_with_replays: fn(sample: ComparisonSample, reference: String, candidate: String) -> ComparisonSample Never! {
     result := sample
     result.reference_replay = Val(comparison_observation_value(reference))
     result.candidate_replay = Val(comparison_observation_value(candidate))
@@ -35,36 +35,36 @@ fn outcome_with_replays(sample: ComparisonSample, reference: String, candidate: 
 }
 
 // The text of the assertion failure, or "" when the record passes.
-fn outcome_failure(record: ComparisonRecord) -> String Never! {
+outcome_failure: fn(record: ComparisonRecord) -> String Never! {
     if comparison_record_assert_equal(record) == {
         .Ok(_) -> ""
         .Err(error) -> comparison_assertion_error_text(error)
     }
 }
 
-fn outcome_invalid(record: ComparisonRecord) -> String Never! {
+outcome_invalid: fn(record: ComparisonRecord) -> String Never! {
     if comparison_record_validate(record) == {
         .Ok(_) -> ""
         .Err(error) -> error.message
     }
 }
 
-fn outcome_case(sample: ComparisonSample?) -> String Never! {
-    found :: sample ?? return "none"
+outcome_case: fn(sample: ComparisonSample?) -> String Never! {
+    found: sample ?? return "none"
     found.identity.case_id
 }
 
 #Test("comparison outcome: every outcome but matched fails, including timed-out and cancelled runs") {
-    statuses :: [ComparisonStatus]{.Mismatch, .Empty, .Unsupported, .Unavailable, .Timeout, .Cancelled, .InvalidOracle, .Contaminated}
+    statuses: [ComparisonStatus]{.Mismatch, .Empty, .Unsupported, .Unavailable, .Timeout, .Cancelled, .InvalidOracle, .Contaminated}
     loop status in statuses {
-        record :: comparison_record_terminal(ObservationRelation.TypedEquality, status, "runner reported it")
+        record: comparison_record_terminal(ObservationRelation.TypedEquality, status, "runner reported it")
         assert(!comparison_status_is_success(status), "{comparison_status_as_str(status)} counts as success")
         assert_eq(outcome_failure(record), "comparison {comparison_status_as_str(status)}: runner reported it")
     }
     assert_eq(comparison_status_as_str(ComparisonStatus.Timeout), "timeout")
     assert_eq(comparison_status_as_str(ComparisonStatus.Cancelled), "cancelled")
     // A run whose cases all matched still fails when the runner timed out or was cancelled.
-    stopped :: [ComparisonStatus]{ComparisonStatus.Timeout, ComparisonStatus.Cancelled}
+    stopped: [ComparisonStatus]{ComparisonStatus.Timeout, ComparisonStatus.Cancelled}
     loop status in stopped {
         record := testing_compare_samples(ObservationRelation.TypedEquality, [ComparisonSample]{outcome_value_sample("a", "1", "1")})
         assert(record.status == ComparisonStatus.Matched, "the observed case matched")
@@ -74,13 +74,13 @@ fn outcome_case(sample: ComparisonSample?) -> String Never! {
 }
 
 #Test("comparison outcome: empty and entirely discarded runs are empty, and any discard blocks matched") {
-    empty :: testing_compare_samples_with_discarded(ObservationRelation.TypedEquality, [ComparisonSample]{}, 0)
+    empty: testing_compare_samples_with_discarded(ObservationRelation.TypedEquality, [ComparisonSample]{}, 0)
     assert(empty.status == ComparisonStatus.Empty, "no cases is empty")
     assert_eq(outcome_failure(empty), "comparison empty: comparison corpus is empty")
-    discarded :: testing_compare_samples_with_discarded(ObservationRelation.TypedEquality, [ComparisonSample]{}, 3)
+    discarded: testing_compare_samples_with_discarded(ObservationRelation.TypedEquality, [ComparisonSample]{}, 3)
     assert(discarded.status == ComparisonStatus.Empty, "all discarded is empty")
     assert_eq(outcome_failure(discarded), "comparison empty: all comparison cases were discarded")
-    partial :: testing_compare_samples_with_discarded(ObservationRelation.TypedEquality, [ComparisonSample]{outcome_value_sample("a", "1", "1")}, 1)
+    partial: testing_compare_samples_with_discarded(ObservationRelation.TypedEquality, [ComparisonSample]{outcome_value_sample("a", "1", "1")}, 1)
     assert(partial.status == ComparisonStatus.InvalidOracle, "a discard with matching cases is an invalid oracle")
     assert_eq(outcome_failure(partial), "comparison invalid_oracle: comparison discarded cases and cannot claim equality")
     missing := outcome_value_sample("a", "1", "1")
@@ -107,54 +107,54 @@ fn outcome_case(sample: ComparisonSample?) -> String Never! {
 }
 
 #Test("comparison outcome: an observation that changes on replay is contamination, ahead of any mismatch") {
-    steady :: outcome_with_replays(outcome_value_sample("a", "1", "1"), "1", "1")
+    steady: outcome_with_replays(outcome_value_sample("a", "1", "1"), "1", "1")
     assert(testing_compare_samples(ObservationRelation.TypedEquality, [ComparisonSample]{steady}).status == ComparisonStatus.Matched, "stable replays match")
-    drifting :: outcome_with_replays(outcome_value_sample("b", "1", "1"), "2", "1")
-    reference :: testing_compare_samples(ObservationRelation.TypedEquality, [ComparisonSample]{steady, drifting})
+    drifting: outcome_with_replays(outcome_value_sample("b", "1", "1"), "2", "1")
+    reference: testing_compare_samples(ObservationRelation.TypedEquality, [ComparisonSample]{steady, drifting})
     assert(reference.status == ComparisonStatus.Contaminated, "a changed reference replay is contamination")
     assert_eq(reference.contamination ?? "", "reference observation changed on replay for case `b`")
     assert_eq(outcome_failure(reference), "comparison contaminated: reference observation changed on replay for case `b`")
-    candidate :: testing_compare_samples(ObservationRelation.TypedEquality, [ComparisonSample]{outcome_with_replays(outcome_value_sample("c", "1", "1"), "1", "3")})
+    candidate: testing_compare_samples(ObservationRelation.TypedEquality, [ComparisonSample]{outcome_with_replays(outcome_value_sample("c", "1", "1"), "1", "3")})
     assert(candidate.status == ComparisonStatus.Contaminated, "a changed candidate replay is contamination")
     assert_eq(candidate.contamination ?? "", "candidate observation changed on replay for case `c`")
     // The case also mismatches; contamination wins, so it can't be reported as a counterexample.
-    both :: testing_compare_samples(ObservationRelation.TypedEquality, [ComparisonSample]{outcome_with_replays(outcome_value_sample("d", "1", "2"), "1", "5")})
+    both: testing_compare_samples(ObservationRelation.TypedEquality, [ComparisonSample]{outcome_with_replays(outcome_value_sample("d", "1", "2"), "1", "5")})
     assert(both.status == ComparisonStatus.Contaminated, "a contaminated mismatch is contamination")
     assert(both.reduced_counterexample == None, "a contaminated case became a counterexample")
 }
 
 #Test("comparison outcome: reduction keeps only a case that still mismatches under the same relation") {
-    original :: testing_compare_samples(ObservationRelation.TypedEquality, [ComparisonSample]{outcome_value_sample("long", "[1,2,7]", "[1,2,8]")})
+    original: testing_compare_samples(ObservationRelation.TypedEquality, [ComparisonSample]{outcome_value_sample("long", "[1,2,7]", "[1,2,8]")})
     assert(original.status == ComparisonStatus.Mismatch, "the original mismatches")
-    passing :: [ComparisonSample]{outcome_value_sample("passing", "[1]", "[1]")}
-    drifting :: [ComparisonSample]{outcome_with_replays(outcome_value_sample("drifting", "[7]", "[8]"), "[9]", "[8]")}
-    short :: [ComparisonSample]{outcome_value_sample("short", "[7]", "[8]")}
+    passing: [ComparisonSample]{outcome_value_sample("passing", "[1]", "[1]")}
+    drifting: [ComparisonSample]{outcome_with_replays(outcome_value_sample("drifting", "[7]", "[8]"), "[9]", "[8]")}
+    short: [ComparisonSample]{outcome_value_sample("short", "[7]", "[8]")}
     assert_eq(outcome_case(testing_reduce_mismatch(original, [[ComparisonSample]]{passing, drifting, short})), "short")
     assert_eq(outcome_case(testing_reduce_mismatch(original, [[ComparisonSample]]{passing, drifting})), "long")
     assert_eq(outcome_case(testing_reduce_mismatch(original, [[ComparisonSample]]{})), "long")
-    matched :: testing_compare_samples(ObservationRelation.TypedEquality, passing)
+    matched: testing_compare_samples(ObservationRelation.TypedEquality, passing)
     assert_eq(outcome_case(testing_reduce_mismatch(matched, [[ComparisonSample]]{short})), "none")
 }
 
 #Test("comparison outcome: reduction under ordered effects and typed failure compares what each relation declares") {
-    reference :: comparison_observation_with_effects(comparison_observation_value("ok"), [String]{"open", "write", "close"})
-    swapped :: comparison_observation_with_effects(comparison_observation_value("ok"), [String]{"open", "close", "write"})
-    original :: testing_compare_samples(ObservationRelation.OrderedEffects, [ComparisonSample]{outcome_sample("long", reference, swapped)})
+    reference: comparison_observation_with_effects(comparison_observation_value("ok"), [String]{"open", "write", "close"})
+    swapped: comparison_observation_with_effects(comparison_observation_value("ok"), [String]{"open", "close", "write"})
+    original: testing_compare_samples(ObservationRelation.OrderedEffects, [ComparisonSample]{outcome_sample("long", reference, swapped)})
     assert(original.status == ComparisonStatus.Mismatch, "a reordered effect mismatches under ordered effects")
     // Equal values with equal effects no longer mismatch, so that reduction is refused.
-    same :: [ComparisonSample]{outcome_sample("same", reference, reference)}
+    same: [ComparisonSample]{outcome_sample("same", reference, reference)}
     // Equal values whose effects are still out of order keep the mismatch.
-    kept :: [ComparisonSample]{outcome_sample("kept", reference, swapped)}
+    kept: [ComparisonSample]{outcome_sample("kept", reference, swapped)}
     assert_eq(outcome_case(testing_reduce_mismatch(original, [[ComparisonSample]]{same, kept})), "kept")
     // Under typed equality the same pair would match: the relation is what decides.
     assert(testing_compare_samples(ObservationRelation.TypedEquality, kept).status == ComparisonStatus.Matched, "typed equality ignores effects")
 
-    refused :: comparison_observation_failure("err", "NotFound")
-    denied :: comparison_observation_failure("err", "Denied")
-    failing :: testing_compare_samples(ObservationRelation.TypedFailure, [ComparisonSample]{outcome_sample("long", refused, denied)})
+    refused: comparison_observation_failure("err", "NotFound")
+    denied: comparison_observation_failure("err", "Denied")
+    failing: testing_compare_samples(ObservationRelation.TypedFailure, [ComparisonSample]{outcome_sample("long", refused, denied)})
     assert(failing.status == ComparisonStatus.Mismatch, "a different typed failure mismatches")
-    agree :: [ComparisonSample]{outcome_sample("agree", refused, refused)}
-    differ :: [ComparisonSample]{outcome_sample("differ", refused, denied)}
+    agree: [ComparisonSample]{outcome_sample("agree", refused, refused)}
+    differ: [ComparisonSample]{outcome_sample("differ", refused, denied)}
     assert_eq(outcome_case(testing_reduce_mismatch(failing, [[ComparisonSample]]{agree, differ})), "differ")
     assert_eq(outcome_case(testing_reduce_mismatch(failing, [[ComparisonSample]]{agree})), "long")
 }

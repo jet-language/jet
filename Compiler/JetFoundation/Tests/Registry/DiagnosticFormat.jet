@@ -3,7 +3,7 @@
 // paths, package refs, identifiers and keywords in their own case.
 use jet_foundation.[diagnostic_registry_rows, diagnostic_sentence_case_line]
 
-fn diagnostic_format_any_part_contains(needle: String) -> Bool Never! {
+diagnostic_format_any_part_contains: fn(needle: String) -> Bool Never! {
     loop row in diagnostic_registry_rows() {
         if row.meaning.contains(needle) || row.what.contains(needle) || row.why.contains(needle) || row.fix.contains(needle) -> return true
     }
@@ -36,7 +36,7 @@ fn diagnostic_format_any_part_contains(needle: String) -> Bool Never! {
     assert(diagnostic_format_any_part_contains("C-style"))
     assert(!diagnostic_format_any_part_contains("`--offline` Forbids Network Access"))
     assert(!diagnostic_format_any_part_contains("or `Lo > Hi` (empty range)"))
-    kept :: [String]{
+    kept: [String]{
         "Int cannot cross the C boundary",
         "Syntax.jet owns user-typeable syntax",
         "Bool cannot cross the boundary",
@@ -51,7 +51,7 @@ fn diagnostic_format_any_part_contains(needle: String) -> Bool Never! {
 }
 
 #Test("diagnostic case validator excludes non-prose tokens") {
-    kept :: [String]{
+    kept: [String]{
         "UserId has no matching field",
         "--offline forbids network access",
         "src/Main.jet is not reachable",

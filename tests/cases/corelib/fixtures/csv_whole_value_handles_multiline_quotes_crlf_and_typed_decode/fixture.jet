@@ -1,25 +1,25 @@
 
-use csv :: core.encoding.csv
+use csv: core.encoding.csv
 
 #Codable
-struct Note { name: String, note: String }
+Note: struct { name: String, note: String }
 
-fn csv_error_contains(input: String, needle: String) -> Bool {
-    _rows :: csv.parse(input) ?? {
+csv_error_contains: fn(input: String, needle: String) -> Bool {
+    _rows: csv.parse(input) ?? {
         return err.reason.contains(needle)
     }
     return false
 }
 
-fn run() {
-    raw :: "name,note\nAda,\"line1\nline2\"\nLin,\"said \"\"hi\"\"\"\n"
-    rows :: csv.parse(raw) ?? panic("parse")
+run: fn() {
+    raw: "name,note\nAda,\"line1\nline2\"\nLin,\"said \"\"hi\"\"\"\n"
+    rows: csv.parse(raw) ?? panic("parse")
     print(rows.len())
     print(rows[1][1])
     print(rows[2][1])
     print(csv.to_string(rows).replace("\n", "|"))
 
-    notes :: csv.decode<Note>(raw) ?? panic("decode")
+    notes: csv.decode<Note>(raw) ?? panic("decode")
     print(notes.len())
     print(notes[0].name)
     print(notes[0].note)

@@ -16,9 +16,9 @@
 // The lookup splits the table at `\n{module_name} `, so only that module's
 // rows are copied out and parsed; every other row is passed over by the
 // runtime search.
-fn core_sig_row_lookup(rows: String, module_name: String, member: String) -> CoreTypedCallSignature? {
-    prefix :: "{module_name} "
-    separator :: "\n{prefix}"
+core_sig_row_lookup: fn(rows: String, module_name: String, member: String) -> CoreTypedCallSignature? {
+    prefix: "{module_name} "
+    separator: "\n{prefix}"
     first := true
     loop chunk in rows.split(separator) {
         // The text before the first separator holds a row of this module only
@@ -29,14 +29,14 @@ fn core_sig_row_lookup(rows: String, module_name: String, member: String) -> Cor
             if !rows.starts_with(prefix) -> next
             at_start = true
         }
-        head :: if chunk.split_once("\n") == .Val(parts) -> parts.before else -> chunk
-        line :: if at_start -> head else -> "{prefix}{head}"
-        fields :: line.split(" ").to_list()
+        head: if chunk.split_once("\n") == .Val(parts) -> parts.before else -> chunk
+        line: if at_start -> head else -> "{prefix}{head}"
+        fields: line.split(" ").to_list()
         if (fields.len() != 4 && fields.len() != 5) || !core_sig_one_of(member, fields[1].split("|").to_list()) -> next
         parameters := [CoreCallTypedParameter]{}
         if fields[2] != "-" {
             loop text in core_sig_row_parameters(fields[2]) {
-                bytes :: text.bytes()
+                bytes: text.bytes()
                 access := AccessConvention.Read
                 start := 0
                 if core_sig_row_code(bytes, 0) == 94 {
@@ -50,7 +50,7 @@ fn core_sig_row_lookup(rows: String, module_name: String, member: String) -> Cor
                 &parameters.push(core_sig_positional(core_sig_row_type(text, start), access))
             }
         }
-        return_type :: if fields[3] == "-" -> Type?{None} else -> Val(core_sig_row_type(fields[3], 0))
+        return_type: if fields[3] == "-" -> Type?{None} else -> Val(core_sig_row_type(fields[3], 0))
         signature := core_sig(module_name, member, parameters, return_type)
         signature.native_return_labels = core_sig_row_tuple_labels(fields[3])
         if fields.len() == 5 {
@@ -66,17 +66,17 @@ fn core_sig_row_lookup(rows: String, module_name: String, member: String) -> Cor
 // A `(name:T,…)` return's labels, or a `Result<T,(name:T,…)>` return's error
 // labels, in row (kernel declaration) order; the parsed Type sorts them
 // canonically. Empty for any other return field.
-fn core_sig_row_tuple_labels(field: String) -> [String] Never! {
-    bytes :: field.bytes()
+core_sig_row_tuple_labels: fn(field: String) -> [String] Never! {
+    bytes: field.bytes()
     labels := [String]{}
     if field.starts_with("Result<") && field.ends_with(">") {
-        result_args :: String.from_bytes(bytes.slice(7, bytes.len() - 1)) ?? return labels
-        sides :: core_sig_row_parameters(result_args)
+        result_args: String.from_bytes(bytes.slice(7, bytes.len() - 1)) ?? return labels
+        sides: core_sig_row_parameters(result_args)
         if sides.len() != 2 -> return labels
         return core_sig_row_tuple_labels(sides[1])
     }
     if bytes.len() < 2 || core_sig_row_code(bytes, 0) != 40 || core_sig_row_code(bytes, bytes.len() - 1) != 41 -> return labels
-    inner :: String.from_bytes(bytes.slice(1, bytes.len() - 1)) ?? return labels
+    inner: String.from_bytes(bytes.slice(1, bytes.len() - 1)) ?? return labels
     if inner == "" -> return labels
     loop part in core_sig_row_parameters(inner) {
         &labels.push(part.split(":").to_list()[0])
@@ -85,34 +85,34 @@ fn core_sig_row_tuple_labels(field: String) -> [String] Never! {
 }
 
 // One parsed row type and the byte offset just past it.
-struct CoreSigRowType {
+CoreSigRowType: struct {
     ty: Type
     next: Int
 }
 
 // Comma-separated row types and the byte offset just past their closer.
-struct CoreSigRowTypes {
+CoreSigRowTypes: struct {
     types: [Type]
     next: Int
 }
 
-fn core_sig_row_code(bytes: [U8], index: Int) -> Int Never! {
+core_sig_row_code: fn(bytes: [U8], index: Int) -> Int Never! {
     if index >= bytes.len() -> return -1
     Int.from_u8(bytes[index])
 }
 
-fn core_sig_row_is_name_code(code: Int) -> Bool Never! {
+core_sig_row_is_name_code: fn(code: Int) -> Bool Never! {
     (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95
 }
 
 // The top-level comma-separated parameter spellings of a `params` field.
-fn core_sig_row_parameters(field: String) -> [String] Never! {
-    bytes :: field.bytes()
+core_sig_row_parameters: fn(field: String) -> [String] Never! {
+    bytes: field.bytes()
     out := [String]{}
     depth := 0
     start := 0
     loop (index, byte) in bytes {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         if code == 91 || code == 60 || code == 40 -> depth += 1
         if code == 93 || code == 62 || code == 41 -> depth -= 1
         if code == 44 && depth == 0 {
@@ -124,27 +124,27 @@ fn core_sig_row_parameters(field: String) -> [String] Never! {
     out
 }
 
-fn core_sig_row_type(text: String, start: Int) -> Type Never! {
-    bytes :: text.bytes()
-    parsed :: core_sig_row_type_at(bytes, start)
+core_sig_row_type: fn(text: String, start: Int) -> Type Never! {
+    bytes: text.bytes()
+    parsed: core_sig_row_type_at(bytes, start)
     if parsed.next != bytes.len() -> panic("Core signature row type `{text}` has trailing text")
     parsed.ty
 }
 
-fn core_sig_row_type_at(bytes: [U8], start: Int) -> CoreSigRowType Never! {
+core_sig_row_type_at: fn(bytes: [U8], start: Int) -> CoreSigRowType Never! {
     parsed := core_sig_row_atom_at(bytes, start)
     loop core_sig_row_code(bytes, parsed.next) == 63 -> parsed = CoreSigRowType{ty: Type.Option{inner: parsed.ty}, next: parsed.next + 1}
     parsed
 }
 
 // The types from `start` up to the closer `close` (`>` or `)`).
-fn core_sig_row_types_at(bytes: [U8], start: Int, close: Int) -> CoreSigRowTypes Never! {
+core_sig_row_types_at: fn(bytes: [U8], start: Int, close: Int) -> CoreSigRowTypes Never! {
     types := [Type]{}
     next := start
     done := core_sig_row_code(bytes, next) == close
     if done -> next += 1
     loop !done {
-        parsed :: core_sig_row_type_at(bytes, next)
+        parsed: core_sig_row_type_at(bytes, next)
         &types.push(parsed.ty)
         done = core_sig_row_code(bytes, parsed.next) != 44
         next = parsed.next + 1
@@ -152,12 +152,12 @@ fn core_sig_row_types_at(bytes: [U8], start: Int, close: Int) -> CoreSigRowTypes
     CoreSigRowTypes{types: types, next: next}
 }
 
-fn core_sig_row_atom_at(bytes: [U8], start: Int) -> CoreSigRowType Never! {
-    first :: core_sig_row_code(bytes, start)
+core_sig_row_atom_at: fn(bytes: [U8], start: Int) -> CoreSigRowType Never! {
+    first: core_sig_row_code(bytes, start)
     if first == 91 {
-        element :: core_sig_row_type_at(bytes, start + 1)
+        element: core_sig_row_type_at(bytes, start + 1)
         if core_sig_row_code(bytes, element.next) == 58 {
-            value :: core_sig_row_type_at(bytes, element.next + 1)
+            value: core_sig_row_type_at(bytes, element.next + 1)
             return CoreSigRowType{ty: Type.Map{key: element.ty, key_span: None, value: value.ty}, next: value.next + 1}
         }
         return CoreSigRowType{ty: Type.List{element: element.ty}, next: element.next + 1}
@@ -170,7 +170,7 @@ fn core_sig_row_atom_at(bytes: [U8], start: Int) -> CoreSigRowType Never! {
         loop !done {
             name_end := next
             loop core_sig_row_code(bytes, name_end) != 58 -> name_end += 1
-            field :: core_sig_row_type_at(bytes, name_end + 1)
+            field: core_sig_row_type_at(bytes, name_end + 1)
             &fields.push(TypeTupleField{name: String.from_bytes(bytes.slice(next, name_end)) ?? "", ty: field.ty})
             done = core_sig_row_code(bytes, field.next) != 44
             next = field.next + 1
@@ -179,7 +179,7 @@ fn core_sig_row_atom_at(bytes: [U8], start: Int) -> CoreSigRowType Never! {
     }
     end := start
     loop core_sig_row_is_name_code(core_sig_row_code(bytes, end)) -> end += 1
-    name :: String.from_bytes(bytes.slice(start, end)) ?? ""
+    name: String.from_bytes(bytes.slice(start, end)) ?? ""
     if name == "fn" {
         params := [Type]{}
         ret := Type?{None}
@@ -188,14 +188,14 @@ fn core_sig_row_atom_at(bytes: [U8], start: Int) -> CoreSigRowType Never! {
         if done -> next += 1
         loop !done {
             if core_sig_row_code(bytes, next) == 59 {
-                result :: core_sig_row_type_at(bytes, next + 1)
+                result: core_sig_row_type_at(bytes, next + 1)
                 ret = Val(result.ty)
                 next = result.next + 1
                 done = true
             } else {
-                param :: core_sig_row_type_at(bytes, next)
+                param: core_sig_row_type_at(bytes, next)
                 &params.push(param.ty)
-                code :: core_sig_row_code(bytes, param.next)
+                code: core_sig_row_code(bytes, param.next)
                 done = code == 41
                 next = if code == 44 -> param.next + 1 else -> param.next
                 if done -> next += 1
@@ -204,7 +204,7 @@ fn core_sig_row_atom_at(bytes: [U8], start: Int) -> CoreSigRowType Never! {
         return CoreSigRowType{ty: Type.Fn{params: params, ret: ret, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}, next: next}
     }
     if core_sig_row_code(bytes, end) == 60 {
-        args :: core_sig_row_types_at(bytes, end + 1, 62)
+        args: core_sig_row_types_at(bytes, end + 1, 62)
         if name == "Result" -> return CoreSigRowType{ty: Type.Result{ok: args.types[0], err: args.types[1]}, next: args.next}
         if name == "Union" -> return CoreSigRowType{ty: Type.Union{members: args.types}, next: args.next}
         return CoreSigRowType{ty: Type.Apply{name: name, args: args.types}, next: args.next}
@@ -224,7 +224,7 @@ fn core_sig_row_atom_at(bytes: [U8], start: Int) -> CoreSigRowType Never! {
         bits := 0
         digits := true
         loop byte in bytes.slice(start + 1, end) {
-            code :: Int.from_u8(byte)
+            code: Int.from_u8(byte)
             if code < 48 || code > 57 -> digits = false
             bits = bits * 10 + code - 48
         }
@@ -233,8 +233,8 @@ fn core_sig_row_atom_at(bytes: [U8], start: Int) -> CoreSigRowType Never! {
     CoreSigRowType{ty: Type.Named{name: name}, next: end}
 }
 
-fn core_platform_fixed_signature(module_name: String, member: String) -> CoreTypedCallSignature? {
-    rows :: """
+core_platform_fixed_signature: fn(module_name: String, member: String) -> CoreTypedCallSignature? {
+    rows: """
 core.auth __state_load - [u8]
 core.auth __state_replace [u8],^[u8] Bool
 core.files __read_bytes_os String Result<[u8],IOError>

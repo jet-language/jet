@@ -1,13 +1,13 @@
-package {
+package: {
     name: "pipeline_builtin"
     authority: { allow: [Exec, IO, Mem.Alloc, Time.Wait] }
 }
 
-use process :: core.process
+use process: core.process
 
-fn run() {
-    source :: process.cmd(["printf", "keep-one\nskip\nkeep-two\n"])
-    filter :: process.cmd(["grep", "keep"])
-    result :: process.pipeline([source, filter]) ?? panic("pipeline")
+run: fn() {
+    source: process.cmd(["printf", "keep-one\nskip\nkeep-two\n"])
+    filter: process.cmd(["grep", "keep"])
+    result: process.pipeline([source, filter]) ?? panic("pipeline")
     print("exit={result.code} output={result.output.trim()}")
 }

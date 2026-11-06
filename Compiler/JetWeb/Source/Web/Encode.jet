@@ -8,33 +8,33 @@
 use jet_wasm.[WASM_F32, WASM_F64, WASM_I32, wasm_put_unsigned, wasm_sig_side]
 
 // The block type of a block, loop or if with no result.
-WEB_VOID :: 0x40
+WEB_VOID: 0x40
 
-WEB_SECTION_CUSTOM :: 0
-WEB_SECTION_TYPE :: 1
-WEB_SECTION_IMPORT :: 2
-WEB_SECTION_FUNCTION :: 3
-WEB_SECTION_GLOBAL :: 6
-WEB_SECTION_EXPORT :: 7
-WEB_SECTION_ELEMENT :: 9
-WEB_SECTION_CODE :: 10
-WEB_SECTION_DATA :: 11
+WEB_SECTION_CUSTOM: 0
+WEB_SECTION_TYPE: 1
+WEB_SECTION_IMPORT: 2
+WEB_SECTION_FUNCTION: 3
+WEB_SECTION_GLOBAL: 6
+WEB_SECTION_EXPORT: 7
+WEB_SECTION_ELEMENT: 9
+WEB_SECTION_CODE: 10
+WEB_SECTION_DATA: 11
 
 // Bytes of a padded function-index LEB128, patched once every index is known.
-WEB_PADDED :: 5
+WEB_PADDED: 5
 
 // An unsigned LEB128 of exactly WEB_PADDED bytes at `at` (a u32 value).
-fn web_patch_padded(out: &[U8], at: Int, value: Int) Never! {
+web_patch_padded: fn(out: &[U8], at: Int, value: Int) Never! {
     rest := value
     loop k in 0..<WEB_PADDED {
-        b :: rest.bit_and(0x7f)
+        b: rest.bit_and(0x7f)
         rest >>= 7
         out[at + k] = U8{if k + 1 < WEB_PADDED -> b.bit_or(0x80) else -> b}
     }
 }
 
 // The signature letter of a value type.
-fn web_type_letter(ty: Int) -> String Never! {
+web_type_letter: fn(ty: Int) -> String Never! {
     if ty == WASM_I32 -> return "i"
     if ty == WASM_F32 -> return "f"
     if ty == WASM_F64 -> return "d"
@@ -42,14 +42,14 @@ fn web_type_letter(ty: Int) -> String Never! {
 }
 
 // The parameter letters of signature `key`.
-fn web_sig_params(key: String) -> String Never! {
-    parts :: key.split(":").to_list()
+web_sig_params: fn(key: String) -> String Never! {
+    parts: key.split(":").to_list()
     if parts.len() == 0 -> "" else -> parts[0]
 }
 
 // The result letter of signature `key`, "" for none.
-fn web_sig_result(key: String) -> String Never! {
-    parts :: key.split(":").to_list()
+web_sig_result: fn(key: String) -> String Never! {
+    parts: key.split(":").to_list()
     if parts.len() < 2 -> "" else -> parts[1]
 }
 
@@ -57,15 +57,15 @@ fn web_sig_result(key: String) -> String Never! {
 // through a code address cannot know whether its callee returns a value, and
 // x86-64 lets a caller ignore an unset rax where WebAssembly checks the type,
 // so every table function returns a word (`l` for no result).
-fn web_slot_sig(key: String) -> String Never! {
+web_slot_sig: fn(key: String) -> String Never! {
     if web_sig_result(key) != "" -> return key.copy()
     "{web_sig_params(key)}:l"
 }
 
 // The function type entry of signature `key` (form 0x60).
-fn web_put_func_type(out: &[U8], key: String) Never! {
+web_put_func_type: fn(out: &[U8], key: String) Never! {
     &out.push(0x60)
-    sides :: [[Int]]{wasm_sig_side(key, false), wasm_sig_side(key, true)}
+    sides: [[Int]]{wasm_sig_side(key, false), wasm_sig_side(key, true)}
     loop types in sides {
         wasm_put_unsigned(&out, types.len())
         loop ty in types -> &out.push(U8{ty})

@@ -1,17 +1,17 @@
-struct Quantity<D> {
+Quantity: struct<D> {
     value: Float
 }
 
-struct MeterDim {}
-struct SecondDim {}
+MeterDim: struct {}
+SecondDim: struct {}
 
-fn meter(value: Float) -> Quantity<MeterDim> { Quantity<MeterDim>{ value: value } }
-fn second(value: Float) -> Quantity<SecondDim> { Quantity<SecondDim>{ value: value } }
+meter: fn(value: Float) -> Quantity<MeterDim> { Quantity<MeterDim>{ value: value } }
+second: fn(value: Float) -> Quantity<SecondDim> { Quantity<SecondDim>{ value: value } }
 
-fn divide<A, B>(left: Quantity<A>, right: Quantity<B>) -> Quantity<A * B> {
+divide: fn<A, B>(left: Quantity<A>, right: Quantity<B>) -> Quantity<A * B> {
     return Quantity<A * B>{ value: left.value / right.value }
 }
 
-fn run() {
+run: fn() {
     print(divide(meter(2.0), second(1.0)).value)
 }

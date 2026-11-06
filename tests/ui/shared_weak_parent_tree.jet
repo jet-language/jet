@@ -1,13 +1,13 @@
 // Strong kids and weak parent back-edges never close a strong cycle.
-struct Person {
+Person: struct {
     name: String
     parent: Shared.Weak<Person>?
     kids: [Shared<Person>]
 }
 
-fn run() {
-    mum :: shared Person{name: "Ada", parent: None, kids: []}
-    kid :: shared Person{name: "Byron", parent: Val(mum.downgrade()), kids: []}
+run: fn() {
+    mum: shared Person{name: "Ada", parent: None, kids: []}
+    kid: shared Person{name: "Byron", parent: Val(mum.downgrade()), kids: []}
     &mum.kids.push(kid)
     &mum.kids.push(shared Person{name: "Cy", parent: Val(mum.downgrade()), kids: []})
     print("{mum.name} has {mum.kids.len()} kids")

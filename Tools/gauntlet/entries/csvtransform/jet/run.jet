@@ -1,28 +1,28 @@
 use core.[data, files]
 
 #Codable
-struct Sale {
+Sale: struct {
     region: String
     amount: Decimal
 }
 
 #CLI
-struct Args {
+Args: struct {
     input: String
 }
 
-fn run(args: Args) {
-    text :: files.read(args.input) ?? panic("read failed")
-    sales :: data.csv<Sale>(text) ?? panic("csv failed")
-    zero :: Decimal("0.00")
-    included :: data.query(sales)
+run: fn(args: Args) {
+    text: files.read(args.input) ?? panic("read failed")
+    sales: data.csv<Sale>(text) ?? panic("csv failed")
+    zero: Decimal("0.00")
+    included: data.query(sales)
         .filter(sale -> sale.amount > zero)
         .collect() ?? panic("filter failed")
     groups := data.query(included)
         .group_by(sale -> sale.region)
         .sum(sale -> sale.amount.to_float())
         .collect() ?? panic("group sum")
-    counts :: data.query(included)
+    counts: data.query(included)
         .group_by(sale -> sale.region)
         .count()
         .collect() ?? panic("group count")
@@ -35,10 +35,10 @@ fn run(args: Args) {
                 break
             }
         }
-        sum :: "{group.value:Fixed(2)}"
+        sum: "{group.value:Fixed(2)}"
         print("{group.key} n={count} sum={sum}")
     }
-    total :: included.fold(Decimal("0.00"), (total, sale) -> total + sale.amount)
-    sum :: total.to_string()
+    total: included.fold(Decimal("0.00"), (total, sale) -> total + sale.amount)
+    sum: total.to_string()
     print("total n={included.len()} sum={sum}")
 }

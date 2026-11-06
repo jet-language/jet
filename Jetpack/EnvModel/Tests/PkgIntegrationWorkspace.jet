@@ -9,15 +9,15 @@ use {
 }
 
 #Test("package_root_owns_membership_over_retired_workspace_source") {
-    dir :: envmodel_test_workspace_dir("package-members")
+    dir: envmodel_test_workspace_dir("package-members")
     envmodel_test_write_package(dir, "packages/hello", "name: \"hello\"\n")
     envmodel_test_write_package(dir, "packages/ranker", "name: \"ranker\"\n")
     envmodel_test_write_package(dir, "", "name: \"root\"\nmembers: [\"packages/hello\", \"packages/ranker\"]\n")
-    files.write(files.join(dir, "workspace.jet"), "module workspace {{ members: 1 }}\n") ?? panic("stale workspace source")
+    files.write(files.join(dir, "workspace.jet"), "workspace: module {{ members: 1 }}\n") ?? panic("stale workspace source")
     cache := WorkspaceDeclarationCache.new()
-    plan :: envmodel_workspace_load(&cache, dir) ?? panic("membership load")
+    plan: envmodel_workspace_load(&cache, dir) ?? panic("membership load")
     assert_eq(envmodel_test_member_names(plan), [String]{"hello", "ranker"})
-    source :: files.read(files.join(dir, "package.jet")) ?? panic("manifest bytes")
+    source: files.read(files.join(dir, "package.jet")) ?? panic("manifest bytes")
     assert_eq(plan.source_digest, pkg_sha256_hex(source.bytes()))
     files.remove_all(dir) ?? panic("scratch cleanup")
 }
@@ -27,10 +27,10 @@ use {
 }
 
 #Test("committed_monorepo_example_indexes_and_addresses_members") {
-    root :: envmodel_test_repo_root()
-    dir :: files.join(root, "Examples/features/packages/monorepo")
-    source :: files.read(files.join(dir, "workspace.jet")) ?? panic("committed workspace source")
-    plan :: envmodel_workspace_evaluate(source, dir) ?? panic("committed workspace evaluation")
+    root: envmodel_test_repo_root()
+    dir: files.join(root, "Examples/features/packages/monorepo")
+    source: files.read(files.join(dir, "workspace.jet")) ?? panic("committed workspace source")
+    plan: envmodel_workspace_evaluate(source, dir) ?? panic("committed workspace evaluation")
     names := envmodel_test_member_names(plan)
     &names.sort()
     assert_eq(names, [String]{"hello", "ranker"})
@@ -44,30 +44,30 @@ use {
             ranker_path = Val(path)
         }
     }
-    index :: WorkspaceIndex.from_members(members)
-    hello :: RefSpec.classify_with_workspace("hello", SourceTable.empty(), index) ?? panic("bare hello")
+    index: WorkspaceIndex.from_members(members)
+    hello: RefSpec.classify_with_workspace("hello", SourceTable.empty(), index) ?? panic("bare hello")
     assert_eq(hello.source, RefSource.Path)
     assert(hello.package.ends_with("hello"))
-    ranker :: RefSpec.classify_with_workspace(ranker_path ?? panic("ranker present"), SourceTable.empty(), index) ?? panic("path ranker")
+    ranker: RefSpec.classify_with_workspace(ranker_path ?? panic("ranker present"), SourceTable.empty(), index) ?? panic("path ranker")
     assert(ranker.package.ends_with("ranker"))
 }
 
 #Test("find_discovers_packages_with_package_jet") {
-    dir :: envmodel_test_workspace_dir("ws-find-test")
+    dir: envmodel_test_workspace_dir("ws-find-test")
     envmodel_test_write_package(dir, "packages/hello", "name: \"hello\"\n")
     envmodel_test_write_package(dir, "packages/ranker", "name: \"ranker\"\n")
     files.create_dir_all(files.join(dir, "packages/bare")) ?? panic("bare directory")
-    plan :: envmodel_workspace_evaluate("module workspace {{ members: find(\"./packages\") }}\n", dir) ?? panic("find succeeds")
+    plan: envmodel_workspace_evaluate("workspace: module {{ members: find(\"./packages\") }}\n", dir) ?? panic("find succeeds")
     assert_eq(plan.members.len(), 2)
-    names :: envmodel_test_member_names(plan)
+    names: envmodel_test_member_names(plan)
     assert(names.contains("hello"))
     assert(names.contains("ranker"))
     files.remove_all(dir) ?? panic("scratch cleanup")
 }
 
 #Test("discovery_probe_skips_deep_non_workspace_jet_without_stack_overflow") {
-    dir :: envmodel_test_workspace_dir("ws-deep-probe")
-    deep := "fn run() {{\n    x :: "
+    dir: envmodel_test_workspace_dir("ws-deep-probe")
+    deep := "run: fn() {{\n    x: "
     loop _ in 0..<400 -> deep = "{deep}(() => "
     deep = "{deep}1"
     loop _ in 0..<400 -> deep = "{deep})"

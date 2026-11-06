@@ -2,19 +2,19 @@
 // quoting.
 use {
     core.encoding.[Dyn]
-    lsp_protocol_term :: core.term
+    lsp_protocol_term: core.term
     jet_foundation.[foundation_parse_protocol_json, foundation_json_integer, foundation_json_quote]
     jet_devserver.[number]
 }
 
 #Error
-struct LSPRPCError {
+LSPRPCError: struct {
     code: Int
     message: String
 }
 
-fn lsp_parse_rpc_message(body: String) -> Dyn LSPRPCError! {
-    message :: foundation_parse_protocol_json(body) ?? return Err(LSPRPCError{code: -32700, message: "Parse error"})
+lsp_parse_rpc_message: fn(body: String) -> Dyn LSPRPCError! {
+    message: foundation_parse_protocol_json(body) ?? return Err(LSPRPCError{code: -32700, message: "Parse error"})
     if message != .Object(_) -> return Err(LSPRPCError{code: -32600, message: "Invalid Request"})
     if (message.field("jsonrpc") ?? return Err(LSPRPCError{code: -32600, message: "Invalid Request"})) == {
         .Text(version) -> {
@@ -35,36 +35,36 @@ fn lsp_parse_rpc_message(body: String) -> Dyn LSPRPCError! {
     Ok(message)
 }
 
-fn lsp_serialize_id(id: Dyn) -> String Never! {
+lsp_serialize_id: fn(id: Dyn) -> String Never! {
     if id == .Text(text) -> return foundation_json_quote(text)
     if foundation_json_integer(id) == .Val(number) -> return "{number}"
     "null"
 }
 
-fn lsp_response(id: Dyn, result_json: String) -> String Never! {
+lsp_response: fn(id: Dyn, result_json: String) -> String Never! {
     "{{\"jsonrpc\":\"2.0\",\"id\":{lsp_serialize_id(id)},\"result\":{result_json}}}"
 }
 
-fn lsp_error_response(id: Dyn, code: Int, message: String) -> String Never! {
+lsp_error_response: fn(id: Dyn, code: Int, message: String) -> String Never! {
     "{{\"jsonrpc\":\"2.0\",\"id\":{lsp_serialize_id(id)},\"error\":{{\"code\":{code},\"message\":{foundation_json_quote(message)}}}}}"
 }
 
-fn lsp_cancellation_key(params: Dyn?) -> String? Never! {
-    value :: params ?? return None
+lsp_cancellation_key: fn(params: Dyn?) -> String? Never! {
+    value: params ?? return None
     // Presence takes priority, even if the first field has an invalid ID.
     // Rust's or_else only reads requestId when id is absent, not invalid/null.
-    id :: value.field("id") ?? value.field("requestId") ?? return None
+    id: value.field("id") ?? value.field("requestId") ?? return None
     if id != .Text(_) && foundation_json_integer(id) == None -> return None
     Val(lsp_serialize_id(id))
 }
 
 // Rust318–326. The actual fallible Stderr methods are canonical
 // StreamHandles StderrWriteLine/StderrFlush, not the nonfallible eprint rail.
-fn lsp_write_log_line(stderr: &lsp_protocol_term.Stderr, line: String) IOError! -[IO, Time.Wait]> {
+lsp_write_log_line: fn(stderr: &lsp_protocol_term.Stderr, line: String) IOError! -[IO, Time.Wait]> {
     &stderr.write_line(line) ?? return Err(err)
 }
 
-fn lsp_write_log(message: String) IOError! -[IO, Time.Wait]> {
+lsp_write_log: fn(message: String) IOError! -[IO, Time.Wait]> {
     stderr := lsp_protocol_term.stderr()
     lsp_write_log_line(&stderr, "[jet-lsp] {message}") ?? return Err(err)
     &stderr.flush() ?? return Err(err)

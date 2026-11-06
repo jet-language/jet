@@ -1,32 +1,32 @@
-use text_parse :: core.text.parse
+use text_parse: core.text.parse
 
-enum Step {
+Step: enum {
     Identity
     Field(String)
     Each
     AtLeast(field: String, limit: Int)
 }
 
-fn parse_stage(source: String) -> [Step]? {
-    stage :: source.trim()
+parse_stage: fn(source: String) -> [Step]? {
+    stage: source.trim()
     if stage == "." -> return Val([Step]{Step.Identity})
 
     if stage.starts_with("select(") && stage.ends_with(")") {
-        body :: text_parse.strip_suffix(text_parse.strip_prefix(stage, "select("), ")").trim()
-        words :: body.split(" ").to_list()
+        body: text_parse.strip_suffix(text_parse.strip_prefix(stage, "select("), ")").trim()
+        words: body.split(" ").to_list()
         if words.len() != 3 -> return None
-        path :: words[0].trim()
+        path: words[0].trim()
         if !path.starts_with(".") || path.len() < 2 -> return None
         if words[1].trim() != ">=" -> return None
-        limit :: Int.parse(words[2].trim()) ?? return None
-        field :: text_parse.strip_prefix(path, ".")
+        limit: Int.parse(words[2].trim()) ?? return None
+        field: text_parse.strip_prefix(path, ".")
         return Val([Step]{Step.AtLeast{field: field, limit: limit}})
     }
 
     if stage.ends_with("[]") {
-        path :: text_parse.strip_suffix(stage, "[]").trim()
+        path: text_parse.strip_suffix(stage, "[]").trim()
         if !path.starts_with(".") || path.len() < 2 -> return None
-        field :: text_parse.strip_prefix(path, ".")
+        field: text_parse.strip_prefix(path, ".")
         return Val([Step]{Step.Field(field), Step.Each})
     }
 
@@ -36,19 +36,19 @@ fn parse_stage(source: String) -> [Step]? {
     return None
 }
 
-fn parse(source: String) -> [Step]? {
+parse: fn(source: String) -> [Step]? {
     steps := [Step]{}
-    stages :: source.split("|").to_list()
+    stages: source.split("|").to_list()
     if stages.len() == 0 -> return None
     loop stage in stages {
-        parsed :: parse_stage(stage) ?? return None
+        parsed: parse_stage(stage) ?? return None
         &steps.extend(parsed)
     }
     if steps.len() == 0 -> return None
     return Val(steps)
 }
 
-fn field(value: Dyn, name: String) -> Dyn? {
+field: fn(value: Dyn, name: String) -> Dyn? {
     if value == .Object(entries) {
         loop pair in entries {
             if pair.key == name -> return Val(pair.value)
@@ -57,7 +57,7 @@ fn field(value: Dyn, name: String) -> Dyn? {
     return None
 }
 
-fn apply_step(values: [Dyn], step: Step) -> [Dyn] {
+apply_step: fn(values: [Dyn], step: Step) -> [Dyn] {
     output := [Dyn]{}
     loop value in values {
         if step == {
@@ -72,7 +72,7 @@ fn apply_step(values: [Dyn], step: Step) -> [Dyn] {
             }
             .AtLeast(name, limit) -> {
                 if field(value.copy(), name.copy()) == .Val(found) {
-                    score :: found.int() ?? Int.MIN
+                    score: found.int() ?? Int.MIN
                     if score >= limit -> &output.push(value)
                 }
             }
@@ -81,8 +81,8 @@ fn apply_step(values: [Dyn], step: Step) -> [Dyn] {
     return output
 }
 
-fn run(data: Dyn, query: String) -> [Dyn]? {
-    steps :: parse(query) ?? return None
+run: fn(data: Dyn, query: String) -> [Dyn]? {
+    steps: parse(query) ?? return None
     values := [Dyn]{data}
     loop step in steps -> values = apply_step(values, step)
     return Val(values)

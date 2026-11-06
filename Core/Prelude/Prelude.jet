@@ -1,4 +1,4 @@
-package {
+package: {
     name: "core.prelude"
     version: "0.0.1"
     edition: "2026"
@@ -8,33 +8,33 @@ package {
         prelude: .Library{ entry: prelude }
     }
 }
-use core :: core
+use core: core
 
 // `keep` is the compiler's identity/use-site barrier. The other helpers,
 // including the optional-to-failure view, are ordinary reachable Jet bodies.
-fn keep<T>(value: T) -> T Never! { value }
+keep: fn<T>(value: T) -> T Never! { value }
 
-fn identity(value: ^String) -> String Never! { value }
+identity: fn(value: ^String) -> String Never! { value }
 
-fn always(value: Bool) -> Bool Never! { value }
+always: fn(value: Bool) -> Bool Never! { value }
 
-fn identity_int(value: Int) -> Int Never! { value }
+identity_int: fn(value: Int) -> Int Never! { value }
 
-fn identity_float(value: Float) -> Float Never! { value }
+identity_float: fn(value: Float) -> Float Never! { value }
 
-fn identity_bool(value: Bool) -> Bool Never! { value }
+identity_bool: fn(value: Bool) -> Bool Never! { value }
 
-fn const_int(value: Int, ignored: Int) -> Int Never! {
-    _ :: ignored
+const_int: fn(value: Int, ignored: Int) -> Int Never! {
+    _: ignored
     value
 }
 
-fn const_bool(value: Bool, ignored: Bool) -> Bool Never! {
-    _ :: ignored
+const_bool: fn(value: Bool, ignored: Bool) -> Bool Never! {
+    _: ignored
     value
 }
 
-fn not_bool(value: Bool) -> Bool Never! {
+not_bool: fn(value: Bool) -> Bool Never! {
     if value -> return false
     true
 }
@@ -46,7 +46,7 @@ fn not_bool(value: Bool) -> Bool Never! {
 // nothing, so no other value is the least or the greatest. Only an unordered
 // pair (neither `a < b` nor `b <= a`) pays for finding which side is NaN, so
 // ordered values cost one or two compares per argument.
-fn min<T: Comparable>(a: T, b: T, rest: ...T) -> T Never! {
+min: fn<T: Comparable>(a: T, b: T, rest: ...T) -> T Never! {
     best := a
     if b < a {
         best = b
@@ -63,7 +63,7 @@ fn min<T: Comparable>(a: T, b: T, rest: ...T) -> T Never! {
     best
 }
 
-fn max<T: Comparable>(a: T, b: T, rest: ...T) -> T Never! {
+max: fn<T: Comparable>(a: T, b: T, rest: ...T) -> T Never! {
     best := a
     if a < b {
         best = b
@@ -81,7 +81,7 @@ fn max<T: Comparable>(a: T, b: T, rest: ...T) -> T Never! {
 }
 
 // Reversed bounds are accepted: `clamp(x, 10, 0)` clamps to `0..=10`.
-fn clamp<T: Comparable>(x: T, lo: T, hi: T) -> T Never! {
+clamp: fn<T: Comparable>(x: T, lo: T, hi: T) -> T Never! {
     if hi < lo {
         if hi <= x {
             if x <= lo -> return x
@@ -102,7 +102,7 @@ fn clamp<T: Comparable>(x: T, lo: T, hi: T) -> T Never! {
 // The caller materializes the receiver and then `why`,
 // even when the payload is present. Own those evaluated values, not a later
 // read of the caller's optional. Construct an Err only for clean absence.
-fn option_or_err<T>(value: ^T?, why: ^String) -> T Err! {
+option_or_err: fn<T>(value: ^T?, why: ^String) -> T Err! {
     return if value == {
         .Val(payload) -> Ok(payload)
         .None -> Err(why)
@@ -114,7 +114,7 @@ fn option_or_err<T>(value: ^T?, why: ^String) -> T Err! {
 // reads only `self` fields, so `jet explain` can print it without running code.
 // `reject(value)` raises one while compiling. The constants are the registry
 // columns, and each has a default.
-trait Diagnostic {
+Diagnostic: trait {
     // The report's code. None: the type's path, such as `web.BadPath`.
     code: String?{None}
     severity: Severity{.Error}
@@ -139,14 +139,14 @@ trait Diagnostic {
     // The next step without a machine edit. None: the `fix` text.
     fix_next: String?{None}
     fix_safety: DiagnosticFixSafety?{None}
-    fn what(self) -> String
-    fn why(self) -> String
-    fn fix(self) -> String
+    what: fn(self) -> String
+    why: fn(self) -> String
+    fix: fn(self) -> String
 }
 
 // How a diagnostic stops the build. `.Warning` and `.Lint` reports don't, and
 // `#Allow(Type)` silences one.
-enum Severity {
+Severity: enum {
     Error
     Warning
     Lint
@@ -154,7 +154,7 @@ enum Severity {
 
 // A part of the toolchain that reports a diagnostic. A row lists every part
 // that does (`[.Parse, .Sema]`).
-enum DiagnosticStage {
+DiagnosticStage: enum {
     Build
     Compile
     Comptime
@@ -171,7 +171,7 @@ enum DiagnosticStage {
 }
 
 // When a diagnostic can fire.
-enum DiagnosticMoment {
+DiagnosticMoment: enum {
     Compile
     Run
     Test
@@ -180,14 +180,14 @@ enum DiagnosticMoment {
 
 // A retired code no longer fires; it stays so old logs remain explainable.
 // A reserved code holds its number for a rule not yet reported.
-enum DiagnosticStatus {
+DiagnosticStatus: enum {
     Active
     Reserved
     Retired
 }
 
 // The machine edit `jet fix` applies for a diagnostic.
-enum DiagnosticEdit {
+DiagnosticEdit: enum {
     SourceEdit
     SuggestedSourceEdit
     CryptoMisuse
@@ -202,14 +202,14 @@ enum DiagnosticEdit {
 
 // Why a diagnostic has no machine edit: the fix is a design choice, it would
 // change behavior, or more than one fix fits.
-enum DiagnosticNoFix {
+DiagnosticNoFix: enum {
     Design
     Behavior
     Ambiguous
 }
 
 // How safe a machine edit is to apply without review.
-enum DiagnosticFixSafety {
+DiagnosticFixSafety: enum {
     Formatting
     BehaviorPreserving
     APIChanging
@@ -220,10 +220,10 @@ enum DiagnosticFixSafety {
 // Compiler-supplied #Receipt facts are not a user-constructible handle.
 // This private source target retains the typed payload and all three checked
 // metadata arguments; the raw store operation uses the existing encoder.
-module receipt {
-    use core :: core
+receipt: module {
+    use core: core
 
-    fn attach<T>(value: T, section_name: String, type_name: String, schema_digest: String) Never! {
+    attach: fn<T>(value: T, section_name: String, type_name: String, schema_digest: String) Never! {
         core.prelude.__receipt_attach<T>(value, section_name, type_name, schema_digest)
     }
 }

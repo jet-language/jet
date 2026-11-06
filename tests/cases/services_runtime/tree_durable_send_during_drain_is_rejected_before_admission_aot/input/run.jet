@@ -1,19 +1,19 @@
 
 use {
-    service :: core.service
-    testing :: core.testing
+    service: core.service
+    testing: core.testing
 }
 
-fn worker() {}
+worker: fn() {}
 
-fn run() {
+run: fn() {
     temp := testing.temp_dir("tree-drain-reject")
-    store :: Path.from(temp).join("authority.log").to_string()
+    store: Path.from(temp).join("authority.log").to_string()
     tree := service.tree("tree-drain-reject")
     &tree.set_delivery(service.delivery_durable()) ?? panic("delivery")
-    state :: service.state_store(store) ?? panic("state")
+    state: service.state_store(store) ?? panic("state")
     &tree.set_state_event_log(state, "events", 1, "reversible") ?? panic("state adapter")
-    endpoint :: &tree.worker("api", worker, capacity: 1) ?? panic("worker")
+    endpoint: &tree.worker("api", worker, capacity: 1) ?? panic("worker")
     &tree.start() ?? panic("start")
     // copy: the drain and the rejected durable send still use the endpoint.
     &tree.directory_register("api", endpoint.copy()) ?? panic("directory")
@@ -23,7 +23,7 @@ fn run() {
         .Err(_) -> { print("direct:rejected") }
     }
     print("handoff:{&tree.handoff_generation() ?? panic("handoff")}")
-    current :: tree.directory_resolve("api") ?? panic("resolve")
+    current: tree.directory_resolve("api") ?? panic("resolve")
     if &tree.receive(current) == {
         .Ok(_) -> { print("pending:accepted") }
         .Err(_) -> { print("pending:rejected") }

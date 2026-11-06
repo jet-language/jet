@@ -1,37 +1,37 @@
 // XML checker roots: lexical call precedence, audited value tails, direct read windows.
-fn text(key: String) -> String Never! { key.copy() }
-fn object(key: Int) -> Int Never! { key }
-fn xml_roots_predicate() -> Bool Never! {
-    text :: (key: String) -[]> key == "value"
-    object :: (key: String) -[]> text(key)
+text: fn(key: String) -> String Never! { key.copy() }
+object: fn(key: Int) -> Int Never! { key }
+xml_roots_predicate: fn() -> Bool Never! {
+    text: (key: String) -[]> key == "value"
+    object: (key: String) -[]> text(key)
     object("value")
 }
-fn xml_roots_byte() -> U8 Never! {
+xml_roots_byte: fn() -> U8 Never! {
     #Unsafe("no raw operations in this regression") {
         #Unsafe("nested tail retains its value grammar") { U8{7} }
     }
 }
-fn xml_roots_first(bytes: View<U8>) -> U8 Never! { bytes[0] }
-fn xml_roots_window(bytes: [U8]) -> U8 Never! {
+xml_roots_first: fn(bytes: View<U8>) -> U8 Never! { bytes[0] }
+xml_roots_window: fn(bytes: [U8]) -> U8 Never! {
     xml_roots_first(bytes[0..<bytes.len()])
 }
-fn has(key: String) -> Bool { Err("global failure") }
-fn xml_roots_local_failure_contract() -> Bool Never! {
-    has :: (key: String) -> !(key == "")
-    text :: (key: String) -> has(key)
+has: fn(key: String) -> Bool { Err("global failure") }
+xml_roots_local_failure_contract: fn() -> Bool Never! {
+    has: (key: String) -> !(key == "")
+    text: (key: String) -> has(key)
     text("value")
 }
-fn xml_roots_next() -> Int Never! {
+xml_roots_next: fn() -> Int Never! {
     loop {
-        event :: 1
-        node :: if event == { 0 -> { next } else -> 1 }
+        event: 1
+        node: if event == { 0 -> { next } else -> 1 }
         return node
     }
 }
-fn xml_roots_prefix(name: String?) Never! {
-    if name == .Val(prefix) { _ :: prefix.len() }
+xml_roots_prefix: fn(name: String?) Never! {
+    if name == .Val(prefix) { _: prefix.len() }
 }
-fn xml_roots_shared<T>(x: ^T) -> Shared<T?> {
+xml_roots_shared: fn<T>(x: ^T) -> Shared<T?> {
     shared (T?{Val(^x)})
 }
 #Test("xml_checker_roots_fixtures") {

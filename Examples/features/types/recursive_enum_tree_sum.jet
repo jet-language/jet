@@ -1,25 +1,25 @@
 // #3831: a recursive enum whose variant carries two subtrees builds with
 // `Tree.Node{...}`, traverses, and releases on every tier (AOT boxes the
 // recursive payload).
-enum Tree {
+Tree: enum {
     Leaf
     Node(left: Tree, value: Int, right: Tree)
 }
 
-fn build(lo: Int, hi: Int) -> Tree {
+build: fn(lo: Int, hi: Int) -> Tree {
     if lo > hi -> return Tree.Leaf
-    mid :: (lo + hi) >> 1
+    mid: (lo + hi) >> 1
     Tree.Node{left: build(lo, mid - 1), value: mid, right: build(mid + 1, hi)}
 }
 
-fn sum(t: Tree) -> Int {
+sum: fn(t: Tree) -> Int {
     if t == {
         .Leaf -> 0
         .Node(left, value, right) -> sum(left) + value + sum(right)
     }
 }
 
-fn run() {
+run: fn() {
     tree := build(1, 100)
     print("sum={sum(tree)}")
     tree = Tree.Leaf

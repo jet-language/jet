@@ -1,5 +1,5 @@
 Error [jet.NestedHookedAssignment]: Compound assignment can't target a nested operator field
-  --> operator_nested_compound.jet:28:17
+  --> tests/ui/operator_nested_compound.jet:28:17
     |
  28 |     outer.inner.value += Vec2{x: 3, y: 4}
     |                 ^^^^^
@@ -8,10 +8,10 @@ Error [jet.NestedHookedAssignment]: Compound assignment can't target a nested op
 More: jet-lang.dev/e/E0362
 
 Error [jet.NestedHookedAssignment]: Compound assignment can't target a nested operator field
-  --> operator_nested_compound.jet:31:76
+  --> tests/ui/operator_nested_compound.jet:31:77
     |
- 31 | fn update_generic<T: Add>(outer: &GenericOuter<T>, delta: T) { outer.inner.value += delta }
-    |                                                                            ^^^^^
+ 31 | update_generic: fn<T: Add>(outer: &GenericOuter<T>, delta: T) { outer.inner.value += delta }
+    |                                                                             ^^^^^
  Why: The current operator-place lowering supports one named owner and one field
  Fix: Bind the inner value, update it, then assign the whole inner value back
 More: jet-lang.dev/e/E0362

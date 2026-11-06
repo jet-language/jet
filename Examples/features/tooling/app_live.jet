@@ -7,16 +7,16 @@ use {
 }
 
 #Error
-enum OrderError {
+OrderError: enum {
     EmptyStatus
 }
 
-fn order_count(status: String) -[DB.Read]> Int OrderError! {
+order_count: fn(status: String) -[DB.Read]> Int OrderError! {
     if status == "" -> return Err(OrderError.EmptyStatus)
     status.len()
 }
 
-fn shown(state: Loadable<Int, OrderError>) -> String {
+shown: fn(state: Loadable<Int, OrderError>) -> String {
     if state == {
         .Loaded(value) -> "loaded {value}"
         .Failed(reason) -> if reason == {
@@ -26,9 +26,9 @@ fn shown(state: Loadable<Int, OrderError>) -> String {
     }
 }
 
-fn run() {
-    pending :: app.live(order_count, "pending")
-    shipped :: app.live(order_count, "shipped")
+run: fn() {
+    pending: app.live(order_count, "pending")
+    shipped: app.live(order_count, "shipped")
     print("pending {shown(app.state(pending))}")
     print("shipped {shown(app.state(shipped))}")
     // Only the "pending" binding re-runs; its value is unchanged.
@@ -39,7 +39,7 @@ fn run() {
     // Every binding of the source re-runs.
     app.invalidate(order_count)
     print("shipped {shown(app.state(shipped))}")
-    broken :: app.live(order_count, "")
+    broken: app.live(order_count, "")
     print("broken {shown(app.state(broken))}")
     print(app.live_stats())
 }

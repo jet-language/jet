@@ -1,19 +1,19 @@
 // `helper` declares no return type, so it is `Unit` with the implicit default
 // `Err` route (spec.md:971-988): `?? return Err(...)` is its failure return,
 // and the `Int` that `source()` produces on success is dropped (E0433).
-fn source() -> Int {
+source: fn() -> Int {
     return Ok(7)
 }
 
-fn declared() -> Int {
-    value :: source() ?? return Err("declared failure")
+declared: fn() -> Int {
+    value: source() ?? return Err("declared failure")
     return Ok(value)
 }
 
-fn helper() {
+helper: fn() {
     source() ?? return Err("resultless failure")
 }
 
-fn run() {
+run: fn() {
     helper()
 }

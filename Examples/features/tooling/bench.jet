@@ -1,7 +1,7 @@
 // D-CLAIM-BENCH1=A: `.measure` marks a `#Test` claim for
 // `jet test --measure`; plain `jet test` still checks the claim once.
 // `jet run` ignores test claims and just runs `main`.
-fn fib(n: Int) -> Int {
+fib: fn(n: Int) -> Int {
     a := 0
     b := 1
     loop i in 0..<n {
@@ -12,23 +12,23 @@ fn fib(n: Int) -> Int {
     return a
 }
 
-fn work(i: Int) -> Int { return (i * 17 + 3) % 101 }
+work: fn(i: Int) -> Int { return (i * 17 + 3) % 101 }
 
 // The baseline drops every loop value on purpose. An optimizing build may
 // erase its work.
-fn elided_baseline(n: Int) -> Int {
+elided_baseline: fn(n: Int) -> Int {
     loop i in 0..<n -> work(i).drop("baseline: measure a loop whose values nobody reads")
     return 0
 }
 
 // Feed each value to keep() inside the measured loop before using it.
-fn kept_loop(n: Int) -> Int {
+kept_loop: fn(n: Int) -> Int {
     total := 0
     loop i in 0..<n -> total += keep(work(i))
     return total
 }
 
-fn run() {
+run: fn() {
     print("fib(10) = {fib(10)}")
     print("keep loop sum(10) = {kept_loop(10)}")
 }

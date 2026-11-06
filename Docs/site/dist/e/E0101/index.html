@@ -32,24 +32,18 @@
 <h2>What</h2>
 <p class="diag-copy what" data-registry-field="what">This program has no `run` function</p>
 <h2>Why</h2>
-<p class="diag-copy why" data-registry-field="why">Running a program starts at `fn run`, and the entry file doesn&#39;t define one</p>
+<p class="diag-copy why" data-registry-field="why">Running a program starts at `run: fn`, and the entry file doesn&#39;t define one</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Add `fn run() { ... }` to the entry file</p>
+<p class="diag-copy fix" data-registry-field="fix">Add `run: fn() { ... }` to the entry file</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0101</code>: <code>tests/ui/E1130_kernel_proof.stderr</code>.</p>
+<p>First UI snapshot mentioning <code>E0101</code>: <code>tests/ui/no_main.stderr</code>.</p>
 <pre class="diag">Error [jet.MissingRunFunction]: This program has no `run` function
- Why: Running a program starts at `fn run`, and the entry file doesn&#39;t define one
- Fix: Add `fn run() { ... }` to the entry file
+ Why: Running a program starts at `run: fn`, and the entry file doesn&#39;t define one
+ Fix: Add `run: fn() { ... }` to the entry file
 More: jet-lang.dev/e/E0101
 
-Error [jet.ValueNotSendable]: `#Kernel(.parallel)` cannot cross its worker boundary: sema cannot prove no reachable effects or opaque calls
-  --&gt; tests/ui/E1130_kernel_proof.jet:1:1
-    |
-  1 | #Kernel(.parallel) fn noisy(value: Int) -&gt; Int {
-    | ^^^^^^^^^^^^^^^^^^
- Why: A safe kernel crosses a worker boundary only after sema proves sendability, bounds, aliasing, captures, races, barriers, and control flow before lowering
- Fix: Use a read-only effect-free expression over checked Core compute operations, or move provider/raw code behind its typed `#Unsafe` boundary
-More: jet-lang.dev/e/E1102
+1 problem found
+run `jet explain E0101` to learn more
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>
 </article>

@@ -1,12 +1,12 @@
 // Package/Blocks.rs security tests: retired build environment payloads and
-// the contextual inline `package { … }` carrier.
+// the contextual inline `package: { … }` carrier.
 use jet_pkg_model.[
     InlinePackageBlock, PackageFacts, pkg_binder_slice, pkg_binder_tail, pkg_extract_inline_package,
     pkg_inline_package_insertion_offset, pkg_parse_build,
 ]
 
 #Test("build profile rejects retired environment payload") {
-    hostile :: "release: Build.{{ optimize: \"full\", env: \"RUSTFLAGS=--cfg=hostile; touch pwned\" }}"
+    hostile: "release: Build.{{ optimize: \"full\", env: \"RUSTFLAGS=--cfg=hostile; touch pwned\" }}"
     if pkg_parse_build(hostile) == {
         .Ok(_) -> panic("retired build-profile environment data must not reach rustc")
         .Err(_) -> {}
@@ -16,7 +16,7 @@ use jet_pkg_model.[
 // Rust `extract_inline_package(source).unwrap()`: the scan succeeds and the
 // carrier may be absent. A single `??` would consume both the Result and the
 // Option rail, so absence must stay observable here.
-fn pkg_test_scan_inline_package(source: String) -> InlinePackageBlock? Never! {
+pkg_test_scan_inline_package: fn(source: String) -> InlinePackageBlock? Never! {
     scanned := InlinePackageBlock?{None}
     if pkg_extract_inline_package(source) == {
         .Ok(found) -> scanned = found
@@ -26,46 +26,46 @@ fn pkg_test_scan_inline_package(source: String) -> InlinePackageBlock? Never! {
 }
 
 #Test("inline package spans and mask preserve offsets") {
-    source :: "// header\npackage /* carrier */ {{\nname: \"demo\"\n}}\nfn run() {{}}\n"
-    block :: pkg_test_scan_inline_package(source) ?? panic("leading inline Package")
+    source: "// header\npackage: /* carrier */ {{\nname: \"demo\"\n}}\nrun: fn() {{}}\n"
+    block: pkg_test_scan_inline_package(source) ?? panic("leading inline Package")
     assert_eq(pkg_binder_slice(source, block.keyword_span.start, block.keyword_span.end), "package")
-    masked :: block.mask_source(source)
+    masked: block.mask_source(source)
     assert_eq(source.bytes().len(), masked.bytes().len())
-    raw :: masked.bytes()
+    raw: masked.bytes()
     loop index in block.span.start..<block.span.end {
-        code :: Int.from_u8(raw[index])
+        code: Int.from_u8(raw[index])
         assert(code == 32 || code == 10 || code == 13)
     }
 }
 
 #Test("inline package scanner ignores nested words") {
-    nested :: "fn run() {{ print(\"package {{ not a declaration }}\") }}\n"
+    nested: "run: fn() {{ print(\"package: {{ not a declaration }}\") }}\n"
     assert(pkg_test_scan_inline_package(nested) == None)
-    source :: "package {{ description: \"\"\"package {{ still text }}\"\"\" }}\nfn run() {{}}\n"
-    block :: pkg_test_scan_inline_package(source) ?? panic("triple-quoted Package values stay inside the carrier")
+    source: "package: {{ description: \"\"\"package: {{ still text }}\"\"\" }}\nrun: fn() {{}}\n"
+    block: pkg_test_scan_inline_package(source) ?? panic("triple-quoted Package values stay inside the carrier")
     assert(block.body(source).contains("still text"))
 }
 
 #Test("inline package scanner ignores module path segments") {
-    source :: "module perf.package {{\n}}\nfn run() {{}}\n"
+    source: "perf.package: module {{\n}}\nrun: fn() {{}}\n"
     assert(pkg_test_scan_inline_package(source) == None)
 }
 
 #Test("inline package allows byte zero shebang header") {
-    source :: "#!/usr/bin/env jet\npackage {{ name: \"demo\" }}\nfn run() {{}}\n"
+    source: "#!/usr/bin/env jet\npackage: {{ name: \"demo\" }}\nrun: fn() {{}}\n"
     assert(pkg_test_scan_inline_package(source) != None)
 }
 
 #Test("inline package rejects not first duplicate and unbalanced") {
-    if pkg_extract_inline_package("fn run() {{}}\npackage {{ name: \"demo\" }}\n") == {
+    if pkg_extract_inline_package("run: fn() {{}}\npackage {{ name: \"demo\" }}\n") == {
         .Err(error) -> assert(error.message() == "the inline Package declaration must be first")
         .Ok(_) -> panic("a later carrier is not first")
     }
-    if pkg_extract_inline_package("package {{ name: \"one\" }}\npackage {{ name: \"two\" }}\nfn run() {{}}\n") == {
+    if pkg_extract_inline_package("package: {{ name: \"one\" }}\npackage: {{ name: \"two\" }}\nrun: fn() {{}}\n") == {
         .Err(error) -> assert(error.message() == "only one inline Package declaration is allowed")
         .Ok(_) -> panic("a second carrier is a duplicate")
     }
-    if pkg_extract_inline_package("package {{ name: \"demo\"\nfn run() {{}}\n") == {
+    if pkg_extract_inline_package("package: {{ name: \"demo\"\nrun: fn() {{}}\n") == {
         .Err(error) -> assert(error.message() == "the inline Package declaration is missing its closing `}}`")
         .Ok(_) -> panic("an unclosed carrier is unbalanced")
     }
@@ -73,18 +73,18 @@ fn pkg_test_scan_inline_package(source: String) -> InlinePackageBlock? Never! {
 
 // Insert a carrier at the computed offset; the result must parse as a
 // leading carrier.
-fn pkg_test_insert_inline_package(source: String) -> String Never! {
-    at :: pkg_inline_package_insertion_offset(source)
-    out :: "{pkg_binder_slice(source, 0, at)}package {{ name: \"demo\" }}\n{pkg_binder_tail(source, at)}"
-    block :: pkg_test_scan_inline_package(out) ?? panic("insertion must produce a leading carrier")
+pkg_test_insert_inline_package: fn(source: String) -> String Never! {
+    at: pkg_inline_package_insertion_offset(source)
+    out: "{pkg_binder_slice(source, 0, at)}package: {{ name: \"demo\" }}\n{pkg_binder_tail(source, at)}"
+    block: pkg_test_scan_inline_package(out) ?? panic("insertion must produce a leading carrier")
     assert_eq(block.body(out).trim(), "name: \"demo\"")
     out
 }
 
 #Test("inline package insertion keeps header first and docs attached") {
-    assert_eq(pkg_test_insert_inline_package("#!/usr/bin/env jet\n// tool header\nuse files :: core.files\n"), "#!/usr/bin/env jet\n// tool header\npackage {{ name: \"demo\" }}\nuse files :: core.files\n")
-    assert_eq(pkg_test_insert_inline_package("// header\n\n/// Entry.\n/// More.\nfn run() {{}}\n"), "// header\n\npackage {{ name: \"demo\" }}\n/// Entry.\n/// More.\nfn run() {{}}\n")
-    assert_eq(pkg_test_insert_inline_package("fn run() {{}}\n"), "package {{ name: \"demo\" }}\nfn run() {{}}\n")
+    assert_eq(pkg_test_insert_inline_package("#!/usr/bin/env jet\n// tool header\nuse files: core.files\n"), "#!/usr/bin/env jet\n// tool header\npackage: {{ name: \"demo\" }}\nuse files: core.files\n")
+    assert_eq(pkg_test_insert_inline_package("// header\n\n/// Entry.\n/// More.\nrun: fn() {{}}\n"), "// header\n\npackage: {{ name: \"demo\" }}\n/// Entry.\n/// More.\nrun: fn() {{}}\n")
+    assert_eq(pkg_test_insert_inline_package("run: fn() {{}}\n"), "package: {{ name: \"demo\" }}\nrun: fn() {{}}\n")
 }
 
 // Package/mod.rs `source_files_checked`: interpolated suffixes compare values,

@@ -5,35 +5,35 @@
 // forgets a cancelled waiter, and refuses work while it drains; a closed
 // connection refuses further queries. Another engine or driver is an owner
 // ballot, not something a URL name implies.
-package {
+package: {
     name: "db_contracts"
     authority: { allow: [DB, DB.Read, DB.Write, IO, Mem.Alloc, Time.Wait] }
 }
 
-use db :: core.db
-use time :: core.time
+use db: core.db
+use time: core.time
 
 #Codable
-struct Item {
+Item: struct {
     id: Int
     name: String
     price: Float
 }
 
-fn count(scope: DBScope) -[DB]> Int {
-    row :: scope.query_one(SQL{"SELECT COUNT(*) AS n FROM item"}) ?? return -1
+count: fn(scope: DBScope) -[DB]> Int {
+    row: scope.query_one(SQL{"SELECT COUNT(*) AS n FROM item"}) ?? return -1
     db.row_int(row, "n") ?? -1
 }
 
 // Queues behind the held lease until its owner cancels it.
-fn wait_for_lease(pool: DBPool, started: Sender<Int>) -[DB, Time.Wait]> String {
+wait_for_lease: fn(pool: DBPool, started: Sender<Int>) -[DB, Time.Wait]> String {
     started.send(1)
-    lease :: pool.acquire(deadline: 60000ms) ?? return "waiter: {err.message}"
+    lease: pool.acquire(deadline: 60000ms) ?? return "waiter: {err.message}"
     lease.close() ?? return "waiter release: {err.message}"
     "waiter: acquired"
 }
 
-fn failure_label(error: TaskFailure) -> String {
+failure_label: fn(error: TaskFailure) -> String {
     if error == {
         .Panicked(reason) -> { return "panicked: {reason}" }
         .DeadlineBlown -> { return "deadline" }
@@ -41,57 +41,57 @@ fn failure_label(error: TaskFailure) -> String {
     }
 }
 
-fn run() {
-    conn :: db.open_memory()
-    policy :: db.policy("item", "true") ?? panic("policy")
-    scope :: conn.with_policy(policy, "owner")
-    _ :: db.migrate(scope, "item-v1", [SQL{"CREATE TABLE item (id INTEGER PRIMARY KEY, name TEXT NOT NULL, price REAL NOT NULL, stocked BOOLEAN NOT NULL)"}]) ?? panic("migrate")
+run: fn() {
+    conn: db.open_memory()
+    policy: db.policy("item", "true") ?? panic("policy")
+    scope: conn.with_policy(policy, "owner")
+    _: db.migrate(scope, "item-v1", [SQL{"CREATE TABLE item (id INTEGER PRIMARY KEY, name TEXT NOT NULL, price REAL NOT NULL, stocked BOOLEAN NOT NULL)"}]) ?? panic("migrate")
 
     // Prepared values: one statement text, every value bound, quotes kept as data.
-    names :: ["bolt", "nut", "o'ring"]
+    names: ["bolt", "nut", "o'ring"]
     loop index in 0..<names.len() {
-        id :: index + 1
-        name :: names[index]
-        price :: Float{index} + 0.25
-        stocked :: index != 1
-        insert :: SQL{"INSERT INTO item (id, name, price, stocked) VALUES ({id}, {name}, {price}, {stocked})"}
+        id: index + 1
+        name: names[index]
+        price: Float{index} + 0.25
+        stocked: index != 1
+        insert: SQL{"INSERT INTO item (id, name, price, stocked) VALUES ({id}, {name}, {price}, {stocked})"}
         if index == 0 -> print("prepared: {insert.template()} with {insert.params().len()} values")
-        _ :: scope.execute(insert) ?? panic("insert")
+        _: scope.execute(insert) ?? panic("insert")
     }
 
     // Typed rows: a whole record, and single typed columns.
-    rows :: scope.query(SQL{"SELECT id, name, price, stocked FROM item ORDER BY id"}) ?? panic("select")
+    rows: scope.query(SQL{"SELECT id, name, price, stocked FROM item ORDER BY id"}) ?? panic("select")
     loop row in rows {
-        item :: db.decode<Item>(row) ?? panic("decode {err}")
+        item: db.decode<Item>(row) ?? panic("decode {err}")
         // SQLite stores a boolean as an integer; the typed column reader takes 0 or 1.
-        stocked :: db.row_bool(row, "stocked") ?? panic("stocked")
+        stocked: db.row_bool(row, "stocked") ?? panic("stocked")
         print("row {item.id}: {item.name} {item.price} stocked={stocked}")
     }
-    third :: scope.query_one(SQL{"SELECT name FROM item WHERE id = 3"}) ?? panic("select one")
+    third: scope.query_one(SQL{"SELECT name FROM item WHERE id = 3"}) ?? panic("select one")
     print("typed column: {db.row_text(third, "name") ?? "(none)"}")
-    wrong :: scope.query_one(SQL{"SELECT name FROM item WHERE id = 1"}) ?? panic("select one")
+    wrong: scope.query_one(SQL{"SELECT name FROM item WHERE id = 1"}) ?? panic("select one")
     if db.row_int(wrong, "name") == {
         .Ok(_) -> print("text column as Int: accepted")
         .Err(error) -> print("text column as Int: {error.message}")
     }
 
     // Rollback: explicit and failed-transaction both leave the table as it was.
-    before :: count(scope)
+    before: count(scope)
     print("begin: {conn.begin()}")
-    _ :: scope.execute(SQL{"DELETE FROM item"}) ?? panic("delete")
+    _: scope.execute(SQL{"DELETE FROM item"}) ?? panic("delete")
     print("inside the transaction: {count(scope)} rows")
     print("rollback: {conn.rollback()}")
     print("after rollback: {count(scope)} rows, unchanged {count(scope) == before}")
-    duplicate :: 1
-    batch :: [SQL{"INSERT INTO item (id, name, price, stocked) VALUES (4, 'washer', 1.0, true)"}, SQL{"INSERT INTO item (id, name, price, stocked) VALUES ({duplicate}, 'clash', 1.0, true)"}]
+    duplicate: 1
+    batch: [SQL{"INSERT INTO item (id, name, price, stocked) VALUES (4, 'washer', 1.0, true)"}, SQL{"INSERT INTO item (id, name, price, stocked) VALUES ({duplicate}, 'clash', 1.0, true)"}]
     if db.transaction(scope, "restock", batch) == {
         .Ok(steps) -> print("failed batch: committed {steps}")
         .Err(_) -> print("failed batch: rolled back, unchanged {count(scope) == before}")
     }
 
     // Pool: one connection, a timed-out waiter, an exact release.
-    pool :: db.pool(":memory:", max: 1) ?? panic("pool")
-    held :: pool.acquire(deadline: 100ms) ?? panic("first lease")
+    pool: db.pool(":memory:", max: 1) ?? panic("pool")
+    held: pool.acquire(deadline: 100ms) ?? panic("first lease")
     if pool.acquire(deadline: 20ms) == {
         .Ok(_) -> print("second lease while held: granted")
         .Err(error) -> print("second lease while held: {error.message}")
@@ -101,10 +101,10 @@ fn run() {
     print("after release: {pool.receipt()}")
 
     // Cancellation: a cancelled waiter gives up its place in the queue.
-    blocker :: pool.acquire(deadline: 100ms) ?? panic("blocking lease")
-    { sender: started_tx, receiver: started_rx } :: channel<Int>(capacity: 1)
-    waiter :: task wait_for_lease(pool, started_tx)
-    _ :: started_rx.receive() ?? panic("waiter did not start")
+    blocker: pool.acquire(deadline: 100ms) ?? panic("blocking lease")
+    { sender: started_tx, receiver: started_rx }: channel<Int>(capacity: 1)
+    waiter: task wait_for_lease(pool, started_tx)
+    _: started_rx.receive() ?? panic("waiter did not start")
     time.sleep(20ms)
     waiter.cancel()
     if ^waiter.join() == {
@@ -112,7 +112,7 @@ fn run() {
         .Err(error) -> print("waiter: {failure_label(error)}")
     }
     blocker.close() ?? panic("blocker release")
-    next :: pool.acquire(deadline: 100ms) ?? panic("lease after a cancelled waiter")
+    next: pool.acquire(deadline: 100ms) ?? panic("lease after a cancelled waiter")
     print("lease after the cancelled waiter: {next}")
 
     // Draining refuses new leases; the held one still releases, then drain ends.

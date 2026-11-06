@@ -1,56 +1,56 @@
 // Trait constants: a trait declares `name: Type` (with a default as
-// `name: Type{value}`), each implementation gives `name :: value`, and code
+// `name: Type{value}`), each implementation gives `name: value`, and code
 // reads `Type.name` on a type or `T.name` through a bound.
-enum Tone {
+Tone: enum {
     Plain
     Loud
 }
 
-trait Shape {
+Shape: trait {
     sides: Int
     label: String{"shape"}
     tone: Tone{.Plain}
     angles: [Int]
-    fn area(self) -> Float
+    area: fn(self) -> Float
 }
 
-struct Square {
+Square: struct {
     side: Float
 }
 
 impl Square.Shape {
-    sides :: 4
-    label :: "square"
-    angles :: [90, 90, 90, 90]
+    sides: 4
+    label: "square"
+    angles: [90, 90, 90, 90]
 
-    fn area(self) -> Float { self.side * self.side }
+    area: fn(self) -> Float { self.side * self.side }
 }
 
-struct Triangle {
+Triangle: struct {
     base: Float
     height: Float
 }
 
 impl Triangle.Shape {
-    sides :: 3
-    tone :: Tone.Loud
-    angles :: [60, 60, 60]
+    sides: 3
+    tone: Tone.Loud
+    angles: [60, 60, 60]
 
-    fn area(self) -> Float { self.base * self.height / 2.0 }
+    area: fn(self) -> Float { self.base * self.height / 2.0 }
 }
 
-fn tone_name(tone: Tone) -> String {
+tone_name: fn(tone: Tone) -> String {
     if tone == {
         .Plain -> "plain"
         .Loud -> "loud"
     }
 }
 
-fn describe<T: Shape>(shape: T) -> String {
+describe: fn<T: Shape>(shape: T) -> String {
     "{T.label}: {T.sides} sides, {T.angles.len()} angles, {tone_name(T.tone)}, area {shape.area()}"
 }
 
-fn run() {
+run: fn() {
     print("Square.sides = {Square.sides}")
     print("Triangle.label = {Triangle.label}")
     print("Square.tone = {tone_name(Square.tone)}")

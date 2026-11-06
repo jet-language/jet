@@ -30,13 +30,13 @@ host_env_pending := I64{0}
 host_env_capture_code := I64{0}
 
 // runtime-init: 4 when host_env_rows,host_env_length,logical_env_root
-#Export(c) fn jet_rt_host_env_init() {
+#Export(c) jet_rt_host_env_init: fn() {
     #Unsafe("runtime-init runs before any other thread exists") {
         host_env_capture_code = rt_host_env_capture_address()
     }
 }
 
-fn rt_host_env_capture_address() -> I64 {
+rt_host_env_capture_address: fn() -> I64 {
     // Native-approved RuntimeLibrary FunctionAddress intrinsic (arity 1).
     loop { jet_rt_unreachable(I64{0}, I64{0}) }
 }
@@ -44,12 +44,12 @@ fn rt_host_env_capture_address() -> I64 {
 // Rust 1.90.0 library/std/src/sys/env/unix.rs, env()::parse:
 // search '=' AFTER byte zero, permit names starting '=', skip malformed rows.
 // https://github.com/rust-lang/rust/blob/1.90.0/library/std/src/sys/env/unix.rs
-fn host_environment_split(bytes: I64) -> I64 {
+host_environment_split: fn(bytes: I64) -> I64 {
     #Unsafe("bytes borrows one live NUL-terminated startup string") {
         if (os_load_u8(bytes) == I64{0}) { return I64{-1} }
         index := I64{1}
         loop {
-            byte :: os_load_u8(wrapping(bytes + index))
+            byte: os_load_u8(wrapping(bytes + index))
             if (byte == I64{0}) { return I64{-1} }
             if (byte == I64{61}) { return index }
             index = wrapping(index + I64{1})
@@ -57,20 +57,20 @@ fn host_environment_split(bytes: I64) -> I64 {
     }
 }
 
-#Export(c) fn jet_rt_host_arguments(argc: I64, argv: I64, envp: I64) {
+#Export(c) jet_rt_host_arguments: fn(argc: I64, argv: I64, envp: I64) {
     host_arguments_register(argc, argv, envp, false)
 }
 
 // A program's main (JetBackend Image/Object.jet x64_object_main): argv and
 // envp are the startup stack's, so the environment is indexed when first read.
-#Export(c) fn jet_rt_host_main_arguments(argc: I64, argv: I64, envp: I64) {
+#Export(c) jet_rt_host_main_arguments: fn(argc: I64, argv: I64, envp: I64) {
     host_arguments_register(argc, argv, envp, true)
 }
 
-fn host_arguments_register(argc: I64, argv: I64, envp: I64, main: Bool) {
+host_arguments_register: fn(argc: I64, argv: I64, envp: I64, main: Bool) {
     // libc main's argc is a nonnegative int32. Explicit hosts use that same
     // range; discard unspecified upper register bits before any other use.
-    count :: argc.bit_and(I64{4294967295})
+    count: argc.bit_and(I64{4294967295})
     if (host_argc != I64{-1}) {
         if !(host_argc == count && host_argv == argv && host_envp == envp) {
             host_arguments_refused()
@@ -81,7 +81,7 @@ fn host_arguments_register(argc: I64, argv: I64, envp: I64, main: Bool) {
         host_argv = argv
         host_envp = envp
     }
-    capture :: host_env_capture_code
+    capture: host_env_capture_code
     if (capture != I64{0}) {
         // The envp array is word aligned: bit 0 tells capture it is a main's.
         _ := coll_call1(capture, if main -> envp.bit_or(I64{1}) else -> envp)
@@ -97,14 +97,14 @@ fn host_arguments_register(argc: I64, argv: I64, envp: I64, main: Bool) {
 // it. An entryless host's is indexed now (it lends envp only for this call);
 // a main's pointer array is copied, to be indexed by the first reader
 // (host_environment_require).
-#Export(c) fn jet_rt_host_env_capture(startup: I64) -> I64 {
-    envp :: startup.bit_and(I64{-2})
+#Export(c) jet_rt_host_env_capture: fn(startup: I64) -> I64 {
+    envp: startup.bit_and(I64{-2})
     logical_environment_startup()
     raw_count := I64{0}
     #Unsafe("startup lends the immutable, null-terminated envp pointer array and its NUL-terminated entries") {
         if (envp != I64{0}) {
             loop {
-                entry :: os_load_i64(wrapping(envp + raw_count * I64{8}))
+                entry: os_load_i64(wrapping(envp + raw_count * I64{8}))
                 if (entry == I64{0}) { break }
                 raw_count = wrapping(raw_count + I64{1})
             }
@@ -114,7 +114,7 @@ fn host_arguments_register(argc: I64, argv: I64, envp: I64, main: Bool) {
         host_environment_index(envp, raw_count)
         return I64{0}
     }
-    pending :: jet_rt_alloc(wrapping(raw_count + I64{2}) * I64{8}, I64{8})
+    pending: jet_rt_alloc(wrapping(raw_count + I64{2}) * I64{8}, I64{8})
     #Unsafe("pending exclusively owns raw_count + 2 words; registration is single-threaded and precedes user code") {
         os_store_i64(pending, I64{0})
         os_store_i64(wrapping(pending + I64{8}), raw_count)
@@ -126,7 +126,7 @@ fn host_arguments_register(argc: I64, argv: I64, envp: I64, main: Bool) {
 
 // Indexes the `raw_count` entries of the envp array `envp` into the owned
 // index host_env_rows / host_env_length.
-fn host_environment_index(envp: I64, raw_count: I64) {
+host_environment_index: fn(envp: I64, raw_count: I64) {
     // One process-lifetime index, not an environment map. The capacity is the
     // raw row count; valid rows are [entry pointer, name length, value offset].
     rows := I64{0}
@@ -135,13 +135,13 @@ fn host_environment_index(envp: I64, raw_count: I64) {
     total_bytes := I64{0}
     #Unsafe("rows exclusively owns raw_count index records; startup lends every pointed-to NUL string") {
         loop index < raw_count {
-            entry :: os_load_i64(wrapping(envp + index * I64{8}))
-            split :: host_environment_split(entry)
+            entry: os_load_i64(wrapping(envp + index * I64{8}))
+            split: host_environment_split(entry)
             if (split >= I64{0}) {
                 if (rows == I64{0}) -> rows = jet_rt_alloc(raw_count * I64{24}, I64{8})
-                length :: host_startup_byte_length(entry)
+                length: host_startup_byte_length(entry)
                 total_bytes = total_bytes + length + I64{1}
-                row :: wrapping(rows + valid * I64{24})
+                row: wrapping(rows + valid * I64{24})
                 os_store_i64(row, entry)
                 os_store_i64(wrapping(row + I64{8}), split)
                 // Temporarily retain length while the private index is built.
@@ -151,14 +151,14 @@ fn host_environment_index(envp: I64, raw_count: I64) {
             index = wrapping(index + I64{1})
         }
     }
-    storage :: if (total_bytes == I64{0}) -> I64{0} else -> jet_rt_alloc(total_bytes, I64{1})
+    storage: if (total_bytes == I64{0}) -> I64{0} else -> jet_rt_alloc(total_bytes, I64{1})
     cursor := storage
     index = I64{0}
     #Unsafe("storage exclusively owns total_bytes; each source row lends its NUL string for this capture call, and published rows point only into the owned block") {
         loop index < valid {
-            row :: wrapping(rows + index * I64{24})
-            length :: os_load_i64(wrapping(row + I64{16}))
-            span :: wrapping(length + I64{1})
+            row: wrapping(rows + index * I64{24})
+            length: os_load_i64(wrapping(row + I64{16}))
+            span: wrapping(length + I64{1})
             rt_text_bytes_copy(cursor, os_load_i64(row), span)
             os_store_i64(row, cursor)
             os_store_i64(wrapping(row + I64{16}), wrapping(os_load_i64(wrapping(row + I64{8})) + I64{1}))
@@ -172,15 +172,15 @@ fn host_environment_index(envp: I64, raw_count: I64) {
     }
 }
 
-fn host_arguments_require() {
+host_arguments_require: fn() {
     if (host_argc == I64{-1}) { host_arguments_refused() }
 }
 
 // Every reader of host_env_rows / host_env_length calls this first: a main's
 // startup environment is indexed here, once, by the first reader.
-fn host_environment_require() {
+host_environment_require: fn() {
     host_arguments_require()
-    pending :: host_env_pending
+    pending: host_env_pending
     if (pending == I64{0} || sync_load(pending) == I64{2}) -> return
     if sync_once_enter(pending) {
         host_environment_index(wrapping(pending + I64{16}), rt_text_word(wrapping(pending + I64{8})))
@@ -188,13 +188,13 @@ fn host_environment_require() {
     }
 }
 
-fn host_environment_row(index: I64) -> I64 {
+host_environment_row: fn(index: I64) -> I64 {
     host_environment_require()
     if (index < I64{0} || index >= host_env_length) { host_environment_index_refused() }
     wrapping(host_env_rows + index * I64{24})
 }
 
-fn host_startup_byte_length(bytes: I64) -> I64 {
+host_startup_byte_length: fn(bytes: I64) -> I64 {
     count := I64{0}
     #Unsafe("bytes lends one live NUL-terminated startup string") {
         loop os_load_u8(wrapping(bytes + count)) != (I64{0}) -> count = wrapping(count + I64{1})
@@ -204,9 +204,9 @@ fn host_startup_byte_length(bytes: I64) -> I64 {
 
 // Native [U8] is packed. Empty data is null; capacity is exactly length,
 // and the sole owner releases length bytes at the native list alignment 8.
-fn host_startup_bytes(bytes: I64, length: I64) -> I64 {
+host_startup_bytes: fn(bytes: I64, length: I64) -> I64 {
     if (length == I64{0}) { return I64{0} }
-    data :: jet_rt_alloc(length, I64{8})
+    data: jet_rt_alloc(length, I64{8})
     source := bytes
     destination := data
     remaining := length
@@ -221,8 +221,8 @@ fn host_startup_bytes(bytes: I64, length: I64) -> I64 {
     data
 }
 
-fn host_startup_list(bytes: I64, length: I64, output: I64) {
-    data :: host_startup_bytes(bytes, length)
+host_startup_list: fn(bytes: I64, length: I64, output: I64) {
+    data: host_startup_bytes(bytes, length)
     #Unsafe("output lends a 24-byte native [U8] header and receives ownership of data") {
         os_store_i64(output, length)
         os_store_i64(wrapping(output + I64{8}), length)
@@ -230,17 +230,17 @@ fn host_startup_list(bytes: I64, length: I64, output: I64) {
     }
 }
 
-#Export(c) fn jet_rt_env_count() -> I64 {
+#Export(c) jet_rt_env_count: fn() -> I64 {
     host_environment_require()
     host_env_length
 }
 
-#Export(c) fn jet_rt_env_entry(index: I64, key_out: I64, value_out: I64) {
-    row :: host_environment_row(index)
+#Export(c) jet_rt_env_entry: fn(index: I64, key_out: I64, value_out: I64) {
+    row: host_environment_row(index)
     #Unsafe("row borrows a complete immutable startup index record") {
-        bytes :: os_load_i64(row)
-        key_length :: os_load_i64(wrapping(row + I64{8}))
-        value :: wrapping(bytes + os_load_i64(wrapping(row + I64{16})))
+        bytes: os_load_i64(row)
+        key_length: os_load_i64(wrapping(row + I64{8}))
+        value: wrapping(bytes + os_load_i64(wrapping(row + I64{16})))
         host_startup_list(bytes, key_length, key_out)
         host_startup_list(value, host_startup_byte_length(value), value_out)
     }
@@ -248,48 +248,48 @@ fn host_startup_list(bytes: I64, length: I64, output: I64) {
 
 // Private Core primitive adapters use the generated list-out ABI, not a
 // temporary native header. They transfer the same packed buffer allocator/owner.
-#Export(c) fn jet_sys_startup_env_count_raw() -> I64 { jet_rt_env_count() }
+#Export(c) jet_sys_startup_env_count_raw: fn() -> I64 { jet_rt_env_count() }
 
-#Export(c) fn jet_sys_startup_env_name_raw(index: I64, data_out: I64) -> I64 {
-    row :: host_environment_row(index)
+#Export(c) jet_sys_startup_env_name_raw: fn(index: I64, data_out: I64) -> I64 {
+    row: host_environment_row(index)
     #Unsafe("row borrows its immutable record; data_out lends one writable pointer word") {
-        length :: os_load_i64(wrapping(row + I64{8}))
+        length: os_load_i64(wrapping(row + I64{8}))
         os_store_i64(data_out, host_startup_bytes(os_load_i64(row), length))
         return length
     }
 }
 
-#Export(c) fn jet_sys_startup_env_value_raw(index: I64, data_out: I64) -> I64 {
-    row :: host_environment_row(index)
+#Export(c) jet_sys_startup_env_value_raw: fn(index: I64, data_out: I64) -> I64 {
+    row: host_environment_row(index)
     #Unsafe("row borrows its immutable record; data_out lends one writable pointer word") {
-        bytes :: wrapping(os_load_i64(row) + os_load_i64(wrapping(row + I64{16})))
-        length :: host_startup_byte_length(bytes)
+        bytes: wrapping(os_load_i64(row) + os_load_i64(wrapping(row + I64{16})))
+        length: host_startup_byte_length(bytes)
         os_store_i64(data_out, host_startup_bytes(bytes, length))
         return length
     }
 }
 
-#Export(c) fn jet_rt_arg_count() -> I64 {
+#Export(c) jet_rt_arg_count: fn() -> I64 {
     host_arguments_require()
     host_argc
 }
 
-#Export(c) fn jet_rt_arg_entry(index: I64, output: I64) {
+#Export(c) jet_rt_arg_entry: fn(index: I64, output: I64) {
     host_arguments_require()
     if (index < I64{0} || index >= host_argc) { host_argument_index_refused() }
     #Unsafe("startup lends argc initialized argv pointers and their immutable NUL strings") {
-        bytes :: os_load_i64(wrapping(host_argv + index * I64{8}))
+        bytes: os_load_i64(wrapping(host_argv + index * I64{8}))
         host_startup_list(bytes, host_startup_byte_length(bytes), output)
     }
 }
 
 // D-JOB-SUBCMD1=C: 1 when the program's first word (argv[1]) is the
 // `length` bytes at `data`, the name of a job the entry function runs in
-// place of `fn run` (JetIR ir_entry_function); 0 otherwise.
-#Export(c) fn jet_rt_entry_job_selected(data: I64, length: I64) -> I64 {
+// place of `run: fn` (JetIR ir_entry_function); 0 otherwise.
+#Export(c) jet_rt_entry_job_selected: fn(data: I64, length: I64) -> I64 {
     host_arguments_require()
     if (host_argc < I64{2}) { return I64{0} }
-    bytes :: host_argument_bytes(I64{1})
+    bytes: host_argument_bytes(I64{1})
     if (host_startup_byte_length(bytes) != length) { return I64{0} }
     #Unsafe("argv[1] is an immutable startup string of `length` bytes; data lends the job name's static bytes") {
         at := I64{0}
@@ -304,18 +304,18 @@ fn host_startup_list(bytes: I64, length: I64, output: I64) {
 // jet_std_io_args: std::env::args().collect(), argv[0] first, through the
 // generated list-out ABI (an exact count*8 buffer of owned Text words, 0 when
 // empty). Args::next unwraps into_string, so a non-UTF-8 argument panics.
-#Export(c) fn jet_std_io_args(output: I64) -> I64 {
+#Export(c) jet_std_io_args: fn(output: I64) -> I64 {
     host_arguments_require()
-    count :: host_argc
+    count: host_argc
     index := I64{0}
     loop index < count {
-        bytes :: host_argument_bytes(index)
-        length :: host_startup_byte_length(bytes)
+        bytes: host_argument_bytes(index)
+        length: host_startup_byte_length(bytes)
         at := I64{0}
         loop at < length {
-            width :: rt_text_valid_width(wrapping(bytes + at), wrapping(length - at), I64{1})
+            width: rt_text_valid_width(wrapping(bytes + at), wrapping(length - at), I64{1})
             if (width < I64{0}) {
-                message :: rt_static_text("called `Result::unwrap()` on an `Err` value: invalid UTF-8 process argument")
+                message: rt_static_text("called `Result::unwrap()` on an `Err` value: invalid UTF-8 process argument")
                 jet_rt_panic_message(rt_text_data(message), rt_text_len(message))
                 rt_text_store(output, I64{0})
                 return I64{0}
@@ -324,10 +324,10 @@ fn host_startup_list(bytes: I64, length: I64, output: I64) {
         }
         index = wrapping(index + I64{1})
     }
-    data :: if (count == I64{0}) -> I64{0} else -> jet_rt_alloc(count * I64{8}, I64{8})
+    data: if (count == I64{0}) -> I64{0} else -> jet_rt_alloc(count * I64{8}, I64{8})
     index = I64{0}
     loop index < count {
-        bytes :: host_argument_bytes(index)
+        bytes: host_argument_bytes(index)
         rt_text_store(wrapping(data + index * I64{8}), rt_text_copy(bytes, host_startup_byte_length(bytes)))
         index = wrapping(index + I64{1})
     }
@@ -335,7 +335,7 @@ fn host_startup_list(bytes: I64, length: I64, output: I64) {
     count
 }
 
-fn host_argument_bytes(index: I64) -> I64 {
+host_argument_bytes: fn(index: I64) -> I64 {
     #Unsafe("startup lends argc initialized argv pointers and their immutable NUL strings") {
         return os_load_i64(wrapping(host_argv + index * I64{8}))
     }
@@ -345,20 +345,20 @@ fn host_argument_bytes(index: I64) -> I64 {
 // flags use the immutable host snapshot, not Core's mutable logical overlay.
 // The first matching row wins; this internal lookup lends raw startup bytes.
 // There is no Core route, provider or second environment map.
-fn host_environment_value(key: I64) -> I64 {
-    key_data :: rt_text_data(key)
-    key_length :: rt_text_len(key)
+host_environment_value: fn(key: I64) -> I64 {
+    key_data: rt_text_data(key)
+    key_length: rt_text_len(key)
     host_environment_value_bytes(key_data, key_length)
 }
 
-fn host_environment_value_bytes(key_data: I64, key_length: I64) -> I64 {
+host_environment_value_bytes: fn(key_data: I64, key_length: I64) -> I64 {
     host_environment_require()
     index := I64{0}
     #Unsafe("the startup index and key bytes are immutable borrowed data") {
         loop index < host_env_length {
-            row :: wrapping(host_env_rows + index * I64{24})
+            row: wrapping(host_env_rows + index * I64{24})
             if (os_load_i64(wrapping(row + I64{8})) == key_length) {
-                bytes :: os_load_i64(row)
+                bytes: os_load_i64(row)
                 matched := true
                 at := I64{0}
                 loop at < key_length {
@@ -377,13 +377,13 @@ fn host_environment_value_bytes(key_data: I64, key_length: I64) -> I64 {
 }
 
 // std::env::var parity for internal runtime flags: invalid UTF-8 is absent.
-fn rt_env_get(key: I64) -> I64 {
-    value :: host_environment_value(key)
+rt_env_get: fn(key: I64) -> I64 {
+    value: host_environment_value(key)
     if (value == I64{0}) -> return I64{0}
-    length :: host_startup_byte_length(value)
+    length: host_startup_byte_length(value)
     at := I64{0}
     loop at < length {
-        width :: rt_text_valid_width(wrapping(value + at), wrapping(length - at), I64{1})
+        width: rt_text_valid_width(wrapping(value + at), wrapping(length - at), I64{1})
         if (width < I64{0}) -> return I64{0}
         at = wrapping(at + width)
     }
@@ -391,10 +391,10 @@ fn rt_env_get(key: I64) -> I64 {
 }
 
 // std::env::var_os(...).to_string_lossy parity for private time-zone lookup.
-fn rt_env_get_lossy(key: I64) -> I64 {
-    value :: host_environment_value(key)
+rt_env_get_lossy: fn(key: I64) -> I64 {
+    value: host_environment_value(key)
     if (value == I64{0}) -> I64{0} else -> rt_text_lossy(value, host_startup_byte_length(value))
 }
 
 // Runtime-private owned startup value for source capability inputs.
-#Export(c) fn jet_rt_env_get(key: I64) -> I64 { rt_env_get(key) }
+#Export(c) jet_rt_env_get: fn(key: I64) -> I64 { rt_env_get(key) }

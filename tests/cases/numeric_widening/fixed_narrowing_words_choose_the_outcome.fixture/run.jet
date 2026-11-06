@@ -1,19 +1,19 @@
-use process :: core.process
+use process: core.process
 
 // `wrapping`, `saturating` and `checked` written around a narrowing typed-literal
 // conversion choose what a value that doesn't fit gives, from a fixed width and
 // from an Int; a value that fits converts unchanged under every word. `inner`
 // shows that a word covers only the conversion it is written around.
-fn words(big: U16, low: I64, top: U64, wide: Int, deep: Int, fit: U16, small: I64) {
+words: fn(big: U16, low: I64, top: U64, wide: Int, deep: Int, fit: U16, small: I64) {
     print("wrapping: {wrapping(U8{big})} {wrapping(I8{low})} {wrapping(U16{wide})} {wrapping(I32{deep})} {wrapping(U32{top})} {wrapping(I64{top})}")
     print("saturating: {saturating(U8{big})} {saturating(I8{low})} {saturating(U16{wide})} {saturating(U8{low})} {saturating(I64{top})} {saturating(I32{deep})}")
     print("checked: {checked(U8{big}) == None} {checked(I8{low}) == None} {checked(U16{wide}) == None} {checked(U8{fit}) ?? U8{0}} {checked(I8{small}) ?? I8{0}}")
     print("fits: {wrapping(U8{fit})} {saturating(I8{small})} {wrapping(U8{wide - 69800})} {saturating(U16{wide - 69000})}")
 }
 
-fn run() {
-    wide :: 70000
-    mode :: process.args().get(0) ?? "words"
+run: fn() {
+    wide: 70000
+    mode: process.args().get(0) ?? "words"
     if mode == "inner" {
         print("{wrapping(U8{U16{wide}})}")
     } else {

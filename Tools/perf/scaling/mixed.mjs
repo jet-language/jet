@@ -4,11 +4,11 @@
 // lines per function and 53 bytes per line, structs, enums with payloads, a
 // trait called through trait values, generic functions, closures, value and
 // variant matches, maps, strings and interpolation, and about 4.7%
-// compile-time (`comptime`) items. `fn run` prints one checksum line.
+// compile-time (`comptime`) items. `run: fn` prints one checksum line.
 //
 // The package is one source file (main.jet) of numbered sections, like the
 // assembled compiler unit. Both compilers that must build it disagree on a
-// multi-file package today: the Rust reference requires `module part_0` for
+// multi-file package today: the Rust reference requires `part_0: module` for
 // a sibling file and cannot lower a generic instantiated inside one ("missing
 // checked function target"), while the self-hosted compiler loads sibling
 // files itself and rejects the `module` line (E0105 "defined twice"); it also
@@ -81,15 +81,15 @@ function unit(m, u, r, stats) {
   const constantValue = constantA * 7 + constantB;
   if (constant) {
     lines.push(`// Prepared once while building; folded into every use below.`);
-    lines.push(`${constant} :: comptime { ${constantA} * 7 + ${constantB} }`, '');
+    lines.push(`${constant}: comptime { ${constantA} * 7 + ${constantB} }`, '');
     stats.comptime_items += 1;
   }
   const scoreA = r.int(3, 19);
   const scoreB = r.int(2, 11);
-  lines.push(`struct ${rec} {`, '    identifier: Int', '    weight: Int', '    label: String', '    markers: [Int]', '}', '');
-  lines.push(`enum ${shape} {`, '    Dot(Int)', '    Segment(start: Int, finish: Int)', '    Named(String)', '    Empty', '}', '');
+  lines.push(`${rec}: struct {`, '    identifier: Int', '    weight: Int', '    label: String', '    markers: [Int]', '}', '');
+  lines.push(`${shape}: enum {`, '    Dot(Int)', '    Segment(start: Int, finish: Int)', '    Named(String)', '    Empty', '}', '');
   lines.push(`impl ${rec}.${trait} {`,
-    `    fn score(self) -> Int { (self.identifier * ${scoreA} + self.weight * ${scoreB} + self.label.len()) % ${MODULUS} }`, '}', '');
+    `    score: fn(self) -> Int { (self.identifier * ${scoreA} + self.weight * ${scoreB} + self.label.len()) % ${MODULUS} }`, '}', '');
   stats.types += 2;
   stats.functions += 1;
   const score = record => mod(record.identifier * scoreA + record.weight * scoreB + record.label.length);
@@ -105,14 +105,14 @@ function unit(m, u, r, stats) {
     const threshold = r.int(5, 25);
     const index = r.int(0, 7);
     const text = [
-      `fn ${name}(seed: Int) -> Int {`,
+      `${name}: fn(seed: Int) -> Int {`,
       `    accumulator := seed % ${MODULUS}`,
       `    records := [${rec}]{}`,
       `    loop index in 0..<${count} {`,
-      `        marker :: (index * ${a} + seed) % 97`,
+      `        marker: (index * ${a} + seed) % 97`,
       `        &records.push(${rec}{identifier: index + marker, weight: (index * ${b} + ${c}) % 31, label: "record-{index}-{marker}", markers: [Int]{index, marker}})`,
       '    }',
-      `    scored :: [${trait}]{records[0], records[1], records[2]}`,
+      `    scored: [${trait}]{records[0], records[1], records[2]}`,
       `    accumulator = (accumulator + total_score_m${m}(scored) + score_one_m${m}(records[${count - 1}])) % ${MODULUS}`,
       '    loop record in records {',
       '        accumulator = if {',
@@ -120,8 +120,8 @@ function unit(m, u, r, stats) {
       `            else -> (accumulator + record.identifier * 5) % ${MODULUS}`,
       '        }',
       '    }',
-      `    fallback :: ${rec}{identifier: 0, weight: 0, label: "none", markers: [Int]{}}`,
-      `    chosen :: pick_m${m}(records, ${index}, fallback)`,
+      `    fallback: ${rec}{identifier: 0, weight: 0, label: "none", markers: [Int]{}}`,
+      `    chosen: pick_m${m}(records, ${index}, fallback)`,
       `    accumulator = (accumulator + chosen.identifier + chosen.label.len()) % ${MODULUS}`,
       '    accumulator',
       '}',
@@ -152,11 +152,11 @@ function unit(m, u, r, stats) {
     const d = r.int(2, 9);
     const e = r.int(7, 97);
     const text = [
-      `fn ${name}(seed: Int) -> Int {`,
+      `${name}: fn(seed: Int) -> Int {`,
       `    accumulator := (seed * ${a}) % ${MODULUS}`,
       `    shapes := [${shape}]{}`,
       `    loop index in 0..<${count} {`,
-      `        next_shape :: if (seed + index) % 4 == {`,
+      `        next_shape: if (seed + index) % 4 == {`,
       `            0 -> ${shape}.Dot((seed + index * ${b}) % 101)`,
       `            1 -> ${shape}.Segment{start: index, finish: (seed + ${c}) % 53}`,
       `            2 -> ${shape}.Named("shape-{index}-{seed % 7}")`,
@@ -165,7 +165,7 @@ function unit(m, u, r, stats) {
       '        &shapes.push(next_shape)',
       '    }',
       '    loop item in shapes {',
-      '        step :: if item == {',
+      '        step: if item == {',
       `            .Dot(value) -> value * ${d}`,
       '            .Segment(start, finish) -> start * 5 + finish',
       '            .Named(text) -> text.len() * 7',
@@ -198,11 +198,11 @@ function unit(m, u, r, stats) {
     const a = r.int(3, 9);
     const limit = r.int(20, 32);
     const text = [
-      `fn ${name}(seed: Int) -> Int {`,
+      `${name}: fn(seed: Int) -> Int {`,
       '    counts := [String:Int]{}',
-      `    words :: [String]{${words.map(word => `"${word}"`).join(', ')}}`,
+      `    words: [String]{${words.map(word => `"${word}"`).join(', ')}}`,
       '    loop (index, word) in words {',
-      `        key :: "{word}-{(seed + index) % ${buckets}}"`,
+      `        key: "{word}-{(seed + index) % ${buckets}}"`,
       '        counts[key] = (counts.get(key) ?? 0) + index + 1',
       '    }',
       '    accumulator := counts.len()',
@@ -245,18 +245,18 @@ function unit(m, u, r, stats) {
     const factor = r.int(2, 13);
     const offset = r.int(1, 99);
     const text = [
-      `fn ${name}(seed: Int) -> Int {`,
-      `    table :: [Int:Int]{${keys.map((key, i) => `${key}: ${values[i]}`).join(', ')}}`,
-      `    probes :: [Int]{${keys[0]}, ${keys[1]}, ${keys[2]}, seed % 100}`,
+      `${name}: fn(seed: Int) -> Int {`,
+      `    table: [Int:Int]{${keys.map((key, i) => `${key}: ${values[i]}`).join(', ')}}`,
+      `    probes: [Int]{${keys[0]}, ${keys[1]}, ${keys[2]}, seed % 100}`,
       `    accumulator := seed % ${MODULUS}`,
       `    loop round in 0..<${rounds} {`,
-      `        probe :: probes[round % 4] + (round /% 4) * ${spread}`,
-      '        found :: table.get(probe)',
+      `        probe: probes[round % 4] + (round /% 4) * ${spread}`,
+      '        found: table.get(probe)',
       `        accumulator = (accumulator + round + (found.map((value) -> value * 2) ?? ${fallback})) % ${MODULUS}`,
       '    }',
-      `    adjust :: (value: Int) -> (value * ${factor} + ${constantValue}) % ${MODULUS}`,
+      `    adjust: (value: Int) -> (value * ${factor} + ${constantValue}) % ${MODULUS}`,
       '    accumulator = adjust(accumulator)',
-      '    first :: probes.first()',
+      '    first: probes.first()',
       `    accumulator = (accumulator + (first.map((value) -> value + ${offset}) ?? 0)) % ${MODULUS}`,
       '    accumulator',
       '}',
@@ -282,7 +282,7 @@ function unit(m, u, r, stats) {
     const a = r.int(2, 9);
     const b = r.int(1, 30);
     const text = [
-      `fn ${name}(seed: Int) -> Int {`,
+      `${name}: fn(seed: Int) -> Int {`,
       '    value := seed % 1000 + 2',
       '    steps := 0',
       `    loop value > 1 && steps < ${limit} {`,
@@ -321,7 +321,7 @@ function unit(m, u, r, stats) {
   }
 
   const start = constant ?? String(constantValue);
-  const totalText = [`fn ${tag}_total() -> Int {`, `    accumulator := ${start} % ${MODULUS}`];
+  const totalText = [`${tag}_total: fn() -> Int {`, `    accumulator := ${start} % ${MODULUS}`];
   let accumulator = mod(constantValue);
   for (const [index, worker] of workers.entries()) {
     // Every worker folds its result through the section's three-argument
@@ -334,11 +334,11 @@ function unit(m, u, r, stats) {
     const labelLimit = r.int(34, 42);
     const tail = worker.text[worker.text.length - 2].trim();
     const text = [...worker.text.slice(0, -2),
-      `    worker_result :: ${tail}`,
-      `    checkpoint :: blend_m${m}(worker_result, seed % 1000, ${first})`,
-      `    trace_label :: "${worker.name}:{worker_result % 1000}:{checkpoint % 1000}"`,
-      `    trace_weight :: if trace_label.len() > ${labelLimit} -> blend_m${m}(checkpoint, trace_label.len(), ${third}) else -> blend_m${m}(checkpoint, 1, ${third})`,
-      '    blended_parts :: [Int]{worker_result % 997, checkpoint % 991, trace_weight % 983}',
+      `    worker_result: ${tail}`,
+      `    checkpoint: blend_m${m}(worker_result, seed % 1000, ${first})`,
+      `    trace_label: "${worker.name}:{worker_result % 1000}:{checkpoint % 1000}"`,
+      `    trace_weight: if trace_label.len() > ${labelLimit} -> blend_m${m}(checkpoint, trace_label.len(), ${third}) else -> blend_m${m}(checkpoint, 1, ${third})`,
+      '    blended_parts: [Int]{worker_result % 997, checkpoint % 991, trace_weight % 983}',
       '    combined := 0',
       `    loop part in blended_parts -> combined = blend_m${m}(combined, part, ${fourth})`,
       `    blend_m${m}(combined, worker_result % 997, ${second})`,
@@ -368,18 +368,18 @@ function sectionHeader(m) {
   const trait = `ScoredM${m}`;
   return [
     `// Section ${m} of the mixed compile-throughput benchmark.`,
-    `trait ${trait} {`, '    fn score(self) -> Int', '}', '',
-    `fn pick_m${m}<T>(items: [T], index: Int, fallback: T) -> T {`,
+    `${trait}: trait {`, '    score: fn(self) -> Int', '}', '',
+    `pick_m${m}: fn<T>(items: [T], index: Int, fallback: T) -> T {`,
     '    if index < items.len() -> return items[index]',
     '    fallback',
     '}', '',
-    `fn total_score_m${m}(items: [${trait}]) -> Int {`,
+    `total_score_m${m}: fn(items: [${trait}]) -> Int {`,
     '    sum := 0',
     `    loop item in items -> sum = (sum + item.score()) % ${MODULUS}`,
     '    sum',
     '}', '',
-    `fn score_one_m${m}(item: ${trait}) -> Int { item.score() * 2 }`, '',
-    `fn blend_m${m}(left: Int, right: Int, weight: Int) -> Int { (left * weight + right) % ${MODULUS} }`, '',
+    `score_one_m${m}: fn(item: ${trait}) -> Int { item.score() * 2 }`, '',
+    `blend_m${m}: fn(left: Int, right: Int, weight: Int) -> Int { (left * weight + right) % ${MODULUS} }`, '',
   ];
 }
 
@@ -395,7 +395,7 @@ export function mixedSources(codeLines, seed) {
   const lines = [`// Deterministic mixed compile-throughput workload: --code-lines ${codeLines} --seed ${seed}`, ''];
   const sectionTotals = [];
   const codeOf = list => list.filter(isCodeLine).length;
-  // `fn run() {`, `checksum := 0`, the print and `}`, plus one sum line per section.
+  // `run: fn() {`, `checksum := 0`, the print and `}`, plus one sum line per section.
   let code = 4;
   while (code < codeLines) {
     const m = stats.sections;
@@ -411,7 +411,7 @@ export function mixedSources(codeLines, seed) {
       code += codeOf(generated.lines);
       units.push(generated);
     }
-    const total = [`fn section_total_m${m}() -> Int {`, '    accumulator := 0'];
+    const total = [`section_total_m${m}: fn() -> Int {`, '    accumulator := 0'];
     let value = 0;
     for (const generated of units) {
       total.push(`    accumulator = (accumulator * 13 + ${generated.totalName}()) % ${MODULUS}`);
@@ -425,7 +425,7 @@ export function mixedSources(codeLines, seed) {
     stats.sections += 1;
   }
   let checksum = 0;
-  lines.push('fn run() {', '    checksum := 0');
+  lines.push('run: fn() {', '    checksum := 0');
   for (const [m, value] of sectionTotals.entries()) {
     lines.push(`    checksum = (checksum * 31 + section_total_m${m}()) % ${MODULUS}`);
     checksum = mod(checksum * 31 + value);

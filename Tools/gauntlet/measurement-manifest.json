@@ -264,8 +264,8 @@
         "evidence_key": "compound_assign_vs_binary_assign",
         "surface_field": "surface_wall_time_ms",
         "plain_field": "plain_wall_time_ms",
-        "surface_source": "// Real paired workload: compound_assign_vs_binary_assign surface spelling\nfn run() {\n    total := 0\n    loop i in 0..<100000 {\n        total += i\n    }\n    print(\"performance-surface:compound_assign_vs_binary_assign:{total}\")\n}",
-        "plain_source": "// Real paired workload: compound_assign_vs_binary_assign plain spelling\nfn run() {\n    total := 0\n    loop i in 0..<100000 {\n        total = total + i\n    }\n    print(\"performance-surface:compound_assign_vs_binary_assign:{total}\")\n}",
+        "surface_source": "// Real paired workload: compound_assign_vs_binary_assign surface spelling\nrun: fn() {\n    total := 0\n    loop i in 0..<100000 {\n        total += i\n    }\n    print(\"performance-surface:compound_assign_vs_binary_assign:{total}\")\n}",
+        "plain_source": "// Real paired workload: compound_assign_vs_binary_assign plain spelling\nrun: fn() {\n    total := 0\n    loop i in 0..<100000 {\n        total = total + i\n    }\n    print(\"performance-surface:compound_assign_vs_binary_assign:{total}\")\n}",
         "input_range": "0..<100000",
         "expected_output": "performance-surface:compound_assign_vs_binary_assign:4999950000",
         "measured": {
@@ -505,7 +505,7 @@
       "harness": "Tools/gauntlet/harness/build-system.mjs",
       "project": {
         "generator": "node Tools/gauntlet/axes/build-system/generate.mjs {dir}",
-        "shape": "the mid-size build-time program (Tools/perf/build-time/midsize.mjs, 90 units) in 9 unit files plus the entry; Jet: a package whose @build.jet `fn build` registers one executable; Nix: a flake whose stdenv.mkDerivation runs make over the same program in C (gcc -O1, parallel), nixpkgs pinned to the repository's flake.lock",
+        "shape": "the mid-size build-time program (Tools/perf/build-time/midsize.mjs, 90 units) in 9 unit files plus the entry; Jet: a package whose @build.jet `build: fn` registers one executable; Nix: a flake whose stdenv.mkDerivation runs make over the same program in C (gcc -O1, parallel), nixpkgs pinned to the repository's flake.lock",
         "expected_output_file": "Tools/perf/build-time/midsize.out",
         "edit_files": {"jet": "jet/units_4.jet", "nix": "nix/src/units_4.c"}
       },

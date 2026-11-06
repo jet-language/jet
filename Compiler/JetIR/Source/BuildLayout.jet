@@ -1,4 +1,4 @@
-// Constraint layout (D-LAYOUT1): `name :: Layout{ … }` binds the runtime's
+// Constraint layout (D-LAYOUT1): `name: Layout{ … }` binds the runtime's
 // layout Handle (NativeLayout.jet) in the enclosing scope, then each body
 // element builds its Constraint, which the runtime registers with the handle as
 // it is made. HVar / VVar / LengthVar values are the runtime's LinExpr shells
@@ -8,57 +8,57 @@
 
 use jet_foundation.[Span, BodyHandleOp, TBinaryOp, TLocal, Type]
 
-fn ir_layout_value_type(ty: Type) -> Bool Never! {
+ir_layout_value_type: fn(ty: Type) -> Bool Never! {
     if ir_untag(ty) == .Named(name) -> return name == "HVar" || name == "VVar" || name == "LengthVar"
     false
 }
 
 // The statement: the handle, named after the binding, then the body.
-fn ir_layout_statement(m: &IRModule, p: IRProgram, b: &IRBuilder, handle: TLocal, label: String, body: [Int], span: Span) Never! {
-    layout_ty :: Type.Named{name: "Layout"}
-    row :: ir_value_type(&m, p, layout_ty) ?? {
-        _ :: ir_type_fail(&b, span, layout_ty)
+ir_layout_statement: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, handle: TLocal, label: String, body: [Int], span: Span) Never! {
+    layout_ty: Type.Named{name: "Layout"}
+    row: ir_value_type(&m, p, layout_ty) ?? {
+        _: ir_type_fail(&b, span, layout_ty)
         return
     }
-    string_row :: ir_string_row(&m)
-    name :: ir_temp(&m, &b, string_row)
-    text :: ir_intern_text(&m, label)
+    string_row: ir_string_row(&m)
+    name: ir_temp(&m, &b, string_row)
+    text: ir_intern_text(&m, label)
     ir_emit(&b.f, IROp.ConstText, name, text, -1, -1, b.line)
-    layout :: ir_runtime(&m, &b, "jet_rt_layout_new", [Int]{name}, row)
+    layout: ir_runtime(&m, &b, "jet_rt_layout_new", [Int]{name}, row)
     b.fresh[layout] = true
     ir_bind_local(&m, p, &b, handle, layout, span)
     ir_stmts(&m, p, &b, body)
 }
 
 // A plain number in a layout expression: a constant LinExpr.
-fn ir_layout_literal(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: Int, span: Span) -> Int Never! {
-    row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+ir_layout_literal: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: Int, span: Span) -> Int Never! {
+    row: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
     number := ir_expr(&m, p, &b, value)
     if ir_failed(b) || number < 0 -> return -1
     if ir_untag(ir_ty(p, b, value)) == .Int {
-        float_row :: ir_value_type(&m, p, Type.Float) ?? return ir_type_fail(&b, span, Type.Float)
-        converted :: ir_runtime(&m, &b, "jet_int_owned_to_f64", [Int]{number}, float_row)
+        float_row: ir_value_type(&m, p, Type.Float) ?? return ir_type_fail(&b, span, Type.Float)
+        converted: ir_runtime(&m, &b, "jet_int_owned_to_f64", [Int]{number}, float_row)
         ir_release(&m, &b, number)
         number = converted
     }
-    result :: ir_runtime(&m, &b, "jet_rt_layout_constant", [Int]{number}, row)
+    result: ir_runtime(&m, &b, "jet_rt_layout_constant", [Int]{number}, row)
     b.fresh[result] = true
     result
 }
 
 // `a + b` / `a - b` over layout values.
-fn ir_layout_binary(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, op: TBinaryOp, lhs: Int, rhs: Int, span: Span) -> Int Never! {
+ir_layout_binary: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, op: TBinaryOp, lhs: Int, rhs: Int, span: Span) -> Int Never! {
     export := ""
     if op == {
         .Add -> export = "jet_rt_layout_add"
         .Sub -> export = "jet_rt_layout_sub"
         else -> return ir_fail_slot(&b, span, "layout operator other than + and -")
     }
-    row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
-    left :: ir_expr(&m, p, &b, lhs)
-    right :: ir_expr(&m, p, &b, rhs)
+    row: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    left: ir_expr(&m, p, &b, lhs)
+    right: ir_expr(&m, p, &b, rhs)
     if ir_failed(b) || left < 0 || right < 0 -> return -1
-    result :: ir_runtime(&m, &b, export, [Int]{left, right}, row)
+    result: ir_runtime(&m, &b, export, [Int]{left, right}, row)
     b.fresh[result] = true
     ir_release(&m, &b, left)
     ir_release(&m, &b, right)
@@ -67,7 +67,7 @@ fn ir_layout_binary(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, op: TBi
 
 // `a <= b` / `a >= b` / `a == b`: the Constraint (Le0/Ge1/Eq2), registered
 // with the layout its variables belong to.
-fn ir_layout_compare(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, op: TBinaryOp, lhs: Int, rhs: Int, span: Span) -> Int Never! {
+ir_layout_compare: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, op: TBinaryOp, lhs: Int, rhs: Int, span: Span) -> Int Never! {
     code := 0
     if op == {
         .Le -> code = 0
@@ -75,12 +75,12 @@ fn ir_layout_compare(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, op: TB
         .Eq -> code = 2
         else -> return ir_fail_slot(&b, span, "layout comparison other than <=, >= and ==")
     }
-    row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
-    left :: ir_expr(&m, p, &b, lhs)
-    right :: ir_expr(&m, p, &b, rhs)
+    row: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    left: ir_expr(&m, p, &b, lhs)
+    right: ir_expr(&m, p, &b, rhs)
     if ir_failed(b) || left < 0 || right < 0 -> return -1
-    opcode :: ir_word_const(&m, &b, code)
-    result :: ir_runtime(&m, &b, "jet_rt_layout_compare", [Int]{left, right, opcode}, row)
+    opcode: ir_word_const(&m, &b, code)
+    result: ir_runtime(&m, &b, "jet_rt_layout_compare", [Int]{left, right, opcode}, row)
     b.fresh[result] = true
     ir_release(&m, &b, left)
     ir_release(&m, &b, right)
@@ -88,13 +88,13 @@ fn ir_layout_compare(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, op: TB
 }
 
 // The Layout and Constraint methods (Handle / Constraint).
-fn ir_layout_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, operation: BodyHandleOp, args: [Int], span: Span) -> Int? Never! {
+ir_layout_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, operation: BodyHandleOp, args: [Int], span: Span) -> Int? Never! {
     method := ""
     if operation == {
         .LayoutMethod(name) -> method = name
         else -> return None
     }
-    strength :: if method == {
+    strength: if method == {
         "required" -> 0
         "strong" -> 1
         "medium" -> 2
@@ -111,22 +111,22 @@ fn ir_layout_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receive
         "conflict" -> export = "jet_rt_layout_conflict_into"
         else -> return Val(ir_fail_slot(&b, span, "Layout.{method}"))
     }
-    handle :: ir_expr(&m, p, &b, receiver)
+    handle: ir_expr(&m, p, &b, receiver)
     if ir_failed(b) || handle < 0 -> return Val(-1)
     call_args := [Int]{handle}
     loop argument in args {
-        value :: ir_expr(&m, p, &b, argument)
+        value: ir_expr(&m, p, &b, argument)
         if ir_failed(b) || value < 0 -> return Val(-1)
         &call_args.push(value)
     }
     result := -1
     if method == "suggest" {
-        _ :: ir_runtime(&m, &b, export, call_args, -1)
+        _: ir_runtime(&m, &b, export, call_args, -1)
     } else {
         if method == "conflict" {
             result = ir_layout_conflict(&m, p, &b, ty, call_args, span)
         } else {
-            row :: ir_value_type(&m, p, ty) ?? return Val(ir_type_fail(&b, span, ty))
+            row: ir_value_type(&m, p, ty) ?? return Val(ir_type_fail(&b, span, ty))
             result = ir_runtime(&m, &b, export, call_args, row)
             b.fresh[result] = m.types[row].drop != ""
         }
@@ -137,24 +137,24 @@ fn ir_layout_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receive
 
 // `layout.conflict()`: the runtime hands over the List<String> buffer and its
 // length (jet_rt_layout_conflict_into), which the List header here owns.
-fn ir_layout_conflict(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, call_args: [Int], span: Span) -> Int Never! {
-    row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
-    out :: ir_out_slot(&m, &b, 1)
+ir_layout_conflict: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, call_args: [Int], span: Span) -> Int Never! {
+    row: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    out: ir_out_slot(&m, &b, 1)
     args := call_args
     &args.push(out)
-    word_row :: ir_word_row(&m)
-    length :: ir_runtime(&m, &b, "jet_rt_layout_conflict_into", args, word_row)
-    storage :: ir_fresh_temp(&m, &b, row)
+    word_row: ir_word_row(&m)
+    length: ir_runtime(&m, &b, "jet_rt_layout_conflict_into", args, word_row)
+    storage: ir_fresh_temp(&m, &b, row)
     ir_emit(&b.f, IROp.StackAddress, storage, 24, 8, -1, b.line)
-    data :: ir_load_word(&m, &b, out, 0)
+    data: ir_load_word(&m, &b, out, 0)
     ir_route_list_header(&m, &b, storage, 0, data, length)
     storage
 }
 
 // `.required()` / `.strong()` / `.medium()` / `.weak()`: the runtime takes
 // the constraint and returns the same shell, so a kept one is cloned first.
-fn ir_layout_strength(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, strength: Int, span: Span) -> Int Never! {
-    row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+ir_layout_strength: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, strength: Int, span: Span) -> Int Never! {
+    row: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
     constraint := ir_expr(&m, p, &b, receiver)
     if ir_failed(b) || constraint < 0 -> return -1
     if b.fresh[constraint] {
@@ -162,8 +162,8 @@ fn ir_layout_strength(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, recei
     } else {
         constraint = ir_runtime(&m, &b, "jet_rt_handle_clone_constraint", [Int]{constraint}, row)
     }
-    level :: ir_word_const(&m, &b, strength)
-    result :: ir_runtime(&m, &b, "jet_rt_layout_strength", [Int]{constraint, level}, row)
+    level: ir_word_const(&m, &b, strength)
+    result: ir_runtime(&m, &b, "jet_rt_layout_strength", [Int]{constraint, level}, row)
     b.fresh[result] = true
     result
 }

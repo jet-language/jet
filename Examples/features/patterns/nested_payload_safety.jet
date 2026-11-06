@@ -1,7 +1,7 @@
 // Nested enum payload patterns: grouped leaves with payloads, named and
 // positional payloads, duplicate payload types, guards, or-patterns, and a
 // payload nested inside another payload (matched one level at a time).
-enum Msg {
+Msg: enum {
     Net {
         Packet(Int)
         Ping(Int)
@@ -13,19 +13,19 @@ enum Msg {
     Quit
 }
 
-enum Shape {
+Shape: enum {
     Rect(w: Int, h: Int)
     Circle(Int)
 }
 
-enum Reply {
+Reply: enum {
     Ok(Shape)
     Err(String)
 }
 
 // A guard arm (`pattern && condition`) makes the arm list conditional, so it
 // needs an `else` fallback.
-fn route(m: Msg) -> String {
+route: fn(m: Msg) -> String {
     if m == {
         .Net.Packet(bytes) && bytes > 1000 -> "jumbo {bytes}B"
         .Net.Packet(bytes) -> "packet {bytes}B"
@@ -37,7 +37,7 @@ fn route(m: Msg) -> String {
 }
 
 // Group arms match every leaf under the group.
-fn group(m: Msg) -> String {
+group: fn(m: Msg) -> String {
     if m == {
         .Net -> "net"
         .UI -> "ui"
@@ -45,7 +45,7 @@ fn group(m: Msg) -> String {
     }
 }
 
-fn shape_text(s: Shape) -> String {
+shape_text: fn(s: Shape) -> String {
     if s == {
         .Rect(w, h) && w == h -> "square {w}"
         .Rect(w, h) -> "rect {w}x{h}"
@@ -54,14 +54,14 @@ fn shape_text(s: Shape) -> String {
     }
 }
 
-fn describe(r: Reply) -> String {
+describe: fn(r: Reply) -> String {
     if r == {
         .Ok(s) -> "ok {shape_text(s)}"
         .Err(msg) -> "error {msg}"
     }
 }
 
-fn run() {
+run: fn() {
     print(route(Msg.Net.Packet(1500)))
     print(route(Msg.Net.Packet(64)))
     print(route(Msg.Net.Ping(3)))
@@ -77,7 +77,7 @@ fn run() {
 
     // Mutation after narrowing: the bindings are fresh locals; the matched
     // value is unchanged.
-    held :: Msg.Net.Packet(10)
+    held: Msg.Net.Packet(10)
     if held == .Net.Packet(bytes) {
         total := bytes
         total += 5

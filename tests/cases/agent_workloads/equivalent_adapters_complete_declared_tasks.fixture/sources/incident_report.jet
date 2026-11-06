@@ -1,30 +1,30 @@
 use {
-    fs :: core.files
-    csv :: core.encoding.csv
+    fs: core.files
+    csv: core.encoding.csv
 }
 
-struct Incident {
+Incident: struct {
     service: String
     status: String
 }
 
 #CLI
-struct WorkloadArgs {
+WorkloadArgs: struct {
     input: String
 }
 
-fn run(args: WorkloadArgs) {
-    input :: args.input
-    text :: fs.read(input) ?? panic("cannot read input")
+run: fn(args: WorkloadArgs) {
+    input: args.input
+    text: fs.read(input) ?? panic("cannot read input")
     incidents := [Incident]{}
     services := [String]{}
     rejects := [String]{}
-    rows :: csv.rows(
+    rows: csv.rows(
         text, delimiter: "\t", header: true, skip_blank: true
     ) ?? panic("cannot parse input")
     loop row in rows {
-        fields :: row.fields
-        line_number :: row.line
+        fields: row.fields
+        line_number: row.line
         if {
             fields.len() != 3 -> &rejects.push("reject|{line_number}|field-count")
             fields.get(0) == .Val(service) -> {

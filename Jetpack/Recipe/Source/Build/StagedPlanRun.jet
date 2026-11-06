@@ -3,7 +3,7 @@
 // plan fingerprints are owner-gated.
 
 // The only host state exposed while a staged plan action emits its fragment.
-struct StagedPlanContext {
+StagedPlanContext: struct {
     source_dir: String
     artifact_root: String
 }
@@ -11,7 +11,7 @@ struct StagedPlanContext {
 // A successful staged plan publication. The artifact directory is committed
 // only after the fragment passes model validation and the complete BuildPlan
 // graph is admitted.
-struct StagedPlanReport {
+StagedPlanReport: struct {
     action_identity: String
     fragment_digest: String
     plan_fingerprint: String
@@ -22,12 +22,12 @@ struct StagedPlanReport {
 // A plan callback failed, was cancelled, or reached outside its declared
 // input authority; the last names the violated sandbox rule.
 #Error
-enum StagedPlanActionError {
+StagedPlanActionError: enum {
     Cancelled
     Failed(String)
     UndeclaredAccess(String)
 
-    fn message(self) -> String Never! {
+    message: fn(self) -> String Never! {
         if self == {
             .Cancelled -> "staged plan action was cancelled"
             .Failed(detail) -> detail
@@ -37,29 +37,29 @@ enum StagedPlanActionError {
 }
 
 // The staged plan callback: emit one typed fragment from the sandbox view.
-struct StagedPlanEmitter {
+StagedPlanEmitter: struct {
     emit: fn(PlanSandbox) -[FS, Env]> BuildPlanFragment StagedPlanActionError!
 }
 
 // Capability-limited input view for the plan callback.
-struct PlanSandbox {
+PlanSandbox: struct {
     priv source_dir: String
     priv declared_inputs: [String: String]
     priv observed_inputs: [String]
 
     // Read one exact declared input and verify its locked digest before the
     // callback sees its bytes.
-    fn read_input(&self, path: String) -[FS, Env]> [U8] StagedPlanActionError! {
-        declared_digest :: self.declared_inputs.get(path) ?? return Err(StagedPlanActionError.UndeclaredAccess("input `{path}`"))
-        source :: if recipe_confined_source(self.source_dir, path, false) == {
+    read_input: fn(&self, path: String) -[FS, Env]> [U8] StagedPlanActionError! {
+        declared_digest: self.declared_inputs.get(path) ?? return Err(StagedPlanActionError.UndeclaredAccess("input `{path}`"))
+        source: if recipe_confined_source(self.source_dir, path, false) == {
             .Ok(resolved) -> resolved
             .Err(error) -> { return Err(StagedPlanActionError.Failed("{error.code}: {error.what}")) }
         }
-        bytes :: if recipe_read_file_nofollow(source, RECIPE_MAX_READ_BYTES) == {
+        bytes: if recipe_read_file_nofollow(source, RECIPE_MAX_READ_BYTES) == {
             .Ok(read) -> read
             .Err(error) -> { return Err(StagedPlanActionError.Failed("could not read declared input `{path}`: {error.message()}")) }
         }
-        digest :: pkg_sha256_hex(bytes)
+        digest: pkg_sha256_hex(bytes)
         if !recipe_digest_matches(declared_digest, digest) {
             return Err(StagedPlanActionError.Failed("declared input `{path}` digest mismatch: expected `{declared_digest}`, got `sha256-{digest}`"))
         }
@@ -71,17 +71,17 @@ struct PlanSandbox {
     }
 
     // Store reads are not part of the staged plan sandbox authority.
-    fn read_store(self, path: String) -> [U8] StagedPlanActionError! {
+    read_store: fn(self, path: String) -> [U8] StagedPlanActionError! {
         Err(StagedPlanActionError.UndeclaredAccess("store path `{path}`"))
     }
 
     // Package resolution is unavailable after the finite stage boundary; all
     // resolution facts must be declared by the caller.
-    fn resolve_package(self, package: String) StagedPlanActionError! {
+    resolve_package: fn(self, package: String) StagedPlanActionError! {
         Err(StagedPlanActionError.UndeclaredAccess("package resolution `{package}`"))
     }
 
-    fn observed_inputs(self) -> [String] Never! {
+    observed_inputs: fn(self) -> [String] Never! {
         self.observed_inputs
     }
 
@@ -89,7 +89,7 @@ struct PlanSandbox {
 
 // No callback, input read, tool lookup or artifact publication is permitted
 // before the canonical producer seam has admitted the complete graph.
-fn recipe_run_staged_plan_action(_action: StagedPlanAction, _ctx: StagedPlanContext, _tools: [String: String], _emitter: StagedPlanEmitter) -[FS, Env, Rand]> StagedPlanReport RecipeDiagnostic! {
+recipe_run_staged_plan_action: fn(_action: StagedPlanAction, _ctx: StagedPlanContext, _tools: [String: String], _emitter: StagedPlanEmitter) -[FS, Env, Rand]> StagedPlanReport RecipeDiagnostic! {
     Err(recipe_plan_refusal())
 }
 

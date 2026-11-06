@@ -4,49 +4,49 @@
 // consumer recases or re-derives the field names.
 //
 // Run: APP_PORT=9000 jet run Examples/features/serde/shape_projection.jet -- --listen-port 7000
-package {
+package: {
     name: "shape_projection"
     authority: { allow: [DB, Env, Exec] }
 }
 
 use {
-    args :: core.args
-    env :: core.sys
-    json :: core.encoding.json
-    db :: core.db
+    args: core.args
+    env: core.sys
+    json: core.encoding.json
+    db: core.db
 }
 
 derive T.LayoutFacts {
-    info :: T.$layout
-    selected :: info[.port_slot]
-    layout_name :: selected.name
-    fn layout_projection(self) -> String Never! { "{$layout_name}" }
+    info: T.$layout
+    selected: info[.port_slot]
+    layout_name: selected.name
+    layout_projection: fn(self) -> String Never! { "{$layout_name}" }
 }
 
 #[LayoutFacts, CLI]
-struct Config {
+Config: struct {
     #[Doc("port to listen on"), Rename(name: "port", json: "port_json", args: "listen-port", env: "APP_PORT", db: "port_col", layout: "port_slot")] port: Int{8080}
     #[Doc("host to bind"), Rename(name: "host", json: "host_json", args: "bind-host", env: "APP_HOST", db: "host_col", layout: "host_slot")] host: String{"localhost"}
 }
 
-fn run() [FieldError]! {
-    file :: json.decode<Config>("{{\"port_json\": 9000, \"host_json\": \"example\"}}")
+run: fn() [FieldError]! {
+    file: json.decode<Config>("{{\"port_json\": 9000, \"host_json\": \"example\"}}")
     print(file.port)
     print(file.host)
     assert(file.layout_projection() == "port_slot", "layout shape name")
-    flags :: args.decode<Config>()
-    settings :: env.decode<Config>(prefix: "APP_")
-    cfg :: Config.merge(flags, settings)
+    flags: args.decode<Config>()
+    settings: env.decode<Config>(prefix: "APP_")
+    cfg: Config.merge(flags, settings)
     print(cfg.port)
     print(cfg.host)
     conn := db.open_memory()
-    policy :: db.policy("shape_config", "true") ?? panic("policy")
+    policy: db.policy("shape_config", "true") ?? panic("policy")
     scoped := conn.with_policy(policy, "owner")
-    _created :: db.migrate(scoped, "shape-config-v1", [SQL{"CREATE TABLE shape_config (port_col INTEGER, host_col TEXT)"}]) ?? panic("migrate")
-    _inserted :: scoped.execute(SQL{"INSERT INTO shape_config (port_col, host_col) VALUES (9100, 'db-host')"}) ?? panic("insert")
-    row :: scoped.query_one(SQL{"SELECT port_col, host_col FROM shape_config"}) ?? panic("query")
-    db_file :: db.decode<Config>(row)
+    _created: db.migrate(scoped, "shape-config-v1", [SQL{"CREATE TABLE shape_config (port_col INTEGER, host_col TEXT)"}]) ?? panic("migrate")
+    _inserted: scoped.execute(SQL{"INSERT INTO shape_config (port_col, host_col) VALUES (9100, 'db-host')"}) ?? panic("insert")
+    row: scoped.query_one(SQL{"SELECT port_col, host_col FROM shape_config"}) ?? panic("query")
+    db_file: db.decode<Config>(row)
     print(db_file.port)
     print(db_file.host)
-    _closed :: scoped.close()
+    _closed: scoped.close()
 }

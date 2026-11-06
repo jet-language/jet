@@ -1,24 +1,24 @@
 // A user trait that shares the name `IndexMut` is not the prelude index
 // hook (#5971 c6): its impl never routes `g[k] = v`.
-trait IndexMut {
-    fn set(&self, k: Int, v: Int)
+IndexMut: trait {
+    set: fn(&self, k: Int, v: Int)
 }
 
-struct Grid {
+Grid: struct {
     cells: [Int]
 }
 
 impl Grid.Index {
-    type Key = Int
-    type Value = Int
-    fn get(self, k: Int) -> Int? { self.cells.get(k) }
+    Key: Int
+    Value: Int
+    get: fn(self, k: Int) -> Int? { self.cells.get(k) }
 }
 
 impl Grid.IndexMut {
-    fn set(&self, k: Int, v: Int) { print("user set {k} {v}") }
+    set: fn(&self, k: Int, v: Int) { print("user set {k} {v}") }
 }
 
-fn run() {
+run: fn() {
     g := Grid{cells: [1, 2, 3]}
     &g.set(1, 9)
     g[1] = 9

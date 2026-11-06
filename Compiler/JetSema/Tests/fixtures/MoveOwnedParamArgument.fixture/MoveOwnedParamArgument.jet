@@ -1,28 +1,28 @@
 // `^` on an owned parameter, a local and a field of one moves: no diagnostic.
-struct Bag {
+Bag: struct {
     items: [String]
 }
 
-fn keep(bag: ^Bag) -> Int { bag.items.len() }
+keep: fn(bag: ^Bag) -> Int { bag.items.len() }
 
-fn count(items: ^[String]) -> Int { items.len() }
+count: fn(items: ^[String]) -> Int { items.len() }
 
-fn forward(bag: ^Bag) -> Int {
+forward: fn(bag: ^Bag) -> Int {
     keep(^bag)
 }
 
-fn fields(bag: ^Bag) -> Int {
+fields: fn(bag: ^Bag) -> Int {
     count(^bag.items)
 }
 
-fn collect(item: ^[Int]) -> Int {
+collect: fn(item: ^[Int]) -> Int {
     rows := [[Int]]{}
     &rows.push(^item)
     rows.len()
 }
 
-fn run() {
-    local :: Bag{items: [String]{"one"}}
+run: fn() {
+    local: Bag{items: [String]{"one"}}
     print(forward(^local))
     print(fields(Bag{items: [String]{"two"}}))
     print(collect([Int]{1}))

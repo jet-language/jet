@@ -1,14 +1,14 @@
 
-use process :: core.process
+use process: core.process
 
-fn run() -[Exec, IO, Time.Wait]> {
-    plain :: process.run_spec(process.cmd(["echo", "plain-ok"]).stdout(.Capture)) ?? panic("default run failed")
+run: fn() -[Exec, IO, Time.Wait]> {
+    plain: process.run_spec(process.cmd(["echo", "plain-ok"]).stdout(.Capture)) ?? panic("default run failed")
     print(plain.output.trim())
 
-    run_result :: process.run_spec(process.cmd(["printf", "run-ok"]).terminal()) ?? panic("terminal run failed")
+    run_result: process.run_spec(process.cmd(["printf", "run-ok"]).terminal()) ?? panic("terminal run failed")
     print(run_result.output.contains("run-ok"))
 
-    child :: process.cmd(["printf", "spawn-ok"]).terminal().spawn() ?? panic("terminal spawn failed")
+    child: process.cmd(["printf", "spawn-ok"]).terminal().spawn() ?? panic("terminal spawn failed")
     if child.terminal == {
         .Val(session) -> {
             session.resize(TerminalSize{ cols: 100, rows: 30 }) ?? panic("resize failed")
@@ -16,7 +16,7 @@ fn run() -[Exec, IO, Time.Wait]> {
         }
         .None -> { print("spawn: no session") }
     }
-    waited :: child.wait() ?? panic("terminal wait failed")
+    waited: child.wait() ?? panic("terminal wait failed")
     print(waited.output.contains("spawn-ok"))
 
     if process.pipeline([process.cmd(["echo", "a"]), process.cmd(["cat"]).terminal()]) == {

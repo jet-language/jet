@@ -1,44 +1,44 @@
-struct Meter {
+Meter: struct {
     priv value: Float
 }
 
-struct Centimeter {
+Centimeter: struct {
     priv value: Float
 }
 
-struct Second {
+Second: struct {
     priv value: Float
 }
 
-struct Hertz {
+Hertz: struct {
     priv value: Float
 }
 
-struct Speed {
+Speed: struct {
     priv value: Float
 }
 
-struct Acceleration {
+Acceleration: struct {
     priv value: Float
 }
 
-fn meter(value: Float) -> Meter { Meter{ value: value } }
-fn centimeter(value: Float) -> Centimeter { Centimeter{ value: value } }
-fn second(value: Float) -> Second { Second{ value: value } }
-fn hertz(value: Float) -> Hertz { Hertz{ value: value } }
+meter: fn(value: Float) -> Meter { Meter{ value: value } }
+centimeter: fn(value: Float) -> Centimeter { Centimeter{ value: value } }
+second: fn(value: Float) -> Second { Second{ value: value } }
+hertz: fn(value: Float) -> Hertz { Hertz{ value: value } }
 
-fn checked_meters_add(left: Meter, right: Meter) -> Meter Err! {
-    sum :: left.value + right.value
+checked_meters_add: fn(left: Meter, right: Meter) -> Meter Err! {
+    sum: left.value + right.value
     if !sum.is_finite() -> return Err("meter sum is not finite")
     return Ok(Meter{ value: sum })
 }
-fn meter_to_centimeter(value: Meter) -> Centimeter { Centimeter{ value: value.value * 100.0 } }
-fn centimeters_to_meter(value: Centimeter) -> Meter { Meter{ value: value.value / 100.0 } }
-fn meters_per_second(distance: Meter, elapsed: Second) -> Speed { Speed{ value: distance.value / elapsed.value } }
-fn speed_per_second(speed: Speed, elapsed: Second) -> Meter { Meter{ value: speed.value * elapsed.value } }
-fn meters_per_second_squared(distance: Meter, elapsed: Second) -> Acceleration { Acceleration{ value: distance.value / (elapsed.value * elapsed.value) } }
-fn acceleration_step(acceleration: Acceleration, elapsed: Second) -> Speed { Speed{ value: acceleration.value * elapsed.value } }
-fn format_meter(value: Meter) -> String { value.value }} m"
-fn format_centimeter(value: Centimeter) -> String { value.value }} cm"
-fn format_speed(value: Speed) -> String { value.value }} m/s"
-fn format_hertz(value: Hertz) -> String { value.value }} Hz"
+meter_to_centimeter: fn(value: Meter) -> Centimeter { Centimeter{ value: value.value * 100.0 } }
+centimeters_to_meter: fn(value: Centimeter) -> Meter { Meter{ value: value.value / 100.0 } }
+meters_per_second: fn(distance: Meter, elapsed: Second) -> Speed { Speed{ value: distance.value / elapsed.value } }
+speed_per_second: fn(speed: Speed, elapsed: Second) -> Meter { Meter{ value: speed.value * elapsed.value } }
+meters_per_second_squared: fn(distance: Meter, elapsed: Second) -> Acceleration { Acceleration{ value: distance.value / (elapsed.value * elapsed.value) } }
+acceleration_step: fn(acceleration: Acceleration, elapsed: Second) -> Speed { Speed{ value: acceleration.value * elapsed.value } }
+format_meter: fn(value: Meter) -> String { value.value }} m"
+format_centimeter: fn(value: Centimeter) -> String { value.value }} cm"
+format_speed: fn(value: Speed) -> String { value.value }} m/s"
+format_hertz: fn(value: Hertz) -> String { value.value }} Hz"

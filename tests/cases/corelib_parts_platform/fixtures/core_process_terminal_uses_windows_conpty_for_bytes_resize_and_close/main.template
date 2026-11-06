@@ -1,19 +1,19 @@
 
-use process :: core.process
+use process: core.process
 
-fn run() {
-    policy :: TerminalPolicy{
+run: fn() {
+    policy: TerminalPolicy{
         size: TerminalSize{ cols: 80, rows: 24 },
         mode: .Cooked
     }
-    child :: process.cmd(["cmd.exe", "/D", "/Q", "/C", "{work}/conpty_probe.cmd"])
+    child: process.cmd(["cmd.exe", "/D", "/Q", "/C", "{work}/conpty_probe.cmd"])
         .cwd("{work}")
         .terminal(policy)
         .spawn() ?? panic("ConPTY spawn failed")
-    session :: child.terminal ?? panic("missing ConPTY session")
+    session: child.terminal ?? panic("missing ConPTY session")
     session.resize(TerminalSize{ cols: 100, rows: 30 }) ?? panic("ConPTY resize failed")
     child.stdin.write_text("typed\r\n") ?? panic("ConPTY input failed")
-    result :: child.wait() ?? panic("ConPTY wait failed")
+    result: child.wait() ?? panic("ConPTY wait failed")
     print(result.success)
     print(result.output)
     if child.stdin.write_text("late") == {

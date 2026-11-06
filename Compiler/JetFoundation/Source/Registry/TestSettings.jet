@@ -1,9 +1,9 @@
 // D-TEST-INVOKE1=A: the one `jet test` settings table. By one naming rule a
 // row is the flag `--shard=3/8` (`_` is `-` in a flag), the TestProfile field
 // `shard: 3/8` in package.jet and the call `t.shard(3, 8)` on the `Test` value
-// of test.jet's `fn test`. One order holds, as for build options
-// (D-SETTING-ORDER1=A): the selected test profile, then `fn test`, then the
-// flag, each later layer replacing the earlier. `jet test` runs `fn test` once
+// of test.jet's `test: fn`. One order holds, as for build options
+// (D-SETTING-ORDER1=A): the selected test profile, then `test: fn`, then the
+// flag, each later layer replacing the earlier. `jet test` runs `test: fn` once
 // in a plan step to collect its calls before any test runs. A row that is
 // not `ported` is refused in all three places (E2104 for the field and the
 // call, the not-ported refusal for the flag).
@@ -24,7 +24,7 @@
 // duration (`--time-limit=60s`, `time_limit: 60s`, `t.time_limit("60s")`).
 // Size: a positive size in `k`, `m` or `g` (also `kib`, `mib`, `gib`) units
 // (`--memory=16G`, `memory: 16gib`, `t.memory("16G")`).
-enum TestSettingKind {
+TestSettingKind: enum {
     Switch
     Count
     Seed
@@ -37,7 +37,7 @@ enum TestSettingKind {
     Size
 }
 
-struct TestSettingRow {
+TestSettingRow: struct {
     name: String
     kind: TestSettingKind
     ported: Bool
@@ -46,8 +46,8 @@ struct TestSettingRow {
 
 // One chosen value: its row's name, the canonical value text
 // (test_setting_value) and the layer that wrote it (`profile `ui``,
-// `fn test`, `flag`).
-struct TestSetting {
+// `test: fn`, `flag`).
+TestSetting: struct {
     name: String
     value: String
     source: String
@@ -55,19 +55,19 @@ struct TestSetting {
 
 // Why settings text can't be read (test_settings_parse_lines).
 #Error
-struct TestSettingError {
+TestSettingError: struct {
     message: String
 }
 
 // The environment variable that names the plan file of `jet test`'s plan
 // step. Each `t.<setting>(…)` call appends `name<TAB>value<NL>` to it; any
 // run without it ignores the calls.
-TEST_SETTINGS_PLAN_ENV :: "JET_TEST_PLAN"
+TEST_SETTINGS_PLAN_ENV: "JET_TEST_PLAN"
 // Set in each child of a run to its settings, one `name<TAB>value<TAB>source`
 // line each: the child takes them as decided and runs no plan step of its own.
-TEST_SETTINGS_ENV :: "JET_TEST_SETTINGS"
+TEST_SETTINGS_ENV: "JET_TEST_SETTINGS"
 
-JET_TEST_SETTINGS :: comptime { [TestSettingRow]{
+JET_TEST_SETTINGS: comptime { [TestSettingRow]{
     {name: "fresh", kind: TestSettingKind.Switch, ported: true, help: "Bypass only cached test results (default off); the build cache remains reusable"},
     {name: "docs", kind: TestSettingKind.Switch, ported: true, help: "Run checked documentation examples only (default off)"},
     {name: "filter", kind: TestSettingKind.Text, ported: true, help: "Only run tests and corpus rows whose name contains the text"},
@@ -119,20 +119,20 @@ JET_TEST_SETTINGS :: comptime { [TestSettingRow]{
     {name: "browser_trace", kind: TestSettingKind.Switch, ported: false, help: "Keep redacted BiDi trace entries for every browser attempt"},
 } }
 
-fn test_setting_row(name: String) -> TestSettingRow? {
+test_setting_row: fn(name: String) -> TestSettingRow? {
     loop row in JET_TEST_SETTINGS {
         if row.name == name -> return Val(row.copy())
     }
     None
 }
 
-fn test_setting_flag(name: String) -> String Never! {
+test_setting_flag: fn(name: String) -> String Never! {
     "--{name.replace("_", "-")}"
 }
 
 // The row a flag (`--shard` or `--shard=3/8`, `-u`) names.
-fn test_setting_flag_row(argument: String) -> TestSettingRow? {
-    head :: argument.split("=").to_list()[0]
+test_setting_flag_row: fn(argument: String) -> TestSettingRow? {
+    head: argument.split("=").to_list()[0]
     if head == "-u" -> return test_setting_row("update_snapshots")
     loop row in JET_TEST_SETTINGS {
         if test_setting_flag(row.name) == head -> return Val(row.copy())
@@ -141,8 +141,8 @@ fn test_setting_flag_row(argument: String) -> TestSettingRow? {
 }
 
 // The three spellings of a row, as `jet help test` shows them.
-fn test_setting_spellings(row: TestSettingRow) -> String Never! {
-    flag :: test_setting_flag(row.name)
+test_setting_spellings: fn(row: TestSettingRow) -> String Never! {
+    flag: test_setting_flag(row.name)
     if row.kind == {
         .Switch -> "{flag}, `{row.name}: true`, `t.{row.name}()`"
         .Count -> "{flag}=<n>, `{row.name}: 4`, `t.{row.name}(4)`"
@@ -157,7 +157,7 @@ fn test_setting_spellings(row: TestSettingRow) -> String Never! {
 }
 
 // What a value of the row must look like, for a refusal's "needs …".
-fn test_setting_hint(row: TestSettingRow) -> String Never! {
+test_setting_hint: fn(row: TestSettingRow) -> String Never! {
     if row.kind == {
         .Switch -> "true or false"
         .Count -> "a whole number of at least 1"
@@ -178,15 +178,15 @@ fn test_setting_hint(row: TestSettingRow) -> String Never! {
 // failures and off are accepted); Shard is `I/N`; Levels is the levels
 // joined by `,` (written `none,full`, `[none, full]` or `["none", "full"]`);
 // Duration is whole milliseconds, `<n>ms`; Size is whole bytes.
-fn test_setting_value(row: TestSettingRow, text: String) -> String? Never! {
-    trimmed :: text.trim()
+test_setting_value: fn(row: TestSettingRow, text: String) -> String? Never! {
+    trimmed: text.trim()
     if row.kind == {
         .Switch -> {
             if trimmed == "true" || trimmed == "false" -> return Val(trimmed.copy())
             None
         }
         .Count | .Seed -> {
-            count :: test_setting_whole(trimmed) ?? return None
+            count: test_setting_whole(trimmed) ?? return None
             if row.kind == TestSettingKind.Count && count < 1 -> return None
             Val("{count}")
         }
@@ -203,10 +203,10 @@ fn test_setting_value(row: TestSettingRow, text: String) -> String? Never! {
             }
         }
         .Shard -> {
-            parts :: trimmed.split("/").to_list()
+            parts: trimmed.split("/").to_list()
             if parts.len() != 2 -> return None
-            index :: test_setting_whole(parts[0].trim()) ?? return None
-            count :: test_setting_whole(parts[1].trim()) ?? return None
+            index: test_setting_whole(parts[0].trim()) ?? return None
+            count: test_setting_whole(parts[1].trim()) ?? return None
             if index < 1 || index > count || count > 4096 -> return None
             Val("{index}/{count}")
         }
@@ -215,7 +215,7 @@ fn test_setting_value(row: TestSettingRow, text: String) -> String? Never! {
             if inner.starts_with("[") && inner.ends_with("]") -> inner = inner.slice(1..<inner.len() - 1)
             levels := [String]{}
             loop part in inner.split(",").to_list() {
-                level :: part.trim().replace("\"", "")
+                level: part.trim().replace("\"", "")
                 if level != "none" && level != "basic" && level != "full" -> return None
                 if levels.contains(level) -> return None
                 &levels.push(level)
@@ -237,17 +237,17 @@ fn test_setting_value(row: TestSettingRow, text: String) -> String? Never! {
                 return None
             }
             // At most nine digits, so the product stays far inside Int.
-            plain :: digits.replace("_", "")
+            plain: digits.replace("_", "")
             if plain.bytes().len() > 9 -> return None
-            count :: test_setting_whole(plain) ?? return None
+            count: test_setting_whole(plain) ?? return None
             if count < 1 -> return None
             Val("{count * unit}ms")
         }
         .Size -> {
             loop unit in TEST_SETTING_SIZE_UNITS {
                 if !trimmed.ends_with(unit.suffix) -> next
-                plain :: trimmed.removesuffix(unit.suffix).trim().replace("_", "")
-                count :: test_setting_whole(plain) ?? return None
+                plain: trimmed.removesuffix(unit.suffix).trim().replace("_", "")
+                count: test_setting_whole(plain) ?? return None
                 if count < 1 -> return None
                 return Val("{count * unit.bytes}")
             }
@@ -256,13 +256,13 @@ fn test_setting_value(row: TestSettingRow, text: String) -> String? Never! {
     }
 }
 
-struct TestSettingSizeUnit {
+TestSettingSizeUnit: struct {
     suffix: String
     bytes: Int
 }
 
 // Longest suffix first, so `gib` is not read as `b`.
-TEST_SETTING_SIZE_UNITS :: comptime { [TestSettingSizeUnit]{
+TEST_SETTING_SIZE_UNITS: comptime { [TestSettingSizeUnit]{
     {suffix: "GiB", bytes: 1073741824}, {suffix: "gib", bytes: 1073741824}, {suffix: "GB", bytes: 1073741824}, {suffix: "gb", bytes: 1073741824},
     {suffix: "MiB", bytes: 1048576}, {suffix: "mib", bytes: 1048576}, {suffix: "MB", bytes: 1048576}, {suffix: "mb", bytes: 1048576},
     {suffix: "KiB", bytes: 1024}, {suffix: "kib", bytes: 1024}, {suffix: "KB", bytes: 1024}, {suffix: "kb", bytes: 1024},
@@ -271,17 +271,17 @@ TEST_SETTING_SIZE_UNITS :: comptime { [TestSettingSizeUnit]{
 } }
 
 // A nonnegative decimal of at most nine digits.
-fn test_setting_whole(text: String) -> Int? Never! {
+test_setting_whole: fn(text: String) -> Int? Never! {
     if text == "" || text.bytes().len() > 9 -> return None
     loop byte in text.bytes() {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         if code < 48 || code > 57 -> return None
     }
     Val(Int.parse(text) ?? return None)
 }
 
 // Writes `setting` into `settings`, replacing an earlier value of its row.
-fn test_settings_put(settings: &[TestSetting], setting: TestSetting) Never! {
+test_settings_put: fn(settings: &[TestSetting], setting: TestSetting) Never! {
     loop index in 0..<settings.len() {
         if settings[index].name == setting.name {
             settings[index] = setting
@@ -292,14 +292,14 @@ fn test_settings_put(settings: &[TestSetting], setting: TestSetting) Never! {
 }
 
 // `later` over `earlier`: every row `later` writes replaces the earlier value.
-fn test_settings_layered(earlier: [TestSetting], later: [TestSetting]) -> [TestSetting] Never! {
+test_settings_layered: fn(earlier: [TestSetting], later: [TestSetting]) -> [TestSetting] Never! {
     // copy: `earlier` stays with the caller; the layered list owns its rows.
     merged := earlier.copy()
     loop setting in later -> test_settings_put(&merged, setting.copy())
     merged
 }
 
-fn test_settings_get(settings: [TestSetting], name: String) -> String? Never! {
+test_settings_get: fn(settings: [TestSetting], name: String) -> String? Never! {
     loop setting in settings {
         if setting.name == name -> return Val(setting.value.copy())
     }
@@ -307,76 +307,76 @@ fn test_settings_get(settings: [TestSetting], name: String) -> String? Never! {
 }
 
 // A Switch row's value; false when no layer wrote it.
-fn test_settings_on(settings: [TestSetting], name: String) -> Bool Never! {
+test_settings_on: fn(settings: [TestSetting], name: String) -> Bool Never! {
     (test_settings_get(settings, name) ?? "false") == "true"
 }
 
 // The I and the N of the `shard` value, 1 and 1 when unsharded.
-fn test_settings_shard_part(settings: [TestSetting], part: Int) -> Int Never! {
-    value :: test_settings_get(settings, "shard") ?? return 1
-    parts :: value.split("/").to_list()
+test_settings_shard_part: fn(settings: [TestSetting], part: Int) -> Int Never! {
+    value: test_settings_get(settings, "shard") ?? return 1
+    parts: value.split("/").to_list()
     if parts.len() != 2 -> return 1
     Int.parse(parts[part]) ?? 1
 }
 
-fn test_settings_shard_index(settings: [TestSetting]) -> Int Never! { test_settings_shard_part(settings, 0) }
+test_settings_shard_index: fn(settings: [TestSetting]) -> Int Never! { test_settings_shard_part(settings, 0) }
 
-fn test_settings_shard_count(settings: [TestSetting]) -> Int Never! { test_settings_shard_part(settings, 1) }
+test_settings_shard_count: fn(settings: [TestSetting]) -> Int Never! { test_settings_shard_part(settings, 1) }
 
 // The levels of the `optimize` value, in order; empty when unset.
-fn test_settings_levels(settings: [TestSetting]) -> [String] Never! {
-    value :: test_settings_get(settings, "optimize") ?? return [String]{}
+test_settings_levels: fn(settings: [TestSetting]) -> [String] Never! {
+    value: test_settings_get(settings, "optimize") ?? return [String]{}
     value.split(",").to_list()
 }
 
 // The `time_limit` value in milliseconds.
-fn test_settings_time_limit_ms(settings: [TestSetting]) -> Int? Never! {
-    value :: test_settings_get(settings, "time_limit") ?? return None
+test_settings_time_limit_ms: fn(settings: [TestSetting]) -> Int? Never! {
+    value: test_settings_get(settings, "time_limit") ?? return None
     Val(Int.parse(value.removesuffix("ms")) ?? return None)
 }
 
 // A Count or Size row's value as a number; 0 when no layer wrote it.
-fn test_settings_number(settings: [TestSetting], name: String) -> Int Never! {
-    value :: test_settings_get(settings, name) ?? return 0
+test_settings_number: fn(settings: [TestSetting], name: String) -> Int Never! {
+    value: test_settings_get(settings, name) ?? return 0
     Int.parse(value) ?? 0
 }
 
 // The settings as `name<TAB>value<TAB>source` lines (TEST_SETTINGS_ENV), and
 // back. The plan file's lines are `name<TAB>value`, each from the `source`
-// the reader names; one the plan step wrote after `fn test` called
+// the reader names; one the plan step wrote after `test: fn` called
 // `t.run()` starts with TEST_SETTING_AFTER_RUN (JetRuntime TestSuite.jet).
-fn test_settings_lines(settings: [TestSetting]) -> String Never! {
+test_settings_lines: fn(settings: [TestSetting]) -> String Never! {
     text := ""
     loop setting in settings -> text = "{text}{setting.name}\t{setting.value}\t{setting.source}\n"
     text
 }
 
 // The mark of a plan line whose `t.<name>(…)` call came after `t.run()`.
-TEST_SETTING_AFTER_RUN :: "!"
+TEST_SETTING_AFTER_RUN: "!"
 
 // The settings `text` holds; a line without its own source is from
 // `source`. Err names the first line that is no setting, no value of its
 // row, a row not ported yet, or a call after `t.run()`, as the
 // `t.<name>(…)` call that wrote it.
-fn test_settings_parse_lines(text: String, source: String) -> [TestSetting] TestSettingError! {
+test_settings_parse_lines: fn(text: String, source: String) -> [TestSetting] TestSettingError! {
     settings := [TestSetting]{}
     loop line in text.split("\n").to_list() {
         if line == "" -> next
-        late :: line.starts_with(TEST_SETTING_AFTER_RUN)
-        parts :: line.removeprefix(TEST_SETTING_AFTER_RUN).split("\t").to_list()
-        row :: test_setting_row(parts[0]) ?? return Err(TestSettingError{message: "`{parts[0]}` is not a `jet test` setting"})
+        late: line.starts_with(TEST_SETTING_AFTER_RUN)
+        parts: line.removeprefix(TEST_SETTING_AFTER_RUN).split("\t").to_list()
+        row: test_setting_row(parts[0]) ?? return Err(TestSettingError{message: "`{parts[0]}` is not a `jet test` setting"})
         if late -> return Err(TestSettingError{message: "`t.{row.name}(…)` comes after `t.run()`, whose tests already ran without it"})
-        raw :: if parts.len() > 1 -> parts[1].copy() else -> ""
-        value :: test_setting_value(row, raw) ?? return Err(TestSettingError{message: "`t.{row.name}(…)` needs {test_setting_hint(row)}, not `{raw}`"})
+        raw: if parts.len() > 1 -> parts[1].copy() else -> ""
+        value: test_setting_value(row, raw) ?? return Err(TestSettingError{message: "`t.{row.name}(…)` needs {test_setting_hint(row)}, not `{raw}`"})
         if !row.ported -> return Err(TestSettingError{message: "`t.{row.name}(…)` is not ported to the Jet test runner yet"})
-        from :: if parts.len() > 2 -> parts[2].copy() else -> source.copy()
+        from: if parts.len() > 2 -> parts[2].copy() else -> source.copy()
         test_settings_put(&settings, TestSetting{name: row.name.copy(), value: value, source: from})
     }
     Ok(settings)
 }
 
 #Test("a test setting row is one flag, field and call name") {
-    row :: test_setting_row("update_snapshots") ?? panic("update_snapshots row")
+    row: test_setting_row("update_snapshots") ?? panic("update_snapshots row")
     assert_eq(test_setting_flag(row.name), "--update-snapshots")
     assert_eq((test_setting_flag_row("-u") ?? panic("-u row")).name, "update_snapshots")
     assert_eq((test_setting_flag_row("--shard=3/8") ?? panic("shard row")).name, "shard")
@@ -385,25 +385,25 @@ fn test_settings_parse_lines(text: String, source: String) -> [TestSetting] Test
 }
 
 #Test("test setting values are canonical or name what they need") {
-    shard :: test_setting_row("shard") ?? panic("shard row")
+    shard: test_setting_row("shard") ?? panic("shard row")
     assert_eq(test_setting_value(shard, " 3/8 ") ?? "", "3/8")
     assert(test_setting_value(shard, "0/8") == None)
     assert(test_setting_value(shard, "9/8") == None)
     assert_eq(test_setting_hint(shard), "I/N with 1 <= I <= N, such as `2/4`")
     assert_eq(test_setting_value(shard, "1/4097") ?? "refused", "refused")
-    levels :: test_setting_row("optimize") ?? panic("optimize row")
+    levels: test_setting_row("optimize") ?? panic("optimize row")
     assert_eq(test_setting_value(levels, "[none, full]") ?? "", "none,full")
     assert_eq(test_setting_value(levels, "[\"basic\"]") ?? "", "basic")
     assert_eq(test_setting_value(levels, "none,none") ?? "refused", "refused")
-    limit :: test_setting_row("time_limit") ?? panic("time_limit row")
+    limit: test_setting_row("time_limit") ?? panic("time_limit row")
     assert_eq(test_setting_value(limit, "2m") ?? "", "120000ms")
     assert_eq(test_setting_value(limit, "0s") ?? "refused", "refused")
-    capture :: test_setting_row("capture") ?? panic("capture row")
+    capture: test_setting_row("capture") ?? panic("capture row")
     assert_eq(test_setting_value(capture, "off") ?? "", "none")
-    seed :: test_setting_row("shuffle") ?? panic("shuffle row")
+    seed: test_setting_row("shuffle") ?? panic("shuffle row")
     assert_eq(test_setting_value(seed, "0") ?? "", "0")
     assert_eq(test_setting_value(seed, "-1") ?? "refused", "refused")
-    memory :: test_setting_row("memory") ?? panic("memory row")
+    memory: test_setting_row("memory") ?? panic("memory row")
     assert_eq(test_setting_value(memory, "16G") ?? "", "17179869184")
     assert_eq(test_setting_value(memory, "512mib") ?? "", "536870912")
     assert_eq(test_setting_value(memory, "lots") ?? "refused", "refused")
@@ -411,9 +411,9 @@ fn test_settings_parse_lines(text: String, source: String) -> [TestSetting] Test
 }
 
 #Test("later test setting layers replace earlier values") {
-    profile :: [TestSetting]{TestSetting{name: "shard", value: "1/2", source: "profile `ci`"}, TestSetting{name: "serial", value: "true", source: "profile `ci`"}}
-    code :: test_settings_parse_lines("shard\t3/8\nresults\tr.json\n", "fn test") ?? panic(err.message)
-    merged :: test_settings_layered(profile, code)
+    profile: [TestSetting]{TestSetting{name: "shard", value: "1/2", source: "profile `ci`"}, TestSetting{name: "serial", value: "true", source: "profile `ci`"}}
+    code: test_settings_parse_lines("shard\t3/8\nresults\tr.json\n", "fn test") ?? panic(err.message)
+    merged: test_settings_layered(profile, code)
     assert_eq(test_settings_shard_index(merged), 3)
     assert_eq(test_settings_shard_count(merged), 8)
     assert(test_settings_on(merged, "serial"))
@@ -427,8 +427,8 @@ fn test_settings_parse_lines(text: String, source: String) -> [TestSetting] Test
     assert_eq(test_settings_refusal("serial\ttrue\n!shard\t3/8\n"), "`t.shard(…)` comes after `t.run()`, whose tests already ran without it")
 }
 
-// Why `fn test`'s plan lines `text` are refused, "" when they aren't.
-fn test_settings_refusal(text: String) -> String Never! {
-    _ :: test_settings_parse_lines(text, "fn test") ?? return err.message
+// Why `test: fn`'s plan lines `text` are refused, "" when they aren't.
+test_settings_refusal: fn(text: String) -> String Never! {
+    _: test_settings_parse_lines(text, "fn test") ?? return err.message
     ""
 }

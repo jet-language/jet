@@ -1,7 +1,7 @@
 
-struct Gate { step: Int }
+Gate: struct { step: Int }
 
-fn slow_value(gate: Shared<Gate>) -> Int {
+slow_value: fn(gate: Shared<Gate>) -> Int {
     gate.step = 1
     total := 0
     loop n in 0..<2000000 { total += n }
@@ -9,22 +9,22 @@ fn slow_value(gate: Shared<Gate>) -> Int {
     return 1
 }
 
-fn fail_after_start(gate: Shared<Gate>) -> Int {
+fail_after_start: fn(gate: Shared<Gate>) -> Int {
     loop gate.step == 0 {}
     panic("wait failed")
     return 0
 }
 
-fn leave_on_wait_panic() {
-    gate :: shared Gate{ step: 0 }
+leave_on_wait_panic: fn() {
+    gate: shared Gate{ step: 0 }
     task.group group {
-        slow :: task slow_value(gate)
-        _ignored :: (task.any { fail_after_start(gate) }) ?? 0
+        slow: task slow_value(gate)
+        _ignored: (task.any { fail_after_start(gate) }) ?? 0
         slow.join() ?? panic("slow child failed")
     }
 }
 
-fn run() {
+run: fn() {
     leave_on_wait_panic()
     print("caller")
 }

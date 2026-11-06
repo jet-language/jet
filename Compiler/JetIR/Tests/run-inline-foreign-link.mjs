@@ -22,7 +22,7 @@ function command(label,exe,args,cwd,env={}){
 const version=command('rust-version',rustc,['-vV'],root);
 assert.equal(version.status,0);const target=version.stdout.match(/^host: (.+)$/m)?.[1];assert(target);
 const pkgSource=readFileSync(join(root,'Jetpack/Integrations/Source/Foreign/RustBridge/WrapperEmit.jet'),'utf8');
-const pkgTemplate=pkgSource.split('fn pkg_ffi_emit_inline_build_rs(')[1].match(/\n    """\n([\s\S]*?)\n[ \t]*"""/)[1];
+const pkgTemplate=pkgSource.split('pkg_ffi_emit_inline_build_rs: fn(')[1].match(/\n    """\n([\s\S]*?)\n[ \t]*"""/)[1];
 function render(files){
  const cpp=files.some(row=>row.cpp),fileRows=files.map(row=>`(${JSON.stringify(row.name)}, ${JSON.stringify(row.cpp?cxx:cc)}, ${row.cpp}, "")`).join(', ');
  let text=pkgTemplate;
@@ -55,7 +55,7 @@ for(const fixture of cases){
 }
 if(process.argv[3]){
  const unit=resolve(process.argv[3]),source=readFileSync(unit,'utf8'),providers=runtimeExportSignatures(root),entries=[];
- const pattern=/^\s*#\[[^\n]*\bFFI\((c|cpp)\)[^\n]*\]\s*\n\s*(?:pub\s+)?fn\s+([A-Za-z_]\w*)[^]*?\{\s*"""([^]*?)"""\s*\}/gm;
+ const pattern=/^\s*#\[[^\n]*\bFFI\((c|cpp)\)[^\n]*\]\s*\n\s*(?:pub\s+)?([A-Za-z_]\w*):\s*fn\b[^]*?\{\s*"""([^]*?)"""\s*\}/gm;
  for(const match of source.matchAll(pattern))entries.push({language:match[1],name:match[2],source:match[3],line:source.slice(0,match.index).split('\n').length});
  const definitions=new Map(),objects=[],failures=[];
  for(const [index,entry]of entries.entries()){

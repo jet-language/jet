@@ -38,19 +38,19 @@
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0167</code>: <code>tests/ui/typestate/member_collision_in_separate_impl_is_e0167.stderr</code>.</p>
 <pre class="diag">Error [jet.CasingMismatch]: State `open` must be PascalCase
-  --&gt; tests/ui/typestate/member_collision_in_separate_impl_is_e0167.jet:1:23
+  --&gt; tests/ui/typestate/member_collision_in_separate_impl_is_e0167.jet:1:24
     |
-  1 | struct Door { state { open } }
-    |                       ^^^^
+  1 | Door: struct { state { open } }
+    |                        ^^^^
  Why: Jet enforces PascalCase for type-like names, snake_case for value-like names, and ALL_CAPS (SCREAMING_SNAKE_CASE) for module-global constants
  Fix: Rename it to `Open`
 More: jet-lang.dev/e/E0357
 
 Error [jet.TypestateMemberConflict]: State `open` collides with a member of `Door`
-  --&gt; tests/ui/typestate/member_collision_in_separate_impl_is_e0167.jet:1:23
+  --&gt; tests/ui/typestate/member_collision_in_separate_impl_is_e0167.jet:1:24
     |
-  1 | struct Door { state { open } }
-    |                       ^^^^
+  1 | Door: struct { state { open } }
+    |                        ^^^^
  Why: State facts and ordinary members share the owning type&#39;s namespace
  Fix: Rename the state or the member so `Type.State.open` is unique
 More: jet-lang.dev/e/E0167

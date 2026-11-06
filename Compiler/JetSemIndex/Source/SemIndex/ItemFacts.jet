@@ -21,7 +21,7 @@ use jet_foundation.[
     failure_contract_source,
 ]
 
-fn semindex_collect_item_facts(db: &SymbolDB, ctx: &WalkCtx, names: NameFacts, program: Program, source: String, item: Item, mp: String) {
+semindex_collect_item_facts: fn(db: &SymbolDB, ctx: &WalkCtx, names: NameFacts, program: Program, source: String, item: Item, mp: String) {
     if item == {
         // These six belong to the root's nominal dispatch. Explicit invariant
         // arms keep new AST variants from silently disappearing in a catch-all.
@@ -62,13 +62,13 @@ fn semindex_collect_item_facts(db: &SymbolDB, ctx: &WalkCtx, names: NameFacts, p
             &db.defs.push(SymDef{identity: semindex_module_identity(ctx.scope_identity, value.name), name: value.name, def_span: value.name_span, module_path: mp, kind: .Module})
         }
         .CodeModule(value) -> {
-            identity :: if value.instance_identity == {
+            identity: if value.instance_identity == {
                 .Val(instance) -> "instance:{instance.fingerprint}"
                 .None -> semindex_module_identity(ctx.scope_identity, value.name)
             }
             &db.defs.push(SymDef{identity: identity, name: value.name, def_span: value.name_span, module_path: mp, kind: .Module})
             if value.body == .Val(body) {
-                previous :: ctx.scope_identity
+                previous: ctx.scope_identity
                 ctx.scope_identity = identity
                 semindex_structural_slot(&db, &ctx, "items", .List, (db: SymbolDB, ctx: WalkCtx) -> {
                     loop child in body -> semindex_collect_item(&db, &ctx, names, program, source, child, mp)
@@ -139,7 +139,7 @@ fn semindex_collect_item_facts(db: &SymbolDB, ctx: &WalkCtx, names: NameFacts, p
 
 // Rust2759–2779/2788–2794 deliberately stop at a nested Loop's source. This is
 // not a recursive derive expander: checked expansion belongs to Sema.
-fn semindex_collect_template_body_item(db: &SymbolDB, ctx: &WalkCtx, names: NameFacts, program: Program, source: String, body_item: DeriveBodyItem, mp: String) {
+semindex_collect_template_body_item: fn(db: &SymbolDB, ctx: &WalkCtx, names: NameFacts, program: Program, source: String, body_item: DeriveBodyItem, mp: String) {
     if body_item == {
         .Item(child) -> semindex_collect_item(&db, &ctx, names, program, source, child, mp)
         .Stmt(statement) -> semindex_collect_stmt(&db, &ctx, names, program, source, statement, mp)
@@ -150,7 +150,7 @@ fn semindex_collect_template_body_item(db: &SymbolDB, ctx: &WalkCtx, names: Name
 // Rust2577–2628: only the wrapper signature, all params including authored self.
 // Source defaults are unevaluated S6 byte spans; generic/failure facts unavailable
 // at the original Typed stage, not fabricated checked-empty values.
-fn semindex_extern_callable_kind(function: ExternFn, source: String) -> SymKind Never! {
+semindex_extern_callable_kind: fn(function: ExternFn, source: String) -> SymKind Never! {
     params := [SymNameType]{}
     sources := [SourceSpan]{}
     access := [AccessConvention]{}
@@ -174,22 +174,22 @@ fn semindex_extern_callable_kind(function: ExternFn, source: String) -> SymKind 
 
 // Rust hover_for_fn2821–2900. Unlike fn_signature, retain the effective return
 // before the arrow, explicit empty -[]> and every declared effect (even Mem/Panic).
-fn semindex_hover_for_fn(function: Func) -> String Never! {
+semindex_hover_for_fn: fn(function: Func) -> String Never! {
     parts := [String]{}
     star_done := false
     loop index in 0..<function.params.len() {
-        parameter :: function.params[index]
+        parameter: function.params[index]
         if parameter.name == "self" -> next
         if parameter.zone == .LabelOnly && !star_done {
             star_done = true
             &parts.push("*")
         }
-        head :: if parameter.zone == .PositionalOnly -> parameter.name else if parameter.public_label == {
+        head: if parameter.zone == .PositionalOnly -> parameter.name else if parameter.public_label == {
             .Val(label) -> "{label.name} {parameter.name}"
             .None -> parameter.name
         }
-        default :: if parameter.default != None -> "{{…}}" else -> ""
-        rest :: if parameter.variadic -> "..." else -> ""
+        default: if parameter.default != None -> "{{…}}" else -> ""
+        rest: if parameter.variadic -> "..." else -> ""
         &parts.push("{access_sigil(parameter.convention)}{head}: {rest}{type_name(parameter.ty)}{default}")
         if parameter.zone == .PositionalOnly {
             following := index + 1
@@ -210,8 +210,8 @@ fn semindex_hover_for_fn(function: Func) -> String Never! {
     }
     policies := [String]{}
     loop policy in semindex_callable_policies(function) -> &policies.push(callable_policy_display(policy))
-    chain :: policies.join(", ")
-    policy_text :: if chain != "" -> " ; policies=[{chain}]" else -> ""
-    failure :: func_failure_contract(function)
-    "fn {function.name}({parts.join(", ")}) {type_name(func_effective_return_type(function))}{arrow}{policy_text}\nfailure: {type_name(failure_contract_shown_type(failure))} ({failure_contract_source(failure)})"
+    chain: policies.join(", ")
+    policy_text: if chain != "" -> " ; policies=[{chain}]" else -> ""
+    failure: func_failure_contract(function)
+    "{function.name}: fn({parts.join(", ")}) {type_name(func_effective_return_type(function))}{arrow}{policy_text}\nfailure: {type_name(failure_contract_shown_type(failure))} ({failure_contract_source(failure)})"
 }

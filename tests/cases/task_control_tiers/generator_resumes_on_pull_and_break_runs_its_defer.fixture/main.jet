@@ -1,15 +1,15 @@
 // D-CONC-STREAM1=A: a generator's producer runs only when its consumer
 // pulls, one value per pull, and a consumer `break` cancels it at its
 // `yield`, where its `defer` runs before the loop is left.
-struct Marker {
+Marker: struct {
     name: String
 }
 
 impl Marker.Close {
-    fn close(^self) { print("producer: cleanup {self.name}") }
+    close: fn(^self) { print("producer: cleanup {self.name}") }
 }
 
-fn numbers(name: String) -> Stream<Int> {
+numbers: fn(name: String) -> Stream<Int> {
     marker := Marker{name: name}
     defer close(^marker)
     i := 1
@@ -21,7 +21,7 @@ fn numbers(name: String) -> Stream<Int> {
     }
 }
 
-fn run() {
+run: fn() {
     print("consumer: start")
     loop value in numbers("counter") {
         print("consumer: got {value}")

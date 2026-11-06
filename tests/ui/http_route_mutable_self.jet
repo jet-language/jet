@@ -1,15 +1,15 @@
-use server :: core.http.server
+use server: core.http.server
 
-struct Jokes {
+Jokes: struct {
     count: Int
     #Server.Get("/jokes")
-    fn joke(&self) -> HTTPResponse HTTPError! {
+    joke: fn(&self) -> HTTPResponse HTTPError! {
         self.count += 1
         Ok(server.response(200, "joke"))
     }
 }
 
-fn run() {
-    mux :: server.mux()
+run: fn() {
+    mux: server.mux()
     mux.mount(Jokes{count: 0})
 }

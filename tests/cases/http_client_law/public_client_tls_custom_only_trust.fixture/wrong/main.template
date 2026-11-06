@@ -1,14 +1,14 @@
 
 use {
-    http :: core.http.client
-    tls :: core.net.tls
-    fs :: core.files
+    http: core.http.client
+    tls: core.net.tls
+    fs: core.files
 }
-fn run() {
-    pem :: fs.read_bytes("{work}/tls/localhost.cert.pem") ?? panic("wrong ca")
-    roots :: tls.RootCertificates.from_pem(pem) ?? panic("roots")
-    cfg :: tls.ClientConfig.default().with_trust(.CustomOnly(roots)) ?? panic("cfg")
-    client :: http.Client.new().tls(cfg).protocols(false, true, false)
+run: fn() {
+    pem: fs.read_bytes("{work}/tls/localhost.cert.pem") ?? panic("wrong ca")
+    roots: tls.RootCertificates.from_pem(pem) ?? panic("roots")
+    cfg: tls.ClientConfig.default().with_trust(.CustomOnly(roots)) ?? panic("cfg")
+    client: http.Client.new().tls(cfg).protocols(false, true, false)
     if client.send(http.request("GET", "https://localhost:{cap:port}/")) == {
         .Ok(_) -> print("ok")
         .Err(_) -> print("tls-fail")

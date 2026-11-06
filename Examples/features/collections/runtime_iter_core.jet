@@ -1,10 +1,10 @@
 // Native slot-ABI cutover: scalar, owning, nested, failure and cursor paths.
-fn optional_number(n: Int) -> Int? {
+optional_number: fn(n: Int) -> Int? {
     if n % 2 == 0 -> Val(n * 10) else -> None
 }
 
-fn run() {
-    xs :: [1, 2, 3, 4, 5]
+run: fn() {
+    xs: [1, 2, 3, 4, 5]
     assert_eq(xs.lazy().take(0).to_list(), [Int]{})
     assert_eq(xs.lazy().take(3).to_list(), [1, 2, 3])
     assert_eq(xs.lazy().skip(2).to_list(), [3, 4, 5])
@@ -39,7 +39,7 @@ fn run() {
     assert_eq(xs.lazy().filter_map(n -> optional_number(n)).to_list(), [20, 40])
     assert_eq([Int?]{Val(1), Val(2)}.lazy().try_collect(), Val([1, 2]))
     assert_eq([Int?]{Val(1), None, Val(3)}.lazy().try_collect(), None)
-    words :: ["ant", "ant", "bee", "ant"]
+    words: ["ant", "ant", "bee", "ant"]
     assert_eq(words.lazy().dedup().to_list(), ["ant", "bee", "ant"])
     assert_eq(words.lazy().join("|"), "ant|ant|bee|ant")
     assert_eq(words.lazy().repeat(2).take(5).to_list(), ["ant", "ant", "bee", "ant", "ant"])

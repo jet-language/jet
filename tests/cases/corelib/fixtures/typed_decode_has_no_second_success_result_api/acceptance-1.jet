@@ -1,14 +1,14 @@
 
-use json :: core.encoding.json
+use json: core.encoding.json
 
 #[PublishedSchema, Codable]
-struct User { id: Int  name: String }
+User: struct { id: Int  name: String }
 
 migration User {
     rename old_name -> name
 }
 
-fn run() {
-    user :: json.decode<User>("{{\"id\":1,\"old_name\":\"Ada\"}}") ?? panic("bad")
+run: fn() {
+    user: json.decode<User>("{{\"id\":1,\"old_name\":\"Ada\"}}") ?? panic("bad")
     print(user.name)
 }

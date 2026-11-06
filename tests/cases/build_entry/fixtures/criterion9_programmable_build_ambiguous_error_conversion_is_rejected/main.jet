@@ -1,19 +1,19 @@
 
 #Error
-enum BuildLeftError { One }
+BuildLeftError: enum { One }
 #Error
-enum BuildRightError { One }
+BuildRightError: enum { One }
 #Error
-enum BuildTargetError { One }
+BuildTargetError: enum { One }
 
 impl BuildError -> BuildLeftError { return BuildLeftError.One }
 impl BuildError -> BuildRightError { return BuildRightError.One }
 impl BuildLeftError -> BuildTargetError { return BuildTargetError.One }
 impl BuildRightError -> BuildTargetError { return BuildTargetError.One }
 
-fn build(b: Build) BuildTargetError! {
-    first :: b.add_library("app", ["main.jet"], [])
+build: fn(b: Build) BuildTargetError! {
+    first: b.add_library("app", ["main.jet"], [])
     b.default(first)
 }
 
-fn run() {}
+run: fn() {}

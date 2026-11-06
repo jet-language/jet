@@ -1,19 +1,19 @@
-package {
+package: {
     name: "reactive_textinput_smoke"
     authority: { allow: [Browser, IO, Mem.Alloc] }
 }
 
 use {
-    ui :: core.ui
-    reactive :: core.reactive
+    ui: core.ui
+    reactive: core.reactive
 }
 
-fn run() {
+run: fn() {
     body := reactive.signal("old")
     backend := ui.tui_backend()
-    render_backend :: backend.copy()
+    render_backend: backend.copy()
     ui.reactive_render(() -> {
-        tree :: ui.node_role(body.get(), 30.0, 3.0, ui.aria_role_text_input())
+        tree: ui.node_role(body.get(), 30.0, 3.0, ui.aria_role_text_input())
         ui.mount(render_backend, tree)
     })
     print("renders: {backend.render_count()}")

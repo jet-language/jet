@@ -1,48 +1,48 @@
 
 use {
-    json :: core.encoding.json
-    text :: core.text
+    json: core.encoding.json
+    text: core.text
 }
 
 #[PublishedSchema, Codable]
-struct Published {
+Published: struct {
     known: Int
 }
 
 #Codable
-struct Plain {
+Plain: struct {
     known: Int
 }
 
 #[Codable, DenyUnknownFields]
-struct Strict {
+Strict: struct {
     known: Int
 }
 
-fn published() -[]> String {
-    value :: json.decode<Published>("{{\"middle\":2,\"known\":7,\"future\":1,\"tail\":3}}") ?? panic("published decode")
+published: fn() -[]> String {
+    value: json.decode<Published>("{{\"middle\":2,\"known\":7,\"future\":1,\"tail\":3}}") ?? panic("published decode")
     return json.to_string(value)
 }
 
-fn plain() -[]> String {
-    value :: json.decode<Plain>("{{\"future\":1,\"known\":7,\"middle\":2}}") ?? panic("plain decode")
+plain: fn() -[]> String {
+    value: json.decode<Plain>("{{\"future\":1,\"known\":7,\"middle\":2}}") ?? panic("plain decode")
     return json.to_string(value)
 }
 
-fn strict() -[]> String {
+strict: fn() -[]> String {
     json.decode<Strict>("{{\"known\":7,\"extra\":1}}") ? _value -> return "strict accepted" ! errors -> return errors[0].reason
 }
 
-fn malformed() -[]> String {
+malformed: fn() -[]> String {
     json.decode<Published>("{{\"known\":7") ? _value -> return "malformed accepted" ! _error -> return "malformed rejected"
 }
 
-fn forced_deopt() -[]> String {
+forced_deopt: fn() -[]> String {
     if text.casefold("Straße") != "strasse" { panic("casefold") }
     return published()
 }
 
-fn run() {
+run: fn() {
     print(published())
     print(plain())
     print(strict())

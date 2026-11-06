@@ -1,12 +1,12 @@
-use service :: core.service
+use service: core.service
 
-fn time_wait(workflow: ServiceWorkflow, duration: ^Duration) -[FS, Time]> {
+time_wait: fn(workflow: ServiceWorkflow, duration: ^Duration) -[FS, Time]> {
     workflow.sleep(duration) ?? return
 }
 
-fn activity_wait(workflow: ServiceWorkflow) -[FS]> {
+activity_wait: fn(workflow: ServiceWorkflow) -[FS]> {
     workflow.activity("charge", "charge-1") ?? return
     (workflow.all(["charge-1"]) ?? return).drop("the effect row, not the joined ids, is under test")
 }
 
-fn run() {}
+run: fn() {}

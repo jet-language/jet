@@ -6,10 +6,10 @@ use {
     jet_foundation.[DIAGNOSTIC_ERROR]
 }
 
-fn atomic_field_test_source(name: String, source: String, accepted: Bool, atomic: Bool) {
-    parsed :: parse_source(source.bytes())
+atomic_field_test_source: fn(name: String, source: String, accepted: Bool, atomic: Bool) {
+    parsed: parse_source(source.bytes())
     if parsed.diagnostics.len() != 0 -> panic("{name}: parity source must parse")
-    checked :: check_program(parsed.program, "atomic_field_parity", "{name}.jet", [SemaSourceSegment]{})
+    checked: check_program(parsed.program, "atomic_field_parity", "{name}.jet", [SemaSourceSegment]{})
     errors := 0
     loop diagnostic in checked.diagnostics {
         if diagnostic.severity == DIAGNOSTIC_ERROR -> errors += 1
@@ -25,7 +25,7 @@ fn atomic_field_test_source(name: String, source: String, accepted: Bool, atomic
         if statement == .Return(.Val(value), _) {
             if value.kind == .StructLit(fields, _, _) {
                 if fields.len() != 1 -> panic("{name}: field order/count changed")
-                field :: fields[0]
+                field: fields[0]
                 if atomic {
                     if sema_atomic_field_inner(field.field.ty) == None || field.value.ty != field.field.ty -> panic("{name}: field lost its Atomic carrier")
                     if field.value.kind == .StaticCall(owner, _, method, _, args) {

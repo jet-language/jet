@@ -1,15 +1,15 @@
 
 use {
-    args :: core.args
-    process :: core.process
-    io :: core.term
+    args: core.args
+    process: core.process
+    io: core.term
 }
 
-fn run() {
-    spec :: args.spec()
+run: fn() {
+    spec: args.spec()
         .flag("verbose", "print extra detail")
-    parsed :: spec.parse_or_exit(process.args())
-    embedded :: spec.parse(["--verbose"]) ?? panic("pure parse failed")
+    parsed: spec.parse_or_exit(process.args())
+    embedded: spec.parse(["--verbose"]) ?? panic("pure parse failed")
     print(parsed.flag("verbose"))
     print(embedded.flag("verbose"))
 }

@@ -1,34 +1,34 @@
 // #3039: sema's checked loop proof (AutoVectorizationFacts) reaches the range
 // loop it covers; a fixed-list access at the proved index drops its bounds
 // check, and every other loop keeps the checked path.
-struct Sample {
+Sample: struct {
     value: Float
     bias: Float
 }
 
 // Proven: both accesses are at the index of a fixed list the extent covers.
-fn auto_loop(values: [Float#8]) -> [Float#8] {
+auto_loop: fn(values: [Float#8]) -> [Float#8] {
     output := [Float#8]{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
     loop i in 0..<8 -> output[i] = values[i] * 2.0 + 1.0
     return output
 }
 
 // #Scalar records no proof.
-#Scalar fn scalar_loop(values: [Float#8]) -> [Float#8] {
+#Scalar scalar_loop: fn(values: [Float#8]) -> [Float#8] {
     output := [Float#8]{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
     loop i in 0..<8 -> output[i] = values[i] * 2.0 + 1.0
     return output
 }
 
 // A field projection of an element read at the index.
-fn project_fields(points: [Sample#4]) -> [Float#4] {
+project_fields: fn(points: [Sample#4]) -> [Float#4] {
     output := [Float#4]{0.0, 0.0, 0.0, 0.0}
     loop i in 0..<4 -> output[i] = points[i].value + points[i].bias
     return output
 }
 
 // A reduction carries a value across rounds: not independent.
-fn sum_positive(values: [Float#8]) -> Float {
+sum_positive: fn(values: [Float#8]) -> Float {
     total := Float{0.0}
     loop i in 0..<8 {
         if values[i] > 0.0 -> total += values[i]
@@ -37,7 +37,7 @@ fn sum_positive(values: [Float#8]) -> Float {
 }
 
 // An early exit; the write to `found` also carries across rounds.
-fn first_match(values: [Int#8], needle: Int) -> Int {
+first_match: fn(values: [Int#8], needle: Int) -> Int {
     found := -1
     loop i in 0..<8 {
         if values[i] == needle {
@@ -49,7 +49,7 @@ fn first_match(values: [Int#8], needle: Int) -> Int {
 }
 
 // A `return` inside the body is not a shape the proof reads: no row.
-fn first_index(values: [Int#8], needle: Int) -> Int {
+first_index: fn(values: [Int#8], needle: Int) -> Int {
     loop i in 0..<8 {
         if values[i] == needle -> return i
     }
@@ -57,14 +57,14 @@ fn first_index(values: [Int#8], needle: Int) -> Int {
 }
 
 // A growable list has no fixed length the extent covers: checked.
-fn growable(values: [Int]) -> Int {
+growable: fn(values: [Int]) -> Int {
     total := 0
     loop i in 0..<3 -> total += values[i]
     return total
 }
 
 // An extent past the fixed length keeps the check.
-fn past_end(values: [Int#4]) -> Int {
+past_end: fn(values: [Int#4]) -> Int {
     total := 0
     loop i in 0..<4 -> total += values[i]
     loop k in 0..<5 {
@@ -74,14 +74,14 @@ fn past_end(values: [Int#4]) -> Int {
 }
 
 // A zero-trip loop runs no round.
-fn zero_trip(values: [Int#4]) -> Int {
+zero_trip: fn(values: [Int#4]) -> Int {
     total := 0
     loop i in 0..<0 -> total += values[i]
     return total
 }
 
 // A neighbouring read, a stepped range and a computed bound record nothing.
-fn unproven(values: [Int#4], count: Int) -> Int {
+unproven: fn(values: [Int#4], count: Int) -> Int {
     total := 0
     loop i in 0..<3 -> total += values[i + 1]
     loop j in 0..<4, 2 -> total += values[j]
@@ -89,11 +89,11 @@ fn unproven(values: [Int#4], count: Int) -> Int {
     return total
 }
 
-fn run() {
-    values :: [Float#8]{1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0}
+run: fn() {
+    values: [Float#8]{1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0}
     print(auto_loop(values))
     print(scalar_loop(values))
-    points :: [Sample#4]{
+    points: [Sample#4]{
         {value: 1.0, bias: 10.0},
         {value: 2.0, bias: 20.0},
         {value: 3.0, bias: 30.0},

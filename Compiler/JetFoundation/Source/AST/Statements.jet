@@ -1,6 +1,6 @@
 // Rust-shaped statements and their parser/semantic support records.
 
-enum Stmt {
+Stmt: enum {
     Expr(expr: Expr)
     Val(binding: Binding)
     Assign(target: LValue, op: BinOp?, op_span: Span, value: Expr)
@@ -38,31 +38,31 @@ enum Stmt {
     DeferClose(close: Expr, span: Span)
 }
 
-struct IfStmt {
+IfStmt: struct {
     cond: Expr
     then_body: [Stmt]
     else_branch: ElseBranch?
     span: Span
 }
 
-enum ElseBranch {
+ElseBranch: enum {
     ElseIf(branch: IfStmt)
     Else(body: [Stmt])
 }
 
-struct SwitchArm {
+SwitchArm: struct {
     cond: Expr
     body: [Stmt]
     span: Span
 }
 
-struct ContextField {
+ContextField: struct {
     name: String
     value: Expr
     span: Span
 }
 
-struct PolicyDeclaration {
+PolicyDeclaration: struct {
     key: PolicyKey
     value: PolicyValue
     scope: PolicyScope
@@ -71,7 +71,7 @@ struct PolicyDeclaration {
     source: String
 }
 
-enum PolicyKey {
+PolicyKey: enum {
     Unsafe
     Impure
     Nondeterministic
@@ -94,7 +94,7 @@ enum PolicyKey {
     Sentries
 }
 
-enum PolicyValue {
+PolicyValue: enum {
     Enabled
     Limit(value: Int)
     Forbid
@@ -111,7 +111,7 @@ enum PolicyValue {
     Explicit
 }
 
-enum PolicyScope {
+PolicyScope: enum {
     Organization
     Package
     Module
@@ -119,35 +119,35 @@ enum PolicyScope {
     Block
 }
 
-enum ForKind {
+ForKind: enum {
     Range(start: Expr, end: Expr, step: Expr?, exclusive: Bool)
     In(collection: Expr, step: Expr?)
 }
 
-enum LValue {
+LValue: enum {
     Local(name: String, name_span: Span)
     Index(base: Expr, index: Expr, span: Span, kind: IndexKind)
     Field(base: Expr, field: String, span: Span)
 }
 
-enum MetaField {
+MetaField: enum {
     Category(value: Expr, span: Span)
     Tunable(span: Span)
     Maturity(value: Expr, span: Span)
     Unknown(name: String, value: Expr?, span: Span)
 }
 
-struct MetaAttr {
+MetaAttr: struct {
     fields: [MetaField]
     span: Span
 }
 
-struct MetaFacts {
+MetaFacts: struct {
     category: String?
     tunable: Bool
 }
 
-struct Binding {
+Binding: struct {
     mutable: Bool
     markers: [Marker]
     reactive_upgrade: Bool
@@ -168,7 +168,7 @@ struct Binding {
     gc_transferred: Bool
 }
 
-struct GCPromotion {
+GCPromotion: struct {
     span: Span
     scope: String
     policy_provenance: String
@@ -177,13 +177,13 @@ struct GCPromotion {
     collection_len: Int?
 }
 
-struct GCPromotionEdge {
+GCPromotionEdge: struct {
     binding: String
     slot: String
     group: Int
 }
 
-struct Marker {
+Marker: struct {
     name: String
     declaration_module: String? { None }
     declaration_span: Span? { None }
@@ -193,7 +193,7 @@ struct Marker {
     arg_labels: [CallLabel?]
     span: Span
     ct: CtValue?
-    // Written as a `#X :: value` line inside the declaration's body rather
+    // Written as a `#X: value` line inside the declaration's body rather
     // than above it. The marker means the same either way.
     inside: Bool{false}
 }
@@ -206,7 +206,7 @@ struct Marker {
 // the body's list reads and writes that the extent keeps inside their fixed
 // list, which need no bounds check. Each Bool is a semantic verdict on the
 // whole body; a loop sema cannot read completely carries no facts at all.
-struct AutoVectorizationFacts {
+AutoVectorizationFacts: struct {
     element_type: Type
     no_aliasing: Bool
     no_early_exit: Bool
@@ -216,7 +216,7 @@ struct AutoVectorizationFacts {
     proven_indexes: [Int]
 }
 
-fn ast_binding(name: String, name_span: Span, mutable: Bool, init: Expr, sigil_span: Span?) -> Binding Never! {
+ast_binding: fn(name: String, name_span: Span, mutable: Bool, init: Expr, sigil_span: Span?) -> Binding Never! {
     Binding{
         mutable: mutable,
         markers: [Marker]{},

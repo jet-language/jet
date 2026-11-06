@@ -1,26 +1,26 @@
 Error [jet.UnknownFunction]: `Iter` has no method `nth`
-  --> tests/ui/iter_missing_method_hint.jet:7:16
+  --> tests/ui/iter_missing_method_hint.jet:7:14
     |
-  7 |     _ :: parts.nth(1)
-    |                ^^^
+  7 |     _: parts.nth(1)
+    |              ^^^
  Why: Positional picks on `Iter` use one consuming path
  Fix: Use `.skip(n).first()`; `nth` is not part of the API
 More: jet-lang.dev/e/E0102
 
 Error [jet.UnknownFunction]: `Iter` has no method `get`
-  --> tests/ui/iter_missing_method_hint.jet:8:16
+  --> tests/ui/iter_missing_method_hint.jet:8:14
     |
-  8 |     _ :: parts.get(0)
-    |                ^^^
+  8 |     _: parts.get(0)
+    |              ^^^
  Why: `Iter` is a one-pass source; `get` needs a materialized list, so collection consumes the source and allocates the list
  Fix: Materialize it first with `.to_list()`; this consumes the source and allocates a list
 More: jet-lang.dev/e/E0102
 
 Error [jet.UnknownFunction]: `Widget` has no method `get`
-  --> tests/ui/iter_missing_method_hint.jet:10:17
+  --> tests/ui/iter_missing_method_hint.jet:10:15
     |
- 10 |     _ :: widget.get(0)
-    |                 ^^^
+ 10 |     _: widget.get(0)
+    |               ^^^
  Why: Check the method name on this type
- Fix: Define it inside `struct Widget` or `impl Widget`
+ Fix: Define it inside `Widget: struct` or `impl Widget`
 More: jet-lang.dev/e/E0102

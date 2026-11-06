@@ -1,21 +1,21 @@
 use {
     core.mem
-    store :: c.store
+    store: c.store
 }
 
-#Layout(c) struct Record {
+#Layout(c) Record: struct {
     id: U64
 }
 
-#Import module c.store {
-    fn store_load(id: U64, out: *Record) -> I32 = "store_load"
+#Import c.store: module {
+    store_load: fn(id: U64, out: *Record) -> I32 = "store_load"
 }
 
 #Unsafe("the local slot remains live for the complete C call")
-fn invoke() {
+invoke: fn() {
     slot := Record{id: 0}
-    p :: mem.Ptr<Record>.from_addr(mem.address_of(slot))
+    p: mem.Ptr<Record>.from_addr(mem.address_of(slot))
     print(store.store_load(1, p))
 }
 
-fn run() { invoke() }
+run: fn() { invoke() }

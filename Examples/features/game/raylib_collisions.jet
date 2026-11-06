@@ -1,36 +1,36 @@
-package {
+package: {
     name: "raylib_collisions"
     authority: {
     allow: [IO]
     }
 }
-use rl :: core.game.raylib
+use rl: core.game.raylib
 
 // raylib's collision checks are plain functions over its Vector2 and
 // Rectangle: no window and no effect. A paddle sweeps right one step at a
 // time; each line reports what it touches at that step.
-fn run() {
-    wall :: rl.rectangle(40.0, 0.0, 8.0, 30.0)
-    ball :: rl.vector2(30.0, 20.0)
-    slope_from :: rl.vector2(0.0, 30.0)
-    slope_to :: rl.vector2(60.0, 0.0)
+run: fn() {
+    wall: rl.rectangle(40.0, 0.0, 8.0, 30.0)
+    ball: rl.vector2(30.0, 20.0)
+    slope_from: rl.vector2(0.0, 30.0)
+    slope_to: rl.vector2(60.0, 0.0)
     loop step in 0..<4 {
-        paddle :: rl.rectangle(Float{step * 12}, 16.0, 10.0, 4.0)
-        hits_wall :: rl.check_collision_recs(paddle, wall)
-        hits_ball :: rl.check_collision_circle_rec(ball, 3.0, paddle)
-        overlap :: rl.get_collision_rec(paddle, wall)
+        paddle: rl.rectangle(Float{step * 12}, 16.0, 10.0, 4.0)
+        hits_wall: rl.check_collision_recs(paddle, wall)
+        hits_ball: rl.check_collision_circle_rec(ball, 3.0, paddle)
+        overlap: rl.get_collision_rec(paddle, wall)
         print("step={step} wall={hits_wall} ball={hits_ball} overlap_width={Int.from_float(overlap.width) ?? -1}")
     }
-    corner :: rl.vector2(48.0, 30.0)
+    corner: rl.vector2(48.0, 30.0)
     print("corner_inside={rl.check_collision_point_rec(corner, wall)}")
     print("near_corner={rl.check_collision_point_circle(rl.vector2(51.0, 34.0), corner, 5.0)}")
     print("ball_on_slope={rl.check_collision_circle_line(ball, 3.0, slope_from, slope_to)}")
     print("point_on_slope={rl.check_collision_point_line(rl.vector2(20.0, 20.0), slope_from, slope_to, 1)}")
-    triangle :: rl.check_collision_point_triangle(ball, rl.vector2(20.0, 10.0), rl.vector2(40.0, 30.0), rl.vector2(20.0, 30.0))
+    triangle: rl.check_collision_point_triangle(ball, rl.vector2(20.0, 10.0), rl.vector2(40.0, 30.0), rl.vector2(20.0, 30.0))
     print("ball_in_triangle={triangle}")
-    star :: [rl.RaylibVector2]{rl.vector2(10.0, 0.0), rl.vector2(13.0, 7.0), rl.vector2(20.0, 7.0), rl.vector2(14.0, 12.0), rl.vector2(16.0, 20.0), rl.vector2(10.0, 15.0), rl.vector2(4.0, 20.0), rl.vector2(6.0, 12.0), rl.vector2(0.0, 7.0), rl.vector2(7.0, 7.0)}
+    star: [rl.RaylibVector2]{rl.vector2(10.0, 0.0), rl.vector2(13.0, 7.0), rl.vector2(20.0, 7.0), rl.vector2(14.0, 12.0), rl.vector2(16.0, 20.0), rl.vector2(10.0, 15.0), rl.vector2(4.0, 20.0), rl.vector2(6.0, 12.0), rl.vector2(0.0, 7.0), rl.vector2(7.0, 7.0)}
     print("star_center={rl.check_collision_point_poly(rl.vector2(10.0, 10.0), star)} star_notch={rl.check_collision_point_poly(rl.vector2(10.0, 18.0), star)}")
-    crossing :: rl.check_collision_lines(slope_from, slope_to, rl.vector2(0.0, 0.0), rl.vector2(60.0, 30.0)) ?? rl.vector2(-1.0, -1.0)
+    crossing: rl.check_collision_lines(slope_from, slope_to, rl.vector2(0.0, 0.0), rl.vector2(60.0, 30.0)) ?? rl.vector2(-1.0, -1.0)
     print("slopes_cross_at={Int.from_float(crossing.x) ?? -1},{Int.from_float(crossing.y) ?? -1}")
     print("circles={rl.check_collision_circles(ball, 3.0, rl.vector2(36.0, 28.0), 7.0)}")
 }

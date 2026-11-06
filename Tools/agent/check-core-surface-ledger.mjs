@@ -803,10 +803,10 @@ function syntaxConstants() {
     .map(function (name) { return SYNTAX_DIR + "/" + name; });
   for (const file of files) {
     const source = read(file);
-    for (const match of source.matchAll(/^([A-Z][A-Z0-9_]*) :: "((?:\\.|[^"\\])*)"/gm)) {
+    for (const match of source.matchAll(/^([A-Z][A-Z0-9_]*): "((?:\\.|[^"\\])*)"/gm)) {
       values.set(match[1], decodeJetStringContent(match[2], file + " " + match[1]));
     }
-    for (const match of source.matchAll(/^([A-Z][A-Z0-9_]*) :: String\.from_bytes\(\[U8\]\{([0-9, ]*)\}\)$/gm)) {
+    for (const match of source.matchAll(/^([A-Z][A-Z0-9_]*): String\.from_bytes\(\[U8\]\{([0-9, ]*)\}\)$/gm)) {
       const bytes = match[2].split(",").map(function (byte) { return Number(byte.trim()); });
       values.set(match[1], Buffer.from(bytes).toString("utf8"));
     }
@@ -1859,12 +1859,12 @@ function validateDispatcherIdentity(module, member, expression, sourceLine) {
 function ownedWrapperRuntimeUnit(source, module, member) {
   const lines = source.split(/\r?\n/);
   const start = lines.findIndex(function (line) {
-    return new RegExp("^\\s*(?:#[A-Za-z_][A-Za-z0-9_]*(?:\\(\"(?:[^\"\\\\]|\\\\.)*\"\\))?\\s+)*fn\\s+" + member + "\\b").test(line);
+    return new RegExp("^\\s*(?:#[A-Za-z_][A-Za-z0-9_]*(?:\\(\"(?:[^\"\\\\]|\\\\.)*\"\\))?\\s+)*(?:pub\\s+)?" + member + ": fn\\b").test(line);
   });
   if (start < 0) return null;
   let end = start + 1;
   while (end < lines.length &&
-      !/^(?:priv\s+)?(?:fn|struct|enum|impl|module|trait)\b|^[A-Za-z_][A-Za-z0-9_]*(?:<[^>]*>)?\s*::|^#/.test(lines[end])) {
+      !/^(?:pub\s+|priv\s+)?[A-Za-z_][A-Za-z0-9_.]*(?:<[^>]*>)?:(?!=)|^impl\b|^#/.test(lines[end])) {
     end += 1;
   }
   const body = lines.slice(start, end).join("\n");
@@ -2197,7 +2197,7 @@ function parseCoreSource(source, root = ROOT) {
   }
   for (const sourceModule of sourceModules) {
     const sourceFunctions = new Set(Array.from(
-      readSource(sourceModule.path).matchAll(/^\s*(?:#[A-Za-z_][A-Za-z0-9_]*(?:\("(?:[^"\\]|\\.)*"\))?\s+)*fn\s+([A-Za-z_][A-Za-z0-9_]*)/gm),
+      readSource(sourceModule.path).matchAll(/^\s*(?:#[A-Za-z_][A-Za-z0-9_]*(?:\("(?:[^"\\]|\\.)*"\))?\s+)*(?:pub\s+)?([A-Za-z_][A-Za-z0-9_]*): fn\b/gm),
     ).map(function (match) { return match[1]; }));
     for (const member of sourceModule.ownedMembers) {
       const target = sourceTargets.get(sourceModule.module + "." + member) ?? member;
@@ -2206,11 +2206,12 @@ function parseCoreSource(source, root = ROOT) {
           sourceModule.module + "." + member + "` target `" + target + "` at line " + sourceModule.sourceLine);
       }
     }
-    // A type alias is `Name :: Type` or `Name<T> :: Type<T>`; a column-0
-    // constant matches too, which only widens this existence check.
+    // A type is `Name: struct …`, an alias `Name: Type` or `Name<T>: Type<T>`;
+    // any other column-0 declaration matches too, which only widens this
+    // existence check.
     const sourceTypes = new Set(Array.from(
-      readSource(sourceModule.path).matchAll(/^(?:(?:struct|enum|trait)\s+([A-Za-z_][A-Za-z0-9_]*)|([A-Za-z_][A-Za-z0-9_]*)(?:<[^>]*>)?\s*::)/gm),
-    ).map(function (match) { return match[1] ?? match[2]; }));
+      readSource(sourceModule.path).matchAll(/^(?:pub\s+)?([A-Za-z_][A-Za-z0-9_]*)(?:<[^>]*>)?:(?!=)/gm),
+    ).map(function (match) { return match[1]; }));
     for (const type of sourceModule.ownedTypes) {
       if (!sourceTypes.has(type)) {
         throw new Error("Core source module does not declare owned type `" +
@@ -2259,7 +2260,7 @@ function parseCoreSource(source, root = ROOT) {
     const unit = ownedWrapperRuntimeUnit(readSource(owner.path), owner.module, row.member);
     if (unit) {
       throw new Error("dispatcher row `" + row.module + "." + row.member + "` (Core.jet line " +
-        row.sourceLine + ") is dead: its owned wrapper `fn " + row.member + "` in " + owner.path +
+        row.sourceLine + ") is dead: its owned wrapper `" + row.member + ": fn` in " + owner.path +
         " (owns at Core.jet line " + owner.sourceLine + ") calls runtime unit `" + unit +
         "` instead of the provider; delete the row and the Rust symbol it names");
     }
@@ -2388,7 +2389,7 @@ function validatePublicDispatcher(sourceOrModules, rows, options = {}) {
 // gate-tier map in the syntax registry.
 function validateCoreMemModule(declarations) {
   const source = read(CORE_SURFACE_SYNTAX_PATH);
-  const tiers = resolveItems(jetListBody(source, "CORE_MEM_GATE_TIERS ::", CORE_SURFACE_SYNTAX_PATH), syntaxConstants());
+  const tiers = resolveItems(jetListBody(source, "CORE_MEM_GATE_TIERS: ", CORE_SURFACE_SYNTAX_PATH), syntaxConstants());
   const module = declarations.modules.find(function (entry) { return entry.module === "core.mem"; });
   if (!module) throw new Error("Core.jet declares no core.mem module");
   const declared = module.members.slice().sort();
@@ -2436,7 +2437,7 @@ function coreSourceFacts() {
 
 // The extension rows of CoreCallExtensions.jet's CORE_CALL_EXTENSIONS list:
 // one CoreCallRecord literal per line, already in the CoreCallRows.jet spelling.
-const CORE_CALL_EXTENSIONS_HEAD = "CORE_CALL_EXTENSIONS :: [CoreCallRecord]{";
+const CORE_CALL_EXTENSIONS_HEAD = "CORE_CALL_EXTENSIONS: [CoreCallRecord]{";
 function coreCallExtensionRows(source) {
   const rows = [];
   let state = "head";
@@ -2490,7 +2491,7 @@ function generatedCoreCallRegistry(coreSource, extensionSource, declarations) {
     "// Each row is an evaluated CoreCallRecord literal, so the table lands without",
     "// a compile-time execution host.",
     "// CoreModuleExportNames is the separate module/export-name projection.",
-    "CORE_CALLS :: comptime { [CoreCallRecord]{",
+    "CORE_CALLS: comptime { [CoreCallRecord]{",
   ];
   for (const row of declarations.dispatcherRows) {
     const expression = coreDispatcherExpression(row);
@@ -2514,7 +2515,7 @@ function generatedCoreCallRegistry(coreSource, extensionSource, declarations) {
     "} }",
     "",
     "// Module/member/type names follow Core.jet module declaration order.",
-    "CORE_MODULE_EXPORTS :: [CoreModuleExportNames]{",
+    "CORE_MODULE_EXPORTS: [CoreModuleExportNames]{",
   );
   for (const module of declarations.modules) {
     const members = module.members.map(function (member) {
@@ -2545,7 +2546,7 @@ function writeCoreCallRegistry(source, declarations) {
 // discriminants and methods are skipped.
 function coreSourceEnumVariants(path, name) {
   const text = read(path);
-  const header = new RegExp("(?:^|\\n)[ \\t]*(?:pub\\s+)?enum\\s+" + name + "\\s*\\{").exec(text);
+  const header = new RegExp("(?:^|\\n)[ \\t]*(?:pub\\s+)?" + name + ":\\s*enum\\s*\\{").exec(text);
   if (!header) return null;
   let end = header.index + header[0].length;
   for (let depth = 1; depth && end < text.length; end++) {
@@ -2578,7 +2579,7 @@ function generatedCoreEnumRows(source, declarations) {
     "// Source SHA-256: " + sha256(source),
     "// Core enum leaves in Core.jet module declaration order; the first row",
     "// naming a type is its canonical variant list.",
-    "CORE_ENUM_ROWS :: [CoreModuleTypeExport]{",
+    "CORE_ENUM_ROWS: [CoreModuleTypeExport]{",
   ];
   // `core_module_enum_variants` authenticates the exporting module through its
   // catalog row and reads the leaf's variants here, so every module that
@@ -2612,7 +2613,7 @@ function generatedCoreEnumRows(source, declarations) {
     "",
     "// Source-owned Core nominals (`source_module … types { … }`) in Core.jet",
     "// order; the Rust mirror is CoreModuleExports::CORE_SOURCE_OWNED_TYPES.",
-    "CORE_SOURCE_OWNED_TYPES :: [CoreSourceOwnedType]{",
+    "CORE_SOURCE_OWNED_TYPES: [CoreSourceOwnedType]{",
   );
   for (const entry of declarations.sourceModules) {
     for (const type of entry.ownedTypes) {
@@ -2634,11 +2635,11 @@ function writeCoreEnumRows(source, declarations) {
 // CORE_ENUM_PAYLOAD_ROWS enum names, each once in first-occurrence order.
 const CORE_ENUM_PAYLOAD_ROWS_PATH = "Compiler/JetFoundation/Source/Registry/CoreEnumPayloadRows.jet";
 const CORE_SOURCE_OWNED_ROWS_PATH = "Compiler/JetFoundation/Source/Registry/CoreSourceOwned.jet";
-const CORE_ENUM_PAYLOAD_ROWS_HEAD = "CORE_ENUM_PAYLOAD_ROWS :: [CoreEnumPayloadRow]{\n";
+const CORE_ENUM_PAYLOAD_ROWS_HEAD = "CORE_ENUM_PAYLOAD_ROWS: [CoreEnumPayloadRow]{\n";
 
 function coreOwnerAnnotationSuffixes(enumNames) {
   const owned = read(CORE_SOURCE_OWNED_ROWS_PATH);
-  const head = "CORE_SOURCE_OWNED_ROWS :: comptime { [CoreSourceOwnedRow]{";
+  const head = "CORE_SOURCE_OWNED_ROWS: comptime { [CoreSourceOwnedRow]{";
   const start = owned.indexOf(head);
   const end = owned.indexOf("\n} }", start);
   if (start < 0 || end < 0) throw new Error(CORE_SOURCE_OWNED_ROWS_PATH + " has no CORE_SOURCE_OWNED_ROWS table");
@@ -2675,7 +2676,7 @@ function generatedCoreEnumPayloadRows() {
     "// Owning an opaque impl or a compiler enum menu does not create an export.",
     "// Qualified-annotation suffixes: " + CORE_SOURCE_OWNED_ROWS_PATH + " impl types,",
     "// then the enum names above, each once in first-occurrence order.",
-    "JET_CORE_OWNER_ANNOTATION_SUFFIXES :: [String]{",
+    "JET_CORE_OWNER_ANNOTATION_SUFFIXES: [String]{",
     ...coreOwnerAnnotationSuffixes(enumNames).map((suffix) => "    " + jetStringExpression(suffix) + ","),
     "}",
     "",
@@ -2893,8 +2894,9 @@ function receiverSourceMethods(tables, item, context) {
   return methods;
 }
 
-// The public methods a Core source declares on a type: `fn` members of its
-// struct body and of its `impl` blocks, trait implementations included.
+// The public methods a Core source declares on a type: `name: fn(…) {`
+// members of its struct body and of its `impl` blocks, trait implementations
+// included. A member without a body is a field of function type.
 function coreTypeMethods(paths, type) {
   const methods = new Set();
   for (const path of paths) {
@@ -2902,10 +2904,10 @@ function coreTypeMethods(paths, type) {
     let depth = 0;
     for (const line of read(path).split(/\r?\n/)) {
       if (depth === 0) {
-        const header = line.match(/^(?:impl|struct)\s+([A-Za-z_][A-Za-z0-9_]*)(?:<[^>]*>)?(?:\.[A-Za-z_.]+)?\s*\{/);
-        owner = header !== null && header[1] === type;
+        const header = line.match(/^(?:impl\s+([A-Za-z_][A-Za-z0-9_]*)(?:<[^>]*>)?(?:\.[A-Za-z_.]+)?|([A-Za-z_][A-Za-z0-9_]*):\s*struct(?:<[^>]*>)?)\s*\{/);
+        owner = header !== null && (header[1] ?? header[2]) === type;
       } else if (depth === 1 && owner) {
-        const fn = line.match(/^\s+fn\s+([A-Za-z_][A-Za-z0-9_]*)/);
+        const fn = line.match(/^\s+([A-Za-z_][A-Za-z0-9_]*):\s*fn\b.*\{/);
         if (fn && !fn[1].startsWith("__")) methods.add(fn[1]);
       }
       for (const char of line.replace(/"(?:[^"\\]|\\.)*"/g, "").replace(/\/\/.*$/, "")) {
@@ -4569,7 +4571,7 @@ function validateCoreApiSyntaxCoverage() {
     "lsp_signature_help_returns_active_parameter",
     "rest: ...String",
     "lsp_hover_returns_signature",
-    "fn connect(host: String, /",
+    "connect: fn(host: String, /",
   ]) {
     if (!editor.includes(marker)) {
       throw new Error("editor coverage does not teach Core gate form: " + marker);

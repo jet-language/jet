@@ -4,15 +4,15 @@
 // owned by publication policy.
 use {
     jet_foundation.[diagnostic_from_registry]
-    files :: core.files
+    files: core.files
 }
 
-enum PublicationGateState {
+PublicationGateState: enum {
     Passed
     Blocked
     NotRequired
 }
-struct PublicationGateStatus {
+PublicationGateStatus: struct {
     signature: PublicationGateState
     audit: PublicationGateState
     name: PublicationGateState
@@ -20,14 +20,14 @@ struct PublicationGateStatus {
     review: PublicationGateState
 }
 
-fn publication_gate_label(state: PublicationGateState) -> String Never! {
+publication_gate_label: fn(state: PublicationGateState) -> String Never! {
     if state == {
         .Passed -> "passed"
         .Blocked -> "blocked"
         .NotRequired -> "not-required"
     }
 }
-fn publication_parse_gate(value: String) -> PublicationGateState? Never! {
+publication_parse_gate: fn(value: String) -> PublicationGateState? Never! {
     if value == {
         "passed" -> Val(PublicationGateState.Passed)
         "blocked" -> Val(PublicationGateState.Blocked)
@@ -35,27 +35,27 @@ fn publication_parse_gate(value: String) -> PublicationGateState? Never! {
         else -> None
     }
 }
-fn publication_core_reviewed() -> PublicationGateStatus Never! {
+publication_core_reviewed: fn() -> PublicationGateStatus Never! {
     PublicationGateStatus{signature: .NotRequired, audit: .NotRequired, name: .NotRequired, liveness: .NotRequired, review: .Passed}
 }
-fn publication_community_with_name(signature: PublicationGateState, audit: PublicationGateState, name: PublicationGateState) -> PublicationGateStatus Never! {
+publication_community_with_name: fn(signature: PublicationGateState, audit: PublicationGateState, name: PublicationGateState) -> PublicationGateStatus Never! {
     PublicationGateStatus{signature: signature, audit: audit, name: name, liveness: .Blocked, review: .NotRequired}
 }
-fn publication_community_open(status: PublicationGateStatus) -> Bool Never! {
+publication_community_open: fn(status: PublicationGateStatus) -> Bool Never! {
     status.signature == .Passed && status.audit == .Passed && status.name == .Passed && status.liveness == .Passed
 }
-fn publication_gate_summary(status: PublicationGateStatus) -> String Never! {
+publication_gate_summary: fn(status: PublicationGateStatus) -> String Never! {
     "signature={publication_gate_label(status.signature)};audit={publication_gate_label(status.audit)};name={publication_gate_label(status.name)};liveness={publication_gate_label(status.liveness)};review={publication_gate_label(status.review)}"
 }
-fn publication_parse_gate_status(summary: String) -> PublicationGateStatus? Never! {
+publication_parse_gate_status: fn(summary: String) -> PublicationGateStatus? Never! {
     signature := PublicationGateState?{None}
     audit := PublicationGateState?{None}
     name := PublicationGateState?{None}
     liveness := PublicationGateState?{None}
     review := PublicationGateState?{None}
     loop field in summary.split(";") {
-        pair :: field.split_once("=") ?? return None
-        state :: publication_parse_gate(pair.after) ?? return None
+        pair: field.split_once("=") ?? return None
+        state: publication_parse_gate(pair.after) ?? return None
         if pair.before == {
             "signature" -> {
                 if signature != None -> return None
@@ -82,7 +82,7 @@ fn publication_parse_gate_status(summary: String) -> PublicationGateStatus? Neve
     }
     Val(PublicationGateStatus{signature: signature ?? return None, audit: audit ?? return None, name: name ?? return None, liveness: liveness ?? return None, review: review ?? return None})
 }
-fn publication_blocked_reasons(status: PublicationGateStatus) -> [String] Never! {
+publication_blocked_reasons: fn(status: PublicationGateStatus) -> [String] Never! {
     reasons := [String]{}
     if status.signature != .Passed -> &reasons.push("#935 live signature chain")
     if status.audit != .Passed -> &reasons.push("#431 advisory audit")
@@ -91,24 +91,24 @@ fn publication_blocked_reasons(status: PublicationGateStatus) -> [String] Never!
     reasons
 }
 
-fn publication_require_core_review(repo: String, package: String, version: String) PublicationDiagnosticError! -[FS]> {
+publication_require_core_review: fn(repo: String, package: String, version: String) PublicationDiagnosticError! -[FS]> {
     publication_require_review(repo, package, version, false)
 }
-fn publication_require_takeover_review(repo: String, package: String, version: String) PublicationDiagnosticError! -[FS]> {
+publication_require_takeover_review: fn(repo: String, package: String, version: String) PublicationDiagnosticError! -[FS]> {
     publication_require_review(repo, package, version, true)
 }
-fn publication_require_review(repo: String, package: String, version: String, takeover: Bool) PublicationDiagnosticError! -[FS]> {
-    path :: files.join(files.join(files.join(repo, "reviews"), package), "{version}.review")
-    text :: files.read(path) ?? return Err(publication_review_error(package, version, path, takeover))
+publication_require_review: fn(repo: String, package: String, version: String, takeover: Bool) PublicationDiagnosticError! -[FS]> {
+    path: files.join(files.join(files.join(repo, "reviews"), package), "{version}.review")
+    text: files.read(path) ?? return Err(publication_review_error(package, version, path, takeover))
     package_field := String?{None}
     version_field := String?{None}
     reviewer := String?{None}
     decision := String?{None}
-    lines :: text.lines()
+    lines: text.lines()
     if lines.len() == 0 || lines[0] != "jet-registry-core-review-v1" -> return Err(publication_review_error(package, version, path, takeover))
     loop index in 1..<lines.len() {
-        line :: lines[index]
-        pair :: line.split_once("=") ?? return Err(publication_review_error(package, version, path, takeover))
+        line: lines[index]
+        pair: line.split_once("=") ?? return Err(publication_review_error(package, version, path, takeover))
         if pair.before == {
             "package" -> {
                 if package_field != None -> return Err(publication_review_error(package, version, path, takeover))
@@ -131,7 +131,7 @@ fn publication_require_review(repo: String, package: String, version: String, ta
     }
     if package_field != Val(package) || version_field != Val(version) || (reviewer ?? "").trim() == "" || decision != Val("approved") -> return Err(publication_review_error(package, version, path, takeover))
 }
-fn publication_review_error(package: String, version: String, path: String, takeover: Bool) -> PublicationDiagnosticError Never! {
+publication_review_error: fn(package: String, version: String, path: String, takeover: Bool) -> PublicationDiagnosticError Never! {
     if takeover -> return PublicationDiagnosticError{diagnostic: diagnostic_from_registry("E2105", None,
         "package takeover of `{package}` {version} has no approved registry review receipt",
         "changing a package signing key transfers release authority, so a registry maintainer must review the takeover",

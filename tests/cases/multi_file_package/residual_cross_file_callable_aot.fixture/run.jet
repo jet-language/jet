@@ -2,16 +2,16 @@
 use {
     values
     functions
-    calls :: functions
-    transform :: functions.apply
-    Weight :: values.Item
-    Store :: values.Pool
-    OFFSET :: values.BASE
+    calls: functions
+    transform: functions.apply
+    Weight: values.Item
+    Store: values.Pool
+    OFFSET: values.BASE
 }
-fn run() {
-    first :: transform(Weight{weight: OFFSET}, (item: Weight) -> Weight{weight: item.weight + 1})
-    second :: calls.apply(first, (item: Weight) -> Weight{weight: item.weight + 2})
-    copied :: duplicate(second)
-    pool :: Store<Weight>{items: [copied]}
+run: fn() {
+    first: transform(Weight{weight: OFFSET}, (item: Weight) -> Weight{weight: item.weight + 1})
+    second: calls.apply(first, (item: Weight) -> Weight{weight: item.weight + 2})
+    copied: duplicate(second)
+    pool: Store<Weight>{items: [copied]}
     print(total(pool_copy(pool)))
 }

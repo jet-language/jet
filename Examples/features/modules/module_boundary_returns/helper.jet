@@ -1,37 +1,37 @@
 use {
-    time :: core.time
-    math :: core.math
+    time: core.time
+    math: core.math
 }
 
-struct Secret { value: String }
+Secret: struct { value: String }
 
 #Error
-enum FormError {
+FormError: enum {
     Empty
 }
 
-fn double(value: Int) -> Int { value * 2 }
+double: fn(value: Int) -> Int { value * 2 }
 
-fn parse_count(text: String) -> Int Err! {
+parse_count: fn(text: String) -> Int Err! {
     if text == "" -> return Err("empty")
     Ok(text.len())
 }
 
-fn checked_len(text: String) -> Int FormError! {
+checked_len: fn(text: String) -> Int FormError! {
     if text == "" -> return Err(FormError.Empty)
     Ok(text.len())
 }
 
-fn reveal(secret: Secret) -> String { secret.value }
+reveal: fn(secret: Secret) -> String { secret.value }
 
-fn first<T>(items: [T]) -> T { items[0] }
+first: fn<T>(items: [T]) -> T { items[0] }
 
-struct Crate<T> { item: T }
+Crate: struct<T> { item: T }
 
-fn unpack<T>(boxed: Crate<T>) -> T { boxed.item }
+unpack: fn<T>(boxed: Crate<T>) -> T { boxed.item }
 
 // A generic function specialized for its caller still reaches the Core
 // functions its own module imports.
-fn at_least_one<T>(items: [T]) -> Int { items.len() + 1 - math.sign(items.len()) }
+at_least_one: fn<T>(items: [T]) -> Int { items.len() + 1 - math.sign(items.len()) }
 
-fn pause() -> time.Duration { 250ms }
+pause: fn() -> time.Duration { 250ms }

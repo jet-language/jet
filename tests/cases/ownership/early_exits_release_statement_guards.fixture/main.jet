@@ -4,52 +4,52 @@
 // and `?? next`. Each later guard_edit() on the same store only proceeds
 // once every read guard is gone.
 
-fn lookup(store: Shared<[String:String]>, key: String) -> String {
-    stored :: store.guard_read().value.get(key) ?? return "{key}: missing"
+lookup: fn(store: Shared<[String:String]>, key: String) -> String {
+    stored: store.guard_read().value.get(key) ?? return "{key}: missing"
     "{key}: {stored}"
 }
 
-fn year(entries: [String:String], key: String) -> String {
+year: fn(entries: [String:String], key: String) -> String {
     entries.get(key).or_err("no year for {key}")
 }
 
-fn checked(store: Shared<[String:String]>, key: String) -> String {
-    stored :: year(store.guard_read().value, key)
+checked: fn(store: Shared<[String:String]>, key: String) -> String {
+    stored: year(store.guard_read().value, key)
     "{key}: {stored}"
 }
 
-fn noted(store: Shared<[String:String]>, key: String) -> String {
-    stored :: year(store.guard_read().value, key)?("reading {key}")
+noted: fn(store: Shared<[String:String]>, key: String) -> String {
+    stored: year(store.guard_read().value, key)?("reading {key}")
     "{key}: {stored}"
 }
 
 // The read guard of the `then` arm is never taken when the `else` arm
 // returns, so that exit releases only its own.
-fn pick(store: Shared<[String:String]>, key: String, lenient: Bool) -> String {
-    stored :: if lenient -> store.guard_read().value.get(key) ?? "none" else -> store.guard_read().value.get(key) ?? return "{key}: gone"
+pick: fn(store: Shared<[String:String]>, key: String, lenient: Bool) -> String {
+    stored: if lenient -> store.guard_read().value.get(key) ?? "none" else -> store.guard_read().value.get(key) ?? return "{key}: gone"
     "{key}: {stored}"
 }
 
-fn sum_until_missing(store: Shared<[String:String]>, keys: [String]) -> Int {
+sum_until_missing: fn(store: Shared<[String:String]>, keys: [String]) -> Int {
     total := 0
     loop key in keys {
-        stored :: store.guard_read().value.get(key) ?? break
+        stored: store.guard_read().value.get(key) ?? break
         total += Int.parse(stored) ?? 0
     }
     total
 }
 
-fn sum_present(store: Shared<[String:String]>, keys: [String]) -> Int {
+sum_present: fn(store: Shared<[String:String]>, keys: [String]) -> Int {
     total := 0
     loop key in keys {
-        stored :: store.guard_read().value.get(key) ?? next
+        stored: store.guard_read().value.get(key) ?? next
         total += Int.parse(stored) ?? 0
     }
     total
 }
 
-fn run() {
-    store :: shared [String:String]{}
+run: fn() {
+    store: shared [String:String]{}
     print(lookup(store, "ada"))
     store.guard_edit().value["ada"] = "1815"
     print(lookup(store, "ada"))

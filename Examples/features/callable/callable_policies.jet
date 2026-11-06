@@ -6,16 +6,16 @@ policy audit(topic: String, prefix: String{"audit"}) {
     }
 }
 
-#Policy(audit("users.load")) fn audited_load() -> String { "ok" }
+#Policy(audit("users.load")) audited_load: fn() -> String { "ok" }
 
-#Policy(trace("users.load")) fn load_user(id: Int, label: String{"user"}) -> String { "{label}:{id}" }
+#Policy(trace("users.load")) load_user: fn(id: Int, label: String{"user"}) -> String { "{label}:{id}" }
 
-fn run() {
-    audited :: apply(audit("users.load"), audited_load)
-    layered :: apply(audit("outer"), audit("inner"), audited_load)
-    unwrapped :: apply(audited_load)
-    selected :: apply(retry(3), load_user)
-    bare :: apply(load_user)
+run: fn() {
+    audited: apply(audit("users.load"), audited_load)
+    layered: apply(audit("outer"), audit("inner"), audited_load)
+    unwrapped: apply(audited_load)
+    selected: apply(retry(3), load_user)
+    bare: apply(load_user)
     print(audited())
     print(audited_load())
     print(layered())

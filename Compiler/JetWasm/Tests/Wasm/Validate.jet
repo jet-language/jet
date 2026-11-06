@@ -1,7 +1,7 @@
 use jet_wasm.[wasm_decode_component, wasm_decode_module, wasm_validate_module]
 
 // "" when every core module of the component validates, else the first error.
-fn component_validation(bytes: ^[U8]) -> String Never! {
+component_validation: fn(bytes: ^[U8]) -> String Never! {
     if wasm_decode_component(^bytes) == {
         .Ok(component) -> {
             loop core in component.modules {
@@ -15,13 +15,13 @@ fn component_validation(bytes: ^[U8]) -> String Never! {
 
 // The validation error of a module with the standard header, a type section
 // holding `types`, one function of type 0 and the body `body` (locals + code).
-fn body_validation(types: [Int], body: [Int]) -> String Never! {
+body_validation: fn(types: [Int], body: [Int]) -> String Never! {
     values := [Int]{0, 0x61, 0x73, 0x6d, 1, 0, 0, 0, 1, types.len()}
     loop value in types -> &values.push(value)
-    code :: [Int]{3, 2, 1, 0, 10, body.len() + 2, 1, body.len()}
+    code: [Int]{3, 2, 1, 0, 10, body.len() + 2, 1, body.len()}
     loop value in code -> &values.push(value)
     loop value in body -> &values.push(value)
-    bytes :: loop value in values -> U8{value}
+    bytes: loop value in values -> U8{value}
     if wasm_decode_module(^bytes) == {
         .Ok(module_value) -> {
             if wasm_validate_module(module_value) == .Err(error) -> return error.render()
@@ -33,7 +33,7 @@ fn body_validation(types: [Int], body: [Int]) -> String Never! {
 
 #Test("the shipped components validate") {
     assert_eq(component_validation(fixture("Examples/features/packages/sandbox_mathkit/mathkit.wasm")), "")
-    names :: [String]{"lint_no_x", "crash", "fuel_loop", "incompatible", "malformed", "imports_random"}
+    names: [String]{"lint_no_x", "crash", "fuel_loop", "incompatible", "malformed", "imports_random"}
     loop name in names {
         assert_eq(component_validation(fixture("tests/fixtures/compiler_extension/{name}.wasm")), "")
     }
@@ -41,7 +41,7 @@ fn body_validation(types: [Int], body: [Int]) -> String Never! {
 
 #Test("function bodies are type checked against the operand and control stacks") {
     // () -> (i32): 1, 0x60, 0 params, 1 result i32.
-    returns_i32 :: [Int]{1, 0x60, 0, 1, 0x7f}
+    returns_i32: [Int]{1, 0x60, 0, 1, 0x7f}
     assert_eq(body_validation(returns_i32, [Int]{0, 0x41, 7, 0x0b}), "")
     // Wrong result type.
     assert_eq(body_validation(returns_i32, [Int]{0, 0x42, 7, 0x0b}), "func 0: type mismatch: expected i32, found i64 (at byte 26)")
@@ -64,7 +64,7 @@ fn body_validation(types: [Int], body: [Int]) -> String Never! {
     // br_table with matching arities.
     assert_eq(body_validation(returns_i32, [Int]{0, 0x02, 0x7f, 0x41, 1, 0x41, 0, 0x0e, 1, 0, 0, 0x0b, 0x0b}), "")
     // ref.func of an undeclared function.
-    void :: [Int]{1, 0x60, 0, 0}
+    void: [Int]{1, 0x60, 0, 0}
     assert_eq(body_validation(void, [Int]{0, 0xd2, 0, 0x1a, 0x0b}), "func 0: undeclared function reference 0 (at byte 23)")
     // select over mixed types.
     assert_eq(body_validation(void, [Int]{0, 0x41, 1, 0x42, 2, 0x41, 0, 0x1b, 0x1a, 0x0b}), "func 0: type mismatch: select operands differ (at byte 29)")

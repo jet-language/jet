@@ -1,14 +1,14 @@
 // Conformance capsule (#3180): each cell prints observed transitions under
 // D-CONC-SPAWN1=D, D-CONC-FAIL1=A, D-CONC-JOIN1=A, D-CONC-CHAN1=A,
 // D-CONC-CHAN2=D and D-CANCELMODEL1=C. Deadlines are bounded readiness waits.
-package {
+package: {
     name: "conformance_capsule"
     authority: { allow: [IO, Mem.Alloc, Time, Time.Wait] }
 }
 
-use time :: core.time
+use time: core.time
 
-fn failure_label(error: TaskFailure) -> String {
+failure_label: fn(error: TaskFailure) -> String {
     if error == {
         .Panicked(reason) -> { return "panic:{reason}" }
         .DeadlineBlown -> { return "deadline" }
@@ -18,13 +18,13 @@ fn failure_label(error: TaskFailure) -> String {
 
 // Capacity one: the second send is still blocked after a bounded wait and
 // completes only after the receiver drains the slot.
-fn backpressure_cell() {
-    { sender: tx, receiver: values } :: channel<Int>(capacity: 1)
-    { sender: started_tx, receiver: started } :: channel<Int>(capacity: 4)
-    { sender: sent_tx, receiver: sent } :: channel<Int>(capacity: 4)
+backpressure_cell: fn() {
+    { sender: tx, receiver: values }: channel<Int>(capacity: 1)
+    { sender: started_tx, receiver: started }: channel<Int>(capacity: 4)
+    { sender: sent_tx, receiver: sent }: channel<Int>(capacity: 4)
     tx.send(10)
-    second_tx :: tx.copy()
-    sender :: task {
+    second_tx: tx.copy()
+    sender: task {
         started_tx.send(1)
         second_tx.send(20)
         sent_tx.send(1)
@@ -41,7 +41,7 @@ fn backpressure_cell() {
     ^sender.join() ?? panic(failure_label(err))
 }
 
-fn worker(id: Int, token: Int, token_tx: Sender<Int>, events: Sender<Int>) -> Int {
+worker: fn(id: Int, token: Int, token_tx: Sender<Int>, events: Sender<Int>) -> Int {
     events.send(1)
     time.sleep(20ms)
     events.send(-1)
@@ -51,24 +51,24 @@ fn worker(id: Int, token: Int, token_tx: Sender<Int>, events: Sender<Int>) -> In
 
 // Two tokens bound the pool. Workers log +1/-1 while holding a token; the
 // running maximum over the log is the observed in-flight bound.
-fn worker_limit_cell() {
-    { sender: token_tx, receiver: tokens } :: channel<Int>(capacity: 2)
-    { sender: events_tx, receiver: events } :: channel<Int>(capacity: 16)
+worker_limit_cell: fn() {
+    { sender: token_tx, receiver: tokens }: channel<Int>(capacity: 2)
+    { sender: events_tx, receiver: events }: channel<Int>(capacity: 16)
     token_tx.send(1)
     token_tx.send(2)
-    t1 :: token_tx.copy()
-    t2 :: token_tx.copy()
-    t3 :: token_tx.copy()
-    t4 :: token_tx.copy()
-    e1 :: events_tx.copy()
-    e2 :: events_tx.copy()
-    e3 :: events_tx.copy()
-    e4 :: events_tx.copy()
-    a :: task worker(1, tokens.receive() ?? panic("tokens"), t1, e1)
-    b :: task worker(2, tokens.receive() ?? panic("tokens"), t2, e2)
-    c :: task worker(3, tokens.receive() ?? panic("tokens"), t3, e3)
-    d :: task worker(4, tokens.receive() ?? panic("tokens"), t4, e4)
-    ids :: [
+    t1: token_tx.copy()
+    t2: token_tx.copy()
+    t3: token_tx.copy()
+    t4: token_tx.copy()
+    e1: events_tx.copy()
+    e2: events_tx.copy()
+    e3: events_tx.copy()
+    e4: events_tx.copy()
+    a: task worker(1, tokens.receive() ?? panic("tokens"), t1, e1)
+    b: task worker(2, tokens.receive() ?? panic("tokens"), t2, e2)
+    c: task worker(3, tokens.receive() ?? panic("tokens"), t3, e3)
+    d: task worker(4, tokens.receive() ?? panic("tokens"), t4, e4)
+    ids: [
         ^a.join() ?? panic(failure_label(err)),
         ^b.join() ?? panic(failure_label(err)),
         ^c.join() ?? panic(failure_label(err)),
@@ -78,7 +78,7 @@ fn worker_limit_cell() {
     max_in_flight := 0
     seen := 0
     loop seen < 8 {
-        delta :: events.try_receive() ?? break
+        delta: events.try_receive() ?? break
         in_flight += delta
         if in_flight > max_in_flight -> max_in_flight = in_flight
         seen += 1
@@ -86,31 +86,31 @@ fn worker_limit_cell() {
     print("worker limit: joined={ids} events={seen} max_in_flight={max_in_flight} final_in_flight={in_flight}")
 }
 
-fn double(n: Int) -> Int { n * 2 }
+double: fn(n: Int) -> Int { n * 2 }
 
 // Explicit join and scope-owned join.
-fn join_cell() {
-    t :: task double(21)
+join_cell: fn() {
+    t: task double(21)
     print("join: explicit {^t.join() ?? -1}")
     task.group g {
-        both :: task.all {double(1), double(2)} ?? panic("all")
+        both: task.all {double(1), double(2)} ?? panic("all")
         print("join: scope-owned {both[0]} {both[1]}")
     }
     print("join: group closed")
 }
 
-fn fail_fast(reason: String) -> Int {
+fail_fast: fn(reason: String) -> Int {
     panic(reason)
     return 0
 }
 
-fn fail_late(reason: String) -> Int {
+fail_late: fn(reason: String) -> Int {
     time.sleep(100ms)
     panic(reason)
     return 0
 }
 
-fn sibling(done: Sender<Int>) -> Int {
+sibling: fn(done: Sender<Int>) -> Int {
     time.sleep(200ms)
     done.send(1)
     1
@@ -118,9 +118,9 @@ fn sibling(done: Sender<Int>) -> Int {
 
 // task.all: first failure keeps its identity; the sibling is cancelled at
 // its sleep wait point and never reports completion.
-fn failfast_cell() {
-    { sender: done_tx, receiver: done } :: channel<Int>(capacity: 2)
-    _ :: task.all {fail_fast("first"), fail_late("second"), sibling(done_tx)} ?? {
+failfast_cell: fn() {
+    { sender: done_tx, receiver: done }: channel<Int>(capacity: 2)
+    _: task.all {fail_fast("first"), fail_late("second"), sibling(done_tx)} ?? {
         print("failfast: error {failure_label(err)}")
         [0, 0, 0]
     }
@@ -130,7 +130,7 @@ fn failfast_cell() {
     }
 }
 
-fn shielded() -> Int {
+shielded: fn() -> Int {
     #Shield {
         time.sleep(20ms)
         print("shield: committed inside shield")
@@ -139,16 +139,16 @@ fn shielded() -> Int {
     1
 }
 
-fn quick() -> Int { 7 }
+quick: fn() -> Int { 7 }
 
-fn shield_cell() {
+shield_cell: fn() {
     task.group g {
-        winner :: task.race {shielded(), quick()} ?? panic("race")
+        winner: task.race {shielded(), quick()} ?? panic("race")
         print("shield: winner {winner}")
     }
 }
 
-fn run() {
+run: fn() {
     backpressure_cell()
     worker_limit_cell()
     join_cell()

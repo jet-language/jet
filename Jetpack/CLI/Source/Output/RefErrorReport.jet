@@ -1,12 +1,12 @@
 // A package-ref classification failure as a friendly diagnostic (Rust
 // jetpack::Output::ref_error).
 
-fn cli_ref_error(theme: Theme, error: RefError) Never! -[IO, Time.Wait]> {
+cli_ref_error: fn(theme: Theme, error: RefError) Never! -[IO, Time.Wait]> {
     if error == {
         // E1358: the ref matches none of the legal ref forms.
         .MissingSeparator(raw) | .EmptyHalf(raw) | .Malformed(raw) -> theme.error_coded("E1358", "`{raw}` is not a valid package ref", "A ref is `package@source`, optionally followed by `#version` or `#channel`, or a bare local path starting with `./`, `../`, or `/`.", "write one of the legal forms: `ripgrep@jetpack`, `ripgrep@jetpack#14.1.0`, `owner/repo@github#v1.2`, or `./vendor/tool`.")
         .UnknownSource(source, _, declared) -> {
-            known :: if declared.len() == 0 -> "Sources are built-ins such as `jetpack` and `github`, or names declared in env.jet `sources:`." else -> "Sources are built-ins such as `jetpack` and `github`, or names declared in env.jet. This env declares: {declared.join(", ")}."
+            known: if declared.len() == 0 -> "Sources are built-ins such as `jetpack` and `github`, or names declared in env.jet `sources:`." else -> "Sources are built-ins such as `jetpack` and `github`, or names declared in env.jet. This env declares: {declared.join(", ")}."
             theme.error("`{source}` is not a known source", known, "declare `{source}` in `sources:`, or use a known source name.")
         }
         // A bare name with no separator matched no workspace member.
@@ -15,7 +15,7 @@ fn cli_ref_error(theme: Theme, error: RefError) Never! -[IO, Time.Wait]> {
         .AmbiguousMember(query, candidates) -> theme.error_coded("E1230", "`{query}` matches more than one workspace member", "A bare or path-form ref resolves against the workspace member index, and this one matches several members: {candidates.join(", ")}.", "address one member by its path (e.g. `packages/logging`), or use `package@source`.")
         // E1231: a bare or path ref matched no workspace member.
         .UnknownMember(query, suggestions) -> {
-            did_you_mean :: if suggestions.len() == 0 -> "check `workspace.jet` — that name isn't in the member index." else -> "did you mean: {suggestions.join(", ")}?"
+            did_you_mean: if suggestions.len() == 0 -> "check `workspace.jet` — that name isn't in the member index." else -> "did you mean: {suggestions.join(", ")}?"
             theme.error_coded("E1231", "`{query}` is not a workspace member", "A bare or path-form ref (no `@source` suffix) must name a member listed in the workspace index (`workspace.jet` `members:`).", did_you_mean)
         }
     }

@@ -8,31 +8,31 @@
 // model-only listing live in the package model (`HangarRoots`,
 // `pkg_store_list`); this facade is the checked engine boundary above it.
 
-STORE_STAGE_DIR :: ".stage"
-STORE_OBJECTS_DIR :: "objects"
-STORE_CAS_DIR :: "cas"
-STORE_REFERRERS_DIR :: "referrers"
-STORE_PARTIAL_SUFFIX :: ".partial"
-STORE_NIX_GC_ROOT :: "nix-gc-root"
-STORE_BUILD_SCRATCH_DIR :: "build-scratch"
-STORE_FAILED_SCRATCH_DIR :: "failed-scratch"
-STORE_AUTO_CLEAN_STAMP :: ".last-auto-clean"
-STORE_STALE_AFTER_SECONDS :: 2592000
-STORE_AUTO_CLEAN_AFTER_SECONDS :: 86400
-STORE_MAX_GC_METADATA_BYTES :: 1048576
-STORE_LEASE_NAME_MAX :: 256
+STORE_STAGE_DIR: ".stage"
+STORE_OBJECTS_DIR: "objects"
+STORE_CAS_DIR: "cas"
+STORE_REFERRERS_DIR: "referrers"
+STORE_PARTIAL_SUFFIX: ".partial"
+STORE_NIX_GC_ROOT: "nix-gc-root"
+STORE_BUILD_SCRATCH_DIR: "build-scratch"
+STORE_FAILED_SCRATCH_DIR: "failed-scratch"
+STORE_AUTO_CLEAN_STAMP: ".last-auto-clean"
+STORE_STALE_AFTER_SECONDS: 2592000
+STORE_AUTO_CLEAN_AFTER_SECONDS: 86400
+STORE_MAX_GC_METADATA_BYTES: 1048576
+STORE_LEASE_NAME_MAX: 256
 
-STORE_OPTIMIZE_SEQUENCE :: shared ProcessSequence{next: 0}
-STORE_GC_QUARANTINE_SEQUENCE :: shared ProcessSequence{next: 0}
+STORE_OPTIMIZE_SEQUENCE: shared ProcessSequence{next: 0}
+STORE_GC_QUARANTINE_SEQUENCE: shared ProcessSequence{next: 0}
 
 // Active and stale executable leases.
-struct LeaseInventory {
+LeaseInventory: struct {
     active: Int
     stale: Int
 }
 
 // The audit projection: every committed entry and the lease inventory.
-struct AuditSnapshot {
+AuditSnapshot: struct {
     entries: [StoreEntry]
     leases: LeaseInventory
 }
@@ -40,25 +40,25 @@ struct AuditSnapshot {
 // The package records of this root (the checked model listing). The Rust
 // process memo keyed by the WAL identity stamp is a performance cache only;
 // every call reads the committed projection.
-fn store_list_unlocked(roots: HangarRoots) -> [StoreEntry] StoreError! {
+store_list_unlocked: fn(roots: HangarRoots) -> [StoreEntry] StoreError! {
     pkg_store_list_checked(roots)
 }
 
 // Inspect package projections without taking a lock or replaying journals.
 // Health/reporting paths use this so observation cannot create or repair
 // store state.
-fn store_list_read_only(roots: HangarRoots) -> [StoreEntry] Never! {
+store_list_read_only: fn(roots: HangarRoots) -> [StoreEntry] Never! {
     pkg_store_list(roots)
 }
 
 // Strictly read the committed package projection without taking the Hangar
 // lock or replaying a migration. Audit uses this boundary so observation
 // cannot publish a repaired projection as a side effect.
-fn store_list_read_only_checked(roots: HangarRoots) -> [StoreEntry] StoreError! {
+store_list_read_only_checked: fn(roots: HangarRoots) -> [StoreEntry] StoreError! {
     pkg_store_list_checked(roots)
 }
 
-fn store_is_hangar_internal_directory(name: String) -> Bool Never! {
+store_is_hangar_internal_directory: fn(name: String) -> Bool Never! {
     if name == {
         "build-scratch" | "failed-scratch" | "objects" | ".stage" | "cas" | "referrers" | "closure-db" | "lifecycle-db" | "quarantine" | "receipts" | "seals" | "stage" | ".archive-stage" | "reproducibility-staging" | "unreproducible" -> true
         else -> false
@@ -68,8 +68,8 @@ fn store_is_hangar_internal_directory(name: String) -> Bool Never! {
 // Read executable-lease ownership without changing the lease directory.
 // Recovery and doctor share the same parser and kernel-lock rule so a lease
 // cannot be healthy to one command and stale to the other.
-fn store_inspect_leases(roots: HangarRoots) -> LeaseInventory StoreError! {
-    stale_flags :: store_lease_nodes_unlocked(roots)
+store_inspect_leases: fn(roots: HangarRoots) -> LeaseInventory StoreError! {
+    stale_flags: store_lease_nodes_unlocked(roots)
     active := 0
     stale := 0
     loop flag in stale_flags {
@@ -84,13 +84,13 @@ fn store_inspect_leases(roots: HangarRoots) -> LeaseInventory StoreError! {
 // Produce the audit projection without a lock, migration, journal replay, or
 // cleanup. A malformed object or committed closure cannot be omitted from a
 // successful report.
-fn store_audit_read_only(verification: &StoreVerification, roots: HangarRoots) -> AuditSnapshot StoreError! {
-    graph :: store_closure_graph_read_only(&verification, roots)
-    entries :: store_list_read_only_checked(roots)
+store_audit_read_only: fn(verification: &StoreVerification, roots: HangarRoots) -> AuditSnapshot StoreError! {
+    graph: store_closure_graph_read_only(&verification, roots)
+    entries: store_list_read_only_checked(roots)
     known := [String: Bool]{}
     loop entry in entries -> known[entry.id] = true
 
-    hangar :: roots.hangar_dir()
+    hangar: roots.hangar_dir()
     if files.list_dir(hangar) == {
         .Ok(directory) -> {
             loop entry in directory {
@@ -111,8 +111,8 @@ fn store_audit_read_only(verification: &StoreVerification, roots: HangarRoots) -
     }
 
     loop entry in entries {
-        record :: graph.records.get(entry.id) ?? return Err(StoreError.InvalidData("closure graph has no package record for `{entry.id}`"))
-        metadata :: files.read(files.join(files.join(hangar, entry.id), "meta.json"))
+        record: graph.records.get(entry.id) ?? return Err(StoreError.InvalidData("closure graph has no package record for `{entry.id}`"))
+        metadata: files.read(files.join(files.join(hangar, entry.id), "meta.json"))
         if metadata != record.package_meta {
             return Err(StoreError.InvalidData("metadata projection for `{entry.id}` disagrees with the committed closure record"))
         }
@@ -124,9 +124,9 @@ fn store_audit_read_only(verification: &StoreVerification, roots: HangarRoots) -
         if entry.envelope.output_hash == "" {
             return Err(StoreError.InvalidData("Hangar object `{entry.id}` has no output digest"))
         }
-        canonical_hangar :: files.canonicalize(hangar) ?? hangar
-        hangar_root :: if store_path_starts_with(entry.out, hangar) || store_path_starts_with(entry.out, canonical_hangar) -> Val(canonical_hangar) else -> None
-        actual :: store_read_only_output_hash(&verification, entry.out, hangar_root, entry.platform_artifact_kind != "") ?? return Err(StoreError.InvalidData("Hangar object `{entry.id}` could not be hashed: {err.message()}"))
+        canonical_hangar: files.canonicalize(hangar) ?? hangar
+        hangar_root: if store_path_starts_with(entry.out, hangar) || store_path_starts_with(entry.out, canonical_hangar) -> Val(canonical_hangar) else -> None
+        actual: store_read_only_output_hash(&verification, entry.out, hangar_root, entry.platform_artifact_kind != "") ?? return Err(StoreError.InvalidData("Hangar object `{entry.id}` could not be hashed: {err.message()}"))
         if actual != entry.envelope.output_hash {
             return Err(StoreError.InvalidData("Hangar object `{entry.id}` failed its content digest: expected {entry.envelope.output_hash}, got {actual}"))
         }
@@ -139,7 +139,7 @@ fn store_audit_read_only(verification: &StoreVerification, roots: HangarRoots) -
 }
 
 // The package record ids of `graph` in Rust `BTreeMap` order.
-fn store_sorted_record_ids(graph: ClosureGraph) -> [String] Never! {
+store_sorted_record_ids: fn(graph: ClosureGraph) -> [String] Never! {
     ids := graph.records.keys().to_list()
     &ids.sort()
     ids
@@ -148,28 +148,28 @@ fn store_sorted_record_ids(graph: ClosureGraph) -> [String] Never! {
 // Listing is a checked engine boundary, not the model-only view: it runs the
 // same legacy closure migration used by verify, clean, and cache reuse so
 // every consumer observes one receipt-bearing projection.
-fn store_list_checked(verification: &StoreVerification, roots: HangarRoots) -> [StoreEntry] StoreError! {
-    hangar_lock :: env_runtime_lock(roots.root, "hangar")
+store_list_checked: fn(verification: &StoreVerification, roots: HangarRoots) -> [StoreEntry] StoreError! {
+    hangar_lock: env_runtime_lock(roots.root, "hangar")
     store_list_checked_unlocked(&verification, roots)
 }
 
 // `store_list_checked` for a caller that already holds the Hangar lock.
-fn store_list_checked_unlocked(verification: &StoreVerification, roots: HangarRoots) -> [StoreEntry] StoreError! {
-    _ :: store_migrate_closure_graph_unlocked(&verification, roots)
-    entries :: store_list_unlocked(roots)
+store_list_checked_unlocked: fn(verification: &StoreVerification, roots: HangarRoots) -> [StoreEntry] StoreError! {
+    _: store_migrate_closure_graph_unlocked(&verification, roots)
+    entries: store_list_unlocked(roots)
     healthy := [StoreEntry]{}
     loop entry in entries {
         if entry.envelope.output_hash == "" {
             return Err(StoreError.InvalidData("Hangar object `{entry.id}` has no output digest"))
         }
-        actual :: if store_try_entry_output_hash(&verification, roots, entry) == {
+        actual: if store_try_entry_output_hash(&verification, roots, entry) == {
             .Ok(actual) -> actual
             .Err(error) -> {
                 if error.message().contains("does not exist") {
                     // Deleted output: drop the dangling record so the
                     // provider realizes the package again instead of failing
                     // every call.
-                    _ :: store_tombstone_closure_record_unlocked(&verification, roots, entry.id)
+                    _: store_tombstone_closure_record_unlocked(&verification, roots, entry.id)
                     next
                 }
                 return Err(StoreError.InvalidData("Hangar object `{entry.id}` could not be verified: {error.message()}"))
@@ -190,8 +190,8 @@ fn store_list_checked_unlocked(verification: &StoreVerification, roots: HangarRo
 // List committed records for an explicit full Hangar audit without verifying
 // outputs; the audit loop must be the only content-hashing authority for
 // `hangar verify`.
-fn store_list_for_full_audit(roots: HangarRoots) -> [StoreEntry] StoreError! {
-    hangar_lock :: env_runtime_lock(roots.root, "hangar")
+store_list_for_full_audit: fn(roots: HangarRoots) -> [StoreEntry] StoreError! {
+    hangar_lock: env_runtime_lock(roots.root, "hangar")
     store_list_unlocked(roots)
 }
 
@@ -199,35 +199,35 @@ fn store_list_for_full_audit(roots: HangarRoots) -> [StoreEntry] StoreError! {
 // Corrupt WAL fails closed as an empty list for compatibility with the
 // historical infallible listing API; integrity-sensitive callers use
 // `store_list_checked`.
-fn store_list(verification: &StoreVerification, roots: HangarRoots) -> [StoreEntry] Never! {
+store_list: fn(verification: &StoreVerification, roots: HangarRoots) -> [StoreEntry] Never! {
     store_list_checked(&verification, roots) ?? [StoreEntry]{}
 }
 
 // Recover every Hangar crash surface under one advisory-lock ownership
 // interval. The unlocked helpers are also used by already-locked operations.
-fn store_recover_hangar(verification: &StoreVerification, roots: HangarRoots) -> Int StoreError! {
-    hangar_lock :: env_runtime_lock(roots.root, "hangar")
+store_recover_hangar: fn(verification: &StoreVerification, roots: HangarRoots) -> Int StoreError! {
+    hangar_lock: env_runtime_lock(roots.root, "hangar")
     store_ensure_real_directory(roots.hangar_dir(), "Hangar root")
-    staging :: AdmissionTransaction.recover_unlocked(roots)
-    reproducibility :: store_recover_certification_staging_unlocked(roots)
-    archive :: store_recover_archive_staging_unlocked(roots)
-    repairs :: store_recover_repair_quarantine_unlocked(&verification, roots)
-    build_debug :: recipe_recover_build_scratch(roots.hangar_dir())
+    staging: AdmissionTransaction.recover_unlocked(roots)
+    reproducibility: store_recover_certification_staging_unlocked(roots)
+    archive: store_recover_archive_staging_unlocked(roots)
+    repairs: store_recover_repair_quarantine_unlocked(&verification, roots)
+    build_debug: recipe_recover_build_scratch(roots.hangar_dir())
     // The authenticated protocol owns both receipt validation and the
     // lease-container sweep. The container lifetime lock is the process-tree
     // authority; the service-owner lock authenticates the handoff but shares
     // the managed-root inode with this recovery lock.
-    protocol :: ExecutableLeaseProtocol.open(roots.root)
-    leases :: protocol.recover_stale_leases()
-    closure :: store_recover_closure_journal_unlocked(&verification, roots)
-    migrated :: store_migrate_closure_graph_unlocked(&verification, roots).migrated
+    protocol: ExecutableLeaseProtocol.open(roots.root)
+    leases: protocol.recover_stale_leases()
+    closure: store_recover_closure_journal_unlocked(&verification, roots)
+    migrated: store_migrate_closure_graph_unlocked(&verification, roots).migrated
     Ok(staging + reproducibility + archive + repairs + build_debug + leases + closure + migrated)
 }
 
 // One staleness flag per live lease node.
-fn store_lease_nodes_unlocked(roots: HangarRoots) -> [Bool] StoreError! {
-    leases :: files.join(roots.root, "leases")
-    metadata :: if files.stat(leases) == {
+store_lease_nodes_unlocked: fn(roots: HangarRoots) -> [Bool] StoreError! {
+    leases: files.join(roots.root, "leases")
+    metadata: if files.stat(leases) == {
         .Ok(metadata) -> metadata
         .Err(error) -> {
             if StoreError.IO(error).is_not_found() -> return Ok([Bool]{})
@@ -239,7 +239,7 @@ fn store_lease_nodes_unlocked(roots: HangarRoots) -> [Bool] StoreError! {
     }
     nodes := [Bool]{}
     loop entry in files.list_dir(leases) {
-        text :: entry.name
+        text: entry.name
         // Executable-lease recovery quarantines are outside the live lease
         // namespace and may remain while antivirus finishes a delete. Audit
         // must not classify the private retry name.
@@ -250,7 +250,7 @@ fn store_lease_nodes_unlocked(roots: HangarRoots) -> [Bool] StoreError! {
         if !store_lease_name_is_valid(text) {
             return Err(StoreError.InvalidData("Hangar lease `{text}` has an invalid identity"))
         }
-        node :: files.stat(entry.path)
+        node: files.stat(entry.path)
         if !node.is_dir && !node.is_symlink && !node.is_file {
             return Err(StoreError.InvalidData("Hangar lease `{entry.path}` is not a supported filesystem node"))
         }
@@ -261,31 +261,31 @@ fn store_lease_nodes_unlocked(roots: HangarRoots) -> [Bool] StoreError! {
 
 // A lease directory is live only while its container lock is held; any
 // other lease node is stale.
-fn store_lease_node_is_stale(path: String, node: Stat) -> Bool StoreError! {
+store_lease_node_is_stale: fn(path: String, node: Stat) -> Bool StoreError! {
     if !node.is_dir || node.is_symlink -> return Ok(true)
-    lock :: files.join(files.join(path, ".locks"), "live.lock")
+    lock: files.join(files.join(path, ".locks"), "live.lock")
     Ok(env_lock_state(lock) != RuntimeLockState.Held)
 }
 
 // `<pid>-<sequence>-<entry id>` with a nonzero pid and a non-empty entry id.
-fn store_lease_name_is_valid(name: String) -> Bool Never! {
-    first :: name.split_once("-") ?? return false
-    pid :: store_parse_decimal(first.before) ?? return false
-    second :: first.after.split_once("-") ?? return false
-    _ :: store_parse_decimal(second.before) ?? return false
+store_lease_name_is_valid: fn(name: String) -> Bool Never! {
+    first: name.split_once("-") ?? return false
+    pid: store_parse_decimal(first.before) ?? return false
+    second: first.after.split_once("-") ?? return false
+    _: store_parse_decimal(second.before) ?? return false
     pid != 0 && pid <= 4294967295 && second.after != ""
 }
 
 // Rust `str::parse::<u64>` over ASCII decimal digits (one leading `+`
 // allowed).
-fn store_parse_decimal(text: String) -> Int? Never! {
-    digits :: text.removeprefix("+")
+store_parse_decimal: fn(text: String) -> Int? Never! {
+    digits: text.removeprefix("+")
     if digits == "" -> return None
     loop byte in digits.bytes() {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         if code < 48 || code > 57 -> return None
     }
-    parsed :: Int.parse(digits) ?? return None
+    parsed: Int.parse(digits) ?? return None
     Val(parsed)
 }
 
@@ -294,8 +294,8 @@ fn store_parse_decimal(text: String) -> Int? Never! {
 // same name+version from different refs don't collide. The version
 // segment is dropped when unknown. Never hash-first: identity for
 // correctness is the lockfile, the directory name is for humans.
-fn store_entry_id(name: String, version: String, reference: String, out: String) -> String Never! {
-    fingerprint :: store_sha256_hex("{reference}\n{out}".bytes())
+store_entry_id: fn(name: String, version: String, reference: String, out: String) -> String Never! {
+    fingerprint: store_sha256_hex("{reference}\n{out}".bytes())
     store_short_entry_id(name, version, fingerprint)
 }
 
@@ -303,7 +303,7 @@ fn store_entry_id(name: String, version: String, reference: String, out: String)
 // Provider outputs are projected into a root-local Hangar path, so hashing
 // that path would make the same locked result look different on every
 // checkout or machine.
-fn store_content_addressed_entry_id(name: String, version: String, reference: String, output_hash: String) -> String Never! {
+store_content_addressed_entry_id: fn(name: String, version: String, reference: String, output_hash: String) -> String Never! {
     canonical := "jet.content-entry.v1".bytes()
     &canonical.push(U8{0})
     store_push_bytes(&canonical, reference.bytes())
@@ -312,8 +312,8 @@ fn store_content_addressed_entry_id(name: String, version: String, reference: St
     store_short_entry_id(name, version, store_sha256_hex(canonical))
 }
 
-fn store_short_entry_id(name: String, version: String, fingerprint: String) -> String Never! {
-    short :: pkg_bytes_text(fingerprint.bytes(), 0, 12)
+store_short_entry_id: fn(name: String, version: String, fingerprint: String) -> String Never! {
+    short: pkg_bytes_text(fingerprint.bytes(), 0, 12)
     if version == "" -> return "{name}-{short}"
     "{name}-{version}-{short}"
 }
@@ -321,8 +321,8 @@ fn store_short_entry_id(name: String, version: String, fingerprint: String) -> S
 // The identity expected for a persisted entry. Provider records whose output
 // is content-addressed use the immutable output digest; legacy records retain
 // the existing local output-path identity until they are rewritten.
-fn store_expected_entry_id(entry: StoreEntry) -> String Never! {
-    content_addressed :: if ProducerRecord.decode(entry.producer_record) == {
+store_expected_entry_id: fn(entry: StoreEntry) -> String Never! {
+    content_addressed: if ProducerRecord.decode(entry.producer_record) == {
         .Ok(producer) -> producer.provider == "nix" || producer.provider == "jetpackage"
         .Err(_) -> false
     }

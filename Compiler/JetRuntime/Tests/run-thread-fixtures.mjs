@@ -42,24 +42,24 @@ if (mode === "assemble") {
   // fixture. Keep its real body unexported and unreachable; omit only that
   // annotation, so nm can require precisely the six ledgered musl imports.
   const complete = sources.map((path) => read(path)
-    .replace(/^#Export\(c\) fn jet_rt_panic_list_bounds/m, "fn jet_rt_panic_list_bounds")
+    .replace(/^#Export\(c\) jet_rt_panic_list_bounds: fn/m, "jet_rt_panic_list_bounds: fn")
     // Scheduler hooks are outside this deliberately thread-only fixture unit.
     .replace(/^    scheduler_thread_detach\(\)\n/m, "")
     .replace(/^    sentry_thread_detach\(\)\n/m, "")
     .replace(/^    if rt_task_panic_publish\(message, message_len, I64\{0\}\) -> return\n/gm, "")
     // This unit has no task scheduler or Text/Collections implementation.
     // Strip only task-publication branches; retain the real root reports.
-    .replace(/^fn trap_native_index_range_stop\(\) \{\n[\s\S]*?^\}/m,
-      "fn trap_native_index_range_stop() { trap_native_index_range_root() }")
-    .replace(/^#Export\(c\) fn jet_rt_panic_overflow\(\) \{\n[\s\S]*?^    if published -> return\n/m,
-      "#Export(c) fn jet_rt_panic_overflow() {\n")
+    .replace(/^trap_native_index_range_stop: fn\(\) \{\n[\s\S]*?^\}/m,
+      "trap_native_index_range_stop: fn() { trap_native_index_range_root() }")
+    .replace(/^#Export\(c\) jet_rt_panic_overflow: fn\(\) \{\n[\s\S]*?^    if published -> return\n/m,
+      "#Export(c) jet_rt_panic_overflow: fn() {\n")
     .replace(/^    \/\/ Outcome\.rs:2463-2466[\s\S]*?^    if published -> return\n/m, "")
     .replace(/^        if \(jet_scheduler_native_propagate\(\) != I64\{0\}\) -> return\n/gm, "")
   ).join("\n");
   // The Shared factory, wrapper, import and private address intrinsic form
   // one explicit block. They belong only to the actual-Shared fixture, never
   // to the standalone musl/Jet witness or its pthread-only import census.
-  const sharedBlock = /(?:\/\/ Interim Shared ABI import dies at L8a-4[\s\S]*?)?^#Export\(c\) fn jet_rt_tls_shared_destructor[\s\S]*?(?=^fn thread_tls_destroy)/m;
+  const sharedBlock = /(?:\/\/ Interim Shared ABI import dies at L8a-4[\s\S]*?)?^#Export\(c\) jet_rt_tls_shared_destructor: fn[\s\S]*?(?=^thread_tls_destroy: fn)/m;
   if (!sharedBlock.test(complete)) throw Error("missing Shared TLS source block");
   const unit = complete.replace(sharedBlock, "");
   const shared = read("Compiler/JetRuntime/sources.list").split("\n").map(path => path.trim())
@@ -67,7 +67,7 @@ if (mode === "assemble") {
     + "\n" + read("Compiler/JetRuntime/Tests/Fragments.fixture/SharedThreadTests.jet");
   // Duplicate #Export(c) names are fatal in the good and shared fixture units.
   for (const text of [unit, shared]) {
-    const names = [...text.matchAll(/^#Export\(c\)\s+fn\s+(\w+)\(/gm)].map((match) => match[1]);
+    const names = [...text.matchAll(/^#Export\(c\)\s+(\w+): fn\(/gm)].map((match) => match[1]);
     if (new Set(names).size !== names.length) throw Error("duplicate fixture exports");
   }
   mkdirSync(join(out, "shared/Source"), { recursive: true });
@@ -80,8 +80,8 @@ if (mode === "assemble") {
   // Real malformed checked inputs: retaining the intrinsic requires the
   // driver to reject a missing C entry or an entry with a different ABI.
   for (const [name, source] of [
-    ["missing", unit.replace(/^(#Export\(c\)\s+fn )jet_rt_thread_entry(?=\()/m, "$1fixture_wrong_entry")],
-    ["signature", unit.replace("fn jet_rt_thread_entry(start: I64)", "fn jet_rt_thread_entry(start: I64, _extra: I64)")],
+    ["missing", unit.replace(/^(#Export\(c\)\s+)jet_rt_thread_entry(?=: fn\()/m, "$1fixture_wrong_entry")],
+    ["signature", unit.replace("jet_rt_thread_entry: fn(start: I64)", "jet_rt_thread_entry: fn(start: I64, _extra: I64)")],
   ]) {
     mkdirSync(join(out, name, "Source"), { recursive: true });
     // The unused extra word stays semantically valid so refusal must come

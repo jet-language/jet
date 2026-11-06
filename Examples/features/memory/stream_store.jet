@@ -3,18 +3,18 @@
 // written once and not read again soon. On x86-64 a four- or eight-byte value
 // is stored with `movnti`; narrower values and structs use an ordinary store.
 // Either way the program sees exactly the values it stored.
-use mem :: core.mem
+use mem: core.mem
 
-struct Pair {
+Pair: struct {
     a: Int
     b: Float
 }
 
-fn squares(out: &[Float]) {
+squares: fn(out: &[Float]) {
     loop index in 0..<out.len() -> mem.stream_store(&out[index], out[index] * out[index])
 }
 
-fn run() {
+run: fn() {
     floats := [Float]{1.5, 2.5, 3.5}
     squares(&floats)
     print(floats)

@@ -4,16 +4,16 @@
 // remains the detailed diagnostic surface, and this selects the facts that
 // answer the common provenance question in one screen.
 
-struct WhyLocation {
+WhyLocation: struct {
     path: String
     line: Int?
     text: String?
 
-    fn not_found() -> WhyLocation Never! {
+    not_found: fn() -> WhyLocation Never! {
         WhyLocation{path: "not found", line: None, text: None}
     }
 
-    fn to_tree(self) -> Dyn Never! {
+    to_tree: fn(self) -> Dyn Never! {
         object := [String: Dyn]{}
         object["path"] = Dyn.Text(self.path.copy())
         object["line"] = store_explain_optional_int(self.line)
@@ -25,12 +25,12 @@ struct WhyLocation {
     }
 }
 
-struct WhyRequesting {
+WhyRequesting: struct {
     env_file: WhyLocation
     lock_file: WhyLocation
 }
 
-struct WhyOrigin {
+WhyOrigin: struct {
     catalog: String
     endpoint: String
     cache_endpoint: String
@@ -39,17 +39,17 @@ struct WhyOrigin {
     source_digest: String
 }
 
-struct WhyTrust {
+WhyTrust: struct {
     grade: String
     reason: String
 }
 
-struct WhyDisk {
+WhyDisk: struct {
     bytes: Int?
     objects: Int
 }
 
-struct PackageWhy {
+PackageWhy: struct {
     query: String
     package: String
     available: Bool
@@ -60,8 +60,8 @@ struct PackageWhy {
     dependents: [String]
     receipt: String
 
-    fn from_explain(roots: HangarRoots, explanation: PackageExplain) -> PackageWhy StoreError! {
-        package :: if explanation.entry == {
+    from_explain: fn(roots: HangarRoots, explanation: PackageExplain) -> PackageWhy StoreError! {
+        package: if explanation.entry == {
             .Val(entry) -> entry.name
             .None -> store_explain_package_name(explanation.query)
         }
@@ -74,7 +74,7 @@ struct PackageWhy {
             }
             .None -> {}
         }
-        requesting :: store_why_requesting_projection(store_sorted_unique(names), store_sorted_unique(qualified))
+        requesting: store_why_requesting_projection(store_sorted_unique(names), store_sorted_unique(qualified))
         provider := ""
         facts := [String: String]{}
         source := ""
@@ -108,7 +108,7 @@ struct PackageWhy {
         })
     }
 
-    fn to_json(self) -> String ReportError! {
+    to_json: fn(self) -> String ReportError! {
         requesting := [String: Dyn]{}
         requesting["env_file"] = self.requesting.env_file.to_tree()
         requesting["lock_file"] = self.requesting.lock_file.to_tree()
@@ -138,9 +138,9 @@ struct PackageWhy {
         StatusEnvelope.new("why", true).with_field("why", Dyn.Object(payload)).json()
     }
 
-    fn text(self) -> String Never! {
-        dependents :: if self.dependents.len() == 0 -> "-" else -> self.dependents.join(", ")
-        disk :: if self.disk.bytes == {
+    text: fn(self) -> String Never! {
+        dependents: if self.dependents.len() == 0 -> "-" else -> self.dependents.join(", ")
+        disk: if self.disk.bytes == {
             .Val(bytes) -> "{bytes} B ({self.disk.objects} closure objects)"
             .None -> if self.disk.objects > 0 -> "not recorded ({self.disk.objects} closure objects)" else -> "not recorded"
         }
@@ -155,42 +155,42 @@ struct PackageWhy {
 
 // The facts on the one-screen `why` surface; read-only like the detailed
 // explanation it projects.
-fn store_why_package(verification: &StoreVerification, roots: HangarRoots, query: String) -> PackageWhy? StoreError! {
-    found :: store_explain_package(&verification, roots, query, ExplainLens.All)
-    explanation :: found ?? return Ok(None)
+store_why_package: fn(verification: &StoreVerification, roots: HangarRoots, query: String) -> PackageWhy? StoreError! {
+    found: store_explain_package(&verification, roots, query, ExplainLens.All)
+    explanation: found ?? return Ok(None)
     Ok(Val(PackageWhy.from_explain(roots, explanation)))
 }
 
 // The nearest `env.jet` line and lock line that request the package.
-fn store_why_requesting_projection(names: [String], qualified: [String]) -> WhyRequesting StoreError! {
-    cwd :: sys.current_dir() ?? "."
-    env_file :: store_why_source_location(store_why_nearest_real_file(cwd, ENV_FILE), names, qualified, false)
-    lock_path :: store_nearest_lock_path(cwd)
-    lock_file :: store_why_source_location(lock_path, names, qualified, true)
+store_why_requesting_projection: fn(names: [String], qualified: [String]) -> WhyRequesting StoreError! {
+    cwd: sys.current_dir() ?? "."
+    env_file: store_why_source_location(store_why_nearest_real_file(cwd, ENV_FILE), names, qualified, false)
+    lock_path: store_nearest_lock_path(cwd)
+    lock_file: store_why_source_location(lock_path, names, qualified, true)
     Ok(WhyRequesting{env_file: env_file, lock_file: lock_file})
 }
 
 // The first regular, non-linked `name` in `start` or an ancestor.
-fn store_why_nearest_real_file(start: String, name: String) -> String? Never! {
+store_why_nearest_real_file: fn(start: String, name: String) -> String? Never! {
     current := start
     loop {
-        candidate :: files.join(current, name)
+        candidate: files.join(current, name)
         if files.stat(candidate) == {
             .Ok(info) -> {
                 if info.is_file && !info.is_symlink -> return Val(candidate)
             }
             .Err(_) -> {}
         }
-        parent :: files.dirname(current)
+        parent: files.dirname(current)
         if parent == "" || parent == current -> return None
         current = parent
     }
 }
 
-fn store_why_source_location(path: String?, names: [String], qualified: [String], lock: Bool) -> WhyLocation Never! {
-    found_path :: path ?? return WhyLocation.not_found()
-    raw :: files.read(found_path) ?? return WhyLocation{path: found_path, line: None, text: None}
-    found :: if lock -> store_why_lock_line(raw, names, qualified) else -> store_why_source_line(raw, names, qualified)
+store_why_source_location: fn(path: String?, names: [String], qualified: [String], lock: Bool) -> WhyLocation Never! {
+    found_path: path ?? return WhyLocation.not_found()
+    raw: files.read(found_path) ?? return WhyLocation{path: found_path, line: None, text: None}
+    found: if lock -> store_why_lock_line(raw, names, qualified) else -> store_why_source_line(raw, names, qualified)
     if found == {
         .Val(hit) -> WhyLocation{path: found_path, line: Val(hit.line), text: Val(hit.text)}
         .None -> WhyLocation{path: found_path, line: None, text: None}
@@ -198,13 +198,13 @@ fn store_why_source_location(path: String?, names: [String], qualified: [String]
 }
 
 // A matched source line: 1-based number and trimmed text.
-struct WhyLine {
+WhyLine: struct {
     line: Int
     text: String
 }
 
-fn store_why_source_line(raw: String, names: [String], qualified: [String]) -> WhyLine? Never! {
-    lines :: store_text_lines(raw)
+store_why_source_line: fn(raw: String, names: [String], qualified: [String]) -> WhyLine? Never! {
+    lines: store_text_lines(raw)
     loop index in 0..<lines.len() {
         if store_why_source_line_matches(lines[index], names, qualified) -> return Val(WhyLine{line: index + 1, text: lines[index].trim()})
     }
@@ -213,12 +213,12 @@ fn store_why_source_line(raw: String, names: [String], qualified: [String]) -> W
 
 // The requesting line inside a `[[package]]` block: its `name = "…"` line,
 // else the first line naming a qualified reference.
-fn store_why_lock_line(raw: String, names: [String], qualified: [String]) -> WhyLine? Never! {
-    lines :: store_text_lines(raw)
+store_why_lock_line: fn(raw: String, names: [String], qualified: [String]) -> WhyLine? Never! {
+    lines: store_text_lines(raw)
     block := [WhyLine]{}
     in_block := false
     loop index in 0..<lines.len() {
-        line :: lines[index]
+        line: lines[index]
         if line.trim() == "[[package]]" {
             if in_block {
                 if store_why_matching_lock_block(block, names, qualified) == {
@@ -235,9 +235,9 @@ fn store_why_lock_line(raw: String, names: [String], qualified: [String]) -> Why
     store_why_matching_lock_block(block, names, qualified)
 }
 
-fn store_why_matching_lock_block(block: [WhyLine], names: [String], qualified: [String]) -> WhyLine? Never! {
+store_why_matching_lock_block: fn(block: [WhyLine], names: [String], qualified: [String]) -> WhyLine? Never! {
     loop entry in block {
-        lock_name :: store_why_lock_name(entry.text) ?? next
+        lock_name: store_why_lock_name(entry.text) ?? next
         loop name in names {
             if name != "" && lock_name == name -> return Val(WhyLine{line: entry.line, text: entry.text.trim()})
         }
@@ -252,8 +252,8 @@ fn store_why_matching_lock_block(block: [WhyLine], names: [String], qualified: [
 
 // A source line names a package when a whole package token matches outside
 // a `//` comment.
-fn store_why_source_line_matches(line: String, names: [String], qualified: [String]) -> Bool Never! {
-    code :: if line.split_once("//") == {
+store_why_source_line_matches: fn(line: String, names: [String], qualified: [String]) -> Bool Never! {
+    code: if line.split_once("//") == {
         .Val(parts) -> parts.before
         .None -> line
     }
@@ -267,18 +267,18 @@ fn store_why_source_line_matches(line: String, names: [String], qualified: [Stri
 }
 
 // `needle` occurs in `haystack` not flanked by package-token characters.
-fn store_why_contains_package_token(haystack: String, needle: String) -> Bool Never! {
-    raw :: haystack.bytes()
-    pattern :: needle.bytes()
+store_why_contains_package_token: fn(haystack: String, needle: String) -> Bool Never! {
+    raw: haystack.bytes()
+    pattern: needle.bytes()
     offset := 0
     loop offset + pattern.len() <= raw.len() {
         if !pkg_bytes_starts_with(raw, offset, pattern) {
             offset += 1
             next
         }
-        end :: offset + pattern.len()
-        before :: offset > 0 && store_why_package_token_byte(Int.from_u8(raw[offset - 1]))
-        after :: end < raw.len() && store_why_package_token_byte(Int.from_u8(raw[end]))
+        end: offset + pattern.len()
+        before: offset > 0 && store_why_package_token_byte(Int.from_u8(raw[offset - 1]))
+        after: end < raw.len() && store_why_package_token_byte(Int.from_u8(raw[end]))
         if !before && !after -> return true
         offset = end
     }
@@ -287,19 +287,19 @@ fn store_why_contains_package_token(haystack: String, needle: String) -> Bool Ne
 
 // ASCII alphanumerics, `_`, and `-` continue a package token; any other
 // byte (including every non-ASCII lead or continuation byte) does not.
-fn store_why_package_token_byte(code: Int) -> Bool Never! {
+store_why_package_token_byte: fn(code: Int) -> Bool Never! {
     (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95 || code == 45
 }
 
 // The value of a `name = "…"` lock line.
-fn store_why_lock_name(line: String) -> String? Never! {
-    trimmed :: line.trim()
+store_why_lock_name: fn(line: String) -> String? Never! {
+    trimmed: line.trim()
     if !trimmed.starts_with("name = \"") || !trimmed.ends_with("\"") || trimmed.bytes().len() < 9 -> return None
     Val(trimmed.removeprefix("name = \"").removesuffix("\""))
 }
 
-fn store_why_location_text(location: WhyLocation) -> String Never! {
-    line :: location.line ?? return location.path
+store_why_location_text: fn(location: WhyLocation) -> String Never! {
+    line: location.line ?? return location.path
     if location.text == {
         .Val(text) -> "{location.path}:{line} ({store_why_compact_line(text)})"
         .None -> "{location.path}:{line}"
@@ -307,7 +307,7 @@ fn store_why_location_text(location: WhyLocation) -> String Never! {
 }
 
 // At most 120 characters, then an ellipsis.
-fn store_why_compact_line(line: String) -> String Never! {
+store_why_compact_line: fn(line: String) -> String Never! {
     kept := ""
     count := 0
     loop scalar in line.chars() {
@@ -320,15 +320,15 @@ fn store_why_compact_line(line: String) -> String Never! {
 
 // Where the bytes came from: the catalog, index endpoint, cache endpoint,
 // signature chain, and source identity recorded by the producer.
-fn store_why_origin_projection(roots: HangarRoots, provider: String, fact_map: [String: String], source: String, source_digest: String) -> WhyOrigin Never! {
-    tier :: fact_map.get("nix.index.tier")
-    catalog :: store_why_catalog_origin(tier, fact_map, provider)
-    nix :: provider == "nix"
+store_why_origin_projection: fn(roots: HangarRoots, provider: String, fact_map: [String: String], source: String, source_digest: String) -> WhyOrigin Never! {
+    tier: fact_map.get("nix.index.tier")
+    catalog: store_why_catalog_origin(tier, fact_map, provider)
+    nix: provider == "nix"
     cache_endpoint := fact_map.get("nix.cache.endpoint")
     if cache_endpoint == None && nix -> cache_endpoint = store_why_config_value(roots, "config/nix-cache-v1.endpoint")
     if cache_endpoint == None && nix -> cache_endpoint = Val("https://cache.nixos.org")
     if cache_endpoint == None -> cache_endpoint = fact_map.get("source.url")
-    cache :: cache_endpoint ?? "not recorded"
+    cache: cache_endpoint ?? "not recorded"
     // A signed-index endpoint is the strongest catalog origin; otherwise the
     // configured cache endpoint still answers where the bytes came from.
     endpoint := fact_map.get("nix.index.endpoint")
@@ -353,13 +353,13 @@ fn store_why_origin_projection(roots: HangarRoots, provider: String, fact_map: [
     }
 }
 
-fn store_why_catalog_origin(tier: String?, fact_map: [String: String], provider: String) -> String Never! {
+store_why_catalog_origin: fn(tier: String?, fact_map: [String: String], provider: String) -> String Never! {
     if tier == {
         .Val(found_tier) -> {
-            proof :: fact_map.get("nix.index.proof.v1") ?? return found_tier
-            channel :: store_why_json_string_field(proof, "channel") ?? return found_tier
-            revision :: store_why_json_string_field(proof, "revision") ?? return found_tier
-            system :: store_why_json_string_field(proof, "system") ?? return found_tier
+            proof: fact_map.get("nix.index.proof.v1") ?? return found_tier
+            channel: store_why_json_string_field(proof, "channel") ?? return found_tier
+            revision: store_why_json_string_field(proof, "revision") ?? return found_tier
+            system: store_why_json_string_field(proof, "system") ?? return found_tier
             "{found_tier} ({channel}@{revision} / {system})"
         }
         .None -> {
@@ -377,34 +377,34 @@ fn store_why_catalog_origin(tier: String?, fact_map: [String: String], provider:
     }
 }
 
-fn store_why_json_string_field(raw: String, field: String) -> String? Never! {
-    value :: json.parse(raw) ?? return None
-    object :: pkg_json_object(value) ?? return None
+store_why_json_string_field: fn(raw: String, field: String) -> String? Never! {
+    value: json.parse(raw) ?? return None
+    object: pkg_json_object(value) ?? return None
     store_explain_json_text(object, field)
 }
 
 // A trimmed, non-empty regular config file under the Hangar root.
-fn store_why_config_value(roots: HangarRoots, relative: String) -> String? Never! {
-    path :: files.join(roots.root, relative)
-    info :: files.stat(path) ?? return None
+store_why_config_value: fn(roots: HangarRoots, relative: String) -> String? Never! {
+    path: files.join(roots.root, relative)
+    info: files.stat(path) ?? return None
     if info.is_symlink || !info.is_file -> return None
-    value :: (files.read(path) ?? return None).trim()
+    value: (files.read(path) ?? return None).trim()
     if value == "" -> return None
     Val(value)
 }
 
 // The admission grade the producer facts support.
-fn store_why_trust_projection(provider: String, fact_map: [String: String]) -> WhyTrust Never! {
-    tier :: fact_map.get("nix.index.tier") ?? ""
-    source_kind :: fact_map.get("source.kind") ?? ""
-    index_trust :: fact_map.get("nix.index.trust") ?? ""
-    local_mapping :: tier == "local-unofficial" || source_kind == "local-unofficial-catalog" || (provider == "nix" && index_trust == "unverified")
+store_why_trust_projection: fn(provider: String, fact_map: [String: String]) -> WhyTrust Never! {
+    tier: fact_map.get("nix.index.tier") ?? ""
+    source_kind: fact_map.get("source.kind") ?? ""
+    index_trust: fact_map.get("nix.index.trust") ?? ""
+    local_mapping: tier == "local-unofficial" || source_kind == "local-unofficial-catalog" || (provider == "nix" && index_trust == "unverified")
     if local_mapping {
-        native_recipe :: provider == "jetpackage" && source_kind == "local-unofficial-catalog"
-        reason :: if native_recipe -> "native recipe mapping is unverified; artifact bytes remain SHA-256-verified" else -> "name-to-store-path mapping is unverified; Nix cache bytes remain signature-verified"
+        native_recipe: provider == "jetpackage" && source_kind == "local-unofficial-catalog"
+        reason: if native_recipe -> "native recipe mapping is unverified; artifact bytes remain SHA-256-verified" else -> "name-to-store-path mapping is unverified; Nix cache bytes remain signature-verified"
         return WhyTrust{grade: "unverified-mapping", reason: reason}
     }
-    chain_present :: (fact_map.get("nix.index.signature-chain") ?? "") == "present"
+    chain_present: (fact_map.get("nix.index.signature-chain") ?? "") == "present"
     if (tier == "official-signed" && chain_present) || (index_trust == "verified" && chain_present) {
         return WhyTrust{grade: "signed", reason: "the catalog and signature chain are verified"}
     }
@@ -421,7 +421,7 @@ fn store_why_trust_projection(provider: String, fact_map: [String: String]) -> W
 
 // Bytes on disk of the known local closure objects, counted once per path.
 // Any unmeasurable object makes the total unknown.
-fn store_why_disk_projection(graph: ExplainGraph) -> WhyDisk Never! {
+store_why_disk_projection: fn(graph: ExplainGraph) -> WhyDisk Never! {
     paths := [String]{}
     bytes := 0
     objects := 0
@@ -431,18 +431,18 @@ fn store_why_disk_projection(graph: ExplainGraph) -> WhyDisk Never! {
         if paths.contains(object.path) -> next
         &paths.push(object.path)
         objects += 1
-        size :: store_why_disk_size(object.path) ?? {
+        size: store_why_disk_size(object.path) ?? {
             measurable = false
             next
         }
         bytes += size
     }
-    total :: if objects > 0 && measurable -> Int?{Val(bytes)} else -> Int?{None}
+    total: if objects > 0 && measurable -> Int?{Val(bytes)} else -> Int?{None}
     WhyDisk{bytes: total, objects: objects}
 }
 
-fn store_why_disk_size(path: String) -> Int? Never! {
-    info :: files.stat(path) ?? return None
+store_why_disk_size: fn(path: String) -> Int? Never! {
+    info: files.stat(path) ?? return None
     if info.is_symlink -> return None
     if info.is_dir -> return Val(store_dir_size(path))
     if info.is_file -> return Val(info.size)
@@ -450,9 +450,9 @@ fn store_why_disk_size(path: String) -> Int? Never! {
 }
 
 // Every owner of a direct or transitive referrer, sorted and unique.
-fn store_why_dependent_projection(graph: ExplainGraph) -> [String] Never! {
+store_why_dependent_projection: fn(graph: ExplainGraph) -> [String] Never! {
     owners := [String]{}
-    views :: [[ExplainObject]]{graph.referrers, graph.direct_referrers}
+    views: [[ExplainObject]]{graph.referrers, graph.direct_referrers}
     loop view in views {
         loop object in view {
             loop owner in object.owners -> &owners.push(owner)

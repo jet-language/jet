@@ -3,7 +3,7 @@
 // `.` and any `..` are refused before any handle is opened.
 use jetpack_nix.[NixError, NixImportMetadata, nix_import_admit_source, nix_import_path_components]
 
-fn nix_test_import_refused(relative: String) -> Bool {
+nix_test_import_refused: fn(relative: String) -> Bool {
     if nix_import_path_components(relative) == {
         .Ok(_) -> false
         .Err(error) -> error == NixError.ImportPath
@@ -15,21 +15,21 @@ fn nix_test_import_refused(relative: String) -> Bool {
     assert_eq(nix_import_path_components("sub//./nix/") ?? panic("normalized relative path"), [String]{"sub", "nix"})
     assert_eq(nix_import_path_components("a/.") ?? panic("trailing dot"), [String]{"a"})
     assert_eq(nix_import_path_components("...") ?? panic("dots name"), [String]{"..."})
-    refusals :: [String]{"", "/etc/passwd", "./shell.nix", ".", "a/../b", "..", "sub\\shell.nix"}
+    refusals: [String]{"", "/etc/passwd", "./shell.nix", ".", "a/../b", "..", "sub\\shell.nix"}
     loop refused in refusals {
         assert(nix_test_import_refused(refused))
     }
 }
 
 #Test("nix import admission enforces regular files within the byte limit") {
-    at_limit :: NixImportMetadata{regular_file: true, length: 1048576}
+    at_limit: NixImportMetadata{regular_file: true, length: 1048576}
     at_limit.admit() ?? panic("a file at the limit is admitted")
-    directory :: NixImportMetadata{regular_file: false, length: 1}
+    directory: NixImportMetadata{regular_file: false, length: 1}
     if directory.admit() == {
         .Ok(_) -> panic("a directory import must be refused")
         .Err(error) -> assert_eq(error.message(), "project import is not a regular file")
     }
-    oversized :: NixImportMetadata{regular_file: true, length: 1048577}
+    oversized: NixImportMetadata{regular_file: true, length: 1048577}
     if oversized.admit() == {
         .Ok(_) -> panic("an oversized import must be refused")
         .Err(error) -> assert_eq(error.message(), "project import exceeds the 1 MiB evaluator limit")

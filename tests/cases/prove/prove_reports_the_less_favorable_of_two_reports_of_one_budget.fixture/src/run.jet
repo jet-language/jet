@@ -1,6 +1,6 @@
-module system.hello { target: linux.x64 }
+system.hello: module { target: linux.x64 }
 
-module perf.receipt {
+perf.receipt: module {
     budgets: [Budget]{{name: "binary", scope: .Target("hello"), metric: .BinarySize, provider: .BuildArtifact("hello"), comparison: .Absolute, limit: .AtMost(1MiB), applies: BudgetApplies{
         targets: .Only([.Class(.Native)]),
         profiles: .Only([.Dev])
@@ -13,4 +13,4 @@ module perf.receipt {
     }}}
 }
 
-fn run() { print("hello, world") }
+run: fn() { print("hello, world") }

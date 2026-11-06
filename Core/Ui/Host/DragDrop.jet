@@ -1,10 +1,10 @@
 use {
-    core :: core
+    core: core
     core.ui.host.[UIGrantedPath, UIHostError, UINodeID]
 }
 
 // core.ui.host.drag_drop — typed file/text drop events.
-enum UIDragPhase {
+UIDragPhase: enum {
     Enter
     Over
     Drop
@@ -12,13 +12,13 @@ enum UIDragPhase {
     Cancel
 }
 
-enum UIDragOperation {
+UIDragOperation: enum {
     Copy
     Move
     Link
 }
 
-enum UIDropItem {
+UIDropItem: enum {
     Text(value: String)
     URI(value: String)
     File(value: UIGrantedPath)
@@ -26,7 +26,7 @@ enum UIDropItem {
 
 // `operation` is None when the browser offers no operation (`none`); a drop
 // with no operation is delivered as Cancel (D-UI-DRAG-NONE1=A).
-struct UIDragEvent {
+UIDragEvent: struct {
     target: UINodeID
     phase: UIDragPhase
     operation: UIDragOperation?
@@ -41,24 +41,24 @@ struct UIDragEvent {
 // `#` comment is one URI item. A browser item has no native path, so a
 // provider never sends a file. An empty record is the provider's mark that its
 // queue overflowed and dropped events.
-fn poll() -[IO]> UIDragEvent? UIHostError! {
+poll: fn() -[IO]> UIDragEvent? UIHostError! {
     if !core.ui.host.__capability(3) -> return Err(UIHostError.CapabilityUnavailable{capability: "DragDrop"})
-    raw :: core.ui.host.__event_pop(1) ?? return Ok(None)
+    raw: core.ui.host.__event_pop(1) ?? return Ok(None)
     if raw.len() == 0 -> return Err(UIHostError.QueueFull{service: "DragDrop"})
-    fields :: core.ui.host.provider_record_fields(raw) ?? return Err(drag_failure("a drag/drop event is not a provider record"))
+    fields: core.ui.host.provider_record_fields(raw) ?? return Err(drag_failure("a drag/drop event is not a provider record"))
     if fields.len() != 5 -> return Err(drag_failure("a drag/drop event has 5 fields, not {fields.len()}"))
-    operation :: drag_operation(fields[2])
-    phase :: if operation == None && fields[1] == "drop" -> UIDragPhase.Cancel else -> drag_phase(fields[1])
+    operation: drag_operation(fields[2])
+    phase: if operation == None && fields[1] == "drop" -> UIDragPhase.Cancel else -> drag_phase(fields[1])
     items := [UIDropItem]{}
     if fields[3].len() > 0 -> &items.push(UIDropItem.Text{value: fields[3].copy()})
     loop line in fields[4].split("\n") {
-        uri :: line.trim()
+        uri: line.trim()
         if uri.len() > 0 && !uri.starts_with("#") -> &items.push(UIDropItem.URI{value: uri.copy()})
     }
     Ok(Val(UIDragEvent{target: UINodeID{value: fields[0].copy()}, phase: phase, operation: operation, items: items}))
 }
 
-fn drag_phase(event: String) -> UIDragPhase UIHostError! {
+drag_phase: fn(event: String) -> UIDragPhase UIHostError! {
     if event == "dragenter" -> return Ok(UIDragPhase.Enter)
     if event == "dragover" -> return Ok(UIDragPhase.Over)
     if event == "drop" -> return Ok(UIDragPhase.Drop)
@@ -66,7 +66,7 @@ fn drag_phase(event: String) -> UIDragPhase UIHostError! {
     Err(drag_failure("unknown drag/drop event `{event}`"))
 }
 
-fn drag_operation(drop_effect: String) -> UIDragOperation? UIHostError! {
+drag_operation: fn(drop_effect: String) -> UIDragOperation? UIHostError! {
     if drop_effect == "none" -> return Ok(None)
     if drop_effect == "copy" -> return Ok(Val(UIDragOperation.Copy))
     if drop_effect == "move" -> return Ok(Val(UIDragOperation.Move))
@@ -74,6 +74,6 @@ fn drag_operation(drop_effect: String) -> UIDragOperation? UIHostError! {
     Err(drag_failure("unknown drag/drop operation `{drop_effect}`"))
 }
 
-fn drag_failure(message: String) -> UIHostError Never! {
+drag_failure: fn(message: String) -> UIHostError Never! {
     UIHostError.HostFailure{service: "DragDrop", message: message}
 }

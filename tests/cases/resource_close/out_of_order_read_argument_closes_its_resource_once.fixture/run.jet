@@ -1,18 +1,18 @@
-struct Res { name: String }
+Res: struct { name: String }
 impl Res.Close {
-    fn close(^self) { print("close {self.name}") }
+    close: fn(^self) { print("close {self.name}") }
 }
 
-fn show(r: Res, label: String) {
+show: fn(r: Res, label: String) {
     print("{label} {r.name}")
 }
 
-fn show_default(r: Res, width: Int{2}, label: String) {
+show_default: fn(r: Res, width: Int{2}, label: String) {
     print("{label} {r.name} {width}")
 }
 
 impl Res {
-    fn tell(self, into: String?{None}, label: String) {
+    tell: fn(self, into: String?{None}, label: String) {
         print("{label} {self.name} {into ?? "-"}")
     }
 }
@@ -20,14 +20,14 @@ impl Res {
 // A read argument pinned out of declaration order (reordered labels, or a
 // skipped default before a written argument) views its owner; the owner
 // closes once, at its own scope end, after every use.
-fn run() {
+run: fn() {
     a := Res{name: "a"}
     show(label: "reordered", r: a)
     show(label: "again", r: a)
-    b :: Res{name: "b"}
+    b: Res{name: "b"}
     show_default(b, label: "skipped")
     show_default(b, label: "skipped again")
-    c :: Res{name: "c"}
+    c: Res{name: "c"}
     c.tell(label: "method")
     c.tell(label: "method again")
     print("end")

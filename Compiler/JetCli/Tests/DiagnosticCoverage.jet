@@ -9,31 +9,31 @@ use {
         JetCLICoverageBaseline, JetCLICoverageBaselineRow, JetCLICoverageFact, JetCLICoverageFacts,
         jet_cli_coverage_baseline, jet_cli_coverage_facts, jet_cli_coverage_validate, jet_cli_toolchain_root,
     ]
-    cli_files :: core.files
+    cli_files: core.files
 }
 
-fn coverage_facts() -> [JetCLICoverageFact] Never! {
+coverage_facts: fn() -> [JetCLICoverageFact] Never! {
     if jet_cli_coverage_facts() == {
         .Facts(facts) -> facts
         .Invalid(message) -> panic("registry coverage facts: {message}")
     }
 }
 
-fn coverage_rows(text: String) -> [JetCLICoverageBaselineRow] Never! {
+coverage_rows: fn(text: String) -> [JetCLICoverageBaselineRow] Never! {
     if jet_cli_coverage_baseline(text) == {
         .Rows(rows) -> rows
         .Invalid(message) -> panic("coverage baseline: {message}")
     }
 }
 
-fn coverage_baseline_error(text: String) -> String Never! {
+coverage_baseline_error: fn(text: String) -> String Never! {
     if jet_cli_coverage_baseline(text) == {
         .Rows(_) -> panic("coverage baseline `{text}` must be refused")
         .Invalid(message) -> message
     }
 }
 
-fn coverage_fact(plane: String, edit: Int, reason: Int, uncovered: Int) -> JetCLICoverageFact Never! {
+coverage_fact: fn(plane: String, edit: Int, reason: Int, uncovered: Int) -> JetCLICoverageFact Never! {
     JetCLICoverageFact{plane: plane, rows: edit + reason + uncovered, edit_covered: edit, reason_covered: reason, behavior_reasons: reason, design_reasons: 0, ambiguous_reasons: 0, uncovered: uncovered}
 }
 
@@ -52,7 +52,7 @@ fn coverage_fact(plane: String, edit: Int, reason: Int, uncovered: Int) -> JetCL
 }
 
 #Test("diagnostic coverage: edit and reason counts stay apart and add up per plane") {
-    facts :: coverage_facts()
+    facts: coverage_facts()
     assert(facts.len() > 0)
     loop (index, fact) in facts {
         if index > 0 -> assert(facts[index - 1].plane < fact.plane)
@@ -105,18 +105,18 @@ fn coverage_fact(plane: String, edit: Int, reason: Int, uncovered: Int) -> JetCL
 }
 
 #Test("diagnostic coverage: the registry meets its checked-in floor") {
-    root :: if jet_cli_toolchain_root(cli_files.cwd() ?? ".") == {
+    root: if jet_cli_toolchain_root(cli_files.cwd() ?? ".") == {
         .Found(found) -> found
         .Missing(what, fix) -> panic("{what}; {fix}")
     }
-    text :: cli_files.read("{root}/tests/diagnostics_coverage_baseline.txt") ?? panic("read the coverage baseline: {err}")
-    baseline :: coverage_rows(text)
+    text: cli_files.read("{root}/tests/diagnostics_coverage_baseline.txt") ?? panic("read the coverage baseline: {err}")
+    baseline: coverage_rows(text)
     assert(baseline.len() > 0)
     if jet_cli_coverage_validate(baseline, coverage_facts()) == .Val(message) -> panic("registry coverage fell below its floor: {message}")
 }
 
 #Test("diagnostic coverage: the guard refuses every kind of regression") {
-    floor :: coverage_rows("# plane edit reason total\nsema 2 3 6\nparse 1 1 2\n")
+    floor: coverage_rows("# plane edit reason total\nsema 2 3 6\nparse 1 1 2\n")
     assert_eq(floor.len(), 2)
     assert_eq(floor[0].plane, "parse")
     // The same counts, more edits, or a new row that is covered all pass.

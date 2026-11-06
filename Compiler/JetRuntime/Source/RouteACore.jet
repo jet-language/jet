@@ -9,14 +9,14 @@
 auth_store_root := I64{0}
 web_live_store_root := I64{0}
 
-fn byte_cell_new() -> I64 {
-    root :: jet_rt_alloc(I64{32}, I64{8})
+byte_cell_new: fn() -> I64 {
+    root: jet_rt_alloc(I64{32}, I64{8})
     thread_zero(root, I64{32})
     root
 }
 
 // runtime-init: 3 when auth_store_root
-#Export(c) fn jet_rt_auth_store_init() {
+#Export(c) jet_rt_auth_store_init: fn() {
     if (auth_store_root != I64{0}) -> return
     #Unsafe("runtime-init runs before any other thread exists") {
         auth_store_root = byte_cell_new()
@@ -24,7 +24,7 @@ fn byte_cell_new() -> I64 {
 }
 
 // runtime-init: 3 when web_live_store_root
-#Export(c) fn jet_rt_web_live_store_init() {
+#Export(c) jet_rt_web_live_store_init: fn() {
     if (web_live_store_root != I64{0}) -> return
     #Unsafe("runtime-init runs before any other thread exists") {
         web_live_store_root = byte_cell_new()
@@ -32,8 +32,8 @@ fn byte_cell_new() -> I64 {
 }
 
 // A fresh List<U8> copy of `length` packed bytes; its data word, length returned.
-fn packed_bytes_out(bytes: I64, length: I64, output: I64) -> I64 {
-    data :: if (length == I64{0}) -> I64{0} else -> jet_rt_alloc(length * RT_HOST_U8_STRIDE, I64{8})
+packed_bytes_out: fn(bytes: I64, length: I64, output: I64) -> I64 {
+    data: if (length == I64{0}) -> I64{0} else -> jet_rt_alloc(length * RT_HOST_U8_STRIDE, I64{8})
     at := I64{0}
     loop at < length {
         host_u8_put(data, at, rt_text_byte(wrapping(bytes + at)))
@@ -44,20 +44,20 @@ fn packed_bytes_out(bytes: I64, length: I64, output: I64) -> I64 {
 }
 
 // A copy of the cell's current bytes.
-fn byte_cell_load(root: I64, output: I64) -> I64 {
+byte_cell_load: fn(root: I64, output: I64) -> I64 {
     sync_mutex_lock(root)
-    length :: packed_bytes_out(rt_text_word(wrapping(root + I64{8})), rt_text_word(wrapping(root + I64{16})), output)
+    length: packed_bytes_out(rt_text_word(wrapping(root + I64{8})), rt_text_word(wrapping(root + I64{16})), output)
     sync_mutex_unlock(root)
     length
 }
 
 // Installs `next` only while the cell still equals `expected`.
-fn byte_cell_replace(root: I64, expected: I64, expected_length: I64, next: I64, next_length: I64) -> Bool {
-    old_length :: if (expected_length < I64{0} || expected == I64{0}) -> I64{0} else -> expected_length
-    new_length :: if (next_length < I64{0} || next == I64{0}) -> I64{0} else -> next_length
+byte_cell_replace: fn(root: I64, expected: I64, expected_length: I64, next: I64, next_length: I64) -> Bool {
+    old_length: if (expected_length < I64{0} || expected == I64{0}) -> I64{0} else -> expected_length
+    new_length: if (next_length < I64{0} || next == I64{0}) -> I64{0} else -> next_length
     sync_mutex_lock(root)
-    data :: rt_text_word(wrapping(root + I64{8}))
-    length :: rt_text_word(wrapping(root + I64{16}))
+    data: rt_text_word(wrapping(root + I64{8}))
+    length: rt_text_word(wrapping(root + I64{16}))
     same := length == old_length
     at := I64{0}
     loop same && at < length {
@@ -68,7 +68,7 @@ fn byte_cell_replace(root: I64, expected: I64, expected_length: I64, next: I64, 
         sync_mutex_unlock(root)
         return false
     }
-    replacement :: if (new_length == I64{0}) -> I64{0} else -> jet_rt_alloc(new_length, I64{1})
+    replacement: if (new_length == I64{0}) -> I64{0} else -> jet_rt_alloc(new_length, I64{1})
     at = I64{0}
     loop at < new_length {
         rt_text_put(wrapping(replacement + at), host_u8_get(next, at))
@@ -81,22 +81,22 @@ fn byte_cell_replace(root: I64, expected: I64, expected_length: I64, next: I64, 
     true
 }
 
-#Export(c) fn jet_auth_store_load(output: I64) -> I64 { byte_cell_load(auth_store_root, output) }
+#Export(c) jet_auth_store_load: fn(output: I64) -> I64 { byte_cell_load(auth_store_root, output) }
 
-#Export(c) fn jet_auth_store_replace(expected: I64, expected_length: I64, next: I64, next_length: I64) -> Bool {
+#Export(c) jet_auth_store_replace: fn(expected: I64, expected_length: I64, next: I64, next_length: I64) -> Bool {
     byte_cell_replace(auth_store_root, expected, expected_length, next, next_length)
 }
 
 // core.web's live-query registry (Core/Web/Web.jet), shared by `app`.
-#Export(c) fn jet_web_live_store_load(output: I64) -> I64 { byte_cell_load(web_live_store_root, output) }
+#Export(c) jet_web_live_store_load: fn(output: I64) -> I64 { byte_cell_load(web_live_store_root, output) }
 
-#Export(c) fn jet_web_live_store_replace(expected: I64, expected_length: I64, next: I64, next_length: I64) -> Bool {
+#Export(c) jet_web_live_store_replace: fn(expected: I64, expected_length: I64, next: I64, next_length: I64) -> Bool {
     byte_cell_replace(web_live_store_root, expected, expected_length, next, next_length)
 }
 
 // std::env::var_os(name) as its encoded bytes, None when unset.
-#Export(c) fn jet_tui_cap_env_bytes(name: I64, some: I64, some_len: I64) -> I64 {
-    value :: host_environment_value(name)
+#Export(c) jet_tui_cap_env_bytes: fn(name: I64, some: I64, some_len: I64) -> I64 {
+    value: host_environment_value(name)
     if (value == I64{0}) -> return I64{0}
     rt_text_store(some_len, packed_bytes_out(value, host_startup_byte_length(value), some))
     I64{1}
@@ -105,25 +105,25 @@ fn byte_cell_replace(root: I64, expected: I64, expected_length: I64, next: I64, 
 // JetDevtoolsEvent::from_parts then jet_devtools_publish_event, which reaches
 // only installed event sinks; the native runtime installs none, so the event
 // has no observer to build for.
-#Export(c) fn jet_job_queue_publish_parts(timestamp_ms: I64, source: I64, kind: I64, entity: I64, fields: I64) {
+#Export(c) jet_job_queue_publish_parts: fn(timestamp_ms: I64, source: I64, kind: I64, entity: I64, fields: I64) {
     _ := jet_int_owned_to_i64(timestamp_ms)
 }
 
 // std::thread::sleep(Duration::from_millis(millis as u64)): nanosleep, resumed
 // with the remainder after EINTR. The controlled scheduler's clock does not
 // advance.
-#Export(c) fn jet_job_queue_sleep_ms(millis: I64) {
-    native :: jet_int_owned_to_i64(millis)
+#Export(c) jet_job_queue_sleep_ms: fn(millis: I64) {
+    native: jet_int_owned_to_i64(millis)
     if (jet_scheduler_native_propagate() != I64{0}) -> return
-    request :: jet_rt_alloc(I64{32}, I64{8})
+    request: jet_rt_alloc(I64{32}, I64{8})
     // u64 millis: floor(millis / 1000) = floor(floor(millis / 2) / 500).
-    seconds :: ((native >> I64{1}).bit_and(I64{9223372036854775807})) /% I64{500}
-    remainder :: wrapping(native - seconds * I64{1000})
+    seconds: ((native >> I64{1}).bit_and(I64{9223372036854775807})) /% I64{500}
+    remainder: wrapping(native - seconds * I64{1000})
     rt_text_store(request, seconds)
     rt_text_store(wrapping(request + I64{8}), remainder * I64{1000000})
     loop {
         if (rt_text_word(request) == I64{0} && rt_text_word(wrapping(request + I64{8})) == I64{0}) -> break
-        result :: host_call(I64{35}, request, request + I64{16}, I64{0})
+        result: host_call(I64{35}, request, request + I64{16}, I64{0})
         if (result != I64{-4}) -> break
         rt_text_store(request, rt_text_word(wrapping(request + I64{16})))
         rt_text_store(wrapping(request + I64{8}), rt_text_word(wrapping(request + I64{24})))
@@ -132,19 +132,19 @@ fn byte_cell_replace(root: I64, expected: I64, expected_length: I64, next: I64, 
 }
 
 // The current host task's flags; no task is None.
-#Export(c) fn jet_scheduler_task_paused(some: I64) -> I64 {
-    control :: scheduler_control_current()
+#Export(c) jet_scheduler_task_paused: fn(some: I64) -> I64 {
+    control: scheduler_control_current()
     if (control == I64{0}) -> return I64{0}
     rt_text_store(some, if (sync_load(wrapping(control + I64{8})) != I64{0}) -> I64{1} else -> I64{0})
     I64{1}
 }
-#Export(c) fn jet_scheduler_task_cancelled_state(some: I64) -> I64 {
-    control :: scheduler_control_current()
+#Export(c) jet_scheduler_task_cancelled_state: fn(some: I64) -> I64 {
+    control: scheduler_control_current()
     if (control == I64{0}) -> return I64{0}
     rt_text_store(some, if (sync_load(wrapping(control + I64{16})) != I64{0}) -> I64{1} else -> I64{0})
     I64{1}
 }
 
 // The shared Condition48 protocol.
-#Export(c) fn jet_condition_notify_one(condition: I64) { jet_rt_native_condition_notify_one(condition) }
-#Export(c) fn jet_condition_notify_all(condition: I64) { jet_rt_native_condition_notify_all(condition) }
+#Export(c) jet_condition_notify_one: fn(condition: I64) { jet_rt_native_condition_notify_one(condition) }
+#Export(c) jet_condition_notify_all: fn(condition: I64) { jet_rt_native_condition_notify_all(condition) }

@@ -4,22 +4,22 @@
 // never printed. Under a cooperative model the sleep would return early and the
 // commit would still execute; the single deterministic "7" is the executable
 // proof that Jet unwinds the loser instead.
-package {
+package: {
     name: "cancel_cleanup"
     authority: { allow: [IO, Mem.Alloc, Time] }
 }
 
-use time :: core.time
+use time: core.time
 
-fn slow_commit() -> Int {
+slow_commit: fn() -> Int {
     time.sleep(200ms)  // cancelled here -> unwind; the commit below is skipped
     print("committed")
     return 1
 }
 
-fn fast_seven() -> Int { 7 }
+fast_seven: fn() -> Int { 7 }
 
-fn run() {
-    winner :: task.race {slow_commit(), fast_seven()} ?? panic("race failed")
+run: fn() {
+    winner: task.race {slow_commit(), fast_seven()} ?? panic("race failed")
     print(winner)
 }

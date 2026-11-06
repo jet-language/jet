@@ -1,10 +1,10 @@
-// `jet build` runs the graph its `fn build` declared (spec "Programmable
+// `jet build` runs the graph its `build: fn` declared (spec "Programmable
 // builds"). The session's plan lowers onto the one hermetic executor
 // (Jetpack/CLI/Source/Build), which checks the grant of every selected action
 // and probe before anything runs, then runs the ready actions in deterministic
 // stages in the native sandbox against the local action cache (`JET_STORE_DIR`).
 use {
-    cli_files :: core.files
+    cli_files: core.files
     jet_build_session.[BuildPlanExecution, BuildSessionAction, BuildSessionTarget, BuildSessionToolchain]
     jet_driver.[JetDriverAuthorityPolicy, JetDriverAuthorizedSourceFile, JetDriverFailure, JetDriverVerbOutput, JET_DRIVER_EXIT_USER_ERROR]
     jet_foundation.[Diagnostic, diagnostic_from_registry, diagnostic_registry_row, diagnostic_render_all]
@@ -18,17 +18,14 @@ use {
     jetpack_foundation.[BuildEffect]
 }
 
-// Whether `source` declares the build entry `fn build(b: Build)` (or, ahead of
-// the D-DECL-COLON1 cutover, `build: fn(b: Build)`), as the Driver's build
-// query selects it (jet_driver_query_build_plan); any other top-level
-// `fn build` is ordinary code.
-fn jet_cli_declares_build_entry(source: String) -> Bool Never! {
-    lines :: source.split("\n").to_list()
+// Whether `source` declares the build entry `build: fn(b: Build)`, as the
+// Driver's build query selects it (jet_driver_query_build_plan); any other
+// top-level `build: fn` is ordinary code.
+jet_cli_declares_build_entry: fn(source: String) -> Bool Never! {
+    lines: source.split("\n").to_list()
     loop line in jet_cli_top_level_function_lines(source, "build") {
         if line < 1 || line > lines.len() -> next
-        head :: lines[line - 1]
-        opened :: head.split_once("fn build(") ?? (head.split_once("build: fn(") ?? next)
-        if opened.after.split_once(")") == .Val(params) && params.before.split_once(":") == .Val(typed) {
+        if lines[line - 1].split_once("build: fn(") == .Val(opened) && opened.after.split_once(")") == .Val(params) && params.before.split_once(":") == .Val(typed) {
             if !typed.before.contains(",") && typed.after.trim() == "Build" -> return true
         }
     }
@@ -40,21 +37,21 @@ fn jet_cli_declares_build_entry(source: String) -> Bool Never! {
 // may live in any package source file or in `package.jet`; the build query
 // selects it). A package root or source tree that does not resolve is left to
 // the compile, which reports why.
-fn jet_cli_package_declares_build_entry(file: String) -[FS, Env]> Bool Never! {
+jet_cli_package_declares_build_entry: fn(file: String) -[FS, Env]> Bool Never! {
     cache := WorkspaceDeclarationCache.new()
     found := String?{None}
     if jet_cli_find_package_root_checked(&cache, jet_cli_parent(file) ?? ".") == {
         .Ok(value) -> found = value
         .Err(_) -> return false
     }
-    root :: found ?? return false
+    root: found ?? return false
     files := [JetDriverAuthorizedSourceFile]{}
     if jet_cli_package_sources(root, &files) != None -> return false
     loop source_file in files {
         if jet_cli_declares_build_entry(source_file.source) -> return true
     }
-    manifest :: jet_cli_checked_file(root, JET_CLI_PACKAGE_FILE) ?? return false
-    source :: cli_files.read(manifest) ?? return false
+    manifest: jet_cli_checked_file(root, JET_CLI_PACKAGE_FILE) ?? return false
+    source: cli_files.read(manifest) ?? return false
     pkg_build_entry_source(source) != None
 }
 
@@ -63,13 +60,13 @@ fn jet_cli_package_declares_build_entry(file: String) -[FS, Env]> Bool Never! {
 // invocation grant. `member` names the workspace member a workspace build runs
 // this graph for; its invocation grant is None. None when every action ran or
 // was restored.
-fn jet_cli_build_execute(graph: BuildPlanExecution, root: String, policy: JetDriverAuthorityPolicy?, invocation: JetCLIInvocationAuthority?, member: String?, color: Bool) -> JetDriverVerbOutput? {
+jet_cli_build_execute: fn(graph: BuildPlanExecution, root: String, policy: JetDriverAuthorityPolicy?, invocation: JetCLIInvocationAuthority?, member: String?, color: Bool) -> JetDriverVerbOutput? {
     if graph.actions.len() == 0 && graph.probes.len() == 0 -> return None
     workspace := OverlayPolicy.empty()
     // copy: `refused` is a payload view of the policy read's result.
     if jet_cli_build_workspace_policy(&workspace, root) == .Val(refused) -> return Val(jet_cli_build_policy_refused(refused.copy(), color))
-    plan :: jet_cli_build_hermetic_plan(graph) ?? return Val(jet_cli_ice("the checked build plan does not lower to the executor's graph: {err.debug_text()}"))
-    store :: BuildArtifactStoreHandle.open() ?? return Val(jet_cli_build_execution_failed("E3505", "couldn't open the build store: {err.message()}", None, "point `JET_STORE_DIR` at a writable store directory", color))
+    plan: jet_cli_build_hermetic_plan(graph) ?? return Val(jet_cli_ice("the checked build plan does not lower to the executor's graph: {err.debug_text()}"))
+    store: BuildArtifactStoreHandle.open() ?? return Val(jet_cli_build_execution_failed("E3505", "couldn't open the build store: {err.message()}", None, "point `JET_STORE_DIR` at a writable store directory", color))
     if build_execute_build_plan(plan, root, store, jet_cli_build_grants(policy, workspace, invocation)) == {
         .Ok(_) -> None
         .Err(error) -> Val(jet_cli_build_execution_error(error, member, color))
@@ -80,19 +77,19 @@ fn jet_cli_build_execute(graph: BuildPlanExecution, root: String, policy: JetDri
 // none leaves it empty. The why of the refusal when that workspace's
 // authority or its policy does not read: a build never runs under a policy it
 // could not read.
-fn jet_cli_build_workspace_policy(policy: &OverlayPolicy, root: String) -[FS, Env]> String? Never! {
+jet_cli_build_workspace_policy: fn(policy: &OverlayPolicy, root: String) -[FS, Env]> String? Never! {
     cache := WorkspaceDeclarationCache.new()
-    found :: if jet_cli_find_workspace_root_checked(&cache, root) == {
+    found: if jet_cli_find_workspace_root_checked(&cache, root) == {
         .Ok(nearest) -> nearest
         .Err(error) -> { return Val("Workspace build policy above `{root}` is present but unavailable: {error.diagnostic.what}") }
     }
-    workspace :: found ?? return None
-    resolved :: if pkg_resolve_workspace_source(&cache, workspace) == {
+    workspace: found ?? return None
+    resolved: if pkg_resolve_workspace_source(&cache, workspace) == {
         .Ok(read) -> read
         .Err(error) -> { return Val("Workspace build policy in `{workspace}` is present but unavailable: {error.diagnostic.what}") }
     }
-    source :: resolved ?? return None
-    parsed :: pkg_parse_workspace_policy(source.source) ?? return Val("Workspace build policy in `{source.path}`: {err.message()}")
+    source: resolved ?? return None
+    parsed: pkg_parse_workspace_policy(source.source) ?? return Val("Workspace build policy in `{source.path}`: {err.message()}")
     policy.build_deny = parsed.build_deny
     policy.build_grants = parsed.build_grants
     None
@@ -102,9 +99,9 @@ fn jet_cli_build_workspace_policy(policy: &OverlayPolicy, root: String) -[FS, En
 // `authority.allow`, the workspace's grant to this package, then `-A` and
 // `--allow`. The package's and the invocation's `deny` and the workspace's
 // `policy.deny` win over every grant.
-fn jet_cli_build_grants(policy: JetDriverAuthorityPolicy?, workspace: OverlayPolicy, invocation: JetCLIInvocationAuthority?) -> [BuildEffect] Never! {
+jet_cli_build_grants: fn(policy: JetDriverAuthorityPolicy?, workspace: OverlayPolicy, invocation: JetCLIInvocationAuthority?) -> [BuildEffect] Never! {
     authority := jet_cli_policy_authority([String]{}, policy)
-    subject :: if policy == .Val(package) -> package.subject.copy() else -> ""
+    subject: if policy == .Val(package) -> package.subject.copy() else -> ""
     granted := authority.granted.copy()
     loop grant in workspace.build_grants {
         if subject != "" && grant.subject == subject {
@@ -117,7 +114,7 @@ fn jet_cli_build_grants(policy: JetDriverAuthorityPolicy?, workspace: OverlayPol
     loop right in jet_cli_policy_effects(workspace.build_deny) -> &denied.push(right)
     authority.denied = jet_cli_sorted_set(denied)
     allowed := [BuildEffect]{}
-    effects :: [BuildEffect]{BuildEffect.Net, BuildEffect.FS, BuildEffect.IO, BuildEffect.DB, BuildEffect.Time, BuildEffect.Rand, BuildEffect.Env, BuildEffect.Exec, BuildEffect.Log, BuildEffect.GPU}
+    effects: [BuildEffect]{BuildEffect.Net, BuildEffect.FS, BuildEffect.IO, BuildEffect.DB, BuildEffect.Time, BuildEffect.Rand, BuildEffect.Env, BuildEffect.Exec, BuildEffect.Log, BuildEffect.GPU}
     loop right in effects {
         if jet_cli_answer(authority, right.name()) == JetCLIVerdict.Allowed -> &allowed.push(right)
     }
@@ -127,12 +124,12 @@ fn jet_cli_build_grants(policy: JetDriverAuthorityPolicy?, workspace: OverlayPol
 // A workspace member's ungranted action is E3504: the command line grants the
 // root build only, so the member's own authority and the workspace's grant to
 // it are all it holds. The root build's is E3503.
-fn jet_cli_build_execution_error(error: BuildExecutionError, member: String?, color: Bool) -> JetDriverVerbOutput Never! {
+jet_cli_build_execution_error: fn(error: BuildExecutionError, member: String?, color: Bool) -> JetDriverVerbOutput Never! {
     if error == {
         .MissingGrant(action, capability) -> {
-            subject :: if action.starts_with("probe ") -> "build probe `{action.slice(6..<action.len())}`" else -> "build action `{action}`"
+            subject: if action.starts_with("probe ") -> "build probe `{action.slice(6..<action.len())}`" else -> "build action `{action}`"
             if member == .Val(name) -> return jet_cli_build_execution_failed("E3504", "{subject} of workspace member `{name}` asks for ungranted `{capability.name()}` authority", None, "grant `{capability.name()}` in `{name}`'s package authority or in the workspace's `policy: {{ grants: {{ \"{name}\": #({capability.name()}) }} }}`; `--allow` grants the root build only", color)
-            jet_cli_build_execution_failed("E3503", "{subject} needs `{capability.name()}`, which this build does not grant", None, "grant it with `--allow={capability.name()}` or in package or workspace policy; `fn build` declares the effect and makes the call inside `#Impure(\"reason\")`", color)
+            jet_cli_build_execution_failed("E3503", "{subject} needs `{capability.name()}`, which this build does not grant", None, "grant it with `--allow={capability.name()}` or in package or workspace policy; `build: fn` declares the effect and makes the call inside `#Impure(\"reason\")`", color)
         }
         .SandboxUnavailable -> jet_cli_build_execution_failed("E3505", "build actions run only in the native sandbox, and none is available here", None, "install bubblewrap (`bwrap`) with user namespaces enabled; Jet never runs a build action outside the sandbox", color)
         .IO(action, detail) -> jet_cli_build_execution_failed("E3505", "build action `{action}` failed: {detail}", None, "fix the action's command, toolchain, or input and output declarations", color)
@@ -144,21 +141,21 @@ fn jet_cli_build_execution_error(error: BuildExecutionError, member: String?, co
 
 // One build-execution report: `code`'s row Why, the given What and Fix, and
 // `detail` (an action's stderr) printed as written.
-fn jet_cli_build_execution_failed(code: String, what: String, detail: String?, fix: String, color: Bool) -> JetDriverVerbOutput Never! {
-    why :: (diagnostic_registry_row(code) ?? panic("build execution code `{code}` has no registry row")).why
+jet_cli_build_execution_failed: fn(code: String, what: String, detail: String?, fix: String, color: Bool) -> JetDriverVerbOutput Never! {
+    why: (diagnostic_registry_row(code) ?? panic("build execution code `{code}` has no registry row")).why
     jet_cli_build_refusal(code, what, why, detail, fix, color)
 }
 
 // The E3503 of a workspace build policy that does not read, `why` naming it.
-fn jet_cli_build_policy_refused(why: String, color: Bool) -> JetDriverVerbOutput Never! {
-    what :: (diagnostic_registry_row("E3503") ?? panic("E3503 has no registry row")).what
+jet_cli_build_policy_refused: fn(why: String, color: Bool) -> JetDriverVerbOutput Never! {
+    what: (diagnostic_registry_row("E3503") ?? panic("E3503 has no registry row")).what
     jet_cli_build_refusal("E3503", what, why, None, "Fix the workspace build policy: `policy: {{ deny: #(…) }}` caps every package's build, and `policy: {{ grants: {{ \"package\": #(…) }} }}` grants one package", color)
 }
 
-fn jet_cli_build_refusal(code: String, what: String, why: String, detail: String?, fix: String, color: Bool) -> JetDriverVerbOutput Never! {
+jet_cli_build_refusal: fn(code: String, what: String, why: String, detail: String?, fix: String, color: Bool) -> JetDriverVerbOutput Never! {
     report := diagnostic_from_registry(code, None, what, why, fix)
     report.detail = detail
-    reports :: [Diagnostic]{report}
+    reports: [Diagnostic]{report}
     JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all("", "", reports, color), exit_code: JET_DRIVER_EXIT_USER_ERROR, failure: Val(JetDriverFailure{reports: reports, notice: ""})}
 }
 
@@ -166,19 +163,19 @@ fn jet_cli_build_refusal(code: String, what: String, why: String, detail: String
 // identity, probe, action and target in declaration order, so each session
 // handle id is the executor handle id; the session's toolchain 0 is the
 // executor's inferred host.
-fn jet_cli_build_hermetic_plan(graph: BuildPlanExecution) -> HermeticBuildPlan HermeticBuildError! {
+jet_cli_build_hermetic_plan: fn(graph: BuildPlanExecution) -> HermeticBuildPlan HermeticBuildError! {
     build := HermeticBuildContext.new()
-    provenance :: BuildProvenance.user_declared("fn build", None)
+    provenance: BuildProvenance.user_declared("fn build", None)
     toolchains := [ToolchainHandle]{build.default_host_toolchain()}
     loop index in 1..<graph.toolchains.len() {
-        declared :: graph.toolchains[index]
+        declared: graph.toolchains[index]
         &toolchains.push(&build.toolchain(declared.name, jet_cli_build_toolchain_spec(declared, provenance)))
     }
     signing := [SigningIdentityHandle]{}
     loop identity in graph.signing -> &signing.push(&build.signing_identity(identity.name, SigningIdentitySpec.new(identity.label, provenance)))
     probes := [ProbeHandle]{}
     loop probe in graph.probes {
-        spec :: if probe.kind == {
+        spec: if probe.kind == {
             "find_program" -> ProbeSpec.find_program(probe.value)
             "pkg_config" -> ProbeSpec.pkg_config(probe.value)
             "header" -> ProbeSpec.header_check(probe.value)
@@ -199,14 +196,14 @@ fn jet_cli_build_hermetic_plan(graph: BuildPlanExecution) -> HermeticBuildPlan H
         loop probe in target.probes -> spec = spec.with_probe(probes[probe])
         if target.signing == .Val(identity) -> spec = spec.with_signing_identity(signing[identity])
         loop key in target.metadata.keys() -> spec = spec.with_metadata(key, target.metadata[key])
-        added :: jet_cli_build_add_target(&build, target, spec)
+        added: jet_cli_build_add_target(&build, target, spec)
         &targets.push(added)
     }
     if graph.default >= 0 -> return build.plan_with_default(targets[graph.default])
     build.plan()
 }
 
-fn jet_cli_build_toolchain_spec(declared: BuildSessionToolchain, provenance: BuildProvenance) -> ToolchainSpec Never! {
+jet_cli_build_toolchain_spec: fn(declared: BuildSessionToolchain, provenance: BuildProvenance) -> ToolchainSpec Never! {
     spec := ToolchainSpec.target(declared.target_triple, provenance).with_host_triple(declared.host_triple)
     if declared.sdk == .Val(sdk) -> spec = spec.with_sdk(SDKIdentity.new(sdk, "declared", provenance))
     if declared.linker == .Val(linker) -> spec = spec.with_linker(LinkerIdentity.new(linker, provenance))
@@ -214,7 +211,7 @@ fn jet_cli_build_toolchain_spec(declared: BuildSessionToolchain, provenance: Bui
     spec
 }
 
-fn jet_cli_build_action_spec(action: BuildSessionAction, toolchains: [ToolchainHandle], probes: [ProbeHandle], signing: [SigningIdentityHandle]) -> ActionSpec Never! {
+jet_cli_build_action_spec: fn(action: BuildSessionAction, toolchains: [ToolchainHandle], probes: [ProbeHandle], signing: [SigningIdentityHandle]) -> ActionSpec Never! {
     spec := if action.cache == "uncached-phony" -> ActionSpec.uncached_phony(action.argv) else -> ActionSpec.cached(action.argv)
     spec = spec.with_inputs(action.inputs).with_outputs(action.outputs).with_toolchain(toolchains[action.toolchain])
     loop cap in action.caps {
@@ -247,7 +244,7 @@ fn jet_cli_build_action_spec(action: BuildSessionAction, toolchains: [ToolchainH
     spec
 }
 
-fn jet_cli_build_add_target(build: &HermeticBuildContext, target: BuildSessionTarget, spec: TargetSpec) -> TargetRef HermeticBuildError! {
+jet_cli_build_add_target: fn(build: &HermeticBuildContext, target: BuildSessionTarget, spec: TargetSpec) -> TargetRef HermeticBuildError! {
     if target.kind == {
         "executable" -> &build.add_executable(target.name, spec)
         "library" -> &build.add_library(target.name, spec)
@@ -260,9 +257,7 @@ fn jet_cli_build_add_target(build: &HermeticBuildContext, target: BuildSessionTa
     }
 }
 
-#Test("the build entry reads in both declaration spellings") {
-    assert(jet_cli_declares_build_entry("fn build(b: Build) {{}}\n"))
+#Test("the build entry is the colon declaration `build: fn(b: Build)`") {
     assert(jet_cli_declares_build_entry("build: fn(b: Build) {{}}\n"))
-    assert(!jet_cli_declares_build_entry("fn build(n: Int) {{}}\n"))
     assert(!jet_cli_declares_build_entry("build: fn(n: Int) {{}}\n"))
 }

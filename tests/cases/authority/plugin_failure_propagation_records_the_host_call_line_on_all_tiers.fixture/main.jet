@@ -1,11 +1,11 @@
-use plugin :: core.plugin
+use plugin: core.plugin
 
-fn fail() -> Int plugin.PluginError! {
-    policy :: Authority.from_rights(["FS.Read:."])
-    guest :: plugin.load("failure_guest.wat", policy)
+fail: fn() -> Int plugin.PluginError! {
+    policy: Authority.from_rights(["FS.Read:."])
+    guest: plugin.load("failure_guest.wat", policy)
     guest.trap()
 }
 
-fn run() {
+run: fn() {
     print(fail())
 }

@@ -5,7 +5,7 @@ use {
     jet_devserver.Devtools.catalog.[canonical]
     jet_devserver.Session.[DevtoolsProjection, DevtoolsStatusFact, DevtoolsCommandCapabilities, JET_DEVTOOLS_PROTOCOL]
 }
-fn projection(sequence: U64) -> (DevtoolsProjection, [JetDevtoolsPanelProjection]) {
+projection: fn(sequence: U64) -> (DevtoolsProjection, [JetDevtoolsPanelProjection]) {
     envelope := JetDevtoolsEnvelope.new("s1", 0)
     envelope.push(JetDevtoolsEvent.from_parts(100 + sequence, "devserver", "state", "session", "{{\"state\":\"ready\"}}").unwrap())
     event := envelope.events().next().unwrap().clone()

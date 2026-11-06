@@ -1,12 +1,12 @@
 // The audited register sets per target, shared by sema's contract check and
 // the Rust foreign bridge.
-fn inline_assembly_target_supported(target: String) -> Bool Never! {
+inline_assembly_target_supported: fn(target: String) -> Bool Never! {
     parts := target.split("-").to_list()
     arch := if parts.len() > 0 -> parts[0] else -> ""
     arch == "x86_64" || arch == "i386" || arch == "i586" || arch == "i686" || arch == "x86" || arch == "aarch64" || arch == "arm" || arch == "armv7" || arch.starts_with("thumb") || arch.starts_with("riscv64")
 }
 
-fn inline_assembly_normalize_register(register: String) -> String Never! {
+inline_assembly_normalize_register: fn(register: String) -> String Never! {
     raw := register
     if raw.starts_with("%") {
         bytes := raw.bytes()
@@ -22,7 +22,7 @@ fn inline_assembly_normalize_register(register: String) -> String Never! {
     String.from_bytes(bytes) ?? raw
 }
 
-fn inline_assembly_register_number(register: String, prefix: String, lo: Int, hi: Int) -> Bool Never! {
+inline_assembly_register_number: fn(register: String, prefix: String, lo: Int, hi: Int) -> Bool Never! {
     if !register.starts_with(prefix) -> return false
     bytes := register.bytes()
     prefix_len := prefix.bytes().len()
@@ -38,7 +38,7 @@ fn inline_assembly_register_number(register: String, prefix: String, lo: Int, hi
     number >= lo && number <= hi
 }
 
-fn inline_assembly_register_known(target: String, register: String) -> Bool Never! {
+inline_assembly_register_known: fn(target: String, register: String) -> Bool Never! {
     parts := target.split("-").to_list()
     arch := if parts.len() > 0 -> parts[0] else -> ""
     name := inline_assembly_normalize_register(register)
@@ -58,7 +58,7 @@ fn inline_assembly_register_known(target: String, register: String) -> Bool Neve
 
 // The checked operand contract of an `#FFI(asm)` body for one target, shared by
 // sema (which reports E3223) and the Rust foreign bridge.
-enum InlineAsmContractCheck {
+InlineAsmContractCheck: enum {
     // The function has no `#FFI(asm)` body.
     NotAssembly
     Checked(contract: InlineAsmContract)
@@ -66,8 +66,8 @@ enum InlineAsmContractCheck {
     Incomplete(problem: String)
 }
 
-fn inline_assembly_contract(function: Func, target: String) -> InlineAsmContractCheck Never! {
-    inline :: function.inline_foreign ?? return InlineAsmContractCheck.NotAssembly
+inline_assembly_contract: fn(function: Func, target: String) -> InlineAsmContractCheck Never! {
+    inline: function.inline_foreign ?? return InlineAsmContractCheck.NotAssembly
     if inline.lang != "asm" -> return InlineAsmContractCheck.NotAssembly
 
     params := function.params
@@ -113,7 +113,7 @@ fn inline_assembly_contract(function: Func, target: String) -> InlineAsmContract
             }
             if {
                 checked_destination != None -> {
-                    destination :: checked_destination ?? panic("checked assembly return destination disappeared")
+                    destination: checked_destination ?? panic("checked assembly return destination disappeared")
                     if {
                         return_destination != None -> {
                             bad = Val("an assembly body can have only one checked return destination")
@@ -214,12 +214,12 @@ fn inline_assembly_contract(function: Func, target: String) -> InlineAsmContract
     InlineAsmContractCheck.Checked{contract: InlineAsmContract{target: target, output: return_destination, clobbers: clobbers}}
 }
 
-fn inline_assembly_ascii_whitespace(byte: U8) -> Bool Never! {
+inline_assembly_ascii_whitespace: fn(byte: U8) -> Bool Never! {
     code := Int.from_u8(byte)
     code == 32 || (code >= 9 && code <= 13)
 }
 
-fn inline_assembly_clobber_tokens(text: String) -> [String] Never! {
+inline_assembly_clobber_tokens: fn(text: String) -> [String] Never! {
     tokens := [String]{}
     bytes := text.bytes()
     start := 0
@@ -235,7 +235,7 @@ fn inline_assembly_clobber_tokens(text: String) -> [String] Never! {
     tokens
 }
 
-fn inline_assembly_first_operand(line: String) -> String? {
+inline_assembly_first_operand: fn(line: String) -> String? {
     bytes := line.bytes()
     separator := -1
     index := 0
@@ -254,7 +254,7 @@ fn inline_assembly_first_operand(line: String) -> String? {
     if operand == "" -> None else -> Val(operand)
 }
 
-fn inline_assembly_return_destination(operand: String, params: [Param], target: String, target_supported: Bool) -> InlineAsmOutput? {
+inline_assembly_return_destination: fn(operand: String, params: [Param], target: String, target_supported: Bool) -> InlineAsmOutput? {
     bytes := operand.bytes()
     if operand.starts_with("{{") && operand.ends_with("}}") {
         name := String.from_bytes(bytes.slice(1, bytes.len() - 1)) ?? ""

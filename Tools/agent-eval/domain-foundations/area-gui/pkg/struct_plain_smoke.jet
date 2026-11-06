@@ -1,22 +1,22 @@
-package {
+package: {
     name: "struct_plain_smoke"
     authority: { allow: [Browser, IO, Mem.Alloc] }
 }
 
-use ui :: core.ui
+use ui: core.ui
 
-struct Note {
+Note: struct {
     title: String
     body: String
 }
 
-fn view(note: Note) -> UINode { ui.box([
+view: fn(note: Note) -> UINode { ui.box([
     ui.text(note.title),
     ui.node_role(note.body, 30.0, 3.0, ui.aria_role_text_input())
 ]) }
 
-fn run() {
-    note :: Note{title: "Meeting", body: "old"}
+run: fn() {
+    note: Note{title: "Meeting", body: "old"}
     backend := ui.tui_backend()
     backend.mount(view(note))
     print("mounted")

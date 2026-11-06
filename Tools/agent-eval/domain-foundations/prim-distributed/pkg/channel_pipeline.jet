@@ -1,25 +1,25 @@
 // prim-distributed: bounded producer -> worker -> consumer pipeline.
 // Every edge has capacity two, so producer.send parks when the worker falls behind.
-package {
+package: {
     name: "channel_pipeline"
     authority: { allow: [IO, Mem.Alloc, Time.Wait] }
 }
 
-use time :: core.time
+use time: core.time
 
-fn run() {
-    { sender: input_tx, receiver: input_rx } :: channel<Int>(capacity: 2)
-    { sender: output_tx, receiver: output_rx } :: channel<Int>(capacity: 2)
-    producer_tx :: input_tx.copy()
-    worker_tx :: output_tx.copy()
+run: fn() {
+    { sender: input_tx, receiver: input_rx }: channel<Int>(capacity: 2)
+    { sender: output_tx, receiver: output_rx }: channel<Int>(capacity: 2)
+    producer_tx: input_tx.copy()
+    worker_tx: output_tx.copy()
 
-    producer :: task {
+    producer: task {
         loop n in 1..8 {
             producer_tx.send(n)
         }
         producer_tx.close()
     }
-    worker :: task {
+    worker: task {
         loop n in input_rx {
             time.sleep(5ms)
             worker_tx.send(n * n)

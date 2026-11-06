@@ -5,20 +5,20 @@
 // nothing here claims preemption of running code.
 // A borrowed adapter (`items.lazy().map(...)`) that is dropped early does not
 // end its owner, and a partial `Reader.take` keeps the unread remainder.
-struct CleanupMarker {
+CleanupMarker: struct {
     name: String
 }
 
 impl CleanupMarker.Close {
-    fn close(^self) { print("cleanup: {self.name}") }
+    close: fn(^self) { print("cleanup: {self.name}") }
 }
 
 #Error
-struct ParseError {
+ParseError: struct {
     message: String
 }
 
-fn guarded(name: String) -> Stream<Int> {
+guarded: fn(name: String) -> Stream<Int> {
     marker := CleanupMarker{name: name}
     defer close(^marker)
     yield 1
@@ -26,12 +26,12 @@ fn guarded(name: String) -> Stream<Int> {
     yield 3
 }
 
-fn check(name: String, value: Int) -> Int ParseError! {
+check: fn(name: String, value: Int) -> Int ParseError! {
     if value == 2 -> return Err(ParseError{message: "{name} rejected {value}"})
     Ok(value)
 }
 
-fn consume(name: String) -> Int ParseError! {
+consume: fn(name: String) -> Int ParseError! {
     total := 0
     loop value in guarded(name) {
         total += check(name, value)
@@ -39,17 +39,17 @@ fn consume(name: String) -> Int ParseError! {
     Ok(total)
 }
 
-fn consume_until_cancel(started: Sender<Int>, gate: Receiver<Int>) -> Int {
+consume_until_cancel: fn(started: Sender<Int>, gate: Receiver<Int>) -> Int {
     total := 0
     loop value in guarded("task") {
         total += value
         started.send(value)
-        _ :: gate.receive() ?? 0
+        _: gate.receive() ?? 0
     }
     total
 }
 
-fn failure_label(error: TaskFailure) -> String {
+failure_label: fn(error: TaskFailure) -> String {
     if error == {
         .Panicked(reason) -> { return "panicked: {reason}" }
         .DeadlineBlown -> { return "deadline" }
@@ -57,7 +57,7 @@ fn failure_label(error: TaskFailure) -> String {
     }
 }
 
-fn run() {
+run: fn() {
     // (a) natural end: all three items, then one cleanup.
     loop value in guarded("end") -> print("end: {value}")
 
@@ -68,16 +68,16 @@ fn run() {
     }
 
     // (c) the consumer body fails on the second item.
-    total :: consume("failure") ?? {
+    total: consume("failure") ?? {
         print("failure: {err.message}")
         0
     }
     print("failure total: {total}")
 
     // (d) the consuming task is cancelled while it waits.
-    { sender: started_tx, receiver: started_rx } :: channel<Int>(capacity: 1)
-    { sender: gate_tx, receiver: gate_rx } :: channel<Int>(capacity: 1)
-    worker :: task consume_until_cancel(started_tx, gate_rx)
+    { sender: started_tx, receiver: started_rx }: channel<Int>(capacity: 1)
+    { sender: gate_tx, receiver: gate_rx }: channel<Int>(capacity: 1)
+    worker: task consume_until_cancel(started_tx, gate_rx)
     print("task: started with {started_rx.receive() ?? -1}")
     worker.cancel()
     if ^worker.join() == {
@@ -95,9 +95,9 @@ fn run() {
     print("borrowed: owner len {items.len()} last {items[2]}")
 
     // (f) a partial read keeps the remainder.
-    reader :: Reader.over([U8]{1, 2, 3, 4, 5})
-    head :: &reader.take(2) ?? [U8]{}
+    reader: Reader.over([U8]{1, 2, 3, 4, 5})
+    head: &reader.take(2) ?? [U8]{}
     print("reader: head {head} remaining {reader.remaining()}")
-    rest :: &reader.take(reader.remaining()) ?? [U8]{}
+    rest: &reader.take(reader.remaining()) ?? [U8]{}
     print("reader: rest {rest} remaining {reader.remaining()}")
 }

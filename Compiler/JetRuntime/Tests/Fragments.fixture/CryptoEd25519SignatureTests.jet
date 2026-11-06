@@ -1,12 +1,12 @@
 // Native transports for real private public/sign/key-decode/verify entries.
-#Export(c) fn jet_rt_ed25519_signature_fixture(kind: I64, key: I64, message: I64, length: I64, signature: I64, strict: I64) -> I64 {
-    size :: if {
+#Export(c) jet_rt_ed25519_signature_fixture: fn(kind: I64, key: I64, message: I64, length: I64, signature: I64, strict: I64) -> I64 {
+    size: if {
         (kind == I64{0}) -> I64{4832}
         (kind == I64{3}) -> I64{4096}
         else -> I64{5472}
     }
-    owned :: jet_rt_alloc(size + I64{16}, I64{8})
-    scratch :: owned + I64{8}
+    owned: jet_rt_alloc(size + I64{16}, I64{8})
+    scratch: owned + I64{8}
     rt_text_store(owned, I64{0x42})
     rt_text_store(scratch + size, I64{0x24})
     at := I64{0}

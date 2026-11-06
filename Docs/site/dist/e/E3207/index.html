@@ -32,16 +32,16 @@
 <h2>What</h2>
 <p class="diag-copy what" data-registry-field="what">`#Bindgen` is only allowed in generated cache files.</p>
 <h2>Why</h2>
-<p class="diag-copy why" data-registry-field="why">`.jet/bindings/c/{lib}.jet` is written by `jet inspect bind`; hand-written sources use `#Import module`.</p>
+<p class="diag-copy why" data-registry-field="why">`.jet/bindings/c/{lib}.jet` is written by `jet inspect bind`; hand-written sources use `#Import c.{lib}: module`.</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Edit your overlay file with `#Import module`, or regenerate the cache with `jet inspect bind`.</p>
+<p class="diag-copy fix" data-registry-field="fix">Edit your overlay file with `#Import c.{lib}: module`, or regenerate the cache with `jet inspect bind`.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E3207</code>: <code>tests/ui/generated_cffi_e3207.stderr</code>.</p>
+<p>First UI snapshot mentioning <code>E3207</code>: <code>tests/ui/cffi_e3207_bindgen_outside_cache.stderr</code>.</p>
 <pre class="diag">Error [jet.BindgenOutsideGenerated]: `#Bindgen` is only allowed in generated cache files
-  --&gt; tests/ui/generated_cffi_e3207.jet:2:17
+  --&gt; tests/ui/cffi_e3207_bindgen_outside_cache.jet:1:10
     |
-  2 | #Bindgen module c.demo.__bindgen__ {
-    |                 ^^^^^^^^^^^^^^^^^^
+  1 | #Bindgen c.demo.__bindgen__: module {
+    |          ^^^^^^^^^^^^^^^^^^
  Why: `.jet/bindings/c/demo.jet` is written by `jet inspect bind`; hand-written sources use `#Import module`
  Fix: Edit your overlay file with `#Import module`, or regenerate the cache with `jet inspect bind`
 More: jet-lang.dev/e/E3207

@@ -40,7 +40,7 @@ use {
     jet_parser.[jfmt_expr_start]
 }
 
-struct SemaCallTypedArguments {
+SemaCallTypedArguments: struct {
     values: [TExpr]
     slots: [Int]
     required_types: [Type]
@@ -52,7 +52,7 @@ struct SemaCallTypedArguments {
     binder_site: Int{0}
 }
 
-fn sema_call_resolved_type(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Type Never! {
+sema_call_resolved_type: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Type Never! {
     if program.registration_graph == .Val(graph) {
         sema_type_resolve_declared_recursive(graph, ty, sema_scope_caller_row(environment, graph), environment.generic_params)
     } else {
@@ -62,53 +62,53 @@ fn sema_call_resolved_type(ty: Type, environment: SemaScopeEnvironment, program:
     }
 }
 
-fn sema_call_type_assignable(required: Type, offered: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool? {
+sema_call_type_assignable: fn(required: Type, offered: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool? {
     if program.registration_graph == {
         .Val(graph) -> sema_type_assignable_in_graph_at(graph, required, offered, sema_scope_caller_row(environment, graph), environment.generic_params)
         else -> Val(sema_type_assignable(required, offered))
     }
 }
 
-fn sema_call_box_as_trait(required: Type, offered: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Type? {
-    required_resolved :: sema_call_resolved_type(required, environment, program)
+sema_call_box_as_trait: fn(required: Type, offered: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Type? {
+    required_resolved: sema_call_resolved_type(required, environment, program)
     if required_resolved == {
         .TraitObject(_) -> {}
         else -> return None
     }
-    offered_resolved :: sema_call_resolved_type(offered, environment, program)
+    offered_resolved: sema_call_resolved_type(offered, environment, program)
     if offered_resolved == {
         .TraitObject(_) -> return None
         else -> {}
     }
-    compatible :: sema_call_type_assignable(required_resolved, offered_resolved, environment, program) ?? return None
+    compatible: sema_call_type_assignable(required_resolved, offered_resolved, environment, program) ?? return None
     if compatible -> Val(required_resolved) else -> None
 }
 
-fn sema_call_registration_defaults(graph: SemaRegistrationGraph, binding: SemaCallBinding) -> [SemaCallDefaultValue]? {
+sema_call_registration_defaults: fn(graph: SemaRegistrationGraph, binding: SemaCallBinding) -> [SemaCallDefaultValue]? {
     defaults := [SemaCallDefaultValue]{}
     loop reference in binding.default_refs {
-        expression :: sema_registration_resolve_default(graph, reference) ?? return None
+        expression: sema_registration_resolve_default(graph, reference) ?? return None
         &defaults.push(SemaCallDefaultValue{reference: reference, expression: expression})
     }
     Val(defaults)
 }
 
-fn sema_call_param_optional_for_check(param: SemaCallParam) -> Bool Never! {
+sema_call_param_optional_for_check: fn(param: SemaCallParam) -> Bool Never! {
     param.variadic || param.default != None || param.default_ref != None
 }
 
-fn sema_call_default_ref_equal(left: FunctionDefaultRef, right: FunctionDefaultRef) -> Bool Never! {
+sema_call_default_ref_equal: fn(left: FunctionDefaultRef, right: FunctionDefaultRef) -> Bool Never! {
     left.source_file == right.source_file && left.owner_key == right.owner_key && left.parameter_index == right.parameter_index && left.span.start == right.span.start && left.span.end == right.span.end
 }
 
-fn sema_call_default_expression(reference: FunctionDefaultRef, defaults: [SemaCallDefaultValue]) -> Expr? {
+sema_call_default_expression: fn(reference: FunctionDefaultRef, defaults: [SemaCallDefaultValue]) -> Expr? {
     loop candidate in defaults {
         if sema_call_default_ref_equal(reference, candidate.reference) -> return Val(candidate.expression)
     }
     None
 }
 
-fn sema_call_make_binder_refs(params: [SemaCallParam], parameter: Int) -> [BinderRef] Never! {
+sema_call_make_binder_refs: fn(params: [SemaCallParam], parameter: Int) -> [BinderRef] Never! {
     refs := [BinderRef]{}
     loop index in 0..<parameter {
         if sema_call_parameter_type(params[index]) == .Val(value) {
@@ -118,7 +118,7 @@ fn sema_call_make_binder_refs(params: [SemaCallParam], parameter: Int) -> [Binde
     refs
 }
 
-fn sema_call_mark_materialized_written(arg: CallArg, source_index: Int, parameter: Int, param: SemaCallParam, span: Span) -> CallArg Never! {
+sema_call_mark_materialized_written: fn(arg: CallArg, source_index: Int, parameter: Int, param: SemaCallParam, span: Span) -> CallArg Never! {
     result := arg
     result.flags.source_index = Val(source_index)
     result.flags.binder_slot = Val(parameter)
@@ -127,7 +127,7 @@ fn sema_call_mark_materialized_written(arg: CallArg, source_index: Int, paramete
     result
 }
 
-fn sema_call_make_materialized_default(value: Expr, parameter: Int, param: SemaCallParam, params: [SemaCallParam], span: Span) -> CallArg Never! {
+sema_call_make_materialized_default: fn(value: Expr, parameter: Int, param: SemaCallParam, params: [SemaCallParam], span: Span) -> CallArg Never! {
     flags := ast_empty_call_arg_flags()
     flags.binder_slot = Val(parameter)
     flags.binder_site = Val(span.start)
@@ -138,7 +138,7 @@ fn sema_call_make_materialized_default(value: Expr, parameter: Int, param: SemaC
 
 // Fill only metadata defaults whose original expressions Registration resolved.
 // The returned binding keeps source indices stable for evaluation-order lowering.
-fn sema_call_materialize_defaults(params: [SemaCallParam], binding: SemaCallBinding, args: &[CallArg], defaults: [SemaCallDefaultValue], call_span: Span, diagnostics: &[Diagnostic]) -> SemaCallBinding? {
+sema_call_materialize_defaults: fn(params: [SemaCallParam], binding: SemaCallBinding, args: &[CallArg], defaults: [SemaCallDefaultValue], call_span: Span, diagnostics: &[Diagnostic]) -> SemaCallBinding? {
     if binding.default_refs.len() == 0 -> return Val(binding)
     loop reference in binding.default_refs {
         if sema_call_default_expression(reference, defaults) == None {
@@ -154,7 +154,7 @@ fn sema_call_materialize_defaults(params: [SemaCallParam], binding: SemaCallBind
                     &diagnostics.push(sema_call_arity_diagnostic("this call", params.len(), args.len(), false, call_span))
                     return None
                 }
-                parameter :: if original_index < binding.slots.len() -> binding.slots[original_index] else -> -1
+                parameter: if original_index < binding.slots.len() -> binding.slots[original_index] else -> -1
                 if parameter < 0 || parameter >= params.len() {
                     &diagnostics.push(sema_call_arity_diagnostic("this call", params.len(), args.len(), false, call_span))
                     return None
@@ -166,11 +166,11 @@ fn sema_call_materialize_defaults(params: [SemaCallParam], binding: SemaCallBind
                     &diagnostics.push(sema_error("E0906", call_span, "a default argument refers to an invalid parameter", "default metadata must point into the owning declaration", "repair the registered FunctionDefaultRef"))
                     return None
                 }
-                reference :: params[parameter].default_ref ?? {
+                reference: params[parameter].default_ref ?? {
                     &diagnostics.push(sema_error("E0906", call_span, "a default argument lost its source reference", "metadata defaults are identified by FunctionDefaultRef", "register the declaration's original default expression"))
                     return None
                 }
-                expression :: sema_call_default_expression(reference, defaults) ?? {
+                expression: sema_call_default_expression(reference, defaults) ?? {
                     &diagnostics.push(sema_error("E0906", call_span, "a default argument for this call could not be resolved", "callable defaults retain their owning declaration and source identity", "make the owning declaration available to Registration before checking this call"))
                     return None
                 }
@@ -189,7 +189,7 @@ fn sema_call_materialize_defaults(params: [SemaCallParam], binding: SemaCallBind
     result
 }
 
-fn sema_call_bound_slot(binding: SemaCallBinding, source: SemaCallArgSource, arg: CallArg) -> Int Never! {
+sema_call_bound_slot: fn(binding: SemaCallBinding, source: SemaCallArgSource, arg: CallArg) -> Int Never! {
     if arg.flags.binder_slot == .Val(slot) -> return slot
     if source == {
         .Written(index) -> if index >= 0 && index < binding.slots.len() -> binding.slots[index] else -> -1
@@ -197,7 +197,7 @@ fn sema_call_bound_slot(binding: SemaCallBinding, source: SemaCallArgSource, arg
     }
 }
 
-fn sema_call_view_place_equal(left: SemaOwnershipPlace, right: SemaOwnershipPlace) -> Bool Never! {
+sema_call_view_place_equal: fn(left: SemaOwnershipPlace, right: SemaOwnershipPlace) -> Bool Never! {
     if left.root_key != right.root_key || left.projections.len() != right.projections.len() -> return false
     loop index in 0..<left.projections.len() {
         if left.projections[index] != right.projections[index] -> return false
@@ -205,9 +205,9 @@ fn sema_call_view_place_equal(left: SemaOwnershipPlace, right: SemaOwnershipPlac
     true
 }
 
-fn sema_call_return_view_parameter_expr(parameter: Int, binding: SemaCallBinding, args: [CallArg]) -> Expr? {
+sema_call_return_view_parameter_expr: fn(parameter: Int, binding: SemaCallBinding, args: [CallArg]) -> Expr? {
     loop index in 0..<args.len() {
-        source :: binding.sources[index]
+        source: binding.sources[index]
         if sema_call_bound_slot(binding, source, args[index]) == parameter -> return Val(args[index].expr)
     }
     None
@@ -219,14 +219,14 @@ fn sema_call_return_view_parameter_expr(parameter: Int, binding: SemaCallBinding
 // at the call, a temporary the call frees is refused whatever consumes the
 // result: a surrounding expression would read freed storage. A string literal
 // is static text that is never freed, so only a kept view refuses it.
-fn sema_call_return_view_facts(signature: Type, receiver: Expr?, args: [CallArg], binding: SemaCallBinding, scopes: SemaScopeTable, state: &SemaOwnershipState, span: Span, diagnostics: &[Diagnostic]) -> [SemaCallReturnViewFact] {
-    map :: if signature == {
+sema_call_return_view_facts: fn(signature: Type, receiver: Expr?, args: [CallArg], binding: SemaCallBinding, scopes: SemaScopeTable, state: &SemaOwnershipState, span: Span, diagnostics: &[Diagnostic]) -> [SemaCallReturnViewFact] {
+    map: if signature == {
         .Fn(_, _, _, _, _, return_view_provenance) -> return_view_provenance ?? return [SemaCallReturnViewFact]{}
         else -> {
             return [SemaCallReturnViewFact]{}
         }
     }
-    string_result :: if signature == {
+    string_result: if signature == {
         .Fn(_, ret, _, _, _, _) -> if ret == .Val(result) -> sema_stmt_string_view_type(sema_call_view_result_success(result)) else -> false
         else -> false
     }
@@ -244,22 +244,22 @@ fn sema_call_return_view_facts(signature: Type, receiver: Expr?, args: [CallArg]
                 .Static(_, _) -> {}
             }
             if source_expr == .Val(expression) {
-                source_places :: sema_ownership_places_from_expr_in_state(expression, scopes, &state)
+                source_places: sema_ownership_places_from_expr_in_state(expression, scopes, &state)
                 if source_places.len() == 0 {
-                    temporary :: expr_source_span(expression)
+                    temporary: expr_source_span(expression)
                     &temporaries.push(temporary)
                     if !sema_call_static_text_literal(expression) -> sema_call_report_temporary_view_source(temporary, string_result && entry.slot.len() == 0, &diagnostics)
                 }
                 loop source_place in source_places {
-                    place :: sema_ownership_append_view_source_projections(source_place, source_path.projections, span)
-                    duplicate :: loop existing in places {
+                    place: sema_ownership_append_view_source_projections(source_place, source_path.projections, span)
+                    duplicate: loop existing in places {
                         if sema_call_view_place_equal(existing, place) -> break true
                     } ?? false
                     if !duplicate -> &places.push(place)
                 }
             }
         }
-        access :: if entry.value.mutable -> AccessConvention.Write else -> AccessConvention.Read
+        access: if entry.value.mutable -> AccessConvention.Write else -> AccessConvention.Read
         &facts.push(SemaCallReturnViewFact{
             slot: entry.slot,
             access: access,
@@ -274,13 +274,13 @@ fn sema_call_return_view_facts(signature: Type, receiver: Expr?, args: [CallArg]
 
 // The value an infallible or fallible call returns on success (`T` of
 // `T Never!` / `T E!`), with user tags removed.
-fn sema_call_view_result_success(ty: Type) -> Type Never! {
+sema_call_view_result_success: fn(ty: Type) -> Type Never! {
     if sema_expr_unwrap_tag(ty) == .Result(ok, _) -> return sema_expr_unwrap_tag(ok)
     sema_expr_unwrap_tag(ty)
 }
 
 // A string literal with no interpolation is static text: no call frees it.
-fn sema_call_static_text_literal(expression: Expr) -> Bool Never! {
+sema_call_static_text_literal: fn(expression: Expr) -> Bool Never! {
     if expression == {
         .Paren(inner, _, _) -> return sema_call_static_text_literal(inner)
         .Str(parts, _, _) -> {
@@ -296,15 +296,15 @@ fn sema_call_static_text_literal(expression: Expr) -> Bool Never! {
 // A view-returning call whose source owner is a temporary (Rust
 // `report_temporary_view_source`). A source span is reported once, whichever
 // of the two codes reached it first.
-fn sema_call_report_temporary_view_source(span: Span, string_view: Bool, diagnostics: &[Diagnostic]) Never! {
+sema_call_report_temporary_view_source: fn(span: Span, string_view: Bool, diagnostics: &[Diagnostic]) Never! {
     loop previous in diagnostics {
         if (previous.code == "E2305" || previous.code == "E2307") && previous.span == span -> return
     }
-    diagnostic :: if string_view -> sema_error("E2307", span, "A returned view cannot borrow from a temporary argument", "The temporary owner is dropped at the end of this statement, while the returned view remains live", "Store the owner in a named binding first, then pass that binding to the view-returning call") else -> sema_error("E2305", span, "a returned view cannot borrow from a temporary argument", "the temporary owner is dropped at the end of this statement, while the returned view remains live", "store the owner in a named binding first, then pass that binding to the view-returning call")
+    diagnostic: if string_view -> sema_error("E2307", span, "A returned view cannot borrow from a temporary argument", "The temporary owner is dropped at the end of this statement, while the returned view remains live", "Store the owner in a named binding first, then pass that binding to the view-returning call") else -> sema_error("E2305", span, "a returned view cannot borrow from a temporary argument", "the temporary owner is dropped at the end of this statement, while the returned view remains live", "store the owner in a named binding first, then pass that binding to the view-returning call")
     &diagnostics.push(diagnostic)
 }
 
-fn sema_call_validate_binding(callee: String, params: [SemaCallParam], binding: SemaCallBinding, args: [CallArg], span: Span, diagnostics: &[Diagnostic]) -> Bool {
+sema_call_validate_binding: fn(callee: String, params: [SemaCallParam], binding: SemaCallBinding, args: [CallArg], span: Span, diagnostics: &[Diagnostic]) -> Bool {
     if binding.sources.len() != args.len() {
         &diagnostics.push(sema_error("E0104", span, "the call binding and written arguments disagree", "a checked call must have one source row for every argument value", "resolve callable defaults before checking the call"))
         return false
@@ -313,7 +313,7 @@ fn sema_call_validate_binding(callee: String, params: [SemaCallParam], binding: 
     loop index in 0..<params.len() -> &seen.push(false)
     valid := true
     loop index in 0..<binding.sources.len() {
-        slot :: sema_call_bound_slot(binding, binding.sources[index], args[index])
+        slot: sema_call_bound_slot(binding, binding.sources[index], args[index])
         if {
             slot < 0 || slot >= params.len() -> valid = false
             else -> seen[slot] = true
@@ -332,7 +332,7 @@ fn sema_call_validate_binding(callee: String, params: [SemaCallParam], binding: 
     valid && missing == 0
 }
 
-fn sema_call_is_scalar(ty: Type) -> Bool Never! {
+sema_call_is_scalar: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Int -> true
         .IntN(_, _) -> true
@@ -344,7 +344,7 @@ fn sema_call_is_scalar(ty: Type) -> Bool Never! {
     }
 }
 
-fn sema_call_convention_diagnostic(callee: String, param: SemaCallParam, arg: CallArg, decision: SemaCallConventionDecision) -> Diagnostic {
+sema_call_convention_diagnostic: fn(callee: String, param: SemaCallParam, arg: CallArg, decision: SemaCallConventionDecision) -> Diagnostic {
     if decision == {
         .RequiresWrite -> sema_error("E0202", arg.span, "parameter `{param.name}` requires the write-access marker `&` at the call site", "`{callee}` needs to edit this value with the write-access marker `&`", "write `&` before the argument")
         .RejectsMove -> sema_error("E0203", arg.span, "a value was passed with the move marker `^` to a parameter that does not consume", "only a move parameter accepts a moved value", "remove the move marker `^`")
@@ -356,17 +356,17 @@ fn sema_call_convention_diagnostic(callee: String, param: SemaCallParam, arg: Ca
 // subset, which accepts only function values. A name that is not a
 // registered function, and a module-qualified name, are left to the
 // ordinary argument check.
-fn sema_call_c_callback_unsafe(argument: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Bool {
+sema_call_c_callback_unsafe: fn(argument: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Bool {
     if argument == {
         .Ident(name, _, _) -> {
-            function :: sema_http_route_find_function(environment, program, scopes, name) ?? return false
+            function: sema_http_route_find_function(environment, program, scopes, name) ?? return false
             return !sema_call_foreign_thread_safe_func(function.declaration)
         }
         .Lambda(lambda, _) -> return !sema_call_foreign_thread_safe_lambda(lambda) || sema_call_lambda_captures_local(lambda, scopes)
         .Field(base, _, _, _) -> {
             if base == .Ident(name, _, _) {
-                index :: sema_scope_resolve_index(scopes, name) ?? return false
-                kind :: scopes.bindings[index].symbol.kind
+                index: sema_scope_resolve_index(scopes, name) ?? return false
+                kind: scopes.bindings[index].symbol.kind
                 return kind != SymbolKind.Module && kind != SymbolKind.Import
             }
             return true
@@ -377,7 +377,7 @@ fn sema_call_c_callback_unsafe(argument: Expr, environment: SemaScopeEnvironment
 
 // A C callback lambda is capture-free: no name it reads, other than its own
 // parameters and bindings, may be a local of the enclosing function.
-fn sema_call_lambda_captures_local(lambda: Lambda, scopes: SemaScopeTable) -> Bool {
+sema_call_lambda_captures_local: fn(lambda: Lambda, scopes: SemaScopeTable) -> Bool {
     inner := (loop parameter in lambda.params -> parameter.name)
     names := [String]{}
     if lambda.body == {
@@ -400,18 +400,18 @@ fn sema_call_lambda_captures_local(lambda: Lambda, scopes: SemaScopeTable) -> Bo
     }
     loop name in names {
         if inner.contains(name) -> next
-        index :: sema_scope_resolve_index(scopes, name) ?? next
-        kind :: scopes.bindings[index].symbol.kind
+        index: sema_scope_resolve_index(scopes, name) ?? next
+        kind: scopes.bindings[index].symbol.kind
         if kind == SymbolKind.Local || kind == SymbolKind.Parameter -> return true
     }
     false
 }
 
-fn sema_call_note_ident(names: &[String], expression: Expr) {
+sema_call_note_ident: fn(names: &[String], expression: Expr) {
     if expression == .Ident(name, _, _) -> &names.push(name)
 }
 
-fn sema_call_foreign_thread_safe_func(func: Func) -> Bool Never! {
+sema_call_foreign_thread_safe_func: fn(func: Func) -> Bool Never! {
     if !func.is_pure || func.type_params.len() > 0 || func.pre.len() > 0 || func.post.len() > 0 -> return false
     loop statement in func.body {
         if !sema_call_foreign_thread_safe_stmt(statement) -> return false
@@ -419,7 +419,7 @@ fn sema_call_foreign_thread_safe_func(func: Func) -> Bool Never! {
     true
 }
 
-fn sema_call_foreign_thread_safe_lambda(lambda: Lambda) -> Bool Never! {
+sema_call_foreign_thread_safe_lambda: fn(lambda: Lambda) -> Bool Never! {
     if lambda.take_names.len() > 0 || lambda.meta.mut_captures.len() > 0 || lambda.meta.cloned_captures.len() > 0 -> return false
     if lambda.body == {
         .Expr(value) -> return sema_call_foreign_thread_safe_expr(value)
@@ -432,7 +432,7 @@ fn sema_call_foreign_thread_safe_lambda(lambda: Lambda) -> Bool Never! {
     }
 }
 
-fn sema_call_foreign_thread_safe_stmt(statement: Stmt) -> Bool Never! {
+sema_call_foreign_thread_safe_stmt: fn(statement: Stmt) -> Bool Never! {
     if statement == {
         .Return(value, _) -> return if value == .Val(returned) -> sema_call_foreign_thread_safe_expr(returned) else -> true
         .Expr(value) -> return sema_call_foreign_thread_safe_expr(value)
@@ -441,7 +441,7 @@ fn sema_call_foreign_thread_safe_stmt(statement: Stmt) -> Bool Never! {
     }
 }
 
-fn sema_call_foreign_thread_safe_expr(expression: Expr) -> Bool Never! {
+sema_call_foreign_thread_safe_expr: fn(expression: Expr) -> Bool Never! {
     if expression == {
         .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Char(_, _, _) | .Ident(_, _, _) -> return true
         .Unary(_, operand, _, _) -> return sema_call_foreign_thread_safe_expr(operand)
@@ -457,14 +457,14 @@ fn sema_call_foreign_thread_safe_expr(expression: Expr) -> Bool Never! {
     }
 }
 
-fn sema_call_lambda_escape_policy(parameter: SemaCallParam, abi: SemaRegistrationCallableABI?) -> Bool? {
+sema_call_lambda_escape_policy: fn(parameter: SemaCallParam, abi: SemaRegistrationCallableABI?) -> Bool? {
     if parameter.convention == AccessConvention.Move -> return Val(true)
-    callable_abi :: abi ?? return None
-    parameter_type :: sema_call_parameter_type(parameter) ?? return None
+    callable_abi: abi ?? return None
+    parameter_type: sema_call_parameter_type(parameter) ?? return None
     Val(sema_registration_callback_boundary_param(callable_abi, parameter_type))
 }
 
-fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], abi: SemaRegistrationCallableABI?, apply_lambda_escape_override: Bool, binding: SemaCallBinding, args: &[CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic], report_conventions: Bool) -> SemaCallTypedArguments? {
+sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam], abi: SemaRegistrationCallableABI?, apply_lambda_escape_override: Bool, binding: SemaCallBinding, args: &[CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic], report_conventions: Bool) -> SemaCallTypedArguments? {
     if !sema_call_validate_binding(callee, params, binding, args, span, &diagnostics) -> return None
     values := [TExpr]{}
     slots := [Int]{}
@@ -479,15 +479,15 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
     complete := true
     loop index in 0..<args.len() {
         &reference_starts.push(context.name_references.len())
-        slot :: sema_call_bound_slot(binding, binding.sources[index], args[index])
+        slot: sema_call_bound_slot(binding, binding.sources[index], args[index])
         if slot < 0 || slot >= params.len() -> return None
-        parameter :: params[slot]
-        required_declared :: sema_call_argument_parameter_type(parameter, args[index]) ?? {
+        parameter: params[slot]
+        required_declared: sema_call_argument_parameter_type(parameter, args[index]) ?? {
             &diagnostics.push(sema_error("E0112", args[index].span, "this callable parameter has no checked type", "call checking cannot prove an argument safe without the declaration type", "register the complete callable signature"))
             return None
         }
-        required :: sema_call_resolved_type(required_declared, environment, program)
-        decision :: sema_call_argument_convention(parameter, args[index])
+        required: sema_call_resolved_type(required_declared, environment, program)
+        decision: sema_call_argument_convention(parameter, args[index])
         if report_conventions && decision != SemaCallConventionDecision.Accepted {
             &diagnostics.push(sema_call_convention_diagnostic(callee, parameter, args[index], decision))
             return None
@@ -495,12 +495,12 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
         // Rust CallBinder `rewrite` + `register_binder_refs`: a default names
         // earlier parameters through their declaration-slot temporaries, so
         // they shadow any caller binding of the same name.
-        binder_refs :: args[index].flags.binder_refs
-        binder_start :: context.name_references.len()
+        binder_refs: args[index].flags.binder_refs
+        binder_start: context.name_references.len()
         // A default written in another module checks in its declaring module's
         // names (sema_default_owner_scope), as a fresh value of its own.
         owner_scope := sema_call_default_owner_scope(binding.sources[index], parameter, args[index].expr, environment, program, scopes)
-        default_in_owner :: if owner_scope == {
+        default_in_owner: if owner_scope == {
             .Val(_) -> true
             .None -> false
         }
@@ -513,21 +513,21 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
         binder_keys := if binder_refs.len() > 0 && !default_in_owner -> sema_call_enter_binder_refs(binder_refs, args[index].flags.binder_site ?? span.start, environment, program, &scopes, &state, args[index].expr) else -> [String]{}
         // Rust `arg_expect`: a self-typed numeric read widens into the
         // parameter after it is checked on its own.
-        self_typed :: sema_stmt_numeric_slot_self_typed(args[index].expr, required)
-        trait_parameter :: if required == {
+        self_typed: sema_stmt_numeric_slot_self_typed(args[index].expr, required)
+        trait_parameter: if required == {
             .TraitObject(_) -> true
             else -> false
         }
         // A borrowed trait parameter lends the original concrete storage.
         // Expected-type coercion would instead construct an owned TraitBox.
-        borrowed_trait :: trait_parameter && parameter.convention != AccessConvention.Move
+        borrowed_trait: trait_parameter && parameter.convention != AccessConvention.Move
         // A unit parameter checks its argument on its own, so another unit of
         // its family can convert into it below.
-        unit_parameter :: sema_expr_unit_fact(required, environment, program) != None
+        unit_parameter: sema_expr_unit_fact(required, environment, program) != None
         // A variadic bounded by a compiler-owned trait has the trait's name as
         // its type; like a trait parameter's, its argument is checked on its
         // own and then against the bound (E1313 below).
-        owned_bound_variadic :: parameter.variadic && sema_call_owned_trait_bound(required_declared) != None
+        owned_bound_variadic: parameter.variadic && sema_call_owned_trait_bound(required_declared) != None
         argument_expected := Type?{None}
         if !self_typed && !borrowed_trait && !unit_parameter && !owned_bound_variadic -> argument_expected = Val(required)
         // A C callback is a pure, monomorphic function or a capture-free
@@ -538,9 +538,9 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
                 &diagnostics.push(sema_checked_foreign_type_error(required_declared, expr_span(args[index].expr), true))
             }
         }
-        diagnostic_start :: diagnostics.len()
-        lambda_escapes :: if apply_lambda_escape_override -> sema_call_lambda_escape_policy(parameter, abi) else -> context.lambda_escapes
-        checked_argument :: if {
+        diagnostic_start: diagnostics.len()
+        lambda_escapes: if apply_lambda_escape_override -> sema_call_lambda_escape_policy(parameter, abi) else -> context.lambda_escapes
+        checked_argument: if {
             default_in_owner -> sema_call_check_owner_default(^owner_scope, args[index], argument_expected, parameter, abi, apply_lambda_escape_override, environment, program, &tail_store, &context, span, &binder_keys, &diagnostics)
             apply_lambda_escape_override -> sema_check_expression_with_lambda_escapes(args[index].expr, argument_expected, environment, program, &scopes, &state, &tail_store, &context, lambda_escapes, &diagnostics)
             else -> sema_check_expression(args[index].expr, argument_expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -552,7 +552,7 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
                 binder_site = args[index].flags.binder_site ?? span.start
             }
         }
-        checked_value :: checked_argument ?? {
+        checked_value: checked_argument ?? {
             if !default_in_owner && binder_refs.len() == 0 {
                 if sema_call_parameter_type_undeclared(required, environment, program) -> sema_call_argument_drop_mismatch(args[index].expr, diagnostic_start, &diagnostics) else -> sema_call_argument_replace_mismatch(callee, index, required, args[index].expr, lambda_escapes, diagnostic_start, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             }
@@ -572,8 +572,8 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
         // the value; like any other argument, that becomes the call's E0112.
         // Integer narrowing keeps its own E0108 (Rust check_type_assignable
         // reports it in place of the argument's E0112).
-        slot_start :: diagnostics.len()
-        widened :: if self_typed -> sema_stmt_numeric_slot_value(checked_value, required, environment, program, &diagnostics) else -> Val(checked_value)
+        slot_start: diagnostics.len()
+        widened: if self_typed -> sema_stmt_numeric_slot_value(checked_value, required, environment, program, &diagnostics) else -> Val(checked_value)
         value := widened ?? {
             if sema_integer_narrowing_fix(required, sema_call_resolved_type(checked_value.ty, environment, program)) == None -> sema_call_argument_replace_mismatch(callee, index, required, args[index].expr, lambda_escapes, slot_start, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             return None
@@ -584,7 +584,7 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
         // move marker, E0201) still run without a cascade E0112 (#6294).
         if !compatible && sema_call_parameter_type_undeclared(required, environment, program) -> compatible = true
         if !compatible && sema_expr_unit_implicit_applies(required, value.ty, environment, program) {
-            converted :: sema_expr_unit_implicit_conversion(value, required, environment, program, &scopes, context, &diagnostics) ?? {
+            converted: sema_expr_unit_implicit_conversion(value, required, environment, program, &scopes, context, &diagnostics) ?? {
                 complete = false
                 next
             }
@@ -604,7 +604,7 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
                 bounds = [String]{trait_name}
             }
             if parameter.variadic && !args[index].spread && bounds.len() > 0 {
-                arg_name :: type_name(value.ty)
+                arg_name: type_name(value.ty)
                 unmet := false
                 loop bound in bounds {
                     if sema_call_variadic_bound_met(bound, value.ty, environment, program) == (Val(true)) -> next
@@ -624,7 +624,7 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
         // labelled call is checked against the parameter it actually reaches.
         if abi == .Val(callable_abi) {
             if callable_abi.is_c_abi && required == Type.String && sema_call_literal_has_nul(args[index].expr) {
-                row :: diagnostic_registry_row("E3211") ?? panic("E3211 must have a registry row")
+                row: diagnostic_registry_row("E3211") ?? panic("E3211 must have a registry row")
                 &diagnostics.push(sema_error("E3211", expr_span(args[index].expr), row.what, row.why, row.fix))
             }
         }
@@ -646,18 +646,18 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
         // an element (or a place inside one) stays owned by its collection
         // (E0225). A write parameter's field keeps the refill move the
         // last-use pass proves.
-        consuming_mark :: !default_in_owner && parameter.convention == AccessConvention.Move && !parameter.variadic && args[index].convention == AccessConvention.Move && !sema_ownership_type_is_copy(value.ty)
+        consuming_mark: !default_in_owner && parameter.convention == AccessConvention.Move && !parameter.variadic && args[index].convention == AccessConvention.Move && !sema_ownership_type_is_copy(value.ty)
         if consuming_mark && sema_call_reject_element_move(args[index].expr, &diagnostics) -> return None
-        marked_place :: consuming_mark && sema_call_marked_move_place(args[index].expr, value)
+        marked_place: consuming_mark && sema_call_marked_move_place(args[index].expr, value)
         // A bare `^name` of a read parameter is reported at the name by the
         // ownership check below, which names the consumer (Rust
         // `check_call_argument_access`); a field place reports at the mark.
-        bare_name :: args[index].expr == .Ident(_, _, _)
+        bare_name: args[index].expr == .Ident(_, _, _)
         if marked_place && !bare_name && sema_ownership_reject_read_param_move(&state, args[index].expr, scopes, &diagnostics) -> return None
         taken_place := marked_place
         if taken_place && sema_ownership_binding_for_expr(&state, args[index].expr, scopes) == .Val(root) -> taken_place = !sema_ownership_binding_is_borrowed_param(root)
         if taken_place && args[index].expr == .Field(_, _, _, _) -> &state.exact_field_takes.push(expr_span(args[index].expr))
-        stored :: sema_call_marked_move_value(&state, taken_place, args[index].expr, ^value, scopes, &diagnostics) ?? return None
+        stored: sema_call_marked_move_value(&state, taken_place, args[index].expr, ^value, scopes, &diagnostics) ?? return None
         &values.push(stored)
         &slots.push(slot)
         &required_types.push(required)
@@ -675,7 +675,7 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
 // Whether an argument of type `ty` implements variadic bound `bound`: as a
 // trait value of that bound, or by the bound check generic calls use; None
 // while that check cannot decide.
-fn sema_call_variadic_bound_met(bound: String, ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool? {
+sema_call_variadic_bound_met: fn(bound: String, ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool? {
     if sema_call_type_assignable(Type.TraitObject{bounds: [String]{bound}}, ty, environment, program) == (Val(true)) -> return Val(true)
     if program.registration_graph == .Val(graph) -> return sema_type_bound_satisfied_with_generics(graph, ty, bound, environment.module_identity, environment.generic_params)
     None
@@ -683,15 +683,15 @@ fn sema_call_variadic_bound_met(bound: String, ty: Type, environment: SemaScopeE
 
 // E1313: an argument of a trait-bounded variadic `parameter` misses `bound`.
 // `callee` may be an arity function, which reports as the function called.
-fn sema_call_variadic_bound_unmet(arg_name: String, parameter: String, bound: String, callee: String, span: Span) -> Diagnostic {
-    shown :: sema_error_conversion_leaf(bound)
-    called :: sema_variadic_bound_callee(callee)
+sema_call_variadic_bound_unmet: fn(arg_name: String, parameter: String, bound: String, callee: String, span: Span) -> Diagnostic {
+    shown: sema_error_conversion_leaf(bound)
+    called: sema_variadic_bound_callee(callee)
     sema_error("E1313", span, "`{arg_name}` doesn't implement `{shown}`", "`{parameter}: ...{shown}` checks every argument against `{shown}` — that's how `{called}` accepts a mix of types safely", "implement `{shown}` for `{arg_name}`'s type, or drop the value from this call")
 }
 
 // The compiler-owned trait a parameter type names. Such a bound stays a
 // named type after resolution, where a declared trait becomes a trait object.
-fn sema_call_owned_trait_bound(ty: Type) -> String? {
+sema_call_owned_trait_bound: fn(ty: Type) -> String? {
     if ty == .Named(name) && sema_type_builtin_trait_symbol(name) != None -> return Val(name.copy())
     None
 }
@@ -700,19 +700,19 @@ fn sema_call_owned_trait_bound(ty: Type) -> String? {
 // passed to one of its taking parameters still moves at its last use, as at
 // an ordinary call; a name another argument of the same call also references
 // has no last use there. `values` are the checked arguments, in `args` order.
-fn sema_call_note_route_implicit_takes(params: [SemaCallParam], args: [CallArg], values: [TExpr], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, state: &SemaOwnershipState, context: SemaCheckContext) {
+sema_call_note_route_implicit_takes: fn(params: [SemaCallParam], args: [CallArg], values: [TExpr], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, state: &SemaOwnershipState, context: SemaCheckContext) {
     loop index in 0..<args.len() {
         if index >= params.len() || index >= values.len() -> break
         if sema_call_argument_convention(params[index], args[index]) != SemaCallConventionDecision.NeedsImplicitClone -> next
-        declared :: params[index].ty ?? next
-        required :: sema_call_resolved_type(declared, environment, program)
-        key :: sema_ownership_note_implicit_take(&state, args[index].expr, values[index].ty, required, environment, program, context.generic_params, scopes) ?? next
+        declared: params[index].ty ?? next
+        required: sema_call_resolved_type(declared, environment, program)
+        key: sema_ownership_note_implicit_take(&state, args[index].expr, values[index].ty, required, environment, program, context.generic_params, scopes) ?? next
         twice := false
         loop reference in context.name_references {
             if reference.symbol.id.key != key -> next
             loop other in 0..<args.len() {
                 if other == index -> next
-                other_span :: expr_span(args[other].expr)
+                other_span: expr_span(args[other].expr)
                 if reference.span.start >= other_span.start && reference.span.end <= other_span.end -> twice = true
             }
         }
@@ -721,9 +721,9 @@ fn sema_call_note_route_implicit_takes(params: [SemaCallParam], args: [CallArg],
 }
 
 // A string literal with no interpolation whose written text holds a NUL byte.
-fn sema_call_literal_has_nul(value: Expr) -> Bool Never! {
+sema_call_literal_has_nul: fn(value: Expr) -> Bool Never! {
     if value == .Str(parts, _, _) {
-        nul :: String.from_bytes([U8{0}]) ?? panic("NUL is UTF-8")
+        nul: String.from_bytes([U8{0}]) ?? panic("NUL is UTF-8")
         found := false
         loop part in parts {
             if part == {
@@ -742,7 +742,7 @@ fn sema_call_literal_has_nul(value: Expr) -> Bool Never! {
 // crypto operation and the values the operation accepts there
 // (Core/Crypto/Crypto.jet, Expert.jet return CryptoError outside it).
 // `bytes`: the bound is on a byte list's length, not on an Int.
-struct SemaCryptoBound {
+SemaCryptoBound: struct {
     parameter: String
     reason: DiagnosticCryptoMisuseReason
     noun: String
@@ -751,18 +751,18 @@ struct SemaCryptoBound {
     high: Int?
 }
 
-fn sema_crypto_int(parameter: String, reason: DiagnosticCryptoMisuseReason, noun: String, low: Int, high: Int?) -> SemaCryptoBound Never! {
+sema_crypto_int: fn(parameter: String, reason: DiagnosticCryptoMisuseReason, noun: String, low: Int, high: Int?) -> SemaCryptoBound Never! {
     SemaCryptoBound{parameter: parameter, reason: reason, noun: noun, bytes: false, low: low, high: high}
 }
 
-fn sema_crypto_bytes(parameter: String, reason: DiagnosticCryptoMisuseReason, noun: String, low: Int, high: Int) -> SemaCryptoBound Never! {
+sema_crypto_bytes: fn(parameter: String, reason: DiagnosticCryptoMisuseReason, noun: String, low: Int, high: Int) -> SemaCryptoBound Never! {
     SemaCryptoBound{parameter: parameter, reason: reason, noun: noun, bytes: true, low: low, high: Val(high)}
 }
 
-fn sema_crypto_bounds(callee: String) -> [SemaCryptoBound] Never! {
-    output :: DiagnosticCryptoMisuseReason.OutputLength
-    material :: DiagnosticCryptoMisuseReason.InvalidLength
-    nonce :: DiagnosticCryptoMisuseReason.NonceLength
+sema_crypto_bounds: fn(callee: String) -> [SemaCryptoBound] Never! {
+    output: DiagnosticCryptoMisuseReason.OutputLength
+    material: DiagnosticCryptoMisuseReason.InvalidLength
+    nonce: DiagnosticCryptoMisuseReason.NonceLength
     if callee == {
         "core.crypto.hkdf_sha256" | "core.crypto.expert.hkdf_sha256_raw" -> [SemaCryptoBound]{sema_crypto_int("len", output, "output length", 0, Val(8160))}
         "core.crypto.pbkdf2_hmac" -> [SemaCryptoBound]{
@@ -799,7 +799,7 @@ fn sema_crypto_bounds(callee: String) -> [SemaCryptoBound] Never! {
 
 // The compiler-known length of a byte-list argument: a written list literal
 // without spreads, or a value of a fixed-length list type.
-fn sema_crypto_known_length(value: Expr, ty: Type) -> Int? Never! {
+sema_crypto_known_length: fn(value: Expr, ty: Type) -> Int? Never! {
     if value == .ListLit(elements, _, _) {
         loop element in elements {
             if element == .Spread(_, _, _) -> return None
@@ -812,10 +812,10 @@ fn sema_crypto_known_length(value: Expr, ty: Type) -> Int? Never! {
     None
 }
 
-fn sema_crypto_misuse(operation: String, bound: SemaCryptoBound, expected: String, actual: Int, span: Span) -> Diagnostic Never! {
-    unit :: if !bound.bytes -> "" else if actual == 1 -> " byte" else -> " bytes"
-    over :: if bound.bytes -> " bytes" else -> ""
-    article :: if bound.noun.starts_with("i") || bound.noun.starts_with("o") -> "an" else -> "a"
+sema_crypto_misuse: fn(operation: String, bound: SemaCryptoBound, expected: String, actual: Int, span: Span) -> Diagnostic Never! {
+    unit: if !bound.bytes -> "" else if actual == 1 -> " byte" else -> " bytes"
+    over: if bound.bytes -> " bytes" else -> ""
+    article: if bound.noun.starts_with("i") || bound.noun.starts_with("o") -> "an" else -> "a"
     diagnostic := sema_error("E2702", span, "Crypto API misuse", "the {bound.noun} is {actual}{unit}, and `{operation}` takes {expected}{over}, so the call can only fail", "Replace the offending cryptographic argument with the concrete value or bound named in the diagnostic: pass {article} {bound.noun} of {expected}{over}")
     diagnostic.structured = Val(DiagnosticStructured.CryptoMisuse{reason: bound.reason, operation: operation, expected: Val(expected), actual: Val(actual)})
     diagnostic
@@ -829,21 +829,21 @@ fn sema_crypto_misuse(operation: String, bound: SemaCryptoBound, expected: Strin
 // the effect solve still reads its arguments; its implicit propagation is not
 // reported again (sema_crypto_misused_call), and an error of any earlier
 // check drops every E2702 (sema_crypto_misuse_precedence).
-fn sema_call_crypto_misuse(callee: String, params: [SemaCallParam], args: [CallArg], values: [TExpr], slots: [Int], context: SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
+sema_call_crypto_misuse: fn(callee: String, params: [SemaCallParam], args: [CallArg], values: [TExpr], slots: [Int], context: SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
     if !callee.starts_with("core.crypto.") -> return
-    bounds :: sema_crypto_bounds(callee)
+    bounds: sema_crypto_bounds(callee)
     if bounds.len() == 0 -> return
     if callee.starts_with("core.crypto.expert.") && context.unsafe_depth == 0 -> return
-    parts :: callee.split(".").to_list()
-    operation :: parts[parts.len() - 1].copy()
+    parts: callee.split(".").to_list()
+    operation: parts[parts.len() - 1].copy()
     memory := Int?{None}
     iterations := Int?{None}
     memory_span := Span?{None}
     refused := false
     loop bound in bounds {
-        index :: sema_crypto_argument_index(params, slots, bound.parameter) ?? next
-        known :: if bound.bytes -> sema_crypto_known_length(args[index].expr, values[index].ty) else -> sema_call_compute_literal_int(args[index].expr)
-        actual :: known ?? next
+        index: sema_crypto_argument_index(params, slots, bound.parameter) ?? next
+        known: if bound.bytes -> sema_crypto_known_length(args[index].expr, values[index].ty) else -> sema_call_compute_literal_int(args[index].expr)
+        actual: known ?? next
         if bound.parameter == "memory_kib" {
             memory = Val(actual)
             memory_span = Val(expr_span(args[index].expr))
@@ -863,15 +863,15 @@ fn sema_call_crypto_misuse(callee: String, params: [SemaCallParam], args: [CallA
     // Argon2id's joint work bound (spec.md, the expert surface): memory cost
     // × iterations of at most 1048576, each within its own bound above.
     if memory == .Val(kib) && iterations == .Val(passes) && memory_span == .Val(at) && kib * passes > 1048576 {
-        work :: sema_crypto_int("memory_kib", DiagnosticCryptoMisuseReason.MemoryTimeCost, "memory cost × iterations", 0, Val(1048576))
+        work: sema_crypto_int("memory_kib", DiagnosticCryptoMisuseReason.MemoryTimeCost, "memory cost × iterations", 0, Val(1048576))
         &diagnostics.push(sema_crypto_misuse(operation, work, "at most 1048576", kib * passes, at))
     }
 }
 
 // Whether the call `source` already has its E2702 among `diagnostics`.
-fn sema_crypto_misused_call(source: Expr?, diagnostics: [Diagnostic]) -> Bool Never! {
-    call :: source ?? return false
-    span :: expr_span(call)
+sema_crypto_misused_call: fn(source: Expr?, diagnostics: [Diagnostic]) -> Bool Never! {
+    call: source ?? return false
+    span: expr_span(call)
     loop diagnostic in diagnostics {
         if diagnostic.code != "E2702" -> next
         if diagnostic.span == .Val(at) {
@@ -883,7 +883,7 @@ fn sema_crypto_misused_call(source: Expr?, diagnostics: [Diagnostic]) -> Bool Ne
 
 // D-CRYPTO-DIAG1=A precedence: E2702 is considered only once syntax, types,
 // effects and every other check pass, so any other error drops each E2702.
-fn sema_crypto_misuse_precedence(diagnostics: &[Diagnostic]) Never! {
+sema_crypto_misuse_precedence: fn(diagnostics: &[Diagnostic]) Never! {
     misused := false
     other := false
     loop diagnostic in diagnostics {
@@ -898,7 +898,7 @@ fn sema_crypto_misuse_precedence(diagnostics: &[Diagnostic]) Never! {
     diagnostics = kept
 }
 
-fn sema_crypto_argument_index(params: [SemaCallParam], slots: [Int], parameter: String) -> Int? Never! {
+sema_crypto_argument_index: fn(params: [SemaCallParam], slots: [Int], parameter: String) -> Int? Never! {
     loop index in 0..<slots.len() {
         if params[slots[index]].name == parameter -> return Val(index)
     }
@@ -907,14 +907,14 @@ fn sema_crypto_argument_index(params: [SemaCallParam], slots: [Int], parameter: 
 
 // (Rust `check_call_args`): an argument that does not fit its parameter is
 // E0112 about the call, after a checked typed-text rejection.
-fn sema_call_argument_mismatch(callee: String, index: Int, required: Type, offered: Type, span: Span) -> Diagnostic {
+sema_call_argument_mismatch: fn(callee: String, index: Int, required: Type, offered: Type, span: Span) -> Diagnostic {
     // ("core.mem", "volatile_read" | "volatile_write"): the pointer argument is
     // not a typed pointer, or the written value is not the pointer's element
     // type.
     if callee == "core.mem.volatile_read" || callee == "core.mem.volatile_write" {
-        operation :: sema_call_reflection_leaf_name(callee)
+        operation: sema_call_reflection_leaf_name(callee)
         if index == 0 {
-            why :: if operation == "volatile_read" -> "a volatile read reads through a typed pointer" else -> "a volatile write writes through a typed pointer"
+            why: if operation == "volatile_read" -> "a volatile read reads through a typed pointer" else -> "a volatile write writes through a typed pointer"
             return sema_error("E0112", span, "`{operation}` needs a `Ptr<T>`, not {sema_type_show(offered)}", why, "build a pointer first with `mem.Ptr<T>.from_addr(addr)`")
         }
         return sema_error("E0112", span, "`{operation}` writes a {sema_type_show(required)} through this pointer, but the value is {sema_type_show(offered)}", "a volatile write stores a value of the pointer's element type", "write a `{type_name(required)}` value")
@@ -927,8 +927,8 @@ fn sema_call_argument_mismatch(callee: String, index: Int, required: Type, offer
         if bounds.len() == 1 && !(offered == .TraitObject(_)) {
             bound := bounds[0]
             if bound.cut_last("::") == .Val(parts) -> bound = parts.after
-            name :: type_name(offered)
-            row :: diagnostic_registry_row("E0905") ?? panic("E0905 must have a registry row")
+            name: type_name(offered)
+            row: diagnostic_registry_row("E0905") ?? panic("E0905 must have a registry row")
             return sema_error("E0905", span, row.what.replace("{{type}}", name).replace("{{bound}}", bound), row.why.replace("{{why_text}}", "`{name}` would need to implement `{bound}` before it can be used here"), row.fix.replace("{{fix_text}}", "write `impl {name}.{bound} {{ … }}` with every required method"))
         }
     }
@@ -938,8 +938,8 @@ fn sema_call_argument_mismatch(callee: String, index: Int, required: Type, offer
 // A parameter type that names nothing already has its E0119 where the
 // declaration wrote it; an argument's mismatch against it is that same error
 // again (#6294).
-fn sema_call_parameter_type_undeclared(required: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
-    generic_names :: loop param in environment.generic_params -> param.name
+sema_call_parameter_type_undeclared: fn(required: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
+    generic_names: loop param in environment.generic_params -> param.name
     if program.registration_graph == .Val(graph) -> return sema_type_names_undeclared(graph, sema_scope_caller_row(environment, graph), required, generic_names)
     if environment.registration_graph == .Val(graph) -> return sema_type_names_undeclared(graph, sema_scope_caller_row(environment, graph), required, generic_names)
     false
@@ -947,25 +947,25 @@ fn sema_call_parameter_type_undeclared(required: Type, environment: SemaScopeEnv
 
 // Drops the generic E0108 the argument's own check reported against an
 // undeclared parameter type, keeping every other report of the argument.
-fn sema_call_argument_drop_mismatch(value: Expr, diagnostic_start: Int, diagnostics: &[Diagnostic]) {
-    mismatch_index :: sema_value_mismatch_index(diagnostics, diagnostic_start, expr_span(value)) ?? return
+sema_call_argument_drop_mismatch: fn(value: Expr, diagnostic_start: Int, diagnostics: &[Diagnostic]) {
+    mismatch_index: sema_value_mismatch_index(diagnostics, diagnostic_start, expr_span(value)) ?? return
     loop index in mismatch_index..<diagnostics.len() - 1 -> diagnostics[index] = diagnostics[index + 1]
-    _ :: &diagnostics.pop()
+    _: &diagnostics.pop()
 }
 
 // The argument's own check rejected it against its parameter with the generic
 // E0108 at the value; that report becomes the call's E0112, with the value's
 // own type inferred without the parameter as a target. A lambda value is
 // probed under the parameter's escape policy, so its capture facts match.
-fn sema_call_argument_replace_mismatch(callee: String, index: Int, required: Type, value: Expr, lambda_escapes: Bool?, diagnostic_start: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
-    value_span :: expr_span(value)
-    mismatch_index :: sema_value_mismatch_index(diagnostics, diagnostic_start, value_span) ?? return
+sema_call_argument_replace_mismatch: fn(callee: String, index: Int, required: Type, value: Expr, lambda_escapes: Bool?, diagnostic_start: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
+    value_span: expr_span(value)
+    mismatch_index: sema_value_mismatch_index(diagnostics, diagnostic_start, value_span) ?? return
     probe_diagnostics := [Diagnostic]{}
     previous_lambda_escapes := context.lambda_escapes
     context.lambda_escapes = lambda_escapes
-    probed :: sema_probe_expression(value, None, environment, program, &scopes, &state, &tail_store, &context, &probe_diagnostics)
+    probed: sema_probe_expression(value, None, environment, program, &scopes, &state, &tail_store, &context, &probe_diagnostics)
     context.lambda_escapes = previous_lambda_escapes
-    offered :: probed ?? return
+    offered: probed ?? return
     offered_ty := sema_call_resolved_type(offered.ty, environment, program)
     // A lambda checked against a callable keeps its plain return (Rust
     // `infer_lambda`); the probe above had no target and gave it the total
@@ -985,7 +985,7 @@ fn sema_call_argument_replace_mismatch(callee: String, index: Int, required: Typ
 
 // Whether an argument other than `own` references the binding `key`;
 // `starts` holds each argument's first name reference and the end.
-fn sema_call_key_named_elsewhere(key: String, own: Int, starts: [Int], context: SemaCheckContext) -> Bool Never! {
+sema_call_key_named_elsewhere: fn(key: String, own: Int, starts: [Int], context: SemaCheckContext) -> Bool Never! {
     loop other in 0..<starts.len() - 1 {
         if other == own -> next
         loop index in starts[other]..<starts[other + 1] {
@@ -995,8 +995,8 @@ fn sema_call_key_named_elsewhere(key: String, own: Int, starts: [Int], context: 
     false
 }
 
-fn sema_call_binder_ref_symbol(environment: SemaScopeEnvironment, program: SemaProgramTables, owner: String, site: Int, slot: Int, name: String, ty: Type, span: Span) -> Symbol Never! {
-    id :: symbol_id(SymbolKind.Local, environment.module_identity, owner, "binder_ref_{site}_{slot}")
+sema_call_binder_ref_symbol: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, owner: String, site: Int, slot: Int, name: String, ty: Type, span: Span) -> Symbol Never! {
+    id: symbol_id(SymbolKind.Local, environment.module_identity, owner, "binder_ref_{site}_{slot}")
     Symbol{id: id, kind: SymbolKind.Local, name: name, module_name: environment.module_identity, owner: Val(owner), span: span, ty: Val(ty), visibility: 0}
 }
 
@@ -1006,20 +1006,20 @@ fn sema_call_binder_ref_symbol(environment: SemaScopeEnvironment, program: SemaP
 // unused binding. Each placeholder is declared at the default's first source
 // byte, so every read in it follows the declaration: a method chain or index
 // (`values.len()`, `values[0]`) is spanned after its base (jfmt_expr_start).
-fn sema_call_enter_binder_refs(refs: [BinderRef], site: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, default_expr: Expr) -> [String] Never! {
-    span :: Span{start: jfmt_expr_start(default_expr), end: expr_span(default_expr).end}
-    owner :: sema_scope_function_owner_key(scopes)
+sema_call_enter_binder_refs: fn(refs: [BinderRef], site: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, default_expr: Expr) -> [String] Never! {
+    span: Span{start: jfmt_expr_start(default_expr), end: expr_span(default_expr).end}
+    owner: sema_scope_function_owner_key(scopes)
     _ := sema_scope_enter(&scopes, &state, owner)
     keys := [String]{}
     loop reference in refs {
-        symbol :: sema_call_binder_ref_symbol(environment, program, owner, site, reference.slot, reference.name, reference.ty, span)
+        symbol: sema_call_binder_ref_symbol(environment, program, owner, site, reference.slot, reference.name, reference.ty, span)
         _ := sema_scope_declare_local(&scopes, symbol, false, AccessConvention.Read, None, false)
         &keys.push(symbol.id.key)
     }
     keys
 }
 
-fn sema_call_binder_refs_read(keys: [String], start: Int, context: SemaCheckContext) -> Bool Never! {
+sema_call_binder_refs_read: fn(keys: [String], start: Int, context: SemaCheckContext) -> Bool Never! {
     loop index in start..<context.name_references.len() {
         if keys.contains(context.name_references[index].symbol.id.key) -> return true
     }
@@ -1028,21 +1028,21 @@ fn sema_call_binder_refs_read(keys: [String], start: Int, context: SemaCheckCont
 
 // The declaring module's scope for a default argument this call takes, when
 // the default is written in another module (sema_default_owner_scope).
-fn sema_call_default_owner_scope(source: SemaCallArgSource, parameter: SemaCallParam, expression: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> SemaDefaultOwnerScope? {
+sema_call_default_owner_scope: fn(source: SemaCallArgSource, parameter: SemaCallParam, expression: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> SemaDefaultOwnerScope? {
     if source == {
         .Default(_) -> {}
         else -> return None
     }
-    reference :: parameter.default_ref ?? return None
-    owner_module :: sema_call_default_ref_module(program, reference) ?? return None
+    reference: parameter.default_ref ?? return None
+    owner_module: sema_call_default_ref_module(program, reference) ?? return None
     sema_default_owner_scope(environment, program, scopes, owner_module, expression)
 }
 
 // The module that declares the callable a default belongs to.
-fn sema_call_default_ref_module(program: SemaProgramTables, reference: FunctionDefaultRef) -> String? {
+sema_call_default_ref_module: fn(program: SemaProgramTables, reference: FunctionDefaultRef) -> String? {
     if program.registration_graph == .Val(graph) {
-        row :: sema_registration_callable_row(graph, reference.owner_key) ?? return None
-        module_index :: if row == {
+        row: sema_registration_callable_row(graph, reference.owner_key) ?? return None
+        module_index: if row == {
             .Function(index, _) | .Foreign(index, _) -> index
             .NominalMethod(index, _, _) | .ImplMethod(index, _, _) -> index
         }
@@ -1055,11 +1055,11 @@ fn sema_call_default_ref_module(program: SemaProgramTables, reference: FunctionD
 // names. Its binder slots key under the calling function and module, as
 // sema_call_pin_binder_arguments reads them; a problem it reports is anchored
 // at the call.
-fn sema_call_check_owner_default(owner_scope: ^SemaDefaultOwnerScope?, argument: CallArg, expected: Type?, parameter: SemaCallParam, abi: SemaRegistrationCallableABI?, apply_lambda_escape_override: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, call_span: Span, binder_keys: &[String], diagnostics: &[Diagnostic]) -> TExpr? {
+sema_call_check_owner_default: fn(owner_scope: ^SemaDefaultOwnerScope?, argument: CallArg, expected: Type?, parameter: SemaCallParam, abi: SemaRegistrationCallableABI?, apply_lambda_escape_override: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, call_span: Span, binder_keys: &[String], diagnostics: &[Diagnostic]) -> TExpr? {
     scope := ^owner_scope ?? return None
     if argument.flags.binder_refs.len() > 0 -> binder_keys = sema_call_enter_binder_refs(argument.flags.binder_refs, argument.flags.binder_site ?? call_span.start, environment, program, &scope.scopes, &scope.state, argument.expr)
     default_diagnostics := [Diagnostic]{}
-    checked :: if apply_lambda_escape_override -> sema_check_expression_with_lambda_escapes(argument.expr, expected, scope.environment, program, &scope.scopes, &scope.state, &tail_store, &context, sema_call_lambda_escape_policy(parameter, abi), &default_diagnostics) else -> sema_check_expression(argument.expr, expected, scope.environment, program, &scope.scopes, &scope.state, &tail_store, &context, &default_diagnostics)
+    checked: if apply_lambda_escape_override -> sema_check_expression_with_lambda_escapes(argument.expr, expected, scope.environment, program, &scope.scopes, &scope.state, &tail_store, &context, sema_call_lambda_escape_policy(parameter, abi), &default_diagnostics) else -> sema_check_expression(argument.expr, expected, scope.environment, program, &scope.scopes, &scope.state, &tail_store, &context, &default_diagnostics)
     loop diagnostic in default_diagnostics -> &diagnostics.push(sema_default_use_site_diagnostic(diagnostic, call_span))
     checked
 }
@@ -1069,10 +1069,10 @@ fn sema_call_check_owner_default(owner_scope: ^SemaDefaultOwnerScope?, argument:
 // so binder references read the already-passed values. Methods and Fn calls
 // pin their receiver/callee first; this helper owns only argument pins.
 // Borrowed places are pinned as borrows, fresh values retain an owned pin.
-fn sema_call_pin_binder_arguments(typed: SemaCallTypedArguments, params: [SemaCallParam], lowered: &[TCallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, span: Span) -> [TStmt] Never! {
+sema_call_pin_binder_arguments: fn(typed: SemaCallTypedArguments, params: [SemaCallParam], lowered: &[TCallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, span: Span) -> [TStmt] Never! {
     bindings := [TStmt]{}
     if !typed.pin_arguments -> return bindings
-    owner :: sema_scope_function_owner_key(scopes)
+    owner: sema_scope_function_owner_key(scopes)
     order := [Int]{}
     loop written in 0..<typed.source_indices.len() {
         loop index in 0..<typed.source_indices.len() {
@@ -1083,7 +1083,7 @@ fn sema_call_pin_binder_arguments(typed: SemaCallTypedArguments, params: [SemaCa
         if typed.source_indices[index] < 0 -> &order.push(index)
     }
     loop index in order {
-        slot :: typed.slots[index]
+        slot: typed.slots[index]
         // Each written rest argument must be evaluated before grouping the
         // tail. Its private pin cannot shadow a declaration-slot default.
         pin_slot := slot
@@ -1091,24 +1091,24 @@ fn sema_call_pin_binder_arguments(typed: SemaCallTypedArguments, params: [SemaCa
         // copy: the argument's checked value becomes the binder pin's init, and
         // lowered[index].value is overwritten with the pin local below. Jet has no exchange on an
         // element of the write-borrowed `lowered`.
-        original :: lowered[index].value.copy()
+        original: lowered[index].value.copy()
         init := original
-        place_value :: if init.kind == {
+        place_value: if init.kind == {
             .Local(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Deref(_) | .Borrow(_, _) -> true
             else -> false
         }
-        borrowed :: (lowered[index].borrow || lowered[index].mut_borrow) && place_value
+        borrowed: (lowered[index].borrow || lowered[index].mut_borrow) && place_value
         if borrowed {
-            access :: if lowered[index].mut_borrow -> AccessConvention.Write else -> AccessConvention.Read
+            access: if lowered[index].mut_borrow -> AccessConvention.Write else -> AccessConvention.Read
             init = sema_tree_node(original.ty, TExprKind.Borrow{place: init, access: access}, original.span)
         }
-        symbol :: sema_call_binder_ref_symbol(environment, program, owner, typed.binder_site, pin_slot, params[slot].name, original.ty, span)
+        symbol: sema_call_binder_ref_symbol(environment, program, owner, typed.binder_site, pin_slot, params[slot].name, original.ty, span)
         local := checked_symbol_local("binder_ref_{typed.binder_site}_{pin_slot}", span, symbol.id, original.ty)
         local.generated = true
         local.mutable = lowered[index].mut_borrow
         local.deref = borrowed
-        local_value :: sema_tree_node(original.ty, TExprKind.Local{local: local}, original.span)
-        moves_pin :: params[slot].convention == AccessConvention.Move || (params[slot].variadic && !lowered[index].spread)
+        local_value: sema_tree_node(original.ty, TExprKind.Local{local: local}, original.span)
+        moves_pin: params[slot].convention == AccessConvention.Move || (params[slot].variadic && !lowered[index].spread)
         lowered[index].value = if moves_pin -> sema_tree_node(original.ty, TExprKind.Move{value: local_value}, original.span) else -> local_value
         &bindings.push(TStmt.Let{local: local, let_ty: TLetTy.Inferred, init: init, gc_promotion: None, gc_transferred: false, span: span})
     }
@@ -1116,11 +1116,11 @@ fn sema_call_pin_binder_arguments(typed: SemaCallTypedArguments, params: [SemaCa
 }
 
 // Places the binder pins before the call they feed.
-fn sema_call_with_binder_pins(pins: ^[TStmt], call_value: ^TExpr, span: Span) -> TExpr Never! {
+sema_call_with_binder_pins: fn(pins: ^[TStmt], call_value: ^TExpr, span: Span) -> TExpr Never! {
     if pins.len() == 0 -> return call_value
     // copy: `call_value` moves into the block body on the next line, while the block node needs the
     // call's type as its own.
-    ty :: call_value.ty.copy()
+    ty: call_value.ty.copy()
     body := pins
     &body.push(TStmt.ExprStmt{value: call_value, span: span})
     sema_tree_node(ty, TExprKind.InlineBlock{body: body}, span)
@@ -1128,7 +1128,7 @@ fn sema_call_with_binder_pins(pins: ^[TStmt], call_value: ^TExpr, span: Span) ->
 
 // The place a `^`-marked call argument moves exactly: a field read, or a
 // whole non-Copy local named by itself (a Copy value simply copies).
-fn sema_call_marked_move_place(expr: Expr, value: TExpr) -> Bool Never! {
+sema_call_marked_move_place: fn(expr: Expr, value: TExpr) -> Bool Never! {
     if expr == {
         .Field(_, _, _, _) -> true
         .Ident(_, _, _) -> value.kind == .Local(_) && !sema_ownership_type_is_copy(value.ty)
@@ -1139,14 +1139,14 @@ fn sema_call_marked_move_place(expr: Expr, value: TExpr) -> Bool Never! {
 // A consuming argument `^xs[i]` or `^xs[i].f`: an element stays owned by its
 // collection, so the mark is E0225 (as at a value-position mark,
 // Expressions/Places.jet), never a silent copy. True when rejected.
-fn sema_call_reject_element_move(expr: Expr, diagnostics: &[Diagnostic]) -> Bool Never! {
-    element :: if expr == {
+sema_call_reject_element_move: fn(expr: Expr, diagnostics: &[Diagnostic]) -> Bool Never! {
+    element: if expr == {
         .Index(_, _, _, _, _) -> true
         else -> false
     }
     if !element && !sema_expression_place_below_element(expr) -> return false
-    start :: sema_ownership_place_root_start(expr) ?? expr_span(expr).start
-    mark_span :: Span{start: start - 1, end: start}
+    start: sema_ownership_place_root_start(expr) ?? expr_span(expr).start
+    mark_span: Span{start: start - 1, end: start}
     if element {
         &diagnostics.push(sema_error("E0225", mark_span, "the move marker `^` cannot take an element out of its collection", "`^` moves a name or one of its fields; an element stays owned by its collection, which has no hole to leave behind", "pass `.copy()` of the element instead of `^`, or take it out with a removing call such as `pop`"))
     } else {
@@ -1159,16 +1159,16 @@ fn sema_call_reject_element_move(expr: Expr, diagnostics: &[Diagnostic]) -> Bool
 // (`taken`) is a checked move, and the move of a match payload binding takes
 // the payload out of its subject (sema_ownership_move_pattern_payload).
 // None when the move is rejected.
-fn sema_call_marked_move_value(state: &SemaOwnershipState, taken: Bool, expr: Expr, value: ^TExpr, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> TExpr? {
+sema_call_marked_move_value: fn(state: &SemaOwnershipState, taken: Bool, expr: Expr, value: ^TExpr, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> TExpr? {
     if !taken -> return Val(^value)
-    start :: sema_ownership_place_root_start(expr) ?? expr_span(expr).start
-    payload :: sema_ownership_move_pattern_payload(&state, expr, Span{start: start - 1, end: start}, scopes, &diagnostics)
+    start: sema_ownership_place_root_start(expr) ?? expr_span(expr).start
+    payload: sema_ownership_move_pattern_payload(&state, expr, Span{start: start - 1, end: start}, scopes, &diagnostics)
     if payload < 0 -> return None
-    moved :: if payload > 0 -> sema_expression_payload_take(^value) else -> ^value
+    moved: if payload > 0 -> sema_expression_payload_take(^value) else -> ^value
     Val(sema_tree_node(moved.ty, TExprKind.Move{value: moved}, moved.span))
 }
 
-fn sema_call_widen_union(required: Type, offered: Type) -> Type? {
+sema_call_widen_union: fn(required: Type, offered: Type) -> Type? {
     if required == .Union(members) {
         loop member in members {
             if type_identity_equal(member, offered) -> return Val(required)
@@ -1177,21 +1177,21 @@ fn sema_call_widen_union(required: Type, offered: Type) -> Type? {
     None
 }
 
-fn sema_call_lower_bound_arguments(typed: SemaCallTypedArguments, params: [SemaCallParam], args: &[CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables) -> [TCallArg] Never! {
+sema_call_lower_bound_arguments: fn(typed: SemaCallTypedArguments, params: [SemaCallParam], args: &[CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables) -> [TCallArg] Never! {
     lowered := [TCallArg]{}
     loop index in 0..<typed.values.len() {
-        value :: typed.values[index]
-        arg :: args[index]
-        param :: params[typed.slots[index]]
-        required :: if index < typed.required_types.len() -> typed.required_types[index] else -> sema_call_resolved_type(sema_call_argument_parameter_type(param, arg) ?? value.ty, environment, program)
-        widen_to_vec :: if required == {
+        value: typed.values[index]
+        arg: args[index]
+        param: params[typed.slots[index]]
+        required: if index < typed.required_types.len() -> typed.required_types[index] else -> sema_call_resolved_type(sema_call_argument_parameter_type(param, arg) ?? value.ty, environment, program)
+        widen_to_vec: if required == {
             .List(_) -> if value.ty == {
                 .FixedList(_, _) -> true
                 else -> false
             }
             else -> false
         }
-        widen_to_union :: sema_call_widen_union(required, value.ty)
+        widen_to_union: sema_call_widen_union(required, value.ty)
         &lowered.push(TCallArg{
             value: value,
             template_items: [SymbolID]{},
@@ -1211,9 +1211,9 @@ fn sema_call_lower_bound_arguments(typed: SemaCallTypedArguments, params: [SemaC
 // Normalize the checked rest slot once, before publishing the checked tree. BuildList
 // owns scalar elements; ListSpread clones spread elements through the same
 // checked Clone/effect mechanism as a written list literal.
-fn sema_call_prepare_variadic_elements(typed: SemaCallTypedArguments, params: [SemaCallParam], args: [CallArg], lowered: &[TCallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+sema_call_prepare_variadic_elements: fn(typed: SemaCallTypedArguments, params: [SemaCallParam], args: [CallArg], lowered: &[TCallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
     loop index in 0..<lowered.len() {
-        slot :: typed.slots[index]
+        slot: typed.slots[index]
         if !params[slot].variadic -> next
         // copy: the variadic element value is rewrapped and written back into lowered[index] below.
         // Jet has no exchange on an element of the write-borrowed `lowered`.
@@ -1236,14 +1236,14 @@ fn sema_call_prepare_variadic_elements(typed: SemaCallTypedArguments, params: [S
             // the call still checks.
             if args[index].expr == .Ident(name, name_span, _) -> &diagnostics.push(sema_ownership_diag_expiring_secret_loan_change(name, "be moved", name_span))
         } else if !sema_ownership_type_is_copy(value.ty) {
-            places :: sema_ownership_places_from_expr_in_state(args[index].expr, scopes, &state)
+            places: sema_ownership_places_from_expr_in_state(args[index].expr, scopes, &state)
             borrowed := false
             loop place in places {
                 loop binding in scopes.bindings {
                     if binding.symbol.id.key == place.root_key && sema_ownership_binding_is_borrowed_param(binding) -> borrowed = true
                 }
             }
-            copies_place :: places.len() > 0 && (borrowed || !sema_ownership_unmarked_moves_name(args[index].expr) || sema_ownership_is_share_site(state, args[index].span))
+            copies_place: places.len() > 0 && (borrowed || !sema_ownership_unmarked_moves_name(args[index].expr) || sema_ownership_is_share_site(state, args[index].span))
             if copies_place {
                 if !sema_expression_list_check_clone(value.ty, value.span, environment, program, &context, &diagnostics) -> return false
                 value = sema_tree_node(value.ty, TExprKind.Clone{value: value, fact: CopyFact.Materialize}, value.span)
@@ -1260,7 +1260,7 @@ fn sema_call_prepare_variadic_elements(typed: SemaCallTypedArguments, params: [S
     true
 }
 
-fn sema_call_pack_variadic_arguments(typed: SemaCallTypedArguments, params: [SemaCallParam], lowered: [TCallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic]) -> [TCallArg]? {
+sema_call_pack_variadic_arguments: fn(typed: SemaCallTypedArguments, params: [SemaCallParam], lowered: [TCallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic]) -> [TCallArg]? {
     packed := [TCallArg]{}
     loop slot in 0..<params.len() {
         if !params[slot].variadic {
@@ -1269,8 +1269,8 @@ fn sema_call_pack_variadic_arguments(typed: SemaCallTypedArguments, params: [Sem
             }
             next
         }
-        list_ty :: sema_call_resolved_type(params[slot].ty ?? panic("checked variadic parameter has no type"), environment, program)
-        element :: if list_ty == {
+        list_ty: sema_call_resolved_type(params[slot].ty ?? panic("checked variadic parameter has no type"), environment, program)
+        element: if list_ty == {
             .List(inner) -> inner
             else -> panic("checked variadic parameter is not a List")
         }
@@ -1284,7 +1284,7 @@ fn sema_call_pack_variadic_arguments(typed: SemaCallTypedArguments, params: [Sem
             &packed.push(^argument)
             next
         }
-        has_spread :: loop argument in tail { if argument.spread -> break true } ?? false
+        has_spread: loop argument in tail { if argument.spread -> break true } ?? false
         kind := TExprKind.List{values: [TExpr]{}, trait_coercion: None}
         if has_spread {
             if !sema_expression_list_check_clone(element, span, environment, program, &context, &diagnostics) -> return None
@@ -1299,7 +1299,7 @@ fn sema_call_pack_variadic_arguments(typed: SemaCallTypedArguments, params: [Sem
             loop argument in tail -> &values.push(argument.value)
             kind = TExprKind.List{values: ^values, trait_coercion: None}
         }
-        value :: sema_tree_expr(list_ty, kind, span)
+        value: sema_tree_expr(list_ty, kind, span)
         &packed.push(TCallArg{
             value: ^value, template_items: [SymbolID]{},
             borrow: params[slot].convention == AccessConvention.Read,
@@ -1316,15 +1316,15 @@ fn sema_call_pack_variadic_arguments(typed: SemaCallTypedArguments, params: [Sem
 // lowering happens only after the ownership check accepts and completes.
 // Return the lowered arguments together with the declaration-slot
 // temporaries placed before the call.
-fn sema_call_check_bound_arguments_owned(state: &SemaOwnershipState, callee: String, params: [SemaCallParam], abi: SemaRegistrationCallableABI?, apply_lambda_escape_override: Bool, binding: SemaCallBinding, args: &[CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic]) -> (lowered: [TCallArg], pins: [TStmt])? {
-    typing_start :: diagnostics.len()
-    typed :: sema_call_typecheck_bound_arguments(callee, params, abi, apply_lambda_escape_override, binding, &args, environment, program, &scopes, &state, &tail_store, &context, span, &diagnostics, false) ?? {
+sema_call_check_bound_arguments_owned: fn(state: &SemaOwnershipState, callee: String, params: [SemaCallParam], abi: SemaRegistrationCallableABI?, apply_lambda_escape_override: Bool, binding: SemaCallBinding, args: &[CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic]) -> (lowered: [TCallArg], pins: [TStmt])? {
+    typing_start: diagnostics.len()
+    typed: sema_call_typecheck_bound_arguments(callee, params, abi, apply_lambda_escape_override, binding, &args, environment, program, &scopes, &state, &tail_store, &context, span, &diagnostics, false) ?? {
         // Rust `check_call` reports a mismatched argument type and still
         // checks the call's argument accesses (a lambda argument's captures
         // against the other arguments). It inferred the arguments in order,
         // each one's access conflicts before its own mismatch.
         if sema_call_only_argument_mismatches(diagnostics, typing_start) {
-            mismatches :: loop index in typing_start..<diagnostics.len() -> diagnostics[index]
+            mismatches: loop index in typing_start..<diagnostics.len() -> diagnostics[index]
             loop diagnostics.len() > typing_start -> _ := &diagnostics.pop()
             accesses := [Diagnostic]{}
             _ := sema_ownership_check_call_arguments(&state, callee, params, &args, scopes, &accesses)
@@ -1339,21 +1339,21 @@ fn sema_call_check_bound_arguments_owned(state: &SemaOwnershipState, callee: Str
         }
         return None
     }
-    ownership :: sema_ownership_check_call_arguments(&state, callee, params, &args, scopes, &diagnostics)
+    ownership: sema_ownership_check_call_arguments(&state, callee, params, &args, scopes, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return None
     lowered := sema_call_lower_bound_arguments(typed, params, &args, environment, program)
     if !sema_call_prepare_variadic_elements(typed, params, args, &lowered, environment, program, &scopes, &state, &context, &diagnostics) -> return None
     pins := sema_call_pin_binder_arguments(typed, params, &lowered, environment, program, scopes, span)
-    packed :: sema_call_pack_variadic_arguments(typed, params, lowered, environment, program, &context, span, &diagnostics) ?? return None
+    packed: sema_call_pack_variadic_arguments(typed, params, lowered, environment, program, &context, span, &diagnostics) ?? return None
     Val((lowered: ^packed, pins: ^pins))
 }
 
 // The index of the argument whose source holds `diagnostic`, or `args.len()`
 // when none does.
-fn sema_call_diagnostic_argument(diagnostic: Diagnostic, args: [CallArg]) -> Int Never! {
-    at :: diagnostic.span ?? return args.len()
+sema_call_diagnostic_argument: fn(diagnostic: Diagnostic, args: [CallArg]) -> Int Never! {
+    at: diagnostic.span ?? return args.len()
     loop index in 0..<args.len() {
-        source :: expr_source_span(args[index].expr)
+        source: expr_source_span(args[index].expr)
         if at.start >= args[index].span.start && at.start < source.end -> return index
     }
     args.len()
@@ -1361,7 +1361,7 @@ fn sema_call_diagnostic_argument(diagnostic: Diagnostic, args: [CallArg]) -> Int
 
 // True when the errors since `start` are all argument type mismatches (E0112)
 // and there is at least one.
-fn sema_call_only_argument_mismatches(diagnostics: [Diagnostic], start: Int) -> Bool Never! {
+sema_call_only_argument_mismatches: fn(diagnostics: [Diagnostic], start: Int) -> Bool Never! {
     found := false
     loop index in start..<diagnostics.len() {
         if diagnostics[index].severity != DIAGNOSTIC_ERROR -> next
@@ -1374,7 +1374,7 @@ fn sema_call_only_argument_mismatches(diagnostics: [Diagnostic], start: Int) -> 
 // A `SharedGuard` argument for a write parameter that is neither a
 // `guard_edit()` lease nor a binding the caller holds with write access (Rust
 // `param_conv` `Write`).
-fn sema_call_read_shared_guard_argument(state: &SemaOwnershipState, required: Type, offered: Type, expr: Expr, scopes: SemaScopeTable) -> Bool {
+sema_call_read_shared_guard_argument: fn(state: &SemaOwnershipState, required: Type, offered: Type, expr: Expr, scopes: SemaScopeTable) -> Bool {
     if required == .Apply(guard_name, _) {
         if guard_name != "SharedGuard" -> return false
     } else {

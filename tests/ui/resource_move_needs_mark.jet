@@ -2,33 +2,33 @@
 // owned destinations"): an owning position takes a resource out of an owned
 // variable's field or a live match payload only where `^` writes the move,
 // and once it is written a later use of the original is rejected.
-struct Res { name: String }
+Res: struct { name: String }
 impl Res.Close {
-    fn close(^self) { print("close {self.name}") }
+    close: fn(^self) { print("close {self.name}") }
 }
 
-struct Holder {
+Holder: struct {
     res: Res
     label: String
 }
 
-fn holder(name: String) -> Holder {
+holder: fn(name: String) -> Holder {
     Holder{res: Res{name: name}, label: name}
 }
 
-fn present(carrier: Holder?) -> Bool {
+present: fn(carrier: Holder?) -> Bool {
     carrier != None
 }
 
-fn field_unmarked() -> Res? {
-    h :: holder("field")
+field_unmarked: fn() -> Res? {
+    h: holder("field")
     out := Res?{None}
     out = Val(h.res)
     out
 }
 
-fn payload_unmarked() -> Res? {
-    carrier :: Val(holder("payload"))
+payload_unmarked: fn() -> Res? {
+    carrier: Val(holder("payload"))
     out := Holder?{None}
     if carrier == {
         .Val(found) -> out = Val(found)
@@ -40,35 +40,35 @@ fn payload_unmarked() -> Res? {
     }
 }
 
-fn payload_field_unmarked() -> Res? {
-    carrier :: Val(holder("payload field"))
+payload_field_unmarked: fn() -> Res? {
+    carrier: Val(holder("payload field"))
     if carrier == {
         .Val(found) -> Val(found.res)
         .None -> None
     }
 }
 
-fn arm_tail_unmarked() -> Holder {
-    carrier :: Val(holder("arm"))
-    found :: if carrier == {
+arm_tail_unmarked: fn() -> Holder {
+    carrier: Val(holder("arm"))
+    found: if carrier == {
         .Val(held) -> held
         .None -> panic("no holder")
     }
     found
 }
 
-fn field_marked_then_used() -> Res {
-    h :: holder("marked")
-    out :: Val(^h.res)
+field_marked_then_used: fn() -> Res {
+    h: holder("marked")
+    out: Val(^h.res)
     print(h.res.name)
     out ?? panic("none")
 }
 
-fn payload_marked_then_used() -> Res? {
-    carrier :: Val(holder("payload marked"))
+payload_marked_then_used: fn() -> Res? {
+    carrier: Val(holder("payload marked"))
     if carrier == {
         .Val(found) -> {
-            out :: Val(^found.res)
+            out: Val(^found.res)
             print(found.res.name)
             out
         }
@@ -76,8 +76,8 @@ fn payload_marked_then_used() -> Res? {
     }
 }
 
-fn subject_used_after_payload_move() -> Holder? {
-    carrier :: Val(holder("subject"))
+subject_used_after_payload_move: fn() -> Holder? {
+    carrier: Val(holder("subject"))
     out := Holder?{None}
     if carrier == {
         .Val(found) -> out = Val(^found)
@@ -87,6 +87,6 @@ fn subject_used_after_payload_move() -> Holder? {
     out
 }
 
-fn run() {
+run: fn() {
     print("unreached")
 }

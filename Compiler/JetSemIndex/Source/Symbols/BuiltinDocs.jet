@@ -11,8 +11,8 @@ use jet_foundation.[
 // One owned semantic catalog replaces the REPL's leaking static-string facade.
 // Summaries/examples live here; signatures come from the canonical checked
 // contracts, not the obsolete List<T>, ?T, or renamed Map operation spellings.
-fn semantic_builtin_member(owner: String, name: String, module_path: String, signature: String, summary: String, examples: [String]) -> SemanticSymbol Never! {
-    qualified_name :: "{owner}.{name}"
+semantic_builtin_member: fn(owner: String, name: String, module_path: String, signature: String, summary: String, examples: [String]) -> SemanticSymbol Never! {
+    qualified_name: "{owner}.{name}"
     SemanticSymbol{
         identity: "builtin:method:{qualified_name}",
         name: name,
@@ -29,27 +29,27 @@ fn semantic_builtin_member(owner: String, name: String, module_path: String, sig
     }
 }
 
-fn semantic_builtin_signature(owner: String, name: String, labels: [String], parameters: [Type], result: Type) -> String Never! {
+semantic_builtin_signature: fn(owner: String, name: String, labels: [String], parameters: [Type], result: Type) -> String Never! {
     assert_eq(labels.len(), parameters.len())
     args := [String]{}
     loop index in 0..<parameters.len() -> &args.push("{labels[index]}: {type_name(parameters[index])}")
-    head :: "{owner}.{name}({args.join(", ")})"
+    head: "{owner}.{name}({args.join(", ")})"
     if result == (Type.Named{name: "Unit"}) -> return head
     "{head} -> {type_name(result)}"
 }
 
-fn semantic_builtin_examples(owner: String, name: String, example: String?) -> [String] Never! {
+semantic_builtin_examples: fn(owner: String, name: String, example: String?) -> [String] Never! {
     if example == {
         .Val(text) -> [String]{text}
         .None -> [String]{"{owner}.{name}(...)"}
     }
 }
 
-fn semantic_builtin_collection_doc(owner: String, name: String, labels: [String], callback_return: Type?, summary: String, example: String?) -> SemanticSymbol Never! {
-    element :: Type.Named{name: if owner == "Map" -> "V" else -> "T"}
-    receiver :: if owner == "Map" -> (Type.Map{key: (Type.Named{name: "K"}), key_span: None, value: element}) else -> Type.List{element: element}
-    contract :: sema_collection_method_contract(receiver, name) ?? panic("builtin docs have no checked collection contract: {owner}.{name}")
-    seed :: Val(Type.Named{name: "R"})
+semantic_builtin_collection_doc: fn(owner: String, name: String, labels: [String], callback_return: Type?, summary: String, example: String?) -> SemanticSymbol Never! {
+    element: Type.Named{name: if owner == "Map" -> "V" else -> "T"}
+    receiver: if owner == "Map" -> (Type.Map{key: (Type.Named{name: "K"}), key_span: None, value: element}) else -> Type.List{element: element}
+    contract: sema_collection_method_contract(receiver, name) ?? panic("builtin docs have no checked collection contract: {owner}.{name}")
+    seed: Val(Type.Named{name: "R"})
     parameters := [Type]{}
     loop index in 0..<contract.row.args.len() {
         parameter := sema_collection_method_argument_type(contract, index, seed, true) ?? panic("builtin docs have no checked argument: {owner}.{name}")
@@ -62,19 +62,19 @@ fn semantic_builtin_collection_doc(owner: String, name: String, labels: [String]
         }
         &parameters.push(parameter)
     }
-    result :: sema_collection_method_result_type(contract, callback_return, seed) ?? panic("builtin docs have no checked result: {owner}.{name}")
+    result: sema_collection_method_result_type(contract, callback_return, seed) ?? panic("builtin docs have no checked result: {owner}.{name}")
     semantic_builtin_member(owner, name, "core.collections", semantic_builtin_signature(owner, name, labels, parameters, result), summary, semantic_builtin_examples(owner, name, example))
 }
 
-fn semantic_builtin_string_doc(name: String, labels: [String], summary: String) -> SemanticSymbol Never! {
-    contract :: builtin_method_row(Type.String, name, labels.len()) ?? panic("builtin docs have no checked String contract: {name}")
+semantic_builtin_string_doc: fn(name: String, labels: [String], summary: String) -> SemanticSymbol Never! {
+    contract: builtin_method_row(Type.String, name, labels.len()) ?? panic("builtin docs have no checked String contract: {name}")
     semantic_builtin_member("String", name, "core.collections", semantic_builtin_signature("String", name, labels, contract.parameters, contract.result), summary, semantic_builtin_examples("String", name, None))
 }
 
-fn semantic_builtin_static_doc(owner: String, name: String, module_path: String, labels: [String], summary: String, example: String?) -> SemanticSymbol Never! {
-    rows :: builtin_static_rows(owner, name)
+semantic_builtin_static_doc: fn(owner: String, name: String, module_path: String, labels: [String], summary: String, example: String?) -> SemanticSymbol Never! {
+    rows: builtin_static_rows(owner, name)
     assert_eq(rows.len(), 1)
-    row :: rows[0]
+    row: rows[0]
     semantic_builtin_member(owner, name, module_path, semantic_builtin_signature(owner, name, labels, row.parameters, row.return_type), summary, semantic_builtin_examples(owner, name, example))
 }
 
@@ -82,7 +82,7 @@ fn semantic_builtin_static_doc(owner: String, name: String, module_path: String,
 // checkers, rather than collection rows. Clock.system's Time effect is the
 // checked TimeHandles contract; Duration.in retains the published Rust seam
 // pending its canonical checked-provider integration.
-fn semantic_builtin_special_docs() -> [SemanticSymbol] Never! {
+semantic_builtin_special_docs: fn() -> [SemanticSymbol] Never! {
     [SemanticSymbol]{
         semantic_builtin_member("Clock", "system", "core.collections", "Clock.system() -[Time]> Clock", "Explicit monotonic production clock.", [String]{"Clock.system()"}),
         semantic_builtin_member("Duration", "in", "core.collections", "Duration.in(unit: DurationUnit) -> Int RangeError!", "Reads a checked whole duration unit.", [String]{"duration.in(.Milliseconds)"}),
@@ -90,7 +90,7 @@ fn semantic_builtin_special_docs() -> [SemanticSymbol] Never! {
     }
 }
 
-fn semantic_builtin_doc_symbols() -> [SemanticSymbol] Never! {
+semantic_builtin_doc_symbols: fn() -> [SemanticSymbol] Never! {
     symbols := [SemanticSymbol]{}
     // Duration constructors and explicit clock.
     &symbols.push(semantic_builtin_static_doc("Duration", "milliseconds", "core.collections", [String]{"value"}, "Checked runtime duration in milliseconds.", None))
@@ -106,7 +106,7 @@ fn semantic_builtin_doc_symbols() -> [SemanticSymbol] Never! {
     symbols
 }
 
-fn semantic_append_builtin_collection_docs(symbols: &[SemanticSymbol]) Never! {
+semantic_append_builtin_collection_docs: fn(symbols: &[SemanticSymbol]) Never! {
     &symbols.push(semantic_builtin_collection_doc("List", "len", [String]{}, None, "Number of items.", Val("items.len()")))
     &symbols.push(semantic_builtin_collection_doc("List", "is_empty", [String]{}, None, "True when there are no items.", None))
     &symbols.push(semantic_builtin_collection_doc("List", "push", [String]{"item"}, None, "Appends an item to the end.", None))
@@ -155,7 +155,7 @@ fn semantic_append_builtin_collection_docs(symbols: &[SemanticSymbol]) Never! {
     &symbols.push(semantic_builtin_collection_doc("Map", "each", [String]{"f"}, Val(Type.Named{name: "Unit"}), "Runs f once per entry.", None))
 }
 
-fn semantic_append_builtin_string_docs(symbols: &[SemanticSymbol]) Never! {
+semantic_append_builtin_string_docs: fn(symbols: &[SemanticSymbol]) Never! {
     &symbols.push(semantic_builtin_string_doc("len", [String]{}, "Number of characters."))
     &symbols.push(semantic_builtin_string_doc("is_empty", [String]{}, "True when the string is empty."))
     &symbols.push(semantic_builtin_string_doc("contains", [String]{"s"}, "True when s appears in the string."))

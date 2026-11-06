@@ -2,117 +2,117 @@
 // absent; an error contract names its error before the `!`. Effect denials
 // keep their prefix `!`, and `??`, `!x`, and `!=` are unchanged.
 #Error
-enum DBError {
+DBError: enum {
     Down
 }
 
 #Error
-enum TimeoutError {
+TimeoutError: enum {
     Late
 }
 
 #Error
-enum SaveError {
+SaveError: enum {
     Full
 }
 
-struct Entry {
+Entry: struct {
     id: Int
 }
 
-struct Holder<T> {
+Holder: struct<T> {
     value: T
 }
 
 // A field default with an optional typed head.
-struct Note {
+Note: struct {
     text: String
     author: String?{None}
 }
 
-fn find(id: Int) -> Entry? {
+find: fn(id: Int) -> Entry? {
     if id > 0 -> return Val(Entry{id: id})
     return None
 }
 
 // `[Int]?` is a list that may itself be missing.
-fn recent(n: Int) -> [Int]? {
+recent: fn(n: Int) -> [Int]? {
     if n > 0 -> return Val([n, n + 1])
     return None
 }
 
 // An optional success with a union error contract; the union is grouped.
-fn fetch(id: Int) -> Entry? (DBError | TimeoutError)! {
+fetch: fn(id: Int) -> Entry? (DBError | TimeoutError)! {
     if id < 0 -> return Err(DBError.Down)
     if id > 100 -> return Err(TimeoutError.Late)
     return find(id)
 }
 
 // A unit-fallible contract follows the parameters.
-fn save(entry: Entry) SaveError! {
+save: fn(entry: Entry) SaveError! {
     if entry.id > 100 -> return Err(SaveError.Full)
     print("saved {entry.id}")
 }
 
 // `Err!` pins the default error.
-fn parse_count(text: String) -> Int Err! {
-    n :: Int.parse(text) ?? return Err("not a number: {text}")
+parse_count: fn(text: String) -> Int Err! {
+    n: Int.parse(text) ?? return Err("not a number: {text}")
     return Ok(n)
 }
 
 // Effect denials keep their prefix `!`.
-fn tick() -[!Mem.Alloc]> {
+tick: fn() -[!Mem.Alloc]> {
 }
 
-fn run() {
+run: fn() {
     // `[Int?]` is a list whose items may be missing.
-    ids :: [Int?]{Val(1), None, Val(3)}
+    ids: [Int?]{Val(1), None, Val(3)}
     total := 0
     loop id in ids {
         total += id ?? 0
     }
     print("total {total}")
 
-    list :: recent(2) ?? [Int]{}
+    list: recent(2) ?? [Int]{}
     print("recent {list.len()}")
-    none :: recent(0) ?? [Int]{}
+    none: recent(0) ?? [Int]{}
     print("none {none.len()}")
 
     // `Holder<Int?>` holds an optional; `Holder<Int>?` is an optional holder.
-    inner :: Holder<Int?>{value: None}
-    held :: inner.value ?? -1
+    inner: Holder<Int?>{value: None}
+    held: inner.value ?? -1
     print("inner {held}")
-    maybe :: Holder<Int>?{Val(Holder<Int>{value: 5})}
+    maybe: Holder<Int>?{Val(Holder<Int>{value: 5})}
     if maybe == {
         .Val(holder) -> print("outer {holder.value}")
         .None -> print("outer none")
     }
 
-    one :: Int?{Val(4)}
-    first :: one ?? 0
+    one: Int?{Val(4)}
+    first: one ?? 0
     print("one {first}")
 
-    note :: Note{text: "hi"}
-    author :: note.author ?? "anon"
+    note: Note{text: "hi"}
+    author: note.author ?? "anon"
     print("{note.text} from {author}")
 
-    entry :: fetch(3) ?? return
+    entry: fetch(3) ?? return
     save(entry) ?? return
-    big :: Entry{id: 500}
+    big: Entry{id: 500}
     if save(big) == {
         .Err(_) -> print("save full")
         else -> {}
     }
-    fallback :: fetch(-1) ?? Entry{id: 0}
+    fallback: fetch(-1) ?? Entry{id: 0}
     print("fallback {fallback.id}")
-    absent :: fetch(0) ?? Entry{id: -2}
+    absent: fetch(0) ?? Entry{id: -2}
     print("absent {absent.id}")
 
-    good :: parse_count("12") ?? 0
-    bad :: parse_count("x") ?? -1
+    good: parse_count("12") ?? 0
+    bad: parse_count("x") ?? -1
     print("count {good} {bad}")
 
     tick()
-    ready :: !false
+    ready: !false
     if ready && total != 0 -> print("ready")
 }

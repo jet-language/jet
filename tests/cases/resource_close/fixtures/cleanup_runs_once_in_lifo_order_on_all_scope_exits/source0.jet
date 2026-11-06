@@ -1,31 +1,31 @@
 
-struct Resource { name: String }
+Resource: struct { name: String }
 
 impl Resource.Close {
-    fn close(^self) {
+    close: fn(^self) {
         print("close {self.name}")
     }
 }
 
-fn fail() -> Int Err! {
+fail: fn() -> Int Err! {
     return Err("stop")
 }
 
-fn returned() {
+returned: fn() {
     resource := Resource{ name: "return" }
     defer close(^resource)
     print("return body")
     return
 }
 
-fn questioned() -> Int Err! {
+questioned: fn() -> Int Err! {
     resource := Resource{ name: "question" }
     defer close(^resource)
     value := fail()
     return Ok(value)
 }
 
-fn looped() {
+looped: fn() {
     loop n in [0, 1] {
         resource := Resource{ name: if n == 0 -> "continue" else -> "break" }
         defer close(^resource)
@@ -34,7 +34,7 @@ fn looped() {
     }
 }
 
-fn run() {
+run: fn() {
     first := Resource{ name: "a" }
     defer close(^first)
     second := Resource{ name: "b" }

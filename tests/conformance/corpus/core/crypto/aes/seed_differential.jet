@@ -5,11 +5,11 @@
 // Frozen RustCrypto seed stdout SHA-256: f4d917250e04694bf18705652c69ea0e61f3bf3182e13cc248de618ac3afbf76 (fixtures.json).
 // Jet execution UNEXERCISED at capture; run this corpus after composed Core rebuild.
 use {
-    expert :: core.crypto.expert
+    expert: core.crypto.expert
     core.crypto.[CryptoError]
 }
 
-fn check(key: [U8], nonce: [U8], plain: [U8], aad: [U8], cipher: [U8], fail: Bool) {
+check: fn(key: [U8], nonce: [U8], plain: [U8], aad: [U8], cipher: [U8], fail: Bool) {
     #Unsafe("published KAT or frozen seed AES-GCM fixture") {
         if fail {
             if expert.aes256gcm_open(key, nonce, cipher, aad) == {
@@ -29,7 +29,7 @@ fn check(key: [U8], nonce: [U8], plain: [U8], aad: [U8], cipher: [U8], fail: Boo
     }
 }
 
-fn run() {
+run: fn() {
     // random_0
     check([U8]{31, 25, 40, 157, 204, 231, 140, 23, 66, 206, 239, 190, 10, 31, 169, 106, 252, 198, 7, 252, 187, 114, 178, 79, 249, 125, 169, 131, 193, 25, 52, 156}, [U8]{106, 247, 38, 85, 204, 103, 196, 91, 95, 211, 152, 13}, [U8]{}, [U8]{}, [U8]{170, 77, 227, 83, 143, 169, 28, 123, 196, 109, 189, 247, 234, 251, 132, 33}, false)
     // random_1

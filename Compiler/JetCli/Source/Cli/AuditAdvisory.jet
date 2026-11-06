@@ -10,7 +10,7 @@
 // audit (exit 1); lower-severity matches are reported and the audit passes.
 // `--explain <id>` prints one advisory of the verified feed.
 use {
-    cli_files :: core.files
+    cli_files: core.files
     jet_driver.[
         JetDriverVerbOutput,
         JET_DRIVER_EXIT_OK,
@@ -35,22 +35,22 @@ use {
 
 // A value flag of `jet inspect audit`: absent, given with its value, or given
 // without one.
-enum JetCLIAdvisoryAuditFlag {
+JetCLIAdvisoryAuditFlag: enum {
     Absent
     Given(value: String)
     Missing
 }
 
 // `--name <value>` or `--name=<value>` in `args`.
-fn jet_cli_advisory_audit_flag(args: [String], name: String) -> JetCLIAdvisoryAuditFlag Never! {
+jet_cli_advisory_audit_flag: fn(args: [String], name: String) -> JetCLIAdvisoryAuditFlag Never! {
     loop (index, word) in args {
         if word == name {
-            value :: args.get(index + 1) ?? return .Missing
+            value: args.get(index + 1) ?? return .Missing
             if value.starts_with("-") -> return .Missing
             return .Given{value: value}
         }
         if word.starts_with("{name}=") {
-            value :: word.removeprefix("{name}=")
+            value: word.removeprefix("{name}=")
             if value == "" -> return .Missing
             return .Given{value: value}
         }
@@ -59,17 +59,17 @@ fn jet_cli_advisory_audit_flag(args: [String], name: String) -> JetCLIAdvisoryAu
 }
 
 // One failed audit, as a jet.status/v1 line under `--json`.
-fn jet_cli_advisory_audit_fail(diagnostic: Diagnostic, exit_code: Int, color: Bool, json: Bool) -> JetDriverVerbOutput Never! {
-    diagnostics :: [Diagnostic]{diagnostic}
+jet_cli_advisory_audit_fail: fn(diagnostic: Diagnostic, exit_code: Int, color: Bool, json: Bool) -> JetDriverVerbOutput Never! {
+    diagnostics: [Diagnostic]{diagnostic}
     if json -> return JetDriverVerbOutput{stdout: jet_cli_reports_status_json("audit", false, None, "", "", diagnostics), stderr: "", exit_code: exit_code}
     JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all("", "", diagnostics, color), exit_code: exit_code}
 }
 
-fn jet_cli_advisory_audit_fail_one(diagnostic: Diagnostic, color: Bool, json: Bool) -> JetDriverVerbOutput Never! {
+jet_cli_advisory_audit_fail_one: fn(diagnostic: Diagnostic, color: Bool, json: Bool) -> JetDriverVerbOutput Never! {
     jet_cli_advisory_audit_fail(diagnostic, JET_DRIVER_EXIT_USER_ERROR, color, json)
 }
 
-fn jet_cli_advisory_audit(root: String, args: [String], color: Bool, json: Bool) -[FS, Env, Time]> JetDriverVerbOutput Never! {
+jet_cli_advisory_audit: fn(root: String, args: [String], color: Bool, json: Bool) -[FS, Env, Time]> JetDriverVerbOutput Never! {
     advisory_db := String?{None}
     if jet_cli_advisory_audit_flag(args, "--advisory-db") == {
         .Absent -> {}
@@ -91,20 +91,20 @@ fn jet_cli_advisory_audit(root: String, args: [String], color: Bool, json: Bool)
         .None -> {}
         .Err(error) -> return jet_cli_advisory_audit_fail_one(error.diagnostic, color, json)
     }
-    lock_path :: cli_files.join(cli_files.join(root, ".jet"), "lock")
-    lock_text :: cli_files.read(lock_path) ?? {
+    lock_path: cli_files.join(cli_files.join(root, ".jet"), "lock")
+    lock_text: cli_files.read(lock_path) ?? {
         if !cli_files.exists(lock_path) -> return jet_cli_advisory_audit_fail_one(publication_e2611("the unified lockfile", "run `jet fetch`, review the lock, then run `jet inspect audit` again"), color, json)
         return jet_cli_advisory_audit_fail_one(publication_e2611("a readable unified lockfile", "repair `{lock_path}` and run `jet inspect audit` again: {jet_cli_io_error_text(err)}"), color, json)
     }
-    lock :: pkg_lock_parse(lock_text) ?? return jet_cli_advisory_audit_fail_one(publication_e2611("a valid unified lockfile", "repair `{lock_path}`: {err.message()}"), color, json)
-    configured :: if advisory_db == .Val(path) -> Val(path) else -> publication_advisory_feed_path(root)
-    feed_path :: configured ?? return jet_cli_advisory_audit_fail_one(publication_e2611("a signed advisory database", "pass --advisory-db <path>, set JET_ADVISORY_DB, or add .jet/advisories.db"), color, json)
-    feed_text :: cli_files.read(feed_path) ?? return jet_cli_advisory_audit_fail_one(publication_e2611("a readable signed advisory database", "repair `{feed_path}` and retry: {jet_cli_io_error_text(err)}"), color, json)
-    feed :: publication_parse_advisory_feed(feed_text) ?? return jet_cli_advisory_audit_fail_one(err.diagnostic, color, json)
-    trust_path :: publication_advisory_trust_path(root)
-    trust_text :: cli_files.read(trust_path) ?? return jet_cli_advisory_audit_fail_one(publication_e2610("advisory trust root", "could not read `{trust_path}`: {jet_cli_io_error_text(err)}"), color, json)
-    trust :: publication_parse_advisory_trust(trust_text) ?? return jet_cli_advisory_audit_fail_one(err.diagnostic, color, json)
-    report :: publication_audit_advisory_feed_with_source_exceptions(lock, feed, trust, publication_advisory_now(), exceptions) ?? return jet_cli_advisory_audit_fail_one(err.diagnostic, color, json)
+    lock: pkg_lock_parse(lock_text) ?? return jet_cli_advisory_audit_fail_one(publication_e2611("a valid unified lockfile", "repair `{lock_path}`: {err.message()}"), color, json)
+    configured: if advisory_db == .Val(path) -> Val(path) else -> publication_advisory_feed_path(root)
+    feed_path: configured ?? return jet_cli_advisory_audit_fail_one(publication_e2611("a signed advisory database", "pass --advisory-db <path>, set JET_ADVISORY_DB, or add .jet/advisories.db"), color, json)
+    feed_text: cli_files.read(feed_path) ?? return jet_cli_advisory_audit_fail_one(publication_e2611("a readable signed advisory database", "repair `{feed_path}` and retry: {jet_cli_io_error_text(err)}"), color, json)
+    feed: publication_parse_advisory_feed(feed_text) ?? return jet_cli_advisory_audit_fail_one(err.diagnostic, color, json)
+    trust_path: publication_advisory_trust_path(root)
+    trust_text: cli_files.read(trust_path) ?? return jet_cli_advisory_audit_fail_one(publication_e2610("advisory trust root", "could not read `{trust_path}`: {jet_cli_io_error_text(err)}"), color, json)
+    trust: publication_parse_advisory_trust(trust_text) ?? return jet_cli_advisory_audit_fail_one(err.diagnostic, color, json)
+    report: publication_audit_advisory_feed_with_source_exceptions(lock, feed, trust, publication_advisory_now(), exceptions) ?? return jet_cli_advisory_audit_fail_one(err.diagnostic, color, json)
     if explain == .Val(id) {
         loop advisory in feed.advisories {
             if advisory.id == id -> return jet_cli_advisory_audit_explain(advisory, json)
@@ -117,10 +117,10 @@ fn jet_cli_advisory_audit(root: String, args: [String], color: Bool, json: Bool)
         &diagnostics.push(found.diagnostic)
         if found.severity == .Critical -> critical += 1
     }
-    failed :: critical > 0 || report.maturity.len() > 0
-    exit_code :: if failed -> JET_DRIVER_EXIT_USER_ERROR else -> JET_DRIVER_EXIT_OK
+    failed: critical > 0 || report.maturity.len() > 0
+    exit_code: if failed -> JET_DRIVER_EXIT_USER_ERROR else -> JET_DRIVER_EXIT_OK
     if json {
-        fields :: [JetCLIStatusField]{
+        fields: [JetCLIStatusField]{
             jet_cli_status_field("sequence", jet_cli_status_int(report.receipt.sequence)),
             jet_cli_status_field("key_id", jet_cli_status_text(report.receipt.key_id)),
             jet_cli_status_field("digest", jet_cli_status_text(report.receipt.digest)),
@@ -142,10 +142,10 @@ fn jet_cli_advisory_audit(root: String, args: [String], color: Bool, json: Bool)
 }
 
 // `--explain <id>`: one advisory of the verified feed.
-fn jet_cli_advisory_audit_explain(advisory: PublicationAdvisory, json: Bool) -> JetDriverVerbOutput Never! {
-    fixed :: if advisory.fixed == .Val(version) -> "{version}" else -> "none known"
+jet_cli_advisory_audit_explain: fn(advisory: PublicationAdvisory, json: Bool) -> JetDriverVerbOutput Never! {
+    fixed: if advisory.fixed == .Val(version) -> "{version}" else -> "none known"
     if json {
-        fields :: [JetCLIStatusField]{
+        fields: [JetCLIStatusField]{
             jet_cli_status_field("id", jet_cli_status_text(advisory.id)),
             jet_cli_status_field("package", jet_cli_status_text(advisory.package)),
             jet_cli_status_field("affected", jet_cli_status_text(advisory.affected.raw)),
@@ -155,12 +155,12 @@ fn jet_cli_advisory_audit_explain(advisory: PublicationAdvisory, json: Bool) -> 
         }
         return JetDriverVerbOutput{stdout: "{jet_cli_status_render("audit.explain", true, fields)}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     }
-    out :: "advisory {advisory.id}\n  package: {advisory.package}\n  affected: {advisory.affected.raw}\n  fixed in: {fixed}\n  severity: {publication_severity_label(advisory.severity)}\n  title: {advisory.title}\n"
+    out: "advisory {advisory.id}\n  package: {advisory.package}\n  affected: {advisory.affected.raw}\n  fixed in: {fixed}\n  severity: {publication_severity_label(advisory.severity)}\n  title: {advisory.title}\n"
     JetDriverVerbOutput{stdout: out, stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 
 // A refused `jet inspect audit` input: a usage error (exit 2) for a flag
 // without its value, a user error (exit 1) for an id the feed lacks.
-fn jet_cli_advisory_audit_usage(what: String, exit_code: Int, color: Bool, json: Bool) -> JetDriverVerbOutput Never! {
+jet_cli_advisory_audit_usage: fn(what: String, exit_code: Int, color: Bool, json: Bool) -> JetDriverVerbOutput Never! {
     jet_cli_advisory_audit_fail(diagnostic_from_registry("E2104", None, what, jet_cli_why("E2104"), "run `jet inspect audit [--advisory-db <path>] [--explain <advisory-id>]`"), exit_code, color, json)
 }

@@ -1,15 +1,15 @@
 // #4602: a JSON number keeps its exact text as `Dyn.Number`. Rendering
 // writes the same text back, so `1.50` stays `1.50` and `1e400` survives;
 // reading it as a Float or Int range-checks it at that moment.
-use json :: core.encoding.json
+use json: core.encoding.json
 
-fn read_float(text: String) -[]> String {
-    value :: json.decode<Float>(text) ?? return "rejected"
+read_float: fn(text: String) -[]> String {
+    value: json.decode<Float>(text) ?? return "rejected"
     return "{value}"
 }
 
-fn run() {
-    tree :: json.parse("[1.50,1e2,123456789012345678901234567890,1e400]") ?? panic("parse")
+run: fn() {
+    tree: json.parse("[1.50,1e2,123456789012345678901234567890,1e400]") ?? panic("parse")
     print(json.to_string(tree))
     if tree == .Array(items) {
         loop item in items {

@@ -6,7 +6,7 @@
 // IOError!: native errors pass through unchanged and callers render the
 // canonical shared IOError Display or uplift once at their own boundary.
 
-struct ProfileInstallReceipt {
+ProfileInstallReceipt: struct {
     store_root: String
     package: String
     version: String
@@ -15,7 +15,7 @@ struct ProfileInstallReceipt {
     executable_members: [String]
 }
 
-struct ProfileExecutableProof {
+ProfileExecutableProof: struct {
     digest: String
     mode: Int
 }
@@ -23,37 +23,37 @@ struct ProfileExecutableProof {
 // Rust `copy_open_profile_file`: stream the leased handle from its start
 // into a freshly created destination (exclusive create), hashing as it
 // copies, apply the source mode, sync, and re-hash the destination.
-fn store_reuse_copy_open_profile_file(input: &FileReader, destination: String) -> ProfileExecutableProof IOError! {
+store_reuse_copy_open_profile_file: fn(input: &FileReader, destination: String) -> ProfileExecutableProof IOError! {
     &input.seek(0)
-    info :: input.stat()
+    info: input.stat()
     if !info.is_file -> return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("profile executable is not a regular file")}))
     output := files.create(destination, if_exists: .Refuse)
     hasher := StreamingSHA256.new()
     loop {
-        chunk :: input.read(65536)
+        chunk: input.read(65536)
         if chunk.len() == 0 -> break
         &hasher.update(chunk)
         &output.write_all(chunk)
     }
-    mode :: if sys.is_unix() -> (info.mode).bit_and(0o777) else -> 0
+    mode: if sys.is_unix() -> (info.mode).bit_and(0o777) else -> 0
     if sys.is_unix() -> files.set_mode(destination, mode)
     &output.fsync()
-    digest :: hasher.finalize_hex()
-    copied :: foundation_sha256_file_hex(destination)
+    digest: hasher.finalize_hex()
+    copied: foundation_sha256_file_hex(destination)
     if copied != digest -> return Err(IOError.Other(IOContext{operation: .Write, resource: None, os_code: None, cause: Val("copied profile executable changed")}))
     Ok(ProfileExecutableProof{digest: "sha256-{digest}", mode: mode})
 }
 
 // Rust `profile_file_proof`: a projected profile file must be a regular
 // file at its path, unchanged between the path check and the open.
-fn store_profile_file_proof(path: String) -> ProfileExecutableProof IOError! {
-    at_path :: files.stat(path)
+store_profile_file_proof: fn(path: String) -> ProfileExecutableProof IOError! {
+    at_path: files.stat(path)
     if !at_path.is_file || at_path.is_symlink -> return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("profile projection is not a no-follow file")}))
-    opened :: files.open(path)
+    opened: files.open(path)
     if !sys.is_unix() {
         return Ok(ProfileExecutableProof{digest: "sha256-{foundation_sha256_file_hex(path)}", mode: 0})
     }
-    held :: opened.stat()
+    held: opened.stat()
     if at_path.id != held.id -> return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("profile projection changed while opening")}))
     Ok(ProfileExecutableProof{digest: "sha256-{foundation_sha256_file_hex(path)}", mode: (held.mode).bit_and(0o777)})
 }

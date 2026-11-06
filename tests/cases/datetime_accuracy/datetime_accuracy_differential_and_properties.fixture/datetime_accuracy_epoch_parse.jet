@@ -1,6 +1,6 @@
-use time :: core.time
+use time: core.time
 
-fn parse_status(text: String) -> String {
+parse_status: fn(text: String) -> String {
     if time.parse_rfc3339(text) == {
         .Ok(value) -> { return "accepted|{value.format_rfc3339()}" }
         .Err(_) -> { return "rejected" }
@@ -8,45 +8,45 @@ fn parse_status(text: String) -> String {
     return "rejected"
 }
 
-fn field(meta: String, key: String) -> String {
+field: fn(meta: String, key: String) -> String {
     loop part in meta.split(";") {
-        pair :: part.split_once("=") ?? next
+        pair: part.split_once("=") ?? next
         if pair.before == key -> return pair.after
     }
     return ""
 }
 
-fn i(meta: String, key: String) -> Int { Int.parse(field(meta, key)) ?? panic(key) }
+i: fn(meta: String, key: String) -> Int { Int.parse(field(meta, key)) ?? panic(key) }
 
-fn shown(op: String, meta: String) -> String {
+shown: fn(op: String, meta: String) -> String {
     if op == "parse_status" -> return parse_status(field(meta, "text"))
-    ms :: i(meta, "epoch_ms")
+    ms: i(meta, "epoch_ms")
     if op == "format" -> return time.from_unix_ms(ms).format_rfc3339()
     if op == "to_timestamp" {
-        value :: time.from_unix_ms(ms).to_timestamp()
+        value: time.from_unix_ms(ms).to_timestamp()
         return "{value}"
     }
     if op == "roundtrip_ms" {
-        dt :: time.from_unix_ms(ms)
-        value :: time.from_unix_ms(dt.to_unix_ms()).to_unix_ms()
+        dt: time.from_unix_ms(ms)
+        value: time.from_unix_ms(dt.to_unix_ms()).to_unix_ms()
         return "{value}"
     }
     if op == "format_parse_format" {
-        dt :: time.from_unix_ms(ms)
-        parsed :: time.parse_rfc3339(dt.format_rfc3339()) ?? panic("f5")
+        dt: time.from_unix_ms(ms)
+        parsed: time.parse_rfc3339(dt.format_rfc3339()) ?? panic("f5")
         return parsed.format_rfc3339()
     }
     if op == "parse_format_round_trip" {
-        dt :: time.from_unix_ms(ms)
-        text :: dt.format_rfc3339()
-        parsed :: time.parse_rfc3339(text) ?? panic("parse")
+        dt: time.from_unix_ms(ms)
+        text: dt.format_rfc3339()
+        parsed: time.parse_rfc3339(text) ?? panic("parse")
         return "{parsed.format_rfc3339() == text}"
     }
     panic(op)
 }
 
-fn run() {
-    table :: """
+run: fn() {
+    table: """
 f1_000	format	epoch_ms=1225159446124
 f1_000	to_timestamp	epoch_ms=1225159446124
 f1_000	roundtrip_ms	epoch_ms=1225159446124
@@ -736,9 +736,9 @@ f1_edge_2400_mar01	roundtrip_ms	epoch_ms=13574694896789;edge=2400_mar01
     """
     loop line in table.lines() {
         if line != "" {
-            id_rest :: line.split_once("\t") ?? panic("row")
-            op_rest :: id_rest.after.split_once("\t") ?? panic("row")
-            result :: shown(op_rest.before, op_rest.after)
+            id_rest: line.split_once("\t") ?? panic("row")
+            op_rest: id_rest.after.split_once("\t") ?? panic("row")
+            result: shown(op_rest.before, op_rest.after)
             print("CASE\t{id_rest.before}\t{op_rest.before}\t{result}")
         }
     }

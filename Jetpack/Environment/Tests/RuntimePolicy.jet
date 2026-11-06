@@ -10,16 +10,16 @@ use {
         JETPACK_VERBS, RUNTIME_LOCK_DIR, RUNTIME_LOCK_OWNER_FILE, SOURCE_ROOT_DIR, env_acquire_lock, env_acquire_lock_waiting,
         env_lock_path_for_scope, env_lock_state, env_try_acquire_lock,
     ]
-    files :: core.files
-    sys :: core.sys
-    time :: core.time
+    files: core.files
+    sys: core.sys
+    time: core.time
 }
 
-fn env_rt_test_scratch(label: String) -[FS]> String {
+env_rt_test_scratch: fn(label: String) -[FS]> String {
     files.tmpdir("jpk-runtime-policy-{label}-") ?? panic("claim runtime policy scratch")
 }
 
-fn env_rt_test_is_timeout(error: IOError) -> Bool {
+env_rt_test_is_timeout: fn(error: IOError) -> Bool {
     if error == {
         .TimedOut(context) -> true
         else -> false
@@ -27,7 +27,7 @@ fn env_rt_test_is_timeout(error: IOError) -> Bool {
 }
 
 #Test("every verb is daemonless and needs no root") {
-    policies :: env_all_verb_policies()
+    policies: env_all_verb_policies()
     assert_eq(policies.len(), JETPACK_VERBS.len())
     loop policy in policies {
         assert(!policy.resident_daemon)
@@ -38,12 +38,12 @@ fn env_rt_test_is_timeout(error: IOError) -> Bool {
 }
 
 #Test("project lock allows nested same session scopes") {
-    root :: env_rt_test_scratch("nested-project-lock")
-    managed :: files.join(root, SOURCE_ROOT_DIR)
+    root: env_rt_test_scratch("nested-project-lock")
+    managed: files.join(root, SOURCE_ROOT_DIR)
     files.create_dir_all(managed) ?? panic("managed dir")
     session := RuntimeLockSession.new()
-    outer :: &session.enter(managed, "outer") ?? panic("outer scope")
-    inner :: &session.enter(managed, "inner") ?? panic("a nested scope of the same root reuses the outer claim")
+    outer: &session.enter(managed, "outer") ?? panic("outer scope")
+    inner: &session.enter(managed, "inner") ?? panic("a nested scope of the same root reuses the outer claim")
     files.write(files.join(root, "nested"), "ok") ?? panic("nested write")
     &session.leave(^inner)
     &session.leave(^outer)
@@ -52,25 +52,25 @@ fn env_rt_test_is_timeout(error: IOError) -> Bool {
 }
 
 #Test("stale pid text and file age are not liveness") {
-    root :: env_rt_test_scratch("stale-text")
-    dir :: files.join(root, RUNTIME_LOCK_DIR)
+    root: env_rt_test_scratch("stale-text")
+    dir: files.join(root, RUNTIME_LOCK_DIR)
     files.create_dir_all(dir) ?? panic("lock dir")
-    path :: files.join(dir, "hangar.lock")
+    path: files.join(dir, "hangar.lock")
     files.write(path, "pid=4294967294\nprocess_start=1\n") ?? panic("stale marker")
-    guard :: env_acquire_lock_waiting(root, "hangar", time.duration_ms(100)) ?? panic("a stale marker is not a held lock")
-    held :: env_lock_state(path) ?? panic("probe held")
+    guard: env_acquire_lock_waiting(root, "hangar", time.duration_ms(100)) ?? panic("a stale marker is not a held lock")
+    held: env_lock_state(path) ?? panic("probe held")
     assert(held == RuntimeLockState.Held)
     close(^guard)
-    idle :: env_lock_state(path) ?? panic("probe idle")
+    idle: env_lock_state(path) ?? panic("probe idle")
     assert(idle == RuntimeLockState.Idle)
     assert(files.exists(path))
     files.remove_all(root).drop("test cleanup")
 }
 
 #Test("absent lock probe is read only") {
-    root :: env_rt_test_scratch("absent-probe")
-    path :: files.join(files.join(root, RUNTIME_LOCK_DIR), "missing.lock")
-    state :: env_lock_state(path) ?? panic("probe absent")
+    root: env_rt_test_scratch("absent-probe")
+    path: files.join(files.join(root, RUNTIME_LOCK_DIR), "missing.lock")
+    state: env_lock_state(path) ?? panic("probe absent")
     assert(state == RuntimeLockState.Absent)
     assert(!files.exists(path))
     assert(!files.exists(files.join(root, RUNTIME_LOCK_DIR)))
@@ -78,11 +78,11 @@ fn env_rt_test_is_timeout(error: IOError) -> Bool {
 }
 
 #Test("all scopes contend on one persistent regular lock file") {
-    root :: env_rt_test_scratch("shared-owner")
-    first :: env_acquire_lock(root, "hangar") ?? panic("first claim")
-    owner_path :: first.owner_path
+    root: env_rt_test_scratch("shared-owner")
+    first: env_acquire_lock(root, "hangar") ?? panic("first claim")
+    owner_path: first.owner_path
     assert_eq(owner_path, files.join(files.canonicalize(root) ?? panic("canonical root"), RUNTIME_LOCK_OWNER_FILE))
-    before :: files.stat(owner_path) ?? panic("owner metadata")
+    before: files.stat(owner_path) ?? panic("owner metadata")
     assert(before.is_file)
     assert(!before.is_symlink)
     if !sys.is_windows() -> assert_eq(before.mode.bit_and(0o777), 0o600)
@@ -91,8 +91,8 @@ fn env_rt_test_is_timeout(error: IOError) -> Bool {
     assert((env_lock_state(env_lock_path_for_scope(root, "other")) ?? panic("probe other")) == RuntimeLockState.Held)
     close(^first)
     assert_eq((files.stat(owner_path) ?? panic("persistent owner")).id, before.id)
-    claimed :: env_try_acquire_lock(root, "other") ? found -> found ! error -> panic("idle try")
-    next_owner :: claimed ?? panic("idle try must acquire")
+    claimed: env_try_acquire_lock(root, "other") ? found -> found ! error -> panic("idle try")
+    next_owner: claimed ?? panic("idle try must acquire")
     assert_eq(next_owner.owner_path, owner_path)
     assert_eq((files.stat(owner_path) ?? panic("same owner")).id, before.id)
     close(^next_owner)
@@ -100,8 +100,8 @@ fn env_rt_test_is_timeout(error: IOError) -> Bool {
 }
 
 #Test("a dedicated lock owner directory is refused by acquire try and probe") {
-    root :: env_rt_test_scratch("owner-directory")
-    owner_path :: files.join(root, RUNTIME_LOCK_OWNER_FILE)
+    root: env_rt_test_scratch("owner-directory")
+    owner_path: files.join(root, RUNTIME_LOCK_OWNER_FILE)
     files.create_dir_all(owner_path) ?? panic("plant owner directory")
     assert(env_acquire_lock_waiting(root, "hangar", time.duration_ms(50)) == .Err(_))
     assert(env_try_acquire_lock(root, "hangar") == .Err(_))
@@ -111,8 +111,8 @@ fn env_rt_test_is_timeout(error: IOError) -> Bool {
 
 #Test("a dedicated lock owner symlink is refused without touching its target") {
     if sys.is_windows() -> return
-    root :: env_rt_test_scratch("owner-symlink")
-    target :: files.join(root, "attacker-target")
+    root: env_rt_test_scratch("owner-symlink")
+    target: files.join(root, "attacker-target")
     files.write(target, "not a lock") ?? panic("target")
     files.symlink(target, files.join(root, RUNTIME_LOCK_OWNER_FILE)) ?? panic("plant owner symlink")
     if env_acquire_lock_waiting(root, "hangar", time.duration_ms(50)) == {
@@ -125,21 +125,21 @@ fn env_rt_test_is_timeout(error: IOError) -> Bool {
 }
 
 #Test("lock timeout is deterministic") {
-    root :: env_rt_test_scratch("timeout")
-    guard :: env_acquire_lock(root, "hangar") ?? panic("first claim")
-    watch :: time.start()
+    root: env_rt_test_scratch("timeout")
+    guard: env_acquire_lock(root, "hangar") ?? panic("first claim")
+    watch: time.start()
     if env_acquire_lock_waiting(root, "other", time.duration_ms(80)) == {
         .Ok(_) -> panic("contended advisory lock must time out")
         .Err(error) -> {
             assert(env_rt_test_is_timeout(error))
             if error == .TimedOut(context) {
-                path :: env_lock_path_for_scope(root, "other")
+                path: env_lock_path_for_scope(root, "other")
                 assert_eq(context.resource, Val(path))
                 assert_eq(context.cause, Val("timed out waiting for jetpack lock `{path}`"))
             }
         }
     }
-    elapsed :: time.duration_as_ms(time.elapsed(watch))
+    elapsed: time.duration_as_ms(time.elapsed(watch))
     assert(elapsed >= 60)
     assert(elapsed < 500)
     close(^guard)
@@ -147,8 +147,8 @@ fn env_rt_test_is_timeout(error: IOError) -> Bool {
 }
 
 #Test("lock open failures fail closed") {
-    root :: env_rt_test_scratch("fail-closed")
-    lock_dir :: files.join(root, RUNTIME_LOCK_DIR)
+    root: env_rt_test_scratch("fail-closed")
+    lock_dir: files.join(root, RUNTIME_LOCK_DIR)
     files.write(lock_dir, "not a directory") ?? panic("plant file")
     assert(env_acquire_lock(root, "hangar") == .Err(_))
     files.remove(lock_dir) ?? panic("remove planted file")
@@ -162,10 +162,10 @@ fn env_rt_test_is_timeout(error: IOError) -> Bool {
     // lock_open_and_platform_failures_fail_closed: a final link is refused
     // outright, never waited on.
     if sys.is_windows() -> return
-    root :: env_rt_test_scratch("symlink-fail-closed")
-    lock_dir :: files.join(root, RUNTIME_LOCK_DIR)
+    root: env_rt_test_scratch("symlink-fail-closed")
+    lock_dir: files.join(root, RUNTIME_LOCK_DIR)
     files.create_dir_all(lock_dir) ?? panic("lock dir")
-    target :: files.join(root, "attacker-target")
+    target: files.join(root, "attacker-target")
     files.write(target, "not a lock") ?? panic("target")
     files.symlink(target, files.join(lock_dir, "hangar.lock")) ?? panic("plant symlink")
     if env_acquire_lock_waiting(root, "hangar", time.duration_ms(50)) == {
@@ -178,11 +178,11 @@ fn env_rt_test_is_timeout(error: IOError) -> Bool {
 
 #Test("dual marker name replacement cannot split the shared owner file lock") {
     if sys.is_windows() -> return
-    root :: env_rt_test_scratch("dual-replace-fail-closed")
-    first :: env_acquire_lock(root, "hangar") ?? panic("first claim")
-    lock_dir :: files.join(root, RUNTIME_LOCK_DIR)
-    path :: files.join(lock_dir, "hangar.lock")
-    anchor :: files.join(lock_dir, "hangar.lock.anchor")
+    root: env_rt_test_scratch("dual-replace-fail-closed")
+    first: env_acquire_lock(root, "hangar") ?? panic("first claim")
+    lock_dir: files.join(root, RUNTIME_LOCK_DIR)
+    path: files.join(lock_dir, "hangar.lock")
+    anchor: files.join(lock_dir, "hangar.lock.anchor")
     files.hard_link(path, anchor) ?? panic("anchor")
     files.rename(path, files.join(lock_dir, "displaced.lock")) ?? panic("displace")
     files.rename(anchor, files.join(lock_dir, "displaced.anchor")) ?? panic("displace anchor")
@@ -190,17 +190,17 @@ fn env_rt_test_is_timeout(error: IOError) -> Bool {
     files.hard_link(path, anchor) ?? panic("replacement anchor")
     assert(env_acquire_lock_waiting(root, "hangar", time.duration_ms(50)) == .Err(_))
     close(^first)
-    replacement :: env_acquire_lock(root, "hangar") ?? panic("the replaced marker is usable once the owner file is free")
+    replacement: env_acquire_lock(root, "hangar") ?? panic("the replaced marker is usable once the owner file is free")
     close(^replacement)
     files.remove_all(root).drop("test cleanup")
 }
 
 #Test("all scopes probe the SAME managed-root advisory domain") {
-    root :: env_rt_test_scratch("same-root-domain")
-    first :: env_acquire_lock(root, "first") ?? panic("first root claim")
-    second :: env_try_acquire_lock(root, "second") ? found -> found ! error -> panic("nonblocking second scope")
+    root: env_rt_test_scratch("same-root-domain")
+    first: env_acquire_lock(root, "first") ?? panic("first root claim")
+    second: env_try_acquire_lock(root, "second") ? found -> found ! error -> panic("nonblocking second scope")
     assert(second == None)
-    second_path :: env_lock_path_for_scope(root, "second")
+    second_path: env_lock_path_for_scope(root, "second")
     assert_eq(env_lock_state(second_path) ?? panic("held second marker"), RuntimeLockState.Held)
     close(^first)
     assert_eq(env_lock_state(second_path) ?? panic("idle second marker"), RuntimeLockState.Idle)
@@ -208,14 +208,14 @@ fn env_rt_test_is_timeout(error: IOError) -> Bool {
 }
 
 #Test("nested identity is FileID, not the root's current pathname") {
-    root :: env_rt_test_scratch("nested-renamed-root")
-    managed :: files.join(root, SOURCE_ROOT_DIR)
-    renamed :: files.join(root, "renamed-root")
+    root: env_rt_test_scratch("nested-renamed-root")
+    managed: files.join(root, SOURCE_ROOT_DIR)
+    renamed: files.join(root, "renamed-root")
     files.create_dir_all(managed) ?? panic("managed root")
     session := RuntimeLockSession.new()
-    outer :: &session.enter(managed, "outer") ?? panic("outer root claim")
+    outer: &session.enter(managed, "outer") ?? panic("outer root claim")
     files.rename(managed, renamed) ?? panic("rename retained root")
-    inner :: &session.enter(renamed, "inner") ?? panic("same inode must reuse the held claim")
+    inner: &session.enter(renamed, "inner") ?? panic("same inode must reuse the held claim")
     assert(inner.lock == None)
     &session.leave(^inner)
     &session.leave(^outer)
@@ -223,7 +223,7 @@ fn env_rt_test_is_timeout(error: IOError) -> Bool {
 }
 
 #Test("capability detection reports only a verified backend") {
-    status :: env_detect_sandbox()
+    status: env_detect_sandbox()
     if status.level == {
         .Strong -> {
             assert(status.policy.contains("filesystem="))

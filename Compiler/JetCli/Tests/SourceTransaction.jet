@@ -6,81 +6,81 @@ use {
         jet_cli_fix_checked, jet_cli_fix_errors, jet_cli_fix_log, jet_cli_fix_rewrite,
         jet_cli_transaction_relative, jet_cli_undo_source_changes,
     ]
-    cli_sys :: core.sys
-    cli_files :: core.files
-    cli_process :: core.process
+    cli_sys: core.sys
+    cli_files: core.files
+    cli_process: core.process
 }
 
-struct JetCLITransactionFixtureRoot {
+JetCLITransactionFixtureRoot: struct {
     path: String
 }
 impl JetCLITransactionFixtureRoot.Close {
-    fn close(^self) -[FS]> {
+    close: fn(^self) -[FS]> {
         cli_files.remove_all(self.path).drop("test project cleanup")
     }
 }
 
 #Test("source_transaction") {
-    root :: "{cli_sys.temp_dir()}/jet-source-transaction-{cli_process.current_pid()}"
+    root: "{cli_sys.temp_dir()}/jet-source-transaction-{cli_process.current_pid()}"
     cli_files.create_dir_all(root) ?? panic("test project")
-    owner :: JetCLITransactionFixtureRoot{path: root}
+    owner: JetCLITransactionFixtureRoot{path: root}
     defer close(^owner)
     cli_files.write("{root}/first.jet", "first") ?? panic("first source")
     cli_files.write("{root}/second.jet", "second") ?? panic("second source")
-    changes :: [JetCLISourceChange]{
+    changes: [JetCLISourceChange]{
         {path: "{root}/first.jet", before: "first".bytes(), after: "updated first".bytes()},
         {path: "{root}/second.jet", before: "second".bytes(), after: "updated second".bytes()},
     }
-    log :: jet_cli_fix_log(root, "test", changes, [JetCLISemOp]{}, [JetCLIFixSkip]{})
-    path :: jet_cli_commit_source_changes(root, changes, "test.log.json", log) ?? panic("commit")
-    expected_path :: "{root}/.jet/codemods/test.log.json"
+    log: jet_cli_fix_log(root, "test", changes, [JetCLISemOp]{}, [JetCLIFixSkip]{})
+    path: jet_cli_commit_source_changes(root, changes, "test.log.json", log) ?? panic("commit")
+    expected_path: "{root}/.jet/codemods/test.log.json"
     assert(path == expected_path)
-    first :: cli_files.read("{root}/first.jet") ?? panic("read first")
-    second :: cli_files.read("{root}/second.jet") ?? panic("read second")
+    first: cli_files.read("{root}/first.jet") ?? panic("read first")
+    second: cli_files.read("{root}/second.jet") ?? panic("read second")
     assert(first == "updated first" && second == "updated second")
-    stale :: jet_cli_commit_source_changes(root, changes, "stale.log.json", log) == .Err(_)
+    stale: jet_cli_commit_source_changes(root, changes, "stale.log.json", log) == .Err(_)
     assert(stale)
-    marker :: jet_cli_undo_source_changes(root, "test.log.json") ?? panic("undo")
+    marker: jet_cli_undo_source_changes(root, "test.log.json") ?? panic("undo")
     assert(marker.starts_with("codemod undo `test` applied\n  files: 2\n"))
-    restored_first :: cli_files.read("{root}/first.jet") ?? panic("restored first")
-    restored_second :: cli_files.read("{root}/second.jet") ?? panic("restored second")
+    restored_first: cli_files.read("{root}/first.jet") ?? panic("restored first")
+    restored_second: cli_files.read("{root}/second.jet") ?? panic("restored second")
     assert(restored_first == "first" && restored_second == "second")
-    journal :: cli_files.exists("{root}/.jet/codemods/transaction.journal")
+    journal: cli_files.exists("{root}/.jet/codemods/transaction.journal")
     assert(!journal)
-    operations :: jet_cli_fix_rewrite(`fn rün() { 1 }`.bytes(), `fn rün() { 2 }`.bytes())
+    operations: jet_cli_fix_rewrite(`rün: fn() { 1 }`.bytes(), `rün: fn() { 2 }`.bytes())
     assert(operations.len() == 1)
     if operations[0].from == .Val(from) -> assert(from == "1") else { panic("rewrite from missing") }
     if operations[0].to == .Val(to) -> assert(to == "2") else { panic("rewrite to missing") }
     assert(jet_cli_fix_rewrite([U8]{255}, [U8]{254}).len() == 0)
-    escaped :: jet_cli_transaction_relative(root, "{root}/../outside.jet") == .Err(_)
+    escaped: jet_cli_transaction_relative(root, "{root}/../outside.jet") == .Err(_)
     assert(escaped)
-    malformed :: jet_cli_transaction_relative(root, "{root}/folder//name.jet") == .Err(_)
+    malformed: jet_cli_transaction_relative(root, "{root}/folder//name.jet") == .Err(_)
     assert(malformed)
 }
 
 // A fix whose edit makes the file stop checking is rolled back on its own,
 // the fixes before it stay, and the fix log records it with the error it added.
 #Test("fix_recheck_rolls_back") {
-    root :: "{cli_sys.temp_dir()}/jet-fix-recheck-{cli_process.current_pid()}"
+    root: "{cli_sys.temp_dir()}/jet-fix-recheck-{cli_process.current_pid()}"
     cli_files.create_dir_all(root) ?? panic("test project")
-    owner :: JetCLITransactionFixtureRoot{path: root}
+    owner: JetCLITransactionFixtureRoot{path: root}
     defer close(^owner)
-    file :: "{root}/run.jet"
-    source :: "fn run() {{\n    value :: 1\n    print(value)\n}}\n"
+    file: "{root}/run.jet"
+    source: "run: fn() {{\n    value: 1\n    print(value)\n}}\n"
     cli_files.write(file, source) ?? panic("run source")
-    baseline :: jet_cli_fix_errors(file, source)
+    baseline: jet_cli_fix_errors(file, source)
     assert(baseline.len() == 0)
-    literal :: "fn run() {{\n    value :: ".len()
-    use_site :: "fn run() {{\n    value :: 1\n    print(".len()
-    keep :: JetCLIFix{title: "change the value", edit: TextEdit{span: Span{start: literal, end: literal + 1}, new_text: "2"}, applicability: .Safe, safety: .BehaviorPreserving}
-    breaks :: JetCLIFix{title: "rename the use", edit: TextEdit{span: Span{start: use_site, end: use_site + "value".len()}, new_text: "missing"}, applicability: .Safe, safety: .BehaviorPreserving}
+    literal: "run: fn() {{\n    value: ".len()
+    use_site: "run: fn() {{\n    value: 1\n    print(".len()
+    keep: JetCLIFix{title: "change the value", edit: TextEdit{span: Span{start: literal, end: literal + 1}, new_text: "2"}, applicability: .Safe, safety: .BehaviorPreserving}
+    breaks: JetCLIFix{title: "rename the use", edit: TextEdit{span: Span{start: use_site, end: use_site + "value".len()}, new_text: "missing"}, applicability: .Safe, safety: .BehaviorPreserving}
     rejected := [JetCLIFixSkip]{}
-    checked :: jet_cli_fix_checked(file, source, [JetCLIFix]{keep, breaks}, baseline, &rejected)
-    assert(checked.source == "fn run() {{\n    value :: 2\n    print(value)\n}}\n")
+    checked: jet_cli_fix_checked(file, source, [JetCLIFix]{keep, breaks}, baseline, &rejected)
+    assert(checked.source == "run: fn() {{\n    value: 2\n    print(value)\n}}\n")
     assert(checked.applied == 1)
     assert(rejected.len() == 1)
     assert(rejected[0].title == "rename the use" && rejected[0].reason.starts_with("the edited file no longer checks: "))
-    changes :: [JetCLISourceChange]{{path: file, before: source.bytes(), after: checked.source.bytes()}}
-    log :: String.from_bytes(jet_cli_fix_log(root, "recheck", changes, [JetCLISemOp]{}, rejected)) ?? panic("fix log is UTF-8")
+    changes: [JetCLISourceChange]{{path: file, before: source.bytes(), after: checked.source.bytes()}}
+    log: String.from_bytes(jet_cli_fix_log(root, "recheck", changes, [JetCLISemOp]{}, rejected)) ?? panic("fix log is UTF-8")
     assert(log.contains("\"title\":\"rename the use\"") && log.contains("\"replacement\":\"missing\"") && log.contains("\"reason\":\"the edited file no longer checks: "))
 }

@@ -4,12 +4,12 @@
 // (U64).
 use jet_foundation.[foundation_read_bytes_scalar_at]
 
-enum JetCLIColorRequest {
+JetCLIColorRequest: enum {
     Auto
     Always
     Never
 }
-struct JetCLIOutputFacts {
+JetCLIOutputFacts: struct {
     tty: Bool
     term: [U8]?
     no_color: Bool
@@ -19,13 +19,13 @@ struct JetCLIOutputFacts {
     width: U64?
     unicode: Bool
 }
-enum JetCLIOutputChannel {
+JetCLIOutputChannel: enum {
     HumanStdout
     HumanStderr
     MachineStdout
     Hidden
 }
-enum JetCLIOutputKind {
+JetCLIOutputKind: enum {
     Renderable
     Status
     Log
@@ -33,12 +33,12 @@ enum JetCLIOutputKind {
     Machine
 }
 #Error
-enum JetCLIOutputProfileError {
+JetCLIOutputProfileError: enum {
     InvalidColorRequest(value: [U8])
     InvalidTerm(value: [U8])
     InvalidWidth(value: U64)
 }
-struct JetCLIOutputProfile {
+JetCLIOutputProfile: struct {
     width: U64
     ansi_enabled: Bool
     unicode_enabled: Bool
@@ -47,12 +47,12 @@ struct JetCLIOutputProfile {
     machine_enabled: Bool
 }
 
-JET_CLI_COLOR_AUTO_BYTES :: [U8]{97, 117, 116, 111}
-JET_CLI_COLOR_ALWAYS_BYTES :: [U8]{97, 108, 119, 97, 121, 115}
-JET_CLI_COLOR_NEVER_BYTES :: [U8]{110, 101, 118, 101, 114}
-JET_CLI_TERM_DUMB_BYTES :: [U8]{100, 117, 109, 98}
+JET_CLI_COLOR_AUTO_BYTES: [U8]{97, 117, 116, 111}
+JET_CLI_COLOR_ALWAYS_BYTES: [U8]{97, 108, 119, 97, 121, 115}
+JET_CLI_COLOR_NEVER_BYTES: [U8]{110, 101, 118, 101, 114}
+JET_CLI_TERM_DUMB_BYTES: [U8]{100, 117, 109, 98}
 
-fn jet_cli_color_request(value: [U8]) -> JetCLIColorRequest JetCLIOutputProfileError! {
+jet_cli_color_request: fn(value: [U8]) -> JetCLIColorRequest JetCLIOutputProfileError! {
     if value == JET_CLI_COLOR_AUTO_BYTES -> return Ok(.Auto)
     if value == JET_CLI_COLOR_ALWAYS_BYTES -> return Ok(.Always)
     if value == JET_CLI_COLOR_NEVER_BYTES -> return Ok(.Never)
@@ -63,18 +63,18 @@ fn jet_cli_color_request(value: [U8]) -> JetCLIColorRequest JetCLIOutputProfileE
 
 // Rust char::is_control is Cc, not the diagnostic terminal-escape policy:
 // U+2028 and U+2029 are not controls here. No scalar String/list is created.
-fn jet_cli_output_term_control(term: [U8]) -> Bool Never! {
+jet_cli_output_term_control: fn(term: [U8]) -> Bool Never! {
     index := 0
     loop index < term.len() {
-        scalar :: foundation_read_bytes_scalar_at(term, index)
-        code :: scalar.codepoint
+        scalar: foundation_read_bytes_scalar_at(term, index)
+        code: scalar.codepoint
         if code < 32 || (code >= 127 && code <= 159) -> return true
         index = scalar.next_byte
     }
     false
 }
 
-fn jet_cli_output_profile(facts: JetCLIOutputFacts) -> JetCLIOutputProfile JetCLIOutputProfileError! {
+jet_cli_output_profile: fn(facts: JetCLIOutputFacts) -> JetCLIOutputProfile JetCLIOutputProfileError! {
     dumb := false
     if facts.term == .Val(term) {
         // copy: `term` is a payload view of `facts.term` (owner: `facts`, a read parameter: no move
@@ -82,10 +82,10 @@ fn jet_cli_output_profile(facts: JetCLIOutputFacts) -> JetCLIOutputProfile JetCL
         if term.len() == 0 || jet_cli_output_term_control(term) -> return Err(.InvalidTerm{value: term.copy()})
         dumb = term == JET_CLI_TERM_DUMB_BYTES
     }
-    width :: facts.width ?? U64{80}
+    width: facts.width ?? U64{80}
     if width == (U64{0}) -> return Err(.InvalidWidth{value: width})
-    human :: !facts.json
-    ansi :: if facts.requested_color == {
+    human: !facts.json
+    ansi: if facts.requested_color == {
         .Always -> true
         .Never -> false
         .Auto -> if facts.no_color -> false else if facts.force_color -> true else -> facts.tty
@@ -100,7 +100,7 @@ fn jet_cli_output_profile(facts: JetCLIOutputFacts) -> JetCLIOutputProfile JetCL
     })
 }
 
-fn jet_cli_output_channel(profile: JetCLIOutputProfile, kind: JetCLIOutputKind) -> JetCLIOutputChannel Never! {
+jet_cli_output_channel: fn(profile: JetCLIOutputProfile, kind: JetCLIOutputKind) -> JetCLIOutputChannel Never! {
     if profile.machine_enabled {
         if kind == .Machine -> return .MachineStdout
         return .Hidden

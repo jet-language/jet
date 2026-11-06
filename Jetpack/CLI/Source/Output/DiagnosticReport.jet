@@ -4,19 +4,19 @@
 // source text, so no span becomes a line and column here.
 
 // Rust `Diagnostic::error(code, what, why, fix, None).to_report(&ReportPath::from_process(""), "")`.
-fn cli_diagnostic_report(code: String, what: String, why: String, fix: String) -[FS, Env]> ReportEnvelope Never! {
+cli_diagnostic_report: fn(code: String, what: String, why: String, fix: String) -[FS, Env]> ReportEnvelope Never! {
     cli_diagnostic_to_report(diagnostic_from_registry(code, None, what, why, fix), ReportPath.from_process(""))
 }
 
 // Rust `diagnostic.to_report(&file, "")`.
-fn cli_diagnostic_to_report(diagnostic: Diagnostic, file: ReportPath) -> ReportEnvelope Never! {
-    moment :: if diagnostic.moment == {
+cli_diagnostic_to_report: fn(diagnostic: Diagnostic, file: ReportPath) -> ReportEnvelope Never! {
+    moment: if diagnostic.moment == {
         .Compile -> "compile"
         .Run -> "run"
         .Test -> "test"
         .Tool -> "tool"
     }
-    severity :: if diagnostic.severity == DIAGNOSTIC_ERROR -> "error" else -> "warning"
+    severity: if diagnostic.severity == DIAGNOSTIC_ERROR -> "error" else -> "warning"
     report := ReportEnvelope.new(moment, severity, diagnostic.code, diagnostic.what, diagnostic.why, diagnostic.fix)
     if diagnostic.applicability == .Val(applicability) {
         report.applicability = Val(if applicability == {
@@ -31,11 +31,11 @@ fn cli_diagnostic_to_report(diagnostic: Diagnostic, file: ReportPath) -> ReportE
     report.detail = diagnostic.detail
     if !file.is_empty() -> report.file = Val(file)
     if diagnostic.edit == .Val(edit) {
-        safety :: diagnostic.safety ?? panic("diagnostic `{diagnostic.code}` has an edit without a safety grade")
+        safety: diagnostic.safety ?? panic("diagnostic `{diagnostic.code}` has an edit without a safety grade")
         &report.push_fix_edit(ReportEdit.new(file, ReportSpan.new(edit.span.start, edit.span.end), edit.new_text, cli_report_fix_safety(safety))) ?? panic("a registry edit is valid for its report")
     }
     if diagnostic.no_fix_reason == .Val(reason) {
-        kind :: if reason.kind == {
+        kind: if reason.kind == {
             .Behavior -> NoFixReasonKind.Behavior
             .Design -> NoFixReasonKind.Design
             .Ambiguous -> NoFixReasonKind.Ambiguous
@@ -50,7 +50,7 @@ fn cli_diagnostic_to_report(diagnostic: Diagnostic, file: ReportPath) -> ReportE
     report
 }
 
-fn cli_report_fix_safety(safety: DiagnosticFixSafety) -> FixSafety Never! {
+cli_report_fix_safety: fn(safety: DiagnosticFixSafety) -> FixSafety Never! {
     if safety == {
         .Formatting -> FixSafety.Formatting
         .BehaviorPreserving -> FixSafety.BehaviorPreserving

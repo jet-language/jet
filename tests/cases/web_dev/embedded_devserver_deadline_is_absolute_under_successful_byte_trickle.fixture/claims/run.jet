@@ -1,15 +1,15 @@
 // D-NET-IO-KIND1 revision2 corrected single-task deadline plan, not the superseded plan.
-fn s5_trickle_reset(error: NetError) -> Bool {
+s5_trickle_reset: fn(error: NetError) -> Bool {
     if error == { .ConnectionReset(_) -> true else -> false }
 }
 #Test("original successful byte trickle does not renew absolute request deadline") {
-    port :: s5_web_port()
+    port: s5_web_port()
     s5_web_wait_up(port, 30000)
-    client :: net.tcp_connect("127.0.0.1:{port}") ?? panic("connect trickle")
+    client: net.tcp_connect("127.0.0.1:{port}") ?? panic("connect trickle")
     net.set_read_timeout(client, 12000) ?? panic("original twelve-second read timeout")
-    crlf :: s5_web_crlf()
+    crlf: s5_web_crlf()
     net.tcp_write_all_bytes(client, "GET /__jet_dev_version HTTP/1.1{crlf}Host: localhost".bytes()) ?? panic("incomplete header")
-    started :: time.start()
+    started: time.start()
     sent := 0
     response_bytes := 0
     closed := false
@@ -34,7 +34,7 @@ fn s5_trickle_reset(error: NetError) -> Bool {
         }
     }
     if !closed {
-        remaining :: 12000000000 - time.elapsed(started).ns
+        remaining: 12000000000 - time.elapsed(started).ns
         assert(remaining > 0, "trickle exhausted original twelve-second read timeout")
         if client.read(8192, deadline: time.duration_ns(remaining)) == {
             .Ok(part) -> {
@@ -44,7 +44,7 @@ fn s5_trickle_reset(error: NetError) -> Bool {
             .Err(error) -> { closed = s5_trickle_reset(error) }
         }
     }
-    elapsed :: time.elapsed(started).ns
+    elapsed: time.elapsed(started).ns
     net.tcp_close(client).drop("original client drop ignores close failure")
     assert_eq(sent, 32)
     assert(closed && response_bytes == 0, "incomplete request must close without a response")

@@ -1,15 +1,15 @@
-package {
+package: {
     name: "raylib_images"
     authority: {
     allow: [IO]
     }
 }
-use rl :: core.game.raylib
+use rl: core.game.raylib
 
 // raylib's CPU image functions edit a RaylibImage in memory: no window and
 // no effect. After each step the image is printed one letter per pixel:
 // R red, B blue, W white, K black, G green, . nothing, ? any other color.
-fn letter(color: rl.RaylibColor) -> String {
+letter: fn(color: rl.RaylibColor) -> String {
     if color.a == 0 -> return "."
     if color.r == 200 && color.g == 40 && color.b == 40 -> return "R"
     if color.r == 40 && color.g == 40 && color.b == 200 -> return "B"
@@ -19,7 +19,7 @@ fn letter(color: rl.RaylibColor) -> String {
     "?"
 }
 
-fn show(step: String, image: rl.RaylibImage) {
+show: fn(step: String, image: rl.RaylibImage) {
     print("{step} {image.width}x{image.height}")
     loop y in 0..<image.height {
         row := ""
@@ -28,16 +28,16 @@ fn show(step: String, image: rl.RaylibImage) {
     }
 }
 
-fn channels(color: rl.RaylibColor) -> String {
+channels: fn(color: rl.RaylibColor) -> String {
     "{color.r},{color.g},{color.b},{color.a}"
 }
 
-fn run() {
-    red :: rl.color(200, 40, 40, 255)
-    blue :: rl.color(40, 40, 200, 255)
-    white :: rl.color(255, 255, 255, 255)
-    black :: rl.color(0, 0, 0, 255)
-    green :: rl.color(40, 200, 40, 255)
+run: fn() {
+    red: rl.color(200, 40, 40, 255)
+    blue: rl.color(40, 40, 200, 255)
+    white: rl.color(255, 255, 255, 255)
+    black: rl.color(0, 0, 0, 255)
+    green: rl.color(40, 200, 40, 255)
     image := rl.gen_image_checked(6, 4, 2, 2, red, blue)
     show("checked", image)
     rl.image_draw_rectangle(&image, 1, 1, 3, 2, white)

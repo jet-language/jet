@@ -2,13 +2,13 @@
 // chosen arm is fully checked and emitted; the other arms get name checks
 // only (D-WHEN2). `prep` is no longer a keyword: a value named `prep` is an
 // ordinary name.
-MODE :: comptime { "fast" }
+MODE: comptime { "fast" }
 
-LEVEL :: comptime { 2 }
+LEVEL: comptime { 2 }
 
-fn add(a: Int, b: Int) -> Int { a + b }
+add: fn(a: Int, b: Int) -> Int { a + b }
 
-fn describe() -> String {
+describe: fn() -> String {
     label := "unknown mode"
     comptime if MODE == "safe" {
         label = "safe mode"
@@ -20,7 +20,7 @@ fn describe() -> String {
     label
 }
 
-fn run() {
+run: fn() {
     print(describe())
     comptime if LEVEL > 1 {
         print("level above one")
@@ -30,7 +30,7 @@ fn run() {
     }
     // The unchosen arm is not type-checked: this call would not type-check.
     comptime if false {
-        broken :: add("text", 0)
+        broken: add("text", 0)
         print("{broken}")
     } else {
         print("dropped arm skipped")

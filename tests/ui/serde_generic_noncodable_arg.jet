@@ -3,19 +3,19 @@
 // `Wrap<Plain>` isn't, because `Plain` refuses a wire form.
 // D-AUTODERIVE1=E auto-derives both codecs for a qualifying plain struct, so
 // `Plain` states the refusal with `#!Codable`.
-use json :: core.encoding.json
+use json: core.encoding.json
 
 #Codable
-struct Wrap<T> {
+Wrap: struct<T> {
     value: T
 }
 
 #!Codable
-struct Plain {
+Plain: struct {
     n: Int
 }
 
-fn run() {
-    w :: Wrap<Plain>{value: Plain{n: 1}}
+run: fn() {
+    w: Wrap<Plain>{value: Plain{n: 1}}
     print(json.to_string(w))
 }

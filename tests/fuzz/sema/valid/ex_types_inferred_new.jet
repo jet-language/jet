@@ -1,23 +1,23 @@
 // D-SHAPE3a=A: expected-type inferred fresh constructors.
-struct Counter {
+Counter: struct {
     value: Int
 }
 
-struct Holder {
+Holder: struct {
     counter: Counter
 }
 
 impl Counter {
-    fn new(value: Int) -> Counter { return Counter{value: value} }
+    new: fn(value: Int) -> Counter { return Counter{value: value} }
 }
 
-fn fresh(value: Int) -> Counter { .new(value) }
+fresh: fn(value: Int) -> Counter { .new(value) }
 
-fn read(counter: Counter) -> Int { counter.value }
+read: fn(counter: Counter) -> Int { counter.value }
 
-fn run() {
-    counter :: Counter.new(1)
-    holder :: Holder{counter: .new(2)}
+run: fn() {
+    counter: Counter.new(1)
+    holder: Holder{counter: .new(2)}
     print(read(.new(3)))
     print("{counter.value}{holder.counter.value}{Counter.new(4).value}")
     print(fresh(5).value)

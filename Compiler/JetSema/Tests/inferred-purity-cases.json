@@ -6,23 +6,23 @@
   },
   {
     "name": "pure-inferred-owned-string-copy",
-    "source": "fn copy_value(value: String) -> String { return value }\nfn compute(value: String) -[]> String { return copy_value(value) }\nfn run() { print(compute(\"text\")) }\n",
+    "source": "copy_value: fn(value: String) -> String { return value }\ncompute: fn(value: String) -[]> String { return copy_value(value) }\nrun: fn() { print(compute(\"text\")) }\n",
     "errors": []
   },
   {
     "name": "pure-inferred-panic",
-    "source": "fn stop() -> Int { return panic(\"stop\") }\nfn compute() -[]> Int { return stop() }\nfn run() {}\n",
+    "source": "stop: fn() -> Int { return panic(\"stop\") }\ncompute: fn() -[]> Int { return stop() }\nrun: fn() {}\n",
     "errors": []
   },
   {
     "name": "pure-inferred-interpolation-and-io",
-    "source": "fn format(value: Int) -> String { print(value)\nreturn \"{value}\" }\nfn compute(value: Int) -[]> String { return format(value) }\nfn run() { print(compute(42)) }\n",
+    "source": "format: fn(value: Int) -> String { print(value)\nreturn \"{value}\" }\ncompute: fn(value: Int) -[]> String { return format(value) }\nrun: fn() { print(compute(42)) }\n",
     "errors": ["E3401"],
     "errorCount": 1
   },
   {
     "name": "pure-explicit-interpolation-denial",
-    "source": "fn format(value: Int) -> String { return \"{value}\" }\nfn compute(value: Int) -[!Mem.Alloc]> String { return format(value) }\nfn run() { print(compute(42)) }\n",
+    "source": "format: fn(value: Int) -> String { return \"{value}\" }\ncompute: fn(value: Int) -[!Mem.Alloc]> String { return format(value) }\nrun: fn() { print(compute(42)) }\n",
     "errors": ["E0921"]
   },
   {

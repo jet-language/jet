@@ -1,21 +1,21 @@
 // Child process for prim-distributed message passing.
-package {
+package: {
     name: "socket_worker"
     authority: { allow: [Exec.Args, Mem.Alloc, Net, Time.Wait] }
 }
 
 use {
-    net :: core.net
-    process :: core.process
+    net: core.net
+    process: core.process
 }
 
-fn run() {
-    args :: process.args()
-    addr :: args.get(0) ?? panic("missing listener address")
-    stream :: net.tcp_connect(addr)
-    request :: stream.read_text(8192)
-    value :: request.trim().to_int() ?? panic("typed message was not Int")
-    response :: (value * value).to_string()
+run: fn() {
+    args: process.args()
+    addr: args.get(0) ?? panic("missing listener address")
+    stream: net.tcp_connect(addr)
+    request: stream.read_text(8192)
+    value: request.trim().to_int() ?? panic("typed message was not Int")
+    response: (value * value).to_string()
     stream.write_all(response.bytes())
     stream.close()
 }

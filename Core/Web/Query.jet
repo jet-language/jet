@@ -1,19 +1,19 @@
 // core.web.query — typed live-query state and mutation transitions.
-C_MAX_QUERY_KEY :: 256
+C_MAX_QUERY_KEY: 256
 
-C_MAX_QUERY_PAYLOAD :: 1048576
+C_MAX_QUERY_PAYLOAD: 1048576
 
-C_MAX_QUERY_SUBSCRIBERS :: 1000000
+C_MAX_QUERY_SUBSCRIBERS: 1000000
 
 
 #Error
-enum WebQueryError {
+WebQueryError: enum {
     Offline
     Conflict
     Invalid
 }
 
-enum WebQueryStatus {
+WebQueryStatus: enum {
     Pending
     Fresh
     Stale
@@ -22,7 +22,7 @@ enum WebQueryStatus {
     Offline
 }
 
-enum WebMutationStatus {
+WebMutationStatus: enum {
     Idle
     Pending
     Success
@@ -30,19 +30,19 @@ enum WebMutationStatus {
     Settled
 }
 
-enum WebQueryNetworkMode {
+WebQueryNetworkMode: enum {
     Online
     Always
     OfflineFirst
 }
 
-struct WebQueryState {
+WebQueryState: struct {
     status: WebQueryStatus
     generation: Int
     online: Bool
 }
 
-struct WebQuery {
+WebQuery: struct {
     key: String
     data: String
     status: WebQueryStatus
@@ -54,36 +54,36 @@ struct WebQuery {
 }
 
 impl WebQuery {
-    fn get(self) -> String Never! { self.data }
-    fn show(self) -> String Never! { "{self.key}={self.data}" }
-    fn state(self) -> WebQueryState Never! { state(self) }
-    fn state_signal(self) -> String Never! { state_signal(self) }
-    fn mutation_state(self) -> WebMutationState Never! { mutation_state(self) }
-    fn mutation_signal(self) -> String Never! { mutation_signal(self) }
-    fn facts(self) -> String Never! { facts(self) }
-    fn invalidate(&self) -> Int Never! { invalidate(&self) }
-    fn refresh(&self) WebQueryError! { refresh(&self) }
-    fn cancel(&self) -> Bool Never! { cancel(&self) }
-    fn queue(&self, data: String) -> Int WebQueryError! { queue(&self, data) }
-    fn retry(&self, replay: fn(String)) -> Int WebQueryError! { retry(&self, replay) }
-    fn set_online(&self, online: Bool) Never! { set_online(&self, online) }
-    fn set_mode(&self, mode: WebQueryNetworkMode) Never! { set_mode(&self, mode) }
-    fn mutate<E>(&self, key: String, expected: String?, mutation: fn(String) -> String E!) -> WebMutationState E! { mutate<E>(&self, key, expected, mutation) }
-    fn mutate_with_invalidations<E>(&self, key: String, expected: String?, invalidations: [String], mutation: fn(String) -> String E!) -> WebMutationState E! { mutate_with_invalidations<E>(&self, key, expected, invalidations, mutation) }
+    get: fn(self) -> String Never! { self.data }
+    show: fn(self) -> String Never! { "{self.key}={self.data}" }
+    state: fn(self) -> WebQueryState Never! { state(self) }
+    state_signal: fn(self) -> String Never! { state_signal(self) }
+    mutation_state: fn(self) -> WebMutationState Never! { mutation_state(self) }
+    mutation_signal: fn(self) -> String Never! { mutation_signal(self) }
+    facts: fn(self) -> String Never! { facts(self) }
+    invalidate: fn(&self) -> Int Never! { invalidate(&self) }
+    refresh: fn(&self) WebQueryError! { refresh(&self) }
+    cancel: fn(&self) -> Bool Never! { cancel(&self) }
+    queue: fn(&self, data: String) -> Int WebQueryError! { queue(&self, data) }
+    retry: fn(&self, replay: fn(String)) -> Int WebQueryError! { retry(&self, replay) }
+    set_online: fn(&self, online: Bool) Never! { set_online(&self, online) }
+    set_mode: fn(&self, mode: WebQueryNetworkMode) Never! { set_mode(&self, mode) }
+    mutate: fn<E>(&self, key: String, expected: String?, mutation: fn(String) -> String E!) -> WebMutationState E! { mutate<E>(&self, key, expected, mutation) }
+    mutate_with_invalidations: fn<E>(&self, key: String, expected: String?, invalidations: [String], mutation: fn(String) -> String E!) -> WebMutationState E! { mutate_with_invalidations<E>(&self, key, expected, invalidations, mutation) }
 }
 
-struct WebMutationState {
+WebMutationState: struct {
     status: WebMutationStatus
     data: String
     error: String
 }
-struct WebQuerySeed {
+WebQuerySeed: struct {
     data: String
     generation: Int
     subscribers: Int
 }
 
-fn new(key: String, initial: WebQuerySeed) -> WebQuery Never! {
+new: fn(key: String, initial: WebQuerySeed) -> WebQuery Never! {
     generation := initial.generation
     if generation < 1 -> generation = 1
     subscribers := initial.subscribers
@@ -98,7 +98,7 @@ fn new(key: String, initial: WebQuerySeed) -> WebQuery Never! {
     WebQuery{key: key.copy(), data: initial.data, status: status, error: error, generation: generation, mode: WebQueryNetworkMode.Online, online: true, subscribers: subscribers}
 }
 
-fn live<E>(key: String, data: String, url: String, loader: fn() -> String E!) -> WebQuery E! {
+live: fn<E>(key: String, data: String, url: String, loader: fn() -> String E!) -> WebQuery E! {
     loaded := data
     if url.len() > 0 -> loaded = loader()
     status := WebQueryStatus.Fresh
@@ -110,16 +110,16 @@ fn live<E>(key: String, data: String, url: String, loader: fn() -> String E!) ->
     WebQuery{key: key.copy(), data: loaded, status: status, error: error, generation: 1, mode: WebQueryNetworkMode.Online, online: true, subscribers: 0}
 }
 
-fn get(q: WebQuery) -> String Never! { q.data }
-fn show(q: WebQuery) -> String Never! { "{q.key}={q.data}" }
+get: fn(q: WebQuery) -> String Never! { q.data }
+show: fn(q: WebQuery) -> String Never! { "{q.key}={q.data}" }
 
-fn state(q: WebQuery) -> WebQueryState Never! {
+state: fn(q: WebQuery) -> WebQueryState Never! {
     WebQueryState{status: q.status, generation: q.generation, online: q.online}
 }
 
-fn state_signal(q: WebQuery) -> String Never! { "{q.key}:{status_name(q.status)}:{q.generation}" }
+state_signal: fn(q: WebQuery) -> String Never! { "{q.key}:{status_name(q.status)}:{q.generation}" }
 
-fn mutation_state(q: WebQuery) -> WebMutationState Never! {
+mutation_state: fn(q: WebQuery) -> WebMutationState Never! {
     status := WebMutationStatus.Idle
     if q.status == WebQueryStatus.Pending || q.status == WebQueryStatus.Fetching -> status = WebMutationStatus.Pending
     if q.status == WebQueryStatus.Error || q.status == WebQueryStatus.Offline -> status = WebMutationStatus.Error
@@ -127,9 +127,9 @@ fn mutation_state(q: WebQuery) -> WebMutationState Never! {
     WebMutationState{status: status, data: q.data, error: q.error}
 }
 
-fn mutation_signal(q: WebQuery) -> String Never! { "{status_name(q.status)}:{q.generation}" }
+mutation_signal: fn(q: WebQuery) -> String Never! { "{status_name(q.status)}:{q.generation}" }
 
-fn subscribe(key: String) -> WebQuery Never! {
+subscribe: fn(key: String) -> WebQuery Never! {
     status := WebQueryStatus.Stale
     error := ""
     if !valid_key(key) {
@@ -139,13 +139,13 @@ fn subscribe(key: String) -> WebQuery Never! {
     WebQuery{key: key.copy(), data: "", status: status, error: error, generation: 1, mode: WebQueryNetworkMode.Online, online: true, subscribers: 1}
 }
 
-fn invalidate(q: &WebQuery) -> Int Never! {
+invalidate: fn(q: &WebQuery) -> Int Never! {
     q.status = WebQueryStatus.Stale
     q.generation = q.generation + 1
     q.generation
 }
 
-fn refresh(q: &WebQuery) WebQueryError! {
+refresh: fn(q: &WebQuery) WebQueryError! {
     if q.status == WebQueryStatus.Fetching || q.status == WebQueryStatus.Pending -> return Err(WebQueryError.Invalid)
     if !q.online && q.mode != WebQueryNetworkMode.Always {
         q.status = WebQueryStatus.Offline
@@ -159,7 +159,7 @@ fn refresh(q: &WebQuery) WebQueryError! {
     return Ok()
 }
 
-fn cancel(q: &WebQuery) -> Bool Never! {
+cancel: fn(q: &WebQuery) -> Bool Never! {
     if q.status == WebQueryStatus.Fetching || q.status == WebQueryStatus.Pending {
         q.status = WebQueryStatus.Stale
         q.error = "cancelled"
@@ -169,7 +169,7 @@ fn cancel(q: &WebQuery) -> Bool Never! {
     false
 }
 
-fn queue(q: &WebQuery, data: String) -> Int WebQueryError! {
+queue: fn(q: &WebQuery, data: String) -> Int WebQueryError! {
     if data.len() > C_MAX_QUERY_PAYLOAD -> return Err(WebQueryError.Invalid)
     if q.status == WebQueryStatus.Fetching || q.status == WebQueryStatus.Pending -> return Err(WebQueryError.Invalid)
     q.data = data.copy()
@@ -179,7 +179,7 @@ fn queue(q: &WebQuery, data: String) -> Int WebQueryError! {
     q.generation
 }
 
-fn retry(q: &WebQuery, replay: fn(String)) -> Int WebQueryError! {
+retry: fn(q: &WebQuery, replay: fn(String)) -> Int WebQueryError! {
     if q.status == WebQueryStatus.Fetching || q.status == WebQueryStatus.Pending -> return Err(WebQueryError.Invalid)
     if !q.online && q.mode != WebQueryNetworkMode.Always -> return Err(WebQueryError.Offline)
     q.status = WebQueryStatus.Fetching
@@ -189,7 +189,7 @@ fn retry(q: &WebQuery, replay: fn(String)) -> Int WebQueryError! {
     q.generation
 }
 
-fn mutate<E>(q: &WebQuery, key: String, expected: String?, mutation: fn(String) -> String E!) -> WebMutationState E! {
+mutate: fn<E>(q: &WebQuery, key: String, expected: String?, mutation: fn(String) -> String E!) -> WebMutationState E! {
     if !valid_key(key) || key != q.key {
         q.status = WebQueryStatus.Error
         q.error = "key"
@@ -197,7 +197,7 @@ fn mutate<E>(q: &WebQuery, key: String, expected: String?, mutation: fn(String) 
         return WebMutationState{status: WebMutationStatus.Error, data: q.data, error: q.error}
     }
     if expected != None {
-        actual :: expected
+        actual: expected
         if actual.len() > C_MAX_QUERY_PAYLOAD || actual != q.data {
             q.status = WebQueryStatus.Error
             q.error = "conflict"
@@ -230,7 +230,7 @@ fn mutate<E>(q: &WebQuery, key: String, expected: String?, mutation: fn(String) 
     WebMutationState{status: WebMutationStatus.Success, data: q.data, error: ""}
 }
 
-fn mutate_with_invalidations<E>(q: &WebQuery, key: String, expected: String?, invalidations: [String], mutation: fn(String) -> String E!) -> WebMutationState E! {
+mutate_with_invalidations: fn<E>(q: &WebQuery, key: String, expected: String?, invalidations: [String], mutation: fn(String) -> String E!) -> WebMutationState E! {
     if invalidations.len() > C_MAX_QUERY_SUBSCRIBERS {
         q.status = WebQueryStatus.Error
         q.error = "invalidations"
@@ -245,14 +245,14 @@ fn mutate_with_invalidations<E>(q: &WebQuery, key: String, expected: String?, in
             return WebMutationState{status: WebMutationStatus.Error, data: q.data, error: q.error}
         }
     }
-    result :: mutate<E>(&q, key, expected, mutation)
+    result: mutate<E>(&q, key, expected, mutation)
     if result.status == WebMutationStatus.Success && invalidations.len() > 0 {
         return WebMutationState{status: WebMutationStatus.Settled, data: result.data, error: ""}
     }
     result
 }
 
-fn set_online(q: &WebQuery, online: Bool) Never! {
+set_online: fn(q: &WebQuery, online: Bool) Never! {
     if q.online == online -> return
     q.online = online
     q.generation = q.generation + 1
@@ -265,7 +265,7 @@ fn set_online(q: &WebQuery, online: Bool) Never! {
     }
 }
 
-fn set_mode(q: &WebQuery, mode: WebQueryNetworkMode) Never! {
+set_mode: fn(q: &WebQuery, mode: WebQueryNetworkMode) Never! {
     if q.mode == mode -> return
     q.mode = mode
     q.generation = q.generation + 1
@@ -277,24 +277,24 @@ fn set_mode(q: &WebQuery, mode: WebQueryNetworkMode) Never! {
 }
 
 
-fn facts(q: WebQuery) -> String Never! {
+facts: fn(q: WebQuery) -> String Never! {
     "{{\"key\":\"{esc_json(q.key)}\",\"status\":\"{status_name(q.status)}\",\"generation\":{q.generation},\"online\":{bool_json(q.online)},\"subscribers\":{q.subscribers}}}"
 }
 
-fn valid_key(key: String) -> Bool {
+valid_key: fn(key: String) -> Bool {
     if key.len() == 0 || key.len() > C_MAX_QUERY_KEY -> return false
     loop b in key.bytes() {
-        n :: Int.from_u8(b)
+        n: Int.from_u8(b)
         if n < 33 || n == 127 -> return false
     }
     true
 }
 
-fn esc_json(text: String) -> String {
+esc_json: fn(text: String) -> String {
     out := [U8]{}
-    hex :: "0123456789abcdef".bytes()
+    hex: "0123456789abcdef".bytes()
     loop b in text.bytes() {
-        n :: Int.from_u8(b)
+        n: Int.from_u8(b)
         if n == 34 || n == 92 {
             &out.push(U8{92})
             &out.push(b)
@@ -326,7 +326,7 @@ fn esc_json(text: String) -> String {
     }
     String.from_bytes(out) ?? ""
 }
-fn status_name(s: WebQueryStatus) -> String {
+status_name: fn(s: WebQueryStatus) -> String {
     if s == {
         WebQueryStatus.Pending -> "pending"
         WebQueryStatus.Fresh -> "fresh"
@@ -337,7 +337,7 @@ fn status_name(s: WebQueryStatus) -> String {
     }
 }
 
-fn bool_json(b: Bool) -> String {
+bool_json: fn(b: Bool) -> String {
     if b -> return "true"
     "false"
 }

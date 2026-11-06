@@ -1,29 +1,29 @@
 // #1414 library workload: the public JSON value API owns parsing and
 // canonicalization. Invalid input is an ordinary, reported result.
 use {
-    json :: core.encoding.json
-    fs :: core.files
+    json: core.encoding.json
+    fs: core.files
 }
 
 #CLI
-struct WorkloadArgs {
+WorkloadArgs: struct {
     input: String
 }
 
-fn reject_json() {
+reject_json: fn() {
     print("reject=json")
     print("valid=false")
 }
 
-fn run(args: WorkloadArgs) {
-    input :: args.input
+run: fn(args: WorkloadArgs) {
+    input: args.input
     if fs.read(input) == {
         .Ok(raw) -> {
-            raw_bytes :: raw.bytes()
+            raw_bytes: raw.bytes()
             if raw_bytes.len() <= 1048576 {
                 if json.parse(raw) == {
                     .Ok(value) -> {
-                        canonical :: json.canonical(value) ?? panic("canonicalize")
+                        canonical: json.canonical(value) ?? panic("canonicalize")
                         print("canonical={canonical}")
                         print("valid=true")
                     }

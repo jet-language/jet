@@ -16,24 +16,24 @@ regions — without that machinery leaking into everyday code.
 
 ```jet
 #Error
-enum NameError {
+NameError: enum {
     Empty
 }
 
-struct Point {
+Point: struct {
     x: Float
     y: Float
 
-    fn dist_sq(self) -> Float { self.x * self.x + self.y * self.y }
+    dist_sq: fn(self) -> Float { self.x * self.x + self.y * self.y }
 }
 
-enum Light {
+Light: enum {
     Red
     Yellow
     Green
 }
 
-fn next(light: Light) -> Light {
+next: fn(light: Light) -> Light {
     if light == {
         .Red -> Light.Green
         .Green -> Light.Yellow
@@ -41,15 +41,15 @@ fn next(light: Light) -> Light {
     }
 }
 
-fn clean_name(raw: String) -> String !NameError {
+clean_name: fn(raw: String) -> String !NameError {
     if raw == "" -> return Err(NameError.Empty)
     Ok(raw)
 }
 
-fn greet(name: String) -> String { "hello, {name}" }
+greet: fn(name: String) -> String { "hello, {name}" }
 
 #CLI
-struct Args {
+Args: struct {
     #Doc("who to greet") name: String{"world"}
 }
 
@@ -57,10 +57,10 @@ struct Args {
     assert_eq(greet("Jet"), "hello, Jet")
 }
 
-fn run(args: Args) {
-    name :: clean_name(args.name) ?? "stranger"
+run: fn(args: Args) {
+    name: clean_name(args.name) ?? "stranger"
     print(greet(name))
-    p :: Point{x: 3.0, y: 4.0}
+    p: Point{x: 3.0, y: 4.0}
     print("distance squared: {p.dist_sq()}")
 }
 ```
@@ -73,7 +73,7 @@ distance squared: 25.0
 
 A few things to notice:
 
-- `name :: value` binds an immutable name; `name := value` binds a mutable one.
+- `name: value` binds an immutable name; `name := value` binds a mutable one.
   Types come from values or from signatures.
 - `-> String !NameError` declares a result that is either a `String` or a
   `NameError`. Errors are ordinary values; `??` supplies a fallback.

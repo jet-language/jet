@@ -1,47 +1,47 @@
 // #709 / #237 C4: flagship typed-data analysis on one core.data path.
-package {
+package: {
     name: "data_analysis"
     authority: { allow: [Env, FS, IO] }
 }
 
-use data :: core.data
+use data: core.data
 
 #Codable
-struct Ticket {
+Ticket: struct {
     team: String
     minutes: Float
 }
 
 #Codable
-struct Owner {
+Owner: struct {
     team: String
     owner: String
 }
 
-fn run() {
-    tickets_csv :: "team,minutes\nCore,4.0\nTools,5.0\nCore,8.0\nDocs,3.0\nTools,7.0"
-    owners_csv :: "team,owner\nCore,Ada\nTools,Grace\nDocs,Lin"
-    tickets :: data.csv<Ticket>(tickets_csv) ?? panic("tickets")
-    owners :: data.csv<Owner>(owners_csv) ?? panic("owners")
+run: fn() {
+    tickets_csv: "team,minutes\nCore,4.0\nTools,5.0\nCore,8.0\nDocs,3.0\nTools,7.0"
+    owners_csv: "team,owner\nCore,Ada\nTools,Grace\nDocs,Lin"
+    tickets: data.csv<Ticket>(tickets_csv) ?? panic("tickets")
+    owners: data.csv<Owner>(owners_csv) ?? panic("owners")
 
-    ticket_query :: data.query(tickets).filter(t -> t.minutes >= 4.0)
-    focused :: ticket_query.collect() ?? panic("filter")
-    sorted_query :: data.query(focused).sort_by(t -> t.team)
-    sorted :: sorted_query.collect() ?? panic("sort")
-    joined :: data.inner_join(sorted, owners, t -> t.team, o -> o.team) ?? panic("join")
-    groups :: data.query(sorted)
+    ticket_query: data.query(tickets).filter(t -> t.minutes >= 4.0)
+    focused: ticket_query.collect() ?? panic("filter")
+    sorted_query: data.query(focused).sort_by(t -> t.team)
+    sorted: sorted_query.collect() ?? panic("sort")
+    joined: data.inner_join(sorted, owners, t -> t.team, o -> o.team) ?? panic("join")
+    groups: data.query(sorted)
         .group_by(t -> t.team)
         .mean(t -> t.minutes)
         .collect() ?? panic("group")
-    counts :: data.query(sorted)
+    counts: data.query(sorted)
         .group_by(t -> t.team)
         .count()
         .collect() ?? panic("count")
-    values :: [Float]{4.0, 5.0, 8.0, 3.0, 7.0}
-    summary :: data.describe(values) ?? panic("describe")
-    chart :: data.bar_text(counts) ?? panic("bar")
-    svg :: data.bar_svg(counts) ?? panic("svg")
-    status :: data.status()
+    values: [Float]{4.0, 5.0, 8.0, 3.0, 7.0}
+    summary: data.describe(values) ?? panic("describe")
+    chart: data.bar_text(counts) ?? panic("bar")
+    svg: data.bar_svg(counts) ?? panic("svg")
+    status: data.status()
 
     print("tickets: {tickets.len()}")
     print("focused: {focused.len()}")

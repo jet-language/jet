@@ -5,19 +5,19 @@ use {
     jet_foundation.[DiagnosticExplanation, PolicyDeclaration, PolicyKey, PolicyScope, PolicySourceText, diagnostic_source_text, policy_explain, policy_key_name, policy_resolve]
 }
 
-struct JetCLIMarkerSite {
+JetCLIMarkerSite: struct {
  file: String
  line: U64
 }
 
-fn jet_cli_explain_marker_site(site: String) -> JetCLIMarkerSite JetCLIReadError! {
- bytes :: site.bytes()
+jet_cli_explain_marker_site: fn(site: String) -> JetCLIMarkerSite JetCLIReadError! {
+ bytes: site.bytes()
  cut := bytes.len()
  loop cut > 0 {
  cut -= 1
  if (bytes[cut] == U8{58}) {
- text :: site.slice((cut + 1)..<bytes.len())
- line :: jet_cli_remote_unsigned(text) ?? return Err(jet_cli_read_error("marker line must be a positive number"))
+ text: site.slice((cut + 1)..<bytes.len())
+ line: jet_cli_remote_unsigned(text) ?? return Err(jet_cli_read_error("marker line must be a positive number"))
  if (line == U64{0}) -> return Err(jet_cli_read_error("marker line must be a positive number"))
  return Ok(JetCLIMarkerSite{file: site.slice(0..<cut), line: line})
  }
@@ -27,13 +27,13 @@ fn jet_cli_explain_marker_site(site: String) -> JetCLIMarkerSite JetCLIReadError
 
 // `sources` holds the text of the files the declarations name, so the chain
 // reads `file:line:col`.
-fn jet_cli_explain_policy_lookup(key: PolicyKey, declarations: [PolicyDeclaration], sources: [PolicySourceText]) -> DiagnosticExplanation? Never! {
- effective :: if policy_resolve(key, declarations) == {
+jet_cli_explain_policy_lookup: fn(key: PolicyKey, declarations: [PolicyDeclaration], sources: [PolicySourceText]) -> DiagnosticExplanation? Never! {
+ effective: if policy_resolve(key, declarations) == {
  .Val(value) -> value
  .None -> { return None }
  .Err(_) -> { return None }
  }
- name :: policy_key_name(key)
+ name: policy_key_name(key)
  Val(DiagnosticExplanation{
  code: name, stage: "policy", meaning: "effective scoped policy `{name}`",
  what: Val(policy_explain(effective, sources)),
@@ -43,7 +43,7 @@ fn jet_cli_explain_policy_lookup(key: PolicyKey, declarations: [PolicyDeclaratio
  })
 }
 
-fn jet_cli_explain_marker_offset(source: String, line: U64) -> Int Never! {
+jet_cli_explain_marker_offset: fn(source: String, line: U64) -> Int Never! {
  // A user `--line 0` names no line after the first; `line - 1` on U64 would trap.
  if (line <= U64{1}) -> return 0
  remaining := line - U64{1}
@@ -55,7 +55,7 @@ fn jet_cli_explain_marker_offset(source: String, line: U64) -> Int Never! {
  source.bytes().len()
 }
 
-fn jet_cli_explain_loaded_policy(key: PolicyKey, loaded: JetDriverSourceQueryResult, site: String?, line: U64?, color: Bool, json: Bool) -> JetCLIPlan Never! {
+jet_cli_explain_loaded_policy: fn(key: PolicyKey, loaded: JetDriverSourceQueryResult, site: String?, line: U64?, color: Bool, json: Bool) -> JetCLIPlan Never! {
  if !loaded.complete {
  stderr := ""
  loop diagnostic in loaded.diagnostics -> stderr = "{stderr}{diagnostic.what}\n"
@@ -64,12 +64,12 @@ fn jet_cli_explain_loaded_policy(key: PolicyKey, loaded: JetDriverSourceQueryRes
  declarations := [PolicyDeclaration]{}
  if line == .Val(number) {
  // Rust marker-site selection intentionally sees only the entry module.
- source_module :: loaded.modules[0]
- offset :: jet_cli_explain_marker_offset(source_module.source, number)
+ source_module: loaded.modules[0]
+ offset: jet_cli_explain_marker_offset(source_module.source, number)
  loop declaration in source_module.program.policy_declarations {
  if declaration.key != key -> next
  if declaration.scope == PolicyScope.Function || declaration.scope == PolicyScope.Block {
- target :: declaration.target ?? next
+ target: declaration.target ?? next
  if offset < target.start || offset > target.end -> next
  }
  &declarations.push(declaration)
@@ -84,13 +84,13 @@ fn jet_cli_explain_loaded_policy(key: PolicyKey, loaded: JetDriverSourceQueryRes
  }
  sources := [PolicySourceText]{}
  loop source_module in loaded.modules {
- named :: loop declaration in declarations {
+ named: loop declaration in declarations {
  if declaration.source == source_module.path -> break true
  } ?? false
  if named -> &sources.push(PolicySourceText{path: source_module.path, text: diagnostic_source_text(source_module.source)})
  }
- explanation :: jet_cli_explain_policy_lookup(key, declarations, sources) ?? {
- name :: policy_key_name(key)
+ explanation: jet_cli_explain_policy_lookup(key, declarations, sources) ?? {
+ name: policy_key_name(key)
  if site == .Val(location) -> return jet_cli_fail("E2104", "`{name}` has no effective declaration at {location}", jet_cli_why("E2104"), "correct the named argument or input, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
  return jet_cli_fail("E2104", "policy `{name}` has no effective declaration", "the policy has no applicable writer at this source site", "add one registered policy declaration or explain a concrete marker site", color, JET_DRIVER_EXIT_USER_ERROR)
  }

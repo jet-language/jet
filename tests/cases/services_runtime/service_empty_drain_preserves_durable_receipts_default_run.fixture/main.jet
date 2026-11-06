@@ -1,27 +1,27 @@
 
 use {
-    service :: core.service
-    testing :: core.testing
-    time :: core.time
+    service: core.service
+    testing: core.testing
+    time: core.time
 }
 
-fn worker() {}
+worker: fn() {}
 
-fn receipt_id(receipt: ^Delivery) -> Delivery {
+receipt_id: fn(receipt: ^Delivery) -> Delivery {
     return receipt
 }
 
-fn run() {
+run: fn() {
     temp := testing.temp_dir("drain-empty-durable")
-    store :: Path.from(temp).join("authority.log").to_string()
-    retention :: Duration.seconds(86400) ?? panic("retention")
+    store: Path.from(temp).join("authority.log").to_string()
+    retention: Duration.seconds(86400) ?? panic("retention")
     runtime := service.runtime(store, retention: retention)
     tree := service.tree("drain-empty-durable")
-    endpoint :: &tree.worker("api", worker, capacity: 1) ?? panic("worker")
+    endpoint: &tree.worker("api", worker, capacity: 1) ?? panic("worker")
     &tree.start() ?? panic("start")
     &tree.drain_worker(endpoint) ?? panic("drain")
-    receipt :: runtime.send(endpoint, "after", key: "after") ?? panic("send")
-    id :: receipt_id(receipt)
+    receipt: runtime.send(endpoint, "after", key: "after") ?? panic("send")
+    id: receipt_id(receipt)
     print("accepted")
     print("received:{&tree.receive(endpoint) ?? panic("receive")}")
     runtime.commit(id) ?? panic("commit")

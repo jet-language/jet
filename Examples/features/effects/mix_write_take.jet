@@ -1,24 +1,24 @@
 // D-MEM1: mix of & (write) and ^ (take/move) in one function.
 // equip: edit the player in place, consume the item.
-struct Player {
+Player: struct {
     hp: Int
     name: String
 }
 
-struct Item {
+Item: struct {
     bonus: Int
     label: String
 }
 
 // &Player = edit in place; ^Item = consume/take ownership
-fn equip(p: &Player, item: ^Item) {
+equip: fn(p: &Player, item: ^Item) {
     p.hp += item.bonus
     print("equipped {item.label}, hp now {p.hp}")
 }
 
-fn run() {
+run: fn() {
     hero := Player{hp: 50, name: "Rex"}
-    sword :: Item{bonus: 20, label: "iron sword"}
+    sword: Item{bonus: 20, label: "iron sword"}
     equip(&hero, ^sword)  // & mirrors write; ^ mirrors take
     // sword is consumed; hero.hp is updated
     print(hero.name)

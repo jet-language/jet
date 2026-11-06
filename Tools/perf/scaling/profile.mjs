@@ -50,7 +50,7 @@ function jetFunctions(repo) {
       if (entry.isDirectory()) walk(full);
       else if (entry.name.endsWith('.jet')) {
         fs.readFileSync(full, 'utf8').split('\n').forEach((line, index) => {
-          const match = /^\s*(?:pub\s+)?fn\s+(\w+)/.exec(line);
+          const match = /^\s*(?:pub\s+)?(\w+):\s*fn\b/.exec(line);
           if (match && !jetIndex.has(match[1])) jetIndex.set(match[1], `${path.relative(repo, full)}:${index + 1}`);
         });
       }

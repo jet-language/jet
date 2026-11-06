@@ -1,19 +1,19 @@
 // D-SIMD3 vector-proof probes: each function exercises one checked rule.
 // The probes are ordinary executable Jet source, not a disassembly fixture.
-struct Sample {
+Sample: struct {
     value: Float
     bias: Float
 }
 
 // AoS struct-field projection access.
-fn project_fields(points: [Sample#4]) -> [Float#4] {
+project_fields: fn(points: [Sample#4]) -> [Float#4] {
     output := [Float#4]{0.0, 0.0, 0.0, 0.0}
     loop i in 0..<4 -> output[i] = points[i].value + points[i].bias
     return output
 }
 
 // Conditional Float accumulation. The reduction keeps source-order semantics.
-fn sum_positive(values: [Float#8]) -> Float {
+sum_positive: fn(values: [Float#8]) -> Float {
     total := Float{0.0}
     loop i in 0..<8 {
         if values[i] > 0.0 -> total += values[i]
@@ -22,15 +22,15 @@ fn sum_positive(values: [Float#8]) -> Float {
 }
 
 // Early-exit Int search. The first matching lane is the result.
-fn first_match(values: [Int#8], needle: Int) -> Int {
+first_match: fn(values: [Int#8], needle: Int) -> Int {
     loop i in 0..<8 {
         if values[i] == needle -> return i
     }
     return -1
 }
 
-fn run() {
-    points :: [Sample#4]{
+run: fn() {
+    points: [Sample#4]{
         {value: 1.0, bias: 10.0},
         {value: 2.0, bias: 20.0},
         {value: 3.0, bias: 30.0},

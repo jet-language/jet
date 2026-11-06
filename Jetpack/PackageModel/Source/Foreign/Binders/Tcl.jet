@@ -2,110 +2,110 @@
 // jet_pkg_model::TclBind. A session owns one thread-affine interpreter seeded
 // with the bound source; results cross with width checks and bounded strings.
 
-use files :: core.files
+use files: core.files
 
 // A Tcl binding names the directory holding the embeddable runtime.
-struct TclBindResult {
+TclBindResult: struct {
     source: String
     archive: String
     lib_dir: String
     provenance: String
 }
 
-PKG_TCL_TOOL_ACTION :: "rejected the Tcl binding bridge"
+PKG_TCL_TOOL_ACTION: "rejected the Tcl binding bridge"
 
 // Build the Tcl bridge seeded with `source` and render its Jet surface.
-fn pkg_tcl_bind(source: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> TclBindResult ForeignBindError! {
+pkg_tcl_bind: fn(source: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> TclBindResult ForeignBindError! {
     pkg_binder_require_lib_name(lib)
-    tclsh :: pkg_bridge_tool_path("tclsh") ?? return Err(ForeignBindError.ToolMissing("tclsh"))
-    root :: pkg_binder_tool_root(tclsh) ?? return Err(ForeignBindError.ToolMissing("tclsh"))
-    include :: files.join(root, "include")
-    lib_dir :: files.join(root, "lib")
-    library :: BinderHostOS.current().shared_library("tcl", "tcl86.dll")
+    tclsh: pkg_bridge_tool_path("tclsh") ?? return Err(ForeignBindError.ToolMissing("tclsh"))
+    root: pkg_binder_tool_root(tclsh) ?? return Err(ForeignBindError.ToolMissing("tclsh"))
+    include: files.join(root, "include")
+    lib_dir: files.join(root, "lib")
+    library: BinderHostOS.current().shared_library("tcl", "tcl86.dll")
     if !files.is_file(files.join(include, "tcl.h")) || !files.is_file(files.join(lib_dir, library)) -> return Err(ForeignBindError.Source("the provisioned Tcl runtime has no embeddable headers or shared library"))
     pkg_binder_create_dir_all(cache, "could not create Tcl binding cache")
-    stem :: "jet_tcl_{lib}"
-    c :: files.join(cache, "{stem}.c")
-    object :: files.join(cache, "{stem}.o")
-    archive :: files.join(cache, "lib{stem}.a")
+    stem: "jet_tcl_{lib}"
+    c: files.join(cache, "{stem}.c")
+    object: files.join(cache, "{stem}.o")
+    archive: files.join(cache, "lib{stem}.a")
     pkg_binder_write(c, pkg_tcl_render_c(lib, source), "could not write Tcl bridge")
     pkg_binder_run_reporting_detail([String]{"cc", "-std=c11", "-fPIC", "-c", "-I", include, c, "-o", object}, "cc", PKG_TCL_TOOL_ACTION)
     pkg_binder_run_reporting_detail([String]{"ar", "rcs", archive, object}, "ar", PKG_TCL_TOOL_ACTION)
     pkg_binder_remove_file_quiet(c)
     pkg_binder_remove_file_quiet(object)
-    digest :: pkg_binder_identity_digest([String]{"jet-tcl-bind-v1", source, root})
-    descriptor :: pkg_binder_descriptor_for(ForeignLanguage.Tcl, "Tcl")
-    archive_digest :: pkg_bridge_sha_file(archive)
-    target :: pkg_bridge_foreign_host_target()
+    digest: pkg_binder_identity_digest([String]{"jet-tcl-bind-v1", source, root})
+    descriptor: pkg_binder_descriptor_for(ForeignLanguage.Tcl, "Tcl")
+    archive_digest: pkg_bridge_sha_file(archive)
+    target: pkg_bridge_foreign_host_target()
     provenance := "schema=jet-tcl-bind-v1\nsha256={digest}\n"
-    identity :: ForeignBoundaryIdentity.new("source:sha256-{pkg_sha256_hex(source.bytes())}", "none", descriptor.stamp(), "archive:{archive}:sha256-{archive_digest}", "tclsh={root};cc;ar", target)
-    coverage :: ForeignArtifactCoverage.new("{archive}:sha256-{archive_digest}", target, descriptor.stamp())
+    identity: ForeignBoundaryIdentity.new("source:sha256-{pkg_sha256_hex(source.bytes())}", "none", descriptor.stamp(), "archive:{archive}:sha256-{archive_digest}", "tclsh={root};cc;ar", target)
+    coverage: ForeignArtifactCoverage.new("{archive}:sha256-{archive_digest}", target, descriptor.stamp())
     pkg_bridge_append_boundary_provenance(&provenance, descriptor, lib, identity, coverage)
     Ok(TclBindResult{source: pkg_tcl_render_jet(lib), archive: archive, lib_dir: lib_dir, provenance: provenance})
 }
 
-fn pkg_tcl_render_jet(lib: String) -> String Never! {
+pkg_tcl_render_jet: fn(lib: String) -> String Never! {
     pkg_binder_fill_template(PKG_TCL_JET, [String: String]{"abi": "jet_tcl_{lib}"})
 }
 
-fn pkg_tcl_render_c(lib: String, seed: String) -> String Never! {
+pkg_tcl_render_c: fn(lib: String, seed: String) -> String Never! {
     pkg_binder_fill_template(PKG_TCL_BRIDGE_C, [String: String]{"abi": "jet_tcl_{lib}", "seed": pkg_binder_c_escape(seed)})
 }
 
 // The generated session surface. Hole: `abi`.
-PKG_TCL_JET :: comptime { ```#Import module c.@@abi@@ {
-    fn open() -> Int = "@@abi@@_open"
-    fn eval(handle: Int, code: String) -> String = "@@abi@@_eval"
-    fn eval_once(code: String) -> String = "@@abi@@_eval_once"
-    fn eval_int(handle: Int, code: String) -> Int = "@@abi@@_eval_int"
-    fn eval_float(handle: Int, code: String) -> Float = "@@abi@@_eval_float"
-    fn take_error() -> Int = "@@abi@@_take_error"
-    fn close(handle: Int) = "@@abi@@_close"
+PKG_TCL_JET: comptime { ```#Import c.@@abi@@: module {
+    open: fn() -> Int = "@@abi@@_open"
+    eval: fn(handle: Int, code: String) -> String = "@@abi@@_eval"
+    eval_once: fn(code: String) -> String = "@@abi@@_eval_once"
+    eval_int: fn(handle: Int, code: String) -> Int = "@@abi@@_eval_int"
+    eval_float: fn(handle: Int, code: String) -> Float = "@@abi@@_eval_float"
+    take_error: fn() -> Int = "@@abi@@_take_error"
+    close: fn(handle: Int) = "@@abi@@_close"
 }
-use abi :: c.@@abi@@
+use abi: c.@@abi@@
 
-struct Session { value: Int }
-enum TclError { Eval }
+Session: struct { value: Int }
+TclError: enum { Eval }
 
-fn open() -[FFI.Tcl]> Session TclError! {
-    value :: abi.open()
+open: fn() -[FFI.Tcl]> Session TclError! {
+    value: abi.open()
     if abi.take_error() != 0 -> return Err(TclError.Eval)
     return Ok(Session{ value: value })
 }
 
-fn eval(session: Session, code: String) -[FFI.Tcl]> String TclError! {
-    value :: abi.eval(session.value, code)
+eval: fn(session: Session, code: String) -[FFI.Tcl]> String TclError! {
+    value: abi.eval(session.value, code)
     if abi.take_error() != 0 -> return Err(TclError.Eval)
     return Ok(value)
 }
 
-fn eval_once(code: String) -[FFI.Tcl]> String TclError! {
-    value :: abi.eval_once(code)
+eval_once: fn(code: String) -[FFI.Tcl]> String TclError! {
+    value: abi.eval_once(code)
     if abi.take_error() != 0 -> return Err(TclError.Eval)
     return Ok(value)
 }
 
-fn eval_int(session: Session, code: String) -[FFI.Tcl]> Int TclError! {
-    value :: abi.eval_int(session.value, code)
+eval_int: fn(session: Session, code: String) -[FFI.Tcl]> Int TclError! {
+    value: abi.eval_int(session.value, code)
     if abi.take_error() != 0 -> return Err(TclError.Eval)
     return Ok(value)
 }
 
-fn eval_float(session: Session, code: String) -[FFI.Tcl]> Float TclError! {
-    value :: abi.eval_float(session.value, code)
+eval_float: fn(session: Session, code: String) -[FFI.Tcl]> Float TclError! {
+    value: abi.eval_float(session.value, code)
     if abi.take_error() != 0 -> return Err(TclError.Eval)
     return Ok(value)
 }
 
 impl Session.Close {
-    fn close(^self) { abi.close(self.value) }
+    close: fn(^self) { abi.close(self.value) }
 }
 
-fn close(session: ^Session) -[FFI.Tcl]> { abi.close(session.value) }
+close: fn(session: ^Session) -[FFI.Tcl]> { abi.close(session.value) }
 ``` }
 
 // The thread-affine interpreter bridge. Holes: `abi` and the c-escaped `seed`.
-PKG_TCL_BRIDGE_C :: comptime { ```#include <tcl.h>
+PKG_TCL_BRIDGE_C: comptime { ```#include <tcl.h>
 #include <stdint.h>
 #include <pthread.h>
 #include <stdlib.h>

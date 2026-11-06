@@ -1,22 +1,22 @@
 // SETUP-PORT of jetpack_engine.rs:3210-3215,3225-3226: real short UNIX socket, held through build.
 use {
-    net :: core.net
-    files :: core.files
-    sys :: core.sys
-    process :: core.process
-    time :: core.time
+    net: core.net
+    files: core.files
+    sys: core.sys
+    process: core.process
+    time: core.time
 }
 
-fn run() {
-    args :: process.args()
+run: fn() {
+    args: process.args()
     if args.len() == 1 && args[0] == "cleanup" {
-        socket :: files.read("socket.path") ?? panic("socket path")
+        socket: files.read("socket.path") ?? panic("socket path")
         files.remove(socket).drop("original ignores remove_file cleanup errors")
         return
     }
-    pid :: process.current_pid()
-    socket :: files.join(sys.temp_dir(), "jpk-sock-{pid}")
-    listener :: net.unix_listen(socket) ?? panic("bind real UNIX socket")
+    pid: process.current_pid()
+    socket: files.join(sys.temp_dir(), "jpk-sock-{pid}")
+    listener: net.unix_listen(socket) ?? panic("bind real UNIX socket")
     files.write("socket.path", socket) ?? panic("socket path")
     files.write("ready.partial", "ready") ?? panic("ready temporary")
     files.rename("ready.partial", "ready") ?? panic("ready publish")

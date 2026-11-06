@@ -1,27 +1,27 @@
 // D-CONC-JOIN1: a bound `Task` handle owes `join`. Four things discharge that
 // duty and nothing else does: joining it, using its result, handing it to
 // `all`/`race`/`any`, or `.detach()`.
-package {
+package: {
     name: "tasks_join_all"
     authority: { allow: [IO, Mem.Alloc, Time] }
 }
 
-use time :: core.time
+use time: core.time
 
-fn work(n: Int) -> Int { n * 2 }
+work: fn(n: Int) -> Int { n * 2 }
 
-fn slow_one() -> Int {
+slow_one: fn() -> Int {
     time.sleep(100ms)
     return 1
 }
 
-fn run() {
+run: fn() {
     // Join discharges the duty and yields the value.
-    joined :: task work(5)
+    joined: task work(5)
     print(^joined.join() ?? panic("join failed"))
 
     // `all` consumes every handle in the list.
-    results :: task.all {work(1), work(2), work(3)} ?? panic("task.all failed")
+    results: task.all {work(1), work(2), work(3)} ?? panic("task.all failed")
     print(results[0] + results[1] + results[2])
 
     // `race` consumes both handles; the loser is cancelled.
@@ -31,7 +31,7 @@ fn run() {
     print(task.any {slow_one(), work(4)} ?? panic("any failed"))
 
     // `detach` discharges the duty for fire-and-forget work.
-    background :: task work(6)
+    background: task work(6)
     ^background.detach()
     print("detached")
 }

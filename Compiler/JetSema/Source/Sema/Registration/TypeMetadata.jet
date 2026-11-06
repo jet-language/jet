@@ -12,13 +12,13 @@ use jet_foundation.[
     type_name,
 ]
 
-struct SemaTypeMetadataAutoDerives {
+SemaTypeMetadataAutoDerives: struct {
     printable: Bool
     debug: Bool
     equatable: Bool
 }
 
-fn sema_type_metadata_field_auto_ok(ty: Type) -> Bool Never! {
+sema_type_metadata_field_auto_ok: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 | .Measure(_) -> true
         .List(inner) | .Option(inner) | .Tagged(_, inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> sema_type_metadata_field_auto_ok(inner)
@@ -41,7 +41,7 @@ fn sema_type_metadata_field_auto_ok(ty: Type) -> Bool Never! {
     }
 }
 
-fn sema_type_metadata_struct_auto_ok(definition: StructDef) -> Bool Never! {
+sema_type_metadata_struct_auto_ok: fn(definition: StructDef) -> Bool Never! {
     if definition.is_single_use -> return false
     loop field_index in 0..<definition.fields.len() {
         if definition.fields[field_index].computed != None -> next
@@ -50,7 +50,7 @@ fn sema_type_metadata_struct_auto_ok(definition: StructDef) -> Bool Never! {
     true
 }
 
-fn sema_type_metadata_variant_auto_ok(payload: VariantPayload) -> Bool Never! {
+sema_type_metadata_variant_auto_ok: fn(payload: VariantPayload) -> Bool Never! {
     if payload == {
         .Unit -> true
         .Single(ty, _) -> sema_type_metadata_field_auto_ok(ty)
@@ -63,7 +63,7 @@ fn sema_type_metadata_variant_auto_ok(payload: VariantPayload) -> Bool Never! {
     }
 }
 
-fn sema_type_metadata_enum_auto_ok(definition: EnumDef) -> Bool Never! {
+sema_type_metadata_enum_auto_ok: fn(definition: EnumDef) -> Bool Never! {
     if definition.is_single_use -> return false
     loop variant_index in 0..<definition.variants.len() {
         if !sema_type_metadata_variant_auto_ok(definition.variants[variant_index].payload) -> return false
@@ -74,10 +74,10 @@ fn sema_type_metadata_enum_auto_ok(definition: EnumDef) -> Bool Never! {
 // Rust `auto_derive_requested`: the last marker naming the trait or a family
 // holding it (`#Codable` names both codec traits) decides (`!` refuses it).
 // With no marker the package default applies.
-fn sema_type_metadata_trait_requested(markers: [Marker], trait_name: String, package_default: Bool) -> Bool Never! {
+sema_type_metadata_trait_requested: fn(markers: [Marker], trait_name: String, package_default: Bool) -> Bool Never! {
     index := markers.len() - 1
     loop index >= 0 {
-        marker :: markers[index]
+        marker: markers[index]
         if marker.name == trait_name || owned_trait_family(marker.name, false).contains(trait_name) -> return !marker.negated
         index -= 1
     }
@@ -86,22 +86,22 @@ fn sema_type_metadata_trait_requested(markers: [Marker], trait_name: String, pac
 
 // Only an authored block suppresses a structural selection; a
 // compiler-generated block is that selection's own expansion.
-fn sema_type_metadata_has_trait_block(blocks: [TraitImplBlock], trait_name: String) -> Bool Never! {
+sema_type_metadata_has_trait_block: fn(blocks: [TraitImplBlock], trait_name: String) -> Bool Never! {
     loop block in blocks {
         if block.trait_name == trait_name && !block.compiler_generated -> return true
     }
     false
 }
 
-fn sema_type_metadata_impl_key(type_name: String, trait_name: String) -> String Never! {
+sema_type_metadata_impl_key: fn(type_name: String, trait_name: String) -> String Never! {
     "{type_name.len()}:{type_name}:{trait_name}"
 }
 
-fn sema_type_metadata_has_explicit_impl(declared_trait_impls: [String:Bool], type_name: String, trait_name: String) -> Bool Never! {
+sema_type_metadata_has_explicit_impl: fn(declared_trait_impls: [String:Bool], type_name: String, trait_name: String) -> Bool Never! {
     declared_trait_impls.get(sema_type_metadata_impl_key(type_name, trait_name)) != None
 }
 
-fn sema_type_metadata_select_trait(markers: [Marker], package_default: Bool, structurally_eligible: Bool, explicit_block: Bool, explicit_impl: Bool, trait_name: String) -> Bool Never! {
+sema_type_metadata_select_trait: fn(markers: [Marker], package_default: Bool, structurally_eligible: Bool, explicit_block: Bool, explicit_impl: Bool, trait_name: String) -> Bool Never! {
     structurally_eligible && !explicit_block && !explicit_impl && sema_type_metadata_trait_requested(markers, trait_name, package_default)
 }
 
@@ -110,10 +110,10 @@ fn sema_type_metadata_select_trait(markers: [Marker], package_default: Bool, str
 // that same module's top-level trait impl declarations (see
 // `sema_registration_push_declaration`), so unrelated modules cannot suppress
 // this type's selection.
-fn sema_type_metadata_auto_derives(definition: Item, declared_trait_impls: [String:Bool]) -> SemaTypeMetadataAutoDerives Never! {
+sema_type_metadata_auto_derives: fn(definition: Item, declared_trait_impls: [String:Bool]) -> SemaTypeMetadataAutoDerives Never! {
     if definition == {
         .Struct(value) -> {
-            eligible :: sema_type_metadata_struct_auto_ok(value)
+            eligible: sema_type_metadata_struct_auto_ok(value)
             SemaTypeMetadataAutoDerives{
                 printable: sema_type_metadata_select_trait(value.type_markers, value.auto_derive_default, eligible, sema_type_metadata_has_trait_block(value.trait_impls, "Printable"), sema_type_metadata_has_explicit_impl(declared_trait_impls, value.name, "Printable"), "Printable"),
                 debug: sema_type_metadata_select_trait(value.type_markers, value.auto_derive_default, eligible, sema_type_metadata_has_trait_block(value.trait_impls, "Debug"), sema_type_metadata_has_explicit_impl(declared_trait_impls, value.name, "Debug"), "Debug"),
@@ -121,7 +121,7 @@ fn sema_type_metadata_auto_derives(definition: Item, declared_trait_impls: [Stri
             }
         }
         .Enum(value) -> {
-            eligible :: sema_type_metadata_enum_auto_ok(value)
+            eligible: sema_type_metadata_enum_auto_ok(value)
             SemaTypeMetadataAutoDerives{
                 printable: sema_type_metadata_select_trait(value.type_markers, value.auto_derive_default, eligible, sema_type_metadata_has_trait_block(value.trait_impls, "Printable"), sema_type_metadata_has_explicit_impl(declared_trait_impls, value.name, "Printable"), "Printable"),
                 debug: sema_type_metadata_select_trait(value.type_markers, value.auto_derive_default, eligible, sema_type_metadata_has_trait_block(value.trait_impls, "Debug"), sema_type_metadata_has_explicit_impl(declared_trait_impls, value.name, "Debug"), "Debug"),

@@ -3,23 +3,23 @@
 // environment after type registration.
 use jet_foundation.[Diagnostic, Item, MigrationOp, Span, StructDef, Type, type_name, TTypeDef]
 
-fn sema_schema_published(definition: StructDef) -> Bool Never! {
+sema_schema_published: fn(definition: StructDef) -> Bool Never! {
     if definition.is_published_schema -> return true
     loop derivation in definition.derives { if derivation.name == "PublishedSchema" -> return true }
     false
 }
 
-fn sema_schema_codec(definition: StructDef, codec: String, environment: SemaScopeEnvironment?, program: SemaProgramTables) -> Bool Never! {
+sema_schema_codec: fn(definition: StructDef, codec: String, environment: SemaScopeEnvironment?, program: SemaProgramTables) -> Bool Never! {
     if environment == .Val(scope) {
-        checked :: sema_serde_type_definition(scope, program, definition.name) ?? return false
-        direction :: if codec == "Decode" -> SemaSerdeDirection.Decode else -> SemaSerdeDirection.Encode
+        checked: sema_serde_type_definition(scope, program, definition.name) ?? return false
+        direction: if codec == "Decode" -> SemaSerdeDirection.Decode else -> SemaSerdeDirection.Encode
         return sema_serde_implementation(scope, program, checked, direction)
     }
     loop derivation in definition.derives { if derivation.name == codec -> return true }
     false
 }
 
-fn sema_schema_decodable(ty: Type, environment: SemaScopeEnvironment?, program: SemaProgramTables) -> Bool Never! {
+sema_schema_decodable: fn(ty: Type, environment: SemaScopeEnvironment?, program: SemaProgramTables) -> Bool Never! {
     if environment == .Val(scope) {
         return sema_serde_type_is_admissible(scope, program, ty, SemaSerdeDirection.Decode)
     }
@@ -38,7 +38,7 @@ fn sema_schema_decodable(ty: Type, environment: SemaScopeEnvironment?, program: 
     }
 }
 
-fn check_schema_migrations(items: [Item], snapshots: [String:SchemaSnapshot], environment: SemaScopeEnvironment?, program: SemaProgramTables) -> [Diagnostic] Never! {
+check_schema_migrations: fn(items: [Item], snapshots: [String:SchemaSnapshot], environment: SemaScopeEnvironment?, program: SemaProgramTables) -> [Diagnostic] Never! {
     diagnostics := [Diagnostic]{}
     migrations := [String:[MigrationOp]]{}
     conversions := [(from_ty: String, to_ty: String)]{}
@@ -60,14 +60,14 @@ fn check_schema_migrations(items: [Item], snapshots: [String:SchemaSnapshot], en
     loop item in items {
         if item == .Struct(definition) {
             if !sema_schema_published(definition) -> next
-            baseline :: snapshots.get(definition.name) ?? next
-            span :: definition.published_schema_span ?? definition.name_span
+            baseline: snapshots.get(definition.name) ?? next
+            span: definition.published_schema_span ?? definition.name_span
             current := [String:String]{}
             old := [String:String]{}
             loop field in definition.fields -> current[field.name] = type_name(field.ty)
             loop field in baseline.fields -> old[field.name] = field.ty
-            operations :: migrations.get(definition.name) ?? [MigrationOp]{}
-            name :: definition.name
+            operations: migrations.get(definition.name) ?? [MigrationOp]{}
+            name: definition.name
             loop operation in operations {
                 if operation == {
                     .Remove(field, _) -> {
@@ -77,7 +77,7 @@ fn check_schema_migrations(items: [Item], snapshots: [String:SchemaSnapshot], en
                         }
                     }
                     .Add(field, _, ty, _, _, _, _) -> {
-                        declared :: type_name(ty)
+                        declared: type_name(ty)
                         if {
                             old.get(field) != None -> &diagnostics.push(sema_schema_add_old(name, field, span))
                             current.get(field) == .Val(actual) -> {
@@ -94,14 +94,14 @@ fn check_schema_migrations(items: [Item], snapshots: [String:SchemaSnapshot], en
                         }
                     }
                     .Change(field, _, from, _, to, _, _, _, _) -> {
-                        old_type :: old.get(field)
-                        new_type :: current.get(field)
+                        old_type: old.get(field)
+                        new_type: current.get(field)
                         if {
                             old_type == .Val(old_ty) -> {
                                 if {
                                     new_type == .Val(new_ty) -> {
-                                        declared_from :: type_name(from)
-                                        declared_to :: type_name(to)
+                                        declared_from: type_name(from)
+                                        declared_to: type_name(to)
                                         if old_ty != declared_from || new_ty != declared_to -> &diagnostics.push(sema_schema_change_mismatch(name, field, declared_from, declared_to, old_ty, new_ty, span))
                                     }
                                     else -> &diagnostics.push(sema_schema_unknown(name, field, "change", span))
@@ -132,8 +132,8 @@ fn check_schema_migrations(items: [Item], snapshots: [String:SchemaSnapshot], en
                 if !bridged -> &diagnostics.push(sema_schema_dropped(name, field.name, baseline.published_version, span))
             }
             loop field in definition.fields {
-                old_ty :: old.get(field.name) ?? next
-                new_ty :: type_name(field.ty)
+                old_ty: old.get(field.name) ?? next
+                new_ty: type_name(field.ty)
                 if old_ty == new_ty -> next
                 converter := Bool?{None}
                 loop operation in operations {
@@ -176,38 +176,38 @@ fn check_schema_migrations(items: [Item], snapshots: [String:SchemaSnapshot], en
     diagnostics
 }
 
-fn sema_schema_dropped(name: String, field: String, version: String, span: Span) -> Diagnostic Never! {
+sema_schema_dropped: fn(name: String, field: String, version: String, span: Span) -> Diagnostic Never! {
     sema_error("E0910", span, "the published record `{name}` dropped `{field}` since version `{version}`, with no migration to bridge it", "`#PublishedSchema` pins a record's saved shape at release; old data written with `{field}` could no longer be read", "add `migration {name} {{ remove {field} }}` to delete it, `migration {name} {{ rename {field} -> <new> }}` if you renamed it, or bump the major version")
 }
-fn sema_schema_changed(name: String, field: String, old: String, current: String, span: Span) -> Diagnostic Never! {
+sema_schema_changed: fn(name: String, field: String, old: String, current: String, span: Span) -> Diagnostic Never! {
     sema_error("E0910", span, "the published record `{name}` changed `{field}` from `{old}` to `{current}`, with no migration to bridge it", "`#PublishedSchema` pins a record's saved shape at release; old data stored at the previous type could no longer be read", "add `migration {name} {{ change {field}: {old} -> {current} via {{ (old) -> … }} }}`, or bump the major version")
 }
-fn sema_schema_no_converter(name: String, field: String, old: String, current: String, span: Span) -> Diagnostic Never! {
+sema_schema_no_converter: fn(name: String, field: String, old: String, current: String, span: Span) -> Diagnostic Never! {
     sema_error("E0910", span, "the `change {field}: {old} -> {current}` migration on `{name}` has no converter", "a type change needs a way to turn an old value into a new one — old data already on disk is read through it", "add an inline `via {{ (old) -> … }}` to the `change` op, or declare `impl {old} -> {current} {{ … }}` in scope")
 }
-fn sema_schema_added(name: String, field: String, span: Span) -> Diagnostic Never! {
+sema_schema_added: fn(name: String, field: String, span: Span) -> Diagnostic Never! {
     sema_error("E0910", span, "the published record `{name}` added `{field}`, but old data has no value for it", "`#PublishedSchema` records already written without this field can't be read unless there's a default to fill it in", "add `migration {name} {{ add {field}: <Type> = <default> }}` to supply the value, or bump the major version")
 }
-fn sema_schema_remove_present(name: String, field: String, span: Span) -> Diagnostic Never! {
-    sema_error("E0910", span, "the migration removes `{field}`, but `{name}` still has that field", "a `remove` op declares a field is gone, but the current `#PublishedSchema` struct still defines it", "delete the field from `struct {name}`, or drop the `remove {field}` line")
+sema_schema_remove_present: fn(name: String, field: String, span: Span) -> Diagnostic Never! {
+    sema_error("E0910", span, "the migration removes `{field}`, but `{name}` still has that field", "a `remove` op declares a field is gone, but the current `#PublishedSchema` struct still defines it", "delete the field from `{name}: struct`, or drop the `remove {field}` line")
 }
-fn sema_schema_add_old(name: String, field: String, span: Span) -> Diagnostic Never! {
+sema_schema_add_old: fn(name: String, field: String, span: Span) -> Diagnostic Never! {
     sema_error("E0910", span, "the migration adds `{field}`, but `{name}` already had that field", "an `add` op declares a brand-new field, but the prior published snapshot already records this one", "drop the `add {field}` line; if its type changed, use `change` instead")
 }
-fn sema_schema_change_mismatch(name: String, field: String, from: String, to: String, old: String, current: String, span: Span) -> Diagnostic Never! {
+sema_schema_change_mismatch: fn(name: String, field: String, from: String, to: String, old: String, current: String, span: Span) -> Diagnostic Never! {
     sema_error("E0910", span, "the `change {field}: {from} -> {to}` migration on `{name}` doesn't match the real shapes (`{old}` -> `{current}`)", "the `from` type must be the field's published type and the `to` type must be its current type", "write `change {field}: {old} -> {current} …`")
 }
-fn sema_schema_add_mismatch(name: String, field: String, declared: String, actual: String, span: Span) -> Diagnostic Never! {
+sema_schema_add_mismatch: fn(name: String, field: String, declared: String, actual: String, span: Span) -> Diagnostic Never! {
     sema_error("E0910", span, "the `add {field}: {declared}` migration on `{name}` declares a type the field doesn't have (`{actual}`)", "the type in an `add` op must match the field's type in the struct", "write `add {field}: {actual} = <default>`")
 }
-fn sema_schema_add_decode(name: String, field: String, ty: String, span: Span) -> Diagnostic Never! {
+sema_schema_add_decode: fn(name: String, field: String, ty: String, span: Span) -> Diagnostic Never! {
     sema_error("E0910", span, "the `add {field}: {ty}` migration on `{name}` needs `{ty}` to support `Decode`", "`{name}` derives `Decode` but not `Encode` — it only ever reads data back, so every field, including one added by a migration, must itself be decodable", "derive `Decode` on `{ty}`, or give `{field}` a decodable type")
 }
-fn sema_schema_unknown(name: String, field: String, verb: String, span: Span) -> Diagnostic Never! {
+sema_schema_unknown: fn(name: String, field: String, verb: String, span: Span) -> Diagnostic Never! {
     sema_error("E0910", span, "the `{verb} {field}` migration on `{name}` names a field that doesn't exist", "a migration op must reference a field of this record — either its published shape or its current one", "check the spelling of `{field}`, or remove the `{verb}` op")
 }
 
-fn sema_schema_enter_registered_module(environment: &SemaScopeEnvironment?, program: SemaProgramTables, module_index: Int) Never! {
+sema_schema_enter_registered_module: fn(environment: &SemaScopeEnvironment?, program: SemaProgramTables, module_index: Int) Never! {
     if &environment == .Val(scope) {
         sema_scope_environment_enter_module(&scope, program, module_index, SemaComptimeBodyValues{})
         return
@@ -215,10 +215,10 @@ fn sema_schema_enter_registered_module(environment: &SemaScopeEnvironment?, prog
     panic("an owning schema pass lost its scope environment")
 }
 
-fn sema_schema_check_registered_module(environment: SemaScopeEnvironment?, program: SemaProgramTables, module_index: Int, snapshots: [String:SchemaSnapshot], diagnostics: &[Diagnostic]) Never! {
+sema_schema_check_registered_module: fn(environment: SemaScopeEnvironment?, program: SemaProgramTables, module_index: Int, snapshots: [String:SchemaSnapshot], diagnostics: &[Diagnostic]) Never! {
     if environment == .Val(scope) {
         if program.registration_graph == .Val(graph) {
-            start :: diagnostics.len()
+            start: diagnostics.len()
             loop diagnostic in check_schema_migrations(graph.modules[module_index].program.items, snapshots, environment, program) -> &diagnostics.push(diagnostic)
             sema_attach_diagnostic_source_locations(&diagnostics, start, graph.modules[module_index].source_segments)
             return
@@ -229,9 +229,9 @@ fn sema_schema_check_registered_module(environment: SemaScopeEnvironment?, progr
 
 // Module entry borrows the schema pass's one program graph; it only replaces
 // the selected scope facts and never takes fields from either borrowed owner.
-fn sema_check_schema_migration_graph(registration: ^SemaRegistrationGraph, checked: SemaGraphResult, snapshots: [String:SchemaSnapshot]) -> (registration: SemaRegistrationGraph, diagnostics: [Diagnostic]) Never! {
+sema_check_schema_migration_graph: fn(registration: ^SemaRegistrationGraph, checked: SemaGraphResult, snapshots: [String:SchemaSnapshot]) -> (registration: SemaRegistrationGraph, diagnostics: [Diagnostic]) Never! {
     if snapshots.len() == 0 -> return (diagnostics: [Diagnostic]{}, registration: ^registration)
-    module_count :: registration.modules.len()
+    module_count: registration.modules.len()
     types := [TTypeDef]{}
     loop module_row in checked.modules {
         loop definition in module_row.declarations.type_defs -> &types.push(definition)
@@ -260,6 +260,6 @@ fn sema_check_schema_migration_graph(registration: ^SemaRegistrationGraph, check
         sema_schema_check_registered_module(environment, program, module_index, snapshots, &diagnostics)
     }
     graph_out := ^program.registration_graph
-    restored :: ^graph_out ?? panic("a completed schema pass lost its registration graph")
+    restored: ^graph_out ?? panic("a completed schema pass lost its registration graph")
     (diagnostics: ^diagnostics, registration: ^restored)
 }

@@ -1,18 +1,18 @@
 
-struct IncompleteBlock {
+IncompleteBlock: struct {
     impl Diagnostic {
-        code :: "E0927"
-        fn what(self) -> String { "the complete block text is required" }
-        fn why(self) -> String { "the checker reads one lexical region" }
-        fn fix(self) -> String { "keep the trailing statement inside the block" }
+        code: "E0927"
+        what: fn(self) -> String { "the complete block text is required" }
+        why: fn(self) -> String { "the checker reads one lexical region" }
+        fix: fn(self) -> String { "keep the trailing statement inside the block" }
     }
 }
 
-struct Check {
+Check: struct {
     impl Marker {
-        sites :: [.Block]
+        sites: [.Block]
 
-        fn expand(self, target: Target) {
+        expand: fn(self, target: Target) {
             if !target.contains("after") {
                 reject(IncompleteBlock{})
             }
@@ -20,7 +20,7 @@ struct Check {
     }
 }
 
-fn run() {
+run: fn() {
     #Check {
         if true {
             print("inside")

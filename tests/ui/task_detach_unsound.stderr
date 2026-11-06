@@ -1,17 +1,17 @@
 Error [jet.ReadOnlyValueNotOwned]: `greet` was not moved here, so it cannot be captured by a spawned task
-  --> tests/ui/task_detach_unsound.jet:5:15
+  --> tests/ui/task_detach_unsound.jet:5:13
     |
-  5 |     t :: task greet
-    |               ^^^^^
+  5 |     t: task greet
+    |             ^^^^^
  Why: This function can access the parameter, but it does not own the value; capture requires the move marker `^`
  Fix: Make the parameter owned with the move marker `^`: `greet: ^fn()`
 More: jet-lang.dev/e/E0120
 
 Error [jet.ValueNotSendable]: This task returns `fn()`, which isn't sendable
-  --> tests/ui/task_detach_unsound.jet:5:15
+  --> tests/ui/task_detach_unsound.jet:5:13
     |
-  5 |     t :: task greet
-    |               ^^^^^
+  5 |     t: task greet
+    |             ^^^^^
  Why: The closure holds state that cannot cross this boundary; tasks and channels move owned values between threads
  Fix: Give the task plain owned data, or rebuild the value as an owned copy before spawning
 More: jet-lang.dev/e/E1102

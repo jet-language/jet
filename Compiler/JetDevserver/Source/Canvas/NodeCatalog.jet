@@ -3,25 +3,25 @@ use {
     jet_devserver.Canvas.ValidationJson.[json_str]
 }
 
-struct NodeDescriptor {
+NodeDescriptor: struct {
     id: String; kind: String; archetype: String
     projected: Bool; presentation: PresentationFacts; palette: PaletteFacts
     transaction: String?; default_editor: String
 }
-struct PresentationFacts {
+PresentationFacts: struct {
     label: String; glyph: String; hover: String; accent: String; header: String
     style_archetype: String; layout_family: String; shape: String
 }
-struct PaletteFacts {
+PaletteFacts: struct {
     visible: Bool; insertable: Bool; category: String; rank: I32; rank_terms: [String]
 }
-fn presentation(label: String, glyph: String, hover: String, accent: String, header: String, style_archetype: String, layout_family: String, shape: String) -> PresentationFacts {
+presentation: fn(label: String, glyph: String, hover: String, accent: String, header: String, style_archetype: String, layout_family: String, shape: String) -> PresentationFacts {
     PresentationFacts { label: label, glyph: glyph, hover: hover, accent: accent, header: header, style_archetype: style_archetype, layout_family: layout_family, shape: shape }
 }
-fn palette(visible: Bool, insertable: Bool, category: String, rank: I32, rank_terms: [String]) -> PaletteFacts {
+palette: fn(visible: Bool, insertable: Bool, category: String, rank: I32, rank_terms: [String]) -> PaletteFacts {
     PaletteFacts { visible: visible, insertable: insertable, category: category, rank: rank, rank_terms: rank_terms }
 }
-NODE_DESCRIPTORS :: comptime { [NodeDescriptor]{[} }
+NODE_DESCRIPTORS: comptime { [NodeDescriptor]{[} }
     NodeDescriptor { id: "entry", kind: "entry", archetype: "entry", projected: true,
         presentation: presentation("Entry", "ƒ", "Starts this function.", "archetype", "archetype", "entry", "entry", "node"),
         palette: palette(false, false, "", 0, []), transaction: .None, default_editor: "function_signature" },
@@ -77,42 +77,42 @@ NODE_DESCRIPTORS :: comptime { [NodeDescriptor]{[} }
         presentation: presentation("Pure function", "ƒ", "Computes a value.", "archetype", "archetype", "function_pure", "normal", "node"),
         palette: palette(false, false, "Values", 0, ["expression", "value"]), transaction: .None, default_editor: "inline_expr" }
 ]
-fn descriptor_for(kind: String, archetype: String) -> NodeDescriptor {
+descriptor_for: fn(kind: String, archetype: String) -> NodeDescriptor {
     validate_catalog() ?? {
-        message :: err
+        message: err
         panic("invalid Canvas node catalog: {message}")
     }
     NODE_DESCRIPTORS.iter().find((descriptor) -> descriptor.kind == kind && descriptor.archetype == archetype)
         .unwrap_or_else(() -> panic("missing Canvas node descriptor for {kind}/{archetype}"))
 }
-fn descriptor_for_id(id: String) -> NodeDescriptor {
+descriptor_for_id: fn(id: String) -> NodeDescriptor {
     validate_catalog() ?? {
-        message :: err
+        message: err
         panic("invalid Canvas node catalog: {message}")
     }
     NODE_DESCRIPTORS.iter().find((descriptor) -> descriptor.id == id)
         .unwrap_or_else(() -> panic("missing Canvas node descriptor `{id}`"))
 }
-fn insert_descriptor_id(transaction: String, pure: Bool) -> String {
+insert_descriptor_id: fn(transaction: String, pure: Bool) -> String {
     descriptor := if transaction == "insert_call" -> descriptor_for_id(if pure -> "function_pure" else -> "function_exec") else
         NODE_DESCRIPTORS.iter().find((descriptor) -> descriptor.transaction == Val((transaction)))
             .unwrap_or_else(() -> panic("missing Canvas node descriptor transaction `{transaction}`"))
     assert(descriptor.palette.insertable, "Canvas action descriptor `{descriptor.id}` is not insertable")
     descriptor.id
 }
-fn palette_rank_fields(id: String) -> String {
+palette_rank_fields: fn(id: String) -> String {
     descriptor := descriptor_for_id(id)
     terms := descriptor.palette.rank_terms.iter().map((term) -> json_str(term)).collect().join(",")
     ",\"rank\":{descriptor.palette.rank},\"rank_terms\":[{terms}]"
 }
-fn catalog_json() -> String {
+catalog_json: fn() -> String {
     validate_catalog() ?? {
-        message :: err
+        message: err
         panic("invalid Canvas node catalog: {message}")
     }
     "[{NODE_DESCRIPTORS.iter().map((descriptor) -> descriptor_json(descriptor)).collect().join(",")}]"
 }
-fn validate_catalog() Err! {
+validate_catalog: fn() Err! {
     ids := HashSet.new()
     // GATE #4499: retain exact pair equality/hash for catalog identities.
     identities := HashSet.new()
@@ -128,7 +128,7 @@ fn validate_catalog() Err! {
         }
     }
 }
-fn descriptor_json(descriptor: NodeDescriptor) -> String {
+descriptor_json: fn(descriptor: NodeDescriptor) -> String {
     projected := if descriptor.projected -> "true" else -> "false"
     visible := if descriptor.palette.visible -> "true" else -> "false"
     insertable := if descriptor.palette.insertable -> "true" else -> "false"

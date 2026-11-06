@@ -10,11 +10,11 @@ use {
 // GATE #4483: selected-family dispatch retains Rust cfg(unix).
 
 #Test("zed_extension_keeps_hostile_worktree_path_out_of_the_server_command") {
-    root :: repo_root().join("Tools/editors/zed")
-    source :: fs.read_to_string(root.join("wasm-src/src/lib.rs")).expect("Zed extension source must be present")
-    manifest :: fs.read_to_string(root.join("extension.toml.in")).expect("Zed extension manifest template must be present")
-    readme :: fs.read_to_string(root.join("README.md")).expect("Zed README must be present")
-    artifact :: fs.read(root.join("extension.wasm")).expect("tracked Zed extension artifact must be present")
+    root: repo_root().join("Tools/editors/zed")
+    source: fs.read_to_string(root.join("wasm-src/src/lib.rs")).expect("Zed extension source must be present")
+    manifest: fs.read_to_string(root.join("extension.toml.in")).expect("Zed extension manifest template must be present")
+    readme: fs.read_to_string(root.join("README.md")).expect("Zed README must be present")
+    artifact: fs.read(root.join("extension.wasm")).expect("tracked Zed extension artifact must be present")
     // Never consult hostile worktree PATH; literal identity is approved by manifest.
     assert(source.contains("command: \"jet\".to_string(),\n            args: vec![\"self\".to_string(), \"lsp\".to_string()]"), "{source}")
     assert(!source.contains("worktree.which"), "worktree PATH lookup returned: {source}")
@@ -32,21 +32,21 @@ use {
 
 #Test("vscode_untrusted_workspace_rejects_hostile_binary_and_shell_launches") {
     if selected_family() != "unix" -> return
-    scratch :: Scratch.new("vscode-hostile-workspace")
-    workspace :: scratch.join("untrusted workspace;$(touch vscode-injected)")
-    debug_dir :: workspace.join("target/debug")
+    scratch: Scratch.new("vscode-hostile-workspace")
+    workspace: scratch.join("untrusted workspace;$(touch vscode-injected)")
+    debug_dir: workspace.join("target/debug")
     fs.create_dir_all(debug_dir).expect("create hostile workspace target")
-    binary :: debug_dir.join("jet")
+    binary: debug_dir.join("jet")
     fs.write(binary, "#!/bin/sh\nprintf 'executed\\n' > \"$VSCODE_BINARY_MARKER\"\n").expect("write hostile workspace binary")
     permissions := fs.metadata(binary).expect("stat hostile workspace binary").permissions()
     permissions.set_mode(0o755)
     fs.set_permissions(binary, ^permissions).expect("make hostile workspace binary executable")
-    run_file :: workspace.join("src/hostile file.jet")
+    run_file: workspace.join("src/hostile file.jet")
     fs.create_dir_all(run_file.parent().expect("run file parent")).expect("create hostile workspace source directory")
-    fs.write(run_file, "fn run() {{}}\n").expect("write hostile workspace source")
-    binary_marker :: scratch.join("vscode-binary-executed")
-    injection_marker :: scratch.join("vscode-injected")
-    node_harness :: """
+    fs.write(run_file, "run: fn() {{}}\n").expect("write hostile workspace source")
+    binary_marker: scratch.join("vscode-binary-executed")
+    injection_marker: scratch.join("vscode-injected")
+    node_harness: """
     const fs = require("fs");
     const path = require("path");
     const Module = require("module");
@@ -238,14 +238,14 @@ process.stdout.write([
   `debug-descriptors=${{debugDescriptors}}`,
 ].join("\\n") + "\\n");
 """
-    path_env :: "{debug_dir.display()}:{env.var_os("PATH").map(path -> path.to_string_lossy()).unwrap_or_default()}"
-    output :: Command.new("node").current_dir(scratch.path).arg("-e").arg(node_harness)
+    path_env: "{debug_dir.display()}:{env.var_os("PATH").map(path -> path.to_string_lossy()).unwrap_or_default()}"
+    output: Command.new("node").current_dir(scratch.path).arg("-e").arg(node_harness)
         .env("WORKSPACE", workspace).env("WORKSPACE_BINARY", binary).env("RUN_FILE", run_file)
         .env("VSCODE_BINARY_MARKER", binary_marker).env("EXTENSION", repo_root().join("Tools/editors/vscode/extension.js"))
         .env("PACKAGE", repo_root().join("Tools/editors/vscode/package.json")).env("PATH", path_env)
         .output().expect("run VS Code extension with deterministic mocks")
     assert(output.status.success(), "VS Code hostile-workspace harness failed:\n{String.from_utf8_lossy(output.stderr)}")
-    expected :: "manifest-untrusted-supported=false\nlsp-launches=0\nterminal-launches=0\ndebug-starts=0\ndebug-descriptors=0\n"
+    expected: "manifest-untrusted-supported=false\nlsp-launches=0\nterminal-launches=0\ndebug-starts=0\ndebug-descriptors=0\n"
     assert_eq(String.from_utf8_lossy(output.stdout), expected, "untrusted workspace must refuse LSP and terminal process launches")
     assert(!binary_marker.exists(), "workspace-controlled jet binary was executed")
     assert(!injection_marker.exists(), "workspace path was reparsed as shell syntax")

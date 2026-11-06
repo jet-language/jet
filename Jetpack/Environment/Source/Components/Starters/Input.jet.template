@@ -1,19 +1,19 @@
 // Ownable controlled Input component over canonical core.ui UINode.
-use ui :: core.ui
+use ui: core.ui
 
-struct Input {
+Input: struct {
     value: String
     placeholder: String
 
-    fn to_view(self) -> UINode {
+    to_view: fn(self) -> UINode {
         shown := self.value.copy()
         if self.value == "" -> shown = self.placeholder.copy()
         return ui.node_role("[{shown}]", 20.0, 1.0, ui.aria_role_text_input())
     }
 }
 
-fn input(placeholder: String) -> Input { return Input{value: "", placeholder: placeholder.copy()} }
+input: fn(placeholder: String) -> Input { return Input{value: "", placeholder: placeholder.copy()} }
 
-fn type_char(i: Input, ch: String) -> Input {
+type_char: fn(i: Input, ch: String) -> Input {
     return Input{value: "{i.value}{ch}", placeholder: i.placeholder.copy()}
 }

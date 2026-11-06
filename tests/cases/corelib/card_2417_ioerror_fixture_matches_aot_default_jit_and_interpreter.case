@@ -8,7 +8,7 @@ file: fixture.jet ~ "IOError.Other(IOContext" # original ordinary IOError witnes
 file: fixture.jet ~ "print(\"{error}\")" # original bare Display witness
 file: migration.stderr ~ "Warning [jet.DisplayMigration]: \u0060IOError\u0060 has no \u0060Display\u0060 impl" # original checked-in snapshot predicate
 file: migration.stderr ~ "Why: Display is the user-facing interpolation hook; Debug is for \u0060{value:Debug}\u0060" # original checked-in snapshot predicate
-file: migration.stderr ~ "Fix: add \u0060impl IOError.Display { fn display(self) -> String { … } }\u0060" # original stale fix predicate, never blessed
+file: migration.stderr ~ "Fix: add \u0060impl IOError.Display { display: fn(self) -> String { … } }\u0060" # original stale fix predicate, never blessed
 file: build_entry.warn ~ "MissingDisplay" # original neighbor witness
 file: build_entry.warn !~ "BuildError" # original exclusion
 step: jet build fixture.jet

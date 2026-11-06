@@ -2,35 +2,35 @@
 // clone (a List of values holding file handles) moves the payload out of the
 // carrier: each item closes once, where its new holder ends it, and a carrier
 // whose payload stays is closed once when it ends (#6528).
-use files :: core.files
+use files: core.files
 
-struct Lock {
+Lock: struct {
     owner: files.FileLock
     marker: files.FileReader
 }
 
-struct Tag { name: String }
+Tag: struct { name: String }
 impl Tag.Close {
-    fn close(^self) { print("close {self.name}") }
+    close: fn(^self) { print("close {self.name}") }
 }
 
-struct Held {
+Held: struct {
     name: String
     lock: Lock?
     tag: Tag
 }
 
 #Error
-enum Failure {
+Failure: enum {
     Missing
 }
 
-fn held(name: String) -> Held Never! {
+held: fn(name: String) -> Held Never! {
     Held{name: name, lock: None, tag: Tag{name: name}}
 }
 
-fn keep(^items: [Held]) -> Int {
-    count :: items.len()
+keep: fn(^items: [Held]) -> Int {
+    count: items.len()
     loop item in ^items {
         print("keep {item.name}")
     }
@@ -38,8 +38,8 @@ fn keep(^items: [Held]) -> Int {
 }
 
 // The Option's payload moves on in one arm of a valued match.
-fn pick(^warm: [Held]?) -> Int {
-    count :: if ^warm == {
+pick: fn(^warm: [Held]?) -> Int {
+    count: if ^warm == {
         .Val(list) -> keep(^list)
         .None -> 0
     }
@@ -48,7 +48,7 @@ fn pick(^warm: [Held]?) -> Int {
 }
 
 // The payload moves on only on one path; on the other the carrier keeps it.
-fn maybe(^warm: [Held]?, moving: Bool) -> Int {
+maybe: fn(^warm: [Held]?, moving: Bool) -> Int {
     if ^warm == {
         .Val(list) -> if moving -> return keep(^list)
         .None -> {}
@@ -58,7 +58,7 @@ fn maybe(^warm: [Held]?, moving: Bool) -> Int {
 }
 
 // A Result's Ok payload moves on the same way.
-fn settle(^got: [Held] Failure!) -> Int {
+settle: fn(^got: [Held] Failure!) -> Int {
     if ^got == {
         .Ok(list) -> return keep(^list)
         .Err(_) -> {}
@@ -67,7 +67,7 @@ fn settle(^got: [Held] Failure!) -> Int {
     0
 }
 
-fn run() {
+run: fn() {
     print("pick {pick(Val([held("a"), held("b")]))}")
     print("pick {pick(None)}")
     print("maybe {maybe(Val([held("c")]), true)}")

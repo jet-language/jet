@@ -3,18 +3,18 @@
 // signature does not match the codec's fixed shape is E0907, caught in sema before
 // codegen bridges the verb to `jet_encode` / `jet_decode` — so a sema-accepted
 // program never reaches rustc as broken Rust (I2/I4).
-struct Email {
+Email: struct {
     addr: String
 }
 
 // `encode` must return `Dyn`, not `String`.
 impl Email.Encode {
-    fn encode(self) -> String { self.addr.copy() }
+    encode: fn(self) -> String { self.addr.copy() }
 }
 
 // `decode` is static — a `self` receiver is not part of its shape.
 impl Email.Decode {
-    fn decode(self, tree: Dyn) -> Email [FieldError]! { return Ok(Email{addr: "x"}) }
+    decode: fn(self, tree: Dyn) -> Email [FieldError]! { return Ok(Email{addr: "x"}) }
 }
 
-fn run() { print("ok") }
+run: fn() { print("ok") }

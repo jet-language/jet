@@ -3,11 +3,11 @@
 // their own process group. `platform_start_identity_contracts_are_explicit`
 // asserted the Rust source text and has no behavioral claim to port.
 
-fn services_test_scratch(label: String) -> String {
+services_test_scratch: fn(label: String) -> String {
     files.tmpdir("jpk-services-{label}-") ?? panic("claim scratch dir")
 }
 
-fn services_test_env() -> ShellEnv {
+services_test_env: fn() -> ShellEnv {
     ShellEnv{
         bin_dirs: [String]{},
         vars: [String: String]{},
@@ -21,17 +21,17 @@ fn services_test_env() -> ShellEnv {
 }
 
 // A command with `;` runs through `sh -c`; anything else splits on spaces.
-fn services_test_plan(name: String, command: String) -> DevServicePlan {
-    run :: if command.contains(";") -> [String]{"sh", "-c", command} else -> trust_text_words(command)
+services_test_plan: fn(name: String, command: String) -> DevServicePlan {
+    run: if command.contains(";") -> [String]{"sh", "-c", command} else -> trust_text_words(command)
     DevServicePlan{name, enable: true, run: Val(run)}
 }
 
-fn services_test_host() -> ServiceHost {
+services_test_host: fn() -> ServiceHost {
     ServiceHost.InProcess
 }
 
-fn services_test_read_pid(dir: String) -> Int? {
-    record :: services_read_process_state(dir) ?? return None
+services_test_read_pid: fn(dir: String) -> Int? {
+    record: services_read_process_state(dir) ?? return None
     if record == {
         .Verified(state) -> Val(state.pid)
         .LegacyPID(pid) -> Val(pid)
@@ -39,29 +39,29 @@ fn services_test_read_pid(dir: String) -> Int? {
 }
 
 // Rust test `is_alive`: a zombie is dead; otherwise `kill -0`.
-fn services_test_is_alive(pid: Int) -> Bool {
+services_test_is_alive: fn(pid: Int) -> Bool {
     if sys.is_linux() {
         if services_read_text_bounded("/proc/{pid}/stat", 4096) == .Ok(stat) {
             if stat.cut_last(")") == .Val(parts) {
-                words :: trust_text_words(parts.after)
+                words: trust_text_words(parts.after)
                 if words.len() > 0 && words[0] == "Z" -> return false
             }
         }
     }
-    receipt :: process.cmd([String]{"kill", "-0", "{pid}"}).stdout(.Capture).stderr(.Capture).run() ?? return false
+    receipt: process.cmd([String]{"kill", "-0", "{pid}"}).stdout(.Capture).stderr(.Capture).run() ?? return false
     receipt.success
 }
 
-fn services_test_up(dir: String, plan: DevServicePlan) {
+services_test_up: fn(dir: String, plan: DevServicePlan) {
     env := services_test_env()
     services_up_one(services_test_host(), dir, &env, plan) ?? panic("service up")
 }
 
-fn services_test_down(dir: String, plan: DevServicePlan) {
+services_test_down: fn(dir: String, plan: DevServicePlan) {
     services_down_one(services_test_host(), dir, plan) ?? panic("service down")
 }
 
-fn services_test_error_of(result: ServicesError!) -> String {
+services_test_error_of: fn(result: ServicesError!) -> String {
     if result == {
         .Ok(_) -> panic("expected a services error")
         .Err(error) -> error.message
@@ -69,28 +69,28 @@ fn services_test_error_of(result: ServicesError!) -> String {
 }
 
 // Wait up to two seconds for a descendant to publish its PID file.
-fn services_test_wait_child_pid(path: String) -> Int {
-    deadline :: services_now_ms() + 2000
+services_test_wait_child_pid: fn(path: String) -> Int {
+    deadline: services_now_ms() + 2000
     loop !files.is_file(path) {
         assert(services_now_ms() < deadline, "descendant pid was not published")
         time.sleep(time.duration_ms(20))
     }
-    text :: files.read(path) ?? panic("read child pid")
+    text: files.read(path) ?? panic("read child pid")
     Int.parse(text.trim()) ?? panic("child pid")
 }
 
 // Core contains a spawned child's process group: once the leader exits, its
 // collector sweeps the group, so no descendant outlives the leader. Wait up
 // to two seconds for that sweep.
-fn services_test_wait_swept(pid: Int) {
-    deadline :: services_now_ms() + 2000
+services_test_wait_swept: fn(pid: Int) {
+    deadline: services_now_ms() + 2000
     loop services_test_is_alive(pid) {
         assert(services_now_ms() < deadline, "the leader's process group must be swept once it exits")
         time.sleep(time.duration_ms(20))
     }
 }
 
-fn services_test_has_pair(command: [String], first: String, second: String) -> Bool {
+services_test_has_pair: fn(command: [String], first: String, second: String) -> Bool {
     loop index in 1..<command.len() {
         if command[index - 1] == first && command[index] == second -> return true
     }
@@ -98,24 +98,24 @@ fn services_test_has_pair(command: [String], first: String, second: String) -> B
 }
 
 #Test("up then down a fixture daemon") {
-    dir :: services_test_scratch("up-down")
-    plan :: services_test_plan("fixture", "sleep 30")
+    dir: services_test_scratch("up-down")
+    plan: services_test_plan("fixture", "sleep 30")
     services_test_up(dir, plan)
-    pid :: services_test_read_pid(services_service_dir(dir, "fixture")) ?? panic("pid after up")
+    pid: services_test_read_pid(services_service_dir(dir, "fixture")) ?? panic("pid after up")
     assert(services_test_is_alive(pid), "fixture daemon should be running after up")
     services_test_down(dir, plan)
     assert(!services_test_is_alive(pid), "fixture daemon should be gone after down")
 }
 
 #Test("startup failure persists terminal lifecycle") {
-    dir :: services_test_scratch("startup-failure-lifecycle")
+    dir: services_test_scratch("startup-failure-lifecycle")
     plan := services_test_plan("fixture", "sleep 1")
     plan.run = Val([String]{})
     env := services_test_env()
-    error :: services_test_error_of(services_up_one(services_test_host(), dir, &env, plan))
+    error: services_test_error_of(services_up_one(services_test_host(), dir, &env, plan))
     assert(error.contains("empty `run:` command"), error)
-    found :: services_read_lifecycle(services_service_dir(dir, "fixture")) ? present -> present ! failure -> panic("read lifecycle")
-    facts :: found ?? panic("startup failure must retain lifecycle facts")
+    found: services_read_lifecycle(services_service_dir(dir, "fixture")) ? present -> present ! failure -> panic("read lifecycle")
+    facts: found ?? panic("startup failure must retain lifecycle facts")
     assert_eq(facts.phase, ServicePhase.Failed)
     assert_eq(facts.recovery, "startup-failed")
     assert(facts.pid == None)
@@ -123,18 +123,18 @@ fn services_test_has_pair(command: [String], first: String, second: String) -> B
 }
 
 #Test("up is idempotent") {
-    dir :: services_test_scratch("up-idempotent")
-    plan :: services_test_plan("fixture", "sleep 30")
+    dir: services_test_scratch("up-idempotent")
+    plan: services_test_plan("fixture", "sleep 30")
     services_test_up(dir, plan)
-    first :: services_test_read_pid(services_service_dir(dir, "fixture"))
+    first: services_test_read_pid(services_service_dir(dir, "fixture"))
     services_test_up(dir, plan)
-    second :: services_test_read_pid(services_service_dir(dir, "fixture"))
+    second: services_test_read_pid(services_service_dir(dir, "fixture"))
     assert(first == second, "a second `up` must not spawn a duplicate")
     services_test_down(dir, plan)
 }
 
 #Test("disabled service is a no op") {
-    dir :: services_test_scratch("disabled")
+    dir: services_test_scratch("disabled")
     plan := services_test_plan("fixture", "sleep 30")
     plan.enable = false
     services_test_up(dir, plan)
@@ -144,8 +144,8 @@ fn services_test_has_pair(command: [String], first: String, second: String) -> B
 }
 
 #Test("fast exit without probe is not reported healthy") {
-    dir :: services_test_scratch("fast-exit-no-probe")
-    service :: services_test_plan("fixture", "exit 7;")
+    dir: services_test_scratch("fast-exit-no-probe")
+    service: services_test_plan("fixture", "exit 7;")
     services_test_up(dir, service)
     env := services_test_env()
     assert(!services_wait_healthy(dir, &env, service, time.duration_seconds(2)))
@@ -155,11 +155,11 @@ fn services_test_has_pair(command: [String], first: String, second: String) -> B
 #Test("dependency order is dependency first and rejects cycles") {
     database := services_test_plan("database", "sleep 30")
     api := services_test_plan("api", "sleep 30")
-    worker :: services_test_plan("worker", "sleep 30")
+    worker: services_test_plan("worker", "sleep 30")
     api.after = [String]{"database"}
     database.after = [String]{"worker"}
-    plans :: [DevServicePlan]{api, database, worker}
-    order :: services_dependency_order(plans) ?? panic("dependency order")
+    plans: [DevServicePlan]{api, database, worker}
+    order: services_dependency_order(plans) ?? panic("dependency order")
     names := [String]{}
     loop index in order -> &names.push(plans[index].name)
     assert_eq(names, [String]{"worker", "database", "api"})
@@ -167,7 +167,7 @@ fn services_test_has_pair(command: [String], first: String, second: String) -> B
     cycle := api
     cycle.after = [String]{"database"}
     database.after = [String]{"api"}
-    error :: (services_dependency_order([DevServicePlan]{cycle, database}) ? value -> panic("expected a services error") ! failure -> failure.message)
+    error: (services_dependency_order([DevServicePlan]{cycle, database}) ? value -> panic("expected a services error") ! failure -> failure.message)
     assert(error.contains("service dependency cycle"), error)
     assert(error.contains("api") && error.contains("database"), error)
 }
@@ -175,52 +175,52 @@ fn services_test_has_pair(command: [String], first: String, second: String) -> B
 #Test("dependency order rejects unknown and disabled dependencies") {
     unknown := services_test_plan("api", "sleep 1")
     unknown.after = [String]{"database"}
-    error :: (services_dependency_order([DevServicePlan]{unknown}) ? value -> panic("expected a services error") ! failure -> failure.message)
+    error: (services_dependency_order([DevServicePlan]{unknown}) ? value -> panic("expected a services error") ! failure -> failure.message)
     assert(error.contains("depends on unknown service"), error)
 
     disabled := services_test_plan("database", "sleep 1")
     disabled.enable = false
     dependent := services_test_plan("api", "sleep 1")
     dependent.after = [String]{"database"}
-    disabled_error :: (services_dependency_order([DevServicePlan]{dependent, disabled}) ? value -> panic("expected a services error") ! failure -> failure.message)
+    disabled_error: (services_dependency_order([DevServicePlan]{dependent, disabled}) ? value -> panic("expected a services error") ! failure -> failure.message)
     assert(disabled_error.contains("depends on disabled service"), disabled_error)
 }
 
 #Test("data dir symlink escape is rejected before start") {
     if !sys.is_unix() -> return
-    dir :: services_test_scratch("data-dir-symlink")
-    outside :: services_test_scratch("data-dir-outside")
+    dir: services_test_scratch("data-dir-symlink")
+    outside: services_test_scratch("data-dir-outside")
     files.symlink(outside, files.join(dir, "escape")) ?? panic("symlink")
     service := services_test_plan("fixture", "sleep 30")
     service.data_dir = Val("escape/data")
-    error :: (services_resolve(dir, service) ? value -> panic("expected a services error") ! failure -> failure.message)
+    error: (services_resolve(dir, service) ? value -> panic("expected a services error") ! failure -> failure.message)
     assert(error.contains("data_dir") && error.contains("escapes"), error)
 }
 
 #Test("watch and socket symlink escapes are rejected before creation") {
     if !sys.is_unix() -> return
-    dir :: services_test_scratch("service-path-symlink")
-    outside :: services_test_scratch("service-path-outside")
+    dir: services_test_scratch("service-path-symlink")
+    outside: services_test_scratch("service-path-outside")
     files.symlink(outside, files.join(dir, "watch-root")) ?? panic("watch symlink")
     files.symlink(outside, files.join(dir, "socket-root")) ?? panic("socket symlink")
 
     watched := services_test_plan("fixture", "sleep 30")
     watched.watch = [String]{"watch-root/config"}
-    watch_error :: (services_resolve(dir, watched) ? value -> panic("expected a services error") ! failure -> failure.message)
+    watch_error: (services_resolve(dir, watched) ? value -> panic("expected a services error") ! failure -> failure.message)
     assert(watch_error.contains("watch") && watch_error.contains("escapes"), watch_error)
 
-    socket_error :: (services_prepare_sockets(dir, [String]{"socket-root/service.sock"}) ? value -> panic("expected a services error") ! failure -> failure.message)
+    socket_error: (services_prepare_sockets(dir, [String]{"socket-root/service.sock"}) ? value -> panic("expected a services error") ! failure -> failure.message)
     assert(socket_error.contains("socket") && socket_error.contains("escapes"), socket_error)
     assert(!files.exists(files.join(outside, "service.sock")))
 }
 
 #Test("directory watch snapshot tracks nested files in sorted order") {
-    dir :: services_test_scratch("watch-tree")
+    dir: services_test_scratch("watch-tree")
     files.create_dir_all(files.join(dir, "src/nested")) ?? panic("create tree")
-    files.write(files.join(dir, "src/main.jet"), "fn main() {{}}\n") ?? panic("write main")
-    files.write(files.join(dir, "src/nested/lib.jet"), "fn lib() {{}}\n") ?? panic("write lib")
+    files.write(files.join(dir, "src/main.jet"), "main: fn() {{}}\n") ?? panic("write main")
+    files.write(files.join(dir, "src/nested/lib.jet"), "lib: fn() {{}}\n") ?? panic("write lib")
 
-    first :: services_watch_stamps(dir, [String]{files.join(dir, "src")}) ?? panic("first stamps")
+    first: services_watch_stamps(dir, [String]{files.join(dir, "src")}) ?? panic("first stamps")
     loop index in 1..<first.len() -> assert(first[index - 1] <= first[index], "watch stamps must be sorted")
     found := false
     loop stamp in first {
@@ -228,25 +228,25 @@ fn services_test_has_pair(command: [String], first: String, second: String) -> B
     }
     assert(found)
 
-    files.write(files.join(dir, "src/nested/lib.jet"), "fn lib() -> Int {{ 42 }}\n") ?? panic("rewrite lib")
-    second :: services_watch_stamps(dir, [String]{files.join(dir, "src")}) ?? panic("second stamps")
+    files.write(files.join(dir, "src/nested/lib.jet"), "lib: fn() -> Int {{ 42 }}\n") ?? panic("rewrite lib")
+    second: services_watch_stamps(dir, [String]{files.join(dir, "src")}) ?? panic("second stamps")
     assert(first != second, "nested file changes must change the watch fact")
 }
 
 #Test("restart exhaustion cleans process state") {
-    dir :: services_test_scratch("restart-exhaustion")
+    dir: services_test_scratch("restart-exhaustion")
     service := services_test_plan("fixture", "exit 7;")
     service.restart = Val(RestartPolicy.OnFailure{max: 1, backoff_ms: 0, exponential: false})
     env := services_test_env()
-    found :: services_start_one(services_test_host(), dir, &env, service) ? present -> present ! failure -> panic("start")
-    started :: found ?? panic("fixture must start")
+    found: services_start_one(services_test_host(), dir, &env, service) ? present -> present ! failure -> panic("start")
+    started: found ?? panic("fixture must start")
     services_monitor_service(services_test_host(), started, dir, &env, service)
     assert((services_read_process_state(services_service_dir(dir, "fixture")) ? present -> present ! failure -> panic("read state")) == None)
 }
 
 #Test("health gate probes a tcp port") {
-    dir :: services_test_scratch("health-alive-only")
-    plan :: services_test_plan("fixture", "sleep 30")
+    dir: services_test_scratch("health-alive-only")
+    plan: services_test_plan("fixture", "sleep 30")
     services_test_up(dir, plan)
     env := services_test_env()
     assert_eq(services_health_one(dir, &env, plan), ServiceHealth.Healthy)
@@ -261,81 +261,81 @@ fn services_test_has_pair(command: [String], first: String, second: String) -> B
 }
 
 #Test("ephemeral port stays reserved until service spawn") {
-    reservation :: services_allocate_ports([Int]{0}) ?? panic("ephemeral port allocation")
-    port :: reservation.ports[0]
+    reservation: services_allocate_ports([Int]{0}) ?? panic("ephemeral port allocation")
+    port: reservation.ports[0]
     assert(port != 0)
     assert(net.tcp_listen("127.0.0.1:{port}") == .Err(_), "the parent reservation must prevent a competing bind")
     services_release_ports(^reservation)
-    _ :: net.tcp_listen("127.0.0.1:{port}") ?? panic("the reservation must release before the child is spawned")
+    _: net.tcp_listen("127.0.0.1:{port}") ?? panic("the reservation must release before the child is spawned")
 }
 
 #Test("service spawn exports allocated port and socket activation paths") {
     if !sys.is_unix() -> return
-    dir :: services_test_scratch("activation")
+    dir: services_test_scratch("activation")
     service := services_test_plan("fixture", "printf '%s\\n%s\\n' \"$JETPACK_SERVICE_PORT\" \"$JETPACK_SERVICE_SOCKET_0\" > activation; sleep 30")
     service.ports = [Int]{0}
     service.sockets = [String]{"runtime/service.sock"}
     services_test_up(dir, service)
 
-    activation :: files.join(services_service_dir(dir, "fixture"), "data/activation")
-    deadline :: services_now_ms() + 2000
+    activation: files.join(services_service_dir(dir, "fixture"), "data/activation")
+    deadline: services_now_ms() + 2000
     loop !files.exists(activation) && services_now_ms() < deadline -> time.sleep(time.duration_ms(10))
-    text :: files.read(activation) ?? panic("the child must receive the activation environment")
-    lines :: services_lines(text)
+    text: files.read(activation) ?? panic("the child must receive the activation environment")
+    lines: services_lines(text)
     assert_eq(lines.len(), 2)
     assert((Int.parse(lines[0]) ?? 0) > 0)
     assert_eq(lines[1], files.join(dir, "runtime/service.sock"))
-    ports_text :: files.read(services_ports_path(services_service_dir(dir, "fixture"))) ?? panic("read ports")
+    ports_text: files.read(services_ports_path(services_service_dir(dir, "fixture"))) ?? panic("read ports")
     assert((Int.parse(ports_text.trim()) ?? 0) > 0)
     services_test_down(dir, service)
 }
 
 #Test("service probe requires and waits for declared ready") {
-    dir :: services_test_scratch("probe-ready")
-    plan :: services_test_plan("fixture", "sleep 30")
+    dir: services_test_scratch("probe-ready")
+    plan: services_test_plan("fixture", "sleep 30")
     env := services_test_env()
-    error :: (services_measure_readiness_with_timeout(services_test_host(), dir, &env, plan, 1, time.duration_ms(100)) ? value -> panic("expected a services error") ! failure -> failure.message)
+    error: (services_measure_readiness_with_timeout(services_test_host(), dir, &env, plan, 1, time.duration_ms(100)) ? value -> panic("expected a services error") ! failure -> failure.message)
     assert(error.contains("no declared `ready:` event"), error)
     assert(services_test_read_pid(services_service_dir(dir, "fixture")) == None)
 
-    ready :: files.join(services_service_dir(dir, "fixture"), "data/ready")
-    observed :: files.join(services_service_dir(dir, "fixture"), "data/probed")
+    ready: files.join(services_service_dir(dir, "fixture"), "data/ready")
+    observed: files.join(services_service_dir(dir, "fixture"), "data/probed")
     declared := plan
     declared.ready = Val("touch '{observed}'; test -f '{ready}'")
-    signal :: task {
+    signal: task {
         time.sleep(time.duration_ms(100))
         files.write(ready, "ready") ?? panic("signal ready")
     }
     ready_env := services_test_env()
-    samples :: services_measure_readiness_with_timeout(services_test_host(), dir, &ready_env, declared, 1, time.duration_seconds(1)) ?? panic("measure readiness")
+    samples: services_measure_readiness_with_timeout(services_test_host(), dir, &ready_env, declared, 1, time.duration_seconds(1)) ?? panic("measure readiness")
     signal.join() ?? panic("ready signal task")
     assert_eq(samples.len(), 1)
     assert(files.exists(observed), "ServiceProbe must execute the declared ready event")
 }
 
 #Test("service probe timeout stops the service") {
-    dir :: services_test_scratch("probe-timeout")
+    dir: services_test_scratch("probe-timeout")
     plan := services_test_plan("fixture", "sleep 30")
     plan.ready = Val("false")
     env := services_test_env()
-    error :: (services_measure_readiness_with_timeout(services_test_host(), dir, &env, plan, 1, time.duration_ms(100)) ? value -> panic("expected a services error") ! failure -> failure.message)
+    error: (services_measure_readiness_with_timeout(services_test_host(), dir, &env, plan, 1, time.duration_ms(100)) ? value -> panic("expected a services error") ! failure -> failure.message)
     assert(error.contains("did not become ready"), error)
     assert(services_test_read_pid(services_service_dir(dir, "fixture")) == None)
 }
 
 #Test("down fails closed when service lock cannot open") {
-    dir :: services_test_scratch("down-lock-failure")
-    plan :: services_test_plan("fixture", "sleep 30")
+    dir: services_test_scratch("down-lock-failure")
+    plan: services_test_plan("fixture", "sleep 30")
     services_test_up(dir, plan)
-    state_dir :: services_service_dir(dir, "fixture")
-    pid :: services_test_read_pid(state_dir) ?? panic("pid after up")
-    managed :: pkg_managed_dir(dir)
-    locks :: files.join(managed, ".locks")
-    displaced :: files.join(managed, "locks-displaced")
+    state_dir: services_service_dir(dir, "fixture")
+    pid: services_test_read_pid(state_dir) ?? panic("pid after up")
+    managed: pkg_managed_dir(dir)
+    locks: files.join(managed, ".locks")
+    displaced: files.join(managed, "locks-displaced")
     files.rename(locks, displaced) ?? panic("displace locks")
     files.write(locks, "not a directory") ?? panic("block locks")
 
-    error :: services_test_error_of(services_down_one(services_test_host(), dir, plan))
+    error: services_test_error_of(services_down_one(services_test_host(), dir, plan))
     assert(error.contains("couldn't lock"), error)
     assert_eq(services_test_read_pid(state_dir), Val(pid))
     assert(files.exists(services_pid_path(state_dir)))
@@ -347,11 +347,11 @@ fn services_test_has_pair(command: [String], first: String, second: String) -> B
 }
 
 #Test("typed shutdown policy kills verified process group") {
-    dir :: services_test_scratch("down-shutdown-kill")
+    dir: services_test_scratch("down-shutdown-kill")
     plan := services_test_plan("fixture", "sleep 30")
     services_test_up(dir, plan)
-    state_dir :: services_service_dir(dir, "fixture")
-    pid :: services_test_read_pid(state_dir) ?? panic("pid after up")
+    state_dir: services_service_dir(dir, "fixture")
+    pid: services_test_read_pid(state_dir) ?? panic("pid after up")
     plan.shutdown = Val(ShutdownPolicy.Kill)
     services_test_down(dir, plan)
     assert(!services_test_is_alive(pid))
@@ -360,37 +360,37 @@ fn services_test_has_pair(command: [String], first: String, second: String) -> B
 
 #Test("down stops persisted authority after leader exit") {
     if !sys.is_unix() -> return
-    dir :: services_test_scratch("leader-exit-authority")
-    plan :: services_test_plan("fixture", "sleep 30 & child=$!; echo $child > child.pid")
+    dir: services_test_scratch("leader-exit-authority")
+    plan: services_test_plan("fixture", "sleep 30 & child=$!; echo $child > child.pid")
     env := services_test_env()
-    found :: services_start_one(services_test_host(), dir, &env, plan) ? present -> present ! failure -> panic("start")
+    found: services_start_one(services_test_host(), dir, &env, plan) ? present -> present ! failure -> panic("start")
     started := found ?? panic("fixture must start")
-    child_pid :: services_test_wait_child_pid(files.join(services_service_dir(dir, "fixture"), "data/child.pid"))
+    child_pid: services_test_wait_child_pid(files.join(services_service_dir(dir, "fixture"), "data/child.pid"))
     started.child.wait() ?? panic("leader exit")
     assert(!services_test_is_alive(started.state.pid), "the recorded leader must exit")
     services_test_wait_swept(child_pid)
 
     services_down_one(services_test_host(), dir, plan) ?? panic("down must stop the persisted authority")
     assert(!services_test_is_alive(child_pid), "the persisted process group must be gone")
-    lifecycle :: services_read_lifecycle(services_service_dir(dir, "fixture")) ? present -> present ! failure -> panic("read lifecycle")
-    facts :: lifecycle ?? panic("stopped lifecycle facts must remain explainable")
+    lifecycle: services_read_lifecycle(services_service_dir(dir, "fixture")) ? present -> present ! failure -> panic("read lifecycle")
+    facts: lifecycle ?? panic("stopped lifecycle facts must remain explainable")
     assert_eq(facts.phase, ServicePhase.Stopped)
     assert_eq(facts.recovery, "leader-exited")
 }
 
 #Test("down retries cleanup failed authority after leader exit") {
     if !sys.is_unix() -> return
-    dir :: services_test_scratch("cleanup-failed-authority")
-    plan :: services_test_plan("fixture", "sleep 30 & child=$!; echo $child > child.pid")
+    dir: services_test_scratch("cleanup-failed-authority")
+    plan: services_test_plan("fixture", "sleep 30 & child=$!; echo $child > child.pid")
     env := services_test_env()
-    found :: services_start_one(services_test_host(), dir, &env, plan) ? present -> present ! failure -> panic("start")
+    found: services_start_one(services_test_host(), dir, &env, plan) ? present -> present ! failure -> panic("start")
     started := found ?? panic("fixture must start")
-    service_dir :: services_service_dir(dir, "fixture")
-    child_pid :: services_test_wait_child_pid(files.join(service_dir, "data/child.pid"))
+    service_dir: services_service_dir(dir, "fixture")
+    child_pid: services_test_wait_child_pid(files.join(service_dir, "data/child.pid"))
     started.child.wait() ?? panic("leader exit")
     services_test_wait_swept(child_pid)
 
-    running :: services_read_lifecycle(service_dir) ? present -> present ! failure -> panic("read lifecycle")
+    running: services_read_lifecycle(service_dir) ? present -> present ! failure -> panic("read lifecycle")
     facts := running ?? panic("running lifecycle facts must exist")
     facts.phase = ServicePhase.Failed
     facts.recovery = "cleanup-failed"
@@ -398,20 +398,20 @@ fn services_test_has_pair(command: [String], first: String, second: String) -> B
 
     services_down_one(services_test_host(), dir, plan) ?? panic("down must retry pending authority cleanup")
     assert(!services_test_is_alive(child_pid), "cleanup-failed state must not orphan descendants")
-    stopped :: services_read_lifecycle(service_dir) ? present -> present ! failure -> panic("read lifecycle")
-    final_facts :: stopped ?? panic("stopped lifecycle facts must remain explainable")
+    stopped: services_read_lifecycle(service_dir) ? present -> present ! failure -> panic("read lifecycle")
+    final_facts: stopped ?? panic("stopped lifecycle facts must remain explainable")
     assert_eq(final_facts.phase, ServicePhase.Stopped)
     assert_eq(final_facts.recovery, "leader-exited")
 }
 
 #Test("supervisor cleanup stops persisted authority after leader exit") {
     if !sys.is_unix() -> return
-    dir :: services_test_scratch("supervisor-leader-exit-authority")
-    plan :: services_test_plan("fixture", "sleep 30 & child=$!; echo $child > child.pid")
+    dir: services_test_scratch("supervisor-leader-exit-authority")
+    plan: services_test_plan("fixture", "sleep 30 & child=$!; echo $child > child.pid")
     env := services_test_env()
-    found :: services_start_one(services_test_host(), dir, &env, plan) ? present -> present ! failure -> panic("start")
+    found: services_start_one(services_test_host(), dir, &env, plan) ? present -> present ! failure -> panic("start")
     started := found ?? panic("fixture must start")
-    child_pid :: services_test_wait_child_pid(files.join(services_service_dir(dir, "fixture"), "data/child.pid"))
+    child_pid: services_test_wait_child_pid(files.join(services_service_dir(dir, "fixture"), "data/child.pid"))
     services_test_wait_swept(child_pid)
 
     // The leader can lose the identity race between the supervisor's check
@@ -421,25 +421,25 @@ fn services_test_has_pair(command: [String], first: String, second: String) -> B
     started.child.wait() ?? panic("reap leader")
     assert(!services_test_is_alive(child_pid), "supervisor cleanup must stop the authority")
     assert((services_read_process_state(services_service_dir(dir, "fixture")) ? present -> present ! failure -> panic("read state")) == None)
-    lifecycle :: services_read_lifecycle(services_service_dir(dir, "fixture")) ? present -> present ! failure -> panic("read lifecycle")
-    facts :: lifecycle ?? panic("failed lifecycle facts must remain explainable")
+    lifecycle: services_read_lifecycle(services_service_dir(dir, "fixture")) ? present -> present ! failure -> panic("read lifecycle")
+    facts: lifecycle ?? panic("failed lifecycle facts must remain explainable")
     assert_eq(facts.phase, ServicePhase.Failed)
     assert_eq(facts.recovery, "service exited unexpectedly")
 }
 
 #Test("term kill and final liveness failures propagate") {
-    term :: services_test_error_of(services_stop_process_with(42, None, 0, (action) -> {
+    term: services_test_error_of(services_stop_process_with(42, None, 0, (action) -> {
         if action == StopAction.Term -> return Err(ServicesError.new("TERM failed"))
         Err(ServicesError.new("KILL failed"))
     }, () -> Ok(true)))
     assert_eq(term, "TERM failed; KILL failed")
 
-    kill :: services_test_error_of(services_stop_process_with(42, None, 0, (action) -> {
+    kill: services_test_error_of(services_stop_process_with(42, None, 0, (action) -> {
         if action == StopAction.Kill -> return Err(ServicesError.new("KILL failed"))
     }, () -> Ok(true)))
     assert_eq(kill, "KILL failed")
 
-    alive :: services_test_error_of(services_stop_process_with(42, None, 0, (action) -> {}, () -> Ok(true)))
+    alive: services_test_error_of(services_stop_process_with(42, None, 0, (action) -> {}, () -> Ok(true)))
     assert(alive.contains("still alive"), alive)
 }
 
@@ -458,8 +458,8 @@ fn services_test_has_pair(command: [String], first: String, second: String) -> B
 }
 
 #Test("process state round trips and pid only state stays legacy") {
-    dir :: services_test_scratch("process-state")
-    state :: ServiceProcessState{pid: 42, start_identity: "linux-proc-start:9001", containment: None}
+    dir: services_test_scratch("process-state")
+    state: ServiceProcessState{pid: 42, start_identity: "linux-proc-start:9001", containment: None}
     files.write(services_pid_path(dir), "version=1\npid={state.pid}\nstart={state.start_identity}\n") ?? panic("write state")
     assert_eq(services_read_process_state(dir) ? present -> present ! failure -> panic("read verified"), Val(PersistedProcessState.Verified(state)))
     files.write(services_pid_path(dir), "42\n") ?? panic("write legacy")
@@ -467,8 +467,8 @@ fn services_test_has_pair(command: [String], first: String, second: String) -> B
 }
 
 #Test("incomplete process state fails closed") {
-    dir :: services_test_scratch("incomplete-process-state")
-    state_path :: services_pid_path(dir)
+    dir: services_test_scratch("incomplete-process-state")
+    state_path: services_pid_path(dir)
     files.write(state_path, "version=1\npid=42\n") ?? panic("write pid only")
     assert((services_read_process_state(dir) ? value -> panic("expected a services error") ! failure -> failure.message).contains("is invalid"))
     files.write(state_path, "version=1\nstart=linux-proc-start:9001\n") ?? panic("write start only")
@@ -476,9 +476,9 @@ fn services_test_has_pair(command: [String], first: String, second: String) -> B
 }
 
 #Test("process state rejects unknown duplicate and malformed fields") {
-    dir :: services_test_scratch("malformed-process-state")
-    state_path :: services_pid_path(dir)
-    samples :: [String]{
+    dir: services_test_scratch("malformed-process-state")
+    state_path: services_pid_path(dir)
+    samples: [String]{
         "version=1\npid=42\nstart=x\nextra=y\n",
         "version=1\npid=42\npid=43\nstart=x\n",
         "version=1\npid=nope\nstart=x\n",
@@ -493,18 +493,18 @@ fn services_test_has_pair(command: [String], first: String, second: String) -> B
 
 #Test("socket preparation failure removes prior reservations") {
     if !sys.is_unix() -> return
-    dir :: services_test_scratch("socket-cleanup")
+    dir: services_test_scratch("socket-cleanup")
     files.write(files.join(dir, "blocked"), "not a socket") ?? panic("write blocker")
-    error :: (services_prepare_sockets(dir, [String]{"first.sock", "blocked"}) ? value -> panic("expected a services error") ! failure -> failure.message)
+    error: (services_prepare_sockets(dir, [String]{"first.sock", "blocked"}) ? value -> panic("expected a services error") ! failure -> failure.message)
     assert(error.contains("non-socket file"), error)
     assert(!files.exists(files.join(dir, "first.sock")))
 }
 
 #Test("legacy pid state is removed without running shutdown or signaling") {
-    dir :: services_test_scratch("legacy-pid")
+    dir: services_test_scratch("legacy-pid")
     plan := services_test_plan("fixture", "unused")
     plan.shutdown = None
-    state_dir :: services_service_dir(dir, "fixture")
+    state_dir: services_service_dir(dir, "fixture")
     files.create_dir_all(state_dir) ?? panic("create state dir")
     files.write(services_pid_path(state_dir), "{sys.pid()}") ?? panic("write legacy pid")
     services_down_one(services_test_host(), dir, plan) ?? panic("legacy state must be safely discarded")
@@ -513,7 +513,7 @@ fn services_test_has_pair(command: [String], first: String, second: String) -> B
 
 #Test("pid reuse identity mismatch never reaches liveness or signal") {
     liveness_called := false
-    matched :: services_process_matches_start_with("linux-proc-start:old", () -> Ok(Val("linux-proc-start:reused")), () -> {
+    matched: services_process_matches_start_with("linux-proc-start:old", () -> Ok(Val("linux-proc-start:reused")), () -> {
         liveness_called = true
         Ok(true)
     }) ?? panic("identity check")
@@ -521,7 +521,7 @@ fn services_test_has_pair(command: [String], first: String, second: String) -> B
     assert(!liveness_called)
 
     signaled := false
-    ran :: services_run_if_start_identity_matches("linux-proc-start:old", () -> Ok(Val("linux-proc-start:reused")), () -> {
+    ran: services_run_if_start_identity_matches("linux-proc-start:old", () -> Ok(Val("linux-proc-start:reused")), () -> {
         signaled = true
     }) ?? panic("identity guard")
     assert(!ran)
@@ -529,7 +529,7 @@ fn services_test_has_pair(command: [String], first: String, second: String) -> B
 }
 
 #Test("process identity probe errors propagate before liveness") {
-    error :: (services_process_matches_start_with("expected", () -> Err(ServicesError.new("identity probe failed")), () -> {
+    error: (services_process_matches_start_with("expected", () -> Err(ServicesError.new("identity probe failed")), () -> {
         assert(false, "liveness must not run after an identity probe error")
         Ok(false)
     }) ? value -> panic("expected a services error") ! failure -> failure.message)
@@ -537,9 +537,9 @@ fn services_test_has_pair(command: [String], first: String, second: String) -> B
 }
 
 #Test("current process start identity is stable") {
-    pid :: sys.pid()
-    first :: services_process_start_identity(pid) ?? panic("own identity")
-    second :: services_process_start_identity(pid) ?? panic("own identity")
+    pid: sys.pid()
+    first: services_process_start_identity(pid) ?? panic("own identity")
+    second: services_process_start_identity(pid) ?? panic("own identity")
     assert_eq(first, second)
     assert(first.starts_with("linux-proc-start:"), first)
     assert(services_process_matches_start(ServiceProcessState{pid, start_identity: first, containment: None}) ?? panic("match own identity"))
@@ -548,79 +548,79 @@ fn services_test_has_pair(command: [String], first: String, second: String) -> B
 
 #Test("service log redirect keeps argv with spaces, quotes and a leading dash") {
     if sys.is_windows() -> return
-    dir :: services_test_scratch("log-redirect")
-    stdout_path :: files.join(dir, "stdout.log")
-    stderr_path :: files.join(dir, "stderr.log")
-    run :: [String]{"sh", "-c", "printf '%s|' \"$@\"; printf 'err' >&2", "sh", "a b", "it's \"q\"", "-dash", "--", "$HOME"}
-    argv :: services_log_redirect_argv(stdout_path, stderr_path, run) ?? panic("redirect argv")
-    receipt :: process.cmd(argv).stdout(.Capture).stderr(.Capture).run() ?? panic("run redirected command")
+    dir: services_test_scratch("log-redirect")
+    stdout_path: files.join(dir, "stdout.log")
+    stderr_path: files.join(dir, "stderr.log")
+    run: [String]{"sh", "-c", "printf '%s|' \"$@\"; printf 'err' >&2", "sh", "a b", "it's \"q\"", "-dash", "--", "$HOME"}
+    argv: services_log_redirect_argv(stdout_path, stderr_path, run) ?? panic("redirect argv")
+    receipt: process.cmd(argv).stdout(.Capture).stderr(.Capture).run() ?? panic("run redirected command")
     assert(receipt.success, "redirected command must succeed")
     assert_eq(files.read(stdout_path) ?? panic("read stdout log"), "a b|it's \"q\"|-dash|--|$HOME|")
     assert_eq(files.read(stderr_path) ?? panic("read stderr log"), "err")
 }
 
 #Test("windows guardian authority fails closed without Core containment") {
-    error :: (services_attach_authority(ServiceAuthority.WindowsGuardianJobObject{guardian: "Local\\Jetpack-test"}) ? value -> panic("expected a services error") ! failure -> failure.message)
+    error: (services_attach_authority(ServiceAuthority.WindowsGuardianJobObject{guardian: "Local\\Jetpack-test"}) ? value -> panic("expected a services error") ! failure -> failure.message)
     assert_eq(error, SERVICES_GUARDIAN_UNAVAILABLE)
 }
 
 #Test("pid publication failure kills and reaps child") {
-    dir :: services_test_scratch("pid-publication-failure")
-    bad_path :: files.join(dir, "pid-as-directory")
+    dir: services_test_scratch("pid-publication-failure")
+    bad_path: files.join(dir, "pid-as-directory")
     files.create_dir_all(bad_path) ?? panic("create blocking directory")
     child := process.shell("sleep 30").spawn() ?? panic("spawn fixture")
-    error :: (services_publish_process_state(&child, bad_path, ServiceAuthority.TestProcessGroup) ? value -> panic("expected a services error") ! failure -> failure.message)
+    error: (services_publish_process_state(&child, bad_path, ServiceAuthority.TestProcessGroup) ? value -> panic("expected a services error") ! failure -> failure.message)
     assert(error.contains("couldn't publish service process state"), error)
     assert(&child.exited() ?? panic("poll child"), "child must be reaped")
 }
 
 #Test("logs capture stdout and stderr") {
-    dir :: services_test_scratch("logs")
-    plan :: services_test_plan("fixture", "echo hello-stdout; echo hello-stderr 1>&2")
+    dir: services_test_scratch("logs")
+    plan: services_test_plan("fixture", "echo hello-stdout; echo hello-stderr 1>&2")
     services_test_up(dir, plan)
     // Give the already-exited process a moment to flush to the files.
     time.sleep(time.duration_ms(200))
-    out :: services_logs(dir, "fixture")
+    out: services_logs(dir, "fixture")
     assert(out.contains("hello-stdout"), "logs: {out}")
     assert(out.contains("hello-stderr"), "logs: {out}")
 }
 
 #Test("unresolvable service is a plain error") {
-    dir :: services_test_scratch("unresolvable")
-    plan :: DevServicePlan{name: "not-a-known-service", enable: true}
+    dir: services_test_scratch("unresolvable")
+    plan: DevServicePlan{name: "not-a-known-service", enable: true}
     env := services_test_env()
-    error :: services_test_error_of(services_up_one(services_test_host(), dir, &env, plan))
+    error: services_test_error_of(services_up_one(services_test_host(), dir, &env, plan))
     assert(error.contains("no `run:`"), error)
 }
 
 #Test("typed catalog presets share runtime package and port facts") {
-    dir :: services_test_scratch("typed-catalog")
-    names :: [String]{"redis", "postgres", "mysql", "mariadb", "nginx", "minio", "adminer", "blackfire", "caddy", "cassandra", "clickhouse", "cockroachdb", "couchdb", "dynamodb-local", "elasticmq", "elasticsearch", "garage", "httpbin", "influxdb", "kafka-connect", "kafka", "keycloak", "meilisearch", "memcached", "mongodb", "mosquitto", "nats", "nixseparatedebuginfod", "opensearch", "opentelemetry-collector", "prometheus", "rabbitmq", "rustfs", "sqld", "tailscale", "temporal", "tideways", "typesense", "varnish", "vault", "wiremock"}
-    packages :: [String]{"redis@jetpack", "postgresql@jetpack", "mysql@jetpack", "mariadb@jetpack", "nginx@jetpack", "minio@jetpack", "adminer@jetpack", "blackfire@jetpack", "caddy@jetpack", "cassandra_4@jetpack", "clickhouse@jetpack", "cockroachdb@jetpack", "couchdb3@jetpack", "dynamodb-local@jetpack", "elasticmq-server-bin@jetpack", "elasticsearch7@jetpack", "garage_2@jetpack", "httpbin@jetpack", "influxdb2-server@jetpack", "apacheKafka@jetpack", "apacheKafka@jetpack", "keycloak@jetpack", "meilisearch@jetpack", "memcached@jetpack", "mongodb-ce@jetpack", "mosquitto@jetpack", "nats-server@jetpack", "nixseparatedebuginfod2@jetpack", "opensearch@jetpack", "opentelemetry-collector-contrib@jetpack", "prometheus@jetpack", "rabbitmq-server@jetpack", "rustfs@jetpack", "sqld@jetpack", "tailscale@jetpack", "temporal-cli@jetpack", "tideways-daemon@jetpack", "typesense@jetpack", "varnish@jetpack", "vault-bin@jetpack", "wiremock@jetpack"}
-    ports :: [Int]{6379, 5432, 3306, 3306, 8080, 9000, 8081, 8307, 8080, 9042, 9000, 26257, 5984, 8000, 9324, 9200, 3900, 8080, 8086, 8083, 9092, 8080, 7700, 11211, 27017, 1883, 4222, 8000, 9200, 13133, 9090, 5672, 9000, 8080, 41641, 7233, 9135, 8108, 6081, 8200, 8080}
-    executables :: [String]{"redis-server", "postgres", "mysqld", "mariadbd", "nginx", "minio", "adminer", "blackfire", "caddy", "cassandra", "clickhouse-server", "cockroachdb", "couchdb", "dynamodb-local", "elasticmq-server", "elasticsearch", "garage", "gunicorn", "influxd", "connect-standalone.sh", "kafka-server-start.sh", "kc.sh", "meilisearch", "memcached", "mongod", "mosquitto", "nats-server", "nixseparatedebuginfod", "opensearch", "otelcol-contrib", "prometheus", "rabbitmq-server", "rustfs", "sqld", "tailscale", "temporal", "tideways-daemon", "typesense-server", "varnishd", "vault", "wiremock"}
-    presets :: services_catalog_presets()
+    dir: services_test_scratch("typed-catalog")
+    names: [String]{"redis", "postgres", "mysql", "mariadb", "nginx", "minio", "adminer", "blackfire", "caddy", "cassandra", "clickhouse", "cockroachdb", "couchdb", "dynamodb-local", "elasticmq", "elasticsearch", "garage", "httpbin", "influxdb", "kafka-connect", "kafka", "keycloak", "meilisearch", "memcached", "mongodb", "mosquitto", "nats", "nixseparatedebuginfod", "opensearch", "opentelemetry-collector", "prometheus", "rabbitmq", "rustfs", "sqld", "tailscale", "temporal", "tideways", "typesense", "varnish", "vault", "wiremock"}
+    packages: [String]{"redis@jetpack", "postgresql@jetpack", "mysql@jetpack", "mariadb@jetpack", "nginx@jetpack", "minio@jetpack", "adminer@jetpack", "blackfire@jetpack", "caddy@jetpack", "cassandra_4@jetpack", "clickhouse@jetpack", "cockroachdb@jetpack", "couchdb3@jetpack", "dynamodb-local@jetpack", "elasticmq-server-bin@jetpack", "elasticsearch7@jetpack", "garage_2@jetpack", "httpbin@jetpack", "influxdb2-server@jetpack", "apacheKafka@jetpack", "apacheKafka@jetpack", "keycloak@jetpack", "meilisearch@jetpack", "memcached@jetpack", "mongodb-ce@jetpack", "mosquitto@jetpack", "nats-server@jetpack", "nixseparatedebuginfod2@jetpack", "opensearch@jetpack", "opentelemetry-collector-contrib@jetpack", "prometheus@jetpack", "rabbitmq-server@jetpack", "rustfs@jetpack", "sqld@jetpack", "tailscale@jetpack", "temporal-cli@jetpack", "tideways-daemon@jetpack", "typesense@jetpack", "varnish@jetpack", "vault-bin@jetpack", "wiremock@jetpack"}
+    ports: [Int]{6379, 5432, 3306, 3306, 8080, 9000, 8081, 8307, 8080, 9042, 9000, 26257, 5984, 8000, 9324, 9200, 3900, 8080, 8086, 8083, 9092, 8080, 7700, 11211, 27017, 1883, 4222, 8000, 9200, 13133, 9090, 5672, 9000, 8080, 41641, 7233, 9135, 8108, 6081, 8200, 8080}
+    executables: [String]{"redis-server", "postgres", "mysqld", "mariadbd", "nginx", "minio", "adminer", "blackfire", "caddy", "cassandra", "clickhouse-server", "cockroachdb", "couchdb", "dynamodb-local", "elasticmq-server", "elasticsearch", "garage", "gunicorn", "influxd", "connect-standalone.sh", "kafka-server-start.sh", "kc.sh", "meilisearch", "memcached", "mongod", "mosquitto", "nats-server", "nixseparatedebuginfod", "opensearch", "otelcol-contrib", "prometheus", "rabbitmq-server", "rustfs", "sqld", "tailscale", "temporal", "tideways-daemon", "typesense-server", "varnishd", "vault", "wiremock"}
+    presets: services_catalog_presets()
     assert_eq(presets.len(), names.len())
     loop index in 0..<names.len() {
-        name :: names[index]
-        port :: ports[index]
+        name: names[index]
+        port: ports[index]
         assert_eq(presets[index].name, name)
         assert_eq(presets[index].package, packages[index])
         assert_eq(presets[index].default_port, port)
         assert_eq(services_catalog_pkg_ref(name), Val(packages[index]))
-        plan :: DevServicePlan{name, enable: true, ports: [Int]{port}}
+        plan: DevServicePlan{name, enable: true, ports: [Int]{port}}
         if name == "adminer" {
             assert_eq(services_catalog_executable(name), None)
-            image_error :: (services_image_run_command(plan) ? value -> panic("expected a services error") ! failure -> failure.message)
+            image_error: (services_image_run_command(plan) ? value -> panic("expected a services error") ! failure -> failure.message)
             assert(image_error.contains("owner-gated"), image_error)
-            host_error :: (services_resolve(dir, plan) ? value -> panic("expected a services error") ! failure -> failure.message)
+            host_error: (services_resolve(dir, plan) ? value -> panic("expected a services error") ! failure -> failure.message)
             assert(host_error.contains("owner-gated"), host_error)
             next
         }
         assert_eq(services_catalog_executable(name), Val(executables[index]))
-        command :: services_image_run_command(plan) ?? panic("every preset must have an image command")
+        command: services_image_run_command(plan) ?? panic("every preset must have an image command")
         assert_eq(command[0], executables[index])
-        resolved :: services_resolve(dir, plan) ?? panic("every preset must resolve for host services")
+        resolved: services_resolve(dir, plan) ?? panic("every preset must resolve for host services")
         assert_eq(resolved.run[0], executables[index])
         assert_eq(resolved.ports, [Int]{port})
         assert(resolved.ready == None, "preset readiness must stay typed")
@@ -644,24 +644,24 @@ fn services_test_has_pair(command: [String], first: String, second: String) -> B
             else -> assert_eq(resolved.ready_probe, Val(services_tcp_readiness(port)))
         }
     }
-    aliases :: [String]{"postgresql"}
-    canonicals :: [String]{"postgres"}
+    aliases: [String]{"postgresql"}
+    canonicals: [String]{"postgres"}
     loop index in 0..<aliases.len() {
-        alias :: aliases[index]
-        canonical :: canonicals[index]
+        alias: aliases[index]
+        canonical: canonicals[index]
         assert_eq(services_catalog_pkg_ref(alias), services_catalog_pkg_ref(canonical))
         assert_eq(services_catalog_executable(alias), services_catalog_executable(canonical))
-        alias_plan :: DevServicePlan{name: alias, enable: true}
-        canonical_plan :: DevServicePlan{name: canonical, enable: true}
-        image_run :: services_image_run_command(alias_plan) ?? panic("alias image command")
-        canonical_state :: "/var/lib/jet/services/{canonical}"
+        alias_plan: DevServicePlan{name: alias, enable: true}
+        canonical_plan: DevServicePlan{name: canonical, enable: true}
+        image_run: services_image_run_command(alias_plan) ?? panic("alias image command")
+        canonical_state: "/var/lib/jet/services/{canonical}"
         found := false
         loop argument in image_run {
             if argument.contains(canonical_state) -> found = true
         }
         assert(found, "alias image command must use canonical state path: {image_run.join(" ")}")
-        alias_resolved :: services_resolve(dir, alias_plan) ?? panic("resolve alias")
-        canonical_resolved :: services_resolve(dir, canonical_plan) ?? panic("resolve canonical")
+        alias_resolved: services_resolve(dir, alias_plan) ?? panic("resolve alias")
+        canonical_resolved: services_resolve(dir, canonical_plan) ?? panic("resolve canonical")
         assert_eq(alias_resolved.dir, canonical_resolved.dir)
         assert_eq(alias_resolved.data_dir, canonical_resolved.data_dir)
         assert_eq(alias_resolved.run, canonical_resolved.run)
@@ -676,8 +676,8 @@ fn services_test_has_pair(command: [String], first: String, second: String) -> B
 }
 
 #Test("lifecycle facts persist authority generation and dependencies") {
-    dir :: services_test_scratch("lifecycle-facts")
-    facts :: LifecycleFacts{
+    dir: services_test_scratch("lifecycle-facts")
+    facts: LifecycleFacts{
         backend: "linux-systemd-user",
         generation: 7,
         phase: ServicePhase.Ready,
@@ -693,8 +693,8 @@ fn services_test_has_pair(command: [String], first: String, second: String) -> B
 }
 
 #Test("lifecycle facts reject inconsistent authority claims") {
-    dir :: services_test_scratch("lifecycle-authority-mismatch")
-    facts :: LifecycleFacts{
+    dir: services_test_scratch("lifecycle-authority-mismatch")
+    facts: LifecycleFacts{
         backend: "linux-systemd-user",
         generation: 7,
         phase: ServicePhase.Ready,
@@ -706,13 +706,13 @@ fn services_test_has_pair(command: [String], first: String, second: String) -> B
         dependencies: [String]{}
     }
     services_write_lifecycle(dir, facts) ?? panic("write lifecycle")
-    error :: (services_read_lifecycle(dir) ? value -> panic("expected a services error") ! failure -> failure.message)
+    error: (services_read_lifecycle(dir) ? value -> panic("expected a services error") ! failure -> failure.message)
     assert(error.contains("inconsistent authority facts"), error)
 }
 
 #Test("shell readiness probe is bounded and kills descendants") {
-    dir :: services_test_scratch("bounded-readiness")
-    started :: services_now_ms()
+    dir: services_test_scratch("bounded-readiness")
+    started: services_now_ms()
     assert(!services_run_bounded_probe(process.shell("sleep 30").cwd(dir), 100))
     assert(services_now_ms() - started < 2000)
 }

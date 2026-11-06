@@ -1,27 +1,27 @@
 // A borrowed parameter and its enum payload are stable roots for a returned
 // view: named owners passed to the view-returning call check clean.
-enum Packet {
+Packet: enum {
     Data([Int])
     Empty
 }
 
-struct Bag {
+Bag: struct {
     items: [Int]
 
-    fn window(self) -> View<Int> from self {
+    window: fn(self) -> View<Int> from self {
         self.items[0..<1]
     }
 }
 
-fn head(packet: Packet, spare: [Int]) -> View<Int> from packet | spare {
+head: fn(packet: Packet, spare: [Int]) -> View<Int> from packet | spare {
     if packet == .Data(items) -> return items[0..1]
     spare[0..0]
 }
 
-fn run() {
-    packet :: Packet.Data([Int]{7, 8, 9})
-    spare :: [Int]{0}
+run: fn() {
+    packet: Packet.Data([Int]{7, 8, 9})
+    spare: [Int]{0}
     print(head(packet, spare))
-    bag :: Bag{items: [Int]{4, 5}}
+    bag: Bag{items: [Int]{4, 5}}
     print(bag.window())
 }

@@ -1,13 +1,13 @@
 
 use {
-    fs :: core.files
-    os :: core.sys
+    fs: core.files
+    os: core.sys
 }
-fn run() {
-    root :: "."
-    stale :: Path.from(root).join(".jet_tmp_{os.pid()}_0")
+run: fn() {
+    root: "."
+    stale: Path.from(root).join(".jet_tmp_{os.pid()}_0")
     fs.write(stale, "stale") ?? panic("stale setup failed")
-    bytes :: [U8]{ 110, 101, 119 }
+    bytes: [U8]{ 110, 101, 119 }
     fs.write_atomic("target.bin", bytes) ?? panic("replacement failed")
     fs.write_atomic("blocked", bytes) ?? panic("expected replacement failure")
 }

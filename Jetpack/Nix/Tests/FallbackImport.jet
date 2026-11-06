@@ -9,26 +9,26 @@ use {
     jet_pkg_model.[pkg_sha256_hex]
 }
 
-fn nix_test_fallback_error(projection: NixFallbackProjection, keys: [String]) -> String {
+nix_test_fallback_error: fn(projection: NixFallbackProjection, keys: [String]) -> String {
     if projection.select(keys) == {
         .Ok(_) -> panic("projection selection must fail closed")
         .Err(error) -> error.message()
     }
 }
 
-fn nix_test_fallback_import_error(record: Dyn) -> String {
+nix_test_fallback_import_error: fn(record: Dyn) -> String {
     if nix_fallback_import_record(record) == {
         .Ok(_) -> panic("fallback record must be rejected")
         .Err(error) -> error.message()
     }
 }
 
-fn nix_test_empty_list() -> Dyn {
+nix_test_empty_list: fn() -> Dyn {
     Dyn.Array([Dyn]{})
 }
 
 // The tests/jetpack_criterion8.rs fallback record, in its document order.
-fn nix_test_criterion8_import() -> Dyn {
+nix_test_criterion8_import: fn() -> Dyn {
     Dyn.Object([
         "closedGraph": Dyn.Object(["root": Dyn.Object(["dependencies": nix_test_empty_list()])]),
         "selectedOutputs": Dyn.Object(["out": Dyn.Text("/staging/greet")]),
@@ -42,7 +42,7 @@ fn nix_test_criterion8_import() -> Dyn {
     ])
 }
 
-fn nix_test_criterion8_record() -> Dyn {
+nix_test_criterion8_record: fn() -> Dyn {
     Dyn.Object([
         "drvPath": Dyn.Text("/nix/store/0fixture00000000000000000000-greet.drv"),
         "outputs": Dyn.Object(["out": Dyn.Text("/staging/greet")]),
@@ -51,7 +51,7 @@ fn nix_test_criterion8_record() -> Dyn {
 }
 
 #Test("nix fallback projections select exactly one accepted field") {
-    keys :: [String]{"drvPath", "outputs", "closedGraph", "inputDrvs", "sources", "hashes", "losses", "attestation"}
+    keys: [String]{"drvPath", "outputs", "closedGraph", "inputDrvs", "sources", "hashes", "losses", "attestation"}
     assert_eq((NixFallbackProjection.Graph).select(keys) ?? panic("graph"), "closedGraph")
     assert_eq((NixFallbackProjection.SelectedOutputs).select(keys) ?? panic("outputs"), "outputs")
     assert_eq((NixFallbackProjection.Dependencies).select(keys) ?? panic("dependencies"), "inputDrvs")
@@ -61,10 +61,10 @@ fn nix_test_criterion8_record() -> Dyn {
 }
 
 #Test("nix fallback detection ignores the plain nix build shape") {
-    plain :: [String]{"drvPath", "outputs"}
+    plain: [String]{"drvPath", "outputs"}
     assert(!nix_fallback_detect(plain, plain))
     assert_eq(nix_fallback_import_field(plain), None)
-    wrapped :: [String]{"drvPath", "outputs", "jetpackImport", "jetpack"}
+    wrapped: [String]{"drvPath", "outputs", "jetpackImport", "jetpack"}
     assert(nix_fallback_detect(wrapped, [String]{"closedGraph"}))
     assert_eq(nix_fallback_import_field(wrapped), Val("jetpackImport"))
     assert(nix_fallback_detect(plain, [String]{"outputs", "digests"}))
@@ -72,7 +72,7 @@ fn nix_test_criterion8_record() -> Dyn {
 }
 
 #Test("nix fallback retains canonical projections and digests") {
-    canonical :: NixFallbackCanonical{
+    canonical: NixFallbackCanonical{
         document: `{"proof":{"source":"criterion-8"}}`,
         graph: `{"root":{"dependencies":[]}}`,
         selected_outputs: `{"out":"/store/out"}`,
@@ -84,7 +84,7 @@ fn nix_test_criterion8_record() -> Dyn {
         recipe: Val(`{"kind":"compatibility"}`),
         lock: None,
     }
-    facts :: canonical.imported().facts
+    facts: canonical.imported().facts
     assert_eq(facts.get("nix.fallback.schema"), Val("jetpack.nix-fallback.v1"))
     assert_eq(facts.get("nix.fallback.outputs"), Val(`{"out":"/store/out"}`))
     assert_eq(facts.get("nix.fallback.selected_outputs"), Val(`{"out":"/store/out"}`))
@@ -95,9 +95,9 @@ fn nix_test_criterion8_record() -> Dyn {
 }
 
 #Test("nix fallback record import retains the criterion 8 document") {
-    state :: nix_fallback_import_record(nix_test_criterion8_record()) ? found -> found ! error -> panic("criterion 8 record must import")
-    facts :: (state ?? panic("criterion 8 record is a fallback record")).facts
-    document :: `{"drvPath":"/nix/store/0fixture00000000000000000000-greet.drv","outputs":{"out":"/staging/greet"},"jetpackImport":{"closedGraph":{"root":{"dependencies":[]}},"selectedOutputs":{"out":"/staging/greet"},"dependencies":[],"sources":[],"hashes":{"out":"output-hash"},"losses":[],"proof":{"source":"criterion-8"},"recipe":{"kind":"compatibility"},"lock":{"system":"x86_64-linux"}}}`
+    state: nix_fallback_import_record(nix_test_criterion8_record()) ? found -> found ! error -> panic("criterion 8 record must import")
+    facts: (state ?? panic("criterion 8 record is a fallback record")).facts
+    document: `{"drvPath":"/nix/store/0fixture00000000000000000000-greet.drv","outputs":{"out":"/staging/greet"},"jetpackImport":{"closedGraph":{"root":{"dependencies":[]}},"selectedOutputs":{"out":"/staging/greet"},"dependencies":[],"sources":[],"hashes":{"out":"output-hash"},"losses":[],"proof":{"source":"criterion-8"},"recipe":{"kind":"compatibility"},"lock":{"system":"x86_64-linux"}}}`
     assert_eq(facts.get("nix.fallback.schema"), Val("jetpack.nix-fallback.v1"))
     assert_eq(facts.get("nix.fallback.document"), Val(document))
     assert_eq(facts.get("nix.fallback.document.sha256"), Val(pkg_sha256_hex(document.bytes())))
@@ -116,23 +116,23 @@ fn nix_test_criterion8_record() -> Dyn {
 }
 
 #Test("nix fallback record import reads an unwrapped root and skips the plain build shape") {
-    plain :: Dyn.Object(["drvPath": Dyn.Text("/nix/store/x-greet.drv"), "outputs": Dyn.Object(["out": Dyn.Text("/nix/store/x-greet")])])
+    plain: Dyn.Object(["drvPath": Dyn.Text("/nix/store/x-greet.drv"), "outputs": Dyn.Object(["out": Dyn.Text("/nix/store/x-greet")])])
     assert((nix_fallback_import_record(plain) ? found -> found ! error -> panic("plain build shape is not an error")) == None)
-    unwrapped :: nix_fallback_import_record(nix_test_criterion8_import()) ? found -> found ! error -> panic("unwrapped record must import")
-    facts :: (unwrapped ?? panic("unwrapped projections mark a fallback record")).facts
+    unwrapped: nix_fallback_import_record(nix_test_criterion8_import()) ? found -> found ! error -> panic("unwrapped record must import")
+    facts: (unwrapped ?? panic("unwrapped projections mark a fallback record")).facts
     assert_eq(facts.get("nix.fallback.graph"), Val(`{"root":{"dependencies":[]}}`))
     assert_eq(facts.get("nix.fallback.lock"), Val(`{"system":"x86_64-linux"}`))
 }
 
 #Test("nix fallback record import fails closed on malformed records") {
     assert_eq(nix_test_fallback_import_error(nix_test_empty_list()), "expected a Dyn object")
-    wrapped_text :: Dyn.Object(["jetpackImport": Dyn.Text("not an object")])
+    wrapped_text: Dyn.Object(["jetpackImport": Dyn.Text("not an object")])
     assert_eq(nix_test_fallback_import_error(wrapped_text), "expected a Dyn object")
-    marked_only :: Dyn.Object(["fallback": Dyn.Bool(true)])
+    marked_only: Dyn.Object(["fallback": Dyn.Bool(true)])
     assert_eq(nix_test_fallback_import_error(marked_only), "fallback document has no closed derivation graph field")
-    doubled :: Dyn.Object(["jetpack": Dyn.Object(["closedGraph": nix_test_empty_list(), "graph": nix_test_empty_list()])])
+    doubled: Dyn.Object(["jetpack": Dyn.Object(["closedGraph": nix_test_empty_list(), "graph": nix_test_empty_list()])])
     assert_eq(nix_test_fallback_import_error(doubled), "fallback document has more than one closed derivation graph field")
-    nonfinite :: Dyn.Object([
+    nonfinite: Dyn.Object([
         "jetpackImport": nix_test_criterion8_import(),
         "score": Dyn.Float(Float.NAN),
     ])

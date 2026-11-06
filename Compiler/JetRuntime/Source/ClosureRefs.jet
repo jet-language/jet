@@ -5,10 +5,10 @@
 // The caller owns a live reference throughout retain; unref consumes exactly
 // one reference and its true result alone authorizes release of the box.
 #Export(c)
-fn jet_rt_native_closure_retain(boxed: I64) {
+jet_rt_native_closure_retain: fn(boxed: I64) {
     #Unsafe("the caller's owned reference keeps the aligned closure header live; locked compare-exchange atomically publishes one more owner") {
         loop {
-            count :: os_load_i64(boxed)
+            count: os_load_i64(boxed)
             if (count == I64{9223372036854775807}) -> jet_rt_panic_overflow()
             if (os_cas_i64(boxed, count, count + I64{1}) == count) -> return
         }
@@ -16,10 +16,10 @@ fn jet_rt_native_closure_retain(boxed: I64) {
 }
 
 #Export(c)
-fn jet_rt_native_closure_unref(boxed: I64) -> Bool {
+jet_rt_native_closure_unref: fn(boxed: I64) -> Bool {
     #Unsafe("consumes one reference to an aligned live closure header; locked compare-exchange provides release ordering and last-owner acquire before its release helper") {
         loop {
-            count :: os_load_i64(boxed)
+            count: os_load_i64(boxed)
             if (os_cas_i64(boxed, count, count - I64{1}) == count) -> return count == I64{1}
         }
     }

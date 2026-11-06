@@ -1,4 +1,4 @@
-package {
+package: {
     name: "ui_drop_cancel"
     version: "0.1.0"
     authority: {
@@ -8,13 +8,13 @@ package {
 }
 // D-UI-DRAG-NONE1=A: a drag event's operation is optional, and a drop the
 // browser offers no operation for arrives as Cancel.
-use drag_drop :: core.ui.host.drag_drop
+use drag_drop: core.ui.host.drag_drop
 
-fn run() {
+run: fn() {
     loop {
         if drag_drop.poll() == {
             .Ok(found) -> {
-                event :: found ?? break
+                event: found ?? break
                 print("{event.phase} {event.operation} {event.items.len()}")
             }
             .Err(error) -> print("drop: {error}")

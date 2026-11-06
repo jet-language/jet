@@ -1,19 +1,19 @@
 // #4370: a bare `[]` inside an annotated named tuple takes the field's
 // element type, as it does in a struct field.
-fn report(text: String) -> (lines: [String], at: Int, message: String) {
+report: fn(text: String) -> (lines: [String], at: Int, message: String) {
     if text == "" -> return (lines: [], at: 0, message: "empty")
     (lines: [String]{text}, at: 1, message: "one")
 }
 
-fn describe(entry: (lines: [String], at: Int, message: String)) -> String {
+describe: fn(entry: (lines: [String], at: Int, message: String)) -> String {
     "{entry.message} {entry.lines.len()} at {entry.at}"
 }
 
-fn run() {
+run: fn() {
     print(describe(report("")))
     print(describe(report("x")))
     print(describe((lines: [], at: 7, message: "argument")))
-    blank :: report("")
+    blank: report("")
     grown := blank.lines
     &grown.push("added")
     print(grown[0])

@@ -4,15 +4,15 @@ use {
         JET_CLI_NATIVE_C_FLAGS, JET_CLI_NATIVE_C_HARDENING_REMOVED,
         jet_cli_native_c_policy_values, jet_cli_toolchain_root,
     ]
-    cli_files :: core.files
+    cli_files: core.files
 }
 
 #Test("native C policy constants match native-c-policy.tsv") {
-    root :: if jet_cli_toolchain_root(cli_files.cwd() ?? ".") == {
+    root: if jet_cli_toolchain_root(cli_files.cwd() ?? ".") == {
         .Found(found) -> found
         .Missing(what, fix) -> panic("{what}; {fix}")
     }
-    policy :: cli_files.read("{root}/Compiler/JetCli/Source/Cli/native-c-policy.tsv") ?? panic("read native-c-policy.tsv: {err}")
+    policy: cli_files.read("{root}/Compiler/JetCli/Source/Cli/native-c-policy.tsv") ?? panic("read native-c-policy.tsv: {err}")
     assert_eq(jet_cli_native_c_policy_values(policy, "flag"), JET_CLI_NATIVE_C_FLAGS)
     assert_eq(jet_cli_native_c_policy_values(policy, "hardening-remove"), JET_CLI_NATIVE_C_HARDENING_REMOVED)
 }

@@ -3,13 +3,13 @@
 // `hardened_git_command`). It lives in Foundation so both the engine and the
 // publication package reach the same policy.
 use {
-    process :: core.process
-    sys :: core.sys
+    process: core.process
+    sys: core.sys
 }
 
 // Git environment that could reintroduce ambient configuration, helpers,
 // proxies, or traces. Every hardened command removes all of them.
-FOUNDATION_GIT_REMOVED_ENV :: comptime { [String]{
+FOUNDATION_GIT_REMOVED_ENV: comptime { [String]{
     "GIT_CONFIG_PARAMETERS", "GIT_CONFIG", "GIT_EXEC_PATH", "GIT_TEMPLATE_DIR", "GIT_DIR", "GIT_WORK_TREE",
     "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
     "GIT_CEILING_DIRECTORIES", "GIT_DISCOVERY_ACROSS_FILESYSTEM", "GIT_NAMESPACE", "GIT_NO_REPLACE_OBJECTS",
@@ -22,19 +22,19 @@ FOUNDATION_GIT_REMOVED_ENV :: comptime { [String]{
 } }
 
 // Command-line configuration wins over a repository-local credential helper.
-FOUNDATION_GIT_CONFIG_ARGS :: [String]{"-c", "credential.helper=", "-c", "protocol.ext.allow=never", "-c", "protocol.file.allow=always"}
+FOUNDATION_GIT_CONFIG_ARGS: [String]{"-c", "credential.helper=", "-c", "protocol.ext.allow=never", "-c", "protocol.file.allow=always"}
 
 // The one hardened Git subprocess policy: its fixed working directory, the
 // environment it sets, the ambient variables it removes, and the leading
 // configuration arguments. No caller can create a weaker policy.
-struct FoundationHardenedGitPolicy {
+FoundationHardenedGitPolicy: struct {
     cwd: String
     env: [String: String]
     removed_env: [String]
     args: [String]
 
-    fn current() -[Env]> FoundationHardenedGitPolicy Never! {
-        null_device :: foundation_git_null_device()
+    current: fn() -[Env]> FoundationHardenedGitPolicy Never! {
+        null_device: foundation_git_null_device()
         FoundationHardenedGitPolicy{
             cwd: foundation_git_safe_cwd(),
             env: [String: String]{
@@ -54,7 +54,7 @@ struct FoundationHardenedGitPolicy {
 
     // The captured `git` process specification of this policy. Environment
     // keys are applied in byte order (a `BTreeMap` walk).
-    fn spec(self) -[Exec]> ProcessSpec Never! {
+    spec: fn(self) -[Exec]> ProcessSpec Never! {
         spec := process.cmd([String]{"git"}).cwd(self.cwd)
         keys := self.env.keys().to_list()
         &keys.sort()
@@ -66,20 +66,20 @@ struct FoundationHardenedGitPolicy {
 
 // The hardened Git command every provider, Source Fetch and registry
 // transport operation runs.
-fn foundation_hardened_git_command() -[Env, Exec]> ProcessSpec Never! {
+foundation_hardened_git_command: fn() -[Env, Exec]> ProcessSpec Never! {
     FoundationHardenedGitPolicy.current().spec()
 }
 
 // The non-interactive SSH policy shared by every hardened Git command.
-fn foundation_hardened_ssh_command() -[Env]> String Never! {
+foundation_hardened_ssh_command: fn() -[Env]> String Never! {
     if sys.is_windows() -> return "ssh -oBatchMode=yes -oIdentitiesOnly=yes -oIdentityAgent=none -oIdentityFile=none -F NUL"
     "ssh -oBatchMode=yes -oIdentitiesOnly=yes -oIdentityAgent=none -oIdentityFile=none -F /dev/null"
 }
 
-fn foundation_git_null_device() -[Env]> String Never! {
+foundation_git_null_device: fn() -[Env]> String Never! {
     if sys.is_windows() -> "NUL" else -> "/dev/null"
 }
 
-fn foundation_git_safe_cwd() -[Env]> String Never! {
+foundation_git_safe_cwd: fn() -[Env]> String Never! {
     if sys.is_windows() -> "\\" else -> "/"
 }

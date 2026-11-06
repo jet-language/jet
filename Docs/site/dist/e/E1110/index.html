@@ -34,13 +34,13 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">Structured spawning uses the innermost active lexical `task.group` or a direct `Group` parameter. A group may flow down the call stack, but it cannot become stored state or escape its scope.</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Write `task work()` inside the active group, or pass that handle directly to `fn helper(group: Group)`; do not store or capture it.</p>
+<p class="diag-copy fix" data-registry-field="fix">Write `task work()` inside the active group, or pass that handle directly to `helper: fn(group: Group)`; do not store or capture it.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E1110</code>: <code>tests/ui/taskgroup_parameter_aggregate.stderr</code>.</p>
 <pre class="diag">Error [jet.TaskOutsideGroup]: `Group` cannot be stored inside another value
   --&gt; tests/ui/taskgroup_parameter_aggregate.jet:2:5
     |
-  2 |     groups :: [group]
+  2 |     groups: [group]
     |     ^^^^^^
  Why: A task group is call-stack-only spawn authority; aliases and aggregates could outlive its owner
  Fix: Pass `group: Group` directly to a helper function or method and use it there

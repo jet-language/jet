@@ -1,12 +1,12 @@
 
 use {
-    encoding :: core.encoding
-    jsonl :: core.encoding.jsonl
-    files :: core.files
+    encoding: core.encoding
+    jsonl: core.encoding.jsonl
+    files: core.files
 }
 
-fn run() {
-    input :: files.open("{work}/jsonl/input.data") ?? panic("open")
+run: fn() {
+    input: files.open("{work}/jsonl/input.data") ?? panic("open")
     reader := jsonl.reader(^input) ?? panic("reader")
     if &reader.next() == {
         .Val(v) -> print(v.text() ?? "bad")

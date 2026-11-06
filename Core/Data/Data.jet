@@ -1,4 +1,4 @@
-package {
+package: {
     name: "core.data"
     version: "0.0.1"
     edition: "2026"
@@ -9,37 +9,37 @@ package {
     }
 }
 use {
-    core :: core
+    core: core
 
-    core_files :: core.files
+    core_files: core.files
     core.files.[FileReader]
-    math :: core.math
-    encoding :: core.encoding
+    math: core.math
+    encoding: core.encoding
     core.encoding.[EncodingError, EncodingLimits]
-    json_codec :: core.encoding.json
-    csv_codec :: core.encoding.csv
+    json_codec: core.encoding.json
+    csv_codec: core.encoding.csv
     core.encoding.csv.[CSVReader]
-    encoding_stream :: __core_encoding_stream
-    parquet :: __core_data_parquet
+    encoding_stream: __core_encoding_stream
+    parquet: __core_data_parquet
     core.crypto.[sha256]
-    sys :: core.sys
+    sys: core.sys
     core.db.[SQL, DBValue]
-    sql_kernel :: core.db.sql
-    time :: core.time
+    sql_kernel: core.db.sql
+    time: core.time
     core.time.[DateTime]
 }
-module arrow
+arrow: module
 
-module loader
+loader: module
 
-module stream
+stream: module
 
-module plot
+plot: module
 
-module sketch
+sketch: module
 
 #[Comparable, Equatable]
-enum DataFormat {
+DataFormat: enum {
     CSV
     JSON
     JSONL
@@ -49,7 +49,7 @@ enum DataFormat {
 
 
 #Equatable
-enum DataErrorKind {
+DataErrorKind: enum {
     Decode
     Limit
     IO
@@ -66,14 +66,14 @@ enum DataErrorKind {
     StaleRevision
     InvalidValue
     impl Display {
-        fn display(self) -> String { data_error_kind_text(self) }
+        display: fn(self) -> String { data_error_kind_text(self) }
     }
     impl Debug {
-        fn debug(^self) -> String { data_error_kind_text(self) }
+        debug: fn(^self) -> String { data_error_kind_text(self) }
     }
 }
 
-fn data_error_kind_text(kind: DataErrorKind) -> String Never! {
+data_error_kind_text: fn(kind: DataErrorKind) -> String Never! {
     if kind == {
         .Decode -> "Decode"
         .Limit -> "Limit"
@@ -94,7 +94,7 @@ fn data_error_kind_text(kind: DataErrorKind) -> String Never! {
 }
 
 #[Equatable, Error]
-struct DataError {
+DataError: struct {
     kind: DataErrorKind
     operation: String
     row: Int?
@@ -105,14 +105,14 @@ struct DataError {
 }
 
 impl DataError.Display {
-    fn display(self) -> String { data_error_text(self) }
+    display: fn(self) -> String { data_error_text(self) }
 }
 impl DataError.Debug {
-    fn debug(^self) -> String { data_error_text(self) }
+    debug: fn(^self) -> String { data_error_text(self) }
 }
 
 impl DataError {
-    fn new(kind: DataErrorKind, message: String, path: String) -> DataError Never! {
+    new: fn(kind: DataErrorKind, message: String, path: String) -> DataError Never! {
         return DataError{
             kind: kind,
             operation: path.copy(),
@@ -124,7 +124,7 @@ impl DataError {
         }
     }
 }
-fn data_error(kind: DataErrorKind, message: String, operation: String) -> DataError Never! {
+data_error: fn(kind: DataErrorKind, message: String, operation: String) -> DataError Never! {
     DataError{
         kind: kind,
         operation: operation,
@@ -136,7 +136,7 @@ fn data_error(kind: DataErrorKind, message: String, operation: String) -> DataEr
     }
 }
 
-fn data_error_text(error: DataError) -> String Never! {
+data_error_text: fn(error: DataError) -> String Never! {
     text := "{data_error_kind_text(error.kind)} {error.operation}"
     if error.row == .Val(row) -> text = "{text}, row {row}"
     if error.column == .Val(column) -> text = "{text}, column {column}"
@@ -144,7 +144,7 @@ fn data_error_text(error: DataError) -> String Never! {
     "{text}: {error.reason}"
 }
 
-fn data_error_at(kind: DataErrorKind, message: String, operation: String, index: Int) -> DataError Never! {
+data_error_at: fn(kind: DataErrorKind, message: String, operation: String, index: Int) -> DataError Never! {
     DataError{
         kind: kind,
         operation: operation,
@@ -156,13 +156,13 @@ fn data_error_at(kind: DataErrorKind, message: String, operation: String, index:
     }
 }
 
-fn nonfinite(value: Float) -> Bool Never! {
+nonfinite: fn(value: Float) -> Bool Never! {
     if math.is_finite(value) -> return false
     true
 }
 
 
-struct DataLineOptions {
+DataLineOptions: struct {
     title: String
     x_label: String
     y_label: String
@@ -175,7 +175,7 @@ struct DataLineOptions {
 
 
 #Comparable
-enum DataFreshness {
+DataFreshness: enum {
     Pending
     Fresh
     Stale
@@ -184,7 +184,7 @@ enum DataFreshness {
     Cancelled
 }
 #[Comparable, Equatable]
-enum DataInvalidationCause {
+DataInvalidationCause: enum {
     NoCause
     Loader
     Input
@@ -197,7 +197,7 @@ enum DataInvalidationCause {
 
 
 #Equatable
-struct DataStatus {
+DataStatus: struct {
     step: String
     path: String
     clone_value: String
@@ -209,7 +209,7 @@ struct DataStatus {
 
 
 #Equatable
-struct DataLimits {
+DataLimits: struct {
     encoding: EncodingLimits
     max_groups: Int
     max_sort_rows: Int
@@ -219,19 +219,19 @@ struct DataLimits {
 
 
 
-struct DataAuthority {
+DataAuthority: struct {
     scope: String
     revision: String
 }
 
-struct DataSourceIdentity {
+DataSourceIdentity: struct {
     kind: DataLoaderKind
     locator: String
     member: String
     parameters: [String]
 }
 
-struct DataSnapshotIdentity {
+DataSnapshotIdentity: struct {
     id: String
     source: String
     content: String
@@ -239,27 +239,27 @@ struct DataSnapshotIdentity {
     format: DataFormat
 }
 
-struct DataProvenance {
+DataProvenance: struct {
     source: DataSourceIdentity
     format: DataFormat
     authority: DataAuthority
 }
 
-struct DataColumn {
+DataColumn: struct {
     id: String
     name: String
     type_name: String
     nullable: Bool
 }
 
-struct DataSchema {
+DataSchema: struct {
     identity: String
     format: DataFormat
     columns: [DataColumn]
     projection: String?
 }
 
-struct DataSnapshot<T> {
+DataSnapshot: struct<T> {
     value: T
     identity: DataSnapshotIdentity
     provenance: DataProvenance
@@ -268,7 +268,7 @@ struct DataSnapshot<T> {
     content: [U8]
 }
 
-struct DataLoader<T> {
+DataLoader: struct<T> {
     source: DataSourceIdentity
     format: DataFormat
     authority: DataAuthority
@@ -281,7 +281,7 @@ struct DataLoader<T> {
 }
 
 #Comparable
-struct DataLoaderStatus {
+DataLoaderStatus: struct {
     identity: String
     freshness: DataFreshness
     invalidated_by: DataInvalidationCause
@@ -293,7 +293,7 @@ struct DataLoaderStatus {
 }
 
 #Equatable
-struct DataWatchStatus {
+DataWatchStatus: struct {
     mode: String
     revision: Int
     retained_rows: Int
@@ -307,20 +307,20 @@ struct DataWatchStatus {
     refreshing: Bool
     cancelled: Bool
     impl Display {
-        fn display(self) -> String { data_watch_status_text(self) }
+        display: fn(self) -> String { data_watch_status_text(self) }
     }
     impl Debug {
-        fn debug(^self) -> String { data_watch_status_text(self) }
+        debug: fn(^self) -> String { data_watch_status_text(self) }
     }
 }
 
-fn data_watch_status_text(status: DataWatchStatus) -> String Never! {
+data_watch_status_text: fn(status: DataWatchStatus) -> String Never! {
     "DataWatchStatus{{mode: {status.mode}, revision: {status.revision}, retained_rows: {status.retained_rows}, recomputations: {status.recomputations}, active: {status.active}, generation: {status.generation}, dirty: {status.dirty}, error: {status.error}, freshness_ms: {status.freshness_ms}, invalidation_cause: {status.invalidation_cause}, refreshing: {status.refreshing}, cancelled: {status.cancelled}}}"
 }
 
 // A stream is a one-shot cursor (core-library.md `core.data.stream`): the
 // owned `items` come first, then the rows of the optional pull source.
-struct DataStream<T> {
+DataStream: struct<T> {
     items: [T]
     index: Int
     cancelled: Bool
@@ -330,7 +330,7 @@ struct DataStream<T> {
 // The pull side of a file-backed stream (Rust `DataStream` with its inner
 // reader, `terminal` and `eof`). `pull` reads and decodes one row; a failure
 // stays latched in `terminal`, and `ahead` keeps rows that `len` read early.
-struct __StreamSource<T> {
+__StreamSource: struct<T> {
     pull: fn() -> T? DataError!
     max_output_rows: Int
     ahead: [T]
@@ -341,7 +341,7 @@ struct __StreamSource<T> {
 
 // The CSV record cursor behind `csv_reader<T>`; the first record is the
 // header and is read on the first pull.
-struct __CSVRowSource {
+__CSVRowSource: struct {
     records: CSVReader
     header: [String]
     started: Bool
@@ -350,14 +350,14 @@ struct __CSVRowSource {
 
 // The JSON event cursor behind `json_reader<T>`; the opening `[` is read on
 // the first pull and the closing `]` ends the stream.
-struct __JSONRowSource {
+__JSONRowSource: struct {
     parser: encoding_stream.JSONPull
     array_started: Bool
     array_done: Bool
     row: Int
 }
 
-struct DataPivotCell {
+DataPivotCell: struct {
     row_key: String
     column_key: String
     count: Int
@@ -365,7 +365,7 @@ struct DataPivotCell {
     mean: Float
 }
 #Equatable
-struct DataSummary {
+DataSummary: struct {
     count: Int
     sum: Float
     mean: Float
@@ -376,17 +376,17 @@ struct DataSummary {
     stddev: Float
 }
 
-struct DataJoin<L, R> {
+DataJoin: struct<L, R> {
     left: L
     right: R
 }
 
-struct JetDataPlot<T> {
+JetDataPlot: struct<T> {
     rows: [T]
     plan: JetDataPlotPlan
 }
 
-struct Group<K, V> {
+Group: struct<K, V> {
     key: K
     value: V
 }
@@ -396,46 +396,46 @@ struct Group<K, V> {
 // Row-list queries that only filter and sort may be collected again; every
 // other computation (map, extrema, joins, grouped reducers) is one-shot and
 // derived filter/sort queries share that one-shot state.
-struct __QueryCell<T> {
+__QueryCell: struct<T> {
     run: fn() -> [T] DataError!
 }
 
-struct __QueryState {
+__QueryState: struct {
     consumed: Bool
 }
 
-struct Query<T> {
+Query: struct<T> {
     __steps: [String]
     __one_shot: Bool
     __state: Shared<__QueryState>
     __cell: Shared<__QueryCell<T>>
 }
 
-struct __QueryKeyCell<T, K> {
+__QueryKeyCell: struct<T, K> {
     key: fn(T) -> K DataError!
 }
 
 // `query.group_by(key)`: the grouped carrier its count/sum/mean reducers read.
-struct DataGroupedQuery<T, K> {
+DataGroupedQuery: struct<T, K> {
     __query: Query<T>
     __key: Shared<__QueryKeyCell<T, K>>
 }
 
-struct DataTracked<T, K> {
+DataTracked: struct<T, K> {
     snapshot: DataSnapshot<[T]>
 }
 
-struct DataWatch<T> {
+DataWatch: struct<T> {
     query: Query<T>
     status: DataWatchStatus
 }
 
 #Comparable
-enum JetDataPlotMark {
+JetDataPlotMark: enum {
     Line
     Bar
     Point
-    fn as_str(self) -> String Never! {
+    as_str: fn(self) -> String Never! {
         if self == {
             .Line -> "line"
             .Bar -> "bar"
@@ -445,14 +445,14 @@ enum JetDataPlotMark {
 }
 
 #Comparable
-enum JetDataPlotChannel {
+JetDataPlotChannel: enum {
     X
     Y
     Color
     Size
     Text
     Detail
-    fn as_str(self) -> String Never! {
+    as_str: fn(self) -> String Never! {
         if self == {
             .X -> "x"
             .Y -> "y"
@@ -464,7 +464,7 @@ enum JetDataPlotChannel {
     }
 }
 
-enum JetDataPlotAggregate {
+JetDataPlotAggregate: enum {
     Sum
     Mean
     Count
@@ -473,14 +473,14 @@ enum JetDataPlotAggregate {
 }
 
 #Comparable
-enum JetDataPlotFilterOp {
+JetDataPlotFilterOp: enum {
     Equal
     NotEqual
     Less
     LessEqual
     Greater
     GreaterEqual
-    fn as_str(self) -> String Never! {
+    as_str: fn(self) -> String Never! {
         if self == {
             .Equal -> "eq"
             .NotEqual -> "ne"
@@ -492,25 +492,25 @@ enum JetDataPlotFilterOp {
     }
 }
 
-enum JetDataPlotValue {
+JetDataPlotValue: enum {
     Number
     Text
     Bool
 }
 
-enum JetDataPlotTransform {
+JetDataPlotTransform: enum {
     Identity
     Filter
     Aggregate
 }
 
 #Comparable
-enum JetDataPlotScaleKind {
+JetDataPlotScaleKind: enum {
     Linear
     Log
     Band
     Point
-    fn as_str(self) -> String Never! {
+    as_str: fn(self) -> String Never! {
         if self == {
             .Linear -> "linear"
             .Log -> "log"
@@ -518,21 +518,21 @@ enum JetDataPlotScaleKind {
             .Point -> "point"
         }
     }
-    fn needs_numeric(self) -> Bool Never! { self == .Linear || self == .Log }
+    needs_numeric: fn(self) -> Bool Never! { self == .Linear || self == .Log }
 }
 
-enum JetDataPlotDomain {
+JetDataPlotDomain: enum {
     Auto
     Explicit
 }
 
 #Comparable
-enum JetDataPlotLegendPosition {
+JetDataPlotLegendPosition: enum {
     Top
     Right
     Bottom
     Left
-    fn as_str(self) -> String Never! {
+    as_str: fn(self) -> String Never! {
         if self == {
             .Top -> "top"
             .Right -> "right"
@@ -543,10 +543,10 @@ enum JetDataPlotLegendPosition {
 }
 
 #Comparable
-enum JetDataPlotFacetKind {
+JetDataPlotFacetKind: enum {
     Row
     Column
-    fn as_str(self) -> String Never! {
+    as_str: fn(self) -> String Never! {
         if self == {
             .Row -> "row"
             .Column -> "column"
@@ -555,13 +555,13 @@ enum JetDataPlotFacetKind {
 }
 
 #Comparable
-enum JetDataPlotInteraction {
+JetDataPlotInteraction: enum {
     Hover
     Select
     Zoom
     Pan
     Brush
-    fn as_str(self) -> String Never! {
+    as_str: fn(self) -> String Never! {
         if self == {
             .Hover -> "hover"
             .Select -> "select"
@@ -573,12 +573,12 @@ enum JetDataPlotInteraction {
 }
 
 #Comparable
-enum JetDataPlotBackend {
+JetDataPlotBackend: enum {
     Terminal
     Browser
     Native
     Export
-    fn as_str(self) -> String Never! {
+    as_str: fn(self) -> String Never! {
         if self == {
             .Terminal -> "terminal"
             .Browser -> "browser"
@@ -589,11 +589,11 @@ enum JetDataPlotBackend {
 }
 
 #Comparable
-enum JetDataPlotSupport {
+JetDataPlotSupport: enum {
     Supported
     Degraded
     Unsupported
-    fn as_str(self) -> String Never! {
+    as_str: fn(self) -> String Never! {
         if self == {
             .Supported -> "supported"
             .Degraded -> "degraded"
@@ -602,107 +602,107 @@ enum JetDataPlotSupport {
     }
 }
 
-enum JetDataPlotErrorKind {
+JetDataPlotErrorKind: enum {
     Schema
     Encoding
     Render
 }
 
-enum JetDataPlotRenderFormat {
+JetDataPlotRenderFormat: enum {
     SVG
     Text
     JSON
 }
 
-struct JetDataPlotField {
+JetDataPlotField: struct {
     name: String
     kind: JetDataPlotValue
 }
 
-struct JetDataPlotSchema {
+JetDataPlotSchema: struct {
     fields: [JetDataPlotField]
 }
 
-struct JetDataPlotSourceFacts {
+JetDataPlotSourceFacts: struct {
     rows: Int
     columns: Int
 }
 
-struct JetDataPlotEncoding {
+JetDataPlotEncoding: struct {
     x: String
     y: String
     mark: JetDataPlotMark
 }
 
-struct JetDataPlotScale {
+JetDataPlotScale: struct {
     kind: JetDataPlotScaleKind
     field: String
 }
 
-struct JetDataPlotAxis {
+JetDataPlotAxis: struct {
     field: String
     title: String
 }
 
-struct JetDataPlotLegend {
+JetDataPlotLegend: struct {
     position: JetDataPlotLegendPosition
 }
 
-struct JetDataPlotFacet {
+JetDataPlotFacet: struct {
     kind: JetDataPlotFacetKind
     field: String
 }
 
-struct JetDataPlotLayer {
+JetDataPlotLayer: struct {
     mark: JetDataPlotMark
     encoding: JetDataPlotEncoding
 }
 
-struct JetDataPlotAccessibility {
+JetDataPlotAccessibility: struct {
     title: String
     summary: String
 }
 
-struct JetDataPlotLayout {
+JetDataPlotLayout: struct {
     width: Int
     height: Int
 }
 
-struct JetDataPlotCapability {
+JetDataPlotCapability: struct {
     backend: JetDataPlotBackend
     support: JetDataPlotSupport
 }
 
 #Error
-struct JetDataPlotError {
+JetDataPlotError: struct {
     kind: JetDataPlotErrorKind
     message: String
 }
 
-struct JetDataPlotColumn {
+JetDataPlotColumn: struct {
     name: String
     values: [String]
 }
 
-struct JetDataPlotSelectedRow {
+JetDataPlotSelectedRow: struct {
     index: Int
 }
 
-struct JetDataPlotInspection {
+JetDataPlotInspection: struct {
     text: String
 }
 
-struct JetDataPlotRender {
+JetDataPlotRender: struct {
     format: JetDataPlotRenderFormat
     body: String
 }
 
-struct JetDataPlotProjection {
+JetDataPlotProjection: struct {
     start: Int
     end: Int
 }
 
-struct JetDataPlotPlan {
+JetDataPlotPlan: struct {
     mark: JetDataPlotMark
     labels: [String]
     values: [Float]
@@ -713,7 +713,7 @@ struct JetDataPlotPlan {
 
 // Typed data declarations and provider-backed boundaries.
 impl DataLimits {
-    fn safe() -> DataLimits Never! {
+    safe: fn() -> DataLimits Never! {
         DataLimits{
             encoding: encoding.EncodingLimits.safe(),
             max_groups: 100000,
@@ -724,15 +724,15 @@ impl DataLimits {
     }
 }
 
-fn track<T, K>(rows: [T], _key: fn(T) -> K) -> DataTracked<T, K> DataError! {
+track: fn<T, K>(rows: [T], _key: fn(T) -> K) -> DataTracked<T, K> DataError! {
     Ok(DataTracked<T, K>{snapshot: snapshot_from_rows<T>(rows)})
 }
 
-fn __query_make<T>(steps: [String], one_shot: Bool, run: ^fn() -> [T] DataError!) -> Query<T> Never! {
+__query_make: fn<T>(steps: [String], one_shot: Bool, run: ^fn() -> [T] DataError!) -> Query<T> Never! {
     Query<T>{__steps: steps, __one_shot: one_shot, __state: shared __QueryState{consumed: false}, __cell: shared __QueryCell<T>{run: ^run}}
 }
 
-fn __query_steps(steps: [String], step: String) -> [String] Never! {
+__query_steps: fn(steps: [String], step: String) -> [String] Never! {
     out := steps.copy()
     &out.push(step)
     out
@@ -740,23 +740,23 @@ fn __query_steps(steps: [String], step: String) -> [String] Never! {
 
 // The rows a query produces, without the output bound of `collect`; a
 // one-shot computation runs at most once.
-fn __query_rows<T>(query: Query<T>) -> [T] DataError! {
+__query_rows: fn<T>(query: Query<T>) -> [T] DataError! {
     if query.__one_shot {
         state := query.__state.guard_edit()
         if state.value.consumed -> return Err(data_error(DataErrorKind.State, "query has already been collected", "query.collect"))
         state.value.consumed = true
     }
-    cell :: query.__cell.guard_read()
+    cell: query.__cell.guard_read()
     cell.value.run()
 }
 
 // `data.query(rows)`: a reusable scan of an in-memory row list.
-fn query<T>(rows: [T]) -> Query<T> Never! {
+query: fn<T>(rows: [T]) -> Query<T> Never! {
     __query_make<T>([String]{"scan"}, false, () -> Ok(rows.copy()))
 }
 
 // `data.query(stream)`: a one-shot read of the stream's remaining rows.
-fn __query_stream<T>(source: DataStream<T>) -> Query<T> Never! {
+__query_stream: fn<T>(source: DataStream<T>) -> Query<T> Never! {
     __query_make<T>([String]{"stream"}, true, () -> {
         reader := source.copy()
         if reader.cancelled -> return Err(data_error(DataErrorKind.State, "stream was cancelled", "data.stream"))
@@ -765,7 +765,7 @@ fn __query_stream<T>(source: DataStream<T>) -> Query<T> Never! {
         loop {
             if __stream_pull<T>(&reader) == {
                 .Ok(item) -> {
-                    row :: item ?? return Ok(out)
+                    row: item ?? return Ok(out)
                     if out.len() >= limits.max_output_rows -> return Err(data_error(DataErrorKind.Limit, "max_output_rows {limits.max_output_rows} exceeded", "collect"))
                     &out.push(row)
                 }
@@ -778,11 +778,11 @@ fn __query_stream<T>(source: DataStream<T>) -> Query<T> Never! {
 
 // The next row of a stream: its owned items first, then its pull source.
 // End of input is a stable `None`; a source failure stays latched.
-fn __stream_pull<T>(stream: &DataStream<T>) -> T? DataError! {
+__stream_pull: fn<T>(stream: &DataStream<T>) -> T? DataError! {
     if stream.cancelled -> return Err(data_error(DataErrorKind.State, "stream was cancelled", "data.stream"))
     if stream.index < 0 -> stream.index = 0
     if stream.index < stream.items.len() {
-        value :: stream.items[stream.index].copy()
+        value: stream.items[stream.index].copy()
         stream.index = stream.index + 1
         return Ok(Val(value))
     }
@@ -790,7 +790,7 @@ fn __stream_pull<T>(stream: &DataStream<T>) -> T? DataError! {
         .Val(source) -> {
             cell := source.guard_edit()
             if cell.value.ahead_index < cell.value.ahead.len() {
-                value :: cell.value.ahead[cell.value.ahead_index].copy()
+                value: cell.value.ahead[cell.value.ahead_index].copy()
                 cell.value.ahead_index = cell.value.ahead_index + 1
                 return Ok(Val(value))
             }
@@ -801,7 +801,7 @@ fn __stream_pull<T>(stream: &DataStream<T>) -> T? DataError! {
             if cell.value.done -> return Ok(None)
             if cell.value.pull() == {
                 .Ok(item) -> {
-                    row :: item ?? {
+                    row: item ?? {
                         cell.value.done = true
                         return Ok(None)
                     }
@@ -820,17 +820,17 @@ fn __stream_pull<T>(stream: &DataStream<T>) -> T? DataError! {
 // `stream.collect`: the remaining rows, bounded by the source's
 // `max_output_rows`; crossing fails before the crossing row is kept, and
 // the failure stays latched (Rust `jet_data_stream_collect`).
-fn __stream_collect<T>(stream: &DataStream<T>) -> [T] DataError! {
-    limit :: if stream.__source == {
+__stream_collect: fn<T>(stream: &DataStream<T>) -> [T] DataError! {
+    limit: if stream.__source == {
         .Val(source) -> source.guard_read().value.max_output_rows
         else -> -1
     }
     out := [T]{}
     loop {
-        item :: __stream_pull<T>(&stream)
-        row :: item ?? return Ok(out)
+        item: __stream_pull<T>(&stream)
+        row: item ?? return Ok(out)
         if limit >= 0 && out.len() >= limit {
-            failure :: data_error(DataErrorKind.Limit, "max_output_rows {limit} exceeded", "collect")
+            failure: data_error(DataErrorKind.Limit, "max_output_rows {limit} exceeded", "collect")
             if stream.__source == {
                 .Val(source) -> {
                     cell := source.guard_edit()
@@ -847,9 +847,9 @@ fn __stream_collect<T>(stream: &DataStream<T>) -> [T] DataError! {
 // `stream.len`: the rows still to come. A pull source reads its remaining
 // rows ahead into `ahead` so that no row changes owner; a failure while
 // reading ahead is latched for the pull after those rows.
-fn __stream_remaining<T>(stream: DataStream<T>) -> Int Never! {
+__stream_remaining: fn<T>(stream: DataStream<T>) -> Int Never! {
     if stream.cancelled -> return 0
-    start :: if stream.index < 0 -> 0 else -> stream.index
+    start: if stream.index < 0 -> 0 else -> stream.index
     remaining := stream.items.len() - start
     if remaining < 0 -> remaining = 0
     if stream.__source == {
@@ -896,70 +896,70 @@ fn __stream_remaining<T>(stream: DataStream<T>) -> Int Never! {
 // the end of the input are emitted in the same order.
 
 #Equatable
-enum LateEventDisposition {
+LateEventDisposition: enum {
     Drop
 }
 
-struct StreamEvent<T> {
+StreamEvent: struct<T> {
     value: T
     event_time: DateTime
 }
 
-struct StreamEventTime<T> {
+StreamEventTime: struct<T> {
     events: Stream<StreamEvent<T>>
 }
 
-struct KeyedStream<K, T> {
+KeyedStream: struct<K, T> {
     events: Stream<__KeyedEvent<K, T>>
 }
 
-struct Window<K, T> {
+Window: struct<K, T> {
     key: K
     start: DateTime
     end: DateTime
     events: [StreamEvent<T>]
 }
 
-struct __KeyedEvent<K, T> {
+__KeyedEvent: struct<K, T> {
     key: K
     event: StreamEvent<T>
 }
 
-struct __PendingWindow<T> {
+__PendingWindow: struct<T> {
     key_index: Int
     start_ns: Int
     events: [StreamEvent<T>]
 }
 
 // `stream.with_event_time(f)` with an `Int` result: Unix seconds.
-fn __stream_with_event_time<T>(^stream: Stream<T>, event_time: ^fn(T) -> Int Never!) -> StreamEventTime<T> Never! {
+__stream_with_event_time: fn<T>(^stream: Stream<T>, event_time: ^fn(T) -> Int Never!) -> StreamEventTime<T> Never! {
     StreamEventTime<T>{events: __stream_stamp_seconds<T>(^stream, ^event_time)}
 }
 
 // `stream.with_event_time(f)` with a `DateTime` result.
-fn __stream_with_event_datetime<T>(^stream: Stream<T>, event_time: ^fn(T) -> DateTime Never!) -> StreamEventTime<T> Never! {
+__stream_with_event_datetime: fn<T>(^stream: Stream<T>, event_time: ^fn(T) -> DateTime Never!) -> StreamEventTime<T> Never! {
     StreamEventTime<T>{events: __stream_stamp_datetime<T>(^stream, ^event_time)}
 }
 
-fn __stream_stamp_seconds<T>(^stream: Stream<T>, event_time: ^fn(T) -> Int Never!) -> Stream<StreamEvent<T>> {
+__stream_stamp_seconds: fn<T>(^stream: Stream<T>, event_time: ^fn(T) -> Int Never!) -> Stream<StreamEvent<T>> {
     loop value in stream {
-        at :: time.from_unix_seconds(event_time(value))
+        at: time.from_unix_seconds(event_time(value))
         yield StreamEvent<T>{value: value, event_time: at}
     }
 }
 
-fn __stream_stamp_datetime<T>(^stream: Stream<T>, event_time: ^fn(T) -> DateTime Never!) -> Stream<StreamEvent<T>> {
+__stream_stamp_datetime: fn<T>(^stream: Stream<T>, event_time: ^fn(T) -> DateTime Never!) -> Stream<StreamEvent<T>> {
     loop value in stream {
-        at :: event_time(value)
+        at: event_time(value)
         yield StreamEvent<T>{value: value, event_time: at}
     }
 }
 
-fn __stream_key_by<K, T>(^source: StreamEventTime<T>, key: ^fn(T) -> K Never!) -> KeyedStream<K, T> Never! {
+__stream_key_by: fn<K, T>(^source: StreamEventTime<T>, key: ^fn(T) -> K Never!) -> KeyedStream<K, T> Never! {
     KeyedStream<K, T>{events: __stream_keyed<K, T>(^source.events, ^key)}
 }
 
-fn __stream_keyed<K, T>(^stream: Stream<StreamEvent<T>>, key: ^fn(T) -> K Never!) -> Stream<__KeyedEvent<K, T>> {
+__stream_keyed: fn<K, T>(^stream: Stream<StreamEvent<T>>, key: ^fn(T) -> K Never!) -> Stream<__KeyedEvent<K, T>> {
     loop event in stream {
         yield __KeyedEvent<K, T>{key: key(event.value), event: event}
     }
@@ -968,9 +968,9 @@ fn __stream_keyed<K, T>(^stream: Stream<StreamEvent<T>>, key: ^fn(T) -> K Never!
 // A `Stream<T>` function is a generator that yields only from its own body,
 // so `.window()` is this generator itself, with the generator's default
 // failure carrier.
-fn __stream_window<K: Equatable, T>(^source: KeyedStream<K, T>, width: time.Duration, watermark: time.Duration, late: LateEventDisposition) -> Stream<Window<K, T>> {
-    width_ns :: width.ns
-    lateness_ns :: watermark.ns
+__stream_window: fn<K: Equatable, T>(^source: KeyedStream<K, T>, width: time.Duration, watermark: time.Duration, late: LateEventDisposition) -> Stream<Window<K, T>> {
+    width_ns: width.ns
+    lateness_ns: watermark.ns
     if width_ns <= 0 -> panic("stream window duration must be positive, got {width_ns}ns")
     if lateness_ns < 0 -> panic("stream allowed lateness must be nonnegative, got {lateness_ns}ns")
     keys := [K]{}
@@ -979,10 +979,10 @@ fn __stream_window<K: Equatable, T>(^source: KeyedStream<K, T>, width: time.Dura
     has_mark := false
     stream := ^source.events
     loop keyed in stream {
-        event_ns :: __stream_event_ns(keyed.event.event_time)
+        event_ns: __stream_event_ns(keyed.event.event_time)
         // `.Drop` is the one late-event disposition: a late event joins no window.
-        was_late :: has_mark && event_ns < mark && late == LateEventDisposition.Drop
-        candidate :: event_ns - lateness_ns
+        was_late: has_mark && event_ns < mark && late == LateEventDisposition.Drop
+        candidate: event_ns - lateness_ns
         if !has_mark || candidate > mark {
             mark = candidate
             has_mark = true
@@ -996,7 +996,7 @@ fn __stream_window<K: Equatable, T>(^source: KeyedStream<K, T>, width: time.Dura
                 }
             }
             if key_index == keys.len() -> &keys.push(keyed.key)
-            start_ns :: event_ns /% width_ns * width_ns
+            start_ns: event_ns /% width_ns * width_ns
             position := pending.len()
             joined := false
             loop (index, open) in pending {
@@ -1022,11 +1022,11 @@ fn __stream_window<K: Equatable, T>(^source: KeyedStream<K, T>, width: time.Dura
 }
 
 // Event time as Unix nanoseconds; the window arithmetic is exact `Int`.
-fn __stream_event_ns(at: DateTime) -> Int Never! {
+__stream_event_ns: fn(at: DateTime) -> Int Never! {
     at.to_unix_ns() ?? panic("stream event time {at} is outside the Unix nanosecond range")
 }
 
-fn __stream_windows_ready<K, T>(keys: [K], pending: &[__PendingWindow<T>], width_ns: Int, watermark_ns: Int, flush: Bool) -> [Window<K, T>] Never! {
+__stream_windows_ready: fn<K, T>(keys: [K], pending: &[__PendingWindow<T>], width_ns: Int, watermark_ns: Int, flush: Bool) -> [Window<K, T>] Never! {
     ready := [Window<K, T>]{}
     kept := [__PendingWindow<T>]{}
     loop open in pending {
@@ -1042,25 +1042,25 @@ fn __stream_windows_ready<K, T>(keys: [K], pending: &[__PendingWindow<T>], width
 
 // `data.query(tracked)` and `tracked.query()`: a reusable scan of the
 // tracked snapshot rows.
-fn __query_tracked<T, K>(tracked: DataTracked<T, K>) -> Query<T> Never! {
+__query_tracked: fn<T, K>(tracked: DataTracked<T, K>) -> Query<T> Never! {
     __query_make<T>([String]{"track"}, false, () -> Ok(tracked.snapshot.value.copy()))
 }
 
-fn __query_plan<T>(query: Query<T>) -> [String] Never! { query.__steps.copy() }
+__query_plan: fn<T>(query: Query<T>) -> [String] Never! { query.__steps.copy() }
 
-fn __query_collect<T>(query: Query<T>) -> [T] DataError! {
-    rows :: __query_rows<T>(query) ?? return Err(err)
+__query_collect: fn<T>(query: Query<T>) -> [T] DataError! {
+    rows: __query_rows<T>(query) ?? return Err(err)
     limits := DataLimits.safe()
     if rows.len() > limits.max_output_rows -> return Err(data_error(DataErrorKind.Limit, "max_output_rows {limits.max_output_rows} exceeded", "query.collect"))
     Ok(rows)
 }
 
-fn __query_filter<T>(query: Query<T>, predicate: ^fn(T) -> Bool) -> Query<T> Never! {
+__query_filter: fn<T>(query: Query<T>, predicate: ^fn(T) -> Bool) -> Query<T> Never! {
     __query_make<T>(__query_steps(query.__steps, "filter"), false, () -> {
-        rows :: __query_rows<T>(query) ?? return Err(err)
+        rows: __query_rows<T>(query) ?? return Err(err)
         out := [T]{}
         loop row in rows {
-            keep :: predicate(row.copy()) ?? return Err(data_error(DataErrorKind.State, "filter callback failed", "query.filter"))
+            keep: predicate(row.copy()) ?? return Err(data_error(DataErrorKind.State, "filter callback failed", "query.filter"))
             if keep -> &out.push(row.copy())
         }
         Ok(out)
@@ -1068,14 +1068,14 @@ fn __query_filter<T>(query: Query<T>, predicate: ^fn(T) -> Bool) -> Query<T> Nev
 }
 
 // A stable sort by the String key, bounded by `max_sort_rows`.
-fn __query_sort_by<T>(query: Query<T>, key: ^fn(T) -> String) -> Query<T> Never! {
+__query_sort_by: fn<T>(query: Query<T>, key: ^fn(T) -> String) -> Query<T> Never! {
     __query_make<T>(__query_steps(query.__steps, "sort_by"), false, () -> {
-        rows :: __query_rows<T>(query) ?? return Err(err)
+        rows: __query_rows<T>(query) ?? return Err(err)
         limits := DataLimits.safe()
         if rows.len() > limits.max_sort_rows -> return Err(data_error(DataErrorKind.Limit, "max_sort_rows {limits.max_sort_rows} exceeded", "query.sort_by"))
         keys := [String]{}
         loop row in rows {
-            text :: key(row.copy()) ?? return Err(data_error(DataErrorKind.State, "sort key callback failed", "query.sort_by"))
+            text: key(row.copy()) ?? return Err(data_error(DataErrorKind.State, "sort key callback failed", "query.sort_by"))
             &keys.push(text)
         }
         out := [T]{}
@@ -1088,11 +1088,11 @@ fn __query_sort_by<T>(query: Query<T>, key: ^fn(T) -> String) -> Query<T> Never!
 // its String keys and keeps equal keys in row order. An SQL ORDER BY compares
 // two numeric cells as numbers and any other pair as text, breaks ties by row
 // position, and reverses that whole order when descending.
-fn __query_order_before(keys: [String], left: Int, right: Int, sql_order: Bool, descending: Bool) -> Bool Never! {
+__query_order_before: fn(keys: [String], left: Int, right: Int, sql_order: Bool, descending: Bool) -> Bool Never! {
     if !sql_order -> return keys[left] <= keys[right]
     order := 0
-    left_number :: __query_number(keys[left])
-    right_number :: __query_number(keys[right])
+    left_number: __query_number(keys[left])
+    right_number: __query_number(keys[right])
     numeric := false
     if left_number == .Val(a) {
         if right_number == .Val(b) {
@@ -1110,11 +1110,11 @@ fn __query_order_before(keys: [String], left: Int, right: Int, sql_order: Bool, 
     order < 0
 }
 
-fn __query_number(text: String) -> Float? Never! { Val(Float.parse(text) ?? return None) }
+__query_number: fn(text: String) -> Float? Never! { Val(Float.parse(text) ?? return None) }
 
 // A bottom-up merge sort of the key positions.
-fn __query_merge_order(keys: [String], sql_order: Bool, descending: Bool) -> [Int] Never! {
-    count :: keys.len()
+__query_merge_order: fn(keys: [String], sql_order: Bool, descending: Bool) -> [Int] Never! {
+    count: keys.len()
     order := [Int]{}
     loop index in 0..<count -> &order.push(index)
     width := 1
@@ -1147,12 +1147,12 @@ fn __query_merge_order(keys: [String], sql_order: Bool, descending: Bool) -> [In
     order
 }
 
-fn __query_map<T, U>(query: Query<T>, mapper: ^fn(T) -> U) -> Query<U> Never! {
+__query_map: fn<T, U>(query: Query<T>, mapper: ^fn(T) -> U) -> Query<U> Never! {
     __query_make<U>(__query_steps(query.__steps, "map"), true, () -> {
-        rows :: __query_rows<T>(query) ?? return Err(err)
+        rows: __query_rows<T>(query) ?? return Err(err)
         out := [U]{}
         loop row in rows {
-            value :: mapper(row.copy()) ?? return Err(data_error(DataErrorKind.State, "map callback failed", "query.map"))
+            value: mapper(row.copy()) ?? return Err(data_error(DataErrorKind.State, "map callback failed", "query.map"))
             &out.push(value)
         }
         Ok(out)
@@ -1160,18 +1160,18 @@ fn __query_map<T, U>(query: Query<T>, mapper: ^fn(T) -> U) -> Query<U> Never! {
 }
 
 // The first minimum or maximum key in row order; an empty query has none.
-fn __query_extreme<T, V: Comparable>(query: Query<T>, key: ^fn(T) -> V, maximum: Bool) -> Query<V> Never! {
-    step :: if maximum -> "max" else -> "min"
-    operation :: "query.{step}"
+__query_extreme: fn<T, V: Comparable>(query: Query<T>, key: ^fn(T) -> V, maximum: Bool) -> Query<V> Never! {
+    step: if maximum -> "max" else -> "min"
+    operation: "query.{step}"
     __query_make<V>(__query_steps(query.__steps, step), true, () -> {
-        rows :: __query_rows<T>(query) ?? return Err(err)
+        rows: __query_rows<T>(query) ?? return Err(err)
         selected := [V]{}
         loop row in rows {
-            candidate :: key(row.copy()) ?? return Err(data_error(DataErrorKind.State, "extreme key callback failed", operation))
+            candidate: key(row.copy()) ?? return Err(data_error(DataErrorKind.State, "extreme key callback failed", operation))
             if selected.len() == 0 {
                 &selected.push(candidate)
             } else {
-                replace :: if maximum -> candidate > selected[0] else -> candidate < selected[0]
+                replace: if maximum -> candidate > selected[0] else -> candidate < selected[0]
                 if replace -> selected[0] = candidate
             }
         }
@@ -1180,34 +1180,34 @@ fn __query_extreme<T, V: Comparable>(query: Query<T>, key: ^fn(T) -> V, maximum:
     })
 }
 
-fn __query_min<T, V: Comparable>(query: Query<T>, key: ^fn(T) -> V) -> Query<V> Never! { __query_extreme<T, V>(query, ^key, false) }
+__query_min: fn<T, V: Comparable>(query: Query<T>, key: ^fn(T) -> V) -> Query<V> Never! { __query_extreme<T, V>(query, ^key, false) }
 
-fn __query_max<T, V: Comparable>(query: Query<T>, key: ^fn(T) -> V) -> Query<V> Never! { __query_extreme<T, V>(query, ^key, true) }
+__query_max: fn<T, V: Comparable>(query: Query<T>, key: ^fn(T) -> V) -> Query<V> Never! { __query_extreme<T, V>(query, ^key, true) }
 
-fn __query_inner_join<T, U>(left: Query<T>, right: Query<U>, left_key: ^fn(T) -> String, right_key: ^fn(U) -> String) -> Query<DataJoin<T, U>> Never! {
+__query_inner_join: fn<T, U>(left: Query<T>, right: Query<U>, left_key: ^fn(T) -> String, right_key: ^fn(U) -> String) -> Query<DataJoin<T, U>> Never! {
     __query_make<DataJoin<T, U>>(__query_steps(left.__steps, "inner_join"), true, () -> {
-        left_rows :: __query_rows<T>(left) ?? return Err(err)
-        right_rows :: __query_rows<U>(right) ?? return Err(err)
+        left_rows: __query_rows<T>(left) ?? return Err(err)
+        right_rows: __query_rows<U>(right) ?? return Err(err)
         inner_join<T, U>(left_rows, right_rows, left_key, right_key)
     })
 }
 
-fn __query_left_join<T, U>(left: Query<T>, right: Query<U>, left_key: ^fn(T) -> String, right_key: ^fn(U) -> String) -> Query<DataJoin<T, U?>> Never! {
+__query_left_join: fn<T, U>(left: Query<T>, right: Query<U>, left_key: ^fn(T) -> String, right_key: ^fn(U) -> String) -> Query<DataJoin<T, U?>> Never! {
     __query_make<DataJoin<T, U?>>(__query_steps(left.__steps, "left_join"), true, () -> {
-        left_rows :: __query_rows<T>(left) ?? return Err(err)
-        right_rows :: __query_rows<U>(right) ?? return Err(err)
+        left_rows: __query_rows<T>(left) ?? return Err(err)
+        right_rows: __query_rows<U>(right) ?? return Err(err)
         left_join<T, U>(left_rows, right_rows, left_key, right_key)
     })
 }
 
-fn __query_group_by<T, K>(query: Query<T>, key: ^fn(T) -> K) -> DataGroupedQuery<T, K> Never! {
+__query_group_by: fn<T, K>(query: Query<T>, key: ^fn(T) -> K) -> DataGroupedQuery<T, K> Never! {
     DataGroupedQuery<T, K>{__query: query, __key: shared __QueryKeyCell<T, K>{key: (row: T) -> {
-        value :: key(row) ?? return Err(data_error(DataErrorKind.State, "group key callback failed", "query.group_by"))
+        value: key(row) ?? return Err(data_error(DataErrorKind.State, "group key callback failed", "query.group_by"))
         Ok(value)
     }}}
 }
 
-fn __group_steps<T, K>(grouped: DataGroupedQuery<T, K>, step: String) -> [String] Never! {
+__group_steps: fn<T, K>(grouped: DataGroupedQuery<T, K>, step: String) -> [String] Never! {
     __query_steps(__query_steps(grouped.__query.__steps, "group_by"), step)
 }
 
@@ -1216,12 +1216,12 @@ fn __group_steps<T, K>(grouped: DataGroupedQuery<T, K>, step: String) -> [String
 // `order` holds the positions of `keys` sorted by key, so a row's lookup is a
 // binary search: the key's position in `keys`, else -1 - the slot in `order`
 // where a new group's position goes (__group_add).
-fn __group_find<K: Comparable>(keys: [K], order: [Int], key: K) -> Int Never! {
+__group_find: fn<K: Comparable>(keys: [K], order: [Int], key: K) -> Int Never! {
     low := 0
     high := order.len()
     loop low < high {
-        middle :: low + (high - low) /% 2
-        compared :: keys[order[middle]] <=> key
+        middle: low + (high - low) /% 2
+        compared: keys[order[middle]] <=> key
         if compared == Ordering.Equal -> return order[middle]
         if compared == Ordering.Less {
             low = middle + 1
@@ -1232,28 +1232,28 @@ fn __group_find<K: Comparable>(keys: [K], order: [Int], key: K) -> Int Never! {
     -1 - low
 }
 
-fn __group_add<K>(keys: &[K], order: &[Int], found: Int, key: K) Never! {
+__group_add: fn<K>(keys: &[K], order: &[Int], found: Int, key: K) Never! {
     &order.insert(-1 - found, keys.len())
     &keys.push(key)
 }
 
-fn __group_sorted<K: Comparable, V>(groups: [Group<K, V>]) -> [Group<K, V>] Never! {
+__group_sorted: fn<K: Comparable, V>(groups: [Group<K, V>]) -> [Group<K, V>] Never! {
     out := groups
     &out.sort_by((left: Group<K, V>, right: Group<K, V>) -> left.key <=> right.key)
     out
 }
 
-fn __group_count<T, K: Comparable>(grouped: DataGroupedQuery<T, K>) -> Query<Group<K, Int>> Never! {
+__group_count: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>) -> Query<Group<K, Int>> Never! {
     __query_make<Group<K, Int>>(__group_steps<T, K>(grouped, "count"), true, () -> {
-        rows :: __query_rows<T>(grouped.__query) ?? return Err(err)
+        rows: __query_rows<T>(grouped.__query) ?? return Err(err)
         limits := DataLimits.safe()
-        cell :: grouped.__key.guard_read()
+        cell: grouped.__key.guard_read()
         keys := [K]{}
         order := [Int]{}
         counts := [Int]{}
         loop row in rows {
-            group_key :: cell.value.key(row.copy()) ?? return Err(err)
-            found :: __group_find<K>(keys, order, group_key)
+            group_key: cell.value.key(row.copy()) ?? return Err(err)
+            found: __group_find<K>(keys, order, group_key)
             if found >= 0 {
                 counts[found] = counts[found] + 1
             } else {
@@ -1270,20 +1270,20 @@ fn __group_count<T, K: Comparable>(grouped: DataGroupedQuery<T, K>) -> Query<Gro
 
 // Group sums keep the value callback's numeric type; each numeric domain
 // supplies its own addition to the shared reducer.
-fn __group_sum<T, K: Comparable, V>(grouped: DataGroupedQuery<T, K>, value: ^fn(T) -> V, add: ^fn(V, V) -> V) -> Query<Group<K, V>> Never! {
+__group_sum: fn<T, K: Comparable, V>(grouped: DataGroupedQuery<T, K>, value: ^fn(T) -> V, add: ^fn(V, V) -> V) -> Query<Group<K, V>> Never! {
     __query_make<Group<K, V>>(__group_steps<T, K>(grouped, "sum"), true, () -> {
-        rows :: __query_rows<T>(grouped.__query) ?? return Err(err)
+        rows: __query_rows<T>(grouped.__query) ?? return Err(err)
         limits := DataLimits.safe()
-        cell :: grouped.__key.guard_read()
+        cell: grouped.__key.guard_read()
         keys := [K]{}
         order := [Int]{}
         totals := [V]{}
         loop row in rows {
-            group_key :: cell.value.key(row.copy()) ?? return Err(err)
-            group_value :: value(row.copy()) ?? return Err(data_error(DataErrorKind.State, "group value callback failed", "query.group_by.sum"))
-            found :: __group_find<K>(keys, order, group_key)
+            group_key: cell.value.key(row.copy()) ?? return Err(err)
+            group_value: value(row.copy()) ?? return Err(data_error(DataErrorKind.State, "group value callback failed", "query.group_by.sum"))
+            found: __group_find<K>(keys, order, group_key)
             if found >= 0 {
-                total :: add(totals[found].copy(), group_value) ?? return Err(data_error(DataErrorKind.Overflow, "group sum overflowed", "query.group_by.sum"))
+                total: add(totals[found].copy(), group_value) ?? return Err(data_error(DataErrorKind.Overflow, "group sum overflowed", "query.group_by.sum"))
                 totals[found] = total
             } else {
                 if keys.len() >= limits.max_groups -> return Err(data_error(DataErrorKind.Limit, "max_groups {limits.max_groups} exceeded", "query.group_by.sum"))
@@ -1298,32 +1298,32 @@ fn __group_sum<T, K: Comparable, V>(grouped: DataGroupedQuery<T, K>, value: ^fn(
     })
 }
 
-fn __group_sum_int<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^fn(T) -> Int) -> Query<Group<K, Int>> Never! { __group_sum<T, K, Int>(grouped, ^value, (left: Int, right: Int) -> left + right) }
-fn __group_sum_float<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^fn(T) -> Float) -> Query<Group<K, Float>> Never! { __group_sum<T, K, Float>(grouped, ^value, (left: Float, right: Float) -> left + right) }
-fn __group_sum_f32<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^fn(T) -> F32) -> Query<Group<K, F32>> Never! { __group_sum<T, K, F32>(grouped, ^value, (left: F32, right: F32) -> left + right) }
-fn __group_sum_i8<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^fn(T) -> I8) -> Query<Group<K, I8>> Never! { __group_sum<T, K, I8>(grouped, ^value, (left: I8, right: I8) -> left + right) }
-fn __group_sum_i16<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^fn(T) -> I16) -> Query<Group<K, I16>> Never! { __group_sum<T, K, I16>(grouped, ^value, (left: I16, right: I16) -> left + right) }
-fn __group_sum_i32<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^fn(T) -> I32) -> Query<Group<K, I32>> Never! { __group_sum<T, K, I32>(grouped, ^value, (left: I32, right: I32) -> left + right) }
-fn __group_sum_i64<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^fn(T) -> I64) -> Query<Group<K, I64>> Never! { __group_sum<T, K, I64>(grouped, ^value, (left: I64, right: I64) -> left + right) }
-fn __group_sum_u8<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^fn(T) -> U8) -> Query<Group<K, U8>> Never! { __group_sum<T, K, U8>(grouped, ^value, (left: U8, right: U8) -> left + right) }
-fn __group_sum_u16<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^fn(T) -> U16) -> Query<Group<K, U16>> Never! { __group_sum<T, K, U16>(grouped, ^value, (left: U16, right: U16) -> left + right) }
-fn __group_sum_u32<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^fn(T) -> U32) -> Query<Group<K, U32>> Never! { __group_sum<T, K, U32>(grouped, ^value, (left: U32, right: U32) -> left + right) }
-fn __group_sum_u64<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^fn(T) -> U64) -> Query<Group<K, U64>> Never! { __group_sum<T, K, U64>(grouped, ^value, (left: U64, right: U64) -> left + right) }
+__group_sum_int: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^fn(T) -> Int) -> Query<Group<K, Int>> Never! { __group_sum<T, K, Int>(grouped, ^value, (left: Int, right: Int) -> left + right) }
+__group_sum_float: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^fn(T) -> Float) -> Query<Group<K, Float>> Never! { __group_sum<T, K, Float>(grouped, ^value, (left: Float, right: Float) -> left + right) }
+__group_sum_f32: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^fn(T) -> F32) -> Query<Group<K, F32>> Never! { __group_sum<T, K, F32>(grouped, ^value, (left: F32, right: F32) -> left + right) }
+__group_sum_i8: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^fn(T) -> I8) -> Query<Group<K, I8>> Never! { __group_sum<T, K, I8>(grouped, ^value, (left: I8, right: I8) -> left + right) }
+__group_sum_i16: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^fn(T) -> I16) -> Query<Group<K, I16>> Never! { __group_sum<T, K, I16>(grouped, ^value, (left: I16, right: I16) -> left + right) }
+__group_sum_i32: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^fn(T) -> I32) -> Query<Group<K, I32>> Never! { __group_sum<T, K, I32>(grouped, ^value, (left: I32, right: I32) -> left + right) }
+__group_sum_i64: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^fn(T) -> I64) -> Query<Group<K, I64>> Never! { __group_sum<T, K, I64>(grouped, ^value, (left: I64, right: I64) -> left + right) }
+__group_sum_u8: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^fn(T) -> U8) -> Query<Group<K, U8>> Never! { __group_sum<T, K, U8>(grouped, ^value, (left: U8, right: U8) -> left + right) }
+__group_sum_u16: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^fn(T) -> U16) -> Query<Group<K, U16>> Never! { __group_sum<T, K, U16>(grouped, ^value, (left: U16, right: U16) -> left + right) }
+__group_sum_u32: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^fn(T) -> U32) -> Query<Group<K, U32>> Never! { __group_sum<T, K, U32>(grouped, ^value, (left: U32, right: U32) -> left + right) }
+__group_sum_u64: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^fn(T) -> U64) -> Query<Group<K, U64>> Never! { __group_sum<T, K, U64>(grouped, ^value, (left: U64, right: U64) -> left + right) }
 
-fn __group_mean<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^fn(T) -> Float) -> Query<Group<K, Float>> Never! {
+__group_mean: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^fn(T) -> Float) -> Query<Group<K, Float>> Never! {
     __query_make<Group<K, Float>>(__group_steps<T, K>(grouped, "mean"), true, () -> {
-        rows :: __query_rows<T>(grouped.__query) ?? return Err(err)
+        rows: __query_rows<T>(grouped.__query) ?? return Err(err)
         limits := DataLimits.safe()
-        cell :: grouped.__key.guard_read()
+        cell: grouped.__key.guard_read()
         keys := [K]{}
         order := [Int]{}
         totals := [Float]{}
         counts := [Int]{}
         loop row in rows {
-            group_key :: cell.value.key(row.copy()) ?? return Err(err)
-            group_value :: value(row.copy()) ?? return Err(data_error(DataErrorKind.State, "group value callback failed", "query.group_by.mean"))
+            group_key: cell.value.key(row.copy()) ?? return Err(err)
+            group_value: value(row.copy()) ?? return Err(data_error(DataErrorKind.State, "group value callback failed", "query.group_by.mean"))
             if nonfinite(group_value) -> return Err(data_error(DataErrorKind.NonFinite, "group values must be finite", "query.group_by.mean"))
-            found :: __group_find<K>(keys, order, group_key)
+            found: __group_find<K>(keys, order, group_key)
             if found >= 0 {
                 totals[found] = totals[found] + group_value
                 counts[found] = counts[found] + 1
@@ -1344,10 +1344,10 @@ fn __group_mean<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^fn(T)
 // one WHERE value after parsing, and every referenced field must exist in the
 // all-row schema. Only WHERE, ORDER BY and LIMIT select typed rows here; a
 // projection or grouping changes the row shape.
-fn __query_sql<T: Encode>(rows: [T], sql: SQL) -> Query<T> [FieldError]! {
+__query_sql: fn<T: Encode>(rows: [T], sql: SQL) -> Query<T> [FieldError]! {
     trees := [Dyn]{}
     loop row in rows -> &trees.push(row.encode())
-    spec :: __query_sql_spec(sql) ?? return Err(__query_field_error("{err}"))
+    spec: __query_sql_spec(sql) ?? return Err(__query_field_error("{err}"))
     core.db.sql.__validate_query_fields(spec, __query_sql_fields(trees), "analytics query") ?? return Err(__query_field_error("{err}"))
     reshapes := spec.group_by.len() != 0 || spec.projection.len() != 1 || spec.projection[0] != sql_kernel.JetSQLSelectItem.Wildcard
     loop item in spec.projection {
@@ -1361,19 +1361,19 @@ fn __query_sql<T: Encode>(rows: [T], sql: SQL) -> Query<T> [FieldError]! {
 
 // The CSV header door of `csv.query`: every field the SQL names must be a
 // header column.
-fn __query_validate_fields(fields: [String], sql: SQL) [FieldError]! {
-    spec :: sql_kernel.parse_sql_query(sql.text) ?? return Err(__query_field_error("{err}"))
+__query_validate_fields: fn(fields: [String], sql: SQL) [FieldError]! {
+    spec: sql_kernel.parse_sql_query(sql.text) ?? return Err(__query_field_error("{err}"))
     core.db.sql.__validate_query_fields(spec, fields, "analytics query") ?? return Err(__query_field_error("{err}"))
     Ok()
 }
 
-fn __query_field_error(message: String) -> [FieldError] Never! {
+__query_field_error: fn(message: String) -> [FieldError] Never! {
     [FieldError]{FieldError{path: "", reason: message}}
 }
 
 // The checked carrier binds after parsing, so a value cannot become query
 // syntax; the kernel has one scalar WHERE slot.
-fn __query_sql_spec(sql: SQL) -> sql_kernel.JetSQLQuery Err! {
+__query_sql_spec: fn(sql: SQL) -> sql_kernel.JetSQLQuery Err! {
     spec := sql_kernel.parse_sql_query(sql.text) ?? return Err("{err}")
     placeholder := false
     if spec.filter == .Val(filter) -> placeholder = filter.value == "?"
@@ -1383,7 +1383,7 @@ fn __query_sql_spec(sql: SQL) -> sql_kernel.JetSQLQuery Err! {
     }
     if !placeholder || sql.values.len() != 1 -> return Err("analytics query bindings do not match its WHERE value")
     if sql.values[0] == .Blob(_) -> return Err("analytics query WHERE requires a scalar binding")
-    literal :: if sql.values[0] == {
+    literal: if sql.values[0] == {
         .Null -> "null"
         .Int(value) -> "{value}"
         .Float(value) -> core.db.__float_text(value)
@@ -1397,7 +1397,7 @@ fn __query_sql_spec(sql: SQL) -> sql_kernel.JetSQLQuery Err! {
 
 // The all-row schema's field names: every object key of every row, and `$`
 // for a row that is not an object.
-fn __query_sql_fields(trees: [Dyn]) -> [String] Never! {
+__query_sql_fields: fn(trees: [Dyn]) -> [String] Never! {
     names := [String]{}
     loop tree in trees {
         if tree == .Object(_) {
@@ -1411,7 +1411,7 @@ fn __query_sql_fields(trees: [Dyn]) -> [String] Never! {
 
 // A cell's comparison text: text as is, scalars in their display form, null
 // empty, and any other value as compact JSON.
-fn __query_sql_cell(tree: Dyn, field: String) -> String? Never! {
+__query_sql_cell: fn(tree: Dyn, field: String) -> String? Never! {
     if !(tree == .Object(_)) -> return None
     loop entry in encoding_stream.object_entries(tree) {
         if entry.key != field -> next
@@ -1429,11 +1429,11 @@ fn __query_sql_cell(tree: Dyn, field: String) -> String? Never! {
 
 // WHERE keeps rows whose cell compares true, ORDER BY sorts the kept
 // positions, and LIMIT keeps a prefix.
-fn __query_sql_select(trees: [Dyn], spec: sql_kernel.JetSQLQuery) -> [Int] Never! {
+__query_sql_select: fn(trees: [Dyn], spec: sql_kernel.JetSQLQuery) -> [Int] Never! {
     selected := [Int]{}
     loop index in 0..<trees.len() {
         if spec.filter == .Val(filter) {
-            cell :: __query_sql_cell(trees[index], filter.field) ?? next
+            cell: __query_sql_cell(trees[index], filter.field) ?? next
             if !sql_kernel.compare_sql_cell(cell, filter.operator, filter.value) -> next
         }
         &selected.push(index)
@@ -1459,7 +1459,7 @@ fn __query_sql_select(trees: [Dyn], spec: sql_kernel.JetSQLQuery) -> [Int] Never
 // `data.schema(rows)`: sema passes the checked row type's column names and
 // type spellings (a scalar row is one `value` column), so empty rows still
 // describe their columns.
-fn __schema<T>(_rows: [T], names: [String], types: [String]) -> [DataColumn] Never! {
+__schema: fn<T>(_rows: [T], names: [String], types: [String]) -> [DataColumn] Never! {
     columns := [DataColumn]{}
     loop index in 0..<names.len() {
         &columns.push(DataColumn{id: __column_identity(names[index], types[index]), name: names[index].copy(), type_name: types[index].copy(), nullable: types[index].ends_with("?")})
@@ -1469,76 +1469,76 @@ fn __schema<T>(_rows: [T], names: [String], types: [String]) -> [DataColumn] Nev
 
 // A column identity: FNV-1a 64 over the length-delimited `name:type` key,
 // spelled `column-` and 16 lowercase hex digits.
-fn __column_identity(name: String, type_name: String) -> String Never! {
-    key :: "{name.bytes().len()}:{type_name}"
+__column_identity: fn(name: String, type_name: String) -> String Never! {
+    key: "{name.bytes().len()}:{type_name}"
     hash := U64{14695981039346656037}
     loop byte in key.bytes() -> hash = (hash.bit_xor(U64.from_u8(byte))).wrapping_mul(U64{1099511628211})
-    digits :: "0123456789abcdef".bytes()
+    digits: "0123456789abcdef".bytes()
     out := "column-".bytes()
     loop index in 0..<16 {
-        shift :: U64.from_int(60 - index * 4) ?? U64{0}
+        shift: U64.from_int(60 - index * 4) ?? U64{0}
         &out.push(digits[Int.from_u64((hash >> shift).bit_and(U64{15}))])
     }
     String.from_bytes(out) ?? ""
 }
 
 #Codable
-struct __QueryTestSale {
+__QueryTestSale: struct {
     item: String
     cents: Int
 }
 
-fn __query_test_sales() -> [__QueryTestSale] Never! {
+__query_test_sales: fn() -> [__QueryTestSale] Never! {
     [__QueryTestSale]{__QueryTestSale{item: "tools", cents: 125}, __QueryTestSale{item: "core", cents: 40}, __QueryTestSale{item: "apps", cents: 80}, __QueryTestSale{item: "core", cents: 90}}
 }
 
 #Test("deferred queries filter, sort, map and group rows in key order") {
-    rows :: __query_test_sales()
-    big :: __query_filter<__QueryTestSale>(query<__QueryTestSale>(rows), sale -> sale.cents >= 80)
+    rows: __query_test_sales()
+    big: __query_filter<__QueryTestSale>(query<__QueryTestSale>(rows), sale -> sale.cents >= 80)
     assert_eq(__query_plan<__QueryTestSale>(big), [String]{"scan", "filter"})
-    sorted :: __query_collect<__QueryTestSale>(__query_sort_by<__QueryTestSale>(big, sale -> sale.item)) ?? panic("sort_by")
+    sorted: __query_collect<__QueryTestSale>(__query_sort_by<__QueryTestSale>(big, sale -> sale.item)) ?? panic("sort_by")
     assert_eq(sorted.len(), 3)
     assert_eq(sorted[0].item, "apps")
     assert_eq(sorted[1].cents, 90)
     assert_eq(sorted[2].item, "tools")
     assert_eq((__query_collect<__QueryTestSale>(big) ?? panic("reuse")).len(), 3)
-    mapped :: __query_map<__QueryTestSale, Int>(query<__QueryTestSale>(rows), sale -> sale.cents * 2)
+    mapped: __query_map<__QueryTestSale, Int>(query<__QueryTestSale>(rows), sale -> sale.cents * 2)
     assert_eq(__query_collect<Int>(mapped) ?? panic("map"), [Int]{250, 80, 160, 180})
     if __query_collect<Int>(mapped) == .Ok(_) -> panic("a mapped query collects once")
     assert_eq(__query_collect<Int>(__query_min<__QueryTestSale, Int>(query<__QueryTestSale>(rows), sale -> sale.cents)) ?? panic("min"), [Int]{40})
     assert_eq(__query_collect<String>(__query_max<__QueryTestSale, String>(query<__QueryTestSale>(rows), sale -> sale.item)) ?? panic("max"), [String]{"tools"})
     if __query_collect<Int>(__query_min<__QueryTestSale, Int>(query<__QueryTestSale>([__QueryTestSale]{}), sale -> sale.cents)) == .Ok(_) -> panic("an empty query has no minimum")
-    sums :: __query_collect<Group<String, Int>>(__group_sum_int<__QueryTestSale, String>(__query_group_by<__QueryTestSale, String>(query<__QueryTestSale>(rows), sale -> sale.item), sale -> sale.cents)) ?? panic("sum")
+    sums: __query_collect<Group<String, Int>>(__group_sum_int<__QueryTestSale, String>(__query_group_by<__QueryTestSale, String>(query<__QueryTestSale>(rows), sale -> sale.item), sale -> sale.cents)) ?? panic("sum")
     assert_eq(sums.len(), 3)
     assert_eq(sums[0].key, "apps")
     assert_eq(sums[2].key, "tools")
     assert_eq(sums[1].key, "core")
     assert_eq(sums[1].value, 130)
-    counts :: __query_collect<Group<String, Int>>(__group_count<__QueryTestSale, String>(__query_group_by<__QueryTestSale, String>(query<__QueryTestSale>(rows), sale -> sale.item))) ?? panic("count")
+    counts: __query_collect<Group<String, Int>>(__group_count<__QueryTestSale, String>(__query_group_by<__QueryTestSale, String>(query<__QueryTestSale>(rows), sale -> sale.item))) ?? panic("count")
     assert_eq(counts[1].value, 2)
-    means :: __query_collect<Group<String, Float>>(__group_mean<__QueryTestSale, String>(__query_group_by<__QueryTestSale, String>(query<__QueryTestSale>(rows), sale -> sale.item), sale -> Float{sale.cents})) ?? panic("mean")
+    means: __query_collect<Group<String, Float>>(__group_mean<__QueryTestSale, String>(__query_group_by<__QueryTestSale, String>(query<__QueryTestSale>(rows), sale -> sale.item), sale -> Float{sale.cents})) ?? panic("mean")
     assert_eq(means[1].value, 65.0)
-    joined :: __query_collect<DataJoin<__QueryTestSale, __QueryTestSale?>>(__query_left_join<__QueryTestSale, __QueryTestSale>(query<__QueryTestSale>(rows), query<__QueryTestSale>(sorted), sale -> sale.item, sale -> sale.item)) ?? panic("left_join")
+    joined: __query_collect<DataJoin<__QueryTestSale, __QueryTestSale?>>(__query_left_join<__QueryTestSale, __QueryTestSale>(query<__QueryTestSale>(rows), query<__QueryTestSale>(sorted), sale -> sale.item, sale -> sale.item)) ?? panic("left_join")
     assert_eq(joined.len(), 4)
     assert(joined[1].right == None)
 }
 
 #Test("SQL row queries bind after parsing and keep typed rows") {
-    rows :: __query_test_sales()
-    selected :: __query_sql<__QueryTestSale>(rows, SQL{text: "SELECT * FROM sales WHERE cents > ? ORDER BY item", values: [DBValue]{.Int(50)}}) ?? panic("sql")
+    rows: __query_test_sales()
+    selected: __query_sql<__QueryTestSale>(rows, SQL{text: "SELECT * FROM sales WHERE cents > ? ORDER BY item", values: [DBValue]{.Int(50)}}) ?? panic("sql")
     assert_eq(__query_plan<__QueryTestSale>(selected), [String]{"scan", "sql"})
-    got :: __query_collect<__QueryTestSale>(selected) ?? panic("collect")
+    got: __query_collect<__QueryTestSale>(selected) ?? panic("collect")
     assert_eq(got.len(), 3)
     assert_eq(got[0].item, "apps")
     assert_eq(got[1].cents, 90)
-    top :: __query_collect<__QueryTestSale>(__query_sql<__QueryTestSale>(rows, SQL{text: "SELECT * FROM sales ORDER BY cents DESC LIMIT 2", values: [DBValue]{}}) ?? panic("top")) ?? panic("top collect")
+    top: __query_collect<__QueryTestSale>(__query_sql<__QueryTestSale>(rows, SQL{text: "SELECT * FROM sales ORDER BY cents DESC LIMIT 2", values: [DBValue]{}}) ?? panic("top")) ?? panic("top collect")
     assert_eq(top.len(), 2)
     assert_eq(top[0].cents, 125)
     assert_eq(top[1].cents, 90)
-    quoted :: __query_collect<__QueryTestSale>(__query_sql<__QueryTestSale>(rows, SQL{text: "SELECT * FROM sales WHERE item = ?", values: [DBValue]{.Text("it's")}}) ?? panic("quoted")) ?? panic("quoted collect")
+    quoted: __query_collect<__QueryTestSale>(__query_sql<__QueryTestSale>(rows, SQL{text: "SELECT * FROM sales WHERE item = ?", values: [DBValue]{.Text("it's")}}) ?? panic("quoted")) ?? panic("quoted collect")
     assert_eq(quoted.len(), 0)
-    refusals :: [String]{"SELECT * FROM sales WHERE missing = 1", "SELECT item FROM sales", "SELECT * FROM sales WHERE cents > ?"}
-    expected :: [String]{"analytics query references unknown field `missing`", "SQL projection/grouping changes the row shape; use the Dyn query result", "analytics query WHERE binding is missing"}
+    refusals: [String]{"SELECT * FROM sales WHERE missing = 1", "SELECT item FROM sales", "SELECT * FROM sales WHERE cents > ?"}
+    expected: [String]{"analytics query references unknown field `missing`", "SQL projection/grouping changes the row shape; use the Dyn query result", "analytics query WHERE binding is missing"}
     loop index in 0..<refusals.len() {
         if __query_sql<__QueryTestSale>(rows, SQL{text: refusals[index], values: [DBValue]{}}) == {
             .Ok(_) -> panic("SQL query should be refused")
@@ -1552,7 +1552,7 @@ fn __query_test_sales() -> [__QueryTestSale] Never! {
 }
 
 #Test("schema columns keep their order, nullability and column identity") {
-    columns :: __schema<Int>([Int]{}, [String]{"team", "minutes", "value"}, [String]{"String", "Float", "Int?"})
+    columns: __schema<Int>([Int]{}, [String]{"team", "minutes", "value"}, [String]{"String", "Float", "Int?"})
     assert_eq(columns.len(), 3)
     assert_eq(columns[0].id, "column-ed14b1fd5790663e")
     assert_eq(columns[1].id, "column-52b8ce3bb4ec8b96")
@@ -1561,23 +1561,23 @@ fn __query_test_sales() -> [__QueryTestSale] Never! {
     assert(columns[2].nullable)
 }
 
-fn file<T>(path: String, format: String, limits: DataLimits) -> DataLoader<T> DataError! {
+file: fn<T>(path: String, format: String, limits: DataLimits) -> DataLoader<T> DataError! {
     make_loader<T>(DataLoaderKind.File, path, "", [String]{}, format, "local", limits)
 }
 
-fn file_member<T>(path: String, member: String, format: String, limits: DataLimits) -> DataLoader<T> DataError! {
+file_member: fn<T>(path: String, member: String, format: String, limits: DataLimits) -> DataLoader<T> DataError! {
     make_loader<T>(DataLoaderKind.File, path, member, [String]{}, format, "local", limits)
 }
 
-fn url<T>(href: String, format: String, authority: String, limits: DataLimits) -> DataLoader<T> DataError! {
+url: fn<T>(href: String, format: String, authority: String, limits: DataLimits) -> DataLoader<T> DataError! {
     make_loader<T>(DataLoaderKind.URL, href, "", [String]{}, format, authority, limits)
 }
 
-fn database<T>(query: String, parameters: [String], authority: String, limits: DataLimits) -> DataLoader<T> DataError! {
+database: fn<T>(query: String, parameters: [String], authority: String, limits: DataLimits) -> DataLoader<T> DataError! {
     make_loader<T>(DataLoaderKind.Database, query, "", parameters, "json", authority, limits)
 }
 
-fn value<T: Encode>(value: T, limits: DataLimits) -> DataLoader<T> DataError! {
+value: fn<T: Encode>(value: T, limits: DataLimits) -> DataLoader<T> DataError! {
     payload := [U8]{}
     data_loader_render(&payload, value.encode())
     data_loader_check_payload(limits, payload.len(), "data.value") ?? return Err(err)
@@ -1588,12 +1588,12 @@ fn value<T: Encode>(value: T, limits: DataLimits) -> DataLoader<T> DataError! {
 
 /// Infer a core format from the final path extension, without reading the
 /// source. Query/fragment suffixes do not participate in format detection.
-fn load_default<T>(locator: String) -[FS, Net, DB]> DataLoader<T> DataError! {
+load_default: fn<T>(locator: String) -[FS, Net, DB]> DataLoader<T> DataError! {
     load<T>(locator, DataLimits.safe())
 }
 
-fn load<T>(locator: String, limits: DataLimits) -[FS, Net, DB]> DataLoader<T> DataError! {
-    format :: locator_format(locator)
+load: fn<T>(locator: String, limits: DataLimits) -[FS, Net, DB]> DataLoader<T> DataError! {
+    format: locator_format(locator)
     if locator.starts_with("http://") || locator.starts_with("https://") {
         if url<T>(locator, format, "network", limits) == {
             .Ok(loader) -> return Ok(loader)
@@ -1606,18 +1606,18 @@ fn load<T>(locator: String, limits: DataLimits) -[FS, Net, DB]> DataLoader<T> Da
     }
 }
 
-fn load_format_error(error: DataError, format: String) -> DataError Never! {
+load_format_error: fn(error: DataError, format: String) -> DataError Never! {
     if error.kind == .InvalidArgument && error.reason == "unknown data format" {
         return data_error(DataErrorKind.Bridge, "format `{format}` is provider-owned; import its package", "data.loader")
     }
     error.copy()
 }
 
-fn locator_format(locator: String) -> String DataError! {
-    path :: locator.split("?").to_list()[0].split("#").to_list()[0]
-    segments :: path.split("/").to_list()
-    name :: segments[segments.len() - 1]
-    parts :: name.split(".").to_list()
+locator_format: fn(locator: String) -> String DataError! {
+    path: locator.split("?").to_list()[0].split("#").to_list()[0]
+    segments: path.split("/").to_list()
+    name: segments[segments.len() - 1]
+    parts: name.split(".").to_list()
     if parts.len() < 2 {
         return Err(data_error(DataErrorKind.Bridge, "source has no core format; import a provider package", "data.load"))
     }
@@ -1625,10 +1625,10 @@ fn locator_format(locator: String) -> String DataError! {
 }
 
 #Test("load discovers the final path extension before query and fragment") {
-    local :: load_default<Int>("dir.with.dot/items.CSV?version=.json#part") ?? panic("local loader")
+    local: load_default<Int>("dir.with.dot/items.CSV?version=.json#part") ?? panic("local loader")
     assert_eq(local.source.locator, "dir.with.dot/items.CSV?version=.json#part")
     assert(local.format == .CSV)
-    remote :: load_default<Int>("https://example.test/items.ndjson#part.json") ?? panic("remote loader")
+    remote: load_default<Int>("https://example.test/items.ndjson#part.json") ?? panic("remote loader")
     assert(remote.source.kind == .URL)
     assert(remote.format == .JSONL)
     assert_eq(remote.authority.scope, "network")
@@ -1656,21 +1656,21 @@ fn locator_format(locator: String) -> String DataError! {
 
 // Typed CSV and JSON input report one DataError (kind Decode) that keeps
 // every field failure of the codec decode.
-fn data_decode_error(errors: [FieldError], operation: String) -> DataError Never! {
-    reasons :: loop error in errors -> if error.path == "" -> error.reason else -> "{error.path}: {error.reason}"
+data_decode_error: fn(errors: [FieldError], operation: String) -> DataError Never! {
+    reasons: loop error in errors -> if error.path == "" -> error.reason else -> "{error.path}: {error.reason}"
     data_error(DataErrorKind.Decode, reasons.join("; "), operation)
 }
 
-fn csv<T: Decode>(text: String) -> [T] DataError! {
+csv: fn<T: Decode>(text: String) -> [T] DataError! {
     csv_codec.decode<T>(text) ?? return Err(data_decode_error(err, "data.csv"))
 }
 
-fn json<T: Decode>(text: String) -> [T] DataError! {
+json: fn<T: Decode>(text: String) -> [T] DataError! {
     json_codec.decode<[T]>(text) ?? return Err(data_decode_error(err, "data.json"))
 }
 
 #Test("typed data JSON reuses exact number decoding") {
-    rows :: json<Int>("[9007199254740993,1e2,-9007199254740993]") ?? panic("typed data JSON")
+    rows: json<Int>("[9007199254740993,1e2,-9007199254740993]") ?? panic("typed data JSON")
     assert_eq(rows, [Int]{9007199254740993, 100, -9007199254740993})
 }
 
@@ -1678,11 +1678,11 @@ fn json<T: Decode>(text: String) -> [T] DataError! {
 // `jet_data_stream_scan`). The stream pulls one record at a time: the first
 // record names the fields, and every later record must carry exactly that
 // many. A row failure carries its 1-based data row and stays latched.
-fn csv_reader<T: Decode>(reader: ^FileReader, limits: DataLimits) -[FS, IO]> DataStream<T> DataError! {
+csv_reader: fn<T: Decode>(reader: ^FileReader, limits: DataLimits) -[FS, IO]> DataStream<T> DataError! {
     data_limits_check(limits) ?? return Err(err)
-    records :: csv_codec.reader(^reader, limits.encoding) ?? return Err(data_from_encoding("csv_reader", None, err))
-    state :: shared __CSVRowSource{records: ^records, header: [String]{}, started: false, row: 0}
-    source :: shared __StreamSource<T>{
+    records: csv_codec.reader(^reader, limits.encoding) ?? return Err(data_from_encoding("csv_reader", None, err))
+    state: shared __CSVRowSource{records: ^records, header: [String]{}, started: false, row: 0}
+    source: shared __StreamSource<T>{
         pull: () -> csv_reader_next<T>(state),
         max_output_rows: limits.max_output_rows,
         ahead: [T]{},
@@ -1695,13 +1695,13 @@ fn csv_reader<T: Decode>(reader: ^FileReader, limits: DataLimits) -[FS, IO]> Dat
 
 // One pull of `csv_reader<T>`: the header on the first pull, then one data
 // record decoded to `T`; `None` at end of input.
-fn csv_reader_next<T: Decode>(state: Shared<__CSVRowSource>) -> T? DataError! {
+csv_reader_next: fn<T: Decode>(state: Shared<__CSVRowSource>) -> T? DataError! {
     cell := state.guard_edit()
     if !cell.value.started {
         cell.value.started = true
         if &cell.value.records.next() == {
             .Ok(first) -> {
-                named :: first ?? return Ok(None)
+                named: first ?? return Ok(None)
                 cell.value.header = named.fields.copy()
             }
             .Err(failure) -> return Err(data_from_encoding("csv_reader", None, failure))
@@ -1709,7 +1709,7 @@ fn csv_reader_next<T: Decode>(state: Shared<__CSVRowSource>) -> T? DataError! {
     }
     if &cell.value.records.next() == {
         .Ok(next) -> {
-            record :: next ?? return Ok(None)
+            record: next ?? return Ok(None)
             cell.value.row = cell.value.row + 1
             if csv_reader_row<T>(cell.value.header, record.fields, cell.value.row) == {
                 .Ok(row) -> return Ok(Val(row))
@@ -1723,7 +1723,7 @@ fn csv_reader_next<T: Decode>(state: Shared<__CSVRowSource>) -> T? DataError! {
 // One data record as header-named Text cells (Rust
 // `jet_data_stream_decode_csv_row`). The cells decode as text, so a
 // `Float` field reads "10.0".
-fn csv_reader_row<T: Decode>(header: [String], fields: [String], row: Int) -> T DataError! {
+csv_reader_row: fn<T: Decode>(header: [String], fields: [String], row: Int) -> T DataError! {
     if fields.len() != header.len() {
         error := data_error(DataErrorKind.Decode, "CSV row has {fields.len()} fields; expected {header.len()}", "csv_reader")
         error.row = Val(row)
@@ -1731,8 +1731,8 @@ fn csv_reader_row<T: Decode>(header: [String], fields: [String], row: Int) -> T 
     }
     entries := [(key: String, value: Dyn)]{}
     loop column in 0..<header.len() -> &entries.push((key: header[column].copy(), value: Dyn.Text(fields[column].copy())))
-    tree :: encoding_stream.object_from_entries(^entries)
-    previous :: encoding.__text_cells_enter()
+    tree: encoding_stream.object_from_entries(^entries)
+    previous: encoding.__text_cells_enter()
     if tree.decode<T>() == {
         .Ok(value) -> {
             encoding.__text_cells_leave(previous)
@@ -1749,8 +1749,8 @@ fn csv_reader_row<T: Decode>(header: [String], fields: [String], row: Int) -> T 
 
 // An encoding failure keeps its kind family, column and cause (Rust
 // `jet_data_from_encoding`).
-fn data_from_encoding(operation: String, row: Int?, cause: EncodingError) -> DataError Never! {
-    kind :: if cause.kind == {
+data_from_encoding: fn(operation: String, row: Int?, cause: EncodingError) -> DataError Never! {
+    kind: if cause.kind == {
         .Limit -> DataErrorKind.Limit
         .IO -> DataErrorKind.IO
         .State -> DataErrorKind.State
@@ -1761,7 +1761,7 @@ fn data_from_encoding(operation: String, row: Int?, cause: EncodingError) -> Dat
 
 // The checked `DataLimits` of a reader or snapshot (Rust
 // `jet_data_limits_validate`).
-fn data_limits_check(limits: DataLimits) DataError! {
+data_limits_check: fn(limits: DataLimits) DataError! {
     if !valid_encoding_limits(limits.encoding) {
         return Err(data_error(DataErrorKind.Limit, "encoding limits are outside their safe ranges", "DataLimits"))
     }
@@ -1776,12 +1776,12 @@ fn data_limits_check(limits: DataLimits) DataError! {
 // core-library.md `json_reader<T: Decode>(reader, limits)`). Numbers keep
 // their typed lexemes, each array element folds to one tree under the
 // reader's allocation budget, and a failure stays latched.
-fn json_reader<T: Decode>(reader: ^FileReader, limits: DataLimits) -[FS, IO]> DataStream<T> DataError! {
+json_reader: fn<T: Decode>(reader: ^FileReader, limits: DataLimits) -[FS, IO]> DataStream<T> DataError! {
     data_limits_check(limits) ?? return Err(err)
     parser := encoding_stream.json_reader(^reader, limits.encoding, false) ?? return Err(data_from_encoding("json_reader", None, err))
     parser.typed_numbers = true
-    state :: shared __JSONRowSource{parser: ^parser, array_started: false, array_done: false, row: 0}
-    source :: shared __StreamSource<T>{
+    state: shared __JSONRowSource{parser: ^parser, array_started: false, array_done: false, row: 0}
+    source: shared __StreamSource<T>{
         pull: () -> json_reader_next<T>(state),
         max_output_rows: limits.max_output_rows,
         ahead: [T]{},
@@ -1794,13 +1794,13 @@ fn json_reader<T: Decode>(reader: ^FileReader, limits: DataLimits) -[FS, IO]> Da
 
 // One pull of `json_reader<T>`: the opening `[` on the first pull, then one
 // array element decoded to `T`; `None` at the closing `]` or end of input.
-fn json_reader_next<T: Decode>(state: Shared<__JSONRowSource>) -> T? DataError! {
+json_reader_next: fn<T: Decode>(state: Shared<__JSONRowSource>) -> T? DataError! {
     cell := state.guard_edit()
     if cell.value.array_done -> return Ok(None)
     if !cell.value.array_started {
         if &cell.value.parser.next() == {
             .Ok(next) -> {
-                opened :: next ?? return Ok(None)
+                opened: next ?? return Ok(None)
                 if opened != .ArrayStart {
                     return Err(data_error(DataErrorKind.Decode, "typed JSON stream requires a top-level array of objects", "json_reader"))
                 }
@@ -1809,13 +1809,13 @@ fn json_reader_next<T: Decode>(state: Shared<__JSONRowSource>) -> T? DataError! 
             .Err(failure) -> return Err(data_from_encoding("json_reader", None, failure))
         }
     }
-    first :: if &cell.value.parser.next() == {
+    first: if &cell.value.parser.next() == {
         .Ok(next) -> next
         .Err(failure) -> {
             return Err(data_from_encoding("json_reader", Val(cell.value.row + 1), failure))
         }
     }
-    event :: first ?? {
+    event: first ?? {
         cell.value.array_done = true
         return Ok(None)
     }
@@ -1824,7 +1824,7 @@ fn json_reader_next<T: Decode>(state: Shared<__JSONRowSource>) -> T? DataError! 
         return Ok(None)
     }
     heap := encoding_stream.FoldBudget{decoded: 0, tracked: 0}
-    tree :: if &cell.value.parser.fold(^event, &heap) == {
+    tree: if &cell.value.parser.fold(^event, &heap) == {
         .Ok(folded) -> folded
         .Err(failure) -> {
             cell.value.parser.allocation.release(heap.tracked)
@@ -1849,18 +1849,18 @@ fn json_reader_next<T: Decode>(state: Shared<__JSONRowSource>) -> T? DataError! 
 // is the bound bytes, the offline/value last-good bytes, or the local file;
 // it parses by format, decodes to `T`, and commits as the new last-good
 // snapshot. Any failure is recorded in the loader status before it returns.
-fn snapshot<T: [Encode, Decode]>(loader: &DataLoader<T>) -[FS, Net, DB]> DataSnapshot<T> DataError! {
+snapshot: fn<T: [Encode, Decode]>(loader: &DataLoader<T>) -[FS, Net, DB]> DataSnapshot<T> DataError! {
     if loader.cancelled {
         return Err(data_loader_fail<T>(&loader, data_loader_error(DataErrorKind.State, "data.loader", "loader was cancelled before snapshot")))
     }
     data_loader_validate<T>(loader) ?? return Err(data_loader_fail<T>(&loader, err))
     data_limits_check(loader.limits) ?? return Err(data_loader_fail<T>(&loader, err))
-    payload :: data_loader_payload<T>(loader) ?? return Err(data_loader_fail<T>(&loader, err))
-    tree :: data_loader_tree(payload.data, loader.format, loader.limits) ?? return Err(data_loader_fail<T>(&loader, err))
-    value :: if data_loader_decode<T>(tree, loader.format == DataFormat.CSV) == {
+    payload: data_loader_payload<T>(loader) ?? return Err(data_loader_fail<T>(&loader, err))
+    tree: data_loader_tree(payload.data, loader.format, loader.limits) ?? return Err(data_loader_fail<T>(&loader, err))
+    value: if data_loader_decode<T>(tree, loader.format == DataFormat.CSV) == {
         .Ok(result) -> result
         .Err(failures) -> {
-            reasons :: loop failure in failures -> if failure.path == "" -> failure.reason else -> "{failure.path}: {failure.reason}"
+            reasons: loop failure in failures -> if failure.path == "" -> failure.reason else -> "{failure.path}: {failure.reason}"
             return Err(data_loader_fail<T>(&loader, data_loader_error(DataErrorKind.Decode, "data.loader", reasons.join("; "))))
         }
     }
@@ -1868,13 +1868,13 @@ fn snapshot<T: [Encode, Decode]>(loader: &DataLoader<T>) -[FS, Net, DB]> DataSna
     data_loader_render(&canonical, value.encode())
     schema := data_loader_schema(tree, loader.format)
     schema.identity = data_loader_digest(schema.identity.bytes())
-    provenance_source :: loader.source.copy()
-    provenance_authority :: loader.authority.copy()
-    provenance_format :: loader.format
-    provenance :: DataProvenance{source: provenance_source, format: provenance_format, authority: provenance_authority}
+    provenance_source: loader.source.copy()
+    provenance_authority: loader.authority.copy()
+    provenance_format: loader.format
+    provenance: DataProvenance{source: provenance_source, format: provenance_format, authority: provenance_authority}
     // PreludeDataFlow::commit_snapshot
     data_loader_check_payload(loader.limits, canonical.len(), "data.snapshot") ?? return Err(data_loader_fail<T>(&loader, err))
-    content_id :: data_loader_digest(canonical)
+    content_id: data_loader_digest(canonical)
     source_material := ""
     source_material = data_loader_identity_part(source_material, data_loader_kind_text(loader.source.kind))
     source_material = data_loader_identity_part(source_material, loader.source.locator)
@@ -1882,13 +1882,13 @@ fn snapshot<T: [Encode, Decode]>(loader: &DataLoader<T>) -[FS, Net, DB]> DataSna
     loop parameter in loader.source.parameters -> source_material = data_loader_identity_part(source_material, parameter)
     source_material = data_loader_identity_part(source_material, loader.authority.scope)
     source_material = data_loader_identity_part(source_material, loader.authority.revision)
-    source_id :: data_loader_digest(source_material.bytes())
+    source_id: data_loader_digest(source_material.bytes())
     snapshot_material := ""
     snapshot_material = data_loader_identity_part(snapshot_material, source_id)
     snapshot_material = data_loader_identity_part(snapshot_material, content_id)
     snapshot_material = data_loader_identity_part(snapshot_material, schema.identity)
     snapshot_material = data_loader_identity_part(snapshot_material, data_format_text(loader.format))
-    snapshot_id :: data_loader_digest(snapshot_material.bytes())
+    snapshot_id: data_loader_digest(snapshot_material.bytes())
     loader.status = DataLoaderStatus{
         identity: "snapshot-{snapshot_id}",
         freshness: if payload.offline -> DataFreshness.Offline else -> DataFreshness.Fresh,
@@ -1901,7 +1901,7 @@ fn snapshot<T: [Encode, Decode]>(loader: &DataLoader<T>) -[FS, Net, DB]> DataSna
     }
     loader.last_good = Val(payload.data.copy())
     loader.payload = None
-    identity :: DataSnapshotIdentity{
+    identity: DataSnapshotIdentity{
         id: "snapshot-{snapshot_id}",
         source: "source-{source_id}",
         content: content_id,
@@ -1911,9 +1911,9 @@ fn snapshot<T: [Encode, Decode]>(loader: &DataLoader<T>) -[FS, Net, DB]> DataSna
     Ok(DataSnapshot<T>{value: value, identity: identity, provenance: provenance, schema: schema, status: loader.status.copy(), content: canonical})
 }
 
-fn count<T>(rows: [T]) -> Int Never! { rows.len() }
+count: fn<T>(rows: [T]) -> Int Never! { rows.len() }
 
-fn describe(values: [Float]) -> DataSummary DataError! {
+describe: fn(values: [Float]) -> DataSummary DataError! {
     if values.len() == 0 -> return Err(data_error(DataErrorKind.Empty, "describe of empty data is undefined", "describe"))
     total := Float{0.0}
     if compensated_sum(values, "describe") == {
@@ -1931,7 +1931,7 @@ fn describe(values: [Float]) -> DataSummary DataError! {
         if value > maximum -> maximum = value
     }
     if values.len() > DataLimits.safe().max_sort_rows -> return Err(data_error(DataErrorKind.Empty, "median failed while describing data", "describe"))
-    middle :: finite_quantile(values, Float{0.5}) ?? return Err(data_error(DataErrorKind.Empty, "median failed while describing data", "describe"))
+    middle: finite_quantile(values, Float{0.5}) ?? return Err(data_error(DataErrorKind.Empty, "median failed while describing data", "describe"))
     spread := Float{0.0}
     if variance(values) == {
         .Ok(value) -> spread = value
@@ -1952,11 +1952,11 @@ fn describe(values: [Float]) -> DataSummary DataError! {
 }
 
 
-fn sum(values: [Float]) -> Float DataError! {
+sum: fn(values: [Float]) -> Float DataError! {
     compensated_sum(values, "sum")
 }
 
-fn mean(values: [Float]) -> Float DataError! {
+mean: fn(values: [Float]) -> Float DataError! {
     if values.len() == 0 -> return Err(data_error(DataErrorKind.Empty, "mean of empty data is undefined", "mean"))
     total := Float{0.0}
     // Rust `jet_data_mean_checked` reports its summation failures as `sum`.
@@ -1969,9 +1969,9 @@ fn mean(values: [Float]) -> Float DataError! {
     Ok(normalize_zero(mean_value))
 }
 
-fn min(values: [Float]) -> Float DataError! {
+min: fn(values: [Float]) -> Float DataError! {
     if values.len() == 0 -> return Err(data_error(DataErrorKind.Empty, "min of empty data is undefined", "min"))
-    first :: values[0]
+    first: values[0]
     if nonfinite(first) -> return Err(data_error(DataErrorKind.NonFinite, "numeric input must be finite", "min"))
     out := first
     loop value in values {
@@ -1981,9 +1981,9 @@ fn min(values: [Float]) -> Float DataError! {
     Ok(normalize_zero(out))
 }
 
-fn max(values: [Float]) -> Float DataError! {
+max: fn(values: [Float]) -> Float DataError! {
     if values.len() == 0 -> return Err(data_error(DataErrorKind.Empty, "max of empty data is undefined", "max"))
-    first :: values[0]
+    first: values[0]
     if nonfinite(first) -> return Err(data_error(DataErrorKind.NonFinite, "numeric input must be finite", "max"))
     out := first
     loop value in values {
@@ -1993,7 +1993,7 @@ fn max(values: [Float]) -> Float DataError! {
     Ok(normalize_zero(out))
 }
 
-fn variance(values: [Float]) -> Float DataError! {
+variance: fn(values: [Float]) -> Float DataError! {
     if values.len() == 0 -> return Err(data_error(DataErrorKind.Empty, "variance of empty data is undefined", "variance"))
     mean_value := Float{0.0}
     m2 := Float{0.0}
@@ -2013,7 +2013,7 @@ fn variance(values: [Float]) -> Float DataError! {
     Ok(normalize_zero(result))
 }
 
-fn stddev(values: [Float]) -> Float DataError! {
+stddev: fn(values: [Float]) -> Float DataError! {
     value := Float{0.0}
     if variance(values) == {
         .Ok(result) -> value = result
@@ -2025,11 +2025,11 @@ fn stddev(values: [Float]) -> Float DataError! {
 
 }
 
-fn median(values: [Float]) -> Float DataError! {
+median: fn(values: [Float]) -> Float DataError! {
     quantile(values, Float{0.5})
 }
 
-fn quantile(values: [Float], q: Float) -> Float DataError! {
+quantile: fn(values: [Float], q: Float) -> Float DataError! {
     if nonfinite(q) || q < (Float{0.0}) || q > (Float{1.0}) {
         return Err(data_error(DataErrorKind.InvalidArgument, "quantile q must be a finite value in 0.0 through 1.0", "quantile"))
     }
@@ -2043,7 +2043,7 @@ fn quantile(values: [Float], q: Float) -> Float DataError! {
 }
 
 // The interpolated quantile of nonempty, finite values within max_sort_rows.
-fn finite_quantile(values: [Float], q: Float) -> Float DataError! {
+finite_quantile: fn(values: [Float], q: Float) -> Float DataError! {
     work := [Float]{}
     loop value in values -> &work.push(value)
     pos := q * Float{work.len() - 1}
@@ -2051,7 +2051,7 @@ fn finite_quantile(values: [Float], q: Float) -> Float DataError! {
     hi := lo
     if (Float{lo}) < pos -> hi = lo + 1
     if hi >= work.len() -> hi = work.len() - 1
-    low :: select_rank(&work, 0, work.len(), lo)
+    low: select_rank(&work, 0, work.len(), lo)
     if lo == hi -> return Ok(normalize_zero(low))
     // Selection leaves every value after rank `lo` at or above it, so the
     // next rank is their minimum.
@@ -2065,7 +2065,7 @@ fn finite_quantile(values: [Float], q: Float) -> Float DataError! {
     Ok(normalize_zero(result))
 }
 
-fn rolling_mean(values: [Float], window: Int) -> [Float] DataError! {
+rolling_mean: fn(values: [Float], window: Int) -> [Float] DataError! {
     if window < 1 -> return Err(data_error(DataErrorKind.InvalidArgument, "rolling width must be positive", "rolling_mean"))
     limits := DataLimits.safe()
     if values.len() > limits.max_output_rows -> return Err(data_error(DataErrorKind.Limit, "max_output_rows exceeded", "rolling_mean"))
@@ -2091,22 +2091,22 @@ fn rolling_mean(values: [Float], window: Int) -> [Float] DataError! {
     Ok(out)
 }
 
-fn inner_join<T, U>(left: [T], right: [U], left_key: fn(T) -> String, right_key: fn(U) -> String) -> [DataJoin<T, U>] DataError! {
+inner_join: fn<T, U>(left: [T], right: [U], left_key: fn(T) -> String, right_key: fn(U) -> String) -> [DataJoin<T, U>] DataError! {
     limits := DataLimits.safe()
     left_keys := [String]{}
     right_keys := [String]{}
     loop row in left {
-        key :: left_key(row) ?? return Err(data_error(DataErrorKind.Decode, "left join key failed", "inner_join"))
+        key: left_key(row) ?? return Err(data_error(DataErrorKind.Decode, "left join key failed", "inner_join"))
         &left_keys.push(key)
     }
     loop row in right {
-        key :: right_key(row) ?? return Err(data_error(DataErrorKind.Decode, "right join key failed", "inner_join"))
+        key: right_key(row) ?? return Err(data_error(DataErrorKind.Decode, "right join key failed", "inner_join"))
         &right_keys.push(key)
     }
     // The output cardinality is known from per-key counts before any row is
     // built, so a limit breach costs O(left + right) rather than one push per
     // row up to max_join_rows.
-    right_index :: join_index(right_keys)
+    right_index: join_index(right_keys)
     total := 0
     loop key in left_keys {
         total += join_match_count(right_index, key)
@@ -2116,7 +2116,7 @@ fn inner_join<T, U>(left: [T], right: [U], left_key: fn(T) -> String, right_key:
     }
     out := [DataJoin<T, U>]{}
     loop left_index in 0..<left.len() {
-        position :: right_index.positions.get(left_keys[left_index]) ?? next
+        position: right_index.positions.get(left_keys[left_index]) ?? next
         loop right_index_at in right_index.rows[position] {
             &out.push(DataJoin<T, U>{left: left[left_index], right: right[right_index_at]})
         }
@@ -2127,20 +2127,20 @@ fn inner_join<T, U>(left: [T], right: [U], left_key: fn(T) -> String, right_key:
     Ok(out)
 }
 
-fn left_join<T, U>(left: [T], right: [U], left_key: fn(T) -> String, right_key: fn(U) -> String) -> [DataJoin<T, U?>] DataError! {
+left_join: fn<T, U>(left: [T], right: [U], left_key: fn(T) -> String, right_key: fn(U) -> String) -> [DataJoin<T, U?>] DataError! {
     limits := DataLimits.safe()
     left_keys := [String]{}
     right_keys := [String]{}
     loop row in left {
-        key :: left_key(row) ?? return Err(data_error(DataErrorKind.Decode, "left join key failed", "left_join"))
+        key: left_key(row) ?? return Err(data_error(DataErrorKind.Decode, "left join key failed", "left_join"))
         &left_keys.push(key)
     }
     loop row in right {
-        key :: right_key(row) ?? return Err(data_error(DataErrorKind.Decode, "right join key failed", "left_join"))
+        key: right_key(row) ?? return Err(data_error(DataErrorKind.Decode, "right join key failed", "left_join"))
         &right_keys.push(key)
     }
     // Every left row yields at least one output row; see inner_join.
-    right_index :: join_index(right_keys)
+    right_index: join_index(right_keys)
     total := 0
     loop key in left_keys {
         matches := join_match_count(right_index, key)
@@ -2152,7 +2152,7 @@ fn left_join<T, U>(left: [T], right: [U], left_key: fn(T) -> String, right_key: 
     }
     out := [DataJoin<T, U?>]{}
     loop left_index in 0..<left.len() {
-        position :: right_index.positions.get(left_keys[left_index]) ?? -1
+        position: right_index.positions.get(left_keys[left_index]) ?? -1
         if position < 0 {
             &out.push(DataJoin<T, U?>{left: left[left_index], right: None})
             next
@@ -2169,12 +2169,12 @@ fn left_join<T, U>(left: [T], right: [U], left_key: fn(T) -> String, right_key: 
 
 // The right rows of each join key, in row order: rows[positions[key]]. A
 // join then visits only a left row's matches, not every right row.
-struct __DataJoinIndex {
+__DataJoinIndex: struct {
     positions: [String:Int]
     rows: [[Int]]
 }
 
-fn join_index(keys: [String]) -> __DataJoinIndex Never! {
+join_index: fn(keys: [String]) -> __DataJoinIndex Never! {
     positions := [String:Int]{}
     rows := [[Int]]{}
     loop at in 0..<keys.len() {
@@ -2191,19 +2191,19 @@ fn join_index(keys: [String]) -> __DataJoinIndex Never! {
     __DataJoinIndex{positions: positions, rows: rows}
 }
 
-fn join_match_count(index: __DataJoinIndex, key: String) -> Int Never! {
-    position :: index.positions.get(key) ?? return 0
+join_match_count: fn(index: __DataJoinIndex, key: String) -> Int Never! {
+    position: index.positions.get(key) ?? return 0
     index.rows[position].len()
 }
 
-fn pivot_sum<T>(rows: [T], row_key: fn(T) -> String, column_key: fn(T) -> String, value_fn: fn(T) -> Float) -> [DataPivotCell] DataError! {
+pivot_sum: fn<T>(rows: [T], row_key: fn(T) -> String, column_key: fn(T) -> String, value_fn: fn(T) -> Float) -> [DataPivotCell] DataError! {
     limits := DataLimits.safe()
     cells := [DataPivotCell]{}
     loop index in 0..<rows.len() {
         row := rows[index]
-        row_name :: row_key(row) ?? return Err(data_error(DataErrorKind.Decode, "pivot row key failed", "pivot_sum"))
-        column_name :: column_key(row) ?? return Err(data_error(DataErrorKind.Decode, "pivot column key failed", "pivot_sum"))
-        amount :: value_fn(row) ?? return Err(data_error(DataErrorKind.Decode, "pivot value failed", "pivot_sum"))
+        row_name: row_key(row) ?? return Err(data_error(DataErrorKind.Decode, "pivot row key failed", "pivot_sum"))
+        column_name: column_key(row) ?? return Err(data_error(DataErrorKind.Decode, "pivot column key failed", "pivot_sum"))
+        amount: value_fn(row) ?? return Err(data_error(DataErrorKind.Decode, "pivot value failed", "pivot_sum"))
         if nonfinite(amount) {
             return Err(data_error_at(DataErrorKind.NonFinite, "pivot values must be finite", "pivot_sum", index))
         }
@@ -2240,40 +2240,40 @@ fn pivot_sum<T>(rows: [T], row_key: fn(T) -> String, column_key: fn(T) -> String
         cell.mean = normalize_zero(cell.mean)
         cells[index] = cell
     }
-    _ :: sort_pivot_cells(&cells)
+    _: sort_pivot_cells(&cells)
     Ok(cells)
 }
 
-fn plot<T: Encode>(rows: [T]) -> JetDataPlot<T> DataError! {
+plot: fn<T: Encode>(rows: [T]) -> JetDataPlot<T> DataError! {
     core.data.plot<T>(rows)
 }
 
-fn inspect<T>(plot: JetDataPlot<T>) -> JetDataPlotInspection DataError! {
-    plan :: normalize_plot_plan(plot.plan)
+inspect: fn<T>(plot: JetDataPlot<T>) -> JetDataPlotInspection DataError! {
+    plan: normalize_plot_plan(plot.plan)
     Ok(JetDataPlotInspection{text: plot_inspection_text(plan, plot.rows.len())})
 }
 
-fn inspect_json<T>(plot: JetDataPlot<T>) -> String DataError! {
-    plan :: normalize_plot_plan(plot.plan)
+inspect_json: fn<T>(plot: JetDataPlot<T>) -> String DataError! {
+    plan: normalize_plot_plan(plot.plan)
     Ok(plot_plan_json(plan))
 }
 
-fn text<T>(plot: JetDataPlot<T>) -> String DataError! {
-    plan :: normalize_plot_plan(plot.plan)
+text: fn<T>(plot: JetDataPlot<T>) -> String DataError! {
+    plan: normalize_plot_plan(plot.plan)
     Ok(render_plot_text(plan))
 }
 
-fn svg<T>(plot: JetDataPlot<T>) -> String DataError! {
-    plan :: normalize_plot_plan(plot.plan)
+svg: fn<T>(plot: JetDataPlot<T>) -> String DataError! {
+    plan: normalize_plot_plan(plot.plan)
     Ok(render_plot_svg(plan))
 }
 
-fn show<T>(plot: JetDataPlot<T>) -> JetDataPlotRender DataError! {
+show: fn<T>(plot: JetDataPlot<T>) -> JetDataPlotRender DataError! {
     render<T>(plot, JetDataPlotBackend.Browser)
 }
 
-fn render<T>(plot: JetDataPlot<T>, backend: JetDataPlotBackend) -> JetDataPlotRender DataError! {
-    plan :: normalize_plot_plan(plot.plan)
+render: fn<T>(plot: JetDataPlot<T>, backend: JetDataPlotBackend) -> JetDataPlotRender DataError! {
+    plan: normalize_plot_plan(plot.plan)
     if backend == JetDataPlotBackend.Terminal {
         return Ok(JetDataPlotRender{format: JetDataPlotRenderFormat.Text, body: render_plot_text(plan)})
     }
@@ -2282,12 +2282,12 @@ fn render<T>(plot: JetDataPlot<T>, backend: JetDataPlotBackend) -> JetDataPlotRe
 
 // One row per group: the key, a bar of one `#` per count (at most 40), then
 // the count.
-fn bar_text(groups: [Group<String, Int>]) -> String DataError! {
-    _ :: validate_bar_counts(groups, "bar_text")
+bar_text: fn(groups: [Group<String, Int>]) -> String DataError! {
+    _: validate_bar_counts(groups, "bar_text")
     out := ""
     loop index in 0..<groups.len() {
-        group :: groups[index]
-        width :: if group.value > 40 -> 40 else -> group.value
+        group: groups[index]
+        width: if group.value > 40 -> 40 else -> group.value
         bar := ""
         loop _ in 0..<width -> bar = "{bar}#"
         if index > 0 -> out = "{out}\n"
@@ -2298,18 +2298,18 @@ fn bar_text(groups: [Group<String, Int>]) -> String DataError! {
 
 // A 320-wide chart: one 24px row per group, bars scaled to the largest count
 // over 200px, the count printed after each bar.
-fn bar_svg(groups: [Group<String, Int>]) -> String DataError! {
-    _ :: validate_bar_counts(groups, "bar_svg")
-    height :: 24 + 24 * groups.len()
+bar_svg: fn(groups: [Group<String, Int>]) -> String DataError! {
+    _: validate_bar_counts(groups, "bar_svg")
+    height: 24 + 24 * groups.len()
     maximum := 1
     loop group in groups {
         if group.value > maximum -> maximum = group.value
     }
     out := "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"320\" height=\"{height}\" viewBox=\"0 0 320 {height}\"><rect width=\"320\" height=\"100%\" fill=\"white\"/>"
     loop index in 0..<groups.len() {
-        group :: groups[index]
-        y :: 18 + index * 24
-        bar_width :: math.round(Float{group.value} / Float{maximum} * Float{200.0})
+        group: groups[index]
+        y: 18 + index * 24
+        bar_width: math.round(Float{group.value} / Float{maximum} * Float{200.0})
         out = "{out}<text x=\"8\" y=\"{y}\" font-family=\"monospace\" font-size=\"12\">{xml_escape(group.key)}</text>"
         out = "{out}<rect x=\"96\" y=\"{y - 12}\" width=\"{bar_width}\" height=\"14\" fill=\"#2f6f73\"/>"
         out = "{out}<text x=\"{104 + bar_width}\" y=\"{y}\" font-family=\"monospace\" font-size=\"12\">{group.value}</text>"
@@ -2317,7 +2317,7 @@ fn bar_svg(groups: [Group<String, Int>]) -> String DataError! {
     Ok("{out}</svg>")
 }
 
-fn validate_bar_counts(groups: [Group<String, Int>], operation: String) DataError! {
+validate_bar_counts: fn(groups: [Group<String, Int>], operation: String) DataError! {
     loop index in 0..<groups.len() {
         if groups[index].value < 0 {
             return Err(data_error_at(DataErrorKind.InvalidArgument, "plot counts must be non-negative", operation, index))
@@ -2326,12 +2326,12 @@ fn validate_bar_counts(groups: [Group<String, Int>], operation: String) DataErro
     Ok()
 }
 
-fn line_text(groups: [Group<String, Float>], options: DataLineOptions) -> String DataError! {
-    _ :: validate_line_options(options, "line_text")
+line_text: fn(groups: [Group<String, Float>], options: DataLineOptions) -> String DataError! {
+    _: validate_line_options(options, "line_text")
     labels := [String]{}
     values := [Float]{}
     loop index in 0..<groups.len() {
-        group :: groups[index]
+        group: groups[index]
         if nonfinite(group.value) {
             return Err(data_error_at(DataErrorKind.NonFinite, "plot values must be finite", "line_text", index))
         }
@@ -2341,12 +2341,12 @@ fn line_text(groups: [Group<String, Float>], options: DataLineOptions) -> String
     Ok(render_line_options_text(labels, values, options))
 }
 
-fn line_svg(groups: [Group<String, Float>], options: DataLineOptions) -> String DataError! {
-    _ :: validate_line_options(options, "line_svg")
+line_svg: fn(groups: [Group<String, Float>], options: DataLineOptions) -> String DataError! {
+    _: validate_line_options(options, "line_svg")
     labels := [String]{}
     values := [Float]{}
     loop index in 0..<groups.len() {
-        group :: groups[index]
+        group: groups[index]
         if nonfinite(group.value) {
             return Err(data_error_at(DataErrorKind.NonFinite, "plot values must be finite", "line_svg", index))
         }
@@ -2357,25 +2357,25 @@ fn line_svg(groups: [Group<String, Float>], options: DataLineOptions) -> String 
 }
 
 /// Native facts and live, explicitly opted-in bridge availability.
-fn status() -[FS, Env]> [DataStatus] Never! {
+status: fn() -[FS, Env]> [DataStatus] Never! {
     rows := [DataStatus]{}
-    native_steps :: [String]{"core.data.csv", "core.data.stats", "core.data.query", "core.data.stream", "core.data.schema", "core.data.json"}
+    native_steps: [String]{"core.data.csv", "core.data.stats", "core.data.query", "core.data.stream", "core.data.schema", "core.data.json"}
     loop step in native_steps {
         &rows.push(DataStatus{step: step, path: "native", clone_value: "none", ownership: "jet", trust: "native", fallback: "none", replacement: "native"})
     }
-    bridge_steps :: [String]{"py.*", "r.*", "gpu.*"}
+    bridge_steps: [String]{"py.*", "r.*", "gpu.*"}
     loop step in bridge_steps -> &rows.push(bridge_status(step))
     rows
 }
 
-fn require_bridge(provider: String) DataError! -[FS, Env]> {
-    step :: bridge_provider(provider) ?? return Err(data_error(DataErrorKind.InvalidArgument, "unknown data bridge provider `{provider}`; expected py, r, or gpu", "require_bridge"))
-    facts :: bridge_status(step)
+require_bridge: fn(provider: String) DataError! -[FS, Env]> {
+    step: bridge_provider(provider) ?? return Err(data_error(DataErrorKind.InvalidArgument, "unknown data bridge provider `{provider}`; expected py, r, or gpu", "require_bridge"))
+    facts: bridge_status(step)
     if facts.path == "available" -> return Ok(())
     return Err(data_error(DataErrorKind.Bridge, "{step} unavailable (clone_value={facts.clone_value}, ownership={facts.ownership}, trust={facts.trust}, fallback={facts.fallback}, replacement={facts.replacement})", "require_bridge"))
 }
 
-fn bridge_provider(provider: String) -> String? Never! {
+bridge_provider: fn(provider: String) -> String? Never! {
     name := trim(provider)
     loop name.ends_with(".") -> name = String.from_bytes(name.bytes()[0..<name.bytes().len() - 1]) ?? ""
     if name.ends_with(".*") -> name = String.from_bytes(name.bytes()[0..<name.bytes().len() - 2]) ?? ""
@@ -2386,7 +2386,7 @@ fn bridge_provider(provider: String) -> String? Never! {
     None
 }
 
-fn bridge_status(step: String) -[FS, Env]> DataStatus Never! {
+bridge_status: fn(step: String) -[FS, Env]> DataStatus Never! {
     path := "unavailable"
     if step == "r.*" && bridge_tool_on_path("Rscript") {
         if sys.get("JET_DATA_R_BRIDGE") == .Val(enabled) {
@@ -2398,18 +2398,18 @@ fn bridge_status(step: String) -[FS, Env]> DataStatus Never! {
     DataStatus{step: step, path: path, clone_value: "device-transfer", ownership: "device-buffer", trust: "untrusted-accelerator", fallback: "none", replacement: "core.data / Tensor native CPU path"}
 }
 
-fn bridge_tool_on_path(tool: String) -[FS, Env]> Bool Never! {
+bridge_tool_on_path: fn(tool: String) -[FS, Env]> Bool Never! {
     // Keep opaque native path bytes: PATH need not be UTF-8.
-    path :: core.sys.__host_env("PATH") ?? return false
-    windows :: sys.is_windows()
-    delimiter :: if windows -> U8{59} else -> U8{58}
+    path: core.sys.__host_env("PATH") ?? return false
+    windows: sys.is_windows()
+    delimiter: if windows -> U8{59} else -> U8{58}
     directory := [U8]{}
     quoted := false
     index := 0
     loop {
-        at_end :: index == path.len()
+        at_end: index == path.len()
         if !at_end {
-            b :: path[index]
+            b: path[index]
             index += 1
             if windows && b == (U8{34}) {
                 quoted = !quoted
@@ -2421,8 +2421,8 @@ fn bridge_tool_on_path(tool: String) -[FS, Env]> Bool Never! {
             }
         }
         if directory.len() > 0 {
-            last :: directory[directory.len() - 1]
-            drive_relative :: windows && directory.len() == 2 && directory[1] == (U8{58})
+            last: directory[directory.len() - 1]
+            drive_relative: windows && directory.len() == 2 && directory[1] == (U8{58})
             if last != (U8{47}) && (!windows || last != (U8{92})) && !drive_relative {
                 &directory.push(if windows -> U8{92} else -> U8{47})
             }
@@ -2439,7 +2439,7 @@ fn bridge_tool_on_path(tool: String) -[FS, Env]> Bool Never! {
     false
 }
 
-fn make_loader<T>(kind: DataLoaderKind, locator: String, member: String, parameters: [String], format_name: String, authority_name: String, limits: DataLimits) -> DataLoader<T> DataError! {
+make_loader: fn<T>(kind: DataLoaderKind, locator: String, member: String, parameters: [String], format_name: String, authority_name: String, limits: DataLimits) -> DataLoader<T> DataError! {
     if !valid_encoding_limits(limits.encoding) {
         return Err(data_error(DataErrorKind.Limit, "encoding limits are outside their safe ranges", "data.loader"))
     }
@@ -2463,7 +2463,7 @@ fn make_loader<T>(kind: DataLoaderKind, locator: String, member: String, paramet
     if !valid_public_text(authority_name, false) || !valid_authority(authority_name) {
         return Err(data_error(DataErrorKind.InvalidArgument, "loader authority is invalid", "data.loader"))
     }
-    format :: parse_format(format_name) ?? return Err(data_error(DataErrorKind.InvalidArgument, "unknown data format", "data.loader"))
+    format: parse_format(format_name) ?? return Err(data_error(DataErrorKind.InvalidArgument, "unknown data format", "data.loader"))
     source := DataSourceIdentity{kind: kind, locator: public_locator(kind, locator), member: member, parameters: public_parameters(parameters)}
     authority := DataAuthority{scope: authority_name.copy(), revision: ""}
     status := DataLoaderStatus{
@@ -2489,40 +2489,40 @@ fn make_loader<T>(kind: DataLoaderKind, locator: String, member: String, paramet
     })
 }
 
-fn public_parameters(values: [String]) -> [String] Never! {
+public_parameters: fn(values: [String]) -> [String] Never! {
     out := [String]{}
     loop value in values -> &out.push(public_parameter(value))
     out
 }
 
-fn public_parameter(value: String) -> String Never! {
+public_parameter: fn(value: String) -> String Never! {
     normalized := trim(value)
     if normalized.len() == 0 -> return ""
-    parts :: normalized.split("=").to_list()
+    parts: normalized.split("=").to_list()
     if parts.len() < 2 -> return "value-{sha256(normalized.bytes()).hex()}"
-    key :: trim(parts[0])
+    key: trim(parts[0])
     if key.len() == 0 -> return "value-{sha256(normalized.bytes()).hex()}"
-    parameter_value :: parts[1]
-    upper_key :: upper(key)
-    upper_value :: upper(parameter_value)
+    parameter_value: parts[1]
+    upper_key: upper(key)
+    upper_value: upper(parameter_value)
     sensitive_key := upper_key.contains("PASSWORD") || upper_key.contains("PASSWD") || upper_key.contains("PWD") || upper_key.contains("SECRET") || upper_key.contains("TOKEN") || upper_key.contains("CREDENTIAL") || upper_key.contains("AUTH") || upper_key.contains("API_KEY") || upper_key.contains("APIKEY") || upper_key.contains("ACCESS_KEY") || upper_key.contains("ACCESS-TOKEN") || upper_key.contains("SIGNATURE") || upper_key.contains("COOKIE") || upper_key.contains("SESSION") || upper_key.contains("PRIVATE_KEY") || upper_key.contains("PRIVATE-KEY") || upper_key.contains("BEARER")
     sensitive_value := upper_value.starts_with("BEARER ") || upper_value.starts_with("BASIC ") || upper_value.starts_with("-----BEGIN") || upper_value.starts_with("PASSWORD=") || upper_value.starts_with("SECRET=") || upper_value.starts_with("TOKEN=") || upper_value.starts_with("CREDENTIAL=") || upper_value.starts_with("AUTHORIZATION=")
     if sensitive_key || sensitive_value -> return "{key}=<redacted>"
     normalized
 }
 
-fn public_locator(kind: DataLoaderKind, locator: String) -> String Never! {
+public_locator: fn(kind: DataLoaderKind, locator: String) -> String Never! {
     if kind == DataLoaderKind.Database -> return "query-{sha256(locator.bytes()).hex()}"
     if kind != DataLoaderKind.URL -> return locator.copy()
-    fragment_parts :: locator.split("#").to_list()
-    without_fragment :: fragment_parts[0]
-    query_parts :: without_fragment.split("?").to_list()
+    fragment_parts: locator.split("#").to_list()
+    without_fragment: fragment_parts[0]
+    query_parts: without_fragment.split("?").to_list()
     base := query_parts[0]
-    scheme_parts :: base.split("://").to_list()
+    scheme_parts: base.split("://").to_list()
     if scheme_parts.len() > 1 {
-        path_parts :: scheme_parts[1].split("/").to_list()
-        authority_parts :: path_parts[0].split("@").to_list()
-        authority :: authority_parts[authority_parts.len() - 1]
+        path_parts: scheme_parts[1].split("/").to_list()
+        authority_parts: path_parts[0].split("@").to_list()
+        authority: authority_parts[authority_parts.len() - 1]
         base = "{scheme_parts[0]}://{authority}"
         loop i in 1..<path_parts.len() -> base = "{base}/{path_parts[i]}"
     }
@@ -2532,12 +2532,12 @@ fn public_locator(kind: DataLoaderKind, locator: String) -> String Never! {
     "{base}?{public_query.join("&")}"
 }
 
-fn valid_encoding_limits(limits: EncodingLimits) -> Bool Never! {
+valid_encoding_limits: fn(limits: EncodingLimits) -> Bool Never! {
     if limits.buffer_bytes < 4096 || limits.buffer_bytes > 16777216 -> return false
     if limits.max_depth < 1 || limits.max_depth > 4096 -> return false
     if limits.max_item_bytes < 1 || limits.max_item_bytes > 1073741824 -> return false
     if limits.max_total_bytes != None {
-        total :: limits.max_total_bytes ?? 0
+        total: limits.max_total_bytes ?? 0
         if total < 0 -> return false
     }
     if limits.max_expansion_depth < 0 || limits.max_expansion_depth > 256 -> return false
@@ -2545,8 +2545,8 @@ fn valid_encoding_limits(limits: EncodingLimits) -> Bool Never! {
     true
 }
 
-fn valid_public_text(text: String, allow_empty: Bool) -> Bool Never! {
-    raw :: text.bytes()
+valid_public_text: fn(text: String, allow_empty: Bool) -> Bool Never! {
+    raw: text.bytes()
     if raw.len() == 0 -> return allow_empty
     if raw.len() > 4096 -> return false
     has_nonspace := false
@@ -2557,7 +2557,7 @@ fn valid_public_text(text: String, allow_empty: Bool) -> Bool Never! {
     has_nonspace
 }
 
-fn valid_authority(text: String) -> Bool Never! {
+valid_authority: fn(text: String) -> Bool Never! {
     normalized := upper(text)
     if normalized.starts_with("BEARER ") || normalized.starts_with("BASIC ") -> return false
     if normalized.starts_with("PASSWORD=") || normalized.starts_with("SECRET=") || normalized.starts_with("TOKEN=") || normalized.starts_with("CREDENTIAL=") || normalized.starts_with("AUTHORIZATION=") -> return false
@@ -2567,7 +2567,7 @@ fn valid_authority(text: String) -> Bool Never! {
     true
 }
 
-fn parse_format(name: String) -> DataFormat? Never! {
+parse_format: fn(name: String) -> DataFormat? Never! {
     normalized := upper(name)
     if normalized == {
         "CSV" -> Val(DataFormat.CSV)
@@ -2583,20 +2583,20 @@ fn parse_format(name: String) -> DataFormat? Never! {
 }
 
 
-fn normalize_zero(value: Float) -> Float Never! {
+normalize_zero: fn(value: Float) -> Float Never! {
     if value == (Float{0.0}) -> return Float{0.0}
     value
 }
 
-fn compensated_sum(values: [Float], operation: String) -> Float DataError! {
+compensated_sum: fn(values: [Float], operation: String) -> Float DataError! {
     compensated_sum_range(values, 0, values.len(), operation)
 }
 
-fn compensated_sum_range(values: [Float], start: Int, end: Int, operation: String) -> Float DataError! {
+compensated_sum_range: fn(values: [Float], start: Int, end: Int, operation: String) -> Float DataError! {
     total := Float{0.0}
     correction := Float{0.0}
     loop index in start..<end {
-        value :: values[index]
+        value: values[index]
         if nonfinite(value) {
             return Err(data_error_at(DataErrorKind.NonFinite, "numeric input must be finite", operation, index))
         }
@@ -2617,7 +2617,7 @@ fn compensated_sum_range(values: [Float], start: Int, end: Int, operation: Strin
     if nonfinite(result) -> return Err(data_error(DataErrorKind.Overflow, "finite overflow while summing", operation))
     Ok(normalize_zero(result))
 }
-fn sort_pivot_cells(cells: &[DataPivotCell]) Never! {
+sort_pivot_cells: fn(cells: &[DataPivotCell]) Never! {
     loop i in 1..<cells.len() {
         j := i
         loop j > 0 {
@@ -2630,16 +2630,16 @@ fn sort_pivot_cells(cells: &[DataPivotCell]) Never! {
     }
 }
 
-fn pivot_before(left: DataPivotCell, right: DataPivotCell) -> Bool Never! {
+pivot_before: fn(left: DataPivotCell, right: DataPivotCell) -> Bool Never! {
     row_order := text_compare(left.row_key, right.row_key)
     if row_order < 0 -> return true
     if row_order > 0 -> return false
     text_compare(left.column_key, right.column_key) < 0
 }
 
-fn text_compare(left: String, right: String) -> Int Never! {
-    a :: left.bytes()
-    b :: right.bytes()
+text_compare: fn(left: String, right: String) -> Int Never! {
+    a: left.bytes()
+    b: right.bytes()
     n := a.len()
     if b.len() < n -> n = b.len()
     loop i in 0..<n {
@@ -2652,7 +2652,7 @@ fn text_compare(left: String, right: String) -> Int Never! {
 }
 
 
-fn snapshot_from_rows<T>(rows: [T]) -> DataSnapshot<[T]> Never! {
+snapshot_from_rows: fn<T>(rows: [T]) -> DataSnapshot<[T]> Never! {
     source := DataSourceIdentity{kind: DataLoaderKind.Value, locator: "rows", member: "", parameters: [String]{}}
     authority := DataAuthority{scope: "local", revision: ""}
     return DataSnapshot<[T]>{
@@ -2670,7 +2670,7 @@ fn snapshot_from_rows<T>(rows: [T]) -> DataSnapshot<[T]> Never! {
 // medians of five). Callers pass finite values, where `<` is a total order up
 // to -0.0 and 0.0, which the callers normalize. On return every value after
 // `rank` in the range is at or above the answer.
-fn select_rank(values: &[Float], lo: Int, hi: Int, rank: Int) -> Float Never! {
+select_rank: fn(values: &[Float], lo: Int, hi: Int, rank: Int) -> Float Never! {
     start := lo
     end := hi
     loop {
@@ -2678,13 +2678,13 @@ fn select_rank(values: &[Float], lo: Int, hi: Int, rank: Int) -> Float Never! {
             sort_float_range(&values, start, end)
             return values[rank]
         }
-        pivot :: median_of_medians(&values, start, end)
+        pivot: median_of_medians(&values, start, end)
         // [start, less) < pivot, [less, more) == pivot, [more, end) > pivot.
         less := start
         index := start
         more := end
         loop index < more {
-            value :: values[index]
+            value: values[index]
             if value < pivot {
                 values[index] = values[less]
                 values[less] = value
@@ -2710,15 +2710,15 @@ fn select_rank(values: &[Float], lo: Int, hi: Int, rank: Int) -> Float Never! {
 
 // Gathers the median of each group of five at the front of the range and
 // selects the median of those medians.
-fn median_of_medians(values: &[Float], lo: Int, hi: Int) -> Float Never! {
+median_of_medians: fn(values: &[Float], lo: Int, hi: Int) -> Float Never! {
     count := 0
     start := lo
     loop start < hi {
         end := start + 5
         if end > hi -> end = hi
         sort_float_range(&values, start, end)
-        middle :: start + (end - start - 1) /% 2
-        median :: values[middle]
+        middle: start + (end - start - 1) /% 2
+        median: values[middle]
         values[middle] = values[lo + count]
         values[lo + count] = median
         count = count + 1
@@ -2728,12 +2728,12 @@ fn median_of_medians(values: &[Float], lo: Int, hi: Int) -> Float Never! {
 }
 
 // Insertion sort of a range of at most five values.
-fn sort_float_range(values: &[Float], lo: Int, hi: Int) Never! {
+sort_float_range: fn(values: &[Float], lo: Int, hi: Int) Never! {
     loop i in lo + 1..<hi {
         j := i
         loop j > lo {
             if !(values[j] < values[j - 1]) -> break
-            current :: values[j]
+            current: values[j]
             values[j] = values[j - 1]
             values[j - 1] = current
             j = j - 1
@@ -2766,10 +2766,10 @@ fn sort_float_range(values: &[Float], lo: Int, hi: Int) Never! {
     }
 }
 
-fn render_bar_text(labels: [String], values: [Float]) -> String Never! {
-    bounds :: value_bounds(values)
-    minimum :: bounds.min
-    maximum :: bounds.max
+render_bar_text: fn(labels: [String], values: [Float]) -> String Never! {
+    bounds: value_bounds(values)
+    minimum: bounds.min
+    maximum: bounds.max
     baseline := scale_between(Float{0.0}, minimum, maximum, 20)
     out := ""
     loop i in 0..<labels.len() {
@@ -2790,10 +2790,10 @@ fn render_bar_text(labels: [String], values: [Float]) -> String Never! {
     out
 }
 
-fn render_bar_svg(labels: [String], values: [Float]) -> String Never! {
-    bounds :: value_bounds(values)
-    minimum :: bounds.min
-    maximum :: bounds.max
+render_bar_svg: fn(labels: [String], values: [Float]) -> String Never! {
+    bounds: value_bounds(values)
+    minimum: bounds.min
+    maximum: bounds.max
     baseline := 100
     if maximum > minimum -> baseline = scale_between(Float{0.0}, minimum, maximum, 200)
     w := 320
@@ -2816,7 +2816,7 @@ fn render_bar_svg(labels: [String], values: [Float]) -> String Never! {
     "{out}<line x1=\"{80 + baseline}\" y1=\"0\" x2=\"{80 + baseline}\" y2=\"{h}\" stroke=\"#777\" stroke-width=\"1\"/></svg>"
 }
 
-fn render_line_text(labels: [String], values: [Float]) -> String Never! {
+render_line_text: fn(labels: [String], values: [Float]) -> String Never! {
     out := ""
     loop i in 0..<labels.len() {
         out = "{out}{labels[i]}={values[i]}\n"
@@ -2824,39 +2824,39 @@ fn render_line_text(labels: [String], values: [Float]) -> String Never! {
     out
 }
 
-fn render_line_svg(labels: [String], values: [Float]) -> String Never! {
-    n :: labels.len()
+render_line_svg: fn(labels: [String], values: [Float]) -> String Never! {
+    n: labels.len()
     w := 320
     h := 120
-    bounds :: value_bounds(values)
+    bounds: value_bounds(values)
     out := "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{w}\" height=\"{h}\"><polyline fill=\"none\" stroke=\"#4a90d9\" points=\""
     loop i in 0..<n {
         x := 8
         if n > 1 -> x = i * (w - 16) /% (n - 1) + 8
-        y :: h - 8 - scale_between(values[i], bounds.min, bounds.max, h - 16)
+        y: h - 8 - scale_between(values[i], bounds.min, bounds.max, h - 16)
         if i > 0 -> out = "{out} "
         out = "{out}{x},{y}"
     }
     "{out}\"/></svg>"
 }
 
-fn render_point_svg(labels: [String], values: [Float]) -> String Never! {
-    n :: labels.len()
+render_point_svg: fn(labels: [String], values: [Float]) -> String Never! {
+    n: labels.len()
     w := 320
     h := 120
-    bounds :: value_bounds(values)
+    bounds: value_bounds(values)
     out := "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{w}\" height=\"{h}\">"
     loop i in 0..<n {
         x := 8
         if n > 1 -> x = i * (w - 16) /% (n - 1) + 8
-        y :: h - 8 - scale_between(values[i], bounds.min, bounds.max, h - 16)
+        y: h - 8 - scale_between(values[i], bounds.min, bounds.max, h - 16)
         out = "{out}<circle cx=\"{x}\" cy=\"{y}\" r=\"3\" fill=\"#4a90d9\"/>"
         out = "{out}<text x=\"{x}\" y=\"{h - 1}\" font-size=\"10\">{xml_escape(labels[i])}</text>"
     }
     "{out}</svg>"
 }
 
-fn value_bounds(values: [Float]) -> (min: Float, max: Float) Never! {
+value_bounds: fn(values: [Float]) -> (min: Float, max: Float) Never! {
     minimum := Float{0.0}
     maximum := Float{0.0}
     loop value in values {
@@ -2870,7 +2870,7 @@ fn value_bounds(values: [Float]) -> (min: Float, max: Float) Never! {
     (min: minimum, max: maximum)
 }
 
-fn scale_between(value: Float, minimum: Float, maximum: Float, extent: Int) -> Int Never! {
+scale_between: fn(value: Float, minimum: Float, maximum: Float, extent: Int) -> Int Never! {
     if extent <= 0 || maximum <= minimum -> return 0
     ratio := (value - minimum) / (maximum - minimum)
     if ratio <= (Float{0.0}) -> return 0
@@ -2879,9 +2879,9 @@ fn scale_between(value: Float, minimum: Float, maximum: Float, extent: Int) -> I
 }
 
 
-fn validate_line_options(options: DataLineOptions, operation: String) DataError! {
+validate_line_options: fn(options: DataLineOptions, operation: String) DataError! {
     if options.reference != None {
-        reference :: options.reference ?? Float{0.0}
+        reference: options.reference ?? Float{0.0}
         if nonfinite(reference) -> return Err(data_error(DataErrorKind.NonFinite, "reference line must be finite", operation))
     }
     if options.style != "solid" && options.style != "dashed" && options.style != "dotted" {
@@ -2891,7 +2891,7 @@ fn validate_line_options(options: DataLineOptions, operation: String) DataError!
     return Ok()
 }
 
-fn normalize_plot_plan(plan: JetDataPlotPlan) -> JetDataPlotPlan DataError! {
+normalize_plot_plan: fn(plan: JetDataPlotPlan) -> JetDataPlotPlan DataError! {
     values := [Float]{}
     loop i in 0..<plan.labels.len() {
         value := Float{0.0}
@@ -2914,21 +2914,21 @@ fn normalize_plot_plan(plan: JetDataPlotPlan) -> JetDataPlotPlan DataError! {
     })
 }
 
-fn plot_mark_name(mark: JetDataPlotMark) -> String Never! {
+plot_mark_name: fn(mark: JetDataPlotMark) -> String Never! {
     if mark == JetDataPlotMark.Line -> return "line"
     if mark == JetDataPlotMark.Point -> return "point"
     "bar"
 }
 
-fn plot_plan_json(plan: JetDataPlotPlan) -> String Never! {
+plot_plan_json: fn(plan: JetDataPlotPlan) -> String Never! {
     "{{\"mark\":\"{plot_mark_name(plan.mark)}\",\"n\":{plan.labels.len()},\"width\":{plan.layout.width},\"height\":{plan.layout.height}}}"
 }
 
-fn plot_inspection_text(plan: JetDataPlotPlan, rows: Int) -> String Never! {
+plot_inspection_text: fn(plan: JetDataPlotPlan, rows: Int) -> String Never! {
     "plot mark={plot_mark_name(plan.mark)} rows={rows} labels={plan.labels.len()} width={plan.layout.width} height={plan.layout.height}"
 }
 
-fn render_plot_text(plan: JetDataPlotPlan) -> String Never! {
+render_plot_text: fn(plan: JetDataPlotPlan) -> String Never! {
     if plan.mark == JetDataPlotMark.Line -> return render_line_text(plan.labels, plan.values)
     if plan.mark == JetDataPlotMark.Point {
         out := ""
@@ -2938,7 +2938,7 @@ fn render_plot_text(plan: JetDataPlotPlan) -> String Never! {
     render_bar_text(plan.labels, plan.values)
 }
 
-fn render_plot_svg(plan: JetDataPlotPlan) -> String Never! {
+render_plot_svg: fn(plan: JetDataPlotPlan) -> String Never! {
     if plan.mark == JetDataPlotMark.Line -> return render_line_svg(plan.labels, plan.values)
     if plan.mark == JetDataPlotMark.Point -> return render_point_svg(plan.labels, plan.values)
     render_bar_svg(plan.labels, plan.values)
@@ -2946,7 +2946,7 @@ fn render_plot_svg(plan: JetDataPlotPlan) -> String Never! {
 
 // Points print with six decimals and SVG coordinates with three; -0.0 prints
 // as 0.
-fn render_line_options_text(labels: [String], values: [Float], options: DataLineOptions) -> String Never! {
+render_line_options_text: fn(labels: [String], values: [Float], options: DataLineOptions) -> String Never! {
     points := ""
     loop i in 0..<values.len() {
         if i > 0 -> points = "{points} -> "
@@ -2964,7 +2964,7 @@ fn render_line_options_text(labels: [String], values: [Float], options: DataLine
     if options.markers -> markers = "on"
     out = "{out}line: style={options.style} color={options.color} markers={markers}"
     if options.reference != None {
-        reference :: options.reference ?? Float{0.0}
+        reference: options.reference ?? Float{0.0}
         out = "{out}\nreference: {normalize_zero(reference):Fixed(6)}"
     }
     if options.legend.len() > 0 -> out = "{out}\nlegend: {options.legend}"
@@ -2973,8 +2973,8 @@ fn render_line_options_text(labels: [String], values: [Float], options: DataLine
 
 // A 640x360 chart with a 64/24/44/52 margin. The value range spans the points
 // and the reference line; a flat range widens by one on each side.
-fn render_line_options_svg(labels: [String], values: [Float], options: DataLineOptions) -> String Never! {
-    n :: labels.len()
+render_line_options_svg: fn(labels: [String], values: [Float], options: DataLineOptions) -> String Never! {
+    n: labels.len()
     minimum := Float{0.0}
     maximum := Float{1.0}
     if values.len() > 0 {
@@ -2986,7 +2986,7 @@ fn render_line_options_svg(labels: [String], values: [Float], options: DataLineO
         if value > maximum -> maximum = value
     }
     if options.reference != None {
-        reference :: options.reference ?? Float{0.0}
+        reference: options.reference ?? Float{0.0}
         if values.len() == 0 {
             minimum = reference
             maximum = reference
@@ -2998,12 +2998,12 @@ fn render_line_options_svg(labels: [String], values: [Float], options: DataLineO
         minimum = minimum - Float{1.0}
         maximum = maximum + Float{1.0}
     }
-    color :: xml_escape(options.color)
+    color: xml_escape(options.color)
     out := "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"640\" height=\"360\" viewBox=\"0 0 640 360\"><title>{xml_escape(options.title)}</title><rect width=\"640\" height=\"360\" fill=\"white\"/>"
     out = "{out}<line x1=\"64\" y1=\"44\" x2=\"64\" y2=\"308\" stroke=\"#333\"/><line x1=\"64\" y1=\"308\" x2=\"616\" y2=\"308\" stroke=\"#333\"/>"
     if options.reference != None {
-        reference :: options.reference ?? Float{0.0}
-        y :: line_plot_y(reference, minimum, maximum)
+        reference: options.reference ?? Float{0.0}
+        y: line_plot_y(reference, minimum, maximum)
         out = "{out}<line x1=\"64\" y1=\"{y:Fixed(3)}\" x2=\"616\" y2=\"{y:Fixed(3)}\" stroke=\"#888\" stroke-dasharray=\"4 4\"/>"
     }
     points := ""
@@ -3030,16 +3030,16 @@ fn render_line_options_svg(labels: [String], values: [Float], options: DataLineO
     "{out}</svg>"
 }
 
-fn line_plot_x(index: Int, count: Int) -> Float Never! {
+line_plot_x: fn(index: Int, count: Int) -> Float Never! {
     if count <= 1 -> return Float{340.0}
     Float{64.0} + Float{552.0} * Float{index} / Float{count - 1}
 }
 
-fn line_plot_y(value: Float, minimum: Float, maximum: Float) -> Float Never! {
+line_plot_y: fn(value: Float, minimum: Float, maximum: Float) -> Float Never! {
     Float{44.0} + (maximum - value) / (maximum - minimum) * Float{264.0}
 }
 
-fn xml_escape(text: String) -> String Never! {
+xml_escape: fn(text: String) -> String Never! {
     out := ""
     chunk := [U8]{}
     loop byte in text.bytes() {
@@ -3050,28 +3050,28 @@ fn xml_escape(text: String) -> String Never! {
         else if byte == (U8{34}) -> entity = "&quot;"
         else if byte == (U8{39}) -> entity = "&apos;"
         if entity.len() > 0 {
-            chunk_text :: String.from_bytes(chunk) ?? ""
+            chunk_text: String.from_bytes(chunk) ?? ""
             out = "{out}{chunk_text}{entity}"
             chunk = [U8]{}
         } else {
             &chunk.push(byte)
         }
     }
-    tail :: String.from_bytes(chunk) ?? ""
+    tail: String.from_bytes(chunk) ?? ""
     out = "{out}{tail}"
     out
 }
 
-fn trim(text: String) -> String Never! {
-    raw :: text.bytes()
+trim: fn(text: String) -> String Never! {
+    raw: text.bytes()
     s := 0
     e := raw.len()
     loop s < e {
-        n :: raw[s]
+        n: raw[s]
         if n == 32 || n == 9 || n == 10 || n == 13 -> s = s + 1 else { break }
     }
     loop e > s {
-        n :: raw[e - 1]
+        n: raw[e - 1]
         if n == 32 || n == 9 || n == 10 || n == 13 -> e = e - 1 else { break }
     }
     if s == 0 && e == raw.len() -> return String.from_bytes(raw) ?? ""
@@ -3079,10 +3079,10 @@ fn trim(text: String) -> String Never! {
     String.from_bytes(raw[s..(e - 1)]) ?? ""
 }
 
-fn upper(text: String) -> String Never! {
+upper: fn(text: String) -> String Never! {
     out := [U8]{}
     loop b in text.bytes() {
-        n :: b
+        n: b
         if n >= 97 && n <= 122 -> &out.push(U8{n - 32}) else -> &out.push(b)
     }
     String.from_bytes(out) ?? ""
@@ -3090,26 +3090,26 @@ fn upper(text: String) -> String Never! {
 
 // Native `jet_data_loader_canonical_tree` sorts object keys by UTF-8 lexical
 // order, but keeps Debug float spelling and exact Number text.
-fn data_loader_put_text(out: &[U8], text: String) Never! {
+data_loader_put_text: fn(out: &[U8], text: String) Never! {
     loop index in 0..<text.count_bytes() -> &out.push(encoding_stream.byte_at(text, index))
 }
 
-fn data_loader_put_control(out: &[U8], value: Int) Never! {
+data_loader_put_control: fn(out: &[U8], value: Int) Never! {
     &out.push(U8{92})
     &out.push(U8{117})
     &out.push(U8{48})
     &out.push(U8{48})
-    hex :: "0123456789abcdef"
+    hex: "0123456789abcdef"
     &out.push(encoding_stream.byte_at(hex, value >> 4))
     &out.push(encoding_stream.byte_at(hex, value.bit_and(15)))
 }
 
-fn data_loader_quote(out: &[U8], text: String) Never! {
+data_loader_quote: fn(out: &[U8], text: String) Never! {
     &out.push(U8{34})
     index := 0
     loop index < text.count_bytes() {
-        byte :: encoding_stream.byte_at(text, index)
-        n :: Int.from_u8(byte)
+        byte: encoding_stream.byte_at(text, index)
+        n: Int.from_u8(byte)
         if n == 34 || n == 92 {
             &out.push(U8{92})
             &out.push(byte)
@@ -3130,7 +3130,7 @@ fn data_loader_quote(out: &[U8], text: String) Never! {
     &out.push(U8{34})
 }
 
-fn data_loader_render(out: &[U8], tree: encoding.Dyn) Never! {
+data_loader_render: fn(out: &[U8], tree: encoding.Dyn) Never! {
     #Unsafe("inspect existing private Decode carriers only inside checked Core data source") {
         if tree == .Number(text) {
             data_loader_put_text(&out, text)
@@ -3178,7 +3178,7 @@ fn data_loader_render(out: &[U8], tree: encoding.Dyn) Never! {
     }
 }
 
-fn data_loader_check_payload(limits: DataLimits, bytes: Int, operation: String) DataError! {
+data_loader_check_payload: fn(limits: DataLimits, bytes: Int, operation: String) DataError! {
     if bytes > limits.encoding.max_item_bytes -> return Err(data_error(.Limit, "payload is {bytes} bytes; max_item_bytes is {limits.encoding.max_item_bytes}", operation))
     if limits.encoding.max_total_bytes == .Val(limit) {
         if bytes > limit -> return Err(data_error(.Limit, "payload is {bytes} bytes; max_total_bytes is {limit}", operation))
@@ -3190,37 +3190,37 @@ fn data_loader_check_payload(limits: DataLimits, bytes: Int, operation: String) 
 
 // `bounded_text(value, MAX_STATUS_TEXT)`: at most 1024 bytes, cut on a UTF-8
 // boundary and marked `...<truncated>`.
-fn data_loader_bounded_text(value: String) -> String Never! {
-    raw :: value.bytes()
+data_loader_bounded_text: fn(value: String) -> String Never! {
+    raw: value.bytes()
     if raw.len() <= 1024 -> return value.copy()
     end := 1024 - 14
     loop end > 0 && raw[end] >= (U8{128}) && raw[end] < (U8{192}) -> end -= 1
-    prefix :: if end == 0 -> "" else -> String.from_bytes(raw[0..(end - 1)]) ?? ""
+    prefix: if end == 0 -> "" else -> String.from_bytes(raw[0..(end - 1)]) ?? ""
     "{prefix}...<truncated>"
 }
 
 // `status_text`: a status message that carries credential material is
 // redacted whole.
-fn data_loader_status_text(value: String) -> String Never! {
-    lowered :: value.to_ascii_lower()
-    markers :: [String]{"password=", "password:", "passwd=", "passwd:", "secret=", "secret:", "token=", "token:", "credential=", "credential:", "authorization=", "authorization:", "api_key=", "api_key:", "access_key=", "access_key:", "cookie=", "cookie:", "session=", "session:", "bearer ", "basic ", "-----begin"}
+data_loader_status_text: fn(value: String) -> String Never! {
+    lowered: value.to_ascii_lower()
+    markers: [String]{"password=", "password:", "passwd=", "passwd:", "secret=", "secret:", "token=", "token:", "credential=", "credential:", "authorization=", "authorization:", "api_key=", "api_key:", "access_key=", "access_key:", "cookie=", "cookie:", "session=", "session:", "bearer ", "basic ", "-----begin"}
     loop marker in markers {
         if lowered.contains(marker) -> return "<redacted>"
     }
     data_loader_bounded_text(value)
 }
 
-fn data_loader_error(kind: DataErrorKind, operation: String, reason: String) -> DataError Never! {
+data_loader_error: fn(kind: DataErrorKind, operation: String, reason: String) -> DataError Never! {
     data_error(kind, data_loader_bounded_text(reason), operation)
 }
 
-fn data_loader_public_text_error(label: String) -> DataError Never! {
+data_loader_public_text_error: fn(label: String) -> DataError Never! {
     data_loader_error(DataErrorKind.InvalidArgument, "data.loader", "{label} must be non-empty, contain no control characters, and be at most 4096 bytes")
 }
 
 // `fail`: the loader status records the failure; a non-value loader releases
 // its pending payload.
-fn data_loader_fail<T>(loader: &DataLoader<T>, error: DataError) -> DataError Never! {
+data_loader_fail: fn<T>(loader: &DataLoader<T>, error: DataError) -> DataError Never! {
     cleanup := "payload-released"
     if loader.source.kind == DataLoaderKind.Value {
         cleanup = "retained"
@@ -3241,7 +3241,7 @@ fn data_loader_fail<T>(loader: &DataLoader<T>, error: DataError) -> DataError Ne
 }
 
 // `validate_loader`: the public source identity and authority.
-fn data_loader_validate<T>(loader: DataLoader<T>) DataError! {
+data_loader_validate: fn<T>(loader: DataLoader<T>) DataError! {
     if !valid_public_text(loader.source.locator, false) -> return Err(data_loader_public_text_error("source identity locator"))
     if loader.source.member.len() > 0 && !valid_public_text(loader.source.member, false) -> return Err(data_loader_public_text_error("source identity member"))
     loop parameter in loader.source.parameters {
@@ -3261,7 +3261,7 @@ fn data_loader_validate<T>(loader: DataLoader<T>) DataError! {
 // `payload` plus the local-file read of `jet_data_loader_payload`: bound
 // bytes, then offline/value last-good bytes, then the local file. Every
 // other source needs its provider to bind the payload.
-fn data_loader_payload<T>(loader: DataLoader<T>) -[FS]> (data: [U8], offline: Bool) DataError! {
+data_loader_payload: fn<T>(loader: DataLoader<T>) -[FS]> (data: [U8], offline: Bool) DataError! {
     if loader.payload == .Val(bound) {
         data_loader_check_payload(loader.limits, bound.len(), "data.loader") ?? return Err(err)
         return Ok((data: bound.copy(), offline: loader.offline))
@@ -3272,16 +3272,16 @@ fn data_loader_payload<T>(loader: DataLoader<T>) -[FS]> (data: [U8], offline: Bo
             return Ok((data: good.copy(), offline: loader.offline))
         }
     }
-    local_file :: loader.source.kind == DataLoaderKind.File && loader.source.member.len() == 0
+    local_file: loader.source.kind == DataLoaderKind.File && loader.source.member.len() == 0
     if loader.offline && !local_file {
         return Err(data_loader_error(DataErrorKind.Bridge, "data.loader.offline", "offline mode has no last-good snapshot"))
     }
     if local_file {
-        read :: core_files.read_bytes(loader.source.locator) ?? return Err(data_loader_error(DataErrorKind.IO, "data.loader.file", "could not read `{loader.source.locator}`: {err}"))
+        read: core_files.read_bytes(loader.source.locator) ?? return Err(data_loader_error(DataErrorKind.IO, "data.loader.file", "could not read `{loader.source.locator}`: {err}"))
         data_loader_check_payload(loader.limits, read.len(), "data.loader.file") ?? return Err(err)
         return Ok((data: read, offline: loader.offline))
     }
-    operation :: if loader.source.kind == {
+    operation: if loader.source.kind == {
         .URL -> "data.loader.url"
         .Database -> "data.loader.database"
         .File -> "data.loader.archive"
@@ -3291,12 +3291,12 @@ fn data_loader_payload<T>(loader: DataLoader<T>) -[FS]> (data: [U8], offline: Bo
 }
 
 // The payload as one tree, by format (Rust `jet_data_loader_tree`).
-fn data_loader_tree(payload: [U8], format: DataFormat, limits: DataLimits) -> Dyn DataError! {
+data_loader_tree: fn(payload: [U8], format: DataFormat, limits: DataLimits) -> Dyn DataError! {
     if format == DataFormat.Parquet {
         if parquet.read_rows(payload, limits.max_output_rows, limits.encoding.max_item_bytes) == {
             .Ok(tree) -> return Ok(tree)
             .Err(failure) -> {
-                kind :: if failure.kind == {
+                kind: if failure.kind == {
                     .Decode -> DataErrorKind.Decode
                     .Unsupported -> DataErrorKind.Unsupported
                     .Limit -> DataErrorKind.Limit
@@ -3308,7 +3308,7 @@ fn data_loader_tree(payload: [U8], format: DataFormat, limits: DataLimits) -> Dy
     if format == DataFormat.Arrow {
         return Err(data_loader_error(DataErrorKind.Bridge, "data.loader", "Arrow IPC has a separate provider boundary; Parquet is the registered reader"))
     }
-    text :: String.from_bytes(payload) ?? return Err(data_loader_error(DataErrorKind.Decode, "data.loader", "payload is not UTF-8"))
+    text: String.from_bytes(payload) ?? return Err(data_loader_error(DataErrorKind.Decode, "data.loader", "payload is not UTF-8"))
     tree := Dyn.Null
     if format == DataFormat.JSON {
         if json_codec.parse(text) == {
@@ -3326,14 +3326,14 @@ fn data_loader_tree(payload: [U8], format: DataFormat, limits: DataLimits) -> Dy
     Ok(tree)
 }
 
-fn data_loader_json_reason(prefix: String, failure: EncodingError) -> String Never! {
+data_loader_json_reason: fn(prefix: String, failure: EncodingError) -> String Never! {
     if failure.line == .Val(line) -> return "{prefix} (line {line}): {failure.reason}"
     "{prefix}: {failure.reason}"
 }
 
 // A CSV payload's cells are Text; they decode as typed cells, the scope
 // `csv_reader<T>` decodes its rows in.
-fn data_loader_decode<T: Decode>(tree: Dyn, text_cells: Bool) -> T [FieldError]! {
+data_loader_decode: fn<T: Decode>(tree: Dyn, text_cells: Bool) -> T [FieldError]! {
     if !text_cells {
         if tree.decode<T>() == {
             .Ok(value) -> {
@@ -3344,7 +3344,7 @@ fn data_loader_decode<T: Decode>(tree: Dyn, text_cells: Bool) -> T [FieldError]!
             }
         }
     }
-    previous :: encoding.__text_cells_enter()
+    previous: encoding.__text_cells_enter()
     if tree.decode<T>() == {
         .Ok(value) -> {
             encoding.__text_cells_leave(previous)
@@ -3358,10 +3358,10 @@ fn data_loader_decode<T: Decode>(tree: Dyn, text_cells: Bool) -> T [FieldError]!
 }
 
 // Header-named Text cells; a record whose cell count differs from the header's is a decode error.
-fn data_loader_csv_tree(text: String, limits: DataLimits) -> Dyn DataError! {
-    records :: csv_codec.rows(text, ",", false, false) ?? return Err(data_loader_error(DataErrorKind.Decode, "data.loader.csv", err.reason))
+data_loader_csv_tree: fn(text: String, limits: DataLimits) -> Dyn DataError! {
+    records: csv_codec.rows(text, ",", false, false) ?? return Err(data_loader_error(DataErrorKind.Decode, "data.loader.csv", err.reason))
     if records.len() == 0 -> return Ok(Dyn.Array([Dyn]{}))
-    header :: records[0].fields
+    header: records[0].fields
     loop (index, name) in header {
         if !valid_public_text(name, false) -> return Err(data_loader_public_text_error("CSV header"))
         loop earlier in 0..<index {
@@ -3370,7 +3370,7 @@ fn data_loader_csv_tree(text: String, limits: DataLimits) -> Dyn DataError! {
     }
     values := [Dyn]{}
     loop row in 1..<records.len() {
-        fields :: records[row].fields
+        fields: records[row].fields
         if values.len() >= limits.max_output_rows -> return Err(data_loader_error(DataErrorKind.Limit, "data.loader.csv", "max_output_rows {limits.max_output_rows} exceeded"))
         if fields.len() != header.len() -> return Err(data_loader_error(DataErrorKind.Decode, "data.loader.csv", "CSV row has {fields.len()} fields; header has {header.len()}"))
         entries := [(key: String, value: Dyn)]{}
@@ -3381,10 +3381,10 @@ fn data_loader_csv_tree(text: String, limits: DataLimits) -> Dyn DataError! {
 }
 
 // One JSON value per non-blank line.
-fn data_loader_jsonl_tree(text: String, limits: DataLimits) -> Dyn DataError! {
+data_loader_jsonl_tree: fn(text: String, limits: DataLimits) -> Dyn DataError! {
     values := [Dyn]{}
     loop (index, raw_line) in text.split("\n").to_list() {
-        line :: trim(raw_line)
+        line: trim(raw_line)
         if line.len() == 0 -> next
         if values.len() >= limits.max_output_rows -> return Err(data_loader_error(DataErrorKind.Limit, "data.loader.jsonl", "max_output_rows {limits.max_output_rows} exceeded"))
         if json_codec.parse(line) == {
@@ -3399,7 +3399,7 @@ fn data_loader_jsonl_tree(text: String, limits: DataLimits) -> Dyn DataError! {
 // by name. A null, a missing field, or any field after the first row is
 // nullable; Int and Float share `float`, other conflicts widen to `Any`.
 // The identity is the length-delimited format and column facts.
-fn data_loader_schema(tree: Dyn, format: DataFormat) -> DataSchema Never! {
+data_loader_schema: fn(tree: Dyn, format: DataFormat) -> DataSchema Never! {
     fields := [(name: String, type_name: String, nullable: Bool)]{}
     if tree == {
         .Object(_) -> {
@@ -3409,7 +3409,7 @@ fn data_loader_schema(tree: Dyn, format: DataFormat) -> DataSchema Never! {
             rows_seen := 0
             loop value in values {
                 if value == .Object(_) {
-                    entries :: encoding_stream.object_entries(value)
+                    entries: encoding_stream.object_entries(value)
                     loop entry in entries -> data_schema_absorb(&fields, entry.key, entry.value, rows_seen > 0 || entry.value == .Null)
                     loop index in 0..<fields.len() {
                         present := false
@@ -3427,11 +3427,11 @@ fn data_loader_schema(tree: Dyn, format: DataFormat) -> DataSchema Never! {
         else -> data_schema_absorb(&fields, "$", tree, tree == .Null)
     }
     &fields.sort_by((left: (name: String, type_name: String, nullable: Bool), right: (name: String, type_name: String, nullable: Bool)) -> left.name <=> right.name)
-    format_name :: data_format_text(format)
+    format_name: data_format_text(format)
     identity := data_loader_identity_part("", format_name)
     columns := [DataColumn]{}
     loop (order, field) in fields {
-        column :: DataColumn{id: "column-{order}-{field.name}", name: field.name.copy(), type_name: field.type_name.copy(), nullable: field.nullable}
+        column: DataColumn{id: "column-{order}-{field.name}", name: field.name.copy(), type_name: field.type_name.copy(), nullable: field.nullable}
         identity = data_loader_identity_part(identity, column.id)
         identity = data_loader_identity_part(identity, column.name)
         identity = data_loader_identity_part(identity, column.type_name)
@@ -3441,11 +3441,11 @@ fn data_loader_schema(tree: Dyn, format: DataFormat) -> DataSchema Never! {
     DataSchema{identity: identity, format: format, columns: columns, projection: None}
 }
 
-fn data_schema_absorb(fields: &[(name: String, type_name: String, nullable: Bool)], name: String, value: Dyn, nullable: Bool) Never! {
-    current :: data_schema_value_type(value)
+data_schema_absorb: fn(fields: &[(name: String, type_name: String, nullable: Bool)], name: String, value: Dyn, nullable: Bool) Never! {
+    current: data_schema_value_type(value)
     loop index in 0..<fields.len() {
         if fields[index].name == name {
-            merged :: data_schema_merge(fields[index].type_name, current)
+            merged: data_schema_merge(fields[index].type_name, current)
             fields[index] = (name: name.copy(), type_name: merged.type_name, nullable: fields[index].nullable || nullable || merged.nullable)
             return
         }
@@ -3453,9 +3453,9 @@ fn data_schema_absorb(fields: &[(name: String, type_name: String, nullable: Bool
     &fields.push((name: name.copy(), type_name: current, nullable: nullable || current == "null"))
 }
 
-fn data_schema_merge(left: String, right: String) -> (type_name: String, nullable: Bool) Never! {
+data_schema_merge: fn(left: String, right: String) -> (type_name: String, nullable: Bool) Never! {
     if left == right {
-        known :: left == "null" || left == "bool" || left == "int" || left == "float" || left == "text" || left == "bytes" || left == "array" || left == "object"
+        known: left == "null" || left == "bool" || left == "int" || left == "float" || left == "text" || left == "bytes" || left == "array" || left == "object"
         return (type_name: if known -> left.copy() else -> "Any", nullable: left == "null")
     }
     if left == "null" -> return (type_name: right.copy(), nullable: true)
@@ -3464,7 +3464,7 @@ fn data_schema_merge(left: String, right: String) -> (type_name: String, nullabl
     (type_name: "Any", nullable: false)
 }
 
-fn data_schema_value_type(value: Dyn) -> String Never! {
+data_schema_value_type: fn(value: Dyn) -> String Never! {
     #Unsafe("inspect existing private Decode carriers only inside checked Core data source") {
         if value == .Number(_) -> return "float"
         if value == .Bytes(_) -> return "bytes"
@@ -3482,12 +3482,12 @@ fn data_schema_value_type(value: Dyn) -> String Never! {
     }
 }
 
-fn data_loader_digest(bytes: [U8]) -> String Never! { "sha256-{sha256(bytes).hex()}" }
+data_loader_digest: fn(bytes: [U8]) -> String Never! { "sha256-{sha256(bytes).hex()}" }
 
 // `identity_part`: one length-delimited `len:value;` fact.
-fn data_loader_identity_part(material: String, value: String) -> String Never! { "{material}{value.count_bytes()}:{value};" }
+data_loader_identity_part: fn(material: String, value: String) -> String Never! { "{material}{value.count_bytes()}:{value};" }
 
-fn data_loader_kind_text(kind: DataLoaderKind) -> String Never! {
+data_loader_kind_text: fn(kind: DataLoaderKind) -> String Never! {
     if kind == {
         .File -> "File"
         .URL -> "URL"
@@ -3496,7 +3496,7 @@ fn data_loader_kind_text(kind: DataLoaderKind) -> String Never! {
     }
 }
 
-fn data_format_text(format: DataFormat) -> String Never! {
+data_format_text: fn(format: DataFormat) -> String Never! {
     if format == {
         .CSV -> "csv"
         .JSON -> "json"
@@ -3507,15 +3507,15 @@ fn data_format_text(format: DataFormat) -> String Never! {
 }
 
 #Encode
-struct DataLoaderPortRecord {
+DataLoaderPortRecord: struct {
     z: Float
     a: String
 }
 
 #Test("value loader preserves canonical payload and user-record return type") {
-    record :: DataLoaderPortRecord{z: Float{2.0}, a: "x"}
-    loader :: value<DataLoaderPortRecord>(record, DataLimits.safe()) ?? panic("value loader")
-    payload :: loader.payload ?? panic("value payload")
+    record: DataLoaderPortRecord{z: Float{2.0}, a: "x"}
+    loader: value<DataLoaderPortRecord>(record, DataLimits.safe()) ?? panic("value loader")
+    payload: loader.payload ?? panic("value payload")
     assert_eq(payload, [U8]{123, 34, 97, 34, 58, 34, 120, 34, 44, 34, 122, 34, 58, 50, 46, 48, 125})
     assert_eq(loader.source.kind, DataLoaderKind.Value)
     assert_eq(loader.source.locator, "value")
@@ -3539,7 +3539,7 @@ struct DataLoaderPortRecord {
 }
 
 #Test("value canonical strings retain native C0 and C1 control escaping") {
-    text :: encoding_stream.text_from_bytes([U8]{8, 127, 194, 128, 194, 159, 9}) ?? panic("control text")
+    text: encoding_stream.text_from_bytes([U8]{8, 127, 194, 128, 194, 159, 9}) ?? panic("control text")
     out := [U8]{}
     data_loader_quote(&out, text)
     assert_eq(out, [U8]{34, 92, 117, 48, 48, 48, 56, 92, 117, 48, 48, 55, 102, 92, 117, 48, 48, 56, 48, 92, 117, 48, 48, 57, 102, 92, 116, 34})

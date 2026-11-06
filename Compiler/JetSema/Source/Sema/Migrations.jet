@@ -17,19 +17,19 @@ use jet_foundation.[
     type_name,
 ]
 
-struct SemaMigrationFieldName {
+SemaMigrationFieldName: struct {
     field: String
     json_key: String
 }
 
-struct SemaMigrationCanonicalShape {
+SemaMigrationCanonicalShape: struct {
     names: [SemaMigrationFieldName]
     current: [String]
     historical: [[String]]
     skipped: [String]
 }
 
-fn sema_migration_insert_sorted(values: [String], value: String) -> [String] Never! {
+sema_migration_insert_sorted: fn(values: [String], value: String) -> [String] Never! {
     result := [String]{}
     inserted := false
     loop current in values {
@@ -44,7 +44,7 @@ fn sema_migration_insert_sorted(values: [String], value: String) -> [String] Nev
     result
 }
 
-fn sema_migration_remove(values: [String], value: String) -> [String] Never! {
+sema_migration_remove: fn(values: [String], value: String) -> [String] Never! {
     result := [String]{}
     loop current in values {
         if current != value -> &result.push(current)
@@ -52,17 +52,17 @@ fn sema_migration_remove(values: [String], value: String) -> [String] Never! {
     result
 }
 
-fn sema_migration_rename_all(definition: StructDef) -> String? {
+sema_migration_rename_all: fn(definition: StructDef) -> String? {
     marker := sema_checked_marker(definition.serde_markers, "RenameAll")
     if marker == None -> return None
     sema_checked_marker_text(marker ?? panic("checked RenameAll marker disappeared"))
 }
 
-fn sema_migration_wire_name(style: String?, name: String) -> String Never! {
+sema_migration_wire_name: fn(style: String?, name: String) -> String Never! {
     sema_checked_wire_case(style, name)
 }
 
-fn sema_migration_json_key(definition: StructDef, style: String?, name: String) -> String Never! {
+sema_migration_json_key: fn(definition: StructDef, style: String?, name: String) -> String Never! {
     loop field_index in 0..<definition.fields.len() {
         if definition.fields[field_index].name == name {
             names := sema_checked_field_shape_names(definition, definition.fields[field_index])
@@ -72,7 +72,7 @@ fn sema_migration_json_key(definition: StructDef, style: String?, name: String) 
     sema_migration_wire_name(style, name)
 }
 
-fn sema_migration_canonical_shape(definition: StructDef, migrations: [MigrationDecl]) -> SemaMigrationCanonicalShape Never! {
+sema_migration_canonical_shape: fn(definition: StructDef, migrations: [MigrationDecl]) -> SemaMigrationCanonicalShape Never! {
     style := sema_migration_rename_all(definition)
     names := [SemaMigrationFieldName]{}
     current := [String]{}
@@ -113,11 +113,11 @@ fn sema_migration_canonical_shape(definition: StructDef, migrations: [MigrationD
     SemaMigrationCanonicalShape{names: names, current: current, historical: historical, skipped: skipped}
 }
 
-fn sema_migration_name(kind: String, type_name: String, block_index: Int, field: String) -> String Never! {
+sema_migration_name: fn(kind: String, type_name: String, block_index: Int, field: String) -> String Never! {
     "__jet_migrate_{kind}_{type_name}_{block_index}_{field}"
 }
 
-fn sema_migration_default_function(name: String, ty: Type, default: Expr, span: Span) -> Func Never! {
+sema_migration_default_function: fn(name: String, ty: Type, default: Expr, span: Span) -> Func Never! {
     function := ast_func(name, span, span)
     function.return_type = Val(ty)
     function.return_type_span = Val(span)
@@ -125,7 +125,7 @@ fn sema_migration_default_function(name: String, ty: Type, default: Expr, span: 
     function
 }
 
-fn sema_migration_callable_converter_function(name: String, old_ty: Type, new_ty: Type, converter: Expr, span: Span) -> Func Never! {
+sema_migration_callable_converter_function: fn(name: String, old_ty: Type, new_ty: Type, converter: Expr, span: Span) -> Func Never! {
     argument := CallArg{
         convention: AccessConvention.Move,
         expr: Expr.Ident{name: "__old", span: span, id: AST_NODE_GENERATED},
@@ -157,7 +157,7 @@ fn sema_migration_callable_converter_function(name: String, old_ty: Type, new_ty
     function
 }
 
-fn sema_migration_converter_function(name: String, old_ty: Type, new_ty: Type, converter: Expr, span: Span) -> Func Never! {
+sema_migration_converter_function: fn(name: String, old_ty: Type, new_ty: Type, converter: Expr, span: Span) -> Func Never! {
     if converter == {
         .Lambda(lambda, _) -> if lambda.params.len() == 1 {
             parameter := lambda.params[0]
@@ -191,14 +191,14 @@ fn sema_migration_converter_function(name: String, old_ty: Type, new_ty: Type, c
     sema_migration_callable_converter_function(name, old_ty, new_ty, converter, span)
 }
 
-fn sema_migration_type_is_enabled(type_name: String, enabled_types: [String]) -> Bool Never! {
+sema_migration_type_is_enabled: fn(type_name: String, enabled_types: [String]) -> Bool Never! {
     loop candidate in enabled_types {
         if candidate == type_name -> return true
     }
     false
 }
 
-fn sema_migration_desugar(migrations: &[MigrationDecl], enabled_types: [String]) -> [Func] Never! {
+sema_migration_desugar: fn(migrations: &[MigrationDecl], enabled_types: [String]) -> [Func] Never! {
     functions := [Func]{}
     migration_index := 0
     loop migration in migrations {

@@ -13,16 +13,16 @@ use {
 }
 
 // SCHEMA_VERSION (10–12), independent of documentation schemas.
-SEMINDEX_SCHEMA_VERSION :: 20
+SEMINDEX_SCHEMA_VERSION: 20
 
 // Rust InstanceApplicationFact and InstanceFact (282–303).
-struct InstanceApplicationFact {
+InstanceApplicationFact: struct {
     name: String
     module_path: String
     semantic_identity: String
     span: SourceSpan
 }
-struct InstanceFact {
+InstanceFact: struct {
     name: String
     module_path: String
     fingerprint: String
@@ -39,16 +39,16 @@ struct InstanceFact {
 // Rust SymbolKind (330–365); Foundation SymbolKind is the declaration ID kind.
 // Tuple rows retain declaration order, including duplicate visible spellings.
 // #4357: ordered tuple rows use records until tuple Debug/Show emission is fixed.
-struct SemIndexNameTypeFact {
+SemIndexNameTypeFact: struct {
     name: String
     ty: String
 }
-struct SemIndexCallContractEntry {
+SemIndexCallContractEntry: struct {
     label: String
     zone: String
     variadic: Bool
 }
-enum SemIndexSymbolKind {
+SemIndexSymbolKind: enum {
     Module
     Function(params: [SemIndexNameTypeFact], call_contract: [SemIndexCallContractEntry], ret: String?)
     Struct(fields: [SemIndexNameTypeFact])
@@ -64,18 +64,18 @@ enum SemIndexSymbolKind {
 }
 
 // Rust MemberKind, MemberOrigin, MemberFact (367–392).
-enum MemberKind {
+MemberKind: enum {
     Field
     Variant
     Method
 }
-enum MemberOrigin {
+MemberOrigin: enum {
     TypeBody
     InherentImpl
     TraitImpl(trait_name: String)
     TraitRequirement(trait_name: String)
 }
-struct MemberFact {
+MemberFact: struct {
     owner: String
     name: String
     identity: String
@@ -87,13 +87,13 @@ struct MemberFact {
 }
 
 // Rust BypassKind::as_str and BypassFact (394–432) override law.
-enum BypassKind {
+BypassKind: enum {
     UnsafeRegion
     UnsafeFn
     ExplicitDrop
     LintAllow
 
-    fn as_str(self) -> String Never! {
+    as_str: fn(self) -> String Never! {
         if self == {
             .UnsafeRegion -> "unsafe_region"
             .UnsafeFn -> "unsafe_fn"
@@ -102,7 +102,7 @@ enum BypassKind {
         }
     }
 }
-struct BypassFact {
+BypassFact: struct {
     kind: BypassKind
     site: String
     detail: String
@@ -111,7 +111,7 @@ struct BypassFact {
 }
 
 // Rust TypeDossier (434–451): bypass audit is program-wide, not target-filtered.
-struct TypeDossier {
+TypeDossier: struct {
     schema_version: Int
     target: String
     definition: SymbolDef?
@@ -125,16 +125,16 @@ struct TypeDossier {
 // Rust TraitContractFact and SymbolDef (453–493).
 // Checked empty callable rows differ from unavailable rows in the S1 carrier.
 // #4357: this record is the lossless ordered (name, optional implementation) row.
-struct SemIndexAssociatedTypeFact {
+SemIndexAssociatedTypeFact: struct {
     name: String
     implementation: String?
 }
-struct TraitContractFact {
+TraitContractFact: struct {
     trait_name: String
     associated_types: [SemIndexAssociatedTypeFact]
     methods: [String]
 }
-struct SymbolDef {
+SymbolDef: struct {
     identity: String
     declaration_identity_unavailable: CallableFactUnavailable
     name: String
@@ -152,7 +152,7 @@ struct SymbolDef {
 // Rust DefinitionFact and DefinitionAnchor (495–523).
 // Stable IDs classify semantic ancestry/kind, not spelling, signature, or body;
 // same-kind sibling collisions require unique-candidate checks by consumers.
-struct DefinitionFact {
+DefinitionFact: struct {
     stable_id: String
     signature_id: String
     content_id: String
@@ -162,7 +162,7 @@ struct DefinitionFact {
     module_path: String
     span: SourceSpan
 }
-struct DefinitionAnchor {
+DefinitionAnchor: struct {
     module_path: String
     kind: String
     def_span: SourceSpan
@@ -170,7 +170,7 @@ struct DefinitionAnchor {
 }
 
 // Rust CompilerFact (525–545): typed registry projection, not source inference.
-struct CompilerFact {
+CompilerFact: struct {
     name: String
     kind: String
     type_name: String
@@ -178,20 +178,20 @@ struct CompilerFact {
     // Rust CompilerFact::from_member (537–544). The canonical Foundation
     // registry supplies all three optional projections; no local name table.
     // #4393: explicit optional arms keep native return payloads typed.
-    fn from_member(member: String) -> CompilerFact? Never! {
-        read :: if fact_read_kind(member) == {
+    from_member: fn(member: String) -> CompilerFact? Never! {
+        read: if fact_read_kind(member) == {
             .Val(value) -> value
             .None -> { return None }
         }
-        name :: if fact_read_source_member(read) == {
+        name: if fact_read_source_member(read) == {
             .Val(value) -> value
             .None -> { return None }
         }
-        kind :: if fact_read_reflection_kind(read) == {
+        kind: if fact_read_reflection_kind(read) == {
             .Val(value) -> value
             .None -> { return None }
         }
-        type_name :: if fact_read_public_read_type(read) == {
+        type_name: if fact_read_public_read_type(read) == {
             .Val(value) -> value
             .None -> { return None }
         }
@@ -201,7 +201,7 @@ struct CompilerFact {
 
 // Rust SymbolRef (547–560): absent target means unresolved or ambiguous.
 // Semantic refactors must never replace an absent anchor with a spelling match.
-struct SymbolRef {
+SymbolRef: struct {
     name: String
     module_path: String
     scope_identity: String?
@@ -212,7 +212,7 @@ struct SymbolRef {
 
 // Rust StructuralNode, StructuralSlotBoundary, StructuralSlotKind (562–594).
 // Parent/slot/ordinal are explicit AST ownership, never reconstructed by spans.
-struct StructuralNode {
+StructuralNode: struct {
     id: Int
     parent: Int?
     slot: String
@@ -223,26 +223,26 @@ struct StructuralNode {
     module_path: String
     span: SourceSpan
 }
-struct StructuralSlotBoundary {
+StructuralSlotBoundary: struct {
     parent: Int
     slot: String
     module_path: String
     span: SourceSpan
 }
-enum StructuralSlotKind {
+StructuralSlotKind: enum {
     Scalar
     List
 }
 
 // Rust CallEdge, EffectFact, EffectProvenance (596–623).
 // Transitive effects and deterministic witnesses arrive from the checked solve.
-struct CallEdge {
+CallEdge: struct {
     caller: String
     callee: String
     module_path: String
     call_span: SourceSpan
 }
-struct EffectFact {
+EffectFact: struct {
     function: String
     direct: [String]
     callees: [String]
@@ -250,7 +250,7 @@ struct EffectFact {
     maximal: Bool
     provenance: [EffectProvenance]
 }
-struct EffectProvenance {
+EffectProvenance: struct {
     effect_name: String
     call_path: [String]
     spans: [SourceSpan]
@@ -258,7 +258,7 @@ struct EffectProvenance {
 
 // Rust OutputFact and OutputEntryFact (625–653).
 // SemIndexOutputFact is distinct from PackageModel's manifest OutputFact.
-struct SemIndexOutputFact {
+SemIndexOutputFact: struct {
     binding: String
     kind: String
     name: String
@@ -266,7 +266,7 @@ struct SemIndexOutputFact {
     span: SourceSpan
     entry: OutputEntryFact
 }
-struct OutputEntryFact {
+OutputEntryFact: struct {
     identity: String
     name: String
     module_path: String
@@ -282,18 +282,18 @@ struct OutputEntryFact {
 
 // Rust StateNodeFact, StateTransitionFact, StateGraphFact (655–678).
 // Unavailable reachability/from-state stay optional rather than becoming false.
-struct StateNodeFact {
+StateNodeFact: struct {
     name: String
     terminal: Bool
     reachable: Bool?
     span: SourceSpan
 }
-struct StateTransitionFact {
+StateTransitionFact: struct {
     operation: String
     from: String?
     to: String
 }
-struct StateGraphFact {
+StateGraphFact: struct {
     owner: String
     module_path: String
     states: [StateNodeFact]
@@ -303,7 +303,7 @@ struct StateGraphFact {
 // Rust SemIndex and StructuralAudit (680–714). Query APIs are owned by S3.
 // Canonical package policy/derivations are attached facts, not local copies of
 // their schemas. Index fields remain package-private as in the Rust product.
-struct SemIndex {
+SemIndex: struct {
     schema_version: Int
     defs: [SymbolDef]
     refs: [SymbolRef]
@@ -322,7 +322,7 @@ struct SemIndex {
     effect_projection: EffectProjection
     derivations: [DerivationRecord]
 }
-struct StructuralAudit {
+StructuralAudit: struct {
     added: [String]
     removed: [String]
     changed: [String]

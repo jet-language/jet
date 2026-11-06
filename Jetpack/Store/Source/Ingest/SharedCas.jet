@@ -6,58 +6,58 @@
 // roots. Only the first equal file in each output is shared, because linking
 // two equal files within one output changes its canonical archive identity.
 
-STORE_SHARED_CAS_SEQUENCE :: shared ProcessSequence{next: 0}
+STORE_SHARED_CAS_SEQUENCE: shared ProcessSequence{next: 0}
 
-struct SharedCASReport {
+SharedCASReport: struct {
     optimized_files: Int
     optimized_bytes: Int
 }
 
 // Hold the shared-CAS lock for the returned guard's lifetime.
-fn store_with_shared_cas_lock(roots: HangarRoots) -[FS, Env, Time]> RuntimeLock StoreError! {
-    shared :: roots.shared_cas_dir()
+store_with_shared_cas_lock: fn(roots: HangarRoots) -[FS, Env, Time]> RuntimeLock StoreError! {
+    shared: roots.shared_cas_dir()
     store_ensure_real_directory(shared, "shared CAS pool")
     env_runtime_lock(shared, "shared-cas")
 }
 
 // The one key format used by every shared-CAS writer and reader:
 // `<sha256 hex>-<mode without write bits, 8 hex digits>`.
-fn store_shared_cas_key(digest_hex: String, mode: Int) -> String Never! {
+store_shared_cas_key: fn(digest_hex: String, mode: Int) -> String Never! {
     "{digest_hex}-{store_hex8(store_clear_write_bits(mode))}"
 }
 
 // `mode & !0o222`.
-fn store_clear_write_bits(mode: Int) -> Int Never! { mode - ((mode).bit_and(0o222)) }
+store_clear_write_bits: fn(mode: Int) -> Int Never! { mode - ((mode).bit_and(0o222)) }
 
-fn store_hex8(value: Int) -> String Never! {
-    digits :: "0123456789abcdef".bytes()
+store_hex8: fn(value: Int) -> String Never! {
+    digits: "0123456789abcdef".bytes()
     out := [U8]{}
     loop index in 0..<8 {
-        shift :: (7 - index) * 4
+        shift: (7 - index) * 4
         &out.push(digits[((value >> shift)).bit_and(15)])
     }
     String.from_bytes(out) ?? panic("hex digits are ASCII")
 }
 
-fn store_share_tree_files(roots: HangarRoots, root: String, allow_semantic_xattrs: Bool) StoreError! -[FS, Env, Time]> {
+store_share_tree_files: fn(roots: HangarRoots, root: String, allow_semantic_xattrs: Bool) StoreError! -[FS, Env, Time]> {
     if allow_semantic_xattrs -> return
-    shared_lock :: store_with_shared_cas_lock(roots)
+    shared_lock: store_with_shared_cas_lock(roots)
     store_share_tree_files_unlocked(roots, root, allow_semantic_xattrs)
 }
 
-fn store_share_tree_files_unlocked(roots: HangarRoots, root: String, allow_semantic_xattrs: Bool) StoreError! -[FS, Env, Time]> {
+store_share_tree_files_unlocked: fn(roots: HangarRoots, root: String, allow_semantic_xattrs: Bool) StoreError! -[FS, Env, Time]> {
     store_share_tree_files_unlocked_with_report(roots, root, allow_semantic_xattrs)
 }
 
-fn store_share_tree_files_unlocked_with_report(roots: HangarRoots, root: String, allow_semantic_xattrs: Bool) -[FS, Env, Time]> SharedCASReport StoreError! {
-    empty :: SharedCASReport{optimized_files: 0, optimized_bytes: 0}
+store_share_tree_files_unlocked_with_report: fn(roots: HangarRoots, root: String, allow_semantic_xattrs: Bool) -[FS, Env, Time]> SharedCASReport StoreError! {
+    empty: SharedCASReport{optimized_files: 0, optimized_bytes: 0}
     if allow_semantic_xattrs -> return Ok(empty)
     if files.stat(root).is_symlink -> return Ok(empty)
-    hangar :: roots.hangar_dir()
-    canonical_hangar :: files.canonicalize(hangar) ?? hangar
-    canonical_root :: files.canonicalize(root)
+    hangar: roots.hangar_dir()
+    canonical_hangar: files.canonicalize(hangar) ?? hangar
+    canonical_root: files.canonicalize(root)
     if !store_path_starts_with(canonical_root, canonical_hangar) -> return Ok(empty)
-    shared :: roots.shared_cas_dir()
+    shared: roots.shared_cas_dir()
     if store_path_starts_with(shared, canonical_root) {
         return Err(StoreError.InvalidInput("shared CAS must not be inside a Hangar output"))
     }
@@ -71,8 +71,8 @@ fn store_share_tree_files_unlocked_with_report(roots: HangarRoots, root: String,
     Ok(report)
 }
 
-fn store_share_node(path: String, shared: String, used: &Set<String>, report: &SharedCASReport) StoreError! -[FS, Env, Time]> {
-    info :: files.stat(path)
+store_share_node: fn(path: String, shared: String, used: &Set<String>, report: &SharedCASReport) StoreError! -[FS, Env, Time]> {
+    info: files.stat(path)
     if info.is_symlink -> return
     if info.is_dir {
         entries := files.list_dir(path)
@@ -81,9 +81,9 @@ fn store_share_node(path: String, shared: String, used: &Set<String>, report: &S
         return
     }
     if !info.is_file -> return
-    source_len :: info.size
-    mode :: store_clear_write_bits(store_permission_identity(info))
-    key :: store_shared_cas_key(store_sha256_file_hex(path), mode)
+    source_len: info.size
+    mode: store_clear_write_bits(store_permission_identity(info))
+    key: store_shared_cas_key(store_sha256_file_hex(path), mode)
     // Preserve an existing hardlink topology. A second pass must still mark
     // the first shared occurrence as used; otherwise its equal, unshared
     // sibling could be linked in-tree.
@@ -93,7 +93,7 @@ fn store_share_node(path: String, shared: String, used: &Set<String>, report: &S
     }
     if used.has(key) -> return
     &used.add(key)
-    ensured :: store_ensure_shared_file(shared, key, path, info, mode)
+    ensured: store_ensure_shared_file(shared, key, path, info, mode)
     if store_same_file_inode(path, ensured.path) -> return
     linked := true
     store_replace_with_shared_link(path, ensured.path) ?? {
@@ -110,14 +110,14 @@ fn store_share_node(path: String, shared: String, used: &Set<String>, report: &S
     }
 }
 
-struct SharedCASFile {
+SharedCASFile: struct {
     path: String
     created: Bool
 }
 
-fn store_ensure_shared_file(shared: String, key: String, source_path: String, source: files.Stat, mode: Int) -[FS, Env, Time]> SharedCASFile StoreError! {
-    destination :: files.join(shared, key)
-    existing :: files.stat(destination) ? found -> Val(found) ! error -> {
+store_ensure_shared_file: fn(shared: String, key: String, source_path: String, source: files.Stat, mode: Int) -[FS, Env, Time]> SharedCASFile StoreError! {
+    destination: files.join(shared, key)
+    existing: files.stat(destination) ? found -> Val(found) ! error -> {
         if !store_io_is_not_found(error) -> return Err(StoreError.IO(error))
         None
     }
@@ -132,22 +132,22 @@ fn store_ensure_shared_file(shared: String, key: String, source_path: String, so
         // rewritten through a peer hardlink) is swept aside and replaced
         // by a fresh copy of the verified source bytes. Objects still
         // hardlinked to the bad inode fail their own verification.
-        corrupt :: files.join(shared, ".{key}.corrupt-{sys.pid()}-{store_next_shared_cas_sequence()}")
+        corrupt: files.join(shared, ".{key}.corrupt-{sys.pid()}-{store_next_shared_cas_sequence()}")
         files.rename(destination, corrupt)
         files.remove(corrupt).drop("the swept-aside pool entry is garbage")
     }
-    partial :: files.join(shared, ".{key}.partial-{sys.pid()}-{store_next_shared_cas_sequence()}")
+    partial: files.join(shared, ".{key}.partial-{sys.pid()}-{store_next_shared_cas_sequence()}")
     output := files.create(partial, if_exists: .Refuse)
     input := files.open(source_path)
     loop {
-        chunk :: input.read(65536)
+        chunk: input.read(65536)
         if chunk.len() == 0 -> break
         &output.write_all(chunk)
     }
     &output.fsync()
     files.set_mode(partial, mode)
     files.rename(partial, destination) ?? {
-        failure :: err
+        failure: err
         files.remove(partial).drop("the unpublished partial is scratch")
         if store_io_is_already_exists(failure) -> return store_ensure_shared_file(shared, key, source_path, source, mode)
         return Err(StoreError.IO(failure))
@@ -155,17 +155,17 @@ fn store_ensure_shared_file(shared: String, key: String, source_path: String, so
     Ok(SharedCASFile{path: destination, created: true})
 }
 
-fn store_next_shared_cas_sequence() -> Int Never! {
+store_next_shared_cas_sequence: fn() -> Int Never! {
     process_sequence_take(STORE_SHARED_CAS_SEQUENCE)
 }
 
-fn store_files_equal(left: String, right: String) -[FS]> Bool StoreError! {
+store_files_equal: fn(left: String, right: String) -[FS]> Bool StoreError! {
     if files.stat(left).size != files.stat(right).size -> return Ok(false)
     left_reader := files.open(left)
     right_reader := files.open(right)
     loop {
-        left_chunk :: &left_reader.read(65536)
-        right_chunk :: &right_reader.read(65536)
+        left_chunk: &left_reader.read(65536)
+        right_chunk: &right_reader.read(65536)
         if left_chunk.len() != right_chunk.len() -> return Ok(false)
         if left_chunk.len() == 0 -> return Ok(true)
         if left_chunk != right_chunk -> return Ok(false)
@@ -173,29 +173,29 @@ fn store_files_equal(left: String, right: String) -[FS]> Bool StoreError! {
 }
 
 // Swap `path` for a hardlink to the pooled file, restoring it on failure.
-fn store_replace_with_shared_link(path: String, shared: String) StoreError! -[FS, Env]> {
-    parent :: files.dirname(path)
+store_replace_with_shared_link: fn(path: String, shared: String) StoreError! -[FS, Env]> {
+    parent: files.dirname(path)
     if parent == "" -> return Err(StoreError.Other("shared CAS output has no parent"))
-    name :: files.basename(path)
-    label :: if name == "" -> "file" else -> name
-    temporary :: files.join(parent, ".{label}.shared-{sys.pid()}-{store_next_shared_cas_sequence()}")
+    name: files.basename(path)
+    label: if name == "" -> "file" else -> name
+    temporary: files.join(parent, ".{label}.shared-{sys.pid()}-{store_next_shared_cas_sequence()}")
     files.rename(path, temporary)
     files.hard_link(shared, path) ?? {
-        failure :: err
+        failure: err
         files.rename(temporary, path).drop("restoring the original name is best-effort")
         return Err(StoreError.IO(failure))
     }
     files.remove(temporary).drop("the displaced original is scratch")
 }
 
-fn store_same_file_inode(left: String, right: String) -[FS]> Bool Never! {
-    left_info :: files.stat(left) ?? return false
-    right_info :: files.stat(right) ?? return false
+store_same_file_inode: fn(left: String, right: String) -[FS]> Bool Never! {
+    left_info: files.stat(left) ?? return false
+    right_info: files.stat(right) ?? return false
     left_info.id == right_info.id
 }
 
-fn store_permission_identity(info: files.Stat) -> Int Never! { (info.mode).bit_and(0o7777) }
+store_permission_identity: fn(info: files.Stat) -> Int Never! { (info.mode).bit_and(0o7777) }
 
-fn store_sha256_file_hex(path: String) -[FS]> String StoreError! {
+store_sha256_file_hex: fn(path: String) -[FS]> String StoreError! {
     Ok(crypto.sha256(files.read_bytes(path)).hex())
 }

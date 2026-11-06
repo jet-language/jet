@@ -5,19 +5,19 @@
 // payload, MIRRust.rs:7150), so jet-adapter.sh reports those forms unavailable (exit 77).
 // The adjacent form has no ratified marker.
 use {
-    json :: core.encoding.json
-    files :: core.files
-    process :: core.process
-    time :: core.time
+    json: core.encoding.json
+    files: core.files
+    process: core.process
+    time: core.time
 }
 
-enum ExternalCommand {
+ExternalCommand: enum {
     Read
     Write(String)
 }
 
 
-struct Options {
+Options: struct {
     operation: String
     form: String
     input: String
@@ -26,7 +26,7 @@ struct Options {
     rounds: Int
 }
 
-fn option(args: [String], name: String) -> String {
+option: fn(args: [String], name: String) -> String {
     i := 0
     loop i + 1 < args.len() {
         if args[i] == name -> return args[i + 1].copy()
@@ -35,9 +35,9 @@ fn option(args: [String], name: String) -> String {
     return ""
 }
 
-fn options() -> Options {
-    args :: process.args()
-    rounds :: Int.parse(option(args, "--rounds")) ?? 1
+options: fn() -> Options {
+    args: process.args()
+    rounds: Int.parse(option(args, "--rounds")) ?? 1
     return Options{
         operation: option(args, "--operation"),
         form: option(args, "--form"),
@@ -50,7 +50,7 @@ fn options() -> Options {
 
 // Encode: only the known source expression is representable in the declared enum.
 // ExternalCommand's closed schema has only a tag and an optional Text payload.
-fn encode(form: String, source: String, rounds: Int) -> String? {
+encode: fn(form: String, source: String, rounds: Int) -> String? {
     if source != "Command.Write(\"hello\")" -> return None
     wire := ""
     r := 0
@@ -65,13 +65,13 @@ fn encode(form: String, source: String, rounds: Int) -> String? {
 }
 
 // Decode: every round must accept; the first rejection rejects the sample.
-fn decode(form: String, wire: String, rounds: Int) -> String? {
+decode: fn(form: String, wire: String, rounds: Int) -> String? {
     text := ""
     r := 0
     loop r < rounds {
         if form == {
             "external" -> {
-                v :: json.decode<ExternalCommand>(wire) ?? return None
+                v: json.decode<ExternalCommand>(wire) ?? return None
                 text = json.to_string(v) ?? panic("text enum must be JSON-encodable")
             }
             else -> return None
@@ -81,19 +81,19 @@ fn decode(form: String, wire: String, rounds: Int) -> String? {
     return Val(text)
 }
 
-fn main_code() -> Int {
-    opts :: options()
-    input :: files.read(opts.input) ?? return 3
-    watch :: time.instant()
-    result :: if opts.operation == "encode" -> encode(opts.form, input.trim_end(), opts.rounds) else -> decode(opts.form, input.trim_end(), opts.rounds)
-    spent :: watch.elapsed().in(.Nanoseconds)
+main_code: fn() -> Int {
+    opts: options()
+    input: files.read(opts.input) ?? return 3
+    watch: time.instant()
+    result: if opts.operation == "encode" -> encode(opts.form, input.trim_end(), opts.rounds) else -> decode(opts.form, input.trim_end(), opts.rounds)
+    spent: watch.elapsed().in(.Nanoseconds)
     files.write(opts.metrics, "{{\"codec_ns\":{spent}}}") ?? return 3
-    out :: result ?? return 1
+    out: result ?? return 1
     files.write(opts.output, out) ?? return 3
     return 0
 }
 
-fn run() {
-    code :: main_code()
+run: fn() {
+    code: main_code()
     if code != 0 -> process.exit(code)
 }

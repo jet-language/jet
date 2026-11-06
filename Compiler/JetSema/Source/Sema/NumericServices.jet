@@ -4,10 +4,10 @@ use {
     jet_foundation.[
         UnitRatio,
     ]
-    math :: core.math
+    math: core.math
 }
 
-enum SemaNumericUnitConversionProof {
+SemaNumericUnitConversionProof: enum {
     Exact(value: Float)
     Inexact
     Unavailable
@@ -19,30 +19,30 @@ enum SemaNumericUnitConversionProof {
 // wanted them in the shared `wanted` row, and its function is checked again on
 // the owning thread. A check with no access at all (no registration graph) has
 // no callbacks.
-enum SemaHostHookAccess {
+SemaHostHookAccess: enum {
     Callbacks(hooks: Shared<SemaRegistrationHostHooks>, observed: Shared<SemaBodyCheckReach>?)
     Withheld(wanted: Shared<SemaHostHookWanted>, observed: Shared<SemaBodyCheckReach>?)
 }
 
-struct SemaHostHookWanted {
+SemaHostHookWanted: struct {
     wanted: Bool
 }
 
 // Sticky for one accepted logical body query, including share-site passes and
 // the owning thread's retry. A cold check has no observer and allocates none.
-struct SemaBodyCheckReach {
+SemaBodyCheckReach: struct {
     host: Bool
     foreign_raw_body: Bool
 }
 
-fn sema_host_hook_access(hooks: Shared<SemaRegistrationHostHooks>) -> SemaHostHookAccess? {
+sema_host_hook_access: fn(hooks: Shared<SemaRegistrationHostHooks>) -> SemaHostHookAccess? {
     Val(SemaHostHookAccess.Callbacks{hooks: hooks, observed: None})
 }
 
 // The callbacks behind `access`, or None. A withheld access records that this
 // check wanted them.
-fn sema_host_hook_callbacks(access: SemaHostHookAccess?) -> Shared<SemaRegistrationHostHooks>? {
-    row :: access ?? return None
+sema_host_hook_callbacks: fn(access: SemaHostHookAccess?) -> Shared<SemaRegistrationHostHooks>? {
+    row: access ?? return None
     if row == {
         .Callbacks(hooks, observed) -> {
             sema_body_check_mark_host(observed)
@@ -51,7 +51,7 @@ fn sema_host_hook_callbacks(access: SemaHostHookAccess?) -> Shared<SemaRegistrat
         .Withheld(wanted, observed) -> {
             sema_body_check_mark_host(observed)
             cell := wanted
-            permit :: cell.guard_edit()
+            permit: cell.guard_edit()
             permit.value.wanted = true
             None
         }
@@ -59,58 +59,58 @@ fn sema_host_hook_callbacks(access: SemaHostHookAccess?) -> Shared<SemaRegistrat
 }
 
 // Whether `access` withholds the callbacks (a check on a compiler thread).
-fn sema_host_hooks_withheld(access: SemaHostHookAccess?) -> Bool {
-    row :: access ?? return false
+sema_host_hooks_withheld: fn(access: SemaHostHookAccess?) -> Bool {
+    row: access ?? return false
     if row == {
         .Callbacks(_, _) -> false
         .Withheld(_, _) -> true
     }
 }
 
-fn sema_body_check_observe(access: SemaHostHookAccess?, observed: Shared<SemaBodyCheckReach>?) -> SemaHostHookAccess? {
+sema_body_check_observe: fn(access: SemaHostHookAccess?, observed: Shared<SemaBodyCheckReach>?) -> SemaHostHookAccess? {
     // copy: the observed access is a new owned Option. With nothing observed it equals `access`,
     // the caller's host-hook access (a read parameter), which the caller keeps for its other body
     // checks.
     if observed == None -> return access.copy()
-    row :: access ?? return None
+    row: access ?? return None
     Val(if row == {
         .Callbacks(hooks, _) -> SemaHostHookAccess.Callbacks{hooks: hooks, observed: observed}
         .Withheld(wanted, _) -> SemaHostHookAccess.Withheld{wanted: wanted, observed: observed}
     })
 }
 
-fn sema_body_check_mark_host(observed: Shared<SemaBodyCheckReach>?) {
-    cell :: observed ?? return
-    permit :: cell.guard_edit()
+sema_body_check_mark_host: fn(observed: Shared<SemaBodyCheckReach>?) {
+    cell: observed ?? return
+    permit: cell.guard_edit()
     permit.value.host = true
 }
 
-fn sema_body_check_mark_foreign_raw_body(access: SemaHostHookAccess?) {
-    row :: access ?? return
-    observed :: if row == {
+sema_body_check_mark_foreign_raw_body: fn(access: SemaHostHookAccess?) {
+    row: access ?? return
+    observed: if row == {
         .Callbacks(_, observer) -> observer
         .Withheld(_, observer) -> observer
     }
-    cell :: observed ?? return
-    permit :: cell.guard_edit()
+    cell: observed ?? return
+    permit: cell.guard_edit()
     permit.value.foreign_raw_body = true
 }
 
-fn sema_numeric_unit_conversion_exact(access: SemaHostHookAccess?, value: Float, scale: UnitRatio, offset: UnitRatio) -> SemaNumericUnitConversionProof {
-    hooks :: sema_host_hook_callbacks(access) ?? return SemaNumericUnitConversionProof.Unavailable
-    callback :: hooks.numeric_unit_conversion_exact ?? return SemaNumericUnitConversionProof.Unavailable
-    result :: callback(value, "{scale.numerator}", "{scale.denominator}", "{offset.numerator}", "{offset.denominator}") ?? return SemaNumericUnitConversionProof.Inexact
+sema_numeric_unit_conversion_exact: fn(access: SemaHostHookAccess?, value: Float, scale: UnitRatio, offset: UnitRatio) -> SemaNumericUnitConversionProof {
+    hooks: sema_host_hook_callbacks(access) ?? return SemaNumericUnitConversionProof.Unavailable
+    callback: hooks.numeric_unit_conversion_exact ?? return SemaNumericUnitConversionProof.Unavailable
+    result: callback(value, "{scale.numerator}", "{scale.denominator}", "{offset.numerator}", "{offset.denominator}") ?? return SemaNumericUnitConversionProof.Inexact
     SemaNumericUnitConversionProof.Exact{value: result}
 }
 
 // The exact unit conversion service the host installs: `value * scale +
 // offset`, each ratio given as numerator and denominator text, when that is
 // an integer some Float holds exactly; else None.
-fn sema_numeric_unit_conversion_exact_service(value: Float, scale_numerator: String, scale_denominator: String, offset_numerator: String, offset_denominator: String) -[]> Float? {
+sema_numeric_unit_conversion_exact_service: fn(value: Float, scale_numerator: String, scale_denominator: String, offset_numerator: String, offset_denominator: String) -[]> Float? {
     if !math.is_finite(value) -> return None
     // `value` is exactly `top / bottom`, `bottom` a power of two.
-    bits :: math.to_bits(value)
-    exponent :: (bits >> 52).bit_and(2047)
+    bits: math.to_bits(value)
+    exponent: (bits >> 52).bit_and(2047)
     top := bits.bit_and(4503599627370495)
     power := -1074
     if exponent != 0 {
@@ -135,7 +135,7 @@ fn sema_numeric_unit_conversion_exact_service(value: Float, scale_numerator: Str
         denominator = -denominator
     }
     if numerator %% denominator != 0 -> return None
-    converted :: numerator /% denominator
+    converted: numerator /% denominator
     if converted == 0 -> return Val(0.0)
     // A Float holds the integer when its odd part fits 53 bits below 2^1024.
     odd := if converted < 0 -> -converted else -> converted
@@ -159,11 +159,11 @@ fn sema_numeric_unit_conversion_exact_service(value: Float, scale_numerator: Str
     Val(if converted < 0 -> -result else -> result)
 }
 
-fn sema_numeric_ratio_part(text: String) -[]> Int {
+sema_numeric_ratio_part: fn(text: String) -[]> Int {
     negative := false
     total := 0
     loop byte in text.bytes() {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         if code == 45 -> negative = true
         else -> total = total * 10 + (code - 48)
     }

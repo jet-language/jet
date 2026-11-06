@@ -1,23 +1,23 @@
 
 use {
-    csv :: core.encoding.csv
-    files :: core.files
-    testing :: core.testing
+    csv: core.encoding.csv
+    files: core.files
+    testing: core.testing
 }
 #Codable
-struct Row { name: String, amount: Int }
-fn run() {
-    rows :: [Row]{Row{name: "ordinary", amount: 40}, Row{name: "x' OR amount > 0", amount: 80}}
-    threshold :: 50
-    selected :: rows.query(SQL{"SELECT * FROM rows WHERE amount > {threshold}"}).collect() ?? panic("numeric query")
+Row: struct { name: String, amount: Int }
+run: fn() {
+    rows: [Row]{Row{name: "ordinary", amount: 40}, Row{name: "x' OR amount > 0", amount: 80}}
+    threshold: 50
+    selected: rows.query(SQL{"SELECT * FROM rows WHERE amount > {threshold}"}).collect() ?? panic("numeric query")
     print(selected.len())
-    needle :: "x' OR amount > 0"
-    exact :: rows.query(SQL{"SELECT * FROM rows WHERE name = {needle}"}).collect() ?? panic("text query")
+    needle: "x' OR amount > 0"
+    exact: rows.query(SQL{"SELECT * FROM rows WHERE name = {needle}"}).collect() ?? panic("text query")
     print(exact.len())
     print(exact[0].amount)
-    root :: testing.temp_dir("checked-query-bindings")
-    path :: Path.from(root).join("rows.csv").to_string()
+    root: testing.temp_dir("checked-query-bindings")
+    path: Path.from(root).join("rows.csv").to_string()
     files.write(path, "name,amount\nordinary,40\nother,80\n") ?? panic("fixture")
-    file_rows :: csv.query<Row>(path, SQL{"SELECT * FROM rows WHERE amount > {threshold}"}).collect() ?? panic("file query")
+    file_rows: csv.query<Row>(path, SQL{"SELECT * FROM rows WHERE amount > {threshold}"}).collect() ?? panic("file query")
     print(file_rows.len())
 }

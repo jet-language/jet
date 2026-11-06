@@ -1,25 +1,25 @@
-package {
+package: {
     name: "inline_notes_smoke"
     authority: { allow: [Browser, IO, Mem.Alloc] }
 }
 
 use {
-    ui :: core.ui
-    reactive :: core.reactive
+    ui: core.ui
+    reactive: core.reactive
 }
 
-fn run() {
-    meeting_title :: "Meeting"
-    ideas_title :: "Ideas"
+run: fn() {
+    meeting_title: "Meeting"
+    ideas_title: "Ideas"
     body := reactive.signal("old")
     selected := reactive.signal(0)
     dark := reactive.signal(true)
     settings_open := reactive.signal(false)
     backend := ui.tui_backend()
-    render_backend :: backend.copy()
+    render_backend: backend.copy()
     ui.reactive_render(() -> {
-        marker :: if selected.get() == 0 -> "* " else -> "  "
-        mode :: if dark.get() -> "dark" else -> "light"
+        marker: if selected.get() == 0 -> "* " else -> "  "
+        mode: if dark.get() -> "dark" else -> "light"
         rows := [UINode]{
             ui.node_color("JET NOTES — {mode} mode", 72.0, 1.0, "#161616"),
             ui.node_role("{marker}{meeting_title}", 28.0, 1.0, ui.aria_role_button()),

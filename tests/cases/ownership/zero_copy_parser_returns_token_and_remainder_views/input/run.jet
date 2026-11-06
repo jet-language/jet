@@ -1,25 +1,25 @@
 
-struct Token {
+Token: struct {
     text: View<str>,
     rest: View<str>
 }
 
-fn scan(source: String) -[]> Token {
-    text :: source.before(":")
-    rest :: source.after(":")
+scan: fn(source: String) -[]> Token {
+    text: source.before(":")
+    rest: source.after(":")
     return Token{ text: text, rest: rest }
 }
 
-fn parse(source: String) -[]> Token {
+parse: fn(source: String) -[]> Token {
     return scan(source)
 }
 
-fn run() {
+run: fn() {
     source := "name:value"
-    token :: parse(source)
+    token: parse(source)
     print(token.text)
     print(token.rest)
-    expected :: "name"
+    expected: "name"
     print("wrapped: {token.text}")
     print("wrapped: {expected}")
 }

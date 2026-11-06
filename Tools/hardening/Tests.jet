@@ -4,13 +4,13 @@
 // the accepted case with the forged or broken case that must fail.
 
 use {
-    files :: core.files
-    json :: core.encoding.json
+    files: core.files
+    json: core.encoding.json
 }
 
 // The tree's inputs with only the named witnesses, so a test builds the full
 // surface without inspecting the whole corpus.
-fn tree_inputs(keep: [String]) -[FS]> Inputs Never! {
+tree_inputs: fn(keep: [String]) -[FS]> Inputs Never! {
     inputs := load_inputs(".") ?? panic("the tree inputs did not load: {err}")
     kept := [SourceFile]{}
     loop file in inputs.witnesses {
@@ -20,7 +20,7 @@ fn tree_inputs(keep: [String]) -[FS]> Inputs Never! {
     inputs
 }
 
-fn edited(list: [SourceFile], path: String, from: String, to: String) -> [SourceFile] Never! {
+edited: fn(list: [SourceFile], path: String, from: String, to: String) -> [SourceFile] Never! {
     out := [SourceFile]{}
     found := false
     loop file in list {
@@ -36,22 +36,22 @@ fn edited(list: [SourceFile], path: String, from: String, to: String) -> [Source
     out
 }
 
-fn row_index(manifest: Manifest, id: String) -> Int Never! {
+row_index: fn(manifest: Manifest, id: String) -> Int Never! {
     loop (index, row) in manifest.rows {
         if row.surface.id == id -> return index
     }
     panic("the manifest has no row `{id}`")
 }
 
-fn row_of(manifest: Manifest, id: String) -> ManifestRow Never! {
+row_of: fn(manifest: Manifest, id: String) -> ManifestRow Never! {
     manifest.rows[row_index(manifest, id)].copy()
 }
 
-fn built(inputs: Inputs) -> Manifest Never! {
+built: fn(inputs: Inputs) -> Manifest Never! {
     build_manifest(inputs) ?? panic("the manifest did not build: {err}")
 }
 
-fn build_error(inputs: Inputs) -> String Never! {
+build_error: fn(inputs: Inputs) -> String Never! {
     if build_manifest(inputs) == {
         .Ok(_) -> panic("the manifest built from broken inputs")
         .Err(error) -> error.message.copy()
@@ -61,8 +61,8 @@ fn build_error(inputs: Inputs) -> String Never! {
 // c28: membership comes from the registries and the route facts.
 
 #Test("a removed Core fn, dispatcher arm, receiver method or struct field unroutes its row") {
-    inputs :: tree_inputs([String]{"core.text.byte_count", "core.reflect.of"})
-    clean :: built(inputs)
+    inputs: tree_inputs([String]{"core.text.byte_count", "core.reflect.of"})
+    clean: built(inputs)
     assert_eq(validate_manifest(clean).join("\n"), "")
     assert_eq(row_of(clean, "module:core.text.byte_count").status, "covered")
     assert_eq(row_of(clean, "module:core.reflect.of").status, "covered")
@@ -70,16 +70,16 @@ fn build_error(inputs: Inputs) -> String Never! {
     assert_eq(row_of(clean, "receiver:Condition.notify_all").status, "missing")
     assert_eq(row_of(clean, "field:BuildGraph.action_keys").status, "missing")
     broken := inputs.copy()
-    broken.core_sources = edited(broken.core_sources, "Core/Text/Text.jet", "fn byte_count(text: String)", "fn byte_count_gone(text: String)")
-    broken.core_sources = edited(broken.core_sources, "Core/Tasks/Tasks.jet", "fn notify_all(self)", "fn notify_all_gone(self)")
+    broken.core_sources = edited(broken.core_sources, "Core/Text/Text.jet", "byte_count: fn(text: String)", "byte_count_gone: fn(text: String)")
+    broken.core_sources = edited(broken.core_sources, "Core/Tasks/Tasks.jet", "notify_all: fn(self)", "notify_all_gone: fn(self)")
     broken.core_sources = edited(broken.core_sources, "Core/Build/Build.jet", "    action_keys: [BuildGraphActionKey]\n", "    action_keys_gone: [BuildGraphActionKey]\n")
     broken.route_files = edited(broken.route_files, BUILD_ROUTES_PATH, "if symbol == \"jet_reflect_of\" -> return ir_reflect_of(", "if symbol == \"jet_reflect_gone\" -> return ir_reflect_of(")
-    moved :: built(broken)
+    moved: built(broken)
     assert_eq(validate_manifest(moved).join("\n"), "")
     assert_eq(moved.rows.len(), clean.rows.len())
-    ids :: [String]{"module:core.text.byte_count", "module:core.reflect.of", "receiver:Condition.notify_all", "field:BuildGraph.action_keys"}
+    ids: [String]{"module:core.text.byte_count", "module:core.reflect.of", "receiver:Condition.notify_all", "field:BuildGraph.action_keys"}
     loop id in ids {
-        row :: row_of(moved, id)
+        row: row_of(moved, id)
         assert_eq("{id} {row.status}", "{id} unrouted")
         assert(row.surface.route == None)
         assert(row.surface.problem != "")
@@ -89,10 +89,10 @@ fn build_error(inputs: Inputs) -> String Never! {
 }
 
 #Test("a forged covered row, forged exclusion or unused exclusion breaks the manifest contract") {
-    clean :: built(tree_inputs([String]{"core.text.byte_count"}))
+    clean: built(tree_inputs([String]{"core.text.byte_count"}))
     assert_eq(validate_manifest(clean).join("\n"), "")
-    covered :: row_index(clean, "module:core.text.byte_count")
-    missing :: row_index(clean, "module:core.text.casefold")
+    covered: row_index(clean, "module:core.text.byte_count")
+    missing: row_index(clean, "module:core.text.casefold")
     assert_eq(clean.rows[missing].status, "missing")
     unrouted := -1
     excluded := -1
@@ -116,7 +116,7 @@ fn build_error(inputs: Inputs) -> String Never! {
     }
     // A ratified exclusion that applies to no excluded row.
     &forged.exclusions.push(Exclusion{key: "core.text.casefold", reason: "r", owner: "o", decision: "d"})
-    errors :: validate_manifest(forged).join("\n")
+    errors: validate_manifest(forged).join("\n")
     assert(errors.contains("module:core.text.casefold: covered row has no witness"))
     assert(errors.contains("module:core.text.casefold: covered row names no observable sink"))
     assert(errors.contains("{clean.rows[unrouted].surface.id}: covered row has no route"))
@@ -125,11 +125,11 @@ fn build_error(inputs: Inputs) -> String Never! {
 }
 
 #Test("special routes and exclusions must name real rows and real source text") {
-    inputs :: tree_inputs([String]{})
+    inputs: tree_inputs([String]{})
     specials := inputs.copy()
     specials.specials_text = inputs.specials_text.replace("return sema_data_args_decode(", "return sema_data_args_gone(")
     specials.specials_text = "{specials.specials_text}module:core.text.no_such\t{BUILD_ROUTES_PATH}\tir_host_method(\nmodule:core.text.byte_count\t{BUILD_ROUTES_PATH}\tir_host_method(\n"
-    message :: build_error(specials)
+    message: build_error(specials)
     assert(message.contains("does not contain `if module_name == \"core.args\""))
     assert(message.contains("`module:core.text.no_such` is not a surface row"))
     assert(message.contains("`module:core.text.byte_count` already routes through source"))
@@ -144,35 +144,35 @@ fn build_error(inputs: Inputs) -> String Never! {
 
 // c29: every covered row names a type-aware observable sink.
 
-fn fixture(body: String, key: String) -> String Never! {
-    module_name :: key.rpartition(".").head
-    lines := [String]{"// core-conformance: {key}", "use api :: {module_name}", "", "fn run() {{"}
+fixture: fn(body: String, key: String) -> String Never! {
+    module_name: key.rpartition(".").head
+    lines := [String]{"// core-conformance: {key}", "use api: {module_name}", "", "run: fn() {{"}
     loop line in body.split("\n") -> &lines.push("    {line}")
     &lines.push("}}")
     lines.join("\n")
 }
 
-fn verdict_of(text: String, key: String, class: String) -> String Never! {
-    check :: inspect_witness(key, text, key.rpartition(".").head, key.rpartition(".").tail, class)
+verdict_of: fn(text: String, key: String, class: String) -> String Never! {
+    check: inspect_witness(key, text, key.rpartition(".").head, key.rpartition(".").tail, class)
     if check.sink == .Val(sink) -> return "{sink.kind}/{sink.operation}/{sink.follow_up}"
     "rejected: {check.errors.join(" | ")}"
 }
 
-fn verdict(body: String, key: String, class: String) -> String Never! {
+verdict: fn(body: String, key: String, class: String) -> String Never! {
     verdict_of(fixture(body, key), key, class)
 }
 
 #Test("observed results name a sink; an opaque result needs a follow-up operation first") {
-    open :: "core.test.open"
-    call :: "core.test.call"
-    helper :: "// core-conformance: {call}\nuse api :: core.test\n\nfn checked() -> Int Never! {{\n    return api.call(\"value\")\n}}\n\nfn run() {{\n    print(checked())\n}}"
-    carrier :: "// core-conformance: {call}\npackage {{\n    name: \"carrier\"\n    authority: {{ allow: [IO] }}\n}}\nuse api :: core.test\n\nfn run() {{\n    print(api.call(\"value\"))\n}}"
-    one_line :: "// core-conformance: {call}\npackage {{ name: \"brace}}in-text\" }}\nuse api :: core.test\n\nfn run() {{\n    print(api.call(\"value\"))\n}}"
-    seen :: [String]{
+    open: "core.test.open"
+    call: "core.test.call"
+    helper: "// core-conformance: {call}\nuse api: core.test\n\nchecked: fn() -> Int Never! {{\n    return api.call(\"value\")\n}}\n\nrun: fn() {{\n    print(checked())\n}}"
+    carrier: "// core-conformance: {call}\npackage: {{\n    name: \"carrier\"\n    authority: {{ allow: [IO] }}\n}}\nuse api: core.test\n\nrun: fn() {{\n    print(api.call(\"value\"))\n}}"
+    one_line: "// core-conformance: {call}\npackage: {{ name: \"brace}}in-text\" }}\nuse api: core.test\n\nrun: fn() {{\n    print(api.call(\"value\"))\n}}"
+    seen: [String]{
         verdict("print(api.inspect(api.open(\"value\")))", open, "opaque"),
-        verdict("value :: api.open(\"value\") ?? panic(\"open\")\nprint(value == \"value\")", open, "opaque"),
-        verdict("value :: api.open(\"value\") ?? panic(\"open\")\nprint(value.len())", open, "opaque"),
-        verdict("value :: api.open(\"value\") ?? panic(\"open\")\nalias :: value\nprint(alias.len())", open, "opaque"),
+        verdict("value: api.open(\"value\") ?? panic(\"open\")\nprint(value == \"value\")", open, "opaque"),
+        verdict("value: api.open(\"value\") ?? panic(\"open\")\nprint(value.len())", open, "opaque"),
+        verdict("value: api.open(\"value\") ?? panic(\"open\")\nalias: value\nprint(alias.len())", open, "opaque"),
         verdict("api.call(\"value\") ?? panic(\"call\")\nprint(\"done\")", call, "value"),
         verdict("print(api.call(\"value\"))", call, "value"),
         verdict("api.call(\"value\")\nprint(\"done\")", call, "unit"),
@@ -187,7 +187,7 @@ fn verdict(body: String, key: String, class: String) -> String Never! {
         verdict_of(carrier, call, "value"),
         verdict_of(one_line, call, "value"),
     }
-    expected :: [String]{
+    expected: [String]{
         "direct/print/argument of .inspect",
         "bound/print/operator",
         "bound/print/method len",
@@ -206,10 +206,10 @@ fn verdict(body: String, key: String, class: String) -> String Never! {
 }
 
 #Test("bind-and-discard, compile-only and opaque results with no follow-up are rejected") {
-    open :: "core.test.open"
-    call :: "core.test.call"
-    assert(verdict("_ :: api.open(\"value\") ?? panic(\"open\")\nprint(\"done\")", open, "opaque").contains("discard name _"))
-    assert(verdict("value :: api.open(\"value\") ?? panic(\"open\")\nprint(\"done\")", open, "opaque").contains("never reaches print/eprint/assert"))
+    open: "core.test.open"
+    call: "core.test.call"
+    assert(verdict("_: api.open(\"value\") ?? panic(\"open\")\nprint(\"done\")", open, "opaque").contains("discard name _"))
+    assert(verdict("value: api.open(\"value\") ?? panic(\"open\")\nprint(\"done\")", open, "opaque").contains("never reaches print/eprint/assert"))
     assert(verdict("print(api.open(\"value\"))", open, "opaque").contains("opaque result needs a follow-up operation"))
     assert(verdict("api.open(\"value\")", open, "opaque").contains("no observable sink"))
     assert(verdict("api.call(\"value\")", call, "value").contains("no observable sink"))
@@ -218,15 +218,15 @@ fn verdict(body: String, key: String, class: String) -> String Never! {
     assert(verdict("api.call(\"value\") ?? return Err(\"call\")\nprint(\"done\")", call, "value").contains("Unit run cannot use ?? return Err"))
     assert(verdict("api.call(\"value\")\napi.call(\"again\")\nprint(\"done\")", call, "unit").contains("expected one call"))
     // Compile-only: the only call sits in a function `run` never reaches.
-    unused :: "// core-conformance: {call}\nuse api :: core.test\n\nfn unused() {{\n    print(api.call(\"value\"))\n}}\n\nfn run() {{\n    print(\"done\")\n}}"
+    unused: "// core-conformance: {call}\nuse api: core.test\n\nunused: fn() {{\n    print(api.call(\"value\"))\n}}\n\nrun: fn() {{\n    print(\"done\")\n}}"
     assert(verdict_of(unused, call, "value").starts_with("rejected:"))
-    unparsed :: verdict_of("// core-conformance: {call}\nuse api :: core.test\n\nfn run() {{\n    print(api.call(\"value\") == {{\n        .Ok(_) -> true\n    }})\n}}", call, "value")
+    unparsed: verdict_of("// core-conformance: {call}\nuse api: core.test\n\nrun: fn() {{\n    print(api.call(\"value\") == {{\n        .Ok(_) -> true\n    }})\n}}", call, "value")
     assert(unparsed.contains("witness does not parse: line 6:"))
 }
 
 #Test("a covered row's sink must match the row's result class") {
-    clean :: built(tree_inputs([String]{"core.text.byte_count"}))
-    index :: row_index(clean, "module:core.text.byte_count")
+    clean: built(tree_inputs([String]{"core.text.byte_count"}))
+    index: row_index(clean, "module:core.text.byte_count")
     forged := clean.copy()
     if forged.rows[index].sink == .Val(sink) {
         changed := sink.copy()
@@ -234,7 +234,7 @@ fn verdict(body: String, key: String, class: String) -> String Never! {
         changed.follow_up = ""
         forged.rows[index].sink = Val(changed)
     }
-    errors :: validate_manifest(forged).join("\n")
+    errors: validate_manifest(forged).join("\n")
     assert(errors.contains("module:core.text.byte_count: sink result class `opaque` is not the row's `value`"))
     unit_effect := clean.copy()
     unit_effect.rows[index].sink = Val(Sink{kind: "unit-effect", operation: "later-observer", follow_up: "", via: "", result_class: "value"})
@@ -243,7 +243,7 @@ fn verdict(body: String, key: String, class: String) -> String Never! {
 
 // c30: a repro bundle reconstructs the run exactly.
 
-fn repro_input() -> ReproInput Never! {
+repro_input: fn() -> ReproInput Never! {
     ReproInput{
         run_id: "run-1",
         started: "2026-11-05T00:00:00Z",
@@ -262,7 +262,7 @@ fn repro_input() -> ReproInput Never! {
         seed: "42",
         mutation_arm: "swap-args",
         mutator_version: "1",
-        source: "fn run() {{\n    print(\"ÀB\")\n}}\n",
+        source: "run: fn() {{\n    print(\"ÀB\")\n}}\n",
         stdin: [U8]{97, 10},
         stdout: [U8]{0, 255, 10, 65},
         stderr: [U8]{},
@@ -278,7 +278,7 @@ fn repro_input() -> ReproInput Never! {
     }
 }
 
-fn with_field(tree: Dyn, name: String, value: Dyn) -> Dyn Never! {
+with_field: fn(tree: Dyn, name: String, value: Dyn) -> Dyn Never! {
     kept := [String: Dyn]{}
     if tree == .Object(entries) {
         loop entry in entries -> kept[entry.key.copy()] = entry.value.copy()
@@ -287,18 +287,18 @@ fn with_field(tree: Dyn, name: String, value: Dyn) -> Dyn Never! {
     Dyn.Object(kept)
 }
 
-fn errors_of(tree: Dyn) -> String Never! {
+errors_of: fn(tree: Dyn) -> String Never! {
     validate_repro(tree, "").errors.join("\n")
 }
 
 #Test("a sealed repro reconstructs source, stdin, oracle, commands, raw channels, exit, seed, mutation, commit and binary") {
-    input :: repro_input()
-    bundle :: make_repro(input) ?? panic("the repro did not seal: {err}")
+    input: repro_input()
+    bundle: make_repro(input) ?? panic("the repro did not seal: {err}")
     // Store and read back exactly as a bundle file would be.
-    stored :: json.parse(json.canonical(bundle) ?? panic("no canonical form")) ?? panic("the stored bundle did not parse")
-    check :: validate_repro(stored, digest("snapshot"))
+    stored: json.parse(json.canonical(bundle) ?? panic("no canonical form")) ?? panic("the stored bundle did not parse")
+    check: validate_repro(stored, digest("snapshot"))
     assert_eq(check.errors.join("\n"), "")
-    rebuilt :: reconstruct_repro(stored, "") ?? panic("the repro did not reconstruct: {err}")
+    rebuilt: reconstruct_repro(stored, "") ?? panic("the repro did not reconstruct: {err}")
     assert_eq(rebuilt.source, input.source)
     assert_eq(rebuilt.source_sha256, digest(input.source))
     assert_eq(rebuilt.stdin, [U8]{97, 10})
@@ -323,9 +323,9 @@ fn errors_of(tree: Dyn) -> String Never! {
 }
 
 #Test("a changed byte, a stale snapshot or a missing identity breaks a repro") {
-    bundle :: make_repro(repro_input()) ?? panic("the repro did not seal: {err}")
-    tampered :: [Dyn]{
-        with_field(bundle, "source", Dyn.Text("fn run() {{}}\n")),
+    bundle: make_repro(repro_input()) ?? panic("the repro did not seal: {err}")
+    tampered: [Dyn]{
+        with_field(bundle, "source", Dyn.Text("run: fn() {{}}\n")),
         with_field(bundle, "stdout_bytes", Dyn.Text("AP8KQg==")),
         with_field(bundle, "stdin_bytes", Dyn.Text("Ygo=")),
         with_field(bundle, "exit", Dyn.Int(0)),
@@ -340,7 +340,7 @@ fn errors_of(tree: Dyn) -> String Never! {
         assert(errors_of(forged).contains("repro content digest does not match bundle"))
     }
     assert_eq(errors_of(bundle), "")
-    stale :: validate_repro(bundle, digest("moved"))
+    stale: validate_repro(bundle, digest("moved"))
     assert(stale.stale)
     assert(stale.errors.join("\n").contains("repro registry snapshot is stale"))
     missing := repro_input()
@@ -352,7 +352,7 @@ fn errors_of(tree: Dyn) -> String Never! {
     unslotted := repro_input()
     unslotted.tier_commands = [TierCommand]{TierCommand{tier: "aot", command: "jet run main.jet"}}
     assert(make_repro(unslotted) == .Err(_))
-    loose :: with_field(bundle, "stdout_bytes", Dyn.Text("AP8KQQ"))
+    loose: with_field(bundle, "stdout_bytes", Dyn.Text("AP8KQQ"))
     assert(errors_of(loose).contains("not canonical base64") || errors_of(loose).contains("not valid base64"))
     assert(reconstruct_repro(with_field(bundle, "seed", Dyn.Text("43")), "") == .Err(_))
 }
@@ -360,37 +360,37 @@ fn errors_of(tree: Dyn) -> String Never! {
 // c31: generation is deterministic and staleness follows the snapshot.
 
 #Test("two generations from the same tree are byte-identical") {
-    first :: generate(".") ?? panic("the first generation failed: {err}")
-    second :: generate(".") ?? panic("the second generation failed: {err}")
+    first: generate(".") ?? panic("the first generation failed: {err}")
+    second: generate(".") ?? panic("the second generation failed: {err}")
     assert(first.text == second.text)
     assert_eq(check_manifest_text(first.text, second.manifest, second.text).len(), 0)
     assert(first.text.ends_with("}}\n"))
 }
 
 #Test("an exclusion or registry change moves the snapshot hash and makes the stored manifest stale") {
-    inputs :: tree_inputs([String]{"core.text.byte_count"})
-    clean :: built(inputs)
-    stored :: render_manifest(clean) ?? panic("the manifest did not render: {err}")
+    inputs: tree_inputs([String]{"core.text.byte_count"})
+    clean: built(inputs)
+    stored: render_manifest(clean) ?? panic("the manifest did not render: {err}")
     assert_eq(check_manifest_text(stored, clean, stored).len(), 0)
     excluded := inputs.copy()
     excluded.exclusions_text = "{inputs.exclusions_text}# reviewed again\n"
     registry := inputs.copy()
     registry.registry_files = edited(inputs.registry_files, inputs.registry_files[0].path, "\n", "\n\n")
-    cases :: [(inputs: Inputs, part: String)]{(inputs: excluded, part: "exclusions"), (inputs: registry, part: "registries")}
+    cases: [(inputs: Inputs, part: String)]{(inputs: excluded, part: "exclusions"), (inputs: registry, part: "registries")}
     loop case in cases {
         fresh := clean.copy()
         fresh.snapshot = build_snapshot(case.inputs)
         assert(fresh.snapshot.hash != clean.snapshot.hash)
-        fresh_text :: render_manifest(fresh) ?? panic("the fresh manifest did not render: {err}")
-        problems :: check_manifest_text(stored, fresh, fresh_text).join("\n")
+        fresh_text: render_manifest(fresh) ?? panic("the fresh manifest did not render: {err}")
+        problems: check_manifest_text(stored, fresh, fresh_text).join("\n")
         assert(problems.starts_with("stale: stored source_snapshot.hash {clean.snapshot.hash}"))
         assert(problems.contains("stale: snapshot part `{case.part}` changed"))
         assert(!problems.contains("stale: snapshot part `core` changed"))
     }
     // Same snapshot, edited bytes: reported as a hand edit, not as current.
-    edited_text :: stored.replace("\"status\":\"covered\"", "\"status\":\"missing\"")
+    edited_text: stored.replace("\"status\":\"covered\"", "\"status\":\"missing\"")
     assert(edited_text != stored)
-    hand :: check_manifest_text(edited_text, clean, stored).join("\n")
+    hand: check_manifest_text(edited_text, clean, stored).join("\n")
     assert(hand.contains("module:core.text.byte_count: stored status `missing`, the tree derives `covered`"))
     assert(hand.contains("stored manifest bytes differ from a fresh generation of the same snapshot"))
 }
@@ -398,7 +398,7 @@ fn errors_of(tree: Dyn) -> String Never! {
 // c34: the #2337 regression seeds pass on the fixed compiler, and putting
 // each seam's broken behavior back produces a sealed finding bundle.
 
-fn regression_identity() -> RunIdentity Never! {
+regression_identity: fn() -> RunIdentity Never! {
     RunIdentity{
         run_id: "regressions-test",
         started: "2026-11-05T00:00:00Z",
@@ -411,47 +411,47 @@ fn regression_identity() -> RunIdentity Never! {
     }
 }
 
-fn regression_scratch() -[FS]> String Never! {
+regression_scratch: fn() -[FS]> String Never! {
     files.mkdtemp("jet-hardening-regressions-") ?? panic("scratch: {err}")
 }
 
-fn regression_compiler() -[Env, Exec, Time.Wait]> String Never! {
+regression_compiler: fn() -[Env, Exec, Time.Wait]> String Never! {
     compiler_path() ?? panic("the regression seeds need a compiler: {err}")
 }
 
-fn stored_finding(findings: [Dyn], surface: String) -> Dyn Never! {
+stored_finding: fn(findings: [Dyn], surface: String) -> Dyn Never! {
     if findings.len() != 1 -> panic("{surface} gave {findings.len()} findings, not 1")
-    stored :: json.parse(json.canonical(findings[0]) ?? panic("no canonical form")) ?? panic("the stored bundle did not parse")
+    stored: json.parse(json.canonical(findings[0]) ?? panic("no canonical form")) ?? panic("the stored bundle did not parse")
     assert_eq(validate_repro(stored, digest("snapshot")).errors.join("\n"), "")
     stored
 }
 
 #Test("every regression seed prints its expected bytes on every tier of the fixed compiler") {
-    jet :: regression_compiler()
-    scratch :: regression_scratch()
+    jet: regression_compiler()
+    scratch: regression_scratch()
     loop seed in regression_seeds() {
-        runs :: run_seed(seed, jet, scratch) ?? panic("{seed.surface}: {err}")
+        runs: run_seed(seed, jet, scratch) ?? panic("{seed.surface}: {err}")
         assert_eq(runs.len(), regression_tiers().len())
         loop run in runs {
             if !clean_run(seed, run) -> panic("{seed.surface} on {run.tier} printed `{run.stdout}` (stderr `{run.stderr}`)")
         }
-        findings :: seed_finding(seed, runs, regression_identity(), "none") ?? panic("{seed.surface}: {err}")
+        findings: seed_finding(seed, runs, regression_identity(), "none") ?? panic("{seed.surface}: {err}")
         assert_eq(findings.len(), 0)
     }
 }
 
 #Test("inverting each regression seed's seam produces one sealed P0 finding bundle on that seam's tier") {
-    jet :: regression_compiler()
-    scratch :: regression_scratch()
+    jet: regression_compiler()
+    scratch: regression_scratch()
     found := [String]{}
     loop seed in regression_seeds() {
-        runs :: run_seed(seed, jet, scratch, invert: true) ?? panic("{seed.surface}: {err}")
+        runs: run_seed(seed, jet, scratch, invert: true) ?? panic("{seed.surface}: {err}")
         assert_eq(inversion_problem(seed, runs), "")
-        stored :: stored_finding(seed_finding(seed, runs, regression_identity(), inversion_arm(seed)) ?? panic("{seed.surface}: {err}"), seed.surface)
+        stored: stored_finding(seed_finding(seed, runs, regression_identity(), inversion_arm(seed)) ?? panic("{seed.surface}: {err}"), seed.surface)
         assert_eq(field_text(stored, "stable_surface_id") ?? "", seed.surface)
         assert_eq(field_text(stored, "classification") ?? "", "P0")
         assert_eq(field_text(stored, "mutation_arm") ?? "", inversion_arm(seed))
-        rebuilt :: reconstruct_repro(stored, seed.broken_tier) ?? panic("{seed.surface} did not reconstruct: {err}")
+        rebuilt: reconstruct_repro(stored, seed.broken_tier) ?? panic("{seed.surface} did not reconstruct: {err}")
         assert_eq(rebuilt.source, seed.source)
         assert_eq(rebuilt.stdin, seed.stdin.bytes())
         assert_eq(rebuilt.stdout, seed.broken.bytes())
@@ -463,43 +463,43 @@ fn stored_finding(findings: [Dyn], surface: String) -> Dyn Never! {
 }
 
 #Test("a loud failure off the default tier is P1, silent wrong data, a timeout and a signal are findings, and an inversion must show only on its tier") {
-    seed :: regression_seeds()[3]
-    clean :: TierRun{tier: JET_RUN, command: tier_command(JET_RUN), stdout: seed.expected.copy(), stderr: "", exit: Val(0), signal: None, timeout: false}
-    loud :: TierRun{tier: AOT_RELEASE, command: tier_command(AOT_RELEASE), stdout: "", stderr: "error: emission\n", exit: Val(1), signal: None, timeout: false}
-    silent :: TierRun{tier: AOT_RELEASE, command: tier_command(AOT_RELEASE), stdout: "0\n", stderr: "", exit: Val(0), signal: None, timeout: false}
-    hung :: TierRun{tier: AOT_RELEASE, command: tier_command(AOT_RELEASE), stdout: seed.expected.copy(), stderr: "", exit: None, signal: None, timeout: true}
-    killed :: TierRun{tier: AOT_RELEASE, command: tier_command(AOT_RELEASE), stdout: seed.expected.copy(), stderr: "", exit: None, signal: Val("11"), timeout: false}
-    expected :: [String]{"P1", "P0", "P1", "P1"}
-    cases :: [TierRun]{loud, silent, hung, killed}
+    seed: regression_seeds()[3]
+    clean: TierRun{tier: JET_RUN, command: tier_command(JET_RUN), stdout: seed.expected.copy(), stderr: "", exit: Val(0), signal: None, timeout: false}
+    loud: TierRun{tier: AOT_RELEASE, command: tier_command(AOT_RELEASE), stdout: "", stderr: "error: emission\n", exit: Val(1), signal: None, timeout: false}
+    silent: TierRun{tier: AOT_RELEASE, command: tier_command(AOT_RELEASE), stdout: "0\n", stderr: "", exit: Val(0), signal: None, timeout: false}
+    hung: TierRun{tier: AOT_RELEASE, command: tier_command(AOT_RELEASE), stdout: seed.expected.copy(), stderr: "", exit: None, signal: None, timeout: true}
+    killed: TierRun{tier: AOT_RELEASE, command: tier_command(AOT_RELEASE), stdout: seed.expected.copy(), stderr: "", exit: None, signal: Val("11"), timeout: false}
+    expected: [String]{"P1", "P0", "P1", "P1"}
+    cases: [TierRun]{loud, silent, hung, killed}
     loop (index, run) in cases {
-        stored :: stored_finding(seed_finding(seed, [TierRun]{run.copy(), clean.copy()}, regression_identity(), "none") ?? panic("{err}"), seed.surface)
+        stored: stored_finding(seed_finding(seed, [TierRun]{run.copy(), clean.copy()}, regression_identity(), "none") ?? panic("{err}"), seed.surface)
         assert_eq(field_text(stored, "classification") ?? "", expected[index])
         assert_eq(field_text(stored, "mutation_arm") ?? "", "none")
     }
     assert_eq((seed_finding(seed, [TierRun]{clean.copy()}, regression_identity(), "none") ?? panic("{err}")).len(), 0)
     // release-emission inverts aot_release: that tier must diverge, jet_run must not.
     assert_eq(inversion_problem(seed, [TierRun]{silent.copy(), clean.copy()}), "")
-    aot_clean :: TierRun{tier: AOT_RELEASE, command: tier_command(AOT_RELEASE), stdout: seed.expected.copy(), stderr: "", exit: Val(0), signal: None, timeout: false}
+    aot_clean: TierRun{tier: AOT_RELEASE, command: tier_command(AOT_RELEASE), stdout: seed.expected.copy(), stderr: "", exit: Val(0), signal: None, timeout: false}
     assert_eq(inversion_problem(seed, [TierRun]{aot_clean, clean.copy()}), "inverting regression:release-emission left aot_release clean")
-    run_failed :: TierRun{tier: JET_RUN, command: tier_command(JET_RUN), stdout: "", stderr: "error\n", exit: Val(1), signal: None, timeout: false}
+    run_failed: TierRun{tier: JET_RUN, command: tier_command(JET_RUN), stdout: "", stderr: "error\n", exit: Val(1), signal: None, timeout: false}
     assert_eq(inversion_problem(seed, [TierRun]{silent.copy(), run_failed}), "regression:release-emission failed on jet_run, which its inversion does not touch")
 }
 
 // c36: generated programs are typed, bounded and value-consuming across
 // every construct family, and agree on every tier.
 
-fn generated(seed: String, cases: Int) -> [Generated] Never! {
+generated: fn(seed: String, cases: Int) -> [Generated] Never! {
     generate_programs(seed, cases) ?? panic("generation failed: {err}")
 }
 
-fn run_problem(program: Generated, run: CaseRun) -> String Never! {
+run_problem: fn(program: Generated, run: CaseRun) -> String Never! {
     stderr := run.check.stderr.copy()
     loop tier_run in run.runs -> stderr = "{stderr}{tier_run.stderr}"
     "{program.case_id}: {classify(program, run).mismatch}\n{validate_program(program).join("\n")}\n{stderr}"
 }
 
 #Test("generated programs are typed, bounded and value-consuming, and every family leads a case") {
-    programs :: generated(GENERATOR_SEED, GENERATOR_MAX_CASES)
+    programs: generated(GENERATOR_SEED, GENERATOR_MAX_CASES)
     assert_eq(programs.len(), GENERATOR_MAX_CASES)
     leading := [String]{}
     reached := [String]{}
@@ -507,7 +507,7 @@ fn run_problem(program: Generated, run: CaseRun) -> String Never! {
     loop program in programs {
         assert_eq(validate_program(program).join("\n"), "")
         assert(program.source.len() <= GENERATOR_SOURCE_LIMIT)
-        family :: primary_instance(program).family
+        family: primary_instance(program).family
         if !leading.contains(family) -> &leading.push(family.copy())
         loop item in program.instances {
             if !reached.contains(item.construct_id) -> &reached.push(item.construct_id.copy())
@@ -523,31 +523,31 @@ fn run_problem(program: Generated, run: CaseRun) -> String Never! {
 }
 
 #Test("jet check admits every production and every tier prints every generated value alike") {
-    jet :: regression_compiler()
-    scratch :: regression_scratch()
-    coverage :: coverage_program(GENERATOR_SEED)
+    jet: regression_compiler()
+    scratch: regression_scratch()
+    coverage: coverage_program(GENERATOR_SEED)
     assert_eq(coverage.instances.len(), productions().len())
-    run :: run_case(coverage, jet, scratch, "") ?? panic("coverage: {err}")
+    run: run_case(coverage, jet, scratch, "") ?? panic("coverage: {err}")
     if !case_passes(coverage, run) -> panic(run_problem(coverage, run))
     loop tier_run in run.runs {
         loop item in coverage.instances -> assert(tier_run.stdout.contains("value_{item.slot} "))
     }
     loop program in generated(GENERATOR_SEED, 2) {
-        case_run :: run_case(program, jet, scratch, "") ?? panic("{program.case_id}: {err}")
+        case_run: run_case(program, jet, scratch, "") ?? panic("{program.case_id}: {err}")
         if !case_passes(program, case_run) -> panic(run_problem(program, case_run))
     }
 }
 
 // c37: each negative control fails the layer.
 
-fn forged(decls: String, body: String) -> Generated Never! {
-    item :: Instance{construct_id: "construct:control-flow/forged", family: "control-flow", slot: 0, markers: [String]{}, decls: decls.copy(), body: body.copy()}
+forged: fn(decls: String, body: String) -> Generated Never! {
+    item: Instance{construct_id: "construct:control-flow/forged", family: "control-flow", slot: 0, markers: [String]{}, decls: decls.copy(), body: body.copy()}
     program_of("case-forged", "forged:0", 0, 0, [Instance]{item})
 }
 
 #Test("a missing production, an unlowered construct, an optimizer-only change and observerless generation each fail the layer") {
     assert_eq(layer_controls(), [String]{})
-    rows :: productions()
+    rows: productions()
     no_places := [Production]{}
     loop row in rows {
         if row.family != "nested-places" -> &no_places.push(row.copy())
@@ -557,20 +557,20 @@ fn forged(decls: String, body: String) -> Generated Never! {
     holed := rows.copy()
     holed[0].body = holed[0].body.replace("$B * 2", "$Z * 2")
     assert(validate_productions(holed).join("\n").contains("construct:expressions/arith-call: the template has a hole the generator does not fill"))
-    program :: generated(GENERATOR_SEED, 1)[0]
-    clean :: clean_runs(program)
+    program: generated(GENERATOR_SEED, 1)[0]
+    clean: clean_runs(program)
     assert(case_passes(program, clean))
     unlowered := clean.copy()
     unlowered.runs = [TierRun]{}
     loop tier_run in clean.runs -> &unlowered.runs.push(planted(tier_run, program, UNLOWERED))
-    lowered :: classify(program, unlowered)
+    lowered: classify(program, unlowered)
     assert_eq(lowered.class, UNLOWERED)
     assert_eq(lowered.mismatch, "{UNLOWERED}|{AOT_RELEASE}|exit 1 planted: {AOT_RELEASE} did not lower {primary_instance(program).construct_id}")
     assert_eq(generated_severity(lowered.class), "P1")
     optimizer := clean.copy()
     optimizer.runs = [TierRun]{}
     loop tier_run in clean.runs -> &optimizer.runs.push(planted(tier_run, program, OPTIMIZER_ONLY))
-    changed :: classify(program, optimizer)
+    changed: classify(program, optimizer)
     assert_eq(changed.class, OPTIMIZER_ONLY)
     assert_eq(changed.mismatch, "{OPTIMIZER_ONLY}|{AOT_RELEASE}|`value_{program.primary} 1` became `value_{program.primary} 1~`")
     assert_eq(generated_severity(changed.class), "P0")
@@ -581,9 +581,9 @@ fn forged(decls: String, body: String) -> Generated Never! {
     missing_tier := clean.copy()
     missing_tier.runs = [TierRun]{clean.runs[1].copy()}
     assert_eq(classify(program, missing_tier).class, UNLOWERED)
-    silent :: forged("", "value_0 :: 1\n_ :: value_0\nprint(\"done\")")
+    silent: forged("", "value_0: 1\n_: value_0\nprint(\"done\")")
     assert(validate_program(silent).join("\n").contains("construct:control-flow/forged #0: `value_0` never reaches an observer"))
-    unbounded :: validate_program(forged("fn spin_0(n: Int) -> Int Never! {{\n    spin_0(n)\n}}", "value_0 := spin_0(1)\nloop value_0 > 0 -> value_0 += 1\nprint(\"value_0 {{value_0}}\")")).join("\n")
+    unbounded: validate_program(forged("spin_0: fn(n: Int) -> Int Never! {{\n    spin_0(n)\n}}", "value_0 := spin_0(1)\nloop value_0 > 0 -> value_0 += 1\nprint(\"value_0 {{value_0}}\")")).join("\n")
     assert(unbounded.contains("`spin_0` calls itself, so it may not end"))
     assert(unbounded.contains("`loop value_0 > 0 -> value_0 += 1` is not a bounded loop"))
 }
@@ -591,14 +591,14 @@ fn forged(decls: String, body: String) -> Generated Never! {
 // c38: a fixed seed gives stable ordered bundles, and minimization keeps
 // the construct and the mismatch.
 
-fn fingerprint(programs: [Generated]) -> [String] Never! {
+fingerprint: fn(programs: [Generated]) -> [String] Never! {
     out := [String]{}
     loop program in programs -> &out.push("{program.case_id} {program.seed} {primary_instance(program).construct_id} {digest(program.source)}")
     out
 }
 
 #Test("a fixed seed gives the same programs in the same order, and another seed gives others") {
-    first :: fingerprint(generated(GENERATOR_SEED, 32))
+    first: fingerprint(generated(GENERATOR_SEED, 32))
     assert_eq(first, fingerprint(generated(GENERATOR_SEED, 32)))
     assert(first != fingerprint(generated("2343", 32)))
     loop (index, line) in first -> assert(line.starts_with("{case_name(index)} {GENERATOR_SEED}:{index} "))
@@ -607,18 +607,18 @@ fn fingerprint(programs: [Generated]) -> [String] Never! {
 }
 
 #Test("minimizing a planted finding keeps its construct and mismatch, and its bundle is stable across runs") {
-    jet :: regression_compiler()
-    scratch :: regression_scratch()
+    jet: regression_compiler()
+    scratch: regression_scratch()
     target := generated(GENERATOR_SEED, 1)[0]
     loop program in generated(GENERATOR_SEED, GENERATOR_MAX_CASES) {
         if target.instances.len() < 3 && program.instances.len() == 3 -> target = program.copy()
     }
     assert_eq(target.instances.len(), 3)
-    arm :: "planted:{AOT_RELEASE}:{OPTIMIZER_ONLY}"
-    run :: run_case(target, jet, scratch, OPTIMIZER_ONLY) ?? panic("{target.case_id}: {err}")
-    verdict :: classify(target, run)
+    arm: "planted:{AOT_RELEASE}:{OPTIMIZER_ONLY}"
+    run: run_case(target, jet, scratch, OPTIMIZER_ONLY) ?? panic("{target.case_id}: {err}")
+    verdict: classify(target, run)
     if verdict.class != OPTIMIZER_ONLY -> panic(run_problem(target, run))
-    found :: minimize(target, run, jet, scratch, OPTIMIZER_ONLY) ?? panic("minimize: {err}")
+    found: minimize(target, run, jet, scratch, OPTIMIZER_ONLY) ?? panic("minimize: {err}")
     assert_eq(found.dropped.len(), 2)
     assert_eq(found.program.instances.len(), 1)
     assert_eq(found.program.primary, target.primary)
@@ -626,23 +626,23 @@ fn fingerprint(programs: [Generated]) -> [String] Never! {
     assert_eq(validate_program(found.program).join("\n"), "")
     assert_eq(classify(found.program, found.run).mismatch, verdict.mismatch)
     assert(found.program.source.len() < target.source.len())
-    bundle :: finding_bundle(found, regression_identity(), arm) ?? panic("seal: {err}")
-    stored :: stored_finding([Dyn]{bundle.copy()}, target.case_id)
+    bundle: finding_bundle(found, regression_identity(), arm) ?? panic("seal: {err}")
+    stored: stored_finding([Dyn]{bundle.copy()}, target.case_id)
     assert_eq(field_text(stored, "stable_surface_id") ?? "", primary_instance(target).construct_id)
     assert_eq(field_text(stored, "classification") ?? "", "P0")
     assert_eq(field_text(stored, "seed") ?? "", target.seed)
     assert_eq(field_text(stored, "mutation_arm") ?? "", arm)
-    rebuilt :: reconstruct_repro(stored, AOT_RELEASE) ?? panic("reconstruct: {err}")
+    rebuilt: reconstruct_repro(stored, AOT_RELEASE) ?? panic("reconstruct: {err}")
     assert_eq(rebuilt.source, found.program.source)
     assert_eq(rebuilt.exit, Val(0))
     // The same minimized case run again, by another run at another time,
     // seals to the same stable digest.
-    again :: run_case(found.program, jet, regression_scratch(), OPTIMIZER_ONLY) ?? panic("rerun: {err}")
+    again: run_case(found.program, jet, regression_scratch(), OPTIMIZER_ONLY) ?? panic("rerun: {err}")
     later := regression_identity()
     later.run_id = "generate-later"
     later.started = "2026-11-06T00:00:00Z"
     later.finished = "2026-11-06T00:00:09Z"
-    second :: finding_bundle(Minimized{program: found.program.copy(), run: again, dropped: found.dropped.copy()}, later, arm) ?? panic("reseal: {err}")
+    second: finding_bundle(Minimized{program: found.program.copy(), run: again, dropped: found.dropped.copy()}, later, arm) ?? panic("reseal: {err}")
     assert(json.canonical(second) != json.canonical(bundle))
     assert_eq(stable_digest(second) ?? "", stable_digest(bundle) ?? "")
 }

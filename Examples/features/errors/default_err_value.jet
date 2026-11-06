@@ -1,6 +1,6 @@
 // D-FAIL-ERROR1=A: Err is both the default error type and its constructor.
-fn inspect() {
-    error :: Err("parse failed", code: "CFG404", cause: Err("unexpected token at line 3"))
+inspect: fn() {
+    error: Err("parse failed", code: "CFG404", cause: Err("unexpected token at line 3"))
     print(error.message)
     print(error.code ?? "none")
     print((error.cause ?? Err("missing cause")).message)
@@ -8,15 +8,15 @@ fn inspect() {
     print((error.cause ?? Err("missing cause")).message)
 }
 
-fn explicit() -> Int { Err("explicit failure") }
+explicit: fn() -> Int { Err("explicit failure") }
 
-fn implicit() -> Int { Err("implicit failure") }
+implicit: fn() -> Int { Err("implicit failure") }
 
 #Error
-enum TypedFailure {
+TypedFailure: enum {
     Stopped
 }
 
-fn typed_arm() -> Int TypedFailure! { Err(TypedFailure.Stopped) }
+typed_arm: fn() -> Int TypedFailure! { Err(TypedFailure.Stopped) }
 
-fn run() { inspect() }
+run: fn() { inspect() }

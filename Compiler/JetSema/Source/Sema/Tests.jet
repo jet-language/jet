@@ -14,7 +14,7 @@ use jet_foundation.[
 
 // The parameter types the property-test runner can synthesize inputs for: the
 // scalar value types plus `[T]`, `T?` and fixed lists of a generatable element.
-fn sema_property_param_generatable(ty: Type) -> Bool Never! {
+sema_property_param_generatable: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Int | .Float | .Bool | .String | .Char | .Float32 | .IntN(_, _) | .InlineRange(_, _, _) -> true
         .List(inner) -> sema_property_param_generatable(inner)
@@ -27,7 +27,7 @@ fn sema_property_param_generatable(ty: Type) -> Bool Never! {
 // E0613 (Rust `property_param_unsupported`): one row per parameter of a
 // parameterized `#Test fn` whose type has no automatic generator, reported
 // before the test body's own diagnostics.
-fn sema_property_param_diagnostics(test: TestDef) -> [Diagnostic] Never! {
+sema_property_param_diagnostics: fn(test: TestDef) -> [Diagnostic] Never! {
     diagnostics := [Diagnostic]{}
     loop parameter in test.params {
         if sema_property_param_generatable(parameter.ty) -> next
@@ -42,7 +42,7 @@ fn sema_property_param_diagnostics(test: TestDef) -> [Diagnostic] Never! {
     diagnostics
 }
 
-struct SemaTestFunctionCheckResult {
+SemaTestFunctionCheckResult: struct {
     function: FnBody?
     call_facts: [SemaCallSiteFact]
     comptime_requests: [SemaComptimeRequest]
@@ -57,7 +57,7 @@ struct SemaTestFunctionCheckResult {
     incomplete_reasons: [String]
 }
 
-fn sema_check_test_function(test: TestDef, environment: SemaScopeEnvironment, program: SemaProgramTables, module_scopes: SemaScopeTable, host_hooks: SemaHostHookAccess?) -> SemaTestFunctionCheckResult {
+sema_check_test_function: fn(test: TestDef, environment: SemaScopeEnvironment, program: SemaProgramTables, module_scopes: SemaScopeTable, host_hooks: SemaHostHookAccess?) -> SemaTestFunctionCheckResult {
     key := checked_test_artifact_key(environment.module_identity, test)
     owner_id := SymbolID{key: key}
     scopes := sema_scope_snapshot(module_scopes)
@@ -122,10 +122,10 @@ fn sema_check_test_function(test: TestDef, environment: SemaScopeEnvironment, pr
     }
 }
 
-fn sema_test_synthetic_prefix() -> String Never! { "__test_" }
+sema_test_synthetic_prefix: fn() -> String Never! { "__test_" }
 
 // The synthetic function of a `#Test` block. It is marked compiler-generated,
 // but its body is the user's test code.
-fn sema_test_synthetic_function(func: Func) -> Bool Never! {
+sema_test_synthetic_function: fn(func: Func) -> Bool Never! {
     func.compiler_generated && func.name.starts_with(sema_test_synthetic_prefix())
 }

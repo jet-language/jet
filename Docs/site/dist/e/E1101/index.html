@@ -38,10 +38,10 @@
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E1101</code>: <code>tests/ui/closures/parallel_adapters_reject_unsafe_boundaries_before_codegen.stderr</code>.</p>
 <pre class="diag">Error [jet.ConcurrentCaptureNotOwned]: `seen` cannot cross the `parallel worker` boundary: the value writes shared state
-  --&gt; parallel_adapters_reject_unsafe_boundaries_before_codegen.jet:4:35
+  --&gt; tests/ui/closures/parallel_adapters_reject_unsafe_boundaries_before_codegen.jet:4:33
     |
-  4 |     ignored :: [1, 2, 3].para_map((n: Int) -&gt; { &amp;seen.push(n) })
-    |                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  4 |     ignored: [1, 2, 3].para_map((n: Int) -&gt; { &amp;seen.push(n) })
+    |                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
  Why: The `parallel worker` boundary can run concurrently with its owner; the write would race with the owner or require a hidden merge rule
  Fix: Give it with `^`, freeze it with `freeze`, or share it with `shared`
 More: jet-lang.dev/e/E1101

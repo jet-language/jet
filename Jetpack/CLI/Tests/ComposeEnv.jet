@@ -4,12 +4,12 @@
 // (Tower #3664) and are not ported with it.
 
 // Plain lease text as a child sees it; no lease descriptor is involved.
-fn cli_test_plain(text: LeaseText?) -> String? {
+cli_test_plain: fn(text: LeaseText?) -> String? {
     if text == .Val(value) -> return Val(value.render(LeaseBinding.empty()) ?? panic("plain text renders unbound"))
     None
 }
 
-fn cli_test_provider_paths(file: String, value: String) -> String? {
+cli_test_provider_paths: fn(file: String, value: String) -> String? {
     cli_test_plain(cli_resolve_provider_paths(LeaseText.plain("/hangar/objects/sha256-output"), file, value))
 }
 
@@ -37,16 +37,16 @@ fn cli_test_provider_paths(file: String, value: String) -> String? {
 }
 
 #Test("cli allowlisted dotenv snapshot keeps the declared key only") {
-    root :: files.tmpdir("jetpack-dotenv-allowlist-") ?? panic("claim scratch dir")
+    root: files.tmpdir("jetpack-dotenv-allowlist-") ?? panic("claim scratch dir")
     files.write(files.join(root, ".env"), "ALLOWED=from-dotenv\nUNLISTED=must-not-load\n") ?? panic("write .env")
-    values :: cli_read_dotenv_snapshot(root, ".env", [String]{"ALLOWED"}) ?? panic("read dotenv")
+    values: cli_read_dotenv_snapshot(root, ".env", [String]{"ALLOWED"}) ?? panic("read dotenv")
     assert(values == [String: String]{"ALLOWED": "from-dotenv"})
     files.remove_all(root).drop("scratch cleanup")
 }
 
 #Test("cli hardlinked dotenv never exports an allowlisted outside value") {
-    root :: files.tmpdir("jetpack-dotenv-hardlink-") ?? panic("claim scratch dir")
-    outside :: "{root}-outside"
+    root: files.tmpdir("jetpack-dotenv-hardlink-") ?? panic("claim scratch dir")
+    outside: "{root}-outside"
     files.write(outside, "ALLOWED=outside\nUNLISTED=outside\n") ?? panic("write outside")
     files.hard_link(outside, files.join(root, ".env")) ?? panic("hard link .env")
     if cli_read_dotenv_snapshot(root, ".env", [String]{"ALLOWED"}) == {
@@ -62,7 +62,7 @@ fn cli_test_provider_paths(file: String, value: String) -> String? {
     definitions := [String]{}
     loop tool in CLI_NATIVE_DEV_TOOLS -> &definitions.push(tool.definition)
     assert_eq(definitions, [String]{"jetDev", "jetpackDev"})
-    tools :: cli_native_dev_tool_paths([String: String]{"JET": "/opt/jet/bin/jet", "JETPACK": "/opt/jetpack/bin/jetpack", "PATH": "/usr/bin"})
+    tools: cli_native_dev_tool_paths([String: String]{"JET": "/opt/jet/bin/jet", "JETPACK": "/opt/jetpack/bin/jetpack", "PATH": "/usr/bin"})
     assert_eq(tools, [(command: String, binary: String)]{
         (command: "jet", binary: "/opt/jet/bin/jet"),
         (command: "jetpack", binary: "/opt/jetpack/bin/jetpack")
@@ -73,7 +73,7 @@ fn cli_test_provider_paths(file: String, value: String) -> String? {
 }
 
 #Test("cli native projection derives root timezone and loader paths") {
-    projection :: cli_native_environment_projection("/workspace/jet", [(name: String, output: LeaseText)]{
+    projection: cli_native_environment_projection("/workspace/jet", [(name: String, output: LeaseText)]{
         (name: "tzdata", output: LeaseText.plain("/hangar/tzdata-1")),
         (name: "raylib", output: LeaseText.plain("/hangar/raylib-1")),
         (name: "vulkan-loader", output: LeaseText.plain("/hangar/vulkan-1"))
@@ -82,11 +82,11 @@ fn cli_test_provider_paths(file: String, value: String) -> String? {
         (command: "jetpack", binary: "/opt/jet/bin/jetpack")
     }, Val("/host/lib"))
     assert_eq(projection.bin_dirs(), [String]{"/opt/jet/bin"})
-    vars :: projection.env_vars()
+    vars: projection.env_vars()
     assert_eq(vars.get("JET_ROOT"), Val("/workspace/jet"))
     assert_eq(vars.get("JET_ENV_DISABLE"), Val("1"))
     assert_eq(vars.get("JET_NIX_TMP_CLEANED"), Val("1"))
-    leased :: projection.lease_vars()
+    leased: projection.lease_vars()
     assert_eq(cli_test_plain(leased.get("TZDIR")), Val("/hangar/tzdata-1/share/zoneinfo"))
     if sys.name() == "linux" -> assert_eq(cli_test_plain(leased.get("LD_LIBRARY_PATH")), Val("/hangar/vulkan-1/lib:/hangar/raylib-1/lib:/host/lib"))
     assert_eq(projection.activation, NativeActivation.Disabled)

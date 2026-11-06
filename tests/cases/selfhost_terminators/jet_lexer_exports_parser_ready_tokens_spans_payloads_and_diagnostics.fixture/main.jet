@@ -2,36 +2,36 @@
 // Canonical diagnostic values shared by every compiler phase. Spans are UTF-8
 // byte offsets into the checked source; edits and labels use the same spans.
 
-struct Span {
+Span: struct {
     start: Int
     end: Int
 }
 
-struct TextEdit {
+TextEdit: struct {
     span: Span
     new_text: String
 }
-enum DiagnosticMoment { Compile Run Test Tool }
+DiagnosticMoment: enum { Compile Run Test Tool }
 
-enum DiagnosticFixApplicability { Safe Suggested }
+DiagnosticFixApplicability: enum { Safe Suggested }
 
-enum DiagnosticFixSafety { Formatting BehaviorPreserving APIChanging TargetChanging NeedsReview }
+DiagnosticFixSafety: enum { Formatting BehaviorPreserving APIChanging TargetChanging NeedsReview }
 
-enum DiagnosticNoFixReasonKind { Behavior Design Ambiguous }
+DiagnosticNoFixReasonKind: enum { Behavior Design Ambiguous }
 
-struct DiagnosticNoFixReason {
+DiagnosticNoFixReason: struct {
     kind: DiagnosticNoFixReasonKind
     next: String
 }
 
-struct DiagnosticOrigin {
+DiagnosticOrigin: struct {
     display: String
     path: String
     source: String
     revision: String
 }
 
-struct DiagnosticCause {
+DiagnosticCause: struct {
     code: String
     span: Span?{None}
     origin: DiagnosticOrigin?{None}
@@ -40,12 +40,12 @@ struct DiagnosticCause {
 // A secondary source location explaining the primary report, such as the
 // earlier move a later use reaches. The host renderer draws it as its own
 // `file:line:col` snippet with a caret and the message.
-struct DiagnosticLabel {
+DiagnosticLabel: struct {
     span: Span
     message: String
 }
 
-enum DiagnosticCryptoMisuseReason {
+DiagnosticCryptoMisuseReason: enum {
     InvalidLength
     NonceLength
     OutputLength
@@ -59,34 +59,34 @@ enum DiagnosticCryptoMisuseReason {
     DeterministicEntropy
 }
 
-struct DiagnosticErrorContextFrame {
+DiagnosticErrorContextFrame: struct {
     text: String
     file: String
     line: Int
 }
 
-struct DiagnosticErrorConversion {
+DiagnosticErrorConversion: struct {
     source: String
     target: String
 }
 
-struct DiagnosticErrorField {
+DiagnosticErrorField: struct {
     name: String
     value: String
 }
 
-struct DiagnosticErrorSpan {
+DiagnosticErrorSpan: struct {
     start: Int
     end: Int
 }
 
-struct DiagnosticErrorDetails {
+DiagnosticErrorDetails: struct {
     variant: String
     fields: [DiagnosticErrorField]
     source_span: DiagnosticErrorSpan?{None}
 }
 
-struct DiagnosticErrorJourneyFrame {
+DiagnosticErrorJourneyFrame: struct {
     fn_name: String
     file: String
     line: Int
@@ -94,7 +94,7 @@ struct DiagnosticErrorJourneyFrame {
     hops: Int
 }
 
-struct DiagnosticBuildError {
+DiagnosticBuildError: struct {
     code: String?{None}
     message: String
     typed_identity: String?{None}
@@ -105,14 +105,14 @@ struct DiagnosticBuildError {
     details: DiagnosticErrorDetails?{None}
 }
 
-enum DiagnosticStructured {
+DiagnosticStructured: enum {
     SuggestedEdits(edits: [TextEdit])
     CryptoMisuse(reason: DiagnosticCryptoMisuseReason, operation: String, expected: String?, actual: Int?)
     BuildError(report: DiagnosticBuildError)
     RuntimeHostFault(stdout: String)
 }
 
-struct Diagnostic {
+Diagnostic: struct {
     moment: DiagnosticMoment{DiagnosticMoment.Compile}
     severity: Int
     code: String
@@ -139,7 +139,7 @@ struct Diagnostic {
     nearest_granting_scope: String?{None}
 }
 
-fn diagnostic_with_source_path(diagnostic: ^Diagnostic, source_path: String, aggregate_source_offset: Int) -> Diagnostic Never! {
+diagnostic_with_source_path: fn(diagnostic: ^Diagnostic, source_path: String, aggregate_source_offset: Int) -> Diagnostic Never! {
     updated := diagnostic
     updated.source_path = Val(source_path)
     updated.source_offset = Val(aggregate_source_offset)
@@ -147,7 +147,7 @@ fn diagnostic_with_source_path(diagnostic: ^Diagnostic, source_path: String, agg
     updated
 }
 
-fn diagnostic_with_source_mapping(diagnostic: ^Diagnostic, source_path: String, aggregate_source_offset: Int, source_start: Int) -> Diagnostic Never! {
+diagnostic_with_source_mapping: fn(diagnostic: ^Diagnostic, source_path: String, aggregate_source_offset: Int, source_start: Int) -> Diagnostic Never! {
     updated := diagnostic
     updated.source_path = Val(source_path)
     updated.source_offset = Val(aggregate_source_offset)
@@ -155,86 +155,86 @@ fn diagnostic_with_source_mapping(diagnostic: ^Diagnostic, source_path: String, 
     updated
 }
 
-fn diagnostic_with_edit(diagnostic: Diagnostic, edit: TextEdit) -> Diagnostic Never! {
+diagnostic_with_edit: fn(diagnostic: Diagnostic, edit: TextEdit) -> Diagnostic Never! {
     diagnostic_registry_with_edit(diagnostic.copy(), edit)
 }
 
-fn diagnostic_with_moment(diagnostic: ^Diagnostic, moment: DiagnosticMoment) -> Diagnostic Never! {
+diagnostic_with_moment: fn(diagnostic: ^Diagnostic, moment: DiagnosticMoment) -> Diagnostic Never! {
     updated := diagnostic
     updated.moment = moment
     updated
 }
 
-fn diagnostic_with_origin(diagnostic: ^Diagnostic, origin: DiagnosticOrigin) -> Diagnostic Never! {
+diagnostic_with_origin: fn(diagnostic: ^Diagnostic, origin: DiagnosticOrigin) -> Diagnostic Never! {
     updated := diagnostic
     updated.origin = Val(origin)
     updated
 }
 
-fn diagnostic_with_cause(diagnostic: ^Diagnostic, cause: DiagnosticCause) -> Diagnostic Never! {
+diagnostic_with_cause: fn(diagnostic: ^Diagnostic, cause: DiagnosticCause) -> Diagnostic Never! {
     updated := diagnostic
     &updated.cause.push(cause)
     updated
 }
 
-fn diagnostic_with_causes(diagnostic: ^Diagnostic, causes: [DiagnosticCause]) -> Diagnostic Never! {
+diagnostic_with_causes: fn(diagnostic: ^Diagnostic, causes: [DiagnosticCause]) -> Diagnostic Never! {
     updated := diagnostic
     updated.cause = causes
     updated
 }
 
-fn diagnostic_with_label(diagnostic: ^Diagnostic, span: Span, message: String) -> Diagnostic Never! {
+diagnostic_with_label: fn(diagnostic: ^Diagnostic, span: Span, message: String) -> Diagnostic Never! {
     updated := diagnostic
     &updated.labels.push(DiagnosticLabel{span: span, message: message})
     updated
 }
 
-fn diagnostic_with_edit_grade(diagnostic: Diagnostic, edit: TextEdit, applicability: DiagnosticFixApplicability, safety: DiagnosticFixSafety) -> Diagnostic Never! {
+diagnostic_with_edit_grade: fn(diagnostic: Diagnostic, edit: TextEdit, applicability: DiagnosticFixApplicability, safety: DiagnosticFixSafety) -> Diagnostic Never! {
     diagnostic_registry_with_edit_grade(diagnostic.copy(), edit, applicability, safety)
 }
 
-fn diagnostic_with_fix_grades(diagnostic: Diagnostic, applicability: DiagnosticFixApplicability, safety: DiagnosticFixSafety) -> Diagnostic Never! {
-    edit :: diagnostic.edit ?? panic("diagnostic `{diagnostic.code}` needs an edit before applying explicit fix grades")
+diagnostic_with_fix_grades: fn(diagnostic: Diagnostic, applicability: DiagnosticFixApplicability, safety: DiagnosticFixSafety) -> Diagnostic Never! {
+    edit: diagnostic.edit ?? panic("diagnostic `{diagnostic.code}` needs an edit before applying explicit fix grades")
     diagnostic_registry_with_edit_grade(diagnostic.copy(), edit, applicability, safety)
 }
 
-fn diagnostic_with_structured_edit(diagnostic: Diagnostic, edit: TextEdit) -> Diagnostic Never! {
+diagnostic_with_structured_edit: fn(diagnostic: Diagnostic, edit: TextEdit) -> Diagnostic Never! {
     diagnostic_registry_with_structured_edit(diagnostic.copy(), edit)
 }
 
-fn diagnostic_with_source_derived_suggestion(diagnostic: Diagnostic, span: Span, new_text: String) -> Diagnostic Never! {
+diagnostic_with_source_derived_suggestion: fn(diagnostic: Diagnostic, span: Span, new_text: String) -> Diagnostic Never! {
     diagnostic_registry_with_source_derived_suggestion(diagnostic.copy(), span, new_text)
 }
 
-fn diagnostic_with_alternative_edit(diagnostic: Diagnostic, edit: TextEdit) -> Diagnostic Never! {
+diagnostic_with_alternative_edit: fn(diagnostic: Diagnostic, edit: TextEdit) -> Diagnostic Never! {
     diagnostic_registry_with_alternative_edit(diagnostic.copy(), edit)
 }
 
-fn diagnostic_with_no_fix_reason(diagnostic: ^Diagnostic, reason: DiagnosticNoFixReason) -> Diagnostic Never! {
+diagnostic_with_no_fix_reason: fn(diagnostic: ^Diagnostic, reason: DiagnosticNoFixReason) -> Diagnostic Never! {
     updated := diagnostic
     updated.no_fix_reason = Val(reason)
     updated
 }
 
-fn diagnostic_with_detail(diagnostic: ^Diagnostic, detail: String) -> Diagnostic Never! {
+diagnostic_with_detail: fn(diagnostic: ^Diagnostic, detail: String) -> Diagnostic Never! {
     updated := diagnostic
     updated.detail = Val(detail)
     updated
 }
 
-fn diagnostic_with_structured(diagnostic: ^Diagnostic, structured: DiagnosticStructured) -> Diagnostic Never! {
+diagnostic_with_structured: fn(diagnostic: ^Diagnostic, structured: DiagnosticStructured) -> Diagnostic Never! {
     updated := diagnostic
     updated.structured = Val(structured)
     updated
 }
 
-fn diagnostic_with_decision_row(diagnostic: ^Diagnostic, decision_row: MIRDecisionRow) -> Diagnostic Never! {
+diagnostic_with_decision_row: fn(diagnostic: ^Diagnostic, decision_row: MIRDecisionRow) -> Diagnostic Never! {
     updated := diagnostic
     updated.decision_row = Val(decision_row)
     updated
 }
 
-fn diagnostic_with_rights(diagnostic: ^Diagnostic, denial_kind: String, call_chain: [String], scope_chain: [String], nearest_granting_scope: String?) -> Diagnostic Never! {
+diagnostic_with_rights: fn(diagnostic: ^Diagnostic, denial_kind: String, call_chain: [String], scope_chain: [String], nearest_granting_scope: String?) -> Diagnostic Never! {
     updated := diagnostic
     updated.denial_kind = Val(denial_kind)
     updated.call_chain = call_chain
@@ -243,8 +243,8 @@ fn diagnostic_with_rights(diagnostic: ^Diagnostic, denial_kind: String, call_cha
     updated
 }
 
-DIAGNOSTIC_ERROR :: 1
-DIAGNOSTIC_LINT :: 2
+DIAGNOSTIC_ERROR: 1
+DIAGNOSTIC_LINT: 2
 
 // [selfhost terminator pass source: Compiler/JetLexer/Source/Lexer/Scan.jet]
 // Raw source scanning for the Jet lexer.
@@ -252,20 +252,20 @@ DIAGNOSTIC_LINT :: 2
 // The scanner emits private four-field raw-token facts consumed by both
 // payload construction and the terminator pass:
 // [kind, byte_start, byte_end, first_char_is_uppercase].
-use unicode :: core.text
+use unicode: core.text
 
 
-fn byte_at(source: [U8], index: Int) -> Int Never! {
+byte_at: fn(source: [U8], index: Int) -> Int Never! {
     if index < 0 || index >= source.len() -> return -1
     Int.from_u8(source[index])
 }
 
-fn is_continuation(value: Int) -> Bool Never! {
+is_continuation: fn(value: Int) -> Bool Never! {
     value >= 128 && value <= 191
 }
 
-fn utf8_width(source: [U8], index: Int) -> Int Never! {
-    first :: byte_at(source, index)
+utf8_width: fn(source: [U8], index: Int) -> Int Never! {
+    first: byte_at(source, index)
     if first < 0 -> return 0
     if first < 128 -> return 1
     if first >= 194 && first <= 223 && is_continuation(byte_at(source, index + 1)) -> return 2
@@ -274,8 +274,8 @@ fn utf8_width(source: [U8], index: Int) -> Int Never! {
     1
 }
 
-fn scalar_at(source: [U8], index: Int) -> String Never! {
-    width :: utf8_width(source, index)
+scalar_at: fn(source: [U8], index: Int) -> String Never! {
+    width: utf8_width(source, index)
     if width <= 0 -> return ""
     out := [U8]{}
     loop offset in 0..<width {
@@ -285,31 +285,31 @@ fn scalar_at(source: [U8], index: Int) -> String Never! {
     String.from_bytes(out) ?? ""
 }
 
-fn ascii_alpha(value: Int) -> Bool Never! {
+ascii_alpha: fn(value: Int) -> Bool Never! {
     (value >= 65 && value <= 90) || (value >= 97 && value <= 122)
 }
 
-fn ascii_digit(value: Int) -> Bool Never! {
+ascii_digit: fn(value: Int) -> Bool Never! {
     value >= 48 && value <= 57
 }
 
-fn is_identifier_start(source: [U8], index: Int) -> Bool Never! {
-    value :: byte_at(source, index)
+is_identifier_start: fn(source: [U8], index: Int) -> Bool Never! {
+    value: byte_at(source, index)
     value == 95 || ascii_alpha(value) || unicode.is_alphabetic(scalar_at(source, index))
 }
 
-fn is_identifier_continue(source: [U8], index: Int) -> Bool Never! {
-    value :: byte_at(source, index)
+is_identifier_continue: fn(source: [U8], index: Int) -> Bool Never! {
+    value: byte_at(source, index)
     value == 95 || ascii_alpha(value) || ascii_digit(value) || unicode.is_alphabetic(scalar_at(source, index)) || unicode.is_numeric(scalar_at(source, index))
 }
 
-fn first_char_is_upper(source: [U8], start: Int) -> Bool Never! {
+first_char_is_upper: fn(source: [U8], start: Int) -> Bool Never! {
     scalar := scalar_at(source, start)
     unicode.is_alphabetic(scalar) && unicode.upper(scalar) == scalar && unicode.lower(scalar) != scalar
 }
 
-fn is_whitespace_at(source: [U8], index: Int) -> Bool Never! {
-    value :: byte_at(source, index)
+is_whitespace_at: fn(source: [U8], index: Int) -> Bool Never! {
+    value: byte_at(source, index)
     if value < 0 -> return false
     if value < 128 {
         return value == 9 || value == 10 || value == 11 || value == 12 || value == 13 || value == 32
@@ -317,7 +317,7 @@ fn is_whitespace_at(source: [U8], index: Int) -> Bool Never! {
     unicode.is_whitespace(scalar_at(source, index))
 }
 
-fn slice_text(source: [U8], start: Int, end: Int) -> String Never! {
+slice_text: fn(source: [U8], start: Int, end: Int) -> String Never! {
     out := [U8]{}
     i := start
     loop i < end && i < source.len() {
@@ -327,7 +327,7 @@ fn slice_text(source: [U8], start: Int, end: Int) -> String Never! {
     String.from_bytes(out) ?? ""
 }
 
-fn emit(facts: &[Int], kind: Int, start: Int, end: Int, uppercase: Bool) Never! {
+emit: fn(facts: &[Int], kind: Int, start: Int, end: Int, uppercase: Bool) Never! {
     flag := 0
     if uppercase -> flag = 1
     &facts.push(kind)
@@ -336,24 +336,24 @@ fn emit(facts: &[Int], kind: Int, start: Int, end: Int, uppercase: Bool) Never! 
     &facts.push(flag)
 }
 
-fn push_code(facts: &[Int], kind: Int, start: Int, end: Int, uppercase: Bool) -> Int Never! {
+push_code: fn(facts: &[Int], kind: Int, start: Int, end: Int, uppercase: Bool) -> Int Never! {
     emit(&facts, kind, start, end, uppercase)
     kind
 }
 
-fn previous_scalar_start(source: [U8], index: Int) -> Int Never! {
+previous_scalar_start: fn(source: [U8], index: Int) -> Int Never! {
     if index <= 0 -> return -1
     cursor := index - 1
     loop cursor > 0 && is_continuation(byte_at(source, cursor)) -> cursor -= 1
     cursor
 }
 
-fn previous_is_identifier(source: [U8], index: Int) -> Bool {
-    previous :: previous_scalar_start(source, index)
+previous_is_identifier: fn(source: [U8], index: Int) -> Bool {
+    previous: previous_scalar_start(source, index)
     previous >= 0 && is_identifier_continue(source, previous)
 }
 
-fn scan_identifier_end(source: [U8], start: Int) -> Int {
+scan_identifier_end: fn(source: [U8], start: Int) -> Int {
     i := start
     loop i < source.len() {
         if !is_identifier_continue(source, i) -> return i
@@ -362,7 +362,7 @@ fn scan_identifier_end(source: [U8], start: Int) -> Int {
     i
 }
 
-fn scan_unit_suffix_end(source: [U8], start: Int) -> Int {
+scan_unit_suffix_end: fn(source: [U8], start: Int) -> Int {
     i := start
     loop i < source.len() {
         if !is_identifier_continue(source, i) -> return i
@@ -371,9 +371,9 @@ fn scan_unit_suffix_end(source: [U8], start: Int) -> Int {
     i
 }
 
-fn word_kind(source: [U8], start: Int, end: Int, previous_kind: Int) -> Int Never! {
-    word :: slice_text(source, start, end)
-    previous_is_dot :: if previous_kind == {
+word_kind: fn(source: [U8], start: Int, end: Int, previous_kind: Int) -> Int Never! {
+    word: slice_text(source, start, end)
+    previous_is_dot: if previous_kind == {
         K_DOT -> true
         K_QUESTION_DOT -> true
         else -> false
@@ -414,10 +414,10 @@ fn word_kind(source: [U8], start: Int, end: Int, previous_kind: Int) -> Int Neve
     }
 }
 
-fn scan_digits(source: [U8], start: Int) -> Int Never! {
+scan_digits: fn(source: [U8], start: Int) -> Int Never! {
     i := start
     loop i < source.len() {
-        value :: byte_at(source, i)
+        value: byte_at(source, i)
         if {
             ascii_digit(value) || value == 95 -> {
                 i += 1
@@ -430,15 +430,15 @@ fn scan_digits(source: [U8], start: Int) -> Int Never! {
     i
 }
 
-fn base_digit(value: Int, radix: Int) -> Bool Never! {
+base_digit: fn(value: Int, radix: Int) -> Bool Never! {
     if value >= 48 && value <= 57 -> return value - 48 < radix
     if value >= 65 && value <= 70 -> return value - 55 < radix
     if value >= 97 && value <= 102 -> return value - 87 < radix
     false
 }
 
-fn base_number_end(source: [U8], start: Int) -> Int Never! {
-    marker :: byte_at(source, start + 1)
+base_number_end: fn(source: [U8], start: Int) -> Int Never! {
+    marker: byte_at(source, start + 1)
     radix := if marker == {
         120 | 88 -> 16
         111 | 79 -> 8
@@ -448,7 +448,7 @@ fn base_number_end(source: [U8], start: Int) -> Int Never! {
     if radix == 0 -> return -1
     i := start + 2
     loop i < source.len() {
-        value :: byte_at(source, i)
+        value: byte_at(source, i)
         if {
             value == 95 || base_digit(value, radix) -> {
                 i += 1
@@ -461,9 +461,9 @@ fn base_number_end(source: [U8], start: Int) -> Int Never! {
     i
 }
 
-fn scan_numeric_end(source: [U8], start: Int) -> Int Never! {
+scan_numeric_end: fn(source: [U8], start: Int) -> Int Never! {
     if byte_at(source, start) == 48 {
-        prefixed :: base_number_end(source, start)
+        prefixed: base_number_end(source, start)
         if prefixed >= 0 -> return prefixed
     }
     i := scan_digits(source, start)
@@ -471,14 +471,14 @@ fn scan_numeric_end(source: [U8], start: Int) -> Int Never! {
         i += 1
         i = scan_digits(source, i)
     }
-    exponent :: byte_at(source, i)
+    exponent: byte_at(source, i)
     if exponent == 101 || exponent == 69 {
-        after :: byte_at(source, i + 1)
+        after: byte_at(source, i + 1)
         valid := ascii_digit(after)
         if (after == 43 || after == 45) && ascii_digit(byte_at(source, i + 2)) -> valid = true
         if valid {
             i += 1
-            sign :: byte_at(source, i)
+            sign: byte_at(source, i)
             if sign == 43 || sign == 45 -> i += 1
             i = scan_digits(source, i)
         }
@@ -486,46 +486,46 @@ fn scan_numeric_end(source: [U8], start: Int) -> Int Never! {
     i
 }
 
-fn scan_number_end(source: [U8], start: Int) -> Int {
-    numeric_end :: scan_numeric_end(source, start)
+scan_number_end: fn(source: [U8], start: Int) -> Int {
+    numeric_end: scan_numeric_end(source, start)
     if numeric_end < 0 -> return start + 1
     if base_number_end(source, start) >= 0 -> return numeric_end
-    value :: byte_at(source, numeric_end)
+    value: byte_at(source, numeric_end)
     if !ascii_alpha(value) && value != 95 -> return numeric_end
     scan_unit_suffix_end(source, numeric_end)
 }
 
-fn numeric_is_float(source: [U8], start: Int) -> Bool Never! {
+numeric_is_float: fn(source: [U8], start: Int) -> Bool Never! {
     if base_number_end(source, start) >= 0 -> return false
     i := scan_digits(source, start)
     if byte_at(source, i) == 46 && ascii_digit(byte_at(source, i + 1)) -> return true
-    exponent :: byte_at(source, i)
+    exponent: byte_at(source, i)
     if !(exponent == 101 || exponent == 69) -> return false
-    after :: byte_at(source, i + 1)
+    after: byte_at(source, i + 1)
     ascii_digit(after) || ((after == 43 || after == 45) && ascii_digit(byte_at(source, i + 2)))
 }
 
 // Whether the decimal digits in `start..end` (separators skipped) fit the
 // i64 token fast path.
-fn decimal_digits_fit_int(source: [U8], start: Int, end: Int) -> Bool Never! {
+decimal_digits_fit_int: fn(source: [U8], start: Int, end: Int) -> Bool Never! {
     value := 0
     i := start
     loop i < end {
-        code :: byte_at(source, i)
+        code: byte_at(source, i)
         i += 1
         if code == 95 -> next
         if !ascii_digit(code) -> return false
-        digit :: code - 48
+        digit: code - 48
         if value > (9223372036854775807 - digit) /% 10 -> return false
         value = value * 10 + digit
     }
     true
 }
 
-fn scan_plain_string_end(source: [U8], start: Int, raw_head: Bool) -> Int Never! {
+scan_plain_string_end: fn(source: [U8], start: Int, raw_head: Bool) -> Int Never! {
     i := start + 1
     loop i < source.len() {
-        value :: byte_at(source, i)
+        value: byte_at(source, i)
         if value == 10 -> return -(i + 1)
         if value == 34 -> return i + 1
         if (value == 123 || value == 125) && byte_at(source, i + 1) == value {
@@ -560,13 +560,13 @@ fn scan_plain_string_end(source: [U8], start: Int, raw_head: Bool) -> Int Never!
 // nested braces; a `\ `{…}` template payload only balances braces. An
 // interpolation left open at the line end returns that line end, so the
 // string scan reports it unclosed there.
-fn scan_plain_interpolation_end(source: [U8], open: Int) -> Int Never! {
+scan_plain_interpolation_end: fn(source: [U8], open: Int) -> Int Never! {
     j := open + 1
     depth := 1
-    template :: byte_at(source, open - 1) == 36 && byte_at(source, open - 2) == 92
+    template: byte_at(source, open - 1) == 36 && byte_at(source, open - 2) == 92
     in_quote := false
     loop j < source.len() {
-        value :: byte_at(source, j)
+        value: byte_at(source, j)
         if {
             template -> {
                 if value == 123 -> depth += 1
@@ -579,7 +579,7 @@ fn scan_plain_interpolation_end(source: [U8], open: Int) -> Int Never! {
             }
             value == 34 -> in_quote = true
             value == 96 -> {
-                fence_end :: scan_raw_fence_end(source, j)
+                fence_end: scan_raw_fence_end(source, j)
                 if fence_end < 0 -> return source.len()
                 j = fence_end
                 next
@@ -597,7 +597,7 @@ fn scan_plain_interpolation_end(source: [U8], open: Int) -> Int Never! {
     source.len()
 }
 
-fn scan_raw_fence_end(source: [U8], start: Int) -> Int Never! {
+scan_raw_fence_end: fn(source: [U8], start: Int) -> Int Never! {
     fence_len := 0
     loop byte_at(source, start + fence_len) == 96 -> fence_len += 1
     cursor := start + fence_len
@@ -613,11 +613,11 @@ fn scan_raw_fence_end(source: [U8], start: Int) -> Int Never! {
     -(source.len() + 1)
 }
 
-fn scan_triple_string_end(source: [U8], start: Int, raw_head: Bool) -> Int Never! {
+scan_triple_string_end: fn(source: [U8], start: Int, raw_head: Bool) -> Int Never! {
     i := start + 3
     depth := 0
     loop i < source.len() {
-        value :: byte_at(source, i)
+        value: byte_at(source, i)
         if depth == 0 {
             if value == 92 {
                 if {
@@ -670,7 +670,7 @@ fn scan_triple_string_end(source: [U8], start: Int, raw_head: Bool) -> Int Never
         }
         if value == 34 {
             triple := byte_at(source, i + 1) == 34 && byte_at(source, i + 2) == 34
-            nested :: if triple -> scan_triple_string_end(source, i, false) else -> scan_plain_string_end(source, i, false)
+            nested: if triple -> scan_triple_string_end(source, i, false) else -> scan_plain_string_end(source, i, false)
             if {
                 nested >= 0 -> {
                     i = nested
@@ -682,7 +682,7 @@ fn scan_triple_string_end(source: [U8], start: Int, raw_head: Bool) -> Int Never
             next
         }
         if value == 39 {
-            nested :: scan_char_end(source, i)
+            nested: scan_char_end(source, i)
             if {
                 nested >= 0 -> {
                     i = nested
@@ -694,7 +694,7 @@ fn scan_triple_string_end(source: [U8], start: Int, raw_head: Bool) -> Int Never
             next
         }
         if value == 96 {
-            nested :: scan_raw_fence_end(source, i)
+            nested: scan_raw_fence_end(source, i)
             if {
                 nested >= 0 -> {
                     i = nested
@@ -720,7 +720,7 @@ fn scan_triple_string_end(source: [U8], start: Int, raw_head: Bool) -> Int Never
     -(source.len() + 1)
 }
 
-fn scan_raw_foreign_string_end(source: [U8], start: Int) -> Int Never! {
+scan_raw_foreign_string_end: fn(source: [U8], start: Int) -> Int Never! {
     i := start + 3
     loop i + 2 < source.len() {
         if byte_at(source, i) == 34 && byte_at(source, i + 1) == 34 && byte_at(source, i + 2) == 34 -> return i + 3
@@ -729,7 +729,7 @@ fn scan_raw_foreign_string_end(source: [U8], start: Int) -> Int Never! {
     -(source.len() + 1)
 }
 
-fn scan_char_end(source: [U8], start: Int) -> Int Never! {
+scan_char_end: fn(source: [U8], start: Int) -> Int Never! {
     i := start + 1
     if i >= source.len() -> return -1
     if {
@@ -749,7 +749,7 @@ fn scan_char_end(source: [U8], start: Int) -> Int Never! {
 // The index after the nested `/* … */` comment opened at `start`. A comment
 // whose openers are not all closed runs to the source end and returns
 // `-(end + 1)`, so the payload pass can report it unclosed.
-fn scan_block_comment_end(source: [U8], start: Int) -> Int Never! {
+scan_block_comment_end: fn(source: [U8], start: Int) -> Int Never! {
     i := start + 2
     depth := 1
     loop i < source.len() && depth > 0 {
@@ -771,7 +771,7 @@ fn scan_block_comment_end(source: [U8], start: Int) -> Int Never! {
     i
 }
 
-fn raw_token_facts(source: [U8], config_surface: Bool) -> [Int] {
+raw_token_facts: fn(source: [U8], config_surface: Bool) -> [Int] {
     facts := [Int]{}
     last_code := -1
     i := 0
@@ -785,9 +785,9 @@ fn raw_token_facts(source: [U8], config_surface: Bool) -> [Int] {
             next
         }
         start := i
-        value :: byte_at(source, i)
-        next1 :: byte_at(source, i + 1)
-        next2 :: byte_at(source, i + 2)
+        value: byte_at(source, i)
+        next1: byte_at(source, i + 1)
+        next2: byte_at(source, i + 2)
         if value == 35 && next1 == 33 && next2 == 47 {
             loop i < source.len() && byte_at(source, i) != 10 -> i += 1
             if i < source.len() -> i += 1
@@ -805,7 +805,7 @@ fn raw_token_facts(source: [U8], config_surface: Bool) -> [Int] {
             next
         }
         if value == 47 && next1 == 42 {
-            end :: scan_block_comment_end(source, start)
+            end: scan_block_comment_end(source, start)
             i = if end < 0 -> -end - 1 else -> end
             emit(&facts, K_BLOCK_COMMENT, start, i, false)
             next
@@ -892,13 +892,13 @@ fn raw_token_facts(source: [U8], config_surface: Bool) -> [Int] {
             }
             if {
                 is_identifier_start(source, i + 1) && !previous_is_identifier(source, i) -> {
-                    end :: scan_identifier_end(source, i + 1)
-                    marker_kind :: word_kind(source, i + 1, end, 0)
+                    end: scan_identifier_end(source, i + 1)
+                    marker_kind: word_kind(source, i + 1, end, 0)
                     if {
                         marker_kind == K_IDENT -> {
                             // A respelled retired root also takes its legacy
                             // `()` or `.package` suffix (Payload).
-                            token_end :: retired_fact_end(source, start, end)
+                            token_end: retired_fact_end(source, start, end)
                             last_code = push_code(&facts, K_IDENT, start, token_end, false)
                             i = token_end
                         }
@@ -926,7 +926,7 @@ fn raw_token_facts(source: [U8], config_surface: Bool) -> [Int] {
             // word as a `$NAME` environment read. A lone ` keeps its token.
             if {
                 is_identifier_start(source, i + 1) && !previous_is_identifier(source, i) -> {
-                    end :: scan_identifier_end(source, i + 1)
+                    end: scan_identifier_end(source, i + 1)
                     last_code = push_code(&facts, K_IDENT, start, end, false)
                     i = end
                 }
@@ -1223,7 +1223,7 @@ fn raw_token_facts(source: [U8], config_surface: Bool) -> [Int] {
                     end := if {
                         raw_foreign_body_at(source, facts, facts.len() /% 4) -> scan_raw_foreign_string_end(source, start)
                         else -> {
-                            modes :: string_head_modes(source, facts, facts.len() /% 4)
+                            modes: string_head_modes(source, facts, facts.len() /% 4)
                             scan_triple_string_end(source, start, modes.raw_head)
                         }
                     }
@@ -1238,8 +1238,8 @@ fn raw_token_facts(source: [U8], config_surface: Bool) -> [Int] {
                     }
                 }
                 else -> {
-                    modes :: string_head_modes(source, facts, facts.len() /% 4)
-                    end :: scan_plain_string_end(source, start, modes.raw_head)
+                    modes: string_head_modes(source, facts, facts.len() /% 4)
+                    end: scan_plain_string_end(source, start, modes.raw_head)
                     if {
                         end < 0 -> {
                             i = -end - 1
@@ -1254,7 +1254,7 @@ fn raw_token_facts(source: [U8], config_surface: Bool) -> [Int] {
             next
         }
         if value == 96 {
-            end :: scan_raw_fence_end(source, start)
+            end: scan_raw_fence_end(source, start)
             if {
                 end < 0 -> {
                     i = -end - 1
@@ -1267,7 +1267,7 @@ fn raw_token_facts(source: [U8], config_surface: Bool) -> [Int] {
             next
         }
         if value == 39 {
-            end :: scan_char_end(source, start)
+            end: scan_char_end(source, start)
             if {
                 end < 0 -> {
                     i = source.len()
@@ -1280,9 +1280,9 @@ fn raw_token_facts(source: [U8], config_surface: Bool) -> [Int] {
             next
         }
         if ascii_digit(value) {
-            numeric_end :: scan_numeric_end(source, start)
-            end :: scan_number_end(source, start)
-            kind :: if {
+            numeric_end: scan_numeric_end(source, start)
+            end: scan_number_end(source, start)
+            kind: if {
                 end != numeric_end && (numeric_is_float(source, start) || decimal_digits_fit_int(source, start, numeric_end)) -> K_UNIT_NUMBER
                 // Rust `number`: a unit candidate whose digits overflow the
                 // i64 fast path falls back to an Int token over the whole
@@ -1296,8 +1296,8 @@ fn raw_token_facts(source: [U8], config_surface: Bool) -> [Int] {
             next
         }
         if is_identifier_start(source, i) {
-            end :: scan_identifier_end(source, i)
-            kind :: word_kind(source, i, end, last_code)
+            end: scan_identifier_end(source, i)
+            kind: word_kind(source, i, end, last_code)
             upper := false
             if kind == K_IDENT -> upper = first_char_is_upper(source, i)
             last_code = push_code(&facts, kind, i, end, upper)
@@ -1310,8 +1310,8 @@ fn raw_token_facts(source: [U8], config_surface: Bool) -> [Int] {
     facts
 }
 
-fn terminator_events_scanned(source: [U8], config_surface: Bool) -> [Int] {
-    facts :: raw_token_facts(source, config_surface)
+terminator_events_scanned: fn(source: [U8], config_surface: Bool) -> [Int] {
+    facts: raw_token_facts(source, config_surface)
     terminator_events(source, facts)
 }
 
@@ -1320,174 +1320,174 @@ fn terminator_events_scanned(source: [U8], config_surface: Bool) -> [Int] {
 // Each input row is [kind, byte_start, byte_end, first_char_is_uppercase].
 // Each output row is [event, raw_token_index, byte_position].
 
-K_IDENT :: 1
+K_IDENT: 1
 
-K_RAW_STR :: 2
+K_RAW_STR: 2
 
-K_STR :: 3
+K_STR: 3
 
-K_INT :: 4
+K_INT: 4
 
-K_FLOAT :: 5
+K_FLOAT: 5
 
-K_UNIT_NUMBER :: 6
+K_UNIT_NUMBER: 6
 
-K_CHAR :: 7
+K_CHAR: 7
 
-K_TRUE :: 8
+K_TRUE: 8
 
-K_FALSE :: 9
+K_FALSE: 9
 
-K_SELF :: 10
+K_SELF: 10
 
-K_NULL :: 11
+K_NULL: 11
 
-K_BREAK :: 12
+K_BREAK: 12
 
-K_RETURN :: 13
+K_RETURN: 13
 
-K_RPAREN :: 14
+K_RPAREN: 14
 
-K_RBRACKET :: 15
+K_RBRACKET: 15
 
-K_RBRACE :: 16
+K_RBRACE: 16
 
-K_QUESTION :: 17
+K_QUESTION: 17
 
-K_PLUS_PLUS :: 18
+K_PLUS_PLUS: 18
 
-K_MINUS_MINUS :: 19
+K_MINUS_MINUS: 19
 
-K_GT :: 20
+K_GT: 20
 
-K_SHR :: 21
+K_SHR: 21
 
-K_FENCE_CLOSE :: 22
+K_FENCE_CLOSE: 22
 
-K_DOT :: 23
+K_DOT: 23
 
-K_QUESTION_DOT :: 24
+K_QUESTION_DOT: 24
 
-K_AND_AND :: 25
+K_AND_AND: 25
 
-K_OR_OR :: 26
+K_OR_OR: 26
 
-K_PLUS :: 27
+K_PLUS: 27
 
-K_MINUS :: 28
+K_MINUS: 28
 
-K_STAR :: 29
+K_STAR: 29
 
-K_SLASH :: 30
+K_SLASH: 30
 
-K_SLASH_PERCENT :: 31
+K_SLASH_PERCENT: 31
 
-K_PERCENT :: 32
+K_PERCENT: 32
 
-K_PERCENT_PERCENT :: 33
+K_PERCENT_PERCENT: 33
 
-K_EQ_EQ :: 34
+K_EQ_EQ: 34
 
-K_NOT_EQ :: 35
+K_NOT_EQ: 35
 
-K_LT :: 36
+K_LT: 36
 
-K_LE :: 37
+K_LE: 37
 
-K_GE :: 38
+K_GE: 38
 
-K_COMPARE :: 39
+K_COMPARE: 39
 
-K_AMP :: 40
+K_AMP: 40
 
-K_PIPE :: 41
+K_PIPE: 41
 
-K_CARET :: 42
+K_CARET: 42
 
-K_TILDE_PIPE :: 43
+K_TILDE_PIPE: 43
 
-K_SHL :: 44
+K_SHL: 44
 
-K_QUESTION_QUESTION :: 45
+K_QUESTION_QUESTION: 45
 
-K_LBRACE :: 46
+K_LBRACE: 46
 
-K_LPAREN :: 47
+K_LPAREN: 47
 
-K_LBRACKET :: 48
+K_LBRACKET: 48
 
-K_EOF :: 49
+K_EOF: 49
 
-K_BANG :: 50
+K_BANG: 50
 
-K_UNIFIED_ARROW :: 51
+K_UNIFIED_ARROW: 51
 
-K_LAMBDA_ARROW :: 53
+K_LAMBDA_ARROW: 53
 
-K_EQ :: 54
+K_EQ: 54
 
-K_LINE_COMMENT :: 55
+K_LINE_COMMENT: 55
 
-K_BLOCK_COMMENT :: 56
-K_FN :: 57
-K_PUB :: 58
-K_PRIV :: 59
-K_IF :: 60
-K_ELSE :: 61
-K_IN :: 62
-K_MUTATE :: 63
-K_MOVE :: 64
-K_COPY :: 65
-K_STRUCT :: 66
-K_ENUM :: 67
-K_IMPL :: 68
-K_TRAIT :: 69
-K_TAG :: 70
-K_EFFECT :: 71
-K_DERIVE :: 72
-K_IT :: 73
-K_CONST :: 74
-K_COMPTIME :: 75
-K_LOOP :: 76
-K_YIELD :: 77
-K_USE :: 78
-K_EXTERN :: 79
-K_MODULE :: 80
-K_FENCE_OPEN :: 81
-K_COLON :: 82
-K_COLON_COLON :: 83
-K_COLON_EQ :: 84
-K_COMMA :: 85
-K_SEMI :: 86
-K_DOT_DOT :: 87
-K_DOT_DOT_LT :: 88
-K_DOT_DOT_DOT :: 89
-K_AT :: 90
-K_TILDE :: 91
-K_TILDE_PIPE_EQ :: 92
-K_TILDE_TILDE :: 93
-K_PLUS_EQ :: 94
-K_MINUS_EQ :: 95
-K_STAR_EQ :: 96
-K_SLASH_EQ :: 97
-K_SLASH_PERCENT_EQ :: 98
-K_PERCENT_EQ :: 99
-K_PERCENT_PERCENT_EQ :: 100
-K_AMP_EQ :: 101
-K_PIPE_EQ :: 102
-K_CARET_EQ :: 103
-K_SHL_EQ :: 104
-K_SHR_EQ :: 105
-K_HASH :: 106
-K_DOLLAR :: 107
+K_BLOCK_COMMENT: 56
+K_FN: 57
+K_PUB: 58
+K_PRIV: 59
+K_IF: 60
+K_ELSE: 61
+K_IN: 62
+K_MUTATE: 63
+K_MOVE: 64
+K_COPY: 65
+K_STRUCT: 66
+K_ENUM: 67
+K_IMPL: 68
+K_TRAIT: 69
+K_TAG: 70
+K_EFFECT: 71
+K_DERIVE: 72
+K_IT: 73
+K_CONST: 74
+K_COMPTIME: 75
+K_LOOP: 76
+K_YIELD: 77
+K_USE: 78
+K_EXTERN: 79
+K_MODULE: 80
+K_FENCE_OPEN: 81
+K_COLON: 82
+K_COLON_COLON: 83
+K_COLON_EQ: 84
+K_COMMA: 85
+K_SEMI: 86
+K_DOT_DOT: 87
+K_DOT_DOT_LT: 88
+K_DOT_DOT_DOT: 89
+K_AT: 90
+K_TILDE: 91
+K_TILDE_PIPE_EQ: 92
+K_TILDE_TILDE: 93
+K_PLUS_EQ: 94
+K_MINUS_EQ: 95
+K_STAR_EQ: 96
+K_SLASH_EQ: 97
+K_SLASH_PERCENT_EQ: 98
+K_PERCENT_EQ: 99
+K_PERCENT_PERCENT_EQ: 100
+K_AMP_EQ: 101
+K_PIPE_EQ: 102
+K_CARET_EQ: 103
+K_SHL_EQ: 104
+K_SHR_EQ: 105
+K_HASH: 106
+K_DOLLAR: 107
 
 
-fn kind_at(facts: [Int], index: Int) -> Int Never! {
+kind_at: fn(facts: [Int], index: Int) -> Int Never! {
     if index < 0 || index >= facts.len() /% 4 -> return 0
     return facts[index * 4]
 }
 
-fn ends_statement(kind: Int) -> Bool Never! {
+ends_statement: fn(kind: Int) -> Bool Never! {
     if kind == {
         K_IDENT -> true
         K_RAW_STR -> true
@@ -1516,7 +1516,7 @@ fn ends_statement(kind: Int) -> Bool Never! {
     }
 }
 
-fn suppresses_terminator(kind: Int) -> Bool Never! {
+suppresses_terminator: fn(kind: Int) -> Bool Never! {
     if kind == {
         K_FENCE_CLOSE -> true
         K_DOT -> true
@@ -1548,7 +1548,7 @@ fn suppresses_terminator(kind: Int) -> Bool Never! {
     }
 }
 
-fn arrow(kind: Int) -> Bool Never! {
+arrow: fn(kind: Int) -> Bool Never! {
     if kind == {
         K_UNIFIED_ARROW -> true
         K_LAMBDA_ARROW -> true
@@ -1556,7 +1556,7 @@ fn arrow(kind: Int) -> Bool Never! {
     }
 }
 
-fn newline_between(source: [U8], start: Int, end: Int) -> Bool Never! {
+newline_between: fn(source: [U8], start: Int, end: Int) -> Bool Never! {
     if start < 0 || start > end || end > source.len() -> return false
     cursor := start
     loop cursor < end {
@@ -1566,14 +1566,14 @@ fn newline_between(source: [U8], start: Int, end: Int) -> Bool Never! {
     return false
 }
 
-fn scope_member_starts_at(facts: [Int], index: Int) -> Bool Never! {
+scope_member_starts_at: fn(facts: [Int], index: Int) -> Bool Never! {
     if kind_at(facts, index) != K_DOT || kind_at(facts, index + 1) != K_IDENT -> return false
     cursor := index + 2
     if kind_at(facts, cursor) == K_LBRACE -> return true
     if kind_at(facts, cursor) != K_LPAREN -> return false
     depth := 0
     loop cursor < facts.len() /% 4 {
-        kind :: kind_at(facts, cursor)
+        kind: kind_at(facts, cursor)
         if kind == K_LPAREN -> depth += 1
         if kind == K_RPAREN {
             depth -= 1
@@ -1588,28 +1588,28 @@ fn scope_member_starts_at(facts: [Int], index: Int) -> Bool Never! {
     return kind_at(facts, cursor) == K_LBRACE
 }
 
-fn leading_dot_variant(facts: [Int], index: Int) -> Bool Never! {
-    kind :: kind_at(facts, index)
+leading_dot_variant: fn(facts: [Int], index: Int) -> Bool Never! {
+    kind: kind_at(facts, index)
     if kind == K_NULL -> return true
     return kind == K_IDENT && facts[index * 4 + 3] == 1
 }
 
-fn skip_comment_tokens(facts: [Int], index: Int) -> Int Never! {
+skip_comment_tokens: fn(facts: [Int], index: Int) -> Int Never! {
     cursor := index
     loop {
-        kind :: kind_at(facts, cursor)
+        kind: kind_at(facts, cursor)
         if kind == K_LINE_COMMENT || kind == K_BLOCK_COMMENT -> cursor += 1 else -> break
     }
     return cursor
 }
 
-fn dispatch_arm_starts_at(source: [U8], facts: [Int], index: Int) -> Bool Never! {
+dispatch_arm_starts_at: fn(source: [U8], facts: [Int], index: Int) -> Bool Never! {
     if kind_at(facts, index) != K_DOT -> return false
     cursor := skip_comment_tokens(facts, index + 1)
     if kind_at(facts, cursor) == K_LBRACE {
         depth := 0
         loop cursor < facts.len() /% 4 {
-            kind :: kind_at(facts, cursor)
+            kind: kind_at(facts, cursor)
             if kind == K_LBRACE -> depth += 1
             if kind == K_RBRACE {
                 depth -= 1
@@ -1643,7 +1643,7 @@ fn dispatch_arm_starts_at(source: [U8], facts: [Int], index: Int) -> Bool Never!
         if kind_at(facts, cursor) == K_LPAREN {
             depth := 0
             loop cursor < facts.len() /% 4 {
-                kind :: kind_at(facts, cursor)
+                kind: kind_at(facts, cursor)
                 if kind == K_LPAREN -> depth += 1
                 if kind == K_RPAREN {
                     depth -= 1
@@ -1670,25 +1670,25 @@ fn dispatch_arm_starts_at(source: [U8], facts: [Int], index: Int) -> Bool Never!
     // structural head (`.Key(key) | .Other(key) && key == "b" -> ...`).
     // Scan that guard only on its source line; an unrelated arrow on a later
     // line must not turn a fluent chain into a new arm.
-    connector :: kind_at(facts, cursor)
-    is_boolean_connector :: if connector == {
+    connector: kind_at(facts, cursor)
+    is_boolean_connector: if connector == {
         K_AND_AND -> true
         K_OR_OR -> true
         else -> false
     }
     if is_boolean_connector {
-        guard_start :: facts[cursor * 4 + 1]
+        guard_start: facts[cursor * 4 + 1]
         depth := 0
         loop cursor < facts.len() /% 4 {
-            kind :: kind_at(facts, cursor)
-            is_open_delimiter :: if kind == {
+            kind: kind_at(facts, cursor)
+            is_open_delimiter: if kind == {
                 K_LPAREN -> true
                 K_LBRACKET -> true
                 K_LBRACE -> true
                 else -> false
             }
             if is_open_delimiter -> depth += 1 else {
-                is_close_delimiter :: if kind == {
+                is_close_delimiter: if kind == {
                     K_RPAREN -> true
                     K_RBRACKET -> true
                     K_RBRACE -> true
@@ -1711,28 +1711,28 @@ fn dispatch_arm_starts_at(source: [U8], facts: [Int], index: Int) -> Bool Never!
     return arrow(kind_at(facts, cursor))
 }
 
-fn result_handler_failure_starts_at(facts: [Int], index: Int) -> Bool Never! {
+result_handler_failure_starts_at: fn(facts: [Int], index: Int) -> Bool Never! {
     return kind_at(facts, index) == K_BANG && kind_at(facts, index + 1) == K_IDENT && kind_at(facts, index + 2) == K_UNIFIED_ARROW
 }
 
 // D-CAP-RECEIVER1=D: `&name` / `^name` written together at line start marks
 // the place a call writes or takes, so it begins a statement. A continued
 // bitwise-and or power line keeps a space after its operator.
-fn place_mark_starts_at(facts: [Int], index: Int) -> Bool Never! {
-    mark :: kind_at(facts, index)
+place_mark_starts_at: fn(facts: [Int], index: Int) -> Bool Never! {
+    mark: kind_at(facts, index)
     if mark != K_AMP && mark != K_CARET -> return false
-    name :: kind_at(facts, index + 1)
+    name: kind_at(facts, index + 1)
     if name != K_IDENT && name != K_SELF -> return false
     return facts[index * 4 + 2] == facts[(index + 1) * 4 + 1]
 }
 
-fn terminator_events(source: [U8], facts: [Int]) -> [Int] Never! {
+terminator_events: fn(source: [U8], facts: [Int]) -> [Int] Never! {
     events := [Int]{}
     last_code := -1
     index := 0
     loop index < facts.len() /% 4 {
-        kind :: kind_at(facts, index)
-        is_comment :: if kind == {
+        kind: kind_at(facts, index)
+        is_comment: if kind == {
             K_LINE_COMMENT -> true
             K_BLOCK_COMMENT -> true
             else -> false
@@ -1741,7 +1741,7 @@ fn terminator_events(source: [U8], facts: [Int]) -> [Int] Never! {
             if {
                 kind == K_EOF -> {
                     if last_code >= 0 {
-                        previous :: kind_at(facts, last_code)
+                        previous: kind_at(facts, last_code)
                         if ends_statement(previous) && previous != K_RBRACE {
                             &events.push(1)
                             &events.push(index)
@@ -1752,11 +1752,11 @@ fn terminator_events(source: [U8], facts: [Int]) -> [Int] Never! {
                 }
                 else -> {
                     if last_code >= 0 {
-                        previous :: kind_at(facts, last_code)
-                        end :: facts[last_code * 4 + 2]
-                        start :: facts[index * 4 + 1]
+                        previous: kind_at(facts, last_code)
+                        end: facts[last_code * 4 + 2]
+                        start: facts[index * 4 + 1]
                         if newline_between(source, end, start) && ends_statement(previous) {
-                            split :: if kind == {
+                            split: if kind == {
                                 K_UNIFIED_ARROW -> true
                                 K_LAMBDA_ARROW -> true
                                 K_EQ -> true
@@ -1789,16 +1789,16 @@ fn terminator_events(source: [U8], facts: [Int]) -> [Int] Never! {
     return events
 }
 
-fn split_spelling(kind: Int) -> String Never! {
+split_spelling: fn(kind: Int) -> String Never! {
     if kind == {
         K_UNIFIED_ARROW -> "->"
         K_LAMBDA_ARROW -> "=>"
         K_EQ -> {
-            spelling :: "-[…]"
+            spelling: "-[…]"
             "{spelling}>"
         }
         K_MINUS_MINUS -> {
-            spelling :: "-[…]"
+            spelling: "-[…]"
             "{spelling}>"
         }
         K_LBRACE -> "{{"
@@ -1806,7 +1806,7 @@ fn split_spelling(kind: Int) -> String Never! {
     }
 }
 
-fn lexed_with_terminators(facts: [Int], lexed: ^Lexed, events: [Int]) -> Lexed {
+lexed_with_terminators: fn(facts: [Int], lexed: ^Lexed, events: [Int]) -> Lexed {
     tokens := [Token]{}
     diagnostics := lexed.diagnostics
     event_index := 0
@@ -1814,8 +1814,8 @@ fn lexed_with_terminators(facts: [Int], lexed: ^Lexed, events: [Int]) -> Lexed {
     raw_index := 0
     loop raw_index < facts.len() /% 4 {
         loop event_index < events.len() /% 3 && events[event_index * 3 + 1] == raw_index {
-            event :: events[event_index * 3]
-            at :: events[event_index * 3 + 2]
+            event: events[event_index * 3]
+            at: events[event_index * 3 + 2]
             if {
                 event == 1 -> {
                     &tokens.push(Token{
@@ -1825,10 +1825,10 @@ fn lexed_with_terminators(facts: [Int], lexed: ^Lexed, events: [Int]) -> Lexed {
                     })
                 }
                 else -> {
-                    kind :: kind_at(facts, raw_index)
-                    start :: facts[raw_index * 4 + 1]
-                    end :: facts[raw_index * 4 + 2]
-                    spelling :: split_spelling(kind)
+                    kind: kind_at(facts, raw_index)
+                    start: facts[raw_index * 4 + 1]
+                    end: facts[raw_index * 4 + 2]
+                    spelling: split_spelling(kind)
                     &diagnostics.push(diagnostic_from_registry(
                         "E0986",
                         Val(Span{start: start, end: end}),
@@ -1840,11 +1840,11 @@ fn lexed_with_terminators(facts: [Int], lexed: ^Lexed, events: [Int]) -> Lexed {
             }
             event_index += 1
         }
-        kind :: kind_at(facts, raw_index)
-        start :: facts[raw_index * 4 + 1]
-        end :: facts[raw_index * 4 + 2]
+        kind: kind_at(facts, raw_index)
+        start: facts[raw_index * 4 + 1]
+        end: facts[raw_index * 4 + 2]
         if token_index < lexed.tokens.len() {
-            token :: lexed.tokens[token_index]
+            token: lexed.tokens[token_index]
             if {
                 token.kind == kind && token.span.start == start && token.span.end == end -> {
                     &tokens.push(token)
@@ -1860,22 +1860,22 @@ fn lexed_with_terminators(facts: [Int], lexed: ^Lexed, events: [Int]) -> Lexed {
     Lexed{tokens: tokens, diagnostics: diagnostics}
 }
 
-fn lex_with_terminators(source: [U8], config_surface: Bool, allow_reserved_identifiers: Bool) -> Lexed {
-    facts :: raw_token_facts(source, config_surface)
-    raw :: lex_payload_from_facts(source, facts, config_surface, allow_reserved_identifiers, 0)
-    events :: terminator_events(source, facts)
+lex_with_terminators: fn(source: [U8], config_surface: Bool, allow_reserved_identifiers: Bool) -> Lexed {
+    facts: raw_token_facts(source, config_surface)
+    raw: lex_payload_from_facts(source, facts, config_surface, allow_reserved_identifiers, 0)
+    events: terminator_events(source, facts)
     lexed_with_terminators(facts, ^raw, events)
 }
 
-fn lex(source: [U8]) -> Lexed {
+lex: fn(source: [U8]) -> Lexed {
     lex_with_terminators(source, false, false)
 }
 
-fn lex_config(source: [U8]) -> Lexed {
+lex_config: fn(source: [U8]) -> Lexed {
     lex_with_terminators(source, true, false)
 }
 
-fn lex_generated(source: [U8]) -> Lexed {
+lex_generated: fn(source: [U8]) -> Lexed {
     lex_with_terminators(source, false, true)
 }
 
@@ -1883,7 +1883,7 @@ fn lex_generated(source: [U8]) -> Lexed {
 // Stable parser-facing lexer data. Spans are UTF-8 byte offsets into the
 // original source; payload.text preserves that exact source spelling.
 
-struct TokenPayload {
+TokenPayload: struct {
     text: String
     decoded: String
     integer: Int?
@@ -1893,13 +1893,13 @@ struct TokenPayload {
     string_parts: [StringPart]
 }
 
-struct Token {
+Token: struct {
     kind: Int
     span: Span
     payload: TokenPayload
 }
 
-struct StringPart {
+StringPart: struct {
     kind: Int
     span: Span
     text: String
@@ -1907,128 +1907,128 @@ struct StringPart {
     tokens: [Token]
 }
 
-STRING_PART_TEXT :: 1
-STRING_PART_INTERPOLATION :: 2
-STRING_PART_BYTE :: 3
+STRING_PART_TEXT: 1
+STRING_PART_INTERPOLATION: 2
+STRING_PART_BYTE: 3
 
-struct Lexed {
+Lexed: struct {
     tokens: [Token]
     diagnostics: [Diagnostic]
 }
 
 // These numeric tags are stable at the Jet parser boundary and align with the
 // exhaustive raw-token transport consumed by statement termination.
-TOKEN_IDENT :: 1
-TOKEN_RAW_STRING :: 2
-TOKEN_STRING :: 3
-TOKEN_INT :: 4
-TOKEN_FLOAT :: 5
-TOKEN_UNIT_NUMBER :: 6
-TOKEN_CHAR :: 7
-TOKEN_TRUE :: 8
-TOKEN_FALSE :: 9
-TOKEN_SELF :: 10
-TOKEN_NULL :: 11
-TOKEN_BREAK :: 12
-TOKEN_RETURN :: 13
-TOKEN_RPAREN :: 14
-TOKEN_RBRACKET :: 15
-TOKEN_RBRACE :: 16
-TOKEN_QUESTION :: 17
+TOKEN_IDENT: 1
+TOKEN_RAW_STRING: 2
+TOKEN_STRING: 3
+TOKEN_INT: 4
+TOKEN_FLOAT: 5
+TOKEN_UNIT_NUMBER: 6
+TOKEN_CHAR: 7
+TOKEN_TRUE: 8
+TOKEN_FALSE: 9
+TOKEN_SELF: 10
+TOKEN_NULL: 11
+TOKEN_BREAK: 12
+TOKEN_RETURN: 13
+TOKEN_RPAREN: 14
+TOKEN_RBRACKET: 15
+TOKEN_RBRACE: 16
+TOKEN_QUESTION: 17
 // Retired D-INCR1 spellings: lexed only so the parser teaches E0160.
-TOKEN_PLUS_PLUS :: 18
-TOKEN_MINUS_MINUS :: 19
-TOKEN_GT :: 20
-TOKEN_SHR :: 21
-TOKEN_FENCE_CLOSE :: 22
-TOKEN_DOT :: 23
-TOKEN_QUESTION_DOT :: 24
-TOKEN_AND_AND :: 25
-TOKEN_OR_OR :: 26
-TOKEN_PLUS :: 27
-TOKEN_MINUS :: 28
-TOKEN_STAR :: 29
-TOKEN_SLASH :: 30
-TOKEN_SLASH_PERCENT :: 31
-TOKEN_PERCENT :: 32
-TOKEN_PERCENT_PERCENT :: 33
-TOKEN_EQ_EQ :: 34
-TOKEN_NOT_EQ :: 35
-TOKEN_LT :: 36
-TOKEN_LE :: 37
-TOKEN_GE :: 38
-TOKEN_COMPARE :: 39
-TOKEN_AMP :: 40
-TOKEN_PIPE :: 41
-TOKEN_CARET :: 42
-TOKEN_TILDE_PIPE :: 43
-TOKEN_SHL :: 44
-TOKEN_QUESTION_QUESTION :: 45
-TOKEN_LBRACE :: 46
-TOKEN_LPAREN :: 47
-TOKEN_LBRACKET :: 48
-TOKEN_EOF :: 49
-TOKEN_BANG :: 50
-TOKEN_UNIFIED_ARROW :: 51
-TOKEN_LAMBDA_ARROW :: 53
-TOKEN_EQ :: 54
-TOKEN_LINE_COMMENT :: 55
-TOKEN_BLOCK_COMMENT :: 56
-TOKEN_KW_FN :: 57
-TOKEN_KW_PUB :: 58
-TOKEN_KW_PRIV :: 59
-TOKEN_KW_IF :: 60
-TOKEN_KW_ELSE :: 61
-TOKEN_KW_IN :: 62
-TOKEN_KW_MUTATE :: 63
-TOKEN_KW_MOVE :: 64
-TOKEN_KW_COPY :: 65
-TOKEN_KW_STRUCT :: 66
-TOKEN_KW_ENUM :: 67
-TOKEN_KW_IMPL :: 68
-TOKEN_KW_TRAIT :: 69
-TOKEN_KW_TAG :: 70
-TOKEN_KW_EFFECT :: 71
-TOKEN_KW_DERIVE :: 72
-TOKEN_KW_IT :: 73
-TOKEN_KW_CONST :: 74
-TOKEN_KW_COMPTIME :: 75
-TOKEN_KW_LOOP :: 76
-TOKEN_KW_YIELD :: 77
-TOKEN_KW_USE :: 78
-TOKEN_KW_EXTERN :: 79
-TOKEN_KW_MODULE :: 80
-TOKEN_FENCE_OPEN :: 81
-TOKEN_COLON :: 82
-TOKEN_COLON_COLON :: 83
-TOKEN_COLON_EQ :: 84
-TOKEN_COMMA :: 85
-TOKEN_SEMI :: 86
-TOKEN_DOT_DOT :: 87
-TOKEN_DOT_DOT_LT :: 88
-TOKEN_DOT_DOT_DOT :: 89
-TOKEN_AT :: 90
-TOKEN_TILDE :: 91
-TOKEN_TILDE_PIPE_EQ :: 92
-TOKEN_TILDE_TILDE :: 93
-TOKEN_PLUS_EQ :: 94
-TOKEN_MINUS_EQ :: 95
-TOKEN_STAR_EQ :: 96
-TOKEN_SLASH_EQ :: 97
-TOKEN_SLASH_PERCENT_EQ :: 98
-TOKEN_PERCENT_EQ :: 99
-TOKEN_PERCENT_PERCENT_EQ :: 100
-TOKEN_AMP_EQ :: 101
-TOKEN_PIPE_EQ :: 102
-TOKEN_CARET_EQ :: 103
-TOKEN_SHL_EQ :: 104
-TOKEN_SHR_EQ :: 105
-TOKEN_HASH :: 106
-TOKEN_DOLLAR :: 107
+TOKEN_PLUS_PLUS: 18
+TOKEN_MINUS_MINUS: 19
+TOKEN_GT: 20
+TOKEN_SHR: 21
+TOKEN_FENCE_CLOSE: 22
+TOKEN_DOT: 23
+TOKEN_QUESTION_DOT: 24
+TOKEN_AND_AND: 25
+TOKEN_OR_OR: 26
+TOKEN_PLUS: 27
+TOKEN_MINUS: 28
+TOKEN_STAR: 29
+TOKEN_SLASH: 30
+TOKEN_SLASH_PERCENT: 31
+TOKEN_PERCENT: 32
+TOKEN_PERCENT_PERCENT: 33
+TOKEN_EQ_EQ: 34
+TOKEN_NOT_EQ: 35
+TOKEN_LT: 36
+TOKEN_LE: 37
+TOKEN_GE: 38
+TOKEN_COMPARE: 39
+TOKEN_AMP: 40
+TOKEN_PIPE: 41
+TOKEN_CARET: 42
+TOKEN_TILDE_PIPE: 43
+TOKEN_SHL: 44
+TOKEN_QUESTION_QUESTION: 45
+TOKEN_LBRACE: 46
+TOKEN_LPAREN: 47
+TOKEN_LBRACKET: 48
+TOKEN_EOF: 49
+TOKEN_BANG: 50
+TOKEN_UNIFIED_ARROW: 51
+TOKEN_LAMBDA_ARROW: 53
+TOKEN_EQ: 54
+TOKEN_LINE_COMMENT: 55
+TOKEN_BLOCK_COMMENT: 56
+TOKEN_KW_FN: 57
+TOKEN_KW_PUB: 58
+TOKEN_KW_PRIV: 59
+TOKEN_KW_IF: 60
+TOKEN_KW_ELSE: 61
+TOKEN_KW_IN: 62
+TOKEN_KW_MUTATE: 63
+TOKEN_KW_MOVE: 64
+TOKEN_KW_COPY: 65
+TOKEN_KW_STRUCT: 66
+TOKEN_KW_ENUM: 67
+TOKEN_KW_IMPL: 68
+TOKEN_KW_TRAIT: 69
+TOKEN_KW_TAG: 70
+TOKEN_KW_EFFECT: 71
+TOKEN_KW_DERIVE: 72
+TOKEN_KW_IT: 73
+TOKEN_KW_CONST: 74
+TOKEN_KW_COMPTIME: 75
+TOKEN_KW_LOOP: 76
+TOKEN_KW_YIELD: 77
+TOKEN_KW_USE: 78
+TOKEN_KW_EXTERN: 79
+TOKEN_KW_MODULE: 80
+TOKEN_FENCE_OPEN: 81
+TOKEN_COLON: 82
+TOKEN_COLON_COLON: 83
+TOKEN_COLON_EQ: 84
+TOKEN_COMMA: 85
+TOKEN_SEMI: 86
+TOKEN_DOT_DOT: 87
+TOKEN_DOT_DOT_LT: 88
+TOKEN_DOT_DOT_DOT: 89
+TOKEN_AT: 90
+TOKEN_TILDE: 91
+TOKEN_TILDE_PIPE_EQ: 92
+TOKEN_TILDE_TILDE: 93
+TOKEN_PLUS_EQ: 94
+TOKEN_MINUS_EQ: 95
+TOKEN_STAR_EQ: 96
+TOKEN_SLASH_EQ: 97
+TOKEN_SLASH_PERCENT_EQ: 98
+TOKEN_PERCENT_EQ: 99
+TOKEN_PERCENT_PERCENT_EQ: 100
+TOKEN_AMP_EQ: 101
+TOKEN_PIPE_EQ: 102
+TOKEN_CARET_EQ: 103
+TOKEN_SHL_EQ: 104
+TOKEN_SHR_EQ: 105
+TOKEN_HASH: 106
+TOKEN_DOLLAR: 107
 
 // Tokens.rs `without_comments`: the code tokens of `tokens`, comment trivia
 // dropped, in source order.
-fn lexer_without_comments(tokens: [Token]) -> [Token] Never! {
+lexer_without_comments: fn(tokens: [Token]) -> [Token] Never! {
     kept := [Token]{}
     loop token in tokens {
         if token.kind != TOKEN_LINE_COMMENT && token.kind != TOKEN_BLOCK_COMMENT -> &kept.push(token)
@@ -2041,9 +2041,9 @@ fn lexer_without_comments(tokens: [Token]) -> [Token] Never! {
 // token boundaries; this layer keeps exact spelling and turns literal bytes
 // into parser-ready values without consulting the Rust lexer.
 
-MAX_INTERPOLATION_DEPTH :: 256
+MAX_INTERPOLATION_DEPTH: 256
 
-fn empty_payload(text: String) -> TokenPayload Never! {
+empty_payload: fn(text: String) -> TokenPayload Never! {
     TokenPayload{
         text: text,
         decoded: "",
@@ -2055,11 +2055,11 @@ fn empty_payload(text: String) -> TokenPayload Never! {
     }
 }
 
-fn add_diagnostic(diagnostics: &[Diagnostic], code: String, start: Int, end: Int, what: String, why: String, fix: String) {
+add_diagnostic: fn(diagnostics: &[Diagnostic], code: String, start: Int, end: Int, what: String, why: String, fix: String) {
     &diagnostics.push(diagnostic_from_registry(code, Val(Span{start: start, end: end}), what, why, fix))
 }
 
-fn bytes_text(raw: [U8], start: Int, end: Int) -> String Never! {
+bytes_text: fn(raw: [U8], start: Int, end: Int) -> String Never! {
     out := [U8]{}
     i := start
     loop i < end && i < raw.len() {
@@ -2069,7 +2069,7 @@ fn bytes_text(raw: [U8], start: Int, end: Int) -> String Never! {
     String.from_bytes(out) ?? ""
 }
 
-fn bytes_slice(raw: [U8], start: Int, end: Int) -> [U8] Never! {
+bytes_slice: fn(raw: [U8], start: Int, end: Int) -> [U8] Never! {
     out := [U8]{}
     i := start
     loop i < end && i < raw.len() {
@@ -2079,7 +2079,7 @@ fn bytes_slice(raw: [U8], start: Int, end: Int) -> [U8] Never! {
     out
 }
 
-fn strip_underscores(text: String) -> String Never! {
+strip_underscores: fn(text: String) -> String Never! {
     out := [U8]{}
     loop byte in text.bytes() {
         if Int.from_u8(byte) != 95 -> &out.push(byte)
@@ -2089,31 +2089,31 @@ fn strip_underscores(text: String) -> String Never! {
 
 // Rust `lex_digits`: a decimal or unit-number spelling drops its `_`
 // separators and writes its exponent marker as `e`.
-fn decimal_number_spelling(text: String) -> String Never! {
+decimal_number_spelling: fn(text: String) -> String Never! {
     out := [U8]{}
     loop byte in text.bytes() {
-        code :: Int.from_u8(byte)
+        code: Int.from_u8(byte)
         if code == 95 -> next
         &out.push(if code == 69 -> U8{101} else -> byte)
     }
     String.from_bytes(out) ?? ""
 }
 
-fn digit_value(value: Int) -> Int Never! {
+digit_value: fn(value: Int) -> Int Never! {
     if value >= 48 && value <= 57 -> return value - 48
     if value >= 65 && value <= 90 -> return value - 55
     if value >= 97 && value <= 122 -> return value - 87
     return -1
 }
 
-fn parse_integer_literal(text: String) -> Int? {
-    clean :: strip_underscores(text)
+parse_integer_literal: fn(text: String) -> Int? {
+    clean: strip_underscores(text)
     raw := clean.bytes()
     if raw.len() == 0 -> return None
     radix := 10
     i := 0
     if raw.len() > 1 && Int.from_u8(raw[0]) == 48 {
-        marker :: Int.from_u8(raw[1])
+        marker: Int.from_u8(raw[1])
         if marker == {
             120 | 88 -> {
                 radix = 16
@@ -2133,7 +2133,7 @@ fn parse_integer_literal(text: String) -> Int? {
     if i >= raw.len() -> return None
     value := 0
     loop i < raw.len() {
-        digit :: digit_value(Int.from_u8(raw[i]))
+        digit: digit_value(Int.from_u8(raw[i]))
         if digit < 0 || digit >= radix -> return None
         if value > (9223372036854775807 - digit) /% radix -> return None
         value = value * radix + digit
@@ -2142,13 +2142,13 @@ fn parse_integer_literal(text: String) -> Int? {
     Val(value)
 }
 
-fn parse_float_literal(text: String) -> Float? {
-    clean :: strip_underscores(text)
-    value :: Float.parse(clean) ?? return None
+parse_float_literal: fn(text: String) -> Float? {
+    clean: strip_underscores(text)
+    value: Float.parse(clean) ?? return None
     Val(value)
 }
 
-fn escape_value(value: Int) -> Int Never! {
+escape_value: fn(value: Int) -> Int Never! {
     if value == {
         110 -> 10
         116 -> 9
@@ -2158,52 +2158,52 @@ fn escape_value(value: Int) -> Int Never! {
     }
 }
 
-fn hex_value(value: Int) -> Int Never! {
-    digit :: digit_value(value)
+hex_value: fn(value: Int) -> Int Never! {
+    digit: digit_value(value)
     if digit >= 0 && digit < 16 -> digit else -> -1
 }
 
-fn previous_code_index(facts: [Int], index: Int) -> Int Never! {
+previous_code_index: fn(facts: [Int], index: Int) -> Int Never! {
     cursor := index - 1
     loop cursor >= 0 {
-        kind :: kind_at(facts, cursor)
+        kind: kind_at(facts, cursor)
         if kind != K_LINE_COMMENT && kind != K_BLOCK_COMMENT -> return cursor
         cursor -= 1
     }
     -1
 }
 
-fn fact_text(source: [U8], facts: [Int], index: Int) -> String Never! {
+fact_text: fn(source: [U8], facts: [Int], index: Int) -> String Never! {
     if index < 0 || index >= facts.len() /% 4 -> return ""
     slice_text(source, facts[index * 4 + 1], facts[index * 4 + 2])
 }
 
-fn string_head_modes(source: [U8], facts: [Int], index: Int) -> (raw_head: Bool, byte_head: Bool) Never! {
-    open :: previous_code_index(facts, index)
+string_head_modes: fn(source: [U8], facts: [Int], index: Int) -> (raw_head: Bool, byte_head: Bool) Never! {
+    open: previous_code_index(facts, index)
     if open < 0 || kind_at(facts, open) != K_LBRACE -> return (raw_head: false, byte_head: false)
-    before_open :: previous_code_index(facts, open)
+    before_open: previous_code_index(facts, open)
     raw := before_open >= 0 && kind_at(facts, before_open) == K_DOT
     // D-BOUND-RAW1=A: a typed head is a name whose first character is an
     // ASCII capital, as Rust's lexer reads it; non-ASCII capitals do not count.
     if before_open >= 0 && kind_at(facts, before_open) == K_IDENT {
-        first :: byte_at(source, facts[before_open * 4 + 1])
+        first: byte_at(source, facts[before_open * 4 + 1])
         if first >= 65 && first <= 90 -> raw = true
     }
     byte := false
     if before_open >= 0 && kind_at(facts, before_open) == K_RBRACKET {
-        before_close :: previous_code_index(facts, before_open)
+        before_close: previous_code_index(facts, before_open)
         if {
             before_close >= 0 && kind_at(facts, before_close) == K_IDENT && fact_text(source, facts, before_close) == "U8" -> {
-                before_type :: previous_code_index(facts, before_close)
+                before_type: previous_code_index(facts, before_close)
                 byte = before_type >= 0 && kind_at(facts, before_type) == K_LBRACKET
             }
             else -> {
                 if before_close >= 0 {
-                    hash :: previous_code_index(facts, before_close)
+                    hash: previous_code_index(facts, before_close)
                     if hash >= 0 && kind_at(facts, hash) == K_HASH {
-                        u8 :: previous_code_index(facts, hash)
+                        u8: previous_code_index(facts, hash)
                         if u8 >= 0 && kind_at(facts, u8) == K_IDENT && fact_text(source, facts, u8) == "U8" {
-                            bracket :: previous_code_index(facts, u8)
+                            bracket: previous_code_index(facts, u8)
                             byte = bracket >= 0 && kind_at(facts, bracket) == K_LBRACKET
                         }
                     }
@@ -2214,28 +2214,28 @@ fn string_head_modes(source: [U8], facts: [Int], index: Int) -> (raw_head: Bool,
     (raw_head: raw, byte_head: byte)
 }
 
-fn group_has_ffi_marker(source: [U8], facts: [Int], hash_index: Int, limit: Int) -> Bool Never! {
-    open :: previous_code_index(facts, hash_index + 2)
+group_has_ffi_marker: fn(source: [U8], facts: [Int], hash_index: Int, limit: Int) -> Bool Never! {
+    open: previous_code_index(facts, hash_index + 2)
     if open < 0 || kind_at(facts, open) != K_LBRACKET -> return false
     cursor := open + 1
     depth := 0
     segment_head := true
     loop cursor < limit {
-        kind :: kind_at(facts, cursor)
+        kind: kind_at(facts, cursor)
         // Rust's prelude scan drops comments before reading marker names.
         if kind == K_LINE_COMMENT || kind == K_BLOCK_COMMENT {
             cursor += 1
             next
         }
         if depth == 0 && segment_head && kind == K_IDENT && fact_text(source, facts, cursor) == "FFI" -> return true
-        is_open_delimiter :: if kind == {
+        is_open_delimiter: if kind == {
             K_LPAREN -> true
             K_LBRACKET -> true
             K_LBRACE -> true
             else -> false
         }
         if is_open_delimiter -> depth += 1 else {
-            is_close_delimiter :: if kind == {
+            is_close_delimiter: if kind == {
                 K_RPAREN -> true
                 K_RBRACKET -> true
                 K_RBRACE -> true
@@ -2260,11 +2260,11 @@ fn group_has_ffi_marker(source: [U8], facts: [Int], hash_index: Int, limit: Int)
     false
 }
 
-fn matching_open(facts: [Int], index: Int, open_kind: Int, close_kind: Int) -> Int Never! {
+matching_open: fn(facts: [Int], index: Int, open_kind: Int, close_kind: Int) -> Int Never! {
     cursor := index
     depth := 0
     loop cursor >= 0 {
-        kind :: kind_at(facts, cursor)
+        kind: kind_at(facts, cursor)
         if kind == close_kind -> depth += 1
         if kind == open_kind {
             depth -= 1
@@ -2275,13 +2275,13 @@ fn matching_open(facts: [Int], index: Int, open_kind: Int, close_kind: Int) -> I
     -1
 }
 
-fn has_ffi_marker(source: [U8], facts: [Int], function_index: Int) -> Bool Never! {
+has_ffi_marker: fn(source: [U8], facts: [Int], function_index: Int) -> Bool Never! {
     cursor := previous_code_index(facts, function_index)
     loop cursor >= 0 {
-        kind :: kind_at(facts, cursor)
+        kind: kind_at(facts, cursor)
         // Comments, `pub` and `;` between markers and `fn` are skipped, as in
         // Rust's prelude filter.
-        is_skipped :: if kind == {
+        is_skipped: if kind == {
             K_PUB -> true
             K_SEMI -> true
             K_LINE_COMMENT -> true
@@ -2293,7 +2293,7 @@ fn has_ffi_marker(source: [U8], facts: [Int], function_index: Int) -> Bool Never
             next
         }
         if kind == K_IDENT {
-            marker :: previous_code_index(facts, cursor)
+            marker: previous_code_index(facts, cursor)
             if marker >= 0 && kind_at(facts, marker) == K_HASH {
                 if fact_text(source, facts, cursor) == "FFI" -> return true
                 cursor = marker - 1
@@ -2301,7 +2301,7 @@ fn has_ffi_marker(source: [U8], facts: [Int], function_index: Int) -> Bool Never
             }
         }
         if kind == K_RPAREN {
-            open :: matching_open(facts, cursor, K_LPAREN, K_RPAREN)
+            open: matching_open(facts, cursor, K_LPAREN, K_RPAREN)
             marker := if open >= 0 -> previous_code_index(facts, open) else -> -1
             hash := if marker >= 0 -> previous_code_index(facts, marker) else -> -1
             if marker >= 0 && hash >= 0 && kind_at(facts, marker) == K_IDENT && kind_at(facts, hash) == K_HASH {
@@ -2311,7 +2311,7 @@ fn has_ffi_marker(source: [U8], facts: [Int], function_index: Int) -> Bool Never
             }
         }
         if kind == K_RBRACKET {
-            open :: matching_open(facts, cursor, K_LBRACKET, K_RBRACKET)
+            open: matching_open(facts, cursor, K_LBRACKET, K_RBRACKET)
             hash := if open >= 0 -> previous_code_index(facts, open) else -> -1
             if hash >= 0 && kind_at(facts, hash) == K_HASH {
                 if group_has_ffi_marker(source, facts, hash, function_index) -> return true
@@ -2324,8 +2324,8 @@ fn has_ffi_marker(source: [U8], facts: [Int], function_index: Int) -> Bool Never
     false
 }
 
-fn raw_foreign_body_at(source: [U8], facts: [Int], index: Int) -> Bool Never! {
-    open :: previous_code_index(facts, index)
+raw_foreign_body_at: fn(source: [U8], facts: [Int], index: Int) -> Bool Never! {
+    open: previous_code_index(facts, index)
     if open < 0 || kind_at(facts, open) != K_LBRACE -> return false
     cursor := open - 1
     loop cursor >= 0 {
@@ -2335,12 +2335,12 @@ fn raw_foreign_body_at(source: [U8], facts: [Int], index: Int) -> Bool Never! {
     false
 }
 
-fn shifted_span(span: Span, offset: Int) -> Span Never! {
+shifted_span: fn(span: Span, offset: Int) -> Span Never! {
     Span{start: span.start + offset, end: span.end + offset}
 }
 
 impl Token {
-    fn shift_spans(&self, offset: Int) Never! {
+    shift_spans: fn(&self, offset: Int) Never! {
         self.span = shifted_span(self.span, offset)
         index := 0
         loop index < self.payload.string_parts.len() {
@@ -2351,7 +2351,7 @@ impl Token {
 }
 
 impl StringPart {
-    fn shift_spans(&self, offset: Int) Never! {
+    shift_spans: fn(&self, offset: Int) Never! {
         self.span = shifted_span(self.span, offset)
         index := 0
         loop index < self.tokens.len() {
@@ -2361,7 +2361,7 @@ impl StringPart {
     }
 }
 
-fn shifted_diagnostic(diagnostic: &Diagnostic, offset: Int) Never! {
+shifted_diagnostic: fn(diagnostic: &Diagnostic, offset: Int) Never! {
     diagnostic.span = if diagnostic.span == {
         .Val(span) -> Val(shifted_span(span, offset))
         .None -> None
@@ -2379,18 +2379,18 @@ fn shifted_diagnostic(diagnostic: &Diagnostic, offset: Int) Never! {
     diagnostic.labels = shifted_labels
 }
 
-fn lex_payload_from_facts(source: [U8], facts: [Int], config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int) -> Lexed {
+lex_payload_from_facts: fn(source: [U8], facts: [Int], config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int) -> Lexed {
     tokens := [Token]{}
     diagnostics := [Diagnostic]{}
     cursor := 0
     index := 0
     loop index < facts.len() /% 4 {
-        kind :: kind_at(facts, index)
-        start :: facts[index * 4 + 1]
-        end :: facts[index * 4 + 2]
+        kind: kind_at(facts, index)
+        start: facts[index * 4 + 1]
+        end: facts[index * 4 + 2]
         gap_diagnostic(source, facts, cursor, start, config_surface, allow_reserved_identifiers, depth, &diagnostics)
-        text :: slice_text(source, start, end)
-        built :: payload_for(kind, source, facts, index, text, config_surface, allow_reserved_identifiers, depth, &diagnostics)
+        text: slice_text(source, start, end)
+        built: payload_for(kind, source, facts, index, text, config_surface, allow_reserved_identifiers, depth, &diagnostics)
         if built.keep -> &tokens.push(Token{kind: kind, span: Span{start: start, end: end}, payload: built.payload})
         cursor = end
         index += 1
@@ -2399,12 +2399,12 @@ fn lex_payload_from_facts(source: [U8], facts: [Int], config_surface: Bool, allo
     Lexed{tokens: tokens, diagnostics: diagnostics}
 }
 
-fn lex_payload_at_depth(source: [U8], config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int) -> Lexed {
-    facts :: raw_token_facts(source, config_surface)
+lex_payload_at_depth: fn(source: [U8], config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int) -> Lexed {
+    facts: raw_token_facts(source, config_surface)
     lex_payload_from_facts(source, facts, config_surface, allow_reserved_identifiers, depth)
 }
 
-fn lex_expression(source: [U8], start: Int, end: Int, config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, span: Span, diagnostics: &[Diagnostic]) -> [Token] {
+lex_expression: fn(source: [U8], start: Int, end: Int, config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, span: Span, diagnostics: &[Diagnostic]) -> [Token] {
     if depth >= MAX_INTERPOLATION_DEPTH {
         add_diagnostic(&diagnostics, "E1403", span.start, span.end, "source nesting exceeds the supported limit", "interpolated expressions are lexed as nested Jet source", "pull inner parts out into named bindings or helper functions")
         return [Token]{}
@@ -2424,7 +2424,7 @@ fn lex_expression(source: [U8], start: Int, end: Int, config_surface: Bool, allo
     nested.tokens
 }
 
-fn only_whitespace(source: [U8], start: Int, end: Int) -> Bool {
+only_whitespace: fn(source: [U8], start: Int, end: Int) -> Bool {
     cursor := start
     loop cursor < end {
         if !is_whitespace_at(source, cursor) -> return false
@@ -2433,11 +2433,11 @@ fn only_whitespace(source: [U8], start: Int, end: Int) -> Bool {
     true
 }
 
-fn interpolation_end(source: [U8], start: Int, limit: Int) -> Int Never! {
+interpolation_end: fn(source: [U8], start: Int, limit: Int) -> Int Never! {
     cursor := start + 1
     depth := 1
     loop cursor < limit {
-        value :: byte_at(source, cursor)
+        value: byte_at(source, cursor)
         if value == 47 && byte_at(source, cursor + 1) == 47 {
             cursor += 2
             loop cursor < limit && byte_at(source, cursor) != 10 -> cursor += utf8_width(source, cursor)
@@ -2466,13 +2466,13 @@ fn interpolation_end(source: [U8], start: Int, limit: Int) -> Int Never! {
         }
         if value == 34 {
             triple := byte_at(source, cursor + 1) == 34 && byte_at(source, cursor + 2) == 34
-            nested :: if triple -> scan_triple_string_end(source, cursor, false) else -> scan_plain_string_end(source, cursor, false)
+            nested: if triple -> scan_triple_string_end(source, cursor, false) else -> scan_plain_string_end(source, cursor, false)
             if nested < 0 || nested > limit -> return -1
             cursor = nested
             next
         }
         if value == 39 {
-            nested :: scan_char_end(source, cursor)
+            nested: scan_char_end(source, cursor)
             if nested < 0 || nested > limit -> return -1
             cursor = nested
             next
@@ -2511,19 +2511,19 @@ fn interpolation_end(source: [U8], start: Int, limit: Int) -> Int Never! {
 // Literal text grows in byte buffers: rebuilding a String per scalar made a
 // long literal cost quadratic time. Only ASCII escape bytes are pushed one by
 // one (a lone byte >= 128 is no UTF-8 text); scalars are copied whole.
-fn push_ascii_byte(out: &[U8], value: Int) Never! {
+push_ascii_byte: fn(out: &[U8], value: Int) Never! {
     if value >= 0 && value < 128 -> &out.push(U8{value})
 }
 
-fn push_text(out: &[U8], text: String) Never! {
+push_text: fn(out: &[U8], text: String) Never! {
     loop byte in text.bytes() -> &out.push(byte)
 }
 
-fn text_from_bytes(bytes: [U8]) -> String Never! {
+text_from_bytes: fn(bytes: [U8]) -> String Never! {
     String.from_bytes(bytes) ?? ""
 }
 
-fn append_text_part(parts: &[StringPart], start: Int, end: Int, text: String) Never! {
+append_text_part: fn(parts: &[StringPart], start: Int, end: Int, text: String) Never! {
     &parts.push(StringPart{
         kind: STRING_PART_TEXT,
         span: Span{start: start, end: end},
@@ -2533,7 +2533,7 @@ fn append_text_part(parts: &[StringPart], start: Int, end: Int, text: String) Ne
     })
 }
 
-fn decode_string_content(source: [U8], start: Int, end: Int, triple: Bool, indent: Int, raw_head: Bool, byte_head: Bool, config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, diagnostics: &[Diagnostic]) -> (decoded: String, interpolations: Int, parts: [StringPart], valid: Bool) {
+decode_string_content: fn(source: [U8], start: Int, end: Int, triple: Bool, indent: Int, raw_head: Bool, byte_head: Bool, config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, diagnostics: &[Diagnostic]) -> (decoded: String, interpolations: Int, parts: [StringPart], valid: Bool) {
     decoded := [U8]{}
     literal := [U8]{}
     parts := [StringPart]{}
@@ -2552,7 +2552,7 @@ fn decode_string_content(source: [U8], start: Int, end: Int, triple: Bool, inden
             at_line_start = false
             if literal_start == start && literal.len() == 0 -> literal_start = cursor
         }
-        value :: byte_at(source, cursor)
+        value: byte_at(source, cursor)
         if value == 10 {
             &literal.push(U8{10})
             &decoded.push(U8{10})
@@ -2576,10 +2576,10 @@ fn decode_string_content(source: [U8], start: Int, end: Int, triple: Bool, inden
                 }
                 next
             }
-            next_value :: byte_at(source, cursor + 1)
+            next_value: byte_at(source, cursor + 1)
             if byte_head && next_value == 120 {
-                high :: hex_value(byte_at(source, cursor + 2))
-                low :: hex_value(byte_at(source, cursor + 3))
+                high: hex_value(byte_at(source, cursor + 2))
+                low: hex_value(byte_at(source, cursor + 3))
                 if high >= 0 && low >= 0 && cursor + 3 < end {
                     if literal.len() > 0 {
                         append_text_part(&parts, literal_start, cursor, text_from_bytes(literal))
@@ -2600,14 +2600,14 @@ fn decode_string_content(source: [U8], start: Int, end: Int, triple: Bool, inden
                 cursor += 2
                 next
             }
-            escaped :: escape_value(next_value)
-            escape_width :: utf8_width(source, cursor + 1)
+            escaped: escape_value(next_value)
+            escape_width: utf8_width(source, cursor + 1)
             escape_end := cursor + 1 + escape_width
             if {
                 escaped < 0 -> {
-                    escape_text :: bytes_text(source, cursor + 1, escape_end)
+                    escape_text: bytes_text(source, cursor + 1, escape_end)
                     what := "`\\{escape_text}` isn't an escape Jet knows"
-                    why :: "inside quoted text, `\\` starts an escape: `\\n` (new line), `\\t` (tab), `\\\"` (quote), `\\\\` (backslash)"
+                    why: "inside quoted text, `\\` starts an escape: `\\n` (new line), `\\t` (tab), `\\\"` (quote), `\\\\` (backslash)"
                     add_diagnostic(&diagnostics, "E0001", cursor, escape_end, what, why, "write `\\\\` for a real backslash")
                 }
                 else -> {
@@ -2638,7 +2638,7 @@ fn decode_string_content(source: [U8], start: Int, end: Int, triple: Bool, inden
             cursor += 1
             nesting := 1
             loop cursor < end && nesting > 0 {
-                next_byte :: byte_at(source, cursor)
+                next_byte: byte_at(source, cursor)
                 &literal.push(U8{next_byte.bit_and(255)})
                 &decoded.push(U8{next_byte.bit_and(255)})
                 if next_byte == 123 -> nesting += 1
@@ -2653,7 +2653,7 @@ fn decode_string_content(source: [U8], start: Int, end: Int, triple: Bool, inden
             next
         }
         if value == 123 {
-            close :: interpolation_end(source, cursor, end)
+            close: interpolation_end(source, cursor, end)
             if close < 0 {
                 add_diagnostic(&diagnostics, "E0002", cursor, end, "this `{{` never gets a matching `}}`", "`{{` inside quoted text starts an interpolated value and needs a closing `}}` before the text ends; escaped braces use `{{{{`/`}}}}`, while raw backtick strings keep braces literal", "add a `}}` after the value, write `{{{{` for an escaped brace, or write the text as ``…`` for raw text")
                 valid = false
@@ -2672,8 +2672,8 @@ fn decode_string_content(source: [U8], start: Int, end: Int, triple: Bool, inden
             }
             expr_start := cursor + 1
             part_span := Span{start: cursor, end: close + 1}
-            children :: lex_expression(source, expr_start, close, config_surface, allow_reserved_identifiers, depth, part_span, &diagnostics)
-            expression_text :: slice_text(source, expr_start, close)
+            children: lex_expression(source, expr_start, close, config_surface, allow_reserved_identifiers, depth, part_span, &diagnostics)
+            expression_text: slice_text(source, expr_start, close)
             &parts.push(StringPart{
                 kind: STRING_PART_INTERPOLATION,
                 span: part_span,
@@ -2686,8 +2686,8 @@ fn decode_string_content(source: [U8], start: Int, end: Int, triple: Bool, inden
             literal_start = cursor
             next
         }
-        width :: utf8_width(source, cursor)
-        scalar :: bytes_text(source, cursor, cursor + width)
+        width: utf8_width(source, cursor)
+        scalar: bytes_text(source, cursor, cursor + width)
         push_text(&literal, scalar)
         push_text(&decoded, scalar)
         cursor += width
@@ -2696,8 +2696,8 @@ fn decode_string_content(source: [U8], start: Int, end: Int, triple: Bool, inden
     (decoded: text_from_bytes(decoded), interpolations: interpolations, parts: parts, valid: valid)
 }
 
-fn decode_raw_string(text: String, source_start: Int) -> (decoded: String, parts: [StringPart]) Never! {
-    raw :: text.bytes()
+decode_raw_string: fn(text: String, source_start: Int) -> (decoded: String, parts: [StringPart]) Never! {
+    raw: text.bytes()
     if raw.len() == 0 -> return (decoded: "", parts: [StringPart]{})
     fence := 0
     loop fence < raw.len() && Int.from_u8(raw[fence]) == 96 -> fence += 1
@@ -2719,14 +2719,14 @@ fn decode_raw_string(text: String, source_start: Int) -> (decoded: String, parts
         begin += 1
         finish -= 1
     }
-    decoded :: bytes_text(raw, begin, finish)
+    decoded: bytes_text(raw, begin, finish)
     parts := [StringPart]{}
     append_text_part(&parts, source_start + begin, source_start + finish, decoded)
     (decoded: decoded, parts: parts)
 }
 
 // D-TRIPLE-DELIM1=A: use the same first offending run and byte span as Native.
-fn check_triple_delimiter_text(source: [U8], begin: Int, end: Int, position: String, diagnostics: &[Diagnostic]) {
+check_triple_delimiter_text: fn(source: [U8], begin: Int, end: Int, position: String, diagnostics: &[Diagnostic]) {
     finish := end
     if byte_at(source, end) == 10 && finish > begin && byte_at(source, finish - 1) == 13 -> finish -= 1
     first := begin
@@ -2734,21 +2734,21 @@ fn check_triple_delimiter_text(source: [U8], begin: Int, end: Int, position: Str
     if first == finish -> return
     last := first
     loop last < finish && byte_at(source, last) != 32 && byte_at(source, last) != 9 -> last += utf8_width(source, last)
-    row :: diagnostic_registry_row("E0084") ?? panic("E0084 has no registry row")
+    row: diagnostic_registry_row("E0084") ?? panic("E0084 has no registry row")
     add_diagnostic(&diagnostics, row.code, first, last, row.what.replace("{{position}}", position), row.why, row.fix)
 }
 
-fn decode_string(source: [U8], facts: [Int], index: Int, start: Int, end: Int, config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, diagnostics: &[Diagnostic]) -> (decoded: String, interpolations: Int, parts: [StringPart], valid: Bool) {
+decode_string: fn(source: [U8], facts: [Int], index: Int, start: Int, end: Int, config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, diagnostics: &[Diagnostic]) -> (decoded: String, interpolations: Int, parts: [StringPart], valid: Bool) {
     triple := byte_at(source, start) == 34 && byte_at(source, start + 1) == 34 && byte_at(source, start + 2) == 34
     if triple && raw_foreign_body_at(source, facts, index) {
         body_start := start + 3
         body_end := end - 3
-        body :: slice_text(source, body_start, body_end)
+        body: slice_text(source, body_start, body_end)
         parts := [StringPart]{}
         append_text_part(&parts, body_start, body_end, body)
         return (decoded: body, interpolations: 0, parts: parts, valid: true)
     }
-    modes :: string_head_modes(source, facts, index)
+    modes: string_head_modes(source, facts, index)
     content_start := start + 1
     content_end := end - 1
     indent := 0
@@ -2775,11 +2775,11 @@ fn decode_string(source: [U8], facts: [Int], index: Int, start: Int, end: Int, c
     decode_string_content(source, content_start, content_end, triple, indent, modes.raw_head, modes.byte_head, config_surface, allow_reserved_identifiers, depth, &diagnostics)
 }
 
-fn decode_char(text: String, source_start: Int, diagnostics: &[Diagnostic]) -> String {
-    raw :: text.bytes()
+decode_char: fn(text: String, source_start: Int, diagnostics: &[Diagnostic]) -> String {
+    raw: text.bytes()
     if raw.len() < 2 -> return ""
     if Int.from_u8(raw[1]) != 92 {
-        width :: utf8_width(raw, 1)
+        width: utf8_width(raw, 1)
         if byte_at(raw, 1 + width) != 39 {
             span_end := source_start + 1 + width
             if span_end > source_start + raw.len() -> span_end = source_start + raw.len()
@@ -2793,9 +2793,9 @@ fn decode_char(text: String, source_start: Int, diagnostics: &[Diagnostic]) -> S
     escaped := -1
     if escape_width > 0 -> escaped = escape_value(Int.from_u8(raw[2]))
     if escaped < 0 {
-        escape_text :: bytes_text(raw, 2, escape_end)
+        escape_text: bytes_text(raw, 2, escape_end)
         what := "`\\{escape_text}` isn't an escape Jet knows"
-        why :: "inside a character literal, `\\` starts an escape: `\\n`, `\\t`, `\\'`, `\\\\`"
+        why: "inside a character literal, `\\` starts an escape: `\\n`, `\\t`, `\\'`, `\\\\`"
         add_diagnostic(&diagnostics, "E0001", source_start + 1, source_start + escape_end, what, why, "use a supported escape or a plain character")
     }
     if byte_at(raw, escape_end) != 39 {
@@ -2807,14 +2807,14 @@ fn decode_char(text: String, source_start: Int, diagnostics: &[Diagnostic]) -> S
     String.from_bytes([U8]{U8{escaped}}) ?? ""
 }
 
-fn numeric_payload(kind: Int, source: [U8], start: Int, end: Int, text: String, diagnostics: &[Diagnostic]) -> TokenPayload {
-    numeric_end :: scan_numeric_end(source, start)
+numeric_payload: fn(kind: Int, source: [U8], start: Int, end: Int, text: String, diagnostics: &[Diagnostic]) -> TokenPayload {
+    numeric_end: scan_numeric_end(source, start)
     bounded_end := numeric_end
     if bounded_end < start || bounded_end > end -> bounded_end = end
-    number_text :: slice_text(source, start, bounded_end)
+    number_text: slice_text(source, start, bounded_end)
     suffix := ""
     if kind == K_UNIT_NUMBER -> suffix = slice_text(source, bounded_end, end)
-    marker :: byte_at(source, start + 1)
+    marker: byte_at(source, start + 1)
     radix := if marker == {
         120 | 88 -> 16
         111 | 79 -> 8
@@ -2856,8 +2856,8 @@ fn numeric_payload(kind: Int, source: [U8], start: Int, end: Int, text: String, 
     payload
 }
 
-fn identifier_payload(source: [U8], start: Int, end: Int, text: String, allow_reserved_identifiers: Bool, diagnostics: &[Diagnostic]) -> TokenPayload {
-    raw :: text.bytes()
+identifier_payload: fn(source: [U8], start: Int, end: Int, text: String, allow_reserved_identifiers: Bool, diagnostics: &[Diagnostic]) -> TokenPayload {
+    raw: text.bytes()
     if !allow_reserved_identifiers && raw.len() >= 2 && Int.from_u8(raw[0]) == 95 && Int.from_u8(raw[1]) == 95 {
         add_diagnostic(&diagnostics, "E0067", start, end, "`{text}` is reserved for Jet", "double-underscore names belong to the compiler, generated binders, debugger, serializer, and tools", "rename it without the second leading underscore")
     }
@@ -2869,26 +2869,26 @@ fn identifier_payload(source: [U8], start: Int, end: Int, text: String, allow_re
     payload
 }
 
-fn source_has_text(source: [U8], at: Int, expected: String) -> Bool Never! {
-    wanted :: expected.bytes()
+source_has_text: fn(source: [U8], at: Int, expected: String) -> Bool Never! {
+    wanted: expected.bytes()
     loop offset in 0..<wanted.len() {
         if byte_at(source, at + offset) != Int.from_u8(wanted[offset]) -> return false
     }
     true
 }
 
-fn text_in(name: String, values: [String]) -> Bool Never! {
+text_in: fn(name: String, values: [String]) -> Bool Never! {
     loop value in values {
         if value == name -> return true
     }
     false
 }
 
-fn retired_fact_member(name: String) -> Bool Never! {
+retired_fact_member: fn(name: String) -> Bool Never! {
     text_in(name, [String]{"layout", "fields", "range", "effects", "origin", "name", "index", "sendability", "view_provenance", "movedness", "maturity", "kind", "unit_scale_provenance", "dimension", "attribution", "states", "measure", "exactness", "ty", "base", "unknown", "track_origin", "obligation", "classification", "profile", "flow", "taint", "duty", "rights", "package_policy", "nominal", "interval"})
 }
 
-fn retired_declaration_metadata(name: String) -> Bool Never! {
+retired_declaration_metadata: fn(name: String) -> Bool Never! {
     text_in(name, [String]{"sites", "repeatable", "holds", "safe", "gates", "decision", "retired", "proved_by", "inherits", "companion", "scopes", "resolution", "owns_menu", "identity", "name"})
 }
 
@@ -2903,7 +2903,7 @@ fn retired_declaration_metadata(name: String) -> Bool Never! {
 // Precedence follows Rust's lexer: a fact member after `.`, declaration
 // metadata before `:` and `@irreversible` respell in place; otherwise a name
 // splice wins over the retired roots and subject queries.
-fn retired_fact_in_place(source: [U8], start: Int, name_end: Int, name: String) -> Bool Never! {
+retired_fact_in_place: fn(source: [U8], start: Int, name_end: Int, name: String) -> Bool Never! {
     if name == "irreversible" -> return true
     if byte_at(source, start - 1) == 46 && byte_at(source, start - 2) != 46 && retired_fact_member(name) -> return true
     colon := name_end
@@ -2914,8 +2914,8 @@ fn retired_fact_in_place(source: [U8], start: Int, name_end: Int, name: String) 
 // The end of the identifier token for the prefix `@name` at `start`. A
 // respelled retired root consumes its legacy suffix, so `@build.package`
 // reads as one `$package` word and `@PHASE()` as one `$phase` word.
-fn retired_fact_end(source: [U8], start: Int, name_end: Int) -> Int {
-    name :: slice_text(source, start + 1, name_end)
+retired_fact_end: fn(source: [U8], start: Int, name_end: Int) -> Int {
+    name: slice_text(source, start + 1, name_end)
     suffix_end := name_end
     if name == "build" && source_has_text(source, name_end, ".package") && !is_identifier_continue(source, name_end + 8) -> suffix_end = name_end + 8
     if (name == "PHASE" || name == "PROGRAM" || name == "PACKAGE") && byte_at(source, name_end) == 40 && byte_at(source, name_end + 1) == 41 -> suffix_end = name_end + 2
@@ -2924,20 +2924,20 @@ fn retired_fact_end(source: [U8], start: Int, name_end: Int) -> Int {
 }
 
 // `end` is the token end from `retired_fact_end`, past any legacy suffix.
-fn retired_fact_respelling(source: [U8], start: Int, end: Int, diagnostics: &[Diagnostic]) -> String? {
+retired_fact_respelling: fn(source: [U8], start: Int, end: Int, diagnostics: &[Diagnostic]) -> String? {
     if byte_at(source, start) != 64 -> return None
-    name_end :: scan_identifier_end(source, start + 1)
-    name :: slice_text(source, start + 1, name_end)
-    word :: "@{name}"
+    name_end: scan_identifier_end(source, start + 1)
+    name: slice_text(source, start + 1, name_end)
+    word: "@{name}"
     respelled := ""
     if {
         retired_fact_in_place(source, start, name_end, name) -> {
             respelled = "${name}"
         }
         retired_name_splice(source, start) -> {
-            splice :: "${name}"
-            span :: Span{start: start, end: name_end}
-            retired :: diagnostic_from_registry("E0388", Val(span), "`{word}` is retired; write `{splice}`", "a template splices a binding's name with the fact sigil `; prefix `@` now marks a live link (D-NAME-SPLICE1=B)", "replace `{word}` with `{splice}`")
+            splice: "${name}"
+            span: Span{start: start, end: name_end}
+            retired: diagnostic_from_registry("E0388", Val(span), "`{word}` is retired; write `{splice}`", "a template splices a binding's name with the fact sigil `; prefix `@` now marks a live link (D-NAME-SPLICE1=B)", "replace `{word}` with `{splice}`")
             &diagnostics.push(diagnostic_with_edit(retired, TextEdit{span: span, new_text: splice}))
             return Val(splice)
         }
@@ -2953,36 +2953,36 @@ fn retired_fact_respelling(source: [U8], start: Int, end: Int, diagnostics: &[Di
         }
         else -> return None
     }
-    old :: slice_text(source, start, end)
-    span :: Span{start: start, end: end}
-    retired :: diagnostic_from_registry("E0003", Val(span), "`{old}` is retired; write `{respelled}`", "compiler facts and declaration metadata carry `; prefix `@` in code now marks a live link (D-COMPILER-NS1=A)", "replace `{old}` with `{respelled}`")
+    old: slice_text(source, start, end)
+    span: Span{start: start, end: end}
+    retired: diagnostic_from_registry("E0003", Val(span), "`{old}` is retired; write `{respelled}`", "compiler facts and declaration metadata carry `; prefix `@` in code now marks a live link (D-COMPILER-NS1=A)", "replace `{old}` with `{respelled}`")
     &diagnostics.push(diagnostic_with_edit(retired, TextEdit{span: span, new_text: respelled}))
     Val(respelled)
 }
 
-fn retired_name_splice(source: [U8], start: Int) -> Bool {
+retired_name_splice: fn(source: [U8], start: Int) -> Bool {
     if byte_at(source, start - 1) == 46 && byte_at(source, start - 2) != 46 -> return true
     head_end := start
     loop byte_at(source, head_end - 1) == 32 -> head_end -= 1
     head_start := head_end
     loop head_start > 0 && is_identifier_continue(source, head_start - 1) -> head_start -= 1
-    head :: String.from_bytes(source.slice(head_start, head_end)) ?? ""
+    head: String.from_bytes(source.slice(head_start, head_end)) ?? ""
     head_end < start && text_in(head, [String]{"fn", "impl", "struct", "enum", "trait", "type"})
 }
 
-fn scalar_codepoint(source: [U8], start: Int, width: Int) -> Int Never! {
-    first :: byte_at(source, start)
+scalar_codepoint: fn(source: [U8], start: Int, width: Int) -> Int Never! {
+    first: byte_at(source, start)
     if width == 2 -> return (first - 192) * 64 + (byte_at(source, start + 1) - 128)
     if width == 3 -> return (first - 224) * 4096 + (byte_at(source, start + 1) - 128) * 64 + (byte_at(source, start + 2) - 128)
     if width == 4 -> return (first - 240) * 262144 + (byte_at(source, start + 1) - 128) * 4096 + (byte_at(source, start + 2) - 128) * 64 + (byte_at(source, start + 3) - 128)
     first
 }
 
-fn codepoint_hex(value: Int) -> String Never! {
+codepoint_hex: fn(value: Int) -> String Never! {
     digits := [Int]{}
     remaining := value
     loop remaining > 0 {
-        digit :: remaining - remaining /% 16 * 16
+        digit: remaining - remaining /% 16 * 16
         &digits.push(digit)
         remaining = remaining /% 16
     }
@@ -2990,32 +2990,32 @@ fn codepoint_hex(value: Int) -> String Never! {
     out := [U8]{}
     cursor := digits.len() - 1
     loop cursor >= 0 {
-        digit :: digits[cursor]
+        digit: digits[cursor]
         byte := 48 + digit
         if digit >= 10 -> byte = 55 + digit
         &out.push(U8{byte})
         cursor -= 1
     }
-    hex :: String.from_bytes(out) ?? "0000"
+    hex: String.from_bytes(out) ?? "0000"
     "U+{hex}"
 }
 
-fn printable_character(source: [U8], start: Int, width: Int) -> String {
-    value :: byte_at(source, start)
+printable_character: fn(source: [U8], start: Int, width: Int) -> String {
+    value: byte_at(source, start)
     if value == 0 -> return "\\0"
     if value == 9 -> return "\\t"
-    scalar :: bytes_text(source, start, start + width)
+    scalar: bytes_text(source, start, start + width)
     if unicode.display_width(scalar) == 0 -> return codepoint_hex(scalar_codepoint(source, start, width))
     scalar
 }
 
-fn fact_index_at(facts: [Int], start: Int) -> Int Never! {
+fact_index_at: fn(facts: [Int], start: Int) -> Int Never! {
     index := 0
     loop index < facts.len() /% 4 && facts[index * 4 + 1] < start -> index += 1
     index
 }
 
-fn gap_diagnostic(source: [U8], facts: [Int], start: Int, end: Int, config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, diagnostics: &[Diagnostic]) {
+gap_diagnostic: fn(source: [U8], facts: [Int], start: Int, end: Int, config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, diagnostics: &[Diagnostic]) {
     cursor := start
     loop cursor < end {
         if cursor == 0 && byte_at(source, 0) == 35 && byte_at(source, 1) == 33 && byte_at(source, 2) == 47 {
@@ -3027,7 +3027,7 @@ fn gap_diagnostic(source: [U8], facts: [Int], start: Int, end: Int, config_surfa
             cursor += utf8_width(source, cursor)
             next
         }
-        value :: byte_at(source, cursor)
+        value: byte_at(source, cursor)
         if value == 35 && byte_at(source, cursor + 1) == 33 && byte_at(source, cursor + 2) == 47 {
             add_diagnostic(&diagnostics, "E0042", cursor, cursor + 2, "a shebang line is only recognized at the very start of the file", "the operating system reads launch metadata only from byte 0; Jet does not treat another `#!` as a launch line", "move `#!...` to line 1, or delete it")
             loop cursor < end && byte_at(source, cursor) != 10 -> cursor += 1
@@ -3035,7 +3035,7 @@ fn gap_diagnostic(source: [U8], facts: [Int], start: Int, end: Int, config_surfa
             next
         }
         if value == 34 {
-            index :: fact_index_at(facts, cursor)
+            index: fact_index_at(facts, cursor)
             triple := byte_at(source, cursor + 1) == 34 && byte_at(source, cursor + 2) == 34
             if triple {
                 if {
@@ -3051,10 +3051,10 @@ fn gap_diagnostic(source: [U8], facts: [Int], start: Int, end: Int, config_surfa
             // As in Rust's lexer, an unclosed string still reports what its
             // body teaches (escapes, lone braces, holes) up to the line end;
             // an unclosed `{` hole is then its one error, else the quote is.
-            modes :: string_head_modes(source, facts, index)
-            scanned :: scan_plain_string_end(source, cursor, modes.raw_head)
-            stop :: if scanned < 0 -> -scanned - 1 else -> scanned
-            body :: decode_string_content(source, cursor + 1, stop, false, 0, modes.raw_head, modes.byte_head, config_surface, allow_reserved_identifiers, depth, &diagnostics)
+            modes: string_head_modes(source, facts, index)
+            scanned: scan_plain_string_end(source, cursor, modes.raw_head)
+            stop: if scanned < 0 -> -scanned - 1 else -> scanned
+            body: decode_string_content(source, cursor + 1, stop, false, 0, modes.raw_head, modes.byte_head, config_surface, allow_reserved_identifiers, depth, &diagnostics)
             if body.valid -> add_diagnostic(&diagnostics, "E0002", cursor, stop, "this text never gets a closing quote", "a piece of text must start and end with a `\"` on the same line", "add a closing `\"` before the end of the line")
             cursor = stop
             next
@@ -3071,18 +3071,18 @@ fn gap_diagnostic(source: [U8], facts: [Int], start: Int, end: Int, config_surfa
             add_diagnostic(&diagnostics, "E0002", cursor, source.len(), "a character literal must be exactly one character", "write `'x'` with a single character between the quotes", "use a String for longer text")
             return
         }
-        width :: utf8_width(source, cursor)
-        character :: printable_character(source, cursor, width)
+        width: utf8_width(source, cursor)
+        character: printable_character(source, cursor, width)
         add_diagnostic(&diagnostics, "E0001", cursor, cursor + width, "the character `{character}` doesn't mean anything here (yet)", "unprintable characters are shown as `\\0`, `\\t`, or `U+XXXX` so you can identify them", "remove it, or use supported syntax")
         cursor += width
     }
 }
 
-fn payload_for(kind: Int, source: [U8], facts: [Int], index: Int, text: String, config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, diagnostics: &[Diagnostic]) -> (payload: TokenPayload, keep: Bool) {
-    start :: facts[index * 4 + 1]
-    end :: facts[index * 4 + 2]
+payload_for: fn(kind: Int, source: [U8], facts: [Int], index: Int, text: String, config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, diagnostics: &[Diagnostic]) -> (payload: TokenPayload, keep: Bool) {
+    start: facts[index * 4 + 1]
+    end: facts[index * 4 + 2]
     if kind == K_IDENT -> return (payload: identifier_payload(source, start, end, text, allow_reserved_identifiers, &diagnostics), keep: true)
-    is_numeric_kind :: if kind == {
+    is_numeric_kind: if kind == {
         K_INT -> true
         K_FLOAT -> true
         K_UNIT_NUMBER -> true
@@ -3090,7 +3090,7 @@ fn payload_for(kind: Int, source: [U8], facts: [Int], index: Int, text: String, 
     }
     if is_numeric_kind -> return (payload: numeric_payload(kind, source, start, end, text, &diagnostics), keep: true)
     if kind == K_STR {
-        decoded :: decode_string(source, facts, index, start, end, config_surface, allow_reserved_identifiers, depth, &diagnostics)
+        decoded: decode_string(source, facts, index, start, end, config_surface, allow_reserved_identifiers, depth, &diagnostics)
         payload := empty_payload(text)
         payload.decoded = decoded.decoded
         payload.interpolations = decoded.interpolations
@@ -3098,7 +3098,7 @@ fn payload_for(kind: Int, source: [U8], facts: [Int], index: Int, text: String, 
         return (payload: payload, keep: decoded.valid)
     }
     if kind == K_RAW_STR {
-        raw :: decode_raw_string(text, start)
+        raw: decode_raw_string(text, start)
         payload := empty_payload(text)
         payload.decoded = raw.decoded
         payload.string_parts = raw.parts
@@ -3112,11 +3112,11 @@ fn payload_for(kind: Int, source: [U8], facts: [Int], index: Int, text: String, 
     // D-FENCE2=A: the retired `@[` / `]@` digraphs lex as fence tokens so
     // parsing recovers, and each one teaches its `<:` / `:>` respelling.
     if (kind == K_FENCE_OPEN && text == "@[") || (kind == K_FENCE_CLOSE && text == "]@") {
-        respelled :: if kind == K_FENCE_OPEN -> "<:" else -> ":>"
-        previous :: byte_at(source, start - 1)
-        new_text :: if previous == 58 || previous == 60 -> " {respelled}" else -> respelled
-        span :: Span{start: start, end: end}
-        retired :: diagnostic_from_registry("E-FENCE-SPELLING", Val(span), "`{text}` is the retired fence spelling", "statement-expansion fences are spelled `<: … :>`; prefix `@` belongs to compile-time marks", "replace `{text}` with `{respelled}`")
+        respelled: if kind == K_FENCE_OPEN -> "<:" else -> ":>"
+        previous: byte_at(source, start - 1)
+        new_text: if previous == 58 || previous == 60 -> " {respelled}" else -> respelled
+        span: Span{start: start, end: end}
+        retired: diagnostic_from_registry("E-FENCE-SPELLING", Val(span), "`{text}` is the retired fence spelling", "statement-expansion fences are spelled `<: … :>`; prefix `@` belongs to compile-time marks", "replace `{text}` with `{respelled}`")
         &diagnostics.push(diagnostic_with_edit(retired, TextEdit{span: span, new_text: new_text}))
     }
     if kind == K_BLOCK_COMMENT && scan_block_comment_end(source, start) < 0 {
@@ -3127,11 +3127,11 @@ fn payload_for(kind: Int, source: [U8], facts: [Int], index: Int, text: String, 
     (payload: payload, keep: true)
 }
 
-fn lex_payload(source: [U8], config_surface: Bool) -> Lexed {
+lex_payload: fn(source: [U8], config_surface: Bool) -> Lexed {
     lex_payload_at_depth(source, config_surface, false, 0)
 }
 
-fn lex_generated_payload(source: [U8]) -> Lexed {
+lex_generated_payload: fn(source: [U8]) -> Lexed {
     lex_payload_at_depth(source, false, true, 0)
 }
 
@@ -3141,7 +3141,7 @@ fn lex_generated_payload(source: [U8]) -> Lexed {
 // same aggregate coordinate system as their containing string token.
 use jet_foundation.Span
 
-fn lex_shift_token(token: &Token, offset: Int) Never! {
+lex_shift_token: fn(token: &Token, offset: Int) Never! {
     token.span = Span{start: token.span.start + offset, end: token.span.end + offset}
     loop part_index in 0..<token.payload.string_parts.len() {
         part := token.payload.string_parts[part_index]
@@ -3154,11 +3154,11 @@ fn lex_shift_token(token: &Token, offset: Int) Never! {
 }
 
 // [selfhost terminator pass source: Compiler/JetFoundation/Source/Registry/Diagnostics.jet]
-use diagnostic_unicode :: core.text
+use diagnostic_unicode: core.text
 
-enum DiagnosticRegistryStatus { Active Retired Reserved }
+DiagnosticRegistryStatus: enum { Active Retired Reserved }
 
-enum DiagnosticRegistryFix {
+DiagnosticRegistryFix: enum {
     SourceEdit
     SuggestedSourceEdit
     CryptoMisuse
@@ -3176,7 +3176,7 @@ enum DiagnosticRegistryFix {
 // and canonical construction rules. Human wording at a raise site remains
 // authored input, while moment, severity, row edits, grades, and no-fix facts
 // come from the generated row.
-struct DiagnosticRegistryRow {
+DiagnosticRegistryRow: struct {
     code: String
     lint_name: String?
     stage: String
@@ -3193,17 +3193,17 @@ struct DiagnosticRegistryRow {
     no_fix_reason: DiagnosticNoFixReason?
 }
 
-fn diagnostic_byte_at(source: [U8], index: Int) -> Int Never! {
+diagnostic_byte_at: fn(source: [U8], index: Int) -> Int Never! {
     if index < 0 || index >= source.len() -> return -1
     Int.from_u8(source[index])
 }
 
-fn diagnostic_is_continuation(value: Int) -> Bool Never! {
+diagnostic_is_continuation: fn(value: Int) -> Bool Never! {
     value >= 128 && value <= 191
 }
 
-fn diagnostic_utf8_width(source: [U8], index: Int) -> Int Never! {
-    first :: diagnostic_byte_at(source, index)
+diagnostic_utf8_width: fn(source: [U8], index: Int) -> Int Never! {
+    first: diagnostic_byte_at(source, index)
     if {
         first < 0 -> 0
         first < 128 -> 1
@@ -3214,8 +3214,8 @@ fn diagnostic_utf8_width(source: [U8], index: Int) -> Int Never! {
     }
 }
 
-fn diagnostic_scalar_at(source: [U8], index: Int) -> String Never! {
-    width :: diagnostic_utf8_width(source, index)
+diagnostic_scalar_at: fn(source: [U8], index: Int) -> String Never! {
+    width: diagnostic_utf8_width(source, index)
     if width <= 0 -> return ""
     out := [U8]{}
     loop offset in 0..<width {
@@ -3225,8 +3225,8 @@ fn diagnostic_scalar_at(source: [U8], index: Int) -> String Never! {
     String.from_bytes(out) ?? ""
 }
 
-fn diagnostic_is_whitespace_at(source: [U8], index: Int) -> Bool Never! {
-    value :: diagnostic_byte_at(source, index)
+diagnostic_is_whitespace_at: fn(source: [U8], index: Int) -> Bool Never! {
+    value: diagnostic_byte_at(source, index)
     if {
         value < 0 -> false
         value < 128 -> value == 9 || value == 10 || value == 11 || value == 12 || value == 13 || value == 32
@@ -3234,11 +3234,11 @@ fn diagnostic_is_whitespace_at(source: [U8], index: Int) -> Bool Never! {
     }
 }
 
-fn diagnostic_is_sentence_digit(value: Int) -> Bool Never! {
+diagnostic_is_sentence_digit: fn(value: Int) -> Bool Never! {
     value >= 48 && value <= 57
 }
 
-fn diagnostic_sentence_case_line(value: String) -> String Never! {
+diagnostic_sentence_case_line: fn(value: String) -> String Never! {
     bytes := value.bytes()
     first := -1
     token_len := 0
@@ -3248,12 +3248,12 @@ fn diagnostic_sentence_case_line(value: String) -> String Never! {
     finished := false
     index := 0
     loop index < bytes.len() {
-        width :: diagnostic_utf8_width(bytes, index)
+        width: diagnostic_utf8_width(bytes, index)
         if finished {
             index += width
             next
         }
-        character :: diagnostic_byte_at(bytes, index)
+        character: diagnostic_byte_at(bytes, index)
         if first < 0 {
             if diagnostic_is_whitespace_at(bytes, index) || character == 42 || character == 126 || character == 95 {
                 index += width
@@ -3292,22 +3292,22 @@ fn diagnostic_sentence_case_line(value: String) -> String Never! {
     String.from_bytes(bytes) ?? value
 }
 
-fn diagnostic_registry_row_in(rows: [DiagnosticRegistryRow], code: String) -> DiagnosticRegistryRow? Never! {
+diagnostic_registry_row_in: fn(rows: [DiagnosticRegistryRow], code: String) -> DiagnosticRegistryRow? Never! {
     loop row in rows {
         if row.code == code -> return Val(row)
     }
     None
 }
 
-fn diagnostic_registry_row(code: String) -> DiagnosticRegistryRow? Never! {
+diagnostic_registry_row: fn(code: String) -> DiagnosticRegistryRow? Never! {
     diagnostic_registry_row_in(DIAGNOSTIC_ROWS, code)
 }
 
 // Every registry row in source order (Registry.rs `diagnostic_rows`).
-fn diagnostic_registry_rows() -> [DiagnosticRegistryRow] Never! { DIAGNOSTIC_ROWS }
+diagnostic_registry_rows: fn() -> [DiagnosticRegistryRow] Never! { DIAGNOSTIC_ROWS }
 
-fn diagnostic_registry_static_edit(row: DiagnosticRegistryRow, span: Span) -> TextEdit? {
-    fix :: row.structured_fix ?? return None
+diagnostic_registry_static_edit: fn(row: DiagnosticRegistryRow, span: Span) -> TextEdit? {
+    fix: row.structured_fix ?? return None
     if fix == {
         .Replace(_, replacement) -> Val(TextEdit{span: span, new_text: replacement})
         .Remove(_) -> Val(TextEdit{span: span, new_text: ""})
@@ -3315,20 +3315,20 @@ fn diagnostic_registry_static_edit(row: DiagnosticRegistryRow, span: Span) -> Te
     }
 }
 
-fn diagnostic_registry_applicability(row: DiagnosticRegistryRow, has_edit: Bool) -> DiagnosticFixApplicability? {
+diagnostic_registry_applicability: fn(row: DiagnosticRegistryRow, has_edit: Bool) -> DiagnosticFixApplicability? {
     if !has_edit -> return None
-    safety :: row.fix_safety ?? return None
+    safety: row.fix_safety ?? return None
     if safety == {
         .Formatting | .BehaviorPreserving -> Val(DiagnosticFixApplicability.Safe)
         else -> Val(DiagnosticFixApplicability.Suggested)
     }
 }
 
-fn diagnostic_registry_project_row(diagnostic: ^Diagnostic, row: DiagnosticRegistryRow) -> Diagnostic Never! {
+diagnostic_registry_project_row: fn(diagnostic: ^Diagnostic, row: DiagnosticRegistryRow) -> Diagnostic Never! {
     updated := diagnostic
     if updated.span != None {
-        span :: updated.span ?? return updated
-        edit :: diagnostic_registry_static_edit(row, span)
+        span: updated.span ?? return updated
+        edit: diagnostic_registry_static_edit(row, span)
         if edit == Val(static_edit) {
             updated.edit = Val(static_edit)
             updated.applicability = diagnostic_registry_applicability(row, true)
@@ -3341,9 +3341,9 @@ fn diagnostic_registry_project_row(diagnostic: ^Diagnostic, row: DiagnosticRegis
 
 // Canonical Source-side constructor. The raise site owns the filled prose and
 // span; the generated registry row owns protocol metadata and static edits.
-fn diagnostic_from_registry(code: String, span: Span?, what: String, why: String, fix: String) -> Diagnostic Never! {
-    row :: diagnostic_registry_row(code) ?? panic("diagnostic `{code}` has no generated Source registry row")
-    diagnostic :: Diagnostic{
+diagnostic_from_registry: fn(code: String, span: Span?, what: String, why: String, fix: String) -> Diagnostic Never! {
+    row: diagnostic_registry_row(code) ?? panic("diagnostic `{code}` has no generated Source registry row")
+    diagnostic: Diagnostic{
         moment: row.moment,
         severity: row.severity,
         code: code,
@@ -3358,11 +3358,11 @@ fn diagnostic_from_registry(code: String, span: Span?, what: String, why: String
 // Dynamic Source edits are authorized and graded by the generated row. This
 // preserves the exact replacement/span authored by the producer without
 // deriving safety from human Fix prose.
-fn diagnostic_registry_with_edit(diagnostic: ^Diagnostic, edit: TextEdit) -> Diagnostic Never! {
+diagnostic_registry_with_edit: fn(diagnostic: ^Diagnostic, edit: TextEdit) -> Diagnostic Never! {
     updated := diagnostic
-    row :: diagnostic_registry_row(updated.code) ?? panic("updated `{updated.code}` has no generated Source registry row")
+    row: diagnostic_registry_row(updated.code) ?? panic("updated `{updated.code}` has no generated Source registry row")
     if updated.no_fix_reason != None || row.no_fix_reason != None -> panic("updated `{updated.code}` cannot carry an edit and a registry no-fix reason")
-    fix :: row.structured_fix ?? panic("updated `{updated.code}` has no registry-owned edit channel")
+    fix: row.structured_fix ?? panic("updated `{updated.code}` has no registry-owned edit channel")
     if !diagnostic_registry_is_source_edit(fix) -> panic("updated `{updated.code}` has no Source edit registry channel")
     updated.edit = Val(edit)
     updated.applicability = diagnostic_registry_applicability(row, true)
@@ -3370,11 +3370,11 @@ fn diagnostic_registry_with_edit(diagnostic: ^Diagnostic, edit: TextEdit) -> Dia
     updated
 }
 
-fn diagnostic_registry_is_source_edit(fix: DiagnosticRegistryFix) -> Bool Never! {
+diagnostic_registry_is_source_edit: fn(fix: DiagnosticRegistryFix) -> Bool Never! {
     if fix == {.SourceEdit | .SuggestedSourceEdit -> true else -> false}
 }
 
-fn diagnostic_registry_is_generated_edit(fix: DiagnosticRegistryFix) -> Bool Never! {
+diagnostic_registry_is_generated_edit: fn(fix: DiagnosticRegistryFix) -> Bool Never! {
     if fix == {
         .GeneratedMarkerGroup
         | .GeneratedMissingArms
@@ -3385,18 +3385,18 @@ fn diagnostic_registry_is_generated_edit(fix: DiagnosticRegistryFix) -> Bool Nev
     }
 }
 
-fn diagnostic_registry_safety_auto_apply(safety: DiagnosticFixSafety) -> Bool Never! {
+diagnostic_registry_safety_auto_apply: fn(safety: DiagnosticFixSafety) -> Bool Never! {
     if safety == {
         .Formatting | .BehaviorPreserving -> true
         else -> false
     }
 }
 
-fn diagnostic_registry_with_edit_grade(diagnostic: ^Diagnostic, edit: TextEdit, applicability: DiagnosticFixApplicability, safety: DiagnosticFixSafety) -> Diagnostic Never! {
+diagnostic_registry_with_edit_grade: fn(diagnostic: ^Diagnostic, edit: TextEdit, applicability: DiagnosticFixApplicability, safety: DiagnosticFixSafety) -> Diagnostic Never! {
     updated := diagnostic
-    row :: diagnostic_registry_row(updated.code) ?? panic("updated `{updated.code}` has no generated Source registry row")
+    row: diagnostic_registry_row(updated.code) ?? panic("updated `{updated.code}` has no generated Source registry row")
     if updated.no_fix_reason != None || row.no_fix_reason != None -> panic("updated `{updated.code}` cannot carry an edit and a registry no-fix reason")
-    fix :: row.structured_fix ?? panic("updated `{updated.code}` has no registry-owned edit channel")
+    fix: row.structured_fix ?? panic("updated `{updated.code}` has no registry-owned edit channel")
     if !diagnostic_registry_is_source_edit(fix) -> panic("updated `{updated.code}` has no Source edit registry channel")
     if applicability == DiagnosticFixApplicability.Safe && !diagnostic_registry_safety_auto_apply(safety) -> panic("safe updated edit `{updated.code}` must have an auto-applicable safety grade")
     updated.edit = Val(edit)
@@ -3405,11 +3405,11 @@ fn diagnostic_registry_with_edit_grade(diagnostic: ^Diagnostic, edit: TextEdit, 
     updated
 }
 
-fn diagnostic_registry_with_structured_edit(diagnostic: ^Diagnostic, edit: TextEdit) -> Diagnostic Never! {
+diagnostic_registry_with_structured_edit: fn(diagnostic: ^Diagnostic, edit: TextEdit) -> Diagnostic Never! {
     updated := diagnostic
-    row :: diagnostic_registry_row(updated.code) ?? panic("updated `{updated.code}` has no generated Source registry row")
+    row: diagnostic_registry_row(updated.code) ?? panic("updated `{updated.code}` has no generated Source registry row")
     if updated.no_fix_reason != None || row.no_fix_reason != None -> panic("updated `{updated.code}` cannot carry an edit and a registry no-fix reason")
-    fix :: row.structured_fix ?? panic("updated `{updated.code}` has no registry-owned generated edit channel")
+    fix: row.structured_fix ?? panic("updated `{updated.code}` has no registry-owned generated edit channel")
     if !diagnostic_registry_is_generated_edit(fix) -> panic("updated `{updated.code}` has no generated structured edit registry channel")
     updated.edit = Val(edit)
     updated.applicability = diagnostic_registry_applicability(row, true)
@@ -3417,10 +3417,10 @@ fn diagnostic_registry_with_structured_edit(diagnostic: ^Diagnostic, edit: TextE
     updated
 }
 
-fn diagnostic_registry_with_source_derived_suggestion(diagnostic: ^Diagnostic, span: Span, new_text: String) -> Diagnostic Never! {
+diagnostic_registry_with_source_derived_suggestion: fn(diagnostic: ^Diagnostic, span: Span, new_text: String) -> Diagnostic Never! {
     updated := diagnostic
     if updated.edit != None -> panic("updated `{updated.code}` already carries an edit")
-    row :: diagnostic_registry_row(updated.code) ?? panic("updated `{updated.code}` has no generated Source registry row")
+    row: diagnostic_registry_row(updated.code) ?? panic("updated `{updated.code}` has no generated Source registry row")
     if row.no_fix_reason == None -> panic("updated `{updated.code}` has no explanatory row reason to replace")
     updated.no_fix_reason = None
     updated.applicability = Val(DiagnosticFixApplicability.Suggested)
@@ -3429,7 +3429,7 @@ fn diagnostic_registry_with_source_derived_suggestion(diagnostic: ^Diagnostic, s
     updated
 }
 
-fn diagnostic_registry_with_alternative_edit(diagnostic: ^Diagnostic, edit: TextEdit) -> Diagnostic Never! {
+diagnostic_registry_with_alternative_edit: fn(diagnostic: ^Diagnostic, edit: TextEdit) -> Diagnostic Never! {
     updated := diagnostic
     if updated.no_fix_reason != None -> panic("updated `{updated.code}` cannot carry an edit and no-fix reason")
     if updated.edit == None || updated.applicability == None || updated.safety == None -> panic("updated `{updated.code}` needs a graded primary edit before an alternative")
@@ -3437,7 +3437,7 @@ fn diagnostic_registry_with_alternative_edit(diagnostic: ^Diagnostic, edit: Text
         updated.structured = Val(DiagnosticStructured.SuggestedEdits{edits: [TextEdit]{edit}})
         return updated
     }
-    structured :: updated.structured ?? return updated
+    structured: updated.structured ?? return updated
     if structured == {
         .SuggestedEdits(edits) -> {
             alternatives := edits.copy()
@@ -3455,7 +3455,7 @@ fn diagnostic_registry_with_alternative_edit(diagnostic: ^Diagnostic, edit: Text
 // Source: Compiler/Prelude/Diagnostics.jet
 // Source SHA-256: ac8aa067b922a097fc75efe6e6e136c778726fc3bd02f99cfc9283752f8f06c4
 // This file is generated by Compiler/Bootstrap/generate-diagnostic-rows.mjs; do not edit.
-DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
+DIAGNOSTIC_ROWS: comptime { [DiagnosticRegistryRow]{
     DiagnosticRegistryRow{
         code: "E0001",
         lint_name: None,
@@ -4473,7 +4473,7 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
         status: DiagnosticRegistryStatus.Retired,
         meaning: "Retired function body marker `::` or legacy `=`; named bodies use braces (D-SIG-AFTER1=A)",
         what: "This function uses the retired `::` or legacy `=` body marker.",
-        why: "Named function bodies use braces. `::` binds a name, and `=` fills a slot inside a definition.",
+        why: "Named function bodies use braces. `:` binds a name, and `=` fills a slot inside a definition.",
         fix: "Replace the marker with `{{ … }}`; `jet fmt` applies this fix.",
         detail: true,
         structured_fix: Val(DiagnosticRegistryFix.Replace{from: "::", to: "->"}),
@@ -4521,8 +4521,8 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
         status: DiagnosticRegistryStatus.Retired,
         meaning: "Retired callable result shape; put the return type after the one arrow (D-SIG-AFTER1=A)",
         what: "This callable puts the return type before the arrow.",
-        why: "A return type follows the one arrow: `fn name(...) -> Type {{ … }}`. An effect ceiling splits that arrow: `fn name(...) -[Effects]> Type {{ … }}`.",
-        fix: "Write `fn name(...) -> Type {{ … }}`, or `fn name(...) -[Effects]> Type {{ … }}`.",
+        why: "A return type follows the one arrow: `name: fn(...) -> Type {{ … }}`. An effect ceiling splits that arrow: `name: fn(...) -[Effects]> Type {{ … }}`.",
+        fix: "Write `name: fn(...) -> Type {{ … }}`, or `name: fn(...) -[Effects]> Type {{ … }}`.",
         detail: true,
         structured_fix: None,
         fix_safety: None,
@@ -4666,11 +4666,11 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
         meaning: "A finite value loop is missing its exhaustion route, or uses bare immediate `?? next`/`?? break` (D-CHOOSE-FIND1)",
         what: "This finite value loop needs a written exhaustion route, or cannot use an immediate `?? next`/`?? break` route.",
         why: "A finite source can end without a matching `break`; `next` and `break` after the closing brace would control the loop that just closed instead of naming a target.",
-        fix: "Add `?? fallback` after the closing `}}`, or write a labeled search such as `found :: loop {{ ... break(found, value) }}`.",
+        fix: "Add `?? fallback` after the closing `}}`, or write a labeled search such as `found: loop {{ ... break(found, value) }}`.",
         detail: true,
         structured_fix: None,
         fix_safety: None,
-        no_fix_reason: Val(DiagnosticNoFixReason{kind: DiagnosticNoFixReasonKind.Design, next: "Add `?? fallback` after the closing `}}`, or write a labeled search such as `found :: loop {{ ... break(found, value) }}`."}),
+        no_fix_reason: Val(DiagnosticNoFixReason{kind: DiagnosticNoFixReasonKind.Design, next: "Add `?? fallback` after the closing `}}`, or write a labeled search such as `found: loop {{ ... break(found, value) }}`."}),
     },
     DiagnosticRegistryRow{
         code: "E0079",
@@ -4682,11 +4682,11 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
         meaning: "Effect-only loop uses a result exit (D-LOOPSTATE1)",
         what: "This effect-only loop uses a result exit.",
         why: "A break payload makes an effect-only loop a value expression.",
-        fix: "Bind the loop with `::`, or remove the payload.",
+        fix: "Bind the loop with `:`, or remove the payload.",
         detail: true,
         structured_fix: None,
         fix_safety: None,
-        no_fix_reason: Val(DiagnosticNoFixReason{kind: DiagnosticNoFixReasonKind.Design, next: "Bind the loop with `::`, or remove the payload."}),
+        no_fix_reason: Val(DiagnosticNoFixReason{kind: DiagnosticNoFixReasonKind.Design, next: "Bind the loop with `:`, or remove the payload."}),
     },
     DiagnosticRegistryRow{
         code: "E0080",
@@ -4697,7 +4697,7 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
         status: DiagnosticRegistryStatus.Active,
         meaning: "A named function body follows an arrow instead of braces (D-SIG-AFTER1=A, card #4512)",
         what: "This named function body follows an arrow instead of braces.",
-        why: "A named function has one arrow, `->` or `-[Effects]>`, followed by its optional return type; the body always sits in braces: `fn name(...) -> Type {{ … }}`.",
+        why: "A named function has one arrow, `->` or `-[Effects]>`, followed by its optional return type; the body always sits in braces: `name: fn(...) -> Type {{ … }}`.",
         fix: "Replace `-> expr` with `{{ expr }}`; `jet fmt` applies this fix.",
         detail: true,
         structured_fix: Val(DiagnosticRegistryFix.SourceEdit),
@@ -4823,8 +4823,8 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
         severity: 1,
         moment: DiagnosticMoment.Compile,
         status: DiagnosticRegistryStatus.Retired,
-        meaning: "Teaching: retired explicit binding forms → `: Type ::` / `: Type :=` (D-BIND4)",
-        what: "Teaching: retired explicit binding forms → `: Type ::` / `: Type :=` (D-BIND4)",
+        meaning: "Teaching: retired explicit binding forms → `: Type: ` / `: Type :=` (D-BIND4)",
+        what: "Teaching: retired explicit binding forms → `: Type: ` / `: Type :=` (D-BIND4)",
         why: "The registered parse rule applies here",
         fix: "Follow the guidance for E0998",
         detail: false,
@@ -4921,12 +4921,12 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
         status: DiagnosticRegistryStatus.Active,
         meaning: "No `run` function",
         what: "This program has no `run` function",
-        why: "Running a program starts at `fn run`, and the entry file doesn't define one",
-        fix: "Add `fn run() {{ ... }}` to the entry file",
+        why: "Running a program starts at `run: fn`, and the entry file doesn't define one",
+        fix: "Add `run: fn() {{ ... }}` to the entry file",
         detail: true,
         structured_fix: None,
         fix_safety: None,
-        no_fix_reason: Val(DiagnosticNoFixReason{kind: DiagnosticNoFixReasonKind.Design, next: "Add `fn run() {{ ... }}` to the entry file"}),
+        no_fix_reason: Val(DiagnosticNoFixReason{kind: DiagnosticNoFixReasonKind.Design, next: "Add `run: fn() {{ ... }}` to the entry file"}),
     },
     DiagnosticRegistryRow{
         code: "E0102",
@@ -5079,8 +5079,8 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
         severity: 1,
         moment: DiagnosticMoment.Compile,
         status: DiagnosticRegistryStatus.Active,
-        meaning: "Changing a `::`, const, or read-only parameter",
-        what: "`x` was made with `::`, so it can't change",
+        meaning: "Changing a `:`, const, or read-only parameter",
+        what: "`x` was made with `:`, so it can't change",
         why: "Only `:=` bindings (and `&` parameters) can be changed",
         fix: "Declare it with `x := ...` instead",
         detail: true,
@@ -5159,14 +5159,14 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
         severity: 1,
         moment: DiagnosticMoment.Compile,
         status: DiagnosticRegistryStatus.Active,
-        meaning: "`break(name)`/`next(name)` names no enclosing `name :: loop` (D-LOOPLABEL3, D-LOOPSTATE1)",
+        meaning: "`break(name)`/`next(name)` names no enclosing `name: loop` (D-LOOPLABEL3, D-LOOPSTATE1)",
         what: "No enclosing loop is named `{{name}}`.",
-        why: "`break(name)` and `next(name)` can target only a visible `name :: loop`. Loop names are compile-time control targets.",
-        fix: "Correct the name, or add `name ::` before the intended enclosing loop.",
+        why: "`break(name)` and `next(name)` can target only a visible `name: loop`. Loop names are compile-time control targets.",
+        fix: "Correct the name, or add `name:` before the intended enclosing loop.",
         detail: true,
         structured_fix: None,
         fix_safety: None,
-        no_fix_reason: Val(DiagnosticNoFixReason{kind: DiagnosticNoFixReasonKind.Design, next: "Correct the name, or add `name ::` before the intended enclosing loop."}),
+        no_fix_reason: Val(DiagnosticNoFixReason{kind: DiagnosticNoFixReasonKind.Design, next: "Correct the name, or add `name:` before the intended enclosing loop."}),
     },
     DiagnosticRegistryRow{
         code: "E0988",
@@ -5178,7 +5178,7 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
         meaning: "Retired dot/`@` loop exits in `name := loop`, or runtime use of a loop name (D-LOOPSTATE1)",
         what: "This uses a retired loop-label or dot-exit form.",
         why: "Named exits are keyword-led: `break(name)`, `break(name, value)`, and `next(name)`. A loop name is not a runtime object.",
-        fix: "Replace the dot or `@` form with the matching target-argument exit. Keep the declaration as `name :: loop`.",
+        fix: "Replace the dot or `@` form with the matching target-argument exit. Keep the declaration as `name: loop`.",
         detail: true,
         structured_fix: None,
         fix_safety: None,
@@ -6887,8 +6887,8 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
         severity: 1,
         moment: DiagnosticMoment.Compile,
         status: DiagnosticRegistryStatus.Active,
-        meaning: "Unknown enum variant (with suggestion)",
-        what: "Unknown enum variant (with suggestion)",
+        meaning: "Unknown variant: enum (with suggestion)",
+        what: "Unknown variant: enum (with suggestion)",
         why: "The registered sema rule applies here",
         fix: "Use the suggested variant spelling or a declared variant.",
         detail: false,
@@ -7191,14 +7191,14 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
         severity: 1,
         moment: DiagnosticMoment.Compile,
         status: DiagnosticRegistryStatus.Active,
-        meaning: "`namespace` keyword not in Jet — use `module name {{ }}` for in-file grouping (D-NAMESPACE1)",
-        what: "`namespace` keyword not in Jet — use `module name {{ }}` for in-file grouping (D-NAMESPACE1)",
+        meaning: "`namespace` keyword not in Jet — use `name: module {{ }}` for in-file grouping (D-NAMESPACE1)",
+        what: "`namespace` keyword not in Jet — use `name: module {{ }}` for in-file grouping (D-NAMESPACE1)",
         why: "The registered parse rule applies here",
-        fix: "Use `module name {{ }}` instead of the unsupported `namespace` keyword.",
+        fix: "Use `name: module {{ }}` instead of the unsupported `namespace` keyword.",
         detail: false,
         structured_fix: None,
         fix_safety: None,
-        no_fix_reason: Val(DiagnosticNoFixReason{kind: DiagnosticNoFixReasonKind.Design, next: "Use `module name {{ }}` instead of the unsupported `namespace` keyword."}),
+        no_fix_reason: Val(DiagnosticNoFixReason{kind: DiagnosticNoFixReasonKind.Design, next: "Use `name: module {{ }}` instead of the unsupported `namespace` keyword."}),
     },
     DiagnosticRegistryRow{
         code: "E0324",
@@ -7239,8 +7239,8 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
         severity: 1,
         moment: DiagnosticMoment.Compile,
         status: DiagnosticRegistryStatus.Active,
-        meaning: "A partial struct destructure (`{{ … }}`) with no trailing `..` (D-DESTRUCT1)",
-        what: "A partial struct destructure (`{{ … }}`) with no trailing `..` (D-DESTRUCT1)",
+        meaning: "A partial destructure: struct (`{{ … }}`) with no trailing `..` (D-DESTRUCT1)",
+        what: "A partial destructure: struct (`{{ … }}`) with no trailing `..` (D-DESTRUCT1)",
         why: "The registered sema rule applies here",
         fix: "Add a trailing `..` to a partial struct destructure, or name every field.",
         detail: false,
@@ -7303,8 +7303,8 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
         severity: 1,
         moment: DiagnosticMoment.Compile,
         status: DiagnosticRegistryStatus.Active,
-        meaning: "Leading-dot enum variant (`.Variant`) with no inferable type from context (D-ENUMDOT2=A)",
-        what: "Leading-dot enum variant (`.Variant`) with no inferable type from context (D-ENUMDOT2=A)",
+        meaning: "Leading-dot variant: enum (`.Variant`) with no inferable type from context (D-ENUMDOT2=A)",
+        what: "Leading-dot variant: enum (`.Variant`) with no inferable type from context (D-ENUMDOT2=A)",
         why: "The registered sema rule applies here",
         fix: "Provide a type context for the leading-dot enum variant.",
         detail: false,
@@ -8089,8 +8089,8 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
         status: DiagnosticRegistryStatus.Retired,
         meaning: "Teaching: retired `#Known`, `#Known if` and the `#Known` block; write the mark on the name (D-META-STAGE1=B)",
         what: "`#Known` is retired.",
-        why: "Compile-time work carries the word `prep`, and a compile-time constant is `NAME :: comptime {{ value }}`.",
-        fix: "Write `NAME :: comptime {{ … }}` for a constant, `comptime if <condition> {{ … }}` for a compile-time branch, and `comptime {{ … }}` for a compile-time block.",
+        why: "Compile-time work carries the word `prep`, and a compile-time constant is `NAME: comptime {{ value }}`.",
+        fix: "Write `NAME: comptime {{ … }}` for a constant, `comptime if <condition> {{ … }}` for a compile-time branch, and `comptime {{ … }}` for a compile-time block.",
         detail: true,
         structured_fix: None,
         fix_safety: None,
@@ -8105,8 +8105,8 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
         status: DiagnosticRegistryStatus.Retired,
         meaning: "Teaching: retired alias binding `=`; write `::` (D-ALIAS-OP1=B)",
         what: "This alias declaration uses the retired `=` binding.",
-        why: "`::` defines a name; `=` fills a slot inside an existing declaration (D-ALIAS-OP1=B).",
-        fix: "Replace `=` with `::`.",
+        why: "`:` defines a name; `=` fills a slot inside an existing declaration (D-ALIAS-OP1=B).",
+        fix: "Replace `=` with `:`.",
         detail: true,
         structured_fix: Val(DiagnosticRegistryFix.Replace{from: "=", to: "::"}),
         fix_safety: Val(DiagnosticFixSafety.Formatting),
@@ -8167,9 +8167,9 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
         severity: 1,
         moment: DiagnosticMoment.Compile,
         status: DiagnosticRegistryStatus.Retired,
-        meaning: "Teaching: compile-time `@ {{ … }}`, `@if`, `@loop` and `@fn` are spelled `comptime {{ … }}`, `comptime if`, `comptime loop` and `comptime fn`, a constant `@NAME :: value` is `NAME :: comptime {{ value }}`, read as `NAME`, and a template name splice `fn @method`, `self.@field` or `.@left` is `fn $method`, `self.$field` or `.$left` (D-PREP-SURFACE2=A; D-PREP-BRANCH1=A; D-PREP-FN1=A; D-NAME-SPLICE1=B)",
+        meaning: "Teaching: compile-time `@ {{ … }}`, `@if`, `@loop` and `@fn` are spelled `comptime {{ … }}`, `comptime if`, `comptime loop` and `comptime fn`, a constant `@NAME: value` is `NAME: comptime {{ value }}`, read as `NAME`, and a template name splice `fn @method`, `self.@field` or `.@left` is `$method: fn`, `self.$field` or `.$left` (D-PREP-SURFACE2=A; D-PREP-BRANCH1=A; D-PREP-FN1=A; D-NAME-SPLICE1=B)",
         what: "`{{old}}` is retired; write `{{new}}`.",
-        why: "Build-time blocks, branches, loops, functions and values carry the word `prep`, the same word Jet uses for every build-time step, so compile time is always explicit: a constant evaluated while building is `NAME :: comptime {{ value }}`, and the case of a name never implies it. A template splices a binding's name with the fact sigil `. Prefix `@` now marks a live link. The meaning and the checks are unchanged.",
+        why: "Build-time blocks, branches, loops, functions and values carry the word `prep`, the same word Jet uses for every build-time step, so compile time is always explicit: a constant evaluated while building is `NAME: comptime {{ value }}`, and the case of a name never implies it. A template splices a binding's name with the fact sigil `. Prefix `@` now marks a live link. The meaning and the checks are unchanged.",
         fix: "Replace `{{old}}` with `{{new}}`.",
         detail: true,
         structured_fix: Val(DiagnosticRegistryFix.SourceEdit),
@@ -8215,14 +8215,14 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
         severity: 1,
         moment: DiagnosticMoment.Compile,
         status: DiagnosticRegistryStatus.Active,
-        meaning: "A `comptime {{ … }}` value other than `name :: comptime {{ value }}` is not implemented yet (D-PREP-SURFACE2=A)",
+        meaning: "A `comptime {{ … }}` value other than `name: comptime {{ value }}` is not implemented yet (D-PREP-SURFACE2=A)",
         what: "`comptime {{ … }}` is used as a value in a form this compiler does not support yet.",
-        why: "D-PREP-SURFACE2=A makes the block's final expression its value. Today only a binding `name :: comptime {{ value }}` whose block holds a single final expression is evaluated while building.",
-        fix: "Write `name :: comptime {{ value }}` with one final expression, or bind the result inside a `comptime {{ … }}` statement block.",
+        why: "D-PREP-SURFACE2=A makes the block's final expression its value. Today only a binding `name: comptime {{ value }}` whose block holds a single final expression is evaluated while building.",
+        fix: "Write `name: comptime {{ value }}` with one final expression, or bind the result inside a `comptime {{ … }}` statement block.",
         detail: true,
         structured_fix: None,
         fix_safety: None,
-        no_fix_reason: Val(DiagnosticNoFixReason{kind: DiagnosticNoFixReasonKind.Design, next: "Write `name :: comptime {{ value }}` with one final expression, or bind the result inside a `comptime {{ … }}` statement block."}),
+        no_fix_reason: Val(DiagnosticNoFixReason{kind: DiagnosticNoFixReasonKind.Design, next: "Write `name: comptime {{ value }}` with one final expression, or bind the result inside a `comptime {{ … }}` statement block."}),
     },
     DiagnosticRegistryRow{
         code: "E0392",
@@ -8247,7 +8247,7 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
         severity: 1,
         moment: DiagnosticMoment.Compile,
         status: DiagnosticRegistryStatus.Retired,
-        meaning: "Teaching: a binding puts its type on the value, `name :: Type{{ value }}` (D-BIND-TYPE2=A)",
+        meaning: "Teaching: a binding puts its type on the value, `name: Type{{ value }}` (D-BIND-TYPE2=A)",
         what: "`{{name}}: {{type}}` puts a type after the binding name, which Jet does not accept.",
         why: "A binding carries no type of its own (D-BIND-BARE1); `Type{{ … }}` on the value states the type, checking the value or converting it the way a parameter of that type would.",
         fix: "Write `{{replacement}}`.",
@@ -8922,7 +8922,7 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
         meaning: "Value is thrown away (lost function tail or pure call result, D-DISCARD1)",
         what: "The result of `{{call}}` is thrown away",
         why: "A pure call (no effects, nothing passed with `&`) does nothing when its result is dropped; a function with no return type loses the value of its last line",
-        fix: "For a pure call, use the result or bind it with `result :: {{call}}`; for a last line, write `-> T` after the parameter list if the function should return it; write `.drop(\"reason\")` to discard on purpose",
+        fix: "For a pure call, use the result or bind it with `result: {{call}}`; for a last line, write `-> T` after the parameter list if the function should return it; write `.drop(\"reason\")` to discard on purpose",
         detail: true,
         structured_fix: None,
         fix_safety: None,
@@ -9194,11 +9194,11 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
         meaning: "Arrow loop body computes and drops a non-unit value (D-LOOP-STMT-ARROW1=C)",
         what: "This arrow loop body computes a value and drops it.",
         why: "A statement-position loop arrow discards its body's value; the loop takes write access (&) for items when it updates the source.",
-        fix: "Bind the loop with `::` to collect its values, or write `loop v in &values -> v *= 2` so it takes write access (&) for items.",
+        fix: "Bind the loop with `:` to collect its values, or write `loop v in &values -> v *= 2` so it takes write access (&) for items.",
         detail: true,
         structured_fix: None,
         fix_safety: None,
-        no_fix_reason: Val(DiagnosticNoFixReason{kind: DiagnosticNoFixReasonKind.Behavior, next: "Bind the loop with `::` to collect its values, or write `loop v in &values -> v *= 2` so it takes write access (&) for items."}),
+        no_fix_reason: Val(DiagnosticNoFixReason{kind: DiagnosticNoFixReasonKind.Behavior, next: "Bind the loop with `:` to collect its values, or write `loop v in &values -> v *= 2` so it takes write access (&) for items."}),
     },
     DiagnosticRegistryRow{
         code: "L0509",
@@ -9498,7 +9498,7 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
         meaning: "Expression value is discarded",
         what: "A comparison, arithmetic expression, or bare name computes a value but has no statement effect",
         why: "The expression computes a value but has no statement effect.",
-        fix: "Use the value, bind it with `::`, or remove the expression",
+        fix: "Use the value, bind it with `:`, or remove the expression",
         detail: true,
         structured_fix: Val(DiagnosticRegistryFix.SourceEdit),
         fix_safety: Val(DiagnosticFixSafety.Formatting),
@@ -9514,7 +9514,7 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
         meaning: "Mutable binding is never reassigned",
         what: "This mutable binding receives no later write, so its mutability is unused",
         why: "The binding is marked mutable but receives no later write.",
-        fix: "Declare it with `::` instead of `:=`",
+        fix: "Declare it with `:` instead of `:=`",
         detail: true,
         structured_fix: Val(DiagnosticRegistryFix.SourceEdit),
         fix_safety: Val(DiagnosticFixSafety.Formatting),
@@ -9560,9 +9560,9 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
         moment: DiagnosticMoment.Compile,
         status: DiagnosticRegistryStatus.Active,
         meaning: "A fallible Unit call is bound to a wildcard",
-        what: "`_ ::` adds no value to this Unit call",
+        what: "`_:` adds no value to this Unit call",
         why: "A call with no success value already runs as a statement and propagates a compatible failure",
-        fix: "Remove `_ :: ` and leave the call on its own line",
+        fix: "Remove `_:` and leave the call on its own line",
         detail: true,
         structured_fix: None,
         fix_safety: None,
@@ -9703,8 +9703,8 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
         severity: 1,
         moment: DiagnosticMoment.Compile,
         status: DiagnosticRegistryStatus.Active,
-        meaning: "Ambiguous module name (lists every matching path)",
-        what: "Ambiguous module name (lists every matching path)",
+        meaning: "Ambiguous name: module (lists every matching path)",
+        what: "Ambiguous name: module (lists every matching path)",
         why: "The registered jet rule applies here",
         fix: "Rename one module or remove the duplicate module path so only one matching path remains.",
         detail: false,
@@ -9719,14 +9719,14 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
         severity: 1,
         moment: DiagnosticMoment.Compile,
         status: DiagnosticRegistryStatus.Active,
-        meaning: "`module name;` file declaration not found (D-MOD1)",
-        what: "`module name;` file declaration not found (D-MOD1)",
+        meaning: "`name: module;` file declaration not found (D-MOD1)",
+        what: "`name: module;` file declaration not found (D-MOD1)",
         why: "The registered jet rule applies here",
-        fix: "Add the matching `module name;` file declaration.",
+        fix: "Add the matching `name: module;` file declaration.",
         detail: false,
         structured_fix: None,
         fix_safety: None,
-        no_fix_reason: Val(DiagnosticNoFixReason{kind: DiagnosticNoFixReasonKind.Ambiguous, next: "Add the matching `module name;` file declaration."}),
+        no_fix_reason: Val(DiagnosticNoFixReason{kind: DiagnosticNoFixReasonKind.Ambiguous, next: "Add the matching `name: module;` file declaration."}),
     },
     DiagnosticRegistryRow{
         code: "E0608",
@@ -9929,12 +9929,12 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
         status: DiagnosticRegistryStatus.Active,
         meaning: "Imported script has executable top-level statements",
         what: "Imported script `{{file}}` has executable top-level statements",
-        why: "Imported files provide declarations; executable code belongs in an explicit `fn run`, so an import never gains a hidden side effect.",
-        fix: "Move the statements into the entry file's `fn run`, or import a declaration-only file.",
+        why: "Imported files provide declarations; executable code belongs in an explicit `run: fn`, so an import never gains a hidden side effect.",
+        fix: "Move the statements into the entry file's `run: fn`, or import a declaration-only file.",
         detail: false,
         structured_fix: None,
         fix_safety: None,
-        no_fix_reason: Val(DiagnosticNoFixReason{kind: DiagnosticNoFixReasonKind.Design, next: "Move the statements into the entry file's `fn run`, or import a declaration-only file."}),
+        no_fix_reason: Val(DiagnosticNoFixReason{kind: DiagnosticNoFixReasonKind.Design, next: "Move the statements into the entry file's `run: fn`, or import a declaration-only file."}),
     },
     DiagnosticRegistryRow{
         code: "E0621",
@@ -9943,14 +9943,14 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
         severity: 1,
         moment: DiagnosticMoment.Compile,
         status: DiagnosticRegistryStatus.Active,
-        meaning: "Top-level executable statements require an explicit `fn run`",
-        what: "Top-level executable statements require an explicit `fn run`",
-        why: "Jet does not invent a runtime function for ordinary files; only an explicit `fn run` executes code.",
-        fix: "Move the statements into `fn run`.",
+        meaning: "Top-level executable statements require an explicit `run: fn`",
+        what: "Top-level executable statements require an explicit `run: fn`",
+        why: "Jet does not invent a runtime function for ordinary files; only an explicit `run: fn` executes code.",
+        fix: "Move the statements into `run: fn`.",
         detail: false,
         structured_fix: None,
         fix_safety: None,
-        no_fix_reason: Val(DiagnosticNoFixReason{kind: DiagnosticNoFixReasonKind.Design, next: "Move the statements into `fn run`."}),
+        no_fix_reason: Val(DiagnosticNoFixReason{kind: DiagnosticNoFixReasonKind.Design, next: "Move the statements into `run: fn`."}),
     },
     DiagnosticRegistryRow{
         code: "E0622",
@@ -10007,9 +10007,9 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
         severity: 1,
         moment: DiagnosticMoment.Compile,
         status: DiagnosticRegistryStatus.Active,
-        meaning: "A library package declares `fn run` (one `fn run` per package)",
-        what: "A library package can't declare `fn run`",
-        why: "A package is one namespace: an executable package has one `fn run`, or one in each entry file its `outputs` name, and a library package, which other code imports, has none.",
+        meaning: "A library package declares `run: fn` (one `run: fn` per package)",
+        what: "A library package can't declare `run: fn`",
+        why: "A package is one namespace: an executable package has one `run: fn`, or one in each entry file its `outputs` name, and a library package, which other code imports, has none.",
         fix: "Move the program into its own package or a loose file that uses this library, or make this package an executable.",
         detail: false,
         structured_fix: None,
@@ -10185,7 +10185,7 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
         status: DiagnosticRegistryStatus.Active,
         meaning: "A trait-method impl uses effects beyond the trait method's declared bound (D-EFF3)",
         what: "This `{{method}}` impl uses the effect `{{effect}}`, which the trait doesn't allow.",
-        why: "A trait method may declare an effect upper bound (`fn hash(self) -[]>`, `fn render(self) -[GPU]>`); every implementation's inferred effects must fit inside it, so the bound holds for all impls (D-EFF3).",
+        why: "A trait method may declare an effect upper bound (`hash: fn(self) -[]>`, `render: fn(self) -[GPU]>`); every implementation's inferred effects must fit inside it, so the bound holds for all impls (D-EFF3).",
         fix: "Remove the offending work from the impl, or widen the bound on the trait method.",
         detail: true,
         structured_fix: None,
@@ -11337,7 +11337,7 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
         status: DiagnosticRegistryStatus.Active,
         meaning: "Two C `use` forms for the same lib in one file",
         what: "Two different `use` forms refer to the same C library `{{lib}}`.",
-        why: "S59 allows one bring-in per C lib per file — either `use alias :: \"{{header}}\"` or `use alias :: c.{{lib}}`, not both.",
+        why: "S59 allows one bring-in per C lib per file — either `use alias: \"{{header}}\"` or `use alias: c.{{lib}}`, not both.",
         fix: "remove one line; keep the form that matches your workflow.",
         detail: true,
         structured_fix: None,
@@ -11353,7 +11353,7 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
         status: DiagnosticRegistryStatus.Active,
         meaning: "Overlay symbol clashes with bindgen (incompatible signature)",
         what: "Overlay `{{name}}` disagrees with the generated binding.",
-        why: "User `#Import module c.{{lib}}` may override bindgen symbols, but the Jet signature must stay compatible when replacing.",
+        why: "User `#Import c.{{lib}}: module` may override bindgen symbols, but the Jet signature must stay compatible when replacing.",
         fix: "Match the generated signature, or rename your overlay function.",
         detail: true,
         structured_fix: None,
@@ -11368,9 +11368,9 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
         moment: DiagnosticMoment.Compile,
         status: DiagnosticRegistryStatus.Reserved,
         meaning: "User declared reserved `__bindgen__` segment",
-        what: "module path `{{path}}` uses the reserved segment `__bindgen__`.",
-        why: "Autogen lives in `c.{{lib}}.__bindgen__`; users declare overlays as `#Import module c.{{lib}}` only.",
-        fix: "Drop `__bindgen__` from your module path, or use `#Import module c.{{lib}} {{ … }}`.",
+        what: "path: module `{{path}}` uses the reserved segment `__bindgen__`.",
+        why: "Autogen lives in `c.{{lib}}.__bindgen__`; users declare overlays as `#Import c.{{lib}}: module` only.",
+        fix: "Drop `__bindgen__` from your module path, or use `#Import c.{{lib}}: module {{ … }}`.",
         detail: true,
         structured_fix: None,
         fix_safety: None,
@@ -11402,7 +11402,7 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
         meaning: "`jet inspect bind` / header translation failed",
         what: "Could not generate bindings from `{{header}}`.",
         why: "{{reason}}",
-        fix: "Fix the header path, install dev headers, run `jet inspect bind` manually for details, or hand-write `#Import module c.{{lib}}`.",
+        fix: "Fix the header path, install dev headers, run `jet inspect bind` manually for details, or hand-write `#Import c.{{lib}}: module`.",
         detail: true,
         structured_fix: None,
         fix_safety: None,
@@ -11434,11 +11434,11 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
         meaning: "`#Import(c)` function uses a non-canonical body marker",
         what: "`#Import(c)` functions must name their C symbol with `= \"symbol\"`.",
         why: "`#Import(c)` binds a compile-time C symbol; `->` is a Jet function-body marker and cannot declare a foreign symbol.",
-        fix: "Write `#Import(c) fn name(args) -> Return = \"symbol\"`.",
+        fix: "Write `#Import(c) name: fn(args) -> Return = \"symbol\"`.",
         detail: true,
         structured_fix: None,
         fix_safety: None,
-        no_fix_reason: Val(DiagnosticNoFixReason{kind: DiagnosticNoFixReasonKind.Design, next: "Write `#Import(c) fn name(args) -> Return = \"symbol\"`."}),
+        no_fix_reason: Val(DiagnosticNoFixReason{kind: DiagnosticNoFixReasonKind.Design, next: "Write `#Import(c) name: fn(args) -> Return = \"symbol\"`."}),
     },
     DiagnosticRegistryRow{
         code: "E3209",
@@ -11895,14 +11895,14 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
         severity: 1,
         moment: DiagnosticMoment.Compile,
         status: DiagnosticRegistryStatus.Active,
-        meaning: "Selected root `fn build` has wrong `fn(BuildContext) BuildPlan` signature (D-BUILDENTRY1)",
-        what: "`fn build` must take one `BuildContext` and return `BuildPlan`.",
+        meaning: "Selected root `build: fn` has wrong `fn(BuildContext) BuildPlan` signature (D-BUILDENTRY1)",
+        what: "`build: fn` must take one `BuildContext` and return `BuildPlan`.",
         why: "Build authority and graph handoff are one typed contract. A different signature cannot be selected by `jet build` or modeled by the LSP.",
-        fix: "Write `fn build(b: BuildContext) BuildPlan`.",
+        fix: "Write `build: fn(b: BuildContext) BuildPlan`.",
         detail: true,
         structured_fix: None,
         fix_safety: None,
-        no_fix_reason: Val(DiagnosticNoFixReason{kind: DiagnosticNoFixReasonKind.Ambiguous, next: "Write `fn build(b: BuildContext) BuildPlan`."}),
+        no_fix_reason: Val(DiagnosticNoFixReason{kind: DiagnosticNoFixReasonKind.Ambiguous, next: "Write `build: fn(b: BuildContext) BuildPlan`."}),
     },
     DiagnosticRegistryRow{
         code: "E3502",
@@ -11975,14 +11975,14 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
         severity: 1,
         moment: DiagnosticMoment.Compile,
         status: DiagnosticRegistryStatus.Active,
-        meaning: "One package declares multiple `fn build` entries (D-CONF-ENTRY1)",
+        meaning: "One package declares multiple `build: fn` entries (D-CONF-ENTRY1)",
         what: "Two build entries for one package: both source sites are shown.",
         why: "One package has one build authority, so policy and provenance have one auditable home.",
-        fix: "Keep one `fn build` and remove every other entry.",
+        fix: "Keep one `build: fn` and remove every other entry.",
         detail: true,
         structured_fix: None,
         fix_safety: None,
-        no_fix_reason: Val(DiagnosticNoFixReason{kind: DiagnosticNoFixReasonKind.Ambiguous, next: "Keep one `fn build` and remove every other entry."}),
+        no_fix_reason: Val(DiagnosticNoFixReason{kind: DiagnosticNoFixReasonKind.Ambiguous, next: "Keep one `build: fn` and remove every other entry."}),
     },
     DiagnosticRegistryRow{
         code: "E3521",
@@ -12250,11 +12250,11 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
         meaning: "Application authority is undecided or denies a required effect",
         what: "Application authority is undecided or denies a required effect; the Why line says in one sentence what the program tried to do and which policy has not allowed it.",
         why: "Execution stops before host state changes. A package.jet with no authority block, like a file with no package block, already allows printing, reading input, allocating memory, and reading the program's own arguments; any other effect needs a written grant. `--json` carries the raw `required_effects`, `granted_effects`, `denied_effects`, and `authority` facts.",
-        fix: "Add the effects the report names under `authority` in `package.jet`, for example `allow: [FS, IO]`; writing an authority block replaces the default, so list every effect the program needs. A program with no `package.jet` declares that complete row in a leading `package {{ … }}` block of its entry file; `jet fix --all` inserts that block. Otherwise deny effects deliberately, or approve the exact operation once or for the project in an interactive terminal.",
+        fix: "Add the effects the report names under `authority` in `package.jet`, for example `allow: [FS, IO]`; writing an authority block replaces the default, so list every effect the program needs. A program with no `package.jet` declares that complete row in a leading `package: {{ … }}` block of its entry file; `jet fix --all` inserts that block. Otherwise deny effects deliberately, or approve the exact operation once or for the project in an interactive terminal.",
         detail: true,
         structured_fix: None,
         fix_safety: None,
-        no_fix_reason: Val(DiagnosticNoFixReason{kind: DiagnosticNoFixReasonKind.Design, next: "Add the effects the report names under `authority` in `package.jet`, for example `allow: [FS, IO]`; writing an authority block replaces the default, so list every effect the program needs. A program with no `package.jet` declares that complete row in a leading `package {{ … }}` block of its entry file; `jet fix --all` inserts that block. Otherwise deny effects deliberately, or approve the exact operation once or for the project in an interactive terminal."}),
+        no_fix_reason: Val(DiagnosticNoFixReason{kind: DiagnosticNoFixReasonKind.Design, next: "Add the effects the report names under `authority` in `package.jet`, for example `allow: [FS, IO]`; writing an authority block replaces the default, so list every effect the program needs. A program with no `package.jet` declares that complete row in a leading `package: {{ … }}` block of its entry file; `jet fix --all` inserts that block. Otherwise deny effects deliberately, or approve the exact operation once or for the project in an interactive terminal."}),
     },
     DiagnosticRegistryRow{
         code: "E0801",
@@ -12554,11 +12554,11 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
         meaning: "Trait method doesn't match its contract",
         what: "`mul` doesn't match the `Mul` contract",
         why: "A trait implementation must use the trait method's receiver, parameters, return type, and effects.",
-        fix: "Write `fn mul(self, rhs: Money) -> Money`, matching the `Mul` declaration exactly, including `self`, types, labels, return type, and effects.",
+        fix: "Write `mul: fn(self, rhs: Money) -> Money`, matching the `Mul` declaration exactly, including `self`, types, labels, return type, and effects.",
         detail: true,
         structured_fix: None,
         fix_safety: None,
-        no_fix_reason: Val(DiagnosticNoFixReason{kind: DiagnosticNoFixReasonKind.Design, next: "Write `fn mul(self, rhs: Money) -> Money`, matching the `Mul` declaration exactly, including `self`, types, labels, return type, and effects."}),
+        no_fix_reason: Val(DiagnosticNoFixReason{kind: DiagnosticNoFixReasonKind.Design, next: "Write `mul: fn(self, rhs: Money) -> Money`, matching the `Mul` declaration exactly, including `self`, types, labels, return type, and effects."}),
     },
     DiagnosticRegistryRow{
         code: "E0908",
@@ -12970,11 +12970,11 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
         meaning: "A `#Job fn` clashes with a registered Jet command or repeats a job name in one scope (D-JET-VERBS1=A)",
         what: "A `#Job fn` clashes with a registered Jet command or repeats a job name in one scope (D-JET-VERBS1=A)",
         why: "Top-level commands and jobs must have distinct names, and `jet <name>` must select exactly one function",
-        fix: "Rename the job, e.g. `#Job fn lint_all()`, or give same-named jobs different scopes.",
+        fix: "Rename the job, e.g. `#Job lint_all: fn()`, or give same-named jobs different scopes.",
         detail: false,
         structured_fix: None,
         fix_safety: None,
-        no_fix_reason: Val(DiagnosticNoFixReason{kind: DiagnosticNoFixReasonKind.Design, next: "Rename the job, e.g. `#Job fn lint_all()`, or give same-named jobs different scopes."}),
+        no_fix_reason: Val(DiagnosticNoFixReason{kind: DiagnosticNoFixReasonKind.Design, next: "Rename the job, e.g. `#Job lint_all: fn()`, or give same-named jobs different scopes."}),
     },
     DiagnosticRegistryRow{
         code: "E0951",
@@ -13015,8 +13015,8 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
         severity: 1,
         moment: DiagnosticMoment.Compile,
         status: DiagnosticRegistryStatus.Active,
-        meaning: "@panic :: user-authored compile error (message verbatim)",
-        what: "@panic :: user-authored compile error (message verbatim)",
+        meaning: "@panic: user-authored compile error (message verbatim)",
+        what: "@panic: user-authored compile error (message verbatim)",
         why: "The registered sema rule applies here",
         fix: "Remove the `@panic` or change the condition that raises the authored compile error.",
         detail: false,
@@ -13847,14 +13847,14 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
         severity: 1,
         moment: DiagnosticMoment.Compile,
         status: DiagnosticRegistryStatus.Active,
-        meaning: "`fn run`'s entry parameter isn't a `#CLI` program struct (D-CLI-GLOBAL1=E)",
+        meaning: "`run: fn`'s entry parameter isn't a `#CLI` program struct (D-CLI-GLOBAL1=E)",
         what: "`run`'s parameter isn't a CLI-derived type",
-        why: "A typed `fn run(args: T)` entry only works when `T` is a `#CLI`-derived program struct.",
-        fix: "Mark the program struct `#CLI`, or use a direct scalar-parameter `fn run` entry.",
+        why: "A typed `run: fn(args: T)` entry only works when `T` is a `#CLI`-derived program struct.",
+        fix: "Mark the program struct `#CLI`, or use a direct scalar-parameter `run: fn` entry.",
         detail: true,
         structured_fix: None,
         fix_safety: None,
-        no_fix_reason: Val(DiagnosticNoFixReason{kind: DiagnosticNoFixReasonKind.Design, next: "Mark the program struct `#CLI`, or use a direct scalar-parameter `fn run` entry."}),
+        no_fix_reason: Val(DiagnosticNoFixReason{kind: DiagnosticNoFixReasonKind.Design, next: "Mark the program struct `#CLI`, or use a direct scalar-parameter `run: fn` entry."}),
     },
     DiagnosticRegistryRow{
         code: "E1309",
@@ -13993,7 +13993,7 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
         status: DiagnosticRegistryStatus.Active,
         meaning: "A typed `Output` kind, payload, callable reference, callable contract, visibility, or singular selection is invalid (D-SHAPE-OUTPUT-CALLABLE1)",
         what: "The Output kind, payload, entry reference, callable contract, or singular selection is invalid",
-        why: "`Output` has nine closed kinds; runnable entries are checked function references. Executables take zero or one CLI-derived parameter, Services and Checks take none, and all return `()` or `!`. A singular run without `fn run` also needs one unambiguous Executable.",
+        why: "`Output` has nine closed kinds; runnable entries are checked function references. Executables take zero or one CLI-derived parameter, Services and Checks take none, and all return `()` or `!`. A singular run without `run: fn` also needs one unambiguous Executable.",
         fix: "Use a ratified kind and fields, point `entry:` at one visible safe function with the role's exact signature, or select one of the listed Executables explicitly.",
         detail: true,
         structured_fix: None,
@@ -14394,11 +14394,11 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
         meaning: "`task` has no active lexical or parameter task group, targets a group other than the innermost active one, or lets `Group` escape (D-CONC-SPAWN1=D, D-TASKGROUP-PARAM1)",
         what: "The bare `task` keyword needs a lexical `task.group` or a `Group` parameter, always targets the innermost active one, or `Group` is stored or captured by an escaping lambda.",
         why: "Structured spawning uses the innermost active lexical `task.group` or a direct `Group` parameter. A group may flow down the call stack, but it cannot become stored state or escape its scope.",
-        fix: "Write `task work()` inside the active group, or pass that handle directly to `fn helper(group: Group)`; do not store or capture it.",
+        fix: "Write `task work()` inside the active group, or pass that handle directly to `helper: fn(group: Group)`; do not store or capture it.",
         detail: true,
         structured_fix: None,
         fix_safety: None,
-        no_fix_reason: Val(DiagnosticNoFixReason{kind: DiagnosticNoFixReasonKind.Design, next: "Write `task work()` inside the active group, or pass that handle directly to `fn helper(group: Group)`; do not store or capture it."}),
+        no_fix_reason: Val(DiagnosticNoFixReason{kind: DiagnosticNoFixReasonKind.Design, next: "Write `task work()` inside the active group, or pass that handle directly to `helper: fn(group: Group)`; do not store or capture it."}),
     },
     DiagnosticRegistryRow{
         code: "E1111",
@@ -14999,9 +14999,9 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
         severity: 1,
         moment: DiagnosticMoment.Compile,
         status: DiagnosticRegistryStatus.Retired,
-        meaning: "A role-module contribution uses the retired `module name {{ ns.path: Type.{{ }} }}` form (D-JPK-MODBODY1)",
+        meaning: "A role-module contribution uses the retired `name: module {{ ns.path: Type.{{ }} }}` form (D-JPK-MODBODY1)",
         what: "Role namespace `{{ns}}` belongs in the module declaration name.",
-        why: "`module {{name}} {{ {{ns}}.{{role}}: {{Type}}.{{ … }} }}` splits the role across two places; the canonical form puts it once, in the declaration name, so discovery-by-declaration (`module env.dev`) reads the role straight off the name (D-JPK-MODBODY1).",
+        why: "`module {{name}} {{ {{ns}}.{{role}}: {{Type}}.{{ … }} }}` splits the role across two places; the canonical form puts it once, in the declaration name, so discovery-by-declaration (`env.dev: module`) reads the role straight off the name (D-JPK-MODBODY1).",
         fix: "Write `module {{ns}}.{{role}} {{ … }}` and move the contribution's fields up to the module body.",
         detail: true,
         structured_fix: None,
@@ -15159,9 +15159,9 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
         severity: 1,
         moment: DiagnosticMoment.Compile,
         status: DiagnosticRegistryStatus.Active,
-        meaning: "`module workspace` declared in more than one file (discovery-by-declaration, D-JPK-FILENAME2)",
-        what: "`module workspace` is declared in more than one file: `{{list}}`.",
-        why: "The workspace index is discovered by declaration (D-JPK-FILENAME2), so exactly one file may declare `module workspace {{ … }}`.",
+        meaning: "`workspace: module` declared in more than one file (discovery-by-declaration, D-JPK-FILENAME2)",
+        what: "`workspace: module` is declared in more than one file: `{{list}}`.",
+        why: "The workspace index is discovered by declaration (D-JPK-FILENAME2), so exactly one file may declare `workspace: module {{ … }}`.",
         fix: "Keep one declaration (conventionally in `workspace.jet`) and delete the others.",
         detail: true,
         structured_fix: None,
@@ -15399,14 +15399,14 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
         severity: 1,
         moment: DiagnosticMoment.Compile,
         status: DiagnosticRegistryStatus.Active,
-        meaning: "Project-level `jet dev` has neither `fn dev()` nor `fn run()` in its entry file (U19, D-JPK-DEVCOMPOSE1)",
+        meaning: "Project-level `jet dev` has neither `dev: fn()` nor `run: fn()` in its entry file (U19, D-JPK-DEVCOMPOSE1)",
         what: "This project has no `jet dev` entry.",
-        why: "Project-level `jet dev` (no file argument) runs the entry file's top-level `fn dev()` if it defines one, else `fn run()` (U19, D-JPK-DEVCOMPOSE1). The entry file defines neither.",
-        fix: "Add `fn dev() {{ … }}` (a custom dev command) or `fn run() {{ … }}` (the default) to the entry file.",
+        why: "Project-level `jet dev` (no file argument) runs the entry file's top-level `dev: fn()` if it defines one, else `run: fn()` (U19, D-JPK-DEVCOMPOSE1). The entry file defines neither.",
+        fix: "Add `dev: fn() {{ … }}` (a custom dev command) or `run: fn() {{ … }}` (the default) to the entry file.",
         detail: true,
         structured_fix: None,
         fix_safety: None,
-        no_fix_reason: Val(DiagnosticNoFixReason{kind: DiagnosticNoFixReasonKind.Behavior, next: "Add `fn dev() {{ … }}` (a custom dev command) or `fn run() {{ … }}` (the default) to the entry file."}),
+        no_fix_reason: Val(DiagnosticNoFixReason{kind: DiagnosticNoFixReasonKind.Behavior, next: "Add `dev: fn() {{ … }}` (a custom dev command) or `run: fn() {{ … }}` (the default) to the entry file."}),
     },
     DiagnosticRegistryRow{
         code: "E1255",
@@ -17080,7 +17080,7 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
         moment: DiagnosticMoment.Compile,
         status: DiagnosticRegistryStatus.Active,
         meaning: "An element inside `Layout{{ … }}` doesn't produce a `Constraint` (D-LAYOUT1 / D-LAYOUT-CTOR1)",
-        what: "This element inside `{{name}} :: Layout{{{{ … }}}}` doesn't produce a constraint (found `{{ty}}`)",
+        what: "This element inside `{{name}}: Layout{{{{ … }}}}` doesn't produce a constraint (found `{{ty}}`)",
         why: "Every element directly inside a `Layout{{ … }}` body must be a `>=`/`<=`/`==` comparison of layout values (a `Constraint`), comma-separated like other typed-literal element bodies.",
         fix: "Write a comparison, e.g. `label.width >= 80.0`.",
         detail: true,
@@ -17111,10 +17111,10 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
         severity: 1,
         moment: DiagnosticMoment.Compile,
         status: DiagnosticRegistryStatus.Retired,
-        meaning: "Teaching: retired `layout NAME {{ … }}` → `name :: Layout{{ … }}` (D-LAYOUT-CTOR1)",
+        meaning: "Teaching: retired `layout NAME {{ … }}` → `name: Layout{{ … }}` (D-LAYOUT-CTOR1)",
         what: "`layout` is retired",
         why: "Constraint layouts use typed-literal construction.",
-        fix: "Write `` `{{name}} :: Layout{{{{ … }}}}` ``.",
+        fix: "Write `` `{{name}}: Layout{{{{ … }}}}` ``.",
         detail: true,
         structured_fix: None,
         fix_safety: None,
@@ -17258,11 +17258,11 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
         meaning: "Field-pun name `{{name}}` is not in scope (or is not a field of `{{type}}`).",
         what: "Field-pun name `{{name}}` is not in scope (or is not a field of `{{type}}`).",
         why: "`Type {{ name }}` is shorthand for `Type {{ name: name }}` — it reads the local variable `name` and assigns it to the field of the same name. If no such local exists, or if `Type` has no field by that name, the shorthand is ambiguous.",
-        fix: "Introduce a local `name :: …;` before the struct literal, or write the long form `Type {{ field_name: value }}`.",
+        fix: "Introduce a local `name: …;` before the struct literal, or write the long form `Type {{ field_name: value }}`.",
         detail: true,
         structured_fix: None,
         fix_safety: None,
-        no_fix_reason: Val(DiagnosticNoFixReason{kind: DiagnosticNoFixReasonKind.Ambiguous, next: "Introduce a local `name :: …;` before the struct literal, or write the long form `Type {{ field_name: value }}`."}),
+        no_fix_reason: Val(DiagnosticNoFixReason{kind: DiagnosticNoFixReasonKind.Ambiguous, next: "Introduce a local `name: …;` before the struct literal, or write the long form `Type {{ field_name: value }}`."}),
     },
     DiagnosticRegistryRow{
         code: "E2404",
@@ -17305,7 +17305,7 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
         status: DiagnosticRegistryStatus.Active,
         meaning: "Can't declare `impl {{Source}} -> {{Target}}` — neither type is defined in this program.",
         what: "Can't declare `impl {{Source}} -> {{Target}}` — neither type is defined in this program.",
-        why: "Typed-target error conversions obey the same orphan rule as trait impls (S28); only the default `Err` target may name a foreign source.",
+        why: "Typed-target error conversions obey the same orphan rule as impls: trait (S28); only the default `Err` target may name a foreign source.",
         fix: "Define one of these types locally, or convert the foreign source into `Err`.",
         detail: true,
         structured_fix: None,
@@ -18183,14 +18183,14 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
         severity: 1,
         moment: DiagnosticMoment.Compile,
         status: DiagnosticRegistryStatus.Active,
-        meaning: "Convention file `{{path}}` has no `fn page`.",
-        what: "Convention file `{{path}}` has no `fn page`.",
-        why: "Files under a `.routes(from:)` root must declare `fn page` or start with `_` to opt out. A file without a page would register an endpoint the compiler cannot analyze.",
-        fix: "add `fn page()`, rename the file with a leading `_`, or remove it from the routes directory.",
+        meaning: "Convention file `{{path}}` has no `page: fn`.",
+        what: "Convention file `{{path}}` has no `page: fn`.",
+        why: "Files under a `.routes(from:)` root must declare `page: fn` or start with `_` to opt out. A file without a page would register an endpoint the compiler cannot analyze.",
+        fix: "add `page: fn()`, rename the file with a leading `_`, or remove it from the routes directory.",
         detail: true,
         structured_fix: None,
         fix_safety: None,
-        no_fix_reason: Val(DiagnosticNoFixReason{kind: DiagnosticNoFixReasonKind.Design, next: "add `fn page()`, rename the file with a leading `_`, or remove it from the routes directory."}),
+        no_fix_reason: Val(DiagnosticNoFixReason{kind: DiagnosticNoFixReasonKind.Design, next: "add `page: fn()`, rename the file with a leading `_`, or remove it from the routes directory."}),
     },
     DiagnosticRegistryRow{
         code: "E2807",
@@ -18567,14 +18567,14 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
         severity: 1,
         moment: DiagnosticMoment.Compile,
         status: DiagnosticRegistryStatus.Active,
-        meaning: "`workspace.jet` has no `module workspace {{ … }}` declaration.",
-        what: "`workspace.jet` has no `module workspace {{ … }}` declaration.",
-        why: "`workspace.jet` is the monorepo index (D-WORKSPACE2=A); it must contain exactly one `module workspace {{ members: … }}` body.",
-        fix: "Write `module workspace {{ members: find(\"./packages\") }}` (or an explicit list) in `workspace.jet`.",
+        meaning: "`workspace.jet` has no `workspace: module {{ … }}` declaration.",
+        what: "`workspace.jet` has no `workspace: module {{ … }}` declaration.",
+        why: "`workspace.jet` is the monorepo index (D-WORKSPACE2=A); it must contain exactly one `workspace: module {{ members: … }}` body.",
+        fix: "Write `workspace: module {{ members: find(\"./packages\") }}` (or an explicit list) in `workspace.jet`.",
         detail: true,
         structured_fix: None,
         fix_safety: None,
-        no_fix_reason: Val(DiagnosticNoFixReason{kind: DiagnosticNoFixReasonKind.Design, next: "Write `module workspace {{ members: find(\"./packages\") }}` (or an explicit list) in `workspace.jet`."}),
+        no_fix_reason: Val(DiagnosticNoFixReason{kind: DiagnosticNoFixReasonKind.Design, next: "Write `workspace: module {{ members: find(\"./packages\") }}` (or an explicit list) in `workspace.jet`."}),
     },
     DiagnosticRegistryRow{
         code: "E0996",
@@ -18999,14 +18999,14 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
         severity: 1,
         moment: DiagnosticMoment.Compile,
         status: DiagnosticRegistryStatus.Active,
-        meaning: "An inline `package {{ … }}` declaration is not first (D-ECO-INLINEPACKAGE1)",
-        what: "An inline `package {{ … }}` declaration must be the first top-level declaration.",
+        meaning: "An inline `package: {{ … }}` declaration is not first (D-ECO-INLINEPACKAGE1)",
+        what: "An inline `package: {{ … }}` declaration must be the first top-level declaration.",
         why: "The contextual package carrier owns the file's Package facts and must be established before ordinary Jet items.",
-        fix: "Move the `package {{ … }}` block before every other top-level declaration.",
+        fix: "Move the `package: {{ … }}` block before every other top-level declaration.",
         detail: true,
         structured_fix: None,
         fix_safety: None,
-        no_fix_reason: Val(DiagnosticNoFixReason{kind: DiagnosticNoFixReasonKind.Behavior, next: "Move the `package {{ … }}` block before every other top-level declaration."}),
+        no_fix_reason: Val(DiagnosticNoFixReason{kind: DiagnosticNoFixReasonKind.Behavior, next: "Move the `package: {{ … }}` block before every other top-level declaration."}),
     },
     DiagnosticRegistryRow{
         code: "E1361",
@@ -19015,14 +19015,14 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
         severity: 1,
         moment: DiagnosticMoment.Compile,
         status: DiagnosticRegistryStatus.Active,
-        meaning: "An inline `package {{ … }}` declaration appears more than once (D-ECO-INLINEPACKAGE1)",
-        what: "An inline `package {{ … }}` declaration appears more than once.",
+        meaning: "An inline `package: {{ … }}` declaration appears more than once (D-ECO-INLINEPACKAGE1)",
+        what: "An inline `package: {{ … }}` declaration appears more than once.",
         why: "One source file has one Package identity; accepting a second block would make facts, outputs, and authority ambiguous.",
-        fix: "Keep one leading `package {{ … }}` block and remove the duplicate.",
+        fix: "Keep one leading `package: {{ … }}` block and remove the duplicate.",
         detail: true,
         structured_fix: None,
         fix_safety: None,
-        no_fix_reason: Val(DiagnosticNoFixReason{kind: DiagnosticNoFixReasonKind.Ambiguous, next: "Keep one leading `package {{ … }}` block and remove the duplicate."}),
+        no_fix_reason: Val(DiagnosticNoFixReason{kind: DiagnosticNoFixReasonKind.Ambiguous, next: "Keep one leading `package: {{ … }}` block and remove the duplicate."}),
     },
     DiagnosticRegistryRow{
         code: "E1362",
@@ -19031,8 +19031,8 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
         severity: 1,
         moment: DiagnosticMoment.Compile,
         status: DiagnosticRegistryStatus.Active,
-        meaning: "An inline `package {{ … }}` declaration is malformed or unbalanced (D-ECO-INLINEPACKAGE1)",
-        what: "The inline `package {{ … }}` declaration is malformed or missing its closing brace.",
+        meaning: "An inline `package: {{ … }}` declaration is malformed or unbalanced (D-ECO-INLINEPACKAGE1)",
+        what: "The inline `package: {{ … }}` declaration is malformed or missing its closing brace.",
         why: "The contextual carrier must have one balanced block before its body can be passed to the canonical Package parser.",
         fix: "Close the block and fix its structure, then let the Package field diagnostic identify any invalid field.",
         detail: true,
@@ -19060,8 +19060,8 @@ DIAGNOSTIC_ROWS :: comptime { [DiagnosticRegistryRow]{
 // END GENERATED DIAGNOSTIC ROWS
 
 
-fn run() {
-    result :: lex_payload("Name 500ms 1.25 true \"ok\" 'x'", false)
+run: fn() {
+    result: lex_payload("Name 500ms 1.25 true \"ok\" 'x'", false)
     print(result.tokens[0].kind)
     print(result.tokens[0].payload.text)
     print(result.tokens[1].kind)
@@ -19076,7 +19076,7 @@ fn run() {
     print(result.tokens[5].payload.decoded)
     print(result.tokens[6].kind)
     print(result.diagnostics.len())
-    interpolated :: lex_payload("\"a{{value + 1}}b\"".bytes(), false)
+    interpolated: lex_payload("\"a{{value + 1}}b\"".bytes(), false)
     print(interpolated.tokens[0].payload.string_parts.len())
     print(interpolated.tokens[0].payload.string_parts[0].kind)
     print(interpolated.tokens[0].payload.string_parts[1].kind)
@@ -19084,15 +19084,15 @@ fn run() {
     print(interpolated.tokens[0].payload.string_parts[1].tokens[0].span.start)
     print(interpolated.tokens[0].payload.string_parts[1].tokens[3].kind)
     print(interpolated.tokens[0].payload.string_parts[1].tokens[3].span.start)
-    terminated :: lex("fn f() {{\n    value\n}}".bytes())
+    terminated: lex("f: fn() {{\n    value\n}}".bytes())
     print(terminated.tokens[6].kind)
     print(terminated.tokens[6].span.start)
     print(terminated.tokens[6].span.end)
-    bad :: lex_payload("§§".bytes(), false)
+    bad: lex_payload("§§".bytes(), false)
     print(bad.diagnostics.len())
     print(bad.diagnostics[0].span.start)
     print(bad.diagnostics[1].span.start)
-    prefix :: lex_payload("r\"bad\"".bytes(), false)
+    prefix: lex_payload("r\"bad\"".bytes(), false)
     print(prefix.diagnostics[0].code)
     print(prefix.diagnostics[0].span.end)
 }

@@ -8,33 +8,33 @@
 //
 // Jet also checks a closed record and every field type at compile time. Secret
 // fields use the law's redacted carrier, and env/json/toml/csv share one codec.
-package {
+package: {
     name: "app_config"
     authority: { allow: [Env, FS.Write, IO, Mem.Alloc] }
 }
 
 use {
-    crypto :: core.crypto
-    fs :: core.files
-    env :: core.sys
+    crypto: core.crypto
+    fs: core.files
+    env: core.sys
 }
 
 #[Debug, Decode]
-struct DB {
+DB: struct {
     url: String
     #Redact password: crypto.Secret
 }
 
 #[Debug, Decode]
-struct Settings {
+Settings: struct {
     host: String
     port: Int
     debug: Bool
     db: DB
 }
 
-fn run() {
-    path :: ".jet-app-config.env"
+run: fn() {
+    path: ".jet-app-config.env"
     fs.write(path, "\n# project defaults\nAPP_HOST=\"from-dotenv\"\nAPP_PORT=8080 # inline comment\nAPP_DEBUG=false\nAPP_DB__URL=\"postgres://dotenv\"\nAPP_DB__PASSWORD='dotenv-secret'\n\n") ?? panic("write config")
     env.unset("APP_PORT") ?? false
     env.unset("APP_DEBUG") ?? false
@@ -42,7 +42,7 @@ fn run() {
     env.set("APP_HOST", "from-process")
     env.set("APP_DB__PASSWORD", "process-secret")
 
-    settings :: env.decode<Settings>(prefix: "APP_", file: path, allow: ["APP_HOST", "APP_PORT", "APP_DEBUG", "APP_DB__URL", "APP_DB__PASSWORD"]) ?? panic("decode config")
+    settings: env.decode<Settings>(prefix: "APP_", file: path, allow: ["APP_HOST", "APP_PORT", "APP_DEBUG", "APP_DB__URL", "APP_DB__PASSWORD"]) ?? panic("decode config")
     print("host: {settings.host}")
     print("port: {settings.port}")
     print("debug: {settings.debug}")

@@ -1,4 +1,4 @@
-package {
+package: {
     name: "core.collections"
     version: "0.0.1"
     edition: "2026"
@@ -9,7 +9,7 @@ package {
     }
 }
 
-module set
+set: module
 
 // core.collections — the containers Python keeps in `collections` / `heapq` /
 // `bisect`, written in Jet over arrays.
@@ -20,60 +20,60 @@ module set
 // double-ended queue is the built-in `Queue<T>`.
 
 /// Insertion-ordered string multiset. `get` is `0` for an unseen key.
-struct Counter {
+Counter: struct {
     keys: [String]
     counts: [Int]
 }
 
 /// Insertion-ordered string map. Replacing a key keeps its original position.
-struct OrderedMap {
+OrderedMap: struct {
     keys: [String]
     values: [String]
 }
 
 /// One map layer in a `Chain`. Earlier layers win on lookup.
-struct Layer {
+Layer: struct {
     keys: [String]
     values: [String]
 }
 
 /// Stack of maps. `get` walks from the front.
-struct Chain {
+Chain: struct {
     layers: [Layer]
 }
 
 /// A handle to one row of a `Rows<T>`: its 4-byte position in that table.
 /// A handle only indexes a table of the same row type (D-COLUMNS1).
-struct Row<T> {
+Row: struct<T> {
     __slot: U32
 
     /// The row's position in its table: 0 for the first `add`.
-    fn index(self) -> Int Never! { Int.from_u32(self.__slot) }
+    index: fn(self) -> Int Never! { Int.from_u32(self.__slot) }
 }
 
 /// An add-only table of `T` rows, reached through the `Row<T>` handles `add`
 /// returns: `table[row]` reads and writes a row, `table.field` views one
 /// field of every row. Rows are never removed, inserted or reordered, so a
 /// handle stays valid for the table's life (D-COLUMNS1).
-struct Rows<T> {
+Rows: struct<T> {
     __rows: [T]{[]}
 
     /// Appends `value` and returns its handle. Panics past 4294967295 rows.
-    fn add(&self, value: T) -> Row<T> Never! {
-        count :: self.__rows.len()
+    add: fn(&self, value: T) -> Row<T> Never! {
+        count: self.__rows.len()
         if count >= 4294967295 -> panic("Rows.add: a table holds at most 4294967295 rows")
-        slot :: U32.from_int(count) ?? panic("Rows.add: a table holds at most 4294967295 rows")
+        slot: U32.from_int(count) ?? panic("Rows.add: a table holds at most 4294967295 rows")
         &self.__rows.push(value)
         Row<T>{__slot: slot}
     }
 
     /// How many rows the table holds.
-    fn len(self) -> Int Never! { self.__rows.len() }
+    len: fn(self) -> Int Never! { self.__rows.len() }
 
-    fn is_empty(self) -> Bool Never! { self.__rows.len() == 0 }
+    is_empty: fn(self) -> Bool Never! { self.__rows.len() == 0 }
 }
 
-fn copy_ints(xs: [Int]) -> [Int] {
+copy_ints: fn(xs: [Int]) -> [Int] {
     out := [Int]{}
     loop x in xs -> &out.push(x)
     out
@@ -82,8 +82,8 @@ fn copy_ints(xs: [Int]) -> [Int] {
 // #4884 compiler-internal sort kernel. These are ordinary private Source
 // functions, not exports or runtime-name routes. Comparisons borrow the
 // original storage; payloads move only after the full stable order is known.
-fn collection_sort_order<T, E>(values: View<T>, compare: fn(T, T) -> Ordering E!, descending: Bool) -> [Int] E! {
-    count :: values.len()
+collection_sort_order: fn<T, E>(values: View<T>, compare: fn(T, T) -> Ordering E!, descending: Bool) -> [Int] E! {
+    count: values.len()
     order := [Int]{}
     loop index in 0..<count -> &order.push(index)
     if count < 2 -> return ^order
@@ -96,18 +96,18 @@ fn collection_sort_order<T, E>(values: View<T>, compare: fn(T, T) -> Ordering E!
         loop start < count {
             left_count := width
             if left_count > count - start -> left_count = count - start
-            middle :: start + left_count
+            middle: start + left_count
             right_count := width
             if right_count > count - middle -> right_count = count - middle
-            finish :: middle + right_count
+            finish: middle + right_count
             left := start
             right := middle
             target := start
             loop left < middle && right < finish {
-                left_position :: if order_active -> order[left] else -> spare[left]
-                right_position :: if order_active -> order[right] else -> spare[right]
-                verdict :: compare(values[left_position], values[right_position])
-                take_right :: if descending -> verdict == Ordering.Less else -> verdict == Ordering.Greater
+                left_position: if order_active -> order[left] else -> spare[left]
+                right_position: if order_active -> order[right] else -> spare[right]
+                verdict: compare(values[left_position], values[right_position])
+                take_right: if descending -> verdict == Ordering.Less else -> verdict == Ordering.Greater
                 if take_right {
                     if order_active -> spare[target] = right_position else -> order[target] = right_position
                     right += 1
@@ -119,13 +119,13 @@ fn collection_sort_order<T, E>(values: View<T>, compare: fn(T, T) -> Ordering E!
                 target += 1
             }
             loop left < middle {
-                position :: if order_active -> order[left] else -> spare[left]
+                position: if order_active -> order[left] else -> spare[left]
                 if order_active -> spare[target] = position else -> order[target] = position
                 left += 1
                 target += 1
             }
             loop right < finish {
-                position :: if order_active -> order[right] else -> spare[right]
+                position: if order_active -> order[right] else -> spare[right]
                 if order_active -> spare[target] = position else -> order[target] = position
                 right += 1
                 target += 1
@@ -141,8 +141,8 @@ fn collection_sort_order<T, E>(values: View<T>, compare: fn(T, T) -> Ordering E!
 // order[new] = old. Pop retains the receiver's allocation, and each payload
 // enters exactly one empty optional slot before returning in sorted order.
 // No indexed payload read, owning copy, or default T is needed.
-fn collection_sort_apply_order<T>(rows: &[T], order: [Int]) Never! {
-    count :: rows.len()
+collection_sort_apply_order: fn<T>(rows: &[T], order: [Int]) Never! {
+    count: rows.len()
     if count < 2 -> return
     changed := false
     loop index in 0..<count {
@@ -157,7 +157,7 @@ fn collection_sort_apply_order<T>(rows: &[T], order: [Int]) Never! {
     }
     loop index in 0..<count -> destinations[order[index]] = index
     loop rows.len() > 0 {
-        original :: rows.len() - 1
+        original: rows.len() - 1
         row := &rows.pop() ?? panic("a nonempty sort receiver failed to pop")
         slots[count - 1 - destinations[original]] = Val(^row)
     }
@@ -169,23 +169,23 @@ fn collection_sort_apply_order<T>(rows: &[T], order: [Int]) Never! {
 }
 
 // The declared borrowed return checks the range as a View, not an owning List.
-fn collection_sort_view<T>(values: [T]) -> View<T> Never! from values {
+collection_sort_view: fn<T>(values: [T]) -> View<T> Never! from values {
     values[0..<values.len()]
 }
 
-fn collection_sort_by_compare<T, E>(rows: &[T], ^compare: fn(T, T) -> Ordering E!) E! {
-    window :: collection_sort_view<T>(rows)
+collection_sort_by_compare: fn<T, E>(rows: &[T], ^compare: fn(T, T) -> Ordering E!) E! {
+    window: collection_sort_view<T>(rows)
     order := collection_sort_order<T, E>(window, compare, false)
     collection_sort_apply_order<T>(&rows, order)
 }
 
-fn collection_sort_by_key<T, K: Comparable, E>(rows: &[T], ^key: fn(T) -> K E!, descending: Bool) E! {
+collection_sort_by_key: fn<T, K: Comparable, E>(rows: &[T], ^key: fn(T) -> K E!, descending: Bool) E! {
     keys := [K]{}
     loop index in 0..<rows.len() {
         value := key(rows[index])
         &keys.push(^value)
     }
-    window :: collection_sort_view<K>(keys)
+    window: collection_sort_view<K>(keys)
     order := collection_sort_order<K, Never>(window, (a: K, b: K) -> a <=> b, descending)
     // Normal key Close observes sorted order, whereas an earlier Err/Stop
     // closes only the initialized input prefix. The receiver is still intact
@@ -194,15 +194,15 @@ fn collection_sort_by_key<T, K: Comparable, E>(rows: &[T], ^key: fn(T) -> K E!, 
     collection_sort_apply_order<T>(&rows, order)
 }
 
-fn counter_entries(c: Counter) -> Int {
+counter_entries: fn(c: Counter) -> Int {
     n := c.keys.len()
     if c.counts.len() < n -> n = c.counts.len()
     n
 }
 
-fn counter() -> Counter Never! { Counter{keys: [String]{}, counts: [Int]{}} }
+counter: fn() -> Counter Never! { Counter{keys: [String]{}, counts: [Int]{}} }
 
-fn counter_from(keys: [String]) -> Counter Never! {
+counter_from: fn(keys: [String]) -> Counter Never! {
     out_keys := [String]{}
     out_counts := [Int]{}
     loop key in keys {
@@ -222,7 +222,7 @@ fn counter_from(keys: [String]) -> Counter Never! {
     Counter{keys: out_keys, counts: out_counts}
 }
 
-fn add(c: Counter, key: String, n: Int) -> Counter Never! {
+add: fn(c: Counter, key: String, n: Int) -> Counter Never! {
     entries := counter_entries(c)
     target_count := n
     first_target := -1
@@ -256,11 +256,11 @@ fn add(c: Counter, key: String, n: Int) -> Counter Never! {
     Counter{keys: keys, counts: counts}
 }
 
-fn inc(c: Counter, key: String) -> Counter Never! { add(c, key, 1) }
+inc: fn(c: Counter, key: String) -> Counter Never! { add(c, key, 1) }
 
-fn dec(c: Counter, key: String) -> Counter Never! { add(c, key, -1) }
+dec: fn(c: Counter, key: String) -> Counter Never! { add(c, key, -1) }
 
-fn get(c: Counter, key: String) -> Int Never! {
+get: fn(c: Counter, key: String) -> Int Never! {
     acc := 0
     found := false
     i := 0
@@ -276,12 +276,12 @@ fn get(c: Counter, key: String) -> Int Never! {
     0
 }
 
-fn set_count(c: Counter, key: String, n: Int) -> Counter Never! {
-    cur :: get(c, key)
+set_count: fn(c: Counter, key: String, n: Int) -> Counter Never! {
+    cur: get(c, key)
     add(c, key, n - cur)
 }
 
-fn total(c: Counter) -> Int Never! {
+total: fn(c: Counter) -> Int Never! {
     acc := 0
     entries := counter_entries(c)
     i := 0
@@ -292,7 +292,7 @@ fn total(c: Counter) -> Int Never! {
     acc
 }
 
-fn names(c: Counter) -> [String] Never! {
+names: fn(c: Counter) -> [String] Never! {
     out := [String]{}
     entries := counter_entries(c)
     i := 0
@@ -303,7 +303,7 @@ fn names(c: Counter) -> [String] Never! {
     out
 }
 
-fn elements(c: Counter) -> [String] Never! {
+elements: fn(c: Counter) -> [String] Never! {
     out := [String]{}
     i := 0
     entries := counter_entries(c)
@@ -319,7 +319,7 @@ fn elements(c: Counter) -> [String] Never! {
 }
 
 /// Highest counts first. Ties keep insertion order.
-fn most_common(c: Counter, k: Int) -> Counter Never! {
+most_common: fn(c: Counter, k: Int) -> Counter Never! {
     entries := counter_entries(c)
     if k == 0 -> return Counter{keys: [String]{}, counts: [Int]{}}
     limit := k
@@ -347,18 +347,18 @@ fn most_common(c: Counter, k: Int) -> Counter Never! {
     Counter{keys: keys, counts: counts}
 }
 
-fn remove_counter_at(keys: &[String], counts: &[Int], index: Int) {
+remove_counter_at: fn(keys: &[String], counts: &[Int], index: Int) {
     i := index
     loop i + 1 < keys.len() {
         keys[i] = keys[i + 1]
         counts[i] = counts[i + 1]
         i = i + 1
     }
-    _ :: &keys.pop()
-    _ :: &counts.pop()
+    _: &keys.pop()
+    _: &counts.pop()
 }
 
-fn apply_counter_delta(keys: &[String], counts: &[Int], key: String, delta: Int) {
+apply_counter_delta: fn(keys: &[String], counts: &[Int], key: String, delta: Int) {
     i := 0
     loop i < keys.len() {
         if keys[i] == key {
@@ -378,7 +378,7 @@ fn apply_counter_delta(keys: &[String], counts: &[Int], key: String, delta: Int)
     }
 }
 
-fn counter_copy(c: Counter) -> Counter {
+counter_copy: fn(c: Counter) -> Counter {
     entries := counter_entries(c)
     keys := [String]{}
     counts := [Int]{}
@@ -391,7 +391,7 @@ fn counter_copy(c: Counter) -> Counter {
     Counter{keys: keys, counts: counts}
 }
 
-fn subtract(a: Counter, b: Counter) -> Counter Never! {
+subtract: fn(a: Counter, b: Counter) -> Counter Never! {
     out := counter_copy(a)
     keys := out.keys
     counts := out.counts
@@ -404,7 +404,7 @@ fn subtract(a: Counter, b: Counter) -> Counter Never! {
     Counter{keys: keys, counts: counts}
 }
 
-fn merge_add(a: Counter, b: Counter) -> Counter Never! {
+merge_add: fn(a: Counter, b: Counter) -> Counter Never! {
     out := counter_copy(a)
     keys := out.keys
     counts := out.counts
@@ -417,9 +417,9 @@ fn merge_add(a: Counter, b: Counter) -> Counter Never! {
     Counter{keys: keys, counts: counts}
 }
 
-fn clear_counter(_c: Counter) -> Counter Never! { counter() }
+clear_counter: fn(_c: Counter) -> Counter Never! { counter() }
 
-fn sift_down(xs: &[Int], start: Int, end: Int) {
+sift_down: fn(xs: &[Int], start: Int, end: Int) {
     i := start
     loop {
         left := i * 2 + 1
@@ -437,7 +437,7 @@ fn sift_down(xs: &[Int], start: Int, end: Int) {
     }
 }
 
-fn sift_up(xs: &[Int], start: Int) {
+sift_up: fn(xs: &[Int], start: Int) {
     i := start
     loop i > 0 {
         parent := (i - 1) /% 2
@@ -450,7 +450,7 @@ fn sift_up(xs: &[Int], start: Int) {
     }
 }
 
-fn heapify(xs: [Int]) -> [Int] Never! {
+heapify: fn(xs: [Int]) -> [Int] Never! {
     out := copy_ints(xs)
     n := out.len()
     if n > 1 {
@@ -464,7 +464,7 @@ fn heapify(xs: [Int]) -> [Int] Never! {
     out
 }
 
-fn heappush(xs: [Int], value: Int) -> [Int] Never! {
+heappush: fn(xs: [Int], value: Int) -> [Int] Never! {
     out := copy_ints(xs)
     &out.push(value)
     last := out.len() - 1
@@ -472,7 +472,7 @@ fn heappush(xs: [Int], value: Int) -> [Int] Never! {
     out
 }
 
-fn heappop(xs: [Int]) -> (heap: [Int], value: Int?) Never! {
+heappop: fn(xs: [Int]) -> (heap: [Int], value: Int?) Never! {
     if xs.len() == 0 -> return (heap: [Int]{}, value: None)
     if xs.len() == 1 -> return (heap: [Int]{}, value: Val(xs[0]))
     last := xs[xs.len() - 1]
@@ -487,7 +487,7 @@ fn heappop(xs: [Int]) -> (heap: [Int], value: Int?) Never! {
     (heap: rest, value: Val(xs[0]))
 }
 
-fn heappushpop(xs: [Int], value: Int) -> (heap: [Int], value: Int) Never! {
+heappushpop: fn(xs: [Int], value: Int) -> (heap: [Int], value: Int) Never! {
     if xs.len() == 0 || value <= xs[0] -> return (heap: copy_ints(xs), value: value)
     popped := xs[0]
     rest := [Int]{value}
@@ -501,7 +501,7 @@ fn heappushpop(xs: [Int], value: Int) -> (heap: [Int], value: Int) Never! {
     (heap: rest, value: popped)
 }
 
-fn heapreplace(xs: [Int], value: Int) -> (heap: [Int], value: Int?) Never! {
+heapreplace: fn(xs: [Int], value: Int) -> (heap: [Int], value: Int?) Never! {
     if xs.len() == 0 -> return (heap: [Int]{value}, value: None)
     popped := xs[0]
     rest := [Int]{value}
@@ -515,7 +515,7 @@ fn heapreplace(xs: [Int], value: Int) -> (heap: [Int], value: Int?) Never! {
     (heap: rest, value: Val(popped))
 }
 
-fn max_sift_down(xs: &[Int], start: Int, end: Int) {
+max_sift_down: fn(xs: &[Int], start: Int, end: Int) {
     i := start
     loop {
         left := i * 2 + 1
@@ -533,7 +533,7 @@ fn max_sift_down(xs: &[Int], start: Int, end: Int) {
     }
 }
 
-fn max_sift_up(xs: &[Int], start: Int) {
+max_sift_up: fn(xs: &[Int], start: Int) {
     i := start
     loop i > 0 {
         parent := (i - 1) /% 2
@@ -546,7 +546,7 @@ fn max_sift_up(xs: &[Int], start: Int) {
     }
 }
 
-fn max_heappush(xs: [Int], value: Int) -> [Int] {
+max_heappush: fn(xs: [Int], value: Int) -> [Int] {
     out := copy_ints(xs)
     &out.push(value)
     last := out.len() - 1
@@ -554,7 +554,7 @@ fn max_heappush(xs: [Int], value: Int) -> [Int] {
     out
 }
 
-fn max_heapreplace(xs: [Int], value: Int) -> [Int] {
+max_heapreplace: fn(xs: [Int], value: Int) -> [Int] {
     out := copy_ints(xs)
     out[0] = value
     out_len := out.len()
@@ -562,7 +562,7 @@ fn max_heapreplace(xs: [Int], value: Int) -> [Int] {
     out
 }
 
-fn max_heappop(xs: [Int]) -> (heap: [Int], value: Int?) {
+max_heappop: fn(xs: [Int]) -> (heap: [Int], value: Int?) {
     if xs.len() == 0 -> return (heap: [Int]{}, value: None)
     if xs.len() == 1 -> return (heap: [Int]{}, value: Val(xs[0]))
     popped := xs[0]
@@ -578,7 +578,7 @@ fn max_heappop(xs: [Int]) -> (heap: [Int], value: Int?) {
     (heap: rest, value: Val(popped))
 }
 
-fn nsmallest(n: Int, xs: [Int]) -> [Int] Never! {
+nsmallest: fn(n: Int, xs: [Int]) -> [Int] Never! {
     if n <= 0 -> return [Int]{}
     h := [Int]{}
     loop x in xs {
@@ -590,8 +590,8 @@ fn nsmallest(n: Int, xs: [Int]) -> [Int] Never! {
     }
     out := [Int]{}
     loop _ in 0..<h.len() {
-        pair :: max_heappop(h)
-        v :: pair.value ?? break
+        pair: max_heappop(h)
+        v: pair.value ?? break
         &out.push(v)
         h = pair.heap
     }
@@ -607,21 +607,21 @@ fn nsmallest(n: Int, xs: [Int]) -> [Int] Never! {
     out
 }
 
-fn nlargest(n: Int, xs: [Int]) -> [Int] Never! {
+nlargest: fn(n: Int, xs: [Int]) -> [Int] Never! {
     if n <= 0 -> return [Int]{}
     h := [Int]{}
     loop x in xs {
         if h.len() < n {
             h = heappush(h, x)
         } else if h.len() > 0 && x > h[0] {
-            pair :: heapreplace(h, x)
+            pair: heapreplace(h, x)
             h = pair.heap
         }
     }
     out := [Int]{}
     loop _ in 0..<h.len() {
-        pair :: heappop(h)
-        v :: pair.value ?? break
+        pair: heappop(h)
+        v: pair.value ?? break
         &out.push(v)
         h = pair.heap
     }
@@ -637,7 +637,7 @@ fn nlargest(n: Int, xs: [Int]) -> [Int] Never! {
     out
 }
 
-fn merge_sorted(left: [Int], right: [Int]) -> [Int] Never! {
+merge_sorted: fn(left: [Int], right: [Int]) -> [Int] Never! {
     out := [Int]{}
     i := 0
     j := 0
@@ -661,7 +661,7 @@ fn merge_sorted(left: [Int], right: [Int]) -> [Int] Never! {
     out
 }
 
-fn bisect_left(xs: [Int], value: Int) -> Int Never! {
+bisect_left: fn(xs: [Int], value: Int) -> Int Never! {
     lo := 0
     hi := xs.len()
     loop lo < hi {
@@ -675,7 +675,7 @@ fn bisect_left(xs: [Int], value: Int) -> Int Never! {
     lo
 }
 
-fn bisect_right(xs: [Int], value: Int) -> Int Never! {
+bisect_right: fn(xs: [Int], value: Int) -> Int Never! {
     lo := 0
     hi := xs.len()
     loop lo < hi {
@@ -689,8 +689,8 @@ fn bisect_right(xs: [Int], value: Int) -> Int Never! {
     lo
 }
 
-fn insort_left(xs: [Int], value: Int) -> [Int] Never! {
-    i :: bisect_left(xs, value)
+insort_left: fn(xs: [Int], value: Int) -> [Int] Never! {
+    i: bisect_left(xs, value)
     out := [Int]{}
     k := 0
     loop k < i {
@@ -705,8 +705,8 @@ fn insort_left(xs: [Int], value: Int) -> [Int] Never! {
     out
 }
 
-fn insort_right(xs: [Int], value: Int) -> [Int] Never! {
-    i :: bisect_right(xs, value)
+insort_right: fn(xs: [Int], value: Int) -> [Int] Never! {
+    i: bisect_right(xs, value)
     out := [Int]{}
     k := 0
     loop k < i {
@@ -721,13 +721,13 @@ fn insort_right(xs: [Int], value: Int) -> [Int] Never! {
     out
 }
 
-fn map_entries(m: OrderedMap) -> Int Never! {
+map_entries: fn(m: OrderedMap) -> Int Never! {
     n := m.keys.len()
     if m.values.len() < n -> n = m.values.len()
     n
 }
 
-fn string_index(xs: [String], key: String) -> Int {
+string_index: fn(xs: [String], key: String) -> Int {
     i := 0
     loop i < xs.len() {
         if xs[i] == key -> return i
@@ -736,7 +736,7 @@ fn string_index(xs: [String], key: String) -> Int {
     -1
 }
 
-fn layer_from(keys: [String], values: [String]) -> Layer {
+layer_from: fn(keys: [String], values: [String]) -> Layer {
     n := keys.len()
     if values.len() < n -> n = values.len()
     out_keys := [String]{}
@@ -752,9 +752,9 @@ fn layer_from(keys: [String], values: [String]) -> Layer {
     Layer{keys: out_keys, values: out_values}
 }
 
-fn ordered_map() -> OrderedMap Never! { OrderedMap{keys: [String]{}, values: [String]{}} }
+ordered_map: fn() -> OrderedMap Never! { OrderedMap{keys: [String]{}, values: [String]{}} }
 
-fn map_get(m: OrderedMap, key: String) -> String? Never! {
+map_get: fn(m: OrderedMap, key: String) -> String? Never! {
     i := 0
     entries := map_entries(m)
     loop i < entries {
@@ -764,7 +764,7 @@ fn map_get(m: OrderedMap, key: String) -> String? Never! {
     None
 }
 
-fn map_set(m: OrderedMap, key: String, value: String) -> OrderedMap Never! {
+map_set: fn(m: OrderedMap, key: String, value: String) -> OrderedMap Never! {
     keys := [String]{}
     values := [String]{}
     found := false
@@ -790,7 +790,7 @@ fn map_set(m: OrderedMap, key: String, value: String) -> OrderedMap Never! {
     OrderedMap{keys: keys, values: values}
 }
 
-fn map_remove(m: OrderedMap, key: String) -> OrderedMap Never! {
+map_remove: fn(m: OrderedMap, key: String) -> OrderedMap Never! {
     keys := [String]{}
     values := [String]{}
     i := 0
@@ -805,7 +805,7 @@ fn map_remove(m: OrderedMap, key: String) -> OrderedMap Never! {
     OrderedMap{keys: keys, values: values}
 }
 
-fn map_keys(m: OrderedMap) -> [String] Never! {
+map_keys: fn(m: OrderedMap) -> [String] Never! {
     out := [String]{}
     i := 0
     entries := map_entries(m)
@@ -816,7 +816,7 @@ fn map_keys(m: OrderedMap) -> [String] Never! {
     out
 }
 
-fn map_values(m: OrderedMap) -> [String] Never! {
+map_values: fn(m: OrderedMap) -> [String] Never! {
     out := [String]{}
     i := 0
     entries := map_entries(m)
@@ -827,19 +827,19 @@ fn map_values(m: OrderedMap) -> [String] Never! {
     out
 }
 
-fn map_contains(m: OrderedMap, key: String) -> Bool Never! { map_get(m, key) != None }
+map_contains: fn(m: OrderedMap, key: String) -> Bool Never! { map_get(m, key) != None }
 
-fn map_len(m: OrderedMap) -> Int Never! { map_entries(m) }
+map_len: fn(m: OrderedMap) -> Int Never! { map_entries(m) }
 
-fn chain() -> Chain Never! { Chain{layers: [Layer]{}} }
+chain: fn() -> Chain Never! { Chain{layers: [Layer]{}} }
 
-fn chain_push(c: Chain, keys: [String], values: [String]) -> Chain Never! {
+chain_push: fn(c: Chain, keys: [String], values: [String]) -> Chain Never! {
     layers := [Layer]{layer_from(keys, values)}
     loop layer in c.layers -> &layers.push(layer_from(layer.keys, layer.values))
     Chain{layers: layers}
 }
 
-fn chain_get(c: Chain, key: String) -> String? Never! {
+chain_get: fn(c: Chain, key: String) -> String? Never! {
     loop layer in c.layers {
         i := 0
         entries := layer.keys.len()
@@ -852,4 +852,4 @@ fn chain_get(c: Chain, key: String) -> String? Never! {
     None
 }
 
-fn chain_contains(c: Chain, key: String) -> Bool Never! { chain_get(c, key) != None }
+chain_contains: fn(c: Chain, key: String) -> Bool Never! { chain_get(c, key) != None }

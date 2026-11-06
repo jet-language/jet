@@ -1,12 +1,12 @@
 // prim-distributed: event-time keyed tumbling windows over an in-memory source.
 // The checkpoint is an owned map copy; it demonstrates recovery, not durable storage.
-struct Event {
+Event: struct {
     key: String
     timestamp: Int
     value: Int
 }
 
-fn source() -> Stream<Event> {
+source: fn() -> Stream<Event> {
     yield Event{key: "a", timestamp: 12, value: 3}
     yield Event{key: "b", timestamp: 8, value: 4}
     yield Event{key: "a", timestamp: 7, value: 2}
@@ -15,8 +15,8 @@ fn source() -> Stream<Event> {
     yield Event{key: "a", timestamp: 31, value: 7}
 }
 
-fn run() {
-    events :: [Event]{
+run: fn() {
+    events: [Event]{
         {key: "a", timestamp: 12, value: 3},
         {key: "b", timestamp: 8, value: 4},
         {key: "a", timestamp: 7, value: 2},
@@ -44,7 +44,7 @@ fn run() {
     recovered := checkpoint.copy()
     recovery_max_seen := 12
     recovery_watermark := 0
-    recovery_events :: [Event]{events[3], events[4], events[5]}
+    recovery_events: [Event]{events[3], events[4], events[5]}
     loop event in recovery_events {
         if event.timestamp > recovery_max_seen -> recovery_max_seen = event.timestamp
         recovery_watermark = recovery_max_seen - 5
