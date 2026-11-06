@@ -1706,6 +1706,9 @@ sema_expression_lambda_return_replace_mismatch: fn(required: Type, value: Expr, 
 
 sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, lambda_scopes: &SemaScopeTable, outer_return_type: Type?, outer_failure_carrier: TFailureCarrier?, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], host_callback: Bool, host_write: Bool, host_stored: Bool, open_result: Bool) -> TExpr? {
     lambda_work := lambda
+    // Read once: a lambda nested in this body has its own slot.
+    failure_open: open_result && context.callback_failure_open
+    context.callback_failure_open = false
     inline_loop := lambda_work.params.len() == 0 && (lambda_work.meta.collecting_loop || lambda_work.meta.result_loop)
     if inline_loop && lambda_work.meta.loop_label == .Val(named) -> sema_expression_lambda_install_loop_label(lambda_work, named)
     parent_last_loop_result := context.last_loop_result_type
@@ -1900,8 +1903,10 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
                 // An expected callable with no return row leaves `return
                 // value` without a slot (E0113) until a propagated fallible
                 // call gives the callback that call's carrier.
-                lambda_context.callback_return_open = infers && expected_params != None && expected_ret == None
-                lambda_context.callback_return_closed = infers && expected_params != None && expected_ret != None
+                // A failure-open collection slot (`filter`) keeps its row as
+                // the success the callback's returns must fit.
+                lambda_context.callback_return_open = infers && expected_params != None && (expected_ret == None || failure_open)
+                lambda_context.callback_return_closed = infers && expected_params != None && expected_ret != None && !failure_open
                 lambda_context.callback_return_row = None
             }
         }
@@ -2278,7 +2283,10 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
             lambda_work.meta.fallible_carrier = Val(ret_ty)
         }
     }
-    if expected_ret != None && !sema_expression_lambda_return_fits(expected_ret ?? ret_ty, ret_ty, environment, program) {
+    // A failure-open slot's row names the success of an inferred carrier.
+    fit_ty := ret_ty
+    if failure_open && lambda_work.meta.fallible_propagation && ret_ty == .Result(success, _) -> fit_ty = success.copy()
+    if expected_ret != None && !sema_expression_lambda_return_fits(expected_ret ?? fit_ty, fit_ty, environment, program) {
         // The inferred carrier cannot fit a plain expected return: the failure
         // has no route out of this callback (E0403).
         if lambda_work.meta.fallible_propagation && ret_ty == .Result(_, inferred_error) {
@@ -2370,7 +2378,7 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
         uses_stack_sentry: false,
     }
     result := sema_tree_node(fn_ty, TExprKind.Lambda{value: lambda_value}, lambda.span)
-    checked: if arity_reported || ((host_callback || open_result) && expected_ret == None) -> result else -> sema_expr_expected(result, expected, environment, program, diagnostics) ?? return None
+    checked: if arity_reported || ((host_callback || open_result) && (expected_ret == None || failure_open)) -> result else -> sema_expr_expected(result, expected, environment, program, diagnostics) ?? return None
     if inline_loop {
         sema_scope_leave(lambda_scopes, lambda_state)
         sema_ownership_join_paths(state, lambda_parent_state, lambda_state, lambda_parent_state, true)

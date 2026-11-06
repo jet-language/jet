@@ -649,6 +649,12 @@ SemaCheckContext: struct {
     // function in it is a failure obligation the bundle solve settles, as in
     // a named `T Never!` function, rather than the callback's carrier.
     callback_return_closed: Bool{false}
+    // A collection slot that projects a fallible callback's failure onto its
+    // own result (`filter`'s `[T] E!`): its plain return row (`Bool`) names
+    // only the success, so the callback still infers its carrier from its
+    // first propagated call. Set by Calls/Collections.jet for one argument;
+    // the lambda it is set for reads and clears it on entry.
+    callback_failure_open: Bool{false}
     // The enclosing callable's written failure contract, for E2404 provenance.
     failure_contract_source: String
     // Where E2404's repair edits go: the caller's written `T E!` return and

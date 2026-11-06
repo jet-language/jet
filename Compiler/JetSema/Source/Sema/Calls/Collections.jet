@@ -4,6 +4,7 @@ use jet_foundation.[
     AccessConvention,
     CallArg,
     CollectionLaw,
+    CollectionResult,
     Diagnostic,
     Expr,
     ParamZone,
@@ -49,14 +50,17 @@ sema_call_collections_check_argument: fn(argument: CallArg, method: String, inde
     // (`fn(T)` with no return) accepts any function value; the method's own
     // shape rules decide its use (a named `fn(T, T) -> Ordering` is the
     // `sort_by` comparator). Only a lambda, or the `.member` subject
-    // shorthand that is one is checked against the slot.
+    // shorthand that is one is checked against the slot. A failure-open slot
+    // (Scopes.jet callback_failure_open, set by the caller for this one
+    // argument) is open to a function value the same way.
+    failure_open: context.callback_failure_open
     open_slot := false
     if callback && required == .Fn(_, required_ret, _, _, _, _) {
         is_lambda := if argument.expr == {
             .Lambda(_, _) -> true
             else -> sema_expr_is_bare_member_chain(argument.expr)
         }
-        open_slot = required_ret == None && !is_lambda
+        open_slot = (required_ret == None || failure_open) && !is_lambda
     }
     self_typed: !callback && sema_stmt_numeric_slot_self_typed(argument.expr, required)
     checked := if {
@@ -70,11 +74,16 @@ sema_call_collections_check_argument: fn(argument: CallArg, method: String, inde
         }
     }
     context.lambda_lending_views = previous_lending
+    context.callback_failure_open = false
     if !callback && !open_slot && !self_typed -> sema_value_method_replace_mismatch(argument.expr, method, index, required, reported, environment, program, scopes, state, tail_store, context, diagnostics)
     value: checked ?? return None
     if self_typed -> return sema_stmt_numeric_slot_value(value, required, environment, program, diagnostics)
     if open_slot {
         if value.ty == .Fn(_, _, _, _, _, _) -> return Val(value)
+    }
+    // A failure-open slot takes a callback whose success is the slot's row.
+    if failure_open && required == .Fn(_, required_ret, _, _, _, _) && sema_call_signature_return(value.ty) == .Val(.Result(success, _)) {
+        if required_ret == .Val(row) && sema_call_type_assignable(row, success, environment, program) == (Val(true)) -> return Val(value)
     }
     compatible := if required == {
         .Fn(_, fn_result, _, _, _, _) -> {
@@ -254,6 +263,9 @@ sema_call_try_builtin_collections: fn(receiver: Expr, receiver_value: TExpr, met
                 sema_check_expression(updated_args[index].expr, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
             }
             else -> {
+                // `filter` projects a fallible predicate's failure onto its
+                // `[T] E!` result (sema_collection_filtered).
+                context.callback_failure_open = callback && (contract.row.result == CollectionResult.Filtered || contract.row.result == CollectionResult.ListFiltered)
                 sema_call_collections_check_argument(updated_args[index], method, index, required, callback, method == "edit_disjoint" && index == 1, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
             }
         }
