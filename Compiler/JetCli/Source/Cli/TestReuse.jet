@@ -11,7 +11,9 @@
 // difference runs the tests again and stores the new reads. `--fresh` skips
 // the lookup. A run whose reads can't all be named (a relative path under a
 // directory the runtime can't resolve) is not stored. Reads under /proc,
-// /sys and /dev are the host's own and key nothing.
+// /sys and /dev are the host's own and key nothing, except /dev/shm: a
+// shared-memory tmpfs holds ordinary files a project (or a test runner's
+// staging) keeps there, so they key by content like any other file.
 use {
     test_reuse_files: core.files
     test_reuse_sys: core.sys
@@ -165,7 +167,7 @@ jet_cli_test_reuse_print: fn(kind: String, name: String) -> String? Never! {
         return Val(pairs.join("\n"))
     }
     if kind != "F" && kind != "S" -> return None
-    if name.starts_with("/proc/") || name.starts_with("/sys/") || name.starts_with("/dev/") -> return Val("host")
+    if name.starts_with("/proc/") || name.starts_with("/sys/") || (name.starts_with("/dev/") && !name.starts_with("/dev/shm/")) -> return Val("host")
     if test_reuse_files.is_dir(name) {
         if kind == "S" -> return Val("dir")
         entries: test_reuse_files.list_dir(name) ?? return Val("unreadable dir")
