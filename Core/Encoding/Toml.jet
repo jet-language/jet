@@ -8,7 +8,7 @@
 // `to_string` emits a minimal table document; it does not preserve comments.
 
 use {
-    core.encoding.[Dyn, EncodingError, EncodingErrorKind, EncodingFormat]
+    core.encoding.[Dyn, EncodingError, EncodingErrorKind, EncodingFormat, EncodingLimits]
     json: core.encoding.json
     stream: __core_encoding_stream
 }
@@ -41,8 +41,8 @@ load: fn(text: String) -> Dyn EncodingError! { parse(text) }
 to_string: fn<T: Encode>(value: T) -> String Never! { render_toml(value.encode()) }
 
 parse_toml: fn(text: String) -> Dyn EncodingError! {
-    p := TOMLParser{bytes: text.bytes(), index: 0, line: 1, column: 1, root: Dyn.object()}
-    _: &p.document() ?? return Err(p.fail("TOML document could not be parsed"))
+    p := TOMLParser{bytes: text.bytes(), index: 0, line: 1, column: 1, root: Dyn.object(), depth: 0}
+    _: &p.document() ?? return Err(err)
     Ok(p.root)
 }
 
@@ -52,6 +52,9 @@ TOMLParser: struct {
     line: Int
     column: Int
     root: Dyn
+    // Open arrays and inline tables, bounded by `EncodingLimits.safe().max_depth`
+    // so hostile nesting cannot run the process out of stack.
+    depth: Int
 }
 
 impl TOMLParser {
@@ -303,12 +306,14 @@ impl TOMLParser {
 
     parse_array: fn(&self) -> Dyn EncodingError! {
         _: &self.bump()
+        &self.enter() ?? return Err(err)
         items := [Dyn]{}
         loop {
             &self.skip_space() ?? return Err(self.fail("TOML whitespace scan failed"))
             b0: self.peek() ?? (U8{0})
             if b0 == (U8{93}) {
                 _: &self.bump()
+                self.depth -= 1
                 return Ok(Dyn.Array(items))
             }
             value: &self.parse_value()
@@ -317,6 +322,7 @@ impl TOMLParser {
             b: self.peek() ?? return Err(self.fail("unterminated TOML array"))
             if b == (U8{93}) {
                 _: &self.bump()
+                self.depth -= 1
                 return Ok(Dyn.Array(items))
             }
             if b != (U8{44}) -> return Err(self.fail("expected ',' or ']' after a TOML array value"))
@@ -326,6 +332,7 @@ impl TOMLParser {
 
     parse_inline_table: fn(&self) -> Dyn EncodingError! {
         _: &self.bump()
+        &self.enter() ?? return Err(err)
         // Dyn objects retain insertion order and reject repeated inline keys.
         entries := Dyn.object()
         loop {
@@ -333,6 +340,7 @@ impl TOMLParser {
             b0: self.peek() ?? (U8{0})
             if b0 == (U8{125}) {
                 _: &self.bump()
+                self.depth -= 1
                 return Ok(entries)
             }
             key: &self.parse_key()
@@ -345,11 +353,18 @@ impl TOMLParser {
             b: self.peek() ?? return Err(self.fail("unterminated TOML inline table"))
             if b == (U8{125}) {
                 _: &self.bump()
+                self.depth -= 1
                 return Ok(entries)
             }
             if b != (U8{44}) -> return Err(self.fail("expected ',' or '}}' after a TOML inline-table value"))
             _: &self.bump()
         }
+    }
+
+    enter: fn(&self) EncodingError! {
+        self.depth += 1
+        max_depth: EncodingLimits.safe().max_depth
+        if self.depth > max_depth -> return Err(self.fail("nesting exceeds max_depth ({max_depth})"))
     }
 
     parse_number_or_text: fn(&self) -> Dyn EncodingError! {

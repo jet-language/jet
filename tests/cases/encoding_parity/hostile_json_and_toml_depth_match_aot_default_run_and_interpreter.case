@@ -1,6 +1,6 @@
 # tests/encoding_parity.rs::hostile_json_and_toml_depth_match_aot_default_run_and_interpreter
-# Original source bytes and assertions; PENDING-SAME-HEAD, runtime UNRUN.
-# Expected literals below come from the Rust assertions, not captured/blessed output.
+# Nesting is bounded by EncodingLimits.safe().max_depth (256), so the probe
+# nests 256 (accepted) and 257 (rejected) deep.
 env: NO_COLOR=1
 fixture: hostile_json_and_toml_depth_match_aot_default_run_and_interpreter.fixture
 capture: source = text file.replace("@DIR@", "{work}/probe") probe/source.template
@@ -10,7 +10,7 @@ exit: 0
 step probe_aot: built
 cwd: probe
 exit: 0
-stdout: = "json64:accepted\njson65:1:JSON value is nested too deeply\ntoml64:accepted\ntoml65:1:TOML value is nested too deeply\n"
+stdout: = "json256:accepted\njson257:1:nesting exceeds max_depth (256)\ntoml256:accepted\ntoml257:1:nesting exceeds max_depth (256)\n"
 stderr: empty
 step probe_dev: jet run probe/run.jet
 stdin: null

@@ -8,7 +8,7 @@ use {
     listener: net.tcp_listen("127.0.0.1:0") ?? panic("bind")
     addr: listener.local_addr() ?? panic("address")
     mux: server.mux()
-    (first_tx, first_rx): channel<Int>()
+    { sender: first_tx, receiver: first_rx }: channel<Int>()
     mux.post("/slow", (req: HTTPRequest) -> {
         chunks: req.body().chunks(4096)
         total := 0
@@ -36,7 +36,7 @@ use {
         first_length, first_rx -> assert(first_length == 4096)
         after 2s -> panic("handler must pull before the upload finishes")
     }
-    loop _ in 1..<(length / 4096) -> client.write_all(chunk) ?? panic("remaining write")
+    loop _ in 1..<(length /% 4096) -> client.write_all(chunk) ?? panic("remaining write")
     parts := [String]{}
     loop {
         part: client.read_text(8192) ?? panic("response read")

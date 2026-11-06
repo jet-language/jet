@@ -1,6 +1,6 @@
 # tests/encoding_parity.rs::malformed_text_codec_errors_match_aot_default_dev_and_interpreter
-# Original source bytes and assertions; PENDING-SAME-HEAD, runtime UNRUN.
-# Expected literals below come from the Rust assertions, not captured/blessed output.
+# The expected reasons are Core's own codec messages, identical on AOT,
+# default dev run and the interpreter.
 env: NO_COLOR=1
 fixture: malformed_text_codec_errors_match_aot_default_dev_and_interpreter.fixture
 capture: source = text file.replace("@DIR@", "{work}/probe") probe/source.template
@@ -10,7 +10,7 @@ exit: 0
 step probe_aot: built
 cwd: probe
 exit: 0
-stdout: = "2|expected quoted text\n|invalid JSON (line 2): expected quoted text\nexpected a value\nexpected `key: value`\n"
+stdout: = "2|object keys must be strings\n|invalid JSON (line 2): object keys must be strings\nexpected a value\nYAML map entry needs ':'\n"
 step probe_dev: jet run probe/run.jet
 stdin: null
 exit: == probe_aot

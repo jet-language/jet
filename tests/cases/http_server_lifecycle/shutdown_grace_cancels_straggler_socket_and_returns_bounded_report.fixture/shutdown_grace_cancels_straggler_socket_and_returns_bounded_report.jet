@@ -8,7 +8,7 @@ use {
 }
 
 #Test("shutdown grace cancels straggler and returns bounded report") {
-    (entered_tx, entered_rx): channel<Int>()
+    { sender: entered_tx, receiver: entered_rx }: channel<Int>()
     mux: server.mux()
     mux.get("/slow", (_req: HTTPRequest) -> {
         entered_tx.send(1)
