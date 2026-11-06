@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6612,
-    "rev": 93600,
+    "rev": 93612,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -62222,7 +62222,7 @@
       "id": "c00ys8fj",
       "num": 5085,
       "title": "Scripting ergonomics ballots B1-B10 (list +, slot +=, char-index find, write, top-level statements, fail, Match.named, is_executable, Path.script_dir, Regex lint)",
-      "body": "# Script ergonomics ballots (final; for Main to file on Tower)\n\nOne entry per proposed new API or syntax. Each names the exact spelling, the semantics, a\nbefore/after taken from the four idiomatic tool rewrites\n(`$JET_STATE_ROOT/scratch/ScriptErgonomics/idiomatic/{TestShards,WebBundleCheck,LexerKeywordRows,Lifecycle}.jet`),\nand the saving counted with `count.sh` (program lines / whitespace tokens: no blanks, comments,\n`#Test` blocks or `package {}`). A saving marked [INFERENCE] is read off the before/after text,\nnot measured on a rewritten file.\nNot ballots (bug fixes, no new surface). Landed: `pad_start`/`pad_end` link, `remove_prefix`/`remove_suffix`\nmethods (efbc29643), web baseline (17537755c). Patch ready, not landed (see lane report): the prelude\nrows below and the collecting-loop propagation fix.\n- readable prelude names `eprint`, `read_file`, `write_file`, `file_exists`, `keep`, `Clock`,\n  `Instant`, `Date`, `Duration` resolve without `use` (Spec.md:305-317, D-CORE-PRELUDE1/2);\n  `Date.today()` reaches `LocalDate` statics; `files.read`/`read_file` take `String | Path`\n  like `write`; `.or_err(...)`/`keep(...)` no longer ICE (core.prelude loads);\n- integer selectors of every width (`{i64:Hex(8)}`) and `Pad`/`PadLeft` of any displayable value\n  (`{n:PadLeft(2, \"0\")}`), as codegen already lowered them;\n- `\"x\".pad_start(n, f)` / `pad_end` link (they share the `rjust`/`ljust` runtime routes);\n- `s.remove_prefix(p)` / `s.remove_suffix(p)` are methods (String.jet already had the bodies);\n- `Int.parse` (any fallible call) inside a collecting loop propagates like the statement form\n  (former draft B9).\n\n---\n\n## B1 — List concatenation with `+`\n- Spelling: `a + b` where `a: [T]`, `b: [T]` → new `[T]`; operands unchanged (read, not moved).\n- Semantics: eager copy of `a` then `b`. `View<T>` operands are E0108 (write `.copy()`); maps and\n  sets keep their own operators (none). No new token: `+` widens its operand set, which is\n  language surface, so it needs ratification.\n- Beginner path: `all: header + rows`. Expert path: `xs.extend(ys)` (in place, no copy).\n- Alternatives: (a) `xs.concat(ys)` method only; (b) status quo\n  `out := xs.copy(); loop y in ys -> out.push(y)`.\n- Before (Lifecycle.jet:62): `text: \"{HEADER.join(\"\\n\")}\\n{(loop row in rows -> \"{row}\\n\").join(\"\")}\"`\n  After: `text: \"{(HEADER + rows).join(\"\\n\")}\\n\"`.\n- Before (LexerKeywordRows, 2 sites): `values := m.get(k) ?? [String]{}` / `values.push(v)` /\n  `m[k] = values` — After: `m[k] = (m.get(k) ?? [String]{}) + [v]`.\n- Saving: −4 lines in LexerKeywordRows, −0 lines/−9 tokens in Lifecycle [INFERENCE].\n- Trade-off: `+` hides an O(n) copy; the L0501 copy-in-loop lint covers the hot case.\n\n## B2 — Compound update of a list slot (`xs[i] += n`)\n- Spelling: `xs[i] op= v` for `xs: [T]` (mutable binding), `i: Int`, every compound operator that\n  exists for `T`.\n- Semantics: one bounds check, then read-modify-write of the slot; an out-of-range index stops\n  before any write, so no partial update exists. Maps keep E0164 (a missing key has no value\n  to update); maps get no sugar in this ballot.\n- Today: E0164 \"Compound assignment can't target an indexed slot\".\n- Before (TestShards.jet:44): `loads[lightest] = loads[lightest] + row.weight`\n  After: `loads[lightest] += row.weight`.\n- Saving: 0 lines, −2 tokens per site.\n- Alternative: keep E0164 (explicit total update).\n\n## B3 — `String.find` / `rfind` return a character index as `Int?`\n- Spelling (changed signature, same names): `s.find(needle) -> Int?`, `s.rfind(needle) -> Int?`.\n- Semantics: the character (Unicode scalar) index of the first/last match, `None` when absent, so\n  it composes with `slice`, `len` and `regex.Match.start/end`, which already count characters.\n  Byte search stays available as `s.bytes().index_of_seq(n.bytes())`.\n- Today: `find` returns a UTF-8 byte offset (Core/Text/String.jet:83) and `-1` when absent;\n  `\"héllo // c\".slice(0, \"héllo // c\".find(\"//\"))` prints `héllo /` (probe r1.jet).\n- Before (LexerKeywordRows literal port): `at: line.find(\"//\")` +\n  `code: if at < 0 -> line else -> byte_slice(line, 0, at)` plus a `byte_slice` helper.\n  After: `code: line.slice(0, line.find(\"//\") ?? line.len())`.\n- Saving: the byte-helper family in every text port (PortReview counted 103 lines across ports;\n  −1 line per site [INFERENCE]).\n- Changes a ratified API: one cutover migrating every caller.\n- Alternatives: (a) keep bytes, add `slice_bytes(a, b)`; (b) only document `split_once`.\n\n## B4 — Ambient `write(text)` (stdout without a newline)\n- Spelling: `write(text: String)` in the readable prelude, beside `print`/`eprint`.\n- Semantics: writes `text` to stdout unchanged (no newline), same `IO` effect and flush rules\n  as `print`; `#NoPrelude` hides it like `print`.\n- Today: `print` always appends `\\n`; raw text needs `out := term.stdout()` +\n  `out.write(text).drop(\"...\")`; `term.stdout().write(t)` is E0202 (temporary handle).\n- Before (Lifecycle.jet:64-66): `else if args[0] == \"--print\" {` / `out := term.stdout()` /\n  `out.write(text).drop(\"lifecycle text\")` / `}` — After: `else if args[0] == \"--print\" -> write(text)`.\n- Saving: −3 lines in Lifecycle, and its `use core.term` line once B4 lands (−1).\n- Alternatives: `print(text, end: \"\")` (labelled argument on an existing builtin); allow `&` on a\n  temporary handle for one call.\n\n## B5 — Script entry without `fn run()` (top-level statements)\n- Spelling: a loose file (or `#!` script) with no `fn run` may contain statements at top level.\n- Semantics: those statements, in order, are the body of an implicit fallible `fn run()`;\n  `fn`, `struct`, constants and `use` stay items; a file that has `fn run` and top-level\n  statements is an error. Authority and package rules are unchanged.\n- Today: \"Ordinary files execute only their explicit `fn run` body\" (Examples/features/script_mode).\n- Before: `fn run() {` … `}` (2 lines + one indent level). After: the body alone.\n- Saving: −2 lines per script (TestShards, WebBundleCheck, Lifecycle, LexerKeywordRows: −8).\n- Trade-off: two entry shapes (I8), mitigated because the implicit form desugars to exactly\n  `fn run()`. Coordinate with lane ScriptMode (`#!`, `-A`).\n\n## B6 — `fail(message, code)` for expected failures\n- Spelling: `fail(message: String, code: Int{1}) -> Never` in the readable prelude.\n- Semantics: writes `message` and a newline to stderr, runs scope guards, exits with `code`.\n  Unlike `panic` (program bugs, E3001 frame) it prints no frame.\n- Before (all four rewrites): `fn fail(message: String) -> Never {` / `term.eprint(message)` /\n  `process.exit(1)` / `}` (TestShards names it `usage` with code 64).\n- After: `fail(\"...\")` / `fail(\"...\", 64)` at the call sites; no helper.\n- Saving: −4 lines per script (−16 over the four), and `use core.process` where only `exit`\n  used it.\n- Alternative: `#Error struct` + `return Err(...)` from `run()` (exists; prints a framed report).\n\n## B7 — Named regex groups on `Match`\n- Spelling: `m.named(name: String) -> String?` on `core.regex.Match`.\n- Semantics: the text of the named group `(?<name>…)` in this match; `None` when the group did\n  not participate or the name is not in the pattern (the pattern is known: a `Regex{…}` literal\n  makes an unknown name a compile error).\n- Today: groups are positional (`m.groups[2]`); named groups parse but have no accessor on the\n  source engine path.\n- Before (Lifecycle.jet:45-49): `kind: m.groups[0]`, `name: m.groups[2]`,\n  `m.groups[3].trim()`. After: `m.named(\"kind\") ?? \"\"`, `m.named(\"name\") ?? \"\"`, …\n- Saving: 0 lines; removes index bookkeeping (readability only).\n\n## B8 — `files.is_executable(path)`\n- Spelling: `files.is_executable(path: String | Path) -[FS]> Bool` in `core.files`.\n- Semantics: true when `path` names a regular file the current process may execute; `false` for\n  a failed probe, like `is_file`.\n- Before (WebBundleCheck.jet:39): `if (process.cmd([\"test\", \"-x\", \"{root}/{JET_ENV}\"]).run() ?? fail(...)).code != 0 -> fail(...)`\n  After: `if !files.is_executable(\"{root}/{JET_ENV}\") -> fail(...)`.\n- Saving: 0 lines, −8 tokens, and no `Exec` authority for the probe.\n\n## B9 — `Path.script_dir()`\n- Spelling: `Path.script_dir() -> Path` (static on the prelude `Path`).\n- Semantics: the directory of the entry source file of the running program (the file `jet run`\n  was given), canonicalized; for a built binary, the directory recorded at build time.\n- Today every ported tool assumes cwd = repository root; the originals computed it from\n  `import.meta.url` / `BASH_SOURCE`.\n- Before: `root: files.cwd()` (wrong when run from elsewhere).\n  After: `root: Path.script_dir().join(\"../..\")`.\n- Saving: 0 lines; fixes a behavior difference from the originals.\n- Trade-off: one more ambient read of the entry path; must be defined for `jet build` output.\n\n## B10 — Lint: constant `re.compile(\"…\")` should be a `Regex{…}` literal\n- Spelling: new lint code (next free L-code) \"this pattern is a constant; write `Regex{…}`\",\n  with an auto-fix that rewrites the call and un-escapes backslashes.\n- Semantics: fires on `re.compile(<string literal>)` / `compile_with(<literal>, flags)` with no\n  interpolation; the literal is compile-checked and needs no `?? panic`.\n- Evidence: the four ports re-implemented 873 lines of scanners (PortReview) and no port used a\n  `Regex{}` literal; rewrites with literals were 0.7–1.1× the originals.\n- Saving: per site, −1 `?? panic(...)` and doubled backslashes.\n\n\nEvidence: idiomatic rewrites and measurements in $JET_STATE_ROOT/scratch/ScriptErgonomics/ (count.sh, idiomatic/, gaps.md). Additional owner-gated items from the port review not yet drafted here: merging a child process stderr into stdout or redirecting it to a file (ProcessSpec), and process.exit requiring the Exec effect.",
+      "body": "# Script ergonomics ballots (final; for Main to file on Tower)\n\nOne entry per proposed new API or syntax. Each names the exact spelling, the semantics, a\nbefore/after taken from the four idiomatic tool rewrites\n(`$JET_STATE_ROOT/scratch/ScriptErgonomics/idiomatic/{TestShards,WebBundleCheck,LexerKeywordRows,Lifecycle}.jet`),\nand the saving counted with `count.sh` (program lines / whitespace tokens: no blanks, comments,\n`#Test` blocks or `package {}`). A saving marked [INFERENCE] is read off the before/after text,\nnot measured on a rewritten file.\nNot ballots (bug fixes, no new surface). Landed: `pad_start`/`pad_end` link, `remove_prefix`/`remove_suffix`\nmethods (efbc29643), web baseline (17537755c). Patch ready, not landed (see lane report): the prelude\nrows below and the collecting-loop propagation fix.\n- readable prelude names `eprint`, `read_file`, `write_file`, `file_exists`, `keep`, `Clock`,\n  `Instant`, `Date`, `Duration` resolve without `use` (Spec.md:305-317, D-CORE-PRELUDE1/2);\n  `Date.today()` reaches `LocalDate` statics; `files.read`/`read_file` take `String | Path`\n  like `write`; `.or_err(...)`/`keep(...)` no longer ICE (core.prelude loads);\n- integer selectors of every width (`{i64:Hex(8)}`) and `Pad`/`PadLeft` of any displayable value\n  (`{n:PadLeft(2, \"0\")}`), as codegen already lowered them;\n- `\"x\".pad_start(n, f)` / `pad_end` link (they share the `rjust`/`ljust` runtime routes);\n- `s.remove_prefix(p)` / `s.remove_suffix(p)` are methods (String.jet already had the bodies);\n- `Int.parse` (any fallible call) inside a collecting loop propagates like the statement form\n  (former draft B9).\n\n---\n\n## B1 — List concatenation with `+`\n- Spelling: `a + b` where `a: [T]`, `b: [T]` → new `[T]`; operands unchanged (read, not moved).\n- Semantics: eager copy of `a` then `b`. `View<T>` operands are E0108 (write `.copy()`); maps and\n  sets keep their own operators (none). No new token: `+` widens its operand set, which is\n  language surface, so it needs ratification.\n- Beginner path: `all: header + rows`. Expert path: `xs.extend(ys)` (in place, no copy).\n- Alternatives: (a) `xs.concat(ys)` method only; (b) status quo\n  `out := xs.copy(); loop y in ys -> out.push(y)`.\n- Before (Lifecycle.jet:62): `text: \"{HEADER.join(\"\\n\")}\\n{(loop row in rows -> \"{row}\\n\").join(\"\")}\"`\n  After: `text: \"{(HEADER + rows).join(\"\\n\")}\\n\"`.\n- Before (LexerKeywordRows, 2 sites): `values := m.get(k) ?? [String]{}` / `values.push(v)` /\n  `m[k] = values` — After: `m[k] = (m.get(k) ?? [String]{}) + [v]`.\n- Saving: −4 lines in LexerKeywordRows, −0 lines/−9 tokens in Lifecycle [INFERENCE].\n- Trade-off: `+` hides an O(n) copy; the L0501 copy-in-loop lint covers the hot case.\n\n## B2 — Compound update of a list slot (`xs[i] += n`)\n- Spelling: `xs[i] op= v` for `xs: [T]` (mutable binding), `i: Int`, every compound operator that\n  exists for `T`.\n- Semantics: one bounds check, then read-modify-write of the slot; an out-of-range index stops\n  before any write, so no partial update exists. Maps keep E0164 (a missing key has no value\n  to update); maps get no sugar in this ballot.\n- Today: E0164 \"Compound assignment can't target an indexed slot\".\n- Before (TestShards.jet:44): `loads[lightest] = loads[lightest] + row.weight`\n  After: `loads[lightest] += row.weight`.\n- Saving: 0 lines, −2 tokens per site.\n- Alternative: keep E0164 (explicit total update).\n\n## B3 — `String.find` / `rfind` return a character index as `Int?`\n- Spelling (changed signature, same names): `s.find(needle) -> Int?`, `s.rfind(needle) -> Int?`.\n- Semantics: the character (Unicode scalar) index of the first/last match, `None` when absent, so\n  it composes with `slice`, `len` and `regex.Match.start/end`, which already count characters.\n  Byte search stays available as `s.bytes().index_of_seq(n.bytes())`.\n- Today: `find` returns a UTF-8 byte offset (Core/Text/String.jet:83) and `-1` when absent;\n  `\"héllo // c\".slice(0, \"héllo // c\".find(\"//\"))` prints `héllo /` (probe r1.jet).\n- Before (LexerKeywordRows literal port): `at: line.find(\"//\")` +\n  `code: if at < 0 -> line else -> byte_slice(line, 0, at)` plus a `byte_slice` helper.\n  After: `code: line.slice(0, line.find(\"//\") ?? line.len())`.\n- Saving: the byte-helper family in every text port (PortReview counted 103 lines across ports;\n  −1 line per site [INFERENCE]).\n- Changes a ratified API: one cutover migrating every caller.\n- Alternatives: (a) keep bytes, add `slice_bytes(a, b)`; (b) only document `split_once`.\n\n## B4 — Ambient `write(text)` (stdout without a newline)\n- Spelling: `write(text: String)` in the readable prelude, beside `print`/`eprint`.\n- Semantics: writes `text` to stdout unchanged (no newline), same `IO` effect and flush rules\n  as `print`; `#NoPrelude` hides it like `print`.\n- Today: `print` always appends `\\n`; raw text needs `out := term.stdout()` +\n  `out.write(text).drop(\"...\")`; `term.stdout().write(t)` is E0111 (a plain call cannot change a temporary).\n- Before (Lifecycle.jet:64-66): `else if args[0] == \"--print\" {` / `out := term.stdout()` /\n  `out.write(text).drop(\"lifecycle text\")` / `}` — After: `else if args[0] == \"--print\" -> write(text)`.\n- Saving: −3 lines in Lifecycle, and its `use core.term` line once B4 lands (−1).\n- Alternatives: `print(text, end: \"\")` (labelled argument on an existing builtin); allow `&` on a\n  temporary handle for one call.\n\n## B5 — Script entry without `fn run()` (top-level statements)\n- Spelling: a loose file (or `#!` script) with no `fn run` may contain statements at top level.\n- Semantics: those statements, in order, are the body of an implicit fallible `fn run()`;\n  `fn`, `struct`, constants and `use` stay items; a file that has `fn run` and top-level\n  statements is an error. Authority and package rules are unchanged.\n- Today: \"Ordinary files execute only their explicit `fn run` body\" (Examples/features/script_mode).\n- Before: `fn run() {` … `}` (2 lines + one indent level). After: the body alone.\n- Saving: −2 lines per script (TestShards, WebBundleCheck, Lifecycle, LexerKeywordRows: −8).\n- Trade-off: two entry shapes (I8), mitigated because the implicit form desugars to exactly\n  `fn run()`. Coordinate with lane ScriptMode (`#!`, `-A`).\n\n## B6 — `fail(message, code)` for expected failures\n- Spelling: `fail(message: String, code: Int{1}) -> Never` in the readable prelude.\n- Semantics: writes `message` and a newline to stderr, runs scope guards, exits with `code`.\n  Unlike `panic` (program bugs, E3001 frame) it prints no frame.\n- Before (all four rewrites): `fn fail(message: String) -> Never {` / `term.eprint(message)` /\n  `process.exit(1)` / `}` (TestShards names it `usage` with code 64).\n- After: `fail(\"...\")` / `fail(\"...\", 64)` at the call sites; no helper.\n- Saving: −4 lines per script (−16 over the four), and `use core.process` where only `exit`\n  used it.\n- Alternative: `#Error struct` + `return Err(...)` from `run()` (exists; prints a framed report).\n\n## B7 — Named regex groups on `Match`\n- Spelling: `m.named(name: String) -> String?` on `core.regex.Match`.\n- Semantics: the text of the named group `(?<name>…)` in this match; `None` when the group did\n  not participate or the name is not in the pattern (the pattern is known: a `Regex{…}` literal\n  makes an unknown name a compile error).\n- Today: groups are positional (`m.groups[2]`); named groups parse but have no accessor on the\n  source engine path.\n- Before (Lifecycle.jet:45-49): `kind: m.groups[0]`, `name: m.groups[2]`,\n  `m.groups[3].trim()`. After: `m.named(\"kind\") ?? \"\"`, `m.named(\"name\") ?? \"\"`, …\n- Saving: 0 lines; removes index bookkeeping (readability only).\n\n## B8 — `files.is_executable(path)`\n- Spelling: `files.is_executable(path: String | Path) -[FS]> Bool` in `core.files`.\n- Semantics: true when `path` names a regular file the current process may execute; `false` for\n  a failed probe, like `is_file`.\n- Before (WebBundleCheck.jet:39): `if (process.cmd([\"test\", \"-x\", \"{root}/{JET_ENV}\"]).run() ?? fail(...)).code != 0 -> fail(...)`\n  After: `if !files.is_executable(\"{root}/{JET_ENV}\") -> fail(...)`.\n- Saving: 0 lines, −8 tokens, and no `Exec` authority for the probe.\n\n## B9 — `Path.script_dir()`\n- Spelling: `Path.script_dir() -> Path` (static on the prelude `Path`).\n- Semantics: the directory of the entry source file of the running program (the file `jet run`\n  was given), canonicalized; for a built binary, the directory recorded at build time.\n- Today every ported tool assumes cwd = repository root; the originals computed it from\n  `import.meta.url` / `BASH_SOURCE`.\n- Before: `root: files.cwd()` (wrong when run from elsewhere).\n  After: `root: Path.script_dir().join(\"../..\")`.\n- Saving: 0 lines; fixes a behavior difference from the originals.\n- Trade-off: one more ambient read of the entry path; must be defined for `jet build` output.\n\n## B10 — Lint: constant `re.compile(\"…\")` should be a `Regex{…}` literal\n- Spelling: new lint code (next free L-code) \"this pattern is a constant; write `Regex{…}`\",\n  with an auto-fix that rewrites the call and un-escapes backslashes.\n- Semantics: fires on `re.compile(<string literal>)` / `compile_with(<literal>, flags)` with no\n  interpolation; the literal is compile-checked and needs no `?? panic`.\n- Evidence: the four ports re-implemented 873 lines of scanners (PortReview) and no port used a\n  `Regex{}` literal; rewrites with literals were 0.7–1.1× the originals.\n- Saving: per site, −1 `?? panic(...)` and doubled backslashes.\n\n\nEvidence: idiomatic rewrites and measurements in $JET_STATE_ROOT/scratch/ScriptErgonomics/ (count.sh, idiomatic/, gaps.md). Additional owner-gated items from the port review not yet drafted here: merging a child process stderr into stdout or redirecting it to a file (ProcessSpec), and process.exit requiring the Exec effect.",
       "kind": "task",
       "track": "sidequest",
       "epoch": "e17",
@@ -62236,6 +62236,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Main: E0202 retired in 8fe1586eaa (#6586 c8); a write through a temporary handle is now E0111. CardCleanup Q(a)."
+        },
         {
           "at": "2026-11-06",
           "by": "Main",
@@ -62320,7 +62325,7 @@
       "parentId": "c0svnelx",
       "needsAcceptance": false,
       "created": "2026-10-21T11:49:42.286Z",
-      "updated": "2026-11-06T18:35:50.784Z",
+      "updated": "2026-11-06T19:29:20.820Z",
       "updatedBy": "Main",
       "goals": []
     },
@@ -71084,20 +71089,20 @@
         {
           "n": 5,
           "text": "(was #2341 c4) Each law records its precondition, generated partitions, observable sink, shrink rule, surface set, seed, and relation; rejected inputs do not inflate valid-case counts [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:50:08.849Z"
+          "evidence": "a73b97035e (+43ab1dae55, 8db9c87aff). Main focused proof at 529e9d9ddd, s1 bd1b1baa: cases testing_tiers/property_pre_rejects_cases_and_records_its_law, generated_grade_shrinks_a_planted_reverse_bug, property_tests_generate_shrink_and_replay: 3/3 PASS.",
+          "at": "2026-11-06T19:32:42.204Z"
         },
         {
           "n": 6,
           "text": "(was #2341 c6) The layer adds no new runner, membership ledger, uncontrolled randomness, hidden skip, or separate result format [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:50:10.126Z"
+          "evidence": "Code at 8fe1586eaa, checked by Main. One runner: JetIR BuildTests.jet:459 chooses jet_rt_test_property or jet_rt_test_unit within the single #Test lowering and test.unit slot; TestHarness.jet:115-117 routes faults for both. One ledger and format: TestProperty.jet:422 builds the outcome with the shared test_outcome_new (Test.jet:36-51); the property fills only the fifth wire field; NativeTests.jet:522-524 reads the same wire; the same EvidenceRecord with law attachments (TestOutcome.jet:151-173). Seeded randomness: property_seed (TestProperty.jet:278-291) records the seed on every record, and replay uses JET_PROP_SEED. No hidden skip: TestProperty.jet:371-396 uses the body's own skip flag, rejection exhaustion is a reported error, and rejected cases are not counted. Behaviour rows are the 3 testing_tiers property cases that passed for c5.",
+          "at": "2026-11-06T19:35:29.905Z"
         }
       ],
       "refs": [
@@ -71117,7 +71122,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:57:26.439Z",
-      "updated": "2026-11-06T18:42:20.502Z",
+      "updated": "2026-11-06T19:35:29.905Z",
       "updatedBy": "Main",
       "goals": [
         "G1"
@@ -91163,6 +91168,11 @@
         {
           "at": "2026-11-06",
           "by": "Main",
+          "text": "Owner 2026-11-06 approved: c2 drops the decision ID from `jet explain` output, per AGENTS.md I7."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
           "text": "Deconfliction 2026-11-06: reworded to match D-DECL-COLON1=A (`name: value`, no `::`)."
         },
         {
@@ -91188,7 +91198,7 @@
         },
         {
           "n": 2,
-          "text": "(was #2045 c1) jet explain @ / : / #Live / => (every registered user-typeable glyph, sigil, keyword, marker) returns name, meaning, decision ID, and a one-line example from the syntax registry (`Compiler/JetFoundation/Data/Syntax`) [precut audit: not proven on 9c7ddf1359: C:explain_syntax/explain_syntax_verbose_names_registry_constant_and_decision has no expected output, so the golden runner cannot judge it (#6538)]",
+          "text": "(was #2045 c1) jet explain @ / : / #Live / => (every registered user-typeable glyph, sigil, keyword, marker) returns name, meaning, a docs link and a one-line example from the syntax registry, with no decision ID (I7: decision IDs live in Tower and specs, never in source or registries) (`Compiler/JetFoundation/Data/Syntax`) [precut audit: not proven on 9c7ddf1359: C:explain_syntax/explain_syntax_verbose_names_registry_constant_and_decision has no expected output, so the golden runner cannot judge it (#6538)]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -91229,7 +91239,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-01T09:11:08.072Z",
-      "updated": "2026-11-06T18:37:13.335Z",
+      "updated": "2026-11-06T19:31:33.925Z",
       "updatedBy": "Main"
     },
     {
@@ -94443,7 +94453,26 @@
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "jet check Compiler/JetDevserver with the admitted jet reports 0 problems (1057 across 39 files at 88586c4419), with no #Unsafe block or known-failing row added to reach it.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T19:34:31.274Z"
+        },
+        {
+          "n": 2,
+          "text": "Every jet dev case row (tests/cases/web_dev and tests/cases/devserver*) passes on the default tier with no known-failing row added; the jet dev golden examples pass on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T19:34:32.158Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "goals": [
@@ -94452,7 +94481,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-05T22:56:23.334Z",
-      "updated": "2026-11-05T22:56:23.334Z",
+      "updated": "2026-11-06T19:34:32.158Z",
       "updatedBy": "Main"
     },
     {
@@ -94692,20 +94721,20 @@
         {
           "n": 5,
           "text": "Every name :: value binding in the repo (.jet sources, Prelude, Core, Jetpack, Examples, tests and fixtures, generators and generated files, compiler string templates, diagnostics text, syntax registry, editor grammars, spec and site docs) is written name: value; Docs/audits and dated research/proposals keep their historical text",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-06T02:14:12.542Z"
+          "evidence": "5ef77a52ad (+529e9d9ddd). Main proof on the 529e9d9ddd tree: no line binds with name :: value in any .jet file outside Docs/audits, Docs/research and Docs/proposals, and none in Docs/spec, Tools/editors or the READMEs; the dated audits keep their text.",
+          "at": "2026-11-06T19:34:01.967Z"
         },
         {
           "n": 6,
           "text": "The parser no longer accepts a :: binding, a ^ mark, or a call-site & or ^ mark outside #Policy(writes: .Explicit). Per the owner's order these retired spellings get no registered diagnostic, snapshot or jet fix rule (the E0397 and E0435 teaching is removed); the in-repo conversion is the whole cutover.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-06T02:14:13.333Z"
+          "evidence": "5ef77a52ad deletes E0203/E0224/E0226/E0397/E0434/E0435. Main probes with s1 jet@0.0.1#bd1b1baa… at 529e9d9ddd: 'x :: 1', 'keep(^xs)' and 'grow(&xs)' each fail as a plain parse error (jet.InvalidStatement, no teaching text, rc=1); the same program with plain calls, a &&-typed parameter and xs.move() runs and prints 3 (rc=0).",
+          "at": "2026-11-06T19:34:03.071Z"
         },
         {
           "n": 7,
@@ -94761,7 +94790,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T02:04:25.306Z",
-      "updated": "2026-11-06T18:15:19.009Z",
+      "updated": "2026-11-06T19:34:03.071Z",
       "updatedBy": "Main"
     },
     {
@@ -95709,7 +95738,7 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -95722,11 +95751,11 @@
         {
           "n": 1,
           "text": "Docs/spec/safety.md's ratchet matches UnsafeRatchet output at HEAD; every new row has an audited reason; a lane-check-level gate fails on drift, proven with a planted unrecorded #Unsafe block",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-06T09:04:37.491Z"
+          "evidence": "1574669b9f (UnsafeRatchet --check; LaneCheck runs it). Main focused proof at 529e9d9ddd with s1 jet@0.0.1#bd1b1baa…: --check rc=0 '1336 regions; baseline unchanged', CoreLib raw operations all gated, every safe abstraction has a recorded proof; a planted unrecorded #Unsafe block in Tools/ makes --check exit 1 'unsafe-region baseline grew: Tools 7 -> 8'.",
+          "at": "2026-11-06T19:32:41.277Z"
         }
       ],
       "refs": [],
@@ -95737,8 +95766,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T09:04:33.444Z",
-      "updated": "2026-11-06T09:04:37.491Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-06T19:32:48.363Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-06T19:32:48.363Z"
     },
     {
       "id": "c015yc5v",
@@ -183574,6 +183604,90 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-06T19:35:29.905Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0jfu2us",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-06T19:34:32.158Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0t9jcat",
+      "note": "#2 Every jet dev case row (tests/cases/web_dev and tests/cases/"
+    },
+    {
+      "at": "2026-11-06T19:34:31.274Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0t9jcat",
+      "note": "#1 jet check Compiler/JetDevserver with the admitted jet report"
+    },
+    {
+      "at": "2026-11-06T19:34:03.071Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ofw8u4",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-06T19:34:01.967Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ofw8u4",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-06T19:32:48.363Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c04yboap",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-06T19:32:42.204Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0jfu2us",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-06T19:32:41.278Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c04yboap",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-06T19:31:33.925Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0zn6gbs",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T19:31:33.087Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0zn6gbs",
+      "note": "criteria"
+    },
+    {
+      "at": "2026-11-06T19:29:20.820Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c00ys8fj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T19:29:19.536Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c00ys8fj",
+      "note": "body"
+    },
     {
       "at": "2026-11-06T19:23:08.815Z",
       "by": "Main",
