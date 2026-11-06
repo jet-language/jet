@@ -191,7 +191,7 @@ fn provider_record(fields: [String]) -> String Never! {
 }
 
 // The fields of a provider record, or None when it is malformed.
-fn __provider_fields(record: String) -> [String]? Never! {
+fn provider_record_fields(record: String) -> [String]? Never! {
     raw :: record.bytes()
     fields := [String]{}
     at := 0
@@ -238,7 +238,7 @@ fn file_dialog(request: UIFileDialogRequest, kind: UIFileDialogKind) -> UIFileDi
     token :: core.ui.host.__dialog_request(if opening -> 0 else -> 1, provider_record(wire))
     if token < 0 -> return Err(UIHostError.HostFailure{service: "FileDialog", message: "the provider refused the dialog request"})
     answer :: core.ui.host.__dialog_result(token) ?? return Err(UIHostError.HostFailure{service: "FileDialog", message: "the provider returned no dialog result"})
-    items :: __provider_fields(answer) ?? return Err(UIHostError.HostFailure{service: "FileDialog", message: "the provider's dialog result is not a provider record"})
+    items :: provider_record_fields(answer) ?? return Err(UIHostError.HostFailure{service: "FileDialog", message: "the provider's dialog result is not a provider record"})
     if items.len() == 0 -> return Err(UIHostError.HostFailure{service: "FileDialog", message: "the provider's dialog result has no status"})
     if items[0] == "cancelled" -> return Err(UIHostError.Cancelled(.User))
     if items[0] != "selected" -> return Err(UIHostError.HostFailure{service: "FileDialog", message: "the provider returned an unknown dialog status `{items[0]}`"})

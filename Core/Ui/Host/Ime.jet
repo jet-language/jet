@@ -35,7 +35,7 @@ fn poll() -[IO]> UIIMEEvent? UIHostError! {
     if !core.ui.host.__capability(2) -> return Err(UIHostError.CapabilityUnavailable{capability: "IME"})
     raw :: core.ui.host.__event_pop(0) ?? return Ok(None)
     if raw.len() == 0 -> return Err(UIHostError.QueueFull{service: "IME"})
-    fields :: core.ui.host.__provider_fields(raw) ?? return Err(ime_failure("an IME event is not a provider record"))
+    fields :: core.ui.host.provider_record_fields(raw) ?? return Err(ime_failure("an IME event is not a provider record"))
     if fields.len() != 7 -> return Err(ime_failure("an IME event has 7 fields, not {fields.len()}"))
     text :: fields[2].copy()
     phase :: ime_phase(fields[1], text.len() == 0)

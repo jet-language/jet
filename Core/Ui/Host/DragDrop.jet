@@ -43,7 +43,7 @@ fn poll() -[IO]> UIDragEvent? UIHostError! {
     if !core.ui.host.__capability(3) -> return Err(UIHostError.CapabilityUnavailable{capability: "DragDrop"})
     raw :: core.ui.host.__event_pop(1) ?? return Ok(None)
     if raw.len() == 0 -> return Err(UIHostError.QueueFull{service: "DragDrop"})
-    fields :: core.ui.host.__provider_fields(raw) ?? return Err(drag_failure("a drag/drop event is not a provider record"))
+    fields :: core.ui.host.provider_record_fields(raw) ?? return Err(drag_failure("a drag/drop event is not a provider record"))
     if fields.len() != 5 -> return Err(drag_failure("a drag/drop event has 5 fields, not {fields.len()}"))
     phase :: drag_phase(fields[1])
     operation :: drag_operation(fields[2])
