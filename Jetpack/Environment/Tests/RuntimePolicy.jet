@@ -5,6 +5,16 @@
 // waiter_and_new_opener_never_split_lock_inode) and the Rust backend
 // source-text checks are not ported; see the EnvRuntimePort report.
 
+use {
+    jetpack_foundation.[
+        JETPACK_VERBS, RUNTIME_LOCK_DIR, RUNTIME_LOCK_OWNER_FILE, SOURCE_ROOT_DIR, env_acquire_lock, env_acquire_lock_waiting,
+        env_lock_path_for_scope, env_lock_state, env_try_acquire_lock,
+    ]
+    files :: core.files
+    sys :: core.sys
+    time :: core.time
+}
+
 fn env_rt_test_scratch(label: String) -[FS]> String {
     files.tmpdir("jpk-runtime-policy-{label}-") ?? panic("claim runtime policy scratch")
 }

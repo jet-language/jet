@@ -2,8 +2,10 @@
 // jetpack Components.rs. `jetpack add <Component>` copies a real, editable
 // `.jet` source file into the project's `components/` directory instead of
 // installing an opaque package (the shadcn/ui model). Each starter's canonical
-// source is an ordinary, independently runnable Jet file embedded here at
-// compile time. This is a small fixed catalog, not a package registry.
+// source is an ordinary Jet file embedded here at compile time. The copies
+// share their project package's one namespace, so starters declare no `run`
+// and keep their views as methods. This is a small fixed catalog, not a
+// package registry.
 
 use files :: core.files
 
@@ -18,10 +20,10 @@ struct StarterComponent {
 }
 
 // workaround #5940(g): module-level constants, not inline `comptime {}` values.
-ENV_STARTER_BUTTON :: comptime { embed_file("../../Components/Button.jet") }
-ENV_STARTER_LABEL :: comptime { embed_file("../../Components/Label.jet") }
-ENV_STARTER_INPUT :: comptime { embed_file("../../Components/Input.jet") }
-ENV_STARTER_CONTAINER :: comptime { embed_file("../../Components/Container.jet") }
+ENV_STARTER_BUTTON :: comptime { embed_file("Starters/Button.jet") }
+ENV_STARTER_LABEL :: comptime { embed_file("Starters/Label.jet") }
+ENV_STARTER_INPUT :: comptime { embed_file("Starters/Input.jet") }
+ENV_STARTER_CONTAINER :: comptime { embed_file("Starters/Container.jet") }
 
 fn env_starter_components() -> [StarterComponent] Never! {
     [StarterComponent]{

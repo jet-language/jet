@@ -1,6 +1,14 @@
 // jetpack WorkspaceLock.rs unit tests: the write path and its round trip
 // through PackageModel's `pkg_workspace_lock_load`.
 
+use {
+    jetpack_foundation.[CONFIG_DEFAULT_DIR, PACKAGE_FILE, SOURCE_ROOT_DIR, UNIFIED_LOCK_FILE, WORKSPACE_FILE]
+    jet_env_model.[envmodel_workspace_load]
+    jet_foundation.[policy_key_name]
+    jet_pkg_model.[pkg_lock_parse, pkg_parse_workspace_policy, pkg_sha256_hex, pkg_workspace_lock_load]
+    files :: core.files
+}
+
 fn env_wlock_test_dir(label: String) -[FS]> String {
     files.tmpdir("wlock-{label}-") ?? panic("workspace lock scratch")
 }

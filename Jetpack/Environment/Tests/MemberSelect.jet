@@ -1,9 +1,19 @@
 // jetpack MemberSelect.rs unit tests. The Rust snapshot check renders the
-// diagnostic through jet_foundation::Diagnostics; here the pinned fixture's
+// diagnostic through jet_foundation::Diagnostics; here the pinned snapshot's
 // Error/Why/Fix lines are compared field by field.
 
-MEMBER_SELECT_E1231_SNAPSHOT :: comptime { embed_file("../../../tests/fixtures/jetpack-diagnostics/E1231.stderr") }
-MEMBER_SELECT_E1295_SNAPSHOT :: comptime { embed_file("../../../tests/fixtures/jetpack-diagnostics/E1295.stderr") }
+use {
+    jetpack_foundation.[PACKAGE_FILE]
+    jet_foundation.[diagnostic_display_name]
+    files :: core.files
+    process :: core.process
+}
+
+// The text of tests/fixtures/jetpack-diagnostics/E1231.stderr and
+// E1295.stderr. It is written here because an embed may not leave this
+// package (E0957).
+MEMBER_SELECT_E1231_SNAPSHOT :: "Error [jet.UnknownWorkspaceMember]: `biling` is not a workspace member\n Why: A `-p` selector must name a member listed in the workspace index (`workspace.jet` `members:`).\n Fix: Did you mean: billing?\nMore: jet-lang.dev/e/E1231\n"
+MEMBER_SELECT_E1295_SNAPSHOT :: "Error [jet.UnknownGitRef]: Git ref `orgin/main` not found\n Why: `--affected-since` needs a resolvable git ref so Jet can diff member input hashes against that baseline (no commit matches that ref).\n Fix: Did you mean: main?\nMore: jet-lang.dev/e/E1295\n"
 
 fn env_select_test_snapshot(snapshot: String, diagnostic: Diagnostic) {
     expected :: "Error [{diagnostic_display_name(diagnostic.code)}]: {diagnostic.what}\n Why: {diagnostic.why}\n Fix: {diagnostic.fix}\n"
