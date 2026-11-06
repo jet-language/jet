@@ -2234,6 +2234,12 @@ a runtime directive. Collection excludes these files while preserving their
 names and imports for the real parent fixtures. An absent expected-output file
 never causes exclusion: unmarked UI fixtures remain discovered and require an
 owner-reviewed snapshot.
+A UI fixture's `// @requires REQUIREMENT` lines take the host requirements of
+a case's `requires:` (`tool:cargo`, `os:linux`, `env:NAME=VALUE`, ...). On a
+host that lacks one the fixture reports SKIP-HOST and does not run, whatever
+its known-failing row. The lines in a `.fixed.jet` companion gate only the
+companion's rows. Every fixture that builds a Rust bridge declares
+`// @requires tool:cargo`; the missing-Cargo fixture never does.
 The runner stages the complete `tests/ui` and `tests/ui_lint` trees once per run
 in external scratch, where each project case compiles rooted at its own
 directory. A loose case's source root is its whole directory, and the compiler

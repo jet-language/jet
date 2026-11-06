@@ -179,6 +179,43 @@ kit_ui_test_run: fn(code: Int, stderr: String) -> KitRun {
     files.remove_all(root) ?? panic("remove UI fixed-ledger scratch: {err}")
 }
 
+#Test("a UI fixture's `@requires` lines gate it and its fixed companion as SKIP-HOST, even under a ledger row") {
+    root: kit_ui_test_scratch("requires")
+    missing: "tool:jet-ui-test-absent-tool"
+    met: "env:JET_UI_TEST_UNSET_VARIABLE="
+    assert_eq(kit_ui_requirements("// @requires {met}\nrun: fn() {{}}\n//\t@requires\t{missing}\n// @requires_not\n"), [met, missing])
+    assert_eq(kit_ui_invocation("// @requires {missing}\n", "a.jet", false).refused, "")
+    kit_exec_write(files.join(root, "tests/ui/needs_tool.jet"), "run: fn() {{}}\n// @requires {missing}\n")
+    kit_exec_write(files.join(root, "tests/ui/needs_tool.stderr"), "Error [jet.UnknownName]: never compared\n")
+    // The CLI double passes only `clean` entries; `needs_tool` would fail if it ran.
+    kit_exec_write(files.join(root, "tests/ui/clean_companion.jet"), "run: fn() {{}}\n")
+    kit_exec_write(files.join(root, "tests/ui/clean_companion.fixed.jet"), "// @requires {met}\n// @requires {missing}\nrun: fn() {{}}\n")
+    kit_exec_write(files.join(root, "tests/ui/clean_companion.stderr"), "(no errors)\n")
+    kit_exec_write(files.join(root, "tests/ui/clean_met.jet"), "run: fn() {{}}\n// @requires {met}\n")
+    kit_exec_write(files.join(root, "tests/ui/clean_met.stderr"), "(no errors)\n")
+    kit_exec_write(kit_test_ledger(root), "tests/ui/needs_tool\towner\tledger rows never claim a skipped fixture\n")
+    kit_ui_stage(root, root, true, kit_test_checkout_options(root).ui_corpora)
+    entries: kit_ui_discover(kit_ui_test_context(root, "discovery"))
+    assert_eq(entries.map(entry -> entry.path.copy()), ["tests/ui/clean_companion.jet", "tests/ui/clean_met.jet", "tests/ui/needs_tool.jet"])
+    loop (index, entry) in entries {
+        outcomes: kit_ui_run(entry, kit_ui_test_context(root, "case-{index}"))
+        statuses: outcomes.map(outcome -> outcome.verdict.status.copy())
+        if {
+            entry.path == "tests/ui/clean_companion.jet" -> {
+                assert_eq(statuses, ["PASS", "SKIP-HOST"])
+                assert_eq(outcomes[1].tier, "fixed-check")
+                assert_eq(outcomes[1].verdict.detail, missing)
+            }
+            entry.path == "tests/ui/clean_met.jet" -> assert_eq(statuses, ["PASS"])
+            else -> {
+                assert_eq(statuses, ["SKIP-HOST"])
+                assert_eq(outcomes[0].verdict.detail, missing)
+            }
+        }
+    }
+    files.remove_all(root) ?? panic("remove UI requires scratch: {err}")
+}
+
 #Test("UI staging gives a loose entry its imported modules route trees and data but no other entry") {
     root: kit_ui_test_scratch("imports")
     main: "use helper: \"./modules/helper\"\nrun: fn() {{ print(helper.value()) }}\n"

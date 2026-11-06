@@ -25,7 +25,7 @@ kit_ui_directives: fn() -> [KitUIDirective] {
         {name: "command_override_conflict", argv: ["run"], parent: true, exit: "nonzero", streams: "both", capability: ""},
         {name: "gate", argv: ["check", "--gate", "$arg", "$file"], parent: false, exit: "any", streams: "rendered", capability: ""},
         {name: "compiler_extension", argv: [], parent: false, exit: "any", streams: "", capability: ""},
-        {name: "runtime_ffi", argv: [], parent: false, exit: "any", streams: "", capability: ""}
+        {name: "requires", argv: [], parent: false, exit: "any", streams: "", capability: ""}
     }
     loop name in ["env_facet_missing", "workspace_lock_e1202", "jetlib_version_mismatch", "jetlib_effect_refused", "library_invalid_binding", "parent_control_cancel", "no-os", "build_grants", "build_locked", "jetpack_hangar_digest_mismatch", "jetpack_retired_store_verbs", "programmable_build", "target", "cost_cli"] {
         rows.push(KitUIDirective{name: name, argv: [], parent: false, exit: "any", streams: "", capability: "missing CLI fixture API: {name}"})
@@ -55,6 +55,28 @@ kit_ui_arg: fn(source: String, name: String) -> String? {
         }
     }
     if present -> Val(found) else -> None
+}
+
+// Every `// @requires REQUIREMENT` line, in order. A requirement is spelled as
+// in a case's `requires:` (`tool:cargo`, `os:linux`, `env:NAME=VALUE`, ...).
+kit_ui_requirements: fn(source: String) -> [String] {
+    found := [String]{}
+    loop raw in source.split("\n") {
+        line: raw.trim().copy()
+        if !line.starts_with("//") -> next
+        directive: kit_steps_byte_slice(line, 2, line.count_bytes()).trim().copy()
+        if directive.starts_with("@requires ") || directive.starts_with("@requires\t") || directive == "@requires" -> found.push(kit_steps_byte_slice(directive, 9, directive.count_bytes()).trim())
+    }
+    found
+}
+
+// The verdict of the first requirement this host lacks (SKIP-HOST, or REFUSED
+// for an unknown requirement); None when the host has every one.
+kit_ui_host: fn(source: String, ctx: KitCtx) -> KitVerdict? {
+    loop requirement in kit_ui_requirements(source) {
+        if kit_exec_requires(requirement, ctx.env, ctx.root, ctx.scratch) == .Val(verdict) -> return Val(verdict)
+    }
+    None
 }
 
 kit_ui_invocation: fn(source: String, file: String, lint: Bool) -> KitUICall {
@@ -215,6 +237,8 @@ kit_ui_fixed: fn(entry: KitEntry, ctx: KitCtx, source: String, overlay: [KitEnvV
     outcomes := [KitOutcome]{}
     fixed: kit_ui_fixed_path(entry.path)
     if !files.exists(files.join(ctx.root, fixed)) -> return outcomes
+    fixed_source: files.read(files.join(ctx.root, fixed)) ?? return [KitOutcome{verdict: kit_expect_verdict("ERROR", "read fixed companion: {err}"), run: kit_exec_failed("read fixed companion"), tier: "fixed-check"}]
+    if kit_ui_host(fixed_source, ctx) == .Val(skip) -> return [KitOutcome{verdict: skip, run: kit_exec_failed(skip.detail), tier: "fixed-check"}]
     fixed_env := ctx.env.copy()
     fixed_env.trace_case = fixed
     checked: kit_exec_invoke_with_env(fixed_env, [fixed_env.jet, "check", fixed], source, ctx.scratch, "", overlay)
@@ -336,6 +360,7 @@ kit_ui_outcomes: fn(entry: KitEntry, ctx: KitCtx) -> [KitOutcome] {
     lint: entry.mode.starts_with("lint")
     call: kit_ui_invocation(text, entry.path, lint)
     if call.refused != "" -> return [KitOutcome{verdict: kit_expect_verdict("REFUSED", call.refused), run: kit_exec_failed(call.refused), tier: "-"}]
+    if kit_ui_host(text, ctx) == .Val(skip) -> return [KitOutcome{verdict: skip, run: kit_exec_failed(skip.detail), tier: "-"}]
     source: if {
         call.unlocked_toolchain -> files.join(ctx.scratch, "unlocked-toolchain")
         entry.mode == "plain" || entry.mode == "lint" -> kit_ui_stage_entry(entry, ctx)
