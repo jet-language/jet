@@ -1,310 +1,496 @@
+// Canvas request validation and the small JSON readers Canvas uses on its own
+// request bodies and graph JSON. Every failure is a ready jet.canvas error body.
 use {
-    jet_driver.Diagnostics.[json_str]
+    jet_foundation.[foundation_json_quote]
     jet_semindex.[SourceSpan]
-    jet_devserver.Canvas.GraphHelpers.[edit_error, project_edit_error, query_error]
-    jet_devserver.Canvas.GraphJson.[canvas_collapse_hints, canvas_comment_hints, CommentHint]
-    std.fmt.[format]
-    std.iter.[once]
 }
 
-validate_ident: fn(name: String) Err! {
-    chars := name.chars()
-    first: chars.next() ?? return .Err(edit_error("bad_request", "empty identifier"))
-    if (!first.is_ascii_alphabetic() && first != '_') || !chars.all((c) -> c.is_ascii_alphanumeric() || c == '_') -> return .Err(edit_error("bad_request", "identifier is not a Jet name"))
-    .Ok(_)
+// A JSON string literal decoded from the front of a text, and the bytes it used.
+JsonText: struct {
+    value: String
+    consumed: Int
 }
-validate_query_ident: fn(name: String) Err! {
-    chars := name.chars()
-    first: chars.next() ?? return .Err(query_error("bad_request", "empty identifier"))
-    if (!first.is_ascii_alphabetic() && first != '_') || !chars.all((c) -> c.is_ascii_alphanumeric() || c == '_') -> return .Err(query_error("bad_request", "identifier is not a Jet name"))
-    .Ok(_)
+
+CanvasBounds: struct {
+    x: Int
+    y: Int
+    w: Int
+    h: Int
 }
-validate_ident_for_project: fn(name: String) Err! {
-    chars := name.chars()
-    first: chars.next() ?? return .Err(project_edit_error("bad_request", "empty identifier"))
-    if (!first.is_ascii_alphabetic() && first != '_') || !chars.all((c) -> c.is_ascii_alphanumeric() || c == '_') -> return .Err(project_edit_error("bad_request", "identifier is not a Jet package name"))
-    .Ok(_)
+
+json_str: fn(value: String) -> String Never! { foundation_json_quote(value) }
+
+json_strs: fn(values: [String]) -> String Never! {
+    quoted := [String]{}
+    loop value in values -> quoted.push(json_str(value))
+    quoted.join(",")
 }
-validate_qualified_name: fn(name: String) Err! {
-    loop part in name.split('.') { validate_ident(part) }
-    .Ok(_)
+
+json_optional_str: fn(value: String?) -> String Never! {
+    if value == .Val(text) -> return json_str(text)
+    "null"
 }
-validate_signature_fragment: fn(fragment: String) Err! {
-    if fragment.contains('{') || fragment.contains('}') || fragment.contains('\n') -> return .Err(edit_error("bad_request", "function parameter text must stay inside the signature"))
-    .Ok(_)
+
+span_json: fn(span: SourceSpan) -> String Never! { "{{\"start\":{span.start},\"end\":{span.end}}}" }
+
+ident_byte: fn(byte: Int, first: Bool) -> Bool Never! {
+    (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) || byte == 95 || (!first && byte >= 48 && byte <= 57)
 }
-validate_type_fragment: fn(fragment: String) Err! {
-    if fragment.trim().is_empty() || fragment.contains('{') || fragment.contains('}') || fragment.contains('\n') -> return .Err(edit_error("bad_request", "return type is not a Jet type"))
-    .Ok(_)
-}
-validate_function_signature: fn(signature: String) Err! {
-    if signature.contains('{') || signature.contains('}') || signature.contains('\n') -> return .Err(edit_error("bad_request", "function signature must not include a body"))
-    if !signature.split_whitespace().any((part) -> part == "fn" || part.starts_with("fn(") || part.starts_with("fn<")) -> return .Err(edit_error("bad_request", "function signature must include fn"))
-    .Ok(_)
-}
-validate_single_line_fragment: fn(fragment: String, label: String) Err! {
-    if fragment.trim().is_empty() || fragment.contains('\n') || fragment.contains(Char{13}) -> return .Err(edit_error("bad_request", label))
-    .Ok(_)
-}
-validate_comment_color: fn(color: String) Err! {
-    ok: color.len() == 7 && color.starts_with('#') && color[1..<color.len()].chars().all((c) -> c.is_ascii_hexdigit())
-    if ok { .Ok(_) } else { .Err(edit_error("bad_request", "Canvas comment color must be #RRGGBB")) }
-}
-validate_comment_alpha: fn(alpha: String) Err! {
-    value: alpha.parse<F32>().map_err((_) -> edit_error("bad_request", "Canvas comment alpha must be a number"))
-    if value >= 0.0 && value <= 1.0 { .Ok(_) } else { .Err(edit_error("bad_request", "Canvas comment alpha must be between 0 and 1")) }
-}
-normalize_bounds: fn(bounds: String) -> String Err! {
-    nums: bounds.trim().trim_start_matches('(').trim_end_matches(')').split(',').map((part) -> part.trim().parse<I32>()).collect<Result<[I32], _>>().map_err((_) -> edit_error("bad_request", "Canvas comment bounds must be x,y,w,h"))
-    if nums.len() != 4 || nums[2] <= 0 || nums[3] <= 0 -> return .Err(edit_error("bad_request", "Canvas comment bounds must be x,y,w,h with positive size"))
-    .Ok("{nums[0]},{nums[1]},{nums[2]},{nums[3]}")
-}
-quoted_attr: fn(value: String) -> String { json_str(value) }
-find_comment_hint: fn(src: String, graph_json: String, region_id: String) -> CommentHint? {
-    loop chunk in graph_json.split("\"region_id\":").skip(1) {
-        (id, _): parse_json_string(chunk.trim_start())
-        if id != region_id -> next
-        start: json_usize_field(chunk, "start")
-        end: json_usize_field(chunk, "end")
-        return canvas_comment_hints(src).into_iter().find((hint) -> hint.anchor.start == start && hint.anchor.end == end)
+
+is_jet_ident: fn(name: String) -> Bool Never! {
+    bytes: name.bytes()
+    if bytes.len() == 0 -> return false
+    loop i in 0..<bytes.len() {
+        if !ident_byte(Int.from_u8(bytes[i]), i == 0) -> return false
     }
-    .None
+    true
 }
-find_hint_region: fn(src: String, graph_json: String, region_id: String, kind: String) -> CommentHint? {
-    loop chunk in graph_json.split("\"region_id\":").skip(1) {
-        (id, _): parse_json_string(chunk.trim_start())
-        if id != region_id -> next
-        if json_string_field(chunk, "kind") != .Some(kind) -> next
-        start: json_usize_field(chunk, "start")
-        end: json_usize_field(chunk, "end")
-        hints: if kind is { "comment" -> canvas_comment_hints(src); "collapse" -> canvas_collapse_hints(src); _ -> return .None }
-        return hints.into_iter().find((hint) -> hint.anchor.start == start && hint.anchor.end == end)
+
+validate_ident: fn(name: String) String! {
+    if name == "" -> return Err(edit_error("bad_request", "empty identifier"))
+    if !is_jet_ident(name) -> return Err(edit_error("bad_request", "identifier is not a Jet name"))
+    Ok(())
+}
+
+validate_query_ident: fn(name: String) String! {
+    if name == "" -> return Err(query_error("bad_request", "empty identifier"))
+    if !is_jet_ident(name) -> return Err(query_error("bad_request", "identifier is not a Jet name"))
+    Ok(())
+}
+
+validate_ident_for_project: fn(name: String) String! {
+    if name == "" -> return Err(project_edit_error("bad_request", "empty identifier"))
+    if !is_jet_ident(name) -> return Err(project_edit_error("bad_request", "identifier is not a Jet package name"))
+    Ok(())
+}
+
+validate_qualified_name: fn(name: String) String! {
+    loop part in name.split(".") {
+        _: validate_ident(part) ?? return Err(err)
     }
-    .None
+    Ok(())
 }
-extract_params: fn(graph_json: String, expr: String) -> [(String, String)] {
-    out := [(String, String)]{}
+
+has_body_text: fn(fragment: String) -> Bool Never! {
+    fragment.contains("{{") || fragment.contains("}}") || fragment.contains("\n")
+}
+
+validate_signature_fragment: fn(fragment: String) String! {
+    if has_body_text(fragment) -> return Err(edit_error("bad_request", "function parameter text must stay inside the signature"))
+    Ok(())
+}
+
+validate_type_fragment: fn(fragment: String) String! {
+    if fragment.trim() == "" || has_body_text(fragment) -> return Err(edit_error("bad_request", "return type is not a Jet type"))
+    Ok(())
+}
+
+validate_function_signature: fn(signature: String) String! {
+    if has_body_text(signature) -> return Err(edit_error("bad_request", "function signature must not include a body"))
+    loop part in signature.split(" ") {
+        word: part.trim()
+        if word == "fn" || word.starts_with("fn(") || word.starts_with("fn<") || word.ends_with(":fn") || word.contains(":fn(") -> return Ok(())
+    }
+    Err(edit_error("bad_request", "function signature must include fn"))
+}
+
+validate_single_line_fragment: fn(fragment: String, label: String) String! {
+    if fragment.trim() == "" || fragment.contains("\n") || fragment.contains("\r") -> return Err(edit_error("bad_request", label))
+    Ok(())
+}
+
+validate_comment_color: fn(color: String) String! {
+    bytes: color.bytes()
+    ok := bytes.len() == 7 && Int.from_u8(bytes[0]) == 35
+    if ok {
+        loop i in 1..<7 {
+            byte: Int.from_u8(bytes[i])
+            if !((byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 70) || (byte >= 97 && byte <= 102)) -> ok = false
+        }
+    }
+    if !ok -> return Err(edit_error("bad_request", "Canvas comment color must be #RRGGBB"))
+    Ok(())
+}
+
+validate_comment_alpha: fn(alpha: String) String! {
+    value: alpha.trim().to_float() ?? return Err(edit_error("bad_request", "Canvas comment alpha must be a number"))
+    if value < 0.0 || value > 1.0 -> return Err(edit_error("bad_request", "Canvas comment alpha must be between 0 and 1"))
+    Ok(())
+}
+
+// `x,y,w,h` (optionally parenthesized) as four integers, or None.
+parse_bounds: fn(text: String) -> CanvasBounds? Never! {
+    inner := text.trim()
+    if inner.starts_with("(") -> inner = inner.remove_prefix("(")
+    if inner.ends_with(")") -> inner = inner.remove_suffix(")")
+    numbers := [Int]{}
+    loop part in inner.split(",") {
+        number: part.trim().to_int() ?? return None
+        numbers.push(number)
+    }
+    if numbers.len() != 4 -> return None
+    Val(CanvasBounds{x: numbers[0], y: numbers[1], w: numbers[2], h: numbers[3]})
+}
+
+normalize_bounds: fn(bounds: String) -> String String! {
+    parsed: parse_bounds(bounds) ?? return Err(edit_error("bad_request", "Canvas comment bounds must be x,y,w,h"))
+    if parsed.w <= 0 || parsed.h <= 0 -> return Err(edit_error("bad_request", "Canvas comment bounds must be x,y,w,h with positive size"))
+    Ok("{parsed.x},{parsed.y},{parsed.w},{parsed.h}")
+}
+
+quoted_attr: fn(value: String) -> String Never! { json_str(value) }
+
+// The hint whose anchor is the source span recorded for `region_id` in
+// `graph_json`, among the hints of `kind` ("comment" or "collapse").
+find_hint_region: fn(src: String, graph_json: String, region_id: String, kind: String) -> CommentHint? Never! {
+    first := true
+    loop chunk in graph_json.split("\"region_id\":") {
+        if first {
+            first = false
+            next
+        }
+        id: parse_json_string(chunk.trim_start()) ?? next
+        if id.value != region_id -> next
+        if kind != "comment" && json_string_field(chunk, "kind") != .Val(kind) -> next
+        start: json_int_field(chunk, "start") ?? return None
+        end: json_int_field(chunk, "end") ?? return None
+        hints: if kind == "comment" -> canvas_comment_hints(src) else -> canvas_collapse_hints(src)
+        loop hint in hints {
+            if hint.anchor.start == start && hint.anchor.end == end -> return Val(hint)
+        }
+        return None
+    }
+    None
+}
+
+find_comment_hint: fn(src: String, graph_json: String, region_id: String) -> CommentHint? Never! {
+    find_hint_region(src, graph_json, region_id, "comment")
+}
+
+// Pair of a parameter name and its graph type.
+NamedType: struct {
+    name: String
+    ty: String
+}
+
+extract_params: fn(graph_json: String, expr: String) -> [NamedType] Never! {
+    out := [NamedType]{}
     loop ident in identifiers(expr) {
-        if graph_type_for_name(graph_json, ident) == .Val(ty) {
-            if !out.iter().any(((_0: name, _1: _)) -> name == ident) -> out.push((ident, ty))
+        ty: graph_type_for_name(graph_json, ident) ?? next
+        known := false
+        loop param in out {
+            if param.name == ident -> known = true
         }
+        if !known -> out.push(NamedType{name: ident, ty: ty})
     }
     out
 }
-graph_type_for_name: fn(graph_json: String, name: String) -> String? {
-    loop chunk in graph_json.split("\"name\":").skip(1) {
-        (found, _): parse_json_string(chunk.trim_start())
-        if found != name || !chunk.contains("\"direction\":\"output\"") -> next
-        pos: chunk.find("\"type\"")
-        rest := chunk[pos + "\"type\"".len()..<chunk.len()] // #4303
-        colon: rest.find(':')
-        return parse_json_string(rest[colon + 1..<rest.len()].trim_start()).map(((_0: s, _1: _)) -> s)
+
+graph_type_for_name: fn(graph_json: String, name: String) -> String? Never! {
+    first := true
+    loop chunk in graph_json.split("\"name\":") {
+        if first {
+            first = false
+            next
+        }
+        found: parse_json_string(chunk.trim_start()) ?? next
+        if found.value != name || !chunk.contains("\"direction\":\"output\"") -> next
+        return json_string_field(chunk, "type")
     }
-    .None
+    None
 }
-identifiers: fn(expr: String) -> [String] {
+
+identifiers: fn(expr: String) -> [String] Never! {
     out := [String]{}
-    current := ""
-    loop c in expr.chars().chain(once(' ')) {
-        if c.is_ascii_alphanumeric() || c == '_' { current.push(c) } else if !current.is_empty() {
-            if current.chars().next().map((c) -> c.is_ascii_alphabetic() || c == '_').unwrap_or(false) && !(current == "true".bit_or("false").bit_or("ok").bit_or("err")) -> out.push(current.to_string())
-            current.clear()
+    bytes: expr.bytes()
+    start := -1
+    loop i in 0..bytes.len() {
+        byte: if i < bytes.len() -> Int.from_u8(bytes[i]) else -> 32
+        if ident_byte(byte, false) {
+            if start < 0 -> start = i
+            next
+        }
+        if start >= 0 {
+            word: expr.slice(start, i)
+            if ident_byte(Int.from_u8(bytes[start]), true) && word != "true" && word != "false" && word != "ok" && word != "err" -> out.push(word)
+            start = -1
         }
     }
     out
 }
-parse_simple_call: fn(call: String) -> (String, [String])? {
-    open: call.find('(')
-    close: call.rfind(')')
-    name := call[0..<open].trim() // #4303
-    validate_ident(name).ok()
-    args: if call[open + 1..close].trim().is_empty() -> [] else -> call[open + 1..close].split(',').map((arg) -> { arg := arg.trim(); arg.to_string() }).collect()
-    .Some((_0: name.to_string(), _1: args))
+
+SimpleCall: struct {
+    name: String
+    args: [String]
 }
-find_simple_helper: fn(src: String, name: String) -> ([String], String)? {
+
+parse_simple_call: fn(call: String) -> SimpleCall? Never! {
+    open: call.index_of("(") ?? return None
+    close: call.last_index_of(")") ?? return None
+    if close < open -> return None
+    name: call.slice(0, open).trim()
+    if !is_jet_ident(name) -> return None
+    inner: call.slice(open + 1, close).trim()
+    args := [String]{}
+    if inner != "" {
+        loop arg in inner.split(",") -> args.push(arg.trim())
+    }
+    Val(SimpleCall{name: name, args: args})
+}
+
+SimpleHelper: struct {
+    params: [String]
+    returned: String
+}
+
+// A one-line helper `name: fn(a: T, ...) -> R { return expr }` in `src`.
+find_simple_helper: fn(src: String, name: String) -> SimpleHelper? Never! {
     needle: "{name}: fn("
-    start: src.find(needle)
-    params_start: start + needle.len()
-    params_end: src[params_start..<src.len()].find(')')? + params_start
-    params: src[params_start..params_end].split(',').filter_map((param) -> param.trim().split_once(':').map(((_0: name, _1: _)) -> { name := name.trim(); name.to_string() })).collect()
-    body_start: src[params_end..<src.len()].find('{')? + params_end + 1
-    body_end: src[body_start..<src.len()].find('}')? + body_start
-    body := src[body_start..body_end].trim() // #4303
-    returned := body.strip_prefix("return ")?.trim() // #4303
-    .Some((_0: params, _1: returned.to_string()))
-}
-replace_ident: fn(expr: String, ident: String, replacement: String) -> String {
-    out := ""
-    current := ""
-    loop c in expr.chars().chain(once(' ')) {
-        if c.is_ascii_alphanumeric() || c == '_' { current.push(c) } else {
-            if !current.is_empty() {
-                if current == ident -> out.push_str(replacement) else -> out.push_str(current)
-                current.clear()
-            }
-            out.push(c)
-        }
+    start: src.index_of(needle) ?? return None
+    rest: src.slice(start + needle.len(), src.len())
+    params_end: rest.index_of(")") ?? return None
+    params := [String]{}
+    loop param in rest.slice(0, params_end).split(",") {
+        if param.split_once(":") == .Val(parts) -> params.push(parts.before.trim())
     }
-    trimmed := out.trim_end() // #4303
-    trimmed.to_string()
+    after_params: rest.slice(params_end, rest.len())
+    body_start: after_params.index_of("{{") ?? return None
+    body_text: after_params.slice(body_start + 1, after_params.len())
+    body_end: body_text.index_of("}}") ?? return None
+    body: body_text.slice(0, body_end).trim()
+    if !body.starts_with("return ") -> return None
+    Val(SimpleHelper{params: params, returned: body.remove_prefix("return ").trim()})
 }
-attr_string: fn(text: String, key: String) -> String? {
-    needle: "{key}="
-    pos: text.find(needle)
-    rest := text[pos + needle.len()..<text.len()].trim_start() // #4303
-    if rest.starts_with('"') -> return parse_json_string(rest).map(((_0: s, _1: _)) -> s)
-    .Some(rest.chars().take_while((c) -> !c.is_whitespace()).collect())
-}
-attr_span: fn(text: String, key: String) -> SourceSpan? {
-    raw: attr_string(text, key)
-    (start, end): raw.split_once("..")
-    .Some(SourceSpan(start: start.parse().ok()?, end: end.parse().ok()?))
-}
-attr_bounds: fn(text: String, key: String) -> (I32, I32, I32, I32)? {
-    needle: "{key}="
-    pos: text.find(needle)
-    rest := text[pos + needle.len()..<text.len()].trim_start().strip_prefix('(')? // #4303
-    close: rest.find(')')
-    nums: rest[0..<close].split(',').map((part) -> part.trim().parse<I32>()).collect<Result<[I32], _>>().ok()
-    if nums.len() == 4 { .Some((_0: nums[0], _1: nums[1], _2: nums[2], _3: nums[3])) } else { .None }
-}
-required_string: fn(text: String, key: String) -> String Err! { json_string_field(text, key).ok_or_else(() -> edit_error("bad_request", "missing `{key}`")) }
-required_query_string: fn(text: String, key: String) -> String Err! { json_string_field(text, key).ok_or_else(() -> query_error("bad_request", "missing `{key}`")) }
-required_project_string: fn(text: String, key: String) -> String Err! { json_string_field(text, key).ok_or_else(() -> project_edit_error("bad_request", "missing `{key}`")) }
-json_string_field: fn(text: String, key: String) -> String? {
-    needle: "\"{key}\""
-    pos: text.find(needle)
-    rest := text[pos + needle.len()..<text.len()] // #4303
-    colon: rest.find(':')
-    parse_json_string(rest[colon + 1..<rest.len()].trim_start()).map(((_0: s, _1: _)) -> s)
-}
-json_bool_field: fn(text: String, key: String) -> Bool? {
-    needle: "\"{key}\""
-    pos: text.find(needle)
-    rest := text[pos + needle.len()..<text.len()] // #4303
-    colon: rest.find(':')
-    rest = rest[colon + 1..<rest.len()].trim_start()
-    if rest.starts_with("true") { .Some(true) } else if rest.starts_with("false") { .Some(false) } else { .None }
-}
-json_usize_field: fn(text: String, key: String) -> Usize? {
-    needle: "\"{key}\""
-    pos: text.find(needle)
-    rest := text[pos + needle.len()..<text.len()] // #4303
-    colon: rest.find(':')
-    rest[colon + 1..<rest.len()].trim_start().chars().take_while((c) -> c.is_ascii_digit()).collect<String>().parse().ok()
-}
-json_usize_array: fn(text: String, key: String) -> [Usize] {
-    needle: "\"{key}\""
-    pos: text.find(needle) ?? return []
-    rest := text[pos + needle.len()..<text.len()] // #4303
-    colon: rest.find(':') ?? return []
-    rest = rest[colon + 1..<rest.len()].trim_start()
-    rest = rest.strip_prefix('[') ?? return []
-    out := [Usize]{}
-    loop {
-        rest = rest.trim_start()
-        if rest.starts_with(']') -> break
-        digits: rest.chars().take_while((c) -> c.is_ascii_digit()).collect<String>()
-        if digits.is_empty() -> break
-        if digits.parse<Usize>() is .Ok(n) -> out.push(n)
-        rest = rest[digits.len()..<rest.len()].trim_start()
-        if rest.starts_with(',') -> rest = rest[1..<rest.len()]
-    }
-    out
-}
-json_array_body: fn(text: String, key: String) -> String? {
-    needle: "\"{key}\""
-    pos: text.find(needle)
-    rest := text[pos + needle.len()..<text.len()] // #4303
-    colon: rest.find(':')
-    rest = rest[colon + 1..<rest.len()].trim_start()
-    bytes: rest.as_bytes()
-    if bytes.first().copied()? != 91 -> return .None
-    depth := I32{0}
-    in_string := false
-    escaped := false
-    loop (i, b) in bytes.iter().copied().enumerate() {
-        if in_string {
-            if escaped { escaped = false } else if b == 92 { escaped = true } else if b == 34 { in_string = false }
+
+replace_ident: fn(expr: String, ident: String, replacement: String) -> String Never! {
+    out := [String]{}
+    bytes: expr.bytes()
+    start := -1
+    loop i in 0..bytes.len() {
+        byte: if i < bytes.len() -> Int.from_u8(bytes[i]) else -> 32
+        if ident_byte(byte, false) {
+            if start < 0 -> start = i
             next
         }
-        if b is {
-            34 -> in_string = true
-            91 -> depth += 1
-            93 -> { depth -= 1; if depth == 0 -> return rest.get(1..i) }
-            _ -> {}
+        if start >= 0 {
+            word: expr.slice(start, i)
+            out.push(if word == ident -> replacement else -> word)
+            start = -1
         }
+        if i < bytes.len() -> out.push(expr.slice(i, i + 1))
     }
-    .None
+    out.join("").trim_end()
 }
-json_object_bodies: fn(text: String) -> [String] {
-    out := [String]{}
-    start := Usize?{.None}
-    depth := I32{0}
-    in_string := false
-    escaped := false
-    loop (i, b) in text.bytes().enumerate() {
-        if in_string {
-            if escaped { escaped = false } else if b == 92 { escaped = true } else if b == 34 { in_string = false }
-            next
-        }
-        if b is {
-            34 -> in_string = true
-            123 -> { if depth == 0 -> start = .Some(i + 1); depth += 1 }
-            125 -> {
-                depth -= 1
-                if depth == 0 {
-                    if start.take() == .Val(s) {
-                        if text.get(s..i) == .Val(body) -> out.push(body)
-                    }
-                }
-            }
-            _ -> {}
-        }
+
+attr_string: fn(text: String, key: String) -> String? Never! {
+    needle: "{key}="
+    pos: text.index_of(needle) ?? return None
+    rest: text.slice(pos + needle.len(), text.len()).trim_start()
+    if rest.starts_with("\"") {
+        parsed: parse_json_string(rest) ?? return None
+        return Val(parsed.value)
     }
-    out
+    bytes: rest.bytes()
+    end := 0
+    loop end < bytes.len() && !is_space_byte(Int.from_u8(bytes[end])) -> end += 1
+    Val(rest.slice(0, end))
 }
-wire_span_from_json_chunk: fn(chunk: String, wire_id: String) -> SourceSpan? {
-    (id, _): parse_json_string(chunk.trim_start())
-    if id != wire_id -> return .None
-    pos: chunk.find("\"source_span\"")
-    rest := chunk[pos + "\"source_span\"".len()..<chunk.len()] // #4303
-    colon: rest.find(':')
-    value := rest[colon + 1..<rest.len()].trim_start() // #4303
-    if value.starts_with("null") -> return .None
-    .Some(SourceSpan(start: json_usize_field(value, "start"), end: json_usize_field(value, "end")?))
+
+is_space_byte: fn(byte: Int) -> Bool Never! { byte == 32 || byte == 9 || byte == 10 || byte == 13 }
+
+attr_span: fn(text: String, key: String) -> SourceSpan? Never! {
+    raw: attr_string(text, key) ?? return None
+    parts: raw.split_once("..") ?? return None
+    start: parts.before.to_int() ?? return None
+    end: parts.after.to_int() ?? return None
+    Val(SourceSpan{start: start, end: end})
 }
-json_string_array: fn(text: String, key: String) -> [String] {
+
+attr_bounds: fn(text: String, key: String) -> CanvasBounds? Never! {
+    needle: "{key}="
+    pos: text.index_of(needle) ?? return None
+    rest: text.slice(pos + needle.len(), text.len()).trim_start()
+    if !rest.starts_with("(") -> return None
+    close: rest.index_of(")") ?? return None
+    parse_bounds(rest.slice(1, close))
+}
+
+required_string: fn(text: String, key: String) -> String String! {
+    json_string_field(text, key) ?? return Err(edit_error("bad_request", "missing `{key}`"))
+}
+
+required_query_string: fn(text: String, key: String) -> String String! {
+    json_string_field(text, key) ?? return Err(query_error("bad_request", "missing `{key}`"))
+}
+
+required_project_string: fn(text: String, key: String) -> String String! {
+    json_string_field(text, key) ?? return Err(project_edit_error("bad_request", "missing `{key}`"))
+}
+
+// The text after `"key":` in `text`, leading whitespace removed.
+json_field_value: fn(text: String, key: String) -> String? Never! {
     needle: "\"{key}\""
-    pos: text.find(needle) ?? return []
-    rest := text[pos + needle.len()..<text.len()] // #4303
-    colon: rest.find(':') ?? return []
-    rest = rest[colon + 1..<rest.len()].trim_start()
-    rest = rest.strip_prefix('[') ?? return []
-    out := [String]{}
+    pos: text.index_of(needle) ?? return None
+    rest: text.slice(pos + needle.len(), text.len())
+    colon: rest.index_of(":") ?? return None
+    Val(rest.slice(colon + 1, rest.len()).trim_start())
+}
+
+json_string_field: fn(text: String, key: String) -> String? Never! {
+    value: json_field_value(text, key) ?? return None
+    parsed: parse_json_string(value) ?? return None
+    Val(parsed.value)
+}
+
+json_bool_field: fn(text: String, key: String) -> Bool? Never! {
+    value: json_field_value(text, key) ?? return None
+    if value.starts_with("true") -> return Val(true)
+    if value.starts_with("false") -> return Val(false)
+    None
+}
+
+leading_digits: fn(text: String) -> String Never! {
+    bytes: text.bytes()
+    end := 0
+    loop end < bytes.len() && Int.from_u8(bytes[end]) >= 48 && Int.from_u8(bytes[end]) <= 57 -> end += 1
+    text.slice(0, end)
+}
+
+json_int_field: fn(text: String, key: String) -> Int? Never! {
+    value: json_field_value(text, key) ?? return None
+    leading_digits(value).to_int() ?? return None
+}
+
+json_int_array: fn(text: String, key: String) -> [Int] Never! {
+    out := [Int]{}
+    value: json_field_value(text, key) ?? return out
+    if !value.starts_with("[") -> return out
+    rest := value.remove_prefix("[")
     loop {
         rest = rest.trim_start()
-        if rest.starts_with(']') -> break
-        (value, consumed): parse_json_string(rest) ?? break
-        out.push(value)
-        rest = rest[consumed..<rest.len()].trim_start()
-        if rest.starts_with(',') -> rest = rest[1..<rest.len()]
+        if rest.starts_with("]") -> break
+        digits: leading_digits(rest)
+        if digits == "" -> break
+        number: digits.to_int() ?? break
+        out.push(number)
+        rest = rest.slice(digits.len(), rest.len()).trim_start()
+        if rest.starts_with(",") -> rest = rest.remove_prefix(",")
     }
     out
 }
-parse_json_string: fn(text: String) -> (String, Usize)? {
-    chars := text.char_indices()
-    if chars.next()?._1 != '"' -> return .None
-    out := ""
+
+json_string_array: fn(text: String, key: String) -> [String] Never! {
+    out := [String]{}
+    value: json_field_value(text, key) ?? return out
+    if !value.starts_with("[") -> return out
+    rest := value.remove_prefix("[")
+    loop {
+        rest = rest.trim_start()
+        if rest.starts_with("]") -> break
+        parsed: parse_json_string(rest) ?? break
+        out.push(parsed.value)
+        rest = rest.slice(parsed.consumed, rest.len()).trim_start()
+        if rest.starts_with(",") -> rest = rest.remove_prefix(",")
+    }
+    out
+}
+
+// The bytes between the brackets of the JSON array at `"key":`.
+json_array_body: fn(text: String, key: String) -> String? Never! {
+    value: json_field_value(text, key) ?? return None
+    if !value.starts_with("[") -> return None
+    bytes: value.bytes()
+    depth := 0
+    in_string := false
     escaped := false
-    loop (i, c) in chars {
+    loop i in 0..<bytes.len() {
+        byte: Int.from_u8(bytes[i])
+        if in_string {
+            if {
+                escaped -> escaped = false
+                byte == 92 -> escaped = true
+                byte == 34 -> in_string = false
+            }
+            next
+        }
+        if byte == 34 -> in_string = true
+        if byte == 91 -> depth += 1
+        if byte == 93 {
+            depth -= 1
+            if depth == 0 -> return Val(value.slice(1, i))
+        }
+    }
+    None
+}
+
+// The body of every top-level JSON object in `text`, braces removed.
+json_object_bodies: fn(text: String) -> [String] Never! {
+    out := [String]{}
+    bytes: text.bytes()
+    start := 0
+    depth := 0
+    in_string := false
+    escaped := false
+    loop i in 0..<bytes.len() {
+        byte: Int.from_u8(bytes[i])
+        if in_string {
+            if {
+                escaped -> escaped = false
+                byte == 92 -> escaped = true
+                byte == 34 -> in_string = false
+            }
+            next
+        }
+        if byte == 34 -> in_string = true
+        if byte == 123 {
+            if depth == 0 -> start = i + 1
+            depth += 1
+        }
+        if byte == 125 && depth > 0 {
+            depth -= 1
+            if depth == 0 -> out.push(text.slice(start, i))
+        }
+    }
+    out
+}
+
+wire_span_from_json_chunk: fn(chunk: String, wire_id: String) -> SourceSpan? Never! {
+    id: parse_json_string(chunk.trim_start()) ?? return None
+    if id.value != wire_id -> return None
+    value: json_field_value(chunk, "source_span") ?? return None
+    if value.starts_with("null") -> return None
+    start: json_int_field(value, "start") ?? return None
+    end: json_int_field(value, "end") ?? return None
+    Val(SourceSpan{start: start, end: end})
+}
+
+// The JSON string literal at the front of `text`, decoded.
+parse_json_string: fn(text: String) -> JsonText? Never! {
+    bytes: text.bytes()
+    if bytes.len() == 0 || Int.from_u8(bytes[0]) != 34 -> return None
+    out := [U8]{}
+    escaped := false
+    loop i in 1..<bytes.len() {
+        byte: Int.from_u8(bytes[i])
         if escaped {
-            out.push(if c is { 'n' -> '\n'; 'r' -> (Char{13}); 't' -> '\t'; '"' -> '"'; '\\' -> '\\'; other -> other })
             escaped = false
-        } else if c == '\\' { escaped = true } else if c == '"' { return .Some((_0: out, _1: i + 1)) } else { out.push(c) }
+            if {
+                byte == 110 -> out.push(10)
+                byte == 114 -> out.push(13)
+                byte == 116 -> out.push(9)
+                else -> out.push(bytes[i])
+            }
+            next
+        }
+        if byte == 92 {
+            escaped = true
+            next
+        }
+        if byte == 34 {
+            value: String.from_bytes(out) ?? return None
+            return Val(JsonText{value: value, consumed: i + 1})
+        }
+        out.push(bytes[i])
     }
-    .None
+    None
 }
-span_json: fn(span: SourceSpan) -> String { "{{\"start\":{span.start},\"end\":{span.end}}}" }
-json_strs: fn(values: [String]) -> String { values.iter().map(json_str).collect().join(",") }
-json_optional_str: fn(value: String?) -> String { value.map(json_str).unwrap_or("null") }
