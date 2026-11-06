@@ -5041,7 +5041,7 @@ fn sema_stmt_check_prepared_binding(binding: Binding, environment: SemaScopeEnvi
         sema_stmt_declare_unchecked_binding(binding, environment, program, &scopes)
         return None
     }
-    if sema_stmt_comptime_site_nondeterministic(context, fact_start, &diagnostics) {
+    if sema_stmt_comptime_site_refused(context, fact_start, &diagnostics) {
         sema_stmt_declare_unchecked_binding(binding, environment, program, &scopes)
         return None
     }
@@ -5079,12 +5079,16 @@ fn sema_stmt_check_prepared_binding(binding: Binding, environment: SemaScopeEnvi
     Val(TStmt.Inline{body: [TStmt]{}, span: Span{start: binding.name_span.start, end: init_span.end}})
 }
 
-// A compile-time site whose calls (from `fact_start` on) read ambient time or
-// randomness is refused where the body writes it (E3403), so it is never
-// staged and a later site in the body is still checked. True when reported.
-fn sema_stmt_comptime_site_nondeterministic(context: SemaCheckContext, fact_start: Int, diagnostics: &[Diagnostic]) -> Bool {
+// A compile-time site whose calls (from `fact_start` on) reach `core.net`
+// beyond the pinned fetch (E3412) or read ambient time or randomness (E3403)
+// is refused where the body writes it, so it is never staged and a later
+// site in the body is still checked. True when reported.
+fn sema_stmt_comptime_site_refused(context: SemaCheckContext, fact_start: Int, diagnostics: &[Diagnostic]) -> Bool {
     before :: diagnostics.len()
-    loop index in fact_start..<context.call_facts.len() -> sema_effect_comptime_nondeterministic(context.call_facts[index], &diagnostics)
+    loop index in fact_start..<context.call_facts.len() {
+        fact :: context.call_facts[index]
+        if !sema_effect_comptime_net_unavailable(fact, &diagnostics) -> sema_effect_comptime_nondeterministic(fact, &diagnostics)
+    }
     diagnostics.len() > before
 }
 
@@ -8362,7 +8366,7 @@ fn sema_stmt_check_prep_if(cond: Expr, cond_span: Span, then_body: [Stmt], else_
     checked :: sema_check_expression(cond, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     scopes.comptime_execution_depth -= 1
     condition :: checked ?? return false
-    if sema_stmt_comptime_site_nondeterministic(context, fact_start, &diagnostics) -> return false
+    if sema_stmt_comptime_site_refused(context, fact_start, &diagnostics) -> return false
     // A prepared local reads as its value, so a local left in the checked
     // condition is known only at run time.
     runtime_local := false
@@ -8431,7 +8435,7 @@ fn sema_stmt_check_comptime_block(body: [Stmt], span: Span, environment: SemaSco
     checked :: sema_check_expression(block, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     scopes.comptime_execution_depth -= 1
     checked_block :: checked ?? return false
-    if sema_stmt_comptime_site_nondeterministic(context, fact_start, &diagnostics) -> return false
+    if sema_stmt_comptime_site_refused(context, fact_start, &diagnostics) -> return false
     _ := sema_comptime_body_capture(&context, environment, program, scopes, "comptime block", block, checked_block.ty, span, span)
     false
 }
