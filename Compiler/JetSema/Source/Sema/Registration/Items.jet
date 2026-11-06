@@ -4385,6 +4385,33 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], edg
             }
         }
     }
+    // A lowered inline module's Core member import reads a file-level Core
+    // alias that shares the scoped declaration's span (InlineModules.jet
+    // sema_inline_core_imports); the alias binds the loaded Core module it names.
+    loop hoisted_module in 0..<graph.modules.len() {
+        hoisted := [ImportDecl]{}
+        loop declaration in graph.modules[hoisted_module].program.imports {
+            if sema_inline_core_alias_import(declaration) -> hoisted.push(declaration)
+        }
+        loop declaration in hoisted {
+            if declaration.kind == .Module(name, _) {
+                target := -1
+                loop candidate in 0..<graph.modules.len() {
+                    if graph.modules[candidate].module_name == name {
+                        target = candidate
+                        break
+                    }
+                }
+                if target < 0 {
+                    sema_registration_push_graph_diagnostic(graph, hoisted_module, sema_error("E0003", declaration.span, "the Core module `{name}` an inline module import reads is not in the declaration graph", "a lowered inline module reads its Core members through the loaded Core module", "keep the loader's edge to `{name}` for the inline module's import"))
+                    next
+                }
+                target_identity: graph.modules[target].module_identity.copy()
+                target_package: graph.modules[target].package_identity.copy()
+                sema_registration_add_import(graph, registered, hoisted_module, "", declaration, target_identity, target_package)
+            }
+        }
+    }
     module_index := 0
     loop module_index < graph.modules.len() {
         // Every source import must have one exact edge. A missing edge is not

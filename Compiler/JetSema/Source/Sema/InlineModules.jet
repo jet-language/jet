@@ -22,8 +22,9 @@
 //
 // A generic-module instance arrives here as an ordinary module expanded by
 // `sema_generic_modules_expand`. Module constants are never registered by
-// Rust, so they are dropped. A module that imports Core or a foreign
-// namespace keeps its functions in its body.
+// Rust, so they are dropped. A module that imports a foreign namespace, or a
+// Core module under its own binding, keeps its functions in its body; one that
+// binds Core members reads them through a file-level Core alias.
 use {
     unicode: core.text
     jet_foundation.[
@@ -48,6 +49,7 @@ use {
         ImplConstValue,
         ImplDef,
         ImportDecl,
+        ImportKind,
         Item,
         LValue,
         Lambda,
@@ -83,6 +85,7 @@ use {
         measure_kind,
         measure_literal_value,
         ast_func,
+        core_module_export,
         ast_program,
         ast_struct,
         type_name,
@@ -325,22 +328,88 @@ sema_inline_module_lowered: fn(definition: CodeModule) -> Bool Never! {
 // with the module body (Rust `inline_core_imports`). An inline body sees the
 // file's imports overlaid with its own, so an inline Core import that repeats a
 // file import's alias and module binds nothing new and the lifted members
-// resolve it through the file's binding.
+// resolve it through the file's binding. A Core member the module binds itself
+// (`use core.[math.abs]`, `pub use exported: core.math.abs`) lowers too: its
+// members read it through the file-level Core alias sema_inline_core_imports adds.
 sema_inline_module_lowerable: fn(definition: CodeModule, file_imports: [ImportDecl]) -> Bool Never! {
     if definition.body == None -> return false
     loop declaration in definition.imports {
         if declaration.kind == {
-            .Unqualified(module_alias, _, _, _, _) -> {
-                if module_alias == "core" || module_alias.starts_with("core.") -> return false
+            .Unqualified(module_alias, _, items, _, _) -> {
+                if module_alias == "core" || module_alias.starts_with("core.") {
+                    loop item in items {
+                        if sema_inline_core_member("{module_alias}.{item.original}") == None -> return false
+                    }
+                }
             }
             .Module(name, _) -> {
                 if name != "core" && !name.starts_with("core.") -> return false
-                if !sema_inline_file_binds_module(file_imports, declaration.alias, name) -> return false
+                if !sema_inline_file_binds_module(file_imports, declaration.alias, name) && sema_inline_core_member(name) == None -> return false
             }
             else -> return false
         }
     }
     true
+}
+
+// A Core member path (`core.math.abs`) as the qualified target lifted members
+// read: the member on its Core module's file-level alias. A Core module itself
+// (`core.math`) is no member.
+sema_inline_core_member: fn(path: String) -> SemaInlineTarget? Never! {
+    if !path.starts_with("core.") || core_module_export(path) != None -> return None
+    segments: path.split(".").to_list()
+    module_path := segments[0].copy()
+    loop index in 1..<segments.len() - 1 -> module_path = "{module_path}.{segments[index]}"
+    if core_module_export(module_path) == None -> return None
+    Val(SemaInlineTarget{module_alias: sema_inline_core_alias(module_path), member: segments[segments.len() - 1].copy(), qualified: true})
+}
+
+// The file-level alias of a Core module that lowered members read.
+sema_inline_core_alias: fn(module_path: String) -> String Never! {
+    sema_inline_generated_path("use.{module_path}")
+}
+
+// Whether `declaration` is the file-level Core alias sema_inline_core_imports
+// added for a lowered member import; registration binds it to its Core module.
+sema_inline_core_alias_import: fn(declaration: ImportDecl) -> Bool Never! {
+    if declaration.kind == .Module(name, _) -> return declaration.alias == sema_inline_core_alias(name)
+    false
+}
+
+// The file-level Core imports the Core members bound inside the lowerable
+// modules of `items` (nested ones included) read, one per Core module.
+sema_inline_core_imports: fn(items: [Item], file_imports: [ImportDecl], imports: &[ImportDecl]) Never! {
+    loop item in items {
+        if item == .CodeModule(definition) {
+            body: definition.body ?? next
+            if !sema_inline_module_lowerable(definition, file_imports) -> next
+            loop declaration in definition.imports {
+                paths := [String]{}
+                if declaration.kind == {
+                    .Unqualified(module_alias, _, members, _, _) -> {
+                        if module_alias == "core" || module_alias.starts_with("core.") {
+                            loop member in members -> paths.push("{module_alias}.{member.original}")
+                        }
+                    }
+                    .Module(name, _) -> {
+                        if !sema_inline_file_binds_module(file_imports, declaration.alias, name) -> paths.push(name.copy())
+                    }
+                    else -> {}
+                }
+                loop path in paths {
+                    target: sema_inline_core_member(path) ?? next
+                    bound := false
+                    loop existing in imports {
+                        if existing.alias == target.module_alias -> bound = true
+                    }
+                    if bound -> next
+                    module_path: String.from_bytes(path.bytes()[0..<path.bytes().len() - target.member.bytes().len() - 1]) ?? next
+                    imports.push(ImportDecl{kind: ImportKind.Module{name: module_path, span: declaration.span}, alias: target.module_alias, alias_span: declaration.alias_span, span: declaration.span, item_spans: [Span]{}, local_spans: [Span]{}, is_pub: false, is_package_pub: false, inline_version: None})
+                }
+            }
+            sema_inline_core_imports(body, file_imports, imports)
+        }
+    }
 }
 
 sema_inline_file_binds_module: fn(file_imports: [ImportDecl], alias: String, name: String) -> Bool Never! {
@@ -1385,7 +1454,22 @@ sema_inline_bind_module_imports: fn(definition: CodeModule, surfaces: [SemaInlin
     reexports := [String:SemaInlineTarget]{}
     names := [String:Bool]{}
     loop declaration in definition.imports {
+        // `pub use exported: core.math.abs`: a Core member under the module's
+        // own alias.
+        if declaration.kind == .Module(name, _) {
+            target: sema_inline_core_member(name) ?? next
+            local: declaration.alias
+            if names.get(local) != None {
+                rewrite.diagnostics.push(sema_error("E0105", declaration.alias_span, "the import name `{local}` is used twice", "each import needs a unique namespace name in this file", "rename one with an `alias: path` row"))
+                next
+            }
+            names[local] = true
+            rewrite.qualified[local] = target
+            if declaration.is_pub -> reexports[local] = target
+            next
+        }
         if declaration.kind == .Unqualified(module_alias, module_alias_span, items, _, _) {
+            core: module_alias == "core" || module_alias.starts_with("core.")
             group_start: rewrite.diagnostics.len()
             bound_locals := [String]{}
             bound_targets := [SemaInlineTarget]{}
@@ -1400,6 +1484,11 @@ sema_inline_bind_module_imports: fn(definition: CodeModule, surfaces: [SemaInlin
                     next
                 }
                 names[local] = true
+                if core {
+                    bound_locals.push(local)
+                    bound_targets.push(sema_inline_core_member("{module_alias}.{item.original}") ?? panic("a lowerable module binds only Core members"))
+                    next
+                }
                 if members == .Val(surface) {
                     if surface.functions.get(item.original) == None {
                         rewrite.diagnostics.push(sema_error("E0611", module_alias_span, "`{item.original}` is not defined in module `{module_alias}`", "check the module body for the item you are importing", "make sure the name is spelled correctly"))
@@ -1717,7 +1806,8 @@ sema_inline_modules_lower: fn(program: &Program, diagnostics: &[Diagnostic]) -> 
 
     // 3. Qualified calls and `use` bindings, in every body of the file.
     calls := sema_inline_rewrite_empty()
-    imports: sema_inline_bind_imports(program, surfaces, inline_names, calls)
+    imports := sema_inline_bind_imports(program, surfaces, inline_names, calls)
+    sema_inline_core_imports(hoisted_items, program.imports, imports)
     loop surface in nested -> surfaces.push(surface)
     calls.modules = surfaces.move()
     rewritten := [Item]{}
