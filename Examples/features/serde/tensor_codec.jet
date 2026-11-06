@@ -24,9 +24,9 @@ describe: fn(label: String, t: compute.Tensor) {
 // The explicit wire form: {"shape": [...], "data": [...], "profile": "..."}.
 to_tree: fn(t: compute.Tensor) -> Dyn {
     shape := [Dyn]{}
-    loop dim in compute.shape(t) -> &shape.push(Dyn.Int(dim))
+    loop dim in compute.shape(t) -> shape.push(Dyn.Int(dim))
     data := [Dyn]{}
-    loop value in compute.to_list(t) -> &data.push(Dyn.Float(value))
+    loop value in compute.to_list(t) -> data.push(Dyn.Float(value))
     fields := [String:Dyn]{}
     fields["shape"] = Dyn.Array(shape)
     fields["data"] = Dyn.Array(data)
@@ -35,7 +35,7 @@ to_tree: fn(t: compute.Tensor) -> Dyn {
 }
 
 elements: fn(tree: Dyn, key: String) -> [Dyn] {
-    field: &tree.field(key) ?? panic("missing {key}")
+    field: tree.field(key) ?? panic("missing {key}")
     if field == {
         .Array(items) -> items
         else -> panic("{key} is not an array")
@@ -55,10 +55,10 @@ number: fn(item: Dyn) -> Float {
 
 from_tree: fn(tree: Dyn) -> compute.Tensor {
     shape := [Int]{}
-    loop item in elements(tree, "shape") -> &shape.push(item.int() ?? panic("dim"))
+    loop item in elements(tree, "shape") -> shape.push(item.int() ?? panic("dim"))
     data := [Float]{}
-    loop item in elements(tree, "data") -> &data.push(number(item))
-    profile: (&tree.field("profile") ?? panic("profile")).text() ?? panic("profile text")
+    loop item in elements(tree, "data") -> data.push(number(item))
+    profile: (tree.field("profile") ?? panic("profile")).text() ?? panic("profile text")
     from_values(shape, data, profile)
 }
 
@@ -78,10 +78,10 @@ from_values: fn(shape: [Int], data: [Float], profile: String) -> compute.Tensor 
 
 profile: fn(tensor: compute.Tensor) -> String {
     fields := compute.placement(tensor).split("profile=")
-    _: &fields.next() ?? panic("placement prefix")
-    value: &fields.next() ?? panic("placement profile")
+    _: fields.next() ?? panic("placement prefix")
+    value: fields.next() ?? panic("placement profile")
     pieces := value.split(",")
-    &pieces.next() ?? panic("profile")
+    pieces.next() ?? panic("profile")
 }
 
 run: fn() {

@@ -71,30 +71,30 @@ evidence_capture_context: fn(expected_failure: Bool, property_case: Bool) -> Evi
 // `stable_token`: the framed FNV/golden-ratio pair.
 evidence_stable_token: fn(parts: [String]) -> String Never! {
     state := DerivationHashState{first: U64{0xcbf29ce484222325}, second: U64{0x9e3779b185ebca87}}
-    loop part in parts -> derivation_hash_frame(&state, part)
+    loop part in parts -> derivation_hash_frame(state, part)
     derivation_hash_hex(state)
 }
 
 evidence_write_record_from_codes: fn(path: String, kind: Int, state: Int, name: String, message: String, file: String, line: U32, context: EvidenceCaptureContext) EvidenceCodecError! -[FS, Env]> {
     record := evidence_record_from_test_environment(kind, state, name, message, file, line)
     if record.outcome == EvidenceOutcome.Passed || record.outcome == EvidenceOutcome.Failed {
-        if evidence_record_set_expectation(&record, context.expectation) == .Err(error) -> return Err(evidence_codec_error(evidence_expectation_error_text(error)))
+        if evidence_record_set_expectation(record, context.expectation) == .Err(error) -> return Err(evidence_codec_error(evidence_expectation_error_text(error)))
     }
     if (record.kind == EvidenceKind.Runtime || record.kind == EvidenceKind.Contract) && context.property_case {
-        &record.attachments.push(EvidenceAttachment{name: "caught_by", value: "property_case"})
+        record.attachments.push(EvidenceAttachment{name: "caught_by", value: "property_case"})
         // The same site can stop in both a sampled case and an ordinary test.
         // Those observations have different capture provenance, so they must
         // remain distinct records rather than conflict during report merging.
         record.identity.evidence_id = evidence_stable_token([String]{record.identity.evidence_id, "caught_by", "property_case"})
     }
     derivation: evidence_record_checked_derivation(record)
-    evidence_record_set_derivation(&record, derivation)
+    evidence_record_set_derivation(record, derivation)
     evidence_write_record_with_derivation(path, record, derivation)
 }
 
 evidence_write_record_with_derivation: fn(path: String, record: EvidenceRecord, derivation: DerivationRecord) EvidenceCodecError! -[FS, Env]> {
     frame := [U8]{}
-    evidence_encode_record_with_derivation(record, derivation, &frame)
+    evidence_encode_record_with_derivation(record, derivation, frame)
     evidence_append_frame(path, frame)
 }
 
@@ -119,13 +119,13 @@ evidence_append_frame: fn(path: String, frame: [U8]) EvidenceCodecError! -[FS, E
     guard: if evidence_files.lock(path) == {
         .Ok(held) -> held
         .Err(error) -> {
-            close(^writer)
+            close(writer)
             return Err(evidence_codec_error("{error}"))
         }
     }
-    result: evidence_append_locked(path, &writer, frame)
-    close(^writer)
-    close(^guard)
+    result: evidence_append_locked(path, writer, frame)
+    close(writer)
+    close(guard)
     result
 }
 
@@ -133,14 +133,14 @@ evidence_append_locked: fn(path: String, writer: &evidence_files.FileWriter, fra
     info: writer.stat() ?? return Err(evidence_codec_error("{err}"))
     if info.size == 0 {
         header := EVIDENCE_REPORT_MAGIC.bytes()
-        evidence_put_number(&header, U64.from_u16(EVIDENCE_REPORT_VERSION), 2)
+        evidence_put_number(header, U64.from_u16(EVIDENCE_REPORT_VERSION), 2)
         writer.write_all(header) ?? return Err(evidence_codec_error("{err}"))
     } else if info.size < 10 {
         return Err(evidence_codec_error("truncated evidence report header"))
     } else {
         header: evidence_read_header(path) ?? return Err(evidence_codec_error("{err}"))
         expected := EVIDENCE_REPORT_MAGIC.bytes()
-        evidence_put_number(&expected, U64.from_u16(EVIDENCE_REPORT_VERSION), 2)
+        evidence_put_number(expected, U64.from_u16(EVIDENCE_REPORT_VERSION), 2)
         if header != expected -> return Err(evidence_codec_error("evidence report schema conflict"))
     }
     writer.write_all(frame) ?? return Err(evidence_codec_error("{err}"))
@@ -154,8 +154,8 @@ evidence_read_header: fn(path: String) -[FS.Read]> [U8] IOError! {
     loop header.len() < 10 {
         chunk: reader.read(10 - header.len())
         if chunk.len() == 0 -> break
-        &header.extend(chunk)
+        header.extend(chunk)
     }
-    close(^reader)
+    close(reader)
     Ok(header)
 }

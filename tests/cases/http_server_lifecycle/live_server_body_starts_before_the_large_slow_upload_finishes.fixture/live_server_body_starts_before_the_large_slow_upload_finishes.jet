@@ -30,7 +30,7 @@ use {
     crlf: String.from_bytes([U8]{13, 10}) ?? panic("CRLF")
     client.write_all("POST /slow HTTP/1.1{crlf}Host: local{crlf}Content-Length: {length}{crlf}Connection: close{crlf}{crlf}".bytes()) ?? panic("headers write")
     chunk := [U8]{}
-    loop _ in 0..<4096 -> &chunk.push(7)
+    loop _ in 0..<4096 -> chunk.push(7)
     client.write_all(chunk) ?? panic("first write")
     if {
         first_length, first_rx -> assert(first_length == 4096)
@@ -41,9 +41,9 @@ use {
     loop {
         part: client.read_text(8192) ?? panic("response read")
         if part == "" -> break
-        &parts.push(part)
+        parts.push(part)
     }
     response: parts.join("")
-    ^serving.join() ?? panic("server join")
+    serving.join() ?? panic("server join")
     assert(response.ends_with("{length}"), response)
 }

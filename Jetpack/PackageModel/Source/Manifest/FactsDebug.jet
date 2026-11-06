@@ -28,7 +28,7 @@ pkg_debug_opt_bool: fn(value: Bool?) -> String Never! {
 
 pkg_debug_str_list: fn(values: [String]) -> String Never! {
     parts := [String]{}
-    loop value in values -> &parts.push(pkg_debug_str(value))
+    loop value in values -> parts.push(pkg_debug_str(value))
     "[{parts.join(", ")}]"
 }
 
@@ -42,13 +42,13 @@ pkg_debug_opt_str_list: fn(values: [String]?) -> String Never! {
 // A sorted string set (`BTreeSet<String>`).
 pkg_debug_str_set: fn(values: [String]) -> String Never! {
     parts := [String]{}
-    loop value in pkg_manifest_sorted(values) -> &parts.push(pkg_debug_str(value))
+    loop value in pkg_manifest_sorted(values) -> parts.push(pkg_debug_str(value))
     "{{{parts.join(", ")}}}"
 }
 
 pkg_debug_str_map: fn(map: [String: String]) -> String Never! {
     parts := [String]{}
-    loop key in pkg_manifest_sorted(map.keys().to_list()) -> &parts.push("{pkg_debug_str(key)}: {pkg_debug_str(map[key])}")
+    loop key in pkg_manifest_sorted(map.keys().to_list()) -> parts.push("{pkg_debug_str(key)}: {pkg_debug_str(map[key])}")
     "{{{parts.join(", ")}}}"
 }
 
@@ -93,7 +93,7 @@ pkg_debug_dep_source: fn(source: DepSource) -> String Never! {
 
 pkg_debug_deps: fn(deps: [String: DepSource]) -> String Never! {
     parts := [String]{}
-    loop key in pkg_manifest_sorted(deps.keys().to_list()) -> &parts.push("{pkg_debug_str(key)}: {pkg_debug_dep_source(deps[key])}")
+    loop key in pkg_manifest_sorted(deps.keys().to_list()) -> parts.push("{pkg_debug_str(key)}: {pkg_debug_dep_source(deps[key])}")
     "{{{parts.join(", ")}}}"
 }
 
@@ -108,7 +108,7 @@ pkg_debug_target_identity: fn(identity: TargetProfileIdentity) -> String Never! 
 
 pkg_debug_targets: fn(targets: PackageTargets) -> String Never! {
     parts := [String]{}
-    loop selection in targets.iter() -> &parts.push("{pkg_debug_str(selection.name)}: TargetProfileSelection {{ name: {pkg_debug_str(selection.name)}, profile: {pkg_debug_target_identity(selection.profile)} }}")
+    loop selection in targets.iter() -> parts.push("{pkg_debug_str(selection.name)}: TargetProfileSelection {{ name: {pkg_debug_str(selection.name)}, profile: {pkg_debug_target_identity(selection.profile)} }}")
     "PackageTargets {{ selections: {{{parts.join(", ")}}} }}"
 }
 
@@ -123,19 +123,19 @@ pkg_debug_dev: fn(dev: DevPolicy) -> String Never! {
 
 pkg_debug_boundaries: fn(boundaries: [ImportBoundary]) -> String Never! {
     parts := [String]{}
-    loop boundary in boundaries -> &parts.push("ImportBoundary {{ from: {pkg_debug_str(boundary.from)}, to: {pkg_debug_str(boundary.to)} }}")
+    loop boundary in boundaries -> parts.push("ImportBoundary {{ from: {pkg_debug_str(boundary.from)}, to: {pkg_debug_str(boundary.to)} }}")
     "[{parts.join(", ")}]"
 }
 
 pkg_debug_service: fn(service: ServiceFact) -> String Never! {
     ports := [String]{}
-    loop port in service.ports -> &ports.push("{port}")
+    loop port in service.ports -> ports.push("{port}")
     "ServiceFact {{ enable: {pkg_debug_bool(service.enable)}, ports: [{ports.join(", ")}], ready: {pkg_debug_opt_str(service.ready)}, fields: {pkg_debug_str_map(service.fields)} }}"
 }
 
 pkg_debug_services: fn(services: [String: ServiceFact]) -> String Never! {
     parts := [String]{}
-    loop key in pkg_manifest_sorted(services.keys().to_list()) -> &parts.push("{pkg_debug_str(key)}: {pkg_debug_service(services[key])}")
+    loop key in pkg_manifest_sorted(services.keys().to_list()) -> parts.push("{pkg_debug_str(key)}: {pkg_debug_service(services[key])}")
     "{{{parts.join(", ")}}}"
 }
 
@@ -147,12 +147,12 @@ pkg_debug_payload: fn(payload: OutputPayload) -> String Never! {
         .String(text) -> "String({pkg_debug_str(text)})"
         .Array(values) -> {
             parts := [String]{}
-            loop value in values -> &parts.push(pkg_debug_payload(value))
+            loop value in values -> parts.push(pkg_debug_payload(value))
             "Array([{parts.join(", ")}])"
         }
         .Object(fields) -> {
             parts := [String]{}
-            loop key in pkg_manifest_sorted(fields.keys().to_list()) -> &parts.push("{pkg_debug_str(key)}: {pkg_debug_payload(fields[key])}")
+            loop key in pkg_manifest_sorted(fields.keys().to_list()) -> parts.push("{pkg_debug_str(key)}: {pkg_debug_payload(fields[key])}")
             "Object({{{parts.join(", ")}}})"
         }
     }
@@ -164,7 +164,7 @@ pkg_debug_output: fn(output: OutputFact) -> String Never! {
 
 pkg_debug_outputs: fn(outputs: [String: OutputFact]) -> String Never! {
     parts := [String]{}
-    loop key in pkg_manifest_sorted(outputs.keys().to_list()) -> &parts.push("{pkg_debug_str(key)}: {pkg_debug_output(outputs[key])}")
+    loop key in pkg_manifest_sorted(outputs.keys().to_list()) -> parts.push("{pkg_debug_str(key)}: {pkg_debug_output(outputs[key])}")
     "{{{parts.join(", ")}}}"
 }
 
@@ -172,7 +172,7 @@ pkg_debug_environments: fn(environments: [String: EnvironmentFact]) -> String Ne
     parts := [String]{}
     loop key in pkg_manifest_sorted(environments.keys().to_list()) {
         environment: environments[key]
-        &parts.push("{pkg_debug_str(key)}: EnvironmentFact {{ name: {pkg_debug_str(environment.name)}, tools: {pkg_debug_str_list(environment.tools)}, services: {pkg_debug_services(environment.services)}, secrets: {pkg_debug_str_map(environment.secrets)}, fields: {pkg_debug_str_map(environment.fields)} }}")
+        parts.push("{pkg_debug_str(key)}: EnvironmentFact {{ name: {pkg_debug_str(environment.name)}, tools: {pkg_debug_str_list(environment.tools)}, services: {pkg_debug_services(environment.services)}, secrets: {pkg_debug_str_map(environment.secrets)}, fields: {pkg_debug_str_map(environment.fields)} }}")
     }
     "{{{parts.join(", ")}}}"
 }
@@ -197,7 +197,7 @@ pkg_debug_build_profiles: fn(profiles: [BuildProfileDef]) -> String Never! {
             .ReadOnly -> "ReadOnly"
             .Disabled -> "None"
         }
-        &parts.push("BuildProfileDef {{ name: {pkg_debug_str(profile.name)}, optimize: {optimize}, debug_info: {pkg_debug_bool(profile.debug_info)}, small: {pkg_debug_bool(profile.small)}, panic: {panic}, settings: {pkg_debug_str_map(profile.settings)}, inspect: {inspect}, game_development_stripping: {pkg_debug_opt_bool(profile.game_development_stripping)}, game_cook_mode: {pkg_debug_opt_str(profile.game_cook_mode)} }}")
+        parts.push("BuildProfileDef {{ name: {pkg_debug_str(profile.name)}, optimize: {optimize}, debug_info: {pkg_debug_bool(profile.debug_info)}, small: {pkg_debug_bool(profile.small)}, panic: {panic}, settings: {pkg_debug_str_map(profile.settings)}, inspect: {inspect}, game_development_stripping: {pkg_debug_opt_bool(profile.game_development_stripping)}, game_cook_mode: {pkg_debug_opt_str(profile.game_cook_mode)} }}")
     }
     "[{parts.join(", ")}]"
 }
@@ -206,7 +206,7 @@ pkg_debug_settings: fn(settings: [String: SettingDecl]) -> String Never! {
     parts := [String]{}
     loop key in pkg_manifest_sorted(settings.keys().to_list()) {
         setting: settings[key]
-        &parts.push("{pkg_debug_str(key)}: SettingDecl {{ ty: {pkg_debug_str(setting.ty)}, default: {pkg_debug_str(setting.default)} }}")
+        parts.push("{pkg_debug_str(key)}: SettingDecl {{ ty: {pkg_debug_str(setting.ty)}, default: {pkg_debug_str(setting.default)} }}")
     }
     "{{{parts.join(", ")}}}"
 }
@@ -214,7 +214,7 @@ pkg_debug_settings: fn(settings: [String: SettingDecl]) -> String Never! {
 pkg_debug_members: fn(members: [MemberRef]) -> String Never! {
     parts := [String]{}
     loop member in members {
-        &parts.push(if member == {
+        parts.push(if member == {
             .Path(path) -> "Path({pkg_debug_str(path)})"
             .Find(path) -> "Find({pkg_debug_str(path)})"
         })
@@ -239,7 +239,7 @@ pkg_debug_opt_trust_decision: fn(decision: TrustDecision?) -> String Never! {
 
 pkg_debug_grants: fn(grants: [PackageGrant]) -> String Never! {
     parts := [String]{}
-    loop grant in grants -> &parts.push("({pkg_debug_str(grant.package)}, {pkg_debug_str_list(grant.rights)})")
+    loop grant in grants -> parts.push("({pkg_debug_str(grant.package)}, {pkg_debug_str_list(grant.rights)})")
     "[{parts.join(", ")}]"
 }
 
@@ -247,7 +247,7 @@ pkg_debug_authority: fn(authority: PackageAuthority) -> String Never! {
     trust: if authority.trust == {
         .Val(policy) -> {
             services := [String]{}
-            loop service in policy.services -> &services.push("({pkg_debug_str(service.service)}, {pkg_debug_trust_decision(service.decision)})")
+            loop service in policy.services -> services.push("({pkg_debug_str(service.service)}, {pkg_debug_trust_decision(service.decision)})")
             require := "None"
             if policy.require == .Val(floor) {
                 require = if floor == {
@@ -261,7 +261,7 @@ pkg_debug_authority: fn(authority: PackageAuthority) -> String Never! {
         .None -> "None"
     }
     providers := [String]{}
-    loop provider in authority.providers -> &providers.push("ProviderAuthority {{ provider: {pkg_debug_str(provider.provider)}, registry: {pkg_debug_str(provider.registry)}, allow: {pkg_debug_str_list(provider.allow)}, deny: {pkg_debug_str_list(provider.deny)} }}")
+    loop provider in authority.providers -> providers.push("ProviderAuthority {{ provider: {pkg_debug_str(provider.provider)}, registry: {pkg_debug_str(provider.registry)}, allow: {pkg_debug_str_list(provider.allow)}, deny: {pkg_debug_str_list(provider.deny)} }}")
     "PackageAuthority {{ allow: {pkg_debug_opt_str_list(authority.allow)}, deny: {pkg_debug_opt_str_list(authority.deny)}, needs: {pkg_debug_str_list(authority.needs)}, grants: {pkg_debug_grants(authority.grants)}, trust: {trust}, providers: [{providers.join(", ")}] }}"
 }
 
@@ -276,13 +276,13 @@ pkg_debug_claims: fn(grade: ClaimsGrade?) -> String Never! {
 // use these exact Rust-derived Debug bytes, not a second formatter.
 pkg_debug_source_maps: fn(maps: [PolicySourceMap]) -> String Never! {
     parts := [String]{}
-    loop map in maps -> &parts.push("({pkg_debug_str(map.pattern)}, {pkg_debug_str_list(map.sources)})")
+    loop map in maps -> parts.push("({pkg_debug_str(map.pattern)}, {pkg_debug_str_list(map.sources)})")
     "[{parts.join(", ")}]"
 }
 
 pkg_debug_exceptions: fn(exceptions: [PackagePolicyException]) -> String Never! {
     parts := [String]{}
-    loop exception in exceptions -> &parts.push("PackagePolicyException {{ id: {pkg_debug_str(exception.id)}, scope: {pkg_debug_str(exception.scope)}, reason: {pkg_debug_str(exception.reason)}, expires_at: {exception.expires_at} }}")
+    loop exception in exceptions -> parts.push("PackagePolicyException {{ id: {pkg_debug_str(exception.id)}, scope: {pkg_debug_str(exception.scope)}, reason: {pkg_debug_str(exception.reason)}, expires_at: {exception.expires_at} }}")
     "[{parts.join(", ")}]"
 }
 
@@ -301,7 +301,7 @@ pkg_facts_semantic_text: fn(facts: PackageFacts) -> String Never! {
     }
     loop name in pkg_manifest_sorted(facts.inline_configs.keys().to_list()) {
         config: facts.inline_configs[name]
-        &lines.push("inline_config={pkg_debug_str(name)};name={pkg_debug_opt_str(config.name)};version={pkg_debug_opt_str(config.version)};source={pkg_debug_opt_str(config.source)};deps={pkg_debug_deps(config.deps)};services={pkg_debug_services(config.services)};outputs={pkg_debug_outputs(config.outputs)};environments={pkg_debug_environments(config.environments)};defaults={pkg_debug_str_map(config.defaults)};")
+        lines.push("inline_config={pkg_debug_str(name)};name={pkg_debug_opt_str(config.name)};version={pkg_debug_opt_str(config.version)};source={pkg_debug_opt_str(config.source)};deps={pkg_debug_deps(config.deps)};services={pkg_debug_services(config.services)};outputs={pkg_debug_outputs(config.outputs)};environments={pkg_debug_environments(config.environments)};defaults={pkg_debug_str_map(config.defaults)};")
     }
     lines.join("")
 }

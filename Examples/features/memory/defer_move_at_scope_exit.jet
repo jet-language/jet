@@ -1,4 +1,4 @@
-// #4711: `defer close(^log)` moves `log` when the scope exits, not on the
+// #4711: `defer close(log)` moves `log` when the scope exits, not on the
 // `defer` line, so the statements after the `defer` still read `log`; the
 // deferred close consumes it last.
 Log: struct {
@@ -6,12 +6,12 @@ Log: struct {
 }
 
 impl Log.Close {
-    close: fn(^self) { print("close {self.name}") }
+    close: fn(&&self) { print("close {self.name}") }
 }
 
 run: fn() {
     log: Log{name: "audit"}
-    defer close(^log)
+    defer close(log)
     print("open {log.name}")
     print("still open {log.name}")
 }

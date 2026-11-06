@@ -9,7 +9,7 @@ Machine: struct {
     soft_stop: Bool
 }
 
-finish: fn(machine: ^Machine, ok: Bool) -> Bool {
+finish: fn(machine: &&Machine, ok: Bool) -> Bool {
     ok && machine.steps > 0
 }
 
@@ -21,35 +21,35 @@ step: fn(machine: &Machine) -> Int? {
 
 fallback_block: fn(limit: Int) -> Bool {
     machine := Machine{steps: limit, soft_stop: false}
-    first: step(&machine) ?? {
-        if machine.soft_stop -> return finish(^machine, true)
-        return finish(^machine, false)
+    first: step(machine) ?? {
+        if machine.soft_stop -> return finish(machine, true)
+        return finish(machine, false)
     }
-    _ := step(&machine)
-    finish(^machine, first > 0)
+    _ := step(machine)
+    finish(machine, first > 0)
 }
 
 fallback_return: fn(limit: Int) -> Bool {
     machine := Machine{steps: limit, soft_stop: false}
-    first: step(&machine) ?? return finish(^machine, false)
-    _ := step(&machine)
-    finish(^machine, first > 0)
+    first: step(machine) ?? return finish(machine, false)
+    _ := step(machine)
+    finish(machine, first > 0)
 }
 
 fallback_reaches_join: fn(limit: Int) -> Bool {
     machine := Machine{steps: limit, soft_stop: false}
-    first: step(&machine) ?? {
-        _ := finish(^machine, false)
+    first: step(machine) ?? {
+        _ := finish(machine, false)
         0
     }
-    finish(^machine, first > 0)
+    finish(machine, first > 0)
 }
 
 loop_rebinds: fn(machines: [Machine]) -> Bool {
     done := false
     loop machine in machines {
         // `machine` reads an element of the read parameter `machines`: the
-        // consumer gets an explicit copy (`^machine` would be E0201).
+        // consumer gets an explicit copy (`machine.move()` would be E0201).
         done = finish(machine.copy(), true)
     }
     loop machine in machines {

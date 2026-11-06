@@ -14,7 +14,7 @@ kit_steps_tokens: fn(text: String) -> [KitWord]? {
         start: i
         first: Int.from_u8(bytes[i])
         if (first == 40 || first == 41) && (i + 1 == bytes.len() || bytes[i + 1] == (U8{32}) || bytes[i + 1] == (U8{9})) {
-            &result.push(KitWord{text: kit_steps_byte_slice(text, i, i + 1), start: i, end: i + 1})
+            result.push(KitWord{text: kit_steps_byte_slice(text, i, i + 1), start: i, end: i + 1})
             i += 1
             next
         }
@@ -70,14 +70,14 @@ kit_steps_tokens: fn(text: String) -> [KitWord]? {
                 loop at < i - 1 {
                     if bytes[at] == (U8{92}) -> at += 1
                     if at >= i - 1 -> return None
-                    &buffer.push(bytes[at])
+                    buffer.push(bytes[at])
                     at += 1
                 }
                 decoded = String.from_bytes(buffer) ?? return None
             }
         }
         if bare_escape -> decoded = kit_steps_unquoted(raw) ?? return None
-        &result.push(KitWord{text: decoded, start: start, end: i})
+        result.push(KitWord{text: decoded, start: start, end: i})
     }
     Val(result)
 }
@@ -98,7 +98,7 @@ kit_steps_unquoted: fn(text: String) -> String? {
             else if c == 92 -> escape = true
             else if c == quote -> quote = 0
         } else if c == 34 || c == 39 -> quote = c
-        &result.push(bytes[i])
+        result.push(bytes[i])
         i += 1
     }
     Val(String.from_bytes(result) ?? return None)
@@ -177,7 +177,7 @@ kit_steps_exit_codes: fn(text: String) -> [String]? {
     loop raw in kit_steps_byte_slice(text, 1, text.count_bytes() - 1).split(",") {
         code: raw.trim().copy()
         if kit_steps_integer(code) == None -> return None
-        &result.push(code)
+        result.push(code)
     }
     if result.len() == 0 -> return None
     Val(result)

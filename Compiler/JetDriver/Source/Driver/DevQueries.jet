@@ -31,7 +31,7 @@ jet_driver_dev_host_call: fn(state: Shared<JetDriverDevConfig>, member: String, 
     permit := state.guard_edit()
     if {
         method == "watch" -> {
-            if value == .Text(path) -> &permit.value.watch.push(path.copy())
+            if value == .Text(path) -> permit.value.watch.push(path.copy())
             else -> return None
         }
         method == "serve" -> {
@@ -64,17 +64,17 @@ JetDriverDevQueryResult: struct {
     internal_problem: String?
 }
 
-jet_driver_dev_query_failed: fn(diagnostics: ^[Diagnostic], problem: ^String?) -> JetDriverDevQueryResult Never! {
-    {config: jet_driver_dev_config_stock(), diagnostics: ^diagnostics, complete: false, internal_problem: ^problem}
+jet_driver_dev_query_failed: fn(diagnostics: &&[Diagnostic], problem: &&String?) -> JetDriverDevQueryResult Never! {
+    {config: jet_driver_dev_config_stock(), diagnostics: diagnostics.move(), complete: false, internal_problem: problem.move()}
 }
 
 // The dev configuration of the request's entry package: the stock loop when the
 // package has no `dev: fn(d: Dev)`, otherwise what that function configures.
-jet_driver_query_dev_config: fn(owned_request: ^JetDriverCompileRequest) -> JetDriverDevQueryResult {
-    request := ^owned_request
+jet_driver_query_dev_config: fn(owned_request: &&JetDriverCompileRequest) -> JetDriverDevQueryResult {
+    request := owned_request.move()
     sources: jet_driver_source_query(request)
-    if !sources.complete -> return jet_driver_dev_query_failed(^sources.diagnostics, None)
-    if sources.entry_module_index < 0 || sources.entry_module_index >= sources.modules.len() -> return jet_driver_dev_query_failed(^sources.diagnostics, Val("loaded dev query has no exact entry module"))
+    if !sources.complete -> return jet_driver_dev_query_failed(sources.diagnostics.move(), None)
+    if sources.entry_module_index < 0 || sources.entry_module_index >= sources.modules.len() -> return jet_driver_dev_query_failed(sources.diagnostics.move(), Val("loaded dev query has no exact entry module"))
     package: sources.modules[sources.entry_module_index].package_identity
     selected := String?{None}
     loop loaded_module in sources.modules {
@@ -82,19 +82,19 @@ jet_driver_query_dev_config: fn(owned_request: ^JetDriverCompileRequest) -> JetD
         loop item in loaded_module.program.items {
             if item == .Func(function) && function.name == "dev" && function.params.len() == 1 && function.params[0].ty == (Type.Named{name: "Dev"}) {
                 if selected != None {
-                    errors := ^sources.diagnostics
-                    &errors.push(jet_driver_diagnostic_without_span("E3520", "two dev entries for the package", "one package configures its dev loop once", "keep one `dev: fn(d: Dev)` in the package"))
-                    return jet_driver_dev_query_failed(^errors, None)
+                    errors := sources.diagnostics.move()
+                    errors.push(jet_driver_diagnostic_without_span("E3520", "two dev entries for the package", "one package configures its dev loop once", "keep one `dev: fn(d: Dev)` in the package"))
+                    return jet_driver_dev_query_failed(errors, None)
                 }
                 selected = Val(loaded_module.physical_path.copy())
             }
         }
     }
-    path: selected ?? return JetDriverDevQueryResult{config: jet_driver_dev_config_stock(), diagnostics: ^sources.diagnostics, complete: true, internal_problem: None}
-    selection := jet_driver_lowering_inputs_selection(&request, JetDriverCompileMode.RootRun, Val(^path), Val("dev"), true, None)
-    compiled := ^selection.compile
-    if !compiled.complete || compiled.internal_problem != None -> return jet_driver_dev_query_failed(^compiled.diagnostics, ^compiled.internal_problem)
-    inputs: ^selection.inputs ?? return jet_driver_dev_query_failed(^compiled.diagnostics, Val("checked dev invocation lost its checked functions"))
+    path: selected ?? return JetDriverDevQueryResult{config: jet_driver_dev_config_stock(), diagnostics: sources.diagnostics.move(), complete: true, internal_problem: None}
+    selection := jet_driver_lowering_inputs_selection(request, JetDriverCompileMode.RootRun, Val(path.move()), Val("dev"), true, None)
+    compiled := selection.compile.move()
+    if !compiled.complete || compiled.internal_problem != None -> return jet_driver_dev_query_failed(compiled.diagnostics.move(), compiled.internal_problem.move())
+    inputs: selection.inputs.move() ?? return jet_driver_dev_query_failed(compiled.diagnostics.move(), Val("checked dev invocation lost its checked functions"))
     configured := jet_driver_dev_config_stock()
     configured.configured = true
     state: shared configured
@@ -102,15 +102,15 @@ jet_driver_query_dev_config: fn(owned_request: ^JetDriverCompileRequest) -> JetD
     // A refused effect inside `#Impure` is reported for this gate (E3411).
     config.impure_gate = policy_gate_allows(request.gate_set, PolicyKey.Impure)
     config.build_host_adapter = Val(JetDriverDevAdapter{state: state})
-    run := jet_driver_invocation_run(^inputs, [TComptimeValue]{TComptimeValue.Struct{type_name: "Dev", fields: []}}, config, Span{start: 0, end: 0})
-    errors := ^compiled.diagnostics
-    evaluated: ^run.result ?? return jet_driver_dev_query_failed(^errors, ^run.problem)
-    if evaluated.error == .Val(error) -> &errors.push(error.diagnostic.copy())
+    run := jet_driver_invocation_run(inputs, [TComptimeValue]{TComptimeValue.Struct{type_name: "Dev", fields: []}}, config, Span{start: 0, end: 0})
+    errors := compiled.diagnostics.move()
+    evaluated: run.result.move() ?? return jet_driver_dev_query_failed(errors, run.problem.move())
+    if evaluated.error == .Val(error) -> errors.push(error.diagnostic.copy())
     if evaluated.internal_problem != None || !evaluated.complete {
         // copy: `internal` is a payload view of `evaluated.internal_problem`.
         problem: if evaluated.internal_problem == .Val(internal) -> { Val(internal.message.copy()) } else -> { None }
-        return jet_driver_dev_query_failed(^errors, ^problem)
+        return jet_driver_dev_query_failed(errors, problem)
     }
     permit: state.guard_read()
-    JetDriverDevQueryResult{config: permit.value.copy(), diagnostics: ^errors, complete: true, internal_problem: None}
+    JetDriverDevQueryResult{config: permit.value.copy(), diagnostics: errors.move(), complete: true, internal_problem: None}
 }

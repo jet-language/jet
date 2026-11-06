@@ -114,7 +114,7 @@ PublicationRegistryTransport: enum {
 publication_address_text: fn(address: [U8]) -> String Never! {
     if address.len() == 4 -> return "{Int.from_u8(address[0])}.{Int.from_u8(address[1])}.{Int.from_u8(address[2])}.{Int.from_u8(address[3])}"
     groups := [String]{}
-    loop index in 0..<8 -> &groups.push(pkg_hex_bytes([U8]{address[index * 2], address[index * 2 + 1]}))
+    loop index in 0..<8 -> groups.push(pkg_hex_bytes([U8]{address[index * 2], address[index * 2 + 1]}))
     groups.join(":")
 }
 publication_registry_ip: fn(address: [U8]) -> String Never! {

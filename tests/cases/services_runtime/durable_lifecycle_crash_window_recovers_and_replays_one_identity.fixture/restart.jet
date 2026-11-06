@@ -6,7 +6,7 @@ use {
 
 worker: fn() -[]> {}
 
-state_name: fn(delivery: ^Delivery) -> String {
+state_name: fn(delivery: &&Delivery) -> String {
     state: delivery.status() ?? panic("status")
     if state == {
         .Pending -> { return "Pending" }
@@ -26,10 +26,10 @@ run: fn() {
     runtime := service.runtime("{store}.delivery", retention: retention)
     tree := service.tree("durable-crash")
     state_store: service.state_store(store) ?? panic("state")
-    &tree.set_state_event_log(state_store, "events", 1, "reversible") ?? panic("state adapter")
-    &tree.set_delivery(service.delivery_durable()) ?? panic("delivery")
-    endpoint: &tree.worker("api", worker, capacity: 1) ?? panic("worker")
-    &tree.start() ?? panic("start")
+    tree.set_state_event_log(state_store, "events", 1, "reversible") ?? panic("state adapter")
+    tree.set_delivery(service.delivery_durable()) ?? panic("delivery")
+    endpoint: tree.worker("api", worker, capacity: 1) ?? panic("worker")
+    tree.start() ?? panic("start")
 
     if phase == "accept" {
         accepted: runtime.send(endpoint, "crash", key: "crash") ?? panic("accept")
@@ -38,9 +38,9 @@ run: fn() {
     } else if phase == "deliver" {
         delivery: runtime.send(endpoint, "crash", key: "crash") ?? panic("deliver lookup")
         id: (delivery.copy()).show()
-        state: state_name(^delivery)
+        state: state_name(delivery)
         print("before:{id}:{state}")
-        received: &tree.receive(endpoint) ?? panic("receive")
+        received: tree.receive(endpoint) ?? panic("receive")
         print("received:{received}")
         print("crash_window:open")
     } else {
@@ -53,11 +53,11 @@ run: fn() {
         retry_state: state_name(retry.copy())
         retry_copy: retry.copy()
         print("retry:{retry_id}:{retry_state}")
-        received: &tree.receive(endpoint) ?? panic("replay receive")
+        received: tree.receive(endpoint) ?? panic("replay receive")
         print("received:{received}")
         runtime.commit(retry) ?? panic("replay commit")
         history: (retry_copy.copy()).events() ?? panic("replay history")
-        replayed_state: state_name(^retry_copy)
+        replayed_state: state_name(retry_copy)
         print("replayed:{replayed_state}:{history.len()}")
         print("same_identity:{recovered_id == retry_id}")
     }

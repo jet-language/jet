@@ -27,22 +27,22 @@ acquire: fn(resource: String) -> Lock {
 
 // `release` takes the lock by move (`^`) — this is the terminal consumption.
 // After this call the lock is gone, and the duty is discharged.
-release: fn(lock: ^Lock) { print("unlocked {lock.resource}") }
+release: fn(lock: &&Lock) { print("unlocked {lock.resource}") }
 
 run: fn() {
     db: acquire("db")
     // ... use the locked resource ...
-    release(^db)
+    release(db)
     // The duty travels with the value: handing it to another function that
     // returns it just moves the duty along.
     cache: acquire("cache")
-    held: hold(^cache)
-    release(^held)
+    held: hold(cache)
+    release(held)
 }
 
 // A pass-through: takes the lock and returns it, leaving the consume duty with
 // the caller.
-hold: fn(lock: ^Lock) -> Lock {
+hold: fn(lock: &&Lock) -> Lock {
     print("using {lock.resource}")
     return lock
 }

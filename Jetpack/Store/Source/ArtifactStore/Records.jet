@@ -64,8 +64,8 @@ ArtifactRecordKind: enum {
     // (Rust records.rs:77).
     action: fn(self, key: String) -> ActionHandle Never! {
         framed := self.schema().bytes()
-        &framed.push(U8{0})
-        &framed.extend(key.bytes())
+        framed.push(U8{0})
+        framed.extend(key.bytes())
         ActionHandle.from_bytes(framed)
     }
 }
@@ -129,7 +129,7 @@ impl ArtifactStore {
     touch_records: fn(self, kind: ArtifactRecordKind, keys: [String]) Never! -[FS, Env, Time, Rand]> {
         if !kind.is_action() -> return
         actions := [ActionHandle]{}
-        loop key in keys -> &actions.push(kind.action(key))
+        loop key in keys -> actions.push(kind.action(key))
         self.touch_actions(actions)
     }
 
@@ -140,7 +140,7 @@ impl ArtifactStore {
         if !kind.is_action() -> return Err(ArtifactStoreError.Config("{kind.schema()} records are content addressed; publish them one by one"))
         actions := [ArtifactActionPublication]{}
         loop record in records {
-            if record_open_schema(record.bytes, kind.schema()).problem == None -> &actions.push(ArtifactActionPublication{action: kind.action(record.key), bytes: record.bytes})
+            if record_open_schema(record.bytes, kind.schema()).problem == None -> actions.push(ArtifactActionPublication{action: kind.action(record.key), bytes: record.bytes})
         }
         self.publish_actions(actions)
     }

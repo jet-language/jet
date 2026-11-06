@@ -271,7 +271,7 @@ apply_rename: fn(path: OSPath, src: String, from: String, to: String) -> String 
     formatted: format_source(changed) ?? return .Err(diagnostics_error(path, changed, err))
     result: write_checked_source(path, src, formatted)
     if formatted != src -> record_canvas_rename(path, src, formatted, from, to, idx)
-    return .Ok(^result)
+    return .Ok(result)
 }
 record_canvas_rename: fn(path: &OSPath, before: String, after: String, from: String, to: String, index: &SemIndex) Err! {
     // GATE #4494: symlink-safe exclusive creation; #4409: AlreadyExists receipt collision.
@@ -361,7 +361,7 @@ enclosing_inline_module: fn(items: [Item], position: Usize) -> ([String], Usize)
             scope: tuple_3._0
             close: tuple_3._1
             scope.insert(0, module_ref.name.copy())
-            return .Val((_0: ^scope, _1: close))
+            return .Val((_0: scope, _1: close))
         }
         return .Val((_0: [module_ref.name.copy()], _1: module_ref.span.end.saturating_sub(1)))
     }
@@ -381,8 +381,8 @@ find_trait_location: fn(bundle: AST.ProgramBundle, path: OSPath, trait_name: Str
                     fallback_match: t.name == local_name && scope.iter().map((s) -> s.as_str()).eq(requested_scope.iter().copied())
                     if display_path != .Val(requested_name) && !fallback_match -> next
                     (found_scope, module_close): enclosing_inline_module(root_items, t.name_span.start).unwrap_or_else(() -> (scope.copy(), source_len))
-                    found_scope: display_path.as_ref().and_then((path) -> path.rsplit_once('.')).map(((scope, _)) -> scope.split('.').map((s) -> s.to_string()).collect()).unwrap_or(^found_scope)
-                    return .Val(TraitLocation { trait_def: t, scope: ^found_scope, module_close: module_close })
+                    found_scope: display_path.as_ref().and_then((path) -> path.rsplit_once('.')).map(((scope, _)) -> scope.split('.').map((s) -> s.to_string()).collect()).unwrap_or(found_scope)
+                    return .Val(TraitLocation { trait_def: t, scope: found_scope, module_close: module_close })
                 }
                 .CodeModule(m) -> {
                     if m.body.as_ref() == .Val(body) {
@@ -399,7 +399,7 @@ find_trait_location: fn(bundle: AST.ProgramBundle, path: OSPath, trait_name: Str
     loop (module_idx, module_ref) in bundle.modules.iter().enumerate() {
         if canonical_path(module_ref.path) != source_path -> next
         scope := []
-        if find_in_items(module_ref.items, &scope, requested_scope, trait_name, local_name, module_idx, module_ref.alias, module_ref.items, module_ref.source.len(), bundle) == .Val(t) -> return .Val(t)
+        if find_in_items(module_ref.items, scope, requested_scope, trait_name, local_name, module_idx, module_ref.alias, module_ref.items, module_ref.source.len(), bundle) == .Val(t) -> return .Val(t)
     }
     return .None
 }
@@ -451,7 +451,7 @@ apply_insert_call: fn(path: OSPath, src: String, graph_id: String, callee: Strin
     if wire_inline_expr_id == .Val(inline_id) {
         inline: projection.inline_exprs.iter().find((i) -> i.id == inline_id) ?? return .Err(edit_error("not_found", "Canvas inline expression no longer exists"))
         edits := [edit(inline.span, call)]
-        if plan.import == .Val(import) -> edits.push(^import)
+        if plan.import == .Val(import) -> edits.push(import)
         changed: FixEngine.apply_edits(src, edits) ?? return .Err(edit_error("overlap", "Canvas wired insert edit overlapped"))
         return write_checked_formatted(path, src, changed)
     }
@@ -462,7 +462,7 @@ apply_insert_call: fn(path: OSPath, src: String, graph_id: String, callee: Strin
         .None -> "{indent}{call}\n"
     }
     edits := [edit(SourceSpan { start: insert_offset, end: insert_offset }, stmt)]
-    if plan.import == .Val(import) -> edits.push(^import)
+    if plan.import == .Val(import) -> edits.push(import)
     changed: FixEngine.apply_edits(src, edits) ?? return .Err(edit_error("overlap", "Canvas insert edit overlapped"))
     return write_checked_formatted(path, src, changed)
 }
@@ -497,7 +497,7 @@ insert_call_plan: fn(src: String, callee: String, args: &[String], module_path: 
     module_ref: normalize_core_module(target.module_ref, target.member)
     (prefix, import): core_call_prefix_and_import(src, module_ref)
     final_args: if args.is_empty() -> core_default_args(module_ref, target.member) else -> args.to_vec()
-    return InsertCallPlan { callee: "{prefix}.{target.member}", args: ^final_args, fallible: core_call_is_fallible(module_ref, target.member), import: ^import }
+    return InsertCallPlan { callee: "{prefix}.{target.member}", args: final_args, fallible: core_call_is_fallible(module_ref, target.member), import: import.move() }
 }
 CoreCallTarget: struct { module_ref: String; member: String }
 core_target_for_callee: fn(src: String, callee: String, module_path: String?) -> CoreCallTarget? {
@@ -507,19 +507,19 @@ core_target_for_callee: fn(src: String, callee: String, module_path: String?) ->
     if module_path == .Val(module_ref) {
         alias: default_core_alias(module_ref)
         if module_ref.starts_with("core.") && parts.len() == 2 && parts.first().copied() == .Val(alias.as_str()) {
-            return .Val(CoreCallTarget { module_ref: module_ref.copy(), member: ^member })
+            return .Val(CoreCallTarget { module_ref: module_ref.copy(), member: member.move() })
         }
     }
-    if parts.first() == "core" && parts.len() >= 3 -> return .Val(CoreCallTarget { module_ref: parts[0..<parts.len() - 1].join("."), member: ^member })
+    if parts.first() == "core" && parts.len() >= 3 -> return .Val(CoreCallTarget { module_ref: parts[0..<parts.len() - 1].join("."), member: member.move() })
     loop import in core_imports(src) {
         if import.alias != parts[0] -> next
         suffix: if parts.len() > 2 -> ".{parts[1..parts.len() - 1].join(".")}" else -> ""
-        return .Val(CoreCallTarget { module_ref: "{import.module_ref}{suffix}", member: ^member })
+        return .Val(CoreCallTarget { module_ref: "{import.module_ref}{suffix}", member: member.move() })
     }
     alias: parts[0]
     if Syntax.core_module_for_alias(alias) == .Val(module_ref) {
         suffix: if parts.len() > 2 -> ".{parts[1..parts.len() - 1].join(".")}" else -> ""
-        return .Val(CoreCallTarget { module_ref: "{module_ref}{suffix}", member: ^member })
+        return .Val(CoreCallTarget { module_ref: "{module_ref}{suffix}", member: member.move() })
     }
     return .None
 }
@@ -535,15 +535,15 @@ core_call_prefix_and_import: fn(src: String, module_ref: String) -> (String, Tex
 imported_core_prefix: fn(src: String, module_ref: String) -> String? {
     best := (_0: Usize, _1: String)?{.None}
     loop import in core_imports(src) {
-        if import.module_ref == module_ref -> return .Val(^import.alias)
+        if import.module_ref == module_ref -> return .Val(import.alias.move())
         prefix: "{import.module_ref}."
         if module_ref.starts_with(prefix) {
             suffix := module_ref[prefix.len()..<module_ref.len()] // #4303
             candidate: "{import.alias}.{suffix}"
-            if best.as_ref().map_or(true, ((_0: len, _1: _)) -> import.module_ref.len() > len) -> best = .Val((import.module_ref.len(), ^candidate))
+            if best.as_ref().map_or(true, ((_0: len, _1: _)) -> import.module_ref.len() > len) -> best = .Val((import.module_ref.len(), candidate))
         }
     }
-    return best.map(((_0: _, _1: alias)) -> ^alias)
+    return best.map(((_0: _, _1: alias)) -> alias.move())
 }
 CoreImport: struct { module_ref: String; alias: String }
 // A `use` line or a row of a `use {` block (#6542): `alias: core.x`, or
@@ -572,9 +572,9 @@ core_imports: fn(src: String) -> [CoreImport] {
             alias = default_core_alias(module_ref)
         }
         if !module_ref.starts_with("core.") -> next
-        if !module_ref.is_empty() && !alias.is_empty() -> imports.push(CoreImport { module_ref: module_ref.to_string(), alias: ^alias })
+        if !module_ref.is_empty() && !alias.is_empty() -> imports.push(CoreImport { module_ref: module_ref.to_string(), alias: alias.move() })
     }
-    return ^imports
+    return imports.move()
 }
 ident_prefix: fn(text: String) -> String { text.chars().take_while((c) -> c.is_ascii_alphanumeric() || c == '_').collect() }
 default_core_alias: fn(module_ref: String) -> String { module_ref.rsplit('.').next().unwrap_or("core").to_string() }
@@ -634,7 +634,7 @@ canvas_action_candidate: fn(path: OSPath, src: String, graph_id: String, action_
     check: check_canvas_candidate(path, overlay_path, formatted)
     errors: check.iter().filter((d) -> d.severity == .Error).cloned().collect()
     if !errors.is_empty() -> return .Err(diagnostics_error(path, formatted, errors))
-    return .Ok(^formatted)
+    return .Ok(formatted)
 }
 apply_insert_structural: fn(path: OSPath, src: String, graph_id: String, op: String, wire_origin_pin_id: String?, wire_target_pin: String?) -> String Err! {
     projection: project_file(path) ?? return .Err(diagnostics_error(path, src, err))
@@ -733,7 +733,7 @@ validated_collapse_selection: fn(path: OSPath, src: String, graph_id: String, re
     func: find_func_by_name_span(bundle, name_span) ?? return .Err(edit_error("not_found", "Canvas graph no longer exists"))
     locs := []
     block := []
-    collect_statement_locs(src, func.body, &block, &locs)
+    collect_statement_locs(src, func.body, block, locs)
     first: locs.iter().find((loc) -> requested.start == loc.anchor.start || requested.start == loc.source.start || requested.start == loc.full.start)
         .or_else(() -> locs.iter().find((loc) -> loc.is_guard && loc.guard_span.is_some_and((span) -> requested.start >= span.start && requested.start < span.end)))
     last: locs.iter().find((loc) -> requested.end == loc.anchor.end || requested.end == loc.source.end || requested.end == loc.full.end)
@@ -766,7 +766,7 @@ inline_helper_candidate: fn(path: OSPath, src: String, inline_id: String?, start
     (name, args): parse_simple_call(call) ?? return .Err(edit_error("diagnostic", "Canvas inline needs a direct helper call expression"))
     (params, body): find_simple_helper(src, name) ?? return .Err(edit_error("diagnostic", "Canvas inline could not find a simple helper return body"))
     if params.len() != args.len() -> return .Err(edit_error("diagnostic", "Canvas inline helper argument count changed"))
-    expr := ^body
+    expr := body.move()
     loop (param, arg) in params.iter().zip(args.iter()) -> expr = replace_ident(expr, param, arg)
     return FixEngine.apply_edits(src, [edit(span, expr)]).map_err((_) -> edit_error("overlap", "Canvas inline helper edit overlapped"))
 }

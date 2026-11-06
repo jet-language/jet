@@ -52,7 +52,7 @@ consumption remain identical to the native SplitMix64 seed.
 the public `numerator()` and `denominator()` accessors. Field and method names
 share one member namespace; the storage names are not a construction API.
 
-Manual Core `Debug` implementations use the Prelude's consuming `debug(^self)`
+Manual Core `Debug` implementations use the Prelude's consuming `debug(&&self)`
 contract; `Display` reads `self`. Neither formatting projection changes its text.
 Data errors provide their explicit `Display` and `Debug` implementations beside
 the error declaration; the `#Error` rule does not need a second formatting
@@ -506,7 +506,7 @@ to the existing names under D-ITER-DECLINE1.
 
 `next()` is the one partial pull (D-ITER-RESUME1, which amends
 D-ITER-DECLINE1 for `next` only). It needs exclusive access to a writable
-binding, written `&items.next()`, pulls exactly one item, and leaves the
+binding, written `items.next()`, pulls exactly one item, and leaves the
 remainder in the same source: after two pulls from `[1, 2, 3].lazy()`,
 `to_list()` returns `[3]`. The end is `None`. A moved source cannot be pulled,
 and a loop that drives a source holds it for its whole body, so pulling from
@@ -715,7 +715,7 @@ D-CORE-FILELOCK1):
   and reports `IOError.TimedOut`; `files.try_lock(path)` returns None only
   for contention. After acquisition, Core revalidates the opened identity
   against the path and retries a replaced binding. `FileLock.path` remains
-  read-only. Consuming `close(^lock)`, scope exit, or process exit releases
+  read-only. Consuming `close(lock)`, scope exit, or process exit releases
   the kernel lock; release never removes the lock file. Unix uses `flock`;
   Windows uses `LockFileEx` and denies delete sharing. A directory is not a
   lock file; holding a directory and locking a regular file are distinct.
@@ -734,7 +734,7 @@ D-CORE-FILELOCK1):
   held directory itself. Its `AdvisoryLock` owns an independent close-on-exec
   descriptor, so renaming the directory or closing the original `Directory`
   does not release the lock. A contended lock is an `IOError`; explicit
-  `close(^lock)` or scope exit releases it, without deleting a name. Systems
+  `close(lock)` or scope exit releases it, without deleting a name. Systems
   without directory flock report `Unsupported`. This differs from locking
   the regular file named by `files.lock(path)`.
 - Publish through a held directory by exclusively creating a temporary sibling,
@@ -823,7 +823,7 @@ count_lines: fn(path: String) -> Int IOError! {
 | `writer.set_mode(mode)` | `!IOError` | Set the open file's permission bits; Windows keeps only read-only. |
 
 Readers, writers, temporary resources, and locks own their provider resource
-until lexical scope exit or an explicit `close(^handle)` consumes the handle.
+until lexical scope exit or an explicit `close(handle)` consumes the handle.
 A writer flush remains fallible, and early failure propagation closes the
 handle. `append_all` is deliberately distinct from the streaming `append`
 constructor (D-FILES-APPEND1). See the [bounded buffering law](../spec.md#bounded-buffering-law).
@@ -1233,7 +1233,7 @@ run: fn() {
 | `pbkdf2_hmac(password, salt, iterations, key_len)` | `[U8] !CryptoError` | Derive a bounded PBKDF2-HMAC-SHA256 byte sequence. |
 | `new()` / `update(hasher, bytes)` / `digest(hasher)` | hasher operations | Use the incremental SHA-256 hasher. |
 | `constant_time_equal(a, b)` / `constant_time_equal_bytes(a, b)` | `Bool` | Compare nominal secrets or byte lists without early equality branching. |
-| `wipe(&bytes)` | unit | Zero every element of a `[U8]` and its spare capacity with stores the optimizer cannot drop; the length is unchanged. |
+| `wipe(bytes)` | unit | Zero every element of a `[U8]` and its spare capacity with stores the optimizer cannot drop; the length is unchanged. |
 | `generatekey()` | `X25519SecretKey !CryptoError` | Generate an X25519 secret through the random provider. |
 | `x25519(secret, public)` / `x25519_shared(secret, public)` | `SharedSecret !CryptoError` | Perform typed X25519 agreement and reject invalid keys. |
 | `x25519_public(secret)` | `X25519PublicKey !CryptoError` | Derive the public key. |
@@ -1252,7 +1252,7 @@ only a text data-tree value is accepted, and its UTF-8 bytes become the secret.
 There is no corresponding `Encode` implementation. A user-defined type named
 `Secret` does not inherit this codec by name.
 
-`wipe(&bytes)` erases key bytes that must stay a plain `[U8]`, such as a seed
+`wipe(bytes)` erases key bytes that must stay a plain `[U8]`, such as a seed
 handed to a C library. A buffer the List alone owns is zeroed in place,
 including its spare capacity. A buffer another List still shares keeps its
 bytes for that List: the wiped List takes a fresh zeroed buffer of the same
@@ -1369,7 +1369,7 @@ use {
 provision: fn() -[Secret, IO]> {
     plan: vault.prepare_generate<crypto.SigningKey>("release") ?? return
     write: vault.authorize_write(plan, "create release signer") ?? return
-    key_ref: vault.commit_generate(^write, ^plan) ?? return
+    key_ref: vault.commit_generate(write, plan) ?? return
     print("created {key_ref}")
 }
 ```
@@ -1379,15 +1379,15 @@ provision: fn() -[Secret, IO]> {
 | `get(name)` | `?String` | Read the separate untyped repository-secret value. |
 | `current<T>(name)` | `?KeyRef<T> !VaultError` | Return the active generation, if one exists. |
 | `versions<T>(name)` | `[KeyRef<T>] !VaultError` | Return generations in provider order. |
-| `load<T>(&key)` / `status<T>(&key)` | `T !VaultError` / `KeyStatus !VaultError` | Load an exact Active or Retired key, or inspect `Active`, `Retired`, or `Revoked`. |
-| `prepare_generate<T>(name)` / `prepare_store<T>(name, ^key)` | `MutationPlan<T> !VaultError` | Prepare a typed mutation without publishing it. |
+| `load<T>(key)` / `status<T>(key)` | `T !VaultError` / `KeyStatus !VaultError` | Load an exact Active or Retired key, or inspect `Active`, `Retired`, or `Revoked`. |
+| `prepare_generate<T>(name)` / `prepare_store<T>(name, key)` | `MutationPlan<T> !VaultError` | Prepare a typed mutation without publishing it. |
 | `prepare_import_signing` / `prepare_import_x25519` | typed plan `!VaultError` | Prepare a checked 32-byte signing or X25519 secret import. |
 | `prepare_rotate<T>(name)` | `MutationPlan<T> !VaultError` | Prepare a rotation for a named generation. |
-| `prepare_retire<T>(&key, reason)` / `prepare_revoke<T>(&key, reason)` | `MutationPlan<T> !VaultError` | Bind a retirement or revocation to an exact key and reason. |
-| `authorize_write<T>(&plan, reason)` | `VaultWrite<T> !VaultError` | Request one provider-authorized write for the exact plan. |
-| `commit_generate/store/rotate/retire/revoke<T>(^write, ^plan)` | typed result `!VaultError` | Consume the write and plan in an atomic mutation. |
-| `export_to_recipients<T>(&key, recipients)` | `WrappedVaultKey !KeyWrapError` | Export a typed key for one to sixteen distinct X25519 recipients. |
-| `export_to_passphrase<T>(&key, &passphrase)` | `WrappedVaultKey !KeyWrapError` | Export a typed key under a bounded nominal Secret. |
+| `prepare_retire<T>(key, reason)` / `prepare_revoke<T>(key, reason)` | `MutationPlan<T> !VaultError` | Bind a retirement or revocation to an exact key and reason. |
+| `authorize_write<T>(plan, reason)` | `VaultWrite<T> !VaultError` | Request one provider-authorized write for the exact plan. |
+| `commit_generate/store/rotate/retire/revoke<T>(write, plan)` | typed result `!VaultError` | Consume the write and plan in an atomic mutation. |
+| `export_to_recipients<T>(key, recipients)` | `WrappedVaultKey !KeyWrapError` | Export a typed key for one to sixteen distinct X25519 recipients. |
+| `export_to_passphrase<T>(key, passphrase)` | `WrappedVaultKey !KeyWrapError` | Export a typed key under a bounded nominal Secret. |
 | `prepare_import_wrapped<T>` / `authorize_wrapped_import<T>` / `commit_import_wrapped<T>` | typed results | Bind, authorize, and commit a wrapped-key import. |
 
 `VaultError` is closed: `InvalidName`, `NotFound`, `WrongType`, `Revoked`,
@@ -1601,8 +1601,8 @@ run: fn() {
     print("hi, {name}")
     term.eprint("(log) done")
     out := term.stdout()
-    &out.write("done") ?? return
-    &out.flush() ?? return
+    out.write("done") ?? return
+    out.flush() ?? return
 }
 ```
 
@@ -1631,7 +1631,7 @@ are `Enter`, `Escape`, `Backspace`, `Tab`, `Delete`, the four arrow keys, and
 `Unknown`. `confirm` treats a bare Enter as no; `choose` returns an input error
 after its finite retry budget or when stdin closes.
 
-Read a buffered handle with `&reader.read_line()`: each call mutably lends
+Read a buffered handle with `reader.read_line()`: each call mutably lends
 the reader and returns `String? !IOError`. Ordinary failure propagation
 preserves the optional line, so EOF remains `None` rather than an I/O error.
 
@@ -2413,7 +2413,7 @@ non-square, nonfinite, singular, unsupported-device, and limit failures are
 | `LinearSolver` | type | Stores solver kind, dimension, factors, pivots, and device. |
 
 The independent finite `Solver` counter is not an LU factorization:
-`Solver.new(seed)` starts with zero checks and failures, `&solver.require(ok)`
+`Solver.new(seed)` starts with zero checks and failures, `solver.require(ok)`
 counts every requirement and records failed ones, and `failure_count()` reads
 the failure count. `status()` returns `"ok"` until a failure, then `"failed"`.
 Copying this value copies its counters independently.
@@ -2512,13 +2512,13 @@ resource loading requires the corresponding file and GPU authority.
 | `raylib.get_collision_rec(rec1, rec2)` | `RaylibRectangle` | The overlap of two rectangles, or a zero rectangle when they do not overlap. |
 | `raylib.gen_image_color(width, height, color)` / `gen_image_checked(width, height, checks_x, checks_y, first, second)` | `RaylibImage` | A new RGBA image of one color, or of `checks_x` by `checks_y` pixel checks starting with `first` at the top left. A side below 1 or above 16384, or more than 2^24 pixels, gives an image with no pixels. |
 | `raylib.get_image_color(image, x, y)` | `RaylibColor` | The pixel at `(x, y)`, or a zero color outside the image. |
-| `raylib.image_clear_background(&image, color)` / `image_draw_pixel(&image, x, y, color)` | `Unit` | Set every pixel, or one pixel inside the image, to `color`, alpha included. |
-| `raylib.image_draw_rectangle(&image, x, y, width, height, color)` / `image_draw_rectangle_rec(&image, rec, color)` | `Unit` | Set the rectangle's pixels, clipped to the image and truncated to whole pixels. As in raylib, less than one column still sets the first pixel unless the rectangle ends at the left edge, and less than one row still fills the first row. |
-| `raylib.image_crop(&image, rec)` | `Unit` | Keep the rectangle's pixels, clipped to the image and truncated to whole pixels. A rectangle starting past the image leaves it unchanged. As in raylib, one with no whole column or row leaves no pixels, and the truncated sides (not below 0) become the image's size. |
-| `raylib.image_resize_nn(&image, width, height)` | `Unit` | Nearest-neighbour resize with raylib's 16.16 fixed-point source index. A size outside `gen_image_color`'s limits leaves the image unchanged. |
-| `raylib.image_flip_vertical(&image)` / `image_flip_horizontal(&image)` / `image_rotate_cw(&image)` / `image_rotate_ccw(&image)` | `Unit` | Mirror the rows or columns, or turn the image a quarter turn; a turn swaps width and height. |
-| `raylib.image_color_tint(&image, color)` / `image_color_invert(&image)` | `Unit` | Scale each channel by `color`'s channel / 255, rounded down, alpha included; or replace red, green and blue with 255 minus themselves. |
-| `raylib.image_color_brightness(&image, amount)` / `image_color_replace(&image, color, replace)` | `Unit` | Add `amount`, clamped to -255..255, to red, green and blue, capped at 255; as in raylib, a sum below 0 becomes 1. Or replace every pixel equal to `color` in all four channels with `replace`. |
+| `raylib.image_clear_background(image, color)` / `image_draw_pixel(image, x, y, color)` | `Unit` | Set every pixel, or one pixel inside the image, to `color`, alpha included. |
+| `raylib.image_draw_rectangle(image, x, y, width, height, color)` / `image_draw_rectangle_rec(image, rec, color)` | `Unit` | Set the rectangle's pixels, clipped to the image and truncated to whole pixels. As in raylib, less than one column still sets the first pixel unless the rectangle ends at the left edge, and less than one row still fills the first row. |
+| `raylib.image_crop(image, rec)` | `Unit` | Keep the rectangle's pixels, clipped to the image and truncated to whole pixels. A rectangle starting past the image leaves it unchanged. As in raylib, one with no whole column or row leaves no pixels, and the truncated sides (not below 0) become the image's size. |
+| `raylib.image_resize_nn(image, width, height)` | `Unit` | Nearest-neighbour resize with raylib's 16.16 fixed-point source index. A size outside `gen_image_color`'s limits leaves the image unchanged. |
+| `raylib.image_flip_vertical(image)` / `image_flip_horizontal(image)` / `image_rotate_cw(image)` / `image_rotate_ccw(image)` | `Unit` | Mirror the rows or columns, or turn the image a quarter turn; a turn swaps width and height. |
+| `raylib.image_color_tint(image, color)` / `image_color_invert(image)` | `Unit` | Scale each channel by `color`'s channel / 255, rounded down, alpha included; or replace red, green and blue with 255 minus themselves. |
+| `raylib.image_color_brightness(image, amount)` / `image_color_replace(image, color, replace)` | `Unit` | Add `amount`, clamped to -255..255, to red, green and blue, capped at 255; as in raylib, a sum below 0 becomes 1. Or replace every pixel equal to `color` in all four channels with `replace`. |
 | `raylib.load_texture_atlas(path)` | `RaylibTextureAtlas -[FS, GPU]>` | Load an atlas and decode its PNG texture (every color type, bit depth and Adam7; sixteen-bit samples keep their high byte). A missing or malformed PNG leaves the atlas without a texture. |
 | `raylib.load_sound(path)` | `RaylibSound -[FS, GPU]>` | Load a sound resource. |
 | `raylib.play_sound(sound)` | `Bool -[GPU]>` | Start playback and report whether it was accepted. |
@@ -2677,7 +2677,7 @@ run: fn() {
     stamp: time.parse_rfc3339("2025-01-02T03:04:05Z") ?? return
     print(time.isoformat(stamp))
     clock: time.Clock.new(0)
-    &clock.tick(1000)
+    clock.tick(1000)
     print(clock.now())
 }
 ```
@@ -2895,8 +2895,8 @@ The reader enforces depth `256` and a maximum item size of `16,777,216` bytes.
 | `json.pointer(tree, path)` | `Dyn !EncodingError` | Select by RFC 6901 JSON Pointer; a missing member or bad step is a located error, JSON `null` is a value. |
 | `json.patch(doc, ops)` / `patch_with_limits(doc, ops, limits)` | `Dyn !EncodingError` | Apply an RFC 6902 operation array atomically; `doc` is unchanged on failure. |
 | `json.events(value)` | `[DataEvent]` | Produce the canonical event sequence for a tree. |
-| `json.reader(^input, limits)` / `reader_allow_duplicates(^input, limits)` | `JSONReader !EncodingError` | Construct a bounded file-backed event stream. `reader` fails with a sticky `Syntax` error at a repeated object name; `reader_allow_duplicates` reports each occurrence as its own `Key` event. |
-| `json.writer(^output, limits, canonical)` | `JSONWriter !EncodingError` | Construct a bounded file-backed event writer. |
+| `json.reader(input, limits)` / `reader_allow_duplicates(input, limits)` | `JSONReader !EncodingError` | Construct a bounded file-backed event stream. `reader` fails with a sticky `Syntax` error at a repeated object name; `reader_allow_duplicates` reports each occurrence as its own `Key` event. |
+| `json.writer(output, limits, canonical)` | `JSONWriter !EncodingError` | Construct a bounded file-backed event writer. |
 | `JSONReader.next()` | `?DataEvent !EncodingError` | Return the next event or stable end-of-input. |
 | `JSONWriter.write(event)` / `flush()` / `finish()` | `Unit !EncodingError` | Write events, flush output, or validate and finish the stream. |
 
@@ -2920,7 +2920,7 @@ is retained and counts as nonblank (only spaces and tabs make a blank record).
 | `jsonl.count_rows(text)` | `Int` | Count nonblank rows. |
 | `jsonl.append_line(text, value)` | `String` | Append one encoded row. |
 | `jsonl.first(text)` | `?Dyn !EncodingError` | Return the first nonblank row. |
-| `jsonl.reader(^input, limits)` / `jsonl.writer(^output, limits)` | `JSONLReader !EncodingError` / `JSONLWriter !EncodingError` | Construct bounded file-backed line streams. |
+| `jsonl.reader(input, limits)` / `jsonl.writer(output, limits)` | `JSONLReader !EncodingError` / `JSONLWriter !EncodingError` | Construct bounded file-backed line streams. |
 | `JSONLReader.next()` | `?Dyn !EncodingError` | Return the next row or stable end-of-input. |
 | `JSONLWriter.write(value)` / `flush()` / `finish()` | `Unit !EncodingError` | Write records, flush output, or finish the stream. |
 
@@ -2944,9 +2944,9 @@ header on the first pull) and decodes it, so rows stream one at a time.
 | `csv.rows(text, delimiter, header, skip_blank)` | `[CSVRow] !EncodingError` | Parse physical rows with explicit delimiter, header and blank-line policy. |
 | `csv.parse(text, delimiter, header, skip_blank)` / `decode(text)` | `Dyn !EncodingError` | Parse rows as an array of arrays through the same engine and options as `csv.rows`. |
 | `csv.to_string<T: Encode>(rows)` | `String` | Encode explicit row arrays, typed records, or the array-of-arrays `Dyn` that `csv.parse` returns, so parsed rows round-trip; records use the first record's field order as the header. Rows are separated by LF, with no trailing LF. |
-| `csv.reader(^source, limits, delimiter, header, skip_blank)` / `csv.writer(^target, limits)` | `CSVReader !EncodingError -[FS]>` / `CSVWriter !EncodingError -[FS]>` | Construct incremental file-backed CSV objects. Reader defaults retain the header and blank records. |
+| `csv.reader(source, limits, delimiter, header, skip_blank)` / `csv.writer(target, limits)` | `CSVReader !EncodingError -[FS]>` / `CSVWriter !EncodingError -[FS]>` | Construct incremental file-backed CSV objects. Reader defaults retain the header and blank records. |
 | `CSVReader.next()` | `?CSVRow !EncodingError -[IO]>` | Return the next physical row or stable end-of-input; errors retain their byte offset, physical location, and record/field path. |
-| `CSVWriter.write(^fields)` / `flush()` / `finish()` | `Unit !EncodingError -[IO]>` | Write comma-delimited string fields; CRLF is deferred until the next record or finish. Flush does not finish a record. |
+| `CSVWriter.write(fields)` / `flush()` / `finish()` | `Unit !EncodingError -[IO]>` | Write comma-delimited string fields; CRLF is deferred until the next record or finish. Flush does not finish a record. |
 | `csv.query<T>(path, sql)` | `Query<T> ![FieldError] -[FS]>` | Decode typed header-named records and apply the bounded query plan. |
 | `CSVRow` | type | Physical line number and parsed string fields. |
 
@@ -2991,7 +2991,7 @@ codec must not remove its native options or located error payloads.
 | `xml.parse(text)` / `parse_with(text, options)` / `parse_bytes(bytes, options)` | `Dyn !XMLError` | Parse Unicode text or supported byte encodings with bounded, non-I/O entity policy. |
 | `xml.to_string(tree)` / `to_bytes(tree, options)` | `String !XMLError` / `[U8] !XMLError` | Render a validated XML document with lexical and encoding options. |
 | `xml.canonical(tree, options)` | `String !XMLError` | Apply Inclusive 1.1 or Exclusive 1.0 canonicalization. |
-| `xml.reader(^input, limits, options)` | `XMLReader !EncodingError` | Construct a bounded file-backed XML event reader. |
+| `xml.reader(input, limits, options)` | `XMLReader !EncodingError` | Construct a bounded file-backed XML event reader. |
 | `xml.attribute(element, name)` / `content(element)` / `expanded_name(node)` / `root(document)` | varies `!XMLError` | Inspect attributes, content, expanded names, and the document root. |
 | `XMLWriter.write(event)` / `flush()` / `finish()` | `Unit !EncodingError` | Write XML events, flush output, or validate and finish the stream. |
 
@@ -3016,7 +3016,7 @@ part; its helper functions are not exports of the public CBOR module.
 | --- | --- | --- |
 | `cbor.parse(bytes, options)` | `Dyn !CBORError` | Parse a whole value under depth, item, allocation, and canonical limits. |
 | `cbor.to_bytes<T: Encode>(value)` / `to_bytes_canonical(value)` | `[U8] !CBORError` | Encode ordinary or canonical CBOR. |
-| `cbor.reader(^input, limits)` / `writer(^output, limits)` | `CBORReader !EncodingError` / `CBORWriter !EncodingError` | Construct bounded file-backed event streams. |
+| `cbor.reader(input, limits)` / `writer(output, limits)` | `CBORReader !EncodingError` / `CBORWriter !EncodingError` | Construct bounded file-backed event streams. |
 | `CBORReader.next()` | `?DataEvent !EncodingError` | Return the next event or stable end-of-input. |
 | `CBORWriter.write(event)` / `flush()` / `finish()` | `Unit !EncodingError` | Write events, flush output, or validate and finish the stream. |
 
@@ -3482,7 +3482,7 @@ constant evaluation; they are not alternate syntax for bindings. See
 | Signature | Result | Description |
 |---|---|---|
 | `keep<T>(value: T) -> T` | `T` | Preserve a value at an explicit use site. |
-| `identity(value: ^String) -> String` | text | Return a borrowed string unchanged. |
+| `identity(value: &&String) -> String` | text | Return a borrowed string unchanged. |
 | `always(value: Bool) -> Bool` | Boolean | Return a Boolean unchanged. |
 | `identity_int(value: Int) -> Int`, `identity_float(value: Float) -> Float`, `identity_bool(value: Bool) -> Bool` | same type | Typed identity helpers for primitive values. |
 | `const_int(value: Int, ignored: Int) -> Int` | integer | Select the first integer in a constant-evaluation expression. |
@@ -4009,10 +4009,10 @@ run: fn() {
 | `Bump.new(capacity: Int)` | allocator | Create a contiguous monotonic allocator. |
 | `Pool.new<T>(slots: Int)` | pool | Reuse fixed-size slots by alignment class. |
 | `Fixed.new(size: Int)` | allocator | Create positive-comptime inline backing storage. |
-| `Fixed.over(&bytes)` | allocator | Borrow one mutable byte buffer for the handle's scope. |
+| `Fixed.over(bytes)` | allocator | Borrow one mutable byte buffer for the handle's scope. |
 | `allocator.alloc(value)` | view | Store a value and return a scope-bound view. |
 | `allocator.reset()` | — | Drop values while retaining reusable storage. |
-| `close(^allocator)` | — | Release the allocator resource permanently. |
+| `close(allocator)` | — | Release the allocator resource permanently. |
 | `address_of<T>(value: T) -> Int` | address | Return an inert address value. |
 | `from_addr<T>(address: Int) -> *T` | pointer | `#Unsafe` function: reconstitute a pointer; every call sits in an audited `#Unsafe` region. |
 | `volatile_read<T>(pointer: *T) -> T` | value | `#Unsafe` function: perform a volatile read; every call sits in an audited `#Unsafe` region. |
@@ -4251,22 +4251,22 @@ empty. `socket_addr` is the first element of `socket_addrs`. Explicit
 | `tcp_connect_timeout(addr: SocketAddr, timeout_ms: Int) -[Net, Time.Wait]> TCPStream !NetError` | stream | Connect with a nonnegative timeout. |
 | `tcp_connect_happy(host: String, port: Int, timeout_ms: Int) -[Net, Time.Wait]> TCPStream !NetError` | stream | Connect through the address-family race. |
 | `create_connection(host: String, port: Int) -[Net, Time.Wait]> TCPStream !NetError` / `create_server(host, port) -[Net]> TCPListener !NetError` | endpoint | Build host/port TCP endpoints. |
-| `send(&stream: TCPStream, text: String) -[Net, Time.Wait]> Int !NetError` | count | Write text through the caller's exclusive stream window. |
-| `tcp_read(&stream: TCPStream) -[Net, Time.Wait]> String !NetError` / `tcp_read_bytes(&stream, n) -[Net, Time.Wait]> [U8] !NetError` | text/bytes | Read from a TCP stream. |
-| `tcp_read_text(&stream, n) -[Net, Time.Wait]> String !NetError` | text | Read and decode up to `n` bytes. |
-| `tcp_write(&stream, text: String) -[Net, Time.Wait]> Unit !NetError` / `tcp_write_bytes(&stream, bytes) -[Net, Time.Wait]> Int !NetError` | unit/count | Write text or bytes. |
-| `tcp_write_all_bytes(&stream, bytes) -[Net, Time.Wait]> Unit !NetError` / `tcp_write_text(&stream, text) -[Net, Time.Wait]> Unit !NetError` | unit | Write all bytes or text. |
-| `tcp_shutdown(&stream, how: NetShutdown) -[Net]> Unit !NetError` / `tcp_close(&stream) -[Net]> Unit !NetError` | — | Shut down or close a stream. |
-| `tcp_reply(^stream, status: String, body: String) -[Net, Time.Wait]> Unit !NetError` | — | Consume a stream, write one checked reply with a three-digit status, and close it. |
-| `tcp_ready(&stream, interest: NetReadyInterest, deadline_ms: Int) -[Net, Time.Wait]> NetReady !NetError` | readiness | Wait for a readiness interest until a deadline. |
+| `send(stream: &TCPStream, text: String) -[Net, Time.Wait]> Int !NetError` | count | Write text through the caller's exclusive stream window. |
+| `tcp_read(stream: &TCPStream) -[Net, Time.Wait]> String !NetError` / `tcp_read_bytes(stream, n) -[Net, Time.Wait]> [U8] !NetError` | text/bytes | Read from a TCP stream. |
+| `tcp_read_text(stream, n) -[Net, Time.Wait]> String !NetError` | text | Read and decode up to `n` bytes. |
+| `tcp_write(stream, text: String) -[Net, Time.Wait]> Unit !NetError` / `tcp_write_bytes(stream, bytes) -[Net, Time.Wait]> Int !NetError` | unit/count | Write text or bytes. |
+| `tcp_write_all_bytes(stream, bytes) -[Net, Time.Wait]> Unit !NetError` / `tcp_write_text(stream, text) -[Net, Time.Wait]> Unit !NetError` | unit | Write all bytes or text. |
+| `tcp_shutdown(stream, how: NetShutdown) -[Net]> Unit !NetError` / `tcp_close(stream) -[Net]> Unit !NetError` | — | Shut down or close a stream. |
+| `tcp_reply(stream, status: String, body: String) -[Net, Time.Wait]> Unit !NetError` | — | Consume a stream, write one checked reply with a three-digit status, and close it. |
+| `tcp_ready(stream, interest: NetReadyInterest, deadline_ms: Int) -[Net, Time.Wait]> NetReady !NetError` | readiness | Wait for a readiness interest until a deadline. |
 | `ready_readable(ready: NetReady) -> Bool` / `ready_writable(ready) -> Bool` | Boolean | Inspect readiness. |
 | `tcp_local_addr(stream) -[Net]> String !NetError`, `tcp_peer_addr(stream) -[Net]> String !NetError` | text | Read rendered stream endpoints. |
 | `tcp_local_socket_addr(stream) -[Net]> SocketAddr !NetError`, `tcp_peer_socket_addr(stream) -[Net]> SocketAddr !NetError`, `listener_local_socket_addr(listener) -[Net]> SocketAddr !NetError` | address | Read typed stream/listener endpoints. |
-| `set_timeout(&stream, timeout_ms: Int) -[Net]> Unit !NetError` | — | Set a nonnegative timeout on the caller's stream, without copying the handle. |
-| `set_read_timeout(&stream, timeout_ms: Int) -[Net]> Unit !NetError` / `set_write_timeout(&stream, timeout_ms: Int) -[Net]> Unit !NetError` | — | Set read or write timeouts in milliseconds. |
-| `nodelay(stream) -[Net]> Bool !NetError` / `set_nodelay(&stream, on: Bool) -[Net]> Unit !NetError` | option | Read or set TCP no-delay. |
-| `ttl(stream) -[Net]> Int !NetError` / `set_ttl(&stream, hops: Int) -[Net]> Unit !NetError` | option | Read or set the TTL. |
-| `sendfile(&stream, path: String) -[Net, Time.Wait]> Int !NetError` | count | Send file bytes through a TCP stream. |
+| `set_timeout(stream, timeout_ms: Int) -[Net]> Unit !NetError` | — | Set a nonnegative timeout on the caller's stream, without copying the handle. |
+| `set_read_timeout(stream, timeout_ms: Int) -[Net]> Unit !NetError` / `set_write_timeout(stream, timeout_ms: Int) -[Net]> Unit !NetError` | — | Set read or write timeouts in milliseconds. |
+| `nodelay(stream) -[Net]> Bool !NetError` / `set_nodelay(stream, on: Bool) -[Net]> Unit !NetError` | option | Read or set TCP no-delay. |
+| `ttl(stream) -[Net]> Int !NetError` / `set_ttl(stream, hops: Int) -[Net]> Unit !NetError` | option | Read or set the TTL. |
+| `sendfile(stream, path: String) -[Net, Time.Wait]> Int !NetError` | count | Send file bytes through a TCP stream. |
 | `udp_bind(addr: String) -[Net]> UDPSocket !NetError` / `udp_bind_addr(addr: SocketAddr) -[Net]> UDPSocket !NetError` | socket | Bind a UDP socket. |
 | `udp_local_addr(socket: UDPSocket) -[Net]> SocketAddr !NetError` / `udp_set_timeout(socket, timeout_ms: Int) -[Net]> Unit !NetError` | address/— | Inspect a UDP endpoint or set its timeout. |
 | `udp_send_to(socket, text, addr) -[Net, Time.Wait]> Int !NetError` / `udp_send_bytes_to(socket, bytes, addr) -[Net, Time.Wait]> Int !NetError` | count | Send text or bytes to a datagram address. |
@@ -4274,9 +4274,9 @@ empty. `socket_addr` is the first element of `socket_addrs`. Explicit
 | `udp_packet_data(packet)`, `udp_packet_bytes(packet)`, `udp_packet_addr(packet)` | scalar | Read packet text, bytes, or address. |
 | `udp_packet_original_len(packet) -> Int` / `udp_packet_truncated(packet) -> Bool` | scalar | Inspect datagram length and truncation. |
 | `unix_listen(path: String) -[Net]> UnixListener !NetError` / `unix_connect(path) -[Net, Time.Wait]> UnixStream !NetError` | endpoint | Use Unix-domain sockets. |
-| `unix_accept(listener) -[Net, Time.Wait]> UnixStream !NetError` / `unix_read(&stream) -[Net, Time.Wait]> String !NetError` | stream/text | Accept or read a Unix stream. |
-| `unix_write(&stream, text) -[Net, Time.Wait]> Unit !NetError` / `unix_read_bytes(&stream, n) -[Net, Time.Wait]> [U8] !NetError` | unit/bytes | Write text or read bytes through the caller's exclusive stream window. |
-| `unix_write_all_bytes(&stream, bytes) -[Net, Time.Wait]> Unit !NetError` / `unix_shutdown(&stream, how) -[Net]> Unit !NetError` / `unix_close(&stream) -[Net]> Unit !NetError` | — | Write all bytes or close the same Unix stream. |
+| `unix_accept(listener) -[Net, Time.Wait]> UnixStream !NetError` / `unix_read(stream) -[Net, Time.Wait]> String !NetError` | stream/text | Accept or read a Unix stream. |
+| `unix_write(stream, text) -[Net, Time.Wait]> Unit !NetError` / `unix_read_bytes(stream, n) -[Net, Time.Wait]> [U8] !NetError` | unit/bytes | Write text or read bytes through the caller's exclusive stream window. |
+| `unix_write_all_bytes(stream, bytes) -[Net, Time.Wait]> Unit !NetError` / `unix_shutdown(stream, how) -[Net]> Unit !NetError` / `unix_close(stream) -[Net]> Unit !NetError` | — | Write all bytes or close the same Unix stream. |
 | `dns_a(name: String, ms: Int) -[Net, Time.Wait]> [IPAddr] !NetError` / `dns_aaaa(name, ms) -[Net, Time.Wait]> [IPAddr] !NetError` | addresses | Resolve IPv4 or IPv6 records. |
 | `dns_a_at(server: String, name: String, ms: Int) -[Net, Time.Wait]> [IPAddr] !NetError` / `dns_aaaa_at(server, name, ms) -[Net, Time.Wait]> [IPAddr] !NetError` | addresses | Resolve A or AAAA records through an explicit server. |
 | `dns_txt(name: String, ms: Int) -[Net, Time.Wait]> [String] !NetError` / `dns_ptr(addr, ms) -[Net, Time.Wait]> [String] !NetError` | records | Resolve TXT or PTR records. |
@@ -4385,11 +4385,11 @@ carriers are validated before network use. See [`Core/Net/Tls.jet`](../../../Cor
 | `ClientConfig.default().with_trust(policy)` | `ClientConfig !IOError` | Select `.System`, `.SystemPlus(roots)`, or `.CustomOnly(roots)` trust. |
 | `ClientConfig.default().with_client_identity(identity)` | `ClientConfig !IOError` | Add a validated mTLS client identity to an immutable configuration. |
 | `ClientConfig.default().with_version_bounds(min: version, max: version)` | `ClientConfig !IOError` | Select inclusive `.TLS12` / `.TLS13` bounds; reversed bounds fail before network use. |
-| `tls.client(^tcp, server_name:, config:, deadline:)` | `TLSStream !NetError` | Consume the connected TCP stream, verify the server name, apply configuration, and use the earliest handshake deadline. |
+| `tls.client(tcp, server_name:, config:, deadline:)` | `TLSStream !NetError` | Consume the connected TCP stream, verify the server name, apply configuration, and use the earliest handshake deadline. |
 | `client(host: String, port: Int)` | `TLSStream !IOError` | Convenience form that connects and verifies a host and port. |
-| `read(&stream: TLSStream, n: Int)` / `read_text(&stream, n)` | `[U8] !IOError` / `String !IOError` | Read bounded TLS bytes or checked UTF-8 text. |
-| `write(&stream: TLSStream, bytes: [U8])` / `write_all(&stream, bytes)` | `Int !IOError` / `!IOError` | Write application bytes, partially or completely. |
-| `write_text(&stream: TLSStream, text)` / `close(stream)` | `!IOError` | Write text or send close-notify on the same handle; repeated close is harmless. |
+| `read(stream: &TLSStream, n: Int)` / `read_text(stream, n)` | `[U8] !IOError` / `String !IOError` | Read bounded TLS bytes or checked UTF-8 text. |
+| `write(stream: &TLSStream, bytes: [U8])` / `write_all(stream, bytes)` | `Int !IOError` / `!IOError` | Write application bytes, partially or completely. |
+| `write_text(stream: &TLSStream, text)` / `close(stream)` | `!IOError` | Write text or send close-notify on the same handle; repeated close is harmless. |
 | `stream.peer_identity()` | `TLSPeerIdentity` | Read the verified server name, certificate chain, cipher suite, and negotiated TLS version. |
 | `stream.read(limit, deadline:)` / `stream.write_all(bytes, deadline:)` | matching results | Apply explicit per-call deadlines on the same TLS handle. |
 | `stream.close_write(deadline:)` | `!IOError` | Flush close-notify and close only writes while reads continue. |
@@ -4406,7 +4406,7 @@ DNS subjectAltNames, validity in Unix milliseconds, and RFC 4514-style subject
 and issuer names.
 
 The consumed-stream overload is distinct from `client(host, port)`: using
-`tls.client(^tcp, server_name:, config:, deadline:)` keeps the immutable
+`tls.client(tcp, server_name:, config:, deadline:)` keeps the immutable
 configuration and returns `NetError`. System trust reads `SSL_CERT_FILE` /
 `SSL_CERT_DIR` when set and otherwise the first distribution bundle that loads.
 `RootCertificates.from_pem` and `ClientIdentity.from_pem` validate through the

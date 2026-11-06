@@ -90,14 +90,14 @@ run: fn() {
     empty: QueryEngine<Int>.new()
     print(empty.size())
     engine := QueryEngine<String>.new()
-    &engine.put(key("a", 1), "A", [Key]{})
-    &engine.put(key("b", 1), "B", [Key]{key("a", 1)})
+    engine.put(key("a", 1), "A", [Key]{})
+    engine.put(key("b", 1), "B", [Key]{key("a", 1)})
     print(engine.size())
     print(engine.memo_key_valid(key("b", 1), 0))
     print(engine.memo_key_valid(key("c", 1), 0))
     state := GCState<GCTestObject>.new()
-    &state.insert(U64{1}, GCTestObject{n: 3})
-    &state.insert(U64{2}, GCTestObject{n: 4})
+    state.insert(U64{1}, GCTestObject{n: 3})
+    state.insert(U64{2}, GCTestObject{n: 4})
     print(state.count())
     leaf: Tree<String>{value: "b", children: [Tree<String>]{}}
     middle: Tree<String>{value: "m", children: [Tree<String>]{leaf}}

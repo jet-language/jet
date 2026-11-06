@@ -56,7 +56,7 @@ jet_cli_compiler_checked_value: fn(value: TComptimeValue) -> JetCLIStatusValue N
             entries := [JetCLIStatusField]{}
             loop field in fields {
                 if !ast_comptime_memo_storage_name(field.name) {
-                    &entries.push(jet_cli_status_field(field.name, jet_cli_compiler_checked_value(field.value)))
+                    entries.push(jet_cli_status_field(field.name, jet_cli_compiler_checked_value(field.value)))
                 }
             }
             jet_cli_status_object(entries)
@@ -101,7 +101,7 @@ jet_cli_inspect_compiler_check: fn(file: String, source: String) -> JetDriverVer
             functions := [JetCLIStatusValue]{}
             loop item in parsed.parsed.program.items {
                 if item == .Func(function) {
-                    &functions.push(
+                    functions.push(
                     jet_cli_status_object(
                     [JetCLIStatusField]{
                         jet_cli_status_field("name", jet_cli_status_text(function.name)),

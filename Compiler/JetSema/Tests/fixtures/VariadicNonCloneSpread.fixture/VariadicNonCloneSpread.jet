@@ -1,8 +1,8 @@
 Payload: struct { action: fn() -> String }
 render: fn() -> String { "one" }
-consume: fn(parts: ^...Payload) {}
+consume: fn(parts: &&...Payload) {}
 run: fn() {
     left: [Payload]{Payload{action: render}}
     right: [Payload]{Payload{action: render}}
-    consume(^...left, ^...right)
+    consume(...left, ...right)
 }

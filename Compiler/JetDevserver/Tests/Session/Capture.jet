@@ -53,7 +53,7 @@ capture_test_error: fn(budget: CaptureBudget, records: [CaptureTestRecord], inco
     located: CaptureLocation.new(source_id.copy(), U32{0}).with_column(U32.MAX)
     assert_eq(located.render(), "λ.jet:0:4294967295")
     assert_eq(source_id, "λ.jet")
-    assert_eq(CaptureSourceFact.new(CaptureSource.Network, Val(^located)).reason_text(), "Net at λ.jet:0:4294967295")
+    assert_eq(CaptureSourceFact.new(CaptureSource.Network, Val(located.move())).reason_text(), "Net at λ.jet:0:4294967295")
 }
 
 #Test("capture_package_settings_and_per_invocation_override_are_independent") {
@@ -75,11 +75,11 @@ capture_test_error: fn(budget: CaptureBudget, records: [CaptureTestRecord], inco
     assert_eq(CaptureMode.development().as_str(), "dev")
     assert_eq(CaptureMode.release().as_str(), "release")
     owned_id: "move.jet"
-    location: CaptureLocation.new(^owned_id, U32{4}).with_column(U32{6})
-    fact: CaptureSourceFact.new(CaptureSource.RawInput, Val(^location))
+    location: CaptureLocation.new(owned_id, U32{4}).with_column(U32{6})
+    fact: CaptureSourceFact.new(CaptureSource.RawInput, Val(location.move()))
     assert_eq(fact.reason_text(), "Input at move.jet:4:6")
     at_id: "at.jet"
-    assert_eq(CaptureSourceFact.at(CaptureSource.Network, ^at_id, U32{5}).reason_text(), "Net at at.jet:5")
+    assert_eq(CaptureSourceFact.at(CaptureSource.Network, at_id, U32{5}).reason_text(), "Net at at.jet:5")
     assert(!(CaptureKind.SafeClock).is_sensitive())
     assert((CaptureKind.Sensitive).is_sensitive())
 }

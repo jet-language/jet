@@ -1,17 +1,17 @@
 // D-CALLSITE-MARK1=A (amends D-COPY-DEFAULT1=A at call arguments): an
-// unmarked argument to a take (`^T`) parameter moves when the call is the
-// name's last use, exactly as `^name` would. A use that is not the last needs
+// unmarked argument to a take (`&&T`) parameter moves when the call is the
+// name's last use, exactly as `name.move()` would. A use that is not the last needs
 // the explicit copy `name.copy()` (E0209 teaches it). An edit keeps its `&`.
 Order: struct {
     id: Int
     items: [String]
 }
 
-archive: fn(order: ^Order) -> String {
+archive: fn(order: &&Order) -> String {
     "order {order.id} with {order.items.len()} items"
 }
 
-total: fn(values: ^[Int]) -> Int {
+total: fn(values: &&[Int]) -> Int {
     sum := 0
     loop value in values {
         sum += value
@@ -19,7 +19,7 @@ total: fn(values: ^[Int]) -> Int {
     sum
 }
 
-label: fn(name: ^String, suffix: ^String) -> String {
+label: fn(name: &&String, suffix: &&String) -> String {
     "{name}-{suffix}"
 }
 
@@ -41,14 +41,14 @@ run: fn() {
     // One name in two slots of one call has no last use there: the take
     // slot writes `^` next to the copy.
     name: "crate"
-    print(label(name.copy(), ^name))
+    print(label(name.copy(), name))
 
     score := 41
-    bump(&score)
+    bump(score)
     print("score {score}")
 
     // `^` on a captured name moves it into the lambda, which then runs once.
     note: "draft"
-    finish: () -> print(label(^note, "final"))
+    finish: () -> print(label(note, "final"))
     finish()
 }

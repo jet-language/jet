@@ -286,11 +286,11 @@ prepare_project_rename: fn(ctx: ProjectContext, selected_path: OSPath, from: Str
     loop source in sources {
         loop definition in source.index.definitions() {
             if definition.name != from || !module_belongs_to(ctx.project_root, source.path, definition.module_path) || !definition_matches_anchor(definition, anchor) -> next
-            add_project_rename_edit(&edits_by_source, &seen, source, definition.def_span)
+            add_project_rename_edit(edits_by_source, seen, source, definition.def_span)
         }
         loop reference in source.index.references() {
             if reference.name != from || !module_belongs_to(ctx.project_root, source.path, reference.module_path) || !reference_matches_anchor(reference, anchor) -> next
-            add_project_rename_edit(&edits_by_source, &seen, source, reference.span)
+            add_project_rename_edit(edits_by_source, seen, source, reference.span)
         }
     }
     if edits_by_source.is_empty() -> return .Err(ProjectRenameError.new("not_found", "Canvas rename found no semantic definition or reference sites"))
@@ -749,7 +749,7 @@ finish_project_changes: fn(ctx: ProjectContext, request: String, op: String, cha
 finish_project_changes_with_audit: fn(ctx: ProjectContext, request: String, op: String, changes: [ProjectChange], audit: String) -> String Err! {
     changes := changes
     loop change in changes { validate_project_path(ctx.project_root, change.path, change.rel)? }
-    if op == "rename_binding".bit_or("rename_function") { normalize_and_format_project_changes(ctx, &changes)? } else { normalize_and_validate_project_changes(ctx, &changes)? }
+    if op == "rename_binding".bit_or("rename_function") { normalize_and_format_project_changes(ctx, changes)? } else { normalize_and_validate_project_changes(ctx, changes)? }
     if op == "rename_binding".bit_or("rename_function") -> validate_project_rename_overlay(ctx, changes)?
     preview: json_bool_field(request, "preview").unwrap_or(false) || op.starts_with("preview_")
     changed: changes.iter().any((c) -> c.before != c.after)

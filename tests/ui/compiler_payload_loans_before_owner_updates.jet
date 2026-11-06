@@ -38,7 +38,7 @@ read_then_append: fn(items: &[LoanItem]) -> Int Never! {
         if items[index] == .Fields(fields) {
             loop text in fields.values -> total += text.len()
         }
-        &items.push(LoanItem.Unit)
+        items.push(LoanItem.Unit)
         index += 1
     }
     total
@@ -58,7 +58,7 @@ run: fn() Never! {
         LoanStatement.Val{binding: LoanBinding{name: "one", transferred: false}},
         LoanStatement.Val{binding: LoanBinding{name: "four", transferred: false}},
     }
-    assert(update_statements(&statements) == 7)
+    assert(update_statements(statements) == 7)
     loop statement in statements {
         if statement == .Val(binding) -> assert(binding.transferred)
     }
@@ -66,7 +66,7 @@ run: fn() Never! {
         LoanItem.Fields{fields: LoanFields{values: [String]{"a", "bc"}}},
         LoanItem.Fields{fields: LoanFields{values: [String]{"def"}}},
     }
-    assert(read_then_append(&items) == 6)
+    assert(read_then_append(items) == 6)
     assert(items.len() == 4)
     assert(owned_loop_metadata([Int]{0, 1, 2}) == 9)
 }

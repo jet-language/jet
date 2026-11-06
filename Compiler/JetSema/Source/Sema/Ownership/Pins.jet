@@ -1,4 +1,4 @@
-// `mem.pin(&place) -> Pin<T>` starts a tracked write window that
+// `mem.pin(place) -> Pin<T>` starts a tracked write window that
 // promises the place keeps its address. The pin names that storage location,
 // so its argument must be a named place (E0218).
 use jet_foundation.[
@@ -68,7 +68,7 @@ sema_pin_call_argument: fn(expr: Expr) -> CallArg? {
     }
 }
 
-// Rust `core_call` ("core.mem", "pin") view fact: `pinned: mem.pin(&place)`
+// Rust `core_call` ("core.mem", "pin") view fact: `pinned: mem.pin(place)`
 // keeps an exclusive write window on `place` for as long as `pinned` lives.
 // True when the binding is a pin and its fact was recorded.
 sema_pin_record_binding: fn(state: &SemaOwnershipState, binding: Binding, init_ty: Type, scopes: SemaScopeTable) -> Bool {
@@ -79,19 +79,19 @@ sema_pin_record_binding: fn(state: &SemaOwnershipState, binding: Binding, init_t
         .Place(value, _, _, _) -> value
         else -> argument.expr
     }
-    places: sema_ownership_places_from_expr_in_state(target, scopes, &state)
+    places: sema_ownership_places_from_expr_in_state(target, scopes, state)
     if places.len() != 1 -> return false
-    loan_seq: sema_ownership_matching_loan_seq(&state, places[0], expr_span(argument.expr))
-    sema_ownership_record_view_fact(&state, binding.name, binding.name_span, places[0], [String]{}, AccessConvention.Write, scopes, loan_seq)
+    loan_seq: sema_ownership_matching_loan_seq(state, places[0], expr_span(argument.expr))
+    sema_ownership_record_view_fact(state, binding.name, binding.name_span, places[0], [String]{}, AccessConvention.Write, scopes, loan_seq)
 }
 
-// Rust `check_owner_change(name, "be moved")` for the exact move `^place`:
+// Rust `check_owner_change(name, "be moved")` for the exact move `place.move()`:
 // moving a pinned place is E0219. Runs before the moved place is read.
 sema_pin_check_move: fn(state: &SemaOwnershipState, expr: Expr, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
-    loop place in sema_ownership_places_from_expr_in_state(expr, scopes, &state) {
-        if sema_ownership_conflicting_view_for_expr(&state, place, AccessConvention.Move, expr, scopes) == .Val(fact) {
+    loop place in sema_ownership_places_from_expr_in_state(expr, scopes, state) {
+        if sema_ownership_conflicting_view_for_expr(state, place, AccessConvention.Move, expr, scopes) == .Val(fact) {
             if sema_pin_view_fact(fact, scopes) {
-                &diagnostics.push(sema_ownership_diag_view_change(fact, place, "be moved", expr_span(expr), scopes))
+                diagnostics.push(sema_ownership_diag_view_change(fact, place, "be moved", expr_span(expr), scopes))
                 return false
             }
         }

@@ -6,7 +6,7 @@ GenericPicker: struct {
     }
     weighted_pick: fn<T>(&self, items: [T], weights: [Float]) -> T? Never! {
         if weights.len() != items.len() -> return None
-        &self.pick(items)
+        self.pick(items)
     }
     sample: fn<T>(&self, items: [T], count: Int) -> [T] Never! {
         if count <= 0 -> return [T]{}
@@ -26,10 +26,10 @@ GenericOwner: struct<T> {
 }
 run: fn() {
     picker := GenericPicker{}
-    print((&picker.pick([1, 2])) ?? 0)
-    print((&picker.weighted_pick([1, 2], [1.0, 2.0])) ?? 0)
-    print(&picker.sample([1, 2], 2))
+    print((picker.pick([1, 2])) ?? 0)
+    print((picker.weighted_pick([1, 2], [1.0, 2.0])) ?? 0)
+    print(picker.sample([1, 2], 2))
     values := [1, 2]
-    &picker.shuffle(&values)
+    picker.shuffle(values)
     print(values)
 }

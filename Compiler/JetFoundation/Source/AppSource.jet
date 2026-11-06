@@ -46,11 +46,11 @@ app_route_file_address: fn(relative: String) -> AppRouteAddress {
     stem: if relative.ends_with(".jet") -> relative.slice(0, relative.len() - 4) else -> relative
     parts := [String]{}
     loop part in stem.split("/") {
-        if part != "" -> &parts.push(part)
+        if part != "" -> parts.push(part)
     }
     if parts.len() > 0 {
         last: app_route_file_words(parts[parts.len() - 1])
-        if last == "index" || last == "page" -> _ := &parts.pop()
+        if last == "index" || last == "page" -> _ := parts.pop()
     }
     if parts.len() == 0 -> return AppRouteAddress{path: "/", bad_part: None}
     path := ""
@@ -65,7 +65,7 @@ app_route_file_address: fn(relative: String) -> AppRouteAddress {
             if !sema_casing_is_alphanumeric(scalar) && scalar != "_" -> return AppRouteAddress{path: "", bad_part: Val(part)}
         }
         words := [String]{}
-        loop word in sema_casing_split_words(name) -> &words.push(unicode.lower(word))
+        loop word in sema_casing_split_words(name) -> words.push(unicode.lower(word))
         path = "{path}/:{words.join("_")}"
     }
     AppRouteAddress{path: path, bad_part: None}
@@ -91,7 +91,7 @@ app_route_file_words: fn(component: String) -> String {
 app_route_file_run_words: fn(run: String) -> String {
     words := [String]{}
     loop piece in run.split("-") {
-        loop word in sema_casing_split_words(piece) -> &words.push(unicode.lower(word))
+        loop word in sema_casing_split_words(piece) -> words.push(unicode.lower(word))
     }
     words.join("-")
 }

@@ -8,7 +8,7 @@ recipe_debug_test_root: fn(label: String) -[Env, Rand]> String {
 
 #Test("build attempt json round trips and redacts secrets") {
     attempt := BuildAttempt.new("weirdctl", "adapt:weirdctl:./vendor/weirdctl", "adapter", "rh", "sh")
-    &attempt.push_step(StepLog{
+    attempt.push_step(StepLog{
         index: 1,
         total: 1,
         name: "install",
@@ -34,7 +34,7 @@ recipe_debug_test_root: fn(label: String) -[Env, Rand]> String {
     files.write(files.join(outside, "live"), "must survive") ?? panic("live file")
     files.symlink(outside, files.join(source, "escape")) ?? panic("escape link")
     attempt := BuildAttempt.new("pkg", "pkg@1", "fixture", "recipe", "source")
-    if &attempt.preserve_scratch(root, source, files.join(root, "missing-output")) == {
+    if attempt.preserve_scratch(root, source, files.join(root, "missing-output")) == {
         .Ok(_) -> panic("a symlinked source must stop scratch preservation")
         .Err(_) -> {}
     }

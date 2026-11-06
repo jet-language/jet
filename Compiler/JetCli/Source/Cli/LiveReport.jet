@@ -49,25 +49,25 @@ jet_cli_live_json_report: fn(snapshot: JetCLILiveSnapshot, plane: String) -> Str
     grouped := [String:[String]]{}
     names := [String]{}
     loop value in snapshot.values {
-        &values.push(jet_cli_status_object([
+        values.push(jet_cli_status_object([
             jet_cli_status_field("value_id", jet_cli_status_text(value.value_id)), jet_cli_status_field("type_identity", jet_cli_status_text(value.type_identity)),
             jet_cli_status_field("disposition", jet_cli_status_text(value.disposition)), jet_cli_status_field("reason", jet_cli_status_text(value.reason)),
             jet_cli_status_field("rendered_value", if value.rendered_value == .Val(shown) -> jet_cli_status_text(shown) else -> JetCLIStatusValue.Null),
         ]))
-        if !grouped.has_key(value.type_identity) -> &names.push(value.type_identity)
+        if !grouped.has_key(value.type_identity) -> names.push(value.type_identity)
         ids := grouped.get(value.type_identity) ?? [String]{}
-        &ids.push(value.value_id)
+        ids.push(value.value_id)
         grouped[value.type_identity] = ids
     }
-    &names.sort()
+    names.sort()
     shapes := [JetCLIStatusValue]{}
     loop name in names {
         ids: grouped.get(name) ?? [String]{}
-        &shapes.push(jet_cli_status_object([jet_cli_status_field("type_identity", jet_cli_status_text(name)), jet_cli_status_field("value_ids", jet_cli_status_array(ids.map(id -> jet_cli_status_text(id))))]))
+        shapes.push(jet_cli_status_object([jet_cli_status_field("type_identity", jet_cli_status_text(name)), jet_cli_status_field("value_ids", jet_cli_status_array(ids.map(id -> jet_cli_status_text(id))))]))
     }
     fields := [JetCLIStatusField]{jet_cli_status_field("plane", jet_cli_status_text(plane))}
-    &fields.extend(jet_cli_live_identity_fields(snapshot))
-    &fields.push(jet_cli_status_field("values", jet_cli_status_array(values)))
-    &fields.push(jet_cli_status_field("shapes", jet_cli_status_array(shapes)))
+    fields.extend(jet_cli_live_identity_fields(snapshot))
+    fields.push(jet_cli_status_field("values", jet_cli_status_array(values)))
+    fields.push(jet_cli_status_field("shapes", jet_cli_status_array(shapes)))
     "{jet_cli_status_render("inspect.{plane}", true, fields)}\n"
 }

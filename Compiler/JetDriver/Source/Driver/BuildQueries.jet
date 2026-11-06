@@ -55,11 +55,11 @@ jet_driver_build_compiler_nodes: fn(request: JetDriverCompileRequest, load: JetD
         }
         // copy: build_session_compiler_node stores `subject` as the node's subject, and the node's
         // input digest needs its own copy of the same text for `name`. Both live in one node.
-        &checks.push(build_session_compiler_node("check", subject, [BuildGraphInputDigest]{{name: subject.copy(), digest: digest}}))
+        checks.push(build_session_compiler_node("check", subject, [BuildGraphInputDigest]{{name: subject.copy(), digest: digest}}))
     }
-    &checks.sort_by((left: BuildGraphNode, right: BuildGraphNode) -> (left.subject <=> right.subject).then(left.key <=> right.key))
+    checks.sort_by((left: BuildGraphNode, right: BuildGraphNode) -> (left.subject <=> right.subject).then(left.key <=> right.key))
     outputs := [String]{}
-    loop name in request.build_output_names -> build_session_append_unique(&outputs, name)
+    loop name in request.build_output_names -> build_session_append_unique(outputs, name)
     if outputs.len() == 0 {
         parts: request.authorized_sources.entry_path.split("/").to_list()
         file: parts[parts.len() - 1]
@@ -68,12 +68,12 @@ jet_driver_build_compiler_nodes: fn(request: JetDriverCompileRequest, load: JetD
         // reassigned and pushed into `outputs`, while `components` still views `file`.
         output := file.copy()
         if components.len() > 1 && !(components.len() == 2 && components[0] == "") {
-            _ := &components.pop()
+            _ := components.pop()
             output = components.join(".")
         }
-        &outputs.push(if output == "" -> { "program" } else -> { ^output })
+        outputs.push(if output == "" -> { "program" } else -> { output.move() })
     }
-    &outputs.sort()
+    outputs.sort()
     // copy: `checks` keeps every check node (it is the returned graph), so each compile node's
     // input digest needs its own key text.
     inputs: loop node in checks -> BuildGraphInputDigest{name: "check:{node.subject}", digest: node.key.copy()}
@@ -84,13 +84,13 @@ jet_driver_build_compiler_nodes: fn(request: JetDriverCompileRequest, load: JetD
         // copy: `compiled` keeps its key when it moves into `compiles`, and the link node's input
         // digest needs its own copy of the same key.
         linked: build_session_compiler_node("link", output, [BuildGraphInputDigest]{{name: "compile:{output}", digest: compiled.key.copy()}})
-        &compiles.push(^compiled)
-        &links.push(^linked)
+        compiles.push(compiled)
+        links.push(linked)
     }
     // Rust's enum order is Check, Compile, Link (not string key order).
-    loop node in compiles -> &checks.push(node)
-    loop node in links -> &checks.push(node)
-    Val(^checks)
+    loop node in compiles -> checks.push(node)
+    loop node in links -> checks.push(node)
+    Val(checks.move())
 }
 
 jet_driver_build_selected_output_names: fn(plan: BuildSessionPlan) -> [String] Never! {
@@ -98,15 +98,15 @@ jet_driver_build_selected_output_names: fn(plan: BuildSessionPlan) -> [String] N
     outputs := [String]{}
     loop (index, target) in permit.value.targets {
         if plan.default >= 0 && index != plan.default -> next
-        loop output in target.outputs -> build_session_append_unique(&outputs, output)
+        loop output in target.outputs -> build_session_append_unique(outputs, output)
     }
-    &outputs.sort()
+    outputs.sort()
     outputs
 }
 
-jet_driver_build_install_nodes: fn(plan: BuildSessionPlan, nodes: ^[BuildGraphNode]) Never! {
+jet_driver_build_install_nodes: fn(plan: BuildSessionPlan, nodes: &&[BuildGraphNode]) Never! {
     permit := plan.storage.guard_edit()
-    permit.value.nodes = ^nodes
+    permit.value.nodes = nodes.move()
 }
 
 // This is the selected source declaration, not inferred/transitive effects
@@ -150,23 +150,23 @@ JetDriverBuildQueryResponse: struct {
     request: JetDriverCompileRequest
     query: JetDriverBuildQueryResult
 }
-jet_driver_build_query_empty: fn(request: ^JetDriverCompileRequest, diagnostics: ^[Diagnostic], complete: Bool, problem: ^String?) -> JetDriverBuildQueryResponse Never! {
-    {request: ^request, query: JetDriverBuildQueryResult{plan: None, graph: None, generated: [], diagnostics: ^diagnostics, complete: complete, internal_problem: ^problem}}
+jet_driver_build_query_empty: fn(request: &&JetDriverCompileRequest, diagnostics: &&[Diagnostic], complete: Bool, problem: &&String?) -> JetDriverBuildQueryResponse Never! {
+    {request: request.move(), query: JetDriverBuildQueryResult{plan: None, graph: None, generated: [], diagnostics: diagnostics.move(), complete: complete, internal_problem: problem.move()}}
 }
 // A build that failed: its own reports `ran` after the compile's `errors`,
 // or the staged reports alone when the staging check failed (`staged`).
-jet_driver_build_query_failed: fn(request: ^JetDriverCompileRequest, errors: ^[Diagnostic], ran: ^[Diagnostic], staged: Bool) -> JetDriverBuildQueryResponse Never! {
-    reports := ^errors
+jet_driver_build_query_failed: fn(request: &&JetDriverCompileRequest, errors: &&[Diagnostic], ran: &&[Diagnostic], staged: Bool) -> JetDriverBuildQueryResponse Never! {
+    reports := errors.move()
     if !staged {
-        loop error in ^ran -> &reports.push(error)
+        loop error in ran.move() -> reports.push(error)
     }
-    jet_driver_build_query_empty(^request, ^reports, false, None)
+    jet_driver_build_query_empty(request, reports, false, None)
 }
-jet_driver_query_build_plan: fn(owned_request: ^JetDriverCompileRequest, scope: &JetDriverBuildQueryScope) -> JetDriverBuildQueryResponse {
-    request := ^owned_request
+jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope: &JetDriverBuildQueryScope) -> JetDriverBuildQueryResponse {
+    request := owned_request.move()
     sources: jet_driver_source_query(request)
-    if !sources.complete -> return jet_driver_build_query_empty(^request, ^sources.diagnostics, false, None)
-    if sources.entry_module_index < 0 || sources.entry_module_index >= sources.modules.len() -> return jet_driver_build_query_empty(^request, ^sources.diagnostics, false, Val("loaded build query has no exact entry module"))
+    if !sources.complete -> return jet_driver_build_query_empty(request, sources.diagnostics.move(), false, None)
+    if sources.entry_module_index < 0 || sources.entry_module_index >= sources.modules.len() -> return jet_driver_build_query_empty(request, sources.diagnostics.move(), false, Val("loaded build query has no exact entry module"))
     package: sources.modules[sources.entry_module_index].package_identity
     selected := String?{None}
     selected_site := ""
@@ -178,9 +178,9 @@ jet_driver_query_build_plan: fn(owned_request: ^JetDriverCompileRequest, scope: 
             if item == .Func(function) && jet_driver_item_is_build_entry(item) {
                 site: jet_driver_build_entry_site(loaded_module.path, loaded_module.source, function.span.start)
                 if selected != None {
-                    errors := ^sources.diagnostics
-                    &errors.push(jet_driver_diagnostic_at_source("E3520", Val(function.name_span), loaded_module.path, 0, "Two build entries for one package: {selected_site} and {site}.", "One package has one build authority, so policy and provenance have one auditable home.", "Keep one `build: fn` and remove every other entry."))
-                    return jet_driver_build_query_empty(^request, ^errors, false, None)
+                    errors := sources.diagnostics.move()
+                    errors.push(jet_driver_diagnostic_at_source("E3520", Val(function.name_span), loaded_module.path, 0, "Two build entries for one package: {selected_site} and {site}.", "One package has one build authority, so policy and provenance have one auditable home.", "Keep one `build: fn` and remove every other entry."))
+                    return jet_driver_build_query_empty(request, errors, false, None)
                 }
                 // copy: `sources` keeps its module rows: on a duplicate build entry it returns
                 // `sources.diagnostics`. The selected path moves into
@@ -195,11 +195,11 @@ jet_driver_query_build_plan: fn(owned_request: ^JetDriverCompileRequest, scope: 
     path: selected ?? {
         // No build entry still has an ordinary checked source projection.
         // Loader-only success must not hide type errors in the package.
-        checked: jet_driver_compile_selection(&request, JetDriverCompileMode.Doc, None, None, false, true)
+        checked: jet_driver_compile_selection(request, JetDriverCompileMode.Doc, None, None, false, true)
         complete: checked.complete && checked.internal_problem == None && !jet_driver_has_errors(checked.diagnostics)
-        result := jet_driver_build_query_empty(^request, ^checked.diagnostics, complete, ^checked.internal_problem)
+        result := jet_driver_build_query_empty(request, checked.diagnostics.move(), complete, checked.internal_problem.move())
         if complete {
-            result.query.nodes = ^checked.build_nodes ?? {
+            result.query.nodes = checked.build_nodes.move() ?? {
                 result.query.complete = false
                 result.query.internal_problem = Val("completed build query lost its compiler node identities")
                 return result
@@ -215,26 +215,26 @@ jet_driver_query_build_plan: fn(owned_request: ^JetDriverCompileRequest, scope: 
     // lowered as a typed trap (JetDriverKeepGoing); its reports (`staged`)
     // stand only when the build itself fails, and the final checked compile
     // with the generated modules reports what generation left unresolved.
-    selection := jet_driver_lowering_inputs_selection(&request, JetDriverCompileMode.RootRun, Val(path.copy()), Val("build"), true, None)
+    selection := jet_driver_lowering_inputs_selection(request, JetDriverCompileMode.RootRun, Val(path.copy()), Val("build"), true, None)
     errors := [Diagnostic]{}
     staged_failed: selection.compile.internal_problem == None && jet_driver_has_errors(selection.compile.diagnostics)
     if staged_failed {
-        errors = ^selection.compile.diagnostics
-        selection = jet_driver_lowering_inputs_selection(&request, JetDriverCompileMode.RootRun, Val(path.copy()), Val("build"), true, Val(JetDriverKeepGoing{skip: [String]{}}))
+        errors = selection.compile.diagnostics.move()
+        selection = jet_driver_lowering_inputs_selection(request, JetDriverCompileMode.RootRun, Val(path.copy()), Val("build"), true, Val(JetDriverKeepGoing{skip: [String]{}}))
     }
-    compiled := ^selection.compile
+    compiled := selection.compile.move()
     if staged_failed {
         // The trapped compile's reports restate the staged ones.
-        if compiled.internal_problem != None || compiled.build_program == None || selection.inputs == None -> return jet_driver_build_query_empty(^request, ^errors, false, None)
+        if compiled.internal_problem != None || compiled.build_program == None || selection.inputs == None -> return jet_driver_build_query_empty(request, errors, false, None)
     } else {
-        if !compiled.complete || compiled.internal_problem != None -> return jet_driver_build_query_empty(^request, ^compiled.diagnostics, false, ^compiled.internal_problem)
-        errors = ^compiled.diagnostics
+        if !compiled.complete || compiled.internal_problem != None -> return jet_driver_build_query_empty(request, compiled.diagnostics.move(), false, compiled.internal_problem.move())
+        errors = compiled.diagnostics.move()
     }
-    program: ^compiled.build_program ?? return jet_driver_build_query_empty(^request, ^errors, false, Val("checked build invocation lost its ProgramInfo"))
-    inputs: ^selection.inputs ?? return jet_driver_build_query_empty(^request, ^errors, false, Val("checked build invocation lost its checked functions"))
-    session_id: jet_driver_build_next_session_id(&scope) ?? return jet_driver_build_query_empty(^request, ^errors, false, Val("build invocation identity space exhausted"))
+    program: compiled.build_program.move() ?? return jet_driver_build_query_empty(request, errors, false, Val("checked build invocation lost its ProgramInfo"))
+    inputs: selection.inputs.move() ?? return jet_driver_build_query_empty(request, errors, false, Val("checked build invocation lost its checked functions"))
+    session_id: jet_driver_build_next_session_id(scope) ?? return jet_driver_build_query_empty(request, errors, false, Val("build invocation identity space exhausted"))
     session := build_session_new(session_id, jet_driver_build_session_package(package, path), request.host_facts.compiler_identity ?? "", scope.policy)
-    build_session_set_args(&session, request.build_args)
+    build_session_set_args(session, request.build_args)
     config := jet_eval_runtime_config(request.eval_config)
     // A refused effect inside `#Impure` is reported for this gate (E3411).
     config.impure_gate = policy_gate_allows(request.gate_set, PolicyKey.Impure)
@@ -243,46 +243,46 @@ jet_driver_query_build_plan: fn(owned_request: ^JetDriverCompileRequest, scope: 
     // response.
     config.build_host_adapter = Val(JetDriverBuildAdapter{session: session.copy(), inputs: request.build_inputs.copy(), http_inputs: request.build_http_inputs.copy(), network_declared: network_declared, base_dir: base_dir})
     config.compiler_query_host = Val(jet_driver_comptime_compiler_for(request))
-    run := jet_driver_invocation_run(^inputs, [TComptimeValue]{jet_eval_build_context_value(session_id, program)}, config, span)
+    run := jet_driver_invocation_run(inputs, [TComptimeValue]{jet_eval_build_context_value(session_id, program)}, config, span)
     // The build's own reports; after a failed staging check the staged
     // reports stand alone when the build fails (a trap it reached restates
     // them) and give way to the final checked compile when it runs.
     ran := [Diagnostic]{}
-    evaluated: ^run.result ?? {
-        build_session_abort(&session)
-        if staged_failed -> return jet_driver_build_query_empty(^request, ^errors, false, None)
-        return jet_driver_build_query_empty(^request, ^errors, false, ^run.problem)
+    evaluated: run.result.move() ?? {
+        build_session_abort(session)
+        if staged_failed -> return jet_driver_build_query_empty(request, errors, false, None)
+        return jet_driver_build_query_empty(request, errors, false, run.problem.move())
     }
     // copy: `ran` owns the reported diagnostic, while `evaluated` keeps its error for the
     // internal_problem/complete checks below. `error` is a payload view, which cannot be moved.
-    if evaluated.error == .Val(error) -> &ran.push(error.diagnostic.copy())
+    if evaluated.error == .Val(error) -> ran.push(error.diagnostic.copy())
     returned: evaluated.value
     if evaluated.internal_problem != None || !evaluated.complete || returned == None {
-        build_session_abort(&session)
-        if staged_failed -> return jet_driver_build_query_empty(^request, ^errors, false, None)
+        build_session_abort(session)
+        if staged_failed -> return jet_driver_build_query_empty(request, errors, false, None)
         // copy: the query result owns the problem text, but `internal` is a payload view of
         // `evaluated.internal_problem`, and Jet has no consuming match to move it out.
         problem: if evaluated.internal_problem == .Val(internal) -> { Val(internal.message.copy()) } else -> { None }
-        loop error in ran -> &errors.push(error)
-        return jet_driver_build_query_empty(^request, ^errors, false, ^problem)
+        loop error in ran -> errors.push(error)
+        return jet_driver_build_query_empty(request, errors, false, problem)
     }
     if returned == .Val(data) && jet_eval_build_failed_diagnostic(data, span) == .Val(diagnostic) {
-        build_session_abort(&session)
-        &ran.push(diagnostic)
-        return jet_driver_build_query_failed(^request, ^errors, ^ran, staged_failed)
+        build_session_abort(session)
+        ran.push(diagnostic)
+        return jet_driver_build_query_failed(request, errors, ran, staged_failed)
     }
     value: jet_eval_build_session_input(returned ?? panic("checked return lost its data")) ?? {
-        build_session_abort(&session)
-        &ran.push(jet_driver_diagnostic_without_span("E3502", "`build: fn` returns nothing", "a build is the graph its Build context describes", "remove the returned value; configure `b` instead"))
-        return jet_driver_build_query_failed(^request, ^errors, ^ran, staged_failed)
+        build_session_abort(session)
+        ran.push(jet_driver_diagnostic_without_span("E3502", "`build: fn` returns nothing", "a build is the graph its Build context describes", "remove the returned value; configure `b` instead"))
+        return jet_driver_build_query_failed(request, errors, ran, staged_failed)
     }
-    finished: build_session_finish(&session, value)
-    loop error in finished.diagnostics -> &ran.push(jet_eval_build_session_diagnostic(error))
-    plan: ^finished.plan ?? return jet_driver_build_query_failed(^request, ^errors, ^ran, staged_failed)
-    if jet_driver_has_errors(ran) -> return jet_driver_build_query_failed(^request, ^errors, ^ran, staged_failed)
+    finished: build_session_finish(session, value)
+    loop error in finished.diagnostics -> ran.push(jet_eval_build_session_diagnostic(error))
+    plan: finished.plan.move() ?? return jet_driver_build_query_failed(request, errors, ran, staged_failed)
+    if jet_driver_has_errors(ran) -> return jet_driver_build_query_failed(request, errors, ran, staged_failed)
     // The build ran: the final checked compile below replaces the staged reports.
     if staged_failed -> errors = [Diagnostic]{}
-    loop error in ran -> &errors.push(error)
+    loop error in ran -> errors.push(error)
     // The selected generated modules, owned by the build's package: the
     // final checked bundle below and every target compile of the plan
     // (the response's `generated`) load them beside the package's sources.
@@ -295,19 +295,19 @@ jet_driver_query_build_plan: fn(owned_request: ^JetDriverCompileRequest, scope: 
     if selected_outputs -> request.build_output_names = jet_driver_build_selected_output_names(plan)
     // copy: the request gets temporary generated-module rows for the checked recompile, popped
     // right after; `generated` stays whole for the response.
-    loop generated_row in generated -> &request.generated_modules.push(generated_row.copy())
-    checked: jet_driver_compile_selection(&request, JetDriverCompileMode.Doc, None, None, false, true)
-    loop request.generated_modules.len() > original_generated_count -> _: &request.generated_modules.pop()
+    loop generated_row in generated -> request.generated_modules.push(generated_row.copy())
+    checked: jet_driver_compile_selection(request, JetDriverCompileMode.Doc, None, None, false, true)
+    loop request.generated_modules.len() > original_generated_count -> _: request.generated_modules.pop()
     if selected_outputs -> request.build_output_names = [String]{}
-    loop error in checked.diagnostics -> &errors.push(error)
-    if !checked.complete || checked.internal_problem != None || jet_driver_has_errors(errors) -> return jet_driver_build_query_empty(^request, ^errors, false, ^checked.internal_problem)
-    // The nodes move out of the checked result: a `:` read of the field would copy them at `^nodes`.
-    nodes: ^checked.build_nodes ?? return jet_driver_build_query_empty(^request, ^errors, false, Val("completed build query lost its compiler node identities"))
+    loop error in checked.diagnostics -> errors.push(error)
+    if !checked.complete || checked.internal_problem != None || jet_driver_has_errors(errors) -> return jet_driver_build_query_empty(request, errors, false, checked.internal_problem.move())
+    // The nodes move out of the checked result: a `:` read of the field would copy them at `nodes.move()`.
+    nodes: checked.build_nodes.move() ?? return jet_driver_build_query_empty(request, errors, false, Val("completed build query lost its compiler node identities"))
     // copy: the plan installs its own node list, and `nodes` moves into the response's `nodes`
     // below. These are two independent owners of the same node identities.
     jet_driver_build_install_nodes(plan, nodes.copy())
     graph: build_plan_graph(plan)
-    return JetDriverBuildQueryResponse{request: ^request, query: JetDriverBuildQueryResult{plan: Val(^plan), graph: Val(graph), generated: ^generated, nodes: ^nodes, diagnostics: ^errors, complete: true, internal_problem: None, authority_policy: ^compiled.authority_policy}}
+    return JetDriverBuildQueryResponse{request: request.move(), query: JetDriverBuildQueryResult{plan: Val(plan.move()), graph: Val(graph), generated: generated.move(), nodes: nodes.move(), diagnostics: errors.move(), complete: true, internal_problem: None, authority_policy: compiled.authority_policy.move()}}
 }
 // The package a build session spells its `.jet/generated/<package>/` and
 // contribution sources with: a manifest package's identity, or, for a build
@@ -315,7 +315,7 @@ jet_driver_query_build_plan: fn(owned_request: ^JetDriverCompileRequest, scope: 
 jet_driver_build_session_package: fn(package: String, entry_path: String) -> String Never! {
     if !package.starts_with("source-root:") -> return package.copy()
     parts := entry_path.split("/").to_list()
-    file_name: &parts.pop() ?? entry_path
+    file_name: parts.pop() ?? entry_path
     file_name.removesuffix(".jet")
 }
 // Whether the entry package declares a `build: fn`, the build entry
@@ -352,8 +352,8 @@ jet_driver_build_entry_site: fn(path: String, source: String, at: Int) -> String
     }
     "`{path}:{line}`"
 }
-jet_driver_query_build_nodes: fn(request: ^JetDriverCompileRequest, scope: &JetDriverBuildQueryScope) -> JetDriverBuildQueryResponse {
+jet_driver_query_build_nodes: fn(request: &&JetDriverCompileRequest, scope: &JetDriverBuildQueryScope) -> JetDriverBuildQueryResponse {
     // Nodes are the checked graph's exact compiler facts, never a projection
     // reconstructed from emitted source, action names or a receipt.
-    jet_driver_query_build_plan(^request, &scope)
+    jet_driver_query_build_plan(request, scope)
 }

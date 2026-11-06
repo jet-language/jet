@@ -154,15 +154,15 @@ perf_nearest_rank: fn(sorted: [PerfRational], numerator: Int, denominator: Int) 
 perf_statistics: fn(samples: [PerfRational]) -> PerfStatistics PerfBudgetError! {
     if samples.len() == 0 -> return Err(perf_error("statistics require at least one sample"))
     sorted := samples.copy()
-    &sorted.sort_by((left: PerfRational, right: PerfRational) -> perf_rational_cmp(left, right))
+    sorted.sort_by((left: PerfRational, right: PerfRational) -> perf_rational_cmp(left, right))
     p50: perf_nearest_rank(sorted, 500, 1000)
     sum := perf_rational_zero()
     deviations := [PerfRational]{}
     loop sample in sorted {
         sum = perf_rational_add(sum, sample)
-        &deviations.push(perf_rational_abs(perf_rational_sub(sample, p50)))
+        deviations.push(perf_rational_abs(perf_rational_sub(sample, p50)))
     }
-    &deviations.sort_by((left: PerfRational, right: PerfRational) -> perf_rational_cmp(left, right))
+    deviations.sort_by((left: PerfRational, right: PerfRational) -> perf_rational_cmp(left, right))
     Ok(PerfStatistics{
         p50: p50, p90: perf_nearest_rank(sorted, 900, 1000),
         p95: perf_nearest_rank(sorted, 950, 1000), p99: perf_nearest_rank(sorted, 990, 1000),
@@ -252,32 +252,32 @@ PerfSHAStream: struct { prefix: [U8], block: Int, words: [Int] }
 // Rust ShaStream::new.
 perf_sha_stream_new: fn(evidence_id: String, context_key: String, baseline_ids: [String], replicate: Int) -> PerfSHAStream Never! {
     prefix := PERF_BOOTSTRAP_DOMAIN.bytes()
-    &prefix.push(U8{0})
-    loop byte in evidence_id.bytes() -> &prefix.push(byte)
-    loop byte in context_key.bytes() -> &prefix.push(byte)
+    prefix.push(U8{0})
+    loop byte in evidence_id.bytes() -> prefix.push(byte)
+    loop byte in context_key.bytes() -> prefix.push(byte)
     loop id in baseline_ids {
-        loop byte in id.bytes() -> &prefix.push(byte)
+        loop byte in id.bytes() -> prefix.push(byte)
     }
-    perf_push_u64(&prefix, replicate)
+    perf_push_u64(prefix, replicate)
     PerfSHAStream{prefix: prefix, block: 0, words: [Int]{}}
 }
 perf_push_u64: fn(bytes: &[U8], value: Int) Never! {
-    loop index in 0..<8 -> &bytes.push(U8{(value >> ((7 - index) * 8)).bit_and(255)})
+    loop index in 0..<8 -> bytes.push(U8{(value >> ((7 - index) * 8)).bit_and(255)})
 }
 // Rust ShaStream::word.
 perf_sha_stream_word: fn(stream: &PerfSHAStream) -> Int Never! {
     if stream.words.len() == 0 {
         input := stream.prefix.copy()
-        perf_push_u64(&input, stream.block)
+        perf_push_u64(input, stream.block)
         stream.block = (stream.block + 1) % 18446744073709551616
         digest: sha256_bytes(input[0..<input.len()])
         loop chunk in 0..<4 {
             word := 0
             loop offset in 0..<8 -> word = word * 256 + Int.from_u8(digest[(3 - chunk) * 8 + offset])
-            &stream.words.push(word)
+            stream.words.push(word)
         }
     }
-    &stream.words.pop() ?? panic("digest contains four words")
+    stream.words.pop() ?? panic("digest contains four words")
 }
 // Rust ShaStream::index.
 perf_sha_stream_index: fn(stream: &PerfSHAStream, population: Int) -> Int PerfBudgetError! {
@@ -285,16 +285,16 @@ perf_sha_stream_index: fn(stream: &PerfSHAStream, population: Int) -> Int PerfBu
     threshold: 18446744073709551616 /% population * population
     // Rejection sampling: redraw until the word falls below the largest
     // multiple of `population`, so the modulo is unbiased.
-    word := perf_sha_stream_word(&stream)
-    loop word >= threshold -> word = perf_sha_stream_word(&stream)
+    word := perf_sha_stream_word(stream)
+    loop word >= threshold -> word = perf_sha_stream_word(stream)
     Ok(word % population)
 }
 // Rust resample.
 perf_resample: fn(values: [PerfRational], count: Int, stream: &PerfSHAStream) -> [PerfRational] PerfBudgetError! {
     out := [PerfRational]{}
     loop _ in 0..<count {
-        index: perf_sha_stream_index(&stream, values.len())
-        &out.push(values[index].copy())
+        index: perf_sha_stream_index(stream, values.len())
+        out.push(values[index].copy())
     }
     Ok(out)
 }
@@ -304,14 +304,14 @@ perf_bootstrap_values: fn(evidence_id: String, context_key: String, baseline_rep
     values := [PerfRational]{}
     loop replicate in 0..<policy.bootstrap_resamples {
         stream := perf_sha_stream_new(evidence_id, context_key, baseline_report_ids, replicate)
-        candidate_resample: perf_resample(candidate, candidate.len(), &stream)
+        candidate_resample: perf_resample(candidate, candidate.len(), stream)
         candidate_estimator: perf_estimator(candidate_resample, percentile)
         value: if comparison == {
             .AbsoluteFrom(limit, limit_direction) -> {
                 if { limit_direction == PerfLimitDirection.AtMost -> perf_rational_sub(candidate_estimator, limit) else -> perf_rational_sub(limit, candidate_estimator) }
             }
             .RelativeTo(limit_basis_points, goal) -> {
-                baseline_resample: perf_resample(baseline, baseline.len(), &stream)
+                baseline_resample: perf_resample(baseline, baseline.len(), stream)
                 baseline_estimator: perf_estimator(baseline_resample, percentile)
                 if baseline_estimator.num == 0 -> return Err(perf_error("RelativeTo bootstrap baseline estimator is zero"))
                 perf_relative_stat(candidate_estimator, baseline_estimator, limit_basis_points, goal, direction)
@@ -320,9 +320,9 @@ perf_bootstrap_values: fn(evidence_id: String, context_key: String, baseline_rep
                 return Err(perf_error("Absolute does not bootstrap"))
             }
         }
-        &values.push(value)
+        values.push(value)
     }
-    &values.sort_by((left: PerfRational, right: PerfRational) -> perf_rational_cmp(left, right))
+    values.sort_by((left: PerfRational, right: PerfRational) -> perf_rational_cmp(left, right))
     Ok(values)
 }
 // Rust evaluate.
@@ -377,10 +377,10 @@ perf_trend: fn(report_ids: [String], estimators: [PerfRational], direction: Perf
     loop left in 0..<estimators.len() {
         loop right in left + 1..<estimators.len() {
             numerator: if { direction == PerfDirection.LowerIsBetter -> perf_rational_sub(estimators[left], estimators[right]) else -> perf_rational_sub(estimators[right], estimators[left]) }
-            &slopes.push(perf_rational_div(numerator, perf_rational_integer(right - left)))
+            slopes.push(perf_rational_div(numerator, perf_rational_integer(right - left)))
         }
     }
-    &slopes.sort_by((left: PerfRational, right: PerfRational) -> perf_rational_cmp(left, right))
+    slopes.sort_by((left: PerfRational, right: PerfRational) -> perf_rational_cmp(left, right))
     score: perf_nearest_rank(slopes, 500, 1000)
     label: if {
         score.num > 0 -> PerfTrendLabel.Improving

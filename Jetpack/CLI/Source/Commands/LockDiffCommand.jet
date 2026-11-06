@@ -47,7 +47,7 @@ CLILockDiffGuard: struct {
 }
 
 impl CLILockDiffGuard.Close {
-    close: fn(^self) {
+    close: fn(&&self) {
         if !self.active -> return
         after: pkg_lock_load(self.root)
         diff: LockDiff.between(self.before, after)
@@ -62,7 +62,7 @@ cli_cmd_lock: fn(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time
         theme.error("`jetpack lock` needs the `diff` subcommand", "the unified `.jet/lock` is inspected through one read-only diff surface", "run `jetpack lock diff [--against <rev>]`")
         return EXIT_USAGE
     }
-    root: cli_project_root(&cache, cli_current_dir())
+    root: cli_project_root(cache, cli_current_dir())
     current: cli_read_lock(root) ?? {
         theme.error("could not read the current lock", err.message(), "restore a valid `.jet/lock` and run the diff again")
         return EXIT_USAGE
@@ -95,7 +95,7 @@ cli_render_lock_diff_lines: fn(diff: LockDiff, sizes: DiffSizes) -[FS]> [String]
         .None -> sizes.disk
     }
     lines := [String]{}
-    loop change in diff.packages -> &lines.push(cli_render_package_change(change))
+    loop change in diff.packages -> lines.push(cli_render_package_change(change))
     loop change in diff.channels {
         mark := ""
         before := ""
@@ -113,14 +113,14 @@ cli_render_lock_diff_lines: fn(diff: LockDiff, sizes: DiffSizes) -[FS]> [String]
                 after = change.after ?? "—"
             }
         }
-        &lines.push("{mark} channel {change.name} {before} → {after}")
+        lines.push("{mark} channel {change.name} {before} → {after}")
     }
-    &lines.push("{diff.added_count()} added, {diff.removed_count()} removed, {diff.updated_count()} updated")
-    &lines.push("net download {cli_render_delta(sizes.download)} · net disk {cli_render_delta(disk)}")
+    lines.push("{diff.added_count()} added, {diff.removed_count()} removed, {diff.updated_count()} updated")
+    lines.push("net download {cli_render_delta(sizes.download)} · net disk {cli_render_delta(disk)}")
     loop change in diff.packages {
         before: change.before_trust ?? next
         after: change.after_trust ?? next
-        if before != after -> &lines.push("trust {change.name}: {before} → {after}")
+        if before != after -> lines.push("trust {change.name}: {before} → {after}")
     }
     lines
 }
@@ -153,7 +153,7 @@ cli_measured_disk_delta: fn(diff: LockDiff) -[FS]> Int? Never! {
                 measured = true
                 path: change.after_output ?? ""
                 if !counted.contains(path) {
-                    &counted.push(path)
+                    counted.push(path)
                     delta += bytes
                 }
             }
@@ -162,7 +162,7 @@ cli_measured_disk_delta: fn(diff: LockDiff) -[FS]> Int? Never! {
                 measured = true
                 path: change.before_output ?? ""
                 if !counted.contains(path) {
-                    &counted.push(path)
+                    counted.push(path)
                     delta -= bytes
                 }
             }

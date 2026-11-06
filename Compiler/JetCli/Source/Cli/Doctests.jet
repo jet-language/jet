@@ -46,7 +46,7 @@ jet_cli_doctest_overlay: fn(snapshot: &JetDriverAuthorizedSourceSnapshot, packag
     loop file in snapshot.roots[0].files {
         if !package && file.path != snapshot.entry_path -> next
         doctests: jet_cli_doctest_file(file.path, file.relative_path, file.source)
-        if doctests.tests.len() > 0 -> &found.push(doctests)
+        if doctests.tests.len() > 0 -> found.push(doctests)
     }
     loop doctests in found {
         loop index in 0..<snapshot.roots[0].files.len() {
@@ -94,7 +94,7 @@ jet_cli_doctest_claims: fn(tests: [JetNativeTestCase], doctests: [JetCLIDoctestF
     loop test in tests {
         loop doctest_file in doctests {
             if jet_cli_doctest_named(doctest_file, test.name) != None {
-                &claims.push(test)
+                claims.push(test)
                 break
             }
         }
@@ -133,7 +133,7 @@ jet_cli_doctest_settle: fn(wire: String, doctests: JetCLIDoctestFile, test: JetC
             output = "{output}{JET_CLI_DOCTEST_OPEN}{pieces[index]}"
             next
         }
-        &actuals.push(framed[0])
+        actuals.push(framed[0])
         rest := framed[1]
         loop at in 2..<framed.len() -> rest = "{rest}{JET_CLI_DOCTEST_CLOSE}{framed[at]}"
         output = "{output}{rest}"
@@ -149,12 +149,12 @@ jet_cli_doctest_settle: fn(wire: String, doctests: JetCLIDoctestFile, test: JetC
         position += 1
         if actual == expectation.expected -> next
         if update && !actual.contains("\n") {
-            &rewrites.push(JetCLIDocExpectation{expression: expectation.expression, expected: actual, line: expectation.line})
+            rewrites.push(JetCLIDocExpectation{expression: expectation.expression, expected: actual, line: expectation.line})
             next
         }
         message: "Doctest output mismatch. Expected: `{expectation.expected}` Got: `{actual}`"
-        &mismatches.push(JetCLITestStop{code: row.code.copy(), message: message.copy(), file: doctests.shown.copy(), line: U32.from_int(expectation.line) ?? U32{0}})
-        &diagnostics.push(diagnostic_from_registry(row.code, Val(jet_cli_doctest_line_span(doctests.source, expectation.line)), message, row.why, row.fix))
+        mismatches.push(JetCLITestStop{code: row.code.copy(), message: message.copy(), file: doctests.shown.copy(), line: U32.from_int(expectation.line) ?? U32{0}})
+        diagnostics.push(diagnostic_from_registry(row.code, Val(jet_cli_doctest_line_span(doctests.source, expectation.line)), message, row.why, row.fix))
     }
     if diagnostics.len() > 0 {
         parts.flags = parts.flags.bit_and(14)
@@ -191,7 +191,7 @@ jet_cli_doctest_rewrite: fn(source: String, rewrites: [JetCLIDocExpectation]) ->
     wire: jet_cli_native_test_wire(JetNativeTestWire{flags: 1, name: "doctest at a.jet:1", stdout: stdout, stderr: ""})
     rewrites := [JetCLIDocExpectation]{}
     mismatches := [JetCLITestStop]{}
-    settled: jet_cli_doctest_settle(wire, doctests, doctests.tests[0], false, false, &rewrites, &mismatches) ?? panic("a well-formed wire settles")
+    settled: jet_cli_doctest_settle(wire, doctests, doctests.tests[0], false, false, rewrites, mismatches) ?? panic("a well-formed wire settles")
     parts: jet_cli_native_test_wire_parts(settled) ?? panic("a settled wire parses")
     assert_eq(parts.flags, 0)
     assert_eq(parts.stdout, "setup\n")
@@ -202,7 +202,7 @@ jet_cli_doctest_rewrite: fn(source: String, rewrites: [JetCLIDocExpectation]) ->
     assert_eq(mismatches[0].message, "Doctest output mismatch. Expected: `5` Got: `4`")
     assert_eq(mismatches[0].file, "a.jet")
     assert_eq(mismatches[0].line, U32{2})
-    updated: jet_cli_doctest_settle(wire, doctests, doctests.tests[0], false, true, &rewrites, &mismatches) ?? panic("a well-formed wire settles")
+    updated: jet_cli_doctest_settle(wire, doctests, doctests.tests[0], false, true, rewrites, mismatches) ?? panic("a well-formed wire settles")
     assert_eq(mismatches.len(), 1)
     assert_eq((jet_cli_native_test_wire_parts(updated) ?? panic("an updated wire parses")).flags, 1)
     assert_eq(jet_cli_doctest_rewrite(source, rewrites), "/// ```jet\n/// 2 + 2 // => 4\n/// ```\n")

@@ -85,7 +85,7 @@ ascii_lower: fn(text: String) -> String Never! {
     out := [U8]{}
     loop b in text.bytes() {
         n: Int.from_u8(b)
-        if n >= 65 && n <= 90 -> &out.push(U8{n + 32}) else -> &out.push(b)
+        if n >= 65 && n <= 90 -> out.push(U8{n + 32}) else -> out.push(b)
     }
     String.from_bytes(out) ?? ""
 }
@@ -95,7 +95,7 @@ slice: fn(raw: [U8], start: Int, end: Int) -> String Never! {
     i := start
     loop {
         if i >= end -> return String.from_bytes(out) ?? ""
-        &out.push(raw[i])
+        out.push(raw[i])
         i = i + 1
     }
 }

@@ -168,7 +168,7 @@ lsp_diag_test_file: fn(relative: String, source: String) -> JetDriverAuthorizedS
 }
 lsp_diag_test_snapshot: fn(relative: String, source: String, extras: [JetDriverAuthorizedSourceFile]) -> JetDriverQuerySnapshot Never! {
     files := [JetDriverAuthorizedSourceFile]{lsp_diag_test_file(relative, source)}
-    loop file in extras -> &files.push(file)
+    loop file in extras -> files.push(file)
     core: foundation_embedded_core()
     request: JetDriverCompileRequest{
         authorized_sources: JetDriverAuthorizedSourceSnapshot{roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{canonical_path: lsp_diag_test_path("/lsp"), identity: "lsp-fixture-root", allow_hardlinks: false, files: files, foreign_cache_files: [JetDriverAuthorizedSourceFile]{}}}, entry_root_identity: "lsp-fixture-root", entry_path: lsp_diag_test_path("/lsp/{relative}")},
@@ -191,14 +191,14 @@ lsp_diag_test_clean: fn(checked: Shared<JetDriverCheckedQuery>) Never! {
     doc := LSPDocument.new(lsp_diag_test_path("/lsp/lsp_incremental_diagnostic_parity.jet"), before.copy(), 1)
     state: LSPDiagnosticState.new()
     queries := JetDriverCompilerQueries.new()
-    lsp_diag_test_clean(lsp_check_with_bundle(state, &queries, snapshot, doc))
+    lsp_diag_test_clean(lsp_check_with_bundle(state, queries, snapshot, doc))
     value := 0
     loop (index, byte) in before.bytes() { if byte == (U8{50}) -> value = index }
     range: LSPRange{start: lsp_byte_offset_to_lsp(before, value), end: lsp_byte_offset_to_lsp(before, value + 1)}
-    assert(&doc.apply_range_edit(range, Val(1), "\"wrong\""))
-    incremental: lsp_check_with_bundle(state, &queries, snapshot, doc)
+    assert(doc.apply_range_edit(range, Val(1), "\"wrong\""))
+    incremental: lsp_check_with_bundle(state, queries, snapshot, doc)
     fresh_queries := JetDriverCompilerQueries.new()
-    fresh: lsp_check_with_bundle(state, &fresh_queries, snapshot, doc)
+    fresh: lsp_check_with_bundle(state, fresh_queries, snapshot, doc)
     incremental_permit: incremental.guard_read()
     fresh_permit: fresh.guard_read()
     file: ReportPath.from_process(lsp_diag_path.display(doc.path))
@@ -212,12 +212,12 @@ lsp_diag_test_clean: fn(checked: Shared<JetDriverCheckedQuery>) Never! {
     queries := JetDriverCompilerQueries.new()
     a := LSPDocument.new(lsp_diag_test_path("/lsp/query-a.jet"), "run: fn() {{}}\n", 1)
     b: LSPDocument.new(lsp_diag_test_path("/lsp/query-b.jet"), "helper: fn() {{}}\n", 1)
-    lsp_diag_test_clean(lsp_check_with_bundle(state, &queries, snapshot, a))
-    lsp_diag_test_clean(lsp_check_with_bundle(state, &queries, snapshot, a))
-    lsp_diag_test_clean(lsp_check_with_bundle(state, &queries, snapshot, b))
-    &a.replace_text("run: fn() {{ print(\"changed\") }}\n")
-    lsp_diag_test_clean(lsp_check_with_bundle(state, &queries, snapshot, a))
-    lsp_diag_test_clean(lsp_check_with_bundle(state, &queries, snapshot, b))
+    lsp_diag_test_clean(lsp_check_with_bundle(state, queries, snapshot, a))
+    lsp_diag_test_clean(lsp_check_with_bundle(state, queries, snapshot, a))
+    lsp_diag_test_clean(lsp_check_with_bundle(state, queries, snapshot, b))
+    a.replace_text("run: fn() {{ print(\"changed\") }}\n")
+    lsp_diag_test_clean(lsp_check_with_bundle(state, queries, snapshot, a))
+    lsp_diag_test_clean(lsp_check_with_bundle(state, queries, snapshot, b))
     stats: queries.stats()
     assert_eq(stats.hits, 2)
     assert_eq(stats.recomputes, 3)
@@ -227,9 +227,9 @@ lsp_diag_test_clean: fn(checked: Shared<JetDriverCheckedQuery>) Never! {
     roots: [lsp_diag_path.OsPath]{a.path, b.path}
     loop root in roots {
         label: lsp_diag_path.display(root)
-        &inputs.push(InputKey.file(FileKey.new(label)))
-        &inputs.push(InputKey.new("checked-external:{label}"))
-        &inputs.push(InputKey.new("checked-policy:{label}"))
+        inputs.push(InputKey.file(FileKey.new(label)))
+        inputs.push(InputKey.new("checked-external:{label}"))
+        inputs.push(InputKey.new("checked-policy:{label}"))
     }
     assert_eq(stats.live_inputs, inputs.len())
     assert_eq(stats.live_memos, 2)
@@ -246,11 +246,11 @@ lsp_diag_test_clean: fn(checked: Shared<JetDriverCheckedQuery>) Never! {
     state.docs[main_uri] = LSPDocument.new(lsp_diag_test_path("/lsp/main.jet"), main.copy(), 1)
     state.docs[dependency_uri] = LSPDocument.new(lsp_diag_test_path("/lsp/b.jet"), "value: fn() -> String {{ return \"unsaved\" }}\n", 1)
     queries := JetDriverCompilerQueries.new()
-    broken: lsp_check_with_bundle(state, &queries, snapshot, state.docs[main_uri])
+    broken: lsp_check_with_bundle(state, queries, snapshot, state.docs[main_uri])
     permit: broken.guard_read()
     assert(permit.value.result.diagnostics.len() > 0)
-    &state.docs[dependency_uri].replace_text("value: fn() -> Int {{ return 2 }}\n")
-    repaired: lsp_check_with_bundle(state, &queries, snapshot, state.docs[main_uri])
+    state.docs[dependency_uri].replace_text("value: fn() -> Int {{ return 2 }}\n")
+    repaired: lsp_check_with_bundle(state, queries, snapshot, state.docs[main_uri])
     lsp_diag_test_clean(repaired)
     assert_eq(queries.recompute_count(QueryKey.for_file("checked.lsp", FileKey.new(lsp_diag_path.display(state.docs[main_uri].path)))), 2)
 }
@@ -269,17 +269,17 @@ lsp_diag_test_clean: fn(checked: Shared<JetDriverCheckedQuery>) Never! {
     state.docs[main_uri] = LSPDocument.new(lsp_diag_test_path("/lsp/run.jet"), main.copy(), 1)
     state.docs[scoring_uri] = LSPDocument.new(lsp_diag_test_path("/lsp/scoring.jet"), overlay.copy(), 2)
     queries := JetDriverCompilerQueries.new()
-    checked: lsp_check_with_bundle(state, &queries, snapshot, state.docs[main_uri])
+    checked: lsp_check_with_bundle(state, queries, snapshot, state.docs[main_uri])
     permit: checked.guard_read()
     diagnostics: jet_driver_present_checked_diagnostics(permit.value.result)
     targets := [String:Bool]{}
-    groups: lsp_diagnostic_groups(state, main_uri, permit.value.result, diagnostics, snapshot.cwd.platform, &targets)
+    groups: lsp_diagnostic_groups(state, main_uri, permit.value.result, diagnostics, snapshot.cwd.platform, targets)
     clears: diagnostic_report_clear_counts(diagnostics)
     imported: lsp_diag_test_params(lsp_document_group_json(state, scoring_uri, diagnostics, groups[scoring_uri], clears))
     assert_eq(lsp_diag_test_field(imported, "version"), Dyn.Int(2))
     imported_errors := [Diagnostic]{}
     loop index in groups[scoring_uri] {
-        if diagnostics[index].code == "E0107" -> &imported_errors.push(diagnostics[index])
+        if diagnostics[index].code == "E0107" -> imported_errors.push(diagnostics[index])
         origin: diagnostics[index].origin ?? panic("imported diagnostic must own its checked bytes")
         assert_eq(origin.source, overlay)
     }
@@ -299,7 +299,7 @@ lsp_diag_test_clean: fn(checked: Shared<JetDriverCheckedQuery>) Never! {
     state.docs[scoring_uri].text = "{overlay}// later\n"
     stale: lsp_diag_test_params(lsp_document_group_json(state, scoring_uri, diagnostics, groups[scoring_uri], clears))
     assert_eq(stale.field("version"), None)
-    _ := &state.docs.remove(scoring_uri)
+    _ := state.docs.remove(scoring_uri)
     closed: lsp_diag_test_params(lsp_document_group_json(state, scoring_uri, diagnostics, groups[scoring_uri], clears))
     assert_eq(closed.field("version"), None)
 }
@@ -321,12 +321,12 @@ lsp_diag_test_clean: fn(checked: Shared<JetDriverCheckedQuery>) Never! {
     state.diagnostic_targets["file:///lsp/other.jet"][dependency] = true
     state.diagnostic_targets["file:///lsp/other.jet"][elsewhere] = true
     queries := JetDriverCompilerQueries.new()
-    checked: lsp_check_with_bundle(state, &queries, snapshot, state.docs[uri])
+    checked: lsp_check_with_bundle(state, queries, snapshot, state.docs[uri])
     permit: checked.guard_read()
     diagnostics: jet_driver_present_checked_diagnostics(permit.value.result)
     assert_eq(diagnostics.len(), 0)
     targets := [String:Bool]{}
-    groups: lsp_diagnostic_groups(state, uri, permit.value.result, diagnostics, snapshot.cwd.platform, &targets)
+    groups: lsp_diagnostic_groups(state, uri, permit.value.result, diagnostics, snapshot.cwd.platform, targets)
     assert(groups.has_key(uri))
     assert(groups.has_key(dependency))
     assert(groups.has_key(dropped))
@@ -361,33 +361,33 @@ lsp_diag_test_clean: fn(checked: Shared<JetDriverCheckedQuery>) Never! {
     state.docs[main_uri] = LSPDocument.new(lsp_diag_test_path("/lsp/run.jet"), main.copy(), 1)
     state.docs[other_uri] = LSPDocument.new(lsp_diag_test_path("/lsp/other.jet"), other.copy(), 1)
     queries := JetDriverCompilerQueries.new()
-    opened: lsp_check_with_bundle(state, &queries, snapshot, state.docs[main_uri])
+    opened: lsp_check_with_bundle(state, queries, snapshot, state.docs[main_uri])
     lsp_diag_test_clean(opened)
     opened_permit: opened.guard_read()
     state.checked_modules[main_uri] = lsp_checked_module_paths(opened_permit.value.result, snapshot.cwd.platform)
     // Other reads no edited module: it must not enter the importer batch.
-    independent: lsp_check_with_bundle(state, &queries, snapshot, state.docs[other_uri])
+    independent: lsp_check_with_bundle(state, queries, snapshot, state.docs[other_uri])
     lsp_diag_test_clean(independent)
     independent_permit: independent.guard_read()
     state.checked_modules[other_uri] = lsp_checked_module_paths(independent_permit.value.result, snapshot.cwd.platform)
-    &state.docs[helper_uri].replace_text(helper_text.copy())
+    state.docs[helper_uri].replace_text(helper_text.copy())
     state.docs[helper_uri].version = 2
     state.dirty[helper_uri] = true
-    assert_eq(lsp_dirty_documents(&state), [String]{helper_uri, main_uri})
-    broken: lsp_check_with_bundle(state, &queries, snapshot, state.docs[main_uri])
+    assert_eq(lsp_dirty_documents(state), [String]{helper_uri, main_uri})
+    broken: lsp_check_with_bundle(state, queries, snapshot, state.docs[main_uri])
     broken_permit: broken.guard_read()
     assert(broken_permit.value.result.diagnostics.len() > 0)
     // Two rapid sibling changes coalesce; the latest bytes are the witness.
-    &state.docs[helper_uri].replace_text(helper_text.copy())
+    state.docs[helper_uri].replace_text(helper_text.copy())
     state.docs[helper_uri].version = 3
     state.dirty[helper_uri] = true
-    &state.docs[helper_uri].replace_text(helper_int.copy())
+    state.docs[helper_uri].replace_text(helper_int.copy())
     state.docs[helper_uri].version = 4
     state.dirty[helper_uri] = true
-    assert_eq(lsp_dirty_documents(&state), [String]{helper_uri, main_uri})
-    repaired: lsp_check_with_bundle(state, &queries, snapshot, state.docs[main_uri])
+    assert_eq(lsp_dirty_documents(state), [String]{helper_uri, main_uri})
+    repaired: lsp_check_with_bundle(state, queries, snapshot, state.docs[main_uri])
     lsp_diag_test_clean(repaired)
-    assert_eq(lsp_dirty_documents(&state), [String]{})
+    assert_eq(lsp_dirty_documents(state), [String]{})
     assert_eq(state.docs[helper_uri].version, 4)
 }
 

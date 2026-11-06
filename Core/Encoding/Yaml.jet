@@ -63,14 +63,14 @@ parse_block: fn(text: String) -> Dyn EncodingError! {
     buf := [U8]{}
     loop b in text.bytes() {
         if b == (U8{10}) {
-            &rows.push(String.from_bytes(buf) ?? return Err(syntax_error(EncodingFormat.YAML, 0, 1, 1, "", "invalid UTF-8 in YAML input")))
+            rows.push(String.from_bytes(buf) ?? return Err(syntax_error(EncodingFormat.YAML, 0, 1, 1, "", "invalid UTF-8 in YAML input")))
             buf = [U8]{}
             next
         }
         if b == (U8{13}) -> next
-        &buf.push(b)
+        buf.push(b)
     }
-    if buf.len() > 0 -> &rows.push(String.from_bytes(buf) ?? return Err(syntax_error(EncodingFormat.YAML, 0, 1, 1, "", "invalid UTF-8 in YAML input")))
+    if buf.len() > 0 -> rows.push(String.from_bytes(buf) ?? return Err(syntax_error(EncodingFormat.YAML, 0, 1, 1, "", "invalid UTF-8 in YAML input")))
     if rows.len() == 0 -> return Ok(Dyn.Null)
     first := ""
     first_index := 0
@@ -125,7 +125,7 @@ parse_block_scalar: fn(rows: [String], start: Int, parent_indent: Int, folded: B
     loop i < rows.len() {
         line: rows[i]
         if line.len() == 0 {
-            &lines.push("")
+            lines.push("")
             i += 1
             next
         }
@@ -133,7 +133,7 @@ parse_block_scalar: fn(rows: [String], start: Int, parent_indent: Int, folded: B
         if pad <= parent_indent -> break
         if content_indent < 0 -> content_indent = pad
         if pad < content_indent -> break
-        &lines.push(strip_indent(line, content_indent))
+        lines.push(strip_indent(line, content_indent))
         i += 1
     }
     out := ""
@@ -195,12 +195,12 @@ parse_map: fn(rows: [String], indent: Int) -> Dyn EncodingError! {
         key: trim_yaml(cut.before)
         if key.len() == 0 -> return Err(syntax_error(EncodingFormat.YAML, 0, 1, 1, "", "YAML map key is empty"))
         if seen.has_key(key) -> return Err(syntax_error(EncodingFormat.YAML, 0, 1, 1, "", "duplicate YAML map key"))
-        _: &seen.add(key, true)
+        _: seen.add(key, true)
         rest: trim_yaml(strip_inline_comment(cut.after))
         i += 1
         if rest == "|" || rest == ">" {
             block: parse_block_scalar(rows, i - 1, pad, rest == ">")
-            &entries.push((key: key, value: Dyn.Text(block.value)))
+            entries.push((key: key, value: Dyn.Text(block.value)))
             i = block.next
         } else if rest.len() == 0 {
             child_rows := [String]{}
@@ -211,15 +211,15 @@ parse_map: fn(rows: [String], indent: Int) -> Dyn EncodingError! {
                     next
                 }
                 if leading_spaces(child) <= pad -> break
-                &child_rows.push(child)
+                child_rows.push(child)
                 i += 1
             }
-            &entries.push((key: key, value: parse_block(join_lines(child_rows))))
+            entries.push((key: key, value: parse_block(join_lines(child_rows))))
         } else {
-            &entries.push((key: key, value: parse_scalar(rest)))
+            entries.push((key: key, value: parse_scalar(rest)))
         }
     }
-    Ok(stream.object_from_entries(^entries))
+    Ok(stream.object_from_entries(entries))
 }
 
 parse_list: fn(rows: [String], indent: Int) -> Dyn EncodingError! {
@@ -242,8 +242,8 @@ parse_list: fn(rows: [String], indent: Int) -> Dyn EncodingError! {
         i += 1
         if rest == "|" || rest == ">" || rest == "!!binary |" || rest == "!!binary >" {
             block: parse_block_scalar(rows, i - 1, pad, rest == ">" || rest == "!!binary >")
-            if rest.starts_with("!!binary") -> &items.push(parse_scalar("!!binary {block.value}"))
-            else -> &items.push(Dyn.Text(block.value))
+            if rest.starts_with("!!binary") -> items.push(parse_scalar("!!binary {block.value}"))
+            else -> items.push(Dyn.Text(block.value))
             i = block.next
         } else if rest.len() == 0 {
             child_rows := [String]{}
@@ -254,26 +254,26 @@ parse_list: fn(rows: [String], indent: Int) -> Dyn EncodingError! {
                     next
                 }
                 if leading_spaces(child) <= pad -> break
-                &child_rows.push(child)
+                child_rows.push(child)
                 i += 1
             }
-            &items.push(parse_block(join_lines(child_rows)))
+            items.push(parse_block(join_lines(child_rows)))
         } else if is_map_entry(rest) {
             map_rows := [String]{rest}
             loop i < rows.len() {
                 child: rows[i]
                 if is_blank_or_comment(child) {
-                    &map_rows.push("")
+                    map_rows.push("")
                     i += 1
                     next
                 }
                 if leading_spaces(child) <= pad -> break
-                &map_rows.push(strip_indent(child, pad + 2))
+                map_rows.push(strip_indent(child, pad + 2))
                 i += 1
             }
-            &items.push(parse_map(map_rows, 0))
+            items.push(parse_map(map_rows, 0))
         } else {
-            &items.push(parse_scalar(strip_inline_comment(rest)))
+            items.push(parse_scalar(strip_inline_comment(rest)))
         }
     }
     Ok(Dyn.Array(items))
@@ -293,7 +293,7 @@ parse_scalar: fn(text: String) -> Dyn EncodingError! {
         encoded: unquote(trim_yaml(drop_prefix(clean, 8)))
         compact := [U8]{}
         loop b in encoded.bytes() {
-            if b != (U8{32}) && b != (U8{9}) && b != (U8{10}) && b != (U8{13}) -> &compact.push(b)
+            if b != (U8{32}) && b != (U8{9}) && b != (U8{10}) && b != (U8{13}) -> compact.push(b)
         }
         bytes: base64.decode(String.from_bytes(compact) ?? "") ?? return Err(syntax_error(EncodingFormat.YAML, 0, 1, 1, "", "invalid !!binary base64"))
         return Ok(Dyn.Bytes(bytes))
@@ -343,15 +343,15 @@ parse_scalar: fn(text: String) -> Dyn EncodingError! {
 // A float keeps its own spelling when it is a JSON number token (`+` dropped),
 // else its shortest decimal spelling; `.inf` and `.nan` have no lexeme and stay
 // `Float`. Rust twin: jet-foundation.
-number_tree: fn(clean: ^String, value: Float) -> Dyn Never! {
-    unsigned := ^clean
+number_tree: fn(clean: &&String, value: Float) -> Dyn Never! {
+    unsigned := clean.move()
     raw: unsigned.bytes()
     if raw.len() > 0 && raw[0] == (U8{43}) {
         unsigned = String.from_bytes(raw[1..<raw.len()]) ?? panic("removing an ASCII prefix preserves UTF-8")
     }
-    if is_json_number_token(unsigned) -> return stream.typed_number(^unsigned)
+    if is_json_number_token(unsigned) -> return stream.typed_number(unsigned)
     shown := "{value}"
-    if is_json_number_token(shown) -> return stream.typed_number(^shown)
+    if is_json_number_token(shown) -> return stream.typed_number(shown)
     Dyn.Float(value)
 }
 
@@ -624,13 +624,13 @@ unquote: fn(text: String) -> String Never! {
     loop i < raw.len() - 1 {
         if raw[0] == (U8{34}) && raw[i] == (U8{92}) && i + 1 < raw.len() - 1 {
             i += 1
-            if raw[i] == (U8{110}) -> &out.push(U8{10})
-            else if raw[i] == (U8{114}) -> &out.push(U8{13})
-            else if raw[i] == (U8{116}) -> &out.push(U8{9})
-            else if raw[i] == (U8{34}) || raw[i] == (U8{92}) -> &out.push(raw[i])
-            else -> &out.push(raw[i])
+            if raw[i] == (U8{110}) -> out.push(U8{10})
+            else if raw[i] == (U8{114}) -> out.push(U8{13})
+            else if raw[i] == (U8{116}) -> out.push(U8{9})
+            else if raw[i] == (U8{34}) || raw[i] == (U8{92}) -> out.push(raw[i])
+            else -> out.push(raw[i])
         } else {
-            &out.push(raw[i])
+            out.push(raw[i])
         }
         i += 1
     }

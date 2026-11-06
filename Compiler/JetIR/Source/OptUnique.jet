@@ -27,7 +27,7 @@ ir_opt_hoist_unique: fn(m: IRModule, f: &IRFunction, keys: [String], notes: &[St
     facts: ir_opt_facts(f)
     // The header each slot names (-1: none).
     root := [Int]{}
-    loop slot in 0..<count -> &root.push(if slot < f.param_count && facts.defs[slot] == 1 -> slot else -> -1)
+    loop slot in 0..<count -> root.push(if slot < f.param_count && facts.defs[slot] == 1 -> slot else -> -1)
     loop at in 0..<f.op.len() {
         dst: f.dst[at]
         if dst < f.param_count || dst >= count || facts.defs[dst] != 1 -> next
@@ -45,27 +45,27 @@ ir_opt_hoist_unique: fn(m: IRModule, f: &IRFunction, keys: [String], notes: &[St
     loops := [Int]{}
     loop at in 0..<f.op.len() {
         op: f.op[at]
-        &outer.push(-1)
-        &ends.push(-1)
+        outer.push(-1)
+        ends.push(-1)
         if op == .End || op == .Else {
-            opener: &open.pop() ?? panic("ir_opt_hoist_unique: End without an open construct")
+            opener: open.pop() ?? panic("ir_opt_hoist_unique: End without an open construct")
             if f.op[opener] == .Loop {
-                _ := &loops.pop()
+                _ := loops.pop()
                 ends[opener] = at
             }
         }
-        &inner.push(if loops.len() > 0 -> loops[loops.len() - 1] else -> -1)
+        inner.push(if loops.len() > 0 -> loops[loops.len() - 1] else -> -1)
         if op == .Block || op == .Loop || op == .If || op == .Else {
-            &open.push(at)
+            open.push(at)
             if op == .Loop {
                 outer[at] = if loops.len() > 0 -> loops[loops.len() - 1] else -> -1
-                &loops.push(at)
+                loops.push(at)
             }
         }
     }
     // The calls, and where each goes (-1: stays).
     target := [Int]{}
-    loop _ in 0..<f.op.len() -> &target.push(-1)
+    loop _ in 0..<f.op.len() -> target.push(-1)
     moved := 0
     rows := [String]{}
     loop at in 0..<f.op.len() {
@@ -88,13 +88,13 @@ ir_opt_hoist_unique: fn(m: IRModule, f: &IRFunction, keys: [String], notes: &[St
         if place >= 0 || why != "" {
             list: ir_opt_unique_list(keys[f.a[at]])
             row: if place >= 0 -> "unique {f.name} {list}: made unique before the Loop" else -> "unique {f.name} {list}: declined ({why})"
-            if !rows.contains(row) -> &rows.push(row)
+            if !rows.contains(row) -> rows.push(row)
         }
         if place < 0 -> next
         target[at] = place
         moved += 1
     }
-    loop row in rows -> &notes.push(row)
+    loop row in rows -> notes.push(row)
     if moved == 0 -> return 0
     code := IROptCode{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}}
     loop at in 0..<f.op.len() {
@@ -105,20 +105,20 @@ ir_opt_hoist_unique: fn(m: IRModule, f: &IRFunction, keys: [String], notes: &[St
                 if target[k] != at -> next
                 header: root[f.args[f.b[k]]]
                 if done.contains(header) -> next
-                &done.push(header)
-                ir_opt_code_put(&code, f.op[k], f.dst[k], f.a[k], f.b[k], f.c[k], f.code_line[k])
+                done.push(header)
+                ir_opt_code_put(code, f.op[k], f.dst[k], f.a[k], f.b[k], f.c[k], f.code_line[k])
             }
         }
         if target[at] >= 0 -> next
-        ir_opt_code_put(&code, f.op[at], f.dst[at], f.a[at], f.b[at], f.c[at], f.code_line[at])
+        ir_opt_code_put(code, f.op[at], f.dst[at], f.a[at], f.b[at], f.c[at], f.code_line[at])
     }
-    f.op = ^code.op
-    f.dst = ^code.dst
-    f.a = ^code.a
-    f.b = ^code.b
-    f.c = ^code.c
-    f.code_line = ^code.line
-    ir_opt_compact(&f)
+    f.op = code.op.move()
+    f.dst = code.dst.move()
+    f.a = code.a.move()
+    f.b = code.b.move()
+    f.c = code.c.move()
+    f.code_line = code.line.move()
+    ir_opt_compact(f)
     moved
 }
 
@@ -167,7 +167,7 @@ ir_opt_reshares: fn(m: IRModule, f: IRFunction, facts: OptFacts, keys: [String],
     buffer := [Int]{}
     reads := [Int]{}
     loop k in (opener + 1)..<end {
-        if f.op[k] == .Load && f.a[k] >= 0 && root[f.a[k]] == header && f.b[k] == 16 && f.dst[k] >= 0 -> &buffer.push(f.dst[k])
+        if f.op[k] == .Load && f.a[k] >= 0 && root[f.a[k]] == header && f.b[k] == 16 && f.dst[k] >= 0 -> buffer.push(f.dst[k])
     }
     at := opener + 1
     loop at < end {
@@ -178,7 +178,7 @@ ir_opt_reshares: fn(m: IRModule, f: IRFunction, facts: OptFacts, keys: [String],
         }
         op: f.op[at]
         unique: ir_opt_unique_header(f, keys, root, at) == header
-        ir_x64_reads_into(f, at, &reads)
+        ir_x64_reads_into(f, at, reads)
         loop slot in reads {
             if slot < 0 || slot >= count -> next
             if root[slot] == header {
@@ -257,7 +257,7 @@ ir_opt_unique_to_callers: fn(m: IRModule, functions: &[IRFunction], keys: [Strin
     count: functions.len()
     if m.entry < 0 || m.entry >= count -> return 0
     addressed := [Bool]{}
-    loop _ in 0..<count -> &addressed.push(false)
+    loop _ in 0..<count -> addressed.push(false)
     addressed[m.entry] = true
     loop ty in m.types {
         drop: if ty.drop == "" -> -1 else -> name_rows_value(m.function_rows, ty.drop) ?? -1
@@ -278,12 +278,12 @@ ir_opt_unique_to_callers: fn(m: IRModule, functions: &[IRFunction], keys: [Strin
     helpers := [Int]{}
     loop id in 0..<count {
         if addressed[id] || !ir_opt_unique_on_param(functions[id], keys) -> next
-        hoisted += ir_opt_hoist_unique(m, &functions[id], keys, &notes)
-        ir_opt_entry_uniques(m, functions[id], keys, id, &callees, &params, &sites, &helpers)
+        hoisted += ir_opt_hoist_unique(m, functions[id], keys, notes)
+        ir_opt_entry_uniques(m, functions[id], keys, id, callees, params, sites, helpers)
     }
     if callees.len() == 0 -> return hoisted
     ok := [Bool]{}
-    loop _ in callees -> &ok.push(true)
+    loop _ in callees -> ok.push(true)
     loop g in functions {
         loop at in 0..<g.op.len() {
             if g.op[at] != .Call -> next
@@ -300,14 +300,14 @@ ir_opt_unique_to_callers: fn(m: IRModule, functions: &[IRFunction], keys: [Strin
         }
     }
     loop k in 0..<callees.len() {
-        if ok[k] -> ir_opt_kill(&functions[callees[k]], sites[k])
+        if ok[k] -> ir_opt_kill(functions[callees[k]], sites[k])
     }
     loop id in 0..<count {
         killed := false
         loop k in 0..<callees.len() {
             if ok[k] && callees[k] == id -> killed = true
         }
-        if ir_opt_put_uniques(&functions[id], callees, params, helpers, ok) || killed -> ir_opt_compact(&functions[id])
+        if ir_opt_put_uniques(functions[id], callees, params, helpers, ok) || killed -> ir_opt_compact(functions[id])
     }
     hoisted
 }
@@ -344,11 +344,11 @@ ir_opt_entry_uniques: fn(m: IRModule, f: IRFunction, keys: [String], id: Int, ca
         param: ir_opt_unique_param(f, keys, at)
         if param >= 0 {
             if !taken.contains(param) && !ir_opt_param_written(f, param) {
-                &taken.push(param)
-                &callees.push(id)
-                &params.push(param)
-                &sites.push(at)
-                &helpers.push(f.a[at])
+                taken.push(param)
+                callees.push(id)
+                params.push(param)
+                sites.push(at)
+                helpers.push(f.a[at])
             }
             at += 1
             next
@@ -383,17 +383,17 @@ ir_opt_put_uniques: fn(f: &IRFunction, callees: [Int], params: [Int], helpers: [
             loop k in 0..<callees.len() {
                 if !ok[k] || callees[k] != f.a[at] -> next
                 arg: f.args[f.b[at] + params[k]]
-                start: ir_args(&f, [Int]{arg})
-                ir_opt_code_put(&code, IROp.Call, -1, helpers[k], start, 1, f.code_line[at])
+                start: ir_args(f, [Int]{arg})
+                ir_opt_code_put(code, IROp.Call, -1, helpers[k], start, 1, f.code_line[at])
             }
         }
-        ir_opt_code_put(&code, f.op[at], f.dst[at], f.a[at], f.b[at], f.c[at], f.code_line[at])
+        ir_opt_code_put(code, f.op[at], f.dst[at], f.a[at], f.b[at], f.c[at], f.code_line[at])
     }
-    f.op = ^code.op
-    f.dst = ^code.dst
-    f.a = ^code.a
-    f.b = ^code.b
-    f.c = ^code.c
-    f.code_line = ^code.line
+    f.op = code.op.move()
+    f.dst = code.dst.move()
+    f.a = code.a.move()
+    f.b = code.b.move()
+    f.c = code.c.move()
+    f.code_line = code.line.move()
     true
 }

@@ -27,11 +27,11 @@ semindex_open: fn(entry: OSPath) -[FS, Env]> SemIndex SemIndexError! {
         if bundle == .Val(checked_bundle) {
             index := build_index(checked_bundle, facts)
             cache := WorkspaceDeclarationCache.new()
-            semindex_attach_package_facts(&index, &cache, entry_str)
-            return Ok(^index)
+            semindex_attach_package_facts(index, cache, entry_str)
+            return Ok(index)
         }
     }
-    Err(SemIndexError.Load{diagnostics: ^diags})
+    Err(SemIndexError.Load{diagnostics: diags.move()})
 }
 
 semindex_open_symbols: fn(entry: OSPath) -[FS, Env]> SemanticSymbolIndex SemIndexError! {
@@ -42,7 +42,7 @@ semindex_open_symbols: fn(entry: OSPath) -[FS, Env]> SemanticSymbolIndex SemInde
             return Ok(build_symbol_db(checked_bundle, facts).symbols)
         }
     }
-    Err(SemIndexError.Load{diagnostics: ^diags})
+    Err(SemIndexError.Load{diagnostics: diags.move()})
 }
 
 semindex_open_with_overlays: fn(entry: OSPath, overlays: [(OSPath, String)]) -[FS, Env]> SemIndex SemIndexError! {
@@ -52,11 +52,11 @@ semindex_open_with_overlays: fn(entry: OSPath, overlays: [(OSPath, String)]) -[F
         if bundle == .Val(checked_bundle) {
             index := build_index(checked_bundle, facts)
             cache := WorkspaceDeclarationCache.new()
-            semindex_attach_package_facts(&index, &cache, entry_str)
-            return Ok(^index)
+            semindex_attach_package_facts(index, cache, entry_str)
+            return Ok(index)
         }
     }
-    Err(SemIndexError.Load{diagnostics: ^diags})
+    Err(SemIndexError.Load{diagnostics: diags.move()})
 }
 
 semindex_open_structural_with_overlays: fn(entry: OSPath, overlays: [(OSPath, String)]) -[FS, Env]> SemIndex SemIndexError! {
@@ -66,16 +66,16 @@ semindex_open_structural_with_overlays: fn(entry: OSPath, overlays: [(OSPath, St
         if bundle == .Val(checked_bundle) {
             index := build_index(checked_bundle, facts)
             cache := WorkspaceDeclarationCache.new()
-            semindex_attach_package_facts(&index, &cache, entry_str)
-            return Ok(^index)
+            semindex_attach_package_facts(index, cache, entry_str)
+            return Ok(index)
         }
     }
-    Err(SemIndexError.Load{diagnostics: ^diags})
+    Err(SemIndexError.Load{diagnostics: diags.move()})
 }
 
 semindex_open_with_overlays_and_diagnostics: fn(entry: OSPath, overlays: [(OSPath, String)]) -[FS, Env]> (SemIndex, [Diagnostic]) SemIndexError! {
     (index, diagnostics, _): semindex_open_with_overlays_diagnostics_and_inputs(entry, overlays)
-    Ok((^index, ^diagnostics))
+    Ok((index, diagnostics))
 }
 
 semindex_open_with_overlays_diagnostics_and_inputs: fn(entry: OSPath, overlays: [(OSPath, String)]) -[FS, Env]> (SemIndex, [Diagnostic], [OSPath]) SemIndexError! {
@@ -88,9 +88,9 @@ semindex_open_with_overlays_diagnostics_and_inputs: fn(entry: OSPath, overlays: 
             inputs: loop module_ref in checked_bundle.modules -> module_ref.path.copy()
             index := build_index(checked_bundle, facts)
             cache := WorkspaceDeclarationCache.new()
-            semindex_attach_package_facts(&index, &cache, entry_str)
-            Ok((^index, ^diags, ^inputs))
+            semindex_attach_package_facts(index, cache, entry_str)
+            Ok((index, diags, inputs))
         }
-        .None -> Err(SemIndexError.Load{diagnostics: ^diags})
+        .None -> Err(SemIndexError.Load{diagnostics: diags.move()})
     }
 }

@@ -23,7 +23,7 @@ pkg_test_cbind_error: fn(header: String, lib: String) -> String Never! {
 pkg_test_cbind_source_parses: fn(source: String) -> Bool Never! {
     lexed: lex_generated(source.bytes())
     if lexed.diagnostics.len() != 0 -> return false
-    parsed: parse_lexed(^lexed)
+    parsed: parse_lexed(lexed)
     loop diagnostic in parsed.diagnostics {
         if diagnostic.severity == 1 -> return false
     }
@@ -88,7 +88,7 @@ pkg_test_cbind_source_parses: fn(source: String) -> Bool Never! {
     // `void*` return and varargs stay skipped; a pointer paired with a scalar
     // count is a typed Jet slice at the generated boundary.
     skipped := [String]{}
-    loop entry in r.skipped -> &skipped.push(entry.name)
+    loop entry in r.skipped -> skipped.push(entry.name)
     assert(skipped.contains("raw_alloc"))
     assert(skipped.contains("log_msg"))
     assert_eq(r.bound, [String]{"ok", "sum"})

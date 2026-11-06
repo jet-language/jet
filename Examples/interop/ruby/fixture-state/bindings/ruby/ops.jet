@@ -28,10 +28,10 @@ RubyError: enum {
 }
 
 impl Session.Close {
-    close: fn(^self) { abi.close(self.value) }
+    close: fn(&&self) { abi.close(self.value) }
 }
 
-close: fn(session: ^Session) { abi.close(session.value) }
+close: fn(session: &&Session) { abi.close(session.value) }
 
 open: fn() -> Session RubyError! {
     handle: abi.open()
@@ -48,9 +48,9 @@ decode_response: fn(raw: String, code: Int) -> Dyn RubyError! {
     if code == 5 -> return Err(RubyError.Limit)
     if code != 0 -> return Err(RubyError.Protocol)
     response := json.parse(raw) ?? return Err(RubyError.Protocol)
-    succeeded := (&response.field("ok") ?? Dyn.Bool(false)).bool() ?? false
+    succeeded := (response.field("ok") ?? Dyn.Bool(false)).bool() ?? false
     if !succeeded -> return Err(RubyError.CommandFailed)
-    return Ok(&response.field("value") ?? Dyn.Null)
+    return Ok(response.field("value") ?? Dyn.Null)
 }
 
 transform: fn(session: Session, input: Dyn, deadline_ms: Int) -> Dyn RubyError! {

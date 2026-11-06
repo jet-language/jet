@@ -24,7 +24,7 @@ PublicationBreakingChange: struct {
 publication_api_snapshot_items: fn(snapshot: PackageCapabilitySnapshot) -> [PublicAPIItem] Never! {
     items := [PublicAPIItem]{}
     loop line in snapshot.signatures {
-        if pkg_api_snapshot_line_name(line) == .Val(row) -> &items.push(PublicAPIItem{kind: row.kind, name: row.name, signature: line.copy()})
+        if pkg_api_snapshot_line_name(line) == .Val(row) -> items.push(PublicAPIItem{kind: row.kind, name: row.name, signature: line.copy()})
     }
     items
 }
@@ -75,12 +75,12 @@ publication_diff_public_api: fn(old: [PublicAPIItem], new: [PublicAPIItem]) -> [
             matched[replacement] = true
             item: new[replacement]
             if publication_api_effects_narrowed(old_item, item) -> next
-            &changes.push(PublicationBreakingChange{
+            changes.push(PublicationBreakingChange{
                 description: "public {old_item.kind} `{old_item.name}` changed signature\n   | was: {old_item.signature}\n   | now: {item.signature}",
                 item_name: old_item.name.copy(),
             })
         } else {
-            &changes.push(PublicationBreakingChange{
+            changes.push(PublicationBreakingChange{
                 description: "public {old_item.kind} `{old_item.name}` was removed\n   | {old_item.signature}\n   | (removed)",
                 item_name: old_item.name.copy(),
             })
@@ -89,7 +89,7 @@ publication_diff_public_api: fn(old: [PublicAPIItem], new: [PublicAPIItem]) -> [
     loop index in 0..<new.len() {
         item: new[index]
         if matched[index] || !publication_api_addition_breaks(old, new, item) -> next
-        &changes.push(PublicationBreakingChange{
+        changes.push(PublicationBreakingChange{
             description: "public {item.kind} `{item.name}` was added to an existing type\n   | (absent)\n   | {item.signature}",
             item_name: item.name.copy(),
         })

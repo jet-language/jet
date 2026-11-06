@@ -86,7 +86,7 @@ pkg_resolve_workspace_source: fn(cache: &WorkspaceDeclarationCache, dir: String)
         if err.is_missing() -> return Ok(None)
         return Err(WorkspaceSourceError{diagnostic: err.workspace_diagnostic()})
     }
-    if resolver.resolve_workspace_source(&cache) == {
+    if resolver.resolve_workspace_source(cache) == {
         .Ok(source) -> Ok(source)
         .Err(error) -> Err(WorkspaceSourceError{diagnostic: error.workspace_diagnostic()})
     }
@@ -142,7 +142,7 @@ pkg_lex_workspace_declaration: fn(src: [U8]) -> WorkspaceDeclarationProbe Never!
     tokens := [Token]{}
     loop token in lexed.tokens {
         if token.kind == TOKEN_LINE_COMMENT || token.kind == TOKEN_BLOCK_COMMENT -> next
-        &tokens.push(token)
+        tokens.push(token)
     }
     declares_module: pkg_workspace_tokens_declare_module(tokens, lexed.tables)
     WorkspaceDeclarationProbe{declares_module: declares_module, declares_members: declares_module && pkg_workspace_tokens_name_members(tokens, lexed.tables)}
@@ -176,14 +176,14 @@ pkg_workspace_tokens_name_members: fn(tokens: [Token], tables: TokenTables) -> B
 // Cheap token probe for a top-level `workspace: module` declaration. Full
 // parsing stays in the EnvModel workspace evaluator.
 pkg_declares_workspace_module: fn(cache: &WorkspaceDeclarationCache, src: String) -> Bool Never! {
-    pkg_workspace_declaration_probe(&cache, src).declares_module
+    pkg_workspace_declaration_probe(cache, src).declares_module
 }
 
 // True when a workspace declaration also supplies a `members:` index field.
 // A top-level `.jet` file that lists members is an index, not
 // authority-only metadata.
 pkg_declares_workspace_members: fn(cache: &WorkspaceDeclarationCache, src: String) -> Bool Never! {
-    pkg_workspace_declaration_probe(&cache, src).declares_members
+    pkg_workspace_declaration_probe(cache, src).declares_members
 }
 
 // E1239: the workspace authority must have one declaration source. Each
@@ -192,7 +192,7 @@ pkg_e1239_ambiguous_workspace: fn(paths: [String]) -> Diagnostic Never! {
     names := [String]{}
     loop path in paths {
         name: files.basename(path)
-        &names.push(if name == "" -> path else -> name)
+        names.push(if name == "" -> path else -> name)
     }
     diagnostic_from_registry(
         "E1239",

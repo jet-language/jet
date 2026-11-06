@@ -56,9 +56,9 @@ X64_COMPTIME_REPLY_FD: 4
 // One frame: `kind` and up to seven operands.
 x64_comptime_frame: fn(kind: Int, operands: [Int]) -> [U8] Never! {
     bytes := [U8]{}
-    x64_comptime_put_word(&bytes, kind)
+    x64_comptime_put_word(bytes, kind)
     loop index in 0..<7 {
-        x64_comptime_put_word(&bytes, if index < operands.len() -> operands[index] else -> 0)
+        x64_comptime_put_word(bytes, if index < operands.len() -> operands[index] else -> 0)
     }
     bytes
 }
@@ -66,7 +66,7 @@ x64_comptime_frame: fn(kind: Int, operands: [Int]) -> [U8] Never! {
 x64_comptime_put_word: fn(bytes: &[U8], value: Int) Never! {
     bits := if value < 0 -> value + 18446744073709551616 else -> value
     loop _ in 0..<8 {
-        &bytes.push(U8{bits.bit_and(255)})
+        bytes.push(U8{bits.bit_and(255)})
         bits = bits >> 8
     }
 }
@@ -126,7 +126,7 @@ x64_comptime_filter: fn(stdout: Bool) -> [U8] Never! {
     read_check: trap + 1
     write_check: read_check + 3
     fds := [Int]{X64_COMPTIME_REPLY_FD, 2}
-    if stdout -> &fds.push(1)
+    if stdout -> fds.push(1)
     allow: write_check + 1 + fds.len() + 1
     program := [X64ComptimeBpf]{
         X64ComptimeBpf{code: X64_BPF_LD_W_ABS, k: 4, jt: -1, jf: -1},
@@ -138,21 +138,21 @@ x64_comptime_filter: fn(stdout: Bool) -> [U8] Never! {
         X64ComptimeBpf{code: X64_BPF_JEQ_K, k: 20, jt: write_check, jf: 7},
     }
     loop (index, number) in allowed {
-        &program.push(X64ComptimeBpf{code: X64_BPF_JEQ_K, k: number, jt: allow, jf: 8 + index})
+        program.push(X64ComptimeBpf{code: X64_BPF_JEQ_K, k: number, jt: allow, jf: 8 + index})
     }
-    &program.push(X64ComptimeBpf{code: X64_BPF_RET_K, k: X64_SECCOMP_RET_TRAP, jt: -1, jf: -1})
+    program.push(X64ComptimeBpf{code: X64_BPF_RET_K, k: X64_SECCOMP_RET_TRAP, jt: -1, jf: -1})
     // read: only the command descriptor.
-    &program.push(X64ComptimeBpf{code: X64_BPF_LD_W_ABS, k: 16, jt: -1, jf: -1})
-    &program.push(X64ComptimeBpf{code: X64_BPF_JEQ_K, k: X64_COMPTIME_COMMAND_FD, jt: allow, jf: read_check + 2})
-    &program.push(X64ComptimeBpf{code: X64_BPF_RET_K, k: X64_SECCOMP_RET_TRAP, jt: -1, jf: -1})
+    program.push(X64ComptimeBpf{code: X64_BPF_LD_W_ABS, k: 16, jt: -1, jf: -1})
+    program.push(X64ComptimeBpf{code: X64_BPF_JEQ_K, k: X64_COMPTIME_COMMAND_FD, jt: allow, jf: read_check + 2})
+    program.push(X64ComptimeBpf{code: X64_BPF_RET_K, k: X64_SECCOMP_RET_TRAP, jt: -1, jf: -1})
     // write, writev: the reply descriptor, standard error and, admitted,
     // standard output.
-    &program.push(X64ComptimeBpf{code: X64_BPF_LD_W_ABS, k: 16, jt: -1, jf: -1})
+    program.push(X64ComptimeBpf{code: X64_BPF_LD_W_ABS, k: 16, jt: -1, jf: -1})
     loop (index, fd) in fds {
-        &program.push(X64ComptimeBpf{code: X64_BPF_JEQ_K, k: fd, jt: allow, jf: write_check + 2 + index})
+        program.push(X64ComptimeBpf{code: X64_BPF_JEQ_K, k: fd, jt: allow, jf: write_check + 2 + index})
     }
-    &program.push(X64ComptimeBpf{code: X64_BPF_RET_K, k: X64_SECCOMP_RET_TRAP, jt: -1, jf: -1})
-    &program.push(X64ComptimeBpf{code: X64_BPF_RET_K, k: X64_SECCOMP_RET_ALLOW, jt: -1, jf: -1})
+    program.push(X64ComptimeBpf{code: X64_BPF_RET_K, k: X64_SECCOMP_RET_TRAP, jt: -1, jf: -1})
+    program.push(X64ComptimeBpf{code: X64_BPF_RET_K, k: X64_SECCOMP_RET_ALLOW, jt: -1, jf: -1})
     if program.len() != allow + 1 -> panic("comptime seccomp layout: allow is {allow}, the program has {program.len()} instructions")
     x64_comptime_bpf_bytes(program)
 }
@@ -165,11 +165,11 @@ x64_comptime_bpf_bytes: fn(program: [X64ComptimeBpf]) -> [U8] Never! {
         jt: if row.jt < 0 -> 0 else -> row.jt - at - 1
         jf: if row.jf < 0 -> 0 else -> row.jf - at - 1
         if jt < 0 || jt > 255 || jf < 0 || jf > 255 -> panic("comptime seccomp jump out of range at {at}")
-        &bytes.push(U8{row.code.bit_and(255)})
-        &bytes.push(U8{(row.code >> 8).bit_and(255)})
-        &bytes.push(U8{jt})
-        &bytes.push(U8{jf})
-        loop shift in 0..<4 -> &bytes.push(U8{(row.k >> (8 * shift)).bit_and(255)})
+        bytes.push(U8{row.code.bit_and(255)})
+        bytes.push(U8{(row.code >> 8).bit_and(255)})
+        bytes.push(U8{jt})
+        bytes.push(U8{jf})
+        loop shift in 0..<4 -> bytes.push(U8{(row.k >> (8 * shift)).bit_and(255)})
     }
     bytes
 }

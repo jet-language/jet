@@ -54,7 +54,7 @@ lsp_semantic_tokens_delta_response: fn(server: LSPServer, params: Dyn?, id: Dyn)
 
 lsp_semantic_tokens_json: fn(src: String, data: [U32]) -> String Never! {
     values := [String]{}
-    loop number in data -> &values.push("{number}")
+    loop number in data -> values.push("{number}")
     "{{\"resultId\":\"{lsp_semantic_tokens_result_id(src, data)}\",\"data\":[{values.join(",")}]}}"
 }
 
@@ -76,8 +76,8 @@ lsp_inlay_hint_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -[FS, Env]
     hints := [InlayHint]{}
     if result.graph != None {
         db: lsp_build_symbol_db(result)
-        loop hint in db.inlay_hints_for(lsp_token_path.display(doc.path)) -> &hints.push(hint[0].copy())
-        loop hint in lsp_reasoning_inlay_hints(db, lsp_token_path.display(doc.path)) -> &hints.push(hint)
+        loop hint in db.inlay_hints_for(lsp_token_path.display(doc.path)) -> hints.push(hint[0].copy())
+        loop hint in lsp_reasoning_inlay_hints(db, lsp_token_path.display(doc.path)) -> hints.push(hint)
     }
     Val(lsp_response(id, lsp_format_inlay_hints(hints, doc.text)))
 }

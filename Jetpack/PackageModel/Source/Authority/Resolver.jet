@@ -79,7 +79,7 @@ AuthorityResolver: struct {
         }
         root_identity: FileIdentity.from_stat(held, AuthorityKind.Directory)
         if root_identity != expected -> return Err(AuthorityError.Changed(effective))
-        Ok(AuthorityResolver{root: canonical, root_identity: root_identity, root_handle: ^handle, allow_hardlinks: allow_hardlinks})
+        Ok(AuthorityResolver{root: canonical, root_identity: root_identity, root_handle: handle.move(), allow_hardlinks: allow_hardlinks})
     }
 
     // Root snapshots borrow the resolver's one pin; descendants retain their
@@ -113,7 +113,7 @@ AuthorityResolver: struct {
         loop {
             chunk: handle.read(AUTHORITY_READ_CHUNK) ?? return Err(AuthorityError.IO{path: full, operation: "read", detail: "{err}"})
             if chunk.len() == 0 -> break
-            loop byte in chunk -> &bytes.push(byte)
+            loop byte in chunk -> bytes.push(byte)
             if bytes.len() > PKG_MAX_TREE_FILE_BYTES {
                 return Err(pkg_authority_limit_error(full, "authority file exceeds the {PKG_MAX_TREE_FILE_BYTES}-byte read bound"))
             }
@@ -135,7 +135,7 @@ AuthorityResolver: struct {
         handle := Directory?{None}
         if relative != "" {
             opened: self.root_handle.open_directory(relative) ?? return Err(pkg_authority_map_io(full, err, true))
-            handle = Val(^opened)
+            handle = Val(opened.move())
         }
         info: if handle == {
             .Val(opened) -> opened.stat() ?? return Err(AuthorityError.IO{path: full, operation: "inspect", detail: "{err}"})
@@ -148,7 +148,7 @@ AuthorityResolver: struct {
             path: full,
             relative: relative,
             identity: FileIdentity.from_stat(info, AuthorityKind.Directory),
-            handle: ^handle,
+            handle: handle.move(),
             allow_hardlinks: self.allow_hardlinks
         }
         self.revalidate_directory(checked)
@@ -173,7 +173,7 @@ AuthorityResolver: struct {
         }
         self.revalidate_file(file)
         self.revalidate_root()
-        Ok(CheckedManifest{file: ^file, facts: facts})
+        Ok(CheckedManifest{file: file.move(), facts: facts})
     }
 
     // Open and parse one package member directory.
@@ -188,7 +188,7 @@ AuthorityResolver: struct {
     // Compose one checked Package without reopening its authority paths.
     checked_package: fn(self, path: String) -[FS, Env]> CheckedPackage AuthorityError! {
         member: self.checked_member(path)
-        self.complete_checked_package(^member)
+        self.complete_checked_package(member)
     }
 
     // Compose only the package rooted at this resolver: no `members:` walk
@@ -197,7 +197,7 @@ AuthorityResolver: struct {
         member: self.checked_member(".")
         facts := member.manifest.facts
         manifest_path: member.manifest.file.path
-        &facts.compose_configs_checked(self, member.directory) ?? return Err(AuthorityError.Invalid{path: manifest_path, detail: err.message()})
+        facts.compose_configs_checked(self, member.directory) ?? return Err(AuthorityError.Invalid{path: manifest_path, detail: err.message()})
         facts.validate_guarantees() ?? return Err(AuthorityError.Invalid{path: manifest_path, detail: err.message()})
         facts.validate_defaults() ?? return Err(AuthorityError.Invalid{path: manifest_path, detail: err.message()})
         self.revalidate_member(member)
@@ -207,10 +207,10 @@ AuthorityResolver: struct {
     // Complete a member from an already-open checked directory and manifest.
     // Config paths and a Package's own membership are relative to that
     // Package root; the checked directory carries its opened handle.
-    complete_checked_package: fn(self, member: ^CheckedMember) -[FS, Env]> CheckedPackage AuthorityError! {
+    complete_checked_package: fn(self, member: &&CheckedMember) -[FS, Env]> CheckedPackage AuthorityError! {
         facts := member.manifest.facts
         manifest_path: member.manifest.file.path
-        &facts.compose_configs_checked(self, member.directory) ?? return Err(AuthorityError.Invalid{path: manifest_path, detail: err.message()})
+        facts.compose_configs_checked(self, member.directory) ?? return Err(AuthorityError.Invalid{path: manifest_path, detail: err.message()})
         facts.validate_defaults() ?? return Err(AuthorityError.Invalid{path: manifest_path, detail: err.message()})
         facts.checked_members_in(self, member.directory)
         self.revalidate_member(member)
@@ -222,13 +222,13 @@ AuthorityResolver: struct {
     discover_members: fn(self, path: String) -[FS, Env]> [CheckedMember] AuthorityError! {
         scan: self.checked_directory(path)
         budget := AuthorityWalkBudget.new()
-        entries: pkg_authority_read_sorted_entries(self.directory_handle(scan), scan.path, &budget)
+        entries: pkg_authority_read_sorted_entries(self.directory_handle(scan), scan.path, budget)
         members := [CheckedMember]{}
         loop entry in entries {
             if entry.info.is_symlink -> return Err(AuthorityError.Symlink(entry.path))
             if !entry.info.is_dir -> next
             relative: pkg_authority_relative_join(scan.relative, entry.name)
-            // The member is moved into the list (`^member`): a copying push
+            // The member is moved into the list (`member.move()`): a copying push
             // would need clone glue for CheckedMember, whose manifest's
             // CheckedFile holds a FileReader, which cannot be copied natively.
             // (Binding the call with `:` would unwrap its Result, so the
@@ -236,7 +236,7 @@ AuthorityResolver: struct {
             if self.checked_member(relative) == {
                 .Ok(member) -> {
                     self.revalidate_member(member)
-                    &members.push(^member)
+                    members.push(member)
                 }
                 .Err(error) -> {
                     if !error.is_missing() -> return Err(error)
@@ -252,7 +252,7 @@ AuthorityResolver: struct {
     discover_files: fn(self, path: String, extension: String?) -[FS, Env]> [CheckedFile] AuthorityError! {
         scan: self.checked_directory(path)
         budget := AuthorityWalkBudget.new()
-        entries: pkg_authority_read_sorted_entries(self.directory_handle(scan), scan.path, &budget)
+        entries: pkg_authority_read_sorted_entries(self.directory_handle(scan), scan.path, budget)
         found := [CheckedFile]{}
         loop entry in entries {
             relative: pkg_authority_relative_join(scan.relative, entry.name)
@@ -268,8 +268,8 @@ AuthorityResolver: struct {
             }
             file: self.checked_file(relative)
             self.revalidate_file(file)
-            &budget.record_file(file.path, file.bytes.len())
-            &found.push(^file)
+            budget.record_file(file.path, file.bytes.len())
+            found.push(file)
         }
         self.revalidate_directory(scan)
         Ok(found)
@@ -280,8 +280,8 @@ AuthorityResolver: struct {
     discover_source_files: fn(self) -[FS, Env]> [CheckedFile] AuthorityError! {
         found := [CheckedFile]{}
         budget := AuthorityWalkBudget.new()
-        self.discover_source_files_from(".", &found, &budget, 0)
-        &found.sort_by(file -> file.relative)
+        self.discover_source_files_from(".", found, budget, 0)
+        found.sort_by(file -> file.relative)
         self.revalidate_root()
         Ok(found)
     }
@@ -292,18 +292,18 @@ AuthorityResolver: struct {
         self.revalidate_directory(directory)
         found := [CheckedFile]{}
         budget := AuthorityWalkBudget.new()
-        self.discover_source_files_from(directory.relative, &found, &budget, 0)
-        &found.sort_by(file -> file.relative)
+        self.discover_source_files_from(directory.relative, found, budget, 0)
+        found.sort_by(file -> file.relative)
         hasher := crypto.Hasher.new()
         loop file in found {
             relative: if directory.relative == "" -> file.relative else -> {
                 if !file.relative.starts_with("{directory.relative}/") -> return Err(AuthorityError.Escapes(file.path))
                 file.relative.removeprefix("{directory.relative}/")
             }
-            &hasher.update(relative.replace("\\", "/").bytes())
-            &hasher.update([U8]{U8{0}})
-            &hasher.update(pkg_u64_be_bytes(file.bytes.len()))
-            &hasher.update(file.bytes)
+            hasher.update(relative.replace("\\", "/").bytes())
+            hasher.update([U8]{U8{0}})
+            hasher.update(pkg_u64_be_bytes(file.bytes.len()))
+            hasher.update(file.bytes)
             self.revalidate_file(file)
         }
         self.revalidate_directory(directory)
@@ -321,7 +321,7 @@ AuthorityResolver: struct {
                 if manifest.facts.members.len() > 0 {
                     path := manifest.file.path
                     text := manifest.file.text()
-                    source := WorkspaceSource{path: path, source: text, role: WorkspaceSourceRole.Index, checked: ^manifest.file}
+                    source := WorkspaceSource{path: path, source: text, role: WorkspaceSourceRole.Index, checked: manifest.file.move()}
                     self.revalidate_source(source)
                     return Ok(Val(source))
                 }
@@ -331,21 +331,21 @@ AuthorityResolver: struct {
             }
         }
         budget := AuthorityWalkBudget.new()
-        entries: pkg_authority_read_sorted_entries(self.root_handle, self.root, &budget)
+        entries: pkg_authority_read_sorted_entries(self.root_handle, self.root, budget)
         indexes := [WorkspaceSource]{}
         authorities := [WorkspaceSource]{}
         malformed_canonical := false
         loop entry in entries {
             if pkg_authority_extension(entry.name) != Val(FILE_EXT) -> next
             file: self.checked_file(entry.name)
-            &budget.record_file(file.path, file.bytes.len())
+            budget.record_file(file.path, file.bytes.len())
             source: file.text()
-            if pkg_declares_workspace_module(&cache, source) {
-                role: if entry.name == WORKSPACE_FILE || pkg_declares_workspace_members(&cache, source) -> WorkspaceSourceRole.Index else -> WorkspaceSourceRole.Authority
-                // `^file` moves the checked file in; a plain read would copy its FileReader.
-                candidate: WorkspaceSource{path: file.path, source: source, role: role, checked: ^file}
+            if pkg_declares_workspace_module(cache, source) {
+                role: if entry.name == WORKSPACE_FILE || pkg_declares_workspace_members(cache, source) -> WorkspaceSourceRole.Index else -> WorkspaceSourceRole.Authority
+                // `file.move()` moves the checked file in; a plain read would copy its FileReader.
+                candidate: WorkspaceSource{path: file.path, source: source, role: role, checked: file.move()}
                 self.revalidate_source(candidate)
-                if role == WorkspaceSourceRole.Index -> &indexes.push(candidate) else -> &authorities.push(candidate)
+                if role == WorkspaceSourceRole.Index -> indexes.push(candidate) else -> authorities.push(candidate)
             } else if entry.name == WORKSPACE_FILE {
                 malformed_canonical = true
             }
@@ -353,17 +353,17 @@ AuthorityResolver: struct {
         self.revalidate_root()
         if malformed_canonical && indexes.len() == 0 -> return Err(AuthorityError.WorkspaceNoModule)
         if indexes.len() > 0 {
-            if authorities.len() == 0 -> return Ok(&indexes.pop())
+            if authorities.len() == 0 -> return Ok(indexes.pop())
             paths := [String]{indexes[indexes.len() - 1].path}
-            loop source in authorities -> &paths.push(source.path)
+            loop source in authorities -> paths.push(source.path)
             return Err(AuthorityError.WorkspaceAmbiguous(paths))
         }
         if authorities.len() == {
             0 -> Ok(None)
-            1 -> Ok(&authorities.pop())
+            1 -> Ok(authorities.pop())
             else -> {
                 paths := [String]{}
-                loop source in authorities -> &paths.push(source.path)
+                loop source in authorities -> paths.push(source.path)
                 Err(AuthorityError.WorkspaceAmbiguous(paths))
             }
         }
@@ -439,7 +439,7 @@ AuthorityResolver: struct {
             return Err(pkg_authority_limit_error(pkg_authority_join(self.root, path), "authority source walk exceeds the {PKG_MAX_TREE_DEPTH}-level depth bound"))
         }
         scan: self.checked_directory(path)
-        entries: pkg_authority_read_sorted_entries(self.directory_handle(scan), scan.path, &budget)
+        entries: pkg_authority_read_sorted_entries(self.directory_handle(scan), scan.path, budget)
         loop entry in entries {
             relative: pkg_authority_relative_join(scan.relative, entry.name)
             if entry.info.is_symlink {
@@ -453,7 +453,7 @@ AuthorityResolver: struct {
                 if depth >= PKG_MAX_TREE_DEPTH {
                     return Err(pkg_authority_limit_error(files.join(self.root, relative), "authority source walk exceeds the {PKG_MAX_TREE_DEPTH}-level depth bound"))
                 }
-                self.discover_source_files_from(relative, &found, &budget, depth + 1)
+                self.discover_source_files_from(relative, found, budget, depth + 1)
             } else if pkg_authority_extension(entry.name) == (Val(FILE_EXT)) {
                 if !entry.info.is_file {
                     return Err(AuthorityError.WrongKind{path: files.join(self.root, relative), expected: AUTHORITY_KIND_FILE, actual: pkg_authority_entry_kind_name(entry.info)})
@@ -461,8 +461,8 @@ AuthorityResolver: struct {
                 budget.ensure_file(files.join(self.root, relative), entry.info.size)
                 file: self.checked_file(relative)
                 self.revalidate_file(file)
-                &budget.record_file(file.path, file.bytes.len())
-                &found.push(^file)
+                budget.record_file(file.path, file.bytes.len())
+                found.push(file)
             }
         }
         self.revalidate_directory(scan)
@@ -473,7 +473,7 @@ AuthorityResolver: struct {
             if err.is_missing() -> return Ok(None)
             return Err(err)
         }
-        Ok(Val(^file))
+        Ok(Val(file.move()))
     }
 
     // The normalized root-relative spelling of `path`; `.`, `..`, and an
@@ -491,7 +491,7 @@ AuthorityResolver: struct {
                 "" | "." -> next
                 ".." -> return Err(AuthorityError.Escapes(path))
                 else -> {
-                    &parts.push(part)
+                    parts.push(part)
                 }
             }
         }
@@ -575,6 +575,6 @@ pkg_authority_relative_join: fn(relative: String, name: String) -> String Never!
 pkg_u64_be_bytes: fn(value: Int) -> [U8] Never! {
     out := [U8]{}
     shift_values: [Int]{56, 48, 40, 32, 24, 16, 8, 0}
-    loop shift in shift_values -> &out.push(U8{((value >> shift)).bit_and(0xFF)})
+    loop shift in shift_values -> out.push(U8{((value >> shift)).bit_and(0xFF)})
     out
 }

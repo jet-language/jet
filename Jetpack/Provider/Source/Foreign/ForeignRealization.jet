@@ -22,10 +22,10 @@ ForeignRealization: struct {
 provider_realize_foreign_dependencies: fn(verification: &StoreVerification, roots: HangarRoots, project_root: String, manifest: Manifest, ctx: ProviderCtx) -[FS, Env, Exec, Time, Time.Wait]> [ForeignRealization] ProviderError! {
     realized := [ForeignRealization]{}
     names := manifest.dependencies.keys().to_list()
-    &names.sort()
+    names.sort()
     loop name in names {
         if manifest.dependencies[name] == {
-            .Foreign(language, reference) -> &realized.push(provider_realize_foreign_one(&verification, roots, project_root, name, language, reference, ctx))
+            .Foreign(language, reference) -> realized.push(provider_realize_foreign_one(verification, roots, project_root, name, language, reference, ctx))
             else -> {}
         }
     }
@@ -61,7 +61,7 @@ provider_realize_foreign_one: fn(verification: &StoreVerification, roots: Hangar
         provenance: "foreign-provider-v1 language={language.root()} provider={spec.provider.label()} reference={reference}",
         platform_artifact_kind: "",
     }
-    ingested: store_ingest_tree(&verification, roots, request) ?? return Err(ProviderError.Ingest(err.what()))
+    ingested: store_ingest_tree(verification, roots, request) ?? return Err(ProviderError.Ingest(err.what()))
     entry: ingested.entry
     stored_binding: provider_foreign_binding_in(entry.out, language, name)
     provider_require_regular_file(stored_binding, "verified foreign binding")
@@ -177,7 +177,7 @@ provider_write_verified_file: fn(destination: String, bytes: [U8]) ProviderError
     digest: pkg_sha256_hex(bytes)
     temporary: files.join(parent, ".{file_name}.{sys.pid()}-{provider_prefix(digest, 12)}.tmp")
     writer: files.create(temporary, if_exists: .Refuse) ?? return Err(ProviderError.ForeignProjection("could not stage binding {temporary}: {err}"))
-    if provider_write_synced(^writer, bytes) == {
+    if provider_write_synced(writer, bytes) == {
         .Ok(_) -> {}
         .Err(error) -> {
             files.remove(temporary).drop("the failed write is reported; the temporary file may already be gone")
@@ -193,8 +193,8 @@ provider_write_verified_file: fn(destination: String, bytes: [U8]) ProviderError
     }
 }
 
-provider_write_synced: fn(writer: ^FileWriter, bytes: [U8]) IOError! -[FS]> {
+provider_write_synced: fn(writer: &&FileWriter, bytes: [U8]) IOError! -[FS]> {
     writer.write_all(bytes)
     writer.fsync()
-    close(^writer)
+    close(writer)
 }

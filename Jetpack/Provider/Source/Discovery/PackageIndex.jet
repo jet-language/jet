@@ -54,14 +54,14 @@ PackageIndexEntry: struct {
         }
         if self.docs == "" && other.docs != "" -> self.docs = other.docs
         loop platform in other.platforms {
-            if !self.platforms.contains(platform) -> &self.platforms.push(platform)
+            if !self.platforms.contains(platform) -> self.platforms.push(platform)
         }
         loop option in other.options {
             known := false
             loop existing in self.options {
                 if existing.name == option.name -> known = true
             }
-            if !known -> &self.options.push(option)
+            if !known -> self.options.push(option)
         }
     }
 }
@@ -83,12 +83,12 @@ PackageIndex: struct {
         found := false
         loop index in 0..<self.packages.len() {
             if !found && self.packages[index].source == record.source && self.packages[index].name == record.name {
-                &self.packages[index].merge_from(record)
+                self.packages[index].merge_from(record)
                 found = true
             }
         }
-        if !found -> &self.packages.push(record)
-        &self.packages.sort_by((left: PackageIndexEntry, right: PackageIndexEntry) -> (left.source <=> right.source).then(left.name <=> right.name))
+        if !found -> self.packages.push(record)
+        self.packages.sort_by((left: PackageIndexEntry, right: PackageIndexEntry) -> (left.source <=> right.source).then(left.name <=> right.name))
     }
 
     // Case-insensitive search ranked exact, prefix, substring, option field,
@@ -98,14 +98,14 @@ PackageIndex: struct {
         scored := [(score: Int, record: PackageIndexEntry)]{}
         loop record in self.packages {
             score: env_discovery_score(record, q) ?? next
-            &scored.push((score: score, record: record))
+            scored.push((score: score, record: record))
         }
         // Stable passes from the least significant key.
-        &scored.sort_by(item -> item.record.name)
-        &scored.sort_by(item -> item.record.source)
-        &scored.sort_by(item -> item.score)
+        scored.sort_by(item -> item.record.name)
+        scored.sort_by(item -> item.record.source)
+        scored.sort_by(item -> item.score)
         found := [PackageIndexEntry]{}
-        loop item in scored -> &found.push(item.record)
+        loop item in scored -> found.push(item.record)
         found
     }
 
@@ -119,7 +119,7 @@ PackageIndex: struct {
                 .Val(source) -> record.source == source && record.name == split.name
                 .None -> record.name == split.name || record.reference == query
             }
-            if matched -> &matches.push(record)
+            if matched -> matches.push(record)
         }
         if matches.len() == 1 -> return Val(matches[0])
         None
@@ -129,7 +129,7 @@ PackageIndex: struct {
     package_completions: fn(self, source: String, prefix: String) -> [String] Never! {
         out := [String]{}
         loop record in self.packages {
-            if record.source == source && record.name.starts_with(prefix) -> &out.push(record.name)
+            if record.source == source && record.name.starts_with(prefix) -> out.push(record.name)
         }
         provider_sorted_unique(out)
     }
@@ -193,7 +193,7 @@ env_discovery_load: fn(project_dir: String) -[FS]> PackageIndex? ProviderReason!
             .Ok(tree) -> tree
             .Err(error) -> { return Err(ProviderReason{message: "{path}:{number + 1}: {error.reason}"}) }
         }
-        &index.add_package(env_discovery_record_from_json(value))
+        index.add_package(env_discovery_record_from_json(value))
     }
     Ok(Val(index))
 }
@@ -224,7 +224,7 @@ env_discovery_merge_refs: fn(index: &PackageIndex, refs: [RefSpec], fixtures: St
             .Val(pair) -> pair.provenance
             .None -> "declared"
         }
-        &index.add_package(env_discovery_record_for_ref(spec, version, provenance))
+        index.add_package(env_discovery_record_for_ref(spec, version, provenance))
     }
 }
 
@@ -252,7 +252,7 @@ env_discovery_merge_store_entries: fn(index: &PackageIndex, store_entries: [Stor
                 reference = "{name}{REF_PROVIDER_AT}{source}"
             }
         }
-        &index.add_package(PackageIndexEntry{
+        index.add_package(PackageIndexEntry{
             source,
             name,
             reference,
@@ -270,7 +270,7 @@ env_discovery_merge_store_entries: fn(index: &PackageIndex, store_entries: [Stor
 // `Pkg.adapt(...)` adapter packages.
 env_discovery_merge_adapters: fn(index: &PackageIndex, adapters: [AdapterPlan]) Never! {
     loop adapter in adapters {
-        &index.add_package(PackageIndexEntry{
+        index.add_package(PackageIndexEntry{
             source: "adapt",
             name: adapter.name,
             reference: "adapt:{adapter.name}",
@@ -292,7 +292,7 @@ env_discovery_merge_lock: fn(index: &PackageIndex, lock: LockFile) Never! {
     loop package in lock.packages {
         if package.source == {
             .Registry(registry, reference, _, _, _, authority, tier, gate_status) -> {
-                &index.add_package(PackageIndexEntry{
+                index.add_package(PackageIndexEntry{
                     source: registry,
                     name: package.name,
                     reference,
@@ -327,7 +327,7 @@ env_discovery_service_option_fields: fn() -> [PackageOptionField] Never! {
 
 env_discovery_search_json: fn(records: [PackageIndexEntry]) -> String Never! {
     items := [Dyn]{}
-    loop record in records -> &items.push(env_discovery_record_tree(record))
+    loop record in records -> items.push(env_discovery_record_tree(record))
     pkg_json_render(Dyn.Object(["packages": Dyn.Array(items)]))
 }
 
@@ -449,7 +449,7 @@ env_discovery_split_query: fn(query: String) -> (source: String?, name: String) 
 env_discovery_record_tree: fn(record: PackageIndexEntry) -> Dyn Never! {
     options := [Dyn]{}
     loop option in record.options {
-        &options.push(Dyn.Object(["name": Dyn.Text(option.name), "default": Dyn.Text(option.default), "docs": Dyn.Text(option.docs)]))
+        options.push(Dyn.Object(["name": Dyn.Text(option.name), "default": Dyn.Text(option.default), "docs": Dyn.Text(option.docs)]))
     }
     Dyn.Object([
         "source": Dyn.Text(record.source.copy()),
@@ -501,7 +501,7 @@ env_discovery_string_array: fn(value: Dyn?) -> [String] Never! {
     out := [String]{}
     loop item in items {
         if pkg_json_text(item) == {
-            .Val(text) -> &out.push(text)
+            .Val(text) -> out.push(text)
             .None -> {}
         }
     }
@@ -514,7 +514,7 @@ env_discovery_option_array: fn(value: Dyn?) -> [PackageOptionField] Never! {
     loop item in items {
         object: pkg_json_object(item) ?? next
         name: env_discovery_required_text(object, "name") ?? next
-        &out.push(PackageOptionField{name, default: env_discovery_optional_text(object, "default", ""), docs: env_discovery_optional_text(object, "docs", "")})
+        out.push(PackageOptionField{name, default: env_discovery_optional_text(object, "default", ""), docs: env_discovery_optional_text(object, "docs", "")})
     }
     out
 }

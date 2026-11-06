@@ -7,7 +7,7 @@ run: fn(path: String) {
     raw: files.read(path) ?? panic("warning stderr")
     selected := [Dyn]{}
     loop row in raw.lines() {
-        if row.starts_with("Warning [") || row.trim_start().starts_with("-->") -> &selected.push(Dyn.Text(row))
+        if row.starts_with("Warning [") || row.trim_start().starts_with("-->") -> selected.push(Dyn.Text(row))
     }
     print(json.to_string(Dyn.Array(selected)))
 }

@@ -43,8 +43,8 @@ project_stmt: fn(g: &GraphBuilder, index: &SemIndex, src: String, stmt: &Stmt, o
             if g.nodes.iter_mut().find((node) == .Val(node) -> node.id == node_id) { node.meta_json = meta_attr_json(b.meta.as_ref()) }
             input_pin: add_pin(g, node_id, "value", "input", ty, "", false)
             output_pin: add_pin(g, node_id, b.name, "output", ty, "", false)
-            g.local_pins.insert(b.name.clone(), ^output_pin)
-            g.local_types.insert(b.name.clone(), ^ty)
+            g.local_pins.insert(b.name.clone(), output_pin)
+            g.local_types.insert(b.name.clone(), ty)
             init_span: if b.pattern.is_none() -> binding_init_span(src, b) else -> b.init.span()
             connect_expr_to_input_with_span(g, index, src, b.init, init_span, ordinal, "init", node_id, input_pin, x - 220, y)
         }
@@ -57,8 +57,8 @@ project_stmt: fn(g: &GraphBuilder, index: &SemIndex, src: String, stmt: &Stmt, o
             output: add_pin(g, node_id, "target", "output", ty, "&", false)
             connect_expr_to_input(g, index, src, value, ordinal, "value", node_id, input, x - 220, y)
             if target == .Local(name: name, ..) {
-                g.local_pins.insert(name.clone(), ^output)
-                g.local_types.insert(name.clone(), ^ty)
+                g.local_pins.insert(name.clone(), output)
+                g.local_types.insert(name.clone(), ty)
             }
         }
         .Expr(e) -> { _: project_expr_node(g, index, src, e, ordinal, x, y, true) }
@@ -114,11 +114,11 @@ project_stmt: fn(g: &GraphBuilder, index: &SemIndex, src: String, stmt: &Stmt, o
             add_node(g, node_id, "loop", "loop {var}", span.into(), x, y, ["control"], ["source_jump"])
             iter_ty: if kind is { .Range(..) -> "Int"; .In(..) -> "iterable" }
             output: add_pin(g, node_id, var, "output", iter_ty, "", false)
-            g.local_pins.insert(var.clone(), ^output)
+            g.local_pins.insert(var.clone(), output)
             g.local_types.insert(var.clone(), iter_ty.to_string())
             if (second, _): var2 {
                 second_output: add_pin(g, node_id, second, "output", iter_ty, "", false)
-                g.local_pins.insert(second.clone(), ^second_output)
+                g.local_pins.insert(second.clone(), second_output)
                 g.local_types.insert(second.clone(), iter_ty.to_string())
             }
             if kind is {
@@ -151,7 +151,7 @@ project_stmt: fn(g: &GraphBuilder, index: &SemIndex, src: String, stmt: &Stmt, o
                 affordances := [String]{["edit_inline_expr", "source_jump"]}
                 is_pattern_test: arm.cond == .PatternTest(..)
                 if is_pattern_test { affordances.push("add_pattern_arm") }
-                add_node(g, node_id, "branch", if is_pattern_test -> "if ==" else -> "if", span.into(), x, y, ["control"], ^affordances)
+                add_node(g, node_id, "branch", if is_pattern_test -> "if ==" else -> "if", span.into(), x, y, ["control"], affordances)
                 if pattern_subject_type(g, index, arm.cond) == .Val(pattern_type) { set_pattern_node_type(g, node_id, pattern_type) }
                 cond: add_pin(g, node_id, "cond", "input", "Bool", "", false)
                 if is_pattern_test { _: add_arm_pin(g, node_id, "arm1", pattern_pin_label(src, arm.cond), pattern_arm_edit_span(src, arm.cond)) }
@@ -436,7 +436,7 @@ project_value_node: fn(g: GraphBuilder, index: SemIndex, src: String, expr: Expr
         node_id: if g.nodes.iter().any((node) -> node.id == base_node_id && node.span != source_span) -> "{base_node_id}:{span.start}-{span.end}" else -> base_node_id
         add_node(g, node_id, "variable_get", name, source_span, x, y, ["read"], ["edit_inline_expr", "source_jump"])
         pin: add_pin(g, node_id, name, "output", ty, "", false)
-        g.getter_pins.insert(^key, pin.clone())
+        g.getter_pins.insert(key, pin.clone())
         return .Some(pin)
     }
     (title, badges): if expr is {
@@ -504,7 +504,7 @@ project_expr_node: fn(g: GraphBuilder, index: SemIndex, src: String, expr: Expr,
             is_game_component: method == "component"
             affordances := [String]{["insert_call", "source_jump"]}
             if is_game_asset || is_game_component { affordances.push("edit_game_selection") }
-            add_node(g, node_id, if variant_like -> "variant" else -> archetype, title, method_span.into(), x, y, [], ^affordances)
+            add_node(g, node_id, if variant_like -> "variant" else -> archetype, title, method_span.into(), x, y, [], affordances)
             recv_ty: expr_type(g, index, receiver)
             recv_pin: add_pin(g, node_id, "self", "input", recv_ty, "", false)
             connect_expr_to_input(g, index, src, receiver, ordinal * 1000 + 1, "self", node_id, recv_pin, x - 220, y)

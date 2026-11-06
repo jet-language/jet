@@ -128,7 +128,7 @@ build_snapshot_declared_inputs: fn(store: BuildArtifactStoreHandle, base: String
         bytes: build_secure_read_file(base, path, build_read_budget(total))
         total += bytes.len()
         digest: store.put_blob(bytes)
-        &inputs.push(ActionInputCapture{snapshot: ActionInputSnapshot{path: input, digest, byte_len: bytes.len()}, bytes})
+        inputs.push(ActionInputCapture{snapshot: ActionInputSnapshot{path: input, digest, byte_len: bytes.len()}, bytes})
     }
     Ok(inputs)
 }
@@ -142,7 +142,7 @@ build_capture_declared_outputs: fn(store: BuildArtifactStoreHandle, base: String
         bytes: build_secure_read_file(base, path, build_read_budget(total))
         total += bytes.len()
         digest: store.put_blob(bytes)
-        &outputs.push(ActionOutputRecord{path: output, digest, byte_len: bytes.len()})
+        outputs.push(ActionOutputRecord{path: output, digest, byte_len: bytes.len()})
     }
     Ok(ActionResultRecord{key, outcome, outputs, failure_report: None, status})
 }
@@ -189,7 +189,7 @@ build_relative_components: fn(base: String, path: String, escape: String) -> [St
     parts := [String]{}
     loop part in relative.split("/") {
         if part == "" || part == "." || part == ".." -> next
-        &parts.push(part)
+        parts.push(part)
     }
     Ok(parts)
 }
@@ -223,7 +223,7 @@ build_secure_read_file: fn(base: String, path: String, limit: Int) -[FS]> [U8] B
         want: limit + 1 - bytes.len()
         chunk: reader.read(if want < BUILD_READ_CHUNK_BYTES -> want else -> BUILD_READ_CHUNK_BYTES) ?? return Err(BuildIOError.from(err))
         if chunk.len() == 0 -> break
-        &bytes.extend(chunk)
+        bytes.extend(chunk)
     }
     if bytes.len() > limit -> return Err(BuildIOError.new(.InvalidData, "cache entry exceeds its byte limit"))
     Ok(bytes)
@@ -258,7 +258,7 @@ build_atomic_restore_file: fn(base: String, path: String, bytes: [U8]) BuildIOEr
             .Ok(writer) -> {
                 writer.write_all(bytes) ?? return Err(BuildIOError.from(err))
                 writer.fsync() ?? return Err(BuildIOError.from(err))
-                close(^writer)
+                close(writer)
                 if directory.rename(temp_name, final_name) == {
                     .Ok(_) -> return
                     .Err(error) -> {
@@ -329,8 +329,8 @@ build_hex_encode: fn(bytes: [U8]) -> String Never! {
     out := [U8]{}
     loop byte in bytes {
         value: Int.from_u8(byte)
-        &out.push(digits[value >> 4])
-        &out.push(digits[value.bit_and(15)])
+        out.push(digits[value >> 4])
+        out.push(digits[value.bit_and(15)])
     }
     String.from_bytes(out) ?? panic("hex digits are ASCII")
 }
@@ -344,7 +344,7 @@ build_hex_decode: fn(value: String) -> [U8] BuildIOError! {
     loop index < raw.len() {
         high: build_hex_digit(raw[index]) ?? return Err(BuildIOError.new(.InvalidData, "hex field contains a non-hex digit"))
         low: build_hex_digit(raw[index + 1]) ?? return Err(BuildIOError.new(.InvalidData, "hex field contains a non-hex digit"))
-        &out.push(U8{high * 16 + low})
+        out.push(U8{high * 16 + low})
         index += 2
     }
     Ok(out)
@@ -453,7 +453,7 @@ build_read_action_record: fn(store: BuildArtifactStoreHandle, key: String) -[FS,
         path: build_path_new(fields[0]) ?? return Err(BuildIOError.new(.InvalidData, "malformed action output record"))
         digest: ContentDigest.parse(fields[1]) ?? return Err(BuildIOError.new(.InvalidData, err.message))
         byte_len: build_parse_u64(fields[2]) ?? return Err(BuildIOError.new(.InvalidData, "malformed action output record"))
-        &outputs.push(ActionOutputRecord{path, digest, byte_len})
+        outputs.push(ActionOutputRecord{path, digest, byte_len})
     }
     found: outcome ?? return Err(BuildIOError.new(.InvalidData, "action record has no outcome"))
     failed: if found == {
@@ -472,9 +472,9 @@ build_record_lines: fn(text: String) -> [String] Never! {
     loop line in text.split("\n") {
         raw: line.bytes()
         // A CR (13) before the LF belongs to the line ending.
-        if raw.len() > 0 && Int.from_u8(raw[raw.len() - 1]) == 13 -> &lines.push(String.from_bytes(raw.slice(0, raw.len() - 1)) ?? line) else -> &lines.push(line)
+        if raw.len() > 0 && Int.from_u8(raw[raw.len() - 1]) == 13 -> lines.push(String.from_bytes(raw.slice(0, raw.len() - 1)) ?? line) else -> lines.push(line)
     }
-    if lines.len() > 0 && lines[lines.len() - 1] == "" -> _ := &lines.pop()
+    if lines.len() > 0 && lines[lines.len() - 1] == "" -> _ := lines.pop()
     lines
 }
 
@@ -526,7 +526,7 @@ build_report_to_json: fn(report: DiagnosticBuildError) -> String Never! {
         .Val(text) -> foundation_json_quote(text)
         .None -> "null"
     }
-    &fields.push("\"code\":{code}")
+    fields.push("\"code\":{code}")
     cause: if report.causes.len() == {
         0 -> "null"
         1 -> build_report_to_json(report.causes[0])
@@ -535,15 +535,15 @@ build_report_to_json: fn(report: DiagnosticBuildError) -> String Never! {
             "[{rendered.join(",")}]"
         }
     }
-    &fields.push("\"cause\":{cause}")
-    if report.typed_identity == .Val(identity) -> &fields.push("\"typed_identity\":{foundation_json_quote(identity)}")
+    fields.push("\"cause\":{cause}")
+    if report.typed_identity == .Val(identity) -> fields.push("\"typed_identity\":{foundation_json_quote(identity)}")
     if report.context_frames.len() > 0 {
         frames: loop frame in report.context_frames -> "{{\"text\":{foundation_json_quote(frame.text)},\"file\":{foundation_json_quote(frame.file)},\"line\":{frame.line}}}"
-        &fields.push("\"context_frames\":[{frames.join(",")}]")
+        fields.push("\"context_frames\":[{frames.join(",")}]")
     }
     if report.conversion_history.len() > 0 {
         conversions: loop conversion in report.conversion_history -> "{{\"source\":{foundation_json_quote(conversion.source)},\"target\":{foundation_json_quote(conversion.target)}}}"
-        &fields.push("\"conversion_history\":[{conversions.join(",")}]")
+        fields.push("\"conversion_history\":[{conversions.join(",")}]")
     }
     if report.details == .Val(details) {
         detail_fields: loop field in details.fields -> "{foundation_json_quote(field.name)}:{field.value}"
@@ -551,7 +551,7 @@ build_report_to_json: fn(report: DiagnosticBuildError) -> String Never! {
             .Val(range) -> "{{\"start\":{range.start},\"end\":{range.end}}}"
             .None -> "null"
         }
-        &fields.push("\"details\":{{\"variant\":{foundation_json_quote(details.variant)},\"fields\":{{{detail_fields.join(",")}}},\"source_span\":{span}}}")
+        fields.push("\"details\":{{\"variant\":{foundation_json_quote(details.variant)},\"fields\":{{{detail_fields.join(",")}}},\"source_span\":{span}}}")
     }
     "{{{fields.join(",")}}}"
 }
@@ -600,8 +600,8 @@ build_report_from_tree: fn(value: Dyn) -> DiagnosticBuildError BuildIOError! {
     causes := [DiagnosticBuildError]{}
     if cause_value == {
         .Null -> {}
-        .Object(_) -> &causes.push(build_report_from_tree(cause_value))
-        .Array(items) -> loop item in items -> &causes.push(build_report_from_tree(item))
+        .Object(_) -> causes.push(build_report_from_tree(cause_value))
+        .Array(items) -> loop item in items -> causes.push(build_report_from_tree(item))
         else -> return Err(build_report_invalid("error report cause is not null, an object, or an array"))
     }
     typed_identity := String?{None}
@@ -611,7 +611,7 @@ build_report_from_tree: fn(value: Dyn) -> DiagnosticBuildError BuildIOError! {
         items: pkg_json_array(raw) ?? return Err(build_report_invalid("error report context_frames is not an array"))
         loop item in items {
             frame: build_report_object(item, "context frame")
-            &context_frames.push(DiagnosticErrorContextFrame{
+            context_frames.push(DiagnosticErrorContextFrame{
                 text: build_report_text(build_report_field(frame, "text"), "context text"),
                 file: build_report_text(build_report_field(frame, "file"), "context file"),
                 line: build_report_u32(build_report_field(frame, "line"), "context line"),
@@ -626,7 +626,7 @@ build_report_from_tree: fn(value: Dyn) -> DiagnosticBuildError BuildIOError! {
         items: pkg_json_array(raw) ?? return Err(build_report_invalid("error report conversion_history is not an array"))
         loop item in items {
             conversion: build_report_object(item, "conversion")
-            &conversion_history.push(DiagnosticErrorConversion{
+            conversion_history.push(DiagnosticErrorConversion{
                 source: build_report_text(build_report_field(conversion, "source"), "conversion source"),
                 target: build_report_text(build_report_field(conversion, "target"), "conversion target"),
             })

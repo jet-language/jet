@@ -300,7 +300,7 @@ nixeval_oracle_optional_sri: fn(document: NixEvalJSON, parent: [String: Int], ke
 nixeval_oracle_exact_keys: fn(parent: [String: Int], expected: [String], path: String) NixEvalError! {
     actual: nixeval_sorted(parent.keys().to_list())
     wanted := expected.copy()
-    &wanted.sort()
+    wanted.sort()
     if actual != wanted {
         return Err(NixEvalError.Manifest("`{path}` keys must be exactly {nixeval_debug_strings(wanted)}, got {nixeval_debug_strings(actual)}"))
     }
@@ -340,37 +340,37 @@ nixeval_base64_value: fn(byte: Int) -> Int Never! {
 // Rust `{:?}` rendering of a string list, used by manifest diagnostics.
 nixeval_debug_strings: fn(values: [String]) -> String Never! {
     rendered := [String]{}
-    loop value in values -> &rendered.push(nixeval_debug_string(value))
+    loop value in values -> rendered.push(nixeval_debug_string(value))
     joined: rendered.join(", ")
     "[{joined}]"
 }
 
 nixeval_debug_string: fn(value: String) -> String Never! {
     out := [U8]{}
-    nixeval_push_byte(&out, 34)
+    nixeval_push_byte(out, 34)
     hex: "0123456789abcdef".bytes()
     loop byte in value.bytes() {
         code: Int.from_u8(byte)
         if code == {
-            34 -> nixeval_push_text(&out, "\\\"")
-            92 -> nixeval_push_text(&out, "\\\\")
-            10 -> nixeval_push_text(&out, "\\n")
-            13 -> nixeval_push_text(&out, "\\r")
-            9 -> nixeval_push_text(&out, "\\t")
-            0 -> nixeval_push_text(&out, "\\0")
+            34 -> nixeval_push_text(out, "\\\"")
+            92 -> nixeval_push_text(out, "\\\\")
+            10 -> nixeval_push_text(out, "\\n")
+            13 -> nixeval_push_text(out, "\\r")
+            9 -> nixeval_push_text(out, "\\t")
+            0 -> nixeval_push_text(out, "\\0")
             else -> {
                 if {
                     code < 32 || code == 127 -> {
-                        nixeval_push_text(&out, "\\u{{")
-                        if code >= 16 -> &out.push(hex[code /% 16])
-                        &out.push(hex[code % 16])
-                        nixeval_push_text(&out, "}}")
+                        nixeval_push_text(out, "\\u{{")
+                        if code >= 16 -> out.push(hex[code /% 16])
+                        out.push(hex[code % 16])
+                        nixeval_push_text(out, "}}")
                     }
-                    else -> &out.push(byte)
+                    else -> out.push(byte)
                 }
             }
         }
     }
-    nixeval_push_byte(&out, 34)
+    nixeval_push_byte(out, 34)
     String.from_bytes(out) ?? value
 }

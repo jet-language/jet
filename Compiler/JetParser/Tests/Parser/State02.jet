@@ -11,9 +11,9 @@ program: fn(source: String) -> Program { parser_test_program(source) }
     assert(lexed.diagnostics.is_empty())
     expected := [Token]{}
     loop token in lexed.tokens {
-        if token.kind != TOKEN_LINE_COMMENT && token.kind != TOKEN_BLOCK_COMMENT -> &expected.push(token)
+        if token.kind != TOKEN_LINE_COMMENT && token.kind != TOKEN_BLOCK_COMMENT -> expected.push(token)
     }
-    prepared: parser_prepare_tokens(^lexed.tokens, &lexed.tables)
+    prepared: parser_prepare_tokens(lexed.tokens.move(), lexed.tables)
     assert(prepared.fenced_statements.is_empty())
     assert(prepared.tokens == expected)
     // Token value equality is observable; Rust Cow pointer identity is not a Jet API.
@@ -88,7 +88,7 @@ program: fn(source: String) -> Program { parser_test_program(source) }
     checked: parser_test_result(source)
     assert(loop d in checked.diagnostics { if d.code == "E0081" -> break true } ?? false)
     names := [String]{}
-    loop item in checked.program.items { if item == .Func(func) -> &names.push(func.name) }
+    loop item in checked.program.items { if item == .Func(func) -> names.push(func.name) }
     assert(names.contains("host_open") && names.contains("run"))
     second: lex("foo: fn() -> Int\nbar: fn() {{}}\n".bytes())
     assert(second.diagnostics.is_empty())

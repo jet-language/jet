@@ -64,7 +64,7 @@ DBPoolReceipt: struct {
     replacement_failures: Int
 }
 impl DBPoolReceipt.Display { display: fn(self) -> String { pool_receipt_text(self) } }
-impl DBPoolReceipt.Debug { debug: fn(^self) -> String { pool_receipt_text(self) } }
+impl DBPoolReceipt.Debug { debug: fn(&&self) -> String { pool_receipt_text(self) } }
 
 pool_receipt_text: fn(receipt: DBPoolReceipt) -> String Never! {
     lifecycle: if receipt.lifecycle == {
@@ -94,7 +94,7 @@ pool_receipt_text: fn(receipt: DBPoolReceipt) -> String Never! {
 DBError: struct { message: String }
 
 impl DBError.Display { display: fn(self) -> String { self.message.copy() } }
-impl DBError.Debug { debug: fn(^self) -> String { self.message } }
+impl DBError.Debug { debug: fn(&&self) -> String { self.message } }
 impl DBError -> Err { Err(self.message) }
 impl DBValue.Display { display: fn(self) -> String { render_value(self) } }
 
@@ -203,7 +203,7 @@ __float_text: fn(value: Float) -> String Never! {
     if exponent_at < 0 {
         if raw.len() >= 2 && raw[raw.len() - 2] == (U8{46}) && raw[raw.len() - 1] == (U8{48}) {
             out := [U8]{}
-            loop i in 0..<raw.len() - 2 -> &out.push(raw[i])
+            loop i in 0..<raw.len() - 2 -> out.push(raw[i])
             return String.from_bytes(out) ?? panic("decimal float text must be UTF-8")
         }
         return text
@@ -228,19 +228,19 @@ __float_text: fn(value: Float) -> String Never! {
     }
     decimal: point + exponent
     out := [U8]{}
-    if start == 1 -> &out.push(U8{45})
+    if start == 1 -> out.push(U8{45})
     if decimal <= 0 {
-        &out.push(U8{48})
-        &out.push(U8{46})
-        loop _ in 0..<0 - decimal -> &out.push(U8{48})
+        out.push(U8{48})
+        out.push(U8{46})
+        loop _ in 0..<0 - decimal -> out.push(U8{48})
     }
     loop digit in 0..<count {
-        if decimal > 0 && digit == decimal -> &out.push(U8{46})
+        if decimal > 0 && digit == decimal -> out.push(U8{46})
         index := start + digit
         if dot_at >= 0 && index >= dot_at -> index += 1
-        &out.push(raw[index])
+        out.push(raw[index])
     }
-    loop _ in count..<decimal -> &out.push(U8{48})
+    loop _ in count..<decimal -> out.push(U8{48})
     String.from_bytes(out) ?? panic("decimal float text must be UTF-8")
 }
 
@@ -331,12 +331,12 @@ __sql_lower: fn(byte: U8) -> U8 Never! {
 }
 __sql_lower_text: fn(text: String) -> String Never! {
     out := [U8]{}
-    loop byte in text.bytes() -> &out.push(__sql_lower(byte))
+    loop byte in text.bytes() -> out.push(__sql_lower(byte))
     String.from_bytes(out) ?? ""
 }
 __bytes_text: fn(raw: [U8], start: Int, end: Int) -> String Never! {
     out := [U8]{}
-    loop at in start..<end -> &out.push(raw[at])
+    loop at in start..<end -> out.push(raw[at])
     String.from_bytes(out) ?? ""
 }
 __sql_trimmed: fn(raw: [U8], start: Int, end: Int) -> String Never! {
@@ -403,10 +403,10 @@ __sql_tokens: fn(raw: [U8]) -> [__SQLToken] Never! {
                 start: at
                 word := [U8]{}
                 loop at < raw.len() && __sql_word_byte(Int.from_u8(raw[at])) {
-                    &word.push(__sql_lower(raw[at]))
+                    word.push(__sql_lower(raw[at]))
                     at += 1
                 }
-                &tokens.push(__SQLToken{start: start, end: at, word: String.from_bytes(word) ?? ""})
+                tokens.push(__SQLToken{start: start, end: at, word: String.from_bytes(word) ?? ""})
             }
             else -> {
                 at += 1
@@ -497,11 +497,11 @@ __sql_split_trimmed: fn(raw: [U8], start: Int, end: Int) -> [String] Never! {
     from := start
     loop at in start..<end {
         if Int.from_u8(raw[at]) == 44 {
-            &parts.push(__sql_trimmed(raw, from, at))
+            parts.push(__sql_trimmed(raw, from, at))
             from = at + 1
         }
     }
-    &parts.push(__sql_trimmed(raw, from, end))
+    parts.push(__sql_trimmed(raw, from, end))
     parts
 }
 
@@ -580,10 +580,10 @@ __sql_is_migration_metadata: fn(raw: [U8]) -> Bool Never! {
             }
             else -> {
                 if pending {
-                    &out.push(U8{32})
+                    out.push(U8{32})
                     pending = false
                 }
-                &out.push(__sql_lower(byte))
+                out.push(__sql_lower(byte))
             }
         }
     }
@@ -647,10 +647,10 @@ __policy_apply: fn(sql: SQL, policy: RowPolicy, user: String, allow_schema: Bool
     if user_index > sql.values.len() -> return Err(__db_error("policy-scoped SQL bind count does not match its placeholders"))
     values := [DBValue]{}
     loop index in 0..<sql.values.len() {
-        if index == user_index -> &values.push(DBValue.Text(user.copy()))
-        &values.push(sql.values[index].copy())
+        if index == user_index -> values.push(DBValue.Text(user.copy()))
+        values.push(sql.values[index].copy())
     }
-    if user_index == sql.values.len() -> &values.push(DBValue.Text(user.copy()))
+    if user_index == sql.values.len() -> values.push(DBValue.Text(user.copy()))
     tail_start := insertion
     loop tail_start < raw.len() && __sql_space(Int.from_u8(raw[tail_start])) { tail_start += 1 }
     suffix: if tail_start >= raw.len() -> "" else -> " {__bytes_text(raw, tail_start, raw.len())}"
@@ -685,7 +685,7 @@ DBScope: struct {
 
 __db_open: fn(path: String, failure: String) -> DBConnection Never! {
     driver := __driver_open(path) ?? panic(failure)
-    DBConnection{state: shared __DBState{driver: ^driver, path: path.copy(), written: [String]{}}}
+    DBConnection{state: shared __DBState{driver: driver.move(), path: path.copy(), written: [String]{}}}
 }
 open: fn(path: String) -[DB]> DBConnection Never! { __db_open(path, "database open failed") }
 open_memory: fn() -[DB]> DBConnection Never! { __db_open(":memory:", "in-memory database open failed") }
@@ -716,7 +716,7 @@ __db_rollback: fn(state: Shared<__DBState>) -> Bool Never! {
 }
 __db_shutdown: fn(state: Shared<__DBState>) -> Bool Never! {
     guard := state.guard_edit()
-    __driver_shutdown(&guard.value.driver)
+    __driver_shutdown(guard.value.driver)
 }
 
 impl DBConnection {
@@ -743,9 +743,9 @@ __scope_execute: fn(scope: DBScope, sql: SQL, allow_schema: Bool) -> Int DBError
     scoped: __policy_apply(sql, scope.policy, scope.user, allow_schema) ?? return Err(err)
     guard := scope.state.guard_edit()
     if raw(guard.value.driver) == (U64{0}) -> return Err(__db_closed())
-    changed: __driver_execute(&guard.value.driver, scoped.text, scoped.values) ?? return Err(err)
+    changed: __driver_execute(guard.value.driver, scoped.text, scoped.values) ?? return Err(err)
     if __sql_table(scoped) == .Val(table) {
-        if !guard.value.written.contains(table) -> &guard.value.written.push(table.copy())
+        if !guard.value.written.contains(table) -> guard.value.written.push(table.copy())
         web.__live_invalidate_all(__live_source(table))
     }
     Ok(changed)
@@ -754,7 +754,7 @@ __scope_query: fn(scope: DBScope, sql: SQL, allow_schema: Bool) -> [[String: DBV
     scoped: __policy_apply(sql, scope.policy, scope.user, allow_schema) ?? return Err(err)
     guard := scope.state.guard_edit()
     if raw(guard.value.driver) == (U64{0}) -> return Err(__db_closed())
-    __driver_query(&guard.value.driver, scoped.text, scoped.values)
+    __driver_query(guard.value.driver, scoped.text, scoped.values)
 }
 
 // ---- live queries (D-LIVEQUERY1, #1158) ----------------------------------
@@ -793,7 +793,7 @@ impl DBScope {
         tokens: __sql_tokens(scoped.text.bytes())
         if tokens.len() == 0 || tokens[0].word != "select" -> return Err(__db_error("a live query must be one SELECT"))
         key := [String]{web.__live_arg<String>(self.user), web.__live_arg<String>(scoped.text)}
-        loop value in scoped.values -> &key.push(web.__live_arg<DBValue>(value))
+        loop value in scoped.values -> key.push(web.__live_arg<DBValue>(value))
         scope: self.copy()
         query: sql.copy()
         Ok(web.__live_bind<[[String: DBValue]], DBError>(__live_source(__sql_table(scoped) ?? ""), key, () -> __scope_query(scope, query, false)))
@@ -807,7 +807,7 @@ impl DBScope.Driver {
     query_one: fn(self, sql: SQL) -[DB.Read]> [String: DBValue]? DBError! {
         rows := __scope_query(self, sql, false) ?? return Err(err)
         if rows.len() == 0 -> return Ok(None)
-        first: &rows.remove(0, .Slot) ?? panic("database first row disappeared")
+        first: rows.remove(0, .Slot) ?? panic("database first row disappeared")
         Ok(Val(first))
     }
     execute: fn(self, sql: SQL) -[DB.Write]> Int DBError! { __scope_execute(self, sql, false) }
@@ -954,7 +954,7 @@ __migration_apply: fn(scope: DBScope, name: String, steps: [SQL]) -> Int DBError
     rows := [__LedgerRow]{}
     loop entry in stored {
         parsed: __ledger_row(entry) ?? return Err(err)
-        &rows.push(parsed)
+        rows.push(parsed)
     }
     drift := [String]{}
     current := 0
@@ -965,7 +965,7 @@ __migration_apply: fn(scope: DBScope, name: String, steps: [SQL]) -> Int DBError
             if row.migration_key == name -> latest = index
             if {
                 __ledger_drift(row, current) == .Val(message) -> {
-                    &drift.push(message.copy())
+                    drift.push(message.copy())
                 }
                 row.operation == "apply" || row.operation == "rollback" -> {
                     current = row.to_version
@@ -989,7 +989,7 @@ __migration_apply: fn(scope: DBScope, name: String, steps: [SQL]) -> Int DBError
         _: __scope_execute(scope, sql, true) ?? return Err(err)
     }
     step_ids := [String]{}
-    loop index in 0..<steps.len() -> &step_ids.push(__migration_step_id(index + 1, steps[index]))
+    loop index in 0..<steps.len() -> step_ids.push(__migration_step_id(index + 1, steps[index]))
     // Direct migrations run under the DB authority alone; without a granted
     // wall clock the ledger records 0 for both timestamps.
     values: [DBValue]{
@@ -1061,7 +1061,7 @@ __hex16: fn(hash: U64) -> String Never! {
     out := [U8]{}
     loop index in 0..<16 {
         nibble: Int.from_u64((hash >> (60 - index * 4)).bit_and(U64{15}))
-        &out.push(digits[nibble])
+        out.push(digits[nibble])
     }
     String.from_bytes(out) ?? ""
 }
@@ -1125,11 +1125,11 @@ __LeaseState: struct {
     drivers: [__Driver]
 }
 impl __LeaseState.Close {
-    close: fn(^self) {
-        drivers := ^self.drivers
+    close: fn(&&self) {
+        drivers := self.drivers.move()
         loop drivers.len() > 0 {
-            driver: &drivers.remove(0, .Slot) ?? panic("database lease lost its connection")
-            __pool_release(self.pool, ^driver)
+            driver: drivers.remove(0, .Slot) ?? panic("database lease lost its connection")
+            __pool_release(self.pool, driver)
         }
     }
 }
@@ -1141,10 +1141,10 @@ __PoolWaiter: struct {
     ticket: Int
 }
 impl __PoolWaiter.Close {
-    close: fn(^self) {
+    close: fn(&&self) {
         if self.ticket < 0 -> return
         guard := self.pool.guard_edit()
-        __pool_remove_waiter(&guard.value, self.ticket)
+        __pool_remove_waiter(guard.value, self.ticket)
     }
 }
 
@@ -1153,8 +1153,8 @@ impl DBLease {
     close: fn(self) DBError! -[DB]> {
         guard := self.state.guard_edit()
         if guard.value.drivers.len() == 0 -> return Ok(())
-        driver: &guard.value.drivers.remove(0, .Slot) ?? return Ok(())
-        __pool_release(guard.value.pool, ^driver)
+        driver: guard.value.drivers.remove(0, .Slot) ?? return Ok(())
+        __pool_release(guard.value.pool, driver)
         Ok(())
     }
 }
@@ -1188,7 +1188,7 @@ __pool_mark_drained: fn(state: &__PoolState) Never! {
 __pool_remove_waiter: fn(state: &__PoolState, ticket: Int) Never! {
     loop index in 0..<state.waiters.len() {
         if state.waiters[index] == ticket {
-            _: &state.waiters.remove(index, .Slot)
+            _: state.waiters.remove(index, .Slot)
             return
         }
     }
@@ -1199,29 +1199,29 @@ __pool_replace_one: fn(state: &__PoolState) Never! {
         state.replacement_failures += 1
         return
     }
-    if !__driver_health(&driver) {
+    if !__driver_health(driver) {
         state.unhealthy += 1
         state.replacement_failures += 1
-        close(^driver)
+        close(driver)
         return
     }
-    &state.available.push(^driver)
+    state.available.push(driver)
     state.replacements += 1
 }
-__pool_release: fn(pool: Shared<__PoolState>, driver: ^__Driver) Never! {
-    held := ^driver
+__pool_release: fn(pool: Shared<__PoolState>, driver: &&__Driver) Never! {
+    held := driver.move()
     fit: __driver_reset(held)
     guard := pool.guard_edit()
     if guard.value.leased > 0 -> guard.value.leased -= 1
     guard.value.releases += 1
     if guard.value.lifecycle == .Open && fit {
-        &guard.value.available.push(^held)
+        guard.value.available.push(held)
         return
     }
     if !fit -> guard.value.unhealthy += 1
-    close(^held)
-    __pool_mark_drained(&guard.value)
-    if !fit -> __pool_replace_one(&guard.value)
+    close(held)
+    __pool_mark_drained(guard.value)
+    if !fit -> __pool_replace_one(guard.value)
 }
 
 __PoolClaim: struct {
@@ -1237,25 +1237,25 @@ __pool_claim: fn(pool: Shared<__PoolState>, ticket: Int, deadline_ns: Int) -> __
     claim := __PoolClaim{drivers: [__Driver]{}, failure: None, ticket: ticket, retry: false}
     guard := pool.guard_edit()
     if guard.value.lifecycle != .Open {
-        if ticket >= 0 -> __pool_remove_waiter(&guard.value, ticket)
+        if ticket >= 0 -> __pool_remove_waiter(guard.value, ticket)
         claim.ticket = -1
         claim.failure = Val(__pool_state_error(guard.value.lifecycle))
         return claim
     }
     turn: if ticket >= 0 -> guard.value.waiters.len() > 0 && guard.value.waiters[0] == ticket else -> guard.value.waiters.len() == 0
     if turn && guard.value.available.len() > 0 {
-        if ticket >= 0 -> __pool_remove_waiter(&guard.value, ticket)
+        if ticket >= 0 -> __pool_remove_waiter(guard.value, ticket)
         claim.ticket = -1
-        driver := &guard.value.available.pop() ?? panic("database pool lost an idle connection")
-        healthy: __driver_health(&driver)
+        driver := guard.value.available.pop() ?? panic("database pool lost an idle connection")
+        healthy: __driver_health(driver)
         expired: __pool_expired(deadline_ns)
         if healthy && !expired {
             guard.value.leased += 1
             guard.value.acquires += 1
-            &claim.drivers.push(^driver)
+            claim.drivers.push(driver)
             return claim
         }
-        close(^driver)
+        close(driver)
         if !healthy -> guard.value.unhealthy += 1
         if expired {
             guard.value.timeouts += 1
@@ -1265,7 +1265,7 @@ __pool_claim: fn(pool: Shared<__PoolState>, ticket: Int, deadline_ns: Int) -> __
         return claim
     }
     if turn && guard.value.available.len() + guard.value.leased + guard.value.opening < guard.value.max {
-        if ticket >= 0 -> __pool_remove_waiter(&guard.value, ticket)
+        if ticket >= 0 -> __pool_remove_waiter(guard.value, ticket)
         claim.ticket = -1
         driver := __driver_open(guard.value.url) ?? {
             guard.value.open_failures += 1
@@ -1280,27 +1280,27 @@ __pool_claim: fn(pool: Shared<__PoolState>, ticket: Int, deadline_ns: Int) -> __
             }
             return claim
         }
-        healthy: __driver_health(&driver)
+        healthy: __driver_health(driver)
         expired: __pool_expired(deadline_ns)
         if !healthy || expired {
             if !healthy -> guard.value.unhealthy += 1
             if expired -> guard.value.timeouts += 1
-            close(^driver)
+            close(driver)
             claim.failure = Val(__db_error(if expired -> "database pool acquisition deadline exceeded" else -> "database pool opened an unhealthy connection"))
             return claim
         }
         guard.value.leased += 1
         guard.value.acquires += 1
-        &claim.drivers.push(^driver)
+        claim.drivers.push(driver)
         return claim
     }
     if claim.ticket < 0 {
         claim.ticket = guard.value.next_ticket
         guard.value.next_ticket += 1
-        &guard.value.waiters.push(claim.ticket)
+        guard.value.waiters.push(claim.ticket)
     }
     if __pool_expired(deadline_ns) {
-        __pool_remove_waiter(&guard.value, claim.ticket)
+        __pool_remove_waiter(guard.value, claim.ticket)
         claim.ticket = -1
         guard.value.timeouts += 1
         claim.failure = Val(__db_error("database pool acquisition deadline exceeded"))
@@ -1312,10 +1312,10 @@ __pool_drain_step: fn(pool: Shared<__PoolState>, deadline_ns: Int) -> DBPoolRece
     guard := pool.guard_edit()
     if guard.value.lifecycle == .Open -> guard.value.lifecycle = .Draining
     loop guard.value.available.len() > 0 {
-        driver: &guard.value.available.pop() ?? panic("database pool lost an idle connection")
-        close(^driver)
+        driver: guard.value.available.pop() ?? panic("database pool lost an idle connection")
+        close(driver)
     }
-    __pool_mark_drained(&guard.value)
+    __pool_mark_drained(guard.value)
     if guard.value.lifecycle == .Drained -> return Ok(Val(__pool_receipt(guard.value)))
     if __pool_expired(deadline_ns) {
         guard.value.timeouts += 1
@@ -1345,13 +1345,13 @@ impl DBPool {
     acquire: fn(self, *, deadline: Duration{30000ms}) -[DB, Time.Wait]> DBLease DBError! {
         deadline_ns: __pool_deadline(deadline)
         waiter := __PoolWaiter{pool: self.state.copy(), ticket: -1}
-        defer close(^waiter)
+        defer close(waiter)
         loop {
             claim := __pool_claim(self.state, waiter.ticket, deadline_ns)
             if claim.failure == .Val(failure) -> return Err(__db_error(failure.message))
             if claim.drivers.len() > 0 {
-                driver: &claim.drivers.remove(0, .Slot) ?? panic("database pool lost a claimed connection")
-                return Ok(DBLease{state: shared __LeaseState{pool: self.state.copy(), drivers: [__Driver]{^driver}}})
+                driver: claim.drivers.remove(0, .Slot) ?? panic("database pool lost a claimed connection")
+                return Ok(DBLease{state: shared __LeaseState{pool: self.state.copy(), drivers: [__Driver]{driver.move()}}})
             }
             waiter.ticket = claim.ticket
             if !claim.retry -> time.sleep(1ms)
@@ -1392,7 +1392,7 @@ __dyn_value: fn(value: DBValue) -> Dyn Never! {
         .Bool(flag) -> Dyn.Bool(flag)
         .Blob(bytes) -> {
             items := [Dyn]{}
-            loop byte in bytes -> &items.push(Dyn.Int(Int.from_u8(byte)))
+            loop byte in bytes -> items.push(Dyn.Int(Int.from_u8(byte)))
             Dyn.Array(items)
         }
     }
@@ -1411,9 +1411,9 @@ decode: fn<T: Decode>(row: [String: DBValue], names: [(db_name: String, key: Str
                 break
             }
         }
-        &entries.push((key: ^key, value: __dyn_value(value)))
+        entries.push((key: key, value: __dyn_value(value)))
     }
-    tree: stream.object_from_entries(^entries)
+    tree: stream.object_from_entries(entries)
     if tree.decode<T>() == {
         .Ok(value) -> Ok(value)
         .Err(failures) -> Err(failures)
@@ -1464,14 +1464,14 @@ decode: fn<T: Decode>(row: [String: DBValue], names: [(db_name: String, key: Str
 SqliteDB: struct { priv raw: U64 }
 SqliteStmt: struct { priv raw: U64 }
 impl SqliteDB.Close {
-    close: fn(^self) {
+    close: fn(&&self) {
         #Unsafe("this consuming Close owns the sole SQLite database pointer, including open-error handles; close_v2 permits live statements to finalize later") {
             _: sqlite3.close_v2(self.raw)
         }
     }
 }
 impl SqliteStmt.Close {
-    close: fn(^self) {
+    close: fn(&&self) {
         #Unsafe("this consuming Close owns the sole statement pointer; SQLite permits finalize(NULL) and rusqlite drops finalize's status") {
             _: sqlite3.finalize(self.raw)
         }
@@ -1479,8 +1479,8 @@ impl SqliteStmt.Close {
 }
 CachedStatement: struct { handle: SqliteStmt, sql: String }
 impl CachedStatement.Close {
-    close: fn(^self) {
-        close(^self.handle)
+    close: fn(&&self) {
+        close(self.handle.move())
     }
 }
 
@@ -1488,13 +1488,13 @@ impl CachedStatement.Close {
 // READWRITE|CREATE|URI|NOMUTEX, extended codes and a 5000ms busy timeout.
 __Driver: struct { database: SqliteDB, cache: [CachedStatement] }
 impl __Driver.Close {
-    close: fn(^self) {
-        cache := ^self.cache
+    close: fn(&&self) {
+        cache := self.cache.move()
         loop cache.len() > 0 {
-            statement: &cache.pop() ?? panic("SQLite cache lost a statement")
-            close(^statement)
+            statement: cache.pop() ?? panic("SQLite cache lost a statement")
+            close(statement)
         }
-        close(^self.database)
+        close(self.database.move())
     }
 }
 raw: fn(driver: __Driver) -> U64 Never! { driver.database.raw }
@@ -1530,12 +1530,12 @@ __driver_open: fn(path: String) -> __Driver? Never! {
         single_threaded: mutex == (U64{8})
         sqlite3.mutex_free(mutex)
         if single_threaded -> return None
-        status: sqlite3.open_v2(path, &pointer, I32{32838}, U64{0})
+        status: sqlite3.open_v2(path, pointer, I32{32838}, U64{0})
         database: SqliteDB{raw: pointer}
         if status != (I32{0}) -> return None
         _: sqlite3.extended_result_codes(pointer, I32{1})
         if sqlite3.busy_timeout(pointer, I32{5000}) != (I32{0}) -> return None
-        return Val(__Driver{database: ^database, cache: [CachedStatement]{}})
+        return Val(__Driver{database: database.move(), cache: [CachedStatement]{}})
     }
 }
 // Shut a shared connection down in place: later operations see raw == 0 and
@@ -1543,8 +1543,8 @@ __driver_open: fn(path: String) -> __Driver? Never! {
 __driver_shutdown: fn(driver: &__Driver) -> Bool Never! {
     if raw(driver) == (U64{0}) -> return false
     loop driver.cache.len() > 0 {
-        statement: &driver.cache.pop() ?? panic("SQLite cache lost a statement")
-        close(^statement)
+        statement: driver.cache.pop() ?? panic("SQLite cache lost a statement")
+        close(statement)
     }
     #Unsafe("close the exclusively borrowed connection's sole SQLite pointer once; zeroing it below makes the later Close a no-op") {
         _: sqlite3.close_v2(raw(driver))
@@ -1573,14 +1573,14 @@ prepare: fn(driver: &__Driver, sql: String) -> CachedStatement DBError! {
     // different spelling needs the canonical trimmed-key comparison below.
     loop index in 0..<driver.cache.len() {
         if driver.cache[index].sql == sql {
-            cached: &driver.cache.remove(index, .Slot) ?? panic("SQLite cache index disappeared")
+            cached: driver.cache.remove(index, .Slot) ?? panic("SQLite cache index disappeared")
             return Ok(cached)
         }
     }
     key: sql.trim()
     loop index in 0..<driver.cache.len() {
         if driver.cache[index].sql == key {
-            cached: &driver.cache.remove(index, .Slot) ?? panic("SQLite cache index disappeared")
+            cached: driver.cache.remove(index, .Slot) ?? panic("SQLite cache index disappeared")
             return Ok(cached)
         }
     }
@@ -1595,11 +1595,11 @@ prepare: fn(driver: &__Driver, sql: String) -> CachedStatement DBError! {
         if {
             length == 0 -> {
                 empty: sqlite_mem.__bytes_pack([U8]{0})
-                status = sqlite3.prepare_v3(raw(driver), empty, I32{0}, U32{1}, &pointer, &tail)
+                status = sqlite3.prepare_v3(raw(driver), empty, I32{0}, U32{1}, pointer, tail)
                 sqlite_mem.__bytes_free(empty, 1)
             }
             else -> {
-                status = sqlite3.prepare_v3(raw(driver), sqlite_mem.__string_data(key), I32{length}, U32{1}, &pointer, &tail)
+                status = sqlite3.prepare_v3(raw(driver), sqlite_mem.__string_data(key), I32{length}, U32{1}, pointer, tail)
             }
         }
         handle: SqliteStmt{raw: pointer}
@@ -1614,20 +1614,20 @@ prepare: fn(driver: &__Driver, sql: String) -> CachedStatement DBError! {
             }
             return Err(failure)
         }
-        return Ok(CachedStatement{handle: ^handle, sql: key})
+        return Ok(CachedStatement{handle: handle.move(), sql: key})
     }
 }
-release: fn(driver: &__Driver, statement: ^CachedStatement) Never! {
+release: fn(driver: &__Driver, statement: &&CachedStatement) Never! {
     if statement_raw(statement) == (U64{0}) -> return
     #Unsafe("reset this exclusively owned statement and clear the TRANSIENT bindings before returning it to its owning cache") {
         _: sqlite3.reset(statement_raw(statement))
         _: sqlite3.clear_bindings(statement_raw(statement))
     }
     if driver.cache.len() == 16 {
-        oldest: &driver.cache.remove(0, .Slot) ?? panic("SQLite cache lost its oldest statement")
-        close(^oldest)
+        oldest: driver.cache.remove(0, .Slot) ?? panic("SQLite cache lost its oldest statement")
+        close(oldest)
     }
-    &driver.cache.push(^statement)
+    driver.cache.push(statement)
 }
 bind: fn(driver: __Driver, statement: U64, params: [DBValue]) -> DBError? Never! {
     #Unsafe("exclusive statement loan; scalar values are copied, borrowed String lives unmodified until SQLITE_TRANSIENT finishes, and packed blobs are freed only after SQLite copies them") {
@@ -1675,9 +1675,9 @@ bind: fn(driver: __Driver, statement: U64, params: [DBValue]) -> DBError? Never!
     None
 }
 __driver_execute: fn(driver: &__Driver, sql: String, params: [DBValue]) -> Int DBError! {
-    statement: prepare(&driver, sql) ?? return Err(err)
+    statement: prepare(driver, sql) ?? return Err(err)
     if bind(driver, statement_raw(statement), params) == .Val(failure) {
-        release(&driver, ^statement)
+        release(driver, statement)
         return Err(failure)
     }
     count := 0
@@ -1694,7 +1694,7 @@ __driver_execute: fn(driver: &__Driver, sql: String, params: [DBValue]) -> Int D
             else -> failure = Val(error(driver))
         }
     }
-    release(&driver, ^statement)
+    release(driver, statement)
     if failure == .Val(found_failure) -> return Err(found_failure)
     Ok(count)
 }
@@ -1727,9 +1727,9 @@ cell_wire_width: fn(value: DBValue) -> Int Never! {
 }
 
 __driver_query: fn(driver: &__Driver, sql: String, params: [DBValue]) -> [[String: DBValue]] DBError! {
-    statement: prepare(&driver, sql) ?? return Err(err)
+    statement: prepare(driver, sql) ?? return Err(err)
     if bind(driver, statement_raw(statement), params) == .Val(failure) {
-        release(&driver, ^statement)
+        release(driver, statement)
         return Err(failure)
     }
     rows := [[String: DBValue]]{}
@@ -1746,7 +1746,7 @@ __driver_query: fn(driver: &__Driver, sql: String, params: [DBValue]) -> [[Strin
             if name == (U64{0}) -> panic("Null pointer from sqlite3_column_name: Out of memory?")
             text: c_string(name)
             row_prefix += tagged_width(sqlite_mem.__string_byte_len(text))
-            &names.push(text)
+            names.push(text)
         }
         loop {
             status: sqlite3.step(statement_raw(statement))
@@ -1778,14 +1778,14 @@ __driver_query: fn(driver: &__Driver, sql: String, params: [DBValue]) -> [[Strin
                 }
                 wire_rows += cell_wire_width(value)
                 if row.get(names[at]) == .Val(_) -> duplicate = true
-                row[names[at].copy()] = ^value
+                row[names[at].copy()] = value.move()
             }
             wire_rows += row_prefix
             if count > 100000 -> column_overflow = true
-            &rows.push(^row)
+            rows.push(row)
         }
     }
-    release(&driver, ^statement)
+    release(driver, statement)
     if failure == .Val(found_failure) -> return Err(found_failure)
     if wire_rows + decimal_width(rows.len()) + 3 > 67108864 -> return Err(DBError{message: "database result exceeds the wire-size limit"})
     if rows.len() > 1000000 -> return Err(DBError{message: "database row count exceeds the wire limit"})
@@ -1794,13 +1794,13 @@ __driver_query: fn(driver: &__Driver, sql: String, params: [DBValue]) -> [[Strin
     Ok(rows)
 }
 __driver_query_one: fn(driver: &__Driver, sql: String, params: [DBValue]) -> [String: DBValue]? DBError! {
-    rows := __driver_query(&driver, sql, params) ?? return Err(err)
+    rows := __driver_query(driver, sql, params) ?? return Err(err)
     if rows.len() == 0 -> return Ok(None)
-    first: &rows.remove(0, .Slot) ?? panic("SQLite first row disappeared")
+    first: rows.remove(0, .Slot) ?? panic("SQLite first row disappeared")
     Ok(Val(first))
 }
 __driver_health: fn(driver: &__Driver) -> Bool Never! {
-    if __driver_query_one(&driver, "SELECT 1", [DBValue]{}) == {
+    if __driver_query_one(driver, "SELECT 1", [DBValue]{}) == {
         .Ok(found) -> found != None
         .Err(_) -> false
     }
@@ -1843,18 +1843,18 @@ __driver_health: fn(driver: &__Driver) -> Bool Never! {
 #Test("SQLite driver preserves typed bindings, storage affinities and transaction behavior") {
     driver := __driver_open(":memory:") ?? panic("SQLite memory open failed")
     assert(__driver_begin(driver))
-    _: __driver_execute(&driver, "CREATE TABLE values_store (value INTEGER)", [DBValue]{}) ?? panic("SQLite create failed")
-    assert_eq(__driver_execute(&driver, "INSERT INTO values_store VALUES (?)", [DBValue]{.Int(17)}) ?? -1, 1)
+    _: __driver_execute(driver, "CREATE TABLE values_store (value INTEGER)", [DBValue]{}) ?? panic("SQLite create failed")
+    assert_eq(__driver_execute(driver, "INSERT INTO values_store VALUES (?)", [DBValue]{.Int(17)}) ?? -1, 1)
     assert(__driver_rollback(driver))
-    _: __driver_execute(&driver, "CREATE TABLE values_store (value INTEGER)", [DBValue]{}) ?? panic("SQLite rollback did not undo schema")
+    _: __driver_execute(driver, "CREATE TABLE values_store (value INTEGER)", [DBValue]{}) ?? panic("SQLite rollback did not undo schema")
     assert(__driver_begin(driver))
-    _: __driver_execute(&driver, "INSERT INTO values_store VALUES (?)", [DBValue]{.Int(42)}) ?? panic("SQLite insert failed")
+    _: __driver_execute(driver, "INSERT INTO values_store VALUES (?)", [DBValue]{.Int(42)}) ?? panic("SQLite insert failed")
     assert(__driver_commit(driver))
-    selected: __driver_query(&driver, "SELECT value FROM values_store", [DBValue]{}) ?? panic("SQLite select failed")
+    selected: __driver_query(driver, "SELECT value FROM values_store", [DBValue]{}) ?? panic("SQLite select failed")
     assert_eq(row_int(selected[0], "value") ?? -1, 42)
 
     bindings: [DBValue]{.Null, .Int(9223372036854775807), .Int(-9223372036854775808), .Float(1.25), .Text(""), .Text("jet{__nul_text()}λ"), .Bool(true), .Blob([U8]{}), .Blob([U8]{0, 1, 255})}
-    rows: __driver_query(&driver, "SELECT ? AS missing, ? AS largest, ? AS smallest, ? AS real, ? AS empty, ? AS text, ? AS flag, ? AS empty_blob, ? AS blob", bindings) ?? panic("SQLite bindings failed")
+    rows: __driver_query(driver, "SELECT ? AS missing, ? AS largest, ? AS smallest, ? AS real, ? AS empty, ? AS text, ? AS flag, ? AS empty_blob, ? AS blob", bindings) ?? panic("SQLite bindings failed")
     row: rows[0]
     assert((row_value(row, "missing") ?? panic("missing null")).is_null())
     assert_eq(row_int(row, "largest") ?? 0, 9223372036854775807)
@@ -1865,15 +1865,15 @@ __driver_health: fn(driver: &__Driver) -> Bool Never! {
     assert_eq(row_int(row, "flag") ?? 0, 1)
     assert_eq((row_value(row, "empty_blob") ?? panic("missing empty blob")).blob() ?? [U8]{1}, [U8]{})
     assert_eq((row_value(row, "blob") ?? panic("missing blob")).blob() ?? [U8]{}, [U8]{0, 1, 255})
-    invalid_utf8: __driver_query(&driver, "SELECT CAST(X'ff' AS TEXT) AS value", [DBValue]{}) ?? panic("SQLite text selection failed")
+    invalid_utf8: __driver_query(driver, "SELECT CAST(X'ff' AS TEXT) AS value", [DBValue]{}) ?? panic("SQLite text selection failed")
     assert_eq(row_text(invalid_utf8[0], "value") ?? "invalid", "")
-    if __driver_query_one(&driver, "SELECT value FROM values_store WHERE value = 0", [DBValue]{}) == {
+    if __driver_query_one(driver, "SELECT value FROM values_store WHERE value = 0", [DBValue]{}) == {
         .Val(_) -> assert(false)
         .None -> {}
         .Err(_) -> assert(false)
     }
-    assert(__driver_health(&driver))
-    assert(__driver_shutdown(&driver))
+    assert(__driver_health(driver))
+    assert(__driver_shutdown(driver))
 }
 
 // Ordinary scope-end Close drains Driver -> CachedStatement -> SqliteStmt, then
@@ -1881,28 +1881,28 @@ __driver_health: fn(driver: &__Driver) -> Bool Never! {
 __driver_cache_parity_probe: fn() Never! {
     driver := __driver_open(":memory:") ?? panic("SQLite open failed")
     loop number in 0..<20 {
-        rows: __driver_query(&driver, "SELECT {number} AS value", [DBValue]{}) ?? panic("SQLite cache prepare failed")
+        rows: __driver_query(driver, "SELECT {number} AS value", [DBValue]{}) ?? panic("SQLite cache prepare failed")
         assert_eq(row_int(rows[0], "value") ?? -1, number)
     }
-    cached: __driver_query(&driver, "  SELECT 19 AS value  ", [DBValue]{}) ?? panic("SQLite trimmed cache key failed")
+    cached: __driver_query(driver, "  SELECT 19 AS value  ", [DBValue]{}) ?? panic("SQLite trimmed cache key failed")
     assert_eq(row_int(cached[0], "value") ?? -1, 19)
     assert(__driver_begin(driver))
     assert(__driver_reset(driver))
     assert(__driver_begin(driver))
     assert(__driver_rollback(driver))
-    if __driver_execute(&driver, "SELECT ? AS value", [DBValue]{.Int(1)}) == {
+    if __driver_execute(driver, "SELECT ? AS value", [DBValue]{.Int(1)}) == {
         .Ok(_) -> assert(false)
         .Err(failure) -> assert_eq(failure.message, "Execute returned results - did you mean to call query?")
     }
-    if __driver_query(&driver, "SELECT ?", [DBValue]{}) == {
+    if __driver_query(driver, "SELECT ?", [DBValue]{}) == {
         .Ok(_) -> assert(false)
         .Err(failure) -> assert_eq(failure.message, "Wrong number of parameters passed to query. Got 0, needed 1")
     }
-    if __driver_query(&driver, "SELECT 1 AS same, 2 AS same", [DBValue]{}) == {
+    if __driver_query(driver, "SELECT 1 AS same, 2 AS same", [DBValue]{}) == {
         .Ok(_) -> assert(false)
         .Err(failure) -> assert_eq(failure.message, "database row contains a duplicate column")
     }
-    if __driver_query(&driver, "SELEC invalid", [DBValue]{}) == {
+    if __driver_query(driver, "SELEC invalid", [DBValue]{}) == {
         .Ok(_) -> assert(false)
         .Err(failure) -> assert(failure.message.contains(" in SELEC invalid at offset 0"))
     }
@@ -1910,7 +1910,7 @@ __driver_cache_parity_probe: fn() Never! {
 
 #Test("SQLite driver retains cache/error parity and releases every cached handle") {
     warm := __driver_open(":memory:") ?? panic("SQLite warmup failed")
-    assert(__driver_shutdown(&warm))
+    assert(__driver_shutdown(warm))
     baseline := I64{0}
     #Unsafe("SQLite's allocator counter is read-only; this test owns its connections and retains no foreign column pointers") {
         baseline = sqlite3.memory_used()

@@ -36,15 +36,15 @@ s3_truth_utf8_width: fn(b: U8) -> Int Never! {
 s3_truth_md_paths: fn(directory: String) -> [String] {
     entries: s3_truth_files.list_dir(directory) ?? return [String]{}
     paths := [String]{}
-    loop entry in entries -> &paths.push(entry.path.copy())
-    &paths.sort()
+    loop entry in entries -> paths.push(entry.path.copy())
+    paths.sort()
     result := [String]{}
     loop path in paths {
         if s3_truth_files.is_dir(path) {
             nested: s3_truth_md_paths(path)
-            loop item in nested -> &result.push(item)
+            loop item in nested -> result.push(item)
         } else if path.ends_with(".md") && !path.ends_with("/.md") && path != ".md" {
-            &result.push(path)
+            result.push(path)
         }
     }
     result
@@ -75,7 +75,7 @@ s3_truth_example_paths: fn(text: String) -> [String] {
             end += width
         }
         tail: policy_slice_raw(raw, start, end)
-        if tail.ends_with(".jet") -> &result.push("{prefix}{tail}")
+        if tail.ends_with(".jet") -> result.push("{prefix}{tail}")
         at = start
     }
     result
@@ -86,8 +86,8 @@ s3_guard_docs_examples: fn() {
     parts := [String]{s3_truth_files.read("README.md") ?? ""}
     entries: s3_truth_files.list_dir("Docs") ?? panic("Docs/ missing")
     paths := [String]{}
-    loop entry in entries -> &paths.push(entry.path.copy())
-    &paths.sort()
+    loop entry in entries -> paths.push(entry.path.copy())
+    paths.sort()
     loop path in paths {
         if s3_truth_files.is_dir(path) {
             // Rust excluded the top-level historical directories; dated
@@ -96,17 +96,17 @@ s3_guard_docs_examples: fn() {
             nested: s3_truth_md_paths(path)
             loop item in nested {
                 body: s3_truth_files.read(item) ?? next
-                &parts.push(body)
+                parts.push(body)
             }
         } else if path.ends_with(".md") && !path.ends_with("/.md") {
             body: s3_truth_files.read(path) ?? next
-            &parts.push(body)
+            parts.push(body)
         }
     }
     content: parts.join("")
     missing := [String]{}
     loop path in s3_truth_example_paths(content) {
-        if !s3_truth_files.exists(path) -> &missing.push(path)
+        if !s3_truth_files.exists(path) -> missing.push(path)
     }
     assert(missing.len() == 0, "docs reference example files that do not exist: {missing}")
 }
@@ -150,9 +150,9 @@ s3_truth_retired_senses: fn(text: String) -> [String] {
     }
     // Original sort_unstable + dedup order and unique labels.
     result := [String]{}
-    if codec -> &result.push("codec mode called a stream")
-    if collecting -> &result.push("collecting loop called yielding")
-    if event -> &result.push("event called a stream")
+    if codec -> result.push("codec mode called a stream")
+    if collecting -> result.push("collecting loop called yielding")
+    if event -> result.push("event called a stream")
     result
 }
 
@@ -173,7 +173,7 @@ s3_truth_link_targets: fn(text: String) -> [String] {
             first = word.copy()
             break
         }
-        &result.push(first)
+        result.push(first)
         at = end + 1
     }
     result
@@ -223,8 +223,8 @@ s3_guard_vocabulary_senses: fn() {
             // Dated evidence keeps its words as recorded (retirement_ratchet.jet).
             if guards_dated_evidence("Docs{policy_slice_bytes(candidate, docs_root.count_bytes(), candidate.count_bytes())}") -> next
             if seen.get(candidate) ?? false -> next
-            _: &seen.add(candidate, true)
-            &targets.push(candidate)
+            _: seen.add(candidate, true)
+            targets.push(candidate)
         }
     }
     violations := [String]{}
@@ -232,11 +232,11 @@ s3_guard_vocabulary_senses: fn() {
         text: s3_truth_files.read(target) ?? next
         if target != vocabulary_path {
             retired: s3_truth_retired_senses(text)
-            if retired.len() > 0 -> &violations.push("{target}: retired senses: {retired}")
+            if retired.len() > 0 -> violations.push("{target}: retired senses: {retired}")
             has_word := false
             words: [String]{"stream", "reader", "event", "collecting loop"}
             loop word in words { if s3_truth_contains_word(text, word) -> has_word = true }
-            if has_word && !text.contains("vocabulary.md") -> &violations.push("{target}: uses Jet vocabulary without linking Docs/spec/vocabulary.md")
+            if has_word && !text.contains("vocabulary.md") -> violations.push("{target}: uses Jet vocabulary without linking Docs/spec/vocabulary.md")
         }
     }
     assert(violations.len() == 0, "linked Markdown targets must use the vocabulary page and current senses: {violations}")

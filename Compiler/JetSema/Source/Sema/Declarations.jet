@@ -116,7 +116,7 @@ sema_callable_policies: fn(func: Func) -> CallablePolicyChain Never! {
                 if argument == .Expr(value) {
                     if value == .Call(call, _) {
                         arguments: loop call_argument in call.args -> sema_callable_policy_argument_text(call_argument.expr)
-                        &policies.push(CallablePolicy{name: call.name, arguments: arguments})
+                        policies.push(CallablePolicy{name: call.name, arguments: arguments})
                     }
                 }
             }
@@ -129,7 +129,7 @@ sema_function_param_types: fn(func: Func) -> [Type] Never! {
     params := [Type]{}
     loop parameter_index in 0..<func.params.len() {
         ty: type_with_effective_fn_returns(func.params[parameter_index].ty)
-        if func.params[parameter_index].variadic -> &params.push(Type.List{element: ty}) else -> &params.push(ty)
+        if func.params[parameter_index].variadic -> params.push(Type.List{element: ty}) else -> params.push(ty)
     }
     params
 }
@@ -142,7 +142,7 @@ sema_function_param_contract: fn(func: Func) -> [CallContractRow]? {
         implicit_local_label: func.params[parameter_index].zone == ParamZone.Either && func.params[parameter_index].public_label == None
         if func.params[parameter_index].public_label != None -> label = (func.params[parameter_index].public_label ?? CallLabel{name: "", span: func.params[parameter_index].name_span}).name
         if func.params[parameter_index].zone == ParamZone.PositionalOnly || implicit_local_label -> label = ""
-        &contract.push(CallContractRow{label: label, zone: func.params[parameter_index].zone})
+        contract.push(CallContractRow{label: label, zone: func.params[parameter_index].zone})
         if label != "" || func.params[parameter_index].zone != ParamZone.Either -> has_contract = true
     }
     if has_contract -> Val(contract) else -> None
@@ -154,16 +154,16 @@ sema_function_call_metadata: fn(func: Func, owner: SymbolID, fallback_source_fil
     variadic := [Bool]{}
     conventions := [AccessConvention]{}
     loop (index, parameter) in func.params {
-        &names.push(parameter.name)
-        &variadic.push(parameter.variadic)
-        &conventions.push(parameter.convention)
+        names.push(parameter.name)
+        variadic.push(parameter.variadic)
+        conventions.push(parameter.convention)
         if parameter.default == {
             .Val(default_expr) -> {
                 span: expr_span(default_expr)
                 source_file: sema_source_file_at(source_segments, fallback_source_file, fallback_source_origin, span)
-                &defaults.push(Val(FunctionDefaultRef{source_file: source_file, owner_key: owner.key, parameter_index: index, span: span}))
+                defaults.push(Val(FunctionDefaultRef{source_file: source_file, owner_key: owner.key, parameter_index: index, span: span}))
             }
-            else -> &defaults.push(None)
+            else -> defaults.push(None)
         }
     }
     FunctionCallMetadata{

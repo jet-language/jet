@@ -19,7 +19,7 @@ run: fn() {
     }
 
     first := net.tcp_connect(address) ?? panic("first connect")
-    net.set_read_timeout(&first, 0) ?? panic("zero timeout")
+    net.set_read_timeout(first, 0) ?? panic("zero timeout")
     if first.read(1) == {
         .Ok(_) -> print("unexpected first read")
         .Err(error) -> print(net.error_message(error))

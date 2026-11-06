@@ -21,7 +21,7 @@ cli_test_install_catalog_tools: fn(root: String) -[FS]> {
 cli_test_catalog_tool_env: fn(root: String, systemd_bin: String?) -> ShellEnv {
     bin_dirs := [String]{files.join(root, "bin")}
     if systemd_bin == {
-        .Val(bin) -> &bin_dirs.push(bin)
+        .Val(bin) -> bin_dirs.push(bin)
         .None -> {}
     }
     ShellEnv{
@@ -63,7 +63,7 @@ cli_test_catalog_worker: fn(claim: ServicesClaim, tools: String, fake: FakeSyste
         supervisor := cli_test_catalog_worker(claim, tools, fake, name, 0).spawn() ?? panic("spawn catalog supervisor")
         service_dir: claim.service_dir(name)
         cli_test_wait_for_file_contains(files.join(service_dir, "pid"), "pid=")
-        assert(services_wait_healthy(claim.project, &env, plan, time.duration_seconds(3)), "catalog service `{name}` did not pass its production readiness command")
+        assert(services_wait_healthy(claim.project, env, plan, time.duration_seconds(3)), "catalog service `{name}` did not pass its production readiness command")
         data_dir: files.join(service_dir, "data")
         if name == {
             "redis" -> assert(files.is_file(files.join(data_dir, ".service-running")))

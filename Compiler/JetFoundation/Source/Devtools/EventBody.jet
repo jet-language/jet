@@ -28,11 +28,11 @@ JetDevtoolsSourceSpan: struct { source_id: String, file: String, start_line: U32
 JetDevtoolsFunctionIdentity: struct { function_id: String, name: String, source: JetDevtoolsSourceSpan }
 JetDevtoolsGameLaunchPhase: struct { phase: String, status: String, detail: String }
 
-jet_devtools_source_span_new: fn(^source_id: String, ^file: String, start_line: U32, start_column: U32, end_line: U32, end_column: U32) -> JetDevtoolsSourceSpan Never! {
-    JetDevtoolsSourceSpan{source_id: ^source_id, file: ^file, start_line: start_line, start_column: start_column, end_line: end_line, end_column: end_column}
+jet_devtools_source_span_new: fn(&&source_id: String, &&file: String, start_line: U32, start_column: U32, end_line: U32, end_column: U32) -> JetDevtoolsSourceSpan Never! {
+    JetDevtoolsSourceSpan{source_id: source_id.move(), file: file.move(), start_line: start_line, start_column: start_column, end_line: end_line, end_column: end_column}
 }
-jet_devtools_function_identity_new: fn(^function_id: String, ^name: String, ^source: JetDevtoolsSourceSpan) -> JetDevtoolsFunctionIdentity Never! {
-    JetDevtoolsFunctionIdentity{function_id: ^function_id, name: ^name, source: ^source}
+jet_devtools_function_identity_new: fn(&&function_id: String, &&name: String, &&source: JetDevtoolsSourceSpan) -> JetDevtoolsFunctionIdentity Never! {
+    JetDevtoolsFunctionIdentity{function_id: function_id.move(), name: name.move(), source: source.move()}
 }
 
 JetDevtoolsEventBody: enum {

@@ -3,10 +3,10 @@ Error [jet.UseAfterMove]: `arena` was consumed by `close`, so it can't be used h
     |
   9 |     y: arena.alloc(2)
     |        ^^^^^
-  --> tests/ui/mem_use_after_reset.jet:8:12
+  --> tests/ui/mem_use_after_reset.jet:8:11
     |
-  8 |     close(^arena)
-    |            ^^^^^ `arena` moved to `close` here
+  8 |     close(arena)
+    |           ^^^^^ `arena` moved to `close` here
  Why: After a value moves somewhere else, its old name no longer gives access to it
  Fix: Stop using `arena` after the move, or give `close` a copy with `arena.copy()` where it moved.
  Note: acquire a new `Arena` resource; closed resources cannot be copied or reused

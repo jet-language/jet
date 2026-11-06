@@ -49,7 +49,7 @@ lsp_reasoning_inlay_hints: fn(db: SymbolDB, path: String) -> [InlayHint] Never! 
     loop record in db.index.derivations() {
         loop fact in db.index.definition_facts() {
             if fact.stable_id != record.subject -> next
-            if fact.module_path == path -> &hints.push(InlayHint{span: (Span{start: fact.span.start, end: fact.span.end}), module_path: fact.module_path.copy(), label: "reason: {record.claim} · {derivation_disposition_text(record.disposition)}"})
+            if fact.module_path == path -> hints.push(InlayHint{span: (Span{start: fact.span.start, end: fact.span.end}), module_path: fact.module_path.copy(), label: "reason: {record.claim} · {derivation_disposition_text(record.disposition)}"})
             break
         }
         if hints.len() == 64 -> break
@@ -101,14 +101,14 @@ lsp_reasoning_record_json: fn(db: SymbolDB, record: DerivationRecord, expanded: 
     loop (index, value) in record.premises {
         if index == 128 -> break
         bounded: lsp_bounded_reasoning_text(value, 1024)
-        &premise_rows.push(foundation_json_quote(bounded.text))
+        premise_rows.push(foundation_json_quote(bounded.text))
     }
     premises: premise_rows.join(",")
     assumption_rows := [String]{}
     loop (index, value) in record.assumptions {
         if index == 128 -> break
         bounded: lsp_bounded_reasoning_text(value, 1024)
-        &assumption_rows.push(foundation_json_quote(bounded.text))
+        assumption_rows.push(foundation_json_quote(bounded.text))
     }
     payload := "null"
     payload_truncated := false
@@ -174,7 +174,7 @@ lsp_callable_definition_for_selection: fn(db: SymbolDB, selection: String?) -> V
 
 lsp_json_string_array: fn(values: [String]) -> String Never! {
     rows := [String]{}
-    loop value in values -> &rows.push(foundation_json_quote(value))
+    loop value in values -> rows.push(foundation_json_quote(value))
     rows.join(",")
 }
 
@@ -196,13 +196,13 @@ lsp_callable_summary_json: fn(db: SymbolDB, selection: String?) -> String Never!
         stable_match := false
         if stable == .Val(fact_index) -> stable_match = facts[fact_index].stable_id == record.subject
         if !stable_match && record.subject != definition.identity -> next
-        &selected.push(i)
+        selected.push(i)
         if derivation_disposition_text(record.disposition) == "stale" -> stale = true
         if record.observation != None -> observed = true
     }
     write_rows := [String]{}
     loop parameter in signature.parameters {
-        if parameter.access == .Write -> &write_rows.push("{{\"name\":{foundation_json_quote(parameter.name)},\"type\":{foundation_json_quote(parameter.type_name())},\"access\":\"write\",\"evidence\":\"declared_parameter\"}}")
+        if parameter.access == .Write -> write_rows.push("{{\"name\":{foundation_json_quote(parameter.name)},\"type\":{foundation_json_quote(parameter.type_name())},\"access\":\"write\",\"evidence\":\"declared_parameter\"}}")
     }
     effects := "{{\"status\":\"unavailable\",\"reason\":\"no checked effect row\"}}"
     if db.index.effect_of(definition.identity) == .Val(effect_window) {
@@ -210,8 +210,8 @@ lsp_callable_summary_json: fn(db: SymbolDB, selection: String?) -> String Never!
         witnesses := [String]{}
         loop witness in effect_ref.provenance {
             spans := [String]{}
-            loop span in witness.spans -> &spans.push("{{\"start\":{span.start},\"end\":{span.end}}}")
-            &witnesses.push("{{\"effect\":{foundation_json_quote(witness.effect_name)},\"call_path\":[{lsp_json_string_array(witness.call_path)}],\"spans\":[{spans.join(",")}]}}")
+            loop span in witness.spans -> spans.push("{{\"start\":{span.start},\"end\":{span.end}}}")
+            witnesses.push("{{\"effect\":{foundation_json_quote(witness.effect_name)},\"call_path\":[{lsp_json_string_array(witness.call_path)}],\"spans\":[{spans.join(",")}]}}")
         }
         effects = "{{\"status\":\"checked\",\"direct\":[{lsp_json_string_array(effect_ref.direct)}],\"inferred\":[{lsp_json_string_array(effect_ref.inferred)}],\"callees\":[{lsp_json_string_array(effect_ref.callees)}],\"maximal\":{effect_ref.maximal},\"provenance\":[{witnesses.join(",")}]}}"
     }
@@ -219,11 +219,11 @@ lsp_callable_summary_json: fn(db: SymbolDB, selection: String?) -> String Never!
     loop (position, index) in selected {
         if position == 64 -> break
         record: records[index]
-        &checked_rows.push("{{\"id\":{foundation_json_quote(record.id)},\"disposition\":{foundation_json_quote(derivation_disposition_text(record.disposition))},\"identity\":{{\"source\":{foundation_json_quote(record.identity.source)},\"build\":{foundation_json_quote(record.identity.build)},\"run\":{foundation_json_quote(record.identity.run)},\"target\":{foundation_json_quote(record.identity.target)}}},\"observation\":{lsp_reasoning_observation_json(record.observation)},\"evidence\":\"checked\"}}")
+        checked_rows.push("{{\"id\":{foundation_json_quote(record.id)},\"disposition\":{foundation_json_quote(derivation_disposition_text(record.disposition))},\"identity\":{{\"source\":{foundation_json_quote(record.identity.source)},\"build\":{foundation_json_quote(record.identity.build)},\"run\":{foundation_json_quote(record.identity.run)},\"target\":{foundation_json_quote(record.identity.target)}}},\"observation\":{lsp_reasoning_observation_json(record.observation)},\"evidence\":\"checked\"}}")
     }
     status: if stale -> "stale" else if selected.is_empty() -> "checked_without_derivation" else -> "checked"
     views := [String]{}
-    loop view in signature.returned_views -> &views.push(foundation_json_quote(view.canonical()))
+    loop view in signature.returned_views -> views.push(foundation_json_quote(view.canonical()))
     callable: "{{\"identity\":{foundation_json_quote(definition.identity)},\"qualified_name\":{foundation_json_quote(definition.qualified_name)},\"module_path\":{foundation_json_quote(definition.module_path)},\"span\":{{\"start\":{definition.def_span.start},\"end\":{definition.def_span.end}}}}}"
     declaration: "{{\"kind\":\"checked_declaration\",\"module_path\":{foundation_json_quote(definition.module_path)}}}"
     failure: if signature.failure_contract == {
@@ -250,16 +250,16 @@ lsp_reasoning_view_json: fn(db: SymbolDB, path: String, selection: String?, expa
         if selected == .Val(value) { if record.id != value && record.subject != value && record.claim != value -> next }
         count += 1
         if count > 64 -> next
-        &rendered.push(lsp_reasoning_record_json(db, record, expanded))
+        rendered.push(lsp_reasoning_record_json(db, record, expanded))
         family: lsp_reasoning_family(record)
         if !lens_rows.has_key(family) -> lens_rows[family] = [String]{}
-        &lens_rows[family].push(foundation_json_quote(record.id))
+        lens_rows[family].push(foundation_json_quote(record.id))
     }
     lenses := [String]{}
     loop name in ([String]{"value", "ownership", "state", "effects", "dependencies", "impact", "optimization", "counterexamples", "relationships"}) {
         rows := ""
         if lens_rows.get(name) == .Val(items) -> rows = items.join(",")
-        &lenses.push("{{\"name\":\"{name}\",\"records\":[{rows}]}}")
+        lenses.push("{{\"name\":\"{name}\",\"records\":[{rows}]}}")
     }
     selected_json: if selected == {
         .Val(value) -> foundation_json_quote(value)

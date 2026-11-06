@@ -1,4 +1,4 @@
-// `^x` of a payload bound from a moved Option or Result whose payload has no
+// `x.move()` of a payload bound from a moved Option or Result whose payload has no
 // clone (a List of values holding file handles) moves the payload out of the
 // carrier: each item closes once, where its new holder ends it, and a carrier
 // whose payload stays is closed once when it ends (#6528).
@@ -11,7 +11,7 @@ Lock: struct {
 
 Tag: struct { name: String }
 impl Tag.Close {
-    close: fn(^self) { print("close {self.name}") }
+    close: fn(&&self) { print("close {self.name}") }
 }
 
 Held: struct {
@@ -29,18 +29,18 @@ held: fn(name: String) -> Held Never! {
     Held{name: name, lock: None, tag: Tag{name: name}}
 }
 
-keep: fn(^items: [Held]) -> Int {
+keep: fn(&&items: [Held]) -> Int {
     count: items.len()
-    loop item in ^items {
+    loop item in items.move() {
         print("keep {item.name}")
     }
     count
 }
 
 // The Option's payload moves on in one arm of a valued match.
-pick: fn(^warm: [Held]?) -> Int {
-    count: if ^warm == {
-        .Val(list) -> keep(^list)
+pick: fn(&&warm: [Held]?) -> Int {
+    count: if warm.move() == {
+        .Val(list) -> keep(list)
         .None -> 0
     }
     print("picked {count}")
@@ -48,9 +48,9 @@ pick: fn(^warm: [Held]?) -> Int {
 }
 
 // The payload moves on only on one path; on the other the carrier keeps it.
-maybe: fn(^warm: [Held]?, moving: Bool) -> Int {
-    if ^warm == {
-        .Val(list) -> if moving -> return keep(^list)
+maybe: fn(&&warm: [Held]?, moving: Bool) -> Int {
+    if warm.move() == {
+        .Val(list) -> if moving -> return keep(list)
         .None -> {}
     }
     print("left {moving}")
@@ -58,9 +58,9 @@ maybe: fn(^warm: [Held]?, moving: Bool) -> Int {
 }
 
 // A Result's Ok payload moves on the same way.
-settle: fn(^got: [Held] Failure!) -> Int {
-    if ^got == {
-        .Ok(list) -> return keep(^list)
+settle: fn(&&got: [Held] Failure!) -> Int {
+    if got.move() == {
+        .Ok(list) -> return keep(list)
         .Err(_) -> {}
     }
     print("failed")

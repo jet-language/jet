@@ -57,7 +57,7 @@ FoundationHardenedGitPolicy: struct {
     spec: fn(self) -[Exec]> ProcessSpec Never! {
         spec := process.cmd([String]{"git"}).cwd(self.cwd)
         keys := self.env.keys().to_list()
-        &keys.sort()
+        keys.sort()
         loop key in keys -> spec = spec.env(key, self.env[key])
         loop variable in self.removed_env -> spec = spec.env_remove(variable)
         spec.args_extend(self.args).stdout(.Capture).stderr(.Capture)

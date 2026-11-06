@@ -2,7 +2,7 @@
 count_work: fn(work: &[Int]) -> Int {
     visits := 0
     loop work.len() > 0 {
-        _value: &work.pop() ?? -1
+        _value: work.pop() ?? -1
         visits += 1
     }
     return visits
@@ -12,7 +12,7 @@ run: fn() {
     input: [Int]{3, -1, 0, 2}
     selected := [Int]{}
     loop value in input {
-        if value > 0 -> &selected.push(value)
+        if value > 0 -> selected.push(value)
     }
     print("separate input={input}")
     print("separate result={selected}")
@@ -27,12 +27,12 @@ run: fn() {
     work := [Int]{1, 2}
     seen := [Int]{}
     loop work.len() > 0 {
-        value: &work.pop() ?? -1
-        &seen.push(value)
-        if value < 3 -> &work.push(value + 2)
+        value: work.pop() ?? -1
+        seen.push(value)
+        if value < 3 -> work.push(value + 2)
     }
     print("work seen={seen} empty={work.len() == 0}")
 
     empty := [Int]{}
-    print("empty visits={count_work(&empty)}")
+    print("empty visits={count_work(empty)}")
 }

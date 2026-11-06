@@ -10,40 +10,40 @@ use jet_foundation.[Span, TIntegerBounds, TNumericOp, Type]
 ir_distinct_convert: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, argument: Int, operation: TNumericOp, range: TIntegerBounds?, fallible: Bool, span: Span) -> Int Never! {
     if operation == {
         .CastAs(_) -> {}
-        else -> return ir_numeric_method(&m, p, &b, ty, argument, operation, span)
+        else -> return ir_numeric_method(m, p, b, ty, argument, operation, span)
     }
     success := ty.copy()
     if fallible {
         if ir_untag(success) == .Result(ok_ty, _) {
             success = ok_ty
         } else {
-            return ir_fail_slot(&b, span, "fallible distinct conversion into {ir_type_name(ty)}")
+            return ir_fail_slot(b, span, "fallible distinct conversion into {ir_type_name(ty)}")
         }
     }
-    value: ir_expr(&m, p, &b, argument)
+    value: ir_expr(m, p, b, argument)
     if ir_failed(b) || value < 0 -> return -1
     if fallible && range == .Val(bounds) {
-        int_row: ir_type_row(&m, Type.Int) ?? 0
+        int_row: ir_type_row(m, Type.Int) ?? 0
         exact := value
         if ir_kind_of(m, b, value) != .Int {
-            exact = ir_numeric_cast(&m, p, &b, value, int_row, span)
-            ir_release(&m, &b, value)
+            exact = ir_numeric_cast(m, p, b, value, int_row, span)
+            ir_release(m, b, value)
         }
-        return ir_distinct_in_range(&m, p, &b, ty, exact, bounds.lo, bounds.hi, span)
+        return ir_distinct_in_range(m, p, b, ty, exact, bounds.lo, bounds.hi, span)
     }
-    target: ir_value_type(&m, p, success) ?? return ir_type_fail(&b, span, success)
+    target: ir_value_type(m, p, success) ?? return ir_type_fail(b, span, success)
     cast := value
     if b.f.slot_type[value] != target {
-        cast = ir_numeric_cast(&m, p, &b, value, target, span)
-        ir_release(&m, &b, value)
+        cast = ir_numeric_cast(m, p, b, value, target, span)
+        ir_release(m, b, value)
     }
-    if fallible -> return ir_result_box(&m, p, &b, ty, true, cast)
+    if fallible -> return ir_result_box(m, p, b, ty, true, cast)
     cast
 }
 
 ir_distinct_in_range: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: Int, low: Int, high: Int, span: Span) -> Int Never! {
-    int_row: ir_type_row(&m, Type.Int) ?? 0
-    lo: ir_int_constant(&m, &b, int_row, low)
-    hi: ir_int_constant(&m, &b, int_row, high)
-    ir_route(&m, p, &b, "jet_inline_range_from_int", [Int]{value, lo, hi}, [Bool]{false, false, false}, ty, span)
+    int_row: ir_type_row(m, Type.Int) ?? 0
+    lo: ir_int_constant(m, b, int_row, low)
+    hi: ir_int_constant(m, b, int_row, high)
+    ir_route(m, p, b, "jet_inline_range_from_int", [Int]{value, lo, hi}, [Bool]{false, false, false}, ty, span)
 }

@@ -130,7 +130,7 @@ TrustEngine: struct {
         if signers.len() >= role.threshold -> return Err(TrustRootError.RotationRejected{detail: "drill requires fewer than threshold signers"})
         signed: trust_sign_root(new_root, signers)
         drill := self.clone_for_drill()
-        if &drill.update_root(signed, clock) == {
+        if drill.update_root(signed, clock) == {
             .Ok(_) -> return Err(TrustRootError.RotationRejected{detail: "threshold-minus-one rotation incorrectly succeeded"})
             .Err(error) -> {
                 if error == {
@@ -157,7 +157,7 @@ TrustEngine: struct {
             .Val(path) -> self.ensure_delegation_allows(path)
             .None -> {}
         }
-        trust_enforce_metadata_digest(&self, MetadataRole.Targets, signed.signed.version, canonical)
+        trust_enforce_metadata_digest(self, MetadataRole.Targets, signed.signed.version, canonical)
         self.versions[(MetadataRole.Targets).label()] = signed.signed.version
     }
 
@@ -179,7 +179,7 @@ TrustEngine: struct {
             length: targets_canonical.bytes().len()
             if entry.length != length -> return Err(TrustRootError.ConsistentSnapshotMismatch{role: "targets", detail: "length {entry.length} != {length}"})
         }
-        trust_enforce_metadata_digest(&self, MetadataRole.Snapshot, signed.signed.version, canonical)
+        trust_enforce_metadata_digest(self, MetadataRole.Snapshot, signed.signed.version, canonical)
         self.versions[(MetadataRole.Snapshot).label()] = signed.signed.version
     }
 
@@ -199,7 +199,7 @@ TrustEngine: struct {
         if got != want -> return Err(TrustRootError.ConsistentSnapshotMismatch{role: "snapshot", detail: "sha256 {got} != {want}"})
         length: snapshot_canonical.bytes().len()
         if entry.length != length -> return Err(TrustRootError.ConsistentSnapshotMismatch{role: "snapshot", detail: "length {entry.length} != {length}"})
-        trust_enforce_metadata_digest(&self, MetadataRole.Timestamp, signed.signed.version, canonical)
+        trust_enforce_metadata_digest(self, MetadataRole.Timestamp, signed.signed.version, canonical)
         self.versions[(MetadataRole.Timestamp).label()] = signed.signed.version
     }
 
@@ -236,7 +236,7 @@ trust_verify_role_signatures: fn(role: MetadataRole, canonical: String, signatur
         if !role_keys.key_ids.contains(signature.key_id) -> next
         if keyring.verify(signature.key_id, canonical.bytes(), signature) == {
             .Ok(_) -> {
-                if !valid.contains(signature.key_id) -> &valid.push(signature.key_id)
+                if !valid.contains(signature.key_id) -> valid.push(signature.key_id)
             }
             .Err(error) -> {
                 if error == {
@@ -309,11 +309,11 @@ TrustFixtureRoot: struct {
 trust_fixture_threshold_root: fn(version: Int, expires_unix: Int) -> TrustFixtureRoot TrustRootError! {
     labels: [String]{"root-1", "root-2", "root-3", "targets", "snapshot", "timestamp"}
     keys := [TrustKey]{}
-    loop label in labels -> &keys.push(TrustKey.generate(label))
+    loop label in labels -> keys.push(TrustKey.generate(label))
     keyring := Keyring.empty()
     public_key_ids := [String: String]{}
     loop key in keys {
-        &keyring.insert(key)
+        keyring.insert(key)
         public_key_ids[key.key_id] = TRUST_ALG_HMAC_SHA256
     }
     roles := [String: RoleKeys]{}

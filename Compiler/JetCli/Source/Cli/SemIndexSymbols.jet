@@ -189,25 +189,25 @@ jet_cli_language_symbols: fn() -> [JetCLISymbol] Never! {
     symbols := [JetCLISymbol]{}
     no_examples: [String]{}
     loop ty in JET_CLI_TYPE_LIST {
-        &symbols.push(jet_cli_symbol_builtin("builtin:type:{ty}", ty, ty, None, "core", JetCLISymbolKind.Type, "type {ty}", "Built-in Jet type.", no_examples))
+        symbols.push(jet_cli_symbol_builtin("builtin:type:{ty}", ty, ty, None, "core", JetCLISymbolKind.Type, "type {ty}", "Built-in Jet type.", no_examples))
     }
-    &symbols.push(jet_cli_symbol_builtin("builtin:fact:$origin", "$origin", "$origin", None, "compiler", JetCLISymbolKind.Member, "$origin: OriginInfo?", "Compiler-owned typed fact.", no_examples))
+    symbols.push(jet_cli_symbol_builtin("builtin:fact:$origin", "$origin", "$origin", None, "compiler", JetCLISymbolKind.Member, "$origin: OriginInfo?", "Compiler-owned typed fact.", no_examples))
     loop keyword in JET_CLI_KEYWORD_LIST {
-        &symbols.push(jet_cli_symbol_builtin("builtin:keyword:{keyword}", keyword, keyword, None, "syntax", JetCLISymbolKind.Keyword, keyword, "Jet keyword.", no_examples))
+        symbols.push(jet_cli_symbol_builtin("builtin:keyword:{keyword}", keyword, keyword, None, "syntax", JetCLISymbolKind.Keyword, keyword, "Jet keyword.", no_examples))
     }
     loop row in JET_CLI_SYMBOL_BUILTIN_METHODS {
         parts: row.qualified_name.split(".").to_list()
         examples: if row.example == "" -> [String]{} else -> [String]{row.example}
-        &symbols.push(jet_cli_symbol_builtin("builtin:method:{row.qualified_name}", parts[1], row.qualified_name, Val(parts[0]), "core.collections", JetCLISymbolKind.Member, row.signature, row.summary, examples))
+        symbols.push(jet_cli_symbol_builtin("builtin:method:{row.qualified_name}", parts[1], row.qualified_name, Val(parts[0]), "core.collections", JetCLISymbolKind.Member, row.signature, row.summary, examples))
     }
-    &symbols.push(jet_cli_symbol_builtin("builtin:method:Int.parse", "parse", "Int.parse", Val("Int"), "core.numeric", JetCLISymbolKind.Member, "Int.parse(text: String) -> Int ParseError!", "Parses text as an Int.", [String]{"Int.parse(text)"}))
-    &symbols.push(jet_cli_symbol_builtin("builtin:method:Float.parse", "parse", "Float.parse", Val("Float"), "core.numeric", JetCLISymbolKind.Member, "Float.parse(text: String) -> Float ParseError!", "Parses text as a Float.", [String]{"Float.parse(text)"}))
+    symbols.push(jet_cli_symbol_builtin("builtin:method:Int.parse", "parse", "Int.parse", Val("Int"), "core.numeric", JetCLISymbolKind.Member, "Int.parse(text: String) -> Int ParseError!", "Parses text as an Int.", [String]{"Int.parse(text)"}))
+    symbols.push(jet_cli_symbol_builtin("builtin:method:Float.parse", "parse", "Float.parse", Val("Float"), "core.numeric", JetCLISymbolKind.Member, "Float.parse(text: String) -> Float ParseError!", "Parses text as a Float.", [String]{"Float.parse(text)"}))
     loop source in BUILTIN_NUMERIC_SOURCES {
         loop target in JET_CLI_SYMBOL_NUMERIC_TARGETS {
             ret: jet_cli_symbol_conversion_return(target, source.method) ?? next
             result: if jet_cli_symbol_is_result(Val(ret)) -> "{target} !String" else -> target
             qualified_name: "{target}.{source.method}"
-            &symbols.push(jet_cli_symbol_builtin("builtin:method:{qualified_name}", source.method, qualified_name, Val(target), "core.numeric", JetCLISymbolKind.Member, "{target}.{source.method}(value: {source.source}) -> {result}", "Converts {source.source} to {target}.", no_examples))
+            symbols.push(jet_cli_symbol_builtin("builtin:method:{qualified_name}", source.method, qualified_name, Val(target), "core.numeric", JetCLISymbolKind.Member, "{target}.{source.method}(value: {source.source}) -> {result}", "Converts {source.source} to {target}.", no_examples))
         }
     }
     symbols
@@ -222,11 +222,11 @@ jet_cli_symbol_index: fn(symbols: [JetCLISymbol]) -> [JetCLISymbol] Never! {
         if existing == .Val(position) -> unique[position] = symbol
         if existing == None {
             positions[symbol.identity] = unique.len()
-            &unique.push(symbol)
+            unique.push(symbol)
         }
     }
     // `SemanticSymbolIndex::sort`: qualified name, module, identity.
-    &unique.sort_by((left: JetCLISymbol, right: JetCLISymbol) -> (left.qualified_name <=> right.qualified_name).then(left.module_path <=> right.module_path).then(left.identity <=> right.identity))
+    unique.sort_by((left: JetCLISymbol, right: JetCLISymbol) -> (left.qualified_name <=> right.qualified_name).then(left.module_path <=> right.module_path).then(left.identity <=> right.identity))
     unique
 }
 
@@ -259,16 +259,16 @@ jet_cli_symbol_snake: fn(name: String) -> String Never! {
     loop index in 0..<bytes.len() {
         byte: bytes[index]
         if !jet_cli_symbol_is_upper(byte) {
-            &out.push(byte)
+            out.push(byte)
             next
         }
         if index > 0 && bytes[index - 1] != (U8{95}) {
             previous: bytes[index - 1]
             next_code: if index + 1 < bytes.len() -> Int.from_u8(bytes[index + 1]) else -> 0
             acronym_end: jet_cli_symbol_is_upper(previous) && next_code >= 97 && next_code <= 122
-            if jet_cli_symbol_is_lower_or_digit(previous) || acronym_end -> &out.push(U8{95})
+            if jet_cli_symbol_is_lower_or_digit(previous) || acronym_end -> out.push(U8{95})
         }
-        &out.push(U8.from_int(Int.from_u8(byte) + 32) ?? byte)
+        out.push(U8.from_int(Int.from_u8(byte) + 32) ?? byte)
     }
     String.from_bytes(out) ?? name
 }
@@ -321,9 +321,9 @@ jet_cli_symbol_distinct_conversions: fn(owner: String, base: Type, ranged: Bool,
     conversions := [JetCLISymbolConversion]{}
     base_name: type_name(base)
     if jet_cli_symbol_is_numeric(base) {
-        loop row in BUILTIN_NUMERIC_SOURCES -> &conversions.push(JetCLISymbolConversion{method: row.method, source: row.source})
+        loop row in BUILTIN_NUMERIC_SOURCES -> conversions.push(JetCLISymbolConversion{method: row.method, source: row.source})
     }
-    if !jet_cli_symbol_is_numeric(base) -> &conversions.push(JetCLISymbolConversion{method: jet_cli_symbol_conversion_method(base_name), source: base_name})
+    if !jet_cli_symbol_is_numeric(base) -> conversions.push(JetCLISymbolConversion{method: jet_cli_symbol_conversion_method(base_name), source: base_name})
     loop conversion in conversions {
         fallible: checked_text_error != None || ranged || jet_cli_symbol_is_result(jet_cli_symbol_conversion_return(base_name, conversion.method))
         qualified_name: "{owner}.{conversion.method}"
@@ -334,7 +334,7 @@ jet_cli_symbol_distinct_conversions: fn(owner: String, base: Type, ranged: Bool,
             signature = "{owner}.{conversion.method}(value: {conversion.source}) -> {owner}\nfailure: {error} (CheckedText)"
             summary = "Validates {conversion.source} through {owner}.CheckedText."
         }
-        &symbols.push(JetCLISymbol{
+        symbols.push(JetCLISymbol{
             identity: "source:method:{scope_identity}:{qualified_name}",
             name: conversion.method,
             qualified_name: qualified_name,
@@ -377,21 +377,21 @@ jet_cli_symbol_module_scope: fn(index: JetCLISemIndex, module_path: String, name
 jet_cli_symbol_collect_conversions: fn(index: JetCLISemIndex, items: [Item], module_path: String, scope_identity: String, lexical_scope: JetCLISymbolScope?, symbols: &[JetCLISymbol]) Never! {
     loop item in items {
         if item == {
-            .Distinct(definition) -> jet_cli_symbol_distinct_conversions(definition.name, definition.base, definition.range != None, jet_cli_symbol_checked_text_error(items, definition.name), module_path, scope_identity, definition.name_span, lexical_scope, &symbols)
+            .Distinct(definition) -> jet_cli_symbol_distinct_conversions(definition.name, definition.base, definition.range != None, jet_cli_symbol_checked_text_error(items, definition.name), module_path, scope_identity, definition.name_span, lexical_scope, symbols)
             .UnitFamily(family) -> {
                 // Canonical Time is the one fixed-carrier family that mints no
                 // distinct (`UnitFamilyDef::distinct_defs`).
                 canonical_time: family.family == "Time" && (family.resolved_owner ?? "") == "core.units"
                 if !canonical_time {
                     loop named in sema_registration_unit_family_type_names(family) {
-                        jet_cli_symbol_distinct_conversions(named.name, Type.Float, false, None, module_path, scope_identity, named.span, lexical_scope, &symbols)
+                        jet_cli_symbol_distinct_conversions(named.name, Type.Float, false, None, module_path, scope_identity, named.span, lexical_scope, symbols)
                     }
                 }
             }
             .CodeModule(code_module) -> {
                 if code_module.body == .Val(body) {
                     scope: jet_cli_symbol_module_scope(index, module_path, code_module.name, code_module.name_span, code_module.span, scope_identity, lexical_scope)
-                    jet_cli_symbol_collect_conversions(index, body, module_path, scope.identity, Val(scope), &symbols)
+                    jet_cli_symbol_collect_conversions(index, body, module_path, scope.identity, Val(scope), symbols)
                 }
             }
             else -> {}
@@ -445,11 +445,11 @@ jet_cli_symbol_scopes: fn(index: JetCLISemIndex) -> JetCLISymbolScopes Never! {
         if def.kind == {
             .Local(_, _) | .Param(_) -> {
                 if queries.get(def.module_path) == None {
-                    &module_paths.push(def.module_path)
+                    module_paths.push(def.module_path)
                     queries[def.module_path] = [Span]{}
                 }
                 spans := queries.get(def.module_path) ?? [Span]{}
-                &spans.push(def.def_span)
+                spans.push(def.def_span)
                 queries[def.module_path] = spans
             }
             else -> {}
@@ -460,7 +460,7 @@ jet_cli_symbol_scopes: fn(index: JetCLISemIndex) -> JetCLISymbolScopes Never! {
         scopes.nodes_by_id["{node.module_path}\n{node.id}"] = node
         if queries.get(node.module_path) == None -> next
         list := module_nodes.get(node.module_path) ?? [JetCLISemNode]{}
-        &list.push(node)
+        list.push(node)
         module_nodes[node.module_path] = list
         if node.parent == .Val(parent) {
             child_key: "{node.module_path}\n{parent}"
@@ -496,12 +496,12 @@ jet_cli_symbol_scopes: fn(index: JetCLISemIndex) -> JetCLISymbolScopes Never! {
         active := [JetCLISemNode]{}
         loop span in spans {
             loop next_node < nodes.len() && nodes[next_node].span.start <= span.start {
-                &active.push(nodes[next_node])
+                active.push(nodes[next_node])
                 next_node += 1
             }
             kept := [JetCLISemNode]{}
             loop node in active {
-                if node.span.end >= span.start -> &kept.push(node)
+                if node.span.end >= span.start -> kept.push(node)
             }
             active = kept
             candidates: if span.end < span.start -> nodes else -> active
@@ -570,7 +570,7 @@ jet_cli_symbol_shape: fn(name: String, kind: JetCLISemKind, owner: String?) -> J
             if callable.effects == .Val(row) {
                 loop entry in row {
                     root: entry.name.split(".").to_list()[0]
-                    if root != "Panic" && root != "Mem" -> &shown.push(entry.name)
+                    if root != "Panic" && root != "Mem" -> shown.push(entry.name)
                 }
             }
             result := ""
@@ -643,13 +643,13 @@ jet_cli_symbol_trait_contracts: fn(contracts: [JetCLISemTraitContract], declarat
         lines := [String]{"{prefix} {contract.trait_name}"}
         loop entry in contract.associated_types {
             if entry.ty == .Val(ty) {
-                &lines.push("  type {entry.name} = {ty}")
+                lines.push("  type {entry.name} = {ty}")
             } else {
-                &lines.push("  type {entry.name}")
+                lines.push("  type {entry.name}")
             }
         }
-        loop method in contract.methods -> &lines.push("  {method}")
-        &rendered.push(lines.join("\n"))
+        loop method in contract.methods -> lines.push("  {method}")
+        rendered.push(lines.join("\n"))
     }
     rendered.join("\n")
 }
@@ -669,7 +669,7 @@ jet_cli_symbol_source_docs: fn(source: String, def_start: Int) -> JetCLIDocComme
     position := lines.len() - 1
     loop position >= 0 {
         doc: jet_cli_doc_strip_prefix(lines[position].trim(), "///") ?? break
-        &collected.push(doc.trim())
+        collected.push(doc.trim())
         position -= 1
     }
     comment := JetCLIDocComment{summary: "", examples: [String]{}}
@@ -677,7 +677,7 @@ jet_cli_symbol_source_docs: fn(source: String, def_start: Int) -> JetCLIDocComme
     loop position >= 0 {
         line: collected[position]
         if jet_cli_doc_strip_prefix(line, "Example:") == .Val(example) {
-            &comment.examples.push(example.trim())
+            comment.examples.push(example.trim())
         } else if comment.summary == "" && line != "" {
             comment.summary = line
         }
@@ -702,7 +702,7 @@ jet_cli_symbol_alias_identity: fn(module_path: String, span: Span) -> String? Ne
 // import.
 jet_cli_symbol_imported_module: fn(modules: [JetDriverDocModule], doc_module: JetDriverDocModule, imports: [ImportDecl], module_alias: String) -> String? Never! {
     candidates := imports
-    loop import in doc_module.imports -> &candidates.push(import)
+    loop import in doc_module.imports -> candidates.push(import)
     loop candidate in candidates {
         if candidate.alias != module_alias -> next
         if candidate.kind == {
@@ -767,12 +767,12 @@ jet_cli_symbol_collect_imports: fn(symbols: &[JetCLISymbol], modules: [JetDriver
                     symbol.provenance = JetCLISymbolProvenance.Source{module_path: doc_module.path}
                     symbol.span = Val(items_span)
                     symbol.lexical_scope = scope
-                    &symbols.push(symbol)
+                    symbols.push(symbol)
                 }
             }
             else -> {
                 alias_name: import.alias
-                &symbols.push(JetCLISymbol{
+                symbols.push(JetCLISymbol{
                     identity: jet_cli_symbol_alias_identity(doc_module.path, import.alias_span) ?? jet_cli_symbol_import_identity(doc_module.path, scope, alias_name),
                     name: alias_name,
                     qualified_name: alias_name,
@@ -796,8 +796,8 @@ jet_cli_symbol_collect_inline_imports: fn(index: JetCLISemIndex, symbols: &[JetC
         if item == .CodeModule(code_module) {
             parent_identity: if parent_scope == .Val(parent) -> parent.identity else -> "module:{doc_module.path}"
             scope: jet_cli_symbol_module_scope(index, doc_module.path, code_module.name, code_module.name_span, code_module.span, parent_identity, parent_scope)
-            jet_cli_symbol_collect_imports(&symbols, modules, doc_module, code_module.imports, Val(scope))
-            if code_module.body == .Val(body) -> jet_cli_symbol_collect_inline_imports(index, &symbols, modules, doc_module, body, Val(scope))
+            jet_cli_symbol_collect_imports(symbols, modules, doc_module, code_module.imports, Val(scope))
+            if code_module.body == .Val(body) -> jet_cli_symbol_collect_inline_imports(index, symbols, modules, doc_module, body, Val(scope))
         }
     }
 }
@@ -836,7 +836,7 @@ jet_cli_symbol_canonical_name: fn(modules: [JetDriverDocModule], module_path: St
 jet_cli_build_symbols: fn(index: JetCLISemIndex, modules: [JetDriverDocModule]) -> [JetCLISymbol] Never! {
     symbols := jet_cli_language_symbols()
     loop doc_module in modules {
-        jet_cli_symbol_collect_conversions(index, doc_module.items, doc_module.path, "module:{doc_module.path}", None, &symbols)
+        jet_cli_symbol_collect_conversions(index, doc_module.items, doc_module.path, "module:{doc_module.path}", None, symbols)
     }
     owners := [String: String]{}
     origin_traits := [String: String]{}
@@ -884,7 +884,7 @@ jet_cli_build_symbols: fn(index: JetCLISemIndex, modules: [JetDriverDocModule]) 
             else -> {}
         }
         identity: if scope != None -> "{def.identity}@{def.def_span.start}" else -> def.identity
-        &symbols.push(JetCLISymbol{
+        symbols.push(JetCLISymbol{
             identity: identity,
             name: def.name,
             qualified_name: qualified_name,
@@ -900,8 +900,8 @@ jet_cli_build_symbols: fn(index: JetCLISemIndex, modules: [JetDriverDocModule]) 
         })
     }
     loop doc_module in modules {
-        jet_cli_symbol_collect_imports(&symbols, modules, doc_module, doc_module.imports, None)
-        jet_cli_symbol_collect_inline_imports(index, &symbols, modules, doc_module, doc_module.items, None)
+        jet_cli_symbol_collect_imports(symbols, modules, doc_module, doc_module.imports, None)
+        jet_cli_symbol_collect_inline_imports(index, symbols, modules, doc_module, doc_module.items, None)
     }
     jet_cli_symbol_index(symbols)
 }

@@ -43,13 +43,13 @@ store_broker_test_serve_once: fn(socket: String, config: SharedStoreConfig) -> T
     listener: net.unix_listen(socket) ?? panic("broker listen")
     task {
         broker_verification := StoreVerification.new()
-        store_broker_test_serve_result(&broker_verification, listener, config)
+        store_broker_test_serve_result(broker_verification, listener, config)
     }
 }
 
 store_broker_test_serve_result: fn(verification: &StoreVerification, listener: UnixListener, config: SharedStoreConfig) -> String Never! {
     stream := net.unix_accept(listener) ?? panic("broker accept")
-    if store_broker_serve_peer(&verification, ^stream, config, store_broker_current_uid() ?? panic("current uid")) == {
+    if store_broker_serve_peer(verification, stream, config, store_broker_current_uid() ?? panic("current uid")) == {
         .Ok(_) -> ""
         .Err(error) -> error.message()
     }
@@ -63,7 +63,7 @@ store_broker_test_incoming_empty: fn(shared_root: String) -> Bool Never! {
     binding: store_broker_test_binding()
     encoded: store_broker_encode_write_request(binding, "credential", "archive".bytes()) ?? panic("encode")
     reader := BrokerWireReader.memory(encoded)
-    parsed: store_broker_read_request(&reader) ?? panic("parse")
+    parsed: store_broker_read_request(reader) ?? panic("parse")
     if parsed == {
         .Write(request) -> {
             assert_eq(request.archive, "archive".bytes())
@@ -76,12 +76,12 @@ store_broker_test_incoming_empty: fn(shared_root: String) -> Bool Never! {
 
 #Test("store broker request operations reject fields from the other operation") {
     write := BrokerWireReader.memory("{STORE_BROKER_REQUEST_MAGIC}\nop=write\nbytes=0\ncredential=00\n\n".bytes())
-    if store_broker_read_request(&write) == {
+    if store_broker_read_request(write) == {
         .Ok(_) -> panic("a write without provenance must fail")
         .Err(error) -> assert(error.message().contains("no `reference`"))
     }
     read := BrokerWireReader.memory("{STORE_BROKER_REQUEST_MAGIC}\nop=read\nreference={store_hex_bytes("app".bytes())}\nbytes=0\n\n".bytes())
-    if store_broker_read_request(&read) == {
+    if store_broker_read_request(read) == {
         .Ok(_) -> panic("a read with archive bytes must fail")
         .Err(error) -> assert(error.message().contains("cannot include archive bytes"))
     }
@@ -90,9 +90,9 @@ store_broker_test_incoming_empty: fn(shared_root: String) -> Bool Never! {
 #Test("store broker archive response round trips success and missing status") {
     encoded: store_broker_encode_archive_response("archive".bytes()) ?? panic("encode")
     reader := BrokerWireReader.memory(encoded)
-    assert_eq(store_broker_read_archive_response(&reader) ? found -> found ! error -> panic("parse"), Val("archive".bytes()))
+    assert_eq(store_broker_read_archive_response(reader) ? found -> found ! error -> panic("parse"), Val("archive".bytes()))
     missing := BrokerWireReader.memory("{STORE_BROKER_RESPONSE_MAGIC}\nstatus=missing\n\n".bytes())
-    assert_eq(store_broker_read_archive_response(&missing) ? found -> found ! error -> panic("parse missing"), [U8]?{None})
+    assert_eq(store_broker_read_archive_response(missing) ? found -> found ! error -> panic("parse missing"), [U8]?{None})
 }
 
 #Test("store broker configured paths must stay inside the installed boundary") {
@@ -184,25 +184,25 @@ store_broker_test_incoming_empty: fn(shared_root: String) -> Bool Never! {
     files.create_dir_all(source) ?? panic("source")
     files.write(files.join(source, "payload"), "broker payload\n") ?? panic("payload")
     local: HangarRoots.at(roots.root)
-    entry: (store_ingest_tree(&verification, local, store_broker_test_request("broker-demo", "broker-demo@local", source, "broker promotion test")) ?? panic("ingest")).entry
-    archive: store_export_unsigned_archive(&verification, local, entry.id, true) ?? panic("export")
+    entry: (store_ingest_tree(verification, local, store_broker_test_request("broker-demo", "broker-demo@local", source, "broker promotion test")) ?? panic("ingest")).entry
+    archive: store_export_unsigned_archive(verification, local, entry.id, true) ?? panic("export")
     shared_root: files.join(roots.root, "shared")
     config: SharedStoreConfig{socket: files.join(roots.root, "broker.sock"), shared_root: shared_root, trust_key: files.join(roots.root, "trust/hangar.key"), grants: files.join(roots.root, "users")}
     key_path: files.join(roots.root, "broker-key")
     files.write(key_path, store_test_repeat("k", 32)) ?? panic("key")
     binding: store_broker_provenance_binding_for_entry(entry) ?? panic("binding")
     shared: HangarRoots.at(shared_root)
-    store_broker_promote_staged_archive(&verification, shared, config, key_path, archive, binding) ?? panic("promote")
-    published: store_find_by_reference(&verification, shared, entry.reference) ?? panic("published")
-    store_verify_hangar_object(&verification, shared, published) ?? panic("verify published")
+    store_broker_promote_staged_archive(verification, shared, config, key_path, archive, binding) ?? panic("promote")
+    published: store_find_by_reference(verification, shared, entry.reference) ?? panic("published")
+    store_verify_hangar_object(verification, shared, published) ?? panic("verify published")
     assert(store_broker_test_incoming_empty(shared_root))
 
     corrupted := archive
     corrupted[0] = corrupted[0].bit_xor(U8{1})
-    assert(store_broker_promote_staged_archive(&verification, shared, config, key_path, corrupted, binding) == .Err(_))
-    still: store_find_by_reference(&verification, shared, entry.reference) ?? panic("still published")
+    assert(store_broker_promote_staged_archive(verification, shared, config, key_path, corrupted, binding) == .Err(_))
+    still: store_find_by_reference(verification, shared, entry.reference) ?? panic("still published")
     assert_eq(still.id, published.id)
-    store_verify_hangar_object(&verification, shared, still) ?? panic("verify still published")
+    store_verify_hangar_object(verification, shared, still) ?? panic("verify still published")
     assert(store_broker_test_incoming_empty(shared_root))
     store_test_drop_roots(roots)
 }
@@ -215,8 +215,8 @@ store_broker_test_incoming_empty: fn(shared_root: String) -> Bool Never! {
     source: files.join(roots.root, "s")
     files.create_dir_all(source) ?? panic("source")
     files.write(files.join(source, "payload"), "socket protocol payload\n") ?? panic("payload")
-    entry: (store_ingest_tree(&verification, local, store_broker_test_request("socket-demo", "socket-demo@local", source, "socket protocol test")) ?? panic("ingest")).entry
-    archive: store_export_unsigned_archive(&verification, local, entry.id, true) ?? panic("export")
+    entry: (store_ingest_tree(verification, local, store_broker_test_request("socket-demo", "socket-demo@local", source, "socket protocol test")) ?? panic("ingest")).entry
+    archive: store_export_unsigned_archive(verification, local, entry.id, true) ?? panic("export")
     config: store_broker_test_configure(local)
     shared_root: config.shared_root
     shared: HangarRoots.at(shared_root)
@@ -227,18 +227,18 @@ store_broker_test_incoming_empty: fn(shared_root: String) -> Bool Never! {
     refusing: store_broker_test_serve_once(wrong_socket, config)
     client := net.unix_connect(wrong_socket) ?? panic("connect")
     request: store_broker_encode_write_request(binding, "wrong-credential", archive) ?? panic("encode")
-    net.unix_write_all_bytes(&client, request).drop("the broker may close first")
-    net.unix_close(&client).drop("client close")
+    net.unix_write_all_bytes(client, request).drop("the broker may close first")
+    net.unix_close(client).drop("client close")
     failure: refusing.join() ?? panic("broker task")
     assert(failure.contains("credential is invalid"))
-    assert(store_find_by_reference(&verification, shared, entry.reference) == None)
+    assert(store_find_by_reference(verification, shared, entry.reference) == None)
 
     // The private owner promotes through the configured socket.
     promoting: store_broker_test_serve_once(config.socket, config)
-    assert(store_promote_shared_entry(&verification, local, entry) ?? panic("promote"))
+    assert(store_promote_shared_entry(verification, local, entry) ?? panic("promote"))
     assert_eq(promoting.join() ?? panic("broker task"), "")
-    published: store_find_by_reference(&verification, shared, entry.reference) ?? panic("published")
-    store_verify_hangar_object(&verification, shared, published) ?? panic("verify published")
+    published: store_find_by_reference(verification, shared, entry.reference) ?? panic("published")
+    store_verify_hangar_object(verification, shared, published) ?? panic("verify published")
     assert(store_broker_test_incoming_empty(shared_root))
 
     // A reader imports the signed entry through its own configured socket.
@@ -246,14 +246,14 @@ store_broker_test_incoming_empty: fn(shared_root: String) -> Bool Never! {
     reader_config: store_broker_test_configure(reader)
     reading: store_broker_test_serve_once(reader_config.socket, config)
     expectation: CacheExpectation{identity: entry.cache_identity, owned_output: None, allow_unsigned_local: true}
-    reused: if store_reuse_shared_entry(&verification, reader, entry.reference, expectation) == {
+    reused: if store_reuse_shared_entry(verification, reader, entry.reference, expectation) == {
         .Val(found) -> found
         .None -> panic("authenticated broker read should return the published entry")
         .Err(_) -> panic("reuse")
     }
     assert_eq(reading.join() ?? panic("broker task"), "")
     assert_eq(reused.envelope.output_hash, entry.envelope.output_hash)
-    store_verify_hangar_object(&verification, reader, reused) ?? panic("verify reused")
+    store_verify_hangar_object(verification, reader, reused) ?? panic("verify reused")
 
     // A corrupted archive is refused and live data stays intact.
     corrupted := archive
@@ -262,12 +262,12 @@ store_broker_test_incoming_empty: fn(shared_root: String) -> Bool Never! {
     rejecting: store_broker_test_serve_once(corrupt_socket, config)
     corrupt_client := net.unix_connect(corrupt_socket) ?? panic("connect")
     corrupt_request: store_broker_encode_write_request(binding, STORE_BROKER_PRIVATE_OWNER, corrupted) ?? panic("encode")
-    net.unix_write_all_bytes(&corrupt_client, corrupt_request).drop("the broker may close first")
-    net.unix_close(&corrupt_client).drop("client close")
+    net.unix_write_all_bytes(corrupt_client, corrupt_request).drop("the broker may close first")
+    net.unix_close(corrupt_client).drop("client close")
     assert((rejecting.join() ?? panic("broker task")) != "")
-    still: store_find_by_reference(&verification, shared, entry.reference) ?? panic("still published")
+    still: store_find_by_reference(verification, shared, entry.reference) ?? panic("still published")
     assert_eq(still.id, published.id)
-    store_verify_hangar_object(&verification, shared, still) ?? panic("verify still published")
+    store_verify_hangar_object(verification, shared, still) ?? panic("verify still published")
     assert(store_broker_test_incoming_empty(shared_root))
     store_test_drop_roots(roots)
 }
@@ -294,31 +294,31 @@ store_broker_test_incoming_empty: fn(shared_root: String) -> Bool Never! {
     broker: task {
         broker_verification := StoreVerification.new()
         first := net.unix_accept(listener) ?? panic("accept")
-        store_broker_serve_peer(&broker_verification, ^first, config, store_broker_current_uid() ?? panic("current uid")) ?? panic("serve")
+        store_broker_serve_peer(broker_verification, first, config, store_broker_current_uid() ?? panic("current uid")) ?? panic("serve")
         second := net.unix_accept(listener) ?? panic("accept")
-        store_broker_serve_peer(&broker_verification, ^second, config, store_broker_current_uid() ?? panic("current uid")) ?? panic("serve")
+        store_broker_serve_peer(broker_verification, second, config, store_broker_current_uid() ?? panic("current uid")) ?? panic("serve")
     }
-    realized: store_realize_verified(&verification, local, store_broker_test_ctx(local), RealizeRequest.Package{spec: spec, table: table}) ?? panic("realize")
+    realized: store_realize_verified(verification, local, store_broker_test_ctx(local), RealizeRequest.Package{spec: spec, table: table}) ?? panic("realize")
     assert(realized.source_state() == SourceState.Built)
     broker.join() ?? panic("broker task")
     files.remove(config.socket) ?? panic("remove socket")
 
     shared: HangarRoots.at(config.shared_root)
-    published: store_find_by_reference(&verification, shared, "hello@mine") ?? panic("published")
-    store_verify_hangar_object(&verification, shared, published) ?? panic("verify published")
-    exported: store_export_archive(&verification, shared, published.id, true, Val(config.trust_key)) ?? panic("export")
+    published: store_find_by_reference(verification, shared, "hello@mine") ?? panic("published")
+    store_verify_hangar_object(verification, shared, published) ?? panic("verify published")
+    exported: store_export_archive(verification, shared, published.id, true, Val(config.trust_key)) ?? panic("export")
 
     // A reader with the published entry in its shared root reuses it.
     reader: HangarRoots.at(files.join(roots.root, "reader"))
     reader_config: store_broker_test_configure(reader)
-    store_import_archive(&verification, HangarRoots.at(reader_config.shared_root), exported.bytes, Val(reader_config.trust_key), false) ?? panic("import")
+    store_import_archive(verification, HangarRoots.at(reader_config.shared_root), exported.bytes, Val(reader_config.trust_key), false) ?? panic("import")
     reader_listener: net.unix_listen(reader_config.socket) ?? panic("listen")
     reader_broker: task {
         broker_verification := StoreVerification.new()
         stream := net.unix_accept(reader_listener) ?? panic("accept")
-        store_broker_serve_peer(&broker_verification, ^stream, reader_config, store_broker_current_uid() ?? panic("current uid")) ?? panic("serve")
+        store_broker_serve_peer(broker_verification, stream, reader_config, store_broker_current_uid() ?? panic("current uid")) ?? panic("serve")
     }
-    reused: store_realize_verified(&verification, reader, store_broker_test_ctx(reader), RealizeRequest.Package{spec: spec, table: table}) ?? panic("reuse")
+    reused: store_realize_verified(verification, reader, store_broker_test_ctx(reader), RealizeRequest.Package{spec: spec, table: table}) ?? panic("reuse")
     assert(reused.source_state() == SourceState.Cached)
     assert_eq(reused.metadata().envelope.output_hash, published.envelope.output_hash)
     reader_broker.join() ?? panic("broker task")
@@ -333,13 +333,13 @@ store_broker_test_incoming_empty: fn(shared_root: String) -> Bool Never! {
     server_config.grants = files.join(roots.root, "missing-grants")
     denied_broker: task {
         broker_verification := StoreVerification.new()
-        store_broker_test_serve_result(&broker_verification, denied_listener, server_config)
+        store_broker_test_serve_result(broker_verification, denied_listener, server_config)
     }
-    if store_realize_verified(&verification, denied, store_broker_test_ctx(denied), RealizeRequest.Package{spec: spec, table: table}) == {
+    if store_realize_verified(verification, denied, store_broker_test_ctx(denied), RealizeRequest.Package{spec: spec, table: table}) == {
         .Ok(_) -> panic("unauthorized broker read must not reach provider realization")
         .Err(error) -> assert(error == .Store(_))
     }
-    assert(store_find_by_reference(&verification, denied, "hello@mine") == None)
+    assert(store_find_by_reference(verification, denied, "hello@mine") == None)
     assert((denied_broker.join() ?? panic("broker task")) != "")
     reused.into_parts().lease.release()
     realized.into_parts().lease.release()
@@ -354,7 +354,7 @@ store_broker_test_ctx: fn(roots: HangarRoots) -> ProviderCtx Never! {
     binding: ProvenanceBinding{reference: "demo@ci", source: "source-digest", builder: "builder-digest", action: "action-digest", output: "sha256-output", platform: "x86_64-linux", sandbox: "sandbox-digest", policy: "policy-digest"}
     encoded: store_broker_encode_write_request(binding, "credential", "archive".bytes()) ?? panic("encode")
     reader := BrokerWireReader.memory(encoded)
-    parsed: store_broker_read_request(&reader) ?? panic("parse")
+    parsed: store_broker_read_request(reader) ?? panic("parse")
     if parsed == {
         .Write(request) -> {
             assert_eq(request.archive, "archive".bytes())
@@ -386,7 +386,7 @@ store_broker_test_ctx: fn(roots: HangarRoots) -> ProviderCtx Never! {
 #Test("store broker fails closed without socket activation and peer credentials") {
     roots: store_test_temp_roots()
     verification := StoreVerification.new()
-    if store_serve_shared_store(&verification, HangarRoots.at(files.join(roots.root, "local"))) == {
+    if store_serve_shared_store(verification, HangarRoots.at(files.join(roots.root, "local"))) == {
         .Ok(_) -> panic("the broker service must not serve without a handed-over listener")
         .Err(error) -> assert(error == .Unsupported(_) && error.message().contains("not supported yet"), "unexpected broker refusal: {error.message()}")
     }
@@ -396,11 +396,11 @@ store_broker_test_ctx: fn(roots: HangarRoots) -> ProviderCtx Never! {
     client := net.unix_connect(socket) ?? panic("connect")
     stream := accepting.join() ?? panic("accept")
     config: store_broker_test_configure(HangarRoots.at(files.join(roots.root, "served")))
-    if store_broker_serve_connection(&verification, ^stream, config) == {
+    if store_broker_serve_connection(verification, stream, config) == {
         .Ok(_) -> panic("a connection without kernel peer credentials must be refused")
         .Err(error) -> assert(error == .Unsupported(_) && error.message().contains("peer's credentials"), "unexpected peer refusal: {error.message()}")
     }
-    net.unix_close(&client).drop("client close")
+    net.unix_close(client).drop("client close")
     store_test_drop_roots(roots)
 }
 
@@ -419,10 +419,10 @@ store_broker_test_ctx: fn(roots: HangarRoots) -> ProviderCtx Never! {
     accepting: task { net.unix_accept(listener) }
     client := net.unix_connect(layout.socket) ?? panic("connect")
     stream := accepting.join() ?? panic("accept")
-    net.unix_write_all_bytes(&client, "ping".bytes()) ?? panic("write")
-    got: net.unix_read_bytes(&stream, 4) ?? panic("read")
+    net.unix_write_all_bytes(client, "ping".bytes()) ?? panic("write")
+    got: net.unix_read_bytes(stream, 4) ?? panic("read")
     assert_eq(got, "ping".bytes())
-    net.unix_close(&client).drop("client close")
-    net.unix_close(&stream).drop("server close")
+    net.unix_close(client).drop("client close")
+    net.unix_close(stream).drop("server close")
     store_test_drop_roots(roots)
 }

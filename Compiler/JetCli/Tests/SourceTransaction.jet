@@ -15,7 +15,7 @@ JetCLITransactionFixtureRoot: struct {
     path: String
 }
 impl JetCLITransactionFixtureRoot.Close {
-    close: fn(^self) -[FS]> {
+    close: fn(&&self) -[FS]> {
         cli_files.remove_all(self.path).drop("test project cleanup")
     }
 }
@@ -24,7 +24,7 @@ impl JetCLITransactionFixtureRoot.Close {
     root: "{cli_sys.temp_dir()}/jet-source-transaction-{cli_process.current_pid()}"
     cli_files.create_dir_all(root) ?? panic("test project")
     owner: JetCLITransactionFixtureRoot{path: root}
-    defer close(^owner)
+    defer close(owner)
     cli_files.write("{root}/first.jet", "first") ?? panic("first source")
     cli_files.write("{root}/second.jet", "second") ?? panic("second source")
     changes: [JetCLISourceChange]{
@@ -64,7 +64,7 @@ impl JetCLITransactionFixtureRoot.Close {
     root: "{cli_sys.temp_dir()}/jet-fix-recheck-{cli_process.current_pid()}"
     cli_files.create_dir_all(root) ?? panic("test project")
     owner: JetCLITransactionFixtureRoot{path: root}
-    defer close(^owner)
+    defer close(owner)
     file: "{root}/run.jet"
     source: "run: fn() {{\n    value: 1\n    print(value)\n}}\n"
     cli_files.write(file, source) ?? panic("run source")
@@ -75,7 +75,7 @@ impl JetCLITransactionFixtureRoot.Close {
     keep: JetCLIFix{title: "change the value", edit: TextEdit{span: Span{start: literal, end: literal + 1}, new_text: "2"}, applicability: .Safe, safety: .BehaviorPreserving}
     breaks: JetCLIFix{title: "rename the use", edit: TextEdit{span: Span{start: use_site, end: use_site + "value".len()}, new_text: "missing"}, applicability: .Safe, safety: .BehaviorPreserving}
     rejected := [JetCLIFixSkip]{}
-    checked: jet_cli_fix_checked(file, source, [JetCLIFix]{keep, breaks}, baseline, &rejected)
+    checked: jet_cli_fix_checked(file, source, [JetCLIFix]{keep, breaks}, baseline, rejected)
     assert(checked.source == "run: fn() {{\n    value: 2\n    print(value)\n}}\n")
     assert(checked.applied == 1)
     assert(rejected.len() == 1)

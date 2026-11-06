@@ -20,7 +20,7 @@ impl SemIndex {
     to_status_envelope_with_expand: fn(self, expand: ExpandProjection) -> StatusEnvelope Never! {
         fields: self.status_payload_fields()
         value: semindex_status_expand_projection(expand) ?? panic("semindex payload must be valid JSON")
-        StatusEnvelope.new("inspect.semindex", true).with_field("semindex", StatusValue.Object{fields: ^fields.with("expand", value)})
+        StatusEnvelope.new("inspect.semindex", true).with_field("semindex", StatusValue.Object{fields: fields.with("expand", value)})
     }
 
     // The Rust private inner helper's base assembly. Keep optional expansion
@@ -30,17 +30,17 @@ impl SemIndex {
     // twelve-field CompilerSemanticIndex projection owned by the compiler.
     status_payload_fields: fn(self) -> StatusFields Never! {
         definitions := [StatusValue]{}
-        loop row in self.definitions() -> &definitions.push(semindex_status_def(row))
+        loop row in self.definitions() -> definitions.push(semindex_status_def(row))
         definition_facts := [StatusValue]{}
-        loop row in self.definition_facts() -> &definition_facts.push(semindex_status_definition_fact(row))
+        loop row in self.definition_facts() -> definition_facts.push(semindex_status_definition_fact(row))
         derivations := [StatusValue]{}
-        loop row in self.derivations() -> &derivations.push(derivation_record_status_value(row))
+        loop row in self.derivations() -> derivations.push(derivation_record_status_value(row))
         instances := [StatusValue]{}
-        loop row in self.instances() -> &instances.push(semindex_status_instance(row))
+        loop row in self.instances() -> instances.push(semindex_status_instance(row))
         outputs := [StatusValue]{}
-        loop row in self.outputs() -> &outputs.push(semindex_status_output(row))
+        loop row in self.outputs() -> outputs.push(semindex_status_output(row))
         state_graphs := [StatusValue]{}
-        loop row in self.state_graphs() -> &state_graphs.push(semindex_status_state_graph(row))
+        loop row in self.state_graphs() -> state_graphs.push(semindex_status_state_graph(row))
         package: if self.package_facts == {
             .Val(row) -> package_facts_status_value(row) ?? panic("semindex payload must be valid JSON")
             .None -> StatusValue.Null
@@ -50,15 +50,15 @@ impl SemIndex {
             .None -> StatusValue.Null
         }
         references := [StatusValue]{}
-        loop row in self.references() -> &references.push(semindex_status_ref(row))
+        loop row in self.references() -> references.push(semindex_status_ref(row))
         calls := [StatusValue]{}
-        loop row in self.call_edges() -> &calls.push(semindex_status_call(row))
+        loop row in self.call_edges() -> calls.push(semindex_status_call(row))
         effects := [StatusValue]{}
-        loop row in self.effects() -> &effects.push(semindex_status_effect(row))
+        loop row in self.effects() -> effects.push(semindex_status_effect(row))
         arithmetic := [StatusValue]{}
-        loop row in self.arithmetic() -> &arithmetic.push(semindex_status_arithmetic(row))
+        loop row in self.arithmetic() -> arithmetic.push(semindex_status_arithmetic(row))
         members := [StatusValue]{}
-        loop row in self.members() -> &members.push(semindex_status_member(row))
+        loop row in self.members() -> members.push(semindex_status_member(row))
         fields := StatusFields.new()
             .with("schema_version", StatusValue.Integer{value: self.schema_version()})
             .with("definitions", StatusValue.Array{values: definitions})
@@ -87,12 +87,12 @@ semindex_status_expand_projection: fn(projection: ExpandProjection) -> StatusVal
     lenses := [StatusValue]{}
     loop lens in projection.lenses {
         facts := [StatusValue]{}
-        loop fact in lens.facts -> &facts.push(semindex_status_expand_value(fact))
+        loop fact in lens.facts -> facts.push(semindex_status_expand_value(fact))
         fields: StatusFields.new()
             .with("name", StatusValue.String{value: lens.name})
             .with("summary", StatusValue.String{value: lens.summary})
             .with("facts", StatusValue.Array{values: facts})
-        &lenses.push(StatusValue.Object{fields: fields})
+        lenses.push(StatusValue.Object{fields: fields})
     }
     Ok(StatusValue.Object{fields: StatusFields.new()
         .with("selection", StatusValue.String{value: projection.selection})
@@ -107,13 +107,13 @@ semindex_status_expand_value: fn(value: ExpandValue) -> StatusValue ReportError!
         .String(text) -> Ok(StatusValue.String{value: text})
         .Array(values) -> {
             rows := [StatusValue]{}
-            loop row in values -> &rows.push(semindex_status_expand_value(row))
+            loop row in values -> rows.push(semindex_status_expand_value(row))
             Ok(StatusValue.Array{values: rows})
         }
         .Object(entries) -> {
             fields := StatusFields.new()
             loop index in semindex_expand_object_order(entries) {
-                &fields.insert(entries[index].key, semindex_status_expand_value(entries[index].value))
+                fields.insert(entries[index].key, semindex_status_expand_value(entries[index].value))
             }
             Ok(StatusValue.Object{fields: fields})
         }
@@ -127,8 +127,8 @@ semindex_json_expand_projection: fn(projection: ExpandProjection) -> String Neve
     lenses := [String]{}
     loop lens in projection.lenses {
         facts := [String]{}
-        loop fact in lens.facts -> &facts.push(semindex_json_expand_value(fact))
-        &lenses.push("{{\"name\":{foundation_json_quote(lens.name)},\"summary\":{foundation_json_quote(lens.summary)},\"facts\":[{facts.join(",")}]}}")
+        loop fact in lens.facts -> facts.push(semindex_json_expand_value(fact))
+        lenses.push("{{\"name\":{foundation_json_quote(lens.name)},\"summary\":{foundation_json_quote(lens.summary)},\"facts\":[{facts.join(",")}]}}")
     }
     "{{\"selection\":{foundation_json_quote(projection.selection)},\"lenses\":[{lenses.join(",")}]}}"
 }
@@ -141,13 +141,13 @@ semindex_json_expand_value: fn(value: ExpandValue) -> String Never! {
         .String(text) -> foundation_json_quote(text)
         .Array(values) -> {
             rows := [String]{}
-            loop row in values -> &rows.push(semindex_json_expand_value(row))
+            loop row in values -> rows.push(semindex_json_expand_value(row))
             "[{rows.join(",")}]"
         }
         .Object(entries) -> {
             rows := [String]{}
             loop index in semindex_expand_object_order(entries) {
-                &rows.push("{foundation_json_quote(entries[index].key)}:{semindex_json_expand_value(entries[index].value)}")
+                rows.push("{foundation_json_quote(entries[index].key)}:{semindex_json_expand_value(entries[index].value)}")
             }
             "{{{rows.join(",")}}}"
         }
@@ -156,7 +156,7 @@ semindex_json_expand_value: fn(value: ExpandValue) -> String Never! {
 
 semindex_expand_object_order: fn(entries: [ExpandObjectEntry]) -> [Int] Never! {
     order := [Int]{}
-    loop index in 0..<entries.len() -> &order.push(index)
-    &order.sort_by((left: Int, right: Int) -> entries[left].key <=> entries[right].key)
+    loop index in 0..<entries.len() -> order.push(index)
+    order.sort_by((left: Int, right: Int) -> entries[left].key <=> entries[right].key)
     order
 }

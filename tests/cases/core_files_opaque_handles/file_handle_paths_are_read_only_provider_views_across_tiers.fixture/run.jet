@@ -5,13 +5,13 @@ make_writer_path: fn(path: String) -> String {
     writer: files.create(path) ?? panic("create")
     print(writer.path == path)
     writer.write_line("payload") ?? panic("write")
-    &writer.flush() ?? panic("flush")
+    writer.flush() ?? panic("flush")
     writer.path
 }
 
 make_reader_path: fn(path: String) -> String {
     reader := files.open(path) ?? panic("open")
-    line: &reader.read_line() ?? panic("read")
+    line: reader.read_line() ?? panic("read")
     print(line == "payload")
     reader.path
 }

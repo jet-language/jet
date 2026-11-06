@@ -24,13 +24,13 @@ Event: enum {
     Named(z: Int, a: Int, k: Int)
 }
 
-consume_owned: fn(^s: String) -> Int Never! {
+consume_owned: fn(&&s: String) -> Int Never! {
     s.len()
 }
 
 // `second` reads `s` before `first` takes it.
-build: fn(^s: String) -> Pair Never! {
-    Pair{second: s.len(), first: consume_owned(^s)}
+build: fn(&&s: String) -> Pair Never! {
+    Pair{second: s.len(), first: consume_owned(s)}
 }
 
 run: fn() {

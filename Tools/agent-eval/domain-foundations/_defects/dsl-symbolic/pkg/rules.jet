@@ -40,8 +40,8 @@ fire: fn(facts: &[String:Int], rules: [Rule]) -> [String] {
     events := [String]{}
     loop rule in rules {
         value: facts.get(rule.fact.copy()) ?? 0
-        if !matches(rule.condition.copy(), value) -> &events.push("{rule.name}:skip")
-        else -> &events.push("{rule.name}:{apply(rule.action.copy(), &facts, rule.fact.copy())}")
+        if !matches(rule.condition.copy(), value) -> events.push("{rule.name}:skip")
+        else -> events.push("{rule.name}:{apply(rule.action.copy(), facts, rule.fact.copy())}")
     }
     return events
 }
@@ -53,5 +53,5 @@ sample: fn() -> [String] {
         { name: "cap", fact: "score", condition: RuleCondition.AtLeast(20), action: RuleAction.Set(20) },
         { name: "award", fact: "score", condition: RuleCondition.Equals(10), action: RuleAction.Add(1) }
     }
-    return fire(&facts, rules)
+    return fire(facts, rules)
 }

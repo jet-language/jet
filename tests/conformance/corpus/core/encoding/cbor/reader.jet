@@ -10,7 +10,7 @@ run: fn() {
     path: Path.from(root).join("value.cbor")
     files.write_bytes(path, [U8]{1}) ?? panic("fixture")
     input: files.open(path) ?? panic("open")
-    reader: cbor.reader(^input) ?? panic("reader")
+    reader: cbor.reader(input) ?? panic("reader")
     result: reader.next() ?? panic("next")
     if result == {
         .Int(value) -> print(value)

@@ -66,7 +66,7 @@ impl AuthorityError -> EnvModelEvalError {
 // owns candidate scanning, ambiguity, and source I/O diagnostics.
 // The caller owns the session cache and shares it with discovery and lock I/O.
 envmodel_workspace_load: fn(cache: &WorkspaceDeclarationCache, dir: String) -[FS, Env, Exec, Time.Wait]> WorkspacePlan? EnvModelEvalError! {
-    loaded: envmodel_workspace_load_checked(&cache, dir)
+    loaded: envmodel_workspace_load_checked(cache, dir)
     snapshot: loaded ?? return Ok(None)
     Ok(Val(snapshot.plan))
 }
@@ -81,27 +81,27 @@ envmodel_workspace_load_checked: fn(cache: &WorkspaceDeclarationCache, dir: Stri
             return Err(EnvModelEvalError{diagnostic: error.workspace_diagnostic()})
         }
     }
-    envmodel_workspace_load_checked_with_resolver(&cache, resolver)
+    envmodel_workspace_load_checked_with_resolver(cache, resolver)
 }
 
 // Load and evaluate the index selected by an already-open authority root. The
 // resolver and source snapshot cross the evaluation boundary together; this
 // never reopens the selected source by pathname.
 envmodel_workspace_load_checked_with_resolver: fn(cache: &WorkspaceDeclarationCache, resolver: AuthorityResolver) -[FS, Env, Exec, Time.Wait]> WorkspaceSnapshot? EnvModelEvalError! {
-    resolved: if resolver.resolve_workspace_source(&cache) == {
+    resolved: if resolver.resolve_workspace_source(cache) == {
         .Ok(found) -> found
         .Err(error) -> { return Err(EnvModelEvalError{diagnostic: error.workspace_diagnostic()}) }
     }
     source: resolved ?? return Ok(None)
     resolver.revalidate_source(source)
     if source.role != WorkspaceSourceRole.Index -> return Ok(None)
-    Ok(Val(envmodel_workspace_load_checked_source(resolver, ^source)))
+    Ok(Val(envmodel_workspace_load_checked_source(resolver, source)))
 }
 
 // Evaluate an index from the same checked source snapshot selected by a
 // caller. The caller transfers the snapshot after selecting it; no second
 // authority read can silently replace its path, bytes, role, or identity.
-envmodel_workspace_load_checked_source: fn(resolver: AuthorityResolver, expected: ^WorkspaceSource) -[FS, Env, Exec, Time.Wait]> WorkspaceSnapshot EnvModelEvalError! {
+envmodel_workspace_load_checked_source: fn(resolver: AuthorityResolver, expected: &&WorkspaceSource) -[FS, Env, Exec, Time.Wait]> WorkspaceSnapshot EnvModelEvalError! {
     if expected.role != WorkspaceSourceRole.Index {
         return Err(EnvModelEvalError{diagnostic: envmodel_changed_workspace_source_diagnostic(resolver.root)})
     }
@@ -121,7 +121,7 @@ envmodel_workspace_evaluate_package_source: fn(source: WorkspaceSource, resolver
     loop member in checked_members {
         resolver.revalidate_member(member.member)
         canonical_path: resolver.relative_identity(member.member.directory)
-        &members.push(WorkspacePlanMember{name: member.facts.name, path: canonical_path, canonical_path: canonical_path})
+        members.push(WorkspacePlanMember{name: member.facts.name, path: canonical_path, canonical_path: canonical_path})
     }
     resolver.revalidate_source(source)
     Ok(WorkspacePlan{members: members, comptime_inputs: [ComptimeInput]{}, overlay_policy: OverlayPolicy.empty(), source_digest: pkg_sha256_hex(source.source.bytes())})
@@ -147,7 +147,7 @@ envmodel_workspace_has_build_entry: fn(src: String) -> Bool Never! {
     source: pkg_strip_overlay_policy(src)
     lexed: lex(source.bytes())
     if lexed.diagnostics.len() > 0 -> return false
-    parsed: parse_lexed_with_source(^lexed, source.bytes(), parser_line_starts(source.bytes()))
+    parsed: parse_lexed_with_source(lexed, source.bytes(), parser_line_starts(source.bytes()))
     if parsed.diagnostics.len() > 0 -> return false
     loop item in parsed.program.items {
         if item == {
@@ -195,7 +195,7 @@ envmodel_workspace_evaluate_with_resolver: fn(src: String, base_dir: String, rol
     eval_src: pkg_strip_overlay_policy(src)
     lexed: lex(eval_src.bytes())
     if lexed.diagnostics.len() > 0 -> return Err(EnvModelEvalError{diagnostic: lexed.diagnostics[0]})
-    parsed: parse_lexed_with_source(^lexed, eval_src.bytes(), parser_line_starts(eval_src.bytes()))
+    parsed: parse_lexed_with_source(lexed, eval_src.bytes(), parser_line_starts(eval_src.bytes()))
     if parsed.diagnostics.len() > 0 -> return Err(EnvModelEvalError{diagnostic: parsed.diagnostics[parsed.diagnostics.len() - 1]})
     program: parsed.program
 
@@ -254,10 +254,10 @@ envmodel_workspace_evaluate_with_resolver: fn(src: String, base_dir: String, rol
     comptime_inputs := [ComptimeInput]{}
     loop expr in workspace_module.members {
         evaluated: envmodel_workspace_eval_members_expr(expr, src, base_dir, resolver, funcs, globals)
-        &comptime_inputs.extend(evaluated.inputs)
+        comptime_inputs.extend(evaluated.inputs)
         loop member_path in evaluated.paths {
             identity: envmodel_workspace_validate_member_path(member_path.path, resolver, members, Val(member_path.span))
-            &members.push(WorkspacePlanMember{name: identity.name, path: member_path.path, canonical_path: identity.canonical_path})
+            members.push(WorkspacePlanMember{name: identity.name, path: member_path.path, canonical_path: identity.canonical_path})
         }
     }
 
@@ -432,7 +432,7 @@ envmodel_workspace_eval_members_expr: fn(expr: Expr, src: String, base_dir: Stri
                 scan_dir: envmodel_workspace_validate_find_scan_dir(dir, resolver, span)
                 arg_span: expr_span(arg.expr)
                 paths := [WorkspaceMemberPath]{}
-                loop found in envmodel_workspace_find_package_dirs(scan_dir, resolver, span) -> &paths.push(WorkspaceMemberPath{path: found, span: arg_span})
+                loop found in envmodel_workspace_find_package_dirs(scan_dir, resolver, span) -> paths.push(WorkspaceMemberPath{path: found, span: arg_span})
                 return Ok(WorkspaceMembersValue{paths: paths, inputs: [ComptimeInput]{}})
             }
         }
@@ -456,7 +456,7 @@ envmodel_workspace_eval_members_expr: fn(expr: Expr, src: String, base_dir: Stri
     }
     value: comptime_evaluate(expr, src, funcs, base_dir, globals) ?? return Err(EnvModelEvalError{diagnostic: err.diagnostic})
     paths := [WorkspaceMemberPath]{}
-    loop path in envmodel_workspace_string_list(value, span) -> &paths.push(WorkspaceMemberPath{path: path, span: span})
+    loop path in envmodel_workspace_string_list(value, span) -> paths.push(WorkspaceMemberPath{path: path, span: span})
     Ok(WorkspaceMembersValue{paths: paths, inputs: [ComptimeInput]{}})
 }
 
@@ -481,7 +481,7 @@ envmodel_workspace_literal_string: fn(expr: Expr) -> String? Never! {
     text := [String]{}
     loop part in parts {
         if part == {
-            .Lit(literal) -> { &text.push(literal) }
+            .Lit(literal) -> { text.push(literal) }
             else -> { return None }
         }
     }
@@ -511,7 +511,7 @@ envmodel_workspace_string_list: fn(value: CtValue, span: Span) -> [String] EnvMo
             "Example: `members: [\"./packages/hello\", \"./packages/ranker\"]`",
             Val(span)
         ))
-        &out.push(path)
+        out.push(path)
     }
     Ok(out)
 }
@@ -544,7 +544,7 @@ envmodel_workspace_strip_cur_dir: fn(raw: String) -> String Never! {
     if components.len() == 0 || components[0] != EnvPathComponent.CurDir -> return raw.copy()
     rest := [String]{}
     loop component in components {
-        if component == .Normal(segment) -> &rest.push(segment)
+        if component == .Normal(segment) -> rest.push(segment)
     }
     rest.join("/")
 }
@@ -557,7 +557,7 @@ envmodel_workspace_find_package_dirs: fn(scan_dir: String, resolver: AuthorityRe
         .Err(error) -> { return Err(envmodel_workspace_authority_error(error, Val(span))) }
     }
     paths := [String]{}
-    loop member in discovered -> &paths.push(member.directory.relative)
+    loop member in discovered -> paths.push(member.directory.relative)
     Ok(paths)
 }
 

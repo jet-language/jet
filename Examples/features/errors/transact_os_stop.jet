@@ -23,7 +23,7 @@ impl Ledger.Rollback {
 
     snapshot: fn(self) -> LedgerSnap { return LedgerSnap{balance: self.balance} }
 
-    restore: fn(&self, snap: ^LedgerSnap) {
+    restore: fn(&self, snap: &&LedgerSnap) {
         print("balance {self.balance} restored to {snap.balance}")
         self.balance = snap.balance
     }
@@ -46,6 +46,6 @@ withdraw: fn(ledger: &Ledger) {
 
 run: fn() {
     ledger := Ledger{balance: 100}
-    withdraw(&ledger)
+    withdraw(ledger)
     print("not reached: balance {ledger.balance}")
 }

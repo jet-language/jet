@@ -27,7 +27,7 @@ impl Ledger.Rollback {
 
     snapshot: fn(self) -> LedgerSnap { return LedgerSnap{balance: self.balance} }
 
-    restore: fn(&self, snap: ^LedgerSnap) {
+    restore: fn(&self, snap: &&LedgerSnap) {
         print("  {self.name}: balance {self.balance} restored to {snap.balance}")
         self.balance = snap.balance
     }
@@ -97,22 +97,22 @@ failing_hook: fn(ledger: &Ledger) -> Int {
 run: fn() {
     ledger := Ledger{name: "ledger", balance: 1000}
     print("commit:")
-    commit(&ledger)
+    commit(ledger)
     print("  balance {ledger.balance}")
 
     print("early return:")
-    _: early_return(&ledger)
+    _: early_return(ledger)
     print("  balance {ledger.balance}")
 
     print("failure:")
-    _: failure(&ledger) ?? -1
+    _: failure(ledger) ?? -1
     print("  balance {ledger.balance}")
 
     print("break:")
-    loop_break(&ledger)
+    loop_break(ledger)
     print("  balance {ledger.balance}")
 
     print("failing hook:")
-    _: failing_hook(&ledger)
+    _: failing_hook(ledger)
     print("  balance {ledger.balance}")
 }

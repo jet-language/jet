@@ -15,18 +15,18 @@ use {
 #Test("jetc_v1_migration_reseals_to_verified_v2_without_touching_source") {
     key := [U8]{}
     nonce := [U8]{}
-    loop i in 0..<32 -> &key.push((U8{i}))
-    loop i in 0..<12 -> &nonce.push((U8{i}))
+    loop i in 0..<32 -> key.push((U8{i}))
+    loop i in 0..<12 -> nonce.push((U8{i}))
     plaintext: "historical migration payload".bytes()
     recipient: crypto.X25519SecretKey.new_random() ?? panic("recipient")
     recipients: [recipient.public_key()]
     #Unsafe("crypto expert: the fixture seals a pinned JETC v1 envelope and migrates it") {
         ciphertext: expert.aes256gcm_seal(key, nonce, plaintext, [U8]{}) ?? panic("AES v1")
         v1 := "JETC".bytes()
-        &v1.push(U8{1})
-        &v1.push(U8{2})
-        loop b in nonce -> &v1.push(b)
-        loop b in ciphertext -> &v1.push(b)
+        v1.push(U8{1})
+        v1.push(U8{2})
+        loop b in nonce -> v1.push(b)
+        loop b in ciphertext -> v1.push(b)
         files.write_bytes("source-2.jetc", v1) ?? panic("source2")
         loop algorithm in [1, 2] {
             source: "source-{algorithm}.jetc"
@@ -54,16 +54,16 @@ use {
         }
         assert_eq(files.read_bytes("source-1.jetc") ?? panic("source"), original)
         wrong := [U8]{}
-        loop _ in 0..<32 -> &wrong.push(U8{9})
+        loop _ in 0..<32 -> wrong.push(U8{9})
         if expert.migrate_v1(wrong, Path.from("source-1.jetc"), recipients, Path.from("wrong-key.jetc")) == {
             .Ok(_) -> panic("migration opened with the wrong key")
             .Err(error) -> assert_eq(error, crypto.FileCryptoError.OpenFailed)
         }
         assert(!files.exists("wrong-key.jetc"))
         hostile := "JETC".bytes()
-        &hostile.push(U8{1})
-        &hostile.push(U8{1})
-        loop b in "bad".bytes() -> &hostile.push(b)
+        hostile.push(U8{1})
+        hostile.push(U8{1})
+        loop b in "bad".bytes() -> hostile.push(b)
         files.write_bytes("hostile.jetc", hostile) ?? panic("hostile")
         if expert.migrate_v1(key, Path.from("hostile.jetc"), recipients, Path.from("absent.jetc")) == {
             .Ok(_) -> panic("migration accepted a hostile envelope")

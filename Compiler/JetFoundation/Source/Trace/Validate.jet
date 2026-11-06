@@ -120,7 +120,7 @@ jettrace_validate_capture_policy: fn(value: CanonicalJSON) -> JetTraceCaptureLim
     fields: jettrace_object_keys(value, "capture_policy", [String]{"allowlist", "browser_row_limit", "browser_rows_truncated", "default_exclusions", "io_row_limit", "io_rows_truncated", "native_row_limit", "native_rows_truncated", "schema", "span_row_limit", "span_rows_truncated", "task_row_limit", "task_rows_truncated"})
     exclusions: jettrace_array(fields[jettrace_get(fields, "default_exclusions")].value, "capture_policy.default_exclusions")
     expected := [CanonicalJSON]{}
-    loop item in DEFAULT_EXCLUSIONS -> &expected.push(.String(item.copy()))
+    loop item in DEFAULT_EXCLUSIONS -> expected.push(.String(item.copy()))
     if exclusions.len() != expected.len() -> return Err(jettrace_error("capture_policy.default_exclusions does not match the default exclusions"))
     loop index in 0..<exclusions.len() {
         if exclusions[index] != expected[index] -> return Err(jettrace_error("capture_policy.default_exclusions does not match the default exclusions"))
@@ -350,7 +350,7 @@ jettrace_validate_toolchain: fn(value: CanonicalJSON) JetTraceError! {
     body_fields := [CanonicalJSONField]{}
     loop key in keys {
         text: jettrace_text(fields[jettrace_get(fields, key)].value, "toolchain.{key}")
-        &body_fields.push(jettrace_field(key.copy(), .String(text.copy())))
+        body_fields.push(jettrace_field(key.copy(), .String(text.copy())))
     }
     digest: jettrace_text(fields[jettrace_get(fields, "digest")].value, "toolchain.digest")
     if !jettrace_hex64(digest) -> return Err(jettrace_error("toolchain.digest is not lowercase Hex64"))

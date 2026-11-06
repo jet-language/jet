@@ -8,7 +8,7 @@ cli_test_dogfood_live_producers: fn() {
     plan: envmodel_evaluate_env_with_environment(source, project, Val("compiler")) ?? panic("evaluate compiler environment")
     roots: HangarRoots.at(store)
     verification := StoreVerification.new()
-    entries: store_list_checked(&verification, roots) ?? panic("checked live store listing")
+    entries: store_list_checked(verification, roots) ?? panic("checked live store listing")
     loop reference in plan.package_refs {
         found := StoreEntry?{None}
         loop entry in entries {

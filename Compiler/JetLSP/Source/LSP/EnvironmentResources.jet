@@ -33,7 +33,7 @@ lsp_environment_root: fn(roots: [OSPath]) -[FS, Env]> OSPath? Never! {
 
 lsp_environment_resource_file: fn(root: OSPath) -> OSPath Never! {
     path := root.copy()
-    lsp_env_path.push(&path, lsp_env_path.from_text(ENV_FILE, root.platform))
+    lsp_env_path.push(path, lsp_env_path.from_text(ENV_FILE, root.platform))
     path
 }
 
@@ -52,22 +52,22 @@ lsp_environment_resource_read_json: fn(roots: [OSPath], uri: String) -[FS, Env, 
     command := lsp_env_process.command(executable)
     // Fresh textual ASCII arguments inherit the actual executable platform;
     // no existing native path is recovered from its lossy display.
-    &command.args([OSPath]{
+    command.args([OSPath]{
         lsp_env_path.from_text("env", executable.platform),
         lsp_env_path.from_text("info", executable.platform),
         lsp_env_path.from_text("--json", executable.platform),
         lsp_env_path.from_text("--no-color", executable.platform),
     })
-    &command.current_dir(root)
-    output := &command.output() ?? return Err(LSPEnvironmentResourceReadError.Unavailable)
-    lsp_environment_resource_text(output.status.success, ^output.stdout)
+    command.current_dir(root)
+    output := command.output() ?? return Err(LSPEnvironmentResourceReadError.Unavailable)
+    lsp_environment_resource_text(output.status.success, output.stdout.move())
 }
 
 // Shared by the actual subprocess path and byte-policy controls. Consumes
 // stdout once; never copies the captured byte buffer to validate its size.
-lsp_environment_resource_text: fn(success: Bool, stdout: ^[U8]) -> String LSPEnvironmentResourceReadError! {
+lsp_environment_resource_text: fn(success: Bool, stdout: &&[U8]) -> String LSPEnvironmentResourceReadError! {
     if !success || stdout.len() > LSP_MAX_ENVIRONMENT_RESOURCE_TEXT_BYTES -> return Err(LSPEnvironmentResourceReadError.Unavailable)
-    decoded: String.from_bytes(^stdout) ?? return Err(LSPEnvironmentResourceReadError.Unavailable)
+    decoded: String.from_bytes(stdout) ?? return Err(LSPEnvironmentResourceReadError.Unavailable)
     text: decoded.trim()
     if text.is_empty() || foundation_parse_protocol_json(text) == None -> return Err(LSPEnvironmentResourceReadError.Unavailable)
     Ok(text)

@@ -100,10 +100,10 @@ PowerShellError: enum {
 ``` }
 
 PKG_PWSH_JET_SESSION: comptime { ```impl Session.Close {
-    close: fn(^self) { abi.close(self.value) }
+    close: fn(&&self) { abi.close(self.value) }
 }
 
-close: fn(session: ^Session) {}
+close: fn(session: &&Session) {}
 
 open: fn() -> Session PowerShellError! {
     handle: abi.open()
@@ -145,9 +145,9 @@ pkg_powershell_bind: fn(path: String, source: String, lib: String, cache: String
     archive: pkg_worker_build_archive(language, abi, build, cache, pkg_powershell_render_c(lib, pwsh, worker, script, functions), "could not write PowerShell process bridge")
     digest: pkg_binder_identity_digest([String]{"jet-pwsh-bind-v1", source, script, pwsh, worker_source})
     provenance := "schema=jet-pwsh-bind-v1\nsha256={digest}\npwsh={pwsh}\nscript={script}\nworker={worker}\n"
-    pkg_binder_append_artifact_boundary(&provenance, ForeignLanguage.PowerShell, "PowerShell", lib, script, archive, "pwsh={pwsh};{pkg_binder_cc_ar_identity()}")
+    pkg_binder_append_artifact_boundary(provenance, ForeignLanguage.PowerShell, "PowerShell", lib, script, archive, "pwsh={pwsh};{pkg_binder_cc_ar_identity()}")
     bound := [String]{}
-    loop function in functions -> &bound.push(function.jet)
+    loop function in functions -> bound.push(function.jet)
     result: ForeignBindResult{source: pkg_powershell_render_jet(lib, functions), bound: bound, archive: archive, provenance: provenance}
     pkg_binder_remove_tree_quiet(build)
     Ok(result)
@@ -163,13 +163,13 @@ pkg_powershell_parse_function_names: fn(bytes: [U8]) -> [PwshBoundFunction] Fore
         if name == "" -> next
         if !pkg_powershell_ident(name) -> return Err(ForeignBindError.Source("PowerShell function `{name}` cannot be projected as a Jet identifier"))
         parts := [String]{}
-        loop part in name.split("-") -> &parts.push(pkg_ascii_lower(part))
+        loop part in name.split("-") -> parts.push(pkg_ascii_lower(part))
         jet: parts.join("_")
         if pkg_powershell_reserved(jet) -> return Err(ForeignBindError.Source("PowerShell function `{name}` projects to reserved Jet name `{jet}`"))
         loop existing in out {
             if pkg_ascii_lower(existing.jet) == pkg_ascii_lower(jet) -> return Err(ForeignBindError.Source("PowerShell function `{name}` collides with another generated Jet function `{jet}`"))
         }
-        &out.push(PwshBoundFunction{pwsh: name, jet: jet})
+        out.push(PwshBoundFunction{pwsh: name, jet: jet})
     }
     if out.len() == 0 -> return Err(ForeignBindError.Source("no top-level PowerShell functions were found"))
     Ok(out)
@@ -177,7 +177,7 @@ pkg_powershell_parse_function_names: fn(bytes: [U8]) -> [PwshBoundFunction] Fore
 
 pkg_powershell_render_worker: fn(functions: [PwshBoundFunction]) -> String Never! {
     allowed := [String]{}
-    loop function in functions -> &allowed.push("'{function.pwsh.replace("'", "''")}'")
+    loop function in functions -> allowed.push("'{function.pwsh.replace("'", "''")}'")
     pkg_binder_fill_template(PKG_PWSH_WORKER, [String: String]{"allowed": allowed.join(", ")})
 }
 
@@ -185,13 +185,13 @@ pkg_powershell_render_jet: fn(lib: String, functions: [PwshBoundFunction]) -> St
     abi: "jet_pwsh_{lib}"
     out := [String]{"#Import c.{abi}: module {{\n    open: fn() -> Int = \"{abi}_open\"\n    take_error: fn() -> Int = \"{abi}_take_error\"\n    cancel: fn(handle: Int) = \"{abi}_cancel\"\n    close: fn(handle: Int) = \"{abi}_close\"\n"}
     loop function in functions {
-        &out.push("    {function.jet}: fn(handle: Int, input: String, deadline_ms: Int) -> String = \"{abi}_invoke_{function.jet}\"\n")
+        out.push("    {function.jet}: fn(handle: Int, input: String, deadline_ms: Int) -> String = \"{abi}_invoke_{function.jet}\"\n")
     }
-    &out.push(pkg_binder_fill_template(PKG_PWSH_JET_TYPES, [String: String]{"abi": abi}))
-    &out.push(pkg_render_decode_response("PowerShellError", DecoderProtocol.StandardEnvelope))
-    &out.push(PKG_PWSH_JET_SESSION)
+    out.push(pkg_binder_fill_template(PKG_PWSH_JET_TYPES, [String: String]{"abi": abi}))
+    out.push(pkg_render_decode_response("PowerShellError", DecoderProtocol.StandardEnvelope))
+    out.push(PKG_PWSH_JET_SESSION)
     loop function in functions {
-        &out.push("{function.jet}: fn(session: Session, input: Dyn, deadline_ms: Int) -> Dyn PowerShellError! {{\n    payload: json.to_string(input) ?? return Err(PowerShellError.Protocol)\n    raw: abi.{function.jet}(session.value, payload, deadline_ms)\n    code: abi.take_error()\n    return decode_response(raw, code)\n}}\n\n")
+        out.push("{function.jet}: fn(session: Session, input: Dyn, deadline_ms: Int) -> Dyn PowerShellError! {{\n    payload: json.to_string(input) ?? return Err(PowerShellError.Protocol)\n    raw: abi.{function.jet}(session.value, payload, deadline_ms)\n    code: abi.take_error()\n    return decode_response(raw, code)\n}}\n\n")
     }
     out.join("")
 }
@@ -204,7 +204,7 @@ pkg_powershell_render_probe: fn() -> String Never! {
 pkg_powershell_render_c: fn(lib: String, pwsh: String, worker: String, script: String, functions: [PwshBoundFunction]) -> String Never! {
     abi: "jet_pwsh_{lib}"
     wrappers := [String]{}
-    loop function in functions -> &wrappers.push(pkg_worker_invoke_wrapper(abi, function.jet, "invoke", function.pwsh))
+    loop function in functions -> wrappers.push(pkg_worker_invoke_wrapper(abi, function.jet, "invoke", function.pwsh))
     pkg_worker_render_supervisor_c(abi, pwsh, worker, script, wrappers.join(""), "\"-NoLogo\",\"-NoProfile\",\"-NonInteractive\",\"-File\",worker_path,script_path")
 }
 

@@ -38,7 +38,7 @@ text: fn(value: String) -> Dyn Never! { Dyn.Text(value.copy()) }
 artifacts_dyn: fn(artifacts: [Artifact]) -> Dyn Never! {
     out := [Dyn]{}
     loop artifact in artifacts {
-        &out.push(Dyn.Object([String: Dyn]{"path": text(artifact.path), "sha256": text(artifact.sha256), "size": Dyn.Int(artifact.size)}))
+        out.push(Dyn.Object([String: Dyn]{"path": text(artifact.path), "sha256": text(artifact.sha256), "size": Dyn.Int(artifact.size)}))
     }
     Dyn.Array(out)
 }
@@ -49,7 +49,7 @@ receipt_dyn: fn(receipt: Receipt) -> Dyn Never! {
         entry := [String: Dyn]{"scope": text(row.scope), "status": text(row.status)}
         if row.total == .Val(total) -> entry["total"] = Dyn.Int(total)
         if row.passed == .Val(passed) -> entry["passed"] = Dyn.Int(passed)
-        &rows.push(Dyn.Object(entry))
+        rows.push(Dyn.Object(entry))
     }
     Dyn.Object([String: Dyn]{
         "file": text(receipt.file),
@@ -67,8 +67,8 @@ receipt_dyn: fn(receipt: Receipt) -> Dyn Never! {
 
 upload_names: fn(candidate: Candidate) -> [String] Never! {
     names := [String]{}
-    loop artifact in candidate.staged -> &names.push(artifact.path.copy())
-    &names.extend([String]{CANDIDATE_FILE, SIGNATURE_FILE})
+    loop artifact in candidate.staged -> names.push(artifact.path.copy())
+    names.extend([String]{CANDIDATE_FILE, SIGNATURE_FILE})
     names
 }
 
@@ -76,17 +76,17 @@ upload_names: fn(candidate: Candidate) -> [String] Never! {
 record_of: fn(candidate: Candidate) -> Dyn Never! {
     release: candidate.release
     receipts := [Dyn]{}
-    loop receipt in candidate.receipts -> &receipts.push(receipt_dyn(receipt))
+    loop receipt in candidate.receipts -> receipts.push(receipt_dyn(receipt))
     matrix := [Dyn]{}
     loop row in candidate.matrix {
         files := [Dyn]{}
         loop receipt in candidate.receipts {
-            if receipt.target == row.target -> &files.push(text(receipt.file))
+            if receipt.target == row.target -> files.push(text(receipt.file))
         }
-        &matrix.push(Dyn.Object([String: Dyn]{"asset": text(seed_asset_name(candidate.name, row.target)), "name": text(row.name), "receipts": Dyn.Array(files), "target": text(row.target)}))
+        matrix.push(Dyn.Object([String: Dyn]{"asset": text(seed_asset_name(candidate.name, row.target)), "name": text(row.name), "receipts": Dyn.Array(files), "target": text(row.target)}))
     }
     assets := [Dyn]{}
-    loop name in upload_names(candidate) -> &assets.push(text(name))
+    loop name in upload_names(candidate) -> assets.push(text(name))
     Dyn.Object([String: Dyn]{
         "schema": text(CANDIDATE_SCHEMA),
         "name": text(candidate.name),
@@ -158,9 +158,9 @@ canonical_or_empty: fn(tree: Dyn) -> String Never! {
 keys_of: fn(tree: Dyn) -> [String] Never! {
     keys := [String]{}
     if tree == .Object(entries) {
-        loop entry in entries -> &keys.push(entry.key.copy())
+        loop entry in entries -> keys.push(entry.key.copy())
     }
-    &keys.sort_by((left: String, right: String) -> left <=> right)
+    keys.sort_by((left: String, right: String) -> left <=> right)
     keys
 }
 
@@ -170,22 +170,22 @@ record_mismatches: fn(stored: Dyn, fresh: Dyn) -> [Problem] Never! {
     problems := [Problem]{}
     names := keys_of(without_digest(stored))
     loop name in keys_of(fresh) {
-        if !contains_text(names, name) -> &names.push(name.copy())
+        if !contains_text(names, name) -> names.push(name.copy())
     }
     loop name in names {
         left: field(stored, name)
         right: field(fresh, name)
         if canonical_or_empty(left) == canonical_or_empty(right) -> next
         if !is_object(left) || !is_object(right) {
-            &problems.push(problem(MISMATCH, "the record's `{name}` does not match the release directory"))
+            problems.push(problem(MISMATCH, "the record's `{name}` does not match the release directory"))
             next
         }
         keys := keys_of(left)
         loop key in keys_of(right) {
-            if !contains_text(keys, key) -> &keys.push(key.copy())
+            if !contains_text(keys, key) -> keys.push(key.copy())
         }
         loop key in keys {
-            if canonical_or_empty(field(left, key)) != canonical_or_empty(field(right, key)) -> &problems.push(problem(MISMATCH, "the record's `{name}.{key}` does not match the release directory"))
+            if canonical_or_empty(field(left, key)) != canonical_or_empty(field(right, key)) -> problems.push(problem(MISMATCH, "the record's `{name}.{key}` does not match the release directory"))
         }
     }
     problems

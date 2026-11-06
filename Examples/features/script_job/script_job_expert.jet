@@ -40,7 +40,7 @@ InputError: struct {
 
 acquire: fn(name: String) -> Lease { Lease{name: name.copy()} }
 
-release: fn(lease: ^Lease) { print("cleanup: released {lease.name}") }
+release: fn(lease: &&Lease) { print("cleanup: released {lease.name}") }
 
 checked_input: fn(value: String) -> String InputError! {
     if value == "bad" -> return Err(InputError{message: "input is not valid"})
@@ -61,7 +61,7 @@ ship_job: fn() {
             "recovered"
         }
         print("result: {message}")
-        release(^lease)
+        release(lease)
     }
 }
 

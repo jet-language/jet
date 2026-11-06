@@ -110,7 +110,7 @@ EnvelopeWalkHook: struct {
     }
 
     observe: fn(&self, path: String, stage: EnvelopeWalkStage) Never! -[FS]> {
-        &self.events.push(EnvelopeWalkEvent{path: path.copy(), stage: stage})
+        self.events.push(EnvelopeWalkEvent{path: path.copy(), stage: stage})
         self.react(path, stage)
     }
 }
@@ -124,26 +124,26 @@ EnvelopeArchive: struct {
 
     new: fn() -> EnvelopeArchive Never! {
         envelope_archive := EnvelopeArchive{hasher: crypto.Hasher.new()}
-        &envelope_archive.update(ENVELOPE_ARCHIVE_MAGIC.bytes())
-        &envelope_archive.update([U8]{U8{0}})
+        envelope_archive.update(ENVELOPE_ARCHIVE_MAGIC.bytes())
+        envelope_archive.update([U8]{U8{0}})
         envelope_archive
     }
 
     update: fn(&self, bytes: [U8]) Never! {
-        &self.hasher.update(bytes)
+        self.hasher.update(bytes)
     }
 
     // A u64 big-endian length prefix, then the bytes.
     push_bytes: fn(&self, bytes: [U8]) Never! {
-        &self.hasher.update(pkg_u64_be_bytes(bytes.len()))
-        &self.hasher.update(bytes)
+        self.hasher.update(pkg_u64_be_bytes(bytes.len()))
+        self.hasher.update(bytes)
     }
 
     // Kind byte, length-prefixed relative path, u32 big-endian mode.
     record_header: fn(&self, kind: U8, path: [U8], mode: Int) Never! {
-        &self.hasher.update([U8]{kind})
-        &self.push_bytes(path)
-        &self.hasher.update(pkg_u32_be_bytes(mode))
+        self.hasher.update([U8]{kind})
+        self.push_bytes(path)
+        self.hasher.update(pkg_u32_be_bytes(mode))
     }
 
     finish: fn(self) -> String Never! {
@@ -154,7 +154,7 @@ EnvelopeArchive: struct {
 pkg_u32_be_bytes: fn(value: Int) -> [U8] Never! {
     out := [U8]{}
     shift_values: [Int]{24, 16, 8, 0}
-    loop shift in shift_values -> &out.push(U8{((value >> shift)).bit_and(0xFF)})
+    loop shift in shift_values -> out.push(U8{((value >> shift)).bit_and(0xFF)})
     out
 }
 
@@ -167,7 +167,7 @@ pkg_output_hash_of: fn(out: String) -[FS, Env]> String Never! {
 // The canonical archive digest of a native output.
 pkg_try_output_hash_of: fn(out: String) -[FS, Env]> String EnvelopeError! {
     hook := EnvelopeWalkHook.recording()
-    pkg_try_output_hash_of_with_policy(out, false, &hook)
+    pkg_try_output_hash_of_with_policy(out, false, hook)
 }
 
 // Like `pkg_try_output_hash_of`, but Hangar/internal shared-CAS hardlink
@@ -175,16 +175,16 @@ pkg_try_output_hash_of: fn(out: String) -[FS, Env]> String EnvelopeError! {
 // still reject. CAS peers are never encoded as in-tree `H` records.
 pkg_try_output_hash_of_in_hangar: fn(out: String, hangar_root: String, allow_semantic_xattrs: Bool) -[FS, Env]> String EnvelopeError! {
     hook := EnvelopeWalkHook.recording()
-    pkg_try_output_hash_of_in_hangar_with_policy(out, hangar_root, allow_semantic_xattrs, &hook)
+    pkg_try_output_hash_of_in_hangar_with_policy(out, hangar_root, allow_semantic_xattrs, hook)
 }
 
 pkg_try_output_hash_of_in_hangar_with_policy: fn(out: String, hangar_root: String, allow_semantic_xattrs: Bool, hook: &EnvelopeWalkHook) -[FS, Env]> String EnvelopeError! {
-    pkg_try_output_hash_of_with_hook(out, allow_semantic_xattrs, Val(hangar_root), &hook)
+    pkg_try_output_hash_of_with_hook(out, allow_semantic_xattrs, Val(hangar_root), hook)
 }
 
 // Like `pkg_try_output_hash_of`, with an explicit semantic-xattr policy.
 pkg_try_output_hash_of_with_policy: fn(out: String, allow_semantic_xattrs: Bool, hook: &EnvelopeWalkHook) -[FS, Env]> String EnvelopeError! {
-    pkg_try_output_hash_of_with_hook(out, allow_semantic_xattrs, None, &hook)
+    pkg_try_output_hash_of_with_hook(out, allow_semantic_xattrs, None, hook)
 }
 
 // One regular file's hardlink bookkeeping, keyed by its (device, inode).
@@ -205,19 +205,19 @@ pkg_try_output_hash_of_with_hook: fn(out: String, allow_semantic_xattrs: Bool, h
         if !files.is_abs(target) -> return Err(EnvelopeError.NixTarget("Nix symlink target must be absolute"))
         pkg_validate_nix_store_symlink_target(target)
         envelope_archive := EnvelopeArchive.new()
-        &hook.observe(out, EnvelopeWalkStage.Node)
-        &envelope_archive.record_header(U8{76}, [U8]{}, pkg_envelope_mode(output_info))
-        &envelope_archive.push_bytes(target.bytes())
-        pkg_encode_semantic_xattrs(out, &envelope_archive, allow_semantic_xattrs)
+        hook.observe(out, EnvelopeWalkStage.Node)
+        envelope_archive.record_header(U8{76}, [U8]{}, pkg_envelope_mode(output_info))
+        envelope_archive.push_bytes(target.bytes())
+        pkg_encode_semantic_xattrs(out, envelope_archive, allow_semantic_xattrs)
         return Ok(envelope_archive.finish())
     }
     root: files.canonicalize(out) ?? return Err(EnvelopeError.Resolve{path: out, detail: "{err}"})
     envelope_archive := EnvelopeArchive.new()
     hardlinks := [EnvelopeHardlink]{}
-    pkg_envelope_encode_node(root, root, "", &envelope_archive, &hardlinks, allow_semantic_xattrs, hangar_root != None, &hook)
+    pkg_envelope_encode_node(root, root, "", envelope_archive, hardlinks, allow_semantic_xattrs, hangar_root != None, hook)
     // Admission checks below never alter archive bytes of a tree that hashes.
-    &hardlinks.sort_by(link -> link.key.inode)
-    &hardlinks.sort_by(link -> link.key.device)
+    hardlinks.sort_by(link -> link.key.inode)
+    hardlinks.sort_by(link -> link.key.device)
     loop link in hardlinks {
         if link.seen == link.total -> next
         hangar: hangar_root ?? return Err(EnvelopeError.Hardlink{first: link.first, total: link.total, seen: link.seen})
@@ -235,12 +235,12 @@ pkg_envelope_hangar_admits: fn(root: String, hangar_root: String, link: Envelope
     hangars := [String]{hangar}
     loop machine_root in HangarRoots.machine_roots() {
         machine_hangar: pkg_envelope_canonical_real_directory(machine_root.hangar_dir()) ?? next
-        pkg_envelope_add_allowed_hangar_root(&hangars, machine_hangar)
+        pkg_envelope_add_allowed_hangar_root(hangars, machine_hangar)
     }
     local_cas_paths := [String]{}
     loop candidate in hangars {
         pool: pkg_envelope_canonical_real_directory(files.join(candidate, "cas")) ?? next
-        &local_cas_paths.push(pool)
+        local_cas_paths.push(pool)
     }
     loop pool in local_cas_paths {
         if pkg_envelope_count_cas_peer(pool, link.cas_key, link.key) == 1 -> return true
@@ -258,7 +258,7 @@ pkg_envelope_hangar_admits: fn(root: String, hangar_root: String, link: Envelope
         pool_values: [String?]{local_cas, shared_cas}
         loop pool in pool_values {
             pool_path: pool ?? next
-            if pkg_authority_path_within(pool_path, candidate) && pool_path != candidate -> &excluded.push(pool_path)
+            if pkg_authority_path_within(pool_path, candidate) && pool_path != candidate -> excluded.push(pool_path)
         }
         allowed_peers += pkg_envelope_count_inode_peers_under_except(candidate, link.key, excluded)
         if local_cas == {
@@ -288,9 +288,9 @@ pkg_envelope_add_allowed_hangar_root: fn(roots: &[String], candidate: String) {
     }
     kept := [String]{}
     loop root in roots {
-        if !pkg_authority_path_within(root, candidate) -> &kept.push(root)
+        if !pkg_authority_path_within(root, candidate) -> kept.push(root)
     }
-    &kept.push(candidate)
+    kept.push(candidate)
     roots = kept
 }
 
@@ -328,7 +328,7 @@ pkg_envelope_encode_node: fn(root: String, path: String, rel: String, envelope_a
     rel_bytes: rel.bytes()
     // Reproducibility certification observes every validated node here, so
     // first-difference reporting needs no second traversal.
-    &hook.observe(path, EnvelopeWalkStage.Node)
+    hook.observe(path, EnvelopeWalkStage.Node)
     // Sparse holes hash as logical zeros; the probe only reports policy.
     if info.is_file && !info.is_symlink -> pkg_file_has_sparse_holes(path)
     if info.is_dir {
@@ -338,19 +338,19 @@ pkg_envelope_encode_node: fn(root: String, path: String, rel: String, envelope_a
         // representability laws, while the exact name bytes stay in the digest.
         if !allow_nix_store_symlinks {
             names := [[U8]]{}
-            loop entry in before_entries -> &names.push(entry.name.bytes())
+            loop entry in before_entries -> names.push(entry.name.bytes())
             pkg_reject_casefold_collisions(names) ?? return Err(EnvelopeError.PathLaw(err))
         }
         resolved: files.canonicalize(path) ?? return Err(EnvelopeError.ResolveDirectory{path: path, detail: "{err}"})
         if !pkg_authority_path_within(resolved, root) -> return Err(EnvelopeError.DirectoryEscapes(path))
-        &envelope_archive.record_header(U8{68}, rel_bytes, pkg_envelope_mode(info))
-        pkg_encode_semantic_xattrs(path, &envelope_archive, allow_semantic_xattrs)
-        &hook.observe(path, EnvelopeWalkStage.DirectorySnapshotted)
+        envelope_archive.record_header(U8{68}, rel_bytes, pkg_envelope_mode(info))
+        pkg_encode_semantic_xattrs(path, envelope_archive, allow_semantic_xattrs)
+        hook.observe(path, EnvelopeWalkStage.DirectorySnapshotted)
         entries := files.list_dir(path) ?? return Err(EnvelopeError.ReadEntries{path: path, detail: "{err}"})
-        &entries.sort_by(entry -> entry.name)
+        entries.sort_by(entry -> entry.name)
         loop entry in entries {
             child_rel: if rel == "" -> entry.name else -> "{rel}/{entry.name}"
-            pkg_envelope_encode_node(root, entry.path, child_rel, &envelope_archive, &hardlinks, allow_semantic_xattrs, allow_nix_store_symlinks, &hook)
+            pkg_envelope_encode_node(root, entry.path, child_rel, envelope_archive, hardlinks, allow_semantic_xattrs, allow_nix_store_symlinks, hook)
         }
         after: files.stat(path) ?? return Err(EnvelopeError.DirectoryVanished{path: path, detail: "{err}"})
         after_entries: pkg_envelope_directory_snapshot(path)
@@ -380,9 +380,9 @@ pkg_envelope_encode_node: fn(root: String, path: String, rel: String, envelope_a
                 }
             }
         }
-        &envelope_archive.record_header(U8{76}, rel_bytes, pkg_envelope_mode(info))
-        &envelope_archive.push_bytes(target.bytes())
-        pkg_encode_semantic_xattrs(path, &envelope_archive, allow_semantic_xattrs)
+        envelope_archive.record_header(U8{76}, rel_bytes, pkg_envelope_mode(info))
+        envelope_archive.push_bytes(target.bytes())
+        pkg_encode_semantic_xattrs(path, envelope_archive, allow_semantic_xattrs)
         return
     }
     if info.is_file {
@@ -392,20 +392,20 @@ pkg_envelope_encode_node: fn(root: String, path: String, rel: String, envelope_a
                 loop index in 0..<hardlinks.len() {
                     if hardlinks[index].key == identity {
                         hardlinks[index].seen += 1
-                        &envelope_archive.record_header(U8{72}, rel_bytes, pkg_envelope_mode(info))
-                        &envelope_archive.push_bytes(hardlinks[index].first.bytes())
+                        envelope_archive.record_header(U8{72}, rel_bytes, pkg_envelope_mode(info))
+                        envelope_archive.push_bytes(hardlinks[index].first.bytes())
                         return
                     }
                 }
             }
             .None -> {}
         }
-        &envelope_archive.record_header(U8{70}, rel_bytes, pkg_envelope_mode(info))
-        pkg_encode_semantic_xattrs(path, &envelope_archive, allow_semantic_xattrs)
-        content_digest: pkg_envelope_read_file_stable(path, info, allow_nix_store_symlinks, &envelope_archive, &hook)
+        envelope_archive.record_header(U8{70}, rel_bytes, pkg_envelope_mode(info))
+        pkg_encode_semantic_xattrs(path, envelope_archive, allow_semantic_xattrs)
+        content_digest: pkg_envelope_read_file_stable(path, info, allow_nix_store_symlinks, envelope_archive, hook)
         if key == {
             .Val(identity) -> {
-                &hardlinks.push(EnvelopeHardlink{key: identity, first: rel, seen: 1, total: info.links, cas_key: pkg_envelope_cas_key(info, content_digest)})
+                hardlinks.push(EnvelopeHardlink{key: identity, first: rel, seen: 1, total: info.links, cas_key: pkg_envelope_cas_key(info, content_digest)})
             }
             .None -> {}
         }
@@ -486,15 +486,15 @@ pkg_envelope_read_file_stable: fn(path: String, expected: Stat, allow_hardlink_m
     if !EnvelopeStableIdentity.of(before).unchanged(EnvelopeStableIdentity.of(expected), allow_hardlink_metadata_changes) {
         return Err(EnvelopeError.ChangedBefore(path))
     }
-    &hook.observe(path, EnvelopeWalkStage.FileOpened)
-    &envelope_archive.update(pkg_u64_be_bytes(expected.size))
+    hook.observe(path, EnvelopeWalkStage.FileOpened)
+    envelope_archive.update(pkg_u64_be_bytes(expected.size))
     content := crypto.Hasher.new()
     // Fixed-size reads keep hashing bounded by the chunk plus metadata.
     loop {
         chunk: reader.read(ENVELOPE_READ_CHUNK) ?? return Err(EnvelopeError.ReadEntries{path: path, detail: "{err}"})
         if chunk.len() == 0 -> break
-        &envelope_archive.update(chunk)
-        &content.update(chunk)
+        envelope_archive.update(chunk)
+        content.update(chunk)
     }
     after: reader.stat() ?? return Err(EnvelopeError.Reinspect{path: path, detail: "{err}"})
     if !EnvelopeStableIdentity.of(before).unchanged(EnvelopeStableIdentity.of(after), allow_hardlink_metadata_changes) {
@@ -521,9 +521,9 @@ pkg_envelope_directory_snapshot: fn(path: String) -[FS]> [EnvelopeEntrySnapshot]
             info.is_symlink -> U8{76}
             else -> U8{83}
         }
-        &entries.push(EnvelopeEntrySnapshot{name: entry.name, kind: kind, identity: EnvelopeStableIdentity.of(info)})
+        entries.push(EnvelopeEntrySnapshot{name: entry.name, kind: kind, identity: EnvelopeStableIdentity.of(info)})
     }
-    &entries.sort_by(entry -> entry.name)
+    entries.sort_by(entry -> entry.name)
     Ok(entries)
 }
 
@@ -597,6 +597,6 @@ pkg_envelope_hex8: fn(value: Int) -> String Never! {
     digits: "0123456789abcdef".bytes()
     out := [U8]{}
     shift_values: [Int]{28, 24, 20, 16, 12, 8, 4, 0}
-    loop shift in shift_values -> &out.push(digits[((value >> shift)).bit_and(15)])
+    loop shift in shift_values -> out.push(digits[((value >> shift)).bit_and(15)])
     String.from_bytes(out) ?? ""
 }

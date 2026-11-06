@@ -25,12 +25,12 @@ contains_bytes: fn(raw: [U8], want: [U8], ascii_casefold: Bool) -> Bool {
 }
 request_head: fn(stream: &TCPStream) -> [U8] {
     // Original request_head10-23: persistent 5s read timeout,512-byte reads, positive read, <=64KiB bound, exact CRLFCRLF terminator.
-    net.set_read_timeout(&stream, 5000) ?? panic("request timeout")
+    net.set_read_timeout(stream, 5000) ?? panic("request timeout")
     request := [U8]{}
     loop !contains_bytes(request, [U8]{13,10,13,10}, false) {
         block: stream.read(512) ?? panic("request read")
         assert(block.len() > 0)
-        loop byte in block { &request.push(byte) }
+        loop byte in block { request.push(byte) }
         assert(request.len() <= 65536)
     }
     return request
@@ -65,9 +65,9 @@ line_end: fn(raw: [U8]) -> Int {
 run: fn() {
     listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     publish(listener, "{work}/addr.txt")
-    stream := &listener.accept() ?? panic("accept")
+    stream := listener.accept() ?? panic("accept")
     files.write_atomic("{work}/accepted", "yes".bytes()) ?? panic("accepted flag")
-    head: request_head(&stream)
+    head: request_head(stream)
     assert(prefix(head, "POST /chunked HTTP/1.1{PEER_CRLF}".bytes()))
     assert(contains_bytes(head, "transfer-encoding: chunked".bytes(), true))
     assert(!contains_bytes(head, "content-length:".bytes(), true))
@@ -77,7 +77,7 @@ run: fn() {
     loop {
         block: stream.read(4096) ?? panic("chunk read")
         assert(block.len() != 0)
-        loop byte in block { &pending.push(byte) }
+        loop byte in block { pending.push(byte) }
         loop {
             end: line_end(pending)
             if end < 0 -> break
@@ -93,7 +93,7 @@ run: fn() {
             loop pending.len() < size + 2 {
                 chunk: stream.read(4096) ?? panic("chunk body")
                 assert(chunk.len() != 0)
-                loop byte in chunk { &pending.push(byte) }
+                loop byte in chunk { pending.push(byte) }
             }
             assert_eq(pending.slice(size, size + 2), [U8]{13,10})
             got += size

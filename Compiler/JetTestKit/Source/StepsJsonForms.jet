@@ -28,7 +28,7 @@ kit_steps_json_files: fn(directory: String, canonical: Bool) -> String Err! {
                 .None -> {}
             }
         }
-        &documents.push(json.parse(text) ?? return Err("JSON files parse: {err}"))
+        documents.push(json.parse(text) ?? return Err("JSON files parse: {err}"))
     }
     encoded: json.to_string(Dyn.Array(documents)) ?? return Err("JSON files encode: {err}")
     Ok(encoded)
@@ -39,13 +39,13 @@ kit_steps_json_zero: fn(tree: Dyn, key: String) -> Dyn {
         .Object(fields) -> {
             result := [String: Dyn]{}
             loop pair in fields {
-                _: &result.add(pair.key, if pair.key == key -> Dyn.Int(0) else -> kit_steps_json_zero(pair.value, key))
+                _: result.add(pair.key, if pair.key == key -> Dyn.Int(0) else -> kit_steps_json_zero(pair.value, key))
             }
             return Dyn.Object(result)
         }
         .Array(items) -> {
             result := [Dyn]{}
-            loop item in items -> &result.push(kit_steps_json_zero(item, key))
+            loop item in items -> result.push(kit_steps_json_zero(item, key))
             return Dyn.Array(result)
         }
         else -> return tree.copy()
@@ -59,7 +59,7 @@ kit_steps_json_distinct: fn(values: [Dyn]) -> Int {
         loop other in unique {
             if kit_steps_json_equal(value, other) -> present = true
         }
-        if !present -> &unique.push(value)
+        if !present -> unique.push(value)
     }
     unique.len()
 }

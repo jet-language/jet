@@ -49,25 +49,25 @@ semindex_structure_test_parent: fn(class: String, start: Int, end: Int) -> Struc
 }
 #Test("semindex_claimed_block_spans_are_skipped_through_block_next") {
     ctx := WalkCtx.new(0, "module:main.jet", [Span]{Span{start: 10, end: 20}, Span{start: 10, end: 20}, Span{start: 10, end: 30}, Span{start: 40, end: 50}})
-    assert_eq(semindex_next_unclaimed(&ctx, 0), 0)
+    assert_eq(semindex_next_unclaimed(ctx, 0), 0)
     ctx.block_next[0] = 1
     ctx.block_next[1] = 2
-    assert_eq(semindex_next_unclaimed(&ctx, 0), 2)
+    assert_eq(semindex_next_unclaimed(ctx, 0), 2)
     ctx.block_next[2] = 3
     ctx.block_next[3] = 4
-    assert_eq(semindex_next_unclaimed(&ctx, 1), 4)
+    assert_eq(semindex_next_unclaimed(ctx, 1), 4)
     assert_eq(ctx.block_next[1], 4)
-    assert_eq(semindex_next_unclaimed(&ctx, 4), 4)
+    assert_eq(semindex_next_unclaimed(ctx, 4), 4)
 }
 #Test("semindex_call_rows_use_current_caller_only_and_preserve_exact_callee") {
     calls := [CallEdge]{}
     span: Span{start: 7, end: 11}
-    semindex_record_call_rows(&calls, None, "main.jet", "ignored", span)
+    semindex_record_call_rows(calls, None, "main.jet", "ignored", span)
     assert_eq(calls.len(), 0)
     frame: CallerFrame{name: "run", owner: None, identity: "fn:module:main.jet::run"}
-    semindex_record_call_rows(&calls, Val(frame), "main.jet", "checked::alias", span)
+    semindex_record_call_rows(calls, Val(frame), "main.jet", "checked::alias", span)
     method: CallerFrame{name: "open", owner: Val("Door"), identity: "method:module:main.jet::Door.open"}
-    semindex_record_call_rows(&calls, Val(method), "other.jet", "Door::close", Span{start: 20, end: 20})
+    semindex_record_call_rows(calls, Val(method), "other.jet", "Door::close", Span{start: 20, end: 20})
     assert_eq(calls.len(), 2)
     assert_eq(calls[0].caller, "run")
     assert_eq(calls[0].callee, "checked::alias")
@@ -104,16 +104,16 @@ semindex_structure_test_member: fn(owner: String, name: String, origin: MemberOr
 semindex_structure_test_parent_slot_ordinals_and_restoration: fn() {
     db := SymbolDB.new()
     ctx := WalkCtx.new(0, "module:main.jet", [Span]{Span{start: 12, end: 30}, Span{start: 32, end: 50}})
-    assert_eq(semindex_record_node(&db, ctx, "item", "Discriminant(0)", "main.jet", Span{start: 10, end: 60}), Val(0))
-    &ctx.structural_parents.push(0)
-    semindex_structural_slot(&db, &ctx, "body", StructuralSlotKind.List, (db: SymbolDB, ctx: WalkCtx) -> {
-        assert_eq(semindex_record_node(&db, ctx, "stmt", "Discriminant(3)", "main.jet", Span{start: 15, end: 18}), Val(1))
-        semindex_structural_slot(&db, &ctx, "condition", StructuralSlotKind.Scalar, (db: SymbolDB, ctx: WalkCtx) -> {
-            assert_eq(semindex_record_node(&db, ctx, "expr", "Discriminant(5)", "main.jet", Span{start: 20, end: 21}), Val(2))
+    assert_eq(semindex_record_node(db, ctx, "item", "Discriminant(0)", "main.jet", Span{start: 10, end: 60}), Val(0))
+    ctx.structural_parents.push(0)
+    semindex_structural_slot(db, ctx, "body", StructuralSlotKind.List, (db: SymbolDB, ctx: WalkCtx) -> {
+        assert_eq(semindex_record_node(db, ctx, "stmt", "Discriminant(3)", "main.jet", Span{start: 15, end: 18}), Val(1))
+        semindex_structural_slot(db, ctx, "condition", StructuralSlotKind.Scalar, (db: SymbolDB, ctx: WalkCtx) -> {
+            assert_eq(semindex_record_node(db, ctx, "expr", "Discriminant(5)", "main.jet", Span{start: 20, end: 21}), Val(2))
         })
         assert_eq(ctx.structural_slot, "body")
         assert_eq(ctx.structural_slot_kind, StructuralSlotKind.List)
-        assert_eq(semindex_record_node(&db, ctx, "stmt", "Discriminant(7)", "main.jet", Span{start: 22, end: 23}), Val(3))
+        assert_eq(semindex_record_node(db, ctx, "stmt", "Discriminant(7)", "main.jet", Span{start: 22, end: 23}), Val(3))
     })
     assert_eq(ctx.structural_slot, "root")
     assert_eq(ctx.structural_slot_kind, StructuralSlotKind.List)
@@ -121,12 +121,12 @@ semindex_structure_test_parent_slot_ordinals_and_restoration: fn() {
     assert_eq(db.nodes[2].ordinal, 0)
     assert_eq(db.nodes[3].ordinal, 1)
     assert_eq(db.slot_boundaries.len(), 1)
-    semindex_structural_slot(&db, &ctx, "else_body", StructuralSlotKind.List, (db: SymbolDB, ctx: WalkCtx) -> {})
+    semindex_structural_slot(db, ctx, "else_body", StructuralSlotKind.List, (db: SymbolDB, ctx: WalkCtx) -> {})
     assert_eq(db.slot_boundaries.len(), 2)
     assert_eq(db.slot_boundaries[1].span, SourceSpan{start: 32, end: 50})
-    semindex_structural_slot(&db, &ctx, "body", StructuralSlotKind.List, (db: SymbolDB, ctx: WalkCtx) -> {})
+    semindex_structural_slot(db, ctx, "body", StructuralSlotKind.List, (db: SymbolDB, ctx: WalkCtx) -> {})
     assert_eq(db.slot_boundaries.len(), 2)
-    assert_eq(semindex_record_node(&db, ctx, "item", "bad span", "main.jet", Span{start: 8, end: 7}), None)
+    assert_eq(semindex_record_node(db, ctx, "item", "bad span", "main.jet", Span{start: 8, end: 7}), None)
     assert_eq(db.nodes.len(), 4)
 }
 semindex_structure_test_nested_caller_restores: fn() {
@@ -134,10 +134,10 @@ semindex_structure_test_nested_caller_restores: fn() {
     ctx := WalkCtx.new(0, "module:main.jet", [Span]{})
     outer: CallerFrame{name: "outer", owner: None, identity: "fn:outer"}
     inner: CallerFrame{name: "inner", owner: Val("T"), identity: "method:T.inner"}
-    semindex_with_caller(&db, &ctx, outer, [Param]{}, "main.jet", (db: SymbolDB, ctx: WalkCtx) -> {
-        semindex_record_call(&db, ctx, "main.jet", "one", Span{start: 1, end: 2})
-        semindex_with_caller(&db, &ctx, inner, [Param]{}, "main.jet", (db: SymbolDB, ctx: WalkCtx) -> { semindex_record_call(&db, ctx, "main.jet", "two", Span{start: 3, end: 4}) })
-        semindex_record_call(&db, ctx, "main.jet", "three", Span{start: 5, end: 6})
+    semindex_with_caller(db, ctx, outer, [Param]{}, "main.jet", (db: SymbolDB, ctx: WalkCtx) -> {
+        semindex_record_call(db, ctx, "main.jet", "one", Span{start: 1, end: 2})
+        semindex_with_caller(db, ctx, inner, [Param]{}, "main.jet", (db: SymbolDB, ctx: WalkCtx) -> { semindex_record_call(db, ctx, "main.jet", "two", Span{start: 3, end: 4}) })
+        semindex_record_call(db, ctx, "main.jet", "three", Span{start: 5, end: 6})
     })
     assert_eq(ctx.caller, None)
     assert_eq(db.calls[0].caller, "outer")
@@ -234,9 +234,9 @@ semindex_structure_test_state_marker_paths: fn() Never! {
 semindex_structure_test_function_types: fn(function: Func, mp: String) {
     db := SymbolDB.new()
     ctx := WalkCtx.new(0, semindex_root_identity(mp), [Span]{})
-    root: semindex_record_node(&db, ctx, "item", "Discriminant(0)", mp, function.span) ?? panic("valid function span")
-    &ctx.structural_parents.push(root)
-    semindex_record_func_type_nodes(&db, &ctx, function, mp)
+    root: semindex_record_node(db, ctx, "item", "Discriminant(0)", mp, function.span) ?? panic("valid function span")
+    ctx.structural_parents.push(root)
+    semindex_record_func_type_nodes(db, ctx, function, mp)
     loop index in 0..<function.params.len() {
         node: db.nodes[index + 1]
         assert_eq(node.span, semindex_source_span(function.params[index].ty_span))
@@ -266,7 +266,7 @@ semindex_structure_test_allow_marker_projection: fn() Never! {
         }, arg_labels: [CallLabel?]{}, span: span, ct: None},
         {name: "allow", negated: false, name_span: span, args: [MarkerCallArg]{MarkerCallArg.Expr{value: Expr.Ident{name: "ignored", span: span, id: AST_NODE_GENERATED}}}, arg_labels: [CallLabel?]{}, span: span, ct: None},
     }
-    semindex_collect_allow_markers(&db, markers, "field", "main.jet")
+    semindex_collect_allow_markers(db, markers, "field", "main.jet")
     assert_eq(db.bypasses.len(), 2)
     assert_eq(db.bypasses[0].kind, BypassKind.LintAllow)
     assert_eq(db.bypasses[0].site, "field")

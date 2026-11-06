@@ -133,13 +133,13 @@ jet_cli_gc_parse: fn(raw: String, expected_project: String, now: Int) -> JetCLIG
             identities_seen[id] = true
             retained: jet_cli_gc_bool(row, "retained")
             if retained -> retained_count += 1
-            &identities.push(JetCLIGCIdentity{id: id, retained: retained})
+            identities.push(JetCLIGCIdentity{id: id, retained: retained})
         }
-        &identities.sort_by((left: JetCLIGCIdentity, right: JetCLIGCIdentity) -> left.id <=> right.id)
+        identities.sort_by((left: JetCLIGCIdentity, right: JetCLIGCIdentity) -> left.id <=> right.id)
         if jet_cli_gc_uint(value, "allocations") != identities.len() || jet_cli_gc_uint(value, "retained") != retained_count -> return Err(jet_cli_gc_error("malformed", "GC trace counters do not match identity evidence"))
-        &sites.push(JetCLIGCSite{source: source, span_start: start, span_end: end, scope: scope, policy: policy, reason: reason, type_name: type_name, identities: identities})
+        sites.push(JetCLIGCSite{source: source, span_start: start, span_end: end, scope: scope, policy: policy, reason: reason, type_name: type_name, identities: identities})
     }
-    &sites.sort_by(jet_cli_gc_site_order)
+    sites.sort_by(jet_cli_gc_site_order)
     loop index in 1..<sites.len() {
         if jet_cli_gc_site_order(sites[index - 1], sites[index]) == Ordering.Equal -> return Err(jet_cli_gc_error("malformed", "GC trace repeats a promotion site"))
     }
@@ -173,7 +173,7 @@ jet_cli_gc_read: fn(path: String) -[FS, Env, Time.Wait]> String JetCLIGCError! {
     loop {
         chunk: reader.read(jet_cli_table_min(65536, 4194305 - bytes.len())) ?? return Err(jet_cli_gc_error("malformed", "cannot read GC trace: {jet_cli_io_error_text(err)}"))
         if chunk.len() == 0 -> break
-        loop byte in chunk -> &bytes.push(byte)
+        loop byte in chunk -> bytes.push(byte)
         if bytes.len() > 4194304 -> return Err(jet_cli_gc_error("oversized", "GC trace exceeds the 4 MiB safety limit"))
     }
     Ok(String.from_bytes(bytes) ?? return Err(jet_cli_gc_error("malformed", "cannot read GC trace: stream did not contain valid UTF-8")))
@@ -190,7 +190,7 @@ jet_cli_gc_identity_summary: fn(identities: [JetCLIGCIdentity]) -> String Never!
     values := [String]{}
     loop index in 0..<jet_cli_table_min(8, identities.len()) {
         row: identities[index]
-        &values.push("{row.id}{if row.retained -> "*" else -> ""}")
+        values.push("{row.id}{if row.retained -> "*" else -> ""}")
     }
     text := values.join(", ")
     if identities.len() > 8 -> text = "{text} (+{identities.len() - 8} more)"
@@ -215,8 +215,8 @@ jet_cli_gc_render: fn(trace: JetCLIGCTrace, color: Bool, json: Bool) -> String N
     sites := [JetCLIStatusValue]{}
     loop site in trace.sites {
         identities := [JetCLIStatusValue]{}
-        loop identity in site.identities -> &identities.push(jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("identity", jet_cli_status_int(identity.id)), jet_cli_status_field("retained", jet_cli_status_bool(identity.retained))}))
-        &sites.push(jet_cli_status_object([JetCLIStatusField]{
+        loop identity in site.identities -> identities.push(jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("identity", jet_cli_status_int(identity.id)), jet_cli_status_field("retained", jet_cli_status_bool(identity.retained))}))
+        sites.push(jet_cli_status_object([JetCLIStatusField]{
             jet_cli_status_field("source", jet_cli_status_text(site.source)), jet_cli_status_field("span_start", jet_cli_status_int(site.span_start)), jet_cli_status_field("span_end", jet_cli_status_int(site.span_end)), jet_cli_status_field("scope", jet_cli_status_text(site.scope)), jet_cli_status_field("policy_provenance", jet_cli_status_text(site.policy)), jet_cli_status_field("reason", jet_cli_status_text(site.reason)), jet_cli_status_field("type_name", jet_cli_status_text(site.type_name)), jet_cli_status_field("allocations", jet_cli_status_int(site.identities.len())), jet_cli_status_field("retained", jet_cli_status_int(jet_cli_gc_retained(site.identities))), jet_cli_status_field("identities", jet_cli_status_array(identities)), jet_cli_status_field("recommendation", jet_cli_status_text(jet_cli_gc_recommendation(site))),
         }))
     }

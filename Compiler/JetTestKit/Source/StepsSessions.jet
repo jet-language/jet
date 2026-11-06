@@ -53,7 +53,7 @@ kit_steps_recv_form: fn(text: String) -> KitRecvForm? {
             } else -> {
                 kit_steps_stream_assertion("stdout", "{predicate} {reason}") ?? return None
             }
-            &form.predicates.push(assertion)
+            form.predicates.push(assertion)
         }
     } else if form.collect -> return None
     deadline := ""
@@ -100,7 +100,7 @@ kit_steps_session_pull: fn(stream: ProcessStdoutStream, out: Sender<[U8]>) -> St
             out.send([U8]{})
             return ""
         }
-        out.send(^chunk)
+        out.send(chunk)
     }
     ""
 }
@@ -252,18 +252,18 @@ kit_steps_session_read: fn(step: KitStep, context: KitStepCtx, previous: KitStep
         if chunk.len() == 0 {
             ended = true
         } else {
-            loop byte in chunk -> &buffer.push(byte)
+            loop byte in chunk -> buffer.push(byte)
         }
     }
     reader.cancel()
-    read_error: ^reader.join() ?? ""
+    read_error: reader.join() ?? ""
     // Bytes the reader delivered after the last unit belong to the next recv.
     loop {
         chunk: arrivals.try_receive() ?? break
         if chunk.len() == 0 {
             ended = true
         } else {
-            loop byte in chunk -> &buffer.push(byte)
+            loop byte in chunk -> buffer.push(byte)
         }
     }
     state.children[index].buffer = buffer
@@ -307,7 +307,7 @@ kit_steps_session_action: fn(step: KitStep, context: KitStepCtx, previous: KitSt
                 ()
             }
         }
-        &state.children.push(KitPendingChild{label: step.label, child: child, started: started, step: step, joined: false, input_error: input_error})
+        state.children.push(KitPendingChild{label: step.label, child: child, started: started, step: step, joined: false, input_error: input_error})
         if input_error != "" -> return kit_steps_action_error(state, input_error)
         return KitStepResult{state: state, verdict: kit_expect_verdict("PASS", "")}
     }
@@ -375,7 +375,7 @@ kit_steps_parallel: fn(steps: [KitStep], context: KitStepCtx, state: KitStepStat
     }
     sender.close()
     loop message in reports {
-        if message != "" -> &errors.push(message)
+        if message != "" -> errors.push(message)
     }
     KitStepResult{state: state, verdict: if errors.len() == 0 -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("ERROR", errors.join("; "))}
 }
@@ -407,7 +407,7 @@ kit_steps_parallel_start: fn(group: Group, steps: [KitStep], index: Int, context
     worker: task kit_steps_send_report(step, context, state, reporter)
     // Start all remaining sends before joining this one, preserving concurrency.
     kit_steps_parallel_start(group, steps, index + 1, context, state, sender)
-    ^worker.join() ?? {
+    worker.join() ?? {
         sender.send("parallel task join failed")
         return
     }

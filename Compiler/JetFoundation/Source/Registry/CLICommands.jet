@@ -677,13 +677,13 @@ JET_CLI_FLAGS: comptime { jet_cli_flag_rows() }
 jet_cli_flag_rows: fn() -> [JetCLIFlagSpec] Never! {
     rows := [JetCLIFlagSpec]{}
     loop spec in JET_CLI_FIXED_FLAGS {
-        &rows.push(spec.copy())
+        rows.push(spec.copy())
         if spec.long == "--profile" {
             loop option in JET_BUILD_OPTIONS {
                 flag: build_option_flag(option.name)
                 help := "With build/run/dev/test/inspect: {option.help}"
                 if jet_cli_test_setting_of_flag(flag) == .Val(row) -> help = "{help}; with test: {jet_cli_test_setting_text(row)}"
-                &rows.push(JetCLIFlagSpec{long: flag, help: help})
+                rows.push(JetCLIFlagSpec{long: flag, help: help})
             }
         }
         if spec.long != "--explain-partition" -> next
@@ -694,7 +694,7 @@ jet_cli_flag_rows: fn() -> [JetCLIFlagSpec] Never! {
             if JET_CLI_FIXED_FLAGS.any(fixed -> fixed.long == fixed_flag) -> next
             option_flag: flag.copy() // copy: the build-option lambda's own name.
             if JET_BUILD_OPTIONS.any(option -> build_option_flag(option.name) == option_flag) -> next
-            &rows.push(JetCLIFlagSpec{long: flag, help: jet_cli_test_setting_help(setting)})
+            rows.push(JetCLIFlagSpec{long: flag, help: jet_cli_test_setting_help(setting)})
         }
     }
     rows

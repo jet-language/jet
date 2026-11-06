@@ -181,7 +181,7 @@ provider_bridge_test_read_error: fn(dir: String, fixtures: String?) -[FS, Env]> 
     assert(graph.unsupported.contains("packages:{other}:default"))
     facts := DevShellFacts{packages: [String]{}, unmapped: [String]{}}
     loop output in graph.outputs {
-        if output.kind == FlakeOutputKind.Package -> provider_record_package_output_fact(&facts, output, host)
+        if output.kind == FlakeOutputKind.Package -> provider_record_package_output_fact(facts, output, host)
     }
     shim: provider_render_shim(facts)
     assert(shim.contains("packages: []"))
@@ -231,7 +231,7 @@ provider_bridge_test_read_error: fn(dir: String, fixtures: String?) -[FS, Env]> 
     dir: provider_bridge_test_dir("named_devshell_budget")
     system: provider_bridge_host_system()
     overlays := [String]{}
-    loop _ in 0..<65 -> &overlays.push("overlay")
+    loop _ in 0..<65 -> overlays.push("overlay")
     files.write(files.join(dir, "flake.nix"), "let overlay = final: prev: {{}}; in {{ devShells.{system}.default = {{ packages = []; }}; devShells.{system}.debug = (import pkgs {{ overlays = [ {overlays.join(" ")} ]; }}).mkShell {{ packages = []; }}; }}") ?? panic("flake")
     fixtures: provider_bridge_test_fixture("named_devshell_budget_fx", `{"buildInputs": [], "shellHook": ""}`)
     if provider_read_devshell_output_facts(dir, None, "debug") == {
@@ -299,7 +299,7 @@ provider_bridge_test_read_error: fn(dir: String, fixtures: String?) -[FS, Env]> 
 #Test("bridge native projection budget failure is E1256") {
     dir: provider_bridge_test_dir("native_budget")
     bytes := [U8]{}
-    loop _ in 0..<1048577 -> &bytes.push(U8{120})
+    loop _ in 0..<1048577 -> bytes.push(U8{120})
     source: String.from_bytes(bytes) ?? panic("oversized source")
     files.write(files.join(dir, "flake.nix"), source) ?? panic("oversized flake")
     error: provider_bridge_test_read_error(dir, None)

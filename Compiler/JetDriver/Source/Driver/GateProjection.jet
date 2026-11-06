@@ -26,7 +26,7 @@ jet_driver_doc_gate_projection: fn(docs: &[JetDriverDocModule], graph: SemaGraph
             row.expert = policy.expert
             break
         }
-        &modules.push(row)
+        modules.push(row)
     }
     // Checked name facts are the compiler's sole structure-fact owner.
     if docs.len() == 0 {
@@ -55,13 +55,13 @@ jet_driver_gate_query: fn(request: JetDriverCompileRequest) -> JetDriverGateQuer
     programs := [Program]{}
     loop module_row in source.modules {
         row := SemaGateModule{source: module_row.path, program: module_row.program}
-        jet_driver_gate_module_policy(&row, request, load.packages, module_row.package_identity, module_row.physical_path)
-        &modules.push(row)
-        &programs.push(module_row.program)
+        jet_driver_gate_module_policy(row, request, load.packages, module_row.package_identity, module_row.physical_path)
+        modules.push(row)
+        programs.push(module_row.program)
     }
     names: source.names ?? panic("completed load lost its canonical name facts")
     ledger := sema_gate_ledger_collect(modules, names, request.gate_set, request.external_gate_entries, sema_gate_checked_text_names(programs))
-    loop diagnostic in sema_gate_policy_diagnostics(ledger, modules, source.entry_module_index) -> &ledger.diagnostic_rows.push(diagnostic)
+    loop diagnostic in sema_gate_policy_diagnostics(ledger, modules, source.entry_module_index) -> ledger.diagnostic_rows.push(diagnostic)
     diagnostics := source.diagnostics
     loop entry in ledger.diagnostic_rows {
         path := entry.source
@@ -71,9 +71,9 @@ jet_driver_gate_query: fn(request: JetDriverCompileRequest) -> JetDriverGateQuer
                 break
             }
         }
-        &diagnostics.push(diagnostic_with_source_path(entry.diagnostic, path, 0))
+        diagnostics.push(diagnostic_with_source_path(entry.diagnostic, path, 0))
     }
-    gate_ledger_sort(&ledger)
+    gate_ledger_sort(ledger)
     JetDriverGateQueryResult{source: source, ledger: ledger, diagnostics: diagnostics, complete: !jet_driver_has_errors(diagnostics)}
 }
 
@@ -120,19 +120,19 @@ jet_driver_unsafe_check: fn(request: JetDriverCompileRequest, load: &JetDriverLo
         }
         unit_paths[physical] = source
         program := ast_program()
-        compiler_transfer_rows<Item>(&program.items, &load.modules[index].program.items)
+        compiler_transfer_rows<Item>(program.items, load.modules[index].program.items)
         program.policy_declarations = load.modules[index].program.policy_declarations.copy()
         program.rule_facts = load.modules[index].program.rule_facts.copy()
         program.no_prelude = load.modules[index].program.no_prelude
-        row := SemaGateModule{source: physical, program: ^program}
-        jet_driver_gate_module_policy(&row, request, load.packages, load.modules[index].package_identity, physical)
-        &modules.push(^row)
-        &owners.push(index)
+        row := SemaGateModule{source: physical, program: program.move()}
+        jet_driver_gate_module_policy(row, request, load.packages, load.modules[index].package_identity, physical)
+        modules.push(row)
+        owners.push(index)
     }
     if modules.len() == 0 -> return
     inspection: sema_unsafe_inspect(modules, request.gate_set)
     refusals: sema_gate_source_policy_diagnostics(modules)
-    loop position in 0..<owners.len() -> compiler_transfer_rows<Item>(&load.modules[owners[position]].program.items, &modules[position].program.items)
-    loop entry in inspection.diagnostics -> &load.diagnostics.push(diagnostic_with_source_path(entry.diagnostic, unit_paths.get(entry.source) ?? entry.source, 0))
-    loop entry in refusals -> &load.diagnostics.push(diagnostic_with_source_path(entry.diagnostic, unit_paths.get(entry.source) ?? entry.source, 0))
+    loop position in 0..<owners.len() -> compiler_transfer_rows<Item>(load.modules[owners[position]].program.items, modules[position].program.items)
+    loop entry in inspection.diagnostics -> load.diagnostics.push(diagnostic_with_source_path(entry.diagnostic, unit_paths.get(entry.source) ?? entry.source, 0))
+    loop entry in refusals -> load.diagnostics.push(diagnostic_with_source_path(entry.diagnostic, unit_paths.get(entry.source) ?? entry.source, 0))
 }

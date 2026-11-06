@@ -85,9 +85,9 @@ CppSurface: struct {
 
     append: fn(self, other: CppSurface) -> CppSurface Never! {
         out := self
-        loop class in other.classes -> &out.classes.push(class)
-        loop function in other.functions -> &out.functions.push(function)
-        loop template in other.templates -> &out.templates.push(template)
+        loop class in other.classes -> out.classes.push(class)
+        loop function in other.functions -> out.functions.push(function)
+        loop template in other.templates -> out.templates.push(template)
         out
     }
 }
@@ -120,7 +120,7 @@ pkg_cpp_walk_ast: fn(value: Dyn, header: String, inherited_main: Bool, namespace
         name: pkg_cpp_string(map, "name") ?? ""
         if name != "" {
             nested := namespace
-            &nested.push(name)
+            nested.push(name)
             loop child in pkg_cpp_children(map) {
                 surface = surface.append(pkg_cpp_walk_ast(child, header, in_main, nested, selected))
             }
@@ -131,17 +131,17 @@ pkg_cpp_walk_ast: fn(value: Dyn, header: String, inherited_main: Bool, namespace
         if {
             kind == "CXXRecordDecl" && pkg_cpp_bool_field(map, "completeDefinition") && !pkg_cpp_bool_field(map, "isImplicit") -> {
                 class: pkg_cpp_parse_class(map, namespace)
-                &surface.classes.push(class)
+                surface.classes.push(class)
                 return Ok(surface)
             }
             kind == "FunctionTemplateDecl" -> {
                 template: pkg_cpp_parse_template(map, namespace)
-                &surface.templates.push(template)
+                surface.templates.push(template)
                 return Ok(surface)
             }
             kind == "FunctionDecl" && !pkg_cpp_bool_field(map, "isImplicit") -> {
                 routine: pkg_cpp_parse_routine(map, pkg_cpp_qualified(namespace, pkg_cpp_string(map, "name") ?? ""))
-                &surface.functions.push(routine)
+                surface.functions.push(routine)
                 return Ok(surface)
             }
             else -> {}
@@ -172,7 +172,7 @@ pkg_cpp_parse_class: fn(map: [String: Dyn], namespace: [String]) -> CppClass For
             }
             child_kind == "CXXMethodDecl" && public && !pkg_cpp_bool_field(child, "isImplicit") -> {
                 method: pkg_cpp_parse_routine(child, pkg_cpp_string(child, "name") ?? "")
-                &methods.push(method)
+                methods.push(method)
             }
             else -> {}
         }
@@ -191,7 +191,7 @@ pkg_cpp_parse_template: fn(map: [String: Dyn], namespace: [String]) -> CppFuncti
         if child_kind == {
             "TemplateTypeParmDecl" -> {
                 if pkg_cpp_string(child, "name") == {
-                    .Val(param) -> &type_params.push(param)
+                    .Val(param) -> type_params.push(param)
                     .None -> {}
                 }
             }
@@ -211,7 +211,7 @@ pkg_cpp_instantiate_templates: fn(surface: CppSurface, requests: [CppTemplateIns
     names := [String]{}
     loop request in requests {
         if names.contains(request.jet_name) -> return Err(ForeignBindError.Source("duplicate Jet template name `{request.jet_name}`"))
-        &names.push(request.jet_name)
+        names.push(request.jet_name)
         found := CppFunctionTemplate?{None}
         loop template in out.templates {
             if template.cpp_name == request.qualified_name {
@@ -221,7 +221,7 @@ pkg_cpp_instantiate_templates: fn(surface: CppSurface, requests: [CppTemplateIns
         }
         if found == None {
             known := [String]{}
-            loop template in out.templates -> &known.push(template.cpp_name)
+            loop template in out.templates -> known.push(template.cpp_name)
             return Err(ForeignBindError.Source("clang found no function template `{request.qualified_name}` (selected templates: {known.join(", ")})"))
         }
         template: found ?? panic("the template was found above")
@@ -231,10 +231,10 @@ pkg_cpp_instantiate_templates: fn(surface: CppSurface, requests: [CppTemplateIns
         params := [CppParam]{}
         loop param in template.params {
             kind: pkg_cpp_scalar_substituted(param.spelling, substitutions) ?? return Err(ForeignBindError.Source("template `{request.qualified_name}` parameter `{param.name}` has unsupported instantiated type `{param.spelling}`"))
-            &params.push(CppParam{name: param.name, kind: kind})
+            params.push(CppParam{name: param.name, kind: kind})
         }
         result: pkg_cpp_scalar_substituted(template.result, substitutions) ?? return Err(ForeignBindError.Source("template `{request.qualified_name}` has unsupported instantiated return type `{template.result}`"))
-        &out.functions.push(CppRoutine{cpp_name: "{template.cpp_name}<{request.cpp_args.join(",")}>", jet_name: request.jet_name, params: params, result: result})
+        out.functions.push(CppRoutine{cpp_name: "{template.cpp_name}<{request.cpp_args.join(",")}>", jet_name: request.jet_name, params: params, result: result})
     }
     out.functions = pkg_cpp_disambiguate(out.functions)
     Ok(out)
@@ -253,7 +253,7 @@ pkg_cpp_parse_params: fn(map: [String: Dyn], substitutions: [String: String]) ->
     out := [CppParam]{}
     loop param in pkg_cpp_raw_params(map) {
         kind: pkg_cpp_scalar_substituted(param.spelling, substitutions) ?? return Err(ForeignBindError.Source("parameter `{param.name}` has unsupported clang type `{param.spelling}`"))
-        &out.push(CppParam{name: param.name, kind: kind})
+        out.push(CppParam{name: param.name, kind: kind})
     }
     Ok(out)
 }
@@ -269,7 +269,7 @@ pkg_cpp_raw_params: fn(map: [String: Dyn]) -> [(name: String, spelling: String)]
         declared: pkg_cpp_string(child, "name") ?? ""
         name: if pkg_binder_is_ident(declared) -> declared else -> "arg{index}"
         spelling: pkg_cpp_qual_type(child)
-        &out.push((name: name, spelling: spelling))
+        out.push((name: name, spelling: spelling))
     }
     Ok(out)
 }
@@ -375,7 +375,7 @@ pkg_cpp_disambiguate: fn(routines: [CppRoutine]) -> [CppRoutine] Never! {
         }
         if !shared -> next
         labels := [String]{}
-        loop param in out[index].params -> &labels.push(param.name)
+        loop param in out[index].params -> labels.push(param.name)
         suffix: if labels.len() == 0 -> "no_args" else -> labels.join("_")
         out[index].jet_name = "{out[index].jet_name}_{suffix}"
     }
@@ -409,10 +409,10 @@ pkg_cpp_snake: fn(value: String) -> String Never! {
         loop byte in "{scalar}".bytes() {
             code: Int.from_u8(byte)
             if code >= 65 && code <= 90 {
-                if index > 0 -> &out.push(U8{95})
-                &out.push(U8.from_int(code + 32) ?? byte)
+                if index > 0 -> out.push(U8{95})
+                out.push(U8.from_int(code + 32) ?? byte)
             } else {
-                &out.push(byte)
+                out.push(byte)
             }
         }
         index += 1

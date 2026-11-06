@@ -11,7 +11,7 @@ PackageProfileLoad: struct {
 
 cli_cmd_profile: fn(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     cache := WorkspaceDeclarationCache.new()
-    if (parsed.positional.get(1) ?? "") == TOOL_PROFILE_NAME && parsed.positional.len() > 1 -> return cli_cmd_tool_profile(&verification, theme, parsed)
+    if (parsed.positional.get(1) ?? "") == TOOL_PROFILE_NAME && parsed.positional.len() > 1 -> return cli_cmd_tool_profile(verification, theme, parsed)
     word: parsed.positional.get(0) ?? {
         theme.error("`jet profile` needs a verb", "verbs are: {PROFILE_VERBS.join(", ")}.", "try `jet profile plan <name>`.")
         return EXIT_USAGE
@@ -21,11 +21,11 @@ cli_cmd_profile: fn(verification: &StoreVerification, theme: Theme, parsed: CLIP
         return EXIT_USAGE
     }
     if verb == {
-        .Plan -> cli_package_profile_plan(&cache, theme, parsed)
-        .Build -> cli_package_profile_build(&verification, &cache, theme, parsed)
-        .Switch -> cli_package_profile_switch(&verification, &cache, theme, parsed)
-        .Rollback -> cli_package_profile_rollback(&verification, &cache, theme, parsed)
-        .Generations -> cli_package_profile_generations(&verification, &cache, theme, parsed)
+        .Plan -> cli_package_profile_plan(cache, theme, parsed)
+        .Build -> cli_package_profile_build(verification, cache, theme, parsed)
+        .Switch -> cli_package_profile_switch(verification, cache, theme, parsed)
+        .Rollback -> cli_package_profile_rollback(verification, cache, theme, parsed)
+        .Generations -> cli_package_profile_generations(verification, cache, theme, parsed)
     }
 }
 
@@ -38,17 +38,17 @@ cli_package_profile_plan: fn(cache: &WorkspaceDeclarationCache, theme: Theme, pa
         theme.error("`jet profile plan` accepts one generation name", "planning is read-only and has no trailing command", "run `jet profile plan <name> --json` for machine-readable output")
         return EXIT_USAGE
     }
-    loaded: cli_load_package_profile_plan(&cache, theme, name) ?? return EXIT_USAGE
+    loaded: cli_load_package_profile_plan(cache, theme, name) ?? return EXIT_USAGE
     plan: loaded.plan
     if parsed.flags.json {
         facts := [String]{}
-        loop raw in cli_sorted_provider_fact_keys(plan.provider_facts) -> &facts.push("{cli_json_quote(raw)}:{plan.provider_facts[raw].to_json()}")
+        loop raw in cli_sorted_provider_fact_keys(plan.provider_facts) -> facts.push("{cli_json_quote(raw)}:{plan.provider_facts[raw].to_json()}")
         packages := [String]{}
         loop package in plan.packages {
-            &packages.push("{{\"raw\":{cli_json_quote(package.raw)},\"target\":{cli_json_quote(package.target)},\"source\":{cli_json_quote(package.source)},\"upstream\":{cli_json_optional(package.upstream)},\"provider\":{cli_json_quote(package.provider)},\"channel\":{cli_json_optional(package.channel)},\"declared_by\":[{cli_json_quote_list(package.declared_by)}],\"provider_facts\":{package.provider_facts.to_json()}}}")
+            packages.push("{{\"raw\":{cli_json_quote(package.raw)},\"target\":{cli_json_quote(package.target)},\"source\":{cli_json_quote(package.source)},\"upstream\":{cli_json_optional(package.upstream)},\"provider\":{cli_json_quote(package.provider)},\"channel\":{cli_json_optional(package.channel)},\"declared_by\":[{cli_json_quote_list(package.declared_by)}],\"provider_facts\":{package.provider_facts.to_json()}}}")
         }
         collisions := [String]{}
-        loop path in cli_sorted_map_keys(plan.collisions) -> &collisions.push("{cli_json_quote(path)}:{cli_json_quote(plan.collisions[path])}")
+        loop path in cli_sorted_map_keys(plan.collisions) -> collisions.push("{cli_json_quote(path)}:{cli_json_quote(plan.collisions[path])}")
         print("{{\"name\":{cli_json_quote(plan.name)},\"fingerprint\":{cli_json_quote(plan.fingerprint)},\"selected_profiles\":[{cli_json_quote_list(plan.selected_profiles)}],\"applied\":[{cli_json_quote_list(plan.applied)}],\"sources\":[{cli_json_quote_list(plan.sources)}],\"packages\":[{packages.join(",")}],\"collisions\":{{{collisions.join(",")}}},\"provider_facts\":{{{facts.join(",")}}}}}")
         return EXIT_OK
     }
@@ -71,15 +71,15 @@ cli_package_profile_plan: fn(cache: &WorkspaceDeclarationCache, theme: Theme, pa
 
 cli_sorted_provider_fact_keys: fn(values: [String: ProviderFacts]) -> [String] Never! {
     keys := values.keys().to_list()
-    &keys.sort()
+    keys.sort()
     keys
 }
 
 cli_package_profile_build: fn(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     name: cli_one_profile_name(theme, parsed, PROFILE_VERB_BUILD) ?? return EXIT_USAGE
-    loaded: cli_load_package_profile_plan(&cache, theme, name) ?? return EXIT_USAGE
+    loaded: cli_load_package_profile_plan(cache, theme, name) ?? return EXIT_USAGE
     plan: loaded.plan
-    generation: cli_build_package_generation_locked(&verification, &cache, theme, parsed, loaded.project_dir, plan) ?? return cli_report_package_generation_error(theme, err)
+    generation: cli_build_package_generation_locked(verification, cache, theme, parsed, loaded.project_dir, plan) ?? return cli_report_package_generation_error(theme, err)
     if parsed.flags.json {
         print("{{\"profile\":{cli_json_quote(plan.name)},\"generation\":{generation},\"fingerprint\":{cli_json_quote(plan.fingerprint)}}}")
     } else {
@@ -90,14 +90,14 @@ cli_package_profile_build: fn(verification: &StoreVerification, cache: &Workspac
 
 cli_build_package_generation_locked: fn(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, project_dir: String, plan: PackageProfilePlan) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int CLIError! {
     lock: cli_package_profile_lock(project_dir, plan.name)
-    cli_build_package_generation(&verification, &cache, theme, parsed, project_dir, plan)
+    cli_build_package_generation(verification, cache, theme, parsed, project_dir, plan)
 }
 
 cli_package_profile_switch: fn(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     name: cli_one_profile_name(theme, parsed, PROFILE_VERB_SWITCH) ?? return EXIT_USAGE
-    loaded: cli_load_package_profile_plan(&cache, theme, name) ?? return EXIT_USAGE
+    loaded: cli_load_package_profile_plan(cache, theme, name) ?? return EXIT_USAGE
     plan: loaded.plan
-    record: cli_switch_package_generation_locked(&verification, &cache, theme, parsed, loaded.project_dir, plan) ?? return cli_report_package_generation_error(theme, err)
+    record: cli_switch_package_generation_locked(verification, cache, theme, parsed, loaded.project_dir, plan) ?? return cli_report_package_generation_error(theme, err)
     if parsed.flags.json {
         print("{{\"profile\":{cli_json_quote(plan.name)},\"current\":{record.generation},\"witness\":{cli_json_quote(record.witness)}}}")
     } else {
@@ -111,13 +111,13 @@ cli_package_profile_switch: fn(verification: &StoreVerification, cache: &Workspa
 cli_switch_package_generation_locked: fn(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, project_dir: String, plan: PackageProfilePlan) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> PackageGenerationRecord CLIError! {
     lock: cli_package_profile_lock(project_dir, plan.name)
     state: cli_package_profile_state_dir(project_dir, plan.name)
-    records: cli_read_package_generations(&verification, state)
+    records: cli_read_package_generations(verification, state)
     generation := 0
     loop record in records {
         if record.fingerprint == plan.fingerprint -> generation = record.generation
     }
-    if generation == 0 -> generation = cli_build_package_generation(&verification, &cache, theme, parsed, project_dir, plan)
-    cli_activate_package_generation(&verification, project_dir, plan.name, generation, Val(plan.fingerprint))
+    if generation == 0 -> generation = cli_build_package_generation(verification, cache, theme, parsed, project_dir, plan)
+    cli_activate_package_generation(verification, project_dir, plan.name, generation, Val(plan.fingerprint))
 }
 
 cli_package_profile_rollback: fn(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Time, Time.Wait]> Int Never! {
@@ -143,8 +143,8 @@ cli_package_profile_rollback: fn(verification: &StoreVerification, cache: &Works
         }
         target = Val(number)
     }
-    project_dir: cli_project_env_root(&cache, cli_current_dir())
-    record: cli_rollback_package_generation_locked(&verification, project_dir, name, target) ?? return cli_report_package_generation_error(theme, err)
+    project_dir: cli_project_env_root(cache, cli_current_dir())
+    record: cli_rollback_package_generation_locked(verification, project_dir, name, target) ?? return cli_report_package_generation_error(theme, err)
     if parsed.flags.json {
         print("{{\"profile\":{cli_json_quote(name)},\"current\":{record.generation},\"witness\":{cli_json_quote(record.witness)}}}")
     } else {
@@ -157,8 +157,8 @@ cli_package_profile_rollback: fn(verification: &StoreVerification, cache: &Works
 cli_rollback_package_generation_locked: fn(verification: &StoreVerification, project_dir: String, name: String, target: Int?) -[FS, Env, Time]> PackageGenerationRecord CLIError! {
     lock: cli_package_profile_lock(project_dir, name)
     state: cli_package_profile_state_dir(project_dir, name)
-    records: cli_read_package_generations(&verification, state)
-    pointer: cli_read_package_current_pointer(&verification, state)
+    records: cli_read_package_generations(verification, state)
+    pointer: cli_read_package_current_pointer(verification, state)
     generation := target ?? 0
     if target == None {
         current: pointer ?? return Err(CLIError.Other("profile has no current generation to roll back"))
@@ -167,7 +167,7 @@ cli_rollback_package_generation_locked: fn(verification: &StoreVerification, pro
         }
         if generation == 0 -> return Err(CLIError.Other("profile has no older generation to roll back to"))
     }
-    cli_activate_package_generation(&verification, project_dir, name, generation, None)
+    cli_activate_package_generation(verification, project_dir, name, generation, None)
 }
 
 // A profile's generation history and its current generation.
@@ -179,8 +179,8 @@ PackageGenerationHistory: struct {
 cli_package_generation_history_locked: fn(verification: &StoreVerification, project_dir: String, name: String) -[FS, Env, Time]> PackageGenerationHistory CLIError! {
     lock: cli_package_profile_lock(project_dir, name)
     state: cli_package_profile_state_dir(project_dir, name)
-    records: cli_read_package_generations(&verification, state)
-    pointer: cli_read_package_current_pointer(&verification, state)
+    records: cli_read_package_generations(verification, state)
+    pointer: cli_read_package_current_pointer(verification, state)
     current: if pointer == {
         .Val(found) -> Val(found.generation)
         .None -> None
@@ -190,12 +190,12 @@ cli_package_generation_history_locked: fn(verification: &StoreVerification, proj
 
 cli_package_profile_generations: fn(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Time, Time.Wait]> Int Never! {
     name: cli_one_profile_name(theme, parsed, PROFILE_VERB_GENERATIONS) ?? return EXIT_USAGE
-    project_dir: cli_project_env_root(&cache, cli_current_dir())
-    history: cli_package_generation_history_locked(&verification, project_dir, name) ?? return cli_report_package_generation_error(theme, err)
+    project_dir: cli_project_env_root(cache, cli_current_dir())
+    history: cli_package_generation_history_locked(verification, project_dir, name) ?? return cli_report_package_generation_error(theme, err)
     if parsed.flags.json {
         generations := [String]{}
         loop record in history.records {
-            &generations.push("{{\"generation\":{record.generation},\"fingerprint\":{cli_json_quote(record.fingerprint)},\"witness\":{cli_json_quote(record.witness)},\"lock\":{record.metadata.trim()}}}")
+            generations.push("{{\"generation\":{record.generation},\"fingerprint\":{cli_json_quote(record.fingerprint)},\"witness\":{cli_json_quote(record.witness)},\"lock\":{record.metadata.trim()}}}")
         }
         current: if history.current == {
             .Val(value) -> "{value}"
@@ -241,7 +241,7 @@ cli_valid_profile_name: fn(name: String) -> Bool Never! {
 // Evaluate `profile.<name>` from the project's env.jet; a read failure or a
 // diagnostic is rendered here.
 cli_load_package_profile_plan: fn(cache: &WorkspaceDeclarationCache, theme: Theme, name: String) -[IO, FS, Env, Exec, Time.Wait]> PackageProfileLoad? Never! {
-    project_dir: cli_project_env_root(&cache, cli_current_dir())
+    project_dir: cli_project_env_root(cache, cli_current_dir())
     path: EnvFile.path_in(project_dir)
     source: files.read(path) ?? {
         theme.error("couldn't read {path}", "{err}", "create an env.jet with a `profile.<name>: module {{ … }}` declaration")

@@ -2,19 +2,19 @@
 Resource: struct { name: String }
 
 impl Resource.Close {
-    close: fn(^self) {
+    close: fn(&&self) {
         print("close {self.name}")
     }
 }
 
 run: fn() {
     resource := Resource{ name: "dev" }
-    defer close(^resource)
+    defer close(resource)
     print("body")
 }
 
 bad: fn() {
     resource := Resource{ name: "x" }
-    defer close(^resource)
-    defer close(^resource)
+    defer close(resource)
+    defer close(resource)
 }

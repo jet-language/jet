@@ -6,7 +6,7 @@ run: fn() {
     address: net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("address"))
     client: net.tcp_connect(address) ?? panic("connect")
     _server: net.tcp_accept(listener) ?? panic("accept")
-    ready: net.tcp_ready(&client, NetReadyInterest.Write, 1000) ?? panic("ready")
+    ready: net.tcp_ready(client, NetReadyInterest.Write, 1000) ?? panic("ready")
     result: net.ready_writable(ready)
     print(result)
 }

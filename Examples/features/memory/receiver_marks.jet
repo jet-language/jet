@@ -16,7 +16,7 @@ impl Buffer {
     len: fn(self) -> Int {
         return self.text.len()
     }
-    seal: fn(^self) {
+    seal: fn(&&self) {
         print(self.text)
     }
 }
@@ -30,21 +30,21 @@ inspect: fn(buffer: Buffer) {
 }
 
 edit: fn(buffer: &Buffer) {
-    &buffer.append(" edited")
+    buffer.append(" edited")
 }
 
 run: fn() {
     buf := Buffer{text: "hello"}
-    &buf.append(" world")
+    buf.append(" world")
     print(buf.len())
     // The mark binds `buf` for `grow`; the fresh result passes unmarked.
-    inspect(&buf.grow())
-    edit(&buf)
+    inspect(buf.grow())
+    edit(buf)
     items := [Buffer{text: "a"}, Buffer{text: "b"}]
-    &items[1].append("!")
+    items[1].append("!")
     print(items[1].text)
     // A marked element receiver may replace the whole element.
-    &items[0].clear()
+    items[0].clear()
     print(items[0].text)
     // A fresh receiver takes no mark.
     print(make_buffer().len())
@@ -52,7 +52,7 @@ run: fn() {
     mask := (total).bit_and(3)
     print(mask)
     values := [3, 1, 2]
-    &values.push(values.len())
+    values.push(values.len())
     print(values)
-    ^buf.seal()
+    buf.seal()
 }

@@ -81,7 +81,7 @@ pkg_lua_bind: fn(path: String, source: String, lib: String, cache: String) -[FS,
     pkg_binder_remove_file_quiet(object)
     digest: pkg_binder_identity_digest([String]{"jet-lua-bind-v2", source, root})
     provenance := "schema=jet-lua-bind-v2\nsha256={digest}\nruntime={root}\nstate=per-session\ntransport=dyn+table-view\ntable-view=zero-copy\nhook=instructions\n"
-    pkg_binder_append_artifact_boundary(&provenance, ForeignLanguage.Lua, "Lua", lib, path, archive, "luac={luac};{pkg_binder_cc_ar_identity()}")
+    pkg_binder_append_artifact_boundary(provenance, ForeignLanguage.Lua, "Lua", lib, path, archive, "luac={luac};{pkg_binder_cc_ar_identity()}")
     Ok(LuaBindResult{source: pkg_lua_render_jet(abi, functions), bound: functions, archive: archive, lib_dir: lib_dir, provenance: provenance})
 }
 
@@ -105,16 +105,16 @@ pkg_lua_find_library_dir: fn(root: String) -[FS, Env]> String? Never! {
 pkg_lua_render_jet: fn(abi: String, functions: [String]) -> String Never! {
     out := [String]{"#Import c.{abi}: module {{\n"}
     fixed: PKG_LUA_FIXED_FUNCTIONS
-    loop entry in fixed -> &out.push("    {entry.name}: fn{entry.signature} = \"{abi}_{entry.name}\"\n")
+    loop entry in fixed -> out.push("    {entry.name}: fn{entry.signature} = \"{abi}_{entry.name}\"\n")
     loop name in functions {
-        &out.push("    {name}: fn(handle: Int, input: String, deadline_ms: Int) -> String = \"{abi}_invoke_{name}\"\n")
-        &out.push("    {name}_view: fn(handle: Int, deadline_ms: Int) Int = \"{abi}_view_{name}\"\n")
+        out.push("    {name}: fn(handle: Int, input: String, deadline_ms: Int) -> String = \"{abi}_invoke_{name}\"\n")
+        out.push("    {name}_view: fn(handle: Int, deadline_ms: Int) Int = \"{abi}_view_{name}\"\n")
     }
-    &out.push("}}\nuse abi: c.{abi}\nuse json: core.encoding.json\n\nSession: struct {{ value: Int }}\nTableView: struct {{ session: Int, table: Int }}\n#Error\nLuaError: enum {{ NotRunning Timeout Cancelled Protocol CommandFailed Limit }}\n\n")
-    &out.push(pkg_render_lua_decode_status("LuaError"))
-    &out.push(pkg_render_decode_response("LuaError", DecoderProtocol.LuaRawJSON))
-    &out.push(PKG_LUA_JET_SESSION)
-    loop name in functions -> &out.push(pkg_binder_fill_template(PKG_LUA_JET_FUNCTION, [String: String]{"name": name}))
+    out.push("}}\nuse abi: c.{abi}\nuse json: core.encoding.json\n\nSession: struct {{ value: Int }}\nTableView: struct {{ session: Int, table: Int }}\n#Error\nLuaError: enum {{ NotRunning Timeout Cancelled Protocol CommandFailed Limit }}\n\n")
+    out.push(pkg_render_lua_decode_status("LuaError"))
+    out.push(pkg_render_decode_response("LuaError", DecoderProtocol.LuaRawJSON))
+    out.push(PKG_LUA_JET_SESSION)
+    loop name in functions -> out.push(pkg_binder_fill_template(PKG_LUA_JET_FUNCTION, [String: String]{"name": name}))
     out.join("")
 }
 
@@ -126,7 +126,7 @@ pkg_lua_render_probe: fn() -> String Never! {
 pkg_lua_render_c: fn(abi: String, source: String, functions: [String]) -> String Never! {
     wrappers := [String]{}
     loop name in functions {
-        &wrappers.push("const char* {abi}_invoke_{name}(int64_t h,const char*input,int64_t deadline){{return invoke(h,\"{name}\",input,deadline);}}\nint64_t {abi}_view_{name}(int64_t h,int64_t deadline){{return view(h,\"{name}\",deadline);}}\n")
+        wrappers.push("const char* {abi}_invoke_{name}(int64_t h,const char*input,int64_t deadline){{return invoke(h,\"{name}\",input,deadline);}}\nint64_t {abi}_view_{name}(int64_t h,int64_t deadline){{return view(h,\"{name}\",deadline);}}\n")
     }
     pkg_binder_fill_template(PKG_LUA_BRIDGE_C, [String: String]{
         "abi": abi,
@@ -157,7 +157,7 @@ pkg_lua_discover: fn(source: String) -> [String] ForeignBindError! {
             if pkg_lua_word_at(tokens, index + 3) == None -> return Err(ForeignBindError.Source("Lua function `{name}` must take one input argument"))
             if pkg_lua_punct_at(tokens, index + 4) != 41 -> return Err(ForeignBindError.Source("Lua function `{name}` must take one input argument"))
             if functions.contains(name) -> return Err(ForeignBindError.Source("Lua function `{name}` is declared more than once"))
-            &functions.push(name)
+            functions.push(name)
             depth = 1
             index += 5
             next
@@ -246,10 +246,10 @@ pkg_lua_lex: fn(source: String) -> [LuaToken] ForeignBindError! {
             start: index
             index += 1
             loop index < bytes.len() && pkg_bytes_is_word(Int.from_u8(bytes[index])) -> index += 1
-            &out.push(LuaToken.Word(pkg_bytes_text(bytes, start, index)))
+            out.push(LuaToken.Word(pkg_bytes_text(bytes, start, index)))
             next
         }
-        if code == 40 || code == 41 || code == 44 -> &out.push(LuaToken.Punct(code))
+        if code == 40 || code == 41 || code == 44 -> out.push(LuaToken.Punct(code))
         index += 1
     }
     Ok(out)
@@ -264,11 +264,11 @@ pkg_lua_reserved: fn(value: String) -> Bool Never! {
 }
 
 PKG_LUA_JET_SESSION: comptime { ```impl Session.Close {
-    close: fn(^self) { abi.close(self.value) }
+    close: fn(&&self) { abi.close(self.value) }
 }
 
 impl TableView.Close {
-    close: fn(^self) { abi.view_release(self.session, self.table) }
+    close: fn(&&self) { abi.view_release(self.session, self.table) }
 }
 
 open: fn() -> Session LuaError! {

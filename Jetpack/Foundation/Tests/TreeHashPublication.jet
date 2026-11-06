@@ -789,7 +789,7 @@ foundation_publication_test_staged: fn(root: String, expected: String) Never! -[
     }
     loop index in 0..<inputs.len() {
         hasher := StreamingSHA256.new()
-        &hasher.update(inputs[index].bytes())
+        hasher.update(inputs[index].bytes())
         assert_eq(hasher.finalize_hex(), expected[index])
     }
 }
@@ -807,7 +807,7 @@ foundation_publication_test_staged: fn(root: String, expected: String) Never! -[
             loop offset < bytes.len() {
                 end: if offset + chunk_size < bytes.len() -> offset + chunk_size else -> bytes.len()
                 chunk: loop index in offset..<end -> bytes[index]
-                &hasher.update(chunk)
+                hasher.update(chunk)
                 offset = end
             }
             assert_eq(hasher.finalize_hex(), expected)
@@ -817,10 +817,10 @@ foundation_publication_test_staged: fn(root: String, expected: String) Never! -[
 
 #Test("streaming SHA256 emits the same raw bytes through empty updates") {
     hasher := StreamingSHA256.new()
-    &hasher.update([U8]{})
-    &hasher.update([U8]{97})
-    &hasher.update([U8]{})
-    &hasher.update([U8]{98, 99})
+    hasher.update([U8]{})
+    hasher.update([U8]{97})
+    hasher.update([U8]{})
+    hasher.update([U8]{98, 99})
     bytes: "abc".bytes()
     view: bytes[0..<bytes.len()]
     assert_eq(hasher.finalize(), sha256_bytes(view))

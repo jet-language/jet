@@ -128,21 +128,21 @@ pkg_java_bind: fn(source_path: String, source: String, lib: String, cache: Strin
     ar_identity: pkg_bridge_tool_identity("ar")
     language: (ForeignLanguage.Java).root()
     builder := ForeignIdentityBuilder.new(FOREIGN_BRIDGE_IDENTITY_SCHEMA)
-    &builder.field("language", language.bytes())
-    &builder.field("binder_schema", "jet-java-bind-v1".bytes())
-    &builder.field("library", lib.bytes())
-    &builder.field("abi", abi.bytes())
-    &builder.field("descriptor", descriptor.stamp().bytes())
-    &builder.field("source_path", path.bytes())
-    &builder.field("source_bytes", source.bytes())
-    &builder.field("javap", javap.stdout)
-    &builder.field("bridge", bridge_source.bytes())
-    &builder.field("classes", classes.bytes())
-    &builder.field("jvm", jvm_dir.bytes())
-    &builder.field("javac_toolchain", javac_identity.bytes())
-    &builder.field("javap_toolchain", javap_identity.bytes())
-    &builder.field("cc", cc_identity.bytes())
-    &builder.field("ar", ar_identity.bytes())
+    builder.field("language", language.bytes())
+    builder.field("binder_schema", "jet-java-bind-v1".bytes())
+    builder.field("library", lib.bytes())
+    builder.field("abi", abi.bytes())
+    builder.field("descriptor", descriptor.stamp().bytes())
+    builder.field("source_path", path.bytes())
+    builder.field("source_bytes", source.bytes())
+    builder.field("javap", javap.stdout)
+    builder.field("bridge", bridge_source.bytes())
+    builder.field("classes", classes.bytes())
+    builder.field("jvm", jvm_dir.bytes())
+    builder.field("javac_toolchain", javac_identity.bytes())
+    builder.field("javap_toolchain", javap_identity.bytes())
+    builder.field("cc", cc_identity.bytes())
+    builder.field("ar", ar_identity.bytes())
     identity: builder.finish()
     source_digest: pkg_bridge_sha_file(path) ?? return Err(pkg_binder_scalar_bridge_error(err))
     fields: [(name: String, value: String)]{
@@ -166,8 +166,8 @@ pkg_java_bind: fn(source_path: String, source: String, lib: String, cache: Strin
     artifacts: [(name: String, digest: String)]{(name: files.basename(archive), digest: archive_digest)}
     provenance: pkg_bridge_render_provenance(identity, fields, artifacts) ?? return Err(pkg_binder_scalar_bridge_error(err))
     bound := [String]{}
-    loop method in surface.methods -> &bound.push(method.name)
-    &bound.push("new")
+    loop method in surface.methods -> bound.push(method.name)
+    bound.push("new")
     Ok(JavaBindResult{source: pkg_java_render_jet(lib, surface), bound: bound, archive: archive, jvm_dir: jvm_dir, provenance: provenance})
 }
 
@@ -209,10 +209,10 @@ pkg_java_parse_javap: fn(class: String, text: String) -> JavaSurface ForeignBind
         name: if words.len() > 0 -> words[words.len() - 1] else -> ""
         if !pkg_binder_is_ident(name) -> next
         if names.contains(name) -> return Err(ForeignBindError.Source("overloaded Java method `{name}` needs an explicit overlay"))
-        &names.push(name)
+        names.push(name)
         types: pkg_java_descriptor_types(descriptor)
         if types.result == JavaScalar.Void -> return Err(ForeignBindError.Source("void Java method `{name}` needs a typed overlay"))
-        &methods.push(JavaMethod{name: name, params: types.params, result: types.result, is_static: sig.contains(" static ")})
+        methods.push(JavaMethod{name: name, params: types.params, result: types.result, is_static: sig.contains(" static ")})
     }
     if !has_ctor -> return Err(ForeignBindError.Source("no supported public constructor was discovered"))
     if methods.len() == 0 -> return Err(ForeignBindError.Source("no supported public Java methods were discovered"))
@@ -228,8 +228,8 @@ pkg_java_descriptor_types: fn(value: String) -> JavaDescriptorTypes ForeignBindE
     params := [JavaScalar]{}
     loop index in 1..<close {
         if Int.from_u8(raw[index]) == {
-            74 -> &params.push(JavaScalar.Int)
-            68 -> &params.push(JavaScalar.Float)
+            74 -> params.push(JavaScalar.Int)
+            68 -> params.push(JavaScalar.Float)
             else -> return Err(ForeignBindError.Source(unsupported))
         }
     }
@@ -246,14 +246,14 @@ pkg_java_descriptor_types: fn(value: String) -> JavaDescriptorTypes ForeignBindE
 // `arg0: Int, arg1: Float`.
 pkg_java_params_jet: fn(params: [JavaScalar]) -> String Never! {
     parts := [String]{}
-    loop index in 0..<params.len() -> &parts.push("arg{index}: {params[index].jet()}")
+    loop index in 0..<params.len() -> parts.push("arg{index}: {params[index].jet()}")
     parts.join(", ")
 }
 
 // `arg0, arg1`.
 pkg_java_args: fn(count: Int) -> String Never! {
     parts := [String]{}
-    loop index in 0..<count -> &parts.push("arg{index}")
+    loop index in 0..<count -> parts.push("arg{index}")
     parts.join(", ")
 }
 
@@ -264,19 +264,19 @@ pkg_java_render_jet: fn(lib: String, surface: JavaSurface) -> String Never! {
     loop method in surface.methods {
         receiver: pkg_java_receiver(method, "handle: Int")
         result: if method.result == JavaScalar.Void -> "" else -> " {method.result.jet()}"
-        &out.push("    {method.name}: fn({receiver}{pkg_java_params_jet(method.params)}){result} = \"{abi}_{method.name}\"\n")
+        out.push("    {method.name}: fn({receiver}{pkg_java_params_jet(method.params)}){result} = \"{abi}_{method.name}\"\n")
     }
-    &out.push("}}\nuse abi: c.{abi}\n\nHandle: struct {{ value: Int }}\n#Error\nJavaError: enum {{ Exception }}\n\n")
-    &out.push("new: fn({ctor_params}) -[FFI.Java]> Handle JavaError! {{\n    value: abi.new({pkg_java_args(surface.ctor.len())})\n    if abi.take_error() != 0 {{ return Err(JavaError.Exception) }}\n    return Ok(Handle{{ value: value }})\n}}\n\n")
-    &out.push("close: fn(^handle: Handle) -[FFI.Java]> {{}}\n\nimpl Handle.Close {{\n    close: fn(^self) {{ abi.close(self.value) }}\n}}\n\n")
+    out.push("}}\nuse abi: c.{abi}\n\nHandle: struct {{ value: Int }}\n#Error\nJavaError: enum {{ Exception }}\n\n")
+    out.push("new: fn({ctor_params}) -[FFI.Java]> Handle JavaError! {{\n    value: abi.new({pkg_java_args(surface.ctor.len())})\n    if abi.take_error() != 0 {{ return Err(JavaError.Exception) }}\n    return Ok(Handle{{ value: value }})\n}}\n\n")
+    out.push("close: fn(&&handle: Handle) -[FFI.Java]> {{}}\n\nimpl Handle.Close {{\n    close: fn(&&self) {{ abi.close(self.value) }}\n}}\n\n")
     loop method in surface.methods {
         receiver: pkg_java_receiver(method, "handle: Handle")
         call_receiver: pkg_java_receiver(method, "handle.value")
         call: "abi.{method.name}({call_receiver}{pkg_java_args(method.params.len())})"
         if method.result == JavaScalar.Void {
-            &out.push("{method.name}: fn({receiver}{pkg_java_params_jet(method.params)}) -[FFI.Java]> {{\n    {call}\n    if abi.take_error() != 0 {{ panic(\"Java exception\") }}\n}}\n\n")
+            out.push("{method.name}: fn({receiver}{pkg_java_params_jet(method.params)}) -[FFI.Java]> {{\n    {call}\n    if abi.take_error() != 0 {{ panic(\"Java exception\") }}\n}}\n\n")
         } else {
-            &out.push("{method.name}: fn({receiver}{pkg_java_params_jet(method.params)}) -[FFI.Java]> {method.result.jet()} !JavaError {{\n    value: {call}\n    if abi.take_error() != 0 {{ return Err(JavaError.Exception) }}\n    return Ok(value)\n}}\n\n")
+            out.push("{method.name}: fn({receiver}{pkg_java_params_jet(method.params)}) -[FFI.Java]> {method.result.jet()} !JavaError {{\n    value: {call}\n    if abi.take_error() != 0 {{ return Err(JavaError.Exception) }}\n    return Ok(value)\n}}\n\n")
         }
     }
     out.join("")
@@ -295,7 +295,7 @@ pkg_java_render_c: fn(lib: String, surface: JavaSurface, classes: String) -> Str
     class: pkg_java_c_escape(surface.class)
     out := [String]{pkg_binder_fill_template(PKG_JAVA_BRIDGE_C, [String: String]{"abi": abi, "classes": pkg_java_c_escape(classes)})}
     ctor_descriptor: pkg_java_descriptor(surface.ctor, JavaScalar.Void)
-    &out.push("int64_t {abi}_new({pkg_java_params_c(surface.ctor)}){{last_error=0;JNIEnv*e=env();if(!e)return 0;jclass c=(*e)->FindClass(e,\"{class}\");if(!c){{fail(e);return 0;}}jmethodID m=(*e)->GetMethodID(e,c,\"<init>\",\"{ctor_descriptor}\");if(!m){{fail(e);return 0;}}{pkg_java_emit_jvalues(surface.ctor)}jobject local=(*e)->NewObjectA(e,c,m,a);if(!local||(*e)->ExceptionCheck(e)){{fail(e);return 0;}}jobject global=(*e)->NewGlobalRef(e,local);(*e)->DeleteLocalRef(e,local);if(!global){{fail(e);return 0;}}pthread_mutex_lock(&lock);for(int i=0;i<1024;i++){{if(!handles[i]){{handles[i]=global;pthread_mutex_unlock(&lock);return i+1;}}}}pthread_mutex_unlock(&lock);(*e)->DeleteGlobalRef(e,global);fail(e);return 0;}}\n")
+    out.push("int64_t {abi}_new({pkg_java_params_c(surface.ctor)}){{last_error=0;JNIEnv*e=env();if(!e)return 0;jclass c=(*e)->FindClass(e,\"{class}\");if(!c){{fail(e);return 0;}}jmethodID m=(*e)->GetMethodID(e,c,\"<init>\",\"{ctor_descriptor}\");if(!m){{fail(e);return 0;}}{pkg_java_emit_jvalues(surface.ctor)}jobject local=(*e)->NewObjectA(e,c,m,a);if(!local||(*e)->ExceptionCheck(e)){{fail(e);return 0;}}jobject global=(*e)->NewGlobalRef(e,local);(*e)->DeleteLocalRef(e,local);if(!global){{fail(e);return 0;}}pthread_mutex_lock(&lock);for(int i=0;i<1024;i++){{if(!handles[i]){{handles[i]=global;pthread_mutex_unlock(&lock);return i+1;}}}}pthread_mutex_unlock(&lock);(*e)->DeleteGlobalRef(e,global);fail(e);return 0;}}\n")
     loop method in surface.methods {
         fallback: method.result.default_return()
         receiver: if method.is_static -> "" else -> "int64_t handle"
@@ -309,7 +309,7 @@ pkg_java_render_c: fn(lib: String, surface: JavaSurface, classes: String) -> Str
             .Void -> "(*e)->Call{statics}VoidMethodA(e,{target},id,a);"
         }
         returned: if method.result == JavaScalar.Void -> "" else -> "return value;"
-        &out.push("{method.result.c()} {abi}_{method.name}({receiver}{separator}{pkg_java_params_c(method.params)}){{last_error=0;JNIEnv*e=env();if(!e){fallback}jclass c=(*e)->FindClass(e,\"{class}\");if(!c){{fail(e);{fallback}}}{lookup}jmethodID id=(*e)->Get{statics}MethodID(e,c,\"{method.name}\",\"{pkg_java_descriptor(method.params, method.result)}\");if(!id){{fail(e);{fallback}}}{pkg_java_emit_jvalues(method.params)}{call}if((*e)->ExceptionCheck(e)){{fail(e);{fallback}}}{returned}}}\n")
+        out.push("{method.result.c()} {abi}_{method.name}({receiver}{separator}{pkg_java_params_c(method.params)}){{last_error=0;JNIEnv*e=env();if(!e){fallback}jclass c=(*e)->FindClass(e,\"{class}\");if(!c){{fail(e);{fallback}}}{lookup}jmethodID id=(*e)->Get{statics}MethodID(e,c,\"{method.name}\",\"{pkg_java_descriptor(method.params, method.result)}\");if(!id){{fail(e);{fallback}}}{pkg_java_emit_jvalues(method.params)}{call}if((*e)->ExceptionCheck(e)){{fail(e);{fallback}}}{returned}}}\n")
     }
     out.join("")
 }
@@ -317,7 +317,7 @@ pkg_java_render_c: fn(lib: String, surface: JavaSurface, classes: String) -> Str
 // `int64_t arg0,double arg1`.
 pkg_java_params_c: fn(params: [JavaScalar]) -> String Never! {
     parts := [String]{}
-    loop index in 0..<params.len() -> &parts.push("{params[index].c()} arg{index}")
+    loop index in 0..<params.len() -> parts.push("{params[index].c()} arg{index}")
     parts.join(",")
 }
 
@@ -325,15 +325,15 @@ pkg_java_params_c: fn(params: [JavaScalar]) -> String Never! {
 pkg_java_emit_jvalues: fn(params: [JavaScalar]) -> String Never! {
     slots: if params.len() > 1 -> params.len() else -> 1
     out := [String]{"jvalue a[{slots}];"}
-    loop index in 0..<params.len() -> &out.push("a[{index}].{params[index].jni_field()}=arg{index};")
+    loop index in 0..<params.len() -> out.push("a[{index}].{params[index].jni_field()}=arg{index};")
     out.join("")
 }
 
 pkg_java_descriptor: fn(params: [JavaScalar], result: JavaScalar) -> String Never! {
     out := [String]{"("}
-    loop scalar in params -> &out.push(scalar.descriptor())
-    &out.push(")")
-    &out.push(result.descriptor())
+    loop scalar in params -> out.push(scalar.descriptor())
+    out.push(")")
+    out.push(result.descriptor())
     out.join("")
 }
 

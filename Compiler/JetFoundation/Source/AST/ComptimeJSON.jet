@@ -41,7 +41,7 @@ ast_comptime_value_json: fn(value: CtValue) -> String comptime_encoding.Encoding
             parts := [String]{}
             loop item in values {
                 encoded: ast_comptime_value_json(item) ?? return Err(err)
-                &parts.push(encoded)
+                parts.push(encoded)
             }
             "[{parts.join(",")}]"
         }
@@ -52,7 +52,7 @@ ast_comptime_value_json: fn(value: CtValue) -> String comptime_encoding.Encoding
                     return Err(ast_comptime_json_unsupported("JSON cannot encode non-text map keys"))
                 }
                 encoded: ast_comptime_value_json(entry.value) ?? return Err(err)
-                &parts.push("{foundation_json_quote(key)}:{encoded}")
+                parts.push("{foundation_json_quote(key)}:{encoded}")
             }
             "{{{parts.join(",")}}}"
         }
@@ -61,7 +61,7 @@ ast_comptime_value_json: fn(value: CtValue) -> String comptime_encoding.Encoding
             loop field in fields {
                 if ast_comptime_memo_storage_name(field.name) -> next
                 encoded: ast_comptime_value_json(field.value) ?? return Err(err)
-                &parts.push("{foundation_json_quote(field.name)}:{encoded}")
+                parts.push("{foundation_json_quote(field.name)}:{encoded}")
             }
             "{{{parts.join(",")}}}"
         }
@@ -76,9 +76,9 @@ ast_comptime_value_json: fn(value: CtValue) -> String comptime_encoding.Encoding
                 encoded: ast_comptime_value_json(argument.value) ?? return Err(err)
                 if labeled {
                     label: argument.label ?? panic("checked enum label")
-                    &parts.push("{foundation_json_quote(label)}:{encoded}")
+                    parts.push("{foundation_json_quote(label)}:{encoded}")
                 } else {
-                    &parts.push(encoded)
+                    parts.push(encoded)
                 }
             }
             key: foundation_json_quote(variant)

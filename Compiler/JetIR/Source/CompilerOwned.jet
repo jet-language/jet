@@ -178,16 +178,16 @@ ir_compiler_owned_core_fields: fn() -> [String:[TypeTupleField]] Never! {
         {name: "AllocError", fields: [String]{"requested_bytes", "allocator"}},
         {name: "DataSummary", fields: [String]{"count", "sum", "mean", "min", "max", "median", "variance", "stddev"}},
     }
-    loop name in IR_COMPILER_OWNED_GEOMETRY_POINTS -> &records.push(IRCompilerOwnedRecord{name: name.copy(), fields: [String]{"x", "y"}})
-    loop record in IR_COMPILER_OWNED_CORE_RECORDS -> &records.push(record.copy())
+    loop name in IR_COMPILER_OWNED_GEOMETRY_POINTS -> records.push(IRCompilerOwnedRecord{name: name.copy(), fields: [String]{"x", "y"}})
+    loop record in IR_COMPILER_OWNED_CORE_RECORDS -> records.push(record.copy())
     owners := [String]{}
     fields := [[String]]{}
     seen := [String:Bool]{}
     loop record in records {
         if seen.get(record.name) != None -> next
         seen[record.name] = true
-        &owners.push(record.name.copy())
-        &fields.push(record.fields.copy())
+        owners.push(record.name.copy())
+        fields.push(record.fields.copy())
     }
     types: core_record_field_table(owners, fields)
     out := [String:[TypeTupleField]]{}
@@ -195,7 +195,7 @@ ir_compiler_owned_core_fields: fn() -> [String:[TypeTupleField]] Never! {
         row := [TypeTupleField]{}
         loop (f, field) in fields[k] {
             ty: types[k][f] ?? panic("missing canonical Core field {owner}.{field}")
-            &row.push(TypeTupleField{name: field.copy(), ty: ty.copy()})
+            row.push(TypeTupleField{name: field.copy(), ty: ty.copy()})
         }
         out[owner] = row
     }
@@ -238,7 +238,7 @@ ir_compiler_owned_record_fields: fn(name: String, core: [String:[TypeTupleField]
         scalar: if name == "Transform" -> Type.Float else -> t
         names: [String]{"m00", "m01", "m10", "m11", "tx", "ty"}
         fields := [TypeTupleField]{}
-        loop field in names -> &fields.push(TypeTupleField{name: field, ty: scalar})
+        loop field in names -> fields.push(TypeTupleField{name: field, ty: scalar})
         return Val(fields)
     }
     if name == "KeyRef" || name == "MutationPlan" || name == "VaultWrite" -> return Val([TypeTupleField]{})
@@ -259,7 +259,7 @@ ir_compiler_owned_record_fields: fn(name: String, core: [String:[TypeTupleField]
         if record.name != name -> next
         scalar: ir_math_scalar_type(name)
         fields := [TypeTupleField]{}
-        loop field in record.fields -> &fields.push(TypeTupleField{name: field, ty: scalar})
+        loop field in record.fields -> fields.push(TypeTupleField{name: field, ty: scalar})
         return Val(fields)
     }
     None

@@ -45,27 +45,27 @@ pkg_bridge_scalar_bridge_identity_with_sources: fn(descriptor: BinderDescriptor,
 pkg_bridge_scalar_bridge_identity_with_descriptor: fn(language: String, lib: String, abi: String, runtime: String, descriptor: String, sources: [BridgeSource], worker: String, functions: [ScalarBridgeFunction]) -[FS, Env, Exec, Time.Wait]> String ForeignBridgeError! {
     worker_bytes: files.read_bytes(worker) ?? return Err(pkg_bridge_error("could not read {worker} for bridge identity: {err}"))
     identity := ForeignIdentityBuilder.new(FOREIGN_BRIDGE_IDENTITY_SCHEMA)
-    &identity.field("bridge_schema", FOREIGN_SCALAR_BRIDGE_SCHEMA.bytes())
-    &identity.field("language", language.bytes())
-    &identity.field("library", lib.bytes())
-    &identity.field("abi", abi.bytes())
-    &identity.field("runtime", runtime.bytes())
-    &identity.field("runtime_toolchain", pkg_bridge_tool_identity(runtime).bytes())
-    &identity.field("cc", pkg_bridge_tool_identity("cc").bytes())
-    &identity.field("ar", pkg_bridge_tool_identity("ar").bytes())
-    &identity.field("descriptor", descriptor.bytes())
+    identity.field("bridge_schema", FOREIGN_SCALAR_BRIDGE_SCHEMA.bytes())
+    identity.field("language", language.bytes())
+    identity.field("library", lib.bytes())
+    identity.field("abi", abi.bytes())
+    identity.field("runtime", runtime.bytes())
+    identity.field("runtime_toolchain", pkg_bridge_tool_identity(runtime).bytes())
+    identity.field("cc", pkg_bridge_tool_identity("cc").bytes())
+    identity.field("ar", pkg_bridge_tool_identity("ar").bytes())
+    identity.field("descriptor", descriptor.bytes())
     loop source in sources {
         if source.role == "" -> return Err(pkg_bridge_error("foreign bridge source roles cannot be empty"))
-        &identity.field("{source.role}_path", source.path.bytes())
+        identity.field("{source.role}_path", source.path.bytes())
         source_bytes: files.read_bytes(source.path) ?? return Err(pkg_bridge_error("could not read {source.path} for bridge identity: {err}"))
-        &identity.field("{source.role}_bytes", source_bytes)
+        identity.field("{source.role}_bytes", source_bytes)
     }
-    &identity.field("worker_path", worker.bytes())
-    &identity.field("worker_bytes", worker_bytes)
+    identity.field("worker_path", worker.bytes())
+    identity.field("worker_bytes", worker_bytes)
     loop function in functions {
-        &identity.field("function", function.name.bytes())
-        loop parameter in function.params -> &identity.field("parameter", parameter.debug_name().bytes())
-        &identity.field("result", function.result.debug_name().bytes())
+        identity.field("function", function.name.bytes())
+        loop parameter in function.params -> identity.field("parameter", parameter.debug_name().bytes())
+        identity.field("result", function.result.debug_name().bytes())
     }
     Ok(identity.finish())
 }
@@ -164,13 +164,13 @@ pkg_bridge_write_scalar_provenance_with_sources: fn(cache: String, lib: String, 
     worker_digest: pkg_bridge_sha_file(worker)
     archive_digest: pkg_bridge_sha_file(archive)
     source_rows := [String]{}
-    loop entry in sources -> &source_rows.push("{entry.role}:{entry.path}:{pkg_bridge_sha_file(entry.path)}")
+    loop entry in sources -> source_rows.push("{entry.role}:{entry.path}:{pkg_bridge_sha_file(entry.path)}")
     boundary_identity: ForeignBoundaryIdentity.new(source_rows.join("|"), "none", "descriptor={descriptor}", "worker:{worker}:{worker_digest}", "runtime={runtime_toolchain};cc={cc};ar={ar}", pkg_bridge_foreign_host_target())
     boundary := ForeignBoundaryContract.new(descriptor_row, lib, boundary_identity)
     coverage: ForeignArtifactCoverage.new("{archive}:sha256-{archive_digest}", pkg_bridge_foreign_host_target(), boundary.identity.generator).with_transitive_dependencies([String]{}).with_reachable_callbacks([String]{}).with_compiler_flags([String]{})
     boundary = boundary.with_artifact_coverage(coverage)
     loop obligation in FOREIGN_BOUNDARY_OBLIGATIONS {
-        &boundary.set_obligation(obligation, FFIEvidenceBasis.Trusted, "scalar-sidecar-generator", [String]{"adapter implementation remains TRUSTED outside hardening", "loaded archive and generated worker identities are recorded"})
+        boundary.set_obligation(obligation, FFIEvidenceBasis.Trusted, "scalar-sidecar-generator", [String]{"adapter implementation remains TRUSTED outside hardening", "loaded archive and generated worker identities are recorded"})
     }
     provenance: files.join(cache, "{lib}.provenance")
     fields := [(name: String, value: String)]{
@@ -192,17 +192,17 @@ pkg_bridge_write_scalar_provenance_with_sources: fn(cache: String, lib: String, 
         (name: "cc", value: cc),
         (name: "ar", value: ar)
     }
-    loop field in boundary.provenance_fields() -> &fields.push(field)
+    loop field in boundary.provenance_fields() -> fields.push(field)
     loop entry in sources {
-        &fields.push((name: entry.role, value: entry.path))
-        &fields.push((name: "{entry.role}-sha256", value: pkg_bridge_sha_file(entry.path)))
+        fields.push((name: entry.role, value: entry.path))
+        fields.push((name: "{entry.role}-sha256", value: pkg_bridge_sha_file(entry.path)))
     }
-    &fields.push((name: "worker", value: worker))
-    &fields.push((name: "worker-sha256", value: worker_digest))
+    fields.push((name: "worker", value: worker))
+    fields.push((name: "worker-sha256", value: worker_digest))
     loop function in functions {
-        &fields.push((name: "function", value: function.name))
-        &fields.push((name: "function-params", value: pkg_foreign_scalar_list_debug(function.params)))
-        &fields.push((name: "function-result", value: function.result.debug_name()))
+        fields.push((name: "function", value: function.name))
+        fields.push((name: "function-params", value: pkg_foreign_scalar_list_debug(function.params)))
+        fields.push((name: "function-result", value: function.result.debug_name()))
     }
     artifacts: [(name: String, digest: String)]{(name: files.basename(worker), digest: worker_digest), (name: files.basename(archive), digest: archive_digest)}
     pkg_bridge_write_provenance(provenance, identity, fields, artifacts)
@@ -228,7 +228,7 @@ pkg_bridge_render_scalar_jet: fn(abi: String, descriptor: BinderDescriptor, func
         result: function.result.jet_name() ?? return Err(pkg_bridge_error(pkg_bridge_unsupported_scalar(function.result)))
         out = "{out}{function.name}: fn({params}) -[{effect_root}]> {result} !String {{\n"
         arguments := [String]{}
-        loop index in 0..<function.params.len() -> &arguments.push("arg{index}")
+        loop index in 0..<function.params.len() -> arguments.push("arg{index}")
         out = "{out}    value: abi.{function.name}({arguments.join(", ")})\n    if abi.take_error() != 0 {{\n        return Err(\"foreign call failed\")\n    }}\n    return Ok(value)\n}}\n\n"
     }
     Ok(out)
@@ -239,7 +239,7 @@ pkg_bridge_scalar_jet_params: fn(function: ScalarBridgeFunction) -> String Forei
     loop index in 0..<function.params.len() {
         scalar: function.params[index]
         jet_type: scalar.jet_name() ?? return Err(pkg_bridge_error(pkg_bridge_unsupported_scalar(scalar)))
-        &params.push("arg{index}: {jet_type}")
+        params.push("arg{index}: {jet_type}")
     }
     Ok(params.join(", "))
 }
@@ -278,11 +278,11 @@ pkg_bridge_render_scalar_c: fn(abi: String, runtime: String, worker: String, sou
         loop index in 0..<function.params.len() {
             scalar: function.params[index]
             parameter_type: pkg_bridge_scalar_c_type(scalar) ?? return Err(pkg_bridge_error(pkg_bridge_unsupported_scalar(scalar)))
-            &parameters.push("{parameter_type} arg{index}")
+            parameters.push("{parameter_type} arg{index}")
             spec: pkg_bridge_scalar_format_spec(scalar) ?? return Err(pkg_bridge_error(pkg_bridge_unsupported_scalar(scalar)))
             specs = "{specs}{spec}"
             argument: pkg_bridge_scalar_format_arg(scalar, index) ?? return Err(pkg_bridge_error(pkg_bridge_unsupported_scalar(scalar)))
-            &arguments.push(argument)
+            arguments.push(argument)
         }
         out = "{out}{result_type} {abi}_{function.name}({parameters.join(", ")}) {{\n    char output[256];\n    char command[8192];\n    int written = snprintf(command, sizeof(command), \""
         out = "{out}{quoted_runtime} {quoted_worker} {quoted_source} {pkg_bridge_c_escape(pkg_bridge_shell_quote(function.name))}{specs}"
@@ -353,9 +353,9 @@ pkg_bridge_validate_scalar_bridge: fn(abi: String, descriptor: BinderDescriptor,
     loop function in functions {
         if !pkg_bridge_is_identifier(function.name) -> return Err(pkg_bridge_error("invalid foreign function name `{function.name}`"))
         if names.contains(function.name) -> return Err(pkg_bridge_error("duplicate foreign function `{function.name}`"))
-        &names.push(function.name)
+        names.push(function.name)
         scalars := function.params
-        &scalars.push(function.result)
+        scalars.push(function.result)
         loop scalar in scalars {
             if scalar == {
                 .Int | .Float | .Bool -> {}

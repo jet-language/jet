@@ -27,12 +27,12 @@ ir_opt_split_loops: fn(m: IRModule, f: &IRFunction) -> Int Never! {
     writes := [Int]{}
     last_write := [Int]{}
     loop _ in 0..<slots {
-        &uses.push(0)
-        &writes.push(0)
-        &last_write.push(-1)
+        uses.push(0)
+        writes.push(0)
+        last_write.push(-1)
     }
     loop at in 0..<count {
-        ir_x64_reads_into(f, at, &reads)
+        ir_x64_reads_into(f, at, reads)
         loop slot in reads {
             if slot >= 0 && slot < slots -> uses[slot] = uses[slot] + 1
         }
@@ -70,25 +70,25 @@ ir_opt_split_loops: fn(m: IRModule, f: &IRFunction) -> Int Never! {
         tail: f.a[head]
         if tail <= head || tail >= count -> next
         exits: ir_opt_split_exits(f, head, tail)
-        &touched.clear()
+        touched.clear()
         loop at in head..<(tail + 1) {
-            ir_x64_reads_into(f, at, &reads)
-            loop slot in reads -> ir_opt_split_note(&mark, &inside, &changed, &touched, slot, head, false)
-            ir_opt_split_note(&mark, &inside, &changed, &touched, ir_x64_write(f, at), head, true)
+            ir_x64_reads_into(f, at, reads)
+            loop slot in reads -> ir_opt_split_note(mark, inside, changed, touched, slot, head, false)
+            ir_opt_split_note(mark, inside, changed, touched, ir_x64_write(f, at), head, true)
         }
         start: split_slot.len()
         loop slot in touched {
             if !splittable[slot] || inside[slot] == uses[slot] || (changed[slot] && !exits) -> next
-            &split_slot.push(slot)
-            &split_new.push(ir_slot(&f, f.slot_type[slot], .Temp, -1, f.slot_line[slot]))
-            &split_old.push(-1)
-            &split_written.push(changed[slot])
+            split_slot.push(slot)
+            split_new.push(ir_slot(f, f.slot_type[slot], .Temp, -1, f.slot_line[slot]))
+            split_old.push(-1)
+            split_written.push(changed[slot])
         }
         if split_slot.len() == start -> next
         row: first.len()
-        &first.push(start)
-        &counts.push(split_slot.len() - start)
-        &heads.push(head)
+        first.push(start)
+        counts.push(split_slot.len() - start)
+        heads.push(head)
         enter_of[head] = row
         close_of[tail] = row
         if exits -> back_of[tail + 1] = row
@@ -107,11 +107,11 @@ ir_opt_split_loops: fn(m: IRModule, f: &IRFunction) -> Int Never! {
         if enter >= 0 {
             loop k in first[enter]..<(first[enter] + counts[enter]) {
                 slot: split_slot[k]
-                ir_opt_code_put(&code, .Move, split_new[k], current[slot], -1, -1, line)
+                ir_opt_code_put(code, .Move, split_new[k], current[slot], -1, -1, line)
                 split_old[k] = current[slot]
                 current[slot] = split_new[k]
             }
-            &open_rows.push(enter)
+            open_rows.push(enter)
         }
         // A Br past the Block around a Loop hands its written splits back
         // first, innermost Loop first.
@@ -121,33 +121,33 @@ ir_opt_split_loops: fn(m: IRModule, f: &IRFunction) -> Int Never! {
             loop row_at >= 0 && target < heads[open_rows[row_at]] - 1 {
                 row: open_rows[row_at]
                 loop k in first[row]..<(first[row] + counts[row]) {
-                    if split_written[k] -> ir_opt_code_put(&code, .Move, split_old[k], split_new[k], -1, -1, line)
+                    if split_written[k] -> ir_opt_code_put(code, .Move, split_old[k], split_new[k], -1, -1, line)
                 }
                 row_at -= 1
             }
         }
-        ir_opt_split_put(&code, &f, current, at)
-        if op == .Block || op == .Loop || op == .If -> &opens.push(at)
-        if op == .End -> _ := &opens.pop()
+        ir_opt_split_put(code, f, current, at)
+        if op == .Block || op == .Loop || op == .If -> opens.push(at)
+        if op == .End -> _ := opens.pop()
         closing: close_of[at]
         if closing >= 0 {
             loop k in first[closing]..<(first[closing] + counts[closing]) -> current[split_slot[k]] = split_old[k]
-            _ := &open_rows.pop()
+            _ := open_rows.pop()
         }
         back: back_of[at]
         if back >= 0 {
             loop k in first[back]..<(first[back] + counts[back]) {
-                if split_written[k] -> ir_opt_code_put(&code, .Move, split_old[k], split_new[k], -1, -1, line)
+                if split_written[k] -> ir_opt_code_put(code, .Move, split_old[k], split_new[k], -1, -1, line)
             }
         }
     }
-    f.op = ^code.op
-    f.dst = ^code.dst
-    f.a = ^code.a
-    f.b = ^code.b
-    f.c = ^code.c
-    f.code_line = ^code.line
-    ir_opt_compact(&f)
+    f.op = code.op.move()
+    f.dst = code.dst.move()
+    f.a = code.a.move()
+    f.b = code.b.move()
+    f.c = code.c.move()
+    f.code_line = code.line.move()
+    ir_opt_compact(f)
     split_slot.len()
 }
 
@@ -170,7 +170,7 @@ ir_opt_split_note: fn(mark: &[Int], inside: &[Int], changed: &[Bool], touched: &
         mark[slot] = head
         inside[slot] = 0
         changed[slot] = false
-        &touched.push(slot)
+        touched.push(slot)
     }
     inside[slot] = inside[slot] + 1
     if write -> changed[slot] = true
@@ -214,13 +214,13 @@ ir_opt_split_put: fn(code: &IROptCode, f: &IRFunction, current: [Int], at: Int) 
             start: f.args.len()
             loop index in b..<(b + c) {
                 value: f.args[index]
-                &f.args.push(if value >= 0 -> current[value] else -> value)
+                f.args.push(if value >= 0 -> current[value] else -> value)
             }
             b = start
         }
     }
     if ir_x64_write(f, at) >= 0 && dst >= 0 -> dst = current[dst]
-    ir_opt_code_put(&code, op, dst, a, b, c, f.code_line[at])
+    ir_opt_code_put(code, op, dst, a, b, c, f.code_line[at])
 }
 
 // count(n): total and i live before, in and after the Loop, which writes
@@ -228,36 +228,36 @@ ir_opt_split_put: fn(code: &IROptCode, f: &IRFunction, current: [Int], at: Int) 
 // Blocks hands the two back before it, the Block's End after it.
 #Test("A Loop gets slots of its own for the words it shares and hands written ones back on every way out") {
     m := ir_module_new()
-    word: ir_type_row(&m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
-    truth: ir_type_row(&m, Type.Bool) ?? panic("no Bool row")
+    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+    truth: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
     f := ir_function_new("count", "test:split.jet::count", "", "split.jet", 1)
-    n: ir_slot(&f, word, IRSlotKind.Param, ir_intern_name(&m, "n"), 1)
+    n: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "n"), 1)
     f.result = word
-    total: ir_slot(&f, word, IRSlotKind.Local, ir_intern_name(&m, "total"), 2)
-    i: ir_slot(&f, word, IRSlotKind.Local, ir_intern_name(&m, "i"), 3)
-    done: ir_slot(&f, truth, IRSlotKind.Temp, -1, 0)
-    hit: ir_slot(&f, truth, IRSlotKind.Temp, -1, 0)
-    one: ir_slot(&f, word, IRSlotKind.Temp, -1, 0)
-    _ := ir_emit(&f, IROp.Const, total, 0, -1, -1, 2)
-    _ := ir_emit(&f, IROp.Const, i, 0, -1, -1, 3)
-    _ := ir_emit(&f, IROp.Block, -1, 17, -1, -1, 4)
-    _ := ir_emit(&f, IROp.Block, -1, 16, -1, -1, 4)
-    _ := ir_emit(&f, IROp.Loop, -1, 15, -1, -1, 4)
-    _ := ir_emit(&f, IROp.Ge, done, i, n, -1, 4)
-    _ := ir_emit(&f, IROp.BrIf, -1, done, 1, -1, 4)
-    _ := ir_emit(&f, IROp.Eq, hit, total, n, -1, 5)
-    _ := ir_emit(&f, IROp.If, -1, hit, -1, 10, 5)
-    _ := ir_emit(&f, IROp.Br, -1, 3, -1, -1, 5)
-    _ := ir_emit(&f, IROp.End, -1, 8, -1, -1, 5)
-    _ := ir_emit(&f, IROp.Add, total, total, i, IR_OVERFLOW_WRAP, 6)
-    _ := ir_emit(&f, IROp.Const, one, 1, -1, -1, 7)
-    _ := ir_emit(&f, IROp.Add, i, i, one, IR_OVERFLOW_WRAP, 7)
-    _ := ir_emit(&f, IROp.Br, -1, 0, -1, -1, 7)
-    _ := ir_emit(&f, IROp.End, -1, 4, -1, -1, 7)
-    _ := ir_emit(&f, IROp.End, -1, 3, -1, -1, 7)
-    _ := ir_emit(&f, IROp.End, -1, 2, -1, -1, 7)
-    _ := ir_emit(&f, IROp.Return, -1, total, -1, -1, 8)
-    assert_eq(ir_opt_split_loops(m, &f), 2)
+    total: ir_slot(f, word, IRSlotKind.Local, ir_intern_name(m, "total"), 2)
+    i: ir_slot(f, word, IRSlotKind.Local, ir_intern_name(m, "i"), 3)
+    done: ir_slot(f, truth, IRSlotKind.Temp, -1, 0)
+    hit: ir_slot(f, truth, IRSlotKind.Temp, -1, 0)
+    one: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(f, IROp.Const, total, 0, -1, -1, 2)
+    _ := ir_emit(f, IROp.Const, i, 0, -1, -1, 3)
+    _ := ir_emit(f, IROp.Block, -1, 17, -1, -1, 4)
+    _ := ir_emit(f, IROp.Block, -1, 16, -1, -1, 4)
+    _ := ir_emit(f, IROp.Loop, -1, 15, -1, -1, 4)
+    _ := ir_emit(f, IROp.Ge, done, i, n, -1, 4)
+    _ := ir_emit(f, IROp.BrIf, -1, done, 1, -1, 4)
+    _ := ir_emit(f, IROp.Eq, hit, total, n, -1, 5)
+    _ := ir_emit(f, IROp.If, -1, hit, -1, 10, 5)
+    _ := ir_emit(f, IROp.Br, -1, 3, -1, -1, 5)
+    _ := ir_emit(f, IROp.End, -1, 8, -1, -1, 5)
+    _ := ir_emit(f, IROp.Add, total, total, i, IR_OVERFLOW_WRAP, 6)
+    _ := ir_emit(f, IROp.Const, one, 1, -1, -1, 7)
+    _ := ir_emit(f, IROp.Add, i, i, one, IR_OVERFLOW_WRAP, 7)
+    _ := ir_emit(f, IROp.Br, -1, 0, -1, -1, 7)
+    _ := ir_emit(f, IROp.End, -1, 4, -1, -1, 7)
+    _ := ir_emit(f, IROp.End, -1, 3, -1, -1, 7)
+    _ := ir_emit(f, IROp.End, -1, 2, -1, -1, 7)
+    _ := ir_emit(f, IROp.Return, -1, total, -1, -1, 8)
+    assert_eq(ir_opt_split_loops(m, f), 2)
     // Before the Loop: i and total move in (in the order the Loop first
     // references them); n and the 1 keep their slots.
     assert_eq(f.op.len(), 25)
@@ -275,8 +275,8 @@ ir_opt_split_put: fn(code: &IROptCode, f: &IRFunction, current: [Int], at: Int) 
     assert(f.op[20] == .End && f.op[21] == .Move && f.dst[21] == i && f.a[21] == inner_i)
     assert(f.op[22] == .Move && f.dst[22] == total && f.a[22] == inner_total)
     assert(f.op[24] == .Return && f.a[24] == total)
-    &m.functions.push(f)
+    m.functions.push(f)
     found := [IRLintFinding]{}
-    ir_lint_function(m, ir_lint_context(m), m.functions[0], "split", &found)
+    ir_lint_function(m, ir_lint_context(m), m.functions[0], "split", found)
     assert_eq(found.len(), 0)
 }

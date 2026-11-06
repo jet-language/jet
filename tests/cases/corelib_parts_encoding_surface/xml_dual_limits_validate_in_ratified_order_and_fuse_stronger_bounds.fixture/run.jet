@@ -12,7 +12,7 @@ run: fn() {
     xml_bad := xml.XMLParseOptions.safe()
     xml_bad.limits.max_depth = 0
     input1: files.open("probe.xml") ?? panic("open1")
-    if xml.reader(^input1, enc_bad, xml_bad) == {
+    if xml.reader(input1, enc_bad, xml_bad) == {
         .Ok(_) -> { print("accepted") }
         .Err(error) -> {
             print(error.format == encoding.EncodingFormat.XML)
@@ -31,7 +31,7 @@ run: fn() {
     xml_depth.limits.max_depth = 0
     xml_depth.limits.max_nodes = 0
     input2: files.open("probe.xml") ?? panic("open2")
-    if xml.reader(^input2, enc_ok, xml_depth) == {
+    if xml.reader(input2, enc_ok, xml_depth) == {
         .Ok(_) -> { print("accepted") }
         .Err(error) -> {
             print(error.format == encoding.EncodingFormat.XML)
@@ -50,7 +50,7 @@ run: fn() {
     xml_cross.limits.max_depth = 2
     xml_cross.limits.max_entity_depth = 3
     input3: files.open("probe.xml") ?? panic("open3")
-    if xml.reader(^input3, enc_ok2, xml_cross) == {
+    if xml.reader(input3, enc_ok2, xml_cross) == {
         .Ok(_) -> { print("accepted") }
         .Err(error) -> {
             print(error.format == encoding.EncodingFormat.XML)
@@ -71,7 +71,7 @@ run: fn() {
     xml_loose.limits.max_depth = 8
     xml_loose.limits.max_entity_depth = 8
     input4: files.open("probe.xml") ?? panic("open4")
-    reader: xml.reader(^input4, enc_tight, xml_loose) ?? panic("fused reader")
+    reader: xml.reader(input4, enc_tight, xml_loose) ?? panic("fused reader")
     loop true {
         result: reader.next()
         if result == {
@@ -98,7 +98,7 @@ run: fn() {
     xml_tight.limits.max_depth = 1
     xml_tight.limits.max_entity_depth = 1
     deep_input: files.open("probe.xml") ?? panic("open deep")
-    deep_reader: xml.reader(^deep_input, enc_loose, xml_tight) ?? panic("xml-tight reader")
+    deep_reader: xml.reader(deep_input, enc_loose, xml_tight) ?? panic("xml-tight reader")
     loop true {
         result: deep_reader.next()
         if result == {

@@ -116,11 +116,11 @@ provider_sparse_member_fetch_in: fn(remote: RemoteSource, want_package: String, 
             if PackageFacts.parse(text, "{target}/package") == {
                 .Ok(facts) -> {
                     names := facts.deps.keys().to_list()
-                    &names.sort()
+                    names.sort()
                     loop name in names {
                         if provider_classify_canonical_dep(name, facts.deps[name], target, member_dirs, all_dirs) == {
                             .Member(path) -> {
-                                if !wanted.contains(path) -> &wanted.push(path)
+                                if !wanted.contains(path) -> wanted.push(path)
                             }
                             .OutsideWorkspace(path) -> return SparseOutcome.DepOutside(ProviderError.MemberOutsideWorkspace("package `{want_package}` depends on in-repo `{path}`, which is not a workspace member of `{remote.label}`"))
                             .External -> {}
@@ -136,7 +136,7 @@ provider_sparse_member_fetch_in: fn(remote: RemoteSource, want_package: String, 
     // stay available for discovery.
     if !provider_git_in(tmp, [String]{"sparse-checkout", "init", "--cone"}) -> return SparseOutcome.SparseFailed
     set_args := [String]{"sparse-checkout", "set"}
-    loop path in wanted -> &set_args.push(path)
+    loop path in wanted -> set_args.push(path)
     if !provider_git_in(tmp, set_args) -> return SparseOutcome.SparseFailed
     if !provider_git_in(tmp, [String]{"checkout", "--quiet", "FETCH_HEAD"}) -> return SparseOutcome.SparseFailed
     // The opened checkout authority is kept through validation and
@@ -403,7 +403,7 @@ provider_read_all: fn(reader: FileReader) -[FS]> [U8] IOError! {
     loop {
         chunk: reader.read(PROVIDER_READ_CHUNK_BYTES)
         if chunk.len() == 0 -> break
-        loop byte in chunk -> &bytes.push(byte)
+        loop byte in chunk -> bytes.push(byte)
     }
     Ok(bytes)
 }
@@ -420,15 +420,15 @@ provider_tree_fingerprint: fn(root: String) -[FS]> String ProviderReason! {
 
 provider_tree_fingerprint_held: fn(root: Directory) -[FS]> String ProviderReason! {
     found := [(relative: String, bytes: [U8], mode: Int)]{}
-    provider_collect_fingerprint_files(root, "", &found) ?? return Err(ProviderReason{message: "{err}"})
-    &found.sort_by(file -> file.relative)
+    provider_collect_fingerprint_files(root, "", found) ?? return Err(ProviderReason{message: "{err}"})
+    found.sort_by(file -> file.relative)
     input := [U8]{}
     loop file in found {
-        loop byte in file.relative.bytes() -> &input.push(byte)
-        &input.push(U8{0})
-        provider_push_be(&input, file.bytes.len(), 8)
-        loop byte in file.bytes -> &input.push(byte)
-        provider_push_be(&input, file.mode, 4)
+        loop byte in file.relative.bytes() -> input.push(byte)
+        input.push(U8{0})
+        provider_push_be(input, file.bytes.len(), 8)
+        loop byte in file.bytes -> input.push(byte)
+        provider_push_be(input, file.mode, 4)
     }
     Ok(pkg_sha256_hex(input))
 }
@@ -441,7 +441,7 @@ provider_collect_fingerprint_files: fn(directory: Directory, relative: String, o
         if info.is_symlink -> return Err(provider_io_error_other(files.join(directory.path, entry.name), "refusing symlink in fingerprinted package tree: {files.join(directory.path, entry.name)}"))
         if info.is_dir {
             child: directory.open_directory(entry.name)
-            provider_collect_fingerprint_files(child, child_relative, &out)
+            provider_collect_fingerprint_files(child, child_relative, out)
         } else if info.is_file {
             file: directory.open(entry.name)
             before: file.stat()
@@ -452,7 +452,7 @@ provider_collect_fingerprint_files: fn(directory: Directory, relative: String, o
             if !provider_same_file_identity(before, after) {
                 return Err(provider_io_error_other(files.join(directory.path, entry.name), "fingerprinted source file changed while reading: {files.join(directory.path, entry.name)}"))
             }
-            &out.push((relative: child_relative, bytes: bytes, mode: before.mode))
+            out.push((relative: child_relative, bytes: bytes, mode: before.mode))
         } else {
             return Err(provider_io_error_other(files.join(directory.path, entry.name), "unsupported fingerprinted package entry: {files.join(directory.path, entry.name)}"))
         }

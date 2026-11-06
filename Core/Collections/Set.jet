@@ -7,7 +7,7 @@ StringSet: struct {
 }
 copy_strings: fn(xs: [String]) -> [String] {
     out := [String]{}
-    loop x in xs -> &out.push(x.copy())
+    loop x in xs -> out.push(x.copy())
     out
 }
 
@@ -23,7 +23,7 @@ new: fn() -> StringSet Never! { StringSet{items: [String]{}} }
 from_list: fn(items: [String]) -> StringSet Never! {
     out := [String]{}
     loop item in items {
-        if !has_string(out, item) -> &out.push(item.copy())
+        if !has_string(out, item) -> out.push(item.copy())
     }
     StringSet{items: out}
 }
@@ -31,14 +31,14 @@ from_list: fn(items: [String]) -> StringSet Never! {
 add: fn(s: StringSet, item: String) -> StringSet Never! {
     if has_string(s.items, item) -> return StringSet{items: copy_strings(s.items)}
     items := copy_strings(s.items)
-    &items.push(item.copy())
+    items.push(item.copy())
     StringSet{items: items}
 }
 
 discard: fn(s: StringSet, item: String) -> StringSet Never! {
     items := [String]{}
     loop x in s.items {
-        if x != item -> &items.push(x.copy())
+        if x != item -> items.push(x.copy())
     }
     StringSet{items: items}
 }
@@ -63,7 +63,7 @@ clear: fn(_s: StringSet) -> StringSet Never! { new() }
 union: fn(a: StringSet, b: StringSet) -> StringSet Never! {
     items := copy_strings(a.items)
     loop x in b.items {
-        if !has_string(items, x) -> &items.push(x.copy())
+        if !has_string(items, x) -> items.push(x.copy())
     }
     StringSet{items: items}
 }
@@ -71,7 +71,7 @@ union: fn(a: StringSet, b: StringSet) -> StringSet Never! {
 intersection: fn(a: StringSet, b: StringSet) -> StringSet Never! {
     items := [String]{}
     loop x in a.items {
-        if has_string(b.items, x) -> &items.push(x.copy())
+        if has_string(b.items, x) -> items.push(x.copy())
     }
     StringSet{items: items}
 }
@@ -79,7 +79,7 @@ intersection: fn(a: StringSet, b: StringSet) -> StringSet Never! {
 difference: fn(a: StringSet, b: StringSet) -> StringSet Never! {
     items := [String]{}
     loop x in a.items {
-        if !has_string(b.items, x) -> &items.push(x.copy())
+        if !has_string(b.items, x) -> items.push(x.copy())
     }
     StringSet{items: items}
 }

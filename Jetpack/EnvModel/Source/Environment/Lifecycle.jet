@@ -57,12 +57,12 @@ EnvironmentLifecycle: struct {
 
     fingerprint: fn(self) -> String Never! {
         lines := [String]{}
-        if self.formatter == .Val(formatter) -> &lines.push("formatter\t{formatter.package}\n")
-        loop dotenv in self.dotenv -> &lines.push("dotenv\t{dotenv.fingerprint()}\n")
-        loop name in self.unset -> &lines.push("unset\t{name}\n")
+        if self.formatter == .Val(formatter) -> lines.push("formatter\t{formatter.package}\n")
+        loop dotenv in self.dotenv -> lines.push("dotenv\t{dotenv.fingerprint()}\n")
+        loop name in self.unset -> lines.push("unset\t{name}\n")
         hooks := [HookSpec]{}
-        &hooks.extend(self.on_enter)
-        &hooks.extend(self.checks)
+        hooks.extend(self.on_enter)
+        hooks.extend(self.checks)
         loop hook in hooks {
             action: if hook.action == {
                 .Task(job) -> "task:{job}"
@@ -70,17 +70,17 @@ EnvironmentLifecycle: struct {
             }
             cwd: hook.cwd ?? ""
             trust: if hook.trusted -> "trusted" else -> "untrusted"
-            &lines.push("hook\t{hook.name}\t{action}\t{cwd}\t{trust}\n")
+            lines.push("hook\t{hook.name}\t{action}\t{cwd}\t{trust}\n")
         }
-        if self.git_hooks_path == .Val(path) -> &lines.push("git-hooks-path\t{path}\n")
+        if self.git_hooks_path == .Val(path) -> lines.push("git-hooks-path\t{path}\n")
         reload: if self.reload == {
             .Never -> "reload\tnever\n"
             .Prompt -> "reload\tprompt\n"
             .Watch(paths, debounce_ms) -> "reload\twatch\t{paths.join(",")}\t{debounce_ms}\n"
         }
-        &lines.push(reload)
+        lines.push(reload)
         explicit: if self.reload_explicit -> "reload-explicit=true\n" else -> "reload-explicit=false\n"
-        &lines.push(explicit)
+        lines.push(explicit)
         lines.join("")
     }
 }

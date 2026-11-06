@@ -12,14 +12,14 @@ use {
     core.encoding.[Dyn]
 }
 inject_canvas_session: fn(asset: CanvasAsset, session_secret: String) -> CanvasAsset {
-    asset := ^asset
+    asset := asset.move()
     if asset.content_type == "text/html; charset=utf-8" {
         if asset.body.find("app.js?") == .Val(index) {
             insert_at: index + "app.js?".len()
             asset.body.insert_str(insert_at, "session={session_secret}&")
         }
     }
-    return ^asset
+    return asset.move()
 }
 method_not_allowed: fn(stream: &impl Write) Err! {
     write_response(stream, "405 Method Not Allowed", "text/plain; charset=utf-8", "method not allowed".bytes())
@@ -50,7 +50,7 @@ session_response: fn(session: ResidentDevSession) -> String {
 }
 with_session: fn(body: String, session: &ResidentDevSession) -> String {
     marker: "\"canvas\":{{"
-    index: body.find(marker) ?? return ^body
+    index: body.find(marker) ?? return body.move()
     insert_at: index + marker.len()
     decorated := String.with_capacity(body.len() + session.json().len() + 16)
     decorated.push_str(body[0..<insert_at])
@@ -58,14 +58,14 @@ with_session: fn(body: String, session: &ResidentDevSession) -> String {
     decorated.push_str(session.json())
     decorated.push(',')
     decorated.push_str(body[insert_at..<body.len()])
-    return ^decorated
+    return decorated.move()
 }
 current_revision_for_request: fn(canvas_file: String, request: String) -> String {
     source_id: parse_json(request).ok().and_then((value) -> if value == {
         .Object(object) -> object.into_iter().find_map(((name, value)) -> {
             if name != "source_id" -> return .None
             if value == {
-                .Text(id) | .TypedText(id) -> .Val(^id)
+                .Text(id) | .TypedText(id) -> .Val(id)
                 else -> .None
             }
         })
@@ -87,18 +87,18 @@ source_id_from_payload: fn(payload: String) -> String {
                         .Text(id) | .TypedText(id) -> .Val(id.clone())
                         else -> .None
                     }
-                }) == .Val(source_id) -> return .Val(^source_id)
+                }) == .Val(source_id) -> return .Val(source_id)
                 object.iter().find_map(((_, value)) -> find(value))
             }
             .Array(values) -> values.iter().find_map(find)
             else -> .None
         }
     }
-    return find(&value).unwrap_or_default()
+    return find(value).unwrap_or_default()
 }
 current_revision_for_source_id: fn(canvas_file: String, source_id: String?) -> String {
     source_path: source_id.and_then((id) -> Canvas.project_path_for_source_id(OSPath.new(canvas_file), id)).unwrap_or_else(() -> OSPath.new(canvas_file))
-    return Canvas.read_source_without_symlinks(&source_path).map((source) -> Canvas.source_revision(source)).unwrap_or_default()
+    return Canvas.read_source_without_symlinks(source_path).map((source) -> Canvas.source_revision(source)).unwrap_or_default()
 }
 serve_static_from_root: fn(stream: impl Write, root: OSPath, path: String, nonce: String, session_secret: String) -> U16 Err! {
     // The generated output root is the complete preview boundary. No source fallback.
@@ -106,7 +106,7 @@ serve_static_from_root: fn(stream: impl Write, root: OSPath, path: String, nonce
         .Ok(path) -> path
         .Err(_) -> { write_response(stream, "400 Bad Request", "text/plain; charset=utf-8", "bad path".bytes())?; return .Ok(400) }
     }
-    content_type: content_type_for(&relative)
+    content_type: content_type_for(relative)
     is_html: relative.extension().and_then((extension) -> extension.to_str()).is_some_and((extension) -> extension.eq_ignore_ascii_case("html"))
     reload_script := is_html.then(() -> live_reload_script(nonce, session_secret))
     raw_limit: if reload_script.as_mut() == {
@@ -120,7 +120,7 @@ serve_static_from_root: fn(stream: impl Write, root: OSPath, path: String, nonce
         }
         .None -> MAX_STATIC_RESPONSE_BYTES
     }
-    bytes: if read_static_file_bounded(root, &relative, raw_limit) == {
+    bytes: if read_static_file_bounded(root, relative, raw_limit) == {
         .Ok(b) -> b
         .Err(error) -> {
             (status, code, body): if error.kind() == {
@@ -132,7 +132,7 @@ serve_static_from_root: fn(stream: impl Write, root: OSPath, path: String, nonce
         }
     }
     if reload_script == .Val(script) {
-        html: if decode_html(^bytes) == {
+        html: if decode_html(bytes) == {
             .Ok(html) -> html
             .Err(_) -> { write_response(stream, "500 Internal Server Error", "text/plain; charset=utf-8", "static HTML is not valid UTF-8".bytes())?; return .Ok(500) }
         }
@@ -143,16 +143,16 @@ serve_static_from_root: fn(stream: impl Write, root: OSPath, path: String, nonce
         write_response(stream, "200 OK", content_type, injected.as_bytes())?
         return .Ok(200)
     }
-    write_response(stream, "200 OK", content_type, &bytes)?
+    write_response(stream, "200 OK", content_type, bytes)?
     return .Ok(200)
 }
 read_source_without_symlinks: fn(path: OSPath) -> String Err! { Canvas.read_source_without_symlinks(path) }
 read_web_manifest: fn(root: OSPath) -> String? {
-    bytes: read_static_file_bounded(root, &OSPath.new("web.manifest.json"), MAX_STATIC_RESPONSE_BYTES).ok()?
-    return String.from_utf8(^bytes).ok()
+    bytes: read_static_file_bounded(root, OSPath.new("web.manifest.json"), MAX_STATIC_RESPONSE_BYTES).ok()?
+    return String.from_utf8(bytes).ok()
 }
 decode_html: fn(bytes: [U8]) -> String Err! {
-    String.from_utf8(^bytes).map_err((_) -> Error.new(ErrorKind.InvalidData, "static HTML is not valid UTF-8")) // GATE #4409
+    String.from_utf8(bytes).map_err((_) -> Error.new(ErrorKind.InvalidData, "static HTML is not valid UTF-8")) // GATE #4409
 }
 html_raw_response_limit: fn(script_capacity: USize) -> U64 {
     script_bytes: U64.try_from(script_capacity).unwrap_or(U64.MAX)
@@ -460,6 +460,6 @@ inject_live_reload_with_script: fn(html: String, script: String) -> String? {
     if insertion == .Val(index) {
         out.push_str(html[0..<index]); out.push_str(script); out.push_str(html[index..<html.len()])
     } else { out.push_str(html); out.push_str(script) }
-    return .Val(^out)
+    return .Val(out)
 }
 

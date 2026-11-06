@@ -31,20 +31,20 @@ LPTypes: struct {
 
 lp_types: fn(m: &IRModule) -> LPTypes {
     LPTypes{
-        int: ir_intern_type(&m, "Int", IRType{ty: Type.Int, kind: IRTypeKind.Int, size: 8, align: 8, class: IRClass.Integer, signed: true, bits: 64, drop: "jet_rt_int_drop"}),
-        bool: ir_intern_type(&m, "Bool", IRType{ty: Type.Bool, kind: IRTypeKind.Bool, size: 1, align: 1, class: IRClass.Integer, signed: false, bits: 8, drop: ""}),
-        float: ir_intern_type(&m, "Float", IRType{ty: Type.Float, kind: IRTypeKind.Float, size: 8, align: 8, class: IRClass.Float, signed: true, bits: 64, drop: ""}),
-        word: ir_intern_type(&m, "U64", IRType{ty: Type.IntN{signed: false, bits: 64}, kind: IRTypeKind.Word, size: 8, align: 8, class: IRClass.Integer, signed: false, bits: 64, drop: ""}),
-        pointer: ir_intern_type(&m, "Pointer", IRType{ty: Type.Named{name: "Pointer"}, kind: IRTypeKind.Pointer, size: 8, align: 8, class: IRClass.Pointer, signed: false, bits: 64, drop: ""}),
+        int: ir_intern_type(m, "Int", IRType{ty: Type.Int, kind: IRTypeKind.Int, size: 8, align: 8, class: IRClass.Integer, signed: true, bits: 64, drop: "jet_rt_int_drop"}),
+        bool: ir_intern_type(m, "Bool", IRType{ty: Type.Bool, kind: IRTypeKind.Bool, size: 1, align: 1, class: IRClass.Integer, signed: false, bits: 8, drop: ""}),
+        float: ir_intern_type(m, "Float", IRType{ty: Type.Float, kind: IRTypeKind.Float, size: 8, align: 8, class: IRClass.Float, signed: true, bits: 64, drop: ""}),
+        word: ir_intern_type(m, "U64", IRType{ty: Type.IntN{signed: false, bits: 64}, kind: IRTypeKind.Word, size: 8, align: 8, class: IRClass.Integer, signed: false, bits: 64, drop: ""}),
+        pointer: ir_intern_type(m, "Pointer", IRType{ty: Type.Named{name: "Pointer"}, kind: IRTypeKind.Pointer, size: 8, align: 8, class: IRClass.Pointer, signed: false, bits: 64, drop: ""}),
         // An owned handle with a drop and no clone: a Copy of it is a second owner.
-        owned: ir_intern_type(&m, "Handle", IRType{ty: Type.Named{name: "Handle"}, kind: IRTypeKind.Pointer, size: 8, align: 8, class: IRClass.Pointer, signed: false, bits: 64, drop: "jet_handle_drop"}),
+        owned: ir_intern_type(m, "Handle", IRType{ty: Type.Named{name: "Handle"}, kind: IRTypeKind.Pointer, size: 8, align: 8, class: IRClass.Pointer, signed: false, bits: 64, drop: "jet_handle_drop"}),
     }
 }
 
 lp_add: fn(m: &IRModule, f: IRFunction) -> Int {
     row: m.functions.len()
-    name_rows_set(&m.function_rows, f.key, row)
-    &m.functions.push(f)
+    name_rows_set(m.function_rows, f.key, row)
+    m.functions.push(f)
     row
 }
 
@@ -53,178 +53,178 @@ lp_fn: fn(name: String) -> IRFunction {
 }
 
 lp_temp: fn(f: &IRFunction, ty: Int) -> Int {
-    ir_slot(&f, ty, IRSlotKind.Temp, -1, 0)
+    ir_slot(f, ty, IRSlotKind.Temp, -1, 0)
 }
 
 lp_const: fn(f: &IRFunction, ty: Int, value: Int) -> Int {
-    slot: lp_temp(&f, ty)
-    _ := ir_emit(&f, IROp.Const, slot, value, -1, -1, 0)
+    slot: lp_temp(f, ty)
+    _ := ir_emit(f, IROp.Const, slot, value, -1, -1, 0)
     slot
 }
 
 lp_return: fn(f: &IRFunction, slot: Int) {
-    _ := ir_emit(&f, IROp.Return, -1, slot, -1, -1, 0)
+    _ := ir_emit(f, IROp.Return, -1, slot, -1, -1, 0)
 }
 
 // A module with `twice(n: Int) -> Int` (function 0) and a `run` that is
 // valid but for the bug planted for `rule` ("" for none).
 lp_module: fn(rule: String) -> IRModule {
     m := ir_module_new()
-    t: lp_types(&m)
+    t: lp_types(m)
     twice := lp_fn("twice")
-    n: ir_slot(&twice, t.int, IRSlotKind.Param, ir_intern_name(&m, "n"), 1)
+    n: ir_slot(twice, t.int, IRSlotKind.Param, ir_intern_name(m, "n"), 1)
     twice.param_count = 1
     twice.result = t.int
-    sum: lp_temp(&twice, t.int)
-    _ := ir_emit(&twice, IROp.Add, sum, n, n, IR_OVERFLOW_TRAP, 1)
-    lp_return(&twice, sum)
-    _ := lp_add(&m, twice)
+    sum: lp_temp(twice, t.int)
+    _ := ir_emit(twice, IROp.Add, sum, n, n, IR_OVERFLOW_TRAP, 1)
+    lp_return(twice, sum)
+    _ := lp_add(m, twice)
     f := lp_fn("run")
-    lp_plant(rule, &m, t, &f)
-    m.entry = lp_add(&m, f)
+    lp_plant(rule, m, t, f)
+    m.entry = lp_add(m, f)
     m
 }
 
 // The valid run: a loop over a Bool, an If with an Else, a call, a print.
 lp_valid: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
-    three: lp_const(&f, t.int, 3)
-    six: lp_temp(&f, t.int)
-    call_args: ir_args(&f, [Int]{three})
-    _ := ir_emit(&f, IROp.Call, six, 0, call_args, 1, 1)
-    flag: lp_temp(&f, t.bool)
-    _ := ir_emit(&f, IROp.Lt, flag, three, six, -1, 1)
-    _ := ir_open(&f, IROp.Block, 1)
-    _ := ir_emit(&f, IROp.BrIf, -1, flag, 0, -1, 1)
-    _ := ir_open_if(&f, flag, 1)
-    otherwise: ir_emit(&f, IROp.Else, -1, -1, -1, -1, 1)
+    three: lp_const(f, t.int, 3)
+    six: lp_temp(f, t.int)
+    call_args: ir_args(f, [Int]{three})
+    _ := ir_emit(f, IROp.Call, six, 0, call_args, 1, 1)
+    flag: lp_temp(f, t.bool)
+    _ := ir_emit(f, IROp.Lt, flag, three, six, -1, 1)
+    _ := ir_open(f, IROp.Block, 1)
+    _ := ir_emit(f, IROp.BrIf, -1, flag, 0, -1, 1)
+    _ := ir_open_if(f, flag, 1)
+    otherwise: ir_emit(f, IROp.Else, -1, -1, -1, -1, 1)
     opener: f.open[f.open.len() - 1]
     f.b[opener] = otherwise
-    ir_end(&f, 1)
-    ir_end(&f, 1)
-    text: ir_slot(&f, ir_intern_type(&m, "String", IRType{ty: Type.String, kind: IRTypeKind.String, size: 8, align: 8, class: IRClass.Pointer, signed: false, bits: 64, drop: "jet_rt_string_drop"}), IRSlotKind.Temp, -1, 0)
-    show_args: ir_args(&f, [Int]{six})
-    _ := ir_emit(&f, IROp.CallRuntime, text, ir_intern_name(&m, "jet_rt_int_to_string"), show_args, 1, 1)
-    flush: lp_const(&f, t.bool, 1)
-    line_args: ir_args(&f, [Int]{text, flush})
-    _ := ir_emit(&f, IROp.CallRuntime, -1, ir_intern_name(&m, "jet_term_write_stdout_line"), line_args, 2, 1)
-    _ := ir_emit(&f, IROp.Drop, -1, text, -1, -1, 1)
-    lp_return(&f, -1)
+    ir_end(f, 1)
+    ir_end(f, 1)
+    text: ir_slot(f, ir_intern_type(m, "String", IRType{ty: Type.String, kind: IRTypeKind.String, size: 8, align: 8, class: IRClass.Pointer, signed: false, bits: 64, drop: "jet_rt_string_drop"}), IRSlotKind.Temp, -1, 0)
+    show_args: ir_args(f, [Int]{six})
+    _ := ir_emit(f, IROp.CallRuntime, text, ir_intern_name(m, "jet_rt_int_to_string"), show_args, 1, 1)
+    flush: lp_const(f, t.bool, 1)
+    line_args: ir_args(f, [Int]{text, flush})
+    _ := ir_emit(f, IROp.CallRuntime, -1, ir_intern_name(m, "jet_term_write_stdout_line"), line_args, 2, 1)
+    _ := ir_emit(f, IROp.Drop, -1, text, -1, -1, 1)
+    lp_return(f, -1)
 }
 
 lp_slot_range: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
-    sum: lp_temp(&f, t.int)
-    _ := ir_emit(&f, IROp.Add, sum, sum, 99, IR_OVERFLOW_TRAP, 1)
-    lp_return(&f, -1)
+    sum: lp_temp(f, t.int)
+    _ := ir_emit(f, IROp.Add, sum, sum, 99, IR_OVERFLOW_TRAP, 1)
+    lp_return(f, -1)
 }
 
 lp_dst_range: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
-    _ := ir_emit(&f, IROp.Const, 77, 1, -1, -1, 1)
-    lp_return(&f, -1)
+    _ := ir_emit(f, IROp.Const, 77, 1, -1, -1, 1)
+    lp_return(f, -1)
 }
 
 lp_name_range: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
-    none: ir_args(&f, [Int]{})
-    _ := ir_emit(&f, IROp.CallRuntime, -1, 500, none, 0, 1)
-    lp_return(&f, -1)
+    none: ir_args(f, [Int]{})
+    _ := ir_emit(f, IROp.CallRuntime, -1, 500, none, 0, 1)
+    lp_return(f, -1)
 }
 
 lp_kind: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
-    three: lp_const(&f, t.int, 3)
-    _ := ir_open_if(&f, three, 1)
-    ir_end(&f, 1)
-    lp_return(&f, -1)
+    three: lp_const(f, t.int, 3)
+    _ := ir_open_if(f, three, 1)
+    ir_end(f, 1)
+    lp_return(f, -1)
 }
 
 lp_imm: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
-    _ := lp_const(&f, t.bool, 2)
-    lp_return(&f, -1)
+    _ := lp_const(f, t.bool, 2)
+    lp_return(f, -1)
 }
 
 lp_layout: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
-    three: lp_const(&f, t.int, 3)
-    half: lp_temp(&f, t.float)
-    sum: lp_temp(&f, t.int)
-    _ := ir_emit(&f, IROp.Add, sum, three, half, IR_OVERFLOW_TRAP, 1)
-    lp_return(&f, -1)
+    three: lp_const(f, t.int, 3)
+    half: lp_temp(f, t.float)
+    sum: lp_temp(f, t.int)
+    _ := ir_emit(f, IROp.Add, sum, three, half, IR_OVERFLOW_TRAP, 1)
+    lp_return(f, -1)
 }
 
 lp_convert: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
-    word: lp_temp(&f, t.word)
-    other: lp_temp(&f, t.word)
-    _ := ir_emit(&f, IROp.Convert, other, word, -1, -1, 1)
-    lp_return(&f, -1)
+    word: lp_temp(f, t.word)
+    other: lp_temp(f, t.word)
+    _ := ir_emit(f, IROp.Convert, other, word, -1, -1, 1)
+    lp_return(f, -1)
 }
 
 lp_clone: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
-    handle: lp_temp(&f, t.owned)
-    second: lp_temp(&f, t.owned)
-    _ := ir_emit(&f, IROp.Copy, second, handle, -1, -1, 1)
-    lp_return(&f, -1)
+    handle: lp_temp(f, t.owned)
+    second: lp_temp(f, t.owned)
+    _ := ir_emit(f, IROp.Copy, second, handle, -1, -1, 1)
+    lp_return(f, -1)
 }
 
 lp_arity: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
-    six: lp_temp(&f, t.int)
-    none: ir_args(&f, [Int]{})
-    _ := ir_emit(&f, IROp.Call, six, 0, none, 0, 1)
-    lp_return(&f, -1)
+    six: lp_temp(f, t.int)
+    none: ir_args(f, [Int]{})
+    _ := ir_emit(f, IROp.Call, six, 0, none, 0, 1)
+    lp_return(f, -1)
 }
 
 lp_arg: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
-    half: lp_temp(&f, t.float)
-    six: lp_temp(&f, t.int)
-    call_args: ir_args(&f, [Int]{half})
-    _ := ir_emit(&f, IROp.Call, six, 0, call_args, 1, 1)
-    lp_return(&f, -1)
+    half: lp_temp(f, t.float)
+    six: lp_temp(f, t.int)
+    call_args: ir_args(f, [Int]{half})
+    _ := ir_emit(f, IROp.Call, six, 0, call_args, 1, 1)
+    lp_return(f, -1)
 }
 
 lp_result: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
-    three: lp_const(&f, t.int, 3)
-    flag: lp_temp(&f, t.bool)
-    call_args: ir_args(&f, [Int]{three})
-    _ := ir_emit(&f, IROp.Call, flag, 0, call_args, 1, 1)
-    lp_return(&f, -1)
+    three: lp_const(f, t.int, 3)
+    flag: lp_temp(f, t.bool)
+    call_args: ir_args(f, [Int]{three})
+    _ := ir_emit(f, IROp.Call, flag, 0, call_args, 1, 1)
+    lp_return(f, -1)
 }
 
 // The route jet_std_io_stdout_is_tty takes the stdout handle (one word),
 // here called with none.
 lp_route: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
-    tty: lp_temp(&f, t.bool)
-    none: ir_args(&f, [Int]{})
-    _ := ir_emit(&f, IROp.CallRuntime, tty, ir_intern_name(&m, "jet_std_io_stdout_is_tty"), none, 0, 1)
-    lp_return(&f, -1)
+    tty: lp_temp(f, t.bool)
+    none: ir_args(f, [Int]{})
+    _ := ir_emit(f, IROp.CallRuntime, tty, ir_intern_name(m, "jet_std_io_stdout_is_tty"), none, 0, 1)
+    lp_return(f, -1)
 }
 
 lp_nesting: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
-    _ := ir_emit(&f, IROp.Block, -1, 2, -1, -1, 1)
-    lp_return(&f, -1)
-    _ := ir_emit(&f, IROp.End, -1, 1, -1, -1, 1)
+    _ := ir_emit(f, IROp.Block, -1, 2, -1, -1, 1)
+    lp_return(f, -1)
+    _ := ir_emit(f, IROp.End, -1, 1, -1, -1, 1)
 }
 
 lp_depth: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
-    _ := ir_open(&f, IROp.Block, 1)
-    _ := ir_emit(&f, IROp.Br, -1, 3, -1, -1, 1)
-    ir_end(&f, 1)
-    lp_return(&f, -1)
+    _ := ir_open(f, IROp.Block, 1)
+    _ := ir_emit(f, IROp.Br, -1, 3, -1, -1, 1)
+    ir_end(f, 1)
+    lp_return(f, -1)
 }
 
 lp_return_value: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
-    three: lp_const(&f, t.int, 3)
-    lp_return(&f, three)
+    three: lp_const(f, t.int, 3)
+    lp_return(f, three)
 }
 
 lp_arena: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
-    _ := ir_slot(&f, 4000, IRSlotKind.Temp, -1, 0)
-    lp_return(&f, -1)
+    _ := ir_slot(f, 4000, IRSlotKind.Temp, -1, 0)
+    lp_return(f, -1)
 }
 
 lp_type_kind: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
-    _ := ir_intern_type(&m, "Wrong", IRType{ty: Type.Int, kind: IRTypeKind.Bool, size: 1, align: 1, class: IRClass.Integer, signed: false, bits: 8, drop: ""})
-    lp_return(&f, -1)
+    _ := ir_intern_type(m, "Wrong", IRType{ty: Type.Int, kind: IRTypeKind.Bool, size: 1, align: 1, class: IRClass.Integer, signed: false, bits: 8, drop: ""})
+    lp_return(f, -1)
 }
 
 lp_type_layout: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
-    _ := ir_intern_type(&m, "U24", IRType{ty: Type.IntN{signed: false, bits: 24}, kind: IRTypeKind.Word, size: 3, align: 1, class: IRClass.Integer, signed: false, bits: 24, drop: ""})
-    lp_return(&f, -1)
+    _ := ir_intern_type(m, "U24", IRType{ty: Type.IntN{signed: false, bits: 24}, kind: IRTypeKind.Word, size: 3, align: 1, class: IRClass.Integer, signed: false, bits: 24, drop: ""})
+    lp_return(f, -1)
 }
 
 // The rules a planted bug breaks, one module each.
@@ -236,25 +236,25 @@ LP_RULES: [String]{
 
 lp_plant: fn(rule: String, m: &IRModule, t: LPTypes, f: &IRFunction) {
     if rule == {
-        "arena" -> lp_arena(&m, t, &f)
-        "operand.slot" -> lp_slot_range(&m, t, &f)
-        "operand.dst" -> lp_dst_range(&m, t, &f)
-        "operand.ref" -> lp_name_range(&m, t, &f)
-        "operand.kind" -> lp_kind(&m, t, &f)
-        "operand.imm" -> lp_imm(&m, t, &f)
-        "typing.layout" -> lp_layout(&m, t, &f)
-        "typing.convert" -> lp_convert(&m, t, &f)
-        "typing.clone" -> lp_clone(&m, t, &f)
-        "call.arity" -> lp_arity(&m, t, &f)
-        "call.arg" -> lp_arg(&m, t, &f)
-        "call.result" -> lp_result(&m, t, &f)
-        "route.call" -> lp_route(&m, t, &f)
-        "control.nesting" -> lp_nesting(&m, t, &f)
-        "control.depth" -> lp_depth(&m, t, &f)
-        "return" -> lp_return_value(&m, t, &f)
-        "type.kind" -> lp_type_kind(&m, t, &f)
-        "type.layout" -> lp_type_layout(&m, t, &f)
-        else -> lp_valid(&m, t, &f)
+        "arena" -> lp_arena(m, t, f)
+        "operand.slot" -> lp_slot_range(m, t, f)
+        "operand.dst" -> lp_dst_range(m, t, f)
+        "operand.ref" -> lp_name_range(m, t, f)
+        "operand.kind" -> lp_kind(m, t, f)
+        "operand.imm" -> lp_imm(m, t, f)
+        "typing.layout" -> lp_layout(m, t, f)
+        "typing.convert" -> lp_convert(m, t, f)
+        "typing.clone" -> lp_clone(m, t, f)
+        "call.arity" -> lp_arity(m, t, f)
+        "call.arg" -> lp_arg(m, t, f)
+        "call.result" -> lp_result(m, t, f)
+        "route.call" -> lp_route(m, t, f)
+        "control.nesting" -> lp_nesting(m, t, f)
+        "control.depth" -> lp_depth(m, t, f)
+        "return" -> lp_return_value(m, t, f)
+        "type.kind" -> lp_type_kind(m, t, f)
+        "type.layout" -> lp_type_layout(m, t, f)
+        else -> lp_valid(m, t, f)
     }
 }
 
@@ -270,7 +270,7 @@ lp_only: fn(findings: [IRLintFinding], rule: String) -> Bool {
 // The rows of the module planted with `rule`, linted as after the build.
 lp_lint: fn(rule: String) -> [IRLintFinding] {
     m := lp_module(rule)
-    ir_lint_module(&m, "ir.build", compiler_threads_single())
+    ir_lint_module(m, "ir.build", compiler_threads_single())
 }
 
 // The Core rows whose arity disagrees with their runtime route (IR Lint
@@ -285,7 +285,7 @@ lp_core_failures: fn(core: [IRLintFinding]) -> Int {
     seen := [String]{}
     loop finding in core {
         if LP_CORE_ARITY.contains(finding.function) {
-            &seen.push(finding.function)
+            seen.push(finding.function)
         } else {
             print("core row not listed: {finding.function}: {finding.message}")
             failures += 1
@@ -331,8 +331,8 @@ lp_status: fn() -> Int {
     report := ir_opt_report(2)
     broken := m.functions[m.entry].copy()
     broken.dst[0] = 99
-    clean: ir_opt_lint(m, context, m.functions[m.entry], "inline", &report)
-    caught: !ir_opt_lint(m, context, broken, "simplify", &report)
+    clean: ir_opt_lint(m, context, m.functions[m.entry], "inline", report)
+    caught: !ir_opt_lint(m, context, broken, "simplify", report)
     if clean && caught && report.lint.len() > 0 && report.lint[0].pass == "ir.opt.simplify" {
         print("ok pass name")
     } else {

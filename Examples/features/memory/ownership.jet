@@ -6,7 +6,7 @@ show: fn(msg: String) { print(msg) }
 
 bump: fn(n: &Int) { n += 1 }
 
-archive: fn(name: ^String) -> String { name }
+archive: fn(name: &&String) -> String { name }
 
 headline: fn(text: String) -> String { "== {text} ==" }
 
@@ -16,14 +16,14 @@ apply: fn(reader: fn(String) -> Int, text: String) -> Int { reader(text) }
 
 run: fn() {
     score := 41
-    bump(&score)
+    bump(score)
     print(score)
     greeting: "hello"
     show(greeting)
     print(greeting)
     print(apply(length, greeting))
     print(apply((text: String) -> text.len(), greeting))
-    saved: archive(^"vault")
+    saved: archive("vault")
     print(saved)
     print(headline("Jet"))
 }

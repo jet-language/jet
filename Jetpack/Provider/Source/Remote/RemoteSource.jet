@@ -23,7 +23,7 @@ RemoteSource: struct {
             repo: if parts.len() > 1 -> parts[1] else -> ""
             if owner == "" || repo == "" -> return Err(ProviderError.CoreBuild("`github:` sources need `github:owner/repo`, got `{upstream}`"))
             path_rev := [String]{}
-            loop index in 2..<parts.len() -> &path_rev.push(parts[index])
+            loop index in 2..<parts.len() -> path_rev.push(parts[index])
             joined: path_rev.join("/")
             rev: if split.rev != None -> split.rev else -> (if joined == "" -> None else -> Val(joined))
             remote: RemoteSource{url: "https://github.com/{owner}/{repo}.git", rev, label: "github:{owner}/{repo}"}
@@ -142,9 +142,9 @@ provider_member_dirs_from_listing: fn(listing: String) -> [String] Never! {
         if path.ends_with("/{PACKAGE_FILE}") {
             dir = path.removesuffix("/{PACKAGE_FILE}")
         }
-        if dir != "" && !out.contains(dir) -> &out.push(dir)
+        if dir != "" && !out.contains(dir) -> out.push(dir)
     }
-    &out.sort()
+    out.sort()
     out
 }
 
@@ -184,7 +184,7 @@ provider_all_tree_dirs: fn(listing: String) -> [String] Never! {
         current := line.trim()
         loop current.contains("/") {
             current = current.cut_last("/")?.before ?? ""
-            if current != "" && !out.contains(current) -> &out.push(current)
+            if current != "" && !out.contains(current) -> out.push(current)
         }
     }
     out
@@ -200,7 +200,7 @@ provider_dir_basename: fn(dir: String) -> String Never! {
 provider_join_repo_relative: fn(member_dir: String, target: String) -> String? Never! {
     parts := [String]{}
     loop part in member_dir.split("/") {
-        if part != "" -> &parts.push(part)
+        if part != "" -> parts.push(part)
     }
     loop segment in target.split("/") {
         if segment == "" || segment == "." -> next
@@ -209,7 +209,7 @@ provider_join_repo_relative: fn(member_dir: String, target: String) -> String? N
             parts = parts[0..<parts.len() - 1]
             next
         }
-        &parts.push(segment)
+        parts.push(segment)
     }
     if parts.len() == 0 -> return None
     Val(parts.join("/"))

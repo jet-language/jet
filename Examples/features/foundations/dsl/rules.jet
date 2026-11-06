@@ -55,7 +55,7 @@ parse: fn(source: String) -> [Rule]? {
         line: item.trim()
         if line != "" {
             rule: parse_rule(line) ?? return None
-            &rules.push(rule)
+            rules.push(rule)
         }
     }
     if rules.len() == 0 -> return None
@@ -76,12 +76,12 @@ apply: fn(facts: &[String:Int], fact: String, action: Action) -> String {
         .Add(delta) -> {
             next: current + delta
             event: "{fact}={next}"
-            &facts.add(fact, next).drop("rule fact update")
+            facts.add(fact, next).drop("rule fact update")
             return event
         }
         .Set(next) -> {
             event: "{fact}={next}"
-            &facts.add(fact, next).drop("rule fact update")
+            facts.add(fact, next).drop("rule fact update")
             return event
         }
     }
@@ -92,8 +92,8 @@ fire: fn(facts: &[String:Int], rules: [Rule]) -> [String] {
     events := [String]{}
     loop rule in rules {
         value: facts.get(rule.fact.copy()) ?? 0
-        event: if matches(rule.condition.copy(), value) -> apply(&facts, rule.fact.copy(), rule.action.copy()) else -> "skip"
-        &events.push("{rule.name}:{event}")
+        event: if matches(rule.condition.copy(), value) -> apply(facts, rule.fact.copy(), rule.action.copy()) else -> "skip"
+        events.push("{rule.name}:{event}")
     }
     return events
 }

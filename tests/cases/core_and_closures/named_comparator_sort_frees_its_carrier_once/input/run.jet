@@ -29,11 +29,11 @@ run: fn() {
     parts := 0
     loop round in 0..<64 {
         ordered := [Entry]{}
-        loop entry in entries -> &ordered.push(entry)
-        &ordered.sort_by(entry_order)
+        loop entry in entries -> ordered.push(entry)
+        ordered.sort_by(entry_order)
         sorted := [String]{}
-        loop name in names -> &sorted.push(name)
-        &sorted.sort_by(text_order)
+        loop name in names -> sorted.push(name)
+        sorted.sort_by(text_order)
         files: ordered.map(file_name)
         evidence: ordered.filter(is_evidence)
         parts = parts + files[round % 3].split(".").to_list().len() + sorted[round % 4].split("-").to_list().len() + evidence.len()

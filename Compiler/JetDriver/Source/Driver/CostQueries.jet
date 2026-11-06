@@ -15,16 +15,16 @@ JetDriverCostQueryResult: struct {
     report: TCostReport?
     gaps: [String]
 }
-jet_driver_cost_query: fn(request: ^JetDriverCompileRequest) -> JetDriverCostQueryResult {
-    selected := ^request
+jet_driver_cost_query: fn(request: &&JetDriverCompileRequest) -> JetDriverCostQueryResult {
+    selected := request.move()
     selected.mode = JetDriverCompileMode.Doc
     selected.capture_cost_report = true
-    compile := jet_driver_compile(^selected)
+    compile := jet_driver_compile(selected)
     // Move the report rows out and reset the fields with whole assignments,
     // so `compile` is whole again when it moves below.
-    report := ^compile.cost_report
+    report := compile.cost_report.move()
     compile.cost_report = None
-    gaps := ^compile.cost_gaps
+    gaps := compile.cost_gaps.move()
     compile.cost_gaps = [String]{}
-    JetDriverCostQueryResult{compile: ^compile, report: ^report, gaps: ^gaps}
+    JetDriverCostQueryResult{compile: compile.move(), report: report.move(), gaps: gaps.move()}
 }

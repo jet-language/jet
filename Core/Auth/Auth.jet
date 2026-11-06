@@ -168,7 +168,7 @@ is_object: fn(tree: encoding.Dyn) -> Bool Never! {
 }
 
 member: fn(tree: encoding.Dyn, name: String) -> encoding.Dyn? {
-    value: &tree.field(name) ?? return None
+    value: tree.field(name) ?? return None
     Val(value)
 }
 
@@ -208,12 +208,12 @@ audience_claim: fn(fields: encoding.Dyn, expected: String) -> String AuthError! 
             if items.len() == 0 -> return Err(AuthError.MalformedToken("claim `aud` must contain at least one text"))
             loop item in items {
                 text: item.text() ?? return Err(AuthError.MalformedToken("claim `aud` must contain only text"))
-                &values.push(text)
+                values.push(text)
             }
         }
         else -> {
             text: value.text() ?? return Err(AuthError.MalformedToken("claim `aud` must be text or a text list"))
-            &values.push(text)
+            values.push(text)
         }
     }
     loop candidate in values {
@@ -258,23 +258,23 @@ number_lexeme: fn(text: String, name: String) -> String? {
 
 paseto_pae: fn(message: [U8], footer: [U8], implicit: [U8]) -> [U8] Never! {
     out := [U8]{}
-    pae_len(&out, 4)
-    pae_part(&out, "v4.public.".bytes())
-    pae_part(&out, message)
-    pae_part(&out, footer)
-    pae_part(&out, implicit)
+    pae_len(out, 4)
+    pae_part(out, "v4.public.".bytes())
+    pae_part(out, message)
+    pae_part(out, footer)
+    pae_part(out, implicit)
     out
 }
 
 pae_part: fn(out: &[U8], bytes: [U8]) Never! {
-    pae_len(&out, bytes.len())
-    loop byte in bytes -> &out.push(byte)
+    pae_len(out, bytes.len())
+    loop byte in bytes -> out.push(byte)
 }
 
 pae_len: fn(out: &[U8], value: Int) Never! {
     n := value
     loop _ in 0..<8 {
-        &out.push(to_u8(n))
+        out.push(to_u8(n))
         n = n >> 8
     }
 }
@@ -295,7 +295,7 @@ b64url_decode: fn(text: String) -> [U8] AuthError! {
         bits = bits + 6
         if bits >= 8 {
             bits = bits - 8
-            &out.push(to_u8(acc >> bits))
+            out.push(to_u8(acc >> bits))
         }
     }
     if bits != 0 && (acc.bit_and(((1 << bits) - 1))) != 0 -> return Err(AuthError.DecodeError("non-canonical base64 trailing bits"))
@@ -324,8 +324,8 @@ __store_load: fn() -[DB]> [U8] Never! {
     core.auth.__state_load()
 }
 
-__store_replace: fn(expected: [U8], replacement: ^[U8]) -[DB]> Bool Never! {
-    core.auth.__state_replace(expected, ^replacement)
+__store_replace: fn(expected: [U8], replacement: &&[U8]) -[DB]> Bool Never! {
+    core.auth.__state_replace(expected, replacement)
 }
 
 /// Register an identity with an already-computed password hash.
@@ -339,7 +339,7 @@ register_user: fn(user_id: String, password_hash: String) Err! -[DB]> {
         loop record in records {
             if record.kind == 1 && record.a == user_id -> return Err("user `{user_id}` already registered")
         }
-        &records.push(AuthRecord{kind: 1, a: user_id, b: password_hash, c: delivery ?? "", n: if delivery == None -> 0 else -> 1})
+        records.push(AuthRecord{kind: 1, a: user_id, b: password_hash, c: delivery ?? "", n: if delivery == None -> 0 else -> 1})
         if core.auth.__store_replace(seen, encode_store(records)) -> return Ok()
     }
 }
@@ -355,7 +355,7 @@ password_login: fn(user_id: String, password_hash: String, now_ms: Int, ttl_ms: 
             if record.kind == 1 && record.a == user_id && ct_text(record.b, password_hash) -> ok = true
         }
         if !ok -> return Err("invalid credentials")
-        &records.push(session_record(session))
+        records.push(session_record(session))
         if core.auth.__store_replace(seen, encode_store(records)) -> return Ok(session)
     }
 }
@@ -387,7 +387,7 @@ magic_link_issue: fn(user_id: String, now_ms: Int, ttl_ms: Int) -[DB, Rand]> Str
         }
         if !registered -> return Err("magic link requires a registered delivery identity")
         token: opaque_token("magic")
-        &records.push(AuthRecord{kind: 3, a: token, b: user_id, c: delivery, n: expires_at})
+        records.push(AuthRecord{kind: 3, a: token, b: user_id, c: delivery, n: expires_at})
         if core.auth.__store_replace(seen, encode_store(records)) -> return Ok(token)
     }
 }
@@ -411,7 +411,7 @@ magic_link_consume: fn(token: String, now_ms: Int, ttl_ms: Int) -[DB, Rand]> Ses
         if user.n != 1 || user.c != entry.c -> return Err("magic link delivery identity is unavailable")
         session: new_session(entry.b, now_ms, ttl_ms)
         next := without_index(records, index)
-        &next.push(session_record(session))
+        next.push(session_record(session))
         if core.auth.__store_replace(seen, encode_store(next)) -> return Ok(session)
     }
 }
@@ -435,16 +435,16 @@ oauth_begin: fn(provider: String) -[DB, Env, Time, Rand]> String Err! {
         next := [AuthRecord]{}
         loop record in records {
             if record.kind != 4 {
-                &next.push(record)
+                next.push(record)
             } else if record.n > now_ms {
                 if drop_oldest {
                     drop_oldest = false
                 } else {
-                    &next.push(record)
+                    next.push(record)
                 }
             }
         }
-        &next.push(AuthRecord{kind: 4, a: state, b: provider, c: state, n: expires_at})
+        next.push(AuthRecord{kind: 4, a: state, b: provider, c: state, n: expires_at})
         if core.auth.__store_replace(seen, encode_store(next)) -> return Ok(state)
     }
 }
@@ -462,7 +462,7 @@ oauth_finish: fn(state: String, assertion: String, now_ms: Int, ttl_ms: Int) -[D
         subject: oauth_verify(entry.c, assertion, now_ms, config)
         session: new_session(subject, now_ms, ttl_ms)
         next := without_index(records, index)
-        &next.push(session_record(session))
+        next.push(session_record(session))
         if core.auth.__store_replace(seen, encode_store(next)) -> return Ok(session)
     }
 }
@@ -540,7 +540,7 @@ find_live: fn(records: [AuthRecord], kind: Int, token: String, now_ms: Int) -> I
 without_index: fn(records: [AuthRecord], index: Int) -> [AuthRecord] Never! {
     out := [AuthRecord]{}
     loop i in 0..<records.len() {
-        if i != index -> &out.push(records[i])
+        if i != index -> out.push(records[i])
     }
     out
 }
@@ -552,11 +552,11 @@ ct_text: fn(left: String, right: String) -> Bool Never! {
 encode_store: fn(records: [AuthRecord]) -> [U8] Never! {
     out := [U8]{}
     loop record in records {
-        &out.push(to_u8(record.kind))
-        put_field(&out, record.a)
-        put_field(&out, record.b)
-        put_field(&out, record.c)
-        put_field(&out, "{record.n}")
+        out.push(to_u8(record.kind))
+        put_field(out, record.a)
+        put_field(out, record.b)
+        put_field(out, record.c)
+        put_field(out, "{record.n}")
     }
     out
 }
@@ -564,11 +564,11 @@ encode_store: fn(records: [AuthRecord]) -> [U8] Never! {
 put_field: fn(out: &[U8], text: String) Never! {
     raw: text.bytes()
     n: raw.len()
-    &out.push(to_u8(n))
-    &out.push(to_u8(n >> 8))
-    &out.push(to_u8(n >> 16))
-    &out.push(to_u8(n >> 24))
-    loop b in raw -> &out.push(b)
+    out.push(to_u8(n))
+    out.push(to_u8(n >> 8))
+    out.push(to_u8(n >> 16))
+    out.push(to_u8(n >> 24))
+    loop b in raw -> out.push(b)
 }
 
 decode_store: fn(raw: [U8]) -> [AuthRecord]? {
@@ -584,11 +584,11 @@ decode_store: fn(raw: [U8]) -> [AuthRecord]? {
             pos = pos + 4
             if pos + n > raw.len() -> return None
             text: slice_bytes(raw, pos, pos + n) ?? return None
-            &fields.push(text)
+            fields.push(text)
             pos = pos + n
         }
         number: Int.parse(fields[3]) ?? return None
-        &out.push(AuthRecord{kind: kind, a: fields[0], b: fields[1], c: fields[2], n: number})
+        out.push(AuthRecord{kind: kind, a: fields[0], b: fields[1], c: fields[2], n: number})
     }
     Val(out)
 }
@@ -671,7 +671,7 @@ oauth_config: fn(provider: String) -[Env]> OAuthConfig {
     loop b in raw {
         n: Int.from_u8(b)
         if !(is_alnum(n) || n == 45 || n == 95) -> return Err("OAuth provider is invalid")
-        if n >= 97 && n <= 122 -> &upper.push(to_u8(n - 32)) else -> &upper.push(b)
+        if n >= 97 && n <= 122 -> upper.push(to_u8(n - 32)) else -> upper.push(b)
     }
     suffix: String.from_bytes(upper) ?? return Err("OAuth provider is invalid")
     secret: sys.get("JET_OAUTH_{suffix}_SECRET") ?? return Err("OAuth provider is not configured")
@@ -731,7 +731,7 @@ oauth_b64: fn(text: String) -> [U8] {
         bits = bits + 6
         if bits >= 8 {
             bits = bits - 8
-            &out.push(to_u8(acc >> bits))
+            out.push(to_u8(acc >> bits))
         }
     }
     if bits != 0 && (acc.bit_and(((1 << bits) - 1))) != 0 -> return Err("OAuth assertion encoding is non-canonical")
@@ -873,19 +873,19 @@ json_hex4: fn(raw: [U8], start: Int) -> Int? {
 
 push_scalar: fn(out: &[U8], cp: Int) Never! {
     if cp < 128 {
-        &out.push(to_u8(cp))
+        out.push(to_u8(cp))
     } else if cp < 2048 {
-        &out.push(to_u8((192).bit_or((cp >> 6))))
-        &out.push(to_u8((128).bit_or((cp.bit_and(63)))))
+        out.push(to_u8((192).bit_or((cp >> 6))))
+        out.push(to_u8((128).bit_or((cp.bit_and(63)))))
     } else if cp < 65536 {
-        &out.push(to_u8((224).bit_or((cp >> 12))))
-        &out.push(to_u8((128).bit_or(((cp >> 6).bit_and(63)))))
-        &out.push(to_u8((128).bit_or((cp.bit_and(63)))))
+        out.push(to_u8((224).bit_or((cp >> 12))))
+        out.push(to_u8((128).bit_or(((cp >> 6).bit_and(63)))))
+        out.push(to_u8((128).bit_or((cp.bit_and(63)))))
     } else {
-        &out.push(to_u8((240).bit_or((cp >> 18))))
-        &out.push(to_u8((128).bit_or(((cp >> 12).bit_and(63)))))
-        &out.push(to_u8((128).bit_or(((cp >> 6).bit_and(63)))))
-        &out.push(to_u8((128).bit_or((cp.bit_and(63)))))
+        out.push(to_u8((240).bit_or((cp >> 18))))
+        out.push(to_u8((128).bit_or(((cp >> 12).bit_and(63)))))
+        out.push(to_u8((128).bit_or(((cp >> 6).bit_and(63)))))
+        out.push(to_u8((128).bit_or((cp.bit_and(63)))))
     }
 }
 
@@ -904,18 +904,18 @@ json_string: fn(raw: [U8], start: Int) -> JSONText? {
         }
         if n < 32 -> return None
         if n != 92 {
-            &out.push(to_u8(n))
+            out.push(to_u8(n))
         } else {
             if pos >= raw.len() -> return None
             e: Int.from_u8(raw[pos])
             pos = pos + 1
             if {
-                e == 34 || e == 92 || e == 47 -> &out.push(to_u8(e))
-                e == 98 -> &out.push(U8{8})
-                e == 102 -> &out.push(U8{12})
-                e == 110 -> &out.push(U8{10})
-                e == 114 -> &out.push(U8{13})
-                e == 116 -> &out.push(U8{9})
+                e == 34 || e == 92 || e == 47 -> out.push(to_u8(e))
+                e == 98 -> out.push(U8{8})
+                e == 102 -> out.push(U8{12})
+                e == 110 -> out.push(U8{10})
+                e == 114 -> out.push(U8{13})
+                e == 116 -> out.push(U8{9})
                 e == 117 -> {
                     high: json_hex4(raw, pos) ?? return None
                     pos = pos + 4
@@ -924,10 +924,10 @@ json_string: fn(raw: [U8], start: Int) -> JSONText? {
                         low: json_hex4(raw, pos + 2) ?? return None
                         pos = pos + 6
                         if low < 56320 || low > 57343 -> return None
-                        push_scalar(&out, 65536 + ((high - 55296) << 10) + (low - 56320))
+                        push_scalar(out, 65536 + ((high - 55296) << 10) + (low - 56320))
                     } else {
                         if high >= 56320 && high <= 57343 -> return None
-                        push_scalar(&out, high)
+                        push_scalar(out, high)
                     }
                 }
                 else -> return None
@@ -948,7 +948,7 @@ json_skip_value: fn(raw: [U8], start: Int) -> Int? {
     }
     if first == 123 || first == 91 {
         closers := [Int]{}
-        &closers.push(if first == 123 -> 125 else -> 93)
+        closers.push(if first == 123 -> 125 else -> 93)
         pos := start + 1
         loop pos < raw.len() {
             n: Int.from_u8(raw[pos])
@@ -956,11 +956,11 @@ json_skip_value: fn(raw: [U8], start: Int) -> Int? {
                 value: json_string(raw, pos) ?? return None
                 pos = value.next
             } else if n == 123 || n == 91 {
-                &closers.push(if n == 123 -> 125 else -> 93)
+                closers.push(if n == 123 -> 125 else -> 93)
                 pos = pos + 1
             } else if n == 125 || n == 93 {
                 if closers[closers.len() - 1] != n -> return None
-                _ := &closers.pop()
+                _ := closers.pop()
                 pos = pos + 1
                 if closers.len() == 0 -> return Val(pos)
             } else {
@@ -996,11 +996,11 @@ split_dot: fn(text: String) -> [String] Never! {
     start := 0
     loop i in 0..<raw.len() {
         if raw[i] == (U8{46}) {
-            &out.push(slice_bytes(raw, start, i) ?? "")
+            out.push(slice_bytes(raw, start, i) ?? "")
             start = i + 1
         }
     }
-    &out.push(slice_bytes(raw, start, raw.len()) ?? "")
+    out.push(slice_bytes(raw, start, raw.len()) ?? "")
     out
 }
 
@@ -1048,7 +1048,7 @@ slice_u8: fn(bytes: [U8], start: Int, end: Int) -> [U8] Never! {
     out := [U8]{}
     i := start
     loop i < end && i < bytes.len() {
-        &out.push(bytes[i])
+        out.push(bytes[i])
         i = i + 1
     }
     out
@@ -1069,10 +1069,10 @@ b64url_for_test: fn(bytes: [U8]) -> String Never! {
         first: Int.from_u8(bytes[i])
         second: if i + 1 < bytes.len() -> Int.from_u8(bytes[i + 1]) else -> 0
         third: if i + 2 < bytes.len() -> Int.from_u8(bytes[i + 2]) else -> 0
-        &out.push(alphabet[first >> 2])
-        &out.push(alphabet[((first.bit_and(3)) << 4).bit_or((second >> 4))])
-        if i + 1 < bytes.len() -> &out.push(alphabet[((second.bit_and(15)) << 2).bit_or((third >> 6))])
-        if i + 2 < bytes.len() -> &out.push(alphabet[third.bit_and(63)])
+        out.push(alphabet[first >> 2])
+        out.push(alphabet[((first.bit_and(3)) << 4).bit_or((second >> 4))])
+        if i + 1 < bytes.len() -> out.push(alphabet[((second.bit_and(15)) << 2).bit_or((third >> 6))])
+        if i + 2 < bytes.len() -> out.push(alphabet[third.bit_and(63)])
         i = i + 3
     }
     String.from_bytes(out) ?? ""
@@ -1243,7 +1243,7 @@ expiry_outcome: fn(now_ms: Int, ttl_ms: Int) -> String Never! {
 
 #Test("PASETO rejects every non v4.public form") {
     key := [U8]{}
-    loop _ in 0..<32 -> &key.push(U8{1})
+    loop _ in 0..<32 -> key.push(U8{1})
     assert(paseto_outcome("v4.public.AA", [U8]{1}) == "WeakKey")
     assert(paseto_outcome("v3.public.AA", key) == "UnsupportedToken(only PASETO v4.public is supported)")
     assert(paseto_outcome("v4.local.AA", key) == "UnsupportedToken(only PASETO v4.public is supported)")
@@ -1285,9 +1285,9 @@ expiry_outcome: fn(now_ms: Int, ttl_ms: Int) -> String Never! {
 
 #Test("store rows round trip") {
     rows := [AuthRecord]{}
-    &rows.push(AuthRecord{kind: 1, a: "alice@example.com", b: "argon2id:demo", c: "alice@example.com", n: 1})
-    &rows.push(AuthRecord{kind: 2, a: "sess-1", b: "alice@example.com", c: session_cookie_mint("sess-1"), n: 1700000000000})
-    &rows.push(AuthRecord{kind: 4, a: "oauth-1", b: "google", c: "", n: -5})
+    rows.push(AuthRecord{kind: 1, a: "alice@example.com", b: "argon2id:demo", c: "alice@example.com", n: 1})
+    rows.push(AuthRecord{kind: 2, a: "sess-1", b: "alice@example.com", c: session_cookie_mint("sess-1"), n: 1700000000000})
+    rows.push(AuthRecord{kind: 4, a: "oauth-1", b: "google", c: "", n: -5})
     decoded: decode_store(encode_store(rows)) ?? panic("store decode")
     assert(decoded.len() == 3)
     assert(decoded[1].c == "jet_session=sess-1; HttpOnly; Secure; SameSite=Lax; Path=/")

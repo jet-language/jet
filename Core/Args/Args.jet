@@ -44,7 +44,7 @@ decode_argv: fn(argv: [String]) -> Dyn Never! {
             i = i + 1
             loop {
                 if i >= argv.len() -> break
-                &positionals.push(Dyn.Text(argv[i].copy()))
+                positionals.push(Dyn.Text(argv[i].copy()))
                 i = i + 1
             }
             break
@@ -55,28 +55,28 @@ decode_argv: fn(argv: [String]) -> Dyn Never! {
             if eq >= 0 {
                 key: slice_str(rest, 0, eq)
                 val: slice_str(rest, eq + 1, rest.bytes().len())
-                put_entry(&entries, key, parse_atom(val))
+                put_entry(entries, key, parse_atom(val))
                 i = i + 1
                 next
             }
             if starts(rest, "no-") && rest.bytes().len() > 3 {
-                put_entry(&entries, drop_prefix(rest, 3), Dyn.Bool(false))
+                put_entry(entries, drop_prefix(rest, 3), Dyn.Bool(false))
                 i = i + 1
                 next
             }
             // A following negative number is a value, not another option.
             if i + 1 < argv.len() && argv[i + 1] != "--" && (!starts(argv[i + 1], "-") || negative_number(argv[i + 1])) {
-                put_entry(&entries, rest, parse_atom(argv[i + 1]))
+                put_entry(entries, rest, parse_atom(argv[i + 1]))
                 i = i + 2
                 next
             }
-            put_entry(&entries, rest, Dyn.Bool(true))
+            put_entry(entries, rest, Dyn.Bool(true))
             i = i + 1
             next
         }
         if a == "-h" {
-            put_entry(&entries, "help", Dyn.Bool(true))
-            put_entry(&entries, "h", Dyn.Bool(true))
+            put_entry(entries, "help", Dyn.Bool(true))
+            put_entry(entries, "h", Dyn.Bool(true))
             i = i + 1
             next
         }
@@ -85,17 +85,17 @@ decode_argv: fn(argv: [String]) -> Dyn Never! {
             raw: a.bytes()
             loop k in 1..<raw.len() {
                 ch: String.from_bytes([U8]{raw[k]}) ?? ""
-                put_entry(&entries, ch, Dyn.Bool(true))
-                if ch == "h" -> put_entry(&entries, "help", Dyn.Bool(true))
+                put_entry(entries, ch, Dyn.Bool(true))
+                if ch == "h" -> put_entry(entries, "help", Dyn.Bool(true))
             }
             i = i + 1
             next
         }
-        &positionals.push(Dyn.Text(a.copy()))
+        positionals.push(Dyn.Text(a.copy()))
         i = i + 1
     }
-    if argv.len() > 0 -> put_entry(&entries, "0", Dyn.Text(argv[0].copy()))
-    &entries.push((key: "_", value: Dyn.Array(positionals)))
+    if argv.len() > 0 -> put_entry(entries, "0", Dyn.Text(argv[0].copy()))
+    entries.push((key: "_", value: Dyn.Array(positionals)))
     Dyn.Object(entries)
 }
 
@@ -152,46 +152,46 @@ object_set: fn(entries: &[(key: String, value: Dyn)], key: String, value: Dyn) {
             return
         }
     }
-    &entries.push((key: key, value: value))
+    entries.push((key: key, value: value))
 }
 
 add_flag_entry: fn(entries: &[(key: String, value: Dyn)], key: String, old: Dyn, value: Dyn) {
     if old == {
         .Bool(previous) -> {
             if previous {
-                object_set(&entries, key, Dyn.Int(2))
+                object_set(entries, key, Dyn.Int(2))
             } else {
-                object_set(&entries, key, value)
+                object_set(entries, key, value)
             }
         }
         .Int(count) -> {
             if count > 0 {
-                object_set(&entries, key, Dyn.Int(count + 1))
+                object_set(entries, key, Dyn.Int(count + 1))
             } else {
-                object_set(&entries, key, value)
+                object_set(entries, key, value)
             }
         }
-        else -> { object_set(&entries, key, value) }
+        else -> { object_set(entries, key, value) }
     }
 }
 
 put_entry: fn(entries: &[(key: String, value: Dyn)], key: String, value: Dyn) {
     old: object_get(entries, key)
     if old == .None {
-        &entries.push((key: key, value: value))
+        entries.push((key: key, value: value))
         return
     }
     previous: old
     if value == {
         .Bool(flag_value) -> {
             if flag_value {
-                add_flag_entry(&entries, key, previous, value)
+                add_flag_entry(entries, key, previous, value)
             } else {
-                object_set(&entries, key, value)
+                object_set(entries, key, value)
             }
         }
         else -> {
-            object_set(&entries, key, value)
+            object_set(entries, key, value)
         }
     }
 }
@@ -201,7 +201,7 @@ put_entry: fn(entries: &[(key: String, value: Dyn)], key: String, value: Dyn) {
         (key: "first", value: Dyn.Text("old")),
         (key: "second", value: Dyn.Int(2)),
     }
-    put_entry(&entries, "first", Dyn.Text("new"))
+    put_entry(entries, "first", Dyn.Text("new"))
     assert(entries.len() == 2)
     assert(entries[0].key == "first")
     assert(entries[1].key == "second")
@@ -301,7 +301,7 @@ positionals: fn(tree: Dyn) -> [String] Never! {
                 .Array(items) -> {
                     loop item in items {
                         if item == {
-                            .Text(s) -> &out.push(s.copy())
+                            .Text(s) -> out.push(s.copy())
                             else -> { _ := 0 }
                         }
                     }
@@ -401,7 +401,7 @@ get_choice: fn(tree: Dyn, key: String, choices: [String]) -> String? Never! {
 missing_required: fn(tree: Dyn, defs: [ArgDef]) -> [String] Never! {
     out := [String]{}
     loop d in defs {
-        if d.required && !has(tree, d.dest) && !has(tree, d.name) -> &out.push(d.name.copy())
+        if d.required && !has(tree, d.dest) && !has(tree, d.name) -> out.push(d.name.copy())
     }
     out
 }
@@ -413,7 +413,7 @@ apply_defaults: fn(tree: Dyn, defs: [ArgDef]) -> Dyn Never! {
             .Object(entries) -> {
                 if object_get(entries, d.dest) == .None && object_get(entries, d.name) == .None {
                     next_entries := entries.copy()
-                    &next_entries.push((key: d.dest, value: parse_atom(d.default_text)))
+                    next_entries.push((key: d.dest, value: parse_atom(d.default_text)))
                     out = Dyn.Object(next_entries)
                 }
             }
@@ -579,9 +579,9 @@ __cli_spec: fn(table: String, help: String, version: String, has_version: Bool, 
     loop cursor.at < cursor.raw.len() {
         if cursor.raw[cursor.at] == (U8{99}) {
             cursor.at += 1
-            name: cli_take(&cursor)
-            command_help: cli_take(&cursor)
-            &spec.commands.push(CLICommand{name: name, help: command_help, inputs: [CLIInput]{}})
+            name: cli_take(cursor)
+            command_help: cli_take(cursor)
+            spec.commands.push(CLICommand{name: name, help: command_help, inputs: [CLIInput]{}})
             next
         }
         kind: Int{cursor.raw[cursor.at + 1]} - 48
@@ -591,26 +591,26 @@ __cli_spec: fn(table: String, help: String, version: String, has_version: Bool, 
         has_default: cursor.raw[cursor.at + 5] == (U8{100})
         has_env: cursor.raw[cursor.at + 6] == (U8{101})
         cursor.at += 7
-        name: cli_take(&cursor)
-        short: cli_take(&cursor)
+        name: cli_take(cursor)
+        short: cli_take(cursor)
         default := String?{None}
-        if has_default -> default = Val(cli_take(&cursor))
+        if has_default -> default = Val(cli_take(cursor))
         choices := [String]{}
         if kind == CLI_CHOICE {
-            count: Int.parse(cli_take(&cursor)) ?? 0
-            loop _ in 0..<count -> &choices.push(cli_take(&cursor))
+            count: Int.parse(cli_take(cursor)) ?? 0
+            loop _ in 0..<count -> choices.push(cli_take(cursor))
         }
         env := String?{None}
         if has_env {
             env = envs[env_index].copy()
             env_index += 1
         }
-        input: CLIInput{name: name, short: short, flag: flag, kind: kind, choices: ^choices, default: ^default, env: ^env, required: required, positional: positional}
+        input: CLIInput{name: name, short: short, flag: flag, kind: kind, choices: choices, default: default, env: env, required: required, positional: positional}
         last: spec.commands.len() - 1
         if last < 0 {
-            &spec.inputs.push(input)
+            spec.inputs.push(input)
         } else {
-            &spec.commands[last].inputs.push(input)
+            spec.commands[last].inputs.push(input)
         }
     }
     spec
@@ -648,14 +648,14 @@ cli_command_level: fn(spec: CLISpec, program: String, command: CLICommand) -> CL
         loop parent in spec.inputs {
             if parent.name == input.name && parent.flag == input.flag -> shadowed = true
         }
-        if !shadowed -> &local.push(input.copy())
+        if !shadowed -> local.push(input.copy())
     }
-    CLILevel{program: program.copy(), help: command.help.copy(), accepts_version: spec.version != None, inherited: spec.inputs.copy(), local: ^local, commands: [CLICommand]{}}
+    CLILevel{program: program.copy(), help: command.help.copy(), accepts_version: spec.version != None, inherited: spec.inputs.copy(), local: local, commands: [CLICommand]{}}
 }
 
 cli_all: fn(level: CLILevel) -> [CLIInput] Never! {
     all := level.inherited.copy()
-    loop input in level.local -> &all.push(input.copy())
+    loop input in level.local -> all.push(input.copy())
     all
 }
 
@@ -694,8 +694,8 @@ cli_store: fn(values: &CLIValues, name: String, value: String) Never! {
         values.values[slot] = value.copy()
         return
     }
-    &values.names.push(name.copy())
-    &values.values.push(value.copy())
+    values.names.push(name.copy())
+    values.values.push(value.copy())
 }
 
 cli_get_flag: fn(parsed: CLIParsed, name: String) -> Bool? Never! {
@@ -710,12 +710,12 @@ cli_set_flag: fn(parsed: &CLIParsed, name: String, value: Bool) Never! {
         parsed.flags[slot] = value
         return
     }
-    &parsed.flag_names.push(name.copy())
-    &parsed.flags.push(value)
+    parsed.flag_names.push(name.copy())
+    parsed.flags.push(value)
 }
 
 cli_mark: fn(parsed: &CLIParsed, name: String) Never! {
-    if !parsed.explicit.contains(name) -> &parsed.explicit.push(name.copy())
+    if !parsed.explicit.contains(name) -> parsed.explicit.push(name.copy())
 }
 
 cli_parsed: fn(status: Int, message: String) -> CLIParsed Never! {
@@ -741,9 +741,9 @@ cli_ascii_lower: fn(text: String) -> String Never! {
     out := [U8]{}
     loop byte in text.bytes() {
         if byte >= 65 && byte <= 90 {
-            &out.push(byte + U8{32})
+            out.push(byte + U8{32})
         } else {
-            &out.push(byte)
+            out.push(byte)
         }
     }
     String.from_bytes(out) ?? ""
@@ -778,7 +778,7 @@ cli_edit_distance: fn(a: String, b: String) -> Int Never! {
     left: a.bytes()
     right: b.bytes()
     previous := [Int]{}
-    loop j in 0..<(right.len() + 1) -> &previous.push(j)
+    loop j in 0..<(right.len() + 1) -> previous.push(j)
     loop (i, x) in left {
         current := [Int]{i + 1}
         loop (j, y) in right {
@@ -788,9 +788,9 @@ cli_edit_distance: fn(a: String, b: String) -> Int Never! {
                 if current[j] < best -> best = current[j]
                 best += 1
             }
-            &current.push(best)
+            current.push(best)
         }
-        previous = ^current
+        previous = current.move()
     }
     previous[right.len()]
 }
@@ -817,18 +817,18 @@ cli_parse_level: fn(spec: CLISpec, level: CLILevel, argv: [String], start: Int, 
     all: cli_all(level)
     out := cli_parsed(-1, "")
     root_help: start >= argv.len() && level.commands.len() > 0
-    cli_set_flag(&out, "help", false)
-    cli_set_flag(&out, "version", false)
+    cli_set_flag(out, "help", false)
+    cli_set_flag(out, "version", false)
     fallbacks := CLIValues{names: [String]{}, values: [String]{}}
     loop input in all {
         if input.flag {
-            cli_set_flag(&out, input.name, false)
+            cli_set_flag(out, input.name, false)
             next
         }
         if input.env == .Val(value) {
-            cli_store(&fallbacks, input.name, value)
+            cli_store(fallbacks, input.name, value)
         } else if input.default == .Val(value) {
-            cli_store(&fallbacks, input.name, value)
+            cli_store(fallbacks, input.name, value)
         }
     }
     i := start
@@ -837,7 +837,7 @@ cli_parse_level: fn(spec: CLISpec, level: CLILevel, argv: [String], start: Int, 
         if arg == "--" {
             i += 1
             loop i < argv.len() {
-                &out.positionals.push(argv[i].copy())
+                out.positionals.push(argv[i].copy())
                 i += 1
             }
             break
@@ -845,8 +845,8 @@ cli_parse_level: fn(spec: CLISpec, level: CLILevel, argv: [String], start: Int, 
         if starts(arg, "--") {
             rest: drop_prefix(arg, 2)
             if rest == "help" || (rest == "version" && level.accepts_version) {
-                cli_set_flag(&out, rest, true)
-                cli_mark(&out, rest)
+                cli_set_flag(out, rest, true)
+                cli_mark(out, rest)
                 i += 1
                 next
             }
@@ -858,16 +858,16 @@ cli_parse_level: fn(spec: CLISpec, level: CLILevel, argv: [String], start: Int, 
                 if option >= 0 {
                     refusal: cli_store_error(all[option], value, float_ok)
                     if refusal.bytes().len() > 0 -> return cli_failed(refusal)
-                    cli_store(&out.options, name, value)
-                    cli_mark(&out, name)
+                    cli_store(out.options, name, value)
+                    cli_mark(out, name)
                 } else if cli_find(all, name, true) >= 0 {
                     return cli_failed("--{name} is a flag; it takes no value (got `={value}`)\n\n{cli_usage(level)}")
                 } else {
                     return cli_failed(cli_unknown(name, all, cli_usage(level)))
                 }
             } else if cli_find(all, rest, true) >= 0 {
-                cli_set_flag(&out, rest, true)
-                cli_mark(&out, rest)
+                cli_set_flag(out, rest, true)
+                cli_mark(out, rest)
             } else {
                 option: cli_find(all, rest, false)
                 if option < 0 -> return cli_failed(cli_unknown(rest, all, cli_usage(level)))
@@ -875,8 +875,8 @@ cli_parse_level: fn(spec: CLISpec, level: CLILevel, argv: [String], start: Int, 
                 if i >= argv.len() -> return cli_failed("`--{rest}` requires a value\n\n{cli_usage(level)}")
                 refusal: cli_store_error(all[option], argv[i], float_ok)
                 if refusal.bytes().len() > 0 -> return cli_failed(refusal)
-                cli_store(&out.options, rest, argv[i])
-                cli_mark(&out, rest)
+                cli_store(out.options, rest, argv[i])
+                cli_mark(out, rest)
             }
             i += 1
             next
@@ -891,8 +891,8 @@ cli_parse_level: fn(spec: CLISpec, level: CLILevel, argv: [String], start: Int, 
                 if found < 0 -> return cli_failed(if length > 1 -> "unknown option `-{short}`\n\n{cli_usage(level)}" else -> "unknown option `-{rest}`\n\n{cli_usage(level)}")
                 input: all[found].copy()
                 if input.flag {
-                    cli_set_flag(&out, input.name, true)
-                    cli_mark(&out, input.name)
+                    cli_set_flag(out, input.name, true)
+                    cli_mark(out, input.name)
                     k += 1
                     next
                 }
@@ -905,8 +905,8 @@ cli_parse_level: fn(spec: CLISpec, level: CLILevel, argv: [String], start: Int, 
                 }
                 refusal: cli_store_error(input, value, float_ok)
                 if refusal.bytes().len() > 0 -> return cli_failed(refusal)
-                cli_store(&out.options, input.name, value)
-                cli_mark(&out, input.name)
+                cli_store(out.options, input.name, value)
+                cli_mark(out, input.name)
                 break
             }
             i += 1
@@ -925,19 +925,19 @@ cli_parse_level: fn(spec: CLISpec, level: CLILevel, argv: [String], start: Int, 
                 nested: cli_parse_level(spec, cli_command_level(spec, level.program, command), argv, i + 1, float_ok)
                 if nested.status >= 0 -> return nested
                 loop (index, name) in nested.flag_names {
-                    if nested.explicit.contains(name) || cli_slot(out.flag_names, name) < 0 -> cli_set_flag(&out, name, nested.flags[index])
+                    if nested.explicit.contains(name) || cli_slot(out.flag_names, name) < 0 -> cli_set_flag(out, name, nested.flags[index])
                 }
                 loop (index, name) in nested.options.names {
-                    if nested.explicit.contains(name) || cli_slot(out.options.names, name) < 0 -> cli_store(&out.options, name, nested.options.values[index])
+                    if nested.explicit.contains(name) || cli_slot(out.options.names, name) < 0 -> cli_store(out.options, name, nested.options.values[index])
                 }
-                loop value in nested.positionals -> &out.positionals.push(value.copy())
-                loop name in nested.explicit -> cli_mark(&out, name)
+                loop value in nested.positionals -> out.positionals.push(value.copy())
+                loop name in nested.explicit -> cli_mark(out, name)
                 out.command = command.name.copy()
                 break
             }
             if level.commands.len() > 0 -> return cli_failed("unknown command `{arg}`\n\n{cli_usage(level)}")
         }
-        &out.positionals.push(arg.copy())
+        out.positionals.push(arg.copy())
         i += 1
     }
     // D-CLI-POS1=A named-wins: a named value satisfies its positional slot and
@@ -955,19 +955,19 @@ cli_parse_level: fn(spec: CLISpec, level: CLILevel, argv: [String], start: Int, 
             value: out.positionals[bare].copy()
             refusal: cli_store_error(input, value, float_ok)
             if refusal.bytes().len() > 0 -> return cli_failed(refusal)
-            cli_store(&out.options, input.name, value)
+            cli_store(out.options, input.name, value)
             bare += 1
         } else if cli_lookup(fallbacks, input.name) == .Val(value) {
-            cli_store(&out.options, input.name, value)
-            &filled.push(input.name.copy())
+            cli_store(out.options, input.name, value)
+            filled.push(input.name.copy())
         } else {
-            &missing.push(input.name.copy())
+            missing.push(input.name.copy())
         }
     }
     if out.command.bytes().len() == 0 && bare < out.positionals.len() -> return cli_failed("{__cli_surplus(out.positionals, bare)}\n\n{cli_usage(level)}")
     loop input in all {
         if input.flag || filled.contains(input.name) || cli_slot(out.options.names, input.name) >= 0 -> next
-        if cli_lookup(fallbacks, input.name) == .Val(value) -> cli_store(&out.options, input.name, value)
+        if cli_lookup(fallbacks, input.name) == .Val(value) -> cli_store(out.options, input.name, value)
     }
     asked_help: cli_get_flag(out, "help") ?? false
     if missing.len() > 0 && !root_help && !asked_help -> return cli_failed("{__cli_missing(missing)}\n\n{cli_usage(level)}")
@@ -1008,7 +1008,7 @@ cli_parse: fn(spec: CLISpec, argv: [String], float_ok: fn(String) -> Bool Never!
     inputs := spec.inputs.copy()
     loop command in spec.commands {
         if command.name == parsed.command {
-            loop input in command.inputs -> &inputs.push(input.copy())
+            loop input in command.inputs -> inputs.push(input.copy())
         }
     }
     loop input in inputs {
@@ -1095,7 +1095,7 @@ __cli_flag_value: fn(name: String, value: String) -> String Never! {
 }
 __cli_surplus: fn(positionals: [String], start: Int) -> String Never! {
     surplus := [String]{}
-    loop index in start..<positionals.len() -> &surplus.push("`{positionals[index]}`")
+    loop index in start..<positionals.len() -> surplus.push("`{positionals[index]}`")
     plural: if surplus.len() == 1 -> "" else -> "s"
     "unexpected argument{plural}: {surplus.join(", ")}"
 }
@@ -1169,76 +1169,76 @@ args_option_entry: fn(name: String, help: String, meta: String, value: Int) -> A
     args_entry(ARG_OPTION, name, None, help, meta, None, None, false, false, value)
 }
 
-args_with: fn(^spec: ArgsSpec, ^entry: ArgEntry) -> ArgsSpec Never! {
-    out := ^spec
-    &out.levels[0].entries.push(^entry)
+args_with: fn(&&spec: ArgsSpec, &&entry: ArgEntry) -> ArgsSpec Never! {
+    out := spec.move()
+    out.levels[0].entries.push(entry)
     out
 }
 
-__args_description: fn(^spec: ArgsSpec, description: String) -> ArgsSpec Never! {
-    out := ^spec
+__args_description: fn(&&spec: ArgsSpec, description: String) -> ArgsSpec Never! {
+    out := spec.move()
     out.levels[0].description = Val(description.copy())
     out
 }
 
-__args_version: fn(^spec: ArgsSpec, version: String) -> ArgsSpec Never! {
-    out := ^spec
+__args_version: fn(&&spec: ArgsSpec, version: String) -> ArgsSpec Never! {
+    out := spec.move()
     out.levels[0].version = Val(version.copy())
     out
 }
 
-__args_flag: fn(^spec: ArgsSpec, name: String, help: String) -> ArgsSpec Never! {
-    args_with(^spec, args_entry(ARG_FLAG, name, None, help, "", None, None, false, false, CLI_TEXT))
+__args_flag: fn(&&spec: ArgsSpec, name: String, help: String) -> ArgsSpec Never! {
+    args_with(spec, args_entry(ARG_FLAG, name, None, help, "", None, None, false, false, CLI_TEXT))
 }
 
-__args_flag_short: fn(^spec: ArgsSpec, name: String, short: String, help: String) -> ArgsSpec Never! {
-    args_with(^spec, args_entry(ARG_FLAG, name, Val(short.copy()), help, "", None, None, false, false, CLI_TEXT))
+__args_flag_short: fn(&&spec: ArgsSpec, name: String, short: String, help: String) -> ArgsSpec Never! {
+    args_with(spec, args_entry(ARG_FLAG, name, Val(short.copy()), help, "", None, None, false, false, CLI_TEXT))
 }
 
-__args_option: fn(^spec: ArgsSpec, name: String, help: String, meta: String) -> ArgsSpec Never! {
-    args_with(^spec, args_option_entry(name, help, meta, CLI_TEXT))
+__args_option: fn(&&spec: ArgsSpec, name: String, help: String, meta: String) -> ArgsSpec Never! {
+    args_with(spec, args_option_entry(name, help, meta, CLI_TEXT))
 }
 
-__args_option_short: fn(^spec: ArgsSpec, name: String, short: String, help: String, meta: String) -> ArgsSpec Never! {
-    args_with(^spec, args_entry(ARG_OPTION, name, Val(short.copy()), help, meta, None, None, false, false, CLI_TEXT))
+__args_option_short: fn(&&spec: ArgsSpec, name: String, short: String, help: String, meta: String) -> ArgsSpec Never! {
+    args_with(spec, args_entry(ARG_OPTION, name, Val(short.copy()), help, meta, None, None, false, false, CLI_TEXT))
 }
 
-__args_option_default: fn(^spec: ArgsSpec, name: String, help: String, meta: String, default: String) -> ArgsSpec Never! {
-    args_with(^spec, args_entry(ARG_OPTION, name, None, help, meta, Val(default.copy()), None, false, false, CLI_TEXT))
+__args_option_default: fn(&&spec: ArgsSpec, name: String, help: String, meta: String, default: String) -> ArgsSpec Never! {
+    args_with(spec, args_entry(ARG_OPTION, name, None, help, meta, Val(default.copy()), None, false, false, CLI_TEXT))
 }
 
-__args_option_env: fn(^spec: ArgsSpec, name: String, help: String, meta: String, env: String) -> ArgsSpec Never! {
-    args_with(^spec, args_entry(ARG_OPTION, name, None, help, meta, None, Val(env.copy()), false, false, CLI_TEXT))
+__args_option_env: fn(&&spec: ArgsSpec, name: String, help: String, meta: String, env: String) -> ArgsSpec Never! {
+    args_with(spec, args_entry(ARG_OPTION, name, None, help, meta, None, Val(env.copy()), false, false, CLI_TEXT))
 }
 
-__args_option_int: fn(^spec: ArgsSpec, name: String, help: String, meta: String) -> ArgsSpec Never! {
-    args_with(^spec, args_option_entry(name, help, meta, CLI_INT))
+__args_option_int: fn(&&spec: ArgsSpec, name: String, help: String, meta: String) -> ArgsSpec Never! {
+    args_with(spec, args_option_entry(name, help, meta, CLI_INT))
 }
 
-__args_option_float: fn(^spec: ArgsSpec, name: String, help: String, meta: String) -> ArgsSpec Never! {
-    args_with(^spec, args_option_entry(name, help, meta, CLI_FLOAT))
+__args_option_float: fn(&&spec: ArgsSpec, name: String, help: String, meta: String) -> ArgsSpec Never! {
+    args_with(spec, args_option_entry(name, help, meta, CLI_FLOAT))
 }
 
 // `choices` is a comma list; each choice is trimmed and an empty one dropped.
-__args_option_choice: fn(^spec: ArgsSpec, name: String, help: String, meta: String, choices: String) -> ArgsSpec Never! {
+__args_option_choice: fn(&&spec: ArgsSpec, name: String, help: String, meta: String, choices: String) -> ArgsSpec Never! {
     entry := args_option_entry(name, help, meta, CLI_CHOICE)
     loop part in choices.split(",") {
         choice: part.trim()
-        if choice.bytes().len() > 0 -> &entry.choices.push(choice.copy())
+        if choice.bytes().len() > 0 -> entry.choices.push(choice.copy())
     }
-    args_with(^spec, ^entry)
+    args_with(spec, entry)
 }
 
-__args_repeat: fn(^spec: ArgsSpec, name: String, help: String, meta: String) -> ArgsSpec Never! {
-    args_with(^spec, args_entry(ARG_OPTION, name, None, help, meta, None, None, false, true, CLI_TEXT))
+__args_repeat: fn(&&spec: ArgsSpec, name: String, help: String, meta: String) -> ArgsSpec Never! {
+    args_with(spec, args_entry(ARG_OPTION, name, None, help, meta, None, None, false, true, CLI_TEXT))
 }
 
-__args_required_option: fn(^spec: ArgsSpec, name: String, help: String, meta: String) -> ArgsSpec Never! {
-    args_with(^spec, args_entry(ARG_OPTION, name, None, help, meta, None, None, true, false, CLI_TEXT))
+__args_required_option: fn(&&spec: ArgsSpec, name: String, help: String, meta: String) -> ArgsSpec Never! {
+    args_with(spec, args_entry(ARG_OPTION, name, None, help, meta, None, None, true, false, CLI_TEXT))
 }
 
-__args_positional: fn(^spec: ArgsSpec, name: String, help: String) -> ArgsSpec Never! {
-    args_with(^spec, args_entry(ARG_POSITIONAL, name, None, help, "", None, None, false, false, CLI_TEXT))
+__args_positional: fn(&&spec: ArgsSpec, name: String, help: String) -> ArgsSpec Never! {
+    args_with(spec, args_entry(ARG_POSITIONAL, name, None, help, "", None, None, false, false, CLI_TEXT))
 }
 
 args_same_input: fn(left: ArgEntry, right: ArgEntry) -> Bool Never! {
@@ -1248,12 +1248,12 @@ args_same_input: fn(left: ArgEntry, right: ArgEntry) -> Bool Never! {
 // Rust `jet_args_subcommand`: the command inherits every parent input; its
 // own input of the same name gives way to the inherited one. Its levels move
 // after the parent's, so each nested level index shifts by the parent count.
-__args_subcommand: fn(^spec: ArgsSpec, name: String, help: String, ^command: ArgsSpec) -> ArgsSpec Never! {
-    out := ^spec
-    nested := ^command
+__args_subcommand: fn(&&spec: ArgsSpec, name: String, help: String, &&command: ArgsSpec) -> ArgsSpec Never! {
+    out := spec.move()
+    nested := command.move()
     inherited := out.levels[0].inherited.copy()
     loop entry in out.levels[0].entries {
-        if entry.kind != ARG_COMMAND -> &inherited.push(entry.copy())
+        if entry.kind != ARG_COMMAND -> inherited.push(entry.copy())
     }
     kept := [ArgEntry]{}
     loop entry in nested.levels[0].entries {
@@ -1261,15 +1261,15 @@ __args_subcommand: fn(^spec: ArgsSpec, name: String, help: String, ^command: Arg
         loop parent in inherited {
             if args_same_input(parent, entry) -> shadowed = true
         }
-        if !shadowed -> &kept.push(entry.copy())
+        if !shadowed -> kept.push(entry.copy())
     }
-    nested.levels[0].entries = ^kept
+    nested.levels[0].entries = kept.move()
     loop entry in inherited {
         present := false
         loop parent in nested.levels[0].inherited {
             if args_same_input(parent, entry) -> present = true
         }
-        if !present -> &nested.levels[0].inherited.push(entry.copy())
+        if !present -> nested.levels[0].inherited.push(entry.copy())
     }
     nested.levels[0].inherited_version = nested.levels[0].inherited_version || out.levels[0].inherited_version || out.levels[0].version != None
     if nested.levels[0].inherited_version -> nested.levels[0].version = None
@@ -1279,11 +1279,11 @@ __args_subcommand: fn(^spec: ArgsSpec, name: String, help: String, ^command: Arg
         loop index in 0..<moved.entries.len() {
             if moved.entries[index].kind == ARG_COMMAND -> moved.entries[index].nested = moved.entries[index].nested + offset
         }
-        &out.levels.push(^moved)
+        out.levels.push(moved)
     }
     entry := args_entry(ARG_COMMAND, name, None, help, "", None, None, false, false, CLI_TEXT)
     entry.nested = offset
-    &out.levels[0].entries.push(^entry)
+    out.levels[0].entries.push(entry)
     out
 }
 
@@ -1347,13 +1347,13 @@ __args_help: fn(spec: ArgsSpec) -[Exec.Args]> String Never! {
 // order.
 __args_completion: fn(spec: ArgsSpec, shell: String) -> String Never! {
     words := [String]{"--help"}
-    if spec.levels[0].version != None -> &words.push("--version")
+    if spec.levels[0].version != None -> words.push("--version")
     loop entry in spec.levels[0].entries {
         if entry.kind == ARG_FLAG || entry.kind == ARG_OPTION {
-            &words.push("--{entry.name}")
-            if entry.short == .Val(short) -> &words.push("-{short}")
+            words.push("--{entry.name}")
+            if entry.short == .Val(short) -> words.push("-{short}")
         } else {
-            &words.push(entry.name.copy())
+            words.push(entry.name.copy())
         }
     }
     "{shell} completion: {words.join(" ")}"
@@ -1363,7 +1363,7 @@ __args_completion: fn(spec: ArgsSpec, shell: String) -> String Never! {
 args_all: fn(level: ArgsLevel) -> [ArgEntry] Never! {
     all := level.inherited.copy()
     loop entry in level.entries {
-        if entry.kind != ARG_COMMAND -> &all.push(entry.copy())
+        if entry.kind != ARG_COMMAND -> all.push(entry.copy())
     }
     all
 }
@@ -1392,8 +1392,8 @@ args_store: fn(options: &[String:[String]], entry: ArgEntry, value: String) -> S
     if entry.value == CLI_FLOAT && !__cli_is_float(value) -> return __cli_float_refusal(entry.name, value)
     if entry.value == CLI_CHOICE && !entry.choices.contains(value) -> return __cli_choice_refusal(entry.name, value, entry.choices.join(", "))
     values := if entry.repeat -> (options.get(entry.name) ?? [String]{}).copy() else -> [String]{}
-    &values.push(value.copy())
-    options[entry.name.copy()] = ^values
+    values.push(value.copy())
+    options[entry.name.copy()] = values.move()
     ""
 }
 
@@ -1446,7 +1446,7 @@ args_parse_level: fn(spec: ArgsSpec, at: Int, argv: [String], start: Int, out: &
         if arg == "--" {
             i += 1
             loop i < argv.len() {
-                &out.positionals.push(argv[i].copy())
+                out.positionals.push(argv[i].copy())
                 i += 1
             }
             break
@@ -1465,7 +1465,7 @@ args_parse_level: fn(spec: ArgsSpec, at: Int, argv: [String], start: Int, out: &
                 value: slice_str(rest, eq + 1, rest.bytes().len())
                 option: args_find(all, ARG_OPTION, name)
                 if option >= 0 {
-                    refusal: args_store(&out.options, all[option], value)
+                    refusal: args_store(out.options, all[option], value)
                     if refusal.bytes().len() > 0 -> return refusal
                     out.explicit_options[name.copy()] = true
                 } else if args_find(all, ARG_FLAG, name) >= 0 {
@@ -1481,7 +1481,7 @@ args_parse_level: fn(spec: ArgsSpec, at: Int, argv: [String], start: Int, out: &
                 if option < 0 -> return args_unknown(rest, all, args_help(spec, at))
                 i += 1
                 if i >= argv.len() -> return "`--{rest}` requires a value\n\n{args_help(spec, at)}"
-                refusal: args_store(&out.options, all[option], argv[i])
+                refusal: args_store(out.options, all[option], argv[i])
                 if refusal.bytes().len() > 0 -> return refusal
                 out.explicit_options[rest.copy()] = true
             }
@@ -1509,7 +1509,7 @@ args_parse_level: fn(spec: ArgsSpec, at: Int, argv: [String], start: Int, out: &
                     if i >= argv.len() -> return "`-{short}` requires a value\n\n{args_help(spec, at)}"
                     value = argv[i].copy()
                 }
-                refusal: args_store(&out.options, all[found], value)
+                refusal: args_store(out.options, all[found], value)
                 if refusal.bytes().len() > 0 -> return refusal
                 out.explicit_options[all[found].name.copy()] = true
                 break
@@ -1527,7 +1527,7 @@ args_parse_level: fn(spec: ArgsSpec, at: Int, argv: [String], start: Int, out: &
             }
             if command >= 0 {
                 nested := args_parsed()
-                refusal: args_parse_level(spec, command, argv, i + 1, &nested)
+                refusal: args_parse_level(spec, command, argv, i + 1, nested)
                 if refusal.bytes().len() > 0 -> return refusal
                 loop (name, value) in nested.flags {
                     if nested.explicit_flags.get(name) != None || out.flags.get(name) == None -> out.flags[name.copy()] = value
@@ -1535,7 +1535,7 @@ args_parse_level: fn(spec: ArgsSpec, at: Int, argv: [String], start: Int, out: &
                 loop (name, values) in nested.options {
                     if nested.explicit_options.get(name) != None || out.options.get(name) == None -> out.options[name.copy()] = values.copy()
                 }
-                loop value in nested.positionals -> &out.positionals.push(value.copy())
+                loop value in nested.positionals -> out.positionals.push(value.copy())
                 loop (name, value) in nested.explicit_flags -> out.explicit_flags[name.copy()] = value
                 loop (name, value) in nested.explicit_options -> out.explicit_options[name.copy()] = value
                 out.subcommand = Val(arg.copy())
@@ -1543,7 +1543,7 @@ args_parse_level: fn(spec: ArgsSpec, at: Int, argv: [String], start: Int, out: &
             }
             if has_commands -> return "unknown command `{arg}`\n\n{args_help(spec, at)}"
         }
-        &out.positionals.push(arg.copy())
+        out.positionals.push(arg.copy())
         i += 1
     }
     // D-CLI-POS1=A named-wins: a named value satisfies its positional slot and
@@ -1560,7 +1560,7 @@ args_parse_level: fn(spec: ArgsSpec, at: Int, argv: [String], start: Int, out: &
             value: out.positionals[bare].copy()
             option: args_find(all, ARG_OPTION, entry.name)
             if option >= 0 {
-                refusal: args_store(&out.options, all[option], value)
+                refusal: args_store(out.options, all[option], value)
                 if refusal.bytes().len() > 0 -> return refusal
             } else {
                 out.options[entry.name.copy()] = [String]{value.copy()}
@@ -1569,12 +1569,12 @@ args_parse_level: fn(spec: ArgsSpec, at: Int, argv: [String], start: Int, out: &
         } else if fallbacks.get(entry.name) == .Val(value) {
             out.options[entry.name.copy()] = [String]{value.copy()}
         } else {
-            &missing.push(entry.name.copy())
+            missing.push(entry.name.copy())
         }
     }
     if out.subcommand == None && bare < out.positionals.len() {
         surplus := [String]{}
-        loop index in bare..<out.positionals.len() -> &surplus.push("`{out.positionals[index]}`")
+        loop index in bare..<out.positionals.len() -> surplus.push("`{out.positionals[index]}`")
         plural: if surplus.len() == 1 -> "" else -> "s"
         return "unexpected argument{plural}: {surplus.join(", ")}\n\n{args_help(spec, at)}"
     }
@@ -1596,7 +1596,7 @@ args_parse_level: fn(spec: ArgsSpec, at: Int, argv: [String], start: Int, out: &
 // is the Err's message.
 __args_parse: fn(spec: ArgsSpec, args: [String]) -[Env, Exec.Args]> ParsedArgs Err! {
     out := args_parsed()
-    refusal: args_parse_level(spec, 0, args, 0, &out)
+    refusal: args_parse_level(spec, 0, args, 0, out)
     if refusal.bytes().len() > 0 -> return Err(refusal)
     Ok(out)
 }
@@ -1605,7 +1605,7 @@ __args_parse: fn(spec: ArgsSpec, args: [String]) -[Env, Exec.Args]> ParsedArgs E
 // refusal goes to stderr and exits 2.
 __args_parse_or_exit: fn(spec: ArgsSpec, args: [String]) -[Env, Exec, Exec.Args, IO, Time.Wait]> ParsedArgs Never! {
     out := args_parsed()
-    refusal: args_parse_level(spec, 0, args, 0, &out)
+    refusal: args_parse_level(spec, 0, args, 0, out)
     if refusal.bytes().len() > 0 {
         core.term.eprint(refusal)
         core.process.exit(2)

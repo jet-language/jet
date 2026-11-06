@@ -50,10 +50,10 @@ poll: fn() -[IO]> UIDragEvent? UIHostError! {
     operation: drag_operation(fields[2])
     phase: if operation == None && fields[1] == "drop" -> UIDragPhase.Cancel else -> drag_phase(fields[1])
     items := [UIDropItem]{}
-    if fields[3].len() > 0 -> &items.push(UIDropItem.Text{value: fields[3].copy()})
+    if fields[3].len() > 0 -> items.push(UIDropItem.Text{value: fields[3].copy()})
     loop line in fields[4].split("\n") {
         uri: line.trim()
-        if uri.len() > 0 && !uri.starts_with("#") -> &items.push(UIDropItem.URI{value: uri.copy()})
+        if uri.len() > 0 && !uri.starts_with("#") -> items.push(UIDropItem.URI{value: uri.copy()})
     }
     Ok(Val(UIDragEvent{target: UINodeID{value: fields[0].copy()}, phase: phase, operation: operation, items: items}))
 }

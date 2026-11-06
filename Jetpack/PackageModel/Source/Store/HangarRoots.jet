@@ -59,26 +59,26 @@ HangarRoots: struct {
             {root: pkg_user_data_root(), dev_mode: true},
             HangarRoots.at(pkg_legacy_user_root())
         }
-        loop candidate in candidates -> pkg_hangar_add_machine_root(&roots, candidate)
+        loop candidate in candidates -> pkg_hangar_add_machine_root(roots, candidate)
         parents := [String]{}
         loop root in roots {
-            if root.root != "/" && root.root != "" -> &parents.push(files.dirname(root.root))
+            if root.root != "/" && root.root != "" -> parents.push(files.dirname(root.root))
         }
         name_values: [String]{"XDG_DATA_HOME", "XDG_STATE_HOME", "LOCALAPPDATA"}
         loop name in name_values {
             parent: pkg_environment_path(name) ?? next
-            &parents.push(parent)
+            parents.push(parent)
         }
-        &parents.push(pkg_environment_path("XDG_CACHE_HOME") ?? files.join(pkg_home_dir(), ".cache"))
+        parents.push(pkg_environment_path("XDG_CACHE_HOME") ?? files.join(pkg_home_dir(), ".cache"))
         loop parent in authority_holds(parents) {
             entries: files.list_dir(parent) ?? next
             loop entry in entries {
                 info: files.stat(entry.path) ?? next
                 if info.is_symlink || !info.is_dir -> next
                 if pkg_hangar_real_directory(files.join(entry.path, pkg_hangar_subdir())) {
-                    pkg_hangar_add_machine_root(&roots, HangarRoots{root: entry.path, dev_mode: true})
+                    pkg_hangar_add_machine_root(roots, HangarRoots{root: entry.path, dev_mode: true})
                 } else if pkg_hangar_real_directory(files.join(entry.path, HANGAR_LEGACY_SUBDIR)) {
-                    pkg_hangar_add_machine_root(&roots, HangarRoots.at(entry.path))
+                    pkg_hangar_add_machine_root(roots, HangarRoots.at(entry.path))
                 }
             }
         }
@@ -96,7 +96,7 @@ pkg_hangar_add_machine_root: fn(roots: &[HangarRoots], candidate: HangarRoots) -
     loop root in roots {
         if root.root == candidate.root && root.hangar_dir() == candidate.hangar_dir() -> return
     }
-    &roots.push(candidate)
+    roots.push(candidate)
 }
 
 pkg_hangar_real_directory: fn(path: String) -[FS]> Bool Never! {
@@ -251,15 +251,15 @@ pkg_json_quote: fn(text: String) -> String Never! {
 
 pkg_hangar_json_string_array: fn(items: [String]) -> String Never! {
     quoted := [String]{}
-    loop item in items -> &quoted.push(pkg_json_quote(item))
+    loop item in items -> quoted.push(pkg_json_quote(item))
     "[{quoted.join(", ")}]"
 }
 
 pkg_hangar_json_string_object: fn(map: [String: String]) -> String Never! {
     keys := map.keys().to_list()
-    &keys.sort()
+    keys.sort()
     parts := [String]{}
-    loop key in keys -> &parts.push("{pkg_json_quote(key)}: {pkg_json_quote(map[key])}")
+    loop key in keys -> parts.push("{pkg_json_quote(key)}: {pkg_json_quote(map[key])}")
     "{{{parts.join(", ")}}}"
 }
 
@@ -296,7 +296,7 @@ pkg_parse_meta: fn(text: String) -> ParsedMeta? Never! {
             items: pkg_json_array(value) ?? [Dyn]{}
             loop item in items {
                 reference_text: pkg_json_text(item) ?? next
-                &references.push(reference_text)
+                references.push(reference_text)
             }
         }
         .None -> {}
@@ -429,7 +429,7 @@ pkg_store_list_impl: fn(roots: HangarRoots, strict: Bool) -[FS, Env]> [StoreEntr
                 return Err(HangarReadError.InvalidData("invalid Hangar metadata `{meta}`"))
             }
         }
-        &out.push(StoreEntry{
+        out.push(StoreEntry{
             id: entry.name,
             name: parsed.name,
             version: parsed.version,
@@ -448,7 +448,7 @@ pkg_store_list_impl: fn(roots: HangarRoots, strict: Bool) -[FS, Env]> [StoreEntr
             last_used_at: parsed.last_used_at ?? 0
         })
     }
-    &out.sort_by(entry -> entry.id)
+    out.sort_by(entry -> entry.id)
     Ok(out)
 }
 

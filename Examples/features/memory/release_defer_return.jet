@@ -3,14 +3,14 @@ Resource: struct {
 }
 
 impl Resource.Close {
-    close: fn(^self) { print("close {self.name}") }
+    close: fn(&&self) { print("close {self.name}") }
 }
 
 make: fn() -> Int {
     first := Resource{name: "first"}
-    defer close(^first)
+    defer close(first)
     second := Resource{name: "second"}
-    defer close(^second)
+    defer close(second)
     print("body")
     return 7
 }

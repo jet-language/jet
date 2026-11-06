@@ -73,7 +73,7 @@ impl NativeOverlayPanelFact {
         validate_text(self.title, "native overlay panel title", false)
         validate_text(self.status, "native overlay panel status", true)
         ids := [String: Bool]{}
-        loop node in &self.nodes -> node.validate(0, count, &ids)
+        loop node in &self.nodes -> node.validate(0, count, ids)
         return ()
     }
 }
@@ -86,7 +86,7 @@ impl NativeOverlayEvent {
         return Self { protocol, session_id, revision, sequence, observed_at_ms, panels }
     }
     current: fn(session_id: String, revision: String, sequence: U64, observed_at_ms: U64, panels: [NativeOverlayPanelFact]) -> Self {
-        return Self.new(JET_DEVTOOLS_PROTOCOL, session_id, revision, sequence, observed_at_ms, ^panels)
+        return Self.new(JET_DEVTOOLS_PROTOCOL, session_id, revision, sequence, observed_at_ms, panels)
     }
     validate: fn(self: &Self) Err! {
         if self.protocol != JET_DEVTOOLS_PROTOCOL -> return .Err("native overlay protocol must be `{JET_DEVTOOLS_PROTOCOL}`")
@@ -97,7 +97,7 @@ impl NativeOverlayEvent {
         count := Usize{0}
         loop panel in &self.panels {
             if panel_ids.insert(panel.panel_id.copy(), true).is_some() -> return .Err("native overlay event repeats panel `{panel.panel_id}`")
-            panel.validate(&count)
+            panel.validate(count)
         }
         return ()
     }
@@ -267,12 +267,12 @@ impl NativeOverlayHost {
         if projected_panel_count > MAX_OVERLAY_PANELS -> return .Err("native overlay frame exceeds its panel budget")
         if projected_node_count > MAX_OVERLAY_NODES -> return .Err("native overlay frame exceeds its node budget")
         if revision_changed -> self.panels.clear()
-        self.session_id = .Val(^event.session_id)
-        self.revision = .Val(^event.revision)
+        self.session_id = .Val(event.session_id.move())
+        self.revision = .Val(event.revision.move())
         self.sequence = .Val(event.sequence)
         self.view.cursor = .Val(event.sequence)
         self.observed_at_ms = event.observed_at_ms
-        loop panel in event.panels -> self.panels.insert(panel.panel_id.copy(), ^panel)
+        loop panel in event.panels -> self.panels.insert(panel.panel_id.copy(), panel)
         self.push_frame()
         return ()
     }
@@ -283,7 +283,7 @@ impl NativeOverlayHost {
             item: if !selection.item_key.is_empty() -> .Val(selection.item_key.copy()) else -> .None
             return JetDevtoolsSelection.new(selection.panel_id, item)
         })
-        if update.event.clone() == .Val(event) -> self.ingest(^event)
+        if update.event.clone() == .Val(event) -> self.ingest(event)
         else if self.sequence.is_some() -> self.push_frame()
         return ()
     }
@@ -313,7 +313,7 @@ impl NativeOverlayHost {
                 y = y.saturating_add(16)
             }
             loop node in &panel.nodes {
-                append_native_node_commands(&commands, node, bounds.x.saturating_add(18), &y, bottom, 0)
+                append_native_node_commands(commands, node, bounds.x.saturating_add(18), y, bottom, 0)
                 if y >= bottom || commands.len() >= MAX_OVERLAY_NODES -> break
             }
         }
@@ -369,7 +369,7 @@ impl NativeOverlayHost {
             observed_at_ms: self.observed_at_ms, open: self.state.open, dock: self.state.dock, focused: self.is_focused(), viewport: self.viewport,
             bounds: self.viewport.overlay_rect(self.state.dock), cursor: self.view.cursor, selection: self.view.selection.copy(), panels }
         if self.frames.len() == self.max_frames -> _: self.frames.pop_front()
-        self.frames.push_back(^frame)
+        self.frames.push_back(frame)
     }
 }
 impl NativeOverlayHost.Default {
@@ -397,9 +397,9 @@ NativeOverlayHostBridge: struct {
 impl NativeOverlayHostBridge {
     new: fn(session: Arc<ResidentDevSession>, release_build: Bool) -> Self {
         // GATE #4494: native Arc ownership and mutex guards at callback boundaries.
-        adapter: NativeOverlayAdapter.for_session(&session).with_release_build(release_build)
+        adapter: NativeOverlayAdapter.for_session(session).with_release_build(release_build)
         host: NativeOverlayHost.new().with_release_build(release_build)
-        return Self { session, adapter: Mutex.new(^adapter), host: Mutex.new(^host), toggle_key_state: Mutex.new({}) }
+        return Self { session, adapter: Mutex.new(adapter), host: Mutex.new(host), toggle_key_state: Mutex.new({}) }
     }
     frame: fn(self: Self) -> NativeOverlayFrame? { return self.host.lock().ok()?.frame().cloned() }
 }
@@ -407,8 +407,8 @@ impl NativeOverlayHostBridge.JetDevtoolsNativeHost {
     on_event: fn(self: Self, session_id: String, _event: JetDevtoolsEvent) -> Unit {
         if session_id != self.session.id() -> return
         adapter := self.adapter.lock() ?? return
-        update: adapter.sync_session(&self.session) ?? return
-        if self.host.lock() == .Ok(host) -> _: host.ingest_update(&update)
+        update: adapter.sync_session(self.session) ?? return
+        if self.host.lock() == .Ok(host) -> _: host.ingest_update(update)
     }
     on_window_open: fn(self: Self, window: JetDevtoolsNativeWindow) -> Unit {
         if window.session_id != self.session.id() -> return
@@ -433,7 +433,7 @@ impl NativeOverlayHostBridge.JetDevtoolsNativeHost {
             }
             .Gamepad { gamepad, control, pressed } -> NativeOverlayInput.Gamepad { gamepad, control, pressed }
         }
-        return host.route_input(^input) == .Overlay
+        return host.route_input(input) == .Overlay
     }
     on_frame_begin: fn(self: Self, frame: JetDevtoolsNativeFrame) -> [JetDevtoolsNativeDrawCommand] {
         if frame.session_id != self.session.id() -> return []
@@ -444,7 +444,7 @@ impl NativeOverlayHostBridge.JetDevtoolsNativeHost {
     }
     on_draw: fn(self: Self, session_id: String, command: JetDevtoolsNativeDrawCommand) -> Unit {
         if session_id != self.session.id() -> return
-        if self.host.lock() == .Ok(host) -> host.record_native_draw(^command)
+        if self.host.lock() == .Ok(host) -> host.record_native_draw(command)
     }
     on_frame_end: fn(self: Self, session_id: String) -> Unit {
         if session_id != self.session.id() -> return

@@ -94,7 +94,7 @@ JetLibExport: struct {
 
     new: fn(name: String, scalar: JetLibScalar, params: Int) -> JetLibExport Never! {
         conventions := [JetLibAccess]{}
-        loop _ in 0..<params -> &conventions.push(JetLibAccess.Read)
+        loop _ in 0..<params -> conventions.push(JetLibAccess.Read)
         JetLibExport.with_conventions(name, scalar, conventions)
     }
 
@@ -172,36 +172,36 @@ JetLibStamp: struct {
     // count of length-prefixed effect names (sorted), and the payload digest.
     encode_bytes: fn(self) -> [U8] Never! {
         out := JetLibWriter.new()
-        loop byte in JETLIB_MAGIC.bytes() -> &out.bytes.push(byte)
-        &out.bytes.push(U8{0})
-        &out.push_text(self.compiler_version)
-        &out.push_text(self.compiler_build)
-        &out.push_text(self.library_name)
+        loop byte in JETLIB_MAGIC.bytes() -> out.bytes.push(byte)
+        out.bytes.push(U8{0})
+        out.push_text(self.compiler_version)
+        out.push_text(self.compiler_build)
+        out.push_text(self.library_name)
         if self.entry == {
             .Val(entry) -> {
-                &out.bytes.push(U8{1})
-                &out.push_text(entry)
+                out.bytes.push(U8{1})
+                out.push_text(entry)
             }
-            .None -> &out.bytes.push(U8{0})
+            .None -> out.bytes.push(U8{0})
         }
-        &out.push_text(self.target)
-        &out.push_text(self.target_triple)
-        &out.push_text(self.linker_identity)
-        &out.push_text(self.abi_identity)
-        &out.push_u32(Int.from_u32(self.abi_version))
+        out.push_text(self.target)
+        out.push_text(self.target_triple)
+        out.push_text(self.linker_identity)
+        out.push_text(self.abi_identity)
+        out.push_u32(Int.from_u32(self.abi_version))
         assert(self.exports.len() <= 4294967295, "a .jetlib header cannot contain more than u32 exports")
-        &out.push_u32(self.exports.len())
+        out.push_u32(self.exports.len())
         loop export in self.exports {
-            &out.push_text(export.name)
-            &out.push_text(export.symbol)
-            &out.bytes.push(U8{export.scalar.tag()})
-            &out.push_u32(Int.from_u32(export.params))
-            loop convention in export.conventions -> &out.bytes.push(U8{convention.tag()})
+            out.push_text(export.name)
+            out.push_text(export.symbol)
+            out.bytes.push(U8{export.scalar.tag()})
+            out.push_u32(Int.from_u32(export.params))
+            loop convention in export.conventions -> out.bytes.push(U8{convention.tag()})
         }
         effects: jetlib_effects_canonical(self.declared_effects)
-        &out.push_u32(effects.len().bit_and(4294967295))
-        loop effect_name in effects -> &out.push_text(effect_name)
-        &out.push_text(self.payload_digest)
+        out.push_u32(effects.len().bit_and(4294967295))
+        loop effect_name in effects -> out.push_text(effect_name)
+        out.push_text(self.payload_digest)
         out.bytes
     }
 
@@ -209,7 +209,7 @@ JetLibStamp: struct {
     // prefix decode; only package entrypoints project the canonical set.
     decode_bytes: fn(bytes: View<U8>) -> JetLibStamp Err! {
         reader := JetLibReader{bytes: bytes, at: 0, loader: false}
-        stamp := JetLibStamp.decode_prefix(&reader) ?? return Err(err)
+        stamp := JetLibStamp.decode_prefix(reader) ?? return Err(err)
         if reader.at != bytes.len() -> return Err("unexpected payload after .jetlib stamp")
         stamp.declared_effects = jetlib_effects_canonical(stamp.declared_effects)
         Ok(stamp)
@@ -222,42 +222,42 @@ JetLibStamp: struct {
         }
         if reader.bytes[magic.len()] != (U8{0}) -> return Err("not a .jetlib artifact (bad magic)")
         reader.at = magic.len() + 1
-        compiler_version: &reader.take_string("compiler version") ?? return Err(err)
-        compiler_build: &reader.take_string("compiler build") ?? return Err(err)
-        library_name: &reader.take_string("library name") ?? return Err(err)
-        entry: if &reader.take_optional_string("output entry") == {
+        compiler_version: reader.take_string("compiler version") ?? return Err(err)
+        compiler_build: reader.take_string("compiler build") ?? return Err(err)
+        library_name: reader.take_string("library name") ?? return Err(err)
+        entry: if reader.take_optional_string("output entry") == {
             .Val(value) -> { Val(value) }
             .None -> { None }
             .Err(error) -> { return Err(error) }
         }
-        target: &reader.take_string("target") ?? return Err(err)
-        target_triple: &reader.take_string("target triple") ?? return Err(err)
-        linker_identity: &reader.take_string("linker identity") ?? return Err(err)
-        abi_identity: &reader.take_string("ABI identity") ?? return Err(err)
-        abi_version: &reader.take_u32("ABI version") ?? return Err(err)
-        export_count: &reader.take_count("export") ?? return Err(err)
+        target: reader.take_string("target") ?? return Err(err)
+        target_triple: reader.take_string("target triple") ?? return Err(err)
+        linker_identity: reader.take_string("linker identity") ?? return Err(err)
+        abi_identity: reader.take_string("ABI identity") ?? return Err(err)
+        abi_version: reader.take_u32("ABI version") ?? return Err(err)
+        export_count: reader.take_count("export") ?? return Err(err)
         exports := [JetLibExport]{}
         loop _ in 0..<export_count {
-            name: &reader.take_string("export name") ?? return Err(err)
-            symbol: &reader.take_string("export symbol") ?? return Err(err)
-            scalar_code: &reader.take_byte() ?? return Err("truncated .jetlib header (export scalar)")
+            name: reader.take_string("export name") ?? return Err(err)
+            symbol: reader.take_string("export symbol") ?? return Err(err)
+            scalar_code: reader.take_byte() ?? return Err("truncated .jetlib header (export scalar)")
             scalar: JetLibScalar.from_tag(scalar_code) ?? return Err(err)
-            params: &reader.take_u32("export parameter count") ?? return Err(err)
+            params: reader.take_u32("export parameter count") ?? return Err(err)
             if params > JETLIB_MAX_EXPORT_PARAMS -> return Err(".jetlib export has too many parameters")
             conventions := [JetLibAccess]{}
             loop _ in 0..<params {
-                convention: &reader.take_byte() ?? return Err("truncated .jetlib header (access convention)")
-                &conventions.push(JetLibAccess.from_tag(convention) ?? return Err(err))
+                convention: reader.take_byte() ?? return Err("truncated .jetlib header (access convention)")
+                conventions.push(JetLibAccess.from_tag(convention) ?? return Err(err))
             }
-            &exports.push(JetLibExport{name: name, symbol: symbol, scalar: scalar, params: U32{params}, conventions: conventions})
+            exports.push(JetLibExport{name: name, symbol: symbol, scalar: scalar, params: U32{params}, conventions: conventions})
         }
-        effect_count: &reader.take_count("effect") ?? return Err(err)
+        effect_count: reader.take_count("effect") ?? return Err(err)
         effects := [String]{}
         loop _ in 0..<effect_count {
-            effect_name: &reader.take_string("effect") ?? return Err(err)
-            &effects.push(effect_name)
+            effect_name: reader.take_string("effect") ?? return Err(err)
+            effects.push(effect_name)
         }
-        payload_digest: &reader.take_string("payload digest") ?? return Err(err)
+        payload_digest: reader.take_string("payload digest") ?? return Err(err)
         Ok(JetLibStamp{compiler_version: compiler_version, compiler_build: compiler_build,
             library_name: library_name, entry: entry, target: target, target_triple: target_triple,
             linker_identity: linker_identity, abi_identity: abi_identity, abi_version: U32{abi_version},
@@ -274,14 +274,14 @@ JetLibArtifact: struct {
 
     encode_bytes: fn(self) -> [U8] Never! {
         out := JetLibWriter{bytes: self.stamp.encode_bytes()}
-        loop i in 0..<8 -> &out.bytes.push(U8{(self.payload.len() >> ((7 - i) * 8)).bit_and(255)})
-        &out.push_raw(self.payload)
+        loop i in 0..<8 -> out.bytes.push(U8{(self.payload.len() >> ((7 - i) * 8)).bit_and(255)})
+        out.push_raw(self.payload)
         out.bytes
     }
     decode_bytes: fn(bytes: [U8], host_max: Int, loader: Bool) -> JetLibArtifact Err! from bytes {
         input: bytes[0..<bytes.len()]
         reader := JetLibReader{bytes: input, at: 0, loader: loader}
-        stamp := JetLibStamp.decode_prefix(&reader) ?? return Err(err)
+        stamp := JetLibStamp.decode_prefix(reader) ?? return Err(err)
         if bytes.len() - reader.at < 8 -> return Err("truncated .jetlib artifact (payload length)")
         declared := 0
         loop index in 0..<8 -> declared = (declared << 8).bit_or(Int.from_u8(bytes[reader.at + index]))
@@ -302,21 +302,21 @@ JetLibWriter: struct {
     }
 
     push_raw: fn(&self, bytes: View<U8>) Never! {
-        loop byte in bytes -> &self.bytes.push(byte)
+        loop byte in bytes -> self.bytes.push(byte)
     }
 
     push_u32: fn(&self, value: Int) Never! {
         assert(value >= 0 && value <= 4294967295, ".jetlib header value exceeds u32")
         shift_values: [Int]{24, 16, 8, 0}
-        loop shift in shift_values -> &self.bytes.push(U8{(value >> shift).bit_and(0xFF)})
+        loop shift in shift_values -> self.bytes.push(U8{(value >> shift).bit_and(0xFF)})
     }
 
     // A u32 length prefix, then the bytes.
     push_text: fn(&self, text: String) Never! {
         raw: text.bytes()
         assert(raw.len() <= 4294967295, "a .jetlib header field cannot exceed u32 bytes")
-        &self.push_u32(raw.len())
-        loop byte in raw -> &self.bytes.push(byte)
+        self.push_u32(raw.len())
+        loop byte in raw -> self.bytes.push(byte)
     }
 }
 
@@ -344,29 +344,29 @@ JetLibReader: struct {
     // copied out of the input; only the payload keeps the input owner.
     take_field: fn(&self, what: String) -> [U8] Err! {
         if self.bytes.len() - self.at < 4 -> return Err(jetlib_parse_message(JetLibParseFailure{kind: JetLibParseKind.Length, field: what}, self.loader))
-        length: &self.take_u32(what) ?? return Err(err)
+        length: self.take_u32(what) ?? return Err(err)
         if length > JETLIB_MAX_HEADER_FIELD_BYTES -> return Err(jetlib_parse_message(JetLibParseFailure{kind: JetLibParseKind.TooLarge, field: what}, self.loader))
         if self.bytes.len() - self.at < length -> return Err(jetlib_parse_message(JetLibParseFailure{kind: JetLibParseKind.Field, field: what}, self.loader))
         field := [U8]{}
-        loop index in self.at..<self.at + length -> &field.push(self.bytes[index])
+        loop index in self.at..<self.at + length -> field.push(self.bytes[index])
         self.at += length
         Ok(field)
     }
     take_string: fn(&self, what: String) -> String Err! {
-        raw := &self.take_field(what) ?? return Err(err)
+        raw := self.take_field(what) ?? return Err(err)
         text: String.from_bytes(raw) ?? return Err(jetlib_parse_message(JetLibParseFailure{kind: JetLibParseKind.UTF8, field: what}, self.loader))
         Ok(text)
     }
     take_optional_string: fn(&self, what: String) -> String? Err! {
-        present: &self.take_byte() ?? return Err("truncated .jetlib header ({what} presence)")
+        present: self.take_byte() ?? return Err("truncated .jetlib header ({what} presence)")
         if present == {
             0 -> Ok(None)
-            1 -> Ok(Val(&self.take_string(what) ?? return Err(err)))
+            1 -> Ok(Val(self.take_string(what) ?? return Err(err)))
             else -> Err("invalid .jetlib {what} presence tag {present}")
         }
     }
     take_count: fn(&self, what: String) -> Int Err! {
-        count: &self.take_u32("{what} count") ?? return Err(err)
+        count: self.take_u32("{what} count") ?? return Err(err)
         if count > JETLIB_MAX_HEADER_ITEMS -> return Err(".jetlib header has too many {what} entries")
         Ok(count)
     }
@@ -398,7 +398,7 @@ jetlib_effects_canonical: fn(effects: [String]) -> [String] Never! {
     set := [String: Bool]{}
     loop effect_name in effects -> set[effect_name] = true
     result := [String]{}
-    loop (effect_name, _) in set -> &result.push(effect_name)
+    loop (effect_name, _) in set -> result.push(effect_name)
     result
 }
 
@@ -407,10 +407,10 @@ jetlib_effects_canonical: fn(effects: [String]) -> [String] Never! {
 pkg_jetlib_c_symbol: fn(name: String) -> String Never! {
     out := [U8]{}
     raw: name.bytes()
-    if raw.len() == 0 -> &out.push(U8{95})
+    if raw.len() == 0 -> out.push(U8{95})
     else {
         first: Int.from_u8(raw[0])
-        if first >= 48 && first <= 57 -> &out.push(U8{95})
+        if first >= 48 && first <= 57 -> out.push(U8{95})
     }
     loop byte in raw {
         code: Int.from_u8(byte)
@@ -418,7 +418,7 @@ pkg_jetlib_c_symbol: fn(name: String) -> String Never! {
         if (code >= 0x80) && (code < 0xC0) {
             next
         }
-        &out.push(if keep -> byte else -> U8{95})
+        out.push(if keep -> byte else -> U8{95})
     }
     String.from_bytes(out) ?? panic("C symbol construction produces only ASCII")
 }
@@ -532,7 +532,7 @@ pkg_jetlib_check_effect_grant: fn(library: String, stamp: JetLibStamp, grant: [S
                 break
             }
         }
-        if !covered -> &diagnostics.push(pkg_e1339(library, effect_name))
+        if !covered -> diagnostics.push(pkg_e1339(library, effect_name))
     }
     JetLibRefusal{diagnostics: diagnostics}
 }

@@ -109,16 +109,16 @@ impl Clock {
     }
     tick: fn(&self, millis: Int) -> Int Never! {
         next: saturating_add_ns(self.now(), millis)
-        &self.set(next)
+        self.set(next)
         self.now()
     }
     advance: fn(&self, to_ms: Int) -> Int Never! {
-        &self.set(to_ms)
+        self.set(to_ms)
         self.now()
     }
     wait: fn(&self, duration: Duration) -> Int Never! {
         next: saturating_add_ns(self.now(), duration.ns /% 1000000)
-        &self.set(next)
+        self.set(next)
         self.now()
     }
     __observer: fn(self) -> __ClockObserver Never! {
@@ -179,10 +179,10 @@ __expiry_deadline: fn(now_ms: Int, ttl: Duration) -> Int Never! {
 #Test("ExpiringValue observes original clocks and expires strictly after its deadline") {
     clock := Clock.new(100)
     cached: ExpiringValue.new("fresh", Duration{ns: 2000000}, clock)
-    &clock.tick(2)
+    clock.tick(2)
     assert_eq(cached.get(clock) ?? panic("equality must remain valid"), "fresh")
     assert(cached.is_valid(clock))
-    &clock.tick(1)
+    clock.tick(1)
     assert(!cached.is_valid(clock))
     if cached.get(clock) == {
         .Err(_) -> {}
@@ -243,18 +243,18 @@ impl Clock.Equatable {
     original: Clock.new(100)
     observer: original.__observer()
     fork: original.__fork()
-    assert_eq(&fork.tick(25), 125)
+    assert_eq(fork.tick(25), 125)
     assert_eq(original.now(), 100)
     assert_eq(observer.now(), 100)
-    assert_eq(&original.advance(-10), -10)
+    assert_eq(original.advance(-10), -10)
     assert_eq(observer.now(), -10)
     assert_eq(fork.now(), 125)
-    assert_eq(&original.wait(duration_ns(-1500000)), -11)
+    assert_eq(original.wait(duration_ns(-1500000)), -11)
     assert_eq(observer.now(), -11)
-    assert_eq(&original.advance(time_int_max()), time_int_max())
-    assert_eq(&original.tick(1), time_int_max())
-    assert_eq(&original.advance(time_int_min()), time_int_min())
-    assert_eq(&original.wait(duration_ns(-1000000)), time_int_min())
+    assert_eq(original.advance(time_int_max()), time_int_max())
+    assert_eq(original.tick(1), time_int_max())
+    assert_eq(original.advance(time_int_min()), time_int_min())
+    assert_eq(original.wait(duration_ns(-1000000)), time_int_min())
     assert(original.equal(Clock.new(time_int_min())))
     assert_eq(original.__show(), "Clock {{ now: -9223372036854775808 }}")
 }
@@ -262,11 +262,11 @@ impl Clock.Equatable {
 #Test("Clock ordinary and nested aggregate copies fork the timeline") {
     original: Clock.new(0)
     duplicate: original.copy()
-    assert_eq(&duplicate.tick(1), 1)
+    assert_eq(duplicate.tick(1), 1)
     assert_eq(original.now(), 0)
     clocks: [Clock]{original}
     copied: clocks.copy()
-    assert_eq(&copied[0].advance(2), 2)
+    assert_eq(copied[0].advance(2), 2)
     assert_eq(clocks[0].now(), 0)
 }
 
@@ -354,11 +354,11 @@ strftime: fn(format: String, dt: DateTime) -> String Never! {
         if raw[i] != (U8{37}) {
             start: i
             loop i < raw.len() && raw[i] != (U8{37}) -> i = i + 1
-            loop j in start..<i -> &out.push(raw[j])
+            loop j in start..<i -> out.push(raw[j])
             next
         }
         if i + 1 >= raw.len() {
-            &out.push(U8{37})
+            out.push(U8{37})
             break
         }
         code: raw[i + 1]
@@ -387,13 +387,13 @@ strftime: fn(format: String, dt: DateTime) -> String Never! {
             else -> {
                 // An unsupported directive may start a multi-byte scalar.
                 // Keep both original bytes; the literal run keeps its remainder.
-                &out.push(raw[i])
-                &out.push(code)
+                out.push(raw[i])
+                out.push(code)
                 ""
             }
         }
         piece_raw: piece.bytes()
-        loop b in piece_raw -> &out.push(b)
+        loop b in piece_raw -> out.push(b)
         i = i + 2
     }
     String.from_bytes(out) ?? panic("strftime produced invalid UTF-8")
@@ -678,7 +678,7 @@ impl LocalDate.Equatable {
 }
 impl LocalDate.Comparable { compare: fn(self, rhs: LocalDate) -> Ordering { civil_order(civil_day(self), civil_day(rhs)) } }
 impl LocalDate.Display { display: fn(self) -> String { self.to_string() } }
-impl LocalDate.Debug { debug: fn(^self) -> String { self.to_string() } }
+impl LocalDate.Debug { debug: fn(&&self) -> String { self.to_string() } }
 
 local_time: fn(hour: Int, minute: Int, second: Int) -> LocalTime Never! { civil_time(hour, minute, second, 0) }
 time: fn(hour: Int, minute: Int, second: Int) -> LocalTime Never! { local_time(hour, minute, second) }
@@ -715,7 +715,7 @@ impl LocalTime {
 impl LocalTime.Equatable { equal: fn(self, rhs: LocalTime) -> Bool { civil_time_ns(self) == civil_time_ns(rhs) } }
 impl LocalTime.Comparable { compare: fn(self, rhs: LocalTime) -> Ordering { civil_order(civil_time_ns(self), civil_time_ns(rhs)) } }
 impl LocalTime.Display { display: fn(self) -> String { self.to_string() } }
-impl LocalTime.Debug { debug: fn(^self) -> String { self.to_string() } }
+impl LocalTime.Debug { debug: fn(&&self) -> String { self.to_string() } }
 
 period: fn(years: Int, months: Int, days: Int) -> Period Never! { Period{years_value: years, months_value: months, days_value: days} }
 period_days: fn(days: Int) -> Period Never! { period(0, 0, days) }
@@ -744,7 +744,7 @@ impl Period {
     }
 }
 impl Period.Display { display: fn(self) -> String { self.to_string() } }
-impl Period.Debug { debug: fn(^self) -> String { self.to_string() } }
+impl Period.Debug { debug: fn(&&self) -> String { self.to_string() } }
 impl Period.Equatable { equal: fn(self, rhs: Period) -> Bool { self.years_value == rhs.years_value && self.months_value == rhs.months_value && self.days_value == rhs.days_value } }
 impl LocalDate {
     period_total: fn(self, value: Period, unit: String) -> Float Never! {
@@ -919,7 +919,7 @@ impl DateTime.Comparable {
     }
 }
 impl DateTime.Display { display: fn(self) -> String { self.to_string() } }
-impl DateTime.Debug { debug: fn(^self) -> String { self.to_string() } }
+impl DateTime.Debug { debug: fn(&&self) -> String { self.to_string() } }
 impl DateTime {
     period_total: fn(self, value: Period, unit: String) -> Float Never! {
         end: self.add_period(value)
@@ -969,7 +969,7 @@ civil_find_byte: fn(raw: [U8], byte: U8, start: Int) -> Int Never! {
 }
 civil_slice: fn(raw: [U8], start: Int, end: Int) -> String Never! {
     out := [U8]{}
-    loop i in start..<end -> &out.push(raw[i])
+    loop i in start..<end -> out.push(raw[i])
     String.from_bytes(out) ?? panic("civil-time string slice is not UTF-8")
 }
 civil_split: fn(value: String, separator: String) -> (head: String, tail: String)? Never! {
@@ -1164,13 +1164,13 @@ zone: fn(name: String) -[Env, FS.Read]> Zone TimeError! {
     loop rel.starts_with("right/") -> rel = civil_slice(rel.bytes(), 6, rel.bytes().len())
     if core.time.__embedded_zone_bytes(rel) == .Val(bytes) -> return civil_tzif(name, bytes)
     roots := [String]{}
-    if core.time.__zone_env("JET_TZDB_DIR") == .Val(dir) -> &roots.push(dir)
-    if core.time.__zone_env("TZDIR") == .Val(dir) -> &roots.push(dir)
-    if core.time.__zone_env("JET_ROOT") == .Val(dir) -> &roots.push("{dir}/Core/Time/tzdb")
-    &roots.push("Core/Time/tzdb")
-    &roots.push("/usr/share/zoneinfo")
-    &roots.push("/usr/share/lib/zoneinfo")
-    &roots.push("/etc/zoneinfo")
+    if core.time.__zone_env("JET_TZDB_DIR") == .Val(dir) -> roots.push(dir)
+    if core.time.__zone_env("TZDIR") == .Val(dir) -> roots.push(dir)
+    if core.time.__zone_env("JET_ROOT") == .Val(dir) -> roots.push("{dir}/Core/Time/tzdb")
+    roots.push("Core/Time/tzdb")
+    roots.push("/usr/share/zoneinfo")
+    roots.push("/usr/share/lib/zoneinfo")
+    roots.push("/etc/zoneinfo")
     loop root in roots {
         if core.time.__zone_file_bytes("{root}/{rel}") == .Val(bytes) -> return civil_tzif(name, bytes)
     }
@@ -1193,7 +1193,7 @@ civil_tzif_header: fn(bytes: [U8], base: Int) -> (version: Int, counts: [Int]) T
     version := 0
     if base + 4 < bytes.len() -> version = Int{bytes[base + 4]}
     counts := [Int]{}
-    loop i in 0..<6 -> &counts.push(civil_be(bytes, base + 20 + i * 4, 4, false))
+    loop i in 0..<6 -> counts.push(civil_be(bytes, base + 20 + i * 4, 4, false))
     Ok((version: version, counts: counts))
 }
 civil_tzif: fn(name: String, bytes: [U8]) -> Zone TimeError! {
@@ -1212,7 +1212,7 @@ civil_tzif: fn(name: String, bytes: [U8]) -> Zone TimeError! {
     times := [Int]{}
     pos := base
     loop _ in 0..<counts[3] {
-        &times.push(civil_be(bytes, pos, width, true))
+        times.push(civil_be(bytes, pos, width, true))
         pos = pos + width
     }
     indices: pos
@@ -1224,11 +1224,11 @@ civil_tzif: fn(name: String, bytes: [U8]) -> Zone TimeError! {
         offset: civil_be(bytes, pos, 4, true)
         dst := false
         if pos + 4 < bytes.len() -> dst = bytes[pos + 4] != (U8{0})
-        &infos.push(ZoneInfo{offset: offset, is_dst: dst})
+        infos.push(ZoneInfo{offset: offset, is_dst: dst})
         pos = pos + 6
     }
     transitions := [ZoneTransition]{}
-    loop i in 0..<times.len() -> &transitions.push(ZoneTransition{at: times[i], info: civil_clamp(Int{bytes[indices + i]}, 0, infos.len() - 1)})
+    loop i in 0..<times.len() -> transitions.push(ZoneTransition{at: times[i], info: civil_clamp(Int{bytes[indices + i]}, 0, infos.len() - 1)})
     data: ZoneData{transitions: transitions, infos: infos}
     Ok(Zone{name_value: name, data: data})
 }
@@ -1260,7 +1260,7 @@ civil_local_utc: fn(value: Zone, date: LocalDate, t: LocalTime, disambiguation: 
     last := Int?{None}
     loop info in value.data.infos {
         if offsets.contains(info.offset) -> next
-        &offsets.push(info.offset)
+        offsets.push(info.offset)
         candidate: saturating_sub_ns(local, info.offset)
         if !civil_local_matches(value, date, t, info.offset, candidate) -> next
         if first == .Val(minimum) {
@@ -1325,7 +1325,7 @@ impl Zone {
     }
 }
 impl Zone.Display { display: fn(self) -> String { self.to_string() } }
-impl Zone.Debug { debug: fn(^self) -> String { self.to_string() } }
+impl Zone.Debug { debug: fn(&&self) -> String { self.to_string() } }
 zoned: fn(value: DateTime, zone: Zone) -> ZonedDateTime Never! { ZonedDateTime{instant: value, zone_value: zone} }
 zoned_local: fn(date: LocalDate, t: LocalTime, zone: Zone, disambiguation: String{"compatible"}) -> ZonedDateTime TimeError! {
     seconds: civil_local_utc(zone, date, t, disambiguation)
@@ -1378,7 +1378,7 @@ impl ZonedDateTime.Equatable {
 }
 impl ZonedDateTime.Comparable { compare: fn(self, rhs: ZonedDateTime) -> Ordering { self.instant.compare(rhs.instant) } }
 impl ZonedDateTime.Display { display: fn(self) -> String { self.to_string() } }
-impl ZonedDateTime.Debug { debug: fn(^self) -> String { self.to_string() } }
+impl ZonedDateTime.Debug { debug: fn(&&self) -> String { self.to_string() } }
 parse_zoned: fn(value: String) -[Env, FS.Read]> ZonedDateTime TimeError! {
     raw: value.bytes()
     if raw.len() == 0 || raw[raw.len() - 1] != (U8{93}) -> return Err(TimeError{reason: "RFC9557 datetime needs a [zone]: {value}"})
@@ -1497,7 +1497,7 @@ civil_format_checked: fn(pattern: String, date: LocalDate, t: LocalTime, zone: (
             if !closed -> return Err(TextError{message: "E2703: unterminated format literal"})
             marker: "{literals.len()}"
             normalized = "{normalized}{marker}"
-            &literals.push((marker: marker, value: literal))
+            literals.push((marker: marker, value: literal))
             next
         }
         if byte == (U8{37}) {
@@ -1564,7 +1564,7 @@ impl Instant {
 impl Instant.Equatable { equal: fn(self, rhs: Instant) -> Bool { self.start_ns == rhs.start_ns } }
 impl Instant.Comparable { compare: fn(self, rhs: Instant) -> Ordering { civil_order(self.start_ns, rhs.start_ns) } }
 impl Instant.Display { display: fn(self) -> String { self.to_string() } }
-impl Instant.Debug { debug: fn(^self) -> String { self.to_string() } }
+impl Instant.Debug { debug: fn(&&self) -> String { self.to_string() } }
 
 // Wire codecs intentionally differ from strict public civil parsers.
 civil_codec_day: fn(date: LocalDate) -> Int Never! {

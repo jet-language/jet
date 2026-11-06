@@ -70,12 +70,12 @@ NixEvalLexer: struct {
     tokenize: fn(source: String) -> [NixEvalToken] NixEvalError! {
         lexer := NixEvalLexer{bytes: source.bytes(), position: 0, tokens: [NixEvalToken]{}}
         loop lexer.position < lexer.bytes.len() {
-            &lexer.skip_space_and_comments()
+            lexer.skip_space_and_comments()
             if lexer.position == lexer.bytes.len() -> break
-            token: &lexer.token()
-            &lexer.push(token)
+            token: lexer.token()
+            lexer.push(token)
         }
-        &lexer.tokens.push(NixEvalToken.End)
+        lexer.tokens.push(NixEvalToken.End)
         Ok(lexer.tokens)
     }
 
@@ -87,7 +87,7 @@ NixEvalLexer: struct {
         estimated: self.bytes.len() * 4 + (self.tokens.len() + 1) * NIXEVAL_TOKEN_MEMORY_ESTIMATE_BYTES
         if estimated > NIXEVAL_MEMORY_BYTES -> return Err(NixEvalError.ResourceLimit("foreign flake evaluator memory budget exceeded"))
         if self.tokens.len() >= NIXEVAL_TOKEN_LIMIT -> return Err(NixEvalError.ResourceLimit("foreign flake has more than {NIXEVAL_TOKEN_LIMIT} tokens"))
-        &self.tokens.push(token)
+        self.tokens.push(token)
     }
 
     skip_space_and_comments: fn(&self) NixEvalError! {
@@ -108,7 +108,7 @@ NixEvalLexer: struct {
         }
     }
 
-    single: fn(&self, token: ^NixEvalToken, width: Int) -> NixEvalToken Never! {
+    single: fn(&self, token: &&NixEvalToken, width: Int) -> NixEvalToken Never! {
         self.position += width
         token
     }
@@ -117,49 +117,49 @@ NixEvalLexer: struct {
         byte: self.at(0)
         next_byte: self.at(1)
         if byte == {
-            123 -> &self.single(NixEvalToken.LeftBrace, 1)
-            125 -> &self.single(NixEvalToken.RightBrace, 1)
-            91 -> &self.single(NixEvalToken.LeftBracket, 1)
-            93 -> &self.single(NixEvalToken.RightBracket, 1)
-            40 -> &self.single(NixEvalToken.LeftParen, 1)
-            41 -> &self.single(NixEvalToken.RightParen, 1)
-            58 -> &self.single(NixEvalToken.Colon, 1)
-            59 -> &self.single(NixEvalToken.Semicolon, 1)
-            44 -> &self.single(NixEvalToken.Comma, 1)
-            63 -> &self.single(NixEvalToken.Question, 1)
-            34 -> &self.string()
+            123 -> self.single(NixEvalToken.LeftBrace, 1)
+            125 -> self.single(NixEvalToken.RightBrace, 1)
+            91 -> self.single(NixEvalToken.LeftBracket, 1)
+            93 -> self.single(NixEvalToken.RightBracket, 1)
+            40 -> self.single(NixEvalToken.LeftParen, 1)
+            41 -> self.single(NixEvalToken.RightParen, 1)
+            58 -> self.single(NixEvalToken.Colon, 1)
+            59 -> self.single(NixEvalToken.Semicolon, 1)
+            44 -> self.single(NixEvalToken.Comma, 1)
+            63 -> self.single(NixEvalToken.Question, 1)
+            34 -> self.string()
             61 -> {
                 if {
-                    next_byte == 61 -> &self.single(NixEvalToken.EqualEqual, 2)
-                    else -> &self.single(NixEvalToken.Equal, 1)
+                    next_byte == 61 -> self.single(NixEvalToken.EqualEqual, 2)
+                    else -> self.single(NixEvalToken.Equal, 1)
                 }
             }
             33 -> {
                 if next_byte != 61 -> return Err(NixEvalError.Unsupported("unary `!` is not supported"))
-                &self.single(NixEvalToken.NotEqual, 2)
+                self.single(NixEvalToken.NotEqual, 2)
             }
             47 -> {
                 if {
-                    next_byte == 47 -> &self.single(NixEvalToken.Merge, 2)
-                    else -> NixEvalToken.Path(&self.path())
+                    next_byte == 47 -> self.single(NixEvalToken.Merge, 2)
+                    else -> NixEvalToken.Path(self.path())
                 }
             }
             46 -> {
                 if {
-                    next_byte == 46 && self.at(2) == 46 -> &self.single(NixEvalToken.Ellipsis, 3)
-                    next_byte == 47 || (next_byte == 46 && self.at(2) == 47) -> NixEvalToken.Path(&self.path())
-                    else -> &self.single(NixEvalToken.Dot, 1)
+                    next_byte == 46 && self.at(2) == 46 -> self.single(NixEvalToken.Ellipsis, 3)
+                    next_byte == 47 || (next_byte == 46 && self.at(2) == 47) -> NixEvalToken.Path(self.path())
+                    else -> self.single(NixEvalToken.Dot, 1)
                 }
             }
-            else -> &self.word_token(byte, next_byte)
+            else -> self.word_token(byte, next_byte)
         }
     }
 
     // Indented strings, integers and identifiers; any other byte is unsupported.
     word_token: fn(&self, byte: Int, next_byte: Int) -> NixEvalToken NixEvalError! {
-        if byte == 39 && next_byte == 39 -> return &self.indented_string()
-        if (byte == 45 && nixeval_is_ascii_digit(next_byte)) || nixeval_is_ascii_digit(byte) -> return Ok(NixEvalToken.Integer(&self.integer()))
-        if nixeval_is_ascii_alpha(byte) || byte == 95 -> return Ok(NixEvalToken.Identifier(&self.identifier()))
+        if byte == 39 && next_byte == 39 -> return self.indented_string()
+        if (byte == 45 && nixeval_is_ascii_digit(next_byte)) || nixeval_is_ascii_digit(byte) -> return Ok(NixEvalToken.Integer(self.integer()))
+        if nixeval_is_ascii_alpha(byte) || byte == 95 -> return Ok(NixEvalToken.Identifier(self.identifier()))
         Err(nixeval_unsupported_character(byte))
     }
 
@@ -174,19 +174,19 @@ NixEvalLexer: struct {
                 self.position += 1
                 text: String.from_bytes(literal) ?? ""
                 if !interpolated -> return Ok(NixEvalToken.Str(text))
-                if text != "" -> &parts.push(NixEvalStringTokenPart.Literal(text))
+                if text != "" -> parts.push(NixEvalStringTokenPart.Literal(text))
                 return Ok(NixEvalToken.Interpolated(parts))
             }
             if byte == 92 {
                 self.position += 1
                 escaped: self.at(0)
                 if escaped == {
-                    110 -> nixeval_push_byte(&literal, 10)
-                    114 -> nixeval_push_byte(&literal, 13)
-                    116 -> nixeval_push_byte(&literal, 9)
-                    34 -> nixeval_push_byte(&literal, 34)
-                    92 -> nixeval_push_byte(&literal, 92)
-                    36 -> nixeval_push_byte(&literal, 36)
+                    110 -> nixeval_push_byte(literal, 10)
+                    114 -> nixeval_push_byte(literal, 13)
+                    116 -> nixeval_push_byte(literal, 9)
+                    34 -> nixeval_push_byte(literal, 34)
+                    92 -> nixeval_push_byte(literal, 92)
+                    36 -> nixeval_push_byte(literal, 36)
                     else -> return Err(NixEvalError.Syntax("invalid string escape"))
                 }
                 self.position += 1
@@ -195,18 +195,18 @@ NixEvalLexer: struct {
             if byte == 36 && self.at(1) == 123 {
                 interpolated = true
                 if literal.len() > 0 {
-                    &parts.push(NixEvalStringTokenPart.Literal(String.from_bytes(literal) ?? ""))
+                    parts.push(NixEvalStringTokenPart.Literal(String.from_bytes(literal) ?? ""))
                     literal = [U8]{}
                 }
                 position := self.position + 2
-                expression: nixeval_capture_interpolation(self.bytes, &position)
+                expression: nixeval_capture_interpolation(self.bytes, position)
                 self.position = position
-                &parts.push(NixEvalStringTokenPart.Expression(expression))
+                parts.push(NixEvalStringTokenPart.Expression(expression))
                 if parts.len() > NIXEVAL_MAX_STRING_PARTS -> return Err(NixEvalError.ResourceLimit("foreign flake string has more than {NIXEVAL_MAX_STRING_PARTS} parts"))
                 next
             }
             width: nixeval_scalar_width(self.bytes, self.position)
-            loop offset in 0..<width -> &literal.push(self.bytes[self.position + offset])
+            loop offset in 0..<width -> literal.push(self.bytes[self.position + offset])
             self.position += width
         }
         Err(NixEvalError.Syntax("unterminated string"))
@@ -270,20 +270,20 @@ nixeval_interpolated_parts: fn(source: String) -> [NixEvalStringTokenPart] NixEv
         if nixeval_byte(bytes, position) == 36 && nixeval_byte(bytes, position + 1) == 123 {
             interpolated = true
             if literal.len() > 0 {
-                &parts.push(NixEvalStringTokenPart.Literal(String.from_bytes(literal) ?? ""))
+                parts.push(NixEvalStringTokenPart.Literal(String.from_bytes(literal) ?? ""))
                 literal = [U8]{}
             }
             position += 2
-            &parts.push(NixEvalStringTokenPart.Expression(nixeval_capture_interpolation(bytes, &position)))
+            parts.push(NixEvalStringTokenPart.Expression(nixeval_capture_interpolation(bytes, position)))
             if parts.len() > NIXEVAL_MAX_STRING_PARTS -> return Err(NixEvalError.ResourceLimit("foreign flake string has more than {NIXEVAL_MAX_STRING_PARTS} parts"))
             next
         }
         width: nixeval_scalar_width(bytes, position)
-        loop offset in 0..<width -> &literal.push(bytes[position + offset])
+        loop offset in 0..<width -> literal.push(bytes[position + offset])
         position += width
     }
     if !interpolated -> return Ok([NixEvalStringTokenPart]{})
-    if literal.len() > 0 -> &parts.push(NixEvalStringTokenPart.Literal(String.from_bytes(literal) ?? ""))
+    if literal.len() > 0 -> parts.push(NixEvalStringTokenPart.Literal(String.from_bytes(literal) ?? ""))
     Ok(parts)
 }
 
@@ -369,7 +369,7 @@ nixeval_indented_string_end: fn(bytes: [U8], start: Int) -> Int NixEvalError! {
 // The reference reports an unsupported byte as its Latin-1 character.
 nixeval_unsupported_character: fn(byte: Int) -> NixEvalError Never! {
     shown := [U8]{}
-    nixeval_push_scalar(&shown, byte)
+    nixeval_push_scalar(shown, byte)
     character: String.from_bytes(shown) ?? "?"
     NixEvalError.Unsupported("character `{character}` is not supported")
 }

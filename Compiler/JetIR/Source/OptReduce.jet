@@ -139,17 +139,17 @@ ir_reduce_width: fn(kind: Int) -> Int Never! {
 // total fed by a load or by an equality test of a loaded element, and per
 // Loop that stores one value. Returns the bodies the pass changed.
 ir_opt_reduce_module: fn(m: &IRModule, functions: &[IRFunction], report: &IROptReport) -> [Int] Never! {
-    word_row: ir_word_row(&m)
+    word_row: ir_word_row(m)
     // Per kind its leaf's function row (-1 until a Loop calls it); `made`
     // the kinds whose leaf is new, in the order of their rows.
     leaves := [Int]{}
-    loop kind in 0..<IR_REDUCE_KINDS -> &leaves.push(name_rows_value(m.function_rows, ir_reduce_key(kind)) ?? -1)
+    loop kind in 0..<IR_REDUCE_KINDS -> leaves.push(name_rows_value(m.function_rows, ir_reduce_key(kind)) ?? -1)
     made := [Int]{}
     bodies: functions.len()
     changed := [Int]{}
     loop id in 0..<bodies {
         if functions[id].asm != None -> next
-        if ir_opt_reduce_loops(m, &functions[id], &leaves, &made, bodies, word_row, &report) > 0 -> &changed.push(id)
+        if ir_opt_reduce_loops(m, functions[id], leaves, made, bodies, word_row, report) > 0 -> changed.push(id)
     }
     loop kind in made {
         name: ir_reduce_leaf_name(kind)
@@ -158,10 +158,10 @@ ir_opt_reduce_module: fn(m: &IRModule, functions: &[IRFunction], report: &IROptR
         names := [String]{"data", "first", "end", if fill -> "value" else -> "total"}
         regs := [Int]{X64_RDI, X64_RSI, X64_RDX, X64_RCX}
         if kind != IR_REDUCE_SUM && !fill {
-            &names.push("value")
-            &regs.push(X64_R8)
+            names.push("value")
+            regs.push(X64_R8)
         }
-        loop param in names -> _ := ir_slot(&f, word_row, IRSlotKind.Param, ir_intern_name(&m, param), 0)
+        loop param in names -> _ := ir_slot(f, word_row, IRSlotKind.Param, ir_intern_name(m, param), 0)
         f.result = word_row
         exact: kind == IR_REDUCE_COUNT_INTS || kind == IR_REDUCE_COUNT_WIDENED || kind == IR_REDUCE_FILL_INTS
         code: if {
@@ -170,8 +170,8 @@ ir_opt_reduce_module: fn(m: &IRModule, functions: &[IRFunction], report: &IROptR
             else -> x64_count_code(ir_reduce_width(kind), exact)
         }
         f.asm = Val(IRAsmLeaf{code: code, regs: regs, result: X64_RAX})
-        name_rows_set(&m.function_rows, ir_reduce_key(kind), functions.len())
-        &functions.push(^f)
+        name_rows_set(m.function_rows, ir_reduce_key(kind), functions.len())
+        functions.push(f)
     }
     changed
 }
@@ -188,19 +188,19 @@ ir_opt_reduce_loops: fn(m: IRModule, f: &IRFunction, leaves: &[Int], made: &[Int
         }
     }
     if !has_loop -> return 0
-    ir_opt_compact(&f)
+    ir_opt_compact(f)
     // Per slot the first and last instruction naming it.
     first := [Int]{}
     latest := [Int]{}
     loop _ in 0..<f.slot_type.len() {
-        &first.push(f.op.len())
-        &latest.push(-1)
+        first.push(f.op.len())
+        latest.push(-1)
     }
     reads := [Int]{}
     loop k in 0..<f.op.len() {
-        ir_x64_reads_into(f, k, &reads)
+        ir_x64_reads_into(f, k, reads)
         written: ir_x64_write(f, k)
-        if written >= 0 -> &reads.push(written)
+        if written >= 0 -> reads.push(written)
         loop slot in reads {
             if slot < 0 -> next
             if k < first[slot] -> first[slot] = k
@@ -217,16 +217,16 @@ ir_opt_reduce_loops: fn(m: IRModule, f: &IRFunction, leaves: &[Int], made: &[Int
             else -> "count"
         }
         if found.reason == "" {
-            &taken.push(found.plan)
+            taken.push(found.plan)
             report.reduced += 1
-            &report.reductions.push("{what} reduction {f.name}: vectorized")
+            report.reductions.push("{what} reduction {f.name}: vectorized")
             if leaves[found.plan.kind] < 0 {
                 leaves[found.plan.kind] = bodies + made.len()
-                &made.push(found.plan.kind)
+                made.push(found.plan.kind)
             }
         } else if found.reason != "-" {
             report.reductions_declined += 1
-            &report.reductions.push("{what} reduction {f.name}: declined ({found.reason})")
+            report.reductions.push("{what} reduction {f.name}: declined ({found.reason})")
         }
     }
     if taken.len() == 0 -> return 0
@@ -234,18 +234,18 @@ ir_opt_reduce_loops: fn(m: IRModule, f: &IRFunction, leaves: &[Int], made: &[Int
     pending := 0
     loop at in 0..<f.op.len() {
         if pending < taken.len() && taken[pending].at == at {
-            ir_reduce_call(&f, &code, taken[pending], leaves[taken[pending].kind], word_row)
+            ir_reduce_call(f, code, taken[pending], leaves[taken[pending].kind], word_row)
             pending += 1
         }
-        ir_opt_code_put(&code, f.op[at], f.dst[at], f.a[at], f.b[at], f.c[at], f.code_line[at])
+        ir_opt_code_put(code, f.op[at], f.dst[at], f.a[at], f.b[at], f.c[at], f.code_line[at])
     }
-    f.op = ^code.op
-    f.dst = ^code.dst
-    f.a = ^code.a
-    f.b = ^code.b
-    f.c = ^code.c
-    f.code_line = ^code.line
-    ir_opt_compact(&f)
+    f.op = code.op.move()
+    f.dst = code.dst.move()
+    f.a = code.a.move()
+    f.b = code.b.move()
+    f.c = code.c.move()
+    f.code_line = code.line.move()
+    ir_opt_compact(f)
     taken.len()
 }
 
@@ -301,12 +301,12 @@ ir_reduce_loop: fn(m: IRModule, f: IRFunction, at: Int, first: [Int], latest: [I
     guards := [Int]{}
     loop k := at + 1, k < end - 1 {
         if f.op[k] == .Loop -> return ir_reduce_declined(IR_REDUCE_SUM, "-")
-        &body.push(k)
+        body.push(k)
         if f.op[k] == .If && f.b[k] < 0 && f.c[k] > k + 1 && f.op[f.c[k] - 1] == .Unreachable {
-            &faults.push(k)
+            faults.push(k)
             k = f.c[k] + 1
         } else if f.op[k] == .If && f.b[k] < 0 && ir_reduce_leaves(f, k) {
-            &guards.push(k)
+            guards.push(k)
             k = f.c[k] + 1
         } else {
             k += 1
@@ -408,7 +408,7 @@ ir_reduce_loop: fn(m: IRModule, f: IRFunction, at: Int, first: [Int], latest: [I
     // live within one pass.
     reads := [Int]{}
     loop k in body {
-        ir_x64_reads_into(f, k, &reads)
+        ir_x64_reads_into(f, k, reads)
         loop slot in reads {
             if total >= 0 && slot == total && k != add && f.op[k] != .IntBig && f.op[k] != .Drop -> return ir_reduce_declined(kind, "the total is read in the Loop")
             if slot == index && k != step && k != user && k != widen && f.op[k] != .IntBig && !ir_reduce_is_test(f, k, index) -> return ir_reduce_declined(kind, "the index is read in the Loop")
@@ -706,13 +706,13 @@ ir_reduce_is_test: fn(f: IRFunction, k: Int, index: Int) -> Bool Never! {
 ir_reduce_call: fn(f: &IRFunction, code: &IROptCode, plan: IRReduceLoop, leaf: Int, word_row: Int) Never! {
     line: f.code_line[plan.at]
     end: f.a[plan.at]
-    data_value: ir_reduce_value(&f, &code, plan.at, end, plan.base, line)
-    data: ir_reduce_word(&f, &code, data_value, word_row, line)
-    bound_value: ir_reduce_value(&f, &code, plan.at, end, plan.bound, line)
-    bound: ir_reduce_word(&f, &code, bound_value, word_row, line)
-    first: ir_reduce_word(&f, &code, plan.index, word_row, line)
+    data_value: ir_reduce_value(f, code, plan.at, end, plan.base, line)
+    data: ir_reduce_word(f, code, data_value, word_row, line)
+    bound_value: ir_reduce_value(f, code, plan.at, end, plan.bound, line)
+    bound: ir_reduce_word(f, code, bound_value, word_row, line)
+    first: ir_reduce_word(f, code, plan.index, word_row, line)
     // A fill has no total.
-    total: if plan.total >= 0 -> ir_reduce_word(&f, &code, plan.total, word_row, line) else -> -1
+    total: if plan.total >= 0 -> ir_reduce_word(f, code, plan.total, word_row, line) else -> -1
     // The Bool row of the Loop's index test.
     bool_row := -1
     loop k in (plan.at + 1)..<end {
@@ -722,30 +722,30 @@ ir_reduce_call: fn(f: &IRFunction, code: &IROptCode, plan: IRReduceLoop, leaf: I
         }
     }
     if plan.limit >= 0 {
-        limit_value: ir_reduce_value(&f, &code, plan.at, end, plan.limit, line)
-        limit: ir_reduce_word(&f, &code, limit_value, word_row, line)
-        within: ir_slot(&f, bool_row, IRSlotKind.Temp, -1, line)
-        ir_opt_code_put(&code, .Le, within, bound, limit, -1, line)
-        ir_opt_code_put(&code, .If, -1, within, -1, -1, line)
+        limit_value: ir_reduce_value(f, code, plan.at, end, plan.limit, line)
+        limit: ir_reduce_word(f, code, limit_value, word_row, line)
+        within: ir_slot(f, bool_row, IRSlotKind.Temp, -1, line)
+        ir_opt_code_put(code, .Le, within, bound, limit, -1, line)
+        ir_opt_code_put(code, .If, -1, within, -1, -1, line)
     }
-    sum: ir_slot(&f, word_row, IRSlotKind.Temp, -1, line)
+    sum: ir_slot(f, word_row, IRSlotKind.Temp, -1, line)
     args := [Int]{data, first, bound}
-    if total >= 0 -> &args.push(total)
+    if total >= 0 -> args.push(total)
     if plan.value >= 0 {
-        value_value: ir_reduce_value(&f, &code, plan.at, end, plan.value, line)
-        &args.push(ir_reduce_word(&f, &code, value_value, word_row, line))
+        value_value: ir_reduce_value(f, code, plan.at, end, plan.value, line)
+        args.push(ir_reduce_word(f, code, value_value, word_row, line))
     }
-    start: ir_args(&f, args)
-    ir_opt_code_put(&code, .Call, sum, leaf, start, args.len(), line)
-    declined: ir_slot(&f, word_row, IRSlotKind.Temp, -1, line)
-    ir_opt_code_put(&code, .Const, declined, X64_INT_SUM_DECLINED, -1, -1, line)
-    taken: ir_slot(&f, bool_row, IRSlotKind.Temp, -1, line)
-    ir_opt_code_put(&code, .Ne, taken, sum, declined, -1, line)
-    ir_opt_code_put(&code, .If, -1, taken, -1, -1, line)
-    if plan.total >= 0 -> ir_opt_code_put(&code, .Move, plan.total, sum, -1, -1, line)
-    ir_opt_code_put(&code, .Move, plan.index, bound, -1, -1, line)
-    ir_opt_code_put(&code, .End, -1, -1, -1, -1, line)
-    if plan.limit >= 0 -> ir_opt_code_put(&code, .End, -1, -1, -1, -1, line)
+    start: ir_args(f, args)
+    ir_opt_code_put(code, .Call, sum, leaf, start, args.len(), line)
+    declined: ir_slot(f, word_row, IRSlotKind.Temp, -1, line)
+    ir_opt_code_put(code, .Const, declined, X64_INT_SUM_DECLINED, -1, -1, line)
+    taken: ir_slot(f, bool_row, IRSlotKind.Temp, -1, line)
+    ir_opt_code_put(code, .Ne, taken, sum, declined, -1, line)
+    ir_opt_code_put(code, .If, -1, taken, -1, -1, line)
+    if plan.total >= 0 -> ir_opt_code_put(code, .Move, plan.total, sum, -1, -1, line)
+    ir_opt_code_put(code, .Move, plan.index, bound, -1, -1, line)
+    ir_opt_code_put(code, .End, -1, -1, -1, -1, line)
+    if plan.limit >= 0 -> ir_opt_code_put(code, .End, -1, -1, -1, -1, line)
 }
 
 // `slot`'s value before the Loop: the slot itself when the Loop never
@@ -753,16 +753,16 @@ ir_reduce_call: fn(f: &IRFunction, code: &IROptCode, plan: IRReduceLoop, leaf: I
 ir_reduce_value: fn(f: &IRFunction, code: &IROptCode, at: Int, end: Int, slot: Int, line: Int) -> Int Never! {
     def: ir_reduce_def(f, at, end, slot)
     if def < 0 -> return slot
-    fresh: ir_slot(&f, f.slot_type[slot], IRSlotKind.Temp, -1, line)
+    fresh: ir_slot(f, f.slot_type[slot], IRSlotKind.Temp, -1, line)
     if f.op[def] == .Const {
-        ir_opt_code_put(&code, .Const, fresh, f.a[def], -1, -1, line)
+        ir_opt_code_put(code, .Const, fresh, f.a[def], -1, -1, line)
         return fresh
     }
-    source: ir_reduce_value(&f, &code, at, end, f.a[def], line)
+    source: ir_reduce_value(f, code, at, end, f.a[def], line)
     if f.op[def] == .Load {
-        ir_opt_code_put(&code, .Load, fresh, source, f.b[def], f.c[def], line)
+        ir_opt_code_put(code, .Load, fresh, source, f.b[def], f.c[def], line)
     } else {
-        ir_opt_code_put(&code, .Move, fresh, source, -1, -1, line)
+        ir_opt_code_put(code, .Move, fresh, source, -1, -1, line)
     }
     fresh
 }
@@ -770,7 +770,7 @@ ir_reduce_value: fn(f: &IRFunction, code: &IROptCode, at: Int, end: Int, slot: I
 // `slot` as a word of `word_row`: itself, or moved into a fresh one.
 ir_reduce_word: fn(f: &IRFunction, code: &IROptCode, slot: Int, word_row: Int, line: Int) -> Int Never! {
     if f.slot_type[slot] == word_row -> return slot
-    fresh: ir_slot(&f, word_row, IRSlotKind.Temp, -1, line)
-    ir_opt_code_put(&code, .Move, fresh, slot, -1, -1, line)
+    fresh: ir_slot(f, word_row, IRSlotKind.Temp, -1, line)
+    ir_opt_code_put(code, .Move, fresh, slot, -1, -1, line)
     fresh
 }

@@ -31,7 +31,7 @@ jet_cli_perf_browser_symbol: fn(value: String) -> Bool Never! {
 }
 jet_cli_perf_browser_status: fn(value: Dyn, action: String, required: [String], optional: [String]) JetCLIReadError! {
     fields := [String]{"schema", "action", "ok", "reports"}
-    loop field in required -> &fields.push(field)
+    loop field in required -> fields.push(field)
     jet_cli_perf_object(value, fields, optional, "browser relay status")
     if jet_cli_perf_text(jet_cli_perf_field(value, "schema")) != JET_CLI_STATUS_SCHEMA || jet_cli_perf_text(jet_cli_perf_field(value, "action")) != action || !jet_cli_perf_bool(jet_cli_perf_field(value, "ok")) -> return Err(jet_cli_read_error("browser relay status header is invalid"))
     if jet_cli_perf_array(jet_cli_perf_field(value, "reports")).len() != 0 -> return Err(jet_cli_read_error("browser relay has unexpected reports"))
@@ -56,14 +56,14 @@ jet_cli_perf_browser_decode: fn(text: String, pid: Int, started: String) -> JetC
             if path == "" || perf_text.has_control(path) || paths.has_key(path) || !jet_cli_perf_digest(fields[2]) -> return Err(jet_cli_read_error("browser source identity is invalid or duplicated"))
             if sources.len() >= 4096 -> return Err(jet_cli_read_error("browser source identities exceed their bound"))
             paths[path] = sources.len()
-            &sources.push(SourceIdentity{path: path, sha256: fields[2], symbols: [(kind: String, name: String)]{}})
+            sources.push(SourceIdentity{path: path, sha256: fields[2], symbols: [(kind: String, name: String)]{}})
         } else if fields.len() == 4 && fields[0] == "symbol" {
             path: jet_cli_perf_hex_text(fields[1])
             name: jet_cli_perf_hex_text(fields[2])
             if !paths.has_key(path) || symbols.has_key(name) || !jet_cli_perf_browser_symbol(name) || (fields[3] != "fn" && fields[3] != "handler") -> return Err(jet_cli_read_error("browser symbol identity is invalid or duplicated"))
             if symbols.len() >= 4096 -> return Err(jet_cli_read_error("browser symbols exceed their bound"))
             index: paths[path]
-            &sources[index].symbols.push((kind: fields[3], name: name))
+            sources[index].symbols.push((kind: fields[3], name: name))
             symbols[name] = path
         } else {
             return Err(jet_cli_read_error("browser source identity TSV is malformed"))
@@ -73,7 +73,7 @@ jet_cli_perf_browser_decode: fn(text: String, pid: Int, started: String) -> JetC
     maps := [TraceSourceMap]{}
     if jet_cli_perf_optional(header, "source_map") == .Val(encoded) {
         map: jet_cli_perf_hex_text(jet_cli_perf_text(encoded))
-        &maps.push(TraceSourceMap{kind: "js", path: "app.js", sha256: sha256_hex(map), map: map})
+        maps.push(TraceSourceMap{kind: "js", path: "app.js", sha256: sha256_hex(map), map: map})
     }
     rows := [TraceBrowser]{}
     truncated := false
@@ -96,7 +96,7 @@ jet_cli_perf_browser_decode: fn(text: String, pid: Int, started: String) -> JetC
         name: jet_cli_perf_text(jet_cli_perf_field(row, "symbol"))
         if !([String]{"event", "wasm", "dom"}).contains(class) || !symbols.has_key(name) -> return Err(jet_cli_read_error("browser relay row has no checked compiler attribution"))
         if rows.len() >= 4096 -> return Err(jet_cli_read_error("browser relay exceeds its row bound"))
-        &rows.push(TraceBrowser{class: class, duration_ns: jet_cli_perf_uint(jet_cli_perf_field(row, "duration_ns")), start_ns: jet_cli_perf_uint(jet_cli_perf_field(row, "start_ns")), symbol: JetSymbolRef{path: symbols[name], name: name}})
+        rows.push(TraceBrowser{class: class, duration_ns: jet_cli_perf_uint(jet_cli_perf_field(row, "duration_ns")), start_ns: jet_cli_perf_uint(jet_cli_perf_field(row, "start_ns")), symbol: JetSymbolRef{path: symbols[name], name: name}})
     }
     Ok(JetCLIPerfBrowser{rows: rows, sources: sources, source_maps: maps, truncated: truncated})
 }

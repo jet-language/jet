@@ -15,7 +15,7 @@ impl Ledger.Rollback {
 
     snapshot: fn(self) -> LedgerSnap { return LedgerSnap{balance: self.balance} }
 
-    restore: fn(&self, snap: ^LedgerSnap) { self.balance = snap.balance }
+    restore: fn(&self, snap: &&LedgerSnap) { self.balance = snap.balance }
 }
 
 #Error
@@ -36,11 +36,11 @@ run: fn() {
     alice := Ledger{balance: 100, name: "Alice"}
     bob := Ledger{balance: 0, name: "Bob"}
     print("=== successful transfer ===")
-    r: transfer(&alice, &bob, 40) ?? (-1)
+    r: transfer(alice, bob, 40) ?? (-1)
     print(alice.balance)
     print(bob.balance)
     print("=== overdraft: balances restored by Rollback ===")
-    s: transfer(&alice, &bob, 200) ?? (-1)
+    s: transfer(alice, bob, 200) ?? (-1)
     print(alice.balance)
     print(bob.balance)
     print(s)

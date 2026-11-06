@@ -70,15 +70,15 @@ sema_units_source_mentions: fn(source: String, wanted: NameTable) -> SemaUnitSou
         // Every scalar start of the run, as the ident loop above visited them.
         offset := start
         loop offset < at {
-            if offset > 0 && sema_units_ascii_digit(bytes[offset - 1]) && !sema_units_ascii_digit(bytes[offset]) -> sema_units_mention_suffix(&suffixes, bytes, offset, at, false)
-            if offset + 5 <= at && bytes[offset] == (U8{102}) && bytes[offset + 1] == (U8{114}) && bytes[offset + 2] == (U8{111}) && bytes[offset + 3] == (U8{109}) && bytes[offset + 4] == (U8{95}) -> sema_units_mention_suffix(&suffixes, bytes, offset + 5, at, true)
+            if offset > 0 && sema_units_ascii_digit(bytes[offset - 1]) && !sema_units_ascii_digit(bytes[offset]) -> sema_units_mention_suffix(suffixes, bytes, offset, at, false)
+            if offset + 5 <= at && bytes[offset] == (U8{102}) && bytes[offset + 1] == (U8{114}) && bytes[offset + 2] == (U8{111}) && bytes[offset + 3] == (U8{109}) && bytes[offset + 4] == (U8{95}) -> sema_units_mention_suffix(suffixes, bytes, offset + 5, at, true)
             offset = sema_units_scalar_end(bytes, offset)
         }
     }
     sorted := [SemaUnitSuffixMention]{}
-    loop (_, row) in suffixes -> &sorted.push(row)
-    &sorted.sort_by((left: SemaUnitSuffixMention, right: SemaUnitSuffixMention) -> left.text <=> right.text)
-    SemaUnitSourceMentions{identifiers: ^identifiers, unqualified: ^unqualified, suffixes: ^sorted}
+    loop (_, row) in suffixes -> sorted.push(row)
+    sorted.sort_by((left: SemaUnitSuffixMention, right: SemaUnitSuffixMention) -> left.text <=> right.text)
+    SemaUnitSourceMentions{identifiers: identifiers.move(), unqualified: unqualified.move(), suffixes: sorted.move()}
 }
 sema_units_identifier: fn(mentions: SemaUnitSourceMentions, name: String) -> Bool Never! {
     mentions.identifiers.get(name) != None

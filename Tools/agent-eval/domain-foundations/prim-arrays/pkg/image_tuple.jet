@@ -11,7 +11,7 @@ resize: fn(image: (pixels: Tensor, width: Int, height: Int, channels: Int, dtype
             channel := 0
             loop channel < image.channels {
                 value: compute.get(image.pixels, [source_y, source_x, channel]) ?? panic("resize read")
-                compute.set(&out, [y, x, channel], value) ?? panic("resize write")
+                compute.set(out, [y, x, channel], value) ?? panic("resize write")
                 channel += 1
             }
             x += 1
@@ -32,7 +32,7 @@ grayscale: fn(image: (pixels: Tensor, width: Int, height: Int, channels: Int, dt
             green: compute.get(image.pixels, [y, x, 1]) ?? panic("green read")
             blue: compute.get(image.pixels, [y, x, 2]) ?? panic("blue read")
             gray := red * 0.3 + green * 0.59 + blue * 0.11
-            compute.set(&out, [y, x, 0], gray) ?? panic("gray write")
+            compute.set(out, [y, x, 0], gray) ?? panic("gray write")
             x += 1
         }
         y += 1

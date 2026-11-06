@@ -54,7 +54,7 @@ MetadataFacts: struct {
         facts.license = provider_toml_string(cargo_toml, "license") ?? ""
         facts.dependencies = provider_toml_dependency_keys(cargo_toml, "[dependencies]")
         facts.build_dependencies = provider_toml_dependency_keys(cargo_toml, "[build-dependencies]")
-        if cargo_toml.contains("build =") -> &facts.scripts.push("build.rs")
+        if cargo_toml.contains("build =") -> facts.scripts.push("build.rs")
         facts.source_identity = "cargo:{facts.name}@{facts.version}"
         facts
     }
@@ -64,7 +64,7 @@ MetadataFacts: struct {
         facts := MetadataFacts.empty(ProviderFamily.PyPI, name)
         facts.version = version
         facts.source_identity = "pypi:{name}@{version}"
-        if dynamic_metadata -> &facts.todos.push("dynamic metadata must be resolved before build execution")
+        if dynamic_metadata -> facts.todos.push("dynamic metadata must be resolved before build execution")
         facts
     }
 
@@ -128,8 +128,8 @@ ProviderFactReport: struct {
     // when either is missing; the facts' conflicts carry over.
     with_identity: fn(facts: MetadataFacts) -> ProviderFactReport Never! {
         losses := [String]{}
-        if facts.name == "" -> &losses.push("provider metadata has no package name")
-        if facts.identity_selector().value == "" -> &losses.push("provider metadata has no exact version, revision, or digest")
+        if facts.name == "" -> losses.push("provider metadata has no package name")
+        if facts.identity_selector().value == "" -> losses.push("provider metadata has no exact version, revision, or digest")
         conflicts: facts.conflicts
         ProviderFactReport{facts: facts, losses: losses, conflicts: conflicts, native_format: "", native_document: ""}
     }
@@ -177,7 +177,7 @@ provider_toml_dependency_keys: fn(raw: String, section: String) -> [String] Neve
         }
         if !inside -> next
         pair: line.split_once("=") ?? next
-        &keys.push(pair.before.trim())
+        keys.push(pair.before.trim())
     }
     keys
 }
@@ -186,7 +186,7 @@ provider_toml_dependency_keys: fn(raw: String, section: String) -> [String] Neve
 provider_distinct_values: fn(values: [String]) -> [String] Never! {
     distinct := [String]{}
     loop value in values {
-        if !distinct.contains(value) -> &distinct.push(value)
+        if !distinct.contains(value) -> distinct.push(value)
     }
     distinct
 }
@@ -203,6 +203,6 @@ provider_format_dependency: fn(raw_name: String, raw_version: String) -> String 
 // Sorted without repeats (`sort` then `dedup`).
 provider_sorted_unique: fn(values: [String]) -> [String] Never! {
     out := provider_distinct_values(values)
-    &out.sort()
+    out.sort()
     out
 }

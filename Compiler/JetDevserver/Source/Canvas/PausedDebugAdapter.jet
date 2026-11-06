@@ -53,7 +53,7 @@ impl PausedDebugSessionAdapter {
 
     inject_into: fn(self, host: &PausedEvaluateHost) PausedEvaluateError! {
         if self.state != .Paused {
-            &host.clear_session()
+            host.clear_session()
             return Ok()
         }
         location: self.source_location()
@@ -66,12 +66,12 @@ impl PausedDebugSessionAdapter {
                 if self.projection_value(evaluation, id, location) == .Ok(published) -> projection = published
             }
             if projection.type_name == "" -> projection.type_name = PAUSED_DEBUG_UNKNOWN_TYPE
-            &bindings.push(projection)
+            bindings.push(projection)
         }
         scope: LexicalScope.new(self.scope_id, paused_debug_bounded_name(self.snapshot.function), None, location, bindings)
         session: paused_session(self.identity, SessionState.Paused, [LexicalScope]{scope}, self.authority, DEFAULT_EVALUATION_BUDGET)
-        &host.clear_evaluator_result()
-        &host.set_session(session)
+        host.clear_evaluator_result()
+        host.set_session(session)
         Ok()
     }
 
@@ -109,26 +109,26 @@ impl PausedDebugSessionAdapter {
 
     resume: fn(&self, host: &PausedEvaluateHost) Never! {
         self.state = .Running
-        self.clear_if_current(&host)
+        self.clear_if_current(host)
     }
 
     cancel: fn(&self, host: &PausedEvaluateHost, reason: String) PausedEvaluateError! {
         self.state = .Cancelled
         if self.host_is_current(host) {
-            if &host.cancel_session(reason) == .Err(failure) -> return Err(paused_error(failure.display()))
-            &host.clear_evaluator_result()
+            if host.cancel_session(reason) == .Err(failure) -> return Err(paused_error(failure.display()))
+            host.clear_evaluator_result()
         }
         Ok()
     }
 
     exit: fn(&self, host: &PausedEvaluateHost) Never! {
         self.state = .Finished
-        self.clear_if_current(&host)
+        self.clear_if_current(host)
     }
 
     stale: fn(&self, host: &PausedEvaluateHost) Never! {
         self.state = .Stale
-        self.clear_if_current(&host)
+        self.clear_if_current(host)
     }
 
     validate: fn(self) PausedEvaluateError! {
@@ -178,7 +178,7 @@ impl PausedDebugSessionAdapter {
     }
 
     clear_if_current: fn(self, host: &PausedEvaluateHost) Never! {
-        if self.host_is_current(host) -> &host.clear_session()
+        if self.host_is_current(host) -> host.clear_session()
     }
 }
 
@@ -225,7 +225,7 @@ paused_debug_bounded_text: fn(value: String) -> PausedDebugBoundedText Never! {
         }
         if length + shown.len() > MAX_VALUE_BYTES -> return PausedDebugBoundedText{text: pieces.join(""), truncated: true}
         length += shown.len()
-        &pieces.push(shown)
+        pieces.push(shown)
     }
     PausedDebugBoundedText{text: pieces.join(""), truncated: false}
 }

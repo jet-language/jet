@@ -10,14 +10,14 @@ Run: struct {
 make_run: fn() -> Run {
     return Run{graph: Graph{names: ["a", "b"], size: 2}, values: ["v"]}
 }
-hop: fn(run: ^Run) -> Graph {
-    graph := ^run.graph
+hop: fn(run: &&Run) -> Graph {
+    graph := run.graph.move()
     print(run.values.len())
     return graph
 }
 hop_local: fn() -> Int {
     run := make_run()
-    names := ^run.graph.names
+    names := run.graph.names.move()
     run.graph.names = ["c"]
     return names.len() + run.graph.names.len()
 }

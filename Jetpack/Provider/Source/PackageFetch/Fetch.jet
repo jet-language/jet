@@ -11,31 +11,31 @@ pkg_fetch: fn(verification: &StoreVerification, project_root: String, manifest: 
         pkg_lock_verify_all_manifest_deps_locked(manifest, lock) ?? return Err(PackageFetchError{diagnostic: err.diagnostic()})
         lock.validate_completeness() ?? return Err(PackageFetchError{diagnostic: err.diagnostic()})
         pkg_fetch_provenance(lock, manifest)
-        directories: pkg_fetch_locked_directories(&verification, roots, root, manifest, lock)
+        directories: pkg_fetch_locked_directories(verification, roots, root, manifest, lock)
         return Ok(PackageFetchResult{lock: lock, directories: directories})
     }
     resolver := PackageFetchResolver{root: root, previous: existing, options: options, policy: manifest.policy, nodes: [String: PackageFetchNode]{}, versions: [String: PackageFetchVersion]{}, visiting: [String]{}, registry_plan: [String: PublicationIndexEntry]{}, update_scope: pkg_fetch_update_scope(existing, options), foreign: [String: ForeignRealization]{}, advisory_loaded: false, advisory: None}
-    projections: provider_realize_foreign_dependencies(&verification, roots, root, manifest, context) ?? return Err(pkg_fetch_error("E1256", "couldn't realize the foreign package provider", err.message(), "provide a pinned hash-verified provider artifact with its generated binding, then run `jet fetch` again"))
+    projections: provider_realize_foreign_dependencies(verification, roots, root, manifest, context) ?? return Err(pkg_fetch_error("E1256", "couldn't realize the foreign package provider", err.message(), "provide a pinned hash-verified provider artifact with its generated binding, then run `jet fetch` again"))
     loop projection in projections -> resolver.foreign[projection.name] = projection
     resolver.registry_plan = pkg_fetch_registry_plan(resolver, manifest)
     direct: pkg_lock_manifest_dependency_names(manifest)
-    loop name in direct -> pkg_fetch_resolve(&verification, roots, context, &resolver, name, manifest.dependencies[name], root, [String]{"{manifest.package.name} (root)", name})
+    loop name in direct -> pkg_fetch_resolve(verification, roots, context, resolver, name, manifest.dependencies[name], root, [String]{"{manifest.package.name} (root)", name})
     lock := existing ?? LockFile.empty()
     lock.version = PKG_LOCK_VERSION
     lock.root_dependencies = direct
     lock.authority = if manifest.authority != PackageAuthority.default() -> Val(manifest.authority) else -> None
     lock.packages = [LockedPackage]{LockedPackage{name: manifest.package.name, version: manifest.package.version, source: .Root, dependencies: direct, layer: pkg_lock_layer_from_manifest(manifest)}}
     names := resolver.nodes.keys().to_list()
-    &names.sort()
+    names.sort()
     directories := [String: String]{}
     loop name in names {
-        &lock.packages.push(resolver.nodes[name].package)
+        lock.packages.push(resolver.nodes[name].package)
         directories[name] = resolver.nodes[name].directory
     }
     if options.update_dep == .Val(target) && existing == .Val(previous) {
         related := pkg_fetch_closure(previous, target)
         loop name in pkg_fetch_closure(lock, target) {
-            if !related.contains(name) -> &related.push(name)
+            if !related.contains(name) -> related.push(name)
         }
         loop index in 0..<lock.packages.len() {
             package: lock.packages[index]
@@ -44,7 +44,7 @@ pkg_fetch: fn(verification: &StoreVerification, project_root: String, manifest: 
         }
     }
     pkg_fetch_provenance(lock, manifest)
-    pkg_lock_ensure_build_stamp(root, &lock)
+    pkg_lock_ensure_build_stamp(root, lock)
     semantic: pkg_fetch_semantic_records(root, lock, manifest, options)
     // Fetch rebuilds the whole SemanticLock tail, so it replaces the one
     // `existing` carried instead of appending a second copy.
@@ -57,7 +57,7 @@ pkg_fetch_missing_lock_what: fn(manifest: Manifest) -> String Never! {
     names: pkg_lock_manifest_dependency_names(manifest)
     if names.len() == 0 -> return "`{UNIFIED_LOCK_FILE}` is missing"
     quoted := [String]{}
-    loop name in names -> &quoted.push("`{name}`")
+    loop name in names -> quoted.push("`{name}`")
     verb: if names.len() == 1 -> "is" else -> "are"
     "`{UNIFIED_LOCK_FILE}` is missing, so {quoted.join(", ")} {verb} not locked"
 }
@@ -68,7 +68,7 @@ pkg_fetch_provenance: fn(lock: LockFile, manifest: Manifest) PackageFetchError! 
 pkg_fetch_semantic_records: fn(root: String, lock: LockFile, manifest: Manifest, options: PackageFetchOptions) -[FS, Env, Time]> SemanticLockFile PackageFetchError! {
     semantic := trust_semantic_lock_load(root) ?? SemanticLockFile.empty()
     semantic.source_maps = loop map in manifest.policy.source_maps -> SourceMapEntry{pattern: map.pattern, sources: map.sources}
-    &semantic.source_maps.sort_by(map -> map.pattern)
+    semantic.source_maps.sort_by(map -> map.pattern)
     scope: if options.update_dep == .Val(target) -> Val(pkg_fetch_closure(lock, target)) else -> None
     loop package in lock.packages {
         if scope == .Val(names) && !names.contains(package.name) -> next
@@ -94,7 +94,7 @@ pkg_fetch_semantic_records: fn(root: String, lock: LockFile, manifest: Manifest,
             rationale.update_command = if options.update_dep == .Val(name) -> "jet update {name}" else -> "jet update"
             record := SemanticRecord.new(LockIdentity{kind: .Package, key: "registry:{registry}:{package.name}", exact: reference, hash: hash, platform: pkg_host_platform()}, rationale)
             if metadata == .Val(value) -> record.future_fields["dependency-metadata"] = value.canonical()
-            _: &semantic.selective_update(record)
+            _: semantic.selective_update(record)
         }
     }
     trust_revalidate_semantic_lock(semantic) ?? return Err(pkg_fetch_error("E1205", "couldn't record the registry resolution rationale", "semantic lock validation rejected the update explanation", err.message()))
@@ -117,7 +117,7 @@ pkg_fetch_locked_directories: fn(verification: &StoreVerification, roots: Hangar
                 if package.source != expected_source || package.locked == None -> return Err(pkg_fetch_locked_error(name, "locked git source disagrees with the manifest or has no pinned revision"))
                 pkg_fetch_locked_source(name, package)
             }
-            .Registry(requirement) -> pkg_fetch_locked_registry(&verification, roots, root, manifest, lock, package, requirement)
+            .Registry(requirement) -> pkg_fetch_locked_registry(verification, roots, root, manifest, lock, package, requirement)
             .Foreign(language, reference) -> pkg_fetch_locked_foreign(roots, root, package, language, reference)
         }
         directories[name] = directory
@@ -178,16 +178,16 @@ pkg_fetch_locked_registry: fn(verification: &StoreVerification, roots: HangarRoo
         }
         edges: pkg_fetch_registry_edges(dependency, metadata, name)
         expected := [String]{}
-        loop edge in edges -> &expected.push(edge.name)
+        loop edge in edges -> expected.push(edge.name)
         loop child in pkg_lock_manifest_dependency_names(dependency) {
             if dependency.dependencies[child] == .Registry(_) -> next
-            &expected.push(child)
+            expected.push(child)
         }
         if pkg_overlay_sorted_unique(package.dependencies) != pkg_overlay_sorted_unique(expected) -> return Err(pkg_fetch_registry_error(name, "locked dependency roles, features, or constraints disagree with the artifact metadata"))
         receipt: publication_authorize_package_candidate(manifest.policy, name, package.version, dependency.package.license, registry) ?? return Err(PackageFetchError{diagnostic: publication_package_policy_edge_diagnostic(manifest.package.name, "{manifest.package.name} -> {name}#{package.version}", registry, err)})
         resolver: PackageFetchResolver{root: root, previous: Val(lock), options: PackageFetchOptions{locked: true}, policy: manifest.policy, nodes: [String: PackageFetchNode]{}, versions: [String: PackageFetchVersion]{}, visiting: [String]{}, registry_plan: [String: PublicationIndexEntry]{}, update_scope: [String]{}, foreign: [String: ForeignRealization]{}, advisory_loaded: false, advisory: None}
-        installed: pkg_fetch_registry_ingest(&verification, roots, resolver, config, selected, snapshot.path(), [String]{}, None, receipt, publication_active_source_exception(manifest.policy.exceptions, name, package.version), true)
-        close(^snapshot)
+        installed: pkg_fetch_registry_ingest(verification, roots, resolver, config, selected, snapshot.path(), [String]{}, None, receipt, publication_active_source_exception(manifest.policy.exceptions, name, package.version), true)
+        close(snapshot)
         // A hashing failure is a failed content hash; `hash` is never empty here.
         if (publication_registry_artifact_hash(installed.out) ?? "") != hash -> return Err(pkg_fetch_registry_error(name, "stored registry artifact failed its content hash"))
         return Ok(installed.out)

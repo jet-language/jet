@@ -38,9 +38,9 @@ store_static_cache_serve: fn(site: String) -> StoreTestCacheServer Never! {
         provenance: "static cache test",
         platform_artifact_kind: "",
     }
-    entry: (store_ingest_tree(&verification, roots, request) ?? panic("ingest static cache entry")).entry
+    entry: (store_ingest_tree(verification, roots, request) ?? panic("ingest static cache entry")).entry
     store_bind_cache(roots, "public", [String]{local_cache}, None, None, true) ?? panic("bind local cache publisher")
-    published: store_publish_cache_entry(&verification, roots, entry.id, "public") ?? panic("publish signed local cache objects")
+    published: store_publish_cache_entry(verification, roots, entry.id, "public") ?? panic("publish signed local cache objects")
     files.copy_dir(local_cache, publication) ?? panic("copy the publication")
     hash: entry.envelope.output_hash
     assert(files.is_file(files.join(publication, "nar/{hash}.nar")))
@@ -51,23 +51,23 @@ store_static_cache_serve: fn(site: String) -> StoreTestCacheServer Never! {
     server: store_static_cache_serve(publication)
     trust_key: files.join(root, "trust/cache-public.key")
     store_bind_cache(roots, "public", [String]{server.endpoint}, Val(trust_key), None, false) ?? panic("bind read-only static cache")
-    verified: store_verify_cache_transfer(&verification, roots, entry.id, "public") ?? panic("verify static cache objects")
+    verified: store_verify_cache_transfer(verification, roots, entry.id, "public") ?? panic("verify static cache objects")
     assert_eq(verified.mirror, server.endpoint)
     assert_eq(verified.output_hash, published.output_hash)
     assert_eq(verified.witness, published.witness)
-    store_substitute_cache_entry(&verification, roots, entry.id, "public", files.join(restored, "out")) ?? panic("substitute from verified static cache")
+    store_substitute_cache_entry(verification, roots, entry.id, "public", files.join(restored, "out")) ?? panic("substitute from verified static cache")
     assert_eq(files.read(files.join(restored, "out/payload")) ?? panic("restored payload"), "static cache bytes\n")
 
     info_path: files.join(publication, "{hash}-{entry.id}.narinfo")
     signed_info: files.read(info_path) ?? panic("signed static narinfo")
     unsigned := [String]{}
     loop line in signed_info.lines() {
-        if !line.starts_with("Sig: ") -> &unsigned.push(line)
+        if !line.starts_with("Sig: ") -> unsigned.push(line)
     }
     files.write(info_path, "{unsigned.join("\n")}\n") ?? panic("remove static narinfo signature")
-    assert(store_verify_cache_transfer(&verification, roots, entry.id, "public") == .Err(_))
+    assert(store_verify_cache_transfer(verification, roots, entry.id, "public") == .Err(_))
     files.write(info_path, signed_info) ?? panic("restore signed static narinfo")
-    store_test_stop_cache_server(^server)
+    store_test_stop_cache_server(server)
 
     store_make_tree_writable_for_removal(root).drop("cleanup")
     files.remove_all(root).drop("cleanup")

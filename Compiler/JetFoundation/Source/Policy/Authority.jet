@@ -36,7 +36,7 @@ authority_is_deny_only: fn(right: String) -> Bool Never! {
 authority_grantable_roots: fn() -> [String] Never! {
     roots := [String]{}
     loop root in EFFECT_VOCABULARY_ROOTS {
-        if !authority_is_deny_only(root) -> &roots.push(root)
+        if !authority_is_deny_only(root) -> roots.push(root)
     }
     roots
 }
@@ -51,11 +51,11 @@ AuthorityVerdict: enum {
 // A rights set: sorted with duplicates removed (Rust `Holds`).
 authority_holds: fn(rights: [String]) -> [String] Never! {
     sorted := rights
-    &sorted.sort()
+    sorted.sort()
     out := [String]{}
     loop right in sorted {
         if out.contains(right) -> next
-        &out.push(right)
+        out.push(right)
     }
     out
 }
@@ -63,8 +63,8 @@ authority_holds: fn(rights: [String]) -> [String] Never! {
 // Insert one right, keeping the set sorted and duplicate-free.
 authority_holds_insert: fn(holds: &[String], right: String) {
     if holds.contains(right) -> return
-    &holds.push(right)
-    &holds.sort()
+    holds.push(right)
+    holds.sort()
 }
 
 // Root segment of a dotted right (`FS.Read` -> `FS`).
@@ -79,7 +79,7 @@ authority_ascii_lower: fn(value: String) -> String Never! {
     out := [U8]{}
     loop byte in value.bytes() {
         code: Int.from_u8(byte)
-        &out.push(if code >= 65 && code <= 90 -> U8{code + 32} else -> byte)
+        out.push(if code >= 65 && code <= 90 -> U8{code + 32} else -> byte)
     }
     String.from_bytes(out) ?? value
 }
@@ -151,7 +151,7 @@ authority_tighten: fn(outer: [String], inner: [String]) -> Bool Never! {
 authority_uncovered: fn(used: [String], held: [String]) -> [String] Never! {
     out := [String]{}
     loop right in used {
-        if !authority_covers_any(held, right) -> &out.push(right)
+        if !authority_covers_any(held, right) -> out.push(right)
     }
     authority_holds(out)
 }
@@ -160,7 +160,7 @@ authority_uncovered: fn(used: [String], held: [String]) -> [String] Never! {
 authority_covered: fn(used: [String], matching: [String]) -> [String] Never! {
     out := [String]{}
     loop right in used {
-        if authority_covers_any(matching, right) -> &out.push(right)
+        if authority_covers_any(matching, right) -> out.push(right)
     }
     authority_holds(out)
 }
@@ -185,7 +185,7 @@ CanonicalAuthority: struct {
     // checks still fail closed because no known hold covers them.
     from_rights: fn(rights: [String]) -> CanonicalAuthority Never! {
         holds := [String]{}
-        loop right in rights -> &holds.push(authority_parse_right(right) ?? right)
+        loop right in rights -> holds.push(authority_parse_right(right) ?? right)
         CanonicalAuthority{holds: authority_holds(holds)}
     }
 
@@ -248,8 +248,8 @@ ApplicationAuthority: struct {
     // floor right leaves only through `deny`, which wins over every allow.
     from_policy: fn(allow: [String]?, deny: [String]?, authority: String) -> ApplicationAuthority Never! {
         granted := [String]{}
-        loop name in AUTHORITY_AMBIENT_BASIC_EFFECTS -> &granted.push(name)
-        loop name in (allow ?? [String]{}) -> &granted.push(name)
+        loop name in AUTHORITY_AMBIENT_BASIC_EFFECTS -> granted.push(name)
+        loop name in (allow ?? [String]{}) -> granted.push(name)
         ApplicationAuthority{
             required_effects: [String]{},
             granted_effects: authority_parse_rights(granted),
@@ -272,7 +272,7 @@ ApplicationAuthority: struct {
         loop effect_name in self.required_effects {
             if authority_is_deny_only(effect_name) -> next
             if authority_answer(floor, [String]{}, effect_name) == AuthorityVerdict.Allowed -> next
-            &out.push(effect_name)
+            out.push(effect_name)
         }
         authority_holds(out)
     }
@@ -282,7 +282,7 @@ ApplicationAuthority: struct {
         out := [String]{}
         loop effect_name in self.required_effects {
             if authority_is_deny_only(effect_name) -> next
-            if authority_answer(self.granted_effects, self.denied_effects, effect_name) == AuthorityVerdict.Missing -> &out.push(effect_name)
+            if authority_answer(self.granted_effects, self.denied_effects, effect_name) == AuthorityVerdict.Missing -> out.push(effect_name)
         }
         authority_holds(out)
     }
@@ -291,7 +291,7 @@ ApplicationAuthority: struct {
     denied_required_effects: fn(self) -> [String] Never! {
         out := [String]{}
         loop effect_name in self.required_effects {
-            if authority_answer(self.granted_effects, self.denied_effects, effect_name) == AuthorityVerdict.Denied -> &out.push(effect_name)
+            if authority_answer(self.granted_effects, self.denied_effects, effect_name) == AuthorityVerdict.Denied -> out.push(effect_name)
         }
         authority_holds(out)
     }
@@ -323,7 +323,7 @@ ApplicationAuthority: struct {
         actions := [String]{}
         loop right in rights {
             action: authority_effect_action(right)
-            if !actions.contains(action) -> &actions.push(action)
+            if !actions.contains(action) -> actions.push(action)
         }
         said: if {
             actions.len() == 0 -> "uses no authority"
@@ -397,7 +397,7 @@ authority_parse_rights: fn(names: [String]) -> [String] Never! {
     out := [String]{}
     loop name in names {
         parsed: authority_parse_right(name) ?? next
-        &out.push(parsed)
+        out.push(parsed)
     }
     authority_holds(out)
 }

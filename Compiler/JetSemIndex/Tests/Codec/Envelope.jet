@@ -80,10 +80,10 @@ semindex_envelope_reorder_after_source: fn() -> String Never! {
 semindex_identity_stable_across_reorder: fn(before: SemIndex, after: SemIndex) {
     before_ids := [String]{}
     after_ids := [String]{}
-    loop definition in before.definitions() -> &before_ids.push(definition.identity.copy())
-    loop definition in after.definitions() -> &after_ids.push(definition.identity.copy())
-    &before_ids.sort()
-    &after_ids.sort()
+    loop definition in before.definitions() -> before_ids.push(definition.identity.copy())
+    loop definition in after.definitions() -> after_ids.push(definition.identity.copy())
+    before_ids.sort()
+    after_ids.sort()
     assert_eq(before_ids, after_ids)
     module_seen := false
     function_seen := false

@@ -203,7 +203,7 @@ tasks: fn(from: Int, to: Int) -> Int {
     total := 0
     loop i in from..<to {
         handle: task data[i % 3] + i
-        total += ^handle.join() ?? 0
+        total += handle.join() ?? 0
     }
     total
 }
@@ -212,7 +212,7 @@ guarded: fn(from: Int, to: Int) -> Int {
     data: [Int]{1, 2, 3}
     total := 0
     loop i in from..<to {
-        guarded_round(data, i, &total)
+        guarded_round(data, i, total)
     }
     total
 }

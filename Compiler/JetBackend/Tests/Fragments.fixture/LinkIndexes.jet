@@ -4,15 +4,15 @@ run: fn() {
     indexes: [Int]{0, 1, 0xfeff, 0xff00, 0xfff0, 0xfff1, 0xfff2, 0xffff, 0x10000, 0x10100, LINK_ABS, LINK_COMMON}
     symtab := [U8]{}
     xindex := [U8]{}
-    loop index in indexes -> link_pack_sym(&symtab, &xindex, 0, 0, index, 0, 0)
+    loop index in indexes -> link_pack_sym(symtab, xindex, 0, 0, index, 0, 0)
     xindex_at: symtab.len()
-    &symtab.extend(xindex)
-    c := link_context(^[[U8]]{symtab}, LINK_BASE)
-    &c.obj_buffer.push(0)
-    &c.obj_symtab.push(0)
-    &c.obj_shndx.push(xindex_at)
-    &c.obj_count.push(0x10101)
-    &c.obj_first_section.push(100)
+    symtab.extend(xindex)
+    c := link_context([[U8]]{symtab}, LINK_BASE)
+    c.obj_buffer.push(0)
+    c.obj_symtab.push(0)
+    c.obj_shndx.push(xindex_at)
+    c.obj_count.push(0x10101)
+    c.obj_first_section.push(100)
     loop (k, index) in indexes {
         raw: link_u16(c.bufs, 0, 24 * k + 6)
         expected_raw: if index >= 0xff00 -> 0xffff else if index == LINK_ABS -> 0xfff1 else if index == LINK_COMMON -> 0xfff2 else -> index

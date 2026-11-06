@@ -72,7 +72,7 @@ foundation_pascal_name_case: fn(name: String) -> String Never! {
     words := [String]{}
     loop word in body.split("_") {
         if word == "" -> next
-        &words.push(foundation_capitalize_first(word))
+        words.push(foundation_capitalize_first(word))
     }
     joined: words.join("")
     if leading -> return "_{joined}"
@@ -83,7 +83,7 @@ foundation_capitalize_first: fn(word: String) -> String Never! {
     out := [String]{}
     loop scalar in word.chars() {
         text: "{scalar}"
-        &out.push(if out.len() == 0 -> text.to_upper() else -> text)
+        out.push(if out.len() == 0 -> text.to_upper() else -> text)
     }
     out.join("")
 }
@@ -142,7 +142,7 @@ foundation_sanitize_crate_name: fn(raw: String) -> String Never! {
         text: "{scalar}"
         bytes: text.bytes()
         word: bytes.len() == 1 && foundation_ascii_word(Int.from_u8(bytes[0]))
-        &out.push(if word -> text else -> "_")
+        out.push(if word -> text else -> "_")
     }
     name := out.join("")
     if name == "" -> name = "out"

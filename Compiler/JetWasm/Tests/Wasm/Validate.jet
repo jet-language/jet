@@ -1,8 +1,8 @@
 use jet_wasm.[wasm_decode_component, wasm_decode_module, wasm_validate_module]
 
 // "" when every core module of the component validates, else the first error.
-component_validation: fn(bytes: ^[U8]) -> String Never! {
-    if wasm_decode_component(^bytes) == {
+component_validation: fn(bytes: &&[U8]) -> String Never! {
+    if wasm_decode_component(bytes) == {
         .Ok(component) -> {
             loop core in component.modules {
                 if wasm_validate_module(core) == .Err(error) -> return error.render()
@@ -17,12 +17,12 @@ component_validation: fn(bytes: ^[U8]) -> String Never! {
 // holding `types`, one function of type 0 and the body `body` (locals + code).
 body_validation: fn(types: [Int], body: [Int]) -> String Never! {
     values := [Int]{0, 0x61, 0x73, 0x6d, 1, 0, 0, 0, 1, types.len()}
-    loop value in types -> &values.push(value)
+    loop value in types -> values.push(value)
     code: [Int]{3, 2, 1, 0, 10, body.len() + 2, 1, body.len()}
-    loop value in code -> &values.push(value)
-    loop value in body -> &values.push(value)
+    loop value in code -> values.push(value)
+    loop value in body -> values.push(value)
     bytes: loop value in values -> U8{value}
-    if wasm_decode_module(^bytes) == {
+    if wasm_decode_module(bytes) == {
         .Ok(module_value) -> {
             if wasm_validate_module(module_value) == .Err(error) -> return error.render()
             ""

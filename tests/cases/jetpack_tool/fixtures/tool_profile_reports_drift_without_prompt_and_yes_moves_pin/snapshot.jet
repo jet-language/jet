@@ -31,8 +31,8 @@ visit: fn(root: String, path: String) {
     if !info.is_dir -> return
     entries: files.list_dir(path.copy()) ?? panic("list {path}: {err}")
     children := [String]{}
-    loop entry in entries -> &children.push(entry.path)
-    &children.sort()
+    loop entry in entries -> children.push(entry.path)
+    children.sort()
     loop child in children -> visit(root.copy(), child)
 }
 run: fn() {

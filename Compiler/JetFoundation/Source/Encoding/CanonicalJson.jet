@@ -30,15 +30,15 @@ canonical_json_object: fn(fields: [CanonicalJSONField]) -> CanonicalJSON Canonic
     }
     sorted := fields
     sorted = loop fresh_item in sorted -> fresh_item
-    &sorted.sort_by((left: CanonicalJSONField, right: CanonicalJSONField) -> left.key <=> right.key)
+    sorted.sort_by((left: CanonicalJSONField, right: CanonicalJSONField) -> left.key <=> right.key)
     Ok(CanonicalJSON.Object(sorted))
 }
 
 // Rust `CanonicalJson::bytes`: the encoding plus one LF.
 canonical_json_bytes: fn(value: CanonicalJSON) -> [U8] Never! {
     out := [U8]{}
-    canonical_json_encode(value, &out)
-    &out.push(U8{10})
+    canonical_json_encode(value, out)
+    out.push(U8{10})
     out
 }
 
@@ -49,33 +49,33 @@ canonical_json_sha256: fn(value: CanonicalJSON) -> String Never! {
 }
 
 canonical_json_append: fn(out: &[U8], text: String) Never! {
-    loop byte in text.bytes() -> &out.push(byte)
+    loop byte in text.bytes() -> out.push(byte)
 }
 
 // Rust `encode_json`.
 canonical_json_encode: fn(value: CanonicalJSON, out: &[U8]) Never! {
     if value == {
-        .Null -> canonical_json_append(&out, "null")
-        .Bool(flag) -> canonical_json_append(&out, if flag -> "true" else -> "false")
-        .Integer(number) -> canonical_json_append(&out, number)
-        .String(text) -> canonical_json_encode_string(text, &out)
+        .Null -> canonical_json_append(out, "null")
+        .Bool(flag) -> canonical_json_append(out, if flag -> "true" else -> "false")
+        .Integer(number) -> canonical_json_append(out, number)
+        .String(text) -> canonical_json_encode_string(text, out)
         .Array(values) -> {
-            &out.push(U8{91})
+            out.push(U8{91})
             loop (index, child) in values {
-                if index != 0 -> &out.push(U8{44})
-                canonical_json_encode(child, &out)
+                if index != 0 -> out.push(U8{44})
+                canonical_json_encode(child, out)
             }
-            &out.push(U8{93})
+            out.push(U8{93})
         }
         .Object(fields) -> {
-            &out.push(U8{123})
+            out.push(U8{123})
             loop (index, field) in fields {
-                if index != 0 -> &out.push(U8{44})
-                canonical_json_encode_string(field.key, &out)
-                &out.push(U8{58})
-                canonical_json_encode(field.value, &out)
+                if index != 0 -> out.push(U8{44})
+                canonical_json_encode_string(field.key, out)
+                out.push(U8{58})
+                canonical_json_encode(field.value, out)
             }
-            &out.push(U8{125})
+            out.push(U8{125})
         }
     }
 }
@@ -84,27 +84,27 @@ canonical_json_encode: fn(value: CanonicalJSON, out: &[U8]) Never! {
 // C0 controls as `\u00xx`; every other scalar verbatim.
 canonical_json_encode_string: fn(value: String, out: &[U8]) Never! {
     hex: "0123456789abcdef".bytes()
-    &out.push(U8{34})
+    out.push(U8{34})
     loop byte in value.bytes() {
         code: Int.from_u8(byte)
         if code == {
-            34 -> canonical_json_append(&out, "\\\"")
-            92 -> canonical_json_append(&out, "\\\\")
-            8 -> canonical_json_append(&out, "\\b")
-            12 -> canonical_json_append(&out, "\\f")
-            10 -> canonical_json_append(&out, "\\n")
-            13 -> canonical_json_append(&out, "\\r")
-            9 -> canonical_json_append(&out, "\\t")
+            34 -> canonical_json_append(out, "\\\"")
+            92 -> canonical_json_append(out, "\\\\")
+            8 -> canonical_json_append(out, "\\b")
+            12 -> canonical_json_append(out, "\\f")
+            10 -> canonical_json_append(out, "\\n")
+            13 -> canonical_json_append(out, "\\r")
+            9 -> canonical_json_append(out, "\\t")
             else -> {
                 if code < 32 {
-                    canonical_json_append(&out, "\\u00")
-                    &out.push(hex[code >> 4])
-                    &out.push(hex[code.bit_and(15)])
+                    canonical_json_append(out, "\\u00")
+                    out.push(hex[code >> 4])
+                    out.push(hex[code.bit_and(15)])
                 } else {
-                    &out.push(byte)
+                    out.push(byte)
                 }
             }
         }
     }
-    &out.push(U8{34})
+    out.push(U8{34})
 }

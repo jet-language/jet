@@ -12,7 +12,7 @@ use files: core.files
 text: fn(bytes: [U8]) -> String { String.from_bytes(bytes) ?? panic("utf8") }
 
 line_of: fn(reader: &FileReader) -> String {
-    if &reader.read_line() == {
+    if reader.read_line() == {
         .Ok(found) -> found ?? "eof"
         .Err(_) -> "error"
     }
@@ -24,18 +24,18 @@ run: fn() {
     files.write(path, "alpha\nbeta\ngamma\n")
 
     reader := files.open(path)
-    print("first line: {line_of(&reader)}")
-    &reader.seek(0)
+    print("first line: {line_of(reader)}")
+    reader.seek(0)
     print("after seek(0): {text(reader.read(5))}")
-    &reader.seek(11)
-    print("after seek(11): {line_of(&reader)}")
-    &reader.seek(6)
-    first: line_of(&reader)
-    second: line_of(&reader)
+    reader.seek(11)
+    print("after seek(11): {line_of(reader)}")
+    reader.seek(6)
+    first: line_of(reader)
+    second: line_of(reader)
     print("lines from 6: {first} {second}")
-    &reader.seek(100)
+    reader.seek(100)
     print("past the end reads {reader.read(4).len()} bytes")
-    if &reader.seek(-1) == {
+    if reader.seek(-1) == {
         .Ok(_) -> print("seek(-1): accepted")
         .Err(error) -> print("seek(-1): {error == .InvalidInput(_)}")
     }

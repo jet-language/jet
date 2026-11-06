@@ -41,35 +41,35 @@ sema_lint_allowance_push: fn(markers: [Marker], target: Span, segments: [SemaSou
     loop marker in markers {
         lint: sema_lint_allowance_name(marker) ?? next
         location: sema_source_location_at(segments, target) ?? next
-        &allowances.push(SemaLintAllowance{lint: lint, source_path: location.source_path, source_offset: location.aggregate_start, target: target})
+        allowances.push(SemaLintAllowance{lint: lint, source_path: location.source_path, source_offset: location.aggregate_start, target: target})
     }
 }
 
 sema_lint_allowance_functions: fn(functions: [Func], segments: [SemaSourceSegment], allowances: &[SemaLintAllowance]) Never! {
-    loop function in functions -> sema_lint_allowance_push(function.markers, function.span, segments, &allowances)
+    loop function in functions -> sema_lint_allowance_push(function.markers, function.span, segments, allowances)
 }
 
 sema_lint_allowance_item: fn(item: Item, segments: [SemaSourceSegment], allowances: &[SemaLintAllowance]) Never! {
     if item == {
-        .Func(function) -> sema_lint_allowance_push(function.markers, function.span, segments, &allowances)
+        .Func(function) -> sema_lint_allowance_push(function.markers, function.span, segments, allowances)
         .Struct(definition) -> {
             loop field in definition.fields {
                 end := field.ty_span.end
                 if field.computed == .Val(computed) -> end = expr_span(computed).end
                 if field.default == .Val(default) -> end = expr_span(default).end
-                sema_lint_allowance_push(field.serde_markers, Span{start: field.name_span.start, end: end}, segments, &allowances)
+                sema_lint_allowance_push(field.serde_markers, Span{start: field.name_span.start, end: end}, segments, allowances)
             }
-            sema_lint_allowance_functions(definition.methods, segments, &allowances)
-            loop implementation in definition.trait_impls -> sema_lint_allowance_functions(implementation.methods, segments, &allowances)
+            sema_lint_allowance_functions(definition.methods, segments, allowances)
+            loop implementation in definition.trait_impls -> sema_lint_allowance_functions(implementation.methods, segments, allowances)
         }
         .Enum(definition) -> {
-            sema_lint_allowance_functions(definition.methods, segments, &allowances)
-            loop implementation in definition.trait_impls -> sema_lint_allowance_functions(implementation.methods, segments, &allowances)
+            sema_lint_allowance_functions(definition.methods, segments, allowances)
+            loop implementation in definition.trait_impls -> sema_lint_allowance_functions(implementation.methods, segments, allowances)
         }
-        .Impl(implementation) -> sema_lint_allowance_functions(implementation.methods, segments, &allowances)
+        .Impl(implementation) -> sema_lint_allowance_functions(implementation.methods, segments, allowances)
         .CodeModule(code_module) -> {
             if code_module.body == .Val(body) {
-                loop nested in body -> sema_lint_allowance_item(nested, segments, &allowances)
+                loop nested in body -> sema_lint_allowance_item(nested, segments, allowances)
             }
         }
         else -> {}
@@ -82,9 +82,9 @@ sema_lint_allowances: fn(program: Program, segments: [SemaSourceSegment], allowa
     loop application in program.applied_rules {
         if application.site != Val(RuleSite.Statement) -> next
         target: application.target ?? next
-        sema_lint_allowance_push([Marker]{application.marker}, target, segments, &allowances)
+        sema_lint_allowance_push([Marker]{application.marker}, target, segments, allowances)
     }
-    loop item in program.items -> sema_lint_allowance_item(item, segments, &allowances)
+    loop item in program.items -> sema_lint_allowance_item(item, segments, allowances)
 }
 
 // Whether a located lint diagnostic falls inside an allowance for its lint.

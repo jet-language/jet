@@ -36,14 +36,14 @@ pkg_top_level_commas: fn(body: String) -> [String] Never! {
             40 | 91 | 123 -> depth += 1
             41 | 93 | 125 -> depth -= 1
             44 -> if depth == 0 {
-                &out.push(pkg_bytes_text(raw, start, index))
+                out.push(pkg_bytes_text(raw, start, index))
                 start = index + 1
             }
             else -> {}
         }
     }
     tail: pkg_bytes_text(raw, start, raw.len())
-    if tail.trim() != "" -> &out.push(tail)
+    if tail.trim() != "" -> out.push(tail)
     out
 }
 
@@ -55,7 +55,7 @@ pkg_key_value_entries: fn(body: String) -> [ManifestEntry] PackageParseError! {
         entry: piece.trim()
         if entry == "" -> next
         parts: entry.split_once(":") ?? return Err(PackageParseError.Composition("malformed metadata field `{entry}`"))
-        &entries.push(ManifestEntry{key: parts.before.trim(), value: parts.after.trim()})
+        entries.push(ManifestEntry{key: parts.before.trim(), value: parts.after.trim()})
     }
     Ok(entries)
 }
@@ -135,7 +135,7 @@ pkg_strip_comments: fn(value: String) -> String Never! {
     loop index < raw.len() {
         code: Int.from_u8(raw[index])
         if quoted {
-            &out.push(raw[index])
+            out.push(raw[index])
             if {
                 escaped -> escaped = false
                 code == 92 -> escaped = true
@@ -147,7 +147,7 @@ pkg_strip_comments: fn(value: String) -> String Never! {
         }
         if code == 34 {
             quoted = true
-            &out.push(raw[index])
+            out.push(raw[index])
             index += 1
             next
         }
@@ -155,7 +155,7 @@ pkg_strip_comments: fn(value: String) -> String Never! {
             index += 2
             loop index < raw.len() {
                 if Int.from_u8(raw[index]) == 10 {
-                    &out.push(raw[index])
+                    out.push(raw[index])
                     index += 1
                     break
                 }
@@ -163,7 +163,7 @@ pkg_strip_comments: fn(value: String) -> String Never! {
             }
             next
         }
-        &out.push(raw[index])
+        out.push(raw[index])
         index += 1
     }
     pkg_bytes_text(out, 0, out.len())
@@ -195,7 +195,7 @@ pkg_parse_list: fn(value: String) -> [String] Never! {
     out := [String]{}
     loop entry in pkg_top_level_entries(body) {
         item: pkg_scalar(entry)
-        if item != "" -> &out.push(item)
+        if item != "" -> out.push(item)
     }
     out
 }
@@ -230,14 +230,13 @@ pkg_split_field: fn(value: String) -> ManifestEntry? Never! {
     None
 }
 
-// One top-level `left: right` or `left: right` binding (untrimmed halves).
+// One top-level `left: right` binding (untrimmed halves).
 ManifestBinding: struct {
     left: String
-    operator: String
     right: String
 }
 
-// `mod::split_package_binding`: the first top-level `::` or `:`.
+// `mod::split_package_binding`: the first top-level `:`.
 pkg_split_package_binding: fn(entry: String) -> ManifestBinding? Never! {
     raw: entry.bytes()
     depth := 0
@@ -261,8 +260,7 @@ pkg_split_package_binding: fn(entry: String) -> ManifestBinding? Never! {
             40 | 91 | 123 -> depth += 1
             41 | 93 | 125 -> depth -= 1
             58 -> if depth == 0 {
-                if pkg_bytes_code(raw, index + 1) == 58 -> return Val(ManifestBinding{left: pkg_bytes_text(raw, 0, index), operator: "::", right: pkg_bytes_text(raw, index + 2, raw.len())})
-                return Val(ManifestBinding{left: pkg_bytes_text(raw, 0, index), operator: ":", right: pkg_bytes_text(raw, index + 1, raw.len())})
+                return Val(ManifestBinding{left: pkg_bytes_text(raw, 0, index), right: pkg_bytes_text(raw, index + 1, raw.len())})
             }
             else -> {}
         }
@@ -311,7 +309,7 @@ pkg_top_level_entries: fn(value: String) -> [String] Never! {
         }
         if depth == 0 && (code == 44 || code == 10) {
             current: pkg_bytes_text(raw, start, index)
-            if current.trim() != "" -> &entries.push(current)
+            if current.trim() != "" -> entries.push(current)
             start = index + 1
             index += 1
             next
@@ -319,7 +317,7 @@ pkg_top_level_entries: fn(value: String) -> [String] Never! {
         width: pkg_bytes_space_width(raw, index)
         if depth == 0 && width > 0 && pkg_implicit_field_start(raw, index, pkg_bytes_text(raw, start, index)) {
             current: pkg_bytes_text(raw, start, index)
-            if current.trim() != "" -> &entries.push(current)
+            if current.trim() != "" -> entries.push(current)
             index = pkg_bytes_skip_space(raw, index)
             start = index
             next
@@ -327,7 +325,7 @@ pkg_top_level_entries: fn(value: String) -> [String] Never! {
         index += if width > 0 -> width else -> 1
     }
     tail: pkg_bytes_text(raw, start, raw.len())
-    if tail.trim() != "" -> &entries.push(tail)
+    if tail.trim() != "" -> entries.push(tail)
     entries
 }
 
@@ -374,14 +372,14 @@ pkg_top_level_lines_or_commas: fn(body: String) -> [String] Never! {
             41 | 93 | 125 -> depth -= 1
             44 | 10 -> if depth == 0 {
                 current: pkg_bytes_text(raw, start, index)
-                if current.trim() != "" -> &out.push(current)
+                if current.trim() != "" -> out.push(current)
                 start = index + 1
             }
             else -> {}
         }
     }
     tail: pkg_bytes_text(raw, start, raw.len())
-    if tail.trim() != "" -> &out.push(tail)
+    if tail.trim() != "" -> out.push(tail)
     out
 }
 
@@ -399,8 +397,8 @@ pkg_named_entries_checked: fn(body: String, scope: String) -> [ManifestEntry] Pa
     loop entry in pkg_top_level_entries(body) {
         field: pkg_split_field(entry) ?? return Err(PackageParseError.MalformedField("{scope}: {entry}"))
         if seen.contains(field.key) -> return Err(PackageParseError.Composition("`{scope}.{field.key}` is declared more than once"))
-        &seen.push(field.key)
-        &entries.push(field)
+        seen.push(field.key)
+        entries.push(field)
     }
     Ok(entries)
 }
@@ -418,7 +416,7 @@ pkg_parse_string_list: fn(value: String) -> [String]? Never! {
     loop piece in pkg_top_level_commas(inner) {
         entry: piece.trim()
         if entry == "" -> next
-        &out.push(pkg_unquote(entry))
+        out.push(pkg_unquote(entry))
     }
     Val(out)
 }
@@ -447,6 +445,6 @@ pkg_is_identifier: fn(value: String) -> Bool Never! {
 // Map keys in ascending byte order, the iteration order of a Rust BTreeMap.
 pkg_manifest_sorted: fn(keys: [String]) -> [String] Never! {
     out := keys
-    &out.sort()
+    out.sort()
     out
 }

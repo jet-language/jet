@@ -16,9 +16,9 @@ apply: fn(f: fn(Int) -> Int, value: Int) -> Int { f(value) }
 
 edit: fn(values: &[Int]) { values[0] = 9 }
 
-consume: fn(text: ^String) { print(text) }
+consume: fn(text: &&String) { print(text) }
 
-duplicate_if: fn<T>(value: ^T, yes: Bool) -> T {
+duplicate_if: fn<T>(value: &&T, yes: Bool) -> T {
     if yes -> return value.copy()
     return value
 }
@@ -32,9 +32,9 @@ run: fn() {
     read_generic(text)
     parcel.show()
     print(apply((n: Int) -> (n + 1), 41))
-    edit(&values)
+    edit(values)
     print(values[0])
-    consume(^text)
+    consume(text)
     branch: "branch"
-    print(duplicate_if(^branch, true))
+    print(duplicate_if(branch, true))
 }

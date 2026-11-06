@@ -12,10 +12,10 @@ use jobs: core.jobs
 run: fn() {
     queue := jobs.queue() ?? return
 
-    first: &queue.enqueue(process, "now", key: "first") ?? return
-    _failed: &queue.enqueue(process, "fail", key: "failed") ?? return
-    cancelled: &queue.delay(process, "cancel", for: 1s) ?? return
-    deadlettered: &queue.delay(process, "dead", for: 1s) ?? return
+    first: queue.enqueue(process, "now", key: "first") ?? return
+    _failed: queue.enqueue(process, "fail", key: "failed") ?? return
+    cancelled: queue.delay(process, "cancel", for: 1s) ?? return
+    deadlettered: queue.delay(process, "dead", for: 1s) ?? return
     receipt: queue.receipt(first.id) ?? return
     // The id is derived from the package authority, so it differs per queue.
     print("receipt:{receipt.id == first.id}:{receipt.job_type}")

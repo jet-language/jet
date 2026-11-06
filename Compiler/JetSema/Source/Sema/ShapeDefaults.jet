@@ -2,8 +2,8 @@
 // Schema.shape_fact_from_struct reads Field.default_ct, not source expressions.
 use jet_foundation.[Program, Item, TComptimeValue]
 
-sema_checked_shape_defaults: fn(program: ^Program, registered: SemaRegistrationModule, values: [SemaComptimeItemValue]) -> Program Never! {
-    updated_program := ^program
+sema_checked_shape_defaults: fn(program: &&Program, registered: SemaRegistrationModule, values: [SemaComptimeItemValue]) -> Program Never! {
+    updated_program := program.move()
     defaults := [String:TComptimeValue]{}
     loop value in values {
         if value.module_identity != registered.module_identity || value.kind != SemaComptimeItemKind.FieldDefault {

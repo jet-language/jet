@@ -10,7 +10,7 @@ run: fn() {
     passed := 0
     loop path in paths {
         input: files.open(path) ?? panic("open boundary")
-        reader: xml.reader(^input) ?? panic("reader defaults")
+        reader: xml.reader(input) ?? panic("reader defaults")
         document_start := false
         root_start := false
         document_end := false
@@ -18,15 +18,15 @@ run: fn() {
             maybe: reader.next() ?? panic("boundary next")
             if maybe == {
                 Val(event) -> {
-                    event_kind := (&event.field("$xml_event") ?? panic("event tag")).text() ?? ""
+                    event_kind := (event.field("$xml_event") ?? panic("event tag")).text() ?? ""
                     if event_kind == "document_start" {
-                        wire_encoding := (&event.field("encoding") ?? panic("encoding")).text() ?? ""
+                        wire_encoding := (event.field("encoding") ?? panic("encoding")).text() ?? ""
                         document_start = wire_encoding == "UTF-8"
                     }
                     if event_kind == "element_start" {
-                        name := &event.field("name") ?? panic("name")
-                        local := (&name.field("local") ?? panic("local")).text() ?? ""
-                        namespace := (&name.field("namespace_uri") ?? panic("namespace")).text() ?? ""
+                        name := event.field("name") ?? panic("name")
+                        local := (name.field("local") ?? panic("local")).text() ?? ""
+                        namespace := (name.field("namespace_uri") ?? panic("namespace")).text() ?? ""
                         root_start = local == "r" && namespace == "urn:r"
                     }
                     if event_kind == "document_end" { document_end = true }
@@ -43,7 +43,7 @@ run: fn() {
     print(passed)
 
     malformed_input: files.open("malformed.xml") ?? panic("open malformed")
-    malformed_reader: xml.reader(^malformed_input) ?? panic("malformed reader")
+    malformed_reader: xml.reader(malformed_input) ?? panic("malformed reader")
     loop true {
         result: malformed_reader.next()
         if result == {
@@ -68,7 +68,7 @@ run: fn() {
     }
 
     invalid_char_input: files.open("invalid-char.xml") ?? panic("open invalid character")
-    invalid_char_reader: xml.reader(^invalid_char_input) ?? panic("invalid character reader")
+    invalid_char_reader: xml.reader(invalid_char_input) ?? panic("invalid character reader")
     loop true {
         result: invalid_char_reader.next()
         if result == {
@@ -101,7 +101,7 @@ run: fn() {
     total_limits := encoding.EncodingLimits.safe()
     total_limits.max_total_bytes = Val(6)
     total_input: files.open("limited.xml") ?? panic("open total")
-    total_reader: xml.reader(^total_input, total_limits, xml.XMLParseOptions.safe()) ?? panic("total reader")
+    total_reader: xml.reader(total_input, total_limits, xml.XMLParseOptions.safe()) ?? panic("total reader")
     loop true {
         result: total_reader.next()
         if result == {
@@ -129,7 +129,7 @@ run: fn() {
     }
 
     conflict_input: files.open("encoding-conflict.xml") ?? panic("open encoding conflict")
-    conflict_reader: xml.reader(^conflict_input) ?? panic("encoding conflict reader")
+    conflict_reader: xml.reader(conflict_input) ?? panic("encoding conflict reader")
     conflict_start: conflict_reader.next() ?? panic("encoding conflict document start")
     if conflict_start == None { panic("missing document start") }
     conflict: conflict_reader.next()

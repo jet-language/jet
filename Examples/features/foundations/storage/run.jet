@@ -18,7 +18,7 @@ crash_writer: fn(path: Path) {
     // A piped stdout is written when its buffer fills or the process stops
     // (D-STDOUT-BUFFER1): flush, so the parent sees the line while this waits.
     out := term.stdout()
-    &out.flush() ?? panic("crash writer flush")
+    out.flush() ?? panic("crash writer flush")
     time.sleep(30s)
     append_record(path, "event|3|late").drop("the writer is killed before this append")
 }

@@ -44,12 +44,12 @@ note: fn(label: String, value: Float) -> Float {
 
 // The owned call exercises a concrete defaulted slot and a variadic rest;
 // the tap calls make source-order and exactly-once evaluation visible.
-tap: fn<T>(label: String, value: ^T) -> T {
+tap: fn<T>(label: String, value: &&T) -> T {
     print("tap {label}")
     value
 }
 
-collect: fn(first: ^Int, second: ^Int{first}, rest: ...Int) -> Int {
+collect: fn(first: &&Int, second: &&Int{first}, rest: ...Int) -> Int {
     print("rest {rest.len()}")
     second
 }

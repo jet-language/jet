@@ -82,7 +82,7 @@ wide: I64{ 9_000_000_000 } // `_` digit separators (S67)
 // fields are the only privacy.
 
 greet: fn(who: String) -> String { who }}"
-id: fn<T>(x: ^T) -> T { x }
+id: fn<T>(x: &&T) -> T { x }
 largest: fn<T: Comparable>(xs: [T]) -> T {
     // ...
 }
@@ -371,8 +371,8 @@ Score: struct {
 
 collections: fn() {
      nums := [Int]{ 3, 1, 2 } // list type shorthand (S65)
-    &nums.push(4)
-    &nums.sort()
+    nums.push(4)
+    nums.sort()
 
     // empty literals infer element type from context (S78); else annotate
      seen := [Int]{} // (S78 / explicit)
@@ -442,7 +442,7 @@ closures: fn() {
 }
 
 // Function types: `fn(T1, T2) -> R` (S47). Parameters are read-only: a function
-// type has no `&`/`^` parameter spelling, so a callback returns updated values.
+// type has no `&`/`&&` parameter spelling, so a callback returns updated values.
 // Named fns coerce to function values.
 apply: fn(f: fn(Int) -> Int, x: Int) -> Int { f(x) }
 fixed_size_list: fn() {
@@ -527,19 +527,20 @@ with_fs: fn() {
 
 use core.mem
 
-// Access sigils ride the type (D-MEM1): `&T` write, `^T` take/move,
-// bare `T` read (the default; no sigil). Call site & receivers mirror them.
+// Access sigils ride the type (D-MEM1, D-MOVE-SIGIL1): `&T` write, `&&T`
+// take/move, bare `T` read (the default; no sigil). Calls are plain: the
+// signature decides (D-CALLSITE-MARK2); an early move is `x.move()`.
 damage: fn(p: &Player, amount: Int) {           // &  = exclusive write
     p.hp = p.hp - amount
 }
-consume: fn(item: ^Item) { }                    // ^ = ownership moved/consumed
+consume: fn(item: &&Item) { }                    // && = ownership moved/consumed
 P: struct {
     edit: fn(&self) { }                         // receiver sigils
-    destroy: fn(^self) { }
+    destroy: fn(&&self) { }
 }
 call_sites: fn(player: Player, file: File) {
-    damage(&player, 10)
-    consume(^item)
+    damage(player, 10)
+    consume(item)
 }
 
 // Raw pointers (D-CAP9): `*T` type, prefix `*x` raw-pointer-of, postfix `p.*` deref.

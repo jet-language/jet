@@ -9,7 +9,7 @@ Res: struct {
 }
 
 impl Res.Close {
-    close: fn(^self) { print("close {self.name}") }
+    close: fn(&&self) { print("close {self.name}") }
 }
 
 count: fn(n: Int, acc: Int) -> Int {
@@ -21,7 +21,7 @@ count: fn(n: Int, acc: Int) -> Int {
 deferred: fn(n: Int) -> Int {
     if n == 0 -> return 0
     d: Res{name: "d{n}"}
-    defer close(^d)
+    defer close(d)
     return deferred(n - 1)
 }
 
@@ -29,21 +29,21 @@ closed_first: fn(n: Int, acc: Int) -> Int {
     if n == 0 -> return acc
     r: Res{name: "c{n}"}
     size: r.name.len()
-    close(^r)
+    close(r)
     closed_first(n - 1, acc + size)
 }
 
-handed: fn(n: Int, r: ^Res) -> Int {
+handed: fn(n: Int, r: &&Res) -> Int {
     if n == 0 {
-        close(^r)
+        close(r)
         return 0
     }
-    handed(n - 1, ^r)
+    handed(n - 1, r)
 }
 
-kept: fn(n: Int, r: ^Res) -> Int {
+kept: fn(n: Int, r: &&Res) -> Int {
     if n == 0 {
-        close(^r)
+        close(r)
         return 0
     }
     kept(n - 1, Res{name: "k{n}"})

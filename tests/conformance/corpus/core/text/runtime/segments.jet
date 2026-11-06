@@ -11,7 +11,7 @@ use {
 
 segment_text: fn(points: [Int]) -> String Never! {
     out := [U8]{}
-    loop cp in points -> text_segment_string.append_cp(&out, cp)
+    loop cp in points -> text_segment_string.append_cp(out, cp)
     String.from_bytes(out) ?? panic("segment fixture")
 }
 
@@ -35,16 +35,16 @@ break_case: fn(row: String, sentence: Bool) Never! {
         if token == "×" -> next
         if token == "÷" {
             if current.len() > 0 {
-                &expected.push(String.from_bytes(current) ?? panic("break segment"))
+                expected.push(String.from_bytes(current) ?? panic("break segment"))
                 current = [U8]{}
             }
             next
         }
         cp: break_hex(token)
-        text_segment_string.append_cp(&full, cp)
-        text_segment_string.append_cp(&current, cp)
+        text_segment_string.append_cp(full, cp)
+        text_segment_string.append_cp(current, cp)
     }
-    if current.len() > 0 -> &expected.push(String.from_bytes(current) ?? panic("break segment"))
+    if current.len() > 0 -> expected.push(String.from_bytes(current) ?? panic("break segment"))
     input: String.from_bytes(full) ?? panic("break input")
     actual: if sentence -> text_segments.sentence_segments(input) else -> text_segments.word_segments(input)
     assert_eq(actual, expected)

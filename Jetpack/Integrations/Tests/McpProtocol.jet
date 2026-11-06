@@ -27,29 +27,29 @@ pkg_test_mcp_codec_error: fn(result: MCPCodecError) -> String {
 
 #Test("stable mcp peer negotiates and completes the session lifecycle") {
     peer := MCPPeer.server(MCPPolicy.stable())
-    selected: &peer.negotiate([String]{MCP_PREVIEW_REVISION, MCP_STABLE_REVISION}) ?? panic("stable negotiation")
+    selected: peer.negotiate([String]{MCP_PREVIEW_REVISION, MCP_STABLE_REVISION}) ?? panic("stable negotiation")
     assert_eq(selected.revision, MCPRevision.Stable20251125)
     assert_eq(peer.state(), MCPLifecycleState.Negotiated)
     client_info: MCPImplementation.new("client", "1") ?? panic("client identity")
     params: MCPInitializeParams.new(MCPRevision.Stable20251125, MCPCapabilities.empty(), Val(client_info))
     server_info: MCPImplementation.new("server", "1") ?? panic("server identity")
-    _: &peer.initialize(params, server_info, MCPCapabilities.empty()) ?? panic("initialize")
-    &peer.initialized() ?? panic("initialized")
-    &peer.shutdown() ?? panic("shutdown")
-    &peer.exit() ?? panic("exit")
+    _: peer.initialize(params, server_info, MCPCapabilities.empty()) ?? panic("initialize")
+    peer.initialized() ?? panic("initialized")
+    peer.shutdown() ?? panic("shutdown")
+    peer.exit() ?? panic("exit")
     assert_eq(peer.state(), MCPLifecycleState.Closed)
     assert_eq(peer.audit_facts().as_map()["mcp.protocol_version"], MCP_STABLE_REVISION)
 }
 
 #Test("mcp stateless preview revision refuses session initialize") {
     preview := MCPPeer.server(MCPPolicy.stable_and([MCPRevision]{MCPRevision.Preview20260728}))
-    _: &preview.negotiate([String]{MCP_PREVIEW_REVISION}) ?? panic("preview negotiation")
+    _: preview.negotiate([String]{MCP_PREVIEW_REVISION}) ?? panic("preview negotiation")
     server_info: MCPImplementation.new("server", "1") ?? panic("server identity")
-    if &preview.initialize(MCPInitializeParams.new(MCPRevision.Preview20260728, MCPCapabilities.empty(), None), server_info, MCPCapabilities.empty()) == {
+    if preview.initialize(MCPInitializeParams.new(MCPRevision.Preview20260728, MCPCapabilities.empty(), None), server_info, MCPCapabilities.empty()) == {
         .Ok(_) -> panic("stateless revisions have no session initialize")
         .Err(error) -> assert_eq(error, MCPLifecycleError.StatelessRevision)
     }
-    &preview.exit() ?? panic("stateless exit")
+    preview.exit() ?? panic("stateless exit")
 }
 
 #Test("mcp codecs round trip messages and enforce bounds") {
@@ -95,15 +95,15 @@ pkg_test_mcp_codec_error: fn(result: MCPCodecError) -> String {
 
 #Test("mcp preview requires explicit opt in and uses the stateless profile") {
     stable := MCPPeer.server(MCPPolicy.stable())
-    if &stable.negotiate([String]{MCP_PREVIEW_REVISION}) == {
+    if stable.negotiate([String]{MCP_PREVIEW_REVISION}) == {
         .Ok(_) -> panic("preview must need opt-in")
         .Err(error) -> assert_eq(error, MCPNegotiationError.PreviewRequiresOptIn)
     }
     preview := MCPPeer.server(MCPPolicy.stable_and([MCPRevision]{MCPRevision.Preview20260728}))
-    selected: &preview.negotiate([String]{MCP_PREVIEW_REVISION}) ?? panic("preview negotiation")
+    selected: preview.negotiate([String]{MCP_PREVIEW_REVISION}) ?? panic("preview negotiation")
     assert_eq(selected.lifecycle, MCPLifecycleProfile.Stateless)
     assert_eq(preview.state(), MCPLifecycleState.Ready)
-    if &preview.exit() == {
+    if preview.exit() == {
         .Ok(_) -> assert_eq(preview.state(), MCPLifecycleState.Closed)
         .Err(error) -> panic(error.message())
     }
@@ -111,7 +111,7 @@ pkg_test_mcp_codec_error: fn(result: MCPCodecError) -> String {
 
 #Test("mcp rejects unknown revisions and lifecycle before negotiation") {
     peer := MCPPeer.server(MCPPolicy.stable())
-    if &peer.negotiate([String]{"2099-01-01"}) == {
+    if peer.negotiate([String]{"2099-01-01"}) == {
         .Ok(_) -> panic("unknown revision must not negotiate")
         .Err(error) -> {
             if error == {
@@ -120,7 +120,7 @@ pkg_test_mcp_codec_error: fn(result: MCPCodecError) -> String {
             }
         }
     }
-    if &peer.shutdown() == {
+    if peer.shutdown() == {
         .Ok(_) -> panic("shutdown needs a negotiated revision")
         .Err(error) -> assert_eq(error, MCPLifecycleError.NotNegotiated)
     }

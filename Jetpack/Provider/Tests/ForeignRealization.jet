@@ -22,7 +22,7 @@ provider_foreign_test_projection_error: fn(verification: &StoreVerification, roo
     store_root: files.join(root, "store")
     roots: HangarRoots.at(store_root)
     ctx: ProviderCtx{fixtures: None, store_dir: store_root, offline: true, project_dir: None, nix_index: None, nix_roots: None, allow_local_nix_catalog: false}
-    if provider_realize_foreign_one(&verification, roots, root, name, ForeignLanguage.Py, "./provider#version=1.0.0", ctx) == {
+    if provider_realize_foreign_one(verification, roots, root, name, ForeignLanguage.Py, "./provider#version=1.0.0", ctx) == {
         .Ok(_) -> panic("the foreign projection must fail")
         .Err(error) -> error
     }
@@ -36,7 +36,7 @@ provider_foreign_test_projection_error: fn(verification: &StoreVerification, roo
     files.create_dir_all(files.join(source, "visible")) ?? panic("visible")
     files.write(files.join(source, "visible/value"), "stable\n") ?? panic("value")
     files.symlink(".", files.join(source, "visible/loop")) ?? panic("symlink")
-    if provider_foreign_test_projection_error(&verification, root, "hostile") == {
+    if provider_foreign_test_projection_error(verification, root, "hostile") == {
         .ForeignProjection(reason) -> {
             assert(reason.contains("source tree"))
             assert(reason.contains("could not be hashed"))
@@ -57,7 +57,7 @@ provider_foreign_test_projection_error: fn(verification: &StoreVerification, roo
         files.create_dir(current) ?? panic("nested directory")
     }
     files.write(files.join(current, "payload"), "stable\n") ?? panic("payload")
-    if provider_foreign_test_projection_error(&verification, root, "hostile") == {
+    if provider_foreign_test_projection_error(verification, root, "hostile") == {
         .ForeignProjection(reason) -> {
             assert(reason.contains("source tree"))
             assert(reason.contains("could not be hashed"))

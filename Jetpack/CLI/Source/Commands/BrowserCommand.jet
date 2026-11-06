@@ -31,7 +31,7 @@ cli_cmd_browser: fn(verification: &StoreVerification, theme: Theme, parsed: CLIP
     }
     if verb == {
         .Lock -> cli_browser_lock(theme, parsed)
-        .Provision -> cli_browser_provision(&verification, &cache, theme, parsed)
+        .Provision -> cli_browser_provision(verification, cache, theme, parsed)
         .Resolve -> cli_browser_resolve(theme, parsed)
         .List -> cli_browser_list(theme)
     }
@@ -91,7 +91,7 @@ cli_browser_provision: fn(verification: &StoreVerification, cache: &WorkspaceDec
         theme.error("`jetpack browser provision` needs a package ref", "provision realizes one browser package and locks its binary into `.jet/lock`.", "try `jetpack browser provision chromium@jetpack`.")
         return EXIT_USAGE
     }
-    spec: cli_classify_or_report(&cache, theme, raw) ?? return EXIT_USAGE
+    spec: cli_classify_or_report(cache, theme, raw) ?? return EXIT_USAGE
     engine: env_browser_normalize_engine(spec.short_name()) ?? {
         theme.error("browser provision needs a supported engine package", err.message(), "package short name must be one of: {BROWSER_ENGINES.join(", ")}.")
         return EXIT_USAGE
@@ -101,7 +101,7 @@ cli_browser_provision: fn(verification: &StoreVerification, cache: &WorkspaceDec
         project_root: cli_current_dir(),
         refs: [RefSpec]{spec},
         adapters: [AdapterPlan]{},
-        table: cli_cwd_table(&cache),
+        table: cli_cwd_table(cache),
         label: JETPACK_PROMPT_LABEL,
         prompt_path: PromptPathMode.Short,
         prompt_strip: PromptStripMode.Off,
@@ -109,7 +109,7 @@ cli_browser_provision: fn(verification: &StoreVerification, cache: &WorkspaceDec
         secrets: [SecretSpec]{},
         environment: EnvironmentFacts{},
     }
-    env: cli_compose_env(&verification, theme, roots, parsed.flags, plan) ?? {
+    env: cli_compose_env(verification, theme, roots, parsed.flags, plan) ?? {
         if err == .Reported(code) -> return code
         theme.error("couldn't compose the browser environment", err.message(), "retry the provision after fixing the reported problem.")
         return EXIT_USAGE

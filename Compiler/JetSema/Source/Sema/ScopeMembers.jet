@@ -55,7 +55,7 @@ sema_scope_members_append_name: fn(values: &[String], name: String) Never! {
     loop existing in values {
         if existing == name -> return
     }
-    &values.push(name)
+    values.push(name)
 }
 
 sema_scope_members_site_name: fn(value: Expr) -> String? {
@@ -86,7 +86,7 @@ sema_scope_members_declared_sites: fn(declaration: MarkerDecl) -> [String]? {
                 loop item in values {
                     site: sema_scope_members_site_name(item) ?? return None
                     if !sema_scope_members_site_is_known(site) -> return None
-                    sema_scope_members_append_name(&sites, site)
+                    sema_scope_members_append_name(sites, site)
                 }
                 return Val(sites)
             }
@@ -118,7 +118,7 @@ sema_scope_members_first_parameter_is_type: fn(declaration: MarkerDecl) -> Bool 
 }
 
 sema_scope_members_registry_add_declaration: fn(registry: &SemaScopeMembersMarkerRegistry, declaration: MarkerDecl) -> Bool Never! {
-    sema_scope_members_registry_add_identity(&registry, declaration, None, None)
+    sema_scope_members_registry_add_identity(registry, declaration, None, None)
 }
 
 sema_scope_members_registry_add_identity: fn(registry: &SemaScopeMembersMarkerRegistry, declaration: MarkerDecl, identity: String?, span: Span?) -> Bool Never! {
@@ -126,17 +126,17 @@ sema_scope_members_registry_add_identity: fn(registry: &SemaScopeMembersMarkerRe
         if existing.name == declaration.name && existing.declaration_module == identity && existing.declaration_span == span -> return identity != None
     }
     if declaration.group != None {
-        &registry.marker_rules.push(SemaScopeMembersMarkerRule{
+        registry.marker_rules.push(SemaScopeMembersMarkerRule{
             name: declaration.name, sites: [String]{}, first_parameter_is_type: false,
             repeatable: false, params: [MarkerDeclParam]{}, group: true,
             declaration_module: identity, declaration_span: span,
         })
-        sema_scope_members_append_name(&registry.known_marker_names, declaration.name)
+        sema_scope_members_append_name(registry.known_marker_names, declaration.name)
         return true
     }
     sites: sema_scope_members_declared_sites(declaration) ?? return false
     repeatable: sema_scope_members_declared_repeatable(declaration) ?? return false
-    &registry.marker_rules.push(SemaScopeMembersMarkerRule{
+    registry.marker_rules.push(SemaScopeMembersMarkerRule{
         name: declaration.name,
         sites: sites,
         first_parameter_is_type: sema_scope_members_first_parameter_is_type(declaration),
@@ -144,10 +144,10 @@ sema_scope_members_registry_add_identity: fn(registry: &SemaScopeMembersMarkerRe
         params: declaration.params,
         declaration_module: identity, declaration_span: span,
     })
-    sema_scope_members_append_name(&registry.known_marker_names, declaration.name)
+    sema_scope_members_append_name(registry.known_marker_names, declaration.name)
     loop site in sites {
-        if site == "Function" -> sema_scope_members_append_name(&registry.function_allowed_markers, declaration.name)
-        if site == "Block" -> sema_scope_members_append_name(&registry.block_allowed_markers, declaration.name)
+        if site == "Function" -> sema_scope_members_append_name(registry.function_allowed_markers, declaration.name)
+        if site == "Block" -> sema_scope_members_append_name(registry.block_allowed_markers, declaration.name)
     }
     true
 }
@@ -156,13 +156,13 @@ sema_scope_members_registry_add_items: fn(registry: &SemaScopeMembersMarkerRegis
     loop item in items {
         if item == {
             .UserDerive(derive_definition) -> {
-                sema_scope_members_append_name(&registry.derive_provider_names, derive_definition.trait_name)
-                sema_scope_members_append_name(&registry.known_marker_names, derive_definition.trait_name)
+                sema_scope_members_append_name(registry.derive_provider_names, derive_definition.trait_name)
+                sema_scope_members_append_name(registry.known_marker_names, derive_definition.trait_name)
             }
             .CodeModule(code_module) -> {
                 if code_module.body != None {
                     body: code_module.body ?? return false
-                    if !sema_scope_members_registry_add_items(&registry, body) -> return false
+                    if !sema_scope_members_registry_add_items(registry, body) -> return false
                 }
             }
             else -> {}
@@ -173,21 +173,21 @@ sema_scope_members_registry_add_items: fn(registry: &SemaScopeMembersMarkerRegis
 
 sema_scope_members_registry_add_program: fn(registry: &SemaScopeMembersMarkerRegistry, program: Program) -> Bool Never! {
     loop declaration in sema_marker_module_declarations(program.items, "", false) {
-        if !sema_scope_members_registry_add_declaration(&registry, declaration) -> return false
+        if !sema_scope_members_registry_add_declaration(registry, declaration) -> return false
     }
     // Derive providers keep their existing lexical registration path.
-    sema_scope_members_registry_add_items(&registry, program.items)
+    sema_scope_members_registry_add_items(registry, program.items)
 }
 
 sema_scope_members_registry_add_applied_catalog: fn(registry: &SemaScopeMembersMarkerRegistry, catalog: TAppliedRuleCatalog) -> Bool Never! {
     seen := [String]{}
     loop rule in catalog.rows {
         if seen.contains(rule.name) -> return false
-        &seen.push(rule.name)
-        sema_scope_members_append_name(&registry.known_marker_names, rule.name)
+        seen.push(rule.name)
+        sema_scope_members_append_name(registry.known_marker_names, rule.name)
         loop site in rule.sites {
-            if site == "Function" -> sema_scope_members_append_name(&registry.function_allowed_markers, rule.name)
-            if site == "Block" -> sema_scope_members_append_name(&registry.block_allowed_markers, rule.name)
+            if site == "Function" -> sema_scope_members_append_name(registry.function_allowed_markers, rule.name)
+            if site == "Block" -> sema_scope_members_append_name(registry.block_allowed_markers, rule.name)
         }
     }
     true
@@ -207,27 +207,27 @@ sema_scope_members_build_marker_registry: fn(graph: SemaRegistrationGraph, modul
         block_allowed_markers: [String]{},
         derive_provider_names: [String]{},
     }
-    if !sema_scope_members_registry_add_applied_catalog(&registry, catalog) -> return None
+    if !sema_scope_members_registry_add_applied_catalog(registry, catalog) -> return None
     current_module_found := false
     loop module_row_index in 0..<graph.modules.len() {
         // The current module's rows come from `program`; read either in place.
         if graph.modules[module_row_index].module_identity == module_identity {
             current_module_found = true
-            if !sema_scope_members_registry_add_program(&registry, program) -> return None
+            if !sema_scope_members_registry_add_program(registry, program) -> return None
         } else {
             // Derive providers retain their existing package scope; marker
             // declarations enter only through the import-qualified rows below.
             loop item_index in 0..<graph.modules[module_row_index].program.items.len() {
                 if graph.modules[module_row_index].program.items[item_index] == .UserDerive(provider) {
-                    sema_scope_members_append_name(&registry.derive_provider_names, provider.trait_name)
-                    sema_scope_members_append_name(&registry.known_marker_names, provider.trait_name)
+                    sema_scope_members_append_name(registry.derive_provider_names, provider.trait_name)
+                    sema_scope_members_append_name(registry.known_marker_names, provider.trait_name)
                 }
             }
         }
     }
     if !current_module_found -> return None
     loop declaration in sema_marker_module_visible_declarations(graph, module_identity) {
-        if !sema_scope_members_registry_add_declaration(&registry, declaration) -> return None
+        if !sema_scope_members_registry_add_declaration(registry, declaration) -> return None
     }
     // A group's members may have the same written name as caller-local rows.
     // Their canonical identity selects the declaration, never that name.
@@ -236,7 +236,7 @@ sema_scope_members_build_marker_registry: fn(graph: SemaRegistrationGraph, modul
         resolved: sema_marker_module_resolve_application(graph, module_identity, marker)
         declaration := resolved.declaration ?? next
         declaration.name = marker.name
-        if !sema_scope_members_registry_add_identity(&registry, declaration, marker.declaration_module, marker.declaration_span) -> return None
+        if !sema_scope_members_registry_add_identity(registry, declaration, marker.declaration_module, marker.declaration_span) -> return None
     }
     Val(registry)
 }
@@ -309,16 +309,16 @@ sema_scope_members_check_dsl_header: fn(registry: SemaScopeMembersMarkerRegistry
         diagnostics: [Diagnostic]{},
     }
     if !result.known {
-        &result.diagnostics.push(sema_error("E0927", args_span ?? span, "`#{name}` is not a declared checked text block", "checked text blocks come from the one library rule registry", "declare `{name}: struct {{ impl Marker {{ sites: [.Block] }} }}` before using `#{name} {{ … }}"))
+        result.diagnostics.push(sema_error("E0927", args_span ?? span, "`#{name}` is not a declared checked text block", "checked text blocks come from the one library rule registry", "declare `{name}: struct {{ impl Marker {{ sites: [.Block] }} }}` before using `#{name} {{ … }}"))
         return result
     }
     if !result.block_allowed {
-        &result.diagnostics.push(sema_error("E0355", args_span ?? span, "`#{name}` cannot open a checked text block", "a checked text block must declare `.Block` as a legal site", "add `.Block` to the rule declaration or use the rule at its declared site"))
+        result.diagnostics.push(sema_error("E0355", args_span ?? span, "`#{name}` cannot open a checked text block", "a checked text block must declare `.Block` as a legal site", "add `.Block` to the rule declaration or use the rule at its declared site"))
         return result
     }
     result.args_valid = sema_scope_members_dsl_args_valid(name, args)
     if !result.args_valid {
-        &result.diagnostics.push(sema_scope_members_dsl_argument_shape_diagnostic(name, args_span, span))
+        result.diagnostics.push(sema_scope_members_dsl_argument_shape_diagnostic(name, args_span, span))
         return result
     }
     if sema_scope_members_is_applied_rule_at(program, name, name_span) && args.len() == 1 {
@@ -360,22 +360,22 @@ sema_scope_members_vocabulary: fn(marker: String) -> [String]? Never! {
 // in an ordinary function or method body (E0615).
 sema_scope_members_check: fn(items: [Item]) -> [Diagnostic] {
     diagnostics := [Diagnostic]{}
-    sema_scope_members_check_assertionless_tests(items, &diagnostics)
+    sema_scope_members_check_assertionless_tests(items, diagnostics)
     loop item in items {
         if item == {
-            .Test(test) -> sema_scope_members_check_marker_body("Test", test.body, &diagnostics)
-            .Func(function) -> sema_scope_members_walk(function.body, false, &diagnostics)
-            .Impl(implementation) -> loop method in implementation.methods -> sema_scope_members_walk(method.body, false, &diagnostics)
+            .Test(test) -> sema_scope_members_check_marker_body("Test", test.body, diagnostics)
+            .Func(function) -> sema_scope_members_walk(function.body, false, diagnostics)
+            .Impl(implementation) -> loop method in implementation.methods -> sema_scope_members_walk(method.body, false, diagnostics)
             .Struct(definition) -> {
-                loop method in definition.methods -> sema_scope_members_walk(method.body, false, &diagnostics)
+                loop method in definition.methods -> sema_scope_members_walk(method.body, false, diagnostics)
                 loop implementation in definition.trait_impls {
-                    loop method in implementation.methods -> sema_scope_members_walk(method.body, false, &diagnostics)
+                    loop method in implementation.methods -> sema_scope_members_walk(method.body, false, diagnostics)
                 }
             }
             .Enum(definition) -> {
-                loop method in definition.methods -> sema_scope_members_walk(method.body, false, &diagnostics)
+                loop method in definition.methods -> sema_scope_members_walk(method.body, false, diagnostics)
                 loop implementation in definition.trait_impls {
-                    loop method in implementation.methods -> sema_scope_members_walk(method.body, false, &diagnostics)
+                    loop method in implementation.methods -> sema_scope_members_walk(method.body, false, diagnostics)
                 }
             }
             else -> {}
@@ -392,8 +392,8 @@ sema_scope_members_check_assertionless_tests: fn(items: [Item], diagnostics: &[D
     loop item in items {
         if item == .Test(test) {
             found := false
-            loop statement in test.body -> ast_visit_statement(statement, (expression: Expr) -> sema_scope_members_note_assertion(&found, expression), true)
-            if !found -> &diagnostics.push(sema_lint("L2901", test.span, "This #Test block has no assertions.", "A test with no assertions cannot find bugs because it always passes.", "Add at least one assertion, or remove the test if it only exercises compilation."))
+            loop statement in test.body -> ast_visit_statement(statement, (expression: Expr) -> sema_scope_members_note_assertion(found, expression), true)
+            if !found -> diagnostics.push(sema_lint("L2901", test.span, "This #Test block has no assertions.", "A test with no assertions cannot find bugs because it always passes.", "Add at least one assertion, or remove the test if it only exercises compilation."))
         }
     }
 }
@@ -426,11 +426,11 @@ sema_scope_members_check_marker_body: fn(marker: String, body: [Stmt], diagnosti
             // `#Arithmetic(...) { … }` is a lexical policy
             // region, not a member of the enclosing test.
             if dsl || name == "Arithmetic" -> next
-            sema_scope_members_validate_member(marker, name, index == 0, dot_span, &diagnostics)
-            sema_scope_members_walk(member_body, true, &diagnostics)
+            sema_scope_members_validate_member(marker, name, index == 0, dot_span, diagnostics)
+            sema_scope_members_walk(member_body, true, diagnostics)
             next
         }
-        sema_scope_members_walk_children(statement, true, &diagnostics)
+        sema_scope_members_walk_children(statement, true, diagnostics)
     }
 }
 
@@ -441,7 +441,7 @@ sema_scope_members_validate_member: fn(marker: String, name: String, is_first: B
     if sema_scope_members_vocabulary(marker) == {
         .Val(found) -> vocabulary = found
         else -> {
-            &diagnostics.push(sema_error("E0614", dot_span, "`#{marker}` blocks have no members", "only some rule blocks declare a `.member {{ … }}` vocabulary; `#{marker}` isn't one of them", "remove this `.{name}` block"))
+            diagnostics.push(sema_error("E0614", dot_span, "`#{marker}` blocks have no members", "only some rule blocks declare a `.member {{ … }}` vocabulary; `#{marker}` isn't one of them", "remove this `.{name}` block"))
             return
         }
     }
@@ -451,11 +451,11 @@ sema_scope_members_validate_member: fn(marker: String, name: String, is_first: B
             if index > 0 -> listed = "{listed}, "
             listed = "{listed}`.{member}`"
         }
-        &diagnostics.push(sema_error("E0614", dot_span, "`.{name}` isn't a member of `#{marker}`", "a `#{marker}` block understands these members: {listed}", "use one of {listed}, or remove this block"))
+        diagnostics.push(sema_error("E0614", dot_span, "`.{name}` isn't a member of `#{marker}`", "a `#{marker}` block understands these members: {listed}", "use one of {listed}, or remove this block"))
         return
     }
     if name == "setup" && !is_first {
-        &diagnostics.push(sema_error("E0616", dot_span, "`.setup` must be the first statement in the test", "`.setup` marks the test's initialization; anything before it would run first", "move `.setup {{ … }}` to the top of the block"))
+        diagnostics.push(sema_error("E0616", dot_span, "`.setup` must be the first statement in the test", "`.setup` marks the test's initialization; anything before it would run first", "move `.setup {{ … }}` to the top of the block"))
     }
 }
 
@@ -466,12 +466,12 @@ sema_scope_members_walk: fn(body: [Stmt], nested: Bool, diagnostics: &[Diagnosti
         if statement == .ScopeMember(name, _, _, _, member_body, dsl, dot_span, _) {
             if !dsl && name != "Arithmetic" {
                 diagnostic: if nested -> sema_error("E0618", dot_span, "scope members can't be nested", "each `.{name}`-style member is a top-level region of the block; nesting one inside another member or a control block has no meaning", "move `.{name} {{ … }}` out to the top level of the block") else -> sema_error("E0615", dot_span, "`.{name}` only works inside a marker block that declares it", "a leading-dot member statement resolves against the enclosing applied rule's vocabulary — here there is no such block", "move it inside a `#Test(\"…\") {{ … }}` block, or write an ordinary statement")
-                &diagnostics.push(diagnostic)
+                diagnostics.push(diagnostic)
             }
-            sema_scope_members_walk(member_body, nested, &diagnostics)
+            sema_scope_members_walk(member_body, nested, diagnostics)
             next
         }
-        sema_scope_members_walk_children(statement, nested, &diagnostics)
+        sema_scope_members_walk_children(statement, nested, diagnostics)
     }
 }
 
@@ -480,10 +480,10 @@ sema_scope_members_walk: fn(body: [Stmt], nested: Bool, diagnostics: &[Diagnosti
 sema_scope_members_walk_children: fn(statement: Stmt, nested: Bool, diagnostics: &[Diagnostic]) {
     if statement == {
         .Switch(_, arms, else_body, _) -> {
-            loop arm in arms -> sema_scope_members_walk(arm.body, nested, &diagnostics)
-            if else_body == .Val(body) -> sema_scope_members_walk(body, nested, &diagnostics)
+            loop arm in arms -> sema_scope_members_walk(arm.body, nested, diagnostics)
+            if else_body == .Val(body) -> sema_scope_members_walk(body, nested, diagnostics)
         }
-        .While(_, body, _, _, _) | .For(_, _, _, _, body, _, _, _, _) | .Loop(body, _, _, _) | .CountedLoop(_, _, _, body, _, _, _) | .Unsafe(_, _, body, _) | .Impure(_, _, body, _) | .Reactive(body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .TaskGroup(_, _, _, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) | .ComptimeBlock(body, _, _) | .ContextBlock(_, body, _) | .Live(body, _) | .AssumeDet(_, _, body, _) | .Transact(_, _, body, _, _) | .ScopeMember(_, _, _, _, body, _, _, _) -> sema_scope_members_walk(body, nested, &diagnostics)
+        .While(_, body, _, _, _) | .For(_, _, _, _, body, _, _, _, _) | .Loop(body, _, _, _) | .CountedLoop(_, _, _, body, _, _, _) | .Unsafe(_, _, body, _) | .Impure(_, _, body, _) | .Reactive(body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .TaskGroup(_, _, _, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) | .ComptimeBlock(body, _, _) | .ContextBlock(_, body, _) | .Live(body, _) | .AssumeDet(_, _, body, _) | .Transact(_, _, body, _, _) | .ScopeMember(_, _, _, _, body, _, _, _) -> sema_scope_members_walk(body, nested, diagnostics)
         else -> {}
     }
 }

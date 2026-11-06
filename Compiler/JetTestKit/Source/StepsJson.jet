@@ -18,7 +18,7 @@ kit_steps_json_path: fn(path: String) -> [String]? {
                 if i == bytes.len() -> return None
                 part: String.from_bytes(bytes.slice(projection_start, i + 1)) ?? return None
                 if !kit_steps_json_projection_valid(part) -> return None
-                &parts.push(part)
+                parts.push(part)
                 i += 1
                 next
             }
@@ -29,7 +29,7 @@ kit_steps_json_path: fn(path: String) -> [String]? {
                 i += 1
             }
             if i == key_start -> return None
-            &parts.push(String.from_bytes(bytes.slice(start, i)) ?? return None)
+            parts.push(String.from_bytes(bytes.slice(start, i)) ?? return None)
         } else if bytes[i] == (U8{91}) {
             i += 1
             start: i
@@ -63,7 +63,7 @@ kit_steps_json_path: fn(path: String) -> [String]? {
                     if token != "{number}" -> return None
                 }
             }
-            &parts.push(token)
+            parts.push(token)
             i += 1
         } else {
             return None
@@ -274,15 +274,15 @@ kit_steps_json_leaf: fn(value: Dyn, op: String, expected: Dyn, expected_type: St
         if value == {
             .Object(fields) -> {
                 keys := [String]{}
-                loop pair in fields -> &keys.push(pair.key)
-                &keys.sort()
+                loop pair in fields -> keys.push(pair.key)
+                keys.sort()
                 wanted: if expected == { .Array(items) -> items else -> { return Val("JSON keys needs an array") } }
                 names := [String]{}
                 loop item in wanted {
                     name: if item == { .Text(text) -> text else -> { return Val("JSON keys needs strings") } }
-                    &names.push(name)
+                    names.push(name)
                 }
-                &names.sort()
+                names.sort()
                 return if keys == names -> None else -> Val("JSON key sets differ")
             }
             else -> return Val("JSON keys needs an object")
@@ -357,7 +357,7 @@ kit_steps_json_test: fn(text: String, mode: String, path: String, op: String, li
     if op == "#distinct=" {
         values := [Dyn]{}
         loop value in selected {
-            if value == { .Array(items) -> { loop item in items -> &values.push(item) } else -> &values.push(value) }
+            if value == { .Array(items) -> { loop item in items -> values.push(item) } else -> values.push(value) }
         }
         return if kit_steps_json_distinct(values) == count -> None else -> Val("JSON distinct count differs")
     }

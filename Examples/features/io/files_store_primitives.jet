@@ -72,7 +72,7 @@ run: fn() {
         .Err(error) -> print("held open of a link: {kind(error)}")
     }
     reader := store.open("stage/payload")
-    line: &reader.read_line()
+    line: reader.read_line()
     print("held read: {line ?? "<end>"}")
     print("read_link: {store.read_link("alias")}")
     print("entry_stat link: {store.entry_stat("alias").is_symlink}")
@@ -123,7 +123,7 @@ run: fn() {
         .Val(_) -> print("try_lock while held: acquired")
         .Err(error) -> print("try_lock while held: {kind(error)}")
     }
-    close(^held)
+    close(held)
     if files.try_lock(lock_path) == {
         .None -> print("try_lock after close: None")
         .Val(_) -> print("try_lock after close: acquired")

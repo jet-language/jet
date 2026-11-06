@@ -275,30 +275,30 @@ FactContribution: struct {
         FactContribution{key: key, value: value, scope: scope, layer: layer, source: source}
     }
 
-    at: fn(^self, span: Span) -> FactContribution Never! {
+    at: fn(&&self, span: Span) -> FactContribution Never! {
         updated := self
         updated.span = span
         updated
     }
 
-    for_target: fn(^self, target: Span) -> FactContribution Never! {
+    for_target: fn(&&self, target: Span) -> FactContribution Never! {
         updated := self
         updated.target = Val(target)
         updated
     }
 
-    force_with_reason: fn(^self, reason: String) -> FactContribution Never! {
+    force_with_reason: fn(&&self, reason: String) -> FactContribution Never! {
         updated := self
         updated.force = true
         updated.force_reason = Val(reason)
         updated
     }
 
-    forced: fn(^self) -> FactContribution Never! {
-        ^self.force_with_reason(".Force")
+    forced: fn(&&self) -> FactContribution Never! {
+        self.force_with_reason(".Force")
     }
 
-    with_reason: fn(^self, reason: String) -> FactContribution Never! {
+    with_reason: fn(&&self, reason: String) -> FactContribution Never! {
         updated := self
         updated.reason = Val(reason)
         updated
@@ -383,7 +383,7 @@ pkg_fact_precedes: fn(left: FactContribution, right: FactContribution) -> Bool N
 pkg_fact_resolve: fn(key: FactKey, declarations: [FactContribution]) -> EffectiveFact? FactError! {
     chain := [FactContribution]{}
     loop declaration in declarations {
-        if declaration.key == key.name { &chain.push(declaration) }
+        if declaration.key == key.name { chain.push(declaration) }
     }
     if key.default == {
         .Val(written) -> {
@@ -392,7 +392,7 @@ pkg_fact_resolve: fn(key: FactKey, declarations: [FactContribution]) -> Effectiv
                 if declaration.default -> has_default = true
             }
             if !has_default {
-                &chain.push(FactContribution.default_for(key, written.value, written.source))
+                chain.push(FactContribution.default_for(key, written.value, written.source))
             }
         }
         .None -> {}
@@ -403,7 +403,7 @@ pkg_fact_resolve: fn(key: FactKey, declarations: [FactContribution]) -> Effectiv
     loop declaration in chain {
         index := sorted.len()
         loop index > 0 && pkg_fact_precedes(declaration, sorted[index - 1]) -> index -= 1
-        &sorted.insert(index, declaration)
+        sorted.insert(index, declaration)
     }
     chain = sorted
     loop declaration in chain {
@@ -427,7 +427,7 @@ pkg_fact_resolve: fn(key: FactKey, declarations: [FactContribution]) -> Effectiv
     }
     eligible := [Int]{}
     loop index in 0..<chain.len() {
-        if force_layer < 0 || chain[index].layer.rank() <= force_layer { &eligible.push(index) }
+        if force_layer < 0 || chain[index].layer.rank() <= force_layer { eligible.push(index) }
     }
     effective_layer := -1
     loop index in eligible {
@@ -439,7 +439,7 @@ pkg_fact_resolve: fn(key: FactKey, declarations: [FactContribution]) -> Effectiv
     }
     candidates := [Int]{}
     loop index in eligible {
-        if chain[index].layer.rank() == effective_layer && chain[index].scope.rank() == effective_scope { &candidates.push(index) }
+        if chain[index].layer.rank() == effective_layer && chain[index].scope.rank() == effective_scope { candidates.push(index) }
     }
     first: chain[candidates[0]]
     loop position in 1..<candidates.len() {

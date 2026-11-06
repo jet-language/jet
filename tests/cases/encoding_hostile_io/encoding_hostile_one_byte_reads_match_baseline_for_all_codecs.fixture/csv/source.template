@@ -7,8 +7,8 @@ use {
 
 run: fn() {
     input: files.open("{work}/csv/input.data") ?? panic("open")
-    reader := csv.reader(^input) ?? panic("reader")
-    if &reader.next() == {
+    reader := csv.reader(input) ?? panic("reader")
+    if reader.next() == {
         .Val(row) -> {
             print(row.fields[0])
             print(row.fields[1])
@@ -16,7 +16,7 @@ run: fn() {
         .None -> print("none")
         .Err(_) -> panic("first")
     }
-    if &reader.next() == {
+    if reader.next() == {
         .None -> print("eof")
         .Val(_) -> print("bad")
         .Err(_) -> panic("eof")

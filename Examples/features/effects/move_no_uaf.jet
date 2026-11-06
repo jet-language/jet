@@ -1,15 +1,15 @@
-// D-CAP7: move/take (^T) — valid program; caller does not use value after move.
+// D-CAP7: move/take (&&T) — valid program; caller does not use value after move.
 Token: struct {
     id: Int
     kind: String
 }
 
-// ^Token = caller yields ownership; fn receives it
-consume: fn(t: ^Token) { print("consumed token {t.id} ({t.kind})") }
+// &&Token = caller yields ownership; fn receives it
+consume: fn(t: &&Token) { print("consumed token {t.id} ({t.kind})") }
 
 run: fn() {
     tok: Token{id: 42, kind: "access"}
-    consume(^tok)  // ownership moves here; tok is gone after this line
+    consume(tok)  // ownership moves here; tok is gone after this line
     // no reference to tok below — use-after-move avoided
     print("done")
 }

@@ -107,7 +107,7 @@ run: fn() {
     _: started_rx.receive() ?? panic("waiter did not start")
     time.sleep(20ms)
     waiter.cancel()
-    if ^waiter.join() == {
+    if waiter.join() == {
         .Ok(outcome) -> print(outcome)
         .Err(error) -> print("waiter: {failure_label(error)}")
     }

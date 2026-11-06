@@ -13,7 +13,7 @@ run: fn() {
     task.group pool(limit: 2) {
         handles: loop name in ["a.txt", "b.txt"] -> task missing(name)
         loop handle in handles {
-            outcome: ^handle.join() ?? (receipt: None, error: None)
+            outcome: handle.join() ?? (receipt: None, error: None)
             if outcome.error == {
                 .Val(error) -> print(resource(error))
                 .None -> print("cancelled")

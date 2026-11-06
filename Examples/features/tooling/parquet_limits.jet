@@ -23,8 +23,8 @@ kind_name: fn(kind: data.DataErrorKind) -> String { "{kind:Debug}" }
 // Bind `bytes` as the payload of a pinned URL loader and read its rows.
 read: fn(bytes: [U8], limits: data.DataLimits) -> [Dyn] data.DataError! {
     loader := data.url<[Dyn]>("https://example.invalid/fixture.parquet", "parquet", "network", limits) ?? return Err(err)
-    data_loader.bind(&loader, bytes) ?? return Err(err)
-    snapshot: data.snapshot<[Dyn]>(&loader) ?? return Err(err)
+    data_loader.bind(loader, bytes) ?? return Err(err)
+    snapshot: data.snapshot<[Dyn]>(loader) ?? return Err(err)
     Ok(snapshot.value)
 }
 

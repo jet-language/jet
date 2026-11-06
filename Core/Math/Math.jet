@@ -337,7 +337,7 @@ checked_pow: fn(base: Int, exponent: Int) -> Int? Never! {
     Val(result)
 }
 
-// Integer power has the same exact arithmetic and negative-exponent stop as `^`.
+// Integer power has the same exact arithmetic and negative-exponent stop as `Int.pow`.
 int_pow: fn(base: Int, exponent: Int) -> Int Never! { base.pow(exponent) }
 
 saturating_add: fn(a: Int, b: Int) -> Int Never! { a + b }
@@ -3782,17 +3782,17 @@ impl Transform2 {
 __decimal_to_string: fn(value: Decimal) -> String Never! {
     digits: "{value.magnitude}".bytes()
     bytes := [U8]{}
-    if value.negative -> &bytes.push(U8{45})
+    if value.negative -> bytes.push(U8{45})
     if value.scale >= digits.len() && value.scale != 0 {
-        &bytes.push(U8{48})
-        &bytes.push(U8{46})
-        loop _ in 0..<(value.scale - digits.len()) -> &bytes.push(U8{48})
-        loop byte in digits -> &bytes.push(byte)
+        bytes.push(U8{48})
+        bytes.push(U8{46})
+        loop _ in 0..<(value.scale - digits.len()) -> bytes.push(U8{48})
+        loop byte in digits -> bytes.push(byte)
     } else {
         boundary: digits.len() - value.scale
         loop (index, byte) in digits {
-            if value.scale != 0 && index == boundary -> &bytes.push(U8{46})
-            &bytes.push(byte)
+            if value.scale != 0 && index == boundary -> bytes.push(U8{46})
+            bytes.push(byte)
         }
     }
     String.from_bytes(bytes) ?? panic("Decimal digits are not UTF-8")

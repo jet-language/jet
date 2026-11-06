@@ -4,15 +4,15 @@ use jet_wasm.[
     WasmComponent, WasmModule, wasm_decode_component, wasm_decode_module, wasm_is_component,
 ]
 
-component_of: fn(bytes: ^[U8]) -> WasmComponent Never! {
-    if wasm_decode_component(^bytes) == {
+component_of: fn(bytes: &&[U8]) -> WasmComponent Never! {
+    if wasm_decode_component(bytes) == {
         .Ok(component) -> component
         .Err(error) -> panic("decode failed: {error.render()}")
     }
 }
 
-component_failure: fn(bytes: ^[U8]) -> String Never! {
-    if wasm_decode_component(^bytes) == {
+component_failure: fn(bytes: &&[U8]) -> String Never! {
+    if wasm_decode_component(bytes) == {
         .Ok(_) -> ""
         .Err(error) -> error.render()
     }
@@ -20,7 +20,7 @@ component_failure: fn(bytes: ^[U8]) -> String Never! {
 
 raw_module_failure: fn(values: [Int]) -> String Never! {
     bytes: loop value in values -> U8{value}
-    if wasm_decode_module(^bytes) == {
+    if wasm_decode_module(bytes) == {
         .Ok(_) -> ""
         .Err(error) -> error.render()
     }
@@ -29,7 +29,7 @@ raw_module_failure: fn(values: [Int]) -> String Never! {
 // The decode failure of a module with the standard header followed by `sections`.
 module_failure: fn(sections: [Int]) -> String Never! {
     values := [Int]{0, 0x61, 0x73, 0x6d, 1, 0, 0, 0}
-    loop value in sections -> &values.push(value)
+    loop value in sections -> values.push(value)
     raw_module_failure(values)
 }
 

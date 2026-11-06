@@ -32,12 +32,12 @@ ProviderAdapter: enum {
     // provider that cannot derive it gets no early cache path.
     cache_expectation: fn(self, verification: &StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> CacheExpectation? Never! {
         if self == {
-            .Nix -> NixProvider{}.cache_expectation(&verification, spec, table, ctx)
-            .Core -> CoreProvider{}.cache_expectation(&verification, spec, table, ctx)
-            .Cran -> CranProvider{}.cache_expectation(&verification, spec, table, ctx)
-            .LuaRocks -> LuaRocksProvider{}.cache_expectation(&verification, spec, table, ctx)
-            .ScriptRegistry(kind) -> ScriptRegistryProvider{kind}.cache_expectation(&verification, spec, table, ctx)
-            .Native -> NativeReleaseProvider{}.cache_expectation(&verification, spec, table, ctx)
+            .Nix -> NixProvider{}.cache_expectation(verification, spec, table, ctx)
+            .Core -> CoreProvider{}.cache_expectation(verification, spec, table, ctx)
+            .Cran -> CranProvider{}.cache_expectation(verification, spec, table, ctx)
+            .LuaRocks -> LuaRocksProvider{}.cache_expectation(verification, spec, table, ctx)
+            .ScriptRegistry(kind) -> ScriptRegistryProvider{kind}.cache_expectation(verification, spec, table, ctx)
+            .Native -> NativeReleaseProvider{}.cache_expectation(verification, spec, table, ctx)
             .Unsupported(_) -> None
         }
     }
@@ -54,12 +54,12 @@ ProviderAdapter: enum {
     // adapter so Nix can plan one shared closure.
     plan_downloads: fn(self, verification: &StoreVerification, specs: [RefSpec], table: SourceTable, ctx: ProviderCtx) -[IO, FS, Env, Net, Time, Time.Wait]> DownloadPlan ProviderError! {
         if self == {
-            .Nix -> NixProvider{}.plan_downloads(&verification, specs, table, ctx)
-            .Core -> CoreProvider{}.plan_downloads(&verification, specs, table, ctx)
-            .Cran -> CranProvider{}.plan_downloads(&verification, specs, table, ctx)
-            .LuaRocks -> LuaRocksProvider{}.plan_downloads(&verification, specs, table, ctx)
-            .ScriptRegistry(kind) -> ScriptRegistryProvider{kind}.plan_downloads(&verification, specs, table, ctx)
-            .Native -> NativeReleaseProvider{}.plan_downloads(&verification, specs, table, ctx)
+            .Nix -> NixProvider{}.plan_downloads(verification, specs, table, ctx)
+            .Core -> CoreProvider{}.plan_downloads(verification, specs, table, ctx)
+            .Cran -> CranProvider{}.plan_downloads(verification, specs, table, ctx)
+            .LuaRocks -> LuaRocksProvider{}.plan_downloads(verification, specs, table, ctx)
+            .ScriptRegistry(kind) -> ScriptRegistryProvider{kind}.plan_downloads(verification, specs, table, ctx)
+            .Native -> NativeReleaseProvider{}.plan_downloads(verification, specs, table, ctx)
             .Unsupported(_) -> Ok(DownloadPlan.empty())
         }
     }
@@ -83,12 +83,12 @@ ProviderAdapter: enum {
 
     realize: fn(self, verification: &StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Realized ProviderError! {
         if self == {
-            .Nix -> NixProvider{}.realize(&verification, spec, table, ctx)
-            .Core -> CoreProvider{}.realize(&verification, spec, table, ctx)
-            .Cran -> CranProvider{}.realize(&verification, spec, table, ctx)
-            .LuaRocks -> LuaRocksProvider{}.realize(&verification, spec, table, ctx)
-            .ScriptRegistry(kind) -> ScriptRegistryProvider{kind}.realize(&verification, spec, table, ctx)
-            .Native -> NativeReleaseProvider{}.realize(&verification, spec, table, ctx)
+            .Nix -> NixProvider{}.realize(verification, spec, table, ctx)
+            .Core -> CoreProvider{}.realize(verification, spec, table, ctx)
+            .Cran -> CranProvider{}.realize(verification, spec, table, ctx)
+            .LuaRocks -> LuaRocksProvider{}.realize(verification, spec, table, ctx)
+            .ScriptRegistry(kind) -> ScriptRegistryProvider{kind}.realize(verification, spec, table, ctx)
+            .Native -> NativeReleaseProvider{}.realize(verification, spec, table, ctx)
             .Unsupported(label) -> Err(ProviderError.Unsupported("provider `{label}` has no realization path for `{spec.raw}`; import and lock its native facts first"))
         }
     }
@@ -125,7 +125,7 @@ provider_validate_cache_authority: fn(spec: RefSpec, table: SourceTable, ctx: Pr
 
 // Independently derive every fact required to trust an existing cache record.
 provider_cache_expectation: fn(verification: &StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time, Time.Wait, Rand]> CacheExpectation? Never! {
-    provider_for_ref(spec, table, ctx).cache_expectation(&verification, spec, table, ctx)
+    provider_for_ref(spec, table, ctx).cache_expectation(verification, spec, table, ctx)
 }
 
 // The exact external approval subject for a provider action, without
@@ -207,15 +207,15 @@ provider_plan_downloads: fn(verification: &StoreVerification, specs: [RefSpec], 
             if kinds[index] == kind -> position = index
         }
         if position < 0 {
-            &kinds.push(kind)
-            &grouped.push([RefSpec]{spec})
+            kinds.push(kind)
+            grouped.push([RefSpec]{spec})
         } else {
-            &grouped[position].push(spec)
+            grouped[position].push(spec)
         }
     }
     plan := DownloadPlan.empty()
     loop index in 0..<kinds.len() {
-        &plan.extend(provider_for(kinds[index]).plan_downloads(&verification, grouped[index], table, ctx))
+        plan.extend(provider_for(kinds[index]).plan_downloads(verification, grouped[index], table, ctx))
     }
     Ok(plan)
 }
@@ -243,8 +243,8 @@ provider_requires_acquisition: fn(spec: RefSpec, table: SourceTable, offline: Bo
 // Realize a ref through its provider. The resolver never knows which backend
 // runs; every result carries the refreshed shared provider facts.
 provider_realize: fn(verification: &StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Realized ProviderError! {
-    realized := provider_for_ref(spec, table, ctx).realize(&verification, spec, table, ctx)
-    provider_refresh_provider_facts(&realized.producer, realized.reference)
+    realized := provider_for_ref(spec, table, ctx).realize(verification, spec, table, ctx)
+    provider_refresh_provider_facts(realized.producer, realized.reference)
     Ok(realized)
 }
 

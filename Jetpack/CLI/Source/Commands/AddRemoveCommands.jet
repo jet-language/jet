@@ -14,7 +14,7 @@ cli_cmd_add: fn(verification: &StoreVerification, theme: Theme, parsed: CLIParse
         return EXIT_USAGE
     }
     if env_component_find(raw) == .Val(component) -> return cli_add_component(theme, component)
-    if parsed.flags.adapt -> return cli_add_adapt(&cache, theme, raw)
+    if parsed.flags.adapt -> return cli_add_adapt(cache, theme, raw)
     dir: cli_current_dir()
     // Classify against the env's declared sources so `add fd@unstable` works
     // when `unstable` is already declared.
@@ -22,7 +22,7 @@ cli_cmd_add: fn(verification: &StoreVerification, theme: Theme, parsed: CLIParse
         .Val(env) -> env.source_table()
         .None -> SourceTable.empty()
     }
-    cli_ensure_builtin_sources(&table)
+    cli_ensure_builtin_sources(table)
     spec: RefSpec.classify_in(raw, table) ?? {
         cli_ref_error(theme, err)
         return EXIT_USAGE
@@ -33,7 +33,7 @@ cli_cmd_add: fn(verification: &StoreVerification, theme: Theme, parsed: CLIParse
     roots: pkg_resolve_roots()
     no_live := LiveRegion?{None}
     name_w: if spec.package.len() > 8 -> spec.package.len() else -> 8
-    lease: if cli_realize_ref_outcome(&verification, theme, roots, parsed.flags, table, spec, name_w, RowStyle.Ready, &no_live, RealizeScope.Project) == {
+    lease: if cli_realize_ref_outcome(verification, theme, roots, parsed.flags, table, spec, name_w, RowStyle.Ready, no_live, RealizeScope.Project) == {
         .Realized(_, _, _, realized_lease) -> realized_lease
         .NeedsNix(need) -> {
             cli_report_nix_bridge_required(theme, parsed.flags, [NixBridgeNeed]{need}, [String]{})
@@ -44,8 +44,8 @@ cli_cmd_add: fn(verification: &StoreVerification, theme: Theme, parsed: CLIParse
         }
     }
     // The lease keeps the verified entry consumable until the command ends.
-    code: cli_add_record_ref(&cache, theme, parsed, dir, spec)
-    ^lease.release()
+    code: cli_add_record_ref(cache, theme, parsed, dir, spec)
+    lease.release()
     code
 }
 
@@ -57,7 +57,7 @@ cli_add_record_ref: fn(cache: &WorkspaceDeclarationCache, theme: Theme, parsed: 
     }
     theme.ok("added {theme.bold(spec.package)} to {ENV_FILE}")
     theme.detail(theme.gray("now: {edited.packages.join(", ")}"))
-    if cli_load_project_plan(&cache, theme) == .Ok(plan) {
+    if cli_load_project_plan(cache, theme) == .Ok(plan) {
         loop source in cli_channel_sources(plan.table) {
             exact: cli_resolve_source_channel(source, parsed.flags) ?? next
             channel: LockedSourceChannel{name: source.name, channel: source.lock_channel, exact: exact}
@@ -85,7 +85,7 @@ cli_adapter_source: fn(cache: &WorkspaceDeclarationCache, theme: Theme, raw: Str
             }
         }
     }
-    table: cli_cwd_table(&cache)
+    table: cli_cwd_table(cache)
     spec: RefSpec.classify_in(raw, table) ?? {
         cli_ref_error(theme, err)
         return None
@@ -136,7 +136,7 @@ cli_trim_end_matches: fn(text: String, suffix: String) -> String Never! {
 
 // U20: print a `Pkg.adapt(...)` declaration draft instead of editing env.jet.
 cli_add_adapt: fn(cache: &WorkspaceDeclarationCache, theme: Theme, raw: String) -[IO, FS, Env, Exec, Time.Wait]> Int Never! {
-    source: cli_adapter_source(&cache, theme, raw) ?? return EXIT_USAGE
+    source: cli_adapter_source(cache, theme, raw) ?? return EXIT_USAGE
     // The last non-empty `/ : @ #` segment names the adapter.
     last := ""
     current := ""
@@ -187,7 +187,7 @@ cli_cmd_remove: fn(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Ti
         .Val(env) -> env.source_table()
         .None -> SourceTable.empty()
     }
-    cli_ensure_builtin_sources(&table)
+    cli_ensure_builtin_sources(table)
     spec: RefSpec.classify_in(raw, table) ?? {
         cli_ref_error(theme, err)
         return EXIT_USAGE

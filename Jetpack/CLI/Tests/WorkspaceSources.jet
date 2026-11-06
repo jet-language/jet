@@ -8,14 +8,14 @@ cli_ws_test_scratch: fn(label: String) -[FS]> String {
 // The Rust test-only `load_workspace`: the checked index snapshot, written
 // through to `.jet/lock`; None when no index source declares a workspace.
 cli_ws_test_load_workspace: fn(cache: &WorkspaceDeclarationCache, dir: String) -> WorkspacePlan? {
-    source: if cli_checked_workspace_source(&cache, dir) == {
+    source: if cli_checked_workspace_source(cache, dir) == {
         .Val(found) -> found
         .None -> { return None }
         .Err(_) -> panic("workspace discovery")
     }
     if source.source.role != WorkspaceSourceRole.Index -> return None
-    snapshot: cli_workspace_snapshot_from_source(source.resolver, ^source.source) ?? panic("workspace snapshot")
-    cli_finish_workspace_load(&cache, dir, Val(snapshot)) ?? panic("workspace lock write")
+    snapshot: cli_workspace_snapshot_from_source(source.resolver, source.source.move()) ?? panic("workspace snapshot")
+    cli_finish_workspace_load(cache, dir, Val(snapshot)) ?? panic("workspace lock write")
 }
 
 #Test("cli project root walks from a nested command directory") {
@@ -24,7 +24,7 @@ cli_ws_test_load_workspace: fn(cache: &WorkspaceDeclarationCache, dir: String) -
     nested: files.join(root, "packages/app/src")
     files.create_dir_all(nested) ?? panic("create nested dir")
     files.write(files.join(root, "env.jet"), "env.dev: module {{}}\n") ?? panic("write env.jet")
-    assert_eq(cli_project_root(&cache, nested), root)
+    assert_eq(cli_project_root(cache, nested), root)
     files.remove_all(root).drop("scratch cleanup")
 }
 
@@ -34,7 +34,7 @@ cli_ws_test_load_workspace: fn(cache: &WorkspaceDeclarationCache, dir: String) -
     nested: files.join(root, "packages/app/src")
     files.create_dir_all(nested) ?? panic("create nested dir")
     files.write(files.join(root, PACKAGE_FILE), "name: \"app\"\n") ?? panic("write package.jet")
-    assert_eq(cli_project_root(&cache, nested), root)
+    assert_eq(cli_project_root(cache, nested), root)
     files.remove_all(root).drop("scratch cleanup")
 }
 
@@ -46,10 +46,10 @@ cli_ws_test_load_workspace: fn(cache: &WorkspaceDeclarationCache, dir: String) -
     files.create_dir_all(nested) ?? panic("create nested dir")
     files.write(files.join(root, "authority.jet"), "workspace: module {{ policy: {{ deny: #(Exec) }} }}\n") ?? panic("write authority.jet")
     files.write(files.join(package, PACKAGE_FILE), "name: \"app\"\n") ?? panic("write package.jet")
-    assert_eq(cli_project_root(&cache, nested), package)
-    assert_eq(cli_workspace_root(&cache, nested), root)
-    assert((envmodel_workspace_load(&cache, root) ? found -> found ! error -> panic("load the workspace")) == None)
-    assert(cli_ws_test_load_workspace(&cache, root) == None)
+    assert_eq(cli_project_root(cache, nested), package)
+    assert_eq(cli_workspace_root(cache, nested), root)
+    assert((envmodel_workspace_load(cache, root) ? found -> found ! error -> panic("load the workspace")) == None)
+    assert(cli_ws_test_load_workspace(cache, root) == None)
     files.remove_all(root).drop("scratch cleanup")
 }
 
@@ -64,10 +64,10 @@ cli_ws_test_load_workspace: fn(cache: &WorkspaceDeclarationCache, dir: String) -
     files.write(files.join(root, "tools.jet"), "// {root}\nhelper: fn() {{}}\n") ?? panic("write tools.jet")
     files.write(files.join(package, PACKAGE_FILE), "// {root}\nname: \"app\"\n") ?? panic("write package.jet")
     before: cache.lexes
-    assert_eq(cli_workspace_root(&cache, nested), root)
-    assert_eq(cli_workspace_root(&cache, nested), root)
-    assert((envmodel_workspace_load(&cache, root) ? found -> found ! error -> panic("load the workspace")) == None)
-    assert(cli_ws_test_load_workspace(&cache, root) == None)
+    assert_eq(cli_workspace_root(cache, nested), root)
+    assert_eq(cli_workspace_root(cache, nested), root)
+    assert((envmodel_workspace_load(cache, root) ? found -> found ! error -> panic("load the workspace")) == None)
+    assert(cli_ws_test_load_workspace(cache, root) == None)
     assert_eq(cache.lexes - before, 3)
     files.remove_all(root).drop("scratch cleanup")
 }

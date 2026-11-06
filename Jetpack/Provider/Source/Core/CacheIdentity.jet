@@ -23,23 +23,23 @@ provider_refresh_provider_facts: fn(producer: &ProducerRecord, reference: String
     native.plan = ProviderPlanFacts.from_facts(provider_without_keys(producer.plan.facts(), carriers)) ?? return Err(ProviderError.BadOutput(err.message()))
 
     shared := ProviderFacts.for_reference(producer.provider, reference)
-    &shared.set_resolved_source(producer.immutable_source)
+    shared.set_resolved_source(producer.immutable_source)
     document: producer.facts.get(PROVIDER_NIX_NATIVE_DOCUMENT) ?? ""
     format: producer.facts.get(PROVIDER_NIX_NATIVE_FORMAT) ?? ""
     if {
-        format.trim() != "" && document.trim() != "" -> &shared.set_native_document(format, document)
-        else -> &shared.set_native_document("jet-producer-record-v1", native.encode())
+        format.trim() != "" && document.trim() != "" -> shared.set_native_document(format, document)
+        else -> shared.set_native_document("jet-producer-record-v1", native.encode())
     }
     loop key in provider_sorted_keys(producer.facts) {
         if carriers.contains(key) -> next
-        &shared.add_fact(key, ProviderFactValue.Text(producer.facts[key]), "jet-producer-record-v1")
+        shared.add_fact(key, ProviderFactValue.Text(producer.facts[key]), "jet-producer-record-v1")
     }
     extras: [(key: String, value: String)]{
         (key: "provider.source_digest", value: producer.source_digest),
         (key: "provider.toolchain_facts", value: producer.toolchain_facts),
         (key: "provider.policy_facts", value: producer.policy_facts),
     }
-    loop extra in extras -> &shared.add_fact(extra.key, ProviderFactValue.Text(extra.value), "jet-producer-record-v1")
+    loop extra in extras -> shared.add_fact(extra.key, ProviderFactValue.Text(extra.value), "jet-producer-record-v1")
     shared.validate() ?? return Err(ProviderError.BadOutput(err.message))
     producer.facts[PROVIDER_SHARED_FACTS] = shared.to_json()
     producer.facts[PROVIDER_SHARED_FACTS_DIGEST] = shared.digest()
@@ -89,8 +89,8 @@ provider_adapter_action_identity: fn(plan: AdapterPlan, recipe: BuildRecipe, sou
 // subject before any tool is realized.
 provider_adapter_dependency_refs: fn(plan: AdapterPlan) -> [String] Never! {
     dependencies := [String]{}
-    loop dependency in plan.deps -> &dependencies.push(envmodel_pkg_ref(dependency))
-    &dependencies.sort()
+    loop dependency in plan.deps -> dependencies.push(envmodel_pkg_ref(dependency))
+    dependencies.sort()
     dependencies
 }
 
@@ -99,8 +99,8 @@ provider_adapter_dependency_refs: fn(plan: AdapterPlan) -> [String] Never! {
 // trust change even when the recipe and dependency refs do not move.
 provider_adapter_identity_inputs: fn(plan: AdapterPlan, table: SourceTable) -> [String] Never! {
     inputs := provider_adapter_dependency_refs(plan)
-    loop line in table.trust_lines() -> &inputs.push("authority:{line}")
-    &inputs.sort()
+    loop line in table.trust_lines() -> inputs.push("authority:{line}")
+    inputs.sort()
     inputs
 }
 
@@ -245,7 +245,7 @@ provider_without_keys: fn(map: [String: String], keys: [String]) -> [String: Str
 // Map keys in byte order (a `BTreeMap` walk).
 provider_sorted_keys: fn(map: [String: String]) -> [String] Never! {
     keys := map.keys().to_list()
-    &keys.sort()
+    keys.sort()
     keys
 }
 

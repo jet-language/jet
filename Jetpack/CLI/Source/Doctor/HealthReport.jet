@@ -66,7 +66,7 @@ DoctorReport: struct {
     run: fn(verification: &StoreVerification, project: String, online: Bool) -[FS, Env, Exec, Time, Time.Wait]> DoctorReport Never! {
         roots: pkg_resolve_roots()
         DoctorReport{checks: [DoctorCheck]{
-            cli_doctor_check_hangar(&verification, roots),
+            cli_doctor_check_hangar(verification, roots),
             cli_doctor_check_leases(roots),
             cli_doctor_check_registry(online),
             cli_doctor_check_locks(project, roots),
@@ -105,7 +105,7 @@ DoctorReport: struct {
             fields["status"] = Dyn.Text(check.health.word())
             fields["detail"] = Dyn.Text(check.detail)
             fields["fix"] = Dyn.Text(check.fix)
-            &checks.push(Dyn.Object(fields))
+            checks.push(Dyn.Object(fields))
         }
         document := [String: Dyn]{}
         document["kind"] = Dyn.Text("jetpack.doctor")
@@ -168,7 +168,7 @@ cli_doctor_check_hangar: fn(verification: &StoreVerification, roots: HangarRoots
     graph := ClosureGraph.empty()
     closure_error := ""
     closure_failed := false
-    if store_closure_graph_read_only(&verification, roots) == {
+    if store_closure_graph_read_only(verification, roots) == {
         .Ok(loaded) -> graph = loaded
         .Err(error) -> {
             closure_failed = true
@@ -198,7 +198,7 @@ cli_doctor_check_hangar: fn(verification: &StoreVerification, roots: HangarRoots
             .None -> {}
         }
         if !files.exists(entry.out) -> return DoctorCheck.degraded("hangar", "object `{id}` points to a missing output", "realize the package again")
-        if store_try_entry_output_hash(&verification, roots, entry) == {
+        if store_try_entry_output_hash(verification, roots, entry) == {
             .Ok(actual) -> {
                 if entry.envelope.output_hash == "" || actual != entry.envelope.output_hash {
                     return DoctorCheck.degraded("hangar", "object `{id}` failed its content digest", "remove the corrupt object with `jetpack hangar clean`, then realize it again")
@@ -272,9 +272,9 @@ cli_doctor_registry_endpoints: fn() -[Env]> [(name: String, url: String)] Never!
     }
     if found.len() == 0 -> found["jet"] = "https://github.com/jet-lang/registry"
     ordered := found.keys().to_list()
-    &ordered.sort()
+    ordered.sort()
     endpoints := [(name: String, url: String)]{}
-    loop name in ordered -> &endpoints.push((name: name, url: found[name]))
+    loop name in ordered -> endpoints.push((name: name, url: found[name]))
     endpoints
 }
 
@@ -347,15 +347,15 @@ cli_doctor_check_locks: fn(project: String, roots: HangarRoots) -[FS, Env]> Doct
             .Ok(listed) -> listed
             .Err(error) -> {
                 if store_io_is_not_found(error) -> next
-                &unknown.push("{dir} (directory unreadable)")
+                unknown.push("{dir} (directory unreadable)")
                 next
             }
         }
         loop entry in entries {
             if files.suffix(entry.path) != ".lock" -> next
             if env_lock_state(entry.path) == {
-                .Ok(state) -> if state == RuntimeLockState.Held -> &held.push(entry.name)
-                .Err(_) -> &unknown.push(entry.name)
+                .Ok(state) -> if state == RuntimeLockState.Held -> held.push(entry.name)
+                .Err(_) -> unknown.push(entry.name)
             }
         }
     }
@@ -430,6 +430,6 @@ cli_doctor_key_pair_matches: fn(secret: String, public_hex: String) -[FS]> Bool 
     public: hex.decode(public_hex) ?? return Err(DoctorSigningKeyError{detail: "{err}"})
     key: crypto.SigningKey.from_bytes(seed) ?? return Err(DoctorSigningKeyError{detail: "{err}"})
     matches: key.public_key().bytes == public
-    close(^key)
+    close(key)
     Ok(matches)
 }

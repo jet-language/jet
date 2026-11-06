@@ -85,7 +85,7 @@ function lineAt(source, offset) { return source.slice(0, offset).split("\n").len
 function resultType(source, tokens, at, module, localTypes) {
   const start = at;
   if (!tokens[at]) return null;
-  if (["&", "^"].includes(tokens[at].value)) at++;
+  while (tokens[at]?.value === "&") at++;
   const first = tokens[at]?.value;
   if (identifier.test(first ?? "")) {
     const named = chain(tokens, at);
@@ -257,7 +257,7 @@ export function callSites(source, functions, context = null) {
     // receiver calls attributable without guessing by the method's spelling.
     if (identifier.test(value) && [":", ":="].includes(tokens[i + 1]?.value)) {
       let at = i + 2;
-      while (["&", "^", "~", "comptime"].includes(tokens[at]?.value)) at++;
+      while (["&", "~", "comptime"].includes(tokens[at]?.value)) at++;
       const rhs = chain(tokens, at);
       if (rhs) {
         const target = expand(rhs.parts, scope.aliases);

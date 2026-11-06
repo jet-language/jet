@@ -75,17 +75,17 @@ PlugRows: struct {
 
 plug_rows: fn(m: &IRModule) -> PlugRows Never! {
     PlugRows{
-        word: ir_word_row(&m),
-        i32: ir_type_row(&m, Type.IntN{signed: true, bits: 32}) ?? 0,
-        u32: ir_type_row(&m, Type.IntN{signed: false, bits: 32}) ?? 0,
-        u64: ir_type_row(&m, Type.IntN{signed: false, bits: 64}) ?? 0,
-        i8: ir_type_row(&m, Type.IntN{signed: true, bits: 8}) ?? 0,
-        u8: ir_type_row(&m, Type.IntN{signed: false, bits: 8}) ?? 0,
-        i16: ir_type_row(&m, Type.IntN{signed: true, bits: 16}) ?? 0,
-        u16: ir_type_row(&m, Type.IntN{signed: false, bits: 16}) ?? 0,
-        f32: ir_type_row(&m, Type.Float32) ?? 0,
-        f64: ir_type_row(&m, Type.Float) ?? 0,
-        flag: ir_type_row(&m, Type.Bool) ?? 0,
+        word: ir_word_row(m),
+        i32: ir_type_row(m, Type.IntN{signed: true, bits: 32}) ?? 0,
+        u32: ir_type_row(m, Type.IntN{signed: false, bits: 32}) ?? 0,
+        u64: ir_type_row(m, Type.IntN{signed: false, bits: 64}) ?? 0,
+        i8: ir_type_row(m, Type.IntN{signed: true, bits: 8}) ?? 0,
+        u8: ir_type_row(m, Type.IntN{signed: false, bits: 8}) ?? 0,
+        i16: ir_type_row(m, Type.IntN{signed: true, bits: 16}) ?? 0,
+        u16: ir_type_row(m, Type.IntN{signed: false, bits: 16}) ?? 0,
+        f32: ir_type_row(m, Type.Float32) ?? 0,
+        f64: ir_type_row(m, Type.Float) ?? 0,
+        flag: ir_type_row(m, Type.Bool) ?? 0,
     }
 }
 
@@ -158,97 +158,97 @@ PlugCx: struct {
     at: Int
 
     temp: fn(&self, row: Int) -> Int Never! {
-        ir_slot(&self.f, row, IRSlotKind.Temp, -1, 0)
+        ir_slot(self.f, row, IRSlotKind.Temp, -1, 0)
     }
 
     emit: fn(&self, op: IROp, dst: Int, a: Int, b: Int, c: Int) Never! {
-        _: ir_emit(&self.f, op, dst, a, b, c, 0)
+        _: ir_emit(self.f, op, dst, a, b, c, 0)
     }
 
     konst: fn(&self, row: Int, value: Int) -> Int Never! {
-        slot: &self.temp(row)
-        &self.emit(IROp.Const, slot, value, -1, -1)
+        slot: self.temp(row)
+        self.emit(IROp.Const, slot, value, -1, -1)
         slot
     }
 
     word: fn(&self, value: Int) -> Int Never! {
-        &self.konst(self.rows.word, value)
+        self.konst(self.rows.word, value)
     }
 
     // A wrapping integer operation, or a float one.
     op2: fn(&self, op: IROp, row: Int, left: Int, right: Int) -> Int Never! {
-        dst: &self.temp(row)
+        dst: self.temp(row)
         policy: if row == self.rows.f64 -> -1 else -> IR_OVERFLOW_WRAP
-        &self.emit(op, dst, left, right, policy)
+        self.emit(op, dst, left, right, policy)
         dst
     }
 
     cmp: fn(&self, op: IROp, left: Int, right: Int) -> Int Never! {
-        dst: &self.temp(self.rows.flag)
-        &self.emit(op, dst, left, right, -1)
+        dst: self.temp(self.rows.flag)
+        self.emit(op, dst, left, right, -1)
         dst
     }
 
     emit_copy: fn(&self, row: Int, value: Int) -> Int Never! {
-        dst: &self.temp(row)
-        &self.emit(IROp.Copy, dst, value, -1, -1)
+        dst: self.temp(row)
+        self.emit(IROp.Copy, dst, value, -1, -1)
         dst
     }
 
     convert: fn(&self, row: Int, value: Int) -> Int Never! {
-        dst: &self.temp(row)
-        &self.emit(IROp.Convert, dst, value, -1, -1)
+        dst: self.temp(row)
+        self.emit(IROp.Convert, dst, value, -1, -1)
         dst
     }
 
     load: fn(&self, row: Int, pointer: Int, offset: Int) -> Int Never! {
-        dst: &self.temp(row)
-        &self.emit(IROp.Load, dst, pointer, offset, -1)
+        dst: self.temp(row)
+        self.emit(IROp.Load, dst, pointer, offset, -1)
         dst
     }
 
     store: fn(&self, pointer: Int, offset: Int, value: Int) Never! {
-        &self.emit(IROp.Store, -1, pointer, offset, value)
+        self.emit(IROp.Store, -1, pointer, offset, value)
     }
 
     // A runtime helper's call; `row` -1 for none.
     rt: fn(&self, name: String, args: [Int], row: Int) -> Int Never! {
-        dst: if row >= 0 -> &self.temp(row) else -> -1
-        start: ir_args(&self.f, args)
-        &self.emit(IROp.CallRuntime, dst, self.names.get(name) ?? panic("plugin runtime name {name} not interned"), start, args.len())
+        dst: if row >= 0 -> self.temp(row) else -> -1
+        start: ir_args(self.f, args)
+        self.emit(IROp.CallRuntime, dst, self.names.get(name) ?? panic("plugin runtime name {name} not interned"), start, args.len())
         dst
     }
 
     call: fn(&self, callee: Int, args: [Int], row: Int) -> Int Never! {
-        dst: if row >= 0 -> &self.temp(row) else -> -1
-        start: ir_args(&self.f, args)
-        &self.emit(IROp.Call, dst, callee, start, args.len())
+        dst: if row >= 0 -> self.temp(row) else -> -1
+        start: ir_args(self.f, args)
+        self.emit(IROp.Call, dst, callee, start, args.len())
         dst
     }
 
     push: fn(&self, slot: Int) Never! {
-        &self.stack.push(slot)
+        self.stack.push(slot)
     }
 
     pop: fn(&self) -> Int Never! {
-        &self.stack.pop() ?? panic("plugin translation popped an empty operand stack")
+        self.stack.pop() ?? panic("plugin translation popped an empty operand stack")
     }
 
     // The top `count` operands, in stack order.
     pops: fn(&self, count: Int) -> [Int] Never! {
         out := [Int]{}
-        loop _ in 0..<count -> &out.push(-1)
+        loop _ in 0..<count -> out.push(-1)
         k := count
         loop k > 0 {
             k -= 1
-            out[k] = &self.pop()
+            out[k] = self.pop()
         }
         out
     }
 
     truncate: fn(&self, height: Int) Never! {
         loop self.stack.len() > height {
-            _: &self.stack.pop()
+            _: self.stack.pop()
         }
     }
 
@@ -263,93 +263,93 @@ PlugCx: struct {
         if overlap {
             sources = [Int]{}
             loop value in values {
-                kept: &self.emit_copy(self.f.slot_type[value], value)
-                &sources.push(kept)
+                kept: self.emit_copy(self.f.slot_type[value], value)
+                sources.push(kept)
             }
         }
-        loop (k, slot) in slots -> &self.emit(IROp.Copy, slot, sources[k], -1, -1)
+        loop (k, slot) in slots -> self.emit(IROp.Copy, slot, sources[k], -1, -1)
     }
 
     ret_dummy: fn(&self) Never! {
-        &self.emit(IROp.Return, -1, self.dummy, -1, -1)
+        self.emit(IROp.Return, -1, self.dummy, -1, -1)
     }
 
     // Records trap `code` at this instruction and returns.
     trap: fn(&self, code: Int) Never! {
-        number: &self.word(code)
-        fid: &self.word(self.fid)
-        at: &self.word(self.at)
-        _: &self.rt("jet_plugin_trap", [Int]{self.inst, number, fid, at}, -1)
-        &self.ret_dummy()
+        number: self.word(code)
+        fid: self.word(self.fid)
+        at: self.word(self.at)
+        _: self.rt("jet_plugin_trap", [Int]{self.inst, number, fid, at}, -1)
+        self.ret_dummy()
     }
 
     guard: fn(&self, test: Int, code: Int) Never! {
-        _: ir_open_if(&self.f, test, 0)
-        &self.trap(code)
-        ir_end(&self.f, 0)
+        _: ir_open_if(self.f, test, 0)
+        self.trap(code)
+        ir_end(self.f, 0)
     }
 
     // Returns when the instance holds a trap; `frame` adds this function's
     // frame first (a helper that trapped recorded its own).
     check: fn(&self, frame: Bool) Never! {
-        trapped: &self.load(self.rows.word, self.inst, PLUG_INST_TRAP)
-        zero: &self.word(0)
-        test: &self.cmp(IROp.Ne, trapped, zero)
-        _: ir_open_if(&self.f, test, 0)
+        trapped: self.load(self.rows.word, self.inst, PLUG_INST_TRAP)
+        zero: self.word(0)
+        test: self.cmp(IROp.Ne, trapped, zero)
+        _: ir_open_if(self.f, test, 0)
         if frame {
-            fid: &self.word(self.fid)
-            at: &self.word(self.at)
-            _: &self.rt("jet_plugin_frame", [Int]{self.inst, fid, at}, -1)
+            fid: self.word(self.fid)
+            at: self.word(self.at)
+            _: self.rt("jet_plugin_frame", [Int]{self.inst, fid, at}, -1)
         }
-        &self.ret_dummy()
-        ir_end(&self.f, 0)
+        self.ret_dummy()
+        ir_end(self.f, 0)
     }
 
     fuel: fn(&self) Never! {
-        left: &self.load(self.rows.word, self.inst, PLUG_INST_FUEL)
-        one: &self.word(1)
-        rest: &self.op2(IROp.Sub, self.rows.word, left, one)
-        &self.store(self.inst, PLUG_INST_FUEL, rest)
-        zero: &self.word(0)
-        spent: &self.cmp(IROp.Lt, rest, zero)
-        &self.guard(spent, PLUG_TRAP_FUEL)
+        left: self.load(self.rows.word, self.inst, PLUG_INST_FUEL)
+        one: self.word(1)
+        rest: self.op2(IROp.Sub, self.rows.word, left, one)
+        self.store(self.inst, PLUG_INST_FUEL, rest)
+        zero: self.word(0)
+        spent: self.cmp(IROp.Lt, rest, zero)
+        self.guard(spent, PLUG_TRAP_FUEL)
     }
 
     // An i32 slot's value zero-extended to a word.
     zext: fn(&self, value: Int) -> Int Never! {
-        wide: &self.emit_copy(self.rows.word, value)
-        mask: &self.word(4294967295)
-        &self.op2(IROp.BitAnd, self.rows.word, wide, mask)
+        wide: self.emit_copy(self.rows.word, value)
+        mask: self.word(4294967295)
+        self.op2(IROp.BitAnd, self.rows.word, wide, mask)
     }
 
     // A word sign-extended from its low `bits`.
     sext: fn(&self, value: Int, bits: Int) -> Int Never! {
-        shift: &self.word(64 - bits)
-        up: &self.op2(IROp.Shl, self.rows.word, value, shift)
-        &self.op2(IROp.Shr, self.rows.word, up, shift)
+        shift: self.word(64 - bits)
+        up: self.op2(IROp.Shl, self.rows.word, value, shift)
+        self.op2(IROp.Shr, self.rows.word, up, shift)
     }
 
     // The i32 of a word's low 32 bits.
     narrow32: fn(&self, value: Int) -> Int Never! {
-        low: &self.sext(value, 32)
-        &self.emit_copy(self.rows.i32, low)
+        low: self.sext(value, 32)
+        self.emit_copy(self.rows.i32, low)
     }
 
     unsigned: fn(&self, value: Int, wide: Bool) -> Int Never! {
-        if wide -> return &self.emit_copy(self.rows.u64, value)
-        low: &self.zext(value)
-        &self.emit_copy(self.rows.u32, low)
+        if wide -> return self.emit_copy(self.rows.u64, value)
+        low: self.zext(value)
+        self.emit_copy(self.rows.u32, low)
     }
 
     signed: fn(&self, value: Int, wide: Bool) -> Int Never! {
-        bits: &self.emit_copy(self.rows.word, value)
+        bits: self.emit_copy(self.rows.word, value)
         if wide -> return bits
-        &self.narrow32(bits)
+        self.narrow32(bits)
     }
 
     // A comparison's Bool as an i32.
     flag: fn(&self, test: Int) -> Int Never! {
-        slot: &self.emit_copy(self.rows.i32, test)
+        slot: self.emit_copy(self.rows.i32, test)
         self.flags[slot] = test
         slot
     }
@@ -357,40 +357,40 @@ PlugCx: struct {
     // An i32's truth as a Bool.
     truth: fn(&self, value: Int) -> Int Never! {
         if self.flags.get(value) == .Val(test) -> return test
-        zero: &self.konst(self.rows.i32, 0)
-        &self.cmp(IROp.Ne, value, zero)
+        zero: self.konst(self.rows.i32, 0)
+        self.cmp(IROp.Ne, value, zero)
     }
 
     promote: fn(&self, value: Int) -> Int Never! {
-        &self.convert(self.rows.f64, value)
+        self.convert(self.rows.f64, value)
     }
 
     demote: fn(&self, value: Int) -> Int Never! {
-        &self.convert(self.rows.f32, value)
+        self.convert(self.rows.f32, value)
     }
 
     // A value's bits read back as `row` through frame storage.
     reinterpret: fn(&self, value: Int, row: Int) -> Int Never! {
-        area: &self.temp(self.rows.word)
-        &self.emit(IROp.StackAddress, area, 8, 8, -1)
-        &self.store(area, 0, value)
-        &self.load(row, area, 0)
+        area: self.temp(self.rows.word)
+        self.emit(IROp.StackAddress, area, 8, 8, -1)
+        self.store(area, 0, value)
+        self.load(row, area, 0)
     }
 
     // The checked native address of `width` bytes at `address` + `offset`
     // of flat memory `memory`.
     address: fn(&self, memory: Int, address: Int, offset: Int, width: Int) -> Int Never! {
-        start: &self.zext(address)
-        displacement: &self.word(offset)
-        effective: &self.op2(IROp.Add, self.rows.word, start, displacement)
-        size: &self.word(width)
-        end: &self.op2(IROp.Add, self.rows.word, effective, size)
-        memories: &self.load(self.rows.word, self.inst, PLUG_INST_MEMORIES)
-        limit: &self.load(self.rows.word, memories, memory * 24 + 8)
-        outside: &self.cmp(IROp.Gt, end, limit)
-        &self.guard(outside, PLUG_TRAP_MEMORY)
-        base: &self.load(self.rows.word, memories, memory * 24)
-        &self.op2(IROp.Add, self.rows.word, base, effective)
+        start: self.zext(address)
+        displacement: self.word(offset)
+        effective: self.op2(IROp.Add, self.rows.word, start, displacement)
+        size: self.word(width)
+        end: self.op2(IROp.Add, self.rows.word, effective, size)
+        memories: self.load(self.rows.word, self.inst, PLUG_INST_MEMORIES)
+        limit: self.load(self.rows.word, memories, memory * 24 + 8)
+        outside: self.cmp(IROp.Gt, end, limit)
+        self.guard(outside, PLUG_TRAP_MEMORY)
+        base: self.load(self.rows.word, memories, memory * 24)
+        self.op2(IROp.Add, self.rows.word, base, effective)
     }
 
     // A branch to the label `depth` blocks out, carrying its values.
@@ -398,75 +398,75 @@ PlugCx: struct {
         target: self.frames.len() - 1 - depth
         slots: if self.frames[target].kind == PLUG_FRAME_LOOP -> self.frames[target].param_slots else -> self.frames[target].result_slots
         values := [Int]{}
-        loop k in (self.stack.len() - slots.len())..<self.stack.len() -> &values.push(self.stack[k])
-        &self.transfer(values, slots)
+        loop k in (self.stack.len() - slots.len())..<self.stack.len() -> values.push(self.stack[k])
+        self.transfer(values, slots)
         out: ir_depth(self.f, self.frames[target].opener)
-        &self.emit(IROp.Br, -1, out, -1, -1)
+        self.emit(IROp.Br, -1, out, -1, -1)
     }
 
     enter_else: fn(&self) Never! {
         top: self.frames.len() - 1
         if !self.dead {
-            values: &self.pops(self.frames[top].results.len())
+            values: self.pops(self.frames[top].results.len())
             slots: self.frames[top].result_slots.copy()
-            &self.transfer(values, slots)
+            self.transfer(values, slots)
         }
-        ir_else(&self.f, 0)
-        &self.truncate(self.frames[top].height)
-        loop slot in self.frames[top].param_slots -> &self.push(slot)
+        ir_else(self.f, 0)
+        self.truncate(self.frames[top].height)
+        loop slot in self.frames[top].param_slots -> self.push(slot)
         self.frames[top].has_else = true
         self.dead = false
     }
 
     leave: fn(&self) Never! {
-        frame: &self.frames.pop() ?? panic("plugin translation closed an unopened block")
+        frame: self.frames.pop() ?? panic("plugin translation closed an unopened block")
         if !self.dead {
-            values: &self.pops(frame.results.len())
-            &self.transfer(values, frame.result_slots)
+            values: self.pops(frame.results.len())
+            self.transfer(values, frame.result_slots)
         }
         // An `if` without `else` passes its params through as its results.
         if frame.kind == PLUG_FRAME_IF && !frame.has_else && frame.results.len() > 0 {
-            ir_else(&self.f, 0)
-            &self.transfer(frame.param_slots, frame.result_slots)
+            ir_else(self.f, 0)
+            self.transfer(frame.param_slots, frame.result_slots)
         }
-        ir_end(&self.f, 0)
-        &self.truncate(frame.height)
+        ir_end(self.f, 0)
+        self.truncate(frame.height)
         self.dead = false
         if frame.kind == PLUG_FRAME_BODY {
-            left: &self.load(self.rows.word, self.inst, PLUG_INST_DEPTH)
-            one: &self.word(1)
-            less: &self.op2(IROp.Sub, self.rows.word, left, one)
-            &self.store(self.inst, PLUG_INST_DEPTH, less)
-            &self.emit(IROp.Return, -1, if frame.result_slots.len() > 0 -> frame.result_slots[0] else -> -1, -1, -1)
+            left: self.load(self.rows.word, self.inst, PLUG_INST_DEPTH)
+            one: self.word(1)
+            less: self.op2(IROp.Sub, self.rows.word, left, one)
+            self.store(self.inst, PLUG_INST_DEPTH, less)
+            self.emit(IROp.Return, -1, if frame.result_slots.len() > 0 -> frame.result_slots[0] else -> -1, -1, -1)
             self.dead = true
             return
         }
         loop slot in frame.result_slots {
-            kept: &self.emit_copy(self.f.slot_type[slot], slot)
-            &self.push(kept)
+            kept: self.emit_copy(self.f.slot_type[slot], slot)
+            self.push(kept)
         }
     }
 
     open: fn(&self, kind: Int, sig: WasmFuncType, test: Int) Never! {
-        args: &self.pops(sig.params.len())
+        args: self.pops(sig.params.len())
         params := [Int]{}
         loop (k, arg) in args {
-            slot: &self.temp(plug_row(self.rows, sig.params[k]))
-            &self.emit(IROp.Copy, slot, arg, -1, -1)
-            &params.push(slot)
+            slot: self.temp(plug_row(self.rows, sig.params[k]))
+            self.emit(IROp.Copy, slot, arg, -1, -1)
+            params.push(slot)
         }
         results := [Int]{}
         loop result in sig.results {
-            slot: &self.temp(plug_row(self.rows, result))
-            &results.push(slot)
+            slot: self.temp(plug_row(self.rows, result))
+            results.push(slot)
         }
-        opener: if kind == PLUG_FRAME_IF -> ir_open_if(&self.f, test, 0) else -> ir_open(&self.f, if kind == PLUG_FRAME_LOOP -> IROp.Loop else -> IROp.Block, 0)
-        &self.frames.push(PlugFrame{
+        opener: if kind == PLUG_FRAME_IF -> ir_open_if(self.f, test, 0) else -> ir_open(self.f, if kind == PLUG_FRAME_LOOP -> IROp.Loop else -> IROp.Block, 0)
+        self.frames.push(PlugFrame{
             kind: kind, opener: opener, height: self.stack.len(), params: sig.params, results: sig.results,
             param_slots: params, result_slots: results, has_else: false,
         })
-        loop slot in params -> &self.push(slot)
-        if kind == PLUG_FRAME_LOOP -> &self.fuel()
+        loop slot in params -> self.push(slot)
+        if kind == PLUG_FRAME_LOOP -> self.fuel()
     }
 }
 
@@ -485,32 +485,32 @@ plug_translate: fn(kit: PlugKit, scope: PlugScope, fid: Int, ty: WasmFuncType, c
         flags: [Int:Int]{}, dead: false, skip: 0, dummy: -1, at: code.start,
     }
     cx.f.result = if ty.results.len() > 0 -> plug_row(rows, ty.results[0]) else -> -1
-    cx.inst = ir_slot(&cx.f, rows.word, IRSlotKind.Param, -1, 0)
+    cx.inst = ir_slot(cx.f, rows.word, IRSlotKind.Param, -1, 0)
     loop param in ty.params {
-        slot: ir_slot(&cx.f, plug_row(rows, param), IRSlotKind.Param, -1, 0)
-        &cx.locals.push(slot)
+        slot: ir_slot(cx.f, plug_row(rows, param), IRSlotKind.Param, -1, 0)
+        cx.locals.push(slot)
     }
     loop local in code.locals {
-        slot: ir_slot(&cx.f, plug_row(rows, local), IRSlotKind.Local, -1, 0)
-        &cx.locals.push(slot)
-        &cx.emit(IROp.Const, slot, 0, -1, -1)
+        slot: ir_slot(cx.f, plug_row(rows, local), IRSlotKind.Local, -1, 0)
+        cx.locals.push(slot)
+        cx.emit(IROp.Const, slot, 0, -1, -1)
     }
-    if cx.f.result >= 0 -> cx.dummy = &cx.konst(cx.f.result, 0)
-    &cx.fuel()
-    depth: &cx.load(rows.word, cx.inst, PLUG_INST_DEPTH)
-    one: &cx.word(1)
-    deeper: &cx.op2(IROp.Add, rows.word, depth, one)
-    &cx.store(cx.inst, PLUG_INST_DEPTH, deeper)
-    limit: &cx.word(PLUG_DEPTH_LIMIT)
-    exhausted: &cx.cmp(IROp.Gt, deeper, limit)
-    &cx.guard(exhausted, PLUG_TRAP_STACK)
-    &cx.open(PLUG_FRAME_BODY, WasmFuncType{params: [Int]{}, results: ty.results}, -1)
+    if cx.f.result >= 0 -> cx.dummy = cx.konst(cx.f.result, 0)
+    cx.fuel()
+    depth: cx.load(rows.word, cx.inst, PLUG_INST_DEPTH)
+    one: cx.word(1)
+    deeper: cx.op2(IROp.Add, rows.word, depth, one)
+    cx.store(cx.inst, PLUG_INST_DEPTH, deeper)
+    limit: cx.word(PLUG_DEPTH_LIMIT)
+    exhausted: cx.cmp(IROp.Gt, deeper, limit)
+    cx.guard(exhausted, PLUG_TRAP_STACK)
+    cx.open(PLUG_FRAME_BODY, WasmFuncType{params: [Int]{}, results: ty.results}, -1)
     loop k in 0..<code.op.len() {
         cx.at = code.at[k]
-        plug_op(&cx, kit, scope, code, k)
+        plug_op(cx, kit, scope, code, k)
     }
     if cx.frames.len() != 0 -> return Err(WasmError.new("function {fid}: unterminated body", cx.at))
-    Ok(^cx.f)
+    Ok(cx.f.move())
 }
 
 plug_op: fn(cx: &PlugCx, kit: PlugKit, scope: PlugScope, code: WasmCode, k: Int) WasmError! {
@@ -527,235 +527,235 @@ plug_op: fn(cx: &PlugCx, kit: PlugKit, scope: PlugScope, code: WasmCode, k: Int)
                 cx.skip -= 1
             }
             op == WASM_OP_ELSE && cx.skip == 0 -> {
-                &cx.enter_else()
+                cx.enter_else()
             }
             op == WASM_OP_END -> {
-                &cx.leave()
+                cx.leave()
             }
         }
         return
     }
     if {
         op == WASM_OP_UNREACHABLE -> {
-            &cx.trap(PLUG_TRAP_UNREACHABLE)
+            cx.trap(PLUG_TRAP_UNREACHABLE)
             cx.dead = true
         }
         op == WASM_OP_NOP -> {}
         op == WASM_OP_BLOCK -> {
-            &cx.open(PLUG_FRAME_BLOCK, plug_block_sig(scope, a), -1)
+            cx.open(PLUG_FRAME_BLOCK, plug_block_sig(scope, a), -1)
         }
         op == WASM_OP_LOOP -> {
-            &cx.open(PLUG_FRAME_LOOP, plug_block_sig(scope, a), -1)
+            cx.open(PLUG_FRAME_LOOP, plug_block_sig(scope, a), -1)
         }
         op == WASM_OP_IF -> {
-            condition: &cx.pop()
-            test: &cx.truth(condition)
-            &cx.open(PLUG_FRAME_IF, plug_block_sig(scope, a), test)
+            condition: cx.pop()
+            test: cx.truth(condition)
+            cx.open(PLUG_FRAME_IF, plug_block_sig(scope, a), test)
         }
         op == WASM_OP_ELSE -> {
-            &cx.enter_else()
+            cx.enter_else()
         }
         op == WASM_OP_END -> {
-            &cx.leave()
+            cx.leave()
         }
         op == WASM_OP_BR -> {
-            &cx.branch(a)
+            cx.branch(a)
             cx.dead = true
         }
         op == WASM_OP_BR_IF -> {
-            condition: &cx.pop()
-            test: &cx.truth(condition)
-            _: ir_open_if(&cx.f, test, 0)
-            &cx.branch(a)
-            ir_end(&cx.f, 0)
+            condition: cx.pop()
+            test: cx.truth(condition)
+            _: ir_open_if(cx.f, test, 0)
+            cx.branch(a)
+            ir_end(cx.f, 0)
         }
         op == WASM_OP_BR_TABLE -> {
-            index: &cx.pop()
+            index: cx.pop()
             loop (n, depth) in code.tables[a] {
-                case: &cx.konst(rows.i32, n)
-                hit: &cx.cmp(IROp.Eq, index, case)
-                _: ir_open_if(&cx.f, hit, 0)
-                &cx.branch(depth)
-                ir_end(&cx.f, 0)
+                case: cx.konst(rows.i32, n)
+                hit: cx.cmp(IROp.Eq, index, case)
+                _: ir_open_if(cx.f, hit, 0)
+                cx.branch(depth)
+                ir_end(cx.f, 0)
             }
-            &cx.branch(b)
+            cx.branch(b)
             cx.dead = true
         }
         op == WASM_OP_RETURN -> {
-            &cx.branch(cx.frames.len() - 1)
+            cx.branch(cx.frames.len() - 1)
             cx.dead = true
         }
         op == WASM_OP_CALL -> {
             ty: scope.callee_types[a]
-            args: &cx.pops(ty.params.len())
+            args: cx.pops(ty.params.len())
             all := [Int]{cx.inst}
-            loop arg in args -> &all.push(arg)
+            loop arg in args -> all.push(arg)
             row: if ty.results.len() > 0 -> plug_row(rows, ty.results[0]) else -> -1
-            result: &cx.call(kit.base + scope.funcs[a], all, row)
-            &cx.check(true)
-            if row >= 0 -> &cx.push(result)
+            result: cx.call(kit.base + scope.funcs[a], all, row)
+            cx.check(true)
+            if row >= 0 -> cx.push(result)
         }
         op == WASM_OP_CALL_INDIRECT -> {
             ty: scope.types[a]
-            index: &cx.pop()
-            args: &cx.pops(ty.params.len())
-            table: &cx.word(scope.tables[b])
-            sig: &cx.word(scope.type_sigs[a])
-            fid: &cx.word(cx.fid)
-            at: &cx.word(cx.at)
-            target: &cx.rt("jet_plugin_table_fid", [Int]{cx.inst, table, index, sig, fid, at}, rows.word)
-            &cx.check(false)
+            index: cx.pop()
+            args: cx.pops(ty.params.len())
+            table: cx.word(scope.tables[b])
+            sig: cx.word(scope.type_sigs[a])
+            fid: cx.word(cx.fid)
+            at: cx.word(cx.at)
+            target: cx.rt("jet_plugin_table_fid", [Int]{cx.inst, table, index, sig, fid, at}, rows.word)
+            cx.check(false)
             all := [Int]{cx.inst, target}
-            loop arg in args -> &all.push(arg)
+            loop arg in args -> all.push(arg)
             row: if ty.results.len() > 0 -> plug_row(rows, ty.results[0]) else -> -1
-            result: &cx.call(kit.dispatch_base + scope.type_sigs[a], all, row)
-            &cx.check(true)
-            if row >= 0 -> &cx.push(result)
+            result: cx.call(kit.dispatch_base + scope.type_sigs[a], all, row)
+            cx.check(true)
+            if row >= 0 -> cx.push(result)
         }
         op == WASM_OP_DROP -> {
-            _: &cx.pop()
+            _: cx.pop()
         }
         op == WASM_OP_SELECT || op == WASM_OP_SELECT_T -> {
-            condition: &cx.pop()
-            second: &cx.pop()
-            first: &cx.pop()
-            test: &cx.truth(condition)
-            dst: &cx.temp(cx.f.slot_type[first])
-            _: ir_open_if(&cx.f, test, 0)
-            &cx.emit(IROp.Copy, dst, first, -1, -1)
-            ir_else(&cx.f, 0)
-            &cx.emit(IROp.Copy, dst, second, -1, -1)
-            ir_end(&cx.f, 0)
-            &cx.push(dst)
+            condition: cx.pop()
+            second: cx.pop()
+            first: cx.pop()
+            test: cx.truth(condition)
+            dst: cx.temp(cx.f.slot_type[first])
+            _: ir_open_if(cx.f, test, 0)
+            cx.emit(IROp.Copy, dst, first, -1, -1)
+            ir_else(cx.f, 0)
+            cx.emit(IROp.Copy, dst, second, -1, -1)
+            ir_end(cx.f, 0)
+            cx.push(dst)
         }
         op == WASM_OP_LOCAL_GET -> {
             local: cx.locals[a]
-            value: &cx.emit_copy(cx.f.slot_type[local], local)
-            &cx.push(value)
+            value: cx.emit_copy(cx.f.slot_type[local], local)
+            cx.push(value)
         }
         op == WASM_OP_LOCAL_SET -> {
-            value: &cx.pop()
-            &cx.emit(IROp.Copy, cx.locals[a], value, -1, -1)
+            value: cx.pop()
+            cx.emit(IROp.Copy, cx.locals[a], value, -1, -1)
         }
         op == WASM_OP_LOCAL_TEE -> {
-            value: &cx.pop()
-            &cx.emit(IROp.Copy, cx.locals[a], value, -1, -1)
-            &cx.push(value)
+            value: cx.pop()
+            cx.emit(IROp.Copy, cx.locals[a], value, -1, -1)
+            cx.push(value)
         }
         op == WASM_OP_GLOBAL_GET -> {
-            globals: &cx.load(rows.word, cx.inst, PLUG_INST_GLOBALS)
-            value: &cx.load(plug_row(rows, scope.global_types[a]), globals, scope.globals[a] * 8)
-            &cx.push(value)
+            globals: cx.load(rows.word, cx.inst, PLUG_INST_GLOBALS)
+            value: cx.load(plug_row(rows, scope.global_types[a]), globals, scope.globals[a] * 8)
+            cx.push(value)
         }
         op == WASM_OP_GLOBAL_SET -> {
-            value: &cx.pop()
-            globals: &cx.load(rows.word, cx.inst, PLUG_INST_GLOBALS)
-            &cx.store(globals, scope.globals[a] * 8, value)
+            value: cx.pop()
+            globals: cx.load(rows.word, cx.inst, PLUG_INST_GLOBALS)
+            cx.store(globals, scope.globals[a] * 8, value)
         }
         op == WASM_OP_TABLE_GET -> {
-            index: &cx.pop()
-            table: &cx.word(scope.tables[a])
-            fid: &cx.word(cx.fid)
-            at: &cx.word(cx.at)
-            value: &cx.rt("jet_plugin_table_get", [Int]{cx.inst, table, index, fid, at}, rows.word)
-            &cx.check(false)
-            &cx.push(value)
+            index: cx.pop()
+            table: cx.word(scope.tables[a])
+            fid: cx.word(cx.fid)
+            at: cx.word(cx.at)
+            value: cx.rt("jet_plugin_table_get", [Int]{cx.inst, table, index, fid, at}, rows.word)
+            cx.check(false)
+            cx.push(value)
         }
         op == WASM_OP_TABLE_SET -> {
-            value: &cx.pop()
-            index: &cx.pop()
-            table: &cx.word(scope.tables[a])
-            fid: &cx.word(cx.fid)
-            at: &cx.word(cx.at)
-            _: &cx.rt("jet_plugin_table_set", [Int]{cx.inst, table, index, value, fid, at}, -1)
-            &cx.check(false)
+            value: cx.pop()
+            index: cx.pop()
+            table: cx.word(scope.tables[a])
+            fid: cx.word(cx.fid)
+            at: cx.word(cx.at)
+            _: cx.rt("jet_plugin_table_set", [Int]{cx.inst, table, index, value, fid, at}, -1)
+            cx.check(false)
         }
         op >= 0x28 && op <= 0x3e -> {
-            plug_memory_access(&cx, scope, op, b)
+            plug_memory_access(cx, scope, op, b)
         }
         op == WASM_OP_MEMORY_SIZE -> {
-            memories: &cx.load(rows.word, cx.inst, PLUG_INST_MEMORIES)
-            size: &cx.load(rows.word, memories, scope.memory * 24 + 8)
-            shift: &cx.word(16)
-            pages: &cx.op2(IROp.Shr, rows.word, size, shift)
-            value: &cx.emit_copy(rows.i32, pages)
-            &cx.push(value)
+            memories: cx.load(rows.word, cx.inst, PLUG_INST_MEMORIES)
+            size: cx.load(rows.word, memories, scope.memory * 24 + 8)
+            shift: cx.word(16)
+            pages: cx.op2(IROp.Shr, rows.word, size, shift)
+            value: cx.emit_copy(rows.i32, pages)
+            cx.push(value)
         }
         op == WASM_OP_MEMORY_GROW -> {
-            delta: &cx.pop()
-            memory: &cx.word(scope.memory)
-            fid: &cx.word(cx.fid)
-            at: &cx.word(cx.at)
-            old: &cx.rt("jet_plugin_memory_grow", [Int]{cx.inst, memory, delta, fid, at}, rows.word)
-            &cx.check(false)
-            value: &cx.emit_copy(rows.i32, old)
-            &cx.push(value)
+            delta: cx.pop()
+            memory: cx.word(scope.memory)
+            fid: cx.word(cx.fid)
+            at: cx.word(cx.at)
+            old: cx.rt("jet_plugin_memory_grow", [Int]{cx.inst, memory, delta, fid, at}, rows.word)
+            cx.check(false)
+            value: cx.emit_copy(rows.i32, old)
+            cx.push(value)
         }
         op == WASM_OP_I32_CONST -> {
-            value: &cx.konst(rows.i32, a)
-            &cx.push(value)
+            value: cx.konst(rows.i32, a)
+            cx.push(value)
         }
         op == WASM_OP_I64_CONST -> {
-            value: &cx.konst(rows.word, a)
-            &cx.push(value)
+            value: cx.konst(rows.word, a)
+            cx.push(value)
         }
         op == WASM_OP_F32_CONST -> {
-            value: &cx.konst(rows.f32, a)
-            &cx.push(value)
+            value: cx.konst(rows.f32, a)
+            cx.push(value)
         }
         op == WASM_OP_F64_CONST -> {
-            value: &cx.konst(rows.f64, a)
-            &cx.push(value)
+            value: cx.konst(rows.f64, a)
+            cx.push(value)
         }
         op >= 0x45 && op <= 0x4f -> {
-            plug_int_compare(&cx, op - 0x45, false)
+            plug_int_compare(cx, op - 0x45, false)
         }
         op >= 0x50 && op <= 0x5a -> {
-            plug_int_compare(&cx, op - 0x50, true)
+            plug_int_compare(cx, op - 0x50, true)
         }
         op >= 0x5b && op <= 0x60 -> {
-            plug_float_compare(&cx, op - 0x5b, true)
+            plug_float_compare(cx, op - 0x5b, true)
         }
         op >= 0x61 && op <= 0x66 -> {
-            plug_float_compare(&cx, op - 0x61, false)
+            plug_float_compare(cx, op - 0x61, false)
         }
         op >= 0x67 && op <= 0x78 -> {
-            plug_int_arith(&cx, op - 0x67, false)
+            plug_int_arith(cx, op - 0x67, false)
         }
         op >= 0x79 && op <= 0x8a -> {
-            plug_int_arith(&cx, op - 0x79, true)
+            plug_int_arith(cx, op - 0x79, true)
         }
         op >= 0x8b && op <= 0x98 -> {
-            plug_float_arith(&cx, op - 0x8b, true)
+            plug_float_arith(cx, op - 0x8b, true)
         }
         op >= 0x99 && op <= 0xa6 -> {
-            plug_float_arith(&cx, op - 0x99, false)
+            plug_float_arith(cx, op - 0x99, false)
         }
         op >= 0xa7 && op <= 0xc4 -> {
-            plug_convert(&cx, op)
+            plug_convert(cx, op)
         }
         op == WASM_OP_REF_NULL -> {
-            value: &cx.word(0)
-            &cx.push(value)
+            value: cx.word(0)
+            cx.push(value)
         }
         op == WASM_OP_REF_IS_NULL -> {
-            value: &cx.pop()
-            zero: &cx.word(0)
-            test: &cx.cmp(IROp.Eq, value, zero)
-            result: &cx.flag(test)
-            &cx.push(result)
+            value: cx.pop()
+            zero: cx.word(0)
+            test: cx.cmp(IROp.Eq, value, zero)
+            result: cx.flag(test)
+            cx.push(result)
         }
         op == WASM_OP_REF_FUNC -> {
-            value: &cx.word(scope.funcs[a] + 1)
-            &cx.push(value)
+            value: cx.word(scope.funcs[a] + 1)
+            cx.push(value)
         }
         op >= 0xfc00 && op <= 0xfc07 -> {
             n: op - 0xfc00
-            value: &cx.pop()
-            plug_trunc(&cx, value, n % 4 < 2, (n % 2) + (if n >= 4 -> 2 else -> 0) + 4)
+            value: cx.pop()
+            plug_trunc(cx, value, n % 4 < 2, (n % 2) + (if n >= 4 -> 2 else -> 0) + 4)
         }
         op >= WASM_OP_MEMORY_INIT && op <= WASM_OP_TABLE_FILL -> {
-            plug_bulk(&cx, scope, op, a, b)
+            plug_bulk(cx, scope, op, a, b)
         }
         else -> {
             return Err(WasmError.new("function {cx.fid}: instruction 0x{op} is not supported by the plugin engine", cx.at))
@@ -808,35 +808,35 @@ plug_memory_access: fn(cx: &PlugCx, scope: PlugScope, op: Int, offset: Int) Neve
             op == 0x29 -> rows.word
             else -> rows.i32
         }
-        address: &cx.pop()
-        pointer: &cx.address(scope.memory, address, offset, width)
-        value: &cx.load(narrow, pointer, 0)
-        kept: if narrow == result -> value else -> &cx.emit_copy(result, value)
-        &cx.push(kept)
+        address: cx.pop()
+        pointer: cx.address(scope.memory, address, offset, width)
+        value: cx.load(narrow, pointer, 0)
+        kept: if narrow == result -> value else -> cx.emit_copy(result, value)
+        cx.push(kept)
         return
     }
-    value: &cx.pop()
-    address: &cx.pop()
-    pointer: &cx.address(scope.memory, address, offset, width)
-    stored: if cx.f.slot_type[value] == narrow -> value else -> &cx.emit_copy(narrow, value)
-    &cx.store(pointer, 0, stored)
+    value: cx.pop()
+    address: cx.pop()
+    pointer: cx.address(scope.memory, address, offset, width)
+    stored: if cx.f.slot_type[value] == narrow -> value else -> cx.emit_copy(narrow, value)
+    cx.store(pointer, 0, stored)
 }
 
 // i32 (eqz … ge_u) or, `wide`, i64 comparisons by their index in the group.
 plug_int_compare: fn(cx: &PlugCx, index: Int, wide: Bool) Never! {
     row: if wide -> cx.rows.word else -> cx.rows.i32
     if index == 0 {
-        value: &cx.pop()
-        zero: &cx.konst(row, 0)
-        test: &cx.cmp(IROp.Eq, value, zero)
-        result: &cx.flag(test)
-        return &cx.push(result)
+        value: cx.pop()
+        zero: cx.konst(row, 0)
+        test: cx.cmp(IROp.Eq, value, zero)
+        result: cx.flag(test)
+        return cx.push(result)
     }
-    right := &cx.pop()
-    left := &cx.pop()
+    right := cx.pop()
+    left := cx.pop()
     if index >= 4 && index % 2 == 0 {
-        left = &cx.unsigned(left, wide)
-        right = &cx.unsigned(right, wide)
+        left = cx.unsigned(left, wide)
+        right = cx.unsigned(right, wide)
     }
     op: if {
         index == 1 -> IROp.Eq
@@ -846,9 +846,9 @@ plug_int_compare: fn(cx: &PlugCx, index: Int, wide: Bool) Never! {
         index <= 8 -> IROp.Le
         else -> IROp.Ge
     }
-    test: &cx.cmp(op, left, right)
-    result: &cx.flag(test)
-    &cx.push(result)
+    test: cx.cmp(op, left, right)
+    result: cx.flag(test)
+    cx.push(result)
 }
 
 // i32 or, `wide`, i64 clz … rotr by their index in the group.
@@ -857,20 +857,20 @@ plug_int_arith: fn(cx: &PlugCx, index: Int, wide: Bool) Never! {
     urow: if wide -> cx.rows.u64 else -> cx.rows.u32
     width: if wide -> 64 else -> 32
     if index <= 2 {
-        value: &cx.pop()
-        bits: if wide -> value else -> &cx.zext(value)
-        size: &cx.word(width)
+        value: cx.pop()
+        bits: if wide -> value else -> cx.zext(value)
+        size: cx.word(width)
         name: if {
             index == 0 -> "jet_plugin_clz"
             index == 1 -> "jet_plugin_ctz"
             else -> "jet_plugin_popcnt"
         }
-        count: &cx.rt(name, [Int]{bits, size}, cx.rows.word)
-        result: if wide -> count else -> &cx.emit_copy(row, count)
-        return &cx.push(result)
+        count: cx.rt(name, [Int]{bits, size}, cx.rows.word)
+        result: if wide -> count else -> cx.emit_copy(row, count)
+        return cx.push(result)
     }
-    right: &cx.pop()
-    left: &cx.pop()
+    right: cx.pop()
+    left: cx.pop()
     result := -1
     if {
         index == 3 || index == 4 || index == 5 || index == 10 || index == 11 || index == 12 -> {
@@ -882,72 +882,72 @@ plug_int_arith: fn(cx: &PlugCx, index: Int, wide: Bool) Never! {
                 index == 11 -> IROp.BitOr
                 else -> IROp.BitXor
             }
-            result = &cx.op2(op, row, left, right)
+            result = cx.op2(op, row, left, right)
         }
         index >= 6 && index <= 9 -> {
-            zero: &cx.konst(row, 0)
-            by_zero: &cx.cmp(IROp.Eq, right, zero)
-            &cx.guard(by_zero, PLUG_TRAP_DIVIDE)
+            zero: cx.konst(row, 0)
+            by_zero: cx.cmp(IROp.Eq, right, zero)
+            cx.guard(by_zero, PLUG_TRAP_DIVIDE)
             if index == 6 {
-                minus: &cx.konst(row, -1)
-                negating: &cx.cmp(IROp.Eq, right, minus)
-                _: ir_open_if(&cx.f, negating, 0)
-                least: &cx.konst(row, if wide -> 0 - 9223372036854775807 - 1 else -> 0 - 2147483648)
-                overflows: &cx.cmp(IROp.Eq, left, least)
-                &cx.guard(overflows, PLUG_TRAP_OVERFLOW)
-                ir_end(&cx.f, 0)
+                minus: cx.konst(row, -1)
+                negating: cx.cmp(IROp.Eq, right, minus)
+                _: ir_open_if(cx.f, negating, 0)
+                least: cx.konst(row, if wide -> 0 - 9223372036854775807 - 1 else -> 0 - 2147483648)
+                overflows: cx.cmp(IROp.Eq, left, least)
+                cx.guard(overflows, PLUG_TRAP_OVERFLOW)
+                ir_end(cx.f, 0)
             }
             op: if index <= 7 -> IROp.Div else -> IROp.Rem
             if {
                 index % 2 == 0 -> {
-                    result = &cx.op2(op, row, left, right)
+                    result = cx.op2(op, row, left, right)
                 }
                 else -> {
-                    ul: &cx.unsigned(left, wide)
-                    ur: &cx.unsigned(right, wide)
-                    quotient: &cx.op2(op, urow, ul, ur)
-                    result = &cx.signed(quotient, wide)
+                    ul: cx.unsigned(left, wide)
+                    ur: cx.unsigned(right, wide)
+                    quotient: cx.op2(op, urow, ul, ur)
+                    result = cx.signed(quotient, wide)
                 }
             }
         }
         else -> {
-            mask: &cx.konst(row, width - 1)
-            count: &cx.op2(IROp.BitAnd, row, right, mask)
+            mask: cx.konst(row, width - 1)
+            count: cx.op2(IROp.BitAnd, row, right, mask)
             if {
                 index == 13 -> {
-                    result = &cx.op2(IROp.Shl, row, left, count)
+                    result = cx.op2(IROp.Shl, row, left, count)
                 }
                 index == 14 -> {
-                    result = &cx.op2(IROp.Shr, row, left, count)
+                    result = cx.op2(IROp.Shr, row, left, count)
                 }
                 index == 15 -> {
-                    ul: &cx.unsigned(left, wide)
-                    shifted: &cx.op2(IROp.Shr, urow, ul, count)
-                    result = &cx.signed(shifted, wide)
+                    ul: cx.unsigned(left, wide)
+                    shifted: cx.op2(IROp.Shr, urow, ul, count)
+                    result = cx.signed(shifted, wide)
                 }
                 else -> {
-                    full: &cx.konst(row, width)
-                    rest: &cx.op2(IROp.Sub, row, full, count)
-                    back: &cx.op2(IROp.BitAnd, row, rest, mask)
-                    ul: &cx.unsigned(left, wide)
-                    first: &cx.op2(if index == 16 -> IROp.Shl else -> IROp.Shr, urow, ul, count)
-                    second: &cx.op2(if index == 16 -> IROp.Shr else -> IROp.Shl, urow, ul, back)
-                    joined: &cx.op2(IROp.BitOr, urow, first, second)
-                    result = &cx.signed(joined, wide)
+                    full: cx.konst(row, width)
+                    rest: cx.op2(IROp.Sub, row, full, count)
+                    back: cx.op2(IROp.BitAnd, row, rest, mask)
+                    ul: cx.unsigned(left, wide)
+                    first: cx.op2(if index == 16 -> IROp.Shl else -> IROp.Shr, urow, ul, count)
+                    second: cx.op2(if index == 16 -> IROp.Shr else -> IROp.Shl, urow, ul, back)
+                    joined: cx.op2(IROp.BitOr, urow, first, second)
+                    result = cx.signed(joined, wide)
                 }
             }
         }
     }
-    &cx.push(result)
+    cx.push(result)
 }
 
 // f32 (`narrow`) or f64 eq … ge by their index in the group.
 plug_float_compare: fn(cx: &PlugCx, index: Int, narrow: Bool) Never! {
-    right := &cx.pop()
-    left := &cx.pop()
+    right := cx.pop()
+    left := cx.pop()
     if narrow {
-        left = &cx.promote(left)
-        right = &cx.promote(right)
+        left = cx.promote(left)
+        right = cx.promote(right)
     }
     op: if {
         index == 0 -> IROp.Eq
@@ -957,9 +957,9 @@ plug_float_compare: fn(cx: &PlugCx, index: Int, narrow: Bool) Never! {
         index == 4 -> IROp.Le
         else -> IROp.Ge
     }
-    test: &cx.cmp(op, left, right)
-    result: &cx.flag(test)
-    &cx.push(result)
+    test: cx.cmp(op, left, right)
+    result: cx.flag(test)
+    cx.push(result)
 }
 
 // f32 (`narrow`, computed in binary64 and rounded once) or f64 abs …
@@ -968,8 +968,8 @@ plug_float_arith: fn(cx: &PlugCx, index: Int, narrow: Bool) Never! {
     result := -1
     if {
         index <= 6 -> {
-            value := &cx.pop()
-            if narrow -> value = &cx.promote(value)
+            value := cx.pop()
+            if narrow -> value = cx.promote(value)
             name: if {
                 index == 0 -> "jet_plugin_f64_abs"
                 index == 1 -> "jet_plugin_f64_neg"
@@ -979,14 +979,14 @@ plug_float_arith: fn(cx: &PlugCx, index: Int, narrow: Bool) Never! {
                 index == 5 -> "jet_plugin_f64_nearest"
                 else -> "jet_std_math_sqrt"
             }
-            result = &cx.rt(name, [Int]{value}, cx.rows.f64)
+            result = cx.rt(name, [Int]{value}, cx.rows.f64)
         }
         else -> {
-            right := &cx.pop()
-            left := &cx.pop()
+            right := cx.pop()
+            left := cx.pop()
             if narrow {
-                left = &cx.promote(left)
-                right = &cx.promote(right)
+                left = cx.promote(left)
+                right = cx.promote(right)
             }
             if {
                 index <= 10 -> {
@@ -996,7 +996,7 @@ plug_float_arith: fn(cx: &PlugCx, index: Int, narrow: Bool) Never! {
                         index == 9 -> IROp.Mul
                         else -> IROp.Div
                     }
-                    result = &cx.op2(op, cx.rows.f64, left, right)
+                    result = cx.op2(op, cx.rows.f64, left, right)
                 }
                 else -> {
                     name: if {
@@ -1004,75 +1004,75 @@ plug_float_arith: fn(cx: &PlugCx, index: Int, narrow: Bool) Never! {
                         index == 12 -> "jet_plugin_f64_max"
                         else -> "jet_plugin_f64_copysign"
                     }
-                    result = &cx.rt(name, [Int]{left, right}, cx.rows.f64)
+                    result = cx.rt(name, [Int]{left, right}, cx.rows.f64)
                 }
             }
         }
     }
-    if narrow -> result = &cx.demote(result)
-    &cx.push(result)
+    if narrow -> result = cx.demote(result)
+    cx.push(result)
 }
 
 // A float-to-integer truncation: `from32` an f32 operand, `mode` 1 unsigned
 // + 2 i64 + 4 saturating (PluginHost.jet jet_plugin_trunc).
 plug_trunc: fn(cx: &PlugCx, value: Int, from32: Bool, mode: Int) Never! {
-    operand: if from32 -> &cx.promote(value) else -> value
-    flags: &cx.word(mode)
-    fid: &cx.word(cx.fid)
-    at: &cx.word(cx.at)
-    bits: &cx.rt("jet_plugin_trunc", [Int]{cx.inst, operand, flags, fid, at}, cx.rows.word)
-    if mode < 4 -> &cx.check(false)
-    result: if mode % 4 >= 2 -> bits else -> &cx.narrow32(bits)
-    &cx.push(result)
+    operand: if from32 -> cx.promote(value) else -> value
+    flags: cx.word(mode)
+    fid: cx.word(cx.fid)
+    at: cx.word(cx.at)
+    bits: cx.rt("jet_plugin_trunc", [Int]{cx.inst, operand, flags, fid, at}, cx.rows.word)
+    if mode < 4 -> cx.check(false)
+    result: if mode % 4 >= 2 -> bits else -> cx.narrow32(bits)
+    cx.push(result)
 }
 
 // The numeric conversions 0xa7 … 0xc4.
 plug_convert: fn(cx: &PlugCx, op: Int) Never! {
     rows: cx.rows
-    value: &cx.pop()
+    value: cx.pop()
     if op >= 0xa8 && op <= 0xab {
         n: op - 0xa8
-        return plug_trunc(&cx, value, n < 2, n % 2)
+        return plug_trunc(cx, value, n < 2, n % 2)
     }
     if op >= 0xae && op <= 0xb1 {
         n: op - 0xae
-        return plug_trunc(&cx, value, n < 2, (n % 2) + 2)
+        return plug_trunc(cx, value, n < 2, (n % 2) + 2)
     }
     result := -1
     if {
         op == 0xa7 -> {
-            result = &cx.narrow32(value)
+            result = cx.narrow32(value)
         }
         op == 0xac -> {
-            result = &cx.emit_copy(rows.word, value)
+            result = cx.emit_copy(rows.word, value)
         }
         op == 0xad -> {
-            result = &cx.zext(value)
+            result = cx.zext(value)
         }
         (op >= 0xb2 && op <= 0xb5) || (op >= 0xb7 && op <= 0xba) -> {
             n: if op <= 0xb5 -> op - 0xb2 else -> op - 0xb7
             wide := value
-            if n == 1 -> wide = &cx.zext(value)
-            widened: if n == 3 -> &cx.rt("jet_plugin_f64_from_u64", [Int]{value}, rows.f64) else -> &cx.convert(rows.f64, wide)
-            result = if op <= 0xb5 -> &cx.demote(widened) else -> widened
+            if n == 1 -> wide = cx.zext(value)
+            widened: if n == 3 -> cx.rt("jet_plugin_f64_from_u64", [Int]{value}, rows.f64) else -> cx.convert(rows.f64, wide)
+            result = if op <= 0xb5 -> cx.demote(widened) else -> widened
         }
         op == 0xb6 -> {
-            result = &cx.demote(value)
+            result = cx.demote(value)
         }
         op == 0xbb -> {
-            result = &cx.promote(value)
+            result = cx.promote(value)
         }
         op == 0xbc -> {
-            result = &cx.reinterpret(value, rows.i32)
+            result = cx.reinterpret(value, rows.i32)
         }
         op == 0xbd -> {
-            result = &cx.reinterpret(value, rows.word)
+            result = cx.reinterpret(value, rows.word)
         }
         op == 0xbe -> {
-            result = &cx.reinterpret(value, rows.f32)
+            result = cx.reinterpret(value, rows.f32)
         }
         op == 0xbf -> {
-            result = &cx.reinterpret(value, rows.f64)
+            result = cx.reinterpret(value, rows.f64)
         }
         else -> {
             // extend8_s … extend32_s: the i32 forms (0xc0, 0xc1) and the i64 forms.
@@ -1081,84 +1081,84 @@ plug_convert: fn(cx: &PlugCx, op: Int) Never! {
                 op == 0xc1 || op == 0xc3 -> 16
                 else -> 32
             }
-            word: if op <= 0xc1 -> &cx.emit_copy(rows.word, value) else -> value
-            extended: &cx.sext(word, bits)
-            result = if op <= 0xc1 -> &cx.emit_copy(rows.i32, extended) else -> extended
+            word: if op <= 0xc1 -> cx.emit_copy(rows.word, value) else -> value
+            extended: cx.sext(word, bits)
+            result = if op <= 0xc1 -> cx.emit_copy(rows.i32, extended) else -> extended
         }
     }
-    &cx.push(result)
+    cx.push(result)
 }
 
 // The bulk memory and table instructions 0xfc08 … 0xfc11.
 plug_bulk: fn(cx: &PlugCx, scope: PlugScope, op: Int, a: Int, b: Int) Never! {
     rows: cx.rows
-    fid: &cx.word(cx.fid)
-    at: &cx.word(cx.at)
+    fid: cx.word(cx.fid)
+    at: cx.word(cx.at)
     if op == WASM_OP_DATA_DROP {
-        segment: &cx.word(scope.data_base + a)
-        _: &cx.rt("jet_plugin_data_drop", [Int]{cx.inst, segment}, -1)
+        segment: cx.word(scope.data_base + a)
+        _: cx.rt("jet_plugin_data_drop", [Int]{cx.inst, segment}, -1)
         return
     }
     if op == WASM_OP_ELEM_DROP {
-        segment: &cx.word(scope.elem_base + a)
-        _: &cx.rt("jet_plugin_elem_drop", [Int]{cx.inst, segment}, -1)
+        segment: cx.word(scope.elem_base + a)
+        _: cx.rt("jet_plugin_elem_drop", [Int]{cx.inst, segment}, -1)
         return
     }
     if op == WASM_OP_TABLE_SIZE {
-        table: &cx.word(scope.tables[a])
-        size: &cx.rt("jet_plugin_table_size", [Int]{cx.inst, table}, rows.word)
-        result: &cx.emit_copy(rows.i32, size)
-        return &cx.push(result)
+        table: cx.word(scope.tables[a])
+        size: cx.rt("jet_plugin_table_size", [Int]{cx.inst, table}, rows.word)
+        result: cx.emit_copy(rows.i32, size)
+        return cx.push(result)
     }
     if op == WASM_OP_TABLE_GROW {
-        delta: &cx.pop()
-        value: &cx.pop()
-        table: &cx.word(scope.tables[a])
-        old: &cx.rt("jet_plugin_table_grow", [Int]{cx.inst, table, value, delta, fid, at}, rows.word)
-        &cx.check(false)
-        result: &cx.emit_copy(rows.i32, old)
-        return &cx.push(result)
+        delta: cx.pop()
+        value: cx.pop()
+        table: cx.word(scope.tables[a])
+        old: cx.rt("jet_plugin_table_grow", [Int]{cx.inst, table, value, delta, fid, at}, rows.word)
+        cx.check(false)
+        result: cx.emit_copy(rows.i32, old)
+        return cx.push(result)
     }
-    count: &cx.pop()
-    second: &cx.pop()
-    first: &cx.pop()
+    count: cx.pop()
+    second: cx.pop()
+    first: cx.pop()
     if {
         op == WASM_OP_MEMORY_INIT -> {
-            memory: &cx.word(scope.memory)
-            segment: &cx.word(scope.data_base + a)
-            _: &cx.rt("jet_plugin_memory_init", [Int]{cx.inst, memory, segment, first, second, count, fid, at}, -1)
+            memory: cx.word(scope.memory)
+            segment: cx.word(scope.data_base + a)
+            _: cx.rt("jet_plugin_memory_init", [Int]{cx.inst, memory, segment, first, second, count, fid, at}, -1)
         }
         op == WASM_OP_MEMORY_COPY -> {
-            memory: &cx.word(scope.memory)
-            _: &cx.rt("jet_plugin_memory_copy", [Int]{cx.inst, memory, memory, first, second, count, fid, at}, -1)
+            memory: cx.word(scope.memory)
+            _: cx.rt("jet_plugin_memory_copy", [Int]{cx.inst, memory, memory, first, second, count, fid, at}, -1)
         }
         op == WASM_OP_MEMORY_FILL -> {
-            memory: &cx.word(scope.memory)
-            _: &cx.rt("jet_plugin_memory_fill", [Int]{cx.inst, memory, first, second, count, fid, at}, -1)
+            memory: cx.word(scope.memory)
+            _: cx.rt("jet_plugin_memory_fill", [Int]{cx.inst, memory, first, second, count, fid, at}, -1)
         }
         op == WASM_OP_TABLE_INIT -> {
-            table: &cx.word(scope.tables[b])
-            segment: &cx.word(scope.elem_base + a)
-            _: &cx.rt("jet_plugin_table_init", [Int]{cx.inst, table, segment, first, second, count, fid, at}, -1)
+            table: cx.word(scope.tables[b])
+            segment: cx.word(scope.elem_base + a)
+            _: cx.rt("jet_plugin_table_init", [Int]{cx.inst, table, segment, first, second, count, fid, at}, -1)
         }
         op == WASM_OP_TABLE_COPY -> {
-            target: &cx.word(scope.tables[a])
-            source: &cx.word(scope.tables[b])
-            _: &cx.rt("jet_plugin_table_copy", [Int]{cx.inst, target, source, first, second, count, fid, at}, -1)
+            target: cx.word(scope.tables[a])
+            source: cx.word(scope.tables[b])
+            _: cx.rt("jet_plugin_table_copy", [Int]{cx.inst, target, source, first, second, count, fid, at}, -1)
         }
         else -> {
-            table: &cx.word(scope.tables[a])
-            _: &cx.rt("jet_plugin_table_fill", [Int]{cx.inst, table, first, second, count, fid, at}, -1)
+            table: cx.word(scope.tables[a])
+            _: cx.rt("jet_plugin_table_fill", [Int]{cx.inst, table, first, second, count, fid, at}, -1)
         }
     }
-    &cx.check(false)
+    cx.check(false)
 }
 
 // ---- entry thunks, dispatchers and import stubs ------------------------------------
 
-plug_cx: fn(kit: PlugKit, f: ^IRFunction, fid: Int) -> PlugCx Never! {
+plug_cx: fn(kit: PlugKit, f: &&IRFunction, fid: Int) -> PlugCx Never! {
     PlugCx{
-        f: ^f, rows: kit.rows, names: kit.names, fid: fid, inst: 0, locals: [Int]{}, stack: [Int]{}, frames: [PlugFrame]{},
+        f: f.move(), rows: kit.rows, names: kit.names, fid: fid, inst: 0, locals: [Int]{}, stack: [Int]{}, frames: [PlugFrame]{},
         flags: [Int:Int]{}, dead: false, skip: 0, dummy: -1, at: 0,
     }
 }
@@ -1170,28 +1170,28 @@ plug_thunk: fn(kit: PlugKit, fid: Int, ty: WasmFuncType) -> IRFunction Never! {
     rows: kit.rows
     cx := plug_cx(kit, ir_hashed_function("plugin.thunk", "#plugin.thunk<{kit.artifact}>#{fid}", "jet_ir_plugin_thunk_", "", 0), fid)
     cx.f.result = rows.word
-    cx.inst = ir_slot(&cx.f, rows.word, IRSlotKind.Param, -1, 0)
-    area: ir_slot(&cx.f, rows.word, IRSlotKind.Param, -1, 0)
-    cx.dummy = &cx.word(0)
+    cx.inst = ir_slot(cx.f, rows.word, IRSlotKind.Param, -1, 0)
+    area: ir_slot(cx.f, rows.word, IRSlotKind.Param, -1, 0)
+    cx.dummy = cx.word(0)
     all := [Int]{cx.inst}
     loop (k, param) in ty.params {
-        wide: &cx.load(if param == WASM_F32 -> rows.f64 else -> plug_row(rows, param), area, k * 8)
-        value: if param == WASM_F32 -> &cx.demote(wide) else -> wide
-        &all.push(value)
+        wide: cx.load(if param == WASM_F32 -> rows.f64 else -> plug_row(rows, param), area, k * 8)
+        value: if param == WASM_F32 -> cx.demote(wide) else -> wide
+        all.push(value)
     }
     row: if ty.results.len() > 0 -> plug_row(rows, ty.results[0]) else -> -1
-    result: &cx.call(kit.base + fid, all, row)
-    &cx.check(false)
+    result: cx.call(kit.base + fid, all, row)
+    cx.check(false)
     if row >= 0 {
         stored: if {
-            row == rows.f32 -> &cx.promote(result)
-            row == rows.i32 -> &cx.emit_copy(rows.word, result)
+            row == rows.f32 -> cx.promote(result)
+            row == rows.i32 -> cx.emit_copy(rows.word, result)
             else -> result
         }
-        &cx.store(area, 0, stored)
+        cx.store(area, 0, stored)
     }
-    &cx.ret_dummy()
-    ^cx.f
+    cx.ret_dummy()
+    cx.f.move()
 }
 
 // The indirect-call dispatcher of signature class `sig`: calls whichever
@@ -1201,24 +1201,24 @@ plug_dispatcher: fn(kit: PlugKit, sig: Int, ty: WasmFuncType, targets: [Int]) ->
     cx := plug_cx(kit, ir_hashed_function("plugin.dispatch", "#plugin.dispatch<{kit.artifact}>#{sig}", "jet_ir_plugin_dispatch_", "", 0), -1)
     row: if ty.results.len() > 0 -> plug_row(rows, ty.results[0]) else -> -1
     cx.f.result = row
-    cx.inst = ir_slot(&cx.f, rows.word, IRSlotKind.Param, -1, 0)
-    target: ir_slot(&cx.f, rows.word, IRSlotKind.Param, -1, 0)
+    cx.inst = ir_slot(cx.f, rows.word, IRSlotKind.Param, -1, 0)
+    target: ir_slot(cx.f, rows.word, IRSlotKind.Param, -1, 0)
     all := [Int]{cx.inst}
     loop param in ty.params {
-        slot: ir_slot(&cx.f, plug_row(rows, param), IRSlotKind.Param, -1, 0)
-        &all.push(slot)
+        slot: ir_slot(cx.f, plug_row(rows, param), IRSlotKind.Param, -1, 0)
+        all.push(slot)
     }
-    if row >= 0 -> cx.dummy = &cx.konst(row, 0)
+    if row >= 0 -> cx.dummy = cx.konst(row, 0)
     loop fid in targets {
-        known: &cx.word(fid)
-        hit: &cx.cmp(IROp.Eq, target, known)
-        _: ir_open_if(&cx.f, hit, 0)
-        result: &cx.call(kit.base + fid, all, row)
-        &cx.emit(IROp.Return, -1, result, -1, -1)
-        ir_end(&cx.f, 0)
+        known: cx.word(fid)
+        hit: cx.cmp(IROp.Eq, target, known)
+        _: ir_open_if(cx.f, hit, 0)
+        result: cx.call(kit.base + fid, all, row)
+        cx.emit(IROp.Return, -1, result, -1, -1)
+        ir_end(cx.f, 0)
     }
-    &cx.ret_dummy()
-    ^cx.f
+    cx.ret_dummy()
+    cx.f.move()
 }
 
 // The stub of lowered import row `import` (function `fid`, core type `ty`):
@@ -1228,40 +1228,40 @@ plug_import_stub: fn(kit: PlugKit, fid: Int, import: Int, ty: WasmFuncType) -> I
     cx := plug_cx(kit, ir_hashed_function("plugin.import", "#plugin.import<{kit.artifact}>#{fid}", "jet_ir_plugin_import_", "", 0), fid)
     row: if ty.results.len() > 0 -> plug_row(rows, ty.results[0]) else -> -1
     cx.f.result = row
-    cx.inst = ir_slot(&cx.f, rows.word, IRSlotKind.Param, -1, 0)
+    cx.inst = ir_slot(cx.f, rows.word, IRSlotKind.Param, -1, 0)
     params := [Int]{}
     loop param in ty.params {
-        slot: ir_slot(&cx.f, plug_row(rows, param), IRSlotKind.Param, -1, 0)
-        &params.push(slot)
+        slot: ir_slot(cx.f, plug_row(rows, param), IRSlotKind.Param, -1, 0)
+        params.push(slot)
     }
-    if row >= 0 -> cx.dummy = &cx.konst(row, 0)
-    area: &cx.temp(rows.word)
-    &cx.emit(IROp.StackAddress, area, 8 * (params.len() + 1), 8, -1)
+    if row >= 0 -> cx.dummy = cx.konst(row, 0)
+    area: cx.temp(rows.word)
+    cx.emit(IROp.StackAddress, area, 8 * (params.len() + 1), 8, -1)
     loop (k, slot) in params {
         kind: cx.f.slot_type[slot]
         stored: if {
-            kind == rows.f32 -> &cx.promote(slot)
-            kind == rows.i32 -> &cx.emit_copy(rows.word, slot)
+            kind == rows.f32 -> cx.promote(slot)
+            kind == rows.i32 -> cx.emit_copy(rows.word, slot)
             else -> slot
         }
-        &cx.store(area, k * 8, stored)
+        cx.store(area, k * 8, stored)
     }
-    index: &cx.word(import)
-    count: &cx.word(params.len())
-    raw: &cx.rt("jet_plugin_host_import", [Int]{cx.inst, index, area, count}, rows.word)
-    &cx.check(false)
+    index: cx.word(import)
+    count: cx.word(params.len())
+    raw: cx.rt("jet_plugin_host_import", [Int]{cx.inst, index, area, count}, rows.word)
+    cx.check(false)
     if {
         row < 0 -> {
-            &cx.emit(IROp.Return, -1, -1, -1, -1)
+            cx.emit(IROp.Return, -1, -1, -1, -1)
         }
         else -> {
             result: if {
-                row == rows.i32 -> &cx.narrow32(raw)
+                row == rows.i32 -> cx.narrow32(raw)
                 row == rows.word -> raw
-                else -> &cx.reinterpret(raw, row)
+                else -> cx.reinterpret(raw, row)
             }
-            &cx.emit(IROp.Return, -1, result, -1, -1)
+            cx.emit(IROp.Return, -1, result, -1, -1)
         }
     }
-    ^cx.f
+    cx.f.move()
 }

@@ -40,7 +40,7 @@ store_reuse_direct_cas_entry: fn(verification: &StoreVerification, roots: Hangar
     seal_info: files.stat(store_reuse_seal_path(roots, digest)) ?? return false
     if !object_info.is_dir || object_info.is_symlink || !seal_info.is_file -> return false
     if (object_info.mode).bit_and(0o222) != 0 -> return false
-    sealed: store_check_seal(&verification, expected, roots.hangar_dir()) ?? return false
+    sealed: store_check_seal(verification, expected, roots.hangar_dir()) ?? return false
     sealed == digest
 }
 
@@ -58,7 +58,7 @@ store_snapshot_lease_unlocked: fn(verification: &StoreVerification, roots: Hanga
             else -> {}
         }
     }
-    direct_cas: store_reuse_direct_cas_entry(&verification, roots, entry)
+    direct_cas: store_reuse_direct_cas_entry(verification, roots, entry)
     if !validate_provider_facts {
         producer: ProducerRecord.decode(entry.producer_record) ?? return Err(StoreError.Other("warm cache entry `{entry.id}` has an invalid producer record: {err.message()}"))
         if sys.name() == "linux" && producer.provider == "nix" && !direct_cas {
@@ -74,7 +74,7 @@ store_snapshot_lease_unlocked: fn(verification: &StoreVerification, roots: Hanga
     }
     lease_snapshot_root: files.join(lease_root, "snapshot")
     snapshot_root: if direct_cas -> entry.out else -> lease_snapshot_root
-    if store_reuse_build_lease(&verification, roots, entry, projection_index, direct_cas, lease_root, lease_lock_path, ^live_lock, snapshot_root, lease_snapshot_root) == {
+    if store_reuse_build_lease(verification, roots, entry, projection_index, direct_cas, lease_root, lease_lock_path, live_lock, snapshot_root, lease_snapshot_root) == {
         .Ok(lease) -> Ok(lease)
         .Err(error) -> {
             // The live lock already dropped with the failed build.
@@ -109,7 +109,7 @@ store_reuse_hold_directory: fn(path: String) -> LeasedDirectory StoreError! {
     Ok(LeasedDirectory{path: path, directory: Val(directory), id: info.id, child_fd: store_lease_reserve_child_fd()})
 }
 
-store_reuse_build_lease: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, projection_index: NixProjectionIndex?, direct_cas: Bool, lease_root: String, lease_lock_path: String, live_lock: ^RuntimeLock, snapshot_root: String, lease_snapshot_root: String) -> CacheLease StoreError! {
+store_reuse_build_lease: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, projection_index: NixProjectionIndex?, direct_cas: Bool, lease_root: String, lease_lock_path: String, live_lock: &&RuntimeLock, snapshot_root: String, lease_snapshot_root: String) -> CacheLease StoreError! {
     if !files.exists(entry.out) {
         store_ensure_real_directory(snapshot_root, "cache lease snapshot")
         return Ok(CacheLease{
@@ -147,7 +147,7 @@ store_reuse_build_lease: fn(verification: &StoreVerification, roots: HangarRoots
     sealed_digest := entry.envelope.output_hash
     if !direct_cas {
         hardlinks := [String: String]{}
-        store_copy_snapshot_node(entry.out, snapshot_root, &hardlinks)
+        store_copy_snapshot_node(entry.out, snapshot_root, hardlinks)
         digest: pkg_try_output_hash_of(snapshot_root) ?? return Err(StoreError.Other(err.message()))
         if digest != entry.envelope.output_hash {
             store_remove_snapshot_node(snapshot_root)
@@ -160,38 +160,38 @@ store_reuse_build_lease: fn(verification: &StoreVerification, roots: HangarRoots
     snapshot_dir: store_reuse_hold_directory(snapshot_root)
     projections: if projection_index == {
         .Val(index) -> store_nix_store_projection_for_entry_index(roots, entry, snapshot_root, index)
-        .None -> store_nix_store_projection_for_entry(&verification, roots, entry, snapshot_root)
+        .None -> store_nix_store_projection_for_entry(verification, roots, entry, snapshot_root)
     }
-    if direct_cas -> store_reuse_validate_direct_projection_seals(&verification, roots, projections)
+    if direct_cas -> store_reuse_validate_direct_projection_seals(verification, roots, projections)
     output_sources := [LeaseOutputSource]{LeaseOutputSource{output_root: entry.out, source: snapshot_root}}
     seen_digests := [String]{entry.envelope.output_hash}
     output_names: store_sorted_keys(entry.named_outputs)
     loop name in output_names {
         digest: entry.named_outputs[name]
         if seen_digests.contains(digest) -> next
-        &seen_digests.push(digest)
+        seen_digests.push(digest)
         source := ""
         loop projection in projections {
             if source == "" && projection.digest == digest -> source = projection.source
         }
         if source == "" {
-            source = if direct_cas -> store_reuse_sealed_hangar_projection_object(&verification, roots, digest, "named output") else -> store_reuse_hangar_projection_object(roots, digest, "named output")
+            source = if direct_cas -> store_reuse_sealed_hangar_projection_object(verification, roots, digest, "named output") else -> store_reuse_hangar_projection_object(roots, digest, "named output")
         }
-        &output_sources.push(LeaseOutputSource{output_root: store_reuse_object_path(roots, digest), source: source})
+        output_sources.push(LeaseOutputSource{output_root: store_reuse_object_path(roots, digest), source: source})
     }
     opened: store_reuse_open_nix_projection_sources(projections)
     leased_output_roots := [LeasedOutputRoot]{}
     loop output in output_sources {
         if store_reuse_same_path(output.source, snapshot_root) {
             if sys.family() == "windows" {
-                &leased_output_roots.push(LeasedOutputRoot{output_root: output.output_root, child_root: LeaseText.plain(snapshot_root), child_fd: None})
+                leased_output_roots.push(LeasedOutputRoot{output_root: output.output_root, child_root: LeaseText.plain(snapshot_root), child_fd: None})
             } else {
-                &leased_output_roots.push(LeasedOutputRoot{output_root: output.output_root, child_root: snapshot_dir.child_text(""), child_fd: Val(snapshot_dir.child_fd)})
+                leased_output_roots.push(LeasedOutputRoot{output_root: output.output_root, child_root: snapshot_dir.child_text(""), child_fd: Val(snapshot_dir.child_fd)})
             }
             next
         }
         if sys.name() != "linux" {
-            &leased_output_roots.push(LeasedOutputRoot{output_root: output.output_root, child_root: LeaseText.plain(output.source), child_fd: None})
+            leased_output_roots.push(LeasedOutputRoot{output_root: output.output_root, child_root: LeaseText.plain(output.source), child_fd: None})
             next
         }
         at: store_reuse_binding_index(opened.bindings, output.source) ?? return Err(StoreError.Other("named output `{output.output_root}` has no stable lease handle"))
@@ -199,8 +199,8 @@ store_reuse_build_lease: fn(verification: &StoreVerification, roots: HangarRoots
         // root or single-file object is named by its canonical source, whose
         // target or identity validation re-checks.
         if opened.bindings[at].child_fd() == {
-            .Val(fd) -> &leased_output_roots.push(LeasedOutputRoot{output_root: output.output_root, child_root: store_lease_fd_text(fd), child_fd: Val(fd)})
-            .None -> &leased_output_roots.push(LeasedOutputRoot{output_root: output.output_root, child_root: LeaseText.plain(output.source), child_fd: None})
+            .Val(fd) -> leased_output_roots.push(LeasedOutputRoot{output_root: output.output_root, child_root: store_lease_fd_text(fd), child_fd: Val(fd)})
+            .None -> leased_output_roots.push(LeasedOutputRoot{output_root: output.output_root, child_root: LeaseText.plain(output.source), child_fd: None})
         }
     }
     bin_output_root := String?{None}
@@ -235,16 +235,16 @@ store_reuse_build_lease: fn(verification: &StoreVerification, roots: HangarRoots
         protocol: ExecutableLeaseProtocol.open(roots.root)
         protocol_lease_id = protocol.new_lease_id()
         protocol_owner_scope = ExecutableLeaseProtocol.owner_scope(protocol_lease_id)
-        members: store_reuse_executable_lease_members(&executables)
+        members: store_reuse_executable_lease_members(executables)
         prepared: protocol.prepare_snapshot(protocol_lease_id, protocol_owner_scope, snapshot_root, entry.name, entry.version, entry.reference, sealed_digest, members)
         frame: protocol.encode_request(prepared.request)
         receipt: protocol.accept_snapshot(frame, sealed_digest, snapshot_root)
         protocol_generation = receipt.generation
-        protocol_owner_lock = Val(^prepared.owner_lock)
+        protocol_owner_lock = Val(prepared.owner_lock.move())
     }
     wrapper_dir := LeasedDirectory?{None}
     if wrappers == {
-        .Val(found) -> wrapper_dir = Val(^found.directory)
+        .Val(found) -> wrapper_dir = Val(found.directory.move())
         .None -> {}
     }
     Ok(CacheLease{
@@ -275,7 +275,7 @@ store_reuse_build_lease: fn(verification: &StoreVerification, roots: HangarRoots
         bin_output_root: bin_output_root,
         bin_output_index: bin_output_index,
         projected_bin_root: projected_bin_root,
-        nix_projection_bindings: ^opened.bindings,
+        nix_projection_bindings: opened.bindings.move(),
         wrapper_directory_handle: wrapper_dir
     })
 }
@@ -299,7 +299,7 @@ store_reuse_open_snapshot_executables: fn(snapshot_root: String, bin: String?) -
         file: files.open(entry.path)
         info: file.stat()
         if !info.is_file -> next
-        &out.push(SnapshotFile{relative: entry.name, file: Val(file), id: info.id})
+        out.push(SnapshotFile{relative: entry.name, file: Val(file), id: info.id})
     }
     Ok(out)
 }
@@ -312,14 +312,14 @@ store_reuse_executable_lease_members: fn(executables: &[SnapshotFile]) -> [Lease
         relative: executables[index].relative
         if executables[index].file == None -> return Err(StoreError.Other("lease executable `{relative}` lost its handle"))
         if &executables[index].file == .Val(input) {
-            &input.seek(0)
+            input.seek(0)
             hasher := StreamingSHA256.new()
             loop {
                 chunk: input.read(65536)
                 if chunk.len() == 0 -> break
-                &hasher.update(chunk)
+                hasher.update(chunk)
             }
-            &members.push(LeaseMember{name: relative, digest: "sha256-{hasher.finalize_hex()}"})
+            members.push(LeaseMember{name: relative, digest: "sha256-{hasher.finalize_hex()}"})
         }
     }
     Ok(members)
@@ -354,13 +354,13 @@ store_reuse_create_exec_wrappers: fn(snapshot_root: String, executables: [Snapsh
     shell: store_reuse_find_system_tool("sh")
     argv: [String]{unshare, "--user", "--map-root-user", "--mount", "--propagation", "private", shell, "-c", STORE_LEASE_KEEPER_SCRIPT, "jetpack-lease-keeper", mount, mountpoint}
     child := process.cmd(argv).stdin(.Stream).stdout(.Stream).stderr(.Stream).spawn()
-    ready: store_reuse_keeper_line(&child)
-    if ready.trim() != "ready" -> return Err(store_reuse_wrapper_keeper_error(^child, "creating private executable mount"))
+    ready: store_reuse_keeper_line(child)
+    if ready.trim() != "ready" -> return Err(store_reuse_wrapper_keeper_error(child, "creating private executable mount"))
     root: "/proc/{child.id()}/root{mountpoint}"
     loop executable in executables -> files.symlink(store_lease_wrapper_target(root_fd, bin, executable.relative), files.join(root, executable.relative))
     child.stdin.write_all("seal\n".bytes())
-    sealed: store_reuse_keeper_line(&child)
-    if sealed.trim() != "sealed" -> return Err(store_reuse_wrapper_keeper_error(^child, "sealing private executable mount"))
+    sealed: store_reuse_keeper_line(child)
+    if sealed.trim() != "sealed" -> return Err(store_reuse_wrapper_keeper_error(child, "sealing private executable mount"))
     directory: store_reuse_hold_directory(root)
     child.stdin.close()
     receipt: child.wait()
@@ -376,9 +376,9 @@ store_reuse_keeper_line: fn(child: &ProcessChild) -> String Never! {
 }
 
 // Rust `wrapper_keeper_error`: the keeper's stderr names the failure.
-store_reuse_wrapper_keeper_error: fn(child: ^ProcessChild, action: String) -> StoreError Never! {
+store_reuse_wrapper_keeper_error: fn(child: &&ProcessChild, action: String) -> StoreError Never! {
     lines := [String]{}
-    loop line in child.stderr.lines() -> &lines.push(line)
+    loop line in child.stderr.lines() -> lines.push(line)
     if child.wait() == {
         .Err(_) -> {}
         else -> {}
@@ -393,7 +393,7 @@ store_copy_snapshot_node: fn(source: String, destination: String, hardlinks: &[S
     if info.is_dir {
         files.create_dir_all(destination)
         entries: files.list_dir(source)
-        loop entry in entries -> store_copy_snapshot_node(entry.path, files.join(destination, entry.name), &hardlinks)
+        loop entry in entries -> store_copy_snapshot_node(entry.path, files.join(destination, entry.name), hardlinks)
         files.set_mode(destination, (info.mode).bit_and(0o7777))
         return
     }

@@ -22,61 +22,61 @@ Pack: struct {
     overlays: [Overlay]
     prompt: String
 }
-nix_source: fn(name: ^String, upstream: ^String) -> Source {
+nix_source: fn(name: &&String, upstream: &&String) -> Source {
     return Source{name: name, upstream: upstream, via: "nix"}
 }
-core_source: fn(name: ^String, upstream: ^String) -> Source {
+core_source: fn(name: &&String, upstream: &&String) -> Source {
     return Source{name: name, upstream: upstream, via: "core"}
 }
-overlay: fn(source: ^String, packages: ^[String]) -> Overlay {
+overlay: fn(source: &&String, packages: &&[String]) -> Overlay {
     return Overlay{source: source, packages: packages}
 }
-pack_item: fn(source: ^String, name: ^String) -> Package {
+pack_item: fn(source: &&String, name: &&String) -> Package {
     return Package{source: source, name: name}
 }
-flatten_overlay: fn(o: ^Overlay) -> [Package] {
+flatten_overlay: fn(o: &&Overlay) -> [Package] {
     out: [Package] = []
     names: o.packages
     source: o.source
     loop name in names {
-        &out.push(pack_item(source.copy(), ^name))
+        out.push(pack_item(source.copy(), name))
     }
     return out
 }
-packages: fn(pack: ^Pack) -> [Package] {
+packages: fn(pack: &&Pack) -> [Package] {
     out: [Package] = []
     overlays: pack.overlays
     loop o in overlays {
-        grouped: flatten_overlay(^o)
+        grouped: flatten_overlay(o)
         loop p in grouped {
-            &out.push(p)
+            out.push(p)
         }
     }
     return out
 }
-source_ref: fn(p: ^Package) -> String { "{p.source}:{p.name}" }
-package_refs: fn(pack: ^Pack) -> [String] {
+source_ref: fn(p: &&Package) -> String { "{p.source}:{p.name}" }
+package_refs: fn(pack: &&Pack) -> [String] {
     out: [String] = []
-    loop p in packages(^pack) {
-        &out.push(source_ref(^p))
+    loop p in packages(pack) {
+        out.push(source_ref(p))
     }
     return out
 }
-source_directives: fn(sources: ^[Source]) -> [JSON] {
+source_directives: fn(sources: &&[Source]) -> [JSON] {
     out: [JSON] = []
     loop s in sources {
-        &out.push(source_json(^s))
+        out.push(source_json(s))
     }
     return out
 }
-text_array: fn(items: ^[String]) -> [JSON] {
+text_array: fn(items: &&[String]) -> [JSON] {
     out: [JSON] = []
     loop item in items {
-        &out.push(JSON.Text(item))
+        out.push(JSON.Text(item))
     }
     return out
 }
-source_json: fn(s: ^Source) -> JSON {
+source_json: fn(s: &&Source) -> JSON {
     m: [String:JSON] = []
     m["kind"] = JSON.Text("source")
     m["name"] = JSON.Text(s.name)
@@ -84,13 +84,13 @@ source_json: fn(s: ^Source) -> JSON {
     m["via"] = JSON.Text(s.via)
     return JSON.Object(m)
 }
-packages_json: fn(pack: ^Pack) -> JSON {
+packages_json: fn(pack: &&Pack) -> JSON {
     m: [String:JSON] = []
     m["kind"] = JSON.Text("packages")
-    m["items"] = JSON.Array(text_array(package_refs(^pack)))
+    m["items"] = JSON.Array(text_array(package_refs(pack)))
     return JSON.Object(m)
 }
-prompt_json: fn(label: ^String) -> JSON {
+prompt_json: fn(label: &&String) -> JSON {
     m: [String:JSON] = []
     m["kind"] = JSON.Text("prompt")
     m["label"] = JSON.Text(label)
@@ -99,8 +99,8 @@ prompt_json: fn(label: ^String) -> JSON {
 shell: fn() -> [JSON] {
     pack: Pack{sources: [nix_source("stable", "NixOS/nixpkgs/nixos-24.05@github"), nix_source("unstable", "NixOS/nixpkgs/nixpkgs-unstable@github"), core_source("mine", "./jet-pkgs")], overlays: [overlay("stable", ["ripgrep", "fd"]), overlay("unstable", ["neovim"]), overlay("mine", ["hello"])], prompt: "jetpack-fp"}
     directives := source_directives(pack.sources.copy())
-    &directives.push(packages_json(pack.copy()))
-    &directives.push(prompt_json(pack.prompt.copy()))
+    directives.push(packages_json(pack.copy()))
+    directives.push(prompt_json(pack.prompt.copy()))
     return directives
 }
 run: fn() {

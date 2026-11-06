@@ -14,8 +14,8 @@ cli_cmd_vendor: fn(verification: &StoreVerification, theme: Theme, parsed: CLIPa
         vendor_dir = if files.is_abs(requested) -> requested else -> files.join(cwd, requested)
     }
     built := [StoreEntry]{}
-    loop entry in store_list(&verification, roots) {
-        if entry.envelope.provenance.contains("core-") -> &built.push(entry)
+    loop entry in store_list(verification, roots) {
+        if entry.envelope.provenance.contains("core-") -> built.push(entry)
     }
     if built.len() == 0 {
         theme.status("nothing to vendor: no source-built packages in the hangar.")
@@ -62,7 +62,7 @@ cli_vendor_copy_dir: fn(src: String, dst: String) IOError! -[FS]> {
 // output hash, platform, closure, and signed producer facts. It executes
 // nothing, so it is safe to run against untrusted builds.
 cli_cmd_audit: fn(verification: &StoreVerification, theme: Theme) -[IO, FS, Env, Time.Wait]> Int Never! {
-    snapshot: store_audit_read_only(&verification, pkg_resolve_roots()) ?? {
+    snapshot: store_audit_read_only(verification, pkg_resolve_roots()) ?? {
         theme.error("could not read Hangar provenance", err.message(), "repair the Hangar journal or metadata, then retry audit.")
         return EXIT_USAGE
     }
@@ -94,7 +94,7 @@ cli_cmd_audit: fn(verification: &StoreVerification, theme: Theme) -[IO, FS, Env,
                     theme.detail("  Catalog Trust: {trust}")
                     theme.detail("  Signature Chain: {chain}")
                     if chain != "present" {
-                        &unverified_catalog.push(entry.id)
+                        unverified_catalog.push(entry.id)
                         native_catalog: producer.provider == "jetpackage" && (producer.facts.get("source.kind") ?? "") == "local-unofficial-catalog"
                         if native_catalog {
                             theme.detail("  Trust Note: native recipe mapping is unverified; artifact bytes remain SHA-256-verified")

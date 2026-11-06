@@ -69,7 +69,7 @@ DataErrorKind: enum {
         display: fn(self) -> String { data_error_kind_text(self) }
     }
     impl Debug {
-        debug: fn(^self) -> String { data_error_kind_text(self) }
+        debug: fn(&&self) -> String { data_error_kind_text(self) }
     }
 }
 
@@ -108,7 +108,7 @@ impl DataError.Display {
     display: fn(self) -> String { data_error_text(self) }
 }
 impl DataError.Debug {
-    debug: fn(^self) -> String { data_error_text(self) }
+    debug: fn(&&self) -> String { data_error_text(self) }
 }
 
 impl DataError {
@@ -310,7 +310,7 @@ DataWatchStatus: struct {
         display: fn(self) -> String { data_watch_status_text(self) }
     }
     impl Debug {
-        debug: fn(^self) -> String { data_watch_status_text(self) }
+        debug: fn(&&self) -> String { data_watch_status_text(self) }
     }
 }
 
@@ -733,13 +733,13 @@ track: fn<T, K>(rows: [T], _key: fn(T) -> K) -> DataTracked<T, K> DataError! {
     Ok(DataTracked<T, K>{snapshot: snapshot_from_rows<T>(rows)})
 }
 
-__query_make: fn<T>(steps: [String], one_shot: Bool, limits: DataLimits, run: ^fn() -> [T] DataError!) -> Query<T> Never! {
-    Query<T>{__steps: steps, __one_shot: one_shot, __limits: limits, __state: shared __QueryState{consumed: false}, __cell: shared __QueryCell<T>{run: ^run}}
+__query_make: fn<T>(steps: [String], one_shot: Bool, limits: DataLimits, run: &&fn() -> [T] DataError!) -> Query<T> Never! {
+    Query<T>{__steps: steps, __one_shot: one_shot, __limits: limits, __state: shared __QueryState{consumed: false}, __cell: shared __QueryCell<T>{run: run.move()}}
 }
 
 __query_steps: fn(steps: [String], step: String) -> [String] Never! {
     out := steps.copy()
-    &out.push(step)
+    out.push(step)
     out
 }
 
@@ -772,11 +772,11 @@ __query_stream: fn<T>(source: DataStream<T>) -> Query<T> Never! {
         if reader.cancelled -> return Err(data_error(DataErrorKind.State, "stream was cancelled", "data.stream"))
         out := [T]{}
         loop {
-            if __stream_pull<T>(&reader) == {
+            if __stream_pull<T>(reader) == {
                 .Ok(item) -> {
                     row: item ?? return Ok(out)
                     if out.len() >= limits.max_output_rows -> return Err(data_error(DataErrorKind.Limit, "max_output_rows {limits.max_output_rows} exceeded", "collect"))
-                    &out.push(row)
+                    out.push(row)
                 }
                 .Err(failure) -> return Err(failure)
             }
@@ -836,7 +836,7 @@ __stream_collect: fn<T>(stream: &DataStream<T>) -> [T] DataError! {
     }
     out := [T]{}
     loop {
-        item: __stream_pull<T>(&stream)
+        item: __stream_pull<T>(stream)
         row: item ?? return Ok(out)
         if limit >= 0 && out.len() >= limit {
             failure: data_error(DataErrorKind.Limit, "max_output_rows {limit} exceeded", "collect")
@@ -849,7 +849,7 @@ __stream_collect: fn<T>(stream: &DataStream<T>) -> [T] DataError! {
             }
             return Err(failure)
         }
-        &out.push(row)
+        out.push(row)
     }
 }
 
@@ -873,7 +873,7 @@ __stream_remaining: fn<T>(stream: DataStream<T>) -> Int Never! {
                 if cell.value.pull() == {
                     .Ok(item) -> {
                         if item == {
-                            .Val(row) -> &cell.value.ahead.push(row)
+                            .Val(row) -> cell.value.ahead.push(row)
                             else -> {
                                 cell.value.done = true
                                 reading = false
@@ -941,34 +941,34 @@ __PendingWindow: struct<T> {
 }
 
 // `stream.with_event_time(f)` with an `Int` result: Unix seconds.
-__stream_with_event_time: fn<T>(^stream: Stream<T>, event_time: ^fn(T) -> Int Never!) -> StreamEventTime<T> Never! {
-    StreamEventTime<T>{events: __stream_stamp_seconds<T>(^stream, ^event_time)}
+__stream_with_event_time: fn<T>(&&stream: Stream<T>, event_time: &&fn(T) -> Int Never!) -> StreamEventTime<T> Never! {
+    StreamEventTime<T>{events: __stream_stamp_seconds<T>(stream.move(), event_time)}
 }
 
 // `stream.with_event_time(f)` with a `DateTime` result.
-__stream_with_event_datetime: fn<T>(^stream: Stream<T>, event_time: ^fn(T) -> DateTime Never!) -> StreamEventTime<T> Never! {
-    StreamEventTime<T>{events: __stream_stamp_datetime<T>(^stream, ^event_time)}
+__stream_with_event_datetime: fn<T>(&&stream: Stream<T>, event_time: &&fn(T) -> DateTime Never!) -> StreamEventTime<T> Never! {
+    StreamEventTime<T>{events: __stream_stamp_datetime<T>(stream.move(), event_time)}
 }
 
-__stream_stamp_seconds: fn<T>(^stream: Stream<T>, event_time: ^fn(T) -> Int Never!) -> Stream<StreamEvent<T>> {
+__stream_stamp_seconds: fn<T>(&&stream: Stream<T>, event_time: &&fn(T) -> Int Never!) -> Stream<StreamEvent<T>> {
     loop value in stream {
         at: time.from_unix_seconds(event_time(value))
         yield StreamEvent<T>{value: value, event_time: at}
     }
 }
 
-__stream_stamp_datetime: fn<T>(^stream: Stream<T>, event_time: ^fn(T) -> DateTime Never!) -> Stream<StreamEvent<T>> {
+__stream_stamp_datetime: fn<T>(&&stream: Stream<T>, event_time: &&fn(T) -> DateTime Never!) -> Stream<StreamEvent<T>> {
     loop value in stream {
         at: event_time(value)
         yield StreamEvent<T>{value: value, event_time: at}
     }
 }
 
-__stream_key_by: fn<K, T>(^source: StreamEventTime<T>, key: ^fn(T) -> K Never!) -> KeyedStream<K, T> Never! {
-    KeyedStream<K, T>{events: __stream_keyed<K, T>(^source.events, ^key)}
+__stream_key_by: fn<K, T>(&&source: StreamEventTime<T>, key: &&fn(T) -> K Never!) -> KeyedStream<K, T> Never! {
+    KeyedStream<K, T>{events: __stream_keyed<K, T>(source.events.move(), key)}
 }
 
-__stream_keyed: fn<K, T>(^stream: Stream<StreamEvent<T>>, key: ^fn(T) -> K Never!) -> Stream<__KeyedEvent<K, T>> {
+__stream_keyed: fn<K, T>(&&stream: Stream<StreamEvent<T>>, key: &&fn(T) -> K Never!) -> Stream<__KeyedEvent<K, T>> {
     loop event in stream {
         yield __KeyedEvent<K, T>{key: key(event.value), event: event}
     }
@@ -977,7 +977,7 @@ __stream_keyed: fn<K, T>(^stream: Stream<StreamEvent<T>>, key: ^fn(T) -> K Never
 // A `Stream<T>` function is a generator that yields only from its own body,
 // so `.window()` is this generator itself, with the generator's default
 // failure carrier.
-__stream_window: fn<K: Equatable, T>(^source: KeyedStream<K, T>, width: time.Duration, watermark: time.Duration, late: LateEventDisposition) -> Stream<Window<K, T>> {
+__stream_window: fn<K: Equatable, T>(&&source: KeyedStream<K, T>, width: time.Duration, watermark: time.Duration, late: LateEventDisposition) -> Stream<Window<K, T>> {
     width_ns: width.ns
     lateness_ns: watermark.ns
     if width_ns <= 0 -> panic("stream window duration must be positive, got {width_ns}ns")
@@ -986,7 +986,7 @@ __stream_window: fn<K: Equatable, T>(^source: KeyedStream<K, T>, width: time.Dur
     pending := [__PendingWindow<T>]{}
     mark := 0
     has_mark := false
-    stream := ^source.events
+    stream := source.events.move()
     loop keyed in stream {
         event_ns: __stream_event_ns(keyed.event.event_time)
         // `.Drop` is the one late-event disposition: a late event joins no window.
@@ -1004,7 +1004,7 @@ __stream_window: fn<K: Equatable, T>(^source: KeyedStream<K, T>, width: time.Dur
                     break
                 }
             }
-            if key_index == keys.len() -> &keys.push(keyed.key)
+            if key_index == keys.len() -> keys.push(keyed.key)
             start_ns: event_ns /% width_ns * width_ns
             position := pending.len()
             joined := false
@@ -1020,14 +1020,14 @@ __stream_window: fn<K: Equatable, T>(^source: KeyedStream<K, T>, width: time.Dur
                 }
             }
             if joined {
-                &pending[position].events.push(keyed.event)
+                pending[position].events.push(keyed.event)
             } else {
-                &pending.insert(position, __PendingWindow<T>{key_index: key_index, start_ns: start_ns, events: [StreamEvent<T>]{keyed.event}})
+                pending.insert(position, __PendingWindow<T>{key_index: key_index, start_ns: start_ns, events: [StreamEvent<T>]{keyed.event}})
             }
         }
-        loop ready in __stream_windows_ready<K, T>(keys, &pending, width_ns, mark, false) -> yield ready
+        loop ready in __stream_windows_ready<K, T>(keys, pending, width_ns, mark, false) -> yield ready
     }
-    loop ready in __stream_windows_ready<K, T>(keys, &pending, width_ns, mark, true) -> yield ready
+    loop ready in __stream_windows_ready<K, T>(keys, pending, width_ns, mark, true) -> yield ready
 }
 
 // Event time as Unix nanoseconds; the window arithmetic is exact `Int`.
@@ -1040,9 +1040,9 @@ __stream_windows_ready: fn<K, T>(keys: [K], pending: &[__PendingWindow<T>], widt
     kept := [__PendingWindow<T>]{}
     loop open in pending {
         if flush || open.start_ns + width_ns <= watermark_ns {
-            &ready.push(Window<K, T>{key: keys[open.key_index], start: time.from_unix_nanoseconds(open.start_ns), end: time.from_unix_nanoseconds(open.start_ns + width_ns), events: open.events})
+            ready.push(Window<K, T>{key: keys[open.key_index], start: time.from_unix_nanoseconds(open.start_ns), end: time.from_unix_nanoseconds(open.start_ns + width_ns), events: open.events})
         } else {
-            &kept.push(open)
+            kept.push(open)
         }
     }
     pending = kept
@@ -1064,20 +1064,20 @@ __query_collect: fn<T>(query: Query<T>) -> [T] DataError! {
     Ok(rows)
 }
 
-__query_filter: fn<T>(query: Query<T>, predicate: ^fn(T) -> Bool) -> Query<T> Never! {
+__query_filter: fn<T>(query: Query<T>, predicate: &&fn(T) -> Bool) -> Query<T> Never! {
     __query_make<T>(__query_steps(query.__steps, "filter"), false, query.__limits.copy(), () -> {
         rows: __query_rows<T>(query) ?? return Err(err)
         out := [T]{}
         loop row in rows {
             keep: predicate(row.copy()) ?? return Err(data_error(DataErrorKind.State, "filter callback failed", "query.filter"))
-            if keep -> &out.push(row.copy())
+            if keep -> out.push(row.copy())
         }
         Ok(out)
     })
 }
 
 // A stable sort by the String key, bounded by `max_sort_rows`.
-__query_sort_by: fn<T>(query: Query<T>, key: ^fn(T) -> String) -> Query<T> Never! {
+__query_sort_by: fn<T>(query: Query<T>, key: &&fn(T) -> String) -> Query<T> Never! {
     __query_make<T>(__query_steps(query.__steps, "sort_by"), false, query.__limits.copy(), () -> {
         rows: __query_rows<T>(query) ?? return Err(err)
         limits: query.__limits.copy()
@@ -1085,10 +1085,10 @@ __query_sort_by: fn<T>(query: Query<T>, key: ^fn(T) -> String) -> Query<T> Never
         keys := [String]{}
         loop row in rows {
             text: key(row.copy()) ?? return Err(data_error(DataErrorKind.State, "sort key callback failed", "query.sort_by"))
-            &keys.push(text)
+            keys.push(text)
         }
         out := [T]{}
-        loop index in __query_merge_order(keys, false, false) -> &out.push(rows[index].copy())
+        loop index in __query_merge_order(keys, false, false) -> out.push(rows[index].copy())
         Ok(out)
     })
 }
@@ -1125,7 +1125,7 @@ __query_number: fn(text: String) -> Float? Never! { Val(Float.parse(text) ?? ret
 __query_merge_order: fn(keys: [String], sql_order: Bool, descending: Bool) -> [Int] Never! {
     count: keys.len()
     order := [Int]{}
-    loop index in 0..<count -> &order.push(index)
+    loop index in 0..<count -> order.push(index)
     width := 1
     loop width < count {
         merged := [Int]{}
@@ -1141,10 +1141,10 @@ __query_merge_order: fn(keys: [String], sql_order: Bool, descending: Bool) -> [I
                 take_left := right >= end
                 if !take_left && left < middle -> take_left = __query_order_before(keys, order[left], order[right], sql_order, descending)
                 if take_left {
-                    &merged.push(order[left])
+                    merged.push(order[left])
                     left = left + 1
                 } else {
-                    &merged.push(order[right])
+                    merged.push(order[right])
                     right = right + 1
                 }
             }
@@ -1156,20 +1156,20 @@ __query_merge_order: fn(keys: [String], sql_order: Bool, descending: Bool) -> [I
     order
 }
 
-__query_map: fn<T, U>(query: Query<T>, mapper: ^fn(T) -> U) -> Query<U> Never! {
+__query_map: fn<T, U>(query: Query<T>, mapper: &&fn(T) -> U) -> Query<U> Never! {
     __query_make<U>(__query_steps(query.__steps, "map"), true, query.__limits.copy(), () -> {
         rows: __query_rows<T>(query) ?? return Err(err)
         out := [U]{}
         loop row in rows {
             value: mapper(row.copy()) ?? return Err(data_error(DataErrorKind.State, "map callback failed", "query.map"))
-            &out.push(value)
+            out.push(value)
         }
         Ok(out)
     })
 }
 
 // The first minimum or maximum key in row order; an empty query has none.
-__query_extreme: fn<T, V: Comparable>(query: Query<T>, key: ^fn(T) -> V, maximum: Bool) -> Query<V> Never! {
+__query_extreme: fn<T, V: Comparable>(query: Query<T>, key: &&fn(T) -> V, maximum: Bool) -> Query<V> Never! {
     step: if maximum -> "max" else -> "min"
     operation: "query.{step}"
     __query_make<V>(__query_steps(query.__steps, step), true, query.__limits.copy(), () -> {
@@ -1178,7 +1178,7 @@ __query_extreme: fn<T, V: Comparable>(query: Query<T>, key: ^fn(T) -> V, maximum
         loop row in rows {
             candidate: key(row.copy()) ?? return Err(data_error(DataErrorKind.State, "extreme key callback failed", operation))
             if selected.len() == 0 {
-                &selected.push(candidate)
+                selected.push(candidate)
             } else {
                 replace: if maximum -> candidate > selected[0] else -> candidate < selected[0]
                 if replace -> selected[0] = candidate
@@ -1189,11 +1189,11 @@ __query_extreme: fn<T, V: Comparable>(query: Query<T>, key: ^fn(T) -> V, maximum
     })
 }
 
-__query_min: fn<T, V: Comparable>(query: Query<T>, key: ^fn(T) -> V) -> Query<V> Never! { __query_extreme<T, V>(query, ^key, false) }
+__query_min: fn<T, V: Comparable>(query: Query<T>, key: &&fn(T) -> V) -> Query<V> Never! { __query_extreme<T, V>(query, key, false) }
 
-__query_max: fn<T, V: Comparable>(query: Query<T>, key: ^fn(T) -> V) -> Query<V> Never! { __query_extreme<T, V>(query, ^key, true) }
+__query_max: fn<T, V: Comparable>(query: Query<T>, key: &&fn(T) -> V) -> Query<V> Never! { __query_extreme<T, V>(query, key, true) }
 
-__query_inner_join: fn<T, U>(left: Query<T>, right: Query<U>, left_key: ^fn(T) -> String, right_key: ^fn(U) -> String) -> Query<DataJoin<T, U>> Never! {
+__query_inner_join: fn<T, U>(left: Query<T>, right: Query<U>, left_key: &&fn(T) -> String, right_key: &&fn(U) -> String) -> Query<DataJoin<T, U>> Never! {
     __query_make<DataJoin<T, U>>(__query_steps(left.__steps, "inner_join"), true, left.__limits.copy(), () -> {
         left_rows: __query_rows<T>(left) ?? return Err(err)
         right_rows: __query_rows<U>(right) ?? return Err(err)
@@ -1201,7 +1201,7 @@ __query_inner_join: fn<T, U>(left: Query<T>, right: Query<U>, left_key: ^fn(T) -
     })
 }
 
-__query_left_join: fn<T, U>(left: Query<T>, right: Query<U>, left_key: ^fn(T) -> String, right_key: ^fn(U) -> String) -> Query<DataJoin<T, U?>> Never! {
+__query_left_join: fn<T, U>(left: Query<T>, right: Query<U>, left_key: &&fn(T) -> String, right_key: &&fn(U) -> String) -> Query<DataJoin<T, U?>> Never! {
     __query_make<DataJoin<T, U?>>(__query_steps(left.__steps, "left_join"), true, left.__limits.copy(), () -> {
         left_rows: __query_rows<T>(left) ?? return Err(err)
         right_rows: __query_rows<U>(right) ?? return Err(err)
@@ -1209,7 +1209,7 @@ __query_left_join: fn<T, U>(left: Query<T>, right: Query<U>, left_key: ^fn(T) ->
     })
 }
 
-__query_group_by: fn<T, K>(query: Query<T>, key: ^fn(T) -> K) -> DataGroupedQuery<T, K> Never! {
+__query_group_by: fn<T, K>(query: Query<T>, key: &&fn(T) -> K) -> DataGroupedQuery<T, K> Never! {
     DataGroupedQuery<T, K>{__query: query, __key: shared __QueryKeyCell<T, K>{key: (row: T) -> {
         value: key(row) ?? return Err(data_error(DataErrorKind.State, "group key callback failed", "query.group_by"))
         Ok(value)
@@ -1242,13 +1242,13 @@ __group_find: fn<K: Comparable>(keys: [K], order: [Int], key: K) -> Int Never! {
 }
 
 __group_add: fn<K>(keys: &[K], order: &[Int], found: Int, key: K) Never! {
-    &order.insert(-1 - found, keys.len())
-    &keys.push(key)
+    order.insert(-1 - found, keys.len())
+    keys.push(key)
 }
 
 __group_sorted: fn<K: Comparable, V>(groups: [Group<K, V>]) -> [Group<K, V>] Never! {
     out := groups
-    &out.sort_by((left: Group<K, V>, right: Group<K, V>) -> left.key <=> right.key)
+    out.sort_by((left: Group<K, V>, right: Group<K, V>) -> left.key <=> right.key)
     out
 }
 
@@ -1267,19 +1267,19 @@ __group_count: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>) -> Query<Gr
                 counts[found] = counts[found] + 1
             } else {
                 if keys.len() >= limits.max_groups -> return Err(data_error(DataErrorKind.Limit, "max_groups {limits.max_groups} exceeded", "query.group_by.count"))
-                __group_add<K>(&keys, &order, found, group_key)
-                &counts.push(1)
+                __group_add<K>(keys, order, found, group_key)
+                counts.push(1)
             }
         }
         out := [Group<K, Int>]{}
-        loop index in 0..<keys.len() -> &out.push(Group<K, Int>{key: keys[index].copy(), value: counts[index]})
+        loop index in 0..<keys.len() -> out.push(Group<K, Int>{key: keys[index].copy(), value: counts[index]})
         Ok(__group_sorted<K, Int>(out))
     })
 }
 
 // Group sums keep the value callback's numeric type; each numeric domain
 // supplies its own addition to the shared reducer.
-__group_sum: fn<T, K: Comparable, V>(grouped: DataGroupedQuery<T, K>, value: ^fn(T) -> V, add: ^fn(V, V) -> V) -> Query<Group<K, V>> Never! {
+__group_sum: fn<T, K: Comparable, V>(grouped: DataGroupedQuery<T, K>, value: &&fn(T) -> V, add: &&fn(V, V) -> V) -> Query<Group<K, V>> Never! {
     __query_make<Group<K, V>>(__group_steps<T, K>(grouped, "sum"), true, grouped.__query.__limits.copy(), () -> {
         rows: __query_rows<T>(grouped.__query) ?? return Err(err)
         limits: grouped.__query.__limits.copy()
@@ -1296,30 +1296,30 @@ __group_sum: fn<T, K: Comparable, V>(grouped: DataGroupedQuery<T, K>, value: ^fn
                 totals[found] = total
             } else {
                 if keys.len() >= limits.max_groups -> return Err(data_error(DataErrorKind.Limit, "max_groups {limits.max_groups} exceeded", "query.group_by.sum"))
-                __group_add<K>(&keys, &order, found, group_key)
-                &totals.push(group_value)
+                __group_add<K>(keys, order, found, group_key)
+                totals.push(group_value)
             }
         }
         if keys.len() > limits.max_output_rows -> return Err(data_error(DataErrorKind.Limit, "max_output_rows {limits.max_output_rows} exceeded", "query.group_by.sum"))
         out := [Group<K, V>]{}
-        loop index in 0..<keys.len() -> &out.push(Group<K, V>{key: keys[index].copy(), value: totals[index].copy()})
+        loop index in 0..<keys.len() -> out.push(Group<K, V>{key: keys[index].copy(), value: totals[index].copy()})
         Ok(__group_sorted<K, V>(out))
     })
 }
 
-__group_sum_int: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^fn(T) -> Int) -> Query<Group<K, Int>> Never! { __group_sum<T, K, Int>(grouped, ^value, (left: Int, right: Int) -> left + right) }
-__group_sum_float: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^fn(T) -> Float) -> Query<Group<K, Float>> Never! { __group_sum<T, K, Float>(grouped, ^value, (left: Float, right: Float) -> left + right) }
-__group_sum_f32: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^fn(T) -> F32) -> Query<Group<K, F32>> Never! { __group_sum<T, K, F32>(grouped, ^value, (left: F32, right: F32) -> left + right) }
-__group_sum_i8: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^fn(T) -> I8) -> Query<Group<K, I8>> Never! { __group_sum<T, K, I8>(grouped, ^value, (left: I8, right: I8) -> left + right) }
-__group_sum_i16: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^fn(T) -> I16) -> Query<Group<K, I16>> Never! { __group_sum<T, K, I16>(grouped, ^value, (left: I16, right: I16) -> left + right) }
-__group_sum_i32: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^fn(T) -> I32) -> Query<Group<K, I32>> Never! { __group_sum<T, K, I32>(grouped, ^value, (left: I32, right: I32) -> left + right) }
-__group_sum_i64: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^fn(T) -> I64) -> Query<Group<K, I64>> Never! { __group_sum<T, K, I64>(grouped, ^value, (left: I64, right: I64) -> left + right) }
-__group_sum_u8: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^fn(T) -> U8) -> Query<Group<K, U8>> Never! { __group_sum<T, K, U8>(grouped, ^value, (left: U8, right: U8) -> left + right) }
-__group_sum_u16: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^fn(T) -> U16) -> Query<Group<K, U16>> Never! { __group_sum<T, K, U16>(grouped, ^value, (left: U16, right: U16) -> left + right) }
-__group_sum_u32: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^fn(T) -> U32) -> Query<Group<K, U32>> Never! { __group_sum<T, K, U32>(grouped, ^value, (left: U32, right: U32) -> left + right) }
-__group_sum_u64: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^fn(T) -> U64) -> Query<Group<K, U64>> Never! { __group_sum<T, K, U64>(grouped, ^value, (left: U64, right: U64) -> left + right) }
+__group_sum_int: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: &&fn(T) -> Int) -> Query<Group<K, Int>> Never! { __group_sum<T, K, Int>(grouped, value, (left: Int, right: Int) -> left + right) }
+__group_sum_float: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: &&fn(T) -> Float) -> Query<Group<K, Float>> Never! { __group_sum<T, K, Float>(grouped, value, (left: Float, right: Float) -> left + right) }
+__group_sum_f32: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: &&fn(T) -> F32) -> Query<Group<K, F32>> Never! { __group_sum<T, K, F32>(grouped, value, (left: F32, right: F32) -> left + right) }
+__group_sum_i8: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: &&fn(T) -> I8) -> Query<Group<K, I8>> Never! { __group_sum<T, K, I8>(grouped, value, (left: I8, right: I8) -> left + right) }
+__group_sum_i16: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: &&fn(T) -> I16) -> Query<Group<K, I16>> Never! { __group_sum<T, K, I16>(grouped, value, (left: I16, right: I16) -> left + right) }
+__group_sum_i32: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: &&fn(T) -> I32) -> Query<Group<K, I32>> Never! { __group_sum<T, K, I32>(grouped, value, (left: I32, right: I32) -> left + right) }
+__group_sum_i64: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: &&fn(T) -> I64) -> Query<Group<K, I64>> Never! { __group_sum<T, K, I64>(grouped, value, (left: I64, right: I64) -> left + right) }
+__group_sum_u8: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: &&fn(T) -> U8) -> Query<Group<K, U8>> Never! { __group_sum<T, K, U8>(grouped, value, (left: U8, right: U8) -> left + right) }
+__group_sum_u16: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: &&fn(T) -> U16) -> Query<Group<K, U16>> Never! { __group_sum<T, K, U16>(grouped, value, (left: U16, right: U16) -> left + right) }
+__group_sum_u32: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: &&fn(T) -> U32) -> Query<Group<K, U32>> Never! { __group_sum<T, K, U32>(grouped, value, (left: U32, right: U32) -> left + right) }
+__group_sum_u64: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: &&fn(T) -> U64) -> Query<Group<K, U64>> Never! { __group_sum<T, K, U64>(grouped, value, (left: U64, right: U64) -> left + right) }
 
-__group_mean: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^fn(T) -> Float) -> Query<Group<K, Float>> Never! {
+__group_mean: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: &&fn(T) -> Float) -> Query<Group<K, Float>> Never! {
     __query_make<Group<K, Float>>(__group_steps<T, K>(grouped, "mean"), true, grouped.__query.__limits.copy(), () -> {
         rows: __query_rows<T>(grouped.__query) ?? return Err(err)
         limits: grouped.__query.__limits.copy()
@@ -1338,13 +1338,13 @@ __group_mean: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^fn(T
                 counts[found] = counts[found] + 1
             } else {
                 if keys.len() >= limits.max_groups -> return Err(data_error(DataErrorKind.Limit, "max_groups {limits.max_groups} exceeded", "query.group_by.mean"))
-                __group_add<K>(&keys, &order, found, group_key)
-                &totals.push(group_value)
-                &counts.push(1)
+                __group_add<K>(keys, order, found, group_key)
+                totals.push(group_value)
+                counts.push(1)
             }
         }
         out := [Group<K, Float>]{}
-        loop index in 0..<keys.len() -> &out.push(Group<K, Float>{key: keys[index].copy(), value: totals[index] / Float{counts[index]}})
+        loop index in 0..<keys.len() -> out.push(Group<K, Float>{key: keys[index].copy(), value: totals[index] / Float{counts[index]}})
         Ok(__group_sorted<K, Float>(out))
     })
 }
@@ -1355,7 +1355,7 @@ __group_mean: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^fn(T
 // projection or grouping changes the row shape.
 __query_sql: fn<T: Encode>(rows: [T], sql: SQL) -> Query<T> [FieldError]! {
     trees := [Dyn]{}
-    loop row in rows -> &trees.push(row.encode())
+    loop row in rows -> trees.push(row.encode())
     spec: __query_sql_spec(sql) ?? return Err(__query_field_error("{err}"))
     core.db.sql.__validate_query_fields(spec, __query_sql_fields(trees), "analytics query") ?? return Err(__query_field_error("{err}"))
     reshapes := spec.group_by.len() != 0 || spec.projection.len() != 1 || spec.projection[0] != sql_kernel.JetSQLSelectItem.Wildcard
@@ -1364,7 +1364,7 @@ __query_sql: fn<T: Encode>(rows: [T], sql: SQL) -> Query<T> [FieldError]! {
     }
     if reshapes -> return Err(__query_field_error("SQL projection/grouping changes the row shape; use the Dyn query result"))
     selected := [T]{}
-    loop index in __query_sql_select(trees, spec) -> &selected.push(rows[index].copy())
+    loop index in __query_sql_select(trees, spec) -> selected.push(rows[index].copy())
     Ok(__query_make<T>([String]{"scan", "sql"}, false, DataLimits.safe(), () -> Ok(selected.copy())))
 }
 
@@ -1410,9 +1410,9 @@ __query_sql_fields: fn(trees: [Dyn]) -> [String] Never! {
     names := [String]{}
     loop tree in trees {
         if tree == .Object(_) {
-            loop entry in encoding_stream.object_entries(tree) -> &names.push(entry.key.copy())
+            loop entry in encoding_stream.object_entries(tree) -> names.push(entry.key.copy())
         } else {
-            &names.push("$")
+            names.push("$")
         }
     }
     names
@@ -1445,20 +1445,20 @@ __query_sql_select: fn(trees: [Dyn], spec: sql_kernel.JetSQLQuery) -> [Int] Neve
             cell: __query_sql_cell(trees[index], filter.field) ?? next
             if !sql_kernel.compare_sql_cell(cell, filter.operator, filter.value) -> next
         }
-        &selected.push(index)
+        selected.push(index)
     }
     if spec.order == .Val(order) {
         keys := [String]{}
-        loop index in selected -> &keys.push(__query_sql_cell(trees[index], order.field) ?? "")
+        loop index in selected -> keys.push(__query_sql_cell(trees[index], order.field) ?? "")
         ordered := [Int]{}
-        loop position in __query_merge_order(keys, true, order.descending) -> &ordered.push(selected[position])
+        loop position in __query_merge_order(keys, true, order.descending) -> ordered.push(selected[position])
         selected = ordered
     }
     if spec.limit == .Val(limit) {
         kept := [Int]{}
         loop index in selected {
             if (U64.from_int(kept.len()) ?? U64{0}) >= limit -> break
-            &kept.push(index)
+            kept.push(index)
         }
         selected = kept
     }
@@ -1471,7 +1471,7 @@ __query_sql_select: fn(trees: [Dyn], spec: sql_kernel.JetSQLQuery) -> [Int] Neve
 __schema: fn<T>(_rows: [T], names: [String], types: [String]) -> [DataColumn] Never! {
     columns := [DataColumn]{}
     loop index in 0..<names.len() {
-        &columns.push(DataColumn{id: __column_identity(names[index], types[index]), name: names[index].copy(), type_name: types[index].copy(), nullable: types[index].ends_with("?")})
+        columns.push(DataColumn{id: __column_identity(names[index], types[index]), name: names[index].copy(), type_name: types[index].copy(), nullable: types[index].ends_with("?")})
     }
     columns
 }
@@ -1486,7 +1486,7 @@ __column_identity: fn(name: String, type_name: String) -> String Never! {
     out := "column-".bytes()
     loop index in 0..<16 {
         shift: U64.from_int(60 - index * 4) ?? U64{0}
-        &out.push(digits[Int.from_u64((hash >> shift).bit_and(U64{15}))])
+        out.push(digits[Int.from_u64((hash >> shift).bit_and(U64{15}))])
     }
     String.from_bytes(out) ?? ""
 }
@@ -1588,7 +1588,7 @@ database: fn<T>(query: String, parameters: [String], authority: String, limits: 
 
 value: fn<T: Encode>(value: T, limits: DataLimits) -> DataLoader<T> DataError! {
     payload := [U8]{}
-    data_loader_render(&payload, value.encode())
+    data_loader_render(payload, value.encode())
     data_loader_check_payload(limits, payload.len(), "data.value") ?? return Err(err)
     loader := make_loader<T>(DataLoaderKind.Value, "value", "", [String]{}, "json", "local", limits) ?? return Err(err)
     loader.payload = Val(payload)
@@ -1687,10 +1687,10 @@ json: fn<T: Decode>(text: String) -> [T] DataError! {
 // `jet_data_stream_scan`). The stream pulls one record at a time: the first
 // record names the fields, and every later record must carry exactly that
 // many. A row failure carries its 1-based data row and stays latched.
-csv_reader: fn<T: Decode>(reader: ^FileReader, limits: DataLimits) -[FS, IO]> DataStream<T> DataError! {
+csv_reader: fn<T: Decode>(reader: &&FileReader, limits: DataLimits) -[FS, IO]> DataStream<T> DataError! {
     data_limits_check(limits) ?? return Err(err)
-    records: csv_codec.reader(^reader, limits.encoding) ?? return Err(data_from_encoding("csv_reader", None, err))
-    state: shared __CSVRowSource{records: ^records, header: [String]{}, started: false, row: 0}
+    records: csv_codec.reader(reader, limits.encoding) ?? return Err(data_from_encoding("csv_reader", None, err))
+    state: shared __CSVRowSource{records: records.move(), header: [String]{}, started: false, row: 0}
     source: shared __StreamSource<T>{
         pull: () -> csv_reader_next<T>(state),
         limits: limits,
@@ -1708,7 +1708,7 @@ csv_reader_next: fn<T: Decode>(state: Shared<__CSVRowSource>) -> T? DataError! {
     cell := state.guard_edit()
     if !cell.value.started {
         cell.value.started = true
-        if &cell.value.records.next() == {
+        if cell.value.records.next() == {
             .Ok(first) -> {
                 named: first ?? return Ok(None)
                 cell.value.header = named.fields.copy()
@@ -1716,7 +1716,7 @@ csv_reader_next: fn<T: Decode>(state: Shared<__CSVRowSource>) -> T? DataError! {
             .Err(failure) -> return Err(data_from_encoding("csv_reader", None, failure))
         }
     }
-    if &cell.value.records.next() == {
+    if cell.value.records.next() == {
         .Ok(next) -> {
             record: next ?? return Ok(None)
             cell.value.row = cell.value.row + 1
@@ -1739,8 +1739,8 @@ csv_reader_row: fn<T: Decode>(header: [String], fields: [String], row: Int) -> T
         return Err(error)
     }
     entries := [(key: String, value: Dyn)]{}
-    loop column in 0..<header.len() -> &entries.push((key: header[column].copy(), value: Dyn.Text(fields[column].copy())))
-    tree: encoding_stream.object_from_entries(^entries)
+    loop column in 0..<header.len() -> entries.push((key: header[column].copy(), value: Dyn.Text(fields[column].copy())))
+    tree: encoding_stream.object_from_entries(entries)
     previous: encoding.__text_cells_enter()
     if tree.decode<T>() == {
         .Ok(value) -> {
@@ -1785,11 +1785,11 @@ data_limits_check: fn(limits: DataLimits) DataError! {
 // core-library.md `json_reader<T: Decode>(reader, limits)`). Numbers keep
 // their typed lexemes, each array element folds to one tree under the
 // reader's allocation budget, and a failure stays latched.
-json_reader: fn<T: Decode>(reader: ^FileReader, limits: DataLimits) -[FS, IO]> DataStream<T> DataError! {
+json_reader: fn<T: Decode>(reader: &&FileReader, limits: DataLimits) -[FS, IO]> DataStream<T> DataError! {
     data_limits_check(limits) ?? return Err(err)
-    parser := encoding_stream.json_reader(^reader, limits.encoding, false) ?? return Err(data_from_encoding("json_reader", None, err))
+    parser := encoding_stream.json_reader(reader, limits.encoding, false) ?? return Err(data_from_encoding("json_reader", None, err))
     parser.typed_numbers = true
-    state: shared __JSONRowSource{parser: ^parser, array_started: false, array_done: false, row: 0}
+    state: shared __JSONRowSource{parser: parser.move(), array_started: false, array_done: false, row: 0}
     source: shared __StreamSource<T>{
         pull: () -> json_reader_next<T>(state),
         limits: limits,
@@ -1807,7 +1807,7 @@ json_reader_next: fn<T: Decode>(state: Shared<__JSONRowSource>) -> T? DataError!
     cell := state.guard_edit()
     if cell.value.array_done -> return Ok(None)
     if !cell.value.array_started {
-        if &cell.value.parser.next() == {
+        if cell.value.parser.next() == {
             .Ok(next) -> {
                 opened: next ?? return Ok(None)
                 if opened != .ArrayStart {
@@ -1818,7 +1818,7 @@ json_reader_next: fn<T: Decode>(state: Shared<__JSONRowSource>) -> T? DataError!
             .Err(failure) -> return Err(data_from_encoding("json_reader", None, failure))
         }
     }
-    first: if &cell.value.parser.next() == {
+    first: if cell.value.parser.next() == {
         .Ok(next) -> next
         .Err(failure) -> {
             return Err(data_from_encoding("json_reader", Val(cell.value.row + 1), failure))
@@ -1833,7 +1833,7 @@ json_reader_next: fn<T: Decode>(state: Shared<__JSONRowSource>) -> T? DataError!
         return Ok(None)
     }
     heap := encoding_stream.FoldBudget{decoded: 0, tracked: 0}
-    tree: if &cell.value.parser.fold(^event, &heap) == {
+    tree: if cell.value.parser.fold(event, heap) == {
         .Ok(folded) -> folded
         .Err(failure) -> {
             cell.value.parser.allocation.release(heap.tracked)
@@ -1860,21 +1860,21 @@ json_reader_next: fn<T: Decode>(state: Shared<__JSONRowSource>) -> T? DataError!
 // snapshot. Any failure is recorded in the loader status before it returns.
 snapshot: fn<T: [Encode, Decode]>(loader: &DataLoader<T>) -[FS, Net, DB]> DataSnapshot<T> DataError! {
     if loader.cancelled {
-        return Err(data_loader_fail<T>(&loader, data_loader_error(DataErrorKind.State, "data.loader", "loader was cancelled before snapshot")))
+        return Err(data_loader_fail<T>(loader, data_loader_error(DataErrorKind.State, "data.loader", "loader was cancelled before snapshot")))
     }
-    data_loader_validate<T>(loader) ?? return Err(data_loader_fail<T>(&loader, err))
-    data_limits_check(loader.limits) ?? return Err(data_loader_fail<T>(&loader, err))
-    payload: data_loader_payload<T>(loader) ?? return Err(data_loader_fail<T>(&loader, err))
-    tree: data_loader_tree(payload.data, loader.format, loader.limits) ?? return Err(data_loader_fail<T>(&loader, err))
+    data_loader_validate<T>(loader) ?? return Err(data_loader_fail<T>(loader, err))
+    data_limits_check(loader.limits) ?? return Err(data_loader_fail<T>(loader, err))
+    payload: data_loader_payload<T>(loader) ?? return Err(data_loader_fail<T>(loader, err))
+    tree: data_loader_tree(payload.data, loader.format, loader.limits) ?? return Err(data_loader_fail<T>(loader, err))
     value: if data_loader_decode<T>(tree, loader.format == DataFormat.CSV) == {
         .Ok(result) -> result
         .Err(failures) -> {
             reasons: loop failure in failures -> if failure.path == "" -> failure.reason else -> "{failure.path}: {failure.reason}"
-            return Err(data_loader_fail<T>(&loader, data_loader_error(DataErrorKind.Decode, "data.loader", reasons.join("; "))))
+            return Err(data_loader_fail<T>(loader, data_loader_error(DataErrorKind.Decode, "data.loader", reasons.join("; "))))
         }
     }
     canonical := [U8]{}
-    data_loader_render(&canonical, value.encode())
+    data_loader_render(canonical, value.encode())
     schema := data_loader_schema(tree, loader.format)
     schema.identity = data_loader_digest(schema.identity.bytes())
     provenance_source: loader.source.copy()
@@ -1882,7 +1882,7 @@ snapshot: fn<T: [Encode, Decode]>(loader: &DataLoader<T>) -[FS, Net, DB]> DataSn
     provenance_format: loader.format
     provenance: DataProvenance{source: provenance_source, format: provenance_format, authority: provenance_authority}
     // PreludeDataFlow::commit_snapshot
-    data_loader_check_payload(loader.limits, canonical.len(), "data.snapshot") ?? return Err(data_loader_fail<T>(&loader, err))
+    data_loader_check_payload(loader.limits, canonical.len(), "data.snapshot") ?? return Err(data_loader_fail<T>(loader, err))
     content_id: data_loader_digest(canonical)
     source_material := ""
     source_material = data_loader_identity_part(source_material, data_loader_kind_text(loader.source.kind))
@@ -2054,13 +2054,13 @@ quantile: fn(values: [Float], q: Float) -> Float DataError! {
 // The interpolated quantile of nonempty, finite values within max_sort_rows.
 finite_quantile: fn(values: [Float], q: Float) -> Float DataError! {
     work := [Float]{}
-    loop value in values -> &work.push(value)
+    loop value in values -> work.push(value)
     pos := q * Float{work.len() - 1}
     lo := Int.from_float(pos) ?? panic("quantile position must be finite")
     hi := lo
     if (Float{lo}) < pos -> hi = lo + 1
     if hi >= work.len() -> hi = work.len() - 1
-    low: select_rank(&work, 0, work.len(), lo)
+    low: select_rank(work, 0, work.len(), lo)
     if lo == hi -> return Ok(normalize_zero(low))
     // Selection leaves every value after rank `lo` at or above it, so the
     // next rank is their minimum.
@@ -2095,7 +2095,7 @@ rolling_mean: fn(values: [Float], window: Int) -> [Float] DataError! {
         n := i + 1 - start
         mean_value := total / Float{n}
         if nonfinite(mean_value) -> return Err(data_error(DataErrorKind.Overflow, "finite overflow while computing rolling mean", "rolling_mean"))
-        &out.push(normalize_zero(mean_value))
+        out.push(normalize_zero(mean_value))
     }
     Ok(out)
 }
@@ -2106,11 +2106,11 @@ inner_join: fn<T, U>(left: [T], right: [U], left_key: fn(T) -> String, right_key
     right_keys := [String]{}
     loop row in left {
         key: left_key(row) ?? return Err(data_error(DataErrorKind.Decode, "left join key failed", "inner_join"))
-        &left_keys.push(key)
+        left_keys.push(key)
     }
     loop row in right {
         key: right_key(row) ?? return Err(data_error(DataErrorKind.Decode, "right join key failed", "inner_join"))
-        &right_keys.push(key)
+        right_keys.push(key)
     }
     // The output cardinality is known from per-key counts before any row is
     // built, so a limit breach costs O(left + right) rather than one push per
@@ -2127,7 +2127,7 @@ inner_join: fn<T, U>(left: [T], right: [U], left_key: fn(T) -> String, right_key
     loop left_index in 0..<left.len() {
         position: right_index.positions.get(left_keys[left_index]) ?? next
         loop right_index_at in right_index.rows[position] {
-            &out.push(DataJoin<T, U>{left: left[left_index], right: right[right_index_at]})
+            out.push(DataJoin<T, U>{left: left[left_index], right: right[right_index_at]})
         }
     }
     if out.len() > limits.max_output_rows {
@@ -2142,11 +2142,11 @@ left_join: fn<T, U>(left: [T], right: [U], left_key: fn(T) -> String, right_key:
     right_keys := [String]{}
     loop row in left {
         key: left_key(row) ?? return Err(data_error(DataErrorKind.Decode, "left join key failed", "left_join"))
-        &left_keys.push(key)
+        left_keys.push(key)
     }
     loop row in right {
         key: right_key(row) ?? return Err(data_error(DataErrorKind.Decode, "right join key failed", "left_join"))
-        &right_keys.push(key)
+        right_keys.push(key)
     }
     // Every left row yields at least one output row; see inner_join.
     right_index: join_index(right_keys)
@@ -2163,11 +2163,11 @@ left_join: fn<T, U>(left: [T], right: [U], left_key: fn(T) -> String, right_key:
     loop left_index in 0..<left.len() {
         position: right_index.positions.get(left_keys[left_index]) ?? -1
         if position < 0 {
-            &out.push(DataJoin<T, U?>{left: left[left_index], right: None})
+            out.push(DataJoin<T, U?>{left: left[left_index], right: None})
             next
         }
         loop right_index_at in right_index.rows[position] {
-            &out.push(DataJoin<T, U?>{left: left[left_index], right: Val(right[right_index_at])})
+            out.push(DataJoin<T, U?>{left: left[left_index], right: Val(right[right_index_at])})
         }
     }
     if out.len() > limits.max_output_rows {
@@ -2193,9 +2193,9 @@ join_index: fn(keys: [String]) -> __DataJoinIndex Never! {
         } else {
             position = rows.len()
             positions[keys[at].copy()] = position
-            &rows.push([Int]{})
+            rows.push([Int]{})
         }
-        &rows[position].push(at)
+        rows[position].push(at)
     }
     __DataJoinIndex{positions: positions, rows: rows}
 }
@@ -2227,7 +2227,7 @@ pivot_sum: fn<T>(rows: [T], row_key: fn(T) -> String, column_key: fn(T) -> Strin
             if cells.len() >= limits.max_groups {
                 return Err(data_error(DataErrorKind.Limit, "max_groups exceeded", "pivot_sum"))
             }
-            &cells.push(DataPivotCell{row_key: row_name, column_key: column_name, count: 1, sum: amount.copy(), mean: amount})
+            cells.push(DataPivotCell{row_key: row_name, column_key: column_name, count: 1, sum: amount.copy(), mean: amount})
             next
         }
         cell := cells[found]
@@ -2249,7 +2249,7 @@ pivot_sum: fn<T>(rows: [T], row_key: fn(T) -> String, column_key: fn(T) -> Strin
         cell.mean = normalize_zero(cell.mean)
         cells[index] = cell
     }
-    _: sort_pivot_cells(&cells)
+    _: sort_pivot_cells(cells)
     Ok(cells)
 }
 
@@ -2344,8 +2344,8 @@ line_text: fn(groups: [Group<String, Float>], options: DataLineOptions) -> Strin
         if nonfinite(group.value) {
             return Err(data_error_at(DataErrorKind.NonFinite, "plot values must be finite", "line_text", index))
         }
-        &labels.push(group.key)
-        &values.push(group.value)
+        labels.push(group.key)
+        values.push(group.value)
     }
     Ok(render_line_options_text(labels, values, options))
 }
@@ -2359,8 +2359,8 @@ line_svg: fn(groups: [Group<String, Float>], options: DataLineOptions) -> String
         if nonfinite(group.value) {
             return Err(data_error_at(DataErrorKind.NonFinite, "plot values must be finite", "line_svg", index))
         }
-        &labels.push(group.key)
-        &values.push(group.value)
+        labels.push(group.key)
+        values.push(group.value)
     }
     Ok(render_line_options_svg(labels, values, options))
 }
@@ -2370,10 +2370,10 @@ status: fn() -[FS, Env]> [DataStatus] Never! {
     rows := [DataStatus]{}
     native_steps: [String]{"core.data.csv", "core.data.stats", "core.data.query", "core.data.stream", "core.data.schema", "core.data.json"}
     loop step in native_steps {
-        &rows.push(DataStatus{step: step, path: "native", clone_value: "none", ownership: "jet", trust: "native", fallback: "none", replacement: "native"})
+        rows.push(DataStatus{step: step, path: "native", clone_value: "none", ownership: "jet", trust: "native", fallback: "none", replacement: "native"})
     }
     bridge_steps: [String]{"py.*", "r.*", "gpu.*"}
-    loop step in bridge_steps -> &rows.push(bridge_status(step))
+    loop step in bridge_steps -> rows.push(bridge_status(step))
     rows
 }
 
@@ -2425,7 +2425,7 @@ bridge_tool_on_path: fn(tool: String) -[FS, Env]> Bool Never! {
                 next
             }
             if b != delimiter || quoted {
-                &directory.push(b)
+                directory.push(b)
                 next
             }
         }
@@ -2433,10 +2433,10 @@ bridge_tool_on_path: fn(tool: String) -[FS, Env]> Bool Never! {
             last: directory[directory.len() - 1]
             drive_relative: windows && directory.len() == 2 && directory[1] == (U8{58})
             if last != (U8{47}) && (!windows || last != (U8{92})) && !drive_relative {
-                &directory.push(if windows -> U8{92} else -> U8{47})
+                directory.push(if windows -> U8{92} else -> U8{47})
             }
         }
-        loop b in tool.bytes() -> &directory.push(b)
+        loop b in tool.bytes() -> directory.push(b)
         is_file := false
         #Unsafe("native path bytes originate from the host environment and are split at ASCII boundaries") {
             is_file = core.data.__host_path_is_file(directory) ?? false
@@ -2500,7 +2500,7 @@ make_loader: fn<T>(kind: DataLoaderKind, locator: String, member: String, parame
 
 public_parameters: fn(values: [String]) -> [String] Never! {
     out := [String]{}
-    loop value in values -> &out.push(public_parameter(value))
+    loop value in values -> out.push(public_parameter(value))
     out
 }
 
@@ -2537,7 +2537,7 @@ public_locator: fn(kind: DataLoaderKind, locator: String) -> String Never! {
     }
     if query_parts.len() == 1 -> return base
     public_query := [String]{}
-    loop parameter in query_parts[1].split("&") -> &public_query.push(public_parameter(parameter))
+    loop parameter in query_parts[1].split("&") -> public_query.push(public_parameter(parameter))
     "{base}?{public_query.join("&")}"
 }
 
@@ -2684,10 +2684,10 @@ select_rank: fn(values: &[Float], lo: Int, hi: Int, rank: Int) -> Float Never! {
     end := hi
     loop {
         if end - start <= 5 {
-            sort_float_range(&values, start, end)
+            sort_float_range(values, start, end)
             return values[rank]
         }
-        pivot: median_of_medians(&values, start, end)
+        pivot: median_of_medians(values, start, end)
         // [start, less) < pivot, [less, more) == pivot, [more, end) > pivot.
         less := start
         index := start
@@ -2725,7 +2725,7 @@ median_of_medians: fn(values: &[Float], lo: Int, hi: Int) -> Float Never! {
     loop start < hi {
         end := start + 5
         if end > hi -> end = hi
-        sort_float_range(&values, start, end)
+        sort_float_range(values, start, end)
         middle: start + (end - start - 1) /% 2
         median: values[middle]
         values[middle] = values[lo + count]
@@ -2733,7 +2733,7 @@ median_of_medians: fn(values: &[Float], lo: Int, hi: Int) -> Float Never! {
         count = count + 1
         start = end
     }
-    select_rank(&values, lo, lo + count, lo + (count - 1) /% 2)
+    select_rank(values, lo, lo + count, lo + (count - 1) /% 2)
 }
 
 // Insertion sort of a range of at most five values.
@@ -2762,15 +2762,15 @@ sort_float_range: fn(values: &[Float], lo: Int, hi: Int) Never! {
     seed := 7
     loop index in 0..<61 {
         seed = (seed * 1103515245 + 12345 + index) %% 2147483648
-        &mixed.push(Float{seed %% 17} - Float{8.0})
+        mixed.push(Float{seed %% 17} - Float{8.0})
     }
-    &cases.push(mixed)
+    cases.push(mixed)
     loop values in cases {
         sorted := values.copy()
-        &sorted.sort()
+        sorted.sort()
         loop rank in 0..<values.len() {
             work := values.copy()
-            assert_eq(select_rank(&work, 0, work.len(), rank), sorted[rank])
+            assert_eq(select_rank(work, 0, work.len(), rank), sorted[rank])
         }
     }
 }
@@ -2785,8 +2785,8 @@ sort_float_range: fn(values: &[Float], lo: Int, hi: Int) Never! {
 rank_select_prototype: fn<T, E>(values: View<T>, rank: Int, before: fn(T, T) -> Bool E!) -> Int E! {
     if rank < 0 || rank >= values.len() -> panic("rank {rank} is outside 0..<{values.len()}")
     order := [Int]{}
-    loop index in 0..<values.len() -> &order.push(index)
-    rank_select_range<T, E>(values, &order, 0, order.len(), rank, before)
+    loop index in 0..<values.len() -> order.push(index)
+    rank_select_range<T, E>(values, order, 0, order.len(), rank, before)
 }
 
 // Selects over order[lo..<hi]. On return the indices before `rank` in the
@@ -2797,10 +2797,10 @@ rank_select_range: fn<T, E>(values: View<T>, order: &[Int], lo: Int, hi: Int, ra
     end := hi
     loop {
         if end - start <= 5 {
-            rank_sort_small<T, E>(values, &order, start, end, before)
+            rank_sort_small<T, E>(values, order, start, end, before)
             return order[rank]
         }
-        pivot: rank_pivot<T, E>(values, &order, start, end, before)
+        pivot: rank_pivot<T, E>(values, order, start, end, before)
         // [start, less) before pivot, [less, more) equivalent, [more, end) after.
         less := start
         index := start
@@ -2846,7 +2846,7 @@ rank_pivot: fn<T, E>(values: View<T>, order: &[Int], lo: Int, hi: Int, before: f
     loop start < hi {
         end := start + 5
         if end > hi -> end = hi
-        rank_sort_small<T, E>(values, &order, start, end, before)
+        rank_sort_small<T, E>(values, order, start, end, before)
         middle: start + (end - start - 1) /% 2
         median: order[middle]
         order[middle] = order[lo + count]
@@ -2854,7 +2854,7 @@ rank_pivot: fn<T, E>(values: View<T>, order: &[Int], lo: Int, hi: Int, before: f
         count = count + 1
         start = end
     }
-    rank_select_range<T, E>(values, &order, lo, lo + count, lo + (count - 1) /% 2, before)
+    rank_select_range<T, E>(values, order, lo, lo + count, lo + (count - 1) /% 2, before)
 }
 
 // Insertion sort of at most five indices by their values.
@@ -2876,7 +2876,7 @@ rank_test_values: fn(count: Int, seed: Int) -> [Int] Never! {
     state := seed
     loop index in 0..<count {
         state = (state * 1103515245 + 12345 + index) %% 2147483648
-        &out.push(state %% 97)
+        out.push(state %% 97)
     }
     out
 }
@@ -2900,21 +2900,21 @@ rank_test_text_before: fn(a: String, b: String) -> Bool Never! { text_compare(a,
     ascending := [Int]{}
     descending := [Int]{}
     loop index in 0..<23 {
-        &ascending.push(index)
-        &descending.push(22 - index)
+        ascending.push(index)
+        descending.push(22 - index)
     }
-    &cases.push(ascending)
-    &cases.push(descending)
-    &cases.push(rank_test_values(41, 3))
+    cases.push(ascending)
+    cases.push(descending)
+    cases.push(rank_test_values(41, 3))
     loop values in cases {
         sorted := values.copy()
-        &sorted.sort()
+        sorted.sort()
         view: values[0..<values.len()]
         loop rank in 0..<values.len() {
             calls := 0
             order := [Int]{}
-            loop index in 0..<values.len() -> &order.push(index)
-            found: rank_select_range<Int, Never>(view, &order, 0, order.len(), rank, (a: Int, b: Int) -> rank_test_before(a, b, &calls))
+            loop index in 0..<values.len() -> order.push(index)
+            found: rank_select_range<Int, Never>(view, order, 0, order.len(), rank, (a: Int, b: Int) -> rank_test_before(a, b, calls))
             assert_eq(values[found], sorted[rank])
             // Partition law: nothing before the rank is after the answer, and
             // nothing after it is before the answer.
@@ -2935,14 +2935,14 @@ rank_test_text_before: fn(a: String, b: String) -> Bool Never! { text_compare(a,
         ranks: [Int]{0, values.len() /% 2, values.len() - 1}
         loop rank in ranks {
             calls := 0
-            _: rank_select_prototype<Int, Never>(view, rank, (a: Int, b: Int) -> rank_test_before(a, b, &calls))
+            _: rank_select_prototype<Int, Never>(view, rank, (a: Int, b: Int) -> rank_test_before(a, b, calls))
             assert(calls <= 40 * values.len())
         }
     }
     same := [Int]{}
-    loop index in 0..<2000 -> &same.push(4)
+    loop index in 0..<2000 -> same.push(4)
     same_calls := 0
-    _: rank_select_prototype<Int, Never>(same[0..<same.len()], 1000, (a: Int, b: Int) -> rank_test_before(a, b, &same_calls))
+    _: rank_select_prototype<Int, Never>(same[0..<same.len()], 1000, (a: Int, b: Int) -> rank_test_before(a, b, same_calls))
     assert(same_calls <= 40 * same.len())
 
     // Callback error order: the first refusal returns unchanged and no
@@ -2951,7 +2951,7 @@ rank_test_text_before: fn(a: String, b: String) -> Bool Never! { text_compare(a,
     stops: [Int]{1, 2, 17, 250}
     loop stop in stops {
         calls := 0
-        if rank_select_prototype<Int, DataError>(mixed[0..<mixed.len()], 150, (a: Int, b: Int) -> rank_test_refusing(a, b, &calls, stop)) == {
+        if rank_select_prototype<Int, DataError>(mixed[0..<mixed.len()], 150, (a: Int, b: Int) -> rank_test_refusing(a, b, calls, stop)) == {
             .Ok(_) -> assert(false)
             .Err(error) -> assert_eq(error.reason, "comparison {stop} refused")
         }
@@ -3105,7 +3105,7 @@ normalize_plot_plan: fn(plan: JetDataPlotPlan) -> JetDataPlotPlan DataError! {
         if nonfinite(value) {
             return Err(data_error_at(DataErrorKind.NonFinite, "plot values must be finite", "plot", i))
         }
-        &values.push(value)
+        values.push(value)
     }
     height := 24 * plan.labels.len() + 16
     if plan.mark == JetDataPlotMark.Line || plan.mark == JetDataPlotMark.Point -> height = 120
@@ -3260,7 +3260,7 @@ xml_escape: fn(text: String) -> String Never! {
             out = "{out}{chunk_text}{entity}"
             chunk = [U8]{}
         } else {
-            &chunk.push(byte)
+            chunk.push(byte)
         }
     }
     tail: String.from_bytes(chunk) ?? ""
@@ -3289,7 +3289,7 @@ upper: fn(text: String) -> String Never! {
     out := [U8]{}
     loop b in text.bytes() {
         n: b
-        if n >= 97 && n <= 122 -> &out.push(U8{n - 32}) else -> &out.push(b)
+        if n >= 97 && n <= 122 -> out.push(U8{n - 32}) else -> out.push(b)
     }
     String.from_bytes(out) ?? ""
 }
@@ -3297,89 +3297,89 @@ upper: fn(text: String) -> String Never! {
 // Native `jet_data_loader_canonical_tree` sorts object keys by UTF-8 lexical
 // order, but keeps Debug float spelling and exact Number text.
 data_loader_put_text: fn(out: &[U8], text: String) Never! {
-    loop index in 0..<text.count_bytes() -> &out.push(encoding_stream.byte_at(text, index))
+    loop index in 0..<text.count_bytes() -> out.push(encoding_stream.byte_at(text, index))
 }
 
 data_loader_put_control: fn(out: &[U8], value: Int) Never! {
-    &out.push(U8{92})
-    &out.push(U8{117})
-    &out.push(U8{48})
-    &out.push(U8{48})
+    out.push(U8{92})
+    out.push(U8{117})
+    out.push(U8{48})
+    out.push(U8{48})
     hex: "0123456789abcdef"
-    &out.push(encoding_stream.byte_at(hex, value >> 4))
-    &out.push(encoding_stream.byte_at(hex, value.bit_and(15)))
+    out.push(encoding_stream.byte_at(hex, value >> 4))
+    out.push(encoding_stream.byte_at(hex, value.bit_and(15)))
 }
 
 data_loader_quote: fn(out: &[U8], text: String) Never! {
-    &out.push(U8{34})
+    out.push(U8{34})
     index := 0
     loop index < text.count_bytes() {
         byte: encoding_stream.byte_at(text, index)
         n: Int.from_u8(byte)
         if n == 34 || n == 92 {
-            &out.push(U8{92})
-            &out.push(byte)
+            out.push(U8{92})
+            out.push(byte)
         } else if n == 10 || n == 13 || n == 9 {
-            &out.push(U8{92})
-            &out.push(if n == 10 -> U8{110} else if n == 13 -> U8{114} else -> U8{116})
+            out.push(U8{92})
+            out.push(if n == 10 -> U8{110} else if n == 13 -> U8{114} else -> U8{116})
         } else if n < 32 || n == 127 {
-            data_loader_put_control(&out, n)
+            data_loader_put_control(out, n)
         } else if n == 194 && index + 1 < text.count_bytes() && Int.from_u8(encoding_stream.byte_at(text, index + 1)) <= 159 {
             // Rust char::is_control includes the C1 scalars U+0080..U+009F.
             index += 1
-            data_loader_put_control(&out, Int.from_u8(encoding_stream.byte_at(text, index)))
+            data_loader_put_control(out, Int.from_u8(encoding_stream.byte_at(text, index)))
         } else {
-            &out.push(byte)
+            out.push(byte)
         }
         index += 1
     }
-    &out.push(U8{34})
+    out.push(U8{34})
 }
 
 data_loader_render: fn(out: &[U8], tree: encoding.Dyn) Never! {
     #Unsafe("inspect existing private Decode carriers only inside checked Core data source") {
         if tree == .Number(text) {
-            data_loader_put_text(&out, text)
+            data_loader_put_text(out, text)
             return
         }
         if tree == .Bytes(bytes) {
-            &out.push(U8{91})
+            out.push(U8{91})
             loop (index, byte) in bytes {
-                if index != 0 -> &out.push(U8{44})
-                data_loader_put_text(&out, "{byte}")
+                if index != 0 -> out.push(U8{44})
+                data_loader_put_text(out, "{byte}")
             }
-            &out.push(U8{93})
+            out.push(U8{93})
             return
         }
     }
     if tree == {
-        .Null -> data_loader_put_text(&out, "null")
-        .Bool(value) -> data_loader_put_text(&out, if value -> "true" else -> "false")
-        .Int(value) -> data_loader_put_text(&out, "{value}")
-        .Float(value) -> data_loader_put_text(&out, "{value:Debug}")
-        .Text(value) -> data_loader_quote(&out, value)
+        .Null -> data_loader_put_text(out, "null")
+        .Bool(value) -> data_loader_put_text(out, if value -> "true" else -> "false")
+        .Int(value) -> data_loader_put_text(out, "{value}")
+        .Float(value) -> data_loader_put_text(out, "{value:Debug}")
+        .Text(value) -> data_loader_quote(out, value)
         .Array(values) -> {
-            &out.push(U8{91})
+            out.push(U8{91})
             loop (index, value) in values {
-                if index != 0 -> &out.push(U8{44})
-                data_loader_render(&out, value)
+                if index != 0 -> out.push(U8{44})
+                data_loader_render(out, value)
             }
-            &out.push(U8{93})
+            out.push(U8{93})
         }
         .Object(_) -> {
             // Sort the owned entries directly; the comparator captures no tree.
             entries := encoding_stream.object_entries(tree)
-            &entries.sort_by((left: (key: String, value: Dyn), right: (key: String, value: Dyn)) -> left.key <=> right.key)
-            &out.push(U8{123})
+            entries.sort_by((left: (key: String, value: Dyn), right: (key: String, value: Dyn)) -> left.key <=> right.key)
+            out.push(U8{123})
             loop (position, entry) in entries {
-                if position != 0 -> &out.push(U8{44})
-                data_loader_quote(&out, entry.key)
-                &out.push(U8{58})
-                data_loader_render(&out, entry.value)
+                if position != 0 -> out.push(U8{44})
+                data_loader_quote(out, entry.key)
+                out.push(U8{58})
+                data_loader_render(out, entry.value)
             }
-            &out.push(U8{125})
+            out.push(U8{125})
         }
-        .DateTime(_) -> data_loader_quote(&out, tree.to_text() ?? panic("DateTime always has an RFC 3339 representation"))
+        .DateTime(_) -> data_loader_quote(out, tree.to_text() ?? panic("DateTime always has an RFC 3339 representation"))
         else -> panic("unknown native Dyn carrier")
     }
 }
@@ -3580,8 +3580,8 @@ data_loader_csv_tree: fn(text: String, limits: DataLimits) -> Dyn DataError! {
         if values.len() >= limits.max_output_rows -> return Err(data_loader_error(DataErrorKind.Limit, "data.loader.csv", "max_output_rows {limits.max_output_rows} exceeded"))
         if fields.len() != header.len() -> return Err(data_loader_error(DataErrorKind.Decode, "data.loader.csv", "CSV row has {fields.len()} fields; header has {header.len()}"))
         entries := [(key: String, value: Dyn)]{}
-        loop column in 0..<header.len() -> &entries.push((key: header[column].copy(), value: Dyn.Text(fields[column].copy())))
-        &values.push(encoding_stream.object_from_entries(^entries))
+        loop column in 0..<header.len() -> entries.push((key: header[column].copy(), value: Dyn.Text(fields[column].copy())))
+        values.push(encoding_stream.object_from_entries(entries))
     }
     Ok(Dyn.Array(values))
 }
@@ -3594,7 +3594,7 @@ data_loader_jsonl_tree: fn(text: String, limits: DataLimits) -> Dyn DataError! {
         if line.len() == 0 -> next
         if values.len() >= limits.max_output_rows -> return Err(data_loader_error(DataErrorKind.Limit, "data.loader.jsonl", "max_output_rows {limits.max_output_rows} exceeded"))
         if json_codec.parse(line) == {
-            .Ok(value) -> &values.push(value)
+            .Ok(value) -> values.push(value)
             .Err(failure) -> return Err(data_loader_error(DataErrorKind.Decode, "data.loader.jsonl", data_loader_json_reason("invalid JSONL record at line {index + 1}", failure)))
         }
     }
@@ -3609,14 +3609,14 @@ data_loader_schema: fn(tree: Dyn, format: DataFormat) -> DataSchema Never! {
     fields := [(name: String, type_name: String, nullable: Bool)]{}
     if tree == {
         .Object(_) -> {
-            loop entry in encoding_stream.object_entries(tree) -> data_schema_absorb(&fields, entry.key, entry.value, entry.value == .Null)
+            loop entry in encoding_stream.object_entries(tree) -> data_schema_absorb(fields, entry.key, entry.value, entry.value == .Null)
         }
         .Array(values) -> {
             rows_seen := 0
             loop value in values {
                 if value == .Object(_) {
                     entries: encoding_stream.object_entries(value)
-                    loop entry in entries -> data_schema_absorb(&fields, entry.key, entry.value, rows_seen > 0 || entry.value == .Null)
+                    loop entry in entries -> data_schema_absorb(fields, entry.key, entry.value, rows_seen > 0 || entry.value == .Null)
                     loop index in 0..<fields.len() {
                         present := false
                         loop entry in entries {
@@ -3625,14 +3625,14 @@ data_loader_schema: fn(tree: Dyn, format: DataFormat) -> DataSchema Never! {
                         if !present -> fields[index] = (name: fields[index].name.copy(), type_name: fields[index].type_name.copy(), nullable: true)
                     }
                 } else {
-                    data_schema_absorb(&fields, "$", value, rows_seen > 0 || value == .Null)
+                    data_schema_absorb(fields, "$", value, rows_seen > 0 || value == .Null)
                 }
                 rows_seen += 1
             }
         }
-        else -> data_schema_absorb(&fields, "$", tree, tree == .Null)
+        else -> data_schema_absorb(fields, "$", tree, tree == .Null)
     }
-    &fields.sort_by((left: (name: String, type_name: String, nullable: Bool), right: (name: String, type_name: String, nullable: Bool)) -> left.name <=> right.name)
+    fields.sort_by((left: (name: String, type_name: String, nullable: Bool), right: (name: String, type_name: String, nullable: Bool)) -> left.name <=> right.name)
     format_name: data_format_text(format)
     identity := data_loader_identity_part("", format_name)
     columns := [DataColumn]{}
@@ -3642,7 +3642,7 @@ data_loader_schema: fn(tree: Dyn, format: DataFormat) -> DataSchema Never! {
         identity = data_loader_identity_part(identity, column.name)
         identity = data_loader_identity_part(identity, column.type_name)
         identity = data_loader_identity_part(identity, if column.nullable -> "true" else -> "false")
-        &columns.push(column)
+        columns.push(column)
     }
     DataSchema{identity: identity, format: format, columns: columns, projection: None}
 }
@@ -3656,7 +3656,7 @@ data_schema_absorb: fn(fields: &[(name: String, type_name: String, nullable: Boo
             return
         }
     }
-    &fields.push((name: name.copy(), type_name: current, nullable: nullable || current == "null"))
+    fields.push((name: name.copy(), type_name: current, nullable: nullable || current == "null"))
 }
 
 data_schema_merge: fn(left: String, right: String) -> (type_name: String, nullable: Bool) Never! {
@@ -3747,7 +3747,7 @@ DataLoaderPortRecord: struct {
 #Test("value canonical strings retain native C0 and C1 control escaping") {
     text: encoding_stream.text_from_bytes([U8]{8, 127, 194, 128, 194, 159, 9}) ?? panic("control text")
     out := [U8]{}
-    data_loader_quote(&out, text)
+    data_loader_quote(out, text)
     assert_eq(out, [U8]{34, 92, 117, 48, 48, 48, 56, 92, 117, 48, 48, 55, 102, 92, 117, 48, 48, 56, 48, 92, 117, 48, 48, 57, 102, 92, 116, 34})
 }
 

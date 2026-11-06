@@ -1,8 +1,8 @@
-Error [jet.MissingWriteMarker]: Cannot write to `cur` — it does not have the write-access marker `&`; required before calling `.next()`
-  --> tests/ui/iter_cursor_immutable_binding.jet:20:13
+Error [jet.MissingWriteMarker]: `.next()` changes `cur`, which has read access only
+  --> tests/ui/iter_cursor_immutable_binding.jet:20:12
     |
- 20 |     a: &cur.next()
-    |             ^^^^
- Why: This method edits the value it's called on; the write-access marker `&` is required
+ 20 |     a: cur.next()
+    |            ^^^^
+ Why: This method edits the value it's called on, so its receiver needs write access
  Fix: Declare `cur := ...`
 More: jet-lang.dev/e/E0202

@@ -6,12 +6,12 @@ lsp_env_test_json: fn(text: String) -> Dyn Never! {
 
 lsp_env_test_server: fn() -> LSPServer Never! {
     snapshot: lsp_diag_test_snapshot("environment-resource.jet", "run: fn() {{}}\n", [JetDriverAuthorizedSourceFile]{})
-    LSPServer.new(^snapshot)
+    LSPServer.new(snapshot)
 }
 
 lsp_env_test_child: fn(root: OSPath, name: String) -> OSPath Never! {
     child := root.copy()
-    lsp_env_path.push(&child, lsp_env_path.from_text(name, root.platform))
+    lsp_env_path.push(child, lsp_env_path.from_text(name, root.platform))
     child
 }
 
@@ -27,40 +27,40 @@ lsp_env_test_scratch: fn(label: String) -[Env, FS, Exec]> OSPath Never! {
 #Test("environment output accepts strict JSON scalars and preserves trimmed text") {
     loop text in ([String]{"{{\"packages\":[]}}", "null", "true", "42", "[1,2]", "\"é\""}) {
         stdout := " \t{Char{13}}\n{text}\n".bytes()
-        assert_eq(lsp_environment_resource_text(true, ^stdout), Ok(text))
+        assert_eq(lsp_environment_resource_text(true, stdout), Ok(text))
     }
     unicode_space := "{Char{133}}{{\"x\":1}}{Char{8195}}".bytes()
-    assert_eq(lsp_environment_resource_text(true, ^unicode_space), Ok("{{\"x\":1}}"))
+    assert_eq(lsp_environment_resource_text(true, unicode_space), Ok("{{\"x\":1}}"))
 }
 
 #Test("environment output rejects failed status invalid UTF8 empty and invalid protocol JSON") {
     valid := "{{}}".bytes()
-    assert_eq(lsp_environment_resource_text(false, ^valid), Err(LSPEnvironmentResourceReadError.Unavailable))
+    assert_eq(lsp_environment_resource_text(false, valid), Err(LSPEnvironmentResourceReadError.Unavailable))
     invalid_utf8 := [U8]{U8{255}}
-    assert_eq(lsp_environment_resource_text(true, ^invalid_utf8), Err(LSPEnvironmentResourceReadError.Unavailable))
+    assert_eq(lsp_environment_resource_text(true, invalid_utf8), Err(LSPEnvironmentResourceReadError.Unavailable))
     loop text in ([String]{"", " {Char{13}}\n\t", "not JSON", "{{\"x\":1,\"x\":2}}", "9223372036854775808", "\"\\ud800\""}) {
         stdout := text.bytes()
-        assert_eq(lsp_environment_resource_text(true, ^stdout), Err(LSPEnvironmentResourceReadError.Unavailable))
+        assert_eq(lsp_environment_resource_text(true, stdout), Err(LSPEnvironmentResourceReadError.Unavailable))
     }
 }
 
 #Test("environment resource raw byte limit accepts exact ceiling and rejects excess before trim") {
     at_limit := [U8]{U8{34}}
-    loop _ in 0..<(LSP_MAX_ENVIRONMENT_RESOURCE_TEXT_BYTES - 2) -> &at_limit.push(U8{97})
-    &at_limit.push(U8{34})
+    loop _ in 0..<(LSP_MAX_ENVIRONMENT_RESOURCE_TEXT_BYTES - 2) -> at_limit.push(U8{97})
+    at_limit.push(U8{34})
     above_limit := at_limit.copy()
-    &above_limit.push(U8{32})
-    assert_eq(lsp_environment_resource_text(true, ^above_limit), Err(LSPEnvironmentResourceReadError.Unavailable))
-    accepted: lsp_environment_resource_text(true, ^at_limit) ?? panic("exact raw byte ceiling")
+    above_limit.push(U8{32})
+    assert_eq(lsp_environment_resource_text(true, above_limit), Err(LSPEnvironmentResourceReadError.Unavailable))
+    accepted: lsp_environment_resource_text(true, at_limit) ?? panic("exact raw byte ceiling")
     assert_eq(accepted.bytes().len(), LSP_MAX_ENVIRONMENT_RESOURCE_TEXT_BYTES)
     // Scalar count is well below the limit, but UTF8 bytes exceed it by two.
     unicode := [U8]{U8{34}}
     loop _ in 0..<(LSP_MAX_ENVIRONMENT_RESOURCE_TEXT_BYTES / 2) {
-        &unicode.push(U8{195})
-        &unicode.push(U8{169})
+        unicode.push(U8{195})
+        unicode.push(U8{169})
     }
-    &unicode.push(U8{34})
-    assert_eq(lsp_environment_resource_text(true, ^unicode), Err(LSPEnvironmentResourceReadError.Unavailable))
+    unicode.push(U8{34})
+    assert_eq(lsp_environment_resource_text(true, unicode), Err(LSPEnvironmentResourceReadError.Unavailable))
 }
 
 #Test("resources read returns exact invalid-params response for every missing or nonstring URI") {

@@ -19,7 +19,7 @@ source: fn(items: [Int]) -> Stream<Int> {
     loop item in items -> yield item
 }
 
-pad_min: fn(items: ^Stream<Int>, min: Int) -> Stream<Pad> {
+pad_min: fn(items: &&Stream<Int>, min: Int) -> Stream<Pad> {
     seen := 0
     loop item in items {
         yield Pad.Item(item)
@@ -46,8 +46,8 @@ padded: fn(items: [Int], min: Int) -> [Int] {
     out := [Int]{}
     loop slot in pad_min(source(items), min) {
         if slot == {
-            .Item(value) -> &out.push(value)
-            .Missing(index) -> &out.push(fill(index))
+            .Item(value) -> out.push(value)
+            .Missing(index) -> out.push(fill(index))
         }
     }
     out
@@ -57,8 +57,8 @@ checked_padded: fn(items: [Int], min: Int) -> [Int] FillError! {
     out := [Int]{}
     loop slot in pad_min(source(items), min) {
         if slot == {
-            .Item(value) -> &out.push(value)
-            .Missing(index) -> &out.push(checked_fill(index))
+            .Item(value) -> out.push(value)
+            .Missing(index) -> out.push(checked_fill(index))
         }
     }
     Ok(out)
@@ -78,8 +78,8 @@ run: fn() {
     taken := [Int]{}
     loop slot in pad_min(source([1, 2]), 5) {
         if slot == {
-            .Item(value) -> &taken.push(value)
-            .Missing(index) -> &taken.push(fill(index))
+            .Item(value) -> taken.push(value)
+            .Missing(index) -> taken.push(fill(index))
         }
         if taken.len() == 3 -> break
     }

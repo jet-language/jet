@@ -147,7 +147,7 @@ AdmissionTransaction: struct {
         store_transaction_validate_digest(object.digest)
         files.stat(object.source) ?? return Err(StoreError.IO(err).with_message("cannot inspect staged Hangar object `{object.source}`: {StoreError.IO(err).message()}"))
         destination: files.join(files.join(self.roots.hangar_dir(), STORE_OBJECTS_DIR), object.digest)
-        &self.objects.push(object)
+        self.objects.push(object)
         Ok(destination)
     }
 
@@ -157,10 +157,10 @@ AdmissionTransaction: struct {
     commit: fn(&self, entries: &[StoreEntry], extra_receipts: [AdmissionReceipt], excluded: String?, mode: RegistrationMode, fresh_action_key: String?) -> Bool StoreError! {
         if self.committed -> return Err(StoreError.Other("Hangar admission transaction already committed"))
         registered := false
-        if &self.commit_steps(&entries, extra_receipts, excluded, mode, fresh_action_key) == {
+        if self.commit_steps(entries, extra_receipts, excluded, mode, fresh_action_key) == {
             .Ok(value) -> registered = value
             .Err(error) -> {
-                &self.rollback()
+                self.rollback()
                 return Err(error)
             }
         }
@@ -170,46 +170,46 @@ AdmissionTransaction: struct {
 
     commit_steps: fn(&self, entries: &[StoreEntry], extra_receipts: [AdmissionReceipt], excluded: String?, mode: RegistrationMode, fresh_action_key: String?) -> Bool StoreError! {
         verification := self.verification.copy()
-        &self.publish_objects(excluded)
+        self.publish_objects(excluded)
         store_injected_failure(AdmissionFailurePoint.AfterObjectPublication)
         receipts_dir: files.join(self.roots.hangar_dir(), STORE_RECEIPTS_DIR)
         loop receipt in extra_receipts {
-            if self.publish_receipt(receipt) -> &self.receipts.push(files.join(receipts_dir, receipt.digest))
+            if self.publish_receipt(receipt) -> self.receipts.push(files.join(receipts_dir, receipt.digest))
         }
         loop index in 0..<entries.len() {
             entry := entries[index]
-            wrote: store_prepare_entry_receipt_with_status(self.roots, &entry)
+            wrote: store_prepare_entry_receipt_with_status(self.roots, entry)
             entries[index] = entry
-            if wrote -> &self.receipts.push(files.join(receipts_dir, entry.receipt))
+            if wrote -> self.receipts.push(files.join(receipts_dir, entry.receipt))
         }
         store_injected_failure(AdmissionFailurePoint.AfterReceiptPublication)
-        registered: store_register_entries_unlocked_with_mode(&verification, self.roots, entries, mode, fresh_action_key)
+        registered: store_register_entries_unlocked_with_mode(verification, self.roots, entries, mode, fresh_action_key)
         self.committed = true
-        if !registered -> &self.remove_new_receipts()
-        &self.finish()
+        if !registered -> self.remove_new_receipts()
+        self.finish()
         Ok(registered)
     }
 
     // Compatibility seam for the projection claim helpers: the same object
     // publication and rollback without package metadata to register.
     commit_objects: fn(&self, excluded: String?) -> [String] StoreError! {
-        if &self.commit_objects_steps(excluded) == {
+        if self.commit_objects_steps(excluded) == {
             .Ok(published) -> Ok(published)
             .Err(error) -> {
-                &self.rollback()
+                self.rollback()
                 Err(error)
             }
         }
     }
 
     commit_objects_steps: fn(&self, excluded: String?) -> [String] StoreError! {
-        &self.publish_objects(excluded)
+        self.publish_objects(excluded)
         store_injected_failure(AdmissionFailurePoint.AfterObjectPublication)
         objects_dir: files.join(self.roots.hangar_dir(), STORE_OBJECTS_DIR)
         destinations := [String]{}
-        loop object in self.objects -> &destinations.push(files.join(objects_dir, object.digest))
+        loop object in self.objects -> destinations.push(files.join(objects_dir, object.digest))
         self.committed = true
-        &self.finish()
+        self.finish()
         Ok(destinations)
     }
 
@@ -221,7 +221,7 @@ AdmissionTransaction: struct {
         already_counted := 0
         counted := [String: Bool]{}
         loop object in self.objects {
-            if object.repair_corrupt -> store_invalidate_verified_digest(&verification, files.join(objects_dir, object.digest))
+            if object.repair_corrupt -> store_invalidate_verified_digest(verification, files.join(objects_dir, object.digest))
             if counted.has_key(object.digest) -> next
             counted[object.digest] = true
             destination: files.join(objects_dir, object.digest)
@@ -240,8 +240,8 @@ AdmissionTransaction: struct {
             }
         }
         incoming = if incoming > already_counted -> incoming - already_counted else -> 0
-        store_ensure_hangar_capacity(&verification, self.roots, store_admission_reservation(incoming), excluded)
-        loop index in 0..<self.objects.len() -> &self.publish_object(index)
+        store_ensure_hangar_capacity(verification, self.roots, store_admission_reservation(incoming), excluded)
+        loop index in 0..<self.objects.len() -> self.publish_object(index)
         if self.published.len() > 0 -> store_sync_store_directory(objects_dir)
     }
 
@@ -249,7 +249,7 @@ AdmissionTransaction: struct {
         verification := self.verification.copy()
         if files.stat(destination) == {
             .Ok(_) -> {
-                actual: store_verified_output_hash_persistent(&verification, destination, Val(self.roots.hangar_dir()), object.allow_semantic_xattrs) ?? return Ok(false)
+                actual: store_verified_output_hash_persistent(verification, destination, Val(self.roots.hangar_dir()), object.allow_semantic_xattrs) ?? return Ok(false)
                 Ok(actual == object.digest)
             }
             .Err(error) -> {
@@ -295,7 +295,7 @@ AdmissionTransaction: struct {
                 store_make_tree_writable_for_removal(object.source)
                 files.rename(object.source, held)
                 store_sync_store_directory(files.dirname(object.source))
-                &self.published.push(PublishedObject{destination: destination, original_source: Val(object.source), held_source: Val(held), backup: None, pending: None, created: false})
+                self.published.push(PublishedObject{destination: destination, original_source: Val(object.source), held_source: Val(held), backup: None, pending: None, created: false})
             }
             return
         }
@@ -306,7 +306,7 @@ AdmissionTransaction: struct {
         backup: if existing -> Val(self.move_aside(destination, index)) else -> None
         original_source: if internal -> Val(object.source) else -> None
         record_index: self.published.len()
-        &self.published.push(PublishedObject{destination: destination, original_source: original_source, held_source: None, backup: backup, pending: None, created: false})
+        self.published.push(PublishedObject{destination: destination, original_source: original_source, held_source: None, backup: backup, pending: None, created: false})
         if backup != None -> store_sync_store_directory(objects_dir)
 
         partial: files.join(objects_dir, "{object.digest}{STORE_PARTIAL_SUFFIX}")
@@ -322,15 +322,15 @@ AdmissionTransaction: struct {
             else -> store_copy_nofollow_tree(object.source, partial) ?? return Err(StoreError.Other(err.what()))
         }
         store_seal_node(partial)
-        actual: store_verified_output_hash(&verification, partial, Val(self.roots.hangar_dir()), object.allow_semantic_xattrs)
+        actual: store_verified_output_hash(verification, partial, Val(self.roots.hangar_dir()), object.allow_semantic_xattrs)
         if actual != object.digest -> return Err(StoreError.Other("Hangar object `{object.digest}` re-hashed as `{actual}`"))
         store_fsync_tree(partial)
         store_sync_store_directory(objects_dir)
         files.rename(partial, destination)
         self.published[record_index].pending = None
         self.published[record_index].created = true
-        store_write_seal(&verification, destination, self.roots.hangar_dir(), object.digest)
-        store_refresh_verified_digest(&verification, destination, self.roots.hangar_dir(), object.allow_semantic_xattrs, object.digest)
+        store_write_seal(verification, destination, self.roots.hangar_dir(), object.digest)
+        store_refresh_verified_digest(verification, destination, self.roots.hangar_dir(), object.allow_semantic_xattrs, object.digest)
         store_sync_store_directory(objects_dir)
     }
 
@@ -397,11 +397,11 @@ AdmissionTransaction: struct {
         if self.committed -> return
         index := self.published.len() - 1
         loop index >= 0 {
-            store_transaction_undo(&verification, self.roots.hangar_dir(), self.published[index])
+            store_transaction_undo(verification, self.roots.hangar_dir(), self.published[index])
             index -= 1
         }
         self.published = [PublishedObject]{}
-        &self.remove_new_receipts()
+        self.remove_new_receipts()
         store_transaction_remove_node(self.stage).drop("the stage is swept by the next admission recovery")
         self.committed = true
     }
@@ -421,7 +421,7 @@ store_transaction_undo: fn(verification: &StoreVerification, hangar: String, pub
         .None -> {}
     }
     if published.created {
-        store_remove_seal(&verification, published.destination, hangar).drop("rollback restores what it can")
+        store_remove_seal(verification, published.destination, hangar).drop("rollback restores what it can")
         restorable: published.original_source != None && files.lexists(published.destination) && !files.lexists(published.original_source ?? "")
         if {
             restorable -> {

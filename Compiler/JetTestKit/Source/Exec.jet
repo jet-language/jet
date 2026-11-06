@@ -26,14 +26,14 @@ kit_exec_select_ids: fn(all_ids: [String], options: KitOptions) -> KitSelection 
                 if options.others_selected -> next
                 return KitSelection{ids: [], error: "unknown case ID: {id}"}
             }
-            &requested.push(id)
+            requested.push(id)
         }
     }
     seen := [String]{}
     loop id in options.bless.ids {
         if kit_expect_named(seen, id) -> return KitSelection{ids: [], error: "duplicate bless ID: {id}"}
         if !kit_expect_named(all_ids, id) -> return KitSelection{ids: [], error: "unknown bless ID: {id}"}
-        &seen.push(id)
+        seen.push(id)
     }
     selected := [String]{}
     loop (index, id) in all_ids {
@@ -41,7 +41,7 @@ kit_exec_select_ids: fn(all_ids: [String], options: KitOptions) -> KitSelection 
         if options.bless.ids.len() > 0 && !kit_expect_named(options.bless.ids, id) -> next
         if options.filter != "" && !id.contains(options.filter) -> next
         if index % options.shard_count != options.shard_index - 1 -> next
-        &selected.push(id)
+        selected.push(id)
     }
     KitSelection{ids: selected, error: ""}
 }
@@ -135,7 +135,7 @@ kit_exec_spec: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, ove
             if variable.name == "JET_FFI_CACHE_DIR" -> cache_override = variable.value ?? ""
         }
         marked := [String]{env.trace_node, files.join(env.root, "Tools/testkit/native-command.mjs"), "--case", env.trace_case, "--root", env.root, "--cwd", cwd, "--jet", env.jet, "--cache-root", env.trace_cache, "--ffi-cache", cache_override, "--"}
-        loop argument in argv -> &marked.push(argument)
+        loop argument in argv -> marked.push(argument)
         marked
     } else -> { argv }
     spec := process.cmd(commands).cwd(cwd).stdout(.Capture).stderr(.Capture).stdin(.Stream).timeout(env.timeout)
@@ -229,7 +229,7 @@ kit_exec_invoke_terminal: fn(env: KitEnv, argv: [String], cwd: String, scratch: 
 kit_exec_terminal_order: fn(events: [KitTerminalEvent]) -> [KitTerminalEvent] {
     ordered := [KitTerminalEvent]{}
     loop event in events {
-        &ordered.push(event)
+        ordered.push(event)
         position := ordered.len() - 1
         loop position > 0 && ordered[position - 1].at > ordered[position].at {
             earlier: ordered[position - 1]
@@ -263,7 +263,7 @@ kit_exec_run: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, stdi
         .Val(shape) -> {
             eof: String.from_bytes([U8{4}]) ?? panic("EOF character")
             loop event in kit_exec_terminal_order(shape.events) {
-                kit_exec_wait(child, &watched, started, event.at)
+                kit_exec_wait(child, watched, started, event.at)
                 if event.kind == "resize" {
                     session: child.terminal ?? {
                         if input_error == "" -> input_error = "terminal resize: no terminal session"
@@ -287,7 +287,7 @@ kit_exec_run: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, stdi
         }
         .None -> child.stdin.close()
     }
-    kit_exec_wait(child, &watched, started, -1)
+    kit_exec_wait(child, watched, started, -1)
     receipt: child.wait() ?? return kit_exec_failed("wait: {err}")
     if env.peaks != "" && watched.peak > 0 {
         files.append_all(env.peaks, "{watched.peak}\n").drop("a missing peak only loses one scheduling weight")
@@ -309,7 +309,7 @@ kit_exec_wait: fn(child: ProcessChild, watched: &KitResident, started: time.Inst
         if until >= 0 && at >= until -> return
         exited: child.exited() ?? return
         if exited -> return
-        kit_exec_watch_resident(&watched, at)
+        kit_exec_watch_resident(watched, at)
         time.sleep(if until >= 0 && until - at < pause * 1000000 -> time.duration_ns(until - at) else -> time.duration_ms(pause))
         if pause < 10 -> pause = if pause * 2 > 10 -> 10 else -> pause * 2
     }
@@ -338,7 +338,7 @@ kit_exec_watch_resident: fn(watched: &KitResident, at: Int) Never! {
     if watched.pid <= 0 || watched.killed || at < watched.due -> return
     watched.due = at + 100000000
     pids := [Int]{}
-    used: kit_exec_tree_resident(watched.pid, watched.tree, &pids)
+    used: kit_exec_tree_resident(watched.pid, watched.tree, pids)
     if pids.len() == 0 -> return
     if used > watched.peak -> watched.peak = used
     if used <= watched.limit -> return
@@ -363,14 +363,14 @@ kit_exec_tree_resident: fn(pid: Int, tree: Bool, pids: &[Int]) -> Int Never! {
         at += 1
         status: files.read("/proc/{current}/status") ?? next
         used += kit_exec_resident_bytes(status)
-        &pids.push(current)
+        pids.push(current)
         if !tree -> next
         threads: files.list_dir("/proc/{current}/task") ?? next
         loop thread in threads {
             children: files.read(files.join(thread.path, "children")) ?? next
             loop word in children.split(" ") {
                 child: Int.parse(word.trim().copy()) ?? next
-                &queue.push(child)
+                queue.push(child)
             }
         }
     }

@@ -3,7 +3,7 @@ Res: struct {
 }
 
 impl Res.Close {
-    close: fn(^self) { print("close {self.name}") }
+    close: fn(&&self) { print("close {self.name}") }
 }
 
 peek: fn(warm: Res?) -> Bool {
@@ -21,9 +21,9 @@ run: fn() {
     one = Val(Res{name: "a"})
     print("peek {peek(one)}")
     many := [Res]{}
-    &many.push(Res{name: "b"})
+    many.push(Res{name: "b"})
     held := [Res]?{None}
-    held = Val(^many)
+    held = Val(many.move())
     print("peek_list {peek_list(held)}")
     print("end")
 }

@@ -6,7 +6,7 @@
 // negative status is not remapped to success and caller storage is retained.
 decode_status: fn(input: &[U8], output: &[U8]) -> Result<U32, Int> {
     written := 0
-    status := __jet_ffi_native_decode_status(input, input.len(), output, output.len(), &written)
+    status := __jet_ffi_native_decode_status(input, input.len(), output, output.len(), written)
     if status < 0 -> return Err(status)
     return Ok(written)
 }
@@ -14,5 +14,5 @@ decode_status: fn(input: &[U8], output: &[U8]) -> Result<U32, Int> {
 run: fn() -> Result<U32, Int> {
     input := [1, 2, 3]
     output := [0, 0, 0]
-    return decode_status(&input, &output)
+    return decode_status(input, output)
 }

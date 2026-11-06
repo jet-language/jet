@@ -12,8 +12,8 @@ accepted: fn(payload: String) { print(payload) }
 
 run: fn() {
     queue := jobs.queue() ?? panic("queue authority/provider rejected")
-    first: &queue.enqueue(accepted, "payload", key: "checked-identity") ?? panic("enqueue rejected checked job")
-    duplicate: &queue.enqueue(accepted, "payload", key: "checked-identity") ?? panic("duplicate rejected checked job")
+    first: queue.enqueue(accepted, "payload", key: "checked-identity") ?? panic("enqueue rejected checked job")
+    duplicate: queue.enqueue(accepted, "payload", key: "checked-identity") ?? panic("duplicate rejected checked job")
     assert(first.job_type == "accepted")
     assert(duplicate.duplicate)
     assert(first.id == duplicate.id)

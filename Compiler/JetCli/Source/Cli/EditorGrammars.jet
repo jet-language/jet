@@ -92,7 +92,7 @@ jet_cli_devtools_grammars: fn(quiet: Bool, color: Bool) -[FS, Env]> JetCLIPlan N
     rewritten := [String]{}
     loop (index, path) in targets {
         text: cli_files.read(path) ?? return jet_cli_grammar_fail("couldn't read `{path}`: {jet_cli_io_error_text(err)}", color)
-        &rewritten.push(jet_cli_grammar_replace_section(text, sections[index], path) ?? return jet_cli_grammar_fail(err.message, color))
+        rewritten.push(jet_cli_grammar_replace_section(text, sections[index], path) ?? return jet_cli_grammar_fail(err.message, color))
     }
     out := ""
     loop (index, path) in targets {
@@ -225,13 +225,13 @@ jet_cli_grammar_string: fn(literal: String, field: String) -> String JetCLIReadE
                     return Err(jet_cli_read_error("unsupported escape \\{jet_cli_grammar_slice(body, at + 1, at + 2)} in {field} string literal {literal}"))
                 }
             }
-            &out.push(decoded)
+            out.push(decoded)
             at += 2
         } else if (byte == (U8{123}) || byte == (U8{125})) && at + 1 < raw.len() && raw[at + 1] == byte {
-            &out.push(byte)
+            out.push(byte)
             at += 2
         } else {
-            &out.push(byte)
+            out.push(byte)
             at += 1
         }
     }
@@ -257,7 +257,7 @@ jet_cli_grammar_constant_line: fn(line: String) -> (name: String, literal: Strin
 jet_cli_grammar_constants: fn(root: String) -[FS]> [JetCLIGrammarConstant] JetCLIReadError! {
     directory: cli_files.join(root, JET_CLI_GRAMMAR_SYNTAX_DIR)
     names := cli_files.listdir(directory) ?? return Err(jet_cli_read_error("could not list {JET_CLI_GRAMMAR_SYNTAX_DIR}: {jet_cli_io_error_text(err)}"))
-    &names.sort()
+    names.sort()
     constants := [JetCLIGrammarConstant]{}
     loop entry in names {
         if !entry.ends_with(".jet") -> next
@@ -271,7 +271,7 @@ jet_cli_grammar_constants: fn(root: String) -[FS]> [JetCLIGrammarConstant] JetCL
                 if prior.value != value -> return Err(jet_cli_read_error("conflicting constant {found.name} in {prior.path} and {path}"))
                 known = true
             }
-            if !known -> &constants.push(JetCLIGrammarConstant{name: found.name, path: path, value: value})
+            if !known -> constants.push(JetCLIGrammarConstant{name: found.name, path: path, value: value})
         }
     }
     Ok(constants)
@@ -289,7 +289,7 @@ jet_cli_grammar_markers: fn(root: String) -[FS]> [String] JetCLIReadError! {
         } else if line.starts_with("}}") {
             current = None
         } else if current == .Val(open) && line.trim().starts_with("impl Marker") {
-            &names.push(open.copy())
+            names.push(open.copy())
             current = None
         }
     }
@@ -325,13 +325,13 @@ jet_cli_grammar_tokens: fn(root: String, constants: [JetCLIGrammarConstant]) -[F
     at := jet_cli_grammar_find(table, "text:", 0)
     loop at >= 0 {
         written += 1
-        if jet_cli_grammar_row(table, raw, at, constants) == .Val(token) -> &tokens.push(token)
+        if jet_cli_grammar_row(table, raw, at, constants) == .Val(token) -> tokens.push(token)
         at = jet_cli_grammar_find(table, "text:", at + 5)
     }
     if tokens.len() == 0 || tokens.len() != written {
         return Err(jet_cli_read_error("could not parse every HighlightToken row in {JET_CLI_GRAMMAR_HIGHLIGHTS} (parsed {tokens.len()}, found {written})"))
     }
-    loop name in jet_cli_grammar_markers(root) -> &tokens.push(JetCLIGrammarToken{text: name, class: "MarkerRule"})
+    loop name in jet_cli_grammar_markers(root) -> tokens.push(JetCLIGrammarToken{text: name, class: "MarkerRule"})
     Ok(tokens)
 }
 
@@ -402,7 +402,7 @@ jet_cli_grammar_anonymous: fn(root: String) -[FS]> [String] JetCLIReadError! {
                 if field.key == "type" && field.value == .Text(name) -> kind = Val(name.copy())
                 if field.key == "named" && field.value == .Bool(flag) -> unnamed = !flag
             }
-            if unnamed && kind == .Val(name) && !anonymous.contains(name) -> &anonymous.push(name.copy())
+            if unnamed && kind == .Val(name) && !anonymous.contains(name) -> anonymous.push(name.copy())
         }
     }
     if anonymous.len() == 0 -> return Err(jet_cli_read_error("no anonymous node types in {JET_CLI_GRAMMAR_NODE_TYPES}"))
@@ -414,9 +414,9 @@ jet_cli_grammar_class_texts: fn(tokens: [JetCLIGrammarToken], class: String) -> 
     texts := [String]{}
     loop token in tokens {
         if token.class != class || JET_CLI_GRAMMAR_BRACKETS.contains(token.text) || texts.contains(token.text) -> next
-        &texts.push(token.text.copy())
+        texts.push(token.text.copy())
     }
-    &texts.sort()
+    texts.sort()
     texts
 }
 
@@ -424,8 +424,8 @@ jet_cli_grammar_regex_escape: fn(text: String) -> String Never! {
     special: "\\.+*?^$()[]{{}}|/-".bytes()
     out := [U8]{}
     loop byte in text.bytes() {
-        if special.contains(byte) -> &out.push(U8{92})
-        &out.push(byte)
+        if special.contains(byte) -> out.push(U8{92})
+        out.push(byte)
     }
     String.from_bytes(out) ?? panic("regex escaping preserves UTF-8")
 }
@@ -443,7 +443,7 @@ jet_cli_grammar_render_vscode: fn(tokens: [JetCLIGrammarToken]) -> String Never!
         longest := 0
         loop text in texts {
             if jet_cli_grammar_is_word(text) {
-                &words.push(jet_cli_grammar_regex_escape(text))
+                words.push(jet_cli_grammar_regex_escape(text))
             } else if text.count_bytes() > longest {
                 longest = text.count_bytes()
             }
@@ -451,16 +451,16 @@ jet_cli_grammar_render_vscode: fn(tokens: [JetCLIGrammarToken]) -> String Never!
         // Longest first, so `:=` is never read as `:` and `=`.
         loop width in 0..<longest {
             loop text in texts {
-                if !jet_cli_grammar_is_word(text) && text.count_bytes() == longest - width -> &symbols.push(jet_cli_grammar_regex_escape(text))
+                if !jet_cli_grammar_is_word(text) && text.count_bytes() == longest - width -> symbols.push(jet_cli_grammar_regex_escape(text))
             }
         }
         global := [String]{}
         contextual := [String]{}
         loop word in words {
             if class.keyword && !JET_CLI_GRAMMAR_GLOBAL_KEYWORDS.contains(word) {
-                &contextual.push(word)
+                contextual.push(word)
             } else {
-                &global.push(word)
+                global.push(word)
             }
         }
         scope: class.textmate
@@ -473,23 +473,23 @@ jet_cli_grammar_render_vscode: fn(tokens: [JetCLIGrammarToken]) -> String Never!
                 class.keyword -> "(?<![.A-Za-z0-9_])({alternation})(?![A-Za-z0-9_])"
                 else -> "\\b({alternation})\\b"
             }
-            &patterns.push(jet_cli_grammar_vscode_pattern(scope, pattern))
+            patterns.push(jet_cli_grammar_vscode_pattern(scope, pattern))
         }
         if contextual.len() > 0 {
             // Identifier-like keywords must not steal ordinary names; color
             // only declaration shape.
             if contextual.contains("as") {
-                &patterns.push(jet_cli_grammar_vscode_pattern(scope, "(?<![.A-Za-z0-9_])(as)(?=\\s+[A-Za-z_][A-Za-z0-9_]*)"))
+                patterns.push(jet_cli_grammar_vscode_pattern(scope, "(?<![.A-Za-z0-9_])(as)(?=\\s+[A-Za-z_][A-Za-z0-9_]*)"))
             }
             rest := [String]{}
             loop word in contextual {
-                if word != "as" -> &rest.push(word)
+                if word != "as" -> rest.push(word)
             }
             if rest.len() > 0 {
-                &patterns.push(jet_cli_grammar_vscode_pattern(scope, "(?<![.A-Za-z0-9_])({rest.join("|")})(?=\\s*(?:\\{{|[A-Za-z_][A-Za-z0-9_]*\\s*:))"))
+                patterns.push(jet_cli_grammar_vscode_pattern(scope, "(?<![.A-Za-z0-9_])({rest.join("|")})(?=\\s*(?:\\{{|[A-Za-z_][A-Za-z0-9_]*\\s*:))"))
             }
         }
-        if symbols.len() > 0 -> &patterns.push(jet_cli_grammar_vscode_pattern(scope, "({symbols.join("|")})"))
+        if symbols.len() > 0 -> patterns.push(jet_cli_grammar_vscode_pattern(scope, "({symbols.join("|")})"))
     }
     "      \"comment\": \"{JET_CLI_GRAMMAR_START}\",\n      \"patterns\": [\n{patterns.join(",\n")}\n      ],\n      \"endComment\": \"{JET_CLI_GRAMMAR_END}\"\n"
 }
@@ -514,7 +514,7 @@ jet_cli_grammar_render_zed: fn(tokens: [JetCLIGrammarToken], anonymous: [String]
         loop text in texts {
             if !jet_cli_grammar_is_word(text) || !anonymous.contains(text) -> next
             if class.keyword && !JET_CLI_GRAMMAR_GLOBAL_KEYWORDS.contains(text) -> next
-            &words.push("  {foundation_json_quote(text)}")
+            words.push("  {foundation_json_quote(text)}")
         }
         if words.len() > 0 -> out = "{out}[\n{words.join("\n")}\n] {class.zed}\n\n"
     }

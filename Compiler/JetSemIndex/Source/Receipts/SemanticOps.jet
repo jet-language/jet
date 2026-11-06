@@ -101,7 +101,7 @@ semops_parse_files: fn(value: Dyn) -> [SemanticOpFile]? Never! {
     if value == .Array(values) {
         files := [SemanticOpFile]{}
         loop row in values {
-            if semops_file(row) == .Val(file) -> &files.push(file)
+            if semops_file(row) == .Val(file) -> files.push(file)
         }
         return Val(files)
     }
@@ -125,7 +125,7 @@ semops_op: fn(value: Dyn) -> SemanticOp? Never! {
         if semops_field(object, "targets") == .Val(target_value) {
             if target_value == .Array(rows) {
                 loop row in rows {
-                    if semops_target(row) == .Val(target) -> &targets.push(target)
+                    if semops_target(row) == .Val(target) -> targets.push(target)
                 }
             }
         }
@@ -147,7 +147,7 @@ semops_ops: fn(value: Dyn) -> [SemanticOp]? Never! {
     if value == .Array(values) {
         operations := [SemanticOp]{}
         loop row in values {
-            if semops_op(row) == .Val(operation) -> &operations.push(operation)
+            if semops_op(row) == .Val(operation) -> operations.push(operation)
         }
         return Val(operations)
     }
@@ -165,10 +165,10 @@ semantic_ops_for_file: fn(path: String, source_hash: String) -[FS, Env]> [Semant
         paths := [String]{}
         if semops_files.list_dir(receipts) == .Ok(entries) {
             loop entry in entries {
-                if entry.name.ends_with(".log.json") && semops_files.is_file(entry.path) -> &paths.push(entry.path)
+                if entry.name.ends_with(".log.json") && semops_files.is_file(entry.path) -> paths.push(entry.path)
             }
         }
-        &paths.sort()
+        paths.sort()
         loop receipt in paths {
             raw: semops_files.read(receipt) ?? next
             value: semops_parse_receipt(raw) ?? next
@@ -187,9 +187,9 @@ semantic_ops_for_file: fn(path: String, source_hash: String) -[FS, Env]> [Semant
                 op_value: semops_field(object, "semantic_ops") ?? next
                 operations: semops_ops(op_value) ?? next
                 loop operation in operations {
-                    attached := ^operation
+                    attached := operation.move()
                     attached.files = files.copy()
-                    &out.push(attached)
+                    out.push(attached)
                 }
             }
         }
@@ -232,7 +232,7 @@ semantic_rename_ops: fn(before: SemIndex, after: SemIndex) -> [SemanticOp] Never
         }
         if reverse != 1 -> next
         used_after[candidate] = true
-        &out.push(SemanticOp{
+        out.push(SemanticOp{
             kind: "rename", rule_id: Val("jet-fix"), from: Val(old.name), to: Val(new.name),
             node: None, match_template: None, replace_template: None,
             targets: [SemanticOpTarget]{SemanticOpTarget{
@@ -272,7 +272,7 @@ semantic_blame: fn(index: SemIndex, receipts: [SemanticOp]) -> [SemanticBlameEnt
                 break
             }
         }
-        &out.push(SemanticBlameEntry{
+        out.push(SemanticBlameEntry{
             stable_id: fact.stable_id, identity: fact.human_identity, kind: fact.kind, operation,
         })
     }

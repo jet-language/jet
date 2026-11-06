@@ -33,8 +33,8 @@ copy_tree: fn(from: String, to: String) {
 run_tier: fn(jet: String, scratch: String, directory: String, release: Bool) -> String {
     tier: if release -> "native O2" else -> "native O0"
     args := [String]{jet.copy(), "run"}
-    if release -> &args.push("--release")
-    &args.push("{scratch}/{directory}/run.jet")
+    if release -> args.push("--release")
+    args.push("{scratch}/{directory}/run.jet")
     receipt: process.cmd(args).cwd(scratch.copy()).env("NO_COLOR", "1").run() ?? fail("{directory} {tier} failed: {err}")
     if !receipt.success -> fail("{directory} {tier} failed: code={receipt.code}\n{receipt.output}{receipt.errors}")
     receipt.output

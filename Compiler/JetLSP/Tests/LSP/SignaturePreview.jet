@@ -18,9 +18,9 @@ lsp_signature_test_definition: fn() -> SymbolDef Never! {
     SymbolDef{identity: "fn:main::run", declaration_identity_unavailable: CallableFactUnavailable{required_stage: .Resolved, reason: "typed algorithm input"}, name: "run", qualified_name: "main.run", module_path: "main.jet", def_span: SourceSpan{start: 3, end: 6}, kind: .Function{params: [SemIndexNameTypeFact]{}, call_contract: [SemIndexCallContractEntry]{}, ret: None}, view_provenance: [ViewProvenanceFact]{}, callable_signature: Val(signature), derives: [String]{}, nominal_base: None, trait_contracts: [TraitContractFact]{}}
 }
 
-lsp_signature_test_db: fn(definition: ^SymbolDef) -> SymbolDB Never! {
+lsp_signature_test_db: fn(definition: &&SymbolDef) -> SymbolDB Never! {
     db := SymbolDB.new()
-    db.index = SemIndex.new([SymbolDef]{^definition}, [SymbolRef]{}, [CallEdge]{}, [EffectFact]{}, [MemberFact]{}, [StructuralNode]{}, [DefinitionFact]{})
+    db.index = SemIndex.new([SymbolDef]{definition.move()}, [SymbolRef]{}, [CallEdge]{}, [EffectFact]{}, [MemberFact]{}, [StructuralNode]{}, [DefinitionFact]{})
     db
 }
 

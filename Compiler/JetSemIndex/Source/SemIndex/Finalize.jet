@@ -68,20 +68,20 @@ semindex_build_symbol_db: fn(registration: SemaRegistrationGraph, checked: SemaG
         module_index: semindex_loaded_registration_index(registration, source)
         module_ref: registration.modules[module_index]
         block_spans := module_ref.program.block_spans.copy()
-        &block_spans.sort_by((left: Span, right: Span) -> left.start <=> right.start)
+        block_spans.sort_by((left: Span, right: Span) -> left.start <=> right.start)
         alias := source.alias.copy()
         if module_index < checked.effect_facts.name_ledger.modules.len() -> alias = checked.effect_facts.name_ledger.modules[module_index].alias.copy()
-        ctx := WalkCtx.new(module_index, semindex_root_identity(alias), ^block_spans)
-        loop item in module_ref.program.items -> semindex_collect_item(&db, &ctx, checked.effect_facts.name_ledger, module_ref.program, source.loaded_source, item, source.display)
-        semindex_apply_inferred_effect_rows(&db, module_index, module_ref.program.items, source.alias, source.display, checked.effect_facts)
+        ctx := WalkCtx.new(module_index, semindex_root_identity(alias), block_spans)
+        loop item in module_ref.program.items -> semindex_collect_item(db, ctx, checked.effect_facts.name_ledger, module_ref.program, source.loaded_source, item, source.display)
+        semindex_apply_inferred_effect_rows(db, module_index, module_ref.program.items, source.alias, source.display, checked.effect_facts)
     }
-    semindex_add_import_alias_definitions(&db, registration, checked.effect_facts.name_ledger, module_sources, loaded_module_rows)
-    semindex_add_declaration_visibility(&db, registration, checked.effect_facts.name_ledger, module_sources, loaded_module_rows)
-    semindex_add_propagation_hints(&db, checked, module_sources, loaded_module_rows)
-    semindex_add_state_graph_hovers(&db, registration, checked.effect_facts, module_sources, loaded_module_rows)
-    semindex_add_breadcrumb_hints(&db)
-    &db.finalize_index(registration, checked, module_sources, loaded_module_rows, effect_program, effect_summaries)
-    &db.refresh_effect_hovers()
+    semindex_add_import_alias_definitions(db, registration, checked.effect_facts.name_ledger, module_sources, loaded_module_rows)
+    semindex_add_declaration_visibility(db, registration, checked.effect_facts.name_ledger, module_sources, loaded_module_rows)
+    semindex_add_propagation_hints(db, checked, module_sources, loaded_module_rows)
+    semindex_add_state_graph_hovers(db, registration, checked.effect_facts, module_sources, loaded_module_rows)
+    semindex_add_breadcrumb_hints(db)
+    db.finalize_index(registration, checked, module_sources, loaded_module_rows, effect_program, effect_summaries)
+    db.refresh_effect_hovers()
     db.symbols = semindex_build_semantic_symbol_index(db, registration, checked.effect_facts.name_ledger, module_sources, loaded_module_rows)
     db
 }
@@ -139,7 +139,7 @@ semindex_add_propagation_hints: fn(db: &SymbolDB, checked: SemaGraphResult, modu
                     if node.kind == .TryWithContext(_, note, _, _, _, _) {
                         if note != None || seen.get(node.span.end) != None -> next
                         seen[node.span.end] = true
-                        &db.inlay.push(InlayHint{span: Span{start: node.span.end, end: node.span.end}, module_path: source.display.copy(), label: "?"})
+                        db.inlay.push(InlayHint{span: Span{start: node.span.end, end: node.span.end}, module_path: source.display.copy(), label: "?"})
                     }
                 }
             }
@@ -153,7 +153,7 @@ semindex_state_declarations: fn(items: [Item]) -> [Int] Never! {
     declarations := [Int]{}
     loop index in 0..<items.len() {
         if items[index] == .Struct(definition) {
-            if definition.state != None -> &declarations.push(index)
+            if definition.state != None -> declarations.push(index)
         }
     }
     declarations
@@ -171,7 +171,7 @@ semindex_build_state_graphs: fn(registration: SemaRegistrationGraph, checked: Se
             if module_ref.program.items[index] == .Struct(definition) {
                 if definition.state == .Val(declaration) {
                     key: "{definition.name}.State"
-                    if sema_effect_facts_state_graph(checked.effect_facts, key) == .Val(graph) -> &graphs.push(semindex_state_graph_fact(definition.name, declaration.states, source.display, graph))
+                    if sema_effect_facts_state_graph(checked.effect_facts, key) == .Val(graph) -> graphs.push(semindex_state_graph_fact(definition.name, declaration.states, source.display, graph))
                 }
             }
         }
@@ -189,13 +189,13 @@ semindex_state_graph_fact: fn(owner: String, declarations: [NamedSpan], module_p
             }
         }
         if span == {
-            .Val(location) -> &states.push(StateNodeFact{name: node.name, terminal: node.terminal, reachable: node.reachable, span: semindex_source_span(location)})
+            .Val(location) -> states.push(StateNodeFact{name: node.name, terminal: node.terminal, reachable: node.reachable, span: semindex_source_span(location)})
             .None -> { panic("checked state graph node must have a declaration") }
         }
     }
     transitions := [StateTransitionFact]{}
-    loop transition in graph.transitions -> &transitions.push(StateTransitionFact{operation: transition.operation, from: transition.from, to: transition.to})
-    StateGraphFact{owner: owner, module_path: module_path, states: ^states, transitions: ^transitions}
+    loop transition in graph.transitions -> transitions.push(StateTransitionFact{operation: transition.operation, from: transition.from, to: transition.to})
+    StateGraphFact{owner: owner, module_path: module_path, states: states.move(), transitions: transitions.move()}
 }
 semindex_add_state_graph_hovers: fn(db: &SymbolDB, registration: SemaRegistrationGraph, facts: SemIndexEffectFacts, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int]) Never! {
     loop source_index in loaded_module_rows {
@@ -214,7 +214,7 @@ semindex_add_state_graph_hovers: fn(db: &SymbolDB, registration: SemaRegistratio
                                     .Val(reachable) -> if reachable -> "reachable" else -> "unreachable"
                                     else -> "reachability unknown"
                                 }
-                                &db.hover.push(HoverEntry{span: member.span, module_path: source.display, text: "state `{definition.name}.State.{member.name}` ({terminal}; {reachability})"})
+                                db.hover.push(HoverEntry{span: member.span, module_path: source.display, text: "state `{definition.name}.State.{member.name}` ({terminal}; {reachability})"})
                                 break
                             }
                         }
@@ -231,14 +231,14 @@ semindex_add_import_alias_definitions: fn(db: &SymbolDB, registration: SemaRegis
     sources := [Int:Int]{}
     loop source_index in loaded_module_rows -> sources[semindex_loaded_registration_index(registration, module_sources[source_index])] = source_index
     order := [Int]{}
-    loop index in 0..<names.aliases.len() -> &order.push(index)
-    &order.sort_by((left: Int, right: Int) -> (names.aliases[left].module_index <=> names.aliases[right].module_index).then(names.aliases[left].span.start <=> names.aliases[right].span.start).then(names.aliases[left].span.end <=> names.aliases[right].span.end).then(names.aliases[left].name <=> names.aliases[right].name))
+    loop index in 0..<names.aliases.len() -> order.push(index)
+    order.sort_by((left: Int, right: Int) -> (names.aliases[left].module_index <=> names.aliases[right].module_index).then(names.aliases[left].span.start <=> names.aliases[right].span.start).then(names.aliases[left].span.end <=> names.aliases[right].span.end).then(names.aliases[left].name <=> names.aliases[right].name))
     loop index in order {
         alias: names.aliases[index]
         if alias.span.start >= alias.span.end -> next
         if alias.module_index < 0 || alias.module_index >= names.modules.len() -> next
         if sources.get(alias.module_index) == .Val(source_index) {
-            if name_facts_alias_identity(names, alias.module_index, alias.span) == .Val(identity) -> &db.defs.push(SymDef{identity: identity, name: alias.name, def_span: alias.span, module_path: module_sources[source_index].display, kind: .Module})
+            if name_facts_alias_identity(names, alias.module_index, alias.span) == .Val(identity) -> db.defs.push(SymDef{identity: identity, name: alias.name, def_span: alias.span, module_path: module_sources[source_index].display, kind: .Module})
         }
     }
 }
@@ -276,13 +276,13 @@ semindex_apply_inferred_effect_rows: fn(db: &SymbolDB, module_index: Int, items:
             }
             if facts.solved.get("{alias}::{local_key}") == .Val(row) {
                 inferred := [EffectRowEntry]{}
-                loop name in row -> &inferred.push(EffectRowEntry{name: name, span: db.defs[index].def_span})
+                loop name in row -> inferred.push(EffectRowEntry{name: name, span: db.defs[index].def_span})
                 display_ret: if failure == {
                     .Checked(value) -> failure_contract_shown_return(value)
                     .Unavailable(_) -> ret
                 }
                 signature: semindex_fn_signature(db.defs[index].name, params, contract, variadic, display_ret, failure, Val(inferred), None, db.view_provenance.get(db.defs[index].identity), access, defaults, policies)
-                db.defs[index].kind = SymKind.Function{params: params, param_sources: sources, signature_facts_available: available, param_contract: contract, param_variadic: variadic, return_type: ret, failure_contract: failure, foreign_boundary: foreign, effects: Val(^inferred), effect_via: via, param_access: access, param_defaults: defaults, policies: policies, generic_parameters: generics}
+                db.defs[index].kind = SymKind.Function{params: params, param_sources: sources, signature_facts_available: available, param_contract: contract, param_variadic: variadic, return_type: ret, failure_contract: failure, foreign_boundary: foreign, effects: Val(inferred.move()), effect_via: via, param_access: access, param_defaults: defaults, policies: policies, generic_parameters: generics}
                 loop hover_index in 0..<db.hover.len() {
                     hover: db.hover[hover_index]
                     if hover.module_path != db.defs[index].module_path || hover.span != db.defs[index].def_span -> next
@@ -300,7 +300,7 @@ semindex_inferred_hover_tail: fn(text: String) -> String Never! {
     if text.split_once("\n") == .Val(parts) {
         tail := [String]{}
         loop line in parts.after.lines() {
-            if !line.starts_with("failure: ") -> &tail.push(line)
+            if !line.starts_with("failure: ") -> tail.push(line)
         }
         joined: tail.join("\n")
         if joined != "" -> return "\n{joined}"
@@ -314,13 +314,13 @@ semindex_build_definition_facts: fn(defs: [SymbolDef], nodes: [StructuralNode], 
     by_module := [String:[Int]]{}
     loop index in 0..<defs.len() {
         if by_module.get(defs[index].module_path) == None -> by_module[defs[index].module_path] = [Int]{}
-        &by_module[defs[index].module_path].push(index)
+        by_module[defs[index].module_path].push(index)
     }
     sources := [String:Int]{}
     loop source_index in loaded_module_rows {
         display: module_sources[source_index].display
         if sources.get(display) == None -> sources[display] = source_index
-        if by_module.get(display) != None -> &by_module[display].sort_by((left: Int, right: Int) -> defs[left].def_span.start <=> defs[right].def_span.start)
+        if by_module.get(display) != None -> by_module[display].sort_by((left: Int, right: Int) -> defs[left].def_span.start <=> defs[right].def_span.start)
     }
     cursors := [String:Int]{}
     source_bytes := [Int:[U8]]{}
@@ -354,7 +354,7 @@ semindex_build_definition_facts: fn(defs: [SymbolDef], nodes: [StructuralNode], 
             if node.span.start >= 0 && node.span.end >= node.span.start && node.span.end <= source_bytes[source_index].len() -> source = String.from_bytes(source_bytes[source_index][node.span.start..<node.span.end]) ?? ""
             identity_hash: sha256_hex(structural)
             signature_hash: sha256_hex(signature)
-            &out.push(DefinitionFact{
+            out.push(DefinitionFact{
                 stable_id: "def:{identity_hash.slice(0, 16)}",
                 signature_id: "sig:{signature_hash.slice(0, 16)}",
                 content_id: "sha256:{sha256_hex(semindex_normalize_definition(source))}",
@@ -364,7 +364,7 @@ semindex_build_definition_facts: fn(defs: [SymbolDef], nodes: [StructuralNode], 
             })
         }
     }
-    &out.sort_by((left: DefinitionFact, right: DefinitionFact) -> (left.stable_id <=> right.stable_id).then(left.human_identity <=> right.human_identity))
+    out.sort_by((left: DefinitionFact, right: DefinitionFact) -> (left.stable_id <=> right.stable_id).then(left.human_identity <=> right.human_identity))
     out
 }
 
@@ -388,16 +388,16 @@ semindex_definition_signature: fn(definition: SymbolDef) -> String Never! {
     if definition.kind == {
         .Function(params, contract, ret) -> {
             types := [String]{}
-            loop param in params -> &types.push(param.ty)
+            loop param in params -> types.push(param.ty)
             contracts := [String]{}
-            loop row in contract -> &contracts.push("{row.label}:{row.zone}:{row.variadic}")
+            loop row in contract -> contracts.push("{row.label}:{row.zone}:{row.variadic}")
             views := [String]{}
-            loop provenance in definition.view_provenance -> &views.push(provenance.canonical())
+            loop provenance in definition.view_provenance -> views.push(provenance.canonical())
             "({types.join(",")})->{ret ?? "()"};call_contract=[{contracts.join(",")}];view_source={views.join("|")}"
         }
         .Struct(fields) -> {
             types := [String]{}
-            loop field in fields -> &types.push(field.ty)
+            loop field in fields -> types.push(field.ty)
             "{{{types.join(",")}}}"
         }
         .Enum(variants) -> "variants:{variants.len()}"

@@ -3,7 +3,7 @@ package: {
     authority: { allow: [FS, FS.Read, FS.Write, IO, Mem.Alloc] }
 }
 
-// #6415: `loop x in ^list` over items that hold a FileReader takes each item
+// #6415: `loop x in list.move()` over items that hold a FileReader takes each item
 // by move. A kept item keeps its one reader; a skipped item and the items an
 // early return leaves behind close theirs exactly once. A second close of
 // the same reader used to hang in jet_fd_drop_raw.
@@ -20,19 +20,19 @@ Held: struct {
 
 open_all: fn(paths: [String]) -[FS]> [Held] IOError! {
     opened := [Held]{}
-    loop path in paths -> &opened.push(Held{name: path, reader: files.open(path)})
+    loop path in paths -> opened.push(Held{name: path, reader: files.open(path)})
     kept := [Held]{}
-    loop held in ^opened {
+    loop held in opened.move() {
         if held.name.ends_with("skip") -> next
-        &kept.push(^held)
+        kept.push(held)
     }
     Ok(kept)
 }
 
 first_taken: fn(paths: [String]) -[FS]> Int IOError! {
     opened := [Held]{}
-    loop path in paths -> &opened.push(Held{name: path, reader: files.open(path)})
-    loop held in ^opened {
+    loop path in paths -> opened.push(Held{name: path, reader: files.open(path)})
+    loop held in opened.move() {
         return Ok(held.reader.read(64).len())
     }
     Ok(0)

@@ -43,27 +43,27 @@ MAX_STATIC_RESPONSE_BYTES: 64 * 1024 * 1024
 PUBLICATION_COUNTER: AtomicU64.new(0)
 decode_devtools_envelope: fn(payload: String) -> JetDevtoolsDecodedEnvelope Err! {
     root: parse_json_with_limit(payload, JET_DEVTOOLS_MAX_ENVELOPE_BYTES) ?? return .Err("devtools envelope is not valid bounded JSON")
-    object: object_map(&root) ?? return .Err("devtools envelope must be an object")
-    protocol: devtools_required_string(&object, "protocol")
+    object: object_map(root) ?? return .Err("devtools envelope must be an object")
+    protocol: devtools_required_string(object, "protocol")
     if protocol != JET_DEVTOOLS_PROTOCOL -> return .Err("devtools envelope protocol does not match jet.devtools.v1")
     if object.contains_key("history") -> return .Err("devtools envelope must use the single `events` stream")
-    session_id: devtools_required_string(&object, "session_id")
-    started_at_ms: devtools_required_u64(&object, "started_at_ms")
+    session_id: devtools_required_string(object, "session_id")
+    started_at_ms: devtools_required_u64(object, "started_at_ms")
     if object.get("direction") == .Val(direction) {
         if devtools_required_value_string(direction, "direction")? == {
             "host_to_runtime" -> {
                 if object.contains_key("events") -> return .Err("devtools command envelope cannot contain an events stream")
-                return .Commands(decode_devtools_command_envelope(&object, session_id, started_at_ms)?)
+                return .Commands(decode_devtools_command_envelope(object, session_id, started_at_ms)?)
             }
             "runtime_to_host" -> {
                 if object.contains_key("commands") -> return .Err("devtools event envelope cannot contain a commands stream")
-                return .Events(decode_devtools_events(&object, session_id, started_at_ms)?)
+                return .Events(decode_devtools_events(object, session_id, started_at_ms)?)
             }
             else -> { return .Err("devtools envelope direction is not recognized") }
         }
     }
     if object.contains_key("commands") -> return .Err("devtools command envelope requires direction")
-    return .Events(decode_devtools_events(&object, session_id, started_at_ms)?)
+    return .Events(decode_devtools_events(object, session_id, started_at_ms)?)
 }
 decode_devtools_events: fn(object: [String:Dyn], session_id: String, started_at_ms: U64) -> JetDevtoolsEnvelope Err! {
     events: if object.get("events") == {
@@ -74,37 +74,37 @@ decode_devtools_events: fn(object: [String:Dyn], session_id: String, started_at_
     envelope := JetDevtoolsEnvelope.new(session_id.to_string(), started_at_ms)
     loop value in events {
         event: object_map(value) ?? return .Err("devtools envelope event must be an object")
-        sequence: devtools_required_u64(&event, "sequence")
+        sequence: devtools_required_u64(event, "sequence")
         if sequence == 0 -> return .Err("devtools envelope event sequence must be positive")
-        timestamp_ms: devtools_required_u64(&event, "timestamp_ms")
-        source: devtools_required_string(&event, "source")
-        kind: devtools_required_string(&event, "kind")
-        entity: devtools_required_string(&event, "entity")
+        timestamp_ms: devtools_required_u64(event, "timestamp_ms")
+        source: devtools_required_string(event, "source")
+        kind: devtools_required_string(event, "kind")
+        entity: devtools_required_string(event, "entity")
         fields_value: event.get("fields") ?? return .Err("devtools envelope missing `fields`")
         _: object_map(fields_value) ?? return .Err("devtools envelope `fields` must be an object")
         fields: Session.render_json(fields_value)
         payload: if event.get("payload") == {
             .None | .Val(.Null) -> .None
-            .Val(.Object(_)) -> .Val(devtools_required_object_json(&event, "payload")?)
+            .Val(.Object(_)) -> .Val(devtools_required_object_json(event, "payload")?)
             else -> { return .Err("devtools event payload must be an object or null") }
         }
         decoded: decode_devtools_body(kind, entity, fields_value)
         typed: if decoded == {
             .Val(body) -> {
-                typed: JetDevtoolsEvent.from_wire(sequence, timestamp_ms, ^source, ^body, ^fields, ^payload)
+                typed: JetDevtoolsEvent.from_wire(sequence, timestamp_ms, source, body, fields, payload)
                 if typed.kind() != kind || typed.entity() != entity -> return .Err("devtools event identity does not match its typed body")
                 typed
             }
-            .None -> JetDevtoolsEvent.from_parts_with_payload(timestamp_ms, ^source, ^kind, ^entity, ^fields, ^payload)
+            .None -> JetDevtoolsEvent.from_parts_with_payload(timestamp_ms, source, kind, entity, fields, payload)
         }
-        envelope.push(^typed)
+        envelope.push(typed)
     }
     if object.get("selection") == .Val(selection) {
         if selection == {
             .Null -> envelope.set_selection(.None)
             .Object(v) -> {
                 selection: object_map_entries(v)
-                envelope.set_selection(.Val(JetDevtoolsSelection.new(devtools_required_string(&selection, "panel_id"), devtools_optional_string(&selection, "item_key")?)))
+                envelope.set_selection(.Val(JetDevtoolsSelection.new(devtools_required_string(selection, "panel_id"), devtools_optional_string(selection, "item_key")?)))
             }
             else -> { return .Err("devtools envelope selection must be an object or null") }
         }
@@ -120,18 +120,18 @@ decode_devtools_events: fn(object: [String:Dyn], session_id: String, started_at_
     if object.get("lifecycle") == .Val(v) -> envelope.set_lifecycle(devtools_lifecycle(devtools_required_value_string(v, "lifecycle")?)?)
     if object.get("freshness") == .Val(v) {
         freshness: object_map(v) ?? return .Err("devtools envelope freshness must be an object")
-        envelope.set_freshness(JetDevtoolsFreshnessFact { state: devtools_freshness_state(devtools_required_string(&freshness, "state")?), observed_at_ms: devtools_required_u64(&freshness, "observed_at_ms")? })
+        envelope.set_freshness(JetDevtoolsFreshnessFact { state: devtools_freshness_state(devtools_required_string(freshness, "state")?), observed_at_ms: devtools_required_u64(freshness, "observed_at_ms")? })
     }
     if object.get("privacy") == .Val(v) {
         privacy: object_map(v) ?? return .Err("devtools envelope privacy must be an object")
-        envelope.privacy = JetDevtoolsPrivacy { loopback_only: devtools_required_bool(&privacy, "loopback_only"), payload_free_by_default: devtools_required_bool(&privacy, "payload_free_by_default")?, published_payloads: devtools_required_bool(&privacy, "published_payloads")? }
+        envelope.privacy = JetDevtoolsPrivacy { loopback_only: devtools_required_bool(privacy, "loopback_only"), payload_free_by_default: devtools_required_bool(privacy, "payload_free_by_default")?, published_payloads: devtools_required_bool(privacy, "published_payloads")? }
     }
     if object.get("source_identity") == .Val(v) {
         envelope.source_identity = if v == {
             .Null -> .None
             .Object(v) -> {
                 identity: object_map_entries(v)
-                .Val(JetDevtoolsSourceIdentityFact.new(devtools_optional_string(&identity, "source_id"), devtools_optional_string(&identity, "build_id")?, devtools_optional_string(&identity, "revision")?, devtools_optional_string(&identity, "world_id")?))
+                .Val(JetDevtoolsSourceIdentityFact.new(devtools_optional_string(identity, "source_id"), devtools_optional_string(identity, "build_id")?, devtools_optional_string(identity, "revision")?, devtools_optional_string(identity, "world_id")?))
             }
             else -> { return .Err("devtools envelope source_identity must be an object or null") }
         }
@@ -142,7 +142,7 @@ decode_devtools_events: fn(object: [String:Dyn], session_id: String, started_at_
 }
 decode_devtools_command_envelope: fn(object: [String:Dyn], session_id: String, started_at_ms: U64) -> JetDevtoolsCommandEnvelope Err! {
     expected: ["protocol", "session_id", "started_at_ms", "direction", "commands"]
-    if !devtools_has_exact_fields(object, &expected) -> return .Err("devtools command envelope has unexpected top-level fields")
+    if !devtools_has_exact_fields(object, expected) -> return .Err("devtools command envelope has unexpected top-level fields")
     direction: devtools_required_value_string(object.get("direction") ?? return .Err("devtools command envelope requires direction"), "direction")
     if direction != "host_to_runtime" -> return .Err("devtools command envelope direction must be host_to_runtime")
     commands: if object.get("commands") == {
@@ -154,34 +154,34 @@ decode_devtools_command_envelope: fn(object: [String:Dyn], session_id: String, s
     loop value in commands {
         command: object_map(value) ?? return .Err("devtools envelope command must be an object")
         if command.len() != 2 || !command.contains_key("kind") || !command.contains_key("payload") -> return .Err("devtools envelope command must contain only kind and payload")
-        kind: devtools_required_string(&command, "kind")
+        kind: devtools_required_string(command, "kind")
         payload: command.get("payload").and_then(object_map) ?? return .Err("devtools envelope command payload must be an object")
         if kind == {
             "DatabaseExplain" -> {
-                if !devtools_has_exact_fields(&payload, &["session_id", "request_id", "statement_identity", "timeout_ms", "max_rows"]) -> return .Err("devtools envelope database command payload has unexpected fields")
-                request: JetDevtoolsDatabaseExplainRequest.new(devtools_required_string(&payload, "session_id"), devtools_required_string(&payload, "request_id")?, devtools_required_string(&payload, "statement_identity")?, devtools_required_u64(&payload, "timeout_ms")?, devtools_required_u64(&payload, "max_rows")?)?
-                envelope.enqueue_command(.DatabaseExplain(^request))
+                if !devtools_has_exact_fields(payload, &["session_id", "request_id", "statement_identity", "timeout_ms", "max_rows"]) -> return .Err("devtools envelope database command payload has unexpected fields")
+                request: JetDevtoolsDatabaseExplainRequest.new(devtools_required_string(payload, "session_id"), devtools_required_string(payload, "request_id")?, devtools_required_string(payload, "statement_identity")?, devtools_required_u64(payload, "timeout_ms")?, devtools_required_u64(payload, "max_rows")?)?
+                envelope.enqueue_command(.DatabaseExplain(request))
             }
             "GameControl" -> {
-                if !devtools_has_exact_fields(&payload, &["session_id", "request_id", "kind", "source_id", "revision", "world_id", "actor_id", "component_id", "authored_instance_id", "source_span_start", "source_span_end", "field", "value", "category", "expression", "required_authority", "frame_id", "budget"]) -> return .Err("devtools envelope game control payload has unexpected fields")
+                if !devtools_has_exact_fields(payload, &["session_id", "request_id", "kind", "source_id", "revision", "world_id", "actor_id", "component_id", "authored_instance_id", "source_span_start", "source_span_end", "field", "value", "category", "expression", "required_authority", "frame_id", "budget"]) -> return .Err("devtools envelope game control payload has unexpected fields")
                 request: JetDevtoolsGameControlRequest {
-                    session_id: devtools_required_string(&payload, "session_id"), request_id: devtools_required_string(&payload, "request_id")?,
-                    kind: JetDevtoolsGameControlKind.from_str(devtools_required_string(&payload, "kind")?)?,
-                    source_id: devtools_optional_string(&payload, "source_id")?, revision: devtools_optional_string(&payload, "revision")?,
-                    world_id: devtools_optional_string(&payload, "world_id")?, actor_id: devtools_optional_string(&payload, "actor_id")?,
-                    component_id: devtools_optional_string(&payload, "component_id")?, authored_instance_id: devtools_optional_string(&payload, "authored_instance_id")?,
-                    source_span_start: devtools_optional_u64(&payload, "source_span_start")?, source_span_end: devtools_optional_u64(&payload, "source_span_end")?,
-                    field: devtools_optional_string(&payload, "field")?, value: devtools_optional_string(&payload, "value")?,
-                    category: devtools_optional_string(&payload, "category")?, expression: devtools_optional_string(&payload, "expression")?,
-                    required_authority: devtools_optional_string(&payload, "required_authority")?, frame_id: devtools_optional_u64(&payload, "frame_id")?, budget: devtools_optional_u64(&payload, "budget")?
+                    session_id: devtools_required_string(payload, "session_id"), request_id: devtools_required_string(payload, "request_id")?,
+                    kind: JetDevtoolsGameControlKind.from_str(devtools_required_string(payload, "kind")?)?,
+                    source_id: devtools_optional_string(payload, "source_id")?, revision: devtools_optional_string(payload, "revision")?,
+                    world_id: devtools_optional_string(payload, "world_id")?, actor_id: devtools_optional_string(payload, "actor_id")?,
+                    component_id: devtools_optional_string(payload, "component_id")?, authored_instance_id: devtools_optional_string(payload, "authored_instance_id")?,
+                    source_span_start: devtools_optional_u64(payload, "source_span_start")?, source_span_end: devtools_optional_u64(payload, "source_span_end")?,
+                    field: devtools_optional_string(payload, "field")?, value: devtools_optional_string(payload, "value")?,
+                    category: devtools_optional_string(payload, "category")?, expression: devtools_optional_string(payload, "expression")?,
+                    required_authority: devtools_optional_string(payload, "required_authority")?, frame_id: devtools_optional_u64(payload, "frame_id")?, budget: devtools_optional_u64(payload, "budget")?
                 }
                 request.validate()
-                envelope.enqueue_command(.GameControl(^request))
+                envelope.enqueue_command(.GameControl(request))
             }
             "ProjectRebuild" -> {
-                if !devtools_has_exact_fields(&payload, &["session_id", "request_id", "expected_revision"]) -> return .Err("devtools envelope project rebuild payload has unexpected fields")
-                request: JetDevtoolsProjectRebuildRequest.new(devtools_required_string(&payload, "session_id")?, devtools_required_string(&payload, "request_id")?, devtools_required_string(&payload, "expected_revision")?)?
-                envelope.enqueue_command(.ProjectRebuild(^request))?
+                if !devtools_has_exact_fields(payload, &["session_id", "request_id", "expected_revision"]) -> return .Err("devtools envelope project rebuild payload has unexpected fields")
+                request: JetDevtoolsProjectRebuildRequest.new(devtools_required_string(payload, "session_id")?, devtools_required_string(payload, "request_id")?, devtools_required_string(payload, "expected_revision")?)?
+                envelope.enqueue_command(.ProjectRebuild(request))?
             }
             else -> { return .Err("devtools envelope contains an unsupported command kind") }
         }
@@ -192,61 +192,61 @@ decode_devtools_command_envelope: fn(object: [String:Dyn], session_id: String, s
 decode_devtools_body: fn(kind: String, _entity: String, fields: &Dyn) -> JetDevtoolsEventBody? Err! {
     object: object_map(fields) ?? return .Err("devtools event fields must be an object")
     if devtools_expected_fields(kind) == .Val(expected) {
-        if !devtools_has_exact_fields(&object, &expected) -> return .None
+        if !devtools_has_exact_fields(object, expected) -> return .None
     }
     body: if kind == {
         "Build" -> {
-            devtools_exact_fields(&object, &["status", "tier", "diagnostics", "kept", "reset"])
-            JetDevtoolsEventBody.Build { status: devtools_required_string(&object, "status"), tier: devtools_required_string(&object, "tier")?, diagnostics: devtools_required_string_array(&object, "diagnostics")?, kept: devtools_required_u64(&object, "kept")?, reset: devtools_required_u64(&object, "reset")? }
+            devtools_exact_fields(object, &["status", "tier", "diagnostics", "kept", "reset"])
+            JetDevtoolsEventBody.Build { status: devtools_required_string(object, "status"), tier: devtools_required_string(object, "tier")?, diagnostics: devtools_required_string_array(object, "diagnostics")?, kept: devtools_required_u64(object, "kept")?, reset: devtools_required_u64(object, "reset")? }
         }
         "Route" -> {
-            devtools_exact_fields(&object, &["path", "matched", "render_mode", "reason"])?
-            JetDevtoolsEventBody.Route { path: devtools_required_string(&object, "path")?, matched: devtools_required_bool(&object, "matched")?, render_mode: devtools_required_string(&object, "render_mode")?, reason: devtools_required_string(&object, "reason")? }
+            devtools_exact_fields(object, &["path", "matched", "render_mode", "reason"])?
+            JetDevtoolsEventBody.Route { path: devtools_required_string(object, "path")?, matched: devtools_required_bool(object, "matched")?, render_mode: devtools_required_string(object, "render_mode")?, reason: devtools_required_string(object, "reason")? }
         }
         "Query" -> {
-            devtools_exact_fields(&object, &["name", "state", "footprint"])?
-            state: JetDevtoolsQueryState{if devtools_required_string(&object, "state")? == {
+            devtools_exact_fields(object, &["name", "state", "footprint"])?
+            state: JetDevtoolsQueryState{if devtools_required_string(object, "state")? == {
                 "fetching" -> .Fetching
                 "fresh" -> .Fresh
                 "stale" -> .Stale
                 "invalidated" -> .Invalidated
                 else -> { return .Err("devtools Query state is not recognized") }
             }}
-            JetDevtoolsEventBody.Query { name: devtools_required_string(&object, "name")?, state, footprint: devtools_required_u64(&object, "footprint")? }
+            JetDevtoolsEventBody.Query { name: devtools_required_string(object, "name")?, state, footprint: devtools_required_u64(object, "footprint")? }
         }
         "Mutation" -> {
-            devtools_exact_fields(&object, &["name", "lifecycle", "rollback"])?
-            lifecycle: JetDevtoolsMutationLifecycle{if devtools_required_string(&object, "lifecycle")? == {
+            devtools_exact_fields(object, &["name", "lifecycle", "rollback"])?
+            lifecycle: JetDevtoolsMutationLifecycle{if devtools_required_string(object, "lifecycle")? == {
                 "started" -> .Started
                 "committed" -> .Committed
                 "failed" -> .Failed
                 "rolled_back" -> .RolledBack
                 else -> { return .Err("devtools Mutation lifecycle is not recognized") }
             }}
-            JetDevtoolsEventBody.Mutation { name: devtools_required_string(&object, "name")?, lifecycle, rollback: devtools_required_bool(&object, "rollback")? }
+            JetDevtoolsEventBody.Mutation { name: devtools_required_string(object, "name")?, lifecycle, rollback: devtools_required_bool(object, "rollback")? }
         }
         "Form" -> {
-            devtools_exact_fields(&object, &["name", "field", "state", "validation"])?
-            state: JetDevtoolsFormState{if devtools_required_string(&object, "state")? == {
+            devtools_exact_fields(object, &["name", "field", "state", "validation"])?
+            state: JetDevtoolsFormState{if devtools_required_string(object, "state")? == {
                 "pristine" -> .Pristine
                 "dirty" -> .Dirty
                 "valid" -> .Valid
                 "invalid" -> .Invalid
                 else -> { return .Err("devtools Form state is not recognized") }
             }}
-            JetDevtoolsEventBody.Form { name: devtools_required_string(&object, "name")?, field: devtools_required_string(&object, "field")?, state, validation: devtools_required_string(&object, "validation")? }
+            JetDevtoolsEventBody.Form { name: devtools_required_string(object, "name")?, field: devtools_required_string(object, "field")?, state, validation: devtools_required_string(object, "validation")? }
         }
         "Table" -> {
-            devtools_exact_fields(&object, &["name", "viewport", "sort", "filter"])?
-            JetDevtoolsEventBody.Table { name: devtools_required_string(&object, "name")?, viewport: devtools_required_u64(&object, "viewport")?, sort: devtools_required_string(&object, "sort")?, filter: devtools_required_string(&object, "filter")? }
+            devtools_exact_fields(object, &["name", "viewport", "sort", "filter"])?
+            JetDevtoolsEventBody.Table { name: devtools_required_string(object, "name")?, viewport: devtools_required_u64(object, "viewport")?, sort: devtools_required_string(object, "sort")?, filter: devtools_required_string(object, "filter")? }
         }
         "Store" -> {
-            devtools_exact_fields(&object, &["name", "transaction", "diff", "cursor"])?
-            JetDevtoolsEventBody.Store { name: devtools_required_string(&object, "name")?, transaction: devtools_required_string(&object, "transaction")?, diff: devtools_required_string(&object, "diff")?, cursor: devtools_required_u64(&object, "cursor")? }
+            devtools_exact_fields(object, &["name", "transaction", "diff", "cursor"])?
+            JetDevtoolsEventBody.Store { name: devtools_required_string(object, "name")?, transaction: devtools_required_string(object, "transaction")?, diff: devtools_required_string(object, "diff")?, cursor: devtools_required_u64(object, "cursor")? }
         }
         "Trace" -> {
-            devtools_exact_fields(&object, &["name", "kind", "request", "duration_ms", "status"])?
-            trace_kind: JetDevtoolsTraceKind{if devtools_required_string(&object, "kind")? == {
+            devtools_exact_fields(object, &["name", "kind", "request", "duration_ms", "status"])?
+            trace_kind: JetDevtoolsTraceKind{if devtools_required_string(object, "kind")? == {
                 "request" -> .Request
                 "render" -> .Render
                 "job" -> .Job
@@ -254,61 +254,61 @@ decode_devtools_body: fn(kind: String, _entity: String, fields: &Dyn) -> JetDevt
                 "frame" -> .Frame
                 else -> { return .Err("devtools Trace kind is not recognized") }
             }}
-            JetDevtoolsEventBody.Trace { name: devtools_required_string(&object, "name")?, kind: trace_kind, request: devtools_required_string(&object, "request")?, duration_ms: devtools_required_u64(&object, "duration_ms")?, status: devtools_required_string(&object, "status")? }
+            JetDevtoolsEventBody.Trace { name: devtools_required_string(object, "name")?, kind: trace_kind, request: devtools_required_string(object, "request")?, duration_ms: devtools_required_u64(object, "duration_ms")?, status: devtools_required_string(object, "status")? }
         }
         "Cost" -> {
-            devtools_exact_fields(&object, &["name", "rule", "bytes", "allocations"])?
-            JetDevtoolsEventBody.Cost { name: devtools_required_string(&object, "name")?, rule: devtools_required_string(&object, "rule")?, bytes: devtools_required_u64(&object, "bytes")?, allocations: devtools_required_u64(&object, "allocations")? }
+            devtools_exact_fields(object, &["name", "rule", "bytes", "allocations"])?
+            JetDevtoolsEventBody.Cost { name: devtools_required_string(object, "name")?, rule: devtools_required_string(object, "rule")?, bytes: devtools_required_u64(object, "bytes")?, allocations: devtools_required_u64(object, "allocations")? }
         }
         "Gate" -> {
-            devtools_exact_fields(&object, &["name", "status", "detail"])?
-            JetDevtoolsEventBody.Gate { name: devtools_required_string(&object, "name")?, status: devtools_required_string(&object, "status")?, detail: devtools_required_string(&object, "detail")? }
+            devtools_exact_fields(object, &["name", "status", "detail"])?
+            JetDevtoolsEventBody.Gate { name: devtools_required_string(object, "name")?, status: devtools_required_string(object, "status")?, detail: devtools_required_string(object, "detail")? }
         }
         "Structure" -> {
-            devtools_exact_fields(&object, &["name", "kind", "status"])?
-            JetDevtoolsEventBody.Structure { name: devtools_required_string(&object, "name")?, kind: devtools_required_string(&object, "kind")?, status: devtools_required_string(&object, "status")? }
+            devtools_exact_fields(object, &["name", "kind", "status"])?
+            JetDevtoolsEventBody.Structure { name: devtools_required_string(object, "name")?, kind: devtools_required_string(object, "kind")?, status: devtools_required_string(object, "status")? }
         }
         "Test" -> {
-            devtools_exact_fields(&object, &["name", "status", "duration_ms", "diagnostics"])?
-            JetDevtoolsEventBody.Test { name: devtools_required_string(&object, "name")?, status: devtools_required_string(&object, "status")?, duration_ms: devtools_required_u64(&object, "duration_ms")?, diagnostics: devtools_required_string(&object, "diagnostics")? }
+            devtools_exact_fields(object, &["name", "status", "duration_ms", "diagnostics"])?
+            JetDevtoolsEventBody.Test { name: devtools_required_string(object, "name")?, status: devtools_required_string(object, "status")?, duration_ms: devtools_required_u64(object, "duration_ms")?, diagnostics: devtools_required_string(object, "diagnostics")? }
         }
         "Job" -> {
-            devtools_exact_fields(&object, &["name", "status", "duration_ms", "diagnostics"])?
-            JetDevtoolsEventBody.Job { name: devtools_required_string(&object, "name")?, status: devtools_required_string(&object, "status")?, duration_ms: devtools_required_u64(&object, "duration_ms")?, diagnostics: devtools_required_string(&object, "diagnostics")? }
+            devtools_exact_fields(object, &["name", "status", "duration_ms", "diagnostics"])?
+            JetDevtoolsEventBody.Job { name: devtools_required_string(object, "name")?, status: devtools_required_string(object, "status")?, duration_ms: devtools_required_u64(object, "duration_ms")?, diagnostics: devtools_required_string(object, "diagnostics")? }
         }
         "Frame" -> {
-            devtools_exact_fields(&object, &["name", "status", "duration_ms"])?
-            JetDevtoolsEventBody.Frame { name: devtools_required_string(&object, "name")?, status: devtools_required_string(&object, "status")?, duration_ms: devtools_required_u64(&object, "duration_ms")? }
+            devtools_exact_fields(object, &["name", "status", "duration_ms"])?
+            JetDevtoolsEventBody.Frame { name: devtools_required_string(object, "name")?, status: devtools_required_string(object, "status")?, duration_ms: devtools_required_u64(object, "duration_ms")? }
         }
         "GameFrameSample" -> {
-            devtools_exact_fields(&object, &["sequence", "frame_id", "scene", "frame_index", "build", "revision", "trace_id", "start_ns", "cpu_ns", "gpu_ns", "responsible_function"])?
-            JetDevtoolsEventBody.GameFrameSample { sequence: devtools_required_u64(&object, "sequence")?, frame_id: devtools_required_u64(&object, "frame_id")?, scene: devtools_required_string(&object, "scene")?, frame_index: devtools_required_u64(&object, "frame_index")?, build: devtools_required_string(&object, "build")?, revision: devtools_required_string(&object, "revision")?, trace_id: devtools_required_string(&object, "trace_id")?, start_ns: devtools_required_u64(&object, "start_ns")?, cpu_ns: devtools_required_u64(&object, "cpu_ns")?, gpu_ns: devtools_optional_u64(&object, "gpu_ns")?, responsible_function: devtools_optional_function(&object, "responsible_function")? }
+            devtools_exact_fields(object, &["sequence", "frame_id", "scene", "frame_index", "build", "revision", "trace_id", "start_ns", "cpu_ns", "gpu_ns", "responsible_function"])?
+            JetDevtoolsEventBody.GameFrameSample { sequence: devtools_required_u64(object, "sequence")?, frame_id: devtools_required_u64(object, "frame_id")?, scene: devtools_required_string(object, "scene")?, frame_index: devtools_required_u64(object, "frame_index")?, build: devtools_required_string(object, "build")?, revision: devtools_required_string(object, "revision")?, trace_id: devtools_required_string(object, "trace_id")?, start_ns: devtools_required_u64(object, "start_ns")?, cpu_ns: devtools_required_u64(object, "cpu_ns")?, gpu_ns: devtools_optional_u64(object, "gpu_ns")?, responsible_function: devtools_optional_function(object, "responsible_function")? }
         }
         "GameDrawEvent" -> {
-            devtools_exact_fields(&object, &["sequence", "frame_id", "scene", "frame_index", "build", "revision", "trace_id", "event_index", "event_id", "function", "phase", "domain", "start_ns", "duration_ns", "object_id", "resource_id"])?
-            JetDevtoolsEventBody.GameDrawEvent { sequence: devtools_required_u64(&object, "sequence")?, frame_id: devtools_required_u64(&object, "frame_id")?, scene: devtools_required_string(&object, "scene")?, frame_index: devtools_required_u64(&object, "frame_index")?, build: devtools_required_string(&object, "build")?, revision: devtools_required_string(&object, "revision")?, trace_id: devtools_required_string(&object, "trace_id")?, event_index: devtools_required_u64(&object, "event_index")?, event_id: devtools_required_u64(&object, "event_id")?, function: devtools_required_function(&object, "function")?, phase: devtools_required_string(&object, "phase")?, domain: devtools_required_string(&object, "domain")?, start_ns: devtools_required_u64(&object, "start_ns")?, duration_ns: devtools_required_u64(&object, "duration_ns")?, object_id: devtools_optional_string(&object, "object_id")?, resource_id: devtools_optional_string(&object, "resource_id")? }
+            devtools_exact_fields(object, &["sequence", "frame_id", "scene", "frame_index", "build", "revision", "trace_id", "event_index", "event_id", "function", "phase", "domain", "start_ns", "duration_ns", "object_id", "resource_id"])?
+            JetDevtoolsEventBody.GameDrawEvent { sequence: devtools_required_u64(object, "sequence")?, frame_id: devtools_required_u64(object, "frame_id")?, scene: devtools_required_string(object, "scene")?, frame_index: devtools_required_u64(object, "frame_index")?, build: devtools_required_string(object, "build")?, revision: devtools_required_string(object, "revision")?, trace_id: devtools_required_string(object, "trace_id")?, event_index: devtools_required_u64(object, "event_index")?, event_id: devtools_required_u64(object, "event_id")?, function: devtools_required_function(object, "function")?, phase: devtools_required_string(object, "phase")?, domain: devtools_required_string(object, "domain")?, start_ns: devtools_required_u64(object, "start_ns")?, duration_ns: devtools_required_u64(object, "duration_ns")?, object_id: devtools_optional_string(object, "object_id")?, resource_id: devtools_optional_string(object, "resource_id")? }
         }
         "GameLaunchProfile" -> {
-            devtools_exact_fields(&object, &["target", "run_mode", "headless_compatible", "phases"])?
-            JetDevtoolsEventBody.GameLaunchProfile { target: devtools_required_string(&object, "target")?, run_mode: devtools_required_string(&object, "run_mode")?, headless_compatible: devtools_required_bool(&object, "headless_compatible")?, phases: devtools_required_game_launch_phases(&object, "phases")? }
+            devtools_exact_fields(object, &["target", "run_mode", "headless_compatible", "phases"])?
+            JetDevtoolsEventBody.GameLaunchProfile { target: devtools_required_string(object, "target")?, run_mode: devtools_required_string(object, "run_mode")?, headless_compatible: devtools_required_bool(object, "headless_compatible")?, phases: devtools_required_game_launch_phases(object, "phases")? }
         }
         "GameSwap" -> {
-            devtools_exact_fields(&object, &["sequence", "path", "kind", "status", "old_schema_id", "new_schema_id", "migration", "reason"])?
-            kind: devtools_required_string(&object, "kind")?
+            devtools_exact_fields(object, &["sequence", "path", "kind", "status", "old_schema_id", "new_schema_id", "migration", "reason"])?
+            kind: devtools_required_string(object, "kind")?
             if kind != "asset" && kind != "script" && kind != "world" -> return .Err("devtools GameSwap kind is not recognized")
-            status: devtools_required_string(&object, "status")?
+            status: devtools_required_string(object, "status")?
             if status != "applied" && status != "rejected" -> return .Err("devtools GameSwap status is not recognized")
-            migration: devtools_required_string(&object, "migration")?
+            migration: devtools_required_string(object, "migration")?
             if migration != "preserve" && migration != "migrate" && migration != "reset" && migration != "reject" -> return .Err("devtools GameSwap migration is not recognized")
-            JetDevtoolsEventBody.GameSwap { sequence: devtools_required_u64(&object, "sequence")?, path: devtools_required_string(&object, "path")?, kind, status, old_schema_id: devtools_optional_string(&object, "old_schema_id")?, new_schema_id: devtools_optional_string(&object, "new_schema_id")?, migration, reason: devtools_required_string(&object, "reason")? }
+            JetDevtoolsEventBody.GameSwap { sequence: devtools_required_u64(object, "sequence")?, path: devtools_required_string(object, "path")?, kind, status, old_schema_id: devtools_optional_string(object, "old_schema_id")?, new_schema_id: devtools_optional_string(object, "new_schema_id")?, migration, reason: devtools_required_string(object, "reason")? }
         }
         "Request" -> {
-            devtools_exact_fields(&object, &["id", "method", "path", "status"])?
-            JetDevtoolsEventBody.Request { id: devtools_required_string(&object, "id")?, method: devtools_required_string(&object, "method")?, path: devtools_required_string(&object, "path")?, status: devtools_required_u16(&object, "status")? }
+            devtools_exact_fields(object, &["id", "method", "path", "status"])?
+            JetDevtoolsEventBody.Request { id: devtools_required_string(object, "id")?, method: devtools_required_string(object, "method")?, path: devtools_required_string(object, "path")?, status: devtools_required_u16(object, "status")? }
         }
         "Response" -> {
-            devtools_exact_fields(&object, &["id", "status", "bytes"])?
-            JetDevtoolsEventBody.Response { id: devtools_required_string(&object, "id")?, status: devtools_required_u16(&object, "status")?, bytes: devtools_required_u64(&object, "bytes")? }
+            devtools_exact_fields(object, &["id", "status", "bytes"])?
+            JetDevtoolsEventBody.Response { id: devtools_required_string(object, "id")?, status: devtools_required_u16(object, "status")?, bytes: devtools_required_u64(object, "bytes")? }
         }
         else -> { return .None }
     }
@@ -357,8 +357,8 @@ devtools_required_game_launch_phases: fn(object: [String:Dyn], key: String) -> [
     phases := [JetDevtoolsGameLaunchPhase]{}
     loop value in values {
         phase: object_map(value) ?? return .Err("devtools event `{key}` must contain objects")
-        devtools_exact_fields(&phase, &["phase", "status", "detail"])
-        phases.push(JetDevtoolsGameLaunchPhase.new(devtools_required_string(&phase, "phase"), devtools_required_string(&phase, "status")?, devtools_required_string(&phase, "detail")?))
+        devtools_exact_fields(phase, &["phase", "status", "detail"])
+        phases.push(JetDevtoolsGameLaunchPhase.new(devtools_required_string(phase, "phase"), devtools_required_string(phase, "status")?, devtools_required_string(phase, "detail")?))
     }
     return phases
 }
@@ -391,7 +391,7 @@ devtools_optional_u64: fn(object: [String:Dyn], key: String) -> U64? Err! {
 devtools_required_function: fn(object: [String:Dyn], key: String) -> JetDevtoolsFunctionIdentity Err! {
     function: object.get(key).and_then(object_map) ?? return .Err("devtools event `{key}` must be an object")
     source: function.get("source").and_then(object_map) ?? return .Err("devtools event `{key}.source` must be an object")
-    return JetDevtoolsFunctionIdentity.new(devtools_required_string(&function, "function_id"), devtools_required_string(&function, "name")?, JetDevtoolsSourceSpan.new(devtools_required_string(&source, "source_id")?, devtools_required_string(&source, "file")?, devtools_required_u32(&source, "start_line")?, devtools_required_u32(&source, "start_column")?, devtools_required_u32(&source, "end_line")?, devtools_required_u32(&source, "end_column")?))
+    return JetDevtoolsFunctionIdentity.new(devtools_required_string(function, "function_id"), devtools_required_string(function, "name")?, JetDevtoolsSourceSpan.new(devtools_required_string(source, "source_id")?, devtools_required_string(source, "file")?, devtools_required_u32(source, "start_line")?, devtools_required_u32(source, "start_column")?, devtools_required_u32(source, "end_line")?, devtools_required_u32(source, "end_column")?))
 }
 devtools_optional_function: fn(object: [String:Dyn], key: String) -> JetDevtoolsFunctionIdentity? Err! {
     if object.get(key) == {
@@ -465,7 +465,7 @@ terminal_style_adapter: fn(file: String) -> Arc<TerminalStyleHostAdapter> Err! {
     capabilities: TerminalCapabilityFacts.from_environment(std.env.var("TERM").ok().as_deref(), std.env.var("COLORTERM").ok().as_deref(), is_tty, std.env.var_os("NO_COLOR").is_some(), .Auto)
     source: TerminalStyleHostSource.new(file, capabilities) ?? return .Err("could not inject terminal style source: {err}")
     adapter: Arc.new(TerminalStyleHostAdapter.new())
-    adapter.inject(^source)
+    adapter.inject(source)
     return adapter
 }
 DevRevisionFacts: struct { accepted: U64?; candidate: U64?; diagnostic: U64? }
@@ -517,7 +517,7 @@ impl DevStatus {
     refresh: fn(self: Self) -> Unit {
         if !self.active.load(.SeqCst) -> return
         snap: self.state.lock().unwrap().clone()
-        (word, rest): self.header_text_for(&snap)
+        (word, rest): self.header_text_for(snap)
         line: self.format_line(word, rest)
         if self.verbose() {
             if self.pin -> self.write_header_verbose(line) else {
@@ -531,7 +531,7 @@ impl DevStatus {
         if self.pin {
             lines := [line, self.dashboard_detail_line()]
             if snap.state == "error" -> lines.extend(frame_lines(snap.code, snap.diagnostic))
-            self.write_block(&lines)
+            self.write_block(lines)
             return
         }
         // CI floor prints the owned diagnostic verbatim, without a frame.
@@ -628,21 +628,21 @@ impl DevStatus {
         state := self.state.lock().unwrap()
         last_build_ms: state.last_build_ms
         *state = DevStatusSnapshot { state: "building", code: "", diagnostic: "", last_build_ms, candidate: .Val(self.next_candidate()) }
-        drop(^state)
+        drop(state)
         self.refresh()
     }
     mark_ready: fn(self: Self, elapsed_ms: U128, is_rebuild: Bool) -> Unit {
         browser_relay := self.browser_relay.lock().unwrap()
         if self.browser_trace_enabled.load(.SeqCst) {
             _: browser_relay.take()
-            *browser_relay = read_web_manifest(&self.web_root).and_then((manifest) -> BrowserTrace.Relay.new(manifest).ok())
+            *browser_relay = read_web_manifest(self.web_root).and_then((manifest) -> BrowserTrace.Relay.new(manifest).ok())
         }
-        drop(^browser_relay)
+        drop(browser_relay)
         state := self.state.lock().unwrap()
         if is_rebuild -> _: self.version.fetch_add(1, .SeqCst)
         self.published.store(true, .SeqCst)
         *state = DevStatusSnapshot { state: "ready", code: "", diagnostic: "", last_build_ms: elapsed_ms, candidate: .None }
-        drop(^state)
+        drop(state)
         self.refresh()
         if is_rebuild -> self.log_rebuild(true, format_build_time(elapsed_ms))
     }
@@ -651,8 +651,8 @@ impl DevStatus {
         state := self.state.lock().unwrap()
         last_build_ms: state.last_build_ms
         candidate: state.candidate.unwrap_or_else(() -> self.next_candidate())
-        *state = DevStatusSnapshot { state: "error", code: code.clone(), diagnostic: ^diagnostic, last_build_ms, candidate: .Val(candidate) }
-        drop(^state)
+        *state = DevStatusSnapshot { state: "error", code: code.clone(), diagnostic: diagnostic, last_build_ms, candidate: .Val(candidate) }
+        drop(state)
         self.refresh()
         if is_rebuild { self.log_rebuild(false, code); self.log_diagnostic(code, diagnostic_for_log) }
     }
@@ -665,16 +665,16 @@ impl DevStatus {
     }
     revision_facts: fn(self: Self) -> DevRevisionFacts {
         snap: self.state.lock().unwrap()
-        return self.revision_facts_for(&snap)
+        return self.revision_facts_for(snap)
     }
     web_error_facts: fn(self: Self) -> WebErrorDevStatusFacts {
         snap: self.state.lock().unwrap().clone()
-        return WebErrorDevStatusFacts.new(^snap.state, ^snap.code, ^snap.diagnostic)
+        return WebErrorDevStatusFacts.new(snap.state.move(), snap.code.move(), snap.diagnostic.move())
     }
     json: fn(self: Self) -> String {
         snap: self.state.lock().unwrap().clone()
-        revisions: self.revision_facts_for(&snap)
-        (word, rest): self.header_text_for(&snap)
+        revisions: self.revision_facts_for(snap)
+        (word, rest): self.header_text_for(snap)
         message: "{word} · {rest}"
         number: (value: U64?) -> value.map_or_else(() -> "null", (n) -> n.to_string())
         return "{{" + "\"version\":" + self.version.load(.SeqCst).to_string() + ",\"state\":\"" + foundation_json_escape(word) + "\",\"message\":\"" + foundation_json_escape(message) + "\",\"file\":\"" + foundation_json_escape(self.watched_file) + "\",\"code\":\"" + foundation_json_escape(snap.code) + "\",\"diagnostic\":\"" + foundation_json_escape(snap.diagnostic) + "\",\"clients\":" + self.client_count().to_string() + ",\"last_build_ms\":" + snap.last_build_ms.to_string() + ",\"candidate\":" + number(revisions.candidate) + ",\"diagnostic_revision\":" + number(revisions.diagnostic) + ",\"accepted_revision\":" + number(revisions.accepted) + ",\"last_good_revision\":" + number(revisions.accepted) + "}}"
@@ -688,7 +688,7 @@ impl DevStatus {
         is_new: !clients.contains_key(id)
         if is_new && clients.len() >= MAX_CLIENTS -> return
         changed: clients.insert(id.to_string(), Instant.now()).is_none()
-        drop(^clients)
+        drop(clients)
         recovered: self.reconnecting.swap(false, .SeqCst)
         if pruned || changed || recovered -> self.refresh()
     }
@@ -701,7 +701,7 @@ impl DevStatus {
         clients.retain((_, seen) -> now.saturating_duration_since(*seen) <= cutoff)
         changed: clients.len() != before
         disconnected: before > 0 && clients.is_empty()
-        drop(^clients)
+        drop(clients)
         if disconnected -> self.reconnecting.store(true, .SeqCst)
         return changed
     }
@@ -709,24 +709,24 @@ impl DevStatus {
         if !Session.client_id_is_valid(id) -> return
         clients := self.clients.lock().unwrap()
         changed: clients.remove(id).is_some()
-        drop(^clients)
+        drop(clients)
         if changed {
             // pagehide is a clean close/reload, not a broken lease.
             self.reconnecting.store(false, .SeqCst)
             self.refresh()
         }
     }
-    record_command_receipt: fn(self: Self, receipt: String) -> Unit { *self.command_receipt.lock().unwrap() = .Val(^receipt) }
+    record_command_receipt: fn(self: Self, receipt: String) -> Unit { *self.command_receipt.lock().unwrap() = .Val(receipt) }
     command_receipt: fn(self: Self) -> String? { return self.command_receipt.lock().unwrap().clone() }
     activate_browser_trace: fn(self: &Self, manifest: String) Err! {
         relay: BrowserTrace.Relay.new(manifest)
-        *self.browser_relay.lock().unwrap() = .Val(^relay)
+        *self.browser_relay.lock().unwrap() = .Val(relay)
         self.browser_trace_enabled.store(true, .SeqCst)
         _: self.version.fetch_add(1, .SeqCst)
     }
     activate_requested_browser_trace: fn(self: Self) -> Unit {
         if BrowserTrace.take_request() != .Ok(true) -> return
-        if read_web_manifest(&self.web_root) == .Val(manifest) -> _: self.activate_browser_trace(manifest)
+        if read_web_manifest(self.web_root) == .Val(manifest) -> _: self.activate_browser_trace(manifest)
     }
 }
 CanvasHostOptions: struct {
@@ -754,13 +754,13 @@ impl WebHost {
         static_root: fs.canonicalize(root) ?? return .Err("error: couldn't open static output `{root.display()}`: {err}")
         application_port: application_listener.local_addr().map((address) -> address.port()).unwrap_or(0)
         if session.application_port() != application_port -> return .Err("error: shared devtools session application port {session.application_port()} does not match static preview port {application_port}")
-        return Self.bind_application_only_with_listener(file, verbose, ^static_root, release_policy, false, ^application_listener, ^session)
+        return Self.bind_application_only_with_listener(file, verbose, static_root, release_policy, false, application_listener, session)
     }
     bind_application_preview_listener: fn(port: U16?) -> TcpListener Err! { return bind_application_server(port) }
     bind_application_only_with_policy: fn(file: String, verbose: Bool, port: U16?, static_root: OSPath, release_policy: ReleaseDevtoolsPolicy, web_swap_enabled: Bool) -> Self Err! {
         application_listener: bind_application_server(port)
         application_port: application_listener.local_addr().map((address) -> address.port()).unwrap_or(0)
         session: Arc.new(ResidentDevSession.new(file, 0, application_port))
-        return Self.bind_application_only_with_listener(file, verbose, ^static_root, release_policy, web_swap_enabled, ^application_listener, ^session)
+        return Self.bind_application_only_with_listener(file, verbose, static_root, release_policy, web_swap_enabled, application_listener, session)
     }
 }

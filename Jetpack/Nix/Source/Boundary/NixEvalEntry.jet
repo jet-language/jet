@@ -3,14 +3,14 @@
 // imports reach the evaluator only through an explicit `NixEvalAuthority`.
 use jetpack_nix_eval.[NixEvalAuthority, NixEvalDevShell, NixEvalError, NixEvalInventoryEntry]
 
-nix_evaluate_devshell_with_import_authority: fn(source: String, system: String, authority: ^NixEvalAuthority?) -> NixEvalDevShell NixEvalError! {
+nix_evaluate_devshell_with_import_authority: fn(source: String, system: String, authority: &&NixEvalAuthority?) -> NixEvalDevShell NixEvalError! {
     boundary: NixNativeBoundary.embedded()
-    boundary.evaluate_devshell_with_import_authority(source, system, ^authority)
+    boundary.evaluate_devshell_with_import_authority(source, system, authority)
 }
 
-nix_evaluate_devshell_output_with_import_authority: fn(source: String, system: String, output: String, authority: ^NixEvalAuthority?) -> NixEvalDevShell NixEvalError! {
+nix_evaluate_devshell_output_with_import_authority: fn(source: String, system: String, output: String, authority: &&NixEvalAuthority?) -> NixEvalDevShell NixEvalError! {
     boundary: NixNativeBoundary.embedded()
-    boundary.evaluate_devshell_output_with_import_authority(source, system, output, ^authority)
+    boundary.evaluate_devshell_output_with_import_authority(source, system, output, authority)
 }
 
 nix_evaluator_identity: fn(system: String) -> String NixEvalError! {
@@ -28,9 +28,9 @@ nix_evaluate_derivation: fn(source: String, system: String) -> NixNativeDerivati
     boundary.evaluate_derivation(source, system)
 }
 
-nix_evaluate_derivation_with_import_authority: fn(source: String, system: String, authority: ^NixEvalAuthority?) -> NixNativeDerivation NixEvalError! {
+nix_evaluate_derivation_with_import_authority: fn(source: String, system: String, authority: &&NixEvalAuthority?) -> NixNativeDerivation NixEvalError! {
     boundary: NixNativeBoundary.embedded()
-    boundary.evaluate_derivation_with_import_authority(source, system, ^authority)
+    boundary.evaluate_derivation_with_import_authority(source, system, authority)
 }
 
 nix_evaluate_derivation_output: fn(source: String, system: String, attribute: String) -> NixNativeDerivation NixEvalError! {
@@ -38,7 +38,7 @@ nix_evaluate_derivation_output: fn(source: String, system: String, attribute: St
     boundary.evaluate_derivation_output(source, system, attribute)
 }
 
-nix_evaluate_derivation_output_with_import_authority: fn(source: String, system: String, attribute: String, authority: ^NixEvalAuthority?) -> NixNativeDerivation NixEvalError! {
+nix_evaluate_derivation_output_with_import_authority: fn(source: String, system: String, attribute: String, authority: &&NixEvalAuthority?) -> NixNativeDerivation NixEvalError! {
     boundary: NixNativeBoundary.embedded()
-    boundary.evaluate_derivation_output_with_import_authority(source, system, attribute, ^authority)
+    boundary.evaluate_derivation_output_with_import_authority(source, system, attribute, authority)
 }

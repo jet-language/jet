@@ -20,7 +20,7 @@ provider_pkg_integration_report_error: fn(report: ProviderFactReport) -> Provide
 #Test("pkg integration provider_contract_covers_core_nix_path_github") {
     contracts: ProviderFamilyContract.built_in()
     families := [ProviderFamily]{}
-    loop contract in contracts -> &families.push(contract.family)
+    loop contract in contracts -> families.push(contract.family)
     assert(families.contains(ProviderFamily.Core))
     assert(families.contains(ProviderFamily.Nix))
     assert(families.contains(ProviderFamily.Path))
@@ -245,7 +245,7 @@ provider_pkg_integration_report_error: fn(report: ProviderFactReport) -> Provide
 // Ported from pkg.rs:1286-1311.
 #Test("pkg integration provider_fetch_allowed_offline_with_satisfied_lock") {
     graph := AuthorityGraph.empty()
-    &graph.add_locked(ProviderObject{family: ProviderFamily.Cargo, ref_key: "serde", exact_identity: "cargo:serde@1", hash: "sha256-aa", platform: "any", signature: "", audit: [String]{}, sandbox_effects: [String]{}, build_effects: [String]{}})
+    graph.add_locked(ProviderObject{family: ProviderFamily.Cargo, ref_key: "serde", exact_identity: "cargo:serde@1", hash: "sha256-aa", platform: "any", signature: "", audit: [String]{}, sandbox_effects: [String]{}, build_effects: [String]{}})
     decision: graph.fetch_allowed(ProviderRequest{family: ProviderFamily.Cargo, ref_key: "serde", exact_identity: "cargo:serde@1", hash: "sha256-aa", platform: "any", offline: true})
     assert_eq(decision, FetchDecision.AllowedOfflineSatisfied)
 }
@@ -253,7 +253,7 @@ provider_pkg_integration_report_error: fn(report: ProviderFactReport) -> Provide
 // Ported from pkg.rs:660-686.
 #Test("pkg integration lock_satisfied_offline_verbs_do_not_touch_network") {
     graph := AuthorityGraph.empty()
-    &graph.add_locked(ProviderObject{family: ProviderFamily.Npm, ref_key: "left-pad", exact_identity: "npm:left-pad@1.0.0", hash: "sha256-aa", platform: "any", signature: "", audit: [String]{}, sandbox_effects: [String]{}, build_effects: [String]{}})
+    graph.add_locked(ProviderObject{family: ProviderFamily.Npm, ref_key: "left-pad", exact_identity: "npm:left-pad@1.0.0", hash: "sha256-aa", platform: "any", signature: "", audit: [String]{}, sandbox_effects: [String]{}, build_effects: [String]{}})
     decision: graph.fetch_allowed(ProviderRequest{family: ProviderFamily.Npm, ref_key: "left-pad", exact_identity: "npm:left-pad@1.0.0", hash: "sha256-aa", platform: "any", offline: true})
     assert_eq(decision, FetchDecision.AllowedOfflineSatisfied)
 }

@@ -16,7 +16,7 @@ notebook_document_test_graph: fn() -> JetNotebook Never! {
     nb
 }
 notebook_document_test_store: fn(nb: &JetNotebook, id: String, text: String) NotebookError! {
-    &nb.store_output(id, notebook_plain_bundle(text), 1, Val(7))
+    nb.store_output(id, notebook_plain_bundle(text), 1, Val(7))
 }
 notebook_document_test_error: fn(nb: JetNotebook, id: String) -> String Never! {
     if nb.dependency_order(id) == {
@@ -25,7 +25,7 @@ notebook_document_test_error: fn(nb: JetNotebook, id: String) -> String Never! {
     }
 }
 notebook_document_test_edit_error: fn(nb: JetNotebook, id: String, source: String) -> String Never! {
-    if &nb.edit_cell(id, source) == {
+    if nb.edit_cell(id, source) == {
         .Err(error) -> error.message
         .Ok(_) -> { panic("expected edit error") }
     }
@@ -33,7 +33,7 @@ notebook_document_test_edit_error: fn(nb: JetNotebook, id: String, source: Strin
 // End the returned write window at the helper boundary before editing the
 // document again; no copied cell/bundle or shortened runtime assertions.
 notebook_document_test_add: fn(nb: &JetNotebook, kind: NotebookCellKind, source: String, edit: String?) -[Rand]> String NotebookError! {
-    window := &nb.add_cell(kind, source)
+    window := nb.add_cell(kind, source)
     id: window[0].id.copy()
     if edit == .Val(text) -> window[0].source = text
     Ok(id)
@@ -43,8 +43,8 @@ notebook_document_test_add: fn(nb: &JetNotebook, kind: NotebookCellKind, source:
 // simulated here.
 #Test("jetnb_cache_merge_ipynb_and_jet_export_never_hide_loss_document_cache") {
     nb := JetNotebook.new("env-doc")
-    id: notebook_document_test_add(&nb, NotebookCellKind.Jet, "answer: 42", None) ?? panic("cell id")
-    &nb.store_output(id, notebook_plain_bundle("answer : Int: 42"), 1, None) ?? panic("store")
+    id: notebook_document_test_add(nb, NotebookCellKind.Jet, "answer: 42", None) ?? panic("cell id")
+    nb.store_output(id, notebook_plain_bundle("answer : Int: 42"), 1, None) ?? panic("store")
     assert(nb.visible_output(id) == .Val(_))
     nb.cells[0].source = "answer: 7"
     assert(nb.visible_output(id) == None)
@@ -81,12 +81,12 @@ notebook_document_test_add: fn(nb: &JetNotebook, kind: NotebookCellKind, source:
         notebook_document_test_cell("read", "x() + helper()", [String]{"future", "first", "future"}),
         notebook_document_test_cell("future", "helper: fn() -> Int {{ return 3 }}", [String]{}),
     }
-    &nb.refresh_dependencies() ?? panic("refresh")
+    nb.refresh_dependencies() ?? panic("refresh")
     assert_eq(nb.cells[2].depends_on, [String]{"first", "latest", "future"})
-    &nb.refresh_dependencies() ?? panic("refresh")
+    nb.refresh_dependencies() ?? panic("refresh")
     assert_eq(nb.cells[2].depends_on, [String]{"first", "latest", "future"})
     nb.cells[2].depends_on = [String]{"missing"}
-    error: if &nb.refresh_dependencies() == {
+    error: if nb.refresh_dependencies() == {
         .Err(error) -> error.message
         .Ok(_) -> { panic("unknown edge accepted") }
     }
@@ -98,7 +98,7 @@ notebook_document_test_add: fn(nb: &JetNotebook, kind: NotebookCellKind, source:
     original: nb.source_hash()
     assert_eq(original, "4388ffb3f7cce7e098ba89ec9d6b2ddb62ce48a6345f0b77aba14108bd7186d5")
     nb.environment_hash = "new env"
-    notebook_document_test_store(&nb, "a", "1") ?? panic("store")
+    notebook_document_test_store(nb, "a", "1") ?? panic("store")
     assert_eq(nb.source_hash(), original)
     nb.cells[1].depends_on = [String]{}
     assert(nb.source_hash() != original)
@@ -129,7 +129,7 @@ notebook_document_test_add: fn(nb: &JetNotebook, kind: NotebookCellKind, source:
     nb := notebook_document_test_graph()
     original_order: nb.dependency_order("c") ?? panic("order")
     original: nb.closure_cache_key("c") ?? panic("key")
-    notebook_document_test_store(&nb, "c", "3") ?? panic("store")
+    notebook_document_test_store(nb, "c", "3") ?? panic("store")
     nb.cells[0].depends_on = [String]{"b", "a"}
     assert_eq(nb.dependency_order("c") ?? panic("order"), original_order)
     assert(nb.closure_cache_key("c") != (Val(original)))
@@ -144,11 +144,11 @@ notebook_document_test_add: fn(nb: &JetNotebook, kind: NotebookCellKind, source:
 #Test("notebook_invalidate_from_walks_reversed_layout_and_keeps_stale_evidence") {
     nb := notebook_document_test_graph()
     ids: [String]{"a", "b", "c", "d"}
-    loop id in ids -> notebook_document_test_store(&nb, id, id) ?? panic("store")
+    loop id in ids -> notebook_document_test_store(nb, id, id) ?? panic("store")
     assert(nb.visible_output("c") == .Val(_))
-    &nb.invalidate_from("missing")
+    nb.invalidate_from("missing")
     assert(nb.visible_output("c") == .Val(_))
-    &nb.invalidate_from("a")
+    nb.invalidate_from("a")
     stale_ids: [String]{"a", "b", "c"}
     loop id in stale_ids -> assert(nb.visible_output(id) == None)
     assert(nb.visible_output("d") == .Val(_))
@@ -159,9 +159,9 @@ notebook_document_test_add: fn(nb: &JetNotebook, kind: NotebookCellKind, source:
     nb := JetNotebook.new("e")
     nb.cells = [NotebookCell]{notebook_document_test_cell("c", "3", [String]{"b"}), notebook_document_test_cell("b", "2", [String]{"a"}), notebook_document_test_cell("a", "1", [String]{})}
     ids: [String]{"a", "b", "c"}
-    loop id in ids -> notebook_document_test_store(&nb, id, id) ?? panic("store")
+    loop id in ids -> notebook_document_test_store(nb, id, id) ?? panic("store")
     nb.merge_conflicts = [NotebookMergeConflict]{NotebookMergeConflict{cell_id: "a", ours_source: "1", theirs_source: "2"}, NotebookMergeConflict{cell_id: "b", ours_source: "2", theirs_source: "3"}}
-    removed: &nb.remove_cell("a") ?? panic("remove")
+    removed: nb.remove_cell("a") ?? panic("remove")
     assert_eq(removed, [String]{"a", "b", "c"})
     assert_eq(nb.cells.len(), 2)
     assert(nb.cells[1].depends_on.len() == 0)
@@ -171,7 +171,7 @@ notebook_document_test_add: fn(nb: &JetNotebook, kind: NotebookCellKind, source:
     assert_eq(nb.merge_conflicts.len(), 1)
     assert_eq(nb.merge_conflicts[0].cell_id, "b")
     assert_eq(nb.dependency_order("c") ?? panic("order"), [String]{"b", "c"})
-    missing: if &nb.remove_cell("a") == {
+    missing: if nb.remove_cell("a") == {
         .Err(_) -> true
         .Ok(_) -> false
     }
@@ -180,12 +180,12 @@ notebook_document_test_add: fn(nb: &JetNotebook, kind: NotebookCellKind, source:
 #Test("notebook_edit_invalidates_only_changed_cell_closure_and_clears_its_conflict") {
     nb := notebook_document_test_graph()
     ids: [String]{"a", "b", "c", "d"}
-    loop id in ids -> notebook_document_test_store(&nb, id, id) ?? panic("store")
+    loop id in ids -> notebook_document_test_store(nb, id, id) ?? panic("store")
     nb.merge_conflicts = [NotebookMergeConflict]{NotebookMergeConflict{cell_id: "a", ours_source: "x: 1", theirs_source: "x: 2"}}
-    &nb.edit_cell("a", "x: 1") ?? panic("edit")
+    nb.edit_cell("a", "x: 1") ?? panic("edit")
     assert(nb.visible_output("c") == .Val(_))
     assert_eq(nb.merge_conflicts.len(), 1)
-    &nb.edit_cell("a", "x: 2") ?? panic("edit")
+    nb.edit_cell("a", "x: 2") ?? panic("edit")
     assert(nb.visible_output("a") == None)
     assert(nb.visible_output("b") == None)
     assert(nb.visible_output("c") == None)
@@ -195,17 +195,17 @@ notebook_document_test_add: fn(nb: &JetNotebook, kind: NotebookCellKind, source:
 #Test("notebook_failed_edit_restores_target_source_and_edges_without_invalidating_output") {
     nb := JetNotebook.new("e")
     nb.cells = [NotebookCell]{notebook_document_test_cell("a", "1", [String]{}), notebook_document_test_cell("bad", "2", [String]{"missing"})}
-    notebook_document_test_store(&nb, "a", "1") ?? panic("store")
-    assert_eq(notebook_document_test_edit_error(&nb, "a", "3"), "cell `bad` depends on unknown cell `missing`")
+    notebook_document_test_store(nb, "a", "1") ?? panic("store")
+    assert_eq(notebook_document_test_edit_error(nb, "a", "3"), "cell `bad` depends on unknown cell `missing`")
     assert_eq(nb.cells[0].source, "1")
     assert_eq(nb.cells[0].depends_on, [String]{})
     assert(nb.visible_output("a") == .Val(_))
-    assert_eq(notebook_document_test_edit_error(&nb, "absent", "3"), "unknown cell `absent`")
+    assert_eq(notebook_document_test_edit_error(nb, "absent", "3"), "unknown cell `absent`")
 }
 #Test("notebook_visible_output_checks_entry_key_full_bundle_and_execution_count") {
     nb := JetNotebook.new("e")
     nb.cells = [NotebookCell]{notebook_document_test_cell("a", "1", [String]{})}
-    notebook_document_test_store(&nb, "a", "1") ?? panic("store")
+    notebook_document_test_store(nb, "a", "1") ?? panic("store")
     key: nb.closure_cache_key("a") ?? panic("key")
     assert(nb.visible_output("a") == .Val(_))
     nb.output_cache[key].key = "forged"
@@ -213,11 +213,11 @@ notebook_document_test_add: fn(nb: &JetNotebook, kind: NotebookCellKind, source:
     nb.output_cache[key].key = key
     nb.output_cache[key].bundle.requested_origins = [String]{"https://example.invalid"}
     assert(nb.visible_output("a") == None)
-    notebook_document_test_store(&nb, "a", "1") ?? panic("store")
+    notebook_document_test_store(nb, "a", "1") ?? panic("store")
     nb.output_cache[key].execution_count = 2
     assert(nb.visible_output("a") == None)
-    notebook_document_test_store(&nb, "a", "1") ?? panic("store")
-    &nb.invalidate_all_outputs()
+    notebook_document_test_store(nb, "a", "1") ?? panic("store")
+    nb.invalidate_all_outputs()
     assert(nb.visible_output("a") == None)
     assert(nb.cells[0].output != None)
     assert(nb.visible_output("absent") == None)
@@ -227,7 +227,7 @@ notebook_document_test_add: fn(nb: &JetNotebook, kind: NotebookCellKind, source:
     nb.cells = [NotebookCell]{NotebookCell{id: "md", kind: NotebookCellKind.Markdown, source: "# hello", output: None, depends_on: [String]{}}}
     ids: [String]{"absent", "md"}
     loop id in ids {
-        error: if &nb.store_output(id, notebook_plain_bundle("text"), 1, None) == {
+        error: if nb.store_output(id, notebook_plain_bundle("text"), 1, None) == {
             .Err(error) -> error.message
             .Ok(_) -> { panic("store accepted") }
         }
@@ -237,7 +237,7 @@ notebook_document_test_add: fn(nb: &JetNotebook, kind: NotebookCellKind, source:
 }
 #Test("notebook_document_from_canonical_bytes_roundtrips_real_graph_cache") {
     nb := notebook_document_test_graph()
-    notebook_document_test_store(&nb, "c", "3") ?? panic("store")
+    notebook_document_test_store(nb, "c", "3") ?? panic("store")
     bytes: canonical_json_bytes(notebook_to_json(nb) ?? panic("encode"))
     restored: JetNotebook.from_canonical_bytes(bytes) ?? panic("decode")
     assert_eq(restored.source_hash(), nb.source_hash())
@@ -249,21 +249,21 @@ notebook_document_test_add: fn(nb: &JetNotebook, kind: NotebookCellKind, source:
     loss := NotebookLossReport.default()
     assert(loss.is_empty())
     assert_eq(loss.render(), "no loss\n")
-    &loss.push("outputs / trust / cell ids omitted")
-    &loss.push("markdown cells omitted")
+    loss.push("outputs / trust / cell ids omitted")
+    loss.push("markdown cells omitted")
     assert(!loss.is_empty())
     assert_eq(loss.render(), "export loss:\n  - outputs / trust / cell ids omitted\n  - markdown cells omitted\n")
 }
 #Test("notebook_uuid_v4_add_cell_has_canonical_identity_and_write_through_window") {
     nb := JetNotebook.new("e")
-    id: notebook_document_test_add(&nb, NotebookCellKind.Jet, "1", Val("2")) ?? panic("entropy")
+    id: notebook_document_test_add(nb, NotebookCellKind.Jet, "1", Val("2")) ?? panic("entropy")
     assert_eq(id.len(), 36)
     assert_eq(id.slice(14..<15), "4")
     assert([String]{"8", "9", "a", "b"}.contains(id.slice(19..<20)))
     hyphens: [Int]{8, 13, 18, 23}
     loop position in hyphens -> assert_eq(id.slice(position..<(position + 1)), "-")
     assert_eq(nb.cells[0].source, "2")
-    second_id: notebook_document_test_add(&nb, NotebookCellKind.Markdown, "# hello", None) ?? panic("entropy")
+    second_id: notebook_document_test_add(nb, NotebookCellKind.Markdown, "# hello", None) ?? panic("entropy")
     assert(id != second_id)
     assert_eq(nb.cells[0].source, "2")
     assert_eq(nb.cells[1].kind, NotebookCellKind.Markdown)

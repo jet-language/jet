@@ -36,7 +36,7 @@ publication_oci_test_entry: fn() -> PublicationIndexEntry Never! {
 }
 publication_oci_test_descriptors: fn() -> [PublicationOCIDescriptor] Never! {
     out := [PublicationOCIDescriptor]{}
-    loop kind in ([String]{PUBLICATION_OCI_SBOM_TYPE, PUBLICATION_OCI_SIGNATURE_TYPE, PUBLICATION_OCI_PROVENANCE_TYPE, PUBLICATION_OCI_REPRODUCIBILITY_TYPE}) -> &out.push(PublicationOCIDescriptor{artifact_type: kind, digest: publication_oci_test_subject(), size: 7})
+    loop kind in ([String]{PUBLICATION_OCI_SBOM_TYPE, PUBLICATION_OCI_SIGNATURE_TYPE, PUBLICATION_OCI_PROVENANCE_TYPE, PUBLICATION_OCI_REPRODUCIBILITY_TYPE}) -> out.push(PublicationOCIDescriptor{artifact_type: kind, digest: publication_oci_test_subject(), size: 7})
     out
 }
 // Focused actual renderer/binding declarations: narrow proof, not OCI parity.
@@ -144,10 +144,10 @@ publication_oci_test_descriptors: fn() -> [PublicationOCIDescriptor] Never! {
     assert(publication_read_oci_file(link, 5) == .Err(.InvalidInput(_)))
     assert(publication_write_oci_file(link, "first".bytes(), "OCI referrer blob") == .Err(.InvalidInput(_)))
     bytes := [U8]{}
-    loop _ in 0..<PUBLICATION_MAX_OCI_REFERRER_BYTES -> &bytes.push(U8{120})
+    loop _ in 0..<PUBLICATION_MAX_OCI_REFERRER_BYTES -> bytes.push(U8{120})
     large: files.join(repo, "large")
     publication_write_oci_file(large, bytes, "OCI referrer blob") ?? panic("4 MiB exact")
-    &bytes.push(U8{120})
+    bytes.push(U8{120})
     assert(publication_write_oci_file(files.join(repo, "too-large"), bytes, "OCI referrer blob") == .Err(.InvalidInput(_)))
     // Bound refusal precedes both existing-byte conflict and path type checks.
     assert(publication_write_oci_file(path, bytes, "OCI referrer blob") == .Err(.InvalidInput(_)))

@@ -13,11 +13,11 @@ recipe_hostile_rows: fn() -> [[String]] {
         fields: line.split("\t").to_list()
         assert(fields.len() == 4, "malformed hostile corpus row")
         assert(!ids.contains(fields[0]), "hostile corpus repeats case")
-        &ids.push(fields[0])
+        ids.push(fields[0])
         assert(categories.contains(fields[1]), "unknown hostile category")
         assert(fields[2] != "", "missing hostile attempt")
         assert_eq(fields[3], "blocked-or-unsupported")
-        &rows.push(fields)
+        rows.push(fields)
     }
     assert(rows.len() == 7, "hostile corpus lost required case")
     loop category in categories {
@@ -36,24 +36,24 @@ recipe_hostile_observe: fn(listener: TCPListener, milliseconds: Int, bytes_predi
     deadline: time.instant() + time.duration_ms(milliseconds)
     loop {
         // Exact WouldBlock polling: deadline0 drains queued sockets; ONLY Timeout polls.
-        if &listener.accept(deadline: 0s) == {
+        if listener.accept(deadline: 0s) == {
             .Ok(accepted) -> {
                 stream := accepted
                 if !bytes_predicate {
-                    hostile_net.tcp_close(&stream) ?? panic("drop observer connection")
+                    hostile_net.tcp_close(stream) ?? panic("drop observer connection")
                     return true
                 }
                 bytes := [U8]{}
                 loop {
-                    if hostile_net.tcp_read_bytes(&stream, 8192) == {
+                    if hostile_net.tcp_read_bytes(stream, 8192) == {
                         .Ok(chunk) -> {
                             if chunk.len() == 0 -> break
-                            &bytes.extend(chunk)
+                            bytes.extend(chunk)
                         }
                         .Err(_) -> break // Original ignores read_to_end error, retains collected bytes.
                     }
                 }
-                hostile_net.tcp_close(&stream) ?? panic("drop observer connection")
+                hostile_net.tcp_close(stream) ?? panic("drop observer connection")
                 return bytes == "escaped".bytes()
             }
             .Err(error) -> if error == {

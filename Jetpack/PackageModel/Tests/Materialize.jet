@@ -43,8 +43,8 @@ use {
         .Err(error) -> panic("multiple verified signing failed: {error.message()}")
     }
     bytes := "a".bytes()
-    &bytes.push(U8{0})
-    &bytes.push(U8{98})
+    bytes.push(U8{0})
+    bytes.push(U8{98})
     assert_eq(many.tool, Val("multiple"))
     assert_eq(many.tool_identity, Val(pkg_sha256_hex(bytes)))
 }
@@ -55,14 +55,14 @@ use {
     plan.artifact_name = "demo.app"
     plan.files = [BundleFile]{BundleFile.new("demo.app/Contents/MacOS/demo", BundleFileKind.Executable, 493, "native payload".bytes())}
     output: files.join(root, "demo.app")
-    facts: pkg_bundle_materialize(&plan, output, "compiler-fixture-version") ?? panic("materialize: {err}")
+    facts: pkg_bundle_materialize(plan, output, "compiler-fixture-version") ?? panic("materialize: {err}")
     assert_eq(files.read_bytes(files.join(output, "Contents/MacOS/demo")) ?? panic("published"), "native payload".bytes())
     assert_eq(facts.bytes, "native payload".bytes().len())
     assert(facts.sha256 != plan.logical_artifact_sha256())
     assert_eq(facts.materializer.tool_version, "compiler-fixture-version")
     assert_eq(facts.materializer.authority, "in-process")
     assert_eq(facts.signing, None)
-    assert(pkg_bundle_materialize(&plan, output, "compiler-fixture-version") == .Err(_))
+    assert(pkg_bundle_materialize(plan, output, "compiler-fixture-version") == .Err(_))
     files.remove_all(root) ?? panic("cleanup")
 }
 #Test("native bundle failure cleans partially written stage") {
@@ -72,7 +72,7 @@ use {
     file: BundleFile.new("demo.app/payload", BundleFileKind.Metadata, 420, "payload".bytes())
     plan.files = [BundleFile]{file, file}
     output: files.join(root, "demo.app")
-    assert(pkg_bundle_materialize(&plan, output, "test") == .Err(_))
+    assert(pkg_bundle_materialize(plan, output, "test") == .Err(_))
     assert(!files.exists(output))
     stage: files.join(root, ".demo.app.jet-package-app-{sys.pid()}")
     assert(!files.exists(stage))

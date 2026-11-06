@@ -188,8 +188,8 @@ assign   = place ( "=" | "+=" | "-=" | "*=" | "/=" | "/%=" | "%=" | "%%="
                  | "<<=" | ">>=" ) expr NL ;
 ```
 
-A parameter's access marker is on its type (`x: &T` or `x: ^T`); receivers
-write `&self` or `^self`. A type is never written between a binding name and its
+A parameter's access marker is on its type (`x: &T` or `x: &&T`); receivers
+write `&self` or `&&self`. A type is never written between a binding name and its
 binding sigil. Types ride values (`Type{…}` or an expected-type-inferred
 `{…}`), or appear on signatures and fields. The old `name: Type: value` and
 `name: Type := value` forms are retired (D-BIND-BARE1=A).
@@ -885,7 +885,7 @@ Function values use a function type with parameter types and a result:
 function-value effect bound is written `fn(T1, T2) -[]> R`; other effect sets
 replace the empty set. Unmarked parameters have plain read access. A named
 function becomes a value only when every parameter can be called with that read
-access; parameters requiring `&` or `^` keep the function direct-call-only
+access; parameters requiring `&` or `&&` keep the function direct-call-only
 (**E0227**; S47, D-MEM-PARAM1).
 
 The same structural callable-value comparison applies inside collection and
@@ -919,7 +919,7 @@ in that scope does not escape: it borrows each `:=` local it writes, so the
 write lands on the owner (`count := 0; bump: (n: Int) -> { count += n };
 bump(2)` leaves `count` at 2). An escaping lambda—one stored in a binding that
 is passed, stored, or returned, returned itself, stored in a struct field, or
-passed to a `^T` parameter—must own its captures.
+passed to a `&&T` parameter—must own its captures.
 Copy values are copied at closure creation; other clonable values are cloned;
 an owned non-clonable value moves. A borrowed non-clonable parameter cannot
 escape (**E0120**). The old `take(...)` prefix is rejected with **E0057**.
@@ -1139,20 +1139,21 @@ Jet has one explicit ownership contract. A parameter without an access marker is
 always a read parameter; sema decides this from the signature and never raises
 it to write or take access from body usage. The public surface is:
 
-| Source type | Access | Required call-site marker |
+| Source type | Access | Call site |
 | --- | --- | --- |
-| `T` | read; the callee cannot mutate the caller's value | none |
-| `&T` | exclusive write/edit access | `&` |
-| `^T` | take; ownership moves to the callee | `^` |
+| `T` | read; the callee cannot mutate the caller's value | plain |
+| `&T` | exclusive write/edit access | plain; needs a `:=` binding |
+| `&&T` | take; ownership moves to the callee | plain; the name is gone after the call |
 
-For non-scalar values, a read call borrows the existing value without an
-allocation. A body write through an unmarked parameter, or passing it to a write
-or take position, is a hard error at the definition or call site; add `&` or `^`
-to the contract and mirror it where the call transfers access. A cloneable read
-value entering an owning destination is materialized automatically. A bare
-`:` binding of a place remains a read window; non-cloneable values and
-`#Policy(copies: .Explicit)` require an explicit `.copy()` or an owning `^`
-contract (D-MEM1, D-MEM-COPYSEM1).
+Calls carry no marks (D-CALLSITE-MARK2=A): the signature decides. For
+non-scalar values, a read call borrows the existing value without an
+allocation. A body write through an unmarked parameter, or passing it to a
+write or take position, is a hard error at the definition or call site; add
+`&` or `&&` to the contract. A cloneable read value entering an owning
+destination is materialized automatically. A bare `:` binding of a place
+remains a read window; non-cloneable values and `#Policy(copies: .Explicit)`
+require an explicit `.copy()` or an owning `&&` contract (D-MEM1,
+D-MEM-COPYSEM1).
 
 Move facts follow executable control-flow paths. A loop repeats a move only
 when that path reaches its back edge (including `next`); a `return` or `break`
@@ -1160,12 +1161,12 @@ after a move ends that path instead. Assigning a fresh whole value clears the
 old move fact before another iteration. A move completed before the loop, or
 while evaluating its one-time collection header, is not repeated by the loop
 body. An owned pattern table such as
-`if ^owned == { .Object(entries) -> … }` consumes its subject once and binds
+`if owned.move() == { .Object(entries) -> … }` consumes its subject once and binds
 each arm's payload from that already-checked subject, not by moving it again.
 This includes tables used as value tails: testing the next arm does not
 consume the original subject a second time.
 Owning `Dyn` and `DBValue` constructors accept explicit payload transfers,
-for example `Dyn.Text(^text)`; the payload stays moved and is not copied.
+for example `Dyn.Text(text.move())`; the payload stays moved and is not copied.
 
 Public Jet APIs return newly computed answers (D-OUTPUT-RETURNS1=A). Use one
 value, tuple, or named struct for multiple results, including trait requirements
@@ -1180,18 +1181,18 @@ Those performance claims require exercised proof.
 
 ```jet
 bump: fn(n: &Int) { n += 1 }
-archive: fn(name: ^String) -> String { name }
+archive: fn(name: &&String) -> String { name }
 
 run: fn() {
     score := 41
-    bump(&score)
-    saved: archive(^"vault")
+    bump(score)
+    saved: archive("vault")
     print(saved)
 }
 ```
 
 The sigil on a method receiver is written at its definition. Plain `self` is a
-read receiver; `&self` is a write receiver; `^self` consumes the receiver.
+read receiver; `&self` is a write receiver; `&&self` consumes the receiver.
 
 ```jet
 Player: struct {
@@ -1205,38 +1206,39 @@ impl Player {
 
 run: fn() {
     player := Player{hp: 10}
-    &player.heal(2)
+    player.heal(2)
     print(player.show())
 }
 ```
 
 Writing through a read receiver is E0205 and points to `&self`. Calling a
 `&self` method requires a changeable receiver binding and is checked with E0202.
-Using the same name twice while a write access is live is E0204: pass `&x` once,
-or materialize `x.copy()` first. A `&x` argument writes only once the call runs,
-so a later argument may read `x` when that read ends with its own evaluation
-(`grow(&xs, xs.len())`, like `&xs.push(xs.len())`, or a copied scalar in
-`add(&n, n)`); a later argument the call keeps holding, moves, or writes is
-still E0204, and so is `x` passed on to a nested call (`grow(&xs, f(xs))`),
-whose parameter may keep or take it. A written `&` always means the call edits
-(D-CALLSITE-MARK1=A): `&x` passed to a parameter that only reads is E0225,
-whose Safe fix removes the mark. A `ViewMut<T>` parameter keeps the `&` that
-builds its write window.
+Calls carry no marks (D-CALLSITE-MARK2=A): the signature says what a call does
+to each input, so `bump(score)`, `items.push(3)` and `buf.seal()` are written
+plain. Using the same name twice while a write access is live is E0204: pass
+`x` once, or materialize `x.copy()` first. A write argument writes only once
+the call runs, so a later argument may read `x` when that read ends with its
+own evaluation (`grow(xs, xs.len())`, like `xs.push(xs.len())`, or a copied
+scalar in `add(n, n)`); a later argument the call keeps holding, moves, or
+writes is still E0204, and so is `x` passed on to a nested call
+(`grow(xs, f(xs))`), whose parameter may keep or take it. A part of a list
+passed to a writing parameter is a write window by itself
+(`sort_part(values[0..2])`). A write window bound to a name keeps its mark:
+`edit: &values[2..3]`.
 
 ### Copies, moves, and owned destinations
 
-A named binding passed to a take parameter without `^` moves when the call is
-its last use (D-COPY-DEFAULT1=A, D-CALLSITE-MARK1=A); any later use on any path,
-or a later iteration of a loop the name outlives, makes that argument E0209,
-which teaches `x.copy()` or a reorder. Jet never hides a clone to make that call work.
-A name in two argument slots of one call has no last use in that call, so a
-take slot is E0209 there. Fields, values with cleanup (a `Close` resource, a
-consume duty, or a type holding one by value), type parameters, and captures
-inside a lambda body still need `^`, so the moment a value with cleanup closes
-is always written. One call that reads a name through one argument and takes
-it through another is E0204. `^x` on a captured name inside a lambda body moves
-`x` into the lambda: `x` is gone after the lambda is made, and a second call
-of the lambda binding on any path is E0121.
+A named binding passed to a take parameter moves into the call
+(D-COPY-DEFAULT1=A, D-CALLSITE-MARK2=A); any later use on any path, or a later
+iteration of a loop the name outlives, is E0209, which names the call and
+teaches `x.copy()` or a reorder. Jet never hides a clone to make that call
+work. A name in two argument slots of one call has no last use in that call,
+so a take slot is E0209 there. A field passed to a take parameter is written
+`owner.field.move()`, so a partial move is always visible. One call that reads
+a name through one argument and takes it through another is E0204. A captured
+name passed to a take parameter inside a lambda body moves `x` into the
+lambda: `x` is gone after the lambda is made, and a second call of the lambda
+binding on any path is E0121.
 A literal, `x.copy()`, or call result is a temporary and
 may enter a take parameter without another marker. A temporary with cleanup
 lent to a read parameter (`show(open_log("x"))`) closes exactly once, when its
@@ -1262,24 +1264,23 @@ print(saved)
 See [`copy_verb.jet`](../../Examples/features/memory/copy_verb.jet) for the
 explicit-copy form.
 
-The compiler chooses when a name is unmarked, and a mark gives exact control
-(D-COPY-DEFAULT1=A). `ys: xs` reads a place through a view, `ys := xs.copy()` makes
-an independent copy, and `ys := ^xs` moves `xs` exactly: `^place` is accepted
-in every value position (binding, assignment, field initializer, collection
-element, result), and any later use of `xs` is E0121 naming the move. `^`
-before a literal or call result, or before a collection element or any place
-below one (`^items[i].tags`, whose copy is spelled `items[i].tags.copy()`), is E0225;
-on a read or write parameter it is E0201. An unmarked use that is not the last one
-shares the value instead of moving it: the source stays usable and each holder
-has its own value, so a write through one never shows in the other. A use in
-`return`, or in a loop's `break` value, is the last use for the loops it
-leaves. Values that cannot be copied (resources, one-pass iterators, consume
-duties, tasks) keep E0121 on the later use. A taking receiver call or an
-argument to a take parameter, on a whole local at its last use, needs no `^`;
-a take elsewhere still does, and a writing
-call always needs `&`. Under `#Policy(copies: .Explicit)`, every implicit copy
-that `jet audit copies` reports is a diagnostic with a Safe `.copy()` edit, and an
-unmarked move that a later use reaches stays E0121.
+The compiler chooses when a name is unmarked, and `.move()` and `.copy()` give
+exact control (D-COPY-DEFAULT1=A, D-COPY-MOVE-SPELL1=A). `ys: xs` reads a place
+through a view, `ys := xs.copy()` makes an independent copy, and
+`ys := xs.move()` moves `xs` exactly: `.move()` is accepted in every value
+position (binding, assignment, field initializer, collection element, result),
+and any later use of `xs` is E0121 naming the move. `.move()` below a collection
+element (`items[i].tags.move()`, whose copy is spelled `items[i].tags.copy()`)
+is E0225; on a read or write parameter it is E0201. An unmarked use that is not
+the last one shares the value instead of moving it: the source stays usable and
+each holder has its own value, so a write through one never shows in the other.
+A use in `return`, or in a loop's `break` value, is the last use for the loops
+it leaves. Values that cannot be copied (resources, one-pass iterators, consume
+duties, tasks) keep E0121 on the later use. A call is always written plain: its
+signature's `&` or `&&` decides whether it writes or takes. Under
+`#Policy(copies: .Explicit)`, every implicit copy that `jet audit copies`
+reports is a diagnostic with a Safe `.copy()` edit, and an unmarked move that a
+later use reaches stays E0121.
 See [`view_move_copy.jet`](../../Examples/features/memory/view_move_copy.jet)
 and [`share_on_reuse.jet`](../../Examples/features/memory/share_on_reuse.jet).
 
@@ -1301,11 +1302,11 @@ and incompatible read/write paths are E2305, or E2307 for string views
 Constructing a struct prefixes each contained view's output path with its field
 name, including nested structs and views already bound to local names. This
 does not turn a local owner into a caller-owned one: returning such an aggregate
-still rejects views into values made here or consumed by a `^` parameter.
-A positional enum constructor preserves the payload's written access:
-`Choice.First(&values[0..1])` fills a declared `ViewMut<Int>` payload with a
-write window. It cannot grant write access to a read-only parameter or turn an
-unmarked owned slice into a write view.
+still rejects views into values made here or consumed by a `&&` parameter.
+A positional enum constructor preserves the payload's access: with
+`edit: &values[0..1]`, `Choice.First(edit)` fills a declared `ViewMut<Int>`
+payload with that write window. It cannot grant write access to a read-only
+parameter or turn an unmarked owned slice into a write view.
 At a string boundary, fill `View<str>` only from `.trim()`, `.after()`,
 `.before()`, or a tracked string-view binding; a plain owned `String` is not a
 borrowed window.
@@ -1354,8 +1355,9 @@ and ranges lower through a safe structural split; known fields are disjoint;
 dynamic projections conservatively overlap. Jet's sema validates these facts.
 A call or temporary is not a place: bind it first (E0213). The
 retired `values.view(0..1)` spelling is E0214 and points to `values[0..1]`.
-Method calls do not extend a place, so `&values[0..1].sort()` writes the maximal
-range and then calls the method on that window (D-SHAPE-PLACE1=A).
+Method calls do not extend a place, so `values[0..1].sort()` calls `sort` on
+the maximal range, which `sort`'s `&self` makes a write window
+(D-SHAPE-PLACE1=A, D-CALLSITE-MARK2=A).
 
 Sema keeps one provenance and alias graph for every borrowed window, regardless
 of whether the runtime representation is a string slice, `View<T>`, arena
@@ -1450,7 +1452,7 @@ not satisfied. See
 infers `T` from the value. A field read takes one read lock and a field write one
 write lock; a read-modify-write such as `config.hits += 1` holds one lock across
 both halves. Each statement is one atomic step. Cloning a `Shared<T>` clones the
-cheap handle, not the payload, so it can cross a task boundary without `^`
+cheap handle, not the payload, so it can cross a task boundary without `&&`
 (D-SHARED-API1, D-CONC-SHARE1=A).
 A type may declare strong `Shared` edges back to itself (a linked list, a tree);
 the cycle check runs at the write. A write into a shared cell, its edit guard's
@@ -1459,11 +1461,11 @@ type, is rejected with E0221 unless the stored value is built in place: a
 literal, a new cell (`shared T{…}`) whose fields are built the same way, a value
 whose type has no strong path back, or a `:` name bound to a new cell in the
 same run of its scope and read nowhere else since. A writing call
-(`&cell.kids.push(kid)`) is checked the same way for each argument. Building a
+(`cell.kids.push(kid)`) is checked the same way for each argument. Building a
 list by prepending or adding new children never closes a cycle; storing an
 existing handle does, so use a `Shared.Weak<T>` back-edge (`.downgrade()`) or an
 id. Weak back-edges do not keep a cycle alive; computed fields are not stored
-edges. A writing call on a place inside a cell (`&cell.items.push(x)`) edits the
+edges. A writing call on a place inside a cell (`cell.items.push(x)`) edits the
 stored value under the cell's write lock, like a field write.
 
 The complete assignment place stays under that lock: `store.items[key] = value`
@@ -1497,7 +1499,7 @@ the ordered shared engine avoids nesting locks and therefore avoids the plain
 access deadlock class. The closure spellings `Shared.read(f)` and `Shared.edit(f)`
 are retired (E1116); read fields directly. `Shared.new(x)` is retired (E1115);
 use `shared x`. A grouped operand uses the same construction, `shared (expr)`;
-for example, a generic optional payload can be `shared (T?{Val(^x)})`.
+for example, a generic optional payload can be `shared (T?{Val(x.move())})`.
 
 Expert code can hold a lock across helper calls with `guard_read()` or
 `guard_edit()`. Each returns an owned `SharedGuard<T>` and releases it on every
@@ -1599,7 +1601,7 @@ See [`entity_world.jet`](../../Examples/features/memory/entity_world.jet) and
 links and nested writes (D-POOLID-API1).
 
 `Rows<T>` (`core.collections`) is an add-only table and `Row<T>` its 4-byte
-row handle. `&rows.add(v)` appends `v` and returns its `Row<T>`; `rows[row]`
+row handle. `rows.add(v)` appends `v` and returns its `Row<T>`; `rows[row]`
 reads or writes that row (`rows[row].f = v` too); `rows.f` is a read-only
 `[F]` of field `f` of every row, in row order; `row.index()` is the row's
 position as an `Int`; `freeze(rows)` snapshots the table. There is no remove,
@@ -1635,15 +1637,15 @@ ratified narrow teaching diagnostic.
 
 Access markers are prefix sigils on the type, not on the binding name. The
 unmarked type is the enforced read default; the only explicit access sigils are
-`&` for exclusive write and `^` for take. They appear on parameters, and the
-call site mirrors them when a caller supplies a write window or transfers
-ownership.
+`&` for exclusive write and `&&` for take (D-MOVE-SIGIL1=A). They appear on
+parameters; calls stay plain, because the signature decides
+(D-CALLSITE-MARK2=A).
 
 | Written type | Meaning | Native lowering of a non-scalar parameter |
 | --- | --- | --- |
 | `T` | read; the callee cannot elevate it | shared borrow |
 | `&T` | exclusive edit access | mutable borrow |
-| `^T` | ownership moves to the callee | owned value |
+| `&&T` | ownership moves to the callee | owned value |
 
 ```jet
 Player: struct {
@@ -1654,30 +1656,32 @@ damage: fn(player: &Player, amount: Int) {
     player.hp = player.hp - amount
 }
 
-consume: fn(resource: ^String) { print(resource) }
+consume: fn(resource: &&String) { print(resource) }
 
 run: fn() {
     player := Player{hp: 10}
-    damage(&player, 3)
-    consume(^"resource")
+    damage(player, 3)
+    consume("resource")
 }
 ```
 
 An access marker composes with the optional prefix: `&?User` is write access to
-an optional `User`, and `^?Texture` takes an optional `Texture`. More than one
-access marker on a parameter is E0029:
+an optional `User`, and `&&?Texture` takes an optional `Texture`. A marker both
+before the parameter name and on its type is E0029:
 
 ```text
-error[E0029]: two access markers on one parameter
-  --> file.jet:3:12
-   |
- 3 | bad: fn(p: &^Player) { … }
-   |            ^^ remove one access marker
+Error [jet.DuplicateAccessMarker]: `p` has two access markers
+  --> file.jet:4:10
+    |
+  4 | bad: fn(&p: &&Player) { print(p.hp) }
+    |          ^
+ Why: The write-access marker `&` before the parameter name conflicts with the take marker `&&` on its type; a parameter can declare only one access marker
+ Fix: Keep one access marker on the type or receiver and remove the other
 ```
 
-A value takes one marker too: `^^handle.join()` or `&^items` on an argument or
-expression is E0029 ("this value has two access markers"); write
-`^handle.join()` (D-SHAPE-COPY1=A).
+The three marks outside signatures are a write window bound to a name
+(`edit: &values[2..3]`), a match that writes into its subject
+(`if &shape == { … }`), and `task &&name`. `^` has no meaning in the grammar.
 
 `.copy()` is a method call, not an access marker. Raw-pointer access (`p.*` or
 prefix `*x`) is a separate `#Unsafe`-gated mechanism. It does not change the
@@ -2137,7 +2141,7 @@ are thread-confined, so move plain owned data across a task or channel rather
 than moving the allocator itself.
 
 `arena.reset()` retains backing storage for reuse. Terminal release uses the
-universal resource operation `close(^allocator)`; `.free()` is not the
+universal resource operation `close(allocator)`; `.free()` is not the
 allocator release spelling. Using an allocator after its move is E0121. The
 walkthrough is [`Examples/features/memory/arena.jet`](../../Examples/features/memory/arena.jet). (D-ALLOC1, D-ALLOC-C, D-ALLOC-D)
 
@@ -2156,12 +2160,12 @@ close, and the Result carrying its view owns none of it. See
 
 `arena.alloc(value)` places a value in retained arena storage and returns a
 scope-bound view, not an owned copy. `reset()` mutably borrows the arena and
-`close(^arena)` consumes it, so the compiler rejects either operation while a
+`close(arena)` consumes it, so the compiler rejects either operation while a
 view is live. The runtime has one narrowly contained lifetime-extension helper
 inside the memory implementation; that lifetime never appears in user syntax.
 
 A view must stay inside its region and before the arena is reset or closed.
-E0631 rejects a view returned, stored in another owner, passed to a `&` or `^`
+E0631 rejects a view returned, stored in another owner, passed to a `&` or `&&`
 parameter, or captured by an escaping closure. E0632 rejects a read after the
 arena reset. Regions are implicit and scope-inferred from the lexical scope of
 the arena binding. Expert code may use `#Region(r) { ... }` for a named or
@@ -2626,7 +2630,7 @@ Copyable captures are copied at closure creation; owned non-copyable captures
 move. A task-boundary value must be sendable (**E1102**). Mutable or otherwise
 non-sendable captures report **E1101** or **E1102**. A `view` borrow, a struct
 containing `ref` fields, a trait value, or a closure with non-sendable captures
-cannot cross. Give ownership to a child with `^`, make an immutable owned
+cannot cross. Give ownership to a child with `task &&name`, make an immutable owned
 snapshot with `freeze`, or use `Shared` and a lock for deliberate shared
 mutation (D-CONC-CROSS1).
 
@@ -2643,9 +2647,9 @@ values. Mutating methods and write windows report the same E1113 with the
 original freeze location; a control-flow merge preserves the proof only when
 every reaching path carries a frozen value.
 
-`task ^name { ... }` consumes `name` into the child. Using `name` after child
-creation is the ordinary **E0121** use-after-move. This `^` capture spelling is
-specific to tasks; `^` on an ordinary call argument retains its move meaning.
+`task &&name { ... }` consumes `name` into the child. Using `name` after child
+creation is the ordinary **E0121** use-after-move. This capture mark is one of
+the three marks written outside a signature (D-CALLSITE-MARK2=A).
 `Shared` and `Cell` retain their synchronized and local-only semantics.
 
 The example and golden output are `Examples/features/concurrency/freeze_capture.jet`
@@ -3045,11 +3049,11 @@ and `= "rust::path"`; `extern rust "std"` needs no extra dependency. A
 non-`core` crate requires an exact version pin (E0701). By-value boundary types
 include scalars, `String`, `Char`, lists/maps/options/results built from allowed
 types, and structs or enums whose fields obey the same rule.
-Capability parameters use the `&` and `^` conventions; a raw foreign call that
+Capability parameters use the `&` and `&&` conventions; a raw foreign call that
 carries one requires an audited `#Unsafe` boundary (E0702).
 
 A returned resource may declare `#Close(close)`. Its close function must consume
-exactly `^` of the handle and return no value, so `close(^handle)` owns one
+exactly `&&` of the handle and return no value, so `close(handle)` owns one
 release. When a dependency is needed, Jet builds a hidden cached cargo bridge
 under `~/.cache/jet/ffi/` or the directory selected by `JET_FFI_CACHE_DIR`; it
 does not add a manifest to the user's project. Missing cargo is E0703, a
@@ -3223,7 +3227,7 @@ supported surface.
 JVM lazily in the Jet process, attaches calling threads, and destroys the JVM
 at process teardown. Java objects are opaque `java.<lib>.Handle` values in a
 bounded 1,024-slot global-reference table. Calls borrow a handle;
-`close(^handle)` consumes it and releases the global reference. Constructors
+`close(handle)` consumes it and releases the global reference. Constructors
 and value-returning methods return `JavaError.Exception` on a Java exception;
 Java stack text and foreign frames remain inside the bridge. Calls carry
 `FFI.Java`, and javac/javap/cc/ar are bounded to 60 seconds with 64-KiB
@@ -3244,7 +3248,7 @@ typed `cs.<lib>` module.
 `load_assembly_and_get_function_pointer`; managed entry points use
 `[UnmanagedCallersOnly]`. No worker or file protocol participates in calls.
 Instances are opaque move-only handles in a 1,024-slot generation-checked
-`GCHandle` table. `close(^handle)` releases the managed root. Exhaustion,
+`GCHandle` table. `close(handle)` releases the managed root. Exhaustion,
 managed exceptions, and invalid/stale handles become `DotNetError.ResourceLimit`,
 `DotNetError.Exception`, and `DotNetError.InvalidHandle`; foreign exception
 text does not cross. Calls carry `FFI.DotNet`, with 60-second tool deadlines
@@ -3263,7 +3267,7 @@ once; `eval`, `eval_int`, and `eval_float` share that session. `eval_once` uses
 a fresh interpreter for one call.
 
 **Boundary.** `Session` is opaque and thread-affine. A bounded 64-slot table owns
-interpreters; `close(^session)` consumes the Jet handle, and process teardown
+interpreters; `close(session)` consumes the Jet handle, and process teardown
 cleans remaining interpreters before Tcl finalization. String results are
 copied through a 64-KiB boundary and reject embedded NUL and oversized values.
 Typed Tcl parsing supplies integer and float entrypoints. Tcl failures become
@@ -3332,7 +3336,7 @@ ownership semantics.
 
 **Boundary.** Class pointers never reach Jet. The C bridge owns them in a
 bounded 64-slot table and returns opaque move-only identities;
-`<class>_close(^handle)` consumes one identity. Stale or double close fails
+`<class>_close(handle)` consumes one identity. Stale or double close fails
 before the Pascal destructor runs, and process teardown destroys remaining
 objects before runtime finalization. Calls carry `FFI.Pascal`; compiler and
 archiver tools have 60-second and 64-KiB bounds, and native links pin the
@@ -3383,7 +3387,7 @@ remain in the worker. Calls carry `FFI.PowerShell`.
 
 **Evidence.** A call has a 1–300000 ms deadline. Expiry or cancellation kills
 and reaps the complete process group and invalidates its generation-tagged
-session; `close(^session)` consumes the handle. At most 32 workers exist per
+session; `close(session)` consumes the handle. At most 32 workers exist per
 process. Binding-time tools have 60-second and 64-KiB bounds and E3208
 laundered diagnostics. See
 [`Examples/interop/powershell`](../../Examples/interop/powershell). (D-FFI-PWSH1)
@@ -3405,7 +3409,7 @@ inside the worker. Calls carry `FFI.Perl` and do not accept runtime source.
 
 **Evidence.** Calls use a 1–300000 ms deadline. Timeout or cancellation kills
 the process group; generation-tagged handles reject stale identities and
-`close(^session)` consumes a session. At most 32 workers exist. CPAN
+`close(session)` consumes a session. At most 32 workers exist. CPAN
 realization is provider work. Binding tools have 60-second and 64-KiB bounds
 and E3208 diagnostics. See
 [`Examples/interop/perl`](../../Examples/interop/perl). (D-FFI-PERL1)
@@ -3426,7 +3430,7 @@ is not the result channel. Ruby exceptions become
 inside the worker. Calls carry `FFI.Ruby`.
 
 **Evidence.** Timeout and cancellation use a 1–300000 ms deadline and kill the
-process group; `close(^session)` consumes a generation-tagged session, with at
+process group; `close(session)` consumes a generation-tagged session, with at
 most 32 workers. Compiler and archive tools have 60-second and 64-KiB bounds.
 RubyGems installation remains provider work. See
 [`Examples/interop/ruby`](../../Examples/interop/ruby). (D-FFI-RUBY1)
@@ -3448,7 +3452,7 @@ protocol, command, and resource-limit failures. Calls carry `FFI.Php` and do
 not expose PHP exception text or source paths.
 
 **Evidence.** Worker frames and responses are capped at 1 MiB. A call deadline
-or cancellation replaces the affected workers; `close(^pool)` consumes the
+or cancellation replaces the affected workers; `close(pool)` consumes the
 pool handle. Binding lint, C compilation, and archiving use bounded diagnostics
 and the descriptor/provenance record. See
 [`Examples/interop/php`](../../Examples/interop/php). (D-FFI-PHP1)
@@ -3512,7 +3516,7 @@ move-only opaque `Object` values, and VARIANT/SAFEARRAY values cross as bounded
 `Dyn`. Dynamic name-based `IDispatch` is available only inside explicit
 `#Unsafe`; generated safe calls use fixed DISPIDs. Each live object owns a
 single-threaded apartment and a generation-tagged handle tied to its creating
-thread. `close(^object)` releases it and balances `CoUninitialize`; stale,
+thread. `close(object)` releases it and balances `CoUninitialize`; stale,
 cross-thread, and double-close uses fail before invocation. HRESULT and
 EXCEPINFO become `ComError` variants without vendor text. Calls carry
 `FFI.Com`; frames and Dyn depth are capped at 1 MiB and 64.
@@ -3582,9 +3586,9 @@ The lifecycle states are `Pending`, `Fresh`, `Stale`, `Fetching`, `Error`, and
 `Offline`. Mutation states are `Idle`, `Pending`, `Success`, `Error`, and
 `Settled`; network modes are `Online`, `Always`, and `OfflineFirst`. `get`,
 `show`, `state`, `state_signal`, `mutation_state`, `mutation_signal`, and
-`facts` read values and bounded lifecycle facts. `invalidate(&q)` marks a
-query stale and advances its generation. `refresh(&q)`, `queue(&q, data)`, and
-`retry(&q, replay)` are fallible operations; `cancel(&q)` returns whether an
+`facts` read values and bounded lifecycle facts. `invalidate(q)` marks a
+query stale and advances its generation. `refresh(q)`, `queue(q, data)`, and
+`retry(q, replay)` are fallible operations; `cancel(q)` returns whether an
 in-flight operation was cancelled. `mutate` checks the key and optional
 expected value, applies the mutation, and returns a `WebMutationState`;
 `mutate_with_invalidations` additionally validates target keys.

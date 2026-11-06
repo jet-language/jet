@@ -63,7 +63,7 @@ provider_packagist_parse_metadata: fn(repository: String, name: String, raw: Str
                             if dependency_name == "php" || dependency_name.starts_with("ext-") || dependency_name.starts_with("lib-") -> next
                             if !(ScriptRegistryKind.Packagist).valid_name(dependency_name) -> return Err(RegistryError.Reason("package `{name}` has unsafe dependency `{dependency_name}`"))
                             requirement: provider_script_json_str(entry.value)
-                            &dependencies.push(RegistryDependency{name: dependency_name, requirement})
+                            dependencies.push(RegistryDependency{name: dependency_name, requirement})
                         }
                     }
                     .None -> {}
@@ -100,7 +100,7 @@ provider_packagist_parse_metadata: fn(repository: String, name: String, raw: Str
             }
             .None -> {}
         }
-        &out.push(RegistryPackage{name, version, url: provider_script_absolutize(repository, url), integrity, dependencies, psr4})
+        out.push(RegistryPackage{name, version, url: provider_script_absolutize(repository, url), integrity, dependencies, psr4})
     }
     if out.len() == 0 -> return Err(RegistryError.Reason("Packagist has no usable release for `{name}`"))
     Ok(out)
@@ -112,7 +112,7 @@ provider_packagist_psr4_paths: fn(value: Dyn) -> [String] RegistryError! {
         .Text(path) -> Ok([String]{path})
         .Array(items) -> {
             paths := [String]{}
-            loop item in items -> &paths.push(provider_script_json_str(item))
+            loop item in items -> paths.push(provider_script_json_str(item))
             Ok(paths)
         }
         else -> Err(RegistryError.Reason("PSR-4 path must be a string or ordered string array"))
@@ -139,19 +139,19 @@ provider_packagist_expand_releases: fn(metadata: Dyn, releases: [Dyn]) -> [Dyn] 
             loop field in previous {
                 if field.key == change.key {
                     if !unset {
-                        &next_fields.push((key: field.key, value: change.value))
+                        next_fields.push((key: field.key, value: change.value))
                         replaced = true
                     }
                 } else {
-                    &next_fields.push(field)
+                    next_fields.push(field)
                 }
             }
-            if !unset && !replaced -> &next_fields.push((key: change.key, value: change.value))
+            if !unset && !replaced -> next_fields.push((key: change.key, value: change.value))
             previous = next_fields
         }
         object := [String: Dyn]{}
         loop field in previous -> object[field.key] = field.value
-        &expanded.push(Dyn.Object(object))
+        expanded.push(Dyn.Object(object))
     }
     Ok(expanded)
 }
@@ -224,27 +224,27 @@ provider_packagist_write_autoloader: fn(artifacts: [RegistryArtifact], out: Stri
     mappings := [PackagistAutoloadMapping]{}
     loop artifact in artifacts {
         prefixes := artifact.package.psr4.keys().to_list()
-        &prefixes.sort()
+        prefixes.sort()
         loop prefix in prefixes {
             directories := [String]{}
             relatives: artifact.package.psr4[prefix]
             loop relative in relatives {
                 trimmed: provider_script_trim_slashes(relative)
-                &directories.push(if trimmed == "" -> "{artifact.package.name}/" else -> "{artifact.package.name}/{trimmed}")
+                directories.push(if trimmed == "" -> "{artifact.package.name}/" else -> "{artifact.package.name}/{trimmed}")
             }
-            &mappings.push(PackagistAutoloadMapping{prefix, directories})
+            mappings.push(PackagistAutoloadMapping{prefix, directories})
         }
     }
-    &mappings.sort_by((left: PackagistAutoloadMapping, right: PackagistAutoloadMapping) -> (right.prefix.bytes().len() <=> left.prefix.bytes().len()).then(left.prefix <=> right.prefix))
+    mappings.sort_by((left: PackagistAutoloadMapping, right: PackagistAutoloadMapping) -> (right.prefix.bytes().len() <=> left.prefix.bytes().len()).then(left.prefix <=> right.prefix))
     php := [String]{"<?php\nspl_autoload_register(static function (string $class): void {{\n"}
     loop mapping in mappings {
-        &php.push("    if (str_starts_with($class, '{provider_packagist_php_quote(mapping.prefix)}')) {{\n")
+        php.push("    if (str_starts_with($class, '{provider_packagist_php_quote(mapping.prefix)}')) {{\n")
         loop directory in mapping.directories {
-            &php.push("        $file = __DIR__.'/{provider_packagist_php_quote("{directory}/")}'.str_replace('\\\\', '/', substr($class, {mapping.prefix.bytes().len()})).'.php'; if (is_file($file)) {{ require $file; return; }}\n")
+            php.push("        $file = __DIR__.'/{provider_packagist_php_quote("{directory}/")}'.str_replace('\\\\', '/', substr($class, {mapping.prefix.bytes().len()})).'.php'; if (is_file($file)) {{ require $file; return; }}\n")
         }
-        &php.push("    }}\n")
+        php.push("    }}\n")
     }
-    &php.push("}});\nreturn true;\n")
+    php.push("}});\nreturn true;\n")
     vendor: files.join(out, "vendor")
     provider_registry_create_dir_all(vendor, "could not create Composer vendor dir")
     provider_registry_write_text(files.join(vendor, "autoload.php"), php.join(""), "could not write Composer autoloader")

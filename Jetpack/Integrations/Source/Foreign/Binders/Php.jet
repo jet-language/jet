@@ -166,7 +166,7 @@ pkg_php_bind: fn(path: String, source: String, lib: String, cache: String) -[FS,
     archive: pkg_worker_build_archive(language, abi, build, cache, bridge, "could not write PHP pool bridge")
     digest: pkg_binder_identity_digest([String]{"jet-php-bind-v1", source, script, php, worker_source})
     provenance := "schema=jet-php-bind-v1\nsha256={digest}\nphp={php}\nscript={script}\nworker={worker}\npool_workers=4\n"
-    pkg_binder_append_artifact_boundary(&provenance, ForeignLanguage.Php, "PHP", lib, script, archive, "php={php};{pkg_binder_cc_ar_identity()}")
+    pkg_binder_append_artifact_boundary(provenance, ForeignLanguage.Php, "PHP", lib, script, archive, "php={php};{pkg_binder_cc_ar_identity()}")
     result: ForeignBindResult{source: pkg_php_render_jet(lib, functions), bound: functions, archive: archive, provenance: provenance}
     pkg_binder_remove_tree_quiet(build)
     Ok(result)
@@ -204,7 +204,7 @@ pkg_php_parse_discovery: fn(output: [U8]) -> [String] ForeignBindError! {
         loop existing in out {
             if pkg_ascii_lower(existing) == pkg_ascii_lower(name) -> return Err(ForeignBindError.Source("PHP function `{name}` is declared more than once"))
         }
-        &out.push(name)
+        out.push(name)
     }
     if out.len() == 0 -> return Err(ForeignBindError.Source("no top-level named PHP functions were found"))
     Ok(out)
@@ -212,13 +212,13 @@ pkg_php_parse_discovery: fn(output: [U8]) -> [String] ForeignBindError! {
 
 pkg_php_render_worker: fn(functions: [String]) -> String Never! {
     allowed := [String]{}
-    loop name in functions -> &allowed.push("    '{name}' => true")
+    loop name in functions -> allowed.push("    '{name}' => true")
     pkg_binder_fill_template(PKG_PHP_WORKER, [String: String]{"allowed": allowed.join(",\n")})
 }
 
 pkg_php_render_pool_c: fn(abi: String, inner: String, functions: [String]) -> String Never! {
     wrappers := [String]{}
-    loop name in functions -> &wrappers.push(pkg_worker_invoke_wrapper(abi, name, "pool_invoke", name))
+    loop name in functions -> wrappers.push(pkg_worker_invoke_wrapper(abi, name, "pool_invoke", name))
     pkg_binder_fill_template(PKG_PHP_POOL_C, [String: String]{"abi": abi, "inner": inner, "wrappers": wrappers.join("")})
 }
 
@@ -226,12 +226,12 @@ pkg_php_render_jet: fn(lib: String, functions: [String]) -> String Never! {
     abi: "jet_php_{lib}"
     out := [String]{"#Import c.{abi}: module {{\n    open: fn() -> Int = \"{abi}_open\"\n    take_error: fn() -> Int = \"{abi}_take_error\"\n    cancel: fn(handle: Int) = \"{abi}_cancel\"\n    close: fn(handle: Int) = \"{abi}_close\"\n"}
     loop name in functions {
-        &out.push("    {name}: fn(handle: Int, input: String, deadline_ms: Int) -> String = \"{abi}_invoke_{name}\"\n")
+        out.push("    {name}: fn(handle: Int, input: String, deadline_ms: Int) -> String = \"{abi}_invoke_{name}\"\n")
     }
-    &out.push("}}\nuse abi: c.{abi}\nuse json: core.encoding.json\n\nPhpPool: struct {{ value: Int }}\n#Error\nPhpError: enum {{ NotRunning Timeout Cancelled Protocol CommandFailed Limit }}\n\nimpl PhpPool.Close {{\n    close: fn(^self) {{ abi.close(self.value) }}\n}}\n\nclose: fn(^pool: PhpPool) {{ abi.close(pool.value) }}\n\nopen: fn() -> PhpPool PhpError! {{\n    handle: abi.open()\n    if abi.take_error() != 0 {{ return Err(PhpError.NotRunning) }}\n    return Ok(PhpPool{{ value: handle }})\n}}\n\ncancel: fn(pool: PhpPool) {{ abi.cancel(pool.value) }}\n\n")
-    &out.push(pkg_render_decode_response("PhpError", DecoderProtocol.StandardEnvelope))
+    out.push("}}\nuse abi: c.{abi}\nuse json: core.encoding.json\n\nPhpPool: struct {{ value: Int }}\n#Error\nPhpError: enum {{ NotRunning Timeout Cancelled Protocol CommandFailed Limit }}\n\nimpl PhpPool.Close {{\n    close: fn(&&self) {{ abi.close(self.value) }}\n}}\n\nclose: fn(&&pool: PhpPool) {{ abi.close(pool.value) }}\n\nopen: fn() -> PhpPool PhpError! {{\n    handle: abi.open()\n    if abi.take_error() != 0 {{ return Err(PhpError.NotRunning) }}\n    return Ok(PhpPool{{ value: handle }})\n}}\n\ncancel: fn(pool: PhpPool) {{ abi.cancel(pool.value) }}\n\n")
+    out.push(pkg_render_decode_response("PhpError", DecoderProtocol.StandardEnvelope))
     loop name in functions {
-        &out.push("{name}: fn(pool: PhpPool, input: Dyn, deadline_ms: Int) -> Dyn PhpError! {{\n    payload: json.to_string(input) ?? return Err(PhpError.Protocol)\n    raw: abi.{name}(pool.value, payload, deadline_ms)\n    code: abi.take_error()\n    return decode_response(raw, code)\n}}\n\n")
+        out.push("{name}: fn(pool: PhpPool, input: Dyn, deadline_ms: Int) -> Dyn PhpError! {{\n    payload: json.to_string(input) ?? return Err(PhpError.Protocol)\n    raw: abi.{name}(pool.value, payload, deadline_ms)\n    code: abi.take_error()\n    return decode_response(raw, code)\n}}\n\n")
     }
     out.join("")
 }

@@ -96,8 +96,8 @@ LeaseRequest: struct {
             (name: "nonce", value: self.nonce)
         }
         out := [String]{"{LEASE_PROTOCOL_HEADER}\n"}
-        loop field in fields -> &out.push("{field.name}={field.value}\n")
-        if include_mac -> &out.push("mac={self.mac}\n")
+        loop field in fields -> out.push("{field.name}={field.value}\n")
+        if include_mac -> out.push("mac={self.mac}\n")
         text: out.join("")
         if text.bytes().len() > LEASE_MAX_FRAME_BYTES -> return Err(store_lease_invalid("executable lease request exceeds the frame bound"))
         Ok(text)
@@ -141,8 +141,8 @@ store_lease_receipt_canonical: fn(receipt: LeaseReceipt, include_mac: Bool) -> S
         (name: "members", value: store_lease_encode_members(receipt.members))
     }
     out := [String]{"{LEASE_RECEIPT_HEADER}\n"}
-    loop field in fields -> &out.push("{field.name}={field.value}\n")
-    if include_mac -> &out.push("mac={receipt.mac}\n")
+    loop field in fields -> out.push("{field.name}={field.value}\n")
+    if include_mac -> out.push("mac={receipt.mac}\n")
     Ok(out.join(""))
 }
 
@@ -241,7 +241,7 @@ store_lease_validate_members: fn(members: [LeaseMember]) IOError! {
         if name == "" || name == "." || name == ".." || name.contains("/") || name.contains("\\") || names.contains(name) {
             return Err(store_lease_invalid("executable lease member name is not canonical"))
         }
-        &names.push(name)
+        names.push(name)
         store_lease_validate_digest(member.digest, "executable member digest")
     }
 }
@@ -318,9 +318,9 @@ store_lease_decode_optional_text: fn(value: String, field: String) -> String IOE
 store_lease_encode_members: fn(members: [LeaseMember]) -> String IOError! {
     store_lease_validate_members(members)
     sorted := members
-    &sorted.sort_by(member -> member.name)
+    sorted.sort_by(member -> member.name)
     lines := [String]{}
-    loop member in sorted -> &lines.push("{member.name}\t{member.digest}\n")
+    loop member in sorted -> lines.push("{member.name}\t{member.digest}\n")
     Ok(store_lease_encode_text(lines.join("")))
 }
 
@@ -330,7 +330,7 @@ store_lease_decode_members: fn(value: String) -> [LeaseMember] IOError! {
     loop line in text.split("\n") {
         if line == "" -> next
         pair: line.split_once("\t") ?? return Err(store_lease_invalid("lease member record is malformed"))
-        &members.push(LeaseMember{name: pair.before, digest: pair.after})
+        members.push(LeaseMember{name: pair.before, digest: pair.after})
     }
     store_lease_validate_members(members)
     Ok(members)
@@ -345,7 +345,7 @@ store_lease_decode_hex: fn(value: String, field: String) -> [U8] IOError! {
     loop at < raw.len() {
         high: store_lease_hex_digit(raw[at]) ?? return Err(store_lease_invalid(field))
         low: store_lease_hex_digit(raw[at + 1]) ?? return Err(store_lease_invalid(field))
-        &out.push(U8{high * 16 + low})
+        out.push(U8{high * 16 + low})
         at += 2
     }
     Ok(out)

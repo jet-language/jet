@@ -53,8 +53,8 @@ kind_name: fn(kind: encoding.EncodingErrorKind) -> String {
 // The document: field `a`, then 19 skipped fields; `tail` replaces the last.
 document: fn(tail: String, after: String) -> String {
     fields := [String]{"\"a\":1"}
-    loop index in 1..<19 -> &fields.push("\"f{index}\":[{index},{{\"k\":\"v{index}\"}}]")
-    &fields.push(tail)
+    loop index in 1..<19 -> fields.push("\"f{index}\":[{index},{{\"k\":\"v{index}\"}}]")
+    fields.push(tail)
     "{{{fields.join(",")}}}{after}"
 }
 
@@ -79,9 +79,9 @@ projected: fn(label: String, text: String, full_line: Int?) {
 
 first_key: fn(label: String, path: Path) (EncodingError | IOError)! {
     input: files.open(path) ?? return Err(err)
-    events := json.reader(^input) ?? return Err(err)
-    _start: &events.next() ?? return Ok(())
-    key: &events.next() ?? return Ok(())
+    events := json.reader(input) ?? return Err(err)
+    _start: events.next() ?? return Ok(())
+    key: events.next() ?? return Ok(())
     if key == {
         .Key(name) -> print("{label} reader: stopped after first key `{name}`; the rest is unread")
         else -> print("{label} reader: the first event after the root is not a key")
@@ -91,10 +91,10 @@ first_key: fn(label: String, path: Path) (EncodingError | IOError)! {
 
 drained: fn(label: String, path: Path) (EncodingError | IOError)! {
     input: files.open(path) ?? return Err(err)
-    events := json.reader(^input) ?? return Err(err)
+    events := json.reader(input) ?? return Err(err)
     count := 0
     loop {
-        if &events.next() == {
+        if events.next() == {
             .Ok(next) -> {
                 _: next ?? break
                 count += 1

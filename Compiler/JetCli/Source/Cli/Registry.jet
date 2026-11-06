@@ -122,14 +122,14 @@ jet_cli_closest: fn(needle: String, candidates: [String]) -> String? Never! {
 jet_cli_closest_command: fn(name: String) -> String? Never! {
     names := [String]{}
     loop command in JET_CLI_COMMANDS {
-        if jet_cli_is_canonical_top_level(command.name) -> &names.push(command.name)
+        if jet_cli_is_canonical_top_level(command.name) -> names.push(command.name)
     }
     jet_cli_closest(name, names)
 }
 
 jet_cli_closest_flag: fn(flag: String) -> String? Never! {
     names := [String]{}
-    loop spec in JET_CLI_FLAGS -> &names.push(spec.long)
+    loop spec in JET_CLI_FLAGS -> names.push(spec.long)
     jet_cli_closest(flag.split("=").to_list()[0], names)
 }
 
@@ -138,10 +138,10 @@ jet_cli_group_label: fn(name: String) -> String Never! {
     parts := [String]{}
     loop part in name.split("-").to_list() {
         if part.len() == 0 {
-            &parts.push("")
+            parts.push("")
             next
         }
-        &parts.push("{part.slice(0..<1).to_upper()}{part.slice(1..<part.len())}")
+        parts.push("{part.slice(0..<1).to_upper()}{part.slice(1..<part.len())}")
     }
     parts.join("-")
 }
@@ -193,7 +193,7 @@ jet_cli_command_usage: fn(name: String) -> String Never! {
         group: JET_CLI_COMMANDS[moved.group]
         lines := [String]{}
         loop usage in group.actions[moved.action].usage.split("\n").to_list() {
-            &lines.push("{JET_CLI_BINARY} {group.name} {usage}")
+            lines.push("{JET_CLI_BINARY} {group.name} {usage}")
         }
         return lines.join("\n")
     }
@@ -234,7 +234,7 @@ jet_cli_flag_commands: fn(help: String) -> [String]? Never! {
         loop form in parts[0].split("/").to_list() {
             loop word in form.split(" ").to_list() {
                 if jet_cli_command_index(word) == None && jet_cli_word_group(word) == None -> next
-                if !commands.contains(word) -> &commands.push(word)
+                if !commands.contains(word) -> commands.push(word)
                 break
             }
         }
@@ -284,7 +284,7 @@ jet_cli_flags_for_command: fn(name: String) -> [JetCLIFlagSpec] Never! {
         commands: jet_cli_flag_commands(spec.help) ?? [String]{}
         if !commands.contains(name) && !JET_CLI_GLOBAL_FLAGS.contains(spec.long) -> next
         help: if jet_cli_flag_scope(spec.help) == .Val(parts) -> parts[1] else -> spec.help.copy()
-        &flags.push(JetCLIFlagSpec{long: spec.long, help: help})
+        flags.push(JetCLIFlagSpec{long: spec.long, help: help})
     }
     flags
 }
@@ -333,7 +333,7 @@ jet_cli_is_help_order: fn(value: String) -> Bool Never! {
 // keep table order.
 jet_cli_commands_in: fn(order: String) -> [Int] Never! {
     picked := [Bool]{}
-    loop _command in JET_CLI_COMMANDS -> &picked.push(false)
+    loop _command in JET_CLI_COMMANDS -> picked.push(false)
     ordered := [Int]{}
     loop ordered.len() < JET_CLI_COMMANDS.len() {
         best := -1
@@ -342,7 +342,7 @@ jet_cli_commands_in: fn(order: String) -> [Int] Never! {
             if best < 0 || jet_cli_command_before(index, best, order) -> best = index
         }
         picked[best] = true
-        &ordered.push(best)
+        ordered.push(best)
     }
     ordered
 }

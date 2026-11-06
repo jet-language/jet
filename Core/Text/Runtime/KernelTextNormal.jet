@@ -37,7 +37,7 @@ hangul_compose: fn(a: Int, b: Int) -> Int? {
 
 encode_cps_prefix: fn(cps: [Int], length: Int) -> String Never! {
     out := [U8]{}
-    loop i in 0..<length -> normal_string.append_cp(&out, cps[i])
+    loop i in 0..<length -> normal_string.append_cp(out, cps[i])
     String.from_bytes(out) ?? ""
 }
 
@@ -78,16 +78,16 @@ normalize: fn(text: String, compat: Bool, recompose: Bool) -> String Never! {
         if width == 3 -> cp = cp.bit_and(15)
         if width == 4 -> cp = cp.bit_and(7)
         loop k in 1..<width -> cp = (cp << 6).bit_or((Int.from_u8(bytes[at + k]).bit_and(63)))
-        decompose_cp(&out, cp, compat, index, pool)
+        decompose_cp(out, cp, compat, index, pool)
         at = at + width
     }
-    canon_order(&out, ccc)
+    canon_order(out, ccc)
     if recompose {
         pairs_asset: normal_compose.UNICODE_COMPOSE_PAIRS
         assert(normal_assets.valid(pairs_asset, 6, 9), "invalid Unicode asset schema/version/extent")
         pairs_bytes: pairs_asset[0..<pairs_asset.len()]
         pairs: pairs_asset[40..<normal_assets.uint(pairs_bytes, 28, 4)]
-        return compose(&out, ccc, pairs)
+        return compose(out, ccc, pairs)
     }
     encode_cps_prefix(out, out.len())
 }
@@ -96,9 +96,9 @@ normalize: fn(text: String, compat: Bool, recompose: Bool) -> String Never! {
 decompose_cp: fn(out: &[Int], cp: Int, compat: Bool, index: View<U8>, pool: View<U8>) Never! {
     sindex: cp - C_SBASE
     if sindex >= 0 && sindex < C_SCOUNT {
-        &out.push(C_LBASE + sindex /% C_NCOUNT)
-        &out.push(C_VBASE + (sindex % C_NCOUNT) /% C_TCOUNT)
-        if sindex % C_TCOUNT != 0 -> &out.push(C_TBASE + sindex % C_TCOUNT)
+        out.push(C_LBASE + sindex /% C_NCOUNT)
+        out.push(C_VBASE + (sindex % C_NCOUNT) /% C_TCOUNT)
+        if sindex % C_TCOUNT != 0 -> out.push(C_TBASE + sindex % C_TCOUNT)
         return
     }
     low := 0
@@ -115,7 +115,7 @@ decompose_cp: fn(out: &[Int], cp: Int, compat: Bool, index: View<U8>, pool: View
                     offset: normal_assets.uint(index, row + 3, 2)
                     length: Int.from_u8(index[row + 5])
                     loop child in offset..<(offset + length) {
-                        decompose_cp(&out, normal_assets.scalar(pool, child), compat, index, pool)
+                        decompose_cp(out, normal_assets.scalar(pool, child), compat, index, pool)
                     }
                     return
                 }
@@ -123,7 +123,7 @@ decompose_cp: fn(out: &[Int], cp: Int, compat: Bool, index: View<U8>, pool: View
             }
         }
     }
-    &out.push(cp)
+    out.push(cp)
 }
 
 // Rust `ccc`: binary search the generated nonzero ranges.
@@ -154,7 +154,7 @@ canon_order: fn(cps: &[Int], ccc: View<U8>) Never! {
             at = at + 1
         }
         if !unordered -> next
-        if positions.len() == 0 -> loop _ in 0..<256 -> &positions.push(0)
+        if positions.len() == 0 -> loop _ in 0..<256 -> positions.push(0)
         loop class in 1..<256 -> positions[class] = 0
         loop i in start..<at {
             class: normal_ccc(ccc, cps[i])
@@ -166,7 +166,7 @@ canon_order: fn(cps: &[Int], ccc: View<U8>) Never! {
             positions[class] = offset
             offset = offset + count
         }
-        loop scratch.len() < at - start -> &scratch.push(0)
+        loop scratch.len() < at - start -> scratch.push(0)
         loop i in start..<at {
             class: normal_ccc(ccc, cps[i])
             scratch[positions[class]] = cps[i]

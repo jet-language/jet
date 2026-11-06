@@ -38,7 +38,7 @@ ast_visit_expr: fn(expression: Expr, visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, Time
             loop {
                 if operand == .Binary(_, inner_left, inner_right, _, _) {
                     visitor(operand)
-                    &rights.push(inner_right)
+                    rights.push(inner_right)
                     operand = inner_left
                 } else {
                     break
@@ -105,14 +105,14 @@ expr_binary_operands: fn(left: Expr, right: Expr) -> [Expr] Never! {
     operand := left
     loop {
         if operand == .Binary(_, inner_left, inner_right, _, _) {
-            &operands.push(inner_right)
+            operands.push(inner_right)
             operand = inner_left
         } else {
             break
         }
     }
-    &operands.push(operand)
-    &operands.reverse()
+    operands.push(operand)
+    operands.reverse()
     operands
 }
 ast_visit_body: fn(body: [Stmt], visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!, nested_expression: Bool) Never! {

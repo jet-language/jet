@@ -71,7 +71,7 @@ capture_eligibility_assert_skip: fn(outcome: CaptureEligibility, reason: Capture
         // A stale grant is irrelevant to a safe run, too.
         other := attempt.identity.copy()
         other.build_id = "old"
-        attempt.consent = Val(SensitiveCaptureConsent.new(^other, CaptureConsentScope.default()))
+        attempt.consent = Val(SensitiveCaptureConsent.new(other, CaptureConsentScope.default()))
         assert(policy.eligibility(attempt) == CaptureEligibility.SafeClock(CaptureBudget.new_unchecked(U64{29})))
     }
 }
@@ -84,7 +84,7 @@ capture_eligibility_assert_skip: fn(outcome: CaptureEligibility, reason: Capture
         capture_eligibility_assert_skip(policy.eligibility(attempt), CaptureSkipReason.UnsafeSource(first.copy()), true)
         wrong := attempt.identity.copy()
         wrong.revision = "old"
-        attempt.consent = Val(SensitiveCaptureConsent.new(^wrong, policy.consent_scope(attempt)))
+        attempt.consent = Val(SensitiveCaptureConsent.new(wrong, policy.consent_scope(attempt)))
         capture_eligibility_assert_skip(policy.eligibility(attempt), CaptureSkipReason.SensitiveConsentScopeChanged(first.copy()), true)
     }
 }
@@ -96,7 +96,7 @@ capture_eligibility_assert_skip: fn(outcome: CaptureEligibility, reason: Capture
     capture_eligibility_assert_skip(policy.eligibility(attempt), CaptureSkipReason.UnsafeSource(attempt.sources[1].copy()), false)
     wrong := attempt.identity.copy()
     wrong.source_id = "other"
-    attempt.consent = Val(SensitiveCaptureConsent.new(^wrong, policy.consent_scope(attempt)))
+    attempt.consent = Val(SensitiveCaptureConsent.new(wrong, policy.consent_scope(attempt)))
     capture_eligibility_assert_skip(policy.eligibility(attempt), CaptureSkipReason.UnsafeSource(attempt.sources[1].copy()), false)
     attempt.consent = None
     capture_eligibility_assert_skip(policy.eligibility(attempt), CaptureSkipReason.UnsafeSource(attempt.sources[1].copy()), false)
@@ -142,17 +142,17 @@ capture_eligibility_assert_skip: fn(outcome: CaptureEligibility, reason: Capture
     loop field in 0..<8 {
         changed := original.copy()
         changed_policy := policy.copy()
-        if field == 0 -> &changed.scope.authorities.push("extra authority")
-        if field == 1 -> &changed.scope.hosts.push("other.test")
-        if field == 2 -> &changed.scope.streams.push("stderr")
-        if field == 3 -> &changed.scope.disclosures.push("other disclosure")
+        if field == 0 -> changed.scope.authorities.push("extra authority")
+        if field == 1 -> changed.scope.hosts.push("other.test")
+        if field == 2 -> changed.scope.streams.push("stderr")
+        if field == 3 -> changed.scope.disclosures.push("other disclosure")
         if field == 4 -> changed.scope.destination = "other destination"
         if field == 5 -> changed_policy.package.budget = CaptureBudget.new_unchecked(U64{101})
         if field == 6 {
             changed_policy.mode = CaptureMode.Release
             changed_policy.explicit_capture = true
         }
-        if field == 7 -> &changed.sources.push(CaptureSourceFact.new(CaptureSource.Randomness, None))
+        if field == 7 -> changed.sources.push(CaptureSourceFact.new(CaptureSource.Randomness, None))
         capture_eligibility_assert_skip(changed_policy.eligibility(changed), CaptureSkipReason.SensitiveConsentScopeChanged(original.sources[1].copy()), true)
     }
     // Duplicate/order changes and obsolete base mode/limit are canonicalized;

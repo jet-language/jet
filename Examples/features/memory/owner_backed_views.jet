@@ -13,7 +13,10 @@ Library: struct {
 
 book_at: fn(lib: Library, i: Int) -> View<Book> { lib.books[i..i] }
 
-edit_at: fn(lib: &Library, i: Int) -> ViewMut<Book> { &lib.books[i..i] }
+edit_at: fn(lib: &Library, i: Int) -> ViewMut<Book> {
+    window: &lib.books[i..i]
+    window
+}
 
 run: fn() {
     lib := Library{
@@ -25,9 +28,9 @@ run: fn() {
     first: book_at(lib, 0)
     print(first[0].title)
     print(first[0].pages)
-    dune: edit_at(&lib, 0)
+    dune: edit_at(lib, 0)
     dune[0].pages += 10
-    neuro: edit_at(&lib, 1)
+    neuro: edit_at(lib, 1)
     neuro[0].pages += 9
     print(lib.books[0].pages)
     print(lib.books[1].pages)

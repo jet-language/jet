@@ -55,8 +55,8 @@ lsp_hover_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String? {
         db := lsp_build_symbol_db(result)
         if result.graph != None {
             cache := WorkspaceDeclarationCache.new()
-            if semindex_package_facts_for_entry(&cache, path) == .Ok(package) {
-                if package == .Val(facts) -> &db.attach_package_facts(facts.copy())
+            if semindex_package_facts_for_entry(cache, path) == .Ok(package) {
+                if package == .Val(facts) -> db.attach_package_facts(facts.copy())
             }
         }
         discovery: lsp_load_discovery_index(path, doc.path.platform)
@@ -95,7 +95,7 @@ lsp_definition_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String?
             // Driver owns checked authorization/build-plan acquisition. Never
             // substitute a generated-name string heuristic for this query.
             if lsp_query_build_plan_with_overlay(server.snapshot, doc.path, doc.text) == .Ok(plan) {
-                if plan == .Val(build) -> generated = lsp_register_generated_declarations(&db, build, module_path, tokens)
+                if plan == .Val(build) -> generated = lsp_register_generated_declarations(db, build, module_path, tokens)
             }
         }
         target := lsp_compute_definition(db, tokens, doc.text, module_path, offset)
@@ -109,7 +109,7 @@ lsp_definition_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String?
                 if lsp_navigation_path.parent_span(doc.path) == .Val(extent) -> root = Val(lsp_navigation_path.owned_span(doc.path, extent))
             }
             absolute := (root ?? lsp_navigation_path.from_text(".", doc.path.platform)).copy()
-            lsp_navigation_path.push(&absolute, lsp_navigation_path.from_text(declaration.module_path, absolute.platform))
+            lsp_navigation_path.push(absolute, lsp_navigation_path.from_text(declaration.module_path, absolute.platform))
             range: lsp_checked_byte_span_to_range(declaration.source, declaration.span) ?? return Val(lsp_error_response(id, -32603, "generated definition range is outside its checked source"))
             artifact: declaration.module_path
             status: if declaration.module_name.is_empty() && declaration.plugin == None -> "missing" else -> "available"

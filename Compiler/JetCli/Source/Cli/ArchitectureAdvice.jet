@@ -74,16 +74,16 @@ jet_cli_architecture_calls: fn(index: JetCLISemIndex) -> [JetCLIArchitectureCall
         to: callee ?? next
         callable: jet_cli_sem_callable(to) ?? next
         result: if callable.return_type == .Val(ty) -> Val(type_name(ty)) else -> String?{None}
-        &calls.push(JetCLIArchitectureCall{caller_key: jet_cli_architecture_key(from), caller_name: from.qualified_name, caller_module: from.module_path, caller_span: from.def_span, callee_key: jet_cli_architecture_key(to), callee_name: to.qualified_name, callee_module: to.module_path, callee_span: to.def_span, callee_return: result, call_span: edge.span})
+        calls.push(JetCLIArchitectureCall{caller_key: jet_cli_architecture_key(from), caller_name: from.qualified_name, caller_module: from.module_path, caller_span: from.def_span, callee_key: jet_cli_architecture_key(to), callee_name: to.qualified_name, callee_module: to.module_path, callee_span: to.def_span, callee_return: result, call_span: edge.span})
     }
     calls
 }
 
 jet_cli_architecture_unique: fn(values: &[String]) Never! {
-    &values.sort()
+    values.sort()
     unique := [String]{}
     loop value in values {
-        if unique.len() == 0 || unique[unique.len() - 1] != value -> &unique.push(value)
+        if unique.len() == 0 || unique[unique.len() - 1] != value -> unique.push(value)
     }
     values = unique
 }
@@ -94,7 +94,7 @@ jet_cli_architecture_row: fn(index: JetCLISemIndex, kind: String, subject: Strin
     boundaries := [String]{}
     cross_module := false
     loop call in calls {
-        &boundaries.push("{call.caller_module} -> {call.callee_module}")
+        boundaries.push("{call.caller_module} -> {call.callee_module}")
         if call.caller_module != call.callee_module -> cross_module = true
         entries: [JetCLIArchitectureEvidence]{
             {role: "caller-definition", module_path: call.caller_module, span: call.caller_span},
@@ -104,18 +104,18 @@ jet_cli_architecture_row: fn(index: JetCLISemIndex, kind: String, subject: Strin
         loop entry in entries {
             key: "{entry.role}:{entry.module_path}:{entry.span.start}:{entry.span.end}"
             if !evidence_keys.contains(key) {
-                &evidence_keys.push(key)
-                &evidence.push(entry)
+                evidence_keys.push(key)
+                evidence.push(entry)
             }
         }
         loop effect_row in index.effects {
             if effect_row.function != call.caller_name -> next
-            if effect_row.inferred.len() > 0 -> &boundaries.push("effects {call.caller_name}: {effect_row.inferred.join(", ")}")
+            if effect_row.inferred.len() > 0 -> boundaries.push("effects {call.caller_name}: {effect_row.inferred.join(", ")}")
             break
         }
     }
-    &evidence.sort_by((left: JetCLIArchitectureEvidence, right: JetCLIArchitectureEvidence) -> (left.module_path <=> right.module_path).then(left.span.start <=> right.span.start).then(left.role <=> right.role))
-    jet_cli_architecture_unique(&boundaries)
+    evidence.sort_by((left: JetCLIArchitectureEvidence, right: JetCLIArchitectureEvidence) -> (left.module_path <=> right.module_path).then(left.span.start <=> right.span.start).then(left.role <=> right.role))
+    jet_cli_architecture_unique(boundaries)
     JetCLIArchitectureRow{kind: kind, subject: subject, scope: if cross_module -> "cross-module" else -> "same-module", evidence: evidence, boundaries: boundaries, uncertainty: [String]{note, "the checked call graph proves references, not a business invariant", "operator review may reject this candidate; no refactor or policy is applied"}}
 }
 
@@ -124,11 +124,11 @@ jet_cli_architecture_rows: fn(index: JetCLISemIndex) -> [JetCLIArchitectureRow] 
     callee_keys := [String]{}
     caller_keys := [String]{}
     loop call in calls {
-        &callee_keys.push(call.callee_key)
-        &caller_keys.push(call.caller_key)
+        callee_keys.push(call.callee_key)
+        caller_keys.push(call.caller_key)
     }
-    jet_cli_architecture_unique(&callee_keys)
-    jet_cli_architecture_unique(&caller_keys)
+    jet_cli_architecture_unique(callee_keys)
+    jet_cli_architecture_unique(caller_keys)
     rows := [JetCLIArchitectureRow]{}
     seen := [String]{}
     loop key in callee_keys {
@@ -136,15 +136,15 @@ jet_cli_architecture_rows: fn(index: JetCLISemIndex) -> [JetCLIArchitectureRow] 
         callers := [String]{}
         loop call in calls {
             if call.callee_key != key -> next
-            &group.push(call)
-            if !callers.contains(call.caller_key) -> &callers.push(call.caller_key)
+            group.push(call)
+            if !callers.contains(call.caller_key) -> callers.push(call.caller_key)
         }
         if callers.len() < 2 -> next
         subject: group[0].callee_name
         identity: "shared-callee:{subject}"
         if seen.contains(identity) -> next
-        &seen.push(identity)
-        &rows.push(jet_cli_architecture_row(index, "shared-callee", subject, group, "one checked callable is consumed by multiple callers; review whether they must preserve one invariant"))
+        seen.push(identity)
+        rows.push(jet_cli_architecture_row(index, "shared-callee", subject, group, "one checked callable is consumed by multiple callers; review whether they must preserve one invariant"))
     }
     loop key in caller_keys {
         group := [JetCLIArchitectureCall]{}
@@ -152,20 +152,20 @@ jet_cli_architecture_rows: fn(index: JetCLISemIndex) -> [JetCLIArchitectureRow] 
         returns := [String]{}
         loop call in calls {
             if call.caller_key != key -> next
-            &group.push(call)
-            if !callees.contains(call.callee_key) -> &callees.push(call.callee_key)
+            group.push(call)
+            if !callees.contains(call.callee_key) -> callees.push(call.callee_key)
             if call.callee_return == .Val(result) {
-                if !returns.contains(result) -> &returns.push(result)
+                if !returns.contains(result) -> returns.push(result)
             }
         }
         if callees.len() < 2 || returns.len() != 1 -> next
         subject: group[0].caller_name
         identity: "consumer-agreement:{subject}"
         if seen.contains(identity) -> next
-        &seen.push(identity)
-        &rows.push(jet_cli_architecture_row(index, "consumer-agreement", subject, group, "one checked consumer joins multiple same-result call paths; review whether their results must agree"))
+        seen.push(identity)
+        rows.push(jet_cli_architecture_row(index, "consumer-agreement", subject, group, "one checked consumer joins multiple same-result call paths; review whether their results must agree"))
     }
-    &rows.sort_by((left: JetCLIArchitectureRow, right: JetCLIArchitectureRow) -> (left.subject <=> right.subject).then(left.kind <=> right.kind).then(left.scope <=> right.scope))
+    rows.sort_by((left: JetCLIArchitectureRow, right: JetCLIArchitectureRow) -> (left.subject <=> right.subject).then(left.kind <=> right.kind).then(left.scope <=> right.scope))
     if rows.len() > 64 -> rows = rows[0..63]
     rows
 }
@@ -182,7 +182,7 @@ jet_cli_architecture_value: fn(inspection: JetCLIArchitectureInspection) -> JetC
     rows := [JetCLIStatusValue]{}
     loop row in inspection.rows {
         evidence: loop entry in row.evidence -> jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("role", jet_cli_status_text(entry.role)), jet_cli_status_field("module", jet_cli_status_text(entry.module_path)), jet_cli_status_field("span", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("start", jet_cli_status_int(entry.span.start)), jet_cli_status_field("end", jet_cli_status_int(entry.span.end))}))})
-        &rows.push(jet_cli_status_object([JetCLIStatusField]{
+        rows.push(jet_cli_status_object([JetCLIStatusField]{
             jet_cli_status_field("kind", jet_cli_status_text(row.kind)),
             jet_cli_status_field("subject", jet_cli_status_text(row.subject)),
             jet_cli_status_field("scope", jet_cli_status_text(row.scope)),
@@ -194,7 +194,7 @@ jet_cli_architecture_value: fn(inspection: JetCLIArchitectureInspection) -> JetC
         }))
     }
     fields := [JetCLIStatusField]{jet_cli_status_field("status", jet_cli_status_text(if inspection.reason == None -> "advisory" else -> "unavailable")), jet_cli_status_field("rows", jet_cli_status_array(rows)), jet_cli_status_field("operator_action", jet_cli_status_text("review_or_reject"))}
-    if inspection.reason == .Val(reason) -> &fields.push(jet_cli_status_field("reason", jet_cli_status_text(reason)))
+    if inspection.reason == .Val(reason) -> fields.push(jet_cli_status_field("reason", jet_cli_status_text(reason)))
     jet_cli_status_object(fields)
 }
 

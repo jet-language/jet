@@ -115,24 +115,24 @@ target_test_provider: fn(name: String, hash: String) -> ProviderContract Never! 
         jet_target_memory_region_new("overflow", 18446744073709551615, ByteSize{bytes: 1}, .Reserved, .R),
     }
     errors := [TargetMachineError]{}
-    jet_target_validate_memory_regions(machine.memory, &errors)
+    jet_target_validate_memory_regions(machine.memory, errors)
     assert_eq(errors, [TargetMachineError]{.EmptyMemoryRegion{name: "same"}, .DuplicateMemoryRegion{name: "same"}, .MemoryAddressOverflow{name: "overflow"}, .OverlappingMemoryRegions{first: "same", second: "same"}})
     errors = [TargetMachineError]{}
-    jet_target_validate_linker(.File{path: " \n", sha256: "sha256:"}, true, &errors)
+    jet_target_validate_linker(.File{path: " \n", sha256: "sha256:"}, true, errors)
     assert_eq(errors, [TargetMachineError]{.LinkerFileMissingPath, .LinkerFileMissingHash{path: " \n"}})
-    jet_target_validate_linker(.Unspecified, true, &errors)
+    jet_target_validate_linker(.Unspecified, true, errors)
     assert(errors.contains(.MissingLinkerInput))
     machine.allocator = .Fixed{region: "absent", size: ByteSize{bytes: 1}}
     errors = [TargetMachineError]{}
-    jet_target_validate_allocator(machine, &errors)
+    jet_target_validate_allocator(machine, errors)
     assert_eq(errors, [TargetMachineError]{.AllocatorRegionUnknown{region: "absent"}})
     machine.allocator = .Fixed{region: "same", size: ByteSize{bytes: 9}}
     errors = [TargetMachineError]{}
-    jet_target_validate_allocator(machine, &errors)
+    jet_target_validate_allocator(machine, errors)
     assert_eq(errors, [TargetMachineError]{.AllocatorRegionTooSmall{region: "same", requested_bytes: 9, available_bytes: 8}})
     machine.allocator = .Fixed{region: "overflow", size: ByteSize{bytes: 0}}
     errors = [TargetMachineError]{}
-    jet_target_validate_allocator(machine, &errors)
+    jet_target_validate_allocator(machine, errors)
     assert_eq(errors, [TargetMachineError]{.AllocatorRegionNotRam{region: "overflow"}})
 }
 #Test("provider_startup_limits_and_unique_capability_failures") {
@@ -162,8 +162,8 @@ target_test_provider: fn(name: String, hash: String) -> ProviderContract Never! 
     usage.static_ram_bytes = 1
     usage.mmio = [MMIOAccess]{MMIOAccess{address: 0x40020400, size: ByteSize{bytes: 0}, unsafe_gate: Val(TargetUnsafeGate{reason: " "})}, MMIOAccess{address: 18446744073709551615, size: ByteSize{bytes: 1}, unsafe_gate: None}}
     errors := [TargetMachineError]{}
-    jet_target_validate_ram_budget(machine, usage, &errors)
-    jet_target_validate_mmio(machine, usage, &errors)
+    jet_target_validate_ram_budget(machine, usage, errors)
+    jet_target_validate_mmio(machine, usage, errors)
     assert_eq(errors, [TargetMachineError]{.RamOverflow{used_bytes: 18446744073709551615, ram_bytes: 131072}, .MMIOEmptyUnsafeReason{address: 0x40020400}, .MMIOOutsideRegion{address: 18446744073709551615, size_bytes: 1}, .MMIOMissingUnsafeGate{address: 18446744073709551615}})
 }
 #Test("from_core_apis_sorts_dedups_and_derives_capabilities") {
@@ -396,6 +396,6 @@ target_test_provider: fn(name: String, hash: String) -> ProviderContract Never! 
     usage.stack_bytes = 18446744073709551615
     usage.static_ram_bytes = 1
     errors := [TargetMachineError]{}
-    jet_target_validate_ram_budget(machine, usage, &errors)
+    jet_target_validate_ram_budget(machine, usage, errors)
     assert(errors.is_empty())
 }

@@ -17,14 +17,14 @@ jet_cli_build_fact_explain_host: fn(key: String, file: String, profile: String, 
     if entry == "" {
         notices := [String]{}
         cwd: cli_files.cwd() ?? "."
-        if jet_cli_find_project_entry(cwd, "explain", color, &notices) == {
+        if jet_cli_find_project_entry(cwd, "explain", color, notices) == {
             .Entry(found) -> entry = found.path
             .Absent -> return jet_cli_missing_bare_entry("explain", cwd, color)
             .Refused(plan) -> return plan
         }
     }
     prepared := jet_cli_prepare_overlays(entry, entry, [JetCLIOverlay]{}, color, None, JetDriverCompileMode.Doc)
-    if ^prepared == {
+    if prepared.move() == {
         .Refused(output) -> JetCLIPlan.Done{output: output}
         .Prepared(request, snapshot) -> {
             selected := request
@@ -33,7 +33,7 @@ jet_cli_build_fact_explain_host: fn(key: String, file: String, profile: String, 
             explained: jet_driver_explain_build_fact(selected, key)
             if explained.fact == .Val(fact) {
                 lines := [String]{}
-                loop line in fact.explain().split("\n") -> &lines.push(line.removeprefix("  "))
+                loop line in fact.explain().split("\n") -> lines.push(line.removeprefix("  "))
                 explanation: DiagnosticExplanation{code: key, stage: "", meaning: lines[0], what: Val(lines.join("\n")), why: Val(JET_CLI_BUILD_FACT_WHY), fix: Val(JET_CLI_BUILD_FACT_FIX), example: None}
                 return jet_cli_explanation_output(explanation, color, json)
             }

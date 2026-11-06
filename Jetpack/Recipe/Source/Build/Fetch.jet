@@ -111,12 +111,12 @@ recipe_percent_decode_ascii: fn(value: String) -> String Never! {
             high: recipe_hex_value(Int.from_u8(bytes[index + 1]))
             low: recipe_hex_value(Int.from_u8(bytes[index + 2]))
             if high >= 0 && low >= 0 {
-                recipe_push_latin1(&decoded, high * 16 + low)
+                recipe_push_latin1(decoded, high * 16 + low)
                 index += 3
                 next
             }
         }
-        recipe_push_latin1(&decoded, Int.from_u8(bytes[index]))
+        recipe_push_latin1(decoded, Int.from_u8(bytes[index]))
         index += 1
     }
     String.from_bytes(decoded) ?? panic("Latin-1 scalars always encode as UTF-8")
@@ -125,11 +125,11 @@ recipe_percent_decode_ascii: fn(value: String) -> String Never! {
 // Append the UTF-8 encoding of the scalar U+0000..U+00FF with value `code`.
 recipe_push_latin1: fn(out: &[U8], code: Int) Never! {
     if code < 128 {
-        &out.push(U8{code})
+        out.push(U8{code})
         return
     }
-    &out.push(U8{192 + code /% 64})
-    &out.push(U8{128 + code % 64})
+    out.push(U8{192 + code /% 64})
+    out.push(U8{128 + code % 64})
 }
 
 // The value of one hexadecimal digit, or -1.

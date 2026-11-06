@@ -41,7 +41,7 @@ cli_channel_sources: fn(table: SourceTable) -> [ChannelSource] Never! {
         }
         pinned: policy == ChannelPolicy.Pinned
         lock_channel: if pinned -> nix_channel ?? channel.as_str() else -> channel.as_str()
-        &sources.push(ChannelSource{
+        sources.push(ChannelSource{
             name: decl.name,
             base: base,
             channel: channel,
@@ -130,7 +130,7 @@ cli_apply_locked_channels: fn(theme: Theme, project_dir: String, table: &SourceT
             cli_report_unlocked_channel(theme, source.name, source.lock_channel)
             return Err(CLIError.Reported(EXIT_USAGE))
         }
-        &table.set_upstream(source.name, lock.exact)
+        table.set_upstream(source.name, lock.exact)
     }
 }
 
@@ -208,7 +208,7 @@ cli_channel_fixture_rows: fn(flags: CLIFlags) -[FS, Env]> [[String]] Never! {
     dir: cli_fixtures_for(flags) ?? return [[String]]{}
     raw: files.read(files.join(dir, "channels.txt")) ?? return [[String]]{}
     rows := [[String]]{}
-    loop line in raw.lines() -> &rows.push(trust_text_words(line))
+    loop line in raw.lines() -> rows.push(trust_text_words(line))
     rows
 }
 
@@ -370,7 +370,7 @@ cli_semver_nums: fn(text: String) -> [Int]? Never! {
             digits = "{digits}{code - 48}"
         }
         if digits == "" -> return None
-        &out.push(Int.parse(digits) ?? return None)
+        out.push(Int.parse(digits) ?? return None)
     }
     Val(out)
 }

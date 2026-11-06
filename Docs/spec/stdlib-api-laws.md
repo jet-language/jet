@@ -105,7 +105,7 @@ Return a new allocation by value. Do not write into a caller-supplied buffer
 unless the API is explicitly a low-allocation path.
 
 Make mutation visible: a mutating function takes `&T`, while ownership
-transfer takes `^T`. Document the invariant enforced by every `#SingleUse`
+transfer takes `&&T`. Document the invariant enforced by every `#SingleUse`
 type.
 
 ### Internal Core Shared publication
@@ -194,7 +194,7 @@ spelling. Do not add a mode parameter or preserve an alias for the same
 operation.
 
 ```jet
-&text.replace("a", "b")
+text.replace("a", "b")
 text.replace_first("a", "b")
 ```
 
@@ -548,7 +548,7 @@ other hosts. Neither bridge writes the operating-system environment.
 
 `RealtimeStream.cancel(&self)` forwards its write-borrowed stream to
 `core.rt.__cancel(&self)`. The public method and its provider call both retain
-the explicit write-access marker; cancellation does not consume the stream.
+the `&self` write receiver; cancellation does not consume the stream.
 
 ## Testing evidence source policy
 

@@ -5,7 +5,7 @@ run: fn() Never! {
     fact: pkg_fact_resolve(FactKey.new("Build.Settings.tls"), [contribution]) ?? panic("forced writer must resolve")
     resolved: fact ?? panic("forced writer must produce a value")
     ledger := GateLedger{}
-    jet_cli_gate_append_build_facts(&ledger, [resolved])
+    jet_cli_gate_append_build_facts(ledger, [resolved])
     if ledger.rows.len() != 1 -> panic("forced writer must produce one gate")
     entry: ledger.rows[0]
     if entry.kind != GateKind.BuildFlag || entry.domain != "build" || entry.subject != "Build.Settings.tls" || entry.source != "system.jet" || entry.reason != (Val("fleet certification")) || entry.span != (Val(span)) {

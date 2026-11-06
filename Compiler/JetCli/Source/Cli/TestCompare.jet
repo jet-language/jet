@@ -68,7 +68,7 @@ jet_cli_comparison_strings: fn(value: Dyn, key: String) -> [String] JetCLICompar
     }
     result := [String]{}
     loop item in values {
-        if item == .Text(text) -> &result.push(text) else {
+        if item == .Text(text) -> result.push(text) else {
             return Err(jet_cli_comparison_error("`{key}` entries must be strings"))
         }
     }
@@ -98,7 +98,7 @@ jet_cli_comparison_binding: fn(root: Dyn) -> JetCLIComparisonBinding JetCLICompa
     loop key in keys {
         child: jet_cli_comparison_value(binding, key) ?? {
             missing = true
-            &fields.push("")
+            fields.push("")
             next
         }
         text: if child == .Text(text) -> text else -> {
@@ -108,7 +108,7 @@ jet_cli_comparison_binding: fn(root: Dyn) -> JetCLIComparisonBinding JetCLICompa
         if text.trim() == "" {
             return Err(jet_cli_comparison_error("foreign binding `{key}` must not be empty"))
         }
-        &fields.push(text)
+        fields.push(text)
     }
     assumptions := [String]{}
     if jet_cli_comparison_value(binding, "assumptions") == .Val(child) {
@@ -124,7 +124,7 @@ jet_cli_comparison_binding: fn(root: Dyn) -> JetCLIComparisonBinding JetCLICompa
             if text.trim() == "" {
                 return Err(jet_cli_comparison_error("foreign binding `assumptions` entries must not be empty"))
             }
-            &assumptions.push(text)
+            assumptions.push(text)
         }
     }
     if missing {
@@ -235,7 +235,7 @@ jet_cli_comparison_parse: fn(input: String, relation_override: String?) -> JetCL
     }
     samples := [ComparisonSample]{}
     loop (index, value) in cases {
-        &samples.push(jet_cli_comparison_sample(value, index, seed, source, tool, target, relation))
+        samples.push(jet_cli_comparison_sample(value, index, seed, source, tool, target, relation))
     }
     record := testing_compare_samples_with_discarded(relation, samples, discarded)
     if jet_cli_comparison_terminal(jet_cli_comparison_text(root, "status") ?? "") == .Val(status) {

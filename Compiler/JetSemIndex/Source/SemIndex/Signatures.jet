@@ -36,12 +36,12 @@ semindex_function_parameter_parts: fn(params: [SymNameType], contract: [SymParam
         }
         if zone == .LabelOnly && !star_done {
             star_done = true
-            &parts.push("*")
+            parts.push("*")
         }
         shown: if zone == .PositionalOnly -> contract_local else if label == contract_local -> label else -> "{label} {contract_local}"
         rest: if index < variadic.len() && variadic[index] -> "..." else -> ""
-        &parts.push("{shown}: {rest}{type_name(params[index].ty)}")
-        if zone == .PositionalOnly && (index + 1 >= contract.len() || contract[index + 1].zone != .PositionalOnly) -> &parts.push("/")
+        parts.push("{shown}: {rest}{type_name(params[index].ty)}")
+        if zone == .PositionalOnly && (index + 1 >= contract.len() || contract[index + 1].zone != .PositionalOnly) -> parts.push("/")
     }
     parts
 }
@@ -54,7 +54,7 @@ semindex_binder_active_parameter: fn(active_label: String?, active_positional: I
     loop label in consumed_labels {
         loop index in 0..<contract.len() {
             if !semindex_consumed_slots_contains(consumed_slots, index) && contract[index].zone != .PositionalOnly && contract[index].label == label {
-                &consumed_slots.push(index)
+                consumed_slots.push(index)
                 break
             }
         }
@@ -113,7 +113,7 @@ semindex_fn_signature: fn(name: String, params: [SymNameType], param_contract: [
     if effects == .Val(row) {
         loop fact in row {
             root := fact.name.split(".")[0] // #4303
-            if root != "Panic" && root != "Mem" -> &shown.push(fact.name)
+            if root != "Panic" && root != "Mem" -> shown.push(fact.name)
         }
     }
     result: if ret == {
@@ -134,7 +134,7 @@ semindex_fn_signature: fn(name: String, params: [SymNameType], param_contract: [
         }
     }
     policy_names := [String]{}
-    loop policy in policies -> &policy_names.push(callable_policy_display(policy))
+    loop policy in policies -> policy_names.push(callable_policy_display(policy))
     if policy_names.len() > 0 -> signature += " ; policies=[{policy_names.join(", ")}]"
     signature += "\nfailure: "
     if failure_contract == {
@@ -159,12 +159,12 @@ semindex_parameter_defaults: fn(params: [Param], source: String, skip_self: Bool
                 if span.start < 0 || span.end < span.start || span.end > bytes.len() -> panic("callable default span must select source text")
                 selected := bytes[span.start..<span.end] // #4303
                 text: String.from_bytes(selected) ?? panic("callable default span must select source text")
-                &defaults.push(Val(CallableDefaultFact{
+                defaults.push(Val(CallableDefaultFact{
                     source_text: text, source: semindex_source_span(span),
                     value_unavailable: CallableFactUnavailable{required_stage: CompilerStage.Prepared, reason: "the semindex producer does not evaluate callable defaults"},
                 }))
             }
-            .None -> &defaults.push(.None)
+            .None -> defaults.push(.None)
         }
     }
     defaults
@@ -183,7 +183,7 @@ semindex_callable_policies: fn(function: Func) -> [CallablePolicy] Never! {
 semindex_method_params: fn(function: Func) -> [SymNameType] Never! {
     params := [SymNameType]{}
     loop parameter in function.params {
-        if parameter.name != "self" -> &params.push(SymNameType{name: parameter.name, ty: parameter.ty})
+        if parameter.name != "self" -> params.push(SymNameType{name: parameter.name, ty: parameter.ty})
     }
     params
 }
@@ -193,7 +193,7 @@ semindex_method_parameter_contract: fn(function: Func) -> [SymParamContract] Nev
 semindex_parameter_contract: fn(params: [Param]) -> [SymParamContract] Never! {
     contract := [SymParamContract]{}
     loop parameter in params {
-        if parameter.name != "self" -> &contract.push(SymParamContract{name: parameter.name, label: param_call_label(parameter), zone: parameter.zone})
+        if parameter.name != "self" -> contract.push(SymParamContract{name: parameter.name, label: param_call_label(parameter), zone: parameter.zone})
     }
     contract
 }
@@ -202,17 +202,17 @@ semindex_method_parameter_variadic: fn(function: Func) -> [Bool] Never! {
 }
 semindex_parameter_variadic: fn(params: [Param]) -> [Bool] Never! {
     variadic := [Bool]{}
-    loop parameter in params { if parameter.name != "self" -> &variadic.push(parameter.variadic) }
+    loop parameter in params { if parameter.name != "self" -> variadic.push(parameter.variadic) }
     variadic
 }
 semindex_method_parameter_access: fn(function: Func) -> [AccessConvention] Never! {
     access := [AccessConvention]{}
-    loop parameter in function.params { if parameter.name != "self" -> &access.push(parameter.convention) }
+    loop parameter in function.params { if parameter.name != "self" -> access.push(parameter.convention) }
     access
 }
 semindex_callable_kind: fn(function: Func, source: String) -> SymKind Never! {
     param_sources := [SourceSpan]{}
-    loop parameter in function.params { if parameter.name != "self" -> &param_sources.push(semindex_source_span(parameter.name_span)) }
+    loop parameter in function.params { if parameter.name != "self" -> param_sources.push(semindex_source_span(parameter.name_span)) }
     SymKind.Function{
         params: semindex_method_params(function), param_sources: param_sources,
         signature_facts_available: true, param_contract: semindex_method_parameter_contract(function),

@@ -65,18 +65,18 @@ ForeignBoundaryObservation: struct {
     }
 
     // Builders consume the observation (Rust `mut self`), never copying it.
-    with_assumptions: fn(^self, assumptions: [String]) -> ForeignBoundaryObservation Never! {
+    with_assumptions: fn(&&self, assumptions: [String]) -> ForeignBoundaryObservation Never! {
         out := self
         rows := [String]{}
         loop assumption in assumptions {
-            if !rows.contains(assumption) -> &rows.push(assumption)
+            if !rows.contains(assumption) -> rows.push(assumption)
         }
-        &rows.sort()
+        rows.sort()
         out.assumptions = rows
         out
     }
 
-    with_evidence: fn(^self, evidence: EvidenceIdentity) -> ForeignBoundaryObservation Never! {
+    with_evidence: fn(&&self, evidence: EvidenceIdentity) -> ForeignBoundaryObservation Never! {
         out := self
         out.evidence = Val(evidence)
         out
@@ -141,7 +141,7 @@ pkg_foreign_boundary_capability: fn(language: ForeignLanguage) -> ForeignBoundar
 // The complete family matrix used by foreign inspection and comparison views.
 pkg_foreign_boundary_capabilities: fn() -> [ForeignBoundaryCapability] Never! {
     rows := [ForeignBoundaryCapability]{}
-    loop language in ForeignLanguage.all() -> &rows.push(pkg_foreign_boundary_capability(language))
+    loop language in ForeignLanguage.all() -> rows.push(pkg_foreign_boundary_capability(language))
     rows
 }
 
@@ -232,8 +232,8 @@ ForeignSourceReceipt: struct {
             (name: "source-receipt-compared-samples", value: self.compared_samples.to_string()),
             (name: "source-receipt-discarded-cases", value: self.discarded_cases.to_string())
         }
-        loop evidence in self.evidence -> &fields.push((name: "source-receipt-evidence", value: pkg_bridge_evidence_key(evidence)))
-        if self.comparison_reason == .Val(reason) -> &fields.push((name: "source-receipt-comparison-reason", value: reason))
+        loop evidence in self.evidence -> fields.push((name: "source-receipt-evidence", value: pkg_bridge_evidence_key(evidence)))
+        if self.comparison_reason == .Val(reason) -> fields.push((name: "source-receipt-comparison-reason", value: reason))
         fields
     }
 
@@ -241,7 +241,7 @@ ForeignSourceReceipt: struct {
     render: fn(self) -> String ForeignBridgeError! {
         self.validate()
         output := ""
-        loop field in self.provenance_fields() -> pkg_bridge_append_line(&output, field.name, field.value)
+        loop field in self.provenance_fields() -> pkg_bridge_append_line(output, field.name, field.value)
         identity: self.boundary_identity
         output = "{output}source-receipt-boundary-source={identity.source}\nsource-receipt-boundary-overlay={identity.overlay}\nsource-receipt-boundary-generator={identity.generator}\nsource-receipt-boundary-implementation={identity.implementation}\nsource-receipt-boundary-toolchain={identity.toolchain}\nsource-receipt-boundary-target={identity.target}\n"
         Ok(output)
@@ -311,7 +311,7 @@ ForeignBoundaryContract: struct {
         coverage_digest: artifact_coverage.digest()
         obligations := [ForeignObligationEvidence]{}
         loop obligation in FOREIGN_BOUNDARY_OBLIGATIONS {
-            &obligations.push(ForeignObligationEvidence{obligation: obligation, basis: FFIEvidenceBasis.Unknown, checker: "not-established", assumptions: [String]{"descriptor declarations do not prove the foreign implementation"}, coverage_digest: coverage_digest})
+            obligations.push(ForeignObligationEvidence{obligation: obligation, basis: FFIEvidenceBasis.Unknown, checker: "not-established", assumptions: [String]{"descriptor declarations do not prove the foreign implementation"}, coverage_digest: coverage_digest})
         }
         alignment: if {
             is_cpp -> "opaque-handle; native class layout intentionally unclaimed"
@@ -362,7 +362,7 @@ ForeignBoundaryContract: struct {
         loop obligation in self.obligations {
             obligation.validate(self.artifact_coverage)
             if names.contains(obligation.obligation) -> return Err(pkg_bridge_error("foreign boundary repeats obligation `{obligation.obligation}`"))
-            &names.push(obligation.obligation)
+            names.push(obligation.obligation)
         }
         loop name in FOREIGN_BOUNDARY_OBLIGATIONS {
             if !names.contains(name) -> return Err(pkg_bridge_error("foreign boundary omitted a canonical obligation row"))
@@ -393,9 +393,9 @@ ForeignBoundaryContract: struct {
         out := self
         rows := [String]{}
         loop assumption in assumptions {
-            if !rows.contains(assumption) -> &rows.push(assumption)
+            if !rows.contains(assumption) -> rows.push(assumption)
         }
-        &rows.sort()
+        rows.sort()
         out.assumptions = rows
         out
     }
@@ -421,15 +421,15 @@ ForeignBoundaryContract: struct {
                 break
             }
         }
-        if !replaced -> &self.obligations.push(obligation)
+        if !replaced -> self.obligations.push(obligation)
         self.obligations = loop fresh_item in self.obligations -> fresh_item
-        &self.obligations.sort_by(row -> row.obligation)
+        self.obligations.sort_by(row -> row.obligation)
     }
 
     // Record one basis/checker/assumption row against this contract's exact
     // loaded artifact coverage.
     set_obligation: fn(&self, name: String, basis: FFIEvidenceBasis, checker: String, assumptions: [String]) ForeignBridgeError! {
-        &self.record_obligation(ForeignObligationEvidence.new(name, basis, checker, assumptions, self.artifact_coverage))
+        self.record_obligation(ForeignObligationEvidence.new(name, basis, checker, assumptions, self.artifact_coverage))
     }
 
     obligation: fn(self, name: String) -> ForeignObligationEvidence? Never! {
@@ -463,7 +463,7 @@ ForeignBoundaryContract: struct {
     carrier_facts: fn(self) -> FFIBoundaryFacts Never! {
         obligations := [FFIBoundaryObligation]{}
         loop obligation in self.obligations {
-            &obligations.push(FFIBoundaryObligation{name: obligation.obligation, basis: obligation.basis, checker: obligation.checker, assumptions: obligation.assumptions, coverage_digest: obligation.coverage_digest})
+            obligations.push(FFIBoundaryObligation{name: obligation.obligation, basis: obligation.basis, checker: obligation.checker, assumptions: obligation.assumptions, coverage_digest: obligation.coverage_digest})
         }
         FFIBoundaryFacts{
             schema: self.schema,
@@ -485,7 +485,7 @@ ForeignBoundaryContract: struct {
     }
 
     // Rust takes `mut self` by value: consume, never copy, the contract.
-    attach_derivation: fn(^self, record: DerivationRecord) -> ForeignBoundaryContract ForeignBridgeError! {
+    attach_derivation: fn(&&self, record: DerivationRecord) -> ForeignBoundaryContract ForeignBridgeError! {
         if !derivation_record_validate(record) -> return Err(pkg_bridge_error("derivation {record.id} has a non-canonical identity"))
         if record.identity != self.identity.derivation_identity() -> return Err(pkg_bridge_error("foreign boundary derivation identity does not match its source/build/run/target inputs"))
         out := self
@@ -493,17 +493,17 @@ ForeignBoundaryContract: struct {
         Ok(out)
     }
 
-    attach_evidence: fn(^self, record: EvidenceRecord) -> ForeignBoundaryContract ForeignBridgeError! {
+    attach_evidence: fn(&&self, record: EvidenceRecord) -> ForeignBoundaryContract ForeignBridgeError! {
         evidence_record_validate(record) ?? return Err(pkg_bridge_error("foreign boundary evidence is invalid: {evidence_expectation_error_text(err)}"))
         derivation: record.derivation ?? return Err(pkg_bridge_error("foreign boundary evidence must reference a checked derivation"))
         if self.derivation != Val(derivation) -> return Err(pkg_bridge_error("foreign boundary evidence and derivation references disagree"))
         out := self
         if !out.evidence.contains(record.identity) {
-            &out.evidence.push(record.identity)
+            out.evidence.push(record.identity)
             // Rust derived EvidenceIdentity Ord: field tuple, not the joined
             // "a/b/c" key (which misorders e.g. `a` vs `a-b` at the `/`).
             out.evidence = loop fresh_item in out.evidence -> fresh_item
-            &out.evidence.sort_by((left: EvidenceIdentity, right: EvidenceIdentity) -> (left.report_id <=> right.report_id).then(left.claim_id <=> right.claim_id).then(left.evidence_id <=> right.evidence_id))
+            out.evidence.sort_by((left: EvidenceIdentity, right: EvidenceIdentity) -> (left.report_id <=> right.report_id).then(left.claim_id <=> right.claim_id).then(left.evidence_id <=> right.evidence_id))
         }
         Ok(out)
     }
@@ -521,10 +521,10 @@ ForeignBoundaryContract: struct {
         comparison_record_assert_equal(comparison) ?? return Err(pkg_bridge_error("foreign replacement comparison was not accepted: {comparison_assertion_error_text(err)}"))
         // Exactly one copy, Rust's `self.clone()`; the attach steps consume it.
         candidate := self.copy()
-        candidate = ^candidate.attach_derivation(derivation)
-        candidate = ^candidate.attach_evidence(evidence)
-        &candidate.record_comparison(comparison, Val(evidence.identity))
-        &candidate.mark_replacement_accepted()
+        candidate = candidate.attach_derivation(derivation)
+        candidate = candidate.attach_evidence(evidence)
+        candidate.record_comparison(comparison, Val(evidence.identity))
+        candidate.mark_replacement_accepted()
         receipt: ForeignSourceReceipt.from_contract(candidate, comparison, replacement_identity)
         candidate.source_receipt = Val(receipt.copy())
         candidate.validate()
@@ -532,9 +532,9 @@ ForeignBoundaryContract: struct {
         Ok(receipt)
     }
 
-    record_observation: fn(&self, observation: ^ForeignBoundaryObservation) ForeignBridgeError! {
+    record_observation: fn(&self, observation: &&ForeignBoundaryObservation) ForeignBridgeError! {
         observation.validate()
-        &self.observations.push(observation)
+        self.observations.push(observation)
     }
 
     // Consume one canonical comparison record. Every sampled case keeps both
@@ -547,23 +547,23 @@ ForeignBoundaryContract: struct {
         if record.samples.len() == 0 {
             reason: record.reason ?? "comparison produced no samples"
             assumptions := self.assumptions
-            &assumptions.push("comparison-terminal:{outcome}:{reason}")
-            &assumptions.push("comparison-relation:{relation}")
+            assumptions.push("comparison-terminal:{outcome}:{reason}")
+            assumptions.push("comparison-relation:{relation}")
             rows := [String]{}
             loop assumption in assumptions {
-                if !rows.contains(assumption) -> &rows.push(assumption)
+                if !rows.contains(assumption) -> rows.push(assumption)
             }
-            &rows.sort()
+            rows.sort()
             self.assumptions = rows
             return
         }
         loop sample in record.samples {
             assumptions := [String]{"relation={relation}", "source={sample.identity.source}", "tool={sample.identity.tool}", "target={sample.identity.target}"}
-            if sample.reference_replay == .Val(replay) -> &assumptions.push("reference-replay={replay.raw}")
-            if sample.candidate_replay == .Val(replay) -> &assumptions.push("replacement-replay={replay.raw}")
+            if sample.reference_replay == .Val(replay) -> assumptions.push("reference-replay={replay.raw}")
+            if sample.candidate_replay == .Val(replay) -> assumptions.push("replacement-replay={replay.raw}")
             observation := ForeignBoundaryObservation.new(sample.identity.case_id, sample.identity.input_id, sample.reference.raw, sample.candidate.raw, outcome).with_assumptions(assumptions)
-            if evidence == .Val(identity) -> observation = ^observation.with_evidence(identity)
-            &self.record_observation(^observation)
+            if evidence == .Val(identity) -> observation = observation.with_evidence(identity)
+            self.record_observation(observation)
         }
     }
 
@@ -571,7 +571,7 @@ ForeignBoundaryContract: struct {
     // explicit source receipt.
     accept_replacement: fn(&self) ForeignBridgeError! {
         if self.source_receipt == None -> return Err(pkg_bridge_error("use accept_reasoned_replacement to attach the checked source receipt"))
-        &self.mark_replacement_accepted()
+        self.mark_replacement_accepted()
     }
 
     mark_replacement_accepted: fn(&self) ForeignBridgeError! {
@@ -591,7 +591,7 @@ ForeignBoundaryContract: struct {
     // Stable digest for a complete boundary row; it only keys the row.
     digest: fn(self) -> String Never! {
         identity := ForeignIdentityBuilder.new(FOREIGN_BOUNDARY_SCHEMA)
-        loop field in self.stable_fields() -> &identity.field(field.name, field.value.bytes())
+        loop field in self.stable_fields() -> identity.field(field.name, field.value.bytes())
         identity.finish()
     }
 
@@ -611,7 +611,7 @@ ForeignBoundaryContract: struct {
 
     sorted_width_names: fn(self) -> [String] Never! {
         names := self.scalar_widths.keys().to_list()
-        &names.sort()
+        names.sort()
         names
     }
 
@@ -653,18 +653,18 @@ ForeignBoundaryContract: struct {
             (name: "boundary-toolchain-identity", value: self.identity.toolchain),
             (name: "boundary-target-identity", value: self.identity.target)
         }
-        loop name in self.sorted_width_names() -> &fields.push((name: "boundary-width-{name}", value: self.scalar_widths[name]))
-        if self.derivation == .Val(derivation) -> &fields.push((name: "boundary-derivation", value: derivation.id))
-        loop evidence in self.evidence -> &fields.push((name: "boundary-evidence", value: pkg_bridge_evidence_key(evidence)))
-        loop assumption in self.assumptions -> &fields.push((name: "boundary-assumption", value: assumption))
+        loop name in self.sorted_width_names() -> fields.push((name: "boundary-width-{name}", value: self.scalar_widths[name]))
+        if self.derivation == .Val(derivation) -> fields.push((name: "boundary-derivation", value: derivation.id))
+        loop evidence in self.evidence -> fields.push((name: "boundary-evidence", value: pkg_bridge_evidence_key(evidence)))
+        loop assumption in self.assumptions -> fields.push((name: "boundary-assumption", value: assumption))
         loop obligation in self.obligations {
-            &fields.push((name: "boundary-obligation", value: "{obligation.obligation}\t{obligation.basis.as_str()}\t{obligation.checker}\t{obligation.coverage_digest}\t{obligation.assumptions.join("|")}"))
+            fields.push((name: "boundary-obligation", value: "{obligation.obligation}\t{obligation.basis.as_str()}\t{obligation.checker}\t{obligation.coverage_digest}\t{obligation.assumptions.join("|")}"))
         }
         loop observation in self.observations {
-            &fields.push((name: "boundary-comparison", value: "{observation.case_id}\t{observation.input}\t{observation.outcome}\t{observation.foreign}\t{observation.replacement}"))
+            fields.push((name: "boundary-comparison", value: "{observation.case_id}\t{observation.input}\t{observation.outcome}\t{observation.foreign}\t{observation.replacement}"))
         }
         if self.source_receipt == .Val(receipt) {
-            loop field in receipt.provenance_fields() -> &fields.push(field)
+            loop field in receipt.provenance_fields() -> fields.push(field)
         }
         fields
     }
@@ -673,7 +673,7 @@ ForeignBoundaryContract: struct {
         coverage: self.artifact_coverage
         obligation_rows := [String]{}
         loop obligation in self.obligations {
-            &obligation_rows.push("{obligation.obligation}:{obligation.basis.as_str()}:{obligation.checker}:{obligation.coverage_digest}:{obligation.assumptions.join("|")}")
+            obligation_rows.push("{obligation.obligation}:{obligation.basis.as_str()}:{obligation.checker}:{obligation.coverage_digest}:{obligation.assumptions.join("|")}")
         }
         fields := [(name: String, value: String)]{
             (name: "schema", value: self.schema),
@@ -711,7 +711,7 @@ ForeignBoundaryContract: struct {
             (name: "toolchain_identity", value: self.identity.toolchain),
             (name: "target_identity", value: self.identity.target)
         }
-        loop name in self.sorted_width_names() -> &fields.push((name: name, value: self.scalar_widths[name]))
+        loop name in self.sorted_width_names() -> fields.push((name: name, value: self.scalar_widths[name]))
         fields
     }
 }

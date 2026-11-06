@@ -54,8 +54,8 @@ CBindResult: struct {
 // space-joined flag list, `""` when there are none.
 pkg_cbind_compute_bind_hash: fn(header_src: String, cflags: String) -> String Never! {
     input := header_src.bytes()
-    &input.push(U8{0})
-    loop byte in cflags.bytes() -> &input.push(byte)
+    input.push(U8{0})
+    loop byte in cflags.bytes() -> input.push(byte)
     pkg_sha256_hex(input)
 }
 
@@ -111,11 +111,11 @@ C_BINDING_METADATA_SCHEMA: "jet-c-binding-metadata-v1"
 // Facts sorted by their stable key, exact duplicates removed.
 pkg_cffi_sorted_facts: fn(facts: [FFIHandleFact]) -> [FFIHandleFact] Never! {
     sorted := facts
-    &sorted.sort_by(fact -> fact.stable_key())
+    sorted.sort_by(fact -> fact.stable_key())
     unique := [FFIHandleFact]{}
     loop fact in sorted {
         if unique.len() > 0 && unique[unique.len() - 1] == fact -> next
-        &unique.push(fact)
+        unique.push(fact)
     }
     unique
 }
@@ -137,12 +137,12 @@ pkg_cffi_metadata_escape: fn(value: String) -> String Never! {
         code: Int.from_u8(byte)
         plain: (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 46 || code == 95 || code == 45 || code == 47
         if plain {
-            &out.push(byte)
+            out.push(byte)
             next
         }
-        &out.push(U8{37})
-        &out.push(digits[code >> 4])
-        &out.push(digits[(code).bit_and(15)])
+        out.push(U8{37})
+        out.push(digits[code >> 4])
+        out.push(digits[(code).bit_and(15)])
     }
     String.from_bytes(out) ?? ""
 }
@@ -181,7 +181,7 @@ pkg_cbind_generate_with_options: fn(header_src: String, lib: String, overlay: Ha
 // header/overlay generation.
 pkg_cbind_generate_with_overlay_and_plans: fn(header_src: String, lib: String, overlay: HandleOverlay, plans: [String: BindingPlan]) -> CBindResult CBindError! {
     result := pkg_cbind_generate_with_overlay(header_src, lib, overlay)
-    pkg_cbind_attach_plans(&result, plans, "generated")
+    pkg_cbind_attach_plans(result, plans, "generated")
     Ok(result)
 }
 
@@ -196,7 +196,7 @@ pkg_cbind_generate_with_contract_and_plans: fn(header_src: String, lib: String, 
     previous_stamp: result.boundary.stamp()
     result.source = result.source.replace(previous_stamp, contract.stamp())
     result.boundary = contract.copy()
-    pkg_cbind_attach_plans(&result, plans, "canonical")
+    pkg_cbind_attach_plans(result, plans, "canonical")
     Ok(result)
 }
 
@@ -218,35 +218,35 @@ pkg_cbind_generate_with_descriptor_and_overlay: fn(header_src: String, lib: Stri
     lines := [String]{}
     used_names := [String]{}
     loop handle in discovery.handles {
-        if !used_names.contains(handle.jet_name) -> &used_names.push(handle.jet_name)
+        if !used_names.contains(handle.jet_name) -> used_names.push(handle.jet_name)
     }
 
     loop raw_decl in pkg_opaque_split_declarations(cleaned) {
         decl: raw_decl.trim()
         if decl == "" -> next
         proto: pkg_cbind_parse_prototype(decl) ?? next
-        if pkg_cbind_render_binding(proto, &used_names, contract, discovery, catalog) == {
+        if pkg_cbind_render_binding(proto, used_names, contract, discovery, catalog) == {
             .Ok(line) -> {
-                &bound.push(proto.name)
+                bound.push(proto.name)
                 // A `#Close(...)` marker line comes first; each line is indented.
-                loop part in line.split("\n") -> &lines.push("    {part}\n")
+                loop part in line.split("\n") -> lines.push("    {part}\n")
                 if pkg_cbind_managed_callback_param_index(proto, catalog) != None {
-                    &lines.push("    {proto.name}: fn(callback: fn(FfiCallbackEvent<I64>)) -> FfiCallbackRegistration = {pkg_cbind_quote(proto.name)}\n")
+                    lines.push("    {proto.name}: fn(callback: fn(FfiCallbackEvent<I64>)) -> FfiCallbackRegistration = {pkg_cbind_quote(proto.name)}\n")
                 }
                 if proto.name == "unsubscribe" && pkg_cbind_native_void_pointer_proto(proto) {
-                    &lines.push("    unsubscribe: fn(subscription: &&FfiCallbackRegistration) -> Task<!String> = \"__jet_ffi_callback_unsubscribe\"\n")
+                    lines.push("    unsubscribe: fn(subscription: &&FfiCallbackRegistration) -> Task<!String> = \"__jet_ffi_callback_unsubscribe\"\n")
                 }
                 if proto.name == "emit_async" {
-                    &lines.push("    emit_async: fn(value: I64) -> Task<I64 ! String> = \"__jet_ffi_emit_async\"\n")
+                    lines.push("    emit_async: fn(value: I64) -> Task<I64 ! String> = \"__jet_ffi_emit_async\"\n")
                 }
             }
-            .Err(skip) -> &skipped.push((name: proto.name, reason: skip.reason))
+            .Err(skip) -> skipped.push((name: proto.name, reason: skip.reason))
         }
     }
 
     if bound.len() == 0 {
         unresolved := [String]{}
-        loop entry in discovery.unresolved -> &unresolved.push("`{entry.typedef_name}`: {entry.reason}")
+        loop entry in discovery.unresolved -> unresolved.push("`{entry.typedef_name}`: {entry.reason}")
         suffix: if unresolved.len() == 0 -> "" else -> "; opaque handle bindings were unresolved: {unresolved.join("; ")}"
         return Err(CBindError{message: "no bindable C function prototypes found for `{lib}`{suffix}"})
     }
@@ -267,13 +267,13 @@ pkg_cbind_generate_with_descriptor_and_overlay: fn(header_src: String, lib: Stri
         boundary.cleanup = "no generated close contract"
     } else {
         handle_names := [String]{}
-        loop handle in discovery.handles -> &handle_names.push(handle.jet_name)
+        loop handle in discovery.handles -> handle_names.push(handle.jet_name)
         boundary.ownership = "owned opaque handles: {handle_names.join(",")}"
         boundary.cleanup = "overlay/conventional close symbol consumes each handle"
     }
     boundary.copy_cost = "scalar values copy by value; records retain declared C layout; handles never copy native state"
     assumptions := [String]{}
-    loop entry in discovery.unresolved -> &assumptions.push("{entry.typedef_name}: {entry.reason}")
+    loop entry in discovery.unresolved -> assumptions.push("{entry.typedef_name}: {entry.reason}")
     boundary.assumptions = assumptions
     boundary_stamp: boundary.stamp()
     type_declarations: catalog.render_type_declarations()
@@ -301,7 +301,7 @@ pkg_cbind_c_descriptor: fn() -> BinderDescriptor CBindError! {
 pkg_cbind_attach_plans: fn(result: &CBindResult, plans: [String: BindingPlan], against: String) CBindError! {
     boundary_digest: result.boundary.digest()
     names := plans.keys().to_list()
-    &names.sort()
+    names.sort()
     loop name in names {
         plan: plans[name]
         if name != plan.operation.name -> return Err(CBindError{message: "adaptation plan key `{name}` names `{plan.operation.name}`"})
@@ -311,7 +311,7 @@ pkg_cbind_attach_plans: fn(result: &CBindResult, plans: [String: BindingPlan], a
     loop name in names {
         plan: plans[name]
         result.source = "{result.source}{plan.render_facade()}\n"
-        &selected.push(plan)
+        selected.push(plan)
     }
     result.plans = selected
 }
@@ -321,11 +321,11 @@ pkg_cbind_attach_plans: fn(result: &CBindResult, plans: [String: BindingPlan], a
 // (`close={"k": "v"};thread-safety={"k": Safe};links=["a"]`).
 pkg_cbind_boundary_overlay_identity: fn(overlay: HandleOverlay) -> String Never! {
     close_keys := overlay.close_functions.keys().to_list()
-    &close_keys.sort()
+    close_keys.sort()
     close := [String]{}
-    loop key in close_keys -> &close.push("{pkg_cbind_debug_quote(key)}: {pkg_cbind_debug_quote(overlay.close_functions[key])}")
+    loop key in close_keys -> close.push("{pkg_cbind_debug_quote(key)}: {pkg_cbind_debug_quote(overlay.close_functions[key])}")
     safety_keys := overlay.thread_safety.keys().to_list()
-    &safety_keys.sort()
+    safety_keys.sort()
     safety := [String]{}
     loop key in safety_keys {
         spelled: if overlay.thread_safety[key] == {
@@ -333,12 +333,12 @@ pkg_cbind_boundary_overlay_identity: fn(overlay: HandleOverlay) -> String Never!
             .Safe -> "Safe"
             .Unsafe -> "Unsafe"
         }
-        &safety.push("{pkg_cbind_debug_quote(key)}: {spelled}")
+        safety.push("{pkg_cbind_debug_quote(key)}: {spelled}")
     }
     links := overlay.links
-    &links.sort()
+    links.sort()
     quoted_links := [String]{}
-    loop link in links -> &quoted_links.push(pkg_cbind_debug_quote(link))
+    loop link in links -> quoted_links.push(pkg_cbind_debug_quote(link))
     "close={{{close.join(", ")}}};thread-safety={{{safety.join(", ")}}};links=[{quoted_links.join(", ")}]"
 }
 
@@ -353,7 +353,7 @@ pkg_cbind_debug_quote: fn(value: String) -> String Never! {
         // C1 controls U+0080..U+009F encode as 0xC2 0x80..0x9F.
         second: pkg_bytes_code(raw, index + 1)
         if code == 0xC2 && second >= 0x80 && second <= 0x9F {
-            &out.push("\\u{{{pkg_cbind_lower_hex(second)}}}")
+            out.push("\\u{{{pkg_cbind_lower_hex(second)}}}")
             index += 2
             next
         }
@@ -364,23 +364,23 @@ pkg_cbind_debug_quote: fn(value: String) -> String Never! {
             else -> 1
         }
         if code == {
-            34 -> &out.push("\\\"")
-            92 -> &out.push("\\\\")
-            9 -> &out.push("\\t")
-            10 -> &out.push("\\n")
-            13 -> &out.push("\\r")
-            0 -> &out.push("\\0")
+            34 -> out.push("\\\"")
+            92 -> out.push("\\\\")
+            9 -> out.push("\\t")
+            10 -> out.push("\\n")
+            13 -> out.push("\\r")
+            0 -> out.push("\\0")
             else -> {
                 if code < 32 || code == 127 {
-                    &out.push("\\u{{{pkg_cbind_lower_hex(code)}}}")
+                    out.push("\\u{{{pkg_cbind_lower_hex(code)}}}")
                 } else {
-                    &out.push(pkg_bytes_text(raw, index, index + width))
+                    out.push(pkg_bytes_text(raw, index, index + width))
                 }
             }
         }
         index += width
     }
-    &out.push("\"")
+    out.push("\"")
     out.join("")
 }
 

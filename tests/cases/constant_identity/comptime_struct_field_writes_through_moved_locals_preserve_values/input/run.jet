@@ -15,25 +15,25 @@ Row: struct {
     untouched: Int
 }
 
-write: fn(row: ^Row) -> Row Never! {
+write: fn(row: &&Row) -> Row Never! {
     updated := row
     updated.access = AccessConvention.Write
     updated
 }
 
-write_nested: fn(row: ^Row) -> Row Never! {
+write_nested: fn(row: &&Row) -> Row Never! {
     updated := row
     updated.coverage.bits = (updated.coverage.bits).bit_or(4)
     updated
 }
 
-SIMPLE_ROWS: [write(^Row{
+SIMPLE_ROWS: [write(Row{
     access: AccessConvention.Read,
     coverage: Coverage{bits: 1, reserved: 7},
     untouched: 9,
 })]
 
-ROWS: [write_nested(write(^Row{
+ROWS: [write_nested(write(Row{
     access: AccessConvention.Read,
     coverage: Coverage{bits: 1, reserved: 7},
     untouched: 9,

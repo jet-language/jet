@@ -12,9 +12,9 @@ editor_test_envelope: fn() -> String Never! {
 }
 #Test("one_transport_opens_both_editor_hosts_from_one_envelope") {
     transport := editor_test_transport([String]{})
-    &transport.replace_devtools_json(editor_test_envelope()) ?? panic("envelope")
-    vscode: &transport.open(editor_test_open_request(.VsCode)) ?? panic("vscode")
-    zed: &transport.open(editor_test_open_request(.Zed)) ?? panic("zed")
+    transport.replace_devtools_json(editor_test_envelope()) ?? panic("envelope")
+    vscode: transport.open(editor_test_open_request(.VsCode)) ?? panic("vscode")
+    zed: transport.open(editor_test_open_request(.Zed)) ?? panic("zed")
     assert_eq(vscode.protocol, JET_DEVTOOLS_PROTOCOL)
     assert_eq(vscode.events, zed.events)
     assert_eq(vscode.panels, zed.panels)
@@ -25,7 +25,7 @@ editor_test_envelope: fn() -> String Never! {
 }
 #Test("reconnect_cursor_is_bounded_and_deterministic") {
     transport := editor_test_transport([String]{})
-    &transport.replace_devtools_json(editor_test_envelope()) ?? panic("envelope")
+    transport.replace_devtools_json(editor_test_envelope()) ?? panic("envelope")
     request: EditorReconnectRequest.new(.Zed, "session-1", "src/main.jet", "src/main.jet", "rev-1", Val(U64{1}))
     resumed: transport.reconnect(request) ?? panic("resume")
     assert_eq(resumed.resumed_from, Val(U64{1}))
@@ -37,10 +37,10 @@ editor_test_envelope: fn() -> String Never! {
     transport := editor_test_transport([String]{})
     request := editor_test_open_request(.VsCode)
     request.source_path = "../secret.jet"
-    assert(if &transport.open(request) == .Err(.SourcePathRejected(_)) -> true else -> false)
+    assert(if transport.open(request) == .Err(.SourcePathRejected(_)) -> true else -> false)
     request.source_path = "src/main.jet"
     request.revision = "rev-2"
-    assert(if &transport.open(request) == .Err(.RevisionMismatch{..}) -> true else -> false)
+    assert(if transport.open(request) == .Err(.RevisionMismatch{..}) -> true else -> false)
 }
 #Test("commands_require_the_transport_grant") {
     request: EditorCommandRequest.new(.VsCode, "session-1", "src/main.jet", "src/main.jet", "rev-1", .Build)
@@ -59,7 +59,7 @@ editor_test_envelope: fn() -> String Never! {
 #Test("lsp_json_response_keeps_json_rpc_id_and_typed_result") {
     transport := editor_test_transport([String]{})
     request: `{"jsonrpc":"2.0","id":7,"method":"jet/devtools/open","params":{"editor":"vscode","session_id":"session-1","source_id":"src/main.jet","source_path":"src/main.jet","revision":"rev-1"}}`
-    response: &transport.handle_lsp_json(request) ?? panic("response")
+    response: transport.handle_lsp_json(request) ?? panic("response")
     assert(response.starts_with(`{"jsonrpc":"2.0","id":7,"result":{`))
     assert(response.contains(`"protocol":"jet.devtools.v1"`))
 }
@@ -69,7 +69,7 @@ editor_test_envelope: fn() -> String Never! {
     transport := editor_test_transport([String]{})
     loop sequence in 1..<259 {
         event: EditorStreamEvent.new(U64{sequence}, U64{sequence}, "test", "Build", "main", [String:EditorFactValue]{}, None) ?? panic("event")
-        &transport.append_event(event) ?? panic("append")
+        transport.append_event(event) ?? panic("append")
     }
     assert_eq(transport.event_count(), 256)
     assert_eq(transport.latest_cursor(), Val(U64{258}))
@@ -81,7 +81,7 @@ editor_test_envelope: fn() -> String Never! {
     assert_eq(future.events.len(), 0)
     assert_eq(future.next_cursor, Val(U64{18446744073709551615}))
     duplicate: EditorStreamEvent.new(U64{258}, U64{259}, "test", "Build", "main", [String:EditorFactValue]{}, None) ?? panic("event")
-    assert(if &transport.append_event(duplicate) == .Err(.InvalidEnvelope("event sequence must increase monotonically")) -> true else -> false)
+    assert(if transport.append_event(duplicate) == .Err(.InvalidEnvelope("event sequence must increase monotonically")) -> true else -> false)
     assert_eq(transport.latest_cursor(), Val(U64{258}))
 }
 #Test("editor validation retains Unicode controls port parsing and grant normalization") {
@@ -98,19 +98,19 @@ editor_test_envelope: fn() -> String Never! {
     transport := editor_test_transport([String]{})
     request := editor_test_open_request(.VsCode)
     request.item_key = Val("main")
-    first: &transport.open(request) ?? panic("selection")
+    first: transport.open(request) ?? panic("selection")
     assert_eq(first.selection.item_key, Val("main"))
-    implicit: &transport.open(editor_test_open_request(.Zed)) ?? panic("shared selection")
+    implicit: transport.open(editor_test_open_request(.Zed)) ?? panic("shared selection")
     assert_eq(implicit.selection.item_key, Val("main"))
     explicit := editor_test_open_request(.Zed)
     explicit.panel_id = Val("build")
-    cleared: &transport.open(explicit) ?? panic("explicit panel")
+    cleared: transport.open(explicit) ?? panic("explicit panel")
     assert_eq(cleared.selection.item_key, None)
 }
 #Test("editor JSON dispatch preserves unsupported-method precedence and float cursor domain") {
     transport := editor_test_transport([String]{})
     unknown: `{"jsonrpc":"2.0","id":null,"method":"unknown","params":{}}`
-    assert(if &transport.handle_lsp_json(unknown) == .Err(.UnsupportedMethod("unknown")) -> true else -> false)
+    assert(if transport.handle_lsp_json(unknown) == .Err(.UnsupportedMethod("unknown")) -> true else -> false)
     params: foundation_parse_protocol_json(`{"cursor":18446744073709551616.0}`) ?? panic("float fixture")
     assert_eq(editor_optional_cursor(params) ?? panic("Rust saturating float cast"), Val(U64{18446744073709551615}))
 }

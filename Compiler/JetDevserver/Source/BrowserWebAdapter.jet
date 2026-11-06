@@ -241,31 +241,31 @@ view_json: fn(state: BrowserWebState, placement: BrowserPlacement) -> String { f
 swap_json: fn(state: BrowserWebState) -> String {
     output := String.with_capacity(2048)
     output.push('{')
-    field_string(&output, "protocol", JET_DEVTOOLS_PROTOCOL, true)
-    field_string(&output, "kind", "web.module-swap", false)
+    field_string(output, "protocol", JET_DEVTOOLS_PROTOCOL, true)
+    field_string(output, "kind", "web.module-swap", false)
     output.push_str(",\"active\":")
     if state.swap.as_ref() == {
-        .Val(swap) -> write_swap_snapshot(&output, swap.active())
+        .Val(swap) -> write_swap_snapshot(output, swap.active())
         .None -> output.push_str("null")
     }
     output.push_str(",\"committed\":")
     if state.swap.as_ref() == {
-        .Val(swap) -> write_swap_snapshot(&output, swap.committed())
+        .Val(swap) -> write_swap_snapshot(output, swap.committed())
         .None -> output.push_str("null")
     }
     output.push_str(",\"phase\":")
     if state.swap.as_ref() == {
-        .Val(swap) -> quoted(swap.phase().as_str(), &output)
+        .Val(swap) -> quoted(swap.phase().as_str(), output)
         .None -> output.push_str("null")
     }
     output.push_str(",\"last_receipt\":")
     if state.last_swap.as_ref() == {
-        .Val(receipt) -> write_swap_receipt(&output, receipt)
+        .Val(receipt) -> write_swap_receipt(output, receipt)
         .None -> output.push_str("null")
     }
     output.push_str(",\"error\":")
     if state.swap_error.as_deref() == {
-        .Val(error) -> quoted(error, &output)
+        .Val(error) -> quoted(error, output)
         .None -> output.push_str("null")
     }
     output.push('}'); output
@@ -273,27 +273,27 @@ swap_json: fn(state: BrowserWebState) -> String {
 release_json: fn(projection: DevtoolsProjection, panels: [JetDevtoolsPanelProjection]) -> String {
     output := String.with_capacity(2048)
     output.push('{')
-    field_string(&output, "protocol", projection.protocol, true)
-    field_string(&output, "kind", "devtools.release", false)
-    field_string(&output, "session_id", projection.session_id, false)
-    field_optional_string(&output, "source_id", projection.source_id.as_deref())
-    field_optional_string(&output, "build_id", projection.build_id.as_deref())
-    field_string(&output, "revision", projection.revision, false)
-    field_string(&output, "lifecycle", projection.status.state.as_str(), false)
-    field_bool(&output, "read_only", true, false)
-    field_bool(&output, "payloads_redacted", true, false)
+    field_string(output, "protocol", projection.protocol, true)
+    field_string(output, "kind", "devtools.release", false)
+    field_string(output, "session_id", projection.session_id, false)
+    field_optional_string(output, "source_id", projection.source_id.as_deref())
+    field_optional_string(output, "build_id", projection.build_id.as_deref())
+    field_string(output, "revision", projection.revision, false)
+    field_string(output, "lifecycle", projection.status.state.as_str(), false)
+    field_bool(output, "read_only", true, false)
+    field_bool(output, "payloads_redacted", true, false)
     output.push_str(",\"panels\":[")
     loop (index, panel) in panels.iter().enumerate() {
         if index != 0 -> output.push(',')
         descriptor := panel.availability.descriptor
         output.push('{')
-        field_string(&output, "id", descriptor.id.as_str(), true)
-        field_string(&output, "title", descriptor.title, false)
-        field_bool(&output, "available", panel.availability.is_available(), false)
+        field_string(output, "id", descriptor.id.as_str(), true)
+        field_string(output, "title", descriptor.title, false)
+        field_bool(output, "available", panel.availability.is_available(), false)
         output.push_str(",\"capabilities\":[")
         loop (capability_index, capability) in descriptor.required_capabilities.iter().enumerate() {
             if capability_index != 0 -> output.push(',')
-            quoted(capability.as_str(), &output)
+            quoted(capability.as_str(), output)
         }
         output.push_str("]}}")
     }
@@ -553,9 +553,9 @@ render_page: fn(state: BrowserWebState, placement: BrowserPlacement) -> String {
     html.push_str("</span><span class=\"grow\"></span><span class=\"note\" role=\"status\"></span>")
     if !workbench -> html.push_str("<a class=\"link\" data-route=\"/__jet_devtools/workbench\">Workbench</a>")
     html.push_str("</header>")
-    render_attention(&html, frame); render_source_tool(&html, frame)
+    render_attention(html, frame); render_source_tool(html, frame)
     html.push_str("<div class=\"body\"><section class=\"facts\" data-scroll aria-label=\"Facts\">")
-    if !workbench -> render_selected(&html, frame)
+    if !workbench -> render_selected(html, frame)
     loop (index, group) in INTENT_GROUPS.iter().enumerate() {
         members := frame.panels.iter().filter((panel) -> intent_group(panel.panel_id) == index).collect()
         if members.is_empty() -> next
@@ -575,7 +575,7 @@ render_page: fn(state: BrowserWebState, placement: BrowserPlacement) -> String {
             html.push_str("{open_count} open · {available_count} panel{suffix}")
         } else { html.push_str("{available_count} available") }
         html.push_str("</span></summary><div class=\"group-body\">")
-        loop panel in members.iter().filter((panel) -> panel_available(panel)) -> render_panel(&html, panel, selection)
+        loop panel in members.iter().filter((panel) -> panel_available(panel)) -> render_panel(html, panel, selection)
         unavailable_count := members.len() - available_count
         if unavailable_count > 0 {
             html.push_str("<details class=\"fold\"><summary>{unavailable_count} not available here</summary>")
@@ -590,7 +590,7 @@ render_page: fn(state: BrowserWebState, placement: BrowserPlacement) -> String {
     }
     if frame.panels.is_empty() { html.push_str("<p class=\"empty\">Waiting for the first devtools fact.</p>") } else if frame.panels.iter().all((panel) -> !panel_available(panel)) { html.push_str("<p class=\"empty\">No live panels are available on this host.</p>") }
     html.push_str("</section>")
-    if workbench -> render_inspector(&html, frame)
+    if workbench -> render_inspector(html, frame)
     html.push_str("</div><script>const S=JSON.parse(\"")
     html.push_str(js_string(state_json)); html.push_str("\");"); html.push_str(PAGE_JS)
     html.push_str("</script></main></body></html>")
@@ -660,7 +660,7 @@ render_selected: fn(html: &String, frame: &BrowserDevtoolsFrame) {
     selection := frame.selection.as_ref() ?? return
     panel := frame.panels.iter().find((panel) -> panel.panel_id == selection.panel_id) ?? return
     path := [&BrowserNode]{}
-    node := selection.node_id.as_deref().filter((node_id) -> find_path(panel.nodes, node_id, &path)).and_then((_) -> path.last().copied())
+    node := selection.node_id.as_deref().filter((node_id) -> find_path(panel.nodes, node_id, path)).and_then((_) -> path.last().copied())
     html.push_str("<section class=\"selected\" aria-label=\"Selected\"><div class=\"eyebrow\">Selected fact</div>")
     render_crumbs(html, panel, path)
     if node == { .Val(node) -> render_node_detail(html, panel.panel_id, node)
@@ -704,7 +704,7 @@ render_inspector: fn(html: &String, frame: &BrowserDevtoolsFrame) {
         html.push_str("<p class=\"empty\">Selected panel is not in the current catalog.</p></aside>"); return
     }
     path := [&BrowserNode]{}
-    node := selection.node_id.as_deref().filter((node_id) -> find_path(panel.nodes, node_id, &path)).and_then((_) -> path.last().copied())
+    node := selection.node_id.as_deref().filter((node_id) -> find_path(panel.nodes, node_id, path)).and_then((_) -> path.last().copied())
     render_crumbs(html, panel, path)
     if node == {
         .Val(node) -> render_node_detail(html, panel.panel_id, node)
@@ -768,41 +768,41 @@ bounded_value: fn(value: String) -> String { bounded_text(value, "(none)", MAX_B
 frame_json: fn(frame: BrowserDevtoolsFrame) -> String {
     output := String.with_capacity(4096)
     output.push('{')
-    field_string(&output, "schema", BROWSER_PAGE_SCHEMA, true)
-    field_string(&output, "protocol", frame.protocol, false)
-    field_string(&output, "placement", frame.placement.as_str(), false)
-    field_string(&output, "route", frame.route, false)
-    field_string(&output, "session_id", frame.session_id, false)
-    field_optional_string(&output, "source_id", frame.source_id.as_deref())
-    field_optional_string(&output, "build_id", frame.build_id.as_deref())
-    field_string(&output, "revision", frame.revision, false)
-    field_optional_string(&output, "world_id", frame.world_id.as_deref())
-    field_u64_option(&output, "sequence", frame.sequence)
-    field_u64_option(&output, "cursor", frame.cursor.map((cursor) -> cursor.sequence))
-    field_string(&output, "state", frame.state.as_str(), false)
-    output.push_str(",\"status\":"); status_json(&output, frame.status)
+    field_string(output, "schema", BROWSER_PAGE_SCHEMA, true)
+    field_string(output, "protocol", frame.protocol, false)
+    field_string(output, "placement", frame.placement.as_str(), false)
+    field_string(output, "route", frame.route, false)
+    field_string(output, "session_id", frame.session_id, false)
+    field_optional_string(output, "source_id", frame.source_id.as_deref())
+    field_optional_string(output, "build_id", frame.build_id.as_deref())
+    field_string(output, "revision", frame.revision, false)
+    field_optional_string(output, "world_id", frame.world_id.as_deref())
+    field_u64_option(output, "sequence", frame.sequence)
+    field_u64_option(output, "cursor", frame.cursor.map((cursor) -> cursor.sequence))
+    field_string(output, "state", frame.state.as_str(), false)
+    output.push_str(",\"status\":"); status_json(output, frame.status)
     output.push_str(",\"tools\":{{\"source\":{{")
-    field_bool(&output, "available", frame.tools.source, true)
-    field_optional_string(&output, "reason", frame.tools.source_reason.as_deref())
+    field_bool(output, "available", frame.tools.source, true)
+    field_optional_string(output, "reason", frame.tools.source_reason.as_deref())
     output.push_str("}},\"rebuild\":{{")
-    field_bool(&output, "available", frame.tools.rebuild, true)
-    field_optional_string(&output, "reason", frame.tools.rebuild_reason.as_deref())
+    field_bool(output, "available", frame.tools.rebuild, true)
+    field_optional_string(output, "reason", frame.tools.rebuild_reason.as_deref())
     output.push_str("}},\"receipts\":[")
     loop (index, receipt) in frame.receipts.iter().enumerate() {
         if index != 0 -> output.push(',')
         output.push('{')
-        field_u64(&output, "sequence", receipt.sequence, true)
-        field_string(&output, "request_id", receipt.request_id, false)
-        field_string(&output, "kind", receipt.kind, false)
-        field_string(&output, "status", receipt.status, false)
-        field_optional_string(&output, "error", receipt.error.as_deref())
+        field_u64(output, "sequence", receipt.sequence, true)
+        field_string(output, "request_id", receipt.request_id, false)
+        field_string(output, "kind", receipt.kind, false)
+        field_string(output, "status", receipt.status, false)
+        field_optional_string(output, "error", receipt.error.as_deref())
         output.push('}')
     }
     output.push_str("],\"selection\":")
     if frame.selection.as_ref() == {
         .Val(selection) -> {
-            output.push('{'); field_string(&output, "panel_id", selection.panel_id, true)
-            field_optional_string(&output, "node_id", selection.node_id.as_deref()); output.push('}')
+            output.push('{'); field_string(output, "panel_id", selection.panel_id, true)
+            field_optional_string(output, "node_id", selection.node_id.as_deref()); output.push('}')
         }
         .None -> output.push_str("null")
     }
@@ -810,26 +810,26 @@ frame_json: fn(frame: BrowserDevtoolsFrame) -> String {
     loop (index, panel) in frame.panels.iter().enumerate() {
         if index != 0 -> output.push(',')
         output.push('{')
-        field_string(&output, "panel_id", panel.panel_id, true)
-        field_string(&output, "title", panel.title, false)
-        field_u64(&output, "freshness_ms", panel.freshness_ms, false)
-        field_string(&output, "status", panel.status, false)
-        field_u64_option(&output, "cursor", panel.cursor)
-        field_bool(&output, "open", panel.open, false)
-        field_string(&output, "dock", panel.dock.as_str(), false)
-        output.push_str(",\"nodes\":["); write_nodes_json(&output, panel.nodes); output.push_str("]}}")
+        field_string(output, "panel_id", panel.panel_id, true)
+        field_string(output, "title", panel.title, false)
+        field_u64(output, "freshness_ms", panel.freshness_ms, false)
+        field_string(output, "status", panel.status, false)
+        field_u64_option(output, "cursor", panel.cursor)
+        field_bool(output, "open", panel.open, false)
+        field_string(output, "dock", panel.dock.as_str(), false)
+        output.push_str(",\"nodes\":["); write_nodes_json(output, panel.nodes); output.push_str("]}}")
     }
     output.push_str("],\"elements\":[")
     loop (index, element) in frame.elements.iter().enumerate() {
         if index != 0 -> output.push(',')
         output.push('{')
-        field_string(&output, "id", element.id, true)
-        field_string(&output, "kind", element.kind, false)
-        field_optional_string(&output, "panel_id", element.panel_id.as_deref())
-        field_optional_string(&output, "node_id", element.node_id.as_deref())
-        field_string(&output, "label", element.label, false)
-        field_optional_string(&output, "value", element.value.as_deref())
-        field_optional_string(&output, "status", element.status.as_deref())
+        field_string(output, "id", element.id, true)
+        field_string(output, "kind", element.kind, false)
+        field_optional_string(output, "panel_id", element.panel_id.as_deref())
+        field_optional_string(output, "node_id", element.node_id.as_deref())
+        field_string(output, "label", element.label, false)
+        field_optional_string(output, "value", element.value.as_deref())
+        field_optional_string(output, "status", element.status.as_deref())
         output.push('}')
     }
     output.push_str("]}}"); output
@@ -898,20 +898,20 @@ quoted: fn(value: String, output: &String) { output.push('"'); output.push_str(f
 reconnect_json: fn(state: BrowserWebState, from: U64?, reset: Bool, truncation: Bool) -> String Err! {
     output := String.with_capacity(4096)
     output.push('{')
-    field_string(&output, "schema", BROWSER_PAGE_SCHEMA, true)
-    field_string(&output, "protocol", JET_DEVTOOLS_PROTOCOL, false)
-    field_string(&output, "session_id", state.host().session_id(), false)
-    field_u64_option(&output, "from", from)
-    field_u64_option(&output, "cursor", state.host().sequence())
-    field_bool(&output, "reset", reset, false)
-    field_bool(&output, "truncation", truncation, false)
-    field_bool(&output, "complete", !truncation, false)
+    field_string(output, "schema", BROWSER_PAGE_SCHEMA, true)
+    field_string(output, "protocol", JET_DEVTOOLS_PROTOCOL, false)
+    field_string(output, "session_id", state.host().session_id(), false)
+    field_u64_option(output, "from", from)
+    field_u64_option(output, "cursor", state.host().sequence())
+    field_bool(output, "reset", reset, false)
+    field_bool(output, "truncation", truncation, false)
+    field_bool(output, "complete", !truncation, false)
     output.push_str(",\"events\":[")
     if !truncation {
         replay := state.host().resume_from(from.map(BrowserReconnectCursor.new)) ?? return .Err(err.to_string())
         loop (index, event) in replay.events.iter().enumerate() {
             if index != 0 -> output.push(',')
-            event_json(&output, event)
+            event_json(output, event)
         }
     }
     output.push_str("],\"view\":"); output.push_str(view_json(state, .Workbench)); output.push('}')
@@ -1034,31 +1034,31 @@ effect_json: fn(effect_ref: BrowserHostEffect) -> String {
     output.push_str(BROWSER_PAGE_SCHEMA); output.push_str("\",\"effect\":")
     if effect_ref == {
         .PanelOpened { placement, panel_id } -> {
-            output.push_str("{{\"kind\":\"panel-opened\",\"placement\":"); quoted(placement.as_str(), &output)
-            field_string(&output, "panel_id", panel_id, false)
+            output.push_str("{{\"kind\":\"panel-opened\",\"placement\":"); quoted(placement.as_str(), output)
+            field_string(output, "panel_id", panel_id, false)
         }
         .PanelClosed { placement, panel_id } -> {
-            output.push_str("{{\"kind\":\"panel-closed\",\"placement\":"); quoted(placement.as_str(), &output)
-            field_string(&output, "panel_id", panel_id, false)
+            output.push_str("{{\"kind\":\"panel-closed\",\"placement\":"); quoted(placement.as_str(), output)
+            field_string(output, "panel_id", panel_id, false)
         }
         .PanelDocked { placement, panel_id, dock } -> {
-            output.push_str("{{\"kind\":\"panel-docked\",\"placement\":"); quoted(placement.as_str(), &output)
-            field_string(&output, "panel_id", panel_id, false); field_string(&output, "dock", dock.as_str(), false)
+            output.push_str("{{\"kind\":\"panel-docked\",\"placement\":"); quoted(placement.as_str(), output)
+            field_string(output, "panel_id", panel_id, false); field_string(output, "dock", dock.as_str(), false)
         }
         .SourceNavigated { placement, panel_id, node_id, source } -> {
-            output.push_str("{{\"kind\":\"source-navigated\",\"placement\":"); quoted(placement.as_str(), &output)
-            field_string(&output, "panel_id", panel_id, false); field_string(&output, "node_id", node_id, false)
+            output.push_str("{{\"kind\":\"source-navigated\",\"placement\":"); quoted(placement.as_str(), output)
+            field_string(output, "panel_id", panel_id, false); field_string(output, "node_id", node_id, false)
             output.push_str(",\"source\":{{")
-            field_string(&output, "source_id", source.source_id, true)
-            field_u64(&output, "line", U64{source.line}, false)
-            field_u64(&output, "column", U64{source.column}, false)
-            field_optional_string(&output, "function", source.function.as_deref())
+            field_string(output, "source_id", source.source_id, true)
+            field_u64(output, "line", U64{source.line}, false)
+            field_u64(output, "column", U64{source.column}, false)
+            field_optional_string(output, "function", source.function.as_deref())
             output.push('}')
         }
         .ActionInvoked { placement, panel_id, node_id, action_id } -> {
-            output.push_str("{{\"kind\":\"action-invoked\",\"placement\":"); quoted(placement.as_str(), &output)
-            field_string(&output, "panel_id", panel_id, false); field_string(&output, "node_id", node_id, false)
-            field_string(&output, "action_id", action_id, false)
+            output.push_str("{{\"kind\":\"action-invoked\",\"placement\":"); quoted(placement.as_str(), output)
+            field_string(output, "panel_id", panel_id, false); field_string(output, "node_id", node_id, false)
+            field_string(output, "action_id", action_id, false)
         }
     }
     output.push_str("}}"); output

@@ -70,16 +70,16 @@ build_session_add_action: fn(state: &BuildSessionState, method: String, args: [B
         }
     }
     action: BuildSessionAction{name: name, inputs: inputs, outputs: outputs, argv: argv, caps: caps, toolchain: toolchain, probes: probes, signing: signing, kind: kind, pools: pools, env: env, env_allowlist: allowlist, helpers: helpers, labels: labels, cache: cache, legacy: if legacy -> Val(wrapper) else -> None, plugin: None}
-    build_session_insert_action(&state, action)
+    build_session_insert_action(state, action)
 }
 
 #Test("an allowlisted environment name the action does not declare is UndeclaredEnvName") {
     policy: BuildSessionPolicy{legacy_denied: None, plugins_denied: None, plugin_grants: [String:[String]]{}}
     session := build_session_new(73, "envcheck", "fixture-compiler", policy)
     // Every session already holds the `host` toolchain; the action names its own.
-    toolchain_reply: build_session_call(&session, "toolchain", [BuildSessionValue]{.Text(value: "cross"), .Text(value: "x86_64-unknown-linux-gnu")}, None, false, 1, 2)
+    toolchain_reply: build_session_call(session, "toolchain", [BuildSessionValue]{.Text(value: "cross"), .Text(value: "x86_64-unknown-linux-gnu")}, None, false, 1, 2)
     toolchain: if toolchain_reply == {.Value(value) -> value else -> panic("toolchain declaration failed")}
-    signing_reply: build_session_call(&session, "signing", [BuildSessionValue]{.Text(value: "dev"), .Text(value: "Developer")}, None, false, 3, 4)
+    signing_reply: build_session_call(session, "signing", [BuildSessionValue]{.Text(value: "dev"), .Text(value: "Developer")}, None, false, 3, 4)
     signing: if signing_reply == {.Value(value) -> value else -> panic("signing declaration failed")}
     empty: BuildSessionValue.List{values: [BuildSessionValue]{}}
     outputs: BuildSessionValue.List{values: [BuildSessionValue]{.Text(value: "generated/env.txt")}}
@@ -87,13 +87,13 @@ build_session_add_action: fn(state: &BuildSessionState, method: String, args: [B
     env: BuildSessionValue.List{values: [BuildSessionValue]{.Text(value: "PATH=/bin")}}
     base: [BuildSessionValue]{.Text(value: "env"), empty, outputs, argv, empty, toolchain, empty, signing, .Text(value: "generic"), empty, env}
     undeclared := base.copy()
-    &undeclared.push(.List(values: [BuildSessionValue]{.Text(value: "HOME")}))
-    refused: build_session_call(&session, "action", undeclared, None, false, 5, 6)
+    undeclared.push(.List(values: [BuildSessionValue]{.Text(value: "HOME")}))
+    refused: build_session_call(session, "action", undeclared, None, false, 5, 6)
     error: if refused == {.Failure(diagnostic) -> diagnostic.error else -> None}
     assert_eq(error, Val(BuildSessionError.UndeclaredEnvName{action: "env", key: "HOME"}))
     declared := base.copy()
-    &declared.push(.List(values: [BuildSessionValue]{.Text(value: "PATH")}))
-    accepted: build_session_call(&session, "action", declared, None, false, 7, 8)
+    declared.push(.List(values: [BuildSessionValue]{.Text(value: "PATH")}))
+    accepted: build_session_call(session, "action", declared, None, false, 7, 8)
     accepted_ok: if accepted == {.Value(_) -> true else -> false}
     assert(accepted_ok)
 }
@@ -123,11 +123,11 @@ build_session_insert_action: fn(state: &BuildSessionState, action: BuildSessionA
     seen := [String]{}
     loop output in action.outputs {
         if build_session_contains_string(seen, output) -> return build_session_error_fail(state, BuildSessionError.DuplicateActionOutput{action: action.name, output: output})
-        &seen.push(output)
+        seen.push(output)
         loop generated in state.generated { if generated.path == output -> return build_session_error_fail(state, BuildSessionError.GeneratedModuleCycle{name: generated.name, path: output}) }
     }
     id: state.actions.len()
-    &state.actions.push(action)
+    state.actions.push(action)
     BuildSessionReply.Value{value: BuildSessionValue.Handle{type_name: "BuildAction", session: state.id, id: id}}
 }
 
@@ -154,7 +154,7 @@ build_session_add_target: fn(state: &BuildSessionState, method: String, args: [B
     if args.len() >= 4 -> deps = build_session_handles(state, args, 3, "BuildTarget") ?? return build_session_fail(state, "target dependencies do not belong to this build")
     if args.len() >= 5 -> probes = build_session_handles(state, args, 4, "BuildProbe") ?? return build_session_fail(state, "target probes do not belong to this build")
     if args.len() >= 6 -> toolchain = build_session_handle(state, args[5], "BuildToolchain") ?? return build_session_fail(state, "target toolchain does not belong to this build")
-    build_session_insert_target(&state, BuildSessionTarget{name: name, kind: kind, sources: sources, inputs: [String]{}, outputs: [String]{}, actions: actions, deps: deps, probes: probes, toolchain: toolchain, signing: signing, metadata: [String:String]{}, plugin: None})
+    build_session_insert_target(state, BuildSessionTarget{name: name, kind: kind, sources: sources, inputs: [String]{}, outputs: [String]{}, actions: actions, deps: deps, probes: probes, toolchain: toolchain, signing: signing, metadata: [String:String]{}, plugin: None})
 }
 
 build_session_insert_target: fn(state: &BuildSessionState, target: BuildSessionTarget) -> BuildSessionReply {
@@ -172,7 +172,7 @@ build_session_insert_target: fn(state: &BuildSessionState, target: BuildSessionT
         if id < 0 || id >= state.signing.len() -> return build_session_error_fail(state, BuildSessionError.UnknownSigningIdentity{id: id})
     }
     id: state.targets.len()
-    &state.targets.push(target)
+    state.targets.push(target)
     BuildSessionReply.Value{value: BuildSessionValue.Handle{type_name: "BuildTarget", session: state.id, id: id}}
 }
 
@@ -196,9 +196,9 @@ build_session_legacy_resume: fn(session: &BuildSession, args: [BuildSessionValue
     declared := args
     if declared.len() != 17 -> return build_session_fail(permit.value, "legacy resume requires the canonical project-file argument")
     // Decode the declaration using precisely the ordinary path, transactionally.
-    _ := &declared.pop()
+    _ := declared.pop()
     trial := permit.value.copy()
-    reply: build_session_add_action(&trial, "legacy", declared)
+    reply: build_session_add_action(trial, "legacy", declared)
     if reply == .Failure(_) -> return reply
     state := &permit.value
     action := trial.actions[trial.actions.len() - 1]
@@ -213,5 +213,5 @@ build_session_legacy_resume: fn(session: &BuildSession, args: [BuildSessionValue
     loop key in imported.labels.keys() { if key != "legacy.import" && key != "legacy.project-file" -> action.labels[key] = imported.labels[key] }
     action.labels["legacy.import"] = "project-file"
     action.labels["legacy.project-file"] = build_session_legacy_file(action.legacy ?? "")
-    build_session_insert_action(&state, action)
+    build_session_insert_action(state, action)
 }

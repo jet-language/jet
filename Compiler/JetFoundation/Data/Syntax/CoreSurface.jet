@@ -352,7 +352,7 @@ PARAM_ZONE_LABEL_ONLY: "*"
 /// built-in copy, resolved before ordinary method lookup so no type can
 /// redefine it, and on a type receiver (`Recipe.copy()`) it stays an
 /// associated call. A temporary (no named binding survives to be used-after),
-/// so it never needs `^` and never trips E0209. `.clone()` is not
+/// so it never needs `.move()` and never trips E0209. `.clone()` is not
 /// user-typable Jet syntax (I8).
 METHOD_COPY: "copy"
 
@@ -451,7 +451,7 @@ KW_CONST: "const"
 KW_RETURN: "return"
 
 /// (ratified 2026-07-15, card #647): the only deferred
-/// statement is `defer close(^resource)`. `defer` is contextual so ordinary
+/// statement is `defer close(resource)`. `defer` is contextual so ordinary
 /// identifiers keep their existing meaning outside statement-head position.
 KW_DEFER: "defer"
 
@@ -685,7 +685,7 @@ MEM_VOLATILE_READ: "volatile_read"
 /// volatile/MMIO write.
 MEM_VOLATILE_WRITE: "volatile_write"
 
-/// D-CACHE-CONTROL1=A: `mem.stream_store(&dst, value)` — `dst = value`
+/// D-CACHE-CONTROL1=A: `mem.stream_store(dst, value)` — `dst = value`
 /// written without filling the cache where the target has a non-temporal
 /// store, else an ordinary store. Safe; no `#Unsafe`.
 MEM_STREAM_STORE: "stream_store"
@@ -694,7 +694,7 @@ MEM_STREAM_STORE: "stream_store"
 /// an Int (taking a pointer is inert; using it needs `#Unsafe`).
 MEM_ADDRESS_OF: "address_of"
 
-/// (ratified 2026-07-26): `mem.pin(&place)` — start the address-stable
+/// (ratified 2026-07-26): `mem.pin(place)` — start the address-stable
 /// window on `place`. Safe code may still read and edit through the returned
 /// `Pin<T>`; it may not move, replace, or resize the pinned storage while any
 /// pin is live. Gated by `use core.mem` like the rest of the low-level surface.
@@ -741,7 +741,7 @@ MEM_ALLOC_TRY_ALLOC: "try_alloc"
 MEM_ALLOC_RESET: "reset"
 
 /// Retired allocator-specific terminal verb; the resource protocol is
-/// `close(^allocator)` and no rule accepts `free`.
+/// `close(allocator)` and no rule accepts `free`.
 MEM_ALLOC_FREE: "free"
 
 /// S58: one tier for every current `core.mem` module item. Keep this table
@@ -839,7 +839,7 @@ METHOD_FRESH_NEW_RANDOM: "new_random"
 /// (`rng.int(lo, hi)` / `rng.float()`) — reproducible from the caller's seed
 /// (`random.rng(seed)`) — while the ambient `random.int(…)` stays E3403.
 /// (ratified 2026-06-25) widens `Rng` with `bool()` / `pick(list)`
-/// / `shuffle(&list)`, mirroring the ambient `random.*` set.
+/// / `shuffle(list)`, mirroring the ambient `random.*` set.
 RNG_TYPE: "RNG"
 
 /// (ratified 2026-09-05): scoped deterministic execution

@@ -33,18 +33,18 @@ panel: fn(id: String, freshness: U64) -> NativeOverlayPanelFact {
         NativeOverlayInput.Key { code: "Space", pressed: true },
         NativeOverlayInput.Pointer { x: -100, y: -100, pressed: true },
         NativeOverlayInput.Text("typed"), NativeOverlayInput.Activate { action_id: "inspect" }
-    ] -> assert_eq(host.route_input(^input), NativeOverlayInputRoute.Overlay)
+    ] -> assert_eq(host.route_input(input), NativeOverlayInputRoute.Overlay)
     host.close()
     assert_eq(host.route_input(.Key { code: "Space", pressed: true }), NativeOverlayInputRoute.Game)
 }
 #Test("headless_projection_is_deterministic") {
     event: NativeOverlayEvent.current("session", "revision", 7, 99, [panel("Traces", 3), panel("Build", 3)])
-    assert_eq(NativeOverlayHost.headless_projection(&event).unwrap(), NativeOverlayHost.headless_projection(&event).unwrap())
+    assert_eq(NativeOverlayHost.headless_projection(event).unwrap(), NativeOverlayHost.headless_projection(event).unwrap())
 }
 #Test("merged_projection_stays_bounded") {
     host := NativeOverlayHost.new()
     nodes: (0..MAX_OVERLAY_NODES).map((index) -> NativeOverlayNode.text("node-{index}", "node")).collect()
-    host.ingest(NativeOverlayEvent.current("session", "revision", 1, 1, [NativeOverlayPanelFact.new("first", "first", 1, "ready", ^nodes)])).unwrap()
+    host.ingest(NativeOverlayEvent.current("session", "revision", 1, 1, [NativeOverlayPanelFact.new("first", "first", 1, "ready", nodes)])).unwrap()
     error: host.ingest(NativeOverlayEvent.current("session", "revision", 2, 2, [panel("second", 1)])).unwrap_err()
     assert(error.contains("node budget"))
     assert_eq(host.frame().unwrap().sequence, 1)

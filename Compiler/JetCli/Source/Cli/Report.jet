@@ -57,9 +57,9 @@ jet_cli_report_path: fn(cwd: String?, value: String) -> String Never! {
         if {
             part == "" || part == "." -> {}
             part == ".." -> {
-                if parts.len() > 0 -> _ := &parts.pop()
+                if parts.len() > 0 -> _ := parts.pop()
             }
-            else -> &parts.push(part)
+            else -> parts.push(part)
         }
     }
     "/{parts.join("/")}"
@@ -92,11 +92,11 @@ jet_cli_report_base: fn(file: String) -[FS, Env]> JetCLIReportBase? Never! {
 // order (workspace, repository, package), or None for a standalone source.
 jet_cli_report_root: fn(start: String) -[FS, Env]> String? Never! {
     cache := WorkspaceDeclarationCache.new()
-    if jet_cli_find_workspace_root_checked(&cache, start) == .Ok(found) {
+    if jet_cli_find_workspace_root_checked(cache, start) == .Ok(found) {
         if found != None -> return found
     }
     if jet_cli_find_repository_root(start) == .Val(root) -> return Val(root)
-    if jet_cli_find_package_root_checked(&cache, start) == .Ok(found) -> return found
+    if jet_cli_find_package_root_checked(cache, start) == .Ok(found) -> return found
     None
 }
 
@@ -134,17 +134,17 @@ jet_cli_report_within: fn(root: String, path: String) -> Bool Never! {
 jet_cli_report_relative: fn(from: String, path: String) -> String Never! {
     left := [String]{}
     loop part in from.split("/") {
-        if part != "" -> &left.push(part)
+        if part != "" -> left.push(part)
     }
     right := [String]{}
     loop part in path.split("/") {
-        if part != "" -> &right.push(part)
+        if part != "" -> right.push(part)
     }
     shared := 0
     loop shared < left.len() && shared < right.len() && left[shared] == right[shared] -> shared += 1
     steps := [String]{}
-    loop _ in shared..<left.len() -> &steps.push("..")
-    loop index in shared..<right.len() -> &steps.push(right[index].copy())
+    loop _ in shared..<left.len() -> steps.push("..")
+    loop index in shared..<right.len() -> steps.push(right[index].copy())
     if steps.len() == 0 -> return "."
     steps.join("/")
 }
@@ -228,13 +228,13 @@ jet_cli_json_control_quote: fn(value: String) -> String Never! {
             }
         }
         if escape.len() > 0 {
-            loop escaped in escape.bytes() -> &out.push(escaped)
+            loop escaped in escape.bytes() -> out.push(escaped)
         } else {
-            &out.push(bytes[index])
+            out.push(bytes[index])
         }
         index += width
     }
-    &out.push(U8{34})
+    out.push(U8{34})
     String.from_bytes(out) ?? ""
 }
 
@@ -264,7 +264,7 @@ jet_cli_build_error_json: fn(report: DiagnosticBuildError) -> String Never! {
         .Val(text) -> jet_cli_json_control_quote(text)
         else -> "null"
     }
-    &fields.push("\"code\":{code}")
+    fields.push("\"code\":{code}")
     cause: if report.causes.len() == {
         0 -> "null"
         1 -> jet_cli_build_error_json(report.causes[0])
@@ -273,19 +273,19 @@ jet_cli_build_error_json: fn(report: DiagnosticBuildError) -> String Never! {
             "[{causes.join(",")}]"
         }
     }
-    &fields.push("\"cause\":{cause}")
-    if report.typed_identity == .Val(identity) -> &fields.push("\"typed_identity\":{jet_cli_json_control_quote(identity)}")
+    fields.push("\"cause\":{cause}")
+    if report.typed_identity == .Val(identity) -> fields.push("\"typed_identity\":{jet_cli_json_control_quote(identity)}")
     if report.context_frames.len() > 0 {
         frames: loop frame in report.context_frames -> "{{\"text\":{jet_cli_json_control_quote(frame.text)},\"file\":{jet_cli_json_control_quote(frame.file)},\"line\":{frame.line}}}"
-        &fields.push("\"context_frames\":[{frames.join(",")}]")
+        fields.push("\"context_frames\":[{frames.join(",")}]")
     }
     if report.source_journey.len() > 0 {
         frames: loop frame in report.source_journey -> "{{\"fn_name\":{jet_cli_json_control_quote(frame.fn_name)},\"file\":{jet_cli_json_control_quote(frame.file)},\"line\":{frame.line},\"column\":0,\"note\":{jet_cli_json_control_quote(frame.note)},\"hops\":{frame.hops}}}"
-        &fields.push("\"source_journey\":[{frames.join(",")}]")
+        fields.push("\"source_journey\":[{frames.join(",")}]")
     }
     if report.conversion_history.len() > 0 {
         conversions: loop conversion in report.conversion_history -> "{{\"source\":{jet_cli_json_control_quote(conversion.source)},\"target\":{jet_cli_json_control_quote(conversion.target)}}}"
-        &fields.push("\"conversion_history\":[{conversions.join(",")}]")
+        fields.push("\"conversion_history\":[{conversions.join(",")}]")
     }
     if report.details == .Val(details) {
         // JetErrorDetails::to_json: field values are already JSON text.
@@ -294,7 +294,7 @@ jet_cli_build_error_json: fn(report: DiagnosticBuildError) -> String Never! {
             .Val(span) -> jet_cli_report_span(span.start, span.end)
             else -> "null"
         }
-        &fields.push("\"details\":{{\"variant\":{jet_cli_json_control_quote(details.variant)},\"fields\":{{{members.join(",")}}},\"source_span\":{source_span}}}")
+        fields.push("\"details\":{{\"variant\":{jet_cli_json_control_quote(details.variant)},\"fields\":{{{members.join(",")}}},\"source_span\":{source_span}}}")
     }
     "{{{fields.join(",")}}}"
 }
@@ -303,11 +303,11 @@ jet_cli_build_error_json: fn(report: DiagnosticBuildError) -> String Never! {
 jet_cli_report_edits: fn(diagnostic: Diagnostic) -> [TextEdit] Never! {
     edits := [TextEdit]{}
     // copy: `edit` is a payload of read parameter `diagnostic`, which keeps the original; the returned `edits` list owns this one
-    if diagnostic.edit == .Val(edit) -> &edits.push(edit.copy())
+    if diagnostic.edit == .Val(edit) -> edits.push(edit.copy())
     if diagnostic.structured == .Val(structured) {
         if structured == {
             .SuggestedEdits(alternatives) -> {
-                loop alternative in alternatives -> &edits.push(alternative)
+                loop alternative in alternatives -> edits.push(alternative)
             }
             else -> {}
         }
@@ -345,7 +345,7 @@ jet_cli_report_clear_counts: fn(diagnostics: [Diagnostic]) -> [Int] Never! {
                 if named -> count += 1
             }
         }
-        &counts.push(count)
+        counts.push(count)
     }
     counts
 }
@@ -356,7 +356,7 @@ jet_cli_report_clear_counts: fn(diagnostics: [Diagnostic]) -> [Int] Never! {
 // `base` the same way.
 jet_cli_report_json: fn(diagnostic: Diagnostic, base: JetCLIReportBase?, file: String, source: String, clears: Int) -> String Never! {
     sources := diagnostic_source_texts()
-    jet_cli_report_json_with(diagnostic, base, file, source, clears, &sources)
+    jet_cli_report_json_with(diagnostic, base, file, source, clears, sources)
 }
 
 // jet_cli_report_json over a batch's indexed sources (`sources`, Render.jet):
@@ -379,7 +379,7 @@ jet_cli_report_json_with: fn(diagnostic: Diagnostic, base: JetCLIReportBase?, fi
     file_json: if report_file.len() > 0 -> jet_cli_json_string(report_file) else -> "null"
     out = "{out},\"file\":{file_json}"
     if diagnostic.span == .Val(span) {
-        position: diagnostic_source_position(&sources, diagnostic.origin, source)
+        position: diagnostic_source_position(sources, diagnostic.origin, source)
         out = "{out},\"line\":{diagnostic_source_line(sources.texts[position], span.start)},\"col\":{diagnostic_source_column(sources.texts[position], span.start)},\"span\":{jet_cli_report_span(span.start, span.end)}"
     } else {
         out = "{out},\"line\":null,\"col\":null,\"span\":null"
@@ -404,7 +404,7 @@ jet_cli_report_json_with: fn(diagnostic: Diagnostic, base: JetCLIReportBase?, fi
             path: jet_cli_report_file(base, cause_origin.path)
             if path.len() > 0 -> cause_file = jet_cli_json_string(path)
             if cause.span == .Val(cause_span) {
-                position: diagnostic_source_position(&sources, cause.origin, "")
+                position: diagnostic_source_position(sources, cause.origin, "")
                 cause_line = "{diagnostic_source_line(sources.texts[position], cause_span.start)}"
                 cause_col = "{diagnostic_source_column(sources.texts[position], cause_span.start)}"
             }
@@ -417,7 +417,7 @@ jet_cli_report_json_with: fn(diagnostic: Diagnostic, base: JetCLIReportBase?, fi
     }
     out = "{out},\"cause\":[{causes.join(",")}]"
     if diagnostic.labels.len() > 0 {
-        position: diagnostic_source_position(&sources, diagnostic.origin, source)
+        position: diagnostic_source_position(sources, diagnostic.origin, source)
         labels: loop label in diagnostic.labels -> "{{\"line\":{diagnostic_source_line(sources.texts[position], label.span.start)},\"col\":{diagnostic_source_column(sources.texts[position], label.span.start)},\"span\":{jet_cli_report_span(label.span.start, label.span.end)},\"message\":{jet_cli_json_string(label.message)}}}"
         out = "{out},\"labels\":[{labels.join(",")}]"
     }
@@ -444,7 +444,7 @@ jet_cli_reports_json: fn(base: JetCLIReportBase?, file: String, source: String, 
     clears: jet_cli_report_clear_counts(diagnostics)
     sources := diagnostic_source_texts()
     reports := [String]{}
-    loop (index, diagnostic) in diagnostics -> &reports.push(jet_cli_report_json_with(diagnostic, base, report_file, source, clears[index], &sources))
+    loop (index, diagnostic) in diagnostics -> reports.push(jet_cli_report_json_with(diagnostic, base, report_file, source, clears[index], sources))
     reports
 }
 

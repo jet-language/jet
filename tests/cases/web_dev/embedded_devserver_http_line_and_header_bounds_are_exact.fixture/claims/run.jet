@@ -44,14 +44,14 @@ s5_web_rejected: fn(response: [U8]?) -> Bool {
     exact_headers := [String]{}
     exact_header_bytes := 0
     loop index in 0..<max_header /% max_line {
-        &exact_headers.push(exact_header)
+        exact_headers.push(exact_header)
         exact_header_bytes = exact_header_bytes + exact_header.bytes().len() + 2
     }
     assert_eq(exact_header_bytes, max_header)
     aggregate: s5_web_raw(port, s5_web_raw_get("/__jet_dev_version", exact_headers)) ?? panic("aggregate headers at boundary not served")
     assert(s5_web_is_200(aggregate))
     over_headers := exact_headers
-    &over_headers.push("X: y")
+    over_headers.push("X: y")
     over_header_bytes := 0
     loop header in over_headers {
         assert(header.bytes().len() + 2 <= max_line)
@@ -60,12 +60,12 @@ s5_web_rejected: fn(response: [U8]?) -> Bool {
     assert(over_header_bytes > max_header)
     assert(s5_web_rejected(s5_web_raw(port, s5_web_raw_get("/__jet_dev_version", over_headers))))
     exact_count_headers := [String]{}
-    loop index in 0..<max_count -> &exact_count_headers.push("X-{index}: y")
+    loop index in 0..<max_count -> exact_count_headers.push("X-{index}: y")
     assert_eq(exact_count_headers.len(), max_count)
     count_response: s5_web_raw(port, s5_web_raw_get("/__jet_dev_version", exact_count_headers)) ?? panic("100 headers at boundary not served")
     assert(s5_web_is_200(count_response))
     over_count_headers := exact_count_headers
-    &over_count_headers.push("X-extra: y")
+    over_count_headers.push("X-extra: y")
     assert_eq(over_count_headers.len(), max_count + 1)
     assert(s5_web_rejected(s5_web_raw(port, s5_web_raw_get("/__jet_dev_version", over_count_headers))))
 }

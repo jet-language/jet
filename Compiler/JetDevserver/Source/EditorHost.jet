@@ -32,7 +32,7 @@ EditorHost: enum {
         }
     }
 }
-impl EditorHost.Display { display: fn(^self) -> String { self.wire_name() } }
+impl EditorHost.Display { display: fn(&&self) -> String { self.wire_name() } }
 EditorCommand: enum {
     Check, Build, Test, Run, Debug
     wire_name: fn(self) -> String Never! { if self == {
@@ -60,7 +60,7 @@ EditorCommand: enum {
         }
     }
 }
-impl EditorCommand.Display { display: fn(^self) -> String { self.wire_name() } }
+impl EditorCommand.Display { display: fn(&&self) -> String { self.wire_name() } }
 #Error
 EditorHostError: enum {
     InvalidRequest(String), InvalidEnvelope(String), UnsupportedEditor(String), UnsupportedCommand(String), UnsupportedMethod(String), LoopbackViolation(String), SourcePathRejected(String)
@@ -91,41 +91,41 @@ EditorHostError: enum {
 
 EditorSessionIdentity: struct {
     session_id: String, source_id: String, source_path: String, revision: String
-    new: fn(^session_id: String, ^source_id: String, ^source_path: String, ^revision: String) -> EditorSessionIdentity EditorHostError! {
+    new: fn(&&session_id: String, &&source_id: String, &&source_path: String, &&revision: String) -> EditorSessionIdentity EditorHostError! {
         editor_validate_stable_text(session_id, "session_id")
         editor_validate_source_identity(source_id)
         path: editor_clean_source_path(source_path)
         editor_validate_stable_text(revision, "revision")
-        Ok(EditorSessionIdentity{session_id: ^session_id, source_id: ^source_id, source_path: path, revision: ^revision})
+        Ok(EditorSessionIdentity{session_id: session_id.move(), source_id: source_id, source_path: path, revision: revision.move()})
     }
 }
 EditorFactValue: enum {
     Null, Bool(Bool), Integer(I64), Float(F64), Text(String), Array([EditorFactValue]), Object([String:EditorFactValue])
-    text: fn(^value: String) -> EditorFactValue EditorHostError! {
+    text: fn(&&value: String) -> EditorFactValue EditorHostError! {
         editor_validate_stable_text(value, "fact text")
-        Ok(.Text(^value))
+        Ok(.Text(value))
     }
     render: fn(self, out: &[U8]) Never! {
         if self == {
-            .Null -> editor_append(&out, "null")
-            .Bool(value) -> editor_append(&out, if value -> "true" else -> "false")
-            .Integer(value) -> editor_append(&out, "{value}")
-            .Float(value) -> editor_append(&out, "{value}")
-            .Text(value) -> editor_render_string(value, &out)
+            .Null -> editor_append(out, "null")
+            .Bool(value) -> editor_append(out, if value -> "true" else -> "false")
+            .Integer(value) -> editor_append(out, "{value}")
+            .Float(value) -> editor_append(out, "{value}")
+            .Text(value) -> editor_render_string(value, out)
             .Array(values) -> {
-                &out.push(U8{91})
-                loop (index, value) in values { if index != 0 -> &out.push(U8{44}); value.render(&out) }
-                &out.push(U8{93})
+                out.push(U8{91})
+                loop (index, value) in values { if index != 0 -> out.push(U8{44}); value.render(out) }
+                out.push(U8{93})
             }
-            .Object(values) -> editor_render_fact_object(values, &out)
+            .Object(values) -> editor_render_fact_object(values, out)
         }
     }
 }
 EditorStreamEvent: struct {
     sequence: U64, timestamp_ms: U64, source: String, kind: String, entity: String
     fields: [String:EditorFactValue], payload: [String:EditorFactValue]?
-    new: fn(sequence: U64, timestamp_ms: U64, ^source: String, ^kind: String, ^entity: String, ^fields: [String:EditorFactValue], ^payload: [String:EditorFactValue]?) -> EditorStreamEvent EditorHostError! {
-        event: EditorStreamEvent{sequence, timestamp_ms, source: ^source, kind: ^kind, entity: ^entity, fields: ^fields, payload: ^payload}
+    new: fn(sequence: U64, timestamp_ms: U64, &&source: String, &&kind: String, &&entity: String, &&fields: [String:EditorFactValue], &&payload: [String:EditorFactValue]?) -> EditorStreamEvent EditorHostError! {
+        event: EditorStreamEvent{sequence, timestamp_ms, source: source, kind: kind, entity: entity, fields: fields, payload: payload.move()}
         event.validate()
         Ok(event)
     }
@@ -138,25 +138,25 @@ EditorStreamEvent: struct {
         if self.payload == .Val(payload) -> editor_validate_fact_object(payload, "event payload")
     }
     render: fn(self, out: &[U8]) Never! {
-        editor_append(&out, "{{\"sequence\":{self.sequence},\"timestamp_ms\":{self.timestamp_ms},\"source\":")
-        editor_render_string(self.source, &out)
-        editor_append(&out, ",\"kind\":"); editor_render_string(self.kind, &out)
-        editor_append(&out, ",\"entity\":"); editor_render_string(self.entity, &out)
-        editor_append(&out, ",\"fields\":"); editor_render_fact_object(self.fields, &out)
-        editor_append(&out, ",\"payload\":")
-        if self.payload == .Val(payload) -> editor_render_fact_object(payload, &out) else -> editor_append(&out, "null")
-        &out.push(U8{125})
+        editor_append(out, "{{\"sequence\":{self.sequence},\"timestamp_ms\":{self.timestamp_ms},\"source\":")
+        editor_render_string(self.source, out)
+        editor_append(out, ",\"kind\":"); editor_render_string(self.kind, out)
+        editor_append(out, ",\"entity\":"); editor_render_string(self.entity, out)
+        editor_append(out, ",\"fields\":"); editor_render_fact_object(self.fields, out)
+        editor_append(out, ",\"payload\":")
+        if self.payload == .Val(payload) -> editor_render_fact_object(payload, out) else -> editor_append(out, "null")
+        out.push(U8{125})
     }
-    serialize: fn(self) -> String Never! { out := [U8]{}; self.render(&out); editor_finish(^out) }
+    serialize: fn(self) -> String Never! { out := [U8]{}; self.render(out); editor_finish(out) }
 }
 EditorStreamSnapshot: struct {
     events: [EditorStreamEvent], resumed_from: U64?, next_cursor: U64?
     serialize: fn(self) -> String Never! {
         out := [U8]{}
-        editor_append(&out, `{"events":`); editor_render_events(self.events, &out)
-        editor_append(&out, ",\"resumed_from\":"); editor_render_optional_u64(self.resumed_from, &out)
-        editor_append(&out, ",\"next_cursor\":"); editor_render_optional_u64(self.next_cursor, &out)
-        &out.push(U8{125}); editor_finish(^out)
+        editor_append(out, `{"events":`); editor_render_events(self.events, out)
+        editor_append(out, ",\"resumed_from\":"); editor_render_optional_u64(self.resumed_from, out)
+        editor_append(out, ",\"next_cursor\":"); editor_render_optional_u64(self.next_cursor, out)
+        out.push(U8{125}); editor_finish(out)
     }
 }
 EditorWorkbenchSnapshot: struct {
@@ -167,51 +167,51 @@ EditorWorkbenchSnapshot: struct {
     resumed_from: U64?, cursor: U64?, time_cursor: U64?
     serialize: fn(self) -> String Never! {
         out := [U8]{}
-        editor_append(&out, `{"protocol":`); editor_render_string(self.protocol, &out)
-        editor_append(&out, ",\"protocol_version\":{self.protocol_version},\"editor\":"); editor_render_string(self.host.wire_name(), &out)
-        editor_append(&out, ",\"workbench_url\":"); editor_render_string(self.workbench_url, &out)
-        editor_render_identity(self.identity, true, &out)
-        editor_append(&out, ",\"started_at_ms\":{self.started_at_ms},\"panels\":[")
+        editor_append(out, `{"protocol":`); editor_render_string(self.protocol, out)
+        editor_append(out, ",\"protocol_version\":{self.protocol_version},\"editor\":"); editor_render_string(self.host.wire_name(), out)
+        editor_append(out, ",\"workbench_url\":"); editor_render_string(self.workbench_url, out)
+        editor_render_identity(self.identity, true, out)
+        editor_append(out, ",\"started_at_ms\":{self.started_at_ms},\"panels\":[")
         loop (index, panel) in self.panels {
-            if index != 0 -> &out.push(U8{44})
-            editor_append(&out, `{"id":`); editor_render_string("{panel.id.as_str()}", &out)
-            editor_append(&out, ",\"title\":"); editor_render_string("{panel.title}", &out)
-            editor_append(&out, ",\"ordinal\":{panel.order}}}")
+            if index != 0 -> out.push(U8{44})
+            editor_append(out, `{"id":`); editor_render_string("{panel.id.as_str()}", out)
+            editor_append(out, ",\"title\":"); editor_render_string("{panel.title}", out)
+            editor_append(out, ",\"ordinal\":{panel.order}}}")
         }
-        editor_append(&out, "],\"panel_availability\":[")
+        editor_append(out, "],\"panel_availability\":[")
         loop (index, row) in self.panel_availability {
-            if index != 0 -> &out.push(U8{44})
-            editor_append(&out, `{"id":`); editor_render_string("{row.descriptor.id.as_str()}", &out)
-            editor_append(&out, ",\"available\":{row.is_available()},\"reasons\":[")
+            if index != 0 -> out.push(U8{44})
+            editor_append(out, `{"id":`); editor_render_string("{row.descriptor.id.as_str()}", out)
+            editor_append(out, ",\"available\":{row.is_available()},\"reasons\":[")
             loop (reason_index, reason) in row.unavailable_reasons() {
-                if reason_index != 0 -> &out.push(U8{44})
-                editor_render_string("{reason.as_str()}", &out)
+                if reason_index != 0 -> out.push(U8{44})
+                editor_render_string("{reason.as_str()}", out)
             }
-            editor_append(&out, "]}}")
+            editor_append(out, "]}}")
         }
-        editor_append(&out, "],\"selection\":"); editor_render_selection(self.selection, &out)
-        editor_append(&out, ",\"events\":"); editor_render_events(self.events, &out)
-        editor_append(&out, ",\"resumed_from\":"); editor_render_optional_u64(self.resumed_from, &out)
-        editor_append(&out, ",\"cursor\":"); editor_render_optional_u64(self.cursor, &out)
-        editor_append(&out, ",\"time_cursor\":"); editor_render_optional_u64(self.time_cursor, &out)
-        &out.push(U8{125}); editor_finish(^out)
+        editor_append(out, "],\"selection\":"); editor_render_selection(self.selection, out)
+        editor_append(out, ",\"events\":"); editor_render_events(self.events, out)
+        editor_append(out, ",\"resumed_from\":"); editor_render_optional_u64(self.resumed_from, out)
+        editor_append(out, ",\"cursor\":"); editor_render_optional_u64(self.cursor, out)
+        editor_append(out, ",\"time_cursor\":"); editor_render_optional_u64(self.time_cursor, out)
+        out.push(U8{125}); editor_finish(out)
     }
 }
 EditorSourceNavigation: struct {
     host: EditorHost, identity: EditorSessionIdentity, line: U32, column: U32, source_url: String
     serialize: fn(self) -> String Never! {
-        out := [U8]{}; editor_render_response_context(self.host, self.identity, true, &out)
-        editor_append(&out, ",\"line\":{self.line},\"column\":{self.column},\"source_url\":")
-        editor_render_string(self.source_url, &out); &out.push(U8{125}); editor_finish(^out)
+        out := [U8]{}; editor_render_response_context(self.host, self.identity, true, out)
+        editor_append(out, ",\"line\":{self.line},\"column\":{self.column},\"source_url\":")
+        editor_render_string(self.source_url, out); out.push(U8{125}); editor_finish(out)
     }
 }
 EditorCommandReceipt: struct {
     host: EditorHost, identity: EditorSessionIdentity, command: EditorCommand, required_grant: String
     serialize: fn(self) -> String Never! {
-        out := [U8]{}; editor_render_response_context(self.host, self.identity, false, &out)
-        editor_append(&out, ",\"command\":"); editor_render_string(self.command.wire_name(), &out)
-        editor_append(&out, ",\"required_grant\":"); editor_render_string(self.required_grant, &out)
-        editor_append(&out, ",\"status\":\"accepted\"}}"); editor_finish(^out)
+        out := [U8]{}; editor_render_response_context(self.host, self.identity, false, out)
+        editor_append(out, ",\"command\":"); editor_render_string(self.command.wire_name(), out)
+        editor_append(out, ",\"required_grant\":"); editor_render_string(self.required_grant, out)
+        editor_append(out, ",\"status\":\"accepted\"}}"); editor_finish(out)
     }
 }
 EditorHostResponse: enum {
@@ -221,7 +221,7 @@ EditorHostResponse: enum {
             .Workbench(value) -> value.serialize()
             .Stream(value) -> value.serialize()
             .Navigation(value) -> value.serialize()
-            .Selection(value) -> { out := [U8]{}; editor_render_selection(value, &out); editor_finish(^out) }
+            .Selection(value) -> { out := [U8]{}; editor_render_selection(value, out); editor_finish(out) }
             .Command(value) -> value.serialize()
         }
     }
@@ -230,27 +230,27 @@ EditorHostResponse: enum {
 EditorWorkbenchOpenRequest: struct {
     host: EditorHost, session_id: String, source_id: String, source_path: String, revision: String
     panel_id: String?, item_key: String?, cursor: U64?
-    new: fn(host: EditorHost, ^session_id: String, ^source_id: String, ^source_path: String, ^revision: String) -> EditorWorkbenchOpenRequest Never! {
-        EditorWorkbenchOpenRequest{host, session_id: ^session_id, source_id: ^source_id, source_path: ^source_path, revision: ^revision, panel_id: None, item_key: None, cursor: None}
+    new: fn(host: EditorHost, &&session_id: String, &&source_id: String, &&source_path: String, &&revision: String) -> EditorWorkbenchOpenRequest Never! {
+        EditorWorkbenchOpenRequest{host, session_id: session_id, source_id: source_id, source_path: source_path, revision: revision, panel_id: None, item_key: None, cursor: None}
     }
     serialize: fn(self) -> String Never! {
-        out := [U8]{}; editor_render_request_context(self.host, self.session_id, self.source_id, self.source_path, self.revision, &out)
-        editor_append(&out, ",\"panel_id\":"); editor_render_optional_string(self.panel_id, &out)
-        editor_append(&out, ",\"item_key\":"); editor_render_optional_string(self.item_key, &out)
-        editor_append(&out, ",\"cursor\":"); editor_render_optional_u64(self.cursor, &out)
-        &out.push(U8{125}); editor_finish(^out)
+        out := [U8]{}; editor_render_request_context(self.host, self.session_id, self.source_id, self.source_path, self.revision, out)
+        editor_append(out, ",\"panel_id\":"); editor_render_optional_string(self.panel_id, out)
+        editor_append(out, ",\"item_key\":"); editor_render_optional_string(self.item_key, out)
+        editor_append(out, ",\"cursor\":"); editor_render_optional_u64(self.cursor, out)
+        out.push(U8{125}); editor_finish(out)
     }
 }
 EditorReconnectRequest: struct {
     host: EditorHost, session_id: String, source_id: String, source_path: String, revision: String, cursor: U64?
-    new: fn(host: EditorHost, ^session_id: String, ^source_id: String, ^source_path: String, ^revision: String, cursor: U64?) -> EditorReconnectRequest Never! {
-        EditorReconnectRequest{host, session_id: ^session_id, source_id: ^source_id, source_path: ^source_path, revision: ^revision, cursor}
+    new: fn(host: EditorHost, &&session_id: String, &&source_id: String, &&source_path: String, &&revision: String, cursor: U64?) -> EditorReconnectRequest Never! {
+        EditorReconnectRequest{host, session_id: session_id, source_id: source_id, source_path: source_path, revision: revision, cursor}
     }
 }
 EditorSourceNavigationRequest: struct {
     host: EditorHost, session_id: String, source_id: String, source_path: String, revision: String, line: U32, column: U32
-    new: fn(host: EditorHost, ^session_id: String, ^source_id: String, ^source_path: String, ^revision: String, line: U32, column: U32) -> EditorSourceNavigationRequest Never! {
-        EditorSourceNavigationRequest{host, session_id: ^session_id, source_id: ^source_id, source_path: ^source_path, revision: ^revision, line, column}
+    new: fn(host: EditorHost, &&session_id: String, &&source_id: String, &&source_path: String, &&revision: String, line: U32, column: U32) -> EditorSourceNavigationRequest Never! {
+        EditorSourceNavigationRequest{host, session_id: session_id, source_id: source_id, source_path: source_path, revision: revision, line, column}
     }
 }
 EditorPanelSelectionRequest: struct {
@@ -258,8 +258,8 @@ EditorPanelSelectionRequest: struct {
 }
 EditorCommandRequest: struct {
     host: EditorHost, session_id: String, source_id: String, source_path: String, revision: String, command: EditorCommand, arguments: [String]
-    new: fn(host: EditorHost, ^session_id: String, ^source_id: String, ^source_path: String, ^revision: String, command: EditorCommand) -> EditorCommandRequest Never! {
-        EditorCommandRequest{host, session_id: ^session_id, source_id: ^source_id, source_path: ^source_path, revision: ^revision, command, arguments: [String]{}}
+    new: fn(host: EditorHost, &&session_id: String, &&source_id: String, &&source_path: String, &&revision: String, command: EditorCommand) -> EditorCommandRequest Never! {
+        EditorCommandRequest{host, session_id: session_id, source_id: source_id, source_path: source_path, revision: revision, command, arguments: [String]{}}
     }
 }
 
@@ -267,17 +267,17 @@ EditorCommandRequest: struct {
 EditorHostTransport: struct {
     workbench: String, session_identity: EditorSessionIdentity, grant_set: [String:Bool]
     events: [EditorStreamEvent?], head: Int, count: Int, next_sequence: U64, started_at_ms: U64, shared_view: JetDevtoolsViewState
-    new: fn(^workbench_url: String, ^session_id: String, ^source_id: String, ^source_path: String, ^revision: String, grants: [String]) -> EditorHostTransport EditorHostError! {
+    new: fn(&&workbench_url: String, &&session_id: String, &&source_id: String, &&source_path: String, &&revision: String, grants: [String]) -> EditorHostTransport EditorHostError! {
         editor_validate_loopback_url(workbench_url)
-        identity: EditorSessionIdentity.new(^session_id, ^source_id, ^source_path, ^revision)
+        identity: EditorSessionIdentity.new(session_id, source_id, source_path, revision)
         set := [String:Bool]{}
         loop grant in grants { editor_validate_stable_text(grant, "command grant"); set[grant] = true }
         slots: editor_empty_ring()
-        Ok(EditorHostTransport{workbench: ^workbench_url, session_identity: identity, grant_set: set, events: slots, head: 0, count: 0, next_sequence: U64{1}, started_at_ms: U64{0}, shared_view: JetDevtoolsViewState.new(Val(JetDevtoolsSelection.new("build", None)), None)})
+        Ok(EditorHostTransport{workbench: workbench_url.move(), session_identity: identity, grant_set: set, events: slots, head: 0, count: 0, next_sequence: U64{1}, started_at_ms: U64{0}, shared_view: JetDevtoolsViewState.new(Val(JetDevtoolsSelection.new("build", None)), None)})
     }
     identity: fn(self) -> @EditorSessionIdentity Never! from self { @self.session_identity }
     workbench_url: fn(self) -> @String Never! from self { @self.workbench }
-    grants: fn(self) -> [String] Never! { out := [String]{}; loop (grant, _) in self.grant_set -> &out.push(grant.copy()); &out.sort(); out }
+    grants: fn(self) -> [String] Never! { out := [String]{}; loop (grant, _) in self.grant_set -> out.push(grant.copy()); out.sort(); out }
     event_count: fn(self) -> Int Never! { self.count }
     latest_cursor: fn(self) -> U64? Never! {
         if self.count == 0 -> return None
@@ -287,17 +287,17 @@ EditorHostTransport: struct {
         if self.events[(self.head + index) % EDITOR_MAX_EVENTS] == .Val(event) -> return @event
         panic("occupied editor event ring slot")
     }
-    push_event: fn(&self, ^event: EditorStreamEvent) Never! {
-        editor_ring_push(&self.events, &self.head, &self.count, ^event)
+    push_event: fn(&self, &&event: EditorStreamEvent) Never! {
+        editor_ring_push(self.events, self.head, self.count, event)
     }
-    append_event: fn(&self, ^event: EditorStreamEvent) EditorHostError! {
+    append_event: fn(&self, &&event: EditorStreamEvent) EditorHostError! {
         event.validate()
         if self.latest_cursor() == .Val(previous) {
             if event.sequence <= previous -> return Err(EditorHostError.InvalidEnvelope("event sequence must increase monotonically"))
         }
         self.next_sequence = editor_saturating_next(event.sequence)
         self.shared_view.cursor = Val(event.sequence)
-        &self.push_event(^event)
+        self.push_event(event)
     }
     stream_after: fn(self, cursor: U64?) -> EditorStreamSnapshot EditorHostError! {
         if cursor == .Val(requested) {
@@ -310,7 +310,7 @@ EditorHostTransport: struct {
         loop index in 0..<self.count {
             event: self.event_at(index)
             if cursor == .Val(requested) { if event.sequence <= requested -> next }
-            &events.push(event.copy())
+            events.push(event.copy())
         }
         next_cursor := cursor
         if events.len() != 0 -> next_cursor = Val(events[events.len() - 1].sequence)
@@ -321,7 +321,7 @@ EditorHostTransport: struct {
     panel_availability: fn(self) -> [JetDevtoolsPanelAvailability] Never! {
         grants := [JetDevtoolsPanelCapability]{}
         loop (index, capability) in catalog.CAPABILITY_ALL {
-            if self.grant_set.has_key(catalog.CAPABILITY_GRANTS[index]) -> &grants.push(capability)
+            if self.grant_set.has_key(catalog.CAPABILITY_GRANTS[index]) -> grants.push(capability)
         }
         catalog.available_for(JetDevtoolsHostKind.Editor, grants) ?? [JetDevtoolsPanelAvailability]{}
     }
@@ -348,13 +348,13 @@ EditorHostTransport: struct {
         if request.item_key == .Val(value) { editor_validate_stable_text(value, "selection item_key"); item = Val(value.copy()) } else if request.panel_id == None {
             if self.shared_view.selection == .Val(selection) -> item = selection.item_key.copy()
         }
-        self.shared_view.selection = Val(JetDevtoolsSelection.new(canonical, ^item))
-        Ok(self.snapshot(request.host, ^stream))
+        self.shared_view.selection = Val(JetDevtoolsSelection.new(canonical, item))
+        Ok(self.snapshot(request.host, stream))
     }
     reconnect: fn(self, request: EditorReconnectRequest) -> EditorWorkbenchSnapshot EditorHostError! {
         self.validate_request(request.host, request.session_id, request.source_id, request.source_path, request.revision)
         stream: self.stream_after(request.cursor)
-        Ok(self.snapshot(request.host, ^stream))
+        Ok(self.snapshot(request.host, stream))
     }
     navigate_source: fn(self, request: EditorSourceNavigationRequest) -> EditorSourceNavigation EditorHostError! {
         self.validate_request(request.host, request.session_id, request.source_id, request.source_path, request.revision)
@@ -375,18 +375,18 @@ EditorHostTransport: struct {
         if !self.grant_set.has_key(grant) -> return Err(EditorHostError.CommandDenied{command: request.command, required_grant: grant})
         Ok(EditorCommandReceipt{host: request.host, identity: self.session_identity.copy(), command: request.command, required_grant: grant})
     }
-    snapshot: fn(self, host: EditorHost, ^stream: EditorStreamSnapshot) -> EditorWorkbenchSnapshot Never! {
-        EditorWorkbenchSnapshot{host, protocol: JET_DEVTOOLS_PROTOCOL, protocol_version: EDITOR_PROTOCOL_VERSION, workbench_url: self.workbench.copy(), identity: self.session_identity.copy(), started_at_ms: self.started_at_ms, panels: self.panel_catalog().to_list(), panel_availability: self.panel_availability(), selection: (self.shared_view.selection ?? JetDevtoolsSelection.new("build", None)).copy(), events: ^stream.events, resumed_from: stream.resumed_from, cursor: stream.next_cursor, time_cursor: self.shared_view.cursor}
+    snapshot: fn(self, host: EditorHost, &&stream: EditorStreamSnapshot) -> EditorWorkbenchSnapshot Never! {
+        EditorWorkbenchSnapshot{host, protocol: JET_DEVTOOLS_PROTOCOL, protocol_version: EDITOR_PROTOCOL_VERSION, workbench_url: self.workbench.copy(), identity: self.session_identity.copy(), started_at_ms: self.started_at_ms, panels: self.panel_catalog().to_list(), panel_availability: self.panel_availability(), selection: (self.shared_view.selection ?? JetDevtoolsSelection.new("build", None)).copy(), events: stream.events.move(), resumed_from: stream.resumed_from, cursor: stream.next_cursor, time_cursor: self.shared_view.cursor}
     }
     replace_projection: fn(&self, projection: DevtoolsProjection) EditorHostError! {
         if projection.protocol != JET_DEVTOOLS_PROTOCOL -> return Err(EditorHostError.InvalidEnvelope("projection protocol does not match jet.devtools.v1"))
-        &self.check_projection_identity(projection.session_id, projection.source_id, Val(projection.revision))
+        self.check_projection_identity(projection.session_id, projection.source_id, Val(projection.revision))
         // Construct a temporary ring so failed conversion cannot mutate self.
         replacement := editor_empty_ring()
         head := 0
         count := 0
-        loop event in projection.panels -> editor_ring_push(&replacement, &head, &count, editor_event_from_event(event))
-        self.events = ^replacement; self.head = head; self.count = count
+        loop event in projection.panels -> editor_ring_push(replacement, head, count, editor_event_from_event(event))
+        self.events = replacement.move(); self.head = head; self.count = count
         self.next_sequence = if self.latest_cursor() == .Val(sequence) -> editor_saturating_next(sequence) else -> U64{1}
         self.started_at_ms = projection.observed_at
         self.shared_view.cursor = if projection.sequence != (U64{0}) -> Val(projection.sequence) else -> None
@@ -410,7 +410,7 @@ EditorHostTransport: struct {
     sync_session: fn(&self, session: ResidentDevSession) EditorHostError! {
         if session.id() != self.session_identity.session_id -> return Err(EditorHostError.SessionMismatch{expected: self.session_identity.session_id.copy(), actual: session.id().copy()})
         projection: session.devtools_events_since(.None)
-        &self.replace_projection(projection)
+        self.replace_projection(projection)
     }
     replace_devtools_json: fn(&self, payload: String) EditorHostError! {
         // Sole wire decoder belongs to WebHost/Foundation, not this transport.
@@ -431,8 +431,8 @@ EditorHostTransport: struct {
                 replacement := editor_empty_ring()
                 head := 0
                 count := 0
-                loop event in envelope.events() -> editor_ring_push(&replacement, &head, &count, editor_event_from_event(event))
-                self.events = ^replacement; self.head = head; self.count = count
+                loop event in envelope.events() -> editor_ring_push(replacement, head, count, editor_event_from_event(event))
+                self.events = replacement.move(); self.head = head; self.count = count
                 self.next_sequence = if self.latest_cursor() == .Val(sequence) -> editor_saturating_next(sequence) else -> U64{1}
                 self.started_at_ms = envelope.started_at_ms
                 self.shared_view.cursor = envelope.cursor()
@@ -466,7 +466,7 @@ EditorHostTransport: struct {
                 request.panel_id = editor_optional_text(params, "panel_id")
                 request.item_key = editor_optional_text(params, "item_key")
                 request.cursor = editor_optional_cursor(params)
-                EditorHostResponse.Workbench(&self.open(request))
+                EditorHostResponse.Workbench(self.open(request))
             }
             EDITOR_RECONNECT_METHOD -> EditorHostResponse.Workbench(self.reconnect(EditorReconnectRequest.new(host, session, source, path, revision, editor_optional_cursor(params))))
             EDITOR_NAVIGATE_METHOD -> {
@@ -476,14 +476,14 @@ EditorHostTransport: struct {
                 if column > (U64{4294967295}) -> return Err(EditorHostError.InvalidRequest("editor navigation column is out of range"))
                 EditorHostResponse.Navigation(self.navigate_source(EditorSourceNavigationRequest.new(host, session, source, path, revision, U32.from_u64(line) ?? panic("checked line"), U32.from_u64(column) ?? panic("checked column"))))
             }
-            EDITOR_SELECT_METHOD -> EditorHostResponse.Selection(&self.select_panel(EditorPanelSelectionRequest{host, session_id: session, source_id: source, source_path: path, revision, panel_id: editor_field_text(params, "panel_id"), item_key: editor_optional_text(params, "item_key")}))
+            EDITOR_SELECT_METHOD -> EditorHostResponse.Selection(self.select_panel(EditorPanelSelectionRequest{host, session_id: session, source_id: source, source_path: path, revision, panel_id: editor_field_text(params, "panel_id"), item_key: editor_optional_text(params, "item_key")}))
             else -> {
                 command: EditorCommand.parse(editor_field_text(params, "command"))
                 arguments := [String]{}
                 if params.field("arguments") == .Val(value) {
                     if value == .Array(values) {
                         loop argument in values {
-                            if argument == .Text(text) -> &arguments.push(text.copy()) else -> return Err(EditorHostError.InvalidRequest("editor command arguments must be text"))
+                            if argument == .Text(text) -> arguments.push(text.copy()) else -> return Err(EditorHostError.InvalidRequest("editor command arguments must be text"))
                         }
                     } else { return Err(EditorHostError.InvalidRequest("editor command arguments must be an array")) }
                 }
@@ -496,12 +496,12 @@ EditorHostTransport: struct {
 
 editor_empty_ring: fn() -> [EditorStreamEvent?] Never! {
     slots := [EditorStreamEvent?]{}
-    loop _ in 0..<EDITOR_MAX_EVENTS -> &slots.push(.None)
+    loop _ in 0..<EDITOR_MAX_EVENTS -> slots.push(.None)
     slots
 }
-editor_ring_push: fn(slots: &[EditorStreamEvent?], head: &Int, count: &Int, ^event: EditorStreamEvent) Never! {
+editor_ring_push: fn(slots: &[EditorStreamEvent?], head: &Int, count: &Int, &&event: EditorStreamEvent) Never! {
     slot: (head + count) % EDITOR_MAX_EVENTS
-    slots[slot] = Val(^event)
+    slots[slot] = Val(event)
     if count == EDITOR_MAX_EVENTS -> head = (head + 1) % EDITOR_MAX_EVENTS else -> count += 1
 }
 
@@ -592,15 +592,15 @@ editor_source_url: fn(workbench_url: String, source_id: String, line: U32, colum
     end := workbench_url.bytes().len()
     loop end > 0 && workbench_url.bytes()[end - 1] == (U8{47}) -> end -= 1
     base := workbench_url.slice(0, end) // #4303
-    out := [U8]{}; editor_append(&out, base); editor_append(&out, "?source_id=")
-    editor_percent_encode(source_id, &out); editor_append(&out, "&line={line}&column={column}")
-    editor_finish(^out)
+    out := [U8]{}; editor_append(out, base); editor_append(out, "?source_id=")
+    editor_percent_encode(source_id, out); editor_append(out, "&line={line}&column={column}")
+    editor_finish(out)
 }
 editor_percent_encode: fn(value: String, out: &[U8]) Never! {
     loop byte in value.bytes() {
         code: Int.from_u8(byte)
-        if (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 45 || code == 46 || code == 95 || code == 126 -> &out.push(byte)
-        else { &out.push(U8{37}); &out.push(editor_hex_digit(code >> 4)); &out.push(editor_hex_digit(code.bit_and(15))) }
+        if (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 45 || code == 46 || code == 95 || code == 126 -> out.push(byte)
+        else { out.push(U8{37}); out.push(editor_hex_digit(code >> 4)); out.push(editor_hex_digit(code.bit_and(15))) }
     }
 }
 editor_hex_digit: fn(value: Int) -> U8 Never! { "0123456789ABCDEF".bytes()[value] }
@@ -656,44 +656,44 @@ editor_optional_cursor: fn(params: Dyn) -> U64? EditorHostError! {
     if value == .Null -> return Ok(None)
     Ok(Val(editor_field_u64(params, "cursor")))
 }
-editor_append: fn(out: &[U8], text: String) Never! { loop byte in text.bytes() -> &out.push(byte) }
-editor_finish: fn(^out: [U8]) -> String Never! { String.from_bytes(^out) ?? panic("editor JSON writer preserves UTF-8") }
-editor_render_string: fn(value: String, out: &[U8]) Never! { foundation_json_write_quote(&out, value) }
-editor_render_optional_string: fn(value: String?, out: &[U8]) Never! { if value == .Val(text) -> editor_render_string(text, &out) else -> editor_append(&out, "null") }
-editor_render_optional_u64: fn(value: U64?, out: &[U8]) Never! { if value == .Val(number) -> editor_append(&out, "{number}") else -> editor_append(&out, "null") }
+editor_append: fn(out: &[U8], text: String) Never! { loop byte in text.bytes() -> out.push(byte) }
+editor_finish: fn(&&out: [U8]) -> String Never! { String.from_bytes(out) ?? panic("editor JSON writer preserves UTF-8") }
+editor_render_string: fn(value: String, out: &[U8]) Never! { foundation_json_write_quote(out, value) }
+editor_render_optional_string: fn(value: String?, out: &[U8]) Never! { if value == .Val(text) -> editor_render_string(text, out) else -> editor_append(out, "null") }
+editor_render_optional_u64: fn(value: U64?, out: &[U8]) Never! { if value == .Val(number) -> editor_append(out, "{number}") else -> editor_append(out, "null") }
 editor_fact_keys: fn(values: [String:EditorFactValue]) -> [String] Never! {
-    keys := [String]{}; loop (key, _) in values -> &keys.push(key.copy()); &keys.sort(); keys
+    keys := [String]{}; loop (key, _) in values -> keys.push(key.copy()); keys.sort(); keys
 }
 editor_render_fact_object: fn(values: [String:EditorFactValue], out: &[U8]) Never! {
-    &out.push(U8{123})
+    out.push(U8{123})
     loop (index, key) in editor_fact_keys(values) {
-        if index != 0 -> &out.push(U8{44})
-        editor_render_string(key, &out); &out.push(U8{58}); values[key].render(&out)
+        if index != 0 -> out.push(U8{44})
+        editor_render_string(key, out); out.push(U8{58}); values[key].render(out)
     }
-    &out.push(U8{125})
+    out.push(U8{125})
 }
 editor_render_selection: fn(selection: JetDevtoolsSelection, out: &[U8]) Never! {
-    editor_append(&out, `{"panel_id":`); editor_render_string(selection.panel_id, &out)
-    editor_append(&out, ",\"item_key\":"); editor_render_optional_string(selection.item_key, &out); &out.push(U8{125})
+    editor_append(out, `{"panel_id":`); editor_render_string(selection.panel_id, out)
+    editor_append(out, ",\"item_key\":"); editor_render_optional_string(selection.item_key, out); out.push(U8{125})
 }
 editor_render_events: fn(events: [EditorStreamEvent], out: &[U8]) Never! {
-    &out.push(U8{91}); loop (index, event) in events { if index != 0 -> &out.push(U8{44}); event.render(&out) }; &out.push(U8{93})
+    out.push(U8{91}); loop (index, event) in events { if index != 0 -> out.push(U8{44}); event.render(out) }; out.push(U8{93})
 }
 editor_render_identity: fn(identity: EditorSessionIdentity, include_path: Bool, out: &[U8]) Never! {
-    editor_append(&out, ",\"session_id\":"); editor_render_string(identity.session_id, &out)
-    editor_append(&out, ",\"source_id\":"); editor_render_string(identity.source_id, &out)
-    if include_path { editor_append(&out, ",\"source_path\":"); editor_render_string(identity.source_path, &out) }
-    editor_append(&out, ",\"revision\":"); editor_render_string(identity.revision, &out)
+    editor_append(out, ",\"session_id\":"); editor_render_string(identity.session_id, out)
+    editor_append(out, ",\"source_id\":"); editor_render_string(identity.source_id, out)
+    if include_path { editor_append(out, ",\"source_path\":"); editor_render_string(identity.source_path, out) }
+    editor_append(out, ",\"revision\":"); editor_render_string(identity.revision, out)
 }
 editor_render_response_context: fn(host: EditorHost, identity: EditorSessionIdentity, include_path: Bool, out: &[U8]) Never! {
-    editor_append(&out, `{"protocol":`); editor_render_string(JET_DEVTOOLS_PROTOCOL, &out)
-    editor_append(&out, ",\"editor\":"); editor_render_string(host.wire_name(), &out)
-    editor_render_identity(identity, include_path, &out)
+    editor_append(out, `{"protocol":`); editor_render_string(JET_DEVTOOLS_PROTOCOL, out)
+    editor_append(out, ",\"editor\":"); editor_render_string(host.wire_name(), out)
+    editor_render_identity(identity, include_path, out)
 }
 editor_render_request_context: fn(host: EditorHost, session_id: String, source_id: String, source_path: String, revision: String, out: &[U8]) Never! {
-    editor_append(&out, `{"editor":`); editor_render_string(host.wire_name(), &out)
-    editor_append(&out, ",\"session_id\":"); editor_render_string(session_id, &out)
-    editor_append(&out, ",\"source_id\":"); editor_render_string(source_id, &out)
-    editor_append(&out, ",\"source_path\":"); editor_render_string(source_path, &out)
-    editor_append(&out, ",\"revision\":"); editor_render_string(revision, &out)
+    editor_append(out, `{"editor":`); editor_render_string(host.wire_name(), out)
+    editor_append(out, ",\"session_id\":"); editor_render_string(session_id, out)
+    editor_append(out, ",\"source_id\":"); editor_render_string(source_id, out)
+    editor_append(out, ",\"source_path\":"); editor_render_string(source_path, out)
+    editor_append(out, ",\"revision\":"); editor_render_string(revision, out)
 }

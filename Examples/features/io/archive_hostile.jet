@@ -126,7 +126,7 @@ impl BitPacker {
             self.acc = (self.acc).bit_or(((((value >> k)).bit_and(1)) << self.n))
             self.n += 1
             if self.n == 8 {
-                &self.out.push(byte(self.acc))
+                self.out.push(byte(self.acc))
                 self.acc = 0
                 self.n = 0
             }
@@ -135,12 +135,12 @@ impl BitPacker {
 
     // Huffman codes are packed most-significant bit first.
     code: fn(&self, value: Int, count: Int) {
-        loop k in 0..<count -> &self.put(((value >> (count - 1 - k))).bit_and(1), 1)
+        loop k in 0..<count -> self.put(((value >> (count - 1 - k))).bit_and(1), 1)
     }
 
     finish: fn(&self) {
         if self.n > 0 {
-            &self.out.push(byte(self.acc))
+            self.out.push(byte(self.acc))
         }
     }
 }
@@ -149,15 +149,15 @@ impl BitPacker {
 // 258 bytes at distance 1, about 13 bits of input per 258 bytes of output.
 deflate_repeat: fn(literal: Bool, matches: Int) -> [U8] {
     bits := BitPacker{out: [U8]{}, acc: 0, n: 0}
-    &bits.put(1, 1)
-    &bits.put(1, 2)
-    if literal -> &bits.code(168, 8)
+    bits.put(1, 1)
+    bits.put(1, 2)
+    if literal -> bits.code(168, 8)
     loop _ in 0..<matches {
-        &bits.code(197, 8)
-        &bits.code(0, 5)
+        bits.code(197, 8)
+        bits.code(0, 5)
     }
-    &bits.code(0, 7)
-    &bits.finish()
+    bits.code(0, 7)
+    bits.finish()
     bits.out
 }
 
@@ -167,12 +167,12 @@ byte: fn(n: Int) -> U8 {
 }
 
 push16: fn(out: &[U8], n: Int) {
-    &out.push(byte(n))
-    &out.push(byte(n >> 8))
+    out.push(byte(n))
+    out.push(byte(n >> 8))
 }
 
 push32: fn(out: &[U8], n: Int) {
-    loop k in 0..<4 -> &out.push(byte(n >> (8 * k)))
+    loop k in 0..<4 -> out.push(byte(n >> (8 * k)))
 }
 
 // A stored ZIP with `count` empty entries named "x" (CRC-32 of [] is 0).
@@ -182,28 +182,28 @@ zip_entries: fn(count: Int) -> [U8] {
     loop _ in 0..<count {
         offset: local.len()
         // Local header: version, flags, method, time, date, CRC, sizes, name.
-        push32(&local, 0x04034b50)
-        loop v in ([Int]{20, 0, 0, 0, 0}) -> push16(&local, v)
-        loop _ in 0..<3 -> push32(&local, 0)
-        push16(&local, 1)
-        push16(&local, 0)
-        &local.push(U8{120})
+        push32(local, 0x04034b50)
+        loop v in ([Int]{20, 0, 0, 0, 0}) -> push16(local, v)
+        loop _ in 0..<3 -> push32(local, 0)
+        push16(local, 1)
+        push16(local, 0)
+        local.push(U8{120})
         // Central header mirrors it and points back at the local offset.
-        push32(&central, 0x02014b50)
-        loop v in ([Int]{20, 20, 0, 0, 0, 0}) -> push16(&central, v)
-        loop _ in 0..<3 -> push32(&central, 0)
-        loop v in ([Int]{1, 0, 0, 0, 0}) -> push16(&central, v)
-        push32(&central, 0)
-        push32(&central, offset)
-        &central.push(U8{120})
+        push32(central, 0x02014b50)
+        loop v in ([Int]{20, 20, 0, 0, 0, 0}) -> push16(central, v)
+        loop _ in 0..<3 -> push32(central, 0)
+        loop v in ([Int]{1, 0, 0, 0, 0}) -> push16(central, v)
+        push32(central, 0)
+        push32(central, offset)
+        central.push(U8{120})
     }
     out := local.copy()
-    loop b in central -> &out.push(b)
-    push32(&out, 0x06054b50)
-    loop v in ([Int]{0, 0, (count).bit_and(65535), (count).bit_and(65535)}) -> push16(&out, v)
-    push32(&out, central.len())
-    push32(&out, local.len())
-    push16(&out, 0)
+    loop b in central -> out.push(b)
+    push32(out, 0x06054b50)
+    loop v in ([Int]{0, 0, (count).bit_and(65535), (count).bit_and(65535)}) -> push16(out, v)
+    push32(out, central.len())
+    push32(out, local.len())
+    push16(out, 0)
     out
 }
 
@@ -263,8 +263,8 @@ run: fn() {
     bad_isize[good_gz.len() - 1] = U8{127}
     gzip_case("isize mismatch", bad_isize)
     bad_payload := [U8]{31, 139, 8, 0, 0, 0, 0, 0, 0, 255}
-    loop b in deflate_repeat(false, 1) -> &bad_payload.push(b)
-    loop _ in 0..<8 -> &bad_payload.push(U8{0})
+    loop b in deflate_repeat(false, 1) -> bad_payload.push(b)
+    loop _ in 0..<8 -> bad_payload.push(U8{0})
     gzip_case("bad payload", bad_payload)
 
     // zstd: truncated frame, bad content checksum, dictionary frame, and a
@@ -274,7 +274,7 @@ run: fn() {
     zstd_case("truncated", good_zs[0..<(good_zs.len() - 3)])
     // FHD 0x24: single segment, 1-byte content size, content checksum.
     checked := [U8]{40, 181, 47, 253, 36, 3, 25, 0, 0, 106, 101, 116}
-    loop _ in 0..<4 -> &checked.push(U8{0})
+    loop _ in 0..<4 -> checked.push(U8{0})
     zstd_case("bad checksum", checked)
     // `printf jet | zstd --check`: the reference tool's XXH64 content checksum.
     zstd_case("reference checksum", [U8]{40, 181, 47, 253, 4, 88, 25, 0, 0, 106, 101, 116, 118, 204, 169, 85})
@@ -314,9 +314,9 @@ run: fn() {
     one: ar.tar_add([U8]{}, "e", [U8]{}) ?? panic("tar add")
     many := [U8]{}
     loop _ in 0..<4097 {
-        loop k in 0..<512 -> &many.push(one[k])
+        loop k in 0..<512 -> many.push(one[k])
     }
-    loop _ in 0..<1024 -> &many.push(U8{0})
+    loop _ in 0..<1024 -> many.push(U8{0})
     tar_case("4097 entries", many, "e")
 
     // Writers refuse hostile names instead of returning an empty or

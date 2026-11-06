@@ -49,10 +49,10 @@ publication_parse_semver: fn(input: String) -> PublicationSemVer? Never! {
         core = parts.before
     }
     numbers := core.split(".")
-    major: publication_parse_numeric_id((&numbers.next()) ?? return None) ?? return None
-    minor: publication_parse_numeric_id((&numbers.next()) ?? return None) ?? return None
-    patch: publication_parse_numeric_id((&numbers.next()) ?? return None) ?? return None
-    if (&numbers.next()) != None -> return None
+    major: publication_parse_numeric_id((numbers.next()) ?? return None) ?? return None
+    minor: publication_parse_numeric_id((numbers.next()) ?? return None) ?? return None
+    patch: publication_parse_numeric_id((numbers.next()) ?? return None) ?? return None
+    if (numbers.next()) != None -> return None
     Val(PublicationSemVer{major: major, minor: minor, patch: patch, pre: pre, build: build})
 }
 
@@ -123,8 +123,8 @@ publication_cmp_pre_ids: fn(left: String, right: String) -> Ordering Never! {
     a := left.split(".")
     b := right.split(".")
     loop {
-        x_next: &a.next()
-        y_next: &b.next()
+        x_next: a.next()
+        y_next: b.next()
         if x_next == None {
             if y_next == None -> return Ordering.Equal
             return Ordering.Less
@@ -170,7 +170,7 @@ publication_classify_bump: fn(old: PublicationSemVer, new: PublicationSemVer) ->
     PublicationBumpKind.Same
 }
 
-// Whether `new` may break the public API of `old`: it lies outside `^old`,
+// Whether `new` may break the public API of `old`: it lies outside `old.move()`,
 // the range a caret dependent on `old` resolves. One rule with the resolver,
 // so pre-1.0 a minor bump may break (0.2.3 to 0.3.0) and in 0.0.x any bump.
 publication_release_may_break: fn(old: PublicationSemVer, new: PublicationSemVer) -> Bool Never! {
@@ -226,7 +226,7 @@ publication_parse_version_req: fn(input: String) -> PublicationVersionReq? Never
     sets := [[PublicationComparator]]{}
     loop range in raw.split("||") {
         if raw != "" && range.trim() == "" -> return None
-        &sets.push(publication_parse_range(range) ?? return None)
+        sets.push(publication_parse_range(range) ?? return None)
     }
     Val(PublicationVersionReq{sets: sets, raw: raw})
 }
@@ -312,7 +312,7 @@ publication_parse_range: fn(input: String) -> [PublicationComparator]? Never! {
     comps := [PublicationComparator]{}
     loop simple in publication_split_simples(range) {
         expanded: publication_parse_simple(simple) ?? return None
-        loop comparator in expanded -> &comps.push(comparator)
+        loop comparator in expanded -> comps.push(comparator)
     }
     Val(comps)
 }
@@ -325,10 +325,10 @@ publication_split_simples: fn(range: String) -> [String] Never! {
         token: tokens[index]
         bare: token == ">" || token == ">=" || token == "<" || token == "<=" || token == "=" || token == "~" || token == "^"
         if bare && index + 1 < tokens.len() {
-            &out.push("{token}{tokens[index + 1]}")
+            out.push("{token}{tokens[index + 1]}")
             index += 2
         } else {
-            &out.push(token.copy())
+            out.push(token.copy())
             index += 1
         }
     }
@@ -486,8 +486,8 @@ publication_set_satisfiable: fn(first: [PublicationComparator], second: [Publica
         lower: publication_ver(0, 0, 0),
         upper: publication_ver(PUBLICATION_U64_MAX, PUBLICATION_U64_MAX, PUBLICATION_U64_MAX)
     }
-    if !publication_constrain_release_bounds(first, &bounds) -> return false
-    if !publication_constrain_release_bounds(second, &bounds) -> return false
+    if !publication_constrain_release_bounds(first, bounds) -> return false
+    if !publication_constrain_release_bounds(second, bounds) -> return false
     publication_precedence(bounds.lower, bounds.upper) != Ordering.Greater
 }
 
@@ -498,18 +498,18 @@ publication_constrain_release_bounds: fn(set: [PublicationComparator], bounds: &
         if comparator.op == {
             .Eq -> {
                 if pre -> return false
-                publication_tighten_lower(&bounds, v)
-                publication_tighten_upper(&bounds, v)
+                publication_tighten_lower(bounds, v)
+                publication_tighten_upper(bounds, v)
             }
-            .Gte -> publication_tighten_lower(&bounds, v)
+            .Gte -> publication_tighten_lower(bounds, v)
             .Gt -> {
                 lower: if pre -> v else -> (publication_release_successor(v) ?? return false)
-                publication_tighten_lower(&bounds, lower)
+                publication_tighten_lower(bounds, lower)
             }
-            .Lt -> publication_tighten_upper(&bounds, publication_release_predecessor(v) ?? return false)
+            .Lt -> publication_tighten_upper(bounds, publication_release_predecessor(v) ?? return false)
             .Lte -> {
                 upper: if pre -> (publication_release_predecessor(v) ?? return false) else -> v
-                publication_tighten_upper(&bounds, upper)
+                publication_tighten_upper(bounds, upper)
             }
         }
     }

@@ -96,14 +96,14 @@ image_parse_registry_reference: fn(reference: String) -> RegistryReference Image
     authority: host_split.before
     if !image_registry_authority_is_safe(authority) -> return Err(image_invalid("OCI registry reference has an unsafe host"))
     parts := host_split.after.split("/").to_list()
-    leaf: &parts.pop() ?? ""
+    leaf: parts.pop() ?? ""
     if leaf == "" -> return Err(image_invalid("OCI registry reference has no image name"))
     loop part in parts {
         if part == "" -> return Err(image_invalid("OCI registry repository has an empty path component"))
     }
     target: image_registry_leaf(leaf)
     image_validate_registry_component(target.name, "OCI registry image name")
-    &parts.push(target.name)
+    parts.push(target.name)
     loop part in parts -> image_validate_registry_component(part, "OCI registry repository component")
     origin: "{scheme}://{authority}"
     Ok(RegistryReference{api_root: "{origin}/v2/{parts.join("/")}", origin, reference: target.reference})
@@ -196,7 +196,7 @@ image_load_registry_manifest: fn(root: String) -[FS, Env]> RegistryManifest Imag
         size: image_number_field(layer, "size")
         data: image_read_blob(root, layer_digest)
         if data.len() != size -> return Err(image_invalid("OCI layer descriptor size mismatch"))
-        &blobs.push(RegistryBlob{digest: layer_digest, data})
+        blobs.push(RegistryBlob{digest: layer_digest, data})
     }
     Ok(RegistryManifest{digest, raw, blobs})
 }
@@ -233,29 +233,29 @@ image_registry_request: fn(request: RegistryRequest) -[Env, Exec, Time.Wait]> Re
     if request.method == "" || request.url == "" -> return Err(image_invalid("registry request has no method or URL"))
     argv := [String]{"curl", "--silent", "--show-error", "--max-time", "120", "--netrc-optional", "--request", request.method}
     loop header in request.headers {
-        &argv.push("--header")
-        &argv.push(header)
+        argv.push("--header")
+        argv.push(header)
     }
     if request.body != None {
-        &argv.push("--data-binary")
-        &argv.push("@-")
+        argv.push("--data-binary")
+        argv.push("@-")
     }
     if request.include_headers {
-        &argv.push("--dump-header")
-        &argv.push("-")
+        argv.push("--dump-header")
+        argv.push("-")
     } else {
-        &argv.push("--output")
-        &argv.push(image_null_device())
+        argv.push("--output")
+        argv.push(image_null_device())
     }
-    &argv.push("--write-out")
-    &argv.push("\\n%{{http_code}}")
-    &argv.push(request.url)
+    argv.push("--write-out")
+    argv.push("\\n%{{http_code}}")
+    argv.push(request.url)
     spec := process.cmd(argv).stdout(.Stream).stderr(.Capture)
     if request.body != None -> spec = spec.stdin(.Stream)
     child := spec.spawn() ?? return Err(image_invalid("OCI registry adapter could not start: {err}"))
     if request.body == .Val(body) {
         if child.stdin.write_all(body) == .Err(error) {
-            image_abandon_registry_child(&child)
+            image_abandon_registry_child(child)
             return Err(ImageError.IO(error))
         }
         child.stdin.close()
@@ -263,13 +263,13 @@ image_registry_request: fn(request: RegistryRequest) -[Env, Exec, Time.Wait]> Re
     stdout := [U8]{}
     loop {
         chunk: child.stdout.read(65536) ?? {
-            image_abandon_registry_child(&child)
+            image_abandon_registry_child(child)
             return Err(ImageError.IO(err))
         }
         if chunk.len() == 0 -> break
-        &stdout.extend(chunk)
+        stdout.extend(chunk)
         if stdout.len() > IMAGE_MAX_REGISTRY_RESPONSE_BYTES {
-            image_abandon_registry_child(&child)
+            image_abandon_registry_child(child)
             return Err(image_invalid("OCI registry response exceeded its bound"))
         }
     }
@@ -288,7 +288,7 @@ image_registry_request: fn(request: RegistryRequest) -[Env, Exec, Time.Wait]> Re
 
 // Rust `child.kill(); child.wait()` after an abandoned exchange.
 image_abandon_registry_child: fn(child: &ProcessChild) -[Exec, Time.Wait]> {
-    image_kill_quiet(&child)
+    image_kill_quiet(child)
     _: child.wait() ?? return
 }
 

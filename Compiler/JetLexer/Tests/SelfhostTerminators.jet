@@ -25,7 +25,7 @@ use {
     nested: result.tables.literals[literal].string_parts[0].tokens[0]
     assert_eq(result.tokens[0].decoded.id == nested.decoded.id, true)
     before: nested.span.start
-    token_shift_spans(&result.tokens[2], 100, &result.tables.literals)
+    token_shift_spans(result.tokens[2], 100, result.tables.literals)
     assert_eq(result.tables.literals[literal].string_parts[0].tokens[0].span.start == before + 100, true)
     assert_eq(token_decoded(result.tables, result.tables.literals[literal].string_parts[0].tokens[0]), "alpha")
     assert_eq(result.tokens[2].span.start, 112)
@@ -33,9 +33,9 @@ use {
 
 #Test("name table preserves first seen ids across growth") {
     table := name_table()
-    first: name_intern(&table, "μ_name")
-    loop index in 0..<600 -> _ := name_intern(&table, "name{index}")
-    again: name_intern(&table, "μ_name")
+    first: name_intern(table, "μ_name")
+    loop index in 0..<600 -> _ := name_intern(table, "name{index}")
+    again: name_intern(table, "μ_name")
     assert_eq(first.id == again.id, true)
     assert_eq(name_count(table), 602)
     assert_eq(name_text(table, first), "μ_name")

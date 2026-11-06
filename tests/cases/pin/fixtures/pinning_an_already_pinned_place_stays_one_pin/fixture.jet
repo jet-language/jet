@@ -10,11 +10,11 @@ PinQueue: struct {
     head: Pin<Node>
 }
 
-takes_pin: fn(n: ^Pin<Node>) -> Int { return n.payload }
+takes_pin: fn(n: &&Pin<Node>) -> Int { return n.payload }
 
 run: fn() {
     node := Node{payload: 7, hops: 0}
-    queue: PinQueue{head: mem.pin(&node)}
-    seen: takes_pin(^mem.pin(&queue.head))
+    queue: PinQueue{head: mem.pin(node)}
+    seen: takes_pin(mem.pin(queue.head))
     print("{seen}")
 }

@@ -26,15 +26,15 @@ view_field_case: fn(parameter: Bool, access: AccessConvention, expected: String)
     state := sema_ownership_state_init()
     context := sema_check_context_init()
     diagnostics := [Diagnostic]{}
-    view_field_require(sema_scope_declare_local(&scopes, owner, false, access, None, false), "owner is declared")
-    sema_ownership_declare_binding(&state, owner, parameter)
-    if parameter -> &context.return_view_parameter_keys.push(owner.id.key)
-    view_field_require(sema_scope_declare_local(&scopes, selected, false, AccessConvention.Read, None, false), "range binding is declared")
+    view_field_require(sema_scope_declare_local(scopes, owner, false, access, None, false), "owner is declared")
+    sema_ownership_declare_binding(state, owner, parameter)
+    if parameter -> context.return_view_parameter_keys.push(owner.id.key)
+    view_field_require(sema_scope_declare_local(scopes, selected, false, AccessConvention.Read, None, false), "range binding is declared")
     slice: Expr.Slice{base: Expr.Ident{name: "values", span: use_span, id: AST_NODE_GENERATED}, start: Expr.Int{value: 0, span: use_span, width: None, raw: None, id: AST_NODE_GENERATED}, end: Expr.Int{value: 1, span: use_span, width: None, raw: None, id: AST_NODE_GENERATED}, range: None, span: use_span, id: AST_NODE_GENERATED}
-    sema_ownership_declare_binding(&state, selected, false)
-    view_field_require(sema_ownership_record_binding_view(&state, view_field_binding("selected", slice, view_type, use_span), scopes), "production range binding records its owner")
+    sema_ownership_declare_binding(state, selected, false)
+    view_field_require(sema_ownership_record_binding_view(state, view_field_binding("selected", slice, view_type, use_span), scopes), "production range binding records its owner")
     window: view_field_window(Expr.Ident{name: "selected", span: use_span, id: AST_NODE_GENERATED}, use_span)
-    valid: sema_stmt_record_return_views(window, Type.Named{name: "Window"}, scopes, &state, &context, &diagnostics)
+    valid: sema_stmt_record_return_views(window, Type.Named{name: "Window"}, scopes, state, context, diagnostics)
     if expected != "" {
         view_field_require(!valid && diagnostics.len() == 1, "unsafe aggregate return is rejected once")
         view_field_require(diagnostics[0].code == "E2305" && diagnostics[0].what == expected, "aggregate diagnostic matches the Rust checker")
@@ -48,7 +48,7 @@ view_field_case: fn(parameter: Bool, access: AccessConvention, expected: String)
     view_field_require(entry.value.sources.len() == 1 && entry.value.sources[0].source == ViewSource.Parameter{index: 0}, "caller parameter owns the stored view")
     view_field_require(entry.value.sources[0].projections == [ViewSourceProjection]{ViewSourceProjection.Range}, "range projection survives the aggregate")
     nested: view_field_window(window, use_span)
-    nested_facts: sema_stmt_local_view_facts_for_expr(nested, scopes, &state, context)
+    nested_facts: sema_stmt_local_view_facts_for_expr(nested, scopes, state, context)
     view_field_require(nested_facts.len() == 1 && nested_facts[0].slot == [String]{"values", "values"}, "nested aggregate fields preserve every output slot")
 }
 
@@ -61,7 +61,7 @@ view_pattern_case: fn(name: String, source: String, expected: String) {
     checked: check_program(parsed.program, "view-pattern", "view-pattern.jet", [SemaSourceSegment]{})
     codes := [String]{}
     loop diagnostic in checked.diagnostics {
-        if diagnostic.severity == DIAGNOSTIC_ERROR && !codes.contains(diagnostic.code) -> &codes.push(diagnostic.code)
+        if diagnostic.severity == DIAGNOSTIC_ERROR && !codes.contains(diagnostic.code) -> codes.push(diagnostic.code)
     }
     if expected != "" {
         view_field_require(!checked.complete && codes.contains(expected), "{name} rejects {expected}: {checked.diagnostics:Debug}")
@@ -91,45 +91,45 @@ view_pattern_sources: fn() {
     table: "return if value == {{ .Array(items) -> Ok(items[0..<items.len()]) .Object(items) -> Ok(items[0..<items.len()]) }}"
     view_pattern_case("read-payload-if", "{declaration}select: fn(value: Payload) -> View<Int> Err! {{ {ordinary} }}", "")
     view_pattern_case("read-payload-table", "{declaration}select: fn(value: Payload) -> View<Int> Err! {{ {table} }}", "")
-    view_pattern_case("consumed-payload-if", "{declaration}select: fn(value: ^Payload) -> View<Int> Err! {{ {ordinary} }}", "E2305")
-    view_pattern_case("consumed-payload-table", "{declaration}select: fn(value: ^Payload) -> View<Int> Err! {{ {table} }}", "E2305")
+    view_pattern_case("consumed-payload-if", "{declaration}select: fn(value: &&Payload) -> View<Int> Err! {{ {ordinary} }}", "E2305")
+    view_pattern_case("consumed-payload-table", "{declaration}select: fn(value: &&Payload) -> View<Int> Err! {{ {table} }}", "E2305")
     view_pattern_case("local-payload-if", "{declaration}select: fn() -> View<Int> Err! {{ value: Payload.Array([Int]{{1}})\n{ordinary} }}", "E2305")
     view_pattern_case("local-payload-table", "{declaration}select: fn() -> View<Int> Err! {{ value: Payload.Array([Int]{{1}})\n{table} }}", "E2305")
     sum: "total := 0\nloop item in ^items -> total += item\ntotal"
     owned_table: "if value == {{ .Object(items) -> {{ {sum} }} .Array(items) -> {{ {sum} }} }}"
-    view_pattern_case("consumed-table-payload-retains-ownership", "{declaration}sum: fn(value: ^Payload) -> Int {{ {owned_table} }}", "")
+    view_pattern_case("consumed-table-payload-retains-ownership", "{declaration}sum: fn(value: &&Payload) -> Int {{ {owned_table} }}", "")
     view_pattern_case("local-table-payload-retains-ownership", "{declaration}sum: fn() -> Int {{ value := Payload.Object([Int]{{1, 2}})\n{owned_table} }}", "")
     view_pattern_case("taken-table-payload-retains-ownership", "{declaration}sum: fn() -> Int {{ value := Payload.Object([Int]{{1, 2}})\nif ^value == {{ .Object(items) -> {{ {sum} }} .Array(items) -> {{ {sum} }} }} }}", "")
 }
 
 view_pattern_reborrows: fn() {
     declaration: "Value: enum {{ Struct(name: String, fields: [Field]) List([Value]) Text(String) }}\nField: struct {{ value: Value }}\n"
-    nested: "if &fields[i].value == .Struct(_, metadata_fields) {{ if &metadata_fields[j].value == .List(items) {{ &items.push(^item) }} }}"
-    view_pattern_case("nested-write-payload", "{declaration}edit: fn(result: &Value, item: ^Value, i: Int, j: Int) {{ if &result == .Struct(_, fields) {{ {nested}\ncount: fields.len() }} }}", "")
-    view_pattern_case("nested-write-payload-table", "{declaration}edit: fn(result: &Value, item: ^Value, i: Int, j: Int) {{ if &result == {{ .Struct(_, fields) -> {{ {nested} }} else -> {{}} }} }}", "")
-    view_pattern_case("nested-write-parent-suspended", "{declaration}edit: fn(result: &Value, item: ^Value, i: Int, j: Int) {{ if &result == .Struct(_, fields) {{ if &fields[i].value == .Struct(_, metadata_fields) {{ count: fields.len()\nif &metadata_fields[j].value == .List(items) {{ &items.push(^item) }} }} }} }}", "E0220")
-    view_pattern_case("nested-write-unrelated-view-conflicts", "{declaration}edit: fn(result: &Value, item: ^Value, i: Int, j: Int) {{ if &result == .Struct(_, fields) {{ unrelated: fields[0..<fields.len()]\n{nested}\ncount: unrelated.len() }} }}", "E0212")
+    nested: "if &fields[i].value == .Struct(_, metadata_fields) {{ if &metadata_fields[j].value == .List(items) {{ items.push(item) }} }}"
+    view_pattern_case("nested-write-payload", "{declaration}edit: fn(result: &Value, item: &&Value, i: Int, j: Int) {{ if &result == .Struct(_, fields) {{ {nested}\ncount: fields.len() }} }}", "")
+    view_pattern_case("nested-write-payload-table", "{declaration}edit: fn(result: &Value, item: &&Value, i: Int, j: Int) {{ if &result == {{ .Struct(_, fields) -> {{ {nested} }} else -> {{}} }} }}", "")
+    view_pattern_case("nested-write-parent-suspended", "{declaration}edit: fn(result: &Value, item: &&Value, i: Int, j: Int) {{ if &result == .Struct(_, fields) {{ if &fields[i].value == .Struct(_, metadata_fields) {{ count: fields.len()\nif &metadata_fields[j].value == .List(items) {{ items.push(item) }} }} }} }}", "E0220")
+    view_pattern_case("nested-write-unrelated-view-conflicts", "{declaration}edit: fn(result: &Value, item: &&Value, i: Int, j: Int) {{ if &result == .Struct(_, fields) {{ unrelated: fields[0..<fields.len()]\n{nested}\ncount: unrelated.len() }} }}", "E0212")
     view_pattern_case("inner-owned-match-subject-type", "Outer: enum {{ Case(Int) }}\nInner: enum {{ Text(String) Empty }}\ninspect: fn(value: Outer) -> Int {{ if value == {{ .Case(number) -> {{ inner: Inner.Text(\"x\")\nif ^inner == {{ .Text(text) -> text.count_bytes() .Empty -> 0 }} }} }} }}", "")
 }
 
 view_pattern_reinitialization: fn() {
-    declaration: "Inner: struct {{ left: String right: String }}\nPair: struct {{ inner: Inner other: String }}\nconsume: fn(value: ^String) {{}}\nconsume_inner: fn(value: ^Inner) {{}}\n"
+    declaration: "Inner: struct {{ left: String right: String }}\nPair: struct {{ inner: Inner other: String }}\nconsume: fn(value: &&String) {{}}\nconsume_inner: fn(value: &&Inner) {{}}\n"
     initial: "pair := Pair{{inner: Inner{{left: \"left\", right: \"right\"}}, other: \"other\"}}"
-    view_pattern_case("partial-field-reinitialized", "{declaration}inspect: fn() -> Int {{ {initial}\nconsume(^pair.inner.left)\npair.inner.left = \"new\"\npair.inner.right.count_bytes() + pair.inner.left.count_bytes() }}", "")
-    view_pattern_case("partial-field-sibling-stays-readable", "{declaration}inspect: fn() -> Int {{ {initial}\nconsume(^pair.inner.left)\npair.inner.right.count_bytes() }}", "")
-    view_pattern_case("whole-moved-ancestor-not-reinitialized", "{declaration}inspect: fn() -> Int {{ {initial}\nconsume_inner(^pair.inner)\npair.inner.left = \"new\"\npair.inner.right.count_bytes() }}", "E0121")
+    view_pattern_case("partial-field-reinitialized", "{declaration}inspect: fn() -> Int {{ {initial}\nconsume(pair.inner.left.move())\npair.inner.left = \"new\"\npair.inner.right.count_bytes() + pair.inner.left.count_bytes() }}", "")
+    view_pattern_case("partial-field-sibling-stays-readable", "{declaration}inspect: fn() -> Int {{ {initial}\nconsume(pair.inner.left.move())\npair.inner.right.count_bytes() }}", "")
+    view_pattern_case("whole-moved-ancestor-not-reinitialized", "{declaration}inspect: fn() -> Int {{ {initial}\nconsume_inner(pair.inner.move())\npair.inner.left = \"new\"\npair.inner.right.count_bytes() }}", "E0121")
     // The state hook itself must retain the whole moved ancestor even when a
     // caller has already admitted the descendant assignment.
     span: Span{start: 10, end: 20}
     owner: view_field_symbol("pair", SymbolKind.Local, Type.Named{name: "Pair"}, span)
     scopes := sema_scope_init("fixture")
     state := sema_ownership_state_init()
-    view_field_require(sema_scope_declare_local(&scopes, owner, true, AccessConvention.Read, None, false), "reinit owner declared")
+    view_field_require(sema_scope_declare_local(scopes, owner, true, AccessConvention.Read, None, false), "reinit owner declared")
     base: Expr.Field{base: Expr.Ident{name: "pair", span: span, id: AST_NODE_GENERATED}, member: "inner", span: span, id: AST_NODE_GENERATED}
     place: sema_ownership_place_from_expr_inner(base, scopes) ?? panic("missing ancestor place")
-    &state.moved.push(SemaOwnershipMovedPlace{place: place, origin: SemaOwnershipMoveOrigin{span: span, consumer: "consume_inner", share_ty: None}})
+    state.moved.push(SemaOwnershipMovedPlace{place: place, origin: SemaOwnershipMoveOrigin{span: span, consumer: "consume_inner", share_ty: None}})
     child: sema_ownership_place_from_expr_inner(Expr.Field{base: base, member: "left", span: span, id: AST_NODE_GENERATED}, scopes) ?? panic("missing child place")
-    sema_ownership_clear_moved(&state, child)
+    sema_ownership_clear_moved(state, child)
     view_field_require(state.moved.len() == 1 && sema_ownership_place_exact(state.moved[0].place, place), "descendant assignment never clears its moved ancestor")
 }
 
@@ -138,10 +138,10 @@ view_pattern_reinitialization: fn() {
 // parent accesses; no prebuilt view facts grant the successful writes.
 view_constructor_and_split_fields: fn() {
     declaration: "Choice: enum {{ First(ViewMut<Int>) Second(ViewMut<Int>) }}\n"
-    view_pattern_case("marked-enum-payload", "{declaration}choose: fn(values: &[Int], first: Bool) -> Choice {{ if first {{ return Choice.First(&values[0..1]) }} return Choice.Second(&values[0..1]) }}\nrun: fn() {{ values := [1, 2]\nselected: choose(&values, false)\nif selected == {{ .First(part) -> {{ part[0] = 3 }} .Second(part) -> {{ part[0] = 4 }} }} }}", "")
-    view_pattern_case("marked-enum-read-owner-rejected", "{declaration}choose: fn(values: [Int]) -> Choice {{ return Choice.First(&values[0..1]) }}", "E0205")
+    view_pattern_case("marked-enum-payload", "{declaration}choose: fn(values: &[Int], first: Bool) -> Choice {{ part: &values[0..1]\nif first {{ return Choice.First(part) }} return Choice.Second(part) }}\nrun: fn() {{ values := [1, 2]\nselected: choose(values, false)\nif selected == {{ .First(part) -> {{ part[0] = 3 }} .Second(part) -> {{ part[0] = 4 }} }} }}", "")
+    view_pattern_case("marked-enum-read-owner-rejected", "{declaration}choose: fn(values: [Int]) -> Choice {{ part: &values[0..1]\nreturn Choice.First(part) }}", "E0205")
     view_pattern_case("unmarked-enum-write-payload-rejected", "{declaration}choose: fn(values: &[Int]) -> Choice {{ return Choice.First(values[0..1]) }}", "E0108")
-    split: "values := [1, 2, 3, 4]\nparts: &values.split_write(2) ?? panic(\"split failed\")\n"
+    split: "values := [1, 2, 3, 4]\nparts: values.split_write(2) ?? panic(\"split failed\")\n"
     view_pattern_case("split-write-field-access", "run: fn() {{ {split}(parts).left[0] = 10\nparts.right[1] = (parts).left[0]\nprint(parts.right[1]) }}", "")
     view_pattern_case("split-write-owner-suspended", "run: fn() {{ {split}print(values[0])\nprint(parts.left[0]) }}", "E0220")
     view_pattern_case("split-write-parent-suspended", "run: fn() {{ {split}child: &parts.left[0..1]\nparts.left[0] = 10\nprint(child[0]) }}", "E0212")
@@ -149,17 +149,17 @@ view_constructor_and_split_fields: fn() {
 
 view_disjoint_admission_sources: fn() {
     owner: "values := [1, 2, 3, 4]\n"
-    view_pattern_case("disjoint-indexed-iteration", "run: fn() {{ {owner}windows: &values.get_disjoint_write([0, 2]) ?? panic(\"selection\")\nloop window in windows {{ window[0] = 9 }} }}", "")
-    view_pattern_case("disjoint-edit-lending-callback", "run: fn() {{ {owner}result: &values.edit_disjoint([0, 2], (left, right) -> {{ value: left[0]\nright[0] = value\nleft[0] = 9 }}) }}", "")
-    view_pattern_case("disjoint-fixed-owner", "run: fn() {{ values := [Int#4]{{1, 2, 3, 4}}\nparts: &values.split_write(2) ?? panic(\"split\")\nparts.left[0] = 8 }}", "")
-    view_pattern_case("disjoint-split-arity", "run: fn() {{ {owner}result: &values.split_write() }}", "E0104")
-    view_pattern_case("disjoint-index-type", "run: fn() {{ {owner}result: &values.get_disjoint_write([true]) }}", "E0112")
-    view_pattern_case("disjoint-read-parameter", "run: fn(values: [Int]) {{ result: &values.split_write(2) }}", "E0202")
-    view_pattern_case("disjoint-callback-cannot-store-view", "run: fn() {{ {owner}result: &values.edit_disjoint([0, 2], (left, right) -> {{ held: left\nright[0] = 5 }}) }}", "E0212")
-    view_pattern_case("disjoint-callback-cannot-return-value", "run: fn() {{ {owner}result: &values.edit_disjoint([0, 2], (left, right) -> {{ return left }}) }}", "E0113")
-    view_pattern_case("disjoint-callback-cannot-pass-view", "consume: fn(value: ViewMut<Int>) {{}}\nrun: fn() {{ {owner}result: &values.edit_disjoint([0, 2], (left, right) -> {{ consume(left) }}) }}", "E0212")
-    view_pattern_case("disjoint-iteration-cannot-store-view", "run: fn() {{ {owner}windows: &values.get_disjoint_write([0, 2]) ?? panic(\"selection\")\nloop window in windows {{ held: window }} }}", "E0212")
-    view_pattern_case("disjoint-iteration-cannot-return-view", "run: fn() -> ViewMut<Int> {{ {owner}windows: &values.get_disjoint_write([0, 2]) ?? panic(\"selection\")\nloop window in windows {{ return window }}\npanic(\"empty\") }}", "E0212")
+    view_pattern_case("disjoint-indexed-iteration", "run: fn() {{ {owner}windows: values.get_disjoint_write([0, 2]) ?? panic(\"selection\")\nloop window in windows {{ window[0] = 9 }} }}", "")
+    view_pattern_case("disjoint-edit-lending-callback", "run: fn() {{ {owner}result: values.edit_disjoint([0, 2], (left, right) -> {{ value: left[0]\nright[0] = value\nleft[0] = 9 }}) }}", "")
+    view_pattern_case("disjoint-fixed-owner", "run: fn() {{ values := [Int#4]{{1, 2, 3, 4}}\nparts: values.split_write(2) ?? panic(\"split\")\nparts.left[0] = 8 }}", "")
+    view_pattern_case("disjoint-split-arity", "run: fn() {{ {owner}result: values.split_write() }}", "E0104")
+    view_pattern_case("disjoint-index-type", "run: fn() {{ {owner}result: values.get_disjoint_write([true]) }}", "E0112")
+    view_pattern_case("disjoint-read-parameter", "run: fn(values: [Int]) {{ result: values.split_write(2) }}", "E0202")
+    view_pattern_case("disjoint-callback-cannot-store-view", "run: fn() {{ {owner}result: values.edit_disjoint([0, 2], (left, right) -> {{ held: left\nright[0] = 5 }}) }}", "E0212")
+    view_pattern_case("disjoint-callback-cannot-return-value", "run: fn() {{ {owner}result: values.edit_disjoint([0, 2], (left, right) -> {{ return left }}) }}", "E0113")
+    view_pattern_case("disjoint-callback-cannot-pass-view", "consume: fn(value: ViewMut<Int>) {{}}\nrun: fn() {{ {owner}result: values.edit_disjoint([0, 2], (left, right) -> {{ consume(left) }}) }}", "E0212")
+    view_pattern_case("disjoint-iteration-cannot-store-view", "run: fn() {{ {owner}windows: values.get_disjoint_write([0, 2]) ?? panic(\"selection\")\nloop window in windows {{ held: window }} }}", "E0212")
+    view_pattern_case("disjoint-iteration-cannot-return-view", "run: fn() -> ViewMut<Int> {{ {owner}windows: values.get_disjoint_write([0, 2]) ?? panic(\"selection\")\nloop window in windows {{ return window }}\npanic(\"empty\") }}", "E0212")
 }
 
 run: fn() {

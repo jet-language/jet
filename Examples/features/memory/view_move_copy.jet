@@ -1,6 +1,6 @@
 // D-COPY-DEFAULT1=A: the compiler chooses when a name is unmarked, and a
 // mark gives exact control. `ys: xs` reads `xs` through a view, `xs.copy()` is an
-// independent copy, and `^xs` moves `xs` exactly: after it, `xs` is gone.
+// independent copy, and `xs.move()` moves `xs` exactly: after it, `xs` is gone.
 // A last use moves with no mark at all.
 Box: struct {
     items: [Int]
@@ -11,13 +11,13 @@ Ticket: struct {
 }
 
 impl Ticket {
-    redeem: fn(^self) -> String {
+    redeem: fn(&&self) -> String {
         return "redeemed {self.code}"
     }
 }
 
-keep: fn(values: ^[Int]) -> [Int] {
-    ^values
+keep: fn(values: &&[Int]) -> [Int] {
+    values.move()
 }
 
 run: fn() {
@@ -26,32 +26,32 @@ run: fn() {
     print("view sees {view.len()} items")
 
     dup := xs.copy()
-    &dup.push(4)
+    dup.push(4)
     print("copy has {dup.len()}, xs still has {xs.len()}")
 
-    moved := ^xs
+    moved := xs.move()
     print("moved has {moved.len()}")
 
     parts := [7, 8]
-    boxed: Box{items: ^parts}
+    boxed: Box{items: parts.move()}
     print("box holds {boxed.items.len()}")
 
     rows := [9]
-    grid: [[Int]]{^rows}
+    grid: [[Int]]{rows.move()}
     print("grid has {grid.len()} row")
 
     first := [5]
     target := [0, 0]
-    target = ^first
+    target = first.move()
     print("target is {target}")
 
-    kept: keep(^moved)
+    kept: keep(moved)
     print("kept {kept}")
 
-    // A last use takes its receiver with no mark; `^ticket.redeem()` is the
+    // A last use takes its receiver with no mark; `ticket.redeem()` is the
     // same call with the exact mark written.
     ticket := Ticket{code: "A1"}
-    print(^ticket.redeem())
+    print(ticket.redeem())
     spare := Ticket{code: "B2"}
-    print(^spare.redeem())
+    print(spare.redeem())
 }

@@ -18,7 +18,7 @@ jetos_write_etc_tree: fn(dir: String, system: SystemPlan) IOError! -[FS]> {
             .Val(value) -> "pri={value}"
             .None -> "defaults"
         }
-        &fstab.push("{device}\tnone\tswap\t{priority}\t0\t0\n")
+        fstab.push("{device}\tnone\tswap\t{priority}\t0\t0\n")
     }
     files.write(files.join(etc, "fstab"), fstab.join(""))
     jetos_write_identity_files(dir, etc, system)
@@ -40,10 +40,10 @@ jetos_write_identity_files: fn(dir: String, etc: String, system: SystemPlan) IOE
             .Val(value) -> jetos_package_path_or_literal(value)
             .None -> "/run/current-system/sw/bin/sh"
         }
-        &passwd.push("{user}:x:{uid}:{uid}:{user}:{home}:{shell}\n")
-        &group.push("{user}:x:{uid}:{user}\n")
-        &shadow.push("{user}:!:1::::::\n")
-        &sysusers.push("u {user} {uid} \"{user}\" {home} {shell}\n")
+        passwd.push("{user}:x:{uid}:{uid}:{user}:{home}:{shell}\n")
+        group.push("{user}:x:{uid}:{user}\n")
+        shadow.push("{user}:!:1::::::\n")
+        sysusers.push("u {user} {uid} \"{user}\" {home} {shell}\n")
     }
     loop idx in 0..<groups.len() {
         name: groups[idx]
@@ -52,9 +52,9 @@ jetos_write_identity_files: fn(dir: String, etc: String, system: SystemPlan) IOE
             .Val(value) -> jetos_parse_list_items(value).join(",")
             .None -> ""
         }
-        &group.push("{name}:x:{gid}:{members}\n")
-        &sysusers.push("g {name} {gid}\n")
-        if members != "" -> &sysusers.push("m {members.replace(",", " ")} {name}\n")
+        group.push("{name}:x:{gid}:{members}\n")
+        sysusers.push("g {name} {gid}\n")
+        if members != "" -> sysusers.push("m {members.replace(",", " ")} {name}\n")
     }
     files.write(files.join(etc, "passwd"), passwd.join(""))
     files.write(files.join(etc, "group"), group.join(""))
@@ -155,7 +155,7 @@ jetos_kernel_source_json: fn(entry: JetOSRealizedPackage) -[FS]> String Never! {
             .Err(_) -> "<missing>"
         }
         // Rust JSON::object_of emits its ordered fields with these newlines.
-        &files_json.push("{{\n  \"name\": {foundation_json_quote(fact.name)},\n  \"path\": {foundation_json_quote(path)},\n  \"sha256\": {foundation_json_quote(sha)}\n}}")
+        files_json.push("{{\n  \"name\": {foundation_json_quote(fact.name)},\n  \"path\": {foundation_json_quote(path)},\n  \"sha256\": {foundation_json_quote(sha)}\n}}")
     }
     "{{\"mode\":\"source-built\",\"files\":[{files_json.join(",")}]}}"
 }

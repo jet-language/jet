@@ -23,23 +23,23 @@ impl BagIter.Iterator {
 // Stops at the first item above `limit`; everything after it stays unread.
 first_over: fn(items: &Iter<Int>, limit: Int) -> Int? {
     loop {
-        item: (&items.next()) ?? return None
+        item: (items.next()) ?? return None
         if item > limit -> return Val(item)
     }
 }
 
 run: fn() {
     items := [1, 2, 3].lazy()
-    print(&items.next())
-    print(&items.next())
-    print(^items.to_list())
+    print(items.next())
+    print(items.next())
+    print(items.to_list())
 
     bag := BagIter{bag: Crate{data: [7]}, idx: 0}
-    print(&bag.next())
-    print(&bag.next())
-    print(&bag.next())
+    print(bag.next())
+    print(bag.next())
+    print(bag.next())
 
     numbers := [1, 5, 2, 8, 3].lazy()
-    print(first_over(&numbers, 4))
-    print(^numbers.to_list())
+    print(first_over(numbers, 4))
+    print(numbers.to_list())
 }

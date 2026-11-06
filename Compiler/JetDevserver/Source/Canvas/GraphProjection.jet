@@ -60,7 +60,7 @@ project_checked: fn(path: OSPath, source_id: String, src: String, bundle: AST.Pr
     graph_json := [String]{}; inline_spans := [InlineExpr]{}; anchors := [GraphEditAnchor]{}; node_refs := [NodeQueryRef]{}
     callable_exports := canvas_callable_exports(bundle, facts)
     loop (module_idx, module_ref) in bundle.modules.iter().enumerate() ->
-        collect_item_graphs(path, src, index, facts.name_ledger, module_idx, bundle.entry, module_ref.display, module_ref.source, module_ref.items, .None, &graph_json, &inline_spans, &anchors, &node_refs)
+        collect_item_graphs(path, src, index, facts.name_ledger, module_idx, bundle.entry, module_ref.display, module_ref.source, module_ref.items, .None, graph_json, inline_spans, anchors, node_refs)
     game_facts := canvas_game_facts(source_id, src, bundle)
     fmt := jet_driver.Formatter.format_source(src).unwrap_or_else((_) -> src.to_string())
     blueprint := canvas_blueprint_facts_json(path, src, bundle, index, runtime_events, game_facts)
@@ -95,7 +95,7 @@ canvas_callable_callee: fn(bundle: AST.ProgramBundle, declaration: jet_foundatio
 }
 enum_catalog_json: fn(bundle: AST.ProgramBundle) -> String {
     catalog := [String:[String]]{}
-    loop module_ref in bundle.modules -> collect_enum_variants(module_ref.items, &catalog)
+    loop module_ref in bundle.modules -> collect_enum_variants(module_ref.items, catalog)
     keys := catalog.keys().collect(); keys.sort()
     entries := keys.iter().map((name) -> {
         variants := catalog[name].iter().map((variant) -> "{{\"name\":{json_str(variant)},\"source\":{json_str("{name}.{variant}")}}}").collect().join(",")
@@ -119,7 +119,7 @@ collect_enum_variants: fn(items: &[Item], catalog: &[String:[String]]) {
 }
 pattern_catalog_json: fn(bundle: AST.ProgramBundle) -> String {
     catalog := [String:[(String, USize)]]{}
-    loop module_ref in bundle.modules -> collect_pattern_variants(module_ref.items, &catalog)
+    loop module_ref in bundle.modules -> collect_pattern_variants(module_ref.items, catalog)
     keys := catalog.keys().collect(); keys.sort()
     entries := keys.iter().map((name) -> {
         variants := catalog[name].iter().map((variant) -> "{{\"name\":{json_str(variant._0)},\"arity\":{variant._1}}}").collect().join(",")
@@ -187,7 +187,7 @@ canvas_blueprint_facts_json: fn(path: OSPath, src: String, bundle: AST.ProgramBu
     interfaces := [String]{}
     loop (module_idx, module_ref) in bundle.modules.iter().enumerate() {
         items := module_ref.items.iter().collect()
-        collect_interface_facts(items, &interfaces, [], module_ref.source, module_idx, module_ref.alias, bundle.name_ledger)
+        collect_interface_facts(items, interfaces, [], module_ref.source, module_idx, module_ref.alias, bundle.name_ledger)
     }
     task_flows := task_flow_facts(src).join(",")
     outputs := index.outputs().iter().map(output_fact_json).collect().join(",")
@@ -207,7 +207,7 @@ canvas_game_fact_json: fn(fact: CanvasGameFact) -> String {
 canvas_game_facts: fn(source_id: String, src: String, bundle: &AST.ProgramBundle) -> [CanvasGameFact] {
     facts := [CanvasGameFact]{}
     module_ref := bundle.modules.get(bundle.entry) ?? return facts
-    collect_game_items(module_ref.items, source_id, src, &facts)
+    collect_game_items(module_ref.items, source_id, src, facts)
     facts.sort_by_key((fact) -> (_0: fact.source_span.start, _1: fact.source_span.end)); facts
 }
 collect_game_items: fn(items: &[Item], source_id: String, src: String, out: &[CanvasGameFact]) {
@@ -620,8 +620,8 @@ project_func: fn(index: SemIndex, module_display: String, module_src: String, f:
             .Param { ty } -> _: g.local_types.insert(def.name.clone(), ty.clone()), _ -> {}
         }
     }
-    project_stmt_block(&g, index, module_src, f.body, 0, 220, 170)
-    add_source_comment_regions(&g, module_src, f); add_execution_overlay(&g, module_src, f.body)
+    project_stmt_block(g, index, module_src, f.body, 0, 220, 170)
+    add_source_comment_regions(g, module_src, f); add_execution_overlay(g, module_src, f.body)
     g
 }
 collect_node_refs: fn(graph: &GraphBuilder, out: &[NodeQueryRef]) {

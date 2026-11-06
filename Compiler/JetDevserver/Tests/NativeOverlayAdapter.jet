@@ -20,7 +20,7 @@ fact: fn(_revision: String, sequence: U64) -> JetDevtoolsEvent {
     event: JetDevtoolsEvent.from_parts(sequence, "session", "build", "program", "{{\"ok\":true}}").unwrap()
         .publish(JetDevtoolsPayload.one("message", JetDevtoolsValue.text("opaque payload"))).unwrap()
     envelope := JetDevtoolsEnvelope.new("session", 0)
-    envelope.push(^event)
+    envelope.push(event)
     events: envelope.events().cloned().collect()
     return events.into_iter().next().unwrap()
 }
@@ -31,7 +31,7 @@ action_panel: fn() -> NativeOverlayPanelFact {
 }
 #Test("projects_canonical_event_without_json_parsing") {
     input: projection("rev-1", 1, [fact("rev-1", 1)])
-    update: project_projection(&input, &[]).unwrap()
+    update: project_projection(input, &[]).unwrap()
     event: update.event.unwrap()
     panel: event.panels.iter().find((panel) -> panel.panel_id == NATIVE_OVERLAY_EVENT_LOG_PANEL_ID).unwrap()
     root: &panel.nodes[0]
@@ -46,7 +46,7 @@ action_panel: fn() -> NativeOverlayPanelFact {
     second: adapter.apply_projection_with_panels(projection("rev-2", 2, [fact("rev-2", 2)]), &[action_panel()]).unwrap()
     assert_eq(update.identity.revision, "rev-1")
     assert(second.reset)
-    assert(if adapter.validate_action_request(&request) == {
+    assert(if adapter.validate_action_request(request) == {
         .Err(.StaleRevision { expected: _, received: _ }) -> true
         else -> false
     })
@@ -55,7 +55,7 @@ action_panel: fn() -> NativeOverlayPanelFact {
     input := projection("rev-1", 1, [fact("rev-1", 1)])
     input.reset = true
     input.truncation = true
-    update: project_projection(&input, &[]).unwrap()
+    update: project_projection(input, &[]).unwrap()
     assert(update.reset)
     assert(update.truncation)
     assert(update.unavailable.iter().any((fact) -> fact.reason == .Reset))

@@ -63,10 +63,10 @@ semindex_json_view_provenance: fn(provenance: ViewProvenanceFact) -> String Neve
                 .Index -> "{{\"kind\":\"index\"}}"
                 .Range -> "{{\"kind\":\"range\"}}"
             }
-            &projections.push(text)
+            projections.push(text)
         }
         joined: projections.join(",")
-        &sources.push("{{\"source\":{source},\"projections\":[{joined}]}}")
+        sources.push("{{\"source\":{source},\"projections\":[{joined}]}}")
     }
     output_path: semindex_json_strings(provenance.output_path)
     joined_sources: sources.join(",")
@@ -104,7 +104,7 @@ semindex_json_callable_signature: fn(signature: CallableSignatureFact) -> String
         zone: foundation_json_quote(parameter.zone_name())
         ty: foundation_json_quote(parameter.type_name())
         variadic: semindex_json_bool(parameter.variadic)
-        &parameters.push("{{\"name\":{name},\"label\":{label},\"source\":{source},\"default\":{default_text},\"default_source\":{default_source},\"default_value\":{default_value},\"access\":{access},\"zone\":{zone},\"type\":{ty},\"variadic\":{variadic}}}")
+        parameters.push("{{\"name\":{name},\"label\":{label},\"source\":{source},\"default\":{default_text},\"default_source\":{default_source},\"default_value\":{default_value},\"access\":{access},\"zone\":{zone},\"type\":{ty},\"variadic\":{variadic}}}")
     }
     effects := "null"
     effect_status := "null"
@@ -126,7 +126,7 @@ semindex_json_callable_signature: fn(signature: CallableSignatureFact) -> String
                         "{{\"kind\":\"via_parameter\",\"name\":{quoted_name},\"source\":{span}}}"
                     }
                 }
-                &facts.push(fact)
+                facts.push(fact)
             }
             effects = semindex_json_string_array(names)
             effect_status = "{{\"status\":\"checked\"}}"
@@ -454,7 +454,7 @@ semindex_status_view_provenance: fn(provenance: ViewProvenanceFact) -> StatusVal
             .Index -> StatusValue.Object(StatusFields.new().with("kind", StatusValue.String("index")))
             .Range -> StatusValue.Object(StatusFields.new().with("kind", StatusValue.String("range")))
         }
-        &sources.push(StatusValue.Object(StatusFields.new().with("source", source).with("projections", StatusValue.Array(projections))))
+        sources.push(StatusValue.Object(StatusFields.new().with("source", source).with("projections", StatusValue.Array(projections))))
     }
     StatusValue.Object(StatusFields.new().with("output_path", semindex_status_strings(provenance.output_path)).with("sources", StatusValue.Array(sources)).with("mutable", StatusValue.Bool(provenance.mutable)))
 }
@@ -472,7 +472,7 @@ semindex_status_callable_signature: fn(signature: CallableSignatureFact) -> Stat
             default_source = semindex_status_span(value.source)
             default_value = semindex_status_callable_unavailable(value.value_unavailable)
         }
-        &parameters.push(StatusValue.Object(StatusFields.new()
+        parameters.push(StatusValue.Object(StatusFields.new()
             .with("name", StatusValue.String(parameter.name))
             .with("label", StatusValue.String(parameter.label))
             .with("source", semindex_status_span(parameter.source))

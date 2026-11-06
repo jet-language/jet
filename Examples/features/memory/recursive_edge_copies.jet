@@ -38,7 +38,7 @@ renamed: fn(node: Node, note: String) -> Node {
 }
 
 add_tag: fn(node: &Node, text: String) {
-    &node.meta.tags.push(text)
+    node.meta.tags.push(text)
 }
 
 set_note: fn(node: &Node, note: String) {
@@ -63,11 +63,11 @@ run: fn() {
     print("returned: {original.meta.note} / {other.meta.note}")
 
     tagged := original
-    add_tag(&tagged, "b")
+    add_tag(tagged, "b")
     print("write param: {original.meta.tags.len()} / {tagged.meta.tags.len()}")
 
     grown := original
-    &grown.meta.children.push(leaf("leaf"))
+    grown.meta.children.push(leaf("leaf"))
     grown.meta.children[0].meta.note = "leaf edited"
     print("nested: {original.meta.children.len()} / {grown.meta.children.len()} {grown.meta.children[0].meta.note}")
 
@@ -82,7 +82,7 @@ run: fn() {
 
     // A field written inside a function through its write parameter.
     noted := original
-    set_note(&noted, "param field")
+    set_note(noted, "param field")
     print("param field: {original.meta.note} / {noted.meta.note}")
 
     // A Map value's field.

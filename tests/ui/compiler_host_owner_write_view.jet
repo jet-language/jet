@@ -25,7 +25,7 @@ adopt: fn(value: &HostValue, path: [Int], position: Int) -> Bool Never! {
     if &value == .List(values) {
         index: path[position]
         if index < 0 || index >= values.len() -> return false
-        return adopt(&values[index], path, position + 1)
+        return adopt(values[index], path, position + 1)
     }
     false
 }
@@ -35,9 +35,9 @@ adopted: fn(value: HostValue, token: Int) -> Bool Never! {
 }
 run: fn() {
     root := HostValue.List{values: [HostValue]{leaf(10), HostValue.List{values: [HostValue]{leaf(20), leaf(30)}}}}
-    if !adopt(&root, [Int]{1, 0}, 0) -> panic("nested owner adoption failed")
-    if adopt(&root, [Int]{1, 0}, 0) -> panic("owner alias adopted twice")
-    if adopt(&root, [Int]{9}, 0) -> panic("invalid path adopted an owner")
+    if !adopt(root, [Int]{1, 0}, 0) -> panic("nested owner adoption failed")
+    if adopt(root, [Int]{1, 0}, 0) -> panic("owner alias adopted twice")
+    if adopt(root, [Int]{9}, 0) -> panic("invalid path adopted an owner")
     if root == {
         .List(values) -> {
             if adopted(values[0], 10) -> panic("sibling owner changed")

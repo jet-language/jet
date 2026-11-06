@@ -27,7 +27,7 @@ script_deps_test_root: fn(path: String, source: String) -> JetDriverAuthorizedSo
     source: "use textkit#1.4\nrun: fn() {{ print(textkit.hi()) }}\n"
     roots := [JetDriverAuthorizedSourceRoot]{script_deps_test_root(path, source)}
     admitted := [JetDriverScriptDependency]{}
-    assert(jet_cli_script_dependency_roots(&roots, "{path}/stats.jet", &admitted, false) == None)
+    assert(jet_cli_script_dependency_roots(roots, "{path}/stats.jet", admitted, false) == None)
     assert(roots.len() == 2 && admitted.len() == 1)
     assert(admitted[0].name == "textkit" && admitted[0].selector == "1.4" && admitted[0].resolved_version == "1.4.2")
     assert(admitted[0].content_hash.starts_with("sha256-") && admitted[0].content_hash.len() == 71)
@@ -58,13 +58,13 @@ script_deps_test_root: fn(path: String, source: String) -> JetDriverAuthorizedSo
 
     unmatched := [JetDriverAuthorizedSourceRoot]{script_deps_test_root(path, "use textkit#9.9.9\nrun: fn() {{}}\n")}
     rejected := [JetDriverScriptDependency]{}
-    refusal: jet_cli_script_dependency_roots(&unmatched, "{path}/stats.jet", &rejected, false) ?? panic("local package with no matching version must fail")
+    refusal: jet_cli_script_dependency_roots(unmatched, "{path}/stats.jet", rejected, false) ?? panic("local package with no matching version must fail")
     assert(refusal.exit_code != 0 && refusal.stderr.contains("E1253") && refusal.stderr.contains("no version satisfies"))
     assert(unmatched.len() == 1 && rejected.len() == 0)
 
     cli_files.symlink(".", "{package}/loop") ?? panic("hostile dependency link")
     hostile := [JetDriverAuthorizedSourceRoot]{script_deps_test_root(path, source)}
-    refusal_link: jet_cli_script_dependency_roots(&hostile, "{path}/stats.jet", &rejected, false) ?? panic("hostile source must fail")
+    refusal_link: jet_cli_script_dependency_roots(hostile, "{path}/stats.jet", rejected, false) ?? panic("hostile source must fail")
     assert(refusal_link.stderr.contains("E1253") && refusal_link.stderr.contains("symlink"))
     cli_files.remove("{package}/loop") ?? panic("remove hostile link")
     cli_files.symlink("{path}/.jet/inline-deps", "{path}/alias") ?? panic("hostile ancestor")
@@ -72,9 +72,9 @@ script_deps_test_root: fn(path: String, source: String) -> JetDriverAuthorizedSo
     assert(jet_cli_script_dependency_authority("{path}/alias/textkit", "1.4.2") == .Err(_))
 
     manifest := script_deps_test_root(path, source)
-    &manifest.files.push(JetDriverAuthorizedSourceFile{path: "{path}/package.jet", relative_path: "package.jet", identity: "manifest", source: "name: \"project\"\n"})
+    manifest.files.push(JetDriverAuthorizedSourceFile{path: "{path}/package.jet", relative_path: "package.jet", identity: "manifest", source: "name: \"project\"\n"})
     declared := [JetDriverAuthorizedSourceRoot]{manifest}
-    assert(jet_cli_script_dependency_roots(&declared, "{path}/stats.jet", &rejected, false) == None)
+    assert(jet_cli_script_dependency_roots(declared, "{path}/stats.jet", rejected, false) == None)
     assert(declared.len() == 1 && rejected.len() == 0)
 
     // A valid carrier is a package, not a manifestless script; malformed
@@ -86,7 +86,7 @@ script_deps_test_root: fn(path: String, source: String) -> JetDriverAuthorizedSo
     loop inline_source in inline_sources {
         inline_roots := [JetDriverAuthorizedSourceRoot]{script_deps_test_root(path, inline_source)}
         inline_admitted := [JetDriverScriptDependency]{}
-        assert(jet_cli_script_dependency_roots(&inline_roots, "{path}/stats.jet", &inline_admitted, false) == None)
+        assert(jet_cli_script_dependency_roots(inline_roots, "{path}/stats.jet", inline_admitted, false) == None)
         assert(inline_roots.len() == 1 && inline_admitted.len() == 0)
     }
 }

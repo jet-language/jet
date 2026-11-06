@@ -11,7 +11,7 @@ runtime_abi_atom: fn(name: String) -> String Never! {
     loop index in 0..<bytes.len() {
         code: Int.from_u8(bytes[index])
         if code == 46 || code == 95 {
-            if out.len() > 0 && out[out.len() - 1] != (U8{95}) -> &out.push(U8{95})
+            if out.len() > 0 && out[out.len() - 1] != (U8{95}) -> out.push(U8{95})
             next
         }
         upper: code >= 65 && code <= 90
@@ -20,12 +20,12 @@ runtime_abi_atom: fn(name: String) -> String Never! {
             next_code: if index + 1 < bytes.len() -> Int.from_u8(bytes[index + 1]) else -> 0
             previous_upper: previous >= 65 && previous <= 90
             next_lower: next_code >= 97 && next_code <= 122
-            if !previous_upper || next_lower -> &out.push(U8{95})
+            if !previous_upper || next_lower -> out.push(U8{95})
         }
-        &out.push(U8{if upper -> code + 32 else -> code})
+        out.push(U8{if upper -> code + 32 else -> code})
     }
     if out.len() > 0 && out[out.len() - 1] == (U8{95}) {
-        _: &out.pop() ?? panic("a nonempty runtime ABI atom failed to pop")
+        _: out.pop() ?? panic("a nonempty runtime ABI atom failed to pop")
     }
     String.from_bytes(out) ?? panic("runtime ABI atom is not ASCII")
 }
@@ -1356,7 +1356,7 @@ ir_key_row: fn(keys: [String], rows: [Int], key: String) -> Int? Never! {
 // merge sort, so equal keys keep table order), keeping each key's first row.
 ir_key_index: fn(keys: [String]) -> [Int] Never! {
     order := [Int]{}
-    loop index in 0..<keys.len() -> &order.push(index)
+    loop index in 0..<keys.len() -> order.push(index)
     width := 1
     loop width < order.len() {
         merged := [Int]{}
@@ -1368,10 +1368,10 @@ ir_key_index: fn(keys: [String]) -> [Int] Never! {
             right := middle
             loop left < middle || right < end {
                 if right >= end || (left < middle && !(keys[order[right]] < keys[order[left]])) {
-                    &merged.push(order[left])
+                    merged.push(order[left])
                     left += 1
                 } else {
-                    &merged.push(order[right])
+                    merged.push(order[right])
                     right += 1
                 }
             }
@@ -1383,7 +1383,7 @@ ir_key_index: fn(keys: [String]) -> [Int] Never! {
     rows := [Int]{}
     loop row in order {
         if rows.len() > 0 && keys[rows[rows.len() - 1]] == keys[row] -> next
-        &rows.push(row)
+        rows.push(row)
     }
     rows
 }

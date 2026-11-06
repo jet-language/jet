@@ -20,13 +20,13 @@ env_shell_path_separator: fn() -[Env]> String Never! {
 env_shell_push_unique: fn(seen: &[String: Bool], parts: &[String], dir: String) Never! {
     if seen.has_key(dir) -> return
     seen[dir] = true
-    &parts.push(dir)
+    parts.push(dir)
 }
 
 // The leased variable names in sorted order.
 env_shell_lease_var_names: fn(vars: [String: LeaseText]) -> [String] Never! {
     names := vars.keys().to_list()
-    &names.sort()
+    names.sort()
     names
 }
 
@@ -65,12 +65,12 @@ ShellEnv: struct {
         parts := [LeaseText]{}
         loop lease in self.cache_leases {
             bin: lease.child_bin_dir() ?? next
-            &parts.push(bin)
+            parts.push(bin)
         }
-        loop dir in self.bin_dirs -> &parts.push(LeaseText.plain(dir))
+        loop dir in self.bin_dirs -> parts.push(LeaseText.plain(dir))
         loop dir in base_path.split(separator) {
             if dir == "" -> next
-            &parts.push(LeaseText.plain(dir))
+            parts.push(LeaseText.plain(dir))
         }
         LeaseText.join_unique(parts, separator)
     }
@@ -81,10 +81,10 @@ ShellEnv: struct {
         separator: env_shell_path_separator()
         seen := [String: Bool]{}
         parts := [String]{}
-        loop dir in self.bin_dirs -> env_shell_push_unique(&seen, &parts, dir)
+        loop dir in self.bin_dirs -> env_shell_push_unique(seen, parts, dir)
         loop dir in base_path.split(separator) {
             if dir == "" -> next
-            env_shell_push_unique(&seen, &parts, dir)
+            env_shell_push_unique(seen, parts, dir)
         }
         parts.join(separator)
     }
@@ -107,13 +107,13 @@ ShellEnv: struct {
         loop lease in self.cache_leases {
             if lease.child_bin_dir() == None -> next
             parent_bin: lease.parent_shell_bin_dir() ?? return None
-            env_shell_push_unique(&seen, &parts, parent_bin)
+            env_shell_push_unique(seen, parts, parent_bin)
         }
-        loop dir in self.bin_dirs -> env_shell_push_unique(&seen, &parts, dir)
+        loop dir in self.bin_dirs -> env_shell_push_unique(seen, parts, dir)
         separator: env_shell_path_separator()
         loop dir in base_path.split(separator) {
             if dir == "" -> next
-            env_shell_push_unique(&seen, &parts, dir)
+            env_shell_push_unique(seen, parts, dir)
         }
         Val(parts.join(separator))
     }
@@ -136,20 +136,20 @@ ShellEnv: struct {
     // The composed environment over the caller's inherited PATH.
     apply_to: fn(&self, spec: ProcessSpec) -[FS, Exec, Env]> ProcessSpec StoreError! {
         base: sys.get("PATH") ?? ""
-        &self.apply_to_base(spec, base)
+        self.apply_to_base(spec, base)
     }
 
     // Only the declared environment and realized PATH. Callers clear the
     // child environment first for clean-shell checks and task probes.
     apply_clean_to: fn(&self, spec: ProcessSpec) -[FS, Exec, Env]> ProcessSpec StoreError! {
-        &self.apply_to_base(spec, env_shell_clean_path())
+        self.apply_to_base(spec, env_shell_clean_path())
     }
 
     // `apply_clean_to` over a cleared child environment when `clean`, else
     // `apply_to`.
     apply_in_mode: fn(&self, spec: ProcessSpec, clean: Bool) -[FS, Exec, Env]> ProcessSpec StoreError! {
-        if clean -> return &self.apply_clean_to(spec.env_clear())
-        &self.apply_to(spec)
+        if clean -> return self.apply_clean_to(spec.env_clear())
+        self.apply_to(spec)
     }
 
     // The descriptors `apply_to_base` passes, so a leased program path can
@@ -157,7 +157,7 @@ ShellEnv: struct {
     // itself; a lease that lost a handle fails there.
     planned_binding: fn(self) -> LeaseBinding Never! {
         binding := LeaseBinding.empty()
-        loop lease in self.cache_leases -> lease.plan_binding(&binding)
+        loop lease in self.cache_leases -> lease.plan_binding(binding)
         binding
     }
 
@@ -169,7 +169,7 @@ ShellEnv: struct {
         out := spec
         binding := LeaseBinding.empty()
         loop index in 0..<self.cache_leases.len() {
-            out = &self.cache_leases[index].keep_open_for(out, &binding) ?? return Err(StoreError.Other(err.message()))
+            out = self.cache_leases[index].keep_open_for(out, binding) ?? return Err(StoreError.Other(err.message()))
         }
         path: self.composed_path(base_path).render(binding) ?? return Err(StoreError.Other(err.message()))
         out = out.env("PATH", path)
@@ -197,7 +197,7 @@ ShellEnv: struct {
     // Run `cmd_args` inside the composed env and return its exit code. The
     // Jetpack process stays the parent so callers can do post-command work.
     run_command: fn(&self, cmd_args: [String]) -[IO, FS, Env, Exec, Rand, Time, Time.Wait]> Int Never! {
-        &self.run_command_in_mode(cmd_args, None, ShellRunOptions{clean: false, silent: false, replace_process: false})
+        self.run_command_in_mode(cmd_args, None, ShellRunOptions{clean: false, silent: false, replace_process: false})
     }
 
     // Stand in for the Jetpack process with a verified environment command
@@ -205,32 +205,32 @@ ShellEnv: struct {
     // no process replacement, so the command is a waited child whose status,
     // a signal death as 128+n, becomes this process's exit code.
     exec_command: fn(&self, cmd_args: [String]) -[IO, FS, Env, Exec, Rand, Time, Time.Wait]> Int Never! {
-        &self.run_command_in_mode(cmd_args, None, ShellRunOptions{clean: false, silent: false, replace_process: true})
+        self.run_command_in_mode(cmd_args, None, ShellRunOptions{clean: false, silent: false, replace_process: true})
     }
 
     // Run with an explicit working directory; it belongs to the child only.
     run_command_in: fn(&self, cmd_args: [String], cwd: String?) -[IO, FS, Env, Exec, Rand, Time, Time.Wait]> Int Never! {
-        &self.run_command_in_mode(cmd_args, cwd, ShellRunOptions{clean: false, silent: false, replace_process: false})
+        self.run_command_in_mode(cmd_args, cwd, ShellRunOptions{clean: false, silent: false, replace_process: false})
     }
 
     // Run while keeping stdout out of a generated shell script; stderr stays
     // visible so a failed task still explains itself.
     run_command_in_silent: fn(&self, cmd_args: [String], cwd: String?) -[IO, FS, Env, Exec, Rand, Time, Time.Wait]> Int Never! {
-        &self.run_command_in_mode(cmd_args, cwd, ShellRunOptions{clean: false, silent: true, replace_process: false})
+        self.run_command_in_mode(cmd_args, cwd, ShellRunOptions{clean: false, silent: true, replace_process: false})
     }
 
     // Run with no inherited host variables: only the composed PATH, declared
     // variables, Jet markers, and declared unsets enter the child.
     run_clean_command: fn(&self, cmd_args: [String]) -[IO, FS, Env, Exec, Rand, Time, Time.Wait]> Int Never! {
-        &self.run_command_in_mode(cmd_args, None, ShellRunOptions{clean: true, silent: false, replace_process: false})
+        self.run_command_in_mode(cmd_args, None, ShellRunOptions{clean: true, silent: false, replace_process: false})
     }
 
     run_clean_command_in: fn(&self, cmd_args: [String], cwd: String?) -[IO, FS, Env, Exec, Rand, Time, Time.Wait]> Int Never! {
-        &self.run_command_in_mode(cmd_args, cwd, ShellRunOptions{clean: true, silent: false, replace_process: false})
+        self.run_command_in_mode(cmd_args, cwd, ShellRunOptions{clean: true, silent: false, replace_process: false})
     }
 
     run_clean_command_in_silent: fn(&self, cmd_args: [String], cwd: String?) -[IO, FS, Env, Exec, Rand, Time, Time.Wait]> Int Never! {
-        &self.run_command_in_mode(cmd_args, cwd, ShellRunOptions{clean: true, silent: true, replace_process: false})
+        self.run_command_in_mode(cmd_args, cwd, ShellRunOptions{clean: true, silent: true, replace_process: false})
     }
 
     run_command_in_mode: fn(&self, cmd_args: [String], cwd: String?, options: ShellRunOptions) -[IO, FS, Env, Exec, Rand, Time, Time.Wait]> Int Never! {
@@ -272,10 +272,10 @@ ShellEnv: struct {
             }
         }
         scratch: launch.scratch
-        defer close(^scratch)
+        defer close(scratch)
         spec := launch.spec
         if cwd == .Val(directory) -> spec = spec.cwd(directory)
-        spec = if &self.apply_in_mode(spec, options.clean) == {
+        spec = if self.apply_in_mode(spec, options.clean) == {
             .Ok(ready) -> ready
             .Err(error) -> {
                 Theme.resolve_choice(ColorChoice.Auto).error("could not run `{program}`", error.message(), "re-realize the package so its lease holds every output, then run the command again")
@@ -302,14 +302,14 @@ ShellEnv: struct {
 
     // Enter an interactive temporary shell. Returns the child's exit code.
     enter: fn(&self, theme: Theme, kind: ShellKind) -[IO, FS, Env, Exec, Rand, Time, Time.Wait]> Int Never! {
-        &self.enter_with_mode(theme, kind, false)
+        self.enter_with_mode(theme, kind, false)
     }
 
     // Enter an interactive temporary shell with only the composed
     // environment: the explicit `--pure` foreign-environment path. Ordinary
     // Jetpack shells keep the host variables users expect.
     enter_clean: fn(&self, theme: Theme, kind: ShellKind) -[IO, FS, Env, Exec, Rand, Time, Time.Wait]> Int Never! {
-        &self.enter_with_mode(theme, kind, true)
+        self.enter_with_mode(theme, kind, true)
     }
 
     enter_with_mode: fn(&self, theme: Theme, kind: ShellKind, clean: Bool) -[IO, FS, Env, Exec, Rand, Time, Time.Wait]> Int Never! {
@@ -330,13 +330,13 @@ ShellEnv: struct {
                 return 126
             }
         }
-        scratch := ^launch.scratch
+        scratch := launch.scratch.move()
         spec := launch.spec
-        spec = if &self.apply_in_mode(spec, clean) == {
+        spec = if self.apply_in_mode(spec, clean) == {
             .Ok(ready) -> ready
             .Err(error) -> {
                 theme.error("could not start `{kind.binary()}`", error.message(), "re-realize the leased packages, then enter the shell again")
-                close(^scratch)
+                close(scratch)
                 return 126
             }
         }
@@ -349,20 +349,20 @@ ShellEnv: struct {
             .Bash -> {
                 rc: env_shell_write_temp("jetpack-bashrc", env_shell_bash_rc(self.label, self.prompt_path, self.prompt_strip))
                 spec = spec.args_extend([String]{"--rcfile", rc, "-i"})
-                &scratch.scratch_files.push(rc)
+                scratch.scratch_files.push(rc)
             }
             .Zsh -> {
                 // zsh reads `.zshrc` from ZDOTDIR; point it at a scratch dir.
                 dir: env_shell_write_temp_dir("jetpack-zdotdir")
                 env_shell_write_best_effort(files.join(dir, ".zshrc"), env_shell_zsh_rc(self.label, self.prompt_path, self.prompt_strip))
                 spec = spec.env("ZDOTDIR", dir).arg("-i")
-                &scratch.scratch_dirs.push(dir)
+                scratch.scratch_dirs.push(dir)
             }
             .Fish -> {
                 spec = spec.args_extend([String]{"-C", env_shell_fish_init(self.label, self.prompt_path, self.prompt_strip), "-i"})
             }
         }
-        defer close(^scratch)
+        defer close(scratch)
         spec = spec.stdin(.Inherit).stdout(.Inherit).stderr(.Inherit)
         code: if spec.run() == {
             .Ok(receipt) -> env_shell_exit_code(receipt, 0)

@@ -188,7 +188,7 @@ status_of: fn(state: EditorState) -> String { state.status.copy() }
 commit_edit: fn(state: EditorState, next: String, next_selection: TextSelection, status: String) -> EditorState {
     if state.body == next -> return state.copy()
     history := state.undo
-    &history.push(state.body)
+    history.push(state.body)
     EditorState{
         body: next.copy(),
         title: state.title.copy(),
@@ -278,9 +278,9 @@ drop_text: fn(state: EditorState, dropped: String) -> EditorState { apply_text(s
 
 undo: fn(state: EditorState) -> EditorState {
     history := state.undo
-    previous: &history.pop() ?? return state
+    previous: history.pop() ?? return state
     forward := state.redo
-    &forward.push(state.body)
+    forward.push(state.body)
     cursor: text.scalar_count(previous)
     EditorState{
         body: previous.copy(),
@@ -298,9 +298,9 @@ undo: fn(state: EditorState) -> EditorState {
 
 redo: fn(state: EditorState) -> EditorState {
     forward := state.redo
-    next: &forward.pop() ?? return state
+    next: forward.pop() ?? return state
     history := state.undo
-    &history.push(state.body)
+    history.push(state.body)
     cursor: text.scalar_count(next)
     EditorState{
         body: next.copy(),

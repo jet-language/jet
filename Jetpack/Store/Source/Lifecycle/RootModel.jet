@@ -281,7 +281,7 @@ LifecycleSnapshot: struct {
     root_list: fn(self) -> [LifecycleRoot] Never! {
         out := [LifecycleRoot]{}
         ids: store_lifecycle_sorted_ids(self.roots)
-        loop id in ids -> &out.push(self.roots[id])
+        loop id in ids -> out.push(self.roots[id])
         out
     }
 }
@@ -376,17 +376,17 @@ store_lifecycle_pad20: fn(value: Int) -> String Never! {
 // Sorted, duplicate-free union of two target sets.
 store_lifecycle_union: fn(left: [String], right: [String]) -> [String] Never! {
     merged := left.copy()
-    loop value in right -> &merged.push(value)
+    loop value in right -> merged.push(value)
     store_lifecycle_sorted_set(merged)
 }
 
 // Sort and drop duplicates.
 store_lifecycle_sorted_set: fn(values: [String]) -> [String] Never! {
     sorted := values.copy()
-    &sorted.sort()
+    sorted.sort()
     out := [String]{}
     loop value in sorted {
-        if out.len() == 0 || out[out.len() - 1] != value -> &out.push(value)
+        if out.len() == 0 || out[out.len() - 1] != value -> out.push(value)
     }
     out
 }
@@ -401,7 +401,7 @@ store_lifecycle_is_subset: fn(inner: [String], outer: [String]) -> Bool Never! {
 // Root ids of a state map in sorted order.
 store_lifecycle_sorted_ids: fn(state: [String: LifecycleRoot]) -> [String] Never! {
     ids := state.keys().to_list()
-    &ids.sort()
+    ids.sort()
     ids
 }
 

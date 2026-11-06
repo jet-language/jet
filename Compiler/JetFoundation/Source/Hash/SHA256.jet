@@ -70,31 +70,31 @@ sha256_compress: fn(state: &[U32], words: &[U32], k: [U32], block: View<U8>, off
 
 sha256_bytes: fn(data: View<U8>) -> [U8] Never! {
     state := [U32]{}
-    loop word in SHA256_H0 -> &state.push(U32{word})
+    loop word in SHA256_H0 -> state.push(U32{word})
     k := [U32]{}
-    loop word in SHA256_K -> &k.push(U32{word})
+    loop word in SHA256_K -> k.push(U32{word})
     words := [U32]{}
-    loop _ in 0..<64 -> &words.push(U32{0})
+    loop _ in 0..<64 -> words.push(U32{0})
     offset := 0
     loop offset + 64 <= data.len() {
-        sha256_compress(&state, &words, k, data, offset)
+        sha256_compress(state, words, k, data, offset)
         offset += 64
     }
     msg := [U8]{}
-    loop position in offset..<data.len() -> &msg.push(data[position])
-    &msg.push(U8{128})
-    loop msg.len() % 64 != 56 -> &msg.push(U8{0})
+    loop position in offset..<data.len() -> msg.push(data[position])
+    msg.push(U8{128})
+    loop msg.len() % 64 != 56 -> msg.push(U8{0})
     bit_length: ((data.len() * 8)).bit_and(SHA256_LENGTH_MASK)
     index := 7
     loop index >= 0 {
         length_byte: ((bit_length >> (8 * index))).bit_and(255)
-        &msg.push(U8{length_byte})
+        msg.push(U8{length_byte})
         index -= 1
     }
     padded: msg[0..<msg.len()]
     offset = 0
     loop offset < msg.len() {
-        sha256_compress(&state, &words, k, padded, offset)
+        sha256_compress(state, words, k, padded, offset)
         offset += 64
     }
     output := [U8]{}
@@ -104,10 +104,10 @@ sha256_bytes: fn(data: View<U8>) -> [U8] Never! {
         second: ((word >> 16)).bit_and(255)
         third: ((word >> 8)).bit_and(255)
         fourth: (word).bit_and(255)
-        &output.push(U8{first})
-        &output.push(U8{second})
-        &output.push(U8{third})
-        &output.push(U8{fourth})
+        output.push(U8{first})
+        output.push(U8{second})
+        output.push(U8{third})
+        output.push(U8{fourth})
     }
     output
 }
@@ -123,8 +123,8 @@ sha256_hex_bytes: fn(bytes: [U8]) -> String Never! {
     digits := List<U8>.try_with_capacity(bytes.len() * 2) ?? panic("hex digit allocation failed")
     loop byte in bytes {
         value: Int.from_u8(byte)
-        &digits.push(sha256_hex_digit(((value >> 4)).bit_and(15)))
-        &digits.push(sha256_hex_digit((value).bit_and(15)))
+        digits.push(sha256_hex_digit(((value >> 4)).bit_and(15)))
+        digits.push(sha256_hex_digit((value).bit_and(15)))
     }
     String.from_bytes(digits) ?? panic("hex digits are ASCII")
 }

@@ -15,15 +15,15 @@ total_lines: fn(nodes: Rows<Node>) -> Int {
 
 run: fn() {
     nodes := Rows<Node>{}
-    first: &nodes.add(Node{line: 3, kind: 1})
-    second: &nodes.add(Node{line: 7, kind: 2})
+    first: nodes.add(Node{line: 3, kind: 1})
+    second: nodes.add(Node{line: 7, kind: 2})
     print("{nodes.len()} rows, second at {second.index()}")
     nodes[second].line = 9
     nodes[first] = Node{line: 4, kind: 5}
     print("first: line {nodes[first].line} kind {nodes[first].kind}")
     print("kinds {nodes.kind}, lines total {total_lines(nodes)}")
     types := Rows<Ty>{}
-    word: &types.add(Ty{size: 8})
+    word: types.add(Ty{size: 8})
     print("type {word.index()} is {types[word].size} bytes, empty {types.is_empty()}")
     frozen: freeze(nodes)
     print("frozen lines {frozen.line}")

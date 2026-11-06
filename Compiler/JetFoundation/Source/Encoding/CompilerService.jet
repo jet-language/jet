@@ -68,7 +68,7 @@ jet_config_plain_literal: fn(expr: Expr) -> CtValue? Never! {
         .Str(parts, _, _) -> {
             text := [String]{}
             loop part in parts {
-                if part == .Lit(piece) -> &text.push(piece) else -> return None
+                if part == .Lit(piece) -> text.push(piece) else -> return None
             }
             Val(CtValue.Str{value: text.join("")})
         }
@@ -95,7 +95,7 @@ jet_config_literal: fn(value: CtValue) -> String? Never! {
         .List(values) -> {
             element: if values.len() == 0 -> "Int" else -> type_name(ast_comptime_value_type(values[0]))
             items := [String]{}
-            loop item in values -> &items.push(jet_config_literal(item) ?? return None)
+            loop item in values -> items.push(jet_config_literal(item) ?? return None)
             Val(["[", element, "]{{", items.join(", "), "}}"].join(""))
         }
         .Map(entries) -> {
@@ -104,7 +104,7 @@ jet_config_literal: fn(value: CtValue) -> String? Never! {
             loop entry in entries {
                 key: jet_config_literal(ast_comptime_key_to_value(entry.key)) ?? return None
                 item: jet_config_literal(entry.value) ?? return None
-                &items.push("{key}: {item}")
+                items.push("{key}: {item}")
             }
             Val([map_type, "{{", items.join(", "), "}}"].join(""))
         }
@@ -123,26 +123,26 @@ jet_config_string_escape: fn(text: String) -> String Never! {
     loop byte in text.bytes() {
         if {
             byte == (U8{92}) || byte == (U8{34}) -> {
-                &out.push(U8{92})
-                &out.push(byte)
+                out.push(U8{92})
+                out.push(byte)
             }
             byte == (U8{123}) || byte == (U8{125}) -> {
-                &out.push(byte)
-                &out.push(byte)
+                out.push(byte)
+                out.push(byte)
             }
             byte == (U8{10}) -> {
-                &out.push(U8{92})
-                &out.push(U8{110})
+                out.push(U8{92})
+                out.push(U8{110})
             }
             byte == (U8{13}) -> {
-                &out.push(U8{92})
-                &out.push(U8{114})
+                out.push(U8{92})
+                out.push(U8{114})
             }
             byte == (U8{9}) -> {
-                &out.push(U8{92})
-                &out.push(U8{116})
+                out.push(U8{92})
+                out.push(U8{116})
             }
-            else -> &out.push(byte)
+            else -> out.push(byte)
         }
     }
     String.from_bytes(out) ?? text
@@ -201,7 +201,7 @@ compiler_service_tagged: fn(value: Dyn) -> CompilerServiceTagged? Never! {
 
 compiler_service_tag: fn(label: String, payload: Dyn) -> Dyn Never! {
     fields := [(key: String, value: Dyn)]{}
-    &fields.push((key: label, value: payload))
+    fields.push((key: label, value: payload))
     Dyn.Object(fields)
 }
 
@@ -224,7 +224,7 @@ compiler_service_value_wire: fn(value: CtValue) -> Dyn? Never! {
         }
         .List(values) -> {
             items := [Dyn]{}
-            loop item in values -> &items.push(compiler_service_value_wire(item) ?? return None)
+            loop item in values -> items.push(compiler_service_value_wire(item) ?? return None)
             Val(compiler_service_tag("List", Dyn.Array(items)))
         }
         .Map(entries) -> {
@@ -232,20 +232,20 @@ compiler_service_value_wire: fn(value: CtValue) -> Dyn? Never! {
             loop entry in entries {
                 key: compiler_service_key_wire(entry.key)
                 item: compiler_service_value_wire(entry.value) ?? return None
-                &items.push(Dyn.Object(["key": key, "value": item]))
+                items.push(Dyn.Object(["key": key, "value": item]))
             }
             Val(compiler_service_tag("Map", Dyn.Array(items)))
         }
         .Struct(type_name, fields) -> {
             items := [Dyn]{}
-            loop field in fields -> &items.push(Dyn.Object(["name": Dyn.Text(field.name), "value": compiler_service_value_wire(field.value) ?? return None]))
+            loop field in fields -> items.push(Dyn.Object(["name": Dyn.Text(field.name), "value": compiler_service_value_wire(field.value) ?? return None]))
             Val(compiler_service_tag("Struct", Dyn.Object(["type": Dyn.Text(type_name), "fields": Dyn.Array(items)])))
         }
         .Enum(type_name, variant, args) -> {
             items := [Dyn]{}
             loop argument in args {
                 label: if argument.label == .Val(text) -> Dyn.Text(text) else -> Dyn.Null
-                &items.push(Dyn.Object(["label": label, "value": compiler_service_value_wire(argument.value) ?? return None]))
+                items.push(Dyn.Object(["label": label, "value": compiler_service_value_wire(argument.value) ?? return None]))
             }
             Val(compiler_service_tag("Enum", Dyn.Object(["type": Dyn.Text(type_name), "variant": Dyn.Text(variant), "args": Dyn.Array(items)])))
         }
@@ -294,14 +294,14 @@ compiler_service_value_from_wire: fn(value: Dyn) -> CtValue? Never! {
             loop item in items {
                 number: foundation_json_integer(item) ?? return None
                 if number < 0 || number > 255 -> return None
-                &bytes.push(U8{number})
+                bytes.push(U8{number})
             }
             Val(CtValue.Bytes{value: bytes})
         }
         "List" -> {
             items: compiler_service_rows(payload) ?? return None
             values := [CtValue]{}
-            loop item in items -> &values.push(compiler_service_value_from_wire(item) ?? return None)
+            loop item in items -> values.push(compiler_service_value_from_wire(item) ?? return None)
             Val(CtValue.List{values: values})
         }
         "Map" -> {
@@ -310,7 +310,7 @@ compiler_service_value_from_wire: fn(value: Dyn) -> CtValue? Never! {
             loop item in items {
                 key: compiler_service_key_from_wire(compiler_service_get(item, "key") ?? return None) ?? return None
                 entry_value: compiler_service_value_from_wire(compiler_service_get(item, "value") ?? return None) ?? return None
-                &entries.push(CtMapEntry{key: key, value: entry_value})
+                entries.push(CtMapEntry{key: key, value: entry_value})
             }
             Val(CtValue.Map{entries: entries})
         }
@@ -320,7 +320,7 @@ compiler_service_value_from_wire: fn(value: Dyn) -> CtValue? Never! {
             loop item in compiler_service_array(payload, "fields") ?? return None {
                 name: compiler_service_text(item, "name") ?? return None
                 field_value: compiler_service_value_from_wire(compiler_service_get(item, "value") ?? return None) ?? return None
-                &fields.push(NamedCtValue{name: name, value: field_value})
+                fields.push(NamedCtValue{name: name, value: field_value})
             }
             Val(CtValue.Struct{type_name: type_name, fields: fields})
         }
@@ -331,7 +331,7 @@ compiler_service_value_from_wire: fn(value: Dyn) -> CtValue? Never! {
             loop item in compiler_service_array(payload, "args") ?? return None {
                 label: compiler_service_text(item, "label")
                 argument_value: compiler_service_value_from_wire(compiler_service_get(item, "value") ?? return None) ?? return None
-                &args.push(CtEnumArg{label: label, value: argument_value})
+                args.push(CtEnumArg{label: label, value: argument_value})
             }
             Val(CtValue.Enum{type_name: type_name, variant: variant, args: args})
         }
@@ -364,7 +364,7 @@ compiler_service_named_keys_from_wire: fn(value: Dyn) -> [NamedCtKey]? Never! {
     loop item in items {
         name: compiler_service_text(item, "name") ?? return None
         key: compiler_service_key_from_wire(compiler_service_get(item, "value") ?? return None) ?? return None
-        &fields.push(NamedCtKey{name: name, value: key})
+        fields.push(NamedCtKey{name: name, value: key})
     }
     Val(fields)
 }
@@ -406,15 +406,15 @@ compiler_service_key_from_wire: fn(value: Dyn) -> CtKey? Never! {
 // The fields of a diagnostic the requester renders or re-anchors: severity,
 // code, the span within the requester's own source, and the three sentences.
 // The diagnostic moves in; its texts move into the wire, uncopied.
-compiler_service_diagnostic_wire: fn(diagnostic: ^Diagnostic) -> Dyn Never! {
+compiler_service_diagnostic_wire: fn(diagnostic: &&Diagnostic) -> Dyn Never! {
     span: if diagnostic.span == .Val(found) -> Dyn.Object(["start": Dyn.Int(found.start), "end": Dyn.Int(found.end)]) else -> Dyn.Null
     Dyn.Object([
         "severity": Dyn.Int(diagnostic.severity),
-        "code": Dyn.Text(^diagnostic.code),
+        "code": Dyn.Text(diagnostic.code.move()),
         "span": span,
-        "what": Dyn.Text(^diagnostic.what),
-        "why": Dyn.Text(^diagnostic.why),
-        "fix": Dyn.Text(^diagnostic.fix),
+        "what": Dyn.Text(diagnostic.what.move()),
+        "why": Dyn.Text(diagnostic.why.move()),
+        "fix": Dyn.Text(diagnostic.fix.move()),
     ])
 }
 
@@ -435,7 +435,7 @@ compiler_service_diagnostic_from_wire: fn(value: Dyn) -> Diagnostic? Never! {
 
 // ── Requests and responses ──
 
-compiler_service_comptime_request: fn(program: ^String, base_dir: ^String) -> String Never! {
+compiler_service_comptime_request: fn(program: &&String, base_dir: &&String) -> String Never! {
     compiler_service_render(Dyn.Object(["program": Dyn.Text(program), "base_dir": Dyn.Text(base_dir)]))
 }
 
@@ -448,13 +448,13 @@ compiler_service_comptime_request_from: fn(request: Dyn) -> (program: String, ba
 
 // A value that no wire spelling carries is refused as the evaluator refuses
 // a result a config value can't hold.
-compiler_service_comptime_response: fn(outcome: ^JetConfigOutcome) -> String Never! {
+compiler_service_comptime_response: fn(outcome: &&JetConfigOutcome) -> String Never! {
     if outcome == {
         .Value(value) -> {
             if compiler_service_value_wire(value) == .Val(wire) -> return compiler_service_render(Dyn.Object(["value": wire]))
             compiler_service_render(Dyn.Object(["error": compiler_service_diagnostic_wire(jet_config_eval_diagnostic(None, "this config value's result has a shape a config value can't hold"))]))
         }
-        .Refused(diagnostic) -> compiler_service_render(Dyn.Object(["error": compiler_service_diagnostic_wire(^diagnostic)]))
+        .Refused(diagnostic) -> compiler_service_render(Dyn.Object(["error": compiler_service_diagnostic_wire(diagnostic)]))
     }
 }
 
@@ -466,7 +466,7 @@ compiler_service_comptime_outcome: fn(response: Dyn) -> JetConfigOutcome? Never!
     None
 }
 
-compiler_service_check_request: fn(file: ^String, source: ^String) -> String Never! {
+compiler_service_check_request: fn(file: &&String, source: &&String) -> String Never! {
     compiler_service_render(Dyn.Object(["file": Dyn.Text(file), "source": Dyn.Text(source)]))
 }
 
@@ -477,8 +477,8 @@ compiler_service_check_request_from: fn(request: Dyn) -> (file: String, source: 
     Val((file: file, source: source))
 }
 
-compiler_service_check_response: fn(diagnostics: ^[Diagnostic]) -> String Never! {
-    rows: loop diagnostic in ^diagnostics -> compiler_service_diagnostic_wire(^diagnostic)
+compiler_service_check_response: fn(diagnostics: &&[Diagnostic]) -> String Never! {
+    rows: loop diagnostic in diagnostics.move() -> compiler_service_diagnostic_wire(diagnostic)
     compiler_service_render(Dyn.Object(["diagnostics": Dyn.Array(rows)]))
 }
 
@@ -486,7 +486,7 @@ compiler_service_check_response: fn(diagnostics: ^[Diagnostic]) -> String Never!
 compiler_service_check_diagnostics: fn(response: Dyn) -> [Diagnostic]? Never! {
     diagnostics := [Diagnostic]{}
     loop row in compiler_service_array(response, "diagnostics") ?? return None {
-        &diagnostics.push(compiler_service_diagnostic_from_wire(row) ?? return None)
+        diagnostics.push(compiler_service_diagnostic_from_wire(row) ?? return None)
     }
     Val(diagnostics)
 }

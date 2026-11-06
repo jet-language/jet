@@ -28,12 +28,12 @@ pkg_parse_workspace_policy: fn(src: String) -> OverlayPolicy OverlayError! {
         block: pkg_overlay_balanced(raw, open + 1)
         parsed: pkg_overlay_parse_set(ident.ident, block.body)
         if policy.overlay(parsed.name) != None -> return Err(OverlayError.Malformed("overlay `{parsed.name}` is declared more than once"))
-        &policy.overlays.push(parsed)
+        policy.overlays.push(parsed)
         position = open + 1 + block.consumed
     }
     packages := [String]{}
     loop overlay in policy.overlays {
-        loop candidate in overlay.packages -> &packages.push(candidate.package)
+        loop candidate in overlay.packages -> packages.push(candidate.package)
     }
     loop package in pkg_overlay_sorted_unique(packages) {
         if policy.resolve_package_override_checked(package) == {
@@ -58,7 +58,7 @@ pkg_overlay_parse_set: fn(name: String, body: String) -> OverlaySet OverlayError
         }
         if pkg_overlay_parse_package_line(line) == {
             .Val(package) -> {
-                &overlay.merge_package(package)
+                overlay.merge_package(package)
                 next
             }
             .None -> {}
@@ -71,9 +71,9 @@ pkg_overlay_parse_set: fn(name: String, body: String) -> OverlaySet OverlayError
         if !record.starts_with("{{") -> return Err(OverlayError.Malformed("`overrides` must be a record"))
         opened: record.removeprefix("{{")
         if !opened.ends_with("}}") -> return Err(OverlayError.Malformed("`overrides` record is not closed"))
-        loop package in pkg_overlay_parse_keyed_overrides(opened.removesuffix("}}")) -> &keyed.push(package)
+        loop package in pkg_overlay_parse_keyed_overrides(opened.removesuffix("}}")) -> keyed.push(package)
     }
-    loop package in keyed -> &overlay.merge_package(package)
+    loop package in keyed -> overlay.merge_package(package)
     Ok(overlay)
 }
 
@@ -93,12 +93,12 @@ pkg_overlay_parse_keyed_overrides: fn(body: String) -> [PackageOverride] Overlay
         package: pkg_overlay_unquote(entry.before.trim())
         if package == "" -> return Err(OverlayError.Malformed("`overrides` package names cannot be empty"))
         if names.contains(package) -> return Err(OverlayError.Malformed("override `{package}` is declared more than once"))
-        &names.push(package)
+        names.push(package)
         record: entry.after.trim()
         if !record.starts_with("{{") -> return Err(OverlayError.Malformed("override `{package}` must use the standard `{{ … }}` record"))
         opened: record.removeprefix("{{")
         if !opened.ends_with("}}") -> return Err(OverlayError.Malformed("override `{package}` record is not closed"))
-        &packages.push(pkg_overlay_parse_keyed_record(package, opened.removesuffix("}}")))
+        packages.push(pkg_overlay_parse_keyed_record(package, opened.removesuffix("}}")))
     }
     Ok(packages)
 }
@@ -118,7 +118,7 @@ pkg_overlay_parse_keyed_record: fn(package: String, body: String) -> PackageOver
             .None -> {}
         }
         seen[field.copy()] = value.copy()
-        &result.apply_field(field, value)
+        result.apply_field(field, value)
     }
     Ok(result)
 }
@@ -132,27 +132,27 @@ impl PackageOverride {
             "source" -> {
                 payload: pkg_overlay_priority_payload(value)
                 self.source = Val(pkg_overlay_unquote(payload.value))
-                &self.record_priority("source", payload.priority)
+                self.record_priority("source", payload.priority)
             }
             "version" -> {
                 payload: pkg_overlay_priority_payload(value)
                 self.version = Val(pkg_overlay_unquote(payload.value))
-                &self.record_priority("version", payload.priority)
+                self.record_priority("version", payload.priority)
             }
             "flags" -> {
                 payload: pkg_overlay_priority_payload(value)
                 self.flags = pkg_overlay_parse_flag_record(payload.value)
-                &self.record_priority("flags", payload.priority)
+                self.record_priority("flags", payload.priority)
             }
             "patches" -> {
                 payload: pkg_overlay_priority_payload(value)
                 self.patches = pkg_overlay_parse_patch_list(payload.value)
-                &self.record_priority("patches", payload.priority)
+                self.record_priority("patches", payload.priority)
             }
             "allowUnfree" -> {
                 payload: pkg_overlay_priority_payload(value)
                 self.allow_unfree = pkg_overlay_parse_bool(payload.value)
-                &self.record_priority("allowUnfree", payload.priority)
+                self.record_priority("allowUnfree", payload.priority)
             }
             "env" -> {
                 payload: pkg_overlay_priority_payload(value)
@@ -221,7 +221,7 @@ pkg_overlay_parse_flag_record: fn(input: String) -> [String] OverlayError! {
     flags := [String]{}
     loop piece in pkg_overlay_top_level_commas(inner) {
         entry: pkg_overlay_split_colon(piece.trim()) ?? return Err(OverlayError.Malformed("each `flags` entry needs `name: true|false`"))
-        if pkg_overlay_parse_bool(entry.after) -> &flags.push(pkg_overlay_unquote(entry.before.trim()))
+        if pkg_overlay_parse_bool(entry.after) -> flags.push(pkg_overlay_unquote(entry.before.trim()))
     }
     Ok(flags)
 }
@@ -241,7 +241,7 @@ pkg_overlay_parse_env_record: fn(input: String) -> [OverrideEnv] OverlayError! {
             }
             .None -> {}
         }
-        &values.push(OverrideEnv{key: key, value: value})
+        values.push(OverrideEnv{key: key, value: value})
     }
     Ok(values)
 }
@@ -294,10 +294,10 @@ pkg_overlay_parse_package_line: fn(line: String) -> PackageOverride? OverlayErro
     if field == "flags" {
         payload: pkg_overlay_priority_payload(value)
         result.flags = pkg_overlay_parse_string_list(payload.value)
-        &result.record_priority("flags", payload.priority)
+        result.record_priority("flags", payload.priority)
         return Ok(Val(result))
     }
-    &result.apply_field(field, value)
+    result.apply_field(field, value)
     Ok(Val(result))
 }
 
@@ -305,14 +305,14 @@ pkg_overlay_parse_patch_list: fn(input: String) -> [String] OverlayError! {
     patches := [String]{}
     loop entry in pkg_overlay_parse_list(input) {
         item: entry.trim()
-        &patches.push(pkg_overlay_unquote(pkg_overlay_strip_wrapped(item, "patch(", ")") ?? item.copy()))
+        patches.push(pkg_overlay_unquote(pkg_overlay_strip_wrapped(item, "patch(", ")") ?? item.copy()))
     }
     Ok(patches)
 }
 
 pkg_overlay_parse_string_list: fn(input: String) -> [String] OverlayError! {
     values := [String]{}
-    loop entry in pkg_overlay_parse_list(input) -> &values.push(pkg_overlay_unquote(entry.trim()))
+    loop entry in pkg_overlay_parse_list(input) -> values.push(pkg_overlay_unquote(entry.trim()))
     Ok(values)
 }
 
@@ -392,7 +392,7 @@ pkg_overlay_top_level_policy_fields: fn(body: String) -> [OverlayPolicyField] Ov
         loop line_end < raw.len() && Int.from_u8(raw[line_end]) != OVERLAY_NEWLINE {
             line_end += 1
         }
-        &fields.push(OverlayPolicyField{name: ident.ident, value: pkg_bytes_text(raw, colon + 1, line_end).trim()})
+        fields.push(OverlayPolicyField{name: ident.ident, value: pkg_bytes_text(raw, colon + 1, line_end).trim()})
         position = ident.end
     }
     Ok(fields)
@@ -412,7 +412,7 @@ pkg_overlay_parse_build_grants: fn(body: String) -> [BuildGrant] OverlayError! {
         loop grant in grants {
             if grant.subject == subject -> return Err(OverlayError.Malformed("`policy.grants` package `{subject}` appears more than once"))
         }
-        &grants.push(BuildGrant{subject: subject, effects: pkg_overlay_parse_effect_tuple(entry.after.trim(), "policy.grants")})
+        grants.push(BuildGrant{subject: subject, effects: pkg_overlay_parse_effect_tuple(entry.after.trim(), "policy.grants")})
     }
     Ok(grants)
 }
@@ -422,7 +422,7 @@ pkg_overlay_parse_effect_tuple: fn(raw: String, field: String) -> [String] Overl
     effects := [String]{}
     loop piece in pkg_overlay_top_level_commas(inner) {
         written: pkg_overlay_unquote(piece.trim())
-        if written != "" -> &effects.push(written)
+        if written != "" -> effects.push(written)
     }
     if effects.len() == 0 -> return Err(OverlayError.Malformed("`{field}:` must grant at least one effect"))
     loop written in effects {
@@ -453,7 +453,7 @@ pkg_overlay_named_block: fn(body: String, name: String) -> String? OverlayError!
         if pkg_bytes_code(raw, open) != OVERLAY_OPEN_BRACE -> return Err(OverlayError.Malformed("workspace `{name}` must be a record"))
         block: pkg_overlay_balanced_policy_body(raw, open + 1)
         if blocks.len() > 0 -> return Err(OverlayError.Malformed("workspace `{name}` block appears more than once"))
-        &blocks.push(block)
+        blocks.push(block)
     }
     Ok(blocks.get(0))
 }
@@ -512,8 +512,8 @@ pkg_overlay_exact_field_value: fn(body: String, field: String) -> String? Overla
                     else -> return Err(OverlayError.UnsupportedPolicy("workspace `policy.{name}` is unsupported; use `policy.deny` or subject-scoped `policy.grants`"))
                 }
                 if seen.contains(name) -> return Err(OverlayError.Malformed("workspace `policy.{name}` appears more than once"))
-                &seen.push(name)
-                if name == field -> &values.push(parts.after.trim())
+                seen.push(name)
+                if name == field -> values.push(parts.after.trim())
             }
             .None -> {
                 name: pkg_overlay_first_word(entry)
@@ -554,16 +554,16 @@ pkg_overlay_strip_overlay_blocks: fn(body: String) -> String Never! {
     position := 0
     loop position < raw.len() {
         at: pkg_overlay_find_word(raw, WORKSPACE_OVERLAY, position) ?? break
-        &out.push(pkg_bytes_text(raw, position, at))
+        out.push(pkg_bytes_text(raw, position, at))
         open: pkg_overlay_find_char(raw, at + keyword_len, OVERLAY_OPEN_BRACE) ?? -1
         if open < 0 {
-            &out.push(WORKSPACE_OVERLAY)
+            out.push(WORKSPACE_OVERLAY)
             position = at + keyword_len
             next
         }
         position = open + 1 + pkg_overlay_balanced(raw, open + 1).consumed
     }
-    &out.push(pkg_bytes_text(raw, position, raw.len()))
+    out.push(pkg_bytes_text(raw, position, raw.len()))
     out.join("")
 }
 
@@ -581,7 +581,7 @@ pkg_overlay_strip_allow_unfree_lines: fn(body: String) -> String Never! {
         content_end := end
         if end < raw.len() && content_end > start && Int.from_u8(raw[content_end - 1]) == 13 -> content_end -= 1
         line: pkg_bytes_text(raw, start, content_end)
-        if !line.trim_start().starts_with("policy.allowUnfree") -> &out.push("{line}\n")
+        if !line.trim_start().starts_with("policy.allowUnfree") -> out.push("{line}\n")
         start = end + 1
     }
     out.join("")
@@ -613,9 +613,9 @@ pkg_overlay_strip_build_policy_blocks: fn(body: String) -> String Never! {
             position = after
             next
         }
-        &out.push(pkg_bytes_text(raw, position, at))
+        out.push(pkg_bytes_text(raw, position, at))
         position = open + 1 + pkg_overlay_balanced(raw, open + 1).consumed
     }
-    &out.push(pkg_bytes_text(raw, position, raw.len()))
+    out.push(pkg_bytes_text(raw, position, raw.len()))
     out.join("")
 }

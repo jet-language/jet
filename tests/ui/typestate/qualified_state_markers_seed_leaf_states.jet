@@ -5,10 +5,10 @@ Door: struct {
 
 impl Door {
     #Transition(_, Door.State.Closed) new: fn() -[]> Door { return Door{} }
-    #Transition(Door.State.Closed, Door.State.Open) open: fn(self: ^Door) -[]> Door {
+    #Transition(Door.State.Closed, Door.State.Open) open: fn(self: &&Door) -[]> Door {
         return self
     }
-    #State(Door.State.Closed) inspect: fn(self: ^Door) -[]> String {
+    #State(Door.State.Closed) inspect: fn(self: &&Door) -[]> String {
         next := self.open()
         return "closed"
     }

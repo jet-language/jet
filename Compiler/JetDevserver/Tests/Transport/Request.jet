@@ -52,15 +52,15 @@ devserver_test_header_error: fn(lines: [String]) -> String Never! {
 #Test("aggregate_request_headers_are_bounded_before_parse") {
     cr: String.from_bytes([U8]{13}) ?? panic("ASCII CR fixture")
     lines := [String]{"GET / HTTP/1.1{cr}\nHost: localhost{cr}\n"}
-    loop index in 0..<8 -> &lines.push("X-Fill-{index}: {"x".repeat(4090)}{cr}\n")
-    &lines.push("{cr}\n")
+    loop index in 0..<8 -> lines.push("X-Fill-{index}: {"x".repeat(4090)}{cr}\n")
+    lines.push("{cr}\n")
     assert(devserver_test_request_fails(lines.join("")))
 }
 #Test("request_header_count_is_bounded_before_parse") {
     cr: String.from_bytes([U8]{13}) ?? panic("ASCII CR fixture")
     lines := [String]{"GET / HTTP/1.1{cr}\nHost: localhost{cr}\n"}
-    loop index in 0..<(MAX_REQUEST_HEADER_COUNT + 1) -> &lines.push("X-Count-{index}: y{cr}\n")
-    &lines.push("{cr}\n")
+    loop index in 0..<(MAX_REQUEST_HEADER_COUNT + 1) -> lines.push("X-Count-{index}: y{cr}\n")
+    lines.push("{cr}\n")
     assert(devserver_test_request_fails(lines.join("")))
 }
 

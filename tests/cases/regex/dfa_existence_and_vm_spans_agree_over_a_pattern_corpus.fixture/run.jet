@@ -16,15 +16,15 @@ show: fn(pattern: String, flags: RegexFlags, texts: [String]) {
             groups := [String]{}
             g := 1
             loop g <= m.groups.len() {
-                &groups.push("{m.group_start(g) ?? -1}-{m.group_end(g) ?? -1}")
+                groups.push("{m.group_start(g) ?? -1}-{m.group_end(g) ?? -1}")
                 g = g + 1
             }
-            &spans.push("{m.start}:{m.end}({groups.join(" ")})")
+            spans.push("{m.start}:{m.end}({groups.join(" ")})")
         }
         exists: compiled.is_match(text)
         found: compiled.find(text) != None
         whole: compiled.full_match(text)
-        &cells.push("{exists}/{exists == found}/{whole}/{spans.join(",")}")
+        cells.push("{exists}/{exists == found}/{whole}/{spans.join(",")}")
     }
     print("{pattern.debug()} [{flags}] {cells.join(" | ")}")
 }

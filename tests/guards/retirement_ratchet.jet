@@ -103,15 +103,15 @@ s6_ratchet_hits: fn(line: String) -> [String] {
     hits := [String]{}
     words: [String]{s6_ratchet_concat("Abil", "ity"), s6_ratchet_concat("Abil", "ities"), s6_ratchet_concat("Capabil", "ity"), s6_ratchet_concat("Cap", "s")}
     loop word in words {
-        if s6_ratchet_contains_word(line, word) -> &hits.push(word)
+        if s6_ratchet_contains_word(line, word) -> hits.push(word)
     }
     markers: [String]{s6_ratchet_concat("#Abil", "ities"), s6_ratchet_concat("#Cap", "s"), s6_ratchet_concat("#", "Grant"), s6_ratchet_concat("#", "grant")}
     loop marker in markers {
-        if line.contains(marker) -> &hits.push(marker)
+        if line.contains(marker) -> hits.push(marker)
     }
     identifiers: [String]{s6_ratchet_concat("KW_", "CAPS"), s6_ratchet_concat("TYPE_", "ABILITIES"), s6_ratchet_concat("CAP_", "HANDLE_TYPE"), s6_ratchet_concat("Stmt::Cap", "s")}
     loop identifier in identifiers {
-        if line.contains(identifier) -> &hits.push(identifier)
+        if line.contains(identifier) -> hits.push(identifier)
     }
     hits
 }
@@ -126,7 +126,7 @@ s6_ratchet_authority_scan: fn(directory: String, relative: String, offenders: &[
         if kind.is_dir {
             if entry.name.starts_with(".") || entry.name.starts_with("target") ||
                 entry.name == "build" || entry.name == "node_modules" -> next
-            s6_ratchet_authority_scan(entry.path, path, &offenders)
+            s6_ratchet_authority_scan(entry.path, path, offenders)
         } else {
             if path.starts_with("Tools/tower/") -> next
             content: s6_ratchet_files.read(entry.path) ?? next
@@ -137,7 +137,7 @@ s6_ratchet_authority_scan: fn(directory: String, relative: String, offenders: &[
                 hits: s6_ratchet_hits(line)
                 if hits.len() == 0 || s6_ratchet_history(path) || s6_ratchet_fixture(path) ||
                     s6_ratchet_producer(path, line) || s6_ratchet_unrelated(path, line) -> next
-                &offenders.push("{path}:{number}: {hits}")
+                offenders.push("{path}:{number}: {hits}")
             }
         }
     }
@@ -145,7 +145,7 @@ s6_ratchet_authority_scan: fn(directory: String, relative: String, offenders: &[
 
 s6_ratchet_authority_vocabulary: fn() {
     offenders := [String]{}
-    s6_ratchet_authority_scan(".", "", &offenders)
+    s6_ratchet_authority_scan(".", "", offenders)
     assert(offenders.len() == 0, "retired authority vocabulary escaped its fixture/history boundary: {offenders}")
 }
 

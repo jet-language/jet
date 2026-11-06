@@ -159,7 +159,7 @@ field: fn(form: WebForm, name: String, kind: String, required: Bool) -> WebForm 
         if item.name == name -> return Err(WebFormError.Invalid)
     }
     if out.fields.len() >= C_MAX_FORM_FIELDS -> return Err(WebFormError.Invalid)
-    &out.fields.push(WebFormFieldState{name: name.copy(), value_type: parse_kind(kind), required: required, value: "", touched: false, validating: false, errors: [String]{}})
+    out.fields.push(WebFormFieldState{name: name.copy(), value_type: parse_kind(kind), required: required, value: "", touched: false, validating: false, errors: [String]{}})
     Ok(out)
 }
 
@@ -184,7 +184,7 @@ blur: fn(form: &WebForm, name: String) WebFormError! {
     loop field in form.fields {
         if field.name == name {
             found = true
-            valid = validate_field_form(&form, name)
+            valid = validate_field_form(form, name)
             break
         }
     }
@@ -196,7 +196,7 @@ blur: fn(form: &WebForm, name: String) WebFormError! {
 }
 
 validate: fn(form: &WebForm) WebFormError! {
-    if !apply_validation(&form) -> return Err(WebFormError.Validation)
+    if !apply_validation(form) -> return Err(WebFormError.Validation)
     return Ok()
 }
 
@@ -207,7 +207,7 @@ validate_async: fn(form: WebForm) -> WebForm Never! {
 }
 
 submit: fn(form: &WebForm) -> String WebFormError! {
-    if !apply_validation(&form) -> return Err(WebFormError.Validation)
+    if !apply_validation(form) -> return Err(WebFormError.Validation)
     form.status = WebFormStatus.Submitted
     html(form)
 }
@@ -226,8 +226,8 @@ input: fn(name: String, fields: [WebFormFieldSpec]) -> WebFormInput WebFormError
             if default.len() > C_MAX_FORM_TEXT || has_control_text(default) -> return Err(WebFormError.Invalid)
         }
         if contains_name(names, field.name) || contains_name(wires, field.wire_name) -> return Err(WebFormError.Invalid)
-        &names.push(field.name)
-        &wires.push(field.wire_name)
+        names.push(field.name)
+        wires.push(field.wire_name)
     }
     Ok(WebFormInput{type_name: name.copy(), fields: copy_fields(fields)})
 }
@@ -253,7 +253,7 @@ input_exclude: fn(input: WebFormInput, name: String) -> WebFormInput WebFormErro
     fields := [WebFormFieldSpec]{}
     found := false
     loop item in input.fields {
-        if item.name == name -> found = true else -> &fields.push(item)
+        if item.name == name -> found = true else -> fields.push(item)
     }
     if !found -> return Err(WebFormError.Missing)
     if !fields_valid(fields) -> return Err(WebFormError.Invalid)
@@ -264,7 +264,7 @@ input_group: fn(input: WebFormInput, prefix: String, suffix: String) -> WebFormI
     if prefix.len() == 0 && suffix.len() == 0 -> return Err(WebFormError.Invalid)
     fields := [WebFormFieldSpec]{}
     loop item in input.fields {
-        &fields.push(WebFormFieldSpec{name: "{prefix}{item.name}{suffix}", value_type: item.value_type, required: item.required, default: item.default, label: item.label, control: item.control, group: item.group, wire_name: "{prefix}{item.wire_name}{suffix}"})
+        fields.push(WebFormFieldSpec{name: "{prefix}{item.name}{suffix}", value_type: item.value_type, required: item.required, default: item.default, label: item.label, control: item.control, group: item.group, wire_name: "{prefix}{item.wire_name}{suffix}"})
     }
     if !fields_valid(fields) -> return Err(WebFormError.Invalid)
     Ok(WebFormInput{type_name: input.type_name.copy(), fields: fields})
@@ -292,7 +292,7 @@ typed: fn(input: WebFormInput, action: String) -> WebFormTyped WebFormError! {
 }
 
 typed_set: fn(form: &WebFormTyped, name: String, value: String) WebFormError! {
-    set(&form.form, name, value)
+    set(form.form, name, value)
 }
 
 typed_set_async_validator: fn(form: &WebFormTyped, name: String, timing: WebFormValidationTiming, delay_ms: Int, validator: fn(String)) WebFormError! {
@@ -306,7 +306,7 @@ typed_set_async_validator: fn(form: &WebFormTyped, name: String, timing: WebForm
             form.form.status = WebFormStatus.Validating
             validator(form.form.fields[i].value.copy())
             form.form.fields[i].validating = false
-            valid := validate_field_form(&form.form, name)
+            valid := validate_field_form(form.form, name)
             if valid -> form.form.status = WebFormStatus.Dirty else -> form.form.status = WebFormStatus.Invalid
             return Ok()
         }
@@ -325,12 +325,12 @@ action_field_error: fn(error: WebFormActionError, field: String, message: String
     out := error.copy()
     existing: out.field_errors.get(field)
     if existing == None {
-        _: &out.field_errors.add(field.copy(), [String]{message.copy()})
+        _: out.field_errors.add(field.copy(), [String]{message.copy()})
     } else {
         errors := existing.copy()
         if errors.len() >= C_MAX_FORM_FIELDS -> return out
-        &errors.push(message.copy())
-        _: &out.field_errors.add(field.copy(), errors)
+        errors.push(message.copy())
+        _: out.field_errors.add(field.copy(), errors)
     }
     out
 }
@@ -338,13 +338,13 @@ action_field_error: fn(error: WebFormActionError, field: String, message: String
 action_form_error: fn(error: WebFormActionError, message: String) -> WebFormActionError Never! {
     if message.len() == 0 || message.len() > C_MAX_FORM_TEXT -> return error.copy()
     out := error.copy()
-    if out.form_errors.len() < C_MAX_FORM_FIELDS -> &out.form_errors.push(message.copy())
+    if out.form_errors.len() < C_MAX_FORM_FIELDS -> out.form_errors.push(message.copy())
     out
 }
 
 
-typed_blur: fn(form: &WebFormTyped, name: String) WebFormError! { blur(&form.form, name) }
-typed_validate: fn(form: &WebFormTyped) WebFormError! { validate(&form.form) }
+typed_blur: fn(form: &WebFormTyped, name: String) WebFormError! { blur(form.form, name) }
+typed_validate: fn(form: &WebFormTyped) WebFormError! { validate(form.form) }
 typed_validate_async: fn(form: WebFormTyped) -> WebFormValidation Never! {
     out := form.copy()
     out.form.status = WebFormStatus.Validating
@@ -361,7 +361,7 @@ typed_validate_field: fn(form: WebFormTyped, name: String, timing: WebFormValida
             out.form.status = WebFormStatus.Validating
             validator(out.form.fields[i].value.copy())
             out.form.fields[i].validating = false
-            valid = validate_field_form(&out.form, name)
+            valid = validate_field_form(out.form, name)
             if valid -> out.form.status = WebFormStatus.Dirty else -> out.form.status = WebFormStatus.Invalid
             break
         }
@@ -375,7 +375,7 @@ typed_validation_render: fn(chain: WebFormValidationChain) -> String Never! {
 }
 
 typed_submit: fn(form: &WebFormTyped) -> String WebFormError! {
-    if !apply_validation(&form.form) -> return Err(WebFormError.Validation)
+    if !apply_validation(form.form) -> return Err(WebFormError.Validation)
     form.form.status = WebFormStatus.Submitted
     typed_html(form)
 }
@@ -406,10 +406,10 @@ typed_lifecycle: fn(form: WebFormTyped) -> WebFormLifecycle Never! { lifecycle(f
 typed_errors: fn(form: WebFormTyped) -> WebFormErrorState Never! {
     names := [String:[String]]{ }
     loop field in form.form.fields {
-        if field.errors.len() > 0 -> _: &names.add(field.name.copy(), field.errors.copy())
+        if field.errors.len() > 0 -> _: names.add(field.name.copy(), field.errors.copy())
     }
     form_errors := [String]{}
-    if form.form.form_error.len() > 0 -> &form_errors.push(form.form.form_error.copy())
+    if form.form.form_error.len() > 0 -> form_errors.push(form.form.form_error.copy())
     WebFormErrorState{fields: names, form: form_errors}
 }
 
@@ -437,7 +437,7 @@ typed_select_field: fn(form: WebFormTyped, name: String) -> WebFormFieldState We
 }
 
 typed_validation_wait: fn(validation: &WebFormValidation) WebFormError! {
-    result: validate(&validation.form.form)
+    result: validate(validation.form.form)
     validation.pending = false
     result
 }
@@ -448,7 +448,7 @@ typed_validation_cancel: fn(validation: &WebFormValidation) Never! {
 }
 
 typed_submission_wait: fn(submission: &WebFormTypedSubmission) -> String WebFormError! {
-    result: typed_submit(&submission.form)
+    result: typed_submit(submission.form)
     submission.pending = false
     result
 }
@@ -535,7 +535,7 @@ apply_validation: fn(form: &WebForm) -> Bool Never! {
         err := validation_error(form.fields[i])
         form.fields[i].errors = [String]{}
         if err.len() > 0 {
-            &form.fields[i].errors.push(err.copy())
+            form.fields[i].errors.push(err.copy())
             ok = false
         }
         form.fields[i].touched = true
@@ -550,7 +550,7 @@ validate_field_form: fn(form: &WebForm, name: String) -> Bool Never! {
         if form.fields[i].name == name {
             err := validation_error(form.fields[i])
             form.fields[i].errors = [String]{}
-            if err.len() > 0 -> &form.fields[i].errors.push(err.copy())
+            if err.len() > 0 -> form.fields[i].errors.push(err.copy())
             form.fields[i].touched = true
             return err.len() == 0
         }
@@ -582,7 +582,7 @@ status_name: fn(status: WebFormStatus) -> String {
 
 copy_fields: fn(fields: [WebFormFieldSpec]) -> [WebFormFieldSpec] Never! {
     out := [WebFormFieldSpec]{ }
-    loop field in fields -> &out.push(field)
+    loop field in fields -> out.push(field)
     out
 }
 
@@ -591,7 +591,7 @@ states_from_specs: fn(fields: [WebFormFieldSpec]) -> [WebFormFieldState] Never! 
     loop field in fields {
         value := ""
         if field.default != None -> value = field.default ?? ""
-        &out.push(WebFormFieldState{name: field.name, value_type: field.value_type, required: field.required, value: value, touched: false, validating: false, errors: [String]{}})
+        out.push(WebFormFieldState{name: field.name, value_type: field.value_type, required: field.required, value: value, touched: false, validating: false, errors: [String]{}})
     }
     out
 }
@@ -608,8 +608,8 @@ decoded_from_input: fn(form: WebFormTyped) -> WebFormDecodedInput {
                 break
             }
         }
-        _: &values.add(spec.name.copy(), value.copy())
-        _: &wire_values.add(spec.wire_name.copy(), value.copy())
+        _: values.add(spec.name.copy(), value.copy())
+        _: wire_values.add(spec.wire_name.copy(), value.copy())
     }
     WebFormDecodedInput{type_name: form.input.type_name, values: values, wire_values: wire_values}
 }
@@ -642,7 +642,7 @@ decode_typed_input: fn(input: WebFormInput, body: String) -> WebFormDecodedInput
             index := wire_index(input.fields, key)
             if index < 0 -> return None
             states[index].value = value.copy()
-            &seen.push(key.copy())
+            seen.push(key.copy())
         }
     }
     loop i in 0..<input.fields.len() {
@@ -654,8 +654,8 @@ decode_typed_input: fn(input: WebFormInput, body: String) -> WebFormDecodedInput
     loop i in 0..<input.fields.len() {
         spec: input.fields[i]
         value: states[i].value
-        _: &values.add(spec.name.copy(), value.copy())
-        _: &wire_values.add(spec.wire_name.copy(), value.copy())
+        _: values.add(spec.name.copy(), value.copy())
+        _: wire_values.add(spec.wire_name.copy(), value.copy())
     }
     Val(WebFormDecodedInput{type_name: input.type_name, values: values, wire_values: wire_values})
 }
@@ -681,11 +681,11 @@ split_amp: fn(text: String) -> [String] Never! {
     raw := text.bytes()
     loop i in 0..<raw.len() {
         if raw[i] == (U8{38}) {
-            &out.push(slice_text(text, start, i))
+            out.push(slice_text(text, start, i))
             start = i + 1
         }
     }
-    if start <= raw.len() -> &out.push(slice_text(text, start, raw.len()))
+    if start <= raw.len() -> out.push(slice_text(text, start, raw.len()))
     out
 }
 
@@ -713,7 +713,7 @@ url_decode: fn(text: String) -> String Never! {
         if i >= raw.len() -> return String.from_bytes(out) ?? text
         b: raw[i]
         if b == (U8{43}) {
-            &out.push(U8{32})
+            out.push(U8{32})
             i = i + 1
             next
         }
@@ -721,12 +721,12 @@ url_decode: fn(text: String) -> String Never! {
             hi := hex_value(raw[i + 1])
             lo := hex_value(raw[i + 2])
             if hi >= 0 && lo >= 0 {
-                &out.push(U8{hi * 16 + lo})
+                out.push(U8{hi * 16 + lo})
                 i = i + 3
                 next
             }
         }
-        &out.push(b)
+        out.push(b)
         i = i + 1
     }
 }
@@ -754,8 +754,8 @@ fields_valid: fn(fields: [WebFormFieldSpec]) -> Bool Never! {
             if default.len() > C_MAX_FORM_TEXT || has_control_text(default) -> return false
         }
         if contains_name(names, field.name) || contains_name(wires, field.wire_name) -> return false
-        &names.push(field.name)
-        &wires.push(field.wire_name)
+        names.push(field.name)
+        wires.push(field.wire_name)
     }
     true
 }
@@ -828,12 +828,12 @@ esc: fn(text: String) -> String Never! {
     raw := text.bytes()
     out := [U8]{ }
     loop b in raw {
-        if b == 38 -> push_str(&out, "&amp;") else if b == 60 -> push_str(&out, "&lt;") else if b == 62 -> push_str(&out, "&gt;") else if b == 34 -> push_str(&out, "&quot;") else -> &out.push(b)
+        if b == 38 -> push_str(out, "&amp;") else if b == 60 -> push_str(out, "&lt;") else if b == 62 -> push_str(out, "&gt;") else if b == 34 -> push_str(out, "&quot;") else -> out.push(b)
     }
     String.from_bytes(out) ?? ""
 }
 
-push_str: fn(out: &[U8], value: String) Never! { loop b in value.bytes() -> &out.push(b) }
+push_str: fn(out: &[U8], value: String) Never! { loop b in value.bytes() -> out.push(b) }
 
 slice_text: fn(text: String, start: Int, end: Int) -> String Never! {
     raw := text.bytes()
@@ -841,7 +841,7 @@ slice_text: fn(text: String, start: Int, end: Int) -> String Never! {
     i := start
     loop {
         if i < 0 || i >= end || i >= raw.len() -> return String.from_bytes(out) ?? ""
-        &out.push(raw[i])
+        out.push(raw[i])
         i = i + 1
     }
 }

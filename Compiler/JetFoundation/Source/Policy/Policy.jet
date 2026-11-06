@@ -273,7 +273,7 @@ policy_resolve: fn(key: PolicyKey, declarations: [PolicyDeclaration]) -> Effecti
     ordered := [PolicyDeclaration]{}
     loop scope in POLICY_ALL_SCOPES {
         loop declaration in declarations {
-            if declaration.key == key && declaration.scope == scope -> &ordered.push(declaration)
+            if declaration.key == key && declaration.scope == scope -> ordered.push(declaration)
         }
     }
     registry: policy_rule(key)
@@ -293,7 +293,7 @@ policy_resolve: fn(key: PolicyKey, declarations: [PolicyDeclaration]) -> Effecti
             }
         }
         effective = Val(next)
-        &chain.push(declaration)
+        chain.push(declaration)
     }
     value: effective ?? return Ok(None)
     Ok(Val(EffectivePolicy{key: key, value: value, provenance: chain}))

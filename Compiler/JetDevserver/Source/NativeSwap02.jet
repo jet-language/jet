@@ -10,13 +10,13 @@ impl NativeSwapState {
             outcome: if explanation.disposition == .Restart -> NativeSwapOutcome.RestartRequired else -> NativeSwapOutcome.Rejected,
             before: self.executable.revision.copy(), after: plan.to.revision.copy(),
             before_generation: self.executable.generation, after_generation: self.executable.generation,
-            preserved_listeners: ^preserved_listeners, reset_listeners: [], preserved_connections: ^preserved_connections,
-            reset_connections: [], restart_boundary: plan.restart_boundary.copy(), explanation: .Val(^explanation) }
+            preserved_listeners: preserved_listeners, reset_listeners: [], preserved_connections: preserved_connections,
+            reset_connections: [], restart_boundary: plan.restart_boundary.copy(), explanation: .Val(explanation) }
     }
     fail: fn(self: Self, explanation: NativeSwapExplanation) -> NativeSwapReceipt NativeSwapError! {
         receipt := self.rollback()
         receipt.outcome = if explanation.disposition == .Restart -> NativeSwapOutcome.RestartRequired else -> NativeSwapOutcome.Rejected
-        receipt.explanation = .Val(^explanation)
+        receipt.explanation = .Val(explanation)
         receipt
     }
     validate_plan: fn(self: &Self, plan: &NativeSwapPlan) NativeSwapError! {
@@ -87,7 +87,7 @@ impl NativeSwapState {
                 "connection `{handle.id}` names listener `{handle.listener_id}` without an explicit compatible listener handle"))
         }
     }
-    error: fn(self: Self, fact: NativeSwapBlockingFact, detail: String) -> NativeSwapError { NativeSwapError.input(self.source().canonical(), fact, ^detail) }
+    error: fn(self: Self, fact: NativeSwapBlockingFact, detail: String) -> NativeSwapError { NativeSwapError.input(self.source().canonical(), fact, detail) }
     phase_error: fn(self: Self, detail: String) -> NativeSwapError { self.error(.InvalidPhase, "{detail}; current phase={self.phase.as_str()}") }
 }
 // The Rust `CodeRevision` is `NativeSwapCodeRevision` `DataRevision` is `NativeSwapDataRevision`
@@ -98,17 +98,17 @@ receipt_from_working: fn(working: NativeSwapWorkingReceipt, outcome: NativeSwapO
         before_generation: working.before.generation, after_generation: working.after.generation,
         preserved_listeners: working.preserved_listeners.copy(), reset_listeners: working.reset_listeners.copy(),
         preserved_connections: working.preserved_connections.copy(), reset_connections: working.reset_connections.copy(),
-        restart_boundary: working.restart_boundary.copy(), explanation: ^explanation }
+        restart_boundary: working.restart_boundary.copy(), explanation: explanation.move() }
 }
 listener_map: fn(source_id: String, executable: &NativeSwapExecutable, listeners: [NativeSwapListenerHandle]) -> [String:NativeSwapListenerHandle] NativeSwapError! {
     if listeners.len() > MAX_NATIVE_SWAP_FACTS -> return .Err(NativeSwapError.input(source_id, .FactLimit, "resident listener count exceeds its bounded fact limit"))
     map := [String:NativeSwapListenerHandle]{}
     loop listener in listeners {
         _: validate_identity(listener.id, "listener handle identity") ?? return .Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
-        _: validate_source_identity(&listener.source, "listener handle") ?? return .Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
-        if !listener.source.matches(&executable.source) -> return .Err(NativeSwapError.input(source_id, .ListenerHandleStale, "listener `{listener.id}` belongs to another source"))
+        _: validate_source_identity(listener.source, "listener handle") ?? return .Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        if !listener.source.matches(executable.source) -> return .Err(NativeSwapError.input(source_id, .ListenerHandleStale, "listener `{listener.id}` belongs to another source"))
         if listener.generation != executable.generation -> return .Err(NativeSwapError.input(source_id, .ListenerHandleStale, "listener `{listener.id}` does not match resident generation"))
-        if map.insert(listener.id.copy(), ^listener).is_some() -> return .Err(NativeSwapError.input(source_id, .DuplicateIdentity, "resident listener identities must be unique"))
+        if map.insert(listener.id.copy(), listener).is_some() -> return .Err(NativeSwapError.input(source_id, .DuplicateIdentity, "resident listener identities must be unique"))
     }
     map
 }
@@ -118,11 +118,11 @@ connection_map: fn(source_id: String, executable: &NativeSwapExecutable, connect
     loop connection in connections {
         _: validate_identity(connection.id, "connection handle identity") ?? return .Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
         _: validate_identity(connection.listener_id, "connection listener identity") ?? return .Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
-        _: validate_source_identity(&connection.source, "connection handle") ?? return .Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
-        if !connection.source.matches(&executable.source) -> return .Err(NativeSwapError.input(source_id, .ConnectionHandleStale, "connection `{connection.id}` belongs to another source"))
+        _: validate_source_identity(connection.source, "connection handle") ?? return .Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        if !connection.source.matches(executable.source) -> return .Err(NativeSwapError.input(source_id, .ConnectionHandleStale, "connection `{connection.id}` belongs to another source"))
         if connection.generation != executable.generation -> return .Err(NativeSwapError.input(source_id, .ConnectionHandleStale, "connection `{connection.id}` does not match resident generation"))
         if !listeners.contains_key(connection.listener_id) -> return .Err(NativeSwapError.input(source_id, .ConnectionListenerNotPreserved, "connection `{connection.id}` names unknown listener `{connection.listener_id}`"))
-        if map.insert(connection.id.copy(), ^connection).is_some() -> return .Err(NativeSwapError.input(source_id, .DuplicateIdentity, "resident connection identities must be unique"))
+        if map.insert(connection.id.copy(), connection).is_some() -> return .Err(NativeSwapError.input(source_id, .DuplicateIdentity, "resident connection identities must be unique"))
     }
     map
 }
@@ -156,14 +156,14 @@ decision_restart_boundary: fn(decision: HotSwapDecision) -> NativeSwapRestartBou
             .Fresh { .. } -> reset.push(fact.key.copy())
         }
     }
-    NativeSwapRestartBoundary.required(.IncompatibleType, ^affected).with_state(^kept, ^reset)
+    NativeSwapRestartBoundary.required(.IncompatibleType, affected).with_state(kept, reset)
 }
 validate_listener_plan_facts: fn(source_id: String, expected_source: &NativeSwapSourceIdentity, handles: &[NativeSwapListenerHandle]) NativeSwapError! {
     if handles.len() > MAX_NATIVE_SWAP_FACTS -> return .Err(NativeSwapError.input(source_id, .FactLimit, "native swap plan exceeds its listener fact limit"))
     seen := [String:Bool]{}
     loop handle in handles {
         _: validate_identity(handle.id, "listener handle identity") ?? return .Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
-        _: validate_source_identity(&handle.source, "listener handle") ?? return .Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        _: validate_source_identity(handle.source, "listener handle") ?? return .Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
         if !handle.source.matches(expected_source) -> return .Err(NativeSwapError.input(source_id, .ListenerHandleStale, "listener handle `{handle.id}` belongs to another source"))
         if seen.insert(handle.id, true).is_some() -> return .Err(NativeSwapError.input(source_id, .DuplicateIdentity, "listener handle `{handle.id}` appears more than once"))
     }
@@ -174,7 +174,7 @@ validate_connection_plan_facts: fn(source_id: String, expected_source: &NativeSw
     loop handle in handles {
         _: validate_identity(handle.id, "connection handle identity") ?? return .Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
         _: validate_identity(handle.listener_id, "connection listener identity") ?? return .Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
-        _: validate_source_identity(&handle.source, "connection handle") ?? return .Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        _: validate_source_identity(handle.source, "connection handle") ?? return .Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
         if !handle.source.matches(expected_source) -> return .Err(NativeSwapError.input(source_id, .ConnectionHandleStale, "connection handle `{handle.id}` belongs to another source"))
         if seen.insert(handle.id, true).is_some() -> return .Err(NativeSwapError.input(source_id, .DuplicateIdentity, "connection handle `{handle.id}` appears more than once"))
     }
@@ -201,7 +201,7 @@ bounded_text: fn(value: String, limit: USize) -> String {
     output
 }
 restart_or_reject: fn(source_id: String, allows_restart: Bool, fact: NativeSwapBlockingFact, detail: String) -> NativeSwapError {
-    if allows_restart && fact.is_restartable() -> NativeSwapError.restart(source_id, fact, ^detail)
+    if allows_restart && fact.is_restartable() -> NativeSwapError.restart(source_id, fact, detail)
     else {
         reason: if fact.is_restartable() -> "capability does not allow a clean restart" else -> "blocking fact cannot be handled by a clean restart"
         NativeSwapError.input(source_id, fact, "{detail}; {reason}")

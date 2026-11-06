@@ -1,5 +1,5 @@
 // Access sigils (D-MEM1): the access marker rides the type — `&T` write,
-// `^T` move/take — and the call site mirrors it. Receivers carry the sigil on
+// `&&T` move/take — and the call site mirrors it. Receivers carry the sigil on
 // `self`. Plain `T` / `self` is read (the default, no sigil).
 Player: struct {
     hp: Int
@@ -20,8 +20,8 @@ impl Player {
 
 run: fn() {
     p := Player{hp: 100, name: "Aria"}
-    damage(&p, 30)  // call site mirrors the `&` write access
+    damage(p, 30)  // call site mirrors the `&` write access
     report(p)  // plain read, no sigil
-    &p.heal(10)  // receiver `&self`, clean method-call syntax
+    p.heal(10)  // receiver `&self`, clean method-call syntax
     print(p.show())
 }

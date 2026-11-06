@@ -17,21 +17,21 @@ build: fn(n: Int) -> [Link] {
     loop i > 0 {
         i -= 1
         body := [Int]{i, i + 1}
-        tail := &holder.pop() ?? [Link]{}
-        &holder.push([Link]{Link.Node{c: i, t: ^body, e: Val(^tail)}})
+        tail := holder.pop() ?? [Link]{}
+        holder.push([Link]{Link.Node{c: i, t: body.move(), e: Val(tail.move())}})
     }
-    &holder.pop() ?? [Link]{}
+    holder.pop() ?? [Link]{}
 }
 
-walk: fn(chain: ^[Link]) -> Int {
+walk: fn(chain: &&[Link]) -> Int {
     total := 0
-    rest := ^chain
+    rest := chain.move()
     loop rest.len() == 1 {
-        link := &rest.pop() ?? break
+        link := rest.pop() ?? break
         if link == {
             .Node(c, t, e) -> {
                 total += c + t.len()
-                rest = ^e ?? [Link]{}
+                rest = e.move() ?? [Link]{}
             }
             .End -> break
         }
@@ -46,10 +46,10 @@ Named: struct {
 // The list is dead after the loop: its items move into the records.
 wrap_all: fn(count: Int) -> [Named] {
     names := [String]{}
-    loop index in 0..<count -> &names.push("n{index}")
+    loop index in 0..<count -> names.push("n{index}")
     out := [Named]{}
     loop name in names {
-        &out.push(Named{name: name})
+        out.push(Named{name: name})
     }
     out
 }
@@ -57,29 +57,29 @@ wrap_all: fn(count: Int) -> [Named] {
 // Still read after the loop: every stored item is a copy.
 wrap_kept: fn(count: Int) -> Int {
     names := [String]{}
-    loop index in 0..<count -> &names.push("k{index}")
+    loop index in 0..<count -> names.push("k{index}")
     out := [Named]{}
-    loop name in names -> &out.push(Named{name: name})
+    loop name in names -> out.push(Named{name: name})
     out.len() * 10 + names.len()
 }
 
 run: fn() {
     chain := build(5)
-    print("walk {walk(^chain)}")
+    print("walk {walk(chain)}")
 
     kept := [Int]{1, 2, 3}
     duplicate := kept
-    &kept.push(4)
+    kept.push(4)
     print("duplicate {duplicate.len()} kept {kept.len()}")
 
     source := [Int]{7}
     moved := source
-    &moved.push(8)
+    moved.push(8)
     print("moved {moved.len()}")
 
     shared := [Int]{1}
     first := shared
-    &first.push(2)
+    first.push(2)
     second := shared
     print("first {first.len()} second {second.len()} shared {shared.len()}")
 

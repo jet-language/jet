@@ -24,7 +24,7 @@ sema_variadic_bounds_expand: fn(program: &Program) {
     calls := sema_inline_rewrite_empty()
     calls.variadic = fixed
     rewritten := [Item]{}
-    loop item in program.items -> &rewritten.push(sema_inline_rewrite_item(&calls, item))
+    loop item in program.items -> rewritten.push(sema_inline_rewrite_item(calls, item))
     expanded := [Item]{}
     loop item in rewritten {
         if item == .Func(function) {
@@ -34,13 +34,13 @@ sema_variadic_bounds_expand: fn(program: &Program) {
                 // bounds: its one-argument arity is a generic function, so it
                 // is type-checked but never instantiated (#6449).
                 arities: calls.variadic_arities.get(function.name) ?? [Int]{1}
-                loop arity in arities -> &expanded.push(Item.Func{value: sema_variadic_bound_specialize(function, bounds, arity)})
+                loop arity in arities -> expanded.push(Item.Func{value: sema_variadic_bound_specialize(function, bounds, arity)})
                 next
             }
         }
-        &expanded.push(item)
+        expanded.push(item)
     }
-    program.items = ^expanded
+    program.items = expanded.move()
 }
 
 // The traits bounding `function`'s trailing variadic, when it is one whose
@@ -51,7 +51,7 @@ sema_variadic_bound_traits: fn(function: Func, declared: [String:Bool]) -> [Stri
     if !last.variadic -> return None
     loops := 0
     uses := [Span]{}
-    loop statement in function.body -> sema_function_header_variadic_statement(statement, last.name, true, &loops, &uses)
+    loop statement in function.body -> sema_function_header_variadic_statement(statement, last.name, true, loops, uses)
     if loops != 1 || uses.len() > 0 -> return None
     if last.variadic_bound_list == .Val(list) {
         if list.len() == 0 -> return None
@@ -70,8 +70,8 @@ sema_inline_note_variadic_arity: fn(rewrite: &SemaInlineRewrite, name: String, a
     loop known in arities {
         if known == arity -> return "{name}__va{arity}"
     }
-    &arities.push(arity)
-    rewrite.variadic_arities[name] = ^arities
+    arities.push(arity)
+    rewrite.variadic_arities[name] = arities.move()
     "{name}__va{arity}"
 }
 
@@ -108,13 +108,13 @@ sema_variadic_bound_specialize: fn(function: Func, bounds: [String], arity: Int)
     updated := function
     updated.name = "{function.name}__va{arity}"
     params := [Param]{}
-    loop index in 0..<(function.params.len() - 1) -> &params.push(function.params[index])
+    loop index in 0..<(function.params.len() - 1) -> params.push(function.params[index])
     loop index in 0..<arity {
         type_name: "{last.name}__Va{index}"
-        &updated.type_params.push(TypeParam{name: type_name, name_span: last.ty_span, bounds: bounds, prep: None})
-        &params.push(Param{convention: last.convention, root: false, name: sema_variadic_bound_slot_name(last.name, index), name_span: last.name_span, public_label: None, zone: ParamZone.PositionalOnly, ty: Type.Named{name: type_name}, ty_span: last.ty_span, default: None, variadic: false, variadic_bound_list: None, declared_view_from_names: None, declared_footprint: None})
+        updated.type_params.push(TypeParam{name: type_name, name_span: last.ty_span, bounds: bounds, prep: None})
+        params.push(Param{convention: last.convention, root: false, name: sema_variadic_bound_slot_name(last.name, index), name_span: last.name_span, public_label: None, zone: ParamZone.PositionalOnly, ty: Type.Named{name: type_name}, ty_span: last.ty_span, default: None, variadic: false, variadic_bound_list: None, declared_view_from_names: None, declared_footprint: None})
     }
-    updated.params = ^params
+    updated.params = params.move()
     body := [Stmt]{}
     loop statement in function.body {
         if sema_variadic_bound_direct_loop(statement, last.name) {
@@ -122,14 +122,14 @@ sema_variadic_bound_specialize: fn(function: Func, bounds: [String], arity: Int)
                 loop index in 0..<arity {
                     slot := sema_inline_rewrite_empty()
                     slot.values[variable] = Expr.Ident{name: sema_variadic_bound_slot_name(last.name, index), span: variable_span, id: AST_NODE_GENERATED}
-                    loop unrolled in sema_inline_rewrite_stmts(&slot, loop_body) -> &body.push(unrolled)
+                    loop unrolled in sema_inline_rewrite_stmts(slot, loop_body) -> body.push(unrolled)
                 }
             }
             next
         }
-        &body.push(statement)
+        body.push(statement)
     }
-    updated.body = ^body
+    updated.body = body.move()
     updated
 }
 

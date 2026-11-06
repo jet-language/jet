@@ -15,7 +15,7 @@ jet_cli_program_zsh_bracket: fn(value: String) -> String Never! { jet_cli_progra
 jet_cli_program_zsh_standard: fn(standard: Bool, version: Bool) -> [String] Never! {
     if !standard -> return [String]{}
     specs := [String]{"    '(-v --verbose){{-v,--verbose}}[print extra detail]'", "    '(-q --quiet){{-q,--quiet}}[suppress normal output]'", "    '--color[control terminal color]:MODE:(auto always never)'"}
-    if version -> &specs.push("    '--version[show version]'")
+    if version -> specs.push("    '--version[show version]'")
     specs
 }
 
@@ -24,7 +24,7 @@ jet_cli_program_zsh_inputs: fn(inputs: [CLIInputSchema]) -> [String] Never! {
     positions := [Int]{}
     loop index in 0..<inputs.len() {
         if inputs[index].positional == None -> next
-        &positions.push(index)
+        positions.push(index)
         slot := positions.len() - 1
         loop slot > 0 && (inputs[positions[slot - 1]].positional ?? U16{0}) > (inputs[index].positional ?? U16{0}) {
             positions[slot] = positions[slot - 1]
@@ -35,14 +35,14 @@ jet_cli_program_zsh_inputs: fn(inputs: [CLIInputSchema]) -> [String] Never! {
     loop index in positions {
         input: inputs[index]
         meta: (input.metavar ?? input.flag).to_lower()
-        &specs.push("    ':{jet_cli_program_zsh_single(meta)}:{jet_cli_program_zsh_bracket(input.help)}'")
+        specs.push("    ':{jet_cli_program_zsh_single(meta)}:{jet_cli_program_zsh_bracket(input.help)}'")
     }
     loop input in inputs {
         value: if input.metavar == .Val(name) -> ":{name.to_lower()}:" else -> ""
         names: if input.short == .Val(short) -> "(-{short} --{input.flag}){{-{short},--{input.flag}}}" else -> "--{input.flag}"
-        &specs.push("    '{jet_cli_program_zsh_single(names)}[{jet_cli_program_zsh_bracket(input.help)}]{value}'")
+        specs.push("    '{jet_cli_program_zsh_single(names)}[{jet_cli_program_zsh_bracket(input.help)}]{value}'")
     }
-    &specs.push("    '--help[show help]'")
+    specs.push("    '--help[show help]'")
     specs
 }
 
@@ -55,21 +55,21 @@ jet_cli_program_completions: fn(shell: String, name: String, schema: CLICommandS
             command_name: jet_cli_program_shell_quote(name)
             if schema.commands.len() == 0 -> return Val("# bash completion from JetCommandSchema v{RECORD_VERSION}\n__jet_program_completion() {{\n    local cur\n    COMPREPLY=()\n    cur=\"${{COMP_WORDS[COMP_CWORD]}}\"\n    COMPREPLY=( $(compgen -W {root} -- \"$cur\") )\n}}\ncomplete -F __jet_program_completion -- {command_name}\n")
             cases := [String]{}
-            loop command in schema.commands -> &cases.push("        {jet_cli_program_shell_quote(command.name)}) flags={jet_cli_program_shell_quote(schema.command_completion_words(command).join(" "))} ;;")
+            loop command in schema.commands -> cases.push("        {jet_cli_program_shell_quote(command.name)}) flags={jet_cli_program_shell_quote(schema.command_completion_words(command).join(" "))} ;;")
             flags: jet_cli_program_shell_quote(root_inputs.join(" "))
             return Val("# bash completion from JetCommandSchema v{RECORD_VERSION}\n__jet_program_completion() {{\n    local cur flags\n    COMPREPLY=()\n    cur=\"${{COMP_WORDS[COMP_CWORD]}}\"\n    if [[ $COMP_CWORD -eq 1 ]]; then\n        COMPREPLY=( $(compgen -W {root} -- \"$cur\") )\n        return 0\n    fi\n    flags={flags}\n    case \"${{COMP_WORDS[1]}}\" in\n{cases.join("\n")}\n    esac\n    if [[ \"$cur\" == -* ]]; then\n        COMPREPLY=( $(compgen -W \"$flags\" -- \"$cur\") )\n    fi\n}}\ncomplete -F __jet_program_completion -- {command_name}\n")
         }
         "zsh" -> {
             specs := jet_cli_program_zsh_standard(schema.standard, schema.version != None)
-            loop spec in jet_cli_program_zsh_inputs(schema.inputs) -> &specs.push(spec)
+            loop spec in jet_cli_program_zsh_inputs(schema.inputs) -> specs.push(spec)
             command_name: jet_cli_program_shell_quote(name)
             if schema.commands.len() == 0 -> return Val("#compdef {command_name}\n# zsh completion from JetCommandSchema v{RECORD_VERSION}\n_arguments \\\n{specs.join(" \\\n")}\n")
             commands: (loop command in schema.commands -> command.name).join(" ")
-            &specs.push("    '1:command:({commands})'")
+            specs.push("    '1:command:({commands})'")
             cases := [String]{}
             loop command in schema.commands {
                 command_specs: jet_cli_program_zsh_inputs(schema.command_inputs(command))
-                &cases.push("        {jet_cli_program_shell_quote(command.name)}) _arguments \\\n{command_specs.join(" \\\n")} ;;")
+                cases.push("        {jet_cli_program_shell_quote(command.name)}) _arguments \\\n{command_specs.join(" \\\n")} ;;")
             }
             return Val("#compdef {command_name}\n# zsh completion from JetCommandSchema v{RECORD_VERSION}\nif (( CURRENT == 2 )); then\n_arguments \\\n{specs.join(" \\\n")}\nelse\n    case $words[2] in\n{cases.join("\n")}\n    esac\nfi\n")
         }
@@ -105,7 +105,7 @@ jet_cli_program_completions: fn(shell: String, name: String, schema: CLICommandS
             command_flags := [String]{}
             loop command in schema.commands {
                 words: (loop word in schema.command_completion_words(command) -> jet_cli_program_ps_quote(word)).join(",")
-                &command_flags.push("{jet_cli_program_ps_quote(command.name)} = @({words})")
+                command_flags.push("{jet_cli_program_ps_quote(command.name)} = @({words})")
             }
             return Val("# PowerShell completion from JetCommandSchema v{RECORD_VERSION}\nRegister-ArgumentCompleter -Native -CommandName {command_name} -ScriptBlock {{ param($wordToComplete,$commandAst,$cursorPosition) $root = @({root}); $flags = @({flags}); $commandFlags = @{{ {command_flags.join("; ")} }}; $words = @($commandAst.CommandElements | ForEach-Object {{ $_.Extent.Text }}); $selected = if ($words.Count -ge 2) {{ $words[1] }} else {{ '' }}; $choices = if ($commandFlags.ContainsKey($selected)) {{ $commandFlags[$selected] }} elseif ($wordToComplete.StartsWith('-')) {{ $flags }} else {{ $root }}; $choices | Where-Object {{ $_ -like \"$wordToComplete*\" }} | ForEach-Object {{ [System.Management.Automation.CompletionResult]::new($_,$_,'ParameterName',$_) }} }}\n")
         }

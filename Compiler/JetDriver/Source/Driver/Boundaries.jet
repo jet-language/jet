@@ -21,9 +21,9 @@ jet_driver_check_import_boundaries: fn(packages: [JetDriverPackageInfo], source_
     any_rule := false
     loop package in packages {
         row := [Bool]{}
-        loop _ in package.boundaries -> &row.push(false)
+        loop _ in package.boundaries -> row.push(false)
         if package.boundaries.len() > 0 -> any_rule = true
-        &hits.push(^row)
+        hits.push(row)
     }
     if !any_rule -> return
     unit_of_module := [String:Int]{}
@@ -49,7 +49,7 @@ jet_driver_check_import_boundaries: fn(packages: [JetDriverPackageInfo], source_
                 ManifestEntry{key: "to", value: to_name},
                 ManifestEntry{key: "rule", value: "{rule.from} -> {rule.to}"},
             }, Val(edge.declaration.span))
-            &diagnostics.push(diagnostic_with_source_path(^denied, from_unit.path, 0))
+            diagnostics.push(diagnostic_with_source_path(denied, from_unit.path, 0))
             break
         }
     }
@@ -57,7 +57,7 @@ jet_driver_check_import_boundaries: fn(packages: [JetDriverPackageInfo], source_
         loop (rule_index, rule) in package.boundaries {
             if hits[package_index][rule_index] -> next
             unused: pkg_manifest_diagnostic_from_row("L0619", [ManifestEntry]{ManifestEntry{key: "rule", value: "{rule.from} -> {rule.to}"}}, None)
-            &diagnostics.push(diagnostic_with_source_path(^unused, package.manifest_path ?? "package.jet", 0))
+            diagnostics.push(diagnostic_with_source_path(unused, package.manifest_path ?? "package.jet", 0))
         }
     }
 }
@@ -69,9 +69,9 @@ jet_driver_boundary_module_name: fn(package: String, relative_path: String) -> S
     parts := [String]{}
     loop part in relative_path.split("/") {
         if part == "" || part == "." -> next
-        if part.ends_with(".jet") -> &parts.push(part.removesuffix(".jet")) else -> &parts.push(part)
+        if part.ends_with(".jet") -> parts.push(part.removesuffix(".jet")) else -> parts.push(part)
     }
-    if parts.len() > 1 && (parts[parts.len() - 1] == "main" || parts[parts.len() - 1] == "module") -> _ := &parts.pop()
+    if parts.len() > 1 && (parts[parts.len() - 1] == "main" || parts[parts.len() - 1] == "module") -> _ := parts.pop()
     name := package
     loop part in parts -> name = "{name}.{part}"
     name

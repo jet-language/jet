@@ -121,64 +121,64 @@ envmodel_evaluate_dev_service: fn(entry: ServiceEntry, scope: ModuleEvalScope, g
             .Ports -> {
                 if envmodel_ports_from(value) == {
                     .Val(ports) -> plan.ports = ports
-                    .None -> envmodel_push_service_extra(&plan, field.name, value)
+                    .None -> envmodel_push_service_extra(plan, field.name, value)
                 }
             }
             .Run -> {
                 if envmodel_command_from(value) == {
                     .Val(command) -> plan.run = Val(command)
-                    .None -> envmodel_push_service_extra(&plan, field.name, value)
+                    .None -> envmodel_push_service_extra(plan, field.name, value)
                 }
             }
             .Shutdown -> {
                 if envmodel_shutdown_from(value) == {
                     .Val(shutdown) -> plan.shutdown = Val(shutdown)
-                    .None -> envmodel_push_service_extra(&plan, field.name, value)
+                    .None -> envmodel_push_service_extra(plan, field.name, value)
                 }
             }
             .DataDir -> {
                 if value == {
                     .Str(text) -> plan.data_dir = Val(text)
-                    else -> envmodel_push_service_extra(&plan, field.name, value)
+                    else -> envmodel_push_service_extra(plan, field.name, value)
                 }
             }
             .Ready -> {
                 if value == {
                     .Str(text) -> plan.ready = Val(text)
-                    else -> envmodel_push_service_extra(&plan, field.name, value)
+                    else -> envmodel_push_service_extra(plan, field.name, value)
                 }
             }
             .Restart -> {
                 if envmodel_restart_from(value) == {
                     .Val(restart) -> plan.restart = Val(restart)
-                    .None -> envmodel_push_service_extra(&plan, field.name, value)
+                    .None -> envmodel_push_service_extra(plan, field.name, value)
                 }
             }
             .Watch -> {
                 if envmodel_strings_from(value) == {
                     .Val(paths) -> plan.watch = paths
-                    .None -> envmodel_push_service_extra(&plan, field.name, value)
+                    .None -> envmodel_push_service_extra(plan, field.name, value)
                 }
             }
             .After -> {
                 if envmodel_strings_from(value) == {
                     .Val(names) -> plan.after = names
-                    .None -> envmodel_push_service_extra(&plan, field.name, value)
+                    .None -> envmodel_push_service_extra(plan, field.name, value)
                 }
             }
             .BeforeStart -> {
                 if envmodel_strings_from(value) == {
                     .Val(names) -> plan.before_start = names
-                    .None -> envmodel_push_service_extra(&plan, field.name, value)
+                    .None -> envmodel_push_service_extra(plan, field.name, value)
                 }
             }
             .Sockets -> {
                 if envmodel_strings_from(value) == {
                     .Val(names) -> plan.sockets = names
-                    .None -> envmodel_push_service_extra(&plan, field.name, value)
+                    .None -> envmodel_push_service_extra(plan, field.name, value)
                 }
             }
-            .Other -> envmodel_push_service_extra(&plan, field.name, value)
+            .Other -> envmodel_push_service_extra(plan, field.name, value)
         }
     }
     plan.enable = if enable == {
@@ -192,7 +192,7 @@ envmodel_evaluate_dev_service: fn(entry: ServiceEntry, scope: ModuleEvalScope, g
 }
 
 envmodel_push_service_extra: fn(plan: &DevServicePlan, name: String, value: CtValue) Never! {
-    &plan.extra.push(DevServiceExtra{name: name, value: ast_comptime_value_show(value)})
+    plan.extra.push(DevServiceExtra{name: name, value: ast_comptime_value_show(value)})
 }
 
 envmodel_probe_error: fn(what: String, why: String, fix: String, span: Span) -> EnvModelEvalError Never! {
@@ -212,7 +212,7 @@ envmodel_ready_probe_from: fn(value: Expr, scope: ModuleEvalScope, globals: [Str
     values := [CtValue]{}
     loop arg in call.args {
         envmodel_check_build_io(arg.expr)
-        &values.push(envmodel_comptime_evaluate(arg.expr, globals, scope))
+        values.push(envmodel_comptime_evaluate(arg.expr, globals, scope))
     }
     probe: if kind == {
         .Exec -> {
@@ -284,7 +284,7 @@ envmodel_ports_from: fn(value: CtValue) -> [Int]? Never! {
     ports := [Int]{}
     loop item in items {
         if item == {
-            .Int(number) -> { &ports.push(number) }
+            .Int(number) -> { ports.push(number) }
             else -> { return None }
         }
     }
@@ -305,7 +305,7 @@ envmodel_strings_from: fn(value: CtValue) -> [String]? Never! {
     strings := [String]{}
     loop item in items {
         if item == {
-            .Str(text) -> { &strings.push(text) }
+            .Str(text) -> { strings.push(text) }
             else -> { return None }
         }
     }

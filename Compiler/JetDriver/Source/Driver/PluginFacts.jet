@@ -13,11 +13,11 @@ jet_driver_plugin_facts: fn(request: JetDriverCompileRequest) -[FS]> SemaPluginI
     if root != "" {
         cache: plugin_facts_files.join(root, ".jet/cache/api")
         names := plugin_facts_files.listdir(cache) ?? [String]{}
-        &names.sort()
+        names.sort()
         loop name in names {
             if !name.starts_with("plugin__") || !name.ends_with(".api") -> next
             text: plugin_facts_files.read(plugin_facts_files.join(cache, name)) ?? next
-            &snapshots.push(SemaPluginSnapshot{stem: name.slice(8, name.len() - 4), text: text})
+            snapshots.push(SemaPluginSnapshot{stem: name.slice(8, name.len() - 4), text: text})
         }
     }
     sema_plugin_interface_facts(snapshots)

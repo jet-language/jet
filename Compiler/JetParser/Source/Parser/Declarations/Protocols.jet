@@ -22,74 +22,74 @@ use {
 }
 
 parser_protocol_ahead: fn(state: &JetParserState) -> Bool Never! {
-    parser_current_kind(&state) == TOKEN_IDENT && parser_value_at(&state, 0) == "protocol" && parser_kind_at(&state, 1) == TOKEN_IDENT
+    parser_current_kind(state) == TOKEN_IDENT && parser_value_at(state, 0) == "protocol" && parser_kind_at(state, 1) == TOKEN_IDENT
 }
 
 parser_parse_protocol: fn(state: &JetParserState, modifiers: ParsedItemModifiers) -> Item {
-    start: parser_bump(&state)
-    name: parser_expect_name(&state, "for a protocol name")
-    parser_expect(&state, TOKEN_LBRACE, "`{{` before protocol messages")
+    start: parser_bump(state)
+    name: parser_expect_name(state, "for a protocol name")
+    parser_expect(state, TOKEN_LBRACE, "`{{` before protocol messages")
     messages := [ProtocolMessage]{}
-    loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
-        parser_skip_semicolons(&state)
-        if parser_current_kind(&state) == TOKEN_RBRACE -> break
-        if parser_current_kind(&state) == TOKEN_COMMA {
-            parser_bump(&state)
+    loop parser_current_kind(state) != TOKEN_RBRACE && parser_current_kind(state) != TOKEN_EOF {
+        parser_skip_semicolons(state)
+        if parser_current_kind(state) == TOKEN_RBRACE -> break
+        if parser_current_kind(state) == TOKEN_COMMA {
+            parser_bump(state)
             next
         }
-        &messages.push(parser_protocol_message(&state))
-        if parser_current_kind(&state) == TOKEN_COMMA || parser_current_kind(&state) == TOKEN_SEMI -> parser_bump(&state)
+        messages.push(parser_protocol_message(state))
+        if parser_current_kind(state) == TOKEN_COMMA || parser_current_kind(state) == TOKEN_SEMI -> parser_bump(state)
     }
-    close: parser_expect(&state, TOKEN_RBRACE, "`}}` after protocol messages")
+    close: parser_expect(state, TOKEN_RBRACE, "`}}` after protocol messages")
     Item.ProtocolDecl{value: ProtocolDecl{is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: parser_value(state, name), name_span: name.span, messages: messages, span: parser_cover(start.span, close.span)}}
 }
 
 parser_protocol_message: fn(state: &JetParserState) -> ProtocolMessage {
-    start: parser_current(&state)
-    sender: parser_expect_name(&state, "for a protocol message sender")
+    start: parser_current(state)
+    sender: parser_expect_name(state, "for a protocol message sender")
     endpoint: if parser_value(state, sender) == {
         "client" -> (direction: ProtocolDirection.ClientToServer, expected: "server")
         "server" -> (direction: ProtocolDirection.ServerToClient, expected: "client")
         else -> {
-            parser_protocol_error(&state, sender.span, "protocol messages start with `client` or `server`", "the sender determines the protocol direction", "write `client: Message(...)` or `server: Message(...)`")
+            parser_protocol_error(state, sender.span, "protocol messages start with `client` or `server`", "the sender determines the protocol direction", "write `client: Message(...)` or `server: Message(...)`")
             (direction: ProtocolDirection.ClientToServer, expected: "server")
         }
     }
-    if parser_current_kind(&state) == TOKEN_UNIFIED_ARROW {
-        arrow: parser_bump(&state)
-        receiver: parser_expect_name(&state, "for the protocol receiver")
+    if parser_current_kind(state) == TOKEN_UNIFIED_ARROW {
+        arrow: parser_bump(state)
+        receiver: parser_expect_name(state, "for the protocol receiver")
         // One report per line: a wrong receiver is named, a right one is the
         // retired repetition.
         found: parser_value(state, receiver)
         written: parser_value(state, sender)
         if found != endpoint.expected {
-            parser_protocol_error(&state, receiver.span, "expected receiver `{endpoint.expected}`, found `{found}`", "the retired endpoint-pair spelling still had to name the opposite endpoint", "write `{written}: …`")
+            parser_protocol_error(state, receiver.span, "expected receiver `{endpoint.expected}`, found `{found}`", "the retired endpoint-pair spelling still had to name the opposite endpoint", "write `{written}: …`")
         } else {
-            parser_protocol_error(&state, arrow.span, "protocol lines no longer repeat the receiver", "the sender already determines the direction", "write `client: Message(...)` or `server: Message(...)`")
+            parser_protocol_error(state, arrow.span, "protocol lines no longer repeat the receiver", "the sender already determines the direction", "write `client: Message(...)` or `server: Message(...)`")
         }
     }
-    parser_expect(&state, TOKEN_COLON, "after a protocol message sender")
-    message: parser_expect_name(&state, "for a protocol message name")
-    parser_expect(&state, TOKEN_LPAREN, "`(` before a protocol message payload")
+    parser_expect(state, TOKEN_COLON, "after a protocol message sender")
+    message: parser_expect_name(state, "for a protocol message name")
+    parser_expect(state, TOKEN_LPAREN, "`(` before a protocol message payload")
     fields := [TypedNamedField]{}
-    loop parser_current_kind(&state) != TOKEN_RPAREN && parser_current_kind(&state) != TOKEN_EOF {
-        field: parser_expect_name(&state, "for a protocol message field")
-        parser_expect(&state, TOKEN_COLON, "after a protocol message field")
-        ty: parser_parse_type(&state, 0)
-        &fields.push(TypedNamedField{name: parser_value(state, field), ty: ty.ty})
-        if parser_current_kind(&state) == TOKEN_COMMA {
-            parser_bump(&state)
+    loop parser_current_kind(state) != TOKEN_RPAREN && parser_current_kind(state) != TOKEN_EOF {
+        field: parser_expect_name(state, "for a protocol message field")
+        parser_expect(state, TOKEN_COLON, "after a protocol message field")
+        ty: parser_parse_type(state, 0)
+        fields.push(TypedNamedField{name: parser_value(state, field), ty: ty.ty})
+        if parser_current_kind(state) == TOKEN_COMMA {
+            parser_bump(state)
             next
         }
-        if parser_current_kind(&state) != TOKEN_RPAREN && parser_current_kind(&state) != TOKEN_COMMA {
-            parser_add_error_here(&state, "expected `,` between protocol message fields", "protocol payload fields are comma-separated", "add a comma or close the payload")
+        if parser_current_kind(state) != TOKEN_RPAREN && parser_current_kind(state) != TOKEN_COMMA {
+            parser_add_error_here(state, "expected `,` between protocol message fields", "protocol payload fields are comma-separated", "add a comma or close the payload")
             break
         }
     }
-    close: parser_expect(&state, TOKEN_RPAREN, "`)` after a protocol message payload")
+    close: parser_expect(state, TOKEN_RPAREN, "`)` after a protocol message payload")
     ProtocolMessage{direction: endpoint.direction, name: parser_value(state, message), name_span: message.span, fields: fields, span: parser_cover(start.span, close.span)}
 }
 
 parser_protocol_error: fn(state: &JetParserState, span: Span, what: String, why: String, fix: String) {
-    parser_add_error_code(&state, "E0154", span, what, why, fix)
+    parser_add_error_code(state, "E0154", span, what, why, fix)
 }

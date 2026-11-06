@@ -38,7 +38,7 @@ kit_steps_median_labels: fn(text: String, plan: KitPlan, before: Int) -> [String
     loop raw in kit_steps_byte_slice(text, 1, text.count_bytes() - 1).split(",") {
         label: raw.trim().copy()
         if !kit_steps_known_label(plan, label, before) -> return None
-        &labels.push(label)
+        labels.push(label)
     }
     if labels.len() != 3 -> return None
     Val(labels)
@@ -55,7 +55,7 @@ kit_steps_median_assertion: fn(original: String, plan: KitPlan, before: Int) -> 
     if factor < 0 -> return None
     right: kit_steps_median_labels(words[6], plan, before) ?? return None
     labels := left
-    loop label in right -> &labels.push(label)
+    loop label in right -> labels.push(label)
     Val(KitAssertion{stream: "elapsed", path: "", mode: "median-ratio", value: words[3], alternatives: labels, extra: op})
 }
 
@@ -68,7 +68,7 @@ kit_steps_median_value: fn(labels: [String], history: [KitCapturedStep]) -> Int?
             index -= 1
             receipt: history[index]
             if receipt.label == label {
-                &values.push(receipt.elapsed_ns)
+                values.push(receipt.elapsed_ns)
                 found = true
                 break
             }
@@ -76,7 +76,7 @@ kit_steps_median_value: fn(labels: [String], history: [KitCapturedStep]) -> Int?
         if !found -> return None
     }
     if values.len() != 3 -> return None
-    &values.sort()
+    values.sort()
     Val(values[1])
 }
 

@@ -60,8 +60,8 @@ store_external_root_manual_id: fn(principal: ProducerID, label: String) -> RootI
 store_external_root_manual_witness: fn(principal: ProducerID, label: String, reference: String, targets: [String]) -> RootWitness StoreError! {
     canonical := [String]{"jet-manual-root-v1\n"}
     framed: [String]{principal.as_str(), label, reference}
-    loop value in framed -> &canonical.push("{value.bytes().len()}\n{value}\n")
-    loop target in targets -> &canonical.push("{target}\n")
+    loop value in framed -> canonical.push("{value.bytes().len()}\n{value}\n")
+    loop target in targets -> canonical.push("{target}\n")
     text: canonical.join("")
     RootWitness.new("sha256-{pkg_sha256_hex(text.bytes())}")
 }
@@ -80,14 +80,14 @@ store_external_root_targets_unlocked: fn(roots: HangarRoots, reference: String, 
 }
 
 store_external_root_targets_locked: fn(verification: &StoreVerification, roots: HangarRoots, reference: String) -[FS, Env, Time]> [String] StoreError! {
-    session: store_lifecycle_session(&verification, roots)
-    graph: store_lifecycle_closure_graph_unlocked(&verification, roots)
+    session: store_lifecycle_session(verification, roots)
+    graph: store_lifecycle_closure_graph_unlocked(verification, roots)
     store_external_root_targets_unlocked(roots, reference, graph)
 }
 
 // Rust `external_root_targets`.
 store_external_root_targets: fn(verification: &StoreVerification, roots: HangarRoots, reference: String) -[FS, Env, Time]> [String] ExternalRootError! {
-    if store_external_root_targets_locked(&verification, roots, reference) == {
+    if store_external_root_targets_locked(verification, roots, reference) == {
         .Ok(targets) -> Ok(targets)
         .Err(error) -> {
             if store_external_root_is_missing_reference(error, reference) -> return Err(ExternalRootError.ReferenceNotFound(reference))
@@ -106,7 +106,7 @@ store_external_root_is_missing_reference: fn(error: StoreError, reference: Strin
 
 // Rust `external_root_closure_size`.
 store_external_root_closure_size: fn(verification: &StoreVerification, roots: HangarRoots, reference: String) -[FS, Env, Time]> Int ExternalRootError! {
-    targets: store_external_root_targets(&verification, roots, reference)
+    targets: store_external_root_targets(verification, roots, reference)
     Ok(targets.len())
 }
 
@@ -130,8 +130,8 @@ store_external_root_map_error: fn(label: String, error: StoreError) -> ExternalR
 }
 
 store_external_root_register_locked: fn(verification: &StoreVerification, roots: HangarRoots, id: RootID, producer: ProducerID, label: String, reference: String, metadata: RootMetadata, expected_etag: String?, expected: RootEtag?, at: Int) -[FS, Env, Time]> LifecycleSnapshot StoreError! {
-    session: store_lifecycle_session(&verification, roots)
-    graph: store_lifecycle_closure_graph_unlocked(&verification, roots)
+    session: store_lifecycle_session(verification, roots)
+    graph: store_lifecycle_closure_graph_unlocked(verification, roots)
     targets: store_external_root_targets_unlocked(roots, reference, graph)
     witness: store_external_root_manual_witness(producer, label, reference, targets)
     identity: RootIdentity.new(RootKind.Manual, id, producer, Incarnation.new(1), witness)
@@ -140,7 +140,7 @@ store_external_root_register_locked: fn(verification: &StoreVerification, roots:
 }
 
 store_external_root_register_snapshot: fn(verification: &StoreVerification, roots: HangarRoots, id: RootID, producer: ProducerID, label: String, reference: String, metadata: RootMetadata, expected_etag: String?, expected: RootEtag?, at: Int) -[FS, Env, Time]> LifecycleSnapshot ExternalRootError! {
-    if store_external_root_register_locked(&verification, roots, id, producer, label, reference, metadata, expected_etag, expected, at) == {
+    if store_external_root_register_locked(verification, roots, id, producer, label, reference, metadata, expected_etag, expected, at) == {
         .Ok(snapshot) -> Ok(snapshot)
         .Err(error) -> {
             if store_external_root_is_missing_reference(error, reference) -> return Err(ExternalRootError.ReferenceNotFound(reference))
@@ -167,7 +167,7 @@ store_register_external_root_at: fn(verification: &StoreVerification, roots: Han
         .Val(text) -> expected = Val(RootEtag.parse(text))
         .None -> {}
     }
-    snapshot: store_external_root_register_snapshot(&verification, roots, id, producer, label, reference, metadata, expected_etag, expected, at)
+    snapshot: store_external_root_register_snapshot(verification, roots, id, producer, label, reference, metadata, expected_etag, expected, at)
     root: snapshot.roots.get(id.as_str()) ?? return Err(ExternalRootError.Store(StoreError.InvalidData("manual lifecycle root `{label}` disappeared after update")))
     Ok(store_external_root_view(root))
 }
@@ -175,18 +175,18 @@ store_register_external_root_at: fn(verification: &StoreVerification, roots: Han
 // Rust `list_external_roots`: the principal's live manual roots.
 store_list_external_roots: fn(verification: &StoreVerification, roots: HangarRoots, principal: String) -[FS, Env, Time]> [ExternalRootView] ExternalRootError! {
     producer: ProducerID.new(principal)
-    snapshot: store_lifecycle_snapshot(&verification, roots)
+    snapshot: store_lifecycle_snapshot(verification, roots)
     views := [ExternalRootView]{}
     live_roots: snapshot.root_list()
     loop root in live_roots {
         if root.identity.kind != RootKind.Manual || root.identity.producer != producer || root.phase == RootPhase.Tombstoned -> next
-        &views.push(store_external_root_view(root))
+        views.push(store_external_root_view(root))
     }
     Ok(views)
 }
 
 store_external_root_remove: fn(verification: &StoreVerification, roots: HangarRoots, id: RootID, label: String, expected_etag: String, at: Int) -[FS, Env, Time]> LifecycleSnapshot ExternalRootError! {
-    if store_lifecycle_atomic_remove(&verification, roots, id, expected_etag, LifecycleTimestamp.from_unix_seconds(at)) == {
+    if store_lifecycle_atomic_remove(verification, roots, id, expected_etag, LifecycleTimestamp.from_unix_seconds(at)) == {
         .Ok(snapshot) -> Ok(snapshot)
         .Err(error) -> Err(store_external_root_map_error(label, error))
     }
@@ -197,13 +197,13 @@ store_unregister_external_root_at: fn(verification: &StoreVerification, roots: H
     store_external_root_validate_label(label)
     producer: ProducerID.new(principal)
     id: store_external_root_manual_id(producer, label)
-    snapshot: store_lifecycle_snapshot(&verification, roots)
+    snapshot: store_lifecycle_snapshot(verification, roots)
     if !snapshot.roots.has_key(id.as_str()) -> return Err(ExternalRootError.Store(StoreError.NotFound("external root `{label}` was not found")))
     root: snapshot.roots[id.as_str()]
     if root.identity.kind != RootKind.Manual || root.identity.producer != producer {
         return Err(ExternalRootError.Store(StoreError.PermissionDenied("external root `{label}` is owned by another producer")))
     }
-    store_external_root_remove(&verification, roots, id, label, expected_etag, at)
+    store_external_root_remove(verification, roots, id, label, expected_etag, at)
 }
 
 // Rust `reconcile_profile_generation_root`: prepare the immutable root of
@@ -214,7 +214,7 @@ store_reconcile_profile_generation_root: fn(verification: &StoreVerification, ro
     incarnation: Incarnation.new(1)
     root_witness: RootWitness.new(witness)
     identity: RootIdentity.new(RootKind.ProfileGeneration, id, ProducerID.new("jetpack-profile-generation"), incarnation, root_witness)
-    snapshot: store_lifecycle_prepare_if_absent(&verification, roots, identity, store_lifecycle_sorted_set(targets), LifecycleTimestamp.from_unix_seconds(at))
+    snapshot: store_lifecycle_prepare_if_absent(verification, roots, identity, store_lifecycle_sorted_set(targets), LifecycleTimestamp.from_unix_seconds(at))
     root: snapshot.roots.get(id.as_str()) ?? return Err(StoreError.Other("generation root disappeared after prepare"))
     if root.phase == RootPhase.Committed -> return Ok(None)
     Ok(Val(PreparedProfileGenerationRoot{id, incarnation, witness: root_witness}))

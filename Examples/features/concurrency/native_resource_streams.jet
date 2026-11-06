@@ -23,7 +23,7 @@ count_lines: fn(src: String) -> Int IOError! {
 run: fn() {
     task.group g {
         { sender, receiver: ch }: channel<Int>(1)
-        producer: task ^sender {
+        producer: task &&sender {
             sender.send(10)
             sender.send(20)
             sender.send(30)
@@ -31,7 +31,7 @@ run: fn() {
         }
         loop value in ch -> print("channel: {value}")
         print("channel ended")
-        ^producer.join() ?? panic("producer failed")
+        producer.join() ?? panic("producer failed")
 
         // The timer never ends by itself; the consumer owns the bound.
         seen := 0

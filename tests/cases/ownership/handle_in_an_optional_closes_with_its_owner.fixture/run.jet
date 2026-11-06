@@ -70,7 +70,7 @@ hold_enum: fn(path: String) {
 take_payload: fn(path: String) -> FileReader {
     holder := Holder{file: Val(reader(path))}
     if holder.file == {
-        .Val(file) -> ^file
+        .Val(file) -> file.move()
         None -> panic("no file")
     }
 }
@@ -91,10 +91,10 @@ run: fn() {
     moved := take_payload(path)
     print("moved open {open_fds() - before}")
     print("moved reads {moved.read(3).len()}")
-    drop_reader(^moved)
+    drop_reader(moved)
     print("moved leaked {open_fds() - before}")
 }
 
-drop_reader: fn(file: ^FileReader) {
+drop_reader: fn(file: &&FileReader) {
     print("dropping {file.read(2).len()}")
 }

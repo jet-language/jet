@@ -20,8 +20,8 @@ gate_query_external: fn(source: String) -> GateEntry Never! {
 }
 gate_query_request: fn(source: String, policy: String?) -> JetDriverCompileRequest {
     files := [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: "/gates/run.jet", relative_path: "run.jet", identity: "gates-run", source: source}}
-    if policy == .Val(value) -> &files.push(JetDriverAuthorizedSourceFile{path: "/gates/package.jet", relative_path: "package.jet", identity: "gates-package", source: "name: \"gates\"\npolicy: {{ {value} }}\n"})
-    &files.push(JetDriverAuthorizedSourceFile{path: "/gates/helper.jet", relative_path: "helper.jet", identity: "gates-helper", source: "helper: fn() {{ undefined_helper() }}"})
+    if policy == .Val(value) -> files.push(JetDriverAuthorizedSourceFile{path: "/gates/package.jet", relative_path: "package.jet", identity: "gates-package", source: "name: \"gates\"\npolicy: {{ {value} }}\n"})
+    files.push(JetDriverAuthorizedSourceFile{path: "/gates/helper.jet", relative_path: "helper.jet", identity: "gates-helper", source: "helper: fn() {{ undefined_helper() }}"})
     JetDriverCompileRequest{
         authorized_sources: JetDriverAuthorizedSourceSnapshot{roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{canonical_path: "/gates", identity: "gates-root", allow_hardlinks: false, files: files, foreign_cache_files: []}}, entry_root_identity: "gates-root", entry_path: "/gates/run.jet"},
         canonical_effect_source: "", core_sources: [], host_facts: JetDriverHostFacts{target_triple: None, active_os: None, compiler_identity: None}, eval_config: jet_eval_default_config(), record_store: None, trace_sink: None, compiler_threads: compiler_threads_single(),

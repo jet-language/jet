@@ -1,4 +1,4 @@
-// D-MEM1: method receivers — &self (write), ^self (consume), self (read).
+// D-MEM1: method receivers — &self (write), &&self (consume), self (read).
 Buffer: struct {
     data: String
     size: Int
@@ -18,15 +18,15 @@ impl Buffer {
         self.size += 1
     }
 
-    seal: fn(^self) -> String { "[sealed: {self.data}]" }
+    seal: fn(&&self) -> String { "[sealed: {self.data}]" }
 }
 
 run: fn() {
     buf := Buffer{data: "hello", size: 1}
     print(buf.peek())  // plain read
     buf.describe()  // plain self, read
-    &buf.append(" world")  // &self write
+    buf.append(" world")  // &self write
     buf.describe()
-    result: ^buf.seal()  // ^self consume; buf gone after this
+    result: buf.seal()  // &&self consume; buf gone after this
     print(result)
 }

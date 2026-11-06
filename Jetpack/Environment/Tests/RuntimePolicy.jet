@@ -42,11 +42,11 @@ env_rt_test_is_timeout: fn(error: IOError) -> Bool {
     managed: files.join(root, SOURCE_ROOT_DIR)
     files.create_dir_all(managed) ?? panic("managed dir")
     session := RuntimeLockSession.new()
-    outer: &session.enter(managed, "outer") ?? panic("outer scope")
-    inner: &session.enter(managed, "inner") ?? panic("a nested scope of the same root reuses the outer claim")
+    outer: session.enter(managed, "outer") ?? panic("outer scope")
+    inner: session.enter(managed, "inner") ?? panic("a nested scope of the same root reuses the outer claim")
     files.write(files.join(root, "nested"), "ok") ?? panic("nested write")
-    &session.leave(^inner)
-    &session.leave(^outer)
+    session.leave(inner)
+    session.leave(outer)
     assert_eq(files.read(files.join(root, "nested")) ?? panic("read nested"), "ok")
     files.remove_all(root).drop("test cleanup")
 }
@@ -60,7 +60,7 @@ env_rt_test_is_timeout: fn(error: IOError) -> Bool {
     guard: env_acquire_lock_waiting(root, "hangar", time.duration_ms(100)) ?? panic("a stale marker is not a held lock")
     held: env_lock_state(path) ?? panic("probe held")
     assert(held == RuntimeLockState.Held)
-    close(^guard)
+    close(guard)
     idle: env_lock_state(path) ?? panic("probe idle")
     assert(idle == RuntimeLockState.Idle)
     assert(files.exists(path))
@@ -89,13 +89,13 @@ env_rt_test_is_timeout: fn(error: IOError) -> Bool {
     assert((env_try_acquire_lock(root, "hangar") ? found -> found ! error -> panic("same-scope try")) == None)
     assert((env_try_acquire_lock(root, "other") ? found -> found ! error -> panic("other-scope try")) == None)
     assert((env_lock_state(env_lock_path_for_scope(root, "other")) ?? panic("probe other")) == RuntimeLockState.Held)
-    close(^first)
+    close(first)
     assert_eq((files.stat(owner_path) ?? panic("persistent owner")).id, before.id)
     claimed: env_try_acquire_lock(root, "other") ? found -> found ! error -> panic("idle try")
     next_owner: claimed ?? panic("idle try must acquire")
     assert_eq(next_owner.owner_path, owner_path)
     assert_eq((files.stat(owner_path) ?? panic("same owner")).id, before.id)
-    close(^next_owner)
+    close(next_owner)
     files.remove_all(root).drop("test cleanup")
 }
 
@@ -142,7 +142,7 @@ env_rt_test_is_timeout: fn(error: IOError) -> Bool {
     elapsed: time.duration_as_ms(time.elapsed(watch))
     assert(elapsed >= 60)
     assert(elapsed < 500)
-    close(^guard)
+    close(guard)
     files.remove_all(root).drop("test cleanup")
 }
 
@@ -189,9 +189,9 @@ env_rt_test_is_timeout: fn(error: IOError) -> Bool {
     files.write(path, "replacement") ?? panic("replacement")
     files.hard_link(path, anchor) ?? panic("replacement anchor")
     assert(env_acquire_lock_waiting(root, "hangar", time.duration_ms(50)) == .Err(_))
-    close(^first)
+    close(first)
     replacement: env_acquire_lock(root, "hangar") ?? panic("the replaced marker is usable once the owner file is free")
-    close(^replacement)
+    close(replacement)
     files.remove_all(root).drop("test cleanup")
 }
 
@@ -202,7 +202,7 @@ env_rt_test_is_timeout: fn(error: IOError) -> Bool {
     assert(second == None)
     second_path: env_lock_path_for_scope(root, "second")
     assert_eq(env_lock_state(second_path) ?? panic("held second marker"), RuntimeLockState.Held)
-    close(^first)
+    close(first)
     assert_eq(env_lock_state(second_path) ?? panic("idle second marker"), RuntimeLockState.Idle)
     files.remove_all(root).drop("test cleanup")
 }
@@ -213,12 +213,12 @@ env_rt_test_is_timeout: fn(error: IOError) -> Bool {
     renamed: files.join(root, "renamed-root")
     files.create_dir_all(managed) ?? panic("managed root")
     session := RuntimeLockSession.new()
-    outer: &session.enter(managed, "outer") ?? panic("outer root claim")
+    outer: session.enter(managed, "outer") ?? panic("outer root claim")
     files.rename(managed, renamed) ?? panic("rename retained root")
-    inner: &session.enter(renamed, "inner") ?? panic("same inode must reuse the held claim")
+    inner: session.enter(renamed, "inner") ?? panic("same inode must reuse the held claim")
     assert(inner.lock == None)
-    &session.leave(^inner)
-    &session.leave(^outer)
+    session.leave(inner)
+    session.leave(outer)
     files.remove_all(root).drop("test cleanup")
 }
 

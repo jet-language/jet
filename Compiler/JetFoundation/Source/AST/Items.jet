@@ -201,13 +201,13 @@ import_walk_bindings: fn(declaration: ImportDecl) -> [ImportBinding] Never! {
     if declaration.kind == {
         .Module(name, path_span) -> {
             alias: if declaration.alias == "" -> None else -> Val(declaration.alias)
-            &bindings.push(ImportBinding{module_alias: name, original: None, local: import_alias(declaration), alias: alias, module_alias_span: path_span, item_span: None, local_span: declaration.alias_span, items_span: None, import_span: declaration.span, is_pub: declaration.is_pub, is_package_pub: declaration.is_package_pub})
+            bindings.push(ImportBinding{module_alias: name, original: None, local: import_alias(declaration), alias: alias, module_alias_span: path_span, item_span: None, local_span: declaration.alias_span, items_span: None, import_span: declaration.span, is_pub: declaration.is_pub, is_package_pub: declaration.is_package_pub})
         }
         .Unqualified(module_alias, module_alias_span, items, items_span, _) -> {
             loop (index, item) in items {
                 item_span: if index < declaration.item_spans.len() -> Val(declaration.item_spans[index]) else -> None
                 local_span: if index < declaration.local_spans.len() -> declaration.local_spans[index] else -> item_span ?? module_alias_span
-                &bindings.push(ImportBinding{module_alias: module_alias, original: Val(item.original), local: member_import_local(item.original, item.alias), alias: item.alias, module_alias_span: module_alias_span, item_span: item_span, local_span: local_span, items_span: Val(items_span), import_span: declaration.span, is_pub: declaration.is_pub, is_package_pub: declaration.is_package_pub})
+                bindings.push(ImportBinding{module_alias: module_alias, original: Val(item.original), local: member_import_local(item.original, item.alias), alias: item.alias, module_alias_span: module_alias_span, item_span: item_span, local_span: local_span, items_span: Val(items_span), import_span: declaration.span, is_pub: declaration.is_pub, is_package_pub: declaration.is_package_pub})
             }
         }
         .File(_, _) -> {}
@@ -1161,7 +1161,7 @@ unit_family_distinct_defs: fn(family: UnitFamilyDef) -> [DistinctDef] Never! {
             derives := [NamedSpan]{NamedSpan{name: if point -> "Comparable" else -> "Numeric", span: member.name_span}}
             quantity := QuantityInfo?{None}
             if family.resolved_dimension == .Val(dimension) {
-                loop codec in owned_trait_codec_names() -> &derives.push(NamedSpan{name: codec.copy(), span: member.name_span})
+                loop codec in owned_trait_codec_names() -> derives.push(NamedSpan{name: codec.copy(), span: member.name_span})
                 kind: if {
                     !affine -> QuantityKind.Linear
                     point -> QuantityKind.Point
@@ -1169,7 +1169,7 @@ unit_family_distinct_defs: fn(family: UnitFamilyDef) -> [DistinctDef] Never! {
                 }
                 quantity = Val(QuantityInfo{dimension: dimension, kind: kind})
             }
-            &definitions.push(DistinctDef{is_pub: family.is_pub, is_package_pub: family.is_package_pub, type_markers: [Marker]{}, derives: derives, quantity: quantity, name: name, name_span: member.name_span, base: Type.Float, base_span: member.name_span, range: None, span: member.name_span})
+            definitions.push(DistinctDef{is_pub: family.is_pub, is_package_pub: family.is_package_pub, type_markers: [Marker]{}, derives: derives, quantity: quantity, name: name, name_span: member.name_span, base: Type.Float, base_span: member.name_span, range: None, span: member.name_span})
         }
     }
     definitions

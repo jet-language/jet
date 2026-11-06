@@ -55,7 +55,7 @@ auth_oauth: fn(auth: Auth, providers: String) -> Auth Never! {
         loop raw in comma_group.split(" ") {
             provider: raw.trim()
             if valid_provider(provider) && !contains_string(configured, provider) && configured.len() < AUTH_MAX_PROVIDERS {
-                &configured.push(provider.copy())
+                configured.push(provider.copy())
             }
         }
     }
@@ -72,8 +72,8 @@ auth_routes: fn(auth: Auth) -> String Never! {
     }
     providers := canonical_providers(auth.providers)
     loop provider in providers {
-        &routes.push("GET /oauth/{provider}/begin")
-        &routes.push("GET /oauth/{provider}/callback")
+        routes.push("GET /oauth/{provider}/begin")
+        routes.push("GET /oauth/{provider}/callback")
     }
     "AuthRoutes({routes.join("; ")})"
 }
@@ -92,7 +92,7 @@ canonical_providers: fn(values: [String]) -> [String] {
     providers := [String]{}
     loop provider in values {
         if valid_provider(provider) && !contains_string(providers, provider) && providers.len() < AUTH_MAX_PROVIDERS {
-            &providers.push(provider.copy())
+            providers.push(provider.copy())
         }
     }
     providers
@@ -102,9 +102,9 @@ state: fn<T: [Encode, Decode], E: [Encode, Decode]>(binding: Live<T, E>) -> Load
 
 live_stats: fn() -> String Never! { web.live_stats() }
 
-__live_bind: fn<T: [Encode, Decode], E: [Encode, Decode]>(source: String, args: [String], run: ^fn() -> T E!) -> Live<T, E> Never! { web.__live_bind<T, E>(source, args, ^run) }
+__live_bind: fn<T: [Encode, Decode], E: [Encode, Decode]>(source: String, args: [String], run: &&fn() -> T E!) -> Live<T, E> Never! { web.__live_bind<T, E>(source, args, run) }
 
-__live_poll: fn<T: [Encode, Decode], E: [Encode, Decode]>(source: String, args: [String], every: Duration?, run: ^fn() -> T E!) -> Live<T, E> Never! { web.__live_poll<T, E>(source, args, every, ^run) }
+__live_poll: fn<T: [Encode, Decode], E: [Encode, Decode]>(source: String, args: [String], every: Duration?, run: &&fn() -> T E!) -> Live<T, E> Never! { web.__live_poll<T, E>(source, args, every, run) }
 
 __live_push: fn<T: Encode>(source: String, args: [String], value: T) Never! { web.__live_push<T>(source, args, value) }
 
@@ -166,7 +166,7 @@ sync: fn(doc_show: String, over: String) -> String Never! {
         } else {
             id: registry.next_id + 1
             registry.next_id = id
-            &registry.records.push(web.LiveRecord{id: id, source: web.LIVE_SYNC_SOURCE, key: over.copy(), value: value, dirty: false, every_ns: 0, ran_ns: 0})
+            registry.records.push(web.LiveRecord{id: id, source: web.LIVE_SYNC_SOURCE, key: over.copy(), value: value, dirty: false, every_ns: 0, ran_ns: 0})
         }
         if web.live_cell_replace(seen, web.live_encode(registry)) -> return receipt
     }
@@ -215,7 +215,7 @@ sync_document_merge: fn(left: String, right: String) -> String? {
             if entries.get(key) == .Val(existing) {
                 if existing != value -> return None
             } else {
-                _: &entries.add(key, value)
+                _: entries.add(key, value)
             }
         }
         if entries.len() > SYNC_MAX_ENTRIES -> return None
@@ -235,7 +235,7 @@ sync_document_merge: fn(left: String, right: String) -> String? {
             slot: counts.get(replica) ?? SyncCount{positive: 0, negative: 0}
             positive: if count.positive > slot.positive -> count.positive else -> slot.positive
             negative: if count.negative > slot.negative -> count.negative else -> slot.negative
-            _: &counts.add(replica, SyncCount{positive: positive, negative: negative})
+            _: counts.add(replica, SyncCount{positive: positive, negative: negative})
         }
         if counts.len() > SYNC_MAX_REPLICAS -> return None
         merged = sync_counter_show(counts)
@@ -264,19 +264,19 @@ sync_map_entries: fn(value: String) -> [String:String]? {
         key: sync_unescape(pair.first) ?? return None
         item: sync_unescape(pair.second) ?? return None
         if !sync_token_valid(key) || item.len() > SYNC_MAX_TEXT || entries.get(key) != .None -> return None
-        _: &entries.add(key, item)
+        _: entries.add(key, item)
     }
     Val(entries)
 }
 
 sync_map_show: fn(entries: [String:String]) -> String {
     keys := [String]{}
-    loop key in entries.keys() -> &keys.push(key)
-    &keys.sort()
+    loop key in entries.keys() -> keys.push(key)
+    keys.sort()
     shown := [String]{}
     loop key in keys {
         value: entries.get(key) ?? next
-        &shown.push("{sync_escape(key)}={sync_escape(value)}")
+        shown.push("{sync_escape(key)}={sync_escape(value)}")
     }
     "SyncMap({shown.join(",")})"
 }
@@ -304,18 +304,18 @@ sync_pair_insert: fn(items: [SyncPair], item: SyncPair) -> [SyncPair]? {
         if existing.first == item.first && existing.second == item.second -> return None
         later: if existing.first == item.first -> existing.second > item.second else -> existing.first > item.first
         if !placed && later {
-            &out.push(item)
+            out.push(item)
             placed = true
         }
-        &out.push(existing)
+        out.push(existing)
     }
-    if !placed -> &out.push(item)
+    if !placed -> out.push(item)
     Val(out)
 }
 
 sync_list_show: fn(items: [SyncPair]) -> String {
     shown := [String]{}
-    loop item in items -> &shown.push("{sync_escape(item.first)}:{sync_escape(item.second)}")
+    loop item in items -> shown.push("{sync_escape(item.first)}:{sync_escape(item.second)}")
     "SyncList({shown.join("|")})"
 }
 
@@ -330,7 +330,7 @@ sync_counter_entries: fn(value: String) -> [String:SyncCount]? {
         positive: sync_count_parse(sync_unescape(sides.first) ?? return None, "+") ?? return None
         negative: sync_count_parse(sync_unescape(sides.second) ?? return None, "-") ?? return None
         if !sync_token_valid(replica) || counts.get(replica) != .None -> return None
-        _: &counts.add(replica, SyncCount{positive: positive, negative: negative})
+        _: counts.add(replica, SyncCount{positive: positive, negative: negative})
     }
     if counts.len() > SYNC_MAX_REPLICAS -> return None
     // The checked total of positive minus negative counts must stay an Int.
@@ -347,12 +347,12 @@ sync_counter_entries: fn(value: String) -> [String:SyncCount]? {
 
 sync_counter_show: fn(counts: [String:SyncCount]) -> String {
     replicas := [String]{}
-    loop replica in counts.keys() -> &replicas.push(replica)
-    &replicas.sort()
+    loop replica in counts.keys() -> replicas.push(replica)
+    replicas.sort()
     shown := [String]{}
     loop replica in replicas {
         count: counts.get(replica) ?? next
-        &shown.push("{sync_escape(replica)}=+{count.positive}/-{count.negative}")
+        shown.push("{sync_escape(replica)}=+{count.positive}/-{count.negative}")
     }
     "PNCounter({shown.join(",")})"
 }
@@ -424,14 +424,14 @@ sync_split: fn(value: String, separator: String) -> [String]? {
         } else if scalar == "\\" {
             escaped = true
         } else if scalar == separator {
-            &parts.push(current)
+            parts.push(current)
             current = ""
         } else {
             current = "{current}{scalar}"
         }
     }
     if escaped -> return None
-    &parts.push(current)
+    parts.push(current)
     Val(parts)
 }
 

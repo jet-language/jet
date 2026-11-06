@@ -52,7 +52,7 @@ CranProvider: struct {
     // unknown size.
     plan_downloads: fn(self, verification: &StoreVerification, specs: [RefSpec], table: SourceTable, ctx: ProviderCtx) -> DownloadPlan ProviderError! {
         plan := DownloadPlan.empty()
-        loop spec in specs -> &plan.add_item(PlanItem{package: spec.raw, state: PlanState.New, download_bytes: None, disk_bytes: None})
+        loop spec in specs -> plan.add_item(PlanItem{package: spec.raw, state: PlanState.New, download_bytes: None, disk_bytes: None})
         Ok(plan)
     }
 
@@ -81,7 +81,7 @@ provider_cran_realize: fn(spec: RefSpec, ctx: ProviderCtx) -[IO, FS, Env, Exec, 
     wanted: provider_cran_parse_ref(spec.package)
     scratch: provider_registry_scratch(ctx.store_dir, "cran", "could not create CRAN scratch")
     guard := RegistryScratch{path: scratch}
-    defer close(^guard)
+    defer close(guard)
     metadata_path: files.join(scratch, "PACKAGES")
     authority.to_path("{repository}/src/contrib/PACKAGES", metadata_path, scratch)
     metadata: provider_registry_read_text(metadata_path, "could not read CRAN metadata")
@@ -96,7 +96,7 @@ provider_cran_realize: fn(spec: RefSpec, ctx: ProviderCtx) -[IO, FS, Env, Exec, 
         path: files.join(scratch, filename)
         authority.to_path("{repository}/src/contrib/{filename}", path, scratch)
         bytes: provider_registry_read_bytes(path, "could not read `{filename}`")
-        &artifacts.push(CranSourceArtifact{record, path, hash: pkg_sha256_hex(bytes)})
+        artifacts.push(CranSourceArtifact{record, path, hash: pkg_sha256_hex(bytes)})
     }
     source_hash: provider_cran_closure_hash(artifacts)
     if ctx.project_dir == {
@@ -129,14 +129,14 @@ provider_cran_realize: fn(spec: RefSpec, ctx: ProviderCtx) -[IO, FS, Env, Exec, 
     provider_registry_seal(out_dir, "could not seal CRAN output")
     envelope: Envelope.for_output(out_dir, spec.raw, CRAN_RECIPE_ID)
     dependencies := [String]{}
-    loop dependency in root.dependencies -> &dependencies.push(dependency.name)
+    loop dependency in root.dependencies -> dependencies.push(dependency.name)
     if ctx.project_dir == {
         .Val(project) -> pkg_lock_record_cran_realization(project, root.name, root.version, spec.raw, out_dir, source_hash, repository, fetch_authority, dependencies, provider_registry_lock_envelope(envelope))
         .None -> {}
     }
     identity: provider_cache_identity(source_hash, CRAN_RECIPE_ID, ctx, fetch_authority)
     objects := [RegistrySourceObject]{}
-    loop artifact in artifacts -> &objects.push(RegistrySourceObject{name: artifact.record.name, sha256: artifact.hash, file_name: files.basename(artifact.path)})
+    loop artifact in artifacts -> objects.push(RegistrySourceObject{name: artifact.record.name, sha256: artifact.hash, file_name: files.basename(artifact.path)})
     edges: provider_registry_dependency_objects(root.name, objects)
     facts := edges.facts
     facts["repository"] = repository
@@ -209,10 +209,10 @@ provider_cran_parse_packages: fn(raw: String) -> [String: CranRecord] RegistryEr
                 dependency: provider_cran_parse_dependency(item) ?? next
                 if provider_cran_is_base_package(dependency.name) -> next
                 if provider_cran_has_dependency(dependencies, dependency.name) -> next
-                &dependencies.push(dependency)
+                dependencies.push(dependency)
             }
         }
-        &dependencies.sort_by(dependency -> dependency.name)
+        dependencies.sort_by(dependency -> dependency.name)
         records[name] = CranRecord{name, version, dependencies}
     }
     if records.len() == 0 -> return Err(RegistryError.Reason("CRAN PACKAGES metadata contained no package records"))
@@ -265,7 +265,7 @@ provider_cran_is_base_package: fn(name: String) -> Bool Never! {
 // against the selected metadata version and refusing cycles.
 provider_cran_dependency_order: fn(root: String, records: [String: CranRecord]) -> [String] RegistryError! {
     walk := CranOrderWalk{records, active: [String]{}, done: [String]{}, out: [String]{}}
-    &walk.visit(root)
+    walk.visit(root)
     Ok(walk.out)
 }
 
@@ -278,7 +278,7 @@ CranOrderWalk: struct {
     visit: fn(&self, name: String) RegistryError! {
         if self.done.contains(name) -> return
         if self.active.contains(name) -> return Err(RegistryError.Reason("CRAN dependency cycle includes `{name}`"))
-        &self.active.push(name)
+        self.active.push(name)
         record: self.records.get(name) ?? return Err(RegistryError.Reason("CRAN dependency `{name}` is absent from repository metadata"))
         loop dependency in record.dependencies {
             selected: self.records.get(dependency.name) ?? return Err(RegistryError.Reason("CRAN dependency `{dependency.name}` is absent from repository metadata"))
@@ -290,11 +290,11 @@ CranOrderWalk: struct {
                 }
                 .None -> {}
             }
-            &self.visit(dependency.name)
+            self.visit(dependency.name)
         }
-        _ := &self.active.pop()
-        &self.done.push(name)
-        &self.out.push(name)
+        _ := self.active.pop()
+        self.done.push(name)
+        self.out.push(name)
     }
 }
 
@@ -337,9 +337,9 @@ provider_cran_compare_versions: fn(left: String, right: String) -> Ordering Neve
 provider_cran_closure_hash: fn(artifacts: [CranSourceArtifact]) -> String Never! {
     values := [String]{}
     loop artifact in artifacts {
-        &values.push(artifact.record.name)
-        &values.push(artifact.record.version)
-        &values.push(artifact.hash)
+        values.push(artifact.record.name)
+        values.push(artifact.record.version)
+        values.push(artifact.hash)
     }
     provider_registry_identity_hash("jet-cran-source-v1", values)
 }
@@ -364,6 +364,6 @@ provider_cran_write_runtime_wrapper: fn(out: String) RegistryError! -[FS, Env]> 
 
 provider_cran_render_provenance: fn(repository: String, fetch_authority: String, source_hash: String, artifacts: [CranSourceArtifact]) -> String Never! {
     lines := [String]{"schema=jet-cran-provider-v1\nrepository={repository}\nfetch_authority={fetch_authority}\nsource_hash={source_hash}\n"}
-    loop artifact in artifacts -> &lines.push("package={artifact.record.name}:{artifact.record.version}:{artifact.hash}\n")
+    loop artifact in artifacts -> lines.push("package={artifact.record.name}:{artifact.record.version}:{artifact.hash}\n")
     lines.join("")
 }

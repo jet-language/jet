@@ -20,9 +20,9 @@ FenceTestExpansion: struct {
 fence_test_expand: fn(source: String) -> FenceTestExpansion {
     lexed := lex(source.bytes())
     assert(lexed.diagnostics.is_empty())
-    expanded := parser_prepare_tokens(^lexed.tokens, &lexed.tables)
+    expanded := parser_prepare_tokens(lexed.tokens.move(), lexed.tables)
     assert(expanded.diagnostics.is_empty())
-    FenceTestExpansion{tokens: ^expanded.tokens, fenced_statements: ^expanded.fenced_statements, diagnostics: ^expanded.diagnostics, tables: ^lexed.tables}
+    FenceTestExpansion{tokens: expanded.tokens.move(), fenced_statements: expanded.fenced_statements.move(), diagnostics: expanded.diagnostics.move(), tables: lexed.tables.move()}
 }
 
 #Test("lexer_uses_fence_digraphs_and_close_suppresses_a_terminator") {
@@ -52,7 +52,7 @@ use_pair(<: t1, t2, t3 :>, <: a, b, c :>)
     names := [String]{}
     loop token in expanded.tokens {
         name: token_decoded(expanded.tables, token)
-        if token.kind == TOKEN_IDENT && name.starts_with("t") -> &names.push(name)
+        if token.kind == TOKEN_IDENT && name.starts_with("t") -> names.push(name)
     }
     assert(names.len() >= 3)
     assert_eq(names[0..<3], [String]{"t1", "t2", "t3"})
@@ -74,7 +74,7 @@ use_pair(<: t1, t2, t3 :>, <: a, b, c :>)
         code: testcase.code
         lexed := lex(testcase.source.bytes())
         assert(lexed.diagnostics.is_empty())
-        _: parser_test_diagnostic(parser_prepare_tokens(^lexed.tokens, &lexed.tables).diagnostics, code)
+        _: parser_test_diagnostic(parser_prepare_tokens(lexed.tokens.move(), lexed.tables).diagnostics, code)
     }
 }
 
@@ -82,10 +82,10 @@ use_pair(<: t1, t2, t3 :>, <: a, b, c :>)
 #Test("binding_fence_accepts_distinct_names_and_rejects_only_a_repeat") {
     distinct := lex(`run: fn() { <: first, second, third :> := 0 }`.bytes())
     assert(distinct.diagnostics.is_empty())
-    assert(parser_prepare_tokens(^distinct.tokens, &distinct.tables).diagnostics.is_empty())
+    assert(parser_prepare_tokens(distinct.tokens.move(), distinct.tables).diagnostics.is_empty())
     repeated := lex(`run: fn() { <: first, second, first :> := 0 }`.bytes())
     assert(repeated.diagnostics.is_empty())
-    _: parser_test_diagnostic(parser_prepare_tokens(^repeated.tokens, &repeated.tables).diagnostics, "E0369")
+    _: parser_test_diagnostic(parser_prepare_tokens(repeated.tokens.move(), repeated.tables).diagnostics, "E0369")
 }
 
 #Test("formatter_emits_one_fence_and_is_stable") {
@@ -159,7 +159,7 @@ use_pair(<: t1, t2, t3 :>, <: a, b, c :>)
     assert_eq(expanded.fenced_statements[0].copies, 4)
     values := [Int]{}
     loop token in expanded.tokens {
-        if token.kind == TOKEN_INT -> &values.push(token_integer(expanded.tables, token) ?? panic("integer payload"))
+        if token.kind == TOKEN_INT -> values.push(token_integer(expanded.tables, token) ?? panic("integer payload"))
     }
     assert_eq(values, [Int]{0, 1, 2, 3})
 }
@@ -185,7 +185,7 @@ use_pair(<: t1, t2, t3 :>, <: a, b, c :>)
     ] {
         lexed := lex(source.bytes())
         assert(lexed.diagnostics.is_empty())
-        _: parser_test_diagnostic(parser_prepare_tokens(^lexed.tokens, &lexed.tables).diagnostics, "E0371")
+        _: parser_test_diagnostic(parser_prepare_tokens(lexed.tokens.move(), lexed.tables).diagnostics, "E0371")
     }
 }
 
@@ -194,7 +194,7 @@ use_pair(<: t1, t2, t3 :>, <: a, b, c :>)
     source: "run: fn() {{ <: {names.join(", ")} :>: work() }}\n"
     lexed := lex(source.bytes())
     assert(lexed.diagnostics.is_empty())
-    _: parser_test_diagnostic(parser_prepare_tokens(^lexed.tokens, &lexed.tables).diagnostics, "E0371")
+    _: parser_test_diagnostic(parser_prepare_tokens(lexed.tokens.move(), lexed.tables).diagnostics, "E0371")
 }
 
 #Test("hostile_expanded_statement_bytes_are_rejected_by_the_shared_budget") {
@@ -202,7 +202,7 @@ use_pair(<: t1, t2, t3 :>, <: a, b, c :>)
     source: "run: fn() {{ print(<:0..4095:>, \"{body}\") }}\n"
     lexed := lex(source.bytes())
     assert(lexed.diagnostics.is_empty())
-    _: parser_test_diagnostic(parser_prepare_tokens(^lexed.tokens, &lexed.tables).diagnostics, "E0371")
+    _: parser_test_diagnostic(parser_prepare_tokens(lexed.tokens.move(), lexed.tables).diagnostics, "E0371")
 }
 
 #Test("nested_lambda_and_struct_braces_stay_inside_fenced_statements") {

@@ -73,7 +73,7 @@ jet_cli_sem_parse_op: fn(value: Dyn, files: [JetCLISemOpFile]) -> JetCLISemOp? N
         after: jet_cli_sem_json_text(row, "after") ?? next
         target_kind: jet_cli_sem_json_text(row, "kind") ?? next
         path: jet_cli_sem_json_text(row, "module_path") ?? next
-        &targets.push(JetCLISemOpTarget{stable_id: stable, before: before, after: after, kind: target_kind, module_path: path})
+        targets.push(JetCLISemOpTarget{stable_id: stable, before: before, after: after, kind: target_kind, module_path: path})
     }
     Val(JetCLISemOp{kind: kind, rule_id: jet_cli_sem_json_text(value, "rule_id"), from: jet_cli_sem_json_text(value, "from"), to: jet_cli_sem_json_text(value, "to"), node: jet_cli_sem_json_text(value, "node"), match_template: jet_cli_sem_json_text(value, "match"), replace_template: jet_cli_sem_json_text(value, "replace"), targets: targets, files: files})
 }
@@ -86,8 +86,8 @@ jet_cli_sem_ops_for_file: fn(raw: String, source_hash: String) -> [JetCLISemOp] 
         root: directory ?? break
         receipts: "{root}/.jet/codemods"
         names := [String]{}
-        loop entry in (cli_files.list_dir(receipts) ?? [cli_files.DirEntry]{}) -> &names.push(entry.name)
-        &names.sort()
+        loop entry in (cli_files.list_dir(receipts) ?? [cli_files.DirEntry]{}) -> names.push(entry.name)
+        names.sort()
         loop name in names {
             receipt: "{receipts}/{name}"
             if !name.ends_with(".log.json") || !cli_files.is_file(receipt) -> next
@@ -101,14 +101,14 @@ jet_cli_sem_ops_for_file: fn(raw: String, source_hash: String) -> [JetCLISemOp] 
                 before: jet_cli_sem_json_text(row, "before_hash") ?? next
                 after: jet_cli_sem_json_text(row, "after_hash") ?? next
                 normalized: jet_cli_sem_normalize(if file_path.starts_with("/") -> file_path else -> "{root}/{file_path}")
-                &files.push(JetCLISemOpFile{path: normalized, before_hash: before, after_hash: after})
+                files.push(JetCLISemOpFile{path: normalized, before_hash: before, after_hash: after})
                 if normalized == path && (jet_cli_sem_same_hash(before, source_hash) || jet_cli_sem_same_hash(after, source_hash)) {
                     matches = true
                 }
             }
             if !matches -> next
             loop row in (jet_cli_sem_json_array(value, "semantic_ops") ?? [Dyn]{}) {
-                if jet_cli_sem_parse_op(row, files) == .Val(operation) -> &output.push(operation)
+                if jet_cli_sem_parse_op(row, files) == .Val(operation) -> output.push(operation)
             }
         }
         directory = jet_cli_parent(root)
@@ -151,7 +151,7 @@ jet_cli_semantic_rename_ops: fn(before: [JetCLISemDefinitionFact], after: [JetCL
         candidates := [Int]{}
         loop (new_index, candidate) in after {
             if !used.contains(new_index) && old.kind == candidate.kind && old.module_path == candidate.module_path && old.signature_id == candidate.signature_id && old.name != candidate.name {
-                &candidates.push(new_index)
+                candidates.push(new_index)
             }
         }
         if candidates.len() != 1 -> next
@@ -162,9 +162,9 @@ jet_cli_semantic_rename_ops: fn(before: [JetCLISemDefinitionFact], after: [JetCL
             if other_index == old_index || (other.kind == candidate.kind && other.module_path == candidate.module_path && other.signature_id == candidate.signature_id && other.name != candidate.name) -> reverse += 1
         }
         if reverse != 1 -> next
-        &used.push(index)
+        used.push(index)
         target: JetCLISemOpTarget{stable_id: old.stable_id, before: old.human_identity, after: candidate.human_identity, kind: candidate.kind, module_path: candidate.module_path}
-        &operations.push(JetCLISemOp{kind: "rename", rule_id: Val("jet-fix"), from: Val(old.name), to: Val(candidate.name), node: None, match_template: None, replace_template: None, targets: [JetCLISemOpTarget]{target}, files: [JetCLISemOpFile]{}})
+        operations.push(JetCLISemOp{kind: "rename", rule_id: Val("jet-fix"), from: Val(old.name), to: Val(candidate.name), node: None, match_template: None, replace_template: None, targets: [JetCLISemOpTarget]{target}, files: [JetCLISemOpFile]{}})
     }
     operations
 }

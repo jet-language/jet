@@ -24,7 +24,7 @@ quad: fn(a: Int) -> (w: Int, x: Int, y: Int, z: Int) {
 
 look: fn(value: Big) -> Int { value.b + value.d }
 
-consume: fn(value: ^Big) -> Int { value.a + value.e + value.name.len() }
+consume: fn(value: &&Big) -> Int { value.a + value.e + value.name.len() }
 
 // Recursive, so never inlined: its result is built where the caller wants it.
 grow: fn(n: Int) -> Box4 {
@@ -45,7 +45,7 @@ run: fn() {
     }
     big: Big{a: 1, b: 2, c: 3, d: 4, e: 5, name: "jet"}
     seen: look(big)
-    used: consume(^big)
+    used: consume(big)
     g: grow(3)
     print(total)
     print(seen + used)

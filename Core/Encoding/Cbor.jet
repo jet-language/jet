@@ -12,25 +12,25 @@ use {
 CBORReader: struct {
     input: codec.CBORPull
 
-    next: fn(&self) -[IO, Time.Wait]> DataEvent? EncodingError! { &self.input.next() }
+    next: fn(&self) -[IO, Time.Wait]> DataEvent? EncodingError! { self.input.next() }
 }
 
 CBORWriter: struct {
     output: codec.CBORPush
 
-    write: fn(&self, event: ^DataEvent) EncodingError! -[IO, Time.Wait]> { &self.output.write(^event) }
-    flush: fn(&self) EncodingError! -[IO, Time.Wait]> { &self.output.flush() }
-    finish: fn(&self) EncodingError! -[IO, Time.Wait]> { &self.output.finish() }
+    write: fn(&self, event: &&DataEvent) EncodingError! -[IO, Time.Wait]> { self.output.write(event) }
+    flush: fn(&self) EncodingError! -[IO, Time.Wait]> { self.output.flush() }
+    finish: fn(&self) EncodingError! -[IO, Time.Wait]> { self.output.finish() }
 }
 
-reader: fn(input: ^FileReader, limits: EncodingLimits{EncodingLimits.safe()}) -[FS]> CBORReader EncodingError! {
-    source: codec.reader(^input, limits) ?? return Err(err)
-    Ok(CBORReader{input: ^source})
+reader: fn(input: &&FileReader, limits: EncodingLimits{EncodingLimits.safe()}) -[FS]> CBORReader EncodingError! {
+    source: codec.reader(input, limits) ?? return Err(err)
+    Ok(CBORReader{input: source.move()})
 }
 
-writer: fn(output: ^FileWriter, limits: EncodingLimits{EncodingLimits.safe()}) -[FS]> CBORWriter EncodingError! {
-    target: codec.writer(^output, limits) ?? return Err(err)
-    Ok(CBORWriter{output: ^target})
+writer: fn(output: &&FileWriter, limits: EncodingLimits{EncodingLimits.safe()}) -[FS]> CBORWriter EncodingError! {
+    target: codec.writer(output, limits) ?? return Err(err)
+    Ok(CBORWriter{output: target.move()})
 }
 
 #Equatable
@@ -65,7 +65,7 @@ CBORError: struct {
         display: fn(self) -> String { self.display_text() }
     }
     impl Debug {
-        debug: fn(^self) -> String { self.display_text() }
+        debug: fn(&&self) -> String { self.display_text() }
     }
 }
 impl CBORError {
@@ -121,21 +121,21 @@ validate: fn(value: Dyn, path: String) CBORError! {
 encode: fn(value: Dyn, canonical: Bool) -> [U8] CBORError! {
     validate(value, "$") ?? return Err(err)
     out := [U8]{}
-    encode_value(value, &out, canonical) ?? return Err(err)
+    encode_value(value, out, canonical) ?? return Err(err)
     Ok(out)
 }
 
 append_uint: fn(out: &[U8], value: Int, width: Int) Never! {
-    loop i in 0..<width -> &out.push(U8{(value >> ((width - i - 1) * 8)).bit_and(255)})
+    loop i in 0..<width -> out.push(U8{(value >> ((width - i - 1) * 8)).bit_and(255)})
 }
 
 append_length: fn(out: &[U8], major: Int, value: Int) Never! {
-    if value < 24 -> &out.push(U8{(major << 5).bit_or(value)})
+    if value < 24 -> out.push(U8{(major << 5).bit_or(value)})
     else {
         width: if value <= 255 -> 1 else if value <= 65535 -> 2 else if value <= 4294967295 -> 4 else -> 8
         additional: if width == 1 -> 24 else if width == 2 -> 25 else if width == 4 -> 26 else -> 27
-        &out.push(U8{(major << 5).bit_or(additional)})
-        append_uint(&out, value, width)
+        out.push(U8{(major << 5).bit_or(additional)})
+        append_uint(out, value, width)
     }
 }
 
@@ -143,14 +143,14 @@ append_length: fn(out: &[U8], major: Int, value: Int) Never! {
 append_float: fn(out: &[U8], value: Float) Never! {
     bits: math.to_bits(value)
     if parser.narrow_bits(bits, 5, 10) == .Val(half) {
-        &out.push(U8{249})
-        append_uint(&out, half, 2)
+        out.push(U8{249})
+        append_uint(out, half, 2)
     } else if parser.narrow_bits(bits, 8, 23) == .Val(single) {
-        &out.push(U8{250})
-        append_uint(&out, single, 4)
+        out.push(U8{250})
+        append_uint(out, single, 4)
     } else {
-        &out.push(U8{251})
-        append_uint(&out, bits, 8)
+        out.push(U8{251})
+        append_uint(out, bits, 8)
     }
 }
 
@@ -167,37 +167,37 @@ key_before: fn(left: String, right: String) -> Bool Never! {
 encode_value: fn(value: Dyn, out: &[U8], canonical: Bool) CBORError! {
     #Unsafe("validated private carriers retain byte strings for typed Encode") {
         if value == {
-            .Null -> &out.push(U8{246})
-            .Bool(b) -> &out.push(if b -> U8{245} else -> U8{244})
+            .Null -> out.push(U8{246})
+            .Bool(b) -> out.push(if b -> U8{245} else -> U8{244})
             .Int(n) -> {
-                if n >= 0 -> append_length(&out, 0, n)
-                else -> append_length(&out, 1, -(n + 1))
+                if n >= 0 -> append_length(out, 0, n)
+                else -> append_length(out, 1, -(n + 1))
             }
-            .Float(n) -> append_float(&out, n)
+            .Float(n) -> append_float(out, n)
             // A validated Number lexeme is its exact Int when integral, else its float64.
             .Number(_) -> {
                 if value.decode<Int>() == {
-                    .Ok(n) -> encode_value(Dyn.Int(n), &out, canonical) ?? return Err(err)
-                    .Err(_) -> append_float(&out, value.decode<Float>() ?? return Err(unsupported("$", "number {value} is outside the CBOR Int and float64 range")))
+                    .Ok(n) -> encode_value(Dyn.Int(n), out, canonical) ?? return Err(err)
+                    .Err(_) -> append_float(out, value.decode<Float>() ?? return Err(unsupported("$", "number {value} is outside the CBOR Int and float64 range")))
                 }
             }
             .Text(text) -> {
                 bytes: text.bytes()
-                append_length(&out, 3, bytes.len())
-                loop byte in bytes -> &out.push(byte)
+                append_length(out, 3, bytes.len())
+                loop byte in bytes -> out.push(byte)
             }
             .Bytes(bytes) -> {
-                append_length(&out, 2, bytes.len())
-                loop byte in bytes -> &out.push(byte)
+                append_length(out, 2, bytes.len())
+                loop byte in bytes -> out.push(byte)
             }
             // DateTime is tag 0 over its RFC 3339 text.
             .DateTime(_) -> {
-                &out.push(U8{192})
-                encode_value(Dyn.Text(value.to_text() ?? ""), &out, canonical) ?? return Err(err)
+                out.push(U8{192})
+                encode_value(Dyn.Text(value.to_text() ?? ""), out, canonical) ?? return Err(err)
             }
             .Array(items) -> {
-                append_length(&out, 4, items.len())
-                loop item in items -> encode_value(item, &out, canonical) ?? return Err(err)
+                append_length(out, 4, items.len())
+                loop item in items -> encode_value(item, out, canonical) ?? return Err(err)
             }
             .Object(_) -> {
                 entries: stream.object_entries(value)
@@ -206,11 +206,11 @@ encode_value: fn(value: Dyn, out: &[U8], canonical: Bool) CBORError! {
                         if entries[j].key == entries[i].key -> return Err(unsupported("$", "duplicate encoded CBOR map key"))
                     }
                 }
-                append_length(&out, 5, entries.len())
+                append_length(out, 5, entries.len())
                 if canonical {
                     order := [Int]{}
                     loop i in 0..<entries.len() {
-                        &order.push(i)
+                        order.push(i)
                         j := order.len() - 1
                         loop j > 0 && key_before(entries[order[j]].key, entries[order[j - 1]].key) {
                             // Snapshot the indexed value before mutating its owner.
@@ -222,13 +222,13 @@ encode_value: fn(value: Dyn, out: &[U8], canonical: Bool) CBORError! {
                         }
                     }
                     loop i in order {
-                        encode_value(Dyn.Text(entries[i].key), &out, canonical) ?? return Err(err)
-                        encode_value(entries[i].value, &out, canonical) ?? return Err(err)
+                        encode_value(Dyn.Text(entries[i].key), out, canonical) ?? return Err(err)
+                        encode_value(entries[i].value, out, canonical) ?? return Err(err)
                     }
                 } else {
                     loop entry in entries {
-                        encode_value(Dyn.Text(entry.key), &out, canonical) ?? return Err(err)
-                        encode_value(entry.value, &out, canonical) ?? return Err(err)
+                        encode_value(Dyn.Text(entry.key), out, canonical) ?? return Err(err)
+                        encode_value(entry.value, out, canonical) ?? return Err(err)
                     }
                 }
             }
@@ -289,11 +289,11 @@ typed_parse_error: fn(error: CBORError) -> FieldError Never! {
     path: "{dir.path}/events.cbor"
     core.files.write_bytes(path, [U8]{159, 130, 1, 2, 191, 97, 107, 127, 97, 97, 97, 98, 255, 255, 255}) ?? panic("fixture")
     input: core.files.open(path) ?? panic("open")
-    source := reader(^input) ?? panic("reader")
+    source := reader(input) ?? panic("reader")
     expected: [DataEvent]{.ArrayStart, .ArrayStart, .Int(1), .Int(2), .ArrayEnd, .ObjectStart, .Key("k"), .Text("ab"), .ObjectEnd, .ArrayEnd}
-    loop event in expected -> assert_eq(&source.next(), Ok(Val(event)))
-    assert_eq(&source.next(), Ok(None))
-    assert_eq(&source.next(), Ok(None))
+    loop event in expected -> assert_eq(source.next(), Ok(Val(event)))
+    assert_eq(source.next(), Ok(None))
+    assert_eq(source.next(), Ok(None))
 }
 
 #Test("CBOR stream reads all float widths and sticky item limit") {
@@ -301,20 +301,20 @@ typed_parse_error: fn(error: CBORError) -> FieldError Never! {
     path: "{dir.path}/floats.cbor"
     core.files.write_bytes(path, [U8]{131, 249, 62, 0, 250, 71, 195, 80, 0, 251, 63, 241, 153, 153, 153, 153, 153, 154}) ?? panic("fixture")
     input: core.files.open(path) ?? panic("open")
-    source := reader(^input) ?? panic("reader")
-    assert_eq(&source.next(), Ok(Val(DataEvent.ArrayStart)))
-    assert_eq(&source.next(), Ok(Val(DataEvent.Float(Float{1.5}))))
-    assert_eq(&source.next(), Ok(Val(DataEvent.Float(Float{100000.0}))))
-    assert_eq(&source.next(), Ok(Val(DataEvent.Float(Float{1.1}))))
-    assert_eq(&source.next(), Ok(Val(DataEvent.ArrayEnd)))
-    assert_eq(&source.next(), Ok(None))
+    source := reader(input) ?? panic("reader")
+    assert_eq(source.next(), Ok(Val(DataEvent.ArrayStart)))
+    assert_eq(source.next(), Ok(Val(DataEvent.Float(Float{1.5}))))
+    assert_eq(source.next(), Ok(Val(DataEvent.Float(Float{100000.0}))))
+    assert_eq(source.next(), Ok(Val(DataEvent.Float(Float{1.1}))))
+    assert_eq(source.next(), Ok(Val(DataEvent.ArrayEnd)))
+    assert_eq(source.next(), Ok(None))
     core.files.write_bytes(path, [U8]{98, 97, 98}) ?? panic("fixture")
     limited_input: core.files.open(path) ?? panic("open")
     limits := EncodingLimits.safe()
     limits.max_item_bytes = 1
-    limited := reader(^limited_input, limits) ?? panic("reader")
+    limited := reader(limited_input, limits) ?? panic("reader")
     first := EncodingError?{None}
-    if &limited.next() == {
+    if limited.next() == {
         .Err(failure) -> {
             assert_eq(failure.reason, "max_item_bytes 1 exceeded")
             assert_eq(failure.byte_offset, 0)
@@ -322,42 +322,42 @@ typed_parse_error: fn(error: CBORError) -> FieldError Never! {
         }
         else -> panic("item limit must fail")
     }
-    if &limited.next() == .Err(failure) -> assert_eq(Val(failure), first) else -> panic("failure must be sticky")
+    if limited.next() == .Err(failure) -> assert_eq(Val(failure), first) else -> panic("failure must be sticky")
 }
 
 #Test("CBOR writer sorts encoded keys and flush does not complete a container") {
     dir: core.files.temp_dir("jet-cbor-write") ?? panic("temp")
     path: "{dir.path}/sorted.cbor"
     output: core.files.create(path) ?? panic("create")
-    sink := writer(^output) ?? panic("writer")
-    &sink.write(DataEvent.ObjectStart) ?? panic("object")
-    &sink.write(DataEvent.Key("aa")) ?? panic("key")
-    &sink.write(DataEvent.Int(1)) ?? panic("value")
-    &sink.flush() ?? panic("flush")
+    sink := writer(output) ?? panic("writer")
+    sink.write(DataEvent.ObjectStart) ?? panic("object")
+    sink.write(DataEvent.Key("aa")) ?? panic("key")
+    sink.write(DataEvent.Int(1)) ?? panic("value")
+    sink.flush() ?? panic("flush")
     assert_eq(core.files.read_bytes(path) ?? panic("read"), [U8]{})
-    &sink.write(DataEvent.Key("b")) ?? panic("key")
-    &sink.write(DataEvent.Float(Float{1.5})) ?? panic("value")
-    &sink.write(DataEvent.ObjectEnd) ?? panic("end")
-    &sink.finish() ?? panic("finish")
-    &sink.finish() ?? panic("repeat finish")
+    sink.write(DataEvent.Key("b")) ?? panic("key")
+    sink.write(DataEvent.Float(Float{1.5})) ?? panic("value")
+    sink.write(DataEvent.ObjectEnd) ?? panic("end")
+    sink.finish() ?? panic("finish")
+    sink.finish() ?? panic("repeat finish")
     assert_eq(core.files.read_bytes(path) ?? panic("read"), [U8]{162, 97, 98, 249, 62, 0, 98, 97, 97, 1})
-    if &sink.write(DataEvent.Null) == .Err(failure) -> assert_eq(failure.reason, "write called after finish") else -> panic("write after finish must fail")
+    if sink.write(DataEvent.Null) == .Err(failure) -> assert_eq(failure.reason, "write called after finish") else -> panic("write after finish must fail")
 }
 
 #Test("CBOR writer incomplete finish is sticky and total limit is checked at root") {
     dir: core.files.temp_dir("jet-cbor-finish") ?? panic("temp")
     path: "{dir.path}/partial.cbor"
     output: core.files.create(path) ?? panic("create")
-    sink := writer(^output) ?? panic("writer")
-    &sink.write(DataEvent.ArrayStart) ?? panic("start")
-    &sink.flush() ?? panic("flush incomplete")
-    if &sink.finish() == .Err(failure) -> assert_eq(failure.reason, "finish requires one complete CBOR root") else -> panic("incomplete finish must fail")
-    if &sink.flush() == .Err(failure) -> assert_eq(failure.reason, "finish requires one complete CBOR root") else -> panic("flush must retain first failure")
+    sink := writer(output) ?? panic("writer")
+    sink.write(DataEvent.ArrayStart) ?? panic("start")
+    sink.flush() ?? panic("flush incomplete")
+    if sink.finish() == .Err(failure) -> assert_eq(failure.reason, "finish requires one complete CBOR root") else -> panic("incomplete finish must fail")
+    if sink.flush() == .Err(failure) -> assert_eq(failure.reason, "finish requires one complete CBOR root") else -> panic("flush must retain first failure")
     limited_output: core.files.create("{dir.path}/limit.cbor") ?? panic("create")
     limits := EncodingLimits.safe()
     limits.max_total_bytes = Val(1)
-    limited := writer(^limited_output, limits) ?? panic("writer")
-    &limited.write(DataEvent.ArrayStart) ?? panic("start")
-    &limited.write(DataEvent.Int(1)) ?? panic("item")
-    if &limited.write(DataEvent.ArrayEnd) == .Err(failure) -> assert_eq(failure.reason, "max_total_bytes 1 exceeded") else -> panic("root wire limit must fail")
+    limited := writer(limited_output, limits) ?? panic("writer")
+    limited.write(DataEvent.ArrayStart) ?? panic("start")
+    limited.write(DataEvent.Int(1)) ?? panic("item")
+    if limited.write(DataEvent.ArrayEnd) == .Err(failure) -> assert_eq(failure.reason, "max_total_bytes 1 exceeded") else -> panic("root wire limit must fail")
 }

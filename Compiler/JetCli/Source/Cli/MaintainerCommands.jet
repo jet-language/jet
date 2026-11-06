@@ -80,13 +80,13 @@ jet_cli_reduce_candidate: fn(lines: &[String], start: Int, end: Int) -> [String]
     // Build only the retained lines; do not clone and drain the whole input.
     candidate := [String]{}
     loop (index, line) in lines {
-        if index < start || index >= end -> &candidate.push(line)
+        if index < start || index >= end -> candidate.push(line)
     }
     candidate
 }
 // The reducer owns its line buffer; candidates borrow it until accepted.
-jet_cli_reduce_lines: fn(lines: ^[String], scratch: String, code: String) -> [String] {
-    current := ^lines
+jet_cli_reduce_lines: fn(lines: &&[String], scratch: String, code: String) -> [String] {
+    current := lines.move()
     chunks := 2
     loop current.len() >= 2 {
         size: (current.len() + chunks - 1) /% chunks
@@ -95,10 +95,10 @@ jet_cli_reduce_lines: fn(lines: ^[String], scratch: String, code: String) -> [St
         start := 0
         loop start < current.len() {
             end: if start + size < current.len() -> start + size else -> current.len()
-            candidate: jet_cli_reduce_candidate(&current, start, end)
+            candidate: jet_cli_reduce_candidate(current, start, end)
             if candidate.len() > 0 && jet_cli_reduce_oracle(scratch, candidate.join("\n"), code) {
                 cli_term.print("reduce: dropped lines {start + 1}..{end} -> {candidate.len()} line(s) left")
-                current = ^candidate
+                current = candidate.move()
                 chunks = if chunks > 2 -> chunks - 1 else -> 2
                 progress = true
                 break
@@ -134,7 +134,7 @@ jet_cli_devtools_reduce: fn(args: [String], color: Bool, json: Bool) -> JetDrive
     }
     lines: source.lines()
     cli_term.print("reduce: starting at {lines.len()} line(s)")
-    reduced: jet_cli_reduce_lines(^lines, scratch, wanted)
+    reduced: jet_cli_reduce_lines(lines, scratch, wanted)
     cli_term.print("reduce: finished at {reduced.len()} line(s)")
     text: reduced.join("\n")
     output: jet_cli_reduced_path(file)

@@ -274,9 +274,9 @@ LinkContext: struct {
     errors: [String]
 }
 
-link_context: fn(bufs: ^[[U8]], base: Int) -> LinkContext Never! {
+link_context: fn(bufs: &&[[U8]], base: Int) -> LinkContext Never! {
     LinkContext{
-        bufs: ^bufs, archives: [LinkArchive]{}, archive_buffer: [Int]{}, lookup: [String:Int]{}, pulled: [Int:Bool]{},
+        bufs: bufs.move(), archives: [LinkArchive]{}, archive_buffer: [Int]{}, lookup: [String:Int]{}, pulled: [Int:Bool]{},
         obj_name: [String]{}, obj_buffer: [Int]{}, obj_base: [Int]{}, obj_shoff: [Int]{}, obj_names: [Int]{},
         obj_symtab: [Int]{}, obj_strtab: [Int]{}, obj_shndx: [Int]{}, obj_count: [Int]{}, obj_first_global: [Int]{},
         obj_first_section: [Int]{}, obj_first_symbol: [Int]{}, obj_sym_count: [Int]{}, rela: [Int:Int]{}, discarded: [Int:Bool]{}, sym_global: [Int]{}, roots: [Int]{},
@@ -346,13 +346,13 @@ link_put16: fn(out: &[U8], at: Int, value: Int) Never! {
 }
 
 link_put32: fn(out: &[U8], at: Int, value: Int) Never! {
-    link_put16(&out, at, value)
-    link_put16(&out, at + 2, value >> 16)
+    link_put16(out, at, value)
+    link_put16(out, at + 2, value >> 16)
 }
 
 link_put64: fn(out: &[U8], at: Int, value: Int) Never! {
-    link_put32(&out, at, value)
-    link_put32(&out, at + 4, value >> 32)
+    link_put32(out, at, value)
+    link_put32(out, at + 4, value >> 32)
 }
 
 link_align: fn(value: Int, align: Int) -> Int Never! {
@@ -361,7 +361,7 @@ link_align: fn(value: Int, align: Int) -> Int Never! {
 }
 
 link_error: fn(c: &LinkContext, message: String) Never! {
-    &c.errors.push(message)
+    c.errors.push(message)
 }
 
 // ---------------------------------------------------------------------------
@@ -471,19 +471,19 @@ link_sec_addr: fn(c: LinkContext, s: Int) -> Int Never! {
 link_intern: fn(c: &LinkContext, name: String) -> Int Never! {
     if c.g_index.get(name) == .Val(found) -> return found
     id: c.g_name.len()
-    &c.g_index.add(name, id).drop("checked absent above")
-    &c.g_name.push(name)
-    &c.g_kind.push(LINK_G_NONE)
-    &c.g_section.push(LINK_UNDEF)
-    &c.g_value.push(0)
-    &c.g_size.push(0)
-    &c.g_obj.push(-1)
-    &c.g_weak_def.push(false)
-    &c.g_strong_ref.push(false)
-    &c.g_alias.push(-1)
-    &c.g_addr.push(0)
-    &c.g_common_size.push(0)
-    &c.g_common_align.push(1)
+    c.g_index.add(name, id).drop("checked absent above")
+    c.g_name.push(name)
+    c.g_kind.push(LINK_G_NONE)
+    c.g_section.push(LINK_UNDEF)
+    c.g_value.push(0)
+    c.g_size.push(0)
+    c.g_obj.push(-1)
+    c.g_weak_def.push(false)
+    c.g_strong_ref.push(false)
+    c.g_alias.push(-1)
+    c.g_addr.push(0)
+    c.g_common_size.push(0)
+    c.g_common_align.push(1)
     id
 }
 
@@ -503,7 +503,7 @@ link_reference: fn(c: &LinkContext, g: Int, weak: Bool) Never! {
     if weak -> return
     if !c.g_strong_ref[g] {
         c.g_strong_ref[g] = true
-        &c.pending.push(g)
+        c.pending.push(g)
     }
 }
 
@@ -602,11 +602,11 @@ link_got_key: fn(c: LinkContext, obj: Int, k: Int) -> Int Never! {
 // a report) when it is not an x86-64 ELF relocatable object.
 link_load_object: fn(c: &LinkContext, b: Int, base: Int, size: Int, name: String) -> Bool Never! {
     if size < LINK_EHDR_SIZE || link_u32(c.bufs, b, base) != 0x464c457f || link_u8(c.bufs, b, base + 4) != 2 || link_u8(c.bufs, b, base + 5) != 1 {
-        link_error(&c, "{name}: not a 64-bit little-endian ELF object")
+        link_error(c, "{name}: not a 64-bit little-endian ELF object")
         return false
     }
     if link_u16(c.bufs, b, base + 16) != 1 || link_u16(c.bufs, b, base + 18) != 62 {
-        link_error(&c, "{name}: not an x86-64 relocatable object")
+        link_error(c, "{name}: not an x86-64 relocatable object")
         return false
     }
     obj: c.obj_name.len()
@@ -634,25 +634,25 @@ link_load_object: fn(c: &LinkContext, b: Int, base: Int, size: Int, name: String
             shndx = base + link_u64(c.bufs, b, h + 24)
         } else if kind == LINK_SHT_RELA {
             target: link_u32(c.bufs, b, h + 44)
-            if target + 1 != k && target > 0 && target < count -> &c.rela.add(first + target, first + k).drop("one RELA section per section")
+            if target + 1 != k && target > 0 && target < count -> c.rela.add(first + target, first + k).drop("one RELA section per section")
         } else if kind == LINK_SHT_GROUP {
-            &groups.push(k)
+            groups.push(k)
         } else if kind == LINK_SHT_X86_64_UNWIND || (kind == LINK_SHT_PROGBITS && link_u8(c.bufs, b, names_at + link_u32(c.bufs, b, h) + 1) == 0x65) {
             // `.e...`: an `.eh_frame` an assembler typed PROGBITS.
-            &eh.push(k)
+            eh.push(k)
         }
         name_at: names_at + link_u32(c.bufs, b, h)
         if link_name_has(c.bufs, b, name_at, ".init", true) || link_name_has(c.bufs, b, name_at, ".fini", true) {
-            &c.init_code.add(first + k, if link_name_has(c.bufs, b, name_at, ".init", true) -> 0 else -> 1).drop("one row per section")
-            &c.roots.push(first + k)
+            c.init_code.add(first + k, if link_name_has(c.bufs, b, name_at, ".init", true) -> 0 else -> 1).drop("one row per section")
+            c.roots.push(first + k)
         }
         if kind == LINK_SHT_INIT_ARRAY || kind == LINK_SHT_FINI_ARRAY || kind == LINK_SHT_PREINIT_ARRAY || (link_u32(c.bufs, b, h + 8).bit_and(0x200000)) != 0 {
             guard: link_u32(c.bufs, b, h + 44)
             if kind != LINK_SHT_PREINIT_ARRAY && link_u32(c.bufs, b, h + 8).bit_and(LINK_SHF_INFO_LINK) != 0 && guard > 0 && guard < count {
-                &c.cond_roots.push(first + k)
-                &c.cond_guards.push(first + guard)
+                c.cond_roots.push(first + k)
+                c.cond_guards.push(first + guard)
             } else {
-                &c.roots.push(first + k)
+                c.roots.push(first + k)
             }
         }
     }
@@ -662,20 +662,20 @@ link_load_object: fn(c: &LinkContext, b: Int, base: Int, size: Int, name: String
     strtab: if symtab < 0 -> 0 else -> base + link_u64(c.bufs, b, shoff + 64 * link_u32(c.bufs, b, symtab_header + 40) + 24)
     first_global: if symtab < 0 -> 0 else -> link_u32(c.bufs, b, symtab_header + 44)
     first_symbol: if obj == 0 -> 0 else -> c.obj_first_symbol[obj - 1] + c.obj_sym_count[obj - 1]
-    &c.obj_name.push(name)
-    &c.obj_buffer.push(b)
-    &c.obj_base.push(base)
-    &c.obj_shoff.push(shoff)
-    &c.obj_names.push(names_at)
-    &c.obj_symtab.push(symtab_at)
-    &c.obj_strtab.push(strtab)
-    &c.obj_shndx.push(shndx)
-    &c.obj_count.push(count)
-    &c.obj_first_global.push(first_global)
-    &c.obj_first_section.push(first)
-    &c.obj_first_symbol.push(first_symbol)
-    &c.obj_sym_count.push(sym_count)
-    loop _ in 0..<sym_count -> &c.sym_global.push(-1)
+    c.obj_name.push(name)
+    c.obj_buffer.push(b)
+    c.obj_base.push(base)
+    c.obj_shoff.push(shoff)
+    c.obj_names.push(names_at)
+    c.obj_symtab.push(symtab_at)
+    c.obj_strtab.push(strtab)
+    c.obj_shndx.push(shndx)
+    c.obj_count.push(count)
+    c.obj_first_global.push(first_global)
+    c.obj_first_section.push(first)
+    c.obj_first_symbol.push(first_symbol)
+    c.obj_sym_count.push(sym_count)
+    loop _ in 0..<sym_count -> c.sym_global.push(-1)
     // COMDAT groups: a group whose signature was already loaded discards its
     // member sections; their symbols then read as undefined references.
     loop k in groups {
@@ -684,13 +684,13 @@ link_load_object: fn(c: &LinkContext, b: Int, base: Int, size: Int, name: String
         if (link_u32(c.bufs, b, at).bit_and(1)) == 0 -> next
         signature: link_cstr(c.bufs, b, strtab + link_u32(c.bufs, b, symtab_at + 24 * link_u32(c.bufs, b, h + 44)))
         if c.comdats.get(signature) == None {
-            &c.comdats.add(signature, true).drop("checked absent above")
+            c.comdats.add(signature, true).drop("checked absent above")
             next
         }
         members: link_u64(c.bufs, b, h + 32).div_euclid(4)
         loop m in 1..<members {
             member: link_u32(c.bufs, b, at + 4 * m)
-            if member > 0 && member < count -> &c.discarded.add(first + member, true).drop("a section is in one group")
+            if member > 0 && member < count -> c.discarded.add(first + member, true).drop("a section is in one group")
         }
     }
     loop k in first_global..<sym_count {
@@ -700,14 +700,14 @@ link_load_object: fn(c: &LinkContext, b: Int, base: Int, size: Int, name: String
         if bind == 0 -> next
         section: link_sym_shndx(c, obj, k)
         symbol_name: link_cstr(c.bufs, b, strtab + link_u32(c.bufs, b, at))
-        g: link_intern(&c, symbol_name)
+        g: link_intern(c, symbol_name)
         c.sym_global[first_symbol + k] = g
         weak: bind == 2
         value: link_u64(c.bufs, b, at + 8)
         symbol_size: link_u64(c.bufs, b, at + 16)
         kind: c.g_kind[g].copy()
         if section == LINK_UNDEF {
-            link_reference(&c, g, weak)
+            link_reference(c, g, weak)
         } else if section == LINK_COMMON {
             if kind == LINK_G_NONE || kind == LINK_G_COMMON {
                 c.g_kind[g] = LINK_G_COMMON
@@ -725,12 +725,12 @@ link_load_object: fn(c: &LinkContext, b: Int, base: Int, size: Int, name: String
             earlier: c.g_obj[g].copy()
             seen_in: if earlier >= 0 -> c.obj_name[earlier] else -> "the linker"
             message: "duplicate symbol `{symbol_name}`: defined in {seen_in} and {name}"
-            link_error(&c, message)
+            link_error(c, message)
         }
     }
     loop k in eh {
         s: first + k
-        if link_class(c, obj, s) == LINK_EH -> link_parse_eh(&c, obj, s)
+        if link_class(c, obj, s) == LINK_EH -> link_parse_eh(c, obj, s)
     }
     true
 }
@@ -752,7 +752,7 @@ link_rel_table: fn(c: LinkContext, obj: Int, s: Int) -> Int Never! {
 }
 
 link_reloc_error: fn(c: &LinkContext, s: Int, off: Int, message: String) Never! {
-    &c.errors.push(link_reloc_text(c, s, off, message))
+    c.errors.push(link_reloc_text(c, s, off, message))
 }
 
 // A relocation report: the section's label, the offset and `message`.
@@ -777,7 +777,7 @@ link_parse_eh: fn(c: &LinkContext, obj: Int, s: Int) Never! {
         length: link_u32(c.bufs, b, base + off)
         if length == 0 -> break
         if length == 0xffffffff {
-            link_reloc_error(&c, s, off, "64-bit .eh_frame records are not supported")
+            link_reloc_error(c, s, off, "64-bit .eh_frame records are not supported")
             return
         }
         total: length + 4
@@ -786,7 +786,7 @@ link_parse_eh: fn(c: &LinkContext, obj: Int, s: Int) Never! {
         cie := -1
         if id != 0 {
             cie = starts.get(off + 4 - id) ?? -1
-            if cie < 0 -> link_reloc_error(&c, s, off, "the FDE names no CIE")
+            if cie < 0 -> link_reloc_error(c, s, off, "the FDE names no CIE")
         }
         first: k
         target := -1
@@ -795,24 +795,24 @@ link_parse_eh: fn(c: &LinkContext, obj: Int, s: Int) Never! {
             rel_off: link_u64(c.bufs, b, at)
             if rel_off >= off + total -> break
             if rel_off < off {
-                link_reloc_error(&c, s, rel_off, "relocations are not sorted by offset")
+                link_reloc_error(c, s, rel_off, "relocations are not sorted by offset")
                 return
             }
             if id != 0 && rel_off == off + 8 -> target = link_u32(c.bufs, b, at + 12)
             k += 1
         }
-        &c.ep_sec.push(s)
-        &c.ep_obj.push(obj)
-        &c.ep_start.push(off)
-        &c.ep_len.push(total)
-        &c.ep_cie.push(cie)
-        &c.ep_target.push(if id == 0 -> -1 else -> target)
-        &c.ep_first_reloc.push(first)
-        &c.ep_reloc_count.push(k - first)
-        &c.ep_next.push(-1)
-        &c.ep_keep.push(id == 0)
-        &c.ep_out.push(0)
-        if id == 0 -> &starts.add(off, piece).drop("record offsets are unique")
+        c.ep_sec.push(s)
+        c.ep_obj.push(obj)
+        c.ep_start.push(off)
+        c.ep_len.push(total)
+        c.ep_cie.push(cie)
+        c.ep_target.push(if id == 0 -> -1 else -> target)
+        c.ep_first_reloc.push(first)
+        c.ep_reloc_count.push(k - first)
+        c.ep_next.push(-1)
+        c.ep_keep.push(id == 0)
+        c.ep_out.push(0)
+        if id == 0 -> starts.add(off, piece).drop("record offsets are unique")
         off += total
     }
 }
@@ -822,14 +822,14 @@ link_parse_eh: fn(c: &LinkContext, obj: Int, s: Int) Never! {
 
 link_pull: fn(c: &LinkContext, key: Int) Never! {
     if c.pulled.get(key) != None -> return
-    &c.pulled.add(key, true).drop("checked absent above")
+    c.pulled.add(key, true).drop("checked absent above")
     index: key.div_euclid(LINK_MEMBER_SCALE)
     member: key % LINK_MEMBER_SCALE
     name: "{c.archives[index].path}({c.archives[index].names[member]})"
     b: c.archive_buffer[index].copy()
     start: c.archives[index].starts[member].copy()
     size: c.archives[index].sizes[member].copy()
-    _ := link_load_object(&c, b, start, size, name)
+    _ := link_load_object(c, b, start, size, name)
 }
 
 // Pull members until no queued strong reference can be satisfied.
@@ -840,7 +840,7 @@ link_resolve: fn(c: &LinkContext) Never! {
         f: link_final(c, g)
         if c.g_kind[f] != LINK_G_NONE -> next
         key: c.lookup.get(c.g_name[f]) ?? -1
-        if key >= 0 -> link_pull(&c, key)
+        if key >= 0 -> link_pull(c, key)
     }
 }
 
@@ -926,40 +926,40 @@ link_synth: fn() -> LinkSynth Never! {
 }
 
 link_synth_code: fn(s: &LinkSynth, bytes: [Int]) Never! {
-    loop byte in bytes -> &s.text.push(U8{byte.bit_and(255)})
+    loop byte in bytes -> s.text.push(U8{byte.bit_and(255)})
 }
 
 // A rel32 field naming `name` at the end of the text so far.
 link_synth_rel32: fn(s: &LinkSynth, name: String, kind: Int) Never! {
     at: s.text.len()
-    &s.rel_at.push(at)
-    &s.rel_names.push(name)
-    &s.rel_types.push(kind)
-    &s.rel_addends.push(-4)
-    link_synth_code(&s, [Int]{0, 0, 0, 0})
+    s.rel_at.push(at)
+    s.rel_names.push(name)
+    s.rel_types.push(kind)
+    s.rel_addends.push(-4)
+    link_synth_code(s, [Int]{0, 0, 0, 0})
 }
 
 // A 32-bit field holding the distance from itself to `name` (data, not an
 // instruction's operand), at the end of the text so far.
 link_synth_pcrel_field: fn(s: &LinkSynth, name: String) Never! {
-    &s.rel_at.push(s.text.len())
-    &s.rel_names.push(name)
-    &s.rel_types.push(LINK_R_PC32)
-    &s.rel_addends.push(0)
-    link_synth_code(&s, [Int]{0, 0, 0, 0})
+    s.rel_at.push(s.text.len())
+    s.rel_names.push(name)
+    s.rel_types.push(LINK_R_PC32)
+    s.rel_addends.push(0)
+    link_synth_code(s, [Int]{0, 0, 0, 0})
 }
 
 link_synth_define: fn(s: &LinkSynth, name: String, section: Int, value: Int) Never! {
-    &s.def_names.push(name)
-    &s.def_sections.push(section)
-    &s.def_values.push(value)
-    &s.names.add(name, true).drop("a synthetic object defines each name once")
+    s.def_names.push(name)
+    s.def_sections.push(section)
+    s.def_values.push(value)
+    s.names.add(name, true).drop("a synthetic object defines each name once")
 }
 
 link_synth_function: fn(s: &LinkSynth, name: String) Never! {
-    loop s.text.len() % 16 != 0 -> &s.text.push(U8{0xcc})
+    loop s.text.len() % 16 != 0 -> s.text.push(U8{0xcc})
     at: s.text.len()
-    link_synth_define(&s, name, 1, at)
+    link_synth_define(s, name, 1, at)
 }
 
 // The ELF relocatable object for `s`: .text, .data, .bss, .rela.text,
@@ -968,72 +968,72 @@ link_synth_function: fn(s: &LinkSynth, name: String) Never! {
 link_synth_object: fn(s: LinkSynth) -> [U8] Never! {
     strtab := [U8]{U8{0}}
     symtab := [U8]{}
-    loop _ in 0..<24 -> &symtab.push(U8{0})
+    loop _ in 0..<24 -> symtab.push(U8{0})
     indexes := [String:Int]{}
     loop (k, name) in s.def_names {
-        elf64_u32(&symtab, elf64_string(&strtab, name))
-        &symtab.push(U8{if s.def_sections[k] == 1 -> 0x12 else -> 0x11})
-        &symtab.push(U8{0})
-        elf64_u16(&symtab, s.def_sections[k])
-        elf64_u64(&symtab, s.def_values[k])
-        elf64_u64(&symtab, 0)
-        &indexes.add(name, k + 1).drop("defined names are unique")
+        elf64_u32(symtab, elf64_string(strtab, name))
+        symtab.push(U8{if s.def_sections[k] == 1 -> 0x12 else -> 0x11})
+        symtab.push(U8{0})
+        elf64_u16(symtab, s.def_sections[k])
+        elf64_u64(symtab, s.def_values[k])
+        elf64_u64(symtab, 0)
+        indexes.add(name, k + 1).drop("defined names are unique")
     }
     loop name in s.rel_names {
         if indexes.get(name) != None -> next
-        &indexes.add(name, symtab.len().div_euclid(24)).drop("checked absent above")
-        elf64_u32(&symtab, elf64_string(&strtab, name))
-        &symtab.push(U8{0x10})
-        &symtab.push(U8{0})
-        elf64_u16(&symtab, 0)
-        elf64_u64(&symtab, 0)
-        elf64_u64(&symtab, 0)
+        indexes.add(name, symtab.len().div_euclid(24)).drop("checked absent above")
+        elf64_u32(symtab, elf64_string(strtab, name))
+        symtab.push(U8{0x10})
+        symtab.push(U8{0})
+        elf64_u16(symtab, 0)
+        elf64_u64(symtab, 0)
+        elf64_u64(symtab, 0)
     }
     rela := [U8]{}
     loop (k, at) in s.rel_at {
-        elf64_u64(&rela, at)
-        elf64_u64(&rela, ((indexes.get(s.rel_names[k]) ?? 0) << 32).bit_or(s.rel_types[k]))
-        elf64_u64(&rela, s.rel_addends[k])
+        elf64_u64(rela, at)
+        elf64_u64(rela, ((indexes.get(s.rel_names[k]) ?? 0) << 32).bit_or(s.rel_types[k]))
+        elf64_u64(rela, s.rel_addends[k])
     }
     shstrtab := [U8]{U8{0}}
     section_names: [String]{".text", ".data", ".bss", ".rela.text", ".symtab", ".strtab", ".shstrtab"}
     name_at := [Int]{0}
-    loop name in section_names -> &name_at.push(elf64_string(&shstrtab, name))
+    loop name in section_names -> name_at.push(elf64_string(shstrtab, name))
     bytes := [U8]{}
     ident: [Int]{0x7f, 0x45, 0x4c, 0x46, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0}
-    loop byte in ident -> &bytes.push(U8{byte})
-    elf64_u16(&bytes, 1)
-    elf64_u16(&bytes, 62)
-    elf64_u32(&bytes, 1)
-    elf64_u64(&bytes, 0)
-    elf64_u64(&bytes, 0)
+    loop byte in ident -> bytes.push(U8{byte})
+    elf64_u16(bytes, 1)
+    elf64_u16(bytes, 62)
+    elf64_u32(bytes, 1)
+    elf64_u64(bytes, 0)
+    elf64_u64(bytes, 0)
     shoff_at: bytes.len()
-    elf64_u64(&bytes, 0)
-    elf64_u32(&bytes, 0)
-    elf64_u16(&bytes, LINK_EHDR_SIZE)
-    elf64_u16(&bytes, 0)
-    elf64_u16(&bytes, 0)
-    elf64_u16(&bytes, 64)
-    elf64_u16(&bytes, 8)
-    elf64_u16(&bytes, 7)
+    elf64_u64(bytes, 0)
+    elf64_u32(bytes, 0)
+    elf64_u16(bytes, LINK_EHDR_SIZE)
+    elf64_u16(bytes, 0)
+    elf64_u16(bytes, 0)
+    elf64_u16(bytes, 64)
+    elf64_u16(bytes, 8)
+    elf64_u16(bytes, 7)
     contents: [[U8]]{s.text, s.data, rela, symtab, strtab, shstrtab}
     offsets := [Int]{}
     loop content in contents {
-        elf64_pad(&bytes, 16)
-        &offsets.push(bytes.len())
-        loop byte in content -> &bytes.push(byte)
+        elf64_pad(bytes, 16)
+        offsets.push(bytes.len())
+        loop byte in content -> bytes.push(byte)
     }
-    elf64_pad(&bytes, 8)
+    elf64_pad(bytes, 8)
     shoff: bytes.len()
     loop shift in 0..<8 -> bytes[shoff_at + shift] = U8{(shoff >> (8 * shift)).bit_and(255)}
-    elf64_section_header(&bytes, 0, 0, 0, 0, 0, 0, 0, 0, 0)
-    elf64_section_header(&bytes, name_at[1], 1, 6, offsets[0], s.text.len(), 0, 0, 16, 0)
-    elf64_section_header(&bytes, name_at[2], 1, 3, offsets[1], s.data.len(), 0, 0, 8, 0)
-    elf64_section_header(&bytes, name_at[3], 8, 3, offsets[2], s.bss, 0, 0, 16, 0)
-    elf64_section_header(&bytes, name_at[4], 4, 0x40, offsets[2], rela.len(), 5, 1, 8, 24)
-    elf64_section_header(&bytes, name_at[5], 2, 0, offsets[3], symtab.len(), 6, 1, 8, 24)
-    elf64_section_header(&bytes, name_at[6], 3, 0, offsets[4], strtab.len(), 0, 0, 1, 0)
-    elf64_section_header(&bytes, name_at[7], 3, 0, offsets[5], shstrtab.len(), 0, 0, 1, 0)
+    elf64_section_header(bytes, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+    elf64_section_header(bytes, name_at[1], 1, 6, offsets[0], s.text.len(), 0, 0, 16, 0)
+    elf64_section_header(bytes, name_at[2], 1, 3, offsets[1], s.data.len(), 0, 0, 8, 0)
+    elf64_section_header(bytes, name_at[3], 8, 3, offsets[2], s.bss, 0, 0, 16, 0)
+    elf64_section_header(bytes, name_at[4], 4, 0x40, offsets[2], rela.len(), 5, 1, 8, 24)
+    elf64_section_header(bytes, name_at[5], 2, 0, offsets[3], symtab.len(), 6, 1, 8, 24)
+    elf64_section_header(bytes, name_at[6], 3, 0, offsets[4], strtab.len(), 0, 0, 1, 0)
+    elf64_section_header(bytes, name_at[7], 3, 0, offsets[5], shstrtab.len(), 0, 0, 1, 0)
     bytes
 }
 
@@ -1041,8 +1041,8 @@ link_load_synth: fn(c: &LinkContext, s: LinkSynth, name: String) Never! {
     bytes: link_synth_object(s)
     b: c.bufs.len()
     size: bytes.len()
-    &c.bufs.push(bytes)
-    _ := link_load_object(&c, b, 0, size, name)
+    c.bufs.push(bytes)
+    _ := link_load_object(c, b, 0, size, name)
 }
 
 // The startup object for musl: `_start` hands `__jet_link_main` to
@@ -1054,45 +1054,45 @@ link_load_synth: fn(c: &LinkContext, s: LinkSynth, name: String) Never! {
 // `__dso_handle`, which crtbegin.o defines in gcc links.
 link_startup: fn(register_frames: Bool) -> LinkSynth Never! {
     s := link_synth()
-    link_synth_function(&s, "_start")
+    link_synth_function(s, "_start")
     // xor ebp, ebp; mov rsi, [rsp]; lea rdx, [rsp + 8]; and rsp, -16; lea rdi, [rip + __jet_link_main]
-    link_synth_code(&s, [Int]{0x31, 0xed, 0x48, 0x8b, 0x34, 0x24, 0x48, 0x8d, 0x54, 0x24, 0x08, 0x48, 0x83, 0xe4, 0xf0, 0x48, 0x8d, 0x3d})
-    link_synth_rel32(&s, "__jet_link_main", LINK_R_PC32)
+    link_synth_code(s, [Int]{0x31, 0xed, 0x48, 0x8b, 0x34, 0x24, 0x48, 0x8d, 0x54, 0x24, 0x08, 0x48, 0x83, 0xe4, 0xf0, 0x48, 0x8d, 0x3d})
+    link_synth_rel32(s, "__jet_link_main", LINK_R_PC32)
     // xor ecx, ecx; xor r8d, r8d; xor r9d, r9d; call __libc_start_main; hlt
-    link_synth_code(&s, [Int]{0x31, 0xc9, 0x45, 0x31, 0xc0, 0x45, 0x31, 0xc9, 0xe8})
-    link_synth_rel32(&s, "__libc_start_main", LINK_R_PLT32)
-    link_synth_code(&s, [Int]{0xf4})
-    link_synth_function(&s, "__jet_link_main")
+    link_synth_code(s, [Int]{0x31, 0xc9, 0x45, 0x31, 0xc0, 0x45, 0x31, 0xc9, 0xe8})
+    link_synth_rel32(s, "__libc_start_main", LINK_R_PLT32)
+    link_synth_code(s, [Int]{0xf4})
+    link_synth_function(s, "__jet_link_main")
     // push rbx; push r12; push r13; push r14; sub rsp, 8; mov r12d, edi; mov r13, rsi; mov r14, rdx
-    link_synth_code(&s, [Int]{0x53, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x48, 0x83, 0xec, 0x08, 0x41, 0x89, 0xfc, 0x49, 0x89, 0xf5, 0x49, 0x89, 0xd6})
+    link_synth_code(s, [Int]{0x53, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x48, 0x83, 0xec, 0x08, 0x41, 0x89, 0xfc, 0x49, 0x89, 0xf5, 0x49, 0x89, 0xd6})
     if register_frames {
         // lea rdi, [rip + __EH_FRAME_BEGIN__]; lea rsi, [rip + __jet_eh_object]; call __jet_eh_startup
-        link_synth_code(&s, [Int]{0x48, 0x8d, 0x3d})
-        link_synth_rel32(&s, "__EH_FRAME_BEGIN__", LINK_R_PC32)
-        link_synth_code(&s, [Int]{0x48, 0x8d, 0x35})
-        link_synth_rel32(&s, "__jet_eh_object", LINK_R_PC32)
-        link_synth_code(&s, [Int]{0xe8})
-        link_synth_rel32(&s, "__jet_eh_startup", LINK_R_PLT32)
+        link_synth_code(s, [Int]{0x48, 0x8d, 0x3d})
+        link_synth_rel32(s, "__EH_FRAME_BEGIN__", LINK_R_PC32)
+        link_synth_code(s, [Int]{0x48, 0x8d, 0x35})
+        link_synth_rel32(s, "__jet_eh_object", LINK_R_PC32)
+        link_synth_code(s, [Int]{0xe8})
+        link_synth_rel32(s, "__jet_eh_startup", LINK_R_PLT32)
     }
     // lea rbx, [rip + __jet_init_array_start]
-    link_synth_code(&s, [Int]{0x48, 0x8d, 0x1d})
-    link_synth_rel32(&s, "__jet_init_array_start", LINK_R_PC32)
+    link_synth_code(s, [Int]{0x48, 0x8d, 0x1d})
+    link_synth_rel32(s, "__jet_init_array_start", LINK_R_PC32)
     // next: lea rax, [rip + __jet_init_array_end]; cmp rbx, rax; jae done
-    link_synth_code(&s, [Int]{0x48, 0x8d, 0x05})
-    link_synth_rel32(&s, "__jet_init_array_end", LINK_R_PC32)
-    link_synth_code(&s, [Int]{0x48, 0x39, 0xc3, 0x73, 0x11})
+    link_synth_code(s, [Int]{0x48, 0x8d, 0x05})
+    link_synth_rel32(s, "__jet_init_array_end", LINK_R_PC32)
+    link_synth_code(s, [Int]{0x48, 0x39, 0xc3, 0x73, 0x11})
     // mov edi, r12d; mov rsi, r13; mov rdx, r14; call [rbx]; add rbx, 8; jmp next
-    link_synth_code(&s, [Int]{0x44, 0x89, 0xe7, 0x4c, 0x89, 0xee, 0x4c, 0x89, 0xf2, 0xff, 0x13, 0x48, 0x83, 0xc3, 0x08, 0xeb, 0xe3})
+    link_synth_code(s, [Int]{0x44, 0x89, 0xe7, 0x4c, 0x89, 0xee, 0x4c, 0x89, 0xf2, 0xff, 0x13, 0x48, 0x83, 0xc3, 0x08, 0xeb, 0xe3})
     // done: mov edi, r12d; mov rsi, r13; mov rdx, r14; add rsp, 8; pop r14; pop r13; pop r12; pop rbx; jmp main
-    link_synth_code(&s, [Int]{0x44, 0x89, 0xe7, 0x4c, 0x89, 0xee, 0x4c, 0x89, 0xf2, 0x48, 0x83, 0xc4, 0x08, 0x41, 0x5e, 0x41, 0x5d, 0x41, 0x5c, 0x5b, 0xe9})
-    link_synth_rel32(&s, "main", LINK_R_PLT32)
-    link_synth_define(&s, "__dso_handle", 2, 0)
-    loop _ in 0..<8 -> &s.data.push(U8{0})
+    link_synth_code(s, [Int]{0x44, 0x89, 0xe7, 0x4c, 0x89, 0xee, 0x4c, 0x89, 0xf2, 0x48, 0x83, 0xc4, 0x08, 0x41, 0x5e, 0x41, 0x5d, 0x41, 0x5c, 0x5b, 0xe9})
+    link_synth_rel32(s, "main", LINK_R_PLT32)
+    link_synth_define(s, "__dso_handle", 2, 0)
+    loop _ in 0..<8 -> s.data.push(U8{0})
     // libgcc's `object: struct` for the registered tables (at most 8 words),
     // then the registration state the lazy `_dl_find_object` keeps
     // (link_eh_shims): 0 none, 1 registering, 2 registered.
-    link_synth_define(&s, "__jet_eh_object", 3, 0)
-    link_synth_define(&s, "__jet_eh_state", 3, 128)
+    link_synth_define(s, "__jet_eh_object", 3, 0)
+    link_synth_define(s, "__jet_eh_state", 3, 128)
     s.bss = 136
     s
 }
@@ -1105,32 +1105,32 @@ link_startup: fn(register_frames: Bool) -> LinkSynth Never! {
 // TLS, environment, stack guard and stdio setup have no reader there.
 link_owned_startup: fn() -> LinkSynth Never! {
     s := link_synth()
-    link_synth_function(&s, LINK_OWNED_START)
+    link_synth_function(s, LINK_OWNED_START)
     // xor ebp, ebp; mov r12, [rsp]; lea r13, [rsp + 8]; lea r14, [r13 + r12 * 8 + 8]; and rsp, -16
-    link_synth_code(&s, [Int]{0x31, 0xed, 0x4c, 0x8b, 0x24, 0x24, 0x4c, 0x8d, 0x6c, 0x24, 0x08, 0x4f, 0x8d, 0x74, 0xe5, 0x08, 0x48, 0x83, 0xe4, 0xf0})
+    link_synth_code(s, [Int]{0x31, 0xed, 0x4c, 0x8b, 0x24, 0x24, 0x4c, 0x8d, 0x6c, 0x24, 0x08, 0x4f, 0x8d, 0x74, 0xe5, 0x08, 0x48, 0x83, 0xe4, 0xf0})
     // lea rbx, [rip + __jet_init_array_start]
-    link_synth_code(&s, [Int]{0x48, 0x8d, 0x1d})
-    link_synth_rel32(&s, "__jet_init_array_start", LINK_R_PC32)
+    link_synth_code(s, [Int]{0x48, 0x8d, 0x1d})
+    link_synth_rel32(s, "__jet_init_array_start", LINK_R_PC32)
     // next: lea rax, [rip + __jet_init_array_end]; cmp rbx, rax; jae done
-    link_synth_code(&s, [Int]{0x48, 0x8d, 0x05})
-    link_synth_rel32(&s, "__jet_init_array_end", LINK_R_PC32)
-    link_synth_code(&s, [Int]{0x48, 0x39, 0xc3, 0x73, 0x11})
+    link_synth_code(s, [Int]{0x48, 0x8d, 0x05})
+    link_synth_rel32(s, "__jet_init_array_end", LINK_R_PC32)
+    link_synth_code(s, [Int]{0x48, 0x39, 0xc3, 0x73, 0x11})
     // mov edi, r12d; mov rsi, r13; mov rdx, r14; call [rbx]; add rbx, 8; jmp next
-    link_synth_code(&s, [Int]{0x44, 0x89, 0xe7, 0x4c, 0x89, 0xee, 0x4c, 0x89, 0xf2, 0xff, 0x13, 0x48, 0x83, 0xc3, 0x08, 0xeb, 0xe3})
+    link_synth_code(s, [Int]{0x44, 0x89, 0xe7, 0x4c, 0x89, 0xee, 0x4c, 0x89, 0xf2, 0xff, 0x13, 0x48, 0x83, 0xc3, 0x08, 0xeb, 0xe3})
     // done: mov edi, r12d; mov rsi, r13; mov rdx, r14; call main
-    link_synth_code(&s, [Int]{0x44, 0x89, 0xe7, 0x4c, 0x89, 0xee, 0x4c, 0x89, 0xf2, 0xe8})
-    link_synth_rel32(&s, "main", LINK_R_PLT32)
+    link_synth_code(s, [Int]{0x44, 0x89, 0xe7, 0x4c, 0x89, 0xee, 0x4c, 0x89, 0xf2, 0xe8})
+    link_synth_rel32(s, "main", LINK_R_PLT32)
     // mov r12d, eax; lea rbx, [rip + __fini_array_end]
-    link_synth_code(&s, [Int]{0x41, 0x89, 0xc4, 0x48, 0x8d, 0x1d})
-    link_synth_rel32(&s, "__fini_array_end", LINK_R_PC32)
+    link_synth_code(s, [Int]{0x41, 0x89, 0xc4, 0x48, 0x8d, 0x1d})
+    link_synth_rel32(s, "__fini_array_end", LINK_R_PC32)
     // back: lea rax, [rip + __fini_array_start]; cmp rbx, rax; jbe exit
-    link_synth_code(&s, [Int]{0x48, 0x8d, 0x05})
-    link_synth_rel32(&s, "__fini_array_start", LINK_R_PC32)
-    link_synth_code(&s, [Int]{0x48, 0x39, 0xc3, 0x76, 0x08})
+    link_synth_code(s, [Int]{0x48, 0x8d, 0x05})
+    link_synth_rel32(s, "__fini_array_start", LINK_R_PC32)
+    link_synth_code(s, [Int]{0x48, 0x39, 0xc3, 0x76, 0x08})
     // sub rbx, 8; call [rbx]; jmp back
-    link_synth_code(&s, [Int]{0x48, 0x83, 0xeb, 0x08, 0xff, 0x13, 0xeb, 0xec})
+    link_synth_code(s, [Int]{0x48, 0x83, 0xeb, 0x08, 0xff, 0x13, 0xeb, 0xec})
     // exit: mov edi, r12d; mov eax, 231 (exit_group); syscall; hlt
-    link_synth_code(&s, [Int]{0x44, 0x89, 0xe7, 0xb8, 0xe7, 0x00, 0x00, 0x00, 0x0f, 0x05, 0xf4})
+    link_synth_code(s, [Int]{0x44, 0x89, 0xe7, 0xb8, 0xe7, 0x00, 0x00, 0x00, 0x0f, 0x05, 0xf4})
     s
 }
 
@@ -1165,7 +1165,7 @@ link_owned_fits: fn(c: LinkContext, start_g: Int) -> Bool Never! {
     fde_first := [Int:Int]{}
     fde_next := [Int]{}
     loop piece in 0..<c.ep_sec.len() {
-        &fde_next.push(-1)
+        fde_next.push(-1)
         if c.ep_target[piece] < 0 -> next
         t: link_target_section(c, c.ep_obj[piece], c.ep_target[piece])
         if t < 0 -> next
@@ -1173,9 +1173,9 @@ link_owned_fits: fn(c: LinkContext, start_g: Int) -> Bool Never! {
         fde_first[t] = piece
     }
     work := [Int]{c.g_section[main_final]}
-    loop root in c.roots -> &work.push(root)
+    loop root in c.roots -> work.push(root)
     loop piece in 0..<c.ep_sec.len() {
-        if c.ep_cie[piece] < 0 && c.ep_keep[piece] -> link_owned_piece(c, &work, piece, false)
+        if c.ep_cie[piece] < 0 && c.ep_keep[piece] -> link_owned_piece(c, work, piece, false)
     }
     // Each section reached: whether it reaches the image.
     kept := [Int:Bool]{}
@@ -1187,7 +1187,7 @@ link_owned_fits: fn(c: LinkContext, start_g: Int) -> Bool Never! {
             if s < 0 || kept.get(s) != None -> next
             obj: link_obj_of(c, s)
             class: link_class(c, obj, s)
-            &kept.add(s, class >= 0 && class != LINK_EH).drop("checked absent above")
+            kept.add(s, class >= 0 && class != LINK_EH).drop("checked absent above")
             if class < 0 || class == LINK_EH -> next
             if class == LINK_TDATA || class == LINK_TBSS || class == LINK_PREINIT -> return false
             b: c.obj_buffer[obj]
@@ -1198,17 +1198,17 @@ link_owned_fits: fn(c: LinkContext, start_g: Int) -> Bool Never! {
             if r >= 0 {
                 table: link_sec_offset(c, obj, r)
                 loop k in 0..<link_sec_size(c, obj, r).div_euclid(24) {
-                    &work.push(link_target_section(c, obj, link_u32(c.bufs, b, table + 24 * k + 12)))
+                    work.push(link_target_section(c, obj, link_u32(c.bufs, b, table + 24 * k + 12)))
                 }
             }
             fde := fde_first.get(s) ?? -1
             loop fde >= 0 {
-                link_owned_piece(c, &work, fde, true)
+                link_owned_piece(c, work, fde, true)
                 fde = fde_next[fde]
             }
         }
         loop (index, root) in c.cond_roots {
-            if kept.get(root) == None && (kept.get(c.cond_guards[index]) ?? false) -> &work.push(root)
+            if kept.get(root) == None && (kept.get(c.cond_guards[index]) ?? false) -> work.push(root)
         }
         if head == work.len() -> return true
     }
@@ -1223,7 +1223,7 @@ link_owned_piece: fn(c: LinkContext, work: &[Int], piece: Int, skip_pc: Bool) Ne
     loop k in c.ep_first_reloc[piece]..<c.ep_first_reloc[piece] + c.ep_reloc_count[piece] {
         at: table + 24 * k
         if skip_pc && link_u64(c.bufs, b, at) == pc -> next
-        &work.push(link_target_section(c, obj, link_u32(c.bufs, b, at + 12)))
+        work.push(link_target_section(c, obj, link_u32(c.bufs, b, at + 12)))
     }
 }
 
@@ -1243,24 +1243,24 @@ link_shims: fn(c: &LinkContext) -> Bool Never! {
         name: c.g_name[g].copy()
         if link_lfs64_base(name) == .Val(base) {
             if link_resolvable(c, base) {
-                target: link_intern(&c, base)
+                target: link_intern(c, base)
                 c.g_alias[g] = target
-                link_reference(&c, target, false)
+                link_reference(c, target, false)
                 changed = true
             }
             next
         }
         if name == LINK_FAULT_REPORT {
-            if c.fault_report != .Import -> link_fault_report(&report, c.fault_report)
+            if c.fault_report != .Import -> link_fault_report(report, c.fault_report)
             next
         }
         if link_alloc_shim_target(name) == .Val(target) {
-            link_synth_function(&s, name)
+            link_synth_function(s, name)
             if target == "" {
-                link_synth_code(&s, [Int]{0xc3})
+                link_synth_code(s, [Int]{0xc3})
             } else {
-                link_synth_code(&s, [Int]{0xe9})
-                link_synth_rel32(&s, target, LINK_R_PLT32)
+                link_synth_code(s, [Int]{0xe9})
+                link_synth_rel32(s, target, LINK_R_PLT32)
             }
             next
         }
@@ -1268,30 +1268,30 @@ link_shims: fn(c: &LinkContext) -> Bool Never! {
             // xor eax, eax; ret: musl's resolver reads resolv.conf on every
             // lookup, so there is no cached state to reload (musl's own
             // `res_init` is the same).
-            link_synth_function(&s, name)
-            link_synth_code(&s, [Int]{0x31, 0xc0, 0xc3})
+            link_synth_function(s, name)
+            link_synth_code(s, [Int]{0x31, 0xc0, 0xc3})
         } else if name == "gnu_get_libc_version" {
             // lea rax, [rip + __jet_libc_version]; ret. The gnu-target std
             // asks only to decide whether to call `__res_init` after a
             // resolver failure; 2.26 is the first glibc that reloads
             // resolv.conf itself, which musl always does.
-            link_synth_function(&s, name)
-            link_synth_code(&s, [Int]{0x48, 0x8d, 0x05})
-            link_synth_rel32(&s, "__jet_libc_version", LINK_R_PC32)
-            link_synth_code(&s, [Int]{0xc3})
+            link_synth_function(s, name)
+            link_synth_code(s, [Int]{0x48, 0x8d, 0x05})
+            link_synth_rel32(s, "__jet_libc_version", LINK_R_PC32)
+            link_synth_code(s, [Int]{0xc3})
             version_at: s.data.len()
-            link_synth_define(&s, "__jet_libc_version", 2, version_at)
-            loop byte in "2.26".bytes() -> &s.data.push(byte)
-            &s.data.push(U8{0})
+            link_synth_define(s, "__jet_libc_version", 2, version_at)
+            loop byte in "2.26".bytes() -> s.data.push(byte)
+            s.data.push(U8{0})
         }
     }
-    if s.def_names.len() == 0 && report.def_names.len() == 0 && !changed -> link_eh_shims(c, &s)
+    if s.def_names.len() == 0 && report.def_names.len() == 0 && !changed -> link_eh_shims(c, s)
     if s.def_names.len() > 0 {
-        link_load_synth(&c, s, "<linker shims>")
+        link_load_synth(c, s, "<linker shims>")
         changed = true
     }
     if report.def_names.len() > 0 {
-        link_load_synth(&c, report, LINK_FAULT_REPORT_OBJECT)
+        link_load_synth(c, report, LINK_FAULT_REPORT_OBJECT)
         // Its .text, the synthetic object's section 1 (link_synth_object).
         c.fault_report_section = c.obj_first_section[c.obj_name.len() - 1] + 1
         changed = true
@@ -1306,11 +1306,11 @@ link_shims: fn(c: &LinkContext) -> Bool Never! {
 // section calling it (link_rows_in_order), so the handler and its report
 // share one run of code as they would in one function.
 link_fault_report: fn(s: &LinkSynth, report: LinkFaultReport) Never! {
-    link_synth_function(&s, LINK_FAULT_REPORT)
+    link_synth_function(s, LINK_FAULT_REPORT)
     if report == .Addresses {
-        &s.text.extend(X64_FAULT_REPORT_ADDRESSES)
+        s.text.extend(X64_FAULT_REPORT_ADDRESSES)
     } else {
-        &s.text.extend(X64_FAULT_REPORT)
+        s.text.extend(X64_FAULT_REPORT)
     }
 }
 
@@ -1337,57 +1337,57 @@ link_eh_shims: fn(c: LinkContext, s: &LinkSynth) Never! {
     unwinder: link_defined_name(c, "_Unwind_Find_FDE")
     lazy: startup && find && unwinder
     if startup {
-        link_synth_function(&s, "__jet_eh_startup")
+        link_synth_function(s, "__jet_eh_startup")
         if lazy || !unwinder {
             // ret
-            link_synth_code(&s, [Int]{0xc3})
+            link_synth_code(s, [Int]{0xc3})
         } else {
             // jmp __register_frame_info (rdi: the tables, rsi: the object)
-            link_synth_code(&s, [Int]{0xe9})
-            link_synth_rel32(&s, "__register_frame_info", LINK_R_PLT32)
+            link_synth_code(s, [Int]{0xe9})
+            link_synth_rel32(s, "__register_frame_info", LINK_R_PLT32)
         }
     }
     if !find -> return
-    link_synth_function(&s, "_dl_find_object")
+    link_synth_function(s, "_dl_find_object")
     if !lazy {
         // mov eax, -1; ret: no object is found, so libgcc's unwinder uses the
         // tables registered at startup.
-        link_synth_code(&s, [Int]{0xb8, 0xff, 0xff, 0xff, 0xff, 0xc3})
+        link_synth_code(s, [Int]{0xb8, 0xff, 0xff, 0xff, 0xff, 0xc3})
         return
     }
     // mov eax, [rip + __jet_eh_state]; cmp eax, 2; je none; test eax, eax; jne header
-    link_synth_code(&s, [Int]{0x8b, 0x05})
-    link_synth_rel32(&s, "__jet_eh_state", LINK_R_PC32)
-    link_synth_code(&s, [Int]{0x83, 0xf8, 0x02, 0x74, 0x5c, 0x85, 0xc0, 0x75, 0x39})
+    link_synth_code(s, [Int]{0x8b, 0x05})
+    link_synth_rel32(s, "__jet_eh_state", LINK_R_PC32)
+    link_synth_code(s, [Int]{0x83, 0xf8, 0x02, 0x74, 0x5c, 0x85, 0xc0, 0x75, 0x39})
     // mov ecx, 1; lock cmpxchg [rip + __jet_eh_state], ecx; jne header
-    link_synth_code(&s, [Int]{0xb9, 0x01, 0x00, 0x00, 0x00, 0xf0, 0x0f, 0xb1, 0x0d})
-    link_synth_rel32(&s, "__jet_eh_state", LINK_R_PC32)
-    link_synth_code(&s, [Int]{0x75, 0x2a})
+    link_synth_code(s, [Int]{0xb9, 0x01, 0x00, 0x00, 0x00, 0xf0, 0x0f, 0xb1, 0x0d})
+    link_synth_rel32(s, "__jet_eh_state", LINK_R_PC32)
+    link_synth_code(s, [Int]{0x75, 0x2a})
     // push rsi; push rdi; sub rsp, 8; lea rdi, [rip + __EH_FRAME_BEGIN__]
-    link_synth_code(&s, [Int]{0x56, 0x57, 0x48, 0x83, 0xec, 0x08, 0x48, 0x8d, 0x3d})
-    link_synth_rel32(&s, "__EH_FRAME_BEGIN__", LINK_R_PC32)
+    link_synth_code(s, [Int]{0x56, 0x57, 0x48, 0x83, 0xec, 0x08, 0x48, 0x8d, 0x3d})
+    link_synth_rel32(s, "__EH_FRAME_BEGIN__", LINK_R_PC32)
     // lea rsi, [rip + __jet_eh_object]; call __register_frame_info
-    link_synth_code(&s, [Int]{0x48, 0x8d, 0x35})
-    link_synth_rel32(&s, "__jet_eh_object", LINK_R_PC32)
-    link_synth_code(&s, [Int]{0xe8})
-    link_synth_rel32(&s, "__register_frame_info", LINK_R_PLT32)
+    link_synth_code(s, [Int]{0x48, 0x8d, 0x35})
+    link_synth_rel32(s, "__jet_eh_object", LINK_R_PC32)
+    link_synth_code(s, [Int]{0xe8})
+    link_synth_rel32(s, "__register_frame_info", LINK_R_PLT32)
     // add rsp, 8; pop rdi; pop rsi; mov eax, 2; xchg [rip + __jet_eh_state], eax
-    link_synth_code(&s, [Int]{0x48, 0x83, 0xc4, 0x08, 0x5f, 0x5e, 0xb8, 0x02, 0x00, 0x00, 0x00, 0x87, 0x05})
-    link_synth_rel32(&s, "__jet_eh_state", LINK_R_PC32)
+    link_synth_code(s, [Int]{0x48, 0x83, 0xc4, 0x08, 0x5f, 0x5e, 0xb8, 0x02, 0x00, 0x00, 0x00, 0x87, 0x05})
+    link_synth_rel32(s, "__jet_eh_state", LINK_R_PC32)
     // header: the struct dl_find_object at rsi: flags, map start,
     // map end, link map 0, eh_frame `__jet_eh_hdr`; return 0.
     // xor eax, eax; mov [rsi], rax; mov [rsi + 8], rax; mov [rsi + 16], rax; mov [rsi + 24], rax; lea rax, [rip + __jet_eh_hdr]
-    link_synth_code(&s, [Int]{0x31, 0xc0, 0x48, 0x89, 0x06, 0x48, 0x89, 0x46, 0x08, 0x48, 0x89, 0x46, 0x10, 0x48, 0x89, 0x46, 0x18, 0x48, 0x8d, 0x05})
-    link_synth_rel32(&s, "__jet_eh_hdr", LINK_R_PC32)
+    link_synth_code(s, [Int]{0x31, 0xc0, 0x48, 0x89, 0x06, 0x48, 0x89, 0x46, 0x08, 0x48, 0x89, 0x46, 0x10, 0x48, 0x89, 0x46, 0x18, 0x48, 0x8d, 0x05})
+    link_synth_rel32(s, "__jet_eh_hdr", LINK_R_PC32)
     // mov [rsi + 32], rax; xor eax, eax; ret
-    link_synth_code(&s, [Int]{0x48, 0x89, 0x46, 0x20, 0x31, 0xc0, 0xc3})
+    link_synth_code(s, [Int]{0x48, 0x89, 0x46, 0x20, 0x31, 0xc0, 0xc3})
     // none: mov eax, -1; ret
-    link_synth_code(&s, [Int]{0xb8, 0xff, 0xff, 0xff, 0xff, 0xc3})
+    link_synth_code(s, [Int]{0xb8, 0xff, 0xff, 0xff, 0xff, 0xc3})
     // The `.eh_frame_hdr`: version 1, eh_frame_ptr pcrel sdata4, no FDE
     // count, no table; then the distance to the tables.
-    link_synth_function(&s, "__jet_eh_hdr")
-    link_synth_code(&s, [Int]{0x01, 0x1b, 0xff, 0xff})
-    link_synth_pcrel_field(&s, "__EH_FRAME_BEGIN__")
+    link_synth_function(s, "__jet_eh_hdr")
+    link_synth_code(s, [Int]{0x01, 0x1b, 0xff, 0xff})
+    link_synth_pcrel_field(s, "__EH_FRAME_BEGIN__")
 }
 
 // Whether `name` is strongly referenced and still undefined: a shim would
@@ -1426,10 +1426,10 @@ link_mark: fn(c: &LinkContext, work: &[Int], s: Int) Never! {
         return
     }
     c.live[s] = c.live_secs.len()
-    &c.live_secs.push(s)
-    &c.live_class.push(class)
-    &c.live_addr.push(0)
-    &work.push(s)
+    c.live_secs.push(s)
+    c.live_class.push(class)
+    c.live_addr.push(0)
+    work.push(s)
 }
 
 // Mark the targets of the relocations in `piece`, except its pc_begin.
@@ -1445,7 +1445,7 @@ link_mark_piece: fn(c: &LinkContext, work: &[Int], piece: Int, skip_pc: Bool) Ne
         at: table + 24 * k
         if skip_pc && link_u64(c.bufs, b, at) == pc -> next
         t: link_target_section(c, obj, link_u32(c.bufs, b, at + 12))
-        link_mark(&c, &work, t)
+        link_mark(c, work, t)
     }
 }
 
@@ -1458,8 +1458,8 @@ link_collect: fn(c: &LinkContext, entries: [Int], linker_names: [String:Bool]) N
     last: c.obj_first_section.len() - 1
     sections: if last < 0 -> 0 else -> c.obj_first_section[last] + c.obj_count[last]
     loop _ in 0..<sections {
-        &c.live.push(-1)
-        &c.sec_fde.push(-1)
+        c.live.push(-1)
+        c.sec_fde.push(-1)
     }
     // Index the FDEs by the section they describe.
     loop piece in 0..<c.ep_sec.len() {
@@ -1472,15 +1472,15 @@ link_collect: fn(c: &LinkContext, entries: [Int], linker_names: [String:Bool]) N
         c.sec_fde[t] = piece
     }
     work := [Int]{}
-    loop entry in entries -> link_mark(&c, &work, entry)
+    loop entry in entries -> link_mark(c, work, entry)
     // Init/fini arrays and SHF_GNU_RETAIN sections of every object are roots.
     loop index in 0..<c.roots.len() {
         root: c.roots[index].copy()
-        link_mark(&c, &work, root)
+        link_mark(c, work, root)
     }
     // Personality routines named by the CIEs.
     loop piece in 0..<c.ep_sec.len() {
-        if c.ep_cie[piece] < 0 && c.ep_keep[piece] -> link_mark_piece(&c, &work, piece, false)
+        if c.ep_cie[piece] < 0 && c.ep_keep[piece] -> link_mark_piece(c, work, piece, false)
     }
     reported := [Int:Bool]{}
     head := 0
@@ -1492,7 +1492,7 @@ link_collect: fn(c: &LinkContext, entries: [Int], linker_names: [String:Bool]) N
             b: c.obj_buffer[obj].copy()
             r: link_rela_of(c, obj, s)
             // Rows are scanned in the order they were marked.
-            &c.rel_base.push(c.rel_slot.len())
+            c.rel_base.push(c.rel_slot.len())
             if r >= 0 {
                 count: link_sec_size(c, obj, r).div_euclid(24)
                 table: link_sec_offset(c, obj, r)
@@ -1500,28 +1500,28 @@ link_collect: fn(c: &LinkContext, entries: [Int], linker_names: [String:Bool]) N
                     at: table + 24 * k
                     symbol: link_u32(c.bufs, b, at + 12)
                     t: link_target_section(c, obj, symbol)
-                    link_mark(&c, &work, t)
+                    link_mark(c, work, t)
                     if t >= 0 && t == c.fault_report_section && c.fault_report_caller < 0 -> c.fault_report_caller = s
-                    slot: link_scan_reloc(&c, &reported, linker_names, obj, s, at, symbol)
-                    &c.rel_slot.push(slot)
+                    slot: link_scan_reloc(c, reported, linker_names, obj, s, at, symbol)
+                    c.rel_slot.push(slot)
                 }
             }
             fde := c.sec_fde[s].copy()
             loop fde >= 0 {
-                link_mark_piece(&c, &work, fde, true)
+                link_mark_piece(c, work, fde, true)
                 fde = c.ep_next[fde]
             }
         }
         loop index in 0..<c.cond_roots.len() {
             root: c.cond_roots[index].copy()
-            if link_live_row(c, c.cond_guards[index]) >= 0 -> link_mark(&c, &work, root)
+            if link_live_row(c, c.cond_guards[index]) >= 0 -> link_mark(c, work, root)
         }
         if head == work.len() -> break
     }
     loop piece in 0..<c.ep_sec.len() {
         if c.ep_cie[piece] >= 0 -> c.ep_keep[piece] = link_live_row(c, c.ep_target[piece]) >= 0
     }
-    link_share_cies(&c)
+    link_share_cies(c)
 }
 
 // One CIE per distinct record, written only when a kept FDE names it. A kept
@@ -1547,9 +1547,9 @@ link_share_cies: fn(c: &LinkContext) Never! {
             if c.ep_reloc_count[cie] == 0 {
                 key: link_eh_record_key(c, cie)
                 shared = by_bytes.get(key) ?? cie
-                if shared == cie -> &by_bytes.add(key, cie).drop("a new record")
+                if shared == cie -> by_bytes.add(key, cie).drop("a new record")
             }
-            &chosen.add(cie, shared).drop("each CIE is chosen once")
+            chosen.add(cie, shared).drop("each CIE is chosen once")
             c.ep_keep[shared] = true
         }
         c.ep_cie[piece] = shared
@@ -1566,11 +1566,11 @@ link_eh_record_key: fn(c: LinkContext, piece: Int) -> String Never! {
     words := [String]{}
     at := 0
     loop at + 4 <= length {
-        &words.push("{link_u32(c.bufs, b, start + at)}")
+        words.push("{link_u32(c.bufs, b, start + at)}")
         at += 4
     }
     loop at < length {
-        &words.push("b{link_u8(c.bufs, b, start + at)}")
+        words.push("b{link_u8(c.bufs, b, start + at)}")
         at += 1
     }
     words.join(",")
@@ -1624,10 +1624,10 @@ link_scan_reloc: fn(c: &LinkContext, reported: &[Int:Bool], linker_names: [Strin
     b: c.obj_buffer[obj].copy()
     g: link_global_of(c, obj, symbol)
     if g >= 0 && !link_defined(c, g) && reported.get(g) == None && (link_u8(c.bufs, b, link_sym_at(c, obj, symbol) + 4) >> 4) != 2 && linker_names.get(c.g_name[g]) == None {
-        &reported.add(g, true).drop("checked absent above")
+        reported.add(g, true).drop("checked absent above")
         site: link_section_label(c, s)
         message: "undefined symbol `{c.g_name[g]}`, referenced by {site}"
-        link_error(&c, message)
+        link_error(c, message)
     }
     kind: link_u32(c.bufs, b, at + 8)
     if !link_is_got_reloc(kind) -> return -1
@@ -1635,8 +1635,8 @@ link_scan_reloc: fn(c: &LinkContext, reported: &[Int:Bool], linker_names: [Strin
     key: link_got_key(c, obj, symbol)
     if c.got.get(key) == .Val(found) -> return found
     slot: c.got_keys.len()
-    &c.got.add(key, slot).drop("checked absent above")
-    &c.got_keys.push(key)
+    c.got.add(key, slot).drop("checked absent above")
+    c.got_keys.push(key)
     slot
 }
 
@@ -1663,8 +1663,8 @@ link_rows_in_order: fn(c: LinkContext) -> [Int] Never! {
     rows := [Int]{}
     loop row in c.live {
         if row < 0 || (moved && row == report) -> next
-        &rows.push(row)
-        if moved && row == caller -> &rows.push(report)
+        rows.push(row)
+        if moved && row == caller -> rows.push(report)
     }
     rows
 }
@@ -1675,16 +1675,16 @@ link_rows_in_order: fn(c: LinkContext) -> [Int] Never! {
 // contiguous at the start of the code.
 link_order: fn(c: LinkContext) -> [[Int]] Never! {
     lists := [[Int]]{}
-    loop _ in 0..<LINK_CLASSES -> &lists.push([Int]{})
-    loop row in link_rows_in_order(c) -> &lists[c.live_class[row]].push(row)
+    loop _ in 0..<LINK_CLASSES -> lists.push([Int]{})
+    loop row in link_rows_in_order(c) -> lists[c.live_class[row]].push(row)
     loop class in ([Int]{LINK_PREINIT, LINK_INIT, LINK_FINI}) {
         keys := [Int]{}
-        loop row in lists[class] -> &keys.push(link_priority(c, c.live_secs[row]))
+        loop row in lists[class] -> keys.push(link_priority(c, c.live_secs[row]))
         lists[class] = link_sort_by(lists[class], keys)
     }
     if c.init_code.len() > 0 {
         keys := [Int]{}
-        loop row in lists[LINK_TEXT] -> &keys.push(c.init_code.get(c.live_secs[row]) ?? 2)
+        loop row in lists[LINK_TEXT] -> keys.push(c.init_code.get(c.live_secs[row]) ?? 2)
         lists[LINK_TEXT] = link_sort_by(lists[LINK_TEXT], keys)
     }
     lists
@@ -1695,7 +1695,7 @@ link_order: fn(c: LinkContext) -> [[Int]] Never! {
 link_sort_by: fn(items: [Int], keys: [Int]) -> [Int] Never! {
     count: items.len()
     order := [Int]{}
-    loop k in 0..<count -> &order.push(k)
+    loop k in 0..<count -> order.push(k)
     width := 1
     loop width < count {
         merged := [Int]{}
@@ -1707,10 +1707,10 @@ link_sort_by: fn(items: [Int], keys: [Int]) -> [Int] Never! {
             right := middle
             loop left < middle || right < end {
                 if right >= end || (left < middle && keys[order[left]] <= keys[order[right]]) {
-                    &merged.push(order[left])
+                    merged.push(order[left])
                     left += 1
                 } else {
-                    &merged.push(order[right])
+                    merged.push(order[right])
                     right += 1
                 }
             }
@@ -1720,7 +1720,7 @@ link_sort_by: fn(items: [Int], keys: [Int]) -> [Int] Never! {
         width = width * 2
     }
     result := [Int]{}
-    loop k in order -> &result.push(items[k])
+    loop k in order -> result.push(items[k])
     result
 }
 
@@ -1784,10 +1784,10 @@ link_layout: fn(c: &LinkContext, note: Bool, packed: Bool) -> LinkLayout Never! 
     addr := c.base + LINK_EHDR_SIZE + LINK_PHDR_SIZE * phnum
     note_at: if note -> addr else -> 0
     if note -> addr += LINK_BUILD_ID_NOTE_SIZE
-    addr = link_place(&c, order[LINK_RODATA], addr)
-    r_end: link_place_eh(&c, addr)
+    addr = link_place(c, order[LINK_RODATA], addr)
+    r_end: link_place_eh(c, addr)
     text_start: link_align(r_end, LINK_PAGE)
-    text_end: link_place(&c, order[LINK_TEXT], text_start)
+    text_end: link_place(c, order[LINK_TEXT], text_start)
     // Packed, the read-write segment's first address shares its page offset
     // with its file offset, the read-only segment's end.
     rw_start: link_align(text_end, LINK_PAGE) + (if packed -> (r_end - c.base) % LINK_PAGE else -> 0)
@@ -1805,23 +1805,23 @@ link_layout: fn(c: &LinkContext, note: Bool, packed: Bool) -> LinkLayout Never! 
         c.tls_align = align
         tls_start: link_align(addr, align)
         c.tls_start = tls_start
-        tdata_end = link_place(&c, order[LINK_TDATA], tls_start)
-        tls_end: link_place(&c, order[LINK_TBSS], tdata_end)
+        tdata_end = link_place(c, order[LINK_TDATA], tls_start)
+        tls_end: link_place(c, order[LINK_TBSS], tdata_end)
         c.tls_end = tls_end
         addr = tdata_end
     }
     preinit_start: link_align(addr, 8)
-    preinit_end: link_place(&c, order[LINK_PREINIT], preinit_start)
+    preinit_end: link_place(c, order[LINK_PREINIT], preinit_start)
     init_start: link_align(preinit_end, 8)
-    init_end: link_place(&c, order[LINK_INIT], init_start)
+    init_end: link_place(c, order[LINK_INIT], init_start)
     fini_start: link_align(init_end, 8)
-    fini_end: link_place(&c, order[LINK_FINI], fini_start)
-    addr = link_place(&c, order[LINK_RELRO], fini_end)
+    fini_end: link_place(c, order[LINK_FINI], fini_start)
+    addr = link_place(c, order[LINK_RELRO], fini_end)
     got_start: link_align(addr, 8)
     c.got_start = got_start
     addr = got_start + 8 * c.got_keys.len()
-    file_end: link_place(&c, order[LINK_DATA], addr)
-    addr = link_place(&c, order[LINK_BSS], file_end)
+    file_end: link_place(c, order[LINK_DATA], addr)
+    addr = link_place(c, order[LINK_BSS], file_end)
     loop g in 0..<c.g_name.len() {
         if c.g_kind[g] != LINK_G_COMMON -> next
         addr = link_align(addr, c.g_common_align[g])
@@ -1911,10 +1911,10 @@ link_apply_got: fn(c: LinkContext, errors: &[String], out: &[U8], obj: Int, s: I
     decided: link_got_form(c, kind, obj, s, off, symbol, addend)
     if decided == 0 {
         slot: c.got.get(link_got_key(c, obj, symbol)) ?? {
-            &errors.push(link_reloc_text(c, s, off, "GOT relocation without a slot"))
+            errors.push(link_reloc_text(c, s, off, "GOT relocation without a slot"))
             return false
         }
-        link_put32(&out, pos, c.got_start + 8 * slot + addend - place)
+        link_put32(out, pos, c.got_start + 8 * slot + addend - place)
         return false
     }
     target: link_target_addr(c, obj, symbol)
@@ -1924,17 +1924,17 @@ link_apply_got: fn(c: LinkContext, errors: &[String], out: &[U8], obj: Int, s: I
     // form takes a GOT slot, so the scan's decision stands.
     form: if decided == 1 && kind == LINK_R_REX_GOTPCRELX && (Int.from_u8(out[pos - 3]).bit_and(0xf8)) == 0x48 && !link_fits32(target + addend - place) && link_fits32(target) -> 4 else -> decided
     value: if form == 4 -> target else -> target + addend - place
-    if !link_fits32(value) -> &errors.push(link_reloc_text(c, s, off, "relaxed GOT relocation out of range"))
+    if !link_fits32(value) -> errors.push(link_reloc_text(c, s, off, "relaxed GOT relocation out of range"))
     if form == 1 {
         out[pos - 2] = U8{0x8d}
-        link_put32(&out, pos, value)
+        link_put32(out, pos, value)
     } else if form == 2 {
         out[pos - 2] = U8{0x67}
         out[pos - 1] = U8{0xe8}
-        link_put32(&out, pos, value)
+        link_put32(out, pos, value)
     } else if form == 3 {
         out[pos - 2] = U8{0xe9}
-        link_put32(&out, pos - 1, value + 1)
+        link_put32(out, pos - 1, value + 1)
         out[pos + 3] = U8{0x90}
     } else {
         // REX.W (REX.R becomes REX.B) C7 /0: mov reg, imm32.
@@ -1943,7 +1943,7 @@ link_apply_got: fn(c: LinkContext, errors: &[String], out: &[U8], obj: Int, s: I
         out[pos - 3] = U8{(0x48).bit_or(((rex >> 2).bit_and(1)))}
         out[pos - 2] = U8{0xc7}
         out[pos - 1] = U8{(0xc0).bit_or(reg)}
-        link_put32(&out, pos, value)
+        link_put32(out, pos, value)
     }
     false
 }
@@ -1960,109 +1960,109 @@ link_apply: fn(c: LinkContext, errors: &[String], out: &[U8], obj: Int, s: Int, 
     addend: link_s64(c.bufs, b, at + 16)
     if slot >= 0 {
         // A GOT slot link_scan_reloc assigned.
-        link_put32(&out, pos, c.got_start + 8 * slot + addend - place)
+        link_put32(out, pos, c.got_start + 8 * slot + addend - place)
         return false
     }
     if kind == LINK_R_NONE -> return false
     symbol: link_u32(c.bufs, b, at + 12)
-    if link_is_got_reloc(kind) -> return link_apply_got(c, &errors, &out, obj, s, kind, off, symbol, addend, pos, place)
+    if link_is_got_reloc(kind) -> return link_apply_got(c, errors, out, obj, s, kind, off, symbol, addend, pos, place)
     target: link_target_addr(c, obj, symbol)
     if kind == LINK_R_64 {
-        link_put64(&out, pos, target + addend)
+        link_put64(out, pos, target + addend)
         return false
     }
     if kind == LINK_R_PC32 || kind == LINK_R_PLT32 {
         value: target + addend - place
-        if !link_fits32(value) -> &errors.push(link_reloc_text(c, s, off, "PC-relative relocation out of range"))
-        link_put32(&out, pos, value)
+        if !link_fits32(value) -> errors.push(link_reloc_text(c, s, off, "PC-relative relocation out of range"))
+        link_put32(out, pos, value)
         return false
     }
     if kind == LINK_R_32 || kind == LINK_R_32S {
         value: target + addend
-        if (kind == LINK_R_32 && (value < 0 || value > 0xffffffff)) || (kind == LINK_R_32S && !link_fits32(value)) -> &errors.push(link_reloc_text(c, s, off, "32-bit absolute relocation out of range"))
-        link_put32(&out, pos, value)
+        if (kind == LINK_R_32 && (value < 0 || value > 0xffffffff)) || (kind == LINK_R_32S && !link_fits32(value)) -> errors.push(link_reloc_text(c, s, off, "32-bit absolute relocation out of range"))
+        link_put32(out, pos, value)
         return false
     }
     if kind == LINK_R_PC64 {
-        link_put64(&out, pos, target + addend - place)
+        link_put64(out, pos, target + addend - place)
         return false
     }
     if kind == LINK_R_GOTPC32 {
-        link_put32(&out, pos, c.got_start + addend - place)
+        link_put32(out, pos, c.got_start + addend - place)
         return false
     }
     if kind == LINK_R_GOTOFF64 {
-        link_put64(&out, pos, target + addend - c.got_start)
+        link_put64(out, pos, target + addend - c.got_start)
         return false
     }
     if kind == LINK_R_TLSGD {
         // data16 lea rdi, [rip + x@tlsgd]; data16 data16 rex64 call __tls_get_addr
         // (or data16 rex64 call [rip + __tls_get_addr@GOTPCREL])
         // -> mov rax, fs:0; lea rax, [rax + x@tpoff]
-        direct: link_byte_is(&out, pos + 4, [Int]{0x66, 0x66, 0x48, 0xe8})
-        indirect: link_byte_is(&out, pos + 4, [Int]{0x66, 0x48, 0xff, 0x15})
-        if !link_byte_is(&out, pos - 4, [Int]{0x66, 0x48, 0x8d, 0x3d}) || (!direct && !indirect) {
-            &errors.push(link_reloc_text(c, s, off, "unrecognized TLS general-dynamic sequence"))
+        direct: link_byte_is(out, pos + 4, [Int]{0x66, 0x66, 0x48, 0xe8})
+        indirect: link_byte_is(out, pos + 4, [Int]{0x66, 0x48, 0xff, 0x15})
+        if !link_byte_is(out, pos - 4, [Int]{0x66, 0x48, 0x8d, 0x3d}) || (!direct && !indirect) {
+            errors.push(link_reloc_text(c, s, off, "unrecognized TLS general-dynamic sequence"))
             return false
         }
-        link_put_bytes(&out, pos - 4, [Int]{0x64, 0x48, 0x8b, 0x04, 0x25, 0, 0, 0, 0, 0x48, 0x8d, 0x80})
-        link_put32(&out, pos + 8, link_tpoff(c, target) + addend + 4)
+        link_put_bytes(out, pos - 4, [Int]{0x64, 0x48, 0x8b, 0x04, 0x25, 0, 0, 0, 0, 0x48, 0x8d, 0x80})
+        link_put32(out, pos + 8, link_tpoff(c, target) + addend + 4)
         return true
     }
     if kind == LINK_R_TLSLD {
         // lea rdi, [rip + x@tlsld]; call __tls_get_addr (or call [rip + GOT])
         // -> mov rax, fs:0, padded with prefixes to the same length.
-        direct: link_byte_is(&out, pos + 4, [Int]{0xe8})
-        indirect: link_byte_is(&out, pos + 4, [Int]{0xff, 0x15})
-        if !link_byte_is(&out, pos - 3, [Int]{0x48, 0x8d, 0x3d}) || (!direct && !indirect) {
-            &errors.push(link_reloc_text(c, s, off, "unrecognized TLS local-dynamic sequence"))
+        direct: link_byte_is(out, pos + 4, [Int]{0xe8})
+        indirect: link_byte_is(out, pos + 4, [Int]{0xff, 0x15})
+        if !link_byte_is(out, pos - 3, [Int]{0x48, 0x8d, 0x3d}) || (!direct && !indirect) {
+            errors.push(link_reloc_text(c, s, off, "unrecognized TLS local-dynamic sequence"))
             return false
         }
         if direct {
-            link_put_bytes(&out, pos - 3, [Int]{0x66, 0x66, 0x66, 0x64, 0x48, 0x8b, 0x04, 0x25, 0, 0, 0, 0})
+            link_put_bytes(out, pos - 3, [Int]{0x66, 0x66, 0x66, 0x64, 0x48, 0x8b, 0x04, 0x25, 0, 0, 0, 0})
         } else {
-            link_put_bytes(&out, pos - 3, [Int]{0x66, 0x66, 0x66, 0x66, 0x64, 0x48, 0x8b, 0x04, 0x25, 0, 0, 0, 0})
+            link_put_bytes(out, pos - 3, [Int]{0x66, 0x66, 0x66, 0x66, 0x64, 0x48, 0x8b, 0x04, 0x25, 0, 0, 0, 0})
         }
         return true
     }
     if kind == LINK_R_DTPOFF32 || kind == LINK_R_TPOFF32 {
         // After the local-dynamic relaxation the module base is the thread
         // pointer, so DTPOFF is TPOFF.
-        link_put32(&out, pos, link_tpoff(c, target) + addend)
+        link_put32(out, pos, link_tpoff(c, target) + addend)
         return false
     }
     if kind == LINK_R_DTPOFF64 || kind == LINK_R_TPOFF64 {
-        link_put64(&out, pos, link_tpoff(c, target) + addend)
+        link_put64(out, pos, link_tpoff(c, target) + addend)
         return false
     }
     if kind == LINK_R_GOTTPOFF {
         // mov reg, [rip + x@gottpoff] -> mov reg, imm32; add reg, [...] -> add reg, imm32
         if off < 3 {
-            &errors.push(link_reloc_text(c, s, off, "unrecognized TLS initial-exec instruction"))
+            errors.push(link_reloc_text(c, s, off, "unrecognized TLS initial-exec instruction"))
             return false
         }
         rex: Int.from_u8(out[pos - 3])
         opcode: Int.from_u8(out[pos - 2])
         modrm: Int.from_u8(out[pos - 1])
         if (rex != 0x48 && rex != 0x4c) || (opcode != 0x8b && opcode != 0x03) || (modrm.bit_and(0xc7)) != 0x05 {
-            &errors.push(link_reloc_text(c, s, off, "unrecognized TLS initial-exec instruction"))
+            errors.push(link_reloc_text(c, s, off, "unrecognized TLS initial-exec instruction"))
             return false
         }
         out[pos - 3] = U8{if rex == 0x4c -> 0x49 else -> 0x48}
         out[pos - 2] = U8{if opcode == 0x8b -> 0xc7 else -> 0x81}
         out[pos - 1] = U8{(0xc0).bit_or(((modrm >> 3).bit_and(7)))}
-        link_put32(&out, pos, link_tpoff(c, target) + addend + 4)
+        link_put32(out, pos, link_tpoff(c, target) + addend + 4)
         return false
     }
     if kind == LINK_R_SIZE32 {
-        link_put32(&out, pos, link_target_size(c, obj, symbol) + addend)
+        link_put32(out, pos, link_target_size(c, obj, symbol) + addend)
         return false
     }
     if kind == LINK_R_SIZE64 {
-        link_put64(&out, pos, link_target_size(c, obj, symbol) + addend)
+        link_put64(out, pos, link_target_size(c, obj, symbol) + addend)
         return false
     }
-    &errors.push(link_reloc_text(c, s, off, "unsupported relocation type {kind}"))
+    errors.push(link_reloc_text(c, s, off, "unsupported relocation type {kind}"))
     false
 }
 
@@ -2076,7 +2076,7 @@ link_emit_section: fn(c: LinkContext, errors: &[String], out: &[U8], row: Int) N
     pos: out.len()
     start: link_sec_offset(c, obj, s)
     size: link_sec_size(c, obj, s)
-    &out.extend(c.bufs[b][start..<start + size])
+    out.extend(c.bufs[b][start..<start + size])
     r: link_rela_of(c, obj, s)
     if r < 0 -> return
     count: link_sec_size(c, obj, r).div_euclid(24)
@@ -2093,7 +2093,7 @@ link_emit_section: fn(c: LinkContext, errors: &[String], out: &[U8], row: Int) N
         // Section offsets fit 32 bits.
         off: link_u32(c.bufs, b, at)
         slot: c.rel_slot[base + k].copy()
-        skip = link_apply(c, &errors, &out, obj, s, at, off, slot, pos + off, address + off)
+        skip = link_apply(c, errors, out, obj, s, at, off, slot, pos + off, address + off)
     }
 }
 
@@ -2111,7 +2111,7 @@ link_emit_eh: fn(c: &LinkContext, out: &[U8]) Never! {
         start: link_sec_offset(c, obj, s) + piece_start
         pos: out.len()
         length: c.ep_len[piece].copy()
-        &out.extend(c.bufs[b][start..<start + length])
+        out.extend(c.bufs[b][start..<start + length])
         table: link_rel_table(c, obj, s)
         first: c.ep_first_reloc[piece].copy()
         end: first + c.ep_reloc_count[piece]
@@ -2120,13 +2120,13 @@ link_emit_eh: fn(c: &LinkContext, out: &[U8]) Never! {
             rel_off: link_u32(c.bufs, b, at)
             off: rel_off - piece_start
             place: c.eh_start + pos - base + off
-            _ := link_apply(c, &errors, &out, obj, s, at, rel_off, -1, pos + off, place)
+            _ := link_apply(c, errors, out, obj, s, at, rel_off, -1, pos + off, place)
         }
         cie: c.ep_cie[piece].copy()
-        if cie >= 0 -> link_put32(&out, pos + 4, c.ep_out[piece] + 4 - c.ep_out[cie])
+        if cie >= 0 -> link_put32(out, pos + 4, c.ep_out[piece] + 4 - c.ep_out[cie])
     }
-    loop _ in 0..<4 -> &out.push(U8{0})
-    &c.errors.extend(errors)
+    loop _ in 0..<4 -> out.push(U8{0})
+    c.errors.extend(errors)
 }
 
 // What `.debug_frame` keeps of an `.eh_frame` CIE (link_eh_cie): the
@@ -2165,7 +2165,7 @@ link_eh_cie: fn(bytes: [U8], at: Int) -> LinkEhCie? Never! {
     ra := Int.from_u8(bytes[ra_at])
     if version != 1 {
         fields_end = ra_at
-        ra = link_debug_uleb(bytes, &fields_end)
+        ra = link_debug_uleb(bytes, fields_end)
     }
     encoding := 0
     instructions := fields_end
@@ -2200,8 +2200,8 @@ link_eh_address: fn(bytes: [U8], at: &Int, encoding: Int, relative: Bool) -> Int
 // multiple of `size` bytes and write its length.
 link_frame_finish: fn(out: &[U8], start: Int, size: Int) Never! {
     pad: (size - (out.len() - start) % size) % size
-    loop _ in 0..<pad -> &out.push(U8{0})
-    link_put32(&out, start, out.len() - start - 4)
+    loop _ in 0..<pad -> out.push(U8{0})
+    link_put32(out, start, out.len() - start - 4)
 }
 
 // One record of the `.eh_frame` link_emit_eh writes at address 0: its CIE's
@@ -2226,7 +2226,7 @@ LinkEhRecord: struct {
 // is padded to the address size.
 link_debug_frame: fn(c: &LinkContext) -> [U8] Never! {
     eh := [U8]{}
-    link_emit_eh(&c, &eh)
+    link_emit_eh(c, eh)
     cies := [Int:LinkEhCie]{}
     records := [LinkEhRecord]{}
     wide := false
@@ -2238,26 +2238,26 @@ link_debug_frame: fn(c: &LinkContext) -> [U8] Never! {
         id: link_debug_le(eh, at + 4, 4)
         if id == 0 {
             cie: link_eh_cie(eh, at) ?? {
-                link_error(&c, "an unwind CIE has no .debug_frame form")
+                link_error(c, "an unwind CIE has no .debug_frame form")
                 return [U8]{}
             }
-            &cies.add(at, cie).drop("record offsets are unique")
-            &records.push(LinkEhRecord{at: at, end: end, cie_at: at, begin: 0, range: 0, instructions: 0})
+            cies.add(at, cie).drop("record offsets are unique")
+            records.push(LinkEhRecord{at: at, end: end, cie_at: at, begin: 0, range: 0, instructions: 0})
         } else {
             cie_at: at + 4 - id
             cie: cies.get(cie_at) ?? {
-                link_error(&c, "an unwind FDE names no CIE before it")
+                link_error(c, "an unwind FDE names no CIE before it")
                 return [U8]{}
             }
             p := at + 8
-            begin: link_eh_address(eh, &p, cie.encoding, true)
-            range: link_eh_address(eh, &p, cie.encoding, false)
+            begin: link_eh_address(eh, p, cie.encoding, true)
+            range: link_eh_address(eh, p, cie.encoding, false)
             if cie.z {
-                data: link_debug_uleb(eh, &p)
+                data: link_debug_uleb(eh, p)
                 p += data
             }
             if begin < 0 || range < 0 || begin + range > 0xffffffff -> wide = true
-            &records.push(LinkEhRecord{at: at, end: end, cie_at: cie_at, begin: begin, range: range, instructions: p})
+            records.push(LinkEhRecord{at: at, end: end, cie_at: cie_at, begin: begin, range: range, instructions: p})
         }
         at = end
     }
@@ -2266,34 +2266,34 @@ link_debug_frame: fn(c: &LinkContext) -> [U8] Never! {
     cie_out := [Int:Int]{}
     loop record in records {
         start: out.len()
-        elf64_u32(&out, 0)
+        elf64_u32(out, 0)
         if record.cie_at == record.at {
             cie: cies.get(record.at) ?? {
-                link_error(&c, "an unwind CIE has no .debug_frame form")
+                link_error(c, "an unwind CIE has no .debug_frame form")
                 return [U8]{}
             }
-            elf64_u32(&out, 0xffffffff)
+            elf64_u32(out, 0xffffffff)
             // Version 4, augmentation "", address size, segment selector size 0.
-            &out.push(U8{4})
-            &out.push(U8{0})
-            &out.push(U8{size})
-            &out.push(U8{0})
-            &out.extend(eh[record.at + cie.fields..<record.at + cie.ra_at])
-            dwarf_uleb(&out, cie.ra)
-            &out.extend(eh[record.at + cie.instructions..<record.end])
-            &cie_out.add(record.at, start).drop("record offsets are unique")
+            out.push(U8{4})
+            out.push(U8{0})
+            out.push(U8{size})
+            out.push(U8{0})
+            out.extend(eh[record.at + cie.fields..<record.at + cie.ra_at])
+            dwarf_uleb(out, cie.ra)
+            out.extend(eh[record.at + cie.instructions..<record.end])
+            cie_out.add(record.at, start).drop("record offsets are unique")
         } else {
-            elf64_u32(&out, cie_out.get(record.cie_at) ?? 0)
+            elf64_u32(out, cie_out.get(record.cie_at) ?? 0)
             if wide {
-                elf64_u64(&out, record.begin)
-                elf64_u64(&out, record.range)
+                elf64_u64(out, record.begin)
+                elf64_u64(out, record.range)
             } else {
-                elf64_u32(&out, record.begin)
-                elf64_u32(&out, record.range)
+                elf64_u32(out, record.begin)
+                elf64_u32(out, record.range)
             }
-            &out.extend(eh[record.instructions..<record.end])
+            out.extend(eh[record.instructions..<record.end])
         }
-        link_frame_finish(&out, start, size)
+        link_frame_finish(out, start, size)
     }
     out
 }
@@ -2322,59 +2322,59 @@ link_eh_unloaded: fn(c: LinkContext) -> Bool Never! {
 // it: a few block copies, not a push per byte.
 link_pad_to: fn(out: &[U8], offset: Int, fill: Int) Never! {
     if offset - out.len() <= 16 {
-        loop out.len() < offset -> &out.push(U8{fill})
+        loop out.len() < offset -> out.push(U8{fill})
         return
     }
     run := [U8]{U8{fill}}
-    loop 2 * run.len() <= offset - out.len() -> &run.extend(run.copy())
-    &out.extend(run[0..<offset - out.len() - run.len()])
-    &out.extend(run)
+    loop 2 * run.len() <= offset - out.len() -> run.extend(run.copy())
+    out.extend(run[0..<offset - out.len() - run.len()])
+    out.extend(run)
 }
 
 // A program header for the bytes at address `start`, file offset `offset`.
 link_phdr: fn(out: &[U8], offset: Int, kind: Int, flags: Int, start: Int, file_size: Int, mem_size: Int, align: Int) Never! {
-    elf64_u32(&out, kind)
-    elf64_u32(&out, flags)
-    elf64_u64(&out, offset)
-    elf64_u64(&out, start)
-    elf64_u64(&out, start)
-    elf64_u64(&out, file_size)
-    elf64_u64(&out, mem_size)
-    elf64_u64(&out, align)
+    elf64_u32(out, kind)
+    elf64_u32(out, flags)
+    elf64_u64(out, offset)
+    elf64_u64(out, start)
+    elf64_u64(out, start)
+    elf64_u64(out, file_size)
+    elf64_u64(out, mem_size)
+    elf64_u64(out, align)
 }
 
 link_write: fn(c: &LinkContext, l: LinkLayout, entry: Int, pieces: &LinkPieces) -> [U8] Never! {
     out := [U8]{}
     ident: [Int]{0x7f, 0x45, 0x4c, 0x46, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0}
-    loop byte in ident -> &out.push(U8{byte})
-    elf64_u16(&out, 2)
-    elf64_u16(&out, 62)
-    elf64_u32(&out, 1)
-    elf64_u64(&out, entry)
-    elf64_u64(&out, LINK_EHDR_SIZE)
-    elf64_u64(&out, 0)
-    elf64_u32(&out, 0)
-    elf64_u16(&out, LINK_EHDR_SIZE)
-    elf64_u16(&out, LINK_PHDR_SIZE)
-    elf64_u16(&out, l.phnum)
-    elf64_u16(&out, 0)
-    elf64_u16(&out, 0)
-    elf64_u16(&out, 0)
-    link_phdr(&out, 0, 1, 4, c.base, l.r_end - c.base, l.r_end - c.base, LINK_PAGE)
+    loop byte in ident -> out.push(U8{byte})
+    elf64_u16(out, 2)
+    elf64_u16(out, 62)
+    elf64_u32(out, 1)
+    elf64_u64(out, entry)
+    elf64_u64(out, LINK_EHDR_SIZE)
+    elf64_u64(out, 0)
+    elf64_u32(out, 0)
+    elf64_u16(out, LINK_EHDR_SIZE)
+    elf64_u16(out, LINK_PHDR_SIZE)
+    elf64_u16(out, l.phnum)
+    elf64_u16(out, 0)
+    elf64_u16(out, 0)
+    elf64_u16(out, 0)
+    link_phdr(out, 0, 1, 4, c.base, l.r_end - c.base, l.r_end - c.base, LINK_PAGE)
     // Packed, the code's offset is link_write_code's, once the file before it is.
-    link_phdr(&out, if l.packed -> 0 else -> l.text_start - c.base, 1, 5, l.text_start, l.text_end - l.text_start, l.text_end - l.text_start, LINK_PAGE)
-    if l.has_rw -> link_phdr(&out, link_file_offset(c, l, LINK_DATA, l.rw_start), 1, 6, l.rw_start, l.file_end - l.rw_start, l.mem_end - l.rw_start, LINK_PAGE)
-    if l.has_tls -> link_phdr(&out, link_file_offset(c, l, LINK_TDATA, c.tls_start), 7, 4, c.tls_start, l.tdata_end - c.tls_start, c.tls_end - c.tls_start, c.tls_align)
+    link_phdr(out, if l.packed -> 0 else -> l.text_start - c.base, 1, 5, l.text_start, l.text_end - l.text_start, l.text_end - l.text_start, LINK_PAGE)
+    if l.has_rw -> link_phdr(out, link_file_offset(c, l, LINK_DATA, l.rw_start), 1, 6, l.rw_start, l.file_end - l.rw_start, l.mem_end - l.rw_start, LINK_PAGE)
+    if l.has_tls -> link_phdr(out, link_file_offset(c, l, LINK_TDATA, c.tls_start), 7, 4, c.tls_start, l.tdata_end - c.tls_start, c.tls_end - c.tls_start, c.tls_align)
     // PT_NOTE: the build-id note, its id zero until link_build_id.
-    if l.note_at != 0 -> link_phdr(&out, l.note_at - c.base, 4, 4, l.note_at, LINK_BUILD_ID_NOTE_SIZE, LINK_BUILD_ID_NOTE_SIZE, 4)
+    if l.note_at != 0 -> link_phdr(out, l.note_at - c.base, 4, 4, l.note_at, LINK_BUILD_ID_NOTE_SIZE, LINK_BUILD_ID_NOTE_SIZE, 4)
     // PT_GNU_STACK: the stack is not executable.
-    elf64_u32(&out, 0x6474e551)
-    elf64_u32(&out, 6)
-    loop _ in 0..<5 -> elf64_u64(&out, 0)
-    elf64_u64(&out, 16)
+    elf64_u32(out, 0x6474e551)
+    elf64_u32(out, 6)
+    loop _ in 0..<5 -> elf64_u64(out, 0)
+    elf64_u64(out, 16)
     base: c.base
-    if l.note_at != 0 -> link_build_id_note(&out)
-    link_write_contents(&c, &out, l, base, &pieces)
+    if l.note_at != 0 -> link_build_id_note(out)
+    link_write_contents(c, out, l, base, pieces)
     out
 }
 
@@ -2397,27 +2397,27 @@ link_write_contents: fn(c: &LinkContext, out: &[U8], l: LinkLayout, origin: Int,
     loop class in link_file_classes() {
         if class == LINK_EH {
             if !c.eh_debug {
-                link_pad_to(&out, c.eh_start - origin, 0)
-                link_emit_eh(&c, &out)
+                link_pad_to(out, c.eh_start - origin, 0)
+                link_emit_eh(c, out)
             }
             next
         }
         if class == LINK_TEXT && l.packed -> next
         shift: if class >= LINK_TDATA -> l.rw_shift else -> 0
         loop row in l.order[class] {
-            link_pad_to(&out, c.live_addr[row] - origin - shift, if class == LINK_TEXT -> 0xcc else -> 0)
-            link_place_row(&c, &out, &pieces, row)
+            link_pad_to(out, c.live_addr[row] - origin - shift, if class == LINK_TEXT -> 0xcc else -> 0)
+            link_place_row(c, out, pieces, row)
         }
         if class == LINK_RELRO {
             // The GOT follows the read-only-after-relocation data.
-            link_pad_to(&out, c.got_start - origin - shift, 0)
+            link_pad_to(out, c.got_start - origin - shift, 0)
             loop key in c.got_keys {
                 value: if key >= 0 -> link_global_addr(c, key) else -> link_got_local(c, -1 - key)
-                elf64_u64(&out, value)
+                elf64_u64(out, value)
             }
         }
     }
-    if l.has_rw -> link_pad_to(&out, l.file_end - origin - l.rw_shift, 0)
+    if l.has_rw -> link_pad_to(out, l.file_end - origin - l.rw_shift, 0)
 }
 
 // A packed layout's code, appended to the finished rest of the image
@@ -2426,17 +2426,17 @@ link_write_contents: fn(c: &LinkContext, out: &[U8], l: LinkLayout, origin: Int,
 link_write_code: fn(c: &LinkContext, image: &[U8], l: LinkLayout, pieces: &LinkPieces) Never! {
     if !l.packed -> return
     at: link_align(image.len(), LINK_PAGE)
-    link_pad_to(&image, at, 0)
+    link_pad_to(image, at, 0)
     loop row in l.order[LINK_TEXT] {
-        link_pad_to(&image, at + c.live_addr[row] - l.text_start, 0xcc)
-        link_place_row(&c, &image, &pieces, row)
+        link_pad_to(image, at + c.live_addr[row] - l.text_start, 0xcc)
+        link_place_row(c, image, pieces, row)
     }
     // p_offset of the second program header, the code's.
-    link_put64(&image, LINK_EHDR_SIZE + LINK_PHDR_SIZE + 8, at)
+    link_put64(image, LINK_EHDR_SIZE + LINK_PHDR_SIZE + 8, at)
     shoff: link_debug_le(image, 40, 8)
     loop k in 1..<link_debug_le(image, 60, 2) {
         header: shoff + 64 * k
-        if link_debug_le(image, header + 4, 4) == LINK_SHT_PROGBITS && link_debug_le(image, header + 16, 8) == l.text_start -> link_put64(&image, header + 24, at)
+        if link_debug_le(image, header + 4, 4) == LINK_SHT_PROGBITS && link_debug_le(image, header + 16, 8) == l.text_start -> link_put64(image, header + 24, at)
     }
 }
 
@@ -2458,12 +2458,12 @@ link_no_pieces: fn() -> LinkPieces Never! {
 link_place_row: fn(c: &LinkContext, out: &[U8], pieces: &LinkPieces, row: Int) Never! {
     if pieces.bytes.len() == 0 {
         errors := [String]{}
-        link_emit_section(c, &errors, &out, row)
-        &c.errors.extend(errors)
+        link_emit_section(c, errors, out, row)
+        c.errors.extend(errors)
         return
     }
-    &out.extend(pieces.bytes[row])
-    &c.errors.extend(pieces.errors[row])
+    out.extend(pieces.bytes[row])
+    c.errors.extend(pieces.errors[row])
     pieces.bytes[row] = [U8]{}
 }
 
@@ -2473,9 +2473,9 @@ link_place_row: fn(c: &LinkContext, out: &[U8], pieces: &LinkPieces, row: Int) N
 link_emitted_rows: fn(l: LinkLayout, debug: LinkDebug) -> [Int] Never! {
     rows := [Int]{}
     loop class in link_file_classes() {
-        if class != LINK_EH -> &rows.extend(l.order[class])
+        if class != LINK_EH -> rows.extend(l.order[class])
     }
-    loop group in 0..<debug.rows.len() -> &rows.extend(debug.rows[group])
+    loop group in 0..<debug.rows.len() -> rows.extend(debug.rows[group])
     rows
 }
 
@@ -2519,39 +2519,39 @@ LinkEmitted: struct {
 // layout, so each piece is the bytes the row has in place, and the reports
 // keep their row. One admitted thread builds no pieces: the image writer
 // then emits every row in place, as it would anyway.
-link_emit_pieces: fn(c: ^LinkContext, rows: [Int], threads: CompilerThreads) -> LinkEmitted Never! {
+link_emit_pieces: fn(c: &&LinkContext, rows: [Int], threads: CompilerThreads) -> LinkEmitted Never! {
     weights := [Int]{}
     total := 0
     loop row in rows {
         weight: link_row_weight(c, row)
-        &weights.push(weight)
+        weights.push(weight)
         total += weight
     }
     workers: compiler_threads_admit(threads, rows.len(), total, LINK_EMIT_MIN_WEIGHT_PER_THREAD, 0, 0)
-    if workers <= 1 -> return LinkEmitted{context: ^c, pieces: link_no_pieces()}
+    if workers <= 1 -> return LinkEmitted{context: c.move(), pieces: link_no_pieces()}
     bounds: compiler_threads_partition(weights, workers)
     live: c.live_secs.len()
-    inputs: shared LinkEmitInputs{contexts: [LinkContext]{^c}, rows: rows}
+    inputs: shared LinkEmitInputs{contexts: [LinkContext]{c.move()}, rows: rows}
     parts := [Shared<LinkEmitPart>]{}
-    loop part in 0..<(bounds.len() - 1) -> &parts.push(shared LinkEmitPart{start: bounds[part], end: bounds[part + 1], bytes: [[U8]]{}, errors: [[String]]{}})
+    loop part in 0..<(bounds.len() - 1) -> parts.push(shared LinkEmitPart{start: bounds[part], end: bounds[part + 1], bytes: [[U8]]{}, errors: [[String]]{}})
     _ := link_emit_parts(inputs, parts, 0) ?? panic("the link emitting threads failed")
     pieces := LinkPieces{bytes: [[U8]]{}, errors: [[String]]{}}
     loop _ in 0..<live {
-        &pieces.bytes.push([U8]{})
-        &pieces.errors.push([String]{})
+        pieces.bytes.push([U8]{})
+        pieces.errors.push([String]{})
     }
     loop part in parts {
         held := part.guard_edit()
         index := held.value.end
         loop index > held.value.start {
             index -= 1
-            pieces.bytes[rows[index]] = &held.value.bytes.pop() ?? panic("a link emitting thread lost a piece")
-            pieces.errors[rows[index]] = &held.value.errors.pop() ?? panic("a link emitting thread lost its reports")
+            pieces.bytes[rows[index]] = held.value.bytes.pop() ?? panic("a link emitting thread lost a piece")
+            pieces.errors[rows[index]] = held.value.errors.pop() ?? panic("a link emitting thread lost its reports")
         }
     }
     back := inputs.guard_edit()
-    context := &back.value.contexts.pop() ?? panic("the link emitting threads lost the link context")
-    LinkEmitted{context: ^context, pieces: ^pieces}
+    context := back.value.contexts.pop() ?? panic("the link emitting threads lost the link context")
+    LinkEmitted{context: context.move(), pieces: pieces.move()}
 }
 
 // Builds `parts[from..]`, one task per part and the last part on this
@@ -2574,9 +2574,9 @@ link_emit_part: fn(inputs: Shared<LinkEmitInputs>, part: Shared<LinkEmitPart>) -
     loop index in permit.value.start..<permit.value.end {
         piece := [U8]{}
         errors := [String]{}
-        link_emit_section(reads.value.contexts[0], &errors, &piece, reads.value.rows[index])
-        &permit.value.bytes.push(^piece)
-        &permit.value.errors.push(^errors)
+        link_emit_section(reads.value.contexts[0], errors, piece, reads.value.rows[index])
+        permit.value.bytes.push(piece)
+        permit.value.errors.push(errors)
     }
     1
 }
@@ -2648,20 +2648,20 @@ link_debug_sections: fn(c: &LinkContext, debug_info: Bool) -> LinkDebug Never! {
             group := groups.get(name) ?? -1
             if group < 0 {
                 group = debug.names.len()
-                &groups.add(name, group).drop("checked absent above")
-                &debug.names.push(name)
-                &debug.rows.push([Int]{})
-                &debug.sizes.push(0)
+                groups.add(name, group).drop("checked absent above")
+                debug.names.push(name)
+                debug.rows.push([Int]{})
+                debug.sizes.push(0)
             }
             offset: link_align(debug.sizes[group], link_sec_align(c, obj, s))
             row: c.live_secs.len()
             c.live[s] = row
-            &c.live_secs.push(s)
-            &c.live_class.push(LINK_DEBUG)
-            &c.live_addr.push(offset)
-            &c.rel_base.push(c.rel_slot.len())
-            loop _ in 0..<link_rel_count(c, obj, s) -> &c.rel_slot.push(-1)
-            &debug.rows[group].push(row)
+            c.live_secs.push(s)
+            c.live_class.push(LINK_DEBUG)
+            c.live_addr.push(offset)
+            c.rel_base.push(c.rel_slot.len())
+            loop _ in 0..<link_rel_count(c, obj, s) -> c.rel_slot.push(-1)
+            debug.rows[group].push(row)
             debug.sizes[group] = offset + link_sec_size(c, obj, s)
         }
     }
@@ -2688,12 +2688,12 @@ link_symbol_header: fn(c: LinkContext, class_headers: [Int], s: Int) -> Int Neve
 }
 
 link_image_symbol: fn(symtab: &[U8], strtab: &[U8], name: String, info: Int, header: Int, value: Int, size: Int) Never! {
-    elf64_u32(&symtab, elf64_string(&strtab, name))
-    &symtab.push(U8{info})
-    &symtab.push(U8{0})
-    elf64_u16(&symtab, header)
-    elf64_u64(&symtab, value)
-    elf64_u64(&symtab, size)
+    elf64_u32(symtab, elf64_string(strtab, name))
+    symtab.push(U8{info})
+    symtab.push(U8{0})
+    elf64_u16(symtab, header)
+    elf64_u64(symtab, value)
+    elf64_u64(symtab, size)
 }
 
 // Append the debug sections, the symbol table and the section headers to
@@ -2704,8 +2704,8 @@ link_image_symbol: fn(symtab: &[U8], strtab: &[U8], name: String, info: Int, hea
 link_write_sections: fn(c: &LinkContext, out: &[U8], l: LinkLayout, debug: LinkDebug, pieces: &LinkPieces, side: Bool) Never! {
     headers := [LinkSectionHeader]{}
     class_headers := [Int]{}
-    loop _ in 0..<LINK_CLASSES -> &class_headers.push(-1)
-    if side -> &headers.push(LinkSectionHeader{name: ".note.gnu.build-id", kind: LINK_SHT_NOTE, flags: 2, addr: l.note_at, offset: LINK_EHDR_SIZE, size: LINK_BUILD_ID_NOTE_SIZE, link: 0, info: 0, align: 4, entry_size: 0})
+    loop _ in 0..<LINK_CLASSES -> class_headers.push(-1)
+    if side -> headers.push(LinkSectionHeader{name: ".note.gnu.build-id", kind: LINK_SHT_NOTE, flags: 2, addr: l.note_at, offset: LINK_EHDR_SIZE, size: LINK_BUILD_ID_NOTE_SIZE, link: 0, info: 0, align: 4, entry_size: 0})
     names: [String]{".rodata", ".eh_frame", ".text", ".tdata", ".tbss", ".preinit_array", ".init_array", ".fini_array", ".data.rel.ro", ".data", ".bss"}
     kinds: [Int]{LINK_SHT_PROGBITS, LINK_SHT_PROGBITS, LINK_SHT_PROGBITS, LINK_SHT_PROGBITS, LINK_SHT_NOBITS, LINK_SHT_PREINIT_ARRAY, LINK_SHT_INIT_ARRAY, LINK_SHT_FINI_ARRAY, LINK_SHT_PROGBITS, LINK_SHT_PROGBITS, LINK_SHT_NOBITS}
     // ALLOC, plus EXECINSTR for code, WRITE for data, TLS for thread data.
@@ -2719,32 +2719,32 @@ link_write_sections: fn(c: &LinkContext, out: &[U8], l: LinkLayout, debug: LinkD
         }
         if extent[1] > extent[0] {
             class_headers[class] = headers.len() + 1
-            &headers.push(LinkSectionHeader{name: names[class], kind: if side -> LINK_SHT_NOBITS else -> kinds[class], flags: flags[class], addr: extent[0], offset: link_file_offset(c, l, class, extent[0]), size: extent[1] - extent[0], link: 0, info: 0, align: if class == LINK_TEXT -> 16 else -> 8, entry_size: 0})
+            headers.push(LinkSectionHeader{name: names[class], kind: if side -> LINK_SHT_NOBITS else -> kinds[class], flags: flags[class], addr: extent[0], offset: link_file_offset(c, l, class, extent[0]), size: extent[1] - extent[0], link: 0, info: 0, align: if class == LINK_TEXT -> 16 else -> 8, entry_size: 0})
         }
         // The GOT follows the read-only-after-relocation data.
         if class == LINK_RELRO && c.got_keys.len() > 0 {
-            &headers.push(LinkSectionHeader{name: ".got", kind: if side -> LINK_SHT_NOBITS else -> LINK_SHT_PROGBITS, flags: 3, addr: c.got_start, offset: link_file_offset(c, l, LINK_RELRO, c.got_start), size: 8 * c.got_keys.len(), link: 0, info: 0, align: 8, entry_size: 8})
+            headers.push(LinkSectionHeader{name: ".got", kind: if side -> LINK_SHT_NOBITS else -> LINK_SHT_PROGBITS, flags: 3, addr: c.got_start, offset: link_file_offset(c, l, LINK_RELRO, c.got_start), size: 8 * c.got_keys.len(), link: 0, info: 0, align: 8, entry_size: 8})
         }
     }
-    sections: link_debug_bytes(&c, debug, &pieces, l.text_start, l.text_end)
+    sections: link_debug_bytes(c, debug, pieces, l.text_start, l.text_end)
     loop (group, name) in debug.names {
         start: out.len()
-        &out.extend(sections[group])
-        &headers.push(LinkSectionHeader{name: name, kind: LINK_SHT_PROGBITS, flags: 0, addr: 0, offset: start, size: sections[group].len(), link: 0, info: 0, align: 1, entry_size: 0})
+        out.extend(sections[group])
+        headers.push(LinkSectionHeader{name: name, kind: LINK_SHT_PROGBITS, flags: 0, addr: 0, offset: start, size: sections[group].len(), link: 0, info: 0, align: 1, entry_size: 0})
     }
     if c.eh_debug {
-        frame: link_debug_frame(&c)
-        elf64_pad(&out, 4)
+        frame: link_debug_frame(c)
+        elf64_pad(out, 4)
         start: out.len()
-        &out.extend(frame)
-        &headers.push(LinkSectionHeader{name: ".debug_frame", kind: LINK_SHT_PROGBITS, flags: 0, addr: 0, offset: start, size: frame.len(), link: 0, info: 0, align: 4, entry_size: 0})
+        out.extend(frame)
+        headers.push(LinkSectionHeader{name: ".debug_frame", kind: LINK_SHT_PROGBITS, flags: 0, addr: 0, offset: start, size: frame.len(), link: 0, info: 0, align: 4, entry_size: 0})
     }
 
     // Symbols: every named local function and object of a loaded section,
     // then the globals defined in one.
     strtab := [U8]{U8{0}}
     symtab := [U8]{}
-    loop _ in 0..<24 -> &symtab.push(U8{0})
+    loop _ in 0..<24 -> symtab.push(U8{0})
     loop obj in 0..<c.obj_name.len() {
         b: c.obj_buffer[obj].copy()
         loop k in 1..<c.obj_first_global[obj] {
@@ -2756,7 +2756,7 @@ link_write_sections: fn(c: &LinkContext, out: &[U8], l: LinkLayout, debug: LinkD
             s: link_sym_shndx(c, obj, k)
             header: link_symbol_header(c, class_headers, s)
             if header < 0 -> next
-            link_image_symbol(&symtab, &strtab, link_cstr(c.bufs, b, c.obj_strtab[obj] + name_offset), info, header, link_sec_addr(c, s) + link_u64(c.bufs, b, at + 8), link_u64(c.bufs, b, at + 16))
+            link_image_symbol(symtab, strtab, link_cstr(c.bufs, b, c.obj_strtab[obj] + name_offset), info, header, link_sec_addr(c, s) + link_u64(c.bufs, b, at + 8), link_u64(c.bufs, b, at + 16))
         }
     }
     first_global: symtab.len().div_euclid(24)
@@ -2769,27 +2769,27 @@ link_write_sections: fn(c: &LinkContext, out: &[U8], l: LinkLayout, debug: LinkD
         if class == LINK_TDATA || class == LINK_TBSS -> next
         bind: if c.g_weak_def[g] -> 2 else -> 1
         kind: if class == LINK_TEXT -> 2 else -> 1
-        link_image_symbol(&symtab, &strtab, c.g_name[g], (bind << 4).bit_or(kind), header, link_global_addr(c, g), c.g_size[g])
+        link_image_symbol(symtab, strtab, c.g_name[g], (bind << 4).bit_or(kind), header, link_global_addr(c, g), c.g_size[g])
     }
-    elf64_pad(&out, 8)
+    elf64_pad(out, 8)
     symtab_at: out.len()
-    &out.extend(symtab)
+    out.extend(symtab)
     strtab_index: headers.len() + 2
-    &headers.push(LinkSectionHeader{name: ".symtab", kind: LINK_SHT_SYMTAB, flags: 0, addr: 0, offset: symtab_at, size: symtab.len(), link: strtab_index, info: first_global, align: 8, entry_size: 24})
+    headers.push(LinkSectionHeader{name: ".symtab", kind: LINK_SHT_SYMTAB, flags: 0, addr: 0, offset: symtab_at, size: symtab.len(), link: strtab_index, info: first_global, align: 8, entry_size: 24})
     strtab_at: out.len()
-    &out.extend(strtab)
-    &headers.push(LinkSectionHeader{name: ".strtab", kind: 3, flags: 0, addr: 0, offset: strtab_at, size: strtab.len(), link: 0, info: 0, align: 1, entry_size: 0})
-    shoff: link_write_section_headers(&out, 0, headers)
-    link_elf_sections(&out, shoff, headers.len() + 2)
+    out.extend(strtab)
+    headers.push(LinkSectionHeader{name: ".strtab", kind: 3, flags: 0, addr: 0, offset: strtab_at, size: strtab.len(), link: 0, info: 0, align: 1, entry_size: 0})
+    shoff: link_write_section_headers(out, 0, headers)
+    link_elf_sections(out, shoff, headers.len() + 2)
 }
 
 // The build-id note with a zero id, appended to `out`.
 link_build_id_note: fn(out: &[U8]) Never! {
-    elf64_u32(&out, 4)
-    elf64_u32(&out, LINK_BUILD_ID_SIZE)
-    elf64_u32(&out, 3)
-    loop byte in ([Int]{0x47, 0x4e, 0x55, 0}) -> &out.push(U8{byte})
-    loop _ in 0..<LINK_BUILD_ID_SIZE -> &out.push(U8{0})
+    elf64_u32(out, 4)
+    elf64_u32(out, LINK_BUILD_ID_SIZE)
+    elf64_u32(out, 3)
+    loop byte in ([Int]{0x47, 0x4e, 0x55, 0}) -> out.push(U8{byte})
+    loop _ in 0..<LINK_BUILD_ID_SIZE -> out.push(U8{0})
 }
 
 // A split image's section headers, appended to it: the build-id note's
@@ -2797,8 +2797,8 @@ link_build_id_note: fn(out: &[U8]) Never! {
 // side debug file.
 link_image_note_section: fn(image: &[U8], l: LinkLayout, base: Int) Never! {
     note: LinkSectionHeader{name: ".note.gnu.build-id", kind: LINK_SHT_NOTE, flags: 2, addr: l.note_at, offset: l.note_at - base, size: LINK_BUILD_ID_NOTE_SIZE, link: 0, info: 0, align: 4, entry_size: 0}
-    shoff: link_write_section_headers(&image, 0, [LinkSectionHeader]{note})
-    link_elf_sections(&image, shoff, 3)
+    shoff: link_write_section_headers(image, 0, [LinkSectionHeader]{note})
+    link_elf_sections(image, shoff, 3)
 }
 
 // The side debug file of the image `image`, laid out as `l` (whose build-id
@@ -2807,10 +2807,10 @@ link_image_note_section: fn(image: &[U8], l: LinkLayout, base: Int) Never! {
 link_debug_file: fn(c: &LinkContext, image: [U8], l: LinkLayout, debug: LinkDebug, pieces: &LinkPieces) -> [U8] Never! {
     note: l.note_at - c.base
     out := image[0..<LINK_EHDR_SIZE]
-    link_put64(&out, 32, 0)
+    link_put64(out, 32, 0)
     loop at in 54..<58 -> out[at] = U8{0}
-    &out.extend(image[note..<note + LINK_BUILD_ID_NOTE_SIZE])
-    link_write_sections(&c, &out, l, debug, &pieces, true)
+    out.extend(image[note..<note + LINK_BUILD_ID_NOTE_SIZE])
+    link_write_sections(c, out, l, debug, pieces, true)
     out
 }
 
@@ -2820,13 +2820,13 @@ link_debug_file: fn(c: &LinkContext, image: [U8], l: LinkLayout, debug: LinkDebu
 // offset `note`). Returns the id.
 link_build_id: fn(image: &[U8], side: &[U8], note: Int) -> [U8] Never! {
     digests := sha256_bytes(image[0..<image.len()])
-    &digests.extend(sha256_bytes(side[0..<side.len()]))
+    digests.extend(sha256_bytes(side[0..<side.len()]))
     hash: sha256_bytes(digests[0..<digests.len()])
     id := [U8]{}
     loop k in 0..<LINK_BUILD_ID_SIZE {
         image[note + 16 + k] = hash[k]
         side[LINK_EHDR_SIZE + 16 + k] = hash[k]
-        &id.push(hash[k])
+        id.push(hash[k])
     }
     id
 }
@@ -2838,26 +2838,26 @@ link_build_id: fn(image: &[U8], side: &[U8], note: Int) -> [U8] Never! {
 link_write_section_headers: fn(out: &[U8], origin: Int, headers: [LinkSectionHeader]) -> Int Never! {
     shstrtab := [U8]{U8{0}}
     name_offsets := [Int]{}
-    loop header in headers -> &name_offsets.push(elf64_string(&shstrtab, header.name))
-    names_offset: elf64_string(&shstrtab, ".shstrtab")
+    loop header in headers -> name_offsets.push(elf64_string(shstrtab, header.name))
+    names_offset: elf64_string(shstrtab, ".shstrtab")
     shstrtab_at: origin + out.len()
-    &out.extend(shstrtab)
-    elf64_pad(&out, 8)
+    out.extend(shstrtab)
+    elf64_pad(out, 8)
     shoff: origin + out.len()
-    loop _ in 0..<64 -> &out.push(U8{0})
+    loop _ in 0..<64 -> out.push(U8{0})
     loop (index, header) in headers {
-        elf64_u32(&out, name_offsets[index])
-        elf64_u32(&out, header.kind)
-        elf64_u64(&out, header.flags)
-        elf64_u64(&out, header.addr)
-        elf64_u64(&out, header.offset)
-        elf64_u64(&out, header.size)
-        elf64_u32(&out, header.link)
-        elf64_u32(&out, header.info)
-        elf64_u64(&out, header.align)
-        elf64_u64(&out, header.entry_size)
+        elf64_u32(out, name_offsets[index])
+        elf64_u32(out, header.kind)
+        elf64_u64(out, header.flags)
+        elf64_u64(out, header.addr)
+        elf64_u64(out, header.offset)
+        elf64_u64(out, header.size)
+        elf64_u32(out, header.link)
+        elf64_u32(out, header.info)
+        elf64_u64(out, header.align)
+        elf64_u64(out, header.entry_size)
     }
-    elf64_section_header(&out, names_offset, 3, 0, shstrtab_at, shstrtab.len(), 0, 0, 1, 0)
+    elf64_section_header(out, names_offset, 3, 0, shstrtab_at, shstrtab.len(), 0, 0, 1, 0)
     shoff
 }
 
@@ -2865,7 +2865,7 @@ link_write_section_headers: fn(out: &[U8], origin: Int, headers: [LinkSectionHea
 // `shoff`, the name table's last: e_shoff, e_shentsize, e_shnum and
 // e_shstrndx.
 link_elf_sections: fn(elf: &[U8], shoff: Int, count: Int) Never! {
-    link_put64(&elf, 40, shoff)
+    link_put64(elf, 40, shoff)
     fields: [Int]{64, count, count - 1}
     loop (index, value) in fields {
         elf[58 + 2 * index] = U8{value.bit_and(255)}
@@ -2884,17 +2884,17 @@ link_load_inputs: fn(c: &LinkContext, names: [String]) Never! {
     loop b in 0..<count {
         size: c.bufs[b].len()
         if size < 8 || link_u8(c.bufs, b, 0) != 0x21 {
-            _ := link_load_object(&c, b, 0, size, names[b])
+            _ := link_load_object(c, b, 0, size, names[b])
             next
         }
         archive: link_read_archive(names[b], c.bufs[b])
-        loop error in archive.errors -> link_error(&c, error)
+        loop error in archive.errors -> link_error(c, error)
         index: c.archives.len()
         loop (k, symbol) in archive.symbol_names {
-            if c.lookup.get(symbol) == None -> &c.lookup.add(symbol, index * LINK_MEMBER_SCALE + archive.symbol_members[k]).drop("checked absent above")
+            if c.lookup.get(symbol) == None -> c.lookup.add(symbol, index * LINK_MEMBER_SCALE + archive.symbol_members[k]).drop("checked absent above")
         }
-        &c.archives.push(archive)
-        &c.archive_buffer.push(b)
+        c.archives.push(archive)
+        c.archive_buffer.push(b)
     }
 }
 
@@ -2907,13 +2907,13 @@ link_resolve_program: fn(c: &LinkContext) -> Int Never! {
     if c.g_index.get("_start") == .Val(g) -> has_start = c.g_kind[g] != LINK_G_NONE
     if !has_start && c.lookup.get("__libc_start_main") != None {
         frames: c.lookup.get("__register_frame_info") != None
-        link_load_synth(&c, link_startup(frames), "<linker startup>")
+        link_load_synth(c, link_startup(frames), "<linker startup>")
     }
-    entry_g: link_intern(&c, "_start")
-    link_reference(&c, entry_g, false)
+    entry_g: link_intern(c, "_start")
+    link_reference(c, entry_g, false)
     loop {
-        link_resolve(&c)
-        if !link_shims(&c) -> break
+        link_resolve(c)
+        if !link_shims(c) -> break
     }
     entry_g
 }
@@ -2922,7 +2922,7 @@ link_resolve_program: fn(c: &LinkContext) -> Int Never! {
 link_entry_section: fn(c: &LinkContext, entry_g: Int) -> Int Never! {
     entry_final: link_final(c, entry_g)
     if c.g_kind[entry_final] != LINK_G_FILE || c.g_section[entry_final] < 0 {
-        link_error(&c, "nothing defines the entry point `_start` (no object defines it and the archives provide no `__libc_start_main`)")
+        link_error(c, "nothing defines the entry point `_start` (no object defines it and the archives provide no `__libc_start_main`)")
         return -1
     }
     c.g_section[entry_final]
@@ -2980,8 +2980,8 @@ X64ResidentLinkResult: struct {
     debug_file: [U8]
     build_id: [U8]
 }
-link_resident_failure: fn(errors: ^[String]) -> X64ResidentLinkResult Never! {
-    X64ResidentLinkResult{image: X64ExecutableResult{bytes: [U8]{}, errors: ^errors}, facts: None, debug_file: [U8]{}, build_id: [U8]{}}
+link_resident_failure: fn(errors: &&[String]) -> X64ResidentLinkResult Never! {
+    X64ResidentLinkResult{image: X64ExecutableResult{bytes: [U8]{}, errors: errors.move()}, facts: None, debug_file: [U8]{}, build_id: [U8]{}}
 }
 
 // Link `bufs` into a static executable. Each buffer is a relocatable object
@@ -2993,9 +2993,9 @@ link_resident_failure: fn(errors: ^[String]) -> X64ResidentLinkResult Never! {
 // runtime pack starts, none of whose kept code needs libc's startup, starts
 // at its own (link_owned_fits). The ELF header is loaded at `base`
 // (LINK_BASE, or LINK_RUN_BASE for Image/Loader.jet).
-x64_link_executable: fn(names: [String], bufs: ^[[U8]], base: Int, threads: CompilerThreads, debug_info: Bool) -> X64ExecutableResult Never! {
-    linked := link_executable_image(names, ^bufs, base, None, threads, debug_info, false)
-    ^linked.image
+x64_link_executable: fn(names: [String], bufs: &&[[U8]], base: Int, threads: CompilerThreads, debug_info: Bool) -> X64ExecutableResult Never! {
+    linked := link_executable_image(names, bufs, base, None, threads, debug_info, false)
+    linked.image.move()
 }
 
 // A static executable whose debug information is in a side file.
@@ -3015,9 +3015,9 @@ X64SplitExecutableResult: struct {
 
 // x64_link_executable with the DWARF, `.symtab` and section headers in a
 // side debug file instead of the executable's tail.
-x64_link_executable_split: fn(names: [String], bufs: ^[[U8]], base: Int, threads: CompilerThreads) -> X64SplitExecutableResult Never! {
-    linked := link_executable_image(names, ^bufs, base, None, threads, true, true)
-    X64SplitExecutableResult{bytes: ^linked.image.bytes, debug_file: ^linked.debug_file, build_id: ^linked.build_id, errors: ^linked.image.errors}
+x64_link_executable_split: fn(names: [String], bufs: &&[[U8]], base: Int, threads: CompilerThreads) -> X64SplitExecutableResult Never! {
+    linked := link_executable_image(names, bufs, base, None, threads, true, true)
+    X64SplitExecutableResult{bytes: linked.image.bytes.move(), debug_file: linked.debug_file.move(), build_id: linked.build_id.move(), errors: linked.image.errors.move()}
 }
 
 // The single canonical executable engine. No request means no export census,
@@ -3025,53 +3025,53 @@ x64_link_executable_split: fn(names: [String], bufs: ^[[U8]], base: Int, threads
 // `split` writes the debug tail to a side file (x64_link_executable_split),
 // and the image's fault report gives addresses under the build id that names
 // it.
-link_executable_image: fn(names: [String], bufs: ^[[U8]], base: Int, request: ^X64ResidentLinkRequest?, threads: CompilerThreads, debug_info: Bool, split: Bool) -> X64ResidentLinkResult Never! {
-    c := link_context(^bufs, base)
+link_executable_image: fn(names: [String], bufs: &&[[U8]], base: Int, request: &&X64ResidentLinkRequest?, threads: CompilerThreads, debug_info: Bool, split: Bool) -> X64ResidentLinkResult Never! {
+    c := link_context(bufs, base)
     if split -> c.fault_report = LinkFaultReport.Addresses
     if request == .Val(wanted) {
-        if names.len() != c.bufs.len() || wanted.runtime_input < 0 || wanted.runtime_input >= names.len() -> return link_resident_failure(^[String]{"resident runtime input is outside the actual link inputs"})
+        if names.len() != c.bufs.len() || wanted.runtime_input < 0 || wanted.runtime_input >= names.len() -> return link_resident_failure([String]{"resident runtime input is outside the actual link inputs"})
     }
-    link_load_inputs(&c, names)
-    if c.errors.len() > 0 -> return link_resident_failure(^c.errors)
+    link_load_inputs(c, names)
+    if c.errors.len() > 0 -> return link_resident_failure(c.errors.move())
     if request == .Val(wanted) {
         seen := [String:Bool]{}
         loop symbol in wanted.callable_exports {
-            if symbol == "" || seen.get(symbol) != None -> return link_resident_failure(^[String]{"empty or duplicate resident runtime export `{symbol}`"})
-            &seen.add(symbol, true).drop("checked absent above")
-            global: link_intern(&c, symbol)
-            link_reference(&c, global, false)
+            if symbol == "" || seen.get(symbol) != None -> return link_resident_failure([String]{"empty or duplicate resident runtime export `{symbol}`"})
+            seen.add(symbol, true).drop("checked absent above")
+            global: link_intern(c, symbol)
+            link_reference(c, global, false)
         }
     }
-    entry_g := link_resolve_program(&c)
-    entry_section := link_entry_section(&c, entry_g)
+    entry_g := link_resolve_program(c)
+    entry_section := link_entry_section(c, entry_g)
     // A program none of whose code needs libc's startup starts at its own.
     if entry_section >= 0 && request == .None && link_owned_fits(c, entry_g) {
-        link_load_synth(&c, link_owned_startup(), "<linker owned startup>")
-        entry_g = link_intern(&c, LINK_OWNED_START)
-        entry_section = link_entry_section(&c, entry_g)
+        link_load_synth(c, link_owned_startup(), "<linker owned startup>")
+        entry_g = link_intern(c, LINK_OWNED_START)
+        entry_section = link_entry_section(c, entry_g)
     }
-    if entry_section < 0 || (request != .None && c.errors.len() > 0) -> return link_resident_failure(^c.errors)
+    if entry_section < 0 || (request != .None && c.errors.len() > 0) -> return link_resident_failure(c.errors.move())
     entries := [Int]{entry_section}
     if request == .Val(wanted) {
         loop symbol in wanted.callable_exports {
-            global: c.g_index.get(symbol) ?? return link_resident_failure(^[String]{"unresolved resident runtime export `{symbol}`"})
+            global: c.g_index.get(symbol) ?? return link_resident_failure([String]{"unresolved resident runtime export `{symbol}`"})
             final: link_final(c, global)
-            if c.g_kind[final] != LINK_G_FILE || c.g_section[final] < 0 -> return link_resident_failure(^[String]{"resident export `{symbol}` is not a concrete file definition"})
+            if c.g_kind[final] != LINK_G_FILE || c.g_section[final] < 0 -> return link_resident_failure([String]{"resident export `{symbol}` is not a concrete file definition"})
             object: c.g_obj[final]
             section: c.g_section[final]
-            if c.obj_buffer[object] != wanted.runtime_input -> return link_resident_failure(^[String]{"resident export `{symbol}` is not defined by the designated runtime input"})
-            if (link_sec_flags(c, object, section).bit_and(4)) == 0 -> return link_resident_failure(^[String]{"resident export `{symbol}` is not executable code"})
+            if c.obj_buffer[object] != wanted.runtime_input -> return link_resident_failure([String]{"resident export `{symbol}` is not defined by the designated runtime input"})
+            if (link_sec_flags(c, object, section).bit_and(4)) == 0 -> return link_resident_failure([String]{"resident export `{symbol}` is not executable code"})
             section_size: link_sec_size(c, object, section)
             offset: c.g_value[final]
             size: c.g_size[final]
-            if offset < 0 || offset >= section_size || size < 0 || size > section_size - offset -> return link_resident_failure(^[String]{"resident export `{symbol}` has an out-of-section extent"})
-            &entries.push(section)
+            if offset < 0 || offset >= section_size || size < 0 || size > section_size - offset -> return link_resident_failure([String]{"resident export `{symbol}` has an out-of-section extent"})
+            entries.push(section)
         }
     }
     linker_names := [String:Bool]{}
-    loop name in link_linker_names() -> &linker_names.add(name, true).drop("names are unique")
-    link_collect(&c, entries, linker_names)
-    if c.errors.len() > 0 -> return link_resident_failure(^c.errors)
+    loop name in link_linker_names() -> linker_names.add(name, true).drop("names are unique")
+    link_collect(c, entries, linker_names)
+    if c.errors.len() > 0 -> return link_resident_failure(c.errors.move())
     // A split link moves the unwind tables to the side debug file when
     // nothing reads them at run time. An image that keeps its debug tail
     // keeps `.eh_frame` loaded: there the move would add the whole table to
@@ -3079,59 +3079,59 @@ link_executable_image: fn(names: [String], bufs: ^[[U8]], base: Int, request: ^X
     c.eh_debug = request == .None && split && link_eh_unloaded(c)
     // A plain executable's layout is packed (LinkLayout); a resident one's
     // segments keep their file offsets at their addresses.
-    layout: link_layout(&c, split, request == .None)
+    layout: link_layout(c, split, request == .None)
     if request != .None {
-        if layout.text_start <= 0 || layout.text_end < layout.text_start || layout.mem_end > 9223372036854775807 -> return link_resident_failure(^[String]{"resident executable layout is outside the native address range"})
+        if layout.text_start <= 0 || layout.text_end < layout.text_start || layout.mem_end > 9223372036854775807 -> return link_resident_failure([String]{"resident executable layout is outside the native address range"})
     }
     startup: link_has_startup(c)
-    link_define_names(&c, layout, startup)
+    link_define_names(c, layout, startup)
     entry: link_global_addr(c, entry_g)
     // The unloaded debug tail (`.debug_*` under `debug_info`, `.symtab`,
     // section headers) follows the loaded data, so profilers and debuggers
     // name the code; under `split` it is the side debug file, which the
     // image's build id names. A packed layout's code comes last.
-    debug: link_debug_sections(&c, debug_info)
+    debug: link_debug_sections(c, debug_info)
     // The sections' bytes, relocated on the threads, then written in order.
-    emitted := link_emit_pieces(^c, link_emitted_rows(layout, debug), threads)
-    c = ^emitted.context
-    image := link_write(&c, layout, entry, &emitted.pieces)
+    emitted := link_emit_pieces(c, link_emitted_rows(layout, debug), threads)
+    c = emitted.context.move()
+    image := link_write(c, layout, entry, emitted.pieces)
     debug_file := [U8]{}
     build_id := [U8]{}
     if split {
-        debug_file = link_debug_file(&c, image, layout, debug, &emitted.pieces)
-        link_image_note_section(&image, layout, c.base)
-        link_write_code(&c, &image, layout, &emitted.pieces)
-        build_id = link_build_id(&image, &debug_file, layout.note_at - c.base)
+        debug_file = link_debug_file(c, image, layout, debug, emitted.pieces)
+        link_image_note_section(image, layout, c.base)
+        link_write_code(c, image, layout, emitted.pieces)
+        build_id = link_build_id(image, debug_file, layout.note_at - c.base)
     } else {
-        link_write_sections(&c, &image, layout, debug, &emitted.pieces, false)
-        link_write_code(&c, &image, layout, &emitted.pieces)
+        link_write_sections(c, image, layout, debug, emitted.pieces, false)
+        link_write_code(c, image, layout, emitted.pieces)
     }
-    if c.errors.len() > 0 -> return link_resident_failure(^c.errors)
+    if c.errors.len() > 0 -> return link_resident_failure(c.errors.move())
     facts := X64ResidentLinkFacts?{None}
     if request == .Val(wanted) {
         symbols := [X64ResidentSymbol]{}
         loop symbol in wanted.callable_exports {
-            global: c.g_index.get(symbol) ?? return link_resident_failure(^[String]{"resident runtime export disappeared after resolution"})
+            global: c.g_index.get(symbol) ?? return link_resident_failure([String]{"resident runtime export disappeared after resolution"})
             final: link_final(c, global)
             section: c.g_section[final]
             row: link_live_row(c, section)
-            if row < 0 || c.live_class[row] != LINK_TEXT -> return link_resident_failure(^[String]{"resident export `{symbol}` is not in the final executable mapping"})
+            if row < 0 || c.live_class[row] != LINK_TEXT -> return link_resident_failure([String]{"resident export `{symbol}` is not in the final executable mapping"})
             object: c.g_obj[final]
             address: link_global_addr(c, global)
             section_address: c.live_addr[row]
             section_size: link_sec_size(c, object, section)
-            if address <= 0 || address < section_address || address < layout.text_start || address >= layout.text_end || section_address < layout.text_start || section_size <= 0 || section_size > layout.text_end - section_address -> return link_resident_failure(^[String]{"resident export `{symbol}` has an invalid linked code address"})
+            if address <= 0 || address < section_address || address < layout.text_start || address >= layout.text_end || section_address < layout.text_start || section_size <= 0 || section_size > layout.text_end - section_address -> return link_resident_failure([String]{"resident export `{symbol}` has an invalid linked code address"})
             section_end: section_address + section_size
-            &symbols.push(X64ResidentSymbol{symbol: symbol, defining_symbol: c.g_name[final], input: c.obj_buffer[object], object_offset: c.obj_base[object], address: address, size: c.g_size[final], section_end: section_end})
+            symbols.push(X64ResidentSymbol{symbol: symbol, defining_symbol: c.g_name[final], input: c.obj_buffer[object], object_offset: c.obj_base[object], address: address, size: c.g_size[final], section_end: section_end})
         }
         segments := [X64ResidentSegment]{
             {address: c.base, file_size: layout.r_end - c.base, memory_size: layout.r_end - c.base, align: LINK_PAGE, flags: 4},
             {address: layout.text_start, file_size: layout.text_end - layout.text_start, memory_size: layout.text_end - layout.text_start, align: LINK_PAGE, flags: 5},
         }
-        if layout.has_rw -> &segments.push(X64ResidentSegment{address: layout.rw_start, file_size: layout.file_end - layout.rw_start, memory_size: layout.mem_end - layout.rw_start, align: LINK_PAGE, flags: 6})
+        if layout.has_rw -> segments.push(X64ResidentSegment{address: layout.rw_start, file_size: layout.file_end - layout.rw_start, memory_size: layout.mem_end - layout.rw_start, align: LINK_PAGE, flags: 6})
         tls := X64ResidentSegment?{None}
         if layout.has_tls -> tls = Val(X64ResidentSegment{address: c.tls_start, file_size: layout.tdata_end - c.tls_start, memory_size: c.tls_end - c.tls_start, align: c.tls_align, flags: 4})
-        facts = Val(X64ResidentLinkFacts{base: c.base, entry: entry, segments: ^segments, tls: tls, preinit_start: layout.preinit_start, preinit_end: layout.preinit_end, init_start: layout.init_start, init_end: layout.init_end, fini_start: layout.fini_start, fini_end: layout.fini_end, symbols: ^symbols})
+        facts = Val(X64ResidentLinkFacts{base: c.base, entry: entry, segments: segments.move(), tls: tls, preinit_start: layout.preinit_start, preinit_end: layout.preinit_end, init_start: layout.init_start, init_end: layout.init_end, fini_start: layout.fini_start, fini_end: layout.fini_end, symbols: symbols.move()})
     }
-    X64ResidentLinkResult{image: X64ExecutableResult{bytes: ^image, errors: [String]{}}, facts: ^facts, debug_file: ^debug_file, build_id: ^build_id}
+    X64ResidentLinkResult{image: X64ExecutableResult{bytes: image.move(), errors: [String]{}}, facts: facts.move(), debug_file: debug_file.move(), build_id: build_id.move()}
 }

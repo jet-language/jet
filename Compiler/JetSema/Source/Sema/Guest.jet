@@ -44,9 +44,9 @@ sema_guest_export_native_symbol: fn(name: String) -> String Never! {
     loop byte in name.bytes() {
         n: Int.from_u8(byte)
         if (n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 95 {
-            &bytes.push(byte)
+            bytes.push(byte)
         } else {
-            &bytes.push(U8{95})
+            bytes.push(U8{95})
         }
     }
     symbol := String.from_bytes(bytes) ?? ""
@@ -102,7 +102,7 @@ sema_guest_check_c_signature: fn(graph: SemaRegistrationGraph, module_index: Int
     valid := true
     loop parameter_index in 0..<function.params.len() {
         if !sema_checked_foreign_type(graph, function.params[parameter_index].ty, module_identity, true, false, handles, [String]{}) {
-            &diagnostics.push(sema_checked_foreign_type_error(function.params[parameter_index].ty, function.params[parameter_index].ty_span, true))
+            diagnostics.push(sema_checked_foreign_type_error(function.params[parameter_index].ty, function.params[parameter_index].ty_span, true))
             valid = false
         }
     }
@@ -115,11 +115,11 @@ sema_guest_check_c_signature: fn(graph: SemaRegistrationGraph, module_index: Int
         if {
             pointer_return -> {
                 row: diagnostic_registry_row("E3202") ?? panic("E3202 has no registry row")
-                &diagnostics.push(sema_error("E3202", return_span, row.what.replace("{{ty}}", type_name(return_type)), row.why, row.fix))
+                diagnostics.push(sema_error("E3202", return_span, row.what.replace("{{ty}}", type_name(return_type)), row.why, row.fix))
                 valid = false
             }
             !sema_checked_foreign_type(graph, return_type, module_identity, true, false, handles, [String]{}) -> {
-                &diagnostics.push(sema_checked_foreign_type_error(return_type, return_span, true))
+                diagnostics.push(sema_checked_foreign_type_error(return_type, return_span, true))
                 valid = false
             }
             else -> {}
@@ -154,9 +154,9 @@ sema_guest_import_bridge_compatible: fn(function: Func) -> Bool Never! {
 sema_guest_library_component_type: fn(graph: SemaRegistrationGraph, module_identity: String, ty: Type, seen: &[String:Bool]) -> Bool {
     if ty == {
         .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 -> true
-        .List(inner) | .Option(inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Tagged(_, inner) -> sema_guest_library_component_type(graph, module_identity, inner, &seen)
-        .Result(ok, err) -> sema_guest_library_component_type(graph, module_identity, ok, &seen) && sema_guest_library_component_type(graph, module_identity, err, &seen)
-        .Named(name) -> sema_guest_library_component_named(graph, module_identity, ty, name, &seen)
+        .List(inner) | .Option(inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Tagged(_, inner) -> sema_guest_library_component_type(graph, module_identity, inner, seen)
+        .Result(ok, err) -> sema_guest_library_component_type(graph, module_identity, ok, seen) && sema_guest_library_component_type(graph, module_identity, err, seen)
+        .Named(name) -> sema_guest_library_component_named(graph, module_identity, ty, name, seen)
         else -> false
     }
 }
@@ -174,7 +174,7 @@ sema_guest_library_component_named: fn(graph: SemaRegistrationGraph, module_iden
             .Struct(definition) -> {
                 safe = true
                 loop field in definition.fields {
-                    if !sema_guest_library_component_type(graph, owner, field.ty, &seen) {
+                    if !sema_guest_library_component_type(graph, owner, field.ty, seen) {
                         safe = false
                         break
                     }
@@ -185,9 +185,9 @@ sema_guest_library_component_named: fn(graph: SemaRegistrationGraph, module_iden
                 loop variant in definition.variants {
                     variant_safe: if variant.payload == {
                         .Unit -> true
-                        .Single(payload, _) -> sema_guest_library_component_type(graph, owner, payload, &seen)
+                        .Single(payload, _) -> sema_guest_library_component_type(graph, owner, payload, seen)
                         .Named(fields) -> loop field in fields {
-                            if !sema_guest_library_component_type(graph, owner, field.ty, &seen) -> break false
+                            if !sema_guest_library_component_type(graph, owner, field.ty, seen) -> break false
                         } ?? true
                     }
                     if !variant_safe {
@@ -196,8 +196,8 @@ sema_guest_library_component_named: fn(graph: SemaRegistrationGraph, module_iden
                     }
                 }
             }
-            .Distinct(definition) -> safe = sema_guest_library_component_type(graph, owner, definition.base, &seen)
-            .TypeAlias(definition) -> safe = sema_guest_library_component_type(graph, owner, definition.target, &seen)
+            .Distinct(definition) -> safe = sema_guest_library_component_type(graph, owner, definition.base, seen)
+            .TypeAlias(definition) -> safe = sema_guest_library_component_type(graph, owner, definition.target, seen)
             else -> {}
         }
     }
@@ -209,9 +209,9 @@ sema_guest_library_component_named: fn(graph: SemaRegistrationGraph, module_iden
 sema_guest_library_component_signature: fn(graph: SemaRegistrationGraph, module_identity: String, function: Func) -> Bool {
     return_type: function.return_type ?? return false
     seen := [String:Bool]{}
-    if !sema_guest_library_component_type(graph, module_identity, return_type, &seen) -> return false
+    if !sema_guest_library_component_type(graph, module_identity, return_type, seen) -> return false
     loop parameter_index in 0..<function.params.len() {
-        if !sema_guest_library_component_type(graph, module_identity, function.params[parameter_index].ty, &seen) -> return false
+        if !sema_guest_library_component_type(graph, module_identity, function.params[parameter_index].ty, seen) -> return false
     }
     true
 }
@@ -221,7 +221,7 @@ sema_guest_library_component_signature: fn(graph: SemaRegistrationGraph, module_
 sema_guest_record_symbol: fn(symbols: &[String:String], symbol: String, owner: String, kind: String, name: String, span: Span?, diagnostics: &[Diagnostic]) {
     description: "{kind} `{name}` in module `{owner}`"
     if symbols.get(symbol) == .Val(previous) {
-        &diagnostics.push(sema_error_optional("E1341", span, "{previous} and {description} use the same C symbol `{symbol}`", "the native guest call surface must map every imported, exported, and generated C symbol unambiguously before codegen", "rename one declaration or its native symbol string"))
+        diagnostics.push(sema_error_optional("E1341", span, "{previous} and {description} use the same C symbol `{symbol}`", "the native guest call surface must map every imported, exported, and generated C symbol unambiguously before codegen", "rename one declaration or its native symbol string"))
     }
     symbols[symbol] = description
 }
@@ -238,19 +238,19 @@ sema_guest_check_surfaces: fn(graph: &SemaRegistrationGraph) {
         loop item in graph.modules[module_index].program.items {
             if item == .Func(function) {
                 if parser_guest_import_symbol(function) != None {
-                    if !sema_guest_check_c_signature(graph, module_index, function, &diagnostics) {
+                    if !sema_guest_check_c_signature(graph, module_index, function, diagnostics) {
                         failed = true
                     } else if !sema_guest_import_bridge_compatible(function) {
-                        &diagnostics.push(sema_error("E1341", function.name_span, "guest import `{function.name}` cannot use the resident hidden C bridge", "per-callable imports have no direct C-module wrapper fallback", "use a read-only scalar or String bridge signature"))
+                        diagnostics.push(sema_error("E1341", function.name_span, "guest import `{function.name}` cannot use the resident hidden C bridge", "per-callable imports have no direct C-module wrapper fallback", "use a read-only scalar or String bridge signature"))
                         failed = true
                     }
                 }
                 if module_index == entry_index && sema_function_is_guest_export(function) && !sema_guest_library_component_signature(graph, graph.modules[module_index].module_identity, function) {
-                    if !sema_guest_check_c_signature(graph, module_index, function, &diagnostics) -> failed = true
+                    if !sema_guest_check_c_signature(graph, module_index, function, diagnostics) -> failed = true
                 }
             }
         }
-        loop diagnostic in diagnostics -> sema_registration_push_graph_diagnostic(&graph, module_index, diagnostic)
+        loop diagnostic in diagnostics -> sema_registration_push_graph_diagnostic(graph, module_index, diagnostic)
     }
     symbols := [String:String]{}
     has_text_export := false
@@ -260,26 +260,26 @@ sema_guest_check_surfaces: fn(graph: &SemaRegistrationGraph) {
         loop item in graph.modules[module_index].program.items {
             if item == {
                 .Func(function) -> {
-                    if parser_guest_import_symbol(function) == .Val(symbol) -> sema_guest_record_symbol(&symbols, symbol, owner, "guest imports", function.name, Val(function.name_span), &diagnostics)
+                    if parser_guest_import_symbol(function) == .Val(symbol) -> sema_guest_record_symbol(symbols, symbol, owner, "guest imports", function.name, Val(function.name_span), diagnostics)
                     if module_index == entry_index && sema_function_is_guest_export(function) {
                         if sema_guest_scalar_shape(function.params, sema_guest_export_return_type(function.return_type)) == (Val(SemaGuestScalar.Text)) -> has_text_export = true
-                        sema_guest_record_symbol(&symbols, sema_guest_export_native_symbol(function.name), owner, "Library exports", function.name, Val(function.name_span), &diagnostics)
+                        sema_guest_record_symbol(symbols, sema_guest_export_native_symbol(function.name), owner, "Library exports", function.name, Val(function.name_span), diagnostics)
                     }
                 }
                 .CModule(c_module) -> {
-                    loop foreign in c_module.functions -> sema_guest_record_symbol(&symbols, foreign.rust_path, owner, "C module imports", foreign.name, Val(foreign.name_span), &diagnostics)
+                    loop foreign in c_module.functions -> sema_guest_record_symbol(symbols, foreign.rust_path, owner, "C module imports", foreign.name, Val(foreign.name_span), diagnostics)
                 }
                 else -> {}
             }
         }
         if diagnostics.len() > 0 -> failed = true
-        loop diagnostic in diagnostics -> sema_registration_push_graph_diagnostic(&graph, module_index, diagnostic)
+        loop diagnostic in diagnostics -> sema_registration_push_graph_diagnostic(graph, module_index, diagnostic)
     }
     if has_text_export {
         diagnostics := [Diagnostic]{}
-        sema_guest_record_symbol(&symbols, "jet_text_free", "<generated>", "generated C symbol", "jet_text_free", None, &diagnostics)
+        sema_guest_record_symbol(symbols, "jet_text_free", "<generated>", "generated C symbol", "jet_text_free", None, diagnostics)
         if diagnostics.len() > 0 -> failed = true
-        loop diagnostic in diagnostics -> sema_registration_push_graph_diagnostic(&graph, -1, diagnostic)
+        loop diagnostic in diagnostics -> sema_registration_push_graph_diagnostic(graph, -1, diagnostic)
     }
     if failed -> graph.complete = false
 }

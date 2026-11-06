@@ -34,15 +34,15 @@ lsp_measure_bench: fn(snapshot: JetDriverQuerySnapshot, source: String, rounds: 
     queries := JetDriverCompilerQueries.new()
     path: lsp_bench_path.from_text("bench.jet", snapshot.cwd.platform)
     cold: lsp_bench_time.instant()
-    _: &queries.check_text_lsp(snapshot, path, source)
+    _: queries.check_text_lsp(snapshot, path, source)
     cold_us: U128.from_int((lsp_bench_time.instant() - cold).ns) ?? panic("monotonic duration is nonnegative")
     warm: lsp_bench_time.instant()
-    _: &queries.check_text_lsp(snapshot, path, source)
+    _: queries.check_text_lsp(snapshot, path, source)
     warm_us: U128.from_int((lsp_bench_time.instant() - warm).ns) ?? panic("monotonic duration is nonnegative")
     edits: lsp_bench_time.instant()
     loop round in 0..<count {
         edited: "{source}\n// lsp-bench-edit:{round % 2}\n"
-        _: &queries.check_text_lsp(snapshot, path, edited)
+        _: queries.check_text_lsp(snapshot, path, edited)
     }
     edit_us: (U128.from_int((lsp_bench_time.instant() - edits).ns) ?? panic("monotonic duration is nonnegative")) /% U128{1000} /% U128{count}
     stats: queries.stats()
@@ -57,15 +57,15 @@ lsp_measure_cone_bench: fn(snapshot: JetDriverQuerySnapshot) -[Time]> [JetDriver
         // One forward append per byte instead of repeatedly copying a prefix.
         bytes := [U8]{}
         loop index in 0..<functions {
-            loop byte in "helper_{index}: fn() -> Int {{ return {index} }}\n".bytes() -> &bytes.push(byte)
+            loop byte in "helper_{index}: fn() -> Int {{ return {index} }}\n".bytes() -> bytes.push(byte)
         }
-        loop byte in "target: fn() -> Int {{ return 1 }}\nrun: fn() -> Int {{ return target() }}\n".bytes() -> &bytes.push(byte)
+        loop byte in "target: fn() -> Int {{ return 1 }}\nrun: fn() -> Int {{ return target() }}\n".bytes() -> bytes.push(byte)
         source: String.from_bytes(bytes) ?? panic("generated ASCII source")
         edited: source.replace("target: fn() -> Int {{ return 1 }}", "target: fn() -> Int {{ return 2 }}")
         queries := JetDriverCompilerQueries.new()
-        _: &queries.check_text_with_receipt(snapshot, path, source, true)
-        measured: &queries.check_text_with_receipt(snapshot, path, edited, true)
-        &receipts.push(measured.receipt)
+        _: queries.check_text_with_receipt(snapshot, path, source, true)
+        measured: queries.check_text_with_receipt(snapshot, path, edited, true)
+        receipts.push(measured.receipt)
     }
     receipts
 }
@@ -123,22 +123,22 @@ lsp_run_doctor: fn(snapshot: JetDriverQuerySnapshot, manifest_dir: OSPath) -[IO,
     parsed: parse_with_source(lexed.tokens, source.bytes())
     if parsed.program != None -> print("  [ok] parser") else -> print("  [FAIL] parser: {parsed.diagnostics.len()} errors")
     queries := JetDriverCompilerQueries.new()
-    diagnostics: lsp_check_document(&queries, snapshot, lsp_doctor_path.from_text("test.jet", snapshot.cwd.platform), source)
+    diagnostics: lsp_check_document(queries, snapshot, lsp_doctor_path.from_text("test.jet", snapshot.cwd.platform), source)
     if diagnostics.len() == 0 -> print("  [ok] sema") else -> print("  [FAIL] sema: {diagnostics.len()} diagnostics")
     if jet_format_source(source).source != None -> print("  [ok] formatter") else -> print("  [FAIL] formatter")
     print("  [ok] JSON-RPC framing")
 
     transcripts := manifest_dir.copy()
-    lsp_doctor_path.push(&transcripts, lsp_doctor_path.from_text("tests/lsp", manifest_dir.platform))
+    lsp_doctor_path.push(transcripts, lsp_doctor_path.from_text("tests/lsp", manifest_dir.platform))
     if lsp_doctor_native.exists(transcripts) {
         count: lsp_doctor_transcript_count(transcripts)
         print("  [ok] transcript runner: {count} fixture(s) found in tests/lsp/")
     } else { print("  [WARN] transcript runner: tests/lsp/ not found") }
     grammar := manifest_dir.copy()
-    lsp_doctor_path.push(&grammar, lsp_doctor_path.from_text("Tools/editors/tree-sitter/grammar.js", manifest_dir.platform))
+    lsp_doctor_path.push(grammar, lsp_doctor_path.from_text("Tools/editors/tree-sitter/grammar.js", manifest_dir.platform))
     if lsp_doctor_native.exists(grammar) -> print("  [ok] Tools/editors/tree-sitter/grammar.js present") else -> print("  [WARN] Tools/editors/tree-sitter/grammar.js not found — run `tree-sitter generate` to build")
     textmate := manifest_dir.copy()
-    lsp_doctor_path.push(&textmate, lsp_doctor_path.from_text("Tools/editors/jet.tmGrammar", manifest_dir.platform))
+    lsp_doctor_path.push(textmate, lsp_doctor_path.from_text("Tools/editors/jet.tmGrammar", manifest_dir.platform))
     if lsp_doctor_native.exists(textmate) -> print("  [ok] Tools/editors/jet.tmGrammar present") else -> print("  [WARN] Tools/editors/jet.tmGrammar not found")
     // Original prints this even after FAIL/WARN; do not silently change policy.
     print("all checks passed — the language server is healthy")

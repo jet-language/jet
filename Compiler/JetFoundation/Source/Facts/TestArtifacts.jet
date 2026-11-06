@@ -113,7 +113,7 @@ checked_test_faults: fn(test: TestDef) -> [String] Never! {
         if expression == .ListLit(elements, _, _) {
             faults := [String]{}
             loop element in elements {
-                if checked_test_fault_path(element) == .Val(path) -> &faults.push(path)
+                if checked_test_fault_path(element) == .Val(path) -> faults.push(path)
             }
             return faults
         }
@@ -204,7 +204,7 @@ checked_test_artifact_fact: fn(module_identity: String, test: TestDef, source: S
     parameters := [TTestParamFact]{}
     index := 0
     loop parameter in test.params {
-        &parameters.push(TTestParamFact{
+        parameters.push(TTestParamFact{
             index: index,
             name: parameter.name,
             span: parameter.name_span,

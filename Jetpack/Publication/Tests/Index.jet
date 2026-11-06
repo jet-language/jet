@@ -130,7 +130,7 @@ publication_index_test_root: fn(label: String) -[FS, Env]> String Never! {
     entry := publication_index_test_entry("x", "1.0.0", false)
     overhead: publication_index_to_jsonl(entry).bytes().len() - 1
     name_bytes := [U8]{}
-    loop index in 0..<(1048576 - overhead) -> &name_bytes.push(U8{97})
+    loop index in 0..<(1048576 - overhead) -> name_bytes.push(U8{97})
     entry.name = String.from_bytes(name_bytes) ?? panic("ASCII fixture")
     at_limit: publication_index_to_jsonl(entry)
     assert_eq(at_limit.bytes().len(), 1048576)
@@ -395,7 +395,7 @@ publication_index_test_root: fn(label: String) -[FS, Env]> String Never! {
     files.create_dir_all(files.join(source, ".jet")) ?? panic("source")
     files.write(files.join(source, "package.jet"), "package bytes\n") ?? panic("package")
     lock := LockFile.empty()
-    &lock.packages.push(LockedPackage{name: "helpers", version: "1.0.0", fingerprint: "sha256-abcd1234", source: LockSource.Path("/tmp/placeholder")})
+    lock.packages.push(LockedPackage{name: "helpers", version: "1.0.0", fingerprint: "sha256-abcd1234", source: LockSource.Path("/tmp/placeholder")})
     files.write(files.join(source, ".jet/lock"), pkg_lock_write(lock)) ?? panic("lock")
     content_hash: foundation_tree_hash(source)
     _: publication_publish_artifact(repo, source, "ref-kit", "1.0.0", content_hash) ?? panic("artifact")
@@ -406,7 +406,7 @@ publication_index_test_root: fn(label: String) -[FS, Env]> String Never! {
     publication_verify_oci_referrers(repo, entry) ?? panic("verify")
     blobs: files.list_dir(files.join(repo, "referrers/{content_hash}/blobs")) ?? panic("blobs")
     bytes := files.read_bytes(blobs[0].path) ?? panic("blob")
-    &bytes.push(U8{10})
+    bytes.push(U8{10})
     files.write_bytes(blobs[0].path, bytes) ?? panic("tamper")
     if publication_verify_oci_referrers(repo, entry) == {
         .Err(error) -> assert("{error}".contains("digest") || "{error}".contains("size"))

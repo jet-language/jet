@@ -37,7 +37,7 @@ dc_has: fn(values: [String], value: String) -> Bool {
 }
 
 dc_add: fn(values: &[String], value: String) {
-    if !dc_has(values, value) -> &values.push(value)
+    if !dc_has(values, value) -> values.push(value)
 }
 
 dc_slice: fn(text: String, start: Int, end: Int) -> String {
@@ -52,8 +52,8 @@ dc_walk: fn(directory: String, out: &[String]) {
     if !dc_files.exists(directory) -> return
     loop child in (dc_files.list_dir(directory) ?? panic("list {directory}: {err}")) {
         if child.is_dir {
-            if child.name != "Tests" && child.name != "Fixtures" && child.name != "fixtures" -> dc_walk(child.path, &out)
-        } else if child.name.ends_with(".jet") && !dc_has(DC_REGISTRY_FILES, child.path) -> &out.push(child.path)
+            if child.name != "Tests" && child.name != "Fixtures" && child.name != "fixtures" -> dc_walk(child.path, out)
+        } else if child.name.ends_with(".jet") && !dc_has(DC_REGISTRY_FILES, child.path) -> out.push(child.path)
     }
 }
 
@@ -63,8 +63,8 @@ dc_walk: fn(directory: String, out: &[String]) {
 // scanned, not the shipped JavaScript or C runtime support.
 dc_source_paths: fn() -> [String] {
     paths := [String]{}
-    loop root in ["Compiler", "Jetpack", "Core"] -> dc_walk(root, &paths)
-    &paths.sort()
+    loop root in ["Compiler", "Jetpack", "Core"] -> dc_walk(root, paths)
+    paths.sort()
     paths
 }
 
@@ -95,7 +95,7 @@ dc_extract_codes: fn(text: String, codes: &[String]) {
         }
         if end > index + 1 && end < bytes.len() && bytes[end] == close {
             code: dc_slice(text, index + 1, end)
-            if dc_is_code(code) -> dc_add(&codes, code)
+            if dc_is_code(code) -> dc_add(codes, code)
         }
     }
 }
@@ -114,7 +114,7 @@ dc_extract_type_paths: fn(text: String, names: &[String]) {
         }
         if end < bytes.len() && bytes[end] == (U8{93}) {
             name: dc_slice(text, index + 1, end)
-            if name.starts_with("jet.") -> dc_add(&names, name)
+            if name.starts_with("jet.") -> dc_add(names, name)
         }
     }
 }
@@ -124,11 +124,11 @@ dc_emitted_codes: fn() -> [String] {
     names := [String]{}
     loop path in dc_source_paths() {
         text: dc_read(path)
-        dc_extract_codes(text, &codes)
-        dc_extract_type_paths(text, &names)
+        dc_extract_codes(text, codes)
+        dc_extract_type_paths(text, names)
     }
     loop row in dc_registered_rows() {
-        if dc_has(names, row.name) -> dc_add(&codes, row.code)
+        if dc_has(names, row.name) -> dc_add(codes, row.code)
     }
     codes
 }
@@ -159,7 +159,7 @@ dc_registered_rows: fn() -> [DcRow] {
             status = dc_slice(line, 19, line.count_bytes()).lower()
         } else if line == "    }}" && status != "" {
             assert(code != "", "diagnostic impl without a code before line `{line}`")
-            &rows.push(DcRow{name: name.copy(), code: code.copy(), status: status.copy()})
+            rows.push(DcRow{name: name.copy(), code: code.copy(), status: status.copy()})
             status = ""
         }
     }
@@ -184,15 +184,15 @@ dc_snapshot_texts: fn() -> [(path: String, text: String)] {
         loop child in (dc_files.list_dir(directory) ?? panic("list {directory}: {err}")) {
             if child.is_dir {
                 nested: dc_files.join(child.path, "stderr")
-                if dc_files.exists(nested) -> &out.push((path: nested, text: dc_read(nested)))
+                if dc_files.exists(nested) -> out.push((path: nested, text: dc_read(nested)))
             } else if child.name.ends_with(".stderr") || child.name.ends_with(".warn") {
-                &out.push((path: child.path, text: dc_read(child.path)))
+                out.push((path: child.path, text: dc_read(child.path)))
             }
         }
     }
     loop name in ["bind_missing_e3208.txt", "bind_data_invalid_e3208.txt", "doctor_l2101.txt", "fetch_no_git_e1203.txt", "prove_artifact_corrupt_e3611.txt", "prove_artifact_unsafe_e3614.txt", "repl_e1801.txt", "unknown_target_e3302.txt"] {
         path: "tests/cli/{name}"
-        if dc_files.exists(path) -> &out.push((path: path, text: dc_read(path)))
+        if dc_files.exists(path) -> out.push((path: path, text: dc_read(path)))
     }
     assert(out.len() > 1000, "the rendered snapshot corpus must be readable")
     out
@@ -207,7 +207,7 @@ dc_report_codes: fn(text: String) -> [String] {
         loop prefix in ["Error [", "Warning [", "Stop [", "Lint ["] {
             if !line.starts_with(prefix) -> next
             end: line.index("]") ?? -1
-            if end > prefix.count_bytes() -> dc_add(&codes, dc_slice(line, prefix.count_bytes(), end))
+            if end > prefix.count_bytes() -> dc_add(codes, dc_slice(line, prefix.count_bytes(), end))
             break
         }
     }
@@ -221,9 +221,9 @@ dc_report_codes: fn(text: String) -> [String] {
     registered: dc_registered_codes()
     missing := [String]{}
     loop code in dc_emitted_codes() {
-        if !dc_has(DC_EXCLUDED_CODES, code) && !dc_has(registered, code) -> &missing.push(code)
+        if !dc_has(DC_EXCLUDED_CODES, code) && !dc_has(registered, code) -> missing.push(code)
     }
-    &missing.sort()
+    missing.sort()
     assert_eq(missing.join(" "), "")
 }
 
@@ -249,14 +249,14 @@ dc_report_codes: fn(text: String) -> [String] {
     listed: DC_SPEC_AHEAD_OF_IMPL.map(row -> row.code)
     now_emitted := [String]{}
     loop code in listed {
-        if dc_has(emitted, code) -> &now_emitted.push(code)
+        if dc_has(emitted, code) -> now_emitted.push(code)
     }
     unlisted := [String]{}
     loop row in rows {
-        if row.status != "reserved" && row.status != "retired" && !dc_has(DC_EXCLUDED_CODES, row.code) && !dc_has(emitted, row.code) && !dc_has(listed, row.code) -> &unlisted.push(row.code)
+        if row.status != "reserved" && row.status != "retired" && !dc_has(DC_EXCLUDED_CODES, row.code) && !dc_has(emitted, row.code) && !dc_has(listed, row.code) -> unlisted.push(row.code)
     }
-    &now_emitted.sort()
-    &unlisted.sort()
+    now_emitted.sort()
+    unlisted.sort()
     assert_eq("now emitted, remove from the list: {now_emitted.join(" ")}", "now emitted, remove from the list: ")
     assert_eq("registered but never emitted: {unlisted.join(" ")}", "registered but never emitted: ")
 }
@@ -270,13 +270,13 @@ dc_report_codes: fn(text: String) -> [String] {
         if !dc_contains_any(text, DC_RUSTC_CODES) -> next
         loop (index, line) in text.split("\n").to_list() {
             loop code in DC_RUSTC_CODES {
-                if line.contains("\"{code}\"") && (line.contains("diagnostic_from_registry(") || line.contains("Diagnostic{{")) -> &failures.push("{path}:{index + 1} raises rustc code {code}")
+                if line.contains("\"{code}\"") && (line.contains("diagnostic_from_registry(") || line.contains("Diagnostic{{")) -> failures.push("{path}:{index + 1} raises rustc code {code}")
             }
         }
     }
     loop snapshot in dc_snapshot_texts() {
         loop code in dc_report_codes(snapshot.text) {
-            if dc_has(DC_RUSTC_CODES, code) -> &failures.push("{snapshot.path} opens a report with rustc code [{code}]")
+            if dc_has(DC_RUSTC_CODES, code) -> failures.push("{snapshot.path} opens a report with rustc code [{code}]")
         }
     }
     assert_eq(failures.join("\n"), "")
@@ -290,7 +290,7 @@ dc_report_codes: fn(text: String) -> [String] {
     loop snapshot in dc_snapshot_texts() {
         loop needle in ["thread 'main' panicked", "panicked at", "stack backtrace:", "target/debug", ".rs:", "rustc rejected generated code"] {
             allowed: snapshot.path.ends_with("ffi_bad_path.stderr") && (needle == ".rs:" || needle == "rustc rejected generated code")
-            if snapshot.text.contains(needle) && !allowed -> &failures.push("{snapshot.path} contains `{needle}`")
+            if snapshot.text.contains(needle) && !allowed -> failures.push("{snapshot.path} contains `{needle}`")
         }
     }
     assert_eq(failures.join("\n"), "")
@@ -302,7 +302,7 @@ dc_report_codes: fn(text: String) -> [String] {
     failures := [String]{}
     loop snapshot in dc_snapshot_texts() {
         loop needle in ["the earlier consuming operation", "source bytes", "found `;`"] {
-            if snapshot.text.contains(needle) -> &failures.push("{snapshot.path} contains `{needle}`")
+            if snapshot.text.contains(needle) -> failures.push("{snapshot.path} contains `{needle}`")
         }
     }
     assert_eq(failures.join("\n"), "")
@@ -327,16 +327,16 @@ dc_raw_code_panic: fn(line: String) -> Bool {
 // Known failing: #6187 (Core/Http/Server.jet raises panic("E2805: ...")).
 #Test("runtime_user_error_codes_use_jet_panic_voice") {
     paths := [String]{}
-    dc_walk("Compiler/Prelude", &paths)
-    dc_walk("Compiler/JetRuntime", &paths)
-    dc_walk("Core", &paths)
+    dc_walk("Compiler/Prelude", paths)
+    dc_walk("Compiler/JetRuntime", paths)
+    dc_walk("Core", paths)
     assert(paths.len() > 10, "the runtime library sources must be readable")
     failures := [String]{}
     loop path in paths {
         text: dc_read(path)
         if !text.contains("panic(\"E") -> next
         loop (index, line) in text.split("\n").to_list() {
-            if dc_raw_code_panic(line) -> &failures.push("{path}:{index + 1} uses raw panic for a Jet error code")
+            if dc_raw_code_panic(line) -> failures.push("{path}:{index + 1} uses raw panic for a Jet error code")
         }
     }
     assert_eq(failures.join("\n"), "")
@@ -350,7 +350,7 @@ dc_marker_literal_offenders: fn(sources: [(path: String, text: String)], names: 
             code: line.split("//").to_list()[0]
             if !dc_contains_any(code, ["marker_name", "marker.name", "attr_name", "rule_name", "marker_head"]) -> next
             loop name in names {
-                if code.contains("\"{name}\"") -> &offenders.push("{source.path}:{index + 1} contains marker name `{name}`")
+                if code.contains("\"{name}\"") -> offenders.push("{source.path}:{index + 1} contains marker name `{name}`")
             }
         }
     }
@@ -363,7 +363,7 @@ dc_marker_names: fn() -> [String] {
     loop line in dc_read("Compiler/JetFoundation/Source/Policy/PreludeMarkers.jet").split("\n") {
         if line.starts_with(" ") || !line.contains(": struct") -> next
         colon: line.index(": struct") ?? line.count_bytes()
-        &names.push(dc_slice(line, 0, colon).trim().copy())
+        names.push(dc_slice(line, 0, colon).trim().copy())
     }
     assert(names.len() > 20, "the marker declaration source must be readable")
     names
@@ -376,10 +376,10 @@ dc_marker_names: fn() -> [String] {
 #Test("marker_name_literals_stay_in_the_registry") {
     names: dc_marker_names()
     paths := [String]{}
-    loop directory in ["Compiler/JetLexer/Source", "Compiler/JetParser/Source", "Compiler/JetSema/Source"] -> dc_walk(directory, &paths)
+    loop directory in ["Compiler/JetLexer/Source", "Compiler/JetParser/Source", "Compiler/JetSema/Source"] -> dc_walk(directory, paths)
     assert(paths.len() > 10, "the compiler front-end sources must be readable")
     sources := [(path: String, text: String)]{}
-    loop path in paths -> &sources.push((path: path, text: dc_read(path)))
+    loop path in paths -> sources.push((path: path, text: dc_read(path)))
     assert_eq(dc_marker_literal_offenders(sources, names).join("\n"), "")
     seeded: dc_marker_literal_offenders([(path: String, text: String)]{(path: "synthetic.jet", text: "if marker_name == \"Inline\" {{}}")}, ["Inline"])
     assert_eq(seeded.len(), 1)

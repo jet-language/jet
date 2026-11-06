@@ -43,7 +43,7 @@ sema_cell_guard_report: fn(what: String, span: Span, diagnostics: &[Diagnostic])
             }
         }
     }
-    &diagnostics.push(sema_error("E0217", span, what, "a Cell guard is a temporary loan handle; storing it inside another value could keep the loan after its local scope ends", "keep the guard in a local name or a tuple, and use `.map(...)` or `.split(...)` for projections"))
+    diagnostics.push(sema_error("E0217", span, what, "a Cell guard is a temporary loan handle; storing it inside another value could keep the loan after its local scope ends", "keep the guard in a local name or a tuple, and use `.map(...)` or `.split(...)` for projections"))
 }
 
 sema_cell_guard_constructs_value: fn(expr: Expr) -> Bool Never! {
@@ -56,10 +56,10 @@ sema_cell_guard_constructs_value: fn(expr: Expr) -> Bool Never! {
 // Rust `infer`: an expression that builds a value whose type stores a guard.
 sema_cell_guard_check_construct: fn(expr: Expr, ty: Type, diagnostics: &[Diagnostic]) {
     if !sema_cell_guard_constructs_value(expr) || !sema_cell_guard_storage_unsupported(ty) -> return
-    sema_cell_guard_report("a Cell guard cannot be stored inside `{type_name(ty)}`", expr_span(expr), &diagnostics)
+    sema_cell_guard_report("a Cell guard cannot be stored inside `{type_name(ty)}`", expr_span(expr), diagnostics)
 }
 
 // Rust `check_lambda` captures: a lambda would carry the loan with it.
 sema_cell_guard_check_capture: fn(name: String, ty: Type, span: Span, diagnostics: &[Diagnostic]) {
-    if sema_cell_guard_contained(ty) -> sema_cell_guard_report("Cell guard `{name}` cannot be captured by a lambda", span, &diagnostics)
+    if sema_cell_guard_contained(ty) -> sema_cell_guard_report("Cell guard `{name}` cannot be captured by a lambda", span, diagnostics)
 }

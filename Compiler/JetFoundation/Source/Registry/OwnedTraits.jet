@@ -132,7 +132,7 @@ owned_trait_arithmetic: fn(trait_name: String) -> Bool Never! {
 owned_trait_arithmetic_listed: fn() -> String Never! {
     names := [String]{}
     loop owned in OWNED_TRAITS {
-        if owned_trait_arithmetic(owned.name) -> &names.push(owned.name.copy())
+        if owned_trait_arithmetic(owned.name) -> names.push(owned.name.copy())
     }
     owned_trait_listed(names)
 }
@@ -168,7 +168,7 @@ owned_trait_structural: fn(trait_name: String) -> Bool Never! {
 owned_trait_structural_names: fn() -> [String] Never! {
     names := [String]{}
     loop owned in OWNED_TRAITS {
-        if owned_trait_structural(owned.name) -> &names.push(owned.name.copy())
+        if owned_trait_structural(owned.name) -> names.push(owned.name.copy())
     }
     names
 }
@@ -184,7 +184,7 @@ owned_trait_codec: fn(trait_name: String) -> Bool Never! {
 owned_trait_codec_names: fn() -> [String] Never! {
     names := [String]{}
     loop owned in OWNED_TRAITS {
-        if owned_trait_codec(owned.name) -> &names.push(owned.name.copy())
+        if owned_trait_codec(owned.name) -> names.push(owned.name.copy())
     }
     names
 }
@@ -219,7 +219,7 @@ owned_trait_family: fn(marker: String, bundle: Bool) -> [String] Never! {
     members := [String]{}
     loop owned in OWNED_TRAITS {
         family: if bundle -> owned.bundle_family else -> owned.auto_derive_family
-        if family == .Val(name) && name == marker -> &members.push(owned.name.copy())
+        if family == .Val(name) && name == marker -> members.push(owned.name.copy())
     }
     members
 }

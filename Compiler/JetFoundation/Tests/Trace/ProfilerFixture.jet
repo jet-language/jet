@@ -45,7 +45,7 @@ perf_profile_fixture_profile: fn(state: String) -> TraceProfile Never! {
 }
 perf_profile_fixture: fn(state: String) -> [U8] Never! {
     identity := SourceIdentity{path: "profile.jet", sha256: sha256_hex(PERF_PROFILE_FIXTURE_SOURCE), symbols: [(kind: String, name: String)]{}}
-    loop name in ([String]{"cold", "hot", "run"}) -> &identity.symbols.push((kind: "fn", name: name))
+    loop name in ([String]{"cold", "hot", "run"}) -> identity.symbols.push((kind: "fn", name: name))
     source_map: trace_source_map_jet_with_source("profile.jet", PERF_PROFILE_FIXTURE_SOURCE) ?? panic(err.message)
     skeleton: TraceSkeleton{command: "run", argv: [String]{"run", "profile.jet"},
         toolchain: TraceToolchain{jet_version: "fixture", compiler_build_id: "profile-fixture", stdlib_id: "profile-stdlib", runner_id: "profile-runner"},

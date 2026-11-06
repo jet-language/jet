@@ -113,11 +113,11 @@ semantic_test_local: fn(identity: String, module_path: String, start: Int, end: 
     assert(index.at("second.jet", 9) == None)
     assert(index.at("unknown.jet", 5) == None)
     first.signature = "replacement"
-    &index.push(^first)
+    index.push(first)
     assert_eq(index.symbols().len(), 2)
     replaced: index.lookup_identity("type:first") ?? panic("replacement")
     assert_eq(replaced[0].signature, "replacement")
-    &index.extend([SemanticSymbol]{semantic_test_fact("type:third", "Item", "first.Item", .Type, .Session)})
+    index.extend([SemanticSymbol]{semantic_test_fact("type:third", "Item", "first.Item", .Type, .Session)})
     assert(index.lookup_qualified("first.Item") == None)
     assert_eq(index.lookup("first.Item").len(), 2)
     visible: index.resolve_visible("first.Item") ?? panic("qualified visibility retains ambiguity rule")

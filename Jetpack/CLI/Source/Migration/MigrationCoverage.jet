@@ -86,12 +86,12 @@ CoverageReport: struct {
     from_input: fn(input: CoverageInput) -> CoverageReport CoverageError! {
         inventory: cli_coverage_unique(input.inventory, None)
         assigned := [(package: CoveragePackage, bucket: CoverageBucket)]{}
-        native_recipes: cli_coverage_assign(input.native_recipes, CoverageBucket.NativeRecipe, inventory, &assigned)
-        centrally_imported_recipes: cli_coverage_assign(input.centrally_imported_recipes, CoverageBucket.CentrallyImportedRecipe, inventory, &assigned)
-        local_imports: cli_coverage_assign(input.local_imports, CoverageBucket.LocalImport, inventory, &assigned)
+        native_recipes: cli_coverage_assign(input.native_recipes, CoverageBucket.NativeRecipe, inventory, assigned)
+        centrally_imported_recipes: cli_coverage_assign(input.centrally_imported_recipes, CoverageBucket.CentrallyImportedRecipe, inventory, assigned)
+        local_imports: cli_coverage_assign(input.local_imports, CoverageBucket.LocalImport, inventory, assigned)
         not_yet_imported := [CoveragePackage]{}
         loop package in inventory {
-            if cli_coverage_bucket_of(assigned, package) == None -> &not_yet_imported.push(package)
+            if cli_coverage_bucket_of(assigned, package) == None -> not_yet_imported.push(package)
         }
         total: native_recipes.len() + centrally_imported_recipes.len() + local_imports.len() + not_yet_imported.len()
         nativeized: native_recipes.len()
@@ -171,10 +171,10 @@ cli_coverage_unique: fn(packages: [CoveragePackage], bucket: CoverageBucket?) ->
                 .None -> return Err(CoverageError.DuplicateInventory(package.name))
             }
         }
-        &unique.push(package)
+        unique.push(package)
     }
     // Identity order: name, then version, then reference.
-    &unique.sort_by((left: CoveragePackage, right: CoveragePackage) -> (left.name <=> right.name).then(left.version <=> right.version).then(left.reference <=> right.reference))
+    unique.sort_by((left: CoveragePackage, right: CoveragePackage) -> (left.name <=> right.name).then(left.version <=> right.version).then(left.reference <=> right.reference))
     Ok(unique)
 }
 
@@ -188,7 +188,7 @@ cli_coverage_assign: fn(packages: [CoveragePackage], bucket: CoverageBucket, inv
             .Val(first) -> return Err(CoverageError.PackageInMultipleBuckets{package: package.name, first: first, second: bucket})
             .None -> {}
         }
-        &assigned.push((package: package, bucket: bucket))
+        assigned.push((package: package, bucket: bucket))
     }
     Ok(unique)
 }
@@ -202,6 +202,6 @@ cli_coverage_bucket_of: fn(assigned: [(package: CoveragePackage, bucket: Coverag
 
 cli_coverage_packages_json: fn(packages: [CoveragePackage]) -> Dyn Never! {
     items := [Dyn]{}
-    loop package in packages -> &items.push(package.to_json_tree())
+    loop package in packages -> items.push(package.to_json_tree())
     Dyn.Array(items)
 }

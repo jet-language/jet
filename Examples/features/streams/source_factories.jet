@@ -16,7 +16,7 @@ Ticket: struct {
 }
 
 impl Ticket.Close {
-    close: fn(^self) { print("  closed ticket {self.id}") }
+    close: fn(&&self) { print("  closed ticket {self.id}") }
 }
 
 never: fn() -> Stream<Int> {
@@ -80,28 +80,28 @@ run: fn() {
     print("  source created")
     loop ticket in source {
         print("  got ticket {ticket.id}")
-        close(^ticket)
+        close(ticket)
     }
 
     // from_fn: stateful next, bounded by the consumer.
     print("from_fn:")
     fibs := [Int]{}
     loop f in fibonacci() {
-        &fibs.push(f)
+        fibs.push(f)
         if fibs.len() == 6 -> break
     }
     print(fibs)
 
     // successors: each value is computed from the previous one.
     chain := [Int]{}
-    loop d in doublings(3, 100) -> &chain.push(d)
+    loop d in doublings(3, 100) -> chain.push(d)
     print("successors: {chain}")
 
     // repeat_with over an infinite source: exactly five producer calls.
     print("repeat_with:")
     taken := [Int]{}
     loop s in stamps() {
-        &taken.push(s)
+        taken.push(s)
         if taken.len() == 5 -> break
     }
     print(taken)

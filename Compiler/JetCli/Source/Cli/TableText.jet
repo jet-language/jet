@@ -286,7 +286,7 @@ jet_cli_table_strip_ansi: fn(source: [U8]) -> [U8] Never! {
         if state == {
             0 -> {
                 if code == 27 -> state = 1
-                else -> foundation_append_read_bytes(&out, source, index, scalar.next_byte)
+                else -> foundation_append_read_bytes(out, source, index, scalar.next_byte)
             }
             1 -> state = if code == 91 -> 2 else if code == 93 -> 3 else -> 0
             2 -> { if code >= 64 && code <= 126 -> state = 0 }
@@ -303,8 +303,8 @@ jet_cli_table_strip_ansi: fn(source: [U8]) -> [U8] Never! {
 // scans never materialize a scalar/substring/list from a String. Oversized
 // clusters are skipped, and later fitting clusters are retained (not prefix
 // truncation). Text truncation does not set the table's structural flag.
-jet_cli_table_bound_text: fn(input: ^[U8]) -> [U8] Never! {
-    text := ^input
+jet_cli_table_bound_text: fn(input: &&[U8]) -> [U8] Never! {
+    text := input.move()
     ansi := false
     loop byte in text {
         if byte == (U8{27}) {
@@ -313,12 +313,12 @@ jet_cli_table_bound_text: fn(input: ^[U8]) -> [U8] Never! {
         }
     }
     if ansi -> text = jet_cli_table_strip_ansi(text)
-    if text.len() <= JET_CLI_TABLE_MAX_CELL_BYTES -> return ^text
+    if text.len() <= JET_CLI_TABLE_MAX_CELL_BYTES -> return text.move()
     out := [U8]{}
     index := 0
     loop index < text.len() {
         cluster: jet_cli_table_cluster(text, index, text.len())
-        if out.len() + cluster.end - index <= JET_CLI_TABLE_MAX_CELL_BYTES -> foundation_append_read_bytes(&out, text, index, cluster.end)
+        if out.len() + cluster.end - index <= JET_CLI_TABLE_MAX_CELL_BYTES -> foundation_append_read_bytes(out, text, index, cluster.end)
         index = cluster.end
     }
     out
@@ -350,7 +350,7 @@ jet_cli_table_wrap_span: fn(lines: &[[U8]], text: [U8], start: Int, stop: Int, w
     end := stop
     if end > start && text[end - 1] == (U8{13}) -> end -= 1
     if start == end {
-        &lines.push([U8]{})
+        lines.push([U8]{})
         return
     }
     line := [U8]{}
@@ -361,30 +361,30 @@ jet_cli_table_wrap_span: fn(lines: &[[U8]], text: [U8], start: Int, stop: Int, w
         cluster: jet_cli_table_cluster(text, index, end)
         if {
             cluster.width == 0 -> {
-                if line_width < width -> foundation_append_read_bytes(&line, text, index, cluster.end)
+                if line_width < width -> foundation_append_read_bytes(line, text, index, cluster.end)
             }
             cluster.width > width -> {
                 if line.len() > 0 {
-                    &lines.push(^line)
+                    lines.push(line)
                     line = [U8]{}
                     line_width = 0
                 }
-                &lines.push([U8]{63})
+                lines.push([U8]{63})
                 emitted = true
             }
             else -> {
                 if line_width != 0 && line_width + cluster.width > width {
-                    &lines.push(^line)
+                    lines.push(line)
                     line = [U8]{}
                     line_width = 0
                 }
-                foundation_append_read_bytes(&line, text, index, cluster.end)
+                foundation_append_read_bytes(line, text, index, cluster.end)
                 line_width += cluster.width
             }
         }
         index = cluster.end
     }
-    if line.len() > 0 || !emitted -> &lines.push(^line)
+    if line.len() > 0 || !emitted -> lines.push(line)
 }
 
 jet_cli_table_wrap: fn(text: [U8], budget: Int) -> [[U8]] Never! {
@@ -394,7 +394,7 @@ jet_cli_table_wrap: fn(text: [U8], budget: Int) -> [[U8]] Never! {
     loop start <= text.len() {
         end := start
         loop end < text.len() && text[end] != (U8{10}) -> end += 1
-        jet_cli_table_wrap_span(&lines, text, start, end, width)
+        jet_cli_table_wrap_span(lines, text, start, end, width)
         if end == text.len() -> break
         start = end + 1
     }
@@ -416,7 +416,7 @@ jet_cli_table_clip: fn(text: [U8], width: Int, unicode: Bool) -> [U8] Never! {
     suffix_width: if unicode -> 1 else -> 3
     if width <= suffix_width {
         if unicode -> return [U8]{226, 128, 166}
-        loop _ in 0..<width -> &out.push(U8{46})
+        loop _ in 0..<width -> out.push(U8{46})
         return out
     }
     keep: width - suffix_width
@@ -425,22 +425,22 @@ jet_cli_table_clip: fn(text: [U8], width: Int, unicode: Bool) -> [U8] Never! {
     loop index < text.len() && used < keep {
         cluster: jet_cli_table_cluster(text, index, text.len())
         if cluster.width > keep - used -> break
-        foundation_append_read_bytes(&out, text, index, cluster.end)
+        foundation_append_read_bytes(out, text, index, cluster.end)
         used += cluster.width
         index = cluster.end
     }
     if unicode {
-        &out.push(U8{226})
-        &out.push(U8{128})
-        &out.push(U8{166})
+        out.push(U8{226})
+        out.push(U8{128})
+        out.push(U8{166})
     } else {
-        loop _ in 0..<3 -> &out.push(U8{46})
+        loop _ in 0..<3 -> out.push(U8{46})
     }
     out
 }
 
 jet_cli_table_repeat: fn(out: &[U8], byte: U8, count: Int) Never! {
-    loop _ in 0..<count -> &out.push(byte)
+    loop _ in 0..<count -> out.push(byte)
 }
 
 jet_cli_table_append_pad: fn(out: &[U8], value: [U8], width: Int, alignment: JetCLITableAlignment) Never! {
@@ -448,13 +448,13 @@ jet_cli_table_append_pad: fn(out: &[U8], value: [U8], width: Int, alignment: Jet
         // copy: `value` stays with the caller (`value` is a read parameter: no move out of it,
         // E0201) and the argument of `jet_cli_table_bound_text` owns its own.
         bounded: jet_cli_table_bound_text(value.copy())
-        jet_cli_table_append_pad(&out, bounded, width, alignment)
+        jet_cli_table_append_pad(out, bounded, width, alignment)
         return
     }
     visible: jet_cli_table_text_width(value)
     if visible > width {
         clipped: jet_cli_table_clip(value, width, true)
-        jet_cli_table_append_pad(&out, clipped, width, alignment)
+        jet_cli_table_append_pad(out, clipped, width, alignment)
         return
     }
     gap: jet_cli_table_sub(width, visible)
@@ -463,7 +463,7 @@ jet_cli_table_append_pad: fn(out: &[U8], value: [U8], width: Int, alignment: Jet
         .Right -> gap
         .Center -> gap /% 2
     }
-    jet_cli_table_repeat(&out, U8{32}, left)
-    foundation_append_read_bytes(&out, value, 0, value.len())
-    jet_cli_table_repeat(&out, U8{32}, gap - left)
+    jet_cli_table_repeat(out, U8{32}, left)
+    foundation_append_read_bytes(out, value, 0, value.len())
+    jet_cli_table_repeat(out, U8{32}, gap - left)
 }

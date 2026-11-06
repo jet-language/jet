@@ -245,7 +245,7 @@ core_call_parameter_contract: fn(module_name: String, member: String) -> [CoreCa
     }
 }
 
-core_sig_apply_parameter_contract: fn(signature: ^CoreTypedCallSignature, contracts: [CoreCallParameterContract]) -> CoreTypedCallSignature? {
+core_sig_apply_parameter_contract: fn(signature: &&CoreTypedCallSignature, contracts: [CoreCallParameterContract]) -> CoreTypedCallSignature? {
     updated := signature
     if updated.parameters.len() != contracts.len() -> return None
     required_count := 0
@@ -297,7 +297,7 @@ core_sig_math_fixed: fn(module_name: String, member: String) -> CoreTypedCallSig
         }
         if member == "cartesian" || member == "zip_longest" {
             parameters := [CoreCallTypedParameter]{core_sig_positional(list_int, read), core_sig_positional(list_int, read)}
-            if member == "zip_longest" -> &parameters.push(core_sig_positional(integer, read))
+            if member == "zip_longest" -> parameters.push(core_sig_positional(integer, read))
             return Val(core_sig(module_name, member, parameters, Val(list_list_int)))
         }
         if core_sig_one_of(member, [String]{"pairwise", "groupby", "powerset"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(list_int, read)}, Val(list_list_int)))
@@ -443,13 +443,13 @@ core_sig_network: fn(request: CoreCallSignatureRequest) -> CoreTypedCallSignatur
             core_sig_positional(core_sig_named("TCPStream"), AccessConvention.Move),
             core_sig_param_type("server_name", "server_name", ParamZone.LabelOnly, Type.String),
         }
-        if request.actual_arity == 4 -> &parameters.push(core_sig_param_type("config", "config", ParamZone.LabelOnly, core_sig_named("ClientConfig")))
-        &parameters.push(core_sig_param_type("deadline", "deadline", ParamZone.LabelOnly, core_sig_named("Duration")))
+        if request.actual_arity == 4 -> parameters.push(core_sig_param_type("config", "config", ParamZone.LabelOnly, core_sig_named("ClientConfig")))
+        parameters.push(core_sig_param_type("deadline", "deadline", ParamZone.LabelOnly, core_sig_named("Duration")))
         return Val(core_sig(request.module_name, request.member, parameters, Val(core_sig_result(core_sig_named("TLSStream"), core_sig_named("NetError")))))
     }
     if request.module_name == "core.net" && request.member == "unix_connect" && (request.actual_arity == 1 || request.actual_arity == 2) {
         parameters := [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}
-        if request.actual_arity == 2 -> &parameters.push(core_sig_param_type("deadline", "deadline", ParamZone.LabelOnly, core_sig_named("Duration")))
+        if request.actual_arity == 2 -> parameters.push(core_sig_param_type("deadline", "deadline", ParamZone.LabelOnly, core_sig_named("Duration")))
         return Val(core_sig(request.module_name, request.member, parameters, Val(core_sig_result(core_sig_named("UnixStream"), core_sig_named("NetError")))))
     }
     // Rust `infer_core_call` arms: the HTTP
@@ -539,11 +539,11 @@ core_sig_regex: fn(module_name: String, member: String) -> CoreTypedCallSignatur
         "find_all" | "findall" | "split" -> result = Val(Type.List{element: string})
         "matches" | "finditer" -> result = Val(Type.List{element: matched})
         "replace" | "replace_first" | "sub" | "subn" -> {
-            &parameters.push(core_sig_positional(string, read))
+            parameters.push(core_sig_positional(string, read))
             result = Val(if member == "subn" -> Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "text", ty: string}, TypeTupleField{name: "count", ty: Type.Int}}} else -> string)
         }
         "split_limit" -> {
-            &parameters.push(core_sig_positional(Type.Int, read))
+            parameters.push(core_sig_positional(Type.Int, read))
             result = Val(Type.List{element: string})
         }
         else -> return None
@@ -567,8 +567,8 @@ core_sig_encoding_backing: fn(request: CoreCallSignatureRequest) -> CoreTypedCal
     if module_name == "core.mem" && core_sig_one_of(member, [String]{"__list_capacity", "__list_reserve_exact", "__type_size"}) {
         element: core_sig_named("T")
         params := [CoreCallTypedParameter]{}
-        if member != "__type_size" -> &params.push(core_sig_positional(Type.List{element: element}, if member == "__list_reserve_exact" -> write else -> read))
-        if member == "__list_reserve_exact" -> &params.push(core_sig_positional(Type.Int, read))
+        if member != "__type_size" -> params.push(core_sig_positional(Type.List{element: element}, if member == "__list_reserve_exact" -> write else -> read))
+        if member == "__list_reserve_exact" -> params.push(core_sig_positional(Type.Int, read))
         result: if member == "__list_reserve_exact" -> Type.Bool else -> Type.Int
         return Val(core_sig_generic(module_name, member, params, Val(result), core_sig_type_parameter("T", CoreCallTypeConstraint.Any)))
     }
@@ -722,7 +722,7 @@ core_call_typed_signature_for: fn(request: CoreCallSignatureRequest) -> CoreType
     if request.type_args.len() > 0 && request.type_args.len() != resolved_signature.type_parameters.len() -> return None
     contracts: core_call_parameter_contract(request.module_name, request.member)
     if contracts == Val(contract_rows) {
-        resolved_signature = core_sig_apply_parameter_contract(^resolved_signature, contract_rows) ?? return None
+        resolved_signature = core_sig_apply_parameter_contract(resolved_signature, contract_rows) ?? return None
     }
     if request.actual_arity < resolved_signature.min_arity || request.actual_arity > resolved_signature.max_arity -> return None
     Val(resolved_signature)

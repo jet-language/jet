@@ -5,22 +5,22 @@ use {
     files: core.files
 }
 
-keep_file_reader: fn(value: ^json.JSONReader) -> json.JSONReader { value }
+keep_file_reader: fn(value: &&json.JSONReader) -> json.JSONReader { value }
 
-keep_record_reader: fn(value: ^jsonl.JSONLReader) -> jsonl.JSONLReader { value }
+keep_record_reader: fn(value: &&jsonl.JSONLReader) -> jsonl.JSONLReader { value }
 
 run: fn() {
     input: files.open("value.json") ?? panic("open")
-    file: json.reader(^input) ?? panic("file reader")
-    kept := keep_file_reader(^file)
-    _: &kept.next() ?? panic("file event")
+    file: json.reader(input) ?? panic("file reader")
+    kept := keep_file_reader(file)
+    _: kept.next() ?? panic("file event")
     print("file event")
 
     lines: files.open("value.jsonl") ?? panic("open records")
-    records: jsonl.reader(^lines) ?? panic("record reader")
-    kept_records := keep_record_reader(^records)
-    first: &kept_records.next() ?? panic("first record")
+    records: jsonl.reader(lines) ?? panic("record reader")
+    kept_records := keep_record_reader(records)
+    first: kept_records.next() ?? panic("first record")
     print(json.canonical(first) ?? panic("canonical first"))
-    second: &kept_records.next() ?? panic("second record")
+    second: kept_records.next() ?? panic("second record")
     print(json.canonical(second) ?? panic("canonical second"))
 }

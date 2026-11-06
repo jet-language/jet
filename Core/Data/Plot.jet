@@ -13,10 +13,10 @@ use core.data.[
 /// observations; excess values are not silently rendered without an x label.
 plot: fn(mark: JetDataPlotMark, labels: [String], values: [Float]) -> JetDataPlotPlan Never! {
     xs := [String]{}
-    loop label in labels -> &xs.push(label.copy())
+    loop label in labels -> xs.push(label.copy())
     ys := [Float]{}
     loop i in 0..<labels.len() {
-        if i < values.len() -> &ys.push(values[i]) else -> &ys.push(Float{0.0})
+        if i < values.len() -> ys.push(values[i]) else -> ys.push(Float{0.0})
     }
     h := 24 * xs.len() + 16
     if mark == JetDataPlotMark.Line || mark == JetDataPlotMark.Point -> h = 120
@@ -33,25 +33,25 @@ plot: fn(mark: JetDataPlotMark, labels: [String], values: [Float]) -> JetDataPlo
 
 bar_text: fn(labels: [String], values: [Int]) -> String Never! {
     ys := [Float]{}
-    loop v in values -> &ys.push(Float{v})
+    loop v in values -> ys.push(Float{v})
     render_bar_text(labels, align_values(labels, ys))
 }
 
 bar_svg: fn(labels: [String], values: [Int]) -> String Never! {
     ys := [Float]{}
-    loop v in values -> &ys.push(Float{v})
+    loop v in values -> ys.push(Float{v})
     render_bar_svg(labels, align_values(labels, ys))
 }
 
 line_text: fn(labels: [String], values: [Int]) -> String Never! {
     ys := [Float]{}
-    loop v in values -> &ys.push(Float{v})
+    loop v in values -> ys.push(Float{v})
     render_line_text(labels, align_values(labels, ys))
 }
 
 line_svg: fn(labels: [String], values: [Int]) -> String Never! {
     ys := [Float]{}
-    loop v in values -> &ys.push(Float{v})
+    loop v in values -> ys.push(Float{v})
     render_line_svg(labels, align_values(labels, ys))
 }
 
@@ -89,7 +89,7 @@ show: fn(plan: JetDataPlotPlan) -> String Never! { text(plan) }
 normalize_plan: fn(plan: JetDataPlotPlan) -> JetDataPlotPlan {
     ys := [Float]{}
     loop i in 0..<plan.labels.len() {
-        if i < plan.values.len() -> &ys.push(plan.values[i]) else -> &ys.push(Float{0.0})
+        if i < plan.values.len() -> ys.push(plan.values[i]) else -> ys.push(Float{0.0})
     }
     h := plan.layout.height
     if plan.mark == JetDataPlotMark.Line || plan.mark == JetDataPlotMark.Point -> h = 120
@@ -106,7 +106,7 @@ normalize_plan: fn(plan: JetDataPlotPlan) -> JetDataPlotPlan {
 align_values: fn(labels: [String], values: [Float]) -> [Float] {
     out := [Float]{}
     loop i in 0..<labels.len() {
-        if i < values.len() -> &out.push(values[i]) else -> &out.push(Float{0.0})
+        if i < values.len() -> out.push(values[i]) else -> out.push(Float{0.0})
     }
     out
 }
@@ -245,7 +245,7 @@ xml_escape: fn(text: String) -> String {
             out = "{out}{chunk_text}{entity}"
             chunk = [U8]{}
         } else {
-            &chunk.push(b)
+            chunk.push(b)
         }
     }
     tail: String.from_bytes(chunk) ?? panic("plot XML label encoding failed")

@@ -25,7 +25,7 @@ kit_steps_json_rows: fn(text: String, assertion: KitAssertion) -> String? {
     selected: kit_steps_json_values(text, assertion.json_mode, assertion.json_path) ?? return Val("JSON each selection failed")
     rows := [Dyn]{}
     loop value in selected {
-        if value == { .Array(items) -> { loop item in items -> &rows.push(item) } else -> &rows.push(value) }
+        if value == { .Array(items) -> { loop item in items -> rows.push(item) } else -> rows.push(value) }
     }
     loop row in rows {
         body := assertion.value

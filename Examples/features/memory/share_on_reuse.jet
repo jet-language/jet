@@ -1,7 +1,7 @@
 // D-COPY-DEFAULT1=A: an unmarked use gives a value away only when it is the
 // name's last use. When the name is used again, that earlier use shares the
 // value instead: each holder has its own value, so a write through one never
-// shows in the other. `^name` stays an exact move and `name.copy()` an explicit copy.
+// shows in the other. `name.move()` stays an exact move and `name.copy()` an explicit copy.
 Shape: enum {
     Named(String)
     Blank
@@ -20,7 +20,7 @@ before_limit: fn(items: [Int], limit: Int) -> [Int] {
     seen := [Int]{}
     loop item in items {
         if item > limit -> return seen
-        &seen.push(item)
+        seen.push(item)
     }
     seen
 }
@@ -28,7 +28,7 @@ before_limit: fn(items: [Int], limit: Int) -> [Int] {
 run: fn() {
     xs := [1, 2, 3]
     ys := xs
-    &ys.push(4)
+    ys.push(4)
     print("xs has {xs.len()}, ys has {ys.len()}")
 
     shape := Shape.Named("box")
@@ -40,7 +40,7 @@ run: fn() {
 
     loop round in 0..<2 {
         group := xs
-        &group.push(round)
+        group.push(round)
         print("round {round}: group {group}")
     }
     print("xs is still {xs}")

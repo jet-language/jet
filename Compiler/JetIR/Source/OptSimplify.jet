@@ -54,29 +54,29 @@ ir_opt_simplify: fn(m: IRModule, f: &IRFunction, report: &IROptReport) Never! {
         // are computed again only after one does (most sweeps change
         // nothing, and the last round none).
         facts := ir_opt_facts(f)
-        changed := ir_opt_fold(m, &f, facts, fixed, &report)
-        changed += ir_opt_unreachable(&f, &report)
+        changed := ir_opt_fold(m, f, facts, fixed, report)
+        changed += ir_opt_unreachable(f, report)
         if changed > 0 -> facts = ir_opt_facts(f)
-        step := ir_opt_fuse_compares(m, &f, facts, &report)
+        step := ir_opt_fuse_compares(m, f, facts, report)
         if step > 0 -> facts = ir_opt_facts(f)
         changed += step
-        step = ir_opt_common(m, &f, facts)
+        step = ir_opt_common(m, f, facts)
         if step > 0 -> facts = ir_opt_facts(f)
         changed += step
-        step = ir_opt_propagate(m, &f, facts, &report)
+        step = ir_opt_propagate(m, f, facts, report)
         if step > 0 -> facts = ir_opt_facts(f)
         changed += step
-        step = ir_opt_addresses(&f, facts)
+        step = ir_opt_addresses(f, facts)
         if step > 0 -> facts = ir_opt_facts(f)
         changed += step
-        step = ir_opt_coalesce(&f, facts, &report)
+        step = ir_opt_coalesce(f, facts, report)
         if step > 0 -> facts = ir_opt_facts(f)
         changed += step
-        changed += ir_opt_dead(m, &f, facts, &report)
-        changed += ir_opt_structure(&f, &report)
-        changed += ir_opt_unwrap(&f)
-        ir_opt_compact(&f)
-        changed += ir_opt_short_circuits(&f, &report)
+        changed += ir_opt_dead(m, f, facts, report)
+        changed += ir_opt_structure(f, report)
+        changed += ir_opt_unwrap(f)
+        ir_opt_compact(f)
+        changed += ir_opt_short_circuits(f, report)
         if changed == 0 -> break
         round += 1
     }
@@ -117,16 +117,16 @@ ir_opt_nesting: fn(f: IRFunction) -> OptNesting Never! {
     end := [Int]{}
     els := [Int]{}
     loop _ in 0..<f.op.len() {
-        &end.push(-1)
-        &els.push(-1)
+        end.push(-1)
+        els.push(-1)
     }
     open := [Int]{}
     loop at in 0..<f.op.len() {
         if f.op[at] == {
-            .Block | .Loop | .If -> &open.push(at)
+            .Block | .Loop | .If -> open.push(at)
             .Else -> els[open[open.len() - 1]] = at
             .End -> {
-                opener: &open.pop() ?? panic("ir_opt_nesting: End without an open construct")
+                opener: open.pop() ?? panic("ir_opt_nesting: End without an open construct")
                 end[opener] = at
             }
             else -> {}
@@ -192,7 +192,7 @@ ir_opt_set_const: fn(f: &IRFunction, at: Int, value: Int) Never! {
 }
 
 ir_opt_set_copy: fn(f: &IRFunction, at: Int, source: Int) Never! {
-    if f.dst[at] == source -> return ir_opt_kill(&f, at)
+    if f.dst[at] == source -> return ir_opt_kill(f, at)
     f.op[at] = .Copy
     f.a[at] = source
     f.b[at] = -1
@@ -206,7 +206,7 @@ ir_opt_fold: fn(m: IRModule, f: &IRFunction, facts: OptFacts, fixed: Int, report
         op: f.op[at]
         if op == .If || op == .BrIf {
             value: ir_opt_const_at(f, facts, f.a[at], at) ?? next
-            ir_opt_fold_branch(&f, nesting, at, value != 0)
+            ir_opt_fold_branch(f, nesting, at, value != 0)
             report.branches_folded += 1
             changed += 1
             next
@@ -215,7 +215,7 @@ ir_opt_fold: fn(m: IRModule, f: &IRFunction, facts: OptFacts, fixed: Int, report
             ty: ir_opt_type(m, f, f.a[at])
             if ty.kind != .Bool -> next
             value: ir_opt_const_at(f, facts, f.a[at], at) ?? next
-            ir_opt_set_const(&f, at, if value != 0 -> 0 else -> 1)
+            ir_opt_set_const(f, at, if value != 0 -> 0 else -> 1)
             report.folded += 1
             changed += 1
             next
@@ -227,7 +227,7 @@ ir_opt_fold: fn(m: IRModule, f: &IRFunction, facts: OptFacts, fixed: Int, report
             if ty.kind == .Int && ir_int_inline(0 - value) -> folded = Val(0 - value)
             if ty.kind == .Word && ty.signed -> folded = ir_opt_word(ty, 0 - value, f.c[at] != IR_OVERFLOW_WRAP)
             result: folded ?? next
-            ir_opt_set_const(&f, at, result)
+            ir_opt_set_const(f, at, result)
             report.folded += 1
             changed += 1
             next
@@ -258,7 +258,7 @@ ir_opt_fold: fn(m: IRModule, f: &IRFunction, facts: OptFacts, fixed: Int, report
         right_slot: f.b[at]
         if ir_opt_is_compare(op) && left_slot == right_slot {
             // A value against itself (never Float: NaN).
-            ir_opt_set_const(&f, at, if op == .Eq || op == .Le || op == .Ge -> 1 else -> 0)
+            ir_opt_set_const(f, at, if op == .Eq || op == .Le || op == .Ge -> 1 else -> 0)
             report.folded += 1
             changed += 1
             next
@@ -271,12 +271,12 @@ ir_opt_fold: fn(m: IRModule, f: &IRFunction, facts: OptFacts, fixed: Int, report
         r: right ?? 0
         if has_l && has_r && !bitwise && !identity_only {
             value: ir_opt_fold_value(ty, op, l, r, f.c[at] != IR_OVERFLOW_WRAP) ?? next
-            ir_opt_set_const(&f, at, value)
+            ir_opt_set_const(f, at, value)
             report.folded += 1
             changed += 1
             next
         }
-        if op == .Mul && ir_opt_floor_multiple(&f, facts, at, ty) {
+        if op == .Mul && ir_opt_floor_multiple(f, facts, at, ty) {
             report.folded += 1
             changed += 1
             next
@@ -288,27 +288,27 @@ ir_opt_fold: fn(m: IRModule, f: &IRFunction, facts: OptFacts, fixed: Int, report
         zero_l: has_l && l == 0
         zero_r: has_r && r == 0
         if (op == .Add || op == .Sub || op == .BitOr || op == .BitXor) && zero_r {
-            ir_opt_set_copy(&f, at, left_slot)
+            ir_opt_set_copy(f, at, left_slot)
         } else if (op == .Add || op == .BitOr || op == .BitXor) && zero_l {
-            ir_opt_set_copy(&f, at, right_slot)
+            ir_opt_set_copy(f, at, right_slot)
         } else if op == .Mul && has_r && r == 1 {
-            ir_opt_set_copy(&f, at, left_slot)
+            ir_opt_set_copy(f, at, left_slot)
         } else if op == .Mul && has_l && l == 1 {
-            ir_opt_set_copy(&f, at, right_slot)
+            ir_opt_set_copy(f, at, right_slot)
         } else if (op == .Mul || op == .BitAnd) && (zero_l || zero_r) {
-            ir_opt_set_const(&f, at, 0)
+            ir_opt_set_const(f, at, 0)
         } else if (op == .Sub || op == .BitXor) && left_slot == right_slot {
-            ir_opt_set_const(&f, at, 0)
+            ir_opt_set_const(f, at, 0)
         } else if (op == .BitAnd || op == .BitOr) && left_slot == right_slot {
-            ir_opt_set_copy(&f, at, left_slot)
+            ir_opt_set_copy(f, at, left_slot)
         } else if (op == .Shl || op == .Shr) && zero_r {
-            ir_opt_set_copy(&f, at, left_slot)
+            ir_opt_set_copy(f, at, left_slot)
         } else if op == .Div && has_r && r == 1 {
-            ir_opt_set_copy(&f, at, left_slot)
+            ir_opt_set_copy(f, at, left_slot)
         } else if op == .BitAnd && all_ones && has_r && r == -1 {
-            ir_opt_set_copy(&f, at, left_slot)
+            ir_opt_set_copy(f, at, left_slot)
         } else if op == .BitAnd && all_ones && has_l && l == -1 {
-            ir_opt_set_copy(&f, at, right_slot)
+            ir_opt_set_copy(f, at, right_slot)
         } else {
             next
         }
@@ -393,7 +393,7 @@ ir_opt_fixed_high: fn(kind: Int) -> Int Never! {
 // An If or BrIf at `at` whose condition is the constant `taken`.
 ir_opt_fold_branch: fn(f: &IRFunction, nesting: OptNesting, at: Int, taken: Bool) Never! {
     if f.op[at] == .BrIf {
-        if !taken -> return ir_opt_kill(&f, at)
+        if !taken -> return ir_opt_kill(f, at)
         depth: f.b[at]
         f.op[at] = .Br
         f.a[at] = depth
@@ -407,17 +407,17 @@ ir_opt_fold_branch: fn(f: &IRFunction, nesting: OptNesting, at: Int, taken: Bool
         f.op[at] = .Block
         f.a[at] = -1
         if other >= 0 {
-            loop k in other..<end -> ir_opt_kill(&f, k)
+            loop k in other..<end -> ir_opt_kill(f, k)
         }
         return
     }
     if other < 0 {
-        loop k in at..<(end + 1) -> ir_opt_kill(&f, k)
+        loop k in at..<(end + 1) -> ir_opt_kill(f, k)
         return
     }
     f.op[at] = .Block
     f.a[at] = -1
-    loop k in (at + 1)..<(other + 1) -> ir_opt_kill(&f, k)
+    loop k in (at + 1)..<(other + 1) -> ir_opt_kill(f, k)
 }
 
 // ---------------------------------------------------------------------------
@@ -440,7 +440,7 @@ ir_opt_unreachable: fn(f: &IRFunction, report: &IROptReport) -> Int Never! {
             if (next_op == .Else || next_op == .End) && depth == 0 -> break
             if next_op == .Block || next_op == .Loop || next_op == .If -> depth += 1
             if next_op == .End -> depth -= 1
-            ir_opt_kill(&f, at)
+            ir_opt_kill(f, at)
             removed += 1
             at += 1
         }
@@ -459,7 +459,7 @@ ir_opt_unreachable: fn(f: &IRFunction, report: &IROptReport) -> Int Never! {
 ir_opt_fuse_compares: fn(m: IRModule, f: &IRFunction, facts: OptFacts, report: &IROptReport) -> Int Never! {
     changed := 0
     pairs := [Int]{}
-    loop _ in 0..<f.slot_type.len() -> &pairs.push(0)
+    loop _ in 0..<f.slot_type.len() -> pairs.push(0)
     loop at in 1..<f.op.len() {
         if f.op[at] == .Not && f.a[at] >= 0 && ir_opt_fused_def(f, at) >= 0 -> pairs[f.a[at]] = pairs[f.a[at]] + 1
     }
@@ -475,7 +475,7 @@ ir_opt_fuse_compares: fn(m: IRModule, f: &IRFunction, facts: OptFacts, report: &
         f.a[at] = f.a[def]
         f.b[at] = f.b[def]
         f.c[at] = f.c[def]
-        ir_opt_kill(&f, def)
+        ir_opt_kill(f, def)
         report.compares_fused += 1
         changed += 1
     }
@@ -536,9 +536,9 @@ ir_opt_fused_def: fn(f: IRFunction, at: Int) -> Int Never! {
 // circuits the one before exposed, until it exposes none.
 ir_opt_short_circuits: fn(f: &IRFunction, report: &IROptReport) -> Int Never! {
     exposed := [Int]{}
-    total := ir_opt_short_pass(&f, &report, &exposed, true)
+    total := ir_opt_short_pass(f, report, exposed, true)
     loop exposed.len() > 0 {
-        found: ir_opt_short_pass(&f, &report, &exposed, false)
+        found: ir_opt_short_pass(f, report, exposed, false)
         if found == 0 -> break
         total += found
     }
@@ -555,12 +555,12 @@ ir_opt_short_pass: fn(f: &IRFunction, report: &IROptReport, exposed: &[Int], fir
     nesting: ir_opt_nesting(f)
     wanted := [Bool]{}
     if !first {
-        loop _ in 0..<f.slot_kind.len() -> &wanted.push(false)
+        loop _ in 0..<f.slot_kind.len() -> wanted.push(false)
         loop slot in exposed -> wanted[slot] = true
     }
-    &exposed.clear()
+    exposed.clear()
     seeds := [Int]{}
-    loop _ in 0..<count -> &seeds.push(-1)
+    loop _ in 0..<count -> seeds.push(-1)
     found := 0
     loop at in 1..<count {
         if f.op[at] == .If && ir_opt_short_circuit_at(f, facts, nesting, at) {
@@ -569,7 +569,7 @@ ir_opt_short_pass: fn(f: &IRFunction, report: &IROptReport, exposed: &[Int], fir
             seeds[ir_opt_short_circuit_copy(f, at)] = at
             found += 1
             last: end - 1
-            if f.op[last] == .Not && f.op[last - 1] == .End -> &exposed.push(f.dst[last])
+            if f.op[last] == .Not && f.op[last - 1] == .End -> exposed.push(f.dst[last])
         }
     }
     if found == 0 -> return 0
@@ -578,20 +578,20 @@ ir_opt_short_pass: fn(f: &IRFunction, report: &IROptReport, exposed: &[Int], fir
     loop at in 0..<count {
         op: f.op[at]
         if op == .End || op == .Else -> depth -= 1
-        &open.push(depth)
+        open.push(depth)
         if op == .Block || op == .Loop || op == .If || op == .Else -> depth += 1
     }
-    plan: OptShortPlan{nesting: ^nesting, seeds: ^seeds, open: ^open}
+    plan: OptShortPlan{nesting: nesting.move(), seeds: seeds.move(), open: open.move()}
     rows := OptRows{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}}
     levels := [OptShift]{}
-    ir_opt_short_moved(&rows, &f, plan, &levels, 0, count, 0)
-    f.op = ^rows.op
-    f.dst = ^rows.dst
-    f.a = ^rows.a
-    f.b = ^rows.b
-    f.c = ^rows.c
-    f.code_line = ^rows.line
-    ir_opt_compact(&f)
+    ir_opt_short_moved(rows, f, plan, levels, 0, count, 0)
+    f.op = rows.op.move()
+    f.dst = rows.dst.move()
+    f.a = rows.a.move()
+    f.b = rows.b.move()
+    f.c = rows.c.move()
+    f.code_line = rows.line.move()
+    ir_opt_compact(f)
     report.short_circuits += found
     found
 }
@@ -682,12 +682,12 @@ OptRows: struct {
 }
 
 ir_opt_row: fn(rows: &OptRows, op: IROp, dst: Int, a: Int, b: Int, c: Int, line: Int) Never! {
-    &rows.op.push(op)
-    &rows.dst.push(dst)
-    &rows.a.push(a)
-    &rows.b.push(b)
-    &rows.c.push(c)
-    &rows.line.push(line)
+    rows.op.push(op)
+    rows.dst.push(dst)
+    rows.a.push(a)
+    rows.b.push(b)
+    rows.c.push(c)
+    rows.line.push(line)
 }
 
 // Instructions `from..<to` of `f` onto `rows`, each Br that leaves the
@@ -696,12 +696,12 @@ ir_opt_row: fn(rows: &OptRows, op: IROp, dst: Int, a: Int, b: Int, c: Int, line:
 // is among them rewritten.
 ir_opt_short_moved: fn(rows: &OptRows, f: &IRFunction, plan: OptShortPlan, levels: &[OptShift], from: Int, to: Int, shift: Int) Never! {
     if from >= to -> return
-    &levels.push(OptShift{open: plan.open[from], shift: shift})
+    levels.push(OptShift{open: plan.open[from], shift: shift})
     k := from
     loop k < to {
         at: plan.seeds[k]
         if at >= 0 {
-            k = ir_opt_short_circuit_rewrite(&rows, &f, plan, &levels, at)
+            k = ir_opt_short_circuit_rewrite(rows, f, plan, levels, at)
             next
         }
         op: f.op[k]
@@ -709,10 +709,10 @@ ir_opt_short_moved: fn(rows: &OptRows, f: &IRFunction, plan: OptShortPlan, level
         b := f.b[k]
         if op == .Br -> a = ir_opt_short_depth(plan, levels, k, a)
         if op == .BrIf -> b = ir_opt_short_depth(plan, levels, k, b)
-        ir_opt_row(&rows, op, f.dst[k], a, b, f.c[k], f.code_line[k])
+        ir_opt_row(rows, op, f.dst[k], a, b, f.c[k], f.code_line[k])
         k += 1
     }
-    _ := &levels.pop()
+    _ := levels.pop()
 }
 
 // Br depth `depth` of instruction `k` once every range in `levels` moved it:
@@ -728,7 +728,7 @@ ir_opt_short_depth: fn(plan: OptShortPlan, levels: [OptShift], k: Int, depth: In
 
 // A fresh Bool temporary of `like`'s type.
 ir_opt_bool_temp: fn(f: &IRFunction, like: Int) -> Int Never! {
-    ir_slot(&f, f.slot_type[like], IRSlotKind.Temp, -1, 0)
+    ir_slot(f, f.slot_type[like], IRSlotKind.Temp, -1, 0)
 }
 
 // Short circuit If `at` rewritten onto `rows`; returns the instruction
@@ -746,26 +746,26 @@ ir_opt_short_circuit_rewrite: fn(rows: &OptRows, f: &IRFunction, plan: OptShortP
     branch: if negated -> end + 2 else -> end + 1
     // `t = not c1` stays for the forms that test t; dead code drops it
     // where they do not.
-    if is_or -> ir_opt_short_moved(&rows, &f, plan, &levels, seed + 1, at, 0)
+    if is_or -> ir_opt_short_moved(rows, f, plan, levels, seed + 1, at, 0)
     if f.op[branch] == .BrIf {
         d: ir_opt_short_depth(plan, levels, branch, f.b[branch])
         if is_or == negated {
             // and: c1 && c2; negated or: !c1 && !c2. Both branch inside If.
-            test: if negated -> ir_opt_bool_temp(&f, r) else -> r
-            ir_opt_row(&rows, IROp.If, -1, t, -1, -1, line)
-            ir_opt_short_moved(&rows, &f, plan, &levels, at + 1, end, 0)
-            if negated -> ir_opt_row(&rows, IROp.Not, test, r, -1, -1, line)
-            ir_opt_row(&rows, IROp.BrIf, -1, test, d + 1, -1, line)
-            ir_opt_row(&rows, IROp.End, -1, -1, -1, -1, line)
+            test: if negated -> ir_opt_bool_temp(f, r) else -> r
+            ir_opt_row(rows, IROp.If, -1, t, -1, -1, line)
+            ir_opt_short_moved(rows, f, plan, levels, at + 1, end, 0)
+            if negated -> ir_opt_row(rows, IROp.Not, test, r, -1, -1, line)
+            ir_opt_row(rows, IROp.BrIf, -1, test, d + 1, -1, line)
+            ir_opt_row(rows, IROp.End, -1, -1, -1, -1, line)
         } else {
             // or: c1 || c2; negated and: !c1 || !c2. Branch on either.
-            first: if negated -> ir_opt_bool_temp(&f, r) else -> c1
-            test: if negated -> ir_opt_bool_temp(&f, r) else -> r
-            if negated -> ir_opt_row(&rows, IROp.Not, first, c1, -1, -1, line)
-            ir_opt_row(&rows, IROp.BrIf, -1, first, d, -1, line)
-            ir_opt_short_moved(&rows, &f, plan, &levels, at + 1, end, -1)
-            if negated -> ir_opt_row(&rows, IROp.Not, test, r, -1, -1, line)
-            ir_opt_row(&rows, IROp.BrIf, -1, test, d, -1, line)
+            first: if negated -> ir_opt_bool_temp(f, r) else -> c1
+            test: if negated -> ir_opt_bool_temp(f, r) else -> r
+            if negated -> ir_opt_row(rows, IROp.Not, first, c1, -1, -1, line)
+            ir_opt_row(rows, IROp.BrIf, -1, first, d, -1, line)
+            ir_opt_short_moved(rows, f, plan, levels, at + 1, end, -1)
+            if negated -> ir_opt_row(rows, IROp.Not, test, r, -1, -1, line)
+            ir_opt_row(rows, IROp.BrIf, -1, test, d, -1, line)
         }
         return branch + 1
     }
@@ -784,47 +784,47 @@ ir_opt_short_circuit_rewrite: fn(rows: &OptRows, f: &IRFunction, plan: OptShortP
         no_to = then_end
     }
     if !is_or && no_from == no_to {
-        ir_opt_row(&rows, IROp.If, -1, c1, -1, -1, line)
-        ir_opt_short_moved(&rows, &f, plan, &levels, at + 1, end, 0)
-        ir_opt_row(&rows, IROp.If, -1, r, -1, -1, line)
-        ir_opt_short_moved(&rows, &f, plan, &levels, yes_from, yes_to, 1)
-        ir_opt_row(&rows, IROp.End, -1, -1, -1, -1, line)
-        ir_opt_row(&rows, IROp.End, -1, -1, -1, -1, line)
+        ir_opt_row(rows, IROp.If, -1, c1, -1, -1, line)
+        ir_opt_short_moved(rows, f, plan, levels, at + 1, end, 0)
+        ir_opt_row(rows, IROp.If, -1, r, -1, -1, line)
+        ir_opt_short_moved(rows, f, plan, levels, yes_from, yes_to, 1)
+        ir_opt_row(rows, IROp.End, -1, -1, -1, -1, line)
+        ir_opt_row(rows, IROp.End, -1, -1, -1, -1, line)
     } else if !is_or {
-        ir_opt_short_blocks(&rows, 1, c1, line)
-        ir_opt_row(&rows, IROp.If, -1, c1, -1, -1, line)
-        ir_opt_short_moved(&rows, &f, plan, &levels, at + 1, end, 1)
+        ir_opt_short_blocks(rows, 1, c1, line)
+        ir_opt_row(rows, IROp.If, -1, c1, -1, -1, line)
+        ir_opt_short_moved(rows, f, plan, levels, at + 1, end, 1)
         if yes_from == yes_to {
-            ir_opt_row(&rows, IROp.BrIf, -1, r, 1, -1, line)
+            ir_opt_row(rows, IROp.BrIf, -1, r, 1, -1, line)
         } else {
-            ir_opt_row(&rows, IROp.If, -1, r, -1, -1, line)
-            ir_opt_short_moved(&rows, &f, plan, &levels, yes_from, yes_to, 2)
-            ir_opt_row(&rows, IROp.Br, -1, 2, -1, -1, line)
-            ir_opt_row(&rows, IROp.End, -1, -1, -1, -1, line)
+            ir_opt_row(rows, IROp.If, -1, r, -1, -1, line)
+            ir_opt_short_moved(rows, f, plan, levels, yes_from, yes_to, 2)
+            ir_opt_row(rows, IROp.Br, -1, 2, -1, -1, line)
+            ir_opt_row(rows, IROp.End, -1, -1, -1, -1, line)
         }
-        ir_opt_row(&rows, IROp.End, -1, -1, -1, -1, line)
-        ir_opt_short_moved(&rows, &f, plan, &levels, no_from, no_to, 0)
-        ir_opt_row(&rows, IROp.End, -1, -1, -1, -1, line)
+        ir_opt_row(rows, IROp.End, -1, -1, -1, -1, line)
+        ir_opt_short_moved(rows, f, plan, levels, no_from, no_to, 0)
+        ir_opt_row(rows, IROp.End, -1, -1, -1, -1, line)
     } else if no_from == no_to {
-        skip: ir_opt_bool_temp(&f, r)
-        ir_opt_short_blocks(&rows, 1, c1, line)
-        ir_opt_row(&rows, IROp.If, -1, t, -1, -1, line)
-        ir_opt_short_moved(&rows, &f, plan, &levels, at + 1, end, 1)
-        ir_opt_row(&rows, IROp.Not, skip, r, -1, -1, line)
-        ir_opt_row(&rows, IROp.BrIf, -1, skip, 1, -1, line)
-        ir_opt_row(&rows, IROp.End, -1, -1, -1, -1, line)
-        ir_opt_short_moved(&rows, &f, plan, &levels, yes_from, yes_to, 0)
-        ir_opt_row(&rows, IROp.End, -1, -1, -1, -1, line)
+        skip: ir_opt_bool_temp(f, r)
+        ir_opt_short_blocks(rows, 1, c1, line)
+        ir_opt_row(rows, IROp.If, -1, t, -1, -1, line)
+        ir_opt_short_moved(rows, f, plan, levels, at + 1, end, 1)
+        ir_opt_row(rows, IROp.Not, skip, r, -1, -1, line)
+        ir_opt_row(rows, IROp.BrIf, -1, skip, 1, -1, line)
+        ir_opt_row(rows, IROp.End, -1, -1, -1, -1, line)
+        ir_opt_short_moved(rows, f, plan, levels, yes_from, yes_to, 0)
+        ir_opt_row(rows, IROp.End, -1, -1, -1, -1, line)
     } else {
-        ir_opt_short_blocks(&rows, 2, c1, line)
-        ir_opt_row(&rows, IROp.BrIf, -1, c1, 0, -1, line)
-        ir_opt_short_moved(&rows, &f, plan, &levels, at + 1, end, 1)
-        ir_opt_row(&rows, IROp.BrIf, -1, r, 0, -1, line)
-        ir_opt_short_moved(&rows, &f, plan, &levels, no_from, no_to, 1)
-        ir_opt_row(&rows, IROp.Br, -1, 1, -1, -1, line)
-        ir_opt_row(&rows, IROp.End, -1, -1, -1, -1, line)
-        ir_opt_short_moved(&rows, &f, plan, &levels, yes_from, yes_to, 0)
-        ir_opt_row(&rows, IROp.End, -1, -1, -1, -1, line)
+        ir_opt_short_blocks(rows, 2, c1, line)
+        ir_opt_row(rows, IROp.BrIf, -1, c1, 0, -1, line)
+        ir_opt_short_moved(rows, f, plan, levels, at + 1, end, 1)
+        ir_opt_row(rows, IROp.BrIf, -1, r, 0, -1, line)
+        ir_opt_short_moved(rows, f, plan, levels, no_from, no_to, 1)
+        ir_opt_row(rows, IROp.Br, -1, 1, -1, -1, line)
+        ir_opt_row(rows, IROp.End, -1, -1, -1, -1, line)
+        ir_opt_short_moved(rows, f, plan, levels, yes_from, yes_to, 0)
+        ir_opt_row(rows, IROp.End, -1, -1, -1, -1, line)
     }
     close + 1
 }
@@ -844,17 +844,17 @@ ir_opt_short_blocks: fn(rows: &OptRows, count: Int, c1: Int, line: Int) Never! {
         tail = total
     }
     moved := OptRows{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}}
-    loop k in tail..<total -> ir_opt_row(&moved, rows.op[k], rows.dst[k], rows.a[k], rows.b[k], rows.c[k], rows.line[k])
+    loop k in tail..<total -> ir_opt_row(moved, rows.op[k], rows.dst[k], rows.a[k], rows.b[k], rows.c[k], rows.line[k])
     loop _ in tail..<total {
-        _ := &rows.op.pop()
-        _ := &rows.dst.pop()
-        _ := &rows.a.pop()
-        _ := &rows.b.pop()
-        _ := &rows.c.pop()
-        _ := &rows.line.pop()
+        _ := rows.op.pop()
+        _ := rows.dst.pop()
+        _ := rows.a.pop()
+        _ := rows.b.pop()
+        _ := rows.c.pop()
+        _ := rows.line.pop()
     }
-    loop _ in 0..<count -> ir_opt_row(&rows, IROp.Block, -1, -1, -1, -1, line)
-    loop k in 0..<moved.op.len() -> ir_opt_row(&rows, moved.op[k], moved.dst[k], moved.a[k], moved.b[k], moved.c[k], moved.line[k])
+    loop _ in 0..<count -> ir_opt_row(rows, IROp.Block, -1, -1, -1, -1, line)
+    loop k in 0..<moved.op.len() -> ir_opt_row(rows, moved.op[k], moved.dst[k], moved.a[k], moved.b[k], moved.c[k], moved.line[k])
 }
 
 // ---------------------------------------------------------------------------
@@ -870,9 +870,9 @@ ir_opt_short_blocks: fn(rows: &OptRows, count: Int, c1: Int, line: Int) Never! {
 ir_opt_propagate: fn(m: IRModule, f: &IRFunction, facts: OptFacts, report: &IROptReport) -> Int Never! {
     count: f.slot_type.len()
     replace := [Int]{}
-    loop _ in 0..<count -> &replace.push(-1)
+    loop _ in 0..<count -> replace.push(-1)
     killed := [Bool]{}
-    loop _ in 0..<f.op.len() -> &killed.push(false)
+    loop _ in 0..<f.op.len() -> killed.push(false)
     any := false
     loop at in 0..<f.op.len() {
         op: f.op[at]
@@ -895,7 +895,7 @@ ir_opt_propagate: fn(m: IRModule, f: &IRFunction, facts: OptFacts, report: &IROp
     // Every read of a replaced slot must be reached by its Move/Copy.
     reads := [Int]{}
     loop at in 0..<f.op.len() {
-        ir_x64_reads_into(f, at, &reads)
+        ir_x64_reads_into(f, at, reads)
         loop slot in reads {
             if slot < 0 || replace[slot] < 0 -> next
             if ir_opt_reaching_def(f, facts, slot, at) < 0 {
@@ -917,11 +917,11 @@ ir_opt_propagate: fn(m: IRModule, f: &IRFunction, facts: OptFacts, report: &IROp
     changed := 0
     loop at in 0..<f.op.len() {
         if killed[at] {
-            ir_opt_kill(&f, at)
+            ir_opt_kill(f, at)
             changed += 1
             next
         }
-        ir_opt_rename_reads(&f, at, replace)
+        ir_opt_rename_reads(f, at, replace)
     }
     report.copies_coalesced += changed
     changed
@@ -934,7 +934,7 @@ ir_opt_propagate_adjacent: fn(m: IRModule, f: IRFunction, facts: OptFacts, at: I
     if facts.uses[x] != 1 || facts.defs[y] == 1 || at + 1 >= f.op.len() -> return false
     if m.types[f.slot_type[y]].drop != "" -> return false
     reads := [Int]{}
-    ir_x64_reads_into(f, at + 1, &reads)
+    ir_x64_reads_into(f, at + 1, reads)
     reads.contains(x)
 }
 
@@ -1114,7 +1114,7 @@ ir_opt_coalesce: fn(f: &IRFunction, facts: OptFacts, report: &IROptReport) -> In
                 clean = false
                 break
             }
-            ir_x64_reads_into(f, k, &reads)
+            ir_x64_reads_into(f, k, reads)
             loop slot in reads {
                 if slot == x -> clean = false
             }
@@ -1122,7 +1122,7 @@ ir_opt_coalesce: fn(f: &IRFunction, facts: OptFacts, report: &IROptReport) -> In
         }
         if !clean -> next
         f.dst[def] = x
-        ir_opt_kill(&f, at)
+        ir_opt_kill(f, at)
         report.copies_coalesced += 1
         changed += 1
     }
@@ -1152,9 +1152,9 @@ ir_opt_sink_addresses: fn(m: IRModule, keys: [String], f: &IRFunction) -> Int Ne
     reads := [Int]{}
     at := f.op.len() - 1
     loop at >= 0 {
-        to: ir_opt_sink_target(m, keys, f, facts, at, &reads)
+        to: ir_opt_sink_target(m, keys, f, facts, at, reads)
         if to > at + 1 {
-            ir_opt_rotate(&f, at, to - 1)
+            ir_opt_rotate(f, at, to - 1)
             changed += 1
         }
         at -= 1
@@ -1174,7 +1174,7 @@ ir_opt_sink_target: fn(m: IRModule, keys: [String], f: IRFunction, facts: OptFac
     k := at + 1
     loop k < f.op.len() {
         if ir_opt_structural(f.op[k]) -> return -1
-        ir_x64_reads_into(f, k, &reads)
+        ir_x64_reads_into(f, k, reads)
         loop slot in reads {
             if slot == sum -> return if ir_opt_addresses_at(keys, f, op, sum, k) -> k else -> -1
         }
@@ -1270,11 +1270,11 @@ ir_opt_removable: fn(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
 // `facts` are the function's as it is now; each sweep after one that removed
 // something reads new ones.
 ir_opt_dead: fn(m: IRModule, f: &IRFunction, facts: OptFacts, report: &IROptReport) -> Int Never! {
-    total := ir_opt_dead_sweep(m, &f, facts)
+    total := ir_opt_dead_sweep(m, f, facts)
     removed := total
     loop removed > 0 {
         fresh: ir_opt_facts(f)
-        removed = ir_opt_dead_sweep(m, &f, fresh)
+        removed = ir_opt_dead_sweep(m, f, fresh)
         total += removed
     }
     report.dead_removed += total
@@ -1288,7 +1288,7 @@ ir_opt_dead_sweep: fn(m: IRModule, f: &IRFunction, facts: OptFacts) -> Int Never
         if op == .Drop {
             slot: f.a[at]
             if ir_opt_type(m, f, slot).kind == .Int && (ir_opt_const_at(f, facts, slot, at) != None || ir_opt_masked_at(f, facts, slot, at) != None) {
-                ir_opt_kill(&f, at)
+                ir_opt_kill(f, at)
                 removed += 1
             }
             next
@@ -1296,7 +1296,7 @@ ir_opt_dead_sweep: fn(m: IRModule, f: &IRFunction, facts: OptFacts) -> Int Never
         dst: f.dst[at]
         if dst < 0 || facts.uses[dst] != 0 -> next
         if !ir_opt_removable(m, f, at) && !ir_opt_quiet_division(m, f, facts, at) -> next
-        ir_opt_kill(&f, at)
+        ir_opt_kill(f, at)
         removed += 1
     }
     removed
@@ -1335,8 +1335,8 @@ ir_opt_structure: fn(f: &IRFunction, report: &IROptReport) -> Int Never! {
             .Block | .Loop | .If -> {
                 after: ir_opt_next_live(f, at + 1)
                 if after < f.op.len() && f.op[after] == .End {
-                    ir_opt_kill(&f, at)
-                    ir_opt_kill(&f, after)
+                    ir_opt_kill(f, at)
+                    ir_opt_kill(f, after)
                     changed += 1
                     at = after + 1
                     next
@@ -1344,23 +1344,23 @@ ir_opt_structure: fn(f: &IRFunction, report: &IROptReport) -> Int Never! {
                 if op == .If && after < f.op.len() && f.op[after] == .Else {
                     closing: ir_opt_next_live(f, after + 1)
                     if closing < f.op.len() && f.op[closing] == .End {
-                        ir_opt_kill(&f, at)
-                        ir_opt_kill(&f, after)
-                        ir_opt_kill(&f, closing)
+                        ir_opt_kill(f, at)
+                        ir_opt_kill(f, after)
+                        ir_opt_kill(f, closing)
                         changed += 1
                         at = closing + 1
                         next
                     }
                 }
-                &open.push(at)
+                open.push(at)
             }
-            .End -> _ := &open.pop()
+            .End -> _ := open.pop()
             .Br -> {
                 if f.a[at] == 0 && open.len() > 0 {
                     target: f.op[open[open.len() - 1]]
                     after: ir_opt_next_live(f, at + 1)
                     if after < f.op.len() && target != .Loop && (f.op[after] == .End || (f.op[after] == .Else && target == .If)) {
-                        ir_opt_kill(&f, at)
+                        ir_opt_kill(f, at)
                         changed += 1
                     }
                 }
@@ -1401,8 +1401,8 @@ ir_opt_unwrap: fn(f: &IRFunction) -> Int Never! {
             if op == .BrIf && f.b[k] > depth -> f.b[k] = f.b[k] - 1
             if op == .Block || op == .Loop || op == .If -> depth += 1
         }
-        ir_opt_kill(&f, at)
-        ir_opt_kill(&f, end)
+        ir_opt_kill(f, at)
+        ir_opt_kill(f, end)
         changed += 1
     }
     changed
@@ -1413,30 +1413,30 @@ ir_opt_unwrap: fn(f: &IRFunction) -> Int Never! {
 #Test("A floored quotient times its power-of-two divisor is the dividend masked") {
     loop level in 1..<3 {
         m := ir_module_new()
-        exact: ir_type_row(&m, Type.Int) ?? panic("no Int row")
-        flag: ir_type_row(&m, Type.Bool) ?? panic("no Bool row")
+        exact: ir_type_row(m, Type.Int) ?? panic("no Int row")
+        flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
         g := ir_function_new("even", "test:even.jet::even", "", "even.jet", 1)
-        x: ir_slot(&g, exact, IRSlotKind.Param, ir_intern_name(&m, "x"), 1)
+        x: ir_slot(g, exact, IRSlotKind.Param, ir_intern_name(m, "x"), 1)
         g.result = flag
-        two: ir_slot(&g, exact, IRSlotKind.Temp, -1, 0)
-        _ := ir_emit(&g, IROp.Const, two, 2, -1, -1, 2)
-        half: ir_slot(&g, exact, IRSlotKind.Temp, -1, 0)
-        _ := ir_emit(&g, IROp.FloorDiv, half, x, two, IR_OVERFLOW_TRAP, 2)
-        factor: ir_slot(&g, exact, IRSlotKind.Temp, -1, 0)
-        _ := ir_emit(&g, IROp.Const, factor, 2, -1, -1, 2)
-        twice: ir_slot(&g, exact, IRSlotKind.Temp, -1, 0)
-        _ := ir_emit(&g, IROp.Mul, twice, half, factor, IR_OVERFLOW_TRAP, 2)
-        _ := ir_emit(&g, IROp.Drop, -1, half, -1, -1, 2)
-        same: ir_slot(&g, flag, IRSlotKind.Temp, -1, 0)
-        _ := ir_emit(&g, IROp.Eq, same, twice, x, -1, 2)
-        _ := ir_emit(&g, IROp.Drop, -1, twice, -1, -1, 2)
-        _ := ir_emit(&g, IROp.Return, -1, same, -1, -1, 2)
+        two: ir_slot(g, exact, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(g, IROp.Const, two, 2, -1, -1, 2)
+        half: ir_slot(g, exact, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(g, IROp.FloorDiv, half, x, two, IR_OVERFLOW_TRAP, 2)
+        factor: ir_slot(g, exact, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(g, IROp.Const, factor, 2, -1, -1, 2)
+        twice: ir_slot(g, exact, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(g, IROp.Mul, twice, half, factor, IR_OVERFLOW_TRAP, 2)
+        _ := ir_emit(g, IROp.Drop, -1, half, -1, -1, 2)
+        same: ir_slot(g, flag, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(g, IROp.Eq, same, twice, x, -1, 2)
+        _ := ir_emit(g, IROp.Drop, -1, twice, -1, -1, 2)
+        _ := ir_emit(g, IROp.Return, -1, same, -1, -1, 2)
         m.entry = 0
-        name_rows_set(&m.function_rows, g.key, 0)
-        &m.functions.push(g)
+        name_rows_set(m.function_rows, g.key, 0)
+        m.functions.push(g)
         options := ir_opt_options(level)
         options.verify = true
-        report: ir_optimize_module(&m, options, compiler_threads_single())
+        report: ir_optimize_module(m, options, compiler_threads_single())
         assert_eq(report.lint.len(), 0)
         f: m.functions[0]
         masks := 0
@@ -1454,32 +1454,32 @@ ir_opt_unwrap: fn(f: &IRFunction) -> Int Never! {
 #Test("A Float value computed again from the same operands is the first one") {
     loop level in 1..<3 {
         m := ir_module_new()
-        float: ir_type_row(&m, Type.Float) ?? panic("no Float row")
+        float: ir_type_row(m, Type.Float) ?? panic("no Float row")
         g := ir_function_new("hyp", "test:hyp.jet::hyp", "", "hyp.jet", 1)
-        x: ir_slot(&g, float, IRSlotKind.Param, ir_intern_name(&m, "x"), 1)
-        y: ir_slot(&g, float, IRSlotKind.Param, ir_intern_name(&m, "y"), 1)
+        x: ir_slot(g, float, IRSlotKind.Param, ir_intern_name(m, "x"), 1)
+        y: ir_slot(g, float, IRSlotKind.Param, ir_intern_name(m, "y"), 1)
         g.result = float
         sums := [Int]{}
         loop _ in 0..<2 {
-            xx: ir_slot(&g, float, IRSlotKind.Temp, -1, 0)
-            _ := ir_emit(&g, IROp.Mul, xx, x, x, -1, 2)
-            yy: ir_slot(&g, float, IRSlotKind.Temp, -1, 0)
-            _ := ir_emit(&g, IROp.Mul, yy, y, y, -1, 2)
-            sum: ir_slot(&g, float, IRSlotKind.Temp, -1, 0)
-            _ := ir_emit(&g, IROp.Add, sum, xx, yy, -1, 2)
-            &sums.push(sum)
+            xx: ir_slot(g, float, IRSlotKind.Temp, -1, 0)
+            _ := ir_emit(g, IROp.Mul, xx, x, x, -1, 2)
+            yy: ir_slot(g, float, IRSlotKind.Temp, -1, 0)
+            _ := ir_emit(g, IROp.Mul, yy, y, y, -1, 2)
+            sum: ir_slot(g, float, IRSlotKind.Temp, -1, 0)
+            _ := ir_emit(g, IROp.Add, sum, xx, yy, -1, 2)
+            sums.push(sum)
         }
-        root: ir_slot(&g, float, IRSlotKind.Temp, -1, 0)
-        _ := ir_emit(&g, IROp.Sqrt, root, sums[1], -1, -1, 2)
-        out: ir_slot(&g, float, IRSlotKind.Temp, -1, 0)
-        _ := ir_emit(&g, IROp.Mul, out, sums[0], root, -1, 2)
-        _ := ir_emit(&g, IROp.Return, -1, out, -1, -1, 2)
+        root: ir_slot(g, float, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(g, IROp.Sqrt, root, sums[1], -1, -1, 2)
+        out: ir_slot(g, float, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(g, IROp.Mul, out, sums[0], root, -1, 2)
+        _ := ir_emit(g, IROp.Return, -1, out, -1, -1, 2)
         m.entry = 0
-        name_rows_set(&m.function_rows, g.key, 0)
-        &m.functions.push(g)
+        name_rows_set(m.function_rows, g.key, 0)
+        m.functions.push(g)
         options := ir_opt_options(level)
         options.verify = true
-        report: ir_optimize_module(&m, options, compiler_threads_single())
+        report: ir_optimize_module(m, options, compiler_threads_single())
         assert_eq(report.lint.len(), 0)
         f: m.functions[0]
         muls := 0
@@ -1499,43 +1499,43 @@ ir_opt_unwrap: fn(f: &IRFunction) -> Int Never! {
 #Test("A short-circuit Bool read only by a branch becomes branches on its operands") {
     loop level in 1..<3 {
         m := ir_module_new()
-        exact: ir_type_row(&m, Type.Int) ?? panic("no Int row")
-        flag: ir_type_row(&m, Type.Bool) ?? panic("no Bool row")
+        exact: ir_type_row(m, Type.Int) ?? panic("no Int row")
+        flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
         g := ir_function_new("pick", "test:pick.jet::pick", "", "pick.jet", 1)
-        p: ir_slot(&g, flag, IRSlotKind.Param, ir_intern_name(&m, "p"), 1)
-        q: ir_slot(&g, flag, IRSlotKind.Param, ir_intern_name(&m, "q"), 1)
+        p: ir_slot(g, flag, IRSlotKind.Param, ir_intern_name(m, "p"), 1)
+        q: ir_slot(g, flag, IRSlotKind.Param, ir_intern_name(m, "q"), 1)
         g.result = exact
-        both: ir_slot(&g, flag, IRSlotKind.Temp, -1, 0)
-        _ := ir_emit(&g, IROp.Copy, both, p, -1, -1, 2)
-        _ := ir_open_if(&g, p, 2)
-        _ := ir_emit(&g, IROp.Copy, both, q, -1, -1, 2)
-        ir_end(&g, 2)
-        _ := ir_open_if(&g, both, 2)
-        one: ir_slot(&g, exact, IRSlotKind.Temp, -1, 0)
-        _ := ir_emit(&g, IROp.Const, one, 1, -1, -1, 2)
-        _ := ir_emit(&g, IROp.Return, -1, one, -1, -1, 2)
-        ir_end(&g, 2)
-        either: ir_slot(&g, flag, IRSlotKind.Temp, -1, 0)
-        _ := ir_emit(&g, IROp.Copy, either, p, -1, -1, 3)
-        unset: ir_slot(&g, flag, IRSlotKind.Temp, -1, 0)
-        _ := ir_emit(&g, IROp.Not, unset, p, -1, -1, 3)
-        _ := ir_open_if(&g, unset, 3)
-        _ := ir_emit(&g, IROp.Copy, either, q, -1, -1, 3)
-        ir_end(&g, 3)
-        _ := ir_open_if(&g, either, 3)
-        two: ir_slot(&g, exact, IRSlotKind.Temp, -1, 0)
-        _ := ir_emit(&g, IROp.Const, two, 2, -1, -1, 3)
-        _ := ir_emit(&g, IROp.Return, -1, two, -1, -1, 3)
-        ir_end(&g, 3)
-        zero: ir_slot(&g, exact, IRSlotKind.Temp, -1, 0)
-        _ := ir_emit(&g, IROp.Const, zero, 0, -1, -1, 4)
-        _ := ir_emit(&g, IROp.Return, -1, zero, -1, -1, 4)
+        both: ir_slot(g, flag, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(g, IROp.Copy, both, p, -1, -1, 2)
+        _ := ir_open_if(g, p, 2)
+        _ := ir_emit(g, IROp.Copy, both, q, -1, -1, 2)
+        ir_end(g, 2)
+        _ := ir_open_if(g, both, 2)
+        one: ir_slot(g, exact, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(g, IROp.Const, one, 1, -1, -1, 2)
+        _ := ir_emit(g, IROp.Return, -1, one, -1, -1, 2)
+        ir_end(g, 2)
+        either: ir_slot(g, flag, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(g, IROp.Copy, either, p, -1, -1, 3)
+        unset: ir_slot(g, flag, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(g, IROp.Not, unset, p, -1, -1, 3)
+        _ := ir_open_if(g, unset, 3)
+        _ := ir_emit(g, IROp.Copy, either, q, -1, -1, 3)
+        ir_end(g, 3)
+        _ := ir_open_if(g, either, 3)
+        two: ir_slot(g, exact, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(g, IROp.Const, two, 2, -1, -1, 3)
+        _ := ir_emit(g, IROp.Return, -1, two, -1, -1, 3)
+        ir_end(g, 3)
+        zero: ir_slot(g, exact, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(g, IROp.Const, zero, 0, -1, -1, 4)
+        _ := ir_emit(g, IROp.Return, -1, zero, -1, -1, 4)
         m.entry = 0
-        name_rows_set(&m.function_rows, g.key, 0)
-        &m.functions.push(g)
+        name_rows_set(m.function_rows, g.key, 0)
+        m.functions.push(g)
         options := ir_opt_options(level)
         options.verify = true
-        report: ir_optimize_module(&m, options, compiler_threads_single())
+        report: ir_optimize_module(m, options, compiler_threads_single())
         assert_eq(report.lint.len(), 0)
         assert_eq(report.short_circuits, 2)
         f: m.functions[0]
@@ -1553,36 +1553,36 @@ ir_opt_unwrap: fn(f: &IRFunction) -> Int Never! {
 #Test("An address sum moves to just before the access it addresses") {
     loop level in 1..<3 {
         m := ir_module_new()
-        word: ir_type_row(&m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+        word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
         g := ir_function_new("copy", "test:copy.jet::copy", "", "copy.jet", 1)
-        p: ir_slot(&g, word, IRSlotKind.Param, ir_intern_name(&m, "p"), 1)
-        q: ir_slot(&g, word, IRSlotKind.Param, ir_intern_name(&m, "q"), 1)
-        i: ir_slot(&g, word, IRSlotKind.Param, ir_intern_name(&m, "i"), 1)
+        p: ir_slot(g, word, IRSlotKind.Param, ir_intern_name(m, "p"), 1)
+        q: ir_slot(g, word, IRSlotKind.Param, ir_intern_name(m, "q"), 1)
+        i: ir_slot(g, word, IRSlotKind.Param, ir_intern_name(m, "i"), 1)
         g.result = word
-        target: ir_slot(&g, word, IRSlotKind.Temp, -1, 0)
-        _ := ir_emit(&g, IROp.Add, target, p, i, IR_OVERFLOW_WRAP, 2)
-        source: ir_slot(&g, word, IRSlotKind.Temp, -1, 0)
-        _ := ir_emit(&g, IROp.Add, source, q, i, IR_OVERFLOW_WRAP, 2)
-        both: ir_slot(&g, word, IRSlotKind.Temp, -1, 0)
-        _ := ir_emit(&g, IROp.Add, both, p, q, IR_OVERFLOW_WRAP, 2)
-        value: ir_slot(&g, word, IRSlotKind.Temp, -1, 0)
-        _ := ir_emit(&g, IROp.Load, value, source, 0, -1, 2)
-        _ := ir_emit(&g, IROp.Store, -1, target, 0, value, 2)
-        args: ir_args(&g, [Int]{both, value})
-        _ := ir_emit(&g, IROp.Call, -1, 1, args, 2, 3)
-        _ := ir_emit(&g, IROp.Return, -1, value, -1, -1, 3)
+        target: ir_slot(g, word, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(g, IROp.Add, target, p, i, IR_OVERFLOW_WRAP, 2)
+        source: ir_slot(g, word, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(g, IROp.Add, source, q, i, IR_OVERFLOW_WRAP, 2)
+        both: ir_slot(g, word, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(g, IROp.Add, both, p, q, IR_OVERFLOW_WRAP, 2)
+        value: ir_slot(g, word, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(g, IROp.Load, value, source, 0, -1, 2)
+        _ := ir_emit(g, IROp.Store, -1, target, 0, value, 2)
+        args: ir_args(g, [Int]{both, value})
+        _ := ir_emit(g, IROp.Call, -1, 1, args, 2, 3)
+        _ := ir_emit(g, IROp.Return, -1, value, -1, -1, 3)
         put := ir_function_new("put", "test:put#asm", "", "copy.jet", 1)
-        _ := ir_slot(&put, word, IRSlotKind.Param, ir_intern_name(&m, "address"), 1)
-        _ := ir_slot(&put, word, IRSlotKind.Param, ir_intern_name(&m, "value"), 1)
+        _ := ir_slot(put, word, IRSlotKind.Param, ir_intern_name(m, "address"), 1)
+        _ := ir_slot(put, word, IRSlotKind.Param, ir_intern_name(m, "value"), 1)
         put.asm = Val(IRAsmLeaf{code: [U8]{0x48, 0x89, 0x37}, regs: [Int]{X64_RDI, X64_RSI}, result: -1})
         m.entry = 0
-        name_rows_set(&m.function_rows, g.key, 0)
-        &m.functions.push(g)
-        name_rows_set(&m.function_rows, put.key, 1)
-        &m.functions.push(put)
+        name_rows_set(m.function_rows, g.key, 0)
+        m.functions.push(g)
+        name_rows_set(m.function_rows, put.key, 1)
+        m.functions.push(put)
         options := ir_opt_options(level)
         options.verify = true
-        report: ir_optimize_module(&m, options, compiler_threads_single())
+        report: ir_optimize_module(m, options, compiler_threads_single())
         assert_eq(report.lint.len(), 0)
         f: m.functions[0]
         accesses := 0

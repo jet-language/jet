@@ -6,12 +6,12 @@ Marker: struct {
 }
 
 impl Marker.Close {
-    close: fn(^self) { print("producer: cleanup {self.name}") }
+    close: fn(&&self) { print("producer: cleanup {self.name}") }
 }
 
 numbers: fn(name: String) -> Stream<Int> {
     marker := Marker{name: name}
-    defer close(^marker)
+    defer close(marker)
     i := 1
     loop {
         print("producer: yield {i}")

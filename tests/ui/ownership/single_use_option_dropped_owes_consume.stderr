@@ -4,5 +4,5 @@ Error [jet.SingleUseDropped]: `maybe` still owes `consume`
   8 |     maybe: Lease?{acquire("a")}
     |     ^^^^^
  Why: This value's type is `#SingleUse`, so it carries a job that has to be done — dropping it without doing that job leaves the work undone (an unjoined task, an unreleased lock)
- Fix: Consume it exactly once: move it to a parameter with the move marker `^`, or `return` it — or write `#Unsafe("reason") { consume(maybe) }` to discard it deliberately
+ Fix: Consume it exactly once: pass it to a `&&` parameter, or `return` it — or write `#Unsafe("reason") { consume(maybe) }` to discard it deliberately
 More: jet-lang.dev/e/E0140

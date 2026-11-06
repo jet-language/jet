@@ -21,10 +21,10 @@ lsp_code_action_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String
         permit: checked.checked.guard_read()
         result: permit.value.result
         diagnostics := result.diagnostics.copy()
-        lsp_retain_document_diagnostics(&diagnostics, doc.path, doc.text)
+        lsp_retain_document_diagnostics(diagnostics, doc.path, doc.text)
         fixes: lsp_collect_fixes_from_diagnostics(diagnostics.copy(), doc.text)
         db := lsp_build_symbol_db(result)
-        lsp_merge_workspace_defs(server, doc, &db)
+        lsp_merge_workspace_defs(server, doc, db)
         token_owner: server.lex(doc)
         token_permit: token_owner.guard_read()
         tokens: token_permit.value
@@ -35,17 +35,17 @@ lsp_code_action_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String
             // contract is a publication gate, not a lossy text-path conversion.
             saved: lsp_action_fs.read_text(open.path)
             if saved == {
-                .Ok(text) -> { if text != open.text -> &excluded.push(open.path.copy()) }
-                .Err(_) -> &excluded.push(open.path.copy())
+                .Ok(text) -> { if text != open.text -> excluded.push(open.path.copy()) }
+                .Err(_) -> excluded.push(open.path.copy())
             }
         }
         refactors: lsp_compute_refactor_actions(db, tokens, diagnostics, doc.text, doc.path, root, excluded, requested)
         actions := [String]{}
-        loop fix in fixes -> &actions.push(lsp_code_action_json(uri, doc.version, doc.text, fix))
-        loop action in refactors -> &actions.push(lsp_refactor_action_json(uri, doc.version, doc.text, action))
+        loop fix in fixes -> actions.push(lsp_code_action_json(uri, doc.version, doc.text, fix))
+        loop action in refactors -> actions.push(lsp_refactor_action_json(uri, doc.version, doc.text, action))
         // A declaration under the cursor offers its marker set in either place.
-        if parser_marker_placement_edit_at(doc.text.bytes(), requested.start, false) == .Val(edit) -> &actions.push(lsp_action_json(uri, doc.version, doc.text, "Write the markers above the declaration", "refactor.rewrite", [TextEdit]{edit}))
-        if parser_marker_placement_edit_at(doc.text.bytes(), requested.start, true) == .Val(edit) -> &actions.push(lsp_action_json(uri, doc.version, doc.text, "Write the markers inside the declaration's body", "refactor.rewrite", [TextEdit]{edit}))
+        if parser_marker_placement_edit_at(doc.text.bytes(), requested.start, false) == .Val(edit) -> actions.push(lsp_action_json(uri, doc.version, doc.text, "Write the markers above the declaration", "refactor.rewrite", [TextEdit]{edit}))
+        if parser_marker_placement_edit_at(doc.text.bytes(), requested.start, true) == .Val(edit) -> actions.push(lsp_action_json(uri, doc.version, doc.text, "Write the markers inside the declaration's body", "refactor.rewrite", [TextEdit]{edit}))
         return Val(lsp_response(id, "[{actions.join(",")}]"))
     }
     None
@@ -61,6 +61,6 @@ lsp_refactor_action_json: fn(uri: String, version: Int, src: String, action: Ref
 
 lsp_action_json: fn(uri: String, version: Int, src: String, title: String, kind: String, edits: [TextEdit]) -> String Never! {
     rows := [String]{}
-    loop edit in edits -> &rows.push("{{\"range\":{lsp_range_json(lsp_byte_span_to_range(src, edit.span))},\"newText\":{foundation_json_quote(edit.new_text)}}}")
+    loop edit in edits -> rows.push("{{\"range\":{lsp_range_json(lsp_byte_span_to_range(src, edit.span))},\"newText\":{foundation_json_quote(edit.new_text)}}}")
     "{{\"title\":{foundation_json_quote(title)},\"kind\":\"{kind}\",\"edit\":{{\"documentChanges\":[{{\"textDocument\":{{\"uri\":{foundation_json_quote(uri)},\"version\":{version}}},\"edits\":[{rows.join(",")}]}}]}}}}"
 }

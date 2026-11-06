@@ -45,10 +45,10 @@ StreamingSHA256: struct {
 
     update: fn(&self, data: [U8]) Never! {
         loop byte in data {
-            &self.block.push(byte)
+            self.block.push(byte)
             if self.block.len() == 64 {
-                sha256_compress(&self.state, &self.words, self.k, self.block[0..<64], 0)
-                &self.block.clear()
+                sha256_compress(self.state, self.words, self.k, self.block[0..<64], 0)
+                self.block.clear()
             }
         }
         self.total += data.len()
@@ -60,23 +60,23 @@ StreamingSHA256: struct {
         state := self.state
         words := self.words
         block := self.block
-        &block.push(U8{128})
+        block.push(U8{128})
         if block.len() > 56 {
-            loop block.len() < 64 -> &block.push(U8{0})
-            sha256_compress(&state, &words, self.k, block[0..<64], 0)
-            &block.clear()
+            loop block.len() < 64 -> block.push(U8{0})
+            sha256_compress(state, words, self.k, block[0..<64], 0)
+            block.clear()
         }
-        loop block.len() < 56 -> &block.push(U8{0})
+        loop block.len() < 56 -> block.push(U8{0})
         bit_length: ((self.total * 8)).bit_and(SHA256_LENGTH_MASK)
-        loop shift in FOUNDATION_U64_SHIFTS -> &block.push(U8{((bit_length >> shift)).bit_and(255)})
-        sha256_compress(&state, &words, self.k, block[0..<64], 0)
+        loop shift in FOUNDATION_U64_SHIFTS -> block.push(U8{((bit_length >> shift)).bit_and(255)})
+        sha256_compress(state, words, self.k, block[0..<64], 0)
         digest := [U8]{}
         loop lane in state {
             word: Int.from_u32(lane)
-            &digest.push(U8{((word >> 24)).bit_and(255)})
-            &digest.push(U8{((word >> 16)).bit_and(255)})
-            &digest.push(U8{((word >> 8)).bit_and(255)})
-            &digest.push(U8{(word).bit_and(255)})
+            digest.push(U8{((word >> 24)).bit_and(255)})
+            digest.push(U8{((word >> 16)).bit_and(255)})
+            digest.push(U8{((word >> 8)).bit_and(255)})
+            digest.push(U8{(word).bit_and(255)})
         }
         digest
     }
@@ -134,14 +134,14 @@ foundation_try_tree_hash: fn(root: String) -[FS]> String TreeHashError! {
     if !root_stat.is_dir -> return Err(TreeHashError.Special(root))
     entries := [TreeHashFile]{}
     budget := TreeHashBudget{nodes: 0}
-    foundation_collect_tree_files(root, "", root, &entries, 0, &budget)
-    &entries.sort_by(entry -> entry.relative)
+    foundation_collect_tree_files(root, "", root, entries, 0, budget)
+    entries.sort_by(entry -> entry.relative)
     hasher := StreamingSHA256.new()
     total_bytes := 0
     loop entry in entries {
-        &hasher.update(entry.relative.bytes())
-        &hasher.update([U8]{U8{0}})
-        foundation_hash_regular_nofollow(entry.path, entry.stat, &hasher, &total_bytes)
+        hasher.update(entry.relative.bytes())
+        hasher.update([U8]{U8{0}})
+        foundation_hash_regular_nofollow(entry.path, entry.stat, hasher, total_bytes)
     }
     Ok("sha256-{hasher.finalize_hex()}")
 }
@@ -176,11 +176,11 @@ foundation_collect_tree_files: fn(directory: String, relative_dir: String, root:
         if {
             stat.is_dir -> {
                 if depth >= MAX_TREE_DEPTH -> return Err(TreeHashError.TooLarge{path: entry.path, limit: MAX_TREE_DEPTH})
-                foundation_collect_tree_files(entry.path, relative, root, &out, depth + 1, &budget)
+                foundation_collect_tree_files(entry.path, relative, root, out, depth + 1, budget)
             }
             else -> {
                 if out.len() >= MAX_TREE_FILES -> return Err(TreeHashError.TooLarge{path: root, limit: MAX_TREE_FILES})
-                &out.push(TreeHashFile{relative: relative.replace("\\", "/"), path: entry.path, stat: stat})
+                out.push(TreeHashFile{relative: relative.replace("\\", "/"), path: entry.path, stat: stat})
             }
         }
     }
@@ -204,8 +204,8 @@ foundation_hash_regular_nofollow: fn(path: String, expected: Stat, hasher: &Stre
     next_total: total_bytes + opened.size
     if next_total > MAX_TREE_TOTAL_BYTES -> return Err(TreeHashError.TooLarge{path: path, limit: MAX_TREE_TOTAL_BYTES})
     length := [U8]{}
-    loop shift in FOUNDATION_U64_SHIFTS -> &length.push(U8{((opened.size >> shift)).bit_and(255)})
-    &hasher.update(length)
+    loop shift in FOUNDATION_U64_SHIFTS -> length.push(U8{((opened.size >> shift)).bit_and(255)})
+    hasher.update(length)
     actual_length := 0
     loop {
         chunk: if reader.read(FOUNDATION_READ_CHUNK) == {
@@ -214,7 +214,7 @@ foundation_hash_regular_nofollow: fn(path: String, expected: Stat, hasher: &Stre
         }
         if chunk.len() == 0 -> break
         actual_length += chunk.len()
-        &hasher.update(chunk)
+        hasher.update(chunk)
         if actual_length > opened.size -> return Err(TreeHashError.IO{path: path, detail: "file grew while hashing"})
     }
     after: if reader.stat() == {
@@ -255,7 +255,7 @@ foundation_sha256_file_hex: fn(path: String) -[FS]> String IOError! {
         if chunk.len() == 0 -> break
         actual_length += chunk.len()
         if actual_length > MAX_TREE_FILE_BYTES -> return Err(foundation_io_error(false, path, "file grew beyond the tree hashing bound"))
-        &hasher.update(chunk)
+        hasher.update(chunk)
     }
     after: opened.handle.stat()
     path_after: files.stat(path)
@@ -290,7 +290,7 @@ foundation_read_handle_bounded: fn(handle: FileReader, max_bytes: Int, bound_err
         request: if remaining >= FOUNDATION_READ_CHUNK -> FOUNDATION_READ_CHUNK else -> remaining + 1
         chunk: handle.read(request)
         if chunk.len() == 0 -> break
-        loop byte in chunk -> &bytes.push(byte)
+        loop byte in chunk -> bytes.push(byte)
         if bytes.len() > max_bytes -> return Err(bound_error)
     }
     Ok(bytes)
@@ -372,7 +372,7 @@ foundation_write_file_nofollow_at_root: fn(root: String, relative: String, conte
         child: foundation_open_or_create_directory(directories[parent_index].handle, name) ?? return Err(FoundationPublicationError{phase: .OpenParent, error: err})
         child_path: files.join(directories[parent_index].path, name)
         // Both parent projections end before resizing the held chain.
-        &directories.push(FoundationPublicationDirectory{handle: child, path: child_path, publication_parent: true})
+        directories.push(FoundationPublicationDirectory{handle: child, path: child_path, publication_parent: true})
     }
     leaf: directories.len() - 1
     final_name: components[components.len() - 1]
@@ -579,7 +579,7 @@ FoundationDirectoryAuthority: struct {
         // The child holds its own chain: this authority keeps every
         // descriptor it holds, and each closes once.
         directories := foundation_reopen_held_chain(self.directories)
-        &directories.push(FoundationPublicationDirectory{handle: handle, path: child_path, publication_parent: true})
+        directories.push(FoundationPublicationDirectory{handle: handle, path: child_path, publication_parent: true})
         foundation_ensure_directories_current(directories)
         Ok(FoundationDirectoryAuthority{directories: directories})
     }
@@ -605,23 +605,23 @@ FoundationDirectoryAuthority: struct {
     tree_hash: fn(self, reject_hardlinks: Bool{false}) -[FS]> String IOError! {
         self.revalidate()
         rows := [FoundationHeldTreeFile]{}
-        foundation_collect_held_tree(self.directories[self.directories.len() - 1].handle, "", &rows, 0, reject_hardlinks)
-        &rows.sort_by((left: FoundationHeldTreeFile, right: FoundationHeldTreeFile) -> left.relative <=> right.relative)
+        foundation_collect_held_tree(self.directories[self.directories.len() - 1].handle, "", rows, 0, reject_hardlinks)
+        rows.sort_by((left: FoundationHeldTreeFile, right: FoundationHeldTreeFile) -> left.relative <=> right.relative)
         hasher := StreamingSHA256.new()
         total := 0
         loop row in rows {
             if row.identity.size > MAX_TREE_FILE_BYTES || row.identity.size > MAX_TREE_TOTAL_BYTES - total -> return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(row.relative), os_code: None, cause: Val("package tree exceeds the hashing size bound")}))
-            &hasher.update(row.relative.bytes())
-            &hasher.update([U8]{0})
+            hasher.update(row.relative.bytes())
+            hasher.update([U8]{0})
             length: loop shift in FOUNDATION_U64_SHIFTS -> U8{(row.identity.size >> shift).bit_and(255)}
-            &hasher.update(length)
+            hasher.update(length)
             actual := 0
             loop {
                 chunk: row.reader.read(FOUNDATION_READ_CHUNK)
                 if chunk.len() == 0 -> break
                 actual += chunk.len()
                 if actual > row.identity.size -> return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(row.relative), os_code: None, cause: Val("package source file grew while hashing")}))
-                &hasher.update(chunk)
+                hasher.update(chunk)
             }
             after: row.reader.stat()
             if actual != row.identity.size || !foundation_same_file_identity(row.identity, after) -> return Err(IOError.Other(IOContext{operation: .Read, resource: Val(row.relative), os_code: None, cause: Val("package source file changed while hashing")}))
@@ -669,7 +669,7 @@ foundation_held_tree_names: fn(directory: Directory) -[FS]> [String] IOError! {
     out := [String]{}
     loop entry in directory.list() {
         if !entry.name_is_unicode -> return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(entry.path), os_code: None, cause: Val("package tree contains a non-UTF-8 name")}))
-        &out.push(entry.name)
+        out.push(entry.name)
     }
     Ok(out)
 }
@@ -683,7 +683,7 @@ foundation_collect_held_tree: fn(directory: Directory, relative: String, rows: &
         if info.is_dir {
             child: directory.open_directory(name)
             if foundation_source_tree_ignored(name) -> next
-            foundation_collect_held_tree(child, path, &rows, depth + 1, reject_hardlinks)
+            foundation_collect_held_tree(child, path, rows, depth + 1, reject_hardlinks)
         } else if info.is_file {
             reader: directory.open(name)
             opened: reader.stat()
@@ -691,7 +691,7 @@ foundation_collect_held_tree: fn(directory: Directory, relative: String, rows: &
             if reject_hardlinks && opened.links > 1 -> return Err(IOError.PermissionDenied(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("refusing multiply linked source file")}))
             if foundation_source_tree_ignored(name) -> next
             if rows.len() >= MAX_TREE_FILES -> return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("package tree contains too many files")}))
-            &rows.push(FoundationHeldTreeFile{relative: path, reader: reader, identity: opened})
+            rows.push(FoundationHeldTreeFile{relative: path, reader: reader, identity: opened})
         } else {
             return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("package tree contains a special entry")}))
         }
@@ -837,7 +837,7 @@ foundation_open_file_authority: fn(root: String, relative: String) -[FS, Env]> F
         child: directories[parent_index].handle.open_directory(name)
         child_path: files.join(directories[parent_index].path, name)
         // Retain the child, not a parent view across the vector mutation.
-        &directories.push(FoundationPublicationDirectory{handle: child, path: child_path, publication_parent: false})
+        directories.push(FoundationPublicationDirectory{handle: child, path: child_path, publication_parent: false})
     }
     leaf: directories.len() - 1
     final_name: components[components.len() - 1]
@@ -942,7 +942,7 @@ foundation_open_root_directories: fn(root: String, create: Bool{false}) -[FS, En
         child: if create -> foundation_open_or_create_directory(directories[parent_index].handle, part) else -> directories[parent_index].handle.open_directory(part)
         child_path: files.join(directories[parent_index].path, part)
         // The no-follow parent access is complete before the chain grows.
-        &directories.push(FoundationPublicationDirectory{handle: child, path: child_path, publication_parent: false})
+        directories.push(FoundationPublicationDirectory{handle: child, path: child_path, publication_parent: false})
     }
     Ok(directories)
 }
@@ -956,7 +956,7 @@ foundation_reopen_held_chain: fn(held: [FoundationPublicationDirectory]) -[FS]> 
     loop index in 0..<held.len() {
         if index > 0 {
             reopened: chain[index - 1].handle.open_directory(files.basename(held[index].path))
-            &chain.push(FoundationPublicationDirectory{handle: reopened, path: held[index].path, publication_parent: held[index].publication_parent})
+            chain.push(FoundationPublicationDirectory{handle: reopened, path: held[index].path, publication_parent: held[index].publication_parent})
         }
         if !foundation_same_directory(chain[index].handle.stat(), held[index].handle.stat()) {
             return Err(IOError.Other(IOContext{operation: .Read, resource: Val(held[index].path), os_code: None, cause: Val("file authority directory moved while it was held")}))
@@ -984,7 +984,7 @@ foundation_normal_components: fn(write: Bool, relative: String) -> [String] IOEr
     loop part in relative.split("/") {
         if part == "" || part == "." -> next
         if part == ".." -> return Err(foundation_io_error(write, relative, "file authority path must be relative and normalized"))
-        &components.push(part)
+        components.push(part)
     }
     Ok(components)
 }

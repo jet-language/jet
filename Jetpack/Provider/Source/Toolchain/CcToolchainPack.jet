@@ -125,7 +125,7 @@ provider_cc_pack_target: fn(target: String) -> CcPackTarget? Never! {
 // Every covered target, short spelling first.
 provider_cc_pack_covered_targets: fn() -> String Never! {
     names := [String]{}
-    loop entry in CC_PACK_TARGETS -> &names.push("{entry.short} ({entry.triple})")
+    loop entry in CC_PACK_TARGETS -> names.push("{entry.short} ({entry.triple})")
     names.join(", ")
 }
 
@@ -142,7 +142,7 @@ provider_cc_pack_asset_for_host: fn() -[Env]> CcPackAsset CcToolchainError! {
     hosts := [String]{}
     loop asset in CC_PACK_ASSETS {
         if asset.host == host -> return Ok(asset)
-        &hosts.push(asset.host)
+        hosts.push(asset.host)
     }
     Err(CcToolchainError.Invalid("jet ships no C toolchain pack for host `{host}`; packs exist for {hosts.join(", ")}"))
 }
@@ -190,7 +190,7 @@ provider_cc_pack_fixes: fn(asset: CcPackAsset, release: String?) -> String Never
 // unpacked and recorded first. A Hangar hit never touches the network.
 provider_cc_pack_ensure: fn(verification: &StoreVerification, roots: HangarRoots, asset: CcPackAsset, sources: CcPackSources, offline: Bool) -[IO, FS, Env, Net, Time, Time.Wait]> CcPackTools ProviderError! {
     found := CcPackTools?{None}
-    if provider_cc_pack_lookup(&verification, roots, asset) == {
+    if provider_cc_pack_lookup(verification, roots, asset) == {
         .Ok(value) -> found = value
         .Err(error) -> return Err(ProviderError.BadOutput(error.message()))
     }
@@ -210,7 +210,7 @@ provider_cc_pack_ensure: fn(verification: &StoreVerification, roots: HangarRoots
         }
     }
     term.eprint("first use: unpacking the C toolchain into the Hangar (first time only)")
-    if provider_cc_pack_install(&verification, roots, asset, archive, staging) == {
+    if provider_cc_pack_install(verification, roots, asset, archive, staging) == {
         .Ok(tools) -> {
             provider_cc_remove_tree(archive)
             Ok(tools)
@@ -364,8 +364,8 @@ provider_cc_pack_install: fn(verification: &StoreVerification, roots: HangarRoot
         references: [String]{},
         producer: producer
     }
-    provider_refresh_provider_facts(&realized.producer, reference) ?? return Err(CcToolchainError.Invalid(err.message()))
-    store_record_realized_mode(&verification, roots, realized) ?? return Err(CcToolchainError.Invalid("record C toolchain pack in the Hangar: {err.message()}"))
+    provider_refresh_provider_facts(realized.producer, reference) ?? return Err(CcToolchainError.Invalid(err.message()))
+    store_record_realized_mode(verification, roots, realized) ?? return Err(CcToolchainError.Invalid("record C toolchain pack in the Hangar: {err.message()}"))
     root: provider_cc_checked_object_digest_path(roots.hangar_dir(), digest, "C toolchain pack")
     Ok(CcPackTools{digest: digest, root: root, asset: asset, manifest: manifest, clang_sha256: clang_sha256, lld_sha256: lld_sha256, ar_sha256: ar_sha256})
 }
@@ -383,7 +383,7 @@ provider_cc_pack_tool_sha256: fn(root: String, relative: String) -[FS]> String C
 // The recorded pack for `asset`, re-proved, or None when the Hangar has none.
 provider_cc_pack_lookup: fn(verification: &StoreVerification, roots: HangarRoots, asset: CcPackAsset) -[FS, Env, Time]> CcPackTools? CcToolchainError! {
     if !provider_cc_node_exists(roots.hangar_dir()) -> return Ok(None)
-    entries: store_list_checked(&verification, roots) ?? return Err(CcToolchainError.Invalid("could not inspect Hangar C toolchain packs: {err.message()}"))
+    entries: store_list_checked(verification, roots) ?? return Err(CcToolchainError.Invalid("could not inspect Hangar C toolchain packs: {err.message()}"))
     loop entry in entries {
         if entry.name != CC_PACK_PACKAGE -> next
         producer: ProducerRecord.decode(entry.producer_record) ?? {
@@ -444,7 +444,7 @@ provider_cc_pack_read_manifest: fn(root: String, asset: CcPackAsset) -[FS, Env]>
         .Array(items) -> {
             loop item in items {
                 fields: provider_cc_manifest_object(item) ?? return Err(CcToolchainError.Invalid("C toolchain pack manifest target: expected a Dyn object"))
-                &listed.push(provider_cc_manifest_string(fields, "triple"))
+                listed.push(provider_cc_manifest_string(fields, "triple"))
             }
         }
         else -> return Err(CcToolchainError.Invalid("C toolchain pack manifest field `targets`: expected a Dyn array"))
@@ -464,10 +464,10 @@ CcPackTarStream: struct {
     // At least `need` unread bytes buffered; false at the end of the stream.
     fill: fn(&self, need: Int) -[FS.Read]> Bool CcToolchainError! {
         loop self.buffer.len() - self.at < need {
-            chunk: &self.reader.read(CC_PACK_READ_CHUNK) ?? return Err(CcToolchainError.Invalid("decompress C toolchain pack: {err}"))
+            chunk: self.reader.read(CC_PACK_READ_CHUNK) ?? return Err(CcToolchainError.Invalid("decompress C toolchain pack: {err}"))
             if chunk.len() == 0 -> return Ok(false)
             rest := self.buffer.slice(self.at, self.buffer.len())
-            &rest.extend(chunk)
+            rest.extend(chunk)
             self.buffer = rest
             self.at = 0
         }
@@ -476,7 +476,7 @@ CcPackTarStream: struct {
 
     // The next `count` bytes.
     next_bytes: fn(&self, count: Int) -[FS.Read]> [U8] CcToolchainError! {
-        if !(&self.fill(count)) -> return Err(CcToolchainError.Invalid("C toolchain pack archive is truncated"))
+        if !(self.fill(count)) -> return Err(CcToolchainError.Invalid("C toolchain pack archive is truncated"))
         out: self.buffer.slice(self.at, self.at + count)
         self.at += count
         Ok(out)
@@ -486,7 +486,7 @@ CcPackTarStream: struct {
     skip: fn(&self, count: Int) CcToolchainError! -[FS.Read]> {
         remaining := count
         loop remaining > 0 {
-            if !(&self.fill(1)) -> return Err(CcToolchainError.Invalid("C toolchain pack archive is truncated"))
+            if !(self.fill(1)) -> return Err(CcToolchainError.Invalid("C toolchain pack archive is truncated"))
             available: self.buffer.len() - self.at
             step: if available < remaining -> available else -> remaining
             self.at += step
@@ -499,7 +499,7 @@ CcPackTarStream: struct {
         output := files.create(path, if_exists: .Refuse) ?? return Err(CcToolchainError.Invalid("create `{path}`: {err}"))
         remaining := count
         loop remaining > 0 {
-            if !(&self.fill(1)) -> return Err(CcToolchainError.Invalid("C toolchain pack archive is truncated"))
+            if !(self.fill(1)) -> return Err(CcToolchainError.Invalid("C toolchain pack archive is truncated"))
             available: self.buffer.len() - self.at
             step: if available < remaining -> available else -> remaining
             output.write_all(self.buffer.slice(self.at, self.at + step)) ?? return Err(CcToolchainError.Invalid("write `{path}`: {err}"))
@@ -513,11 +513,11 @@ CcPackTarStream: struct {
 // `destination`, within the entry and byte limits.
 provider_cc_pack_untar: fn(archive: String, destination: String) CcToolchainError! -[FS]> {
     file: files.open(archive, links: .Refuse) ?? return Err(CcToolchainError.Invalid("open C toolchain pack: {err}"))
-    stream := CcPackTarStream{reader: zstd.reader(^file), buffer: [U8]{}, at: 0}
+    stream := CcPackTarStream{reader: zstd.reader(file), buffer: [U8]{}, at: 0}
     entries := 0
     unpacked := 0
     loop {
-        header: &stream.next_bytes(PROVIDER_TAR_BLOCK)
+        header: stream.next_bytes(PROVIDER_TAR_BLOCK)
         if provider_registry_tar_zero(header) -> break
         if !provider_registry_tar_checksum_valid(header) -> return Err(CcToolchainError.Invalid("C toolchain pack has a damaged tar header"))
         raw_name: provider_registry_tar_header_name(header) ?? return Err(CcToolchainError.Invalid(err.message()))
@@ -527,7 +527,7 @@ provider_cc_pack_untar: fn(archive: String, destination: String) CcToolchainErro
         padding: (PROVIDER_TAR_BLOCK - size % PROVIDER_TAR_BLOCK) % PROVIDER_TAR_BLOCK
         name: raw_name.removeprefix("./")
         if name == "" || name == "." {
-            &stream.skip(size + padding)
+            stream.skip(size + padding)
             next
         }
         entries += 1
@@ -544,12 +544,12 @@ provider_cc_pack_untar: fn(archive: String, destination: String) CcToolchainErro
         }
         if target == {
             .Val(path) -> {
-                &stream.copy_to(path, size)
+                stream.copy_to(path, size)
                 files.set_mode(path, mode.bit_and(0o755)) ?? return Err(CcToolchainError.Invalid("set the mode of `{name}`: {err}"))
             }
-            .None -> &stream.skip(size)
+            .None -> stream.skip(size)
         }
-        &stream.skip(padding)
+        stream.skip(padding)
     }
 }
 
@@ -559,7 +559,7 @@ provider_cc_realize_pack: fn(verification: &StoreVerification, spec: RefSpec, ct
     covered: provider_cc_pack_covered_target(target) ?? return Err(ProviderError.Unsupported(err.message()))
     asset: provider_cc_pack_asset_for_host() ?? return Err(ProviderError.Unsupported(err.message()))
     roots: ctx.nix_roots ?? return Err(ProviderError.BadOutput("C toolchain realization has no Hangar roots"))
-    tools: provider_cc_pack_ensure(&verification, roots, asset, provider_cc_pack_default_sources(), ctx.offline)
+    tools: provider_cc_pack_ensure(verification, roots, asset, provider_cc_pack_default_sources(), ctx.offline)
     provider_cc_ensure_real_directory(ctx.store_dir) ?? return Err(ProviderError.BadOutput(err.message()))
     stem: "{CC_TOOLCHAIN_PACKAGE}-{covered.triple}-{provider_cc_pack_short(tools.digest)}-{process.current_pid()}"
     staging: files.join(ctx.store_dir, ".{stem}.partial")
@@ -728,14 +728,14 @@ provider_cc_pack_build_musl: fn(tools: CcPackTools, target: CcPackTarget, usr: S
         if source == "" -> next
         provider_cc_validate_relative_path(source)
         object: "{source.replace("/", "_")}.o"
-        &objects.push(object)
-        &specs.push(provider_cc_pack_compile(clang, flags, files.join(source_root, source), files.join(scratch, object), false))
+        objects.push(object)
+        specs.push(provider_cc_pack_compile(clang, flags, files.join(source_root, source), files.join(scratch, object), false))
     }
     if objects.len() == 0 -> return Err(CcToolchainError.Invalid("musl source list for {target.arch} is empty"))
     loop name in CC_PACK_MUSL_CRT {
         arch_source: files.join(source_root, "crt/{target.arch}/{name}.s")
         source: if provider_cc_is_regular_file(arch_source) -> arch_source else -> files.join(source_root, "crt/{name}.c")
-        &specs.push(provider_cc_pack_compile(clang, flags, source, files.join(lib, "{name}.o"), name == "Scrt1" || name == "rcrt1"))
+        specs.push(provider_cc_pack_compile(clang, flags, source, files.join(lib, "{name}.o"), name == "Scrt1" || name == "rcrt1"))
     }
     receipts: process.run_all(specs, sys.cpu_count()) ?? return Err(CcToolchainError.Invalid("run the pack compiler: {err}"))
     loop result in receipts {
@@ -743,7 +743,7 @@ provider_cc_pack_build_musl: fn(tools: CcPackTools, target: CcPackTarget, usr: S
         if !receipt.success -> return Err(CcToolchainError.Invalid("building musl for {target.triple} failed: {provider_cc_pack_clip(receipt.errors)}"))
     }
     archive := [String]{files.join(tools.root, CC_PACK_AR), "rcs", files.join(lib, "libc.a")}
-    &archive.extend(objects)
+    archive.extend(objects)
     linked: process.cmd(archive).cwd(scratch).env_clear().stdout(.Capture).stderr(.Capture).run() ?? return Err(CcToolchainError.Invalid("run the pack archiver: {err}"))
     if !linked.success -> return Err(CcToolchainError.Invalid("archiving musl for {target.triple} failed: {provider_cc_pack_clip(linked.errors)}"))
     loop name in CC_PACK_MUSL_EMPTY_LIBS {
@@ -753,9 +753,9 @@ provider_cc_pack_build_musl: fn(tools: CcPackTools, target: CcPackTarget, usr: S
 
 provider_cc_pack_compile: fn(clang: String, flags: [String], source: String, object: String, pic: Bool) -[Exec]> ProcessSpec Never! {
     argv := [String]{clang}
-    &argv.extend(flags)
-    if pic -> &argv.push("-fPIC")
-    &argv.extend([String]{"-c", source, "-o", object})
+    argv.extend(flags)
+    if pic -> argv.push("-fPIC")
+    argv.extend([String]{"-c", source, "-o", object})
     process.cmd(argv).env_clear().stdout(.Capture).stderr(.Capture)
 }
 

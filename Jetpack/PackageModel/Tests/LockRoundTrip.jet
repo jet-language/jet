@@ -483,7 +483,7 @@ pkg_lock_test_validation_error: fn(source: LockSource, closure: NixClosureRecord
     lock: pkg_lock_load(scratch.path) ?? panic("reload")
     records := [LockedPackage]{}
     loop package in lock.packages {
-        if package.name == "base64" -> &records.push(package)
+        if package.name == "base64" -> records.push(package)
     }
     assert_eq(records.len(), 1)
     assert_eq(records[0].version, "0.22.1")
@@ -500,7 +500,7 @@ pkg_lock_test_validation_error: fn(source: LockSource, closure: NixClosureRecord
     relock: pkg_lock_load(scratch.path) ?? panic("reload")
     versions := [String]{}
     loop package in relock.packages {
-        if package.name == "base64" -> &versions.push(package.version)
+        if package.name == "base64" -> versions.push(package.version)
     }
     assert_eq(versions, [String]{"0.22.2"})
 }

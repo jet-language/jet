@@ -21,7 +21,7 @@ PlanInput: struct {
     // Inputs ordered by path, then digest.
     sorted: fn(inputs: [PlanInput]) -> [PlanInput] Never! {
         out := inputs
-        &out.sort_by((left: PlanInput, right: PlanInput) -> (left.path <=> right.path).then(left.digest <=> right.digest))
+        out.sort_by((left: PlanInput, right: PlanInput) -> (left.path <=> right.path).then(left.digest <=> right.digest))
         out
     }
 }
@@ -56,7 +56,7 @@ BuildPlanFragment: struct {
 
     canonical_bytes: fn(self) -> [U8] Never! {
         writer := RecipeCanonicalWriter.new("jet.build-plan-fragment.v1")
-        self.write_canonical(&writer)
+        self.write_canonical(writer)
         writer.bytes
     }
 
@@ -64,32 +64,32 @@ BuildPlanFragment: struct {
     // changes the identity.
     write_canonical: fn(self, writer: &RecipeCanonicalWriter) Never! {
         actions := self.actions
-        &actions.sort_by(action -> action.name)
-        &writer.push_count(actions.len())
+        actions.sort_by(action -> action.name)
+        writer.push_count(actions.len())
         loop action in actions {
-            &writer.push_text(action.name)
-            &writer.push_text(action.tool)
-            &writer.push_texts(action.args)
+            writer.push_text(action.name)
+            writer.push_text(action.tool)
+            writer.push_texts(action.args)
             inputs := action.inputs
-            &inputs.sort()
-            &writer.push_texts(inputs)
+            inputs.sort()
+            writer.push_texts(inputs)
             outputs := action.outputs
-            &outputs.sort()
-            &writer.push_texts(outputs)
+            outputs.sort()
+            writer.push_texts(outputs)
             keys := action.env.keys().to_list()
-            &keys.sort()
-            &writer.push_count(keys.len())
+            keys.sort()
+            writer.push_count(keys.len())
             loop key in keys {
-                &writer.push_text(key)
-                &writer.push_text(action.env[key])
+                writer.push_text(key)
+                writer.push_text(action.env[key])
             }
             effects: BuildEffect.sorted(action.effects)
-            &writer.push_count(effects.len())
-            loop build_effect in effects -> &writer.push_text(build_effect.flag())
+            writer.push_count(effects.len())
+            loop build_effect in effects -> writer.push_text(build_effect.flag())
             dependencies := action.dependencies
-            &dependencies.sort()
-            &writer.push_texts(dependencies)
-            &writer.push_text(action.platform)
+            dependencies.sort()
+            writer.push_texts(dependencies)
+            writer.push_text(action.platform)
         }
     }
 }
@@ -121,7 +121,7 @@ StagedPlanAction: struct {
             }
             if input.digest.trim() == "" || pkg_text_has_control(input.digest) -> return Err(StagedPlanError.MissingInputDigest(input.path))
             if declared.contains(input.path) -> return Err(StagedPlanError.DuplicateInput(input.path))
-            &declared.push(input.path)
+            declared.push(input.path)
         }
         _ := pkg_staged_unique_tools(self.authority.tools)
         _ := pkg_staged_unique_effects(self.authority.effects)
@@ -131,7 +131,7 @@ StagedPlanAction: struct {
     validate: fn(self, fragment: BuildPlanFragment) StagedPlanError! {
         self.validate_declaration()
         declared_inputs := [String]{}
-        loop input in self.inputs -> &declared_inputs.push(input.path)
+        loop input in self.inputs -> declared_inputs.push(input.path)
         authority_tools: pkg_staged_unique_tools(self.authority.tools)
         authority_effects: pkg_staged_unique_effects(self.authority.effects)
         names := [String]{}
@@ -141,7 +141,7 @@ StagedPlanAction: struct {
         loop action in fragment.actions {
             if action.name.trim() == "" || pkg_text_has_control(action.name) -> return Err(StagedPlanError.EmptyFragmentActionName)
             if names.contains(action.name) -> return Err(StagedPlanError.DuplicateFragmentActionName(action.name))
-            &names.push(action.name)
+            names.push(action.name)
             if action.tool.trim() == "" || pkg_text_has_control(action.tool) -> return Err(StagedPlanError.EmptyFragmentTool(action.name))
             if !authority_tools.contains(action.tool) -> return Err(StagedPlanError.UnauthorizedTool{action: action.name, tool: action.tool})
             if action.platform != self.authority.platform {
@@ -168,7 +168,7 @@ StagedPlanAction: struct {
                         return Err(StagedPlanError.OutputConflict{first: owned.output, first_owner: owned.owner, second: output.copy(), second_owner: action.name})
                     }
                 }
-                &output_owners.push((output: output, owner: action.name))
+                output_owners.push((output: output, owner: action.name))
             }
             loop dependency in action.dependencies {
                 if dependency == action.name || dependency.trim() == "" -> return Err(StagedPlanError.InvalidDependency{action: action.name, dependency: dependency})
@@ -194,8 +194,8 @@ StagedPlanAction: struct {
     identity: fn(self, fragment: BuildPlanFragment) -> String StagedPlanError! {
         self.validate(fragment)
         writer := RecipeCanonicalWriter.new(STAGED_PLAN_FORMAT)
-        self.write_canonical(&writer)
-        fragment.write_canonical(&writer)
+        self.write_canonical(writer)
+        fragment.write_canonical(writer)
         Ok("staged-plan-sha256:{pkg_sha256_hex(writer.bytes)}")
     }
 
@@ -211,22 +211,22 @@ StagedPlanAction: struct {
     }
 
     write_canonical: fn(self, writer: &RecipeCanonicalWriter) Never! {
-        &writer.push_text(self.name)
-        &writer.push_count(self.stage)
-        &writer.push_count(self.stage_bound)
+        writer.push_text(self.name)
+        writer.push_count(self.stage)
+        writer.push_count(self.stage_bound)
         inputs: PlanInput.sorted(self.inputs)
-        &writer.push_count(inputs.len())
+        writer.push_count(inputs.len())
         loop input in inputs {
-            &writer.push_text(input.path)
-            &writer.push_text(input.digest)
+            writer.push_text(input.path)
+            writer.push_text(input.digest)
         }
         tools := self.authority.tools
-        &tools.sort()
-        &writer.push_texts(tools)
+        tools.sort()
+        writer.push_texts(tools)
         effects: BuildEffect.sorted(self.authority.effects)
-        &writer.push_count(effects.len())
-        loop build_effect in effects -> &writer.push_text(build_effect.flag())
-        &writer.push_text(self.authority.platform)
+        writer.push_count(effects.len())
+        loop build_effect in effects -> writer.push_text(build_effect.flag())
+        writer.push_text(self.authority.platform)
     }
 }
 
@@ -250,11 +250,11 @@ StagedPlanLock: struct {
             "stage_bound={self.stage_bound}",
             "platform={self.authority.platform}"
         }
-        loop input in PlanInput.sorted(self.inputs) -> &lines.push("input={input.path}\t{input.digest}")
+        loop input in PlanInput.sorted(self.inputs) -> lines.push("input={input.path}\t{input.digest}")
         tools := self.authority.tools
-        &tools.sort()
-        loop tool in tools -> &lines.push("tool={tool}")
-        loop build_effect in BuildEffect.sorted(self.authority.effects) -> &lines.push("effect={build_effect.flag()}")
+        tools.sort()
+        loop tool in tools -> lines.push("tool={tool}")
+        loop build_effect in BuildEffect.sorted(self.authority.effects) -> lines.push("effect={build_effect.flag()}")
         body: lines.join("\n")
         "{body}\n"
     }
@@ -339,7 +339,7 @@ pkg_staged_unique_tools: fn(values: [String]) -> [String] StagedPlanError! {
             return Err(StagedPlanError.InvalidInput{path: value, reason: "authority name is empty or contains control characters"})
         }
         if out.contains(value) -> return Err(StagedPlanError.DuplicateTool(value))
-        &out.push(value)
+        out.push(value)
     }
     Ok(out)
 }
@@ -349,7 +349,7 @@ pkg_staged_unique_effects: fn(values: [BuildEffect]) -> [BuildEffect] StagedPlan
     seen := [BuildEffect]{}
     loop build_effect in values {
         if seen.contains(build_effect) -> return Err(StagedPlanError.DuplicateEffect(build_effect.flag()))
-        &seen.push(build_effect)
+        seen.push(build_effect)
     }
     Ok(BuildEffect.sorted(seen))
 }
@@ -375,7 +375,7 @@ pkg_staged_nested_under: fn(child: String, parent: String) -> Bool Never! {
 
 pkg_staged_sorted_keys: fn(map: [String: [String]]) -> [String] Never! {
     keys := map.keys().to_list()
-    &keys.sort()
+    keys.sort()
     keys
 }
 
@@ -383,7 +383,7 @@ pkg_staged_sorted_keys: fn(map: [String: [String]]) -> [String] Never! {
 // walked in name order.
 pkg_staged_detect_cycle: fn(dependencies: [String: [String]]) StagedPlanError! {
     states := [String: StagedPlanVisit]{}
-    loop node in pkg_staged_sorted_keys(dependencies) -> pkg_staged_visit(node, dependencies, &states, [String]{})
+    loop node in pkg_staged_sorted_keys(dependencies) -> pkg_staged_visit(node, dependencies, states, [String]{})
 }
 
 // Depth-first walk from `node`; `stack` is the path that reached it.
@@ -397,9 +397,9 @@ pkg_staged_visit: fn(node: String, dependencies: [String: [String]], states: &[S
     }
     states[node] = StagedPlanVisit.Visiting
     path := stack
-    &path.push(node)
+    path.push(node)
     edges: dependencies.get(node) ?? [String]{}
-    loop dependency in edges -> pkg_staged_visit(dependency, dependencies, &states, path)
+    loop dependency in edges -> pkg_staged_visit(dependency, dependencies, states, path)
     states[node] = StagedPlanVisit.Done
 }
 
@@ -413,7 +413,7 @@ pkg_staged_cycle_chain: fn(stack: [String], node: String) -> [String] Never! {
         }
     }
     chain := [String]{}
-    loop index in start..<stack.len() -> &chain.push(stack[index])
-    &chain.push(node)
+    loop index in start..<stack.len() -> chain.push(stack[index])
+    chain.push(node)
     chain
 }

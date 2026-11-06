@@ -92,7 +92,7 @@ sema_source_location_at: fn(segments: [SemaSourceSegment], site: Span) -> SemaSo
     Val(SemaSourceLocation{source_path: segment.source_file, aggregate_start: segment.generated.start, source_start: segment.source_start, origin: segment.origin})
 }
 
-sema_diagnostic_with_source_location: fn(diagnostic: ^Diagnostic, segments: [SemaSourceSegment]) -> Diagnostic Never! {
+sema_diagnostic_with_source_location: fn(diagnostic: &&Diagnostic, segments: [SemaSourceSegment]) -> Diagnostic Never! {
     updated := diagnostic
     span: updated.span ?? return updated
     location: sema_source_location_at(segments, span) ?? {
@@ -130,7 +130,7 @@ sema_diagnostic_with_source_location: fn(diagnostic: ^Diagnostic, segments: [Sem
         }
         return updated
     }
-    diagnostic_with_source_mapping(^updated, location.source_path, location.aggregate_start, location.source_start)
+    diagnostic_with_source_mapping(updated, location.source_path, location.aggregate_start, location.source_start)
 }
 
 sema_attach_diagnostic_source_locations: fn(diagnostics: &[Diagnostic], start: Int, segments: [SemaSourceSegment]) Never! {

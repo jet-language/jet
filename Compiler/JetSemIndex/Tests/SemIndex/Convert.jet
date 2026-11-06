@@ -167,7 +167,7 @@ semindex_s20_inline_effect_assertions: fn(symbols: SemanticSymbolIndex) Never! {
     assert(announce[0][0].signature.contains("-[IO]>"))
 }
 semindex_s20_dispatch_effect_source: fn() -> String Never! {
-    "Shape: trait {{ area: fn(self) -[IO]> Int }}\ndynamic: fn(shape: Shape) -> Int {{ return shape.area() }}\napply: fn(f: fn() -> Int) -> Int {{ return f() }}\nstored: fn(f: ^fn() -> Int) -> Int {{\n    g: f\n    return g()\n}}\nrun: fn() {{}}\n"
+    "Shape: trait {{ area: fn(self) -[IO]> Int }}\ndynamic: fn(shape: Shape) -> Int {{ return shape.area() }}\napply: fn(f: fn() -> Int) -> Int {{ return f() }}\nstored: fn(f: &&fn() -> Int) -> Int {{\n    g: f\n    return g()\n}}\nrun: fn() {{}}\n"
 }
 semindex_s20_dispatch_effect_assertions: fn(index: SemIndex) Never! {
     apply: (index.effect_of("apply") ?? panic("open callback effects"))[0]

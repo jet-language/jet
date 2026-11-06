@@ -206,7 +206,7 @@ gen_image_color: fn(width: Int, height: Int, color: RaylibColor) -> RaylibImage 
     if !image_size_ok(width, height) -> return no_image()
     rgba: pack_rgba(color)
     pixels := [U8]{}
-    loop _ in 0..<(width * height) -> push_rgba(&pixels, rgba)
+    loop _ in 0..<(width * height) -> push_rgba(pixels, rgba)
     RaylibImage{width: width, height: height, pixels: pixels}
 }
 
@@ -222,7 +222,7 @@ gen_image_checked: fn(width: Int, height: Int, checks_x: Int, checks_y: Int, fir
     loop y in 0..<height {
         loop x in 0..<width {
             rgba: if (x /% step_x + y /% step_y) %% 2 == 0 -> even else -> odd
-            push_rgba(&pixels, rgba)
+            push_rgba(pixels, rgba)
         }
     }
     RaylibImage{width: width, height: height, pixels: pixels}
@@ -240,18 +240,18 @@ image_clear_background: fn(image: &RaylibImage, color: RaylibColor) Never! {
     rgba: pack_rgba(color)
     at := 0
     loop at < image.pixels.len() {
-        put_rgba(&image.pixels, at, rgba)
+        put_rgba(image.pixels, at, rgba)
         at += 4
     }
 }
 
 image_draw_pixel: fn(image: &RaylibImage, x: Int, y: Int, color: RaylibColor) Never! {
     if x < 0 || x >= image.width || y < 0 || y >= image.height -> return
-    put_rgba(&image.pixels, (y * image.width + x) * 4, pack_rgba(color))
+    put_rgba(image.pixels, (y * image.width + x) * 4, pack_rgba(color))
 }
 
 image_draw_rectangle: fn(image: &RaylibImage, x: Int, y: Int, width: Int, height: Int, color: RaylibColor) Never! {
-    image_draw_rectangle_rec(&image, int_rectangle(x, y, width, height), color)
+    image_draw_rectangle_rec(image, int_rectangle(x, y, width, height), color)
 }
 
 // raylib's ImageDrawRectangleRec: the rectangle is clipped to the image and
@@ -285,11 +285,11 @@ image_draw_rectangle_rec: fn(image: &RaylibImage, rec: RaylibRectangle, color: R
     columns: trunc_int(width)
     rgba: pack_rgba(color)
     if columns < 1 {
-        put_rgba(&image.pixels, (top * image.width + left) * 4, rgba)
+        put_rgba(image.pixels, (top * image.width + left) * 4, rgba)
         return
     }
     loop row in top..<(top + max_int(trunc_int(height), 1)) {
-        loop column in left..<(left + columns) -> put_rgba(&image.pixels, (row * image.width + column) * 4, rgba)
+        loop column in left..<(left + columns) -> put_rgba(image.pixels, (row * image.width + column) * 4, rgba)
     }
 }
 
@@ -329,7 +329,7 @@ image_crop: fn(image: &RaylibImage, crop: RaylibRectangle) Never! {
     pixels := [U8]{}
     loop row in top..<(top + rows) {
         start: (row * image.width + left) * 4
-        loop at in start..<(start + columns * 4) -> &pixels.push(image.pixels[at])
+        loop at in start..<(start + columns * 4) -> pixels.push(image.pixels[at])
     }
     image.pixels = pixels
     image.width = columns
@@ -350,7 +350,7 @@ image_resize_nn: fn(image: &RaylibImage, new_width: Int, new_height: Int) Never!
         row: min_int((y * y_ratio) >> 16, image.height - 1) * image.width
         loop x in 0..<new_width {
             at: (row + min_int((x * x_ratio) >> 16, image.width - 1)) * 4
-            loop k in 0..<4 -> &pixels.push(image.pixels[at + k])
+            loop k in 0..<4 -> pixels.push(image.pixels[at + k])
         }
     }
     image.pixels = pixels
@@ -363,7 +363,7 @@ image_flip_vertical: fn(image: &RaylibImage) Never! {
     row := image.height - 1
     loop row >= 0 {
         start: row * image.width * 4
-        loop at in start..<(start + image.width * 4) -> &pixels.push(image.pixels[at])
+        loop at in start..<(start + image.width * 4) -> pixels.push(image.pixels[at])
         row -= 1
     }
     image.pixels = pixels
@@ -374,7 +374,7 @@ image_flip_horizontal: fn(image: &RaylibImage) Never! {
     loop y in 0..<image.height {
         loop x in 0..<image.width {
             at: (y * image.width + image.width - 1 - x) * 4
-            loop k in 0..<4 -> &pixels.push(image.pixels[at + k])
+            loop k in 0..<4 -> pixels.push(image.pixels[at + k])
         }
     }
     image.pixels = pixels
@@ -388,11 +388,11 @@ image_rotate_cw: fn(image: &RaylibImage) Never! {
         y := image.height - 1
         loop y >= 0 {
             at: (y * image.width + x) * 4
-            loop k in 0..<4 -> &pixels.push(image.pixels[at + k])
+            loop k in 0..<4 -> pixels.push(image.pixels[at + k])
             y -= 1
         }
     }
-    turn_image(&image, pixels)
+    turn_image(image, pixels)
 }
 
 // A quarter turn counterclockwise: row i of the result is column
@@ -403,11 +403,11 @@ image_rotate_ccw: fn(image: &RaylibImage) Never! {
     loop x >= 0 {
         loop y in 0..<image.height {
             at: (y * image.width + x) * 4
-            loop k in 0..<4 -> &pixels.push(image.pixels[at + k])
+            loop k in 0..<4 -> pixels.push(image.pixels[at + k])
         }
         x -= 1
     }
-    turn_image(&image, pixels)
+    turn_image(image, pixels)
 }
 
 // raylib's ImageColorTint: each channel becomes channel * tint / 255, rounded
@@ -447,7 +447,7 @@ image_color_replace: fn(image: &RaylibImage, color: RaylibColor, replace: Raylib
     rgba: pack_rgba(replace)
     at := 0
     loop at < image.pixels.len() {
-        if image_rgba(image.pixels, at) == target -> put_rgba(&image.pixels, at, rgba)
+        if image_rgba(image.pixels, at) == target -> put_rgba(image.pixels, at, rgba)
         at += 4
     }
 }
@@ -457,10 +457,10 @@ image_size_ok: fn(width: Int, height: Int) -> Bool {
 }
 
 push_rgba: fn(pixels: &[U8], rgba: Int) {
-    &pixels.push(U8{rgba >> 24})
-    &pixels.push(U8{(rgba >> 16).bit_and(255)})
-    &pixels.push(U8{(rgba >> 8).bit_and(255)})
-    &pixels.push(U8{rgba.bit_and(255)})
+    pixels.push(U8{rgba >> 24})
+    pixels.push(U8{(rgba >> 16).bit_and(255)})
+    pixels.push(U8{(rgba >> 8).bit_and(255)})
+    pixels.push(U8{rgba.bit_and(255)})
 }
 
 image_rgba: fn(pixels: [U8], at: Int) -> Int {
@@ -877,12 +877,12 @@ push_clipped: fn(runs: &[RaylibRun], canvas: RaylibCanvas, x: Int, y: Int, width
     right: min_int(x + width, canvas.width)
     bottom: min_int(y + height, canvas.height)
     if left >= right || top >= bottom -> return
-    &runs.push(RaylibRun{x: left, y: top, width: right - left, height: bottom - top, rgba: rgba})
+    runs.push(RaylibRun{x: left, y: top, width: right - left, height: bottom - top, rgba: rgba})
 }
 
 rect_runs: fn(canvas: RaylibCanvas, x: Int, y: Int, width: Int, height: Int, rgba: Int) -> [RaylibRun] {
     runs := [RaylibRun]{}
-    push_clipped(&runs, canvas, x, y, width, height, rgba)
+    push_clipped(runs, canvas, x, y, width, height, rgba)
     runs
 }
 
@@ -892,7 +892,7 @@ rect_runs: fn(canvas: RaylibCanvas, x: Int, y: Int, width: Int, height: Int, rgb
 line_runs: fn(canvas: RaylibCanvas, x0: Int, y0: Int, x1: Int, y1: Int, rgba: Int) -> [RaylibRun] {
     runs := [RaylibRun]{}
     if x0 == x1 && y0 == y1 {
-        push_clipped(&runs, canvas, x0, y0, 1, 1, rgba)
+        push_clipped(runs, canvas, x0, y0, 1, 1, rgba)
         return runs
     }
     ax := x0
@@ -916,14 +916,14 @@ line_runs: fn(canvas: RaylibCanvas, x0: Int, y0: Int, x1: Int, y1: Int, rgba: In
             if run_width > 0 && y == run_y && x == run_x + run_width {
                 run_width += 1
             } else {
-                if run_width > 0 -> push_clipped(&runs, canvas, run_x, run_y, run_width, 1, rgba)
+                if run_width > 0 -> push_clipped(runs, canvas, run_x, run_y, run_width, 1, rgba)
                 run_x = x
                 run_y = y
                 run_width = 1
             }
             x += 1
         }
-        if run_width > 0 -> push_clipped(&runs, canvas, run_x, run_y, run_width, 1, rgba)
+        if run_width > 0 -> push_clipped(runs, canvas, run_x, run_y, run_width, 1, rgba)
         return runs
     }
     if y0 > y1 {
@@ -942,14 +942,14 @@ line_runs: fn(canvas: RaylibCanvas, x0: Int, y0: Int, x1: Int, y1: Int, rgba: In
         if run_height > 0 && x == run_x && y == run_y + run_height {
             run_height += 1
         } else {
-            if run_height > 0 -> push_clipped(&runs, canvas, run_x, run_y, 1, run_height, rgba)
+            if run_height > 0 -> push_clipped(runs, canvas, run_x, run_y, 1, run_height, rgba)
             run_x = x
             run_y = y
             run_height = 1
         }
         y += 1
     }
-    if run_height > 0 -> push_clipped(&runs, canvas, run_x, run_y, 1, run_height, rgba)
+    if run_height > 0 -> push_clipped(runs, canvas, run_x, run_y, 1, run_height, rgba)
     runs
 }
 
@@ -963,7 +963,7 @@ circle_runs: fn(canvas: RaylibCanvas, center_x: Int, center_y: Int, radius: Int,
     loop row <= last {
         dy: row - center_y
         half: isqrt_floor(radius * radius - dy * dy)
-        push_clipped(&runs, canvas, center_x - half, row, 2 * half + 1, 1, rgba)
+        push_clipped(runs, canvas, center_x - half, row, 2 * half + 1, 1, rgba)
         row += 1
     }
     runs
@@ -1022,7 +1022,7 @@ triangle_runs: fn(canvas: RaylibCanvas, x0: Int, y0: Int, x1: Int, y1: Int, x2: 
         span = edge_span(span, x0, y0, bx, by, row)
         span = edge_span(span, bx, by, cx, cy, row)
         span = edge_span(span, cx, cy, x0, y0, row)
-        if span.lo <= span.hi -> &runs.push(RaylibRun{x: span.lo, y: row, width: span.hi - span.lo + 1, height: 1, rgba: rgba})
+        if span.lo <= span.hi -> runs.push(RaylibRun{x: span.lo, y: row, width: span.hi - span.lo + 1, height: 1, rgba: rgba})
         row += 1
     }
     runs
@@ -1060,7 +1060,7 @@ rec_runs: fn(canvas: RaylibCanvas, rec: RaylibRectangle, rgba: Int) -> [RaylibRu
     top: center_from(subpixel(rec.y))
     right: center_from(subpixel(rec.x + rec.width))
     bottom: center_from(subpixel(rec.y + rec.height))
-    push_clipped(&runs, canvas, left, top, right - left, bottom - top, rgba)
+    push_clipped(runs, canvas, left, top, right - left, bottom - top, rgba)
     runs
 }
 
@@ -1068,12 +1068,12 @@ rec_runs: fn(canvas: RaylibCanvas, rec: RaylibRectangle, rgba: Int) -> [RaylibRu
 rect_lines_runs: fn(canvas: RaylibCanvas, x: Int, y: Int, width: Int, height: Int, rgba: Int) -> [RaylibRun] {
     runs := [RaylibRun]{}
     if width <= 0 || height <= 0 -> return runs
-    push_clipped(&runs, canvas, x, y, width, 1, rgba)
+    push_clipped(runs, canvas, x, y, width, 1, rgba)
     if height > 2 {
-        push_clipped(&runs, canvas, x, y + 1, 1, height - 2, rgba)
-        if width > 1 -> push_clipped(&runs, canvas, x + width - 1, y + 1, 1, height - 2, rgba)
+        push_clipped(runs, canvas, x, y + 1, 1, height - 2, rgba)
+        if width > 1 -> push_clipped(runs, canvas, x + width - 1, y + 1, 1, height - 2, rgba)
     }
-    if height > 1 -> push_clipped(&runs, canvas, x, y + height - 1, width, 1, rgba)
+    if height > 1 -> push_clipped(runs, canvas, x, y + height - 1, width, 1, rgba)
     runs
 }
 
@@ -1090,10 +1090,10 @@ lines_ex_bands: fn(rec: RaylibRectangle, line_thick: Float) -> [RaylibRectangle]
     }
     side: rec.height - thick * 2.0
     bands := [RaylibRectangle]{}
-    &bands.push(RaylibRectangle{x: rec.x, y: rec.y, width: rec.width, height: thick})
-    &bands.push(RaylibRectangle{x: rec.x, y: rec.y - thick + rec.height, width: rec.width, height: thick})
-    &bands.push(RaylibRectangle{x: rec.x, y: rec.y + thick, width: thick, height: side})
-    &bands.push(RaylibRectangle{x: rec.x - thick + rec.width, y: rec.y + thick, width: thick, height: side})
+    bands.push(RaylibRectangle{x: rec.x, y: rec.y, width: rec.width, height: thick})
+    bands.push(RaylibRectangle{x: rec.x, y: rec.y - thick + rec.height, width: rec.width, height: thick})
+    bands.push(RaylibRectangle{x: rec.x, y: rec.y + thick, width: thick, height: side})
+    bands.push(RaylibRectangle{x: rec.x - thick + rec.width, y: rec.y + thick, width: thick, height: side})
     bands
 }
 
@@ -1118,13 +1118,13 @@ gradient_runs: fn(canvas: RaylibCanvas, rec: RaylibRectangle, top_left: Int, bot
             u: (Float{column} + 0.5 - rec.x) / rec.width
             rgba: gradient_rgba(top_left, bottom_left, bottom_right, top_right, u, v)
             if column > start && rgba != current {
-                &runs.push(RaylibRun{x: start, y: row, width: column - start, height: 1, rgba: current})
+                runs.push(RaylibRun{x: start, y: row, width: column - start, height: 1, rgba: current})
                 start = column
             }
             current = rgba
             column += 1
         }
-        &runs.push(RaylibRun{x: start, y: row, width: right - start, height: 1, rgba: current})
+        runs.push(RaylibRun{x: start, y: row, width: right - start, height: 1, rgba: current})
         row += 1
     }
     runs
@@ -1163,8 +1163,8 @@ push_piece: fn(pieces: &[RaylibPiece], xs: [Float], ys: [Float]) {
     sx := [Int]{}
     sy := [Int]{}
     loop at in 0..<xs.len() {
-        &sx.push(subpixel(xs[at]))
-        &sy.push(subpixel(ys[at]))
+        sx.push(subpixel(xs[at]))
+        sy.push(subpixel(ys[at]))
     }
     count: sx.len()
     area := 0
@@ -1174,18 +1174,18 @@ push_piece: fn(pieces: &[RaylibPiece], xs: [Float], ys: [Float]) {
     }
     if area == 0 -> return
     if area > 0 {
-        &pieces.push(RaylibPiece{xs: sx, ys: sy})
+        pieces.push(RaylibPiece{xs: sx, ys: sy})
         return
     }
     rx := [Int]{}
     ry := [Int]{}
     at := count - 1
     loop at >= 0 {
-        &rx.push(sx[at])
-        &ry.push(sy[at])
+        rx.push(sx[at])
+        ry.push(sy[at])
         at -= 1
     }
-    &pieces.push(RaylibPiece{xs: rx, ys: ry})
+    pieces.push(RaylibPiece{xs: rx, ys: ry})
 }
 
 // The columns of `row` whose centers lie inside the piece, within lo..hi.
@@ -1236,10 +1236,10 @@ pieces_cover: fn(canvas: RaylibCanvas, pieces: [RaylibPiece]) -> RaylibCover {
         row_spans := [RaylibSpan]{}
         loop piece in pieces {
             span: piece_span(piece, row, -1, canvas.width)
-            if span.lo <= span.hi -> &row_spans.push(span)
+            if span.lo <= span.hi -> row_spans.push(span)
         }
-        merge_spans(&spans, row_spans)
-        &starts.push(spans.len())
+        merge_spans(spans, row_spans)
+        starts.push(spans.len())
         row += 1
     }
     RaylibCover{top: first, starts: starts, spans: spans}
@@ -1249,7 +1249,7 @@ pieces_cover: fn(canvas: RaylibCanvas, pieces: [RaylibPiece]) -> RaylibCover {
 // or touch.
 merge_spans: fn(out: &[RaylibSpan], spans: [RaylibSpan]) {
     taken := [Bool]{}
-    loop _ in 0..<spans.len() -> &taken.push(false)
+    loop _ in 0..<spans.len() -> taken.push(false)
     lo := 0
     hi := -1
     open := false
@@ -1262,13 +1262,13 @@ merge_spans: fn(out: &[RaylibSpan], spans: [RaylibSpan]) {
         if open && spans[pick].lo <= hi + 1 {
             hi = max_int(hi, spans[pick].hi)
         } else {
-            if open -> &out.push(RaylibSpan{lo: lo, hi: hi})
+            if open -> out.push(RaylibSpan{lo: lo, hi: hi})
             lo = spans[pick].lo
             hi = spans[pick].hi
             open = true
         }
     }
-    if open -> &out.push(RaylibSpan{lo: lo, hi: hi})
+    if open -> out.push(RaylibSpan{lo: lo, hi: hi})
 }
 
 // draw_circle's disc as a cover.
@@ -1284,8 +1284,8 @@ disc_cover: fn(canvas: RaylibCanvas, center_x: Int, center_y: Int, radius: Int) 
         half: isqrt_floor(radius * radius - dy * dy)
         lo: max_int(center_x - half, -1)
         hi: min_int(center_x + half, canvas.width)
-        if lo <= hi -> &spans.push(RaylibSpan{lo: lo, hi: hi})
-        &starts.push(spans.len())
+        if lo <= hi -> spans.push(RaylibSpan{lo: lo, hi: hi})
+        starts.push(spans.len())
         row += 1
     }
     RaylibCover{top: first, starts: starts, spans: spans}
@@ -1314,9 +1314,9 @@ ellipse_cover: fn(canvas: RaylibCanvas, center_x: Int, center_y: Int, radius_h: 
             loop half > 0 && !ellipse_inside(half, dy, radius_v, limit) -> half -= 1
             lo: max_int(center_x - half, -1)
             hi: min_int(center_x + half, canvas.width)
-            if lo <= hi -> &spans.push(RaylibSpan{lo: lo, hi: hi})
+            if lo <= hi -> spans.push(RaylibSpan{lo: lo, hi: hi})
         }
-        &starts.push(spans.len())
+        starts.push(spans.len())
         row += 1
     }
     RaylibCover{top: first, starts: starts, spans: spans}
@@ -1337,7 +1337,7 @@ cover_runs: fn(canvas: RaylibCanvas, cover: RaylibCover, rgba: Int) -> [RaylibRu
     runs := [RaylibRun]{}
     loop k in 0..<(cover.starts.len() - 1) {
         loop at in cover.starts[k]..<cover.starts[k + 1] {
-            push_clipped(&runs, canvas, cover.spans[at].lo, cover.top + k, cover.spans[at].hi - cover.spans[at].lo + 1, 1, rgba)
+            push_clipped(runs, canvas, cover.spans[at].lo, cover.top + k, cover.spans[at].hi - cover.spans[at].lo + 1, 1, rgba)
         }
     }
     runs
@@ -1352,7 +1352,7 @@ outline_runs: fn(canvas: RaylibCanvas, cover: RaylibCover, rgba: Int) -> [Raylib
         loop at in cover.starts[k]..<cover.starts[k + 1] {
             lo: cover.spans[at].lo
             hi: cover.spans[at].hi
-            push_gaps(&runs, canvas, row, lo, hi, interior_spans(cover, k, lo + 1, hi - 1), rgba)
+            push_gaps(runs, canvas, row, lo, hi, interior_spans(cover, k, lo + 1, hi - 1), rgba)
         }
     }
     runs
@@ -1369,7 +1369,7 @@ interior_spans: fn(cover: RaylibCover, k: Int, lo: Int, hi: Int) -> [RaylibSpan]
         loop below in cover.starts[k + 1]..<cover.starts[k + 2] {
             b_lo: max_int(cover.spans[below].lo, a_lo)
             b_hi: min_int(cover.spans[below].hi, a_hi)
-            if b_lo <= b_hi -> &inside.push(RaylibSpan{lo: b_lo, hi: b_hi})
+            if b_lo <= b_hi -> inside.push(RaylibSpan{lo: b_lo, hi: b_hi})
         }
     }
     inside
@@ -1383,10 +1383,10 @@ difference_runs: fn(canvas: RaylibCanvas, outer: RaylibCover, inner: RaylibCover
         holes := [RaylibSpan]{}
         j: row - inner.top
         if j >= 0 && j + 1 < inner.starts.len() {
-            loop at in inner.starts[j]..<inner.starts[j + 1] -> &holes.push(RaylibSpan{lo: inner.spans[at].lo, hi: inner.spans[at].hi})
+            loop at in inner.starts[j]..<inner.starts[j + 1] -> holes.push(RaylibSpan{lo: inner.spans[at].lo, hi: inner.spans[at].hi})
         }
         loop at in outer.starts[k]..<outer.starts[k + 1] {
-            push_gaps(&runs, canvas, row, outer.spans[at].lo, outer.spans[at].hi, holes, rgba)
+            push_gaps(runs, canvas, row, outer.spans[at].lo, outer.spans[at].hi, holes, rgba)
         }
     }
     runs
@@ -1397,10 +1397,10 @@ push_gaps: fn(runs: &[RaylibRun], canvas: RaylibCanvas, row: Int, lo: Int, hi: I
     pen := lo
     loop hole in holes {
         if hole.hi < pen || hole.lo > hi -> next
-        push_clipped(&runs, canvas, pen, row, hole.lo - pen, 1, rgba)
+        push_clipped(runs, canvas, pen, row, hole.lo - pen, 1, rgba)
         pen = hole.hi + 1
     }
-    push_clipped(&runs, canvas, pen, row, hi + 1 - pen, 1, rgba)
+    push_clipped(runs, canvas, pen, row, hi + 1 - pen, 1, rgba)
 }
 
 // acos(2 * (1 - 0.5 / radius)^2 - 1): raylib's widest arc step whose chord
@@ -1446,11 +1446,11 @@ rounded_pieces: fn(rec: RaylibRectangle, roundness: Float, segments: Int, grow: 
         }
         loop at in 0..<(count + 1) {
             angle: (start + step * Float{at}) * C_DEG2RAD
-            &xs.push(cx + core.math.cos(angle) * reach)
-            &ys.push(cy + core.math.sin(angle) * reach)
+            xs.push(cx + core.math.cos(angle) * reach)
+            ys.push(cy + core.math.sin(angle) * reach)
         }
     }
-    push_piece(&pieces, xs, ys)
+    push_piece(pieces, xs, ys)
     pieces
 }
 
@@ -1488,21 +1488,21 @@ ring_pieces: fn(center: RaylibVector2, inner_radius: Float, outer_radius: Float,
         xs := [Float]{}
         ys := [Float]{}
         if sector {
-            &xs.push(center.x)
-            &ys.push(center.y)
-            &xs.push(center.x + core.math.cos(before) * outer)
-            &ys.push(center.y + core.math.sin(before) * outer)
+            xs.push(center.x)
+            ys.push(center.y)
+            xs.push(center.x + core.math.cos(before) * outer)
+            ys.push(center.y + core.math.sin(before) * outer)
         } else {
-            &xs.push(center.x + core.math.cos(before) * outer)
-            &ys.push(center.y + core.math.sin(before) * outer)
-            &xs.push(center.x + core.math.cos(before) * inner)
-            &ys.push(center.y + core.math.sin(before) * inner)
-            &xs.push(center.x + core.math.cos(after) * inner)
-            &ys.push(center.y + core.math.sin(after) * inner)
+            xs.push(center.x + core.math.cos(before) * outer)
+            ys.push(center.y + core.math.sin(before) * outer)
+            xs.push(center.x + core.math.cos(before) * inner)
+            ys.push(center.y + core.math.sin(before) * inner)
+            xs.push(center.x + core.math.cos(after) * inner)
+            ys.push(center.y + core.math.sin(after) * inner)
         }
-        &xs.push(center.x + core.math.cos(after) * outer)
-        &ys.push(center.y + core.math.sin(after) * outer)
-        push_piece(&pieces, xs, ys)
+        xs.push(center.x + core.math.cos(after) * outer)
+        ys.push(center.y + core.math.sin(after) * outer)
+        push_piece(pieces, xs, ys)
     }
     pieces
 }
@@ -1514,11 +1514,11 @@ poly_pieces: fn(center: RaylibVector2, sides: Int, radius: Float, rotation: Floa
     ys := [Float]{}
     loop at in 0..<count {
         angle: (rotation + Float{360.0} * Float{at} / Float{count}) * C_DEG2RAD
-        &xs.push(center.x + core.math.cos(angle) * radius)
-        &ys.push(center.y + core.math.sin(angle) * radius)
+        xs.push(center.x + core.math.cos(angle) * radius)
+        ys.push(center.y + core.math.sin(angle) * radius)
     }
     pieces := [RaylibPiece]{}
-    push_piece(&pieces, xs, ys)
+    push_piece(pieces, xs, ys)
     pieces
 }
 
@@ -1619,11 +1619,11 @@ decode_png: fn(data: [U8]) -> RaylibImage {
             interlace = byte_at(data, start + 12)
             if format.channels == 0 || byte_at(data, start + 10) != 0 || byte_at(data, start + 11) != 0 || interlace > 1 -> return no_image()
         } else if kind == C_PNG_PLTE {
-            loop i in 0..<length -> &palette.push(data[start + i])
+            loop i in 0..<length -> palette.push(data[start + i])
         } else if kind == C_PNG_TRNS {
-            loop i in 0..<length -> &key.push(data[start + i])
+            loop i in 0..<length -> key.push(data[start + i])
         } else if kind == C_PNG_IDAT {
-            loop i in 0..<length -> &compressed.push(data[start + i])
+            loop i in 0..<length -> compressed.push(data[start + i])
         } else if kind == C_PNG_IEND {
             break
         }
@@ -1633,7 +1633,7 @@ decode_png: fn(data: [U8]) -> RaylibImage {
     if format.color_type == 3 && (palette.len() == 0 || palette.len() % 3 != 0) -> return no_image()
     raw: core.archive.decompress(compressed) ?? return no_image()
     pixels := [U8]{}
-    loop _ in 0..<(width * height * 4) -> &pixels.push(U8{0})
+    loop _ in 0..<(width * height * 4) -> pixels.push(U8{0})
     bits: format.channels * format.depth
     step: max_int(bits /% 8, 1)
     passes: if interlace == 1 -> 7 else -> 1
@@ -1648,13 +1648,13 @@ decode_png: fn(data: [U8]) -> RaylibImage {
         if pass_width == 0 || pass_height == 0 -> next
         row_bytes: (pass_width * bits + 7) /% 8
         previous := [U8]{}
-        loop _ in 0..<row_bytes -> &previous.push(U8{0})
+        loop _ in 0..<row_bytes -> previous.push(U8{0})
         loop row in 0..<pass_height {
             if offset + 1 + row_bytes > raw.len() -> return no_image()
             line: png_unfilter(raw, offset, row_bytes, step, previous) ?? return no_image()
             loop column in 0..<pass_width {
                 target: ((origin_y + row * step_y) * width + origin_x + column * step_x) * 4
-                put_rgba(&pixels, target, png_sample(line, column, format, palette, key))
+                put_rgba(pixels, target, png_sample(line, column, format, palette, key))
             }
             previous = line
             offset += 1 + row_bytes
@@ -1685,7 +1685,7 @@ png_unfilter: fn(raw: [U8], offset: Int, row_bytes: Int, step: Int, previous: [U
             predictor = paeth(left, up, corner)
         }
         value: (byte_at(raw, offset + 1 + i) + predictor).bit_and(255)
-        &line.push(U8{value})
+        line.push(U8{value})
     }
     Val(line)
 }
@@ -1827,7 +1827,7 @@ glyph_runs: fn(runs: &[RaylibRun], canvas: RaylibCanvas, glyph: Int, x: Int, y: 
             }
             start: row
             loop row < 7 && (bits >> row).bit_and(1) != 0 -> row += 1
-            push_clipped(&runs, canvas, x + column * scale, y + start * scale, scale, (row - start) * scale, rgba)
+            push_clipped(runs, canvas, x + column * scale, y + start * scale, scale, (row - start) * scale, rgba)
         }
         column += 1
     }
@@ -1851,7 +1851,7 @@ text_runs: fn(canvas: RaylibCanvas, text: String, x: Int, y: Int, size: Int, rgb
         if code >= 128 && code < 192 -> next
         glyph := C_FONT_UNKNOWN
         if code >= 32 && code <= 126 -> glyph = code - 32
-        glyph_runs(&runs, canvas, glyph, pen_x, pen_y, scale, rgba)
+        glyph_runs(runs, canvas, glyph, pen_x, pen_y, scale, rgba)
         pen_x += C_FONT_ADVANCE * scale
     }
     runs
@@ -1943,18 +1943,18 @@ axis_code: fn(axis: String) -> Int Never! {
 run_words: fn(runs: [RaylibRun]) -> [Int] {
     words := [Int]{}
     loop run in runs {
-        &words.push(run.x)
-        &words.push(run.y)
-        &words.push(run.width)
-        &words.push(run.height)
-        &words.push(run.rgba)
+        words.push(run.x)
+        words.push(run.y)
+        words.push(run.width)
+        words.push(run.height)
+        words.push(run.rgba)
     }
     words
 }
 
 coverage: fn(runs: [RaylibRun], width: Int, height: Int) -> [Int] {
     counts := [Int]{}
-    loop _ in 0..<(width * height) -> &counts.push(0)
+    loop _ in 0..<(width * height) -> counts.push(0)
     loop run in runs {
         loop y in run.y..<(run.y + run.height) {
             loop x in run.x..<(run.x + run.width) -> counts[y * width + x] = counts[y * width + x] + 1
@@ -1981,11 +1981,11 @@ coverage: fn(runs: [RaylibRun], width: Int, height: Int) -> [Int] {
     assert_eq(run_words(line_runs(canvas, 3, 3, 3, 3, 1)), [Int]{3, 3, 1, 1, 1})
     diagonal := [Int]{}
     loop i in 0..<8 {
-        &diagonal.push(i)
-        &diagonal.push(i)
-        &diagonal.push(1)
-        &diagonal.push(1)
-        &diagonal.push(1)
+        diagonal.push(i)
+        diagonal.push(i)
+        diagonal.push(1)
+        diagonal.push(1)
+        diagonal.push(1)
     }
     assert_eq(run_words(line_runs(canvas, -3, -3, 12, 12, 1)), diagonal)
     // Only visible steps are walked, whatever the endpoints.
@@ -2012,8 +2012,8 @@ coverage: fn(runs: [RaylibRun], width: Int, height: Int) -> [Int] {
     lower: triangle_runs(canvas, 0, 0, 4, 4, 0, 4, 1)
     assert_eq(run_words(lower), [Int]{0, 0, 1, 1, 1, 0, 1, 2, 1, 1, 0, 2, 3, 1, 1, 0, 3, 4, 1, 1})
     both := [RaylibRun]{}
-    loop run in upper -> &both.push(run)
-    loop run in lower -> &both.push(run)
+    loop run in upper -> both.push(run)
+    loop run in lower -> both.push(run)
     counts: coverage(both, 6, 6)
     loop y in 0..<6 {
         loop x in 0..<6 {
@@ -2086,7 +2086,7 @@ coverage: fn(runs: [RaylibRun], width: Int, height: Int) -> [Int] {
 
 triangle_piece: fn(xs: [Float], ys: [Float]) -> [RaylibPiece] {
     pieces := [RaylibPiece]{}
-    push_piece(&pieces, xs, ys)
+    push_piece(pieces, xs, ys)
     pieces
 }
 
@@ -2098,8 +2098,8 @@ triangle_piece: fn(xs: [Float], ys: [Float]) -> [RaylibPiece] {
     assert_eq(run_words(cover_runs(canvas, pieces_cover(canvas, clockwise), 1)), run_words(upper))
     assert_eq(run_words(cover_runs(canvas, pieces_cover(canvas, counter), 1)), run_words(upper))
     pieces := [RaylibPiece]{}
-    push_piece(&pieces, [Float]{0.0, 4.0, 4.0}, [Float]{0.0, 0.0, 4.0})
-    push_piece(&pieces, [Float]{0.0, 4.0, 0.0}, [Float]{0.0, 4.0, 4.0})
+    push_piece(pieces, [Float]{0.0, 4.0, 4.0}, [Float]{0.0, 0.0, 4.0})
+    push_piece(pieces, [Float]{0.0, 4.0, 0.0}, [Float]{0.0, 4.0, 4.0})
     assert_eq(run_words(cover_runs(canvas, pieces_cover(canvas, pieces), 1)), [Int]{0, 0, 4, 1, 1, 0, 1, 4, 1, 1, 0, 2, 4, 1, 1, 0, 3, 4, 1, 1})
     assert_eq(triangle_piece([Float]{0.0, 2.0, 4.0}, [Float]{0.0, 2.0, 4.0}).len(), 0)
 }
@@ -2131,8 +2131,8 @@ piece_words: fn(pieces: [RaylibPiece]) -> [Int] {
     words := [Int]{}
     loop piece in pieces {
         loop at in 0..<piece.xs.len() {
-            &words.push(piece.xs[at])
-            &words.push(piece.ys[at])
+            words.push(piece.xs[at])
+            words.push(piece.ys[at])
         }
     }
     words
@@ -2153,8 +2153,8 @@ piece_words: fn(pieces: [RaylibPiece]) -> [Int] {
     runs := [RaylibRun]{}
     loop piece in full {
         one := [RaylibPiece]{}
-        &one.push(piece)
-        loop run in cover_runs(square, pieces_cover(square, one), 1) -> &runs.push(run)
+        one.push(piece)
+        loop run in cover_runs(square, pieces_cover(square, one), 1) -> runs.push(run)
     }
     counts: coverage(runs, 10, 10)
     union: coverage(cover_runs(square, pieces_cover(square, full), 1), 10, 10)
@@ -2178,8 +2178,8 @@ piece_words: fn(pieces: [RaylibPiece]) -> [Int] {
     inner: pieces_cover(canvas, rounded_pieces(placed, 1.0, 4, 0.0, 2.0))
     band: difference_runs(canvas, outer, inner, 1)
     both := [RaylibRun]{}
-    loop run in band -> &both.push(run)
-    loop run in cover_runs(canvas, inner, 1) -> &both.push(run)
+    loop run in band -> both.push(run)
+    loop run in cover_runs(canvas, inner, 1) -> both.push(run)
     assert_eq(coverage(both, 12, 8), coverage(cover_runs(canvas, outer, 1), 12, 8))
     words: run_words(band)
     assert(words[0] == 2 && words[1] == 1 && words[2] == 8 && words[3] == 1)
@@ -2238,55 +2238,55 @@ piece_words: fn(pieces: [RaylibPiece]) -> [Int] {
     assert(get_image_color(checks, 4, 0).a == 0 && get_image_color(checks, 0, -1).a == 0)
     assert(gen_image_color(0, 3, red).width == 0 && gen_image_color(16385, 1, red).pixels.len() == 0)
     // Flipped, row 0 reads blue blue red red and row 1 red red blue blue.
-    image_flip_horizontal(&checks)
+    image_flip_horizontal(checks)
     assert(get_image_color(checks, 0, 0).b == 255 && get_image_color(checks, 3, 0).r == 255)
-    image_flip_vertical(&checks)
+    image_flip_vertical(checks)
     assert(get_image_color(checks, 0, 0).r == 255 && get_image_color(checks, 0, 1).b == 255)
-    image_flip_vertical(&checks)
+    image_flip_vertical(checks)
     // Turned clockwise, the 4x2 image is 2x4 and its top row is row 1 then row 0's first pixels.
-    image_rotate_cw(&checks)
+    image_rotate_cw(checks)
     assert(checks.width == 2 && checks.height == 4)
     assert(get_image_color(checks, 0, 0).r == 255 && get_image_color(checks, 1, 0).b == 255)
     assert(get_image_color(checks, 0, 3).b == 255 && get_image_color(checks, 1, 3).r == 255)
-    image_rotate_ccw(&checks)
+    image_rotate_ccw(checks)
     assert(checks.width == 4 && checks.height == 2)
     assert(get_image_color(checks, 0, 0).b == 255 && get_image_color(checks, 3, 1).b == 255)
     // A rectangle under one column sets only its first pixel; under one row, its first row.
     canvas := gen_image_color(4, 4, black)
-    image_draw_rectangle_rec(&canvas, rectangle(1.0, 1.0, 0.5, 3.0), red)
+    image_draw_rectangle_rec(canvas, rectangle(1.0, 1.0, 0.5, 3.0), red)
     assert(get_image_color(canvas, 1, 1).r == 255 && get_image_color(canvas, 1, 2).r == 0)
-    image_draw_rectangle_rec(&canvas, rectangle(0.0, 3.0, 4.0, 0.5), blue)
+    image_draw_rectangle_rec(canvas, rectangle(0.0, 3.0, 4.0, 0.5), blue)
     assert(get_image_color(canvas, 0, 3).b == 255 && get_image_color(canvas, 3, 3).b == 255)
-    image_draw_rectangle_rec(&canvas, rectangle(0.0, 0.0, 0.0, 2.0), blue)
+    image_draw_rectangle_rec(canvas, rectangle(0.0, 0.0, 0.0, 2.0), blue)
     assert(get_image_color(canvas, 0, 0).b == 0)
-    image_draw_pixel(&canvas, 4, 0, red)
-    image_draw_pixel(&canvas, 3, 0, red)
+    image_draw_pixel(canvas, 4, 0, red)
+    image_draw_pixel(canvas, 3, 0, red)
     assert(get_image_color(canvas, 3, 0).r == 255)
-    image_draw_rectangle(&canvas, 1, 1, 2, 2, blue)
-    image_crop(&canvas, rectangle(1.0, 1.0, 2.0, 2.0))
+    image_draw_rectangle(canvas, 1, 1, 2, 2, blue)
+    image_crop(canvas, rectangle(1.0, 1.0, 2.0, 2.0))
     assert(canvas.width == 2 && canvas.height == 2 && get_image_color(canvas, 1, 1).b == 255)
-    image_crop(&canvas, rectangle(0.0, 0.0, 0.5, 2.0))
+    image_crop(canvas, rectangle(0.0, 0.0, 0.5, 2.0))
     assert(canvas.width == 0 && canvas.height == 2 && canvas.pixels.len() == 0)
     // Columns 0 0 1 1 for a 2 to 4 enlargement.
     pair := gen_image_checked(2, 1, 1, 1, red, blue)
-    image_resize_nn(&pair, 4, 1)
+    image_resize_nn(pair, 4, 1)
     assert(pair.width == 4 && get_image_color(pair, 1, 0).r == 255 && get_image_color(pair, 2, 0).b == 255)
-    image_resize_nn(&pair, 0, 1)
+    image_resize_nn(pair, 0, 1)
     assert(pair.width == 4)
     // 200 * 128 / 255 rounds down to 100; a sum below 0 becomes 1.
     tone := gen_image_color(1, 1, RaylibColor{r: 200, g: 100, b: 50, a: 255})
-    image_color_tint(&tone, RaylibColor{r: 128, g: 255, b: 0, a: 255})
+    image_color_tint(tone, RaylibColor{r: 128, g: 255, b: 0, a: 255})
     tinted: get_image_color(tone, 0, 0)
     assert(tinted.r == 100 && tinted.g == 100 && tinted.b == 0 && tinted.a == 255)
-    image_color_invert(&tone)
+    image_color_invert(tone)
     inverted: get_image_color(tone, 0, 0)
     assert(inverted.r == 155 && inverted.b == 255 && inverted.a == 255)
-    image_color_brightness(&tone, -200)
+    image_color_brightness(tone, -200)
     darker: get_image_color(tone, 0, 0)
     assert(darker.r == 1 && darker.g == 1 && darker.b == 55)
-    image_color_replace(&tone, RaylibColor{r: 1, g: 1, b: 55, a: 255}, red)
+    image_color_replace(tone, RaylibColor{r: 1, g: 1, b: 55, a: 255}, red)
     assert(get_image_color(tone, 0, 0).r == 255 && get_image_color(tone, 0, 0).b == 0)
-    image_clear_background(&tone, blue)
+    image_clear_background(tone, blue)
     assert(get_image_color(tone, 0, 0).b == 255)
 }
 
@@ -2310,30 +2310,30 @@ push_be32: fn(out: &[U8], value: Int) {
     shifts: [Int]{24, 16, 8, 0}
     loop shift in shifts {
         byte: (value >> shift).bit_and(255)
-        &out.push(U8{byte})
+        out.push(U8{byte})
     }
 }
 
 push_chunk: fn(out: &[U8], kind: Int, body: [U8]) {
-    push_be32(&out, body.len())
-    push_be32(&out, kind)
-    loop byte in body -> &out.push(byte)
-    push_be32(&out, 0)
+    push_be32(out, body.len())
+    push_be32(out, kind)
+    loop byte in body -> out.push(byte)
+    push_be32(out, 0)
 }
 
 // A PNG of one zlib stream of already filtered scanlines.
 png_bytes: fn(width: Int, height: Int, depth: Int, color_type: Int, interlace: Int, palette: [U8], key: [U8], raw: [U8]) -> [U8] {
     out := [U8]{137, 80, 78, 71, 13, 10, 26, 10}
     header := [U8]{}
-    push_be32(&header, width)
-    push_be32(&header, height)
+    push_be32(header, width)
+    push_be32(header, height)
     fields: [Int]{depth, color_type, 0, 0, interlace}
-    loop value in fields -> &header.push(U8{value})
-    push_chunk(&out, C_PNG_IHDR, header)
-    if palette.len() > 0 -> push_chunk(&out, C_PNG_PLTE, palette)
-    if key.len() > 0 -> push_chunk(&out, C_PNG_TRNS, key)
-    push_chunk(&out, C_PNG_IDAT, core.archive.compress(raw) ?? panic("compress"))
-    push_chunk(&out, C_PNG_IEND, [U8]{})
+    loop value in fields -> header.push(U8{value})
+    push_chunk(out, C_PNG_IHDR, header)
+    if palette.len() > 0 -> push_chunk(out, C_PNG_PLTE, palette)
+    if key.len() > 0 -> push_chunk(out, C_PNG_TRNS, key)
+    push_chunk(out, C_PNG_IDAT, core.archive.compress(raw) ?? panic("compress"))
+    push_chunk(out, C_PNG_IEND, [U8]{})
     out
 }
 
@@ -2341,7 +2341,7 @@ image_words: fn(image: RaylibImage) -> [Int] {
     words := [Int]{image.width, image.height}
     at := 0
     loop at < image.pixels.len() {
-        &words.push(png_rgba(byte_at(image.pixels, at), byte_at(image.pixels, at + 1), byte_at(image.pixels, at + 2), byte_at(image.pixels, at + 3)))
+        words.push(png_rgba(byte_at(image.pixels, at), byte_at(image.pixels, at + 1), byte_at(image.pixels, at + 2), byte_at(image.pixels, at + 3)))
         at += 4
     }
     words

@@ -6,7 +6,7 @@ use {
 }
 run: fn() {
     input: files.open("{work}/upload.fifo") ?? panic("open")
-    body: message.Body.reader(^input) ?? panic("reader")
+    body: message.Body.reader(input) ?? panic("reader")
     req: http.request("POST", "http://{cap:addr}/chunked").body(body).redirects(0)
     resp: req.send() ?? panic("send")
     print(resp.body().text(8) ?? panic("body"))

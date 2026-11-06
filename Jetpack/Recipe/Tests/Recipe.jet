@@ -185,7 +185,7 @@ recipe_test_has_stage_leftover: fn(base: String) -[FS]> Bool {
         .Err(error) -> assert_eq(error.code, "E1238")
     }
     attempt := BuildAttempt.new("pkg", "path:missing", "adapter", "", "")
-    if recipe_run_logged(recipe, ctx, None, &attempt) == {
+    if recipe_run_logged(recipe, ctx, None, attempt) == {
         .Ok(_) -> panic("hosted logged execution must refuse")
         .Err(error) -> assert_eq(error.code, "E1238")
     }

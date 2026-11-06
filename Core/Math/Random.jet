@@ -39,10 +39,10 @@ seeded_next: fn(state: &U64) -> U64 Never! {
 // exact native stream: a modulo-only draw would bias the result and consume
 // a different number of words for large bounds.
 seeded_bounded: fn(state: &U64, bound: U64) -> U64 Never! {
-    if bound == (U64{0}) -> return seeded_next(&state)
+    if bound == (U64{0}) -> return seeded_next(state)
     threshold: U64{0}.wrapping_sub(bound) %% bound
     loop {
-        product: Int{seeded_next(&state)} * Int{bound}
+        product: Int{seeded_next(state)} * Int{bound}
         low: U64{product.bit_and(18446744073709551615)}
         if low >= threshold -> return U64{product >> 64}
     }
@@ -54,14 +54,14 @@ __seeded_int: fn(state: &U64, low: Int, high: Int) -> Int? Never! {
     if high < low -> return None
     if high == low -> return Val(low)
     width: U64{(high - low + 1).bit_and(18446744073709551615)}
-    offset: Int{seeded_bounded(&state, width)}
+    offset: Int{seeded_bounded(state, width)}
     value := (low + offset).bit_and(18446744073709551615)
     if value > C_MASK63 -> value = value - 18446744073709551616
     Val(value)
 }
 
 seeded_unit: fn(state: &U64) -> Float Never! {
-    Float{seeded_next(&state) >> 11} / C_BASE53_FLOAT
+    Float{seeded_next(state) >> 11} / C_BASE53_FLOAT
 }
 
 /// Deterministic caller-owned capability. Drawing edits this owner's one word;
@@ -73,55 +73,55 @@ RNG: struct {
         lower: Int{I64{low}}
         upper: Int{I64{high}}
         if upper < lower -> core.math.__numeric_stop("RNG.int requires low <= high")
-        __seeded_int(&self.state, lower, upper) ?? core.math.__numeric_stop("RNG.int requires low <= high")
+        __seeded_int(self.state, lower, upper) ?? core.math.__numeric_stop("RNG.int requires low <= high")
     }
 
-    float: fn(&self) -> Float Never! { seeded_unit(&self.state) }
+    float: fn(&self) -> Float Never! { seeded_unit(self.state) }
 
     float_range: fn(&self, low: Float, high: Float) -> Float Never! {
         if !(high > low) -> return low
-        low + (high - low) * &self.float()
+        low + (high - low) * self.float()
     }
 
-    bool: fn(&self) -> Bool Never! { (seeded_next(&self.state).bit_and(U64{1})) == U64{1} }
+    bool: fn(&self) -> Bool Never! { (seeded_next(self.state).bit_and(U64{1})) == U64{1} }
 
     // Public bool(p)'s existing arity-1 row targets this reserved
     // method; the zero-argument coin draw uses bool(), not a default p=0.5.
     __bool_p: fn(&self, probability: Float) -> Bool Never! {
         if probability <= 0.0 || math.is_nan(probability) -> return false
         if probability >= 1.0 -> return true
-        &self.float() < probability
+        self.float() < probability
     }
 
     float_open: fn(&self) -> Float Never! {
-        math.max_float(&self.float(), 2.2250738585072014e-308)
+        math.max_float(self.float(), 2.2250738585072014e-308)
     }
 
     normal: fn(&self, mean: Float, stddev: Float) -> Float Never! {
-        first: &self.float_open()
-        second: &self.float()
+        first: self.float_open()
+        second: self.float()
         sample: math.sqrt((Float{-2.0}) * math.ln(first)) * math.cos(math.TAU * second)
         mean + sample * math.max_float(stddev, 0.0)
     }
 
     exponential: fn(&self, lambda: Float) -> Float Never! {
         if lambda <= 0.0 || math.is_nan(lambda) -> return 0.0
-        sample: &self.float_open()
+        sample: self.float_open()
         return -math.ln(sample) / lambda
     }
 
     bytes: fn(&self, count: Int) -> [U8] Never! {
         length: Int{I64{count}}
         out := [U8]{}
-        loop _ in 0..<length -> &out.push(U8{seeded_next(&self.state).bit_and(U64{255})})
+        loop _ in 0..<length -> out.push(U8{seeded_next(self.state).bit_and(U64{255})})
         out
     }
 
-    split: fn(&self) -> RNG Never! { RNG{state: seeded_next(&self.state)} }
+    split: fn(&self) -> RNG Never! { RNG{state: seeded_next(self.state)} }
 
     pick: fn<T>(&self, items: [T]) -> T? Never! {
         if items.len() == 0 -> return None
-        Val(items[&self.int(0, items.len() - 1)].copy())
+        Val(items[self.int(0, items.len() - 1)].copy())
     }
 
     weighted_pick: fn<T>(&self, items: [T], weights: [Float]) -> T? Never! {
@@ -131,7 +131,7 @@ RNG: struct {
             if math.is_finite(weight) && weight > 0.0 -> total += weight
         }
         if total <= 0.0 -> return None
-        needle := &self.float_range(0.0, total)
+        needle := self.float_range(0.0, total)
         loop index in 0..<items.len() {
             weight := Float{0.0}
             if math.is_finite(weights[index]) && weights[index] > 0.0 -> weight = weights[index]
@@ -148,20 +148,20 @@ RNG: struct {
         if want == 0 -> return [T]{}
         pool := items.copy()
         loop index in 0..<want {
-            picked: &self.int(index, pool.len() - 1)
-            &pool.__swap(index, picked)
+            picked: self.int(index, pool.len() - 1)
+            pool.__swap(index, picked)
         }
         // Clone excludes Close owners; discard excess values without a second
         // buffer or a new List truncation/growth seam.
-        loop pool.len() > want -> _ := &pool.pop()
+        loop pool.len() > want -> _ := pool.pop()
         pool
     }
 
     shuffle: fn<T>(&self, items: &[T]) Never! {
         index := items.len() - 1
         loop index > 0 {
-            picked: &self.int(0, index)
-            &items.__swap(index, picked)
+            picked: self.int(0, index)
+            items.__swap(index, picked)
             index -= 1
         }
     }
@@ -300,7 +300,7 @@ bytes: fn(n: Int) -[Rand]> [U8] Never! {
         word: full_word64()
         loop k in 0..<8 {
             if out.len() >= n -> return out
-            &out.push(to_u8(word >> (k * 8)))
+            out.push(to_u8(word >> (k * 8)))
         }
     }
 }
@@ -359,7 +359,7 @@ sample: fn(items: [Int], n: Int) -[Rand]> [Int] Never! {
     out := [Int]{}
     if n <= 0 || items.len() == 0 -> return out
     pool := [Int]{}
-    loop x in items -> &pool.push(x)
+    loop x in items -> pool.push(x)
     want := n
     if want > pool.len() -> want = pool.len()
     i := 0
@@ -368,7 +368,7 @@ sample: fn(items: [Int], n: Int) -[Rand]> [Int] Never! {
         tmp: Int{pool[i]}
         pool[i] = pool[j]
         pool[j] = tmp
-        &out.push(pool[i])
+        out.push(pool[i])
         i = i + 1
     }
     out
@@ -426,7 +426,7 @@ choices: fn(items: [Int], n: Int) -[Rand]> [Int] Never! {
     if items.len() == 0 || n <= 0 -> return out
     loop _ in 0..<n {
         value: choice(items) ?? return out
-        &out.push(value)
+        out.push(value)
     }
     out
 }
@@ -582,94 +582,94 @@ RNGAnswer: struct {
     loop index in 0..<answers.len() {
         answer: answers[index]
         if index %% 2 == 0 -> stream = rng(answer.seed)
-        assert_eq(&stream.int(1, 100), answer.small)
-        assert_eq(&stream.float(), answer.unit)
-        assert_eq(&stream.int(-3000000000000000000, 6000000000000000000), answer.wide)
-        assert_eq(&stream.int(-1, 9223372036854775807), answer.rejection)
-        assert_eq(&stream.int(-9223372036854775808, 9223372036854775807), answer.full)
+        assert_eq(stream.int(1, 100), answer.small)
+        assert_eq(stream.float(), answer.unit)
+        assert_eq(stream.int(-3000000000000000000, 6000000000000000000), answer.wide)
+        assert_eq(stream.int(-1, 9223372036854775807), answer.rejection)
+        assert_eq(stream.int(-9223372036854775808, 9223372036854775807), answer.full)
         assert_eq(stream.state, answer.state)
     }
 }
 
 #Test("caller-owned equal and backwards intervals do not advance state") {
     state := U64{99}
-    assert_eq(__seeded_int(&state, 7, 7), Val(7))
+    assert_eq(__seeded_int(state, 7, 7), Val(7))
     assert_eq(state, U64{99})
-    assert_eq(__seeded_int(&state, 9, 3), None)
+    assert_eq(__seeded_int(state, 9, 3), None)
     assert_eq(state, U64{99})
-    assert_eq(__seeded_int(&state, 1, 100), Val(27))
+    assert_eq(__seeded_int(state, 1, 100), Val(27))
 }
 
 #Test("caller-owned generic methods and split match fixed Rust known answers") {
     stream := rng(42)
-    assert_eq(&stream.bool(), true)
+    assert_eq(stream.bool(), true)
     assert_eq(stream.state, U64{11400714819323198527})
-    assert_eq(&stream.__bool_p(0.25), true)
+    assert_eq(stream.__bool_p(0.25), true)
     assert_eq(stream.state, U64{4354685564936845396})
-    assert_eq(&stream.bytes(6), [U8]{82, 148, 242, 6, 93, 164})
+    assert_eq(stream.bytes(6), [U8]{82, 148, 242, 6, 93, 164})
     assert_eq(stream.state, U64{17418742259747381458})
-    assert_eq(&stream.pick([String]{"a", "b", "c", "d"}), Val("b"))
+    assert_eq(stream.pick([String]{"a", "b", "c", "d"}), Val("b"))
     assert_eq(stream.state, U64{10372713005361028327})
-    assert_eq(&stream.weighted_pick([String]{"a", "b", "c", "d"}, [Float]{math.NAN, -1.0, 0.25, 1.75}), Val("d"))
+    assert_eq(stream.weighted_pick([String]{"a", "b", "c", "d"}, [Float]{math.NAN, -1.0, 0.25, 1.75}), Val("d"))
     assert_eq(stream.state, U64{3326683750974675196})
-    assert_eq(&stream.sample([String]{"a", "b", "c", "d", "e"}, 3), [String]{"b", "c", "d"})
+    assert_eq(stream.sample([String]{"a", "b", "c", "d", "e"}, 3), [String]{"b", "c", "d"})
     assert_eq(stream.state, U64{635340061525167419})
     items := [String]{"a", "b", "c", "d", "e"}
-    &stream.shuffle(&items)
+    stream.shuffle(items)
     assert_eq(items, [String]{"b", "d", "a", "e", "c"})
     assert_eq(stream.state, U64{9344711191398858127})
-    child := &stream.split()
+    child := stream.split()
     assert_eq(child.state, U64{9140336935745592861})
     assert_eq(stream.state, U64{2298681937012504996})
-    assert_eq(&child.int(1, 100), 91)
+    assert_eq(child.int(1, 100), 91)
     assert_eq(child.state, U64{2094307681359239730})
-    assert_eq(&stream.int(1, 100), 10)
+    assert_eq(stream.int(1, 100), 10)
     assert_eq(stream.state, U64{13699396756335703481})
 }
 
 #Test("caller-owned empty or invalid draws preserve the stream") {
     stream := rng(99)
-    assert_eq(&stream.int(7, 7), 7)
-    assert_eq(&stream.__bool_p(0.0), false)
-    assert_eq(&stream.__bool_p(1.0), true)
-    assert_eq(&stream.__bool_p(math.NAN), false)
-    assert_eq(&stream.float_range(3.0, 2.0), 3.0)
-    assert_eq(&stream.float_range(3.0, math.NAN), 3.0)
-    assert_eq(&stream.exponential(0.0), 0.0)
-    assert_eq(&stream.exponential(math.NAN), 0.0)
-    assert_eq(&stream.bytes(-1), [U8]{})
-    assert_eq(&stream.pick([String]{}), None)
-    assert_eq(&stream.pick([String]{"only"}), Val("only"))
-    assert_eq(&stream.weighted_pick([String]{"a"}, [Float]{}), None)
-    assert_eq(&stream.weighted_pick([String]{"a", "b", "c"}, [Float]{math.INFINITY, math.NAN, -1.0}), None)
-    assert_eq(&stream.sample([String]{"a", "b"}, -1), [String]{})
-    assert_eq(&stream.sample([String]{}, 5), [String]{})
+    assert_eq(stream.int(7, 7), 7)
+    assert_eq(stream.__bool_p(0.0), false)
+    assert_eq(stream.__bool_p(1.0), true)
+    assert_eq(stream.__bool_p(math.NAN), false)
+    assert_eq(stream.float_range(3.0, 2.0), 3.0)
+    assert_eq(stream.float_range(3.0, math.NAN), 3.0)
+    assert_eq(stream.exponential(0.0), 0.0)
+    assert_eq(stream.exponential(math.NAN), 0.0)
+    assert_eq(stream.bytes(-1), [U8]{})
+    assert_eq(stream.pick([String]{}), None)
+    assert_eq(stream.pick([String]{"only"}), Val("only"))
+    assert_eq(stream.weighted_pick([String]{"a"}, [Float]{}), None)
+    assert_eq(stream.weighted_pick([String]{"a", "b", "c"}, [Float]{math.INFINITY, math.NAN, -1.0}), None)
+    assert_eq(stream.sample([String]{"a", "b"}, -1), [String]{})
+    assert_eq(stream.sample([String]{}, 5), [String]{})
     empty := [String]{}
     single := [String]{"only"}
-    &stream.shuffle(&empty)
-    &stream.shuffle(&single)
+    stream.shuffle(empty)
+    stream.shuffle(single)
     assert_eq(single, [String]{"only"})
     assert_eq(stream.state, U64{99})
-    assert_eq(&stream.int(1, 100), 27)
+    assert_eq(stream.int(1, 100), 27)
 }
 
 #Test("caller-owned normal draws twice even for negative or NaN deviation") {
     stream := rng(0)
-    assert_eq(&stream.normal(7.0, -1.0), 7.0)
+    assert_eq(stream.normal(7.0, -1.0), 7.0)
     assert_eq(stream.state, U64{4354685564936845354})
-    assert_eq(&stream.normal(7.0, math.NAN), 7.0)
+    assert_eq(stream.normal(7.0, math.NAN), 7.0)
     assert_eq(stream.state, U64{8709371129873690708})
 }
 
 #Test("caller-owned explicit copies have independent streams") {
     first := rng(42)
     second := first.copy()
-    assert_eq(&first.bool(), true)
+    assert_eq(first.bool(), true)
     assert_eq(first.state, U64{11400714819323198527})
     assert_eq(second.state, U64{42})
-    assert_eq(&second.bool(), true)
+    assert_eq(second.bool(), true)
     assert_eq(first.state, second.state)
-    assert_eq(&first.__bool_p(0.25), true)
+    assert_eq(first.__bool_p(0.25), true)
     assert_eq(second.state, U64{11400714819323198527})
     assert_eq("{first}", "RNG {{ .. }}")
     assert_eq("{second}", "RNG {{ .. }}")
@@ -683,16 +683,16 @@ RNGAnswer: struct {
     rejection: [Int]{1474913046063446144, 8007990562831494530, 2014432356388812461, 7384525663493887953, 3135310438806241001, 5704490196125334486, 1889885825713147102, 4735243383115555698}
     full: [Int]{4456085495900499605, -6273545944727883517, -4084088288392011950, -2874173976596520044, -8521839250712812558, 6792609088808213254, -5194507324077150883, 5545679290133000100}
     stream := rng(42)
-    loop expected in small -> assert_eq(&stream.int(1, 100), expected)
+    loop expected in small -> assert_eq(stream.int(1, 100), expected)
     assert_eq(stream.state, U64{17418742259747381458})
     stream = rng(42)
-    loop expected in wide -> assert_eq(&stream.int(-3000000000000000000, 6000000000000000000), expected)
+    loop expected in wide -> assert_eq(stream.int(-3000000000000000000, 6000000000000000000), expected)
     assert_eq(stream.state, U64{17418742259747381458})
     stream = rng(42)
-    loop expected in rejection -> assert_eq(&stream.int(-1, 9223372036854775807), expected)
+    loop expected in rejection -> assert_eq(stream.int(-1, 9223372036854775807), expected)
     assert_eq(stream.state, U64{635340061525167419})
     stream = rng(42)
-    loop expected in full -> assert_eq(&stream.int(-9223372036854775808, 9223372036854775807), expected)
+    loop expected in full -> assert_eq(stream.int(-9223372036854775808, 9223372036854775807), expected)
     assert_eq(stream.state, U64{17418742259747381458})
 }
 
@@ -708,15 +708,15 @@ RNGAnswer: struct {
         [Int]{2, 3, 4, 1, 0}, [Int]{3, 2, 1, 0, 4}, [Int]{4, 3, 2, 1, 0}, [Int]{0, 1, 3, 2, 4},
     }
     stream := rng(42)
-    loop expected in picks -> assert_eq(&stream.pick(items), Val(expected))
+    loop expected in picks -> assert_eq(stream.pick(items), Val(expected))
     assert_eq(stream.state, U64{17418742259747381458})
     stream = rng(42)
-    loop expected in samples -> assert_eq(&stream.sample(items, 3), expected)
+    loop expected in samples -> assert_eq(stream.sample(items, 3), expected)
     assert_eq(stream.state, U64{15362738631823041058})
     stream = rng(42)
     loop expected in shuffles {
         shuffled := items.copy()
-        &stream.shuffle(&shuffled)
+        stream.shuffle(shuffled)
         assert_eq(shuffled, expected)
     }
     assert_eq(stream.state, U64{14334736817860870858})

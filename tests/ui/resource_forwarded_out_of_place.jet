@@ -6,7 +6,7 @@
 // drive) is such a place read too, whoever owns the list.
 Res: struct { name: String }
 impl Res.Close {
-    close: fn(^self) { print("close {self.name}") }
+    close: fn(&&self) { print("close {self.name}") }
 }
 
 Holder: struct {
@@ -65,13 +65,13 @@ return_or: fn(h: Holder) -> Res? {
     Val(h.first ?? return None)
 }
 
-keep: fn(r: ^Res) -> Int { r.name.len() }
+keep: fn(r: &&Res) -> Int { r.name.len() }
 
 loop_push: fn() -> Int {
     list: [Res{name: "push"}]
     out := [Res]{}
     loop item in list {
-        &out.push(item)
+        out.push(item)
     }
     out.len()
 }
@@ -86,7 +86,7 @@ loop_take: fn() -> Int {
     list: [Res{name: "take"}]
     total := 0
     loop item in list {
-        total = total + keep(^item)
+        total = total + keep(item)
     }
     total
 }
@@ -94,8 +94,8 @@ loop_take: fn() -> Int {
 loop_drive_moves: fn() -> Int {
     list: [Res{name: "drive"}]
     out := [Res]{}
-    loop item in ^list {
-        &out.push(item)
+    loop item in list.move() {
+        out.push(item)
     }
     out.len()
 }

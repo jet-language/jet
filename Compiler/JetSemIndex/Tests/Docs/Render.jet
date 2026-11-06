@@ -75,7 +75,7 @@ doc_render_expected_source_json: fn() -> String Never! {
     assert(original != changed)
     assert(changed.contains("\"summary\":\"Altered public API.\""))
     assert(!changed.contains("\"summary\":\"Answer <&>.\""))
-    &row.examples.reverse()
+    row.examples.reverse()
     reordered: doc_item_json(row)
     assert(changed != reordered)
     assert(reordered.contains("\"examples\":[\"first\",\"first\",\"`answer()`\"]"))
@@ -184,7 +184,7 @@ doc_render_assert_status_strings: fn(value: StatusValue, expected: [String]) Nev
 // actual ordered.jet checked graph, not a default projection/filled fixture.
 // Includes a negative public-content/order transition rather than a size or
 // source-inclusion assertion. No alternate checked producer is introduced.
-doc_render_ordered_fixture_rejects_public_content_and_order_drift: fn(^graph: DocGraph) Never! {
+doc_render_ordered_fixture_rejects_public_content_and_order_drift: fn(&&graph: DocGraph) Never! {
     before_md: graph.to_markdown()
     before_html: graph.to_html()
     assert(before_md.contains("### `alpha`\n\nAlpha API."))
@@ -195,7 +195,7 @@ doc_render_ordered_fixture_rejects_public_content_and_order_drift: fn(^graph: Do
     assert(!before_html.contains("<h3 id=\"run\">"))
     assert(before_md.split("### `alpha`")[0].len() < before_md.split("### `zulu`")[0].len())
     assert(before_html.split("<h3 id=\"alpha\">")[0].len() < before_html.split("<h3 id=\"zulu\">")[0].len())
-    &graph.items.reverse()
+    graph.items.reverse()
     reversed_md: graph.to_markdown()
     reversed_html: graph.to_html()
     assert(before_md != reversed_md)

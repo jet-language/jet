@@ -6,12 +6,12 @@ Gate: struct {
 
 impl Gate {
     #Transition(_, Closed) new: fn(w: Int) -[]> Gate { return Gate{ w: w } }
-    #Transition(Closed, Closed) hold: fn(self: ^Gate) -[]> Gate { return self }
-    #Transition(Closed, Reopened) reopen: fn(self: ^Gate) -[]> Gate { return self }
+    #Transition(Closed, Closed) hold: fn(self: &&Gate) -[]> Gate { return self }
+    #Transition(Closed, Reopened) reopen: fn(self: &&Gate) -[]> Gate { return self }
 }
 
 run: fn() {
     g := Gate.new(1)
-    g = ^g.hold()
-    g = ^g.reopen()
+    g = g.hold()
+    g = g.reopen()
 }

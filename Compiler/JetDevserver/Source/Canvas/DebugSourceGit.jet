@@ -130,13 +130,13 @@ impl DebugSessions {
         if !debug_identity_text_valid(source_id) -> return Err(canvas_debug_error("bad_request", "Canvas debug source_id must be bounded source identity text"))
         if !debug_identity_text_valid(revision) -> return Err(canvas_debug_error("bad_request", "Canvas debug revision must be bounded source identity text"))
         next_commands := commands.copy()
-        if next_commands.len() == 0 -> &next_commands.push("s")
+        if next_commands.len() == 0 -> next_commands.push("s")
         id := ""
         if requested_id == {
             .Val(requested) -> {
                 session := self.sessions.get(requested) ?? return Err(canvas_debug_error("session", "debug session is no longer live; start a new session"))
                 if session.path != path || session.source_id != source_id || session.revision != revision {
-                    &self.release(requested)
+                    self.release(requested)
                     return Err(canvas_debug_error("conflict", "debug session is stale for the current source identity or revision"))
                 }
                 if session.tier != tier -> return Err(canvas_debug_error("conflict", "debug session tier does not match the requested execution tier"))
@@ -144,7 +144,7 @@ impl DebugSessions {
                     return Err(canvas_debug_error("limit", "debug session command history is full; start a new session"))
                 }
                 session.breakpoints = breakpoints.copy()
-                loop command in next_commands -> &session.commands.push(command)
+                loop command in next_commands -> session.commands.push(command)
                 session.watches = watches.copy()
                 self.sessions[requested] = session
                 id = requested
@@ -159,7 +159,7 @@ impl DebugSessions {
                             oldest_created = entry.value.created
                         }
                     }
-                    if oldest == .Val(oldest_id) -> &self.release(oldest_id)
+                    if oldest == .Val(oldest_id) -> self.release(oldest_id)
                 }
                 serial: self.next_id
                 self.next_id += 1
@@ -174,16 +174,16 @@ impl DebugSessions {
         }
         session := self.sessions.get(id) ?? return Err(canvas_debug_error("session", "debug session disappeared"))
         inputs := [String]{}
-        loop line in session.breakpoints -> &inputs.push("break {line}")
-        loop watch in session.watches -> &inputs.push("watch {watch}")
-        loop command in next_commands -> &inputs.push(command)
-        &inputs.push("locals")
-        &inputs.push("bt")
-        result: if native_debug_run(&session, inputs, !self.pause_on_input_end) == {
+        loop line in session.breakpoints -> inputs.push("break {line}")
+        loop watch in session.watches -> inputs.push("watch {watch}")
+        loop command in next_commands -> inputs.push(command)
+        inputs.push("locals")
+        inputs.push("bt")
+        result: if native_debug_run(session, inputs, !self.pause_on_input_end) == {
             .Ok(ran) -> ran
             .Err(failure) -> {
                 self.sessions[id] = session
-                &self.release(id)
+                self.release(id)
                 return Err(failure)
             }
         }
@@ -204,7 +204,7 @@ impl DebugSessions {
             }
         }
         self.sessions[id] = session
-        if result.status != .Running -> &self.release(id)
+        if result.status != .Running -> self.release(id)
         Ok(DebugExecution{id: id, status: result.status, transcript: result.transcript, snapshot: result.snapshot, tier: tier})
     }
 
@@ -221,13 +221,13 @@ impl DebugSessions {
     }
 
     clear_paused_session: fn(&self, host: &PausedEvaluateHost, id: String) CanvasDebugError! {
-        session := self.sessions.get(id) ?? return Ok(debug_clear_host_session(&host, id))
+        session := self.sessions.get(id) ?? return Ok(debug_clear_host_session(host, id))
         if session.paused_adapter == {
             .Val(adapter) -> {
                 live := adapter
-                &live.exit(&host)
+                live.exit(host)
             }
-            else -> debug_clear_host_session(&host, id)
+            else -> debug_clear_host_session(host, id)
         }
         session.paused_adapter = None
         self.sessions[id] = session
@@ -235,13 +235,13 @@ impl DebugSessions {
     }
 
     resume_paused_session: fn(&self, host: &PausedEvaluateHost, id: String) CanvasDebugError! {
-        session := self.sessions.get(id) ?? return Ok(debug_clear_host_session(&host, id))
+        session := self.sessions.get(id) ?? return Ok(debug_clear_host_session(host, id))
         if session.paused_adapter == {
             .Val(adapter) -> {
                 live := adapter
-                &live.resume(&host)
+                live.resume(host)
             }
-            else -> debug_clear_host_session(&host, id)
+            else -> debug_clear_host_session(host, id)
         }
         session.paused_adapter = None
         self.sessions[id] = session
@@ -249,13 +249,13 @@ impl DebugSessions {
     }
 
     cancel_paused_session: fn(&self, host: &PausedEvaluateHost, id: String, reason: String) CanvasDebugError! {
-        session := self.sessions.get(id) ?? return Ok(debug_clear_host_session(&host, id))
+        session := self.sessions.get(id) ?? return Ok(debug_clear_host_session(host, id))
         if session.paused_adapter == {
             .Val(adapter) -> {
                 live := adapter
-                &live.cancel(&host, reason) ?? return Err(canvas_debug_error("execution", err.message))
+                live.cancel(host, reason) ?? return Err(canvas_debug_error("execution", err.message))
             }
-            else -> debug_clear_host_session(&host, id)
+            else -> debug_clear_host_session(host, id)
         }
         session.paused_adapter = None
         self.sessions[id] = session
@@ -264,19 +264,19 @@ impl DebugSessions {
 
     cancel_all_paused_sessions: fn(&self, host: &PausedEvaluateHost, reason: String) CanvasDebugError! {
         ids := [String]{}
-        loop entry in self.sessions -> &ids.push(entry.key)
-        loop id in ids -> &self.cancel_paused_session(&host, id, reason)
+        loop entry in self.sessions -> ids.push(entry.key)
+        loop id in ids -> self.cancel_paused_session(host, id, reason)
         Ok()
     }
 
     stale_paused_session: fn(&self, host: &PausedEvaluateHost, id: String) CanvasDebugError! {
-        session := self.sessions.get(id) ?? return Ok(debug_clear_host_session(&host, id))
+        session := self.sessions.get(id) ?? return Ok(debug_clear_host_session(host, id))
         if session.paused_adapter == {
             .Val(adapter) -> {
                 live := adapter
-                &live.stale(&host)
+                live.stale(host)
             }
-            else -> debug_clear_host_session(&host, id)
+            else -> debug_clear_host_session(host, id)
         }
         session.paused_adapter = None
         self.sessions[id] = session
@@ -285,7 +285,7 @@ impl DebugSessions {
 
     discard: fn(&self, id: String) -> DebugTier? Never! {
         session: self.sessions.get(id) ?? return None
-        &self.release(id)
+        self.release(id)
         Val(session.tier)
     }
 
@@ -298,7 +298,7 @@ impl DebugSessions {
         if revision != current_revision && session.revision != revision {
             return Err(canvas_debug_error("conflict", "debug stop request is stale; the live session was kept"))
         }
-        &self.release(id)
+        self.release(id)
         if revision != current_revision || session.revision != revision {
             return Err(canvas_debug_error("conflict", "debug session is stale for the current source revision"))
         }
@@ -307,10 +307,10 @@ impl DebugSessions {
 
     // Remove the session `id`, closing its debugger and deleting its image.
     release: fn(&self, id: String) Never! {
-        session := &self.sessions.remove(id) ?? return
+        session := self.sessions.remove(id) ?? return
         if session.native_live == .Val(live) {
             debugger := live
-            &debugger.close()
+            debugger.close()
         }
         if session.native == .Val(native) {
             if canvas_files.remove_all(native.dir) == {
@@ -323,7 +323,7 @@ impl DebugSessions {
 
 debug_clear_host_session: fn(host: &PausedEvaluateHost, id: String) Never! {
     if host.session == .Val(injected) {
-        if injected.identity.session_id == id -> &host.clear_session()
+        if injected.identity.session_id == id -> host.clear_session()
     }
 }
 
@@ -361,13 +361,13 @@ debug_words: fn(text: String) -> [String] Never! {
         piece: "{ch}"
         if {
             piece == " " || piece == "\t" || piece == "\n" || piece == "\r" -> {
-                if current != "" -> &words.push(current)
+                if current != "" -> words.push(current)
                 current = ""
             }
             else -> current = "{current}{piece}"
         }
     }
-    if current != "" -> &words.push(current)
+    if current != "" -> words.push(current)
     words
 }
 
@@ -420,7 +420,7 @@ native_debug_artifact: fn(jet: String, path: String, id: String) -> NativeDebugA
         else -> None
     }
     lines := [String]{}
-    loop line in jet_source.split("\n") -> &lines.push(line)
+    loop line in jet_source.split("\n") -> lines.push(line)
     Ok(NativeDebugArtifact{dir: scratch, binary: binary, build_id: build_id, jet_file: canvas_files.basename(path), jet_lines: lines})
 }
 
@@ -437,7 +437,7 @@ native_debug_run: fn(session: &DebugSession, commands: [String], run_to_end: Boo
     transcript := ""
     if session.native_live == None {
         live := NativeSession.start(native.binary, canvas_files.join(native.dir, "output.txt")) ?? return Err(debug_unavailable(err))
-        opened: if &live.open(native.jet_file, native.jet_lines) == {
+        opened: if live.open(native.jet_file, native.jet_lines) == {
             .Ok(step) -> step
             .Err(failure) -> { return Err(debug_unavailable(failure)) }
         }
@@ -448,11 +448,11 @@ native_debug_run: fn(session: &DebugSession, commands: [String], run_to_end: Boo
     }
     live := session.native_live ?? return Err(canvas_debug_error("session", "native debug session lost its debugger"))
     queue := commands.copy()
-    if run_to_end -> &queue.push("continue")
+    if run_to_end -> queue.push("continue")
     loop command in queue {
         stop: session.native_stop ?? break
         if stop.kind != NativeStopKind.Paused -> break
-        step: &live.command(command, stop, native.jet_file, native.jet_lines) ?? return Err(debug_unavailable(err))
+        step: live.command(command, stop, native.jet_file, native.jet_lines) ?? return Err(debug_unavailable(err))
         transcript = "{transcript}{step.text}"
         session.native_stop = Val(step.stop)
     }
@@ -460,14 +460,14 @@ native_debug_run: fn(session: &DebugSession, commands: [String], run_to_end: Boo
     snapshot := DebugSnapshot?{None}
     if {
         stop.kind == NativeStopKind.Paused -> {
-            snapshot = if &live.snapshot() == {
+            snapshot = if live.snapshot() == {
                 .Ok(paused) -> paused
                 .Err(failure) -> { return Err(debug_unavailable(failure)) }
             }
             session.native_live = Val(live)
         }
         else -> {
-            &live.close()
+            live.close()
             session.native_live = None
         }
     }
@@ -540,7 +540,7 @@ debug_ok: fn(request: DebugOkRequest) -> String Never! {
         else -> "null"
     }
     wires := [String]{}
-    loop wire in wire_path.ids -> &wires.push(foundation_json_quote(wire))
+    loop wire in wire_path.ids -> wires.push(foundation_json_quote(wire))
     source_json: foundation_json_quote(request.source_id)
     revision_json: foundation_json_quote(revision)
     overlay_json: foundation_json_quote(overlay)
@@ -579,7 +579,7 @@ debug_bounded_text: fn(text: String, max_bytes: Int) -> DebugBoundedText Never! 
 
 debug_diagnostics_error: fn(path: String, src: String, diags: [Diagnostic]) -> String Never! {
     rendered := [String]{}
-    loop diag in diags -> &rendered.push(diagnostic_render(diag, path, src, false))
+    loop diag in diags -> rendered.push(diagnostic_render(diag, path, src, false))
     debug_error("diagnostic", rendered.join("\n"))
 }
 
@@ -598,9 +598,9 @@ required_debug_string: fn(text: String, key: String) -> String CanvasDebugError!
 debug_lines: fn(text: String) -> [String] Never! {
     lines := [String]{}
     loop line in text.split("\n") {
-        if line.ends_with("\r") && line.cut_last("\r") == .Val(parts) -> &lines.push(parts.before) else -> &lines.push(line)
+        if line.ends_with("\r") && line.cut_last("\r") == .Val(parts) -> lines.push(parts.before) else -> lines.push(line)
     }
-    if lines.len() > 0 && lines[lines.len() - 1] == "" -> &lines.pop().drop("the text ends with a line break")
+    if lines.len() > 0 && lines[lines.len() - 1] == "" -> lines.pop().drop("the text ends with a line break")
     lines
 }
 
@@ -699,7 +699,7 @@ DebugRecordIds: struct {
 debug_record_spans: fn(json: String, id_key: String) -> [DebugRecordSpan] Never! {
     records := [DebugRecordSpan]{}
     root: foundation_parse_protocol_json_with_limit(json, MAX_DEBUG_CHILD_OUTPUT_BYTES) ?? return records
-    debug_collect_record_spans(root, id_key, &records)
+    debug_collect_record_spans(root, id_key, records)
     records
 }
 
@@ -712,11 +712,11 @@ debug_collect_record_spans: fn(value: Dyn, id_key: String, records: &[DebugRecor
                 if member.key == id_key && member.value == .Text(text) -> id = Val(text)
                 if member.key == "source_span" -> span = debug_span_value(member.value)
             }
-            if id == .Val(found) && span == .Val(range) -> &records.push(DebugRecordSpan{id: found, span: range})
-            loop member in members -> debug_collect_record_spans(member.value, id_key, &records)
+            if id == .Val(found) && span == .Val(range) -> records.push(DebugRecordSpan{id: found, span: range})
+            loop member in members -> debug_collect_record_spans(member.value, id_key, records)
         }
         .Array(items) -> {
-            loop item in items -> debug_collect_record_spans(item, id_key, &records)
+            loop item in items -> debug_collect_record_spans(item, id_key, records)
         }
         else -> {}
     }
@@ -762,7 +762,7 @@ record_ids_for_span: fn(json: String, id_key: String, active: Span) -> DebugReco
     ids := [String]{}
     loop record in debug_record_spans(json, id_key) {
         if !span_overlaps(record.span, active) || ids.contains(record.id) -> next
-        &ids.push(record.id)
+        ids.push(record.id)
         if ids.len() >= MAX_DEBUG_WIRE_PATH -> return DebugRecordIds{ids: ids, truncated: true}
     }
     DebugRecordIds{ids: ids, truncated: false}
@@ -787,14 +787,14 @@ breakpoint_json: fn(src: String, lines: [Int], stale_anchors: [String]) -> Strin
         valid: line > 0 && line <= line_count
         span_json: if valid -> debug_span_json(line_span(src, line)) else -> "null"
         state: if valid -> "valid" else -> "stale"
-        &entries.push("{{\"line\":{line},\"source_span\":{span_json},\"state\":{foundation_json_quote(state)}}}")
+        entries.push("{{\"line\":{line},\"source_span\":{span_json},\"state\":{foundation_json_quote(state)}}}")
     }
     loop anchor in stale_anchors {
         span_json: if anchor_span(src, anchor) == {
             .Val(span) -> debug_span_json(span)
             else -> "null"
         }
-        &entries.push("{{\"line\":null,\"source_span\":{span_json},\"anchor\":{foundation_json_quote(anchor)},\"state\":\"stale\"}}")
+        entries.push("{{\"line\":null,\"source_span\":{span_json},\"anchor\":{foundation_json_quote(anchor)},\"state\":\"stale\"}}")
     }
     entries.join(",")
 }
@@ -829,7 +829,7 @@ watches_json: fn(transcript: String, watches: [String]) -> DebugJSONList Never! 
             shown: lines[index].split_once(prefix) ?? next
             value: debug_bounded_text(shown.after, MAX_DEBUG_VALUE_BYTES)
             truncated = truncated || value.truncated
-            &values.push("{{\"name\":{foundation_json_quote(watch)},\"value\":{foundation_json_quote(value.text)},\"state\":\"ok\"}}")
+            values.push("{{\"name\":{foundation_json_quote(watch)},\"value\":{foundation_json_quote(value.text)},\"state\":\"ok\"}}")
             break
         }
     }
@@ -851,7 +851,7 @@ parse_assignments: fn(text: String) -> DebugJSONList Never! {
         assignment: part.split_once(" = ") ?? next
         value: debug_bounded_text(assignment.after.trim(), MAX_DEBUG_VALUE_BYTES)
         truncated = truncated || value.truncated
-        &values.push("{{\"name\":{foundation_json_quote(assignment.before.trim())},\"value\":{foundation_json_quote(value.text)}}}")
+        values.push("{{\"name\":{foundation_json_quote(assignment.before.trim())},\"value\":{foundation_json_quote(value.text)}}}")
     }
     DebugJSONList{json: values.join(","), truncated: truncated}
 }
@@ -868,7 +868,7 @@ snapshot_locals_json: fn(snapshot: DebugSnapshot) -> DebugJSONList Never! {
         type_name: debug_bounded_text(local.type_name, MAX_DEBUG_VALUE_BYTES)
         rendered: debug_bounded_text(local.value, MAX_DEBUG_VALUE_BYTES)
         truncated = truncated || type_name.truncated || rendered.truncated
-        &values.push("{{\"name\":{foundation_json_quote(local.name)},\"type\":{foundation_json_quote(type_name.text)},\"value\":{foundation_json_quote(rendered.text)}}}")
+        values.push("{{\"name\":{foundation_json_quote(local.name)},\"type\":{foundation_json_quote(type_name.text)},\"value\":{foundation_json_quote(rendered.text)}}}")
     }
     DebugJSONList{json: values.join(","), truncated: truncated}
 }
@@ -882,7 +882,7 @@ snapshot_watches_json: fn(snapshot: DebugSnapshot, watches: [String]) -> DebugJS
             type_name: debug_bounded_text(local.type_name, MAX_DEBUG_VALUE_BYTES)
             rendered: debug_bounded_text(local.value, MAX_DEBUG_VALUE_BYTES)
             truncated = truncated || type_name.truncated || rendered.truncated
-            &values.push("{{\"name\":{foundation_json_quote(watch)},\"type\":{foundation_json_quote(type_name.text)},\"value\":{foundation_json_quote(rendered.text)},\"state\":\"ok\"}}")
+            values.push("{{\"name\":{foundation_json_quote(watch)},\"type\":{foundation_json_quote(type_name.text)},\"value\":{foundation_json_quote(rendered.text)},\"state\":\"ok\"}}")
             break
         }
     }
@@ -908,7 +908,7 @@ snapshot_call_stack_json: fn(snapshot: DebugSnapshot, source_id: String) -> Debu
             break
         }
         bytes += entry.len()
-        &entries.push(entry)
+        entries.push(entry)
     }
     DebugJSONList{json: entries.join(","), truncated: truncated}
 }
@@ -918,7 +918,7 @@ call_stack_json: fn(transcript: String) -> DebugJSONList Never! {
     frames := [String]{}
     truncated := false
     loop line in debug_lines(transcript) {
-        if line.starts_with("#") && line.contains(" at ") -> &frames.push(line)
+        if line.starts_with("#") && line.contains(" at ") -> frames.push(line)
     }
     first := 0
     if frames.len() > MAX_DEBUG_CALL_STACK {
@@ -951,13 +951,13 @@ debug_newest_entries: fn(lines: [String], first: Int, max_count: Int, max_bytes:
             break
         }
         bytes += entry.len()
-        &kept.push(entry)
+        kept.push(entry)
     }
     ordered := [String]{}
     position := kept.len()
     loop position > 0 {
         position -= 1
-        &ordered.push(kept[position])
+        ordered.push(kept[position])
     }
     DebugJSONList{json: ordered.join(","), truncated: truncated}
 }
@@ -987,7 +987,7 @@ git_relative_path: fn(root: String, path: String) -> String Never! {
 
 git_output: fn(root: String, args: [String]) -> String? Never! {
     argv := [String]{"git", "-C", root}
-    loop arg in args -> &argv.push(arg)
+    loop arg in args -> argv.push(arg)
     if canvas_process.cmd(argv).stdout(.Capture).stderr(.Capture).output_limit(MAX_DEBUG_CHILD_OUTPUT_BYTES).run() == {
         .Ok(receipt) -> if receipt.success -> Val(receipt.output) else -> None
         else -> None
@@ -996,6 +996,6 @@ git_output: fn(root: String, args: [String]) -> String? Never! {
 
 untracked_diff: fn(rel: String, src: String) -> String Never! {
     pieces := [String]{"--- /dev/null\n+++ b/{rel}\n"}
-    loop line in debug_lines(src) -> &pieces.push("+{line}\n")
+    loop line in debug_lines(src) -> pieces.push("+{line}\n")
     pieces.join("")
 }

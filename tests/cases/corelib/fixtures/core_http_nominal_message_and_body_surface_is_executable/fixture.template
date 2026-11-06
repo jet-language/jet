@@ -18,7 +18,7 @@ run: fn() {
     print(http.Body.form(["a": "b"]).text(16) ?? panic("form"))
     print(http.Body.json(42).json<Int>(16) ?? panic("json"))
     input: files.open("{work}/input") ?? panic("open")
-    body: http.Body.reader(^input, 6) ?? panic("reader")
+    body: http.Body.reader(input, 6) ?? panic("reader")
     output: files.create("{work}/output") ?? panic("create")
-    print(body.copy_to(^output, 6) ?? panic("copy"))
+    print(body.copy_to(output, 6) ?? panic("copy"))
 }

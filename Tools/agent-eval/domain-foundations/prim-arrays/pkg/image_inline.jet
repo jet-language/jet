@@ -15,7 +15,7 @@ run: fn() {
             channel := 0
             loop channel < image.channels {
                 value: compute.get(image.pixels, [source_y, source_x, channel]) ?? panic("resize read")
-                compute.set(&enlarged, [y, x, channel], value) ?? panic("resize write")
+                compute.set(enlarged, [y, x, channel], value) ?? panic("resize write")
                 channel += 1
             }
             x += 1
@@ -32,7 +32,7 @@ run: fn() {
             green: compute.get(image.pixels, [y, x, 1]) ?? panic("green read")
             blue: compute.get(image.pixels, [y, x, 2]) ?? panic("blue read")
             gray_value := red * 0.3 + green * 0.59 + blue * 0.11
-            compute.set(&gray, [y, x, 0], gray_value) ?? panic("gray write")
+            compute.set(gray, [y, x, 0], gray_value) ?? panic("gray write")
             x += 1
         }
         y += 1

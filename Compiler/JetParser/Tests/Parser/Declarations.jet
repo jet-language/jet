@@ -77,7 +77,7 @@ run: fn() {}
     assert_eq(decl.name, "Exactness")
     names := [String]{}
     loop param in decl.params {
-        &names.push(param.name)
+        names.push(param.name)
         assert(param.ty == None && param.value != None)
     }
     assert_eq(names, [String]{"$holds", "$safe", "$gates", "$decision"})
@@ -109,7 +109,7 @@ run: fn() {}
 run: fn() {}
 `)
     names := [String]{}
-    loop param in decl.params -> &names.push(param.name)
+    loop param in decl.params -> names.push(param.name)
     assert_eq(names, [String]{"condition", "message", "tags", "$sites", "$repeatable"})
     loop param in decl.params {
         if param.name.starts_with("$") {
@@ -156,7 +156,7 @@ run: fn() {}
 run: fn() {}
 `)
     codes := [String]{}
-    loop diagnostic in diagnostics -> &codes.push(diagnostic.code)
+    loop diagnostic in diagnostics -> codes.push(diagnostic.code)
     assert_eq(codes, [String]{"E0937", "E0936", "E0907"})
 }
 
@@ -170,7 +170,7 @@ run: fn() {}
     program.items[0] == .Struct(definition) ?? panic("struct")
     state: definition.state ?? panic("struct-owned state set")
     names := [String]{}
-    loop name in state.states -> &names.push(name.name)
+    loop name in state.states -> names.push(name.name)
     assert_eq(names, [String]{"Open", "Closed"})
 }
 
@@ -305,10 +305,10 @@ inbody_test_markers: fn(source: String, markers: [Marker]) -> String {
         loop arg in marker.args {
             if arg == .Expr(value) {
                 span: expr_span(value)
-                &args.push(source.slice(span.start..<span.end))
+                args.push(source.slice(span.start..<span.end))
             }
         }
-        &rows.push("{if marker.negated -> "!" else -> ""}{marker.name}({args.join(", ")})")
+        rows.push("{if marker.negated -> "!" else -> ""}{marker.name}({args.join(", ")})")
     }
     rows.join(" ")
 }

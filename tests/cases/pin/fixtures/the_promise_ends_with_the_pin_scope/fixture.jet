@@ -6,14 +6,14 @@ Node: struct {
     hops: Int
 }
 
-consume: fn(n: ^Node) -> Int { return n.payload }
+consume: fn(n: &&Node) -> Int { return n.payload }
 
 run: fn() {
     node := Node{payload: 7, hops: 0}
     if true {
-        pinned: mem.pin(&node)
+        pinned: mem.pin(node)
         pinned.hops += 1
     }
-    taken: consume(^node)
+    taken: consume(node)
     print("{taken}")
 }

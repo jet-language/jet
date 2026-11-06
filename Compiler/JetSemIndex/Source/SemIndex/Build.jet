@@ -179,16 +179,16 @@ WalkCtx: struct {
     block_next: [Int]
 
     // Rust build_symbol_db WalkCtx literal (1343–1355).
-    new: fn(module_idx: Int, scope_identity: ^String, block_spans: ^[Span]) -> WalkCtx Never! {
+    new: fn(module_idx: Int, scope_identity: &&String, block_spans: &&[Span]) -> WalkCtx Never! {
         block_next: loop index in 0..<block_spans.len() + 1 -> index
         WalkCtx{
             module_idx: module_idx,
             caller: None,
-            scope_identity: ^scope_identity,
+            scope_identity: scope_identity.move(),
             structural_parents: [Int]{},
             structural_slot: "root",
             structural_slot_kind: StructuralSlotKind.List,
-            block_spans: ^block_spans,
+            block_spans: block_spans.move(),
             block_next: block_next,
         }
     }
@@ -234,7 +234,7 @@ impl SymbolDB {
                                 .None -> application.source_module
                             }
                             if semindex_instance_application_defined(self.defs, semantic_identity, application.span, application_path) -> next
-                            &self.defs.push(SymDef{
+                            self.defs.push(SymDef{
                                 identity: application.semantic_identity.copy(),
                                 name: application.name.copy(),
                                 def_span: application.span,
@@ -246,7 +246,7 @@ impl SymbolDB {
                 }
             }
         }
-        semindex_project_generated_presentation(&self, registration, checked.names, module_sources, loaded_module_rows)
+        semindex_project_generated_presentation(self, registration, checked.names, module_sources, loaded_module_rows)
         // Checker anchors retain semantic registration paths; index locations
         // use the original LoadedModule display (including Core/...).
         loop index in 0..<self.refs.len() {
@@ -256,7 +256,7 @@ impl SymbolDB {
                 }
             }
         }
-        &self.align_reference_targets()
+        self.align_reference_targets()
         defs := semindex_convert_defs(self.defs, self.view_provenance, self.members, registration, checked.names, module_sources, loaded_module_rows)
         refs := semindex_convert_refs(self.refs)
         // CP-S20: required sema-produced carrier; no default-empty adapter.
@@ -264,7 +264,7 @@ impl SymbolDB {
         definition_facts := semindex_build_definition_facts(defs, self.nodes, registration, checked.effect_facts.name_ledger, module_sources, loaded_module_rows)
         derivations := [DerivationRecord]{}
         loop fact in definition_facts {
-            &derivations.push(derivation_record(
+            derivations.push(derivation_record(
                 fact.stable_id.copy(),
                 fact.human_identity.copy(),
                 "jet-sema",
@@ -275,29 +275,29 @@ impl SymbolDB {
             ))
         }
         // The database keeps calls/members/nodes for LSP consumers (Rust clones).
-        self.index = SemIndex.new(^defs, ^refs, self.calls.copy(), ^effects, self.members.copy(), self.nodes.copy(), ^definition_facts)
-        &self.index.set_derivations(^derivations)
-        &self.arithmetic.sort_by((left: ArithmeticOperationFact, right: ArithmeticOperationFact) -> (left.module_path <=> right.module_path).then(left.operation_span.start <=> right.operation_span.start).then(left.operation_span.end <=> right.operation_span.end))
-        &self.index.set_arithmetic(self.arithmetic.copy())
-        &self.index.set_effect_projection(pkg_project_program_effects(effect_program, effect_summaries, "run", None))
-        &self.index.set_state_graphs(semindex_build_state_graphs(registration, checked, module_sources, loaded_module_rows))
-        &self.index.set_bypasses(self.bypasses.copy())
-        &self.index.set_instances(semindex_instance_facts(registration, checked, module_sources, loaded_module_rows, display_rows))
-        &self.index.set_outputs(semindex_output_facts(registration, module_sources, loaded_module_rows, display_rows))
+        self.index = SemIndex.new(defs, refs, self.calls.copy(), effects, self.members.copy(), self.nodes.copy(), definition_facts)
+        self.index.set_derivations(derivations)
+        self.arithmetic.sort_by((left: ArithmeticOperationFact, right: ArithmeticOperationFact) -> (left.module_path <=> right.module_path).then(left.operation_span.start <=> right.operation_span.start).then(left.operation_span.end <=> right.operation_span.end))
+        self.index.set_arithmetic(self.arithmetic.copy())
+        self.index.set_effect_projection(pkg_project_program_effects(effect_program, effect_summaries, "run", None))
+        self.index.set_state_graphs(semindex_build_state_graphs(registration, checked, module_sources, loaded_module_rows))
+        self.index.set_bypasses(self.bypasses.copy())
+        self.index.set_instances(semindex_instance_facts(registration, checked, module_sources, loaded_module_rows, display_rows))
+        self.index.set_outputs(semindex_output_facts(registration, module_sources, loaded_module_rows, display_rows))
     }
 
     // Rust SymbolDB::refresh_effect_hovers (407–420): every `fn ` hover ends
     // with exactly one current application-boundary projection line.
     refresh_effect_hovers: fn(&self) Never! {
         line: pkg_render_effect_projection_line(self.index.effect_projection)
-        semindex_refresh_effect_hover_rows(&self.hover, line)
+        semindex_refresh_effect_hover_rows(self.hover, line)
     }
 
     // Rust SymbolDB::attach_package_facts (422–428): package policy reaches the
     // index and the already-built hover projection without rebuilding symbols.
-    attach_package_facts: fn(&self, facts: ^PackageFacts) Never! {
-        &self.index.attach_package_facts(^facts)
-        &self.refresh_effect_hovers()
+    attach_package_facts: fn(&self, facts: &&PackageFacts) Never! {
+        self.index.attach_package_facts(facts)
+        self.refresh_effect_hovers()
     }
 
     // Rust SymbolDB::align_reference_targets (430–446): a checked anchor gains a
@@ -319,7 +319,7 @@ impl SymbolDB {
                 if unique && found == .Val(definition_index) {
                     aligned := target.copy()
                     aligned.semantic_identity = Val(self.defs[definition_index].identity.copy())
-                    self.refs[index].target = Val(^aligned)
+                    self.refs[index].target = Val(aligned.move())
                 }
             }
         }
@@ -348,7 +348,7 @@ impl SymbolDB {
     inlay_hints_for: fn(self, path: String) -> [View<InlayHint>] Never! {
         matches := [View<InlayHint>]{}
         loop index in 0..<self.inlay.len() {
-            if self.inlay[index].module_path == path -> &matches.push(self.inlay_window(index))
+            if self.inlay[index].module_path == path -> matches.push(self.inlay_window(index))
         }
         matches
     }
@@ -450,10 +450,10 @@ semindex_instance_facts: fn(registration: SemaRegistrationGraph, checked: SemaGr
             if item == .CodeModule(instance) {
                 if instance.instance_identity == .Val(identity) {
                     arguments := [String]{}
-                    loop key in identity.argument_keys -> &arguments.push(sha256_hex_bytes(key))
+                    loop key in identity.argument_keys -> arguments.push(sha256_hex_bytes(key))
                     applications := [InstanceApplicationFact]{}
                     loop application in identity.applications {
-                        &applications.push(InstanceApplicationFact{
+                        applications.push(InstanceApplicationFact{
                             name: application.name.copy(),
                             module_path: if display_rows.get(application.source_module) == {
                                 .Val(index) -> module_sources[index].display
@@ -467,22 +467,22 @@ semindex_instance_facts: fn(registration: SemaRegistrationGraph, checked: SemaGr
                     if instance.body == .Val(body) {
                         loop member in body {
                             if semindex_instance_member_name(member) == .Val(name) {
-                                if name_facts_exported(checked.names, module_index, foundation_member_name(instance.name, name)) -> &exported.push(name.copy())
+                                if name_facts_exported(checked.names, module_index, foundation_member_name(instance.name, name)) -> exported.push(name.copy())
                             }
                         }
                     }
-                    &facts.push(InstanceFact{
+                    facts.push(InstanceFact{
                         name: instance.name.copy(),
                         module_path: source.display,
                         fingerprint: identity.fingerprint.copy(),
                         full_key_hex: sha256_hex_bytes(identity.full_key),
                         template_definition_id: identity.definition_id.copy(),
                         template_span: semindex_source_span(identity.template_span),
-                        arguments: ^arguments,
+                        arguments: arguments.move(),
                         argument_values: identity.argument_values.copy(),
                         argument_provenance: identity.argument_provenance.copy(),
-                        applications: ^applications,
-                        exported_members: ^exported,
+                        applications: applications.move(),
+                        exported_members: exported.move(),
                     })
                 }
             }
@@ -518,10 +518,10 @@ semindex_output_facts: fn(registration: SemaRegistrationGraph, module_sources: [
                     target_source: sources.get(output.module_id) ?? panic("checked Output target must belong to the loaded bundle")
                     identity: "{module_sources[target_source].alias}::{output.semantic_name}"
                     params := [String]{}
-                    loop param in output.params -> &params.push(type_name(param.ty))
+                    loop param in output.params -> params.push(type_name(param.ty))
                     return_type := String?{None}
                     if output.return_type == .Val(ty) -> return_type = Val(type_name(ty))
-                    &facts.push(SemIndexOutputFact{
+                    facts.push(SemIndexOutputFact{
                         binding: value.name.copy(),
                         kind: output.kind.as_str(),
                         name: output.output_name.copy(),
@@ -536,8 +536,8 @@ semindex_output_facts: fn(registration: SemaRegistrationGraph, module_sources: [
                             },
                             definition_span: semindex_source_span(output.definition),
                             reference_span: semindex_source_span(output.reference),
-                            params: ^params,
-                            return_type: ^return_type,
+                            params: params.move(),
+                            return_type: return_type.move(),
                             failure_contract: type_name(failure_contract_shown_type(output.failure_contract)),
                             failure_source: failure_contract_source(output.failure_contract),
                             authority: output.authority.as_str(),

@@ -6,7 +6,7 @@
 // never retries, pads, truncates, or changes the native status meaning.
 read_chunk: fn(input: &[U8], output: &[U8]) -> Result<U32, Int> {
     read_len := 0
-    status := __jet_ffi_native_read_chunk(input, input.len(), output, output.len(), &read_len)
+    status := __jet_ffi_native_read_chunk(input, input.len(), output, output.len(), read_len)
     if status < 0 -> return Err(status)
     return Ok(read_len)
 }
@@ -14,5 +14,5 @@ read_chunk: fn(input: &[U8], output: &[U8]) -> Result<U32, Int> {
 run: fn() -> Result<U32, Int> {
     input := [1, 2, 3, 4]
     output := [0, 0]
-    return read_chunk(&input, &output)
+    return read_chunk(input, output)
 }

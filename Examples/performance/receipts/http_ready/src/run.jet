@@ -90,7 +90,7 @@ run: fn() (NetError | RangeError | TaskFailure)! {
         budget: 10000ms
         print("ready")
         loop {
-            stream: &listener.accept(deadline: budget)
+            stream: listener.accept(deadline: budget)
             _request: stream.read_text(8192, deadline: budget)
             stream.write_all(http_response(), deadline: budget)
         }
@@ -101,7 +101,7 @@ run: fn() (NetError | RangeError | TaskFailure)! {
     print("ready")
     budget: 1000ms
     server: task {
-        stream: &listener.accept(deadline: budget)
+        stream: listener.accept(deadline: budget)
         _request: stream.read_text(8192, deadline: budget)
         response: [U8]{
             72,

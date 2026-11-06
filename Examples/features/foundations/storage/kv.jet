@@ -14,7 +14,7 @@ kv_replay: fn(path: Path) -> [String:String] {
             op: parts[0]
             key: parts[1]
             if op == "put" && parts.len() >= 3 -> state[key] = parts[2]
-            if op == "del" -> &state.remove(key).drop("delete tombstone")
+            if op == "del" -> state.remove(key).drop("delete tombstone")
         }
     }
     return state
@@ -28,6 +28,6 @@ kv_get: fn(path: Path, key: String) -> String? {
 kv_compact: fn(path: Path) -> Bool {
     state: kv_replay(path)
     compacted := [String]{}
-    loop (key, value) in state -> &compacted.push("put|{key}|{value}")
+    loop (key, value) in state -> compacted.push("put|{key}|{value}")
     return compact_records(path, compacted)
 }

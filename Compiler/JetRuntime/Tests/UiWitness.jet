@@ -63,7 +63,7 @@ plain: fn(operand: String, golden: String, done: String) -> Witness Never! {
 variant_stops: fn(operand: String, golden: String, modes: [String], exit_gap: String, done: String) -> Witness Never! {
     cases := [Case]{ownership(golden)}
     loop mode in modes {
-        &cases.push(stop(mode, 70, SHARED_STOP))
+        cases.push(stop(mode, 70, SHARED_STOP))
     }
     Witness{operands: "OUT {operand}", oracle: false, cases: cases, timeout: 30s, exit_gap: exit_gap, done: done}
 }
@@ -96,12 +96,12 @@ resolve: fn(cwd: String, path: String) -> String Never! {
             if parts.len() > 0 {
                 kept := [String]{}
                 loop index in 0..<parts.len() - 1 {
-                    &kept.push(parts[index].copy())
+                    kept.push(parts[index].copy())
                 }
                 parts = kept
             }
         } else if part != "" && part != "." {
-            &parts.push(part.copy())
+            parts.push(part.copy())
         }
     }
     "/{parts.join("/")}"
@@ -140,7 +140,7 @@ run_binary: fn(binary: String, args: [String], timeout: Duration) -[Exec, FS, IO
     if !files.exists(binary) -> return Outcome{stdout: none.copy(), stderr: none.copy(), status: 0, exited: false, signal: "", error: "spawnSync {binary} ENOENT"}
     argv := [String]{binary.copy()}
     loop arg in args {
-        &argv.push(arg.copy())
+        argv.push(arg.copy())
     }
     if process.cmd(argv).timeout(timeout).run() == {
         .Ok(receipt) -> {

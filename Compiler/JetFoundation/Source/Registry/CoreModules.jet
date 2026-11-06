@@ -95,7 +95,7 @@ core_type_modules: fn(name: String) -> [String] Never! {
 core_type_modules_in: fn(rows: [CoreModuleExportNames], leaf: String) -> [String] Never! {
     modules := [String]{}
     loop row in rows {
-        if core_module_export_has_name(row.type_exports, leaf) -> &modules.push(row.module_name)
+        if core_module_export_has_name(row.type_exports, leaf) -> modules.push(row.module_name)
     }
     modules
 }
@@ -340,7 +340,7 @@ core_source_value_hook: fn(name: String, operation: String) -> String? Never! {
 core_enum_payload_variants: fn(name: String) -> [String]? {
     variants := [String]{}
     loop row in CORE_ENUM_PAYLOAD_ROWS {
-        if row.enum_name == name -> &variants.push(row.variant)
+        if row.enum_name == name -> variants.push(row.variant)
     }
     if variants.len() == 0 -> None else -> Val(variants)
 }
@@ -468,7 +468,7 @@ core_record_field_table: fn(owners: [String], fields: [[String]]) -> [[Type?]] N
     table := [[Type?]]{}
     loop (k, owner) in owners {
         at[owner] = k
-        &table.push(loop _ in fields[k] -> Type?{None})
+        table.push(loop _ in fields[k] -> Type?{None})
     }
     loop row in CORE_RECORD_FIELD_ROWS {
         k: at.get(row.owner) ?? next

@@ -48,9 +48,9 @@ publication_parse_registries_from_env: fn(env: [String: String]) -> [Publication
         if !suffix.ends_with("_URL") -> next
         name: suffix.removesuffix("_URL")
         mirror: (env.get("JET_REGISTRY_{name}_MIRROR") ?? "") == "true"
-        &result.push(PublicationRegistryConfig.private(name.to_lower(), entry.value, mirror))
+        result.push(PublicationRegistryConfig.private(name.to_lower(), entry.value, mirror))
     }
-    if result.len() == 0 -> &result.push(PublicationRegistryConfig.public_default())
+    if result.len() == 0 -> result.push(PublicationRegistryConfig.public_default())
     result
 }
 publication_resolve_publish_registry: fn() -[Env]> PublicationRegistryConfig Never! {

@@ -2,17 +2,17 @@
 use jet_foundation.HotSwap.[HotSwapDecision, StateRetentionDecision, StateRetentionFact]
 WebModuleSwapIdentity: struct { module_ref: String; page: String }
 impl WebModuleSwapIdentity {
-    new: fn(module_ref: String, page: String) -> Self { Self(module_ref: ^module_ref, page: ^page) }
+    new: fn(module_ref: String, page: String) -> Self { Self(module_ref: module_ref, page: page) }
     is_valid: fn(self: Self) -> Bool { !self.module_ref.is_empty() && !self.page.is_empty() }
 }
 WebPageFact: struct { identity: String; artifact: String }
 impl WebPageFact {
-    new: fn(identity: String, artifact: String) -> Self { Self(identity: ^identity, artifact: ^artifact) }
+    new: fn(identity: String, artifact: String) -> Self { Self(identity: identity, artifact: artifact) }
 }
 WebModuleFact: struct { identity: String; interface_fingerprint: String; body_fingerprint: String }
 impl WebModuleFact {
     new: fn(identity: String, interface_fingerprint: String, body_fingerprint: String) -> Self {
-        Self(identity: ^identity, interface_fingerprint: ^interface_fingerprint, body_fingerprint: ^body_fingerprint)
+        Self(identity: identity, interface_fingerprint: interface_fingerprint, body_fingerprint: body_fingerprint)
     }
 }
 WebStateValue: enum { Text(String); Integer(I64); Unsigned(U64); Boolean(Bool); Bytes([U8]) }
@@ -26,13 +26,13 @@ impl WebStateValue {
     } }
 }
 impl From<&String> for WebStateValue { from: fn(value: String) -> Self { .Text(value.to_string()) } }
-impl From<String> for WebStateValue { from: fn(value: String) -> Self { .Text(^value) } }
+impl From<String> for WebStateValue { from: fn(value: String) -> Self { .Text(value) } }
 impl From<Bool> for WebStateValue { from: fn(value: Bool) -> Self { .Boolean(value) } }
 impl From<I64> for WebStateValue { from: fn(value: I64) -> Self { .Integer(value) } }
 impl From<I32> for WebStateValue { from: fn(value: I32) -> Self { .Integer(I64{value}) } }
 impl From<U64> for WebStateValue { from: fn(value: U64) -> Self { .Unsigned(value) } }
 impl From<U32> for WebStateValue { from: fn(value: U32) -> Self { .Unsigned(U64{value}) } }
-impl From<[U8]> for WebStateValue { from: fn(value: [U8]) -> Self { .Bytes(^value) } }
+impl From<[U8]> for WebStateValue { from: fn(value: [U8]) -> Self { .Bytes(value) } }
 WebStateKind: enum { Signal; Store; QueryCache; FormDraft; Scroll; Focus; Island }
 impl WebStateKind {
     as_str: fn(self) -> String { if self == {
@@ -47,31 +47,31 @@ impl WebStateKind {
 }
 WebSignalFact: struct { key: String; type_fingerprint: String; value: WebStateValue }
 impl WebSignalFact {
-    new: fn<T: Into<WebStateValue>>(key: String, type_fingerprint: String, value: T) -> Self { Self(key: ^key, type_fingerprint: ^type_fingerprint, value: value.into()) }
+    new: fn<T: Into<WebStateValue>>(key: String, type_fingerprint: String, value: T) -> Self { Self(key: key, type_fingerprint: type_fingerprint, value: value.into()) }
 }
 WebStoreFact: struct { key: String; type_fingerprint: String; value: WebStateValue }
 impl WebStoreFact {
-    new: fn<T: Into<WebStateValue>>(key: String, type_fingerprint: String, value: T) -> Self { Self(key: ^key, type_fingerprint: ^type_fingerprint, value: value.into()) }
+    new: fn<T: Into<WebStateValue>>(key: String, type_fingerprint: String, value: T) -> Self { Self(key: key, type_fingerprint: type_fingerprint, value: value.into()) }
 }
 WebQueryCacheFact: struct { key: String; type_fingerprint: String; value: WebStateValue }
 impl WebQueryCacheFact {
-    new: fn<T: Into<WebStateValue>>(key: String, type_fingerprint: String, value: T) -> Self { Self(key: ^key, type_fingerprint: ^type_fingerprint, value: value.into()) }
+    new: fn<T: Into<WebStateValue>>(key: String, type_fingerprint: String, value: T) -> Self { Self(key: key, type_fingerprint: type_fingerprint, value: value.into()) }
 }
 WebFormDraftFact: struct { key: String; type_fingerprint: String; value: WebStateValue }
 impl WebFormDraftFact {
-    new: fn<T: Into<WebStateValue>>(key: String, type_fingerprint: String, value: T) -> Self { Self(key: ^key, type_fingerprint: ^type_fingerprint, value: value.into()) }
+    new: fn<T: Into<WebStateValue>>(key: String, type_fingerprint: String, value: T) -> Self { Self(key: key, type_fingerprint: type_fingerprint, value: value.into()) }
 }
 WebScrollFact: struct { key: String; type_fingerprint: String; value: WebStateValue }
 impl WebScrollFact {
-    new: fn<T: Into<WebStateValue>>(key: String, type_fingerprint: String, value: T) -> Self { Self(key: ^key, type_fingerprint: ^type_fingerprint, value: value.into()) }
+    new: fn<T: Into<WebStateValue>>(key: String, type_fingerprint: String, value: T) -> Self { Self(key: key, type_fingerprint: type_fingerprint, value: value.into()) }
 }
 WebFocusFact: struct { key: String; type_fingerprint: String; value: WebStateValue }
 impl WebFocusFact {
-    new: fn<T: Into<WebStateValue>>(key: String, type_fingerprint: String, value: T) -> Self { Self(key: ^key, type_fingerprint: ^type_fingerprint, value: value.into()) }
+    new: fn<T: Into<WebStateValue>>(key: String, type_fingerprint: String, value: T) -> Self { Self(key: key, type_fingerprint: type_fingerprint, value: value.into()) }
 }
 WebIslandFact: struct { key: String; identity: String; type_fingerprint: String; value: WebStateValue }
 impl WebIslandFact {
-    new: fn<T: Into<WebStateValue>>(key: String, identity: String, type_fingerprint: String, value: T) -> Self { Self(key: ^key, identity: ^identity, type_fingerprint: ^type_fingerprint, value: value.into()) }
+    new: fn<T: Into<WebStateValue>>(key: String, identity: String, type_fingerprint: String, value: T) -> Self { Self(key: key, identity: identity, type_fingerprint: type_fingerprint, value: value.into()) }
 }
 WebModuleSwapStateFact: enum {
     Signal(WebSignalFact); Store(WebStoreFact); QueryCache(WebQueryCacheFact); FormDraft(WebFormDraftFact)
@@ -120,13 +120,13 @@ impl WebModuleSwapStateFact {
     } }
     with_value: fn(self: Self, value: WebStateValue) -> Self {
         if self == {
-            .Signal(f) -> .Signal(WebSignalFact(key: f.key.clone(), type_fingerprint: f.type_fingerprint.clone(), value: ^value))
-            .Store(f) -> .Store(WebStoreFact(key: f.key.clone(), type_fingerprint: f.type_fingerprint.clone(), value: ^value))
-            .QueryCache(f) -> .QueryCache(WebQueryCacheFact(key: f.key.clone(), type_fingerprint: f.type_fingerprint.clone(), value: ^value))
-            .FormDraft(f) -> .FormDraft(WebFormDraftFact(key: f.key.clone(), type_fingerprint: f.type_fingerprint.clone(), value: ^value))
-            .Scroll(f) -> .Scroll(WebScrollFact(key: f.key.clone(), type_fingerprint: f.type_fingerprint.clone(), value: ^value))
-            .Focus(f) -> .Focus(WebFocusFact(key: f.key.clone(), type_fingerprint: f.type_fingerprint.clone(), value: ^value))
-            .Island(f) -> .Island(WebIslandFact(key: f.key.clone(), identity: f.identity.clone(), type_fingerprint: f.type_fingerprint.clone(), value: ^value))
+            .Signal(f) -> .Signal(WebSignalFact(key: f.key.clone(), type_fingerprint: f.type_fingerprint.clone(), value: value))
+            .Store(f) -> .Store(WebStoreFact(key: f.key.clone(), type_fingerprint: f.type_fingerprint.clone(), value: value))
+            .QueryCache(f) -> .QueryCache(WebQueryCacheFact(key: f.key.clone(), type_fingerprint: f.type_fingerprint.clone(), value: value))
+            .FormDraft(f) -> .FormDraft(WebFormDraftFact(key: f.key.clone(), type_fingerprint: f.type_fingerprint.clone(), value: value))
+            .Scroll(f) -> .Scroll(WebScrollFact(key: f.key.clone(), type_fingerprint: f.type_fingerprint.clone(), value: value))
+            .Focus(f) -> .Focus(WebFocusFact(key: f.key.clone(), type_fingerprint: f.type_fingerprint.clone(), value: value))
+            .Island(f) -> .Island(WebIslandFact(key: f.key.clone(), identity: f.identity.clone(), type_fingerprint: f.type_fingerprint.clone(), value: value))
         }
     }
 }
@@ -136,15 +136,15 @@ WebModuleSwapSnapshot: struct {
 }
 impl WebModuleSwapSnapshot {
     new: fn(identity: WebModuleSwapIdentity, source_revision: String, build_revision: String, page: WebPageFact, modules: [WebModuleFact], state: [WebModuleSwapStateFact]) -> Self WebModuleSwapError! {
-        snapshot := Self(identity: ^identity, source_revision: ^source_revision, build_revision: ^build_revision, page: ^page, modules: ^modules, state: ^state)
-        snapshot.normalize()?; return .Ok(^snapshot)
+        snapshot := Self(identity: identity, source_revision: source_revision, build_revision: build_revision, page: page, modules: modules, state: state)
+        snapshot.normalize()?; return .Ok(snapshot)
     }
     normalize: fn(self: &Self) WebModuleSwapError! {
         if !self.identity.is_valid() -> return .Err(.InvalidSnapshot(detail: "module and page identity must be non-empty"))
         if self.source_revision.is_empty() || self.build_revision.is_empty() -> return .Err(.InvalidSnapshot(detail: "source and build revisions must be non-empty"))
         if self.page.identity.is_empty() -> return .Err(.InvalidSnapshot(detail: "page identity must be non-empty"))
         if self.page.identity != self.identity.page -> return .Err(.InvalidSnapshot(detail: "page fact identity does not match swap identity"))
-        self.modules.sort_by((left, right) -> left.identity.cmp(&right.identity))
+        self.modules.sort_by((left, right) -> left.identity.cmp(right.identity))
         loop module_ref in &self.modules {
             if module_ref.identity.is_empty() || module_ref.interface_fingerprint.is_empty() || module_ref.body_fingerprint.is_empty() -> return .Err(.InvalidSnapshot(detail: "module identity and fingerprints must be non-empty"))
         }
@@ -246,7 +246,7 @@ impl WebModuleSwapPlan {
                 .Fresh(..) -> {
                     reasons.insert(.StateRetentionFresh, true)
                     (prior_identity, prior_type_fingerprint): old_state.get(key).map((old_fact) -> (.Val(old_fact.identity().to_string()), .Val(old_fact.type_fingerprint().to_string()))).unwrap_or((.None, .None))
-                    reset.push(WebModuleSwapResetFact(state: new_fact.clone(), prior_identity: ^prior_identity, prior_type_fingerprint: ^prior_type_fingerprint, reason: if old_state.contains_key(key) { .StateRetentionFresh } else { .StateAdded }))
+                    reset.push(WebModuleSwapResetFact(state: new_fact.clone(), prior_identity: prior_identity, prior_type_fingerprint: prior_type_fingerprint, reason: if old_state.contains_key(key) { .StateRetentionFresh } else { .StateAdded }))
                 }
             }
         }
@@ -262,7 +262,7 @@ impl WebModuleSwapPlan {
         reset.sort_by((left, right) -> (_0: left.state.kind(), _1: left.state.key()).cmp(&(_0: right.state.kind(), _1: right.state.key())))
         reason_codes: reasons.keys().sorted()
         compatibility: if decision.is_compatible() -> .Compatible else -> .Incompatible(reason_codes: [.SemanticIncompatible])
-        return .Ok(Self(base: ^base, candidate: ^candidate, decision: decision.clone(), compatibility: ^compatibility, changed_modules: ^changed_modules, preserved: ^preserved, reset: ^reset, reason_codes: ^reason_codes))
+        return .Ok(Self(base: base, candidate: candidate, decision: decision.clone(), compatibility: compatibility, changed_modules: changed_modules, preserved: preserved, reset: reset, reason_codes: reason_codes))
     }
     decision: fn(self: Self) -> HotSwapDecision { &self.decision }
     is_compatible: fn(self: Self) -> Bool { self.decision.is_compatible() }
@@ -272,7 +272,7 @@ impl WebModuleSwapPlan {
         loop preserved in &self.preserved {
             if snapshot.state.iter_mut().find((fact) -> fact.kind() == preserved.kind() && fact.key() == preserved.key()) == .Val(slot) -> *slot = preserved.clone()
         }
-        return ^snapshot
+        return snapshot.move()
     }
 }
 WebModuleSwapOperation: enum { Pause; Apply; Commit; Rollback; Restart }
@@ -357,8 +357,8 @@ WebModuleSwapState: struct {
 }
 impl WebModuleSwapState {
     new: fn(snapshot: WebModuleSwapSnapshot) -> Self WebModuleSwapError! {
-        snapshot := ^snapshot; snapshot.normalize()
-        return .Ok(Self(active: snapshot.clone(), committed: ^snapshot, pending: .None, phase: .Committed))
+        snapshot := snapshot.move(); snapshot.normalize()
+        return .Ok(Self(active: snapshot.clone(), committed: snapshot, pending: .None, phase: .Committed))
     }
     committed: fn(self: Self) -> WebModuleSwapSnapshot { &self.committed }
     active: fn(self: Self) -> WebModuleSwapSnapshot { &self.active }
@@ -366,10 +366,10 @@ impl WebModuleSwapState {
     phase: fn(self: Self) -> WebModuleSwapPhase { self.phase }
     pause: fn(self: Self, plan: WebModuleSwapPlan) -> WebModuleSwapReceipt WebModuleSwapError! {
         if self.phase != .Committed || self.pending.is_some() -> return .Err(.InvalidTransition(operation: .Pause, phase: self.phase))
-        self.validate_base(&plan)
+        self.validate_base(plan)
         if plan.base.identity != plan.candidate.identity -> return .Err(.IdentityMismatch(expected: plan.base.identity.clone(), found: plan.candidate.identity.clone()))
         if !plan.is_compatible() -> return .Err(.Incompatible(reason_codes: plan.compatibility.reason_codes().to_vec()))
-        self.pending = .Val(^plan); self.phase = .Paused
+        self.pending = .Val(plan); self.phase = .Paused
         return .Ok(self.receipt(.Pause, .Paused))
     }
     apply: fn(self: Self) -> WebModuleSwapReceipt WebModuleSwapError! {
@@ -377,7 +377,7 @@ impl WebModuleSwapState {
         plan: self.pending.as_ref().ok_or(WebModuleSwapError.NoPendingPlan)
         self.validate_base(plan)
         if !plan.is_compatible() -> return .Err(.Incompatible(reason_codes: plan.compatibility.reason_codes().to_vec()))
-        applied: plan.applied_snapshot(); self.active = ^applied; self.phase = .Applied
+        applied: plan.applied_snapshot(); self.active = applied.move(); self.phase = .Applied
         return .Ok(self.receipt(.Apply, .Applied))
     }
     commit: fn(self: Self) -> WebModuleSwapReceipt WebModuleSwapError! {
@@ -387,7 +387,7 @@ impl WebModuleSwapState {
         if self.active.identity != plan.candidate.identity -> return .Err(.IdentityMismatch(expected: plan.candidate.identity.clone(), found: self.active.identity.clone()))
         plan: self.pending.take().expect("applied swap has a pending plan")
         self.committed = self.active.clone(); self.phase = .Committed
-        return .Ok(self.receipt_for_plan(&plan, .Commit, .Committed))
+        return .Ok(self.receipt_for_plan(plan, .Commit, .Committed))
     }
     rollback: fn(self: Self) -> WebModuleSwapReceipt WebModuleSwapError! {
         had_pending: self.pending.is_some()
@@ -395,26 +395,26 @@ impl WebModuleSwapState {
         self.pending = .None; self.active = self.committed.clone(); self.phase = .Committed
         if had_pending {
             (candidate_identity, source_revision, build_revision, changed_modules, reason_codes, preserved, reset): receipt_data.expect("pending plan was present")
-            return .Ok(WebModuleSwapReceipt(operation: .Rollback, status: .RolledBack, phase: self.phase, identity: self.committed.identity.clone(), candidate_identity: ^candidate_identity, source_revision: ^source_revision, build_revision: ^build_revision, changed_modules: ^changed_modules, reason_codes: ^reason_codes, preserved: ^preserved, reset: ^reset, committed_page: self.committed.page.clone(), active_page: self.active.page.clone()))
+            return .Ok(WebModuleSwapReceipt(operation: .Rollback, status: .RolledBack, phase: self.phase, identity: self.committed.identity.clone(), candidate_identity: candidate_identity, source_revision: source_revision, build_revision: build_revision, changed_modules: changed_modules, reason_codes: reason_codes, preserved: preserved, reset: reset, committed_page: self.committed.page.clone(), active_page: self.active.page.clone()))
         }
         return .Ok(WebModuleSwapReceipt(operation: .Rollback, status: .RolledBack, phase: self.phase, identity: self.committed.identity.clone(), candidate_identity: self.committed.identity.clone(), source_revision: self.committed.source_revision.clone(), build_revision: self.committed.build_revision.clone(), changed_modules: [], reason_codes: [.NothingToRollback], preserved: [], reset: [], committed_page: self.committed.page.clone(), active_page: self.active.page.clone()))
     }
     apply_decision: fn(self: Self, plan: WebModuleSwapPlan) -> WebModuleSwapReceipt WebModuleSwapError! {
-        if !plan.is_compatible() -> return self.restart(^plan)
-        self.pause(^plan)
-        if self.apply() == .Err(error) { _: self.rollback(); return .Err(^error) }
+        if !plan.is_compatible() -> return self.restart(plan)
+        self.pause(plan)
+        if self.apply() == .Err(error) { _: self.rollback(); return .Err(error) }
         return if self.commit() == {
-            .Ok(receipt) -> .Ok(^receipt)
-            .Err(error) -> { _: self.rollback(), .Err(^error) }
+            .Ok(receipt) -> .Ok(receipt)
+            .Err(error) -> { _: self.rollback(), .Err(error) }
         }
     }
     restart: fn(self: Self, plan: WebModuleSwapPlan) -> WebModuleSwapReceipt WebModuleSwapError! {
         if self.phase != .Committed || self.pending.is_some() -> return .Err(.InvalidTransition(operation: .Restart, phase: self.phase))
-        self.validate_base(&plan)
+        self.validate_base(plan)
         if plan.base.identity != plan.candidate.identity -> return .Err(.IdentityMismatch(expected: plan.base.identity.clone(), found: plan.candidate.identity.clone()))
         if plan.is_compatible() -> return .Err(.Incompatible(reason_codes: [.SemanticIncompatible]))
         self.active = plan.candidate.clone(); self.committed = self.active.clone(); self.phase = .Committed
-        return .Ok(self.receipt_for_plan(&plan, .Restart, .Restarted))
+        return .Ok(self.receipt_for_plan(plan, .Restart, .Restarted))
     }
     validate_base: fn(self: &Self, plan: &WebModuleSwapPlan) WebModuleSwapError! {
         if self.committed.identity != plan.base.identity -> return .Err(.IdentityMismatch(expected: self.committed.identity.clone(), found: plan.base.identity.clone()))

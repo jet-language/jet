@@ -219,7 +219,7 @@ build_session_strings: fn(args: [BuildSessionValue], index: Int) -> [String]? {
         out := [String]{}
         loop value in values {
             if value == {
-                .Text(text) -> &out.push(text)
+                .Text(text) -> out.push(text)
                 else -> return None
             }
         }
@@ -250,7 +250,7 @@ build_session_handles: fn(state: BuildSessionState, args: [BuildSessionValue], i
     if index >= args.len() -> return None
     if args[index] == .List(values) {
         out := [Int]{}
-        loop value in values -> &out.push(build_session_handle(state, value, kind) ?? return None)
+        loop value in values -> out.push(build_session_handle(state, value, kind) ?? return None)
         return Val(out)
     }
     None
@@ -283,8 +283,8 @@ build_session_map: fn(entries: [String]) -> [String:String]? {
 
 build_session_unique: fn(values: [String]) -> [String] {
     out := [String]{}
-    loop value in values -> build_session_append_unique(&out, value)
-    &out.sort()
+    loop value in values -> build_session_append_unique(out, value)
+    out.sort()
     out
 }
 
@@ -296,10 +296,10 @@ build_session_caps: fn(values: [String]) -> [String]? {
         if value.contains(".") -> return None
         lower: value.to_lower()
         if !build_session_contains_string([String]{"net", "fs", "io", "db", "time", "rand", "env", "exec", "log", "gpu"}, lower) -> return None
-        build_session_append_unique(&normalized, lower)
+        build_session_append_unique(normalized, lower)
     }
     loop flag in ([String]{"net", "fs", "io", "db", "time", "rand", "env", "exec", "log", "gpu"}) {
-        if build_session_contains_string(normalized, flag) -> &out.push(flag)
+        if build_session_contains_string(normalized, flag) -> out.push(flag)
     }
     Val(out)
 }
@@ -325,13 +325,13 @@ build_session_pools: fn(values: [String]) -> [String] {
     custom := [String]{}
     loop value in values {
         lower: value.to_lower()
-        if build_session_contains_string(known, lower) -> build_session_append_unique(&out, lower)
-        else -> build_session_append_unique(&custom, value)
+        if build_session_contains_string(known, lower) -> build_session_append_unique(out, lower)
+        else -> build_session_append_unique(custom, value)
     }
     ordered := [String]{}
-    loop value in known { if build_session_contains_string(out, value) -> &ordered.push(value) }
-    &custom.sort()
-    loop value in custom -> &ordered.push(value)
+    loop value in known { if build_session_contains_string(out, value) -> ordered.push(value) }
+    custom.sort()
+    loop value in custom -> ordered.push(value)
     ordered
 }
 
@@ -352,20 +352,20 @@ build_session_call: fn(session: &BuildSession, method: String, args: [BuildSessi
         index: if method == "action" -> 4 else -> 5
         caps: build_session_strings(args, index) ?? return build_session_fail(state, "build action effects must be a list of strings")
         if caps.len() > 0 && !in_impure_gate -> return build_session_impure(state, method)
-        return build_session_add_action(&state, method, args)
+        return build_session_add_action(state, method, args)
     }
-    if method.starts_with("add_") -> return build_session_add_target(&state, method, args)
-    if method == "toolchain" -> return build_session_add_toolchain(&state, args)
-    if method == "signing" -> return build_session_add_signing(&state, args)
-    if method == "probe" -> return build_session_add_probe(&state, args, in_impure_gate)
-    if method == "pin" -> return build_session_set_option(&state, args, true, start, end)
-    if build_option_row(method) != None -> return build_session_set_option(&state, args, false, start, end)
+    if method.starts_with("add_") -> return build_session_add_target(state, method, args)
+    if method == "toolchain" -> return build_session_add_toolchain(state, args)
+    if method == "signing" -> return build_session_add_signing(state, args)
+    if method == "probe" -> return build_session_add_probe(state, args, in_impure_gate)
+    if method == "pin" -> return build_session_set_option(state, args, true, start, end)
+    if build_option_row(method) != None -> return build_session_set_option(state, args, false, start, end)
     if method == "generate" {
         if args.len() != 1 -> return build_session_fail(state, "`b.generate` requires a name and typed item block")
         name: build_session_text(args, 0) ?? return build_session_fail(state, "generated module name must be a string")
         source: generated_source ?? return build_session_fail(state, "`b.generate` requires a typed item block, not a source string")
         path: ".jet/generated/{build_session_package_dir(state.package)}/{build_session_safe_name(name)}.jet"
-        return build_session_add_generated(&state, BuildSessionGeneratedModule{name: name, path: path, source: source, source_digest: "", plugin: None})
+        return build_session_add_generated(state, BuildSessionGeneratedModule{name: name, path: path, source: source, source_digest: "", plugin: None})
     }
     if method == "default" {
         if args.len() != 1 -> return build_session_fail(state, "`b.default` takes one target")
@@ -388,10 +388,10 @@ build_session_call: fn(session: &BuildSession, method: String, args: [BuildSessi
         if name.trim() == "" || name.contains(".") -> return build_session_fail(state, "`b.contribute` needs one declared setting name, such as `cache_slots`")
         if args[1] == {.Bool(_) | .Int(_) | .Char(_) | .Text(_) | .Enum(_) -> {} else -> return build_session_fail(state, "`b.contribute` accepts only Bool, Int, Char, String, or a fieldless enum value")}
         // The writer is spelled by the package's name, as `jet explain` and the lock show it.
-        &state.contributions.push(BuildSessionContribution{key: "Build.Settings.{name}", value: args[1], source: "{build_session_package_dir(state.package)}::build", start: start, end: end})
+        state.contributions.push(BuildSessionContribution{key: "Build.Settings.{name}", value: args[1], source: "{build_session_package_dir(state.package)}::build", start: start, end: end})
         return BuildSessionReply.Value{value: BuildSessionValue.Unit}
     }
-    if method == "error" -> return build_session_project_error(&state, args)
+    if method == "error" -> return build_session_project_error(state, args)
     if method == "plugin" {
         if args.len() != 2 || build_session_text(args, 0) == None || build_session_text(args, 1) == None -> return build_session_fail(state, "`b.plugin` requires manifest and component paths")
         if !in_impure_gate -> return build_session_impure(state, method)
@@ -420,7 +420,7 @@ build_session_set_option: fn(state: &BuildSessionState, args: [BuildSessionValue
         state.options[index] = BuildSessionOption{name: name.copy(), value: value.copy(), pinned: pinned, start: start, end: end}
         return BuildSessionReply.Value{value: BuildSessionValue.Unit}
     }
-    &state.options.push(BuildSessionOption{name: name, value: value, pinned: pinned, start: start, end: end})
+    state.options.push(BuildSessionOption{name: name, value: value, pinned: pinned, start: start, end: end})
     BuildSessionReply.Value{value: BuildSessionValue.Unit}
 }
 
@@ -437,8 +437,8 @@ build_session_safe_name: fn(name: String) -> String {
     bytes := [U8]{}
     loop byte in name.bytes() {
         n: Int.from_u8(byte)
-        if (n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 95 || n == 45 -> &bytes.push(byte)
-        else if n < 128 || n >= 192 -> &bytes.push(U8{95})
+        if (n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 95 || n == 45 -> bytes.push(byte)
+        else if n < 128 || n >= 192 -> bytes.push(U8{95})
     }
     String.from_bytes(bytes) ?? panic("invalid generated module name")
 }
@@ -453,14 +453,14 @@ build_session_add_generated: fn(state: &BuildSessionState, generated: BuildSessi
     }
     checked := generated
     checked.source_digest = "sha256:{build_crypto.sha256(checked.source.bytes()).hex()}"
-    &state.generated.push(checked)
+    state.generated.push(checked)
     BuildSessionReply.Value{value: BuildSessionValue.Unit}
 }
 
 build_session_add_toolchain: fn(state: &BuildSessionState, args: [BuildSessionValue]) -> BuildSessionReply {
     if args.len() < 2 || args.len() > 6 -> return build_session_fail(state, "`b.toolchain` accepts two through six string arguments")
     texts := [String]{}
-    loop index in 0..<args.len() -> &texts.push(build_session_text(args, index) ?? return build_session_fail(state, "toolchain fields must be strings"))
+    loop index in 0..<args.len() -> texts.push(build_session_text(args, index) ?? return build_session_fail(state, "toolchain fields must be strings"))
     name: texts[0]
     if name.trim() == "" -> return build_session_error_fail(state, .EmptyToolchainName)
     loop old in state.toolchains { if old.name == name -> return build_session_error_fail(state, BuildSessionError.DuplicateToolchainName{value: name}) }
@@ -468,7 +468,7 @@ build_session_add_toolchain: fn(state: &BuildSessionState, args: [BuildSessionVa
     if texts[1].trim() == "" || host.trim() == "" -> return build_session_error_fail(state, BuildSessionError.EmptyToolchainTriple{value: name})
     loop index in 3..<texts.len() { if texts[index].trim() == "" -> return build_session_error_fail(state, BuildSessionError.EmptyIdentityField{value: name}) }
     id: state.toolchains.len()
-    &state.toolchains.push(BuildSessionToolchain{name: name, role: "target", target_triple: texts[1], host_triple: host, sdk: if texts.len() >= 4 -> Val(texts[3]) else -> None, linker: if texts.len() >= 5 -> Val(texts[4]) else -> None, sysroot: if texts.len() >= 6 -> Val(texts[5]) else -> None})
+    state.toolchains.push(BuildSessionToolchain{name: name, role: "target", target_triple: texts[1], host_triple: host, sdk: if texts.len() >= 4 -> Val(texts[3]) else -> None, linker: if texts.len() >= 5 -> Val(texts[4]) else -> None, sysroot: if texts.len() >= 6 -> Val(texts[5]) else -> None})
     BuildSessionReply.Value{value: BuildSessionValue.Handle{type_name: "BuildToolchain", session: state.id, id: id}}
 }
 
@@ -480,7 +480,7 @@ build_session_add_signing: fn(state: &BuildSessionState, args: [BuildSessionValu
     if label.trim() == "" -> return build_session_error_fail(state, BuildSessionError.EmptyIdentityField{value: name})
     loop old in state.signing { if old.name == name -> return build_session_error_fail(state, BuildSessionError.DuplicateSigningIdentityName{value: name}) }
     id: state.signing.len()
-    &state.signing.push(BuildSessionSigning{name: name, label: label})
+    state.signing.push(BuildSessionSigning{name: name, label: label})
     BuildSessionReply.Value{value: BuildSessionValue.Handle{type_name: "BuildSigningIdentity", session: state.id, id: id}}
 }
 
@@ -527,7 +527,7 @@ build_session_add_probe: fn(state: &BuildSessionState, args: [BuildSessionValue]
     // lock. Rust rejects reproducible classification on these same values.
     if reproducibility == "reproducible" -> return build_session_error_fail(state, BuildSessionError.MissingLockedProvenance{value: name})
     id: state.probes.len()
-    &state.probes.push(BuildSessionProbe{name: name, kind: kind, value: value, code: code, reproducibility: reproducibility, toolchain: toolchain})
+    state.probes.push(BuildSessionProbe{name: name, kind: kind, value: value, code: code, reproducibility: reproducibility, toolchain: toolchain})
     BuildSessionReply.Value{value: BuildSessionValue.Handle{type_name: "BuildProbe", session: state.id, id: id}}
 }
 
@@ -555,7 +555,7 @@ build_session_project_error: fn(state: &BuildSessionState, args: [BuildSessionVa
     } else if code.trim() == "" || what.trim() == "" || why.trim() == "" || fix.trim() == "" {
         diagnostic = build_session_diag(state, "build rule errors require non-empty code, what, why, and fix")
     }
-    &state.diagnostics.push(diagnostic)
+    state.diagnostics.push(diagnostic)
     BuildSessionReply.Value{value: BuildSessionValue.Unit}
 }
 
@@ -564,7 +564,7 @@ build_session_contains_string: fn(values: [String], value: String) -> Bool Never
     false
 }
 build_session_append_unique: fn(values: &[String], value: String) Never! {
-    if !build_session_contains_string(values, value) -> &values.push(value)
+    if !build_session_contains_string(values, value) -> values.push(value)
 }
 
 // Build failures are values only for the checked BuildError constructors.
@@ -641,10 +641,10 @@ build_session_error_json_text: fn(value: String) -> String Never! {
             pair: String.from_bytes([U8]{digits[number /% 16], digits[number % 16]}) ?? panic("invalid hex")
             escaped = "\\u00{pair}"
         }
-        if escaped == "" -> &bytes.push(byte)
-        else { loop part in escaped.bytes() -> &bytes.push(part) }
+        if escaped == "" -> bytes.push(byte)
+        else { loop part in escaped.bytes() -> bytes.push(part) }
     }
-    &bytes.push(U8{34})
+    bytes.push(U8{34})
     String.from_bytes(bytes) ?? panic("JSON preserves UTF8")
 }
 build_session_error_texts: fn(values: [String]) -> String Never! {

@@ -105,7 +105,7 @@ bytes_match_at: fn(raw: [U8], at: Int, needle: [U8]) -> Bool {
 }
 byte_text: fn(raw: [U8], start: Int, end: Int) -> String {
     out := [U8]{}
-    loop i in start..<end -> &out.push(raw[i])
+    loop i in start..<end -> out.push(raw[i])
     String.from_bytes(out) ?? panic("a split at a matched UTF-8 needle stays on scalar boundaries")
 }
 
@@ -157,11 +157,11 @@ expandtabs: fn(receiver: String, tabsize: Int) -> String {
         if b == (U8{9}) {
             if width > 0 {
                 spaces: width - (column %% width)
-                loop _ in 0..<spaces -> &out.push(U8{32})
+                loop _ in 0..<spaces -> out.push(U8{32})
                 column = column + spaces
             }
         } else {
-            loop i in at..<(at + step) -> &out.push(raw[i])
+            loop i in at..<(at + step) -> out.push(raw[i])
             if b == (U8{10}) || b == (U8{13}) -> column = 0 else -> column = column + 1
         }
         at = at + step
@@ -204,7 +204,7 @@ reverse: fn(receiver: String) -> String {
     loop end > 0 {
         start := end - 1
         loop start > 0 && (raw[start].bit_and(U8{192})) == (U8{128}) -> start = start - 1
-        loop i in start..<end -> &out.push(raw[i])
+        loop i in start..<end -> out.push(raw[i])
         end = start
     }
     String.from_bytes(out) ?? panic("reversed scalars are valid UTF-8")
@@ -221,10 +221,10 @@ zfill: fn(receiver: String, width: Int) -> String {
     out := [U8]{}
     body := 0
     if raw.len() > 0 && (raw[0] == (U8{43}) || raw[0] == (U8{45})) {
-        &out.push(raw[0])
+        out.push(raw[0])
         body = 1
     }
-    loop _ in 0..<(width - length) -> &out.push(U8{48})
-    loop i in body..<raw.len() -> &out.push(raw[i])
+    loop _ in 0..<(width - length) -> out.push(U8{48})
+    loop i in body..<raw.len() -> out.push(raw[i])
     String.from_bytes(out) ?? panic("zero-filled text is valid UTF-8")
 }

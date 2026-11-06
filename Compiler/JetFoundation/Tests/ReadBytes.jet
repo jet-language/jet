@@ -25,17 +25,17 @@ read_bytes_require: fn(ok: Bool, message: String) Never! {
     }
 
     out := [U8]{62}
-    foundation_append_read_bytes(&out, source, 0, 0)
-    foundation_append_read_bytes(&out, source, 25, 25)
+    foundation_append_read_bytes(out, source, 0, 0)
+    foundation_append_read_bytes(out, source, 25, 25)
     read_bytes_require(out == ([U8]{62}), "empty ranges do not append")
-    foundation_append_read_bytes(&out, source, 7, 11)
+    foundation_append_read_bytes(out, source, 7, 11)
     read_bytes_require(out == ([U8]{62, 194, 128, 194, 159}), "unchanged original multibyte range")
-    foundation_append_read_bytes(&out, source, 21, 25)
+    foundation_append_read_bytes(out, source, 21, 25)
     read_bytes_require(out == ([U8]{62, 194, 128, 194, 159, 244, 143, 191, 191}), "supplementary scalar copied byte-exact")
     read_bytes_require(source == ([U8]{65, 0, 10, 13, 9, 27, 127, 194, 128, 194, 159, 226, 128, 168, 226, 128, 169, 240, 159, 152, 128, 244, 143, 191, 191}), "source stays unchanged after output append")
     empty: [U8]{}
     read_bytes_require(foundation_read_bytes_len(empty) == 0, "empty extent")
-    foundation_append_read_bytes(&out, empty, 0, 0)
+    foundation_append_read_bytes(out, empty, 0, 0)
     read_bytes_require(out.len() == 9, "empty source appends nothing")
 
     // Preserve the existing diagnostics policy, not public Core's stricter

@@ -100,11 +100,11 @@ impl NativeSession {
         child := native_process.cmd(argv).stdin(.Stream).stdout(.Stream).stderr(.Capture).spawn() ?? return Err(NativeDebugError{detail: "couldn't start LLDB: {err}"})
         session := NativeSession{child: child, output_path: output_path, output_read: 0, finished: false}
         setup := NATIVE_DEBUG_SETUP.copy()
-        &setup.push("settings set target.output-path {native_debug_quote(output_path)}")
-        &setup.push("settings set target.error-path {native_debug_quote(output_path)}")
-        loaded: &session.run_commands(setup) ?? return Err(err)
+        setup.push("settings set target.output-path {native_debug_quote(output_path)}")
+        setup.push("settings set target.error-path {native_debug_quote(output_path)}")
+        loaded: session.run_commands(setup) ?? return Err(err)
         if loaded.contains("error:") {
-            &session.close()
+            session.close()
             return Err(NativeDebugError{detail: "LLDB refused the program: {native_debug_first_error(loaded)}"})
         }
         Ok(session)
@@ -119,7 +119,7 @@ impl NativeSession {
         lines := [String]{}
         loop line in self.child.stdout.lines() {
             if line == NATIVE_DEBUG_SENTINEL -> return Ok(lines.join("\n"))
-            &lines.push(line)
+            lines.push(line)
         }
         self.finished = true
         Err(NativeDebugError{detail: "LLDB exited during `{commands.join("; ")}`"})
@@ -129,32 +129,32 @@ impl NativeSession {
     // line table names it): its number, or None when no code is on that line.
     break_at: fn(&self, file: String, line: Int) -> Int? NativeDebugError! {
         if !native_debug_control_free(file) -> return Err(NativeDebugError{detail: "the breakpoint path contains a control character"})
-        &self.set_breakpoint("breakpoint set -f {native_debug_quote(file)} -l {line}")
+        self.set_breakpoint("breakpoint set -f {native_debug_quote(file)} -l {line}")
     }
 
     // A breakpoint at the start of the Jet function `function`.
     break_in: fn(&self, function: String) -> Int? NativeDebugError! {
         if !native_debug_control_free(function) -> return Err(NativeDebugError{detail: "the function name contains a control character"})
-        &self.set_breakpoint("breakpoint set -n {native_debug_quote(function)}")
+        self.set_breakpoint("breakpoint set -n {native_debug_quote(function)}")
     }
 
     // A breakpoint that resolves to no code is removed, not left pending.
     set_breakpoint: fn(&self, command: String) -> Int? NativeDebugError! {
-        output: &self.run_commands([String]{command}) ?? return Err(err)
+        output: self.run_commands([String]{command}) ?? return Err(err)
         number: native_debug_breakpoint_number(output) ?? return Err(NativeDebugError{detail: "LLDB set no breakpoint: {native_debug_first_error(output)}"})
         if native_debug_breakpoint_resolved(output) -> return Ok(Val(number))
-        &self.delete_breakpoint(number) ?? return Err(err)
+        self.delete_breakpoint(number) ?? return Err(err)
         Ok(None)
     }
 
     delete_breakpoint: fn(&self, number: Int) NativeDebugError! {
-        _: &self.run_commands([String]{"breakpoint delete {number}"}) ?? return Err(err)
+        _: self.run_commands([String]{"breakpoint delete {number}"}) ?? return Err(err)
         Ok()
     }
 
     // Remove every breakpoint.
     clear_breakpoints: fn(&self) NativeDebugError! {
-        _: &self.run_commands([String]{"breakpoint delete"}) ?? return Err(err)
+        _: self.run_commands([String]{"breakpoint delete"}) ?? return Err(err)
         Ok()
     }
 
@@ -163,26 +163,26 @@ impl NativeSession {
         quoted := [String]{}
         loop arg in args {
             if !native_debug_control_free(arg) -> return Err(NativeDebugError{detail: "a program argument contains a control character"})
-            &quoted.push(native_debug_quote(arg))
+            quoted.push(native_debug_quote(arg))
         }
         command: if quoted.len() == 0 -> "process launch" else -> "process launch -- {quoted.join(" ")}"
-        &self.resume(command)
+        self.resume(command)
     }
 
-    continue_run: fn(&self) -> NativeStop NativeDebugError! { &self.resume("process continue") }
+    continue_run: fn(&self) -> NativeStop NativeDebugError! { self.resume("process continue") }
 
     // The next line, entering calls.
-    step_in: fn(&self) -> NativeStop NativeDebugError! { &self.resume("thread step-in") }
+    step_in: fn(&self) -> NativeStop NativeDebugError! { self.resume("thread step-in") }
 
     // The next line of this function, running calls to their end.
-    step_over: fn(&self) -> NativeStop NativeDebugError! { &self.resume("thread step-over") }
+    step_over: fn(&self) -> NativeStop NativeDebugError! { self.resume("thread step-over") }
 
     // Run to the end of this function, stopping in its caller.
-    step_out: fn(&self) -> NativeStop NativeDebugError! { &self.resume("thread step-out") }
+    step_out: fn(&self) -> NativeStop NativeDebugError! { self.resume("thread step-out") }
 
     resume: fn(&self, command: String) -> NativeStop NativeDebugError! {
         if self.finished -> return Err(NativeDebugError{detail: "the program has already finished"})
-        output: &self.run_commands([String]{command}) ?? return Err(err)
+        output: self.run_commands([String]{command}) ?? return Err(err)
         stop: native_debug_parse_stop(output) ?? return Err(NativeDebugError{detail: "LLDB reported no stop for `{command}`: {native_debug_first_error(output)}"})
         if stop.kind != NativeStopKind.Paused -> self.finished = true
         Ok(stop)
@@ -190,23 +190,23 @@ impl NativeSession {
 
     // The selected thread's frames, innermost first.
     backtrace: fn(&self) -> [NativeFrame] NativeDebugError! {
-        output: &self.run_commands([String]{"thread backtrace"}) ?? return Err(err)
+        output: self.run_commands([String]{"thread backtrace"}) ?? return Err(err)
         frames := [NativeFrame]{}
         loop line in output.lines() {
-            if native_debug_parse_frame(line) == .Val(frame) -> &frames.push(frame)
+            if native_debug_parse_frame(line) == .Val(frame) -> frames.push(frame)
         }
         Ok(frames)
     }
 
     // The selected frame's parameters and locals.
     locals: fn(&self) -> [NativeLocal] NativeDebugError! {
-        output: &self.run_commands([String]{"frame variable"}) ?? return Err(err)
+        output: self.run_commands([String]{"frame variable"}) ?? return Err(err)
         Ok(native_debug_parse_locals(output))
     }
 
     // Select frame `index` of the current thread (0 is innermost).
     select_frame: fn(&self, index: Int) -> Bool NativeDebugError! {
-        output: &self.run_commands([String]{"frame select {index}"}) ?? return Err(err)
+        output: self.run_commands([String]{"frame select {index}"}) ?? return Err(err)
         Ok(!output.contains("error:"))
     }
 
@@ -273,14 +273,14 @@ impl NativeSession {
     // whose text is `lines`. None when the program has no `run`.
     open: fn(&self, file: String, lines: [String]) -> NativeDebugStep? NativeDebugError! {
         start := -1
-        if &self.break_in("run") == {
+        if self.break_in("run") == {
             .Ok(placed) -> start = placed ?? -1
             .Err(failure) -> return Err(failure)
         }
         if start < 0 -> return Ok(None)
-        first: &self.launch([String]{}) ?? return Err(err)
-        &self.delete_breakpoint(start) ?? return Err(err)
-        text: &self.report(first, file, lines) ?? return Err(err)
+        first: self.launch([String]{}) ?? return Err(err)
+        self.delete_breakpoint(start) ?? return Err(err)
+        text: self.report(first, file, lines) ?? return Err(err)
         Ok(Val(NativeDebugStep{text: text, stop: first}))
     }
 
@@ -293,15 +293,15 @@ impl NativeSession {
         text := ""
         if word == {
             "s" | "step" | "n" | "next" | "c" | "continue" | "f" | "finish" -> {
-                moved: &self.advance(word) ?? return Err(err)
-                text = &self.report(moved, file, lines) ?? return Err(err)
+                moved: self.advance(word) ?? return Err(err)
+                text = self.report(moved, file, lines) ?? return Err(err)
                 return Ok(NativeDebugStep{text: text, stop: moved})
             }
             "b" | "break" -> {
                 at: Int.parse(operand) ?? -1
                 placed := -1
                 if at >= 1 {
-                    if &self.break_at(file, at) == {
+                    if self.break_at(file, at) == {
                         .Ok(found) -> placed = found ?? -1
                         .Err(failure) -> return Err(failure)
                     }
@@ -313,15 +313,15 @@ impl NativeSession {
                 }
             }
             "locals" -> {
-                locals: &self.locals() ?? return Err(err)
+                locals: self.locals() ?? return Err(err)
                 text = "{native_debug_locals_line(locals)}\n"
             }
             "p" | "print" -> {
-                locals: &self.locals() ?? return Err(err)
+                locals: self.locals() ?? return Err(err)
                 text = "{native_debug_print(locals, operand)}\n"
             }
             "bt" | "backtrace" -> {
-                frames: &self.backtrace() ?? return Err(err)
+                frames: self.backtrace() ?? return Err(err)
                 text = native_debug_backtrace(frames)
             }
             "h" | "help" -> text = "{NATIVE_DEBUG_HELP}\n"
@@ -336,27 +336,27 @@ impl NativeSession {
     // no Jet frame is left to return to.
     advance: fn(&self, word: String) -> NativeStop NativeDebugError! {
         stop := if word == {
-            "s" | "step" -> &self.step_in() ?? return Err(err)
-            "n" | "next" -> &self.step_over() ?? return Err(err)
-            "f" | "finish" -> &self.step_out() ?? return Err(err)
-            else -> &self.continue_run() ?? return Err(err)
+            "s" | "step" -> self.step_in() ?? return Err(err)
+            "n" | "next" -> self.step_over() ?? return Err(err)
+            "f" | "finish" -> self.step_out() ?? return Err(err)
+            else -> self.continue_run() ?? return Err(err)
         }
         depth := 0
         loop stop.kind == NativeStopKind.Paused && !native_debug_stop_in_jet(stop.frame) {
-            frames: &self.backtrace() ?? return Err(err)
+            frames: self.backtrace() ?? return Err(err)
             caller := false
             loop (k, frame) in frames {
                 if k > 0 && native_debug_jet_frame(frame) -> caller = true
             }
             depth += 1
-            stop = if caller && depth <= NATIVE_DEBUG_RUNTIME_DEPTH -> &self.step_out() ?? return Err(err) else -> &self.continue_run() ?? return Err(err)
+            stop = if caller && depth <= NATIVE_DEBUG_RUNTIME_DEPTH -> self.step_out() ?? return Err(err) else -> self.continue_run() ?? return Err(err)
         }
         Ok(stop)
     }
 
     // The program's new output, then where `stop` left it.
     report: fn(&self, stop: NativeStop, file: String, lines: [String]) -> String NativeDebugError! {
-        text := &self.take_output()
+        text := self.take_output()
         if stop.kind == {
             .Exited -> text = "{text}{if stop.code == 0 -> "program finished" else -> "program finished with exit status {stop.code}"}\n"
             .Signaled -> text = "{text}program stopped by {stop.reason}\n"
@@ -364,7 +364,7 @@ impl NativeSession {
                 frame: stop.frame ?? NativeFrame{function: "?", file: "", line: 0}
                 if stop.reason.starts_with("breakpoint") -> text = "{text}breakpoint hit  {frame.file}:{frame.line}  in {frame.function}()\n"
                 source: if frame.file == file && frame.line >= 1 && frame.line <= lines.len() -> lines[frame.line - 1] else -> ""
-                locals: &self.locals() ?? return Err(err)
+                locals: self.locals() ?? return Err(err)
                 text = "{text}{frame.line} | {source}        <- here\n{native_debug_locals_line(locals)}\n"
             }
         }
@@ -375,16 +375,16 @@ impl NativeSession {
     // locals, and the Jet call stack outermost first. None when no Jet frame
     // is on the stack.
     snapshot: fn(&self) -> DebugSnapshot? NativeDebugError! {
-        frames: &self.backtrace() ?? return Err(err)
+        frames: self.backtrace() ?? return Err(err)
         stack := [FrameSnapshot]{}
         loop frame in frames {
-            if native_debug_jet_frame(frame) -> &stack.insert(0, FrameSnapshot{function: frame.function, line: frame.line})
+            if native_debug_jet_frame(frame) -> stack.insert(0, FrameSnapshot{function: frame.function, line: frame.line})
         }
         if stack.len() == 0 -> return Ok(None)
         top: stack[stack.len() - 1]
         values := [ValueSnapshot]{}
-        locals: &self.locals() ?? return Err(err)
-        loop local in locals -> &values.push(ValueSnapshot{name: local.name, type_name: local.type_name, value: local.value})
+        locals: self.locals() ?? return Err(err)
+        loop local in locals -> values.push(ValueSnapshot{name: local.name, type_name: local.type_name, value: local.value})
         Ok(Val(DebugSnapshot{function: top.function, line: top.line, locals: values, call_stack: stack}))
     }
 }
@@ -402,9 +402,9 @@ native_debug_jet_frame: fn(frame: NativeFrame) -> Bool Never! {
 native_debug_locals_line: fn(locals: [NativeLocal]) -> String Never! {
     if locals.len() == 0 -> return "locals:  (none)"
     sorted := locals.copy()
-    &sorted.sort_by((left: NativeLocal, right: NativeLocal) -> left.name <=> right.name)
+    sorted.sort_by((left: NativeLocal, right: NativeLocal) -> left.name <=> right.name)
     shown := [String]{}
-    loop local in sorted -> &shown.push("{local.name} = {local.value}")
+    loop local in sorted -> shown.push("{local.name} = {local.value}")
     "locals:  {shown.join("   ")}"
 }
 
@@ -528,7 +528,7 @@ native_debug_parse_locals: fn(output: String) -> [NativeLocal] Never! {
         raw: rest.after(" = ").trim()
         if name == "" -> next
         type_name: native_debug_jet_type(native_type)
-        &locals.push(NativeLocal{name: name.copy(), type_name: type_name, value: native_debug_jet_value(type_name, raw)})
+        locals.push(NativeLocal{name: name.copy(), type_name: type_name, value: native_debug_jet_value(type_name, raw)})
     }
     locals
 }

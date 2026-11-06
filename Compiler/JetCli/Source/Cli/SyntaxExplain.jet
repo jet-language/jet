@@ -82,16 +82,16 @@ jet_cli_rule_argument_declarations: fn(signature: TAppliedRuleSignature) -> Stri
         if module_row.module_name == "core.compiler.lang" -> menus = module_row.members
     }
     named := [String]{}
-    loop param in signature.params -> &named.push(param.source_type)
-    if signature.variadic_source_type == .Val(source_type) -> &named.push(source_type)
+    loop param in signature.params -> named.push(param.source_type)
+    if signature.variadic_source_type == .Val(source_type) -> named.push(source_type)
     declarations := [String]{}
     loop name in named {
-        if menus.contains(name) -> &declarations.push("`core.compiler.lang.{name}`")
+        if menus.contains(name) -> declarations.push("`core.compiler.lang.{name}`")
     }
-    &declarations.sort()
+    declarations.sort()
     unique := [String]{}
     loop declaration in declarations {
-        if unique.len() == 0 || unique[unique.len() - 1] != declaration -> &unique.push(declaration)
+        if unique.len() == 0 || unique[unique.len() - 1] != declaration -> unique.push(declaration)
     }
     if unique.len() == 0 -> return ""
     " Argument declarations: {unique.join(", ")}."

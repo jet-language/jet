@@ -29,11 +29,11 @@ JET_CLI_RUNTIME_WEB_RECEIPT_FILE: "jet_runtime.wasm.tsv"
 // (jet_cli_build_result). The IR is the native route's (jet_cli_native_program):
 // every fault, a web selection finding among them, is one ICE row, all
 // reported at once with exit 101.
-jet_cli_build_web: fn(file: String, color: Bool, options: BuildOptions, result: JetDriverCompileResult, inputs: ^JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot) -[Env, FS]> JetDriverVerbOutput Never! {
+jet_cli_build_web: fn(file: String, color: Bool, options: BuildOptions, result: JetDriverCompileResult, inputs: &&JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot) -[Env, FS]> JetDriverVerbOutput Never! {
     if result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
     if !result.complete -> return jet_cli_ice("the Jet compiler stopped before finishing `{file}`")
     if jet_cli_build_option_gate_refusal(snapshot.roots[0].canonical_path, options, color) == .Val(refused) -> return refused
-    checked := ^inputs ?? return jet_cli_ice("the Jet compiler finished `{file}` without its checked functions")
+    checked := inputs.move() ?? return jet_cli_ice("the Jet compiler finished `{file}` without its checked functions")
     if checked.entry_key == None -> return jet_cli_native_report(file, "build", JetCLINativeFailure.NoEntry, color)
     runtime_dir: jet_cli_runtime_dir()
     runtime: jet_cli_runtime_exports(runtime_dir)
@@ -43,12 +43,12 @@ jet_cli_build_web: fn(file: String, color: Bool, options: BuildOptions, result: 
     receipt_path: "{runtime_dir}/{runtime.key}/{JET_CLI_RUNTIME_WEB_RECEIPT_FILE}"
     receipt: cli_files.read(receipt_path) ?? return jet_cli_native_report(file, "build", JetCLINativeFailure.Runtime{what: "couldn't read the Jet runtime's web receipt {receipt_path}: {err}"}, color)
     census := [JetDriverIceRow]{}
-    built := jet_cli_native_program(result, ^checked, None, options, runtime, &census, file, jet_driver_entry_root_path(snapshot))
+    built := jet_cli_native_program(result, checked, None, options, runtime, census, file, jet_driver_entry_root_path(snapshot))
     if built.failure == .Val(failure) -> return jet_cli_native_report(file, "build", failure, color)
     if result.trace_sink == .Val(sink) -> sink.begin("web.module", "", -1, -1)
-    web := web_program(^built.program, receipt)
+    web := web_program(built.program.move(), receipt)
     if result.trace_sink == .Val(sink) -> sink.end("web.module", web.bytes.len())
-    loop error in web.errors -> jet_driver_ice_record(&census, "-", "web", "select", error)
+    loop error in web.errors -> jet_driver_ice_record(census, "-", "web", "select", error)
     if census.len() > 0 -> return jet_cli_ice_census(file, census)
     build_dir: jet_cli_output_dir_path(snapshot, options)
     if jet_cli_build_dir(build_dir, color) == .Val(refused) -> return refused

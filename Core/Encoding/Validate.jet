@@ -17,14 +17,14 @@ Validate: struct<T> {
         Validate<T>{value: value.copy(), errors: [FieldError]{}}
     }
 
-    check: fn(^self, holds: Bool, at: String, reason: String) -> Validate<T> Never! {
+    check: fn(&&self, holds: Bool, at: String, reason: String) -> Validate<T> Never! {
         if holds -> return self
         errors := self.errors
-        &errors.push(FieldError{path: at, reason: reason})
+        errors.push(FieldError{path: at, reason: reason})
         Validate<T>{value: self.value, errors: errors}
     }
 
-    finish: fn(^self) -> T [FieldError]! {
+    finish: fn(&&self) -> T [FieldError]! {
         if !self.errors.is_empty() -> return Err(self.errors)
         self.value
     }

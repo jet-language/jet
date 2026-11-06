@@ -81,8 +81,8 @@ trust_json_parse_lenient: fn(input: String) -> TrustJSONDocument Never! {
         if content_end > start && Int.from_u8(raw[content_end - 1]) == TRUST_CARRIAGE_RETURN -> content_end -= 1
         content: pkg_bytes_text(raw, start, content_end)
         if {
-            trust_json_is_provider_noise(content) -> &noise.push(content)
-            else -> loop index in start..<end -> &kept.push(raw[index])
+            trust_json_is_provider_noise(content) -> noise.push(content)
+            else -> loop index in start..<end -> kept.push(raw[index])
         }
         start = end
     }
@@ -95,7 +95,7 @@ trust_json_parse_lenient: fn(input: String) -> TrustJSONDocument Never! {
 trust_json_with_noise: fn(error: String, noise: [String]) -> String Never! {
     if noise.len() == 0 -> return error.copy()
     lines := [String]{"{error}\nfiltered provider noise:"}
-    loop line in noise -> &lines.push("\n  {line}")
+    loop line in noise -> lines.push("\n  {line}")
     lines.join("")
 }
 
@@ -201,7 +201,7 @@ trust_json_quote: fn(text: String) -> String Never! {
 
 trust_json_texts: fn(values: [String]) -> Dyn Never! {
     items := [Dyn]{}
-    loop value in values -> &items.push(Dyn.Text(value.copy()))
+    loop value in values -> items.push(Dyn.Text(value.copy()))
     Dyn.Array(items)
 }
 
@@ -222,31 +222,31 @@ trust_flake_find_node: fn(nodes: [FlakeLockNode], name: String) -> FlakeLockNode
 // Nodes in Rust's derived order; names are unique by the time they sort.
 trust_flake_sorted_lock_nodes: fn(nodes: [FlakeLockNode]) -> [FlakeLockNode] Never! {
     sorted := nodes
-    &sorted.sort_by(node -> node.locked)
-    &sorted.sort_by(node -> node.original)
-    &sorted.sort_by(node -> node.name)
+    sorted.sort_by(node -> node.locked)
+    sorted.sort_by(node -> node.original)
+    sorted.sort_by(node -> node.name)
     sorted
 }
 
 trust_flake_sorted_edges: fn(edges: [FlakeLockEdge]) -> [FlakeLockEdge] Never! {
     sorted := edges
-    &sorted.sort_by(edge -> edge.target)
-    &sorted.sort_by(edge -> edge.name)
+    sorted.sort_by(edge -> edge.target)
+    sorted.sort_by(edge -> edge.name)
     sorted
 }
 
 trust_flake_sorted_registries: fn(entries: [FlakeRegistryEntry]) -> [FlakeRegistryEntry] Never! {
     sorted := entries
-    &sorted.sort_by(entry -> entry.locked)
-    &sorted.sort_by(entry -> entry.original)
-    &sorted.sort_by(entry -> entry.node)
-    &sorted.sort_by(entry -> entry.alias)
+    sorted.sort_by(entry -> entry.locked)
+    sorted.sort_by(entry -> entry.original)
+    sorted.sort_by(entry -> entry.node)
+    sorted.sort_by(entry -> entry.alias)
     sorted
 }
 
 trust_sorted_keys: fn(object: [String: Dyn]) -> [String] Never! {
     keys := object.keys().to_list()
-    &keys.sort()
+    keys.sort()
     keys
 }
 
@@ -288,7 +288,7 @@ trust_flake_resolve_follow_path: fn(segments: [Dyn], nodes: [String: Dyn], path:
         inputs: trust_json_object_field(node, "inputs") ?? return Err(TrustError.IO("flake.lock follow path node `{current}` has no inputs map"))
         target: inputs.get(segment) ?? return Err(TrustError.IO("flake.lock follow path `{segment}` is missing from node `{current}`"))
         deeper := path
-        &deeper.push(step)
+        deeper.push(step)
         resolved: trust_flake_resolve_reference(target, nodes, deeper, current)
         current = resolved ?? return Err(TrustError.IO("flake.lock follow path `{segment}` resolves to an empty node reference"))
     }
@@ -425,7 +425,7 @@ trust_flake_check_semantic_root_inputs: fn(graph: FlakeGraph) TrustError! {
         }
     }
     source_names := [String]{}
-    loop input in graph.inputs -> &source_names.push(input.name)
+    loop input in graph.inputs -> source_names.push(input.name)
     loop name in trust_sorted_keys(root_inputs) {
         if !source_names.contains(name) -> return Err(TrustError.StaleSemanticLock("root input `{name}` is not declared by flake.nix"))
     }
@@ -463,7 +463,7 @@ trust_flake_read_lock_node: fn(name: String, value: Dyn) -> FlakeLockNode TrustE
             edges: trust_json_object(declared) ?? return Err(TrustError.IO("flake.lock node `{name}` inputs are invalid: {TRUST_JSON_NOT_OBJECT}"))
             loop edge in edges {
                 target: trust_json_canonical(edge.value) ?? return Err(err)
-                &inputs.push(FlakeLockEdge{name: edge.key, target})
+                inputs.push(FlakeLockEdge{name: edge.key, target})
             }
         }
         .None -> {}
@@ -476,7 +476,7 @@ trust_flake_read_lock_node: fn(name: String, value: Dyn) -> FlakeLockNode TrustE
 // Rust `flake_lock_node_json`.
 trust_flake_lock_node_json: fn(node: FlakeLockNode) -> String Never! {
     edges := [String]{}
-    loop edge in node.inputs -> &edges.push("{{\"name\":{trust_json_quote(edge.name)},\"target\":{edge.target}}}")
+    loop edge in node.inputs -> edges.push("{{\"name\":{trust_json_quote(edge.name)},\"target\":{edge.target}}}")
     "{{\"inputs\":[{edges.join(",")}],\"locked\":{node.locked},\"name\":{trust_json_quote(node.name)},\"original\":{node.original}}}"
 }
 
@@ -509,7 +509,7 @@ trust_flake_parse_lock_node: fn(raw: String) -> FlakeLockNode TrustError! {
         name: trust_json_string(edge_name) ?? return Err(TrustError.InvalidAssignment(TRUST_JSON_NOT_STRING))
         target: edge.get("target") ?? return Err(TrustError.InvalidAssignment("missing lock edge target"))
         encoded: trust_json_canonical(target) ?? return Err(err)
-        &inputs.push(FlakeLockEdge{name, target: encoded})
+        inputs.push(FlakeLockEdge{name, target: encoded})
     }
     original: object.get("original") ?? return Err(TrustError.InvalidAssignment("missing lock node original"))
     locked: object.get("locked") ?? return Err(TrustError.InvalidAssignment("missing lock node locked"))
@@ -567,7 +567,7 @@ trust_flake_composition_strings: fn(object: [String: Dyn], key: String) -> [Stri
     values := [String]{}
     loop item in items {
         value: trust_json_string(item) ?? return Err(TrustError.InvalidAssignment(TRUST_JSON_NOT_STRING))
-        &values.push(value)
+        values.push(value)
     }
     Ok(values)
 }

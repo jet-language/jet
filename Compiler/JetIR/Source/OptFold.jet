@@ -26,7 +26,7 @@ ir_opt_fold_identical: fn(m: &IRModule, functions: &[IRFunction]) -> Int Never! 
     loop f in functions {
         candidate: f.source_file == "" && f.asm == None && f.op.len() > 0
         if candidate && lowest < 0 -> lowest = first.len()
-        &first.push(if candidate -> 0 else -> -1)
+        first.push(if candidate -> 0 else -> -1)
     }
     loop id in 0..<count {
         if first[id] == 0 -> first[id] = lowest
@@ -38,13 +38,13 @@ ir_opt_fold_identical: fn(m: &IRModule, functions: &[IRFunction]) -> Int Never! 
         split := [Int]{}
         loop id in 0..<count {
             if first[id] < 0 {
-                &split.push(-1)
+                split.push(-1)
                 next
             }
             key: "{first[id]}|{ir_opt_fold_key(m, functions[id], rows, first)}"
             known: seen.get(key) ?? -1
             if known < 0 -> seen[key] = id
-            &split.push(if known < 0 -> id else -> known)
+            split.push(if known < 0 -> id else -> known)
         }
         first = split
         if seen.len() == classes -> break
@@ -55,7 +55,7 @@ ir_opt_fold_identical: fn(m: &IRModule, functions: &[IRFunction]) -> Int Never! 
         if first[id] >= 0 && first[id] != id -> folded += 1
     }
     if folded == 0 -> return 0
-    loop id in 0..<count -> ir_opt_fold_calls(&functions[id], first)
+    loop id in 0..<count -> ir_opt_fold_calls(functions[id], first)
     loop row in 0..<m.types.len() {
         m.types[row].drop = ir_opt_fold_name(m, functions, m.types[row].drop, first)
         m.types[row].clone = ir_opt_fold_name(m, functions, m.types[row].clone, first)
@@ -99,7 +99,7 @@ ir_opt_fold_rows: fn(m: IRModule) -> [Int] Never! {
             known = layouts.len()
             layouts[layout] = known
         }
-        &rows.push(known)
+        rows.push(known)
     }
     rows
 }
@@ -141,13 +141,13 @@ ir_opt_fold_key: fn(m: IRModule, f: IRFunction, rows: [Int], first: [Int]) -> St
             .Local -> "l"
             .Temp -> "t"
         }
-        &parts.push("{kind}{rows[f.slot_type[slot]]}")
+        parts.push("{kind}{rows[f.slot_type[slot]]}")
     }
     loop at in 0..<f.op.len() {
         a: if f.op[at] == .Call -> ir_opt_fold_callee(first, f.a[at]) else -> f.a[at]
-        &parts.push("{ir_op_name(f.op[at])} {f.dst[at]} {a} {f.b[at]} {f.c[at]}")
-        if f.op[at] == .Drop && a >= 0 -> &parts.push(ir_opt_fold_routine(m, m.types[f.slot_type[a]].drop, first))
+        parts.push("{ir_op_name(f.op[at])} {f.dst[at]} {a} {f.b[at]} {f.c[at]}")
+        if f.op[at] == .Drop && a >= 0 -> parts.push(ir_opt_fold_routine(m, m.types[f.slot_type[a]].drop, first))
     }
-    loop arg in f.args -> &parts.push("{arg}")
+    loop arg in f.args -> parts.push("{arg}")
     parts.join("|")
 }

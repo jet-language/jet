@@ -22,13 +22,13 @@ PKG_NO_WORKSPACE_SOURCE: "no-workspace-source"
 // Reuse the session's declaration cache across lock reads and discovery scans.
 pkg_workspace_lock_load: fn(cache: &WorkspaceDeclarationCache, workspace_root: String) -[FS, Env]> WorkspacePlan? {
     resolver: AuthorityResolver.open(workspace_root) ?? return None
-    pkg_workspace_lock_load_with_resolver(&cache, resolver)
+    pkg_workspace_lock_load_with_resolver(cache, resolver)
 }
 
 // Workspace facts through an already-open authority root and shared cache.
 pkg_workspace_lock_load_with_resolver: fn(cache: &WorkspaceDeclarationCache, resolver: AuthorityResolver) -[FS, Env]> WorkspacePlan? {
     lock_file: resolver.checked_file(PKG_WORKSPACE_LOCK) ?? return None
-    pkg_workspace_lock_load_checked_file(&cache, resolver, lock_file)
+    pkg_workspace_lock_load_checked_file(cache, resolver, lock_file)
 }
 
 // Consume one checked lock file without reopening it by pathname. Every
@@ -40,7 +40,7 @@ pkg_workspace_lock_load_checked_file: fn(cache: &WorkspaceDeclarationCache, reso
     lock: pkg_lock_parse(raw) ?? return None
     resolver.revalidate_file(lock_file) ?? return None
     recorded_digest: lock.workspace_source_digest ?? return None
-    source: if resolver.resolve_workspace_source(&cache) == {
+    source: if resolver.resolve_workspace_source(cache) == {
         .Ok(found) -> found
         .Err(_) -> { return None }
     }
@@ -80,9 +80,9 @@ pkg_workspace_lock_load_checked_file: fn(cache: &WorkspaceDeclarationCache, reso
             if package.name != member.name || package.members.len() > 0 -> return None
             if member.package_digest == "" || package.semantic_digest() != member.package_digest -> return None
             if physical_paths.contains(physical_path) || names.contains(member.name) -> return None
-            &physical_paths.push(physical_path)
-            &names.push(member.name)
-            &checked_members.push(^checked.member)
+            physical_paths.push(physical_path)
+            names.push(member.name)
+            checked_members.push(checked.member.move())
             resolver.revalidate_source(present) ?? return None
         }
         loop checked_member in checked_members {
@@ -93,7 +93,7 @@ pkg_workspace_lock_load_checked_file: fn(cache: &WorkspaceDeclarationCache, reso
     plan_source_digest: if lock.workspace_members.len() > 0 -> lock.workspace_members[0].source_digest else -> source_digest
     members := [WorkspacePlanMember]{}
     if is_index {
-        loop member in lock.workspace_members -> &members.push(WorkspacePlanMember{name: member.name, path: member.path, canonical_path: member.canonical_path})
+        loop member in lock.workspace_members -> members.push(WorkspacePlanMember{name: member.name, path: member.path, canonical_path: member.canonical_path})
     }
     resolver.revalidate_file(lock_file) ?? return None
     Val(WorkspacePlan{members: members, comptime_inputs: lock.comptime_inputs, overlay_policy: lock.workspace_overlay_policy, source_digest: plan_source_digest})

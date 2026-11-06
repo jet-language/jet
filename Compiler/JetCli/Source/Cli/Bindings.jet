@@ -98,12 +98,12 @@ jet_cli_data_bind_finish: fn(job: JetCLIDataBindJob, selected_root: String) -[FS
     }
     command := [String]{"jet", "inspect", "bind", format, input_path}
     if root_type == .Val(name) {
-        &command.push("--type")
-        &command.push(name)
+        command.push("--type")
+        command.push(name)
     }
     if output == .Val(path) {
-        &command.push("-o")
-        &command.push(path)
+        command.push("-o")
+        command.push(path)
     }
     result: pkg_generate_data(format, input_path, job.input, root_type, command.join(" ")) ?? return jet_cli_fail("E3208", "Could not generate {format} bindings from {input_path}.", "{err.message}.", "provide a well-formed {format} schema and rerun `jet inspect bind {format}`.", color, JET_DRIVER_EXIT_USER_ERROR)
     if output == .None {

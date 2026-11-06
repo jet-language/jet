@@ -150,7 +150,7 @@ ScriptRegistryProvider: struct {
 
     plan_downloads: fn(self, verification: &StoreVerification, specs: [RefSpec], table: SourceTable, ctx: ProviderCtx) -> DownloadPlan ProviderError! {
         plan := DownloadPlan.empty()
-        loop spec in specs -> &plan.add_item(PlanItem{package: spec.raw, state: PlanState.New, download_bytes: None, disk_bytes: None})
+        loop spec in specs -> plan.add_item(PlanItem{package: spec.raw, state: PlanState.New, download_bytes: None, disk_bytes: None})
         Ok(plan)
     }
 
@@ -177,7 +177,7 @@ provider_script_realize: fn(kind: ScriptRegistryKind, spec: RefSpec, ctx: Provid
     fetch_authority: authority.provenance()
     scratch: provider_registry_scratch(ctx.store_dir, kind.label(), "could not create provider scratch")
     guard := RegistryScratch{path: scratch}
-    defer close(^guard)
+    defer close(guard)
     packages: provider_script_resolve_closure(kind, authority, scratch, root_ref.name, root_ref.version, [String: [RegistryPackage]]{})
     artifacts := [RegistryArtifact]{}
     loop package in packages {
@@ -185,7 +185,7 @@ provider_script_realize: fn(kind: ScriptRegistryKind, spec: RefSpec, ctx: Provid
         authority.to_path(package.url, path, scratch)
         bytes: provider_registry_read_bytes(path, "could not read fetched source")
         provider_script_verify_integrity(package, bytes)
-        &artifacts.push(RegistryArtifact{package, path, sha256: pkg_sha256_hex(bytes)})
+        artifacts.push(RegistryArtifact{package, path, sha256: pkg_sha256_hex(bytes)})
     }
     source_hash: provider_script_closure_hash(kind, artifacts)
     if ctx.project_dir == {
@@ -216,14 +216,14 @@ provider_script_realize: fn(kind: ScriptRegistryKind, spec: RefSpec, ctx: Provid
 
     envelope: Envelope.for_output(out_dir, spec.raw, kind.recipe())
     dependencies := [String]{}
-    loop index in 0..<(artifacts.len() - 1) -> &dependencies.push("{artifacts[index].package.name}#version={artifacts[index].package.version}")
+    loop index in 0..<(artifacts.len() - 1) -> dependencies.push("{artifacts[index].package.name}#version={artifacts[index].package.version}")
     if ctx.project_dir == {
         .Val(project) -> pkg_lock_record_registry_realization(project, kind.label(), root.package.name, root.package.version, spec.raw, out_dir, source_hash, repository, fetch_authority, dependencies, provider_registry_lock_envelope(envelope))
         .None -> {}
     }
     identity: provider_cache_identity(source_hash, kind.recipe(), ctx, fetch_authority)
     objects := [RegistrySourceObject]{}
-    loop artifact in artifacts -> &objects.push(RegistrySourceObject{name: artifact.package.name, sha256: artifact.sha256, file_name: files.basename(artifact.path)})
+    loop artifact in artifacts -> objects.push(RegistrySourceObject{name: artifact.package.name, sha256: artifact.sha256, file_name: files.basename(artifact.path)})
     edges: provider_registry_dependency_objects(root.package.name, objects)
     facts := edges.facts
     facts["repository"] = repository
@@ -275,10 +275,10 @@ provider_script_resolve_closure: fn(kind: ScriptRegistryKind, authority: Registr
     solver := ScriptRegistrySolver{kind, authority, scratch, candidates}
     constraints := [String: [String]]{}
     constraints[root] = [String]{"={version}"}
-    solution: &solver.solve(constraints, [String: RegistryPackage]{})
+    solution: solver.solve(constraints, [String: RegistryPackage]{})
     selected: solution ?? return Err(RegistryError.Reason("no complete dependency solution exists for `{root}` {version}"))
     walk := ScriptRegistryOrderWalk{selected, active: [String]{}, done: [String]{}, out: [RegistryPackage]{}}
-    &walk.visit(root)
+    walk.visit(root)
     Ok(walk.out)
 }
 
@@ -297,7 +297,7 @@ ScriptRegistrySolver: struct {
             if !provider_script_meets_all(self.kind, entry.value.version, requirements) -> return Ok(None)
         }
         names := constraints.keys().to_list()
-        &names.sort()
+        names.sort()
         pending := ""
         found := false
         loop name in names {
@@ -319,12 +319,12 @@ ScriptRegistrySolver: struct {
             next_constraints := constraints
             loop dependency in package.dependencies {
                 listed := next_constraints.get(dependency.name) ?? [String]{}
-                &listed.push(dependency.requirement)
+                listed.push(dependency.requirement)
                 next_constraints[dependency.name] = listed
             }
             next_selected := selected
             next_selected[pending] = package
-            solution: &self.solve(next_constraints, next_selected)
+            solution: self.solve(next_constraints, next_selected)
             if solution != None -> return Ok(solution)
         }
         Ok(None)
@@ -334,7 +334,7 @@ ScriptRegistrySolver: struct {
 // Candidate releases in solver order: newest version first, then by URL.
 provider_script_sorted_candidates: fn(packages: [RegistryPackage]) -> [RegistryPackage] Never! {
     sorted := packages
-    &sorted.sort_by((left: RegistryPackage, right: RegistryPackage) -> provider_script_compare_versions(right.version, left.version).then(left.url <=> right.url))
+    sorted.sort_by((left: RegistryPackage, right: RegistryPackage) -> provider_script_compare_versions(right.version, left.version).then(left.url <=> right.url))
     sorted
 }
 
@@ -355,12 +355,12 @@ ScriptRegistryOrderWalk: struct {
     visit: fn(&self, name: String) RegistryError! {
         if self.done.contains(name) -> return
         if self.active.contains(name) -> return Err(RegistryError.Reason("dependency cycle includes `{name}`"))
-        &self.active.push(name)
+        self.active.push(name)
         package: self.selected.get(name) ?? return Err(RegistryError.Reason("resolved package `{name}` disappeared"))
-        loop dependency in package.dependencies -> &self.visit(dependency.name)
-        _ := &self.active.pop()
-        &self.done.push(name)
-        &self.out.push(package)
+        loop dependency in package.dependencies -> self.visit(dependency.name)
+        _ := self.active.pop()
+        self.done.push(name)
+        self.out.push(package)
     }
 }
 
@@ -395,7 +395,7 @@ provider_script_write_runtime_projection: fn(kind: ScriptRegistryKind, artifacts
 provider_script_reject_tree_features: fn(kind: ScriptRegistryKind, root: String, forbidden: [String]) RegistryError! -[FS]> {
     entries: files.list_dir(root) ?? return Err(RegistryError.Reason("could not inspect installed source: {err}"))
     markers := forbidden
-    loop suffix in kind.native_suffixes() -> &markers.push(suffix)
+    loop suffix in kind.native_suffixes() -> markers.push(suffix)
     loop entry in entries {
         stat: files.stat(entry.path) ?? return Err(RegistryError.Reason("could not inspect installed source: {err}"))
         if stat.is_symlink -> return Err(RegistryError.Reason("installed source contains a symbolic link"))
@@ -449,16 +449,16 @@ provider_script_check_digest: fn(algorithm: String, package: RegistryPackage, ex
 provider_script_closure_hash: fn(kind: ScriptRegistryKind, artifacts: [RegistryArtifact]) -> String Never! {
     values := [String]{}
     loop artifact in artifacts {
-        &values.push(artifact.package.name)
-        &values.push(artifact.package.version)
-        &values.push(artifact.sha256)
+        values.push(artifact.package.name)
+        values.push(artifact.package.version)
+        values.push(artifact.sha256)
     }
     provider_registry_identity_hash("jet-{kind.label()}-source-v1", values)
 }
 
 provider_script_render_provenance: fn(kind: ScriptRegistryKind, repository: String, fetch_authority: String, source_hash: String, artifacts: [RegistryArtifact]) -> String Never! {
     lines := [String]{"schema=jet-{kind.label()}-provider-v1\nrepository={repository}\nfetch_authority={fetch_authority}\nsource_hash={source_hash}\nscripts=disabled\nplugins=disabled\n"}
-    loop artifact in artifacts -> &lines.push("package={artifact.package.name}:{artifact.package.version}:{artifact.sha256}\n")
+    loop artifact in artifacts -> lines.push("package={artifact.package.name}:{artifact.package.version}:{artifact.sha256}\n")
     lines.join("")
 }
 
@@ -481,7 +481,7 @@ provider_script_safe_filename: fn(value: String) -> String Never! {
         text: "{scalar}"
         raw: text.bytes()
         keep: raw.len() == 1 && (provider_registry_is_ascii_alnum(Int.from_u8(raw[0])) || text == "-" || text == "_" || text == ".")
-        &out.push(if keep -> text else -> "-")
+        out.push(if keep -> text else -> "-")
     }
     out.join("")
 }
@@ -503,11 +503,11 @@ provider_script_url_piece: fn(value: String) -> String Never! {
     loop byte in value.bytes() {
         code: Int.from_u8(byte)
         if provider_registry_is_ascii_alnum(code) || code == 45 || code == 95 || code == 46 || code == 126 {
-            &out.push(byte)
+            out.push(byte)
         } else {
-            &out.push(U8{37})
-            &out.push(digits[code >> 4])
-            &out.push(digits[(code).bit_and(15)])
+            out.push(U8{37})
+            out.push(digits[code >> 4])
+            out.push(digits[(code).bit_and(15)])
         }
     }
     pkg_bytes_text(out, 0, out.len())
@@ -756,14 +756,14 @@ provider_script_numeric_parts: fn(version: String) -> [Int]? Never! {
     pieces: provider_registry_split_any(version, ".-+")
     loop piece in pieces {
         value: provider_registry_parse_u64(piece) ?? return None
-        &parts.push(value)
+        parts.push(value)
     }
     Val(parts)
 }
 
 provider_script_join_parts: fn(parts: [Int]) -> String Never! {
     texts := [String]{}
-    loop part in parts -> &texts.push("{part}")
+    loop part in parts -> texts.push("{part}")
     texts.join(".")
 }
 
@@ -793,7 +793,7 @@ provider_script_bump: fn(parts: [Int], index: Int) -> String? Never! {
     if index >= parts.len() -> return None
     bumped := [Int]{}
     loop position in 0..<parts.len() {
-        &bumped.push(if {
+        bumped.push(if {
             position < index -> parts[position]
             position == index -> parts[position] + 1
             else -> 0

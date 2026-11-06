@@ -79,9 +79,9 @@ core.web.forms typed_errors WebFormTyped WebFormErrorState
 core.web.forms typed_focus WebFormTyped,String Result<Unit,WebFormError>
 core.web.forms typed_cancel WebFormTyped Unit
 core.web.forms typed_select_field WebFormTyped,String Result<WebFormFieldState,WebFormError>
-core.web.forms typed_validation_wait ^WebFormValidation Result<Unit,WebFormError>
+core.web.forms typed_validation_wait &&WebFormValidation Result<Unit,WebFormError>
 core.web.forms typed_validation_cancel WebFormValidation Unit
-core.web.forms typed_submission_wait ^WebFormTypedSubmission Result<String,WebFormError>
+core.web.forms typed_submission_wait &&WebFormTypedSubmission Result<String,WebFormError>
 core.web.forms typed_submission_cancel WebFormTypedSubmission Unit
 core.web.table new String,[T] WebTable<T> T
 core.web.table state WebTable<T> WebTableState T
@@ -140,8 +140,8 @@ core.web.store optimistic|patch WebStore<T>,String,[String],fn(;Unit) WebStorePa
 core.web.store patch_generation WebStorePatch<T> Int T
 core.web.store patch_transaction WebStorePatch<T> WebStoreTransaction<T> T
 core.web.store patch_active WebStorePatch<T> Bool T
-core.web.store patch_commit ^WebStorePatch<T> WebStoreTransaction<T> T
-core.web.store patch_rollback ^WebStorePatch<T> T? T
+core.web.store patch_commit &&WebStorePatch<T> WebStoreTransaction<T> T
+core.web.store patch_rollback &&WebStorePatch<T> T? T
 core.web.store back|forward|restore WebStore<T> T? T
 core.web.store jump|scrub WebStore<T>,Int T? T
 core.web.store history WebStore<T> [WebStoreTransaction<T>] T

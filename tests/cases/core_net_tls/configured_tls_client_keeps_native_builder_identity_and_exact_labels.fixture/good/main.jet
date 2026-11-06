@@ -10,5 +10,5 @@ run: fn() -[Net, Time.Wait]> {
     bounded: config.with_version_bounds(min: TLSVersion.TLS13, max: TLSVersion.TLS13) ?? return
     protocols: bounded.with_alpn(["http/1.1"]) ?? return
     tcp: net.tcp_connect("127.0.0.1:1") ?? return
-    _: tls.client(^tcp, server_name: "localhost", config: protocols, deadline: 1s)
+    _: tls.client(tcp, server_name: "localhost", config: protocols, deadline: 1s)
 }

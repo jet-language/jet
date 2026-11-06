@@ -25,10 +25,10 @@ run: fn() {
     limits := data.DataLimits.safe()
     limits.max_groups = 1
     limits.max_output_rows = 10
-    reader := data.csv_reader<Event>(^input, limits) ?? panic("reader")
-    first: stream.next(&reader) ?? panic("next")
+    reader := data.csv_reader<Event>(input, limits) ?? panic("reader")
+    first: stream.next(reader) ?? panic("next")
     print("first: {first.service} {first.latency_ms}")
-    rows: stream.collect(&reader) ?? panic("collect")
+    rows: stream.collect(reader) ?? panic("collect")
     if data.query(rows)
         .group_by(e -> e.service)
         .mean(e -> e.latency_ms)

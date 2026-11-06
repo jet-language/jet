@@ -18,7 +18,7 @@ slow_one: fn() -> Int {
 run: fn() {
     // Join discharges the duty and yields the value.
     joined: task work(5)
-    print(^joined.join() ?? panic("join failed"))
+    print(joined.join() ?? panic("join failed"))
 
     // `all` consumes every handle in the list.
     results: task.all {work(1), work(2), work(3)} ?? panic("task.all failed")
@@ -32,6 +32,6 @@ run: fn() {
 
     // `detach` discharges the duty for fire-and-forget work.
     background: task work(6)
-    ^background.detach()
+    background.detach()
     print("detached")
 }

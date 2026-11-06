@@ -7,7 +7,7 @@ use {
 
 lsp_apply_on_type_edits: fn(src: String, edits: [TextEdit]) -> String Never! {
     ordered := edits.copy()
-    &ordered.sort_by((left: TextEdit, right: TextEdit) -> right.span.start <=> left.span.start)
+    ordered.sort_by((left: TextEdit, right: TextEdit) -> right.span.start <=> left.span.start)
     out := src.copy()
     loop edit in ordered {
         range: lsp_byte_span_to_range(out, edit.span)

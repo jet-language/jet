@@ -48,7 +48,7 @@ provider_script_test_artifact: fn(name: String, version: String, path: String) -
 
 provider_script_test_repeat: fn(text: String, count: Int) -> String Never! {
     parts := [String]{}
-    loop _ in 0..<count -> &parts.push(text)
+    loop _ in 0..<count -> parts.push(text)
     parts.join("")
 }
 
@@ -190,7 +190,7 @@ provider_script_test_cpan_refusal: fn(artifact: RegistryArtifact, out: String, s
 
     cpan: provider_script_test_cpan_search(`{"hits":{"hits":[{"_source":{"distribution":"Jet-App","version":"2.0","download_url":"/Jet-App-2.tar.gz","checksum_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","dependency":[]}},{"_source":{"distribution":"Jet-App","version":"1.0","download_url":"/Jet-App-1.tar.gz","checksum_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","dependency":[]}}]}}`) ?? panic("MetaCPAN search parses")
     versions := [String]{}
-    loop package in cpan -> &versions.push(package.version)
+    loop package in cpan -> versions.push(package.version)
     assert_eq(versions, [String]{"2.0", "1.0"})
     older := false
     loop package in cpan {
@@ -214,10 +214,10 @@ provider_script_test_cpan_refusal: fn(artifact: RegistryArtifact, out: String, s
     authority: provider_script_registry_cache_authority(ScriptRegistryKind.RubyGems, ctx) ?? panic("cache authority loads")
     pkg_lock_record_registry_realization(project, "ruby", "demo", "1.0", spec.raw, "/hangar/demo", provider_script_test_repeat("a", 64), authority.registry(), authority.provenance(), [String]{}, LockEnvelope{})
     assert(provider_validate_cache_authority(spec, table, ctx) == .Ok(_))
-    locked_policy: (provider_cache_expectation(&verification, spec, table, ctx) ?? panic("locked expectation")).identity.policy_fingerprint
+    locked_policy: (provider_cache_expectation(verification, spec, table, ctx) ?? panic("locked expectation")).identity.policy_fingerprint
 
     files.write(manifest, provider_script_test_policy("https://mirror.example.test", "\"dist.example.test\", \"more.example.test\"", "")) ?? panic("policy")
-    changed_policy: (provider_cache_expectation(&verification, spec, table, ctx) ?? panic("changed expectation")).identity.policy_fingerprint
+    changed_policy: (provider_cache_expectation(verification, spec, table, ctx) ?? panic("changed expectation")).identity.policy_fingerprint
     assert(locked_policy != changed_policy)
     assert(provider_validate_cache_authority(spec, table, ctx) == .Err(_))
     files.write(manifest, provider_script_test_policy("https://other.example.test", "\"dist.example.test\"", "")) ?? panic("policy")

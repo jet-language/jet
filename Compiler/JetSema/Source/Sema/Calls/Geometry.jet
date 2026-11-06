@@ -211,7 +211,7 @@ sema_call_geometry_report_transform_chain_mismatch: fn(receiver: Type, method: S
     first: sema_call_geometry_transform_parts(first_type, environment, program) ?? return false
     second: sema_call_geometry_transform_parts(second_type, environment, program) ?? return false
     if type_identity_equal(first.to, second.from) -> return false
-    &diagnostics.push(sema_error(
+    diagnostics.push(sema_error(
         "E2521",
         span,
         "Cannot compose `{type_name(sema_geometry_diagnostic_type(first_type))}` with `{type_name(sema_geometry_diagnostic_type(second_type))}`: `{type_name(first.to)}` does not match `{type_name(second.from)}`.",
@@ -226,7 +226,7 @@ sema_call_geometry_report_method_error: fn(receiver: Type, owner: String, method
     actual_type: if args.len() > 0 -> sema_call_resolved_type(args[0], environment, program) else -> Type.Named{name: "Unknown"}
     expected := type_name(expected_type)
     actual := if args.len() > 0 -> type_name(sema_call_geometry_space(actual_type) ?? actual_type) else -> "<missing>"
-    &diagnostics.push(sema_error(
+    diagnostics.push(sema_error(
         "E2520",
         span,
         "`{owner}.{method}` needs `{expected}` space, got `{actual}`.",
@@ -238,8 +238,8 @@ sema_call_geometry_report_method_error: fn(receiver: Type, owner: String, method
 sema_call_geometry_argument_types: fn(args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> [Type] Never! {
     types := [Type]{}
     loop argument in args {
-        checked: sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-        &types.push(if checked == .Val(value) -> value.ty else -> Type.Named{name: "Unknown"})
+        checked: sema_check_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
+        types.push(if checked == .Val(value) -> value.ty else -> Type.Named{name: "Unknown"})
     }
     types
 }
@@ -266,15 +266,15 @@ sema_call_try_geometry: fn(receiver: Expr, receiver_value: TExpr, method: String
     parts: sema_call_geometry_transform_parts(receiver_value.ty, environment, program) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     expected_count: sema_call_geometry_method_arg_count(method)
     if expected_count == None {
-        if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-        arg_types: sema_call_geometry_argument_types(updated_args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-        sema_call_geometry_report_method_error(receiver_value.ty, parts.name, method, arg_types, span, environment, program, &diagnostics)
+        if !sema_ownership_check_call_receiver(state, receiver, AccessConvention.Read, scopes, span, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+        arg_types: sema_call_geometry_argument_types(updated_args, environment, program, scopes, state, tail_store, context, diagnostics)
+        sema_call_geometry_report_method_error(receiver_value.ty, parts.name, method, arg_types, span, environment, program, diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     if updated_args.len() != (expected_count) {
-        if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-        arg_types: sema_call_geometry_argument_types(updated_args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-        sema_call_geometry_report_method_error(receiver_value.ty, parts.name, method, arg_types, span, environment, program, &diagnostics)
+        if !sema_ownership_check_call_receiver(state, receiver, AccessConvention.Read, scopes, span, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+        arg_types: sema_call_geometry_argument_types(updated_args, environment, program, scopes, state, tail_store, context, diagnostics)
+        sema_call_geometry_report_method_error(receiver_value.ty, parts.name, method, arg_types, span, environment, program, diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     values := [TExpr]{}
@@ -282,32 +282,32 @@ sema_call_try_geometry: fn(receiver: Expr, receiver_value: TExpr, method: String
     valid := true
     loop (index, argument) in updated_args {
         depth_argument := method == "point_at_depth" && index == 1 && updated_args.len() == 2
-        checked: if depth_argument -> sema_check_expression(argument.expr, Val(Type.Float), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        checked: if depth_argument -> sema_check_expression(argument.expr, Val(Type.Float), environment, program, scopes, state, tail_store, context, diagnostics) else -> sema_check_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
         if checked == {
             .Val(value) -> {
-                &values.push(value)
-                &types.push(value.ty)
+                values.push(value)
+                types.push(value.ty)
             }
             else -> {
                 valid = false
-                &types.push(Type.Named{name: "Unknown"})
+                types.push(Type.Named{name: "Unknown"})
             }
         }
     }
     if !valid {
-        _ := sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics)
+        _ := sema_ownership_check_call_receiver(state, receiver, AccessConvention.Read, scopes, span, diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    ownership := sema_ownership_check_method_call(&state, "{parts.name}.{method}", receiver, AccessConvention.Read, sema_call_geometry_method_params(types), &updated_args, scopes, span, &diagnostics)
+    ownership := sema_ownership_check_method_call(state, "{parts.name}.{method}", receiver, AccessConvention.Read, sema_call_geometry_method_params(types), updated_args, scopes, span, diagnostics)
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
     result_type: sema_call_geometry_transform_method_return(receiver_value.ty, method, types, environment, program) ?? {
-        chain_mismatch := sema_call_geometry_report_transform_chain_mismatch(receiver_value.ty, method, types, span, environment, program, &diagnostics)
-        if !chain_mismatch -> sema_call_geometry_report_method_error(receiver_value.ty, parts.name, method, types, span, environment, program, &diagnostics)
+        chain_mismatch := sema_call_geometry_report_transform_chain_mismatch(receiver_value.ty, method, types, span, environment, program, diagnostics)
+        if !chain_mismatch -> sema_call_geometry_report_method_error(receiver_value.ty, parts.name, method, types, span, environment, program, diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     value: sema_tree_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.MathMethod{type_name: parts.name, method: method}, args: values}, span)
-    if !sema_effect_record_intrinsic_fact(environment, program, &scopes, &context, "{parts.name}.{method}", span, sema_call_geometry_call_facts(result_type), &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
+    if !sema_effect_record_intrinsic_fact(environment, program, scopes, context, "{parts.name}.{method}", span, sema_call_geometry_call_facts(result_type), diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
 }
 
 #Test("Geometry declaration identity matches only source-owned Core nominals") {

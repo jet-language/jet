@@ -25,7 +25,7 @@ doc_test_os_path: fn(text: String) -> doc_os_path.OsPath? Never! {
     assert_eq(clipped.column, 5)
     line := 0
     column := 0
-    doc_line_column(source, 2, &line, &column)
+    doc_line_column(source, 2, line, column)
     assert_eq(line, 1)
     assert_eq(column, 3)
     assert_eq(doc_line_offset(source, 1), 0)
@@ -118,7 +118,7 @@ doc_test_retained_item: fn(module_path: String, name: String, kind: String, star
         doc_test_retained_item("a.jet", "A", "field", 2, "second tie"),
         doc_test_retained_item("a.jet", "A", "struct", 9, "type"),
     }
-    doc_sort_items(&items)
+    doc_sort_items(items)
     assert_eq(items[0].summary, "type")
     assert_eq(items[1].summary, "first tie")
     assert_eq(items[2].summary, "second tie")
@@ -132,7 +132,7 @@ doc_test_retained_item: fn(module_path: String, name: String, kind: String, star
         {name: "a", path: "z.jet", public: true, summary: "", source: location},
         {name: "a", path: "a.jet", public: true, summary: "", source: location},
     }
-    doc_sort_modules(&modules)
+    doc_sort_modules(modules)
     assert_eq(modules[0].name, "a")
     assert_eq(modules[1].name, "z")
     assert_eq(modules[2].path, "z.jet")
@@ -141,7 +141,7 @@ doc_test_retained_item: fn(module_path: String, name: String, kind: String, star
         {kind: "inherent_impl", type_name: "A", trait_name: None, module_path: "a.jet", public: true, methods: [String]{}, source: location},
         {kind: "trait_impl", type_name: "A", trait_name: Val("B"), module_path: "a.jet", public: true, methods: [String]{}, source: location},
     }
-    doc_sort_impls(&impls)
+    doc_sort_impls(impls)
     assert_eq(impls[0].trait_name, None)
     assert_eq(impls[1].trait_name, Val("B"))
     assert_eq(impls[2].trait_name, Val("Z"))
@@ -150,7 +150,7 @@ doc_test_retained_item: fn(module_path: String, name: String, kind: String, star
         {module_path: "a.jet", line: 8, setup: [String]{"later"}, expectations: [DocExpectation]{}, source: location},
         {module_path: "a.jet", line: 2, setup: [String]{"first"}, expectations: [DocExpectation]{}, source: location},
     }
-    doc_sort_tests(&tests)
+    doc_sort_tests(tests)
     assert_eq(tests[0].setup[0], "first")
     assert_eq(tests[1].setup[0], "later")
     assert_eq(tests[2].setup[0], "other")

@@ -12,7 +12,7 @@ temp_fixture: fn(name: String, src: String) -> OSPath {
     fs.create_dir_all(dir).expect("semindex temp dir")
     path: dir.join(name)
     fs.write(path, src).expect("write semindex fixture")
-    ^path
+    path.move()
 }
 
 fact: fn(identity: String, name: String, qualified_name: String, kind: SemanticSymbolKind, provenance: SemanticProvenance) -> SemanticSymbol {
@@ -20,6 +20,6 @@ fact: fn(identity: String, name: String, qualified_name: String, kind: SemanticS
         identity: identity.clone(), name: name.clone(), qualified_name: qualified_name.clone(),
         owner: qualified_name.split_once('.').map((owner, _) -> owner.to_string()),
         module_path: "test", kind: kind, signature: identity.clone(), summary: String.new(), examples: [],
-        provenance: ^provenance, span: none, lexical_scope: none
+        provenance: provenance.move(), span: none, lexical_scope: none
     }
 }

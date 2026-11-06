@@ -59,24 +59,24 @@ booking_operation: fn(
     // refines a direct parameter to its payload in the true branch.
     if argument != None {
         handle: argument
-        &arguments.push(testing.HistoryValue.Handle(handle))
+        arguments.push(testing.HistoryValue.Handle(handle))
     }
     if creates != None {
         handle: creates
-        &created_handles.push(handle)
+        created_handles.push(handle)
     }
     if consumes != None {
         handle: consumes
-        &consumed_handles.push(handle)
+        consumed_handles.push(handle)
     }
     if index > 0 {
         previous: index - 1
-        &preconditions.push(
+        preconditions.push(
             testing.HistoryPrecondition.TaskCompleted(
                 testing.TaskID{value: previous % 2}
             )
         )
-        &preconditions.push(
+        preconditions.push(
             testing.HistoryPrecondition.EventAvailable(
                 testing.EventID{value: index}
             )
@@ -85,11 +85,11 @@ booking_operation: fn(
     if argument != None {
         handle: argument
         if name != "reserve" {
-            &preconditions.push(testing.HistoryPrecondition.HandleLive(handle))
+            preconditions.push(testing.HistoryPrecondition.HandleLive(handle))
         }
         if state != None {
             expected: state
-            &preconditions.push(
+            preconditions.push(
                 testing.HistoryPrecondition.HandleState{
                     handle: handle,
                     state: expected,
@@ -146,7 +146,7 @@ booking_model: fn(commands: [BookingCommand]) -> Dyn {
                 old_key: booking_key(handle)
                 // D-CAP-RECEIVER1=D (syntax-decisions.md:2878-2890): `remove`
                 // writes `states`, so the written place carries `&`.
-                &states.remove(old_key).drop("retry consumes the terminal handle")
+                states.remove(old_key).drop("retry consumes the terminal handle")
                 states[booking_key(creates)] = "active"
             }
             else -> {}
@@ -167,7 +167,7 @@ booking_actual_bug: fn(commands: [BookingCommand]) -> Dyn {
             .Retry(handle, creates) -> {
                 old_key: booking_key(handle)
                 if states.get(old_key) != Val("timed_out") {
-                    &states.remove(old_key).drop("retry consumes the terminal handle")
+                    states.remove(old_key).drop("retry consumes the terminal handle")
                 }
                 states[booking_key(creates)] = "active"
             }
@@ -187,7 +187,7 @@ booking_actual_correct: fn(commands: [BookingCommand]) -> Dyn {
             .Timeout(handle) -> states[booking_key(handle)] = "timed_out"
             .Retry(handle, creates) -> {
                 old_key: booking_key(handle)
-                &states.remove(old_key).drop("retry consumes the terminal handle")
+                states.remove(old_key).drop("retry consumes the terminal handle")
                 states[booking_key(creates)] = "active"
             }
             else -> {}
@@ -374,7 +374,7 @@ booking_valid: fn(candidate: testing.TypedHistoryCase<BookingCommand>) -> Bool {
                     return false
                 }
                 if operation.consumes[0] != handle -> return false
-                &states.remove(handle).drop("retry consumes the terminal handle")
+                states.remove(handle).drop("retry consumes the terminal handle")
                 known[replacement] = true
                 states[replacement] = "active"
                 created_count += 1
@@ -393,7 +393,7 @@ booking_rebuild: fn(
     commands := [BookingCommand]{}
     loop operation in case.operations {
         command: booking_command_for(operation) ?? return None
-        &commands.push(command)
+        commands.push(command)
     }
     Val(
         testing.TypedHistoryCase<BookingCommand>{
@@ -422,7 +422,7 @@ booking_generate: fn(
 
     first: testing.HandleID{value: next_id}
     next_id += 1
-    &operations.push(booking_operation(
+    operations.push(booking_operation(
         0,
         "reserve",
         None,
@@ -430,10 +430,10 @@ booking_generate: fn(
         None,
         None,
     ))
-    &schedule.push(booking_schedule(0, "reserve"))
-    &commands.push(BookingCommand.Reserve{creates: first})
+    schedule.push(booking_schedule(0, "reserve"))
+    commands.push(BookingCommand.Reserve{creates: first})
 
-    &operations.push(booking_operation(
+    operations.push(booking_operation(
         1,
         "timeout",
         Val(first),
@@ -441,12 +441,12 @@ booking_generate: fn(
         None,
         Val("active"),
     ))
-    &schedule.push(booking_schedule(1, "timeout"))
-    &commands.push(BookingCommand.Timeout{handle: first})
+    schedule.push(booking_schedule(1, "timeout"))
+    commands.push(BookingCommand.Timeout{handle: first})
 
     second: testing.HandleID{value: next_id}
     next_id += 1
-    &operations.push(booking_operation(
+    operations.push(booking_operation(
         2,
         "retry",
         Val(first),
@@ -454,9 +454,9 @@ booking_generate: fn(
         Val(first),
         Val("timed_out"),
     ))
-    &schedule.push(booking_schedule(2, "retry"))
-    &commands.push(BookingCommand.Retry{handle: first, creates: second})
-    &active.push(second)
+    schedule.push(booking_schedule(2, "retry"))
+    commands.push(BookingCommand.Retry{handle: first, creates: second})
+    active.push(second)
 
     loop index in 3..<step_count {
         choice: rng.below(8)
@@ -464,7 +464,7 @@ booking_generate: fn(
             choice < 3 || (active.len() == 0 && terminal.len() == 0) -> {
                 handle: testing.HandleID{value: next_id}
                 next_id += 1
-                &operations.push(booking_operation(
+                operations.push(booking_operation(
                     index,
                     "reserve",
                     None,
@@ -472,13 +472,13 @@ booking_generate: fn(
                     None,
                     None,
                 ))
-                &schedule.push(booking_schedule(index, "reserve"))
-                &commands.push(BookingCommand.Reserve{creates: handle})
-                &active.push(handle)
+                schedule.push(booking_schedule(index, "reserve"))
+                commands.push(BookingCommand.Reserve{creates: handle})
+                active.push(handle)
             }
             choice < 5 && active.len() > 0 -> {
-                handle: &active.pop() ?? return None
-                &operations.push(booking_operation(
+                handle: active.pop() ?? return None
+                operations.push(booking_operation(
                     index,
                     "cancel",
                     Val(handle),
@@ -486,13 +486,13 @@ booking_generate: fn(
                     None,
                     Val("active"),
                 ))
-                &schedule.push(booking_schedule(index, "cancel"))
-                &commands.push(BookingCommand.Cancel{handle: handle})
-                &terminal.push(BookingTerminal{handle: handle, state: "cancelled"})
+                schedule.push(booking_schedule(index, "cancel"))
+                commands.push(BookingCommand.Cancel{handle: handle})
+                terminal.push(BookingTerminal{handle: handle, state: "cancelled"})
             }
             choice < 7 && active.len() > 0 -> {
-                handle: &active.pop() ?? return None
-                &operations.push(booking_operation(
+                handle: active.pop() ?? return None
+                operations.push(booking_operation(
                     index,
                     "timeout",
                     Val(handle),
@@ -500,15 +500,15 @@ booking_generate: fn(
                     None,
                     Val("active"),
                 ))
-                &schedule.push(booking_schedule(index, "timeout"))
-                &commands.push(BookingCommand.Timeout{handle: handle})
-                &terminal.push(BookingTerminal{handle: handle, state: "timed_out"})
+                schedule.push(booking_schedule(index, "timeout"))
+                commands.push(BookingCommand.Timeout{handle: handle})
+                terminal.push(BookingTerminal{handle: handle, state: "timed_out"})
             }
             terminal.len() > 0 -> {
-                previous: &terminal.pop() ?? return None
+                previous: terminal.pop() ?? return None
                 replacement: testing.HandleID{value: next_id}
                 next_id += 1
-                &operations.push(booking_operation(
+                operations.push(booking_operation(
                     index,
                     "retry",
                     Val(previous.handle),
@@ -516,14 +516,14 @@ booking_generate: fn(
                     Val(previous.handle),
                     Val(previous.state),
                 ))
-                &schedule.push(booking_schedule(index, "retry"))
-                &commands.push(BookingCommand.Retry{handle: previous.handle, creates: replacement})
-                &active.push(replacement)
+                schedule.push(booking_schedule(index, "retry"))
+                commands.push(BookingCommand.Retry{handle: previous.handle, creates: replacement})
+                active.push(replacement)
             }
             else -> {
                 handle: testing.HandleID{value: next_id}
                 next_id += 1
-                &operations.push(booking_operation(
+                operations.push(booking_operation(
                     index,
                     "reserve",
                     None,
@@ -531,9 +531,9 @@ booking_generate: fn(
                     None,
                     None,
                 ))
-                &schedule.push(booking_schedule(index, "reserve"))
-                &commands.push(BookingCommand.Reserve{creates: handle})
-                &active.push(handle)
+                schedule.push(booking_schedule(index, "reserve"))
+                commands.push(BookingCommand.Reserve{creates: handle})
+                active.push(handle)
             }
         }
     }

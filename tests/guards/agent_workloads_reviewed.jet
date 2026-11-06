@@ -88,21 +88,21 @@ s4_review_rows: fn(root: String, file: String, header: String, width: Int) -> [[
         if lines[index] == "" -> next
         fields: lines[index].split("\t").to_list()
         assert_eq(fields.len(), width)
-        &result.push(fields)
+        result.push(fields)
     }
     result
 }
 s4_review_column: fn(rows: [[String]], column: Int) -> [String] {
     result := [String]{}
-    loop row in rows -> &result.push(row[column])
+    loop row in rows -> result.push(row[column])
     result
 }
 s4_review_set: fn(values: [String]) -> [String] {
     sorted := values
-    &sorted.sort()
+    sorted.sort()
     result := [String]{}
     loop value in sorted {
-        if result.len() == 0 || result[result.len() - 1] != value -> &result.push(value)
+        if result.len() == 0 || result[result.len() - 1] != value -> result.push(value)
     }
     result
 }
@@ -143,12 +143,12 @@ s4_review_walk: fn(directory: String, relative: String) -> [String] {
     loop entry in entries {
         child: if relative == "" -> entry.name else -> "{relative}/{entry.name}"
         if s4_review_files.is_dir(entry.path) {
-            loop nested in s4_review_walk(entry.path, child) -> &result.push(nested)
+            loop nested in s4_review_walk(entry.path, child) -> result.push(nested)
         } else {
-            &result.push(child)
+            result.push(child)
         }
     }
-    &result.sort()
+    result.sort()
     result
 }
 #Error
@@ -156,7 +156,7 @@ S4ReviewChecksumError: struct { message: String }
 s4_review_checksum_error: fn(message: String) -> S4ReviewChecksumError { S4ReviewChecksumError{message: message} }
 s4_review_quoted: fn(paths: [String]) -> String {
     quoted := [String]{}
-    loop path in paths -> &quoted.push("\"{path}\"")
+    loop path in paths -> quoted.push("\"{path}\"")
     "[{quoted.join(", ")}]"
 }
 // The SHA256SUMS closure: every row splits on two spaces and names a safe,
@@ -171,23 +171,23 @@ s4_review_checksum_closure: fn(root: String, sums: String) -> Int S4ReviewChecks
         if !parts.found -> return Err(s4_review_checksum_error("bad SHA256SUMS row: {line}"))
         if !s4_review_path(parts.tail) -> return Err(s4_review_checksum_error("invalid checksum path: {parts.tail}"))
         if declared.contains(parts.tail) -> return Err(s4_review_checksum_error("duplicate checksum path: {parts.tail}"))
-        &declared.push(parts.tail)
-        &hashes.push(parts.head)
+        declared.push(parts.tail)
+        hashes.push(parts.head)
     }
     actual := [String]{}
     fixture_roots: [String]{"inputs", "expected"}
     loop name in fixture_roots {
         if s4_review_files.is_dir("{root}/{name}") {
-            loop relative in s4_review_walk("{root}/{name}", name) -> &actual.push(relative)
+            loop relative in s4_review_walk("{root}/{name}", name) -> actual.push(relative)
         }
     }
     actual_set: s4_review_set(actual)
     listed: s4_review_set(declared)
     if actual_set != listed {
         unhashed := [String]{}
-        loop path in actual_set { if !listed.contains(path) -> &unhashed.push(path) }
+        loop path in actual_set { if !listed.contains(path) -> unhashed.push(path) }
         missing := [String]{}
-        loop path in listed { if !actual_set.contains(path) -> &missing.push(path) }
+        loop path in listed { if !actual_set.contains(path) -> missing.push(path) }
         return Err(s4_review_checksum_error("checksum closure mismatch; unhashed={s4_review_quoted(unhashed)}; missing={s4_review_quoted(missing)}"))
     }
     loop relative in listed {
@@ -260,7 +260,7 @@ s4_review_recorded_baselines_cover_frozen_tasks: fn() {
         subject: s4_review_row(tasks, row[4])
         key: "{row[3]}\t{row[4]}"
         assert(!seen.contains(key))
-        &seen.push(key)
+        seen.push(key)
         if run_id == "" -> run_id = row[1] else -> assert_eq(run_id, row[1])
         if machine == "" -> machine = row[2] else -> assert_eq(machine, row[2])
         assert(row[1] != "" && row[2] != "")
@@ -306,7 +306,7 @@ s4_review_manifest_is_complete_frozen_and_non_vacuous: fn() {
         row: line.split("\t").to_list()
         assert_eq(row.len(), 4)
         assert_eq(row[3], "blocked-or-unsupported")
-        &hostile.push(row)
+        hostile.push(row)
     }
     assert_eq(hostile.len(), 7)
     tasks: s4_review_rows(root, "manifest.tsv", S4_REVIEW_HEADER, 13)
@@ -315,9 +315,9 @@ s4_review_manifest_is_complete_frozen_and_non_vacuous: fn() {
     loop subject in tasks {
         assert_eq(subject[0], "1")
         assert(s4_review_path(subject[5]) && s4_review_path(subject[6]))
-        &actual.push([String]{subject[1], subject[2], subject[3], subject[4]})
+        actual.push([String]{subject[1], subject[2], subject[3], subject[4]})
         assert(!ids.contains(subject[1]))
-        &ids.push(subject[1])
+        ids.push(subject[1])
         assert_eq(subject[7], s4_review_field("authority"))
         assert(s4_review_authority(subject[7]))
         assert_eq(subject[8], "jet,bash,python,node")
@@ -362,7 +362,7 @@ s4_review_manifest_is_complete_frozen_and_non_vacuous: fn() {
         assert_eq(row[0], "1")
         assert(ids.contains(row[1]))
         assert_eq(row[5], S4_REVIEW_DOMAIN_SCORING)
-        &actual_domains.push([String]{row[1], row[2], row[3], row[4]})
+        actual_domains.push([String]{row[1], row[2], row[3], row[4]})
     }
     assert_eq(actual_domains, S4_REVIEW_EXPECTED_DOMAIN_CONTRACT)
     assert_eq(s4_review_checksum_closure(root, s4_review_read("{root}/SHA256SUMS")) ?? panic(err.message), 82)
@@ -406,7 +406,7 @@ s4_review_compiled_workload_contract_reuses_agent_schema_and_keeps_hosted_rows: 
     selected := [[String]]{}
     candidate_cxx := false
     loop row in peers {
-        if row[2] == "best-applicable" -> &selected.push(row)
+        if row[2] == "best-applicable" -> selected.push(row)
         if row[2] == "candidate" && row[3] == "cxx" -> candidate_cxx = true
         assert_eq(row[12], "#1414")
     }
@@ -458,7 +458,7 @@ s4_review_compiled_workload_contract_reuses_agent_schema_and_keeps_hosted_rows: 
     toolchains: s4_review_rows(root, "toolchain_contract.tsv", "version\tlanguage\tcommand\tversion_prefix", 4)
     assert_eq(toolchains.len(), 6)
     toolchain_keys := [String]{}
-    loop row in toolchains -> &toolchain_keys.push("{row[1]}|{row[2]}|{row[3]}")
+    loop row in toolchains -> toolchain_keys.push("{row[1]}|{row[2]}|{row[3]}")
     assert_eq(s4_review_set(toolchain_keys), s4_review_set([String]{"jet|jet|Jet 0.1.0", "rust|rustc|rustc 1.97.1", "go|go|go version go1.26.5", "cxx|clang++|clang version 21.1.8", "zig|zig|zig 0.16.0", "domain|node|node v22.23.2"}))
     receipt_fields: S4_REVIEW_COMPILED_RECEIPT_HEADER.split("\t").to_list()
     assert_eq(receipt_fields.len(), 20)
@@ -471,7 +471,7 @@ s4_review_compiled_workload_contract_reuses_agent_schema_and_keeps_hosted_rows: 
     web_found := false
     cross_web_found := false
     loop row in tiers {
-        &availability.push("{row[6]}|{row[7]}")
+        availability.push("{row[6]}|{row[7]}")
         if row[2] == "cross-target" && row[3] == "aarch64-unknown-linux-gnu" {
             aarch64 += 1
             assert(row[5] == "required" && row[6] == "external" && row[7] == "cross-toolchain")
@@ -494,7 +494,7 @@ s4_review_compiled_workload_contract_reuses_agent_schema_and_keeps_hosted_rows: 
         cross_target: if id == "cross-platform-notes" -> "web" else -> "aarch64-unknown-linux-gnu"
         required := [String]{}
         loop row in tiers {
-            if row[1] == id && row[5] == "required" -> &required.push("{row[1]}|{row[2]}|{row[3]}|{row[4]}")
+            if row[1] == id && row[5] == "required" -> required.push("{row[1]}|{row[2]}|{row[3]}|{row[4]}")
         }
         assert_eq(s4_review_set(required), s4_review_set([String]{"{id}|linux|x86_64-unknown-linux-gnu|aot", "{id}|macos|x86_64-apple-darwin|aot", "{id}|windows|x86_64-pc-windows-msvc|aot", "{id}|cross-target|{cross_target}|aot", "{id}|linux|x86_64-unknown-linux-gnu|jit"}))
     }
@@ -508,7 +508,7 @@ s4_review_compiled_workload_contract_reuses_agent_schema_and_keeps_hosted_rows: 
             excluded += 1
             assert(row[6] == "excluded" && row[7] == "freestanding-profile" && row[8].contains("#2046") && row[8].contains("#2300"))
         }
-        if row[5] == "required" -> &embedded_required.push("{row[2]}|{row[3]}|{row[4]}")
+        if row[5] == "required" -> embedded_required.push("{row[2]}|{row[3]}|{row[4]}")
     }
     assert_eq(embedded, 9)
     assert_eq(excluded, 5)

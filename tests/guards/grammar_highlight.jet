@@ -88,7 +88,7 @@ gh_constants: fn() -> [(name: String, value: String)] {
             if close < 0 -> next
             tail: gh_slice(rest, close + 1, rest.count_bytes()).trim().copy()
             if tail != "" && !tail.starts_with("//") -> next
-            &constants.push((name: name, value: gh_unescape(gh_slice(rest, 0, close))))
+            constants.push((name: name, value: gh_unescape(gh_slice(rest, 0, close))))
         }
     }
     assert(constants.len() > 100, "the syntax registry constants must be readable")
@@ -116,7 +116,7 @@ gh_active_markers: fn() -> [String] {
         } else if line.starts_with("}}") {
             current = None
         } else if current == .Val(name) && line.trim().starts_with("impl Marker") {
-            &names.push(name.copy())
+            names.push(name.copy())
             current = None
         }
     }
@@ -140,12 +140,12 @@ gh_tokens: fn() -> [GhToken] {
             pending = Val(gh_resolve(constants, gh_strip_comma(gh_slice(line, 5, line.count_bytes()))))
         } else if line.starts_with("class: HighlightClass.") {
             text: pending ?? panic("highlight class without text: {line}")
-            &tokens.push(GhToken{text: text, class: gh_strip_comma(gh_slice(line, 22, line.count_bytes()))})
+            tokens.push(GhToken{text: text, class: gh_strip_comma(gh_slice(line, 22, line.count_bytes()))})
             pending = None
         }
     }
     assert(tokens.len() > 100, "every HighlightToken row must parse")
-    loop name in gh_active_markers() -> &tokens.push(GhToken{text: name, class: "MarkerRule"})
+    loop name in gh_active_markers() -> tokens.push(GhToken{text: name, class: "MarkerRule"})
     tokens
 }
 
@@ -196,7 +196,7 @@ gh_anonymous_node_types: fn() -> [String] {
             named = if trimmed.contains("true") -> 1 else -> 2
         } else if line.starts_with("  }}") && named == 2 {
             if current == .Val(name) {
-                if !gh_has(out, name) -> &out.push(name)
+                if !gh_has(out, name) -> out.push(name)
             }
             current = None
         }
@@ -214,7 +214,7 @@ gh_query_string_literals: fn(query: String) -> [String] {
         parts: trimmed.split("\"").to_list()
         index := 1
         loop index + 1 < parts.len() {
-            &out.push(parts[index].copy())
+            out.push(parts[index].copy())
             index += 2
         }
     }
@@ -232,7 +232,7 @@ gh_keyword_list: fn() -> [String] {
         if raw.contains(": ") -> next
         line: gh_strip_comma(raw.copy())
         if line == "" || line.starts_with("//") -> next
-        &words.push(gh_resolve(constants, line.copy()))
+        words.push(gh_resolve(constants, line.copy()))
     }
     assert(words.len() > 20, "JET_KEYWORD_LIST must be readable")
     words
@@ -265,7 +265,7 @@ gh_grammar_keyword_words: fn() -> [String] {
             if !group.contains("(") && !group.contains("\\") {
                 loop word in group.split("|") {
                     trimmed: word.trim().copy()
-                    if gh_is_ident(trimmed) && !gh_has(words, trimmed) -> &words.push(trimmed)
+                    if gh_is_ident(trimmed) && !gh_has(words, trimmed) -> words.push(trimmed)
                 }
             }
             rest = gh_slice(tail, close + 1, tail.count_bytes())
@@ -282,7 +282,7 @@ gh_grammar_keyword_words: fn() -> [String] {
     loop token in gh_tokens() {
         if gh_bracket(token.text) -> next
         loop entry in sections {
-            if !gh_section_has_token(entry.section, token.text) -> &missing.push("{entry.path} generated section missing `{token.text}` ({token.class})")
+            if !gh_section_has_token(entry.section, token.text) -> missing.push("{entry.path} generated section missing `{token.text}` ({token.class})")
         }
     }
     assert_eq(missing.join("\n"), "")
@@ -307,14 +307,14 @@ gh_grammar_keyword_words: fn() -> [String] {
     anonymous: gh_anonymous_node_types()
     actual := [String]{}
     loop literal in gh_query_string_literals(gh_generated_section(GH_ZED)) {
-        if !gh_has(actual, literal) -> &actual.push(literal)
+        if !gh_has(actual, literal) -> actual.push(literal)
     }
     expected := [String]{}
     loop token in gh_tokens() {
-        if token.class != "MarkerRule" && gh_is_ident(token.text) && gh_has(anonymous, token.text) && !gh_has(expected, token.text) -> &expected.push(token.text)
+        if token.class != "MarkerRule" && gh_is_ident(token.text) && gh_has(anonymous, token.text) && !gh_has(expected, token.text) -> expected.push(token.text)
     }
-    &actual.sort()
-    &expected.sort()
+    actual.sort()
+    expected.sort()
     assert_eq(actual.join(" "), expected.join(" "))
 }
 
@@ -323,7 +323,7 @@ gh_grammar_keyword_words: fn() -> [String] {
     texts: gh_tokens().map(token -> token.text)
     missing := [String]{}
     loop keyword in gh_keyword_list() {
-        if !gh_has(texts, keyword) -> &missing.push(keyword)
+        if !gh_has(texts, keyword) -> missing.push(keyword)
     }
     assert_eq(missing.join(" "), "")
 }
@@ -333,7 +333,7 @@ gh_grammar_keyword_words: fn() -> [String] {
     words: gh_grammar_keyword_words()
     missing := [String]{}
     loop keyword in gh_keyword_list() {
-        if !gh_has(words, keyword) -> &missing.push(keyword)
+        if !gh_has(words, keyword) -> missing.push(keyword)
     }
     assert_eq(missing.join(" "), "")
 }
@@ -346,7 +346,7 @@ gh_grammar_keyword_words: fn() -> [String] {
     intruders := [String]{}
     loop constant in gh_constants() {
         if !constant.name.starts_with("FOREIGN_") || !gh_is_ident(constant.value) -> next
-        if gh_has(words, constant.value) && !gh_has(keywords, constant.value) && !gh_has(intruders, constant.value) -> &intruders.push(constant.value)
+        if gh_has(words, constant.value) && !gh_has(keywords, constant.value) && !gh_has(intruders, constant.value) -> intruders.push(constant.value)
     }
     assert_eq(intruders.join(" "), "")
 }

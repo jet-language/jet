@@ -10,7 +10,7 @@ use {
 
 connect: fn(name: String, config: ClientConfig) -[Net, Time.Wait]> TLSStream NetError! {
     tcp := net.tcp_connect("127.0.0.1:{free-port:tls}") ?? panic("connect")
-    tls.client(^tcp, server_name: name, config: config, deadline: 5s)
+    tls.client(tcp, server_name: name, config: config, deadline: 5s)
 }
 
 exchange: fn(&secure: TLSStream) -[Net, Time.Wait]> String {
@@ -19,7 +19,7 @@ exchange: fn(&secure: TLSStream) -[Net, Time.Wait]> String {
     loop reply.len() < 5 {
         chunk: secure.read(64, deadline: 5s) ?? panic("read: {err}")
         if chunk.len() == 0 -> panic("early end of stream")
-        loop b in chunk -> &reply.push(b)
+        loop b in chunk -> reply.push(b)
     }
     (String.from_bytes(reply) ?? panic("UTF-8 reply")).trim()
 }
@@ -50,7 +50,7 @@ run: fn() {
     print(peer.leaf.spki_sha256.len() == 32)
     print(tls.version_name(peer.tls_version))
     print(peer.cipher_suite.starts_with("TLS13_"))
-    print(exchange(&secure))
+    print(exchange(secure))
     secure.close() ?? panic("close: {err}")
     print(secure.close() == .Ok(_))
     print(secure.write_all("late".bytes(), deadline: 5s) == .Err(_))
@@ -59,7 +59,7 @@ run: fn() {
     older := connect("localhost", tls12) ?? panic("TLS 1.2 handshake: {err}")
     print(tls.version_name(older.peer_identity().tls_version))
     print(older.peer_identity().cipher_suite.starts_with("TLS_ECDHE_RSA_WITH_"))
-    print(exchange(&older))
+    print(exchange(older))
     older.close() ?? panic("close TLS 1.2: {err}")
 
     // The leaf names only `localhost`; the default trust (SSL_CERT_FILE here)

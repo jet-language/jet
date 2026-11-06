@@ -33,7 +33,7 @@ LexedTokens: struct {
 intern_source: fn(tables: &TokenTables, source: [U8], start: Int, end: Int) -> Name Never! {
     bounded_end: if end > source.len() -> source.len() else -> end
     if start >= bounded_end -> return name_empty()
-    name_intern_bytes(&tables.names, source, start, bounded_end)
+    name_intern_bytes(tables.names, source, start, bounded_end)
 }
 
 // A keyword or punctuation kind: the scanner gives every token of the kind
@@ -46,16 +46,16 @@ fixed_spelling_kind: fn(kind: Int) -> Bool Never! {
 // its first token interned (the same id the probe returns), checked against
 // the spelling's length.
 intern_token_source: fn(tables: &TokenTables, kind: Int, source: [U8], start: Int, end: Int) -> Name Never! {
-    if !fixed_spelling_kind(kind) -> return intern_source(&tables, source, start, end)
+    if !fixed_spelling_kind(kind) -> return intern_source(tables, source, start, end)
     cached: tables.spellings[kind]
     if cached > 0 && tables.names.ends[cached] - name_start(tables.names, cached) == end - start && end <= source.len() -> return Name{id: U32{cached}}
-    text: intern_source(&tables, source, start, end)
+    text: intern_source(tables, source, start, end)
     tables.spellings[kind] = name_index(text)
     text
 }
 
 literal_row: fn(tables: &TokenTables, literal: TokenLiteral) -> Int Never! {
-    &tables.literals.push(literal)
+    tables.literals.push(literal)
     tables.literals.len() - 1
 }
 
@@ -68,14 +68,14 @@ text_literal: fn(interpolations: Int, parts: [StringPart]) -> TokenLiteral Never
 }
 
 add_diagnostic: fn(diagnostics: &[Diagnostic], code: String, start: Int, end: Int, what: String, why: String, fix: String) {
-    &diagnostics.push(diagnostic_from_registry(code, Val(Span{start: start, end: end}), what, why, fix))
+    diagnostics.push(diagnostic_from_registry(code, Val(Span{start: start, end: end}), what, why, fix))
 }
 
 bytes_text: fn(raw: [U8], start: Int, end: Int) -> String Never! {
     out := [U8]{}
     i := start
     loop i < end && i < raw.len() {
-        &out.push(raw[i])
+        out.push(raw[i])
         i += 1
     }
     String.from_bytes(out) ?? ""
@@ -85,7 +85,7 @@ bytes_slice: fn(raw: [U8], start: Int, end: Int) -> [U8] Never! {
     out := [U8]{}
     i := start
     loop i < end && i < raw.len() {
-        &out.push(raw[i])
+        out.push(raw[i])
         i += 1
     }
     out
@@ -94,7 +94,7 @@ bytes_slice: fn(raw: [U8], start: Int, end: Int) -> [U8] Never! {
 strip_underscores: fn(text: String) -> String Never! {
     out := [U8]{}
     loop byte in text.bytes() {
-        if Int.from_u8(byte) != 95 -> &out.push(byte)
+        if Int.from_u8(byte) != 95 -> out.push(byte)
     }
     String.from_bytes(out) ?? ""
 }
@@ -106,7 +106,7 @@ decimal_number_spelling: fn(text: String) -> String Never! {
     loop byte in text.bytes() {
         code: Int.from_u8(byte)
         if code == 95 -> next
-        &out.push(if code == 69 -> U8{101} else -> byte)
+        out.push(if code == 69 -> U8{101} else -> byte)
     }
     String.from_bytes(out) ?? ""
 }
@@ -417,7 +417,7 @@ shifted_diagnostic: fn(diagnostic: &Diagnostic, offset: Int) Never! {
     }
     if &diagnostic.edit == .Val(edit) -> edit.span = shifted_span(edit.span, offset)
     shifted_labels := [DiagnosticLabel]{}
-    loop label in diagnostic.labels -> &shifted_labels.push(DiagnosticLabel{span: shifted_span(label.span, offset), message: label.message})
+    loop label in diagnostic.labels -> shifted_labels.push(DiagnosticLabel{span: shifted_span(label.span, offset), message: label.message})
     diagnostic.labels = shifted_labels
 }
 
@@ -435,22 +435,22 @@ lex_payload_from_facts: fn(source: [U8], facts: [Int], events: [Int], config_sur
     event_index := 0
     fact_count: facts.len() /% 4
     loop index < fact_count {
-        event_index = terminator_events_apply(facts, events, event_index, index, &tokens, &terminator_diagnostics)
+        event_index = terminator_events_apply(facts, events, event_index, index, tokens, terminator_diagnostics)
         kind: kind_at(facts, index)
         start: facts[index * 4 + 1]
         end: facts[index * 4 + 2]
-        gap_diagnostic(source, facts, cursor, start, config_surface, allow_reserved_identifiers, depth, &tables, &diagnostics)
-        text: intern_token_source(&tables, kind, source, start, end)
-        built: payload_for(kind, source, facts, index, text, config_surface, allow_reserved_identifiers, depth, &tables, &diagnostics)
-        if built.keep -> &tokens.push(Token{kind: kind, span: Span{start: start, end: end}, text: text, decoded: built.decoded, literal: built.literal})
+        gap_diagnostic(source, facts, cursor, start, config_surface, allow_reserved_identifiers, depth, tables, diagnostics)
+        text: intern_token_source(tables, kind, source, start, end)
+        built: payload_for(kind, source, facts, index, text, config_surface, allow_reserved_identifiers, depth, tables, diagnostics)
+        if built.keep -> tokens.push(Token{kind: kind, span: Span{start: start, end: end}, text: text, decoded: built.decoded, literal: built.literal})
         cursor = end
         index += 1
     }
-    gap_diagnostic(source, facts, cursor, to, config_surface, allow_reserved_identifiers, depth, &tables, &diagnostics)
+    gap_diagnostic(source, facts, cursor, to, config_surface, allow_reserved_identifiers, depth, tables, diagnostics)
     // An interpolation's nested source is a copy of bytes the depth-0 range
     // already covers.
-    if depth == 0 -> lexer_report_bidi_controls(source, from, to, &diagnostics)
-    LexedTokens{tokens: ^tokens, diagnostics: ^diagnostics}
+    if depth == 0 -> lexer_report_bidi_controls(source, from, to, diagnostics)
+    LexedTokens{tokens: tokens.move(), diagnostics: diagnostics.move()}
 }
 
 // A literal bidirectional control (U+202A-U+202E, U+2066-U+2069) starts at
@@ -470,7 +470,7 @@ lexer_report_bidi_controls: fn(source: [U8], from: Int, to: Int, diagnostics: &[
     loop at < to {
         if byte_at(source, at) == 226 && lexer_bidi_control_at(source, at) {
             row: diagnostic_registry_row("E0088") ?? panic("E0088 has no registry row")
-            add_diagnostic(&diagnostics, row.code, at, at + 3, row.what.replace("{{character}}", codepoint_hex(scalar_codepoint(source, at, 3))), row.why, row.fix)
+            add_diagnostic(diagnostics, row.code, at, at + 3, row.what.replace("{{character}}", codepoint_hex(scalar_codepoint(source, at, 3))), row.why, row.fix)
             at += 3
             next
         }
@@ -482,25 +482,25 @@ lexer_report_bidi_controls: fn(source: [U8], from: Int, to: Int, diagnostics: &[
 lex_payload_at_depth: fn(source: [U8], config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, tables: &TokenTables) -> LexedTokens {
     facts: raw_token_facts(source, config_surface)
     unused := [Diagnostic]{}
-    lex_payload_from_facts(source, facts, [Int]{}, config_surface, allow_reserved_identifiers, depth, 0, source.len(), &tables, &unused)
+    lex_payload_from_facts(source, facts, [Int]{}, config_surface, allow_reserved_identifiers, depth, 0, source.len(), tables, unused)
 }
 
 lex_expression: fn(source: [U8], start: Int, end: Int, config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, span: Span, tables: &TokenTables, diagnostics: &[Diagnostic]) -> [Token] {
     if depth >= MAX_INTERPOLATION_DEPTH {
-        add_diagnostic(&diagnostics, "E1403", span.start, span.end, "source nesting exceeds the supported limit", "interpolated expressions are lexed as nested Jet source", "pull inner parts out into named bindings or helper functions")
+        add_diagnostic(diagnostics, "E1403", span.start, span.end, "source nesting exceeds the supported limit", "interpolated expressions are lexed as nested Jet source", "pull inner parts out into named bindings or helper functions")
         return [Token]{}
     }
     nested_source := bytes_slice(source, start, end)
-    nested := lex_payload_at_depth(nested_source, false, allow_reserved_identifiers, depth + 1, &tables)
-    nested_diagnostics := ^nested.diagnostics
-    loop source_diagnostic in ^nested_diagnostics {
-        diagnostic := ^source_diagnostic
-        shifted_diagnostic(&diagnostic, start)
-        &diagnostics.push(^diagnostic)
+    nested := lex_payload_at_depth(nested_source, false, allow_reserved_identifiers, depth + 1, tables)
+    nested_diagnostics := nested.diagnostics.move()
+    loop source_diagnostic in nested_diagnostics.move() {
+        diagnostic := source_diagnostic.move()
+        shifted_diagnostic(diagnostic, start)
+        diagnostics.push(diagnostic)
     }
     index := 0
     loop index < nested.tokens.len() {
-        token_shift_spans(&nested.tokens[index], start, &tables.literals)
+        token_shift_spans(nested.tokens[index], start, tables.literals)
         index += 1
     }
     nested.tokens
@@ -594,11 +594,11 @@ interpolation_end: fn(source: [U8], start: Int, limit: Int) -> Int Never! {
 // long literal cost quadratic time. Only ASCII escape bytes are pushed one by
 // one (a lone byte >= 128 is no UTF-8 text); scalars are copied whole.
 push_ascii_byte: fn(out: &[U8], value: Int) Never! {
-    if value >= 0 && value < 128 -> &out.push(U8{value})
+    if value >= 0 && value < 128 -> out.push(U8{value})
 }
 
 push_text: fn(out: &[U8], text: String) Never! {
-    loop byte in text.bytes() -> &out.push(byte)
+    loop byte in text.bytes() -> out.push(byte)
 }
 
 text_from_bytes: fn(bytes: [U8]) -> String Never! {
@@ -606,7 +606,7 @@ text_from_bytes: fn(bytes: [U8]) -> String Never! {
 }
 
 append_text_part: fn(parts: &[StringPart], start: Int, end: Int, text: Name) Never! {
-    &parts.push(StringPart{
+    parts.push(StringPart{
         kind: STRING_PART_TEXT,
         span: Span{start: start, end: end},
         text: text,
@@ -637,26 +637,26 @@ decode_string_content: fn(source: [U8], start: Int, end: Int, triple: Bool, inde
         value: byte_at(source, cursor)
         // Plain ASCII text bytes copy through inline.
         if value >= 0 && value < 128 && value != 10 && value != 92 && value != 123 && value != 125 {
-            &literal.push(U8{value})
-            &decoded.push(U8{value})
+            literal.push(U8{value})
+            decoded.push(U8{value})
             cursor += 1
             next
         }
         if value == 10 {
-            &literal.push(U8{10})
-            &decoded.push(U8{10})
+            literal.push(U8{10})
+            decoded.push(U8{10})
             cursor += 1
             if triple -> at_line_start = true
             next
         }
         if value == 92 {
             if raw_head {
-                &literal.push(U8{92})
-                &decoded.push(U8{92})
+                literal.push(U8{92})
+                decoded.push(U8{92})
                 if {
                     byte_at(source, cursor + 1) == 34 -> {
-                        &literal.push(U8{34})
-                        &decoded.push(U8{34})
+                        literal.push(U8{34})
+                        decoded.push(U8{34})
                         cursor += 2
                     }
                     else -> {
@@ -671,10 +671,10 @@ decode_string_content: fn(source: [U8], start: Int, end: Int, triple: Bool, inde
                 low: hex_value(byte_at(source, cursor + 3))
                 if high >= 0 && low >= 0 && cursor + 3 < end {
                     if literal.len() > 0 {
-                        append_text_part(&parts, literal_start, cursor, name_intern_bytes(&tables.names, literal, 0, literal.len()))
+                        append_text_part(parts, literal_start, cursor, name_intern_bytes(tables.names, literal, 0, literal.len()))
                         literal = [U8]{}
                     }
-                    &parts.push(StringPart{
+                    parts.push(StringPart{
                         kind: STRING_PART_BYTE,
                         span: Span{start: cursor, end: cursor + 4},
                         text: name_empty(),
@@ -685,7 +685,7 @@ decode_string_content: fn(source: [U8], start: Int, end: Int, triple: Bool, inde
                     literal_start = cursor
                     next
                 }
-                add_diagnostic(&diagnostics, "E0001", cursor, cursor + 4, "`\\x` needs two hexadecimal digits", "a byte escape writes one byte as `\\xNN`, where both digits are hexadecimal", "write two hexadecimal digits after `\\x`, for example `\\x00`")
+                add_diagnostic(diagnostics, "E0001", cursor, cursor + 4, "`\\x` needs two hexadecimal digits", "a byte escape writes one byte as `\\xNN`, where both digits are hexadecimal", "write two hexadecimal digits after `\\x`, for example `\\x00`")
                 cursor += 2
                 next
             }
@@ -697,39 +697,39 @@ decode_string_content: fn(source: [U8], start: Int, end: Int, triple: Bool, inde
                     escape_text: bytes_text(source, cursor + 1, escape_end)
                     what := "`\\{escape_text}` isn't an escape Jet knows"
                     why: "inside quoted text, `\\` starts an escape: `\\n` (new line), `\\r` (carriage return), `\\t` (tab), `\\\"` (quote), `\\\\` (backslash)"
-                    add_diagnostic(&diagnostics, "E0001", cursor, escape_end, what, why, "write `\\\\` for a real backslash")
+                    add_diagnostic(diagnostics, "E0001", cursor, escape_end, what, why, "write `\\\\` for a real backslash")
                 }
                 else -> {
-                    push_ascii_byte(&literal, escaped)
-                    push_ascii_byte(&decoded, escaped)
+                    push_ascii_byte(literal, escaped)
+                    push_ascii_byte(decoded, escaped)
                 }
             }
             cursor = escape_end
             next
         }
         if value == 123 && byte_at(source, cursor + 1) == 123 {
-            &literal.push(U8{123})
-            &decoded.push(U8{123})
+            literal.push(U8{123})
+            decoded.push(U8{123})
             cursor += 2
             next
         }
         if value == 125 && byte_at(source, cursor + 1) == 125 {
-            &literal.push(U8{125})
-            &decoded.push(U8{125})
+            literal.push(U8{125})
+            decoded.push(U8{125})
             cursor += 2
             next
         }
         // A `\$` template payload (`\${…}`) is downstream text, copied byte
         // for byte as Rust's lexer keeps it.
         if value == 123 && literal.len() >= 2 && Int.from_u8(literal[literal.len() - 2]) == 92 && Int.from_u8(literal[literal.len() - 1]) == 36 {
-            &literal.push(U8{123})
-            &decoded.push(U8{123})
+            literal.push(U8{123})
+            decoded.push(U8{123})
             cursor += 1
             nesting := 1
             loop cursor < end && nesting > 0 {
                 next_byte: byte_at(source, cursor)
-                &literal.push(U8{(next_byte).bit_and(255)})
-                &decoded.push(U8{(next_byte).bit_and(255)})
+                literal.push(U8{(next_byte).bit_and(255)})
+                decoded.push(U8{(next_byte).bit_and(255)})
                 if next_byte == 123 -> nesting += 1
                 if next_byte == 125 -> nesting -= 1
                 cursor += 1
@@ -737,35 +737,35 @@ decode_string_content: fn(source: [U8], start: Int, end: Int, triple: Bool, inde
             next
         }
         if value == 125 {
-            add_diagnostic(&diagnostics, "E0001", cursor, cursor + 1, "a lone `}}` inside quoted text", "inside quoted text, `{{` and `}}` mark an interpolated value, so a literal brace is doubled", "write `}}}}` to print a `}}`")
+            add_diagnostic(diagnostics, "E0001", cursor, cursor + 1, "a lone `}}` inside quoted text", "inside quoted text, `{{` and `}}` mark an interpolated value, so a literal brace is doubled", "write `}}}}` to print a `}}`")
             cursor += 1
             next
         }
         if value == 123 {
             close: interpolation_end(source, cursor, end)
             if close < 0 {
-                add_diagnostic(&diagnostics, "E0002", cursor, end, "this `{{` never gets a matching `}}`", "`{{` inside quoted text starts an interpolated value and needs a closing `}}` before the text ends; escaped braces use `{{{{`/`}}}}`, while raw backtick strings keep braces literal", "add a `}}` after the value, write `{{{{` for an escaped brace, or write the text as ``…`` for raw text")
+                add_diagnostic(diagnostics, "E0002", cursor, end, "this `{{` never gets a matching `}}`", "`{{` inside quoted text starts an interpolated value and needs a closing `}}` before the text ends; escaped braces use `{{{{`/`}}}}`, while raw backtick strings keep braces literal", "add a `}}` after the value, write `{{{{` for an escaped brace, or write the text as ``…`` for raw text")
                 valid = false
                 cursor = end
                 break
             }
             if only_whitespace(source, cursor + 1, close) {
-                add_diagnostic(&diagnostics, "E0003", cursor, close + 1, "there's nothing inside this `{{ }}` to show", "interpolation puts a value into the text, so the braces need a value", "put a value inside, like `{{name}}`, or write `{{{{}}}}` for literal braces")
+                add_diagnostic(diagnostics, "E0003", cursor, close + 1, "there's nothing inside this `{{ }}` to show", "interpolation puts a value into the text, so the braces need a value", "put a value inside, like `{{name}}`, or write `{{{{}}}}` for literal braces")
                 cursor = close + 1
                 literal_start = cursor
                 next
             }
             if literal.len() > 0 {
-                append_text_part(&parts, literal_start, cursor, name_intern_bytes(&tables.names, literal, 0, literal.len()))
+                append_text_part(parts, literal_start, cursor, name_intern_bytes(tables.names, literal, 0, literal.len()))
                 literal = [U8]{}
             }
             expr_start := cursor + 1
             part_span := Span{start: cursor, end: close + 1}
-            children: lex_expression(source, expr_start, close, config_surface, allow_reserved_identifiers, depth, part_span, &tables, &diagnostics)
-            &parts.push(StringPart{
+            children: lex_expression(source, expr_start, close, config_surface, allow_reserved_identifiers, depth, part_span, tables, diagnostics)
+            parts.push(StringPart{
                 kind: STRING_PART_INTERPOLATION,
                 span: part_span,
-                text: intern_source(&tables, source, expr_start, close),
+                text: intern_source(tables, source, expr_start, close),
                 byte: 0,
                 tokens: children,
             })
@@ -775,18 +775,18 @@ decode_string_content: fn(source: [U8], start: Int, end: Int, triple: Bool, inde
             next
         }
         if value >= 0 && value < 128 {
-            &literal.push(U8{value})
-            &decoded.push(U8{value})
+            literal.push(U8{value})
+            decoded.push(U8{value})
             cursor += 1
             next
         }
         width: utf8_width(source, cursor)
         scalar: bytes_text(source, cursor, cursor + width)
-        push_text(&literal, scalar)
-        push_text(&decoded, scalar)
+        push_text(literal, scalar)
+        push_text(decoded, scalar)
         cursor += width
     }
-    if literal.len() > 0 || parts.len() == 0 -> append_text_part(&parts, literal_start, end, name_intern_bytes(&tables.names, literal, 0, literal.len()))
+    if literal.len() > 0 || parts.len() == 0 -> append_text_part(parts, literal_start, end, name_intern_bytes(tables.names, literal, 0, literal.len()))
     (decoded: text_from_bytes(decoded), interpolations: interpolations, parts: parts, valid: valid)
 }
 
@@ -815,7 +815,7 @@ decode_raw_string: fn(text: String, source_start: Int, tables: &TokenTables) -> 
     }
     decoded: bytes_text(raw, begin, finish)
     parts := [StringPart]{}
-    append_text_part(&parts, source_start + begin, source_start + finish, name_intern(&tables.names, decoded))
+    append_text_part(parts, source_start + begin, source_start + finish, name_intern(tables.names, decoded))
     (decoded: decoded, parts: parts)
 }
 
@@ -829,7 +829,7 @@ check_triple_delimiter_text: fn(source: [U8], begin: Int, end: Int, position: St
     last := first
     loop last < finish && byte_at(source, last) != 32 && byte_at(source, last) != 9 -> last += utf8_width(source, last)
     row: diagnostic_registry_row("E0084") ?? panic("E0084 has no registry row")
-    add_diagnostic(&diagnostics, row.code, first, last, row.what.replace("{{position}}", position), row.why, row.fix)
+    add_diagnostic(diagnostics, row.code, first, last, row.what.replace("{{position}}", position), row.why, row.fix)
 }
 
 decode_string: fn(source: [U8], facts: [Int], index: Int, start: Int, end: Int, config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, tables: &TokenTables, diagnostics: &[Diagnostic]) -> (decoded: String, interpolations: Int, parts: [StringPart], valid: Bool) {
@@ -839,7 +839,7 @@ decode_string: fn(source: [U8], facts: [Int], index: Int, start: Int, end: Int, 
         body_end := end - 3
         body: slice_text(source, body_start, body_end)
         parts := [StringPart]{}
-        append_text_part(&parts, body_start, body_end, name_intern(&tables.names, body))
+        append_text_part(parts, body_start, body_end, name_intern(tables.names, body))
         return (decoded: body, interpolations: 0, parts: parts, valid: true)
     }
     modes: string_head_modes(source, facts, index)
@@ -859,14 +859,14 @@ decode_string: fn(source: [U8], facts: [Int], index: Int, start: Int, end: Int, 
         content_start = open_end
         cursor := open_end
         loop cursor < close && byte_at(source, cursor) != 10 -> cursor += utf8_width(source, cursor)
-        check_triple_delimiter_text(source, open_end, cursor, "after the opening", &diagnostics)
-        check_triple_delimiter_text(source, close_line_start, close, "before the closing", &diagnostics)
+        check_triple_delimiter_text(source, open_end, cursor, "after the opening", diagnostics)
+        check_triple_delimiter_text(source, close_line_start, close, "before the closing", diagnostics)
         if cursor < close && byte_at(source, cursor) == 10 -> content_start = cursor + 1
         content_end = close_line_start
         if content_end > content_start && byte_at(source, content_end - 1) == 10 -> content_end -= 1
         if content_end < content_start -> content_end = content_start
     }
-    decode_string_content(source, content_start, content_end, triple, indent, modes.raw_head, modes.byte_head, config_surface, allow_reserved_identifiers, depth, &tables, &diagnostics)
+    decode_string_content(source, content_start, content_end, triple, indent, modes.raw_head, modes.byte_head, config_surface, allow_reserved_identifiers, depth, tables, diagnostics)
 }
 
 decode_char: fn(text: String, source_start: Int, diagnostics: &[Diagnostic]) -> String {
@@ -877,7 +877,7 @@ decode_char: fn(text: String, source_start: Int, diagnostics: &[Diagnostic]) -> 
         if byte_at(raw, 1 + width) != 39 {
             span_end := source_start + 1 + width
             if span_end > source_start + raw.len() -> span_end = source_start + raw.len()
-            add_diagnostic(&diagnostics, "E0002", source_start, span_end, "a character literal must be exactly one character", "write `'x'` with a single character between the quotes", "use a String for longer text")
+            add_diagnostic(diagnostics, "E0002", source_start, span_end, "a character literal must be exactly one character", "write `'x'` with a single character between the quotes", "use a String for longer text")
         }
         return bytes_text(raw, 1, 1 + width)
     }
@@ -892,12 +892,12 @@ decode_char: fn(text: String, source_start: Int, diagnostics: &[Diagnostic]) -> 
         escape_text: bytes_text(raw, 2, escape_end)
         what := "`\\{escape_text}` isn't an escape Jet knows"
         why: "inside a character literal, `\\` starts an escape: `\\n`, `\\r`, `\\t`, `\\'`, `\\\\`"
-        add_diagnostic(&diagnostics, "E0001", source_start + 1, source_start + escape_end, what, why, "use a supported escape or a plain character")
+        add_diagnostic(diagnostics, "E0001", source_start + 1, source_start + escape_end, what, why, "use a supported escape or a plain character")
     }
     if byte_at(raw, escape_end) != 39 {
         span_end := source_start + escape_end
         if span_end > source_start + raw.len() -> span_end = source_start + raw.len()
-        add_diagnostic(&diagnostics, "E0002", source_start, span_end, "a character literal must be exactly one character", "write `'x'` with a single character between the quotes", "use a String for longer text")
+        add_diagnostic(diagnostics, "E0002", source_start, span_end, "a character literal must be exactly one character", "write `'x'` with a single character between the quotes", "use a String for longer text")
     }
     if escaped < 0 -> return "?"
     String.from_bytes([U8]{U8{escaped}}) ?? ""
@@ -909,7 +909,7 @@ numeric_payload: fn(kind: Int, source: [U8], start: Int, end: Int, tables: &Toke
     if bounded_end < start || bounded_end > end -> bounded_end = end
     number_text: slice_text(source, start, bounded_end)
     suffix := name_empty()
-    if kind == K_UNIT_NUMBER -> suffix = intern_source(&tables, source, bounded_end, end)
+    if kind == K_UNIT_NUMBER -> suffix = intern_source(tables, source, bounded_end, end)
     marker: byte_at(source, start + 1)
     radix := if marker == {
         120 | 88 -> 16
@@ -927,9 +927,9 @@ numeric_payload: fn(kind: Int, source: [U8], start: Int, end: Int, tables: &Toke
         }
     }
     if base_prefix && !has_base_digit {
-        add_diagnostic(&diagnostics, "E0001", start, end, "this number prefix has no digits after it", "`0x`, `0o`, and `0b` must be followed by digits, e.g. `0xFF`, `0o17`, `0b1010`", "add digits after the base prefix")
-        decoded: intern_source(&tables, source, start, bounded_end)
-        return (decoded: decoded, literal: literal_row(&tables, number_literal(Val(0), None, name_empty())))
+        add_diagnostic(diagnostics, "E0001", start, end, "this number prefix has no digits after it", "`0x`, `0o`, and `0b` must be followed by digits, e.g. `0xFF`, `0o17`, `0b1010`", "add digits after the base prefix")
+        decoded: intern_source(tables, source, start, bounded_end)
+        return (decoded: decoded, literal: literal_row(tables, number_literal(Val(0), None, name_empty())))
     }
     is_float := if kind == {
         K_FLOAT -> true
@@ -937,11 +937,11 @@ numeric_payload: fn(kind: Int, source: [U8], start: Int, end: Int, tables: &Toke
         else -> false
     }
     if is_float {
-        decoded: name_intern(&tables.names, decimal_number_spelling(number_text))
-        return (decoded: decoded, literal: literal_row(&tables, number_literal(None, Val(parse_float_literal(number_text) ?? Float{0}), suffix)))
+        decoded: name_intern(tables.names, decimal_number_spelling(number_text))
+        return (decoded: decoded, literal: literal_row(tables, number_literal(None, Val(parse_float_literal(number_text) ?? Float{0}), suffix)))
     }
-    decoded: if kind == K_UNIT_NUMBER -> name_intern(&tables.names, decimal_number_spelling(number_text)) else -> intern_source(&tables, source, start, bounded_end)
-    (decoded: decoded, literal: literal_row(&tables, number_literal(Val(parse_integer_literal(number_text) ?? 0), None, suffix)))
+    decoded: if kind == K_UNIT_NUMBER -> name_intern(tables.names, decimal_number_spelling(number_text)) else -> intern_source(tables, source, start, bounded_end)
+    (decoded: decoded, literal: literal_row(tables, number_literal(Val(parse_integer_literal(number_text) ?? 0), None, suffix)))
 }
 
 // Identifier check: reserved double-underscore names. No identifier is
@@ -953,7 +953,7 @@ identifier_respelling: fn(source: [U8], start: Int, end: Int, allow_reserved_ide
     if !allow_reserved_identifiers && width >= 2 && byte_at(source, start) == 95 && byte_at(source, start + 1) == 95 {
         text: slice_text(source, start, end)
         if text == "__bindgen__" && start > 0 && byte_at(source, start - 1) == 46 -> return None
-        add_diagnostic(&diagnostics, "E0067", start, end, "`{text}` is reserved for Jet", "double-underscore names belong to the compiler, generated binders, debugger, serializer, and tools", "rename it without the second leading underscore")
+        add_diagnostic(diagnostics, "E0067", start, end, "`{text}` is reserved for Jet", "double-underscore names belong to the compiler, generated binders, debugger, serializer, and tools", "rename it without the second leading underscore")
     }
     None
 }
@@ -986,17 +986,17 @@ codepoint_hex: fn(value: Int) -> String Never! {
     remaining := value
     loop remaining > 0 {
         digit: remaining - remaining /% 16 * 16
-        &digits.push(digit)
+        digits.push(digit)
         remaining = remaining /% 16
     }
-    loop digits.len() < 4 -> &digits.push(0)
+    loop digits.len() < 4 -> digits.push(0)
     out := [U8]{}
     cursor := digits.len() - 1
     loop cursor >= 0 {
         digit: digits[cursor]
         byte := 48 + digit
         if digit >= 10 -> byte = 55 + digit
-        &out.push(U8{byte})
+        out.push(U8{byte})
         cursor -= 1
     }
     hex: String.from_bytes(out) ?? "0000"
@@ -1038,7 +1038,7 @@ gap_diagnostic: fn(source: [U8], facts: [Int], start: Int, end: Int, config_surf
         }
         value: byte_at(source, cursor)
         if value == 35 && byte_at(source, cursor + 1) == 33 && byte_at(source, cursor + 2) == 47 {
-            add_diagnostic(&diagnostics, "E0042", cursor, cursor + 2, "a shebang line is only recognized at the very start of the file", "the operating system reads launch metadata only from byte 0; Jet does not treat another `#!` as a launch line", "move `#!...` to line 1, or delete it")
+            add_diagnostic(diagnostics, "E0042", cursor, cursor + 2, "a shebang line is only recognized at the very start of the file", "the operating system reads launch metadata only from byte 0; Jet does not treat another `#!` as a launch line", "move `#!...` to line 1, or delete it")
             loop cursor < end && byte_at(source, cursor) != 10 -> cursor += 1
             if cursor < end -> cursor += 1
             next
@@ -1049,10 +1049,10 @@ gap_diagnostic: fn(source: [U8], facts: [Int], start: Int, end: Int, config_surf
             if triple {
                 if {
                     raw_foreign_body_at(source, facts, index) -> {
-                        add_diagnostic(&diagnostics, "E0002", cursor, source.len(), "this raw foreign body never gets a closing `\"\"\"`", "a `#FFI` body preserves everything between its opening and closing `\"\"\"`", "add a closing `\"\"\"` after the foreign source")
+                        add_diagnostic(diagnostics, "E0002", cursor, source.len(), "this raw foreign body never gets a closing `\"\"\"`", "a `#FFI` body preserves everything between its opening and closing `\"\"\"`", "add a closing `\"\"\"` after the foreign source")
                     }
                     else -> {
-                        add_diagnostic(&diagnostics, "E0002", cursor, source.len(), "this multi-line text never gets a closing `\"\"\"`", "a multi-line string starts and ends with `\"\"\"`", "add a closing `\"\"\"` on its own line")
+                        add_diagnostic(diagnostics, "E0002", cursor, source.len(), "this multi-line text never gets a closing `\"\"\"`", "a multi-line string starts and ends with `\"\"\"`", "add a closing `\"\"\"` on its own line")
                     }
                 }
                 return
@@ -1063,8 +1063,8 @@ gap_diagnostic: fn(source: [U8], facts: [Int], start: Int, end: Int, config_surf
             modes: string_head_modes(source, facts, index)
             scanned: scan_plain_string_end(source, cursor, modes.raw_head)
             stop: if scanned < 0 -> -scanned - 1 else -> scanned
-            body: decode_string_content(source, cursor + 1, stop, false, 0, modes.raw_head, modes.byte_head, config_surface, allow_reserved_identifiers, depth, &tables, &diagnostics)
-            if body.valid -> add_diagnostic(&diagnostics, "E0002", cursor, stop, "this text never gets a closing quote", "a piece of text must start and end with a `\"` on the same line", "add a closing `\"` before the end of the line")
+            body: decode_string_content(source, cursor + 1, stop, false, 0, modes.raw_head, modes.byte_head, config_surface, allow_reserved_identifiers, depth, tables, diagnostics)
+            if body.valid -> add_diagnostic(diagnostics, "E0002", cursor, stop, "this text never gets a closing quote", "a piece of text must start and end with a `\"` on the same line", "add a closing `\"` before the end of the line")
             cursor = stop
             next
         }
@@ -1072,19 +1072,19 @@ gap_diagnostic: fn(source: [U8], facts: [Int], start: Int, end: Int, config_surf
             fence := 0
             loop byte_at(source, cursor + fence) == 96 -> fence += 1
             plural := if fence == 1 -> "" else -> "s"
-            add_diagnostic(&diagnostics, "E0002", cursor, source.len(), "this raw text never gets a closing backtick fence", "a raw string closes with a backtick run that has the same length as its opening run", "add a closing fence of {fence} backtick{plural}")
+            add_diagnostic(diagnostics, "E0002", cursor, source.len(), "this raw text never gets a closing backtick fence", "a raw string closes with a backtick run that has the same length as its opening run", "add a closing fence of {fence} backtick{plural}")
             return
         }
         if value == 39 {
             if cursor + 1 >= source.len() -> return
-            add_diagnostic(&diagnostics, "E0002", cursor, source.len(), "a character literal must be exactly one character", "write `'x'` with a single character between the quotes", "use a String for longer text")
+            add_diagnostic(diagnostics, "E0002", cursor, source.len(), "a character literal must be exactly one character", "write `'x'` with a single character between the quotes", "use a String for longer text")
             return
         }
         width: utf8_width(source, cursor)
         // A bidirectional control has its own report (E0088).
         if !lexer_bidi_control_at(source, cursor) {
             character: printable_character(source, cursor, width)
-            add_diagnostic(&diagnostics, "E0001", cursor, cursor + width, "the character `{character}` doesn't mean anything here (yet)", "unprintable characters are shown as `\\0`, `\\t`, or `U+XXXX` so you can identify them", "remove it, or use supported syntax")
+            add_diagnostic(diagnostics, "E0001", cursor, cursor + width, "the character `{character}` doesn't mean anything here (yet)", "unprintable characters are shown as `\\0`, `\\t`, or `U+XXXX` so you can identify them", "remove it, or use supported syntax")
         }
         cursor += width
     }
@@ -1096,8 +1096,8 @@ payload_for: fn(kind: Int, source: [U8], facts: [Int], index: Int, text: Name, c
     start: facts[index * 4 + 1]
     end: facts[index * 4 + 2]
     if kind == K_IDENT {
-        decoded: if identifier_respelling(source, start, end, allow_reserved_identifiers, &diagnostics) == {
-            .Val(respelled) -> name_intern(&tables.names, respelled)
+        decoded: if identifier_respelling(source, start, end, allow_reserved_identifiers, diagnostics) == {
+            .Val(respelled) -> name_intern(tables.names, respelled)
             .None -> text
         }
         return (decoded: decoded, keep: true, literal: -1)
@@ -1109,28 +1109,28 @@ payload_for: fn(kind: Int, source: [U8], facts: [Int], index: Int, text: Name, c
         else -> false
     }
     if is_numeric_kind {
-        number: numeric_payload(kind, source, start, end, &tables, &diagnostics)
+        number: numeric_payload(kind, source, start, end, tables, diagnostics)
         return (decoded: number.decoded, keep: true, literal: number.literal)
     }
     if kind == K_STR {
-        decoded: decode_string(source, facts, index, start, end, config_surface, allow_reserved_identifiers, depth, &tables, &diagnostics)
+        decoded: decode_string(source, facts, index, start, end, config_surface, allow_reserved_identifiers, depth, tables, diagnostics)
         if !decoded.valid -> return (decoded: name_empty(), keep: false, literal: -1)
-        return (decoded: name_intern(&tables.names, decoded.decoded), keep: true, literal: literal_row(&tables, text_literal(decoded.interpolations, decoded.parts)))
+        return (decoded: name_intern(tables.names, decoded.decoded), keep: true, literal: literal_row(tables, text_literal(decoded.interpolations, decoded.parts)))
     }
     if kind == K_RAW_STR {
-        raw: decode_raw_string(slice_text(source, start, end), start, &tables)
-        return (decoded: name_intern(&tables.names, raw.decoded), keep: true, literal: literal_row(&tables, text_literal(0, raw.parts)))
+        raw: decode_raw_string(slice_text(source, start, end), start, tables)
+        return (decoded: name_intern(tables.names, raw.decoded), keep: true, literal: literal_row(tables, text_literal(0, raw.parts)))
     }
-    if kind == K_CHAR -> return (decoded: name_intern(&tables.names, decode_char(slice_text(source, start, end), start, &diagnostics)), keep: true, literal: -1)
+    if kind == K_CHAR -> return (decoded: name_intern(tables.names, decode_char(slice_text(source, start, end), start, diagnostics)), keep: true, literal: -1)
     if kind == K_BLOCK_COMMENT && scan_block_comment_end(source, start) < 0 {
-        add_diagnostic(&diagnostics, "E0002", start, end, "this `/*` comment never gets a closing `*/`", "a block comment starts with `/*` and runs until a matching `*/`", "add a `*/` to close the comment")
+        add_diagnostic(diagnostics, "E0002", start, end, "this `/*` comment never gets a closing `*/`", "a block comment starts with `/*` and runs until a matching `*/`", "add a `*/` to close the comment")
     }
     (decoded: text, keep: true, literal: -1)
 }
 
 lexed_from: fn(source: [U8], config_surface: Bool, allow_reserved_identifiers: Bool) -> Lexed {
     tables := token_tables()
-    raw: lex_payload_at_depth(source, config_surface, allow_reserved_identifiers, 0, &tables)
+    raw: lex_payload_at_depth(source, config_surface, allow_reserved_identifiers, 0, tables)
     Lexed{tokens: raw.tokens, tables: tables, diagnostics: raw.diagnostics}
 }
 

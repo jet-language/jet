@@ -12,7 +12,7 @@ s2_syntax_paths: fn(root: String) -> [String] {
     kind: s2_syntax_files_api.stat(root) ?? return out
     if kind.is_symlink -> return out
     if kind.is_file {
-        &out.push(root)
+        out.push(root)
         return out
     }
     if !kind.is_dir -> return out
@@ -26,7 +26,7 @@ s2_syntax_paths: fn(root: String) -> [String] {
         }
         if entry.is_dir && (omit || name.starts_with("target-") || name.starts_with("build-") || name.starts_with("result-")) -> next
         children: s2_syntax_paths(entry.path)
-        loop child in children -> &out.push(child)
+        loop child in children -> out.push(child)
     }
     out
 }
@@ -85,7 +85,7 @@ s2_syntax_live_surface_has_no_retired_spellings: fn() {
             loop (index, line) in source.lines() {
                 loop needle in forbidden {
                     if needle == "pure fn" && !path.starts_with("Docs") -> next
-                    if s2_syntax_forbidden(line, needle) -> &failures.push("{path}:{index + 1} contains retired {needle}")
+                    if s2_syntax_forbidden(line, needle) -> failures.push("{path}:{index + 1} contains retired {needle}")
                 }
             }
         }
@@ -144,9 +144,9 @@ s2_syntax_old_binding_migration_paths_stay_removed: fn() {
                 allowed: path.ends_with("tests/ui/foreign_declaration_binding.jet") && s2_syntax_old_binding(line)
                 if allowed -> next
                 loop code in codes {
-                    if line.contains(code) -> &failures.push("{path}:{index + 1} contains retired binding diagnostic {code}")
+                    if line.contains(code) -> failures.push("{path}:{index + 1} contains retired binding diagnostic {code}")
                 }
-                if s2_syntax_old_binding(line) -> &failures.push("{path}:{index + 1} contains retired binding spelling")
+                if s2_syntax_old_binding(line) -> failures.push("{path}:{index + 1} contains retired binding spelling")
             }
         }
     }
@@ -219,7 +219,7 @@ s2_syntax_syntax_status_matrix_covers_unbuilt_notes: fn() {
         context := [String]{}
         at := start
         loop at < end {
-            &context.push(lines[at])
+            context.push(lines[at])
             at = at + 1
         }
         paragraph: context.join("\n")
@@ -306,7 +306,7 @@ s2_syntax_artifact_extensions_are_one_closed_kind_specific_family: fn() {
             source: s2_syntax_files_api.read(path) ?? next
             loop (index, line) in source.lines() {
                 loop suffix in retired {
-                    if line.contains(suffix) && !line.contains("jet.jproof") -> &failures.push("{path}:{index + 1} retains retired artifact suffix {suffix}")
+                    if line.contains(suffix) && !line.contains("jet.jproof") -> failures.push("{path}:{index + 1} retains retired artifact suffix {suffix}")
                 }
             }
         }

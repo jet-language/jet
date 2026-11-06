@@ -91,11 +91,11 @@ deflate: fn(data: [U8]) -> [U8] ArchiveError! {
     out := [U8]{}
     i := 0
     if data.len() == 0 {
-        &out.push(U8{1})
-        &out.push(U8{0})
-        &out.push(U8{0})
-        &out.push(U8{255})
-        &out.push(U8{255})
+        out.push(U8{1})
+        out.push(U8{0})
+        out.push(U8{0})
+        out.push(U8{255})
+        out.push(U8{255})
         return Ok(out)
     }
     loop i < data.len() {
@@ -104,13 +104,13 @@ deflate: fn(data: [U8]) -> [U8] ArchiveError! {
         if n > 65535 -> n = 65535
         last := 0
         if i + n >= data.len() -> last = 1
-        &out.push(to_u8(last))
-        &out.push(to_u8(n))
-        &out.push(to_u8(n >> 8))
+        out.push(to_u8(last))
+        out.push(to_u8(n))
+        out.push(to_u8(n >> 8))
         inv := 65535 - n
-        &out.push(to_u8(inv))
-        &out.push(to_u8(inv >> 8))
-        loop k in 0..<n -> &out.push(data[i + k])
+        out.push(to_u8(inv))
+        out.push(to_u8(inv >> 8))
+        loop k in 0..<n -> out.push(data[i + k])
         i = i + n
     }
     Ok(out)
@@ -123,18 +123,18 @@ inflate: fn(data: [U8]) -> [U8] ArchiveError! {
     finished := false
     loop {
         if r.i >= r.data.len() && r.bit == 0 -> return Err(ArchiveError.Malformed)
-        bfinal: &r.get_bits_lsb(1)
-        btype: &r.get_bits_lsb(2)
+        bfinal: r.get_bits_lsb(1)
+        btype: r.get_bits_lsb(2)
         if r.bad -> return Err(ArchiveError.Malformed)
         if {
             btype == 0 -> {
-                &r.align_byte()
+                r.align_byte()
                 if r.i + 4 > r.data.len() -> return Err(ArchiveError.Malformed)
-                lo: &r.take_u8()
-                hi: &r.take_u8()
+                lo: r.take_u8()
+                hi: r.take_u8()
                 ln: (u8_int(lo)).bit_or((u8_int(hi) << 8))
-                nlo: &r.take_u8()
-                nhi: &r.take_u8()
+                nlo: r.take_u8()
+                nhi: r.take_u8()
                 nlen: (u8_int(nlo)).bit_or((u8_int(nhi) << 8))
                 if ((ln).bit_xor(nlen)) != 65535 || r.i + ln > r.data.len() {
                     return Err(ArchiveError.Malformed)
@@ -142,18 +142,18 @@ inflate: fn(data: [U8]) -> [U8] ArchiveError! {
                 if ln > C_MAX_OUTPUT - out.len() -> return Err(ArchiveError.Unsupported)
                 k := 0
                 loop k < ln {
-                    byte: &r.take_u8()
-                    &out.push(byte)
+                    byte: r.take_u8()
+                    out.push(byte)
                     k = k + 1
                 }
             }
             btype == 1 -> {
-                status: inflate_fixed(&r, &out)
+                status: inflate_fixed(r, out)
                 if status == C_INFLATE_UNSUPPORTED -> return Err(ArchiveError.Unsupported)
                 if status != C_INFLATE_OK -> return Err(ArchiveError.Malformed)
             }
             btype == 2 -> {
-                status: inflate_dynamic(&r, &out)
+                status: inflate_dynamic(r, out)
                 if status == C_INFLATE_UNSUPPORTED -> return Err(ArchiveError.Unsupported)
                 if status != C_INFLATE_OK -> return Err(ArchiveError.Malformed)
             }
@@ -182,11 +182,11 @@ compress: fn(data: [U8]) -> [U8] ArchiveError! {
     payload: deflate(data)
     checksum: adler32(data)
     out := [U8]{(U8{120}), (U8{156})}
-    loop byte in payload -> &out.push(byte)
-    &out.push(to_u8(checksum >> 24))
-    &out.push(to_u8(checksum >> 16))
-    &out.push(to_u8(checksum >> 8))
-    &out.push(to_u8(checksum))
+    loop byte in payload -> out.push(byte)
+    out.push(to_u8(checksum >> 24))
+    out.push(to_u8(checksum >> 16))
+    out.push(to_u8(checksum >> 8))
+    out.push(to_u8(checksum))
     Ok(out)
 }
 
@@ -206,7 +206,7 @@ slice_u8: fn(data: [U8], start: Int, end: Int) -> [U8] Never! {
     out := [U8]{}
     i := start
     loop i < end {
-        &out.push(data[i])
+        out.push(data[i])
         i = i + 1
     }
     out
@@ -228,7 +228,7 @@ zip_names_json: fn(archive: [U8]) -> String ArchiveError! {
         extra := escaped.len() + 2
         if !first -> extra = extra + 1
         if total + extra + 1 > C_MAX_JSON -> return Err(ArchiveError.Unsupported)
-        names_json_push(&out, escaped, first)
+        names_json_push(out, escaped, first)
         total = total + extra
         first = false
     }
@@ -260,7 +260,7 @@ zip_read: fn(reader: [U8], name: String) -> [U8] ArchiveError! {
 zip_write: fn(writer: [U8], name: String, data: [U8]) -> [U8] ArchiveError! {
     files := zip_parse_writer(writer)
     if files.len() >= C_MAX_ENTRIES -> return Err(ArchiveError.Unsupported)
-    &files.push(ZipFile{name: name, data: data})
+    files.push(ZipFile{name: name, data: data})
     zip_from_files(files)
 }
 
@@ -298,15 +298,15 @@ tar_add: fn(archive: [U8], name: String, data: [U8]) -> [U8] ArchiveError! {
         return Err(ArchiveError.Unsupported)
     }
     out := [U8]{}
-    loop i in 0..<base_end -> &out.push(archive[i])
+    loop i in 0..<base_end -> out.push(archive[i])
     if nb.len() > 100 {
         long_data := [U8]{}
-        loop b in nb -> &long_data.push(b)
-        &long_data.push(U8{0})
-        append_tar_record(&out, "././#LongLink", long_data, 76)
+        loop b in nb -> long_data.push(b)
+        long_data.push(U8{0})
+        append_tar_record(out, "././#LongLink", long_data, 76)
     }
-    append_tar_record(&out, name, data, 48)
-    append_tar_end(&out)
+    append_tar_record(out, name, data, 48)
+    append_tar_end(out)
     Ok(out)
 }
 
@@ -324,7 +324,7 @@ tar_get: fn(archive: [U8], name: String) -> [U8] ArchiveError! {
     loop i < archive.len() {
         if i + 512 > archive.len() -> return Err(ArchiveError.Malformed)
         hdr := [U8]{}
-        loop k in 0..<512 -> &hdr.push(archive[i + k])
+        loop k in 0..<512 -> hdr.push(archive[i + k])
         if tar_empty(hdr) {
             if !tar_end_valid(archive, i) -> return Err(ArchiveError.Malformed)
             saw_end = true
@@ -340,7 +340,7 @@ tar_get: fn(archive: [U8], name: String) -> [U8] ArchiveError! {
         if sz > C_MAX_OUTPUT -> return Err(ArchiveError.Unsupported)
         if i + sz > archive.len() -> return Err(ArchiveError.Malformed)
         body := [U8]{}
-        loop k in 0..<sz -> &body.push(archive[i + k])
+        loop k in 0..<sz -> body.push(archive[i + k])
         i += sz
         if sz % 512 != 0 {
             pad := 512 - (sz % 512)
@@ -394,7 +394,7 @@ tar_names_json: fn(archive: [U8]) -> String ArchiveError! {
     loop i < archive.len() {
         if i + 512 > archive.len() -> return Err(ArchiveError.Malformed)
         hdr := [U8]{}
-        loop k in 0..<512 -> &hdr.push(archive[i + k])
+        loop k in 0..<512 -> hdr.push(archive[i + k])
         if tar_empty(hdr) {
             if !tar_end_valid(archive, i) -> return Err(ArchiveError.Malformed)
             saw_end = true
@@ -410,7 +410,7 @@ tar_names_json: fn(archive: [U8]) -> String ArchiveError! {
         if sz > C_MAX_OUTPUT -> return Err(ArchiveError.Unsupported)
         if i + sz > archive.len() -> return Err(ArchiveError.Malformed)
         body := [U8]{}
-        loop k in 0..<sz -> &body.push(archive[i + k])
+        loop k in 0..<sz -> body.push(archive[i + k])
         i += sz
         if sz % 512 != 0 {
             pad := 512 - (sz % 512)
@@ -445,7 +445,7 @@ tar_names_json: fn(archive: [U8]) -> String ArchiveError! {
         extra := escaped.len() + 2
         if !first -> extra += 1
         if total + extra + 1 > C_MAX_JSON -> return Err(ArchiveError.Unsupported)
-        names_json_push(&out, escaped, first)
+        names_json_push(out, escaped, first)
         total += extra
         first = false
     }
@@ -456,15 +456,15 @@ tar_names_json: fn(archive: [U8]) -> String ArchiveError! {
 // The names JSON grows in one byte buffer: rebuilding a String per name made
 // listing an archive quadratic in the JSON size, minutes near C_MAX_JSON.
 names_json_push: fn(out: &[U8], escaped: String, first: Bool) Never! {
-    if !first -> &out.push(U8{44})
-    &out.push(U8{34})
-    loop b in escaped.bytes() -> &out.push(b)
-    &out.push(U8{34})
+    if !first -> out.push(U8{44})
+    out.push(U8{34})
+    loop b in escaped.bytes() -> out.push(b)
+    out.push(U8{34})
 }
 
 names_json_finish: fn(out: [U8]) -> String ArchiveError! {
     done := out
-    &done.push(U8{93})
+    done.push(U8{93})
     String.from_bytes(done) ?? return Err(ArchiveError.Malformed)
 }
 
@@ -494,56 +494,56 @@ zip_from_files: fn(files: [ZipFile]) -> [U8] ArchiveError! {
     out := [U8]{}
     offsets := [Int]{}
     loop f in files {
-        &offsets.push(out.len())
+        offsets.push(out.len())
         crc: crc32(f.data)
         nb: f.name.bytes()
-        put32(&out, 0x04034b50)
-        put16(&out, 20)
-        put16(&out, 2048)
-        put16(&out, 0)
-        put16(&out, 0)
-        put16(&out, 0)
-        put32(&out, crc)
-        put32(&out, f.data.len())
-        put32(&out, f.data.len())
-        put16(&out, nb.len())
-        put16(&out, 0)
-        loop b in nb -> &out.push(b)
-        loop b in f.data -> &out.push(b)
+        put32(out, 0x04034b50)
+        put16(out, 20)
+        put16(out, 2048)
+        put16(out, 0)
+        put16(out, 0)
+        put16(out, 0)
+        put32(out, crc)
+        put32(out, f.data.len())
+        put32(out, f.data.len())
+        put16(out, nb.len())
+        put16(out, 0)
+        loop b in nb -> out.push(b)
+        loop b in f.data -> out.push(b)
     }
     cd: out.len()
     loop i in 0..<files.len() {
         f: files[i]
         nb: f.name.bytes()
         crc: crc32(f.data)
-        put32(&out, 0x02014b50)
-        put16(&out, 20)
-        put16(&out, 20)
-        put16(&out, 2048)
-        put16(&out, 0)
-        put16(&out, 0)
-        put16(&out, 0)
-        put32(&out, crc)
-        put32(&out, f.data.len())
-        put32(&out, f.data.len())
-        put16(&out, nb.len())
-        put16(&out, 0)
-        put16(&out, 0)
-        put16(&out, 0)
-        put16(&out, 0)
-        put32(&out, 0)
-        put32(&out, offsets[i])
-        loop b in nb -> &out.push(b)
+        put32(out, 0x02014b50)
+        put16(out, 20)
+        put16(out, 20)
+        put16(out, 2048)
+        put16(out, 0)
+        put16(out, 0)
+        put16(out, 0)
+        put32(out, crc)
+        put32(out, f.data.len())
+        put32(out, f.data.len())
+        put16(out, nb.len())
+        put16(out, 0)
+        put16(out, 0)
+        put16(out, 0)
+        put16(out, 0)
+        put32(out, 0)
+        put32(out, offsets[i])
+        loop b in nb -> out.push(b)
     }
     cdlen: out.len() - cd
-    put32(&out, 0x06054b50)
-    put16(&out, 0)
-    put16(&out, 0)
-    put16(&out, files.len())
-    put16(&out, files.len())
-    put32(&out, cdlen)
-    put32(&out, cd)
-    put16(&out, 0)
+    put32(out, 0x06054b50)
+    put16(out, 0)
+    put16(out, 0)
+    put16(out, files.len())
+    put16(out, files.len())
+    put32(out, cdlen)
+    put32(out, cd)
+    put16(out, 0)
     if out.len() > C_MAX_OUTPUT -> return Err(ArchiveError.Unsupported)
     Ok(out)
 }
@@ -631,13 +631,13 @@ zip_files: fn(archive: [U8]) -> [ZipFile] ArchiveError! {
         if data.len() != usz -> return Err(ArchiveError.Malformed)
         if crc32(data) != crc -> return Err(ArchiveError.Checksum)
         total = total + nlen + data.len()
-        &offsets.push(entry_start)
-        &flags_list.push(flags)
-        &methods.push(method)
-        &crcs.push(crc)
-        &compressed_sizes.push(csz)
-        &uncompressed_sizes.push(usz)
-        &files.push(ZipFile{name: name, data: data})
+        offsets.push(entry_start)
+        flags_list.push(flags)
+        methods.push(method)
+        crcs.push(crc)
+        compressed_sizes.push(csz)
+        uncompressed_sizes.push(usz)
+        files.push(ZipFile{name: name, data: data})
     }
     if !closed -> return Err(ArchiveError.Malformed)
     Ok(files)
@@ -646,7 +646,7 @@ zip_files: fn(archive: [U8]) -> [ZipFile] ArchiveError! {
 zip_list: fn(archive: [U8]) -> [String] ArchiveError! {
     names := [String]{}
     files: zip_files(archive)
-    loop f in files -> &names.push(f.name)
+    loop f in files -> names.push(f.name)
     Ok(names)
 }
 
@@ -703,15 +703,15 @@ zip_central_valid: fn(data: [U8], start: Int, files: [ZipFile], offsets: [Int], 
 }
 
 put16: fn(out: &[U8], n: Int) Never! {
-    &out.push(to_u8(n))
-    &out.push(to_u8(n >> 8))
+    out.push(to_u8(n))
+    out.push(to_u8(n >> 8))
 }
 
 put32: fn(out: &[U8], n: Int) Never! {
-    &out.push(to_u8(n))
-    &out.push(to_u8(n >> 8))
-    &out.push(to_u8(n >> 16))
-    &out.push(to_u8(n >> 24))
+    out.push(to_u8(n))
+    out.push(to_u8(n >> 8))
+    out.push(to_u8(n >> 16))
+    out.push(to_u8(n >> 24))
 }
 
 u16: fn(data: [U8], i: Int) -> Int Never! { (u8_int(data[i])).bit_or((u8_int(data[i + 1]) << 8)) }
@@ -725,7 +725,7 @@ cut: fn(data: [U8], a: Int, b: Int) -> [U8] Never! {
     i := a
     loop {
         if i >= b || i >= data.len() -> break
-        &out.push(data[i])
+        out.push(data[i])
         i += 1
     }
     out
@@ -733,17 +733,17 @@ cut: fn(data: [U8], a: Int, b: Int) -> [U8] Never! {
 
 tar_header_kind: fn(name: String, size: Int, kind: Int) -> [U8] Never! {
     hdr := [U8]{}
-    loop _ in 0..<512 -> &hdr.push(U8{0})
+    loop _ in 0..<512 -> hdr.push(U8{0})
     nb: name.bytes()
     loop i in 0..<nb.len() {
         if i >= 100 -> break
         hdr[i] = nb[i]
     }
-    write_octal(&hdr, 100, 8, 420)
-    write_octal(&hdr, 108, 8, 0)
-    write_octal(&hdr, 116, 8, 0)
-    write_octal(&hdr, 124, 12, size)
-    write_octal(&hdr, 136, 12, 0)
+    write_octal(hdr, 100, 8, 420)
+    write_octal(hdr, 108, 8, 0)
+    write_octal(hdr, 116, 8, 0)
+    write_octal(hdr, 124, 12, size)
+    write_octal(hdr, 136, 12, 0)
     hdr[156] = to_u8(kind)
     // The ustar magic is part of the checksummed header, so it is written
     // before the checksum is summed.
@@ -755,21 +755,21 @@ tar_header_kind: fn(name: String, size: Int, kind: Int) -> [U8] Never! {
     loop i in 148..<156 -> hdr[i] = (U8{32})
     sum := 0
     loop b in hdr -> sum = sum + u8_int(b)
-    write_octal(&hdr, 148, 7, sum)
+    write_octal(hdr, 148, 7, sum)
     hdr[155] = (U8{32})
     hdr
 }
 
 append_tar_record: fn(out: &[U8], name: String, data: [U8], kind: Int) Never! {
     hdr: tar_header_kind(name, data.len(), kind)
-    loop b in hdr -> &out.push(b)
-    loop b in data -> &out.push(b)
+    loop b in hdr -> out.push(b)
+    loop b in data -> out.push(b)
     if data.len() % 512 != 0 {
-        loop _ in 0..<(512 - (data.len() % 512)) -> &out.push(U8{0})
+        loop _ in 0..<(512 - (data.len() % 512)) -> out.push(U8{0})
     }
 }
 append_tar_end: fn(out: &[U8]) Never! {
-    loop _ in 0..<1024 -> &out.push(U8{0})
+    loop _ in 0..<1024 -> out.push(U8{0})
 }
 tar_record_size: fn(size: Int) -> Int Never! {
     padded := size
@@ -958,35 +958,35 @@ json_escape: fn(value: String) -> String ArchiveError! {
     loop b in raw {
         n: u8_int(b)
         if n == 92 {
-            &out.push(U8{92})
-            &out.push(U8{92})
+            out.push(U8{92})
+            out.push(U8{92})
         } else if n == 34 {
-            &out.push(U8{92})
-            &out.push(U8{34})
+            out.push(U8{92})
+            out.push(U8{34})
         } else if n == 8 {
-            &out.push(U8{92})
-            &out.push(U8{98})
+            out.push(U8{92})
+            out.push(U8{98})
         } else if n == 9 {
-            &out.push(U8{92})
-            &out.push(U8{116})
+            out.push(U8{92})
+            out.push(U8{116})
         } else if n == 10 {
-            &out.push(U8{92})
-            &out.push(U8{110})
+            out.push(U8{92})
+            out.push(U8{110})
         } else if n == 12 {
-            &out.push(U8{92})
-            &out.push(U8{102})
+            out.push(U8{92})
+            out.push(U8{102})
         } else if n == 13 {
-            &out.push(U8{92})
-            &out.push(U8{114})
+            out.push(U8{92})
+            out.push(U8{114})
         } else if n < 32 {
-            &out.push(U8{92})
-            &out.push(U8{117})
-            &out.push(U8{48})
-            &out.push(U8{48})
-            &out.push(hex_digit(n >> 4))
-            &out.push(hex_digit((n).bit_and(15)))
+            out.push(U8{92})
+            out.push(U8{117})
+            out.push(U8{48})
+            out.push(U8{48})
+            out.push(hex_digit(n >> 4))
+            out.push(hex_digit((n).bit_and(15)))
         } else {
-            &out.push(b)
+            out.push(b)
         }
     }
     String.from_bytes(out) ?? return Err(ArchiveError.Malformed)
@@ -1035,7 +1035,7 @@ impl BitReader {
         v := 0
         k := 0
         loop k < n {
-            v = (v).bit_or((&self.read_bit() << k))
+            v = (v).bit_or((self.read_bit() << k))
             k = k + 1
         }
         v
@@ -1064,7 +1064,7 @@ inflate_fixed: fn(r: &BitReader, out: &[U8]) -> Int Never! {
         code := 0
         n := 0
         loop n < 7 {
-            code = ((code << 1)).bit_or((&r.read_bit()))
+            code = ((code << 1)).bit_or((r.read_bit()))
             n = n + 1
         }
         if r.bad -> return C_INFLATE_MALFORMED
@@ -1072,13 +1072,13 @@ inflate_fixed: fn(r: &BitReader, out: &[U8]) -> Int Never! {
         extra2 := 0
         sym := 0
         if code <= 23 -> sym = 256 + code else {
-            extra = &r.read_bit()
+            extra = r.read_bit()
             code = ((code << 1)).bit_or(extra)
             if {
                 code >= 48 && code <= 191 -> { sym = code - 48 }
                 code >= 192 && code <= 199 -> { sym = 280 + (code - 192) }
                 else -> {
-                    extra2 = &r.read_bit()
+                    extra2 = r.read_bit()
                     code = ((code << 1)).bit_or(extra2)
                     if code >= 400 && code <= 511 -> sym = 144 + (code - 400) else {
                         return C_INFLATE_MALFORMED
@@ -1090,7 +1090,7 @@ inflate_fixed: fn(r: &BitReader, out: &[U8]) -> Int Never! {
         if {
             sym < 256 -> {
                 if out.len() >= C_MAX_OUTPUT -> return C_INFLATE_UNSUPPORTED
-                &out.push(to_u8(sym))
+                out.push(to_u8(sym))
             }
             sym == 256 -> { return C_INFLATE_OK }
             sym <= 285 -> {
@@ -1100,7 +1100,7 @@ inflate_fixed: fn(r: &BitReader, out: &[U8]) -> Int Never! {
                 add := 0
                 k := 0
                 loop k < extra_n {
-                    add = (add).bit_or((&r.read_bit() << k))
+                    add = (add).bit_or((r.read_bit() << k))
                     k = k + 1
                 }
                 if r.bad -> return C_INFLATE_MALFORMED
@@ -1108,7 +1108,7 @@ inflate_fixed: fn(r: &BitReader, out: &[U8]) -> Int Never! {
                 dcode := 0
                 n2 := 0
                 loop n2 < 5 {
-                    dcode = ((dcode << 1)).bit_or((&r.read_bit()))
+                    dcode = ((dcode << 1)).bit_or((r.read_bit()))
                     n2 = n2 + 1
                 }
                 if r.bad || dcode < 0 || dcode >= C_DIST_BASE.len() -> return C_INFLATE_MALFORMED
@@ -1116,14 +1116,14 @@ inflate_fixed: fn(r: &BitReader, out: &[U8]) -> Int Never! {
                 k2 := 0
                 d_extra: C_DIST_EXTRA[dcode]
                 loop k2 < d_extra {
-                    dadd = (dadd).bit_or((&r.read_bit() << k2))
+                    dadd = (dadd).bit_or((r.read_bit() << k2))
                     k2 = k2 + 1
                 }
                 if r.bad -> return C_INFLATE_MALFORMED
                 dist: C_DIST_BASE[dcode] + dadd
                 if dist <= 0 || dist > out.len() -> return C_INFLATE_MALFORMED
                 if length > C_MAX_OUTPUT - out.len() -> return C_INFLATE_UNSUPPORTED
-                loop _ in 0..<length -> &out.push(out[out.len() - dist])
+                loop _ in 0..<length -> out.push(out[out.len() - dist])
             }
             else -> { return C_INFLATE_MALFORMED }
         }
@@ -1132,7 +1132,7 @@ inflate_fixed: fn(r: &BitReader, out: &[U8]) -> Int Never! {
 
 huff_codes: fn(lengths: [Int]) -> [Int] Never! {
     bl := [Int]{}
-    loop _ in 0..<16 -> &bl.push(0)
+    loop _ in 0..<16 -> bl.push(0)
     i := 0
     loop i < lengths.len() {
         len: lengths[i]
@@ -1140,7 +1140,7 @@ huff_codes: fn(lengths: [Int]) -> [Int] Never! {
         i = i + 1
     }
     next := [Int]{}
-    loop _ in 0..<16 -> &next.push(0)
+    loop _ in 0..<16 -> next.push(0)
     code := 0
     bits := 1
     loop bits < 16 {
@@ -1151,7 +1151,7 @@ huff_codes: fn(lengths: [Int]) -> [Int] Never! {
     codes := [Int]{}
     i = 0
     loop i < lengths.len() {
-        &codes.push(-1)
+        codes.push(-1)
         i = i + 1
     }
     i = 0
@@ -1168,7 +1168,7 @@ huff_codes: fn(lengths: [Int]) -> [Int] Never! {
 
 huff_tree_left: fn(lengths: [Int]) -> Int Never! {
     counts := [Int]{}
-    loop _ in 0..<16 -> &counts.push(0)
+    loop _ in 0..<16 -> counts.push(0)
     loop len in lengths {
         if len < 0 || len > 15 -> return -1
         if len > 0 -> counts[len] = counts[len] + 1
@@ -1202,9 +1202,9 @@ huff_sym: fn(lengths: [Int], codes: [Int], acc: Int, len: Int) -> Int Never! {
 
 inflate_dynamic: fn(r: &BitReader, out: &[U8]) -> Int Never! {
     tmp := BitReader{data: r.data, i: r.i, bit: r.bit, bad: false}
-    hlit: (&tmp.get_bits_lsb(5) + 257)
-    hdist: (&tmp.get_bits_lsb(5) + 1)
-    hclen: (&tmp.get_bits_lsb(4) + 4)
+    hlit: (tmp.get_bits_lsb(5) + 257)
+    hdist: (tmp.get_bits_lsb(5) + 1)
+    hclen: (tmp.get_bits_lsb(4) + 4)
     if tmp.bad || hlit < 257 || hlit > 286 || hdist < 1 || hdist > 32 || hclen < 4 || hclen > 19 {
         r.i = tmp.i
         r.bit = tmp.bit
@@ -1212,10 +1212,10 @@ inflate_dynamic: fn(r: &BitReader, out: &[U8]) -> Int Never! {
         return C_INFLATE_MALFORMED
     }
     cl_len := [Int]{}
-    loop _ in 0..<19 -> &cl_len.push(0)
+    loop _ in 0..<19 -> cl_len.push(0)
     i := 0
     loop i < hclen {
-        cl_len[C_CL_ORDER[i]] = &tmp.get_bits_lsb(3)
+        cl_len[C_CL_ORDER[i]] = tmp.get_bits_lsb(3)
         i = i + 1
     }
     if tmp.bad || !huff_lengths_complete(cl_len) {
@@ -1233,7 +1233,7 @@ inflate_dynamic: fn(r: &BitReader, out: &[U8]) -> Int Never! {
         len := 0
         sym := -1
         loop len < 7 {
-            bit: &tmp.get_bits_lsb(1)
+            bit: tmp.get_bits_lsb(1)
             acc = ((acc << 1)).bit_or(bit)
             len = len + 1
             sym = huff_sym(cl_len, cl_codes, acc, len)
@@ -1242,24 +1242,24 @@ inflate_dynamic: fn(r: &BitReader, out: &[U8]) -> Int Never! {
         if sym < 0 -> break
         if {
             sym <= 15 -> {
-                &all_len.push(sym)
+                all_len.push(sym)
                 prev = sym
             }
             sym == 16 -> {
-                extra: (&tmp.get_bits_lsb(2) + 3)
+                extra: (tmp.get_bits_lsb(2) + 3)
                 if all_len.len() == 0 || all_len.len() + extra > need -> break
-                loop _ in 0..<extra -> &all_len.push(prev)
+                loop _ in 0..<extra -> all_len.push(prev)
             }
             sym == 17 -> {
-                extra: (&tmp.get_bits_lsb(3) + 3)
+                extra: (tmp.get_bits_lsb(3) + 3)
                 if all_len.len() + extra > need -> break
-                loop _ in 0..<extra -> &all_len.push(0)
+                loop _ in 0..<extra -> all_len.push(0)
                 prev = 0
             }
             sym == 18 -> {
-                extra: (&tmp.get_bits_lsb(7) + 11)
+                extra: (tmp.get_bits_lsb(7) + 11)
                 if all_len.len() + extra > need -> break
-                loop _ in 0..<extra -> &all_len.push(0)
+                loop _ in 0..<extra -> all_len.push(0)
                 prev = 0
             }
             else -> { break }
@@ -1276,11 +1276,11 @@ inflate_dynamic: fn(r: &BitReader, out: &[U8]) -> Int Never! {
     dist_len := [Int]{}
     i = 0
     loop i < hlit {
-        &lit_len.push(all_len[i])
+        lit_len.push(all_len[i])
         i = i + 1
     }
     loop i < need {
-        &dist_len.push(all_len[i])
+        dist_len.push(all_len[i])
         i = i + 1
     }
     has_dist := false
@@ -1303,7 +1303,7 @@ inflate_dynamic: fn(r: &BitReader, out: &[U8]) -> Int Never! {
         len := 0
         sym := -1
         loop len < 15 {
-            bit: &tmp.get_bits_lsb(1)
+            bit: tmp.get_bits_lsb(1)
             acc = ((acc << 1)).bit_or(bit)
             len = len + 1
             sym = huff_sym(lit_len, lit_codes, acc, len)
@@ -1323,7 +1323,7 @@ inflate_dynamic: fn(r: &BitReader, out: &[U8]) -> Int Never! {
                     r.bad = false
                     return C_INFLATE_UNSUPPORTED
                 }
-                &out.push(to_u8(sym))
+                out.push(to_u8(sym))
             }
             sym == 256 -> {
                 r.i = tmp.i
@@ -1339,13 +1339,13 @@ inflate_dynamic: fn(r: &BitReader, out: &[U8]) -> Int Never! {
                     r.bad = false
                     return C_INFLATE_MALFORMED
                 }
-                add: &tmp.get_bits_lsb(C_LEN_EXTRA[idx])
+                add: tmp.get_bits_lsb(C_LEN_EXTRA[idx])
                 length: C_LEN_BASE[idx] + add
                 dacc := 0
                 dlen := 0
                 dcode := -1
                 loop dlen < 15 {
-                    bit: &tmp.get_bits_lsb(1)
+                    bit: tmp.get_bits_lsb(1)
                     dacc = ((dacc << 1)).bit_or(bit)
                     dlen = dlen + 1
                     dcode = huff_sym(dist_len, dist_codes, dacc, dlen)
@@ -1357,7 +1357,7 @@ inflate_dynamic: fn(r: &BitReader, out: &[U8]) -> Int Never! {
                     r.bad = tmp.bad
                     return C_INFLATE_MALFORMED
                 }
-                dadd: &tmp.get_bits_lsb(C_DIST_EXTRA[dcode])
+                dadd: tmp.get_bits_lsb(C_DIST_EXTRA[dcode])
                 if tmp.bad {
                     r.i = tmp.i
                     r.bit = tmp.bit
@@ -1377,7 +1377,7 @@ inflate_dynamic: fn(r: &BitReader, out: &[U8]) -> Int Never! {
                     r.bad = false
                     return C_INFLATE_UNSUPPORTED
                 } else {
-                    loop _ in 0..<length -> &out.push(out[out.len() - dist])
+                    loop _ in 0..<length -> out.push(out[out.len() - dist])
                 }
             }
             else -> {

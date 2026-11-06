@@ -34,27 +34,27 @@ services_health_one: fn(project_dir: String, env: &ShellEnv, plan: DevServicePla
     state: services_verified_state(record) ?? return ServiceHealth.NotRunning
     if !(services_process_matches_start(state) ?? false) -> return ServiceHealth.NotRunning
     resolved: services_resolve(project_dir, plan) ?? return ServiceHealth.Unhealthy
-    if services_probe_ready(resolved, &env) -> return ServiceHealth.Healthy
+    if services_probe_ready(resolved, env) -> return ServiceHealth.Healthy
     ServiceHealth.Unhealthy
 }
 
 // The shell spelling of a readiness command, in the project directory with
 // the service's environment.
 services_probe_shell: fn(command: String, resolved: ServiceResolved, env: &ShellEnv) -[FS, Env, Exec, Time, Time.Wait]> Bool Never! {
-    spec: &env.apply_to(process.shell(command).cwd(resolved.project_dir).stdout(.Capture).stderr(.Capture)) ?? return false
+    spec: env.apply_to(process.shell(command).cwd(resolved.project_dir).stdout(.Capture).stderr(.Capture)) ?? return false
     services_run_bounded_probe(spec, SERVICES_MAX_READY_PROBE_MS)
 }
 
 services_probe_ready: fn(resolved: ServiceResolved, env: &ShellEnv) -[FS, Env, Exec, Net, Time, Time.Wait]> Bool Never! {
     if resolved.ready_probe == .Val(probe) {
         return if probe == {
-            .Exec(command) -> services_probe_shell(command, resolved, &env)
+            .Exec(command) -> services_probe_shell(command, resolved, env)
             .HTTP(url, status) -> services_probe_http(url, status)
             .Notify(path) -> services_probe_notify(resolved.project_dir, path)
             .TCP(host, port) -> services_probe_tcp(host, port)
         }
     }
-    if resolved.ready == .Val(command) -> return services_probe_shell(command, resolved, &env)
+    if resolved.ready == .Val(command) -> return services_probe_shell(command, resolved, env)
     // No `ready:` and no port: a live verified process is the only signal,
     // and it already passed the identity check.
     if resolved.ports.len() == 0 -> return true
@@ -98,12 +98,12 @@ services_probe_http: fn(url: String, expected_status: Int?) -[Net, Time.Wait]> B
     if host == "" || host.contains("[") || host.contains("]") -> return false
     address: net.socket_addr_parse("{host}:{port}") ?? return false
     stream := net.tcp_connect_timeout(address, SERVICES_PROBE_CONNECT_MS) ?? return false
-    net.set_read_timeout(&stream, SERVICES_PROBE_CONNECT_MS).drop("a probe without a read timeout still reads once")
-    net.set_write_timeout(&stream, SERVICES_PROBE_CONNECT_MS).drop("a probe without a write timeout still writes once")
+    net.set_read_timeout(stream, SERVICES_PROBE_CONNECT_MS).drop("a probe without a read timeout still reads once")
+    net.set_write_timeout(stream, SERVICES_PROBE_CONNECT_MS).drop("a probe without a write timeout still writes once")
     crlf: "{env_shell_control(13)}\n"
     request: "GET /{path} HTTP/1.1{crlf}Host: {host}{crlf}Connection: close{crlf}{crlf}"
-    net.tcp_write_all_bytes(&stream, request.bytes()) ?? return false
-    bytes: net.tcp_read_bytes(&stream, 1024) ?? return false
+    net.tcp_write_all_bytes(stream, request.bytes()) ?? return false
+    bytes: net.tcp_read_bytes(stream, 1024) ?? return false
     response: String.from_bytes_lossy(bytes)
     if !response.starts_with("HTTP/") -> return false
     words: trust_text_words(response.removeprefix("HTTP/"))
@@ -129,7 +129,7 @@ services_wait_healthy: fn(project_dir: String, env: &ShellEnv, plan: DevServiceP
     deadline: services_now_ms() + timeout.ns /% 1000000
     loop {
         if services_supervisor_failure(project_dir, plan) != None -> return false
-        if services_health_one(project_dir, &env, plan) == ServiceHealth.Healthy {
+        if services_health_one(project_dir, env, plan) == ServiceHealth.Healthy {
             if !needs_stability -> return true
             since: stable_since ?? services_now_ms()
             stable_since = Val(since)

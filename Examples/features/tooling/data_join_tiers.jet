@@ -65,9 +65,9 @@ run: fn() {
 
     // 1001 x 1000 matches under one key exceed the 1_000_000 row cap.
     many_left := [Order]{}
-    loop index in 0..<1001 -> &many_left.push(Order{id: index, team: "k"})
+    loop index in 0..<1001 -> many_left.push(Order{id: index, team: "k"})
     many_right := [Owner]{}
-    loop index in 0..<1000 -> &many_right.push(Owner{team: "k", name: "n"})
+    loop index in 0..<1000 -> many_right.push(Owner{team: "k", name: "n"})
     if data.inner_join<Order, Owner>(many_left, many_right, (o: Order) -> o.team, (w: Owner) -> w.team) == {
         .Ok(rows) -> print("unexpected ok {rows.len()}")
         .Err(error) -> print("limit: {error.operation}: {error.reason}")

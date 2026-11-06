@@ -37,7 +37,7 @@ kit_test_checkout_options: fn(root: String) -> KitOptions {
     assert(counts.contains("\"KNOWN-FAILING\":1"))
     assert(counts.contains("\"UNEXPECTED-PASS\":1"))
     results := [KitCaseResult]{known, unexpected}
-    kit_golden_mark_tier_splits(&results)
+    kit_golden_mark_tier_splits(results)
     assert(results[0].detail.starts_with("tier-split:"))
     assert(results[1].detail.starts_with("tier-split:"))
 }
@@ -100,10 +100,10 @@ kit_test_core_scratch: fn(label: String) -> String {
         assert_eq(selection.error, "")
         loop id in selection.ids {
             assert(!kit_expect_named(all, id))
-            &all.push(id)
+            all.push(id)
         }
     }
-    &all.sort()
+    all.sort()
     assert_eq(all, ids)
 }
 
@@ -168,11 +168,11 @@ kit_test_core_scratch: fn(label: String) -> String {
     second_stall: task kit_exec_invoke(env, stall, root, files.join(root, "d"), "")
     third_stall: task kit_exec_invoke(env, stall, root, files.join(root, "e"), "")
     fourth_stall: task kit_exec_invoke(env, stall, root, files.join(root, "f"), "")
-    loop run in [^first_grow.join() ?? panic("grow"), ^second_grow.join() ?? panic("grow")] {
+    loop run in [first_grow.join() ?? panic("grow"), second_grow.join() ?? panic("grow")] {
         assert_eq(run.limit_hit, "memory")
         assert_eq((kit_exec_process_failure(run) ?? panic("memory")).detail, "memory limit hit")
     }
-    loop run in [^first_stall.join() ?? panic("stall"), ^second_stall.join() ?? panic("stall"), ^third_stall.join() ?? panic("stall"), ^fourth_stall.join() ?? panic("stall")] {
+    loop run in [first_stall.join() ?? panic("stall"), second_stall.join() ?? panic("stall"), third_stall.join() ?? panic("stall"), fourth_stall.join() ?? panic("stall")] {
         assert(run.timed_out)
         assert_eq((kit_exec_process_failure(run) ?? panic("timeout")).status, "TIMEOUT")
     }
@@ -188,7 +188,7 @@ kit_test_pool_entry: fn(env: KitEnv, root: String, index: Int) -> KitRun {
 // As kit_execute_report: the pool task joins the entry's own task.
 kit_test_pool_report: fn(env: KitEnv, root: String, index: Int, done: Sender<Int>) {
     entry: task kit_test_pool_entry(env.copy(), root.copy(), index)
-    run: ^entry.join() ?? kit_exec_failed("the entry task stopped")
+    run: entry.join() ?? kit_exec_failed("the entry task stopped")
     done.send(run.code)
 }
 
@@ -341,7 +341,7 @@ kit_test_selected: fn(suite: String, path: String) -> KitSelected {
 
 #Test("pool rows keep corpus order, suite then path, whatever the pool's size") {
     mixed := [kit_test_selected("ui", "b"), kit_test_selected("cases", "z"), kit_test_selected("golden", "a"), kit_test_selected("cases", "a")]
-    kit_execute_corpus_order(&mixed)
+    kit_execute_corpus_order(mixed)
     assert_eq(mixed.map(item -> "{item.suite} {item.entry.path}"), ["cases a", "cases z", "golden a", "ui b"])
     root: cases_test_root("pool-order")
     names: ["a", "b", "c", "d", "e"]
@@ -355,7 +355,7 @@ kit_test_selected: fn(suite: String, path: String) -> KitSelected {
         schedule: kit_execute_schedule(corpus, [String: KitHistory]{}, jobs, 0, 0)
         rows := [String]{}
         loop run in kit_execute_entries(corpus, schedule, context.options, context.env, context.known, root, run_scratch) {
-            loop result in run.results -> &rows.push("{result.case} {result.status}")
+            loop result in run.results -> rows.push("{result.case} {result.status}")
         }
         assert_eq(rows, corpus.map(item -> "{item.entry.path} PASS"))
     }

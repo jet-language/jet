@@ -66,7 +66,7 @@ registry_coverage_has: fn(values: [String], value: String) -> Bool Never! {
 #Test("every_registered_lint_has_a_unique_snake_case_name") {
     registered := [String]{}
     loop row in diagnostic_registry_rows() {
-        if row.severity == DIAGNOSTIC_LINT && row.status != DiagnosticRegistryStatus.Retired -> &registered.push(row.code)
+        if row.severity == DIAGNOSTIC_LINT && row.status != DiagnosticRegistryStatus.Retired -> registered.push(row.code)
     }
     names := [String]{}
     codes := [String]{}
@@ -74,16 +74,16 @@ registry_coverage_has: fn(values: [String], value: String) -> Bool Never! {
         name: lint.lint_name ?? panic("every registered lint must carry a stable name")
         assert(registry_coverage_is_snake_case(name), "lint `{name}` is not a stable snake_case name")
         assert(!registry_coverage_has(names, name), "lint name `{name}` is duplicated")
-        &names.push(name)
+        names.push(name)
         assert(!registry_coverage_has(codes, lint.code), "lint code `{lint.code}` is duplicated")
-        &codes.push(lint.code)
+        codes.push(lint.code)
         registered_row: diagnostic_registry_row(lint.code) ?? panic("lint `{lint.code}` is not a registered diagnostic row")
         assert(registered_row.severity == DIAGNOSTIC_LINT, "lint `{lint.code}` is not a registered lint diagnostic row")
         assert((lint_name_for_code(lint.code) ?? "") == name, "lint `{lint.code}` does not round-trip through the name registry")
         assert((lint_code_for_name(name) ?? "") == lint.code, "lint name `{name}` does not resolve to its registered code")
     }
-    &codes.sort()
-    &registered.sort()
+    codes.sort()
+    registered.sort()
     assert_eq(codes.join(" "), registered.join(" "))
 }
 
@@ -91,8 +91,8 @@ registry_coverage_has: fn(values: [String], value: String) -> Bool Never! {
     seen := [String]{}
     duplicates := [String]{}
     loop (index, row) in diagnostic_registry_rows() {
-        if registry_coverage_has(seen, row.code) -> &duplicates.push("{row.code} at row {index}")
-        else -> &seen.push(row.code)
+        if registry_coverage_has(seen, row.code) -> duplicates.push("{row.code} at row {index}")
+        else -> seen.push(row.code)
     }
     assert(seen.len() > 100, "the typed diagnostic rows must be populated")
     assert_eq(duplicates.join("\n"), "")
@@ -108,7 +108,7 @@ REGISTRY_COVERAGE_FFI_ROWS: [String]{"E0064", "E0704", "E0705", "E3014", "E3215"
         if row.status != DiagnosticRegistryStatus.Active -> next
         if !row.name.starts_with("jet.Foreign") && !row.name.starts_with("jet.Retired") -> next
         if registry_coverage_has(REGISTRY_COVERAGE_FFI_ROWS, row.code) -> next
-        &teaching.push("{row.code} {row.name}")
+        teaching.push("{row.code} {row.name}")
     }
     assert_eq(teaching.join("\n"), "")
 }
@@ -121,10 +121,10 @@ REGISTRY_COVERAGE_FFI_ROWS: [String]{"E0064", "E0704", "E0705", "E3014", "E3215"
     unknown := [String]{}
     loop row in diagnostic_registry_rows() {
         if row.status != DiagnosticRegistryStatus.Active {
-            if row.stage != "" -> &unknown.push("{row.code}: an inactive row has stage `{row.stage}`")
+            if row.stage != "" -> unknown.push("{row.code}: an inactive row has stage `{row.stage}`")
             next
         }
-        if !diagnostic_stage_is_registered(row.stage) -> &unknown.push("{row.code}: `{row.stage}`")
+        if !diagnostic_stage_is_registered(row.stage) -> unknown.push("{row.code}: `{row.stage}`")
     }
     source: registry_coverage_files.read("Compiler/Prelude/Diagnostics.jet") ?? panic("read Compiler/Prelude/Diagnostics.jet: {err}")
     count := 0
@@ -132,7 +132,7 @@ REGISTRY_COVERAGE_FFI_ROWS: [String]{"E0064", "E0704", "E0705", "E3014", "E3215"
         if line == "    impl Diagnostic {{" -> count += 1
         if !line.starts_with("        stage: [") -> next
         stage: line.remove_prefix("        stage: [").remove_suffix("]").replace(", .", "/").remove_prefix(".").lower()
-        if !diagnostic_stage_is_registered(stage) -> &unknown.push("Prelude impl {count}: `{stage}`")
+        if !diagnostic_stage_is_registered(stage) -> unknown.push("Prelude impl {count}: `{stage}`")
     }
     assert(count > 100, "the Prelude diagnostic impls must be readable")
     assert_eq(unknown.join("\n"), "")
@@ -147,9 +147,9 @@ REGISTRY_COVERAGE_FFI_ROWS: [String]{"E0064", "E0704", "E0705", "E3014", "E3215"
     missing := [String]{}
     loop row in diagnostic_registry_rows() {
         if diagnostic_explanation(row.code) == .Val(explanation) {
-            if explanation.code != row.code || explanation.stage != row.stage || explanation.meaning != row.meaning -> &missing.push("{row.code} explains another row")
+            if explanation.code != row.code || explanation.stage != row.stage || explanation.meaning != row.meaning -> missing.push("{row.code} explains another row")
         } else {
-            &missing.push(row.code)
+            missing.push(row.code)
         }
     }
     assert_eq(missing.join("\n"), "")
@@ -160,7 +160,7 @@ REGISTRY_COVERAGE_FFI_ROWS: [String]{"E0064", "E0704", "E0705", "E3014", "E3215"
 #Test("repeatable_rows_are_declared_not_assumed") {
     repeatable := [String]{}
     loop rule in marker_source_read(MARKER_SOURCE) {
-        if rule.repeatable -> &repeatable.push(rule.name)
+        if rule.repeatable -> repeatable.push(rule.name)
     }
     assert_eq(repeatable.join(" "), "Pre Post Allow")
 }
@@ -174,7 +174,7 @@ REGISTRY_COVERAGE_FFI_ROWS: [String]{"E0064", "E0704", "E0705", "E3014", "E3215"
     names := [String]{}
     loop rule in rules {
         assert(!registry_coverage_has(names, rule.name), "`#{rule.name}` is declared twice")
-        &names.push(rule.name)
+        names.push(rule.name)
         assert(rule.sites.len() > 0, "`#{rule.name}` targets no written code")
     }
     values := 0
@@ -183,7 +183,7 @@ REGISTRY_COVERAGE_FFI_ROWS: [String]{"E0064", "E0704", "E0705", "E3014", "E3215"
     fact_names := [String]{}
     loop row in REGISTRATION_FACT_ROWS {
         assert(!registry_coverage_has(fact_names, row.name), "fact `{row.name}` is registered twice")
-        &fact_names.push(row.name)
+        fact_names.push(row.name)
         if row.target == {
             .Value -> values += 1
             .Scope -> scopes += 1
@@ -203,16 +203,16 @@ REGISTRY_COVERAGE_FFI_ROWS: [String]{"E0064", "E0704", "E0705", "E3014", "E3215"
 #Test("every_row_states_the_one_way_law") {
     violations := [String]{}
     loop row in REGISTRATION_FACT_ROWS {
-        if !registry_coverage_has(["gain", "shrink", "discharge", "none"], row.safe_direction) -> &violations.push("{row.name} states no safe direction (`{row.safe_direction}`)")
-        if row.safe_direction == "none" && row.gates.len() > 0 -> &violations.push("{row.name} states no direction but names gates")
-        if row.published_by != None && row.safe_direction != "none" -> &violations.push("{row.name} is prover-published but states a direction")
+        if !registry_coverage_has(["gain", "shrink", "discharge", "none"], row.safe_direction) -> violations.push("{row.name} states no safe direction (`{row.safe_direction}`)")
+        if row.safe_direction == "none" && row.gates.len() > 0 -> violations.push("{row.name} states no direction but names gates")
+        if row.published_by != None && row.safe_direction != "none" -> violations.push("{row.name} is prover-published but states a direction")
         loop gate in row.gates {
-            if gate.trim().is_empty() -> &violations.push("{row.name} names an empty gate")
+            if gate.trim().is_empty() -> violations.push("{row.name} names an empty gate")
         }
     }
     loop row in REGISTRATION_TRUTH_ROWS {
-        if row.home.is_empty() -> &violations.push("truth {row.name} has no home")
-        if row.guard_test.is_empty() || row.guard_file.is_empty() -> &violations.push("truth {row.name} has no guard")
+        if row.home.is_empty() -> violations.push("truth {row.name} has no home")
+        if row.guard_test.is_empty() || row.guard_file.is_empty() -> violations.push("truth {row.name} has no guard")
     }
     assert_eq(violations.join("\n"), "")
 }
@@ -222,16 +222,16 @@ REGISTRY_COVERAGE_FFI_ROWS: [String]{"E0064", "E0704", "E0705", "E3014", "E3215"
 #Test("every_registered_truth_names_a_home_and_a_guard_that_exist") {
     violations := [String]{}
     loop row in REGISTRATION_TRUTH_ROWS {
-        if !registry_coverage_files.exists(row.home) -> &violations.push("`{row.name}` names the home `{row.home}`, which is not a file")
+        if !registry_coverage_files.exists(row.home) -> violations.push("`{row.name}` names the home `{row.home}`, which is not a file")
         if !registry_coverage_files.exists(row.guard_file) {
-            &violations.push("`{row.name}` names the guard file `{row.guard_file}`, which cannot be read")
+            violations.push("`{row.name}` names the guard file `{row.guard_file}`, which cannot be read")
             next
         }
         source: registry_coverage_files.read(row.guard_file) ?? panic("read {row.guard_file}: {err}")
         words: row.guard_test.split(" ").to_list()
         flag: words[words.len() - 1]
         defined: if flag.starts_with("--") -> source.contains(flag) else -> source.contains("#Test(\"{row.guard_test}\")")
-        if !defined -> &violations.push("`{row.name}` names the guard `{row.guard_test}`, which `{row.guard_file}` does not define")
+        if !defined -> violations.push("`{row.name}` names the guard `{row.guard_test}`, which `{row.guard_file}` does not define")
     }
     assert_eq(violations.join("\n"), "")
 }
@@ -285,7 +285,7 @@ REGISTRY_COVERAGE_FFI_ROWS: [String]{"E0064", "E0704", "E0705", "E3014", "E3215"
         loop other in REGISTRATION_FACT_ROWS {
             if other.name == row.name -> homes += 1
         }
-        if homes != 1 -> &violations.push("plane `{row.name}` has {homes} homes")
+        if homes != 1 -> violations.push("plane `{row.name}` has {homes} homes")
         projection := String?{None}
         covering := 0
         loop read in FOUNDATION_FACT_READ_ROWS {
@@ -294,15 +294,15 @@ REGISTRY_COVERAGE_FFI_ROWS: [String]{"E0064", "E0704", "E0705", "E3014", "E3215"
             if projection == None -> projection = read.reflection.copy()
         }
         if covering == 0 {
-            &violations.push("plane `{row.name}` has no FactRead projection")
+            violations.push("plane `{row.name}` has no FactRead projection")
             next
         }
         kind: projection ?? {
-            &violations.push("plane `{row.name}` resolves to a FactRead row with no reflection kind")
+            violations.push("plane `{row.name}` resolves to a FactRead row with no reflection kind")
             next
         }
         source_kind: fact_read_reflection_kind(FactRead.RegisteredPlane{name: row.name}) ?? ""
-        if source_kind != kind -> &violations.push("plane `{row.name}`: source read reflects `{source_kind}`, projection row reflects `{kind}`")
+        if source_kind != kind -> violations.push("plane `{row.name}`: source read reflects `{source_kind}`, projection row reflects `{kind}`")
     }
     assert(planes > 0, "the registry holds no value plane")
     assert_eq(violations.join("\n"), "")

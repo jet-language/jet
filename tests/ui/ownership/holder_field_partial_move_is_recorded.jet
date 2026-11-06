@@ -1,14 +1,14 @@
 Res: struct { name: String }
 impl Res.Close {
-    close: fn(^self) { print("close {self.name}") }
+    close: fn(&&self) { print("close {self.name}") }
 }
 
 Holder: struct { res: Res }
 
-grab: fn(res: ^Res) { print("took {res.name}") }
+grab: fn(res: &&Res) { print("took {res.name}") }
 
 run: fn() {
     holder: Holder{res: Res{name: "b"}}
-    grab(^holder.res)
+    grab(holder.res.move())
     print(holder.res.name)
 }

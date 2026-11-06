@@ -174,7 +174,7 @@ pkg_parse_git_dep: fn(name: String, body: String) -> DepSource PackageParseError
     seen := [String]{}
     loop entry in pkg_key_value_entries(body) {
         if seen.contains(entry.key) -> return Err(PackageParseError.Composition("git dependency `{name}.{entry.key}` is declared more than once"))
-        &seen.push(entry.key)
+        seen.push(entry.key)
         value: pkg_unquote(entry.value)
         if entry.key == {
             "git" -> url = Val(value)
@@ -186,9 +186,9 @@ pkg_parse_git_dep: fn(name: String, body: String) -> DepSource PackageParseError
     }
     found_url: url ?? return Err(PackageParseError.Composition("git dependency `{name}` is missing `git:`"))
     selectors := [GitSelector]{}
-    if tag_value == .Val(value) -> &selectors.push(GitSelector.Tag(value))
-    if branch_value == .Val(value) -> &selectors.push(GitSelector.Branch(value))
-    if rev_value == .Val(value) -> &selectors.push(GitSelector.Rev(value))
+    if tag_value == .Val(value) -> selectors.push(GitSelector.Tag(value))
+    if branch_value == .Val(value) -> selectors.push(GitSelector.Branch(value))
+    if rev_value == .Val(value) -> selectors.push(GitSelector.Rev(value))
     if selectors.len() != 1 -> return Err(PackageParseError.Composition("git dependency `{name}` must have exactly one of `tag`, `branch`, `rev`"))
     Ok(DepSource.Git{url: found_url, selector: selectors[0]})
 }

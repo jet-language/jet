@@ -80,7 +80,7 @@ jet_cli_import_report_value: fn(plan: JetCLIImportPlan) -> JetCLIStatusValue Nev
     omissions := [JetCLIStatusValue]{}
     loop todo in plan.todos {
         diagnostic: jet_cli_import_todo_diagnostic(todo)
-        &omissions.push(jet_cli_status_object([JetCLIStatusField]{
+        omissions.push(jet_cli_status_object([JetCLIStatusField]{
             jet_cli_status_field("code", jet_cli_status_text(diagnostic.code)),
             jet_cli_status_field("what", jet_cli_status_text(diagnostic.what)),
             jet_cli_status_field("why", jet_cli_status_text(diagnostic.why)),
@@ -125,10 +125,10 @@ jet_cli_import_attach_evidence: fn(plan: &JetCLIImportPlan) JetCLIImportPlanErro
     derivation: plan.evidence.derivations[0].copy()
     record: plan.evidence.records[0].copy()
     boundary := plan.boundary.copy()
-    boundary = ^boundary.attach_derivation(derivation) ?? return Err(jet_cli_import_plan_error(err.message))
-    boundary = ^boundary.attach_evidence(record) ?? return Err(jet_cli_import_plan_error(err.message))
+    boundary = boundary.attach_derivation(derivation) ?? return Err(jet_cli_import_plan_error(err.message))
+    boundary = boundary.attach_evidence(record) ?? return Err(jet_cli_import_plan_error(err.message))
     boundary.validate() ?? return Err(jet_cli_import_plan_error(err.message))
-    plan.boundary = ^boundary
+    plan.boundary = boundary.move()
 }
 
 // Rust `persist_evidence_report_for_inputs`: the encoded report under
@@ -140,7 +140,7 @@ jet_cli_import_persist_evidence: fn(report: EvidenceReport, target_inputs_sha256
     bytes: evidence_report_encode(report) ?? return Err(jet_cli_read_error(err.message))
     artifact_id: import_crypto.sha256(bytes).hex()
     cache := WorkspaceDeclarationCache.new()
-    jet_cli_evidence_persist(&cache, report, bytes, artifact_id, target_inputs_sha256, true) ?? return Err(err)
+    jet_cli_evidence_persist(cache, report, bytes, artifact_id, target_inputs_sha256, true) ?? return Err(err)
 }
 
 // `fs::read_to_string(path).ok()`.
@@ -158,24 +158,24 @@ jet_cli_import_stage: fn(mode: JetCLIImportMode, target: String, baseline: Strin
     prior: jet_cli_import_existing(baseline)
     if mode != JetCLIImportMode.DryRun {
         if existing == {
-            .None -> &writes.push(JetCLIImportWrite{path: target, contents: contents})
+            .None -> writes.push(JetCLIImportWrite{path: target, contents: contents})
             .Val(current) -> {
                 if current != contents {
                     if mode == JetCLIImportMode.Create {
-                        &conflicts.push(target)
+                        conflicts.push(target)
                     } else if prior == .Val(old) {
                         if current == old {
-                            &writes.push(JetCLIImportWrite{path: target, contents: contents})
+                            writes.push(JetCLIImportWrite{path: target, contents: contents})
                         } else if contents != old {
-                            &conflicts.push(target)
+                            conflicts.push(target)
                         }
                     } else {
-                        &conflicts.push(target)
+                        conflicts.push(target)
                     }
                 }
             }
         }
-        if prior != .Val(contents) -> &writes.push(JetCLIImportWrite{path: baseline, contents: contents})
+        if prior != .Val(contents) -> writes.push(JetCLIImportWrite{path: baseline, contents: contents})
     }
 }
 
@@ -183,12 +183,12 @@ jet_cli_import_stage: fn(mode: JetCLIImportMode, target: String, baseline: Strin
 jet_cli_import_apply: fn(plan: JetCLIImportPlan, mode: JetCLIImportMode, json: Bool) -[FS, Env, Time, IO]> JetDriverVerbOutput Never! {
     current := plan
     if mode != JetCLIImportMode.DryRun {
-        jet_cli_import_attach_evidence(&current) ?? return jet_cli_import_operation_error("attach import evidence", err.message, json)
+        jet_cli_import_attach_evidence(current) ?? return jet_cli_import_operation_error("attach import evidence", err.message, json)
     }
     accepted := ForeignSourceReceipt?{None}
     if mode == JetCLIImportMode.Update {
         cwd: import_out_sys.current_dir() ?? return jet_cli_import_operation_error("read current directory", jet_cli_io_error_text(err), json)
-        receipt: jet_cli_import_accept_update_replacement(&current, cwd) ?? return jet_cli_import_operation_error("accept source replacement", err.message, json)
+        receipt: jet_cli_import_accept_update_replacement(current, cwd) ?? return jet_cli_import_operation_error("accept source replacement", err.message, json)
         accepted = Val(receipt)
     }
     report: jet_cli_import_report(current)
@@ -196,9 +196,9 @@ jet_cli_import_apply: fn(plan: JetCLIImportPlan, mode: JetCLIImportMode, json: B
     writes := [JetCLIImportWrite]{}
     conflicts := [String]{}
     loop generated in current.generated {
-        jet_cli_import_stage(mode, import_out_files.join(current.target, generated.relative), import_out_files.join(baseline_root, generated.relative), generated.contents, &writes, &conflicts)
+        jet_cli_import_stage(mode, import_out_files.join(current.target, generated.relative), import_out_files.join(baseline_root, generated.relative), generated.contents, writes, conflicts)
     }
-    jet_cli_import_stage(mode, import_out_files.join(current.target, "import-report.json"), import_out_files.join(baseline_root, "import-report.json"), report, &writes, &conflicts)
+    jet_cli_import_stage(mode, import_out_files.join(current.target, "import-report.json"), import_out_files.join(baseline_root, "import-report.json"), report, writes, conflicts)
     if conflicts.len() > 0 {
         shown: conflicts
         row: diagnostic_registry_row("JT0199") ?? panic("JT0199 is not registered")

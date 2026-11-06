@@ -1,7 +1,7 @@
 // D-PIN1=A / D-PIN2=A / D-PIN3=A: `Pin<T>` is the address-stability contract.
 // Most values survive being moved to a new address. A value that stores an
 // address into itself, or that another value links to, does not — after a move
-// every stored address points at the old place. `mem.pin(&place)` opens a
+// every stored address points at the old place. `mem.pin(place)` opens a
 // tracked write window on `place` and promises that safe code will not move,
 // replace, or resize it while the window is live (E0219). Reading and editing
 // through the pin stay legal, and the edits land in the caller's storage.
@@ -43,13 +43,13 @@ wire_self: fn(node: &SelfNode) -> Pin<SelfNode> {
     #Unsafe("node storage is fixed for the returned pin; self_addr names this place") {
         node.self_addr = mem.address_of(node.payload)
     }
-    return mem.pin(&node)
+    return mem.pin(node)
 }
 
 run: fn() {
     // Caller storage: no allocator, no heap node, no copy of `node`.
     node := Node{payload: 41, hops: 0}
-    pinned: mem.pin(&node)
+    pinned: mem.pin(node)
 
     // Editing through the pin is legal and lands in `node` itself; only moving
     // or replacing the pinned storage is rejected.
@@ -60,14 +60,14 @@ run: fn() {
     // The queue stores the same promise. `head` is declared `Pin<Node>`, so
     // reaching it through the queue projects to a pin again (D-PIN3=A) rather
     // than to a copy of the node.
-    queue: NodeQueue{label: "ready", head: mem.pin(&node)}
+    queue: NodeQueue{label: "ready", head: mem.pin(node)}
     print("label: {(queue.label)}")
     print("payload: {(queue.head.payload)}")
     print("hops: {(queue.head.hops)}")
 
     // Self-referential construction through a safe library API (criterion 2+5).
     self_node := SelfNode{payload: 7, self_addr: 0}
-    self_pinned: wire_self(&self_node)
+    self_pinned: wire_self(self_node)
     print("self_payload: {(self_pinned.payload)}")
     print("self_wired: {(self_pinned.self_addr != 0)}")
 }

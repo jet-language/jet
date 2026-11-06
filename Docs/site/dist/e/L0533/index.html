@@ -34,7 +34,7 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">`{name}` is still open at the call, and its Close cleanup runs when its scope ends, after the call returns; the call keeps its frame, so a chain of such calls grows the stack</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Close `{name}` before the call with `close(^{name})`, or open it in a smaller block that ends before the call</p>
+<p class="diag-copy fix" data-registry-field="fix">Close `{name}` before the call with `close({name})`, or open it in a smaller block that ends before the call</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>L0533</code>: <code>tests/ui_lint/tail_call_blocked.warn</code>.</p>
 <pre class="diag">Warning [jet.TailCallBlocked]: This tail call can&#39;t reuse the frame because `r` closes after it returns
@@ -43,7 +43,7 @@
  18 |     count(n - 1, acc + r.name.len())
     |     ^^^^^
  Why: `r` is a `Res` that is still open here, and its Close implementation runs when its scope ends, after this call returns; the call keeps its frame, so a chain of such calls grows the stack
- Fix: Close `r` before the call with `close(^r)` (bind any argument that reads it first), or open it in a smaller block that ends before the call
+ Fix: Close `r` before the call with `close(r)` (bind any argument that reads it first), or open it in a smaller block that ends before the call
 More: jet-lang.dev/e/L0533
 
 Warning [jet.RedundantFinalReturn]: An explicit `return` is used on the final value line
@@ -61,7 +61,7 @@ Warning [jet.TailCallBlocked]: This tail call can&#39;t reuse the frame because 
  25 |     return deferred(n - 1)
     |            ^^^^^^^^
  Why: `d` is a `Res` that is still open here, and its `defer close` runs when its scope ends, after this call returns; the call keeps its frame, so a chain of such calls grows the stack
- Fix: Close `d` before the call with `close(^d)` (bind any argument that reads it first), or open it in a smaller block that ends before the call
+ Fix: Close `d` before the call with `close(d)` (bind any argument that reads it first), or open it in a smaller block that ends before the call
 More: jet-lang.dev/e/L0533
 
 Warning [jet.TailCallBlocked]: This tail call can&#39;t reuse the frame because `r` closes after it returns
@@ -70,7 +70,7 @@ Warning [jet.TailCallBlocked]: This tail call can&#39;t reuse the frame because 
  49 |     kept(n - 1, Res{name: &quot;k{n}&quot;})
     |     ^^^^
  Why: `r` is a `Res` that is still open here, and its Close implementation runs when its scope ends, after this call returns; the call keeps its frame, so a chain of such calls grows the stack
- Fix: Close `r` before the call with `close(^r)` (bind any argument that reads it first), or open it in a smaller block that ends before the call
+ Fix: Close `r` before the call with `close(r)` (bind any argument that reads it first), or open it in a smaller block that ends before the call
 More: jet-lang.dev/e/L0533
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

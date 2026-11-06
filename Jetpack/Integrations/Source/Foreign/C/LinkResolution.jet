@@ -71,20 +71,20 @@ pkg_cffi_rustc_link_args_for_target_with_entry: fn(cffi: CFFI, project_root: Str
     diagnostics := [Diagnostic]{}
     direct := cffi.link_closure.direct
     if direct.len() == 0 {
-        loop linked in cffi.libs -> &direct.push(linked.lib)
+        loop linked in cffi.libs -> direct.push(linked.lib)
     }
     loop lib in direct {
         if pkg_cffi_resolve_link_for_target_with_entry(lib, project_root, target, entry) == {
             .Ok(flags) -> {
                 if pkg_cffi_validate_link_inputs(lib, project_root, target, flags, cffi.overlay_overrides, entry) == {
-                    .Ok(_) -> pkg_cffi_append_link_flags(&args, flags)
+                    .Ok(_) -> pkg_cffi_append_link_flags(args, flags)
                     .Err(error) -> {
-                        loop diagnostic in error.diagnostics -> &diagnostics.push(diagnostic)
+                        loop diagnostic in error.diagnostics -> diagnostics.push(diagnostic)
                     }
                 }
             }
             .Err(error) -> {
-                loop diagnostic in error.diagnostics -> &diagnostics.push(diagnostic)
+                loop diagnostic in error.diagnostics -> diagnostics.push(diagnostic)
             }
         }
     }
@@ -92,9 +92,9 @@ pkg_cffi_rustc_link_args_for_target_with_entry: fn(cffi: CFFI, project_root: Str
     // own no generated C binding and skip C artifact validation.
     loop lib in cffi.link_closure.transitive {
         if pkg_cffi_resolve_link_for_target_with_entry(lib, project_root, target, entry) == {
-            .Ok(flags) -> pkg_cffi_append_link_flags(&args, flags)
+            .Ok(flags) -> pkg_cffi_append_link_flags(args, flags)
             .Err(error) -> {
-                loop diagnostic in error.diagnostics -> &diagnostics.push(diagnostic)
+                loop diagnostic in error.diagnostics -> diagnostics.push(diagnostic)
             }
         }
     }
@@ -104,16 +104,16 @@ pkg_cffi_rustc_link_args_for_target_with_entry: fn(cffi: CFFI, project_root: Str
 
 pkg_cffi_append_link_flags: fn(args: &[String], flags: LinkFlags) Never! {
     loop dir in flags.lib_dirs {
-        &args.push("-L")
-        &args.push("native={dir}")
+        args.push("-L")
+        args.push("native={dir}")
     }
     loop name in flags.link_names {
-        &args.push("-l")
-        &args.push(name)
+        args.push("-l")
+        args.push(name)
     }
     loop dir in flags.rpath_dirs {
-        &args.push("-C")
-        &args.push("link-arg=-Wl,-rpath,{dir}")
+        args.push("-C")
+        args.push("link-arg=-Wl,-rpath,{dir}")
     }
 }
 
@@ -259,18 +259,18 @@ pkg_cffi_cpp_link: fn(lib: String, actual: String, dir: String, archive: String,
         if line.starts_with("L\t") {
             value: line.removeprefix("L\t")
             if files.is_absolute(value) {
-                &flags.lib_dirs.push(value)
-                &flags.rpath_dirs.push(value)
+                flags.lib_dirs.push(value)
+                flags.rpath_dirs.push(value)
             }
         } else if line.starts_with("l\t") {
             value: line.removeprefix("l\t")
             if pkg_cffi_is_link_word(value) {
                 if value == runtime -> has_runtime = true
-                &flags.link_names.push(value)
+                flags.link_names.push(value)
             }
         }
     }
-    if !has_runtime -> &flags.link_names.push(runtime)
+    if !has_runtime -> flags.link_names.push(runtime)
     Val(flags)
 }
 
@@ -419,18 +419,18 @@ pkg_cffi_parse_pkg_config: fn(text: String, lib: String) -> LinkFlags Never! {
     loop token in pkg_cffi_whitespace_tokens(text) {
         if {
             token.starts_with("-I") -> {
-                &flags.include_dirs.push(token.removeprefix("-I"))
+                flags.include_dirs.push(token.removeprefix("-I"))
             }
             token.starts_with("-L") -> {
-                &flags.lib_dirs.push(token.removeprefix("-L"))
+                flags.lib_dirs.push(token.removeprefix("-L"))
             }
             token.starts_with("-l") -> {
-                &flags.link_names.push(token.removeprefix("-l"))
+                flags.link_names.push(token.removeprefix("-l"))
             }
             else -> {}
         }
     }
-    if flags.link_names.len() == 0 -> &flags.link_names.push(lib)
+    if flags.link_names.len() == 0 -> flags.link_names.push(lib)
     flags
 }
 
@@ -444,7 +444,7 @@ pkg_cffi_whitespace_tokens: fn(text: String) -> [String] Never! {
         if cursor >= bytes.len() -> break
         start: cursor
         loop cursor < bytes.len() && pkg_bytes_space_width(bytes, cursor) == 0 -> cursor += 1
-        &tokens.push(pkg_bytes_text(bytes, start, cursor))
+        tokens.push(pkg_bytes_text(bytes, start, cursor))
     }
     tokens
 }

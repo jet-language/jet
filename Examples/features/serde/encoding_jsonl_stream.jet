@@ -24,23 +24,23 @@ use {
 
 write_catalog: fn(path: Path) -> Bool (EncodingError | IOError)! {
     output: files.create(path) ?? return Err(err)
-    writer := jsonl.writer(^output, encoding.EncodingLimits.safe()) ?? return Err(err)
-    &writer.write(Dyn.Object(["ok": Dyn.Bool(true)])) ?? return Err(err)
-    &writer.write(Dyn.Object(["n": Dyn.Int(2)])) ?? return Err(err)
-    &writer.flush() ?? return Err(err)
-    &writer.finish() ?? return Err(err)
+    writer := jsonl.writer(output, encoding.EncodingLimits.safe()) ?? return Err(err)
+    writer.write(Dyn.Object(["ok": Dyn.Bool(true)])) ?? return Err(err)
+    writer.write(Dyn.Object(["n": Dyn.Int(2)])) ?? return Err(err)
+    writer.flush() ?? return Err(err)
+    writer.finish() ?? return Err(err)
     return Ok(true)
 }
 
 // Read every record, then show that a failure stays sticky.
 drain: fn(label: String, path: Path, limits: encoding.EncodingLimits) IOError! {
     input: files.open(path) ?? return Err(err)
-    reader := jsonl.reader(^input, limits) ?? {
+    reader := jsonl.reader(input, limits) ?? {
         print("{label}: refused {err}")
         return Ok(())
     }
     loop {
-        if &reader.next() == {
+        if reader.next() == {
             .Ok(next) -> {
                 row: next ?? {
                     print("{label}: eof")
@@ -50,7 +50,7 @@ drain: fn(label: String, path: Path, limits: encoding.EncodingLimits) IOError! {
             }
             .Err(error) -> {
                 print("{label}: {error}")
-                if &reader.next() == {
+                if reader.next() == {
                     .Ok(_) -> print("{label}: read again succeeded")
                     .Err(again) -> print("{label}: read again {again.kind == error.kind && again.byte_offset == error.byte_offset}")
                 }
@@ -62,10 +62,10 @@ drain: fn(label: String, path: Path, limits: encoding.EncodingLimits) IOError! {
 
 read_until_cancel: fn(path: Path, started: Sender<Int>, gate: Receiver<Int>) -> Int (EncodingError | IOError)! {
     input: files.open(path) ?? return Err(err)
-    reader := jsonl.reader(^input) ?? return Err(err)
+    reader := jsonl.reader(input) ?? return Err(err)
     count := 0
     loop {
-        _row: &reader.next() ?? break
+        _row: reader.next() ?? break
         count += 1
         started.send(count)
         _: gate.receive() ?? 0
@@ -114,14 +114,14 @@ run: fn() (EncodingError | IOError)! {
     }
 
     lines := [String]{}
-    loop index in 0..<5 -> &lines.push("{{\"n\":{index}}}")
+    loop index in 0..<5 -> lines.push("{{\"n\":{index}}}")
     files.write(path.to_string(), lines.join("\n")) ?? return
     { sender: started_tx, receiver: started_rx }: channel<Int>(capacity: 1)
     { sender: gate_tx, receiver: gate_rx }: channel<Int>(capacity: 1)
     worker: task read_until_cancel(path, started_tx, gate_rx)
     print("cancel: read {started_rx.receive() ?? -1} record before cancel")
     worker.cancel()
-    if ^worker.join() == {
+    if worker.join() == {
         .Ok(count) -> print("cancel: finished after {count} records")
         .Err(error) -> print("cancel: {failure_label(error)}")
     }

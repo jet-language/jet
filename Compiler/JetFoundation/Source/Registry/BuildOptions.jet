@@ -220,7 +220,7 @@ build_option_argument: fn(row: BuildOptionRow, value: String) -> String {
         .Text -> "\"{value}\""
         .List -> {
             items := [String]{}
-            loop item in build_option_items(value) -> &items.push("\"{item}\"")
+            loop item in build_option_items(value) -> items.push("\"{item}\"")
             "[{items.join(", ")}]"
         }
         .Choice -> ".{sema_casing_pascal_words(value)}"
@@ -289,7 +289,7 @@ build_option_variants_text: fn(row: BuildOptionRow) -> String Never! {
     if row.kind == BuildOptionKind.Text -> return "a string literal"
     if row.kind == BuildOptionKind.List -> return "a list literal of strings"
     words := [String]{}
-    loop value in build_option_method_values(row) -> &words.push(build_option_argument(row, value))
+    loop value in build_option_method_values(row) -> words.push(build_option_argument(row, value))
     "one of {build_option_join(words)}"
 }
 
@@ -300,7 +300,7 @@ build_option_method_values: fn(row: BuildOptionRow) -> [String] Never! {
     if row.kind != BuildOptionKind.Bool -> return row.values.copy()
     out := [String]{}
     loop value in row.values {
-        if value == "true" || value == "false" -> &out.push(value.copy())
+        if value == "true" || value == "false" -> out.push(value.copy())
     }
     out
 }
@@ -371,7 +371,7 @@ build_option_removes_check: fn(choice: BuildOptionChoice) -> Bool Never! {
 build_options_check_removals: fn(options: BuildOptions) -> [BuildOptionChoice] Never! {
     out := [BuildOptionChoice]{}
     loop choice in options.values {
-        if build_option_removes_check(choice) -> &out.push(choice.copy())
+        if build_option_removes_check(choice) -> out.push(choice.copy())
     }
     out
 }
@@ -409,7 +409,7 @@ build_option_flags: fn(argv: [String]) -> BuildOptionsResolved Never! {
         loop earlier in flags {
             if earlier.name == row.name && earlier.value != value -> return BuildOptionsResolved.Refused{code: "E2104", what: "`{earlier.written}` and `{argument}` disagree", fix: "pass `{flag}` once"}
         }
-        &flags.push(BuildOptionChoice{name: row.name.copy(), value: value, layer: BuildOptionLayer.Flag, written: argument.copy(), site: "", pinned: false})
+        flags.push(BuildOptionChoice{name: row.name.copy(), value: value, layer: BuildOptionLayer.Flag, written: argument.copy(), site: "", pinned: false})
     }
     BuildOptionsResolved.Resolved{options: BuildOptions{command: "", profile: "", written: flags, values: [BuildOptionChoice]{}}, notes: [String]{}}
 }
@@ -430,12 +430,12 @@ build_options_resolve: fn(command: String, profile: String, written: [BuildOptio
                     return BuildOptionsResolved.Refused{code: "E2113", what: "`{row.name}` is pinned to `{current.value}` {current.site}, so `{choice.written}` can't change it", fix: "remove the flag, or remove the pin {current.site}"}
                 }
                 if current.layer == BuildOptionLayer.Profile || current.layer == BuildOptionLayer.Code {
-                    if current.value != choice.value -> &notes.push("note: {choice.written} replaces {current.written} {current.site} for this run")
+                    if current.value != choice.value -> notes.push("note: {choice.written} replaces {current.written} {current.site} for this run")
                 }
             }
             current = choice.copy()
         }
-        &values.push(current)
+        values.push(current)
     }
     // A full backtrace names frames from the DWARF that `debug_info: false`
     // leaves out; the stock `full` degrades to addresses, a written one is
@@ -501,11 +501,11 @@ build_option_index: fn(name: String) -> Int Never! {
 build_options_with_code: fn(options: BuildOptions, code: [BuildOptionChoice]) -> BuildOptionsResolved Never! {
     written := [BuildOptionChoice]{}
     loop choice in options.written {
-        if choice.layer == BuildOptionLayer.Profile -> &written.push(choice.copy())
+        if choice.layer == BuildOptionLayer.Profile -> written.push(choice.copy())
     }
-    loop choice in code -> &written.push(choice.copy())
+    loop choice in code -> written.push(choice.copy())
     loop choice in options.written {
-        if choice.layer == BuildOptionLayer.Flag -> &written.push(choice.copy())
+        if choice.layer == BuildOptionLayer.Flag -> written.push(choice.copy())
     }
     build_options_resolve(options.command, options.profile, written)
 }

@@ -196,7 +196,7 @@ impl __HTTPBodyCursor.Iterator {
 impl HTTPBodyChunks.Iterable {
     Iter: __HTTPBodyCursor
 
-    iter: fn(^self) -> __HTTPBodyCursor {
+    iter: fn(&&self) -> __HTTPBodyCursor {
         __HTTPBodyCursor{bytes: self.__bytes, max: self.__max, at: 0, error: self.__error, done: false}
     }
 }
@@ -217,11 +217,11 @@ impl Body {
 
     /// Write the body to `writer` when it has at most `limit` bytes; the
     /// count written.
-    copy_to: fn(self, writer: ^FileWriter, limit: Int) -[Net, Time.Wait]> Int HTTPError! {
+    copy_to: fn(self, writer: &&FileWriter, limit: Int) -[Net, Time.Wait]> Int HTTPError! {
         raw: __body_bytes_within(self, limit) ?? return Err(err)
-        out := ^writer
-        &out.write_all(raw) ?? return Err(.IO{operation: "copy body"})
-        &out.flush() ?? return Err(.IO{operation: "copy body"})
+        out := writer.move()
+        out.write_all(raw) ?? return Err(.IO{operation: "copy body"})
+        out.flush() ?? return Err(.IO{operation: "copy body"})
         Ok(raw.len())
     }
 
@@ -283,8 +283,8 @@ __server_request: fn(method: String, path: String, body: Body, fields: Headers) 
     HTTPRequest{method: method, path: path, body: body, headers: fields, __url: path, __body_set: true, __cell: Val(shared __HTTPBodyCell{taken: false})}
 }
 
-__response: fn(status: Int, body: ^Body, fields: ^Headers) -> HTTPResponse Never! {
-    HTTPResponse{status: status, body: ^body, headers: ^fields, __cell: Val(shared __HTTPBodyCell{taken: false})}
+__response: fn(status: Int, body: &&Body, fields: &&Headers) -> HTTPResponse Never! {
+    HTTPResponse{status: status, body: body, headers: fields, __cell: Val(shared __HTTPBodyCell{taken: false})}
 }
 
 // A text response; an out-of-range status is a 500.
@@ -292,10 +292,10 @@ __text_response: fn(status: Int, text: String) -> HTTPResponse Never! {
     fields: headers()
     if status < 100 || status > 599 {
         fallback: body_text("500 Internal Server Error")
-        return __response(500, ^fallback, ^fields)
+        return __response(500, fallback, fields)
     }
     payload: body_text(text)
-    __response(status, ^payload, ^fields)
+    __response(status, payload, fields)
 }
 
 __client_response: fn(status: Int, body: Body, fields: Headers, redirect_history: [String], timings: [Int], reused: Bool, raw_encoding: String?, body_error: HTTPError?) -> HTTPResponse Never! {
@@ -375,7 +375,7 @@ impl HTTPRequest {
     __route_rejected: fn(self) -> HTTPResponse Never! {
         payload: body_text("400 Bad Request")
         fields: headers()
-        __response(400, ^payload, ^fields)
+        __response(400, payload, fields)
     }
 
     header: fn(self, name: String) -> String? Never! { headers_get(self.headers, name) }
@@ -387,7 +387,7 @@ impl HTTPRequest {
             out.__header_error = Val(HTTPError.InvalidHeader)
             return out
         }
-        &out.headers.fields.push(Header{name: name, value: value})
+        out.headers.fields.push(Header{name: name, value: value})
         out
     }
 
@@ -465,17 +465,17 @@ impl HTTPRequest {
     }
     cookie: fn(self, name: String, value: String) -[Net]> HTTPRequest Never! {
         out := self.copy()
-        &out.__cookies.push(Header{name: name, value: value})
+        out.__cookies.push(Header{name: name, value: value})
         out
     }
     form: fn(self, name: String, value: String) -[Net]> HTTPRequest Never! {
         out := self.copy()
-        &out.__form.push(Header{name: name, value: value})
+        out.__form.push(Header{name: name, value: value})
         out
     }
     multipart_text: fn(self, name: String, value: String) -[Net]> HTTPRequest Never! {
         out := self.copy()
-        &out.__multipart.push(Header{name: name, value: value})
+        out.__multipart.push(Header{name: name, value: value})
         out
     }
 
@@ -508,16 +508,16 @@ impl HTTPResponse {
     __with_header: fn(self, name: String, value: String) -> HTTPResponse Never! {
         out := self.copy()
         if !client_header_name(name) || !client_header_value(value) -> return out
-        &out.headers.fields.push(Header{name: name, value: value})
+        out.headers.fields.push(Header{name: name, value: value})
         out
     }
 
-    trailers: fn(self, fields: ^Headers) -[Net]> HTTPResponse HTTPError! {
+    trailers: fn(self, fields: &&Headers) -[Net]> HTTPResponse HTTPError! {
         loop field in fields.fields {
             if !client_header_name(field.name) || !client_header_value(field.value) -> return Err(.InvalidHeader)
         }
         out := self.copy()
-        out.__trailers = Val(^fields)
+        out.__trailers = Val(fields)
         Ok(out)
     }
 
@@ -554,9 +554,9 @@ headers_set_raw: fn(h: Headers, name: String, value: String) -> Headers Never! {
     want: ascii_lower(name)
     fields := [Header]{}
     loop f in h.fields {
-        if ascii_lower(f.name) != want -> &fields.push(f)
+        if ascii_lower(f.name) != want -> fields.push(f)
     }
-    &fields.push(Header{name: name, value: value})
+    fields.push(Header{name: name, value: value})
     Headers{fields: fields}
 }
 
@@ -584,12 +584,12 @@ impl HTTPRouter {
     // route's checked contract (sema sema_call_try_http_router). The route
     // registers on the router's mux, so duplicates, matching and
     // `web.openapi` are the mux's; the handler keeps its `Net`-only type.
-    __route: fn(self, method: String, pattern: String, handler: ^fn(HTTPRequest) -[Net]> HTTPResponse HTTPError!, contract: String) Never! -[Net]> {
+    __route: fn(self, method: String, pattern: String, handler: &&fn(HTTPRequest) -[Net]> HTTPResponse HTTPError!, contract: String) Never! -[Net]> {
         state: self.__state
         index: __router_handler_count(self.__state)
-        self.__mux.__route(method, pattern, ^(request: HTTPRequest) -> __router_call(state, index, request), contract)
+        self.__mux.__route(method, pattern, (request: HTTPRequest) -> __router_call(state, index, request), contract)
         guard := self.__state.guard_edit()
-        &guard.value.handlers.push(__HTTPRouterHandler{call: ^handler})
+        guard.value.handlers.push(__HTTPRouterHandler{call: handler.move()})
     }
 }
 
@@ -751,7 +751,7 @@ headers_all: fn(h: Headers, name: String) -> [String] Never! {
     want: ascii_lower(name)
     out := [String]{}
     loop f in h.fields {
-        if ascii_lower(f.name) == want -> &out.push(f.value)
+        if ascii_lower(f.name) == want -> out.push(f.value)
     }
     out
 }
@@ -764,22 +764,22 @@ headers_set: fn(h: Headers, name: String, value: String) -> Headers Never! {
     loop f in h.fields {
         if ascii_lower(f.name) == want {
             if !replaced {
-                &fields.push(Header{name: name, value: trim(value)})
+                fields.push(Header{name: name, value: trim(value)})
                 replaced = true
             }
         } else {
-            &fields.push(f)
+            fields.push(f)
         }
     }
-    if !replaced -> &fields.push(Header{name: name, value: trim(value)})
+    if !replaced -> fields.push(Header{name: name, value: trim(value)})
     Headers{fields: fields}
 }
 
 headers_append: fn(h: Headers, name: String, value: String) -> Headers Never! {
     if !valid_header_name(name) || has_ctl(value.bytes()) -> return h.copy()
     fields := [Header]{}
-    loop f in h.fields -> &fields.push(f)
-    &fields.push(Header{name: name, value: trim(value)})
+    loop f in h.fields -> fields.push(f)
+    fields.push(Header{name: name, value: trim(value)})
     Headers{fields: fields}
 }
 
@@ -787,14 +787,14 @@ headers_remove: fn(h: Headers, name: String) -> Headers Never! {
     want: ascii_lower(name)
     fields := [Header]{}
     loop f in h.fields {
-        if ascii_lower(f.name) != want -> &fields.push(f)
+        if ascii_lower(f.name) != want -> fields.push(f)
     }
     Headers{fields: fields}
 }
 
 headers_encode: fn(h: Headers) -> [String] Never! {
     out := [String]{}
-    loop f in h.fields -> &out.push("{f.name}: {f.value}")
+    loop f in h.fields -> out.push("{f.name}: {f.value}")
     out
 }
 
@@ -920,7 +920,7 @@ ascii_upper: fn(text: String) -> String Never! {
     out := [U8]{}
     loop b in text.bytes() {
         n: Int.from_u8(b)
-        if n >= 97 && n <= 122 -> &out.push(U8{n - 32}) else -> &out.push(b)
+        if n >= 97 && n <= 122 -> out.push(U8{n - 32}) else -> out.push(b)
     }
     String.from_bytes(out) ?? text
 }
@@ -929,7 +929,7 @@ ascii_lower: fn(text: String) -> String Never! {
     out := [U8]{}
     loop b in text.bytes() {
         n: Int.from_u8(b)
-        if n >= 65 && n <= 90 -> &out.push(U8{n + 32}) else -> &out.push(b)
+        if n >= 65 && n <= 90 -> out.push(U8{n + 32}) else -> out.push(b)
     }
     String.from_bytes(out) ?? text
 }
@@ -1016,7 +1016,7 @@ parse_response: fn(url: String, raw: [U8]) -> HTTPResponse HTTPError! {
     parsed: parse_status_line(lines[0]) ?? return Err(.InvalidStatus)
     hdr_lines := [String]{}
     loop i in 1..<lines.len() {
-        if lines[i].bytes().len() > 0 -> &hdr_lines.push(lines[i])
+        if lines[i].bytes().len() > 0 -> hdr_lines.push(lines[i])
     }
     if !headers_lines_bounded(hdr_lines) || !headers_lines_valid(hdr_lines) -> return Err(.InvalidHeader)
     h := headers_parse(hdr_lines)
@@ -1062,7 +1062,7 @@ parse_request: fn(raw: [U8]) -> HTTPRequest HTTPError! {
     if parsed_version == Version.HTTP2 || parsed_version == Version.HTTP3 -> return Err(.Protocol{version: parts[2]})
     hlines := [String]{}
     loop i in 1..<lines.len() {
-        if lines[i].bytes().len() > 0 -> &hlines.push(lines[i])
+        if lines[i].bytes().len() > 0 -> hlines.push(lines[i])
     }
     if !headers_lines_bounded(hlines) || !headers_lines_valid(hlines) -> return Err(.InvalidHeader)
     h := headers_parse(hlines)
@@ -1083,12 +1083,12 @@ parse_request: fn(raw: [U8]) -> HTTPRequest HTTPError! {
         col := index_byte(line.bytes(), 58)
         name: String.from_bytes(slice_b(line.bytes(), 0, col)) ?? return Err(.InvalidHeader)
         value: String.from_bytes(slice_b(line.bytes(), col + 1, line.bytes().len())) ?? return Err(.InvalidHeader)
-        &fields.fields.push(Header{name: name, value: trim(value)})
+        fields.fields.push(Header{name: name, value: trim(value)})
     }
     // The body stays the wire bytes, sliced once after its length check
     // (#4428). A read as text decodes it then, so a binary upload parses.
     body := Body.Empty
-    if body_raw.len() > 0 -> body = Body.Bytes(^body_raw)
+    if body_raw.len() > 0 -> body = Body.Bytes(body_raw)
     Ok(__server_request(method_text(method_parse(parts[0])), parts[1], body, fields))
 }
 
@@ -1129,7 +1129,7 @@ split_space_line: fn(text: String) -> [String] Never! {
         n: Int.from_u8(raw[i])
         if n == 32 {
             if i == start -> return [String]{}
-            &out.push(String.from_bytes(slice_b(raw, start, i)) ?? "")
+            out.push(String.from_bytes(slice_b(raw, start, i)) ?? "")
             start = i + 1
         } else if n < 32 || n == 127 {
             return [String]{}
@@ -1137,7 +1137,7 @@ split_space_line: fn(text: String) -> [String] Never! {
         i = i + 1
     }
     if start == raw.len() -> return [String]{}
-    &out.push(String.from_bytes(slice_b(raw, start, raw.len())) ?? "")
+    out.push(String.from_bytes(slice_b(raw, start, raw.len())) ?? "")
     out
 }
 
@@ -1178,12 +1178,12 @@ split_lines: fn(text: String) -> [String] Never! {
         if raw[i] == (U8{10}) {
             end := i
             if end > start && raw[end - 1] == (U8{13}) -> end = end - 1
-            &out.push(String.from_bytes(slice_b(raw, start, end)) ?? "")
+            out.push(String.from_bytes(slice_b(raw, start, end)) ?? "")
             start = i + 1
         }
         i = i + 1
     }
-    if start < raw.len() -> &out.push(String.from_bytes(slice_b(raw, start, raw.len())) ?? "")
+    if start < raw.len() -> out.push(String.from_bytes(slice_b(raw, start, raw.len())) ?? "")
     out
 }
 
@@ -1220,7 +1220,7 @@ query_get: fn(q: Query, key: String) -> String? Never! {
 query_all: fn(q: Query, key: String) -> [String] Never! {
     out := [String]{}
     loop p in q.pairs {
-        if p.key == key -> &out.push(p.value)
+        if p.key == key -> out.push(p.value)
     }
     out
 }
@@ -1231,15 +1231,15 @@ query_set: fn(q: Query, key: String, value: String) -> Query Never! {
     loop p in q.pairs {
         if p.key == key {
             if !replaced {
-                &pairs.push(QueryPair{key: key, value: value})
+                pairs.push(QueryPair{key: key, value: value})
                 replaced = true
             }
         } else {
-            &pairs.push(p)
+            pairs.push(p)
         }
     }
     if !replaced {
-        &pairs.push(QueryPair{key: key, value: value})
+        pairs.push(QueryPair{key: key, value: value})
     }
     Query{pairs: pairs}
 }
@@ -1286,7 +1286,7 @@ query_decode: fn(text: String) -> Query Never! {
                 key: String.from_bytes(slice_b(raw, start, key_end)) ?? ""
                 value: String.from_bytes(slice_b(raw, value_start, i)) ?? ""
                 pairs := q.pairs.copy()
-                &pairs.push(QueryPair{key: percent_decode(key), value: percent_decode(value)})
+                pairs.push(QueryPair{key: percent_decode(key), value: percent_decode(value)})
                 q = Query{pairs: pairs}
             }
             start = i + 1
@@ -1338,7 +1338,7 @@ cookies_parse: fn(header: String) -> [Cookie] Never! {
                 v: trim(slice_str(piece, eq + 1, piece.bytes().len()))
                 lower: ascii_lower(n)
                 if first || (lower != "domain" && lower != "path" && lower != "max-age" && lower != "expires" && lower != "secure" && lower != "httponly" && lower != "samesite") {
-                    if valid_cookie_token(n) && valid_cookie_value(v) -> &out.push(cookie(n, v))
+                    if valid_cookie_token(n) && valid_cookie_value(v) -> out.push(cookie(n, v))
                 }
             }
             first = false
@@ -1631,12 +1631,12 @@ percent_encode: fn(text: String) -> String {
     loop b in text.bytes() {
         n: Int.from_u8(b)
         unreserved := (n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 45 || n == 46 || n == 95 || n == 126
-        if unreserved -> &out.push(b)
-        else if n == 32 -> &out.push(U8{43})
+        if unreserved -> out.push(b)
+        else if n == 32 -> out.push(U8{43})
         else {
-            &out.push(U8{37})
-            &out.push(hex_digit(n /% 16))
-            &out.push(hex_digit(n %% 16))
+            out.push(U8{37})
+            out.push(hex_digit(n /% 16))
+            out.push(hex_digit(n %% 16))
         }
     }
     String.from_bytes(out) ?? text
@@ -1648,7 +1648,7 @@ percent_decode: fn(text: String) -> String {
     i := 0
     loop i < raw.len() {
         if raw[i] == (U8{43}) {
-            &out.push(U8{32})
+            out.push(U8{32})
             i = i + 1
             next
         }
@@ -1656,12 +1656,12 @@ percent_decode: fn(text: String) -> String {
             hi: from_hex(raw[i + 1])
             lo: from_hex(raw[i + 2])
             if hi >= 0 && lo >= 0 {
-                &out.push(U8{hi * 16 + lo})
+                out.push(U8{hi * 16 + lo})
                 i = i + 3
                 next
             }
         }
-        &out.push(raw[i])
+        out.push(raw[i])
         i = i + 1
     }
     String.from_bytes(out) ?? text
@@ -1679,10 +1679,10 @@ base64_encode: fn(bytes: [U8]) -> String Never! {
         if have_b -> b = Int.from_u8(bytes[i + 1])
         if have_c -> c = Int.from_u8(bytes[i + 2])
         block: (a * 65536) + (b * 256) + c
-        &out.push(alphabet[(block /% 262144) %% 64])
-        &out.push(alphabet[(block /% 4096) %% 64])
-        if have_b -> &out.push(alphabet[(block /% 64) %% 64]) else -> &out.push(U8{61})
-        if have_c -> &out.push(alphabet[block %% 64]) else -> &out.push(U8{61})
+        out.push(alphabet[(block /% 262144) %% 64])
+        out.push(alphabet[(block /% 4096) %% 64])
+        if have_b -> out.push(alphabet[(block /% 64) %% 64]) else -> out.push(U8{61})
+        if have_c -> out.push(alphabet[block %% 64]) else -> out.push(U8{61})
         i = i + 3
     }
     String.from_bytes(out) ?? ""

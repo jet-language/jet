@@ -55,11 +55,11 @@ env_script_lock_write: fn(script_path: String, lock: ScriptLockFile) IOError! -[
 env_script_lock_render: fn(lock: ScriptLockFile) -> String Never! {
     out := [String]{"version = {lock.version}\n", "script_hash = \"{lock.script_hash}\"\n"}
     loop dep in lock.deps {
-        &out.push("\n{SCRIPT_LOCK_DEP_HEADER}\n")
-        &out.push("name = \"{dep.name}\"\n")
-        &out.push("selector = \"{dep.selector}\"\n")
-        &out.push("resolved = \"{dep.resolved}\"\n")
-        &out.push("content_hash = \"{dep.content_hash}\"\n")
+        out.push("\n{SCRIPT_LOCK_DEP_HEADER}\n")
+        out.push("name = \"{dep.name}\"\n")
+        out.push("selector = \"{dep.selector}\"\n")
+        out.push("resolved = \"{dep.resolved}\"\n")
+        out.push("content_hash = \"{dep.content_hash}\"\n")
     }
     out.join("")
 }
@@ -81,7 +81,7 @@ env_script_lock_parse: fn(raw: String) -> ScriptLockFile EnvironmentError! {
         line: raw_line.trim()
         if line == "" || line.starts_with("#") -> next
         if line == SCRIPT_LOCK_DEP_HEADER {
-            if in_dep -> &deps.push(current)
+            if in_dep -> deps.push(current)
             current = LockedInlineDep.empty()
             in_dep = true
             next
@@ -105,7 +105,7 @@ env_script_lock_parse: fn(raw: String) -> ScriptLockFile EnvironmentError! {
             }
         }
     }
-    if in_dep -> &deps.push(current)
+    if in_dep -> deps.push(current)
     Ok(ScriptLockFile{version, script_hash, deps})
 }
 

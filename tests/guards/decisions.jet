@@ -36,10 +36,10 @@ s3_decision_expand: fn(token: String) -> [String] {
             if !started && !s3_decision_is_digit(byte) -> next
             if !s3_decision_is_digit(byte) -> break
             started = true
-            &digits.push(byte)
+            digits.push(byte)
         }
         number: String.from_bytes(digits) ?? panic("ASCII decision digits")
-        &result.push("{prefix}{number}{suffix}")
+        result.push("{prefix}{number}{suffix}")
     }
     result
 }
@@ -69,7 +69,7 @@ s3_guard_tombstone_provenance: fn() {
                 token: piece.trim().copy()
                 if !token.starts_with("D-") -> next
                 loop expanded in s3_decision_expand(token) {
-                    if !ids.contains(expanded) -> &ids.push(expanded)
+                    if !ids.contains(expanded) -> ids.push(expanded)
                 }
             }
         }

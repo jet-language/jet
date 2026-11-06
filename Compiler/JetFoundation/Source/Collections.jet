@@ -18,12 +18,12 @@
 compiler_transfer_rows: fn<T>(to: &[T], from: &[T]) Never! {
     reversed := [T]{}
     loop from.len() > 0 {
-        row := &from.pop() ?? panic("a nonempty compiler row source failed to pop")
-        &reversed.push(^row)
+        row := from.pop() ?? panic("a nonempty compiler row source failed to pop")
+        reversed.push(row)
     }
     loop reversed.len() > 0 {
-        row := &reversed.pop() ?? panic("a nonempty compiler row buffer failed to pop")
-        &to.push(^row)
+        row := reversed.pop() ?? panic("a nonempty compiler row buffer failed to pop")
+        to.push(row)
     }
 }
 
@@ -44,19 +44,19 @@ compiler_apply_order: fn<T>(rows: &[T], order: [Int]) Never! {
     destinations := [Int]{}
     slots := [T?]{}
     loop index in 0..<count {
-        &destinations.push(0)
-        &slots.push(None)
+        destinations.push(0)
+        slots.push(None)
     }
     loop index in 0..<count -> destinations[order[index]] = index
     loop rows.len() > 0 {
         original: rows.len() - 1
-        row := &rows.pop() ?? panic("a nonempty compiler row list failed to pop")
-        slots[count - 1 - destinations[original]] = Val(^row)
+        row := rows.pop() ?? panic("a nonempty compiler row list failed to pop")
+        slots[count - 1 - destinations[original]] = Val(row.move())
     }
     loop slots.len() > 0 {
-        slot := &slots.pop() ?? panic("a nonempty compiler slot list failed to pop")
-        row := ^slot ?? panic("a compiler row permutation left an empty slot")
-        &rows.push(^row)
+        slot := slots.pop() ?? panic("a nonempty compiler slot list failed to pop")
+        row := slot.move() ?? panic("a compiler row permutation left an empty slot")
+        rows.push(row)
     }
 }
 
@@ -67,10 +67,10 @@ compiler_apply_order: fn<T>(rows: &[T], order: [Int]) Never! {
 compiler_take_rows: fn<T>(rows: &[T]) -> [T] Never! {
     taken := [T]{}
     loop rows.len() > 0 {
-        row := &rows.pop() ?? panic("a nonempty compiler row list failed to pop")
-        &taken.push(^row)
+        row := rows.pop() ?? panic("a nonempty compiler row list failed to pop")
+        taken.push(row)
     }
-    &taken.reverse()
+    taken.reverse()
     taken
 }
 
@@ -724,8 +724,8 @@ sema_collection_method_contract_in: fn(rows: [CollectionOperationRow], receiver:
             seeds := [Int]{}
             comparator := false
             loop (index, arg) in row.args {
-                if collection_arg_is_callback(arg) -> &callbacks.push(index)
-                if arg == CollectionArg.Seed -> &seeds.push(index)
+                if collection_arg_is_callback(arg) -> callbacks.push(index)
+                if arg == CollectionArg.Seed -> seeds.push(index)
                 if arg == CollectionArg.Comparator -> comparator = true
             }
             return Val(SemaCollectionMethodContract{receiver: receiver, kind: kind, row: row, minimum_arity: row.minimum_arity, maximum_arity: row.maximum_arity, receiver_access: collection_access_convention(row.access, family), callback_indices: callbacks, seed_indices: seeds, accepts_comparator: comparator})
@@ -905,7 +905,7 @@ sema_collection_method_result_type: fn(contract: SemaCollectionMethodContract, c
             if element == {
                 .Tuple(fields) -> {
                     output := [TypeTupleField]{}
-                    loop field in fields -> &output.push(TypeTupleField{name: field.name, ty: Type.List{element: field.ty}})
+                    loop field in fields -> output.push(TypeTupleField{name: field.name, ty: Type.List{element: field.ty}})
                     Val(Type.Tuple{fields: output})
                 }
                 else -> None

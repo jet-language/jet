@@ -59,15 +59,15 @@ jet_driver_build_host_call: fn(session: &BuildSession, inputs: JetDriverSharedBu
             // consuming match, so the payload cannot be moved out.
             if value == .Text(source) -> generated = Val(source.copy())
             else { return Val(jet_driver_build_host_failure(session, span, "generated items lost their checked source")) }
-        } else { &values.push(value) }
+        } else { values.push(value) }
     }
-    reply := build_session_call(&session, method, values, generated, impure, span.start, span.end)
+    reply := build_session_call(session, method, values, generated, impure, span.start, span.end)
     if reply == .HostRequest(service, request_args) -> reply = jet_driver_build_input_reply(inputs, http_inputs, network_declared, base_dir, service, request_args, span)
     if reply == {
         .Value(value) -> {
             data := jet_eval_build_session_output(value)
-            if fallible -> data = TComptimeValue.Present{value: ^data}
-            return Val(JetEvalBuildReply.Value{value: ^data})
+            if fallible -> data = TComptimeValue.Present{value: data.move()}
+            return Val(JetEvalBuildReply.Value{value: data.move()})
         }
         .Failure(error) -> {
             if fallible && jet_eval_build_failed_value(error) == .Val(value) {
@@ -96,7 +96,7 @@ impl JetDriverBuildAdapter.JetEvalBuildHostAdapter {
         // (`&`). This call writes a session of its own, and the adapter keeps its session for the
         // next build_call.
         session := self.session.copy()
-        jet_driver_build_host_call(&session, self.inputs, self.http_inputs, self.network_declared, self.base_dir, member, args, fallible, impure, span)
+        jet_driver_build_host_call(session, self.inputs, self.http_inputs, self.network_declared, self.base_dir, member, args, fallible, impure, span)
     }
 }
 
@@ -145,7 +145,7 @@ jet_driver_build_input_reply: fn(inputs: JetDriverSharedBuildInputs?, http_input
 jet_driver_build_split_rel: fn(path: String) -> [String] Never! {
     parts := [String]{}
     loop part in path.split("/") {
-        if part != "" && part != "." -> &parts.push(part)
+        if part != "" && part != "." -> parts.push(part)
     }
     parts
 }
@@ -173,7 +173,7 @@ jet_driver_build_checked_path: fn(host: JetDriverSharedBuildInputs, root: String
     real: host.resolve(jet_driver_build_join(real_root.path, relative)) ?? return Err(err)
     if !real.exists -> return Ok(None)
     if !jet_driver_build_within(real.path, real_root.path) -> return Err(JetDriverBuildInputError{message: "embedded path escapes the real source root"})
-    Ok(Val(^real))
+    Ok(Val(real.move()))
 }
 
 // `segment_match_chars` over one pattern segment's characters from `pi` and one
@@ -197,11 +197,11 @@ jet_driver_build_segment_match: fn(pattern: [String], pi: Int, text: [String], t
         alternative := [String]{}
         loop index in pi + 1..<end + 1 {
             if index < end && pattern[index] != "," {
-                &alternative.push(pattern[index])
+                alternative.push(pattern[index])
                 next
             }
             candidate := alternative
-            loop rest in end + 1..<pattern.len() -> &candidate.push(pattern[rest])
+            loop rest in end + 1..<pattern.len() -> candidate.push(pattern[rest])
             if jet_driver_build_segment_match(candidate, 0, text, ti) -> return true
             alternative = [String]{}
         }
@@ -228,7 +228,7 @@ jet_driver_build_class: fn(pattern: [String], start: Int, end: Int, needle: Stri
 
 jet_driver_build_characters: fn(text: String) -> [String] Never! {
     out := [String]{}
-    loop character in text.chars() -> &out.push("{character}")
+    loop character in text.chars() -> out.push("{character}")
     out
 }
 
@@ -243,16 +243,16 @@ jet_driver_build_glob_match: fn(pattern: [String], pi: Int, path: [String], qi: 
 jet_driver_build_walk: fn(host: JetDriverSharedBuildInputs, directory: String, logical: String, pattern: [String], depth: Int, max_depth: Int, out: &[String]) -[FS.Read]> String? {
     entries := host.entries(directory) ?? return Val(err.message)
     entries = loop fresh_item in entries -> fresh_item
-    &entries.sort_by((left: JetDriverBuildEntry, right: JetDriverBuildEntry) -> left.name <=> right.name)
+    entries.sort_by((left: JetDriverBuildEntry, right: JetDriverBuildEntry) -> left.name <=> right.name)
     loop entry in entries {
         path: jet_driver_build_join(logical, entry.name)
         if entry.directory {
             if depth + 1 < max_depth {
-                if jet_driver_build_walk(host, jet_driver_build_join(directory, entry.name), path, pattern, depth + 1, max_depth, &out) == .Val(problem) -> return Val(problem)
+                if jet_driver_build_walk(host, jet_driver_build_join(directory, entry.name), path, pattern, depth + 1, max_depth, out) == .Val(problem) -> return Val(problem)
             }
             next
         }
-        if entry.file && jet_driver_build_glob_match(pattern, 0, jet_driver_build_split_rel(path), 0) -> &out.push(path)
+        if entry.file && jet_driver_build_glob_match(pattern, 0, jet_driver_build_split_rel(path), 0) -> out.push(path)
     }
     None
 }
@@ -281,7 +281,7 @@ jet_driver_build_find: fn(host: JetDriverSharedBuildInputs, base_dir: String, ar
     prefix := [String]{}
     loop segment in segments {
         if segment == "**" || segment.contains("*") || segment.contains("?") || segment.contains("{{") || segment.contains("[") -> break
-        &prefix.push(segment)
+        prefix.push(segment)
     }
     recursive: segments.contains("**")
     root := if jet_driver_build_checked_path(host, base_dir, ".") == {
@@ -299,18 +299,18 @@ jet_driver_build_find: fn(host: JetDriverSharedBuildInputs, base_dir: String, ar
     }
     matches := [String]{}
     if root.file {
-        if jet_driver_build_glob_match(segments, 0, jet_driver_build_split_rel(logical), 0) -> &matches.push(logical)
+        if jet_driver_build_glob_match(segments, 0, jet_driver_build_split_rel(logical), 0) -> matches.push(logical)
     } else {
         max_depth: if recursive -> { 9223372036854775807 } else -> { segments.len() }
-        if jet_driver_build_walk(host, root.path, logical, segments, prefix.len(), max_depth, &matches) == .Val(problem) -> return jet_driver_build_input_fail("E0955", walk_what, problem, walk_fix, span)
+        if jet_driver_build_walk(host, root.path, logical, segments, prefix.len(), max_depth, matches) == .Val(problem) -> return jet_driver_build_input_fail("E0955", walk_what, problem, walk_fix, span)
     }
-    &matches.sort()
+    matches.sort()
     values := [BuildSessionValue]{}
-    loop relative in ^matches {
+    loop relative in matches.move() {
         _ := host.read_rooted(base_dir, relative, JET_DRIVER_BUILD_MAX_FILE_BYTES) ?? return jet_driver_build_input_fail("E0955", "`find` can't open `{relative}`", "{err.message} (matched while expanding `{raw}`)", "check the path — it is relative to the file's own directory", span)
-        &values.push(BuildSessionValue.Text{value: ^relative})
+        values.push(BuildSessionValue.Text{value: relative.move()})
     }
-    BuildSessionReply.Value{value: BuildSessionValue.List{values: ^values}}
+    BuildSessionReply.Value{value: BuildSessionValue.List{values: values.move()}}
 }
 
 // `b.embed` -> `eval_build_embed`: one locked relative UTF-8 file below the
@@ -324,7 +324,7 @@ jet_driver_build_embed: fn(host: JetDriverSharedBuildInputs, base_dir: String, a
     if escapes -> return jet_driver_build_input_fail("E0957", "`b.embed` path `{relative}` escapes the build root", "locked build inputs must stay beneath the selected source directory", "use a relative path returned by `b.find`, without `..`", span)
     bytes: host.read_rooted(base_dir, relative, JET_DRIVER_BUILD_MAX_FILE_BYTES) ?? return jet_driver_build_input_fail("E0955", "`b.embed` cannot open `{relative}`", err.message, "check the locked relative path", span)
     text: String.from_bytes(bytes) ?? return jet_driver_build_input_fail("E0955", "`b.embed` cannot decode `{relative}` as text", "the embedded file is not valid UTF-8", "embed a UTF-8 text file", span)
-    return BuildSessionReply.Value{value: BuildSessionValue.Text{value: ^text}}
+    return BuildSessionReply.Value{value: BuildSessionValue.Text{value: text.move()}}
 }
 
 // jet-net `FetchError::IO`/`Scheme` as eval_net_fetch reports it (E3414).
@@ -413,7 +413,7 @@ jet_driver_build_fetch: fn(inputs: JetDriverSharedBuildInputs?, http_inputs: Jet
         response := transport.get(url, addresses, port, 30000, JET_DRIVER_BUILD_MAX_FETCH_BYTES) ?? return jet_driver_build_http_error(url, err.message, span)
         if jet_driver_build_http_length(response.headers) == .Err(detail) -> return jet_driver_build_http_error(url, detail.message, span)
         if response.body.len() > JET_DRIVER_BUILD_MAX_FETCH_BYTES -> return jet_driver_build_http_error(url, "fetch response exceeds {JET_DRIVER_BUILD_MAX_FETCH_BYTES} bytes", span)
-        bytes = ^response.body
+        bytes = response.body.move()
     } else {
         if !url.starts_with("file://") {
             scheme: url.split("://").to_list()[0]
@@ -439,6 +439,6 @@ jet_driver_build_fetch: fn(inputs: JetDriverSharedBuildInputs?, http_inputs: Jet
     }
     actual: build_input_crypto.sha256(bytes).hex()
     if actual != expected -> return jet_driver_build_input_fail("E3413", "fetch: sha256 mismatch for `{url}`", "expected `{expected}` but content hashes to `{actual}`", "update the `sha256:` pin to match the content, or verify the URL is correct", span)
-    text: String.from_bytes(^bytes) ?? return jet_driver_build_input_fail("E3414", "fetch: content at `{url}` is not valid UTF-8", "the downloaded bytes could not be decoded as UTF-8 text", "binary content is not supported by comptime fetch; use `embed_bytes` for binary data", span)
-    return BuildSessionReply.Value{value: BuildSessionValue.Text{value: ^text}}
+    text: String.from_bytes(bytes) ?? return jet_driver_build_input_fail("E3414", "fetch: content at `{url}` is not valid UTF-8", "the downloaded bytes could not be decoded as UTF-8 text", "binary content is not supported by comptime fetch; use `embed_bytes` for binary data", span)
+    return BuildSessionReply.Value{value: BuildSessionValue.Text{value: text.move()}}
 }

@@ -15,7 +15,7 @@ cpu_work: fn(n: Int) -> Int {
 
 run_parallel_map: fn() {
     values := [Int]{}
-    loop n in 0..255 -> &values.push(n)
+    loop n in 0..255 -> values.push(n)
     mapped: values.para_map((n: Int) -> cpu_work(n), limit: 16)
     print("parallel_map workers=16 items={values.len()} results={mapped.len()}")
 }
@@ -40,9 +40,9 @@ run_bounded_pipeline: fn() {
         }
 
         results := [Int]{}
-        loop value in output_rx -> &results.push(value)
-        ^producer.join() ?? panic("producer failed")
-        ^worker.join() ?? panic("worker failed")
+        loop value in output_rx -> results.push(value)
+        producer.join() ?? panic("producer failed")
+        worker.join() ?? panic("worker failed")
         print("bounded_pipeline capacity=2 input=8 output={results.len()}")
         print(results)
     }
@@ -73,8 +73,8 @@ run_tcp_parent: fn() {
         .stderr(.Capture)
         .spawn() ?? panic("second worker spawn failed")
 
-    first_connection: &listener.accept() ?? panic("first accept failed")
-    second_connection: &listener.accept() ?? panic("second accept failed")
+    first_connection: listener.accept() ?? panic("first accept failed")
+    second_connection: listener.accept() ?? panic("second accept failed")
     first_connection.write_all("7".bytes()) ?? panic("first request failed")
     second_connection.write_all("11".bytes()) ?? panic("second request failed")
     first_result: first_connection.read_text(8192) ?? panic("first response failed")
@@ -129,7 +129,7 @@ replay_source: fn() -> Stream<Event> {
     yield Event{key: "a", timestamp: 31, value: 7}
 }
 
-count_windows: fn(^stream: Stream<Event>) -> Int {
+count_windows: fn(&&stream: Stream<Event>) -> Int {
     // These are the real Core event-time operators. The window stream owns
     // keyed state, watermark advancement, ordering, and late-event handling.
     windows: stream

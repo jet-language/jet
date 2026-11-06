@@ -10,6 +10,6 @@ inspect: fn(secret: &ExpiringSecret<crypto.SigningKey>) -[]> Bool {
 run: fn() {
     ttl := Duration.seconds(1) ?? panic("duration")
     key := crypto.SigningKey.new_random() ?? panic("key")
-    secret := vault.ExpiringSecret.new(^key, ttl, Clock.system())
-    print(inspect(&secret))
+    secret := vault.ExpiringSecret.new(key, ttl, Clock.system())
+    print(inspect(secret))
 }

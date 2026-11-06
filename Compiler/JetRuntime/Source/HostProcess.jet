@@ -172,7 +172,7 @@ host_sample_fields: fn(result: I64, error: I64, available: I64, value: I64, errn
     host_sample_out(host_call(I64{141}, I64{0}, native_who.bit_and(I64{4294967295}), native_priority), available, value, errno)
 }
 
-// prlimit64(0, resource, NULL, &old): this program's (soft, hard) limit.
+// prlimit64(0, resource, NULL, old): this program's (soft, hard) limit.
 // RLIM_INFINITY (all ones) reads as -1; core.sys maps a negative to None.
 #Export(c) jet_sys_rlimit_raw: fn(resource: I64, available: I64, soft: I64, hard: I64, errno: I64) {
     native: host_i32(resource)
@@ -189,7 +189,7 @@ host_sample_fields: fn(result: I64, error: I64, available: I64, value: I64, errn
     jet_rt_free(buffer, I64{16}, I64{8})
 }
 
-// prlimit64(0, resource, &new, NULL): -1 passes RLIM_INFINITY. Children
+// prlimit64(0, resource, new, NULL): -1 passes RLIM_INFINITY. Children
 // inherit the new limit; raising a hard limit needs privilege (EPERM).
 #Export(c) jet_sys_set_rlimit_raw: fn(resource: I64, soft: I64, hard: I64, available: I64, value: I64, errno: I64) {
     native: host_i32(resource)
@@ -207,7 +207,7 @@ host_sample_fields: fn(result: I64, error: I64, available: I64, value: I64, errn
     jet_rt_free(buffer, I64{16}, I64{8})
 }
 
-// getrusage(who, &usage): user and system time in microseconds, and the
+// getrusage(who, usage): user and system time in microseconds, and the
 // peak resident set, which Linux counts in KiB, in bytes.
 #Export(c) jet_sys_rusage_raw: fn(who: I64, available: I64, user: I64, system: I64, peak: I64, errno: I64) {
     native: host_i32(who)

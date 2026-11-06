@@ -34,8 +34,8 @@ semindex_collect_state_marker_references_for_method: fn(db: &SymbolDB, ctx: Walk
                     if path.name == "_" -> next
                     leaves: path.name.split(".")
                     name := leaves[leaves.len() - 1] // #4303
-                    reference: semindex_scoped_ref(&db, ctx, names, name, path.span, mp)
-                    &db.refs.push(reference)
+                    reference: semindex_scoped_ref(db, ctx, names, name, path.span, mp)
+                    db.refs.push(reference)
                 }
             }
         }
@@ -45,16 +45,16 @@ semindex_collect_state_marker_references_for_method: fn(db: &SymbolDB, ctx: Walk
 semindex_collect_state_marker_references: fn(db: &SymbolDB, ctx: WalkCtx, names: NameFacts, item: Item, mp: String) Never! {
     if item == {
         .Struct(definition) -> {
-            loop method in definition.methods -> semindex_collect_state_marker_references_for_method(&db, ctx, names, method, mp)
+            loop method in definition.methods -> semindex_collect_state_marker_references_for_method(db, ctx, names, method, mp)
             loop implementation in definition.trait_impls {
-                loop method in implementation.methods -> semindex_collect_state_marker_references_for_method(&db, ctx, names, method, mp)
+                loop method in implementation.methods -> semindex_collect_state_marker_references_for_method(db, ctx, names, method, mp)
             }
         }
         .Impl(implementation) -> {
-            loop method in implementation.methods -> semindex_collect_state_marker_references_for_method(&db, ctx, names, method, mp)
+            loop method in implementation.methods -> semindex_collect_state_marker_references_for_method(db, ctx, names, method, mp)
         }
         .Enum(definition) -> {
-            loop method in definition.methods -> semindex_collect_state_marker_references_for_method(&db, ctx, names, method, mp)
+            loop method in definition.methods -> semindex_collect_state_marker_references_for_method(db, ctx, names, method, mp)
         }
         else -> {}
     }
@@ -70,7 +70,7 @@ semindex_record_node: fn(db: SymbolDB, ctx: WalkCtx, class: String, shape: Strin
     ordinal: db.structural_ordinals.get(key) ?? 0
     db.structural_ordinals[key] = ordinal + 1
     id: db.nodes.len()
-    &db.nodes.push(StructuralNode{id: id, parent: parent, slot: ctx.structural_slot, slot_kind: ctx.structural_slot_kind, ordinal: ordinal, class: class, shape: shape, module_path: mp, span: semindex_source_span(span)})
+    db.nodes.push(StructuralNode{id: id, parent: parent, slot: ctx.structural_slot, slot_kind: ctx.structural_slot_kind, ordinal: ordinal, class: class, shape: shape, module_path: mp, span: semindex_source_span(span)})
     Val(id)
 }
 
@@ -112,10 +112,10 @@ semindex_claim_slot_boundary: fn(db: &SymbolDB, ctx: &WalkCtx, name: String) Nev
     // Rust's min_by_key over the sorted tail is its first candidate; claimed spans are skipped
     // through `block_next`, not rescanned on every entry.
     chosen := Int?{None}
-    index := semindex_next_unclaimed(&ctx, first)
+    index := semindex_next_unclaimed(ctx, first)
     loop index < ctx.block_spans.len() {
         if !semindex_block_span_candidate(parent, ctx.block_spans[index]) {
-            index = semindex_next_unclaimed(&ctx, index + 1)
+            index = semindex_next_unclaimed(ctx, index + 1)
             next
         }
         chosen = Val(index)
@@ -130,19 +130,19 @@ semindex_claim_slot_boundary: fn(db: &SymbolDB, ctx: &WalkCtx, name: String) Nev
             if ctx.block_spans[at].start != span.start -> break
             if ctx.block_spans[at].end == span.end -> ctx.block_next[at] = at + 1
         }
-        &db.slot_boundaries.push(StructuralSlotBoundary{parent: parent.id, slot: name, module_path: parent.module_path, span: semindex_source_span(span)})
+        db.slot_boundaries.push(StructuralSlotBoundary{parent: parent.id, slot: name, module_path: parent.module_path, span: semindex_source_span(span)})
     }
 }
 
 // The callback is run even for empty/optional slots. Restoration is stack-like,
 // so siblings never inherit a nested child's name or kind.
 semindex_structural_slot: fn<T>(db: &SymbolDB, ctx: &WalkCtx, name: String, kind: StructuralSlotKind, f: fn(SymbolDB, WalkCtx) -> T) -> T {
-    semindex_claim_slot_boundary(&db, &ctx, name)
+    semindex_claim_slot_boundary(db, ctx, name)
     old_name: ctx.structural_slot
     old_kind: ctx.structural_slot_kind
     ctx.structural_slot = name
     ctx.structural_slot_kind = kind
-    value: f(&db, &ctx)
+    value: f(db, ctx)
     ctx.structural_slot = old_name
     ctx.structural_slot_kind = old_kind
     value
@@ -326,12 +326,12 @@ semindex_item_span: fn(item: Item) -> Span Never! {
 }
 
 semindex_record_func_type_nodes: fn(db: &SymbolDB, ctx: &WalkCtx, function: Func, mp: String) {
-    semindex_structural_slot(&db, &ctx, "params", StructuralSlotKind.List, (db: SymbolDB, ctx: WalkCtx) -> {
-        loop param in function.params -> _ := semindex_record_node(&db, ctx, "type", "type", mp, param.ty_span)
+    semindex_structural_slot(db, ctx, "params", StructuralSlotKind.List, (db: SymbolDB, ctx: WalkCtx) -> {
+        loop param in function.params -> _ := semindex_record_node(db, ctx, "type", "type", mp, param.ty_span)
     })
     if function.return_type_span == .Val(span) {
-        semindex_structural_slot(&db, &ctx, "return_type", StructuralSlotKind.Scalar, (db: SymbolDB, ctx: WalkCtx) -> {
-            _ := semindex_record_node(&db, ctx, "type", "type", mp, span)
+        semindex_structural_slot(db, ctx, "return_type", StructuralSlotKind.Scalar, (db: SymbolDB, ctx: WalkCtx) -> {
+            _ := semindex_record_node(db, ctx, "type", "type", mp, span)
         })
     }
 }
@@ -342,7 +342,7 @@ semindex_collect_allow_markers: fn(db: &SymbolDB, markers: [Marker], site: Strin
         loop arg in marker.args {
             if arg == .Expr(expr) {
                 if expr == .Field(base, member, _, _) {
-                    if base == .Ident(package, _, _) -> &db.bypasses.push(BypassFact{kind: BypassKind.LintAllow, site: site, detail: "{package}.{member}", module_path: mp, span: semindex_source_span(marker.span)})
+                    if base == .Ident(package, _, _) -> db.bypasses.push(BypassFact{kind: BypassKind.LintAllow, site: site, detail: "{package}.{member}", module_path: mp, span: semindex_source_span(marker.span)})
                 }
             }
         }
@@ -350,15 +350,15 @@ semindex_collect_allow_markers: fn(db: &SymbolDB, markers: [Marker], site: Strin
 }
 
 semindex_record_call_rows: fn(calls: &[CallEdge], caller: CallerFrame?, mp: String, callee: String, span: Span) Never! {
-    if caller == .Val(frame) -> &calls.push(CallEdge{caller: semindex_caller_key(frame), callee: callee, module_path: mp, call_span: semindex_source_span(span)})
+    if caller == .Val(frame) -> calls.push(CallEdge{caller: semindex_caller_key(frame), callee: callee, module_path: mp, call_span: semindex_source_span(span)})
 }
 semindex_record_call: fn(db: &SymbolDB, ctx: WalkCtx, mp: String, callee: String, span: Span) Never! {
-    semindex_record_call_rows(&db.calls, ctx.caller, mp, callee, span)
+    semindex_record_call_rows(db.calls, ctx.caller, mp, callee, span)
 }
 semindex_with_caller: fn(db: &SymbolDB, ctx: &WalkCtx, frame: CallerFrame, params: [Param], mp: String, f: fn(SymbolDB, WalkCtx)) {
     previous: ctx.caller
     ctx.caller = Val(frame)
-    f(&db, &ctx)
+    f(db, ctx)
     ctx.caller = previous
 }
 
@@ -371,16 +371,16 @@ semindex_normalize_definition: fn(source: String) -> String Never! {
         ch: chars[index]
         index += 1
         if string {
-            &out.push(ch)
+            out.push(ch)
             if ch == "\\" {
                 if index < chars.len() {
-                    &out.push(chars[index])
+                    out.push(chars[index])
                     index += 1
                 }
             } else if ch == "\"" -> string = false
         } else if ch == "\"" {
             string = true
-            &out.push(ch)
+            out.push(ch)
         } else if ch == "/" && index < chars.len() && chars[index] == "/" {
             index += 1
             loop index < chars.len() {
@@ -388,7 +388,7 @@ semindex_normalize_definition: fn(source: String) -> String Never! {
                 index += 1
                 if next_ch == "\n" -> break
             }
-        } else if !semindex_text.is_whitespace(ch) -> &out.push(ch)
+        } else if !semindex_text.is_whitespace(ch) -> out.push(ch)
     }
     out.join("")
 }
@@ -400,12 +400,12 @@ semindex_normalize_definition: fn(source: String) -> String Never! {
 // is Rust's default NameLedger, not a fake checked-registration carrier.
 semindex_structural_nodes_from_parsed: fn(program: Program, module_path: String, source: String) -> [StructuralNode] {
     block_spans := program.block_spans.copy()
-    &block_spans.sort_by((left: Span, right: Span) -> left.start <=> right.start)
+    block_spans.sort_by((left: Span, right: Span) -> left.start <=> right.start)
     db := SymbolDB.new()
-    ctx := WalkCtx.new(0, semindex_root_identity(module_path), ^block_spans)
+    ctx := WalkCtx.new(0, semindex_root_identity(module_path), block_spans)
     names: NameFacts{modules: [NameModule]{}, declarations: [NameDeclaration]{}, aliases: [NameAlias]{}, references: [NameReference]{}, structure_facts: [StructureFact]{}}
-    loop item in program.items -> semindex_collect_item(&db, &ctx, names, program, source, item, module_path)
-    ^db.nodes
+    loop item in program.items -> semindex_collect_item(db, ctx, names, program, source, item, module_path)
+    db.nodes.move()
 }
 
 semindex_breadcrumb_label: fn(owner: String, members: [MemberFact]) -> String? Never! {
@@ -413,14 +413,14 @@ semindex_breadcrumb_label: fn(owner: String, members: [MemberFact]) -> String? N
     loop member in members {
         if member.owner != owner || member.kind != MemberKind.Method -> next
         if member.origin == {
-            .InherentImpl | .TraitImpl(_) -> &remote.push(member)
+            .InherentImpl | .TraitImpl(_) -> remote.push(member)
             else -> {}
         }
     }
-    &remote.sort_by((a: MemberFact, b: MemberFact) -> (semindex_origin_label(a.origin) <=> semindex_origin_label(b.origin)).then(a.name <=> b.name).then(a.module_path <=> b.module_path).then(a.span.start <=> b.span.start))
+    remote.sort_by((a: MemberFact, b: MemberFact) -> (semindex_origin_label(a.origin) <=> semindex_origin_label(b.origin)).then(a.name <=> b.name).then(a.module_path <=> b.module_path).then(a.span.start <=> b.span.start))
     if remote.len() == 0 -> return None
     labels := [String]{}
-    loop member in remote -> &labels.push("+ {member.signature} [{member.module_path}:{member.span.start}..{member.span.end}]")
+    loop member in remote -> labels.push("+ {member.signature} [{member.module_path}:{member.span.start}..{member.span.end}]")
     Val(labels.join(" | "))
 }
 
@@ -428,7 +428,7 @@ semindex_add_breadcrumb_hints: fn(db: &SymbolDB) Never! {
     loop definition in db.defs {
         if definition.kind == {
             .Struct(_, _) | .Enum(_, _) -> {
-                if semindex_breadcrumb_label(definition.name, db.members) == .Val(label) -> &db.inlay.push(InlayHint{span: definition.def_span, module_path: definition.module_path, label: label})
+                if semindex_breadcrumb_label(definition.name, db.members) == .Val(label) -> db.inlay.push(InlayHint{span: definition.def_span, module_path: definition.module_path, label: label})
             }
             else -> {}
         }

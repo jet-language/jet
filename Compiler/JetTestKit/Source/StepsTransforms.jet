@@ -25,7 +25,7 @@ kit_steps_transform_parts: fn(text: String) -> [String]? {
         else if c == 41 -> depth -= 1
         else if c == 46 && depth == 0 {
             if index == start -> return None
-            &parts.push(kit_steps_byte_slice(text, start, index))
+            parts.push(kit_steps_byte_slice(text, start, index))
             start = index + 1
         }
         if depth < 0 -> return None
@@ -33,7 +33,7 @@ kit_steps_transform_parts: fn(text: String) -> [String]? {
     if depth != 0 || quote != 0 -> return None
     if text != "" {
         if start == text.count_bytes() -> return None
-        &parts.push(kit_steps_byte_slice(text, start, text.count_bytes()))
+        parts.push(kit_steps_byte_slice(text, start, text.count_bytes()))
     }
     Val(parts)
 }
@@ -86,7 +86,7 @@ kit_steps_strip_sgr: fn(text: String) -> String {
         if escaped {
             if byte == (U8{109}) -> escaped = false
         } else if byte == (U8{27}) -> escaped = true
-        else -> &result.push(byte)
+        else -> result.push(byte)
     }
     String.from_bytes(result) ?? panic("SGR strip changed UTF-8")
 }
@@ -107,7 +107,7 @@ kit_steps_strip_ansi: fn(text: String) -> String {
                 }
             }
         } else {
-            &result.push(bytes[cursor])
+            result.push(bytes[cursor])
             cursor += 1
         }
     }
@@ -118,7 +118,7 @@ kit_steps_strip_ansi: fn(text: String) -> String {
 kit_steps_terminal_transform: fn(text: String, name: String) -> String? {
     if name == "visible_cols" {
         result := [String]{}
-        loop line in kit_steps_rust_lines(text) -> &result.push("{kit_steps_scalar_count(kit_steps_strip_sgr(line))}")
+        loop line in kit_steps_rust_lines(text) -> result.push("{kit_steps_scalar_count(kit_steps_strip_sgr(line))}")
         return Val(result.join("\n"))
     }
     if name == "cursor_up_counts" {
@@ -130,7 +130,7 @@ kit_steps_terminal_transform: fn(text: String, name: String) -> String? {
                 end := i + 2
                 loop end < bytes.len() && bytes[end] >= (U8{48}) && bytes[end] <= (U8{57}) -> end += 1
                 if end < bytes.len() && bytes[end] == (U8{65}) {
-                    &result.push("{Int.parse(String.from_bytes(bytes.slice(i + 2, end)) ?? return None) ?? return None}")
+                    result.push("{Int.parse(String.from_bytes(bytes.slice(i + 2, end)) ?? return None) ?? return None}")
                     i = end
                 }
             }
@@ -177,7 +177,7 @@ kit_steps_transform_one: fn(text: String, part: String) -> String? {
                         .Val(end) -> {
                             if end < start + 2 -> return None
                             if kit_steps_byte_slice(line, start + 2, end).contains(".jet") {
-                                &lines.push("{kit_steps_byte_slice(line, 0, start + 2)}<source>:{kit_steps_byte_slice(line, end + 1, line.count_bytes())}")
+                                lines.push("{kit_steps_byte_slice(line, 0, start + 2)}<source>:{kit_steps_byte_slice(line, end + 1, line.count_bytes())}")
                                 next
                             }
                         }
@@ -186,7 +186,7 @@ kit_steps_transform_one: fn(text: String, part: String) -> String? {
                 }
                 .None -> {}
             }
-            &lines.push(line)
+            lines.push(line)
         }
         return Val("{lines.join("\n")}{if text.ends_with("\n") -> "\n" else -> ""}")
     }
@@ -199,7 +199,7 @@ kit_steps_transform_one: fn(text: String, part: String) -> String? {
             scalar: kit_steps_scalar(bytes, index)
             whitespace: if part == "strip_whitespace" -> kit_steps_unicode_space(scalar.value) else -> scalar.value == 32 || (scalar.value >= 9 && scalar.value <= 13)
             if !whitespace {
-                loop at in index..<scalar.next -> &result.push(bytes[at])
+                loop at in index..<scalar.next -> result.push(bytes[at])
             }
             index = scalar.next
         }
@@ -209,11 +209,11 @@ kit_steps_transform_one: fn(text: String, part: String) -> String? {
         lines := [String]{}
         loop line in kit_steps_rust_lines(text) {
             if part == "until_blank" && line == "" -> break
-            if part == "trim_lines" -> &lines.push(line.trim().copy())
+            if part == "trim_lines" -> lines.push(line.trim().copy())
             else if part == "first_words" {
                 words: kit_steps_whitespace_words(line)
-                if words.len() > 0 -> &lines.push(words[0])
-            } else -> &lines.push(line)
+                if words.len() > 0 -> lines.push(words[0])
+            } else -> lines.push(line)
         }
         return Val(lines.join("\n"))
     }
@@ -223,7 +223,7 @@ kit_steps_transform_one: fn(text: String, part: String) -> String? {
     if name == "filter" && body.starts_with("where ") {
         lines := [String]{}
         loop line in kit_steps_rust_lines(text) {
-            if kit_steps_expression(kit_steps_byte_slice(body, 6, body.count_bytes()), line) ?? return None -> &lines.push(line)
+            if kit_steps_expression(kit_steps_byte_slice(body, 6, body.count_bytes()), line) ?? return None -> lines.push(line)
         }
         return Val(lines.join("\n"))
     }
@@ -233,7 +233,7 @@ kit_steps_transform_one: fn(text: String, part: String) -> String? {
         values := [String]{}
         loop line in kit_steps_rust_lines(text) {
             number: Int.parse(line) ?? return None
-            &values.push("{number.bit_and(mask)}")
+            values.push("{number.bit_and(mask)}")
         }
         return Val(values.join("\n"))
     }
@@ -247,7 +247,7 @@ kit_steps_transform_one: fn(text: String, part: String) -> String? {
                 if negative -> matched = matched && one
                 else -> matched = matched || one
             }
-            if matched -> &lines.push(line)
+            if matched -> lines.push(line)
         }
         return Val(lines.join("\n"))
     }
@@ -265,7 +265,7 @@ kit_steps_transform_one: fn(text: String, part: String) -> String? {
     if name == "strip_prefix_lines" {
         lines := [String]{}
         loop line in kit_steps_rust_lines(text) {
-            if line.starts_with(args[0]) -> &lines.push(kit_steps_byte_slice(line, args[0].count_bytes(), line.count_bytes()))
+            if line.starts_with(args[0]) -> lines.push(kit_steps_byte_slice(line, args[0].count_bytes(), line.count_bytes()))
         }
         return Val(lines.join("\n"))
     }

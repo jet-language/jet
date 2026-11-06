@@ -33,7 +33,7 @@ pkg_cbind_render_binding: fn(p: CProto, used_names: &[String], contract: Foreign
         managed_emit -> "__jet_native_emit_async"
         else -> p.name
     }
-    function_name: pkg_bind_unique_name(&used_names, foundation_generated_snake_name(seed, "function"))
+    function_name: pkg_bind_unique_name(used_names, foundation_generated_snake_name(seed, "function"))
     context_index: if managed_callback == {
         .Val(callback_index) -> callback_index + 1
         .None -> -1
@@ -47,8 +47,8 @@ pkg_cbind_render_binding: fn(p: CProto, used_names: &[String], contract: Foreign
         split: pkg_cbind_split_param_type_and_name(raw, idx)
         ty: split.ty
         jet_ty: pkg_cbind_render_param_type(p, idx, ty, length_param, contract, handles, catalog)
-        name: pkg_bind_unique_name(&used_param_names, foundation_generated_snake_name(split.name, "arg"))
-        &params.push("{name}: {jet_ty}")
+        name: pkg_bind_unique_name(used_param_names, foundation_generated_snake_name(split.name, "arg"))
+        params.push("{name}: {jet_ty}")
     }
     params_str: params.join(", ")
     close_marker: if handles.handle_for_type(p.ret) == {

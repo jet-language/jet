@@ -28,7 +28,7 @@ Tags: `defect`, `impossible`. `JET_STORE_DIR=$JET_STATE_ROOT/dx3/prim-arrays/sto
 
 ### prim-arrays-G2 — AOT Tensor writes fail
 
-Tag: `defect`. `JET_STORE_DIR=$JET_STATE_ROOT/dx3/prim-arrays/store Tools/agent/jet-env jet build $JET_STATE_ROOT/dx3/prim-arrays/pkg/set_ice.jet` exits 101 with `internal compiler error: the generated Rust did not compile` (`build/set_ice.rs`). The same `compute.set(&tensor, [0, 1], 3.0)` program under `jet run` returns `values:[0.0, 3.0, 0.0, 0.0]`. This blocks AOT implementations that allocate an output and fill indexed pixels. Areas: data, AI/ML, science.
+Tag: `defect`. `JET_STORE_DIR=$JET_STATE_ROOT/dx3/prim-arrays/store Tools/agent/jet-env jet build $JET_STATE_ROOT/dx3/prim-arrays/pkg/set_ice.jet` exits 101 with `internal compiler error: the generated Rust did not compile` (`build/set_ice.rs`). The same `compute.set(tensor, [0, 1], 3.0)` program under `jet run` returns `values:[0.0, 3.0, 0.0, 0.0]`. This blocks AOT implementations that allocate an output and fill indexed pixels. Areas: data, AI/ML, science.
 
 ### prim-arrays-G3 — No labeled N-D Tensor primitive
 

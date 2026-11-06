@@ -32,7 +32,7 @@ Sh: struct {
         display: fn(self) -> String { self.argv.join(" ") }
     }
     impl Debug {
-        debug: fn(^self) -> String { self.argv.join(" ") }
+        debug: fn(&&self) -> String { self.argv.join(" ") }
     }
     impl Equatable {
         equal: fn(self, rhs: Sh) -> Bool { self.argv == rhs.argv }
@@ -43,7 +43,7 @@ impl Sh {
     args: fn(self) -> [String] Never! { self.argv.copy() }
     raw: fn(text: String) -> Sh Never! {
         argv := [String]{}
-        sh_split_into(text, &argv)
+        sh_split_into(text, argv)
         Sh{argv: argv}
     }
 }
@@ -52,13 +52,13 @@ sh_split_into: fn(text: String, argv: &[String]) Never! {
     word := ""
     loop scalar in unicode.scalars(text) {
         if scalar.is_whitespace() {
-            if word != "" -> &argv.push(word)
+            if word != "" -> argv.push(word)
             word = ""
         } else {
             word = "{word}{scalar}"
         }
     }
-    if word != "" -> &argv.push(word)
+    if word != "" -> argv.push(word)
 }
 
 // The checked `Sh{…}` literal: literal text splits on whitespace, each hole's
@@ -66,10 +66,10 @@ sh_split_into: fn(text: String, argv: &[String]) Never! {
 __sh_literal: fn(literals: [String], holes: [String]) -> Sh Never! {
     if literals.len() != holes.len() + 1 -> panic("typed Sh literal and hole counts do not match")
     argv := [String]{}
-    sh_split_into(literals[0], &argv)
+    sh_split_into(literals[0], argv)
     loop index in 0..<holes.len() {
-        &argv.push(holes[index].copy())
-        sh_split_into(literals[index + 1], &argv)
+        argv.push(holes[index].copy())
+        sh_split_into(literals[index + 1], argv)
     }
     Sh{argv: argv}
 }
@@ -216,10 +216,10 @@ run_all: fn(specs: [ProcessSpec], jobs: Int) -[Exec, Time.Wait]> [Result<Process
     task.group pool(limit: jobs) {
         handles: loop spec in specs -> task run_all_job(core.process.__spec_parent_death(spec))
         loop handle in handles {
-            outcome: ^handle.join() ?? (receipt: None, error: Val(run_all_cancelled()))
+            outcome: handle.join() ?? (receipt: None, error: Val(run_all_cancelled()))
             if outcome.receipt == {
-                .Val(receipt) -> &results.push(Ok(receipt))
-                .None -> &results.push(Err(outcome.error ?? run_all_cancelled()))
+                .Val(receipt) -> results.push(Ok(receipt))
+                .None -> results.push(Err(outcome.error ?? run_all_cancelled()))
             }
         }
     }
@@ -396,8 +396,8 @@ path_parts: fn(value: String, separator: U8) -> [String] Never! {
     i := 0
     loop i <= raw.len() {
         if i == raw.len() || raw[i] == separator {
-            if i == start -> &out.push(".") else {
-                &out.push(String.from_bytes(slice_u8(raw, start, i)) ?? "")
+            if i == start -> out.push(".") else {
+                out.push(String.from_bytes(slice_u8(raw, start, i)) ?? "")
             }
             start = i + 1
         }
@@ -413,7 +413,7 @@ split_lines: fn(value: String) -> [String] {
     i := 0
     loop i < raw.len() {
         if raw[i] == (U8{10}) || raw[i] == (U8{13}) {
-            &out.push(String.from_bytes(slice_u8(raw, start, i)) ?? "")
+            out.push(String.from_bytes(slice_u8(raw, start, i)) ?? "")
             if raw[i] == (U8{13}) && i + 1 < raw.len() && raw[i + 1] == (U8{10}) {
                 i = i + 2
             } else {
@@ -424,7 +424,7 @@ split_lines: fn(value: String) -> [String] {
             i = i + 1
         }
     }
-    if start < raw.len() -> &out.push(String.from_bytes(slice_u8(raw, start, raw.len())) ?? "")
+    if start < raw.len() -> out.push(String.from_bytes(slice_u8(raw, start, raw.len())) ?? "")
     out
 }
 
@@ -437,7 +437,7 @@ quote_arg: fn(value: String) -> String {
         }
     }
     out := [U8]{}
-    if needs_quote -> &out.push(U8{34})
+    if needs_quote -> out.push(U8{34})
     backslashes := 0
     loop byte in raw {
         if byte == (U8{92}) {
@@ -447,29 +447,29 @@ quote_arg: fn(value: String) -> String {
         if byte == (U8{34}) {
             count := backslashes * 2 + 1
             loop count > 0 {
-                &out.push(U8{92})
+                out.push(U8{92})
                 count = count - 1
             }
-            &out.push(U8{34})
+            out.push(U8{34})
         } else {
             loop backslashes > 0 {
-                &out.push(U8{92})
+                out.push(U8{92})
                 backslashes = backslashes - 1
             }
-            &out.push(byte)
+            out.push(byte)
         }
         backslashes = 0
     }
     if needs_quote {
         loop backslashes > 0 {
-            &out.push(U8{92})
-            &out.push(U8{92})
+            out.push(U8{92})
+            out.push(U8{92})
             backslashes = backslashes - 1
         }
-        &out.push(U8{34})
+        out.push(U8{34})
     } else {
         loop backslashes > 0 {
-            &out.push(U8{92})
+            out.push(U8{92})
             backslashes = backslashes - 1
         }
     }
@@ -480,7 +480,7 @@ slice_u8: fn(raw: [U8], start: Int, end: Int) -> [U8] Never! {
     out := [U8]{}
     i := start
     loop i < end {
-        &out.push(raw[i])
+        out.push(raw[i])
         i = i + 1
     }
     out
@@ -590,7 +590,7 @@ impl __ProcessChunkCursor.Iterator {
 impl ProcessChunks.Iterable {
     Iter: __ProcessChunkCursor
 
-    iter: fn(^self) -> __ProcessChunkCursor {
+    iter: fn(&&self) -> __ProcessChunkCursor {
         __ProcessChunkCursor{stdout: self.__stdout, stderr: self.__stderr, size: self.__size, done: false}
     }
 }
@@ -605,11 +605,11 @@ __stderr_chunks: fn(stream: ProcessStderrStream, size: Int) -> ProcessChunks Nev
     ProcessChunks{__stderr: Val(stream), __size: size}
 }
 
-pipe_line: fn(^input: [U8]) -> String? IOError! {
-    bytes := ^input
+pipe_line: fn(&&input: [U8]) -> String? IOError! {
+    bytes := input.move()
     if bytes.len() == 0 -> return Ok(None)
-    trim_pipe_line(&bytes)
-    text: String.from_bytes(^bytes) ?? return Err(IOError.Other(IOContext{
+    trim_pipe_line(bytes)
+    text: String.from_bytes(bytes) ?? return Err(IOError.Other(IOContext{
         operation: .Read, resource: Val("process output"), os_code: None,
         cause: Val("stream did not contain valid UTF-8"),
     }))
@@ -618,17 +618,17 @@ pipe_line: fn(^input: [U8]) -> String? IOError! {
 
 trim_pipe_line: fn(bytes: &[U8]) Never! {
     if bytes.len() > 0 && bytes[bytes.len() - 1] == (U8{10}) {
-        _: &bytes.pop()
-        if bytes.len() > 0 && bytes[bytes.len() - 1] == (U8{13}) -> _: &bytes.pop()
+        _: bytes.pop()
+        if bytes.len() > 0 && bytes[bytes.len() - 1] == (U8{13}) -> _: bytes.pop()
     }
 }
 
 #Test("pipe next_line preserves final bare CR and removes only one CR before LF") {
     final := [U8]{120, 13}
-    trim_pipe_line(&final)
+    trim_pipe_line(final)
     assert_eq(final, [U8]{120, 13})
     crlf := [U8]{120, 13, 13, 10}
-    trim_pipe_line(&crlf)
+    trim_pipe_line(crlf)
     assert_eq(crlf, [U8]{120, 13})
     assert_eq(pipe_line([U8]{10}) ?? panic("empty line"), Val(""))
     assert_eq(pipe_line([U8]{}) ?? panic("EOF"), None)

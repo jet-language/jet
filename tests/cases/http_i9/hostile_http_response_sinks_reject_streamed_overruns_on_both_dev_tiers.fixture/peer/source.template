@@ -25,12 +25,12 @@ contains_bytes: fn(raw: [U8], want: [U8], ascii_casefold: Bool) -> Bool {
 }
 request_head: fn(stream: &TCPStream) -> [U8] {
     // Original request_head10-23: persistent 5s read timeout,512-byte reads, positive read, <=64KiB bound, exact CRLFCRLF terminator.
-    net.set_read_timeout(&stream, 5000) ?? panic("request timeout")
+    net.set_read_timeout(stream, 5000) ?? panic("request timeout")
     request := [U8]{}
     loop !contains_bytes(request, [U8]{13,10,13,10}, false) {
         block: stream.read(512) ?? panic("request read")
         if block.len() == 0 -> break
-        loop byte in block { &request.push(byte) }
+        loop byte in block { request.push(byte) }
     }
     return request
 }
@@ -45,7 +45,7 @@ DeflateBits: struct {
 }
 bit_write: fn(bits: &DeflateBits, value: Int, count: Int) {
     loop offset in 0..<count {
-        if bits.bit == 0 -> &bits.bytes.push(U8{0})
+        if bits.bit == 0 -> bits.bytes.push(U8{0})
         if value.bit_and(1 << offset) != 0 {
             last: bits.bytes.len() - 1
             bits.bytes[last] = U8{Int.from_u8(bits.bytes[last]).bit_or(1 << bits.bit)}
@@ -90,10 +90,10 @@ gzip_bomb: fn() -> [U8] {
     length: 8388609
     frame := [U8]{31, 139, 8, 0, 0, 0, 0, 0, 0, 255}
     bits := DeflateBits{bytes: [U8]{}, bit: 0}
-    bit_write(&bits, 1, 1)
-    bit_write(&bits, 1, 2)
+    bit_write(bits, 1, 1)
+    bit_write(bits, 1, 2)
     literal: fixed_code(120)
-    bit_write(&bits, literal.code, literal.count)
+    bit_write(bits, literal.code, literal.count)
     bases: [Int]{3,4,5,6,7,8,9,10,11,13,15,17,19,23,27,31,35,43,51,59,67,83,99,115,131,163,195,227,258}
     extras: [Int]{0,0,0,0,0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4,5,5,5,5,0}
     remaining := length - 1
@@ -106,9 +106,9 @@ gzip_bomb: fn() -> [U8] {
             extra: extras[index]
             if count <= base + ((1 << extra) - 1) {
                 code: fixed_code(257 + index)
-                bit_write(&bits, code.code, code.count)
-                bit_write(&bits, count - base, extra)
-                bit_write(&bits, 0, 5)
+                bit_write(bits, code.code, code.count)
+                bit_write(bits, count - base, extra)
+                bit_write(bits, 0, 5)
                 selected = true
                 break
             }
@@ -116,23 +116,23 @@ gzip_bomb: fn() -> [U8] {
         assert(selected)
         remaining -= count
     }
-    loop i in 0..<remaining { bit_write(&bits, literal.code, literal.count) }
+    loop i in 0..<remaining { bit_write(bits, literal.code, literal.count) }
     end: fixed_code(256)
-    bit_write(&bits, end.code, end.count)
-    loop byte in bits.bytes { &frame.push(byte) }
+    bit_write(bits, end.code, end.count)
+    loop byte in bits.bytes { frame.push(byte) }
     table := [Int]{}
     loop index in 0..<256 {
         crc := index
         loop j in 0..<8 {
             if crc.bit_and(1) != 0 { crc = (crc >> 1).bit_xor(3988292384) } else { crc >>= 1 }
         }
-        &table.push(crc)
+        table.push(crc)
     }
     crc := 4294967295
     loop i in 0..<length { crc = (crc >> 8).bit_xor(table[crc.bit_and(255).bit_xor(120)]) }
     crc = crc.bit_xor(4294967295)
-    loop i in 0..<4 { &frame.push(U8{(crc >> (8 * i)).bit_and(255)}) }
-    loop i in 0..<4 { &frame.push(U8{(length >> (8 * i)).bit_and(255)}) }
+    loop i in 0..<4 { frame.push(U8{(crc >> (8 * i)).bit_and(255)}) }
+    loop i in 0..<4 { frame.push(U8{(length >> (8 * i)).bit_and(255)}) }
     assert(frame.len() < 1048576)
     return frame
 }
@@ -141,11 +141,11 @@ run: fn() {
     publish(listener, "{work}/addr.txt")
     gzip: gzip_bomb()
     block := [U8]{}
-    loop i in 0..<65536 { &block.push(U8{120}) }
+    loop i in 0..<65536 { block.push(U8{120}) }
     loop connection in 0..<12 {
-        stream := &listener.accept() ?? panic("connection")
-        net.set_write_timeout(&stream, 10000) ?? panic("write timeout")
-        request: request_head(&stream)
+        stream := listener.accept() ?? panic("connection")
+        net.set_write_timeout(stream, 10000) ?? panic("write timeout")
+        request: request_head(stream)
         if contains_bytes(request, "/gzip-get".bytes(), false) || contains_bytes(request, "/gzip-request".bytes(), false) {
     _: stream.write_all("HTTP/1.1 200 OK{PEER_CRLF}Content-Encoding: gzip{PEER_CRLF}Content-Length: {gzip.len()}{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}".bytes())
             _: stream.write_all(gzip)

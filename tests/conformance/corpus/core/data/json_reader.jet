@@ -13,8 +13,8 @@ Record: struct {
 run: fn() {
     input: files.open("/dev/null") ?? panic("open")
     limits := data.DataLimits.safe()
-    reader := data.json_reader<Record>(^input, limits) ?? panic("reader")
-    if stream.next(&reader) == {
+    reader := data.json_reader<Record>(input, limits) ?? panic("reader")
+    if stream.next(reader) == {
         .Ok(first) -> print(first == None)
         .Err(error) -> panic("next: {error}")
     }

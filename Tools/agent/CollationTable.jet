@@ -64,7 +64,7 @@ parse_elements: fn(text: String) -> [Int] TableError! {
         body: closed.head
         weights: body.replace("*", ".").split(".").to_list()
         if weights.len() != 4 || weights[0] != "" -> return Err(fail("element '{body}' is not three weights"))
-        loop at in 1..<4 -> &out.push(hex_value(weights[at]))
+        loop at in 1..<4 -> out.push(hex_value(weights[at]))
         rest = closed.tail.trim()
     }
 }
@@ -85,7 +85,7 @@ parse_allkeys: fn(source: String) -> [KeyRow] TableError! {
         if fields.sep == "" -> return Err(fail("row without ';': '{line}'"))
         scalars := [Int]{}
         loop word in fields.head.trim().split(" ") {
-            if word != "" -> &scalars.push(hex_value(word))
+            if word != "" -> scalars.push(hex_value(word))
         }
         if scalars.len() < 1 || scalars.len() > 3 -> return Err(fail("row key '{fields.head}' has {scalars.len()} scalars"))
         elements: parse_elements(fields.tail)
@@ -96,7 +96,7 @@ parse_allkeys: fn(source: String) -> [KeyRow] TableError! {
             if weight > limit -> return Err(fail("weight {weight} of '{line}' exceeds {limit}"))
             slot = if slot == 2 -> 0 else -> slot + 1
         }
-        &rows.push(KeyRow{scalars: scalars, elements: elements, rank: key_rank(scalars)})
+        rows.push(KeyRow{scalars: scalars, elements: elements, rank: key_rank(scalars)})
     }
     if !version_seen -> return Err(fail("{ALLKEYS_PATH} has no @version line"))
     Ok(rows)
@@ -113,8 +113,8 @@ parse_unified_ideographs: fn(source: String) -> [Int] TableError! {
         span: fields.head.trim().partition("..")
         first: hex_value(span.head.trim())
         last: if span.sep == "" -> first else -> hex_value(span.tail.trim())
-        &ranges.push(first)
-        &ranges.push(last)
+        ranges.push(first)
+        ranges.push(last)
     }
     if ranges.len() == 0 -> return Err(fail("{PROPLIST_PATH} lists no Unified_Ideograph ranges"))
     Ok(ranges)
@@ -135,13 +135,13 @@ key_rank: fn(scalars: [Int]) -> Int {
 
 sorted_rows: fn(rows: [KeyRow]) -> [KeyRow] Never! {
     out := [KeyRow]{}
-    loop row in rows -> &out.push(row)
-    &out.sort_by((row: KeyRow) -> row.rank)
+    loop row in rows -> out.push(row)
+    out.sort_by((row: KeyRow) -> row.rank)
     out
 }
 
 push_le: fn(out: &[U8], value: Int, width: Int) {
-    loop at in 0..<width -> &out.push(U8{(value >> (8 * at)).bit_and(Int{255})})
+    loop at in 0..<width -> out.push(U8{(value >> (8 * at)).bit_and(Int{255})})
 }
 
 Tables: struct {
@@ -172,22 +172,22 @@ build_tables: fn(rows: [KeyRow]) -> Tables TableError! {
         if count > 255 -> return Err(fail("key {row.scalars} has {count} elements"))
         if {
             row.scalars.len() == 1 -> {
-                push_le(&singles, row.scalars[0], 3)
-                push_le(&singles, element_count, 3)
-                push_le(&singles, count, 1)
+                push_le(singles, row.scalars[0], 3)
+                push_le(singles, element_count, 3)
+                push_le(singles, count, 1)
                 single_count += 1
             }
             else -> {
-                loop at in 0..<3 -> push_le(&contractions, if at < row.scalars.len() -> row.scalars[at] else -> ABSENT, 3)
-                push_le(&contractions, element_count, 3)
-                push_le(&contractions, count, 1)
+                loop at in 0..<3 -> push_le(contractions, if at < row.scalars.len() -> row.scalars[at] else -> ABSENT, 3)
+                push_le(contractions, element_count, 3)
+                push_le(contractions, count, 1)
                 contraction_count += 1
             }
         }
         loop at in 0..<count {
-            push_le(&elements, row.elements[at * 3], 2)
-            push_le(&elements, row.elements[at * 3 + 1], 2)
-            push_le(&elements, row.elements[at * 3 + 2], 1)
+            push_le(elements, row.elements[at * 3], 2)
+            push_le(elements, row.elements[at * 3 + 1], 2)
+            push_le(elements, row.elements[at * 3 + 2], 1)
         }
         element_count += count
     }
@@ -200,10 +200,10 @@ byte_literal: fn(bytes: [U8]) -> String {
     out := [U8]{}
     loop byte in bytes {
         value: Int.from_u8(byte)
-        &out.push(U8{92})
-        &out.push(U8{120})
-        &out.push(digits[value >> 4])
-        &out.push(digits[value.bit_and(Int{15})])
+        out.push(U8{92})
+        out.push(U8{120})
+        out.push(digits[value >> 4])
+        out.push(digits[value.bit_and(Int{15})])
     }
     String.from_bytes_lossy(out)
 }
@@ -212,28 +212,28 @@ byte_literal: fn(bytes: [U8]) -> String {
 // 40-byte header, then `count` records of `stride` bytes, then the pool.
 jucd: fn(kind: Int, count: Int, stride: Int, records: [U8], pool: [U8]) -> [U8] {
     out := [U8]{}
-    loop byte in "JUCD".bytes() -> &out.push(byte)
-    push_le(&out, 1, 2)
-    push_le(&out, 0, 2)
-    push_le(&out, 17, 3)
-    push_le(&out, 0, 1)
+    loop byte in "JUCD".bytes() -> out.push(byte)
+    push_le(out, 1, 2)
+    push_le(out, 0, 2)
+    push_le(out, 17, 3)
+    push_le(out, 0, 1)
     pool_offset: 40 + records.len()
     header: [Int]{kind, count, stride, 40, pool_offset, pool.len(), pool_offset + pool.len()}
-    loop value in header -> push_le(&out, value, 4)
-    loop byte in records -> &out.push(byte)
-    loop byte in pool -> &out.push(byte)
+    loop value in header -> push_le(out, value, 4)
+    loop byte in records -> out.push(byte)
+    loop byte in pool -> out.push(byte)
     out
 }
 
 // Unified_Ideograph (first, last) pairs as kind-2 range rows, sorted by first.
 ideograph_rows: fn(ranges: [Int]) -> [U8] {
     starts := [Int]{}
-    loop at in 0..<ranges.len() /% 2 -> &starts.push(at)
-    &starts.sort_by((at: Int) -> ranges[at * 2])
+    loop at in 0..<ranges.len() /% 2 -> starts.push(at)
+    starts.sort_by((at: Int) -> ranges[at * 2])
     out := [U8]{}
     loop at in starts {
-        push_le(&out, ranges[at * 2], 3)
-        push_le(&out, ranges[at * 2 + 1], 3)
+        push_le(out, ranges[at * 2], 3)
+        push_le(out, ranges[at * 2 + 1], 3)
     }
     out
 }

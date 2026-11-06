@@ -25,12 +25,12 @@ contains_bytes: fn(raw: [U8], want: [U8], ascii_casefold: Bool) -> Bool {
 }
 request_head: fn(stream: &TCPStream) -> [U8] {
     // Original request_head10-23: persistent 5s read timeout,512-byte reads, positive read, <=64KiB bound, exact CRLFCRLF terminator.
-    net.set_read_timeout(&stream, 5000) ?? panic("request timeout")
+    net.set_read_timeout(stream, 5000) ?? panic("request timeout")
     request := [U8]{}
     loop !contains_bytes(request, [U8]{13,10,13,10}, false) {
         block: stream.read(512) ?? panic("request read")
         assert(block.len() > 0)
-        loop byte in block { &request.push(byte) }
+        loop byte in block { request.push(byte) }
         assert(request.len() <= 65536)
     }
     return request
@@ -51,7 +51,7 @@ read_exact: fn(stream: TCPStream, size: Int) -> [U8] {
     loop out.len() < size {
         chunk: stream.read(size - out.len()) ?? panic("frame read_exact")
         assert(chunk.len() > 0)
-        loop byte in chunk { &out.push(byte) }
+        loop byte in chunk { out.push(byte) }
     }
     return out
 }
@@ -74,13 +74,13 @@ first_headers: fn(stream: TCPStream) -> Frame {
     }
 }
 preface: fn(stream: &TCPStream, timeout: Int) {
-    net.set_read_timeout(&stream, timeout) ?? panic("read timeout")
+    net.set_read_timeout(stream, timeout) ?? panic("read timeout")
     assert_eq(read_exact(stream, 24), "PRI * HTTP/2.0{PEER_CRLF}{PEER_CRLF}SM{PEER_CRLF}{PEER_CRLF}".bytes())
     assert(read_frame(stream).kind == 4)
     write_frame(stream, 4, 0, 0, [U8]{})
 }
 observed_closed: fn(stream: &TCPStream) -> Bool {
-    net.set_read_timeout(&stream, 50) ?? panic("close observer timeout")
+    net.set_read_timeout(stream, 50) ?? panic("close observer timeout")
     deadline: time.instant() + 500ms
     loop {
         if stream.read(1) == {
@@ -98,9 +98,9 @@ observed_closed: fn(stream: &TCPStream) -> Bool {
 run: fn() {
     listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     publish(listener, "{work}/addr.txt")
-    stream := &listener.accept() ?? panic("accept")
-    net.set_write_timeout(&stream, 2000) ?? panic("write timeout")
-    preface(&stream, 5000)
+    stream := listener.accept() ?? panic("accept")
+    net.set_write_timeout(stream, 2000) ?? panic("write timeout")
+    preface(stream, 5000)
     first: first_headers(stream)
     assert_eq(first.id, 1)
     write_frame(stream, 1, 4, 1, [U8]{136})
@@ -108,7 +108,7 @@ run: fn() {
     assert_eq(second.id, 3)
     write_frame(stream, 1, 4, 3, [U8]{136})
     chunk := [U8]{}
-    loop i in 0..<65536 { &chunk.push(U8{120}) }
+    loop i in 0..<65536 { chunk.push(U8{120}) }
     head: [U8]{1,0,0,0,0,0,0,0,3}
     loop i in 0..<1024 {
         // Original send bool: first failed header/payload stops flood, not a test failure.
@@ -121,5 +121,5 @@ run: fn() {
             else -> {}
         }
     }
-    assert(observed_closed(&stream))
+    assert(observed_closed(stream))
 }

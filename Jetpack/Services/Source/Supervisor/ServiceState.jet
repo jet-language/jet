@@ -188,9 +188,9 @@ services_write_atomic: fn(path: String, contents: [U8]) IOError! -[FS, Env]> {
 
 services_replace_through: fn(temporary: String, path: String, contents: [U8]) IOError! -[FS]> {
     writer := files.create(temporary, if_exists: .Refuse)
-    &writer.write_all(contents)
-    &writer.fsync()
-    close(^writer)
+    writer.write_all(contents)
+    writer.fsync()
+    close(writer)
     files.rename(temporary, path)
 }
 
@@ -236,7 +236,7 @@ services_lines: fn(text: String) -> [String] Never! {
     pieces: text.split("\n").to_list()
     count: if text.ends_with("\n") -> pieces.len() - 1 else -> pieces.len()
     carriage_return: env_shell_control(13)
-    loop index in 0..<count -> &lines.push(pieces[index].removesuffix(carriage_return))
+    loop index in 0..<count -> lines.push(pieces[index].removesuffix(carriage_return))
     lines
 }
 
@@ -273,7 +273,7 @@ services_read_process_state: fn(dir: String) -[FS]> PersistedProcessState? Servi
     loop raw in lines {
         pair: raw.trim().split_once("=") ?? return Err(invalid)
         if seen.contains(pair.before) -> return Err(invalid)
-        &seen.push(pair.before)
+        seen.push(pair.before)
         if pair.before == {
             "version" -> {
                 if pair.after != "1" -> return Err(invalid)
@@ -371,7 +371,7 @@ services_read_lifecycle: fn(dir: String) -[FS]> LifecycleFacts? ServicesError! {
         value: pair.after
         if key != "dependency" {
             if seen.contains(key) -> return Err(invalid)
-            &seen.push(key)
+            seen.push(key)
         }
         if key == {
             "version" -> {
@@ -392,7 +392,7 @@ services_read_lifecycle: fn(dir: String) -[FS]> LifecycleFacts? ServicesError! {
                     "recovery" -> recovery = Val(value)
                     "unit" -> unit = Val(value)
                     "guardian" -> guardian = Val(value)
-                    else -> &dependencies.push(value)
+                    else -> dependencies.push(value)
                 }
             }
             else -> return Err(invalid)

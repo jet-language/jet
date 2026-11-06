@@ -263,20 +263,20 @@ sema_stream_handle_known_wrong_direction: fn(owner: String, method: String) -> B
 // without recording a receiver convention, so an unmarked `reader.read(n)` or
 // `writer.write_all(bytes)` needs no `&`, and a written mark has no convention
 // to be checked against. `text_cursor_method_return` and
-// `binary_reader_method_return` record none either, so `&c.skip_ws()` and
-// `&r.take(n)` keep their mark. `Stdout`/`Stderr` dispatch to their `&self`
+// `binary_reader_method_return` record none either, so `c.skip_ws()` and
+// `r.take(n)` keep their mark. `Stdout`/`Stderr` dispatch to their `&self`
 // source methods instead.
 sema_stream_handle_reports_no_receiver_convention: fn(owner: String) -> Bool Never! {
     owner == "MappedFile" || owner == "FileScope" || owner == "FileReader" || owner == "FileWriter" || owner == "StdinHandle" || owner == "Cursor" || owner == "Reader"
 }
 
 sema_stream_handle_infer_args: fn(args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
-    loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
 }
 
 sema_stream_handle_effect_fact: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, api: String, span: Span, result_type: Type, effect_name: String, diagnostics: &[Diagnostic]) -> Bool Never! {
     entries := [EffectRowEntry]{}
-    if effect_name != "" -> &entries.push(EffectRowEntry{name: effect_name, span: span})
+    if effect_name != "" -> entries.push(EffectRowEntry{name: effect_name, span: span})
     facts := SemaCallFacts{
         return_type: result_type,
         failure_carrier: sema_call_failure_carrier(Val(result_type)),
@@ -284,7 +284,7 @@ sema_stream_handle_effect_fact: fn(environment: SemaScopeEnvironment, program: S
         type_args: [Type]{},
         default_refs: [FunctionDefaultRef]{},
     }
-    sema_effect_record_intrinsic_fact(environment, program, &scopes, &context, api, span, facts, &diagnostics)
+    sema_effect_record_intrinsic_fact(environment, program, scopes, context, api, span, facts, diagnostics)
 }
 
 sema_stream_handle_fixed_list_assignable: fn(required: Type, offered: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
@@ -315,11 +315,11 @@ sema_stream_handle_argument_mismatch: fn(callee: String, required: Type, offered
 
 sema_stream_handle_checked_args: fn(callee: String, params: [SemaCallParam], args: [CallArg], receiver_expr: Expr?, receiver_value: TExpr?, receiver_convention: AccessConvention, shift_argument: Int, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> [TExpr]? {
     checked_args := args
-    binding: sema_call_bind_args(callee, params, &checked_args, span, &diagnostics) ?? {
-        sema_stream_handle_infer_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    binding: sema_call_bind_args(callee, params, checked_args, span, diagnostics) ?? {
+        sema_stream_handle_infer_args(args, environment, program, scopes, state, tail_store, context, diagnostics)
         return None
     }
-    if !sema_call_validate_binding(callee, params, binding, checked_args, span, &diagnostics) -> return None
+    if !sema_call_validate_binding(callee, params, binding, checked_args, span, diagnostics) -> return None
     values := [TExpr]{}
     loop index in 0..<checked_args.len() {
         slot: sema_call_bound_slot(binding, binding.sources[index], checked_args[index])
@@ -327,14 +327,14 @@ sema_stream_handle_checked_args: fn(callee: String, params: [SemaCallParam], arg
         required_declared: sema_call_parameter_type(params[slot]) ?? return None
         required := sema_call_resolved_type(required_declared, environment, program)
         value_start: diagnostics.len()
-        value: if shift_argument == index -> sema_check_expression(checked_args[index].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression(checked_args[index].expr, Val(required), environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        value: if shift_argument == index -> sema_check_expression(checked_args[index].expr, None, environment, program, scopes, state, tail_store, context, diagnostics) else -> sema_check_expression(checked_args[index].expr, Val(required), environment, program, scopes, state, tail_store, context, diagnostics)
         checked: value ?? {
             // The parameter type is the value's hint: its own E0108 against
             // it becomes the handle call's argument mismatch.
             value_span: expr_span(checked_args[index].expr)
             if sema_value_mismatch_index(diagnostics, value_start, value_span) == .Val(mismatch_index) {
                 probe_diagnostics := [Diagnostic]{}
-                if sema_probe_expression(checked_args[index].expr, None, environment, program, &scopes, &state, &tail_store, &context, &probe_diagnostics) == .Val(offered) -> diagnostics[mismatch_index] = sema_stream_handle_argument_mismatch(callee, required, sema_call_resolved_type(offered.ty, environment, program), value_span)
+                if sema_probe_expression(checked_args[index].expr, None, environment, program, scopes, state, tail_store, context, probe_diagnostics) == .Val(offered) -> diagnostics[mismatch_index] = sema_stream_handle_argument_mismatch(callee, required, sema_call_resolved_type(offered.ty, environment, program), value_span)
             }
             return None
         }
@@ -342,29 +342,29 @@ sema_stream_handle_checked_args: fn(callee: String, params: [SemaCallParam], arg
             if checked.ty == .IntN(_, _) {
                 // D-BINREAD-LEN1=A: U64 and the signed widths stay explicit (E0112 at the call).
                 if !sema_stream_handle_integer_width(checked.ty) {
-                    &diagnostics.push(sema_stream_handle_argument_mismatch(callee, required, checked.ty, checked_args[index].span))
+                    diagnostics.push(sema_stream_handle_argument_mismatch(callee, required, checked.ty, checked_args[index].span))
                     return None
                 }
                 converted: sema_expr_numeric_conversion(checked, Type.Int, checked.span, sema_source_line_at(environment.source_segments, checked.span) ?? 0) ?? return None
-                &values.push(converted)
+                values.push(converted)
                 next
             }
         }
         compatible := sema_call_type_assignable(required_declared, checked.ty, environment, program) ?? false
         if !compatible && sema_stream_handle_fixed_list_assignable(required_declared, checked.ty, environment, program) -> compatible = true
         if !compatible {
-            &diagnostics.push(sema_stream_handle_argument_mismatch(callee, required, checked.ty, checked_args[index].span))
+            diagnostics.push(sema_stream_handle_argument_mismatch(callee, required, checked.ty, checked_args[index].span))
             return None
         }
-        &values.push(checked)
+        values.push(checked)
     }
     ownership: if receiver_expr == {
         .Val(expr) -> {
             convention := receiver_convention
-            if convention == AccessConvention.Write && sema_ownership_places_from_expr_in_state(expr, scopes, &state).len() == 0 -> convention = AccessConvention.Read
-            sema_ownership_check_handle_method_call(&state, callee, expr, convention, params, &checked_args, scopes, span, &diagnostics)
+            if convention == AccessConvention.Write && sema_ownership_places_from_expr_in_state(expr, scopes, state).len() == 0 -> convention = AccessConvention.Read
+            sema_ownership_check_handle_method_call(state, callee, expr, convention, params, checked_args, scopes, span, diagnostics)
         }
-        .None -> sema_ownership_check_call_arguments(&state, callee, params, &checked_args, scopes, &diagnostics)
+        .None -> sema_ownership_check_call_arguments(state, callee, params, checked_args, scopes, diagnostics)
     }
     if !ownership.accepted || !ownership.complete -> return None
     Val(values)
@@ -372,8 +372,8 @@ sema_stream_handle_checked_args: fn(callee: String, params: [SemaCallParam], arg
 
 sema_stream_handle_finish: fn(receiver: TExpr, operation: THandleOp, args: [TExpr], result_type: Type, effect_name: String, api: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck Never! {
     value := sema_tree_node(result_type, TExprKind.HandleMethod{receiver: receiver, operation: operation, args: args}, span)
-    checked: sema_expression_call_expected(value, expected, environment, program, context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    if !sema_stream_handle_effect_fact(environment, program, &scopes, &context, api, span, result_type, effect_name, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    checked: sema_expression_call_expected(value, expected, environment, program, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    if !sema_stream_handle_effect_fact(environment, program, scopes, context, api, span, result_type, effect_name, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     SemaMethodSpecialCheck{handled: true, value: Val(checked)}
 }
 
@@ -385,11 +385,11 @@ sema_stream_handle_method_ref: fn(owner: String, method: String) -> TMethodRef N
 sema_stream_handle_lines_value: fn(receiver: TExpr, owner: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck Never! {
     result_type := if owner == "FileReader" -> Type.Named{name: "FileLines"} else -> Type.Named{name: "StdinLines"}
     value := sema_tree_node(result_type, TExprKind.MethodCall{receiver: receiver, method: sema_stream_handle_method_ref(owner, "lines"), type_args: [Type]{}, args: [TCallArg]{}}, span)
-    checked: sema_expr_expected(value, expected, environment, program, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    checked: sema_expr_expected(value, expected, environment, program, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     // Rust `receiver_effect_leaf`: `FileReader.lines` waits; `StdinHandle`
     // records no handle effect.
     effect_name := if owner == "FileReader" -> "Time.Wait" else -> ""
-    if !sema_stream_handle_effect_fact(environment, program, &scopes, &context, "{owner}.lines", span, result_type, effect_name, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    if !sema_stream_handle_effect_fact(environment, program, scopes, context, "{owner}.lines", span, result_type, effect_name, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     SemaMethodSpecialCheck{handled: true, value: Val(checked)}
 }
 
@@ -404,55 +404,55 @@ sema_call_try_stream_handle_method: fn(receiver: Expr, receiver_value: TExpr, me
     source_member := if owner == "FileScope" && method == "read" -> "scoped_read" else if owner == "FileReader" && method == "read_line" -> "__reader_read_line" else if owner == "Path" && method == "write_atomic" -> "write_atomic" else -> ""
     if source_member != "" {
         identity: sema_call_core_module_identity(environment, program, "core.files") ?? {
-            &diagnostics.push(sema_error("E0003", span, "filesystem source module is not loaded", "receiver policy requires Core/Files/Files.jet", "load the registered Core source module"))
+            diagnostics.push(sema_error("E0003", span, "filesystem source module is not loaded", "receiver policy requires Core/Files/Files.jet", "load the registered Core source module"))
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
-        target: sema_call_core_source_target(environment, program, identity, source_member, [Type]{}, span, true, &diagnostics) ?? {
-            &diagnostics.push(sema_error("E0003", span, "filesystem source receiver target is missing", "receiver policy requires its canonical source function", "load the registered Core source function"))
+        target: sema_call_core_source_target(environment, program, identity, source_member, [Type]{}, span, true, diagnostics) ?? {
+            diagnostics.push(sema_error("E0003", span, "filesystem source receiver target is missing", "receiver policy requires its canonical source function", "load the registered Core source function"))
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
         access: if owner == "FileReader" -> AccessConvention.Write else -> AccessConvention.Read
         source_args := [CallArg]{CallArg{convention: access, expr: receiver, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}}
-        loop argument in args -> &source_args.push(argument)
+        loop argument in args -> source_args.push(argument)
         scopes.ownership_call_depth += 1
-        value := sema_call_core_check_source_owned(target, "{owner}.{method}", [Type]{}, source_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        value := sema_call_core_check_source_owned(target, "{owner}.{method}", [Type]{}, source_args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         scopes.ownership_call_depth -= 1
         return SemaMethodSpecialCheck{handled: true, value: value}
     }
     if (owner == "FileReader" && method == "lines") || (owner == "StdinHandle" && method == "lines") {
         if args.len() != 0 {
-            sema_stream_handle_infer_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-            &diagnostics.push(sema_call_arity_diagnostic("{owner}.{method}", 0, args.len(), false, span))
+            sema_stream_handle_infer_args(args, environment, program, scopes, state, tail_store, context, diagnostics)
+            diagnostics.push(sema_call_arity_diagnostic("{owner}.{method}", 0, args.len(), false, span))
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
-        _ := sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics)
-        if sema_stream_handle_reports_no_receiver_convention(owner) -> sema_receiver_mark_forget(&state, receiver)
-        return sema_stream_handle_lines_value(receiver_value, owner, span, expected, environment, program, &scopes, &context, &diagnostics)
+        _ := sema_ownership_check_call_receiver(state, receiver, AccessConvention.Read, scopes, span, diagnostics)
+        if sema_stream_handle_reports_no_receiver_convention(owner) -> sema_receiver_mark_forget(state, receiver)
+        return sema_stream_handle_lines_value(receiver_value, owner, span, expected, environment, program, scopes, context, diagnostics)
     }
     if sema_stream_handle_known_wrong_direction(owner, method) {
-        sema_stream_handle_infer_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        sema_stream_handle_infer_args(args, environment, program, scopes, state, tail_store, context, diagnostics)
         if {
             owner == "FileReader" -> {
-                &diagnostics.push(sema_error("E2501", span, "`{method}` is not available on a read-only file handle", "`files.open` returns a read-only handle; it can only read lines or bytes", "use `files.create` or `files.append` to get a writable handle"))
+                diagnostics.push(sema_error("E2501", span, "`{method}` is not available on a read-only file handle", "`files.open` returns a read-only handle; it can only read lines or bytes", "use `files.create` or `files.append` to get a writable handle"))
             }
             else -> {
-                &diagnostics.push(sema_error("E2501", span, "`{method}` is not available on a write-only file handle", "`files.create` returns a write-only handle; it can only write lines", "use `files.open` to get a readable handle"))
+                diagnostics.push(sema_error("E2501", span, "`{method}` is not available on a write-only file handle", "`files.create` returns a write-only handle; it can only write lines", "use `files.open` to get a readable handle"))
             }
         }
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     spec: sema_stream_handle_spec(owner, method, receiver_value.ty) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     if args.len() != spec.params.len() {
-        sema_stream_handle_infer_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-        &diagnostics.push(sema_call_arity_diagnostic("{owner}.{method}", spec.params.len(), args.len(), false, span))
+        sema_stream_handle_infer_args(args, environment, program, scopes, state, tail_store, context, diagnostics)
+        diagnostics.push(sema_call_arity_diagnostic("{owner}.{method}", spec.params.len(), args.len(), false, span))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     shift_argument := if owner == "Reader" && (method == "seek" || method == "skip" || method == "take") -> 0 else -> -1
-    checked_args: sema_stream_handle_checked_args("{owner}.{method}", spec.params, args, Val(receiver), receiver_value, spec.receiver_convention, shift_argument, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-    if sema_stream_handle_reports_no_receiver_convention(owner) -> sema_receiver_mark_forget(&state, receiver)
+    checked_args: sema_stream_handle_checked_args("{owner}.{method}", spec.params, args, Val(receiver), receiver_value, spec.receiver_convention, shift_argument, span, environment, program, scopes, state, tail_store, context, diagnostics)
+    if sema_stream_handle_reports_no_receiver_convention(owner) -> sema_receiver_mark_forget(state, receiver)
     typed_args: checked_args ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    result: sema_stream_handle_finish(receiver_value, spec.operation, typed_args, spec.result_type, spec.effect_name, "{owner}.{method}", span, expected, environment, program, &scopes, &context, &diagnostics)
-    if result.value != None && sema_stream_handle_yields_view(spec.result_type) -> sema_stream_handle_publish_receiver_view(receiver, span, scopes, &state, &context)
+    result: sema_stream_handle_finish(receiver_value, spec.operation, typed_args, spec.result_type, spec.effect_name, "{owner}.{method}", span, expected, environment, program, scopes, context, diagnostics)
+    if result.value != None && sema_stream_handle_yields_view(spec.result_type) -> sema_stream_handle_publish_receiver_view(receiver, span, scopes, state, context)
     result
 }
 
@@ -469,12 +469,12 @@ sema_stream_handle_yields_view: fn(result_type: Type) -> Bool Never! {
 }
 
 sema_stream_handle_publish_receiver_view: fn(receiver: Expr, span: Span, scopes: SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext) Never! {
-    places: sema_ownership_places_from_expr_in_state(receiver, scopes, &state)
+    places: sema_ownership_places_from_expr_in_state(receiver, scopes, state)
     temporaries := [Span]{}
-    if places.len() == 0 -> &temporaries.push(expr_span(receiver))
+    if places.len() == 0 -> temporaries.push(expr_span(receiver))
     facts: [SemaCallReturnViewFact]{SemaCallReturnViewFact{slot: [String]{}, access: AccessConvention.Read, places: places, sources: [ViewSourcePath]{}, temporaries: temporaries}}
-    sema_ownership_note_call_views(&state, span, facts)
-    &context.call_return_views.push(SemaCallReturnView{span: span, facts: facts})
+    sema_ownership_note_call_views(state, span, facts)
+    context.call_return_views.push(SemaCallReturnView{span: span, facts: facts})
 }
 
 sema_stream_handle_static_owner_is_canonical: fn(owner: String, scopes: &SemaScopeTable, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
@@ -493,11 +493,11 @@ sema_stream_handle_static_owner_is_canonical: fn(owner: String, scopes: &SemaSco
 // Static reserved constructors. Callers must still prefer a shadowing user type.
 sema_call_try_stream_handle_static: fn(owner: String, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     known := (owner == "Path" && (method == "from" || method == "home")) || (owner == "Reader" && method == "over") || (owner == "Cursor" && method == "over")
-    if !known || !sema_stream_handle_static_owner_is_canonical(owner, &scopes, environment, program) -> return SemaMethodSpecialCheck{handled: false, value: None}
+    if !known || !sema_stream_handle_static_owner_is_canonical(owner, scopes, environment, program) -> return SemaMethodSpecialCheck{handled: false, value: None}
     expected_count := if method == "home" -> 0 else -> 1
     if args.len() != expected_count {
-        sema_stream_handle_infer_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-        &diagnostics.push(sema_call_arity_diagnostic("{owner}.{method}", expected_count, args.len(), false, span))
+        sema_stream_handle_infer_args(args, environment, program, scopes, state, tail_store, context, diagnostics)
+        diagnostics.push(sema_call_arity_diagnostic("{owner}.{method}", expected_count, args.len(), false, span))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     operation := THandleOp.PathFrom
@@ -506,7 +506,7 @@ sema_call_try_stream_handle_static: fn(owner: String, method: String, args: [Cal
     params := [SemaCallParam]{}
     ownership_args := args
     shift_argument := -1
-    if owner == "Path" && method == "from" -> &params.push(sema_stream_handle_param("path", Type.String, AccessConvention.Read))
+    if owner == "Path" && method == "from" -> params.push(sema_stream_handle_param("path", Type.String, AccessConvention.Read))
     if owner == "Path" && method == "home" {
         operation = THandleOp.PathHome
         effect_name = "FS"
@@ -514,13 +514,13 @@ sema_call_try_stream_handle_static: fn(owner: String, method: String, args: [Cal
     if owner == "Cursor" {
         operation = THandleOp.CursorOver
         result_type = Type.Named{name: "Cursor"}
-        &params.push(sema_stream_handle_param("text", Type.String, AccessConvention.Read))
+        params.push(sema_stream_handle_param("text", Type.String, AccessConvention.Read))
     }
     owned_reader := false
     if owner == "Reader" {
         operation = THandleOp.ReaderOver{owned: false}
         result_type = Type.Named{name: "Reader"}
-        &params.push(sema_stream_handle_param("bytes", Type.List{element: Type.IntN{signed: false, bits: 8}}, AccessConvention.Read))
+        params.push(sema_stream_handle_param("bytes", Type.List{element: Type.IntN{signed: false, bits: 8}}, AccessConvention.Read))
         shift_argument = -1
         if args.len() == 1 {
             if args[0].convention == AccessConvention.Move -> owned_reader = true
@@ -528,7 +528,7 @@ sema_call_try_stream_handle_static: fn(owner: String, method: String, args: [Cal
                 // A last use moves the bytes into the reader; a later use or
                 // a live view of them keeps the borrowing clone.
                 if args[0].expr == {
-                    .Ident(name, _, _) -> { owned_reader = !sema_ownership_name_live_after(name, &tail_store, &context) && !sema_ownership_view_reads_binding(&state, args[0].expr, scopes) }
+                    .Ident(name, _, _) -> { owned_reader = !sema_ownership_name_live_after(name, tail_store, context) && !sema_ownership_view_reads_binding(state, args[0].expr, scopes) }
                     else -> {}
                 }
             }
@@ -539,7 +539,7 @@ sema_call_try_stream_handle_static: fn(owner: String, method: String, args: [Cal
             operation = THandleOp.ReaderOver{owned: owned_reader}
         }
     }
-    typed_args: sema_stream_handle_checked_args("{owner}.{method}", params, ownership_args, None, None, AccessConvention.Read, shift_argument, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    typed_args: sema_stream_handle_checked_args("{owner}.{method}", params, ownership_args, None, None, AccessConvention.Read, shift_argument, span, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     values := typed_args
     if owner == "Reader" && owned_reader && values.len() == 1 {
         if values[0].kind == {
@@ -547,10 +547,10 @@ sema_call_try_stream_handle_static: fn(owner: String, method: String, args: [Cal
             else -> values[0] = sema_tree_node(values[0].ty, TExprKind.Move{value: values[0]}, values[0].span)
         }
     }
-    unit_receiver := sema_node(&context, Type.Named{name: "Unit"}, NodeKind.Unit, span)
+    unit_receiver := sema_node(context, Type.Named{name: "Unit"}, NodeKind.Unit, span)
     value := sema_tree_node(result_type, TExprKind.HandleMethod{receiver: unit_receiver, operation: operation, args: values}, span)
-    checked: sema_expression_call_expected(value, expected, environment, program, context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    if !sema_stream_handle_effect_fact(environment, program, &scopes, &context, "{owner}.{method}", span, result_type, effect_name, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    checked: sema_expression_call_expected(value, expected, environment, program, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    if !sema_stream_handle_effect_fact(environment, program, scopes, context, "{owner}.{method}", span, result_type, effect_name, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     SemaMethodSpecialCheck{handled: true, value: Val(checked)}
 }
 
@@ -576,7 +576,7 @@ sema_call_try_core_file_path_field: fn(base: TExpr, member: String, span: Span, 
     owner_module := sema_stream_handle_owner_module(owner)
     field_id := symbol_id(SymbolKind.Field, owner_module, owner_id.key, member)
     field_symbol := Symbol{id: field_id, kind: SymbolKind.Field, name: member, module_name: owner_module, owner: Val(owner_id.key), span: span, ty: Val(Type.String), visibility: 2}
-    &context.name_references.push(SemaNameReferenceFact{span: span, symbol: field_symbol, kind: "field"})
+    context.name_references.push(SemaNameReferenceFact{span: span, symbol: field_symbol, kind: "field"})
     reference := TFieldRef{owner: Val(owner_id), field: field_id, name: member, ty: Type.String, boxed: false}
     value := if {
         owner == "FileReader" -> sema_tree_node(Type.String, TExprKind.HandleMethod{receiver: base, operation: THandleOp.FileReaderPath, args: [TExpr]{}}, span)
@@ -584,9 +584,9 @@ sema_call_try_core_file_path_field: fn(base: TExpr, member: String, span: Span, 
         else -> sema_tree_node(Type.String, TExprKind.Field{receiver: base, field: reference}, span)
     }
     if owner == "FileReader" || owner == "FileWriter" {
-        if !sema_stream_handle_effect_fact(environment, program, &scopes, &context, "{owner}.path", span, Type.String, "", &diagnostics) -> return None
+        if !sema_stream_handle_effect_fact(environment, program, scopes, context, "{owner}.path", span, Type.String, "", diagnostics) -> return None
     }
-    sema_expr_expected(value, expected, environment, program, &diagnostics)
+    sema_expr_expected(value, expected, environment, program, diagnostics)
 }
 
 sema_stream_handle_fact_has_effect: fn(context: &SemaCheckContext, span: Span, effect_name: String) -> Bool Never! {
@@ -612,6 +612,6 @@ sema_call_stream_record_for_in_fact: fn(collection: TExpr, method_kind: TForInMe
         .EncodingReader(_) -> ""
         else -> { return true }
     }
-    if sema_stream_handle_fact_has_effect(&context, collection.span, effect_name) -> return true
-    sema_stream_handle_effect_fact(environment, program, &scopes, &context, "ForIn.stream", collection.span, collection.ty, effect_name, &diagnostics)
+    if sema_stream_handle_fact_has_effect(context, collection.span, effect_name) -> return true
+    sema_stream_handle_effect_fact(environment, program, scopes, context, "ForIn.stream", collection.span, collection.ty, effect_name, diagnostics)
 }

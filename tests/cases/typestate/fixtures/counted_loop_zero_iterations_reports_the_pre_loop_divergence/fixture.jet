@@ -6,10 +6,10 @@ Order: struct {
 
 impl Order {
     #Transition(_, Draft) start: fn(id: Int) -[]> Order { return Order{ id: id } }
-    #Transition(Draft, Confirmed) confirm: fn(self: ^Order) -[]> Order { return self }
-    #Transition(Draft, Cancelled) cancel: fn(self: ^Order) -[]> Order { return self }
-    #Transition(Confirmed, Closed) close: fn(self: ^Order) -[]> Order { return self }
-    #Transition(Cancelled, Closed) archive: fn(self: ^Order) -[]> Order { return self }
+    #Transition(Draft, Confirmed) confirm: fn(self: &&Order) -[]> Order { return self }
+    #Transition(Draft, Cancelled) cancel: fn(self: &&Order) -[]> Order { return self }
+    #Transition(Confirmed, Closed) close: fn(self: &&Order) -[]> Order { return self }
+    #Transition(Cancelled, Closed) archive: fn(self: &&Order) -[]> Order { return self }
     #State(Confirmed) ship: fn(self) -[]> Int { return self.id }
 }
 

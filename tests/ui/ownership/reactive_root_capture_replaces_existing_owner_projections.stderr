@@ -1,8 +1,8 @@
 Error [jet.UseWhileWriteActive]: `pair` is being changed in this call, so it can't be used again here
-  --> reactive_root_capture_replaces_existing_owner_projections.jet:11:27
+  --> tests/ui/ownership/reactive_root_capture_replaces_existing_owner_projections.jet:11:26
     |
- 11 |         #Reactive { &pair.right.push(4) }
-    |                           ^^^^^
- Why: While something is being changed through the write-access marker `&`, nobody else may be looking at it
- Fix: Pass the write-access marker `&` (`&pair`) only once, or copy first with `pair.copy()`
+ 11 |         #Reactive { pair.right.push(4) }
+    |                          ^^^^^
+ Why: While something is being changed through a write parameter, nobody else may be looking at it
+ Fix: Pass `pair` only once, or copy first with `pair.copy()`
 More: jet-lang.dev/e/E0204

@@ -13,10 +13,10 @@ use {
 
 write_catalog: fn(path: Path) -> Bool (EncodingError | IOError)! {
     output: files.create(path) ?? return Err(err)
-    writer := csv.writer(^output, encoding.EncodingLimits.safe()) ?? return Err(err)
-    &writer.write(["ok", "true"]) ?? return Err(err)
-    &writer.flush() ?? return Err(err)
-    &writer.finish() ?? return Err(err)
+    writer := csv.writer(output, encoding.EncodingLimits.safe()) ?? return Err(err)
+    writer.write(["ok", "true"]) ?? return Err(err)
+    writer.flush() ?? return Err(err)
+    writer.finish() ?? return Err(err)
     return Ok(true)
 }
 
@@ -27,10 +27,10 @@ run: fn() (EncodingError | IOError)! {
     path: Path.from(scratch.path).join("catalog.csv")
     write_catalog(path) ?? return
     input: files.open(path) ?? return
-    reader := csv.reader(^input) ?? return
+    reader := csv.reader(input) ?? return
     loop {
         // A failed read propagates; `??` handles the end of the stream.
-        _value: &reader.next() ?? break
+        _value: reader.next() ?? break
         print("record")
     }
     print("eof")

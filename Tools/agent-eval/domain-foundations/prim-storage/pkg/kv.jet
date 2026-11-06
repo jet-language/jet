@@ -31,6 +31,6 @@ kv_get: fn(path: Path, key: String) -> String? {
 kv_compact: fn(path: Path) -> Bool {
     state: kv_replay(path) ?? panic("kv replay")
     compacted := [String]{}
-    loop (key, value) in state -> &compacted.push("put|{key}|{value}")
+    loop (key, value) in state -> compacted.push("put|{key}|{value}")
     return log.compact_records(path, compacted)
 }

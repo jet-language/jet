@@ -64,7 +64,7 @@ ResidentRecordingState: struct { recording: SessionRecording; cursor: ReplayCurs
 impl ResidentRecordingState {
     new: fn(recording: SessionRecording, first_sequence: U64?) -> Self {
         cursor: recording.replay()
-        Self { recording: ^recording, cursor: ^cursor, checkpoints: {}, first_sequence }
+        Self { recording: recording.move(), cursor: cursor, checkpoints: {}, first_sequence }
     }
 }
 BROWSER_ASSET_WATCH_MAX_FILES: USize{4096}
@@ -96,7 +96,7 @@ impl BrowserAssetWatcher {
         if metadata.file_type().is_symlink() { *skipped = skipped.saturating_add(1); return }
         if metadata.file_type().is_file() {
             if Self.stamp(path) == .Val(stamp) {
-                if path.to_string_lossy().len() <= BROWSER_ASSET_WATCH_MAX_PATH_BYTES -> files.insert(path.copy(), ^stamp) else -> *skipped = skipped.saturating_add(1)
+                if path.to_string_lossy().len() <= BROWSER_ASSET_WATCH_MAX_PATH_BYTES -> files.insert(path.copy(), stamp) else -> *skipped = skipped.saturating_add(1)
             }
             return
         }
@@ -105,45 +105,45 @@ impl BrowserAssetWatcher {
         children := entries.filter_map((entry) -> entry.ok()).map((entry) -> entry.path()).collect()
         children.sort()
         loop child in children {
-            Self.collect(&child, files, skipped)
+            Self.collect(child, files, skipped)
             if files.len() >= BROWSER_ASSET_WATCH_MAX_FILES -> break
         }
     }
     snapshot: fn(self: Self) -> Unit {
         files := [OSPath:BrowserAssetStamp]{}
         skipped := USize{0}
-        Self.collect(&self.root, &files, &skipped)
-        self.known = ^files
+        Self.collect(self.root, files, skipped)
+        self.known = files.move()
     }
     poll: fn(self: Self) -> ([BrowserAssetChange], USize) {
         current := [OSPath:BrowserAssetStamp]{}
         skipped := USize{0}
-        Self.collect(&self.root, &current, &skipped)
+        Self.collect(self.root, current, skipped)
         changes := [BrowserAssetChange]{}
         paths := current.keys().cloned().collect()
         paths.sort()
         loop path in paths {
-            kind: if self.known.get(&path) == {
+            kind: if self.known.get(path) == {
                 .None -> "created"
-                .Val(previous) && previous != current.get(&path).unwrap() -> "changed"
+                .Val(previous) && previous != current.get(path).unwrap() -> "changed"
                 .Val(_) -> { next }
             }
-            changes.push(BrowserAssetChange { path: ^path, kind })
+            changes.push(BrowserAssetChange { path: path.move(), kind })
         }
         old_paths := self.known.keys().cloned().collect()
         old_paths.sort()
         loop path in old_paths {
-            if !current.contains_key(&path) -> changes.push(BrowserAssetChange { path: ^path, kind: "deleted" })
+            if !current.contains_key(path) -> changes.push(BrowserAssetChange { path: path.move(), kind: "deleted" })
         }
         skipped = skipped.saturating_add(changes.len().saturating_sub(BROWSER_ASSET_WATCH_MAX_EVENTS))
         changes.truncate(BROWSER_ASSET_WATCH_MAX_EVENTS)
-        self.known = ^current
+        self.known = current.move()
         (_0: changes, _1: skipped)
     }
     frame: fn(self: Self, session_id: String) -> String {
         (changes, skipped): self.poll()
         events: changes.into_iter().filter_map((change) -> {
-            logical: change.path.strip_prefix(&self.root).ok()
+            logical: change.path.strip_prefix(self.root).ok()
             text: logical.to_string_lossy().replace('\\', "/")
             if text.is_empty() -> return .None
             .Val("{{\"root\":{{\"id\":\"game\",\"path\":\".\"}},\"logical_path\":\"{foundation_json_escape("assets/{text}")}\",\"kind\":\"{foundation_json_escape(change.kind)}\"}}")
@@ -194,7 +194,7 @@ impl ResidentDevSession {
         if !client_id_is_valid(client) -> return
         now: Instant.now()
         clients: self.clients.lock().unwrap()
-        expire_clients(&clients, now)
+        expire_clients(clients, now)
         if !clients.contains_key(client) && clients.len() >= MAX_CLIENTS -> return
         clients.insert(client, now)
     }
@@ -202,7 +202,7 @@ impl ResidentDevSession {
         if !client_id_is_valid(client) -> return
         now: Instant.now()
         clients: self.clients.lock().unwrap()
-        expire_clients(&clients, now)
+        expire_clients(clients, now)
         clients.remove(client)
     }
     browser_game_control_frame: fn(self: Self) -> String Err! {
@@ -212,7 +212,7 @@ impl ResidentDevSession {
         loop _ in 0..32 {
             request: queued.pop_front() ?? break
             frame.enqueue_command(.GameControl(request.copy()))
-            selected.push(^request)
+            selected.push(request)
         }
         if frame.serialize() == {
             .Ok(body) -> {
@@ -220,8 +220,8 @@ impl ResidentDevSession {
                 body
             }
             .Err(error) -> {
-                loop request in selected.into_iter().rev() -> queued.push_front(^request)
-                .Err(^error)
+                loop request in selected.into_iter().rev() -> queued.push_front(request)
+                .Err(error)
             }
         }
     }
@@ -241,7 +241,7 @@ impl ResidentDevSession {
         state: self.devtools_lock()
         envelope: &state.envelope
         source_identity: envelope.source_identity.copy()
-        revision: source_identity.as_ref().and_then((identity) -> identity.revision.copy()).unwrap_or(^current_revision)
+        revision: source_identity.as_ref().and_then((identity) -> identity.revision.copy()).unwrap_or(current_revision)
         latest: envelope.latest_sequence().unwrap_or(0)
         oldest: envelope.oldest_sequence()
         truncation: envelope.truncated || cursor.is_some_and((cursor) -> oldest.is_some_and((oldest) -> cursor.saturating_add(1) < oldest))
@@ -261,9 +261,9 @@ impl ResidentDevSession {
         DevtoolsProjection {
             protocol: JET_DEVTOOLS_PROTOCOL, session_id: self.id.copy(),
             source_id: source_identity.as_ref().and_then((identity) -> identity.source_id.copy()),
-            build_id: source_identity.as_ref().and_then((identity) -> identity.build_id.copy()), revision: ^revision,
-            world_id: source_identity.as_ref().and_then((identity) -> identity.world_id.copy()), sequence: latest, observed_at, panels: ^panels, selection: ^selection,
-            status: ^status, command_capabilities: self.devtools_command_capabilities(), command_receipts: self.devtools_command_receipts(), reset, truncation
+            build_id: source_identity.as_ref().and_then((identity) -> identity.build_id.copy()), revision: revision,
+            world_id: source_identity.as_ref().and_then((identity) -> identity.world_id.copy()), sequence: latest, observed_at, panels: panels, selection: selection,
+            status: status, command_capabilities: self.devtools_command_capabilities(), command_receipts: self.devtools_command_receipts(), reset, truncation
         }
     }
     observe_source: fn(self: Self, revision: String) -> Unit {
@@ -279,17 +279,17 @@ impl ResidentDevSession {
         self.set_devtools_source_identity(.Val(source_id), .Val(build_id), .Val(revision), .Val(world_id))
     }
     record_capture_start: fn(self: &Self, fact: &CaptureStartFact) Err! {
-        self.validate_capture_identity(&fact.identity)
+        self.validate_capture_identity(fact.identity)
         facts: self.capture_facts.lock().unwrap()
         facts.push(.Start(fact.copy()))
         if fact.eligibility.skip() == .Val(skip) -> facts.push(.Skip(skip.copy()))
-        trim_capture_facts(&facts)
+        trim_capture_facts(facts)
     }
     record_capture_fault: fn(self: &Self, fact: &CaptureFaultFact) Err! {
-        self.validate_capture_identity(&fact.identity)
+        self.validate_capture_identity(fact.identity)
         facts: self.capture_facts.lock().unwrap()
         facts.push(.Fault(fact.copy()))
-        trim_capture_facts(&facts)
+        trim_capture_facts(facts)
     }
     capture_facts: fn(self: Self) -> [CaptureSessionFact] { (*self.capture_facts.lock().unwrap()).copy() }
     validate_capture_identity: fn(self: &Self, identity: &CaptureIdentity) Err! {
@@ -306,8 +306,8 @@ impl ResidentDevSession {
         *self.live_values.lock().unwrap() = values.copy()
         lineage: self.live_lineage.lock().unwrap().clone().expect("validated live lineage")
         *self.accepted_revision.lock().unwrap() = snapshot.revision.copy()
-        self.push_receipt(Receipt { kind: "live_swap", status: "committed", before: ^before, after: snapshot.revision.copy(), client: "", output: "",
-            live: .Val(LiveReceipt { lineage: ^lineage, values: ^values }) })
+        self.push_receipt(Receipt { kind: "live_swap", status: "committed", before: before, after: snapshot.revision.copy(), client: "", output: "",
+            live: .Val(LiveReceipt { lineage: lineage.move(), values: values.move() }) })
     }
     mark_building: fn(self: Self) -> Unit {
         *self.state.lock().unwrap() = "building"
@@ -336,21 +336,21 @@ impl ResidentDevSession {
     devtools_panels: fn(self: Self, host: JetDevtoolsHostKind, grants: [JetDevtoolsPanelCapability]) -> [JetDevtoolsPanelProjection] JetDevtoolsPanelCatalogError! {
         catalog: self.devtools_panel_catalog()
         state: self.devtools_lock()
-        catalog.project(&state.envelope, host, grants)
+        catalog.project(state.envelope, host, grants)
     }
     current_revision: fn(self: Self) -> String { (*self.current_revision.lock().unwrap()).copy() }
     devtools_command_receipts: fn(self: Self) -> [JetDevtoolsCommandReceipt] { jet_foundation.DevtoolsControl.jet_devtools_command_receipts(self.id) }
     devtools_command_capabilities: fn(self: Self) -> DevtoolsCommandCapabilities {
         reason: if !self.project_rebuild_executor_available() -> .Val("no rebuild executor is registered for this host")
             else if self.current_revision().is_empty() -> .Val("source revision is unavailable") else -> .None
-        DevtoolsCommandCapabilities { project_rebuild: reason.is_none(), project_rebuild_reason: ^reason }
+        DevtoolsCommandCapabilities { project_rebuild: reason.is_none(), project_rebuild_reason: reason.move() }
     }
     register_project_rebuild_executor: fn(self: Self) -> ProjectRebuildExecutorGuard Err! {
         available: self.project_rebuild_executor.lock() ?? return .Err("project rebuild executor state is poisoned")
         if *available -> return .Err("a project rebuild executor is already registered")
         *available = true
         drop(available)
-        ProjectRebuildExecutorGuard { available: Arc.clone(&self.project_rebuild_executor) }
+        ProjectRebuildExecutorGuard { available: Arc.clone(self.project_rebuild_executor) }
     }
     project_rebuild_executor_available: fn(self: Self) -> Bool { self.project_rebuild_executor.lock().map((available) -> *available).unwrap_or(false) }
     validate_devtools_command_admission: fn(self: &Self, command: &JetDevtoolsCommand) Err! {
@@ -362,8 +362,8 @@ impl ResidentDevSession {
         }
     }
     enqueue_devtools_command: fn(self: &Self, command: JetDevtoolsCommand) Err! {
-        self.validate_devtools_command_admission(&command)
-        jet_foundation.DevtoolsControl.jet_devtools_enqueue_command(^command)
+        self.validate_devtools_command_admission(command)
+        jet_foundation.DevtoolsControl.jet_devtools_enqueue_command(command)
     }
     take_project_rebuild: fn(self: Self) -> JetDevtoolsProjectRebuildRequest? Err! {
         command: self.poll_devtools_command() ?? return .None
@@ -383,9 +383,9 @@ impl ResidentDevSession {
                 return .Err(error)
             }
             self.update_command_receipt(request.request_id, "building", .None)
-            .Val(^request)
+            .Val(request)
         } else {
-            jet_foundation.DevtoolsControl.jet_devtools_requeue_command_front(^command)
+            jet_foundation.DevtoolsControl.jet_devtools_requeue_command_front(command)
             .None
         }
     }
@@ -394,15 +394,15 @@ impl ResidentDevSession {
         if request.session_id != self.id -> return .Err("jet.devtools.v1 command session identity mismatch")
         if result == {
             .Ok(_) -> jet_foundation.DevtoolsControl.jet_devtools_update_command_receipt(self.id, request.request_id, "completed", .None)
-            .Err(error) -> jet_foundation.DevtoolsControl.jet_devtools_update_command_receipt(self.id, request.request_id, "failed", .Val(^error))
+            .Err(error) -> jet_foundation.DevtoolsControl.jet_devtools_update_command_receipt(self.id, request.request_id, "failed", .Val(error))
         }
     }
-    publish_devtools_event_typed: fn(self: Self, event: JetDevtoolsEvent) -> U64 Err! { self.push_devtools_event(^event) }
-    enqueue_game_control: fn(self: &Self, request: JetDevtoolsGameControlRequest) Err! { self.enqueue_devtools_command(.GameControl(^request)) }
+    publish_devtools_event_typed: fn(self: Self, event: JetDevtoolsEvent) -> U64 Err! { self.push_devtools_event(event) }
+    enqueue_game_control: fn(self: &Self, request: JetDevtoolsGameControlRequest) Err! { self.enqueue_devtools_command(.GameControl(request)) }
     poll_devtools_command: fn(self: Self) -> JetDevtoolsCommand? { jet_foundation.DevtoolsControl.jet_devtools_poll_command(self.id) }
     poll_database_explain: fn(self: Self) -> JetDevtoolsDatabaseExplainRequest? { jet_foundation.DevtoolsControl.jet_devtools_poll_database_explain(self.id) }
     update_command_receipt: fn(self: Self, request_id: String, status: String, error: String?) -> Unit {
-        _: jet_foundation.DevtoolsControl.jet_devtools_update_command_receipt(self.id, request_id, status, ^error)
+        _: jet_foundation.DevtoolsControl.jet_devtools_update_command_receipt(self.id, request_id, status, error)
     }
     dispatch_pending_devtools_commands: fn(self: Self) -> USize Err! {
         pending: jet_foundation.DevtoolsControl.jet_devtools_command_count(self.id).min(32)
@@ -412,7 +412,7 @@ impl ResidentDevSession {
             if command == {
                 .DatabaseExplain(request) -> {
                     if request.session_id != self.id {
-                        jet_foundation.DevtoolsControl.jet_devtools_requeue_command_front(.DatabaseExplain(^request))
+                        jet_foundation.DevtoolsControl.jet_devtools_requeue_command_front(.DatabaseExplain(request))
                         return .Err("jet.devtools.v1 command session identity mismatch")
                     }
                     if jet_foundation.Devtools.jet_devtools_dispatch_database_explain(request.session_id, request.request_id, request.statement_identity, request.timeout_ms, request.max_rows) == {
@@ -422,17 +422,17 @@ impl ResidentDevSession {
                         }
                         .Err(error) && error == "database EXPLAIN runtime callback is unavailable" -> {
                             self.update_command_receipt(request.request_id, "waiting", .Val(error.copy()))
-                            jet_foundation.DevtoolsControl.jet_devtools_requeue_command_front(.DatabaseExplain(^request))
+                            jet_foundation.DevtoolsControl.jet_devtools_requeue_command_front(.DatabaseExplain(request))
                             return dispatched
                         }
                         .Err(error) -> {
                             self.update_command_receipt(request.request_id, "rejected", .Val(error.copy()))
                             result: JetDevtoolsDatabaseExplainResult.new(request.session_id.copy(), request.request_id.copy(), request.statement_identity.copy(),
-                                "error", 0, false, 0, [], .Val("dispatch_failed"), .Val(^error))
-                                .and_then((result) -> self.publish_database_explain_result(^result, unix_time_ms(), "devserver"))
+                                "error", 0, false, 0, [], .Val("dispatch_failed"), .Val(error))
+                                .and_then((result) -> self.publish_database_explain_result(result, unix_time_ms(), "devserver"))
                             if result == .Err(publish_error) {
-                                jet_foundation.DevtoolsControl.jet_devtools_requeue_command_front(.DatabaseExplain(^request))
-                                return .Err(^publish_error)
+                                jet_foundation.DevtoolsControl.jet_devtools_requeue_command_front(.DatabaseExplain(request))
+                                return .Err(publish_error)
                             }
                             dispatched = dispatched.saturating_add(1)
                         }
@@ -440,7 +440,7 @@ impl ResidentDevSession {
                 }
                 .GameControl(request) -> {
                     if request.session_id != self.id {
-                        jet_foundation.DevtoolsControl.jet_devtools_requeue_command_front(.GameControl(^request))
+                        jet_foundation.DevtoolsControl.jet_devtools_requeue_command_front(.GameControl(request))
                         return .Err("jet.devtools.v1 game control session identity mismatch")
                     }
                     payload: request.render_json()
@@ -457,20 +457,20 @@ impl ResidentDevSession {
                                 }
                                 .Err(relay_error) -> {
                                     self.update_command_receipt(request.request_id, "waiting", .Val(relay_error.copy()))
-                                    jet_foundation.DevtoolsControl.jet_devtools_requeue_command_front(.GameControl(^request))
-                                    return .Err(^relay_error)
+                                    jet_foundation.DevtoolsControl.jet_devtools_requeue_command_front(.GameControl(request))
+                                    return .Err(relay_error)
                                 }
                             }
                         }
                         .Err(error) -> {
                             self.update_command_receipt(request.request_id, "rejected", .Val(error.copy()))
-                            jet_foundation.DevtoolsControl.jet_devtools_requeue_command_front(.GameControl(^request))
-                            return .Err(^error)
+                            jet_foundation.DevtoolsControl.jet_devtools_requeue_command_front(.GameControl(request))
+                            return .Err(error)
                         }
                     }
                 }
                 .ProjectRebuild(request) -> {
-                    jet_foundation.DevtoolsControl.jet_devtools_requeue_command_front(.ProjectRebuild(^request))
+                    jet_foundation.DevtoolsControl.jet_devtools_requeue_command_front(.ProjectRebuild(request))
                     return dispatched
                 }
             }
@@ -482,7 +482,7 @@ impl ResidentDevSession {
         if result.session_id != self.id -> return .Err("jet.devtools.v1 EXPLAIN result session identity mismatch")
         result.validate()
         event: JetDevtoolsEvent.from_parts(timestamp_ms, source, "DatabaseExplainResult", result.statement_identity.copy(), result.render_json())
-        self.publish_devtools_event_typed(^event)
+        self.publish_devtools_event_typed(event)
     }
     ingest_devtools_envelope: fn(self: Self, decoded: JetDevtoolsDecodedEnvelope) -> USize Err! {
         decoded.validate()
@@ -493,7 +493,7 @@ impl ResidentDevSession {
                     self.set_devtools_source_identity(identity.source_id.copy(), identity.build_id.copy(), identity.revision.copy(), identity.world_id.copy())
                 }
                 events: envelope.events().cloned().collect()
-                count: self.publish_panel_events(^events)
+                count: self.publish_panel_events(events)
                 state: self.devtools_lock()
                 state.envelope.set_selection(envelope.selection().cloned())
                 state.envelope.set_cursor(envelope.cursor())
@@ -523,10 +523,10 @@ impl ResidentDevSession {
                     if command == {
                         .GameControl(request) -> {
                             game_command: JetDevtoolsCommand.GameControl(request.copy())
-                            browser_controls.push_back(^request)
-                            jet_foundation.DevtoolsControl.jet_devtools_record_command_receipt(JetDevtoolsCommandReceipt.for_command(&game_command, "queued", .None))
+                            browser_controls.push_back(request)
+                            jet_foundation.DevtoolsControl.jet_devtools_record_command_receipt(JetDevtoolsCommandReceipt.for_command(game_command, "queued", .None))
                         }
-                        command -> jet_foundation.DevtoolsControl.jet_devtools_enqueue_command(^command)
+                        command -> jet_foundation.DevtoolsControl.jet_devtools_enqueue_command(command)
                     }
                 }
                 count
@@ -536,20 +536,20 @@ impl ResidentDevSession {
     publish_panel_events: fn(self: Self, events: IntoIterator<JetDevtoolsEvent>) -> USize Err! {
         count := USize{0}
         loop event in events {
-            _: self.publish_devtools_event_typed(^event)
+            _: self.publish_devtools_event_typed(event)
             count = count.saturating_add(1)
         }
         count
     }
     publish_job_fact: fn(self: Self, fact: JetDevtoolsJobPanelFact, source: String) -> U64 Err! {
         event: fact.to_protocol_event(source)
-        self.publish_devtools_event_typed(^event)
+        self.publish_devtools_event_typed(event)
     }
     scrub: fn(self: Self, sequence: U64) -> ReplayProjection Err! {
         projection: (() -> {
             recording: self.recording.lock() ?? return .Err("devtools recording state is unavailable because its lock is poisoned")
             state: recording.as_mut() ?? return .Err(recording_unavailable())
-            state.cursor.seek(&state.recording, sequence).map_err(recording_error)
+            state.cursor.seek(state.recording, sequence).map_err(recording_error)
         })()
         if projection.as_ref() == .Ok(value) -> self.sync_replay_cursor(value)
         projection
@@ -558,7 +558,7 @@ impl ResidentDevSession {
         projection: (() -> {
             recording: self.recording.lock() ?? return .Err("devtools recording state is unavailable because its lock is poisoned")
             state: recording.as_mut() ?? return .Err(recording_unavailable())
-            state.cursor.seek_time(&state.recording, timestamp_ms).map_err(recording_error)
+            state.cursor.seek_time(state.recording, timestamp_ms).map_err(recording_error)
         })()
         if projection.as_ref() == .Ok(value) -> self.sync_replay_cursor(value)
         projection
@@ -567,7 +567,7 @@ impl ResidentDevSession {
         projection: (() -> {
             recording: self.recording.lock() ?? return .Err("devtools recording state is unavailable because its lock is poisoned")
             state: recording.as_mut() ?? return .Err(recording_unavailable())
-            state.cursor.step_forward(&state.recording).map_err(recording_error)
+            state.cursor.step_forward(state.recording).map_err(recording_error)
         })()
         if projection.as_ref() == .Ok(value) -> self.sync_replay_cursor(value)
         projection
@@ -576,8 +576,8 @@ impl ResidentDevSession {
         projection: (() -> {
             recording: self.recording.lock() ?? return .Err("devtools recording state is unavailable because its lock is poisoned")
             state: recording.as_mut() ?? return .Err(recording_unavailable())
-            loop _ in 0..count -> _: state.cursor.step_forward(&state.recording).map_err(recording_error)
-            state.recording.projection(&state.cursor).map_err(recording_error)
+            loop _ in 0..count -> _: state.cursor.step_forward(state.recording).map_err(recording_error)
+            state.recording.projection(state.cursor).map_err(recording_error)
         })()
         if projection.as_ref() == .Ok(value) -> self.sync_replay_cursor(value)
         projection
@@ -586,7 +586,7 @@ impl ResidentDevSession {
         validate_devtools_text(name, "checkpoint name")
         recording: self.recording.lock() ?? return .Err("devtools recording state is unavailable because its lock is poisoned")
         state: recording.as_mut() ?? return .Err(recording_unavailable())
-        checkpoint: state.recording.checkpoint(&state.cursor).map_err(recording_error)
+        checkpoint: state.recording.checkpoint(state.cursor).map_err(recording_error)
         state.checkpoints.insert(name, checkpoint.copy())
         checkpoint
     }
@@ -596,8 +596,8 @@ impl ResidentDevSession {
             recording: self.recording.lock() ?? return .Err("devtools recording state is unavailable because its lock is poisoned")
             state: recording.as_mut() ?? return .Err(recording_unavailable())
             checkpoint: state.checkpoints.get(name).cloned() ?? return .Err(RecordingError.CheckpointUnavailable.to_string())
-            state.cursor = state.recording.restore_checkpoint(&checkpoint).map_err(recording_error)
-            state.recording.projection(&state.cursor).map_err(recording_error)
+            state.cursor = state.recording.restore_checkpoint(checkpoint).map_err(recording_error)
+            state.recording.projection(state.cursor).map_err(recording_error)
         })()
         if projection.as_ref() == .Ok(value) -> self.sync_replay_cursor(value)
         projection
@@ -613,17 +613,17 @@ impl ResidentDevSession {
         actual_sequence: state.recording.events().last().map((event) -> event.sequence())
         reason := String?{.None}
         if envelope_identity.as_ref().map_or(true, (identity) ->
-            identity.source_id.as_ref() != .Val(&state.recording.identity().source_id) || identity.build_id.as_ref() != .Val(&state.recording.identity().build_id)) {
+            identity.source_id.as_ref() != .Val(state.recording.identity().source_id) || identity.build_id.as_ref() != .Val(state.recording.identity().build_id)) {
             reason = .Val("resident source/build identity differs from recording")
         } else if expected_sequence != actual_sequence -> reason = .Val("resident event tail differs from recording")
-        else if state.recording.projection(&state.cursor) == .Err(error) -> reason = .Val(error.to_string())
+        else if state.recording.projection(state.cursor) == .Err(error) -> reason = .Val(error.to_string())
         truncation: state.recording.truncation()
-        DevtoolsRecordingDivergence { divergent: reason.is_some(), reason: ^reason, identity: state.recording.identity().copy(),
+        DevtoolsRecordingDivergence { divergent: reason.is_some(), reason: reason, identity: state.recording.identity().copy(),
             expected_sequence, actual_sequence, retained_events: state.recording.event_count(), dropped_events: truncation.dropped_events, truncation }
     }
     recording_control: fn(self: Self, payload: String) -> String Err! {
         root: parse_json_with_limit(payload, JET_DEVTOOLS_MAX_ENVELOPE_BYTES) ?? return .Err("recording control must be valid bounded JSON")
-        object: object_map(&root) ?? return .Err("recording control must be a JSON object")
+        object: object_map(root) ?? return .Err("recording control must be a JSON object")
         operation: object.get("op").or_else(() -> object.get("action")).and_then(json_string) ?? return .Err("recording control must include string op")
         if operation == {
             "scrub" -> {
@@ -660,24 +660,24 @@ impl ResidentDevSession {
         divergence: self.divergence().ok()
         recording: self.recording.lock() ?? return recording_unavailable_json(self.id, "devtools recording state is unavailable because its lock is poisoned")
         state: recording.as_ref() ?? return recording_unavailable_json(self.id, "source/build identity is unavailable")
-        projection: state.recording.projection(&state.cursor) ?? return recording_unavailable_json(self.id, err.to_string())
-        recording_json_for_state(self.id, state, &projection, divergence.as_ref())
+        projection: state.recording.projection(state.cursor) ?? return recording_unavailable_json(self.id, err.to_string())
+        recording_json_for_state(self.id, state, projection, divergence.as_ref())
     }
     set_devtools_source_identity: fn(self: &Self, source_id: String?, build_id: String?, revision: String?, world_id: String?) Err! {
         recording_identity: if {
             source_id.as_ref() == .Val(source) && build_id.as_ref() == .Val(build) -> .Val(SessionIdentity.new(source, build).map_err(recording_error)?)
             else -> .None
         }
-        identity: JetDevtoolsSourceIdentityFact.new(^source_id, ^build_id, ^revision, ^world_id)
+        identity: JetDevtoolsSourceIdentityFact.new(source_id, build_id, revision, world_id)
         first_sequence: (() -> {
             state: self.devtools_lock()
-            state.envelope.set_source_identity(.Val(^identity))
+            state.envelope.set_source_identity(.Val(identity))
             if state.envelope.latest_sequence() == {
                 .Val(sequence) -> .Val(sequence.checked_add(1) ?? return .Err("devtools event sequence exhausted"))
                 .None -> .Val(1)
             }
         })()
-        self.set_recording_identity(^recording_identity, first_sequence)
+        self.set_recording_identity(recording_identity, first_sequence)
     }
     set_recording_identity: fn(self: &Self, identity: SessionIdentity?, first_sequence: U64?) Err! {
         recording: self.recording.lock() ?? return .Err("devtools recording state is unavailable because its lock is poisoned")
@@ -685,7 +685,7 @@ impl ResidentDevSession {
             if state.recording.identity() == identity -> return
         }
         *recording = if identity == {
-            .Val(identity) -> .Val(ResidentRecordingState.new(SessionRecording.new(^identity).map_err(recording_error), first_sequence))
+            .Val(identity) -> .Val(ResidentRecordingState.new(SessionRecording.new(identity).map_err(recording_error), first_sequence))
             .None -> .None
         }
     }
@@ -698,13 +698,13 @@ impl ResidentDevSession {
         change_facts: decision.change_facts.iter().map(game_change_fact_json).collect().join(",")
         kept_keys: kept.iter().map((fact) -> fact.key.copy()).collect()
         reset_keys: reset.iter().map((fact) -> fact.key.copy()).collect()
-        fields: "{{\"module\":{json_value(decision.module_ref)},\"compatibility\":{json_value(compatibility)},\"reason\":{json_value(reason)},\"changed\":{string_array_json(&decision.changed)},\"changed_functions\":{string_array_json(&decision.changed_functions)},\"state\":[{state}],\"kept\":{string_array_json(&kept_keys)},\"reset\":{string_array_json(&reset_keys)},\"rechecked_items\":{string_array_json(&decision.rechecked_items)},\"change_facts\":[{change_facts}]}}"
-        event: JetDevtoolsEvent.from_parts(unix_time_ms(), "sema", "HotSwap", "module", ^fields)
-        _: self.publish_devtools_event_typed(^event)
+        fields: "{{\"module\":{json_value(decision.module_ref)},\"compatibility\":{json_value(compatibility)},\"reason\":{json_value(reason)},\"changed\":{string_array_json(decision.changed)},\"changed_functions\":{string_array_json(decision.changed_functions)},\"state\":[{state}],\"kept\":{string_array_json(kept_keys)},\"reset\":{string_array_json(reset_keys)},\"rechecked_items\":{string_array_json(decision.rechecked_items)},\"change_facts\":[{change_facts}]}}"
+        event: JetDevtoolsEvent.from_parts(unix_time_ms(), "sema", "HotSwap", "module", fields)
+        _: self.publish_devtools_event_typed(event)
     }
     set_devtools_selection: fn(self: &Self, request: String) Err! {
         root: parse_json(request) ?? return .Err("devtools selection must be valid JSON")
-        object: object_map(&root) ?? return .Err("devtools selection must be an object")
+        object: object_map(root) ?? return .Err("devtools selection must be an object")
         nested: object.get("selection").and_then(object_map)
         field: (key: String) -> object.get(key).or_else(() -> nested.as_ref().and_then((selection) -> selection.get(key))).and_then(json_string).map((text) -> text.to_string())
         clear: object.get("clear").is_some_and((value) -> if value == {
@@ -736,20 +736,20 @@ impl ResidentDevSession {
             if clear -> state.envelope.set_selection(.None)
             else {
                 previous_panel: state.envelope.view().selection().map((selection) -> selection.panel_id.copy())
-                selected_panel: panel_id.clone().or(^previous_panel).unwrap_or_default()
+                selected_panel: panel_id.clone().or(previous_panel).unwrap_or_default()
                 selected_item: item_key.clone().or_else(() -> state.envelope.view().selection().and_then((selection) -> selection.item_key.copy()))
-                state.envelope.set_selection(.Val(JetDevtoolsSelection.new(^selected_panel, ^selected_item)))
+                state.envelope.set_selection(.Val(JetDevtoolsSelection.new(selected_panel, selected_item)))
             }
         })()
         panel_json: if clear -> "null" else -> panel_id.as_ref().map(json_value).unwrap_or("null")
         item_json: if clear -> "null" else -> item_key.as_ref().map(json_value).unwrap_or("null")
         fields: "{{\"panel_id\":{panel_json},\"item_key\":{item_json},\"cleared\":{clear}}}"
-        event: JetDevtoolsEvent.from_parts(unix_time_ms(), origin, "Selection", "session", ^fields)
-        _: self.publish_devtools_event_typed(^event)
+        event: JetDevtoolsEvent.from_parts(unix_time_ms(), origin, "Selection", "session", fields)
+        _: self.publish_devtools_event_typed(event)
     }
     set_devtools_cursor: fn(self: &Self, request: String) Err! {
         root: parse_json(request) ?? return .Err("devtools cursor must be valid JSON")
-        object: object_map(&root) ?? return .Err("devtools cursor must be an object")
+        object: object_map(root) ?? return .Err("devtools cursor must be an object")
         origin: object.get("origin").and_then(json_string).unwrap_or("host")
         validate_devtools_text(origin, "cursor origin")
         cursor_value: object.get("cursor").or_else(() -> object.get("sequence"))
@@ -765,7 +765,7 @@ impl ResidentDevSession {
         { self.devtools_lock().envelope.set_cursor(sequence) }
         sequence_json: sequence.map((value) -> value.to_string()).unwrap_or("null")
         fields: "{{\"sequence\":{sequence_json}}}"
-        event: JetDevtoolsEvent.from_parts(unix_time_ms(), origin, "Cursor", "session", ^fields)
-        _: self.publish_devtools_event_typed(^event)
+        event: JetDevtoolsEvent.from_parts(unix_time_ms(), origin, "Cursor", "session", fields)
+        _: self.publish_devtools_event_typed(event)
     }
 }

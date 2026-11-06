@@ -233,7 +233,7 @@ semindex_package_codec_test_checked_instance: fn(instances: [InstanceFact], defi
     assert_eq(instance.template_definition_id.len(), 64)
     names := [String]{}
     identity: "instance:{instance.fingerprint}"
-    loop definition in definitions { if definition.identity == identity -> &names.push(definition.name) }
+    loop definition in definitions { if definition.identity == identity -> names.push(definition.name) }
     assert_eq(names, [String]{"a", "b"})
     assert(index_json.contains(instance.fingerprint))
     assert(index_json.contains(instance.full_key_hex))
@@ -261,8 +261,8 @@ semindex_package_codec_test_checked_output: fn(output: SemIndexOutputFact, index
 semindex_package_codec_test_reorder_identities: fn(before: [SymbolDef], after: [SymbolDef]) {
     before_ids := (loop definition in before -> definition.identity)
     after_ids := (loop definition in after -> definition.identity)
-    &before_ids.sort()
-    &after_ids.sort()
+    before_ids.sort()
+    after_ids.sort()
     assert_eq(before_ids, after_ids)
     fragments: [String]{"module:", "fn:", "type:", "field:", "variant:", "method:"}
     loop fragment in fragments {

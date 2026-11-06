@@ -247,7 +247,7 @@ FlashTestAuditError: struct { text: String, message: String }
     control: String.from_bytes([U8]{U8{1}}) ?? panic("control")
     assert_eq(jet_cli_flash_json_string_token("é\n\"\\{control}"), "é\\n\\\"\\\\\\u0001")
     invalid := JetCLIFlashTokenCursor{bytes: [U8]{U8{34}, U8{255}, U8{34}}, at: 0}
-    _: jet_cli_flash_parse_json_string_token(&invalid) ?? {
+    _: jet_cli_flash_parse_json_string_token(invalid) ?? {
         assert_eq(err.message, "JSON string is not UTF-8")
         return
     }
@@ -374,28 +374,28 @@ flash_test_file: fn(path: String) -> FlashTestFile Never! {
 // #4316: route the same generic host behavior through an ordinary typed test caller.
 // The original direct-call failing unit is retained in the CLI-36 scratch evidence.
 flash_test_regular_file: fn(host: &FlashTestHost, path: Path, label: String) -> Path JetCLIFlashError! {
-    jet_cli_flash_regular_file(&host, path, label)
+    jet_cli_flash_regular_file(host, path, label)
 }
 flash_test_resolve_audit: fn(host: &FlashTestHost, image: Path, target: String, explicit: Path?) -> Path JetCLIFlashError! {
-    jet_cli_flash_resolve_audit(&host, image, target, explicit)
+    jet_cli_flash_resolve_audit(host, image, target, explicit)
 }
 flash_test_read_audit: fn(host: &FlashTestHost, path: Path) -> String JetCLIFlashError! {
-    jet_cli_flash_read_audit(&host, path)
+    jet_cli_flash_read_audit(host, path)
 }
 flash_test_resolve_tool: fn(host: &FlashTestHost, name: String) -> Path JetCLIFlashError! {
-    jet_cli_flash_resolve_tool(&host, name)
+    jet_cli_flash_resolve_tool(host, name)
 }
 flash_test_from_machine: fn(host: &FlashTestHost, machine: TargetMachine, adapter: JetCLIFlashAdapter?) -> JetCLIFlashPlan JetCLIFlashError! {
-    jet_cli_flash_plan_from_machine<FlashTestHost>(&host, machine, flash_paths.of("/out/firmware.elf"), flash_test_no_path(), adapter)
+    jet_cli_flash_plan_from_machine<FlashTestHost>(host, machine, flash_paths.of("/out/firmware.elf"), flash_test_no_path(), adapter)
 }
 flash_test_from_target: fn(host: &FlashTestHost, target: String, image: Path) -> JetCLIFlashPlan JetCLIFlashError! {
-    jet_cli_flash_plan_from_target_and_image(&host, target, image, flash_test_no_path(), flash_test_adapter_none(), "test")
+    jet_cli_flash_plan_from_target_and_image(host, target, image, flash_test_no_path(), flash_test_adapter_none(), "test")
 }
 // #4376 HOST BEGIN: original host tests retained; Core Path IR owner prevents lowering.
 #Test("host regular file preserves no-follow and canonicalize error order through typed caller") {
     host := FlashTestHost{files: [String:FlashTestFile]{}, path: None}
     error := ""
-    _: flash_test_regular_file(&host, flash_paths.of("image"), "flash image") ?? {
+    _: flash_test_regular_file(host, flash_paths.of("image"), "flash image") ?? {
         // copy: the message stays with the failed result the handler reads (owner: that temporary
         // result, dropped after the handler) and `error` (owner: this test's local) keeps the text
         // past it.
@@ -409,7 +409,7 @@ flash_test_from_target: fn(host: &FlashTestHost, target: String, image: Path) ->
     // copy: `file` stays with `file`, which is read again later on this line, and the new value
     // owns its own.
     host.files["image"] = file.copy()
-    _: flash_test_regular_file(&host, flash_paths.of("image"), "flash image") ?? {
+    _: flash_test_regular_file(host, flash_paths.of("image"), "flash image") ?? {
         // copy: the message stays with the failed result the handler reads (owner: that temporary
         // result, dropped after the handler) and `error` (owner: this test's local) keeps the text
         // past it.
@@ -422,7 +422,7 @@ flash_test_from_target: fn(host: &FlashTestHost, target: String, image: Path) ->
     // copy: `file` stays with `file`, which is read again later on this line, and the new value
     // owns its own.
     host.files["image"] = file.copy()
-    _: flash_test_regular_file(&host, flash_paths.of("image"), "target audit") ?? {
+    _: flash_test_regular_file(host, flash_paths.of("image"), "target audit") ?? {
         // copy: the message stays with the failed result the handler reads (owner: that temporary
         // result, dropped after the handler) and `error` (owner: this test's local) keeps the text
         // past it.
@@ -434,7 +434,7 @@ flash_test_from_target: fn(host: &FlashTestHost, target: String, image: Path) ->
     // copy: `file` stays with `file`, which is read again later on this line, and the new value
     // owns its own.
     host.files["image"] = file.copy()
-    _: flash_test_regular_file(&host, flash_paths.of("image"), "flash image") ?? {
+    _: flash_test_regular_file(host, flash_paths.of("image"), "flash image") ?? {
         // copy: the message stays with the failed result the handler reads (owner: that temporary
         // result, dropped after the handler) and `error` (owner: this test's local) keeps the text
         // past it.
@@ -446,14 +446,14 @@ flash_test_from_target: fn(host: &FlashTestHost, target: String, image: Path) ->
     // copy: `file` stays with `file`, which is read again later on this line, and the new value
     // owns its own.
     host.files["image"] = file.copy()
-    assert_eq(flash_paths.show(flash_test_regular_file(&host, flash_paths.of("image"), "flash image") ?? panic("regular")), "/image")
+    assert_eq(flash_paths.show(flash_test_regular_file(host, flash_paths.of("image"), "flash image") ?? panic("regular")), "/image")
 }
 flash_test_no_text: fn() -> String? Never! { None }
 flash_test_no_path: fn() -> Path? Never! { None }
 #Test("audit sidecar candidates explicit selection Unicode sanitization and duplicate names through typed caller") {
     host := FlashTestHost{files: [String:FlashTestFile]{}, path: None}
     error := ""
-    _: flash_test_resolve_audit(&host, flash_paths.of("/out/image.elf"), "board", flash_test_no_path()) ?? {
+    _: flash_test_resolve_audit(host, flash_paths.of("/out/image.elf"), "board", flash_test_no_path()) ?? {
         // copy: the message stays with the failed result the handler reads (owner: that temporary
         // result, dropped after the handler) and `error` (owner: this test's local) keeps the text
         // past it.
@@ -462,10 +462,10 @@ flash_test_no_path: fn() -> Path? Never! { None }
     }
     assert_eq(error, "no target audit sidecar found beside `/out/image.elf`; pass `--audit <target.json>`")
     host.files["/out/image.target.json"] = flash_test_file("/out/image.target.json")
-    assert_eq(flash_paths.show(flash_test_resolve_audit(&host, flash_paths.of("/out/image.elf"), "board", flash_test_no_path()) ?? panic("audit")), "/out/image.target.json")
-    assert_eq(flash_paths.show(flash_test_resolve_audit(&host, flash_paths.of("/out/image.elf"), "image", flash_test_no_path()) ?? panic("same candidate")), "/out/image.target.json")
+    assert_eq(flash_paths.show(flash_test_resolve_audit(host, flash_paths.of("/out/image.elf"), "board", flash_test_no_path()) ?? panic("audit")), "/out/image.target.json")
+    assert_eq(flash_paths.show(flash_test_resolve_audit(host, flash_paths.of("/out/image.elf"), "image", flash_test_no_path()) ?? panic("same candidate")), "/out/image.target.json")
     host.files["/out/board.target.json"] = flash_test_file("/out/board.target.json")
-    _: flash_test_resolve_audit(&host, flash_paths.of("/out/image.elf"), "board", flash_test_no_path()) ?? {
+    _: flash_test_resolve_audit(host, flash_paths.of("/out/image.elf"), "board", flash_test_no_path()) ?? {
         // copy: the message stays with the failed result the handler reads (owner: that temporary
         // result, dropped after the handler) and `error` (owner: this test's local) keeps the text
         // past it.
@@ -473,11 +473,11 @@ flash_test_no_path: fn() -> Path? Never! { None }
         flash_paths.of("")
     }
     assert_eq(error, "multiple target audit sidecars found beside `/out/image.elf`; pass one with `--audit`")
-    assert_eq(flash_paths.show(flash_test_resolve_audit(&host, flash_paths.of("/out/image.elf"), "board", Val(flash_paths.of("/out/board.target.json"))) ?? panic("explicit")), "/out/board.target.json")
+    assert_eq(flash_paths.show(flash_test_resolve_audit(host, flash_paths.of("/out/image.elf"), "board", Val(flash_paths.of("/out/board.target.json"))) ?? panic("explicit")), "/out/board.target.json")
     file := flash_test_file("/out/board.target.json")
     file.metadata.symlink = true
     host.files["/out/board.target.json"] = file
-    _: flash_test_resolve_audit(&host, flash_paths.of("/out/image.elf"), "board", flash_test_no_path()) ?? {
+    _: flash_test_resolve_audit(host, flash_paths.of("/out/image.elf"), "board", flash_test_no_path()) ?? {
         // copy: the message stays with the failed result the handler reads (owner: that temporary
         // result, dropped after the handler) and `error` (owner: this test's local) keeps the text
         // past it.
@@ -486,7 +486,7 @@ flash_test_no_path: fn() -> Path? Never! { None }
     }
     assert_eq(error, "target audit `/out/board.target.json` is not a regular file")
     host.files = [String:FlashTestFile]{"/out/a__.target.json": flash_test_file("/out/a__.target.json")}
-    assert_eq(flash_paths.show(flash_test_resolve_audit(&host, flash_paths.of("/out/image.elf"), "a.é", flash_test_no_path()) ?? panic("sanitize")), "/out/a__.target.json")
+    assert_eq(flash_paths.show(flash_test_resolve_audit(host, flash_paths.of("/out/image.elf"), "a.é", flash_test_no_path()) ?? panic("sanitize")), "/out/a__.target.json")
 }
 // #4376: retain original audit-read assertions while Core Path projection works around owner lowering.
 #Test("audit metadata cap precedes read and accepts the exact one MiB bound") {
@@ -498,7 +498,7 @@ flash_test_no_path: fn() -> Path? Never! { None }
     // owns its own.
     host.files["audit"] = file.copy()
     error := ""
-    _: flash_test_read_audit(&host, flash_paths.of("audit")) ?? {
+    _: flash_test_read_audit(host, flash_paths.of("audit")) ?? {
         // copy: the message stays with the failed result the handler reads (owner: that temporary
         // result, dropped after the handler) and `error` (owner: this test's local) keeps the text
         // past it.
@@ -510,7 +510,7 @@ flash_test_no_path: fn() -> Path? Never! { None }
     // copy: `file` stays with `file`, which is read again later on this line, and the new value
     // owns its own.
     host.files["audit"] = file.copy()
-    _: flash_test_read_audit(&host, flash_paths.of("audit")) ?? {
+    _: flash_test_read_audit(host, flash_paths.of("audit")) ?? {
         // copy: the message stays with the failed result the handler reads (owner: that temporary
         // result, dropped after the handler) and `error` (owner: this test's local) keeps the text
         // past it.
@@ -522,10 +522,10 @@ flash_test_no_path: fn() -> Path? Never! { None }
     // copy: `file` stays with `file`, which is read again later on this line, and the new value
     // owns its own.
     host.files["audit"] = file.copy()
-    assert_eq(flash_test_read_audit(&host, flash_paths.of("audit")) ?? panic("read"), "{{}}")
+    assert_eq(flash_test_read_audit(host, flash_paths.of("audit")) ?? panic("read"), "{{}}")
     file.metadata_error = Val("stat failed")
     host.files["audit"] = file
-    _: flash_test_read_audit(&host, flash_paths.of("audit")) ?? {
+    _: flash_test_read_audit(host, flash_paths.of("audit")) ?? {
         // copy: the message stays with the failed result the handler reads (owner: that temporary
         // result, dropped after the handler) and `error` (owner: this test's local) keeps the text
         // past it.
@@ -539,7 +539,7 @@ flash_test_no_path: fn() -> Path? Never! { None }
     names: [String]{"", "a/b", "a\\b"}
     loop name in names {
         error := ""
-        _: flash_test_resolve_tool(&host, name) ?? {
+        _: flash_test_resolve_tool(host, name) ?? {
             // copy: the message stays with the failed result the handler reads (owner: that
             // temporary result, dropped after the handler) and `error` (owner: this test's local)
             // keeps the text past it.
@@ -549,7 +549,7 @@ flash_test_no_path: fn() -> Path? Never! { None }
         assert_eq(error, "declared flash tool `{name}` is not a bare executable")
     }
     error := ""
-    _: flash_test_resolve_tool(&host, "tool") ?? {
+    _: flash_test_resolve_tool(host, "tool") ?? {
         // copy: the message stays with the failed result the handler reads (owner: that temporary
         // result, dropped after the handler) and `error` (owner: this test's local) keeps the text
         // past it.
@@ -574,7 +574,7 @@ flash_test_no_path: fn() -> Path? Never! { None }
     // owns its own.
     host.files["/first/tool"] = file.copy()
     host.files["/second/tool"] = flash_test_file("/real/tool")
-    _: flash_test_resolve_tool(&host, "tool") ?? {
+    _: flash_test_resolve_tool(host, "tool") ?? {
         // copy: the message stays with the failed result the handler reads (owner: that temporary
         // result, dropped after the handler) and `error` (owner: this test's local) keeps the text
         // past it.
@@ -587,9 +587,9 @@ flash_test_no_path: fn() -> Path? Never! { None }
     // copy: `file` stays with `file`, which is read again later on this line, and the new value
     // owns its own.
     host.files["/first/tool"] = file.copy()
-    assert_eq(flash_paths.show(flash_test_resolve_tool(&host, "tool") ?? panic("tool")), "/real/first")
+    assert_eq(flash_paths.show(flash_test_resolve_tool(host, "tool") ?? panic("tool")), "/real/first")
     host.path = Val([Path]{})
-    _: flash_test_resolve_tool(&host, "tool") ?? {
+    _: flash_test_resolve_tool(host, "tool") ?? {
         // copy: the message stays with the failed result the handler reads (owner: that temporary
         // result, dropped after the handler) and `error` (owner: this test's local) keeps the text
         // past it.
@@ -601,11 +601,11 @@ flash_test_no_path: fn() -> Path? Never! { None }
 // #4376 HOST END
 #Test("capture exact boundary truncation marker and Rust UTF-8 lossy sequences") {
     bytes := [U8]{}
-    loop _ in 0..<65536 -> &bytes.push(U8{97})
+    loop _ in 0..<65536 -> bytes.push(U8{97})
     capture: jet_cli_flash_bound_capture(bytes)
     assert(!capture.truncated)
     assert_eq(capture.bytes, bytes)
-    &bytes.push(U8{98})
+    bytes.push(U8{98})
     bounded: jet_cli_flash_bound_capture(bytes)
     assert(bounded.truncated)
     assert_eq(bounded.bytes.len(), 65536)
@@ -621,7 +621,7 @@ flash_test_no_path: fn() -> Path? Never! { None }
 #Test("receipt status does not override explicit execution failure and sections use shared codec") {
     plan: flash_test_plan()
     failed: jet_cli_flash_execution_failed("launch", "denied", "sandbox", "strict")
-    receipt: jet_cli_flash_receipt_from_execution(plan, ^failed)
+    receipt: jet_cli_flash_receipt_from_execution(plan, failed)
     assert(!receipt.success)
     assert(receipt.status == None)
     section: jet_cli_flash_receipt_section(receipt) ?? panic("section")
@@ -629,7 +629,7 @@ flash_test_no_path: fn() -> Path? Never! { None }
     assert_eq(section.type_name, "FlashReceipt")
     assert_eq(section.bytes, canonical_json_bytes(jet_cli_flash_receipt_to_json(receipt)))
     execution: JetCLIFlashExecution{status: Val(9), stdout: "ok\n".bytes(), stderr: [U8]{}, mechanism: "sandbox", policy: "strict", failure: None}
-    success: jet_cli_flash_receipt_from_execution(plan, ^execution)
+    success: jet_cli_flash_receipt_from_execution(plan, execution)
     assert(success.success)
     assert_eq(success.status, Val(9))
     assert(!success.stdout_truncated)
@@ -658,10 +658,10 @@ flash_test_no_path: fn() -> Path? Never! { None }
 // #4381 PATH END
 flash_test_adapter_none: fn() -> JetCLIFlashAdapter? Never! { None }
 flash_test_build: fn(host: &FlashTestHost, machine: TargetMachine) -> JetCLIFlashPlan JetCLIFlashError! {
-    jet_cli_flash_plan_from_machine<FlashTestHost>(&host, machine, flash_paths.of("/out/firmware.elf"), flash_test_no_path(), flash_test_adapter_none())
+    jet_cli_flash_plan_from_machine<FlashTestHost>(host, machine, flash_paths.of("/out/firmware.elf"), flash_test_no_path(), flash_test_adapter_none())
 }
 flash_test_build_error: fn(host: &FlashTestHost, machine: TargetMachine) -> String Never! {
-    if flash_test_build(&host, machine) == {
+    if flash_test_build(host, machine) == {
         .Ok(_) -> panic("expected plan refusal")
         // copy: the message stays with the failed result (owner: the temporary matched here) and
         // the returned text owns its own.
@@ -683,18 +683,18 @@ flash_test_host_for_machine: fn(machine: TargetMachine) -> FlashTestHost Never! 
 #Test("flash builder hosted and canonical validation precede filesystem effects") {
     empty := FlashTestHost{files: [String:FlashTestFile]{}, path: None}
     hosted: jet_target_machine_hosted("x86_64-unknown-linux-gnu", "test")
-    assert_eq(flash_test_build_error(&empty, hosted), "target `hosted` is hosted; flashing requires a no-OS board or emulator profile")
+    assert_eq(flash_test_build_error(empty, hosted), "target `hosted` is hosted; flashing requires a no-OS board or emulator profile")
     machine := flash_test_machine()
     machine.triple = ""
     validation: jet_target_machine_validate(machine, jet_target_machine_use_default())
     assert(!validation.is_empty())
-    assert_eq(flash_test_build_error(&empty, machine), "target `board.sensor_v1` failed canonical profile validation: {jet_target_machine_errors_debug(validation)}")
+    assert_eq(flash_test_build_error(empty, machine), "target `board.sensor_v1` failed canonical profile validation: {jet_target_machine_errors_debug(validation)}")
     machine = flash_test_machine()
     machine.memory[0].kind = MemoryKind.Reserved
     validation_no_flash: jet_target_machine_validate(machine, jet_target_machine_use_default())
     // No-flash branch in FlashPlan is defensive: canonical validation reports
     // MissingMemoryKind(Flash) first, so it cannot be reached with real facts.
-    assert_eq(flash_test_build_error(&empty, machine), "target `board.sensor_v1` failed canonical profile validation: {jet_target_machine_errors_debug(validation_no_flash)}")
+    assert_eq(flash_test_build_error(empty, machine), "target `board.sensor_v1` failed canonical profile validation: {jet_target_machine_errors_debug(validation_no_flash)}")
 }
 #Test("flash builder immutable image metadata size hash and UTF-8 filename order") {
     machine: flash_test_machine()
@@ -707,27 +707,27 @@ flash_test_host_for_machine: fn(machine: TargetMachine) -> FlashTestHost Never! 
     // copy: the fixture file (owner: this test's local) is edited and stored again by the following
     // cases, and the host table (owner: host.files) holds its own copy of each version.
     host.files["/out/firmware.elf"] = image.copy()
-    assert_eq(flash_test_build_error(&host, machine), "cannot inspect flash image `/out/firmware.elf`: stat failed")
+    assert_eq(flash_test_build_error(host, machine), "cannot inspect flash image `/out/firmware.elf`: stat failed")
     image.metadata_error = None
     // copy: the fixture file (owner: this test's local) is edited and stored again by the following
     // cases, and the host table (owner: host.files) holds its own copy of each version.
     host.files["/out/firmware.elf"] = image.copy()
-    assert_eq(flash_test_build_error(&host, machine), "flash image `/out/firmware.elf` is 4194305 bytes but target `board.sensor_v1` declares only 4194304 flash bytes")
+    assert_eq(flash_test_build_error(host, machine), "flash image `/out/firmware.elf` is 4194305 bytes but target `board.sensor_v1` declares only 4194304 flash bytes")
     image.metadata.bytes = 4194304
     // copy: the fixture file (owner: this test's local) is edited and stored again by the following
     // cases, and the host table (owner: host.files) holds its own copy of each version.
     host.files["/out/firmware.elf"] = image.copy()
-    assert_eq(flash_test_build_error(&host, machine), "cannot hash flash image `/out/firmware.elf`: hash failed")
+    assert_eq(flash_test_build_error(host, machine), "cannot hash flash image `/out/firmware.elf`: hash failed")
     image.hash_error = None
     // copy: the fixture file (owner: this test's local) is edited and stored again by the following
     // cases, and the host table (owner: host.files) holds its own copy of each version.
     host.files["/out/firmware.elf"] = image.copy()
-    assert_eq(flash_test_build_error(&host, machine), "flash path is not UTF-8 at byte 2")
+    assert_eq(flash_test_build_error(host, machine), "flash path is not UTF-8 at byte 2")
     image.non_utf8_name = false
     // copy: the fixture file (owner: this test's local) is edited and stored again by the following
     // cases, and the host table (owner: host.files) holds its own copy of each version.
     host.files["/out/firmware.elf"] = image.copy()
-    plan: flash_test_build(&host, machine) ?? panic("plan")
+    plan: flash_test_build(host, machine) ?? panic("plan")
     assert_eq(plan.image_bytes, 4194304)
     assert_eq(plan.image_sha256, sha256_hex("/out/firmware.elf"))
     assert_eq(plan.tool_identity, sha256_hex("/bin/tool"))
@@ -742,28 +742,28 @@ flash_test_host_for_machine: fn(machine: TargetMachine) -> FlashTestHost Never! 
     // copy: the fixture file (owner: this test's local) is edited and stored again by the following
     // cases, and the host table (owner: host.files) holds its own copy of each version.
     host.files["/out/firmware.target.json"] = audit.copy()
-    assert_eq(flash_test_build_error(&host, machine), "target audit `/out/firmware.target.json` is malformed: top-level value is not an object")
+    assert_eq(flash_test_build_error(host, machine), "target audit `/out/firmware.target.json` is malformed: top-level value is not an object")
     audit.text = "{{}}"
     // copy: the fixture file (owner: this test's local) is edited and stored again by the following
     // cases, and the host table (owner: host.files) holds its own copy of each version.
     host.files["/out/firmware.target.json"] = audit.copy()
-    assert_eq(flash_test_build_error(&host, machine), "target audit has no `name` identity field")
+    assert_eq(flash_test_build_error(host, machine), "target audit has no `name` identity field")
     machine.programmers = [TargetProgrammerFacts]{}
     host = flash_test_host_for_machine(machine)
-    assert_eq(flash_test_build_error(&host, machine), "target `board.sensor_v1` has no owner-approved programmer facts; declare an adapter plus chip for probe-rs, interface/config for OpenOCD, or machine/cpu for an emulator")
+    assert_eq(flash_test_build_error(host, machine), "target `board.sensor_v1` has no owner-approved programmer facts; declare an adapter plus chip for probe-rs, interface/config for OpenOCD, or machine/cpu for an emulator")
     facts := flash_test_facts(TargetProgrammerAdapter.ProbeRs)
     facts.chip = None
     machine.programmers = [TargetProgrammerFacts]{facts}
     host = flash_test_host_for_machine(machine)
-    assert_eq(flash_test_build_error(&host, machine), "target `board.sensor_v1` `probe-rs` programmer is missing explicit `chip` fact")
+    assert_eq(flash_test_build_error(host, machine), "target `board.sensor_v1` `probe-rs` programmer is missing explicit `chip` fact")
     machine = flash_test_machine()
     host = flash_test_host_for_machine(machine)
     tool := flash_test_file("/bin/tool")
     tool.hash_error = Val("hash failed")
     host.files["/bin/tool"] = tool
-    assert_eq(flash_test_build_error(&host, machine), "cannot hash declared flash tool `/bin/tool`: hash failed")
+    assert_eq(flash_test_build_error(host, machine), "cannot hash declared flash tool `/bin/tool`: hash failed")
     error := ""
-    _: flash_test_from_machine(&host, machine, Val(JetCLIFlashAdapter.OpenOcd)) ?? {
+    _: flash_test_from_machine(host, machine, Val(JetCLIFlashAdapter.OpenOcd)) ?? {
         // copy: the message stays with the failed result the handler reads (owner: that temporary
         // result, dropped after the handler) and `error` (owner: this test's local) keeps the text
         // past it.
@@ -777,7 +777,7 @@ flash_test_host_for_machine: fn(machine: TargetMachine) -> FlashTestHost Never! 
     assert_eq(flash_paths.show(jet_cli_flash_default_image("unknown", "test")), ".jet/target/unknown/firmware.elf")
     host := FlashTestHost{files: [String:FlashTestFile]{}, path: None}
     error := ""
-    _: flash_test_from_target(&host, "unknown", flash_paths.of("image")) ?? {
+    _: flash_test_from_target(host, "unknown", flash_paths.of("image")) ?? {
         // copy: the message stays with the failed result the handler reads (owner: that temporary
         // result, dropped after the handler) and `error` (owner: this test's local) keeps the text
         // past it.
@@ -790,7 +790,7 @@ flash_test_host_for_machine: fn(machine: TargetMachine) -> FlashTestHost Never! 
     // Real selected sensor profile has no programmer facts, unlike fixture above.
     selected: jet_driver_target_machine_by_name("sensor", "test") ?? panic("target")
     host = flash_test_host_for_machine(selected)
-    _: flash_test_from_target(&host, "sensor", flash_paths.of("/out/firmware.elf")) ?? {
+    _: flash_test_from_target(host, "sensor", flash_paths.of("/out/firmware.elf")) ?? {
         // copy: the message stays with the failed result the handler reads (owner: that temporary
         // result, dropped after the handler) and `error` (owner: this test's local) keeps the text
         // past it.
@@ -818,20 +818,20 @@ flash_test_host_for_machine: fn(machine: TargetMachine) -> FlashTestHost Never! 
 // #4316 PLAN BEGIN: original plan tests; full proof owed after generic target lowering is fixed.
 #Test("flash builder uses largest flash region not sum and refuses unsafe OpenOCD before PATH") {
     machine := flash_test_machine()
-    &machine.memory.push(jet_target_memory_region_new("flash2", 0x10000000, ByteSize{bytes: 8388608}, .Flash, .Rx))
+    machine.memory.push(jet_target_memory_region_new("flash2", 0x10000000, ByteSize{bytes: 8388608}, .Flash, .Rx))
     host := flash_test_host_for_machine(machine)
     image := flash_test_file("/out/firmware.elf")
     image.metadata.bytes = 8388608
     // copy: the fixture file (owner: this test's local) is edited and stored again by the following
     // cases, and the host table (owner: host.files) holds its own copy of each version.
     host.files["/out/firmware.elf"] = image.copy()
-    plan: flash_test_build(&host, machine) ?? panic("largest capacity")
+    plan: flash_test_build(host, machine) ?? panic("largest capacity")
     assert_eq(plan.image_bytes, 8388608)
     image.metadata.bytes = 8388609
     // copy: the fixture file (owner: this test's local) is edited and stored again by the following
     // cases, and the host table (owner: host.files) holds its own copy of each version.
     host.files["/out/firmware.elf"] = image.copy()
-    assert_eq(flash_test_build_error(&host, machine), "flash image `/out/firmware.elf` is 8388609 bytes but target `board.sensor_v1` declares only 8388608 flash bytes")
+    assert_eq(flash_test_build_error(host, machine), "flash image `/out/firmware.elf` is 8388609 bytes but target `board.sensor_v1` declares only 8388608 flash bytes")
     machine.programmers = [TargetProgrammerFacts]{flash_test_facts(TargetProgrammerAdapter.OpenOcd)}
     host = flash_test_host_for_machine(machine)
     unsafe_image: "/out/evil;file.elf"
@@ -846,24 +846,24 @@ flash_test_host_for_machine: fn(machine: TargetMachine) -> FlashTestHost Never! 
     audit.text = "{{\"name\":{jet_target_json_quote(machine.name)},\"triple\":{jet_target_json_quote(machine.triple)},\"environment\":{jet_target_json_quote(jet_target_environment_identity(machine))},\"provider_identity\":{jet_target_json_quote(jet_target_provider_identity(machine))}}}"
     host.files["/out/evil;file.target.json"] = audit
     host.path = None
-    assert_eq(flash_test_build_error(&host, machine), "image filename `evil;file.elf` cannot be passed to OpenOCD safely")
+    assert_eq(flash_test_build_error(host, machine), "image filename `evil;file.elf` cannot be passed to OpenOCD safely")
     facts := flash_test_facts(TargetProgrammerAdapter.ProbeRs)
     facts.executable = "a/b"
     machine.programmers = [TargetProgrammerFacts]{facts}
     host = flash_test_host_for_machine(machine)
     host.path = None
-    assert_eq(flash_test_build_error(&host, machine), "declared flash tool `a/b` is not a bare executable")
+    assert_eq(flash_test_build_error(host, machine), "declared flash tool `a/b` is not a bare executable")
 }
 // #4316 PLAN END
 // #4381 PATH BEGIN: original receipt bounds test retained; full proof owed after Path identity fix.
 #Test("receipt bounds both streams and hashes lossy text including the truncation marker") {
     output := [U8]{}
-    loop _ in 0..<65537 -> &output.push(U8{255})
+    loop _ in 0..<65537 -> output.push(U8{255})
     // copy: `output` stays with `output`, which is read again later on this line, and the field
     // `stdout` owns its own. `output` stays with `output`, which is read again later on this line,
     // and the field `stderr` owns its own.
     execution: JetCLIFlashExecution{status: Val(0), stdout: output.copy(), stderr: output.copy(), mechanism: "sandbox", policy: "strict", failure: None}
-    receipt: jet_cli_flash_receipt_from_execution(flash_test_plan(), ^execution)
+    receipt: jet_cli_flash_receipt_from_execution(flash_test_plan(), execution)
     assert(receipt.stdout_truncated)
     assert(receipt.stderr_truncated)
     assert_eq(receipt.stdout.len(), 65536)
@@ -897,7 +897,7 @@ flash_test_host_for_machine: fn(machine: TargetMachine) -> FlashTestHost Never! 
     // copy: `file` stays with `file`, which is read again later on this line, and the new value
     // owns its own.
     host.files["/bin/tool"] = file.copy()
-    if flash_test_resolve_tool(&host, "tool") == {
+    if flash_test_resolve_tool(host, "tool") == {
         .Ok(_) -> panic("raw native address was skipped or accepted")
         .Err(failure) -> {
             assert_eq(failure.byte_offset, Val(2))
@@ -907,7 +907,7 @@ flash_test_host_for_machine: fn(machine: TargetMachine) -> FlashTestHost Never! 
     // copy: `file` stays with `file`, which is read again later on this line, and the new value
     // owns its own.
     host.files["image"] = file.copy()
-    if flash_test_regular_file(&host, flash_paths.of("image"), "flash image") == {
+    if flash_test_regular_file(host, flash_paths.of("image"), "flash image") == {
         .Ok(_) -> panic("raw native address was accepted")
         .Err(failure) -> {
             assert_eq(failure.byte_offset, Val(2))
@@ -915,7 +915,7 @@ flash_test_host_for_machine: fn(machine: TargetMachine) -> FlashTestHost Never! 
         }
     }
     host.files["/out/image.target.json"] = file
-    if flash_test_resolve_audit(&host, flash_paths.of("/out/image.elf"), "board", flash_test_no_path()) == {
+    if flash_test_resolve_audit(host, flash_paths.of("/out/image.elf"), "board", flash_test_no_path()) == {
         .Ok(_) -> panic("raw native sidecar was skipped or accepted")
         .Err(failure) -> {
             assert_eq(failure.byte_offset, Val(2))
@@ -929,7 +929,7 @@ flash_test_host_for_machine: fn(machine: TargetMachine) -> FlashTestHost Never! 
 #Test("host regular file preserves no-follow and canonicalize error order") {
     host := FlashTestHost{files: [String:FlashTestFile]{}, path: None}
     error := ""
-    _: jet_cli_flash_regular_file(&host, flash_paths.of("image"), "flash image") ?? {
+    _: jet_cli_flash_regular_file(host, flash_paths.of("image"), "flash image") ?? {
         // copy: the message stays with the failed result the handler reads (owner: that temporary
         // result, dropped after the handler) and `error` (owner: this test's local) keeps the text
         // past it.
@@ -943,7 +943,7 @@ flash_test_host_for_machine: fn(machine: TargetMachine) -> FlashTestHost Never! 
     // copy: `file` stays with `file`, which is read again later on this line, and the new value
     // owns its own.
     host.files["image"] = file.copy()
-    _: jet_cli_flash_regular_file(&host, flash_paths.of("image"), "flash image") ?? {
+    _: jet_cli_flash_regular_file(host, flash_paths.of("image"), "flash image") ?? {
         // copy: the message stays with the failed result the handler reads (owner: that temporary
         // result, dropped after the handler) and `error` (owner: this test's local) keeps the text
         // past it.
@@ -956,7 +956,7 @@ flash_test_host_for_machine: fn(machine: TargetMachine) -> FlashTestHost Never! 
     // copy: `file` stays with `file`, which is read again later on this line, and the new value
     // owns its own.
     host.files["image"] = file.copy()
-    _: jet_cli_flash_regular_file(&host, flash_paths.of("image"), "target audit") ?? {
+    _: jet_cli_flash_regular_file(host, flash_paths.of("image"), "target audit") ?? {
         // copy: the message stays with the failed result the handler reads (owner: that temporary
         // result, dropped after the handler) and `error` (owner: this test's local) keeps the text
         // past it.
@@ -968,7 +968,7 @@ flash_test_host_for_machine: fn(machine: TargetMachine) -> FlashTestHost Never! 
     // copy: `file` stays with `file`, which is read again later on this line, and the new value
     // owns its own.
     host.files["image"] = file.copy()
-    _: jet_cli_flash_regular_file(&host, flash_paths.of("image"), "flash image") ?? {
+    _: jet_cli_flash_regular_file(host, flash_paths.of("image"), "flash image") ?? {
         // copy: the message stays with the failed result the handler reads (owner: that temporary
         // result, dropped after the handler) and `error` (owner: this test's local) keeps the text
         // past it.
@@ -980,12 +980,12 @@ flash_test_host_for_machine: fn(machine: TargetMachine) -> FlashTestHost Never! 
     // copy: `file` stays with `file`, which is read again later on this line, and the new value
     // owns its own.
     host.files["image"] = file.copy()
-    assert_eq(flash_paths.show(jet_cli_flash_regular_file(&host, flash_paths.of("image"), "flash image") ?? panic("regular")), "/image")
+    assert_eq(flash_paths.show(jet_cli_flash_regular_file(host, flash_paths.of("image"), "flash image") ?? panic("regular")), "/image")
 }
 #Test("audit sidecar candidates explicit selection Unicode sanitization and duplicate names") {
     host := FlashTestHost{files: [String:FlashTestFile]{}, path: None}
     error := ""
-    _: jet_cli_flash_resolve_audit(&host, flash_paths.of("/out/image.elf"), "board", flash_test_no_path()) ?? {
+    _: jet_cli_flash_resolve_audit(host, flash_paths.of("/out/image.elf"), "board", flash_test_no_path()) ?? {
         // copy: the message stays with the failed result the handler reads (owner: that temporary
         // result, dropped after the handler) and `error` (owner: this test's local) keeps the text
         // past it.
@@ -994,10 +994,10 @@ flash_test_host_for_machine: fn(machine: TargetMachine) -> FlashTestHost Never! 
     }
     assert_eq(error, "no target audit sidecar found beside `/out/image.elf`; pass `--audit <target.json>`")
     host.files["/out/image.target.json"] = flash_test_file("/out/image.target.json")
-    assert_eq(flash_paths.show(jet_cli_flash_resolve_audit(&host, flash_paths.of("/out/image.elf"), "board", flash_test_no_path()) ?? panic("audit")), "/out/image.target.json")
-    assert_eq(flash_paths.show(jet_cli_flash_resolve_audit(&host, flash_paths.of("/out/image.elf"), "image", flash_test_no_path()) ?? panic("same candidate")), "/out/image.target.json")
+    assert_eq(flash_paths.show(jet_cli_flash_resolve_audit(host, flash_paths.of("/out/image.elf"), "board", flash_test_no_path()) ?? panic("audit")), "/out/image.target.json")
+    assert_eq(flash_paths.show(jet_cli_flash_resolve_audit(host, flash_paths.of("/out/image.elf"), "image", flash_test_no_path()) ?? panic("same candidate")), "/out/image.target.json")
     host.files["/out/board.target.json"] = flash_test_file("/out/board.target.json")
-    _: jet_cli_flash_resolve_audit(&host, flash_paths.of("/out/image.elf"), "board", flash_test_no_path()) ?? {
+    _: jet_cli_flash_resolve_audit(host, flash_paths.of("/out/image.elf"), "board", flash_test_no_path()) ?? {
         // copy: the message stays with the failed result the handler reads (owner: that temporary
         // result, dropped after the handler) and `error` (owner: this test's local) keeps the text
         // past it.
@@ -1005,11 +1005,11 @@ flash_test_host_for_machine: fn(machine: TargetMachine) -> FlashTestHost Never! 
         flash_paths.of("")
     }
     assert_eq(error, "multiple target audit sidecars found beside `/out/image.elf`; pass one with `--audit`")
-    assert_eq(flash_paths.show(jet_cli_flash_resolve_audit(&host, flash_paths.of("/out/image.elf"), "board", Val(flash_paths.of("/out/board.target.json"))) ?? panic("explicit")), "/out/board.target.json")
+    assert_eq(flash_paths.show(jet_cli_flash_resolve_audit(host, flash_paths.of("/out/image.elf"), "board", Val(flash_paths.of("/out/board.target.json"))) ?? panic("explicit")), "/out/board.target.json")
     file := flash_test_file("/out/board.target.json")
     file.metadata.symlink = true
     host.files["/out/board.target.json"] = file
-    _: jet_cli_flash_resolve_audit(&host, flash_paths.of("/out/image.elf"), "board", flash_test_no_path()) ?? {
+    _: jet_cli_flash_resolve_audit(host, flash_paths.of("/out/image.elf"), "board", flash_test_no_path()) ?? {
         // copy: the message stays with the failed result the handler reads (owner: that temporary
         // result, dropped after the handler) and `error` (owner: this test's local) keeps the text
         // past it.
@@ -1018,7 +1018,7 @@ flash_test_host_for_machine: fn(machine: TargetMachine) -> FlashTestHost Never! 
     }
     assert_eq(error, "target audit `/out/board.target.json` is not a regular file")
     host.files = [String:FlashTestFile]{"/out/a__.target.json": flash_test_file("/out/a__.target.json")}
-    assert_eq(flash_paths.show(jet_cli_flash_resolve_audit(&host, flash_paths.of("/out/image.elf"), "a.é", flash_test_no_path()) ?? panic("sanitize")), "/out/a__.target.json")
+    assert_eq(flash_paths.show(jet_cli_flash_resolve_audit(host, flash_paths.of("/out/image.elf"), "a.é", flash_test_no_path()) ?? panic("sanitize")), "/out/a__.target.json")
 }
 // #4316 END
 

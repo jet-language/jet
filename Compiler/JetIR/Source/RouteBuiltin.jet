@@ -645,6 +645,6 @@ ir_builtin_byte_buffer_method_route: fn(method: String) -> IRBuiltinRoute Never!
     if arity == 0 -> panic("checked ByteBufferMethod has no canonical route")
     // Every operand is borrowed: an index or count is read from its exact Int.
     mask := [Bool]{}
-    loop _ in 0..<arity -> &mask.push(true)
+    loop _ in 0..<arity -> mask.push(true)
     ir_builtin_plain_route("byte_buffer_{method}", "JetByteBuffer::{method}", arity, mask, Val(Effect.Mem))
 }

@@ -20,17 +20,17 @@ impl CountingPrompt.EffectPrompt {
 }
 #Test("unavailable_handle_backend_denies_before_prompt_or_operation") {
     root := repl_turn_test_files.temp_dir()
-    repl_turn_test_paths.push(&root, repl_turn_test_paths.from_text("jet_repl_unavailable_backend_{repl_turn_test_process.id()}", root.platform))
+    repl_turn_test_paths.push(root, repl_turn_test_paths.from_text("jet_repl_unavailable_backend_{repl_turn_test_process.id()}", root.platform))
     repl_turn_test_files.create_dir_all(root) ?? panic("create root")
     target := root.copy()
-    repl_turn_test_paths.push(&target, repl_turn_test_paths.from_text("must-not-exist.txt", root.platform))
+    repl_turn_test_paths.push(target, repl_turn_test_paths.from_text("must-not-exist.txt", root.platform))
     policy := ReplPolicy.new(ReplFlags.default(), root)
     policy.handles_available = false
     prompt := CountingPrompt{count: 0}
     request: ReplEffectRequest{root: "FS", operation: "Write", resource: "must-not-exist.txt"}
     _: (() -> {
-        authorization := &policy.authorizer(Val(&prompt))
-        result: &authorization.preflight(request, Span.new(0, 1))
+        authorization := policy.authorizer(Val(prompt))
+        result: authorization.preflight(request, Span.new(0, 1))
         error: if result == {
             .Err(error) -> error
             .Ok(_) -> { panic("unavailable confinement backend must fail closed") }
@@ -54,7 +54,7 @@ impl CountingPrompt.EffectPrompt {
     authority.allow = Val([String]{external_spelling})
     manifest := repl_turn_test_package.PackageFacts.default()
     manifest.effects_enabled = true
-    manifest.authority = ^authority
+    manifest.authority = authority.move()
     entries: [repl_turn_test_budget.PackageEffects]{repl_turn_test_budget.PackageEffects{
         name: "dependency", effects: Holds.from([String]{expected}), effect_sites: {}, panic_sites: [], boundary_span: None,
     }}
@@ -66,20 +66,20 @@ impl CountingPrompt.EffectPrompt {
     assert(flags.allow.contains(expected))
     policy := ReplPolicy.new(flags, native_path("."))
     request: ReplEffectRequest{root: expected, operation: "Read", resource: "authority-substrate"}
-    authorization := &policy.authorizer(.None)
-    &authorization.preflight(request, Span.new(0, 1)) ?? panic("repl preflight")
-    &authorization.authorize(request, Span.new(0, 1)) ?? panic("repl authority")
+    authorization := policy.authorizer(.None)
+    authorization.preflight(request, Span.new(0, 1)) ?? panic("repl preflight")
+    authorization.authorize(request, Span.new(0, 1)) ?? panic("repl authority")
 }
 #Test("repl_temp_writer_rejects_existing_symlink") {
     if repl_turn_test_target.selected_family() == .Unix {
         root := repl_turn_test_files.temp_dir()
-        repl_turn_test_paths.push(&root, repl_turn_test_paths.from_text("jet-repl-temp-symlink-{repl_turn_test_process.id()}", root.platform))
+        repl_turn_test_paths.push(root, repl_turn_test_paths.from_text("jet-repl-temp-symlink-{repl_turn_test_process.id()}", root.platform))
         _: repl_turn_test_files.remove_dir_all(root)
         repl_turn_test_files.create_dir_all(root) ?? panic("create root")
         target := root.copy()
-        repl_turn_test_paths.push(&target, repl_turn_test_paths.from_text("outside.txt", root.platform))
+        repl_turn_test_paths.push(target, repl_turn_test_paths.from_text("outside.txt", root.platform))
         link := root.copy()
-        repl_turn_test_paths.push(&link, repl_turn_test_paths.from_text("session.jet", root.platform))
+        repl_turn_test_paths.push(link, repl_turn_test_paths.from_text("session.jet", root.platform))
         repl_turn_test_files.write(target, "must survive\n".bytes()) ?? panic("write target")
         symlink(target, link) ?? panic("symlink")
         assert(write_temp_file_at(link, "attacker\n").is_err())
@@ -101,7 +101,7 @@ impl CountingPrompt.EffectPrompt {
     os: repl_turn_test_target.selected_os()
     if repl_turn_test_target.selected_family() == .Unix && os != .Linux && os != .Android && os != .MacOS && os != .IOS {
         path := repl_turn_test_files.temp_dir()
-        repl_turn_test_paths.push(&path, repl_turn_test_paths.from_text("jet-repl-unsupported-{repl_turn_test_process.id()}.jet", path.platform))
+        repl_turn_test_paths.push(path, repl_turn_test_paths.from_text("jet-repl-unsupported-{repl_turn_test_process.id()}.jet", path.platform))
         result: write_temp_file_at(path, "must not be written\n")
         error: if result == {
             .Err(error) -> error
@@ -132,7 +132,7 @@ impl CountingPrompt.EffectPrompt {
         else -> { panic("expected statement input") }
     }
     names := Set<String>.new()
-    _: &names.insert("s")
+    _: names.insert("s")
     scope := [String:CtValue]{}
     scope["s"] = CtValue.Str("hello")
     moved: collect_moved_names(stmts, names, scope)

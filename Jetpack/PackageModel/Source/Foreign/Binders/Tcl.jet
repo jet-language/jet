@@ -40,7 +40,7 @@ pkg_tcl_bind: fn(source: String, lib: String, cache: String) -[FS, Env, Exec, Ti
     provenance := "schema=jet-tcl-bind-v1\nsha256={digest}\n"
     identity: ForeignBoundaryIdentity.new("source:sha256-{pkg_sha256_hex(source.bytes())}", "none", descriptor.stamp(), "archive:{archive}:sha256-{archive_digest}", "tclsh={root};cc;ar", target)
     coverage: ForeignArtifactCoverage.new("{archive}:sha256-{archive_digest}", target, descriptor.stamp())
-    pkg_bridge_append_boundary_provenance(&provenance, descriptor, lib, identity, coverage)
+    pkg_bridge_append_boundary_provenance(provenance, descriptor, lib, identity, coverage)
     Ok(TclBindResult{source: pkg_tcl_render_jet(lib), archive: archive, lib_dir: lib_dir, provenance: provenance})
 }
 
@@ -98,10 +98,10 @@ eval_float: fn(session: Session, code: String) -[FFI.Tcl]> Float TclError! {
 }
 
 impl Session.Close {
-    close: fn(^self) { abi.close(self.value) }
+    close: fn(&&self) { abi.close(self.value) }
 }
 
-close: fn(session: ^Session) -[FFI.Tcl]> { abi.close(session.value) }
+close: fn(session: &&Session) -[FFI.Tcl]> { abi.close(session.value) }
 ``` }
 
 // The thread-affine interpreter bridge. Holes: `abi` and the c-escaped `seed`.

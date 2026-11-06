@@ -18,19 +18,19 @@ store_lifecycle_render_entry: fn(entry: LifecycleJournalEntry) -> String Never! 
             label: store_lifecycle_hex_option(metadata.label)
             reference: store_lifecycle_hex_option(metadata.reference)
             expires: store_lifecycle_timestamp_option(metadata.expires_at)
-            &out.push("prepare\t{store_lifecycle_identity_fields(identity)}\t{revision}\t{at.get()}\t{label}\t{reference}\t{expires}\n")
-            loop target in proposed -> &out.push("target\t{target}\n")
-            loop target in protected -> &out.push("protect\t{target}\n")
+            out.push("prepare\t{store_lifecycle_identity_fields(identity)}\t{revision}\t{at.get()}\t{label}\t{reference}\t{expires}\n")
+            loop target in proposed -> out.push("target\t{target}\n")
+            loop target in protected -> out.push("protect\t{target}\n")
         }
         .Commit(id, incarnation, witness, at) -> {
-            &out.push("commit\t{store_lifecycle_hex(id.as_str())}\t{incarnation.get()}\t{store_lifecycle_hex(witness.as_str())}\t{at.get()}\n")
+            out.push("commit\t{store_lifecycle_hex(id.as_str())}\t{incarnation.get()}\t{store_lifecycle_hex(witness.as_str())}\t{at.get()}\n")
         }
         .Tombstone(id, incarnation, witness, at) -> {
-            &out.push("tombstone\t{store_lifecycle_hex(id.as_str())}\t{incarnation.get()}\t{store_lifecycle_hex(witness.as_str())}\t{at.get()}\n")
+            out.push("tombstone\t{store_lifecycle_hex(id.as_str())}\t{incarnation.get()}\t{store_lifecycle_hex(witness.as_str())}\t{at.get()}\n")
         }
         .Legacy(identity, targets, at) -> {
-            &out.push("legacy\t{store_lifecycle_identity_fields(identity)}\t{at.get()}\n")
-            loop target in targets -> &out.push("target\t{target}\n")
+            out.push("legacy\t{store_lifecycle_identity_fields(identity)}\t{at.get()}\n")
+            loop target in targets -> out.push("target\t{target}\n")
         }
     }
     out.join("")
@@ -63,12 +63,12 @@ store_lifecycle_parse_entry: fn(raw: String) -> LifecycleJournalEntry StoreError
             "target" -> {
                 if targets.len() >= STORE_LIFECYCLE_MAX_TARGETS_PER_ROOT -> return Err(StoreError.InvalidData("lifecycle transaction exceeds target-count bound"))
                 if targets.contains(parts[1]) -> return Err(StoreError.InvalidData("duplicate lifecycle target `{parts[1]}`"))
-                &targets.push(parts[1])
+                targets.push(parts[1])
             }
             "protect" -> {
                 if protected.len() >= STORE_LIFECYCLE_MAX_TARGETS_PER_ROOT * 2 -> return Err(StoreError.InvalidData("lifecycle transaction exceeds protected-target bound"))
                 if protected.contains(parts[1]) -> return Err(StoreError.InvalidData("duplicate protected target `{parts[1]}`"))
-                &protected.push(parts[1])
+                protected.push(parts[1])
             }
             else -> return Err(StoreError.InvalidData("invalid lifecycle journal line `{line}`"))
         }
@@ -138,9 +138,9 @@ store_lifecycle_render_snapshot_text: fn(through: String, roots: [String: Lifecy
         label: store_lifecycle_hex_option(root.metadata.label)
         reference: store_lifecycle_hex_option(root.metadata.reference)
         expires: store_lifecycle_timestamp_option(root.metadata.expires_at)
-        &out.push("root\t{store_lifecycle_identity_fields(root.identity)}\t{root.phase.wire()}\t{root.prepared_at.get()}\t{committed}\t{tombstoned}\t{legacy}\t{root.revision}\t{label}\t{reference}\t{expires}\n")
-        loop target in root.targets -> &out.push("target\t{target}\n")
-        loop target in root.protected_targets -> &out.push("protect\t{target}\n")
+        out.push("root\t{store_lifecycle_identity_fields(root.identity)}\t{root.phase.wire()}\t{root.prepared_at.get()}\t{committed}\t{tombstoned}\t{legacy}\t{root.revision}\t{label}\t{reference}\t{expires}\n")
+        loop target in root.targets -> out.push("target\t{target}\n")
+        loop target in root.protected_targets -> out.push("protect\t{target}\n")
     }
     out.join("")
 }
@@ -196,9 +196,9 @@ store_lifecycle_parse_snapshot: fn(raw: String) -> LifecycleSnapshotRecord Store
                 if set.len() >= STORE_LIFECYCLE_MAX_TARGETS_PER_ROOT * 2 -> return Err(StoreError.InvalidData("lifecycle snapshot root exceeds target bound"))
                 if set.contains(fields[1]) -> return Err(StoreError.InvalidData("duplicate lifecycle snapshot target `{fields[1]}`"))
                 if record == "target" {
-                    &roots[current].targets.push(fields[1])
+                    roots[current].targets.push(fields[1])
                 } else {
-                    &roots[current].protected_targets.push(fields[1])
+                    roots[current].protected_targets.push(fields[1])
                 }
             }
             else -> return Err(StoreError.InvalidData("invalid lifecycle snapshot line `{line}`"))
@@ -258,9 +258,9 @@ store_lifecycle_canonical_state: fn(roots: [String: LifecycleRoot]) -> String Ne
         legacy: if root.legacy -> 1 else -> 0
         label: store_lifecycle_hex_option(root.metadata.label)
         reference: store_lifecycle_hex_option(root.metadata.reference)
-        &out.push("root\t{store_lifecycle_identity_fields(root.identity)}\t{root.phase.wire()}\t{root.prepared_at.get()}\t{committed}\t{tombstoned}\t{legacy}\t{root.revision}\t{label}\t{reference}\t{expires}\n")
-        loop target in root.targets -> &out.push("target\t{target}\n")
-        loop target in root.protected_targets -> &out.push("protect\t{target}\n")
+        out.push("root\t{store_lifecycle_identity_fields(root.identity)}\t{root.phase.wire()}\t{root.prepared_at.get()}\t{committed}\t{tombstoned}\t{legacy}\t{root.revision}\t{label}\t{reference}\t{expires}\n")
+        loop target in root.targets -> out.push("target\t{target}\n")
+        loop target in root.protected_targets -> out.push("protect\t{target}\n")
     }
     out.join("")
 }
@@ -341,8 +341,8 @@ store_lifecycle_hex: fn(value: String) -> String Never! {
     raw: value.bytes()
     loop byte in raw {
         code: Int.from_u8(byte)
-        &out.push(digits[code >> 4])
-        &out.push(digits[(code).bit_and(15)])
+        out.push(digits[code >> 4])
+        out.push(digits[(code).bit_and(15)])
     }
     pkg_bytes_text(out, 0, out.len())
 }
@@ -355,7 +355,7 @@ store_lifecycle_unhex: fn(value: String) -> String StoreError! {
     loop index < raw.len() {
         high: store_lifecycle_nibble(Int.from_u8(raw[index]))
         low: store_lifecycle_nibble(Int.from_u8(raw[index + 1]))
-        &bytes.push(U8{high * 16 + low})
+        bytes.push(U8{high * 16 + low})
         index += 2
     }
     text: String.from_bytes(bytes) ?? return Err(StoreError.InvalidData("lifecycle field is not UTF-8"))
@@ -380,10 +380,10 @@ store_lifecycle_lines: fn(text: String) -> [String] Never! {
         segment: segments[index]
         raw: segment.bytes()
         if index < segments.len() - 1 && raw.len() > 0 && Int.from_u8(raw[raw.len() - 1]) == 13 {
-            &lines.push(pkg_bytes_text(raw, 0, raw.len() - 1))
+            lines.push(pkg_bytes_text(raw, 0, raw.len() - 1))
             next
         }
-        &lines.push(segment)
+        lines.push(segment)
     }
     lines
 }

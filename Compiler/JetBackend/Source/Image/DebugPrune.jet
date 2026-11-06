@@ -35,11 +35,11 @@ link_debug_bytes: fn(c: &LinkContext, debug: LinkDebug, pieces: &LinkPieces, tex
     loop group in 0..<debug.names.len() {
         bytes := [U8]{}
         loop row in debug.rows[group] {
-            link_pad_to(&bytes, c.live_addr[row], 0)
-            link_place_row(&c, &bytes, &pieces, row)
+            link_pad_to(bytes, c.live_addr[row], 0)
+            link_place_row(c, bytes, pieces, row)
         }
-        link_pad_to(&bytes, debug.sizes[group], 0)
-        &groups.push(^bytes)
+        link_pad_to(bytes, debug.sizes[group], 0)
+        groups.push(bytes)
     }
     info := -1
     abbrev := -1
@@ -50,21 +50,21 @@ link_debug_bytes: fn(c: &LinkContext, debug: LinkDebug, pieces: &LinkPieces, tex
         if name == ".debug_abbrev" -> abbrev = group
         if name == ".debug_line" -> line = group
         if name == ".debug_loclists" -> lists = group
-        if name == ".debug_jetline" && !link_jetline_link(&groups[group], text_start, text_end) {
-            &c.errors.push("malformed .debug_jetline: a block's records, strings or rows run past it")
+        if name == ".debug_jetline" && !link_jetline_link(groups[group], text_start, text_end) {
+            c.errors.push("malformed .debug_jetline: a block's records, strings or rows run past it")
         }
     }
     if info < 0 || abbrev < 0 -> return groups
     plan: link_info_plan(groups[info], groups[abbrev], text_start, text_end) ?? return groups
     line_offsets := [Int:Int]{}
-    if line >= 0 -> link_line_prune(&groups[line], text_start, text_end, &line_offsets)
+    if line >= 0 -> link_line_prune(groups[line], text_start, text_end, line_offsets)
     list_offsets := [Int:Int]{}
     if lists >= 0 {
         referred := [Int]{}
-        loop at in plan.lists -> &referred.push(link_debug_le(groups[info], at, 4))
-        link_lists_prune(&groups[lists], referred, &list_offsets)
+        loop at in plan.lists -> referred.push(link_debug_le(groups[info], at, 4))
+        link_lists_prune(groups[lists], referred, list_offsets)
     }
-    link_info_rewrite(&groups[info], plan, line_offsets, list_offsets)
+    link_info_rewrite(groups[info], plan, line_offsets, list_offsets)
     groups
 }
 
@@ -105,7 +105,7 @@ link_debug_uleb: fn(bytes: [U8], at: &Int) -> Int Never! {
 // The offset after the leb at `at`; past the end when it runs out.
 link_debug_leb_end: fn(bytes: [U8], at: Int) -> Int Never! {
     end := at
-    _ := link_debug_uleb(bytes, &end)
+    _ := link_debug_uleb(bytes, end)
     end
 }
 
@@ -140,7 +140,7 @@ link_debug_form_end: fn(bytes: [U8], at: Int, form: Int) -> Int Never! {
     // DW_FORM_exprloc.
     if form == 0x18 {
         end := at
-        length: link_debug_uleb(bytes, &end)
+        length: link_debug_uleb(bytes, end)
         return if length < 0 -> -1 else -> end + length
     }
     return -1
@@ -167,27 +167,27 @@ link_debug_abbrevs: fn(bytes: [U8], from: Int) -> LinkAbbrevs? Never! {
     table := LinkAbbrevs{entries: [Int:Int]{}, tags: [Int]{}, children: [Bool]{}, starts: [Int]{}, attributes: [Int]{}, forms: [Int]{}}
     at := from
     loop {
-        code: link_debug_uleb(bytes, &at)
+        code: link_debug_uleb(bytes, at)
         if code < 0 -> return None
         if code == 0 {
-            &table.starts.push(table.attributes.len())
+            table.starts.push(table.attributes.len())
             return Val(table)
         }
-        die: link_debug_uleb(bytes, &at)
+        die: link_debug_uleb(bytes, at)
         if die < 0 || at >= bytes.len() -> return None
         if table.entries.get(code) != .None -> return None
-        &table.entries.add(code, table.tags.len()).drop("checked absent above")
-        &table.tags.push(die)
-        &table.children.push(Int.from_u8(bytes[at]) != 0)
+        table.entries.add(code, table.tags.len()).drop("checked absent above")
+        table.tags.push(die)
+        table.children.push(Int.from_u8(bytes[at]) != 0)
         at += 1
-        &table.starts.push(table.attributes.len())
+        table.starts.push(table.attributes.len())
         loop {
-            attribute: link_debug_uleb(bytes, &at)
-            form: link_debug_uleb(bytes, &at)
+            attribute: link_debug_uleb(bytes, at)
+            form: link_debug_uleb(bytes, at)
             if attribute < 0 || form < 0 || form == 0x21 -> return None
             if attribute == 0 && form == 0 -> break
-            &table.attributes.push(attribute)
-            &table.forms.push(form)
+            table.attributes.push(attribute)
+            table.forms.push(form)
         }
     }
 }
@@ -215,11 +215,11 @@ link_info_attributes: fn(info: [U8], table: LinkAbbrevs, entry: Int, from: Int, 
         attribute: table.attributes[pair]
         form: table.forms[pair]
         if record && form == 0x13 {
-            &plan.refs.push(at)
-            &plan.ref_units.push(unit)
+            plan.refs.push(at)
+            plan.ref_units.push(unit)
         }
-        if record && form == 0x17 && attribute == 0x10 -> &plan.lines.push(at)
-        if record && form == 0x17 && attribute == 0x02 -> &plan.lists.push(at)
+        if record && form == 0x17 && attribute == 0x10 -> plan.lines.push(at)
+        if record && form == 0x17 && attribute == 0x02 -> plan.lists.push(at)
         if attribute == 0x11 && form == 0x01 -> low_pc = link_debug_addr(info, at)
         at = link_debug_form_end(info, at, form)
         if at < 0 || at > info.len() -> return -1
@@ -246,7 +246,7 @@ link_info_dropped_before: fn(drops: [Int], sums: [Int], at: Int) -> Int Never! {
 
 link_info_sums: fn(drops: [Int]) -> [Int] Never! {
     sums := [Int]{0}
-    loop k in 0..<(drops.len() >> 1) -> &sums.push(sums[k] + drops[2 * k + 1] - drops[2 * k])
+    loop k in 0..<(drops.len() >> 1) -> sums.push(sums[k] + drops[2 * k + 1] - drops[2 * k])
     sums
 }
 
@@ -264,21 +264,21 @@ link_info_plan: fn(info: [U8], abbrev: [U8], text_start: Int, text_end: Int) -> 
         end: unit + 4 + length
         if link_debug_le(info, unit + 4, 2) != 5 || Int.from_u8(info[unit + 6]) != 1 || Int.from_u8(info[unit + 7]) != 8 -> return None
         table: link_debug_abbrevs(abbrev, link_debug_le(info, unit + 8, 4)) ?? return None
-        &plan.units.push(unit)
+        plan.units.push(unit)
         pos := unit + 12
         // The level of the next DIE: the unit's children are at 1.
         depth := 0
         drop_start := -1
         loop pos < end {
             die: pos
-            code: link_debug_uleb(info, &pos)
+            code: link_debug_uleb(info, pos)
             if code < 0 -> return None
             if code == 0 {
                 depth -= 1
                 if depth < 0 -> return None
                 if drop_start >= 0 && depth == 1 {
-                    &plan.drops.push(drop_start)
-                    &plan.drops.push(pos)
+                    plan.drops.push(drop_start)
+                    plan.drops.push(pos)
                     drop_start = -1
                 }
                 next
@@ -287,18 +287,18 @@ link_info_plan: fn(info: [U8], abbrev: [U8], text_start: Int, text_end: Int) -> 
             candidate: drop_start < 0 && depth == 1 && table.tags[entry] == 0x2e
             low_pc := -1
             body: pos
-            pos = link_info_attributes(info, table, entry, body, unit, &plan, drop_start < 0 && !candidate, &low_pc)
+            pos = link_info_attributes(info, table, entry, body, unit, plan, drop_start < 0 && !candidate, low_pc)
             if pos < 0 || pos > end -> return None
             if candidate {
                 if low_pc >= 0 && (low_pc < text_start || low_pc >= text_end) {
                     if table.children[entry] {
                         drop_start = die
                     } else {
-                        &plan.drops.push(die)
-                        &plan.drops.push(pos)
+                        plan.drops.push(die)
+                        plan.drops.push(pos)
                     }
                 } else {
-                    _ := link_info_attributes(info, table, entry, body, unit, &plan, true, &low_pc)
+                    _ := link_info_attributes(info, table, entry, body, unit, plan, true, low_pc)
                 }
             }
             if table.children[entry] -> depth += 1
@@ -323,29 +323,29 @@ link_info_rewrite: fn(info: &[U8], plan: LinkInfoPlan, lines: [Int:Int], lists: 
         unit: plan.ref_units[k]
         target: link_debug_le(info, at, 4)
         moved: link_info_dropped_before(plan.drops, sums, unit + target) - link_info_dropped_before(plan.drops, sums, unit)
-        dwarf_patch_u32(&info, at, target - moved)
+        dwarf_patch_u32(info, at, target - moved)
     }
     loop at in plan.lines {
         offset: link_debug_le(info, at, 4)
-        dwarf_patch_u32(&info, at, lines.get(offset) ?? offset)
+        dwarf_patch_u32(info, at, lines.get(offset) ?? offset)
     }
     loop at in plan.lists {
         offset: link_debug_le(info, at, 4)
-        dwarf_patch_u32(&info, at, lists.get(offset) ?? offset)
+        dwarf_patch_u32(info, at, lists.get(offset) ?? offset)
     }
     if plan.drops.len() == 0 -> return
     loop unit in plan.units {
         end: unit + 4 + link_debug_le(info, unit, 4)
         dropped: link_info_dropped_before(plan.drops, sums, end) - link_info_dropped_before(plan.drops, sums, unit)
-        dwarf_patch_u32(&info, unit, end - unit - 4 - dropped)
+        dwarf_patch_u32(info, unit, end - unit - 4 - dropped)
     }
     kept := [U8]{}
     from := 0
     loop k in 0..<(plan.drops.len() >> 1) {
-        &kept.extend(info[from..<plan.drops[2 * k]])
+        kept.extend(info[from..<plan.drops[2 * k]])
         from = plan.drops[2 * k + 1]
     }
-    &kept.extend(info[from..<info.len()])
+    kept.extend(info[from..<info.len()])
     info = kept
 }
 
@@ -368,9 +368,9 @@ link_line_prune: fn(line: &[U8], text_start: Int, text_end: Int, moved: &[Int:In
         program: unit + 12 + link_debug_le(line, unit + 8, 4)
         opcode_base: Int.from_u8(line[unit + 17])
         if opcode_base < 1 || unit + 18 + opcode_base - 1 > program || program > end -> return
-        &olds.push(unit)
-        &news.push(kept.len())
-        &kept.extend(line[unit..<program])
+        olds.push(unit)
+        news.push(kept.len())
+        kept.extend(line[unit..<program])
         pos := program
         loop pos < end {
             sequence: pos
@@ -382,7 +382,7 @@ link_line_prune: fn(line: &[U8], text_start: Int, text_end: Int, moved: &[Int:In
                 op: Int.from_u8(line[pos])
                 pos += 1
                 if op == 0 {
-                    size: link_debug_uleb(line, &pos)
+                    size: link_debug_uleb(line, pos)
                     if size < 1 || pos + size > end -> return
                     sub: Int.from_u8(line[pos])
                     // DW_LNE_set_address: the sequence's first decides.
@@ -400,13 +400,13 @@ link_line_prune: fn(line: &[U8], text_start: Int, text_end: Int, moved: &[Int:In
                 }
             }
             if pos > end -> return
-            if !addressed || (address >= text_start && address < text_end) -> &kept.extend(line[sequence..<pos])
+            if !addressed || (address >= text_start && address < text_end) -> kept.extend(line[sequence..<pos])
         }
-        dwarf_patch_u32(&kept, news[news.len() - 1], kept.len() - news[news.len() - 1] - 4)
+        dwarf_patch_u32(kept, news[news.len() - 1], kept.len() - news[news.len() - 1] - 4)
         at = end
     }
     loop (k, old) in olds {
-        if old != news[k] -> &moved.add(old, news[k]).drop("unit offsets are unique")
+        if old != news[k] -> moved.add(old, news[k]).drop("unit offsets are unique")
     }
     line = kept
 }
@@ -442,7 +442,7 @@ link_list_end: fn(lists: [U8], from: Int, end: Int) -> Int Never! {
             return -1
         }
         if at >= end -> return -1
-        length: link_debug_uleb(lists, &at)
+        length: link_debug_uleb(lists, at)
         if length < 0 -> return -1
         at += length
     }
@@ -468,22 +468,22 @@ link_lists_prune: fn(lists: &[U8], referred: [Int], moved: &[Int:Int]) Never! {
         if length < 8 || length >= 0xfffffff0 || unit + 4 + length > lists.len() || link_debug_le(lists, unit + 4, 2) != 5 || link_debug_le(lists, unit + 8, 4) != 0 -> return
         end: unit + 4 + length
         new_unit: kept.len()
-        &kept.extend(lists[unit..<unit + 12])
+        kept.extend(lists[unit..<unit + 12])
         loop next_list < referred.len() && referred[next_list] < end {
             from: referred[next_list]
             if from < unit + 12 -> return
             to: link_list_end(lists, from, end)
             if to < 0 -> return
-            &olds.push(from)
-            &news.push(kept.len())
-            &kept.extend(lists[from..<to])
+            olds.push(from)
+            news.push(kept.len())
+            kept.extend(lists[from..<to])
             next_list += 1
         }
-        dwarf_patch_u32(&kept, new_unit, kept.len() - new_unit - 4)
+        dwarf_patch_u32(kept, new_unit, kept.len() - new_unit - 4)
         at = end
     }
     if next_list != referred.len() -> return
-    loop (k, old) in olds -> &moved.add(old, news[k]).drop("list offsets are unique")
+    loop (k, old) in olds -> moved.add(old, news[k]).drop("list offsets are unique")
     lists = kept
 }
 
@@ -503,7 +503,7 @@ link_jetline_link: fn(table: &[U8], text_start: Int, text_end: Int) -> Bool Neve
         strings: at + link_debug_le(table, at + 8, 4)
         rows: at + link_debug_le(table, at + 12, 4)
         if length < 12 || end > table.len() || at + 16 + 32 * count > strings || strings > rows || rows > end -> return false
-        if !link_jetline_block(&linked, table, at + 16, count, strings, rows, end, text_start, text_end) -> return false
+        if !link_jetline_block(linked, table, at + 16, count, strings, rows, end, text_start, text_end) -> return false
         at = end
     }
     table = linked
@@ -519,8 +519,8 @@ link_jetline_block: fn(linked: &[U8], table: [U8], records: Int, count: Int, str
         record: records + 32 * k
         start: link_debug_addr(table, record)
         if start >= text_start && start < text_end {
-            &live.push(record)
-            &starts.push(start)
+            live.push(record)
+            starts.push(start)
         }
     }
     if live.len() == 0 -> return true
@@ -528,7 +528,7 @@ link_jetline_block: fn(linked: &[U8], table: [U8], records: Int, count: Int, str
     texts := [U8]{}
     // The string offsets, old to new: each string is kept once.
     moved := [Int:Int]{}
-    if !link_jetline_string(&texts, &moved, table, strings, rows) -> return false
+    if !link_jetline_string(texts, moved, table, strings, rows) -> return false
     body := [U8]{}
     base: link_debug_addr(table, order[0])
     previous := base
@@ -537,30 +537,30 @@ link_jetline_block: fn(linked: &[U8], table: [U8], records: Int, count: Int, str
         size: link_debug_le(table, record + 8, 4)
         name: strings + link_debug_le(table, record + 12, 4)
         file: strings + link_debug_le(table, record + 16, 4)
-        if !link_jetline_string(&texts, &moved, table, name, rows) || !link_jetline_string(&texts, &moved, table, file, rows) -> return false
+        if !link_jetline_string(texts, moved, table, name, rows) || !link_jetline_string(texts, moved, table, file, rows) -> return false
         from: rows + link_debug_le(table, record + 24, 4)
         to := from
         loop _ in 0..<link_debug_le(table, record + 28, 4) -> to = link_debug_leb_end(table, link_debug_leb_end(table, to))
         if from > end || to > end -> return false
         // Sorted by start, a start is never below the previous start; it is
         // below the previous end only where two records overlap.
-        dwarf_sleb(&body, start - previous)
-        dwarf_uleb(&body, size)
-        dwarf_uleb(&body, moved.get(name) ?? 0)
-        dwarf_uleb(&body, moved.get(file) ?? 0)
-        dwarf_uleb(&body, link_debug_le(table, record + 20, 4))
-        dwarf_uleb(&body, to - from)
-        &body.extend(table[from..<to])
+        dwarf_sleb(body, start - previous)
+        dwarf_uleb(body, size)
+        dwarf_uleb(body, moved.get(name) ?? 0)
+        dwarf_uleb(body, moved.get(file) ?? 0)
+        dwarf_uleb(body, link_debug_le(table, record + 20, 4))
+        dwarf_uleb(body, to - from)
+        body.extend(table[from..<to])
         previous = start + size
     }
     block: linked.len()
-    elf64_u32(&linked, 0)
-    elf64_u32(&linked, live.len())
-    elf64_u32(&linked, 20 + body.len())
-    elf64_u64(&linked, base)
-    &linked.extend(body)
-    &linked.extend(texts)
-    dwarf_patch_length(&linked, block)
+    elf64_u32(linked, 0)
+    elf64_u32(linked, live.len())
+    elf64_u32(linked, 20 + body.len())
+    elf64_u64(linked, base)
+    linked.extend(body)
+    linked.extend(texts)
+    dwarf_patch_length(linked, block)
     true
 }
 
@@ -570,7 +570,7 @@ link_jetline_string: fn(texts: &[U8], moved: &[Int:Int], table: [U8], at: Int, l
     if moved.get(at) != .None -> return true
     end: link_debug_cstr_end(table, at)
     if end > limit -> return false
-    &moved.add(at, texts.len()).drop("checked absent above")
-    &texts.extend(table[at..<end])
+    moved.add(at, texts.len()).drop("checked absent above")
+    texts.extend(table[at..<end])
     true
 }

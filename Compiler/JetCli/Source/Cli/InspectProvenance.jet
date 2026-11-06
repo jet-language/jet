@@ -109,19 +109,19 @@ jet_cli_lock_unescape: fn(raw: String) -> String Never! {
         code: Int.from_u8(byte)
         if escaped {
             if code == {
-                110 -> &out.push(U8{10})
-                114 -> &out.push(U8{13})
-                116 -> &out.push(U8{9})
-                else -> &out.push(byte)
+                110 -> out.push(U8{10})
+                114 -> out.push(U8{13})
+                116 -> out.push(U8{9})
+                else -> out.push(byte)
             }
             escaped = false
         } else if code == 92 {
             escaped = true
         } else {
-            &out.push(byte)
+            out.push(byte)
         }
     }
-    if escaped -> &out.push(U8{92})
+    if escaped -> out.push(U8{92})
     String.from_bytes(out) ?? ""
 }
 
@@ -141,10 +141,10 @@ jet_cli_lock_string_array: fn(raw: String) -> [String]? Never! {
         code: Int.from_u8(byte)
         if escaped {
             if code == {
-                110 -> &current.push(U8{10})
-                114 -> &current.push(U8{13})
-                116 -> &current.push(U8{9})
-                else -> &current.push(byte)
+                110 -> current.push(U8{10})
+                114 -> current.push(U8{13})
+                116 -> current.push(U8{9})
+                else -> current.push(byte)
             }
             escaped = false
             item_started = true
@@ -157,18 +157,18 @@ jet_cli_lock_string_array: fn(raw: String) -> [String]? Never! {
         } else if code == 44 && !quoted {
             if !item_started -> return None
             text: String.from_bytes(current) ?? ""
-            &values.push(if item_quoted -> text else -> text.trim())
+            values.push(if item_quoted -> text else -> text.trim())
             current = [U8]{}
             item_started = false
             item_quoted = false
         } else if quoted || !(code == 32 || code == 9 || code == 10 || code == 13 || code == 11 || code == 12) {
-            &current.push(byte)
+            current.push(byte)
             item_started = true
         }
     }
     if quoted || escaped || !item_started -> return None
     text: String.from_bytes(current) ?? ""
-    &values.push(if item_quoted -> text else -> text.trim())
+    values.push(if item_quoted -> text else -> text.trim())
     Val(values)
 }
 
@@ -190,11 +190,11 @@ jet_cli_lock_kv_field: fn(inline: String, key: String) -> String? Never! {
         } else if code == 34 {
             quoted = !quoted
         } else if code == 44 && !quoted {
-            &parts.push(inline.slice(start..<index))
+            parts.push(inline.slice(start..<index))
             start = index + 1
         }
     }
-    &parts.push(inline.slice(start..<bytes.len()))
+    parts.push(inline.slice(start..<bytes.len()))
     loop raw_part in parts {
         part: raw_part.trim()
         if !part.starts_with(key) -> next
@@ -254,7 +254,7 @@ jet_cli_lock_finish: fn(partial: JetCLILockPartial, packages: &[JetCLILockPackag
     if partial.locked_raw == .Val(locked) -> tree_hash = Val(jet_cli_lock_kv_field(jet_cli_lock_inline(locked), "tree-hash") ?? "")
     envelope_provenance := String?{None}
     if partial.envelope -> envelope_provenance = Val(partial.envelope_provenance)
-    &packages.push(JetCLILockPackage{
+    packages.push(JetCLILockPackage{
         name: name,
         version: version,
         root: root,
@@ -278,10 +278,10 @@ jet_cli_lock_finish: fn(partial: JetCLILockPartial, packages: &[JetCLILockPackag
 // `canonicalize_lock` for one list: sorted, duplicates dropped.
 jet_cli_lock_canonical: fn(values: [String]) -> [String] Never! {
     sorted := values
-    &sorted.sort()
+    sorted.sort()
     out := [String]{}
     loop value in sorted {
-        if out.len() == 0 || out[out.len() - 1] != value -> &out.push(value)
+        if out.len() == 0 || out[out.len() - 1] != value -> out.push(value)
     }
     out
 }
@@ -319,7 +319,7 @@ jet_cli_lock_load: fn(root: String) -[FS]> JetCLILockLoad Never! {
         if line == "" || line.starts_with("#") -> next
         if line.starts_with("[") {
             if section == "package" {
-                if jet_cli_lock_finish(partial, &packages) == {
+                if jet_cli_lock_finish(partial, packages) == {
                     .Ok -> {}
                     .Missing -> return JetCLILockLoad.Missing
                     .Unported(shape) -> return JetCLILockLoad.Unported{shape: shape}
@@ -402,7 +402,7 @@ jet_cli_lock_load: fn(root: String) -[FS]> JetCLILockLoad Never! {
         }
     }
     if section == "package" {
-        if jet_cli_lock_finish(partial, &packages) == {
+        if jet_cli_lock_finish(partial, packages) == {
             .Ok -> {}
             .Missing -> return JetCLILockLoad.Missing
             .Unported(shape) -> return JetCLILockLoad.Unported{shape: shape}
@@ -416,7 +416,7 @@ jet_cli_lock_load: fn(root: String) -[FS]> JetCLILockLoad Never! {
         replaced: loop later in index + 1..<packages.len() {
             if packages[later].name == package.name -> break true
         } ?? false
-        if !replaced -> &kept.push(package)
+        if !replaced -> kept.push(package)
     }
     JetCLILockLoad.Loaded{packages: kept}
 }
@@ -479,9 +479,9 @@ jet_cli_provenance_reports: fn(packages: [JetCLILockPackage], target: String?) -
         if target == .Val(name) {
             if package.name != name -> next
         }
-        &reports.push(jet_cli_provenance_report(package))
+        reports.push(jet_cli_provenance_report(package))
     }
-    &reports.sort_by((left: JetCLIProvenanceReport, right: JetCLIProvenanceReport) -> (left.name <=> right.name).then(left.version <=> right.version))
+    reports.sort_by((left: JetCLIProvenanceReport, right: JetCLIProvenanceReport) -> (left.name <=> right.name).then(left.version <=> right.version))
     reports
 }
 
@@ -507,7 +507,7 @@ jet_cli_provenance_text: fn(requirement: String, reports: [JetCLIProvenanceRepor
 
 jet_cli_provenance_field_value: fn(field: JetCLIProvenanceField, evidence: Bool) -> JetCLIStatusValue Never! {
     fields := [JetCLIStatusField]{jet_cli_status_field("value", jet_cli_status_text(field.value)), jet_cli_status_field("status", jet_cli_status_text(field.status))}
-    if evidence -> &fields.push(jet_cli_status_field("evidence", jet_cli_status_text("E1204")))
+    if evidence -> fields.push(jet_cli_status_field("evidence", jet_cli_status_text("E1204")))
     jet_cli_status_object(fields)
 }
 
@@ -543,10 +543,10 @@ jet_cli_inspect_provenance: fn(args: [String], color: Bool, json: Bool, threads:
     }
     notices := [String]{}
     entry := ""
-    found_entry: jet_cli_find_project_entry(root, "inspect provenance", color, &notices)
+    found_entry: jet_cli_find_project_entry(root, "inspect provenance", color, notices)
     if found_entry == {
         .Entry(found) -> entry = found.path
-        .Refused(plan) -> return jet_cli_with_notices(notices, ^plan)
+        .Refused(plan) -> return jet_cli_with_notices(notices, plan)
         .Absent -> return jet_cli_with_notices(notices, jet_cli_not_ported("inspect provenance <project without an entry>", color))
     }
     target := String?{None}

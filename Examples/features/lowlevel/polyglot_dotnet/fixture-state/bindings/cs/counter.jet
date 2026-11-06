@@ -21,10 +21,10 @@ new: fn(arg0: Int) -[FFI.DotNet]> Handle DotNetError! {
     return Ok(Handle{ value: value })
 }
 
-close: fn(^handle: Handle) -[FFI.DotNet]> {}
+close: fn(&&handle: Handle) -[FFI.DotNet]> {}
 
 impl Handle.Close {
-    close: fn(^self) {
+    close: fn(&&self) {
         abi.close(self.value)
         if abi.take_error() != 0 { panic(".NET handle close failed") }
     }

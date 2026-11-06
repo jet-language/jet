@@ -81,7 +81,7 @@ create_order: fn(path: String, cache_version: Cell<Int>, req: HTTPRequest) -> HT
     policy: db.policy("orders", "true") ?? return Ok(server.response(500, "db policy failed"))
     scope: conn.with_policy(policy, "web")
     inserted: scope.execute(SQL{"INSERT INTO orders (item, quantity) VALUES ({order.item}, {order.quantity})"}) ?? 0
-    &cache_version.set(cache_version.get() + 1)
+    cache_version.set(cache_version.get() + 1)
     scope.close()
     return Ok(server.response(201, "created order rows={inserted}"))
 }

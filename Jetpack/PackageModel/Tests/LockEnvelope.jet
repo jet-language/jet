@@ -20,7 +20,7 @@ pkg_lock_test_repeat: fn(text: String, count: Int) -> String Never! {
     bytes := [U8]{}
     unit: text.bytes()
     loop _ in 0..<count {
-        loop byte in unit -> &bytes.push(byte)
+        loop byte in unit -> bytes.push(byte)
     }
     String.from_bytes(bytes) ?? panic("repeated text stays UTF-8")
 }
@@ -141,7 +141,7 @@ pkg_lock_test_project: fn(label: String) -[FS]> TempDir Never! {
     package.source = LockSource.Nix{reference: canonical, output: pkg_lock_test_nix_digest("a")}
     package.nix_closure = Val(pkg_lock_test_nix_closure(pkg_lock_test_nix_digest("a")))
     lock := pkg_lock_test_base_lock([LockedPackage]{package}, [LockedToolchain]{})
-    &lock.source_channels.push(LockedSourceChannel{name: "releases", channel: "latest", exact: canonical})
+    lock.source_channels.push(LockedSourceChannel{name: "releases", channel: "latest", exact: canonical})
     back: pkg_lock_parse(pkg_lock_write(lock)) ?? panic("canonical lock parses")
     if back.packages[0].source == {
         .Nix(reference, _) -> assert_eq(reference, canonical)

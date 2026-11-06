@@ -20,12 +20,12 @@ kit_golden_collect: fn(root: String, directory: String, expected_root: String, p
             if kit_golden_exists(files.join(child.path, "package.jet")) || kit_golden_exists(files.join(child.path, "workspace.jet")) || kit_golden_exists(files.join(child.path, "run.jet")) {
                 if kit_golden_exists(files.join(child.path, "run.jet")) {
                     stem: kit_steps_byte_slice(shown, prefix.count_bytes(), shown.count_bytes())
-                    &entries.push(KitEntry{path: files.join(shown, "run.jet"), expected: files.join(expected_root, stem), project: shown, suite: "golden", mode: ""})
+                    entries.push(KitEntry{path: files.join(shown, "run.jet"), expected: files.join(expected_root, stem), project: shown, suite: "golden", mode: ""})
                 }
                 next
             }
             nested: kit_golden_collect(root, shown, expected_root, prefix)
-            loop entry in nested -> &entries.push(entry)
+            loop entry in nested -> entries.push(entry)
         } else if child.name.ends_with(".jet") && child.name != "package.jet" && child.name != "workspace.jet" {
             // A corpus with an `expected/` folder (Examples/features) keeps
             // support modules in its nested folders, not flat entries; a
@@ -33,7 +33,7 @@ kit_golden_collect: fn(root: String, directory: String, expected_root: String, p
             // (tests/run) may keep flat generated cases in group folders.
             if expected_root != prefix.removesuffix("/") && directory.split("/").len() != prefix.split("/").len() -> next
             stem: kit_steps_byte_slice(shown, prefix.count_bytes(), shown.count_bytes() - 4)
-            &entries.push(KitEntry{path: shown, expected: files.join(expected_root, stem), project: directory, suite: "golden", mode: ""})
+            entries.push(KitEntry{path: shown, expected: files.join(expected_root, stem), project: directory, suite: "golden", mode: ""})
         }
     }
     entries
@@ -47,9 +47,9 @@ kit_golden_discover: fn(root: String, corpora: [String]) -> [KitEntry] {
     loop corpus in corpora {
         separate: files.join(corpus, "expected")
         expected_root: if kit_golden_exists(files.join(root, separate)) -> separate else -> corpus.copy()
-        loop entry in kit_golden_collect(root, corpus, expected_root, "{corpus}/") -> &all.push(entry)
+        loop entry in kit_golden_collect(root, corpus, expected_root, "{corpus}/") -> all.push(entry)
     }
-    &all.sort_by(entry -> entry.path)
+    all.sort_by(entry -> entry.path)
     all
 }
 
@@ -129,7 +129,7 @@ kit_golden_build: fn(entry: KitEntry, tier: KitTier, plan: KitPlan, env: KitEnv,
     path: if step.cwd == "" -> entry.path else -> files.join(source, entry.path)
     args := [String]{env.jet, if tier.direct -> "check" else -> "build", path}
     if !tier.direct {
-        loop flag in tier.flags -> &args.push(flag)
+        loop flag in tier.flags -> args.push(flag)
     }
     case_env: kit_steps_environment(plan, env, work, scratch, "")
     overlay: kit_steps_step_environment(step, env, work, scratch, "", case_env)
@@ -186,8 +186,8 @@ kit_golden_test_outcome: fn(context: KitStepCtx, entry: KitEntry, tier: KitTier,
     code: kit_golden_test_exit(golden) ?? return Val(KitOutcome{verdict: kit_expect_verdict("FAIL", "{files.basename(path)} ends in no test summary, so its exit is unknown"), run: kit_exec_failed("no test summary")})
     project: files.basename(entry.path) == "run.jet" && (kit_golden_exists(files.join(context.work, "package.jet")) || kit_golden_exists(files.join(context.work, "workspace.jet")))
     args := [String]{context.env.jet, "test"}
-    loop flag in tier.test_flags -> &args.push(flag)
-    &args.push(if project -> context.work else -> files.join(source, entry.path))
+    loop flag in tier.test_flags -> args.push(flag)
+    args.push(if project -> context.work else -> files.join(source, entry.path))
     result: kit_exec_invoke_with_env(context.env, args, context.work, context.scratch, "", kit_steps_environment(context.plan, context.env, context.work, context.scratch, ""))
     failure: kit_exec_process_failure(result)
     if failure == {
@@ -215,8 +215,8 @@ kit_golden_run_entry: fn(entry: KitEntry, tier: KitTier, env: KitEnv, scratch: S
     kit_exec_copy_tree(files.join(env.root, entry.project), work, true, false)
     implicit: plan.steps.len() == 0
     if implicit {
-        if plan.compile_only || !tier.direct -> &plan.steps.push(kit_golden_default_step("build"))
-        if !plan.compile_only -> &plan.steps.push(kit_golden_default_step("built"))
+        if plan.compile_only || !tier.direct -> plan.steps.push(kit_golden_default_step("build"))
+        if !plan.compile_only -> plan.steps.push(kit_golden_default_step("built"))
     }
     last_explicit := false
     loop assertion in plan.steps[plan.steps.len() - 1].assertions {
@@ -276,8 +276,8 @@ kit_golden_step_invoke: fn(step: KitStep, index: Int, context: KitStepCtx, previ
     if command == "built" && golden.tier.direct {
         argv := [String]{context.env.jet, "run", files.join(golden.source, golden.entry.path)}
         if step.argv.len() > 1 {
-            &argv.push("--")
-            loop arg in step.argv.slice(1, step.argv.len()) -> &argv.push(arg)
+            argv.push("--")
+            loop arg in step.argv.slice(1, step.argv.len()) -> argv.push(arg)
         }
         actual.argv = argv
     }
@@ -359,7 +359,7 @@ kit_golden_run_suite: fn(entry: KitEntry, context: KitCtx) -> [KitOutcome] {
         }
         scratch: files.join(context.scratch, "{index}")
         files.create_dir_all(scratch) ?? {
-            &results.push(KitOutcome{verdict: kit_expect_verdict("ERROR", "tier scratch: {err}"), run: kit_exec_failed("{err}"), tier: tier_name})
+            results.push(KitOutcome{verdict: kit_expect_verdict("ERROR", "tier scratch: {err}"), run: kit_exec_failed("{err}"), tier: tier_name})
             next
         }
         bless := context.bless
@@ -372,7 +372,7 @@ kit_golden_run_suite: fn(entry: KitEntry, context: KitCtx) -> [KitOutcome] {
                 ()
             }
         }
-        &results.push(kit_cases_known_verdict(outcome, annotation))
+        results.push(kit_cases_known_verdict(outcome, annotation))
     }
     results
 }

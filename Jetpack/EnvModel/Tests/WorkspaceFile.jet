@@ -40,14 +40,14 @@ envmodel_test_eval_error: fn(src: String) -[FS, Env, Exec, Time.Wait]> Diagnosti
 
 // The diagnostic of a present-but-failing `load`.
 envmodel_test_load_error: fn(cache: &WorkspaceDeclarationCache, dir: String) -[FS, Env, Exec, Time.Wait]> Diagnostic {
-    if envmodel_workspace_load(&cache, dir) == {
+    if envmodel_workspace_load(cache, dir) == {
         .Ok(_) -> panic("the workspace source must be surfaced as an error")
         .Err(error) -> error.diagnostic
     }
 }
 
 envmodel_test_load_is_none: fn(cache: &WorkspaceDeclarationCache, dir: String) -[FS, Env, Exec, Time.Wait]> Bool {
-    if envmodel_workspace_load(&cache, dir) == {
+    if envmodel_workspace_load(cache, dir) == {
         .Ok(loaded) -> loaded == None
         .Err(_) -> panic("load must not fail")
     }
@@ -55,13 +55,13 @@ envmodel_test_load_is_none: fn(cache: &WorkspaceDeclarationCache, dir: String) -
 
 envmodel_test_member_names: fn(plan: WorkspacePlan) -> [String] {
     names := [String]{}
-    loop member in plan.members -> &names.push(member.name)
+    loop member in plan.members -> names.push(member.name)
     names
 }
 
 envmodel_test_member_paths: fn(plan: WorkspacePlan) -> [String] {
     paths := [String]{}
-    loop member in plan.members -> &paths.push(member.path)
+    loop member in plan.members -> paths.push(member.path)
     paths
 }
 
@@ -245,12 +245,12 @@ envmodel_test_member_paths: fn(plan: WorkspacePlan) -> [String] {
     target: files.join(symlinked, "workspace-source.txt")
     files.write(target, "workspace: module {{ members: [] }}\n") ?? panic("workspace source")
     files.symlink(target, files.join(symlinked, WORKSPACE_FILE)) ?? panic("workspace symlink")
-    assert_eq(envmodel_test_load_error(&cache, symlinked).code, "E1334")
+    assert_eq(envmodel_test_load_error(cache, symlinked).code, "E1334")
     files.remove_all(symlinked) ?? panic("scratch cleanup")
 
     nonregular: envmodel_test_workspace_dir("workspace-source-directory")
     files.create_dir_all(files.join(nonregular, WORKSPACE_FILE)) ?? panic("workspace directory")
-    assert_eq(envmodel_test_load_error(&cache, nonregular).code, "E1239")
+    assert_eq(envmodel_test_load_error(cache, nonregular).code, "E1239")
     files.remove_all(nonregular) ?? panic("scratch cleanup")
 }
 
@@ -276,17 +276,17 @@ envmodel_test_member_paths: fn(plan: WorkspacePlan) -> [String] {
     cache := WorkspaceDeclarationCache.new()
     dir: envmodel_test_workspace_dir("ws-arbitrary")
     files.write(files.join(dir, "repo-index.jet"), "workspace: module {{ policy: {{ deny: #(Exec) }} }}\n") ?? panic("authority source")
-    assert(envmodel_test_load_is_none(&cache, dir), "authority metadata is not the index")
+    assert(envmodel_test_load_is_none(cache, dir), "authority metadata is not the index")
     // An arbitrary authority cannot repair a malformed reserved index.
     files.write(files.join(dir, WORKSPACE_FILE), "env: module {{}}\n") ?? panic("malformed index")
-    assert_eq(envmodel_test_load_error(&cache, dir).code, "E0995")
+    assert_eq(envmodel_test_load_error(cache, dir).code, "E0995")
 }
 
 #Test("malformed arbitrary workspace declaration is not absent") {
     cache := WorkspaceDeclarationCache.new()
     dir: envmodel_test_workspace_dir("ws-arbitrary-malformed")
     files.write(files.join(dir, "repo-index.jet"), "workspace: module {{ members: [ }}\n") ?? panic("malformed declaration")
-    failed: if envmodel_workspace_load(&cache, dir) == {
+    failed: if envmodel_workspace_load(cache, dir) == {
         .Ok(_) -> false
         .Err(_) -> true
     }
@@ -297,7 +297,7 @@ envmodel_test_member_paths: fn(plan: WorkspacePlan) -> [String] {
     cache := WorkspaceDeclarationCache.new()
     dir: envmodel_test_workspace_dir("ws-in-pkg")
     files.write(files.join(dir, PAYLOAD_FILE), "workspace: module {{ policy: {{ deny: #(FS) }} }}\n") ?? panic("payload source")
-    assert(envmodel_test_load_is_none(&cache, dir), "authority metadata is not the index")
+    assert(envmodel_test_load_is_none(cache, dir), "authority metadata is not the index")
 }
 
 #Test("workspace jet and discovered file are e1239") {
@@ -307,7 +307,7 @@ envmodel_test_member_paths: fn(plan: WorkspacePlan) -> [String] {
     files.write(files.join(dir, WORKSPACE_FILE), "workspace: module {{ members: find(\"./packages\") }}\n") ?? panic("workspace source")
     // A canonical filename never shadows another declaration.
     files.write(files.join(dir, "other.jet"), "workspace: module {{ policy: {{ deny: #(FS) }} }}\n") ?? panic("other declaration")
-    diagnostic: envmodel_test_load_error(&cache, dir)
+    diagnostic: envmodel_test_load_error(cache, dir)
     assert_eq(diagnostic.code, "E1239")
     assert(diagnostic.what.contains(WORKSPACE_FILE))
     assert(diagnostic.what.contains("other.jet"))
@@ -318,7 +318,7 @@ envmodel_test_member_paths: fn(plan: WorkspacePlan) -> [String] {
     dir: envmodel_test_workspace_dir("ws-ambiguous")
     files.write(files.join(dir, "a.jet"), "workspace: module {{ policy: {{ deny: #(FS) }} }}\n") ?? panic("first declaration")
     files.write(files.join(dir, "b.jet"), "workspace: module {{ policy: {{ deny: #(FS) }} }}\n") ?? panic("second declaration")
-    diagnostic: envmodel_test_load_error(&cache, dir)
+    diagnostic: envmodel_test_load_error(cache, dir)
     assert_eq(diagnostic.code, "E1239")
     assert(diagnostic.what.contains("a.jet") && diagnostic.what.contains("b.jet"))
 }
@@ -327,5 +327,5 @@ envmodel_test_member_paths: fn(plan: WorkspacePlan) -> [String] {
     cache := WorkspaceDeclarationCache.new()
     dir: envmodel_test_workspace_dir("ws-none")
     files.write(files.join(dir, "env.jet"), "env.dev: module {{ }}\n") ?? panic("env source")
-    assert(envmodel_test_load_is_none(&cache, dir))
+    assert(envmodel_test_load_is_none(cache, dir))
 }

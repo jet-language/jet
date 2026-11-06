@@ -3,18 +3,18 @@
 // and the subject never closes it again.
 Res: struct { name: String }
 impl Res.Close {
-    close: fn(^self) { print("close {self.name}") }
+    close: fn(&&self) { print("close {self.name}") }
 }
 
-keep: fn(r: ^Res) -> Int { r.name.len() }
+keep: fn(r: &&Res) -> Int { r.name.len() }
 
 make: fn(name: String) -> Res? { Val(Res{name: name}) }
 
 from_local: fn() -> Int {
     local := make("local")
     if local == .Val(held) {
-        applied := ^held
-        return keep(^applied)
+        applied := held.move()
+        return keep(applied)
     }
     0
 }
@@ -22,8 +22,8 @@ from_local: fn() -> Int {
 from_call: fn() -> Int {
     if make("call") == {
         .Val(held) -> {
-            applied := ^held
-            keep(^applied)
+            applied := held.move()
+            keep(applied)
         }
         .None -> 0
     }

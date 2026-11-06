@@ -17,12 +17,12 @@ run: fn() (Closed | HTTPError | NetError | TaskFailure)! {
     t: task {
         listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
         sender.send(listener.local_addr() ?? panic("address"))
-        stream: &listener.accept() ?? panic("accept")
+        stream: listener.accept() ?? panic("accept")
         _req: stream.read_text(8192) ?? panic("request")
-        net.tcp_reply(^stream, "200 OK", "hello, world!") ?? panic("reply")
+        net.tcp_reply(stream, "200 OK", "hello, world!") ?? panic("reply")
     }
     addr: ch.receive() ?? panic("address")
     resp: http.get("http://{addr}/") ?? panic("request")
     print(resp.body().text(8 * 1024 * 1024) ?? panic("body"))
-    ^t.join() ?? panic("server")
+    t.join() ?? panic("server")
 }

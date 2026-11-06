@@ -53,7 +53,7 @@ jet_cli_job_metadata_limits: fn(limits: [StringMapEntry]) -> [StringMapEntry] Ne
     values := [String:String]{}
     loop entry in limits -> values[entry.key] = entry.value
     names := values.keys().to_list()
-    &names.sort()
+    names.sort()
     loop name in names -> StringMapEntry{key: name, value: values[name]}
 }
 jet_cli_job_metadata_status: fn(job: JobFact) -> JetCLIStatusValue Never! {
@@ -83,24 +83,24 @@ jet_cli_jobs_metadata_json: fn(registry: JobRegistry) -> String Never! {
 jet_cli_job_metadata_detail: fn(job: JobFact) -> String Never! {
     parts := [String]{}
     arguments: loop argument in job.arguments -> argument.display()
-    if arguments.len() > 0 -> &parts.push("({arguments.join(", ")})")
+    if arguments.len() > 0 -> parts.push("({arguments.join(", ")})")
     if job.doc == .Val(doc) {
-        if doc != "" -> &parts.push(doc.replace("\n", " "))
+        if doc != "" -> parts.push(doc.replace("\n", " "))
     }
-    if job.schedule == .Val(schedule) -> &parts.push("(every {schedule})")
-    if job.after.len() > 0 -> &parts.push("(after {job.after.join(", ")})")
-    if job.inputs.len() > 0 -> &parts.push("(inputs {job.inputs.join(", ")})")
-    if job.outputs.len() > 0 -> &parts.push("(outputs {job.outputs.join(", ")})")
-    if job.packages.len() > 0 -> &parts.push("(packages {job.packages.join(", ")})")
-    if job.cwd == .Val(cwd) -> &parts.push("(cwd {cwd})")
+    if job.schedule == .Val(schedule) -> parts.push("(every {schedule})")
+    if job.after.len() > 0 -> parts.push("(after {job.after.join(", ")})")
+    if job.inputs.len() > 0 -> parts.push("(inputs {job.inputs.join(", ")})")
+    if job.outputs.len() > 0 -> parts.push("(outputs {job.outputs.join(", ")})")
+    if job.packages.len() > 0 -> parts.push("(packages {job.packages.join(", ")})")
+    if job.cwd == .Val(cwd) -> parts.push("(cwd {cwd})")
     if job.skip == .Val(skip) {
         label: if skip == {
             .Always(reason) -> "always ({reason})"
             .UnlessPlatform(platform) -> "unless platform is {platform}"
         }
-        &parts.push("(skip {label})")
+        parts.push("(skip {label})")
     }
-    if job.cache != .Uncached -> &parts.push("(cache {jet_cli_job_metadata_cache(job.cache)})")
+    if job.cache != .Uncached -> parts.push("(cache {jet_cli_job_metadata_cache(job.cache)})")
     detail := parts.join(" ")
     if job.limits.len() > 0 {
         limits: loop entry in jet_cli_job_metadata_limits(job.limits) -> "{entry.key}={entry.value}"

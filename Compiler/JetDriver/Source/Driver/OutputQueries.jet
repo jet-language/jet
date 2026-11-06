@@ -17,12 +17,12 @@ JetDriverOutputQueryResult: struct {
     target_triple: String
     target_layout: JetTargetLayout?
 }
-jet_driver_output_query: fn(request: ^JetDriverCompileRequest, address: String?) -> JetDriverOutputQueryResult {
-    selected := ^request
+jet_driver_output_query: fn(request: &&JetDriverCompileRequest, address: String?) -> JetDriverOutputQueryResult {
+    selected := request.move()
     selected.mode = JetDriverCompileMode.Doc
     selected.output_intent = SemaOutputIntent.Run
     selected.output_address = address
-    compile: jet_driver_compile(^selected)
+    compile: jet_driver_compile(selected)
     outputs := [ResolvedOutput]{}
     layouts := [JetDriverOutputLayoutRow]{}
     target_triple := ""
@@ -33,10 +33,10 @@ jet_driver_output_query: fn(request: ^JetDriverCompileRequest, address: String?)
                 target_layout = projection.target_layout
                 target_triple = projection.target_triple
             }
-            loop item in projection.items { if item == .Const(binding) && binding.resolved_output == .Val(output) -> &outputs.push(output) }
-            loop fact in projection.layout_facts -> &layouts.push(JetDriverOutputLayoutRow{module_identity: projection.module_identity, source_path: projection.physical_path, fact: fact})
+            loop item in projection.items { if item == .Const(binding) && binding.resolved_output == .Val(output) -> outputs.push(output) }
+            loop fact in projection.layout_facts -> layouts.push(JetDriverOutputLayoutRow{module_identity: projection.module_identity, source_path: projection.physical_path, fact: fact})
         }
-        &outputs.sort_by((a, b) -> (a.address <=> b.address).then(a.source_path <=> b.source_path))
+        outputs.sort_by((a, b) -> (a.address <=> b.address).then(a.source_path <=> b.source_path))
     }
-    JetDriverOutputQueryResult{compile: ^compile, outputs: outputs, layouts: layouts, target_triple: target_triple, target_layout: target_layout}
+    JetDriverOutputQueryResult{compile: compile.move(), outputs: outputs, layouts: layouts, target_triple: target_triple, target_layout: target_layout}
 }

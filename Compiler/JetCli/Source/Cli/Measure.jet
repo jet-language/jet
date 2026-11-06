@@ -77,15 +77,15 @@ jet_cli_measure_plan: fn(snapshot: JetDriverAuthorizedSourceSnapshot, package: B
             if item == .Test(test) {
                 loop statement in test.body {
                     if statement == .ScopeMember(member, _, _, _, _, _, _, _) && member == "measure" {
-                        &plan.claims.push(test.name ?? "")
+                        plan.claims.push(test.name ?? "")
                         break
                     }
                 }
             }
         }
         reported := [Diagnostic]{}
-        loop spec in sema_budget_elaborate_items(parsed.program.items, &reported) {
-            &plan.budgets.push(JetCLIMeasureBudget{spec: spec, shown: file.relative_path, source: file.source})
+        loop spec in sema_budget_elaborate_items(parsed.program.items, reported) {
+            plan.budgets.push(JetCLIMeasureBudget{spec: spec, shown: file.relative_path, source: file.source})
         }
     }
     plan
@@ -95,7 +95,7 @@ jet_cli_measure_plan: fn(snapshot: JetDriverAuthorizedSourceSnapshot, package: B
 jet_cli_measure_claims: fn(tests: [JetNativeTestCase], plan: JetCLIMeasurePlan) -> [JetNativeTestCase] Never! {
     claims := [JetNativeTestCase]{}
     loop test in tests {
-        if plan.claims.contains(test.name) -> &claims.push(test)
+        if plan.claims.contains(test.name) -> claims.push(test)
     }
     claims
 }
@@ -157,11 +157,11 @@ jet_cli_measure_settle: fn(wire: String, name: String, plan: JetCLIMeasurePlan, 
     total := 0
     loop text in fields[2].split(",") {
         time: (jet_cli_measure_word(text) * 1000).div_euclid(iterations)
-        &times.push(time)
+        times.push(time)
         total += time
     }
     if times.len() == 0 -> return Err("the measurement record of `{name}` has no samples")
-    &times.sort()
+    times.sort()
     sorted: times
     record := JetCLIMeasureRecord{
         name: name,
@@ -191,22 +191,22 @@ jet_cli_measure_settle: fn(wire: String, name: String, plan: JetCLIMeasurePlan, 
                 verdict.status = if spec.enforcement == "Warn" -> "warn" else -> "miss"
                 diagnostic := diagnostic_from_registry(missed.code, Val(spec.span), "Performance budget `{spec.name}` regressed: {spec.metric} of `{name}` is {jet_cli_measure_ns(value)} ns per iteration, over its limit of {limit} ns", missed.why, missed.fix)
                 if spec.enforcement == "Warn" -> diagnostic.severity = DIAGNOSTIC_LINT
-                &diagnostics.push(diagnostic)
+                diagnostics.push(diagnostic)
             }
         } else {
             verdict.status = "unevaluated"
             diagnostic := diagnostic_from_registry(unproven.code, Val(spec.span), "Performance budget `{spec.name}` has no usable evidence: `{spec.comparison}` needs a recorded baseline, and `jet test --measure` keeps none", unproven.why, unproven.fix)
             diagnostic.severity = DIAGNOSTIC_LINT
-            &diagnostics.push(diagnostic)
+            diagnostics.push(diagnostic)
         }
         if verdict.status == "miss" && passed {
             parts.flags = parts.flags.bit_and(6)
             record.ok = false
         }
         if diagnostics.len() > 0 -> parts.stderr = "{parts.stderr}{diagnostic_render_all(budget.shown, budget.source, diagnostics, color)}"
-        &record.budgets.push(verdict)
+        record.budgets.push(verdict)
     }
-    &records.push(record)
+    records.push(record)
     Ok(jet_cli_native_test_wire(parts))
 }
 

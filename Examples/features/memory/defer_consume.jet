@@ -1,4 +1,4 @@
-// `defer close(^resource)` consumes its resource when the scope exits. The
+// `defer close(resource)` consumes its resource when the scope exits. The
 // deferred close runs on every exit edge: falling off the end of the body, an
 // early `return`, a `break` out of a loop body, an explicit failure return, and
 // a failure propagated from a plain fallible call.
@@ -7,7 +7,7 @@ Resource: struct {
 }
 
 impl Resource.Close {
-    close: fn(^self) { print("close {self.name}") }
+    close: fn(&&self) { print("close {self.name}") }
 }
 
 #Error
@@ -17,13 +17,13 @@ Fail: enum {
 
 plain: fn() {
     resource: Resource{name: "plain"}
-    defer close(^resource)
+    defer close(resource)
     print("plain body")
 }
 
 early: fn(stop: Bool) -> Int {
     resource: Resource{name: "early"}
-    defer close(^resource)
+    defer close(resource)
     if stop -> return 1
     print("early body")
     2
@@ -33,7 +33,7 @@ loop_break: fn() {
     i := 0
     loop i < 3 {
         resource: Resource{name: "iteration {i}"}
-        defer close(^resource)
+        defer close(resource)
         if i == 1 -> break
         print("loop body {i}")
         i += 1
@@ -43,14 +43,14 @@ loop_break: fn() {
 
 failing: fn(fail: Bool) -> Int Fail! {
     resource: Resource{name: "failing"}
-    defer close(^resource)
+    defer close(resource)
     if fail -> return Err(Fail.Bad)
     Ok(3)
 }
 
 propagate: fn() -> Int Fail! {
     resource: Resource{name: "propagate"}
-    defer close(^resource)
+    defer close(resource)
     value: failing(true)
     Ok(value)
 }

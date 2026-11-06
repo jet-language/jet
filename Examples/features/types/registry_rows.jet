@@ -44,7 +44,7 @@ row_new: fn(name: String) -> Row Never! {
     Row{name: name, kind: kind, pure: kind == None, route: Route.NoRoute}
 }
 
-with_route: fn(row: ^Row, kind: Effect) -> Row Never! {
+with_route: fn(row: &&Row, kind: Effect) -> Row Never! {
     updated := row
     updated.route = Route.Pure{kind: kind}
     updated
@@ -58,7 +58,7 @@ routed: fn(route: Route) -> Bool Never! {
 }
 
 stamp: fn(names: &[String]) -> Int Never! {
-    &names.push("stamped")
+    names.push("stamped")
     names.len()
 }
 

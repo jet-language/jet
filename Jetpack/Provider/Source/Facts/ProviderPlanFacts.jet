@@ -22,8 +22,8 @@ ProviderPlanFacts: struct {
     render: fn(self) -> String Never! {
         lines := [String]{PROVIDER_PLAN_FACTS_HEADER}
         keys := self.entries.keys().to_list()
-        &keys.sort()
-        loop key in keys -> &lines.push("{provider_plan_hex(key)}\t{provider_plan_hex(self.entries[key])}")
+        keys.sort()
+        loop key in keys -> lines.push("{provider_plan_hex(key)}\t{provider_plan_hex(self.entries[key])}")
         "{lines.join("\n")}\n"
     }
 
@@ -79,10 +79,10 @@ provider_lines: fn(raw: String) -> [String] Never! {
         bytes: segment.bytes()
         before_newline: index < segments.len() - 1
         if before_newline && bytes.len() > 0 && Int.from_u8(bytes[bytes.len() - 1]) == 13 {
-            &lines.push(pkg_bytes_text(bytes, 0, bytes.len() - 1))
+            lines.push(pkg_bytes_text(bytes, 0, bytes.len() - 1))
             next
         }
-        &lines.push(segment)
+        lines.push(segment)
     }
     lines
 }
@@ -93,8 +93,8 @@ provider_plan_hex: fn(value: String) -> String Never! {
     out := [U8]{}
     loop byte in value.bytes() {
         code: Int.from_u8(byte)
-        &out.push(digits[code >> 4])
-        &out.push(digits[(code).bit_and(15)])
+        out.push(digits[code >> 4])
+        out.push(digits[(code).bit_and(15)])
     }
     pkg_bytes_text(out, 0, out.len())
 }
@@ -107,7 +107,7 @@ provider_plan_unhex: fn(value: String) -> String ProviderPlanFactsError! {
     loop index < raw.len() {
         high: provider_plan_nibble(Int.from_u8(raw[index]))
         low: provider_plan_nibble(Int.from_u8(raw[index + 1]))
-        &bytes.push(U8{high * 16 + low})
+        bytes.push(U8{high * 16 + low})
         index += 2
     }
     text: String.from_bytes(bytes) ?? return Err(ProviderPlanFactsError.NotUTF8)

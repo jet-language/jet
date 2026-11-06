@@ -41,7 +41,7 @@ s1_authority_manifest_error: fn(text: String) -> Diagnostic {
     // the source policy declarations, never one of them.
     assert_eq(facts.policy.unsafe_paths, Val([String]{}))
     keys := [String]{}
-    loop declaration in facts.policy.declarations -> &keys.push(policy_key_name(declaration.key))
+    loop declaration in facts.policy.declarations -> keys.push(policy_key_name(declaration.key))
     assert_eq(keys, [String]{"gc", "explicit_units", "copies", "sentries"})
     assert_eq(facts.authority.deny, Val([String]{"Mem.Alloc"}))
     assert_eq(facts.authority.trust, None)
@@ -95,9 +95,9 @@ s1_authority_manifest_error: fn(text: String) -> Diagnostic {
 
 #Test("package_guarantees_are_tighten_only") {
     weak := PackagePolicy.default()
-    &weak.contain.push("libxml")
+    weak.contain.push("libxml")
     strong := weak.copy()
-    &strong.contain.push("libz")
+    strong.contain.push("libz")
     strong.harden = true
     if weak.guarantees_tighten(strong) == {
         .Ok(_) -> {}

@@ -220,12 +220,12 @@ collect_project_files: fn(project_root: OSPath, entry_path: OSPath, manifest_roo
             authority_diagnostic = .Val(diagnostic); workspace_source_failed = true; .None
         }
     }
-    push_existing(&paths, entry_path); push_existing(&paths, project_root.join(Syntax.ENV_FILE))
-    if manifest_root == .Val(root) -> push_existing(&paths, root.join(Syntax.PACKAGE_FILE))
-    if ecosystem_root == .Val(root) -> push_existing(&paths, root.join(Syntax.PACKAGE_FILE))
+    push_existing(paths, entry_path); push_existing(paths, project_root.join(Syntax.ENV_FILE))
+    if manifest_root == .Val(root) -> push_existing(paths, root.join(Syntax.PACKAGE_FILE))
+    if ecosystem_root == .Val(root) -> push_existing(paths, root.join(Syntax.PACKAGE_FILE))
     if workspace_root == .Val(root) {
-        if workspace_source == .Val(pair) -> push_existing(&paths, pair._1.path)
-        push_existing(&paths, root.join(Syntax.UNIFIED_LOCK_FILE))
+        if workspace_source == .Val(pair) -> push_existing(paths, pair._1.path)
+        push_existing(paths, root.join(Syntax.UNIFIED_LOCK_FILE))
         if workspace_source == .Val(tuple_5) {
             source_resolver: tuple_5._0
             source: tuple_5._1
@@ -237,7 +237,7 @@ collect_project_files: fn(project_root: OSPath, entry_path: OSPath, manifest_roo
                 if snapshot == .Val(snapshot) {
                     loop member in snapshot.plan.members {
                         member_dir := root.join(member.path); workspace_member_roots.push(member_dir.clone())
-                        push_existing(&paths, member_dir.join(Syntax.PACKAGE_FILE))
+                        push_existing(paths, member_dir.join(Syntax.PACKAGE_FILE))
                     }
                 }
             }

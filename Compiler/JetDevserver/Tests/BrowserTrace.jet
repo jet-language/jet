@@ -39,7 +39,7 @@ manifest: fn() -> String {
     error: read_with_process_state(std.process.id(), ProcessState.Dead).unwrap_err()
     assert(error.contains("stale process session"), "{error}")
     assert(!path.exists(), "dead devserver relay was not removed")
-    drop(^relay)
+    drop(relay)
 }
 #Test("unknown_process_identity_fails_closed_without_consuming_relay") {
     _guard: TEST_LOCK.lock().unwrap()
@@ -48,7 +48,7 @@ manifest: fn() -> String {
     error: read_with_process_state(std.process.id(), ProcessState.Unknown).unwrap_err()
     assert(error.contains("cannot be verified"), "{error}")
     assert(path.exists(), "unknown identity must not mutate relay ownership")
-    drop(^relay)
+    drop(relay)
 }
 #Test("relay_caps_rows_and_records_truncation") {
     _guard: TEST_LOCK.lock().unwrap()

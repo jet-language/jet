@@ -9,12 +9,12 @@ use {
 run: fn() {
     path := "{work}/rows.csv"
     output: files.create(path) ?? panic("create")
-    writer := fmt.writer(^output, encoding.EncodingLimits.safe()) ?? panic("writer")
-    &writer.write(["ok", "true"]) ?? panic("write")
-    &writer.finish() ?? panic("finish")
+    writer := fmt.writer(output, encoding.EncodingLimits.safe()) ?? panic("writer")
+    writer.write(["ok", "true"]) ?? panic("write")
+    writer.finish() ?? panic("finish")
     input: files.open(path) ?? panic("open")
-    reader := fmt.reader(^input) ?? panic("reader")
-    first: &reader.next()
+    reader := fmt.reader(input) ?? panic("reader")
+    first: reader.next()
     if first == {
         .Val(_) -> print(true)
         .None -> print(false)

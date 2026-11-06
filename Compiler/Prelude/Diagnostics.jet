@@ -1403,7 +1403,7 @@ ReadOnlyValueNotOwned: struct {
         fix_safety: .NeedsReview
         what: fn(self) -> String { "`name` was not moved here, so it cannot fill this owning destination" }
         why: fn(self) -> String { "Read access does not transfer ownership; cloneable values copy automatically at ordinary owning destinations, but this value needs an explicit ownership decision" }
-        fix: fn(self) -> String { "Write `name.copy()` for an owning copy, add `^` to the parameter when it should take ownership, or return borrowed data as `-> View<T> from name` with a view derived from `name`" }
+        fix: fn(self) -> String { "Write `name.copy()` for an owning copy, declare the parameter `name: &&T` when it should take ownership, or return borrowed data as `-> View<T> from name` with a view derived from `name`" }
     }
 }
 
@@ -2163,27 +2163,18 @@ UnreachableState: struct {
 MissingMoveMarker: struct {
     impl Diagnostic {
         code: "E0201"
-        what: fn(self) -> String { "The move marker `^` is required; value can't be copied" }
+        what: fn(self) -> String { "This use needs to own a value that can't be copied" }
         why: fn(self) -> String { "The registered sema rule applies here" }
-        fix: fn(self) -> String { "Add the move marker `^` at the consuming call site." }
+        fix: fn(self) -> String { "Declare the parameter or receiver with the take mark `&&`, or call `.move()` where the value is given away." }
     }
 }
 
 MissingWriteMarker: struct {
     impl Diagnostic {
         code: "E0202"
-        what: fn(self) -> String { "The write-access marker `&` is required at call site — write access not granted" }
+        what: fn(self) -> String { "This change needs write access the place doesn't have" }
         why: fn(self) -> String { "The registered sema rule applies here" }
-        fix: fn(self) -> String { "Add the write-access marker `&` at the call site." }
-    }
-}
-
-MoveMarkerNotAllowed: struct {
-    impl Diagnostic {
-        code: "E0203"
-        what: fn(self) -> String { "Move marker `^` used on a non-consuming parameter" }
-        why: fn(self) -> String { "The registered sema rule applies here" }
-        fix: fn(self) -> String { "Use `^` only for a consuming parameter." }
+        fix: fn(self) -> String { "Declare the parameter or receiver with the write mark `&` (`x: &T`, `&self`), or bind the value with `:=` first." }
     }
 }
 
@@ -2199,9 +2190,9 @@ UseWhileWriteActive: struct {
 FieldWriteWithoutMarker: struct {
     impl Diagnostic {
         code: "E0205"
-        what: fn(self) -> String { "`self.field = v` without the write-access marker `&` on the receiver" }
+        what: fn(self) -> String { "`self.field = v` in a method whose receiver is read-only" }
         why: fn(self) -> String { "The registered sema rule applies here" }
-        fix: fn(self) -> String { "Add `&` to the receiver before assigning to `self.field`." }
+        fix: fn(self) -> String { "Write the receiver as `&self` before assigning to `self.field`." }
     }
 }
 
@@ -2265,7 +2256,7 @@ CopyNotSupported: struct {
         no_fix: .Ambiguous
         what: fn(self) -> String { "`x.copy()` on a value that can't be copied — a function, a trait value, or a type Jet doesn't know how to duplicate" }
         why: fn(self) -> String { "The registered sema rule applies here" }
-        fix: fn(self) -> String { "Call `.copy()` only on a copyable value, or move the value with `^` instead." }
+        fix: fn(self) -> String { "Call `.copy()` only on a copyable value, or take the value with `.move()` instead." }
     }
 }
 
@@ -2283,7 +2274,7 @@ OwnerMovedWhileViewed: struct {
 WriteMarkerNotOnPlace: struct {
     impl Diagnostic {
         code: "E0213"
-        meaning: "The write-access marker `&` is not on a place — a name plus maximal field/index/range projections"
+        meaning: "A window does not start from a place — a name plus maximal field/index/range projections"
         detail: true
         what: fn(self) -> String { "A read or write window starts from something that is not a place." }
         why: fn(self) -> String { "Only a name followed by fields, indexes, or one range has stable storage that can be accessed without copying." }
@@ -2340,11 +2331,11 @@ CellGuardEscapes: struct {
 PinWithoutWriteWindow: struct {
     impl Diagnostic {
         code: "E0218"
-        meaning: "`mem.pin` was given a value instead of a write window made with the write-access marker `&`"
+        meaning: "`mem.pin` was given a temporary value instead of a named place"
         detail: true
-        what: fn(self) -> String { "`mem.pin` needs a write window made with the write-access marker `&` into the place being pinned." }
-        why: fn(self) -> String { "A pin promises one storage location will not move, so it has to name that location with the write-access marker; see the sigil reading rule above." }
-        fix: fn(self) -> String { "Write `mem.pin(&place)` with the write-access marker `&`." }
+        what: fn(self) -> String { "`mem.pin` needs a named place to pin." }
+        why: fn(self) -> String { "A pin promises one storage location will not move, so it has to name that location instead of a temporary value." }
+        fix: fn(self) -> String { "Bind the value to a `:=` name, then write `mem.pin(place)`." }
     }
 }
 
@@ -2405,18 +2396,7 @@ PersistentMutableBorrow: struct {
         fix_next: "Compute an owned replacement and assign the persistent or static binding as a whole."
         what: fn(self) -> String { "A mutable borrow of `{self.name}` cannot escape its persistent or static storage cell" }
         why: fn(self) -> String { "Persistent and static state must be changed by computing a replacement and assigning the whole binding. A mutable borrow or mutating receiver would let access escape the cell." }
-        fix: fn(self) -> String { "Compute an owned replacement, then assign the persistent or static binding as a whole instead of passing `{self.name}` with `&` or using a mutating receiver." }
-    }
-}
-
-RetiredMissingReceiverMark: struct {
-    impl Diagnostic {
-        code: "E0224"
-        status: .Retired
-        no_fix: None
-        what: fn(self) -> String { "*Retired* (was: a writing or taking call without its receiver mark; D-CALLSITE-MARK2=A writes calls plain)" }
-        why: fn(self) -> String { "The registered sema rule applies here" }
-        fix: fn(self) -> String { "Follow the guidance for E0224" }
+        fix: fn(self) -> String { "Compute an owned replacement, then assign the persistent or static binding as a whole instead of passing `{self.name}` to a `&` parameter or using a mutating receiver." }
     }
 }
 
@@ -2435,29 +2415,15 @@ UnusedPlaceMark: struct {
     }
 }
 
-ReceiverMarkMismatch: struct {
-    impl Diagnostic {
-        code: "E0226"
-        meaning: "A receiver mark names the wrong permission for its call"
-        detail: true
-        edit: .SourceEdit
-        no_fix: None
-        fix_safety: .BehaviorPreserving
-        what: fn(self) -> String { "This receiver mark names the other permission than the call uses." }
-        why: fn(self) -> String { "The resolved method's signature declares whether a call writes (`&self`) or takes (`&&self`) its receiver, and the call is written plain." }
-        fix: fn(self) -> String { "Remove the mark." }
-    }
-}
-
 MarkedFunctionValue: struct {
     impl Diagnostic {
         code: "E0227"
-        meaning: "A named function with a `&` or `^` parameter is used as a function value"
+        meaning: "A named function with a `&` or `&&` parameter is used as a function value"
         detail: true
         no_fix: .Ambiguous
-        what: fn(self) -> String { "A function whose parameter is marked `&` or `^` is used as a value instead of being called." }
-        why: fn(self) -> String { "A function type gives each parameter plain read access. A value of this function would drop the `&` or `^` mark its callers must write, so the function can only be called directly." }
-        fix: fn(self) -> String { "Call the function directly with the mark, or pass a lambda that makes that call." }
+        what: fn(self) -> String { "A function whose parameter is marked `&` or `&&` is used as a value instead of being called." }
+        why: fn(self) -> String { "A function type gives each parameter plain read access, so a value of this function would lose the write or take its parameter declares; the function can only be called directly." }
+        fix: fn(self) -> String { "Call the function directly, or pass a lambda that makes that call." }
     }
 }
 
@@ -4825,7 +4791,7 @@ TailCallBlocked: struct {
         fix_next: "Close the open value before the call, or open it in a smaller block that ends before the call"
         what: fn(self) -> String { "This tail call can't reuse the frame because `{self.name}` closes after it returns" }
         why: fn(self) -> String { "`{self.name}` is still open at the call, and its Close cleanup runs when its scope ends, after the call returns; the call keeps its frame, so a chain of such calls grows the stack" }
-        fix: fn(self) -> String { "Close `{self.name}` before the call with `close(^{self.name})`, or open it in a smaller block that ends before the call" }
+        fix: fn(self) -> String { "Close `{self.name}` before the call with `close({self.name})`, or open it in a smaller block that ends before the call" }
     }
 }
 
@@ -6185,7 +6151,7 @@ RetiredAllocatorUseAfterFree: struct {
         detail: true
         no_fix: None
         what: fn(self) -> String { "Retired allocator-specific use-after-free diagnostic." }
-        why: fn(self) -> String { "Terminal release now uses ordinary consuming `close(^allocator)` through the move marker `^`." }
+        why: fn(self) -> String { "Terminal release now uses the ordinary consuming `close(allocator)`, whose parameter takes the allocator with `&&`." }
         fix: fn(self) -> String { "Follow E0121 and acquire a new allocator after close." }
     }
 }
@@ -8647,7 +8613,7 @@ ConcurrentCaptureNotOwned: struct {
         detail: true
         what: fn(self) -> String { "`{self.value}` cannot cross the `{self.boundary}` boundary: the value writes shared state" }
         why: fn(self) -> String { "The `{self.boundary}` boundary can run concurrently with its owner; {self.reason}" }
-        fix: fn(self) -> String { "Give it with `^`, freeze it with `freeze`, or share it with `shared`" }
+        fix: fn(self) -> String { "Give it away with `.move()`, freeze it with `freeze`, or share it with `shared`" }
     }
 }
 
@@ -8916,8 +8882,8 @@ ViewOutlivesOwner: struct {
         detail: true
         no_fix: .Ambiguous
         what: fn(self) -> String { "A declared `View<T>` would outlive an owner, or sema cannot stabilize a public owner set for each declared view slot. Read-only views entering non-view owning slots materialize by default; `copies: .Explicit` restores the refusal." }
-        why: fn(self) -> String { "Each declared view slot keeps a bounded set of possible receiver, parameter, or static sources through every return path, call, generic instantiation, aggregate projection, function value, lambda, and trait implementation. Every possible owner must stay live; a consumed (`^`) parameter or receiver is freed when the function returns, so it never owns a returned view." }
-        fix: fn(self) -> String { "Keep every possible owner alive (take a returned view's source as a read or `&` parameter, not `^`), preserve the declared view boundary, or remove `copies: .Explicit` / write `view.copy()` when an owning destination is intended." }
+        why: fn(self) -> String { "Each declared view slot keeps a bounded set of possible receiver, parameter, or static sources through every return path, call, generic instantiation, aggregate projection, function value, lambda, and trait implementation. Every possible owner must stay live; a consumed (`&&`) parameter or receiver is freed when the function returns, so it never owns a returned view." }
+        fix: fn(self) -> String { "Keep every possible owner alive (take a returned view's source as a read or `&` parameter, not `&&`), preserve the declared view boundary, or remove `copies: .Explicit` / write `view.copy()` when an owning destination is intended." }
     }
 }
 
@@ -12624,7 +12590,7 @@ FreezeNotSnapshotable: struct {
         detail: true
         what: fn(self) -> String { "`freeze` cannot snapshot `{self.ty}`: {self.reason}" }
         why: fn(self) -> String { "A frozen value must be an owned cloneable value with no shared handle, resource, function, trait value, or mutable view inside it." }
-        fix: fn(self) -> String { "Use `^` to give the owned value to the task, use `Shared`/`Cell` for deliberate shared state, or rebuild a plain owned value" }
+        fix: fn(self) -> String { "Give the owned value to the task with `task &&name`, use `Shared`/`Cell` for deliberate shared state, or rebuild a plain owned value" }
     }
 }
 
@@ -12757,64 +12723,6 @@ LogicalNotOnNonBool: struct {
         what: fn(self) -> String { "`!` needs a Bool operand." }
         why: fn(self) -> String { "`!` negates a Bool; integer bits use named methods." }
         fix: fn(self) -> String { "Write `value.bit_not()` to flip integer bits." }
-    }
-}
-
-RetiredDeclarationSpelling: struct {
-    old: String
-    new: String
-
-    impl Diagnostic {
-        code: "E0397"
-        stage: [.Parse]
-        meaning: "A declaration uses a retired spelling; every declaration is written `name: value`"
-        detail: true
-        edit: .SourceEdit
-        no_fix: None
-        fix_safety: .BehaviorPreserving
-        what: fn(self) -> String { "`{self.old}` is a retired declaration spelling; write `{self.new}`." }
-        why: fn(self) -> String { "Every declaration is written `name: value`: a binding `limit: 100`, a function `area: fn(r: Float) -> Float`, a type `Point: struct`; `:=` stays the mutable binding." }
-        fix: fn(self) -> String { "Write `{self.new}`; `jet fix` applies this fix." }
-    }
-}
-
-RetiredCallMark: struct {
-    written: String
-    declarer: String
-    repair: String
-
-    impl Diagnostic {
-        code: "E0434"
-        severity: .Lint
-        lint_name: "retired_call_mark"
-        meaning: "A call writes a memory mark its signature already states; calls are written plain"
-        detail: true
-        edit: .SourceEdit
-        no_fix: None
-        fix_safety: .BehaviorPreserving
-        what: fn(self) -> String { "`{self.written}` repeats what {self.declarer} declares; a call is written plain." }
-        why: fn(self) -> String { "A signature says what a function does to each input (`c: &Counter` edits it, `c: &&Counter` takes it), so the call reads `bump(score)`. A mark stays only on a write window bound to a name, a match that writes into its subject, and `task &&name`." }
-        fix: fn(self) -> String { "{self.repair}; `jet fix` applies this fix." }
-    }
-}
-
-RetiredTakeMark: struct {
-    old: String
-    new: String
-
-    impl Diagnostic {
-        code: "E0435"
-        severity: .Lint
-        lint_name: "retired_take_mark"
-        stage: [.Parse]
-        meaning: "A take uses the retired `^` mark; a signature writes `&&` and a value writes `x.move()`"
-        detail: true
-        edit: .SourceEdit
-        no_fix: None
-        fix_safety: .BehaviorPreserving
-        what: fn(self) -> String { "`{self.old}` is a retired take spelling; write `{self.new}`." }
-        why: fn(self) -> String { "A take is written `&&` in a signature (`seal: fn(&&self)`, `c: &&Counter`) and a task capture (`task &&name`), and `x.move()` in a value; `^` is no longer a mark." }
-        fix: fn(self) -> String { "Write `{self.new}`; `jet fix` applies this fix." }
     }
 }
 

@@ -16,7 +16,7 @@ use {
 
 registry_slice: fn(bytes: [U8], start: Int, end: Int) -> [U8] {
     out := [U8]{}
-    loop i in start..<end -> &out.push(bytes[i])
+    loop i in start..<end -> out.push(bytes[i])
     out
 }
 
@@ -38,14 +38,14 @@ registry_words: fn(value: String) -> [String] {
     loop scalar in text.scalars(value) {
         if text.is_whitespace(scalar) {
             if word != "" {
-                &words.push(word)
+                words.push(word)
                 word = ""
             }
         } else {
             word = "{word}{scalar}"
         }
     }
-    if word != "" -> &words.push(word)
+    if word != "" -> words.push(word)
     words
 }
 
@@ -56,7 +56,7 @@ run: fn() {
     deadline: time.instant() + 20s
     requests := [String]{}
     loop requests.len() < 7 && time.instant() < deadline {
-        stream: if &listener.accept(deadline: 0s) == {
+        stream: if listener.accept(deadline: 0s) == {
             .Ok(stream) -> stream
             .Err(_) -> {
                 // Original let-else retries ANY accept error, not just WouldBlock.
@@ -70,7 +70,7 @@ run: fn() {
         loop {
             chunk: net.tcp_read_bytes(stream, 4096) ?? panic("read registry headers")
             if chunk.len() == 0 -> break
-            loop byte in chunk -> &request.push(byte)
+            loop byte in chunk -> request.push(byte)
             boundary: registry_find(request, [U8]{13, 10, 13, 10})
             if boundary >= 0 {
                 header_end = boundary + 4
@@ -98,7 +98,7 @@ run: fn() {
         loop request.len() < header_end + content_length {
             chunk: net.tcp_read_bytes(stream, 4096) ?? panic("read registry body")
             if chunk.len() == 0 -> break
-            loop byte in chunk -> &request.push(byte)
+            loop byte in chunk -> request.push(byte)
         }
         body_end: if request.len() < header_end + content_length -> request.len() else -> header_end + content_length
         body: registry_slice(request, header_end, body_end)
@@ -106,7 +106,7 @@ run: fn() {
         has_schema: registry_find(body, "schemaVersion".bytes()) >= 0
         method_json: json.to_string(Dyn.Text(method))
         path_json: json.to_string(Dyn.Text(path))
-        &requests.push("{{\"method\":{method_json},\"path\":{path_json},\"body_has_schema_version\":{has_schema}}}")
+        requests.push("{{\"method\":{method_json},\"path\":{path_json},\"body_has_schema_version\":{has_schema}}}")
         status := 404
         extra := ""
         if method == "HEAD" -> status = 404

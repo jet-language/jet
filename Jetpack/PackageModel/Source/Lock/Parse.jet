@@ -73,10 +73,10 @@ pkg_lock_parse: fn(raw: String) -> LockFile LockError! {
         // Corruption handling: stop before one malformed value can allocate
         // without a bound.
         if line_text.bytes().len() > PKG_MAX_LOCK_VALUE_BYTES -> return Err(LockError.Invalid(pkg_lock_oversized_value_message(index + 1)))
-        &parser.accept(line_text.trim(), index + 1)
-        if parser.in_semantic -> &parser.semantic_lines.push(line_text)
+        parser.accept(line_text.trim(), index + 1)
+        if parser.in_semantic -> parser.semantic_lines.push(line_text)
     }
-    &parser.finish()
+    parser.finish()
 }
 
 // Parse a lock read from `lock_path`. An unsupported format version is
@@ -190,7 +190,7 @@ LockParser: struct {
         if line == "" || line.starts_with("#") -> return
         if line.starts_with("[") {
             // Any section header closes the section being built.
-            &self.close_section()
+            self.close_section()
             self.section = LockParseSection.from_header(line) ?? return Err(LockError.Invalid("unknown lock section `{line}`"))
             self.in_semantic = self.section == LockParseSection.Semantic
             return
@@ -210,7 +210,7 @@ LockParser: struct {
             self.version = Val(pkg_lock_parse_unsigned(pkg_lock_trim_quotes(value), 4294967295) ?? return Err(LockError.Invalid("invalid lock version: {value}")))
             return
         }
-        if self.section == LockParseSection.BuildStamp -> return &self.assign_build_stamp(key, value)
+        if self.section == LockParseSection.BuildStamp -> return self.assign_build_stamp(key, value)
         if !self.section.shadows_workspace_keys() {
             if key == {
                 "workspace_source_digest" -> {
@@ -230,17 +230,17 @@ LockParser: struct {
         }
         if self.section == {
             .Preamble | .BuildStamp | .Semantic -> {}
-            .Root -> &self.assign_root(key, value)
-            .ComptimeInput -> &self.comptime_input.assign(key, value)
-            .BuildContribution -> &self.build_contribution.assign(key, value)
-            .WorkspaceMember -> &self.workspace_member.assign(key, value)
-            .WorkspaceOverlay -> &self.overlay.assign(key, value)
-            .WorkspaceOverlayPackage -> &self.overlay_package.assign(key, value)
-            .WorkspaceBuildGrant -> &self.build_grant.assign(key, value)
-            .Toolchain -> &self.toolchain.assign(key, value)
-            .Browser -> &self.browser.assign(key, value)
-            .SourceChannel -> &self.source_channel.assign(key, value)
-            .Package -> &self.package.assign(key, value)
+            .Root -> self.assign_root(key, value)
+            .ComptimeInput -> self.comptime_input.assign(key, value)
+            .BuildContribution -> self.build_contribution.assign(key, value)
+            .WorkspaceMember -> self.workspace_member.assign(key, value)
+            .WorkspaceOverlay -> self.overlay.assign(key, value)
+            .WorkspaceOverlayPackage -> self.overlay_package.assign(key, value)
+            .WorkspaceBuildGrant -> self.build_grant.assign(key, value)
+            .Toolchain -> self.toolchain.assign(key, value)
+            .Browser -> self.browser.assign(key, value)
+            .SourceChannel -> self.source_channel.assign(key, value)
+            .Package -> self.package.assign(key, value)
         }
     }
 
@@ -279,45 +279,45 @@ LockParser: struct {
         if self.section == {
             .ComptimeInput -> {
                 if self.comptime_input.finish() == {
-                    .Val(input) -> &self.comptime_inputs.push(input)
+                    .Val(input) -> self.comptime_inputs.push(input)
                     .None -> {}
                 }
                 self.comptime_input = PartialComptimeInput{}
             }
             .WorkspaceMember -> {
-                &self.workspace_members.push(self.workspace_member.finish())
+                self.workspace_members.push(self.workspace_member.finish())
                 self.workspace_member = PartialWorkspaceMember{}
             }
             .Package -> {
-                &self.packages.push(self.package.finish())
+                self.packages.push(self.package.finish())
                 self.package = PartialPackage{}
             }
             .Toolchain -> {
-                &self.toolchains.push(self.toolchain.finish())
+                self.toolchains.push(self.toolchain.finish())
                 self.toolchain = PartialToolchain{}
             }
             .Browser -> {
-                &self.browsers.push(self.browser.finish())
+                self.browsers.push(self.browser.finish())
                 self.browser = PartialBrowser{}
             }
             .SourceChannel -> {
-                &self.source_channels.push(self.source_channel.finish())
+                self.source_channels.push(self.source_channel.finish())
                 self.source_channel = PartialSourceChannel{}
             }
             .BuildContribution -> {
-                &self.build_contributions.push(self.build_contribution.finish())
+                self.build_contributions.push(self.build_contribution.finish())
                 self.build_contribution = PartialBuildContribution{}
             }
             .WorkspaceOverlayPackage -> {
-                &self.overlay_packages.push(self.overlay_package.finish())
+                self.overlay_packages.push(self.overlay_package.finish())
                 self.overlay_package = PartialWorkspaceOverlayPackage{}
             }
             .WorkspaceOverlay -> {
-                &self.overlays.push(self.overlay.finish())
+                self.overlays.push(self.overlay.finish())
                 self.overlay = PartialWorkspaceOverlay{}
             }
             .WorkspaceBuildGrant -> {
-                &self.build_grants.push(self.build_grant.finish())
+                self.build_grants.push(self.build_grant.finish())
                 self.build_grant = PartialWorkspaceBuildGrant{}
             }
             .Preamble | .Root | .BuildStamp | .Semantic -> {}
@@ -326,7 +326,7 @@ LockParser: struct {
     }
 
     finish: fn(&self) -> LockFile LockError! {
-        &self.close_section()
+        self.close_section()
         policy: pkg_lock_build_workspace_overlay_policy(self.overlays, self.overlay_packages, self.build_grants, self.policy_allow_unfree, self.policy_build_deny)
         version: self.version ?? return Err(LockError.Invalid("lock is missing top-level `version`"))
         if version != PKG_LOCK_VERSION -> return Err(LockError.UnsupportedVersion("{version}"))
@@ -346,7 +346,7 @@ LockParser: struct {
             build_contributions: self.build_contributions,
             semantic_text: pkg_lock_semantic_text(self.semantic_lines)
         }
-        pkg_lock_canonicalize(&lock)
+        pkg_lock_canonicalize(lock)
         Ok(lock)
     }
 }
@@ -545,19 +545,19 @@ pkg_lock_build_workspace_overlay_policy: fn(overlays: [PartialWorkspaceOverlay],
     loop overlay in overlays {
         name: overlay.name ?? return Err(LockError.Invalid("workspace overlay is missing `name`"))
         if overlay_names.contains(name) -> return Err(LockError.Invalid("duplicate workspace overlay `{name}`"))
-        &overlay_names.push(name)
+        overlay_names.push(name)
         provider: if overlay.provider == {
             .Val(provider_name) -> Val(ProviderOverride{provider: provider_name, channel: overlay.channel})
             .None -> None
         }
-        &policy.overlays.push(OverlaySet{name: name, provider: provider, packages: [PackageOverride]{}})
+        policy.overlays.push(OverlaySet{name: name, provider: provider, packages: [PackageOverride]{}})
     }
     loop grant in grants {
         package: grant.package ?? return Err(LockError.Invalid("workspace build grant is missing `package`"))
         loop existing in policy.build_grants {
             if existing.subject == package -> return Err(LockError.Invalid("duplicate workspace build grant `{package}`"))
         }
-        &policy.build_grants.push(BuildGrant{subject: package, effects: grant.effects})
+        policy.build_grants.push(BuildGrant{subject: package, effects: grant.effects})
     }
     package_keys := [String]{}
     loop package in packages {
@@ -565,7 +565,7 @@ pkg_lock_build_workspace_overlay_policy: fn(overlays: [PartialWorkspaceOverlay],
         package_name: package.package ?? return Err(LockError.Invalid("workspace overlay package is missing `package`"))
         package_key: "{overlay_name}/{package_name}"
         if package_keys.contains(package_key) -> return Err(LockError.Invalid("duplicate workspace overlay package `{package_key}`"))
-        &package_keys.push(package_key)
+        package_keys.push(package_key)
         target := -1
         loop index in 0..<policy.overlays.len() {
             if target < 0 && policy.overlays[index].name == overlay_name -> target = index
@@ -581,15 +581,15 @@ pkg_lock_build_workspace_overlay_policy: fn(overlays: [PartialWorkspaceOverlay],
         env := [OverrideEnv]{}
         loop fact in package.env {
             split: fact.split_once("=") ?? return Err(LockError.Invalid("invalid workspace overlay environment fact `{fact}`"))
-            &env.push(OverrideEnv{key: split.before, value: split.after})
+            env.push(OverrideEnv{key: split.before, value: split.after})
         }
         env_keys := [String]{}
         loop fact in env {
             if env_keys.contains(fact.key) -> return Err(LockError.Invalid("duplicate workspace overlay environment fact `{fact.key}`"))
-            &env_keys.push(fact.key)
+            env_keys.push(fact.key)
         }
         overlay := policy.overlays[target]
-        &overlay.packages.push(PackageOverride{
+        overlay.packages.push(PackageOverride{
             package: package_name,
             source: package.source,
             version: package.version,
@@ -627,7 +627,7 @@ PartialPackage: struct {
     provenance: DependencyProvenance?{None}
 
     assign: fn(&self, key: String, value: String) LockError! {
-        if key.starts_with("nix-") -> return &self.assign_nix_closure(key, value)
+        if key.starts_with("nix-") -> return self.assign_nix_closure(key, value)
         if key == {
             "name" -> self.name = Val(pkg_lock_unescape(value))
             "version" -> self.version = Val(pkg_lock_unescape(value))
@@ -664,7 +664,7 @@ PartialPackage: struct {
                 // realized (the envelope becomes present).
                 if pkg_lock_is_envelope_key(key) {
                     envelope := self.envelope ?? LockEnvelope.empty()
-                    pkg_lock_assign_envelope(&envelope, key, value)
+                    pkg_lock_assign_envelope(envelope, key, value)
                     self.envelope = Val(envelope)
                 }
             }
@@ -804,7 +804,7 @@ PartialToolchain: struct {
             "id" -> self.id = Val(pkg_lock_unescape(value))
             "channel" -> self.channel = Val(pkg_lock_unescape(value))
             "version" -> self.version = Val(pkg_lock_unescape(value))
-            else -> pkg_lock_assign_envelope(&self.envelope, key, value)
+            else -> pkg_lock_assign_envelope(self.envelope, key, value)
         }
     }
 
@@ -828,7 +828,7 @@ PartialBrowser: struct {
             "binary" -> self.binary = Val(pkg_lock_unescape(value))
             "protocol" -> self.protocol = Val(pkg_lock_unescape(value))
             "size" -> self.size = Val(pkg_lock_parse_unsigned(pkg_lock_trim_quotes(value), 9223372036854775807) ?? return Err(LockError.Invalid("invalid browser size: {value}")))
-            else -> pkg_lock_assign_envelope(&self.envelope, key, value)
+            else -> pkg_lock_assign_envelope(self.envelope, key, value)
         }
     }
 
@@ -995,13 +995,13 @@ pkg_lock_kv_field: fn(inline: String, key: String) -> String? Never! {
             quoted && code == 92 -> escaped = true
             code == 34 -> quoted = !quoted
             code == 44 && !quoted -> {
-                &parts.push(pkg_bytes_text(raw, start, index))
+                parts.push(pkg_bytes_text(raw, start, index))
                 start = index + 1
             }
             else -> {}
         }
     }
-    &parts.push(pkg_bytes_text(raw, start, raw.len()))
+    parts.push(pkg_bytes_text(raw, start, raw.len()))
     loop part_text in parts {
         part: part_text.trim()
         if !part.starts_with(key) -> next
@@ -1035,7 +1035,7 @@ pkg_lock_parse_string_array: fn(input: String) -> [String] LockError! {
         code: Int.from_u8(byte)
         if {
             escaped -> {
-                &current.push(if code == {
+                current.push(if code == {
                     110 -> U8{10}
                     114 -> U8{13}
                     116 -> U8{9}
@@ -1052,13 +1052,13 @@ pkg_lock_parse_string_array: fn(input: String) -> [String] LockError! {
             }
             code == 44 && !quoted -> {
                 if !item_started -> return Err(LockError.Invalid("invalid string array: {inner}"))
-                &values.push(pkg_lock_array_item(current, item_quoted))
+                values.push(pkg_lock_array_item(current, item_quoted))
                 current = [U8]{}
                 item_started = false
                 item_quoted = false
             }
             quoted -> {
-                &current.push(byte)
+                current.push(byte)
                 item_started = true
             }
             else -> {
@@ -1067,14 +1067,14 @@ pkg_lock_parse_string_array: fn(input: String) -> [String] LockError! {
                     index += width
                     next
                 }
-                &current.push(byte)
+                current.push(byte)
                 item_started = true
             }
         }
         index += 1
     }
     if quoted || escaped || !item_started -> return Err(LockError.Invalid("invalid string array: {inner}"))
-    &values.push(pkg_lock_array_item(current, item_quoted))
+    values.push(pkg_lock_array_item(current, item_quoted))
     Ok(values)
 }
 
@@ -1100,7 +1100,7 @@ pkg_lock_unescape: fn(input: String) -> String Never! {
         code: Int.from_u8(byte)
         if {
             escaped -> {
-                &out.push(if code == {
+                out.push(if code == {
                     110 -> U8{10}
                     114 -> U8{13}
                     116 -> U8{9}
@@ -1109,10 +1109,10 @@ pkg_lock_unescape: fn(input: String) -> String Never! {
                 escaped = false
             }
             code == 92 -> escaped = true
-            else -> &out.push(byte)
+            else -> out.push(byte)
         }
     }
-    if escaped -> &out.push(U8{92})
+    if escaped -> out.push(U8{92})
     pkg_bytes_text(out, 0, out.len())
 }
 

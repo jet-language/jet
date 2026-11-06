@@ -42,11 +42,11 @@ jet_cli_fix_collect: fn(file: String, source: String, all: Bool) -> JetCLIFixQue
                 if diagnostic.origin == .Val(origin) {
                     if origin.path != canonical || origin.source != source -> next
                 }
-                &diagnostics.push(diagnostic)
+                diagnostics.push(diagnostic)
             }
             // A script runs with every right, so it needs no authority block.
             authority: jet_cli_application_authority(result, jet_cli_source_invocation(source, None))
-            if jet_cli_inline_grant_refusal(authority, file, source, "run") == .Val(report) -> &diagnostics.push(report)
+            if jet_cli_inline_grant_refusal(authority, file, source, "run") == .Val(report) -> diagnostics.push(report)
         }
     }
     fixes: jet_cli_collect_fixes_from_diagnostics(diagnostics, source)
@@ -115,12 +115,12 @@ jet_cli_fix_checked: fn(file: String, source: String, fixes: [JetCLIFix], baseli
     result := JetCLIFixApply{source: source, applied: 0, deferred: whole.deferred}
     loop fix in fixes {
         trial_fixes := kept.copy()
-        &trial_fixes.push(fix)
+        trial_fixes.push(fix)
         trial: jet_cli_fix_apply_non_overlapping(source, trial_fixes)
         if trial.source == result.source -> next
         errors: jet_cli_fix_errors(file, trial.source)
         if errors.len() <= baseline.len() {
-            &kept.push(fix)
+            kept.push(fix)
             result = JetCLIFixApply{source: trial.source, applied: trial.applied, deferred: whole.deferred}
             next
         }
@@ -131,7 +131,7 @@ jet_cli_fix_checked: fn(file: String, source: String, fixes: [JetCLIFix], baseli
                 break
             }
         }
-        jet_cli_fix_skip(&rejected, fix, "the edited file no longer checks: {added}")
+        jet_cli_fix_skip(rejected, fix, "the edited file no longer checks: {added}")
     }
     result
 }
@@ -141,7 +141,7 @@ jet_cli_fix_skip: fn(skips: &[JetCLIFixSkip], fix: JetCLIFix, reason: String) Ne
     loop skip in skips {
         if skip.edit.span.start == fix.edit.span.start && skip.edit.span.end == fix.edit.span.end && skip.edit.new_text == fix.edit.new_text -> return
     }
-    &skips.push(JetCLIFixSkip{title: fix.title, edit: fix.edit, reason: reason})
+    skips.push(JetCLIFixSkip{title: fix.title, edit: fix.edit, reason: reason})
 }
 
 // `jet fix --markers inside|above`: write every declaration's whole marker
@@ -153,7 +153,7 @@ jet_cli_fix_markers: fn(before: String, inside: Bool) -> JetCLIFixApply {
     round := 0
     loop round < 16 {
         fixes := [JetCLIFix]{}
-        loop edit in parser_marker_placement_edits(source.bytes(), inside) -> &fixes.push(JetCLIFix{title: "move the markers", edit: edit, applicability: DiagnosticFixApplicability.Safe, safety: DiagnosticFixSafety.BehaviorPreserving})
+        loop edit in parser_marker_placement_edits(source.bytes(), inside) -> fixes.push(JetCLIFix{title: "move the markers", edit: edit, applicability: DiagnosticFixApplicability.Safe, safety: DiagnosticFixSafety.BehaviorPreserving})
         if fixes.len() == 0 -> break
         applied: jet_cli_fix_apply_non_overlapping(source, fixes)
         if applied.source == source -> break
@@ -181,7 +181,7 @@ jet_cli_fix_run: fn(file: String, dry_run: Bool, all: Bool, markers: String, col
     skips := [JetCLIFixSkip]{}
     if !all && markers == "" {
         loop fix in all_fixes {
-            if jet_cli_safe_fixes([JetCLIFix]{fix}).len() == 0 -> jet_cli_fix_skip(&skips, fix, "needs review: `jet fix --all` applies it")
+            if jet_cli_safe_fixes([JetCLIFix]{fix}).len() == 0 -> jet_cli_fix_skip(skips, fix, "needs review: `jet fix --all` applies it")
         }
     }
     rejected := [JetCLIFixSkip]{}
@@ -219,7 +219,7 @@ jet_cli_fix_run: fn(file: String, dry_run: Bool, all: Bool, markers: String, col
             round += 1
         }
     }
-    loop skip in rejected -> &skips.push(skip)
+    loop skip in rejected -> skips.push(skip)
     // Each rolled-back fix, with the error its edit adds.
     rolled := ""
     loop skip in rejected -> rolled = "{rolled}{file}: rolled back the fix at {skip.edit.span.start}..{skip.edit.span.end} -> `{skip.edit.new_text}`: {skip.reason}\n"

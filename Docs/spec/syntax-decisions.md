@@ -55,7 +55,8 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, recordin
 | `!` | error-contract mark after its error type (`E!`, `(A \| B)!`); deny-only root in an effect row | `D-TYPE-SUFFIX1=A; D-EFF4` |
 | `?` | optional type mark after its type (`T?`) | `D-TYPE-SUFFIX1=A` |
 | `??` | fallback | `D-RESULT-DECON2` |
-| `&place.method(…) / ^place.method(…)` | receiver place mark: `&`/`^` on the maximal named place a method call writes or takes; fresh receivers stay unmarked; a line starting `&name`/`^name` begins a statement | `D-CAP-RECEIVER1=D` |
+| `x.move()` | an early take: a compiler-owned method that moves a named place out before its last use; a call that takes is written plain because its signature declares `&&T` or `&&self` | `D-COPY-MOVE-SPELL1=A; D-CALLSITE-MARK2=A` |
+| `&&T / &&self` | take mark in a signature, and `task &&name` for a task capture; `&T` / `&self` is the write mark; calls stay unmarked | `D-MOVE-SIGIL1=A; D-CALLSITE-MARK2=A` |
 | `&self.field / &self.[a, b]` | stated receiver field footprint: the record fields a method may read or change, checked against its body (E0231) and published in the API snapshot; reuses member spread `.[` | `D-METHOD-FOOTPRINT1=A; D-SPREAD1=A` |
 | `T{expr}` | field default | `D-DEFAULT-SHAPE1` |
 | `Name{"…"}` | checked text head | `S8; D-CHECKED-TEXT1` |
@@ -2771,6 +2772,10 @@ D-MEM1/S3).
 and `~x` are historical text in this frozen entry, not current syntax. The
 current copy form is `x.copy()`; the retired forms teach E0991 and E0941.
 
+*Supersession (D-CALLSITE-MARK2=A, D-MOVE-SIGIL1=A):* the take mark is `&&T`
+and `&&self`; `^T` and the mirrored call-site marks in this frozen entry are
+historical text. Calls are written plain.
+
 *History:* D-CAP7's original text (pre-2026-07-03) had a third visible
 parameter sigil `~T` (edit/mutate), a fourth `*T` in parameter position, and
 an `Infer` tier where a bare `T` param elevated by body usage. D-MEM1
@@ -2927,6 +2932,10 @@ evaluation order, one place evaluation, two-phase builtin borrowing, and move
 checks are unchanged. Rationale: one value-side mark position for receivers,
 arguments, and windows, with no new tokens.
 
+*Supersession (D-CALLSITE-MARK2=A):* this entry is historical. Calls carry no
+mark on receivers or arguments, and E0224 and E0226 are deleted; the marks
+that remain are listed under D-CALLSITE-MARK2=A.
+
 **D-COPY-DEFAULT1=A — the compiler chooses, a mark gives exact control**
 *(ratified 2026-09-29, card #3741; supersedes the 2026-09-28 P5 direction of
 card #3714)*: an unmarked last use of a name moves with no mark, in every
@@ -2948,6 +2957,37 @@ one-pass iterators, consume duties, tasks) and code under `copies: .Explicit`
 keep E0121 on the later use. A share is materialized as a copy at the share
 site today; copy on first write and inferred kept parameters complete the
 model in later cards.
+
+*Supersession (D-CALLSITE-MARK2=A, D-MOVE-SIGIL1=A):* the `^place` value
+form and the call-site `&`/`^` marks above are historical text. An early move
+is `x.move()`, and a call that takes or writes is written plain.
+
+**D-CALLSITE-MARK2=A — marks live in signatures** *(ratified 2026-11-06, card
+#6586; supersedes the call-site half of D-MEM1, D-CAP-RECEIVER1=D and the
+`^` value form of D-COPY-DEFAULT1=A)*: a signature says what a function does
+to each input, and every call is written plain: `bump(score)`,
+`items.push(3)`, `archive(title)`, `buf.seal()`. A mark stays only where no
+signature decides: a write window bound to a name (`edit: &values[2..3]`,
+`first := &counts[0]`), a match that writes into its subject
+(`if &shape == { … }`), and a task that takes a name (`task &&name { … }`).
+The checks read the signature: a call that edits a value needs it declared
+with `:=`, two overlapping inputs with one write stay E0204, a value passed to
+a take parameter and used again is an error at the later use naming the call, a
+part of a list passed to a writing parameter is a write window by itself, and
+a call never copies on its own. An early move is `x.move()`
+(D-COPY-MOVE-SPELL1=A); a plain field passed to a take parameter is written
+`a.b.move()`. The retired call marks are ordinary parse or type errors; no
+code teaches them (E0203, E0224, E0226, E0434 and E0435 are deleted).
+
+**D-MOVE-SIGIL1=A — `&&` marks a take** *(ratified 2026-11-06, card #6586)*:
+`&T` in a signature means the function may change the input; `&&T` means it
+takes the input for good: `c: &&T`, `seal: fn(&&self)`,
+`gzclose: fn(file: &&GzFile) -> Int = "gzclose"`, `task &&job { … }`. The
+take mark appears only in a parameter type, before `self`, and after `task`,
+so it never meets logical `&&`, which sits between two values. `^` has no
+grammar meaning left (no xor and no power; the bitwise method is
+`bit_xor`) and stays an ordinary error until a ballot gives it a job
+(D-SIGIL-FREED2).
 
 **D-PARAM-CONST1=A — read is Jet's const** *(ratified 2026-10-06)*: Jet has
 no `const` or frozen parameter mark. An unmarked parameter is deep,

@@ -61,7 +61,7 @@ kit_steps_json_collect_spans: fn(bytes: [U8], tree: Dyn, parts: [String], depth:
     if depth == parts.len() {
         actual: kit_steps_json_type(tree)
         if actual != kind && !(kind == "number" && actual == "int") -> return Val("JSON normalization type differs: expected {kind}, got {actual}")
-        &spans.push(KitJSONSpan{start: start, end: kit_steps_json_span_end(bytes, start), normalizer: normalizer})
+        spans.push(KitJSONSpan{start: start, end: kit_steps_json_span_end(bytes, start), normalizer: normalizer})
         return None
     }
     part: parts[depth]
@@ -77,7 +77,7 @@ kit_steps_json_collect_spans: fn(bytes: [U8], tree: Dyn, parts: [String], depth:
                 child: kit_steps_json_space(bytes, kit_steps_json_space(bytes, key_end) + 1)
                 if part == (".{key}") {
                     value: tree.get(key) ?? return Val("JSON normalization member missing: {part}")
-                    return kit_steps_json_collect_spans(bytes, value, parts, depth + 1, child, kind, normalizer, &spans)
+                    return kit_steps_json_collect_spans(bytes, value, parts, depth + 1, child, kind, normalizer, spans)
                 }
                 position = kit_steps_json_space(bytes, kit_steps_json_span_end(bytes, child))
                 if position < bytes.len() && bytes[position] == (U8{44}) -> position = kit_steps_json_space(bytes, position + 1)
@@ -90,7 +90,7 @@ kit_steps_json_collect_spans: fn(bytes: [U8], tree: Dyn, parts: [String], depth:
             position := kit_steps_json_space(bytes, start + 1)
             loop (index, item) in items {
                 if wanted == -1 || index == wanted {
-                    error: kit_steps_json_collect_spans(bytes, item, parts, depth + 1, position, kind, normalizer, &spans)
+                    error: kit_steps_json_collect_spans(bytes, item, parts, depth + 1, position, kind, normalizer, spans)
                     if error != None -> return error
                     if wanted != -1 -> return None
                 }
@@ -120,13 +120,13 @@ kit_steps_json_normalize_lines: fn(text: String, stream: String, rules: [KitJSON
     pieces := [String]{}
     loop line in text.split("\n") {
         if line.trim() == "" {
-            &pieces.push(line.copy())
+            pieces.push(line.copy())
             next
         }
         tree: json.parse(line) ?? return KitJSONResult{text: "", error: "JSON normalization parse: {error}"}
         normalized: kit_steps_json_normalize_document(line, tree, stream, rules)
         if normalized.error != "" -> return normalized
-        &pieces.push(normalized.text)
+        pieces.push(normalized.text)
     }
     KitJSONResult{text: pieces.join("\n"), error: ""}
 }
@@ -138,23 +138,23 @@ kit_steps_json_normalize_document: fn(text: String, tree: Dyn, stream: String, r
     loop (index, rule) in rules {
         if rule.stream != stream -> next
         parts: kit_steps_json_path(rule.path) ?? return KitJSONResult{text: "", error: "invalid JSON normalization path"}
-        error: kit_steps_json_collect_spans(bytes, tree, parts, 0, start, rule.kind, index, &spans)
+        error: kit_steps_json_collect_spans(bytes, tree, parts, 0, start, rule.kind, index, spans)
         if error == {
             .Val(message) -> return KitJSONResult{text: "", error: message}
             .None -> {}
         }
     }
-    &spans.sort_by(span -> span.start)
+    spans.sort_by(span -> span.start)
     pieces := [String]{}
     position := 0
     loop span in spans {
         // An outer selected container already replaces any selected child.
         if span.start < position -> next
-        &pieces.push(String.from_bytes(bytes.slice(position, span.start)) ?? panic("JSON span is not UTF-8"))
+        pieces.push(String.from_bytes(bytes.slice(position, span.start)) ?? panic("JSON span is not UTF-8"))
         kind: rules[span.normalizer].kind
-        &pieces.push("\"<<{kind}>>\"")
+        pieces.push("\"<<{kind}>>\"")
         position = span.end
     }
-    &pieces.push(String.from_bytes(bytes.slice(position, bytes.len())) ?? panic("JSON span is not UTF-8"))
+    pieces.push(String.from_bytes(bytes.slice(position, bytes.len())) ?? panic("JSON span is not UTF-8"))
     KitJSONResult{text: pieces.join(""), error: ""}
 }

@@ -121,7 +121,7 @@ pkg_dependency_boundary_span: fn(program: EffectBudgetProgram, dependency: Strin
 // whose source root contains it, else `root`.
 pkg_effect_module_owner: fn(program: EffectBudgetProgram, path: String) -> String Never! {
     names := program.dep_roots.keys().to_list()
-    &names.sort()
+    names.sort()
     loop name in names {
         if pkg_authority_path_within(path, program.dep_roots[name]) -> return name
     }
@@ -142,12 +142,12 @@ pkg_compute_package_effects: fn(program: EffectBudgetProgram, solved: [String: [
             aggregate.boundary_span = pkg_dependency_boundary_span(program, owner)
         }
         loop function_key in loaded.function_keys {
-            pkg_collect_effects_for_key("{loaded.alias}::{function_key}", reachable, solved, summaries, &aggregate)
+            pkg_collect_effects_for_key("{loaded.alias}::{function_key}", reachable, solved, summaries, aggregate)
         }
         by_package[owner] = aggregate
     }
     names := by_package.keys().to_list()
-    &names.sort()
+    names.sort()
     out := [PackageEffects]{}
     loop name in names {
         entry := by_package[name]
@@ -158,7 +158,7 @@ pkg_compute_package_effects: fn(program: EffectBudgetProgram, solved: [String: [
             witness: pkg_effect_witness(program, site) ?? next
             entry.effect_witnesses[site] = witness
         }
-        &out.push(entry)
+        out.push(entry)
     }
     out
 }
@@ -199,8 +199,8 @@ pkg_effect_entry_candidates: fn(program: EffectBudgetProgram, summaries: [String
     entry_module: program.modules[program.entry]
     candidates := [String]{"{entry_module.alias}::{default_entry}", default_entry}
     if default_entry == "run" && entry_module.has_build_entry {
-        &candidates.push("{entry_module.alias}::{EFFECT_BUILD_ENTRY}")
-        &candidates.push(EFFECT_BUILD_ENTRY)
+        candidates.push("{entry_module.alias}::{EFFECT_BUILD_ENTRY}")
+        candidates.push(EFFECT_BUILD_ENTRY)
     }
     loop candidate in candidates {
         if summaries.has_key(candidate) -> return [String]{candidate}
@@ -212,11 +212,11 @@ pkg_effect_entry_reachable_keys: fn(program: EffectBudgetProgram, summaries: [St
     pending := pkg_effect_entry_candidates(program, summaries, default_entry)
     reachable := [String: Bool]{}
     loop pending.len() > 0 {
-        key: &pending.pop() ?? break
+        key: pending.pop() ?? break
         summary: summaries.get(key) ?? next
         if reachable.has_key(key) -> next
         reachable[key] = true
-        loop edge in summary.edges -> &pending.push(edge)
+        loop edge in summary.edges -> pending.push(edge)
     }
     reachable
 }
@@ -232,15 +232,15 @@ pkg_collect_effects_for_key: fn(key: String, reachable: [String: Bool], solved: 
     if !pkg_effect_key_is_reachable(key, reachable) -> return
     set: solved.get(key) ?? return
     loop effect_name in set {
-        &aggregate.effects.push(effect_name)
+        aggregate.effects.push(effect_name)
         if !aggregate.effect_sites.has_key(effect_name) {
             seen := [String: Bool]{}
-            aggregate.effect_sites[effect_name] = pkg_effect_site(key, effect_name, solved, summaries, &seen)
+            aggregate.effect_sites[effect_name] = pkg_effect_site(key, effect_name, solved, summaries, seen)
         }
     }
     seen := [String: Bool]{}
-    site: pkg_panic_site(key, summaries, &seen) ?? return
-    &aggregate.panic_sites.push(site)
+    site: pkg_panic_site(key, summaries, seen) ?? return
+    aggregate.panic_sites.push(site)
 }
 
 // The deepest function on a static path from `key` that directly performs
@@ -256,7 +256,7 @@ pkg_effect_site: fn(key: String, effect_name: String, solved: [String: [String]]
     loop callee in authority_holds(summary.edges) {
         effects: solved.get(callee) ?? next
         if authority_covers_any(effects, effect_name) || pkg_effect_any_covers(effects, effect_name) {
-            return pkg_effect_site(callee, effect_name, solved, summaries, &seen)
+            return pkg_effect_site(callee, effect_name, solved, summaries, seen)
         }
     }
     key.copy()
@@ -281,7 +281,7 @@ pkg_panic_site: fn(key: String, summaries: [String: PackageEffectSummary], seen:
         if authority_root(direct) == AUTHORITY_PANIC_ROOT -> return Val(key)
     }
     loop callee in authority_holds(summary.edges) {
-        site: pkg_panic_site(callee, summaries, &seen) ?? next
+        site: pkg_panic_site(callee, summaries, seen) ?? next
         return Val(site)
     }
     None
@@ -291,7 +291,7 @@ pkg_panic_site: fn(key: String, summaries: [String: PackageEffectSummary], seen:
 pkg_effect_summary_line: fn(entries: [PackageEffects]) -> String Never! {
     all := [String]{}
     loop entry in entries {
-        loop effect_name in entry.effects -> &all.push(effect_name)
+        loop effect_name in entry.effects -> all.push(effect_name)
     }
     all = authority_holds(all)
     if all.len() == 0 -> return "effects: none"
@@ -344,7 +344,7 @@ pkg_effect_enforce: fn(entries: [PackageEffects], manifest: PackageFacts) -> [Di
             if !outside_allow && !inside_deny -> next
             if is_panic {
                 site: if package.panic_sites.len() > 0 -> package.panic_sites[0] else -> "a reachable dependency function"
-                &diagnostics.push(pkg_e1220_panic(package.name, site, package.boundary_span))
+                diagnostics.push(pkg_e1220_panic(package.name, site, package.boundary_span))
             } else {
                 site: package.effect_sites.get(effect_name)
                 diagnostic := pkg_e1220_at(package.name, effect_name, site)
@@ -353,14 +353,14 @@ pkg_effect_enforce: fn(entries: [PackageEffects], manifest: PackageFacts) -> [Di
                         if package.effect_witnesses.get(function) == {
                             .Val(witness) -> {
                                 diagnostic.span = Val(witness.span)
-                                diagnostic = diagnostic_with_source_path(^diagnostic, witness.path, 0)
+                                diagnostic = diagnostic_with_source_path(diagnostic, witness.path, 0)
                             }
                             .None -> {}
                         }
                     }
                     .None -> {}
                 }
-                &diagnostics.push(diagnostic)
+                diagnostics.push(diagnostic)
             }
         }
     }

@@ -20,8 +20,8 @@ jet_cli_external_fmt_finish: fn(project_dir: String, files: [String], staged: [S
     afters := [[U8]]{}
     loop index in 0..<files.len() {
         after: cli_files.read_bytes(staged[index]) ?? return jet_cli_external_fmt_fail("E1340", "environment formatter did not produce readable output", jet_cli_io_error_text(err), "check the formatter package and retry", color, JET_DRIVER_EXIT_USER_ERROR)
-        if befores[index] != after -> &changed.push(index)
-        &afters.push(after)
+        if befores[index] != after -> changed.push(index)
+        afters.push(after)
     }
     if changed.len() == 0 -> return jet_cli_external_fmt_ok(json)
     if check_only {
@@ -32,9 +32,9 @@ jet_cli_external_fmt_finish: fn(project_dir: String, files: [String], staged: [S
             if json {
                 if show_diff {
                     diff: jet_cli_external_fmt_diff(path, befores[index], afters[index])
-                    &entries.push(jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("path", jet_cli_status_text(path)), jet_cli_status_field("diff", jet_cli_status_text(diff))}))
+                    entries.push(jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("path", jet_cli_status_text(path)), jet_cli_status_field("diff", jet_cli_status_text(diff))}))
                 } else {
-                    &entries.push(jet_cli_status_text(path))
+                    entries.push(jet_cli_status_text(path))
                 }
             } else {
                 stdout = "{stdout}{path}\n"

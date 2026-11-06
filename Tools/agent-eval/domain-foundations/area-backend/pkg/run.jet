@@ -92,7 +92,7 @@ contract_check: fn(document: String) Never! -[]> {
     }
 }
 
-state_label: fn(delivery: ^Delivery) -[DB]> String Never! {
+state_label: fn(delivery: &&Delivery) -[DB]> String Never! {
     state: delivery.status() ?? panic("delivery status")
     return state.show()
 }
@@ -108,19 +108,19 @@ load_test: fn(address: String) Never! {
     workers := [Task<()>]{}
     loop _user in 1..1000 {
         tx: sender.copy()
-        &workers.push(task {
+        workers.push(task {
             load_user(address, tx) ?? panic("load worker failed")
         })
     }
     loop workers.len() > 0 {
-        worker: &workers.pop() ?? panic("missing load worker")
+        worker: workers.pop() ?? panic("missing load worker")
         worker.join() ?? panic("load worker failed")
     }
     sender.close()
     samples := [Int]{}
-    loop value in samples_channel -> &samples.push(value)
+    loop value in samples_channel -> samples.push(value)
     if samples.len() != 1000 -> panic("load test dropped requests")
-    &samples.sort()
+    samples.sort()
     p99: samples[990]
     if p99 > 1000 -> panic("p99 exceeded 1000ms")
     print("load:vus=1000 p99-ms={p99}")
@@ -185,7 +185,7 @@ run: fn() (HTTPError | IOError | NetError | TaskFailure | DBError)! {
     order_body: order_response.json<OrderResponse>() ?? panic("order decode")
     print("queued:{order_body.queued}")
     delivery: tree.send_durable(queue_endpoint, "durable-order", key: "d1") ?? panic("durable send")
-    print("delivery:{state_label(^delivery)}")
+    print("delivery:{state_label(delivery)}")
     load_test(address)
     message: tree.receive(queue_endpoint) ?? panic("queue receive")
     print("worker:{message}")

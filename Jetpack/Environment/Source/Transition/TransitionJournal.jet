@@ -41,7 +41,7 @@ env_transition_components: fn(path: String) -> [String] Never! {
     parts := [String]{}
     loop part in path.split("/") {
         if part == "" || part == "." -> next
-        &parts.push(part)
+        parts.push(part)
     }
     parts
 }
@@ -98,7 +98,7 @@ env_transition_read_bounded: fn(path: String) -[FS]> [U8] EnvironmentError! {
     loop {
         chunk: reader.read(TRANSITION_READ_CHUNK) ?? return Err(env_transition_error("couldn't read {path}: {err}"))
         if chunk.len() == 0 -> break
-        loop byte in chunk -> &bytes.push(byte)
+        loop byte in chunk -> bytes.push(byte)
         if bytes.len() > TRANSITION_MAX_JOURNAL_BYTES {
             return Err(env_transition_error("{path} exceeded the {TRANSITION_MAX_JOURNAL_BYTES}-byte transition limit while being read"))
         }
@@ -243,9 +243,9 @@ env_transition_sync_directory: fn(path: String) IOError! -[FS, Env]> {
 env_transition_journal_path: fn(root: String, operation: String, changes: [TransitionFileChange]) -> String Never! {
     identity := operation.bytes()
     loop change in changes {
-        loop byte in change.relative.bytes() -> &identity.push(byte)
+        loop byte in change.relative.bytes() -> identity.push(byte)
         if change.before == .Val(bytes) {
-            loop byte in bytes -> &identity.push(byte)
+            loop byte in bytes -> identity.push(byte)
         }
     }
     suffix: pkg_sha256_hex(identity)
@@ -267,7 +267,7 @@ env_transition_encode_journal: fn(journal: TransitionJournal) -> [U8] Never! {
         "after={journal.after_fingerprint}\n"
     }
     loop change in journal.changes {
-        &lines.push("file={change.relative}|{env_transition_encode_state(change.before)}|{env_transition_encode_state(change.after)}\n")
+        lines.push("file={change.relative}|{env_transition_encode_state(change.before)}|{env_transition_encode_state(change.after)}\n")
     }
     lines.join("").bytes()
 }
@@ -307,7 +307,7 @@ env_transition_read_journal: fn(path: String) -[FS]> TransitionJournal Environme
         if parts.len() > 3 {
             return Err(env_transition_error("journal {path} has an extra file field"))
         }
-        &changes.push(TransitionFileChange{relative: relative, before: before, after: after})
+        changes.push(TransitionFileChange{relative: relative, before: before, after: after})
     }
     if changes.len() == 0 {
         return Err(env_transition_error("journal {path} has no file records"))
@@ -363,7 +363,7 @@ env_transition_decode_state: fn(value: String?, path: String) -> [U8]? Environme
     loop index in 0..<(hex.len() /% 2) {
         high: env_files_hex_value(Int.from_u8(hex[index * 2]))
         low: env_files_hex_value(Int.from_u8(hex[index * 2 + 1]))
-        &bytes.push(U8{high * 16 + low})
+        bytes.push(U8{high * 16 + low})
     }
     Ok(Val(bytes))
 }

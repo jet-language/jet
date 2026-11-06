@@ -4,14 +4,14 @@ use files: core.files
 replace_closed_temp: fn() -> String {
     owner: files.temp_file("opaque-close-replacement") ?? panic("temp")
     path: owner.path
-    close(^owner)
+    close(owner)
     files.write(path, "replacement") ?? panic("replace temp")
     path
 }
 
 replace_closed_lock: fn(path: String) {
     owner: files.lock(path) ?? panic("lock")
-    close(^owner)
+    close(owner)
     files.write(path, "replacement") ?? panic("replace lock")
 }
 
@@ -19,24 +19,24 @@ run: fn() {
     temp: files.temp_file("opaque-manual-close") ?? panic("temp")
     temp_path: temp.path
     print(files.exists(temp_path))
-    close(^temp)
+    close(temp)
     print(!files.exists(temp_path))
 
     path: files.join(".", "reader.txt")
     writer: files.create(path) ?? panic("create")
     writer.write_line("payload") ?? panic("write")
-    &writer.flush() ?? panic("flush")
-    close(^writer)
+    writer.flush() ?? panic("flush")
+    close(writer)
     reader: files.open(path) ?? panic("open")
     print(reader.path == path)
     line: reader.read_line() ?? panic("read")
-    close(^reader)
+    close(reader)
     print(line == "payload")
 
     lock_path: files.join(".", "owner.lock")
     lock: files.lock(lock_path) ?? panic("lock")
     print(files.exists(lock_path))
-    close(^lock)
+    close(lock)
     print(files.exists(lock_path))
 
     // The old owner's lexical exit must not delete a new ordinary file at

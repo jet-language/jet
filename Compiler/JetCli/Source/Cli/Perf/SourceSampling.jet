@@ -18,7 +18,7 @@ jet_cli_perf_source: fn(path: String, text: String) -> JetCLIPerfSource Never! {
     run_span := Span?{None}
     loop item in program.items {
         if item == .Func(function) {
-            &identity.symbols.push((kind: "fn", name: function.name))
+            identity.symbols.push((kind: "fn", name: function.name))
             if function.name == "run" -> run_span = Val(function.span)
         }
     }
@@ -49,8 +49,8 @@ jet_cli_perf_source_profile: fn(source: JetCLIPerfSource, wall_samples: U64, cpu
     rows := [TraceProfileRow]{}
     wall_count: if wall_samples < (U64{4096}) -> wall_samples else -> U64{4096}
     cpu_count: if cpu_samples < (U64{4096}) -> cpu_samples else -> U64{4096}
-    if wall_samples > (U64{0}) -> &rows.push(TraceProfileRow{clock: "wall", execution_count: None, sample_count: wall_count, sample_weight: wall_count, source: location, symbol: symbol})
-    if cpu_samples > (U64{0}) -> &rows.push(TraceProfileRow{clock: "cpu", execution_count: None, sample_count: cpu_count, sample_weight: cpu_count, source: location, symbol: symbol})
+    if wall_samples > (U64{0}) -> rows.push(TraceProfileRow{clock: "wall", execution_count: None, sample_count: wall_count, sample_weight: wall_count, source: location, symbol: symbol})
+    if cpu_samples > (U64{0}) -> rows.push(TraceProfileRow{clock: "cpu", execution_count: None, sample_count: cpu_count, sample_weight: cpu_count, source: location, symbol: symbol})
     limited: truncated || wall_samples > U64{4096} || cpu_samples > U64{4096}
     status: if limited -> "truncated" else if rows.len() == 0 -> "no_samples" else -> "captured"
     coverage: if rows.len() == 0 && !limited -> "none" else -> "partial"

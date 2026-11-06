@@ -7,12 +7,12 @@ use {
 }
 filled: fn(value: Int, count: Int) -> [U8] {
     out := [U8]{}
-    loop _ in 0..<count -> &out.push((U8{value}))
+    loop _ in 0..<count -> out.push((U8{value}))
     out
 }
 cut: fn(bytes: [U8], start: Int, end: Int) -> [U8] {
     out := [U8]{}
-    loop i in start..<end -> &out.push(bytes[i])
+    loop i in start..<end -> out.push(bytes[i])
     out
 }
 hex: fn(text: String) -> [U8] {
@@ -23,7 +23,7 @@ hex: fn(text: String) -> [U8] {
         b: Int.from_u8(raw[2 * i + 1])
         high: if a <= 57 -> a - 48 else -> a - 87
         low: if b <= 57 -> b - 48 else -> b - 87
-        &out.push((U8{high * 16 + low}))
+        out.push((U8{high * 16 + low}))
     }
     out
 }
@@ -48,20 +48,20 @@ store_little: fn(bytes: &[U8], at: Int, width: Int, value: Int) {
             hostile[last] = (U8{Int.from_u8(hostile[last]).bit_xor(1)})
         }
         if mode == 1 -> hostile = cut(canonical, 0, canonical.len() - 1)
-        if mode == 2 -> &hostile.push(U8{0})
+        if mode == 2 -> hostile.push(U8{0})
         if mode == 3 -> hostile[4] = (U8{1})
         if mode == 4 -> hostile[5] = (U8{2})
         if mode == 5 -> hostile[6] = (U8{2})
         if mode == 6 -> hostile[7] = (U8{1})
-        if mode == 7 -> store_little(&hostile, 8, 4, 32 * 1024 * 1024 + 1)
-        if mode == 8 -> store_little(&hostile, 12, 8, 1099511627776 + 21 * 1048577 + 1)
-        if mode == 9 -> store_little(&hostile, 84, 4, 1)
-        if mode == 10 -> store_little(&hostile, 88, 2, 0)
-        if mode == 11 -> store_little(&hostile, 88, 2, 257)
-        if mode == 12 -> store_little(&hostile, 90, 4, 1)
+        if mode == 7 -> store_little(hostile, 8, 4, 32 * 1024 * 1024 + 1)
+        if mode == 8 -> store_little(hostile, 12, 8, 1099511627776 + 21 * 1048577 + 1)
+        if mode == 9 -> store_little(hostile, 84, 4, 1)
+        if mode == 10 -> store_little(hostile, 88, 2, 0)
+        if mode == 11 -> store_little(hostile, 88, 2, 257)
+        if mode == 12 -> store_little(hostile, 90, 4, 1)
         if mode == 13 -> hostile[94] = (U8{Int.from_u8(hostile[94]).bit_xor(1)})
         if mode == 14 -> loop i in 110..<142 -> hostile[i] = (U8{0})
-        if mode == 15 -> store_little(&hostile, body_at, 4, 1048576 + 1)
+        if mode == 15 -> store_little(hostile, body_at, 4, 1048576 + 1)
         if mode == 16 -> hostile[body_at + 4] = (U8{2})
         input: "hostile-{mode}.jetc"
         output: "hostile-{mode}.out"

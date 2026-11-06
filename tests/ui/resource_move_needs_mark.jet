@@ -4,7 +4,7 @@
 // and once it is written a later use of the original is rejected.
 Res: struct { name: String }
 impl Res.Close {
-    close: fn(^self) { print("close {self.name}") }
+    close: fn(&&self) { print("close {self.name}") }
 }
 
 Holder: struct {
@@ -35,7 +35,7 @@ payload_unmarked: fn() -> Res? {
         .None -> {}
     }
     if out == {
-        .Val(moved) -> Val(^moved.res)
+        .Val(moved) -> Val(moved.res.move())
         .None -> None
     }
 }
@@ -59,7 +59,7 @@ arm_tail_unmarked: fn() -> Holder {
 
 field_marked_then_used: fn() -> Res {
     h: holder("marked")
-    out: Val(^h.res)
+    out: Val(h.res.move())
     print(h.res.name)
     out ?? panic("none")
 }
@@ -68,7 +68,7 @@ payload_marked_then_used: fn() -> Res? {
     carrier: Val(holder("payload marked"))
     if carrier == {
         .Val(found) -> {
-            out: Val(^found.res)
+            out: Val(found.res.move())
             print(found.res.name)
             out
         }
@@ -80,7 +80,7 @@ subject_used_after_payload_move: fn() -> Holder? {
     carrier: Val(holder("subject"))
     out := Holder?{None}
     if carrier == {
-        .Val(found) -> out = Val(^found)
+        .Val(found) -> out = Val(found.move())
         .None -> {}
     }
     print(present(carrier))

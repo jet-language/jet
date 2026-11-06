@@ -37,19 +37,19 @@ sema_trait_constants_check_trait: fn(graph: SemaRegistrationGraph, module_identi
     loop (index, constant) in definition.constants {
         loop earlier in 0..<index {
             if definition.constants[earlier].name == constant.name {
-                &diagnostics.push(sema_error("E0937", constant.name_span, "trait `{definition.name}` declares the constant `{constant.name}` twice", "a read `T.{constant.name}` names one constant of the trait", "remove one `{constant.name}` or rename it"))
+                diagnostics.push(sema_error("E0937", constant.name_span, "trait `{definition.name}` declares the constant `{constant.name}` twice", "a read `T.{constant.name}` names one constant of the trait", "remove one `{constant.name}` or rename it"))
                 break
             }
         }
         loop method in definition.methods {
             if method.name == constant.name {
-                &diagnostics.push(sema_error("E0937", constant.name_span, "trait `{definition.name}` has a constant and a method both named `{constant.name}`", "`T.{constant.name}` would name both", "rename the constant or the method"))
+                diagnostics.push(sema_error("E0937", constant.name_span, "trait `{definition.name}` has a constant and a method both named `{constant.name}`", "`T.{constant.name}` would name both", "rename the constant or the method"))
                 break
             }
         }
         value: constant.default ?? next
         ty: sema_checked_qualify_type(graph, constant.ty, module_identity)
-        sema_trait_constant_report(sema_trait_constant_eval(graph, value, ty, module_identity, module_identity), constant.name, constant.ty, definition.name, expr_span(value), &diagnostics)
+        sema_trait_constant_report(sema_trait_constant_eval(graph, value, ty, module_identity, module_identity), constant.name, constant.ty, definition.name, expr_span(value), diagnostics)
     }
 }
 
@@ -64,14 +64,14 @@ sema_trait_constants_check_impl: fn(graph: SemaRegistrationGraph, module_identit
     loop (index, constant) in constants {
         loop earlier in 0..<index {
             if constants[earlier].name == constant.name {
-                &diagnostics.push(sema_error("E0937", constant.name_span, "the impl gives the constant `{constant.name}` twice", "an implementation has one value for each trait constant", "remove one `{constant.name}: …`"))
+                diagnostics.push(sema_error("E0937", constant.name_span, "the impl gives the constant `{constant.name}` twice", "an implementation has one value for each trait constant", "remove one `{constant.name}: …`"))
                 break
             }
         }
     }
     name: trait_name ?? {
         loop constant in constants {
-            &diagnostics.push(sema_error("E0936", constant.name_span, "`impl {owner}` implements no trait, so it has no constant `{constant.name}`", "`name: value` gives a constant its trait declares", "move `{constant.name}` into the impl of the trait that declares it"))
+            diagnostics.push(sema_error("E0936", constant.name_span, "`impl {owner}` implements no trait, so it has no constant `{constant.name}`", "`name: value` gives a constant its trait declares", "move `{constant.name}` into the impl of the trait that declares it"))
         }
         return checked
     }
@@ -88,7 +88,7 @@ sema_trait_constants_check_impl: fn(graph: SemaRegistrationGraph, module_identit
             }
         }
         if !known {
-            &diagnostics.push(sema_error("E0936", constant.name_span, "`{constant.name}` is not a constant of `{name}`", "an implementation gives only the constants its trait declares", "remove `{constant.name}`, or declare `{constant.name}: Type` in `{name}`"))
+            diagnostics.push(sema_error("E0936", constant.name_span, "`{constant.name}` is not a constant of `{name}`", "an implementation gives only the constants its trait declares", "remove `{constant.name}`, or declare `{constant.name}: Type` in `{name}`"))
         }
     }
     loop declaration in declared {
@@ -103,19 +103,19 @@ sema_trait_constants_check_impl: fn(graph: SemaRegistrationGraph, module_identit
         if given >= 0 {
             result: sema_trait_constant_eval(graph, constants[given].value, ty, module_identity, trait_module)
             if result == .Value(value) {
-                &checked.push(TTraitConstantValue{name: declaration.name, ty: ty, value: value, span: constants[given].span})
+                checked.push(TTraitConstantValue{name: declaration.name, ty: ty, value: value, span: constants[given].span})
             } else {
-                sema_trait_constant_report(result, declaration.name, declaration.ty, name, expr_span(constants[given].value), &diagnostics)
+                sema_trait_constant_report(result, declaration.name, declaration.ty, name, expr_span(constants[given].value), diagnostics)
             }
             next
         }
         default_value: declaration.default ?? {
-            &diagnostics.push(sema_error("E0933", type_span, "`{owner}` implements `{name}` without its constant `{declaration.name}`", "`{name}` declares `{declaration.name}: {type_name(declaration.ty)}` with no default, so each implementation gives its value", "add `{declaration.name}: value` to the impl"))
+            diagnostics.push(sema_error("E0933", type_span, "`{owner}` implements `{name}` without its constant `{declaration.name}`", "`{name}` declares `{declaration.name}: {type_name(declaration.ty)}` with no default, so each implementation gives its value", "add `{declaration.name}: value` to the impl"))
             next
         }
         // A default that is not a value of its type is reported on the trait.
         if sema_trait_constant_eval(graph, default_value, ty, trait_module, trait_module) == .Value(value) {
-            &checked.push(TTraitConstantValue{name: declaration.name, ty: ty, value: value, span: declaration.span})
+            checked.push(TTraitConstantValue{name: declaration.name, ty: ty, value: value, span: declaration.span})
         }
     }
     checked
@@ -126,8 +126,8 @@ sema_trait_constants_check_impl: fn(graph: SemaRegistrationGraph, module_identit
 sema_trait_constant_report: fn(result: SemaTraitConstantEval, name: String, declared: Type, trait_name: String, span: Span, diagnostics: &[Diagnostic]) Never! {
     if result == {
         .Value(_) -> {}
-        .WrongType -> &diagnostics.push(sema_error("E0934", span, "the value of trait constant `{name}` is not of type `{type_name(declared)}`", "`{trait_name}` declares `{name}: {type_name(declared)}`, and each value has that type", "write a value of type `{type_name(declared)}`"))
-        .NotCompileTime -> &diagnostics.push(sema_error("E0935", span, "the value of trait constant `{name}` is not known at compile time", "a trait constant is read from its type without running code, so its value is a literal, an enum case or a list of them", "write the value as a literal, an enum case or a list literal"))
+        .WrongType -> diagnostics.push(sema_error("E0934", span, "the value of trait constant `{name}` is not of type `{type_name(declared)}`", "`{trait_name}` declares `{name}: {type_name(declared)}`, and each value has that type", "write a value of type `{type_name(declared)}`"))
+        .NotCompileTime -> diagnostics.push(sema_error("E0935", span, "the value of trait constant `{name}` is not known at compile time", "a trait constant is read from its type without running code, so its value is a literal, an enum case or a list of them", "write the value as a literal, an enum case or a list literal"))
     }
 }
 
@@ -245,7 +245,7 @@ sema_trait_constant_eval_option: fn(graph: SemaRegistrationGraph, expr: Expr, ty
     sema_trait_constant_present(sema_trait_constant_eval(graph, expr, inner, module_identity, type_module))
 }
 
-sema_trait_constant_present: fn(result: ^SemaTraitConstantEval) -> SemaTraitConstantEval Never! {
+sema_trait_constant_present: fn(result: &&SemaTraitConstantEval) -> SemaTraitConstantEval Never! {
     if result == .Value(value) -> return SemaTraitConstantEval.Value{value: TComptimeValue.Present{value: value.copy()}}
     result
 }
@@ -276,7 +276,7 @@ sema_trait_constant_eval_elements: fn(graph: SemaRegistrationGraph, values: [Exp
     loop item in values {
         result: sema_trait_constant_eval(graph, item, element, module_identity, type_module)
         if result == .Value(value) {
-            &checked.push(value.copy())
+            checked.push(value.copy())
         } else {
             return result
         }
@@ -292,7 +292,7 @@ sema_trait_constant_enum_variants: fn(graph: SemaRegistrationGraph, type_module:
     if graph.modules[row.module_index].nominals[row.row].kind != SemaRegistrationNominalKind.Enum -> return None
     names := [String]{}
     loop variant in graph.modules[row.module_index].nominals[row.row].variants {
-        if variant.payload == .Unit -> &names.push(variant.symbol.name.copy())
+        if variant.payload == .Unit -> names.push(variant.symbol.name.copy())
     }
     Val(names)
 }
@@ -343,7 +343,7 @@ sema_trait_constant_type_path: fn(base: Expr) -> String? Never! {
 // `Type.member` or `T.member` reading a trait constant; unhandled when
 // `member` names no trait constant of the type.
 sema_expression_trait_constant: fn(type_name: String, member: String, member_span: Span, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
-    if program.registration_graph == .Val(graph) -> return sema_expression_trait_constant_in(graph, type_name, member, member_span, span, expected, environment, program, &scopes, &context, &diagnostics)
+    if program.registration_graph == .Val(graph) -> return sema_expression_trait_constant_in(graph, type_name, member, member_span, span, expected, environment, program, scopes, context, diagnostics)
     SemaMethodSpecialCheck{handled: false, value: None}
 }
 
@@ -356,31 +356,31 @@ sema_expression_trait_constant_in: fn(graph: SemaRegistrationGraph, type_name: S
         generic = true
         loop bound in parameter.bounds {
             row: graph.nominal_symbol_rows.get(bound.key) ?? next
-            sema_trait_constant_collect(graph, row, graph.modules[row.module_index].module_identity, member, None, &found)
+            sema_trait_constant_collect(graph, row, graph.modules[row.module_index].module_identity, member, None, found)
         }
     }
     if !generic {
-        if sema_expression_type_symbol(&scopes, environment, program, type_name) == None -> return unhandled
+        if sema_expression_type_symbol(scopes, environment, program, type_name) == None -> return unhandled
         resolved: sema_type_graph_lookup_symbol_at(graph, sema_scope_caller_row(environment, graph), type_name) ?? return unhandled
         owner_row: sema_type_graph_resolved_nominal_row(graph, resolved) ?? return unhandled
         owner: sema_trait_constant_head(sema_checked_qualify_type(graph, Type.Named{name: type_name.copy()}, environment.module_identity)) ?? return unhandled
-        sema_trait_constant_collect_impls(graph, owner_row, owner, member, &found)
+        sema_trait_constant_collect_impls(graph, owner_row, owner, member, found)
     }
     if found.len() == 0 -> return unhandled
     loop index in 1..<found.len() {
         if found[index].trait_name != found[0].trait_name {
-            &diagnostics.push(sema_error("E0937", member_span, "`{type_name}.{member}` names a constant of both `{found[0].trait_name}` and `{found[index].trait_name}`", "each of the two traits declares a constant `{member}`", "rename the constant in one of the traits"))
+            diagnostics.push(sema_error("E0937", member_span, "`{type_name}.{member}` names a constant of both `{found[0].trait_name}` and `{found[index].trait_name}`", "each of the two traits declares a constant `{member}`", "rename the constant in one of the traits"))
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
     }
     if generic {
-        value: sema_node(&context, found[0].ty, NodeKind.TraitConst{owner: Type.Named{name: type_name.copy()}, trait_name: found[0].trait_name.copy(), name: member.copy()}, span)
-        return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
+        value: sema_node(context, found[0].ty, NodeKind.TraitConst{owner: Type.Named{name: type_name.copy()}, trait_name: found[0].trait_name.copy(), name: member.copy()}, span)
+        return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
     }
     // The implementation's value was reported where the impl gives it.
     stored: found[0].value ?? return SemaMethodSpecialCheck{handled: true, value: None}
     value: sema_tree_node(found[0].ty, TExprKind.CtLit{value: stored.copy()}, span)
-    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
 }
 
 // The nominal name a resolved owner type heads.
@@ -407,8 +407,8 @@ sema_trait_constant_collect_impls: fn(graph: SemaRegistrationGraph, owner_row: S
     item: sema_registration_nominal_source_item(graph.modules[owner_row.module_index].nominals[owner_row.row].source)
     if item == .Val(source) {
         if source == {
-            .Struct(definition) -> sema_trait_constant_collect_blocks(graph, owner_module, definition.trait_impls, member, &found)
-            .Enum(definition) -> sema_trait_constant_collect_blocks(graph, owner_module, definition.trait_impls, member, &found)
+            .Struct(definition) -> sema_trait_constant_collect_blocks(graph, owner_module, definition.trait_impls, member, found)
+            .Enum(definition) -> sema_trait_constant_collect_blocks(graph, owner_module, definition.trait_impls, member, found)
             else -> {}
         }
     }
@@ -423,7 +423,7 @@ sema_trait_constant_collect_impls: fn(graph: SemaRegistrationGraph, owner_row: S
             target: sema_trait_constant_head(sema_checked_qualify_type(graph, implementation.target_type, graph.modules[module_index].module_identity)) ?? next
             if target != owner -> next
             row: sema_checked_trait_nominal_row(graph, graph.modules[module_index].module_identity, trait_name) ?? next
-            sema_trait_constant_collect(graph, row, graph.modules[module_index].module_identity, member, Val(implementation.declaration.constants), &found)
+            sema_trait_constant_collect(graph, row, graph.modules[module_index].module_identity, member, Val(implementation.declaration.constants), found)
         }
     }
 }
@@ -433,7 +433,7 @@ sema_trait_constant_collect_impls: fn(graph: SemaRegistrationGraph, owner_row: S
 sema_trait_constant_collect_blocks: fn(graph: SemaRegistrationGraph, module_identity: String, blocks: [TraitImplBlock], member: String, found: &[SemaTraitConstantFound]) Never! {
     loop block in blocks {
         row: sema_checked_trait_nominal_row(graph, module_identity, block.trait_name) ?? next
-        sema_trait_constant_collect(graph, row, module_identity, member, Val(block.constants), &found)
+        sema_trait_constant_collect(graph, row, module_identity, member, Val(block.constants), found)
     }
 }
 
@@ -447,7 +447,7 @@ sema_trait_constant_collect: fn(graph: SemaRegistrationGraph, row: SemaRegistrat
         if declaration.name != member -> next
         ty: sema_checked_qualify_type(graph, declaration.ty, trait_module)
         written: constants ?? {
-            &found.push(SemaTraitConstantFound{trait_name: trait_name, ty: ty, value: None})
+            found.push(SemaTraitConstantFound{trait_name: trait_name, ty: ty, value: None})
             return
         }
         value := TComptimeValue?{None}
@@ -462,7 +462,7 @@ sema_trait_constant_collect: fn(graph: SemaRegistrationGraph, row: SemaRegistrat
         if !given && declaration.default == .Val(default_value) {
             if sema_trait_constant_eval(graph, default_value, ty, trait_module, trait_module) == .Value(result) -> value = Val(result.copy())
         }
-        &found.push(SemaTraitConstantFound{trait_name: trait_name, ty: ty, value: value})
+        found.push(SemaTraitConstantFound{trait_name: trait_name, ty: ty, value: value})
         return
     }
 }

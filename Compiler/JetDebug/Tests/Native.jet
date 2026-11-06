@@ -78,27 +78,27 @@ native_test_toolchain_root: fn() -> String Never! {
     if !built.success -> panic("jet build failed: {built.output}{built.errors}")
     session := NativeSession.start(native_test_files.join(out, "prog"), native_test_files.join(root, "output.txt")) ?? panic("start: {err.detail}")
     resolved := -1
-    if &session.break_at("prog.jet", 2) == {
+    if session.break_at("prog.jet", 2) == {
         .Ok(number) -> resolved = number ?? -1
         .Err(failure) -> panic("break: {failure.detail}")
     }
     assert_eq(resolved, 1)
-    paused: &session.launch([String]{}) ?? panic("launch: {err.detail}")
+    paused: session.launch([String]{}) ?? panic("launch: {err.detail}")
     assert(paused.kind == NativeStopKind.Paused)
     frame: paused.frame ?? panic("pause frame")
     assert_eq(frame.function, "double")
     assert_eq(frame.line, 2)
-    locals: &session.locals() ?? panic("locals: {err.detail}")
+    locals: session.locals() ?? panic("locals: {err.detail}")
     assert_eq(locals[0].name, "x")
     assert_eq(locals[0].type_name, "Int")
     assert_eq(locals[0].value, "0")
-    frames: &session.backtrace() ?? panic("backtrace: {err.detail}")
+    frames: session.backtrace() ?? panic("backtrace: {err.detail}")
     assert_eq(frames[1].function, "run")
-    &session.clear_breakpoints() ?? panic("clear: {err.detail}")
-    finished: &session.continue_run() ?? panic("continue: {err.detail}")
+    session.clear_breakpoints() ?? panic("clear: {err.detail}")
+    finished: session.continue_run() ?? panic("continue: {err.detail}")
     assert(finished.kind == NativeStopKind.Exited)
     assert_eq(finished.code, 0)
-    assert_eq(&session.take_output(), "count 2\n")
-    &session.close()
+    assert_eq(session.take_output(), "count 2\n")
+    session.close()
     native_test_files.remove_all(root) ?? panic("scratch cleanup: {err}")
 }

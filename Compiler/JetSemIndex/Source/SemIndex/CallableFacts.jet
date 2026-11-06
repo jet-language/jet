@@ -83,11 +83,11 @@ ViewProvenanceFact: struct {
                     .Index -> "index"
                     .Range -> "range"
                 }
-                &projections.push(name)
+                projections.push(name)
             }
             path: projections.join("/")
             if self.sources.len() == 1 -> return "slot:{slot};{source};access:{access};path:{path}"
-            &paths.push("{source};path:{path}")
+            paths.push("{source};path:{path}")
         }
         "slot:{slot};one_of({paths.join(",")});access:{access}"
     }
@@ -190,7 +190,7 @@ CallableSignatureFact: struct {
                 errors := [Type]{}
                 if effective == .Result(_, error) {
                     // AST::Type::is_never matches only the Named Never variant.
-                    if error != (Type.Named{name: "Never"}) -> &errors.push(error)
+                    if error != (Type.Named{name: "Never"}) -> errors.push(error)
                 }
                 Val(errors)
             }

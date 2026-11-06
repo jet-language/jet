@@ -16,7 +16,7 @@ cli_cmd_use: fn(verification: &StoreVerification, theme: Theme, parsed: CLIParse
     }
     // `use` can verify many packages that share one Hangar closure; keep the
     // same per-command seal view as `env`.
-    store_arm_command_memo(&verification)
+    store_arm_command_memo(verification)
     table: cli_builtin_table()
     refs := [RefSpec]{}
     loop raw in parsed.positional {
@@ -25,19 +25,19 @@ cli_cmd_use: fn(verification: &StoreVerification, theme: Theme, parsed: CLIParse
             cli_ref_error(theme, err)
             return EXIT_USAGE
         }
-        &refs.push(spec)
+        refs.push(spec)
     }
     roots: pkg_resolve_roots()
     plan := RunPlan.empty(cli_current_dir(), table)
     plan.refs = refs
     references := [String]{}
-    loop spec in plan.refs -> &references.push(spec.raw)
-    warm: store_reuse_verified_user_profile_batch(&verification, roots, references, parsed.flags.local_nix_catalog != None)
+    loop spec in plan.refs -> references.push(spec.raw)
+    warm: store_reuse_verified_user_profile_batch(verification, roots, references, parsed.flags.local_nix_catalog != None)
     warm_reused: cli_warm_realizations_complete(plan, warm)
-    composed: cli_compose_env_scoped_with_warm(&verification, theme, roots, parsed.flags, plan, RealizeScope.Use, true, ^warm, false) ?? return cli_exit_for(theme, err)
-    env := ^composed.env
+    composed: cli_compose_env_scoped_with_warm(verification, theme, roots, parsed.flags, plan, RealizeScope.Use, true, warm, false) ?? return cli_exit_for(theme, err)
+    env := composed.env.move()
     if parsed.flags.prep {
-        cli_auto_clean_after_success(&verification, theme, roots)
+        cli_auto_clean_after_success(verification, theme, roots)
         return EXIT_OK
     }
     command: parsed.command ?? [String]{}
@@ -45,11 +45,11 @@ cli_cmd_use: fn(verification: &StoreVerification, theme: Theme, parsed: CLIParse
     // for Jetpack's own.
     if command.len() > 0 -> theme.status(cli_use_running_line(references, command))
     code: if {
-        command.len() > 0 && warm_reused -> &env.exec_command(command)
-        command.len() > 0 -> &env.run_command(command)
-        else -> &env.enter(theme, ShellKind.detect())
+        command.len() > 0 && warm_reused -> env.exec_command(command)
+        command.len() > 0 -> env.run_command(command)
+        else -> env.enter(theme, ShellKind.detect())
     }
-    if code == 0 -> cli_auto_clean_after_success(&verification, theme, roots)
+    if code == 0 -> cli_auto_clean_after_success(verification, theme, roots)
     code
 }
 
@@ -57,7 +57,7 @@ cli_cmd_use: fn(verification: &StoreVerification, theme: Theme, parsed: CLIParse
 cli_use_running_line: fn(references: [String], command: [String]) -> String Never! {
     program: command[0]
     args := [String]{}
-    loop index in 1..<command.len() -> &args.push(command[index])
+    loop index in 1..<command.len() -> args.push(command[index])
     shown_args: if args.len() == 0 -> "(no args)" else -> args.join(" ")
     "running {references.join(" ")} -> {program} {shown_args}"
 }

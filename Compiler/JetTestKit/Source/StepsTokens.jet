@@ -94,16 +94,16 @@ kit_steps_resolve_step: fn(original: KitStep, context: KitStepCtx, state: KitSte
     if conditional_env {
         selected := [KitEnvVar]{}
         loop variable in original.environment {
-            if kit_steps_conditions(variable.conditions, context, state) -> &selected.push(variable)
+            if kit_steps_conditions(variable.conditions, context, state) -> selected.push(variable)
         }
         // Select before expanding values: unselected branches may name tools
         // or captures unavailable on this host.
         step.environment = selected
     }
     step.replacements = context.plan.replacements
-    loop rule in original.replacements -> &step.replacements.push(rule)
+    loop rule in original.replacements -> step.replacements.push(rule)
     argv := [String]{}
-    loop word in original.argv -> &argv.push(kit_steps_runtime_expand(word, context, state) ?? return None)
+    loop word in original.argv -> argv.push(kit_steps_runtime_expand(word, context, state) ?? return None)
     step.argv = argv
     step.cwd = kit_steps_runtime_expand(original.cwd, context, state) ?? return None
     step.stdin = kit_steps_runtime_expand(original.stdin, context, state) ?? return None
@@ -129,7 +129,7 @@ kit_steps_resolve_step: fn(original: KitStep, context: KitStepCtx, state: KitSte
                 step.stderr_target = pending.step.stderr_target
                 if original.replacements.len() == 0 -> step.replacements = pending.step.replacements
                 rules := pending.step.json_normalize
-                loop rule in step.json_normalize -> &rules.push(rule)
+                loop rule in step.json_normalize -> rules.push(rule)
                 step.json_normalize = rules
             }
         }
@@ -157,7 +157,7 @@ kit_steps_replacements: fn(original: [KitReplacement], context: KitStepCtx, stat
     loop rule in original {
         from: if rule.literal_from -> rule.from else -> kit_steps_runtime_expand(rule.from, context, state) ?? return None
         if from == "" -> return None
-        &rules.push(KitReplacement{from: from, to: rule.to, literal_from: rule.literal_from})
+        rules.push(KitReplacement{from: from, to: rule.to, literal_from: rule.literal_from})
     }
     Val(rules)
 }
@@ -182,7 +182,7 @@ kit_steps_free_port_names: fn(text: String) -> [String]? {
         end: kit_steps_byte_index(kit_steps_byte_slice(rest, after, rest.count_bytes()), "}}") ?? return None
         name: kit_steps_byte_slice(rest, after, after + end)
         if name == "" || name.contains(" ") || name.contains("{{") || name.contains(":") -> return None
-        &names.push(name)
+        names.push(name)
         rest = kit_steps_byte_slice(rest, after + end + 1, rest.count_bytes())
     }
     Val(names)
@@ -198,7 +198,7 @@ kit_steps_case_port_names: fn(context: KitStepCtx) -> [String] {
         if template == "" -> next
         text: files.read(kit_steps_snapshot_path(context.snapshots, context.plan.fixture, template)) ?? next
         loop name in (kit_steps_free_port_names(text) ?? []) {
-            if !kit_expect_named(names, name) -> &names.push(name)
+            if !kit_expect_named(names, name) -> names.push(name)
         }
     }
     names
@@ -218,7 +218,7 @@ kit_steps_free_ports: fn(context: KitStepCtx, count: Int) -> [Int] Err! {
     loop line in result.stdout.trim().split("\n") {
         port: Int.parse(line.copy()) ?? return Err("free-port probe printed a line that is not a port")
         if port < 1 || port > 65535 -> return Err("free-port probe returned an invalid port")
-        &ports.push(port)
+        ports.push(port)
     }
     if ports.len() != count -> return Err("free-port probe printed {ports.len()} ports for {count} names")
     Ok(ports)

@@ -132,12 +132,9 @@ CallArgFlags: struct {
     authority_boundary: Bool
     arithmetic_policy: ArithmeticPolicyFact?
     // The operand of `shared <expr>`: its Move convention is the cell's own
-    // ownership, not a written `^`, so a bare name there is an unmarked
+    // ownership, not a written `.move()`, so a bare name there is an unmarked
     // owning position (Calls/Static.jet).
     shared_operand: Bool{false}
-    // The `&` or `^` a call wrote before this argument. A mark the
-    // parameter's own signature states is retired (E0434).
-    written_mark: Span?{None}
 }
 
 BinderRef: struct {
@@ -193,8 +190,8 @@ IndexKind: enum {
     Pool
 }
 
-// `Take` is the `^` mark on the place a method call
-// consumes (`^buf.seal()`); sema checks it and lowers the unmarked call.
+// `Take` is a sema-built move of a place: `x.move()`, or the place a method
+// call consumes (`buf.seal()`); sema checks it and lowers the unmarked call.
 PlaceAccess: enum {
     Read
     Write

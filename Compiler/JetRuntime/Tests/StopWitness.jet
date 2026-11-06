@@ -45,12 +45,12 @@ resolve: fn(cwd: String, path: String) -> String Never! {
             if parts.len() > 0 {
                 kept := [String]{}
                 loop index in 0..<parts.len() - 1 {
-                    &kept.push(parts[index].copy())
+                    kept.push(parts[index].copy())
                 }
                 parts = kept
             }
         } else if part != "" && part != "." {
-            &parts.push(part.copy())
+            parts.push(part.copy())
         }
     }
     "/{parts.join("/")}"
@@ -152,7 +152,7 @@ data_sequence: fn(cwd: String, out: String, binary: String) -[Exec, FS, IO, Time
             matched = same_bytes(outcome.stderr, expected)
         }
         if !matched -> return fail("{mode}: expected exit 101, empty stdout and exact {golden}; got {shown(outcome)}")
-        &rows.push("{mode}\tpass\texit=101\tstderr-byte-identical=true")
+        rows.push("{mode}\tpass\texit=101\tstderr-byte-identical=true")
     }
     if !write_file("{out}/data-sequence-results.tsv", "{rows.join("\n")}\n".bytes()) -> return 1
     print("8 Dyn List/Entries std Vec bounds/capacity process goldens passed")
@@ -171,7 +171,7 @@ scalar_reflect: fn(out: String, binary: String) -[Exec, FS, IO, Time.Wait]> Int 
         if !same_bytes(outcome.stdout, "flushed".bytes()) -> return fail("{mode}: pending runtime stdout was not flushed")
         golden: "index out of bounds: the len is 0 but the index is {indexes[index]}\n"
         if !same_bytes(outcome.stderr, golden.bytes()) -> return fail("{mode}: stderr differs from exact foreign-panic body")
-        &rows.push("{mode}\tpass\texit=101\tstdout-flushed=true\tstderr-byte-identical=true")
+        rows.push("{mode}\tpass\texit=101\tstdout-flushed=true\tstderr-byte-identical=true")
     }
     if !write_file("{out}/scalar-reflect-stops.tsv", "{rows.join("\n")}\n".bytes()) -> return 1
     print("ScalarReflect bounds: exit 101, exact unsigned-index body and stdout flushed")

@@ -115,13 +115,13 @@ jet_cli_doc_lines: fn(text: String) -> [String] Never! {
         if bytes[index] != (U8{10}) -> next
         end := index
         if end > start && bytes[end - 1] == (U8{13}) -> end -= 1
-        &lines.push(jet_cli_doc_text(bytes, start, end))
+        lines.push(jet_cli_doc_text(bytes, start, end))
         start = index + 1
     }
     if start < bytes.len() {
         end := bytes.len()
         if end > start && bytes[end - 1] == (U8{13}) -> end -= 1
-        &lines.push(jet_cli_doc_text(bytes, start, end))
+        lines.push(jet_cli_doc_text(bytes, start, end))
     }
     lines
 }
@@ -140,13 +140,13 @@ jet_cli_doc_collapse_whitespace: fn(text: String) -> String Never! {
     start := -1
     loop index in 0..<bytes.len() {
         if jet_cli_doc_is_space(bytes[index]) {
-            if start >= 0 -> &words.push(jet_cli_doc_text(bytes, start, index))
+            if start >= 0 -> words.push(jet_cli_doc_text(bytes, start, index))
             start = -1
         } else if start < 0 {
             start = index
         }
     }
-    if start >= 0 -> &words.push(jet_cli_doc_text(bytes, start, bytes.len()))
+    if start >= 0 -> words.push(jet_cli_doc_text(bytes, start, bytes.len()))
     words.join(" ")
 }
 
@@ -210,7 +210,7 @@ jet_cli_doc_source_docs: fn(source: String, def_start: Int) -> JetCLIDocComment 
     position := lines.len() - 1
     loop position >= 0 {
         doc: jet_cli_doc_strip_prefix(lines[position].trim(), "///") ?? break
-        &collected.push(doc.trim())
+        collected.push(doc.trim())
         position -= 1
     }
     comment := JetCLIDocComment{summary: "", examples: [String]{}}
@@ -218,7 +218,7 @@ jet_cli_doc_source_docs: fn(source: String, def_start: Int) -> JetCLIDocComment 
     loop position >= 0 {
         line: collected[position]
         if jet_cli_doc_strip_prefix(line, "Example:") == .Val(example) {
-            &comment.examples.push(example.trim())
+            comment.examples.push(example.trim())
         } else if comment.summary == "" && line != "" && !line.starts_with("```") {
             comment.summary = line
         }
@@ -303,7 +303,7 @@ JetCLIDocUnit: struct {
 
 jet_cli_doc_add_item: fn(output: &[JetCLIDocItem], unit: JetCLIDocUnit, kind: String, name: String, parent: String, public: Bool, package_public: Bool, span: Span, name_span: Span, markers: [String]) Never! {
     comment: jet_cli_doc_source_docs(unit.source, name_span.start)
-    &output.push(JetCLIDocItem{
+    output.push(JetCLIDocItem{
         kind: kind,
         name: name,
         qualified_name: jet_cli_doc_qualified(parent, name),
@@ -321,19 +321,19 @@ jet_cli_doc_add_item: fn(output: &[JetCLIDocItem], unit: JetCLIDocUnit, kind: St
 }
 
 jet_cli_doc_add_function: fn(output: &[JetCLIDocItem], unit: JetCLIDocUnit, function: Func, parent: String, inherited_public: Bool) Never! {
-    jet_cli_doc_add_item(&output, unit, "function", function.name, parent, function.is_pub || inherited_public, function.is_package_pub, function.span, function.name_span, jet_cli_doc_marker_names(function.markers))
+    jet_cli_doc_add_item(output, unit, "function", function.name, parent, function.is_pub || inherited_public, function.is_package_pub, function.span, function.name_span, jet_cli_doc_marker_names(function.markers))
 }
 
 jet_cli_doc_sorted_names: fn(functions: [Func]) -> [String] Never! {
     listed: loop function in functions -> function.name
     names := listed
-    jet_cli_doc_sort_strings(&names)
+    jet_cli_doc_sort_strings(names)
     names
 }
 
 // `add_nested_impl`: a trait block written inside a struct or enum.
 jet_cli_doc_add_nested_impl: fn(output: &[JetCLIDocItem], impls: &[JetCLIDocImpl], unit: JetCLIDocUnit, trait_name: String, type_name: String, methods: [Func], public: Bool, span: Span) Never! {
-    &impls.push(JetCLIDocImpl{
+    impls.push(JetCLIDocImpl{
         kind: "trait_impl",
         type_name: type_name,
         trait_name: Val(trait_name),
@@ -342,15 +342,15 @@ jet_cli_doc_add_nested_impl: fn(output: &[JetCLIDocItem], impls: &[JetCLIDocImpl
         methods: jet_cli_doc_sorted_names(methods),
         source: jet_cli_doc_source_for(unit.path, unit.source, span),
     })
-    loop method in methods -> jet_cli_doc_add_function(&output, unit, method, type_name, public)
+    loop method in methods -> jet_cli_doc_add_function(output, unit, method, type_name, public)
 }
 
 jet_cli_doc_collect_protocol_names: fn(items: [Item], names: &[String]) Never! {
     loop item in items {
         if item == {
-            .ProtocolDecl(protocol) -> if !names.contains(protocol.name) -> &names.push(protocol.name)
-            .CodeModule(code_module) -> if code_module.body == .Val(body) -> jet_cli_doc_collect_protocol_names(body, &names)
-            .GenericModule(generic_module) -> jet_cli_doc_collect_protocol_names(generic_module.body, &names)
+            .ProtocolDecl(protocol) -> if !names.contains(protocol.name) -> names.push(protocol.name)
+            .CodeModule(code_module) -> if code_module.body == .Val(body) -> jet_cli_doc_collect_protocol_names(body, names)
+            .GenericModule(generic_module) -> jet_cli_doc_collect_protocol_names(generic_module.body, names)
             else -> {}
         }
     }
@@ -360,46 +360,46 @@ jet_cli_doc_collect_items: fn(items: [Item], unit: JetCLIDocUnit, parent: String
     no_markers: [String]{}
     loop item in items {
         if item == {
-            .Func(function) -> jet_cli_doc_add_function(&output, unit, function, parent, inherited_public)
+            .Func(function) -> jet_cli_doc_add_function(output, unit, function, parent, inherited_public)
             .Struct(definition) -> {
                 public: definition.is_pub || inherited_public
                 struct_item: output.len()
-                jet_cli_doc_add_item(&output, unit, "struct", definition.name, parent, public, definition.is_package_pub, definition.span, definition.name_span, jet_cli_doc_marker_names(definition.type_markers))
+                jet_cli_doc_add_item(output, unit, "struct", definition.name, parent, public, definition.is_package_pub, definition.span, definition.name_span, jet_cli_doc_marker_names(definition.type_markers))
                 if definition.state == .Val(state) {
                     state_names: loop entry in state.states -> entry.name
                     output[struct_item].signature = "{output[struct_item].signature} {{ state {{ {state_names.join(", ")} }} }}"
                 }
                 owner: jet_cli_doc_qualified(parent, definition.name)
                 loop field in definition.fields {
-                    jet_cli_doc_add_item(&output, unit, "field", field.name, owner, field.is_pub, field.is_package_pub, field.name_span, field.name_span, jet_cli_doc_marker_names(field.serde_markers))
+                    jet_cli_doc_add_item(output, unit, "field", field.name, owner, field.is_pub, field.is_package_pub, field.name_span, field.name_span, jet_cli_doc_marker_names(field.serde_markers))
                 }
-                loop method in definition.methods -> jet_cli_doc_add_function(&output, unit, method, owner, public)
-                loop block in definition.trait_impls -> jet_cli_doc_add_nested_impl(&output, &impls, unit, block.trait_name, definition.name, block.methods, public, definition.span)
+                loop method in definition.methods -> jet_cli_doc_add_function(output, unit, method, owner, public)
+                loop block in definition.trait_impls -> jet_cli_doc_add_nested_impl(output, impls, unit, block.trait_name, definition.name, block.methods, public, definition.span)
             }
             .Enum(definition) -> {
                 public: definition.is_pub || inherited_public
-                jet_cli_doc_add_item(&output, unit, "enum", definition.name, parent, public, definition.is_package_pub, definition.span, definition.name_span, no_markers)
+                jet_cli_doc_add_item(output, unit, "enum", definition.name, parent, public, definition.is_package_pub, definition.span, definition.name_span, no_markers)
                 owner: jet_cli_doc_qualified(parent, definition.name)
                 loop variant in definition.variants {
-                    jet_cli_doc_add_item(&output, unit, "variant", variant.name, owner, public, false, variant.name_span, variant.name_span, jet_cli_doc_marker_names(variant.serde_markers))
+                    jet_cli_doc_add_item(output, unit, "variant", variant.name, owner, public, false, variant.name_span, variant.name_span, jet_cli_doc_marker_names(variant.serde_markers))
                 }
-                loop method in definition.methods -> jet_cli_doc_add_function(&output, unit, method, owner, public)
-                loop block in definition.trait_impls -> jet_cli_doc_add_nested_impl(&output, &impls, unit, block.trait_name, definition.name, block.methods, public, definition.span)
+                loop method in definition.methods -> jet_cli_doc_add_function(output, unit, method, owner, public)
+                loop block in definition.trait_impls -> jet_cli_doc_add_nested_impl(output, impls, unit, block.trait_name, definition.name, block.methods, public, definition.span)
             }
-            .Distinct(definition) -> jet_cli_doc_add_item(&output, unit, "distinct", definition.name, parent, definition.is_pub || inherited_public, definition.is_package_pub, definition.span, definition.name_span, jet_cli_doc_marker_names(definition.type_markers))
-            .TypeAlias(definition) -> jet_cli_doc_add_item(&output, unit, "type_alias", definition.name, parent, definition.is_pub || inherited_public, definition.is_package_pub, definition.span, definition.name_span, no_markers)
-            .UnitFamily(definition) -> jet_cli_doc_add_item(&output, unit, "unit_family", definition.family, parent, definition.is_pub || inherited_public, definition.is_package_pub, definition.span, definition.family_span, no_markers)
+            .Distinct(definition) -> jet_cli_doc_add_item(output, unit, "distinct", definition.name, parent, definition.is_pub || inherited_public, definition.is_package_pub, definition.span, definition.name_span, jet_cli_doc_marker_names(definition.type_markers))
+            .TypeAlias(definition) -> jet_cli_doc_add_item(output, unit, "type_alias", definition.name, parent, definition.is_pub || inherited_public, definition.is_package_pub, definition.span, definition.name_span, no_markers)
+            .UnitFamily(definition) -> jet_cli_doc_add_item(output, unit, "unit_family", definition.family, parent, definition.is_pub || inherited_public, definition.is_package_pub, definition.span, definition.family_span, no_markers)
             .Trait(definition) -> {
                 public: definition.is_pub || inherited_public
-                jet_cli_doc_add_item(&output, unit, "trait", definition.name, parent, public, definition.is_package_pub, definition.span, definition.name_span, no_markers)
+                jet_cli_doc_add_item(output, unit, "trait", definition.name, parent, public, definition.is_package_pub, definition.span, definition.name_span, no_markers)
                 owner: jet_cli_doc_qualified(parent, definition.name)
                 loop method in definition.methods {
-                    jet_cli_doc_add_item(&output, unit, "function", method.name, owner, public, false, method.span, method.name_span, no_markers)
+                    jet_cli_doc_add_item(output, unit, "function", method.name, owner, public, false, method.span, method.name_span, no_markers)
                 }
             }
-            .Tag(definition) -> jet_cli_doc_add_item(&output, unit, "tag", definition.name, parent, definition.is_pub || inherited_public, definition.is_package_pub, definition.span, definition.name_span, no_markers)
-            .ProtocolDecl(definition) -> jet_cli_doc_add_item(&output, unit, "protocol", definition.name, parent, definition.is_pub || inherited_public, definition.is_package_pub, definition.span, definition.name_span, no_markers)
-            .EffectDecl(definition) -> jet_cli_doc_add_item(&output, unit, "effect", definition.name, parent, false, false, definition.span, definition.name_span, no_markers)
+            .Tag(definition) -> jet_cli_doc_add_item(output, unit, "tag", definition.name, parent, definition.is_pub || inherited_public, definition.is_package_pub, definition.span, definition.name_span, no_markers)
+            .ProtocolDecl(definition) -> jet_cli_doc_add_item(output, unit, "protocol", definition.name, parent, definition.is_pub || inherited_public, definition.is_package_pub, definition.span, definition.name_span, no_markers)
+            .EffectDecl(definition) -> jet_cli_doc_add_item(output, unit, "effect", definition.name, parent, false, false, definition.span, definition.name_span, no_markers)
             .Impl(definition) -> {
                 type_parts: definition.type_name.split(".").to_list()
                 endpoint: type_parts[type_parts.len() - 1]
@@ -410,7 +410,7 @@ jet_cli_doc_collect_items: fn(items: [Item], unit: JetCLIDocUnit, parent: String
                     definition.trait_name != None -> "trait_impl"
                     else -> "inherent_impl"
                 }
-                &impls.push(JetCLIDocImpl{
+                impls.push(JetCLIDocImpl{
                     kind: kind,
                     type_name: definition.type_name,
                     trait_name: definition.trait_name,
@@ -420,21 +420,21 @@ jet_cli_doc_collect_items: fn(items: [Item], unit: JetCLIDocUnit, parent: String
                     source: jet_cli_doc_source_for(unit.path, unit.source, definition.span),
                 })
                 owner: jet_cli_doc_qualified(parent, definition.type_name)
-                loop method in definition.methods -> jet_cli_doc_add_function(&output, unit, method, owner, inherited_public)
+                loop method in definition.methods -> jet_cli_doc_add_function(output, unit, method, owner, inherited_public)
             }
             .CodeModule(code_module) -> {
                 public: code_module.is_pub || inherited_public
-                jet_cli_doc_add_item(&output, unit, "module", code_module.name, parent, public, code_module.is_package_pub, code_module.span, code_module.name_span, no_markers)
-                if code_module.body == .Val(body) -> jet_cli_doc_collect_items(body, unit, jet_cli_doc_qualified(parent, code_module.name), public, protocol_names, &output, &impls)
+                jet_cli_doc_add_item(output, unit, "module", code_module.name, parent, public, code_module.is_package_pub, code_module.span, code_module.name_span, no_markers)
+                if code_module.body == .Val(body) -> jet_cli_doc_collect_items(body, unit, jet_cli_doc_qualified(parent, code_module.name), public, protocol_names, output, impls)
             }
             .GenericModule(generic_module) -> {
                 public: generic_module.is_pub || inherited_public
-                jet_cli_doc_add_item(&output, unit, "module", generic_module.name, parent, public, generic_module.is_package_pub, generic_module.span, generic_module.name_span, no_markers)
-                jet_cli_doc_collect_items(generic_module.body, unit, jet_cli_doc_qualified(parent, generic_module.name), public, protocol_names, &output, &impls)
+                jet_cli_doc_add_item(output, unit, "module", generic_module.name, parent, public, generic_module.is_package_pub, generic_module.span, generic_module.name_span, no_markers)
+                jet_cli_doc_collect_items(generic_module.body, unit, jet_cli_doc_qualified(parent, generic_module.name), public, protocol_names, output, impls)
             }
-            .ModuleAlias(definition) -> jet_cli_doc_add_item(&output, unit, "module_alias", definition.name, parent, definition.is_pub || inherited_public, definition.is_package_pub, definition.span, definition.name_span, no_markers)
-            .FactDecl(definition) -> jet_cli_doc_add_item(&output, unit, "fact", definition.name, parent, true, false, definition.span, definition.name_span, no_markers)
-            .Const(definition) -> jet_cli_doc_add_item(&output, unit, "const", definition.name, parent, false, false, definition.span, definition.name_span, no_markers)
+            .ModuleAlias(definition) -> jet_cli_doc_add_item(output, unit, "module_alias", definition.name, parent, definition.is_pub || inherited_public, definition.is_package_pub, definition.span, definition.name_span, no_markers)
+            .FactDecl(definition) -> jet_cli_doc_add_item(output, unit, "fact", definition.name, parent, true, false, definition.span, definition.name_span, no_markers)
+            .Const(definition) -> jet_cli_doc_add_item(output, unit, "const", definition.name, parent, false, false, definition.span, definition.name_span, no_markers)
             // A marker's docs are its struct's, so its companion declaration
             // adds none.
             else -> {}
@@ -473,12 +473,12 @@ jet_cli_doc_trait_contract: fn(contract: JetCLISemTraitContract) -> String Never
     lines := [String]{"implements {contract.trait_name}"}
     loop entry in contract.associated_types {
         if entry.ty == .Val(ty) {
-            &lines.push("  type {entry.name} = {ty}")
+            lines.push("  type {entry.name} = {ty}")
         } else {
-            &lines.push("  type {entry.name}")
+            lines.push("  type {entry.name}")
         }
     }
-    loop method in contract.methods -> &lines.push("  {method}")
+    loop method in contract.methods -> lines.push("  {method}")
     lines.join("\n")
 }
 
@@ -564,7 +564,7 @@ jet_cli_doc_discover_doctests: fn(unit: JetCLIDocUnit) -> [JetCLIDocTest] Never!
     line_starts := [Int]{0}
     source_bytes: unit.source.bytes()
     loop index in 0..<source_bytes.len() {
-        if source_bytes[index] == (U8{10}) -> &line_starts.push(index + 1)
+        if source_bytes[index] == (U8{10}) -> line_starts.push(index + 1)
     }
     loop (index, raw_line) in jet_cli_doc_lines(unit.source) {
         line_number: index + 1
@@ -588,7 +588,7 @@ jet_cli_doc_discover_doctests: fn(unit: JetCLIDocUnit) -> [JetCLIDocTest] Never!
         }
         if doc_line == "```" {
             offset: if fence_line - 1 < line_starts.len() -> line_starts[fence_line - 1] else -> source_bytes.len()
-            &tests.push(JetCLIDocTest{
+            tests.push(JetCLIDocTest{
                 module_path: unit.path,
                 line: fence_line,
                 setup: setup,
@@ -602,13 +602,13 @@ jet_cli_doc_discover_doctests: fn(unit: JetCLIDocUnit) -> [JetCLIDocTest] Never!
         }
         if jet_cli_doc_expect_marker(doc_line) == .Val(marker) {
             bytes: doc_line.bytes()
-            &expectations.push(JetCLIDocExpectation{
+            expectations.push(JetCLIDocExpectation{
                 expression: jet_cli_doc_text(bytes, 0, marker).trim(),
                 expected: jet_cli_doc_text(bytes, marker + JET_CLI_DOC_EXPECT_MARKER.bytes().len(), bytes.len()).trim(),
                 line: line_number,
             })
         } else if doc_line != "" {
-            &setup.push(doc_line)
+            setup.push(doc_line)
         }
     }
     tests
@@ -738,7 +738,7 @@ jet_cli_doc_sort_tests: fn(values: &[JetCLIDocTest]) Never! {
 // application authority).
 jet_cli_build_doc_graph: fn(modules: [JetDriverDocModule], index: JetCLISemIndex) -> JetCLIDocGraph {
     protocol_names := [String]{}
-    loop doc_module in modules -> jet_cli_doc_collect_protocol_names(doc_module.items, &protocol_names)
+    loop doc_module in modules -> jet_cli_doc_collect_protocol_names(doc_module.items, protocol_names)
     graph := JetCLIDocGraph{
         schema_version: JET_CLI_DOC_SCHEMA_VERSION,
         root: ".",
@@ -750,21 +750,21 @@ jet_cli_build_doc_graph: fn(modules: [JetDriverDocModule], index: JetCLISemIndex
     }
     loop doc_module in modules {
         unit: JetCLIDocUnit{path: jet_cli_doc_stable_path(doc_module.path), source: doc_module.source}
-        &graph.modules.push(JetCLIDocModule{
+        graph.modules.push(JetCLIDocModule{
             name: jet_cli_doc_module_name(unit.path, doc_module.alias),
             path: unit.path,
             public: true,
             summary: jet_cli_doc_leading_summary(doc_module.source),
             source: jet_cli_doc_source_for(unit.path, doc_module.source, Span{start: 0, end: 0}),
         })
-        loop test in jet_cli_doc_discover_doctests(unit) -> &graph.doctests.push(test)
-        jet_cli_doc_collect_items(doc_module.items, unit, "", false, protocol_names, &graph.items, &graph.impls)
+        loop test in jet_cli_doc_discover_doctests(unit) -> graph.doctests.push(test)
+        jet_cli_doc_collect_items(doc_module.items, unit, "", false, protocol_names, graph.items, graph.impls)
     }
-    jet_cli_doc_enrich(&graph.items, index)
-    jet_cli_doc_sort_modules(&graph.modules)
-    jet_cli_doc_sort_items(&graph.items)
-    jet_cli_doc_sort_impls(&graph.impls)
-    jet_cli_doc_sort_tests(&graph.doctests)
+    jet_cli_doc_enrich(graph.items, index)
+    jet_cli_doc_sort_modules(graph.modules)
+    jet_cli_doc_sort_items(graph.items)
+    jet_cli_doc_sort_impls(graph.impls)
+    jet_cli_doc_sort_tests(graph.doctests)
     graph
 }
 
@@ -773,7 +773,7 @@ jet_cli_build_doc_graph: fn(modules: [JetDriverDocModule], index: JetCLISemIndex
 jet_cli_doc_undocumented_public: fn(graph: JetCLIDocGraph) -> [JetCLIDocItem] Never! {
     undocumented := [JetCLIDocItem]{}
     loop item in graph.items {
-        if item.public && item.summary == "" && !jet_cli_doc_command_entry(item) -> &undocumented.push(item)
+        if item.public && item.summary == "" && !jet_cli_doc_command_entry(item) -> undocumented.push(item)
     }
     undocumented
 }

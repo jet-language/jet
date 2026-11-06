@@ -104,14 +104,14 @@ pkg_pascal_bind: fn(path: String, source: String, lib: String, cache: String) -[
     pkg_pascal_run([String]{archiver, "rcs", archive, object}, "ar")
     digest: pkg_binder_identity_digest([String]{"jet-pascal-bind-v1", source, compiler})
     bound := [String]{}
-    loop routine in surface.plain -> &bound.push(routine.name)
-    &bound.push(surface.handle.ctor.name)
-    loop routine in surface.handle.methods -> &bound.push(routine.name)
-    &bound.push(surface.handle.close.name)
-    &bound.sort()
+    loop routine in surface.plain -> bound.push(routine.name)
+    bound.push(surface.handle.ctor.name)
+    loop routine in surface.handle.methods -> bound.push(routine.name)
+    bound.push(surface.handle.close.name)
+    bound.sort()
     source_identity: files.canonicalize(path) ?? path
     provenance := "schema=jet-pascal-bind-v1\nsource={source_identity}\nlibrary={lib}\nabi=cdecl\nint64=Jet.Int\ndouble=Jet.Float\nhandles=opaque-int64-generation\ncompiler={compiler}\nexports={bound.join(",")}\nsha256={digest}\n"
-    pkg_binder_append_artifact_boundary(&provenance, ForeignLanguage.Pascal, "Pascal", lib, path, archive, "fpc={compiler};cc={c_compiler};ar={archiver}")
+    pkg_binder_append_artifact_boundary(provenance, ForeignLanguage.Pascal, "Pascal", lib, path, archive, "fpc={compiler};cc={c_compiler};ar={archiver}")
     generated: pkg_pascal_render_jet(lib, surface)
     pkg_binder_remove_tree_quiet(build)
     Ok(PascalBindResult{source: generated, bound: bound, archive: archive, runtime: runtime, provenance: provenance})
@@ -147,9 +147,9 @@ pkg_pascal_parse: fn(source: String) -> PascalSurface ForeignBindError! {
     loop entry in pkg_binder_slice(export_tail, 0, export_end).split(",") {
         words: pkg_binder_words(entry)
         name: if words.len() > 0 -> words[0].trim() else -> ""
-        if pkg_binder_is_ident(name) && !exports.contains(name) -> &exports.push(name)
+        if pkg_binder_is_ident(name) && !exports.contains(name) -> exports.push(name)
     }
-    &exports.sort()
+    exports.sort()
     if exports.len() == 0 -> return Err(ForeignBindError.Source("the Pascal `exports` list has no bindable names"))
     class: pkg_pascal_class_name(lower) ?? return Err(ForeignBindError.Source("no Object Pascal class declaration was found"))
     group := class
@@ -188,7 +188,7 @@ pkg_pascal_parse: fn(source: String) -> PascalSurface ForeignBindError! {
     if !has_close -> return Err(ForeignBindError.Source("class `{class}` needs exported cdecl `{group}_free(handle: Pointer)`"))
     methods := [PascalRoutine]{}
     loop routine in routines {
-        if routine.name.starts_with("{group}_") && routine.name != ctor.name && routine.name != close.name -> &methods.push(routine)
+        if routine.name.starts_with("{group}_") && routine.name != ctor.name && routine.name != close.name -> methods.push(routine)
     }
     loop method in methods {
         pointer_first: method.params.len() > 0 && method.params[0].kind == PascalScalar.Pointer
@@ -210,7 +210,7 @@ pkg_pascal_parse: fn(source: String) -> PascalSurface ForeignBindError! {
             if param.kind == PascalScalar.Pointer -> has_pointer = true
         }
         if !routine.result.is_value() || has_pointer -> return Err(ForeignBindError.Source("exported cdecl `{routine.name}` has an unsupported ABI shape; use Int64 or Double scalars, or a pointer-first handle method"))
-        &plain.push(routine)
+        plain.push(routine)
     }
     Ok(PascalSurface{plain: plain, handle: PascalHandle{group: group, ctor: ctor, close: close, methods: methods}})
 }
@@ -249,7 +249,7 @@ pkg_pascal_scan_routines: fn(lower: String, exports: [String]) -> [PascalRoutine
         loop existing in routines {
             if existing.name == routine.name -> known = true
         }
-        if exports.contains(routine.name) && !known -> &routines.push(routine)
+        if exports.contains(routine.name) && !known -> routines.push(routine)
         cursor = cdecl_at + 6
     }
     Ok(routines)
@@ -278,7 +278,7 @@ pkg_pascal_parse_routine: fn(header: String, is_procedure: Bool) -> PascalRoutin
         loop raw_item in value_names.split(",") {
             item: raw_item.trim()
             if !pkg_binder_is_ident(item) -> return Err(ForeignBindError.Source("routine `{name}` has invalid parameter `{item}`"))
-            &params.push(PascalParam{name: item, kind: kind})
+            params.push(PascalParam{name: item, kind: kind})
         }
     }
     if is_procedure -> return Ok(PascalRoutine{name: name, params: params, result: PascalScalar.Void})
@@ -327,7 +327,7 @@ pkg_pascal_strip_comments: fn(source: String) -> String Never! {
             index += 2
             loop index < raw.len() {
                 if Int.from_u8(raw[index]) == 10 {
-                    &out.push(raw[index])
+                    out.push(raw[index])
                     index += 1
                     break
                 }
@@ -335,7 +335,7 @@ pkg_pascal_strip_comments: fn(source: String) -> String Never! {
             }
             next
         }
-        &out.push(raw[index])
+        out.push(raw[index])
         index += 1
     }
     String.from_bytes(out) ?? source
@@ -376,17 +376,17 @@ pkg_pascal_case: fn(value: String) -> String Never! {
 
 pkg_pascal_params_jet: fn(params: [PascalParam], skip: Int) -> String Never! {
     parts := [String]{}
-    loop index in skip..<params.len() -> &parts.push("{params[index].name}: {params[index].kind.jet()}")
+    loop index in skip..<params.len() -> parts.push("{params[index].name}: {params[index].kind.jet()}")
     "({parts.join(", ")})"
 }
 
 pkg_pascal_call_args: fn(params: [PascalParam], skip: Int, first: String?, separator: String) -> String Never! {
     parts := [String]{}
     if first == {
-        .Val(value) -> &parts.push(value)
+        .Val(value) -> parts.push(value)
         .None -> {}
     }
-    loop index in skip..<params.len() -> &parts.push(params[index].name)
+    loop index in skip..<params.len() -> parts.push(params[index].name)
     "({parts.join(separator)})"
 }
 
@@ -400,30 +400,30 @@ pkg_pascal_render_jet: fn(lib: String, surface: PascalSurface) -> String Never! 
     handle: surface.handle
     ty: pkg_pascal_case(handle.group)
     out := [String]{"use abi: c.{abi}\n\n#Import c.{abi}: module {{\n    take_error: fn() -> Int = \"{abi}_take_error\"\n"}
-    loop routine in surface.plain -> &out.push(pkg_pascal_raw_jet(abi, routine, routine.name))
-    &out.push(pkg_pascal_raw_jet(abi, handle.ctor, handle.ctor.name))
-    loop routine in handle.methods -> &out.push(pkg_pascal_raw_jet(abi, routine, routine.name))
-    &out.push(pkg_pascal_raw_jet(abi, handle.close, "{handle.group}_close"))
-    &out.push("}}\n\n#Error\nPascalError: enum {{\n    InvalidHandle\n    Foreign\n    ResourceLimit\n}}\n\n")
-    &out.push("{ty}: struct {{\n    value: Int\n}}\n\n")
-    &out.push("error: fn(code: Int) -> PascalError {{\n    if code == 1 -> return PascalError.InvalidHandle\n    if code == 2 -> return PascalError.ResourceLimit\n    return PascalError.Foreign\n}}\n\n")
+    loop routine in surface.plain -> out.push(pkg_pascal_raw_jet(abi, routine, routine.name))
+    out.push(pkg_pascal_raw_jet(abi, handle.ctor, handle.ctor.name))
+    loop routine in handle.methods -> out.push(pkg_pascal_raw_jet(abi, routine, routine.name))
+    out.push(pkg_pascal_raw_jet(abi, handle.close, "{handle.group}_close"))
+    out.push("}}\n\n#Error\nPascalError: enum {{\n    InvalidHandle\n    Foreign\n    ResourceLimit\n}}\n\n")
+    out.push("{ty}: struct {{\n    value: Int\n}}\n\n")
+    out.push("error: fn(code: Int) -> PascalError {{\n    if code == 1 -> return PascalError.InvalidHandle\n    if code == 2 -> return PascalError.ResourceLimit\n    return PascalError.Foreign\n}}\n\n")
     loop routine in surface.plain {
-        &out.push("{routine.name}: fn{pkg_pascal_params_jet(routine.params, 0)} -> {routine.result.jet()} {{\n    return abi.{routine.name}{pkg_pascal_call_args(routine.params, 0, None, ", ")}\n}}\n\n")
+        out.push("{routine.name}: fn{pkg_pascal_params_jet(routine.params, 0)} -> {routine.result.jet()} {{\n    return abi.{routine.name}{pkg_pascal_call_args(routine.params, 0, None, ", ")}\n}}\n\n")
     }
-    &out.push("{handle.ctor.name}: fn{pkg_pascal_params_jet(handle.ctor.params, 0)} -> {ty} !PascalError {{\n    raw_handle: abi.{handle.ctor.name}{pkg_pascal_call_args(handle.ctor.params, 0, None, ", ")}\n    code: abi.take_error()\n    if code != 0 -> return Err(error(code))\n    return Ok({ty}{{value: raw_handle}})\n}}\n\n")
+    out.push("{handle.ctor.name}: fn{pkg_pascal_params_jet(handle.ctor.params, 0)} -> {ty} !PascalError {{\n    raw_handle: abi.{handle.ctor.name}{pkg_pascal_call_args(handle.ctor.params, 0, None, ", ")}\n    code: abi.take_error()\n    if code != 0 -> return Err(error(code))\n    return Ok({ty}{{value: raw_handle}})\n}}\n\n")
     loop routine in handle.methods {
         extra := [String]{}
-        loop index in 1..<routine.params.len() -> &extra.push(", {routine.params[index].name}: {routine.params[index].kind.jet()}")
-        &out.push("{routine.name}: fn(handle: {ty}{extra.join("")}) -> {routine.result.jet()} !PascalError {{\n    result_value: abi.{routine.name}{pkg_pascal_call_args(routine.params, 1, Val("handle.value"), ", ")}\n    code: abi.take_error()\n    if code != 0 -> return Err(error(code))\n    return Ok(result_value)\n}}\n\n")
+        loop index in 1..<routine.params.len() -> extra.push(", {routine.params[index].name}: {routine.params[index].kind.jet()}")
+        out.push("{routine.name}: fn(handle: {ty}{extra.join("")}) -> {routine.result.jet()} !PascalError {{\n    result_value: abi.{routine.name}{pkg_pascal_call_args(routine.params, 1, Val("handle.value"), ", ")}\n    code: abi.take_error()\n    if code != 0 -> return Err(error(code))\n    return Ok(result_value)\n}}\n\n")
     }
-    &out.push("close: fn(^handle: {ty}) {{}}\n\nimpl {ty}.Close {{\n    close: fn(^self) {{\n        abi.{handle.group}_close(self.value)\n        if abi.take_error() != 0 -> panic(\"invalid Pascal handle\")\n    }}\n}}\n")
+    out.push("close: fn(&&handle: {ty}) {{}}\n\nimpl {ty}.Close {{\n    close: fn(&&self) {{\n        abi.{handle.group}_close(self.value)\n        if abi.take_error() != 0 -> panic(\"invalid Pascal handle\")\n    }}\n}}\n")
     out.join("")
 }
 
 // C parameters after `skip`; a list with none left is spelled `void`.
 pkg_pascal_c_params: fn(params: [PascalParam], skip: Int) -> String Never! {
     parts := [String]{}
-    loop index in skip..<params.len() -> &parts.push("{params[index].kind.c()} {params[index].name}")
+    loop index in skip..<params.len() -> parts.push("{params[index].kind.c()} {params[index].name}")
     if params.len() == skip -> return "void{parts.join(",")}"
     parts.join(",")
 }
@@ -447,14 +447,14 @@ pkg_pascal_render_c: fn(lib: String, surface: PascalSurface) -> String Never! {
     abi: "jet_pascal_{lib}"
     handle: surface.handle
     decls := [String]{}
-    loop routine in surface.plain -> &decls.push(pkg_pascal_raw_c_decl(routine))
-    &decls.push(pkg_pascal_raw_c_decl(handle.ctor))
-    loop routine in handle.methods -> &decls.push(pkg_pascal_raw_c_decl(routine))
-    &decls.push(pkg_pascal_raw_c_decl(handle.close))
+    loop routine in surface.plain -> decls.push(pkg_pascal_raw_c_decl(routine))
+    decls.push(pkg_pascal_raw_c_decl(handle.ctor))
+    loop routine in handle.methods -> decls.push(pkg_pascal_raw_c_decl(routine))
+    decls.push(pkg_pascal_raw_c_decl(handle.close))
     plain := [String]{}
-    loop routine in surface.plain -> &plain.push(pkg_pascal_wrapper_c(abi, routine, None))
+    loop routine in surface.plain -> plain.push(pkg_pascal_wrapper_c(abi, routine, None))
     methods := [String]{}
-    loop routine in handle.methods -> &methods.push(pkg_pascal_wrapper_c(abi, routine, Val("jet_pascal_borrowed")))
+    loop routine in handle.methods -> methods.push(pkg_pascal_wrapper_c(abi, routine, Val("jet_pascal_borrowed")))
     pkg_binder_fill_template(PKG_PASCAL_BRIDGE_C, [String: String]{
         "abi": abi,
         "decls": decls.join(""),

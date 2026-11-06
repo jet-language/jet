@@ -13,7 +13,7 @@ run: fn() {
     deadline: time.instant() + time.duration_ms(750)
     reached := false
     loop {
-        if &listener.accept(deadline: 0s) == {
+        if listener.accept(deadline: 0s) == {
             .Ok(stream) -> {
                 net.tcp_close(stream) ?? panic("drop observer connection")
                 reached = true

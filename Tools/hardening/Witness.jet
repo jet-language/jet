@@ -147,7 +147,7 @@ is_observer: fn(name: String) -> Bool Never! {
 
 observes: fn(body: [Stmt]) -> Bool Never! {
     names := [String]{}
-    ast_visit_body(body, (expression: Expr) -> note_call_name(&names, expression), true)
+    ast_visit_body(body, (expression: Expr) -> note_call_name(names, expression), true)
     loop name in names {
         if is_observer(name) -> return true
     }
@@ -162,12 +162,12 @@ observes_from: fn(body: [Stmt], start: Int) -> Bool Never! {
 }
 
 note_call_name: fn(names: &[String], expression: Expr) Never! {
-    if expression == .Call(call, _) -> &names.push(call.name.copy())
+    if expression == .Call(call, _) -> names.push(call.name.copy())
 }
 
 with_frame: fn(chain: [String], frame: String) -> [String] Never! {
     out := chain.copy()
-    &out.push(frame)
+    out.push(frame)
     out
 }
 
@@ -228,7 +228,7 @@ observed_later: fn(walk: Walk) -> Walk Never! {
 
 walk_args: fn(args: [CallArg], frame: String, chain: [String], walk: Walk, hits: &[Hit]) Never! {
     inner: with_frame(chain, frame)
-    loop argument in args -> walk_expr(argument.expr, inner, walk, &hits)
+    loop argument in args -> walk_expr(argument.expr, inner, walk, hits)
 }
 
 walk_expr: fn(expression: Expr, chain: [String], walk: Walk, hits: &[Hit]) Never! {
@@ -238,101 +238,101 @@ walk_expr: fn(expression: Expr, chain: [String], walk: Walk, hits: &[Hit]) Never
         loop old in hits {
             if at >= 0 && old.at == at -> known = true
         }
-        if !known -> &hits.push(Hit{chain: chain.copy(), later: walk.later, function: walk.function.copy(), at: at})
+        if !known -> hits.push(Hit{chain: chain.copy(), later: walk.later, function: walk.function.copy(), at: at})
     }
     if expression == {
         .Str(parts, _, _) -> loop part in parts {
-            if part == .Interp(value, _) -> walk_expr(value, with_frame(chain, "interp"), walk, &hits)
+            if part == .Interp(value, _) -> walk_expr(value, with_frame(chain, "interp"), walk, hits)
         }
-        .ListLit(values, _, _) -> loop value in values -> walk_expr(value, with_frame(chain, "wrap"), walk, &hits)
-        .CompareChain(values, _, _, _, _) -> loop value in values -> walk_expr(value, with_frame(chain, "op"), walk, &hits)
-        .Unary(_, value, _, _) -> walk_expr(value, with_frame(chain, "op"), walk, &hits)
+        .ListLit(values, _, _) -> loop value in values -> walk_expr(value, with_frame(chain, "wrap"), walk, hits)
+        .CompareChain(values, _, _, _, _) -> loop value in values -> walk_expr(value, with_frame(chain, "op"), walk, hits)
+        .Unary(_, value, _, _) -> walk_expr(value, with_frame(chain, "op"), walk, hits)
         .Binary(_, left, right, _, _) -> {
-            walk_expr(left, with_frame(chain, "op"), walk, &hits)
-            walk_expr(right, with_frame(chain, "op"), walk, &hits)
+            walk_expr(left, with_frame(chain, "op"), walk, hits)
+            walk_expr(right, with_frame(chain, "op"), walk, hits)
         }
-        .Paren(value, _, _) -> walk_expr(value, with_frame(chain, "paren"), walk, &hits)
+        .Paren(value, _, _) -> walk_expr(value, with_frame(chain, "paren"), walk, hits)
         .Try(value, _, _, note, _) -> {
-            walk_expr(value, with_frame(chain, "fallback:try"), walk, &hits)
-            if note == .Val(note_value) -> walk_expr(note_value, with_frame(chain, "other"), walk, &hits)
+            walk_expr(value, with_frame(chain, "fallback:try"), walk, hits)
+            if note == .Val(note_value) -> walk_expr(note_value, with_frame(chain, "other"), walk, hits)
         }
-        .Field(value, member, _, _) -> walk_expr(value, with_frame(chain, "field:{member}"), walk, &hits)
-        .OptField(value, member, _, _, _, _) -> walk_expr(value, with_frame(chain, "field:{member}"), walk, &hits)
-        .MemberSpread(value, _, _, _) | .Spread(value, _, _) | .Ok(value, _, _) | .Err(value, _, _) | .Present(value, _, _) | .Tainted(value, _, _, _) -> walk_expr(value, with_frame(chain, "wrap"), walk, &hits)
-        .Deref(value, _, _) | .RawOf(value, _, _) | .Copy(value, _, _) | .Place(value, _, _, _) -> walk_expr(value, with_frame(chain, "paren"), walk, &hits)
+        .Field(value, member, _, _) -> walk_expr(value, with_frame(chain, "field:{member}"), walk, hits)
+        .OptField(value, member, _, _, _, _) -> walk_expr(value, with_frame(chain, "field:{member}"), walk, hits)
+        .MemberSpread(value, _, _, _) | .Spread(value, _, _) | .Ok(value, _, _) | .Err(value, _, _) | .Present(value, _, _) | .Tainted(value, _, _, _) -> walk_expr(value, with_frame(chain, "wrap"), walk, hits)
+        .Deref(value, _, _) | .RawOf(value, _, _) | .Copy(value, _, _) | .Place(value, _, _, _) -> walk_expr(value, with_frame(chain, "paren"), walk, hits)
         .MapLit(entries, _, _) -> loop entry in entries {
-            walk_expr(entry.key, with_frame(chain, "wrap"), walk, &hits)
-            walk_expr(entry.value, with_frame(chain, "wrap"), walk, &hits)
+            walk_expr(entry.key, with_frame(chain, "wrap"), walk, hits)
+            walk_expr(entry.value, with_frame(chain, "wrap"), walk, hits)
         }
         .Index(base, index, _, _, _) -> {
-            walk_expr(base, with_frame(chain, "op"), walk, &hits)
-            walk_expr(index, with_frame(chain, "op"), walk, &hits)
+            walk_expr(base, with_frame(chain, "op"), walk, hits)
+            walk_expr(index, with_frame(chain, "op"), walk, hits)
         }
         .Slice(base, start, end, range, _, _) -> {
-            walk_expr(base, with_frame(chain, "op"), walk, &hits)
-            walk_expr(start, with_frame(chain, "op"), walk, &hits)
-            walk_expr(end, with_frame(chain, "op"), walk, &hits)
-            if range == .Val(value) -> walk_expr(value, with_frame(chain, "op"), walk, &hits)
+            walk_expr(base, with_frame(chain, "op"), walk, hits)
+            walk_expr(start, with_frame(chain, "op"), walk, hits)
+            walk_expr(end, with_frame(chain, "op"), walk, hits)
+            if range == .Val(value) -> walk_expr(value, with_frame(chain, "op"), walk, hits)
         }
         .Range(left, right, _, _, _) -> {
-            walk_expr(left, with_frame(chain, "op"), walk, &hits)
-            walk_expr(right, with_frame(chain, "op"), walk, &hits)
+            walk_expr(left, with_frame(chain, "op"), walk, hits)
+            walk_expr(right, with_frame(chain, "op"), walk, hits)
         }
-        .Call(call, _) -> walk_args(call.args, "arg:{call.name}", chain, walk, &hits)
+        .Call(call, _) -> walk_args(call.args, "arg:{call.name}", chain, walk, hits)
         .MethodCall(receiver, method, _, _, _, args, _) | .OptMethodCall(receiver, method, _, _, args, _, _) -> {
-            walk_expr(receiver, with_frame(chain, "recv:{method}"), walk, &hits)
-            walk_args(args, "arg:.{method}", chain, walk, &hits)
+            walk_expr(receiver, with_frame(chain, "recv:{method}"), walk, hits)
+            walk_args(args, "arg:.{method}", chain, walk, hits)
         }
         .CallValue(callee, args, _, _) -> {
             // `print((() -> { call ?? panic(..); true })())`: the observer
             // runs after the invoked body, so the body's effects are observed.
             invoked: if !walk.later && observed_chain(chain) -> observed_later(walk) else -> walk.copy()
-            walk_expr(callee, with_frame(chain, "recv:()"), invoked, &hits)
-            walk_args(args, "arg:()", chain, walk, &hits)
+            walk_expr(callee, with_frame(chain, "recv:()"), invoked, hits)
+            walk_args(args, "arg:()", chain, walk, hits)
         }
-        .StructLit(_, _, _, _, fields, _, _, _) -> loop field in fields -> walk_expr(field.value, with_frame(chain, "wrap"), walk, &hits)
-        .TupleLit(fields, _, _, _) -> loop field in fields -> walk_expr(field.value, with_frame(chain, "wrap"), walk, &hits)
+        .StructLit(_, _, _, _, fields, _, _, _) -> loop field in fields -> walk_expr(field.value, with_frame(chain, "wrap"), walk, hits)
+        .TupleLit(fields, _, _, _) -> loop field in fields -> walk_expr(field.value, with_frame(chain, "wrap"), walk, hits)
         .TypedLit(_, body, _, _) -> if body == {
-            .Fields(fields) -> loop field in fields -> walk_expr(field.value, with_frame(chain, "wrap"), walk, &hits)
-            .Elements(values) -> loop value in values -> walk_expr(value, with_frame(chain, "wrap"), walk, &hits)
+            .Fields(fields) -> loop field in fields -> walk_expr(field.value, with_frame(chain, "wrap"), walk, hits)
+            .Elements(values) -> loop value in values -> walk_expr(value, with_frame(chain, "wrap"), walk, hits)
             .Entries(entries) -> loop entry in entries {
-                walk_expr(entry.key, with_frame(chain, "wrap"), walk, &hits)
-                walk_expr(entry.value, with_frame(chain, "wrap"), walk, &hits)
+                walk_expr(entry.key, with_frame(chain, "wrap"), walk, hits)
+                walk_expr(entry.value, with_frame(chain, "wrap"), walk, hits)
             }
-            .Value(value) -> walk_expr(value, with_frame(chain, "wrap"), walk, &hits)
+            .Value(value) -> walk_expr(value, with_frame(chain, "wrap"), walk, hits)
             else -> {}
         }
         .EnumLit(_, _, _, args, _, _, _) -> loop argument in args {
-            if argument == { .Positional(value) | .Named(_, value) -> walk_expr(value, with_frame(chain, "wrap"), walk, &hits) }
+            if argument == { .Positional(value) | .Named(_, value) -> walk_expr(value, with_frame(chain, "wrap"), walk, hits) }
         }
-        .PatternTest(subject, _, _, _) -> walk_expr(subject, with_frame(chain, "op"), walk, &hits)
+        .PatternTest(subject, _, _, _) -> walk_expr(subject, with_frame(chain, "op"), walk, hits)
         .OrFallback(value, fallback, _, _, _) -> {
-            walk_expr(value, with_frame(chain, fallback_frame(fallback)), walk, &hits)
+            walk_expr(value, with_frame(chain, fallback_frame(fallback)), walk, hits)
             other: with_frame(chain, "other")
             if fallback == {
-                .Value(alternative) -> walk_expr(alternative, other, walk, &hits)
+                .Value(alternative) -> walk_expr(alternative, other, walk, hits)
                 .Block(body, tail, _) -> {
-                    walk_body(body, other, walk, &hits)
-                    if tail == .Val(tail_value) -> walk_expr(tail_value, other, walk, &hits)
+                    walk_body(body, other, walk, hits)
+                    if tail == .Val(tail_value) -> walk_expr(tail_value, other, walk, hits)
                 }
-                .Return(returned, _) -> if returned == .Val(returned_value) -> walk_expr(returned_value, other, walk, &hits)
-                .Panic(_, args) -> walk_args(args, "other", chain, walk, &hits)
+                .Return(returned, _) -> if returned == .Val(returned_value) -> walk_expr(returned_value, other, walk, hits)
+                .Panic(_, args) -> walk_args(args, "other", chain, walk, hits)
                 else -> {}
             }
         }
         .If(condition, then_body, then_value, else_body, else_value, _, _) -> {
-            walk_expr(condition, with_frame(chain, "cond:{observes(then_body) || observes(else_body)}"), walk, &hits)
+            walk_expr(condition, with_frame(chain, "cond:{observes(then_body) || observes(else_body)}"), walk, hits)
             block: with_frame(chain, "block")
-            walk_body(then_body, block, walk, &hits)
-            walk_expr(then_value, block, walk, &hits)
-            walk_body(else_body, block, walk, &hits)
-            walk_expr(else_value, block, walk, &hits)
+            walk_body(then_body, block, walk, hits)
+            walk_expr(then_value, block, walk, hits)
+            walk_body(else_body, block, walk, hits)
+            walk_expr(else_value, block, walk, hits)
         }
         .Lambda(lambda, _) -> if lambda.body == {
-            .Expr(value) -> walk_expr(value, with_frame(chain, "lambda"), walk, &hits)
-            .Block(body) -> walk_body(body, with_frame(chain, "lambda"), walk, &hits)
+            .Expr(value) -> walk_expr(value, with_frame(chain, "lambda"), walk, hits)
+            .Block(body) -> walk_body(body, with_frame(chain, "lambda"), walk, hits)
         }
-        .PtrFromAddr(_, _, _, address, _, _) -> walk_expr(address, with_frame(chain, "other"), walk, &hits)
+        .PtrFromAddr(_, _, _, address, _, _) -> walk_expr(address, with_frame(chain, "other"), walk, hits)
         else -> {}
     }
 }
@@ -340,36 +340,36 @@ walk_expr: fn(expression: Expr, chain: [String], walk: Walk, hits: &[Hit]) Never
 walk_body: fn(body: [Stmt], chain: [String], walk: Walk, hits: &[Hit]) Never! {
     loop index in 0..<body.len() {
         step: if !walk.later && observes_from(body, index + 1) -> observed_later(walk) else -> walk.copy()
-        walk_statement(body[index], chain, step, &hits)
+        walk_statement(body[index], chain, step, hits)
     }
 }
 
 walk_statement: fn(statement: Stmt, chain: [String], walk: Walk, hits: &[Hit]) Never! {
     block: with_frame(chain, "block")
     if statement == {
-        .Expr(value) | .DeferClose(value, _) -> walk_expr(value, with_frame(chain, "stmt"), walk, &hits)
-        .Val(binding) -> walk_expr(binding.init, with_frame(chain, "bind:{binding.name}"), walk, &hits)
-        .Assign(_, _, _, value) -> walk_expr(value, with_frame(chain, "assign"), walk, &hits)
-        .Return(value, _) -> if value == .Val(value) -> walk_expr(value, with_frame(chain, "return"), walk, &hits)
-        .BreakValue(value, _) | .Yield(value, _) | .BreakLabelValue(_, _, value, _) -> walk_expr(value, with_frame(chain, "return"), walk, &hits)
+        .Expr(value) | .DeferClose(value, _) -> walk_expr(value, with_frame(chain, "stmt"), walk, hits)
+        .Val(binding) -> walk_expr(binding.init, with_frame(chain, "bind:{binding.name}"), walk, hits)
+        .Assign(_, _, _, value) -> walk_expr(value, with_frame(chain, "assign"), walk, hits)
+        .Return(value, _) -> if value == .Val(value) -> walk_expr(value, with_frame(chain, "return"), walk, hits)
+        .BreakValue(value, _) | .Yield(value, _) | .BreakLabelValue(_, _, value, _) -> walk_expr(value, with_frame(chain, "return"), walk, hits)
         .While(condition, body, _, _, _) -> {
-            walk_expr(condition, with_frame(chain, "cond:{observes(body)}"), walk, &hits)
-            walk_body(body, block, walk, &hits)
+            walk_expr(condition, with_frame(chain, "cond:{observes(body)}"), walk, hits)
+            walk_body(body, block, walk, hits)
         }
         .For(_, _, _, kind, body, _, _, _, _) -> {
             iterated: with_frame(chain, "cond:{observes(body)}")
             if kind == {
                 .Range(start, end, step, _) -> {
-                    walk_expr(start, iterated, walk, &hits)
-                    walk_expr(end, iterated, walk, &hits)
-                    if step == .Val(value) -> walk_expr(value, iterated, walk, &hits)
+                    walk_expr(start, iterated, walk, hits)
+                    walk_expr(end, iterated, walk, hits)
+                    if step == .Val(value) -> walk_expr(value, iterated, walk, hits)
                 }
                 .In(collection, step) -> {
-                    walk_expr(collection, iterated, walk, &hits)
-                    if step == .Val(value) -> walk_expr(value, iterated, walk, &hits)
+                    walk_expr(collection, iterated, walk, hits)
+                    if step == .Val(value) -> walk_expr(value, iterated, walk, hits)
                 }
             }
-            walk_body(body, block, walk, &hits)
+            walk_body(body, block, walk, hits)
         }
         .Switch(subject, arms, else_body, _) | .ComptimeSwitch(subject, arms, else_body, _) -> {
             observed := false
@@ -379,24 +379,24 @@ walk_statement: fn(statement: Stmt, chain: [String], walk: Walk, hits: &[Hit]) N
             if else_body == .Val(body) {
                 if observes(body) -> observed = true
             }
-            walk_expr(subject, with_frame(chain, "cond:{observed}"), walk, &hits)
+            walk_expr(subject, with_frame(chain, "cond:{observed}"), walk, hits)
             loop arm in arms {
-                walk_expr(arm.cond, block, walk, &hits)
-                walk_body(arm.body, block, walk, &hits)
+                walk_expr(arm.cond, block, walk, hits)
+                walk_body(arm.body, block, walk, hits)
             }
-            if else_body == .Val(body) -> walk_body(body, block, walk, &hits)
+            if else_body == .Val(body) -> walk_body(body, block, walk, hits)
         }
-        .Loop(body, _, _, _) | .Reactive(body, _) | .Shield(body, _) | .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .AuthorityScope(_, _, _, body, _) | .ComptimeBlock(body, _, _) | .Live(body, _) | .Transact(_, _, body, _, _) | .Layout(_, _, body, _) | .Unsafe(_, _, body, _) | .Impure(_, _, body, _) | .TaskGroup(_, _, _, body, _) | .ContextBlock(_, body, _) | .AssumeDet(_, _, body, _) | .ScopeMember(_, _, _, _, body, _, _, _) -> walk_body(body, block, walk, &hits)
+        .Loop(body, _, _, _) | .Reactive(body, _) | .Shield(body, _) | .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .AuthorityScope(_, _, _, body, _) | .ComptimeBlock(body, _, _) | .Live(body, _) | .Transact(_, _, body, _, _) | .Layout(_, _, body, _) | .Unsafe(_, _, body, _) | .Impure(_, _, body, _) | .TaskGroup(_, _, _, body, _) | .ContextBlock(_, body, _) | .AssumeDet(_, _, body, _) | .ScopeMember(_, _, _, _, body, _, _, _) -> walk_body(body, block, walk, hits)
         .CountedLoop(init, condition, step, body, _, _, _) -> {
-            walk_expr(init.init, with_frame(chain, "bind:{init.name}"), walk, &hits)
-            walk_expr(condition, with_frame(chain, "cond:{observes(body)}"), walk, &hits)
-            if step == .Val(value) -> walk_statement(value, block, walk, &hits)
-            walk_body(body, block, walk, &hits)
+            walk_expr(init.init, with_frame(chain, "bind:{init.name}"), walk, hits)
+            walk_expr(condition, with_frame(chain, "cond:{observes(body)}"), walk, hits)
+            if step == .Val(value) -> walk_statement(value, block, walk, hits)
+            walk_body(body, block, walk, hits)
         }
         .ComptimeIf(condition, _, then_body, else_body, _, _) -> {
-            walk_expr(condition, with_frame(chain, "other"), walk, &hits)
-            walk_body(then_body, block, walk, &hits)
-            if else_body == .Val(body) -> walk_body(body, block, walk, &hits)
+            walk_expr(condition, with_frame(chain, "other"), walk, hits)
+            walk_body(then_body, block, walk, hits)
+            if else_body == .Val(body) -> walk_body(body, block, walk, hits)
         }
         else -> {}
     }
@@ -405,7 +405,7 @@ walk_statement: fn(statement: Stmt, chain: [String], walk: Walk, hits: &[Hit]) N
 scan: fn(program: Program, probe: Probe) -> [Hit] Never! {
     hits := [Hit]{}
     loop item in program.items {
-        if item == .Func(function) -> walk_body(function.body, [String]{}, Walk{probe: probe.copy(), later: false, function: function.name.copy()}, &hits)
+        if item == .Func(function) -> walk_body(function.body, [String]{}, Walk{probe: probe.copy(), later: false, function: function.name.copy()}, hits)
     }
     hits
 }
@@ -472,14 +472,14 @@ module_probes: fn(program: Program, module_name: String, member: String) -> [Pro
     loop decl in program.imports {
         if decl.kind == {
             .Module(name, _) -> {
-                if name == module_name -> &probes.push(Probe.Member{alias: decl.alias.copy(), member: member.copy()})
+                if name == module_name -> probes.push(Probe.Member{alias: decl.alias.copy(), member: member.copy()})
             }
             .Unqualified(module_alias, _, items, _, _) -> {
                 if module_alias == module_name {
                     loop item in items {
                         if item.original == member {
                             local: if item.alias == .Val(alias) -> alias.copy() else -> item.original.copy()
-                            &probes.push(Probe.Local{name: local})
+                            probes.push(Probe.Local{name: local})
                         }
                     }
                 }
@@ -494,30 +494,30 @@ inspect_witness: fn(key: String, text: String, module_name: String, member: Stri
     errors := [String]{}
     marker: "// core-conformance: {key}"
     lines: text.split("\n").to_list()
-    if lines.len() == 0 || lines[0].trim_end() != marker -> &errors.push("first line must be `{marker}`")
+    if lines.len() == 0 || lines[0].trim_end() != marker -> errors.push("first line must be `{marker}`")
     markers := 0
     loop line in lines {
         if line.trim() == marker -> markers += 1
     }
-    if markers > 1 -> &errors.push("expected one `{marker}` marker, found {markers}")
+    if markers > 1 -> errors.push("expected one `{marker}` marker, found {markers}")
     source: mask_inline_package(text)
     parsed: parse_source(source.bytes())
     loop diagnostic in parsed.diagnostics {
         if diagnostic.code.starts_with("E") {
             line: if diagnostic.span == .Val(span) -> offset_line(source, span.start) else -> 0
-            &errors.push("witness does not parse: line {line}: {diagnostic.code} {diagnostic.what}")
+            errors.push("witness does not parse: line {line}: {diagnostic.code} {diagnostic.what}")
             return WitnessCheck{sink: None, errors: errors}
         }
     }
     program: parsed.program
     probes: module_probes(program, module_name, member)
     if probes.len() != 1 {
-        &errors.push("expected one import of `{member}` from `{module_name}`, found {probes.len()}")
+        errors.push("expected one import of `{member}` from `{module_name}`, found {probes.len()}")
         return WitnessCheck{sink: None, errors: errors}
     }
     hits: scan(program, probes[0])
     if hits.len() != 1 {
-        &errors.push("expected one call of `{key}`, found {hits.len()}")
+        errors.push("expected one call of `{key}`, found {hits.len()}")
         return WitnessCheck{sink: None, errors: errors}
     }
     hit: hits[0]
@@ -529,12 +529,12 @@ inspect_witness: fn(key: String, text: String, module_name: String, member: Stri
             if function.name == "run" {
                 run_found = true
                 run_unit = function.return_type == None
-                ast_visit_body(function.body, (expression: Expr) -> note_call_name(&run_calls, expression), true)
+                ast_visit_body(function.body, (expression: Expr) -> note_call_name(run_calls, expression), true)
             }
         }
     }
     if !run_found {
-        &errors.push("compile-only witness: no `run: fn()` executes the call")
+        errors.push("compile-only witness: no `run: fn()` executes the call")
         return WitnessCheck{sink: None, errors: errors}
     }
     if hit.function != "run" {
@@ -543,20 +543,20 @@ inspect_witness: fn(key: String, text: String, module_name: String, member: Stri
             if name == hit.function -> reached = true
         }
         if !reached {
-            &errors.push("compile-only witness: `{hit.function}` holds the call but `run` never calls it")
+            errors.push("compile-only witness: `{hit.function}` holds the call but `run` never calls it")
             return WitnessCheck{sink: None, errors: errors}
         }
     }
     if hit.function == "run" && run_unit {
         loop frame in hit.chain {
             if frame == "fallback:return-err" {
-                &errors.push("Unit run cannot use ?? return Err(...) propagation")
+                errors.push("Unit run cannot use ?? return Err(...) propagation")
                 return WitnessCheck{sink: None, errors: errors}
             }
         }
     }
     verdict: judge(program, hit, result_class, 0)
-    loop problem in verdict.errors -> &errors.push(problem.copy())
+    loop problem in verdict.errors -> errors.push(problem.copy())
     if errors.len() > 0 -> return WitnessCheck{sink: None, errors: errors}
     verdict
 }
@@ -570,17 +570,17 @@ judge: fn(program: Program, hit: Hit, result_class: String, depth: Int) -> Witne
     if reading.end == {
         "observed" -> {
             if {
-                result_class == "opaque" && reading.follow_up == "" -> &errors.push("opaque result needs a follow-up operation before observation")
+                result_class == "opaque" && reading.follow_up == "" -> errors.push("opaque result needs a follow-up operation before observation")
                 else -> sink = Val(Sink{kind: "direct", operation: reading.operation.copy(), follow_up: reading.follow_up.copy(), via: "", result_class: result_class.copy()})
             }
         }
         "bound" -> {
             if {
-                reading.name == "" -> &errors.push("a destructured result cannot be traced to an observer")
-                reading.name.starts_with("_") -> &errors.push("result is bound to discard name {reading.name}")
+                reading.name == "" -> errors.push("a destructured result cannot be traced to an observer")
+                reading.name.starts_with("_") -> errors.push("result is bound to discard name {reading.name}")
                 trace(program, reading.name, reading.follow_up, result_class, 0, reading.name) == .Val(found) -> sink = Val(found.copy())
-                result_class == "opaque" -> &errors.push("bound result {reading.name} never reaches print/eprint/assert through a follow-up operation")
-                else -> &errors.push("bound result {reading.name} is never observed by print/eprint/assert")
+                result_class == "opaque" -> errors.push("bound result {reading.name} never reaches print/eprint/assert through a follow-up operation")
+                else -> errors.push("bound result {reading.name} is never observed by print/eprint/assert")
             }
         }
         "statement" -> {
@@ -588,7 +588,7 @@ judge: fn(program: Program, hit: Hit, result_class: String, depth: Int) -> Witne
                 result_class == "never" -> sink = Val(Sink{kind: "never-effect", operation: "exit", follow_up: "", via: "", result_class: result_class.copy()})
                 reading.propagated && hit.later && result_class != "opaque" -> sink = Val(Sink{kind: "propagated", operation: "later-observer", follow_up: "error-propagation", via: "", result_class: result_class.copy()})
                 result_class == "unit" && hit.later -> sink = Val(Sink{kind: "unit-effect", operation: "later-observer", follow_up: "", via: "", result_class: result_class.copy()})
-                else -> &errors.push("result has no observable sink: the call is compile-only or its value is discarded")
+                else -> errors.push("result has no observable sink: the call is compile-only or its value is discarded")
             }
         }
         "returned" -> {
@@ -606,7 +606,7 @@ judge: fn(program: Program, hit: Hit, result_class: String, depth: Int) -> Witne
             }
             return outer
         }
-        else -> &errors.push("result is {reading.end}, not observed")
+        else -> errors.push("result is {reading.end}, not observed")
     }
     if errors.len() > 0 -> return WitnessCheck{sink: None, errors: errors}
     WitnessCheck{sink: sink, errors: errors}

@@ -41,7 +41,7 @@ store_malformed_objects: fn(hangar: String) -[FS, Env]> [MalformedObject] StoreE
     loop entry in entries {
         found_reason: store_malformed_object_reason(entry.path)
         reason: found_reason ?? next
-        &malformed.push(MalformedObject{id: entry.name, path: entry.path, reason})
+        malformed.push(MalformedObject{id: entry.name, path: entry.path, reason})
     }
     Ok(malformed)
 }
@@ -52,13 +52,13 @@ store_malformed_objects: fn(hangar: String) -[FS, Env]> [MalformedObject] StoreE
 store_quarantine_malformed_objects: fn(verification: &StoreVerification, roots: HangarRoots, objects: [MalformedObject]) -[FS, Env, Time]> Int StoreError! {
     if objects.len() == 0 -> return Ok(0)
     permissions := MovePathPermissions.default()
-    if store_quarantine_move_objects(&verification, roots, objects, &permissions) == {
+    if store_quarantine_move_objects(verification, roots, objects, permissions) == {
         .Ok(count) -> {
-            &permissions.restore() ?? return Err(err)
+            permissions.restore() ?? return Err(err)
             Ok(count)
         }
         .Err(error) -> {
-            if &permissions.restore() == {
+            if permissions.restore() == {
                 .Ok(_) -> Err(error)
                 .Err(restore) -> Err(StoreError.Other("{error.message()}; restoring Hangar permissions failed: {restore.message()}"))
             }
@@ -69,22 +69,22 @@ store_quarantine_malformed_objects: fn(verification: &StoreVerification, roots: 
 store_quarantine_move_objects: fn(verification: &StoreVerification, roots: HangarRoots, objects: [MalformedObject], permissions: &MovePathPermissions) -[FS, Env, Time]> Int StoreError! {
     hangar: roots.hangar_dir()
     quarantine: files.join(hangar, "quarantine")
-    &permissions.make_writable(hangar, hangar)
+    permissions.make_writable(hangar, hangar)
     store_ensure_real_directory(quarantine, "Hangar quarantine")
-    &permissions.make_writable(quarantine, hangar)
+    permissions.make_writable(quarantine, hangar)
     moved := 0
     loop object in objects {
         // Admitted objects are directory, regular file, or symlink roots;
         // every shape is quarantinable by rename.
         present: store_node_stat(object.path)
         if present == None -> next
-        &permissions.make_writable(object.path, hangar)
-        store_remove_seal(&verification, object.path, hangar)
+        permissions.make_writable(object.path, hangar)
+        store_remove_seal(verification, object.path, hangar)
         sequence: process_sequence_take(STORE_GC_QUARANTINE_SEQUENCE)
         destination: files.join(quarantine, "gc-{object.id}-{object.reason}-{store_now_secs()}-{sequence}")
         files.rename(object.path, destination)
-        &permissions.renamed(object.path, destination)
-        _: store_tombstone_closure_record_unlocked(&verification, roots, object.id)
+        permissions.renamed(object.path, destination)
+        _: store_tombstone_closure_record_unlocked(verification, roots, object.id)
         moved += 1
     }
     store_sync_store_directory(quarantine)

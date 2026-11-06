@@ -32,7 +32,7 @@ test_read_after_final_symlink_swap: fn(path: OSPath, outside: OSPath) -> [U8] Er
     (parent, name): open_parent(path)
     file := open_file_at(parent, name, O_RDONLY)
     moved: path.with_file_name("main.jet.canvas-test-held")
-    current: read_opened_file(&file, () -> { fs.rename(path, moved)?; symlink(outside, path) })
+    current: read_opened_file(file, () -> { fs.rename(path, moved)?; symlink(outside, path) })
     .Ok(current.bytes)
 }
 test_remove_after_final_symlink_swap: fn(path: OSPath, outside: OSPath) Err! {

@@ -28,14 +28,14 @@ serve: fn(listener: TCPListener, response: [U8], hold: Bool) -[Net, Time.Wait]> 
     loop {
         chunk: stream.read(4096, deadline: 10s) ?? return "read failed"
         if chunk.len() == 0 -> break
-        loop byte in chunk -> &request.push(byte)
+        loop byte in chunk -> request.push(byte)
         n: request.len()
         if !hold && n >= 4 && request[n - 4] == (U8{13}) && request[n - 3] == (U8{10}) && request[n - 2] == (U8{13}) && request[n - 1] == (U8{10}) -> break
     }
     at := 0
     loop at < response.len() {
         rest := [U8]{}
-        loop index in at..<response.len() -> &rest.push(response[index])
+        loop index in at..<response.len() -> rest.push(response[index])
         sent: stream.write(rest, deadline: 10s) ?? return "write failed"
         at += sent
     }
@@ -72,12 +72,12 @@ run: fn() {
 
     // Chunked binary bodies with extensions; the bound returns one excess byte.
     chunked := "HTTP/1.1 200 OK\r\nTransfer-Encoding: gzip, Chunked\r\n\r\n2\r\n".bytes()
-    &chunked.push(U8{255})
-    &chunked.push(U8{0})
-    loop byte in "\r\n3;extension=x\r\nabc\r\n0\r\n\r\n".bytes() -> &chunked.push(byte)
+    chunked.push(U8{255})
+    chunked.push(U8{0})
+    loop byte in "\r\n3;extension=x\r\nabc\r\n0\r\n\r\n".bytes() -> chunked.push(byte)
     exchange("chunked", chunked, 512, 5000, false)
     bounded := "HTTP/1.1 200 OK\r\nContent-Length: 514\r\n\r\n".bytes()
-    loop _ in 0..<514 -> &bounded.push(U8{120})
+    loop _ in 0..<514 -> bounded.push(U8{120})
     listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     port: net.socket_port(net.listener_local_socket_addr(listener) ?? panic("address"))
     peer: task { serve(listener, bounded, false) }

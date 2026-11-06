@@ -111,13 +111,13 @@ PreparedRealization: struct {
 store_realize_uncached: fn(verification: &StoreVerification, roots: HangarRoots, ctx: ProviderCtx, request: RealizeRequest) -[IO, FS, Net, Env, Rand, Exec, Time, Time.Wait]> Realized RealizeError! {
     if request == {
         .Package(spec, table) -> {
-            realized: provider_realize(&verification, spec, table, ctx) ?? return Err(RealizeError.Provider(err))
+            realized: provider_realize(verification, spec, table, ctx) ?? return Err(RealizeError.Provider(err))
             Ok(realized)
         }
         .Adapter(plan, table, expectation) -> {
-            tools: store_realize_adapter_tools(&verification, roots, ctx, plan, table)
+            tools: store_realize_adapter_tools(verification, roots, ctx, plan, table)
             realized := provider_realize_adapter(plan, ctx, expectation, tools.tools, table) ?? return Err(RealizeError.Provider(err))
-            store_bind_adapter_hook_identity(&realized, plan, table, expectation, ctx) ?? return Err(RealizeError.Store(err))
+            store_bind_adapter_hook_identity(realized, plan, table, expectation, ctx) ?? return Err(RealizeError.Store(err))
             Ok(realized)
         }
     }
@@ -140,7 +140,7 @@ store_build_for_cache: fn(verification: &StoreVerification, roots: HangarRoots, 
         final_attempt: attempt + 1 >= attempts
         store_repro_check_cancelled(options)
         left_workspace: RootWorkspace.new(roots, "left", attempt) ?? return Err(RealizeError.Store(err))
-        left: store_realize_uncached(&verification, left_workspace.roots, store_repro_workspace_ctx(ctx, left_workspace.roots.hangar_dir()), request) ? value -> value ! error -> {
+        left: store_realize_uncached(verification, left_workspace.roots, store_repro_workspace_ctx(ctx, left_workspace.roots.hangar_dir()), request) ? value -> value ! error -> {
             if final_attempt -> recipe_promote_failed_attempt(left_workspace.roots.hangar_dir(), roots.hangar_dir(), store_repro_request_package(request)).drop("failed-attempt evidence is best-effort")
             left_workspace.remove()
             if !final_attempt -> next
@@ -160,14 +160,14 @@ store_build_for_cache: fn(verification: &StoreVerification, roots: HangarRoots, 
             left_workspace.remove()
             return Err(RealizeError.Store(failure))
         }
-        right: store_realize_uncached(&verification, right_workspace.roots, store_repro_workspace_ctx(ctx, right_workspace.roots.hangar_dir()), request) ? value -> value ! error -> {
+        right: store_realize_uncached(verification, right_workspace.roots, store_repro_workspace_ctx(ctx, right_workspace.roots.hangar_dir()), request) ? value -> value ! error -> {
             if final_attempt -> recipe_promote_failed_attempt(right_workspace.roots.hangar_dir(), roots.hangar_dir(), store_repro_request_package(request)).drop("failed-attempt evidence is best-effort")
             left_workspace.remove()
             right_workspace.remove()
             if !final_attempt -> next
             return Err(error)
         }
-        comparison: store_repro_compare_independent(&verification, left_workspace, left, right_workspace, right) ? value -> value ! error -> {
+        comparison: store_repro_compare_independent(verification, left_workspace, left, right_workspace, right) ? value -> value ! error -> {
             left_workspace.remove()
             right_workspace.remove()
             return Err(RealizeError.Store(error))
@@ -201,11 +201,11 @@ IndependentComparison: struct {
 }
 
 store_repro_compare_independent: fn(verification: &StoreVerification, left_workspace: RootWorkspace, left: Realized, right_workspace: RootWorkspace, right: Realized) -[FS, Env]> IndependentComparison StoreError! {
-    left_entry: store_repro_entry_from_realized(&verification, left_workspace.roots, left)
-    right_entry: store_repro_entry_from_realized(&verification, right_workspace.roots, right)
+    left_entry: store_repro_entry_from_realized(verification, left_workspace.roots, left)
+    right_entry: store_repro_entry_from_realized(verification, right_workspace.roots, right)
     left_action: store_entry_action_key(left_entry)
     right_action: store_entry_action_key(right_entry)
-    difference: if left_action != right_action -> Val(FirstDifference{path: ".", kind: .ActionIdentity, left: left_action, right: right_action}) else -> store_repro_compare_entries(&verification, left_workspace.roots, left_entry, right_workspace.roots, right_entry)
+    difference: if left_action != right_action -> Val(FirstDifference{path: ".", kind: .ActionIdentity, left: left_action, right: right_action}) else -> store_repro_compare_entries(verification, left_workspace.roots, left_entry, right_workspace.roots, right_entry)
     Ok(IndependentComparison{left_entry, right_entry, left_action, right_action, difference})
 }
 
@@ -263,8 +263,8 @@ store_repro_entry_from_realized: fn(verification: &StoreVerification, roots: Han
         return Err(store_repro_invalid("independent root result has incomplete or mismatched build identity"))
     }
     producer := realized.producer
-    &producer.bind_cache_provenance(realized.reference, realized.envelope.output_hash, identity, realized.references)
-    provider_refresh_provider_facts(&producer, realized.reference) ?? return Err(StoreError.Other("{err}"))
+    producer.bind_cache_provenance(realized.reference, realized.envelope.output_hash, identity, realized.references)
+    provider_refresh_provider_facts(producer, realized.reference) ?? return Err(StoreError.Other("{err}"))
     producer = ProducerRecord.decode(producer.encode())
     probe: StoreEntry{
         id: "",
@@ -284,13 +284,13 @@ store_repro_entry_from_realized: fn(verification: &StoreVerification, roots: Han
         realized_at: 0,
         last_used_at: 0,
     }
-    actual: store_try_entry_output_hash(&verification, roots, probe)
+    actual: store_try_entry_output_hash(verification, roots, probe)
     if actual != realized.envelope.output_hash {
         return Err(store_repro_invalid("independent root output re-hashed as `{actual}`, expected `{realized.envelope.output_hash}`"))
     }
     named_outputs := [String: String]{}
     names := realized.named_outputs.keys().to_list()
-    &names.sort()
+    names.sort()
     loop name in names {
         path: realized.named_outputs[name]
         canonical: files.canonicalize(path)
@@ -327,12 +327,12 @@ store_repro_entry_from_realized: fn(verification: &StoreVerification, roots: Han
 // Batch registration must not re-read every existing record per candidate.
 store_certify_registrations_unlocked: fn(verification: &StoreVerification, roots: HangarRoots, entries: [StoreEntry]) StoreError! -[FS, Env]> {
     existing: store_list_unlocked(roots)
-    loop entry in entries -> store_repro_certify_registration(&verification, roots, entry, entries, None, existing)
+    loop entry in entries -> store_repro_certify_registration(verification, roots, entry, entries, None, existing)
 }
 
 store_certify_registration_unlocked_with_fresh_agreement: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, additional: [StoreEntry], action_key: String) StoreError! -[FS, Env]> {
     existing: store_list_unlocked(roots)
-    store_repro_certify_registration(&verification, roots, entry, additional, Val(action_key), existing)
+    store_repro_certify_registration(verification, roots, entry, additional, Val(action_key), existing)
 }
 
 store_repro_certify_registration: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, additional: [StoreEntry], fresh_action_key: String?, existing: [StoreEntry]) StoreError! -[FS, Env]> {
@@ -347,17 +347,17 @@ store_repro_certify_registration: fn(verification: &StoreVerification, roots: Ha
         if candidate.id != entry.id && store_entry_action_key(candidate) == action_key -> candidates[candidate.id] = candidate
     }
     ids := candidates.keys().to_list()
-    &ids.sort()
+    ids.sort()
     loop id in ids {
         candidate: candidates[id]
         candidate_producer: store_repro_decode_producer(candidate)
-        store_repro_verify_existing_output(&verification, roots, candidate)
+        store_repro_verify_existing_output(verification, roots, candidate)
         entry_first: store_repro_sorts_first(entry, candidate)
         left: if entry_first -> entry else -> candidate
         right: if entry_first -> candidate else -> entry
         left_producer: if entry_first -> producer else -> candidate_producer
         right_producer: if entry_first -> candidate_producer else -> producer
-        if store_repro_compare_registration_entries(&verification, roots, left, right, left_producer, right_producer) == {
+        if store_repro_compare_registration_entries(verification, roots, left, right, left_producer, right_producer) == {
             .Val(difference) -> {
                 report: store_repro_report_json(action_key, action_key, action_key, left, right, left_producer, right_producer, difference)
                 report_path: store_repro_persist_report(roots, action_key, report)
@@ -374,7 +374,7 @@ store_repro_certify_registration: fn(verification: &StoreVerification, roots: Ha
 // certification, so valid `out` + `dev` records are not rejected early.
 store_repro_compare_registration_entries: fn(verification: &StoreVerification, left_roots: HangarRoots, left: StoreEntry, right: StoreEntry, left_producer: ProducerRecord, right_producer: ProducerRecord) -[FS, Env]> FirstDifference? StoreError! {
     if left_producer.provider != "nix" || right_producer.provider != "nix" {
-        return store_repro_compare_entries(&verification, left_roots, left, left_roots, right)
+        return store_repro_compare_entries(verification, left_roots, left, left_roots, right)
     }
     if left.references != right.references {
         return Ok(Val(FirstDifference{path: "references", kind: .References, left: store_repro_debug_list(left.references), right: store_repro_debug_list(right.references)}))
@@ -392,9 +392,9 @@ store_repro_compare_registration_entries: fn(verification: &StoreVerification, l
     right_outputs: store_repro_nix_action_outputs(right, right_producer)
     names := left_outputs.keys().to_list()
     loop name in right_outputs.keys() {
-        if !left_outputs.has_key(name) -> &names.push(name)
+        if !left_outputs.has_key(name) -> names.push(name)
     }
-    &names.sort()
+    names.sort()
     loop name in names {
         left_output: left_outputs.get(name) ?? next
         right_output: right_outputs.get(name) ?? next
@@ -416,7 +416,7 @@ store_repro_compare_registration_entries: fn(verification: &StoreVerification, l
 // Rust `{:?}` of a `Vec<String>`: `["a", "b"]`.
 store_repro_debug_list: fn(values: [String]) -> String Never! {
     quoted := [String]{}
-    loop value in values -> &quoted.push(json.to_string(Dyn.Text(value.copy())) ?? "\"{value}\"")
+    loop value in values -> quoted.push(json.to_string(Dyn.Text(value.copy())) ?? "\"{value}\"")
     "[{quoted.join(", ")}]"
 }
 
@@ -519,9 +519,9 @@ store_repro_side_json: fn(entry: StoreEntry, producer: ProducerRecord, action_ke
 
 store_repro_report_entry_id: fn(entry: StoreEntry, action_key: String) -> String Never! {
     identity := "jet-reproducibility-candidate-v1".bytes()
-    &identity.push(U8{0})
-    store_nix_push_field(&identity, action_key)
-    store_nix_push_field(&identity, entry.envelope.output_hash)
+    identity.push(U8{0})
+    store_nix_push_field(identity, action_key)
+    store_nix_push_field(identity, entry.envelope.output_hash)
     "sha256-{crypto.sha256(identity).hex()}"
 }
 
@@ -545,8 +545,8 @@ store_repro_persist_report: fn(roots: HangarRoots, action_key: String, report: S
 
 store_repro_publish_report: fn(directory: String, partial: String, destination: String, report: String) StoreError! -[FS]> {
     output := files.create(partial, if_exists: .Refuse)
-    &output.write_all(report.bytes())
-    &output.fsync()
+    output.write_all(report.bytes())
+    output.fsync()
     files.set_mode(partial, 0o600)
     files.hard_link(partial, destination)
     files.remove(partial)
@@ -610,7 +610,7 @@ store_repro_report_file_stem: fn(action_key: String) -> String Never! {
 }
 
 store_repro_verify_existing_output: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry) StoreError! -[FS, Env]> {
-    actual: store_try_entry_output_hash(&verification, roots, entry)
+    actual: store_try_entry_output_hash(verification, roots, entry)
     if actual != entry.envelope.output_hash {
         return Err(store_repro_invalid("existing action output `{entry.id}` is corrupt: expected `{entry.envelope.output_hash}`, got `{actual}`"))
     }

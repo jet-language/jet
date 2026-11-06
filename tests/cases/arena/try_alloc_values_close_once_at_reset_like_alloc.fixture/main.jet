@@ -5,7 +5,7 @@ Tracked: struct {
 }
 
 impl Tracked.Close {
-    close: fn(^self) -[IO]> { print("drop {self.label}") }
+    close: fn(&&self) -[IO]> { print("drop {self.label}") }
 }
 
 // Each way of reading a try_alloc's Ok yields a view: the value closes and
@@ -24,9 +24,9 @@ arms: fn() {
     third: arena.try_alloc(Tracked{label: "t3"}) ?? panic("refused")
     print("got {third.label}")
     print("reset arena")
-    &arena.reset()
+    arena.reset()
     print("after reset")
-    close(^arena)
+    close(arena)
     print("arms done")
 }
 
@@ -36,7 +36,7 @@ tried: fn() AllocError! {
     value: arena.try_alloc(Tracked{label: "t4"})
     print("got {value.label}")
     print("close arena")
-    close(^arena)
+    close(arena)
     print("tried done")
 }
 
@@ -50,7 +50,7 @@ fixed_case: fn() {
         print("refused {error.requested_bytes}")
     }
     print("close fixed")
-    close(^fixed)
+    close(fixed)
     print("fixed done")
 }
 

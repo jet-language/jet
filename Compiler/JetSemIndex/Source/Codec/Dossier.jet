@@ -16,13 +16,13 @@ impl TypeDossier {
             .None -> StatusValue.Null
         }
         members := [StatusValue]{}
-        loop row in self.members -> &members.push(semindex_status_member(row))
+        loop row in self.members -> members.push(semindex_status_member(row))
         references := [StatusValue]{}
-        loop row in self.references -> &references.push(semindex_status_ref(row))
+        loop row in self.references -> references.push(semindex_status_ref(row))
         bypasses := [StatusValue]{}
-        loop row in self.bypass_facts -> &bypasses.push(semindex_status_bypass(row))
+        loop row in self.bypass_facts -> bypasses.push(semindex_status_bypass(row))
         state_graphs := [StatusValue]{}
-        loop row in self.state_graphs -> &state_graphs.push(semindex_status_state_graph(row))
+        loop row in self.state_graphs -> state_graphs.push(semindex_status_state_graph(row))
         fields: StatusFields.new()
             .with("schema_version", StatusValue.Integer{value: self.schema_version})
             .with("target", StatusValue.String{value: self.target})

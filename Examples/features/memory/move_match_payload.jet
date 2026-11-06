@@ -1,7 +1,7 @@
-//! An explicit `^p` of a match payload takes the payload out of its subject,
+//! An explicit `p.move()` of a match payload takes the payload out of its subject,
 //! never a copy. The subject keeps (and later closes) its other fields, and
 //! the taken payload closes exactly once, with its new owner: after the
-//! payload moved, in a loop, and through a nested pattern. A `^subject`
+//! payload moved, in a loop, and through a nested pattern. A `subject.move()`
 //! moves into the match, so its payload binding owns the payload outright.
 Secret: struct {
     id: Int
@@ -9,7 +9,7 @@ Secret: struct {
 }
 
 impl Secret.Close {
-    close: fn(^self) { print("close {self.id}") }
+    close: fn(&&self) { print("close {self.id}") }
 }
 
 Slot: enum {
@@ -22,13 +22,13 @@ Holder: struct {
     keep: Secret
 }
 
-consume: fn(secret: ^Secret) { print("consume {secret.id}") }
+consume: fn(secret: &&Secret) { print("consume {secret.id}") }
 
 // The payload moves out; the subject's other field is still used.
 remaining: fn() {
     holder: Holder{slot: Slot.Full{secret: Secret{id: 1, token: "owned"}, label: "first"}, keep: Secret{id: 2, token: "owned"}}
     if holder.slot == .Full(secret, label) {
-        consume(^secret)
+        consume(secret)
         print("label {label}")
     }
     print("keep {holder.keep.id}")
@@ -38,7 +38,7 @@ looped: fn() {
     loop n in [3, 4] {
         slot: Slot.Full{secret: Secret{id: n, token: "owned"}, label: "loop {n}"}
         if slot == .Full(secret, label) {
-            consume(^secret)
+            consume(secret)
             print(label)
         }
     }
@@ -47,19 +47,19 @@ looped: fn() {
 nested: fn() {
     held: Val(Slot.Full{secret: Secret{id: 5, token: "owned"}, label: "nested"})
     if held == .Val(.Full(secret, label)) {
-        consume(^secret)
+        consume(secret)
         print(label)
     }
 }
 
 // The subject itself moves into the match: the binding owns its payload and
-// `^secret` is an ordinary move; the label closes with the match.
+// `secret.move()` is an ordinary move; the label closes with the match.
 moved_subject: fn() {
     slot := Slot.Full{secret: Secret{id: 6, token: "owned"}, label: "moved"}
-    if ^slot == .Full(secret, label) {
-        taken := ^secret
+    if slot.move() == .Full(secret, label) {
+        taken := secret.move()
         print("label {label}")
-        consume(^taken)
+        consume(taken)
     }
 }
 

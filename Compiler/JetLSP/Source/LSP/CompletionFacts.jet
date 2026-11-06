@@ -34,13 +34,13 @@ CompletionItem: struct {
 }
 lsp_to_json: fn(item: CompletionItem) -> String Never! {
     fields := [String]{"\"label\":{foundation_json_quote(item.label)}", "\"kind\":{item.kind}"}
-    if item.detail == .Val(value) -> &fields.push("\"detail\":{foundation_json_quote(value)}")
-    if item.documentation == .Val(value) -> &fields.push("\"documentation\":{foundation_json_quote(value)}")
+    if item.detail == .Val(value) -> fields.push("\"detail\":{foundation_json_quote(value)}")
+    if item.documentation == .Val(value) -> fields.push("\"documentation\":{foundation_json_quote(value)}")
     if item.insert_text == .Val(value) {
-        &fields.push("\"insertText\":{foundation_json_quote(value)}")
-        &fields.push("\"insertTextFormat\":{item.insert_text_format}")
+        fields.push("\"insertText\":{foundation_json_quote(value)}")
+        fields.push("\"insertTextFormat\":{item.insert_text_format}")
     }
-    if item.auto_import == .Val(statement) -> &fields.push("\"additionalTextEdits\":[{{\"range\":{{\"start\":{{\"line\":0,\"character\":0}},\"end\":{{\"line\":0,\"character\":0}}}},\"newText\":{foundation_json_quote(statement)}}}]")
+    if item.auto_import == .Val(statement) -> fields.push("\"additionalTextEdits\":[{{\"range\":{{\"start\":{{\"line\":0,\"character\":0}},\"end\":{{\"line\":0,\"character\":0}}}},\"newText\":{foundation_json_quote(statement)}}}]")
     "{{{fields.join(",")}}}"
 }
 lsp_semantic_documentation: fn(symbol: SemanticSymbol) -> String Never! {
@@ -142,10 +142,10 @@ lsp_detect_switch_enum_type: fn(tokens: [Token], offset: Int, current_path: Stri
     previous := [Int]{}
     last := -1
     loop (index, token) in tokens {
-        &previous.push(last)
+        previous.push(last)
         if token.span.start >= offset -> break
-        if token.kind == TOKEN_LBRACE -> &active.push(index)
-        if token.kind == TOKEN_RBRACE && !active.is_empty() -> _: &active.pop()
+        if token.kind == TOKEN_LBRACE -> active.push(index)
+        if token.kind == TOKEN_RBRACE && !active.is_empty() -> _: active.pop()
         if token.kind != TOKEN_LINE_COMMENT && token.kind != TOKEN_BLOCK_COMMENT -> last = index
     }
     at := active.len()

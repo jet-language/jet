@@ -122,9 +122,9 @@ SchemaBuilder: struct {
     // Reserve a record name and its slot; fields arrive later so nested
     // records can be declared after their parent.
     begin_record: fn(&self, preferred: String) -> (name: String, index: Int) Never! {
-        name: pkg_bind_unique_name(&self.used_type_names, pkg_data_type_name(preferred))
+        name: pkg_bind_unique_name(self.used_type_names, pkg_data_type_name(preferred))
         index: self.records.len()
-        &self.records.push(BoundRecord{name: name, fields: [BoundField]{}})
+        self.records.push(BoundRecord{name: name, fields: [BoundField]{}})
         (index: index, name: name)
     }
 
@@ -132,8 +132,8 @@ SchemaBuilder: struct {
         used := [String]{}
         fields := [BoundField]{}
         loop seed in seeds {
-            name: pkg_bind_unique_name(&used, foundation_generated_snake_name(seed.wire_name, "field"))
-            &fields.push(BoundField{wire_name: seed.wire_name, name: name, ty: seed.ty, optional: seed.optional, note: seed.note})
+            name: pkg_bind_unique_name(used, foundation_generated_snake_name(seed.wire_name, "field"))
+            fields.push(BoundField{wire_name: seed.wire_name, name: name, ty: seed.ty, optional: seed.optional, note: seed.note})
         }
         self.records[index].fields = fields
     }
@@ -191,24 +191,24 @@ pkg_data_render_source: fn(kind: DataSchemaFormat, format: String, input_path: S
         "// sha256: {pkg_sha256_hex(input.bytes())}\n",
         "// format: {format}\n"
     }
-    loop rule in kind.inference_rules() -> &lines.push("// inference: {rule}\n")
-    &lines.push("\n")
+    loop rule in kind.inference_rules() -> lines.push("// inference: {rule}\n")
+    lines.push("\n")
     loop record in builder.records {
-        &lines.push("#Codable\n")
-        &lines.push("{record.name}: struct {{\n")
+        lines.push("#Codable\n")
+        lines.push("{record.name}: struct {{\n")
         loop field in record.fields {
             if field.note == {
-                .Val(note) -> &lines.push("    // {note}\n")
+                .Val(note) -> lines.push("    // {note}\n")
                 .None -> {}
             }
             optional: if field.optional -> "?" else -> ""
             if field.wire_name != field.name {
-                &lines.push("    #Rename({pkg_data_quote_jet_string(field.wire_name)}) {field.name}: {field.ty.render()}{optional}\n")
+                lines.push("    #Rename({pkg_data_quote_jet_string(field.wire_name)}) {field.name}: {field.ty.render()}{optional}\n")
             } else {
-                &lines.push("    {field.name}: {field.ty.render()}{optional}\n")
+                lines.push("    {field.name}: {field.ty.render()}{optional}\n")
             }
         }
-        &lines.push("}}\n\n")
+        lines.push("}}\n\n")
     }
     lines.join("")
 }
@@ -220,12 +220,12 @@ pkg_data_escape_provenance: fn(value: String) -> String Never! {
     loop scalar in pkg_data_scalars(value) {
         code: pkg_data_code(scalar)
         if {
-            code == 92 -> &out.push("\\\\")
-            code == 10 -> &out.push("\\n")
-            code == 13 -> &out.push("\\r")
-            code == 9 -> &out.push("\\t")
-            code < 32 || (code >= 127 && code <= 159) || code == 0x2028 || code == 0x2029 -> &out.push("\\u{pkg_data_hex4(code)}")
-            else -> &out.push(scalar)
+            code == 92 -> out.push("\\\\")
+            code == 10 -> out.push("\\n")
+            code == 13 -> out.push("\\r")
+            code == 9 -> out.push("\\t")
+            code < 32 || (code >= 127 && code <= 159) || code == 0x2028 || code == 0x2029 -> out.push("\\u{pkg_data_hex4(code)}")
+            else -> out.push(scalar)
         }
     }
     out.join("")
@@ -247,7 +247,7 @@ pkg_data_hex4: fn(value: Int) -> String Never! {
 // The Unicode scalars of `text`, each as a one-scalar string.
 pkg_data_scalars: fn(text: String) -> [String] Never! {
     out := [String]{}
-    loop scalar in text.chars() -> &out.push("{scalar}")
+    loop scalar in text.chars() -> out.push("{scalar}")
     out
 }
 
@@ -276,7 +276,7 @@ pkg_data_at: fn(scalars: [String], at: Int) -> String Never! {
 // The text of `scalars[start..<end]`.
 pkg_data_slice: fn(scalars: [String], start: Int, end: Int) -> String Never! {
     out := [String]{}
-    loop index in start..<end -> &out.push(scalars[index])
+    loop index in start..<end -> out.push(scalars[index])
     out.join("")
 }
 
@@ -320,7 +320,7 @@ pkg_data_ascii_upper: fn(value: String) -> String Never! {
     out := [U8]{}
     loop byte in value.bytes() {
         code: Int.from_u8(byte)
-        &out.push(if code >= 97 && code <= 122 -> U8{code - 32} else -> byte)
+        out.push(if code >= 97 && code <= 122 -> U8{code - 32} else -> byte)
     }
     pkg_bytes_text(out, 0, out.len())
 }

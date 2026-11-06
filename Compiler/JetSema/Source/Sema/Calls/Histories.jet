@@ -76,17 +76,17 @@ sema_call_histories_args: fn(args: [CallArg], type_args: [Type], span: Span, env
         frames := [String]{sema_call_histories_frame("jet.history.provenance.v1"), sema_call_histories_frame(package_digest)}
         loop role in 0..<roles.len() {
             if identities[role] == "" -> next
-            &frames.push(sema_call_histories_frame(roles[role]))
-            &frames.push(sema_call_histories_frame(identities[role]))
+            frames.push(sema_call_histories_frame(roles[role]))
+            frames.push(sema_call_histories_frame(identities[role]))
         }
         source = sha256_hex(frames.join(""))
     }
     // copy: the rebuilt call owns its arguments; the source call keeps its own.
     call_args := args.copy()
-    &call_args.push(sema_call_devtools_text_arg("__command_type", command_type, span))
-    &call_args.push(sema_call_devtools_text_arg("__source", source, span))
-    &call_args.push(sema_call_devtools_text_arg("__tool", tool, span))
-    &call_args.push(sema_call_devtools_text_arg("__target", target, span))
+    call_args.push(sema_call_devtools_text_arg("__command_type", command_type, span))
+    call_args.push(sema_call_devtools_text_arg("__source", source, span))
+    call_args.push(sema_call_devtools_text_arg("__tool", tool, span))
+    call_args.push(sema_call_devtools_text_arg("__target", target, span))
     if type_args.len() != 1 -> return call_args
     // Core's `__variants` and `__make` have no default: a default of the
     // generic `__make` type would not specialize. An explicit strategy, or a
@@ -96,18 +96,18 @@ sema_call_histories_args: fn(args: [CallArg], type_args: [Type], span: Span, env
     if !has_strategy {
         derived: sema_call_histories_derive(written, command_type, environment, program)
         if derived.unsupported != "" {
-            &call_args.push(sema_call_devtools_text_arg("__unsupported", derived.unsupported, span))
+            call_args.push(sema_call_devtools_text_arg("__unsupported", derived.unsupported, span))
         } else {
             rows := [String]{}
-            loop row in derived.variants -> &rows.push("\"{row}\"")
+            loop row in derived.variants -> rows.push("\"{row}\"")
             variants_text = "[String]{{{rows.join(", ")}}}"
             make_text = derived.make.copy()
         }
     }
     variants: sema_call_histories_parse_expr(variants_text, span.start) ?? return call_args
     make: sema_call_histories_parse_expr(make_text, span.start + 1) ?? return call_args
-    &call_args.push(sema_call_histories_expr_arg("__variants", variants, span))
-    &call_args.push(sema_call_histories_expr_arg("__make", make, span))
+    call_args.push(sema_call_histories_expr_arg("__variants", variants, span))
+    call_args.push(sema_call_histories_expr_arg("__make", make, span))
     call_args
 }
 
@@ -135,8 +135,8 @@ sema_call_histories_package_digest: fn(graph: SemaRegistrationGraph, package_ide
     frames := [String]{}
     loop index in 0..<graph.modules.len() {
         if graph.modules[index].package_identity != package_identity || graph.modules[index].source == "" -> next
-        &frames.push(sema_call_histories_frame(graph.modules[index].module_identity))
-        &frames.push(sema_call_histories_frame(graph.modules[index].source))
+        frames.push(sema_call_histories_frame(graph.modules[index].module_identity))
+        frames.push(sema_call_histories_frame(graph.modules[index].source))
     }
     if frames.len() == 0 -> return ""
     sha256_hex(frames.join(""))
@@ -154,8 +154,8 @@ sema_call_histories_expr_arg: fn(label: String, expr: Expr, span: Span) -> CallA
 // take distinct starts, so every generated node id is unique in the file.
 sema_call_histories_parse_expr: fn(text: String, start: Int) -> Expr? Never! {
     bytes := [U8]{}
-    loop _ in 0..<start -> &bytes.push(32)
-    loop byte in "__jet_history_value: fn() {{\n    {text}\n}}\n".bytes() -> &bytes.push(byte)
+    loop _ in 0..<start -> bytes.push(32)
+    loop byte in "__jet_history_value: fn() {{\n    {text}\n}}\n".bytes() -> bytes.push(byte)
     parsed: parse_generated_source(bytes)
     if parsed.diagnostics.len() > 0 || parsed.program.items.len() != 1 -> return None
     if parsed.program.items[0] == .Func(function) {
@@ -193,38 +193,38 @@ sema_call_histories_derive: fn(written: String, command_type: String, environmen
         names := [String]{}
         if variant.payload == {
             .Unit -> {}
-            .Single(ty) -> &fields.push(ty.copy())
+            .Single(ty) -> fields.push(ty.copy())
             .Named(declared) -> {
                 loop field in declared {
-                    &fields.push(field.ty.copy())
-                    &names.push(field.name.copy())
+                    fields.push(field.ty.copy())
+                    names.push(field.name.copy())
                 }
             }
         }
         loop field in fields {
             kind: sema_call_histories_kind(field)
             if kind < 0 -> return unsupported
-            &kinds.push([String]{"i", "b", "s"}[kind])
-            &values.push("{[String]{"__ints", "__bools", "__texts"}[kind]}[{counts[kind]}]")
+            kinds.push([String]{"i", "b", "s"}[kind])
+            values.push("{[String]{"__ints", "__bools", "__texts"}[kind]}[{counts[kind]}]")
             counts[kind] = counts[kind] + 1
         }
-        &rows.push(if kinds.len() == 0 -> variant.wire_name.copy() else -> "{variant.wire_name}:{kinds.join(":")}")
+        rows.push(if kinds.len() == 0 -> variant.wire_name.copy() else -> "{variant.wire_name}:{kinds.join(":")}")
         constructor := "{written}.{variant.name}"
         if variant.payload == {
             .Unit -> {}
             .Single(_) -> constructor = "{constructor}({values[0]})"
             .Named(_) -> {
                 labelled := [String]{}
-                loop index in 0..<names.len() -> &labelled.push("{names[index]}: {values[index]}")
+                loop index in 0..<names.len() -> labelled.push("{names[index]}: {values[index]}")
                 constructor = "{constructor}{{{labelled.join(", ")}}}"
             }
         }
-        &arms.push(constructor)
+        arms.push(constructor)
     }
     body := arms[arms.len() - 1]
     if arms.len() > 1 {
         cases := [String]{}
-        loop index in 0..<(arms.len() - 1) -> &cases.push("        {index} -> {arms[index]}\n")
+        loop index in 0..<(arms.len() - 1) -> cases.push("        {index} -> {arms[index]}\n")
         body = "if __variant == {{\n{cases.join("")}        else -> {arms[arms.len() - 1]}\n    }}"
     }
     make: "[(__variant: Int, __ints: [Int], __bools: [Bool], __texts: [String]) -> {{\n    {body}\n}}]"

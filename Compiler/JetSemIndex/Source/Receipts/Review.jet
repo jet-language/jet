@@ -73,14 +73,14 @@ review_pair_by_key: fn(before: View<DefinitionFact>, after: View<DefinitionFact>
     }
     keys := old_keys.keys().to_list()
     // #4343: comparator must be an inline closure.
-    &keys.sort_by((left: ReviewFactKey, right: ReviewFactKey) -> review_key_order(left, right))
+    keys.sort_by((left: ReviewFactKey, right: ReviewFactKey) -> review_key_order(left, right))
     loop key in keys {
         old: old_keys[key]
         new: new_keys.get(key) ?? next
         if old.count == 1 && new.count == 1 && before[old.index].name == after[new.index].name {
             matched_before[old.index] = true
             matched_after[new.index] = true
-            &pairs.push(ReviewFactPair{before_index: old.index, after_index: new.index})
+            pairs.push(ReviewFactPair{before_index: old.index, after_index: new.index})
         }
     }
 }
@@ -115,9 +115,9 @@ review_compiler_identity: fn(index: SemIndex, fact: DefinitionFact) -> String Ne
     }
     fact.human_identity.copy()
 }
-review_matched_operation: fn(kind: ReviewOpKind, after: DefinitionFact, before_identity: ^String, after_identity: ^String, old: ^String?, new: ^String?) -> ReviewSemanticOp Never! {
+review_matched_operation: fn(kind: ReviewOpKind, after: DefinitionFact, before_identity: &&String, after_identity: &&String, old: &&String?, new: &&String?) -> ReviewSemanticOp Never! {
     ReviewSemanticOp{kind, stable_id: after.stable_id.copy(), identity: after_identity.copy(),
-        before: ^old, after: ^new, before_identity: Val(^before_identity), after_identity: Val(^after_identity),
+        before: old, after: new, before_identity: Val(before_identity), after_identity: Val(after_identity),
         alignment: ReviewAlignment.Matched, source_operation: None}
 }
 
@@ -129,18 +129,18 @@ review_semantic_ops: fn(before: SemIndex, after: SemIndex) -> [ReviewSemanticOp]
     matched_before := [Int:Bool]{}
     matched_after := [Int:Bool]{}
     pairs := [ReviewFactPair]{}
-    loop stage in 0..<3 -> review_pair_by_key(old_defs, new_defs, &matched_before, &matched_after, stage, &pairs)
+    loop stage in 0..<3 -> review_pair_by_key(old_defs, new_defs, matched_before, matched_after, stage, pairs)
     operations := [ReviewSemanticOp]{}
     loop pair in pairs {
         old: old_defs[pair.before_index]
         new: new_defs[pair.after_index]
         if old.module_path != new.module_path {
-            &operations.push(review_matched_operation(ReviewOpKind.Moved, new, ^review_compiler_identity(before, old), ^review_compiler_identity(after, new), ^Val(old.module_path.copy()), ^Val(new.module_path.copy())))
+            operations.push(review_matched_operation(ReviewOpKind.Moved, new, review_compiler_identity(before, old), review_compiler_identity(after, new), Val(old.module_path.copy()), Val(new.module_path.copy())))
         }
         if old.signature_id != new.signature_id {
-            &operations.push(review_matched_operation(ReviewOpKind.SignatureChanged, new, ^review_compiler_identity(before, old), ^review_compiler_identity(after, new), ^Val(old.signature_id.copy()), ^Val(new.signature_id.copy())))
+            operations.push(review_matched_operation(ReviewOpKind.SignatureChanged, new, review_compiler_identity(before, old), review_compiler_identity(after, new), Val(old.signature_id.copy()), Val(new.signature_id.copy())))
         } else if old.content_id != new.content_id {
-            &operations.push(review_matched_operation(ReviewOpKind.BodyChanged, new, ^review_compiler_identity(before, old), ^review_compiler_identity(after, new), ^Val(old.content_id.copy()), ^Val(new.content_id.copy())))
+            operations.push(review_matched_operation(ReviewOpKind.BodyChanged, new, review_compiler_identity(before, old), review_compiler_identity(after, new), Val(old.content_id.copy()), Val(new.content_id.copy())))
         }
     }
     old_counts := [ReviewFactKey:Int]{}
@@ -154,8 +154,8 @@ review_semantic_ops: fn(before: SemIndex, after: SemIndex) -> [ReviewSemanticOp]
             counts_ready = true
         }
         identity: review_compiler_identity(before, fact)
-        &operations.push(ReviewSemanticOp{kind: ReviewOpKind.Removed, stable_id: fact.stable_id.copy(), identity: identity.copy(),
-            before: Val(identity.copy()), after: None, before_identity: Val(^identity), after_identity: None,
+        operations.push(ReviewSemanticOp{kind: ReviewOpKind.Removed, stable_id: fact.stable_id.copy(), identity: identity.copy(),
+            before: Val(identity.copy()), after: None, before_identity: Val(identity), after_identity: None,
             alignment: review_unmatched_alignment(fact, old_counts, new_counts, true), source_operation: None})
     }
     loop (index, fact) in new_defs {
@@ -166,12 +166,12 @@ review_semantic_ops: fn(before: SemIndex, after: SemIndex) -> [ReviewSemanticOp]
             counts_ready = true
         }
         identity: review_compiler_identity(after, fact)
-        &operations.push(ReviewSemanticOp{kind: ReviewOpKind.Added, stable_id: fact.stable_id.copy(), identity: identity.copy(),
-            before: None, after: Val(identity.copy()), before_identity: None, after_identity: Val(^identity),
+        operations.push(ReviewSemanticOp{kind: ReviewOpKind.Added, stable_id: fact.stable_id.copy(), identity: identity.copy(),
+            before: None, after: Val(identity.copy()), before_identity: None, after_identity: Val(identity),
             alignment: review_unmatched_alignment(fact, old_counts, new_counts, false), source_operation: None})
     }
-    review_append_effect_operations(&operations, before.effects(), after.effects())
-    review_sort_operations(&operations, false)
+    review_append_effect_operations(operations, before.effects(), after.effects())
+    review_sort_operations(operations, false)
     operations
 }
 
@@ -193,7 +193,7 @@ review_rename_candidates: fn(facts: View<DefinitionFact>, receipt: SemanticOp, r
             } else if !review_identity_matches(fact, identity) -> next
         }
         if requested == .Val(name) { if !review_identity_matches(fact, name) -> next }
-        &candidates.push(index)
+        candidates.push(index)
     }
     candidates
 }
@@ -249,8 +249,8 @@ review_semantic_ops_with_receipts: fn(before: SemIndex, after: SemIndex, receipt
             receipt.targets.len() > 0 -> receipt.targets[0].stable_id.copy()
             else -> "{receipt.kind}:unresolved"
         }
-        before_identity: if old_index >= 0 -> Val(old_defs[old_index].human_identity.copy()) else -> ^before_name
-        after_identity: if new_index >= 0 -> Val(new_defs[new_index].human_identity.copy()) else -> ^after_name
+        before_identity: if old_index >= 0 -> Val(old_defs[old_index].human_identity.copy()) else -> before_name.move()
+        after_identity: if new_index >= 0 -> Val(new_defs[new_index].human_identity.copy()) else -> after_name.move()
         identity: if after_identity == {
             .Val(name) -> name.copy()
             .None -> if before_identity == {
@@ -262,24 +262,24 @@ review_semantic_ops_with_receipts: fn(before: SemIndex, after: SemIndex, receipt
         new_payload: if is_move -> (if new_index >= 0 -> Val(new_defs[new_index].module_path.copy()) else -> None) else -> after_identity.copy()
         source: receipt.rule_id ?? receipt.kind
         operation: ReviewSemanticOp{kind: if is_move -> ReviewOpKind.Moved else -> ReviewOpKind.Renamed,
-            stable_id: ^stable_id, identity: ^identity, before: ^old_payload, after: ^new_payload,
-            before_identity: ^before_identity, after_identity: ^after_identity, alignment, source_operation: Val(source.copy())}
+            stable_id: stable_id, identity: identity, before: old_payload, after: new_payload,
+            before_identity: before_identity, after_identity: after_identity, alignment, source_operation: Val(source.copy())}
         if recorded.has_key(operation) -> next
         recorded[operation.copy()] = true
-        &operations.push(^operation)
+        operations.push(operation)
     }
     // Only Added/Removed can be discarded. Defer their removal to one pass;
     // later receipt matching does not consult operations, so this is equivalent
     // to Rust retain per recorded pair and avoids repeated whole-vector copies.
     filtered := [ReviewSemanticOp]{}
-    &operations.reverse()
+    operations.reverse()
     loop {
-        operation: (&operations.pop()) ?? break
+        operation: (operations.pop()) ?? break
         if (operation.kind == ReviewOpKind.Added || operation.kind == ReviewOpKind.Removed)
             && removed_ids.has_key(operation.stable_id) -> next
-        &filtered.push(^operation)
+        filtered.push(operation)
     }
-    review_sort_operations(&filtered, true)
+    review_sort_operations(filtered, true)
     filtered
 }
 
@@ -318,7 +318,7 @@ review_optional_order: fn(left: String?, right: String?) -> Ordering Never! {
     }
 }
 review_sort_operations: fn(operations: &[ReviewSemanticOp], include_alignment: Bool) Never! {
-    &operations.sort_by((left: ReviewSemanticOp, right: ReviewSemanticOp) ->
+    operations.sort_by((left: ReviewSemanticOp, right: ReviewSemanticOp) ->
         (left.stable_id <=> right.stable_id).then(left.identity <=> right.identity)
             .then(review_kind_rank(left.kind) <=> review_kind_rank(right.kind))
             .then(review_optional_order(left.before, right.before)).then(review_optional_order(left.after, right.after))
@@ -334,15 +334,15 @@ review_append_effect_operations: fn(operations: &[ReviewSemanticOp], before: Vie
     loop (index, fact) in before { old_by_function[fact.function] = index; functions[fact.function] = true }
     loop (index, fact) in after { new_by_function[fact.function] = index; functions[fact.function] = true }
     names := functions.keys().to_list()
-    &names.sort()
+    names.sort()
     loop function in names {
         old_shape := String?{None}
         new_shape := String?{None}
         if old_by_function.get(function) == .Val(index) -> old_shape = Val(review_effect_shape(before[index]))
         if new_by_function.get(function) == .Val(index) -> new_shape = Val(review_effect_shape(after[index]))
         if old_shape == new_shape -> next
-        &operations.push(ReviewSemanticOp{kind: ReviewOpKind.EffectChanged, stable_id: "effect:{function}", identity: function.copy(),
-            before: ^old_shape, after: ^new_shape, before_identity: Val(function.copy()), after_identity: Val(function.copy()),
+        operations.push(ReviewSemanticOp{kind: ReviewOpKind.EffectChanged, stable_id: "effect:{function}", identity: function.copy(),
+            before: old_shape, after: new_shape, before_identity: Val(function.copy()), after_identity: Val(function.copy()),
             alignment: ReviewAlignment.Matched, source_operation: None})
     }
 }
@@ -355,6 +355,6 @@ review_effect_shape: fn(effect_ref: EffectFact) -> String Never! {
 }
 review_sorted_join: fn(values: [String]) -> String Never! {
     sorted := values.copy()
-    &sorted.sort()
+    sorted.sort()
     sorted.dedup().join(",")
 }

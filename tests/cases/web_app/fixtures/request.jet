@@ -37,7 +37,7 @@ run: fn() {
     crlf: String.from_bytes([U8]{13, 10}) ?? panic("CRLF")
     request: "{method} {path} HTTP/1.1{crlf}Host: localhost{crlf}Connection: close{crlf}Content-Length: 0{crlf}{crlf}"
     stream.write_all(request.bytes()) ?? panic("request write")
-    net.tcp_shutdown(&stream, NetShutdown.Write) ?? panic("finish request")
+    net.tcp_shutdown(stream, NetShutdown.Write) ?? panic("finish request")
     bytes := [U8]{}
     complete := false
     reload: sys.get("S6_WEB_RELOAD_APP")
@@ -47,16 +47,16 @@ run: fn() {
         started: time.instant()
         loop time.instant() - started < 250ms {
             remaining: 250 - time.duration_as_ms(time.instant() - started)
-            net.set_read_timeout(&stream, remaining) ?? panic("first window timeout")
+            net.set_read_timeout(stream, remaining) ?? panic("first window timeout")
             failed := false
-            if net.tcp_read_bytes(&stream, 8192) == {
+            if net.tcp_read_bytes(stream, 8192) == {
                 .Ok(part) -> {
                     if part.len() == 0 {
                         assert(time.instant() - started >= 250ms, "reload endpoint fired without a source change")
                         complete = true
                         break
                     }
-                    loop byte in part -> &bytes.push(byte)
+                    loop byte in part -> bytes.push(byte)
                 }
                 .Err(error) -> failed = true
             }
@@ -71,14 +71,14 @@ run: fn() {
         if reload != None {
             assert(time.instant() - changed < 10s, "reload response did not complete")
             remaining: 10000 - time.duration_as_ms(time.instant() - changed)
-            net.set_read_timeout(&stream, remaining) ?? panic("changed window timeout")
+            net.set_read_timeout(stream, remaining) ?? panic("changed window timeout")
         }
-        part: net.tcp_read_bytes(&stream, 8192) ?? panic("response read")
+        part: net.tcp_read_bytes(stream, 8192) ?? panic("response read")
         if part.len() == 0 {
             complete = true
             if reload != None -> assert(time.instant() - changed <= 10s, "reload response completed after deadline")
         } else {
-            loop byte in part -> &bytes.push(byte)
+            loop byte in part -> bytes.push(byte)
         }
     }
     response: String.from_bytes(bytes) ?? panic("response UTF-8")

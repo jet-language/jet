@@ -20,8 +20,8 @@ impl ResidentDevSession {
             state.envelope.set_freshness(freshness)
         }
         fields: "{{\"state\":{json_value(state_name)},\"code\":{json_value(code)},\"diagnostic\":{json_value(diagnostic)}}}"
-        if JetDevtoolsEvent.from_parts(unix_time_ms(), "devserver", "state", "session", ^fields) == .Ok(event) {
-            _: self.publish_devtools_event_typed(^event)
+        if JetDevtoolsEvent.from_parts(unix_time_ms(), "devserver", "state", "session", fields) == .Ok(event) {
+            _: self.publish_devtools_event_typed(event)
         }
     }
     push_devtools_event: fn(self: Self, event: JetDevtoolsEvent) -> U64 Err! {
@@ -34,13 +34,13 @@ impl ResidentDevSession {
         if recording.as_mut() == .Val(state) {
             recorded: SessionEvent.new(sequence, event.timestamp_ms, event.source().to_string(), event.kind().to_string(),
                 event.entity().to_string(), event.fields_json().to_string(), event.payload_json().map((text) -> text.to_string())).map_err(recording_error)
-            state.recording.append_event(^recorded).map_err(recording_error)
+            state.recording.append_event(recorded).map_err(recording_error)
         }
-        assigned: devtools.envelope.push(^event)
+        assigned: devtools.envelope.push(event)
         if recording.as_mut() == .Val(state) {
             cursor := state.recording.replay()
-            loop _ in 0..state.recording.event_count() -> _: cursor.step_forward(&state.recording).map_err(recording_error)
-            state.cursor = ^cursor
+            loop _ in 0..state.recording.event_count() -> _: cursor.step_forward(state.recording).map_err(recording_error)
+            state.cursor = cursor.move()
             state.checkpoints.clear()
         }
         assigned
@@ -76,8 +76,8 @@ impl ResidentDevSession {
         self.select_project_source(request_string(request, "source_id"))
         self.observe_source(revision)
         if !revision.is_empty() -> *self.accepted_revision.lock().unwrap() = revision
-        self.push_receipt(Receipt { kind: if kind.is_empty() -> "source" else -> ^kind, status: "accepted", before: ^before,
-            after: revision, client: ^client, output: request_string(request, "output"), live: .None })
+        self.push_receipt(Receipt { kind: if kind.is_empty() -> "source" else -> kind.move(), status: "accepted", before: before,
+            after: revision, client: client, output: request_string(request, "output"), live: .None })
     }
     refuse_transaction: fn(self: Self, request: String, current_revision: String) -> Unit {
         self.observe_source(current_revision)
@@ -89,7 +89,7 @@ impl ResidentDevSession {
         action: request_string(request, "action_id")
         self.select_project_source(request_string(request, "source_id"))
         if action.contains("test") -> *self.test_state.lock().unwrap() = "requested"
-        self.push_receipt(Receipt { kind: if action.is_empty() -> "command" else -> ^action, status: "requested", before: "",
+        self.push_receipt(Receipt { kind: if action.is_empty() -> "command" else -> action.move(), status: "requested", before: "",
             after: (*self.current_revision.lock().unwrap()).copy(), client: request_string(request, "client_id"),
             output: (*self.selected_output.lock().unwrap()).copy(), live: .None })
     }
@@ -103,10 +103,10 @@ impl ResidentDevSession {
             return
         }
         debugger.state = "active"
-        set_if_present(&debugger.session_id, request_string(request, "session_id"))
-        set_if_present(&debugger.source_id, request_string(request, "source_id"))
-        set_if_present(&debugger.revision, request_string(request, "revision"))
-        set_if_present(&debugger.tier, request_string(request, "tier"))
+        set_if_present(debugger.session_id, request_string(request, "session_id"))
+        set_if_present(debugger.source_id, request_string(request, "source_id"))
+        set_if_present(debugger.revision, request_string(request, "revision"))
+        set_if_present(debugger.tier, request_string(request, "tier"))
     }
     record_debug_response: fn(self: Self, request: String, response: String) -> Unit {
         self.record_debug(request)
@@ -119,15 +119,15 @@ impl ResidentDevSession {
                 "stopped" -> "idle"
                 state -> state.copy()
             }
-            *debugger = DebuggerSnapshot { state: ^state, session_id: ^snapshot.session_id, source_id: ^snapshot.source_id,
-                revision: ^snapshot.revision, tier: ^snapshot.tier }
+            *debugger = DebuggerSnapshot { state: state.move(), session_id: snapshot.session_id.move(), source_id: snapshot.source_id.move(),
+                revision: snapshot.revision.move(), tier: snapshot.tier.move() }
             source_id: if debugger.source_id.is_empty() -> request_string(request, "source_id") else -> debugger.source_id.copy()
             (_0: source_id, _1: debugger.revision.copy())
         })()
         revision: if debugger_revision.is_empty() {
             requested: request_string(request, "revision")
-            if requested.is_empty() -> (*self.current_revision.lock().unwrap()).copy() else -> ^requested
-        } else -> ^debugger_revision
+            if requested.is_empty() -> (*self.current_revision.lock().unwrap()).copy() else -> requested.move()
+        } else -> debugger_revision.move()
         self.remember_last_good_view("debugger", source_id, revision, response)
     }
     select_project_source: fn(self: Self, source_id: String) -> Unit {
@@ -139,7 +139,7 @@ impl ResidentDevSession {
     select_output: fn(self: Self, request: String) -> Unit {
         output: request_string(request, "output")
         target: request_string(request, "target")
-        self.select_output_values(if !output.is_empty() -> .Val(&output) else -> .None, if !target.is_empty() -> .Val(&target) else -> .None)
+        self.select_output_values(if !output.is_empty() -> .Val(output) else -> .None, if !target.is_empty() -> .Val(target) else -> .None)
     }
     select_output_values: fn(self: Self, output: String?, target: String?) -> Unit {
         if output.filter((output) -> !output.is_empty()) == .Val(selected) -> *self.selected_output.lock().unwrap() = selected.copy()
@@ -148,11 +148,11 @@ impl ResidentDevSession {
     id: fn(self: Self) -> String { &self.id }
     selected_target: fn(self: Self) -> String? {
         target: (*self.selected_target.lock().unwrap()).copy()
-        if !target.is_empty() -> .Val(^target) else -> .None
+        if !target.is_empty() -> .Val(target) else -> .None
     }
     selected_output: fn(self: Self) -> String? {
         output: (*self.selected_output.lock().unwrap()).copy()
-        if !output.is_empty() -> .Val(^output) else -> .None
+        if !output.is_empty() -> .Val(output) else -> .None
     }
     application_port: fn(self: Self) -> U16 { self.application_port }
     canvas_port: fn(self: Self) -> U16 { self.canvas_port }
@@ -180,7 +180,7 @@ impl ResidentDevSession {
         live_values_json: live_values.iter().map(live_value_fact_json).collect().join(",")
         now: Instant.now()
         client_state: self.clients.lock().unwrap()
-        expire_clients(&client_state, now)
+        expire_clients(client_state, now)
         clients: client_state.len()
         listener_entries := [String]{}
         if self.canvas_port != 0 {
@@ -199,13 +199,13 @@ impl ResidentDevSession {
     }
     push_receipt: fn(self: Self, receipt: Receipt) -> Unit {
         receipts: self.receipts.lock().unwrap()
-        receipts.push(^receipt)
+        receipts.push(receipt)
         if receipts.len() > MAX_RECEIPTS -> receipts.remove(0)
     }
     install_devtools_event_sink: fn(self: Arc<Self>) -> JetDevtoolsEventSinkGuard {
         // GATE #4494: scoped Arc-backed callback registration.
         sink: Arc<JetDevtoolsEventSink>{self.clone()}
-        jet_foundation.Devtools.jet_devtools_install_event_sink(^sink)
+        jet_foundation.Devtools.jet_devtools_install_event_sink(sink)
     }
     drop: fn(self: Self) -> Unit {
         jet_foundation.DevtoolsControl.jet_devtools_clear_commands(self.id)
@@ -213,7 +213,7 @@ impl ResidentDevSession {
     }
 }
 impl ResidentDevSession.JetDevtoolsEventSink {
-    publish: fn(self: Self, event: JetDevtoolsEvent) -> Unit { _: self.publish_devtools_event_typed(^event) }
+    publish: fn(self: Self, event: JetDevtoolsEvent) -> Unit { _: self.publish_devtools_event_typed(event) }
 }
 trim_capture_facts: fn(facts: [CaptureSessionFact]) -> Unit {
     if facts.len() > MAX_RECEIPTS {
@@ -235,7 +235,7 @@ persist_outcome_fact: fn(outcome: PersistOutcome) -> LiveValueFact {
                 .MigrationUnavailable { from, .. } | .ShapeChanged { from, .. } -> from.copy()
                 else -> "unavailable"
             }
-            LiveValueFact { value_id: prior.key(), type_identity: ^type_identity, disposition: "rejected", reason: reason.message() }
+            LiveValueFact { value_id: prior.key(), type_identity: type_identity, disposition: "rejected", reason: reason.message() }
         }
     }
 }
@@ -343,11 +343,11 @@ object_map: fn(value: Dyn) -> [String:Dyn]? {
 }
 request_string: fn(text: String, key: String) -> String {
     value: parse_json(text) ?? return ""
-    object_map(&value).and_then((object) -> object.get(key).and_then(json_string).map((text) -> text.to_string())).unwrap_or_default()
+    object_map(value).and_then((object) -> object.get(key).and_then(json_string).map((text) -> text.to_string())).unwrap_or_default()
 }
 request_bool: fn(text: String, key: String) -> Bool {
     value: parse_json(text) ?? return false
-    object_map(&value).and_then((object) -> object.get(key).cloned()).is_some_and((value) -> if value == {
+    object_map(value).and_then((object) -> object.get(key).cloned()).is_some_and((value) -> if value == {
         .Bool(lit0) && lit0 == true -> true
         else -> false
     })
@@ -368,7 +368,7 @@ json_string_any: fn(text: String, key: String) -> String? {
             else -> .None
         }
     }
-    find(&value, key)
+    find(value, key)
 }
 find_debugger_snapshot: fn(text: String) -> DebuggerSnapshot? {
     value: parse_json(text).ok()
@@ -388,5 +388,5 @@ find_debugger_snapshot: fn(text: String) -> DebuggerSnapshot? {
             else -> .None
         }
     }
-    find(&value)
+    find(value)
 }

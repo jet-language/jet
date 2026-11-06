@@ -116,10 +116,10 @@ semindex_s10_item_reorder_after: fn() -> String Never! {
 semindex_s10_item_reorder_assertions: fn(before: SemIndex, after: SemIndex) Never! {
     before_ids := [String]{}
     after_ids := [String]{}
-    loop definition in before.definitions() -> &before_ids.push(definition.identity)
-    loop definition in after.definitions() -> &after_ids.push(definition.identity)
-    &before_ids.sort()
-    &after_ids.sort()
+    loop definition in before.definitions() -> before_ids.push(definition.identity)
+    loop definition in after.definitions() -> after_ids.push(definition.identity)
+    before_ids.sort()
+    after_ids.sort()
     assert_eq(before_ids, after_ids)
     module_found := false
     function_found := false
@@ -146,7 +146,7 @@ semindex_s10_context_restoration_assertions: fn(db: &SymbolDB, ctx: &WalkCtx, na
     previous_depth: ctx.structural_parents.len()
     previous_slot: ctx.structural_slot
     previous_kind: ctx.structural_slot_kind
-    semindex_collect_item_facts(&db, &ctx, names, program, source, item, mp)
+    semindex_collect_item_facts(db, ctx, names, program, source, item, mp)
     assert_eq(ctx.scope_identity, previous_scope)
     assert_eq(ctx.caller, previous_caller)
     assert_eq(ctx.structural_parents.len(), previous_depth)

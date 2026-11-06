@@ -5,7 +5,7 @@
 acquire: fn(resource: String) -> Lock {
     return Lock{ resource: resource }
 }
-release: fn(lock: ^Lock) {
+release: fn(lock: &&Lock) {
     print(lock.resource)
 }
 
@@ -16,5 +16,5 @@ peek: fn(lock: Lock) {
 run: fn() {
     db: acquire("db")
     peek(db)
-    release(^db)
+    release(db)
 }

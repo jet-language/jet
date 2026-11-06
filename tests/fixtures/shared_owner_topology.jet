@@ -6,33 +6,33 @@ Bucket: struct {
     by_name: [String:Int],
 }
 
-extract_owner: fn(holder: ^Holder) -> Shared<Int> {
+extract_owner: fn(holder: &&Holder) -> Shared<Int> {
     return holder.owner
 }
 
 append_then_fail: fn(values: &[Int], value: Int) -> Int? Err! {
-    &values.push(value)
+    values.push(value)
     return Err("expected failure")
 }
 
-make_counter: fn(owner: ^Shared<Int>) -> fn(Int) -> Int {
+make_counter: fn(owner: &&Shared<Int>) -> fn(Int) -> Int {
     bucket := Bucket{values: [Int]{}, by_name: [String:Int]{}}
     return (value: Int) -> {
-        failure: append_then_fail(&bucket.values, value) ?? -value
+        failure: append_then_fail(bucket.values, value) ?? -value
         bucket.by_name["last"] = value
         return bucket.values.len() * 100 + bucket.by_name["last"] + owner.strong_count() + failure
     }
 }
 
-take_once: fn(owner: ^Shared<Int>) -> Shared<Int> {
+take_once: fn(owner: &&Shared<Int>) -> Shared<Int> {
     callback: () -> {
         owner
     }
     return callback()
 }
 
-replace_then_take: fn(owner: ^Shared<Int>) -> Shared<Int> {
-    current := ^owner
+replace_then_take: fn(owner: &&Shared<Int>) -> Shared<Int> {
+    current := owner.move()
     callback: () -> {
         current = shared 13
         current
@@ -40,7 +40,7 @@ replace_then_take: fn(owner: ^Shared<Int>) -> Shared<Int> {
     return callback()
 }
 
-take_captured_first: fn(pair: ^SharedPair) -> Shared<Int> {
+take_captured_first: fn(pair: &&SharedPair) -> Shared<Int> {
     callback: () -> {
         pair.first
     }
@@ -63,8 +63,8 @@ snapshot_scope: fn(escaped: Shared<Int>) {
     print(snapshot_copy.value())
 }
 
-counter_scope: fn(live: ^Shared<Int>, escaped: Shared<Int>) {
-    counter: make_counter(^live)
+counter_scope: fn(live: &&Shared<Int>, escaped: Shared<Int>) {
+    counter: make_counter(live)
     alias: counter.copy()
     print(counter(1))
     print(alias(2))
@@ -80,8 +80,8 @@ expired_weak: fn() -> Shared.Weak<Int> {
 run: fn() {
     owner := shared 7
     weak: owner.downgrade()
-    holder: Holder{owner: ^owner}
-    escaped: extract_owner(^holder)
+    holder: Holder{owner: owner.move()}
+    escaped: extract_owner(holder)
     print(escaped.strong_count())
     copy_scope(escaped)
     print(escaped.strong_count())
@@ -89,22 +89,22 @@ run: fn() {
     projection: escaped.capture((value: Int) -> value + 1)
     print(projection.value())
     replace_snapshot: escaped.capture()
-    replaced: escaped.try_replace(^replace_snapshot, 8) ?? false
+    replaced: escaped.try_replace(replace_snapshot, 8) ?? false
     print(replaced)
     print(escaped.capture().value())
 
     live: weak.upgrade() ?? panic("moved aggregate released its owner")
-    counter_scope(^live, escaped)
+    counter_scope(live, escaped)
     print(escaped.strong_count())
 
     once_owner: shared 9
     once_weak: once_owner.downgrade()
-    once_escaped: take_once(^once_owner)
+    once_escaped: take_once(once_owner)
     print(once_escaped.strong_count())
     if once_weak.upgrade() == .None { panic("FnOnce transfer released its owner") }
     replaced_owner := shared 37
     replaced_weak: replaced_owner.downgrade()
-    replaced_result: replace_then_take(^replaced_owner)
+    replaced_result: replace_then_take(replaced_owner)
     print(replaced_result.capture().value())
     print(replaced_result.strong_count())
     print(replaced_weak.upgrade() == .None)
@@ -112,8 +112,8 @@ run: fn() {
     rest_owner := shared 23
     first_weak: first_owner.downgrade()
     rest_weak: rest_owner.downgrade()
-    pair := SharedPair{first: ^first_owner, rest: ^rest_owner}
-    captured_first: take_captured_first(^pair)
+    pair := SharedPair{first: first_owner.move(), rest: rest_owner.move()}
+    captured_first: take_captured_first(pair)
     print(captured_first.capture().value())
     print(captured_first.strong_count())
     print(first_weak.upgrade() != .None)

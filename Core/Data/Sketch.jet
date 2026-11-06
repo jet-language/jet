@@ -9,8 +9,8 @@ empty: fn() -> String Never! { "jet-sketch:v1;0;" }
 
 merge: fn(left: String, right: String) -> String Never! {
     values := [String]{}
-    append_state(left, &values)
-    append_state(right, &values)
+    append_state(left, values)
+    append_state(right, values)
     encode(values)
 }
 
@@ -19,10 +19,10 @@ append_state: fn(text: String, out: &[String]) {
     values: decode(text)
     if values != None {
         decoded: values
-        loop value in decoded -> &out.push(value)
+        loop value in decoded -> out.push(value)
         return
     }
-    &out.push(text)
+    out.push(text)
 }
 
 encode: fn(values: [String]) -> String {
@@ -53,7 +53,7 @@ decode: fn(text: String) -> [String]? {
         pos = colon + 1
         if length < 0 || length > raw.len() - pos -> return None
         value: slice_bytes(raw, pos, pos + length) ?? return None
-        &values.push(value)
+        values.push(value)
         pos = pos + length
     }
     if pos != raw.len() -> return None
@@ -86,7 +86,7 @@ slice_bytes: fn(raw: [U8], start: Int, end: Int) -> String? {
     out := [U8]{}
     i := start
     loop i < end {
-        &out.push(raw[i])
+        out.push(raw[i])
         i = i + 1
     }
     decoded: String.from_bytes(out) ?? return None

@@ -173,7 +173,7 @@ nix_fallback_locked_source_name: fn(project: String, preferred: String, revision
     expected: "{NIX_LOCKED_NIXPKGS_PREFIX}{revision}"
     lock: pkg_lock_load(project) ?? return Err(NixError.Fallback("project lock is unavailable for local Nix fallback"))
     candidates := [String]{preferred}
-    if preferred != REF_SOURCE_NIXPKGS -> &candidates.push(REF_SOURCE_NIXPKGS)
+    if preferred != REF_SOURCE_NIXPKGS -> candidates.push(REF_SOURCE_NIXPKGS)
     loop name in candidates {
         loop channel in lock.source_channels {
             if channel.name == name && channel.exact == expected -> return Ok(name)

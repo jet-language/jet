@@ -307,7 +307,7 @@ store_cache_http_get: fn(url: String, limit: Int) -> [U8]? StoreError! {
     bytes := [U8]{}
     loop part in response.body().chunks(65536) {
         chunk: part ?? return Err(StoreError.InvalidData("HTTP cache response could not be read: {err}"))
-        loop byte in chunk -> &bytes.push(byte)
+        loop byte in chunk -> bytes.push(byte)
         if bytes.len() > limit -> return Err(StoreError.InvalidData("HTTP cache response exceeded its bound"))
     }
     Ok(Val(bytes))
@@ -415,7 +415,7 @@ store_cache_run_bounded_output: fn(spec: ProcessSpec, input: [U8]?, limit: Int, 
     loop {
         chunk: child.stdout.read(65536)
         if chunk.len() == 0 -> break
-        loop byte in chunk -> &stdout.push(byte)
+        loop byte in chunk -> stdout.push(byte)
         if stdout.len() > limit {
             child.kill().drop("the transport already exceeded its bound")
             child.wait().drop("the transport already exceeded its bound")

@@ -178,7 +178,7 @@ NixIndexRecordWire: struct {
     from_record: fn(record: NixIndexRecord) -> NixIndexRecordWire Never! {
         outputs := [NixIndexOutputWire]{}
         names: nixeval_sorted(record.outputs.keys().to_list())
-        loop name in names -> &outputs.push(NixIndexOutputWire{name, store_path: record.outputs[name]})
+        loop name in names -> outputs.push(NixIndexOutputWire{name, store_path: record.outputs[name]})
         NixIndexRecordWire{attrpath: record.attrpath, version: record.version, drv_path: record.drv_path, outputs}
     }
 
@@ -190,7 +190,7 @@ NixIndexRecordWire: struct {
 
     tree: fn(self) -> Dyn Never! {
         outputs := [Dyn]{}
-        loop output in self.outputs -> &outputs.push(output.tree())
+        loop output in self.outputs -> outputs.push(output.tree())
         Dyn.Object([
             "attrpath": pkg_json_texts(self.attrpath),
             "version": Dyn.Text(self.version.copy()),
@@ -202,7 +202,7 @@ NixIndexRecordWire: struct {
     // This record with its outputs in name order.
     sorted: fn(self) -> NixIndexRecordWire Never! {
         outputs := self.outputs.copy()
-        &outputs.sort_by((left: NixIndexOutputWire, right: NixIndexOutputWire) -> left.name <=> right.name)
+        outputs.sort_by((left: NixIndexOutputWire, right: NixIndexOutputWire) -> left.name <=> right.name)
         NixIndexRecordWire{attrpath: self.attrpath, version: self.version, drv_path: self.drv_path, outputs}
     }
 }
@@ -272,10 +272,10 @@ NixIndexDocument: struct {
                 if output.name == "" || pkg_text_has_control(output.name) || output_names.contains(output.name) {
                     return Err(NixIndexError.Invalid("nix index record has duplicate output names"))
                 }
-                &output_names.push(output.name)
+                output_names.push(output.name)
                 nix_index_validate_store_path(output.store_path, false)
                 if output_paths.contains(output.store_path) -> return Err(NixIndexError.Invalid("nix index assigns one store path to multiple output names"))
-                &output_paths.push(output.store_path)
+                output_paths.push(output.store_path)
             }
             if !output_names.contains("out") && !output_names.contains("bin") {
                 return Err(NixIndexError.Invalid("nix index record has neither a primary `out` nor `bin` output"))
@@ -305,18 +305,18 @@ NixIndexDocument: struct {
     canonical_bytes: fn(self) -> [U8] NixIndexError! {
         self.validate()
         records := [NixIndexRecordWire]{}
-        loop record in self.records -> &records.push(record.sorted())
-        &records.sort_by((left: NixIndexRecordWire, right: NixIndexRecordWire) -> nix_index_attrpath_order(left.attrpath, right.attrpath))
+        loop record in self.records -> records.push(record.sorted())
+        records.sort_by((left: NixIndexRecordWire, right: NixIndexRecordWire) -> nix_index_attrpath_order(left.attrpath, right.attrpath))
         indexed := self.coverage.indexed.copy()
-        &indexed.sort_by((left: [String], right: [String]) -> nix_index_attrpath_order(left, right))
+        indexed.sort_by((left: [String], right: [String]) -> nix_index_attrpath_order(left, right))
         misses := self.coverage.not_indexed.copy()
-        &misses.sort_by((left: NixIndexCoverageMiss, right: NixIndexCoverageMiss) -> nix_index_attrpath_order(left.attrpath, right.attrpath).then(left.reason <=> right.reason))
+        misses.sort_by((left: NixIndexCoverageMiss, right: NixIndexCoverageMiss) -> nix_index_attrpath_order(left.attrpath, right.attrpath).then(left.reason <=> right.reason))
         record_trees := [Dyn]{}
-        loop record in records -> &record_trees.push(record.tree())
+        loop record in records -> record_trees.push(record.tree())
         indexed_trees := [Dyn]{}
-        loop attrpath in indexed -> &indexed_trees.push(pkg_json_texts(attrpath))
+        loop attrpath in indexed -> indexed_trees.push(pkg_json_texts(attrpath))
         miss_trees := [Dyn]{}
-        loop miss in misses -> &miss_trees.push(miss.tree())
+        loop miss in misses -> miss_trees.push(miss.tree())
         Ok(pkg_json_render(Dyn.Object([
             "schema": Dyn.Int(self.schema),
             "channel": Dyn.Text(self.channel.copy()),
@@ -426,7 +426,7 @@ NixIndexChannelManifest: struct {
         nix_index_reject_unknown(map, [String]{"schema", "channel", "generation", "issued_unix", "expires_unix", "targets"})
         targets := [NixIndexManifestTarget]{}
         target_values: nix_index_array_field(map, "targets")
-        loop target in target_values -> &targets.push(nix_index_parse_manifest_target(target))
+        loop target in target_values -> targets.push(nix_index_parse_manifest_target(target))
         manifest: NixIndexChannelManifest{
             schema: nix_index_u64_field(map, "schema"),
             channel: nix_index_string_field(map, "channel"),
@@ -450,7 +450,7 @@ NixIndexChannelManifest: struct {
             nix_index_validate_system(target.system)
             key: "{target.revision}\n{target.system}"
             if keys.contains(key) -> return Err(NixIndexError.Invalid("nix index manifest has duplicate targets"))
-            &keys.push(key)
+            keys.push(key)
             if target.compressed_length == 0 || target.compressed_length > NIX_INDEX_MAX_COMPRESSED_BYTES -> return Err(NixIndexError.Invalid("nix index target exceeds compressed bound"))
             if target.decoded_length == 0 || target.decoded_length > NIX_INDEX_MAX_DECODED_BYTES -> return Err(NixIndexError.Invalid("nix index target exceeds decoded bound"))
             if target.record_count > NIX_INDEX_MAX_RECORDS -> return Err(NixIndexError.Invalid("nix index target exceeds record bound"))
@@ -464,9 +464,9 @@ NixIndexChannelManifest: struct {
     canonical_bytes: fn(self) -> [U8] NixIndexError! {
         self.validate()
         targets := self.targets.copy()
-        &targets.sort_by((left: NixIndexManifestTarget, right: NixIndexManifestTarget) -> (left.revision <=> right.revision).then(left.system <=> right.system))
+        targets.sort_by((left: NixIndexManifestTarget, right: NixIndexManifestTarget) -> (left.revision <=> right.revision).then(left.system <=> right.system))
         trees := [Dyn]{}
-        loop target in targets -> &trees.push(target.tree())
+        loop target in targets -> trees.push(target.tree())
         Ok(pkg_json_render(Dyn.Object([
             "schema": Dyn.Int(self.schema),
             "channel": Dyn.Text(self.channel.copy()),
@@ -501,13 +501,13 @@ nix_index_parse_local_native_recipes: fn(bytes: [U8]) -> [NixNativeRecipe] NixIn
     values: nix_index_array_field(map, "recipes")
     if values.len() > NIX_INDEX_MAX_RECORDS -> return Err(NixIndexError.Invalid("local unofficial native catalog has too many recipes"))
     recipes := [NixNativeRecipe]{}
-    loop item in values -> &recipes.push(nix_index_parse_native_recipe(item))
-    &recipes.sort_by((left: NixNativeRecipe, right: NixNativeRecipe) -> (left.name <=> right.name).then(left.version <=> right.version))
+    loop item in values -> recipes.push(nix_index_parse_native_recipe(item))
+    recipes.sort_by((left: NixNativeRecipe, right: NixNativeRecipe) -> (left.name <=> right.name).then(left.version <=> right.version))
     identities := [String]{}
     loop recipe in recipes {
         identity: "{recipe.name}\n{recipe.version}"
         if identities.contains(identity) -> return Err(NixIndexError.Invalid("local unofficial native catalog repeats `{recipe.name}` version `{recipe.version}`"))
-        &identities.push(identity)
+        identities.push(identity)
     }
     if nix_index_canonical_native_recipes_bytes(recipes) != bytes -> return Err(NixIndexError.Invalid("local unofficial native catalog bytes are not canonical"))
     Ok(recipes)
@@ -559,9 +559,9 @@ nix_index_validate_native_recipe_url: fn(url: String) NixIndexError! {
 
 nix_index_canonical_native_recipes_bytes: fn(recipes: [NixNativeRecipe]) -> [U8] Never! {
     sorted := recipes.copy()
-    &sorted.sort_by((left: NixNativeRecipe, right: NixNativeRecipe) -> (left.name <=> right.name).then(left.version <=> right.version))
+    sorted.sort_by((left: NixNativeRecipe, right: NixNativeRecipe) -> (left.name <=> right.name).then(left.version <=> right.version))
     trees := [Dyn]{}
-    loop recipe in sorted -> &trees.push(recipe.tree())
+    loop recipe in sorted -> trees.push(recipe.tree())
     pkg_json_render(Dyn.Object(["schema": Dyn.Int(1), "recipes": Dyn.Array(trees)])).bytes()
 }
 
@@ -569,7 +569,7 @@ nix_index_parse_records: fn(value: Dyn) -> [NixIndexRecordWire] NixIndexError! {
     values: nix_index_value_array(value, "records")
     if values.len() > NIX_INDEX_MAX_RECORDS -> return Err(NixIndexError.Invalid("nix index has too many records"))
     records := [NixIndexRecordWire]{}
-    loop item in values -> &records.push(nix_index_parse_record(item))
+    loop item in values -> records.push(nix_index_parse_record(item))
     Ok(records)
 }
 
@@ -578,7 +578,7 @@ nix_index_parse_record: fn(value: Dyn) -> NixIndexRecordWire NixIndexError! {
     nix_index_reject_unknown(map, [String]{"attrpath", "version", "drvPath", "outputs"})
     outputs := [NixIndexOutputWire]{}
     output_values: nix_index_array_field(map, "outputs")
-    loop output in output_values -> &outputs.push(nix_index_parse_output(output))
+    loop output in output_values -> outputs.push(nix_index_parse_output(output))
     Ok(NixIndexRecordWire{
         attrpath: nix_index_parse_attrpath(nix_index_field(map, "attrpath")),
         version: nix_index_string_field(map, "version"),
@@ -598,13 +598,13 @@ nix_index_parse_coverage: fn(value: Dyn) -> NixIndexCoverage NixIndexError! {
     nix_index_reject_unknown(map, [String]{"indexed", "notIndexed"})
     indexed := [[String]]{}
     indexed_values: nix_index_array_field(map, "indexed")
-    loop item in indexed_values -> &indexed.push(nix_index_parse_attrpath(item))
+    loop item in indexed_values -> indexed.push(nix_index_parse_attrpath(item))
     not_indexed := [NixIndexCoverageMiss]{}
     miss_values: nix_index_array_field(map, "notIndexed")
     loop item in miss_values {
         miss: nix_index_object(item, "nix index coverage miss")
         nix_index_reject_unknown(miss, [String]{"attrpath", "reason"})
-        &not_indexed.push(NixIndexCoverageMiss{attrpath: nix_index_parse_attrpath(nix_index_field(miss, "attrpath")), reason: nix_index_string_field(miss, "reason")})
+        not_indexed.push(NixIndexCoverageMiss{attrpath: nix_index_parse_attrpath(nix_index_field(miss, "attrpath")), reason: nix_index_string_field(miss, "reason")})
     }
     Ok(NixIndexCoverage{indexed, not_indexed})
 }
@@ -612,7 +612,7 @@ nix_index_parse_coverage: fn(value: Dyn) -> NixIndexCoverage NixIndexError! {
 nix_index_parse_attrpath: fn(value: Dyn) -> [String] NixIndexError! {
     attrpath := [String]{}
     segments: nix_index_value_array(value, "attrpath")
-    loop segment in segments -> &attrpath.push(nix_index_string_value(segment, "attrpath segment"))
+    loop segment in segments -> attrpath.push(nix_index_string_value(segment, "attrpath segment"))
     Ok(attrpath)
 }
 

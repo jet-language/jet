@@ -86,21 +86,21 @@ semindex_project_generated_presentation: fn(db: &SymbolDB, registration: SemaReg
             if name_facts_display_path(names, module_index, path.name, Val(module_index)) == .Val(display) {
                 leaves: display.split(".")
                 leaf := leaves[leaves.len() - 1] // #4303
-                if display != path.name && leaf != path.name -> &replacements.push(SemIndexPresentationReplacement{internal: path.name, display: display})
+                if display != path.name && leaf != path.name -> replacements.push(SemIndexPresentationReplacement{internal: path.name, display: display})
             }
         }
         // Rust sort is stable and compares UTF-8 byte lengths, not scalar count.
-        &replacements.sort_by((left: SemIndexPresentationReplacement, right: SemIndexPresentationReplacement) -> right.internal.bytes().len() <=> left.internal.bytes().len())
-        projections[module_index] = ^replacements
+        replacements.sort_by((left: SemIndexPresentationReplacement, right: SemIndexPresentationReplacement) -> right.internal.bytes().len() <=> left.internal.bytes().len())
+        projections[module_index] = replacements.move()
     }
     loop index in 0..<db.hover.len() {
-        if sources.get(db.hover[index].module_path) == .Val(source_index) -> semindex_project_text(projections[semindex_loaded_registration_index(registration, module_sources[source_index])], &db.hover[index].text)
+        if sources.get(db.hover[index].module_path) == .Val(source_index) -> semindex_project_text(projections[semindex_loaded_registration_index(registration, module_sources[source_index])], db.hover[index].text)
     }
     loop index in 0..<db.inlay.len() {
-        if sources.get(db.inlay[index].module_path) == .Val(source_index) -> semindex_project_text(projections[semindex_loaded_registration_index(registration, module_sources[source_index])], &db.inlay[index].label)
+        if sources.get(db.inlay[index].module_path) == .Val(source_index) -> semindex_project_text(projections[semindex_loaded_registration_index(registration, module_sources[source_index])], db.inlay[index].label)
     }
     loop index in 0..<db.members.len() {
-        if sources.get(db.members[index].module_path) == .Val(source_index) -> semindex_project_text(projections[semindex_loaded_registration_index(registration, module_sources[source_index])], &db.members[index].signature)
+        if sources.get(db.members[index].module_path) == .Val(source_index) -> semindex_project_text(projections[semindex_loaded_registration_index(registration, module_sources[source_index])], db.members[index].signature)
     }
 }
 

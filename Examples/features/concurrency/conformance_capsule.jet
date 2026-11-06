@@ -38,7 +38,7 @@ backpressure_cell: fn() {
     sent.receive() ?? panic("sent closed")
     print("backpressure: second send completed after drain")
     print("backpressure: drained {values.receive() ?? -1}")
-    ^sender.join() ?? panic(failure_label(err))
+    sender.join() ?? panic(failure_label(err))
 }
 
 worker: fn(id: Int, token: Int, token_tx: Sender<Int>, events: Sender<Int>) -> Int {
@@ -69,10 +69,10 @@ worker_limit_cell: fn() {
     c: task worker(3, tokens.receive() ?? panic("tokens"), t3, e3)
     d: task worker(4, tokens.receive() ?? panic("tokens"), t4, e4)
     ids: [
-        ^a.join() ?? panic(failure_label(err)),
-        ^b.join() ?? panic(failure_label(err)),
-        ^c.join() ?? panic(failure_label(err)),
-        ^d.join() ?? panic(failure_label(err)),
+        a.join() ?? panic(failure_label(err)),
+        b.join() ?? panic(failure_label(err)),
+        c.join() ?? panic(failure_label(err)),
+        d.join() ?? panic(failure_label(err)),
     ]
     in_flight := 0
     max_in_flight := 0
@@ -91,7 +91,7 @@ double: fn(n: Int) -> Int { n * 2 }
 // Explicit join and scope-owned join.
 join_cell: fn() {
     t: task double(21)
-    print("join: explicit {^t.join() ?? -1}")
+    print("join: explicit {t.join() ?? -1}")
     task.group g {
         both: task.all {double(1), double(2)} ?? panic("all")
         print("join: scope-owned {both[0]} {both[1]}")

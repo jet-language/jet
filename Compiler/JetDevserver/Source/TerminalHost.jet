@@ -66,16 +66,16 @@ TerminalHostConfig: struct {
         TerminalHostConfig{viewport, capabilities, max_events: MAX_TERMINAL_EVENTS, max_nodes: MAX_TERMINAL_NODES}
     }
     with_limits: fn(self: TerminalHostConfig, max_events: USize, max_nodes: USize) -> TerminalHostConfig {
-        self := ^self
+        self := self.move()
         self.max_events = max_events.clamp(1, MAX_TERMINAL_EVENTS)
         self.max_nodes = max_nodes.clamp(1, MAX_TERMINAL_NODES)
-        ^self
+        self.move()
     }
     with_viewport: fn(self: TerminalHostConfig, viewport: TerminalViewport) -> TerminalHostConfig {
-        self := ^self; self.viewport = viewport; ^self
+        self := self.move(); self.viewport = viewport; self.move()
     }
     with_capabilities: fn(self: TerminalHostConfig, capabilities: TerminalHostCapabilities) -> TerminalHostConfig {
-        self := ^self; self.capabilities = capabilities; ^self
+        self := self.move(); self.capabilities = capabilities; self.move()
     }
     default: fn() -> TerminalHostConfig { TerminalHostConfig.new(TerminalViewport.default(), TerminalHostCapabilities.default()) }
 }
@@ -92,12 +92,12 @@ TerminalFactValue: enum {
 }
 TerminalHostFact: struct {
     key: String; value: TerminalFactValue?; published: Bool
-    redacted: fn(key: String) -> TerminalHostFact { TerminalHostFact{key: ^key, value: None, published: false} }
-    text: fn(key: String, value: String) -> TerminalHostFact { TerminalHostFact{key: ^key, value: .Val(.Text(^value)), published: true} }
-    text_bounded: fn(key: String, value: String) -> TerminalHostFact { TerminalHostFact.text(^key, bounded_text(value, MAX_TERMINAL_TEXT_BYTES)) }
-    integer: fn(key: String, value: I64) -> TerminalHostFact { TerminalHostFact{key: ^key, value: .Val(.Integer(value)), published: true} }
-    boolean: fn(key: String, value: Bool) -> TerminalHostFact { TerminalHostFact{key: ^key, value: .Val(.Boolean(value)), published: true} }
-    duration_ms: fn(key: String, value: U64) -> TerminalHostFact { TerminalHostFact{key: ^key, value: .Val(.DurationMs(value)), published: true} }
+    redacted: fn(key: String) -> TerminalHostFact { TerminalHostFact{key: key.move(), value: None, published: false} }
+    text: fn(key: String, value: String) -> TerminalHostFact { TerminalHostFact{key: key.move(), value: .Val(.Text(value)), published: true} }
+    text_bounded: fn(key: String, value: String) -> TerminalHostFact { TerminalHostFact.text(key, bounded_text(value, MAX_TERMINAL_TEXT_BYTES)) }
+    integer: fn(key: String, value: I64) -> TerminalHostFact { TerminalHostFact{key: key.move(), value: .Val(.Integer(value)), published: true} }
+    boolean: fn(key: String, value: Bool) -> TerminalHostFact { TerminalHostFact{key: key.move(), value: .Val(.Boolean(value)), published: true} }
+    duration_ms: fn(key: String, value: U64) -> TerminalHostFact { TerminalHostFact{key: key.move(), value: .Val(.DurationMs(value)), published: true} }
     validate: fn(self) Err! {
         validate_text(self.key, "fact key")
         if !self.published && self.value.is_some() -> return Err("terminal fact `{self.key}` is redacted but carries a value")
@@ -112,15 +112,15 @@ TerminalHostEvent: struct {
     protocol: String; session_id: String; revision: String; sequence: U64; observed_at: U64
     source: String; kind: String; entity: String; panel_id: JetDevtoolsPanelId; facts: [TerminalHostFact]
     new: fn(panel_id: JetDevtoolsPanelId, session_id: String, revision: String, sequence: U64, observed_at: U64, source: String, kind: String, entity: String, facts: [TerminalHostFact]) -> TerminalHostEvent {
-        TerminalHostEvent.from_projection(panel_id, JET_DEVTOOLS_PROTOCOL, ^session_id, ^revision, sequence, observed_at, ^source, ^kind, ^entity, ^facts)
+        TerminalHostEvent.from_projection(panel_id, JET_DEVTOOLS_PROTOCOL, session_id, revision, sequence, observed_at, source, kind, entity, facts)
     }
     from_projection: fn(panel_id: JetDevtoolsPanelId, protocol: String, session_id: String, revision: String, sequence: U64, observed_at: U64, source: String, kind: String, entity: String, facts: [TerminalHostFact]) -> TerminalHostEvent {
-        TerminalHostEvent{protocol: ^protocol, session_id: ^session_id, revision: ^revision, sequence, observed_at, source: ^source, kind: ^kind, entity: ^entity, panel_id, facts: ^facts}
+        TerminalHostEvent{protocol: protocol.move(), session_id: session_id, revision: revision, sequence, observed_at, source: source, kind: kind, entity: entity, panel_id, facts: facts.move()}
     }
     from_devtools_event: fn(event: JetDevtoolsEvent, protocol: String, session_id: String, revision: String, panel_id: JetDevtoolsPanelId) -> TerminalHostEvent {
         facts := [TerminalHostFact.text_bounded("fields", event.fields_json())]
-        if event.payload_json() == .Val(payload) -> &facts.push(TerminalHostFact.text_bounded("payload", payload))
-        TerminalHostEvent.from_projection(panel_id, protocol.clone(), session_id.clone(), revision.clone(), event.sequence(), event.timestamp_ms, event.source().to_string(), event.kind().to_string(), event.entity().to_string(), ^facts)
+        if event.payload_json() == .Val(payload) -> facts.push(TerminalHostFact.text_bounded("payload", payload))
+        TerminalHostEvent.from_projection(panel_id, protocol.clone(), session_id.clone(), revision.clone(), event.sequence(), event.timestamp_ms, event.source().to_string(), event.kind().to_string(), event.entity().to_string(), facts)
     }
     published_fact_count: fn(self) -> USize { self.facts.iter().filter((fact) -> fact.published).count() }
     validate: fn(self) Err! {
@@ -134,14 +134,14 @@ TerminalHostEvent: struct {
         loop fact in self.facts {
             fact.validate()
             if keys.contains_key(fact.key) -> return Err("terminal event repeats fact key `{fact.key}`")
-            &keys.insert(fact.key.clone(), true)
+            keys.insert(fact.key.clone(), true)
         }
     }
 }
 TerminalFocus: struct {
     panel_id: String?; item_key: String?
-    panel: fn(panel_id: String) -> TerminalFocus { TerminalFocus{panel_id: .Val(^panel_id), item_key: None} }
-    item: fn(panel_id: String, item_key: String) -> TerminalFocus { TerminalFocus{panel_id: .Val(^panel_id), item_key: .Val(^item_key)} }
+    panel: fn(panel_id: String) -> TerminalFocus { TerminalFocus{panel_id: .Val(panel_id), item_key: None} }
+    item: fn(panel_id: String, item_key: String) -> TerminalFocus { TerminalFocus{panel_id: .Val(panel_id), item_key: .Val(item_key)} }
     clear_item: fn(self: TerminalFocus) -> () { self.item_key = None }
     default: fn() -> TerminalFocus { TerminalFocus{panel_id: None, item_key: None} }
 }
@@ -172,17 +172,17 @@ TerminalNode: struct {
     freshness: TerminalFreshness; focusable: Bool; text: String?; status: TerminalStatus?; table: TerminalTable?
     children: [TerminalNode]
     container: fn(id: String, kind: TerminalNodeKind, label: String, bounds: TerminalBounds, freshness: TerminalFreshness, children: [TerminalNode]) -> TerminalNode {
-        TerminalNode{id: ^id, kind, label: ^label, bounds, freshness, focusable: false, text: None, status: None, table: None, children: ^children}
+        TerminalNode{id: id.move(), kind, label: label, bounds, freshness, focusable: false, text: None, status: None, table: None, children: children.move()}
     }
     text: fn(id: String, label: String, text: String, bounds: TerminalBounds, freshness: TerminalFreshness) -> TerminalNode {
-        TerminalNode{id: ^id, kind: .Text, label: ^label, bounds, freshness, focusable: false, text: .Val(^text), status: None, table: None, children: []}
+        TerminalNode{id: id.move(), kind: .Text, label: label, bounds, freshness, focusable: false, text: .Val(text), status: None, table: None, children: []}
     }
     status: fn(id: String, label: String, status: TerminalStatus, bounds: TerminalBounds, focusable: Bool) -> TerminalNode {
         freshness: status.freshness
-        TerminalNode{id: ^id, kind: .Status, label: ^label, bounds, freshness, focusable, text: None, status: .Val(^status), table: None, children: []}
+        TerminalNode{id: id.move(), kind: .Status, label: label, bounds, freshness, focusable, text: None, status: .Val(status), table: None, children: []}
     }
     table: fn(id: String, label: String, table: TerminalTable, bounds: TerminalBounds, freshness: TerminalFreshness) -> TerminalNode {
-        TerminalNode{id: ^id, kind: .Table, label: ^label, bounds, freshness, focusable: false, text: None, status: None, table: .Val(^table), children: []}
+        TerminalNode{id: id.move(), kind: .Table, label: label, bounds, freshness, focusable: false, text: None, status: None, table: .Val(table), children: []}
     }
     is_leaf: fn(self) -> Bool { self.children.is_empty() }
     find: fn(self, id: String) -> TerminalNode? {
@@ -190,15 +190,15 @@ TerminalNode: struct {
         self.children.iter().find_map((child) -> child.find(id))
     }
     flatten: fn(self, out: &[String:&TerminalNode]) -> () {
-        &out.insert(self.id.clone(), &self)
-        loop child in self.children { child.flatten(&out) }
+        out.insert(self.id.clone(), self)
+        loop child in self.children { child.flatten(out) }
     }
     count: fn(self) -> USize { 1 + self.children.iter().map((child) -> child.count()).sum() }
 }
 TerminalPanelTree: struct {
     root: TerminalNode; bounds: TerminalBounds; node_count: USize; node_limit: USize; panel_count: USize
     panel: fn(self, panel_id: String) -> TerminalNode? { self.root.children.iter().find((node) -> node.id == "panel:{panel_id}") }
-    nodes: fn(self) -> [String:&TerminalNode] { nodes := [String:&TerminalNode]{}; self.root.flatten(&nodes); ^nodes }
+    nodes: fn(self) -> [String:&TerminalNode] { nodes := [String:&TerminalNode]{}; self.root.flatten(nodes); nodes.move() }
 }
 TerminalFrame: struct {
     protocol: String; session_id: String; source_id: String?; build_id: String?; world_id: String?
@@ -212,19 +212,19 @@ TerminalFrame: struct {
     diff: fn(self, previous: TerminalFrame) -> TerminalDiff {
         before: previous.tree.nodes(); after: self.tree.nodes()
         ids := [String:Bool]{}
-        loop id in before.keys() { &ids.insert(id.clone(), true) }
-        loop id in after.keys() { &ids.insert(id.clone(), true) }
-        ordered_ids := ids.keys().cloned().collect(); &ordered_ids.sort()
+        loop id in before.keys() { ids.insert(id.clone(), true) }
+        loop id in after.keys() { ids.insert(id.clone(), true) }
+        ordered_ids := ids.keys().cloned().collect(); ordered_ids.sort()
         operations := [TerminalDiffOperation]{}
         loop id in ordered_ids {
             if {
-                before.get(id) == None && after.get(id) == .Val(node) -> &operations.push(.Insert{id: id.clone(), node: node.clone()})
-                before.get(id) == .Val(_) && after.get(id) == None -> &operations.push(.Remove{id: id.clone()})
-                before.get(id) == .Val(old) && after.get(id) == .Val(new) -> { if old != new -> &operations.push(.Replace{id: id.clone(), node: new.clone()}) } else -> {}
+                before.get(id) == None && after.get(id) == .Val(node) -> operations.push(.Insert{id: id.clone(), node: node.clone()})
+                before.get(id) == .Val(_) && after.get(id) == None -> operations.push(.Remove{id: id.clone()})
+                before.get(id) == .Val(old) && after.get(id) == .Val(new) -> { if old != new -> operations.push(.Replace{id: id.clone(), node: new.clone()}) } else -> {}
             }
         }
         TerminalDiff{
-            from_revision: previous.revision.clone(), to_revision: self.revision.clone(), operations: ^operations,
+            from_revision: previous.revision.clone(), to_revision: self.revision.clone(), operations: operations,
             viewport_changed: previous.viewport != self.viewport, focus_changed: previous.focus != self.focus,
             keyboard_changed: previous.keyboard != self.keyboard,
             metadata_changed: previous.protocol != self.protocol || previous.session_id != self.session_id
@@ -241,7 +241,7 @@ TerminalDiff: struct {
     viewport_changed: Bool; focus_changed: Bool; keyboard_changed: Bool; metadata_changed: Bool; lines_changed: Bool
     initial: fn(frame: TerminalFrame) -> TerminalDiff {
         nodes: frame.tree.nodes()
-        ids := nodes.keys().cloned().collect(); &ids.sort()
+        ids := nodes.keys().cloned().collect(); ids.sort()
         operations: ids.iter().map((id) -> {id: id.clone(), node: nodes[id].clone()}).collect()
         TerminalDiff{from_revision: "", to_revision: frame.revision.clone(), operations,
             viewport_changed: true, focus_changed: true, keyboard_changed: true, metadata_changed: true, lines_changed: true}
@@ -255,10 +255,10 @@ TerminalHost: struct {
     cursor: U64?; time_cursor: U64?; observed_at: U64?; status: DevtoolsStatusFact?
     focus: TerminalFocus; keyboard: TerminalKeyboardState
     new: fn(config: TerminalHostConfig) -> TerminalHost {
-        config := ^config
+        config := config.move()
         config.max_events = config.max_events.clamp(1, MAX_TERMINAL_EVENTS)
         config.max_nodes = config.max_nodes.clamp(1, MAX_TERMINAL_NODES)
-        TerminalHost{config: ^config, events: VecDeque.new(), session_id: None, source_id: None, build_id: None,
+        TerminalHost{config: config.move(), events: VecDeque.new(), session_id: None, source_id: None, build_id: None,
             world_id: None, revision: None, cursor: None, time_cursor: None, observed_at: None, status: None,
             focus: TerminalFocus.panel(first_panel_id()), keyboard: TerminalKeyboardState.default()}
     }
@@ -290,17 +290,17 @@ TerminalHost: struct {
         self.observed_at = .Val(event.observed_at); self.cursor = .Val(event.sequence)
         if self.time_cursor.is_none() -> self.time_cursor = .Val(event.sequence)
         first_event: self.events.is_empty(); panel_id: event.panel_id.as_str().to_string(); item_key: event_key(event)
-        if self.events.len() == self.config.max_events -> _: &self.events.pop_front()
-        &self.events.push_back(^event)
-        if first_event { self.focus = TerminalFocus.item(panel_id.clone(), ^item_key) } else if self.focus.panel_id.is_none() { self.focus.panel_id = .Val(panel_id.clone()) }
-        self.keyboard.last_action = .Val(.FocusPanel{panel_id: self.focus.panel_id.clone().unwrap_or(^panel_id)})
+        if self.events.len() == self.config.max_events -> _: self.events.pop_front()
+        self.events.push_back(event)
+        if first_event { self.focus = TerminalFocus.item(panel_id.clone(), item_key) } else if self.focus.panel_id.is_none() { self.focus.panel_id = .Val(panel_id.clone()) }
+        self.keyboard.last_action = .Val(.FocusPanel{panel_id: self.focus.panel_id.clone().unwrap_or(panel_id)})
     }
     sync_projection: fn(self: TerminalHost, projection: DevtoolsProjection, panel_ids: [U64:JetDevtoolsPanelId]) -> TerminalFrame Err! {
         validate_projection(projection)
         session_changed: self.session_id.is_some_and((id) -> id != projection.session_id)
         revision_changed: self.revision.is_some_and((revision) -> revision != projection.revision)
         if session_changed || revision_changed || projection.reset || projection.truncation {
-            self.time_cursor = None; &self.events.clear(); self.cursor = None
+            self.time_cursor = None; self.events.clear(); self.cursor = None
             self.focus = TerminalFocus.panel(first_panel_id()); self.keyboard.last_action = None
         }
         self.session_id = .Val(projection.session_id.clone()); self.source_id = projection.source_id.clone()
@@ -312,12 +312,12 @@ TerminalHost: struct {
             sequence: event.sequence()
             if previous_cursor.is_some_and((cursor) -> sequence <= cursor) -> next
             if panel_ids.get(sequence) == .Val(panel_id) {
-                &self.append_event(TerminalHostEvent.from_devtools_event(event, projection.protocol, projection.session_id, projection.revision, panel_id))
+                self.append_event(TerminalHostEvent.from_devtools_event(event, projection.protocol, projection.session_id, projection.revision, panel_id))
             }
         }
         self.cursor = .Val(projection.sequence)
         if previous_time_cursor.is_none() -> self.time_cursor = if projection.sequence != 0 -> .Val(projection.sequence) else -> None
-        &self.apply_selection(projection.selection.as_ref())
+        self.apply_selection(projection.selection.as_ref())
         Ok(self.render())
     }
     sync_session: fn(self: TerminalHost, session: ResidentDevSession) -> TerminalFrame Err! {
@@ -327,15 +327,15 @@ TerminalHost: struct {
         panel_ids := [U64:JetDevtoolsPanelId]{}
         loop panel in panels {
             panel_id: panel.availability.descriptor.id
-            loop event in panel.events { &panel_ids.entry(event.sequence()).or_insert(panel_id) }
+            loop event in panel.events { panel_ids.entry(event.sequence()).or_insert(panel_id) }
         }
-        &self.sync_projection(projection, panel_ids)
+        self.sync_projection(projection, panel_ids)
     }
     apply_selection: fn(self: TerminalHost, selection: DevtoolsSelectionFact?) -> () {
         if selection == .Val(selection) {
             if descriptors().iter().find((d) -> d.id.as_str() == selection.panel_id) == .Val(descriptor) {
                 panel_id: descriptor.id.as_str()
-                if selection.item_key.is_empty() { _: &self.focus_panel(panel_id) } else { _: &self.focus_item(panel_id, selection.item_key) }
+                if selection.item_key.is_empty() { _: self.focus_panel(panel_id) } else { _: self.focus_item(panel_id, selection.item_key) }
                 return
             }
         }
@@ -348,38 +348,38 @@ TerminalHost: struct {
         if descriptors().iter().find((d) -> d.id.as_str() == panel_id) == .Val(descriptor) {
             panel_id: descriptor.id.as_str().to_string()
             self.focus = TerminalFocus.panel(panel_id.clone())
-            self.keyboard.last_action = .Val(.FocusPanel{panel_id: ^panel_id})
+            self.keyboard.last_action = .Val(.FocusPanel{panel_id: panel_id.move()})
             return true
         }
         false
     }
     focus_item: fn(self: TerminalHost, panel_id: String, item_key: String) -> Bool {
-        if !&self.focus_panel(panel_id) -> return false
+        if !self.focus_panel(panel_id) -> return false
         self.focus.item_key = .Val(item_key.to_string())
         self.keyboard.last_action = .Val(.Inspect{panel_id: self.focus.panel_id.clone().unwrap_or(""), item_key: item_key.to_string()})
         true
     }
-    clear_item_focus: fn(self: TerminalHost) -> () { &self.focus.clear_item(); self.keyboard.last_action = .Val(.ReturnToPanel) }
+    clear_item_focus: fn(self: TerminalHost) -> () { self.focus.clear_item(); self.keyboard.last_action = .Val(.ReturnToPanel) }
     handle: fn(self: TerminalHost, input: TerminalInput) -> TerminalAction {
         if input == {
-            .Key(key) -> &self.handle_key(key)
-            .Resize(viewport) -> { &self.set_viewport(viewport); action: TerminalAction.Ignored; self.keyboard.last_action = .Val(action.clone()); action }
+            .Key(key) -> self.handle_key(key)
+            .Resize(viewport) -> { self.set_viewport(viewport); action: TerminalAction.Ignored; self.keyboard.last_action = .Val(action.clone()); action }
         }
     }
     handle_key: fn(self: TerminalHost, key: TerminalKey) -> TerminalAction {
         self.keyboard.last_key = .Val(key)
         action: if key == {
-            .Tab | .Down -> &self.move_panel(1)
-            .BackTab | .Up -> &self.move_panel(-1)
-            .Enter | .Right -> &self.inspect_focused()
+            .Tab | .Down -> self.move_panel(1)
+            .BackTab | .Up -> self.move_panel(-1)
+            .Enter | .Right -> self.inspect_focused()
             .Escape | .Left -> {
-                if self.focus.item_key.is_some() -> &self.clear_item_focus(); TerminalAction.ReturnToPanel else -> TerminalAction.Ignored
+                if self.focus.item_key.is_some() -> self.clear_item_focus(); TerminalAction.ReturnToPanel else -> TerminalAction.Ignored
             }
             .Character(lit0) && lit0 == 'r' -> if self.config.capabilities.access.actions_enabled() -> TerminalAction.Rerun else -> TerminalAction.Ignored
             .Character(lit0) && lit0 == 'R' -> if self.config.capabilities.access.actions_enabled() -> TerminalAction.Restart else -> TerminalAction.Ignored
-            .Character(lit0) && lit0 == 'j' -> { _: &self.focus_panel("jobs"); TerminalAction.FocusJob }
+            .Character(lit0) && lit0 == 'j' -> { _: self.focus_panel("jobs"); TerminalAction.FocusJob }
             .Character(lit0) && lit0 == 'q' -> TerminalAction.Quit
-            .Character(lit0) && lit0 == 't' -> &self.move_cursor()
+            .Character(lit0) && lit0 == 't' -> self.move_cursor()
             .Character(_) -> TerminalAction.Ignored
         }
         self.keyboard.last_action = .Val(action.clone())
@@ -394,9 +394,9 @@ TerminalHost: struct {
             self.focus, self.keyboard, ordered.len(), self.config.max_events, freshness)
         TerminalFrame{protocol: JET_DEVTOOLS_PROTOCOL.to_string(), session_id: self.session_id.clone().unwrap_or(""),
             source_id: self.source_id.clone(), build_id: self.build_id.clone(), world_id: self.world_id.clone(),
-            observed_at: self.observed_at, status: self.status.clone(), revision: ^revision, cursor: self.display_cursor(),
+            observed_at: self.observed_at, status: self.status.clone(), revision: revision, cursor: self.display_cursor(),
             viewport, capabilities: self.config.capabilities, focus: self.focus.clone(), keyboard: self.keyboard.clone(),
-            freshness, event_count: ordered.len(), event_limit: self.config.max_events, tree: ^tree, lines: ^lines}
+            freshness, event_count: ordered.len(), event_limit: self.config.max_events, tree: tree, lines: lines.move()}
     }
     move_panel: fn(self: TerminalHost, direction: ISize) -> TerminalAction {
         catalog: descriptors()
@@ -404,21 +404,21 @@ TerminalHost: struct {
         current: self.focus.panel_id.as_ref().and_then((panel) -> catalog.iter().position((d) -> d.id.as_str() == panel)).unwrap_or(0)
         len: ISize(catalog.len()); next: USize((ISize(current) + direction).rem_euclid(len))
         panel_id: catalog[next].id.as_str().to_string(); self.focus = TerminalFocus.panel(panel_id.clone())
-        .FocusPanel{panel_id: ^panel_id}
+        .FocusPanel{panel_id: panel_id.move()}
     }
     inspect_focused: fn(self: TerminalHost) -> TerminalAction {
         panel_id: self.focus.panel_id.clone().unwrap_or_else(() -> first_panel_id().to_string())
-        if self.focus.item_key.clone() == .Val(item_key) -> return .Inspect{panel_id: ^panel_id, item_key: ^item_key}
+        if self.focus.item_key.clone() == .Val(item_key) -> return .Inspect{panel_id: panel_id.move(), item_key: item_key.move()}
         item_key: ordered_events(self.events).iter().rev().find((event) -> self.panel_id_for_event(event) == panel_id).map((event) -> event_key(event))
         if item_key == .Val(item_key) {
             self.focus.item_key = .Val(item_key.clone())
-            return .Inspect{panel_id: ^panel_id, item_key: ^item_key}
+            return .Inspect{panel_id: panel_id.move(), item_key: item_key.move()}
         }
-        .FocusPanel{panel_id: ^panel_id}
+        .FocusPanel{panel_id: panel_id.move()}
     }
     move_cursor: fn(self: TerminalHost) -> TerminalAction {
         sequences := ordered_events(self.events).iter().map((event) -> event.sequence).collect()
-        &sequences.sort_unstable(); &sequences.dedup()
+        sequences.sort_unstable(); sequences.dedup()
         if sequences.is_empty() -> return .Ignored
         current: self.time_cursor.unwrap_or(sequences[0])
         next: sequences.iter().find((sequence) -> sequence > current).unwrap_or(sequences[0])
@@ -449,13 +449,13 @@ TerminalHost: struct {
                     label: if available -> freshness.label().to_string() else -> "unavailable",
                     detail: if available -> "{panel_events.len()} event(s), retained {ordered.len()}/{self.config.max_events}" else -> panel_state.map((row) -> unavailable_panel_detail(row.unavailable_reasons())).unwrap_or("unavailable"),
                     freshness}
-                &panel_children.push(TerminalNode.status("panel:{panel_id}:status", "freshness", ^status,
+                panel_children.push(TerminalNode.status("panel:{panel_id}:status", "freshness", status,
                     TerminalBounds.new(0, y, viewport.width, height.min(1)), self.focus.panel_id.as_ref() == Val((panel_id))))
                 remaining -= 1
             }
             if remaining > 0 {
                 summary: panel_events.last().map((event) -> event_summary(event, self.config.capabilities)).unwrap_or("No recorded facts")
-                &panel_children.push(TerminalNode.text("panel:{panel_id}:summary", "summary", ^summary,
+                panel_children.push(TerminalNode.text("panel:{panel_id}:summary", "summary", summary,
                     TerminalBounds.new(0, y.saturating_add(1), viewport.width, height.saturating_sub(1).min(1)), freshness))
                 remaining -= 1
             }
@@ -463,16 +463,16 @@ TerminalHost: struct {
                 rows: panel_events.iter().map((event) -> {key: event_key(event),
                     cells: [event.revision.clone(), "{event.sequence}", "{event.observed_at}", event.kind.clone(), event.entity.clone(),
                         event.source.clone(), "{event.published_fact_count()}"]}).collect()
-                &panel_children.push(TerminalNode.table("panel:{panel_id}:events", "events",
+                panel_children.push(TerminalNode.table("panel:{panel_id}:events", "events",
                     TerminalTable{columns: ["revision", "sequence", "observed_at", "kind", "entity", "source", "published_facts"], rows},
                     TerminalBounds.new(0, y.saturating_add(2), viewport.width, height.saturating_sub(2)), freshness))
                 remaining -= 1
             }
-            &children.push(TerminalNode.container("panel:{panel_id}", .Panel, panel_title, panel_bounds, freshness, ^panel_children))
+            children.push(TerminalNode.container("panel:{panel_id}", .Panel, panel_title, panel_bounds, freshness, panel_children))
         }
-        root: TerminalNode.container("terminal-root", .Root, "jet devtools", root_bounds, overall_freshness(ordered, self.display_cursor()), ^children)
+        root: TerminalNode.container("terminal-root", .Root, "jet devtools", root_bounds, overall_freshness(ordered, self.display_cursor()), children)
         panel_count: root.children.len(); node_count: root.count()
-        TerminalPanelTree{root: ^root, bounds: root_bounds, node_count, node_limit: self.config.max_nodes, panel_count}
+        TerminalPanelTree{root: root.move(), bounds: root_bounds, node_count, node_limit: self.config.max_nodes, panel_count}
     }
     default: fn() -> TerminalHost { TerminalHost.new(TerminalHostConfig.default()) }
 }
@@ -512,11 +512,11 @@ validate_status: fn(status: DevtoolsStatusFact) Err! {
 bounded_status: fn(status: DevtoolsStatusFact) -> DevtoolsStatusFact Err! {
     validate_status(status)
     bounded := status.clone()
-    loop value in [&bounded.diagnostic_code, &bounded.diagnostic, &bounded.accepted_revision, &bounded.last_good_revision,
-        &bounded.run_target, &bounded.run_output, &bounded.test_state] {
+    loop value in [&bounded.diagnostic_code, bounded.diagnostic, bounded.accepted_revision, bounded.last_good_revision,
+        bounded.run_target, bounded.run_output, &bounded.test_state] {
         if value == .Val(text) -> value = .Val(bounded_text(text, MAX_TERMINAL_TEXT_BYTES))
     }
-    Ok(^bounded)
+    Ok(bounded)
 }
 bounded_text: fn(value: String, limit: USize) -> String {
     if limit == 0 -> return ""
@@ -530,13 +530,13 @@ bounded_text: fn(value: String, limit: USize) -> String {
         }
         if replacement.is_empty() {
             if output.len().saturating_add(character.len_utf8()) > limit -> break
-            &output.push(character)
+            output.push(character)
             next
         }
         if output.len().saturating_add(replacement.len()) > limit -> break
-        &output.push_str(replacement)
+        output.push_str(replacement)
     }
-    ^output
+    output.move()
 }
 display_optional: fn(value: String) -> String { if value.is_empty() -> "-" else -> value }
 yes_no: fn(value: Bool) -> String { if value -> "yes" else -> "no" }
@@ -562,7 +562,7 @@ status_summary: fn(status: DevtoolsStatusFact, reveal: Bool) -> String {
             .Val(value) -> if reveal -> value else -> "<redacted>"
             .None -> "-"
         }
-        &fields.push("{key}={rendered}")
+        fields.push("{key}={rendered}")
     }
     fields.join(" ")
 }
@@ -575,13 +575,13 @@ unavailable_panel_detail: fn(reasons: [JetDevtoolsPanelUnavailableReason]) -> St
 }
 ordered_events: fn(events: VecDeque<TerminalHostEvent>) -> [&TerminalHostEvent] {
     ordered := events.iter().collect()
-    &ordered.sort_by((left, right) -> left.sequence.cmp(right.sequence)
+    ordered.sort_by((left, right) -> left.sequence.cmp(right.sequence)
         .then_with(() -> left.observed_at.cmp(right.observed_at))
         .then_with(() -> left.revision.cmp(right.revision))
         .then_with(() -> left.kind.cmp(right.kind))
         .then_with(() -> left.entity.cmp(right.entity))
         .then_with(() -> left.source.cmp(right.source)))
-    ^ordered
+    ordered.move()
 }
 event_key: fn(event: TerminalHostEvent) -> String { "event:{event.revision}:{event.sequence}:{event.kind}:{event.entity}" }
 event_summary: fn(event: TerminalHostEvent, capabilities: TerminalHostCapabilities) -> String {
@@ -610,26 +610,26 @@ render_lines: fn(tree: TerminalPanelTree, viewport: TerminalViewport, capabiliti
     sequence: cursor.map((value) -> "{value}").unwrap_or("-")
     observed: observed_at.map((value) -> "{value}").unwrap_or("-")
     state: status.map((status) -> session_state_label(status.state)).unwrap_or("-")
-    &raw.push("jet devtools  session={display_optional(session_id)}  source_id={display_optional(source_id.unwrap_or(""))}  build_id={display_optional(build_id.unwrap_or(""))}  world_id={display_optional(world_id.unwrap_or(""))}  revision={display_optional(revision)}  sequence={sequence}  observed_at={observed}  state={state}  freshness={freshness.label()}")
-    &raw.push("terminal={viewport.width}x{viewport.height}  tty={yes_no(capabilities.tty)}  ansi={yes_no(capabilities.ansi)}  no_color={yes_no(capabilities.no_color)}  verbose={yes_no(capabilities.verbose)}  quiet={yes_no(capabilities.quiet)}  access={access_label(capabilities.access)}  local={yes_no(capabilities.access.local)}  release={yes_no(capabilities.access.release)}  read_only={yes_no(capabilities.access.read_only)}  nodes={tree.node_count}/{tree.node_limit}  events={event_count}/{event_limit}  focus={focus.panel_id.as_ref().unwrap_or("-")}")
-    if status == .Val(status) -> &raw.push("status: {status_summary(status, capabilities.access.local_details_enabled())}")
+    raw.push("jet devtools  session={display_optional(session_id)}  source_id={display_optional(source_id.unwrap_or(""))}  build_id={display_optional(build_id.unwrap_or(""))}  world_id={display_optional(world_id.unwrap_or(""))}  revision={display_optional(revision)}  sequence={sequence}  observed_at={observed}  state={state}  freshness={freshness.label()}")
+    raw.push("terminal={viewport.width}x{viewport.height}  tty={yes_no(capabilities.tty)}  ansi={yes_no(capabilities.ansi)}  no_color={yes_no(capabilities.no_color)}  verbose={yes_no(capabilities.verbose)}  quiet={yes_no(capabilities.quiet)}  access={access_label(capabilities.access)}  local={yes_no(capabilities.access.local)}  release={yes_no(capabilities.access.release)}  read_only={yes_no(capabilities.access.read_only)}  nodes={tree.node_count}/{tree.node_limit}  events={event_count}/{event_limit}  focus={focus.panel_id.as_ref().unwrap_or("-")}")
+    if status == .Val(status) -> raw.push("status: {status_summary(status, capabilities.access.local_details_enabled())}")
     loop panel in tree.root.children {
         selected: focus.panel_id.as_ref().is_some_and((id) -> panel.id.strip_prefix("panel:").is_some_and((candidate) -> candidate == id))
         marker: if selected -> ">" else -> " "
         panel_label: if selected -> style("{marker}[{panel.label}]", "36", capabilities) else -> "{marker}[{panel.label}]"
-        &raw.push("{panel_label} {panel.freshness.label()}")
+        raw.push("{panel_label} {panel.freshness.label()}")
         loop child in panel.children {
             if child.kind == {
-                .Status -> { if child.status == .Val(child_status) -> &raw.push("  status={style(child_status.label, "33", capabilities)}  {child_status.detail}") }
-                .Text -> &raw.push("  {child.text.as_ref().unwrap_or("")}")
-                .Table -> { if child.table == .Val(table) { loop row in table.rows { &raw.push("  {row.cells.join(" | ")}") } } }
+                .Status -> { if child.status == .Val(child_status) -> raw.push("  status={style(child_status.label, "33", capabilities)}  {child_status.detail}") }
+                .Text -> raw.push("  {child.text.as_ref().unwrap_or("")}")
+                .Table -> { if child.table == .Val(table) { loop row in table.rows { raw.push("  {row.cells.join(" | ")}") } } }
                 .Root | .Panel -> {}
             }
         }
     }
     action_help: if capabilities.access.actions_enabled() -> "r rerun  R restart" else -> "r/R disabled(read-only)"
     last: keyboard.last_action.as_ref().map((action) -> action_label(action)).unwrap_or("none")
-    &raw.push("keys: Tab/Down next panel  Shift-Tab/Up previous  Enter inspect  Esc back  {action_help}  j jobs  t time  q quit  last={last}")
+    raw.push("keys: Tab/Down next panel  Shift-Tab/Up previous  Enter inspect  Esc back  {action_help}  j jobs  t time  q quit  last={last}")
     skip: viewport.scroll.min(raw.len())
     raw.iter().skip(skip).take(viewport.height).map((line) -> truncate_columns(line, viewport.width)).collect()
 }
@@ -643,37 +643,37 @@ style: fn(text: String, code: String, capabilities: TerminalHostCapabilities) ->
 strip_ansi: fn(text: String) -> String {
     output := String.with_capacity(text.len()); chars := text.chars()
     loop {
-        ch: &chars.next()
+        ch: chars.next()
         if ch == .Val(ch) {
-            if ch == (Char{27}) && &chars.next() == '[' {
+            if ch == (Char{27}) && chars.next() == '[' {
                 loop {
-                    code: &chars.next()
+                    code: chars.next()
                     if code == .Val(code) { if code >= '@' && code <= '~' -> break } else { break }
                 }
-            } else { &output.push(ch) }
+            } else { output.push(ch) }
         } else { break }
     }
-    ^output
+    output.move()
 }
 truncate_columns: fn(text: String, width: USize) -> String {
     limit: width.max(1); output := String.with_capacity(text.len().min(limit.saturating_add(16)))
     chars := text.chars().peekable(); visible := USize{0}; clipped := false; has_ansi: text.contains(Char{27})
     loop {
-        character: &chars.next()
+        character: chars.next()
         if character == .Val(character) {
-            if character == (Char{27}) && &chars.peek() == '[' {
-                &output.push(character); &output.push(&chars.next().expect("CSI introducer follows escape"))
+            if character == (Char{27}) && chars.peek() == '[' {
+                output.push(character); output.push(chars.next().expect("CSI introducer follows escape"))
                 loop {
-                    code: &chars.next()
-                    if code == .Val(code) { &output.push(code); if code >= '@' && code <= '~' -> break } else { break }
+                    code: chars.next()
+                    if code == .Val(code) { output.push(code); if code >= '@' && code <= '~' -> break } else { break }
                 }
                 next
             }
             if visible >= limit { clipped = true; break }
-            &output.push(character); visible += 1
+            output.push(character); visible += 1
         } else { break }
     }
-    if clipped && has_ansi -> &output.push_str("{Char{27}}[0m")
-    ^output
+    if clipped && has_ansi -> output.push_str("{Char{27}}[0m")
+    output.move()
 }
 

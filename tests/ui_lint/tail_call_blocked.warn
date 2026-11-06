@@ -4,7 +4,7 @@ Warning [jet.TailCallBlocked]: This tail call can't reuse the frame because `r` 
  18 |     count(n - 1, acc + r.name.len())
     |     ^^^^^
  Why: `r` is a `Res` that is still open here, and its Close implementation runs when its scope ends, after this call returns; the call keeps its frame, so a chain of such calls grows the stack
- Fix: Close `r` before the call with `close(^r)` (bind any argument that reads it first), or open it in a smaller block that ends before the call
+ Fix: Close `r` before the call with `close(r)` (bind any argument that reads it first), or open it in a smaller block that ends before the call
 More: jet-lang.dev/e/L0533
 
 Warning [jet.RedundantFinalReturn]: An explicit `return` is used on the final value line
@@ -22,7 +22,7 @@ Warning [jet.TailCallBlocked]: This tail call can't reuse the frame because `d` 
  25 |     return deferred(n - 1)
     |            ^^^^^^^^
  Why: `d` is a `Res` that is still open here, and its `defer close` runs when its scope ends, after this call returns; the call keeps its frame, so a chain of such calls grows the stack
- Fix: Close `d` before the call with `close(^d)` (bind any argument that reads it first), or open it in a smaller block that ends before the call
+ Fix: Close `d` before the call with `close(d)` (bind any argument that reads it first), or open it in a smaller block that ends before the call
 More: jet-lang.dev/e/L0533
 
 Warning [jet.TailCallBlocked]: This tail call can't reuse the frame because `r` closes after it returns
@@ -31,5 +31,5 @@ Warning [jet.TailCallBlocked]: This tail call can't reuse the frame because `r` 
  49 |     kept(n - 1, Res{name: "k{n}"})
     |     ^^^^
  Why: `r` is a `Res` that is still open here, and its Close implementation runs when its scope ends, after this call returns; the call keeps its frame, so a chain of such calls grows the stack
- Fix: Close `r` before the call with `close(^r)` (bind any argument that reads it first), or open it in a smaller block that ends before the call
+ Fix: Close `r` before the call with `close(r)` (bind any argument that reads it first), or open it in a smaller block that ends before the call
 More: jet-lang.dev/e/L0533

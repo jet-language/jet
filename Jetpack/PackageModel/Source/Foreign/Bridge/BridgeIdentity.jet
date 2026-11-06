@@ -31,7 +31,7 @@ ForeignIdentityBuilder: struct {
     // Start an identity record with its schema as the first field.
     new: fn(schema: String) -> ForeignIdentityBuilder Never! {
         identity := ForeignIdentityBuilder{bytes: [U8]{}}
-        &identity.field("schema", schema.bytes())
+        identity.field("schema", schema.bytes())
         identity
     }
 
@@ -39,10 +39,10 @@ ForeignIdentityBuilder: struct {
     // length, name bytes, little-endian u64 length, value bytes.
     field: fn(&self, name: String, value: [U8]) Never! {
         name_bytes: name.bytes()
-        pkg_bridge_push_u64_le(&self.bytes, name_bytes.len())
-        loop byte in name_bytes -> &self.bytes.push(byte)
-        pkg_bridge_push_u64_le(&self.bytes, value.len())
-        loop byte in value -> &self.bytes.push(byte)
+        pkg_bridge_push_u64_le(self.bytes, name_bytes.len())
+        loop byte in name_bytes -> self.bytes.push(byte)
+        pkg_bridge_push_u64_le(self.bytes, value.len())
+        loop byte in value -> self.bytes.push(byte)
     }
 
     // Finish the record as a lowercase SHA-256 digest.
@@ -52,7 +52,7 @@ ForeignIdentityBuilder: struct {
 }
 
 pkg_bridge_push_u64_le: fn(bytes: &[U8], value: Int) Never! {
-    loop index in 0..<8 -> &bytes.push(U8{((value >> (index * 8))).bit_and(255)})
+    loop index in 0..<8 -> bytes.push(U8{((value >> (index * 8))).bit_and(255)})
 }
 
 // `[1]` / `[0]`: the one-byte boolean identity field.
@@ -94,12 +94,12 @@ ForeignBoundaryIdentity: struct {
     // Stable digest used by receipts and generated source comments.
     digest: fn(self) -> String Never! {
         identity := ForeignIdentityBuilder.new(FOREIGN_BOUNDARY_SCHEMA)
-        &identity.field("source", self.source.bytes())
-        &identity.field("overlay", self.overlay.bytes())
-        &identity.field("generator", self.generator.bytes())
-        &identity.field("implementation", self.implementation.bytes())
-        &identity.field("toolchain", self.toolchain.bytes())
-        &identity.field("target", self.target.bytes())
+        identity.field("source", self.source.bytes())
+        identity.field("overlay", self.overlay.bytes())
+        identity.field("generator", self.generator.bytes())
+        identity.field("implementation", self.implementation.bytes())
+        identity.field("toolchain", self.toolchain.bytes())
+        identity.field("target", self.target.bytes())
         identity.finish()
     }
 
@@ -148,12 +148,12 @@ ForeignArtifactCoverage: struct {
 
     digest: fn(self) -> String Never! {
         identity := ForeignIdentityBuilder.new(FOREIGN_BOUNDARY_SCHEMA)
-        &identity.field("loaded-artifact", self.loaded_artifact.bytes())
-        &identity.field("transitive-dependencies", pkg_bridge_stable_optional_strings(self.transitive_dependencies).bytes())
-        &identity.field("reachable-callbacks", pkg_bridge_stable_optional_strings(self.reachable_callbacks).bytes())
-        &identity.field("compiler-flags", pkg_bridge_stable_optional_strings(self.compiler_flags).bytes())
-        &identity.field("target", self.target.bytes())
-        &identity.field("generator", self.generator.bytes())
+        identity.field("loaded-artifact", self.loaded_artifact.bytes())
+        identity.field("transitive-dependencies", pkg_bridge_stable_optional_strings(self.transitive_dependencies).bytes())
+        identity.field("reachable-callbacks", pkg_bridge_stable_optional_strings(self.reachable_callbacks).bytes())
+        identity.field("compiler-flags", pkg_bridge_stable_optional_strings(self.compiler_flags).bytes())
+        identity.field("target", self.target.bytes())
+        identity.field("generator", self.generator.bytes())
         identity.finish()
     }
 
@@ -188,9 +188,9 @@ pkg_bridge_sorted_strings: fn(values: [String]) -> [String] Never! {
     out := [String]{}
     loop value in values {
         if value.trim() == "" || out.contains(value) -> next
-        &out.push(value)
+        out.push(value)
     }
-    &out.sort()
+    out.sort()
     out
 }
 

@@ -35,13 +35,13 @@ parser_authority_scope_stmt: fn(state: &JetParserState, marker: Marker, args: [C
     caps := [NamedSpan]{}
     loop argument in args {
         written: parser_authority_effect_path(argument.expr) ?? {
-            parser_marker_shape_error(&state, marker)
+            parser_marker_shape_error(state, marker)
             return None
         }
         name := written
         if name.starts_with("Effect.") -> name = name.slice(7, name.len())
         cap_span: if argument.label == None -> expr_span(argument.expr) else -> parser_authority_path_span(argument.expr)
-        &caps.push(NamedSpan{name: name, span: cap_span})
+        caps.push(NamedSpan{name: name, span: cap_span})
     }
     binding := NamedSpan?{None}
     caps_span := Span{start: marker.name_span.end, end: marker.span.end}

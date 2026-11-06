@@ -62,16 +62,16 @@ use {
 #Test("insert_completion_truncates_the_old_suffix_and_moves_scalar_cursor") {
     buf := repl_completion_test_text.scalars("use mo.rest + tail")
     cursor := 6
-    repl_insert_completion(&buf, &cursor, 4, "界é")
+    repl_insert_completion(buf, cursor, 4, "界é")
     assert_eq(buf.join(""), "use 界é")
     assert_eq(cursor, 6)
-    repl_insert_completion(&buf, &cursor, 4, "")
+    repl_insert_completion(buf, cursor, 4, "")
     assert_eq(buf.join(""), "use ")
     assert_eq(cursor, 4)
-    repl_insert_completion(&buf, &cursor, 4, "member")
+    repl_insert_completion(buf, cursor, 4, "member")
     assert_eq(buf.join(""), "use member")
     assert_eq(cursor, 10)
-    repl_insert_completion(&buf, &cursor, 0, "alpha")
+    repl_insert_completion(buf, cursor, 0, "alpha")
     assert_eq(buf.join(""), "alpha")
     assert_eq(cursor, 5)
 }

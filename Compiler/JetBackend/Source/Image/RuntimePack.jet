@@ -85,20 +85,20 @@ link_pack_out: fn(c: LinkContext, p: LinkPack, s: Int) -> Int Never! {
 link_pack_local: fn(p: &LinkPack, key: Int, name: String, info: Int, shndx: Int, value: Int, size: Int) -> Int Never! {
     if p.local_index.get(key) == .Val(found) -> return 1 + p.ord_row.len() + found
     j: p.l_name.len()
-    &p.local_index.add(key, j).drop("checked absent above")
-    &p.l_name.push(name)
-    &p.l_info.push(info)
-    &p.l_shndx.push(shndx)
-    &p.l_value.push(value)
-    &p.l_size.push(size)
+    p.local_index.add(key, j).drop("checked absent above")
+    p.l_name.push(name)
+    p.l_info.push(info)
+    p.l_shndx.push(shndx)
+    p.l_value.push(value)
+    p.l_size.push(size)
     1 + p.ord_row.len() + j
 }
 
 link_pack_global: fn(p: &LinkPack, f: Int) -> Int Never! {
     if p.global_index.get(f) == .Val(found) -> return -1 - found
     j: p.gl_id.len()
-    &p.global_index.add(f, j).drop("checked absent above")
-    &p.gl_id.push(f)
+    p.global_index.add(f, j).drop("checked absent above")
+    p.gl_id.push(f)
     return -1 - j
 }
 
@@ -109,19 +109,19 @@ link_pack_symbol: fn(c: &LinkContext, p: &LinkPack, obj: Int, k: Int) -> Int Nev
     if g >= 0 {
         f: link_final(c, g)
         kind: c.g_kind[f].copy()
-        if kind != LINK_G_FILE || p.exports.get(f) != None -> return link_pack_global(&p, f)
+        if kind != LINK_G_FILE || p.exports.get(f) != None -> return link_pack_global(p, f)
         s: c.g_section[f].copy()
         name: c.g_name[f].copy()
-        if s == LINK_ABS -> return link_pack_local(&p, -1 - f, name, 0, LINK_ABS, c.g_value[f], c.g_size[f])
+        if s == LINK_ABS -> return link_pack_local(p, -1 - f, name, 0, LINK_ABS, c.g_value[f], c.g_size[f])
         out: link_pack_out(c, p, s)
         if out < 0 {
             site: link_section_label(c, s)
-            link_error(&c, "runtime pack: `{name}` is defined in {site}, which was collected")
+            link_error(c, "runtime pack: `{name}` is defined in {site}, which was collected")
             return 0
         }
         value: c.g_value[f].copy()
         size: c.g_size[f].copy()
-        return link_pack_local(&p, -1 - f, name, link_pack_sym_type(c, s), out, value, size)
+        return link_pack_local(p, -1 - f, name, link_pack_sym_type(c, s), out, value, size)
     }
     s: link_sym_shndx(c, obj, k)
     b: c.obj_buffer[obj].copy()
@@ -130,21 +130,21 @@ link_pack_symbol: fn(c: &LinkContext, p: &LinkPack, obj: Int, k: Int) -> Int Nev
     value: link_u64(c.bufs, b, at + 8)
     size: link_u64(c.bufs, b, at + 16)
     file_symbol: c.obj_first_symbol[obj] + k
-    if s == LINK_ABS -> return link_pack_local(&p, file_symbol, link_cstr(c.bufs, b, c.obj_strtab[obj] + link_u32(c.bufs, b, at)), info.bit_and(15), LINK_ABS, value, size)
+    if s == LINK_ABS -> return link_pack_local(p, file_symbol, link_cstr(c.bufs, b, c.obj_strtab[obj] + link_u32(c.bufs, b, at)), info.bit_and(15), LINK_ABS, value, size)
     if s < 0 {
         object: c.obj_name[obj].copy()
-        link_error(&c, "runtime pack: {object} refers to local symbol {k}, whose section was discarded")
+        link_error(c, "runtime pack: {object} refers to local symbol {k}, whose section was discarded")
         return 0
     }
     out: link_pack_out(c, p, s)
     if out < 0 {
         object: c.obj_name[obj].copy()
         site: link_section_label(c, s)
-        link_error(&c, "runtime pack: {object} refers to {site}, which was collected")
+        link_error(c, "runtime pack: {object} refers to {site}, which was collected")
         return 0
     }
     if (info.bit_and(15)) == 3 && value == 0 -> return 1 + p.row_ord[link_live_row(c, s)]
-    link_pack_local(&p, file_symbol, link_cstr(c.bufs, b, c.obj_strtab[obj] + link_u32(c.bufs, b, at)), info.bit_and(15), out, value, size)
+    link_pack_local(p, file_symbol, link_cstr(c.bufs, b, c.obj_strtab[obj] + link_u32(c.bufs, b, at)), info.bit_and(15), out, value, size)
 }
 
 // Append the rewritten relocation rows `first..<end` of the RELA table at
@@ -153,12 +153,12 @@ link_pack_relocs: fn(c: &LinkContext, p: &LinkPack, obj: Int, table: Int, first:
     b: c.obj_buffer[obj].copy()
     loop k in first..<end {
         at: table + 24 * k
-        &p.r_off.push(link_u64(c.bufs, b, at) + shift)
-        &p.r_type.push(link_u32(c.bufs, b, at + 8))
+        p.r_off.push(link_u64(c.bufs, b, at) + shift)
+        p.r_type.push(link_u32(c.bufs, b, at + 8))
         symbol: link_u32(c.bufs, b, at + 12)
-        reference: link_pack_symbol(&c, &p, obj, symbol)
-        &p.r_sym.push(reference)
-        &p.r_add.push(link_s64(c.bufs, b, at + 16))
+        reference: link_pack_symbol(c, p, obj, symbol)
+        p.r_sym.push(reference)
+        p.r_add.push(link_s64(c.bufs, b, at + 16))
     }
 }
 
@@ -206,28 +206,28 @@ link_pack_nolibc: fn(c: LinkContext) -> [Int:Bool] Never! {
 // Symbol table entry; every real reserved-range section index crosses through
 // SHN_XINDEX. Absolute/common are negative linker sentinels, never indexes.
 link_pack_sym: fn(symtab: &[U8], xindex: &[U8], name: Int, info: Int, shndx: Int, value: Int, size: Int) Never! {
-    elf64_u32(&symtab, name)
-    &symtab.push(U8{info})
-    &symtab.push(U8{0})
+    elf64_u32(symtab, name)
+    symtab.push(U8{info})
+    symtab.push(U8{0})
     if shndx >= 0xff00 {
-        elf64_u16(&symtab, 0xffff)
-        elf64_u32(&xindex, shndx)
+        elf64_u16(symtab, 0xffff)
+        elf64_u32(xindex, shndx)
     } else {
         encoded: if shndx == LINK_ABS -> 0xfff1 else if shndx == LINK_COMMON -> 0xfff2 else -> shndx
-        elf64_u16(&symtab, encoded)
-        elf64_u32(&xindex, 0)
+        elf64_u16(symtab, encoded)
+        elf64_u32(xindex, 0)
     }
-    elf64_u64(&symtab, value)
-    elf64_u64(&symtab, size)
+    elf64_u64(symtab, value)
+    elf64_u64(symtab, size)
 }
 
 link_pack_rela: fn(bytes: &[U8], p: LinkPack, first: Int, end: Int, first_global: Int) Never! {
     loop k in first..<end {
         ref: p.r_sym[k]
         symbol: if ref >= 0 -> ref else -> first_global + (-1 - ref)
-        elf64_u64(&bytes, p.r_off[k])
-        elf64_u64(&bytes, (symbol << 32).bit_or(p.r_type[k]))
-        elf64_u64(&bytes, p.r_add[k])
+        elf64_u64(bytes, p.r_off[k])
+        elf64_u64(bytes, (symbol << 32).bit_or(p.r_type[k]))
+        elf64_u64(bytes, p.r_add[k])
     }
 }
 
@@ -244,21 +244,21 @@ LinkPackHeaders: struct {
 }
 
 link_pack_header: fn(h: &LinkPackHeaders, name: Int, kind: Int, flags: Int, offset: Int, size: Int, link: Int, info: Int, align: Int, entry_size: Int) Never! {
-    &h.name.push(name)
-    &h.kind.push(kind)
-    &h.flags.push(flags)
-    &h.offset.push(offset)
-    &h.size.push(size)
-    &h.link.push(link)
-    &h.info.push(info)
-    &h.align.push(align)
-    &h.entry_size.push(entry_size)
+    h.name.push(name)
+    h.kind.push(kind)
+    h.flags.push(flags)
+    h.offset.push(offset)
+    h.size.push(size)
+    h.link.push(link)
+    h.info.push(info)
+    h.align.push(align)
+    h.entry_size.push(entry_size)
 }
 
 link_pack_shstr: fn(table: &[U8], seen: &[String:Int], name: String) -> Int Never! {
     if seen.get(name) == .Val(at) -> return at
-    at: elf64_string(&table, name)
-    &seen.add(name, at).drop("checked absent above")
+    at: elf64_string(table, name)
+    seen.add(name, at).drop("checked absent above")
     at
 }
 
@@ -267,7 +267,7 @@ link_pack_shstr: fn(table: &[U8], seen: &[String:Int], name: String) -> Int Neve
 link_pack_write: fn(c: &LinkContext, exports: [Int], nolibc: [Int:Bool]) -> [U8] Never! {
     ord_row: link_rows_in_order(c)
     row_ord := [Int]{}
-    loop _ in ord_row -> &row_ord.push(0)
+    loop _ in ord_row -> row_ord.push(0)
     loop (ord, row) in ord_row -> row_ord[row] = ord
     // Header indexes: each kept section, followed by its RELA section when it
     // has relocations; `.eh_frame` and its RELA; the symbol tables.
@@ -277,13 +277,13 @@ link_pack_write: fn(c: &LinkContext, exports: [Int], nolibc: [Int:Bool]) -> [U8]
     loop row in ord_row {
         s: c.live_secs[row]
         obj: link_obj_of(c, s)
-        &sec_out.push(next_index)
+        sec_out.push(next_index)
         next_index += 1
         if link_rel_count(c, obj, s) > 0 {
-            &rela_out.push(next_index)
+            rela_out.push(next_index)
             next_index += 1
         } else {
-            &rela_out.push(-1)
+            rela_out.push(-1)
         }
     }
     p := LinkPack{
@@ -293,8 +293,8 @@ link_pack_write: fn(c: &LinkContext, exports: [Int], nolibc: [Int:Bool]) -> [U8]
         r_off: [Int]{}, r_type: [Int]{}, r_sym: [Int]{}, r_add: [Int]{},
     }
     loop f in exports {
-        &p.exports.add(f, true).drop("exports are unique")
-        _ := link_pack_global(&p, f)
+        p.exports.add(f, true).drop("exports are unique")
+        _ := link_pack_global(p, f)
     }
     // Relocation rows of every kept section, then of `.eh_frame`.
     rel_first := [Int]{}
@@ -302,17 +302,17 @@ link_pack_write: fn(c: &LinkContext, exports: [Int], nolibc: [Int:Bool]) -> [U8]
     loop row in order {
         s: c.live_secs[row].copy()
         obj: link_obj_of(c, s)
-        &rel_first.push(p.r_off.len())
+        rel_first.push(p.r_off.len())
         table: link_rel_table(c, obj, s)
         count: link_rel_count(c, obj, s)
-        link_pack_relocs(&c, &p, obj, table, 0, count, 0)
+        link_pack_relocs(c, p, obj, table, 0, count, 0)
     }
     eh_rel_first: p.r_off.len()
     // Unwind records: kept FDEs and the CIEs they use, in input order (a CIE
     // precedes its FDEs).
     cie_used := [Int:Bool]{}
     loop piece in 0..<c.ep_sec.len() {
-        if c.ep_cie[piece] >= 0 && c.ep_keep[piece] -> &cie_used.add(c.ep_cie[piece], true).drop("a set")
+        if c.ep_cie[piece] >= 0 && c.ep_keep[piece] -> cie_used.add(c.ep_cie[piece], true).drop("a set")
     }
     eh := [U8]{}
     eh_out := [Int:Int]{}
@@ -324,14 +324,14 @@ link_pack_write: fn(c: &LinkContext, exports: [Int], nolibc: [Int:Bool]) -> [U8]
         obj: c.ep_obj[piece].copy()
         start: link_sec_offset(c, obj, s) + c.ep_start[piece]
         out: eh.len()
-        &eh_out.add(piece, out).drop("pieces are visited once")
-        &eh.extend(c.bufs[c.obj_buffer[obj]][start..<start + c.ep_len[piece]])
+        eh_out.add(piece, out).drop("pieces are visited once")
+        eh.extend(c.bufs[c.obj_buffer[obj]][start..<start + c.ep_len[piece]])
         first: c.ep_first_reloc[piece].copy()
         end: first + c.ep_reloc_count[piece]
         shift: out - c.ep_start[piece]
         table: link_rel_table(c, obj, s)
-        link_pack_relocs(&c, &p, obj, table, first, end, shift)
-        if cie >= 0 -> link_put32(&eh, out + 4, out + 4 - (eh_out.get(cie) ?? 0))
+        link_pack_relocs(c, p, obj, table, first, end, shift)
+        if cie >= 0 -> link_put32(eh, out + 4, out + 4 - (eh_out.get(cie) ?? 0))
     }
     eh_rel_end: p.r_off.len()
     eh_index: if eh.len() > 0 -> next_index else -> -1
@@ -352,51 +352,51 @@ link_pack_write: fn(c: &LinkContext, exports: [Int], nolibc: [Int:Bool]) -> [U8]
     symtab := [U8]{}
     xindex := [U8]{}
     strtab := [U8]{U8{0}}
-    link_pack_sym(&symtab, &xindex, 0, 0, 0, 0, 0)
-    loop out in p.sec_out -> link_pack_sym(&symtab, &xindex, 0, 3, out, 0, 0)
-    loop (j, name) in p.l_name -> link_pack_sym(&symtab, &xindex, elf64_string(&strtab, name), p.l_info[j], p.l_shndx[j], p.l_value[j], p.l_size[j])
+    link_pack_sym(symtab, xindex, 0, 0, 0, 0, 0)
+    loop out in p.sec_out -> link_pack_sym(symtab, xindex, 0, 3, out, 0, 0)
+    loop (j, name) in p.l_name -> link_pack_sym(symtab, xindex, elf64_string(strtab, name), p.l_info[j], p.l_shndx[j], p.l_value[j], p.l_size[j])
     first_global: 1 + p.sec_out.len() + p.l_name.len()
     loop f in p.gl_id {
-        name_at: elf64_string(&strtab, c.g_name[f])
+        name_at: elf64_string(strtab, c.g_name[f])
         kind: c.g_kind[f]
         if kind == LINK_G_FILE {
             s: c.g_section[f]
             bind: if c.g_weak_def[f] -> 2 else -> 1
             if s == LINK_ABS {
-                link_pack_sym(&symtab, &xindex, name_at, bind << 4, LINK_ABS, c.g_value[f], c.g_size[f])
+                link_pack_sym(symtab, xindex, name_at, bind << 4, LINK_ABS, c.g_value[f], c.g_size[f])
             } else {
-                link_pack_sym(&symtab, &xindex, name_at, (bind << 4).bit_or(link_pack_sym_type(c, s)), link_pack_out(c, p, s), c.g_value[f], c.g_size[f])
+                link_pack_sym(symtab, xindex, name_at, (bind << 4).bit_or(link_pack_sym_type(c, s)), link_pack_out(c, p, s), c.g_value[f], c.g_size[f])
             }
         } else if kind == LINK_G_COMMON {
-            link_pack_sym(&symtab, &xindex, name_at, 0x11, LINK_COMMON, c.g_common_align[f], c.g_common_size[f])
+            link_pack_sym(symtab, xindex, name_at, 0x11, LINK_COMMON, c.g_common_align[f], c.g_common_size[f])
         } else {
             bind: if c.g_strong_ref[f] -> 1 else -> 2
-            link_pack_sym(&symtab, &xindex, name_at, bind << 4, 0, 0, 0)
+            link_pack_sym(symtab, xindex, name_at, bind << 4, 0, 0, 0)
         }
     }
     // The file: header, contents, section headers.
     bytes := [U8]{}
     ident: [Int]{0x7f, 0x45, 0x4c, 0x46, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0}
-    loop byte in ident -> &bytes.push(U8{byte})
-    elf64_u16(&bytes, 1)
-    elf64_u16(&bytes, 62)
-    elf64_u32(&bytes, 1)
-    elf64_u64(&bytes, 0)
-    elf64_u64(&bytes, 0)
+    loop byte in ident -> bytes.push(U8{byte})
+    elf64_u16(bytes, 1)
+    elf64_u16(bytes, 62)
+    elf64_u32(bytes, 1)
+    elf64_u64(bytes, 0)
+    elf64_u64(bytes, 0)
     shoff_at: bytes.len()
-    elf64_u64(&bytes, 0)
-    elf64_u32(&bytes, 0)
-    elf64_u16(&bytes, LINK_EHDR_SIZE)
-    elf64_u16(&bytes, 0)
-    elf64_u16(&bytes, 0)
-    elf64_u16(&bytes, 64)
-    elf64_u16(&bytes, if shnum >= 0xff00 -> 0 else -> shnum)
-    elf64_u16(&bytes, if shstrtab_index >= 0xff00 -> 0xffff else -> shstrtab_index)
+    elf64_u64(bytes, 0)
+    elf64_u32(bytes, 0)
+    elf64_u16(bytes, LINK_EHDR_SIZE)
+    elf64_u16(bytes, 0)
+    elf64_u16(bytes, 0)
+    elf64_u16(bytes, 64)
+    elf64_u16(bytes, if shnum >= 0xff00 -> 0 else -> shnum)
+    elf64_u16(bytes, if shstrtab_index >= 0xff00 -> 0xffff else -> shstrtab_index)
     h := LinkPackHeaders{name: [Int]{}, kind: [Int]{}, flags: [Int]{}, offset: [Int]{}, size: [Int]{}, link: [Int]{}, info: [Int]{}, align: [Int]{}, entry_size: [Int]{}}
     shstrtab := [U8]{U8{0}}
     shstr_seen := [String:Int]{}
-    link_pack_header(&h, 0, 0, 0, 0, if shnum >= 0xff00 -> shnum else -> 0, if shstrtab_index >= 0xff00 -> shstrtab_index else -> 0, 0, 0, 0)
-    rela_name: link_pack_shstr(&shstrtab, &shstr_seen, ".rela")
+    link_pack_header(h, 0, 0, 0, 0, if shnum >= 0xff00 -> shnum else -> 0, if shstrtab_index >= 0xff00 -> shstrtab_index else -> 0, 0, 0, 0)
+    rela_name: link_pack_shstr(shstrtab, shstr_seen, ".rela")
     // A kept conditional init/fini array (StaticLink.jet cond_roots) names
     // its guard section's output header, so a program link keeps it exactly
     // when that section is live there too.
@@ -408,60 +408,60 @@ link_pack_write: fn(c: &LinkContext, exports: [Int], nolibc: [Int:Bool]) -> [U8]
         kind: link_sec_type(c, obj, s)
         align: link_sec_align(c, obj, s)
         size: link_sec_size(c, obj, s)
-        elf64_pad(&bytes, align)
+        elf64_pad(bytes, align)
         offset: bytes.len()
         if kind != LINK_SHT_NOBITS {
             start: link_sec_offset(c, obj, s)
-            &bytes.extend(c.bufs[c.obj_buffer[obj]][start..<start + size])
+            bytes.extend(c.bufs[c.obj_buffer[obj]][start..<start + size])
         }
-        name_at: link_pack_shstr(&shstrtab, &shstr_seen, link_pack_section_name(c, c.live_class[row], s, nolibc.get(s) != None))
+        name_at: link_pack_shstr(shstrtab, shstr_seen, link_pack_section_name(c, c.live_class[row], s, nolibc.get(s) != None))
         flags: link_sec_flags(c, obj, s)
         info: if cond_guard.get(s) == .Val(guard) -> link_pack_out(c, p, guard) else -> 0
         // SHF_GROUP: the groups are settled.
-        link_pack_header(&h, name_at, kind, flags - (flags.bit_and(0x200)), offset, size, 0, info, align, 0)
+        link_pack_header(h, name_at, kind, flags - (flags.bit_and(0x200)), offset, size, 0, info, align, 0)
         if rela_out[ord] >= 0 {
-            elf64_pad(&bytes, 8)
+            elf64_pad(bytes, 8)
             rela_at: bytes.len()
             end: if ord + 1 < rel_first.len() -> rel_first[ord + 1] else -> eh_rel_first
-            link_pack_rela(&bytes, p, rel_first[ord], end, first_global)
-            link_pack_header(&h, rela_name, LINK_SHT_RELA, 0x40, rela_at, bytes.len() - rela_at, symtab_index, p.sec_out[ord], 8, 24)
+            link_pack_rela(bytes, p, rel_first[ord], end, first_global)
+            link_pack_header(h, rela_name, LINK_SHT_RELA, 0x40, rela_at, bytes.len() - rela_at, symtab_index, p.sec_out[ord], 8, 24)
         }
     }
     if eh_index >= 0 {
-        elf64_pad(&bytes, 8)
+        elf64_pad(bytes, 8)
         eh_at: bytes.len()
-        &bytes.extend(eh)
-        link_pack_header(&h, link_pack_shstr(&shstrtab, &shstr_seen, ".eh_frame"), LINK_SHT_PROGBITS, 2, eh_at, eh.len(), 0, 0, 8, 0)
+        bytes.extend(eh)
+        link_pack_header(h, link_pack_shstr(shstrtab, shstr_seen, ".eh_frame"), LINK_SHT_PROGBITS, 2, eh_at, eh.len(), 0, 0, 8, 0)
         if eh_rel_end > eh_rel_first {
-            elf64_pad(&bytes, 8)
+            elf64_pad(bytes, 8)
             rela_at: bytes.len()
-            link_pack_rela(&bytes, p, eh_rel_first, eh_rel_end, first_global)
-            link_pack_header(&h, rela_name, LINK_SHT_RELA, 0x40, rela_at, bytes.len() - rela_at, symtab_index, eh_index, 8, 24)
+            link_pack_rela(bytes, p, eh_rel_first, eh_rel_end, first_global)
+            link_pack_header(h, rela_name, LINK_SHT_RELA, 0x40, rela_at, bytes.len() - rela_at, symtab_index, eh_index, 8, 24)
         }
     }
-    link_pack_header(&h, link_pack_shstr(&shstrtab, &shstr_seen, ".note.GNU-stack"), LINK_SHT_PROGBITS, 0, bytes.len(), 0, 0, 0, 1, 0)
-    elf64_pad(&bytes, 8)
+    link_pack_header(h, link_pack_shstr(shstrtab, shstr_seen, ".note.GNU-stack"), LINK_SHT_PROGBITS, 0, bytes.len(), 0, 0, 0, 1, 0)
+    elf64_pad(bytes, 8)
     symtab_at: bytes.len()
-    &bytes.extend(symtab)
-    link_pack_header(&h, link_pack_shstr(&shstrtab, &shstr_seen, ".symtab"), LINK_SHT_SYMTAB, 0, symtab_at, symtab.len(), strtab_index, first_global, 8, 24)
+    bytes.extend(symtab)
+    link_pack_header(h, link_pack_shstr(shstrtab, shstr_seen, ".symtab"), LINK_SHT_SYMTAB, 0, symtab_at, symtab.len(), strtab_index, first_global, 8, 24)
     if extended {
-        elf64_pad(&bytes, 8)
+        elf64_pad(bytes, 8)
         xindex_at: bytes.len()
-        &bytes.extend(xindex)
-        link_pack_header(&h, link_pack_shstr(&shstrtab, &shstr_seen, ".symtab_shndx"), LINK_SHT_SYMTAB_SHNDX, 0, xindex_at, xindex.len(), symtab_index, 0, 4, 4)
+        bytes.extend(xindex)
+        link_pack_header(h, link_pack_shstr(shstrtab, shstr_seen, ".symtab_shndx"), LINK_SHT_SYMTAB_SHNDX, 0, xindex_at, xindex.len(), symtab_index, 0, 4, 4)
     }
     strtab_at: bytes.len()
-    &bytes.extend(strtab)
-    link_pack_header(&h, link_pack_shstr(&shstrtab, &shstr_seen, ".strtab"), 3, 0, strtab_at, strtab.len(), 0, 0, 1, 0)
-    shstrtab_name: link_pack_shstr(&shstrtab, &shstr_seen, ".shstrtab")
+    bytes.extend(strtab)
+    link_pack_header(h, link_pack_shstr(shstrtab, shstr_seen, ".strtab"), 3, 0, strtab_at, strtab.len(), 0, 0, 1, 0)
+    shstrtab_name: link_pack_shstr(shstrtab, shstr_seen, ".shstrtab")
     shstrtab_at: bytes.len()
-    &bytes.extend(shstrtab)
-    link_pack_header(&h, shstrtab_name, 3, 0, shstrtab_at, shstrtab.len(), 0, 0, 1, 0)
-    elf64_pad(&bytes, 8)
+    bytes.extend(shstrtab)
+    link_pack_header(h, shstrtab_name, 3, 0, shstrtab_at, shstrtab.len(), 0, 0, 1, 0)
+    elf64_pad(bytes, 8)
     shoff: bytes.len()
     loop shift in 0..<8 -> bytes[shoff_at + shift] = U8{(shoff >> (8 * shift)).bit_and(255)}
     loop k in 0..<h.name.len() {
-        elf64_section_header(&bytes, h.name[k], h.kind[k], h.flags[k], h.offset[k], h.size[k], h.link[k], h.info[k], h.align[k], h.entry_size[k])
+        elf64_section_header(bytes, h.name[k], h.kind[k], h.flags[k], h.offset[k], h.size[k], h.link[k], h.info[k], h.align[k], h.entry_size[k])
     }
     bytes
 }
@@ -469,10 +469,10 @@ link_pack_write: fn(c: &LinkContext, exports: [Int], nolibc: [Int:Bool]) -> [U8]
 // Link the Jet runtime objects with their C platform dependencies.
 // Audited Jet exports are defined public globals in standalone objects;
 // private functions and imports are not exports. Archives only satisfy roots.
-x64_link_runtime_pack: fn(names: [String], bufs: ^[[U8]], extra_roots: [String]) -> X64ExecutableResult Never! {
-    c := link_context(^bufs, LINK_BASE)
+x64_link_runtime_pack: fn(names: [String], bufs: &&[[U8]], extra_roots: [String]) -> X64ExecutableResult Never! {
+    c := link_context(bufs, LINK_BASE)
     c.fault_report = LinkFaultReport.Import
-    link_load_inputs(&c, names)
+    link_load_inputs(c, names)
     if c.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: c.errors}
     if c.obj_name.len() == 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"runtime pack: no Jet runtime object among the inputs"}}
     root_names := [String]{}
@@ -489,23 +489,23 @@ x64_link_runtime_pack: fn(names: [String], bufs: ^[[U8]], extra_roots: [String])
             if g < 0 -> next
             name: c.g_name[g]
             if link_pack_c_abi(name) && seen.get(name) == None {
-                &seen.add(name, true).drop("checked absent above")
-                &root_names.push(name)
+                seen.add(name, true).drop("checked absent above")
+                root_names.push(name)
             }
         }
     }
     loop name in extra_roots {
         if seen.get(name) == None {
-            &seen.add(name, true).drop("checked absent above")
-            &root_names.push(name)
+            seen.add(name, true).drop("checked absent above")
+            root_names.push(name)
         }
     }
     loop name in root_names {
-        g: link_intern(&c, name)
-        link_reference(&c, g, false)
+        g: link_intern(c, name)
+        link_reference(c, g, false)
     }
-    entry_g: link_resolve_program(&c)
-    entry_section: link_entry_section(&c, entry_g)
+    entry_g: link_resolve_program(c)
+    entry_section: link_entry_section(c, entry_g)
     if entry_section < 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: c.errors}
     // Exported too: the entry, the startup marker (StaticLink.jet
     // link_has_startup), `__tls_get_addr`, which a linker checks a TLS
@@ -514,33 +514,33 @@ x64_link_runtime_pack: fn(names: [String], bufs: ^[[U8]], extra_roots: [String])
     // which a program bound to the runtime image (Image/MemoryLink.jet)
     // registers its own unwind tables.
     optional: [String]{"__jet_link_main", "__tls_get_addr", "__register_frame_info"}
-    &root_names.push("_start")
-    loop name in optional -> &root_names.push(name)
+    root_names.push("_start")
+    loop name in optional -> root_names.push(name)
     exports := [Int]{}
     sections := [Int]{entry_section}
     loop name in root_names {
         g: c.g_index.get(name) ?? next
         f: link_final(c, g)
         if c.g_kind[f] != LINK_G_FILE {
-            if !optional.contains(name) -> link_error(&c, "runtime pack: the input objects do not define the root `{name}`")
+            if !optional.contains(name) -> link_error(c, "runtime pack: the input objects do not define the root `{name}`")
             next
         }
-        if c.g_section[f] >= 0 -> &sections.push(c.g_section[f])
-        &exports.push(f)
+        if c.g_section[f] >= 0 -> sections.push(c.g_section[f])
+        exports.push(f)
     }
     // The program provides `main`; the program link writes the fault report
     // (StaticLink.jet link_fault_report) and defines the rest.
     imports := [String:Bool]{}
-    &imports.add("main", true).drop("a fresh map")
-    &imports.add(LINK_FAULT_REPORT, true).drop("a fresh name")
-    loop name in link_linker_names() -> &imports.add(name, true).drop("names are unique")
-    link_collect(&c, sections, imports)
+    imports.add("main", true).drop("a fresh map")
+    imports.add(LINK_FAULT_REPORT, true).drop("a fresh name")
+    loop name in link_linker_names() -> imports.add(name, true).drop("names are unique")
+    link_collect(c, sections, imports)
     loop name in c.g_name {
-        if link_pack_rust_symbol(name) -> link_error(&c, "runtime pack: Rust symbol `{name}` is not an admissible runtime dependency")
+        if link_pack_rust_symbol(name) -> link_error(c, "runtime pack: Rust symbol `{name}` is not an admissible runtime dependency")
     }
     if c.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: c.errors}
     nolibc: link_pack_nolibc(c)
-    bytes: link_pack_write(&c, exports, nolibc)
+    bytes: link_pack_write(c, exports, nolibc)
     if c.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: c.errors}
     X64ExecutableResult{bytes: bytes, errors: [String]{}}
 }
@@ -582,30 +582,30 @@ link_image_failure: fn(c: LinkContext) -> X64ExecutableResult Never! {
 // every program bound to the image. A `--checked-alloc` program imports
 // jet_rt_alloc_check_link, which the image then lacks, so it links the pack
 // in full (JetCli Host.jet jet_cli_native_executable).
-x64_link_runtime_image: fn(name: String, pack: ^[U8]) -> X64ExecutableResult Never! {
-    c := link_context(^[[U8]]{^pack}, LINK_RUN_BASE)
-    link_load_inputs(&c, [String]{name})
+x64_link_runtime_image: fn(name: String, pack: &&[U8]) -> X64ExecutableResult Never! {
+    c := link_context([[U8]]{pack.move()}, LINK_RUN_BASE)
+    link_load_inputs(c, [String]{name})
     if c.errors.len() > 0 -> return link_image_failure(c)
-    entry_g: link_resolve_program(&c)
-    entry_section: link_entry_section(&c, entry_g)
+    entry_g: link_resolve_program(c)
+    entry_section: link_entry_section(c, entry_g)
     if entry_section < 0 -> return link_image_failure(c)
     // Every other definition the pack exports stays: any program may use it.
     sections := [Int]{entry_section}
     loop g in 0..<c.g_name.len() {
-        if c.g_kind[g] == LINK_G_FILE && c.g_alias[g] < 0 && c.g_section[g] >= 0 && !CHECKED_ALLOC_RUNTIME_EXPORTS.contains(c.g_name[g]) -> &sections.push(c.g_section[g])
+        if c.g_kind[g] == LINK_G_FILE && c.g_alias[g] < 0 && c.g_section[g] >= 0 && !CHECKED_ALLOC_RUNTIME_EXPORTS.contains(c.g_name[g]) -> sections.push(c.g_section[g])
     }
     imports := [String:Bool]{}
-    &imports.add("main", true).drop("a fresh map")
-    loop linker_name in link_linker_names() -> &imports.add(linker_name, true).drop("names are unique")
-    link_collect(&c, sections, imports)
+    imports.add("main", true).drop("a fresh map")
+    loop linker_name in link_linker_names() -> imports.add(linker_name, true).drop("names are unique")
+    link_collect(c, sections, imports)
     if c.errors.len() > 0 -> return link_image_failure(c)
-    layout: link_layout(&c, false, false)
+    layout: link_layout(c, false, false)
     startup: link_has_startup(c)
-    link_define_names(&c, layout, startup)
+    link_define_names(c, layout, startup)
     program_base: link_align(layout.mem_end, LINK_PAGE)
     main_g: c.g_index.get("main") ?? -1
     if main_g < 0 || c.g_kind[link_final(c, main_g)] != LINK_G_NONE {
-        link_error(&c, "{name}: the runtime pack's startup does not import `main`")
+        link_error(c, "{name}: the runtime pack's startup does not import `main`")
         return link_image_failure(c)
     }
     main_final: link_final(c, main_g)
@@ -626,31 +626,31 @@ x64_link_runtime_image: fn(name: String, pack: ^[U8]) -> X64ExecutableResult Nev
             kind: link_u32(c.bufs, b, at + 8)
             off: link_u64(c.bufs, b, at)
             if kind != LINK_R_PC32 && kind != LINK_R_PLT32 && kind != LINK_R_64 {
-                link_reloc_error(&c, s, off, "runtime image: relocation type {kind} against `main` cannot be bound")
+                link_reloc_error(c, s, off, "runtime image: relocation type {kind} against `main` cannot be bound")
                 next
             }
-            elf64_u64(&sites, c.live_addr[row] + off)
-            elf64_u64(&sites, kind)
-            elf64_u64(&sites, link_s64(c.bufs, b, at + 16))
+            elf64_u64(sites, c.live_addr[row] + off)
+            elf64_u64(sites, kind)
+            elf64_u64(sites, link_s64(c.bufs, b, at + 16))
             count += 1
         }
     }
-    if count == 0 -> link_error(&c, "{name}: nothing in the runtime pack calls `main`")
+    if count == 0 -> link_error(c, "{name}: nothing in the runtime pack calls `main`")
     if c.errors.len() > 0 -> return link_image_failure(c)
     entry: link_global_addr(c, entry_g)
-    debug: link_debug_sections(&c, true)
+    debug: link_debug_sections(c, true)
     in_place := link_no_pieces()
-    image := link_write(&c, layout, entry, &in_place)
-    link_write_sections(&c, &image, layout, debug, &in_place, false)
+    image := link_write(c, layout, entry, in_place)
+    link_write_sections(c, image, layout, debug, in_place, false)
     if c.errors.len() > 0 -> return link_image_failure(c)
     bind := [U8]{}
-    elf64_u64(&bind, LINK_IMAGE_BIND_MAGIC)
-    elf64_u64(&bind, program_base)
-    elf64_u64(&bind, count)
-    &bind.extend(sites)
-    link_image_add_section(&image, LINK_IMAGE_BIND_SECTION, bind)
+    elf64_u64(bind, LINK_IMAGE_BIND_MAGIC)
+    elf64_u64(bind, program_base)
+    elf64_u64(bind, count)
+    bind.extend(sites)
+    link_image_add_section(image, LINK_IMAGE_BIND_SECTION, bind)
     exports: link_image_export_index(image)
-    link_image_add_section(&image, LINK_IMAGE_EXPORTS_SECTION, exports)
+    link_image_add_section(image, LINK_IMAGE_EXPORTS_SECTION, exports)
     X64ExecutableResult{bytes: image, errors: [String]{}}
 }
 
@@ -680,7 +680,7 @@ link_image_add_section_at: fn(elf: &[U8], tail: &[U8], origin: Int, name: String
     names.extend(tail[names_at..<names_at + names_size])
     headers := [U8]{}
     headers.extend(tail[shoff..<shoff + 64 * shnum])
-    name_at: elf64_string(&names, name)
+    name_at: elf64_string(names, name)
     if shoff + 64 * shnum == tail.len() && names_at + names_size <= shoff {
         loop tail.len() > names_at { _: tail.pop() }
     }
@@ -743,12 +743,12 @@ link_image_export_index: fn(image: [U8]) -> [U8] Never! {
     }
     defined := [Int]{}
     loop k in first_global..<symtab_count {
-        if link_image_u16(image, symtab_at + 24 * k + 6) != 0 -> &defined.push(k)
+        if link_image_u16(image, symtab_at + 24 * k + 6) != 0 -> defined.push(k)
     }
     slots := 1
     loop slots < 2 * defined.len() -> slots = slots * 2
     table := [Int]{}
-    loop _ in 0..<slots -> &table.push(0)
+    loop _ in 0..<slots -> table.push(0)
     mask: slots - 1
     loop k in defined {
         at := strtab_at + link_image_u32(image, symtab_at + 24 * k)
@@ -759,8 +759,8 @@ link_image_export_index: fn(image: [U8]) -> [U8] Never! {
         table[slot] = k
     }
     out := [U8]{}
-    elf64_u64(&out, LINK_IMAGE_EXPORTS_MAGIC)
-    elf64_u64(&out, slots)
-    loop k in table -> elf64_u32(&out, k)
+    elf64_u64(out, LINK_IMAGE_EXPORTS_MAGIC)
+    elf64_u64(out, slots)
+    loop k in table -> elf64_u32(out, k)
     out
 }

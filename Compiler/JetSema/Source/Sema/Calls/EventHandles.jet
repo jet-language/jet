@@ -112,10 +112,10 @@ sema_event_parameter: fn(name: String, ty: Type, convention: AccessConvention) -
 // moved payload of an emit or a run, and a Hook run's moved fallback.
 sema_event_value_parameters: fn(owner: String, method: String, args: [Type]) -> [SemaCallParam] Never! {
     params := [SemaCallParam]{}
-    if method == "on" || method == "once" || method == "on_priority" -> &params.push(sema_event_parameter("scope", Type.Named{name: "EventScope"}, AccessConvention.Read))
-    if method == "on_priority" -> &params.push(sema_event_parameter("priority", Type.Int, AccessConvention.Read))
-    if method == "emit" || method == "emit_async" || method == "run" -> &params.push(sema_event_parameter("payload", args[0].copy(), AccessConvention.Move))
-    if owner == "Hook" && method == "run" -> &params.push(sema_event_parameter("fallback", args[1].copy(), AccessConvention.Move))
+    if method == "on" || method == "once" || method == "on_priority" -> params.push(sema_event_parameter("scope", Type.Named{name: "EventScope"}, AccessConvention.Read))
+    if method == "on_priority" -> params.push(sema_event_parameter("priority", Type.Int, AccessConvention.Read))
+    if method == "emit" || method == "emit_async" || method == "run" -> params.push(sema_event_parameter("payload", args[0].copy(), AccessConvention.Move))
+    if owner == "Hook" && method == "run" -> params.push(sema_event_parameter("fallback", args[1].copy(), AccessConvention.Move))
     params
 }
 
@@ -135,32 +135,32 @@ sema_call_try_event_handle_method: fn(receiver: Expr, receiver_value: TExpr, met
     owner: sema_event_handle_owner(receiver_type, environment, program) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     type_args := [Type]{}
     if receiver_type == .Apply(_, receiver_args) {
-        loop arg in receiver_args -> &type_args.push(sema_call_resolved_type(arg, environment, program))
+        loop arg in receiver_args -> type_args.push(sema_call_resolved_type(arg, environment, program))
     }
     shape: sema_event_method_shape(owner, method, type_args) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     callee: "{owner}.{method}"
     if args.len() != shape.arity {
-        _ := sema_reactive_infer_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-        &diagnostics.push(sema_call_arity_diagnostic(callee, shape.arity, args.len(), false, span))
+        _ := sema_reactive_infer_args(args, environment, program, scopes, state, tail_store, context, diagnostics)
+        diagnostics.push(sema_call_arity_diagnostic(callee, shape.arity, args.len(), false, span))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     registers: method == "on" || method == "once" || method == "on_priority"
     params: sema_event_value_parameters(owner, method, type_args)
     checked_args := [CallArg]{}
-    loop index in 0..<params.len() -> &checked_args.push(args[index])
-    binding: sema_call_bind_args(callee, params, &checked_args, span, &diagnostics) ?? {
-        _ := sema_reactive_infer_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    loop index in 0..<params.len() -> checked_args.push(args[index])
+    binding: sema_call_bind_args(callee, params, checked_args, span, diagnostics) ?? {
+        _ := sema_reactive_infer_args(args, environment, program, scopes, state, tail_store, context, diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    typed: sema_call_typecheck_bound_arguments(callee, params, None, false, binding, &checked_args, environment, program, &scopes, &state, &tail_store, &context, span, &diagnostics, true) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    ownership := sema_ownership_check_method_call(&state, callee, receiver, AccessConvention.Read, params, &checked_args, scopes, span, &diagnostics)
+    typed: sema_call_typecheck_bound_arguments(callee, params, None, false, binding, checked_args, environment, program, scopes, state, tail_store, context, span, diagnostics, true) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    ownership := sema_ownership_check_method_call(state, callee, receiver, AccessConvention.Read, params, checked_args, scopes, span, diagnostics)
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
     values := typed.values
     if registers {
-        handler: sema_expression_lambda_host_callback_stored(args[args.len() - 1].expr, Val(sema_event_handler_type(owner, type_args)), false, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-        &values.push(handler)
+        handler: sema_expression_lambda_host_callback_stored(args[args.len() - 1].expr, Val(sema_event_handler_type(owner, type_args)), false, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+        values.push(handler)
     }
     value := sema_tree_node(shape.result, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.EventMethod{method: method}, args: values}, span)
-    checked: sema_expression_call_expected(value, expected, environment, program, context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    checked: sema_expression_call_expected(value, expected, environment, program, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     SemaMethodSpecialCheck{handled: true, value: Val(checked)}
 }

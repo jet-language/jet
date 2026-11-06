@@ -63,7 +63,7 @@ store_concurrent_fresh_original: fn() {
         if files.exists(root) -> files.remove_all(root) ?? panic("reset fresh store")
         children := [ProcessChild]{}
         loop _ in 0..<8 {
-            &children.push(concurrent_process.cmd([String]{jet, "cache", "status"})
+            children.push(concurrent_process.cmd([String]{jet, "cache", "status"})
                 .env("JET_STORE_DIR", root).env("JET_STORE_CAP_BYTES", "1048576").env("JET_STORE_RESERVE_BYTES", "0").env("NO_COLOR", "1")
                 .stdout(.Capture).stderr(.Capture).spawn() ?? panic("spawn fresh store opener"))
         }

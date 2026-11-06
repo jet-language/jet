@@ -45,8 +45,8 @@ lr_status: fn(args: [String]) -> Int {
     bufs := [[U8]]{}
     read_started: time.instant()
     loop index in first + 1..<args.len() {
-        &names.push(args[index])
-        &bufs.push(files.read_bytes(args[index]) ?? {
+        names.push(args[index])
+        bufs.push(files.read_bytes(args[index]) ?? {
             print("cannot read {args[index]}")
             return 66
         })
@@ -58,16 +58,16 @@ lr_status: fn(args: [String]) -> Int {
     extra_roots: [String]{"memcpy", "memmove", "memset", "memcmp"}
     result := X64ExecutableResult{bytes: [U8]{}, errors: [String]{}}
     if mode == "--pack" {
-        result = x64_link_runtime_pack(names, ^bufs, extra_roots)
+        result = x64_link_runtime_pack(names, bufs, extra_roots)
     } else if mode == "--image" {
-        pack: &bufs.pop() ?? return 66
-        result = x64_link_runtime_image(names[0], ^pack)
+        pack: bufs.pop() ?? return 66
+        result = x64_link_runtime_image(names[0], pack)
     } else if mode == "--bind" {
-        program: &bufs.pop() ?? return 66
-        image: &bufs.pop() ?? return 66
-        result = x64_link_with_runtime_image(names[1], ^program, ^image)
+        program: bufs.pop() ?? return 66
+        image: bufs.pop() ?? return 66
+        result = x64_link_with_runtime_image(names[1], program, image)
     } else {
-        result = x64_link_executable(names, ^bufs, LINK_BASE, compiler_threads_single(), true)
+        result = x64_link_executable(names, bufs, LINK_BASE, compiler_threads_single(), true)
     }
     link_ms: started.elapsed_millis()
     if result.errors.len() > 0 {
@@ -100,23 +100,23 @@ lr_image_compare: fn(pack_path: String, image_path: String) -> Int {
         return 66
     }
     exports := [String]{}
-    p := link_context(^[[U8]]{pack.copy()}, LINK_RUN_BASE)
-    link_load_inputs(&p, [String]{pack_path})
+    p := link_context([[U8]]{pack.copy()}, LINK_RUN_BASE)
+    link_load_inputs(p, [String]{pack_path})
     loop g in 0..<p.g_name.len() {
-        if p.g_kind[g] == LINK_G_FILE && p.g_alias[g] < 0 && p.g_section[g] >= 0 -> &exports.push(p.g_name[g])
+        if p.g_kind[g] == LINK_G_FILE && p.g_alias[g] < 0 && p.g_section[g] >= 0 -> exports.push(p.g_name[g])
     }
     stub := link_synth()
-    link_synth_function(&stub, "main")
-    link_synth_code(&stub, [Int]{0xc3})
+    link_synth_function(stub, "main")
+    link_synth_code(stub, [Int]{0xc3})
     request: X64ResidentLinkRequest?{Val(X64ResidentLinkRequest{runtime_input: 0, callable_exports: exports})}
-    linked: link_executable_image([String]{pack_path, "stub.o"}, ^[[U8]]{pack.copy(), link_synth_object(stub)}, LINK_RUN_BASE, ^request, compiler_threads_single(), true, false)
+    linked: link_executable_image([String]{pack_path, "stub.o"}, [[U8]]{pack.copy(), link_synth_object(stub)}, LINK_RUN_BASE, request, compiler_threads_single(), true, false)
     reference: linked.image.bytes
     if linked.image.errors.len() > 0 {
         loop error in linked.image.errors -> print("reference link: {error}")
         return 1
     }
-    c := link_context(^[[U8]]{[U8]{}, image.copy()}, LINK_RUN_BASE)
-    view: link_image_view(&c, 1, 0, 0)
+    c := link_context([[U8]]{[U8]{}, image.copy()}, LINK_RUN_BASE)
+    view: link_image_view(c, 1, 0, 0)
     if c.errors.len() > 0 {
         loop error in c.errors -> print("image: {error}")
         return 1

@@ -18,7 +18,7 @@ generic_partial: fn<U>(value: U) -> Bool {
         first: value,
         second: files.temp_file("generic-partial") ?? panic("generic")
     }
-    close(^pair.second)
+    close(pair.second)
     true
 }
 
@@ -31,7 +31,7 @@ exercise: fn(move_first: Bool) -> String {
     first: pair.left.path
     sibling: pair.right.path
     if move_first {
-        close(^pair.left)
+        close(pair.left)
         print(!files.exists(first))
         print(files.exists(sibling))
         pair.left = files.temp_file("partial-reinitialized") ?? panic("reinitialize")
@@ -42,7 +42,7 @@ exercise: fn(move_first: Bool) -> String {
     snapshot: paths(pair)
     print(snapshot[0] == pair.left.path)
     print(snapshot[1] == sibling)
-    close(^pair.left)
+    close(pair.left)
     print(!files.exists(snapshot[0]))
     print(files.exists(sibling))
     pair = Pair{
@@ -51,7 +51,7 @@ exercise: fn(move_first: Bool) -> String {
     }
     print(!files.exists(sibling))
     survivor: pair.right.path
-    close(^pair.left)
+    close(pair.left)
     print(files.exists(survivor))
     survivor
 }
@@ -67,12 +67,12 @@ nested: fn() -> [String] {
     old_left: outer.pair.left.path
     right: outer.pair.right.path
     sibling: outer.sibling.path
-    close(^outer.pair.left)
+    close(outer.pair.left)
     print(!files.exists(old_left))
     print(files.exists(right))
     outer.pair.left = files.temp_file("nested-reinitialized") ?? panic("reinitialize")
     snapshot: paths(outer.pair)
-    close(^outer.pair.right)
+    close(outer.pair.right)
     print(!files.exists(right))
     print(files.exists(snapshot[0]))
     print(files.exists(sibling))

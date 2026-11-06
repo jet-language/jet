@@ -28,7 +28,7 @@ ENVMODEL_DEFAULT_DEBOUNCE_MS: 250
 
 envmodel_presets_from_value: fn(value: CtValue) -> [PresetSpec] EnvironmentFactError! {
     presets := [PresetSpec]{}
-    loop entry in envmodel_preset_entries(value) -> &presets.push(envmodel_preset_from_value(entry.name, entry.value))
+    loop entry in envmodel_preset_entries(value) -> presets.push(envmodel_preset_from_value(entry.name, entry.value))
     Ok(presets)
 }
 
@@ -44,7 +44,7 @@ envmodel_preset_entries: fn(value: CtValue) -> [EnvNamedValue] EnvironmentFactEr
         .Map(map_entries) -> {
             loop entry in map_entries {
                 if entry.key == {
-                    .Str(name) && name.trim() != "" -> { &entries.push(EnvNamedValue{name: name, value: entry.value}) }
+                    .Str(name) && name.trim() != "" -> { entries.push(EnvNamedValue{name: name, value: entry.value}) }
                     else -> { return Err(EnvironmentFactError.new("preset maps need non-empty string names")) }
                 }
             }
@@ -52,7 +52,7 @@ envmodel_preset_entries: fn(value: CtValue) -> [EnvNamedValue] EnvironmentFactEr
         .Struct(_, fields) -> {
             loop field in fields {
                 if field.name.trim() == "" -> return Err(EnvironmentFactError.new("preset records need non-empty names"))
-                &entries.push(EnvNamedValue{name: field.name, value: field.value})
+                entries.push(EnvNamedValue{name: field.name, value: field.value})
             }
         }
         .List(values) -> {
@@ -60,7 +60,7 @@ envmodel_preset_entries: fn(value: CtValue) -> [EnvNamedValue] EnvironmentFactEr
                 fields: envmodel_checked_struct_fields_named(item, "preset")
                 name: envmodel_optional_string_field(fields, "name") ?? ""
                 if name.trim() == "" -> return Err(EnvironmentFactError.new("preset list entries need a non-empty `name`"))
-                &entries.push(EnvNamedValue{name: name, value: item})
+                entries.push(EnvNamedValue{name: name, value: item})
             }
         }
         else -> { return Err(EnvironmentFactError.new("presets must be a map, record, or list of named preset records")) }
@@ -104,20 +104,20 @@ envmodel_languages_from_value: fn(value: CtValue) -> [LanguageSpec] EnvironmentF
                     .Str(text) -> text
                     else -> { return Err(EnvironmentFactError.new("language maps need string language names")) }
                 }
-                &selections.push(envmodel_language_record(Val(name), entry.value))
+                selections.push(envmodel_language_record(Val(name), entry.value))
             }
         }
         .List(values) -> {
             loop item in values {
                 if item == {
-                    .Str(name) -> { &selections.push(envmodel_language_name(name)) }
-                    .Enum(_, variant, args) && args.len() == 0 -> { &selections.push(envmodel_language_name(envmodel_last_segment(variant))) }
-                    .Struct(_, _) -> { &selections.push(envmodel_language_record(None, item)) }
+                    .Str(name) -> { selections.push(envmodel_language_name(name)) }
+                    .Enum(_, variant, args) && args.len() == 0 -> { selections.push(envmodel_language_name(envmodel_last_segment(variant))) }
+                    .Struct(_, _) -> { selections.push(envmodel_language_record(None, item)) }
                     else -> { return Err(EnvironmentFactError.new("language lists need names or typed Lang records")) }
                 }
             }
         }
-        .Struct(type_name, _) && envmodel_last_segment(type_name) == "Lang" -> { &selections.push(envmodel_language_record(None, value)) }
+        .Struct(type_name, _) && envmodel_last_segment(type_name) == "Lang" -> { selections.push(envmodel_language_record(None, value)) }
         else -> { return Err(EnvironmentFactError.new("languages must be a map of Lang records or a list of names/ Lang records")) }
     }
     unique := [LanguageSpec]{}
@@ -130,7 +130,7 @@ envmodel_languages_from_value: fn(value: CtValue) -> [LanguageSpec] EnvironmentF
                 break
             }
         }
-        if !duplicate -> &unique.push(selection)
+        if !duplicate -> unique.push(selection)
     }
     Ok(unique)
 }
@@ -293,7 +293,7 @@ envmodel_dotenv_from_value: fn(value: CtValue) -> [DotenvSpec] EnvironmentFactEr
             }
         }
         envmodel_validate_dotenv_spec(spec)
-        &specs.push(spec)
+        specs.push(spec)
     }
     seen := [String: DotenvSpec]{}
     loop spec in specs {
@@ -305,7 +305,7 @@ envmodel_dotenv_from_value: fn(value: CtValue) -> [DotenvSpec] EnvironmentFactEr
         }
     }
     ordered := [DotenvSpec]{}
-    loop file in envmodel_sorted_keys(seen) -> &ordered.push(seen[file])
+    loop file in envmodel_sorted_keys(seen) -> ordered.push(seen[file])
     Ok(ordered)
 }
 
@@ -314,8 +314,8 @@ envmodel_validate_dotenv_spec: fn(spec: DotenvSpec) EnvironmentFactError! {
         return Err(EnvironmentFactError.new("dotenv file `{spec.file}` must stay inside the project"))
     }
     names := [String]{}
-    &names.extend(spec.allow)
-    &names.extend(spec.secrets)
+    names.extend(spec.allow)
+    names.extend(spec.secrets)
     loop name in names {
         if !envmodel_valid_env_name(name) -> return Err(EnvironmentFactError.new("dotenv variable `{name}` is not a valid environment name"))
     }
@@ -350,7 +350,7 @@ envmodel_dotenv_names: fn(value: CtValue) -> [String] EnvironmentFactError! {
         else -> { return Err(EnvironmentFactError.new("Dotenv `allow` and `secrets` must be lists of strings")) }
     }
     names := [String]{}
-    loop item in values -> &names.push(envmodel_string_value(item) ?? return Err(EnvironmentFactError.new("Dotenv variable names must be strings")))
+    loop item in values -> names.push(envmodel_string_value(item) ?? return Err(EnvironmentFactError.new("Dotenv variable names must be strings")))
     Ok(names)
 }
 
@@ -380,7 +380,7 @@ envmodel_hooks_from_value: fn(prefix: String, value: CtValue) -> [HookSpec] Envi
             if !envmodel_valid_task_name(job) {
                 return Err(EnvironmentFactError.new("{prefix}[{index}] must name a declared #Job; arbitrary commands need a trusted hook record"))
             }
-            &hooks.push(HookSpec{name: "{prefix}.{index}", action: HookAction.Task(job)})
+            hooks.push(HookSpec{name: "{prefix}.{index}", action: HookAction.Task(job)})
             next
         }
         fields: envmodel_checked_unique_fields_named(item, "{prefix}[{index}]", [String]{"name", "command", "cwd", "trusted"})
@@ -405,7 +405,7 @@ envmodel_hooks_from_value: fn(prefix: String, value: CtValue) -> [HookSpec] Envi
                 else -> { return Err(EnvironmentFactError.new("{prefix}[{index}].trusted must be Bool")) }
             }
         }
-        &hooks.push(HookSpec{name: name, action: HookAction.Command(command), cwd: cwd, trusted: trusted})
+        hooks.push(HookSpec{name: name, action: HookAction.Command(command), cwd: cwd, trusted: trusted})
     }
     Ok(hooks)
 }
@@ -538,7 +538,7 @@ envmodel_list_strings_named: fn(value: CtValue, scope: String) -> [String] Envir
         else -> { return Err(EnvironmentFactError.new("{scope} must be a list of strings")) }
     }
     strings := [String]{}
-    loop item in values -> &strings.push(envmodel_string_value(item) ?? return Err(EnvironmentFactError.new("{scope} must contain only strings")))
+    loop item in values -> strings.push(envmodel_string_value(item) ?? return Err(EnvironmentFactError.new("{scope} must contain only strings")))
     Ok(strings)
 }
 
@@ -559,11 +559,11 @@ envmodel_string_map_named: fn(value: CtValue, scope: String) -> [String: String]
                     .Str(text) -> text
                     else -> { return Err(EnvironmentFactError.new("{scope} keys must be strings")) }
                 }
-                &pairs.push(EnvNamedValue{name: key, value: entry.value})
+                pairs.push(EnvNamedValue{name: key, value: entry.value})
             }
         }
         .Struct(_, fields) -> {
-            loop field in fields -> &pairs.push(EnvNamedValue{name: field.name, value: field.value})
+            loop field in fields -> pairs.push(EnvNamedValue{name: field.name, value: field.value})
         }
         else -> { return Err(EnvironmentFactError.new("{scope} must be a record of string values")) }
     }
@@ -639,12 +639,12 @@ envmodel_require_known_fields: fn(fields: [String: CtValue], scope: String, allo
 
 envmodel_sorted_keys: fn<V>(map: [String: V]) -> [String] Never! {
     names := map.keys().to_list()
-    &names.sort()
+    names.sort()
     names
 }
 
 envmodel_push_labeled: fn(lines: &[String], label: String, values: [String]) {
-    loop value in values -> &lines.push("{label}={value}\n")
+    loop value in values -> lines.push("{label}={value}\n")
 }
 
 envmodel_any_blank: fn(values: [String]) -> Bool Never! {
@@ -686,17 +686,17 @@ EnvPathComponent: enum {
 
 envmodel_path_components: fn(path: String) -> [EnvPathComponent] Never! {
     components := [EnvPathComponent]{}
-    if path.starts_with("/") -> &components.push(EnvPathComponent.Root)
+    if path.starts_with("/") -> components.push(EnvPathComponent.Root)
     segments: path.split("/").to_list()
     loop index in 0..<segments.len() {
         segment: segments[index]
         if {
             segment == "" -> {}
             segment == "." -> {
-                if index == 0 -> &components.push(EnvPathComponent.CurDir)
+                if index == 0 -> components.push(EnvPathComponent.CurDir)
             }
-            segment == ".." -> { &components.push(EnvPathComponent.ParentDir) }
-            else -> { &components.push(EnvPathComponent.Normal(segment)) }
+            segment == ".." -> { components.push(EnvPathComponent.ParentDir) }
+            else -> { components.push(EnvPathComponent.Normal(segment)) }
         }
     }
     components

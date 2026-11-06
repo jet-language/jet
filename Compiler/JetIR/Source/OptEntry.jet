@@ -33,16 +33,16 @@ ir_opt_entry: fn(m: IRModule, functions: &[IRFunction], recursive: [Bool], keys:
         row := [IRFunction]{}
         if recursive[id] {
             if ir_opt_entry_guard(m, functions[id], clone) == .Val(guard) {
-                &row.push(guard)
+                row.push(guard)
                 any = true
             }
         }
-        &guards.push(^row)
+        guards.push(row)
     }
     if !any -> return
     loop id in 0..<functions.len() {
         out := ir_opt_entry_build(functions[id], guards, keys) ?? { next }
-        functions[id] = ^out
+        functions[id] = out.move()
     }
 }
 
@@ -52,7 +52,7 @@ ir_opt_entry: fn(m: IRModule, functions: &[IRFunction], recursive: [Bool], keys:
 ir_opt_entry_guard: fn(m: IRModule, g: IRFunction, clone: Int) -> IRFunction? Never! {
     if g.asm != None || g.op.len() == 0 -> return None
     known := [Bool]{}
-    loop slot in 0..<g.slot_type.len() -> &known.push(slot < g.param_count)
+    loop slot in 0..<g.slot_type.len() -> known.push(slot < g.param_count)
     at := 0
     loop at < g.op.len() && at < IR_OPT_ENTRY_LIMIT && ir_opt_entry_test(g.op[at]) {
         if !ir_opt_entry_reads(m, g, known, at) -> return None
@@ -75,17 +75,17 @@ ir_opt_entry_guard: fn(m: IRModule, g: IRFunction, clone: Int) -> IRFunction? Ne
     guard := ir_function_new(g.name, g.key, "", g.source_file, g.line)
     map := [Int]{}
     loop slot in 0..<g.slot_type.len() {
-        &map.push(if slot < g.param_count -> ir_slot(&guard, g.slot_type[slot], IRSlotKind.Param, -1, 0) else -> -1)
+        map.push(if slot < g.param_count -> ir_slot(guard, g.slot_type[slot], IRSlotKind.Param, -1, 0) else -> -1)
     }
     guard.result = g.result
     loop k in 0..<at {
         written: g.dst[k]
-        if written >= 0 && map[written] < 0 -> map[written] = ir_slot(&guard, g.slot_type[written], IRSlotKind.Temp, -1, 0)
-        ir_opt_emit_mapped(&guard, g, k, map, g.code_line[k])
+        if written >= 0 && map[written] < 0 -> map[written] = ir_slot(guard, g.slot_type[written], IRSlotKind.Temp, -1, 0)
+        ir_opt_emit_mapped(guard, g, k, map, g.code_line[k])
     }
-    _ := ir_emit(&guard, IROp.Return, -1, if value >= 0 -> map[value] else -> -1, -1, -1, g.code_line[at])
-    _ := ir_emit(&guard, IROp.End, -1, -1, -1, -1, g.code_line[at + 1])
-    ir_opt_compact(&guard)
+    _ := ir_emit(guard, IROp.Return, -1, if value >= 0 -> map[value] else -> -1, -1, -1, g.code_line[at])
+    _ := ir_emit(guard, IROp.End, -1, -1, -1, -1, g.code_line[at + 1])
+    ir_opt_compact(guard)
     Val(guard)
 }
 
@@ -135,7 +135,7 @@ ir_opt_entry_build: fn(caller: IRFunction, guards: [[IRFunction]], keys: [String
     any := false
     loop at in 0..<caller.op.len() {
         last: ir_opt_entry_site(caller, guards, keys, at)
-        &lasts.push(last)
+        lasts.push(last)
         if last >= 0 -> any = true
     }
     if !any -> return None
@@ -144,21 +144,21 @@ ir_opt_entry_build: fn(caller: IRFunction, guards: [[IRFunction]], keys: [String
     out.symbol_hash = caller.symbol_hash
     out.cold = caller.cold
     out.host_symbol = caller.host_symbol.copy()
-    loop slot in 0..<caller.slot_type.len() -> _ := ir_slot(&out, caller.slot_type[slot], caller.slot_kind[slot], caller.slot_name[slot], caller.slot_line[slot])
+    loop slot in 0..<caller.slot_type.len() -> _ := ir_slot(out, caller.slot_type[slot], caller.slot_kind[slot], caller.slot_name[slot], caller.slot_line[slot])
     out.result = caller.result
-    loop value in caller.args -> &out.args.push(value)
+    loop value in caller.args -> out.args.push(value)
     at := 0
     loop at < caller.op.len() {
         last: lasts[at]
         if last < 0 {
-            _ := ir_emit(&out, caller.op[at], caller.dst[at], caller.a[at], caller.b[at], caller.c[at], caller.code_line[at])
+            _ := ir_emit(out, caller.op[at], caller.dst[at], caller.a[at], caller.b[at], caller.c[at], caller.code_line[at])
             at += 1
             next
         }
-        ir_opt_entry_splice(&out, caller, guards[caller.a[at]][0], at, last)
+        ir_opt_entry_splice(out, caller, guards[caller.a[at]][0], at, last)
         at = last + 1
     }
-    ir_opt_compact(&out)
+    ir_opt_compact(out)
     Val(out)
 }
 
@@ -205,20 +205,20 @@ ir_opt_entry_splice: fn(f: &IRFunction, caller: IRFunction, guard: IRFunction, a
     line: caller.code_line[at]
     map := [Int]{}
     loop slot in 0..<guard.slot_type.len() {
-        &map.push(if slot < guard.param_count -> caller.args[caller.b[at] + slot] else -> ir_slot(&f, guard.slot_type[slot], IRSlotKind.Temp, -1, 0))
+        map.push(if slot < guard.param_count -> caller.args[caller.b[at] + slot] else -> ir_slot(f, guard.slot_type[slot], IRSlotKind.Temp, -1, 0))
     }
     returning: guard.op.len() - 2
-    loop k in 0..<returning -> ir_opt_emit_mapped(&f, guard, k, map, line)
+    loop k in 0..<returning -> ir_opt_emit_mapped(f, guard, k, map, line)
     value: guard.a[returning]
-    if value >= 0 -> _ := ir_emit(&f, IROp.Move, caller.dst[at], map[value], -1, -1, line)
+    if value >= 0 -> _ := ir_emit(f, IROp.Move, caller.dst[at], map[value], -1, -1, line)
     k := at + 1
     loop k <= last && caller.op[k] == .Drop {
-        _ := ir_emit(&f, IROp.Drop, -1, caller.a[k], -1, -1, caller.code_line[k])
+        _ := ir_emit(f, IROp.Drop, -1, caller.a[k], -1, -1, caller.code_line[k])
         k += 1
     }
-    _ := ir_emit(&f, IROp.Else, -1, -1, -1, -1, line)
-    loop held in at..<(last + 1) -> _ := ir_emit(&f, caller.op[held], caller.dst[held], caller.a[held], caller.b[held], caller.c[held], caller.code_line[held])
-    _ := ir_emit(&f, IROp.End, -1, -1, -1, -1, line)
+    _ := ir_emit(f, IROp.Else, -1, -1, -1, -1, line)
+    loop held in at..<(last + 1) -> _ := ir_emit(f, caller.op[held], caller.dst[held], caller.a[held], caller.b[held], caller.c[held], caller.code_line[held])
+    _ := ir_emit(f, IROp.End, -1, -1, -1, -1, line)
 }
 
 // g(n) = if n < 2 -> n else g(n - 1) + n over I64 words: at O1 and O2 g's
@@ -228,36 +228,36 @@ ir_opt_entry_splice: fn(f: &IRFunction, caller: IRFunction, guard: IRFunction, a
 #Test("A call of a recursive function that starts by returning sits behind its test") {
     loop level in 1..<3 {
         m := ir_module_new()
-        word: ir_type_row(&m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
-        flag: ir_type_row(&m, Type.Bool) ?? panic("no Bool row")
+        word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+        flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
         g := ir_function_new("g", "test:entry.jet::g", "", "entry.jet", 1)
-        n: ir_slot(&g, word, IRSlotKind.Param, ir_intern_name(&m, "n"), 1)
+        n: ir_slot(g, word, IRSlotKind.Param, ir_intern_name(m, "n"), 1)
         g.result = word
-        two: ir_slot(&g, word, IRSlotKind.Temp, -1, 0)
-        _ := ir_emit(&g, IROp.Const, two, 2, -1, -1, 2)
-        small: ir_slot(&g, flag, IRSlotKind.Temp, -1, 0)
-        _ := ir_emit(&g, IROp.Lt, small, n, two, -1, 2)
-        _ := ir_emit(&g, IROp.If, -1, small, -1, -1, 2)
-        _ := ir_emit(&g, IROp.Return, -1, n, -1, -1, 2)
-        _ := ir_emit(&g, IROp.End, -1, -1, -1, -1, 2)
-        one: ir_slot(&g, word, IRSlotKind.Temp, -1, 0)
-        _ := ir_emit(&g, IROp.Const, one, 1, -1, -1, 3)
-        less: ir_slot(&g, word, IRSlotKind.Temp, -1, 0)
-        _ := ir_emit(&g, IROp.Sub, less, n, one, IR_OVERFLOW_WRAP, 3)
-        got: ir_slot(&g, word, IRSlotKind.Temp, -1, 0)
-        args: ir_args(&g, [Int]{less})
-        _ := ir_emit(&g, IROp.Call, got, 0, args, 1, 3)
-        sum: ir_slot(&g, word, IRSlotKind.Temp, -1, 0)
-        _ := ir_emit(&g, IROp.Add, sum, got, n, IR_OVERFLOW_WRAP, 3)
-        _ := ir_emit(&g, IROp.Return, -1, sum, -1, -1, 3)
-        ir_opt_compact(&g)
+        two: ir_slot(g, word, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(g, IROp.Const, two, 2, -1, -1, 2)
+        small: ir_slot(g, flag, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(g, IROp.Lt, small, n, two, -1, 2)
+        _ := ir_emit(g, IROp.If, -1, small, -1, -1, 2)
+        _ := ir_emit(g, IROp.Return, -1, n, -1, -1, 2)
+        _ := ir_emit(g, IROp.End, -1, -1, -1, -1, 2)
+        one: ir_slot(g, word, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(g, IROp.Const, one, 1, -1, -1, 3)
+        less: ir_slot(g, word, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(g, IROp.Sub, less, n, one, IR_OVERFLOW_WRAP, 3)
+        got: ir_slot(g, word, IRSlotKind.Temp, -1, 0)
+        args: ir_args(g, [Int]{less})
+        _ := ir_emit(g, IROp.Call, got, 0, args, 1, 3)
+        sum: ir_slot(g, word, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(g, IROp.Add, sum, got, n, IR_OVERFLOW_WRAP, 3)
+        _ := ir_emit(g, IROp.Return, -1, sum, -1, -1, 3)
+        ir_opt_compact(g)
         m.entry = 0
-        name_rows_set(&m.function_rows, g.key, 0)
-        &m.functions.push(g)
+        name_rows_set(m.function_rows, g.key, 0)
+        m.functions.push(g)
         options := ir_opt_options(level)
         options.verify = true
-        &options.disabled.push("accumulate")
-        report: ir_optimize_module(&m, options, compiler_threads_single())
+        options.disabled.push("accumulate")
+        report: ir_optimize_module(m, options, compiler_threads_single())
         assert_eq(report.lint.len(), 0)
         f: m.functions[0]
         calls := 0

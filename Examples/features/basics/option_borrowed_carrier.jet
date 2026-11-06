@@ -16,7 +16,7 @@ label_of: fn(text: String?) -> String { text ?? "none" }
 
 total: fn(first: Blob?, second: Blob) -> Int { size_of(first) + second.data.len() }
 
-pair: fn(first: Blob?, second: ^Blob) -> Int { size_of(first) + second.data.len() }
+pair: fn(first: Blob?, second: &&Blob) -> Int { size_of(first) + second.data.len() }
 
 from_param: fn(blob: Blob) -> Int {
     // Rooted at a read parameter: frozen for the whole call.
@@ -37,7 +37,7 @@ run: fn() {
     differ: Val(blob) != stored
     print("same {same} differ {differ}")
     moved: Blob{data: [Int]{5, 6}, text: "ab"}
-    print("moved {pair(Val(moved), ^moved)}")
+    print("moved {pair(Val(moved), moved)}")
     rows: [Blob]{Blob{data: [Int]{7}, text: "row"}}
     row: rows[0]
     print("alias {size_of(Val(row))} {label_of(Val(row.text))} {rows[0].text}")

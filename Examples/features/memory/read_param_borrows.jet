@@ -57,18 +57,18 @@ kept_graph: fn(env: Env) -> Graph {
 renamed: fn(env: Env) -> Graph {
     plain: env.plain
     updated := plain
-    &updated.names.push("added")
+    updated.names.push("added")
     updated
 }
 
-consume: fn(graph: ^Graph) -> Int {
+consume: fn(graph: &&Graph) -> Int {
     graph.names.len()
 }
 
 consumed: fn(env: Env) -> Int {
     graph: env.graph ?? return 0
     // `graph` reads `env.graph` through a view (`env` is a read parameter), so the
-    // consumer gets an explicit copy; `^graph` would be E0201.
+    // consumer gets an explicit copy; `graph.move()` would be E0201.
     consume(graph.copy())
 }
 
@@ -89,7 +89,7 @@ Holder: struct {
 }
 
 // An owned parameter's last use moves it into the struct; no copy is left.
-hold: fn(graph: ^Graph, note: ^String) -> Holder {
+hold: fn(graph: &&Graph, note: &&String) -> Holder {
     Holder{graph: graph, note: note}
 }
 

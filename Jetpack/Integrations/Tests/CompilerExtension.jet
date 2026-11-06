@@ -42,8 +42,8 @@ pkg_test_extension_too_deep: fn() -> String {
     opens := [String]{}
     closes := [String]{}
     loop _ in 0..<(PKG_JSON_MAX_DEPTH + 1) {
-        &opens.push("[")
-        &closes.push("]")
+        opens.push("[")
+        closes.push("]")
     }
     [opens.join(""), "0", closes.join("")].join("")
 }
@@ -119,7 +119,7 @@ pkg_test_extension_too_deep: fn() -> String {
     valid: snapshot.encode_bytes() ?? panic("sample snapshot encodes")
     assert_eq(TypedSnapshot.decode_bytes(valid) ?? panic("valid snapshot decodes"), snapshot)
     oversized := valid
-    loop oversized.len() < PKG_JSON_MAX_PROTOCOL_BYTES + 1 -> &oversized.push(U8{32})
+    loop oversized.len() < PKG_JSON_MAX_PROTOCOL_BYTES + 1 -> oversized.push(U8{32})
     if TypedSnapshot.decode_bytes(oversized) == {
         .Ok(_) -> panic("oversized snapshot JSON must hit the size cap")
         .Err(error) -> assert_eq(pkg_test_extension_error(error), "JSON input exceeds the 1 MiB limit")
@@ -141,7 +141,7 @@ pkg_test_extension_too_deep: fn() -> String {
     valid: response.encode_bytes() ?? panic("sample response encodes")
     assert_eq(AnalyzeResponse.decode_bytes(valid) ?? panic("valid response decodes"), response)
     oversized := valid
-    loop oversized.len() < PKG_JSON_MAX_PROTOCOL_BYTES + 1 -> &oversized.push(U8{32})
+    loop oversized.len() < PKG_JSON_MAX_PROTOCOL_BYTES + 1 -> oversized.push(U8{32})
     if AnalyzeResponse.decode_bytes(oversized) == {
         .Ok(_) -> panic("oversized response JSON must hit the size cap")
         .Err(error) -> assert_eq(pkg_test_extension_error(error), "JSON input exceeds the 1 MiB limit")
@@ -178,7 +178,7 @@ pkg_test_extension_too_deep: fn() -> String {
     no_emit := pkg_test_extension_snapshot()
     kept := [ExtensionAbility]{}
     loop ability in no_emit.abilities {
-        if ability != ExtensionAbility.EmitFinding -> &kept.push(ability)
+        if ability != ExtensionAbility.EmitFinding -> kept.push(ability)
     }
     no_emit.abilities = kept
     finding: pkg_test_extension_response("note")
@@ -199,22 +199,22 @@ pkg_test_extension_too_deep: fn() -> String {
     raw: pkg_test_extension_response("warning").encode_bytes() ?? panic("encode")
     session := ExtensionSession.new()
     assert_eq(session.phase(), ExtensionSessionPhase.Idle)
-    &session.on_loaded(7) ?? panic("load")
+    session.on_loaded(7) ?? panic("load")
     assert_eq(session.phase(), ExtensionSessionPhase.Loaded)
-    _: &session.stage_response(snapshot, raw) ?? panic("stage")
+    _: session.stage_response(snapshot, raw) ?? panic("stage")
     assert(session.staged() != None)
     assert(!session.is_committed())
-    &session.rollback()
+    session.rollback()
     assert(session.staged() == None)
     assert(!session.is_committed())
-    _: &session.stage_response(snapshot, raw) ?? panic("stage again")
-    accepted: &session.accept_staged() ?? panic("accept")
+    _: session.stage_response(snapshot, raw) ?? panic("stage again")
+    accepted: session.accept_staged() ?? panic("accept")
     assert_eq(accepted.findings[0].rule, "r")
     assert(session.is_committed())
     assert(session.staged() == None)
-    assert(&session.close(handle -> handle == 7))
+    assert(session.close(handle -> handle == 7))
     assert_eq(session.phase(), ExtensionSessionPhase.Closed)
-    if &session.stage_response(snapshot, raw) == {
+    if session.stage_response(snapshot, raw) == {
         .Ok(_) -> panic("a closed session cannot stage")
         .Err(_) -> {}
     }
@@ -224,14 +224,14 @@ pkg_test_extension_too_deep: fn() -> String {
     snapshot: pkg_test_extension_snapshot()
     raw: pkg_test_extension_response("warning").encode_bytes() ?? panic("encode")
     session := ExtensionSession.new()
-    &session.on_loaded(3) ?? panic("load")
-    _: &session.stage_response(snapshot, raw) ?? panic("stage")
-    _: &session.accept_staged() ?? panic("accept")
+    session.on_loaded(3) ?? panic("load")
+    _: session.stage_response(snapshot, raw) ?? panic("stage")
+    _: session.accept_staged() ?? panic("accept")
     assert(session.is_committed())
-    &session.rollback()
+    session.rollback()
     assert(session.staged() == None)
     assert(session.is_committed())
-    if &session.stage_response(snapshot, raw) == {
+    if session.stage_response(snapshot, raw) == {
         .Ok(_) -> panic("restage after accept and rollback must refuse")
         .Err(error) -> assert(error.message.contains("already committed"))
     }
@@ -239,10 +239,10 @@ pkg_test_extension_too_deep: fn() -> String {
 
 #Test("close invokes the guest closer with the live handle") {
     session := ExtensionSession.new()
-    &session.on_loaded(42) ?? panic("load")
-    assert(&session.close(handle -> handle == 42))
+    session.on_loaded(42) ?? panic("load")
+    assert(session.close(handle -> handle == 42))
     assert_eq(session.phase(), ExtensionSessionPhase.Closed)
-    assert(!&session.close(_ -> {
+    assert(!session.close(_ -> {
         assert(false, "the closer must not run without a handle")
         false
     }))

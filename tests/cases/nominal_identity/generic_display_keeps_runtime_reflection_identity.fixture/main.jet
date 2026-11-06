@@ -10,7 +10,7 @@ FromSpace: struct { id: Int }
 #!Equatable
 ToSpace: struct { id: Int }
 Phantom: enum<T> { Marker }
-qualified: fn(value: ^Label<FromSpace, ToSpace>) -> labels.Label<FromSpace, ToSpace> { ^value }
+qualified: fn(value: &&Label<FromSpace, ToSpace>) -> labels.Label<FromSpace, ToSpace> { value.move() }
 run: fn() {
     a: Label<FromSpace, ToSpace>{text: "source identity"}
     b: qualified(a.copy())

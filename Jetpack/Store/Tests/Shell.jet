@@ -99,7 +99,7 @@ env_shell_test_read_marker: fn(marker: String, shell: String, output: String) {
 #Test("run command projects provider runtime paths") {
     env := env_shell_test_env([String]{})
     env.vars["JET_PROVIDER_PATH_TEST"] = "locked-path"
-    assert_eq(&env.run_command([String]{"sh", "-c", "test \"$JET_PROVIDER_PATH_TEST\" = locked-path"}), 0)
+    assert_eq(env.run_command([String]{"sh", "-c", "test \"$JET_PROVIDER_PATH_TEST\" = locked-path"}), 0)
 }
 
 #Test("detect falls back to bash") {
@@ -377,24 +377,24 @@ env_shell_test_read_marker: fn(marker: String, shell: String, output: String) {
 
 #Test("run command returns child status") {
     env := env_shell_test_env([String]{})
-    assert_eq(&env.run_command([String]{"true"}), 0)
-    failed: &env.run_command([String]{"false"})
+    assert_eq(env.run_command([String]{"true"}), 0)
+    failed: env.run_command([String]{"false"})
     assert(failed != 0)
 }
 
 #Test("run command exposes bin on path") {
     // The composed PATH must reach the child: ask `sh` to inspect $PATH.
     env := env_shell_test_env([String]{"/jetpack-test-marker/bin"})
-    code: &env.run_command([String]{"sh", "-c", "case \"$PATH\" in /jetpack-test-marker/bin:*) exit 0;; *) exit 3;; esac"})
+    code: env.run_command([String]{"sh", "-c", "case \"$PATH\" in /jetpack-test-marker/bin:*) exit 0;; *) exit 3;; esac"})
     assert_eq(code, 0)
 }
 
 #Test("nix projection uses an empty store not the host store as lower") {
     if !sys.is_linux() -> return
     scratch := ShellScratch.empty()
-    mounts: env_shell_projection_fstab([String: String]{}, &scratch) ?? panic("build projection fstab")
+    mounts: env_shell_projection_fstab([String: String]{}, scratch) ?? panic("build projection fstab")
     fstab: files.read(mounts.fstab_path) ?? panic("read projection fstab")
-    close(^scratch)
+    close(scratch)
     assert(fstab.contains("jetpack-nix-store /nix tmpfs mode=0755,x-mount.mkdir"))
     assert(fstab.contains("none bind,ro,x-mount.mkdir"))
     assert(ENV_SHELL_NIX_PROJECTION_SCRIPT.contains("\"$mount\" --no-canonicalize --no-mtab --all --fstab"))

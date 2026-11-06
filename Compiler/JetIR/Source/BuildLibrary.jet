@@ -135,9 +135,9 @@ ir_runtime_intrinsic_specs: fn() -> [IRIntrinsicSpec] Never! {
 // ir_build_program's. A row whose function does not satisfy the C export
 // law is not an export. `lifecycle_rows` are the lines of the lifecycle
 // list (ir_lifecycle_rows).
-ir_build_library: fn(functions: ^[FnBody], decls: DeclTable, type_defs: ^[TTypeDef], impls: ^[TImplDef], sources: ^[String:String], constants: ^[TConstantDef], foreign: ^[SemaCheckedForeignFunction], rows: [IRLibraryExportRow], lifecycle_rows: [String]) -> IRLibraryResult Never! {
-    p := ir_program_new(^functions, decls, ^type_defs, ^impls, ^sources, ^constants)
-    ir_foreign_index(&p, ^foreign, decls)
+ir_build_library: fn(functions: &&[FnBody], decls: DeclTable, type_defs: &&[TTypeDef], impls: &&[TImplDef], sources: &&[String:String], constants: &&[TConstantDef], foreign: &&[SemaCheckedForeignFunction], rows: [IRLibraryExportRow], lifecycle_rows: [String]) -> IRLibraryResult Never! {
+    p := ir_program_new(functions, decls, type_defs, impls, sources, constants)
+    ir_foreign_index(p, foreign, decls)
     p.stop_points = false
     m := ir_module_for(p)
     exports := [IRLibraryExportRow]{}
@@ -153,8 +153,8 @@ ir_build_library: fn(functions: ^[FnBody], decls: DeclTable, type_defs: ^[TTypeD
             outside += 1
             next
         }
-        &exports.push(IRLibraryExportRow{key: row.key, symbol: row.symbol})
-        &export_rows.push(index)
+        exports.push(IRLibraryExportRow{key: row.key, symbol: row.symbol})
+        export_rows.push(index)
     }
     if exports.len() == 0 -> return ir_library_failed([String]{"the checked NativeLibrary artifact has no #Export(c) functions ({rows.len()} export rows: {unchecked} without a checked function, {outside} outside the C export law)"})
     // Every export problem is collected, so one run lists them all.
@@ -162,14 +162,14 @@ ir_build_library: fn(functions: ^[FnBody], decls: DeclTable, type_defs: ^[TTypeD
     symbols := [String:Bool]{}
     keys := [String:Bool]{}
     loop (index, row) in exports {
-        if symbols.get(row.symbol) != None -> &problems.push("duplicate checked export symbol {row.symbol}") else -> symbols[row.symbol] = true
-        if keys.get(row.key) != None -> &problems.push("duplicate checked export function {row.symbol}") else -> keys[row.key] = true
-        loop problem in ir_export_signature_problems(p.functions[export_rows[index]]) -> &problems.push("export {row.symbol} {problem}")
-        if row.symbol == "jet_rt_alloc_init" && !ir_void_hook(p.functions[export_rows[index]]) -> &problems.push("jet_rt_alloc_init must take no parameters and return nothing")
+        if symbols.get(row.symbol) != None -> problems.push("duplicate checked export symbol {row.symbol}") else -> symbols[row.symbol] = true
+        if keys.get(row.key) != None -> problems.push("duplicate checked export function {row.symbol}") else -> keys[row.key] = true
+        loop problem in ir_export_signature_problems(p.functions[export_rows[index]]) -> problems.push("export {row.symbol} {problem}")
+        if row.symbol == "jet_rt_alloc_init" && !ir_void_hook(p.functions[export_rows[index]]) -> problems.push("jet_rt_alloc_init must take no parameters and return nothing")
     }
     if problems.len() > 0 -> return ir_library_failed(problems)
     lifecycle := [String:IRLifecycle]{}
-    lifecycle_problem: ir_lifecycle_rows(lifecycle_rows, &lifecycle)
+    lifecycle_problem: ir_lifecycle_rows(lifecycle_rows, lifecycle)
     if lifecycle_problem != "" -> return ir_library_failed([String]{lifecycle_problem})
     hooked := 0
     loop (index, row) in exports {
@@ -229,22 +229,22 @@ ir_build_library: fn(functions: ^[FnBody], decls: DeclTable, type_defs: ^[TTypeD
         }
     }
     if bits != from_bits -> return ir_library_failed([String]{"runtime bitcast definitions must be present as one validated pair"})
-    p.intrinsics = ^intrinsics
+    p.intrinsics = intrinsics.move()
     failures := [IRBuildFailure]{}
     roots := [Int]{}
     loop row in exports {
-        id: ir_function_id(&m, p, row.key, [Type]{}) ?? return ir_library_failed([String]{"export {row.symbol} names a missing checked function"})
-        &roots.push(id)
+        id: ir_function_id(m, p, row.key, [Type]{}) ?? return ir_library_failed([String]{"export {row.symbol} names a missing checked function"})
+        roots.push(id)
     }
-    _: ir_build_queue(&m, p, &failures, 0)
-    ir_drop_glues(&m, p)
+    _: ir_build_queue(m, p, failures, 0)
+    ir_drop_glues(m, p)
     // No export reaches its own runtime route: that would be a construct in
     // its body lowered to a call of the routine it defines, which recurses
     // without end (a sized literal that missed the fold once made
     // jet_int_checked_fixed call itself). Every such export is reported.
     recursive := [String]{}
     loop (index, row) in exports {
-        if ir_calls_own_route(m, roots[index], row.symbol) -> &recursive.push("runtime export {row.symbol} calls its own runtime route {row.symbol}: a construct in its body lowers to the routine it defines")
+        if ir_calls_own_route(m, roots[index], row.symbol) -> recursive.push("runtime export {row.symbol} calls its own runtime route {row.symbol}: a construct in its body lowers to the routine it defines")
     }
     if recursive.len() > 0 -> return ir_library_failed(recursive)
     globals := [IRLibraryExport]{}
@@ -256,19 +256,19 @@ ir_build_library: fn(functions: ^[FnBody], decls: DeclTable, type_defs: ^[TTypeD
         loop name in hook.guards {
             guard: ir_lifecycle_guard(m, p, name)
             if guard < 0 {
-                &guard_problems.push("runtime lifecycle export {row.symbol}: guard `{name}` is no module storage the library reads")
+                guard_problems.push("runtime lifecycle export {row.symbol}: guard `{name}` is no module storage the library reads")
             } else if !ir_names_data(m, roots[index], guard) {
-                &guard_problems.push("runtime lifecycle export {row.symbol}: guard `{name}` is no state the hook sets up")
+                guard_problems.push("runtime lifecycle export {row.symbol}: guard `{name}` is no state the hook sets up")
             } else {
-                &guards.push(guard)
+                guards.push(guard)
             }
         }
-        &globals.push(IRLibraryExport{function: roots[index], symbol: row.symbol, init_priority: hook.init_priority, fini_priority: hook.fini_priority, guards: ^guards})
+        globals.push(IRLibraryExport{function: roots[index], symbol: row.symbol, init_priority: hook.init_priority, fini_priority: hook.fini_priority, guards: guards.move()})
         if IR_HOST_PROVIDER.contains(row.symbol) -> m.functions[roots[index]].host_symbol = row.symbol.copy()
-        &abis.push(ir_export_abi(m, roots[index], row.symbol))
+        abis.push(ir_export_abi(m, roots[index], row.symbol))
     }
     if guard_problems.len() > 0 -> return ir_library_failed(guard_problems)
-    &abis.sort_by((left: IRExportABI, right: IRExportABI) -> left.symbol <=> right.symbol)
+    abis.sort_by((left: IRExportABI, right: IRExportABI) -> left.symbol <=> right.symbol)
     IRLibraryResult{program: m, failures: failures, errors: [String]{}, exports: globals, abis: abis}
 }
 
@@ -311,7 +311,7 @@ ir_export_abi_json: fn(rows: [IRExportABI]) -> String Never! {
     loop row in rows {
         parameters: loop layout in row.parameters -> ir_export_layout_json(layout)
         result: if row.result == .Val(layout) -> ir_export_layout_json(layout) else -> "null"
-        &encoded.push("{{\"symbol\":{foundation_json_quote(row.symbol)},\"parameters\":[{parameters.join(",")}],\"result\":{result}}}")
+        encoded.push("{{\"symbol\":{foundation_json_quote(row.symbol)},\"parameters\":[{parameters.join(",")}],\"result\":{result}}}")
     }
     "[{encoded.join(",")}]"
 }
@@ -334,7 +334,7 @@ ir_thread_exports: fn(m: IRModule, exports: [IRLibraryExport]) -> [String] Never
     defined := [String:Int]{}
     loop row in exports -> defined[row.symbol.copy()] = row.function
     callers := [[Int]]{}
-    loop _ in 0..<count -> &callers.push([Int]{})
+    loop _ in 0..<count -> callers.push([Int]{})
     // Each DataAddress: the data row and the function that takes it.
     data_rows := [Int]{}
     data_users := [Int]{}
@@ -351,16 +351,16 @@ ir_thread_exports: fn(m: IRModule, exports: [IRLibraryExport]) -> [String] Never
                 callee = defined.get(name) ?? -1
             }
             if op == .DataAddress {
-                &data_rows.push(f.a[at])
-                &data_users.push(id)
+                data_rows.push(f.a[at])
+                data_users.push(id)
             }
-            if callee >= 0 && callee < count -> &callers[callee].push(id)
+            if callee >= 0 && callee < count -> callers[callee].push(id)
         }
-        &reaches.push(starts)
-        if starts -> &work.push(id)
+        reaches.push(starts)
+        if starts -> work.push(id)
     }
     guarded := [Bool]{}
-    loop _ in exports -> &guarded.push(false)
+    loop _ in exports -> guarded.push(false)
     head := 0
     loop {
         loop head < work.len() {
@@ -369,7 +369,7 @@ ir_thread_exports: fn(m: IRModule, exports: [IRLibraryExport]) -> [String] Never
             loop caller in callers[id] {
                 if reaches[caller] -> next
                 reaches[caller] = true
-                &work.push(caller)
+                work.push(caller)
             }
         }
         // A hook that can reach a thread start: whatever keeps its guard
@@ -383,7 +383,7 @@ ir_thread_exports: fn(m: IRModule, exports: [IRLibraryExport]) -> [String] Never
                 id: data_users[at]
                 if !row.guards.contains(data) || reaches[id] -> next
                 reaches[id] = true
-                &work.push(id)
+                work.push(id)
                 added = true
             }
         }
@@ -391,9 +391,9 @@ ir_thread_exports: fn(m: IRModule, exports: [IRLibraryExport]) -> [String] Never
     }
     symbols := [String]{}
     loop row in exports {
-        if reaches[row.function] -> &symbols.push(row.symbol.copy())
+        if reaches[row.function] -> symbols.push(row.symbol.copy())
     }
-    &symbols.sort()
+    symbols.sort()
     symbols
 }
 
@@ -412,7 +412,7 @@ ir_lifecycle_rows: fn(lines: [String], lifecycle: &[String:IRLifecycle]) -> Stri
         if text == "" || text.starts_with("#") -> next
         fields := [String]{}
         loop field in text.split(" ").to_list() {
-            if field != "" -> &fields.push(field)
+            if field != "" -> fields.push(field)
         }
         if (fields.len() != 3 && fields.len() != 4) || (fields[1] != "init" && fields[1] != "fini") -> return "invalid runtime lifecycle row `{text}`"
         priority: Int.parse(fields[2]) ?? return "invalid runtime lifecycle priority in `{text}`"
@@ -422,7 +422,7 @@ ir_lifecycle_rows: fn(lines: [String], lifecycle: &[String:IRLifecycle]) -> Stri
         if fields.len() == 4 {
             loop name in fields[3].split(",").to_list() {
                 if name == "" || guards.contains(name) -> return "invalid runtime lifecycle guards in `{text}`"
-                &guards.push(name)
+                guards.push(name)
             }
         }
         lifecycle[fields[0]] = if fields[1] == "init" -> IRLifecycle{init_priority: priority, fini_priority: -1, guards: guards} else -> IRLifecycle{init_priority: -1, fini_priority: priority, guards: guards}
@@ -452,14 +452,14 @@ ir_names_data: fn(m: IRModule, id: Int, row: Int) -> Bool Never! {
     seen[id] = true
     work := [Int]{id}
     loop work.len() > 0 {
-        next_id: &work.pop() ?? break
+        next_id: work.pop() ?? break
         f: m.functions[next_id]
         loop at in 0..<f.op.len() {
             if f.op[at] == .DataAddress && f.a[at] == row -> return true
             callee: f.a[at]
             if (f.op[at] == .Call || f.op[at] == .FunctionAddress) && callee >= 0 && callee < m.functions.len() && seen.get(callee) == None {
                 seen[callee] = true
-                &work.push(callee)
+                work.push(callee)
             }
         }
     }
@@ -550,18 +550,18 @@ ir_export_native_type: fn(ty: Type) -> String? Never! {
 // primitive or void result. Every problem of the signature is listed.
 ir_export_signature_problems: fn(function: FnBody) -> [String] Never! {
     problems := [String]{}
-    if !ir_top_level(function) || function.generic_params.len() != 0 -> &problems.push("is not a monomorphic top-level function")
-    if !ir_infallible(function) -> &problems.push("has a failure carrier; a native C export is infallible")
+    if !ir_top_level(function) || function.generic_params.len() != 0 -> problems.push("is not a monomorphic top-level function")
+    if !ir_infallible(function) -> problems.push("has a failure carrier; a native C export is infallible")
     loop param in function.params {
         if param.convention == AccessConvention.Write {
-            &problems.push("parameter `{param.name}` is written; C exports take primitives by value")
+            problems.push("parameter `{param.name}` is written; C exports take primitives by value")
             next
         }
         problem: ir_export_native_type(param.ty) ?? next
-        &problems.push("parameter `{param.name}`: {problem}")
+        problems.push("parameter `{param.name}`: {problem}")
     }
     if ir_c_export_result(function) == .Val(result) {
-        if ir_export_native_type(result) == .Val(problem) -> &problems.push("result: {problem}")
+        if ir_export_native_type(result) == .Val(problem) -> problems.push("result: {problem}")
     }
     problems
 }
@@ -630,14 +630,14 @@ ir_address_target_signature: fn(function: FnBody, arity: Int) -> Bool Never! {
 // the FunctionAddress of its export; rt_fault_print is a call of the fault
 // report the linker writes.
 ir_intrinsic_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, intrinsic: IRRuntimeIntrinsic, args: [BodyCallArg], span: Span) -> Int Never! {
-    word_row: ir_word_row(&m)
-    float_row: ir_type_row(&m, Type.Float) ?? return ir_fail_slot(&b, span, "type Float")
+    word_row: ir_word_row(m)
+    float_row: ir_type_row(m, Type.Float) ?? return ir_fail_slot(b, span, "type Float")
     if intrinsic == {
-        .StaticText -> ir_static_text_call(&m, p, &b, args, word_row, span)
-        .FloatBits -> ir_bitcast(&m, p, &b, args, float_row, word_row, span)
-        .FloatFromBits -> ir_bitcast(&m, p, &b, args, word_row, float_row, span)
-        .FunctionAddress(key) -> ir_address_call(&m, p, &b, key, args, word_row, span)
-        .FaultReport -> ir_fault_report_call(&m, p, &b, args, word_row, span)
+        .StaticText -> ir_static_text_call(m, p, b, args, word_row, span)
+        .FloatBits -> ir_bitcast(m, p, b, args, float_row, word_row, span)
+        .FloatFromBits -> ir_bitcast(m, p, b, args, word_row, float_row, span)
+        .FunctionAddress(key) -> ir_address_call(m, p, b, key, args, word_row, span)
+        .FaultReport -> ir_fault_report_call(m, p, b, args, word_row, span)
     }
 }
 
@@ -648,61 +648,61 @@ ir_intrinsic_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, intrinsic: IRRu
 // argument and result registers. It never stops: the report is the last
 // thing a faulting process runs.
 ir_fault_report_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, args: [BodyCallArg], word_row: Int, span: Span) -> Int Never! {
-    if args.len() != IR_X64_ARGUMENT_REGISTERS.len() -> return ir_fail_slot(&b, span, "rt_fault_print reads six I64 values")
+    if args.len() != IR_X64_ARGUMENT_REGISTERS.len() -> return ir_fail_slot(b, span, "rt_fault_print reads six I64 values")
     values := [Int]{}
     loop arg in args {
-        value: ir_value_as(&m, p, &b, arg.value, word_row, span)
+        value: ir_value_as(m, p, b, arg.value, word_row, span)
         if ir_failed(b) -> return -1
-        &values.push(value)
+        values.push(value)
     }
-    out: ir_temp(&m, &b, word_row)
-    start: ir_args(&b.f, values)
-    ir_emit(&b.f, IROp.CallRuntime, out, ir_intern_name(&m, LINK_FAULT_REPORT), start, values.len(), b.line)
+    out: ir_temp(m, b, word_row)
+    start: ir_args(b.f, values)
+    ir_emit(b.f, IROp.CallRuntime, out, ir_intern_name(m, LINK_FAULT_REPORT), start, values.len(), b.line)
     out
 }
 
 ir_static_text_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, args: [BodyCallArg], word_row: Int, span: Span) -> Int Never! {
-    if args.len() != 1 -> return ir_fail_slot(&b, span, "rt_static_text is literal-only")
+    if args.len() != 1 -> return ir_fail_slot(b, span, "rt_static_text is literal-only")
     parts: if ir_body_node(p, b, args[0].value).kind == {
         .StrLit(written) -> written
-        else -> { return ir_fail_slot(&b, span, "rt_static_text is literal-only") }
+        else -> { return ir_fail_slot(b, span, "rt_static_text is literal-only") }
     }
     literal := ""
     loop part in parts {
         if part == {
             .Literal(text) -> literal = "{literal}{text}"
-            .Interpolation(_, _) -> return ir_fail_slot(&b, span, "rt_static_text is literal-only")
+            .Interpolation(_, _) -> return ir_fail_slot(b, span, "rt_static_text is literal-only")
         }
     }
-    slot: ir_temp(&m, &b, word_row)
-    ir_emit(&b.f, IROp.ConstText, slot, ir_intern_text(&m, literal), -1, -1, b.line)
+    slot: ir_temp(m, b, word_row)
+    ir_emit(b.f, IROp.ConstText, slot, ir_intern_text(m, literal), -1, -1, b.line)
     slot
 }
 
 ir_address_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, key: String, args: [BodyCallArg], word_row: Int, span: Span) -> Int Never! {
-    if args.len() != 0 -> return ir_fail_slot(&b, span, "a runtime address intrinsic takes no arguments")
-    target: ir_function_id(&m, p, key, [Type]{}) ?? return ir_fail_slot(&b, span, "runtime address target {key} is not among the checked functions")
-    slot: ir_temp(&m, &b, word_row)
-    ir_emit(&b.f, IROp.FunctionAddress, slot, target, -1, -1, b.line)
+    if args.len() != 0 -> return ir_fail_slot(b, span, "a runtime address intrinsic takes no arguments")
+    target: ir_function_id(m, p, key, [Type]{}) ?? return ir_fail_slot(b, span, "runtime address target {key} is not among the checked functions")
+    slot: ir_temp(m, b, word_row)
+    ir_emit(b.f, IROp.FunctionAddress, slot, target, -1, -1, b.line)
     slot
 }
 
 // The bits of the one argument (of row `input`) as a value of row `output`.
 ir_bitcast: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, args: [BodyCallArg], input: Int, output: Int, span: Span) -> Int Never! {
-    if args.len() != 1 -> return ir_fail_slot(&b, span, "a runtime bitcast reads one value")
-    value: ir_value_as(&m, p, &b, args[0].value, input, span)
+    if args.len() != 1 -> return ir_fail_slot(b, span, "a runtime bitcast reads one value")
+    value: ir_value_as(m, p, b, args[0].value, input, span)
     if ir_failed(b) -> return -1
-    ir_reinterpret(&m, &b, value, output)
+    ir_reinterpret(m, b, value, output)
 }
 
 // The bits of scalar slot `value` as a fresh value of row `output`: stored
 // in a frame word, loaded back in the other class.
 ir_reinterpret: fn(m: &IRModule, b: &IRBuilder, value: Int, output: Int) -> Int Never! {
-    pointer_row: ir_pointer_row(&m)
-    area: ir_temp(&m, &b, pointer_row)
-    ir_emit(&b.f, IROp.StackAddress, area, 8, 8, -1, b.line)
-    ir_emit(&b.f, IROp.Store, -1, area, 0, value, b.line)
-    out: ir_temp(&m, &b, output)
-    ir_emit(&b.f, IROp.Load, out, area, 0, -1, b.line)
+    pointer_row: ir_pointer_row(m)
+    area: ir_temp(m, b, pointer_row)
+    ir_emit(b.f, IROp.StackAddress, area, 8, 8, -1, b.line)
+    ir_emit(b.f, IROp.Store, -1, area, 0, value, b.line)
+    out: ir_temp(m, b, output)
+    ir_emit(b.f, IROp.Load, out, area, 0, -1, b.line)
     out
 }

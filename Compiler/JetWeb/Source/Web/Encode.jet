@@ -64,10 +64,10 @@ web_slot_sig: fn(key: String) -> String Never! {
 
 // The function type entry of signature `key` (form 0x60).
 web_put_func_type: fn(out: &[U8], key: String) Never! {
-    &out.push(0x60)
+    out.push(0x60)
     sides: [[Int]]{wasm_sig_side(key, false), wasm_sig_side(key, true)}
     loop types in sides {
-        wasm_put_unsigned(&out, types.len())
-        loop ty in types -> &out.push(U8{ty})
+        wasm_put_unsigned(out, types.len())
+        loop ty in types -> out.push(U8{ty})
     }
 }

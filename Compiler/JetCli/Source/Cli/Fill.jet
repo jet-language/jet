@@ -18,29 +18,29 @@ JetCLIFillGoal: struct {
 
 jet_cli_fill_function_info: fn(function: Func, infos: &[JetCLIFillFunction]) Never! {
     if function.params.len() == 0 && function.return_type == .Val(ty) {
-        &infos.push(JetCLIFillFunction{name: function.name, return_type: type_name(ty)})
+        infos.push(JetCLIFillFunction{name: function.name, return_type: type_name(ty)})
     }
 }
 
 jet_cli_fill_function_infos: fn(items: [Item], infos: &[JetCLIFillFunction]) Never! {
     loop item in items {
         if item == {
-            .Func(function) -> { jet_cli_fill_function_info(function, &infos) }
+            .Func(function) -> { jet_cli_fill_function_info(function, infos) }
             .Struct(structure) -> {
-                loop function in structure.methods -> jet_cli_fill_function_info(function, &infos)
+                loop function in structure.methods -> jet_cli_fill_function_info(function, infos)
                 loop block in structure.trait_impls {
-                    loop function in block.methods -> jet_cli_fill_function_info(function, &infos)
+                    loop function in block.methods -> jet_cli_fill_function_info(function, infos)
                 }
             }
             .Enum(enumeration) -> {
-                loop function in enumeration.methods -> jet_cli_fill_function_info(function, &infos)
+                loop function in enumeration.methods -> jet_cli_fill_function_info(function, infos)
                 loop block in enumeration.trait_impls {
-                    loop function in block.methods -> jet_cli_fill_function_info(function, &infos)
+                    loop function in block.methods -> jet_cli_fill_function_info(function, infos)
                 }
             }
             .Impl(implementation) -> {
                 loop function in implementation.methods {
-                    jet_cli_fill_function_info(function, &infos)
+                    jet_cli_fill_function_info(function, infos)
                 }
             }
             else -> {}
@@ -61,9 +61,9 @@ jet_cli_fill_card: fn(rows: [TTypedGoal], span: Span) -> String Never! {
 jet_cli_fill_expr: fn(tree: BodyTree, expression: Int, rows: [TTypedGoal], goals: &[JetCLIFillGoal]) Never! {
     node: body_node(tree, expression)
     if node.kind == .Never(reason, _) && reason == "todo" {
-        &goals.push(JetCLIFillGoal{span: node.span, expected: jet_cli_fill_card(rows, node.span)})
+        goals.push(JetCLIFillGoal{span: node.span, expected: jet_cli_fill_card(rows, node.span)})
     }
-    body_each_expr_child(tree, node, (child: Int) -> jet_cli_fill_expr(tree, child, rows, &goals))
+    body_each_expr_child(tree, node, (child: Int) -> jet_cli_fill_expr(tree, child, rows, goals))
 }
 
 jet_cli_fill_function_name: fn(function: FnBody) -> String Never! {
@@ -107,11 +107,11 @@ jet_cli_fill_candidate_checks: fn(file: String, source: String, goal: JetCLIFill
 jet_cli_fill_candidates: fn(unit: JetDriverDocModule, function: FnBody, infos: [JetCLIFillFunction], goal: JetCLIFillGoal) -> [String] JetCLIReadError! {
     candidates := [String]{}
     loop parameter in function.params {
-        if type_name(parameter.ty) == goal.expected -> &candidates.push(parameter.name)
+        if type_name(parameter.ty) == goal.expected -> candidates.push(parameter.name)
     }
     loop info in infos {
         if info.name != function.name && info.return_type == goal.expected {
-            &candidates.push("{info.name}()")
+            candidates.push("{info.name}()")
         }
     }
     literal: if goal.expected == {
@@ -123,11 +123,11 @@ jet_cli_fill_candidates: fn(unit: JetDriverDocModule, function: FnBody, infos: [
         "Unit" | "()" -> "()"
         else -> if goal.expected.ends_with("?") -> "null" else -> ""
     }
-    if literal != "" -> &candidates.push(literal)
+    if literal != "" -> candidates.push(literal)
     checked := [String]{}
     loop candidate in candidates {
         if !checked.contains(candidate) && jet_cli_fill_candidate_checks(unit.physical_path, unit.source, goal, candidate) {
-            &checked.push(candidate)
+            checked.push(candidate)
         }
     }
     checked
@@ -143,12 +143,12 @@ jet_cli_fill_report: fn(result: JetDriverCompileResult, file: String?, line: Int
             next
         }
         infos := [JetCLIFillFunction]{}
-        jet_cli_fill_function_infos(unit.items, &infos)
+        jet_cli_fill_function_infos(unit.items, infos)
         loop function in unit.functions {
             if function.synthetic -> next
             goals := [JetCLIFillGoal]{}
             loop statement in function.body {
-                body_each_stmt_child(function.tree, function.tree.stmts[statement], (expression: Int) -> jet_cli_fill_expr(function.tree, expression, function.typed_goals, &goals))
+                body_each_stmt_child(function.tree, function.tree.stmts[statement], (expression: Int) -> jet_cli_fill_expr(function.tree, expression, function.typed_goals, goals))
             }
             loop goal in goals {
                 goal_line: diagnostic_line_at(unit.source, goal.span.start)
@@ -156,7 +156,7 @@ jet_cli_fill_report: fn(result: JetDriverCompileResult, file: String?, line: Int
                 name: jet_cli_fill_function_name(function)
                 effects: jet_cli_fill_effects(function, unit.alias, index.effects)
                 candidates: if include_candidates -> jet_cli_fill_candidates(unit, function, infos, goal) else -> [String]{}
-                &cards.push(
+                cards.push(
                 jet_cli_status_object(
                 [JetCLIStatusField]{
                     jet_cli_status_field("file", jet_cli_status_text(unit.path)),
@@ -204,7 +204,7 @@ jet_cli_compile_fill: fn(target: String, json: Bool, color: Bool) -> JetDriverVe
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     compiled: jet_cli_compile_file(file, color, None, JetDriverCompileMode.Doc)
     if compiled == {
-        .Refused(refusal) -> output = ^refusal
+        .Refused(refusal) -> output = refusal.move()
         .Compiled(result, snapshot) -> jet_cli_finish(jet_cli_fill_result(file, line, json, color, result, snapshot))
     }
     output

@@ -2,7 +2,7 @@
 // in a loop that can stop early and then returned or stored in a record, an
 // owned field handed off with `^` and refilled before anything reads it, a
 // field of an owner nothing reads again (the owner's cleanup releases only
-// the fields still in place), and an optional unwrapped with `^x ?? ...`.
+// the fields still in place), and an optional unwrapped with `x.move() ?? ...`.
 // Value semantics stay exact: a value still read later is copied, and an
 // owner a view still reads keeps its value.
 
@@ -41,7 +41,7 @@ entries: fn(units: [SourceUnit]) -> [Entry] {
     out := [Entry]{}
     loop index in 0..<units.len() {
         unit := units[index]
-        &out.push(Entry{name: unit.name, path: unit.path})
+        out.push(Entry{name: unit.name, path: unit.path})
     }
     out
 }
@@ -61,9 +61,9 @@ pick_left: fn(seed: String) -> Graph {
 split: fn(seed: String) -> [[String]] {
     pair: make_pair(seed)
     out := [[String]]{}
-    &out.push(pair.right)
+    out.push(pair.right)
     print("split left {pair.left.len()}")
-    &out.push(pair.left)
+    out.push(pair.left)
     out
 }
 
@@ -73,7 +73,7 @@ fresh_left: fn(seed: String) -> Graph {
 }
 
 // A field of an owned parameter is returned by move.
-take_right: fn(pair: ^Pair) -> [String] {
+take_right: fn(pair: &&Pair) -> [String] {
     pair.right
 }
 
@@ -111,30 +111,30 @@ project: fn(n: Int) -> Host? {
 
 gather: fn(values: [Int]) -> [Host]? {
     output := [Host]{}
-    loop value in values -> &output.push(project(value) ?? return None)
+    loop value in values -> output.push(project(value) ?? return None)
     Val(output)
 }
 
 group: fn(name: String, values: [Int]) -> Host? {
     output := [Host]{}
-    loop value in values -> &output.push(project(value) ?? return None)
+    loop value in values -> output.push(project(value) ?? return None)
     Val(Host.Group{name: name, items: output})
 }
 
 add_name: fn(graph: &Graph, name: String) {
-    &graph.names.push(name)
+    graph.names.push(name)
 }
 
 stage: fn(start: Graph, names: [String]) -> Int {
     env := Env{graph: Val(start), count: 0}
     loop name in names {
-        staged := ^env.graph
+        staged := env.graph.move()
         env.graph = None
-        resolved := ^staged ?? {
+        resolved := staged.move() ?? {
             return -1
         }
-        add_name(&resolved, name)
-        env.graph = Val(^resolved)
+        add_name(resolved, name)
+        env.graph = Val(resolved.move())
         env.count += 1
     }
     graph: env.graph ?? Graph{names: [String]{}}
@@ -162,7 +162,7 @@ run: fn() {
 
     env := Env{graph: Val(Graph{names: [String]{"x"}}), count: 0}
     copied := env.graph ?? Graph{names: [String]{}}
-    &copied.names.push("y")
+    copied.names.push("y")
     kept := env.graph ?? Graph{names: [String]{}}
     print("copied {copied.names.len()} kept {kept.names.len()}")
 

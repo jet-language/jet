@@ -44,10 +44,10 @@ RError: enum {
 }
 
 impl Session.Close {
-    close: fn(^self) { abi.close(self.value) }
+    close: fn(&&self) { abi.close(self.value) }
 }
 
-close: fn(session: ^Session) { abi.close(session.value) }
+close: fn(session: &&Session) { abi.close(session.value) }
 
 open: fn() -> Session RError! {
     handle: abi.open()
@@ -64,9 +64,9 @@ decode_response: fn(raw: String, code: Int) -> Dyn RError! {
     if code == 5 -> return Err(RError.Limit)
     if code != 0 -> return Err(RError.Protocol)
     response := json.parse(raw) ?? return Err(RError.Protocol)
-    succeeded := (&response.field("ok") ?? Dyn.Bool(false)).bool() ?? false
+    succeeded := (response.field("ok") ?? Dyn.Bool(false)).bool() ?? false
     if !succeeded -> return Err(RError.CommandFailed)
-    return Ok(&response.field("value") ?? Dyn.Null)
+    return Ok(response.field("value") ?? Dyn.Null)
 }
 
 transform: fn(session: Session, input: Dyn, deadline_ms: Int) -> Dyn RError! {

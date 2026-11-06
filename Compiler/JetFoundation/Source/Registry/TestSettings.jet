@@ -222,7 +222,7 @@ test_setting_value: fn(row: TestSettingRow, text: String) -> String? Never! {
                 level: part.trim().replace("\"", "")
                 if level != "none" && level != "basic" && level != "full" -> return None
                 if levels.contains(level) -> return None
-                &levels.push(level)
+                levels.push(level)
             }
             Val(levels.join(","))
         }
@@ -292,14 +292,14 @@ test_settings_put: fn(settings: &[TestSetting], setting: TestSetting) Never! {
             return
         }
     }
-    &settings.push(setting)
+    settings.push(setting)
 }
 
 // `later` over `earlier`: every row `later` writes replaces the earlier value.
 test_settings_layered: fn(earlier: [TestSetting], later: [TestSetting]) -> [TestSetting] Never! {
     // copy: `earlier` stays with the caller; the layered list owns its rows.
     merged := earlier.copy()
-    loop setting in later -> test_settings_put(&merged, setting.copy())
+    loop setting in later -> test_settings_put(merged, setting.copy())
     merged
 }
 
@@ -374,7 +374,7 @@ test_settings_parse_lines: fn(text: String, source: String) -> [TestSetting] Tes
         value: test_setting_value(row, raw) ?? return Err(TestSettingError{message: "`t.{row.name}(…)` needs {test_setting_hint(row)}, not `{raw}`"})
         if !row.ported -> return Err(TestSettingError{message: "`t.{row.name}(…)` is not ported to the Jet test runner yet"})
         from: if parts.len() > 2 -> parts[2].copy() else -> source.copy()
-        test_settings_put(&settings, TestSetting{name: row.name.copy(), value: value, source: from})
+        test_settings_put(settings, TestSetting{name: row.name.copy(), value: value, source: from})
     }
     Ok(settings)
 }

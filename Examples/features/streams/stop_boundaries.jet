@@ -10,7 +10,7 @@ CleanupMarker: struct {
 }
 
 impl CleanupMarker.Close {
-    close: fn(^self) { print("cleanup: {self.name}") }
+    close: fn(&&self) { print("cleanup: {self.name}") }
 }
 
 #Error
@@ -20,7 +20,7 @@ ParseError: struct {
 
 guarded: fn(name: String) -> Stream<Int> {
     marker := CleanupMarker{name: name}
-    defer close(^marker)
+    defer close(marker)
     yield 1
     yield 2
     yield 3
@@ -80,7 +80,7 @@ run: fn() {
     worker: task consume_until_cancel(started_tx, gate_rx)
     print("task: started with {started_rx.receive() ?? -1}")
     worker.cancel()
-    if ^worker.join() == {
+    if worker.join() == {
         .Ok(sum) -> print("task: finished {sum}")
         .Err(error) -> print("task: {failure_label(error)}")
     }
@@ -96,8 +96,8 @@ run: fn() {
 
     // (f) a partial read keeps the remainder.
     reader: Reader.over([U8]{1, 2, 3, 4, 5})
-    head: &reader.take(2) ?? [U8]{}
+    head: reader.take(2) ?? [U8]{}
     print("reader: head {head} remaining {reader.remaining()}")
-    rest: &reader.take(reader.remaining()) ?? [U8]{}
+    rest: reader.take(reader.remaining()) ?? [U8]{}
     print("reader: rest {rest} remaining {reader.remaining()}")
 }

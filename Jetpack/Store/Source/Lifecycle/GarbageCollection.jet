@@ -84,18 +84,18 @@ store_clean_locks: fn(roots: HangarRoots) -[FS, Env, Time]> CleanLocks StoreErro
 // project lock and the lifecycle journal; the caller holds the Hangar lock.
 store_live_roots_unlocked: fn(verification: &StoreVerification, roots: HangarRoots) -[FS, Env, Time]> LiveRoots StoreError! {
     cwd: files.cwd()
-    graph: store_lifecycle_closure_graph_unlocked(&verification, roots)
-    store_live_roots_from_graph(&verification, roots, cwd, graph)
+    graph: store_lifecycle_closure_graph_unlocked(verification, roots)
+    store_live_roots_from_graph(verification, roots, cwd, graph)
 }
 
 // Rust `live_roots_from_graph`: lock and lifecycle roots expanded through
 // the closure graph.
 store_live_roots_from_graph: fn(verification: &StoreVerification, roots: HangarRoots, start: String, graph: ClosureGraph) -[FS, Env, Time]> LiveRoots StoreError! {
     live := store_lock_roots_from(start)
-    lifecycle: store_lifecycle_protected_targets_unlocked(&verification, roots)
+    lifecycle: store_lifecycle_protected_targets_unlocked(verification, roots)
     targets := live.output_hashes
     record_ids := graph.records.keys().to_list()
-    &record_ids.sort()
+    record_ids.sort()
     loop pair in live.receipt_packages {
         known := false
         matching := [String]{}
@@ -105,7 +105,7 @@ store_live_roots_from_graph: fn(verification: &StoreVerification, roots: HangarR
             if meta.receipt != pair.receipt -> next
             known = true
             same: meta.name == pair.package.name && meta.version == pair.package.version && store_receipt_source_matches(pair.package, meta.reference) && store_receipt_envelope_matches(pair.package, meta.envelope.output_hash)
-            if same -> &matching.push(record.primary)
+            if same -> matching.push(record.primary)
         }
         // A receipt this Hangar never issued belongs to a project served by
         // another root; it protects nothing here and must not fail clean.
@@ -115,28 +115,28 @@ store_live_roots_from_graph: fn(verification: &StoreVerification, roots: HangarR
         }
         // A receipt is the lock's projection of the action root; reachability
         // follows the same graph closure as output and lifecycle roots.
-        loop primary in matching -> store_gc_add(&targets, primary)
+        loop primary in matching -> store_gc_add(targets, primary)
     }
     loop id in live.ids {
         record: graph.records.get(id) ?? next
-        store_gc_add(&targets, record.primary)
+        store_gc_add(targets, record.primary)
     }
     loop id in record_ids {
         record: graph.records[id]
         meta: pkg_parse_meta(record.package_meta) ?? next
-        if live.name_versions.contains(LockNameVersion{name: meta.name, version: meta.version}) -> store_gc_add(&targets, record.primary)
+        if live.name_versions.contains(LockNameVersion{name: meta.name, version: meta.version}) -> store_gc_add(targets, record.primary)
     }
-    loop target in lifecycle -> store_gc_add(&targets, target)
+    loop target in lifecycle -> store_gc_add(targets, target)
     loop target in targets {
         members: graph.closure(target)
-        loop member in members -> store_gc_add(&live.output_hashes, member)
+        loop member in members -> store_gc_add(live.output_hashes, member)
     }
     Ok(live)
 }
 
 // Push `value` unless the set already holds it.
 store_gc_add: fn(set: &[String], value: String) Never! {
-    if !set.contains(value) -> &set.push(value)
+    if !set.contains(value) -> set.push(value)
 }
 
 // Rust `Path::parent`: None at a root or for the empty path.
@@ -182,23 +182,23 @@ store_lock_roots_from: fn(start: String) -[FS]> LiveRoots StoreError! {
     roots := LiveRoots.empty()
     loop pkg in lock.packages {
         name_version: LockNameVersion{name: pkg.name, version: pkg.version}
-        if !roots.name_versions.contains(name_version) -> &roots.name_versions.push(name_version)
+        if !roots.name_versions.contains(name_version) -> roots.name_versions.push(name_version)
         if pkg.receipt == {
             .Val(receipt) -> {
                 if !store_valid_receipt_digest(receipt) -> return Err(StoreError.InvalidData("project lock `{lock_path}` contains an invalid Hangar receipt"))
-                store_gc_add(&roots.receipts, receipt)
-                &roots.receipt_packages.push(LockReceiptPackage{receipt, package: pkg})
+                store_gc_add(roots.receipts, receipt)
+                roots.receipt_packages.push(LockReceiptPackage{receipt, package: pkg})
             }
             .None -> {}
         }
         if pkg.envelope == {
-            .Val(envelope) -> if envelope.output_hash != "" -> store_gc_add(&roots.output_hashes, envelope.output_hash)
+            .Val(envelope) -> if envelope.output_hash != "" -> store_gc_add(roots.output_hashes, envelope.output_hash)
             .None -> {}
         }
     }
     loop toolchain in lock.toolchains {
-        store_gc_add(&roots.ids, toolchain.id)
-        if toolchain.envelope.output_hash != "" -> store_gc_add(&roots.output_hashes, toolchain.envelope.output_hash)
+        store_gc_add(roots.ids, toolchain.id)
+        if toolchain.envelope.output_hash != "" -> store_gc_add(roots.output_hashes, toolchain.envelope.output_hash)
     }
     Ok(roots)
 }
@@ -287,7 +287,7 @@ store_retained_receipts: fn(roots: HangarRoots, live: LiveRoots, now: Int, retir
         keep: store_is_live(entry.name, meta, live) || fresh
         if keep && meta.receipt != "" {
             if !store_valid_receipt_digest(meta.receipt) -> return Err(StoreError.InvalidData("Hangar object `{entry.name}` has an invalid receipt digest"))
-            store_gc_add(&retained, meta.receipt)
+            store_gc_add(retained, meta.receipt)
         }
     }
     Ok(retained)
@@ -295,7 +295,7 @@ store_retained_receipts: fn(roots: HangarRoots, live: LiveRoots, now: Int, retir
 
 // Rust `collect_orphaned_canonical_objects`.
 store_collect_orphaned_canonical_objects: fn(verification: &StoreVerification, roots: HangarRoots, live: LiveRoots, retired: [String]) -[FS, Env]> [OrphanedCanonicalObject] StoreError! {
-    graph: store_lifecycle_closure_graph_unlocked(&verification, roots)
+    graph: store_lifecycle_closure_graph_unlocked(verification, roots)
     store_collect_orphaned_canonical_objects_with_graph(roots, live, retired, graph)
 }
 
@@ -305,7 +305,7 @@ store_collect_orphaned_canonical_objects: fn(verification: &StoreVerification, r
 store_collect_orphaned_canonical_objects_with_graph: fn(roots: HangarRoots, live: LiveRoots, retired: [String], graph: ClosureGraph) -[FS, Env]> [OrphanedCanonicalObject] StoreError! {
     protected := live.output_hashes
     record_ids := graph.records.keys().to_list()
-    &record_ids.sort()
+    record_ids.sort()
     loop id in record_ids {
         if retired.contains(id) -> next
         // A package owns every named output, not only its primary; keep this
@@ -314,7 +314,7 @@ store_collect_orphaned_canonical_objects_with_graph: fn(roots: HangarRoots, live
         names: outputs.keys()
         loop name in names {
             members: graph.closure(outputs[name])
-            loop member in members -> store_gc_add(&protected, member)
+            loop member in members -> store_gc_add(protected, member)
         }
     }
     objects: files.join(roots.hangar_dir(), STORE_OBJECTS_DIR)
@@ -330,13 +330,13 @@ store_collect_orphaned_canonical_objects_with_graph: fn(roots: HangarRoots, live
             metadata.is_symlink -> {
                 // A link root is accounted as the link itself; its target is
                 // never walked.
-                if candidate -> &orphaned.push(OrphanedCanonicalObject{path: item.path, bytes: metadata.size})
+                if candidate -> orphaned.push(OrphanedCanonicalObject{path: item.path, bytes: metadata.size})
             }
-            metadata.is_dir && candidate -> &orphaned.push(OrphanedCanonicalObject{path: item.path, bytes: store_dir_size(item.path)})
+            metadata.is_dir && candidate -> orphaned.push(OrphanedCanonicalObject{path: item.path, bytes: store_dir_size(item.path)})
             else -> {}
         }
     }
-    &orphaned.sort_by(object -> object.path)
+    orphaned.sort_by(object -> object.path)
     Ok(orphaned)
 }
 
@@ -348,7 +348,7 @@ store_remove_hangar_node: fn(verification: &StoreVerification, path: String) Sto
     is_object_node: files.basename(parent) == STORE_OBJECTS_DIR
     if is_object_node {
         hangar: files.dirname(parent)
-        if hangar != "" && hangar != parent -> store_remove_seal(&verification, path, hangar)
+        if hangar != "" && hangar != parent -> store_remove_seal(verification, path, hangar)
     }
     metadata: files.stat(path)
     if metadata.is_symlink {
@@ -408,17 +408,17 @@ store_clean_plan: fn(verification: &StoreVerification, roots: HangarRoots) -[FS,
     if found == None -> return Ok(CleanReport.empty())
     store_require_real_directory(store, "Hangar root")
     locks: store_clean_locks(roots)
-    store_clean_plan_unlocked(&verification, roots)
+    store_clean_plan_unlocked(verification, roots)
 }
 
 store_clean_plan_unlocked: fn(verification: &StoreVerification, roots: HangarRoots) -[FS, Env, Time]> CleanReport StoreError! {
     store: roots.hangar_dir()
     malformed: store_malformed_objects(store)
     retired := [String]{}
-    loop object in malformed -> store_gc_add(&retired, object.id)
-    graph: if retired.len() == 0 -> store_lifecycle_closure_graph_unlocked(&verification, roots) else -> store_lifecycle_closure_graph_unlocked_ignoring(&verification, roots, retired)
+    loop object in malformed -> store_gc_add(retired, object.id)
+    graph: if retired.len() == 0 -> store_lifecycle_closure_graph_unlocked(verification, roots) else -> store_lifecycle_closure_graph_unlocked_ignoring(verification, roots, retired)
     cwd: files.cwd()
-    live: store_live_roots_from_graph(&verification, roots, cwd, graph)
+    live: store_live_roots_from_graph(verification, roots, cwd, graph)
     report := store_gc_sweep_scratch(store, false)
     report.quarantined_objects = malformed.len()
     now: store_now_secs()
@@ -430,7 +430,7 @@ store_clean_plan_unlocked: fn(verification: &StoreVerification, roots: HangarRoo
         if store_is_live(entry.name, meta, live) -> next
         last_used: meta.last_used_at ?? next
         if store_gc_age(now, last_used) < STORE_STALE_AFTER_SECONDS -> next
-        store_gc_add(&retired, entry.name)
+        store_gc_add(retired, entry.name)
         report.removed_objects += 1
         report.removed_bytes += store_dir_size(entry.path)
     }
@@ -453,17 +453,17 @@ store_clean_plan_unlocked: fn(verification: &StoreVerification, roots: HangarRoo
 // Rust `clean`.
 store_clean: fn(verification: &StoreVerification, roots: HangarRoots) -[FS, Env, Time]> CleanReport StoreError! {
     locks: store_clean_locks(roots)
-    store_clean_unlocked(&verification, roots)
+    store_clean_unlocked(verification, roots)
 }
 
 store_clean_unlocked: fn(verification: &StoreVerification, roots: HangarRoots) -[FS, Env, Time]> CleanReport StoreError! {
     store: roots.hangar_dir()
     store_ensure_real_directory(store, "Hangar root")
     malformed: store_malformed_objects(store)
-    quarantined: store_quarantine_malformed_objects(&verification, roots, malformed)
-    graph: store_lifecycle_closure_graph_unlocked(&verification, roots)
+    quarantined: store_quarantine_malformed_objects(verification, roots, malformed)
+    graph: store_lifecycle_closure_graph_unlocked(verification, roots)
     cwd: files.cwd()
-    live: store_live_roots_from_graph(&verification, roots, cwd, graph)
+    live: store_live_roots_from_graph(verification, roots, cwd, graph)
     report := store_gc_sweep_scratch(store, true)
     report.quarantined_objects = quarantined
     now: store_now_secs()
@@ -475,16 +475,16 @@ store_clean_unlocked: fn(verification: &StoreVerification, roots: HangarRoots) -
         last_used: meta.last_used_at ?? next
         if store_gc_age(now, last_used) < STORE_STALE_AFTER_SECONDS -> next
         bytes: store_dir_size(entry.path)
-        store_gc_add(&retired, entry.name)
-        _: store_tombstone_closure_record_unlocked(&verification, roots, entry.name)
-        store_remove_seal(&verification, entry.path, store)
+        store_gc_add(retired, entry.name)
+        _: store_tombstone_closure_record_unlocked(verification, roots, entry.name)
+        store_remove_seal(verification, entry.path, store)
         files.remove_all(entry.path)
         report.removed_objects += 1
         report.removed_bytes += bytes
     }
     orphaned: store_collect_orphaned_canonical_objects_with_graph(roots, live, retired, graph)
     loop node in orphaned {
-        store_remove_hangar_node(&verification, node.path)
+        store_remove_hangar_node(verification, node.path)
         report.removed_objects += 1
         report.removed_bytes += node.bytes
     }
@@ -493,7 +493,7 @@ store_clean_unlocked: fn(verification: &StoreVerification, roots: HangarRoots) -
     receipts: store_sweep_receipts(store, retained, true)
     report.removed_receipts += receipts.removed_receipts
     report.removed_receipt_bytes += receipts.removed_receipt_bytes
-    optimized: store_optimize_hangar(&verification, roots)
+    optimized: store_optimize_hangar(verification, roots)
     report.optimized_files += optimized.optimized_files
     report.optimized_bytes += optimized.optimized_bytes
     Ok(report)
@@ -514,7 +514,7 @@ store_maybe_auto_clean: fn(verification: &StoreVerification, roots: HangarRoots)
             .Err(_) -> {}
         }
     }
-    report: store_clean_unlocked(&verification, roots)
+    report: store_clean_unlocked(verification, roots)
     files.write(stamp, "{store_now_secs()}").drop("the auto-clean stamp is advisory; a missing stamp only cleans again sooner")
     Ok(Val(report))
 }
@@ -588,9 +588,9 @@ store_object_dirs: fn(hangar: String) -[FS]> [DirEntry] StoreError! {
         metadata: files.stat(entry.path)
         if store_gc_reserved_name(entry.name) -> next
         if metadata.is_symlink -> return Err(StoreError.InvalidData("Hangar object entry is a symlink: {entry.path}"))
-        if metadata.is_dir -> &out.push(entry)
+        if metadata.is_dir -> out.push(entry)
     }
-    &out.sort_by(entry -> entry.name)
+    out.sort_by(entry -> entry.name)
     Ok(out)
 }
 
@@ -614,9 +614,9 @@ store_files_under: fn(root: String) -[FS]> [String] Never! {
             metadata.is_symlink -> next
             metadata.is_dir -> {
                 nested: store_files_under(entry.path)
-                loop file in nested -> &out.push(file)
+                loop file in nested -> out.push(file)
             }
-            metadata.is_file -> &out.push(entry.path)
+            metadata.is_file -> out.push(entry.path)
             else -> {}
         }
     }

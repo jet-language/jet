@@ -10,17 +10,17 @@ use jet_cli.[
 // The runtime's record layout (JetRuntime ObserveLive.jet): little-endian
 // words; a text is its byte length (-1 when absent) and its bytes.
 live_inspect_u64: fn(out: &[U8], value: U64) Never! {
-    loop index in 0..<8 -> &out.push(U8{Int.from_u64((value >> (index * 8)).bit_and(U64{255}))})
+    loop index in 0..<8 -> out.push(U8{Int.from_u64((value >> (index * 8)).bit_and(U64{255}))})
 }
 live_inspect_word: fn(out: &[U8], word: Int) Never! {
-    if word < 0 -> live_inspect_u64(&out, U64{word + 9223372036854775807 + 1} + U64{9223372036854775808}) else -> live_inspect_u64(&out, U64{word})
+    if word < 0 -> live_inspect_u64(out, U64{word + 9223372036854775807 + 1} + U64{9223372036854775808}) else -> live_inspect_u64(out, U64{word})
 }
 live_inspect_put: fn(out: &[U8], text: String?) Never! {
     if text == .Val(present) {
-        live_inspect_word(&out, present.bytes().len())
-        loop byte in present.bytes() -> &out.push(byte)
+        live_inspect_word(out, present.bytes().len())
+        loop byte in present.bytes() -> out.push(byte)
     } else {
-        live_inspect_word(&out, -1)
+        live_inspect_word(out, -1)
     }
 }
 live_inspect_state: fn(state: String) -> Int Never! {
@@ -31,80 +31,80 @@ live_inspect_state: fn(state: String) -> Int Never! {
 }
 live_inspect_bytes: fn(snapshot: JetCLILiveSnapshot) -> [U8] Never! {
     out := [U8]{}
-    live_inspect_word(&out, 3550338754064696650)
-    live_inspect_word(&out, 1)
-    live_inspect_word(&out, snapshot.pid)
-    live_inspect_word(&out, snapshot.captured_ms)
-    live_inspect_word(&out, snapshot.runtime.elapsed_ns)
-    live_inspect_u64(&out, snapshot.boot_ns)
-    live_inspect_u64(&out, snapshot.start_ticks)
-    live_inspect_word(&out, snapshot.clock_hz)
-    live_inspect_word(&out, if snapshot.runtime.exit -> 1 else -> 0)
-    loop key in ([String]{"arenas", "arena_allocations", "arena_bytes", "workers", "queued"}) -> live_inspect_word(&out, snapshot.resources.get(key) ?? 0)
-    live_inspect_put(&out, Val(snapshot.session_id.copy()))
-    live_inspect_put(&out, Val(snapshot.source_id.copy()))
-    live_inspect_put(&out, Val(snapshot.build_id.copy()))
-    live_inspect_put(&out, Val(snapshot.revision.copy()))
-    live_inspect_put(&out, Val(snapshot.world_id.copy()))
-    live_inspect_word(&out, 1)
-    live_inspect_word(&out, snapshot.tasks.len())
+    live_inspect_word(out, 3550338754064696650)
+    live_inspect_word(out, 1)
+    live_inspect_word(out, snapshot.pid)
+    live_inspect_word(out, snapshot.captured_ms)
+    live_inspect_word(out, snapshot.runtime.elapsed_ns)
+    live_inspect_u64(out, snapshot.boot_ns)
+    live_inspect_u64(out, snapshot.start_ticks)
+    live_inspect_word(out, snapshot.clock_hz)
+    live_inspect_word(out, if snapshot.runtime.exit -> 1 else -> 0)
+    loop key in ([String]{"arenas", "arena_allocations", "arena_bytes", "workers", "queued"}) -> live_inspect_word(out, snapshot.resources.get(key) ?? 0)
+    live_inspect_put(out, Val(snapshot.session_id.copy()))
+    live_inspect_put(out, Val(snapshot.source_id.copy()))
+    live_inspect_put(out, Val(snapshot.build_id.copy()))
+    live_inspect_put(out, Val(snapshot.revision.copy()))
+    live_inspect_put(out, Val(snapshot.world_id.copy()))
+    live_inspect_word(out, 1)
+    live_inspect_word(out, snapshot.tasks.len())
     loop row in snapshot.tasks {
-        live_inspect_word(&out, row.id)
-        live_inspect_word(&out, row.parent)
-        live_inspect_word(&out, 0)
-        live_inspect_word(&out, live_inspect_state(row.state))
-        live_inspect_word(&out, if row.deadline_ms == None -> 0 else -> 1)
-        live_inspect_word(&out, row.deadline_ms ?? 0)
-        live_inspect_word(&out, if row.cancelled -> 1 else -> 0)
-        live_inspect_put(&out, None)
-        live_inspect_put(&out, Val(row.wait.copy()))
+        live_inspect_word(out, row.id)
+        live_inspect_word(out, row.parent)
+        live_inspect_word(out, 0)
+        live_inspect_word(out, live_inspect_state(row.state))
+        live_inspect_word(out, if row.deadline_ms == None -> 0 else -> 1)
+        live_inspect_word(out, row.deadline_ms ?? 0)
+        live_inspect_word(out, if row.cancelled -> 1 else -> 0)
+        live_inspect_put(out, None)
+        live_inspect_put(out, Val(row.wait.copy()))
     }
     if snapshot.channels.len() > 0 {
-        live_inspect_word(&out, 2)
-        live_inspect_word(&out, snapshot.channels.len())
+        live_inspect_word(out, 2)
+        live_inspect_word(out, snapshot.channels.len())
         loop channel in snapshot.channels {
-            live_inspect_word(&out, channel.id)
-            live_inspect_word(&out, channel.depth)
-            live_inspect_word(&out, if channel.capacity == None -> 0 else -> 1)
-            live_inspect_word(&out, channel.capacity ?? 0)
-            live_inspect_word(&out, channel.send_waiters)
-            live_inspect_word(&out, channel.recv_waiters)
-            live_inspect_word(&out, if channel.closed -> 1 else -> 0)
+            live_inspect_word(out, channel.id)
+            live_inspect_word(out, channel.depth)
+            live_inspect_word(out, if channel.capacity == None -> 0 else -> 1)
+            live_inspect_word(out, channel.capacity ?? 0)
+            live_inspect_word(out, channel.send_waiters)
+            live_inspect_word(out, channel.recv_waiters)
+            live_inspect_word(out, if channel.closed -> 1 else -> 0)
         }
     }
     if snapshot.values.len() > 0 {
-        live_inspect_word(&out, 3)
-        live_inspect_word(&out, snapshot.values.len())
+        live_inspect_word(out, 3)
+        live_inspect_word(out, snapshot.values.len())
         loop value in snapshot.values {
-            live_inspect_put(&out, Val(value.value_id.copy()))
-            live_inspect_put(&out, Val(value.type_identity.copy()))
-            live_inspect_put(&out, Val(value.disposition.copy()))
-            live_inspect_put(&out, Val(value.reason.copy()))
-            if value.rendered_value == .Val(shown) -> live_inspect_put(&out, Val(shown.copy())) else -> live_inspect_put(&out, None)
+            live_inspect_put(out, Val(value.value_id.copy()))
+            live_inspect_put(out, Val(value.type_identity.copy()))
+            live_inspect_put(out, Val(value.disposition.copy()))
+            live_inspect_put(out, Val(value.reason.copy()))
+            if value.rendered_value == .Val(shown) -> live_inspect_put(out, Val(shown.copy())) else -> live_inspect_put(out, None)
         }
     }
     if snapshot.event_records.len() > 0 {
-        live_inspect_word(&out, 4)
-        live_inspect_word(&out, snapshot.event_records.len())
+        live_inspect_word(out, 4)
+        live_inspect_word(out, snapshot.event_records.len())
         loop event in snapshot.event_records {
-            live_inspect_word(&out, event.sequence)
-            live_inspect_put(&out, Val(event.source.copy()))
-            live_inspect_word(&out, event.event_id)
-            live_inspect_word(&out, event.owner_id)
-            live_inspect_word(&out, event.subscription_id)
-            live_inspect_word(&out, event.dispatch_id)
-            live_inspect_put(&out, Val(event.lifecycle.copy()))
-            live_inspect_word(&out, event.queued)
-            live_inspect_word(&out, event.blocked)
-            live_inspect_word(&out, event.running)
-            live_inspect_word(&out, event.capacity)
-            live_inspect_put(&out, Val(event.overflow.copy()))
-            live_inspect_word(&out, event.priority)
-            live_inspect_put(&out, Val(event.failure.copy()))
-            live_inspect_put(&out, Val(event.terminal.copy()))
+            live_inspect_word(out, event.sequence)
+            live_inspect_put(out, Val(event.source.copy()))
+            live_inspect_word(out, event.event_id)
+            live_inspect_word(out, event.owner_id)
+            live_inspect_word(out, event.subscription_id)
+            live_inspect_word(out, event.dispatch_id)
+            live_inspect_put(out, Val(event.lifecycle.copy()))
+            live_inspect_word(out, event.queued)
+            live_inspect_word(out, event.blocked)
+            live_inspect_word(out, event.running)
+            live_inspect_word(out, event.capacity)
+            live_inspect_put(out, Val(event.overflow.copy()))
+            live_inspect_word(out, event.priority)
+            live_inspect_put(out, Val(event.failure.copy()))
+            live_inspect_put(out, Val(event.terminal.copy()))
         }
     }
-    live_inspect_word(&out, 0)
+    live_inspect_word(out, 0)
     out
 }
 live_inspect_event: fn(sequence: Int) -> JetCLILiveEvent Never! {
@@ -148,8 +148,8 @@ live_inspect_decoded: fn(snapshot: JetCLILiveSnapshot) -> JetCLILiveSnapshot Nev
 }
 live_inspect_stat: fn(start: String, user: String, system: String) -> String Never! {
     fields := [String]{"S"}
-    loop index in 1..<19 -> &fields.push(if index == 11 -> user else if index == 12 -> system else -> "0")
-    &fields.push(start)
+    loop index in 1..<19 -> fields.push(if index == 11 -> user else if index == 12 -> system else -> "0")
+    fields.push(start)
     "42 (name ) with spaces) {fields.join(" ")}\n"
 }
 #Test("live_inspect") {
@@ -207,18 +207,18 @@ live_inspect_stat: fn(start: String, user: String, system: String) -> String Nev
     assert((jet_cli_live_decode(wide) ?? panic(err.message)).resources.get("arena_bytes") == Val(9223372036854775807))
     // The process facts: start time binds the snapshot, CPU is since the run start.
     bound := live_inspect_decoded(live_inspect_fixture())
-    jet_cli_live_bind(&bound, live_inspect_stat("1234", "5", "2")) ?? panic(err.message)
+    jet_cli_live_bind(bound, live_inspect_stat("1234", "5", "2")) ?? panic(err.message)
     assert(bound.start_id == "1234" && bound.runtime.cpu_ns == Val(40000000))
     unbound := live_inspect_decoded(live_inspect_fixture())
-    if jet_cli_live_bind(&unbound, live_inspect_stat("2001", "5", "2")) == {
+    if jet_cli_live_bind(unbound, live_inspect_stat("2001", "5", "2")) == {
         .Err(error) -> assert(error.message.contains("does not belong to process 42"))
         .Ok(_) -> panic("bound a later process to the snapshot")
     }
     no_cpu := live_inspect_decoded(live_inspect_fixture())
-    jet_cli_live_bind(&no_cpu, live_inspect_stat("1234", "18446744073", "1")) ?? panic(err.message)
+    jet_cli_live_bind(no_cpu, live_inspect_stat("1234", "18446744073", "1")) ?? panic(err.message)
     assert(no_cpu.runtime.cpu_ns == None)
     truncated_stat := live_inspect_decoded(live_inspect_fixture())
-    if jet_cli_live_bind(&truncated_stat, "42 (name) S 1 2\n") == {
+    if jet_cli_live_bind(truncated_stat, "42 (name) S 1 2\n") == {
         .Err(error) -> assert(error.message.contains("truncated"))
         .Ok(_) -> panic("accepted a truncated stat")
     }
@@ -229,17 +229,17 @@ live_inspect_stat: fn(start: String, user: String, system: String) -> String Nev
     live_inspect_rejected(magic, "unsupported schema")
     live_inspect_rejected(good[0..<good.len() - 1].copy(), "truncated")
     trailing := good.copy()
-    &trailing.push(U8{0})
+    trailing.push(U8{0})
     live_inspect_rejected(trailing, "trailing bytes")
     unknown := good[0..<good.len() - 8].copy()
-    live_inspect_word(&unknown, 9)
-    live_inspect_word(&unknown, 0)
-    live_inspect_word(&unknown, 0)
+    live_inspect_word(unknown, 9)
+    live_inspect_word(unknown, 0)
+    live_inspect_word(unknown, 0)
     live_inspect_rejected(unknown, "unknown section")
     repeated_section := good[0..<good.len() - 8].copy()
-    live_inspect_word(&repeated_section, 2)
-    live_inspect_word(&repeated_section, 0)
-    live_inspect_word(&repeated_section, 0)
+    live_inspect_word(repeated_section, 2)
+    live_inspect_word(repeated_section, 0)
+    live_inspect_word(repeated_section, 0)
     live_inspect_rejected(repeated_section, "repeats a section")
     invented := live_inspect_fixture()
     invented.values = [JetCLILiveValue]{live_inspect_value("app::counter", "Int", "invented", Val("7"))}
@@ -247,7 +247,7 @@ live_inspect_stat: fn(start: String, user: String, system: String) -> String Nev
     many_values := live_inspect_fixture()
     many_values.values = loop _ in 0..<4096 -> live_inspect_value("app::counter", "Int", "kept", Val("7"))
     assert(live_inspect_decoded(many_values).values.len() == 4096)
-    &many_values.values.push(live_inspect_value("app::counter", "Int", "kept", Val("7")))
+    many_values.values.push(live_inspect_value("app::counter", "Int", "kept", Val("7")))
     live_inspect_rejected(live_inspect_bytes(many_values), "too many values")
     many_tasks := live_inspect_fixture()
     many_tasks.tasks = loop index in 0..<4097 -> JetCLILiveTask{id: index, parent: 0, state: "queued", wait: "", deadline_ms: None, cancelled: false}

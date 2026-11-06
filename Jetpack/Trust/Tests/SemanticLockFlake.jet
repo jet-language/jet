@@ -159,7 +159,7 @@ TRUST_TEST_STAGE_A_LOCK: comptime { `{
 `)
     package_outputs := [String]{}
     loop output in graph.outputs {
-        if output.kind == FlakeOutputKind.Package -> &package_outputs.push(output.attribute)
+        if output.kind == FlakeOutputKind.Package -> package_outputs.push(output.attribute)
     }
     assert_eq(package_outputs, [String]{"fetched"})
 }
@@ -173,7 +173,7 @@ TRUST_TEST_STAGE_A_LOCK: comptime { `{
         assert_eq(input.revision, expected_revisions.get(input.name) ?? panic("unexpected input {input.name}"))
     }
     node_names := [String]{}
-    loop node in graph.lock_nodes -> &node_names.push(node.name)
+    loop node in graph.lock_nodes -> node_names.push(node.name)
     assert_eq(node_names, [String]{"flake-utils", "nixpkgs", "root", "systems"})
     flake_utils: trust_flake_find_node(graph.lock_nodes, "flake-utils") ?? panic("flake-utils node")
     assert_eq(flake_utils.inputs[0].name, "systems")

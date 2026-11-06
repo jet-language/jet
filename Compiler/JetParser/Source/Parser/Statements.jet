@@ -98,15 +98,15 @@ use {
 }
 
 parser_statement_is_keyword: fn(state: &JetParserState) -> Bool Never! {
-    token: parser_current(&state)
+    token: parser_current(state)
     if token.kind == TOKEN_RETURN || token.kind == TOKEN_BREAK || token.kind == TOKEN_KW_YIELD -> return true
     if token.kind == TOKEN_KW_LOOP || token.kind == TOKEN_HASH || token.kind == TOKEN_AT -> return true
-    if token.kind == TOKEN_KW_COMPTIME && (parser_prep_verb_ahead(&state, 0, TOKEN_KW_IF) || parser_prep_verb_ahead(&state, 0, TOKEN_KW_LOOP) || parser_prep_verb_ahead(&state, 0, TOKEN_LBRACE)) -> return true
-    if parser_scope_member_ahead(&state) -> return true
+    if token.kind == TOKEN_KW_COMPTIME && (parser_prep_verb_ahead(state, 0, TOKEN_KW_IF) || parser_prep_verb_ahead(state, 0, TOKEN_KW_LOOP) || parser_prep_verb_ahead(state, 0, TOKEN_LBRACE)) -> return true
+    if parser_scope_member_ahead(state) -> return true
     if token.kind == TOKEN_IDENT {
         word: parser_value(state, token)
-        if parser_next_statement_ahead(&state) || word == "defer" -> return true
-        next_kind: parser_kind_at(&state, 1)
+        if parser_next_statement_ahead(state) || word == "defer" -> return true
+        next_kind: parser_kind_at(state, 1)
         if next_kind == TOKEN_COLON || next_kind == TOKEN_COLON_EQ -> return true
     }
     false
@@ -235,8 +235,8 @@ parser_statement_definitely_exits_value_block: fn(stmt: Stmt) -> Bool Never! {
 
 parser_loop_labels_with_current: fn(nested_labels: [String], label: NamedSpan?) -> [String] Never! {
     labels := [String]{}
-    loop nested_label in nested_labels -> &labels.push(nested_label)
-    if label == .Val(value) -> &labels.push(value.name)
+    loop nested_label in nested_labels -> labels.push(nested_label)
+    if label == .Val(value) -> labels.push(value.name)
     labels
 }
 
@@ -283,7 +283,7 @@ parser_loop_body_can_break_inner: fn(statements: [Stmt], nested_labels: [String]
 }
 
 parser_parse_block: fn(state: &JetParserState) -> ParsedBlock {
-    parser_parse_body_block(&state, false)
+    parser_parse_body_block(state, false)
 }
 
 // Rust `callable_tail_block_depth` (#18): the last line of a callable body
@@ -295,7 +295,7 @@ parser_parse_callable_body: fn(state: &JetParserState, value_tail: Bool) -> Pars
     saved_tail_value: state.callable_tail_value
     state.callable_tail_depth = state.block_depth + 1
     state.callable_tail_value = value_tail
-    block: parser_parse_body_block(&state, value_tail)
+    block: parser_parse_body_block(state, value_tail)
     state.callable_tail_depth = saved_tail_depth
     state.callable_tail_value = saved_tail_value
     block
@@ -304,52 +304,52 @@ parser_parse_callable_body: fn(state: &JetParserState, value_tail: Bool) -> Pars
 // Rust `block_stmts`: every braced statement list is one block level deeper.
 parser_parse_body_block: fn(state: &JetParserState, value_tail: Bool) -> ParsedBlock {
     state.block_depth += 1
-    block: parser_parse_body_lines(&state, value_tail)
+    block: parser_parse_body_lines(state, value_tail)
     state.block_depth -= 1
     block
 }
 
 parser_parse_body_lines: fn(state: &JetParserState, value_tail: Bool) -> ParsedBlock {
-    open: parser_expect(&state, TOKEN_LBRACE, "`{{` to begin the block")
+    open: parser_expect(state, TOKEN_LBRACE, "`{{` to begin the block")
     statements := [Stmt]{}
-    parser_skip_semicolons(&state)
-    loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
+    parser_skip_semicolons(state)
+    loop parser_current_kind(state) != TOKEN_RBRACE && parser_current_kind(state) != TOKEN_EOF {
         // An abort still pending here was raised by an enclosing construct;
         // its recovery rescans from the error, so reading on is wasted work.
-        if parser_aborting(&state) -> return ParsedBlock{span: parser_cover(open.span, parser_current(&state).span), statements: statements, tail: None}
+        if parser_aborting(state) -> return ParsedBlock{span: parser_cover(open.span, parser_current(state).span), statements: statements, tail: None}
         // A `#X: value` line directly in a function's body is one of the
         // function's markers, not a statement.
-        if state.block_depth == state.inbody_marker_depth && parser_inbody_marker_ahead(&state) {
-            if parser_parse_inbody_marker(&state) == .Val(line) -> &state.inbody_markers.push(line)
-            parser_skip_semicolons(&state)
+        if state.block_depth == state.inbody_marker_depth && parser_inbody_marker_ahead(state) {
+            if parser_parse_inbody_marker(state) == .Val(line) -> state.inbody_markers.push(line)
+            parser_skip_semicolons(state)
             next
         }
         before := state.position
-        kind: parser_current_kind(&state)
+        kind: parser_current_kind(state)
         statement: if {
-            value_tail && kind == TOKEN_KW_LOOP -> parser_parse_tail_loop(&state)
-            value_tail && kind == TOKEN_KW_IF -> parser_parse_tail_if(&state)
-            else -> parser_parse_statement(&state)
+            value_tail && kind == TOKEN_KW_LOOP -> parser_parse_tail_loop(state)
+            value_tail && kind == TOKEN_KW_IF -> parser_parse_tail_if(state)
+            else -> parser_parse_statement(state)
         }
-        &statements.push(statement)
-        parser_recover_aborted_statement(&state, before)
-        parser_skip_semicolons(&state)
+        statements.push(statement)
+        parser_recover_aborted_statement(state, before)
+        parser_skip_semicolons(state)
         if state.position == before {
-            token: parser_current(&state)
-            parser_add_error_code(&state, "E0003", token.span, "the parser could not advance through this statement", "statement recovery stops infinite retries on malformed input", "remove or complete this statement")
-            parser_bump(&state)
+            token: parser_current(state)
+            parser_add_error_code(state, "E0003", token.span, "the parser could not advance through this statement", "statement recovery stops infinite retries on malformed input", "remove or complete this statement")
+            parser_bump(state)
         }
     }
-    if parser_current_kind(&state) == TOKEN_EOF {
+    if parser_current_kind(state) == TOKEN_EOF {
         // E0083 (#3719): a block cut off by the end of the file names its opener.
-        parser_report_unclosed(&state, open, "the end of the file", "block")
-        end: parser_current(&state).span.start
-        &state.block_spans.push(Span{start: open.span.end, end: end})
+        parser_report_unclosed(state, open, "the end of the file", "block")
+        end: parser_current(state).span.start
+        state.block_spans.push(Span{start: open.span.end, end: end})
         return ParsedBlock{span: Span{start: open.span.start, end: end}, statements: statements, tail: None}
     }
-    close: parser_expect(&state, TOKEN_RBRACE, "`}}` to close the block")
+    close: parser_expect(state, TOKEN_RBRACE, "`}}` to close the block")
     inner: Span{start: open.span.end, end: close.span.start}
-    &state.block_spans.push(inner)
+    state.block_spans.push(inner)
     ParsedBlock{span: parser_cover(open.span, close.span), statements: statements, tail: None}
 }
 
@@ -357,40 +357,40 @@ parser_parse_body_lines: fn(state: &JetParserState, value_tail: Bool) -> ParsedB
 // the block's value. Any other loop form, or a loop with lines after it, is
 // parsed again as a statement.
 parser_parse_tail_loop: fn(state: &JetParserState) -> Stmt {
-    if !parser_tail_speculation_needed(state) -> return parser_parse_statement(&state)
+    if !parser_tail_speculation_needed(state) -> return parser_parse_statement(state)
     saved_position: state.position
     saved_diagnostics: state.diagnostics.len()
     saved_blocks: state.block_spans.len()
     saved_else_arms: state.else_arms.len()
-    parsed: parser_parse_expression(&state, 1, 0)
-    at_tail: parser_at_body_close(&state)
+    parsed: parser_parse_expression(state, 1, 0)
+    at_tail: parser_at_body_close(state)
     if at_tail && parser_expression_is_collecting_loop(parsed.expr) -> return Stmt.Expr{expr: parsed.expr}
-    parser_rewind(&state, saved_position, saved_diagnostics, saved_blocks, saved_else_arms)
-    parser_parse_statement(&state)
+    parser_rewind(state, saved_position, saved_diagnostics, saved_blocks, saved_else_arms)
+    parser_parse_statement(state)
 }
 
 // In the body of a callable with a declared result, a final
 // `if` in a value form (`->` branches, a guard table or a dispatch) is the
 // body's value. Any other `if` there is parsed again as a statement.
 parser_parse_tail_if: fn(state: &JetParserState) -> Stmt {
-    if !parser_expression_form_if_ahead(&state) -> return parser_parse_statement(&state)
+    if !parser_expression_form_if_ahead(state) -> return parser_parse_statement(state)
     saved_position: state.position
     saved_diagnostics: state.diagnostics.len()
     saved_blocks: state.block_spans.len()
     saved_else_arms: state.else_arms.len()
-    parsed: parser_parse_expression(&state, 1, 0)
-    at_tail: parser_at_body_close(&state)
+    parsed: parser_parse_expression(state, 1, 0)
+    at_tail: parser_at_body_close(state)
     if at_tail && !parser_error_since(state, saved_diagnostics) -> return Stmt.Expr{expr: parsed.expr}
     value_errors: state.diagnostics.len() - saved_diagnostics
-    parser_rewind(&state, saved_position, saved_diagnostics, saved_blocks, saved_else_arms)
-    statement: parser_parse_statement(&state)
+    parser_rewind(state, saved_position, saved_diagnostics, saved_blocks, saved_else_arms)
+    statement: parser_parse_statement(state)
     if !at_tail || !parser_error_since(state, saved_diagnostics) -> return statement
     // Both readings fail: keep the value form when the statement reading
     // only adds errors, so one bad arm head (E0366) does not cascade into
     // value arms read as statements (Rust reports the arm error alone).
     if state.diagnostics.len() - saved_diagnostics <= value_errors -> return statement
-    parser_rewind(&state, saved_position, saved_diagnostics, saved_blocks, saved_else_arms)
-    reparsed: parser_parse_expression(&state, 1, 0)
+    parser_rewind(state, saved_position, saved_diagnostics, saved_blocks, saved_else_arms)
+    reparsed: parser_parse_expression(state, 1, 0)
     Stmt.Expr{expr: reparsed.expr}
 }
 
@@ -408,14 +408,14 @@ parser_expression_is_collecting_loop: fn(expr: Expr) -> Bool Never! {
 // statement or declaration instead of nesting every later prepared binding
 // inside the first one without bound.
 parser_parse_value_block: fn(state: &JetParserState, depth: Int, prepared_value: Bool) -> ParsedBlock {
-    if !prepared_value -> return parser_parse_value_lines(&state, depth, false)
+    if !prepared_value -> return parser_parse_value_lines(state, depth, false)
     // Rust reads a prepared value's lines as a callable body (#18).
     saved_tail_depth: state.callable_tail_depth
     saved_tail_value: state.callable_tail_value
     state.block_depth += 1
     state.callable_tail_depth = state.block_depth
     state.callable_tail_value = true
-    block: parser_parse_value_lines(&state, depth, true)
+    block: parser_parse_value_lines(state, depth, true)
     state.block_depth -= 1
     state.callable_tail_depth = saved_tail_depth
     state.callable_tail_value = saved_tail_value
@@ -423,26 +423,26 @@ parser_parse_value_block: fn(state: &JetParserState, depth: Int, prepared_value:
 }
 
 parser_parse_value_lines: fn(state: &JetParserState, depth: Int, prepared_value: Bool) -> ParsedBlock {
-    open: parser_expect(&state, TOKEN_LBRACE, "`{{` to begin the value block")
+    open: parser_expect(state, TOKEN_LBRACE, "`{{` to begin the value block")
     statements := [Stmt]{}
     tail := Expr?{None}
     // S6-R: nested block statements leave a zero-width terminator before the
     // next value-block item; authored semicolons stay visible to diagnostics.
-    parser_skip_synthetic_semicolons(&state)
-    loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
+    parser_skip_synthetic_semicolons(state)
+    loop parser_current_kind(state) != TOKEN_RBRACE && parser_current_kind(state) != TOKEN_EOF {
         // As in `parser_parse_body_block`: stop under an enclosing abort.
-        if parser_aborting(&state) -> return ParsedBlock{span: parser_cover(open.span, parser_current(&state).span), statements: statements, tail: tail}
+        if parser_aborting(state) -> return ParsedBlock{span: parser_cover(open.span, parser_current(state).span), statements: statements, tail: tail}
         before := state.position
-        if prepared_value && parser_current_kind(&state) == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_COLON && parser_prep_verb_ahead(&state, 2, TOKEN_LBRACE) {
-            binding: parser_current(&state)
+        if prepared_value && parser_current_kind(state) == TOKEN_IDENT && parser_kind_at(state, 1) == TOKEN_COLON && parser_prep_verb_ahead(state, 2, TOKEN_LBRACE) {
+            binding: parser_current(state)
             binding_name: parser_value(state, binding)
-            parser_report_unclosed(&state, open, "the binding `{binding_name}`", "prepared value")
+            parser_report_unclosed(state, open, "the binding `{binding_name}`", "prepared value")
             // Leave the line terminator before the binding to end this one.
             if state.position > 0 && state.tokens[state.position - 1].kind == TOKEN_SEMI -> state.position = state.position - 1
-            return ParsedBlock{span: Span{start: open.span.start, end: binding.span.start}, statements: [Stmt]{}, tail: Val(Expr.Unit{span: open.span, id: parser_node_id(&state)})}
+            return ParsedBlock{span: Span{start: open.span.start, end: binding.span.start}, statements: [Stmt]{}, tail: Val(Expr.Unit{span: open.span, id: parser_node_id(state)})}
         }
         if {
-            parser_statement_is_keyword(&state) || parser_guard_table_has_statement_arm(state) || !parser_value_tail_ahead(state) -> &statements.push(parser_parse_statement(&state))
+            parser_statement_is_keyword(state) || parser_guard_table_has_statement_arm(state) || !parser_value_tail_ahead(state) -> statements.push(parser_parse_statement(state))
             else -> {
                 // As in Rust's value blocks: speculate on a tail value (a zero-width
                 // line terminator may sit before `}`), else reparse as a statement.
@@ -450,81 +450,81 @@ parser_parse_value_lines: fn(state: &JetParserState, depth: Int, prepared_value:
                 saved_diagnostics: state.diagnostics.len()
                 saved_blocks: state.block_spans.len()
                 saved_else_arms: state.else_arms.len()
-                value: parser_parse_expression(&state, 1, depth + 1)
-                current: parser_current(&state)
-                if !parser_error_since(state, saved_diagnostics) && (current.kind == TOKEN_RBRACE || (current.kind == TOKEN_SEMI && current.span.start == current.span.end && parser_kind_at(&state, 1) == TOKEN_RBRACE)) {
-                    if current.kind == TOKEN_SEMI -> parser_bump(&state)
+                value: parser_parse_expression(state, 1, depth + 1)
+                current: parser_current(state)
+                if !parser_error_since(state, saved_diagnostics) && (current.kind == TOKEN_RBRACE || (current.kind == TOKEN_SEMI && current.span.start == current.span.end && parser_kind_at(state, 1) == TOKEN_RBRACE)) {
+                    if current.kind == TOKEN_SEMI -> parser_bump(state)
                     tail = Val(value.expr)
                     break
                 }
-                parser_rewind(&state, saved_position, saved_diagnostics, saved_blocks, saved_else_arms)
-                &statements.push(parser_parse_statement(&state))
+                parser_rewind(state, saved_position, saved_diagnostics, saved_blocks, saved_else_arms)
+                statements.push(parser_parse_statement(state))
             }
         }
-        parser_recover_aborted_statement(&state, before)
-        parser_skip_synthetic_semicolons(&state)
+        parser_recover_aborted_statement(state, before)
+        parser_skip_synthetic_semicolons(state)
         if state.position == before {
-            token: parser_current(&state)
-            parser_add_error_code(&state, "E0003", token.span, "the parser could not advance through this block", "block recovery stops infinite retries on malformed input", "remove or complete this statement")
-            parser_bump(&state)
+            token: parser_current(state)
+            parser_add_error_code(state, "E0003", token.span, "the parser could not advance through this block", "block recovery stops infinite retries on malformed input", "remove or complete this statement")
+            parser_bump(state)
         }
     }
-    if parser_current_kind(&state) == TOKEN_EOF {
-        parser_report_unclosed(&state, open, "the end of the file", "block")
-        end: parser_current(&state).span.start
-        &state.block_spans.push(Span{start: open.span.end, end: end})
+    if parser_current_kind(state) == TOKEN_EOF {
+        parser_report_unclosed(state, open, "the end of the file", "block")
+        end: parser_current(state).span.start
+        state.block_spans.push(Span{start: open.span.end, end: end})
         return ParsedBlock{span: Span{start: open.span.start, end: end}, statements: statements, tail: tail}
     }
-    close: parser_expect(&state, TOKEN_RBRACE, "`}}` to close the value block")
+    close: parser_expect(state, TOKEN_RBRACE, "`}}` to close the value block")
     inner: Span{start: open.span.end, end: close.span.start}
-    &state.block_spans.push(inner)
+    state.block_spans.push(inner)
     ParsedBlock{span: parser_cover(open.span, close.span), statements: statements, tail: tail}
 }
 
 parser_parse_statement: fn(state: &JetParserState) -> Stmt {
-    parser_skip_semicolons(&state)
-    token: parser_current(&state)
+    parser_skip_semicolons(state)
+    token: parser_current(state)
     state.statement_start = token.span.start
-    if parser_scope_member_ahead(&state) -> return parser_parse_scope_member(&state)
+    if parser_scope_member_ahead(state) -> return parser_parse_scope_member(state)
     if token.kind == {
-        TOKEN_KW_IF -> parser_parse_if_statement(&state)
-        TOKEN_KW_LOOP -> parser_parse_loop_statement(&state)
-        TOKEN_RETURN -> parser_parse_return_statement(&state)
-        TOKEN_BREAK -> parser_parse_break_statement(&state)
+        TOKEN_KW_IF -> parser_parse_if_statement(state)
+        TOKEN_KW_LOOP -> parser_parse_loop_statement(state)
+        TOKEN_RETURN -> parser_parse_return_statement(state)
+        TOKEN_BREAK -> parser_parse_break_statement(state)
         TOKEN_KW_YIELD -> {
-            start: parser_bump(&state)
-            value: parser_parse_expression(&state, 1, 0)
-            parser_finish_statement(&state)
+            start: parser_bump(state)
+            value: parser_parse_expression(state, 1, 0)
+            parser_finish_statement(state)
             Stmt.Yield{value: value.expr, span: parser_cover(start.span, value.span)}
         }
         // `#Todo`, the one marker allowed only as an expression, starts an
         // ordinary expression statement, not a statement marker.
-        TOKEN_HASH -> if parser_kind_at(&state, 1) == TOKEN_IDENT && parser_value_at(&state, 1) == "Todo" -> parser_parse_assignment_or_expression(&state) else -> parser_parse_marked_statement(&state)
+        TOKEN_HASH -> if parser_kind_at(state, 1) == TOKEN_IDENT && parser_value_at(state, 1) == "Todo" -> parser_parse_assignment_or_expression(state) else -> parser_parse_marked_statement(state)
         TOKEN_KW_COMPTIME -> {
-            if parser_prep_verb_ahead(&state, 0, TOKEN_KW_IF) -> return parser_parse_prep_if(&state)
-            if parser_prep_verb_ahead(&state, 0, TOKEN_KW_LOOP) -> return parser_parse_prep_loop(&state)
-            if parser_prep_verb_ahead(&state, 0, TOKEN_LBRACE) -> return parser_parse_prep_block(&state)
-            parser_parse_assignment_or_expression(&state)
+            if parser_prep_verb_ahead(state, 0, TOKEN_KW_IF) -> return parser_parse_prep_if(state)
+            if parser_prep_verb_ahead(state, 0, TOKEN_KW_LOOP) -> return parser_parse_prep_loop(state)
+            if parser_prep_verb_ahead(state, 0, TOKEN_LBRACE) -> return parser_parse_prep_block(state)
+            parser_parse_assignment_or_expression(state)
         }
         TOKEN_IDENT -> {
-            if parser_next_statement_ahead(&state) -> return parser_parse_next_statement(&state)
+            if parser_next_statement_ahead(state) -> return parser_parse_next_statement(state)
             word: parser_value(state, token)
-            if word == "defer" -> return parser_parse_defer_statement(&state)
-            if parser_task_group_ahead(&state) -> return parser_parse_task_group(&state)
-            if word == "assert" && parser_kind_at(&state, 1) == TOKEN_IDENT -> return parser_parse_assert_names(&state)
-            if parser_kind_at(&state, 1) == TOKEN_COLON && parser_kind_at(&state, 2) == TOKEN_KW_LOOP && !parser_named_loop_is_value(&state) -> return parser_parse_labeled_loop(&state)
-            binding_kind: parser_kind_at(&state, 1)
+            if word == "defer" -> return parser_parse_defer_statement(state)
+            if parser_task_group_ahead(state) -> return parser_parse_task_group(state)
+            if word == "assert" && parser_kind_at(state, 1) == TOKEN_IDENT -> return parser_parse_assert_names(state)
+            if parser_kind_at(state, 1) == TOKEN_COLON && parser_kind_at(state, 2) == TOKEN_KW_LOOP && !parser_named_loop_is_value(state) -> return parser_parse_labeled_loop(state)
+            binding_kind: parser_kind_at(state, 1)
             if {
-                binding_kind == TOKEN_COLON_EQ || binding_kind == TOKEN_COLON -> parser_parse_binding_statement(&state)
-                (binding_kind == TOKEN_LBRACE || binding_kind == TOKEN_DOT) && parser_pattern_binding_ahead(&state) -> parser_parse_pattern_binding_statement(&state)
-                else -> parser_parse_assignment_or_expression(&state)
+                binding_kind == TOKEN_COLON_EQ || binding_kind == TOKEN_COLON -> parser_parse_binding_statement(state)
+                (binding_kind == TOKEN_LBRACE || binding_kind == TOKEN_DOT) && parser_pattern_binding_ahead(state) -> parser_parse_pattern_binding_statement(state)
+                else -> parser_parse_assignment_or_expression(state)
             }
         }
         else -> {
-            if (token.kind == TOKEN_LBRACKET || token.kind == TOKEN_LPAREN) && parser_pattern_binding_ahead(&state) -> return parser_parse_pattern_binding_statement(&state)
+            if (token.kind == TOKEN_LBRACKET || token.kind == TOKEN_LPAREN) && parser_pattern_binding_ahead(state) -> return parser_parse_pattern_binding_statement(state)
             // `{ member: local, … }: tuple` renames tuple members.
-            if token.kind == TOKEN_LBRACE && parser_kind_at(&state, 1) == TOKEN_IDENT && parser_pattern_binding_ahead(&state) -> return parser_parse_pattern_binding_statement(&state)
-            parser_parse_assignment_or_expression(&state)
+            if token.kind == TOKEN_LBRACE && parser_kind_at(state, 1) == TOKEN_IDENT && parser_pattern_binding_ahead(state) -> return parser_parse_pattern_binding_statement(state)
+            parser_parse_assignment_or_expression(state)
         }
     }
 }
@@ -533,18 +533,18 @@ parser_parse_statement: fn(state: &JetParserState) -> Stmt {
 // with no block after its parentheses is a leading-dot enum value, so a
 // braced body may end in one.
 parser_scope_member_ahead: fn(state: &JetParserState) -> Bool Never! {
-    if parser_current_kind(&state) != TOKEN_DOT || parser_kind_at(&state, 1) != TOKEN_IDENT -> return false
-    if parser_kind_at(&state, 2) == TOKEN_LBRACE -> return true
-    if parser_kind_at(&state, 2) != TOKEN_LPAREN -> return false
+    if parser_current_kind(state) != TOKEN_DOT || parser_kind_at(state, 1) != TOKEN_IDENT -> return false
+    if parser_kind_at(state, 2) == TOKEN_LBRACE -> return true
+    if parser_kind_at(state, 2) != TOKEN_LPAREN -> return false
     offset := 2
     depth := 0
     loop {
-        kind: parser_kind_at(&state, offset)
+        kind: parser_kind_at(state, offset)
         if kind == TOKEN_EOF -> return false
         if kind == TOKEN_LPAREN -> depth += 1
         if kind == TOKEN_RPAREN {
             depth -= 1
-            if depth == 0 -> return parser_kind_at(&state, offset + 1) == TOKEN_LBRACE
+            if depth == 0 -> return parser_kind_at(state, offset + 1) == TOKEN_LBRACE
         }
         offset += 1
     }
@@ -553,82 +553,82 @@ parser_scope_member_ahead: fn(state: &JetParserState) -> Bool Never! {
 // Rust `stmt` `task.group g { … }` or
 // `task.group g(limit: n) { … }` opens a structured task scope.
 parser_task_group_ahead: fn(state: &JetParserState) -> Bool Never! {
-    if parser_value_at(&state, 0) != "task" || parser_kind_at(&state, 1) != TOKEN_DOT -> return false
-    selector: parser_lookahead(&state, 2)
-    if selector.kind != TOKEN_IDENT || parser_value(state, selector) != "group" || parser_kind_at(&state, 3) != TOKEN_IDENT -> return false
-    opener: parser_kind_at(&state, 4)
+    if parser_value_at(state, 0) != "task" || parser_kind_at(state, 1) != TOKEN_DOT -> return false
+    selector: parser_lookahead(state, 2)
+    if selector.kind != TOKEN_IDENT || parser_value(state, selector) != "group" || parser_kind_at(state, 3) != TOKEN_IDENT -> return false
+    opener: parser_kind_at(state, 4)
     opener == TOKEN_LBRACE || opener == TOKEN_LPAREN
 }
 
 parser_parse_task_group: fn(state: &JetParserState) -> Stmt {
-    start: parser_bump(&state)
-    parser_expect(&state, TOKEN_DOT, "after `task`")
-    parser_expect_name(&state, "for the `group` selector")
-    name: parser_expect_name(&state, "for the task group name")
+    start: parser_bump(state)
+    parser_expect(state, TOKEN_DOT, "after `task`")
+    parser_expect_name(state, "for the `group` selector")
+    name: parser_expect_name(state, "for the task group name")
     limit := Expr?{None}
-    if parser_current_kind(&state) == TOKEN_LPAREN {
-        parser_bump(&state)
-        label: parser_expect_name(&state, "for the group limit label")
+    if parser_current_kind(state) == TOKEN_LPAREN {
+        parser_bump(state)
+        label: parser_expect_name(state, "for the group limit label")
         label_name: parser_value(state, label)
         if label_name != "limit" {
-            parser_add_error_code(&state, "E0003", label.span, "task-group parameter `{label_name}` is not supported", "the group parameter names the maximum number of active children", "write `limit: n`")
+            parser_add_error_code(state, "E0003", label.span, "task-group parameter `{label_name}` is not supported", "the group parameter names the maximum number of active children", "write `limit: n`")
         }
-        parser_expect(&state, TOKEN_COLON, "after `limit`")
-        value: parser_parse_expression(&state, 1, 0)
+        parser_expect(state, TOKEN_COLON, "after `limit`")
+        value: parser_parse_expression(state, 1, 0)
         limit = Val(value.expr)
-        parser_expect(&state, TOKEN_RPAREN, "after the task-group limit")
+        parser_expect(state, TOKEN_RPAREN, "after the task-group limit")
     }
-    body: parser_parse_block(&state)
+    body: parser_parse_block(state)
     Stmt.TaskGroup{name: parser_value(state, name), name_span: name.span, limit: limit, body: body.statements, span: parser_cover(start.span, body.span)}
 }
 
 parser_parse_scope_member: fn(state: &JetParserState) -> Stmt {
-    dot: parser_bump(&state)
-    name: parser_expect_name(&state, "for the scope-member name")
+    dot: parser_bump(state)
+    name: parser_expect_name(state, "for the scope-member name")
     args := [Expr]{}
     args_span := Span?{None}
-    if parser_current_kind(&state) == TOKEN_LPAREN {
-        open: parser_bump(&state)
-        loop parser_current_kind(&state) != TOKEN_RPAREN && parser_current_kind(&state) != TOKEN_EOF {
-            if parser_current_kind(&state) == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_COLON {
-                label: parser_bump(&state)
-                parser_bump(&state)
-                value: parser_parse_expression(&state, 1, 0)
-                &args.push(Expr.TupleLit{fields: [TupleField]{TupleField{name: parser_value(state, label), value: value.expr}}, span: parser_cover(label.span, value.span), ty: None, id: parser_node_id(&state)})
+    if parser_current_kind(state) == TOKEN_LPAREN {
+        open: parser_bump(state)
+        loop parser_current_kind(state) != TOKEN_RPAREN && parser_current_kind(state) != TOKEN_EOF {
+            if parser_current_kind(state) == TOKEN_IDENT && parser_kind_at(state, 1) == TOKEN_COLON {
+                label: parser_bump(state)
+                parser_bump(state)
+                value: parser_parse_expression(state, 1, 0)
+                args.push(Expr.TupleLit{fields: [TupleField]{TupleField{name: parser_value(state, label), value: value.expr}}, span: parser_cover(label.span, value.span), ty: None, id: parser_node_id(state)})
             } else {
-                value: parser_parse_expression(&state, 1, 0)
-                &args.push(value.expr)
+                value: parser_parse_expression(state, 1, 0)
+                args.push(value.expr)
             }
-            if parser_current_kind(&state) == TOKEN_RPAREN -> break
-            parser_expect(&state, TOKEN_COMMA, "between scope-member arguments")
+            if parser_current_kind(state) == TOKEN_RPAREN -> break
+            parser_expect(state, TOKEN_COMMA, "between scope-member arguments")
         }
-        close: parser_expect(&state, TOKEN_RPAREN, "to close the scope-member arguments")
+        close: parser_expect(state, TOKEN_RPAREN, "to close the scope-member arguments")
         args_span = Val(parser_cover(open.span, close.span))
     }
-    body: parser_parse_block(&state)
+    body: parser_parse_block(state)
     Stmt.ScopeMember{name: parser_value(state, name), name_span: name.span, args: args, args_span: args_span, body: body.statements, dsl: false, dot_span: dot.span, span: parser_cover(dot.span, body.span)}
 }
 
 // Rust `stmt`: `next` is the loop-control word only before a line end, `}`,
 // or a `(name)` target; anywhere else it is an ordinary name (`next := 0`).
 parser_next_statement_ahead: fn(state: &JetParserState) -> Bool Never! {
-    token: parser_current(&state)
+    token: parser_current(state)
     if token.kind != TOKEN_IDENT || parser_value(state, token) != "next" -> return false
-    following: parser_kind_at(&state, 1)
-    following == TOKEN_SEMI || following == TOKEN_RBRACE || (following == TOKEN_LPAREN && parser_kind_at(&state, 2) == TOKEN_IDENT && parser_kind_at(&state, 3) == TOKEN_RPAREN)
+    following: parser_kind_at(state, 1)
+    following == TOKEN_SEMI || following == TOKEN_RBRACE || (following == TOKEN_LPAREN && parser_kind_at(state, 2) == TOKEN_IDENT && parser_kind_at(state, 3) == TOKEN_RPAREN)
 }
 
 // `next` or `next(name)`: continue the innermost or the named loop.
 parser_parse_next_statement: fn(state: &JetParserState) -> Stmt {
-    start: parser_bump(&state)
-    if parser_current_kind(&state) == TOKEN_LPAREN {
-        parser_bump(&state)
-        name: parser_expect_name(&state, "as the loop name in `next(name)`")
-        parser_expect(&state, TOKEN_RPAREN, "`)` after the named next target")
-        parser_finish_statement(&state)
+    start: parser_bump(state)
+    if parser_current_kind(state) == TOKEN_LPAREN {
+        parser_bump(state)
+        name: parser_expect_name(state, "as the loop name in `next(name)`")
+        parser_expect(state, TOKEN_RPAREN, "`)` after the named next target")
+        parser_finish_statement(state)
         return Stmt.ContinueLabel{name: parser_value(state, name), span: start.span}
     }
-    parser_finish_statement(&state)
+    parser_finish_statement(state)
     Stmt.Continue{span: start.span}
 }
 
@@ -640,10 +640,10 @@ parser_parse_next_statement: fn(state: &JetParserState) -> Stmt {
 // compiler-private `true` subject whose span is the `if` keyword.
 parser_parse_if_statement: fn(state: &JetParserState) -> Stmt {
     branch_start: state.position
-    start: parser_bump(&state)
-    if parser_current_kind(&state) == TOKEN_LBRACE {
-        parser_bump(&state)
-        return parser_parse_if_guard_arms(&state, start.span)
+    start: parser_bump(state)
+    if parser_current_kind(state) == TOKEN_LBRACE {
+        parser_bump(state)
+        return parser_parse_if_guard_arms(state, start.span)
     }
     // Parse the subject below comparison precedence so a trailing `OP {`
     // dispatch marker stays in the token stream.
@@ -651,70 +651,70 @@ parser_parse_if_statement: fn(state: &JetParserState) -> Stmt {
     saved_diagnostics: state.diagnostics.len()
     saved_blocks: state.block_spans.len()
     saved_else_arms: state.else_arms.len()
-    subject: parser_parse_expression_no_struct_lit_no_cmp(&state, 1)
-    dispatch: parser_expression_form_dispatch_op(parser_current_kind(&state))
-    if dispatch == .Val(op) && parser_kind_at(&state, 1) == TOKEN_LBRACE && !parser_expression_form_record_test_ahead(&state) {
-        parser_bump(&state)
-        parser_expect(&state, TOKEN_LBRACE, "`{{` to open the `if` dispatch body")
-        return parser_parse_if_arms(&state, subject.expr, start.span, op)
+    subject: if parser_current_kind(state) == TOKEN_AMP -> parser_parse_marked_place(state, 1, false, true) else -> parser_parse_expression_no_struct_lit_no_cmp(state, 1)
+    dispatch: parser_expression_form_dispatch_op(parser_current_kind(state))
+    if dispatch == .Val(op) && parser_kind_at(state, 1) == TOKEN_LBRACE && !parser_expression_form_record_test_ahead(state) {
+        parser_bump(state)
+        parser_expect(state, TOKEN_LBRACE, "`{{` to open the `if` dispatch body")
+        return parser_parse_if_arms(state, subject.expr, start.span, op)
     }
-    parser_rewind(&state, saved_position, saved_diagnostics, saved_blocks, saved_else_arms)
-    cond_start: parser_current(&state).span.start
-    condition: parser_parse_expression_no_struct_lit(&state, 1)
+    parser_rewind(state, saved_position, saved_diagnostics, saved_blocks, saved_else_arms)
+    cond_start: parser_current(state).span.start
+    condition: parser_parse_expression_no_struct_lit(state, 1)
     cond_span: Span{start: cond_start, end: parser_prev_token_end(state)}
     // A bare `=` in a condition is an assignment, not `==`.
-    if parser_current_kind(&state) == TOKEN_EQ {
-        eq_span: parser_current(&state).span
-        parser_add_error_code(&state, "E0322", eq_span, "assignment `=` cannot appear in an `if` condition", "`=` binds a name; use `==` to compare two values", "replace `=` with `==` to compare, or move the assignment before the `if`")
-        parser_sync_stmt(&state)
+    if parser_current_kind(state) == TOKEN_EQ {
+        eq_span: parser_current(state).span
+        parser_add_error_code(state, "E0322", eq_span, "assignment `=` cannot appear in an `if` condition", "`=` binds a name; use `==` to compare two values", "replace `=` with `==` to compare, or move the assignment before the `if`")
+        parser_sync_stmt(state)
         return Stmt.Expr{expr: condition.expr}
     }
-    braced: parser_current_kind(&state) == TOKEN_LBRACE
+    braced: parser_current_kind(state) == TOKEN_LBRACE
     if braced {
         // E0992: an old implicit-dispatch body (its first line is `head ->`)
         // with no comparison marker teaches the explicit form, then parses
         // the body as arms so the rest of the file still checks.
         open_position: state.position
-        parser_bump(&state)
-        if parser_if_body_is_arms(&state) {
-            parser_add_error_code(&state, "E0992", start.span, "a multi-arm `if` needs a comparison between the subject and `{{`", "`if subject == {{ … }}` (or `<`, `>`, `!=`, `<=`, `>=`) marks value dispatch explicitly, so a plain `if cond {{ … }}` body is always statements", "write `if subject == {{ value -> body }}`")
-            return parser_parse_if_arms(&state, condition.expr, start.span, BinOp.Eq)
+        parser_bump(state)
+        if parser_if_body_is_arms(state) {
+            parser_add_error_code(state, "E0992", start.span, "a multi-arm `if` needs a comparison between the subject and `{{`", "`if subject == {{ … }}` (or `<`, `>`, `!=`, `<=`, `>=`) marks value dispatch explicitly, so a plain `if cond {{ … }}` body is always statements", "write `if subject == {{ value -> body }}`")
+            return parser_parse_if_arms(state, condition.expr, start.span, BinOp.Eq)
         }
         state.position = open_position
     }
     parts := [ParserBranchPart]{}
-    body: parser_parse_if_body(&state, &parts, cond_span)
-    arms := [SwitchArm]{SwitchArm{cond: condition.expr, body: ^body, span: expr_span(condition.expr)}}
+    body: parser_parse_if_body(state, parts, cond_span)
+    arms := [SwitchArm]{SwitchArm{cond: condition.expr, body: body.move(), span: expr_span(condition.expr)}}
     else_body := [Stmt]?{None}
-    chained: parser_current_kind(&state) == TOKEN_KW_ELSE && parser_kind_at(&state, 1) == TOKEN_KW_IF
+    chained: parser_current_kind(state) == TOKEN_KW_ELSE && parser_kind_at(state, 1) == TOKEN_KW_IF
     // After a braced body, a final `else` is braced too; an `else if` link
     // and the arms after it take every body shape.
-    if braced && parser_current_kind(&state) == TOKEN_KW_ELSE && !chained {
-        parser_bump(&state)
-        else_start: parser_current(&state).span.start
-        else_body = Val(parser_parse_block(&state).statements)
-        &parts.push(ParserBranchPart{is_else: true, cond: Span{start: else_start, end: else_start}, body: Span{start: else_start, end: parser_prev_token_end(state)}})
+    if braced && parser_current_kind(state) == TOKEN_KW_ELSE && !chained {
+        parser_bump(state)
+        else_start: parser_current(state).span.start
+        else_body = Val(parser_parse_block(state).statements)
+        parts.push(ParserBranchPart{is_else: true, cond: Span{start: else_start, end: else_start}, body: Span{start: else_start, end: parser_prev_token_end(state)}})
     } else {
-        else_body = parser_parse_if_else_chain(&state, &arms, &parts)
+        else_body = parser_parse_if_else_chain(state, arms, parts)
     }
     // L0507: a chained branch, or a braced one with `else` over several
     // lines, prefers one ordered arm table.
-    if chained || (braced && else_body != None && parser_authored_line_break(state, branch_start, state.position)) -> parser_prefer_arm_table(&state, start.span, parts, saved_diagnostics)
-    Stmt.Switch{subject: Expr.Bool{value: true, span: start.span, id: parser_node_id(&state)}, arms: arms, else_body: else_body, span: start.span}
+    if chained || (braced && else_body != None && parser_authored_line_break(state, branch_start, state.position)) -> parser_prefer_arm_table(state, start.span, parts, saved_diagnostics)
+    Stmt.Switch{subject: Expr.Bool{value: true, span: start.span, id: parser_node_id(state)}, arms: arms, else_body: else_body, span: start.span}
 }
 
 // The `else if` links and final `else` of a classic `if`. Each link takes the
 // same body shapes as the leading `if`.
 parser_parse_if_else_chain: fn(state: &JetParserState, arms: &[SwitchArm], parts: &[ParserBranchPart]) -> [Stmt]? {
-    loop parser_current_kind(&state) == TOKEN_KW_ELSE {
-        parser_bump(&state)
-        if parser_current_kind(&state) != TOKEN_KW_IF -> return Val(parser_parse_else_body(&state, &parts))
-        parser_bump(&state)
-        cond_start: parser_current(&state).span.start
-        condition: parser_parse_expression_no_struct_lit(&state, 1)
+    loop parser_current_kind(state) == TOKEN_KW_ELSE {
+        parser_bump(state)
+        if parser_current_kind(state) != TOKEN_KW_IF -> return Val(parser_parse_else_body(state, parts))
+        parser_bump(state)
+        cond_start: parser_current(state).span.start
+        condition: parser_parse_expression_no_struct_lit(state, 1)
         cond_span: Span{start: cond_start, end: parser_prev_token_end(state)}
-        body: parser_parse_if_body(&state, &parts, cond_span)
-        &arms.push(SwitchArm{cond: condition.expr, body: ^body, span: expr_span(condition.expr)})
+        body: parser_parse_if_body(state, parts, cond_span)
+        arms.push(SwitchArm{cond: condition.expr, body: body.move(), span: expr_span(condition.expr)})
     }
     None
 }
@@ -723,58 +723,58 @@ parser_parse_if_else_chain: fn(state: &JetParserState, arms: &[SwitchArm], parts
 // Anything else teaches braces (E0372) and parses as the one statement. The
 // condition and body are recorded in `parts` for the L0507 fix.
 parser_parse_if_body: fn(state: &JetParserState, parts: &[ParserBranchPart], cond: Span) -> [Stmt] {
-    token: parser_current(&state)
+    token: parser_current(state)
     if token.kind == TOKEN_UNIFIED_ARROW {
-        parser_bump(&state)
-        body_start: parser_current(&state).span.start
-        arrow_body: parser_parse_adjacent_effect_body(&state)
-        &parts.push(ParserBranchPart{is_else: false, cond: cond, body: Span{start: body_start, end: parser_prev_token_end(state)}})
+        parser_bump(state)
+        body_start: parser_current(state).span.start
+        arrow_body: parser_parse_adjacent_effect_body(state)
+        parts.push(ParserBranchPart{is_else: false, cond: cond, body: Span{start: body_start, end: parser_prev_token_end(state)}})
         return arrow_body
     }
     if token.kind != TOKEN_LBRACE && token.kind != TOKEN_SEMI {
-        parser_teach_control_braces(&state, "if", token.span)
-        bare_body: parser_parse_adjacent_effect_body(&state)
-        &parts.push(ParserBranchPart{is_else: false, cond: cond, body: Span{start: token.span.start, end: parser_prev_token_end(state)}})
+        parser_teach_control_braces(state, "if", token.span)
+        bare_body: parser_parse_adjacent_effect_body(state)
+        parts.push(ParserBranchPart{is_else: false, cond: cond, body: Span{start: token.span.start, end: parser_prev_token_end(state)}})
         return bare_body
     }
-    block: parser_parse_block(&state)
-    &parts.push(ParserBranchPart{is_else: false, cond: cond, body: Span{start: token.span.start, end: parser_prev_token_end(state)}})
+    block: parser_parse_block(state)
+    parts.push(ParserBranchPart{is_else: false, cond: cond, body: Span{start: token.span.start, end: parser_prev_token_end(state)}})
     block.statements
 }
 
 parser_parse_else_body: fn(state: &JetParserState, parts: &[ParserBranchPart]) -> [Stmt] {
-    token: parser_current(&state)
+    token: parser_current(state)
     if token.kind == TOKEN_LBRACE {
-        block: parser_parse_block(&state)
-        &parts.push(ParserBranchPart{is_else: true, cond: Span{start: token.span.start, end: token.span.start}, body: Span{start: token.span.start, end: parser_prev_token_end(state)}})
+        block: parser_parse_block(state)
+        parts.push(ParserBranchPart{is_else: true, cond: Span{start: token.span.start, end: token.span.start}, body: Span{start: token.span.start, end: parser_prev_token_end(state)}})
         return block.statements
     }
     if token.kind == TOKEN_UNIFIED_ARROW {
-        parser_bump(&state)
+        parser_bump(state)
     } else {
-        parser_teach_control_braces(&state, "else", token.span)
+        parser_teach_control_braces(state, "else", token.span)
     }
-    body_start: parser_current(&state).span.start
-    body: parser_parse_adjacent_effect_body(&state)
-    &parts.push(ParserBranchPart{is_else: true, cond: Span{start: body_start, end: body_start}, body: Span{start: body_start, end: parser_prev_token_end(state)}})
+    body_start: parser_current(state).span.start
+    body: parser_parse_adjacent_effect_body(state)
+    parts.push(ParserBranchPart{is_else: true, cond: Span{start: body_start, end: body_start}, body: Span{start: body_start, end: parser_prev_token_end(state)}})
     body
 }
 
 // An adjacent `->` body owns one non-`if` statement (E0329).
 parser_parse_adjacent_effect_body: fn(state: &JetParserState) -> [Stmt] {
-    token: parser_current(&state)
+    token: parser_current(state)
     if token.kind == TOKEN_KW_IF {
-        parser_add_fatal_code(&state, "E0329", token.span, "a nested one-line `if` needs braces", "an adjacent body owns one non-`if` statement, so direct nesting is ambiguous", "wrap the nested `if` in `{{ ... }}`")
+        parser_add_fatal_code(state, "E0329", token.span, "a nested one-line `if` needs braces", "an adjacent body owns one non-`if` statement, so direct nesting is ambiguous", "wrap the nested `if` in `{{ ... }}`")
         return [Stmt]{}
     }
     state.adjacent_if_body_depth += 1
-    statement: parser_parse_statement(&state)
+    statement: parser_parse_statement(state)
     state.adjacent_if_body_depth -= 1
     [Stmt]{statement}
 }
 
 parser_teach_control_braces: fn(state: &JetParserState, body: String, span: Span) {
-    parser_add_error_code(&state, "E0372", span, "This `{body}` body needs braces.", "Use `->` for one effect statement; braces make a multi-statement or scoped body's boundary visible to readers, editors, and the compiler.", "Write `-> statement` for one statement, or wrap the body in `{{ ... }}`; `jet fmt` applies this fix.")
+    parser_add_error_code(state, "E0372", span, "This `{body}` body needs braces.", "Use `->` for one effect statement; braces make a multi-statement or scoped body's boundary visible to readers, editors, and the compiler.", "Write `-> statement` for one statement, or wrap the body in `{{ ... }}`; `jet fmt` applies this fix.")
 }
 
 // `if { Bool -> body … [else -> body] }` statement guards.
@@ -782,56 +782,56 @@ parser_parse_if_guard_arms: fn(state: &JetParserState, start: Span) -> Stmt {
     arms := [SwitchArm]{}
     else_body := [Stmt]?{None}
     loop {
-        parser_skip_semicolons(&state)
-        token: parser_current(&state)
+        parser_skip_semicolons(state)
+        token: parser_current(state)
         if token.kind == TOKEN_RBRACE {
             if arms.len() == 0 {
-                parser_add_error(&state, token.span, "a statement guard table needs at least one condition", "an empty guard table can never perform an action", "add a `condition -> statement` arm")
-                return Stmt.Expr{expr: Expr.Unit{span: start, id: parser_node_id(&state)}}
+                parser_add_error(state, token.span, "a statement guard table needs at least one condition", "an empty guard table can never perform an action", "add a `condition -> statement` arm")
+                return Stmt.Expr{expr: Expr.Unit{span: start, id: parser_node_id(state)}}
             }
-            parser_bump(&state)
+            parser_bump(state)
             break
         }
         if token.kind == TOKEN_EOF {
-            parser_add_error(&state, token.span, "expected `}}` to close this guard table, found the end of the file", "every `{{` needs a matching `}}`", "add a closing `}}`")
-            return Stmt.Expr{expr: Expr.Unit{span: start, id: parser_node_id(&state)}}
+            parser_add_error(state, token.span, "expected `}}` to close this guard table, found the end of the file", "every `{{` needs a matching `}}`", "add a closing `}}`")
+            return Stmt.Expr{expr: Expr.Unit{span: start, id: parser_node_id(state)}}
         }
         if token.kind == TOKEN_KW_ELSE {
-            parser_bump(&state)
-            parser_expect_unified_arrow(&state, "after `else` in a guard table")
-            else_body = Val(parser_parse_guard_arm_body(&state))
-            parser_skip_semicolons(&state)
-            parser_expect(&state, TOKEN_RBRACE, "`}}` after the final `else` guard arm")
+            parser_bump(state)
+            parser_expect_unified_arrow(state, "after `else` in a guard table")
+            else_body = Val(parser_parse_guard_arm_body(state))
+            parser_skip_semicolons(state)
+            parser_expect(state, TOKEN_RBRACE, "`}}` after the final `else` guard arm")
             break
         }
         arm_position: state.position
-        condition: parser_parse_subjectless_arm_head(&state)
-        parser_expect_unified_arrow(&state, "after a guard condition")
-        body: parser_parse_guard_arm_body(&state)
-        &arms.push(SwitchArm{cond: condition, body: body, span: Span{start: token.span.start, end: parser_previous_end(state)}})
+        condition: parser_parse_subjectless_arm_head(state)
+        parser_expect_unified_arrow(state, "after a guard condition")
+        body: parser_parse_guard_arm_body(state)
+        arms.push(SwitchArm{cond: condition, body: body, span: Span{start: token.span.start, end: parser_previous_end(state)}})
         // Malformed input that consumed nothing must not retry forever.
-        if state.position == arm_position -> parser_bump(&state)
+        if state.position == arm_position -> parser_bump(state)
     }
-    Stmt.Switch{subject: Expr.Bool{value: true, span: start, id: parser_node_id(&state)}, arms: arms, else_body: else_body, span: start}
+    Stmt.Switch{subject: Expr.Bool{value: true, span: start, id: parser_node_id(state)}, arms: arms, else_body: else_body, span: start}
 }
 
 // A subjectless readiness arm is a `value, receiver` pair or
 // an `after duration` head, carried in the one-field tuple node sema
 // recognizes; any other head is a Boolean condition.
 parser_parse_subjectless_arm_head: fn(state: &JetParserState) -> Expr {
-    token: parser_current(&state)
-    if token.kind == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_COMMA {
-        parser_bump(&state)
-        parser_bump(&state)
-        source: parser_parse_expression_no_struct_lit(&state, 1)
-        return Expr.TupleLit{fields: [TupleField]{TupleField{name: parser_value(state, token), value: source.expr}}, span: Span{start: token.span.start, end: expr_span(source.expr).end}, ty: None, id: parser_node_id(&state)}
+    token: parser_current(state)
+    if token.kind == TOKEN_IDENT && parser_kind_at(state, 1) == TOKEN_COMMA {
+        parser_bump(state)
+        parser_bump(state)
+        source: parser_parse_expression_no_struct_lit(state, 1)
+        return Expr.TupleLit{fields: [TupleField]{TupleField{name: parser_value(state, token), value: source.expr}}, span: Span{start: token.span.start, end: expr_span(source.expr).end}, ty: None, id: parser_node_id(state)}
     }
     if token.kind == TOKEN_IDENT && parser_value(state, token) == "after" {
-        parser_bump(&state)
-        duration: parser_parse_expression_no_struct_lit(&state, 1)
-        return Expr.TupleLit{fields: [TupleField]{TupleField{name: parser_select_after_field(), value: duration.expr}}, span: Span{start: token.span.start, end: expr_span(duration.expr).end}, ty: None, id: parser_node_id(&state)}
+        parser_bump(state)
+        duration: parser_parse_expression_no_struct_lit(state, 1)
+        return Expr.TupleLit{fields: [TupleField]{TupleField{name: parser_select_after_field(), value: duration.expr}}, span: Span{start: token.span.start, end: expr_span(duration.expr).end}, ty: None, id: parser_node_id(state)}
     }
-    parser_parse_expression_no_struct_lit(&state, 1).expr
+    parser_parse_expression_no_struct_lit(state, 1).expr
 }
 
 // Rust `Syntax::INTERNAL_SELECT_AFTER_FIELD`: a NUL-led member name no source
@@ -842,36 +842,36 @@ parser_select_after_field: fn() -> String Never! {
 }
 
 parser_parse_guard_arm_body: fn(state: &JetParserState) -> [Stmt] {
-    token: parser_current(&state)
-    if token.kind == TOKEN_LBRACE -> return parser_parse_block(&state).statements
+    token: parser_current(state)
+    if token.kind == TOKEN_LBRACE -> return parser_parse_block(state).statements
     // A nested braced guard table closes itself; only a braceless nested
     // `if` leaves the owner of a following arm ambiguous.
-    if token.kind == TOKEN_KW_IF && parser_kind_at(&state, 1) != TOKEN_LBRACE {
-        parser_add_fatal_code(&state, "E0329", token.span, "a nested guard body needs braces", "a braceless guard owns exactly one non-`if` statement, so direct nesting would be ambiguous", "wrap the nested `if` in `{{ ... }}`")
+    if token.kind == TOKEN_KW_IF && parser_kind_at(state, 1) != TOKEN_LBRACE {
+        parser_add_fatal_code(state, "E0329", token.span, "a nested guard body needs braces", "a braceless guard owns exactly one non-`if` statement, so direct nesting would be ambiguous", "wrap the nested `if` in `{{ ... }}`")
         return [Stmt]{}
     }
     // A one-statement arm body may end before the table's `else` arm.
     state.adjacent_if_body_depth += 1
-    statement: parser_parse_statement(&state)
+    statement: parser_parse_statement(state)
     state.adjacent_if_body_depth -= 1
     [Stmt]{statement}
 }
 
 // Q2: a dispatch arm body is a braced block or one braceless statement.
 parser_parse_arm_body: fn(state: &JetParserState) -> [Stmt] {
-    if parser_current_kind(&state) == TOKEN_LBRACE -> return parser_parse_block(&state).statements
-    [Stmt]{parser_parse_statement(&state)}
+    if parser_current_kind(state) == TOKEN_LBRACE -> return parser_parse_block(state).statements
+    [Stmt]{parser_parse_statement(state)}
 }
 
 // With the cursor just past `{`, does the body open with an arm (an
 // `else ->` catch-all, a range head, or an expression followed by `->`)?
 // Pure lookahead.
 parser_if_body_is_arms: fn(state: &JetParserState) -> Bool {
-    first: parser_current_kind(&state)
-    if first == TOKEN_KW_ELSE && parser_kind_at(&state, 1) == TOKEN_UNIFIED_ARROW -> return true
+    first: parser_current_kind(state)
+    if first == TOKEN_KW_ELSE && parser_kind_at(state, 1) == TOKEN_UNIFIED_ARROW -> return true
     if first == TOKEN_RBRACE -> return false
     // `lo .. hi ->` without a full expression parse.
-    if first == TOKEN_INT && parser_kind_at(&state, 1) == TOKEN_DOT_DOT -> return parser_kind_at(&state, 3) == TOKEN_UNIFIED_ARROW
+    if first == TOKEN_INT && parser_kind_at(state, 1) == TOKEN_DOT_DOT -> return parser_kind_at(state, 3) == TOKEN_UNIFIED_ARROW
     // An arm head is followed by `->` on its own line, outside any group.
     // Without one the line is a statement, and the expression parse below
     // would read a nested body (`if c {`, `loop x in xs {`) only to undo it.
@@ -880,9 +880,9 @@ parser_if_body_is_arms: fn(state: &JetParserState) -> Bool {
     saved_diagnostics: state.diagnostics.len()
     saved_blocks: state.block_spans.len()
     saved_else_arms: state.else_arms.len()
-    _ := parser_parse_expression_no_struct_lit(&state, 1)
-    is_arm: !parser_error_since(state, saved_diagnostics) && parser_at_unified_arrow(&state)
-    parser_rewind(&state, saved_position, saved_diagnostics, saved_blocks, saved_else_arms)
+    _ := parser_parse_expression_no_struct_lit(state, 1)
+    is_arm: !parser_error_since(state, saved_diagnostics) && parser_at_unified_arrow(state)
+    parser_rewind(state, saved_position, saved_diagnostics, saved_blocks, saved_else_arms)
     is_arm
 }
 
@@ -913,36 +913,36 @@ parser_line_arrow_ahead: fn(state: JetParserState) -> Bool Never! {
 parser_parse_if_arms: fn(state: &JetParserState, subject: Expr, start: Span, op: BinOp) -> Stmt {
     pattern_subject: if subject == {
         .Ident(_, _, _) -> subject
-        else -> Expr.Ident{name: "it", span: expr_span(subject), id: parser_node_id(&state)}
+        else -> Expr.Ident{name: "it", span: expr_span(subject), id: parser_node_id(state)}
     }
     arms := [SwitchArm]{}
     else_body := [Stmt]?{None}
     loop {
-        parser_skip_semicolons(&state)
-        token: parser_current(&state)
+        parser_skip_semicolons(state)
+        token: parser_current(state)
         if token.kind == TOKEN_RBRACE {
-            parser_bump(&state)
+            parser_bump(state)
             break
         }
         if token.kind == TOKEN_EOF {
-            parser_add_error(&state, token.span, "expected `}}` to close this `if`, found the end of the file", "every `{{` needs a matching `}}`", "add a closing `}}`")
-            return Stmt.Expr{expr: Expr.Unit{span: start, id: parser_node_id(&state)}}
+            parser_add_error(state, token.span, "expected `}}` to close this `if`, found the end of the file", "every `{{` needs a matching `}}`", "add a closing `}}`")
+            return Stmt.Expr{expr: Expr.Unit{span: start, id: parser_node_id(state)}}
         }
         if token.kind == TOKEN_KW_ELSE {
-            parser_bump(&state)
-            parser_expect_unified_arrow(&state, "after `else` in an `if`")
-            else_body = Val(parser_parse_arm_body(&state))
+            parser_bump(state)
+            parser_expect_unified_arrow(state, "after `else` in an `if`")
+            else_body = Val(parser_parse_arm_body(state))
             next
         }
         arm_position: state.position
-        condition: parser_parse_if_arm_head(&state, subject, pattern_subject, op)
-        parser_expect_unified_arrow(&state, "after an `if` arm value or condition")
-        body: parser_parse_arm_body(&state)
-        &arms.push(SwitchArm{cond: condition, body: body, span: Span{start: token.span.start, end: parser_previous_end(state)}})
+        condition: parser_parse_if_arm_head(state, subject, pattern_subject, op)
+        parser_expect_unified_arrow(state, "after an `if` arm value or condition")
+        body: parser_parse_arm_body(state)
+        arms.push(SwitchArm{cond: condition, body: body, span: Span{start: token.span.start, end: parser_previous_end(state)}})
         // Malformed input that consumed nothing must not retry forever.
-        if state.position == arm_position -> parser_bump(&state)
+        if state.position == arm_position -> parser_bump(state)
     }
-    Stmt.Switch{subject: subject, arms: ^arms, else_body: ^else_body, span: start}
+    Stmt.Switch{subject: subject, arms: arms.move(), else_body: else_body.move(), span: start}
 }
 
 // One bare arm head bound to the subject.
@@ -950,194 +950,194 @@ parser_parse_if_arms: fn(state: &JetParserState, subject: Expr, start: Span, op:
 // Boolean guard (`.Key(key) && key == "b" ->`). Value heads use the
 // distributed arm grammar; a redundant `subject OP` prefix reports E0994.
 parser_parse_if_arm_head: fn(state: &JetParserState, subject: Expr, pattern_subject: Expr, op: BinOp) -> Expr {
-    range: parser_parse_range_arm_head(&state, pattern_subject)
+    range: parser_parse_range_arm_head(state, pattern_subject)
     if range == .Val(head) -> return head
-    if parser_pattern_rhs_ahead(&state, false) {
+    if parser_pattern_rhs_ahead(state, false) {
         saved_position: state.position
         saved_diagnostics: state.diagnostics.len()
         saved_blocks: state.block_spans.len()
         saved_else_arms: state.else_arms.len()
-        pattern: parser_parse_pattern(&state, 1, true)
+        pattern: parser_parse_pattern(state, 1, true)
         // Rust `try_pattern_rhs(true)?`: a fatal error inside the pattern
         // ends the arm; only a complete pattern without `->` is reread.
-        if state.abort_mark > saved_diagnostics -> return parser_expression_form_pattern_condition(&state, pattern_subject, pattern, op)
-        after: parser_current_kind(&state)
-        if after == TOKEN_UNIFIED_ARROW -> return parser_expression_form_pattern_condition(&state, pattern_subject, pattern, op)
+        if state.abort_mark > saved_diagnostics -> return parser_expression_form_pattern_condition(state, pattern_subject, pattern, op)
+        after: parser_current_kind(state)
+        if after == TOKEN_UNIFIED_ARROW -> return parser_expression_form_pattern_condition(state, pattern_subject, pattern, op)
         if after == TOKEN_AND_AND || after == TOKEN_OR_OR {
-            result := parser_expression_form_pattern_condition(&state, pattern_subject, pattern, op)
+            result := parser_expression_form_pattern_condition(state, pattern_subject, pattern, op)
             if op != BinOp.Eq -> return result
             // `&&` binds tighter than `||`, with the pattern as the first operand.
-            loop parser_current_kind(&state) == TOKEN_AND_AND {
-                parser_bump(&state)
-                operand: parser_expression_form_arm_bool_operand(&state, subject, op, 0)
-                result = parser_expression_form_combine(&state, result, operand, BinOp.And)
+            loop parser_current_kind(state) == TOKEN_AND_AND {
+                parser_bump(state)
+                operand: parser_expression_form_arm_bool_operand(state, subject, op, 0)
+                result = parser_expression_form_combine(state, result, operand, BinOp.And)
             }
-            loop parser_current_kind(&state) == TOKEN_OR_OR {
-                parser_bump(&state)
-                group := parser_expression_form_arm_bool_operand(&state, subject, op, 0)
-                loop parser_current_kind(&state) == TOKEN_AND_AND {
-                    parser_bump(&state)
-                    operand: parser_expression_form_arm_bool_operand(&state, subject, op, 0)
-                    group = parser_expression_form_combine(&state, group, operand, BinOp.And)
+            loop parser_current_kind(state) == TOKEN_OR_OR {
+                parser_bump(state)
+                group := parser_expression_form_arm_bool_operand(state, subject, op, 0)
+                loop parser_current_kind(state) == TOKEN_AND_AND {
+                    parser_bump(state)
+                    operand: parser_expression_form_arm_bool_operand(state, subject, op, 0)
+                    group = parser_expression_form_combine(state, group, operand, BinOp.And)
                 }
-                result = parser_expression_form_combine(&state, result, group, BinOp.Or)
+                result = parser_expression_form_combine(state, result, group, BinOp.Or)
             }
             return result
         }
-        parser_rewind(&state, saved_position, saved_diagnostics, saved_blocks, saved_else_arms)
+        parser_rewind(state, saved_position, saved_diagnostics, saved_blocks, saved_else_arms)
     }
-    parser_expression_form_redundant_dispatch(&state, subject, op)
-    parser_expression_form_dispatch_condition(&state, subject, op, 1)
+    parser_expression_form_redundant_dispatch(state, subject, op)
+    parser_expression_form_dispatch_condition(state, subject, op, 1)
 }
 
 // C25: a `lo..hi` range arm head; None when the cursor is not a range head.
 parser_parse_range_arm_head: fn(state: &JetParserState, subject: Expr) -> Expr? {
-    low_token: parser_current(&state)
-    if low_token.kind != TOKEN_INT || parser_kind_at(&state, 1) != TOKEN_DOT_DOT -> return None
+    low_token: parser_current(state)
+    if low_token.kind != TOKEN_INT || parser_kind_at(state, 1) != TOKEN_DOT_DOT -> return None
     low: parser_integer(state, low_token) ?? 0
-    parser_bump(&state)
-    parser_bump(&state)
-    high_token: parser_current(&state)
+    parser_bump(state)
+    parser_bump(state)
+    high_token: parser_current(state)
     if high_token.kind != TOKEN_INT {
-        parser_add_error(&state, high_token.span, "expected an integer after `..` in a range arm", "range arms need both ends: `lo..hi -> body`", "write `0..59 -> {{ body }}` for an inclusive range arm")
-        return Val(Expr.Bool{value: false, span: high_token.span, id: parser_node_id(&state)})
+        parser_add_error(state, high_token.span, "expected an integer after `..` in a range arm", "range arms need both ends: `lo..hi -> body`", "write `0..59 -> {{ body }}` for an inclusive range arm")
+        return Val(Expr.Bool{value: false, span: high_token.span, id: parser_node_id(state)})
     }
-    parser_bump(&state)
+    parser_bump(state)
     high: parser_integer(state, high_token) ?? 0
     span: parser_cover(low_token.span, high_token.span)
-    Val(Expr.PatternTest{subject: subject, pattern: Pattern.Range{lo: ^low, hi: ^high, span: span}, span: span, id: parser_node_id(&state)})
+    Val(Expr.PatternTest{subject: subject, pattern: Pattern.Range{lo: low.move(), hi: high.move(), span: span}, span: span, id: parser_node_id(state)})
 }
 
 // A statement loop body is a braced block or one `->`
 // statement; a nested `if`/`loop` there needs braces (E0329).
 parser_parse_loop_effect_body: fn(state: &JetParserState) -> ParsedBlock {
-    token: parser_current(&state)
-    if parser_at_unified_arrow(&state) {
-        arrow: parser_expect_unified_arrow(&state, "after a loop header")
-        nested: parser_current(&state)
-        if nested.kind == TOKEN_KW_IF || nested.kind == TOKEN_KW_LOOP || (nested.kind == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_COLON && parser_kind_at(&state, 2) == TOKEN_KW_LOOP) {
-            parser_add_fatal_code(&state, "E0329", nested.span, "a nested one-line control body needs braces", "an adjacent loop body owns one simple statement", "wrap the nested control statement in `{{ ... }}`")
+    token: parser_current(state)
+    if parser_at_unified_arrow(state) {
+        arrow: parser_expect_unified_arrow(state, "after a loop header")
+        nested: parser_current(state)
+        if nested.kind == TOKEN_KW_IF || nested.kind == TOKEN_KW_LOOP || (nested.kind == TOKEN_IDENT && parser_kind_at(state, 1) == TOKEN_COLON && parser_kind_at(state, 2) == TOKEN_KW_LOOP) {
+            parser_add_fatal_code(state, "E0329", nested.span, "a nested one-line control body needs braces", "an adjacent loop body owns one simple statement", "wrap the nested control statement in `{{ ... }}`")
             return ParsedBlock{span: arrow.span, statements: [Stmt]{}, tail: None}
         }
-        statement: parser_parse_statement(&state)
-        end := parser_lookahead(&state, -1).span
+        statement: parser_parse_statement(state)
+        end := parser_lookahead(state, -1).span
         return ParsedBlock{span: parser_cover(arrow.span, end), statements: [Stmt]{statement}, tail: None}
     }
-    if token.kind == TOKEN_LBRACE -> return parser_parse_block(&state)
+    if token.kind == TOKEN_LBRACE -> return parser_parse_block(state)
     if token.kind == TOKEN_SEMI || token.kind == TOKEN_EOF {
-        parser_add_fatal_code(&state, "E0003", token.span, "this loop has no body", "a loop header must be followed by a braced block", "add a body written as `{{ ... }}`")
+        parser_add_fatal_code(state, "E0003", token.span, "this loop has no body", "a loop header must be followed by a braced block", "add a body written as `{{ ... }}`")
         return ParsedBlock{span: token.span, statements: [Stmt]{}, tail: None}
     }
     if token.kind == TOKEN_KW_IF || token.kind == TOKEN_KW_LOOP {
-        parser_add_fatal_code(&state, "E0329", token.span, "a nested one-line control body needs braces", "an adjacent loop body owns one simple statement", "wrap the nested control statement in `{{ ... }}`")
+        parser_add_fatal_code(state, "E0329", token.span, "a nested one-line control body needs braces", "an adjacent loop body owns one simple statement", "wrap the nested control statement in `{{ ... }}`")
         return ParsedBlock{span: token.span, statements: [Stmt]{}, tail: None}
     }
-    parser_teach_control_braces(&state, "loop", token.span)
-    statement: parser_parse_statement(&state)
-    end := parser_lookahead(&state, -1).span
+    parser_teach_control_braces(state, "loop", token.span)
+    statement: parser_parse_statement(state)
+    end := parser_lookahead(state, -1).span
     ParsedBlock{span: parser_cover(token.span, end), statements: [Stmt]{statement}, tail: None}
 }
 
 parser_loop_body_start: fn(state: &JetParserState) -> Bool Never! {
-    parser_current_kind(&state) == TOKEN_LBRACE || parser_current_kind(&state) == TOKEN_UNIFIED_ARROW
+    parser_current_kind(state) == TOKEN_LBRACE || parser_current_kind(state) == TOKEN_UNIFIED_ARROW
 }
 
 // A `, stride` after a loop source, unless the comma opens the body.
 parser_loop_stride: fn(state: &JetParserState) -> Expr? {
-    if parser_current_kind(&state) != TOKEN_COMMA -> return None
-    parser_bump(&state)
-    if parser_loop_body_start(&state) -> return None
-    Val(parser_parse_expression_no_struct_lit(&state, 1).expr)
+    if parser_current_kind(state) != TOKEN_COMMA -> return None
+    parser_bump(state)
+    if parser_loop_body_start(state) -> return None
+    Val(parser_parse_expression_no_struct_lit(state, 1).expr)
 }
 
 // `x`, `(key, value)`, or the retired bare `x, y;` binding.
 parser_loop_source_binding: fn(state: &JetParserState) -> ParserExpressionFormLoopClause {
-    if parser_current_kind(&state) == TOKEN_LPAREN -> return parser_expression_form_loop_binding(&state)
-    first: parser_expect_name(&state, "as the loop variable")
-    if parser_current_kind(&state) == TOKEN_COMMA && parser_kind_at(&state, 1) == TOKEN_IDENT && parser_kind_at(&state, 2) == TOKEN_SEMI {
-        parser_bump(&state)
-        second: parser_expect_name(&state, "as the second loop variable")
-        return ParserExpressionFormLoopClause{var: parser_value(state, first), var_span: first.span, var2: Val(NamedSpan{name: parser_value(state, second), span: second.span}), kind: ForKind.In{collection: Expr.Unit{span: first.span, id: parser_node_id(&state)}, step: None}}
+    if parser_current_kind(state) == TOKEN_LPAREN -> return parser_expression_form_loop_binding(state)
+    first: parser_expect_name(state, "as the loop variable")
+    if parser_current_kind(state) == TOKEN_COMMA && parser_kind_at(state, 1) == TOKEN_IDENT && parser_kind_at(state, 2) == TOKEN_SEMI {
+        parser_bump(state)
+        second: parser_expect_name(state, "as the second loop variable")
+        return ParserExpressionFormLoopClause{var: parser_value(state, first), var_span: first.span, var2: Val(NamedSpan{name: parser_value(state, second), span: second.span}), kind: ForKind.In{collection: Expr.Unit{span: first.span, id: parser_node_id(state)}, step: None}}
     }
-    ParserExpressionFormLoopClause{var: parser_value(state, first), var_span: first.span, var2: None, kind: ForKind.In{collection: Expr.Unit{span: first.span, id: parser_node_id(&state)}, step: None}}
+    ParserExpressionFormLoopClause{var: parser_value(state, first), var_span: first.span, var2: None, kind: ForKind.In{collection: Expr.Unit{span: first.span, id: parser_node_id(state)}, step: None}}
 }
 
 parser_loop_source_separator: fn(state: &JetParserState) {
-    token: parser_current(&state)
+    token: parser_current(state)
     if token.kind == TOKEN_KW_IN || (token.kind == TOKEN_SEMI && token.span.start < token.span.end) {
-        parser_bump(&state)
+        parser_bump(state)
         return
     }
-    parser_expect(&state, TOKEN_KW_IN, "between the loop binding and source").drop("parser_expect records the missing-token diagnostic")
+    parser_expect(state, TOKEN_KW_IN, "between the loop binding and source").drop("parser_expect records the missing-token diagnostic")
 }
 
 // S19-amend: `loop` reads all loop forms by header: `loop {}` (infinite),
 // `loop name := value, cond {}` (state), `loop x in source[, stride] {}`
 // (iteration, `(key, value)` for two names) and `loop cond {}` (conditional).
 parser_parse_loop_after_keyword: fn(state: &JetParserState, start: Span, label: NamedSpan?) -> Stmt {
-    first_kind: parser_current_kind(&state)
+    first_kind: parser_current_kind(state)
     if first_kind == TOKEN_LBRACE || first_kind == TOKEN_UNIFIED_ARROW {
         arrow_body: first_kind == TOKEN_UNIFIED_ARROW
-        body: parser_parse_loop_effect_body(&state)
+        body: parser_parse_loop_effect_body(state)
         return Stmt.Loop{body: body.statements, span: parser_cover(start, body.span), arrow_body: arrow_body, label: label}
     }
-    second_kind: parser_kind_at(&state, 1)
+    second_kind: parser_kind_at(state, 1)
     if first_kind == TOKEN_IDENT && second_kind == TOKEN_COLON_EQ {
         // A state loop starts with one mutable name binding.
-        name: parser_bump(&state)
-        sigil: parser_bump(&state)
-        initial: parser_parse_expression(&state, 1, 0)
+        name: parser_bump(state)
+        sigil: parser_bump(state)
+        initial: parser_parse_expression(state, 1, 0)
         init: ast_binding(parser_value(state, name), name.span, true, initial.expr, Val(sigil.span))
-        if parser_current_kind(&state) == TOKEN_COMMA {
-            parser_bump(&state)
+        if parser_current_kind(state) == TOKEN_COMMA {
+            parser_bump(state)
         } else {
-            parser_expect(&state, TOKEN_COMMA, "after the state initializer").drop("parser_expect records the missing-token diagnostic")
+            parser_expect(state, TOKEN_COMMA, "after the state initializer").drop("parser_expect records the missing-token diagnostic")
         }
-        condition: parser_parse_expression_no_struct_lit(&state, 1)
-        arrow_body: parser_current_kind(&state) == TOKEN_UNIFIED_ARROW
-        body: parser_parse_loop_effect_body(&state)
-        return Stmt.CountedLoop{init: ^init, cond: condition.expr, step: None, body: body.statements, span: parser_cover(start, body.span), arrow_body: arrow_body, label: label}
+        condition: parser_parse_expression_no_struct_lit(state, 1)
+        arrow_body: parser_current_kind(state) == TOKEN_UNIFIED_ARROW
+        body: parser_parse_loop_effect_body(state)
+        return Stmt.CountedLoop{init: init.move(), cond: condition.expr, step: None, body: body.statements, span: parser_cover(start, body.span), arrow_body: arrow_body, label: label}
     }
     if (first_kind == TOKEN_IDENT && (second_kind == TOKEN_SEMI || second_kind == TOKEN_COMMA || second_kind == TOKEN_KW_IN)) || first_kind == TOKEN_LPAREN {
-        binding: parser_loop_source_binding(&state)
-        parser_loop_source_separator(&state)
-        first: parser_parse_expression_no_struct_lit(&state, 1)
+        binding: parser_loop_source_binding(state)
+        parser_loop_source_separator(state)
+        first: if parser_current_kind(state) == TOKEN_AMP -> parser_parse_marked_place(state, 1, false, false) else -> parser_parse_expression_no_struct_lit(state, 1)
         kind := ForKind.In{collection: first.expr, step: None}
         if first.expr == {
-            .Range(range_start, range_end, exclusive, _, _) -> kind = ForKind.Range{start: range_start, end: range_end, step: parser_loop_stride(&state), exclusive: exclusive}
+            .Range(range_start, range_end, exclusive, _, _) -> kind = ForKind.Range{start: range_start, end: range_end, step: parser_loop_stride(state), exclusive: exclusive}
             else -> {
-                if parser_current_kind(&state) == TOKEN_DOT_DOT || parser_current_kind(&state) == TOKEN_DOT_DOT_LT {
+                if parser_current_kind(state) == TOKEN_DOT_DOT || parser_current_kind(state) == TOKEN_DOT_DOT_LT {
                     // `..` is inclusive; `..<` is half-open.
-                    exclusive: parser_current_kind(&state) == TOKEN_DOT_DOT_LT
-                    parser_bump(&state)
-                    finish: parser_parse_expression_no_struct_lit(&state, 1)
-                    kind = ForKind.Range{start: first.expr, end: finish.expr, step: parser_loop_stride(&state), exclusive: exclusive}
+                    exclusive: parser_current_kind(state) == TOKEN_DOT_DOT_LT
+                    parser_bump(state)
+                    finish: parser_parse_expression_no_struct_lit(state, 1)
+                    kind = ForKind.Range{start: first.expr, end: finish.expr, step: parser_loop_stride(state), exclusive: exclusive}
                 } else {
-                    kind = ForKind.In{collection: first.expr, step: parser_loop_stride(&state)}
+                    kind = ForKind.In{collection: first.expr, step: parser_loop_stride(state)}
                 }
             }
         }
-        arrow_body: parser_current_kind(&state) == TOKEN_UNIFIED_ARROW
-        body: parser_parse_loop_effect_body(&state)
-        return Stmt.For{var: binding.var, var_span: binding.var_span, var2: binding.var2, kind: ^kind, body: body.statements, span: parser_cover(start, body.span), arrow_body: arrow_body, label: label, auto_vectorization: None}
+        arrow_body: parser_current_kind(state) == TOKEN_UNIFIED_ARROW
+        body: parser_parse_loop_effect_body(state)
+        return Stmt.For{var: binding.var, var_span: binding.var_span, var2: binding.var2, kind: kind.move(), body: body.statements, span: parser_cover(start, body.span), arrow_body: arrow_body, label: label, auto_vectorization: None}
     }
-    condition: parser_parse_expression_no_struct_lit(&state, 1)
-    arrow_body: parser_current_kind(&state) == TOKEN_UNIFIED_ARROW
-    body: parser_parse_loop_effect_body(&state)
+    condition: parser_parse_expression_no_struct_lit(state, 1)
+    arrow_body: parser_current_kind(state) == TOKEN_UNIFIED_ARROW
+    body: parser_parse_loop_effect_body(state)
     Stmt.While{cond: condition.expr, body: body.statements, span: parser_cover(start, body.span), arrow_body: arrow_body, label: label}
 }
 
 parser_parse_loop_statement: fn(state: &JetParserState) -> Stmt {
-    start: parser_bump(&state)
-    parser_parse_loop_after_keyword(&state, start.span, None)
+    start: parser_bump(state)
+    parser_parse_loop_after_keyword(state, start.span, None)
 }
 
 parser_parse_labeled_loop: fn(state: &JetParserState) -> Stmt {
-    name: parser_bump(&state)
-    parser_bump(&state)
-    parser_bump(&state)
+    name: parser_bump(state)
+    parser_bump(state)
+    parser_bump(state)
     label: NamedSpan{name: parser_value(state, name), span: name.span}
-    parser_parse_loop_after_keyword(&state, name.span, Val(label))
+    parser_parse_loop_after_keyword(state, name.span, Val(label))
 }
 
 // Rust `named_loop_is_value`: `name: loop …` binds a loop value when an
@@ -1145,7 +1145,7 @@ parser_parse_labeled_loop: fn(state: &JetParserState) -> Stmt {
 // leaves this loop (labelled, or bare and not under a nested loop); otherwise
 // `name:` labels a statement loop.
 parser_named_loop_is_value: fn(state: &JetParserState) -> Bool Never! {
-    label: parser_current(&state).decoded
+    label: parser_current(state).decoded
     braces := 0
     parens := 0
     brackets := 0
@@ -1165,14 +1165,14 @@ parser_named_loop_is_value: fn(state: &JetParserState) -> Bool Never! {
                 braces += 1
                 saw_body = true
                 if nested_loop_pending {
-                    &nested_loop_braces.push(braces)
+                    nested_loop_braces.push(braces)
                     nested_loop_pending = false
                 }
             }
             TOKEN_RBRACE -> {
                 if braces == 0 -> return false
                 if nested_loop_braces.len() > 0 && nested_loop_braces[nested_loop_braces.len() - 1] == braces {
-                    _ := &nested_loop_braces.pop()
+                    _ := nested_loop_braces.pop()
                 }
                 braces -= 1
                 if saw_body && braces == 0 -> return false
@@ -1214,64 +1214,64 @@ parser_named_loop_is_value: fn(state: &JetParserState) -> Bool Never! {
 }
 
 parser_parse_return_statement: fn(state: &JetParserState) -> Stmt {
-    start: parser_bump(&state)
+    start: parser_bump(state)
     value := Expr?{None}
     end := start.span
-    if parser_current_kind(&state) != TOKEN_SEMI && parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
-        parsed: parser_parse_expression(&state, 1, 0)
+    if parser_current_kind(state) != TOKEN_SEMI && parser_current_kind(state) != TOKEN_RBRACE && parser_current_kind(state) != TOKEN_EOF {
+        parsed: parser_parse_expression(state, 1, 0)
         value = Val(parsed.expr)
         end = parsed.span
     }
-    parser_finish_statement(&state)
+    parser_finish_statement(state)
     Stmt.Return{value: value, span: parser_cover(start.span, end)}
 }
 
 parser_parse_break_statement: fn(state: &JetParserState) -> Stmt {
-    start: parser_bump(&state)
-    if parser_current_kind(&state) == TOKEN_LPAREN {
-        parser_bump(&state)
-        name: parser_expect_name(&state, "as a loop label")
-        if parser_current_kind(&state) == TOKEN_COMMA {
-            parser_bump(&state)
-            value: parser_parse_expression(&state, 1, 0)
-            close: parser_expect(&state, TOKEN_RPAREN, "`)` after labeled break")
-            parser_finish_statement(&state)
+    start: parser_bump(state)
+    if parser_current_kind(state) == TOKEN_LPAREN {
+        parser_bump(state)
+        name: parser_expect_name(state, "as a loop label")
+        if parser_current_kind(state) == TOKEN_COMMA {
+            parser_bump(state)
+            value: parser_parse_expression(state, 1, 0)
+            close: parser_expect(state, TOKEN_RPAREN, "`)` after labeled break")
+            parser_finish_statement(state)
             return Stmt.BreakLabelValue{name: parser_value(state, name), name_span: name.span, value: value.expr, span: parser_cover(start.span, close.span)}
         }
-        parser_expect(&state, TOKEN_RPAREN, "`)` after loop label")
-        parser_finish_statement(&state)
+        parser_expect(state, TOKEN_RPAREN, "`)` after loop label")
+        parser_finish_statement(state)
         return Stmt.BreakLabel{name: parser_value(state, name), span: start.span}
     }
-    if parser_current_kind(&state) != TOKEN_SEMI && parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
-        value: parser_parse_expression(&state, 1, 0)
-        parser_finish_statement(&state)
+    if parser_current_kind(state) != TOKEN_SEMI && parser_current_kind(state) != TOKEN_RBRACE && parser_current_kind(state) != TOKEN_EOF {
+        value: parser_parse_expression(state, 1, 0)
+        parser_finish_statement(state)
         return Stmt.BreakValue{value: value.expr, span: parser_cover(start.span, value.span)}
     }
-    parser_finish_statement(&state)
+    parser_finish_statement(state)
     Stmt.Break{span: start.span}
 }
 
 // The `comptime` keyword leads a build-time verb when the verb follows it.
 parser_prep_verb_ahead: fn(state: &JetParserState, offset: Int, verb: Int) -> Bool Never! {
-    parser_kind_at(&state, offset) == TOKEN_KW_COMPTIME && parser_kind_at(&state, offset + 1) == verb
+    parser_kind_at(state, offset) == TOKEN_KW_COMPTIME && parser_kind_at(state, offset + 1) == verb
 }
 
 // `comptime { … }` is the explicit shared-preparation block. It
 // runs while building and emits no runtime code.
 parser_parse_prep_block: fn(state: &JetParserState) -> Stmt {
-    start: parser_bump(&state)
-    block: parser_parse_block(&state)
+    start: parser_bump(state)
+    block: parser_parse_block(state)
     Stmt.ComptimeBlock{body: block.statements, is_template_loop: false, span: parser_cover(start.span, block.span)}
 }
 
 // A build-time method writes `comptime fn` directly before `fn`.
 parser_prep_fn_ahead: fn(state: &JetParserState) -> Bool Never! {
-    parser_prep_verb_ahead(&state, 0, TOKEN_KW_FN)
+    parser_prep_verb_ahead(state, 0, TOKEN_KW_FN)
 }
 
 parser_take_prep_fn: fn(state: &JetParserState) -> Bool {
-    if !parser_prep_fn_ahead(&state) -> return false
-    parser_bump(&state)
+    if !parser_prep_fn_ahead(state) -> return false
+    parser_bump(state)
     true
 }
 
@@ -1280,48 +1280,48 @@ parser_take_prep_fn: fn(state: &JetParserState) -> Bool {
 // shares the `if` arm grammar. Sema selects the arm; unselected arms are
 // name-checked only.
 parser_parse_prep_if: fn(state: &JetParserState) -> Stmt {
-    start: parser_bump(&state)
-    parser_expect(&state, TOKEN_KW_IF, "`if` after `comptime`")
+    start: parser_bump(state)
+    parser_expect(state, TOKEN_KW_IF, "`if` after `comptime`")
     saved_position: state.position
     saved_diagnostics: state.diagnostics.len()
     saved_blocks: state.block_spans.len()
     saved_else_arms: state.else_arms.len()
-    subject: parser_parse_expression_no_struct_lit_no_cmp(&state, 1)
-    if parser_current_kind(&state) == TOKEN_EQ_EQ && parser_kind_at(&state, 1) == TOKEN_LBRACE {
-        parser_bump(&state)
-        parser_expect(&state, TOKEN_LBRACE, "`{{` to open the `comptime if` dispatch body")
-        dispatch: parser_parse_if_arms(&state, subject.expr, start.span, BinOp.Eq)
+    subject: parser_parse_expression_no_struct_lit_no_cmp(state, 1)
+    if parser_current_kind(state) == TOKEN_EQ_EQ && parser_kind_at(state, 1) == TOKEN_LBRACE {
+        parser_bump(state)
+        parser_expect(state, TOKEN_LBRACE, "`{{` to open the `comptime if` dispatch body")
+        dispatch: parser_parse_if_arms(state, subject.expr, start.span, BinOp.Eq)
         span: Span{start: start.span.start, end: parser_previous_end(state)}
         if dispatch == .Switch(dispatch_subject, arms, else_body, _) -> return Stmt.ComptimeSwitch{subject: dispatch_subject, arms: arms, else_body: else_body, span: span}
         return dispatch
     }
-    parser_rewind(&state, saved_position, saved_diagnostics, saved_blocks, saved_else_arms)
-    condition: parser_parse_expression_no_struct_lit(&state, 1)
-    then_block: parser_parse_block(&state)
+    parser_rewind(state, saved_position, saved_diagnostics, saved_blocks, saved_else_arms)
+    condition: parser_parse_expression_no_struct_lit(state, 1)
+    then_block: parser_parse_block(state)
     else_body := [Stmt]?{None}
     end := then_block.span
-    if parser_current_kind(&state) == TOKEN_KW_ELSE {
-        parser_bump(&state)
-        if parser_prep_verb_ahead(&state, 0, TOKEN_KW_IF) {
-            chained: parser_parse_prep_if(&state)
+    if parser_current_kind(state) == TOKEN_KW_ELSE {
+        parser_bump(state)
+        if parser_prep_verb_ahead(state, 0, TOKEN_KW_IF) {
+            chained: parser_parse_prep_if(state)
             else_body = Val([Stmt]{chained})
-            end = parser_lookahead(&state, -1).span
+            end = parser_lookahead(state, -1).span
         } else {
-            final_block: parser_parse_block(&state)
+            final_block: parser_parse_block(state)
             else_body = Val(final_block.statements)
             end = final_block.span
         }
     }
-    Stmt.ComptimeIf{cond: condition.expr, cond_span: condition.span, then_body: then_block.statements, else_body: ^else_body, span: parser_cover(start.span, end), selected_then: None}
+    Stmt.ComptimeIf{cond: condition.expr, cond_span: condition.span, then_body: then_block.statements, else_body: else_body.move(), span: parser_cover(start.span, end), selected_then: None}
 }
 
 // `comptime loop …` is the ordinary loop run while building. It
 // is one compile-time block holding that loop, so it emits no runtime code.
 parser_parse_prep_loop: fn(state: &JetParserState) -> Stmt {
-    start: parser_bump(&state)
-    keyword: parser_expect(&state, TOKEN_KW_LOOP, "`loop` after `comptime`")
-    body: parser_parse_loop_after_keyword(&state, keyword.span, None)
-    end: parser_lookahead(&state, -1).span
+    start: parser_bump(state)
+    keyword: parser_expect(state, TOKEN_KW_LOOP, "`loop` after `comptime`")
+    body: parser_parse_loop_after_keyword(state, keyword.span, None)
+    end: parser_lookahead(state, -1).span
     Stmt.ComptimeBlock{body: [Stmt]{body}, is_template_loop: state.derive_template_depth > 0, span: parser_cover(start.span, end)}
 }
 
@@ -1330,26 +1330,26 @@ parser_parse_prep_loop: fn(state: &JetParserState) -> Stmt {
 // `:` or `:=`. Bounded by the bracket depth.
 parser_pattern_binding_ahead: fn(state: &JetParserState) -> Bool Never! {
     offset := 0
-    if parser_current_kind(&state) == TOKEN_IDENT {
+    if parser_current_kind(state) == TOKEN_IDENT {
         offset = 1
-        if parser_kind_at(&state, offset) != TOKEN_LBRACE -> return false
+        if parser_kind_at(state, offset) != TOKEN_LBRACE -> return false
     }
-    open: parser_kind_at(&state, offset)
+    open: parser_kind_at(state, offset)
     close := TOKEN_RBRACE
     if open == TOKEN_LBRACKET -> close = TOKEN_RBRACKET
     if open == TOKEN_LPAREN -> close = TOKEN_RPAREN
     if open != TOKEN_LBRACKET && open != TOKEN_LPAREN && open != TOKEN_LBRACE -> return false
     // Rust `try_bind_pattern`: `( name: … )` opens a named tuple, never a pattern.
-    if open == TOKEN_LPAREN && parser_kind_at(&state, offset + 1) == TOKEN_IDENT && parser_kind_at(&state, offset + 2) == TOKEN_COLON -> return false
+    if open == TOKEN_LPAREN && parser_kind_at(state, offset + 1) == TOKEN_IDENT && parser_kind_at(state, offset + 2) == TOKEN_COLON -> return false
     depth := 0
     loop {
-        kind: parser_kind_at(&state, offset)
+        kind: parser_kind_at(state, offset)
         if kind == TOKEN_EOF -> return false
         if kind == open -> depth += 1
         if kind == close {
             depth -= 1
             if depth == 0 {
-                after: parser_kind_at(&state, offset + 1)
+                after: parser_kind_at(state, offset + 1)
                 return after == TOKEN_COLON || after == TOKEN_COLON_EQ
             }
         }
@@ -1362,86 +1362,86 @@ parser_pattern_binding_ahead: fn(state: &JetParserState) -> Bool Never! {
 // `[a, b]: list`, `(a, b): tuple`, `{ a: x, b: y }: tuple` or
 // `Type{x, y: local, ..}: value`.
 parser_parse_pattern_binding_statement: fn(state: &JetParserState) -> Stmt {
-    start: parser_current(&state)
+    start: parser_current(state)
     pattern := BindPattern.List{elems: [BindName]{}, span: start.span}
     if start.kind == {
         TOKEN_LBRACKET -> {
-            parser_bump(&state)
-            elems: parser_pattern_binding_names(&state, TOKEN_RBRACKET, "for a list-pattern binding")
-            close: parser_expect(&state, TOKEN_RBRACKET, "`]` to close the list pattern")
+            parser_bump(state)
+            elems: parser_pattern_binding_names(state, TOKEN_RBRACKET, "for a list-pattern binding")
+            close: parser_expect(state, TOKEN_RBRACKET, "`]` to close the list pattern")
             pattern = BindPattern.List{elems: elems, span: parser_cover(start.span, close.span)}
         }
         TOKEN_LPAREN -> {
-            parser_bump(&state)
-            elems: parser_pattern_binding_names(&state, TOKEN_RPAREN, "for a tuple-pattern binding")
-            close: parser_expect(&state, TOKEN_RPAREN, "`)` to close the tuple pattern")
+            parser_bump(state)
+            elems: parser_pattern_binding_names(state, TOKEN_RPAREN, "for a tuple-pattern binding")
+            close: parser_expect(state, TOKEN_RPAREN, "`)` to close the tuple pattern")
             pattern = BindPattern.Tuple{elems: elems, span: parser_cover(start.span, close.span)}
         }
         TOKEN_LBRACE -> {
-            parser_bump(&state)
+            parser_bump(state)
             elems := [BindName]{}
             loop {
-                member: parser_expect_name(&state, "for a tuple-member rename")
+                member: parser_expect_name(state, "for a tuple-member rename")
                 rename := BindNameRename?{None}
-                if parser_current_kind(&state) == TOKEN_COLON {
-                    parser_bump(&state)
-                    local: parser_expect_name(&state, "as the renamed binding")
+                if parser_current_kind(state) == TOKEN_COLON {
+                    parser_bump(state)
+                    local: parser_expect_name(state, "as the renamed binding")
                     rename = Val(BindNameRename{name: parser_value(state, local), span: local.span})
                 }
-                &elems.push(BindName{name: parser_value(state, member), span: member.span, rename: rename})
-                if parser_current_kind(&state) != TOKEN_COMMA -> break
-                parser_bump(&state)
-                if parser_current_kind(&state) == TOKEN_RBRACE -> break
+                elems.push(BindName{name: parser_value(state, member), span: member.span, rename: rename})
+                if parser_current_kind(state) != TOKEN_COMMA -> break
+                parser_bump(state)
+                if parser_current_kind(state) == TOKEN_RBRACE -> break
             }
-            close: parser_expect(&state, TOKEN_RBRACE, "`}}` to close the tuple-member rename")
+            close: parser_expect(state, TOKEN_RBRACE, "`}}` to close the tuple-member rename")
             pattern = BindPattern.Tuple{elems: elems, span: parser_cover(start.span, close.span)}
         }
         else -> {
-            type_name: parser_expect_name(&state, "for a struct pattern")
-            parser_expect(&state, TOKEN_LBRACE, "`{{` to open the struct pattern")
+            type_name: parser_expect_name(state, "for a struct pattern")
+            parser_expect(state, TOKEN_LBRACE, "`{{` to open the struct pattern")
             fields := [BindName]{}
             rest := Span?{None}
-            if parser_current_kind(&state) != TOKEN_RBRACE {
+            if parser_current_kind(state) != TOKEN_RBRACE {
                 loop {
-                    if parser_current_kind(&state) == TOKEN_DOT_DOT {
-                        rest = Val(parser_bump(&state).span)
+                    if parser_current_kind(state) == TOKEN_DOT_DOT {
+                        rest = Val(parser_bump(state).span)
                         break
                     }
-                    field: parser_expect_name(&state, "for a struct-pattern field")
+                    field: parser_expect_name(state, "for a struct-pattern field")
                     rename := BindNameRename?{None}
-                    if parser_current_kind(&state) == TOKEN_COLON {
-                        parser_bump(&state)
-                        local: parser_expect_name(&state, "as the renamed binding")
+                    if parser_current_kind(state) == TOKEN_COLON {
+                        parser_bump(state)
+                        local: parser_expect_name(state, "as the renamed binding")
                         rename = Val(BindNameRename{name: parser_value(state, local), span: local.span})
                     }
-                    &fields.push(BindName{name: parser_value(state, field), span: field.span, rename: rename})
-                    if parser_current_kind(&state) != TOKEN_COMMA -> break
-                    parser_bump(&state)
-                    if parser_current_kind(&state) == TOKEN_RBRACE -> break
+                    fields.push(BindName{name: parser_value(state, field), span: field.span, rename: rename})
+                    if parser_current_kind(state) != TOKEN_COMMA -> break
+                    parser_bump(state)
+                    if parser_current_kind(state) == TOKEN_RBRACE -> break
                 }
             }
-            close: parser_expect(&state, TOKEN_RBRACE, "`}}` to close the struct pattern")
+            close: parser_expect(state, TOKEN_RBRACE, "`}}` to close the struct pattern")
             span: parser_cover(type_name.span, close.span)
             pattern = BindPattern.Struct{type_name: parser_value(state, type_name), type_span: type_name.span, fields: fields, rest: rest, span: span}
         }
     }
-    sigil: parser_bump(&state)
-    value: parser_parse_expression(&state, 1, 0)
+    sigil: parser_bump(state)
+    value: parser_parse_expression(state, 1, 0)
     binding := ast_binding("", parser_bind_pattern_span(pattern), sigil.kind == TOKEN_COLON_EQ, value.expr, Val(sigil.span))
     binding.pattern = Val(pattern)
-    parser_finish_statement(&state)
+    parser_finish_statement(state)
     Stmt.Val{binding: binding}
 }
 
 // The comma-separated names of a list or tuple pattern, up to `close`.
 parser_pattern_binding_names: fn(state: &JetParserState, close: Int, context: String) -> [BindName] {
     elems := [BindName]{}
-    if parser_current_kind(&state) == close -> return elems
+    if parser_current_kind(state) == close -> return elems
     loop {
-        name: parser_expect_name(&state, context)
-        &elems.push(BindName{name: parser_value(state, name), span: name.span, rename: None})
-        if parser_current_kind(&state) != TOKEN_COMMA -> break
-        parser_bump(&state)
+        name: parser_expect_name(state, context)
+        elems.push(BindName{name: parser_value(state, name), span: name.span, rename: None})
+        if parser_current_kind(state) != TOKEN_COMMA -> break
+        parser_bump(state)
     }
     elems
 }
@@ -1453,55 +1453,55 @@ parser_bind_pattern_span: fn(pattern: BindPattern) -> Span Never! {
 }
 
 parser_parse_binding_statement: fn(state: &JetParserState) -> Stmt {
-    name: parser_expect_name(&state, "in a binding")
-    sigil: parser_current(&state)
+    name: parser_expect_name(state, "in a binding")
+    sigil: parser_current(state)
     mutable: if {
         sigil.kind == TOKEN_COLON_EQ || sigil.kind == TOKEN_COLON -> {
-            parser_bump(&state)
+            parser_bump(state)
             sigil.kind == TOKEN_COLON_EQ
         }
         else -> {
-            parser_add_error(&state, sigil.span, "expected `:=` or `:` in a binding", "the binding sigil distinguishes a mutable value from an immutable one", "write `:=` for mutable or `:` for immutable")
+            parser_add_error(state, sigil.span, "expected `:=` or `:` in a binding", "the binding sigil distinguishes a mutable value from an immutable one", "write `:=` for mutable or `:` for immutable")
             false
         }
     }
     // `name: comptime { value }` is the prepared-value
     // binding. A block holding only its final expression lowers to the one
     // compile-time binding path; any other block keeps E0391.
-    if !mutable && parser_prep_verb_ahead(&state, 0, TOKEN_LBRACE) {
-        head: parser_bump(&state)
-        block: parser_parse_value_block(&state, 0, true)
+    if !mutable && parser_prep_verb_ahead(state, 0, TOKEN_LBRACE) {
+        head: parser_bump(state)
+        block: parser_parse_value_block(state, 0, true)
         span: parser_cover(head.span, block.span)
         if block.statements.len() == 0 && block.tail == .Val(tail) {
             prepared := ast_binding(parser_value(state, name), name.span, false, tail, Val(sigil.span))
             prepared.is_comptime = true
-            parser_finish_statement(&state)
+            parser_finish_statement(state)
             return Stmt.Val{binding: prepared}
         }
-        parser_add_error_code(&state, "E0391", span, "`comptime {{ … }}` is used as a value, which this compiler does not support yet", "Jet makes the block's final expression its value; only a block holding a single final expression is folded today", "write `name: comptime {{ value }}` with one final expression, or a `comptime {{ … }}` statement")
-        parser_finish_statement(&state)
-        return Stmt.Val{binding: ast_binding(parser_value(state, name), name.span, false, Expr.Unit{span: span, id: parser_node_id(&state)}, Val(sigil.span))}
+        parser_add_error_code(state, "E0391", span, "`comptime {{ … }}` is used as a value, which this compiler does not support yet", "Jet makes the block's final expression its value; only a block holding a single final expression is folded today", "write `name: comptime {{ value }}` with one final expression, or a `comptime {{ … }}` statement")
+        parser_finish_statement(state)
+        return Stmt.Val{binding: ast_binding(parser_value(state, name), name.span, false, Expr.Unit{span: span, id: parser_node_id(state)}, Val(sigil.span))}
     }
     // Bare `name := uninit` — an explicit type must precede the literal body.
-    if parser_current_kind(&state) == TOKEN_IDENT && parser_value_at(&state, 0) == "uninit" {
-        after: parser_kind_at(&state, 1)
+    if parser_current_kind(state) == TOKEN_IDENT && parser_value_at(state, 0) == "uninit" {
+        after: parser_kind_at(state, 1)
         if after == TOKEN_SEMI || after == TOKEN_RBRACE || after == TOKEN_EOF {
-            uninit_token: parser_current(&state)
+            uninit_token: parser_current(state)
             binding_name: parser_value(state, name)
-            parser_add_error_code(&state, "E0421", uninit_token.span, "`uninit` needs an explicit type", "an uninitialized binding has no value to infer its type from, so the type must appear before the literal body", "write `{binding_name} := <Type>{{ uninit }}`, e.g. `buffer := [U8#4096]{{ uninit }}`")
-            parser_sync_stmt(&state)
-            return Stmt.Expr{expr: Expr.Unit{span: uninit_token.span, id: parser_node_id(&state)}}
+            parser_add_error_code(state, "E0421", uninit_token.span, "`uninit` needs an explicit type", "an uninitialized binding has no value to infer its type from, so the type must appear before the literal body", "write `{binding_name} := <Type>{{ uninit }}`, e.g. `buffer := [U8#4096]{{ uninit }}`")
+            parser_sync_stmt(state)
+            return Stmt.Expr{expr: Expr.Unit{span: uninit_token.span, id: parser_node_id(state)}}
         }
     }
-    value: parser_parse_expression(&state, 1, 0)
+    value: if parser_current_kind(state) == TOKEN_AMP -> parser_parse_marked_place(state, 0, true, false) else -> parser_parse_expression(state, 1, 0)
     // `name: Layout{ … }` (Rust layout_ctor_binding): a typed-literal
     // constraint body is the layout statement over its elements.
     if parser_layout_elements(value.expr) == .Val(elements) {
         binding_name: parser_value(state, name)
-        if mutable -> parser_add_error_code(&state, "E0003", name.span, "a `Layout{{ … }}` binding is immutable", "`Layout` builds a solved layout handle once; mutate suggestions through `.suggest`, not the binding", "write `{binding_name}: Layout{{ … }}`")
+        if mutable -> parser_add_error_code(state, "E0003", name.span, "a `Layout{{ … }}` binding is immutable", "`Layout` builds a solved layout handle once; mutate suggestions through `.suggest`, not the binding", "write `{binding_name}: Layout{{ … }}`")
         body := [Stmt]{}
-        loop element in elements -> &body.push(Stmt.Expr{expr: parser_desugar_layout_expr(&state, binding_name, element)})
-        parser_finish_statement(&state)
+        loop element in elements -> body.push(Stmt.Expr{expr: parser_desugar_layout_expr(state, binding_name, element)})
+        parser_finish_statement(state)
         return Stmt.Layout{name: binding_name, name_span: name.span, body: body, span: parser_cover(name.span, value.span)}
     }
     binding := ast_binding(parser_value(state, name), name.span, mutable, value.expr, Val(sigil.span))
@@ -1512,11 +1512,11 @@ parser_parse_binding_statement: fn(state: &JetParserState) -> Stmt {
         if parser_typed_literal_uninit_marker(head, body) == .Val(marker_span) {
             binding.ty = head
             binding.ty_span = Val(literal_span)
-            binding.init = Expr.Int{value: 0, span: marker_span, width: None, raw: None, id: parser_node_id(&state)}
+            binding.init = Expr.Int{value: 0, span: marker_span, width: None, raw: None, id: parser_node_id(state)}
             binding.uninit = true
         }
     }
-    parser_finish_statement(&state)
+    parser_finish_statement(state)
     Stmt.Val{binding: binding}
 }
 
@@ -1546,15 +1546,15 @@ parser_layout_anchor_method: fn(field: String) -> String? Never! {
 }
 
 parser_layout_text_arg: fn(state: &JetParserState, text: String, span: Span) -> CallArg Never! {
-    CallArg{convention: AccessConvention.Read, expr: Expr.Str{parts: [StrPart]{StrPart.Lit{text: text}}, span: span, id: parser_node_id(&state)}, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
+    CallArg{convention: AccessConvention.Read, expr: Expr.Str{parts: [StrPart]{StrPart.Lit{text: text}}, span: span, id: parser_node_id(state)}, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
 }
 
 parser_desugar_layout_args: fn(state: &JetParserState, layout_name: String, args: [CallArg]) -> [CallArg] Never! {
     out := [CallArg]{}
     loop arg in args {
         rewritten := arg.copy()
-        rewritten.expr = parser_desugar_layout_expr(&state, layout_name, arg.expr)
-        &out.push(rewritten)
+        rewritten.expr = parser_desugar_layout_expr(state, layout_name, arg.expr)
+        out.push(rewritten)
     }
     out
 }
@@ -1569,19 +1569,19 @@ parser_desugar_layout_expr: fn(state: &JetParserState, layout_name: String, e: E
         if base == .Ident(box_name, ident_span, _) {
             if parser_layout_anchor_method(field) == .Val(method) {
                 box_text: if box_name == "self" -> layout_name.copy() else -> box_name.copy()
-                args: [CallArg]{parser_layout_text_arg(&state, box_text, ident_span), parser_layout_text_arg(&state, field.copy(), field_span)}
-                return Expr.MethodCall{receiver: Expr.Ident{name: layout_name.copy(), span: ident_span, id: parser_node_id(&state)}, method: method, method_span: field_span, owner_type_args: [Type]{}, type_args: [Type]{}, args: args, id: parser_node_id(&state)}
+                args: [CallArg]{parser_layout_text_arg(state, box_text, ident_span), parser_layout_text_arg(state, field.copy(), field_span)}
+                return Expr.MethodCall{receiver: Expr.Ident{name: layout_name.copy(), span: ident_span, id: parser_node_id(state)}, method: method, method_span: field_span, owner_type_args: [Type]{}, type_args: [Type]{}, args: args, id: parser_node_id(state)}
             }
         }
     }
     if e == {
-        .Binary(op, l, r, span, node) -> Expr.Binary{op: op, left: parser_desugar_layout_expr(&state, layout_name, l), right: parser_desugar_layout_expr(&state, layout_name, r), span: span, id: node}
-        .Unary(op, x, span, node) -> Expr.Unary{op: op, operand: parser_desugar_layout_expr(&state, layout_name, x), span: span, id: node}
-        .Field(base, field, span, node) -> Expr.Field{base: parser_desugar_layout_expr(&state, layout_name, base), member: field, span: span, id: node}
-        .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, node) -> Expr.MethodCall{receiver: parser_desugar_layout_expr(&state, layout_name, receiver), method: method, method_span: method_span, owner_type_args: owner_type_args, type_args: type_args, args: parser_desugar_layout_args(&state, layout_name, args), id: node}
+        .Binary(op, l, r, span, node) -> Expr.Binary{op: op, left: parser_desugar_layout_expr(state, layout_name, l), right: parser_desugar_layout_expr(state, layout_name, r), span: span, id: node}
+        .Unary(op, x, span, node) -> Expr.Unary{op: op, operand: parser_desugar_layout_expr(state, layout_name, x), span: span, id: node}
+        .Field(base, field, span, node) -> Expr.Field{base: parser_desugar_layout_expr(state, layout_name, base), member: field, span: span, id: node}
+        .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, node) -> Expr.MethodCall{receiver: parser_desugar_layout_expr(state, layout_name, receiver), method: method, method_span: method_span, owner_type_args: owner_type_args, type_args: type_args, args: parser_desugar_layout_args(state, layout_name, args), id: node}
         .Call(call, node) -> {
             rewritten := call.copy()
-            rewritten.args = parser_desugar_layout_args(&state, layout_name, call.args)
+            rewritten.args = parser_desugar_layout_args(state, layout_name, call.args)
             Expr.Call{call: rewritten, id: node}
         }
         else -> e.copy()
@@ -1612,11 +1612,11 @@ parser_typed_literal_uninit_marker: fn(head: Type?, body: TypedLitBody) -> Span?
     None
 }
 
-// Rust `KW_DEFER`: `defer close(^resource)` keeps the whole close call; any
+// Rust `KW_DEFER`: `defer close(resource)` keeps the whole close call; any
 // other shape is fatal at the statement.
 parser_parse_defer_statement: fn(state: &JetParserState) -> Stmt {
-    start: parser_bump(&state)
-    close: parser_parse_expression(&state, 1, 0)
+    start: parser_bump(state)
+    close: parser_parse_expression(state, 1, 0)
     valid: if close.expr == {
         .Call(call, _) -> call.name == "close" && call.args.len() == 1 && call.args[0].convention != AccessConvention.Write && call.args[0].expr == .Ident(_, _, _)
         else -> false
@@ -1626,98 +1626,107 @@ parser_parse_defer_statement: fn(state: &JetParserState) -> Stmt {
         parser_add_error(state, span, "`defer` only schedules a consuming resource close", "Jet has no general deferred-action mechanism; resource cleanup stays explicit and ownership-checked through `close`, which takes its resource", "write `defer close(resource)`")
         return Stmt.Expr{expr: Expr.Unit{span: start.span, id: parser_node_id(state)}}
     }
-    parser_finish_statement(&state)
-    Stmt.DeferClose{close: close.expr, span: ^span}
+    parser_finish_statement(state)
+    Stmt.DeferClose{close: close.expr, span: span.move()}
 }
 
 // Rust `KW_ASSERT`: `assert a, b` records unsafe-evidence names as the
 // internal assertion call that sema removes before IR lowering.
 parser_parse_assert_names: fn(state: &JetParserState) -> Stmt {
-    start: parser_bump(&state)
+    start: parser_bump(state)
     args := [CallArg]{}
     loop {
-        name: parser_expect_name(&state, "after `assert`")
-        &args.push(CallArg{convention: AccessConvention.Read, expr: Expr.Ident{name: parser_value(state, name), span: name.span, id: parser_node_id(&state)}, span: name.span, flags: ast_empty_call_arg_flags(), label: None, spread: false})
-        if parser_current_kind(&state) != TOKEN_COMMA -> break
-        parser_bump(&state)
-        if parser_current_kind(&state) == TOKEN_RPAREN -> break
+        name: parser_expect_name(state, "after `assert`")
+        args.push(CallArg{convention: AccessConvention.Read, expr: Expr.Ident{name: parser_value(state, name), span: name.span, id: parser_node_id(state)}, span: name.span, flags: ast_empty_call_arg_flags(), label: None, spread: false})
+        if parser_current_kind(state) != TOKEN_COMMA -> break
+        parser_bump(state)
+        if parser_current_kind(state) == TOKEN_RPAREN -> break
     }
-    parser_finish_statement(&state)
-    Stmt.Expr{expr: Expr.Call{call: Call{name: "__jet_unsafe_assert", name_span: start.span, type_args: [Type]{}, args: args}, id: parser_node_id(&state)}}
+    parser_finish_statement(state)
+    Stmt.Expr{expr: Expr.Call{call: Call{name: "__jet_unsafe_assert", name_span: start.span, type_args: [Type]{}, args: args}, id: parser_node_id(state)}}
 }
 
 // Rust `stmt`, its name/`self` arm and its general expression arm (#18): a
 // line must do something. A computed value is allowed only as the bare last
 // line of a callable body; any other unused value is fatal E0003.
 parser_parse_assignment_or_expression: fn(state: &JetParserState) -> Stmt {
-    start: parser_current(&state)
+    start: parser_current(state)
     if start.kind == TOKEN_KW_IN {
-        parser_bump(&state)
-        parser_add_error(&state, start.span, "`in` is reserved as the source-loop keyword", "the `in` keyword marks the boundary between a loop binding and its source", "choose a different identifier name, or use `in` in a source loop; after `.` it is allowed as a member name")
-        return Stmt.Expr{expr: Expr.Unit{span: start.span, id: parser_node_id(&state)}}
+        parser_bump(state)
+        parser_add_error(state, start.span, "`in` is reserved as the source-loop keyword", "the `in` keyword marks the boundary between a loop binding and its source", "choose a different identifier name, or use `in` in a source loop; after `.` it is allowed as a member name")
+        return Stmt.Expr{expr: Expr.Unit{span: start.span, id: parser_node_id(state)}}
     }
-    if start.kind == TOKEN_IDENT && parser_word_follows(&state) {
-        parser_report_unknown_word(&state, false)
-        return Stmt.Expr{expr: Expr.Unit{span: start.span, id: parser_node_id(&state)}}
+    if start.kind == TOKEN_IDENT && parser_word_follows(state) {
+        parser_report_unknown_word(state, false)
+        return Stmt.Expr{expr: Expr.Unit{span: start.span, id: parser_node_id(state)}}
     }
     named: start.kind == TOKEN_IDENT || start.kind == TOKEN_SELF
     if !named && !parser_starts_expression(start.kind) {
-        parser_report_not_a_statement(&state, start)
+        parser_report_not_a_statement(state, start)
         // Consume the offending token (as the `in` arm does): every statement
         // loop re-enters here at the same position otherwise, reporting it
         // forever. A closing brace or the end stays for the enclosing body.
         if start.kind != TOKEN_RBRACE && start.kind != TOKEN_EOF {
-            parser_bump(&state)
+            parser_bump(state)
         }
-        return Stmt.Expr{expr: Expr.Unit{span: start.span, id: parser_node_id(&state)}}
+        return Stmt.Expr{expr: Expr.Unit{span: start.span, id: parser_node_id(state)}}
     }
-    left: parser_parse_expression(&state, 1, 0)
+    // A line opening with a mark (`&mask`) starts a new statement, and a mark
+    // is not a value (D-CALLSITE-MARK2): the line is not a statement. Its
+    // operand is consumed with it, so the line reports once.
+    if start.kind == TOKEN_AMP || start.kind == TOKEN_CARET {
+        parser_report_not_a_statement(state, start)
+        parser_bump(state)
+        _ := parser_parse_expression(state, 1, 0)
+        return Stmt.Expr{expr: Expr.Unit{span: start.span, id: parser_node_id(state)}}
+    }
+    left: parser_parse_expression(state, 1, 0)
     if parser_refutable_test_binding(left.expr) == .Val(binding) {
-        parser_finish_statement(&state)
+        parser_finish_statement(state)
         return Stmt.Val{binding: binding}
     }
-    operator: parser_current_kind(&state)
+    operator: parser_current_kind(state)
     if parser_is_assignment_operator(operator) {
-        op_token: parser_bump(&state)
-        right: parser_parse_expression(&state, 1, 0)
-        parser_finish_statement(&state)
-        target: parser_expression_lvalue(&state, left.expr, left.span, op_token)
-        return Stmt.Assign{target: ^target, op: parser_assignment_binop(operator), op_span: op_token.span, value: right.expr}
+        op_token: parser_bump(state)
+        right: parser_parse_expression(state, 1, 0)
+        parser_finish_statement(state)
+        target: parser_expression_lvalue(state, left.expr, left.span, op_token)
+        return Stmt.Assign{target: target.move(), op: parser_assignment_binop(operator), op_span: op_token.span, value: right.expr}
     }
-    if named && !parser_named_line_does_work(&state, left.expr) {
-        parser_add_error(&state, expr_span(left.expr), "this line computes a value but doesn't do anything with it", "only calls, bindings, assignments, and `return` are allowed here", "use the value, e.g. `x: ...` or `print(...)`")
+    if named && !parser_named_line_does_work(state, left.expr) {
+        parser_add_error(state, expr_span(left.expr), "this line computes a value but doesn't do anything with it", "only calls, bindings, assignments, and `return` are allowed here", "use the value, e.g. `x: ...` or `print(...)`")
         return Stmt.Expr{expr: left.expr}
     }
-    if !named && !parser_marked_line_does_work(&state, left.expr, start.kind) {
-        parser_report_not_a_statement(&state, start)
+    if !named && !parser_at_callable_tail(state) {
+        parser_report_not_a_statement(state, start)
         return Stmt.Expr{expr: left.expr}
     }
-    parser_finish_statement(&state)
+    parser_finish_statement(state)
     Stmt.Expr{expr: left.expr}
 }
 
 parser_report_not_a_statement: fn(state: &JetParserState, start: Token) {
     found: parser_describe_token(state, start)
-    parser_add_error(&state, start.span, "expected a call, binding, assignment, or `return`, found {found}", "inside a function body, write a call, binding, assignment, or `return`", "e.g. print(\"hello\") or x: 1")
+    parser_add_error(state, start.span, "expected a call, binding, assignment, or `return`, found {found}", "inside a function body, write a call, binding, assignment, or `return`", "e.g. print(\"hello\") or x: 1")
 }
 
 // A name followed by another name or a declaration keyword on the same line
 // starts no Jet declaration or statement. `shared` and the `task` surface
 // before a name are expressions: the shared-cell construction and a spawn.
 parser_word_follows: fn(state: &JetParserState) -> Bool Never! {
-    next: parser_kind_at(&state, 1)
+    next: parser_kind_at(state, 1)
     if !(next == TOKEN_IDENT || next == TOKEN_KW_PUB || parser_is_item_keyword(next)) -> return false
     if next != TOKEN_IDENT -> return true
-    current: parser_current(&state)
+    current: parser_current(state)
     word: parser_value(state, current)
-    word != "shared" && !(word == "task" && parser_task_surface_ahead(&state))
+    word != "shared" && !(word == "task" && parser_task_surface_ahead(state))
 }
 
 // At the top level: a word that starts no declaration or script line, either
 // a name followed by another word or a keyword no top-level form begins with.
 parser_unknown_top_word_ahead: fn(state: &JetParserState) -> Bool Never! {
-    token: parser_current(&state)
-    if token.kind == TOKEN_IDENT -> return parser_word_follows(&state)
+    token: parser_current(state)
+    if token.kind == TOKEN_IDENT -> return parser_word_follows(state)
     if !parser_is_keyword_token(state, token) || parser_starts_expression(token.kind) -> return false
     kind: token.kind
     !(kind == TOKEN_KW_IF || kind == TOKEN_KW_LOOP || kind == TOKEN_RETURN || kind == TOKEN_BREAK || kind == TOKEN_KW_YIELD || kind == TOKEN_KW_COMPTIME)
@@ -1725,13 +1734,16 @@ parser_unknown_top_word_ahead: fn(state: &JetParserState) -> Bool Never! {
 
 // The one error for a word Jet does not spell at a declaration or statement
 // start; it lists the forms the grammar accepts there and consumes the word.
+// A declaration keyword written before its name reaches here as a word
+// (parser_colon_declarations).
 parser_report_unknown_word: fn(state: &JetParserState, top_level: Bool) {
-    token: parser_bump(&state)
+    token: parser_bump(state)
     word: parser_text(state, token)
     site: if top_level -> "declaration" else -> "statement"
-    what: if token.kind == TOKEN_IDENT -> "`{word}` is not a Jet word" else -> "the keyword `{word}` doesn't start a {site}"
-    why: if top_level -> "a declaration here starts with `fn`, `struct`, `enum`, `trait`, `impl`, `module`, `use` or `extern`, and a script line with a call, binding or assignment" else -> "a statement here starts with a binding (`name: value`), an assignment, a call, `if`, `loop`, `return`, `break` or `next`"
-    parser_add_error(&state, token.span, what, why, "start the line with one of these forms")
+    keyword: token.kind != TOKEN_IDENT || [String]{"fn", "struct", "enum", "trait", "module", "tag", "effect"}.contains(word)
+    what: if keyword -> "the keyword `{word}` doesn't start a {site}" else -> "`{word}` is not a Jet word"
+    why: if top_level -> "a declaration here is `name: value` (`run: fn() {{ … }}`, `Point: struct {{ … }}`) or an `impl`, `use` or `extern`, and a script line is a call, binding or assignment" else -> "a statement here starts with a binding (`name: value`), an assignment, a call, `if`, `loop`, `return`, `break` or `next`"
+    parser_add_error(state, token.span, what, why, "start the line with one of these forms")
 }
 
 // Rust `starts_expr`: the tokens that can open an expression line.
@@ -1753,38 +1765,22 @@ parser_named_line_does_work: fn(state: &JetParserState, expr: Expr) -> Bool Neve
         .If(_, _, _, _, _, _, _) -> parser_is_result_handler_expr(expr)
         else -> false
     }
-    works || parser_at_callable_tail(&state)
-}
-
-// Any other line works when it starts with the `&`/`^`
-// mark of the call that writes or takes that place (`&buf.push(x)`),
-// including the compact Result handler on that call
-// (`&w.write(x) ? _ -> … ! err -> …`).
-parser_marked_line_does_work: fn(state: &JetParserState, expr: Expr, start_kind: Int) -> Bool Never! {
-    if start_kind == TOKEN_AMP || start_kind == TOKEN_CARET {
-        call: if expr == {
-            .Call(_, _) | .MethodCall(_, _, _, _, _, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) -> true
-            .If(_, _, _, _, _, _, _) -> parser_is_result_handler_expr(expr)
-            else -> false
-        }
-        if call -> return true
-    }
-    parser_at_callable_tail(&state)
+    works || parser_at_callable_tail(state)
 }
 
 // The line ends the innermost callable body (before its `}`).
 parser_at_callable_tail: fn(state: &JetParserState) -> Bool Never! {
     if state.callable_tail_depth != state.block_depth -> return false
-    parser_at_body_close(&state)
+    parser_at_body_close(state)
 }
 
 // The cursor ends its block: at the `}`, or at one line end before it. The
 // `#X: value` lines a function body ends with are not lines of it, so the
 // value line before them is still the body's last.
 parser_at_body_close: fn(state: &JetParserState) -> Bool Never! {
-    offset := if parser_current_kind(&state) == TOKEN_SEMI -> 1 else -> 0
-    if state.inbody_marker_depth == state.block_depth -> offset = parser_skip_inbody_marker_lines(&state, offset)
-    parser_kind_at(&state, offset) == TOKEN_RBRACE
+    offset := if parser_current_kind(state) == TOKEN_SEMI -> 1 else -> 0
+    if state.inbody_marker_depth == state.block_depth -> offset = parser_skip_inbody_marker_lines(state, offset)
+    parser_kind_at(state, offset) == TOKEN_RBRACE
 }
 
 // Rust `is_result_handler_expr`: `value ? ok -> … ! err -> …` is the one
@@ -1809,7 +1805,7 @@ parser_refutable_test_binding: fn(expr: Expr) -> Binding? {
             names: pattern_binding_names(pattern)
             if names.len() == 0 -> return None
             binding := ast_binding("", pattern_span, false, subject, None)
-            binding.pattern = Val(BindPattern.Refutable{pattern: pattern, fallback: fallback, names: ^names, span: span})
+            binding.pattern = Val(BindPattern.Refutable{pattern: pattern, fallback: fallback, names: names.move(), span: span})
             return Val(binding)
         }
     }
@@ -1840,7 +1836,7 @@ parser_assignment_binop: fn(kind: Int) -> BinOp? {
 // after any parentheses; a compound update of anything else is E0165.
 parser_expression_lvalue: fn(state: &JetParserState, expr: Expr, fallback_span: Span, operator: Token) -> LValue {
     if expr == {
-        .Paren(inner, _, _) -> return parser_expression_lvalue(&state, inner, fallback_span, operator)
+        .Paren(inner, _, _) -> return parser_expression_lvalue(state, inner, fallback_span, operator)
         .Ident(name, span, _) -> return LValue.Local{name: name, name_span: span}
         // copy: `base` is a payload of read parameter `expr`, which keeps the original; field `base` of the new LValue.Field owns this one
         .Field(base, member, span, _) -> return LValue.Field{base: base.copy(), field: member, span: span}
@@ -1850,9 +1846,9 @@ parser_expression_lvalue: fn(state: &JetParserState, expr: Expr, fallback_span: 
     }
     if operator.kind != TOKEN_EQ {
         operator_text: parser_text(state, operator)
-        parser_add_fatal_code(&state, "E0165", expr_span(expr), "Compound assignment needs a mutable place.", "S17 permits updates only on a mutable name or an `&` parameter; a computed value has no place to update.", "Bind the value with `:=`, then write `name {operator_text} value`")
+        parser_add_fatal_code(state, "E0165", expr_span(expr), "Compound assignment needs a mutable place.", "S17 permits updates only on a mutable name or an `&` parameter; a computed value has no place to update.", "Bind the value with `:=`, then write `name {operator_text} value`")
     } else {
-        parser_add_error(&state, expr_span(expr), "this value can't be assigned to", "only a name or an indexed slot like `items[0]` can appear on the left of `=`", "use `name := ...` or `map[key] = ...`")
+        parser_add_error(state, expr_span(expr), "this value can't be assigned to", "only a name or an indexed slot like `items[0]` can appear on the left of `=`", "use `name := ...` or `map[key] = ...`")
     }
     LValue.Local{name: "__jet_error", name_span: fallback_span}
 }
@@ -1861,71 +1857,71 @@ parser_expression_lvalue: fn(state: &JetParserState, expr: Expr, fallback_span: 
 // the end of the file; a one-statement `->` body may also end before `else`.
 // Anything else shares the line and is a fatal error.
 parser_finish_statement: fn(state: &JetParserState) {
-    token: parser_current(&state)
+    token: parser_current(state)
     if token.kind == TOKEN_SEMI {
-        parser_bump(&state)
+        parser_bump(state)
         return
     }
     if token.kind == TOKEN_RBRACE || token.kind == TOKEN_EOF || (token.kind == TOKEN_KW_ELSE && state.adjacent_if_body_depth > 0) -> return
     found: parser_describe_token(state, token)
-    parser_add_error(&state, token.span, "something unexpected appeared after this line, found {found}", "each line ends where the line break is (no `;` needed)", "put the next line of code on a new line")
+    parser_add_error(state, token.span, "something unexpected appeared after this line, found {found}", "each line ends where the line break is (no `;` needed)", "put the next line of code on a new line")
 }
 
 parser_parse_marked_statement: fn(state: &JetParserState) -> Stmt {
     // A marker line belongs directly in a declaration's body; in any other
     // block it would mark nothing.
-    if parser_inbody_marker_ahead(&state) {
-        start: parser_current(&state).span
-        line: parser_parse_inbody_marker(&state)
+    if parser_inbody_marker_ahead(state) {
+        start: parser_current(state).span
+        line: parser_parse_inbody_marker(state)
         if line == .Val(marker) {
-            parser_add_error_code(&state, "E0355", marker.span, "`#{marker.name}: …` cannot attach at the Block site", "a `#X: value` line is a marker of the declaration whose body holds it directly; a nested block or a lambda body is not a declaration", "move the line directly into the function's body, or write `#{marker.name}` above the declaration")
+            parser_add_error_code(state, "E0355", marker.span, "`#{marker.name}: …` cannot attach at the Block site", "a `#X: value` line is a marker of the declaration whose body holds it directly; a nested block or a lambda body is not a declaration", "move the line directly into the function's body, or write `#{marker.name}` above the declaration")
         }
-        return Stmt.Expr{expr: Expr.Unit{span: start, id: parser_node_id(&state)}}
+        return Stmt.Expr{expr: Expr.Unit{span: start, id: parser_node_id(state)}}
     }
-    hash: parser_bump(&state)
+    hash: parser_bump(state)
     negated := false
-    if parser_current_kind(&state) == TOKEN_BANG {
-        parser_bump(&state)
+    if parser_current_kind(state) == TOKEN_BANG {
+        parser_bump(state)
         negated = true
     }
-    name: parser_expect_name(&state, "after `#` in a statement marker")
+    name: parser_expect_name(state, "after `#` in a statement marker")
     word: parser_value(state, name)
     // Persistence is keyed by module + name, so a local binding
     // has no stable identity across a reload.
     if word == "Persist" {
-        parser_add_error_code(&state, "E0145", parser_cover(hash.span, name.span), "only module-level state can persist across reloads", "persistence is keyed by module + name; a local has no stable identity across a reload", "move it to module level, or drop `#Persist`")
-        parser_sync_stmt(&state)
-        return Stmt.Expr{expr: Expr.Unit{span: hash.span, id: parser_node_id(&state)}}
+        parser_add_error_code(state, "E0145", parser_cover(hash.span, name.span), "only module-level state can persist across reloads", "persistence is keyed by module + name; a local has no stable identity across a reload", "move it to module level, or drop `#Persist`")
+        parser_sync_stmt(state)
+        return Stmt.Expr{expr: Expr.Unit{span: hash.span, id: parser_node_id(state)}}
     }
     // `#Shield { … }` is a bare block.
-    if word == "Shield" && parser_current_kind(&state) == TOKEN_LPAREN {
-        lparen: parser_current(&state)
-        parser_add_error_code(&state, "E0430", parser_cover(name.span, lparen.span), "`#Shield` takes no arguments", "a shield region protects whatever runs inside it; there is nothing to configure", "write `#Shield {{ … }}`")
-        parser_sync_stmt(&state)
-        return Stmt.Expr{expr: Expr.Unit{span: hash.span, id: parser_node_id(&state)}}
+    if word == "Shield" && parser_current_kind(state) == TOKEN_LPAREN {
+        lparen: parser_current(state)
+        parser_add_error_code(state, "E0430", parser_cover(name.span, lparen.span), "`#Shield` takes no arguments", "a shield region protects whatever runs inside it; there is nothing to configure", "write `#Shield {{ … }}`")
+        parser_sync_stmt(state)
+        return Stmt.Expr{expr: Expr.Unit{span: hash.span, id: parser_node_id(state)}}
     }
     // A context field is set with `name: value`.
-    if word == "Context" && parser_current_kind(&state) == TOKEN_LPAREN && parser_kind_at(&state, 1) == TOKEN_IDENT && parser_kind_at(&state, 2) == TOKEN_EQ {
-        field: parser_lookahead(&state, 1)
-        eq: parser_lookahead(&state, 2)
+    if word == "Context" && parser_current_kind(state) == TOKEN_LPAREN && parser_kind_at(state, 1) == TOKEN_IDENT && parser_kind_at(state, 2) == TOKEN_EQ {
+        field: parser_lookahead(state, 1)
+        eq: parser_lookahead(state, 2)
         field_name: parser_value(state, field)
-        parser_add_error_code(&state, "E0760", eq.span, "context fields are set with `:`, not `=`", "`=` is reassignment (S17); the `name: value` form sets a context field", "write `#Context({field_name}: …) {{ … }}`")
-        parser_sync_stmt(&state)
-        return Stmt.Expr{expr: Expr.Unit{span: hash.span, id: parser_node_id(&state)}}
+        parser_add_error_code(state, "E0760", eq.span, "context fields are set with `:`, not `=`", "`=` is reassignment (S17); the `name: value` form sets a context field", "write `#Context({field_name}: …) {{ … }}`")
+        parser_sync_stmt(state)
+        return Stmt.Expr{expr: Expr.Unit{span: hash.span, id: parser_node_id(state)}}
     }
     args := [CallArg]{ }
     end := name.span
-    if parser_current_kind(&state) == TOKEN_LPAREN {
-        open: parser_current(&state).span
-        args = parser_parse_call_args(&state, 1, true)
-        if state.position > 0 -> end = parser_lookahead(&state, -1).span
-        if args.len() == 0 -> parser_check_empty_marker_parens(&state, word, Span{start: open.start, end: end.end})
+    if parser_current_kind(state) == TOKEN_LPAREN {
+        open: parser_current(state).span
+        args = parser_parse_call_args(state, 1, true)
+        if state.position > 0 -> end = parser_lookahead(state, -1).span
+        if args.len() == 0 -> parser_check_empty_marker_parens(state, word, Span{start: open.start, end: end.end})
     }
     marker_args := [MarkerCallArg]{ }
     labels := [CallLabel?]{ }
     loop arg in args {
-        &marker_args.push(MarkerCallArg.Expr{value: arg.expr})
-        &labels.push(arg.label)
+        marker_args.push(MarkerCallArg.Expr{value: arg.expr})
+        labels.push(arg.label)
     }
     marker_span: parser_cover(hash.span, end)
     marker: Marker{name: parser_value(state, name), negated: negated, name_span: name.span, args: marker_args, arg_labels: labels, span: marker_span, ct: None}
@@ -1935,15 +1931,15 @@ parser_parse_marked_statement: fn(state: &JetParserState) -> Stmt {
     // The marker may stand on its own line above the binding.
     if word == "Track" || word == "Meta" || word == "Local" || word == "Shared" {
         offset := 0
-        loop parser_kind_at(&state, offset) == TOKEN_SEMI -> offset += 1
-        binding_kind: parser_kind_at(&state, offset + 1)
-        if parser_kind_at(&state, offset) == TOKEN_IDENT && (binding_kind == TOKEN_COLON_EQ || binding_kind == TOKEN_COLON) {
-            parser_skip_semicolons(&state)
-            statement: parser_parse_binding_statement(&state)
+        loop parser_kind_at(state, offset) == TOKEN_SEMI -> offset += 1
+        binding_kind: parser_kind_at(state, offset + 1)
+        if parser_kind_at(state, offset) == TOKEN_IDENT && (binding_kind == TOKEN_COLON_EQ || binding_kind == TOKEN_COLON) {
+            parser_skip_semicolons(state)
+            statement: parser_parse_binding_statement(state)
             if statement == .Val(binding) {
                 // copy: the parsed binding is rebuilt to carry its marker.
                 marked := binding.copy()
-                &marked.markers.push(marker)
+                marked.markers.push(marker)
                 return Stmt.Val{binding: marked}
             }
             return statement
@@ -1952,25 +1948,25 @@ parser_parse_marked_statement: fn(state: &JetParserState) -> Stmt {
     // S82: an allowance attaches to one ordinary statement,
     // not an invented block node. Its target stays for sema and gate audit.
     if word == "Allow" {
-        parser_skip_semicolons(&state)
-        target_start: parser_current(&state).span.start
-        statement: parser_parse_statement(&state)
-        &state.statement_rules.push(AppliedRuleApplication{marker: marker, target: Val(Span{start: target_start, end: parser_previous_end(state)}), site: Val(RuleSite.Statement)})
+        parser_skip_semicolons(state)
+        target_start: parser_current(state).span.start
+        statement: parser_parse_statement(state)
+        state.statement_rules.push(AppliedRuleApplication{marker: marker, target: Val(Span{start: target_start, end: parser_previous_end(state)}), site: Val(RuleSite.Statement)})
         return statement
     }
     // Every unsafe gate records its reason.
     if word == "Unsafe" && args.len() == 0 {
-        parser_add_error_code(&state, "E3112", marker_span, "an `#Unsafe` block needs a reason", "every unsafe gate records why its unchecked operations preserve memory safety", "write `#Unsafe(\"why this is safe\") {{ … }}`")
-        parser_sync_stmt(&state)
-        return Stmt.Expr{expr: Expr.Unit{span: hash.span, id: parser_node_id(&state)}}
+        parser_add_error_code(state, "E3112", marker_span, "an `#Unsafe` block needs a reason", "every unsafe gate records why its unchecked operations preserve memory safety", "write `#Unsafe(\"why this is safe\") {{ … }}`")
+        parser_sync_stmt(state)
+        return Stmt.Expr{expr: Expr.Unit{span: hash.span, id: parser_node_id(state)}}
     }
     if word == "Context" {
         loop label in labels {
             if label == .Val(field) {
                 if field.name != "allocator" && field.name != "logger" && field.name != "deadline" {
-                    parser_add_error_code(&state, "E0761", field.span, "`{field.name}` isn't a context field", "the context bundle holds `allocator`, `logger`, and `deadline`", "write `#Context(allocator: …)`, `#Context(logger: …)`, or `#Context(deadline: …)`")
-                    parser_sync_stmt(&state)
-                    return Stmt.Expr{expr: Expr.Unit{span: hash.span, id: parser_node_id(&state)}}
+                    parser_add_error_code(state, "E0761", field.span, "`{field.name}` isn't a context field", "the context bundle holds `allocator`, `logger`, and `deadline`", "write `#Context(allocator: …)`, `#Context(logger: …)`, or `#Context(deadline: …)`")
+                    parser_sync_stmt(state)
+                    return Stmt.Expr{expr: Expr.Unit{span: hash.span, id: parser_node_id(state)}}
                 }
             }
         }
@@ -1978,35 +1974,35 @@ parser_parse_marked_statement: fn(state: &JetParserState) -> Stmt {
     // A switch-off attribute governs a block or the one
     // statement after it; two on one statement is E0344.
     if word == "Off" || word == "DebugOnly" {
-        if parser_current_kind(&state) == TOKEN_HASH {
-            second_hash: parser_current(&state)
-            second: parser_lookahead(&state, 1)
+        if parser_current_kind(state) == TOKEN_HASH {
+            second_hash: parser_current(state)
+            second: parser_lookahead(state, 1)
             second_word: parser_value(state, second)
             if second.kind == TOKEN_IDENT && (second_word == "Off" || second_word == "DebugOnly") {
-                parser_add_error_code(&state, "E0344", Span{start: second_hash.span.start, end: second.span.end}, "only one switch-off attribute can be written on a statement", "`#{word}` and `#{second_word}` both control whether the same statement emits code", "keep one marker: `#Off <statement>` or `#DebugOnly <statement>`")
+                parser_add_error_code(state, "E0344", Span{start: second_hash.span.start, end: second.span.end}, "only one switch-off attribute can be written on a statement", "`#{word}` and `#{second_word}` both control whether the same statement emits code", "keep one marker: `#Off <statement>` or `#DebugOnly <statement>`")
             }
         }
-        if parser_current_kind(&state) != TOKEN_LBRACE {
-            statement: parser_parse_statement(&state)
+        if parser_current_kind(state) != TOKEN_LBRACE {
+            statement: parser_parse_statement(state)
             switched_span: Span{start: hash.span.start, end: parser_previous_end(state)}
             // copy: the application row and the Switched statement each keep the marker.
-            &state.statement_rules.push(AppliedRuleApplication{marker: marker.copy(), target: Val(switched_span), site: Val(RuleSite.Statement)})
+            state.statement_rules.push(AppliedRuleApplication{marker: marker.copy(), target: Val(switched_span), site: Val(RuleSite.Statement)})
             return Stmt.Switched{marker: marker, body: [Stmt]{statement}, span: switched_span}
         }
     }
     // A name the registry doesn't know, written before an ordinary statement,
     // applies to that statement, so sema reports it from the shared applied-rule
     // vocabulary (E0927) or as a declared marker, not as a missing block.
-    if parser_current_kind(&state) != TOKEN_LBRACE && !marker_registered(word) {
-        target_start: parser_current(&state).span.start
-        statement: parser_parse_statement(&state)
-        &state.statement_rules.push(AppliedRuleApplication{marker: marker, target: Val(Span{start: target_start, end: parser_previous_end(state)}), site: Val(RuleSite.Statement)})
+    if parser_current_kind(state) != TOKEN_LBRACE && !marker_registered(word) {
+        target_start: parser_current(state).span.start
+        statement: parser_parse_statement(state)
+        state.statement_rules.push(AppliedRuleApplication{marker: marker, target: Val(Span{start: target_start, end: parser_previous_end(state)}), site: Val(RuleSite.Statement)})
         return statement
     }
     saved_tail_depth: state.callable_tail_depth
     value_tail: marker.name == "Unsafe" && state.callable_tail_value && state.callable_tail_depth == state.block_depth
     if value_tail -> state.callable_tail_depth = state.block_depth + 1
-    body: parser_parse_body_block(&state, value_tail)
+    body: parser_parse_body_block(state, value_tail)
     state.callable_tail_depth = saved_tail_depth
     span: parser_cover(hash.span, body.span)
     // Rust `bind_rule_fact(…, RuleSite::Block)`: a marked block is a Block-site
@@ -2021,7 +2017,7 @@ parser_parse_marked_statement: fn(state: &JetParserState) -> Stmt {
         // not a rule parameter, so the application row carries the effects
         // unlabeled.
         if marker.name == "FX" -> application.arg_labels = (loop _ in marker.arg_labels -> CallLabel?{None})
-        &state.statement_rules.push(AppliedRuleApplication{marker: application, target: Val(span), site: Val(RuleSite.Block)})
+        state.statement_rules.push(AppliedRuleApplication{marker: application, target: Val(span), site: Val(RuleSite.Block)})
     }
     if marker.name == {
         "Unsafe" -> {
@@ -2031,8 +2027,8 @@ parser_parse_marked_statement: fn(state: &JetParserState) -> Stmt {
                 audit_expr = Val(args[0].expr)
                 reason = parser_expr_literal_string(args[0].expr)
             }
-            if parser_unsafe_obligation_policy(&state, marker, PolicyScope.Block, span) == .Val(declaration) {
-                &state.block_policy_declarations.push(declaration)
+            if parser_unsafe_obligation_policy(state, marker, PolicyScope.Block, span) == .Val(declaration) {
+                state.block_policy_declarations.push(declaration)
             }
             Stmt.Unsafe{audit: reason, audit_expr: audit_expr, body: body.statements, span: span}
         }
@@ -2048,8 +2044,8 @@ parser_parse_marked_statement: fn(state: &JetParserState) -> Stmt {
         "Reactive" -> Stmt.Reactive{body: body.statements, span: span}
         "Shield" -> Stmt.Shield{body: body.statements, span: span}
         "Off" | "DebugOnly" -> Stmt.Switched{marker: marker, body: body.statements, span: span}
-        "FX" -> parser_authority_scope_stmt(&state, marker, args, body.statements, span) ?? Stmt.Expr{expr: Expr.Unit{span: hash.span, id: parser_node_id(&state)}}
-        "Policy" -> parser_policy_block_stmt(&state, marker, body.statements, span) ?? Stmt.Expr{expr: Expr.Unit{span: hash.span, id: parser_node_id(&state)}}
+        "FX" -> parser_authority_scope_stmt(state, marker, args, body.statements, span) ?? Stmt.Expr{expr: Expr.Unit{span: hash.span, id: parser_node_id(state)}}
+        "Policy" -> parser_policy_block_stmt(state, marker, body.statements, span) ?? Stmt.Expr{expr: Expr.Unit{span: hash.span, id: parser_node_id(state)}}
         "Region" -> {
             region_name := ""
             region_span := name.span
@@ -2073,11 +2069,11 @@ parser_parse_marked_statement: fn(state: &JetParserState) -> Stmt {
             Stmt.Transact{name: transaction_name, name_span: transaction_span, body: body.statements, implicit: false, span: span}
         }
         // Rust `at_context_stmt`, `at_live_stmt`, `at_nondeterministic_stmt`.
-        "Context" -> Stmt.ContextBlock{fields: parser_context_fields(&state, marker, args), body: body.statements, span: span}
+        "Context" -> Stmt.ContextBlock{fields: parser_context_fields(state, marker, args), body: body.statements, span: span}
         "Live" -> Stmt.Live{body: body.statements, span: span}
         "Nondeterministic" -> {
-            if args.len() != 1 -> parser_marker_shape_error(&state, marker)
-            reason_expr: if args.len() > 0 -> args[0].expr else -> Expr.Unit{span: marker_span, id: parser_node_id(&state)}
+            if args.len() != 1 -> parser_marker_shape_error(state, marker)
+            reason_expr: if args.len() > 0 -> args[0].expr else -> Expr.Unit{span: marker_span, id: parser_node_id(state)}
             reason: parser_expr_literal_string(reason_expr) ?? ""
             Stmt.AssumeDet{reason: reason, reason_expr: reason_expr, body: body.statements, span: span}
         }
@@ -2105,14 +2101,14 @@ parser_context_fields: fn(state: &JetParserState, marker: Marker, args: [CallArg
         value_span: expr_span(arg.expr)
         if arg.label == {
             // copy: `args` is a read parameter the marker keeps; each field owns its name and value.
-            .Val(label) -> &fields.push(ContextField{name: label.name.copy(), value: arg.expr.copy(), span: Span{start: label.span.start, end: value_span.end}})
+            .Val(label) -> fields.push(ContextField{name: label.name.copy(), value: arg.expr.copy(), span: Span{start: label.span.start, end: value_span.end}})
             .None -> {
                 if index >= params.len() {
-                    parser_marker_shape_error(&state, marker)
+                    parser_marker_shape_error(state, marker)
                     next
                 }
                 // copy: `args` is a read parameter the marker keeps; the field owns its value.
-                &fields.push(ContextField{name: params[index].copy(), value: arg.expr.copy(), span: value_span})
+                fields.push(ContextField{name: params[index].copy(), value: arg.expr.copy(), span: value_span})
             }
         }
     }

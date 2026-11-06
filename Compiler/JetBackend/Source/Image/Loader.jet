@@ -271,7 +271,7 @@ loader_segments: fn(header: [U8], table: [U8], table_at: Int, size: Int) -> X64S
         if low < 0 -> low = start
         high = os_page_round(segment.vaddr + segment.memory_size)
         if segment.offset == 0 && !phdr_known -> phdr = segment.vaddr + phoff
-        &segments.push(segment)
+        segments.push(segment)
     }
     if low < 0 -> return loader_segments_failed("the image has no PT_LOAD segment")
     X64Segments{segments: segments, low: low, high: high, entry: loader_u64(header, 24), phdr: phdr, phnum: phnum, failure: ""}
@@ -283,7 +283,7 @@ loader_hex_push: fn(out: &[U8], value: Int) Never! {
     shift := 60
     loop shift > 0 && (value >> shift).bit_and(15) == 0 { shift -= 4 }
     loop shift >= 0 {
-        &out.push(digits[(value >> shift).bit_and(15)])
+        out.push(digits[(value >> shift).bit_and(15)])
         shift -= 4
     }
 }
@@ -322,15 +322,15 @@ x64_image_perf_map: fn(bytes: [U8], pid: Int) -> String {
             length: loader_u64(bytes, symbol + 16)
             name := names + loader_u32(bytes, symbol)
             if value == 0 || length == 0 || name >= names_end || Int.from_u8(bytes[name]) == 0 -> next
-            loader_hex_push(&out, value)
-            &out.push(separators[0])
-            loader_hex_push(&out, length)
-            &out.push(separators[0])
+            loader_hex_push(out, value)
+            out.push(separators[0])
+            loader_hex_push(out, length)
+            out.push(separators[0])
             loop name < names_end && Int.from_u8(bytes[name]) != 0 {
-                &out.push(bytes[name])
+                out.push(bytes[name])
                 name += 1
             }
-            &out.push(separators[1])
+            out.push(separators[1])
         }
     }
     path: "/tmp/perf-{pid}.map"
@@ -396,9 +396,9 @@ x64_executable_load: fn(exe: X64Executable) -> X64LoadedImage {
     if file < 0 {
         // copy: x64_executable_complete reads the whole image part into its own copy.
         whole := exe.copy()
-        failure: x64_executable_complete(&whole)
+        failure: x64_executable_complete(whole)
         if failure != "" -> return loader_failed(failure)
-        return x64_image_load(x64_executable_bytes(^whole))
+        return x64_image_load(x64_executable_bytes(whole))
     }
     // The ELF header as patched: the image's own names the image's program headers.
     header := exe.image[0..<64]
@@ -427,7 +427,7 @@ x64_executable_load: fn(exe: X64Executable) -> X64LoadedImage {
         loop segment in plan.segments {
             if segment.offset + segment.file_size <= exe.image_end -> loader_patch(exe, segment.vaddr - segment.offset, segment.offset, segment.offset + segment.file_size)
         }
-        failure = loader_view(&image, exe, file, memfd)
+        failure = loader_view(image, exe, file, memfd)
     }
     loader_close(file)
     if memfd >= 0 -> loader_close(memfd)
@@ -572,7 +572,7 @@ x64_image_file_read: fn(path: String) -> X64ImageFile {
             after: loader_file_stamp(path)
             if tail.len() == size - load_end && loader_same_stamp(before, after) {
                 gap_at: head.len()
-                &head.extend(tail)
+                head.extend(tail)
                 return X64ImageFile{bytes: head, stamp: after, gap_at: gap_at, gap: load_end - gap_at, failure: ""}
             }
         }
@@ -597,38 +597,38 @@ x64_executable_keep: fn(exe: X64Executable, path: String) -> String {
     if exe.image_end > 0 && exe.image_stamp.len() == 0 {
         // copy: the caller's executable stays whole to run.
         whole := exe.copy()
-        complete: x64_executable_complete(&whole)
+        complete: x64_executable_complete(whole)
         if complete != "" -> return complete
-        return x64_executable_keep(x64_executable_whole(^x64_executable_bytes(^whole)), path)
+        return x64_executable_keep(x64_executable_whole(x64_executable_bytes(whole)), path)
     }
     out := [U8]{}
     image_path: if exe.image_end > 0 -> exe.image_path.bytes() else -> [U8]{}
     stamp: if exe.image_end > 0 -> exe.image_stamp.copy() else -> [Int]{}
     words: [Int]{LOADER_KEPT_MAGIC, exe.image_end, exe.tail_at, exe.patch_at.len(), exe.tail.len(), stamp.len(), image_path.len()}
-    loop value in words -> loader_kept_word(&out, value)
-    loop value in stamp -> loader_kept_word(&out, value)
-    loader_kept_run(&out, image_path)
+    loop value in words -> loader_kept_word(out, value)
+    loop value in stamp -> loader_kept_word(out, value)
+    loader_kept_run(out, image_path)
     loop (k, at) in exe.patch_at {
-        loader_kept_word(&out, at)
-        loader_kept_word(&out, exe.patch_bytes[k].len())
-        loader_kept_run(&out, exe.patch_bytes[k])
+        loader_kept_word(out, at)
+        loader_kept_word(out, exe.patch_bytes[k].len())
+        loader_kept_run(out, exe.patch_bytes[k])
     }
-    loader_kept_run(&out, exe.tail)
+    loader_kept_run(out, exe.tail)
     loader_files.write_bytes(path, out) ?? return "{err}"
     ""
 }
 
 loader_kept_word: fn(out: &[U8], value: Int) Never! {
     at: out.len()
-    link_pad_to(&out, at + 8, 0)
-    link_put64(&out, at, value)
+    link_pad_to(out, at + 8, 0)
+    link_put64(out, at, value)
 }
 
 // `bytes`, then zeros up to the next word.
 loader_kept_run: fn(out: &[U8], bytes: [U8]) Never! {
-    &out.extend(bytes)
+    out.extend(bytes)
     end: out.len() + (8 - out.len() % 8) % 8
-    link_pad_to(&out, end, 0)
+    link_pad_to(out, end, 0)
 }
 
 // The executable kept in the file `path` (x64_executable_keep), bound to
@@ -639,27 +639,27 @@ loader_kept_run: fn(out: &[U8], bytes: [U8]) Never! {
 x64_executable_kept: fn(path: String) -> X64Executable? {
     bytes: loader_files.read_bytes(path) ?? return None
     reader := LoaderKeptReader{bytes: bytes, at: 0, failed: false}
-    if loader_kept_next(&reader) != LOADER_KEPT_MAGIC -> return None
-    image_end: loader_kept_next(&reader)
-    tail_at: loader_kept_next(&reader)
-    patches: loader_kept_next(&reader)
-    tail_len: loader_kept_next(&reader)
-    stamp_len: loader_kept_next(&reader)
-    path_len: loader_kept_next(&reader)
+    if loader_kept_next(reader) != LOADER_KEPT_MAGIC -> return None
+    image_end: loader_kept_next(reader)
+    tail_at: loader_kept_next(reader)
+    patches: loader_kept_next(reader)
+    tail_len: loader_kept_next(reader)
+    stamp_len: loader_kept_next(reader)
+    path_len: loader_kept_next(reader)
     if reader.failed || patches > reader.bytes.len() || stamp_len > 8 -> return None
     stamp := [Int]{}
-    loop _ in 0..<stamp_len -> &stamp.push(loader_kept_next(&reader))
-    image_path: String.from_bytes(loader_kept_take(&reader, path_len)) ?? return None
+    loop _ in 0..<stamp_len -> stamp.push(loader_kept_next(reader))
+    image_path: String.from_bytes(loader_kept_take(reader, path_len)) ?? return None
     patch_at := [Int]{}
     patch_bytes := [[U8]]{}
     loop _ in 0..<patches {
-        &patch_at.push(loader_kept_next(&reader))
-        size: loader_kept_next(&reader)
-        &patch_bytes.push(loader_kept_take(&reader, size))
+        patch_at.push(loader_kept_next(reader))
+        size: loader_kept_next(reader)
+        patch_bytes.push(loader_kept_take(reader, size))
     }
-    tail: loader_kept_take(&reader, tail_len)
+    tail: loader_kept_take(reader, tail_len)
     if reader.failed || reader.at != reader.bytes.len() -> return None
-    if image_end == 0 -> return Val(x64_executable_whole(^tail))
+    if image_end == 0 -> return Val(x64_executable_whole(tail))
     if tail_at < image_end || !loader_same_stamp(loader_file_stamp(image_path), stamp) -> return None
     head: loader_files.read_at(image_path, 0, OS_PAGE_SIZE) ?? return None
     if head.len() < 64 || !loader_same_stamp(loader_file_stamp(image_path), stamp) -> return None
@@ -716,7 +716,7 @@ x64_executable_complete: fn(exe: &X64Executable) -> String {
     whole := loader_image_file_whole(exe.image_path)
     if whole.failure != "" -> return "couldn't read the runtime image {exe.image_path}: {whole.failure}"
     if !loader_same_stamp(whole.stamp, exe.image_stamp) -> return "the runtime image {exe.image_path} changed while jet ran"
-    exe.image = ^whole.bytes
+    exe.image = whole.bytes.move()
     exe.image_gap_at = 0
     exe.image_gap = 0
     ""
@@ -737,9 +737,9 @@ x64_executable_write: fn(exe: X64Executable, path: String) -> String {
     if exe.image_stamp.len() == 0 || exe.image_stamp[2] > exe.tail_at + exe.tail.len() {
         // copy: the caller's executable stays whole to run.
         whole := exe.copy()
-        complete: x64_executable_complete(&whole)
+        complete: x64_executable_complete(whole)
         if complete != "" -> return complete
-        loader_files.write_bytes(path, x64_executable_bytes(^whole)) ?? return "{err}"
+        loader_files.write_bytes(path, x64_executable_bytes(whole)) ?? return "{err}"
         return ""
     }
     changed: "the runtime image {exe.image_path} changed while jet ran"
@@ -752,7 +752,7 @@ x64_executable_write: fn(exe: X64Executable, path: String) -> String {
     // The image file's bytes past its loaded segments read as zeros up to
     // the program part; the program part overwrites the rest.
     zeros := [U8]{}
-    link_pad_to(&zeros, exe.tail_at - exe.image_end, 0)
+    link_pad_to(zeros, exe.tail_at - exe.image_end, 0)
     if zeros.len() > 0 -> loader_files.write_at(path, exe.image_end, zeros) ?? return "{err}"
     if exe.tail.len() > 0 -> loader_files.write_at(path, exe.tail_at, exe.tail) ?? return "{err}"
     ""
@@ -830,13 +830,13 @@ loader_environ: fn(env: [String]?) -> [U8]? {
     if env == .Val(rows) {
         block := [U8]{}
         loop row in rows {
-            &block.extend(row.bytes())
-            &block.push(U8{0})
+            block.extend(row.bytes())
+            block.push(U8{0})
         }
         return Val(block)
     }
     block := loader_files.read_bytes("/proc/self/environ") ?? return None
-    if block.len() > 0 && block[block.len() - 1] != (U8{0}) -> &block.push(U8{0})
+    if block.len() > 0 && block[block.len() - 1] != (U8{0}) -> block.push(U8{0})
     Val(block)
 }
 
@@ -846,7 +846,7 @@ loader_environ_starts: fn(block: [U8]) -> [Int] {
     start := 0
     loop (k, byte) in block {
         if byte != (U8{0}) -> next
-        if k > start -> &starts.push(start)
+        if k > start -> starts.push(start)
         start = k + 1
     }
     starts
@@ -862,7 +862,7 @@ x64_process_env: fn() -> [String] {
         end := start
         loop block[end] != (U8{0}) -> end += 1
         row: String.from_bytes(block[start..<end]) ?? next
-        &rows.push(row)
+        rows.push(row)
     }
     rows
 }
@@ -880,14 +880,14 @@ loader_plan_failed: fn(plan: LoaderPlan, failure: String) -> LoaderPlan {
 }
 
 loader_record: fn(rows: &[Int], number: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int, kind: Int) Never! {
-    &rows.push(number)
-    &rows.push(a1)
-    &rows.push(a2)
-    &rows.push(a3)
-    &rows.push(a4)
-    &rows.push(a5)
-    &rows.push(a6)
-    &rows.push(kind)
+    rows.push(number)
+    rows.push(a1)
+    rows.push(a2)
+    rows.push(a3)
+    rows.push(a4)
+    rows.push(a5)
+    rows.push(a6)
+    rows.push(kind)
 }
 
 // The data page's layout: a zeroed kernel sigaction (SIG_DFL, 32 bytes), a
@@ -932,7 +932,7 @@ loader_mm_record: fn(rows: &[Int], map: Int, stack: Int, arg_start: Int, arg_end
         loop (k, word) in words { os_store_word(map + k * 8, word) }
     }
     // PR_SET_MM, PR_SET_MM_MAP
-    loader_record(&rows, OS_SYS_PRCTL, 35, 14, map, 104, 0, 0, 0)
+    loader_record(rows, OS_SYS_PRCTL, 35, 14, map, 104, 0, 0, 0)
 }
 
 // The main stack's size: RLIMIT_STACK's soft limit, between 128 KiB and
@@ -971,8 +971,8 @@ loader_kernel_ranges: fn() -> [Int] {
         if !line.contains("[vdso]") && !line.contains("[vvar") -> next
         bounds: line.split(" ").to_list()[0].split("-").to_list()
         if bounds.len() != 2 -> next
-        &ranges.push(loader_hex_parse(bounds[0]))
-        &ranges.push(loader_hex_parse(bounds[1]))
+        ranges.push(loader_hex_parse(bounds[0]))
+        ranges.push(loader_hex_parse(bounds[1]))
     }
     ranges
 }
@@ -993,11 +993,11 @@ loader_unmap_records: fn(rows: &[Int], kept: [Int]) Never! {
             }
         }
         if soonest < 0 -> break
-        if soonest > at -> loader_record(&rows, OS_SYS_MUNMAP, at, soonest - at, 0, 0, 0, 0, 0)
+        if soonest > at -> loader_record(rows, OS_SYS_MUNMAP, at, soonest - at, 0, 0, 0, 0, 0)
         if soonest_end > at -> at = soonest_end
         last = soonest
     }
-    if at < LOADER_TASK_END -> loader_record(&rows, OS_SYS_MUNMAP, at, LOADER_TASK_END - at, 0, 0, 0, 0, 0)
+    if at < LOADER_TASK_END -> loader_record(rows, OS_SYS_MUNMAP, at, LOADER_TASK_END - at, 0, 0, 0, 0, 0)
 }
 
 // Build everything the executor needs to start `image` with `launch`.
@@ -1028,21 +1028,21 @@ loader_plan: fn(image: X64LoadedImage, launch: X64Launch, fds: [Int], fork: Bool
     if os_failed(protected) -> return loader_plan_failed(plan, "executable memory was refused (errno {-protected})")
 
     rows := [Int]{}
-    if fork -> loader_record(&rows, OS_SYS_FORK, 0, 0, 0, 0, 0, 0, 1)
+    if fork -> loader_record(rows, OS_SYS_FORK, 0, 0, 0, 0, 0, 0, 1)
     // PR_SET_PDEATHSIG: a `jet run` or `jet dev` child gets SIGTERM when jet
     // ends, however it ends, as the program would if it ran in jet's
     // process; a killed jet leaves no orphan. Their spawn runs on jet's main
     // thread, whose end is jet's end. A jet that ends between the fork and
     // this record still orphans the child.
-    if fork && launch.parent_death -> loader_record(&rows, OS_SYS_PRCTL, 1, 15, 0, 0, 0, 0, 0)
+    if fork && launch.parent_death -> loader_record(rows, OS_SYS_PRCTL, 1, 15, 0, 0, 0, 0, 0)
     if fds.len() > 0 {
         // Two rounds through descriptors above every source, so no move
         // overwrites a source a later move reads.
         spare := fds.len()
         loop fd in fds { if fd >= spare -> spare = fd + 1 }
-        loop (k, fd) in fds { if fd >= 0 -> loader_record(&rows, OS_SYS_DUP2, fd, spare + k, 0, 0, 0, 0, 0) }
-        loop (k, fd) in fds { if fd >= 0 -> loader_record(&rows, OS_SYS_DUP2, spare + k, k, 0, 0, 0, 0, 0) }
-        loader_record(&rows, OS_SYS_CLOSE_RANGE, fds.len(), 0xffffffff, 0, 0, 0, 0, 0)
+        loop (k, fd) in fds { if fd >= 0 -> loader_record(rows, OS_SYS_DUP2, fd, spare + k, 0, 0, 0, 0, 0) }
+        loop (k, fd) in fds { if fd >= 0 -> loader_record(rows, OS_SYS_DUP2, spare + k, k, 0, 0, 0, 0, 0) }
+        loader_record(rows, OS_SYS_CLOSE_RANGE, fds.len(), 0xffffffff, 0, 0, 0, 0, 0)
     } else {
         listed: loader_files.list_dir("/proc/self/fd") ?? return loader_plan_failed(plan, "couldn't list /proc/self/fd: {err}")
         loop entry in listed {
@@ -1051,7 +1051,7 @@ loader_plan: fn(image: X64LoadedImage, launch: X64Launch, fds: [Int], fork: Bool
             #Unsafe("F_GETFD only reads the descriptor's flags") {
                 flags = os_syscall(OS_SYS_FCNTL, fd, 1, 0, 0, 0, 0)
             }
-            if !os_failed(flags) && flags.bit_and(1) != 0 -> loader_record(&rows, OS_SYS_CLOSE, fd, 0, 0, 0, 0, 0, 0)
+            if !os_failed(flags) && flags.bit_and(1) != 0 -> loader_record(rows, OS_SYS_CLOSE, fd, 0, 0, 0, 0, 0, 0)
         }
     }
     // Handled signals go back to the default; ignored ones stay ignored.
@@ -1061,13 +1061,13 @@ loader_plan: fn(image: X64LoadedImage, launch: X64Launch, fds: [Int], fork: Bool
         #Unsafe("rt_sigaction with no new action writes the old one (32 bytes) to the scratch") {
             if os_syscall(OS_SYS_RT_SIGACTION, signal, 0, data + LOADER_DATA_SCRATCH, 8, 0, 0) == 0 -> handler = os_load_word(data + LOADER_DATA_SCRATCH)
         }
-        if handler != 0 && handler != 1 -> loader_record(&rows, OS_SYS_RT_SIGACTION, signal, data + LOADER_DATA_DEFAULT, 0, 8, 0, 0, 0)
+        if handler != 0 && handler != 1 -> loader_record(rows, OS_SYS_RT_SIGACTION, signal, data + LOADER_DATA_DEFAULT, 0, 8, 0, 0, 0)
     }
-    loader_record(&rows, OS_SYS_SIGALTSTACK, data + LOADER_DATA_ALTSTACK, 0, 0, 0, 0, 0, 0)
+    loader_record(rows, OS_SYS_SIGALTSTACK, data + LOADER_DATA_ALTSTACK, 0, 0, 0, 0, 0, 0)
     // SIG_SETMASK to the empty set.
-    loader_record(&rows, OS_SYS_RT_SIGPROCMASK, 2, data + LOADER_DATA_MASK, 0, 8, 0, 0, 0)
+    loader_record(rows, OS_SYS_RT_SIGPROCMASK, 2, data + LOADER_DATA_MASK, 0, 8, 0, 0, 0)
     // PR_SET_NAME
-    loader_record(&rows, OS_SYS_PRCTL, 15, data + LOADER_DATA_NAME, 0, 0, 0, 0, 0)
+    loader_record(rows, OS_SYS_PRCTL, 15, data + LOADER_DATA_NAME, 0, 0, 0, 0, 0)
 
     // The main stack, with a guard page below it.
     stack_size: loader_stack_size(data + LOADER_DATA_SCRATCH)
@@ -1106,19 +1106,19 @@ loader_plan: fn(image: X64LoadedImage, launch: X64Launch, fds: [Int], fork: Bool
     at = loader_put_bytes(at, environ)
     env_start: at
     env := [Int]{}
-    loop start in loader_environ_starts(environ) -> &env.push(env_start + start)
+    loop start in loader_environ_starts(environ) -> env.push(env_start + start)
     argv := [Int]{}
     loop k in 0..<launch.argv.len() {
         at = loader_put_text(at, launch.argv[launch.argv.len() - 1 - k])
-        &argv.push(at)
+        argv.push(at)
     }
     arg_start: at
     at -= at % 16
     words := [Int]{launch.argv.len()}
-    loop k in 0..<argv.len() -> &words.push(argv[argv.len() - 1 - k])
-    &words.push(0)
-    loop address in env -> &words.push(address)
-    &words.push(0)
+    loop k in 0..<argv.len() -> words.push(argv[argv.len() - 1 - k])
+    words.push(0)
+    loop address in env -> words.push(address)
+    words.push(0)
     // This process's auxiliary vector, less what describes the image.
     auxv := 0
     #Unsafe("the data page holds 3840 bytes from LOADER_DATA_AUXV; /proc/self/auxv is [type, value] word pairs") {
@@ -1146,35 +1146,35 @@ loader_plan: fn(image: X64LoadedImage, launch: X64Launch, fds: [Int], fork: Bool
         // AT_PHDR AT_PHENT AT_PHNUM AT_BASE AT_ENTRY AT_PLATFORM AT_BASE_PLATFORM AT_RANDOM AT_EXECFN
         if kind == 3 || kind == 4 || kind == 5 || kind == 7 || kind == 9 || kind == 15 || kind == 24 || kind == 25 || kind == 31 -> next
         if kind >= LOADER_AT_EXECUTABLE && kind <= LOADER_AT_RELAUNCH -> next
-        &words.push(kind)
-        &words.push(value)
+        words.push(kind)
+        words.push(value)
     }
     own := [Int]{3, image.phdr, 4, 56, 5, image.phnum, 7, 0, 9, image.entry, 15, platform, 25, random, 31, executable, LOADER_AT_IMAGE, image.file, LOADER_AT_IMAGE_SIZE, image.file_size}
     if launch.executable != "" {
-        &own.push(LOADER_AT_EXECUTABLE)
-        &own.push(executable)
+        own.push(LOADER_AT_EXECUTABLE)
+        own.push(executable)
     }
     if relaunch != 0 {
-        &own.push(LOADER_AT_RELAUNCH)
-        &own.push(relaunch)
+        own.push(LOADER_AT_RELAUNCH)
+        own.push(relaunch)
     }
-    &own.push(0)
-    &own.push(0)
-    loop word in own -> &words.push(word)
-    if words.len() % 2 != 0 -> &words.push(0)
+    own.push(0)
+    own.push(0)
+    loop word in own -> words.push(word)
+    if words.len() % 2 != 0 -> words.push(0)
     sp: at - words.len() * 8
     if sp < stack + OS_PAGE_SIZE + 0x10000 -> return loader_plan_failed(plan, "the arguments and environment don't fit the main stack")
     #Unsafe("the words lie in the stack mapping, above its guard page") {
         loop (k, word) in words { os_store_word(sp + k * 8, word) }
     }
-    loader_mm_record(&rows, data + LOADER_DATA_MM, sp, arg_start, env_start, env_start, env_end)
+    loader_mm_record(rows, data + LOADER_DATA_MM, sp, arg_start, env_start, env_start, env_end)
 
     // Last, as execve drops the old address space: every mapping goes but
     // the image, its file view, this plan's pages, the new stack and the
     // kernel's [vdso]/[vvar]; and the old thread pointer goes (ARCH_SET_FS
     // 0; the program's libc sets its own). Only the executor runs then.
     kept := [Int]{image.low, image.high, image.file, image.file + os_page_round(image.file_size), executor, executor + OS_PAGE_SIZE, data, data + OS_PAGE_SIZE, stack, stack + plan.stack_size}
-    loop word in loader_kernel_ranges() -> &kept.push(word)
+    loop word in loader_kernel_ranges() -> kept.push(word)
     // The record block: count, records, stack, entry. Room for the unmaps
     // (one more than the kept ranges, the block's own included) and the
     // ARCH_SET_FS record.
@@ -1182,10 +1182,10 @@ loader_plan: fn(image: X64LoadedImage, launch: X64Launch, fds: [Int], fork: Bool
     block: os_map(plan.plan_size, OS_PROT_READ + OS_PROT_WRITE)
     if os_failed(block) -> return loader_plan_failed(plan, "mapping the launch plan failed (errno {-block})")
     plan.plan = block
-    &kept.push(block)
-    &kept.push(block + plan.plan_size)
-    loader_unmap_records(&rows, kept)
-    loader_record(&rows, OS_SYS_ARCH_PRCTL, 0x1002, 0, 0, 0, 0, 0, 0)
+    kept.push(block)
+    kept.push(block + plan.plan_size)
+    loader_unmap_records(rows, kept)
+    loader_record(rows, OS_SYS_ARCH_PRCTL, 0x1002, 0, 0, 0, 0, 0, 0)
     #Unsafe("the block is this plan's own fresh mapping of plan_size bytes") {
         os_store_word(block, rows.len() /% 8)
         loop (k, word) in rows { os_store_word(block + 8 + k * 8, word) }
@@ -1282,7 +1282,7 @@ x64_file_exec: fn(path: String, launch: X64Launch) -> String {
     environ: loader_environ(launch.env) ?? return "couldn't read /proc/self/environ"
     starts: loader_environ_starts(environ)
     texts := [String]{path}
-    loop argument in launch.argv -> &texts.push(argument)
+    loop argument in launch.argv -> texts.push(argument)
     bytes := 8 * (launch.argv.len() + starts.len() + 2) + 16 + environ.len()
     loop text in texts -> bytes += text.bytes().len() + 1
     size: os_page_round(bytes)
@@ -1293,7 +1293,7 @@ x64_file_exec: fn(path: String, launch: X64Launch) -> String {
     addresses := [Int]{}
     loop text in texts {
         at = loader_put_text(at, text)
-        &addresses.push(at)
+        addresses.push(at)
     }
     argv: block + 16
     envp: argv + 8 * (launch.argv.len() + 1)

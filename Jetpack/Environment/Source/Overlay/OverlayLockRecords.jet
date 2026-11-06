@@ -29,13 +29,13 @@ env_overlay_semantic_records: fn(policy: OverlayPolicy, owner: String, platform:
             loop fact in resolved.provenance {
                 source_overlay: policy.overlay(fact.overlay)
                 provider_override: if source_overlay == .Val(found) -> found.provider else -> None
-                &rationales.push(env_overlay_rationale(owner, "overlay `{fact.overlay}` contributed `{fact.field}` = `{fact.value}` at priority {fact.priority}", source_ref, provider_override, exact, fingerprint, recipe_id))
+                rationales.push(env_overlay_rationale(owner, "overlay `{fact.overlay}` contributed `{fact.field}` = `{fact.value}` at priority {fact.priority}", source_ref, provider_override, exact, fingerprint, recipe_id))
             }
             if rationales.len() == 0 {
-                &rationales.push(env_overlay_rationale(owner, "workspace package overlay", source_ref, overlay.provider, exact, fingerprint, recipe_id))
+                rationales.push(env_overlay_rationale(owner, "workspace package overlay", source_ref, overlay.provider, exact, fingerprint, recipe_id))
             }
             identity: LockIdentity{kind: LockRecordKind.PackageOverlay, key: "{overlay.name}:{package.package}", exact, hash: fingerprint, platform}
-            &records.push(SemanticRecord{identity, rationales, future_fields: env_overlay_fact_fields(resolved, overlay.name)})
+            records.push(SemanticRecord{identity, rationales, future_fields: env_overlay_fact_fields(resolved, overlay.name)})
         }
     }
     Ok(records)
@@ -86,15 +86,15 @@ env_overlay_fact_fields: fn(resolved: ResolvedPackageOverride, overlay: String) 
     fields["overlay-fact-flags"] = resolved.flags.join(",")
     env_pairs := [String]{}
     env: resolved.env
-    loop fact in env -> &env_pairs.push("{fact.key}={fact.value}")
-    &env_pairs.sort()
+    loop fact in env -> env_pairs.push("{fact.key}={fact.value}")
+    env_pairs.sort()
     fields["overlay-fact-env"] = env_pairs.join(",")
     fields["overlay-fact-patches"] = resolved.patches.join(",")
     fields["overlay-fact-allow-unfree"] = "{resolved.allow_unfree}"
     fields["overlay-fact-priority"] = "{resolved.priority}"
     priority_fields := [String]{}
-    loop entry in resolved.field_priorities -> &priority_fields.push(entry.key)
-    &priority_fields.sort()
+    loop entry in resolved.field_priorities -> priority_fields.push(entry.key)
+    priority_fields.sort()
     loop field in priority_fields -> fields["overlay-field-priority.{field}"] = "{resolved.field_priorities[field]}"
     loop index in 0..<resolved.provenance.len() {
         fact: resolved.provenance[index]
@@ -114,7 +114,7 @@ env_overlay_policy_fingerprints: fn(policy: OverlayPolicy) -> [OverlayFingerprin
     loop overlay in policy.overlays {
         loop package in overlay.packages {
             resolved: env_overlay_resolve(policy, overlay, package)
-            &out.push(OverlayFingerprint{overlay: overlay.name, package: package.package, fingerprint: env_overlay_resolved_fingerprint(resolved, overlay)})
+            out.push(OverlayFingerprint{overlay: overlay.name, package: package.package, fingerprint: env_overlay_resolved_fingerprint(resolved, overlay)})
         }
     }
     Ok(out)
@@ -150,15 +150,15 @@ env_overlay_draft_block: fn(overlay: String, package: String, patch: String?, pr
     out := [String]{"    overlay {overlay} {{\n"}
     if provider == .Val(name) {
         if channel == {
-            .Val(selected) -> &out.push("        provider: Provider.{name}(channel: \"{selected}\")\n")
-            .None -> &out.push("        provider: Provider.{name}\n")
+            .Val(selected) -> out.push("        provider: Provider.{name}(channel: \"{selected}\")\n")
+            .None -> out.push("        provider: Provider.{name}\n")
         }
     }
-    &out.push("        overrides: {{\n")
-    &out.push("            \"{package}\": {{\n")
-    if patch == .Val(path) -> &out.push("                patches: [patch(\"{path}\")],\n")
-    if allow_unfree -> &out.push("                allowUnfree: true,\n")
-    &out.push("            }},\n        }}\n")
-    &out.push("    }}\n")
+    out.push("        overrides: {{\n")
+    out.push("            \"{package}\": {{\n")
+    if patch == .Val(path) -> out.push("                patches: [patch(\"{path}\")],\n")
+    if allow_unfree -> out.push("                allowUnfree: true,\n")
+    out.push("            }},\n        }}\n")
+    out.push("    }}\n")
     out.join("")
 }

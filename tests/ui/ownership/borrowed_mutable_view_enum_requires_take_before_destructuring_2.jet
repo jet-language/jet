@@ -4,7 +4,7 @@ Choice: enum {
     Second(ViewMut<Int>)
 }
 
-inspect: fn(choice: ^Choice) {
+inspect: fn(choice: &&Choice) {
     if choice == {
         .First(selected) -> print(selected[0])
         .Second(selected) -> print(selected[0])
@@ -13,8 +13,9 @@ inspect: fn(choice: ^Choice) {
 
 run: fn() {
     values := [1, 2]
-    choice: Choice.First(&values[0..1])
-    inspect(^choice)
+    window: &values[0..1]
+    choice: Choice.First(window)
+    inspect(choice)
 }
 
 // KNOWN-FAILING #3917: JetSema does not check this ownership rule yet; this variant retains its original contract, not a skip.

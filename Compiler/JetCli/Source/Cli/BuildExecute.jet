@@ -40,13 +40,13 @@ jet_cli_declares_build_entry: fn(source: String) -> Bool Never! {
 jet_cli_package_declares_build_entry: fn(file: String) -[FS, Env]> Bool Never! {
     cache := WorkspaceDeclarationCache.new()
     found := String?{None}
-    if jet_cli_find_package_root_checked(&cache, jet_cli_parent(file) ?? ".") == {
+    if jet_cli_find_package_root_checked(cache, jet_cli_parent(file) ?? ".") == {
         .Ok(value) -> found = value
         .Err(_) -> return false
     }
     root: found ?? return false
     files := [JetDriverAuthorizedSourceFile]{}
-    if jet_cli_package_sources(root, &files) != None -> return false
+    if jet_cli_package_sources(root, files) != None -> return false
     loop source_file in files {
         if jet_cli_declares_build_entry(source_file.source) -> return true
     }
@@ -64,7 +64,7 @@ jet_cli_build_execute: fn(graph: BuildPlanExecution, root: String, policy: JetDr
     if graph.actions.len() == 0 && graph.probes.len() == 0 -> return None
     workspace := OverlayPolicy.empty()
     // copy: `refused` is a payload view of the policy read's result.
-    if jet_cli_build_workspace_policy(&workspace, root) == .Val(refused) -> return Val(jet_cli_build_policy_refused(refused.copy(), color))
+    if jet_cli_build_workspace_policy(workspace, root) == .Val(refused) -> return Val(jet_cli_build_policy_refused(refused.copy(), color))
     plan: jet_cli_build_hermetic_plan(graph) ?? return Val(jet_cli_ice("the checked build plan does not lower to the executor's graph: {err.debug_text()}"))
     store: BuildArtifactStoreHandle.open() ?? return Val(jet_cli_build_execution_failed("E3505", "couldn't open the build store: {err.message()}", None, "point `JET_STORE_DIR` at a writable store directory", color))
     if build_execute_build_plan(plan, root, store, jet_cli_build_grants(policy, workspace, invocation)) == {
@@ -79,12 +79,12 @@ jet_cli_build_execute: fn(graph: BuildPlanExecution, root: String, policy: JetDr
 // could not read.
 jet_cli_build_workspace_policy: fn(policy: &OverlayPolicy, root: String) -[FS, Env]> String? Never! {
     cache := WorkspaceDeclarationCache.new()
-    found: if jet_cli_find_workspace_root_checked(&cache, root) == {
+    found: if jet_cli_find_workspace_root_checked(cache, root) == {
         .Ok(nearest) -> nearest
         .Err(error) -> { return Val("Workspace build policy above `{root}` is present but unavailable: {error.diagnostic.what}") }
     }
     workspace: found ?? return None
-    resolved: if pkg_resolve_workspace_source(&cache, workspace) == {
+    resolved: if pkg_resolve_workspace_source(cache, workspace) == {
         .Ok(read) -> read
         .Err(error) -> { return Val("Workspace build policy in `{workspace}` is present but unavailable: {error.diagnostic.what}") }
     }
@@ -105,18 +105,18 @@ jet_cli_build_grants: fn(policy: JetDriverAuthorityPolicy?, workspace: OverlayPo
     granted := authority.granted.copy()
     loop grant in workspace.build_grants {
         if subject != "" && grant.subject == subject {
-            loop right in jet_cli_policy_effects(grant.effects) -> &granted.push(right)
+            loop right in jet_cli_policy_effects(grant.effects) -> granted.push(right)
         }
     }
     authority.granted = jet_cli_sorted_set(granted)
-    jet_cli_with_invocation(&authority, invocation)
+    jet_cli_with_invocation(authority, invocation)
     denied := authority.denied.copy()
-    loop right in jet_cli_policy_effects(workspace.build_deny) -> &denied.push(right)
+    loop right in jet_cli_policy_effects(workspace.build_deny) -> denied.push(right)
     authority.denied = jet_cli_sorted_set(denied)
     allowed := [BuildEffect]{}
     effects: [BuildEffect]{BuildEffect.Net, BuildEffect.FS, BuildEffect.IO, BuildEffect.DB, BuildEffect.Time, BuildEffect.Rand, BuildEffect.Env, BuildEffect.Exec, BuildEffect.Log, BuildEffect.GPU}
     loop right in effects {
-        if jet_cli_answer(authority, right.name()) == JetCLIVerdict.Allowed -> &allowed.push(right)
+        if jet_cli_answer(authority, right.name()) == JetCLIVerdict.Allowed -> allowed.push(right)
     }
     allowed
 }
@@ -169,10 +169,10 @@ jet_cli_build_hermetic_plan: fn(graph: BuildPlanExecution) -> HermeticBuildPlan 
     toolchains := [ToolchainHandle]{build.default_host_toolchain()}
     loop index in 1..<graph.toolchains.len() {
         declared: graph.toolchains[index]
-        &toolchains.push(&build.toolchain(declared.name, jet_cli_build_toolchain_spec(declared, provenance)))
+        toolchains.push(build.toolchain(declared.name, jet_cli_build_toolchain_spec(declared, provenance)))
     }
     signing := [SigningIdentityHandle]{}
-    loop identity in graph.signing -> &signing.push(&build.signing_identity(identity.name, SigningIdentitySpec.new(identity.label, provenance)))
+    loop identity in graph.signing -> signing.push(build.signing_identity(identity.name, SigningIdentitySpec.new(identity.label, provenance)))
     probes := [ProbeHandle]{}
     loop probe in graph.probes {
         spec: if probe.kind == {
@@ -181,10 +181,10 @@ jet_cli_build_hermetic_plan: fn(graph: BuildPlanExecution) -> HermeticBuildPlan 
             "header" -> ProbeSpec.header_check(probe.value)
             else -> ProbeSpec.compile_check(probe.value, [String]{}, probe.code)
         }
-        &probes.push(&build.probe(probe.name, spec.with_toolchain(toolchains[probe.toolchain])))
+        probes.push(build.probe(probe.name, spec.with_toolchain(toolchains[probe.toolchain])))
     }
     actions := [HermeticActionHandle]{}
-    loop action in graph.actions -> &actions.push(&build.action(action.name, jet_cli_build_action_spec(action, toolchains, probes, signing)))
+    loop action in graph.actions -> actions.push(build.action(action.name, jet_cli_build_action_spec(action, toolchains, probes, signing)))
     targets := [TargetRef]{}
     loop target in graph.targets {
         spec := TargetSpec.new().with_toolchain(toolchains[target.toolchain])
@@ -196,8 +196,8 @@ jet_cli_build_hermetic_plan: fn(graph: BuildPlanExecution) -> HermeticBuildPlan 
         loop probe in target.probes -> spec = spec.with_probe(probes[probe])
         if target.signing == .Val(identity) -> spec = spec.with_signing_identity(signing[identity])
         loop key in target.metadata.keys() -> spec = spec.with_metadata(key, target.metadata[key])
-        added: jet_cli_build_add_target(&build, target, spec)
-        &targets.push(added)
+        added: jet_cli_build_add_target(build, target, spec)
+        targets.push(added)
     }
     if graph.default >= 0 -> return build.plan_with_default(targets[graph.default])
     build.plan()
@@ -246,14 +246,14 @@ jet_cli_build_action_spec: fn(action: BuildSessionAction, toolchains: [Toolchain
 
 jet_cli_build_add_target: fn(build: &HermeticBuildContext, target: BuildSessionTarget, spec: TargetSpec) -> TargetRef HermeticBuildError! {
     if target.kind == {
-        "executable" -> &build.add_executable(target.name, spec)
-        "library" -> &build.add_library(target.name, spec)
-        "test" -> &build.add_test(target.name, spec)
-        "asset-bundle" -> &build.add_asset_bundle(target.name, spec)
-        "doc" -> &build.add_doc(target.name, spec)
-        "install" -> &build.add_install(target.name, spec)
-        "package" -> &build.add_package(target.name, spec)
-        else -> &build.add_publish(target.name, spec)
+        "executable" -> build.add_executable(target.name, spec)
+        "library" -> build.add_library(target.name, spec)
+        "test" -> build.add_test(target.name, spec)
+        "asset-bundle" -> build.add_asset_bundle(target.name, spec)
+        "doc" -> build.add_doc(target.name, spec)
+        "install" -> build.add_install(target.name, spec)
+        "package" -> build.add_package(target.name, spec)
+        else -> build.add_publish(target.name, spec)
     }
 }
 

@@ -36,7 +36,7 @@ NativeReleaseFacts: struct {
 
 NativeReleaseProvider: struct {
     cache_expectation: fn(self, verification: &StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Net, Time, Time.Wait]> CacheExpectation? Never! {
-        if provider_cc_toolchain_is_reference(spec) -> return provider_cc_toolchain_cache_expectation(&verification, spec, ctx)
+        if provider_cc_toolchain_is_reference(spec) -> return provider_cc_toolchain_cache_expectation(verification, spec, ctx)
         provider_native_cache_expectation(spec, table, ctx)
     }
 
@@ -44,16 +44,16 @@ NativeReleaseProvider: struct {
         plan := DownloadPlan.empty()
         loop spec in specs {
             if provider_cc_toolchain_is_reference(spec) {
-                &plan.extend(provider_cc_toolchain_plan_downloads(&verification, [RefSpec]{spec}, ctx))
+                plan.extend(provider_cc_toolchain_plan_downloads(verification, [RefSpec]{spec}, ctx))
                 next
             }
-            &plan.add_item(PlanItem{package: spec.raw, state: PlanState.New, download_bytes: provider_native_download_size(spec, table, ctx), disk_bytes: None})
+            plan.add_item(PlanItem{package: spec.raw, state: PlanState.New, download_bytes: provider_native_download_size(spec, table, ctx), disk_bytes: None})
         }
         Ok(plan)
     }
 
     realize: fn(self, verification: &StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[IO, FS, Env, Exec, Net, Time, Time.Wait]> Realized ProviderError! {
-        if provider_cc_toolchain_is_reference(spec) -> return provider_cc_toolchain_realize(&verification, spec, ctx)
+        if provider_cc_toolchain_is_reference(spec) -> return provider_cc_toolchain_realize(verification, spec, ctx)
         facts: provider_native_release_facts(spec, table, ctx) ?? return Err(err.into_provider(RegistryErrorKind.NativeRelease))
         identity: provider_plain_cache_identity(provider_native_source_fingerprint(facts), NATIVE_RECIPE_ID, ctx)
         out_dir: provider_native_output_path(ctx.store_dir, facts)
@@ -516,7 +516,7 @@ provider_native_fetch_bounded_bytes: fn(url: String, limit: Int, label: String) 
     out := [U8]{}
     loop part in response.body().chunks(PROVIDER_READ_CHUNK) {
         chunk: part ?? return Err(RegistryError.Reason("could not read {label}: {err}"))
-        loop byte in chunk -> &out.push(byte)
+        loop byte in chunk -> out.push(byte)
         if out.len() > limit -> return Err(RegistryError.Reason("{label} exceeds its size bound"))
     }
     if content_length == {

@@ -27,7 +27,7 @@ diagnostic_theme_severity: fn(color: Bool, severity: Int, text: String) -> Strin
 }
 
 diagnostic_push_text: fn(out: &[U8], text: String) Never! {
-    loop byte in text.bytes() -> &out.push(byte)
+    loop byte in text.bytes() -> out.push(byte)
 }
 
 diagnostic_bytes_text: fn(bytes: [U8], start: Int, end: Int) -> String Never! {
@@ -35,7 +35,7 @@ diagnostic_bytes_text: fn(bytes: [U8], start: Int, end: Int) -> String Never! {
     index := if start < 0 -> 0 else -> start
     limit: if end > bytes.len() -> bytes.len() else -> end
     loop index < limit {
-        &out.push(bytes[index])
+        out.push(bytes[index])
         index += 1
     }
     String.from_bytes(out) ?? ""
@@ -60,13 +60,13 @@ diagnostic_lower_hex: fn(value: Int, min_digits: Int) -> String Never! {
     reversed := [U8]{}
     rest := value
     loop rest > 0 || reversed.len() < min_digits {
-        &reversed.push(digits[rest % 16])
+        reversed.push(digits[rest % 16])
         rest /%= 16
     }
     out := [U8]{}
     index := reversed.len() - 1
     loop index >= 0 {
-        &out.push(reversed[index])
+        out.push(reversed[index])
         index -= 1
     }
     String.from_bytes(out) ?? ""
@@ -82,12 +82,12 @@ diagnostic_escape_terminal_text: fn(value: String) -> String Never! {
         width: diagnostic_utf8_width(bytes, index)
         codepoint: diagnostic_codepoint_at(bytes, index, width)
         if {
-            codepoint == 10 -> diagnostic_push_text(&out, "\\n")
-            codepoint == 13 -> diagnostic_push_text(&out, "\\r")
-            codepoint == 9 -> diagnostic_push_text(&out, "\\t")
-            diagnostic_is_terminal_control(codepoint) -> diagnostic_push_text(&out, "\\u{{{diagnostic_lower_hex(codepoint, 4)}}}")
+            codepoint == 10 -> diagnostic_push_text(out, "\\n")
+            codepoint == 13 -> diagnostic_push_text(out, "\\r")
+            codepoint == 9 -> diagnostic_push_text(out, "\\t")
+            diagnostic_is_terminal_control(codepoint) -> diagnostic_push_text(out, "\\u{{{diagnostic_lower_hex(codepoint, 4)}}}")
             else -> {
-                loop offset in 0..<width -> &out.push(bytes[index + offset])
+                loop offset in 0..<width -> out.push(bytes[index + offset])
             }
         }
         index += width
@@ -148,7 +148,7 @@ diagnostic_source_text: fn(source: String) -> DiagnosticSourceText Never! {
     bytes: source.bytes()
     starts := [Int]{0}
     loop index in 0..<bytes.len() {
-        if bytes[index] == (U8{10}) -> &starts.push(index + 1)
+        if bytes[index] == (U8{10}) -> starts.push(index + 1)
     }
     DiagnosticSourceText{bytes: bytes, line_starts: starts}
 }
@@ -199,8 +199,8 @@ diagnostic_source_position: fn(sources: &DiagnosticSourceTexts, origin: Diagnost
     loop (position, known) in sources.keys {
         if known == key -> return position
     }
-    &sources.keys.push(key)
-    if origin == .Val(found) -> &sources.texts.push(diagnostic_source_text(found.source)) else -> &sources.texts.push(diagnostic_source_text(source))
+    sources.keys.push(key)
+    if origin == .Val(found) -> sources.texts.push(diagnostic_source_text(found.source)) else -> sources.texts.push(diagnostic_source_text(source))
     sources.keys.len() - 1
 }
 
@@ -253,11 +253,11 @@ diagnostic_push_snippet: fn(out: &[U8], diagnostic: Diagnostic, color: Bool, fil
     line: diagnostic_source_line(text, span.start)
     column: diagnostic_source_column(text, span.start)
     location: diagnostic_theme_dim(color, "--> {file}:{line}:{column}")
-    diagnostic_push_text(&out, "  {location}\n")
+    diagnostic_push_text(out, "  {location}\n")
     raw_line_text: diagnostic_line_text_at(text.bytes, span.start)
     line_text: diagnostic_escape_terminal_text(raw_line_text)
-    diagnostic_push_text(&out, "    |\n")
-    diagnostic_push_text(&out, "{diagnostic_right_align("{line}", 3)} | {line_text}\n")
+    diagnostic_push_text(out, "    |\n")
+    diagnostic_push_text(out, "{diagnostic_right_align("{line}", 3)} | {line_text}\n")
     // Width-aware underline: pad by the display width of everything before
     // the span, then draw carets as wide as the spanned text.
     prefix: diagnostic_escape_terminal_text(diagnostic_prefix_chars(raw_line_text, column - 1))
@@ -272,8 +272,8 @@ diagnostic_push_snippet: fn(out: &[U8], diagnostic: Diagnostic, color: Bool, fil
     // Color only the caret glyphs, not the leading pad (keeps columns).
     marks: diagnostic_theme_severity(color, diagnostic.severity, "^".repeat(caret_len))
     if {
-        message == .Val(label_text) -> diagnostic_push_text(&out, "    | {pad}{marks} {diagnostic_escape_terminal_text(label_text)}\n")
-        else -> diagnostic_push_text(&out, "    | {pad}{marks}\n")
+        message == .Val(label_text) -> diagnostic_push_text(out, "    | {pad}{marks} {diagnostic_escape_terminal_text(label_text)}\n")
+        else -> diagnostic_push_text(out, "    | {pad}{marks}\n")
     }
 }
 
@@ -314,7 +314,7 @@ diagnostic_join_escaped: fn(parts: [String], separator: String) -> String Never!
 // source; a diagnostic's own origin replaces both.
 diagnostic_render: fn(diagnostic: Diagnostic, file: String, source: String, color: Bool) -> String Never! {
     sources := diagnostic_source_texts()
-    diagnostic_render_with(diagnostic, file, source, color, &sources)
+    diagnostic_render_with(diagnostic, file, source, color, sources)
 }
 
 // diagnostic_render over the batch's indexed sources: a source is indexed the
@@ -326,33 +326,33 @@ diagnostic_render_with: fn(diagnostic: Diagnostic, file: String, source: String,
     fix: diagnostic_escape_terminal_text(diagnostic.fix)
     label: if diagnostic.severity == DIAGNOSTIC_LINT -> diagnostic_theme_severity(color, diagnostic.severity, "Warning") else -> diagnostic_theme_severity(color, diagnostic.severity, "Error")
     out := [U8]{}
-    diagnostic_push_text(&out, "{label} [{diagnostic_display_name(diagnostic.code)}]: {what}\n")
+    diagnostic_push_text(out, "{label} [{diagnostic_display_name(diagnostic.code)}]: {what}\n")
     if diagnostic.span != None || diagnostic.labels.len() > 0 {
-        position: diagnostic_source_position(&sources, diagnostic.origin, source)
-        if diagnostic.span == .Val(span) -> diagnostic_push_snippet(&out, diagnostic, color, display, sources.texts[position], span, None)
-        loop secondary in diagnostic.labels -> diagnostic_push_snippet(&out, diagnostic, color, display, sources.texts[position], secondary.span, Val(secondary.message))
+        position: diagnostic_source_position(sources, diagnostic.origin, source)
+        if diagnostic.span == .Val(span) -> diagnostic_push_snippet(out, diagnostic, color, display, sources.texts[position], span, None)
+        loop secondary in diagnostic.labels -> diagnostic_push_snippet(out, diagnostic, color, display, sources.texts[position], secondary.span, Val(secondary.message))
     }
-    diagnostic_push_text(&out, " {diagnostic_theme_bold(color, "Why:")} {why}\n")
-    diagnostic_push_text(&out, " {diagnostic_theme_bold(color, "Fix:")} {fix}\n")
+    diagnostic_push_text(out, " {diagnostic_theme_bold(color, "Why:")} {why}\n")
+    diagnostic_push_text(out, " {diagnostic_theme_bold(color, "Fix:")} {fix}\n")
     if diagnostic.detail == .Val(detail) {
         if !diagnostic_has_structured_detail_key(detail) {
             first := true
             loop line in detail.split("\n") {
-                if !first -> diagnostic_push_text(&out, "\n")
+                if !first -> diagnostic_push_text(out, "\n")
                 first = false
-                diagnostic_push_text(&out, diagnostic_escape_terminal_text(line))
+                diagnostic_push_text(out, diagnostic_escape_terminal_text(line))
             }
-            if !detail.ends_with("\n") -> diagnostic_push_text(&out, "\n")
+            if !detail.ends_with("\n") -> diagnostic_push_text(out, "\n")
         }
     }
     if diagnostic.denial_kind == .Val(kind) {
-        diagnostic_push_text(&out, " {diagnostic_theme_bold(color, "Denial:")} {diagnostic_escape_terminal_text(kind)}\n")
-        if diagnostic.call_chain.len() > 0 -> diagnostic_push_text(&out, " {diagnostic_theme_bold(color, "Call chain:")} {diagnostic_join_escaped(diagnostic.call_chain, " → ")}\n")
-        if diagnostic.scope_chain.len() > 0 -> diagnostic_push_text(&out, " {diagnostic_theme_bold(color, "Scope chain:")} {diagnostic_join_escaped(diagnostic.scope_chain, " → ")}\n")
-        if diagnostic.nearest_granting_scope == .Val(scope) -> diagnostic_push_text(&out, " {diagnostic_theme_bold(color, "Nearest granting scope:")} {diagnostic_escape_terminal_text(scope)}\n")
+        diagnostic_push_text(out, " {diagnostic_theme_bold(color, "Denial:")} {diagnostic_escape_terminal_text(kind)}\n")
+        if diagnostic.call_chain.len() > 0 -> diagnostic_push_text(out, " {diagnostic_theme_bold(color, "Call chain:")} {diagnostic_join_escaped(diagnostic.call_chain, " → ")}\n")
+        if diagnostic.scope_chain.len() > 0 -> diagnostic_push_text(out, " {diagnostic_theme_bold(color, "Scope chain:")} {diagnostic_join_escaped(diagnostic.scope_chain, " → ")}\n")
+        if diagnostic.nearest_granting_scope == .Val(scope) -> diagnostic_push_text(out, " {diagnostic_theme_bold(color, "Nearest granting scope:")} {diagnostic_escape_terminal_text(scope)}\n")
     }
     // Jet's own codes have a reference page; a library diagnostic's code is its type path.
-    if !diagnostic.code.contains(".") -> diagnostic_push_text(&out, diagnostic_more_line(diagnostic.code))
+    if !diagnostic.code.contains(".") -> diagnostic_push_text(out, diagnostic_more_line(diagnostic.code))
     String.from_bytes(out) ?? ""
 }
 
@@ -399,6 +399,6 @@ diagnostic_stop_footer: fn(code: String) -> String Never! {
 // once at the end.
 diagnostic_render_all: fn(file: String, source: String, diagnostics: [Diagnostic], color: Bool) -> String Never! {
     sources := diagnostic_source_texts()
-    rendered: loop diagnostic in diagnostics -> diagnostic_render_with(diagnostic, file, source, color, &sources)
+    rendered: loop diagnostic in diagnostics -> diagnostic_render_with(diagnostic, file, source, color, sources)
     rendered.join("\n")
 }

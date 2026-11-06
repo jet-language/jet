@@ -19,13 +19,13 @@ kit_steps_failure_paths: fn(text: String) -> String? {
             end: kit_steps_byte_index(suffix, ".jet")
             if end == {
                 .Val(offset) -> {
-                    &lines.push("{kit_steps_byte_slice(line, 0, start)}<source>{kit_steps_byte_slice(line, start + offset + 4, line.count_bytes())}")
+                    lines.push("{kit_steps_byte_slice(line, 0, start)}<source>{kit_steps_byte_slice(line, start + offset + 4, line.count_bytes())}")
                     next
                 }
                 .None -> {}
             }
         }
-        &lines.push(line)
+        lines.push(line)
     }
     Val("{lines.join("\n")}{if text.ends_with("\n") -> "\n" else -> ""}")
 }
@@ -43,9 +43,9 @@ kit_steps_contract_arrow: fn(text: String) -> String {
                     if byte == (U8{58}) -> colon = offset
                 }
                 number: if colon < 0 -> "?" else -> kit_steps_byte_slice(location, colon + 1, location.count_bytes())
-                &lines.push("{kit_steps_byte_slice(line, 0, start)}  --> <source>:{number}")
+                lines.push("{kit_steps_byte_slice(line, 0, start)}  --> <source>:{number}")
             }
-            .None -> &lines.push(line)
+            .None -> lines.push(line)
         }
     }
     "{lines.join("\n")}{if text.ends_with("\n") -> "\n" else -> ""}"

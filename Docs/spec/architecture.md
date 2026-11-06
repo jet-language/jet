@@ -469,7 +469,7 @@ Engines must not special-case these surface forms:
 | Surface | Core form | Authority |
 |---|---|---|
 | `freeze(x)` | A clone, view materialization or explicit copy, selected by the sema-approved source type; frozen provenance stays in capture metadata. | D-CONC-FREEZE1=A |
-| `^place` in a value position | A move of the checked place; a non-Copy field projection moves that field out, leaving it empty for remainder cleanup. The checker must not materialize a copy of the operand or erase its take provenance. | D-COPY-DEFAULT1=A |
+| `place.move()` in a value position | A move of the checked place; a non-Copy field projection moves that field out, leaving it empty for remainder cleanup. The checker must not materialize a copy of the operand or erase its take provenance. | D-COPY-DEFAULT1=A |
 | `task ^name { … }` | The existing task lambda with an explicit consuming capture; the task-crossing prover owns legality. | D-CONC-FREEZE1=A |
 
 The freeze form is a lowering rule, not an engine-side capture check; web has
@@ -1455,7 +1455,7 @@ Cargo runs, so helpers that share a target build at once. A helper with
 dependencies reads the host Cargo registry through a memory-backed bubblewrap
 overlay (`--overlay-src`/`--tmp-overlay`, bubblewrap 0.11 or newer, checked by
 the backend probe): Cargo's writes end with the sandbox and nothing is copied.
-A raw `extern rust` call whose parameter takes `&` or `^` is a sema error
+A raw `extern rust` call whose parameter takes `&` or `&&` is a sema error
 (`E0702`) outside `#Unsafe`, so it fails before any Cargo work.
 `check`, `run` and `build` share this realization and its
 `E0703`/`E0704`/`E0705` errors, including canonical declaration hints and separate
@@ -1563,7 +1563,7 @@ publishes the entry module's checked C surface, and `#Import(c)` names a C
 function that the library calls. This follows D-ADOPT-GUEST1=A: both directions
 use the same sema-owned C-safe type law. D-FFI-UNIFY1=A keeps the generated
 bridge, descriptor, and native symbol as one mechanism. Where a declaration
-uses D-FFI-CAP1=A, `&` is exclusive for that call and `^` transfers ownership;
+uses D-FFI-CAP1=A, `&` is exclusive for that call and `&&` transfers ownership;
 the host must obey that declaration rather than infer ownership from a header.
 
 The native Library surface maps each parameter and the result of an export,

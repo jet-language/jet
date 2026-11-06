@@ -201,7 +201,7 @@ uart_pop: fn(ring: &UARTRing) -> U8 {
 // Pinning is a real address-stability guarantee, but owner transfer to a DMA
 // device is not a language/runtime operation. This function only replays it.
 dma_checksum: fn(buffer: &DMABuffer) -> Int {
-    pinned: mem.pin(&buffer)
+    pinned: mem.pin(buffer)
     return pinned.words[0] + pinned.words[1] + pinned.words[2] + pinned.words[3]
 }
 dma_replay: fn(buffer: &DMABuffer, registers: &RegisterBlock) -> Int {
@@ -253,10 +253,10 @@ run: fn() {
         dma: DMARegisters{source: U32{0}, destination: U32{0}, length: U32{0}, status: U32{0}},
         mmio_echo: 0,
     }
-    gpio_init(&registers)
-    timer_init(&registers, 4)
-    uart_init(&registers)
-    dma_init(&registers)
+    gpio_init(registers)
+    timer_init(registers, 4)
+    uart_init(registers)
+    dma_init(registers)
 
     queue := InterruptQueue{slots: [Int#4]{0, 0, 0, 0}, head: 0, tail: 0, count: 0, dropped: 0}
     uart := UARTRing{bytes: [U8#8]{0, 0, 0, 0, 0, 0, 0, 0}, head: 0, tail: 0, count: 0, dropped: 0}
@@ -265,26 +265,26 @@ run: fn() {
     slots := FlashSlots{active: 1, trial: SlotState.Empty, rollback_count: 0}
 
     loop tick in 0..<16 {
-        if timer_advance(&registers) -> interrupt_handler(&queue, tick)
-        event: task_handoff(&queue)
+        if timer_advance(registers) -> interrupt_handler(queue, tick)
+        event: task_handoff(queue)
         if event >= 0 {
             sample: (event * 73 + 19) % 4096
-            work: control_tick(&state, sample)
+            work: control_tick(state, sample)
             if work > state.deadline_us -> state.deadline_misses += 1
-            gpio_write(&registers, state.actuator > 0)
-            uart_push(&uart, U8{65})
+            gpio_write(registers, state.actuator > 0)
+            uart_push(uart, U8{65})
         }
     }
 
-    dma_checksum: dma_replay(&dma, &registers)
+    dma_checksum: dma_replay(dma, registers)
     image: [U8#8]{69, 77, 66, 68, 49, 0, 0, 1}
     // The cryptographic signing API is separately checked and replayed in
     // signature_crypto.jet; this package exercises the slot policy and rollback.
     signature_ok: image[0] == U8{69}
-    stage_and_boot(&slots, dma_checksum, signature_ok)
+    stage_and_boot(slots, dma_checksum, signature_ok)
     rollback_image: [U8#8]{0, 0, 0, 0, 0, 0, 0, 0}
-    stage_and_boot(&slots, dma_checksum, rollback_image[0] == U8{69})
-    serial_byte: uart_pop(&uart)
+    stage_and_boot(slots, dma_checksum, rollback_image[0] == U8{69})
+    serial_byte: uart_pop(uart)
 
     print("board {board.name} {board.triple}")
     print("gpio mode {registers.gpio.mode} output {registers.gpio.output} mmio {registers.mmio_echo}")

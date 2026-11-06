@@ -137,7 +137,7 @@ provider_registry_archive_root: fn(unpack: String) -[FS]> String RegistryError! 
 
 // Build scratch under `<store>/<build scratch>/<label>-<pid>-…`. The caller
 // owns cleanup: `guard := RegistryScratch{path: scratch}` then
-// `defer close(^guard)` (Rust `Scratch` drop).
+// `defer close(guard)` (Rust `Scratch` drop).
 provider_registry_scratch: fn(store: String, label: String, context: String) -[FS, Env, Rand]> String RegistryError! {
     parent: files.join(store, STORE_BUILD_SCRATCH_DIR)
     provider_registry_create_dir_all(parent, context)
@@ -153,7 +153,7 @@ RegistryScratch: struct {
 }
 
 impl RegistryScratch.Close {
-    close: fn(^self) -[FS]> { provider_remove_tree_quiet(self.path) }
+    close: fn(&&self) -[FS]> { provider_remove_tree_quiet(self.path) }
 }
 
 // One preserved source archive of a resolved closure.
@@ -173,7 +173,7 @@ provider_registry_dependency_objects: fn(root: String, objects: [RegistrySourceO
         if object.name == root -> next
         digest: "sha256-{object.sha256}"
         facts["dependency.object.{digest}"] = "sources/{object.file_name}"
-        &references.push(digest)
+        references.push(digest)
     }
     (references: references, facts: facts)
 }
@@ -203,7 +203,7 @@ provider_registry_words: fn(text: String) -> [String] Never! {
         if cursor >= raw.len() -> break
         start: cursor
         loop cursor < raw.len() && pkg_bytes_space_width(raw, cursor) == 0 -> cursor += 1
-        &words.push(pkg_bytes_text(raw, start, cursor))
+        words.push(pkg_bytes_text(raw, start, cursor))
     }
     words
 }
@@ -312,7 +312,7 @@ provider_registry_crlf_to_lf: fn(text: String) -> String Never! {
     out := [U8]{}
     loop index in 0..<raw.len() {
         if Int.from_u8(raw[index]) == 13 && pkg_bytes_code(raw, index + 1) == 10 -> next
-        &out.push(raw[index])
+        out.push(raw[index])
     }
     pkg_bytes_text(out, 0, out.len())
 }
@@ -326,11 +326,11 @@ provider_registry_split_any: fn(text: String, delimiters: String) -> [String] Ne
     start := 0
     loop index in 0..<raw.len() {
         if stops.contains(raw[index]) {
-            &pieces.push(pkg_bytes_text(raw, start, index))
+            pieces.push(pkg_bytes_text(raw, start, index))
             start = index + 1
         }
     }
-    &pieces.push(pkg_bytes_text(raw, start, raw.len()))
+    pieces.push(pkg_bytes_text(raw, start, raw.len()))
     pieces
 }
 
@@ -338,10 +338,10 @@ provider_registry_split_any: fn(text: String, delimiters: String) -> [String] Ne
 // closure identity every registry provider hashes.
 provider_registry_identity_hash: fn(prefix: String, values: [String]) -> String Never! {
     identity := prefix.bytes()
-    &identity.push(U8{0})
+    identity.push(U8{0})
     loop value in values {
-        loop byte in value.bytes() -> &identity.push(byte)
-        &identity.push(U8{0})
+        loop byte in value.bytes() -> identity.push(byte)
+        identity.push(U8{0})
     }
     pkg_sha256_hex(identity)
 }
@@ -438,9 +438,9 @@ RegistryAuthority: struct {
             .None -> {}
         }
         normalized_allow := [String]{provider_registry_authority_of(registry)}
-        loop value in allow -> &normalized_allow.push(provider_registry_normalize_authority(value))
+        loop value in allow -> normalized_allow.push(provider_registry_normalize_authority(value))
         normalized_deny := [String]{}
-        loop value in deny -> &normalized_deny.push(provider_registry_normalize_authority(value))
+        loop value in deny -> normalized_deny.push(provider_registry_normalize_authority(value))
         normalized_allow = provider_sorted_unique(normalized_allow)
         normalized_deny = provider_sorted_unique(normalized_deny)
         loop value in normalized_deny {
@@ -481,7 +481,7 @@ RegistryAuthority: struct {
             .Ok(writer) -> writer
             .Err(error) -> { return Err(RegistryError.Reason("could not stage fetched bytes: {error}")) }
         }
-        if response.body().copy_to(^out, PROVIDER_MAX_DOWNLOAD_BYTES) == {
+        if response.body().copy_to(out, PROVIDER_MAX_DOWNLOAD_BYTES) == {
             .Ok(_) -> {}
             .Err(error) -> { return Err(RegistryError.Reason("could not fetch `{url}`: {error}")) }
         }
@@ -582,7 +582,7 @@ provider_registry_ipv4_octets: fn(text: String) -> [Int]? Never! {
             value = value * 10 + (code - 48)
         }
         if value > 255 -> return None
-        &octets.push(value)
+        octets.push(value)
     }
     Val(octets)
 }
@@ -668,7 +668,7 @@ provider_registry_tar_stream: fn(path: String, gzipped: Bool) -[FS]> [U8] Regist
 // marker of a gzip stream at most the pipe capacity may follow.
 provider_registry_preflight_tar: fn(stream: [U8], gzipped: Bool) RegistryError! {
     preflight := RegistryTarPreflight.new()
-    &preflight.feed(stream)
+    preflight.feed(stream)
     preflight.finish()
     if gzipped && preflight.trailing > PROVIDER_TAR_TRAILER_BYTES -> return Err(RegistryError.Reason("source is not a readable gzip tar archive"))
 }
@@ -706,23 +706,23 @@ RegistryTarPreflight: struct {
                 count: if self.remaining < available -> self.remaining else -> available
                 if self.capture_kind >= 0 && self.capture_left > 0 {
                     meaningful: if self.capture_left < count -> self.capture_left else -> count
-                    loop offset in 0..<meaningful -> &self.capture.push(chunk[index + offset])
+                    loop offset in 0..<meaningful -> self.capture.push(chunk[index + offset])
                     self.capture_left -= meaningful
                 }
                 self.remaining -= count
                 index += count
-                if self.remaining == 0 -> &self.finish_payload()
+                if self.remaining == 0 -> self.finish_payload()
                 next
             }
             need: PROVIDER_TAR_BLOCK - self.pending.len()
             available: chunk.len() - index
             count: if need < available -> need else -> available
-            loop offset in 0..<count -> &self.pending.push(chunk[index + offset])
+            loop offset in 0..<count -> self.pending.push(chunk[index + offset])
             index += count
             if self.pending.len() == PROVIDER_TAR_BLOCK {
                 header: self.pending
                 self.pending = [U8]{}
-                &self.header(header)
+                self.header(header)
             }
         }
     }
@@ -771,7 +771,7 @@ RegistryTarPreflight: struct {
         self.capture = [U8]{}
         self.capture_left = if metadata -> stored else -> 0
         self.capture_kind = if metadata -> kind else -> -1
-        if self.remaining == 0 -> &self.finish_payload()
+        if self.remaining == 0 -> self.finish_payload()
     }
 
     // A PAX record set names the logical size of the next entry.
@@ -907,7 +907,7 @@ provider_registry_tar_members: fn(stream: [U8]) -> [RegistryTarMember] RegistryE
         pending_name = None
         if name.bytes().len() > PROVIDER_MAX_ARCHIVE_PATH_BYTES -> return Err(RegistryError.Reason("source archive path exceeds {PROVIDER_MAX_ARCHIVE_PATH_BYTES} bytes"))
         mode: provider_registry_tar_number(header[100..<108])
-        &members.push(RegistryTarMember{entry: RegistryTarEntry{name, kind: provider_registry_tar_kind(flag, name), size: stored}, mode, start})
+        members.push(RegistryTarMember{entry: RegistryTarEntry{name, kind: provider_registry_tar_kind(flag, name), size: stored}, mode, start})
     }
     if pending_name != None -> return Err(unreadable)
     Ok(members)
@@ -972,7 +972,7 @@ provider_registry_pax_path: fn(records: [U8]) -> String? RegistryError! {
 
 provider_registry_tar_entries: fn(stream: [U8]) -> [RegistryTarEntry] RegistryError! {
     listing := [RegistryTarEntry]{}
-    loop member in provider_registry_tar_members(stream) -> &listing.push(member.entry)
+    loop member in provider_registry_tar_members(stream) -> listing.push(member.entry)
     Ok(listing)
 }
 

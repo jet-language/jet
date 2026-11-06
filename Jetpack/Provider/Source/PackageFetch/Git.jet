@@ -110,7 +110,7 @@ pkg_fetch_git_snapshot: fn(transport: PackageFetchGitTransport, url: String, rev
             Ok(snapshot)
         }
         .Err(error) -> {
-            close(^snapshot)
+            close(snapshot)
             parent.remove_tree(stage_name).drop("remove losing owned Git staging directory")
             if !(error == .AlreadyExists(_)) -> return Err(pkg_fetch_git_bad("couldn't publish git cache: {error}"))
             winner: parent.child(prefix) ?? return Err(pkg_fetch_git_bad("couldn't open concurrent git cache: {err}"))
@@ -150,7 +150,7 @@ pkg_fetch_git_node: fn(verification: &StoreVerification, roots: HangarRoots, con
     rev: revision ?? panic("Git revision resolution is exhaustive")
     snapshot: pkg_fetch_git_snapshot(transport, url, rev)
     locked: LockedRevision{rev: rev, tree_hash: snapshot.content_hash, last_modified: time.unix_ns() /% 1000000000}
-    result: pkg_fetch_source_node(&verification, roots, context, &resolver, name, .Git{url: url, selector: pkg_lock_git_selector_str(selector)}, Val(locked), snapshot, chain)
-    close(^snapshot)
+    result: pkg_fetch_source_node(verification, roots, context, resolver, name, .Git{url: url, selector: pkg_lock_git_selector_str(selector)}, Val(locked), snapshot, chain)
+    close(snapshot)
     result
 }

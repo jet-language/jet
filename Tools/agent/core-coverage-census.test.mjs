@@ -48,7 +48,7 @@ test("a bare impl inside a type belongs to it, and operator overloads share one 
       One
       impl Display { display: fn(self) -> String Never! { "" } }
     }
-    Vec: struct { impl Debug { debug: fn(^self) -> String Never! { "" } } }
+    Vec: struct { impl Debug { debug: fn(&&self) -> String Never! { "" } } }
     impl Vec.Mul { mul: fn(self, rhs: Vec) -> Vec Never! { rhs } }
     impl Vec.Mul(Float) { mul: fn(self, rhs: Float) -> Vec Never! { self } }
   `);

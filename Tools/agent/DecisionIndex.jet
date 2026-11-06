@@ -69,10 +69,10 @@ cell: fn(text: String) -> String Never! {
     loop scalar in flat.chars() {
         units: utf16_units("{scalar}")
         if used + units > CELL_KEEP {
-            if used < CELL_KEEP -> &kept.push("�")
+            if used < CELL_KEEP -> kept.push("�")
             break
         }
-        &kept.push("{scalar}")
+        kept.push("{scalar}")
         used += units
     }
     "{kept.join("")}…"
@@ -104,12 +104,12 @@ ratified_decisions: fn(raw: String) -> [RatifiedDecision] IndexError! {
         if item == {
             .Object(fields) -> {
                 if field_text(fields, "status") != "ratified" -> next
-                &rows.push(RatifiedDecision{id: field_text(fields, "id"), outcome: field_text(fields, "outcome"), card: field_text(fields, "cardId")})
+                rows.push(RatifiedDecision{id: field_text(fields, "id"), outcome: field_text(fields, "outcome"), card: field_text(fields, "cardId")})
             }
             else -> {}
         }
     }
-    &rows.sort_by((left: RatifiedDecision, right: RatifiedDecision) -> left.id <=> right.id)
+    rows.sort_by((left: RatifiedDecision, right: RatifiedDecision) -> left.id <=> right.id)
     Ok(rows)
 }
 
@@ -128,10 +128,10 @@ index_body: fn(rows: [RatifiedDecision]) -> String Never! {
     loop row in rows {
         outcome := cell(row.outcome)
         if outcome == "" -> outcome = "—"
-        &lines.push("| `{row.id}` | {outcome} | `{row.card}` |")
+        lines.push("| `{row.id}` | {outcome} | `{row.card}` |")
     }
-    &lines.push("")
-    &lines.push(CLOSE)
+    lines.push("")
+    lines.push(CLOSE)
     lines.join("\n")
 }
 
@@ -170,7 +170,7 @@ run: fn() {
 
 repeated: fn(text: String, count: Int) -> String Never! {
     parts := [String]{}
-    loop _ in 0..<count -> &parts.push(text)
+    loop _ in 0..<count -> parts.push(text)
     parts.join("")
 }
 

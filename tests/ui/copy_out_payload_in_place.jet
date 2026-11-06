@@ -5,15 +5,15 @@
 // moved out either.
 Res: struct { name: String }
 impl Res.Close {
-    close: fn(^self) { print("close {self.name}") }
+    close: fn(&&self) { print("close {self.name}") }
 }
 
-keep: fn(r: ^Res) -> Int { r.name.len() }
+keep: fn(r: &&Res) -> Int { r.name.len() }
 
 from_param: fn(env: Res?) -> Int {
     if env == .Val(held) {
         applied := held
-        return keep(^applied)
+        return keep(applied)
     }
     0
 }
@@ -21,7 +21,7 @@ from_param: fn(env: Res?) -> Int {
 from_element: fn(items: [Res?]) -> Int {
     if items[0] == .Val(held) {
         applied := held
-        return keep(^applied)
+        return keep(applied)
     }
     0
 }
@@ -29,7 +29,7 @@ from_element: fn(items: [Res?]) -> Int {
 from_payload_loop: fn(warm: [Res]?) -> Int {
     merged := [Res]{}
     if warm == .Val(existing) {
-        loop entry in existing -> &merged.push(entry)
+        loop entry in existing -> merged.push(entry)
     }
     merged.len()
 }
@@ -41,13 +41,13 @@ from_projection_loop: fn() -> Int {
     items: value.items
     value.items = [Res]{}
     sink := [Res]{}
-    loop item in items -> &sink.push(^item)
+    loop item in items -> sink.push(item)
     sink.len()
 }
 
 from_param_loop: fn(items: [Res]) -> Int {
     sink := [Res]{}
-    loop item in items -> &sink.push(^item)
+    loop item in items -> sink.push(item)
     sink.len()
 }
 

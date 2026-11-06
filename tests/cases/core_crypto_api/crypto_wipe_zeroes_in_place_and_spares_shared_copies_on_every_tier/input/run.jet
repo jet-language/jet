@@ -9,14 +9,14 @@ all_zero: fn(bytes: [U8]) -> Bool {
 
 run: fn() {
     key := [U8]{}
-    loop _ in 0..<45 -> &key.push(U8{165})
-    crypto.wipe(&key)
+    loop _ in 0..<45 -> key.push(U8{165})
+    crypto.wipe(key)
     print("unique len={key.len()} zero={all_zero(key)}")
     original := [U8]{1, 2, 3, 4}
     kept := original
-    crypto.wipe(&original)
+    crypto.wipe(original)
     print("shared len={original.len()} zero={all_zero(original)} kept={kept}")
     kept[0] = U8{9}
-    &kept.push(U8{5})
+    kept.push(U8{5})
     print("kept after writes={kept}")
 }

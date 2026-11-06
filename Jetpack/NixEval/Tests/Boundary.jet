@@ -59,11 +59,11 @@ nixeval_replace_all: fn(text: String, needle: String, replacement: String) -> St
     index := 0
     loop index < bytes.len() {
         if nixeval_matches_at(bytes, pattern, index) {
-            nixeval_push_text(&out, replacement)
+            nixeval_push_text(out, replacement)
             index += pattern.len()
             next
         }
-        &out.push(bytes[index])
+        out.push(bytes[index])
         index += 1
     }
     String.from_bytes(out) ?? text.copy()

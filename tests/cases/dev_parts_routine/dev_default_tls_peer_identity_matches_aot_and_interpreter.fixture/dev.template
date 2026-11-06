@@ -9,7 +9,7 @@ run: fn() {
     cfg2: cfg.with_version_bounds(min: .TLS13, max: .TLS13) ?? panic("versions")
     tcp: net.tcp_connect("127.0.0.1:{free-port:dev}") ?? panic("tcp")
     budget: Duration.seconds(2) ?? panic("deadline")
-    secure := tls.client(^tcp, server_name: "localhost", config: cfg2, deadline: budget) ?? panic("tls")
+    secure := tls.client(tcp, server_name: "localhost", config: cfg2, deadline: budget) ?? panic("tls")
     peer: secure.peer_identity()
     if peer.verified_server_name != "localhost" { panic("server name") }
     print(peer.verified_server_name)

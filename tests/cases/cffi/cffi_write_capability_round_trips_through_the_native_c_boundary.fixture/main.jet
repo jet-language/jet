@@ -7,12 +7,12 @@ Pair: struct {
 #Import c.cap: module {
     increment: fn(value: &I64) = "jet_cap_increment"
     make: fn() -> Pair = "jet_cap_make"
-    consume: fn(value: ^Pair) -> I64 = "jet_cap_consume"
+    consume: fn(value: &&Pair) -> I64 = "jet_cap_consume"
 }
 run: fn() {
     value := I64{41}
-    c.increment(&value)
+    c.increment(value)
     print(value)
     pair: c.make()
-    print(c.consume(^pair))
+    print(c.consume(pair))
 }

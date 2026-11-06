@@ -24,26 +24,26 @@ run: fn() {
     tagged: ((U64{1} << 62)).bit_or(U64{0x10})
     words := [U64]{U64{0}, U64{1} << 62, tagged, U64{0x6a09e667f3bcc908}, U64{1} << 63, U64.MAX}
     show_u64("literal", words)
-    &words.push(((U64{0x6a09e667} << 32)).bit_or(U64{0xf3bcc900}))
-    &words.push(U64{0x4000000000000040})
+    words.push(((U64{0x6a09e667} << 32)).bit_or(U64{0xf3bcc900}))
+    words.push(U64{0x4000000000000040})
     show_u64("push", words)
     words[0] = U64{0x7ffffffffffffff0}
     show_u64("set", words)
     copied := words.copy()
     show_u64("copy", copied)
     show_u64("slice", words[1..<4])
-    &copied.sort()
+    copied.sort()
     show_u64("sort", copied)
-    fill_u64(&words)
+    fill_u64(words)
     show_u64("borrowed set", words)
     fixed: [U64#3]{U64{1} << 62, tagged, U64.MAX}
     print("fixed: {fixed[0]} {fixed[1]} {fixed[2]}")
 
     signed := [I64]{I64.MIN, I64{-1}, I64{0}, I64{4611686018427387904}, I64.MAX}
-    &signed.push(I64{4611686018427387920})
+    signed.push(I64{4611686018427387920})
     signed[2] = I64{-4611686018427387904}
     show_i64("i64", signed)
     ordered := signed.copy()
-    &ordered.sort()
+    ordered.sort()
     show_i64("i64 sort", ordered)
 }

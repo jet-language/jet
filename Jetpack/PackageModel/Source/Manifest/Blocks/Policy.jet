@@ -56,14 +56,14 @@ pkg_parse_policy: fn(body: String, package_only_fields: Bool) -> [PolicyDeclarat
         }
         key: policy_key_parse(name) ?? next
         if seen.contains(key) -> return Err(pkg_bad_mem("package policy `{name}` is declared more than once"))
-        &seen.push(key)
+        seen.push(key)
         value: if policy_parse_value(key, raw) == {
             .Ok(parsed) -> parsed
             .Err(error) -> {
                 return Err(pkg_bad_mem(error.message()))
             }
         }
-        &out.push(PolicyDeclaration{key: key, value: value, scope: PolicyScope.Package, span: Span{start: 0, end: 0}, target: None, source: "package.jet"})
+        out.push(PolicyDeclaration{key: key, value: value, scope: PolicyScope.Package, span: Span{start: 0, end: 0}, target: None, source: "package.jet"})
     }
     loop rule in POLICY_RULES {
         if policy_resolve(rule.key, out) == .Err(error) -> return Err(pkg_bad_mem("conflicting `{policy_key_name(rule.key)}` declarations: {error.debug()}"))
@@ -176,11 +176,11 @@ pkg_parse_package_policy_surface: fn(body: String) -> PackagePolicySurface Packa
                     stars: pkg_text_count(pattern, "*")
                     if pattern.trim() == "" || (pattern.contains("*") && !pattern.ends_with("*")) || stars > 1 -> return Err(pkg_bad_policy("`policy.sources` patterns must be exact names or one trailing `*`"))
                     if seen_sources.contains(pattern) -> return Err(pkg_bad_policy("`policy.sources.{pattern}` is declared more than once"))
-                    &seen_sources.push(pattern)
+                    seen_sources.push(pattern)
                     sources: pkg_parse_string_list(rule.value.trim()) ?? return Err(pkg_bad_policy("`policy.sources.{pattern}` must contain a non-empty source list"))
                     if sources.len() == 0 || pkg_policy_any_blank(sources) -> return Err(pkg_bad_policy("`policy.sources.{pattern}` must contain a non-empty source list"))
                     if pkg_policy_has_repeat(sources) -> return Err(pkg_bad_policy("`policy.sources.{pattern}` cannot repeat a source authority"))
-                    &surface.source_maps.push(PolicySourceMap{pattern: pattern, sources: sources})
+                    surface.source_maps.push(PolicySourceMap{pattern: pattern, sources: sources})
                 }
             }
             POLICY_FIELD_EXCEPTIONS -> {
@@ -205,7 +205,7 @@ pkg_policy_has_repeat: fn(values: [String]) -> Bool Never! {
     unique := [String]{}
     loop value in values {
         if unique.contains(value) -> return true
-        &unique.push(value)
+        unique.push(value)
     }
     false
 }
@@ -234,7 +234,7 @@ pkg_parse_policy_path: fn(input: String, field: String) -> String PackageParseEr
         if component == "" || component == "." -> next
         if component == ".." -> return Err(pkg_bad_policy("`{field}` must stay within the project root"))
         if pkg_text_has_control(component) -> return Err(pkg_bad_policy("`{field}` contains an invalid project-relative path"))
-        &components.push(component)
+        components.push(component)
     }
     if components.len() == 0 -> return Ok(".")
     Ok(components.join("/"))
@@ -247,7 +247,7 @@ pkg_parse_policy_path_list: fn(raw: String, field: String) -> [String] PackagePa
         entry: piece.trim()
         if entry == "" -> return Err(pkg_bad_policy("`{field}` cannot contain an empty path"))
         path: pkg_parse_policy_path(entry, field)
-        if !paths.contains(path) -> &paths.push(path)
+        if !paths.contains(path) -> paths.push(path)
     }
     Ok(pkg_manifest_sorted(paths))
 }
@@ -260,7 +260,7 @@ pkg_parse_dependency_policy_list: fn(raw: String) -> [String] PackageParseError!
         if entry == "" -> return Err(pkg_bad_policy("`policy.deps` cannot contain an empty dependency"))
         dependency: pkg_unquote(entry)
         if !pkg_validate_dependency_name(dependency) -> return Err(pkg_bad_policy("`policy.deps` name `{dependency}` must be one safe path component"))
-        if !dependencies.contains(dependency) -> &dependencies.push(dependency)
+        if !dependencies.contains(dependency) -> dependencies.push(dependency)
     }
     Ok(pkg_manifest_sorted(dependencies))
 }
@@ -306,10 +306,10 @@ pkg_parse_policy_exceptions: fn(raw: String) -> [PackagePolicyException] Package
         pkg_validate_exception_text("reason", reason)
         if !pkg_is_exact_exception_scope(scope) -> return Err(pkg_bad_policy("`PolicyException.scope` must be an exact `package#version` target; wildcards, `@`, and ranges are not allowed"))
         if seen_ids.contains(id) -> return Err(pkg_bad_policy("`policy.exceptions` repeats exception id `{id}`"))
-        &seen_ids.push(id)
+        seen_ids.push(id)
         if seen_scopes.contains(scope) -> return Err(pkg_bad_policy("`policy.exceptions` repeats exact scope `{scope}`"))
-        &seen_scopes.push(scope)
-        &exceptions.push(PackagePolicyException{id: id, scope: scope, reason: reason, expires_at: expires})
+        seen_scopes.push(scope)
+        exceptions.push(PackagePolicyException{id: id, scope: scope, reason: reason, expires_at: expires})
     }
     Ok(exceptions)
 }
@@ -404,7 +404,7 @@ pkg_parse_guarantee_policy: fn(body: String) -> GuaranteePolicy PackageParseErro
             loop dependency in values {
                 if dependency.trim() == "" -> return Err(pkg_bad_guarantee("`policy.contain` cannot name an empty dependency"))
                 if contain.contains(dependency) -> return Err(pkg_bad_guarantee("`policy.contain` cannot name one dependency more than once"))
-                &contain.push(dependency)
+                contain.push(dependency)
             }
         } else if entry.key == POLICY_FIELD_HARDEN {
             if harden_seen -> return Err(pkg_bad_guarantee("`policy.harden` may be declared once"))

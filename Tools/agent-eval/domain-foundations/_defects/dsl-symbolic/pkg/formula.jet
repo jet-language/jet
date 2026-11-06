@@ -26,7 +26,7 @@ recalc: fn(cells: [String:CalcCell], previous: [String:Int], changed: String) ->
         if dirty.get(name.copy()) ?? false {
             if cells.get(name.copy()) == .Val(cell) {
                 values[name] = eval(cell.copy(), values)
-                &touched.push(name)
+                touched.push(name)
                 loop target in order {
                     if cells.get(target.copy()) == .Val(next) {
                         if next.deps.contains(name) -> dirty[target] = true

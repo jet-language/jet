@@ -52,17 +52,17 @@ sema_kernel_declaration_failure: fn(func: Func, kernel: KernelMarker, method: Bo
 // False when one fails, reported.
 sema_kernel_check_declaration: fn(func: Func, kernel: KernelMarker, method: Bool, params: [TParameter], result: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
     if sema_kernel_declaration_failure(func, kernel, method) == .Val(failure) {
-        &diagnostics.push(sema_kernel_failure(failure.obligation, failure.span))
+        diagnostics.push(sema_kernel_failure(failure.obligation, failure.span))
         return false
     }
     loop param in params {
         problem: sema_ownership_crossing_problem(param.ty, SemaSendCrossing.Kernel, true, environment, program, scopes, context) ?? next
-        &diagnostics.push(sema_ownership_crossing_diagnostic(param.name, param.ty, problem, SemaSendCrossing.Kernel, kernel.span))
+        diagnostics.push(sema_ownership_crossing_diagnostic(param.name, param.ty, problem, SemaSendCrossing.Kernel, kernel.span))
         return false
     }
     if func.return_type != None {
         if sema_ownership_crossing_problem(result, SemaSendCrossing.Kernel, true, environment, program, scopes, context) == .Val(problem) {
-            &diagnostics.push(sema_ownership_crossing_diagnostic("kernel result", result, problem, SemaSendCrossing.Kernel, kernel.span))
+            diagnostics.push(sema_ownership_crossing_diagnostic("kernel result", result, problem, SemaSendCrossing.Kernel, kernel.span))
             return false
         }
     }
@@ -78,7 +78,7 @@ sema_kernel_pending: fn(func: Func, compute_aliases: [String]) -> SemaKernelPend
     names := (loop param in func.params -> param.name)
     body_failure := SemaKernelFailure?{None}
     loop statement in func.body {
-        body_failure = sema_kernel_prove_statement(statement, &names, compute_aliases)
+        body_failure = sema_kernel_prove_statement(statement, names, compute_aliases)
         if body_failure != None -> break
     }
     declared: if func.declared_effects == .Val(row) -> row.len() > 0 else -> false
@@ -93,7 +93,7 @@ sema_kernel_prove_statement: fn(statement: Stmt, names: &[String], compute_alias
             if binding.mutable || binding.pattern != None -> return Val(SemaKernelFailure{obligation: "immutable scalar locals", span: binding.name_span})
             failure: sema_kernel_prove_expr(binding.init, names, compute_aliases)
             if failure != None -> return failure
-            &names.push(binding.name)
+            names.push(binding.name)
             return None
         }
         else -> return Val(SemaKernelFailure{obligation: "uniform straight-line control flow", span: sema_user_text_stmt_span(statement)})
@@ -143,11 +143,11 @@ sema_kernel_prove_expr: fn(expression: Expr, names: [String], compute_aliases: [
 // effect facts: no declared, direct, called or opaque effects, then the body.
 sema_kernel_check_effects: fn(pending: SemaKernelPending, direct: [String], call_edges: [String], maximal: Bool, diagnostics: &[Diagnostic]) -> Bool {
     if pending.declared_effects || direct.len() > 0 || call_edges.len() > 0 || maximal {
-        &diagnostics.push(sema_kernel_failure("no reachable effects or opaque calls", pending.span))
+        diagnostics.push(sema_kernel_failure("no reachable effects or opaque calls", pending.span))
         return false
     }
     if pending.body_failure == .Val(failure) {
-        &diagnostics.push(sema_kernel_failure(failure.obligation, failure.span))
+        diagnostics.push(sema_kernel_failure(failure.obligation, failure.span))
         return false
     }
     true
@@ -157,7 +157,7 @@ sema_kernel_check_effects: fn(pending: SemaKernelPending, direct: [String], call
 sema_kernel_compute_aliases: fn(module_row: SemaRegistrationModule) -> [String] Never! {
     aliases := [String]{}
     loop row in sema_core_registration_imports(module_row) {
-        if row.module_name == "core.compute" && row.item == None -> &aliases.push(row.alias)
+        if row.module_name == "core.compute" && row.item == None -> aliases.push(row.alias)
     }
     aliases
 }

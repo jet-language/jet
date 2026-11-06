@@ -57,7 +57,7 @@ pkg_lock_capture_build_stamp: fn(project_root: String) -[Exec, Time, Time.Wait]>
 // Trimmed stdout of `git -C <root> <args>` when it succeeds.
 pkg_lock_git_output: fn(project_root: String, args: [String]) -[Exec, Time.Wait]> String? {
     argv := [String]{"git", "-C", project_root}
-    loop arg in args -> &argv.push(arg)
+    loop arg in args -> argv.push(arg)
     spec: process.cmd(argv).stdout(.Capture).stderr(.Capture)
     receipt: process.run_spec(spec) ?? return None
     if !receipt.success -> return None

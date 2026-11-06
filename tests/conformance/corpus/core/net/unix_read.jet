@@ -5,7 +5,7 @@ run: fn() {
     listener: net.unix_listen("/tmp/jet-conformance-unix-read.sock") ?? panic("listen")
     client: net.unix_connect("/tmp/jet-conformance-unix-read.sock") ?? panic("connect")
     server: net.unix_accept(listener) ?? panic("accept")
-    net.unix_write_all_bytes(&client, "read".bytes()) ?? panic("write")
-    result: net.unix_read(&server) ?? panic("read")
+    net.unix_write_all_bytes(client, "read".bytes()) ?? panic("write")
+    result: net.unix_read(server) ?? panic("read")
     print(result == "read")
 }

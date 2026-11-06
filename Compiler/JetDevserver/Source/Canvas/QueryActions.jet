@@ -43,7 +43,7 @@ canvas_find: fn(path: OSPath, src: String, query: String) -> String Err! {
         if contains_ci(node.title, needle) || contains_ci(node.kind, needle) -> results.push(query_result_json("graph", node.title, node.title, "", node.span, .Some(node), src))
     }
     loop span in text_matches(src, needle) { results.push(query_result_json("source", needle, needle, path.display().to_string(), span, node_for_span(projection, span), src)) }
-    dedupe_results(&results)
+    dedupe_results(results)
     .Ok(query_ok("find", src, "[{results.join(",")}]", "\"impact\":null,\"diff\":null"))
 }
 canvas_project_find: fn(entry: OSPath, selected_path: OSPath, selected_src: String, query: String, expected_project_revision: String?) -> String Err! {
@@ -58,20 +58,20 @@ canvas_project_find: fn(entry: OSPath, selected_path: OSPath, selected_src: Stri
                 loop def in source.index.definitions() {
                     if !module_belongs_to(context.project_root, source.path, def.module_path) || (!contains_ci(def.name, needle) && !contains_ci(def.identity, needle)) -> next
                     owner: context.sources.iter().find((candidate) -> module_belongs_to(context.project_root, candidate.path, def.module_path)).unwrap_or(source)
-                    push_project_result(&results, &seen, "definition", def.name, def.name, def.module_path, def.def_span, owner, projection, context.selected_path)
+                    push_project_result(results, seen, "definition", def.name, def.name, def.module_path, def.def_span, owner, projection, context.selected_path)
                 }
                 loop reference in source.index.references() {
                     if !module_belongs_to(context.project_root, source.path, reference.module_path) || !contains_ci(reference.name, needle) -> next
                     owner: context.sources.iter().find((candidate) -> module_belongs_to(context.project_root, candidate.path, reference.module_path)).unwrap_or(source)
-                    push_project_result(&results, &seen, "reference", reference.name, reference.name, reference.module_path, reference.span, owner, projection, context.selected_path)
+                    push_project_result(results, seen, "reference", reference.name, reference.name, reference.module_path, reference.span, owner, projection, context.selected_path)
                 }
-                loop span in text_matches(source.source, needle) { push_project_result(&results, &seen, "source", needle, needle, source.source_id, span, source, projection, context.selected_path) }
+                loop span in text_matches(source.source, needle) { push_project_result(results, seen, "source", needle, needle, source.source_id, span, source, projection, context.selected_path) }
             }
             if projection == .Val(projection) {
                 loop node in projection.node_refs {
                     if contains_ci(node.title, needle) || contains_ci(node.kind, needle) {
                         selected_source: context.sources.iter().find((source) -> source.path == context.selected_path) ?? return .Err(query_error("not_found", "Canvas query source is not in the projected project"))
-                        push_project_result(&results, &seen, "graph", node.title, node.title, context.selected_source_id, node.span, selected_source, .Some(projection), context.selected_path)
+                        push_project_result(results, seen, "graph", node.title, node.title, context.selected_source_id, node.span, selected_source, .Some(projection), context.selected_path)
                     }
                 }
             }
@@ -98,12 +98,12 @@ canvas_project_references: fn(entry: OSPath, selected_path: OSPath, selected_src
         }).collect()
         results := [String]{}
         seen := HashSet<String>.new()
-        loop (source, def) in definitions { push_project_result(&results, &seen, "definition", def.name, def.name, def.module_path, def.def_span, source, .Some(projection), context.selected_path) }
+        loop (source, def) in definitions { push_project_result(results, seen, "definition", def.name, def.name, def.module_path, def.def_span, source, .Some(projection), context.selected_path) }
         loop source in context.sources {
             loop reference in source.index.references() {
                 if reference.name != symbol || !module_belongs_to(context.project_root, source.path, reference.module_path) || !reference_targets(reference, definitions) -> next
                 owner: context.sources.iter().find((candidate) -> module_belongs_to(context.project_root, candidate.path, reference.module_path)).unwrap_or(source)
-                push_project_result(&results, &seen, "reference", reference.name, reference.name, reference.module_path, reference.span, owner, .Some(projection), context.selected_path)
+                push_project_result(results, seen, "reference", reference.name, reference.name, reference.module_path, reference.span, owner, .Some(projection), context.selected_path)
             }
         }
         impact: context.sources.iter().find((source) -> source.index.definitions().iter().any((def) -> def.name == symbol)).map((source) -> ImpactReport.analyze(source.index, symbol, 3).to_json()).unwrap_or("null")
@@ -118,17 +118,17 @@ canvas_project_preview_rename: fn(entry: OSPath, selected_path: OSPath, selected
         if project.project_revision != context.project_revision -> return .Err(query_error("conflict", "project changed while Canvas was preparing its rename"))
         projection: project_file(selected_path).map_err((diags) -> query_diagnostics_error(selected_path, selected_src, diags))?
         plan := prepare_project_rename(project, selected_path, symbol, to, .None).map_err((error) -> query_error(error.kind, error.message))?
-        normalize_and_format_project_changes(project, &plan.changes).map_err((error) -> query_error("check", error))?
+        normalize_and_format_project_changes(project, plan.changes).map_err((error) -> query_error("check", error))?
         validate_project_rename_overlay(project, plan.changes).map_err((error) -> query_error("check", error))?
         definitions: context.sources.iter().flat_map((source) -> source.index.definitions().iter().filter((definition) -> definition.name == symbol).map((definition) -> (source, definition))).collect()
         results := [String]{}
         seen := HashSet<String>.new()
-        loop (source, definition) in definitions { push_project_result(&results, &seen, "definition", definition.name, definition.name, definition.module_path, definition.def_span, source, .Some(projection), context.selected_path) }
+        loop (source, definition) in definitions { push_project_result(results, seen, "definition", definition.name, definition.name, definition.module_path, definition.def_span, source, .Some(projection), context.selected_path) }
         loop source in context.sources {
             loop reference in source.index.references() {
                 if reference.name != symbol || !module_belongs_to(context.project_root, source.path, reference.module_path) || !reference_targets(reference, definitions) -> next
                 owner: context.sources.iter().find((candidate) -> module_belongs_to(context.project_root, candidate.path, reference.module_path)).unwrap_or(source)
-                push_project_result(&results, &seen, "reference", reference.name, reference.name, reference.module_path, reference.span, owner, .Some(projection), context.selected_path)
+                push_project_result(results, seen, "reference", reference.name, reference.name, reference.module_path, reference.span, owner, .Some(projection), context.selected_path)
             }
         }
         (results, truncated): bounded_project_results(results)
@@ -284,8 +284,8 @@ core_catalog_entries: fn(query: String) -> [CoreCatalogModule] {
     needle := query.trim() // #4303
     modules := parse_core_catalog_markdown(include_str("../../../../Docs/spec/reference/core-library.md"))
     exports: core_module_exports()
-    merge_core_module_exports(&modules, exports)
-    mark_core_catalog_availability(&modules, exports)
+    merge_core_module_exports(modules, exports)
+    mark_core_catalog_availability(modules, exports)
     if !needle.is_empty() {
         modules = modules.into_iter().filter_map((module_ref) -> {
             module_ref := module_ref
@@ -454,7 +454,7 @@ core_source_callee: fn(src: String, module_path: String) -> String {
 // row, a bare path, or a `use {` block row (core_imports, #6542).
 imported_core_alias: fn(src: String, module_path: String) -> String? {
     loop import in core_imports(src) {
-        if import.module_ref == module_path -> return .Some(^import.alias)
+        if import.module_ref == module_path -> return .Some(import.alias.move())
     }
     .None
 }

@@ -62,7 +62,7 @@ run: fn() {
     // (f) para_fold: each chunk keeps its first index, merge brackets the
     // pair. 200 items make chunks 0, 64, 128, 192.
     indices := [Int]{}
-    loop i in 0..200 -> &indices.push(i)
+    loop i in 0..200 -> indices.push(i)
     grouping: indices.para_fold(() -> "", (acc: String, n: Int) -> if acc == "" -> "{n}" else -> acc, (left: String, right: String) -> "[{left}|{right}]")
     print("para_fold: {grouping}")
 }

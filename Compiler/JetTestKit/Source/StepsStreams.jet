@@ -106,7 +106,7 @@ kit_steps_stream_assertion: fn(key: String, original: String) -> KitAssertion? {
         }
     } else if mode == "~any" {
         if arity < 2 || !kit_steps_reason(original) -> return None
-        loop token in tokens.slice(offset + 1, tokens.len()) -> &alternatives.push(token.text)
+        loop token in tokens.slice(offset + 1, tokens.len()) -> alternatives.push(token.text)
     } else if mode == "one-of" {
         if arity < 3 || !kit_steps_reason(original) -> return None
         data = kit_steps_byte_slice(value, tokens[offset + 1].start, value.count_bytes()).trim().copy()
@@ -298,7 +298,7 @@ kit_steps_string_array: fn(text: String) -> [String]? {
             result := [String]{}
             loop item in items {
                 if item == {
-                    .Text(value) -> &result.push(value)
+                    .Text(value) -> result.push(value)
                     else -> return None
                 }
             }

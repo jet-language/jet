@@ -10,40 +10,40 @@
 // address. Status 0 is Ok(()); status 1 leaves the owned failure text in the
 // out word; a stop propagates before either is read.
 ir_shared_guard_wait: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, guard: Int, condition: Int, predicate: BodyLambda, span: Span) -> Int Never! {
-    editable: ir_shared_guard_editable(ir_ty(p, b, guard)) ?? return ir_fail_slot(&b, span, "SharedGuard.wait without its checked read/edit provenance")
-    row: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
-    string_row: ir_value_type(&m, p, Type.String) ?? return ir_type_fail(&b, span, Type.String)
+    editable: ir_shared_guard_editable(ir_ty(p, b, guard)) ?? return ir_fail_slot(b, span, "SharedGuard.wait without its checked read/edit provenance")
+    row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
+    string_row: ir_value_type(m, p, Type.String) ?? return ir_type_fail(b, span, Type.String)
     predicate_ty: ir_lambda_function_type(predicate)
     backs := [IRWriteBack]{}
-    token: ir_place_address(&m, p, &b, guard, &backs, span)
+    token: ir_place_address(m, p, b, guard, backs, span)
     if ir_failed(b) || token < 0 -> return -1
-    wake: ir_expr(&m, p, &b, condition)
+    wake: ir_expr(m, p, b, condition)
     if ir_failed(b) || wake < 0 -> return -1
-    closure: ir_lambda(&m, p, &b, predicate_ty, predicate, span)
+    closure: ir_lambda(m, p, b, predicate_ty, predicate, span)
     if ir_failed(b) || closure < 0 -> return -1
-    id: ir_lazy_helper(&m, p, &b, "callback", predicate_ty, span)
+    id: ir_lazy_helper(m, p, b, "callback", predicate_ty, span)
     if id < 0 -> return -1
-    invoke: ir_lazy_address(&m, &b, id)
-    out: ir_out_slot(&m, &b, 1)
-    mode: ir_word_const(&m, &b, if editable -> 1 else -> 0)
-    word_row: ir_word_row(&m)
-    status: ir_runtime(&m, &b, "jet_rt_native_shared_guard_wait", [Int]{token, mode, wake, closure, invoke, out}, word_row)
-    loop back in backs -> ir_emit(&b.f, IROp.Load, back.slot, back.cell, 0, -1, b.line)
-    ir_release(&m, &b, wake)
-    ir_release(&m, &b, closure)
-    result: ir_temp(&m, &b, row)
-    zero: ir_word_const(&m, &b, 0)
-    held: ir_bool_op(&m, &b, IROp.Eq, status, zero)
-    ir_open_if(&b.f, held, b.line)
-    done: ir_result_box(&m, p, &b, ty, true, -1)
-    ir_emit(&b.f, IROp.Copy, result, done, -1, -1, b.line)
+    invoke: ir_lazy_address(m, b, id)
+    out: ir_out_slot(m, b, 1)
+    mode: ir_word_const(m, b, if editable -> 1 else -> 0)
+    word_row: ir_word_row(m)
+    status: ir_runtime(m, b, "jet_rt_native_shared_guard_wait", [Int]{token, mode, wake, closure, invoke, out}, word_row)
+    loop back in backs -> ir_emit(b.f, IROp.Load, back.slot, back.cell, 0, -1, b.line)
+    ir_release(m, b, wake)
+    ir_release(m, b, closure)
+    result: ir_temp(m, b, row)
+    zero: ir_word_const(m, b, 0)
+    held: ir_bool_op(m, b, IROp.Eq, status, zero)
+    ir_open_if(b.f, held, b.line)
+    done: ir_result_box(m, p, b, ty, true, -1)
+    ir_emit(b.f, IROp.Copy, result, done, -1, -1, b.line)
     b.fresh[done] = false
-    ir_else(&b.f, b.line)
-    reason: ir_load_at(&m, &b, out, 0, string_row)
-    failed: ir_result_box(&m, p, &b, ty, false, reason)
-    ir_emit(&b.f, IROp.Copy, result, failed, -1, -1, b.line)
+    ir_else(b.f, b.line)
+    reason: ir_load_at(m, b, out, 0, string_row)
+    failed: ir_result_box(m, p, b, ty, false, reason)
+    ir_emit(b.f, IROp.Copy, result, failed, -1, -1, b.line)
     b.fresh[failed] = false
-    ir_end(&b.f, b.line)
+    ir_end(b.f, b.line)
     b.fresh[result] = true
     result
 }
@@ -51,10 +51,10 @@ ir_shared_guard_wait: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, gu
 // `condition.notify_one()` / `notify_all()`: the borrowed handle wakes one
 // or every registered waiter.
 ir_condition_notify: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, condition: Int, all: Bool) -> Int Never! {
-    wake: ir_expr(&m, p, &b, condition)
+    wake: ir_expr(m, p, b, condition)
     if ir_failed(b) || wake < 0 -> return -1
-    _: ir_runtime(&m, &b, if all -> "jet_condition_notify_all" else -> "jet_condition_notify_one", [Int]{wake}, -1)
-    ir_release(&m, &b, wake)
+    _: ir_runtime(m, b, if all -> "jet_condition_notify_all" else -> "jet_condition_notify_one", [Int]{wake}, -1)
+    ir_release(m, b, wake)
     return -1
 }
 
@@ -70,10 +70,10 @@ ir_shared_guard_inner: fn(ty: Type) -> Type? Never! {
 // -1 when a step is no inline field.
 ir_shared_guard_path_offset: fn(m: &IRModule, p: IRProgram, b: IRBuilder, guard: Int, path: [TFieldRef]) -> Int Never! {
     inner: ir_shared_guard_inner(ir_ty(p, b, guard)) ?? return -1
-    row := ir_value_type(&m, p, inner) ?? return -1
+    row := ir_value_type(m, p, inner) ?? return -1
     offset := 0
     loop field in path {
-        member: ir_member_of_row(&m, p, row, field.name) ?? return -1
+        member: ir_member_of_row(m, p, row, field.name) ?? return -1
         if member.boxed -> return -1
         offset += member.offset
         row = member.ty
@@ -85,14 +85,14 @@ ir_shared_guard_path_offset: fn(m: &IRModule, p: IRProgram, b: IRBuilder, guard:
 // guard lending the field (jet_rt_native_shared_guard_project); the permit
 // is released when the projected guard drops.
 ir_shared_guard_map: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, guard: Int, path: [TFieldRef], span: Span) -> Int Never! {
-    row: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
-    offset: ir_shared_guard_path_offset(&m, p, b, guard, path)
-    if offset < 0 -> return ir_fail_slot(&b, span, "SharedGuard.map onto a field that is not stored inline")
-    taken: ir_expr(&m, p, &b, guard)
+    row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
+    offset: ir_shared_guard_path_offset(m, p, b, guard, path)
+    if offset < 0 -> return ir_fail_slot(b, span, "SharedGuard.map onto a field that is not stored inline")
+    taken: ir_expr(m, p, b, guard)
     if ir_failed(b) || taken < 0 -> return -1
-    source: ir_own(&m, p, &b, taken)
-    at: ir_word_const(&m, &b, offset)
-    projected: ir_runtime(&m, &b, "jet_rt_native_shared_guard_project", [Int]{source, at}, row)
+    source: ir_own(m, p, b, taken)
+    at: ir_word_const(m, b, offset)
+    projected: ir_runtime(m, b, "jet_rt_native_shared_guard_project", [Int]{source, at}, row)
     b.fresh[source] = false
     projected
 }
@@ -101,25 +101,25 @@ ir_shared_guard_map: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, gua
 // one shared hold of the guard (jet_rt_native_shared_guard_share), which
 // releases the permit once both have dropped.
 ir_shared_guard_split: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, guard: Int, first: [TFieldRef], second: [TFieldRef], span: Span) -> Int Never! {
-    row: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
-    first_member: ir_member_of_row(&m, p, row, "first") ?? return ir_type_fail(&b, span, ty)
-    second_member: ir_member_of_row(&m, p, row, "second") ?? return ir_type_fail(&b, span, ty)
-    first_offset: ir_shared_guard_path_offset(&m, p, b, guard, first)
-    second_offset: ir_shared_guard_path_offset(&m, p, b, guard, second)
-    if first_offset < 0 || second_offset < 0 -> return ir_fail_slot(&b, span, "SharedGuard.split onto a field that is not stored inline")
-    taken: ir_expr(&m, p, &b, guard)
+    row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
+    first_member: ir_member_of_row(m, p, row, "first") ?? return ir_type_fail(b, span, ty)
+    second_member: ir_member_of_row(m, p, row, "second") ?? return ir_type_fail(b, span, ty)
+    first_offset: ir_shared_guard_path_offset(m, p, b, guard, first)
+    second_offset: ir_shared_guard_path_offset(m, p, b, guard, second)
+    if first_offset < 0 || second_offset < 0 -> return ir_fail_slot(b, span, "SharedGuard.split onto a field that is not stored inline")
+    taken: ir_expr(m, p, b, guard)
     if ir_failed(b) || taken < 0 -> return -1
-    source: ir_own(&m, p, &b, taken)
-    shared: ir_runtime(&m, &b, "jet_rt_native_shared_guard_share", [Int]{source}, first_member.ty)
+    source: ir_own(m, p, b, taken)
+    shared: ir_runtime(m, b, "jet_rt_native_shared_guard_share", [Int]{source}, first_member.ty)
     b.fresh[source] = false
     b.fresh[shared] = false
-    first_at: ir_word_const(&m, &b, first_offset)
-    left: ir_runtime(&m, &b, "jet_rt_native_shared_guard_project", [Int]{shared, first_at}, first_member.ty)
-    second_at: ir_word_const(&m, &b, second_offset)
-    right: ir_runtime(&m, &b, "jet_rt_native_shared_guard_project", [Int]{shared, second_at}, second_member.ty)
-    pair: ir_fresh_temp(&m, &b, row)
-    ir_emit(&b.f, IROp.StackAddress, pair, m.types[row].size, 8, -1, b.line)
-    ir_store_at(&m, p, &b, pair, first_member.offset, left)
-    ir_store_at(&m, p, &b, pair, second_member.offset, right)
+    first_at: ir_word_const(m, b, first_offset)
+    left: ir_runtime(m, b, "jet_rt_native_shared_guard_project", [Int]{shared, first_at}, first_member.ty)
+    second_at: ir_word_const(m, b, second_offset)
+    right: ir_runtime(m, b, "jet_rt_native_shared_guard_project", [Int]{shared, second_at}, second_member.ty)
+    pair: ir_fresh_temp(m, b, row)
+    ir_emit(b.f, IROp.StackAddress, pair, m.types[row].size, 8, -1, b.line)
+    ir_store_at(m, p, b, pair, first_member.offset, left)
+    ir_store_at(m, p, b, pair, second_member.offset, right)
     pair
 }

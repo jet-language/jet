@@ -58,9 +58,9 @@ strict_decode: fn(text: String) {
 
 strict_reader: fn(path: Path) (EncodingError | IOError)! {
     input: files.open(path) ?? return Err(err)
-    events := json.reader(^input) ?? return Err(err)
+    events := json.reader(input) ?? return Err(err)
     loop {
-        if &events.next() == {
+        if events.next() == {
             .Ok(next) -> {
                 event: next ?? {
                     print("reader: unexpectedly reached the end")
@@ -80,10 +80,10 @@ strict_reader: fn(path: Path) (EncodingError | IOError)! {
 
 allow_reader: fn(path: Path) (EncodingError | IOError)! {
     input: files.open(path) ?? return Err(err)
-    events := json.reader_allow_duplicates(^input) ?? return Err(err)
+    events := json.reader_allow_duplicates(input) ?? return Err(err)
     loop {
         // A failed read propagates; `??` handles the end of the stream.
-        event: &events.next() ?? break
+        event: events.next() ?? break
         print("allow reader: {event_name(event)}")
     }
 }
@@ -91,10 +91,10 @@ allow_reader: fn(path: Path) (EncodingError | IOError)! {
 // Count events until the end or the first error.
 wide_reader: fn(label: String, path: Path, allow: Bool, limits: encoding.EncodingLimits) (EncodingError | IOError)! {
     input: files.open(path) ?? return Err(err)
-    events := if allow -> json.reader_allow_duplicates(^input, limits) ?? return Err(err) else -> json.reader(^input, limits) ?? return Err(err)
+    events := if allow -> json.reader_allow_duplicates(input, limits) ?? return Err(err) else -> json.reader(input, limits) ?? return Err(err)
     count := 0
     loop {
-        if &events.next() == {
+        if events.next() == {
             .Ok(next) -> {
                 _: next ?? break
                 count += 1
@@ -127,7 +127,7 @@ run: fn() (EncodingError | IOError)! {
     files.remove(path) ?? return
     // 2,000 distinct names under limits sized for the values, not the names.
     names := [String]{}
-    loop index in 0..<2000 -> &names.push("\"key-{index}-padded-to-a-longer-object-name\":0")
+    loop index in 0..<2000 -> names.push("\"key-{index}-padded-to-a-longer-object-name\":0")
     wide: Path.from(testing.temp_dir("json-duplicate-keys")).join("wide.json")
     files.write(wide.to_string(), "{{{names.join(",")}}}") ?? return
     limits := encoding.EncodingLimits.safe()

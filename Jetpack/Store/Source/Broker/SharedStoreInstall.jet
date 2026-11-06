@@ -76,7 +76,7 @@ store_broker_words: fn(text: String) -> [String] Never! {
         if index >= raw.len() -> break
         start: index
         loop index < raw.len() && pkg_bytes_space_width(raw, index) == 0 -> index += 1
-        &words.push(pkg_bytes_text(raw, start, index))
+        words.push(pkg_bytes_text(raw, start, index))
     }
     words
 }
@@ -268,10 +268,10 @@ store_broker_admin_service_unit_text: fn(executable: String, config: SharedStore
     state_directories: "jet/shared-store/root jet/shared-store/root/.incoming jet/shared-store/root/hangar jet/shared-store/root/.locks"
     writable := [String]{}
     members: [String]{".incoming", "hangar", ".locks"}
-    loop member in members -> &writable.push(store_broker_systemd_escape_path(files.join(config.shared_root, member)))
+    loop member in members -> writable.push(store_broker_systemd_escape_path(files.join(config.shared_root, member)))
     readonly := [String]{}
     readonly_roots: [String]{config.shared_root, config.grants, store_broker_parent_or_root(config.trust_key)}
-    loop path in readonly_roots -> &readonly.push(store_broker_systemd_escape_path(path))
+    loop path in readonly_roots -> readonly.push(store_broker_systemd_escape_path(path))
     "[Unit]\nDescription=Jet shared-store broker request\nRequires=jet-shared-store.socket\n\n[Service]\nType=oneshot\nExecStart={store_broker_systemd_escape_path(executable)} hangar shared broker --fd 3\nDynamicUser=yes\nStateDirectory={state_directories}\nStateDirectoryMode=0700\nLoadCredential=hangar.key:{store_broker_systemd_escape_path(config.trust_key)}\nEnvironment=JET_SHARED_STORE_TRUST_KEY=%d/hangar.key\nNoNewPrivileges=yes\nPrivateTmp=yes\nPrivateDevices=yes\nProtectSystem=strict\nProtectHome=read-only\nProtectKernelTunables=yes\nProtectKernelModules=yes\nProtectControlGroups=yes\nProtectClock=yes\nProtectProc=invisible\nProcSubset=pid\nLockPersonality=yes\nRestrictNamespaces=yes\nRestrictSUIDSGID=yes\nRestrictRealtime=yes\nMemoryDenyWriteExecute=yes\nCapabilityBoundingSet=\nAmbientCapabilities=\nRestrictAddressFamilies=AF_UNIX\nIPAddressDeny=any\nReadOnlyPaths={readonly.join(" ")}\nUMask=0077\nTimeoutStartSec=120\nReadWritePaths={writable.join(" ")}\n"
 }
 
@@ -280,7 +280,7 @@ store_broker_activate_admin_socket: fn() StoreError! {
     commands: [[String]]{[String]{"daemon-reload"}, [String]{"enable", "--now", "jet-shared-store.socket"}}
     loop args in commands {
         argv := [String]{"systemctl"}
-        loop arg in args -> &argv.push(arg)
+        loop arg in args -> argv.push(arg)
         receipt: process.cmd(argv).stdout(.Inherit).stderr(.Inherit).run() ?? return Err(store_broker_invalid("could not activate shared-store systemd socket: {err}"))
         if !receipt.success -> return Err(store_broker_invalid("systemctl {args.join(" ")} failed with exit status: {receipt.code}"))
     }
@@ -538,7 +538,7 @@ store_broker_bounded_file: fn(path: String, limit: Int, label: String) -> [U8] S
     loop bytes.len() <= limit {
         chunk: input.read(limit + 1 - bytes.len())
         if chunk.len() == 0 -> break
-        loop byte in chunk -> &bytes.push(byte)
+        loop byte in chunk -> bytes.push(byte)
     }
     if bytes.len() > limit -> return Err(store_broker_invalid("{label} is too large"))
     Ok(bytes)

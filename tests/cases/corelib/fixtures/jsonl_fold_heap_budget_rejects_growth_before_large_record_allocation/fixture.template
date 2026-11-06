@@ -12,11 +12,11 @@ run: fn() {
     near_limits.max_item_bytes = 100000
     near_limits.max_expansion_bytes = 0
     near_input: files.open("{work}/near-string.jsonl") ?? panic("near string open")
-    near_reader := jsonl.reader(^near_input, near_limits) ?? panic("near string reader")
-    if &near_reader.next() == {
+    near_reader := jsonl.reader(near_input, near_limits) ?? panic("near string reader")
+    if near_reader.next() == {
         .Val(_) | .None -> { print("near-string-limit-missed") }
         .Err(first) -> {
-            if &near_reader.next() == {
+            if near_reader.next() == {
                 .Val(_) | .None -> { print("near-string-terminal-missed") }
                 .Err(second) -> {
                     print(first.byte_offset == 100003)
@@ -31,8 +31,8 @@ run: fn() {
     valid_limits := encoding.EncodingLimits.safe()
     valid_limits.max_item_bytes = 512
     valid_input: files.open("{work}/valid.jsonl") ?? panic("valid open")
-    valid_reader := jsonl.reader(^valid_input, valid_limits) ?? panic("valid reader")
-    if &valid_reader.next() == {
+    valid_reader := jsonl.reader(valid_input, valid_limits) ?? panic("valid reader")
+    if valid_reader.next() == {
         .Val(value) -> {
             last: value.at(31) ?? Dyn.Int(-1)
             print(last.int() ?? -1)
@@ -44,11 +44,11 @@ run: fn() {
     scalar_limits := encoding.EncodingLimits.safe()
     scalar_limits.max_item_bytes = 7
     scalar_input: files.open("{work}/scalar.jsonl") ?? panic("scalar open")
-    scalar_reader := jsonl.reader(^scalar_input, scalar_limits) ?? panic("scalar reader")
-    if &scalar_reader.next() == {
+    scalar_reader := jsonl.reader(scalar_input, scalar_limits) ?? panic("scalar reader")
+    if scalar_reader.next() == {
         .Val(_) | .None -> { print("scalar-limit-missed") }
         .Err(first) -> {
-            if &scalar_reader.next() == {
+            if scalar_reader.next() == {
                 .Val(_) | .None -> { print("scalar-terminal-missed") }
                 .Err(second) -> {
                     print(first.path)
@@ -61,11 +61,11 @@ run: fn() {
     array_limits := encoding.EncodingLimits.safe()
     array_limits.max_item_bytes = 512
     array_input: files.open("{work}/array.jsonl") ?? panic("array open")
-    array_reader := jsonl.reader(^array_input, array_limits) ?? panic("array reader")
-    if &array_reader.next() == {
+    array_reader := jsonl.reader(array_input, array_limits) ?? panic("array reader")
+    if array_reader.next() == {
         .Val(_) | .None -> { print("array-limit-missed") }
         .Err(first) -> {
-            if &array_reader.next() == {
+            if array_reader.next() == {
                 .Val(_) | .None -> { print("array-terminal-missed") }
                 .Err(second) -> {
                     print(first.byte_offset < 256)
@@ -79,11 +79,11 @@ run: fn() {
     object_limits := encoding.EncodingLimits.safe()
     object_limits.max_item_bytes = 512
     object_input: files.open("{work}/object.jsonl") ?? panic("object open")
-    object_reader := jsonl.reader(^object_input, object_limits) ?? panic("object reader")
-    if &object_reader.next() == {
+    object_reader := jsonl.reader(object_input, object_limits) ?? panic("object reader")
+    if object_reader.next() == {
         .Val(_) | .None -> { print("object-limit-missed") }
         .Err(first) -> {
-            if &object_reader.next() == {
+            if object_reader.next() == {
                 .Val(_) | .None -> { print("object-terminal-missed") }
                 .Err(second) -> {
                     print(first.byte_offset < 2048)

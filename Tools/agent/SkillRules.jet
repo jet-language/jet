@@ -85,7 +85,7 @@ join_path: fn(directory: String, name: String) -> String Never! {
 sorted_names: fn(directory: String) -[FS]> [String] SkillRulesError! {
     entries: files.list_dir(directory) ?? return Err(SkillRulesError{message: "cannot list {directory}: {err}"})
     names := entries.map((entry: DirEntry) -> entry.name)
-    &names.sort()
+    names.sort()
     Ok(names)
 }
 
@@ -95,7 +95,7 @@ inventory_rows: fn(text: String) -> [SkillRow] Never! {
     rows := [SkillRow]{}
     loop (index, line) in LINE_BREAK.split(text) {
         if ROW.match(line) == {
-            .Val(row) -> &rows.push(SkillRow{line: index + 1, source: row.groups[1].copy(), name: row.groups[2].copy(), status: row.groups[3].copy(), trigger: row.groups[4].copy(), rule: row.groups[5].copy()})
+            .Val(row) -> rows.push(SkillRow{line: index + 1, source: row.groups[1].copy(), name: row.groups[2].copy(), status: row.groups[3].copy(), trigger: row.groups[4].copy(), rule: row.groups[5].copy()})
             .None -> {}
         }
     }
@@ -106,7 +106,7 @@ inventory_rows: fn(text: String) -> [SkillRow] Never! {
 source_keys: fn(source: String) -> [String] Never! {
     keys := [String]{}
     loop part in SOURCE_JOIN.split(source.trim()) {
-        if part == "R" || part == "T" || part == "M" || part == "H" || part == "G" -> &keys.push(part.copy())
+        if part == "R" || part == "T" || part == "M" || part == "H" || part == "G" -> keys.push(part.copy())
     }
     keys
 }
@@ -118,7 +118,7 @@ unmapped: fn(rows: [SkillRow], key: String, directory: String, names: [String], 
         loop row in rows {
             if row.name == name && source_keys(row.source).contains(key) -> mapped = true
         }
-        if !mapped -> &errors.push("{directory}/{name}/SKILL.md has no row with source {key} in {INVENTORY}")
+        if !mapped -> errors.push("{directory}/{name}/SKILL.md has no row with source {key} in {INVENTORY}")
     }
 }
 
@@ -129,25 +129,25 @@ inventory_errors: fn(rows: [SkillRow], repo: [String], tower: [String]) -> [Stri
     seen := [String:Int]{}
     loop row in rows {
         if seen.get(row.name) == {
-            .Val(first) -> &errors.push("{INVENTORY}:{row.line}: `{row.name}` repeats the row at line {first}")
+            .Val(first) -> errors.push("{INVENTORY}:{row.line}: `{row.name}` repeats the row at line {first}")
             .None -> seen[row.name.copy()] = row.line
         }
-        if !STATUSES.contains(row.status) -> &errors.push("{INVENTORY}:{row.line}: `{row.name}` has status `{row.status}`; use keep, narrow, disable or retire")
-        if row.trigger == "" || row.rule == "" -> &errors.push("{INVENTORY}:{row.line}: `{row.name}` needs its trigger and its preserved rule")
+        if !STATUSES.contains(row.status) -> errors.push("{INVENTORY}:{row.line}: `{row.name}` has status `{row.status}`; use keep, narrow, disable or retire")
+        if row.trigger == "" || row.rule == "" -> errors.push("{INVENTORY}:{row.line}: `{row.name}` needs its trigger and its preserved rule")
         if row.status == "retire" -> next
         keys: source_keys(row.source)
-        if keys.contains("R") && !repo.contains(row.name) -> &errors.push("{INVENTORY}:{row.line}: `{row.name}` is {row.status} from R, but {REPO_SKILLS}/{row.name}/SKILL.md does not exist")
-        if keys.contains("T") && !tower.contains(row.name) -> &errors.push("{INVENTORY}:{row.line}: `{row.name}` is {row.status} from T, but {TOWER_SKILLS}/{row.name}/SKILL.md does not exist")
+        if keys.contains("R") && !repo.contains(row.name) -> errors.push("{INVENTORY}:{row.line}: `{row.name}` is {row.status} from R, but {REPO_SKILLS}/{row.name}/SKILL.md does not exist")
+        if keys.contains("T") && !tower.contains(row.name) -> errors.push("{INVENTORY}:{row.line}: `{row.name}` is {row.status} from T, but {TOWER_SKILLS}/{row.name}/SKILL.md does not exist")
     }
-    unmapped(rows, "R", REPO_SKILLS, repo, &errors)
-    unmapped(rows, "T", TOWER_SKILLS, tower, &errors)
+    unmapped(rows, "R", REPO_SKILLS, repo, errors)
+    unmapped(rows, "T", TOWER_SKILLS, tower, errors)
     errors
 }
 
 skills_in: fn(directory: String) -[FS]> [String] SkillRulesError! {
     found := [String]{}
     loop name in sorted_names(directory) ?? return Err(err) {
-        if files.is_file("{directory}/{name}/SKILL.md") -> &found.push(name.copy())
+        if files.is_file("{directory}/{name}/SKILL.md") -> found.push(name.copy())
     }
     Ok(found)
 }
@@ -174,7 +174,7 @@ missing_laws: fn(agents: String, rules: [Contradiction]) -> [String] Never! {
     text: normalized(agents)
     missing := [String]{}
     loop rule in rules {
-        if !text.contains(rule.law) -> &missing.push("AGENTS.md no longer says \"{rule.law}\"; update the {rule.topic} rule in Tools/agent/SkillRules.jet")
+        if !text.contains(rule.law) -> missing.push("AGENTS.md no longer says \"{rule.law}\"; update the {rule.topic} rule in Tools/agent/SkillRules.jet")
     }
     missing
 }
@@ -187,14 +187,14 @@ contradiction_errors: fn(path: String, text: String, rules: [Contradiction]) -> 
         if rule.multiline {
             loop found in pattern.matches(text) {
                 number: text.slice(0, found.start).count("\n") + 1
-                &errors.push("{path}:{number}: {rule.topic}: \"{found.text}\" contradicts AGENTS.md: \"{rule.law}\"")
+                errors.push("{path}:{number}: {rule.topic}: \"{found.text}\" contradicts AGENTS.md: \"{rule.law}\"")
             }
             next
         }
         loop (index, line) in lines {
             loop found in pattern.matches(line) {
                 if rule.negatable && negated(line, found.start) -> next
-                &errors.push("{path}:{index + 1}: {rule.topic}: \"{found.text}\" contradicts AGENTS.md: \"{rule.law}\"")
+                errors.push("{path}:{index + 1}: {rule.topic}: \"{found.text}\" contradicts AGENTS.md: \"{rule.law}\"")
             }
         }
     }
@@ -206,9 +206,9 @@ visit_markdown: fn(directory: String, found: &[String]) SkillRulesError! -[FS]> 
         path: join_path(directory, name)
         if files.is_symlink(path) -> next
         if files.is_dir(path) {
-            visit_markdown(path, &found) ?? return Err(err)
+            visit_markdown(path, found) ?? return Err(err)
         } else if files.is_file(path) && path.ends_with(".md") {
-            &found.push(path)
+            found.push(path)
         }
     }
     Ok(())
@@ -222,11 +222,11 @@ skill_rules_main: fn() -[FS, IO]> Int SkillRulesError! {
     tower: skills_in(TOWER_SKILLS) ?? return Err(err)
     errors := inventory_errors(rows, repo, tower)
     rules: contradictions()
-    loop missing in missing_laws(read_text("AGENTS.md") ?? return Err(err), rules) -> &errors.push(missing)
+    loop missing in missing_laws(read_text("AGENTS.md") ?? return Err(err), rules) -> errors.push(missing)
     paths := [String]{}
-    loop root in SCANNED_ROOTS -> visit_markdown(root, &paths) ?? return Err(err)
+    loop root in SCANNED_ROOTS -> visit_markdown(root, paths) ?? return Err(err)
     loop path in paths {
-        loop error in contradiction_errors(path, read_text(path) ?? return Err(err), rules) -> &errors.push(error)
+        loop error in contradiction_errors(path, read_text(path) ?? return Err(err), rules) -> errors.push(error)
     }
     if errors.len() > 0 {
         term.eprint("skill-rules: {errors.len()} problem(s)")

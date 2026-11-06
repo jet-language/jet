@@ -24,7 +24,7 @@ jet_driver_rust_foreign_rust_type: fn(ty: Type, user_types: [String]) -> String 
         .Apply(name, args) -> {
             if !user_types.contains(name) -> return "Box<dyn std::any::Any>"
             types := [String]{}
-            loop arg in args -> &types.push(jet_driver_rust_foreign_rust_type(arg, user_types))
+            loop arg in args -> types.push(jet_driver_rust_foreign_rust_type(arg, user_types))
             "{ast_comptime_generated_path(name)}<{types.join(", ")}>"
         }
         .FixedList(elem, len) -> "[{jet_driver_rust_foreign_rust_type(elem, user_types)}; {measure_expression(len)}]"
@@ -43,8 +43,8 @@ jet_driver_rust_foreign_wrapper: fn(function: JetDriverRustForeignFunction, user
     args := [String]{}
     loop index in 0..<function.params.len() {
         param: function.params[index]
-        &params.push("p{index}: {jet_driver_rust_foreign_param_type(param.convention, param.ty, user_types)}")
-        &args.push("p{index}")
+        params.push("p{index}: {jet_driver_rust_foreign_param_type(param.convention, param.ty, user_types)}")
+        args.push("p{index}")
     }
     ret: if function.return_type == .Val(ty) -> jet_driver_rust_foreign_rust_type(ty, user_types) else -> "()"
     call: "{function.rust_path}({args.join(", ")})"
@@ -97,15 +97,15 @@ jet_driver_rust_foreign_trampoline: fn(function: JetDriverRustForeignFunction, r
         expr := ""
         if ty == {
             .String -> {
-                &body.push("    let p{index}_ptr = args[{index}].ptr;")
-                &body.push("    let p{index}_bytes = if args[{index}].len == 0 {{ Vec::new() }} else if p{index}_ptr.is_null() {{ ffi_panic(); }} else {{ unsafe {{ std::slice::from_raw_parts(p{index}_ptr, args[{index}].len).to_vec() }} }};")
-                &body.push("    let p{index} = String::from_utf8(p{index}_bytes).unwrap_or_else(|_| ffi_panic());")
+                body.push("    let p{index}_ptr = args[{index}].ptr;")
+                body.push("    let p{index}_bytes = if args[{index}].len == 0 {{ Vec::new() }} else if p{index}_ptr.is_null() {{ ffi_panic(); }} else {{ unsafe {{ std::slice::from_raw_parts(p{index}_ptr, args[{index}].len).to_vec() }} }};")
+                body.push("    let p{index} = String::from_utf8(p{index}_bytes).unwrap_or_else(|_| ffi_panic());")
                 expr = "p{index}"
             }
             .Named(_) -> {
                 record_ty: jet_driver_rust_foreign_cabi_record_type(ty, record_names) ?? return None
-                &body.push("    let p{index}_ptr = args[{index}].ptr;")
-                &body.push("    if p{index}_ptr.is_null() {{ ffi_panic(); }}")
+                body.push("    let p{index}_ptr = args[{index}].ptr;")
+                body.push("    if p{index}_ptr.is_null() {{ ffi_panic(); }}")
                 expr = "unsafe {{ std::ptr::read(p{index}_ptr as *const {record_ty}) }}"
             }
             .Float -> expr = "f64::from_bits(args[{index}].value)"
@@ -114,57 +114,57 @@ jet_driver_rust_foreign_trampoline: fn(function: JetDriverRustForeignFunction, r
             .Char -> expr = "char::from_u32(args[{index}].value as u32).unwrap_or_else(|| ffi_panic())"
             else -> expr = "args[{index}].value as {jet_driver_rust_foreign_rust_type(ty, [String]{})}"
         }
-        &args.push(expr)
+        args.push(expr)
     }
     call: "jet_ffi_{function.name}({args.join(", ")})"
     if function.return_type == {
-        .None -> &body.push("    let _ = {call};")
+        .None -> body.push("    let _ = {call};")
         .Val(ty) -> if ty == {
             .String -> {
-                &body.push("    let result = {call};")
-                &body.push("    let bytes = result.into_bytes();")
-                &body.push("    let boxed = bytes.into_boxed_slice();")
-                &body.push("    out.len = boxed.len();")
-                &body.push("    out.ptr = Box::into_raw(boxed) as *mut u8;")
+                body.push("    let result = {call};")
+                body.push("    let bytes = result.into_bytes();")
+                body.push("    let boxed = bytes.into_boxed_slice();")
+                body.push("    out.len = boxed.len();")
+                body.push("    out.ptr = Box::into_raw(boxed) as *mut u8;")
             }
-            .Float -> &body.push("    out.value = ({call}).to_bits();")
-            .Float32 -> &body.push("    out.value = ({call}).to_bits() as u64;")
-            .Bool -> &body.push("    out.value = u64::from({call});")
-            .Char -> &body.push("    out.value = ({call}) as u32 as u64;")
+            .Float -> body.push("    out.value = ({call}).to_bits();")
+            .Float32 -> body.push("    out.value = ({call}).to_bits() as u64;")
+            .Bool -> body.push("    out.value = u64::from({call});")
+            .Char -> body.push("    out.value = ({call}) as u32 as u64;")
             .Named(_) -> {
                 record_ty: jet_driver_rust_foreign_cabi_record_type(ty, record_names) ?? return None
-                &body.push("    let result = {call};")
-                &body.push("    let bytes = unsafe {{ std::slice::from_raw_parts(")
-                &body.push("        (&result as *const {record_ty}).cast::<u8>(),")
-                &body.push("        std::mem::size_of::<{record_ty}>(),")
-                &body.push("    ) }}.to_vec().into_boxed_slice();")
-                &body.push("    out.len = bytes.len();")
-                &body.push("    out.ptr = Box::into_raw(bytes) as *mut u8;")
+                body.push("    let result = {call};")
+                body.push("    let bytes = unsafe {{ std::slice::from_raw_parts(")
+                body.push("        (&result as *const {record_ty}).cast::<u8>(),")
+                body.push("        std::mem::size_of::<{record_ty}>(),")
+                body.push("    ) }}.to_vec().into_boxed_slice();")
+                body.push("    out.len = bytes.len();")
+                body.push("    out.ptr = Box::into_raw(bytes) as *mut u8;")
             }
-            .Int | .IntN(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Quantity(_, _) -> &body.push("    out.value = ({call}) as u64;")
+            .Int | .IntN(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Quantity(_, _) -> body.push("    out.value = ({call}) as u64;")
             else -> return None
         }
     }
-    &body.push("    0")
+    body.push("    0")
     Val("#[no_mangle]\npub unsafe extern \"C\" fn jet_ffi_{function.name}_cabi(args: *const JetFfiSlot, argc: usize, out: *mut JetFfiSlot) -> i32 {{\n    match ffi_catch_unwind(|| {{\n{body.join("\n")}\n    }}) {{\n        Ok(code) => code,\n        Err(_) => {{ ffi_host_fault(); 1 }},\n    }}\n}}\n")
 }
 
 jet_driver_rust_foreign_source: fn(facts: JetDriverRustForeignFacts) -> String Never! {
     out := [String]{jet_driver_rust_foreign_preamble(), facts.record_source, "// jet-ffi-descriptor={JET_DRIVER_RUST_FOREIGN_DESCRIPTOR}\n"}
     names := [String]{}
-    loop entry in facts.entries -> &names.push(entry.declaration.name)
+    loop entry in facts.entries -> names.push(entry.declaration.name)
     trampolines := [String?]{}
     has_trampoline := false
     loop entry in facts.entries {
         source: jet_driver_rust_foreign_trampoline(entry.declaration, facts.record_names)
         if source != None -> has_trampoline = true
-        &trampolines.push(source)
+        trampolines.push(source)
     }
-    if has_trampoline -> &out.push("#[no_mangle]\npub unsafe extern \"C\" fn jet_ffi_cabi_free(ptr: *mut u8, len: usize) {{\n    if ptr.is_null() {{ return; }}\n    let _ = Vec::from_raw_parts(ptr, len, len);\n}}\n")
+    if has_trampoline -> out.push("#[no_mangle]\npub unsafe extern \"C\" fn jet_ffi_cabi_free(ptr: *mut u8, len: usize) {{\n    if ptr.is_null() {{ return; }}\n    let _ = Vec::from_raw_parts(ptr, len, len);\n}}\n")
     loop index in 0..<facts.entries.len() {
-        &out.push(jet_driver_rust_foreign_wrapper(facts.entries[index].declaration, names))
-        if trampolines[index] == .Val(source) -> &out.push(source)
-        &out.push("\n")
+        out.push(jet_driver_rust_foreign_wrapper(facts.entries[index].declaration, names))
+        if trampolines[index] == .Val(source) -> out.push(source)
+        out.push("\n")
     }
     out.join("\n")
 }

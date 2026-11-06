@@ -31,7 +31,7 @@ engine_independent_root_cleanup: fn(base: String) {
 #Test("independent_root_runner_promotes_only_agreed_source_output") {
     fixture: engine_independent_root_fixture()
     verification := StoreVerification.new()
-    result: store_certify_independent_root_build(&verification, fixture.roots, fixture.ctx, RealizeRequest.Package{spec: fixture.spec, table: fixture.table}, IndependentRootOptions.default()) ?? panic("independent certification")
+    result: store_certify_independent_root_build(verification, fixture.roots, fixture.ctx, RealizeRequest.Package{spec: fixture.spec, table: fixture.table}, IndependentRootOptions.default()) ?? panic("independent certification")
     assert(result.attestation.starts_with("independent-agreeing-v1:"))
     objects: files.join(fixture.roots.hangar_dir(), "objects")
     assert(engine_paths.is_relative_to(engine_paths.of(result.entry.out), engine_paths.of(objects)))
@@ -58,11 +58,11 @@ engine_independent_root_cleanup: fn(base: String) {
         false
     }
     options: IndependentRootOptions{retries: 0, cancelled: Val(changed)}
-    if store_certify_independent_root_build(&verification, fixture.roots, fixture.ctx, RealizeRequest.Package{spec: fixture.spec, table: fixture.table}, options) == {
+    if store_certify_independent_root_build(verification, fixture.roots, fixture.ctx, RealizeRequest.Package{spec: fixture.spec, table: fixture.table}, options) == {
         .Ok(_) -> panic("divergent roots were promoted")
         .Err(error) -> assert(error.message().contains("conflicting independent roots"))
     }
-    assert_eq(store_list(&verification, fixture.roots).len(), 0)
+    assert_eq(store_list(verification, fixture.roots).len(), 0)
     reports: files.list_dir(files.join(fixture.roots.root, "private/unreproducible")) ?? panic("divergence reports")
     report_path := String?{None}
     loop entry in reports {
@@ -84,10 +84,10 @@ engine_independent_root_cleanup: fn(base: String) {
     verification := StoreVerification.new()
     cancelled: () -[FS]> { true }
     options: IndependentRootOptions{retries: 1, cancelled: Val(cancelled)}
-    if store_certify_independent_root_build(&verification, fixture.roots, fixture.ctx, RealizeRequest.Package{spec: fixture.spec, table: fixture.table}, options) == {
+    if store_certify_independent_root_build(verification, fixture.roots, fixture.ctx, RealizeRequest.Package{spec: fixture.spec, table: fixture.table}, options) == {
         .Ok(_) -> panic("cancelled certification was promoted")
         .Err(error) -> assert(error.message().contains("cancelled"))
     }
-    assert_eq(store_list(&verification, fixture.roots).len(), 0)
+    assert_eq(store_list(verification, fixture.roots).len(), 0)
     engine_independent_root_cleanup(fixture.base)
 }

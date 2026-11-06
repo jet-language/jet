@@ -104,8 +104,8 @@ store_repro_invalid: fn(detail: String) -> StoreError Never! { StoreError.Invali
 
 // Verify both outputs, then compare their canonical trees and entry metadata.
 store_repro_compare_entries: fn(verification: &StoreVerification, left_roots: HangarRoots, left: StoreEntry, right_roots: HangarRoots, right: StoreEntry) -[FS, Env]> FirstDifference? StoreError! {
-    store_repro_verify_existing_output(&verification, left_roots, left)
-    store_repro_verify_existing_output(&verification, right_roots, right)
+    store_repro_verify_existing_output(verification, left_roots, left)
+    store_repro_verify_existing_output(verification, right_roots, right)
     left_snapshot: store_repro_snapshot_for_entry(left_roots, left)
     right_snapshot: store_repro_snapshot_for_entry(right_roots, right)
     if left_snapshot.digest != right_snapshot.digest {
@@ -128,15 +128,15 @@ store_repro_snapshot_output: fn(path: String, hangar_root: String?, allow_semant
     canonical: files.canonicalize(path)
     hook := EnvelopeWalkHook.recording()
     digest: if hangar_root == {
-        .Val(root) -> pkg_try_output_hash_of_in_hangar_with_policy(path, root, allow_semantic_xattrs, &hook) ?? return Err(StoreError.Other(err.message()))
-        else -> pkg_try_output_hash_of_with_policy(path, allow_semantic_xattrs, &hook) ?? return Err(StoreError.Other(err.message()))
+        .Val(root) -> pkg_try_output_hash_of_in_hangar_with_policy(path, root, allow_semantic_xattrs, hook) ?? return Err(StoreError.Other(err.message()))
+        else -> pkg_try_output_hash_of_with_policy(path, allow_semantic_xattrs, hook) ?? return Err(StoreError.Other(err.message()))
     }
     nodes := [String: NodeObservation]{}
     hardlink_first := [String: String]{}
     loop event in hook.events {
         if event.stage != EnvelopeWalkStage.Node -> next
         relative: store_path_strip_prefix(event.path, canonical) ?? return Err(store_repro_invalid("reproducibility observation escaped its output root"))
-        observation: store_repro_observe_node(event.path, relative, &hardlink_first)
+        observation: store_repro_observe_node(event.path, relative, hardlink_first)
         if nodes.has_key(relative) -> return Err(store_repro_invalid("reproducibility observed one output node twice"))
         nodes[relative] = observation
     }
@@ -153,7 +153,7 @@ store_repro_observe_node: fn(path: String, relative: String, hardlink_first: &[S
     names: pkg_list_xattr_names(path) ?? return Err(StoreError.Other(err.message()))
     xattrs := [String]{}
     loop name in names {
-        if !pkg_is_excluded_xattr(name) -> &xattrs.push(name)
+        if !pkg_is_excluded_xattr(name) -> xattrs.push(name)
     }
     if info.is_dir && !info.is_symlink {
         return Ok(NodeObservation{kind: .Directory, mode: info.mode, digest: None, target: None, hardlink: None, xattrs})
@@ -184,7 +184,7 @@ store_repro_read_file_digest: fn(path: String) -[FS]> String StoreError! {
     loop {
         chunk: file.read(65536)
         if chunk.len() == 0 -> break
-        loop byte in chunk -> &bytes.push(byte)
+        loop byte in chunk -> bytes.push(byte)
     }
     after: store_repro_metadata_fingerprint(file.stat())
     if before != after -> return Err(store_repro_invalid("file changed while collecting reproducibility evidence"))
@@ -200,9 +200,9 @@ store_repro_metadata_fingerprint: fn(info: files.Stat) -> String Never! {
 store_repro_first_node_difference: fn(left: OutputSnapshot, right: OutputSnapshot) -> FirstDifference? Never! {
     paths := left.nodes.keys().to_list()
     loop path in right.nodes.keys() {
-        if !left.nodes.has_key(path) -> &paths.push(path)
+        if !left.nodes.has_key(path) -> paths.push(path)
     }
-    &paths.sort()
+    paths.sort()
     loop path in paths {
         if left.nodes.get(path) == {
             .Val(left_node) -> {
@@ -248,9 +248,9 @@ store_repro_metadata_difference: fn(left: StoreEntry, right: StoreEntry) -> Firs
     }
     names := left.named_outputs.keys().to_list()
     loop name in right.named_outputs.keys() {
-        if !left.named_outputs.has_key(name) -> &names.push(name)
+        if !left.named_outputs.has_key(name) -> names.push(name)
     }
-    &names.sort()
+    names.sort()
     loop name in names {
         left_digest: left.named_outputs.get(name)
         right_digest: right.named_outputs.get(name)

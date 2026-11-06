@@ -14,24 +14,24 @@ text_ctype: fn(space: [WasmCtype], ty: WasmCtype, depth: Int) -> String Never! {
     parts := [String]{}
     loop k in 0..<ty.types.len() {
         name: if k < ty.names.len() -> ty.names[k] else -> ""
-        &parts.push("{name}:{text_type_ref(inner, ty.types[k], depth)}")
+        parts.push("{name}:{text_type_ref(inner, ty.types[k], depth)}")
     }
     "k{ty.kind}({parts.join(",")} ok={text_type_ref(space, ty.ok, depth)} err={text_type_ref(space, ty.err, depth)})"
 }
 
 text_module: fn(m: WasmModule) -> String Never! {
     lines := [String]{}
-    loop ty in m.types -> &lines.push("type {ty.render()}")
-    loop entry in m.imports -> &lines.push("import {entry.module_name} {entry.name} {entry.kind} {entry.type_index} {entry.table} {entry.memory} {entry.global}")
-    &lines.push("funcs {m.funcs}")
-    loop table in m.tables -> &lines.push("table {table.elem} {table.limits.min} {table.limits.max}")
-    loop memory in m.memories -> &lines.push("memory {memory.min} {memory.max}")
-    loop global in m.globals -> &lines.push("global {global.ty.value} {global.ty.mutable} {global.init.op} {global.init.value}")
-    loop entry in m.exports -> &lines.push("export {entry.name} {entry.kind} {entry.index}")
-    &lines.push("start {m.start}")
-    loop elem in m.elems -> &lines.push("elem {elem.mode} {elem.table} {elem.offset.op} {elem.offset.value} {elem.elem_type} {elem.items}")
-    loop data in m.datas -> &lines.push("data {data.mode} {data.memory} {data.offset.op} {data.offset.value} {data.bytes}")
-    loop code in m.codes -> &lines.push("code {code.locals} {code.op} {code.a} {code.b} {code.tables}")
+    loop ty in m.types -> lines.push("type {ty.render()}")
+    loop entry in m.imports -> lines.push("import {entry.module_name} {entry.name} {entry.kind} {entry.type_index} {entry.table} {entry.memory} {entry.global}")
+    lines.push("funcs {m.funcs}")
+    loop table in m.tables -> lines.push("table {table.elem} {table.limits.min} {table.limits.max}")
+    loop memory in m.memories -> lines.push("memory {memory.min} {memory.max}")
+    loop global in m.globals -> lines.push("global {global.ty.value} {global.ty.mutable} {global.init.op} {global.init.value}")
+    loop entry in m.exports -> lines.push("export {entry.name} {entry.kind} {entry.index}")
+    lines.push("start {m.start}")
+    loop elem in m.elems -> lines.push("elem {elem.mode} {elem.table} {elem.offset.op} {elem.offset.value} {elem.elem_type} {elem.items}")
+    loop data in m.datas -> lines.push("data {data.mode} {data.memory} {data.offset.op} {data.offset.value} {data.bytes}")
+    loop code in m.codes -> lines.push("code {code.locals} {code.op} {code.a} {code.b} {code.tables}")
     lines.join("\n")
 }
 
@@ -41,21 +41,21 @@ text_options: fn(o: jet_wasm.WasmCanonOptions) -> String Never! {
 
 text_component: fn(c: WasmComponent) -> String Never! {
     lines := [String]{}
-    loop m in c.modules -> &lines.push("module\n{text_module(m)}")
-    loop inst in c.core_instances -> &lines.push("core instance {inst.source} {inst.arg_names} {inst.arg_instances} {inst.export_names} {inst.export_sorts} {inst.export_indexes}")
-    loop item in c.core_funcs -> &lines.push("core func {item.origin} {item.instance} {item.name} {item.target} {text_options(item.options)}")
-    loop item in c.core_memories -> &lines.push("core memory {item.origin} {item.instance} {item.name}")
-    loop item in c.core_tables -> &lines.push("core table {item.origin} {item.instance} {item.name}")
-    loop item in c.core_globals -> &lines.push("core global {item.origin} {item.instance} {item.name}")
+    loop m in c.modules -> lines.push("module\n{text_module(m)}")
+    loop inst in c.core_instances -> lines.push("core instance {inst.source} {inst.arg_names} {inst.arg_instances} {inst.export_names} {inst.export_sorts} {inst.export_indexes}")
+    loop item in c.core_funcs -> lines.push("core func {item.origin} {item.instance} {item.name} {item.target} {text_options(item.options)}")
+    loop item in c.core_memories -> lines.push("core memory {item.origin} {item.instance} {item.name}")
+    loop item in c.core_tables -> lines.push("core table {item.origin} {item.instance} {item.name}")
+    loop item in c.core_globals -> lines.push("core global {item.origin} {item.instance} {item.name}")
     loop item in c.funcs {
         ty: if item.type_index >= 0 -> text_type_ref(c.types, item.type_index, 0) else -> "-"
-        &lines.push("func {item.origin} {item.target} {ty} {item.instance} {item.name} {text_options(item.options)}")
+        lines.push("func {item.origin} {item.target} {ty} {item.instance} {item.name} {text_options(item.options)}")
     }
-    loop item in c.instances -> &lines.push("instance {item.origin} {item.target} {text_type_ref(c.types, item.type_index, 0)}")
-    loop entry in c.imports -> &lines.push("import {entry.name} {entry.kind} {text_type_ref(c.types, entry.type_index, 0)}")
+    loop item in c.instances -> lines.push("instance {item.origin} {item.target} {text_type_ref(c.types, item.type_index, 0)}")
+    loop entry in c.imports -> lines.push("import {entry.name} {entry.kind} {text_type_ref(c.types, entry.type_index, 0)}")
     loop entry in c.exports {
         ty: if c.func_type(entry.index) == .Val(func) -> text_ctype(c.types, func, 0) else -> "-"
-        &lines.push("export {entry.name} {entry.sort} {entry.index} {ty}")
+        lines.push("export {entry.name} {entry.sort} {entry.index} {ty}")
     }
     lines.join("\n")
 }
@@ -64,7 +64,7 @@ text_component: fn(c: WasmComponent) -> String Never! {
 text_rendered: fn(text: String) -> String Never! {
     if wasm_text_to_binary(text) == {
         .Ok(binary) -> {
-            if wasm_decode_component(^binary) == {
+            if wasm_decode_component(binary) == {
                 .Ok(component) -> {
                     loop core in component.modules {
                         if wasm_validate_module(core) == .Err(error) -> return "validate: {error.render()}"
@@ -78,8 +78,8 @@ text_rendered: fn(text: String) -> String Never! {
     }
 }
 
-text_binary_rendered: fn(bytes: ^[U8]) -> String Never! {
-    if wasm_decode_component(^bytes) == {
+text_binary_rendered: fn(bytes: &&[U8]) -> String Never! {
+    if wasm_decode_component(bytes) == {
         .Ok(component) -> text_component(component)
         .Err(error) -> "decode: {error.render()}"
     }
@@ -100,7 +100,7 @@ text_fixture: fn(path: String) -[FS.Read, Env]> String {
     names: [String]{"lint_no_x", "crash", "fuel_loop", "incompatible", "malformed", "imports_random"}
     loop name in names {
         text: text_rendered(text_fixture("tests/fixtures/compiler_extension/{name}.wat"))
-        binary: text_binary_rendered(^extension(name))
+        binary: text_binary_rendered(extension(name))
         assert(text.contains("\ncode ") && text.contains("\nexport "), "{name}: {text}")
         assert_eq(text, binary)
     }
@@ -125,8 +125,8 @@ text_fixture: fn(path: String) -[FS.Read, Env]> String {
 
 #Test("a loaded artifact may be text or binary") {
     text: fixture("tests/fixtures/compiler_extension/lint_no_x.wat")
-    if wasm_load_component(^text) == {
-        .Ok(component) -> assert_eq(text_component(component), text_binary_rendered(^extension("lint_no_x")))
+    if wasm_load_component(text) == {
+        .Ok(component) -> assert_eq(text_component(component), text_binary_rendered(extension("lint_no_x")))
         .Err(error) -> panic("load: {error.render()}")
     }
 }
@@ -137,7 +137,7 @@ text_fixture: fn(path: String) -[FS.Read, Env]> String {
     plain_bytes: wasm_text_to_binary(plain) ?? panic("plain: {err.render()}")
     folded_bytes: wasm_text_to_binary(folded) ?? panic("folded: {err.render()}")
     assert_eq(plain_bytes, folded_bytes)
-    decoded: wasm_decode_module(^plain_bytes) ?? panic("decode: {err.render()}")
+    decoded: wasm_decode_module(plain_bytes) ?? panic("decode: {err.render()}")
     assert_eq(decoded.codes[0].op, [Int]{0x02, 0x20, 0x0d, 0x41, 0x1a, 0x0b, 0x20, 0x41, 0x6a, 0x0b})
     assert_eq(decoded.codes[0].a, [Int]{-64, 0, 0, 7, 0, 0, 0, 1, 0, 0})
 }

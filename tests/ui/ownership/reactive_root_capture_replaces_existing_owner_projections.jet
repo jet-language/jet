@@ -1,13 +1,13 @@
 
 Pair: struct { left: [Int], right: [Int] }
 both: fn(values: &[Int], callback: fn()) {
-    &values.push(3)
+    values.push(3)
     callback()
 }
 run: fn() {
     pair := Pair{ left: [1], right: [2] }
-    both(&pair.right, () -> {
+    both(pair.right, () -> {
         print(pair.left.len())
-        #Reactive { &pair.right.push(4) }
+        #Reactive { pair.right.push(4) }
     })
 }

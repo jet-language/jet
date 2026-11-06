@@ -90,8 +90,8 @@ atomic_replacement_supports_repeated_writes: fn() Never! -[FS, Env, Time, Time.W
         loaded: repl_history_load_bytes(raw ?? panic("missing replacement"))
         assert_eq(loaded.entries, [String]{"second"})
         assert(!loaded.corrupt)
-        close(^guard)
-        close(^backend)
+        close(guard)
+        close(backend)
     }
     repl_history_host_test_remove(root)
 }
@@ -108,15 +108,15 @@ transaction_lock_times_out_then_recovers_after_release: fn() Never! -[FS, Env, T
         error: second.lock() ?? {
             assert(err == .TimedOut(_))
             assert((repl_history_host_test_clock.monotonic_ns() ?? panic("real monotonic clock")) - started < 3000000000)
-            close(^held)
+            close(held)
             recovered: second.lock() ?? panic("lock recovery")
-            close(^recovered)
-            close(^first)
-            close(^second)
+            close(recovered)
+            close(first)
+            close(second)
             repl_history_host_test_remove(root)
             return
         }
-        close(^error)
+        close(error)
         panic("second store acquired held history lock")
     }
 }
@@ -183,8 +183,8 @@ history_native_unix_modes_and_clear_are_private_and_file_absence_is_not_empty: f
         backend.clear() ?? panic("clear under same lock")
         assert_eq(backend.read() ?? panic("read after clear"), None)
         backend.clear() ?? panic("missing clear must still succeed and sync directory")
-        close(^guard)
-        close(^backend)
+        close(guard)
+        close(backend)
     }
     repl_history_host_test_remove(root)
 }
@@ -208,8 +208,8 @@ history_native_unix_rejects_hardlinked_or_symlink_history_before_chmod: fn() Nev
             linked: backend.read() ?? {
                 assert_eq(repl_history_host_test_files.read(target) ?? panic("outside read"), "outside bytes")
                 assert_eq((repl_history_host_test_files.stat(target) ?? panic("outside metadata")).mode.bit_and(511), 420)
-                close(^guard)
-                close(^backend)
+                close(guard)
+                close(backend)
                 repl_history_host_test_remove(root)
                 repl_history_host_test_remove(outside)
                 return
@@ -237,8 +237,8 @@ history_native_windows_same_path_directory_substitution_is_refused: fn() Never! 
             stored: repl_history_host_test_files.read("{root}/held-jet/repl-history") ?? panic("held bytes")
             loaded: repl_history_load_bytes(stored.bytes())
             assert_eq(loaded.entries, [String]{"held marker"})
-            close(^guard)
-            close(^backend)
+            close(guard)
+            close(backend)
             repl_history_host_test_remove(root)
             return
         }
@@ -262,6 +262,6 @@ history_native_unix_nul_state_path_does_not_truncate_to_existing_prefix: fn() Ne
         repl_history_host_test_remove(root)
         return
     }
-    close(^unexpected)
+    close(unexpected)
     panic("NUL state path was accepted")
 }

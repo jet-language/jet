@@ -20,7 +20,7 @@ fixture_run: fn() -> ProcessReceipt {
 
 http_body_bytes: fn(byte: U8, n: Int) -> [U8] {
     out := [U8]{}
-    loop _i in 0..<n -> &out.push(byte)
+    loop _i in 0..<n -> out.push(byte)
     out
 }
 http_bounds_original: fn() {
@@ -29,14 +29,14 @@ http_bounds_original: fn() {
     peer: task {
         loop i in 0..<10 {
             stream := net.tcp_accept(listener) ?? panic("accept")
-            net.set_read_timeout(&stream, 5000) ?? panic("timeout")
-            _request: net.tcp_read_bytes(&stream, 4096) ?? panic("read")
+            net.set_read_timeout(stream, 5000) ?? panic("timeout")
+            _request: net.tcp_read_bytes(stream, 4096) ?? panic("read")
             if i >= 8 {
                 bytes: files.read_bytes("case-{i}.response") ?? panic("response")
-                net.tcp_write_all_bytes(&stream, bytes) ?? panic("write response")
+                net.tcp_write_all_bytes(stream, bytes) ?? panic("write response")
             } else {
                 header: files.read_bytes("case-{i}.header") ?? panic("header")
-                net.tcp_write_all_bytes(&stream, header) ?? panic("write header")
+                net.tcp_write_all_bytes(stream, header) ?? panic("write header")
                 body := [U8]{}
                 if i == 0 -> body = http_body_bytes(U8{97}, 8388608)
                 else if i == 1 -> body = [U8]{255}
@@ -45,13 +45,13 @@ http_bounds_original: fn() {
                 else if i == 4 -> body = http_body_bytes(U8{99}, 8388608)
                 else if i == 5 -> body = http_body_bytes(U8{100}, 8388609)
                 else -> body = "no".bytes()
-                _body_write_result: net.tcp_write_all_bytes(&stream, body)
+                _body_write_result: net.tcp_write_all_bytes(stream, body)
                 if i == 4 || i == 5 || i == 7 {
                     tail: files.read_bytes(if i == 7 -> "partial-chunk-end.bin" else -> "chunk-end.bin") ?? panic("chunk tail")
-                    _tail_write_result: net.tcp_write_all_bytes(&stream, tail)
+                    _tail_write_result: net.tcp_write_all_bytes(stream, tail)
                 }
             }
-            net.tcp_close(&stream) ?? panic("drop peer stream")
+            net.tcp_close(stream) ?? panic("drop peer stream")
         }
     }
     fixture_build(address)

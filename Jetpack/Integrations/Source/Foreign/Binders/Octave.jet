@@ -48,12 +48,12 @@ pkg_octave_bind: fn(path: String, source: String, lib: String, cache: String) -[
     worker: pkg_binder_canonicalize(worker_file, "could not resolve the Octave worker")
     abi: "jet_octave_{lib}"
     wrappers := [String]{}
-    loop function in functions -> &wrappers.push(pkg_worker_invoke_wrapper(abi, function, "invoke", function))
+    loop function in functions -> wrappers.push(pkg_worker_invoke_wrapper(abi, function, "invoke", function))
     bridge: pkg_worker_render_supervisor_c(abi, octave, worker, script, wrappers.join(""), "\"--quiet\",\"--no-gui\",\"--no-window-system\",\"--no-init-file\",worker_path")
     archive: pkg_worker_build_archive(language, abi, build, cache, bridge, "could not write Octave process bridge")
     digest: pkg_binder_identity_digest([String]{"jet-octave-bind-v1", source, script, octave, worker_source})
     provenance := "schema=jet-octave-bind-v1\nsha256={digest}\noctave={octave}\nscript={script}\nworker={worker}\ntransport=json\norder=column-major\nshape=rank-2\nmax_sessions=32\n"
-    pkg_binder_append_artifact_boundary(&provenance, ForeignLanguage.Octave, "Octave", lib, script, archive, "{tool}={octave};{pkg_binder_cc_ar_identity()}")
+    pkg_binder_append_artifact_boundary(provenance, ForeignLanguage.Octave, "Octave", lib, script, archive, "{tool}={octave};{pkg_binder_cc_ar_identity()}")
     result: ForeignBindResult{source: pkg_octave_render_jet(lib, functions), bound: functions, archive: archive, provenance: provenance}
     pkg_binder_remove_tree_quiet(build)
     Ok(result)
@@ -96,7 +96,7 @@ pkg_octave_parse_functions: fn(source: String) -> [String] ForeignBindError! {
         params: pkg_binder_slice(rest, open + 1, close).trim()
         if params == "" || params.contains(",") || params == "varargin" -> return Err(ForeignBindError.Source("Octave function `{name}` must take exactly one matrix argument"))
         if functions.contains(name) -> return Err(ForeignBindError.Source("Octave function `{name}` is declared more than once"))
-        &functions.push(name)
+        functions.push(name)
     }
     if functions.len() == 0 -> return Err(ForeignBindError.Source("no top-level Octave functions were found"))
     Ok(functions)
@@ -109,7 +109,7 @@ pkg_octave_string: fn(value: String) -> String Never! {
 
 pkg_octave_render_worker: fn(script: String, functions: [String]) -> String Never! {
     allowed := [String]{}
-    loop function in functions -> &allowed.push("'{function.replace("'", "''")}'")
+    loop function in functions -> allowed.push("'{function.replace("'", "''")}'")
     PKG_OCTAVE_WORKER.replace("__JET_SCRIPT__", pkg_octave_string(script)).replace("__JET_ALLOWED__", allowed.join(", "))
 }
 
@@ -117,13 +117,13 @@ pkg_octave_render_jet: fn(lib: String, functions: [String]) -> String Never! {
     abi: "jet_octave_{lib}"
     out := [String]{pkg_binder_fill_template(PKG_OCTAVE_JET_HEAD, [String: String]{"abi": abi})}
     loop function in functions {
-        &out.push("    {function}: fn(handle: Int, input: String, deadline_ms: Int) -> String = \"{abi}_invoke_{function}\"\n")
+        out.push("    {function}: fn(handle: Int, input: String, deadline_ms: Int) -> String = \"{abi}_invoke_{function}\"\n")
     }
-    &out.push(PKG_OCTAVE_JET_TYPES)
-    &out.push(pkg_render_decode_response("OctaveError", DecoderProtocol.StandardEnvelope))
-    &out.push(PKG_OCTAVE_JET_SESSION)
+    out.push(PKG_OCTAVE_JET_TYPES)
+    out.push(pkg_render_decode_response("OctaveError", DecoderProtocol.StandardEnvelope))
+    out.push(PKG_OCTAVE_JET_SESSION)
     loop function in functions {
-        &out.push(pkg_binder_fill_template(PKG_OCTAVE_JET_FUNCTION, [String: String]{"function": function}))
+        out.push(pkg_binder_fill_template(PKG_OCTAVE_JET_FUNCTION, [String: String]{"function": function}))
     }
     out.join("")
 }
@@ -172,10 +172,10 @@ OctaveError: enum {
 ``` }
 
 PKG_OCTAVE_JET_SESSION: comptime { ```impl Session.Close {
-    close: fn(^self) { abi.close(self.value) }
+    close: fn(&&self) { abi.close(self.value) }
 }
 
-close: fn(session: ^Session) -[FFI.Octave]> { abi.close(session.value) }
+close: fn(session: &&Session) -[FFI.Octave]> { abi.close(session.value) }
 
 open: fn() -[FFI.Octave]> Session OctaveError! {
     handle: abi.open()

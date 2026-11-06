@@ -106,10 +106,10 @@ trust_escape_component: fn(text: String) -> String Never! {
     out := [U8]{}
     loop byte in text.bytes() {
         if Int.from_u8(byte) == {
-            37 -> loop escaped in "%25".bytes() -> &out.push(escaped)
-            58 -> loop escaped in "%3A".bytes() -> &out.push(escaped)
+            37 -> loop escaped in "%25".bytes() -> out.push(escaped)
+            58 -> loop escaped in "%3A".bytes() -> out.push(escaped)
             TRUST_NEWLINE | TRUST_CARRIAGE_RETURN -> {}
-            else -> &out.push(byte)
+            else -> out.push(byte)
         }
     }
     String.from_bytes(out) ?? text.copy()
@@ -125,12 +125,12 @@ trust_unescape_component: fn(text: String) -> String Never! {
             high: trust_hex_value(Int.from_u8(raw[index + 1]))
             low: trust_hex_value(Int.from_u8(raw[index + 2]))
             if high >= 0 && low >= 0 {
-                &out.push(U8{high * 16 + low})
+                out.push(U8{high * 16 + low})
                 index += 3
                 next
             }
         }
-        &out.push(raw[index])
+        out.push(raw[index])
         index += 1
     }
     String.from_bytes_lossy(out)
@@ -157,7 +157,7 @@ trust_store_lines: fn(store: String) -[FS]> [String] Never! {
     lines := [String]{}
     loop line in trust_text_lines(text) {
         trimmed: line.trim()
-        if trimmed != "" -> &lines.push(trimmed)
+        if trimmed != "" -> lines.push(trimmed)
     }
     lines
 }
@@ -185,7 +185,7 @@ trust_list_entries: fn(store: String) -[FS]> [String] {
 // The typed view of the store.
 trust_list_records: fn(store: String) -[FS]> [TrustRecord] {
     records := [TrustRecord]{}
-    loop line in trust_store_lines(store) -> &records.push(TrustRecord.parse(line))
+    loop line in trust_store_lines(store) -> records.push(TrustRecord.parse(line))
     records
 }
 
@@ -196,7 +196,7 @@ trust_remove_pattern: fn(store: String, pattern: String) -[FS]> Bool {
     if !lines.contains(target) -> return false
     kept := [String]{}
     loop line in lines {
-        if line != target -> &kept.push("{line}\n")
+        if line != target -> kept.push("{line}\n")
     }
     _: files.write(store, kept.join(""))
     true
@@ -220,7 +220,7 @@ trust_revoke: fn(store: String, selector: String) -[FS]> Bool {
             removed = true
             next
         }
-        &kept.push("{line}\n")
+        kept.push("{line}\n")
     }
     if removed -> _: files.write(store, kept.join(""))
     removed

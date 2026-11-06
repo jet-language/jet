@@ -30,7 +30,7 @@ cli_env_selection_order: fn(left: EnvironmentSelection, right: EnvironmentSelect
 
 cli_canonical_env_entry: fn(packages: [EnvironmentSelection]) -> [EnvironmentSelection] Never! {
     sorted := packages
-    &sorted.sort_by((left: EnvironmentSelection, right: EnvironmentSelection) -> cli_env_selection_order(left, right))
+    sorted.sort_by((left: EnvironmentSelection, right: EnvironmentSelection) -> cli_env_selection_order(left, right))
     sorted
 }
 
@@ -56,7 +56,7 @@ cli_read_env_entry_receipt: fn(project_dir: String) -[FS]> EnvEntryReceipt? Neve
         fields: lines[index].split("\t").to_list()
         if fields.len() != 5 -> return None
         if fields[0] == "" || fields[1] == "" || fields[3] == "" || fields[4] == "" -> return None
-        &packages.push(EnvironmentSelection{reference: fields[0], name: fields[1], version: fields[2], output_hash: fields[3], metadata: fields[4]})
+        packages.push(EnvironmentSelection{reference: fields[0], name: fields[1], version: fields[2], output_hash: fields[3], metadata: fields[4]})
     }
     Val(EnvEntryReceipt{stamp: stamp_line.after, secret_identity: secret_identity, packages: cli_canonical_env_entry(packages)})
 }
@@ -110,7 +110,7 @@ cli_u64_le: fn(value: Int) -> [U8] Never! {
     out := [U8]{}
     rest := value
     loop step in 0..<8 {
-        &out.push(U8{rest %% 256})
+        out.push(U8{rest %% 256})
         rest = rest /% 256
     }
     out
@@ -138,10 +138,10 @@ cli_environment_entry_definition_fingerprint_with_hook: fn(requested_preset: Str
         secret_identity ?? "",
     }
     canonical := "jetpack-env-definition-v3".bytes()
-    &canonical.push(U8{0})
+    canonical.push(U8{0})
     loop field in fields {
-        loop byte in cli_u64_le(field.bytes().len()) -> &canonical.push(byte)
-        loop byte in field.bytes() -> &canonical.push(byte)
+        loop byte in cli_u64_le(field.bytes().len()) -> canonical.push(byte)
+        loop byte in field.bytes() -> canonical.push(byte)
     }
     (definition: crypto.sha256(canonical).hex(), hook: hook_fingerprint)
 }
@@ -152,7 +152,7 @@ cli_environment_member_expectations: fn(verification: &StoreVerification, roots:
     context: cli_provider_ctx(roots, flags, cli_effective_fixtures(flags), Val(project_dir), None, Val(roots))
     expectations := [String: CacheExpectation]{}
     loop spec in plan.refs {
-        if provider_cache_expectation(&verification, spec, plan.table, context) == .Val(expectation) -> expectations[spec.raw] = expectation
+        if provider_cache_expectation(verification, spec, plan.table, context) == .Val(expectation) -> expectations[spec.raw] = expectation
     }
     loop adapter in plan.adapters {
         if provider_adapter_cache_expectation(adapter, plan.table, context) == .Ok(expectation) -> expectations[RunPlan.adapter_reference(adapter)] = expectation
@@ -183,16 +183,16 @@ cli_warm_realizations_complete: fn(plan: RunPlan, warm: [VerifiedRealization]?) 
 // Every ref and adapter reference of a plan, sorted.
 cli_env_entry_plan_references: fn(plan: RunPlan) -> [String] Never! {
     references := [String]{}
-    loop spec in plan.refs -> &references.push(spec.raw)
-    loop adapter in plan.adapters -> &references.push(RunPlan.adapter_reference(adapter))
-    &references.sort()
+    loop spec in plan.refs -> references.push(spec.raw)
+    loop adapter in plan.adapters -> references.push(RunPlan.adapter_reference(adapter))
+    references.sort()
     references
 }
 
 cli_env_entry_matches_plan: fn(receipt: EnvEntryReceipt, plan: RunPlan) -> Bool Never! {
     references := [String]{}
-    loop selection in receipt.packages -> &references.push(selection.reference)
-    &references.sort()
+    loop selection in receipt.packages -> references.push(selection.reference)
+    references.sort()
     references == cli_env_entry_plan_references(plan)
 }
 
@@ -216,12 +216,12 @@ cli_format_env_changes: fn(previous: [(name: String, version: String)], current:
     loop pair in current -> after[pair.name] = pair.version
     names := [String]{}
     loop pair in previous {
-        if !names.contains(pair.name) -> &names.push(pair.name)
+        if !names.contains(pair.name) -> names.push(pair.name)
     }
     loop pair in current {
-        if !names.contains(pair.name) -> &names.push(pair.name)
+        if !names.contains(pair.name) -> names.push(pair.name)
     }
-    &names.sort()
+    names.sort()
     updated := [(name: String, old: String, new: String)]{}
     added := [(name: String, version: String)]{}
     removed := [(name: String, version: String)]{}
@@ -229,26 +229,26 @@ cli_format_env_changes: fn(previous: [(name: String, version: String)], current:
         old: before.get(name)
         new: after.get(name)
         if old == .Val(old_version) && new == .Val(new_version) {
-            if old_version != new_version -> &updated.push((name: name, old: old_version, new: new_version))
+            if old_version != new_version -> updated.push((name: name, old: old_version, new: new_version))
         } else if new == .Val(version) {
-            &added.push((name: name, version: version))
+            added.push((name: name, version: version))
         } else if old == .Val(version) {
-            &removed.push((name: name, version: version))
+            removed.push((name: name, version: version))
         }
     }
     parts := [String]{}
     if updated.len() > 0 {
         first: updated[0]
-        &parts.push(if first.old == "" || first.new == "" -> "{first.name} updated" else -> "{first.name} {first.old} to {first.new}")
-        if updated.len() > 1 -> &parts.push("{updated.len()} tools updated")
+        parts.push(if first.old == "" || first.new == "" -> "{first.name} updated" else -> "{first.name} {first.old} to {first.new}")
+        if updated.len() > 1 -> parts.push("{updated.len()} tools updated")
     }
     if added.len() > 0 {
-        &parts.push("{cli_package_label(added[0].name, added[0].version)} added")
-        if added.len() > 1 -> &parts.push("{added.len()} tools added")
+        parts.push("{cli_package_label(added[0].name, added[0].version)} added")
+        if added.len() > 1 -> parts.push("{added.len()} tools added")
     }
     if removed.len() > 0 {
-        &parts.push("{cli_package_label(removed[0].name, removed[0].version)} removed")
-        if removed.len() > 1 -> &parts.push("{removed.len()} tools removed")
+        parts.push("{cli_package_label(removed[0].name, removed[0].version)} removed")
+        if removed.len() > 1 -> parts.push("{removed.len()} tools removed")
     }
     if parts.len() == 0 -> return None
     Val(parts.join(", "))
@@ -272,7 +272,7 @@ cli_record_env_entry_receipt: fn(theme: Theme, project_dir: String, roots: Hanga
         previous_display := [(name: String, version: String)]{}
         loop package in previous.packages {
             version: if package.version == "" -> cli_version_from_out(package.name, package.output_hash) ?? "" else -> package.version
-            &previous_display.push((name: package.name, version: version))
+            previous_display.push((name: package.name, version: version))
         }
         if cli_format_env_changes(previous_display, current) == .Val(changes) -> theme.status("what changed: {changes}")
         if previous.stamp == stamp && previous.secret_identity == secret_identity && previous.packages == selections -> return

@@ -204,7 +204,7 @@ sema_job_duplicate_error: fn(name: String, scope: JobScope, span: Span) -> Diagn
 
 sema_job_command_clash_error: fn(name: String, span: Span, command_span: Span) -> Diagnostic {
     diagnostic: sema_error("E0928", span, "job `{name}` clashes with the `#CLI` command `{name}`", "`{name}` names both a job and a command of this program, so `jet {name}` cannot select exactly one function", "rename the job or the command; an `.Internal` job never clashes")
-    diagnostic_with_label(^diagnostic, command_span, "the `#CLI` command `{name}` is declared here")
+    diagnostic_with_label(diagnostic, command_span, "the `#CLI` command `{name}` is declared here")
 }
 
 // One command word of a `#CLI` struct and where it is written.
@@ -227,9 +227,9 @@ sema_job_cli_commands: fn(items: [Item]) -> [SemaJobCommandWord] {
             if !cli -> next
             loop function in definition.methods {
                 if function.name.starts_with("__computed_") -> next
-                &words.push(SemaJobCommandWord{name: unicode.lower(function.name), span: function.name_span})
+                words.push(SemaJobCommandWord{name: unicode.lower(function.name), span: function.name_span})
             }
-            loop binding in definition.cli_bindings -> &words.push(SemaJobCommandWord{name: unicode.lower(binding.name), span: binding.name_span})
+            loop binding in definition.cli_bindings -> words.push(SemaJobCommandWord{name: unicode.lower(binding.name), span: binding.name_span})
         }
     }
     words
@@ -249,7 +249,7 @@ sema_check_job_names: fn(items: [Item]) -> [Diagnostic] {
                 if !function.is_job -> next
                 span := function.job_span ?? function.name_span
                 if sema_job_is_reserved(function.name) {
-                    &diagnostics.push(sema_job_reserved_name_error(function.name, span))
+                    diagnostics.push(sema_job_reserved_name_error(function.name, span))
                     next
                 }
                 metadata := function.job_metadata ?? ast_job_metadata()
@@ -259,7 +259,7 @@ sema_check_job_names: fn(items: [Item]) -> [Diagnostic] {
                     clash := false
                     loop command in commands {
                         if command.name == word {
-                            &diagnostics.push(sema_job_command_clash_error(function.name, span, command.span))
+                            diagnostics.push(sema_job_command_clash_error(function.name, span, command.span))
                             clash = true
                             break
                         }
@@ -276,11 +276,11 @@ sema_check_job_names: fn(items: [Item]) -> [Diagnostic] {
                     index += 1
                 }
                 if duplicate {
-                    &diagnostics.push(sema_job_duplicate_error(function.name, scope, span))
+                    diagnostics.push(sema_job_duplicate_error(function.name, scope, span))
                     next
                 }
-                &seen_names.push(function.name)
-                &seen_scopes.push(scope)
+                seen_names.push(function.name)
+                seen_scopes.push(scope)
             }
             else -> {}
         }
@@ -301,7 +301,7 @@ sema_check_job_schedules: fn(items: [Item], environment: SemaScopeEnvironment, p
                     if expression == .Ident(name, _, _) && sema_job_mistyped_parameter(function.params, name) -> next
                 }
                 resolution: sema_job_resolve_every_arg(marker.arg, environment, program)
-                if resolution.error == .Val(reason) -> &diagnostics.push(sema_job_schedule_error(reason, sema_job_every_error_span(marker.arg)))
+                if resolution.error == .Val(reason) -> diagnostics.push(sema_job_schedule_error(reason, sema_job_every_error_span(marker.arg)))
             }
             else -> {}
         }

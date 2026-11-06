@@ -36,7 +36,7 @@ raw_ui_transfer_reports: fn(source: String) -> [String] {
     load.modules[entry].program = parsed.program
     keep_going := jet_driver_keep_going_log(None)
     capture := JetDriverCheckedProjectionCapture{}
-    result: jet_driver_compile_loaded_stages(request, &keep_going, ^load, false, &capture)
+    result: jet_driver_compile_loaded_stages(request, keep_going, load, false, capture)
     loop diagnostic in result.diagnostics if diagnostic.code == "E3101" -> diagnostic.what.copy()
 }
 

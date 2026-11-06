@@ -62,14 +62,14 @@ pack_u32be: fn(n: Int) -> [U8] BinaryError! {
 pack_u64le: fn(n: Int) -> [U8] BinaryError! {
     if n < 0 || n > 18446744073709551615 -> return Err(BinaryError.Range)
     out := [U8]{}
-    loop k in 0..<8 -> &out.push(to_u8(n >> (k * 8)))
+    loop k in 0..<8 -> out.push(to_u8(n >> (k * 8)))
     out
 }
 
 pack_u64be: fn(n: Int) -> [U8] BinaryError! {
     if n < 0 || n > 18446744073709551615 -> return Err(BinaryError.Range)
     out := [U8]{}
-    loop k in 0..<8 -> &out.push(to_u8(n >> ((7 - k) * 8)))
+    loop k in 0..<8 -> out.push(to_u8(n >> ((7 - k) * 8)))
     out
 }
 
@@ -173,14 +173,14 @@ pack: fn(fmt: String, values: [Int]) -> [U8] BinaryError! {
     i := 0
     loop op in spec.ops {
         if op.code == 120 {
-            loop _ in 0..<op.repeat -> &out.push(U8{0})
+            loop _ in 0..<op.repeat -> out.push(U8{0})
             next
         }
         r := 0
         loop r < op.repeat {
             if i >= values.len() -> return Err(BinaryError.Values)
             packed: pack_one(op.code, spec.little, values[i])
-            loop b in packed -> &out.push(b)
+            loop b in packed -> out.push(b)
             i = i + 1
             r = r + 1
         }
@@ -203,7 +203,7 @@ unpack: fn(fmt: String, data: [U8]) -> [Int] BinaryError! {
         r := 0
         loop r < op.repeat {
             pair: unpack_one(op.code, spec.little, data, off)
-            &out.push(pair.value)
+            out.push(pair.value)
             off = pair.next
             r = r + 1
         }
@@ -223,11 +223,11 @@ iter_unpack: fn(fmt: String, data: [U8]) -> [[Int]] BinaryError! {
         chunk := [U8]{}
         k := 0
         loop k < size {
-            &chunk.push(data[off + k])
+            chunk.push(data[off + k])
             k = k + 1
         }
         row: unpack(fmt, chunk)
-        &rows.push(row)
+        rows.push(row)
         off = off + size
     }
     Ok(rows)
@@ -285,13 +285,13 @@ parse_fmt: fn(fmt: String) -> Spec BinaryError! {
             i = i + 1
             if rep < 1 -> return Err(BinaryError.Format)
             w: width(code) ?? return Err(BinaryError.Format)
-            &ops.push(Op{code: code, repeat: rep})
+            ops.push(Op{code: code, repeat: rep})
             size = size + w * rep
             if code != 120 -> count = count + rep
             next
         }
         w: width(n) ?? return Err(BinaryError.Format)
-        &ops.push(Op{code: n, repeat: 1})
+        ops.push(Op{code: n, repeat: 1})
         size = size + w
         if n != 120 -> count = count + 1
         i = i + 1

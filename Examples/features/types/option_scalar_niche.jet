@@ -71,7 +71,7 @@ windows: fn() {
         None -> {}
     }
     print("window local {local}")
-    bump(&local, U8{1})
+    bump(local, U8{1})
     print("window param {local}")
     s := Sample{name: "w", code: byte(7), on: flag(1), mark: Val('x'), light: light(0)}
     if &s.code == {
@@ -84,7 +84,7 @@ windows: fn() {
     }
     print("window field {s.code} {s.on}")
     empty := byte(-1)
-    bump(&empty, U8{5})
+    bump(empty, U8{5})
     print("window none {empty}")
 }
 
@@ -108,10 +108,10 @@ run: fn() {
     chars: "héllo".chars()
     print("{chars.first()} {chars.get(1)} {chars.get(7)}")
     popped := [Bool]{true, false}
-    print("{&popped.pop()} {&popped.pop()} {&popped.pop()}")
+    print("{popped.pop()} {popped.pop()} {popped.pop()}")
     m := [String: U8]{}
     m["a"] = U8{200}
-    print("{m.get("a")} {m.get("b")} {&m.remove("a")} {&m.remove("a")}")
+    print("{m.get("a")} {m.get("b")} {m.remove("a")} {m.remove("a")}")
     flags := [Int: Bool]{1: true, 2: false}
     print("{flags.get(1)} {flags.get(2)} {flags.get(3)}")
     // Lazy iteration.

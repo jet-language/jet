@@ -133,15 +133,15 @@ image_build_with_base: fn(spec: OCIBuildSpec, out_dir: String, ref_name: String,
     layers := [OCILayerDescriptor]{}
     diff_ids := [String]{}
     if base_layout == .Val(loaded) {
-        &layers.extend(loaded.layers)
-        &diff_ids.extend(loaded.diff_ids)
+        layers.extend(loaded.layers)
+        diff_ids.extend(loaded.diff_ids)
     }
-    &diff_ids.push("sha256:{layer_digest}")
+    diff_ids.push("sha256:{layer_digest}")
 
     config_json: image_config_json(spec, diff_ids, architecture) ?? return Err(err)
     config_digest: pkg_sha256_hex(config_json.bytes())
 
-    &layers.push(OCILayerDescriptor{media_type: IMAGE_MEDIA_TYPE_LAYER, digest: "sha256:{layer_digest}", size: layer_tar.len()})
+    layers.push(OCILayerDescriptor{media_type: IMAGE_MEDIA_TYPE_LAYER, digest: "sha256:{layer_digest}", size: layer_tar.len()})
     manifest_json: image_manifest_json(config_digest, config_json.bytes().len(), layers) ?? return Err(err)
     manifest_digest: pkg_sha256_hex(manifest_json.bytes())
 
@@ -225,8 +225,8 @@ image_publish_staged_copy: fn(source: String, stage: String, destination: String
 
 image_copy_layout_tree: fn(source: String, destination: String) ImageError! -[FS, Env]> {
     names := [String]{}
-    loop entry in files.list_dir(source) -> &names.push(entry.name)
-    &names.sort()
+    loop entry in files.list_dir(source) -> names.push(entry.name)
+    names.sort()
     loop name in names {
         from: files.join(source, name)
         to: files.join(destination, name)
@@ -267,11 +267,11 @@ image_same_layout: fn(left: String, right: String) -[FS]> Bool ImageError! {
     }
     if left_node != OCINode.Directory -> return Err(image_invalid("OCI layout contains an unsupported filesystem node"))
     left_names := [String]{}
-    loop entry in files.list_dir(left) -> &left_names.push(entry.name)
+    loop entry in files.list_dir(left) -> left_names.push(entry.name)
     right_names := [String]{}
-    loop entry in files.list_dir(right) -> &right_names.push(entry.name)
-    &left_names.sort()
-    &right_names.sort()
+    loop entry in files.list_dir(right) -> right_names.push(entry.name)
+    left_names.sort()
+    right_names.sort()
     if left_names.len() != right_names.len() -> return Ok(false)
     loop index in 0..<left_names.len() {
         if left_names[index] != right_names[index] -> return Ok(false)
@@ -330,9 +330,9 @@ image_write_index: fn(out_dir: String, manifest_digest: String, manifest_size: I
 // `created` or `history`, because an embedded timestamp breaks determinism.
 image_config_json: fn(spec: OCIBuildSpec, diff_ids: [String], architecture: String) -> String ImageError! {
     env := [Dyn]{}
-    loop entry in image_sorted_env(spec.env) -> &env.push(Dyn.Text("{entry.key}={entry.value}"))
+    loop entry in image_sorted_env(spec.env) -> env.push(Dyn.Text("{entry.key}={entry.value}"))
     entrypoint := [Dyn]{}
-    loop argument in spec.entrypoint -> &entrypoint.push(Dyn.Text(argument))
+    loop argument in spec.entrypoint -> entrypoint.push(Dyn.Text(argument))
     exposed := [String: Dyn]{}
     loop port in image_sorted_unique_ints(spec.expose) -> exposed["{port}/tcp"] = Dyn.Object([String: Dyn]{})
     container := [String: Dyn]{}
@@ -346,7 +346,7 @@ image_config_json: fn(spec: OCIBuildSpec, diff_ids: [String], architecture: Stri
         container["Healthcheck"] = Dyn.Object(health)
     }
     ids := [Dyn]{}
-    loop digest in diff_ids -> &ids.push(Dyn.Text(digest))
+    loop digest in diff_ids -> ids.push(Dyn.Text(digest))
     rootfs := [String: Dyn]{}
     rootfs["type"] = Dyn.Text("layers")
     rootfs["diff_ids"] = Dyn.Array(ids)
@@ -364,7 +364,7 @@ image_manifest_json: fn(config_digest: String, config_size: Int, layers: [OCILay
     config["digest"] = Dyn.Text("sha256:{config_digest}")
     config["size"] = Dyn.Int(config_size)
     descriptors := [Dyn]{}
-    loop layer in layers -> &descriptors.push(layer.tree())
+    loop layer in layers -> descriptors.push(layer.tree())
     manifest := [String: Dyn]{}
     manifest["schemaVersion"] = Dyn.Int(2)
     manifest["mediaType"] = Dyn.Text(IMAGE_MEDIA_TYPE_MANIFEST)
@@ -428,7 +428,7 @@ image_load_base: fn(root: String) -[FS, Env]> OCIBaseLayout ImageError! {
         if bytes.len() != size || image_digest_for(bytes) != digest {
             return Err(image_invalid("OCI base layer failed its digest or size check"))
         }
-        &layers.push(OCILayerDescriptor{media_type, digest, size})
+        layers.push(OCILayerDescriptor{media_type, digest, size})
     }
     config_value: manifest.get("config") ?? return Err(image_invalid("OCI manifest has no config descriptor"))
     config_descriptor: image_object(config_value, "OCI config descriptor")
@@ -451,7 +451,7 @@ image_load_base: fn(root: String) -[FS, Env]> OCIBaseLayout ImageError! {
         if value == {
             .Text(digest) -> {
                 image_digest_hex(digest)
-                &diff_ids.push(digest)
+                diff_ids.push(digest)
             }
             else -> return Err(image_invalid("OCI config diff_ids contains a non-string"))
         }
@@ -466,7 +466,7 @@ image_sorted_layer_files: fn(input: [LayerFile]) -> [LayerFile] Never! {
     loop file in input {
         at := sorted.len()
         loop at > 0 && sorted[at - 1].path > file.path -> at -= 1
-        &sorted.insert(at, file)
+        sorted.insert(at, file)
     }
     sorted
 }
@@ -483,7 +483,7 @@ image_validate_layer_files: fn(layer_files: [LayerFile]) ImageError! {
         }
         if file.data.len() > IMAGE_MAX_BLOB_BYTES -> return Err(image_invalid("OCI layer file exceeds the 512 MiB limit"))
         if seen.contains(file.path) -> return Err(image_invalid("OCI layer contains duplicate paths"))
-        &seen.push(file.path)
+        seen.push(file.path)
     }
     loop index in 1..<seen.len() {
         if seen[index].starts_with("{seen[index - 1]}/") {
@@ -594,7 +594,7 @@ image_read_regular_bounded: fn(path: String, limit: Int) -[FS]> [U8] ImageError!
     loop {
         chunk: reader.read(65536)
         if chunk.len() == 0 -> break
-        &bytes.extend(chunk)
+        bytes.extend(chunk)
         if bytes.len() > limit -> return Err(image_invalid("OCI input exceeded its bound while being read"))
     }
     Ok(bytes)
@@ -643,8 +643,8 @@ image_remove_stale_temporary: fn(path: String) ImageError! -[FS]> {
 // Create `path`, refusing an existing entry or a final link, and sync it.
 image_write_new_file: fn(path: String, bytes: [U8]) ImageError! -[FS]> {
     writer := files.create(path, if_exists: .Refuse, links: .Refuse)
-    &writer.write_all(bytes)
-    &writer.fsync()
+    writer.write_all(bytes)
+    writer.fsync()
 }
 
 // Publish one layout metadata file through create-new, sync, rename.
@@ -712,16 +712,16 @@ image_sorted_env: fn(entries: [ImageEnvVar]) -> [ImageEnvVar] Never! {
     by_key := [String: String]{}
     loop entry in entries -> by_key[entry.key] = entry.value
     keys := by_key.keys().to_list()
-    &keys.sort()
+    keys.sort()
     loop key in keys -> ImageEnvVar{key, value: by_key[key]}
 }
 
 image_sorted_unique_ints: fn(values: [Int]) -> [Int] Never! {
     sorted := values.copy()
-    &sorted.sort()
+    sorted.sort()
     unique := [Int]{}
     loop value in sorted {
-        if unique.len() == 0 || unique[unique.len() - 1] != value -> &unique.push(value)
+        if unique.len() == 0 || unique[unique.len() - 1] != value -> unique.push(value)
     }
     unique
 }

@@ -6,7 +6,7 @@ Lock: struct {
 }
 
 impl Lock.Close {
-    close: fn(^self) { print("release {self.name}") }
+    close: fn(&&self) { print("release {self.name}") }
 }
 
 Session: struct {
@@ -14,12 +14,12 @@ Session: struct {
     user: String
 }
 
-hand_off: fn(s: ^Session) { print("got {s.user}") }
+hand_off: fn(s: &&Session) { print("got {s.user}") }
 
-sink: fn<T>(x: ^T) { print("sunk") }
+sink: fn<T>(x: &&T) { print("sunk") }
 
-forward: fn<T>(x: ^T) {
-    sink(^x)
+forward: fn<T>(x: &&T) {
+    sink(x)
     print("forwarded")
 }
 
@@ -30,11 +30,11 @@ wrapper_scope: fn() {
 
 run: fn() {
     held: Session{lock: Lock{name: "db"}, user: "ada"}
-    hand_off(^held)
+    hand_off(held)
     print("after hand_off")
     wrapper_scope()
     print("after scope")
     lock: Lock{name: "generic"}
-    forward(^lock)
+    forward(lock)
     print("after forward")
 }

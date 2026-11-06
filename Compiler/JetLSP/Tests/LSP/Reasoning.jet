@@ -34,7 +34,7 @@ lsp_reasoning_test_record: fn(id: String, subject: String) -> DerivationRecord N
     db: SymbolDB.new()
     record := lsp_reasoning_test_record("r\"", "stable")
     record.premises = [String]{}
-    loop i in 0..<129 -> &record.premises.push("p{i}")
+    loop i in 0..<129 -> record.premises.push("p{i}")
     compact: lsp_reasoning_record_json(db, record, false)
     assert(compact.contains("\"id\":{foundation_json_quote(record.id)}"))
     assert(compact.contains("\"premises_truncated\":true"))
@@ -50,8 +50,8 @@ lsp_reasoning_test_record: fn(id: String, subject: String) -> DerivationRecord N
 #Test("reasoning view keeps sorted canonical relation order fixed lenses and 64 record cap") {
     db := SymbolDB.new()
     records := [DerivationRecord]{}
-    loop i in 0..<65 -> &records.push(lsp_reasoning_test_record("r{i}", "stable"))
-    &db.index.set_derivations(records)
+    loop i in 0..<65 -> records.push(lsp_reasoning_test_record("r{i}", "stable"))
+    db.index.set_derivations(records)
     view: lsp_reasoning_view_json(db, "main.jet", None, false)
     assert(view.contains("\"records_truncated\":true"))
     assert(view.contains("\"selection\":\"all\""))
@@ -68,12 +68,12 @@ lsp_reasoning_test_record: fn(id: String, subject: String) -> DerivationRecord N
     facts := [DefinitionFact]{}
     records := [DerivationRecord]{}
     loop i in 0..<65 {
-        &facts.push(DefinitionFact{stable_id: "s{i}", signature_id: "", content_id: "", human_identity: "fn:{i}", name: "f{i}", kind: "function", module_path: "main.jet", span: SourceSpan{start: i, end: i + 1}})
-        &records.push(lsp_reasoning_test_record("r{i}", "s{i}"))
+        facts.push(DefinitionFact{stable_id: "s{i}", signature_id: "", content_id: "", human_identity: "fn:{i}", name: "f{i}", kind: "function", module_path: "main.jet", span: SourceSpan{start: i, end: i + 1}})
+        records.push(lsp_reasoning_test_record("r{i}", "s{i}"))
     }
     db := SymbolDB.new()
     db.index = SemIndex.new([SymbolDef]{}, [SymbolRef]{}, [CallEdge]{}, [EffectFact]{}, [MemberFact]{}, [StructuralNode]{}, facts)
-    &db.index.set_derivations(records)
+    db.index.set_derivations(records)
     hints: lsp_reasoning_inlay_hints(db, "main.jet")
     assert_eq(hints.len(), 64)
     assert_eq(hints[0].label, "reason: borrowed value · current")
@@ -101,7 +101,7 @@ lsp_reasoning_test_record: fn(id: String, subject: String) -> DerivationRecord N
     record := lsp_reasoning_test_record("selected-record", "stable")
     record.disposition = .Stale
     record.observation = Val(DerivationObservation{event_id: Val("e"), counterexample_id: None})
-    &db.index.set_derivations([DerivationRecord]{record})
+    db.index.set_derivations([DerivationRecord]{record})
     selected: lsp_callable_definition_for_selection(db, Val("selected-record")) ?? panic("stable selection")
     assert_eq(selected[0].identity, "fn:main::run")
     summary: lsp_callable_summary_json(db, Val("selected-record"))

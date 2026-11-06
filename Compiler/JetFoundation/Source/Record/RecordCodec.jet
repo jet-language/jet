@@ -253,7 +253,7 @@ record_value_str_list: fn(value: RecordValue) -> RecordStringsResult Never! {
     loop item in items {
         text: record_value_as_str(item)
         if text.problem != None -> return RecordStringsResult{value: None, problem: text.problem}
-        &texts.push(text.value ?? "")
+        texts.push(text.value ?? "")
     }
     RecordStringsResult{value: Val(texts), problem: None}
 }
@@ -267,7 +267,7 @@ record_value_optional_str: fn(value: String?) -> RecordValue Never! {
 
 record_value_list_of_str: fn(values: [String]) -> RecordValue Never! {
     items := [RecordValue]{}
-    loop text in values -> &items.push(RecordValue.Str{value: text})
+    loop text in values -> items.push(RecordValue.Str{value: text})
     RecordValue.List{values: items}
 }
 
@@ -279,17 +279,17 @@ record_put_uvarint: fn(out: &[U8], value: Int) Never! {
         low: (rest).bit_and(127)
         rest = rest >> 7
         if rest == 0 {
-            &out.push(U8{low})
+            out.push(U8{low})
             return
         }
-        &out.push(U8{(low).bit_or(128)})
+        out.push(U8{(low).bit_or(128)})
     }
 }
 
 record_put_str: fn(out: &[U8], value: String) Never! {
     bytes: value.bytes()
-    record_put_uvarint(&out, bytes.len())
-    loop byte in bytes -> &out.push(byte)
+    record_put_uvarint(out, bytes.len())
+    loop byte in bytes -> out.push(byte)
 }
 
 record_zigzag: fn(value: Int) -> Int Never! {
@@ -317,16 +317,16 @@ record_bytes_before: fn(left: [U8], right: [U8]) -> Bool Never! {
 record_canonical_value: fn(value: RecordValue, problems: &[String]) -> RecordValue Never! {
     if value == {
         .Int(number) -> {
-            if number < 0 - RECORD_MAX_I64 - 1 || number > RECORD_MAX_I64 -> &problems.push("record integer {number} is outside i64")
+            if number < 0 - RECORD_MAX_I64 - 1 || number > RECORD_MAX_I64 -> problems.push("record integer {number} is outside i64")
             value
         }
         .Digest(digest) -> {
-            if digest.len() != RECORD_CHECKSUM_BYTES -> &problems.push("record digest has {digest.len()} bytes, expected 32")
+            if digest.len() != RECORD_CHECKSUM_BYTES -> problems.push("record digest has {digest.len()} bytes, expected 32")
             value
         }
         .List(values) -> {
             canonical := [RecordValue]{}
-            loop item in values -> &canonical.push(record_canonical_value(item, &problems))
+            loop item in values -> canonical.push(record_canonical_value(item, problems))
             RecordValue.List{values: canonical}
         }
         .Map(fields) -> {
@@ -336,10 +336,10 @@ record_canonical_value: fn(value: RecordValue, problems: &[String]) -> RecordVal
             names := [[U8]]{}
             seen := [String:Bool]{}
             loop field in fields {
-                &canonical.push(RecordField{name: field.name, value: record_canonical_value(field.value, &problems)})
-                &names.push(field.name.bytes())
+                canonical.push(RecordField{name: field.name, value: record_canonical_value(field.value, problems)})
+                names.push(field.name.bytes())
                 if seen.get(field.name) != None {
-                    &problems.push("record map key `{field.name}` is duplicated")
+                    problems.push("record map key `{field.name}` is duplicated")
                 } else {
                     seen[field.name] = true
                 }
@@ -354,7 +354,7 @@ record_canonical_value: fn(value: RecordValue, problems: &[String]) -> RecordVal
 // Row order of `names` sorted by bytes; equal names keep their input order.
 record_sorted_order: fn(names: [[U8]]) -> [Int] Never! {
     order := [Int]{}
-    loop index in 0..<names.len() -> &order.push(index)
+    loop index in 0..<names.len() -> order.push(index)
     width := 1
     loop width < order.len() {
         merged := [Int]{}
@@ -366,10 +366,10 @@ record_sorted_order: fn(names: [[U8]]) -> [Int] Never! {
             right := middle
             loop left < middle || right < end {
                 if right >= end || (left < middle && !record_bytes_before(names[order[right]], names[order[left]])) {
-                    &merged.push(order[left])
+                    merged.push(order[left])
                     left += 1
                 } else {
-                    &merged.push(order[right])
+                    merged.push(order[right])
                     right += 1
                 }
             }
@@ -389,20 +389,20 @@ RecordStringTable: struct {
 record_intern: fn(table: &RecordStringTable, value: String) Never! {
     if table.index.get(value) == None {
         table.index[value] = table.order.len()
-        &table.order.push(value)
+        table.order.push(value)
     }
 }
 
 record_intern_value: fn(table: &RecordStringTable, value: RecordValue) Never! {
     if value == {
-        .Str(text) -> record_intern(&table, text)
+        .Str(text) -> record_intern(table, text)
         .List(values) -> {
-            loop item in values -> record_intern_value(&table, item)
+            loop item in values -> record_intern_value(table, item)
         }
         .Map(fields) -> {
             loop field in fields {
-                record_intern(&table, field.name)
-                record_intern_value(&table, field.value)
+                record_intern(table, field.name)
+                record_intern_value(table, field.value)
             }
         }
         else -> {}
@@ -410,44 +410,44 @@ record_intern_value: fn(table: &RecordStringTable, value: RecordValue) Never! {
 }
 
 record_put_ref: fn(out: &[U8], table: RecordStringTable, value: String) Never! {
-    record_put_uvarint(&out, table.index.get(value) ?? 0)
+    record_put_uvarint(out, table.index.get(value) ?? 0)
 }
 
 record_put_value: fn(out: &[U8], table: RecordStringTable, value: RecordValue) Never! {
     if value == {
-        .Null -> &out.push(U8{RECORD_TAG_NULL})
+        .Null -> out.push(U8{RECORD_TAG_NULL})
         .Bool(flag) -> {
-            if flag -> &out.push(U8{RECORD_TAG_TRUE}) else -> &out.push(U8{RECORD_TAG_FALSE})
+            if flag -> out.push(U8{RECORD_TAG_TRUE}) else -> out.push(U8{RECORD_TAG_FALSE})
         }
         .Int(number) -> {
-            &out.push(U8{RECORD_TAG_INT})
-            record_put_uvarint(&out, record_zigzag(number))
+            out.push(U8{RECORD_TAG_INT})
+            record_put_uvarint(out, record_zigzag(number))
         }
         .Str(text) -> {
-            &out.push(U8{RECORD_TAG_STR})
-            record_put_ref(&out, table, text)
+            out.push(U8{RECORD_TAG_STR})
+            record_put_ref(out, table, text)
         }
         .Bytes(bytes) -> {
-            &out.push(U8{RECORD_TAG_BYTES})
-            record_put_uvarint(&out, bytes.len())
-            loop byte in bytes -> &out.push(byte)
+            out.push(U8{RECORD_TAG_BYTES})
+            record_put_uvarint(out, bytes.len())
+            loop byte in bytes -> out.push(byte)
         }
         .List(values) -> {
-            &out.push(U8{RECORD_TAG_LIST})
-            record_put_uvarint(&out, values.len())
-            loop item in values -> record_put_value(&out, table, item)
+            out.push(U8{RECORD_TAG_LIST})
+            record_put_uvarint(out, values.len())
+            loop item in values -> record_put_value(out, table, item)
         }
         .Map(fields) -> {
-            &out.push(U8{RECORD_TAG_MAP})
-            record_put_uvarint(&out, fields.len())
+            out.push(U8{RECORD_TAG_MAP})
+            record_put_uvarint(out, fields.len())
             loop field in fields {
-                record_put_ref(&out, table, field.name)
-                record_put_value(&out, table, field.value)
+                record_put_ref(out, table, field.name)
+                record_put_value(out, table, field.value)
             }
         }
         .Digest(digest) -> {
-            &out.push(U8{RECORD_TAG_DIGEST})
-            loop byte in digest -> &out.push(byte)
+            out.push(U8{RECORD_TAG_DIGEST})
+            loop byte in digest -> out.push(byte)
         }
     }
 }
@@ -455,7 +455,7 @@ record_put_value: fn(out: &[U8], table: RecordStringTable, value: RecordValue) N
 // Stable scalar-position ordering by section id.
 record_section_order: fn(ids: [Int]) -> [Int] Never! {
     order := [Int]{}
-    loop index in 0..<ids.len() -> &order.push(index)
+    loop index in 0..<ids.len() -> order.push(index)
     width := 1
     loop width < order.len() {
         merged := [Int]{}
@@ -467,10 +467,10 @@ record_section_order: fn(ids: [Int]) -> [Int] Never! {
             right := middle
             loop left < middle || right < end {
                 if right >= end || (left < middle && !(ids[order[right]] < ids[order[left]])) {
-                    &merged.push(order[left])
+                    merged.push(order[left])
                     left += 1
                 } else {
-                    &merged.push(order[right])
+                    merged.push(order[right])
                     right += 1
                 }
             }
@@ -493,9 +493,9 @@ record_encode: fn(schema: String, sections: [RecordSection]) -> RecordEncodeResu
     loop section in sections {
         if section.id < 0 || section.id >> 64 != 0 -> return RecordEncodeResult{bytes: None, problem: Val("record section id {section.id} is outside u64")}
         elements := [RecordValue]{}
-        loop element in section.elements -> &elements.push(record_canonical_value(element, &problems))
-        &canonical.push(RecordSection{id: section.id, elements: elements})
-        &ids.push(section.id)
+        loop element in section.elements -> elements.push(record_canonical_value(element, problems))
+        canonical.push(RecordSection{id: section.id, elements: elements})
+        ids.push(section.id)
         if seen.get(section.id) != None {
             return RecordEncodeResult{bytes: None, problem: Val("record section {section.id} is duplicated or out of order")}
         }
@@ -505,29 +505,29 @@ record_encode: fn(schema: String, sections: [RecordSection]) -> RecordEncodeResu
     if problems.len() > 0 -> return RecordEncodeResult{bytes: None, problem: Val(problems[0])}
     table := RecordStringTable{order: [String]{}, index: [String:Int]{}}
     loop index in order {
-        loop element in canonical[index].elements -> record_intern_value(&table, element)
+        loop element in canonical[index].elements -> record_intern_value(table, element)
     }
     out := [U8]{74, 69, 84, 82}
-    record_put_uvarint(&out, RECORD_FORMAT)
-    record_put_str(&out, schema)
-    record_put_uvarint(&out, table.order.len())
-    loop text in table.order -> record_put_str(&out, text)
-    record_put_uvarint(&out, order.len())
+    record_put_uvarint(out, RECORD_FORMAT)
+    record_put_str(out, schema)
+    record_put_uvarint(out, table.order.len())
+    loop text in table.order -> record_put_str(out, text)
+    record_put_uvarint(out, order.len())
     loop index in order {
-        record_put_uvarint(&out, canonical[index].id)
-        record_put_uvarint(&out, canonical[index].elements.len())
+        record_put_uvarint(out, canonical[index].id)
+        record_put_uvarint(out, canonical[index].elements.len())
         body := [U8]{}
         loop element in canonical[index].elements {
             encoded := [U8]{}
-            record_put_value(&encoded, table, element)
-            record_put_uvarint(&out, encoded.len())
-            loop byte in encoded -> &body.push(byte)
+            record_put_value(encoded, table, element)
+            record_put_uvarint(out, encoded.len())
+            loop byte in encoded -> body.push(byte)
         }
-        loop byte in body -> &out.push(byte)
+        loop byte in body -> out.push(byte)
     }
     view: out[0..<out.len()]
     checksum: sha256_bytes(view)
-    loop byte in checksum -> &out.push(byte)
+    loop byte in checksum -> out.push(byte)
     RecordEncodeResult{bytes: Val(out), problem: None}
 }
 
@@ -546,13 +546,13 @@ record_fail: fn(cursor: &RecordCursor, problem: String) Never! {
 }
 
 record_malformed: fn(cursor: &RecordCursor, reason: String) Never! {
-    record_fail(&cursor, "record is malformed: {reason}")
+    record_fail(cursor, "record is malformed: {reason}")
 }
 
 record_read_byte: fn(bytes: [U8], cursor: &RecordCursor) -> Int Never! {
     if cursor.problem != None -> return 0
     if cursor.at >= cursor.end {
-        record_fail(&cursor, "record is truncated")
+        record_fail(cursor, "record is truncated")
         return 0
     }
     value: Int.from_u8(bytes[cursor.at])
@@ -564,24 +564,24 @@ record_read_uvarint: fn(bytes: [U8], cursor: &RecordCursor) -> Int Never! {
     value := 0
     shift := 0
     loop {
-        byte: record_read_byte(bytes, &cursor)
+        byte: record_read_byte(bytes, cursor)
         if cursor.problem != None -> return 0
         low: (byte).bit_and(127)
         if shift == 63 && low > 1 {
-            record_malformed(&cursor, "varint overflows u64")
+            record_malformed(cursor, "varint overflows u64")
             return 0
         }
         value = (value).bit_or((low << shift))
         if (byte).bit_and(128) == 0 {
             if byte == 0 && shift > 0 {
-                record_malformed(&cursor, "varint is not minimal")
+                record_malformed(cursor, "varint is not minimal")
                 return 0
             }
             return value
         }
         shift += 7
         if shift > 63 {
-            record_malformed(&cursor, "varint overflows u64")
+            record_malformed(cursor, "varint overflows u64")
             return 0
         }
     }
@@ -590,10 +590,10 @@ record_read_uvarint: fn(bytes: [U8], cursor: &RecordCursor) -> Int Never! {
 // A count or length: never larger than the remaining input, because every
 // counted thing occupies at least one byte.
 record_read_len: fn(bytes: [U8], cursor: &RecordCursor) -> Int Never! {
-    value: record_read_uvarint(bytes, &cursor)
+    value: record_read_uvarint(bytes, cursor)
     if cursor.problem != None -> return 0
     if value > cursor.end - cursor.at {
-        record_fail(&cursor, "record is truncated")
+        record_fail(cursor, "record is truncated")
         return 0
     }
     value
@@ -603,7 +603,7 @@ record_read_len: fn(bytes: [U8], cursor: &RecordCursor) -> Int Never! {
 record_skip: fn(cursor: &RecordCursor, len: Int) Never! {
     if cursor.problem != None -> return
     if len > cursor.end - cursor.at {
-        record_fail(&cursor, "record is truncated")
+        record_fail(cursor, "record is truncated")
         return
     }
     cursor.at += len
@@ -611,17 +611,17 @@ record_skip: fn(cursor: &RecordCursor, len: Int) Never! {
 
 record_take: fn(bytes: [U8], cursor: &RecordCursor, len: Int) -> [U8] Never! {
     start: cursor.at
-    record_skip(&cursor, len)
+    record_skip(cursor, len)
     if cursor.problem != None -> return [U8]{}
     bytes.slice(start, start + len)
 }
 
 record_read_str: fn(bytes: [U8], cursor: &RecordCursor) -> String Never! {
-    len: record_read_len(bytes, &cursor)
-    raw: record_take(bytes, &cursor, len)
+    len: record_read_len(bytes, cursor)
+    raw: record_take(bytes, cursor, len)
     if cursor.problem != None -> return ""
     String.from_bytes(raw) ?? {
-        record_malformed(&cursor, "string is not UTF-8")
+        record_malformed(cursor, "string is not UTF-8")
         return ""
     }
 }
@@ -642,41 +642,41 @@ record_open: fn(bytes: [U8]) -> RecordReaderResult Never! {
     body: bytes[0..<body_end]
     if sha256_bytes(body) != checksum -> return record_reader_failure("record checksum does not match its bytes")
     cursor := RecordCursor{at: 4, end: body_end, problem: None}
-    format: record_read_uvarint(bytes, &cursor)
+    format: record_read_uvarint(bytes, cursor)
     if cursor.problem == None && format != RECORD_FORMAT -> return record_reader_failure("record format {format} is not supported")
-    schema: record_read_str(bytes, &cursor)
-    string_count: record_read_len(bytes, &cursor)
+    schema: record_read_str(bytes, cursor)
+    string_count: record_read_len(bytes, cursor)
     strings := [String]{}
     loop _ in 0..<string_count {
         if cursor.problem != None -> break
-        &strings.push(record_read_str(bytes, &cursor))
+        strings.push(record_read_str(bytes, cursor))
     }
-    section_count: record_read_len(bytes, &cursor)
+    section_count: record_read_len(bytes, cursor)
     ids := [Int]{}
     section_positions := [Int:Int]{}
     firsts := [Int]{}
     bounds := [Int]{}
     loop _ in 0..<section_count {
         if cursor.problem != None -> break
-        id: record_read_uvarint(bytes, &cursor)
+        id: record_read_uvarint(bytes, cursor)
         if cursor.problem != None -> break
         if ids.len() > 0 && ids[ids.len() - 1] >= id -> return record_reader_failure("record section {id} is duplicated or out of order")
-        element_count: record_read_len(bytes, &cursor)
+        element_count: record_read_len(bytes, cursor)
         lengths := [Int]{}
         loop _ in 0..<element_count {
             if cursor.problem != None -> break
-            &lengths.push(record_read_len(bytes, &cursor))
+            lengths.push(record_read_len(bytes, cursor))
         }
         section_positions[id] = ids.len()
-        &ids.push(id)
-        &firsts.push(bounds.len())
-        &bounds.push(cursor.at)
+        ids.push(id)
+        firsts.push(bounds.len())
+        bounds.push(cursor.at)
         loop len in lengths {
-            record_skip(&cursor, len)
-            &bounds.push(cursor.at)
+            record_skip(cursor, len)
+            bounds.push(cursor.at)
         }
     }
-    if cursor.problem == None && cursor.at != body_end -> record_malformed(&cursor, "trailing bytes before the checksum")
+    if cursor.problem == None && cursor.at != body_end -> record_malformed(cursor, "trailing bytes before the checksum")
     if cursor.problem != None -> return record_reader_failure(cursor.problem ?? "")
     RecordReaderResult{
         reader: Val(RecordReader{schema: schema, digest: checksum, bytes: bytes, strings: strings, ids: ids, section_positions: section_positions, firsts: firsts, bounds: bounds}),
@@ -709,10 +709,10 @@ record_element_count: fn(reader: RecordReader, id: Int) -> Int? Never! {
 }
 
 record_read_string_ref: fn(reader: RecordReader, cursor: &RecordCursor) -> String Never! {
-    index: record_read_uvarint(reader.bytes, &cursor)
+    index: record_read_uvarint(reader.bytes, cursor)
     if cursor.problem != None -> return ""
     if index >= reader.strings.len() {
-        record_malformed(&cursor, "string index {index} is out of range")
+        record_malformed(cursor, "string index {index} is out of range")
         return ""
     }
     reader.strings[index]
@@ -720,48 +720,48 @@ record_read_string_ref: fn(reader: RecordReader, cursor: &RecordCursor) -> Strin
 
 record_read_value: fn(reader: RecordReader, cursor: &RecordCursor, depth: Int) -> RecordValue Never! {
     if depth > RECORD_MAX_DEPTH {
-        record_malformed(&cursor, "value nesting is too deep")
+        record_malformed(cursor, "value nesting is too deep")
         return RecordValue.Null
     }
-    value_tag: record_read_byte(reader.bytes, &cursor)
+    value_tag: record_read_byte(reader.bytes, cursor)
     if cursor.problem != None -> return RecordValue.Null
     if value_tag == {
         RECORD_TAG_NULL -> RecordValue.Null
         RECORD_TAG_FALSE -> RecordValue.Bool{value: false}
         RECORD_TAG_TRUE -> RecordValue.Bool{value: true}
-        RECORD_TAG_INT -> RecordValue.Int{value: record_unzigzag(record_read_uvarint(reader.bytes, &cursor))}
-        RECORD_TAG_STR -> RecordValue.Str{value: record_read_string_ref(reader, &cursor)}
+        RECORD_TAG_INT -> RecordValue.Int{value: record_unzigzag(record_read_uvarint(reader.bytes, cursor))}
+        RECORD_TAG_STR -> RecordValue.Str{value: record_read_string_ref(reader, cursor)}
         RECORD_TAG_BYTES -> {
-            len: record_read_len(reader.bytes, &cursor)
-            RecordValue.Bytes{value: record_take(reader.bytes, &cursor, len)}
+            len: record_read_len(reader.bytes, cursor)
+            RecordValue.Bytes{value: record_take(reader.bytes, cursor, len)}
         }
         RECORD_TAG_LIST -> {
-            count: record_read_len(reader.bytes, &cursor)
+            count: record_read_len(reader.bytes, cursor)
             values := [RecordValue]{}
             loop _ in 0..<count {
                 if cursor.problem != None -> break
-                &values.push(record_read_value(reader, &cursor, depth + 1))
+                values.push(record_read_value(reader, cursor, depth + 1))
             }
             RecordValue.List{values: values}
         }
         RECORD_TAG_MAP -> {
-            count: record_read_len(reader.bytes, &cursor)
+            count: record_read_len(reader.bytes, cursor)
             fields := [RecordField]{}
             loop _ in 0..<count {
                 if cursor.problem != None -> break
-                name: record_read_string_ref(reader, &cursor)
+                name: record_read_string_ref(reader, cursor)
                 if cursor.problem != None -> break
                 if fields.len() > 0 && !record_bytes_before(fields[fields.len() - 1].name.bytes(), name.bytes()) {
-                    record_malformed(&cursor, "map key `{name}` is duplicated or out of order")
+                    record_malformed(cursor, "map key `{name}` is duplicated or out of order")
                     break
                 }
-                &fields.push(RecordField{name: name, value: record_read_value(reader, &cursor, depth + 1)})
+                fields.push(RecordField{name: name, value: record_read_value(reader, cursor, depth + 1)})
             }
             RecordValue.Map{fields: fields}
         }
-        RECORD_TAG_DIGEST -> RecordValue.Digest{value: record_take(reader.bytes, &cursor, RECORD_CHECKSUM_BYTES)}
+        RECORD_TAG_DIGEST -> RecordValue.Digest{value: record_take(reader.bytes, cursor, RECORD_CHECKSUM_BYTES)}
         else -> {
-            record_malformed(&cursor, "unknown value tag {value_tag}")
+            record_malformed(cursor, "unknown value tag {value_tag}")
             RecordValue.Null
         }
     }
@@ -770,8 +770,8 @@ record_read_value: fn(reader: RecordReader, cursor: &RecordCursor, depth: Int) -
 record_section_element: fn(reader: RecordReader, section: Int, index: Int) -> RecordValueResult Never! {
     start: reader.bounds[reader.firsts[section] + index]
     cursor := RecordCursor{at: start, end: reader.bounds[reader.firsts[section] + index + 1], problem: None}
-    value: record_read_value(reader, &cursor, 0)
-    if cursor.problem == None && cursor.at != cursor.end -> record_malformed(&cursor, "element has trailing bytes")
+    value: record_read_value(reader, cursor, 0)
+    if cursor.problem == None && cursor.at != cursor.end -> record_malformed(cursor, "element has trailing bytes")
     if cursor.problem != None -> return RecordValueResult{value: None, problem: cursor.problem}
     RecordValueResult{value: Val(value), problem: None}
 }
@@ -790,7 +790,7 @@ record_elements: fn(reader: RecordReader, id: Int) -> RecordElementsResult Never
     loop index in 0..<record_section_elements(reader, section) {
         decoded: record_section_element(reader, section, index)
         value: decoded.value ?? return RecordElementsResult{value: None, problem: decoded.problem}
-        &values.push(value)
+        values.push(value)
     }
     RecordElementsResult{value: Val(values), problem: None}
 }
@@ -805,9 +805,9 @@ record_decode: fn(bytes: [U8]) -> RecordDecodeResult Never! {
         loop index in 0..<record_section_elements(reader, section) {
             decoded: record_section_element(reader, section, index)
             value: decoded.value ?? return RecordDecodeResult{record: None, problem: decoded.problem}
-            &elements.push(value)
+            elements.push(value)
         }
-        &sections.push(RecordSection{id: reader.ids[section], elements: elements})
+        sections.push(RecordSection{id: reader.ids[section], elements: elements})
     }
     RecordDecodeResult{record: Val(Record{schema: reader.schema, sections: sections, digest: reader.digest}), problem: None}
 }
@@ -832,7 +832,7 @@ record_parse_digest_hex: fn(text: String) -> [U8]? Never! {
     loop index in 0..<32 {
         high: record_hex_value(Int.from_u8(raw[index * 2])) ?? return None
         low: record_hex_value(Int.from_u8(raw[index * 2 + 1])) ?? return None
-        &digest.push(U8.from_int(high * 16 + low) ?? return None)
+        digest.push(U8.from_int(high * 16 + low) ?? return None)
     }
     Val(digest)
 }
@@ -848,45 +848,45 @@ record_json: fn(bytes: [U8]) -> RecordStringResult Never! {
     decoded: record_decode(bytes)
     record: decoded.record ?? return RecordStringResult{value: None, problem: decoded.problem}
     out := [U8]{}
-    foundation_json_append(&out, "{{\"schema\":\"{foundation_json_escape(record.schema)}\",\"digest\":\"{record_digest_hex(record.digest)}\",\"sections\":{{")
+    foundation_json_append(out, "{{\"schema\":\"{foundation_json_escape(record.schema)}\",\"digest\":\"{record_digest_hex(record.digest)}\",\"sections\":{{")
     loop (index, section) in record.sections {
-        if index > 0 -> foundation_json_append(&out, ",")
-        foundation_json_append(&out, "\"{section.id}\":[")
+        if index > 0 -> foundation_json_append(out, ",")
+        foundation_json_append(out, "\"{section.id}\":[")
         loop (element, value) in section.elements {
-            if element > 0 -> foundation_json_append(&out, ",")
-            record_value_json(&out, value)
+            if element > 0 -> foundation_json_append(out, ",")
+            record_value_json(out, value)
         }
-        foundation_json_append(&out, "]")
+        foundation_json_append(out, "]")
     }
-    foundation_json_append(&out, "}}}}")
+    foundation_json_append(out, "}}}}")
     RecordStringResult{value: Val(String.from_bytes(out) ?? panic("record JSON is UTF-8")), problem: None}
 }
 
 record_value_json: fn(out: &[U8], value: RecordValue) Never! {
     if value == {
-        .Null -> foundation_json_append(&out, "null")
-        .Bool(flag) -> foundation_json_append(&out, if flag -> "true" else -> "false")
-        .Int(number) -> foundation_json_append(&out, "{number}")
-        .Str(text) -> foundation_json_append(&out, "\"{foundation_json_escape(text)}\"")
-        .Bytes(raw) -> foundation_json_append(&out, "{{\"bytes\":\"{sha256_hex_bytes(raw)}\"}}")
+        .Null -> foundation_json_append(out, "null")
+        .Bool(flag) -> foundation_json_append(out, if flag -> "true" else -> "false")
+        .Int(number) -> foundation_json_append(out, "{number}")
+        .Str(text) -> foundation_json_append(out, "\"{foundation_json_escape(text)}\"")
+        .Bytes(raw) -> foundation_json_append(out, "{{\"bytes\":\"{sha256_hex_bytes(raw)}\"}}")
         .List(values) -> {
-            foundation_json_append(&out, "[")
+            foundation_json_append(out, "[")
             loop (index, item) in values {
-                if index > 0 -> foundation_json_append(&out, ",")
-                record_value_json(&out, item)
+                if index > 0 -> foundation_json_append(out, ",")
+                record_value_json(out, item)
             }
-            foundation_json_append(&out, "]")
+            foundation_json_append(out, "]")
         }
         .Map(fields) -> {
-            foundation_json_append(&out, "{{")
+            foundation_json_append(out, "{{")
             loop (index, field) in fields {
-                if index > 0 -> foundation_json_append(&out, ",")
-                foundation_json_append(&out, "\"{foundation_json_escape(field.name)}\":")
-                record_value_json(&out, field.value)
+                if index > 0 -> foundation_json_append(out, ",")
+                foundation_json_append(out, "\"{foundation_json_escape(field.name)}\":")
+                record_value_json(out, field.value)
             }
-            foundation_json_append(&out, "}}")
+            foundation_json_append(out, "}}")
         }
-        .Digest(digest) -> foundation_json_append(&out, "{{\"digest\":\"{sha256_hex_bytes(digest)}\"}}")
+        .Digest(digest) -> foundation_json_append(out, "{{\"digest\":\"{sha256_hex_bytes(digest)}\"}}")
     }
 }
 
@@ -897,7 +897,7 @@ record_value_json: fn(out: &[U8], value: RecordValue) Never! {
 // as lowercase hex. Digests enter as 64-character hex and counts as decimal.
 record_key_digest: fn(fields: [String]) -> String Never! {
     framed := [U8]{}
-    loop field in fields -> record_put_str(&framed, field)
+    loop field in fields -> record_put_str(framed, field)
     view: framed[0..<framed.len()]
     sha256_hex_bytes(sha256_bytes(view))
 }

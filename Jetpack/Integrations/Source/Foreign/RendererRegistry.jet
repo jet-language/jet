@@ -101,7 +101,7 @@ pkg_renderer_for: fn(descriptor: BinderDescriptor) -> RendererDescriptor? Never!
 pkg_renderer_canonical_for: fn(renderer: RendererDescriptor) -> BinderDescriptor? Never! {
     found := [BinderDescriptor]{}
     loop descriptor in pkg_foreign_binders() {
-        if descriptor.status == BinderStatus.Active && descriptor.language == renderer.language && descriptor.stub_kind == renderer.stub_kind -> &found.push(descriptor)
+        if descriptor.status == BinderStatus.Active && descriptor.language == renderer.language && descriptor.stub_kind == renderer.stub_kind -> found.push(descriptor)
     }
     if found.len() != 1 -> return None
     Val(found[0])

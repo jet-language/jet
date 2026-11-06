@@ -36,12 +36,12 @@ ProjectionDocument: struct {
     return Ok(view[index])
 }
 
-#Export(c) document_replace: fn(owner: ^ProjectionDocument, input: [Int]) -> ProjectionDocument? ProjectionError! {
+#Export(c) document_replace: fn(owner: &&ProjectionDocument, input: [Int]) -> ProjectionDocument? ProjectionError! {
     if owner.closed -> return Err(ProjectionError.Closed)
     if owner.generation == 9223372036854775807 -> return Err(ProjectionError.Bounds)
     return Ok(ProjectionDocument{bytes: input, generation: owner.generation + 1, closed: false})
 }
 
-#Export(c) document_close: fn(owner: ^ProjectionDocument) -> Unit? ProjectionError! {
+#Export(c) document_close: fn(owner: &&ProjectionDocument) -> Unit? ProjectionError! {
     return Ok(())
 }

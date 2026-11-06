@@ -67,12 +67,12 @@ publication_ensure_registry_root_key: fn(registry_name: String, public_key: Stri
     // Recheck under the lock: the final key is never an empty create-new file.
     if publication_install_registry_root_pin(path, public_key) == {
         .Ok(installed) -> {
-            close(^lock)
+            close(lock)
             authority.revalidate()
             Ok(installed)
         }
         .Err(error) -> {
-            close(^lock)
+            close(lock)
             Err(error)
         }
     }

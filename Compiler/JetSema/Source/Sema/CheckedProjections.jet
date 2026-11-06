@@ -8,17 +8,17 @@ SemaLayoutProjectionRow: struct {
 sema_checked_layout_items: fn(items: [Item], engine: TargetLayoutEngine, module_identity: String, rows: &[SemaLayoutProjectionRow]) Never! {
     loop item in items {
         if item == {
-            .Struct(definition) -> &rows.push(SemaLayoutProjectionRow{name: definition.name, span: definition.name_span, value: sema_comptime_reflection_struct_layout(definition, engine, module_identity)})
-            .Enum(definition) -> &rows.push(SemaLayoutProjectionRow{name: definition.name, span: definition.name_span, value: sema_comptime_reflection_enum_layout(definition, engine, module_identity)})
-            .CodeModule(definition) -> if definition.body == .Val(body) -> sema_checked_layout_items(body, engine, module_identity, &rows)
-            .GenericModule(definition) -> sema_checked_layout_items(definition.body, engine, module_identity, &rows)
+            .Struct(definition) -> rows.push(SemaLayoutProjectionRow{name: definition.name, span: definition.name_span, value: sema_comptime_reflection_struct_layout(definition, engine, module_identity)})
+            .Enum(definition) -> rows.push(SemaLayoutProjectionRow{name: definition.name, span: definition.name_span, value: sema_comptime_reflection_enum_layout(definition, engine, module_identity)})
+            .CodeModule(definition) -> if definition.body == .Val(body) -> sema_checked_layout_items(body, engine, module_identity, rows)
+            .GenericModule(definition) -> sema_checked_layout_items(definition.body, engine, module_identity, rows)
             else -> {}
         }
     }
 }
 sema_checked_layout_projections: fn(items: [Item], engine: TargetLayoutEngine, module_identity: String) -> [SemaLayoutProjectionRow] Never! {
     rows := [SemaLayoutProjectionRow]{}
-    sema_checked_layout_items(items, engine, module_identity, &rows)
+    sema_checked_layout_items(items, engine, module_identity, rows)
     rows
 }
 sema_origin_optional_int: fn(value: Int?) -> TComptimeValue Never! {
@@ -49,9 +49,9 @@ sema_origin_prepared_projection: fn(expression: Expr, ty: Type, value: TComptime
         .Field(base, member, span, _) -> {
             if sema_fact_read_kind(member) != Val(FactRead.Origin) -> return
             receiver: if sema_origin_unwrap(base) == .Ident(name, _, _) -> name else -> "value"
-            &context.origin_facts.push(TOriginProjection{receiver: Val(receiver), span: span, value: value})
+            context.origin_facts.push(TOriginProjection{receiver: Val(receiver), span: span, value: value})
         }
-        .ComptimeName(_, span, _, _) -> &context.origin_facts.push(TOriginProjection{receiver: None, span: span, value: value})
+        .ComptimeName(_, span, _, _) -> context.origin_facts.push(TOriginProjection{receiver: None, span: span, value: value})
         else -> {}
     }
 }

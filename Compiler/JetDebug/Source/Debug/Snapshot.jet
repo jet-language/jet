@@ -47,12 +47,12 @@ DebugSnapshot: struct {
     identity_digest: fn(self) -> String Never! {
         key := debug_snapshot_frame_key(self)
         loop local in self.locals {
-            &key.push("|")
-            &key.push(local.name)
-            &key.push(":")
-            &key.push(local.type_name)
-            &key.push("=")
-            &key.push(local.value)
+            key.push("|")
+            key.push(local.name)
+            key.push(":")
+            key.push(local.type_name)
+            key.push("=")
+            key.push(local.value)
         }
         sha256_hex(key.join(""))
     }
@@ -63,10 +63,10 @@ DebugSnapshot: struct {
 debug_snapshot_frame_key: fn(snapshot: DebugSnapshot) -> [String] Never! {
     key := [String]{snapshot.function, ":", "{snapshot.line}"}
     loop frame in snapshot.call_stack {
-        &key.push("|")
-        &key.push(frame.function)
-        &key.push(":")
-        &key.push("{frame.line}")
+        key.push("|")
+        key.push(frame.function)
+        key.push(":")
+        key.push("{frame.line}")
     }
     key
 }
@@ -206,7 +206,7 @@ debug_path_segments: fn(value: String) -> [String]? Never! {
             lead == 46 -> {
                 end: debug_ident_end(bytes, index + 1)
                 if end == index + 1 -> return None
-                &segments.push(String.from_bytes(bytes[(index + 1)..<end]) ?? return None)
+                segments.push(String.from_bytes(bytes[(index + 1)..<end]) ?? return None)
                 index = end
             }
             lead == 91 -> {
@@ -215,7 +215,7 @@ debug_path_segments: fn(value: String) -> [String]? Never! {
                 loop digit in (index + 1)..<close {
                     if !debug_is_ascii_digit(Int.from_u8(bytes[digit])) -> return None
                 }
-                &segments.push(String.from_bytes(bytes[index..<(close + 1)]) ?? return None)
+                segments.push(String.from_bytes(bytes[index..<(close + 1)]) ?? return None)
                 index = close + 1
             }
             else -> { return None }
@@ -228,13 +228,13 @@ debug_path_segments: fn(value: String) -> [String]? Never! {
 debug_render_snapshot_locals: fn(values: [ValueSnapshot]) -> String Never! {
     if values.len() == 0 -> return "locals:  (none)"
     order := [Int]{}
-    loop index in 0..<values.len() -> &order.push(index)
+    loop index in 0..<values.len() -> order.push(index)
     // Rust's stable sort_by on name: equal names keep their published order.
-    &order.sort_by((left: Int, right: Int) -> {
+    order.sort_by((left: Int, right: Int) -> {
         if values[left].name != values[right].name -> values[left].name <=> values[right].name else -> left <=> right
     })
     parts := [String]{}
-    loop index in order -> &parts.push("{values[index].name} = {values[index].value}")
+    loop index in order -> parts.push("{values[index].name} = {values[index].value}")
     body: parts.join("   ")
     "locals:  {body}"
 }
@@ -379,18 +379,18 @@ debug_unquote_text: fn(raw: String) -> String Never! {
         if {
             escaped -> {
                 if {
-                    code == 110 -> &out.push(U8{10})
-                    code == 114 -> &out.push(U8{13})
-                    code == 116 -> &out.push(U8{9})
-                    else -> &out.push(bytes[index])
+                    code == 110 -> out.push(U8{10})
+                    code == 114 -> out.push(U8{13})
+                    code == 116 -> out.push(U8{9})
+                    else -> out.push(bytes[index])
                 }
                 escaped = false
             }
             code == 92 -> escaped = true
-            else -> &out.push(bytes[index])
+            else -> out.push(bytes[index])
         }
     }
-    if escaped -> &out.push(U8{92})
+    if escaped -> out.push(U8{92})
     String.from_bytes(out) ?? panic("debugger text unquoting preserves UTF-8")
 }
 

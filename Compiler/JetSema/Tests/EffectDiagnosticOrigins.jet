@@ -46,14 +46,14 @@ effect_origin_input: fn(module_index: Int, file: String) -> SemaEffectModuleInpu
     by_key: [String:Int]{"main::ceiling": 0, "worker::inspect": 1}
     inputs := [SemaEffectModuleInput]{effect_origin_input(0, "main.jet"), effect_origin_input(1, "worker.jet")}
     seen := [Bool]{false, false}
-    site: sema_effect_find_dispatch(nodes, by_key, 0, &seen) ?? panic("transitive dispatch not found")
+    site: sema_effect_find_dispatch(nodes, by_key, 0, seen) ?? panic("transitive dispatch not found")
     if site.module_index != 1 || site.dispatch.span != (Span{start: 30, end: 34}) -> panic("dispatch lost its declaring module")
     located: sema_effect_locate_dispatch(site, inputs)
     if located.source_path != Val("worker.jet") || located.span != Val(site.dispatch.span) -> panic("foreign dispatch lost its source location")
     batch := [Diagnostic]{}
-    sema_effect_check_node(caller, [String]{"IO"}, false, Val(located), "", &batch)
+    sema_effect_check_node(caller, [String]{"IO"}, false, Val(located), "", batch)
     all := [Diagnostic]{}
-    sema_effect_publish_diagnostics(&all, inputs[0].source_segments, ^batch)
+    sema_effect_publish_diagnostics(all, inputs[0].source_segments, batch)
     if all.len() != 1 || all[0].code != "E0743" || all[0].source_path != Val("worker.jet") -> panic("publication rebound the foreign dispatch to main")
     entry_site: SemaEffectDispatchSite{dispatch: site.dispatch, module_index: 0}
     entry_located: sema_effect_locate_dispatch(entry_site, inputs)
@@ -68,15 +68,15 @@ effect_origin_input: fn(module_index: Int, file: String) -> SemaEffectModuleInpu
     bounded.declared = [String]{"Net"}
     bounded.has_declared_row = true
     boundary := [Diagnostic]{}
-    sema_effect_check_node(bounded, [String]{"IO"}, false, None, "", &boundary)
+    sema_effect_check_node(bounded, [String]{"IO"}, false, None, "", boundary)
     inputs[1] = effect_origin_input(1, "worker.jet")
     boundary_all := [Diagnostic]{}
-    sema_effect_publish_diagnostics(&boundary_all, inputs[1].source_segments, ^boundary)
+    sema_effect_publish_diagnostics(boundary_all, inputs[1].source_segments, boundary)
     if boundary_all.len() != 1 || boundary_all[0].code != "E0740" || boundary_all[0].source_path != Val("worker.jet") -> panic("effect boundary lost its declaring module")
     // Unlocated diagnostics still acquire the declaring module's source;
     // already located foreign diagnostics above must never be rebound.
     local := [Diagnostic]{}
-    sema_effect_publish_diagnostics(&local, inputs[0].source_segments, [Diagnostic]{sema_effect_unbounded_dispatch_diagnostic(entry_site.dispatch)})
+    sema_effect_publish_diagnostics(local, inputs[0].source_segments, [Diagnostic]{sema_effect_unbounded_dispatch_diagnostic(entry_site.dispatch)})
     if local.len() != 1 || local[0].source_path != Val("main.jet") || local[0].span != Val(entry_site.dispatch.span) -> panic("local effect publication lost its source location")
     print("effect diagnostic origins: passed")
 }

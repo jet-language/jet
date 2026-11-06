@@ -60,7 +60,7 @@ env_select_members: fn(root: String, plan: WorkspacePlan, request: SelectRequest
         names: env_member_names(plan)
         loop name in request.packages {
             if !names.contains(name) -> return Err(env_e1231_unknown_member(name, plan))
-            if !selected.contains(name) -> &selected.push(name)
+            if !selected.contains(name) -> selected.push(name)
         }
     }
     if request.affected || request.affected_since != None {
@@ -70,12 +70,12 @@ env_select_members: fn(root: String, plan: WorkspacePlan, request: SelectRequest
         }
         with_dependents: env_close_under_dependents(root, plan, changed)
         loop name in with_dependents {
-            if !selected.contains(name) -> &selected.push(name)
+            if !selected.contains(name) -> selected.push(name)
         }
     }
     chosen := [WorkspacePlanMember]{}
     loop member in plan.members {
-        if selected.contains(member.name) -> &chosen.push(member)
+        if selected.contains(member.name) -> chosen.push(member)
     }
     Ok(chosen)
 }
@@ -93,7 +93,7 @@ env_dependency_order: fn(root: String, members: [WorkspacePlanMember]) -[FS, Env
 env_dependency_order_checked: fn(resolver: AuthorityResolver, members: [WorkspacePlanMember]) -[FS, Env]> [WorkspacePlanMember] AuthorityError! {
     ordered := [WorkspacePlanMember]{}
     pairs: env_dependency_order_packages_checked(resolver, members)
-    loop pair in pairs -> &ordered.push(pair.member)
+    loop pair in pairs -> ordered.push(pair.member)
     Ok(ordered)
 }
 
@@ -105,8 +105,8 @@ env_dependency_order_packages_checked: fn(resolver: AuthorityResolver, members: 
     dependents := [[Int]]{}
     indegree := [Int]{}
     loop _ in 0..<count {
-        &dependents.push([Int]{})
-        &indegree.push(0)
+        dependents.push([Int]{})
+        indegree.push(0)
     }
     packages := [Int: CheckedPackage]{}
     loop index in 0..<count {
@@ -116,8 +116,8 @@ env_dependency_order_packages_checked: fn(resolver: AuthorityResolver, members: 
         loop dependency_name in checked.facts.deps.keys() {
             dependency: env_member_index(members, dependency_name) ?? next
             if dependency == index || seen.contains(dependency) -> next
-            &seen.push(dependency)
-            &dependents[dependency].push(index)
+            seen.push(dependency)
+            dependents[dependency].push(index)
             indegree[index] = indegree[index] + 1
         }
         packages[index] = checked
@@ -126,35 +126,35 @@ env_dependency_order_packages_checked: fn(resolver: AuthorityResolver, members: 
     // caller builds a plan with duplicate names.
     ready := [Int]{}
     loop index in 0..<count {
-        if indegree[index] == 0 -> &ready.push(index)
+        if indegree[index] == 0 -> ready.push(index)
     }
     emitted := [Bool]{}
-    loop _ in 0..<count -> &emitted.push(false)
+    loop _ in 0..<count -> emitted.push(false)
     order := [Int]{}
     loop ready.len() > 0 {
         at := 0
         loop candidate in 0..<ready.len() {
             if ready[candidate] < ready[at] -> at = candidate
         }
-        index: &ready.remove(at, .Slot) ?? panic("ready member position is in range")
+        index: ready.remove(at, .Slot) ?? panic("ready member position is in range")
         emitted[index] = true
-        &order.push(index)
+        order.push(index)
         next_dependents: dependents[index]
         loop dependent in next_dependents {
             indegree[dependent] = indegree[dependent] - 1
-            if indegree[dependent] == 0 -> &ready.push(dependent)
+            if indegree[dependent] == 0 -> ready.push(dependent)
         }
     }
     // A malformed cycle stays deterministic; the package resolver reports the
     // actual cycle when realization runs.
     loop index in 0..<count {
-        if !emitted[index] -> &order.push(index)
+        if !emitted[index] -> order.push(index)
     }
     resolver.revalidate_root()
     out := [(member: WorkspacePlanMember, package: CheckedPackage)]{}
     loop index in order {
-        package: &packages.remove(index) ?? panic("each member is ordered exactly once")
-        &out.push((member: members[index], package: ^package))
+        package: packages.remove(index) ?? panic("each member is ordered exactly once")
+        out.push((member: members[index], package: package.move()))
     }
     Ok(out)
 }
@@ -173,8 +173,8 @@ env_record_member_input_hashes: fn(root: String, members: [WorkspacePlanMember])
         if resolver.revalidate_member(checked) == .Ok(_) -> existing[member.name] = hash
     }
     lines := [String]{}
-    loop entry in existing -> &lines.push("{entry.key} = \"{entry.value}\"\n")
-    &lines.sort()
+    loop entry in existing -> lines.push("{entry.key} = \"{entry.value}\"\n")
+    lines.sort()
     files.write(path, lines.join("")).drop("the hash cache is best effort")
 }
 
@@ -200,7 +200,7 @@ env_members_affected_vs_cache: fn(root: String, plan: WorkspacePlan) -[FS, Env]>
     out := [String]{}
     if cached.len() == 0 {
         // No baseline yet: every member is affected (first run, cold cache).
-        loop member in plan.members -> &out.push(member.name)
+        loop member in plan.members -> out.push(member.name)
         return out
     }
     resolver: if AuthorityResolver.open(root) == {
@@ -211,7 +211,7 @@ env_members_affected_vs_cache: fn(root: String, plan: WorkspacePlan) -[FS, Env]>
         current: env_member_current_hash(resolver, member)
         previous: cached.get(member.name)
         unchanged: previous != None && current != None && previous == current
-        if !unchanged && !out.contains(member.name) -> &out.push(member.name)
+        if !unchanged && !out.contains(member.name) -> out.push(member.name)
     }
     out
 }
@@ -235,7 +235,7 @@ env_members_changed_since: fn(root: String, plan: WorkspacePlan, git_ref: String
     }
     changed_files := [String]{}
     loop line in receipt.output.split("\n") {
-        if line != "" -> &changed_files.push(line)
+        if line != "" -> changed_files.push(line)
     }
     out := [String]{}
     loop member in plan.members {
@@ -243,7 +243,7 @@ env_members_changed_since: fn(root: String, plan: WorkspacePlan, git_ref: String
         loop file in changed_files {
             relative: env_trim_leading_dot_slash(file)
             if relative == prefix || relative.starts_with("{prefix}/") {
-                if !out.contains(member.name) -> &out.push(member.name)
+                if !out.contains(member.name) -> out.push(member.name)
                 break
             }
         }
@@ -263,7 +263,7 @@ env_suggest_git_refs: fn(root: String, query: String) -[FS, Exec, Time.Wait]> [S
     labels := [String]{}
     loop line in receipt.output.split("\n") {
         label: line.trim()
-        if label != "" -> &labels.push(label)
+        if label != "" -> labels.push(label)
     }
     pkg_ref_nearest(query, labels)
 }
@@ -273,12 +273,12 @@ env_close_under_dependents: fn(root: String, plan: WorkspacePlan, seeds: [String
     out := seeds
     stack := seeds
     loop stack.len() > 0 {
-        name: &stack.pop() ?? break
+        name: stack.pop() ?? break
         dependents: reverse.get(name) ?? next
         loop dependent in dependents {
             if !out.contains(dependent) {
-                &out.push(dependent)
-                &stack.push(dependent)
+                out.push(dependent)
+                stack.push(dependent)
             }
         }
     }
@@ -296,7 +296,7 @@ env_reverse_dependents: fn(root: String, plan: WorkspacePlan) -[FS, Env]> [Strin
         loop dependency_name in checked.manifest.facts.deps.keys() {
             if !names.contains(dependency_name) -> next
             if !reverse.has_key(dependency_name) -> reverse[dependency_name] = [String]{}
-            &reverse[dependency_name].push(member.name)
+            reverse[dependency_name].push(member.name)
         }
     }
     resolver.revalidate_root()
@@ -305,7 +305,7 @@ env_reverse_dependents: fn(root: String, plan: WorkspacePlan) -[FS, Env]> [Strin
 
 env_member_names: fn(plan: WorkspacePlan) -> [String] Never! {
     names := [String]{}
-    loop member in plan.members -> &names.push(member.name)
+    loop member in plan.members -> names.push(member.name)
     names
 }
 

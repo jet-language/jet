@@ -130,8 +130,8 @@ GoldenFixture: struct {
     // Digest of every observed output.
     fingerprint: fn(self) -> String Never! {
         parts := [String]{self.stdout, self.stderr, "{self.exit_code}"}
-        loop file in self.files -> &parts.push("{file.path}={file.content}")
-        loop side_effect in self.side_effects -> &parts.push("effect={side_effect}")
+        loop file in self.files -> parts.push("{file.path}={file.content}")
+        loop side_effect in self.side_effects -> parts.push("effect={side_effect}")
         provider_replacement_digest(parts)
     }
 }
@@ -154,50 +154,50 @@ CompatibilitySurface: struct {
     prove_against: fn(self, foreign: CompatibilitySurface, platform: String) -> ProofReport Never! {
         failures := [ProofFailure]{}
         if foreign.platforms.len() > 0 && !foreign.platforms.contains(platform) {
-            &failures.push(ProofFailure{kind: ProofFailureKind.PlatformMismatch, name: platform.copy(), expected: foreign.platforms.join(","), found: "foreign surface unavailable"})
+            failures.push(ProofFailure{kind: ProofFailureKind.PlatformMismatch, name: platform.copy(), expected: foreign.platforms.join(","), found: "foreign surface unavailable"})
         }
         if self.platforms.len() > 0 && !self.platforms.contains(platform) {
-            &failures.push(ProofFailure{kind: ProofFailureKind.PlatformMismatch, name: platform.copy(), expected: self.platforms.join(","), found: "native surface unavailable"})
+            failures.push(ProofFailure{kind: ProofFailureKind.PlatformMismatch, name: platform.copy(), expected: self.platforms.join(","), found: "native surface unavailable"})
         }
         covered := [String]{}
         foreign_symbols: provider_replacement_by_name(foreign.public_symbols)
         native_symbols: provider_replacement_by_name(self.public_symbols)
         foreign_names := foreign_symbols.keys().to_list()
-        &foreign_names.sort()
+        foreign_names.sort()
         loop name in foreign_names {
             expected: foreign_symbols[name]
             found: native_symbols.get(name) ?? {
-                &failures.push(ProofFailure{kind: ProofFailureKind.MissingPublicSymbol, name: name.copy(), expected: expected.signature, found: "missing"})
+                failures.push(ProofFailure{kind: ProofFailureKind.MissingPublicSymbol, name: name.copy(), expected: expected.signature, found: "missing"})
                 next
             }
             if expected.signature != found.signature {
-                &failures.push(ProofFailure{kind: ProofFailureKind.SignatureMismatch, name: name.copy(), expected: expected.signature, found: found.signature})
+                failures.push(ProofFailure{kind: ProofFailureKind.SignatureMismatch, name: name.copy(), expected: expected.signature, found: found.signature})
                 next
             }
             expected_effects: provider_replacement_sorted_set(expected.effects)
             found_effects: provider_replacement_sorted_set(found.effects)
             if expected_effects != found_effects {
-                &failures.push(ProofFailure{kind: ProofFailureKind.EffectMismatch, name: name.copy(), expected: expected_effects.join(","), found: found_effects.join(",")})
+                failures.push(ProofFailure{kind: ProofFailureKind.EffectMismatch, name: name.copy(), expected: expected_effects.join(","), found: found_effects.join(",")})
                 next
             }
             expected_errors: provider_replacement_sorted_set(expected.errors)
             found_errors: provider_replacement_sorted_set(found.errors)
             if expected_errors != found_errors {
-                &failures.push(ProofFailure{kind: ProofFailureKind.ErrorShapeMismatch, name: name.copy(), expected: expected_errors.join(","), found: found_errors.join(",")})
+                failures.push(ProofFailure{kind: ProofFailureKind.ErrorShapeMismatch, name: name.copy(), expected: expected_errors.join(","), found: found_errors.join(",")})
                 next
             }
-            &covered.push(name)
+            covered.push(name)
         }
         native_goldens: provider_replacement_goldens_by_name(self.goldens)
         loop golden in foreign.goldens {
             if native_goldens.get(golden.name) == {
                 .Val(native) -> {
-                    if native != golden -> &failures.push(ProofFailure{kind: ProofFailureKind.GoldenOutputDiff, name: golden.name.copy(), expected: golden.fingerprint(), found: native.fingerprint()})
+                    if native != golden -> failures.push(ProofFailure{kind: ProofFailureKind.GoldenOutputDiff, name: golden.name.copy(), expected: golden.fingerprint(), found: native.fingerprint()})
                 }
-                .None -> &failures.push(ProofFailure{kind: ProofFailureKind.GoldenOutputDiff, name: golden.name.copy(), expected: golden.fingerprint(), found: "missing"})
+                .None -> failures.push(ProofFailure{kind: ProofFailureKind.GoldenOutputDiff, name: golden.name.copy(), expected: golden.fingerprint(), found: "missing"})
             }
         }
-        &covered.sort()
+        covered.sort()
         inputs: provider_replacement_proof_inputs(foreign, self, platform)
         digest: provider_replacement_digest(inputs)
         ProofReport{foreign_identity: foreign.identity, native_identity: self.identity, platform: platform, inputs: inputs, covered_public_symbols: covered, failures: failures, digest: digest}
@@ -243,7 +243,7 @@ ProofReport: struct {
     candidate: fn(self, license: String, platforms: [String]) -> ReplacementCandidate Never! {
         unsupported := [String]{}
         loop failure in self.failures {
-            if failure.kind == ProofFailureKind.MissingPublicSymbol -> &unsupported.push(failure.name)
+            if failure.kind == ProofFailureKind.MissingPublicSymbol -> unsupported.push(failure.name)
         }
         ReplacementCandidate{
             foreign_identity: self.foreign_identity,
@@ -386,9 +386,9 @@ provider_replacement_goldens_by_name: fn(goldens: [GoldenFixture]) -> [String: G
 provider_replacement_sorted_set: fn(values: [String]) -> [String] Never! {
     out := [String]{}
     loop value in values {
-        if !out.contains(value) -> &out.push(value)
+        if !out.contains(value) -> out.push(value)
     }
-    &out.sort()
+    out.sort()
     out
 }
 
@@ -399,16 +399,16 @@ provider_replacement_proof_inputs: fn(foreign: CompatibilitySurface, native: Com
     surfaces: [CompatibilitySurface]{foreign, native}
     loop surface in surfaces {
         loop symbol in surface.public_symbols {
-            &inputs.push("symbol={symbol.name}:{symbol.signature}:{provider_replacement_sorted_set(symbol.effects).join(",")}:{provider_replacement_sorted_set(symbol.errors).join(",")}")
+            inputs.push("symbol={symbol.name}:{symbol.signature}:{provider_replacement_sorted_set(symbol.effects).join(",")}:{provider_replacement_sorted_set(symbol.errors).join(",")}")
         }
     }
     loop surface in surfaces {
-        loop example in surface.examples -> &inputs.push("example={example}")
+        loop example in surface.examples -> inputs.push("example={example}")
     }
     loop surface in surfaces {
-        loop golden in surface.goldens -> &inputs.push("golden={golden.name}:{golden.fingerprint()}")
+        loop golden in surface.goldens -> inputs.push("golden={golden.name}:{golden.fingerprint()}")
     }
-    &inputs.sort()
+    inputs.sort()
     inputs
 }
 
@@ -428,7 +428,7 @@ provider_replacement_digest: fn(parts: [String]) -> String Never! {
     out := [U8]{}
     shift := 60
     loop shift >= 0 {
-        &out.push(digits[Int{((hash >> shift)).bit_and(U64{15})}])
+        out.push(digits[Int{((hash >> shift)).bit_and(U64{15})}])
         shift -= 4
     }
     "proof-fnv64-{pkg_bytes_text(out, 0, out.len())}"

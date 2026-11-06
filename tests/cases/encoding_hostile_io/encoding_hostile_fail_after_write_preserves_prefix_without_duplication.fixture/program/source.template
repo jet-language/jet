@@ -9,12 +9,12 @@ run: fn() {
     limits := encoding.EncodingLimits.safe()
     limits.max_item_bytes = 1
     output: files.create("{work}/partial.json") ?? panic("create")
-    writer := json.writer(^output, limits) ?? panic("writer")
-    &writer.write(encoding.DataEvent.ArrayStart) ?? panic("array")
-    if &writer.write(encoding.DataEvent.Text("ab")) == {
+    writer := json.writer(output, limits) ?? panic("writer")
+    writer.write(encoding.DataEvent.ArrayStart) ?? panic("array")
+    if writer.write(encoding.DataEvent.Text("ab")) == {
         .Ok(_) -> { print("missed-limit") }
         .Err(first) -> {
-            if &writer.finish() == {
+            if writer.finish() == {
                 .Ok(_) -> { print("finish-after-limit-missed") }
                 .Err(second) -> {
                     print(first.kind == encoding.EncodingErrorKind.Limit)

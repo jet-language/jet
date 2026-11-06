@@ -15,7 +15,7 @@ task_bodies: fn(scope: db.DBScope) -[DB.Read]> String TaskError! {
     bodies := [String]{}
     loop row in rows {
         body: db.row_text(row, "body") ?? return Err(TaskError.Read)
-        &bodies.push(body)
+        bodies.push(body)
     }
     bodies.join(",")
 }

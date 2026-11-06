@@ -113,10 +113,10 @@ TerminalStyleDependency: struct {
     kind: TerminalStyleDependencyKind; id: String; fingerprint: String
     new: fn(kind: TerminalStyleDependencyKind, id: String, fingerprint: String) -> TerminalStyleDependency TerminalStyleFactError! {
         validate_identity(id).map_err((message) -> TerminalStyleFactError.new(.InvalidDependency, message))
-        validate_sha256(fingerprint).map_err((message) -> {kind, id: ^id, fingerprint: ^fingerprint})
+        validate_sha256(fingerprint).map_err((message) -> {kind, id: id, fingerprint: fingerprint.move()})
     }
     from_bytes: fn(kind: TerminalStyleDependencyKind, id: String, bytes: [U8]) -> TerminalStyleDependency TerminalStyleFactError! {
-        TerminalStyleDependency.new(kind, ^id, SHA256.sha256_hex(bytes))
+        TerminalStyleDependency.new(kind, id, SHA256.sha256_hex(bytes))
     }
 }
 TerminalStyleFingerprintFacts: struct {
@@ -126,7 +126,7 @@ TerminalStyleFingerprintFacts: struct {
         validate_identity(source_id).map_err((message) -> TerminalStyleFactError.new(.InvalidSourceIdentity, message))
         if source.len() > MAX_TERMINAL_STYLE_SOURCE_BYTES -> return Err(TerminalStyleFactError.new(.SourceTooLarge, "style source exceeds {MAX_TERMINAL_STYLE_SOURCE_BYTES} bytes"))
         if dependencies.len() > MAX_TERMINAL_STYLE_DEPENDENCIES -> return Err(TerminalStyleFactError.new(.TooManyDependencies, "style has {dependencies.len()} dependencies; limit is {MAX_TERMINAL_STYLE_DEPENDENCIES}"))
-        dependencies := ^dependencies; &dependencies.sort()
+        dependencies := dependencies.move(); dependencies.sort()
         loop pair in dependencies.windows(2) {
             if pair[0].kind == pair[1].kind && pair[0].id == pair[1].id -> return Err(TerminalStyleFactError.new(.InvalidDependency, "duplicate {pair[0].id} dependency identity"))
         }
@@ -134,39 +134,39 @@ TerminalStyleFingerprintFacts: struct {
             validate_identity(dependency.id).map_err((message) -> TerminalStyleFactError.new(.InvalidDependency, message))
             validate_sha256(dependency.fingerprint).map_err((message) -> TerminalStyleFactError.new(.InvalidFingerprint, message))
         }
-        layout_fingerprint: validate_optional_fingerprint(^layout_fingerprint, "layout fingerprint")
-        type_fingerprint: validate_optional_fingerprint(^type_fingerprint, "value-type fingerprint")
+        layout_fingerprint: validate_optional_fingerprint(layout_fingerprint, "layout fingerprint")
+        type_fingerprint: validate_optional_fingerprint(type_fingerprint, "value-type fingerprint")
         source_fingerprint: SHA256.sha256_hex(source.as_bytes())
         fingerprint: facts_fingerprint(source_id, source_fingerprint, dependencies, capabilities, layout_fingerprint, type_fingerprint)
-        Ok(TerminalStyleFingerprintFacts{source_id: ^source_id, source_fingerprint, dependencies: ^dependencies, capabilities, layout_fingerprint, type_fingerprint, fingerprint})
+        Ok(TerminalStyleFingerprintFacts{source_id: source_id.move(), source_fingerprint, dependencies: dependencies, capabilities, layout_fingerprint, type_fingerprint, fingerprint})
     }
     dependency: fn(self, kind: TerminalStyleDependencyKind, id: String) -> TerminalStyleDependency? { self.dependencies.iter().find((d) -> d.kind == kind && d.id == id) }
 }
 facts_fingerprint: fn(source_id: String, source_fingerprint: String, dependencies: [TerminalStyleDependency], capabilities: TerminalCapabilityFacts, layout_fingerprint: String, type_fingerprint: String) -> String {
     canonical := "terminal-style-facts-v1{TEXT_NUL}"
-    frame(&canonical, source_id); frame(&canonical, source_fingerprint); frame(&canonical, capabilities.fingerprint())
-    frame(&canonical, layout_fingerprint); frame(&canonical, type_fingerprint)
-    loop dependency in dependencies { frame(&canonical, dependency.kind.as_str()); frame(&canonical, dependency.id); frame(&canonical, dependency.fingerprint) }
+    frame(canonical, source_id); frame(canonical, source_fingerprint); frame(canonical, capabilities.fingerprint())
+    frame(canonical, layout_fingerprint); frame(canonical, type_fingerprint)
+    loop dependency in dependencies { frame(canonical, dependency.kind.as_str()); frame(canonical, dependency.id); frame(canonical, dependency.fingerprint) }
     SHA256.sha256_hex(canonical.as_bytes())
 }
 TerminalStyleEdit: struct {
     source_id: String; source: String; dependencies: [TerminalStyleDependency]; capabilities: TerminalCapabilityFacts
     layout_fingerprint: String; type_fingerprint: String
     new: fn(source_id: String, source: String) -> TerminalStyleEdit {
-        TerminalStyleEdit{source_id: ^source_id, source: ^source, dependencies: [], capabilities: TerminalCapabilityFacts.default(), layout_fingerprint: "", type_fingerprint: ""}
+        TerminalStyleEdit{source_id: source_id.move(), source: source, dependencies: [], capabilities: TerminalCapabilityFacts.default(), layout_fingerprint: "", type_fingerprint: ""}
     }
-    with_capabilities: fn(self: TerminalStyleEdit, capabilities: TerminalCapabilityFacts) -> TerminalStyleEdit { self := ^self; self.capabilities = capabilities; ^self }
-    with_dependencies: fn(self: TerminalStyleEdit, dependencies: [TerminalStyleDependency]) -> TerminalStyleEdit { self := ^self; self.dependencies = ^dependencies; ^self }
-    with_layout_fingerprint: fn(self: TerminalStyleEdit, fingerprint: String) -> TerminalStyleEdit { self := ^self; self.layout_fingerprint = ^fingerprint; ^self }
-    with_type_fingerprint: fn(self: TerminalStyleEdit, fingerprint: String) -> TerminalStyleEdit { self := ^self; self.type_fingerprint = ^fingerprint; ^self }
+    with_capabilities: fn(self: TerminalStyleEdit, capabilities: TerminalCapabilityFacts) -> TerminalStyleEdit { self := self.move(); self.capabilities = capabilities; self.move() }
+    with_dependencies: fn(self: TerminalStyleEdit, dependencies: [TerminalStyleDependency]) -> TerminalStyleEdit { self := self.move(); self.dependencies = dependencies.move(); self.move() }
+    with_layout_fingerprint: fn(self: TerminalStyleEdit, fingerprint: String) -> TerminalStyleEdit { self := self.move(); self.layout_fingerprint = fingerprint.move(); self.move() }
+    with_type_fingerprint: fn(self: TerminalStyleEdit, fingerprint: String) -> TerminalStyleEdit { self := self.move(); self.type_fingerprint = fingerprint.move(); self.move() }
     bound_source: fn(self: TerminalStyleEdit) -> TerminalStyleEdit {
-        self := ^self
+        self := self.move()
         if self.source.len() > MAX_TERMINAL_STYLE_SOURCE_BYTES {
             end := USize{0}
             loop character in self.source.chars() { end += character.len_utf8(); if end > MAX_TERMINAL_STYLE_SOURCE_BYTES -> break }
-            &self.source.truncate(end)
+            self.source.truncate(end)
         }
-        ^self
+        self.move()
     }
 }
 TerminalStyleRole: enum {
@@ -220,10 +220,10 @@ TerminalStyleDocument: struct {
             if roles.len() >= MAX_TERMINAL_STYLE_ROLES -> return Err(TerminalStyleParseError.new(line_number, .TooManyRoles, "style exceeds {MAX_TERMINAL_STYLE_ROLES} roles"))
             raw_value := raw_value.trim() // #4303
             value: parse_style_value(raw_value).map_err((message) -> TerminalStyleParseError.new(line_number, .InvalidStyle, message))
-            &roles.insert(role, ^value)
+            roles.insert(role, value)
         }
         if roles.is_empty() -> return Err(TerminalStyleParseError.new(0, .InvalidStyle, "style source declares no semantic roles"))
-        Ok(TerminalStyleDocument{roles: ^roles})
+        Ok(TerminalStyleDocument{roles: roles.move()})
     }
     roles: fn(self) -> [TerminalStyleRole:TerminalStyleValue] { &self.roles }
     value: fn(self, role: TerminalStyleRole) -> TerminalStyleValue? { self.roles.get(role) }
@@ -257,10 +257,10 @@ parse_style_value: fn(value: String) -> TerminalStyleValue Err! {
         if part.is_empty() -> return Err("style SGR value has an empty code")
         code: part.parse<U16>().map_err((_) -> "style SGR value has a non-numeric code")
         if code > 255 -> return Err("style SGR code exceeds 255")
-        if index > 0 -> &normalized.push(';')
-        &normalized.push_str("{code}")
+        if index > 0 -> normalized.push(';')
+        normalized.push_str("{code}")
     }
-    Ok(.Sgr(^normalized))
+    Ok(.Sgr(normalized))
 }
 TerminalStyleSnapshot: struct {
     revision: U64; source_id: String; roles: [TerminalStyleRole:TerminalStyleValue]; facts: TerminalStyleFingerprintFacts
@@ -339,7 +339,7 @@ TerminalStyleReload: struct {
     new: fn() -> TerminalStyleReload { TerminalStyleReload{state: Mutex.new(ReloadState{current: None, pending: None, last_error: None, next_subscriber: 1, subscribers: {}})} }
     reload: fn(self, edit: TerminalStyleEdit) -> TerminalStyleReloadReceipt {
         state := self.state.lock().unwrap_or_else((poisoned) -> poisoned.into_inner())
-        apply_locked(&state, edit.bound_source())
+        apply_locked(state, edit.bound_source())
     }
     enqueue: fn(self, edit: TerminalStyleEdit) -> () {
         state := self.state.lock().unwrap_or_else((poisoned) -> poisoned.into_inner()); state.pending = .Val(edit.bound_source())
@@ -347,7 +347,7 @@ TerminalStyleReload: struct {
     has_pending: fn(self) -> Bool { self.state.lock().unwrap_or_else((p) -> p.into_inner()).pending.is_some() }
     flush: fn(self) -> TerminalStyleReloadReceipt? {
         state := self.state.lock().unwrap_or_else((p) -> p.into_inner())
-        if &state.pending.take() == .Val(edit) -> .Val(apply_locked(&state, ^edit)) else -> None
+        if state.pending.take() == .Val(edit) -> .Val(apply_locked(state, edit)) else -> None
     }
     revision: fn(self) -> U64 { self.state.lock().unwrap_or_else((p) -> p.into_inner()).current.as_ref().map((s) -> s.revision).unwrap_or(0) }
     last_valid: fn(self) -> Arc<TerminalStyleSnapshot>? { self.state.lock().unwrap_or_else((p) -> p.into_inner()).current.clone() }
@@ -356,15 +356,15 @@ TerminalStyleReload: struct {
         state := self.state.lock().unwrap_or_else((p) -> p.into_inner())
         if state.subscribers.len() >= MAX_TERMINAL_STYLE_SUBSCRIBERS -> return Err(.LimitReached)
         id: TerminalStyleSubscriberId{value: state.next_subscriber}; state.next_subscriber = state.next_subscriber.saturating_add(1)
-        &state.subscribers.insert(id, SubscriberMailbox{notifications: VecDeque.new()})
+        state.subscribers.insert(id, SubscriberMailbox{notifications: VecDeque.new()})
         Ok(id)
     }
     unsubscribe: fn(self, id: TerminalStyleSubscriberId) -> Bool {
-        state := self.state.lock().unwrap_or_else((p) -> p.into_inner()); &state.subscribers.remove(id).is_some()
+        state := self.state.lock().unwrap_or_else((p) -> p.into_inner()); state.subscribers.remove(id).is_some()
     }
     drain_notifications: fn(self, id: TerminalStyleSubscriberId) -> [TerminalStyleReloadNotification] {
         state := self.state.lock().unwrap_or_else((p) -> p.into_inner())
-        if &state.subscribers.get_mut(id) == .Val(mailbox) -> std.mem.take(&mailbox.notifications).into_iter().collect() else -> []
+        if state.subscribers.get_mut(id) == .Val(mailbox) -> std.mem.take(mailbox.notifications).into_iter().collect() else -> []
     }
     reset: fn(self) -> () { state := self.state.lock().unwrap_or_else((p) -> p.into_inner()); state.current = None; state.pending = None; state.last_error = None }
 }
@@ -375,28 +375,28 @@ apply_locked: fn(state: ReloadState, edit: TerminalStyleEdit) -> TerminalStyleRe
         fact: TerminalStyleErrorFact{code: err.code(), source_id: bounded_identity(edit.source_id), attempted_fingerprint: attempted_fingerprint.clone(), revision, message: bounded_text(err.message(), MAX_TERMINAL_STYLE_ERROR_BYTES)}
         state.last_error = .Val(fact.clone())
         receipt: TerminalStyleReloadReceipt{revision, change: .Invalid, snapshot: current.clone(), error: .Val(fact.clone())}
-        notify(&state, TerminalStyleReloadNotification{revision, change: .Invalid, prior_fingerprint: current.as_ref().map((s) -> s.fingerprint().to_string()), candidate_fingerprint: attempted_fingerprint, error: .Val(^fact)})
+        notify(state, TerminalStyleReloadNotification{revision, change: .Invalid, prior_fingerprint: current.as_ref().map((s) -> s.fingerprint().to_string()), candidate_fingerprint: attempted_fingerprint, error: .Val(fact)})
         return receipt
     }
     change: classify_change(current.as_deref(), candidate); candidate_fingerprint: .Val(candidate.fingerprint().to_string())
     if change == {
-        .Unchanged -> { state.last_error = None; TerminalStyleReloadReceipt{revision, change, snapshot: ^current, error: None} }
+        .Unchanged -> { state.last_error = None; TerminalStyleReloadReceipt{revision, change, snapshot: current, error: None} }
         .RestartRequired(reason) -> {
             state.last_error = None
             receipt: TerminalStyleReloadReceipt{revision, change: .RestartRequired(reason), snapshot: current.clone(), error: None}
-            notify(&state, TerminalStyleReloadNotification{revision, change: .RestartRequired(reason), prior_fingerprint: current.as_ref().map((s) -> s.fingerprint().to_string()), candidate_fingerprint, error: None})
+            notify(state, TerminalStyleReloadNotification{revision, change: .RestartRequired(reason), prior_fingerprint: current.as_ref().map((s) -> s.fingerprint().to_string()), candidate_fingerprint, error: None})
             receipt
         }
         .Initial | .StyleOnly | .CapabilityOnly -> {
             if revision.checked_add(1) == .Val(next_revision) {
-                candidate.revision = next_revision; snapshot: Arc.new(^candidate); state.current = .Val(snapshot.clone()); state.last_error = None
-                notify(&state, TerminalStyleReloadNotification{revision: next_revision, change, prior_fingerprint: current.as_ref().map((s) -> s.fingerprint().to_string()), candidate_fingerprint: .Val(snapshot.fingerprint().to_string()), error: None})
+                candidate.revision = next_revision; snapshot: Arc.new(candidate); state.current = .Val(snapshot.clone()); state.last_error = None
+                notify(state, TerminalStyleReloadNotification{revision: next_revision, change, prior_fingerprint: current.as_ref().map((s) -> s.fingerprint().to_string()), candidate_fingerprint: .Val(snapshot.fingerprint().to_string()), error: None})
                 TerminalStyleReloadReceipt{revision: next_revision, change, snapshot: .Val(snapshot), error: None}
             } else {
                 fact: TerminalStyleErrorFact{code: .RevisionOverflow, source_id: bounded_identity(edit.source_id), attempted_fingerprint: attempted_fingerprint.clone(), revision, message: "style revision counter exhausted"}
                 state.last_error = .Val(fact.clone())
                 receipt: TerminalStyleReloadReceipt{revision, change: .Invalid, snapshot: current.clone(), error: .Val(fact.clone())}
-                notify(&state, TerminalStyleReloadNotification{revision, change: .Invalid, prior_fingerprint: current.as_ref().map((s) -> s.fingerprint().to_string()), candidate_fingerprint: attempted_fingerprint, error: .Val(^fact)})
+                notify(state, TerminalStyleReloadNotification{revision, change: .Invalid, prior_fingerprint: current.as_ref().map((s) -> s.fingerprint().to_string()), candidate_fingerprint: attempted_fingerprint, error: .Val(fact)})
                 receipt
             }
         }
@@ -405,7 +405,7 @@ apply_locked: fn(state: ReloadState, edit: TerminalStyleEdit) -> TerminalStyleRe
 }
 build_snapshot: fn(edit: TerminalStyleEdit) -> TerminalStyleSnapshot BuildError! {
     document: TerminalStyleDocument.parse(edit.source).map_err((error) -> BuildError.Parse(error))
-    facts: TerminalStyleFingerprintFacts.new(edit.source_id.clone(), edit.source, edit.dependencies.clone(), edit.capabilities, edit.layout_fingerprint.clone(), edit.type_fingerprint.clone()).map_err((error) -> {revision: 0, source_id: edit.source_id.clone(), roles: ^document.roles, facts})
+    facts: TerminalStyleFingerprintFacts.new(edit.source_id.clone(), edit.source, edit.dependencies.clone(), edit.capabilities, edit.layout_fingerprint.clone(), edit.type_fingerprint.clone()).map_err((error) -> {revision: 0, source_id: edit.source_id.clone(), roles: document.roles.move(), facts})
 }
 #Error
 BuildError: enum {
@@ -420,9 +420,9 @@ BuildError: enum {
     } }
 }
 notify: fn(state: ReloadState, notification: TerminalStyleReloadNotification) -> () {
-    loop mailbox in &state.subscribers.values_mut() {
-        if mailbox.notifications.len() >= MAX_TERMINAL_STYLE_NOTIFICATIONS -> _: &mailbox.notifications.pop_front()
-        &mailbox.notifications.push_back(notification.clone())
+    loop mailbox in state.subscribers.values_mut() {
+        if mailbox.notifications.len() >= MAX_TERMINAL_STYLE_NOTIFICATIONS -> _: mailbox.notifications.pop_front()
+        mailbox.notifications.push_back(notification.clone())
     }
 }
 validate_identity: fn(value: String) Err! {
@@ -435,23 +435,23 @@ validate_sha256: fn(value: String) Err! {
 }
 validate_optional_fingerprint: fn(value: String, label: String) -> String TerminalStyleFactError! {
     if value.len() > MAX_TERMINAL_STYLE_ID_BYTES || value.chars().any((c) -> c.is_control()) -> return Err(TerminalStyleFactError.new(.InvalidFingerprint, "{label} is not a bounded stable string"))
-    Ok(^value)
+    Ok(value)
 }
-frame: fn(output: String, value: String) -> () { &output.push_str("{value.len()}"); &output.push(':'); &output.push_str(value); &output.push(';') }
+frame: fn(output: String, value: String) -> () { output.push_str("{value.len()}"); output.push(':'); output.push_str(value); output.push(';') }
 bounded_text: fn(value: String, max_bytes: USize) -> String {
     output := ""
     loop character in value.chars() {
         if character.is_control() -> next
         if output.len() + character.len_utf8() > max_bytes -> break
-        &output.push(character)
+        output.push(character)
     }
-    ^output
+    output.move()
 }
 bounded_identity: fn(value: String) -> String { bounded_text(value, MAX_TERMINAL_STYLE_ID_BYTES) }
 TerminalStyleHostSource: struct {
     source_id: String; capabilities: TerminalCapabilityFacts
     new: fn(source_id: String, capabilities: TerminalCapabilityFacts) -> TerminalStyleHostSource TerminalStyleFactError! {
-        validate_identity(source_id).map_err((message) -> {source_id: ^source_id, capabilities})
+        validate_identity(source_id).map_err((message) -> {source_id: source_id.move(), capabilities})
     }
 }
 TerminalStyleHostUnavailableReason: enum {
@@ -481,7 +481,7 @@ TerminalStyleHostAdapter: struct {
     inject: fn(self, source: TerminalStyleHostSource) -> () {
         guard := self.source.lock().unwrap_or_else((p) -> p.into_inner())
         identity_changed: guard.as_ref().is_some_and((previous) -> previous.source_id != source.source_id)
-        guard = .Val(^source); drop(^guard)
+        guard = .Val(source); drop(guard)
         if identity_changed -> self.reload.reset()
     }
     is_injected: fn(self) -> Bool { self.source.lock().unwrap_or_else((p) -> p.into_inner()).is_some() }
@@ -490,7 +490,7 @@ TerminalStyleHostAdapter: struct {
         if source == .Val(source) {
             revision: self.reload.revision()
             edit: parse_style_request(body, source, revision) ?? { event: outcome_json(err, None); return (_0: err, _1: event) }
-            receipt: self.reload.reload(^edit); outcome: host_outcome_from_receipt(receipt)
+            receipt: self.reload.reload(edit); outcome: host_outcome_from_receipt(receipt)
             event: outcome_json(outcome, receipt.snapshot.as_deref()); (_0: outcome, _1: event)
         } else {
             outcome: TerminalStyleHostOutcome.Unavailable(.SourceNotInjected); event: outcome_json(outcome, None); (_0: outcome, _1: event)
@@ -513,7 +513,7 @@ parse_style_request: fn(body: String, source: TerminalStyleHostSource, revision:
         .Val(.Text(text)) -> text.clone()
         else -> { return Err(.Unavailable(.MissingSource)) }
     }
-    edit := TerminalStyleEdit.new(source.source_id.clone(), ^style_source).with_capabilities(source.capabilities)
+    edit := TerminalStyleEdit.new(source.source_id.clone(), style_source).with_capabilities(source.capabilities)
     if object.get("layout_fingerprint") == .Val(.Text(layout)) -> edit = edit.with_layout_fingerprint(layout.clone())
     if object.get("type_fingerprint") == .Val(.Text(fingerprint)) -> edit = edit.with_type_fingerprint(fingerprint.clone())
     if object.get("dependencies") == .Val(entries) {
@@ -536,13 +536,13 @@ parse_style_request: fn(body: String, source: TerminalStyleHostSource, revision:
                 .Val(.Text(fingerprint)) -> fingerprint.clone()
                 else -> { return Err(malformed_request()) }
             }
-            dependency: TerminalStyleDependency.new(kind, ^id, ^fingerprint).map_err((error) -> TerminalStyleHostOutcome.Rejected(.Invalid(TerminalStyleErrorFact{
+            dependency: TerminalStyleDependency.new(kind, id, fingerprint).map_err((error) -> TerminalStyleHostOutcome.Rejected(.Invalid(TerminalStyleErrorFact{
                 code: error.code, source_id: bounded_identity(source.source_id), attempted_fingerprint: None, revision, message: error.message})))
-            &dependencies.push(^dependency)
+            dependencies.push(dependency)
         }
-        edit = edit.with_dependencies(^dependencies)
+        edit = edit.with_dependencies(dependencies)
     }
-    Ok(^edit)
+    Ok(edit)
 }
 object_map: fn(value: Dyn) -> [String:Dyn] Err! {
     if value == .Object(fields) -> Ok(fields.iter().cloned().collect()) else -> Err("terminal style request must be an object")
@@ -566,17 +566,17 @@ host_outcome_from_receipt: fn(receipt: TerminalStyleReloadReceipt) -> TerminalSt
 }
 outcome_json: fn(outcome: TerminalStyleHostOutcome, snapshot: TerminalStyleSnapshot?) -> String {
     output := String.with_capacity(256)
-    &output.push_str("{{\"protocol\":\""); &output.push_str(TERMINAL_STYLE_PROTOCOL); &output.push('"')
+    output.push_str("{{\"protocol\":\""); output.push_str(TERMINAL_STYLE_PROTOCOL); output.push('"')
     if outcome == {
         .Applied{revision, change} -> {
-            &output.push_str(",\"outcome\":\"applied\",\"revision\":{revision},\"change\":\"{change.as_str()}\"")
-            if snapshot == .Val(snapshot) -> &output.push_str(",\"fingerprint\":\"{foundation_json_escape(snapshot.fingerprint())}\"")
+            output.push_str(",\"outcome\":\"applied\",\"revision\":{revision},\"change\":\"{change.as_str()}\"")
+            if snapshot == .Val(snapshot) -> output.push_str(",\"fingerprint\":\"{foundation_json_escape(snapshot.fingerprint())}\"")
         }
         .Rejected(rejection) -> {
-            &output.push_str(",\"outcome\":\"rejected\",\"code\":\"{rejection.code()}\"")
-            if rejection == .Invalid(fact) -> &output.push_str(",\"message\":\"{foundation_json_escape(fact.message)}\"")
+            output.push_str(",\"outcome\":\"rejected\",\"code\":\"{rejection.code()}\"")
+            if rejection == .Invalid(fact) -> output.push_str(",\"message\":\"{foundation_json_escape(fact.message)}\"")
         }
-        .Unavailable(reason) -> &output.push_str(",\"outcome\":\"unavailable\",\"reason\":\"{reason.as_str()}\"")
+        .Unavailable(reason) -> output.push_str(",\"outcome\":\"unavailable\",\"reason\":\"{reason.as_str()}\"")
     }
-    &output.push('}'); ^output
+    output.push('}'); output.move()
 }

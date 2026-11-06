@@ -30,7 +30,7 @@ scalar_at: fn(source: [U8], index: Int) -> String Never! {
     out := [U8]{}
     loop offset in 0..<width {
         if index + offset >= source.len() -> break
-        &out.push(source[index + offset])
+        out.push(source[index + offset])
     }
     String.from_bytes(out) ?? ""
 }
@@ -82,7 +82,7 @@ slice_text: fn(source: [U8], start: Int, end: Int) -> String Never! {
     out := [U8]{}
     i := start
     loop i < end && i < source.len() {
-        &out.push(source[i])
+        out.push(source[i])
         i += 1
     }
     String.from_bytes(out) ?? ""
@@ -91,14 +91,14 @@ slice_text: fn(source: [U8], start: Int, end: Int) -> String Never! {
 emit: fn(facts: &[Int], kind: Int, start: Int, end: Int, uppercase: Bool) Never! {
     flag := 0
     if uppercase -> flag = 1
-    &facts.push(kind)
-    &facts.push(start)
-    &facts.push(end)
-    &facts.push(flag)
+    facts.push(kind)
+    facts.push(start)
+    facts.push(end)
+    facts.push(flag)
 }
 
 push_code: fn(facts: &[Int], kind: Int, start: Int, end: Int, uppercase: Bool) -> Int Never! {
-    emit(&facts, kind, start, end, uppercase)
+    emit(facts, kind, start, end, uppercase)
     kind
 }
 
@@ -654,7 +654,7 @@ scan_block_comment_end: fn(source: [U8], start: Int) -> Int Never! {
 
 raw_token_facts: fn(source: [U8], config_surface: Bool) -> [Int] {
     facts := [Int]{}
-    _ := raw_token_facts_range(source, config_surface, 0, source.len(), -1, &facts)
+    _ := raw_token_facts_range(source, config_surface, 0, source.len(), -1, facts)
     facts
 }
 
@@ -697,7 +697,7 @@ raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int
             end: scan_identifier_end(source, i)
             kind: word_kind(source, i, end, last_code)
             if kind == K_FN -> fn_in_range = true
-            last_code = push_code(&facts, kind, i, end, kind == K_IDENT && value <= 90 && value >= 65)
+            last_code = push_code(facts, kind, i, end, kind == K_IDENT && value <= 90 && value >= 65)
             i = end
             next
         }
@@ -715,48 +715,48 @@ raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int
         }
         if value == 47 && next1 == 47 {
             if config_surface && byte_at(source, i - 1) == 58 {
-                last_code = push_code(&facts, K_SLASH, i, i + 1, false)
-                last_code = push_code(&facts, K_SLASH, i + 1, i + 2, false)
+                last_code = push_code(facts, K_SLASH, i, i + 1, false)
+                last_code = push_code(facts, K_SLASH, i + 1, i + 2, false)
                 i += 2
                 next
             }
             loop i < count && source[i] != 10 -> i += 1
-            emit(&facts, K_LINE_COMMENT, start, i, false)
+            emit(facts, K_LINE_COMMENT, start, i, false)
             next
         }
         if value == 47 && next1 == 42 {
             end: scan_block_comment_end(source, start)
             i = if end < 0 -> -end - 1 else -> end
-            emit(&facts, K_BLOCK_COMMENT, start, i, false)
+            emit(facts, K_BLOCK_COMMENT, start, i, false)
             next
         }
         if value == 40 {
-            last_code = push_code(&facts, K_LPAREN, start, start + 1, false)
+            last_code = push_code(facts, K_LPAREN, start, start + 1, false)
             i += 1
             next
         }
         if value == 41 {
-            last_code = push_code(&facts, K_RPAREN, start, start + 1, false)
+            last_code = push_code(facts, K_RPAREN, start, start + 1, false)
             i += 1
             next
         }
         if value == 123 {
-            last_code = push_code(&facts, K_LBRACE, start, start + 1, false)
+            last_code = push_code(facts, K_LBRACE, start, start + 1, false)
             i += 1
             next
         }
         if value == 125 {
-            last_code = push_code(&facts, K_RBRACE, start, start + 1, false)
+            last_code = push_code(facts, K_RBRACE, start, start + 1, false)
             i += 1
             next
         }
         if value == 91 {
-            last_code = push_code(&facts, K_LBRACKET, start, start + 1, false)
+            last_code = push_code(facts, K_LBRACKET, start, start + 1, false)
             i += 1
             next
         }
         if value == 93 {
-            last_code = push_code(&facts, K_RBRACKET, start, start + 1, false)
+            last_code = push_code(facts, K_RBRACKET, start, start + 1, false)
             i += 1
             next
         }
@@ -764,31 +764,31 @@ raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int
         if value == 58 {
             if {
                 next1 == 62 -> {
-                    last_code = push_code(&facts, K_FENCE_CLOSE, start, start + 2, false)
+                    last_code = push_code(facts, K_FENCE_CLOSE, start, start + 2, false)
                     i += 2
                 }
                 next1 == 58 -> {
-                    last_code = push_code(&facts, K_COLON_COLON, start, start + 2, false)
+                    last_code = push_code(facts, K_COLON_COLON, start, start + 2, false)
                     i += 2
                 }
                 next1 == 61 -> {
-                    last_code = push_code(&facts, K_COLON_EQ, start, start + 2, false)
+                    last_code = push_code(facts, K_COLON_EQ, start, start + 2, false)
                     i += 2
                 }
                 else -> {
-                    last_code = push_code(&facts, K_COLON, start, start + 1, false)
+                    last_code = push_code(facts, K_COLON, start, start + 1, false)
                     i += 1
                 }
             }
             next
         }
         if value == 44 {
-            last_code = push_code(&facts, K_COMMA, start, start + 1, false)
+            last_code = push_code(facts, K_COMMA, start, start + 1, false)
             i += 1
             next
         }
         if value == 59 {
-            last_code = push_code(&facts, K_SEMI, start, start + 1, false)
+            last_code = push_code(facts, K_SEMI, start, start + 1, false)
             i += 1
             next
         }
@@ -799,24 +799,24 @@ raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int
                     marker_kind: word_kind(source, i + 1, end, 0)
                     if {
                         marker_kind == K_IDENT -> {
-                            last_code = push_code(&facts, K_IDENT, start, end, false)
+                            last_code = push_code(facts, K_IDENT, start, end, false)
                             i = end
                         }
                         else -> {
-                            last_code = push_code(&facts, K_AT, start, start + 1, false)
+                            last_code = push_code(facts, K_AT, start, start + 1, false)
                             i += 1
                         }
                     }
                 }
                 else -> {
-                    last_code = push_code(&facts, K_AT, start, start + 1, false)
+                    last_code = push_code(facts, K_AT, start, start + 1, false)
                     i += 1
                 }
             }
             next
         }
         if value == 35 {
-            last_code = push_code(&facts, K_HASH, start, start + 1, false)
+            last_code = push_code(facts, K_HASH, start, start + 1, false)
             i += 1
             next
         }
@@ -827,11 +827,11 @@ raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int
             if {
                 is_identifier_start(source, i + 1) && !previous_is_identifier(source, i) -> {
                     end: scan_identifier_end(source, i + 1)
-                    last_code = push_code(&facts, K_IDENT, start, end, false)
+                    last_code = push_code(facts, K_IDENT, start, end, false)
                     i = end
                 }
                 else -> {
-                    last_code = push_code(&facts, K_DOLLAR, start, start + 1, false)
+                    last_code = push_code(facts, K_DOLLAR, start, start + 1, false)
                     i += 1
                 }
             }
@@ -840,15 +840,15 @@ raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int
         if value == 63 {
             if {
                 next1 == 63 -> {
-                    last_code = push_code(&facts, K_QUESTION_QUESTION, start, start + 2, false)
+                    last_code = push_code(facts, K_QUESTION_QUESTION, start, start + 2, false)
                     i += 2
                 }
                 next1 == 46 -> {
-                    last_code = push_code(&facts, K_QUESTION_DOT, start, start + 2, false)
+                    last_code = push_code(facts, K_QUESTION_DOT, start, start + 2, false)
                     i += 2
                 }
                 else -> {
-                    last_code = push_code(&facts, K_QUESTION, start, start + 1, false)
+                    last_code = push_code(facts, K_QUESTION, start, start + 1, false)
                     i += 1
                 }
             }
@@ -857,19 +857,19 @@ raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int
         if value == 46 {
             if {
                 next1 == 46 && next2 == 46 -> {
-                    last_code = push_code(&facts, K_DOT_DOT_DOT, start, start + 3, false)
+                    last_code = push_code(facts, K_DOT_DOT_DOT, start, start + 3, false)
                     i += 3
                 }
                 next1 == 46 && next2 == 60 -> {
-                    last_code = push_code(&facts, K_DOT_DOT_LT, start, start + 3, false)
+                    last_code = push_code(facts, K_DOT_DOT_LT, start, start + 3, false)
                     i += 3
                 }
                 next1 == 46 -> {
-                    last_code = push_code(&facts, K_DOT_DOT, start, start + 2, false)
+                    last_code = push_code(facts, K_DOT_DOT, start, start + 2, false)
                     i += 2
                 }
                 else -> {
-                    last_code = push_code(&facts, K_DOT, start, start + 1, false)
+                    last_code = push_code(facts, K_DOT, start, start + 1, false)
                     i += 1
                 }
             }
@@ -878,11 +878,11 @@ raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int
         if value == 61 {
             if {
                 next1 == 61 -> {
-                    last_code = push_code(&facts, K_EQ_EQ, start, start + 2, false)
+                    last_code = push_code(facts, K_EQ_EQ, start, start + 2, false)
                     i += 2
                 }
                 else -> {
-                    last_code = push_code(&facts, K_EQ, start, start + 1, false)
+                    last_code = push_code(facts, K_EQ, start, start + 1, false)
                     i += 1
                 }
             }
@@ -891,11 +891,11 @@ raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int
         if value == 33 {
             if {
                 next1 == 61 -> {
-                    last_code = push_code(&facts, K_NOT_EQ, start, start + 2, false)
+                    last_code = push_code(facts, K_NOT_EQ, start, start + 2, false)
                     i += 2
                 }
                 else -> {
-                    last_code = push_code(&facts, K_BANG, start, start + 1, false)
+                    last_code = push_code(facts, K_BANG, start, start + 1, false)
                     i += 1
                 }
             }
@@ -904,15 +904,15 @@ raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int
         if value == 43 {
             if {
                 next1 == 43 -> {
-                    last_code = push_code(&facts, K_PLUS_PLUS, start, start + 2, false)
+                    last_code = push_code(facts, K_PLUS_PLUS, start, start + 2, false)
                     i += 2
                 }
                 next1 == 61 -> {
-                    last_code = push_code(&facts, K_PLUS_EQ, start, start + 2, false)
+                    last_code = push_code(facts, K_PLUS_EQ, start, start + 2, false)
                     i += 2
                 }
                 else -> {
-                    last_code = push_code(&facts, K_PLUS, start, start + 1, false)
+                    last_code = push_code(facts, K_PLUS, start, start + 1, false)
                     i += 1
                 }
             }
@@ -921,19 +921,19 @@ raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int
         if value == 45 {
             if {
                 next1 == 62 -> {
-                    last_code = push_code(&facts, K_UNIFIED_ARROW, start, start + 2, false)
+                    last_code = push_code(facts, K_UNIFIED_ARROW, start, start + 2, false)
                     i += 2
                 }
                 next1 == 45 -> {
-                    last_code = push_code(&facts, K_MINUS_MINUS, start, start + 2, false)
+                    last_code = push_code(facts, K_MINUS_MINUS, start, start + 2, false)
                     i += 2
                 }
                 next1 == 61 -> {
-                    last_code = push_code(&facts, K_MINUS_EQ, start, start + 2, false)
+                    last_code = push_code(facts, K_MINUS_EQ, start, start + 2, false)
                     i += 2
                 }
                 else -> {
-                    last_code = push_code(&facts, K_MINUS, start, start + 1, false)
+                    last_code = push_code(facts, K_MINUS, start, start + 1, false)
                     i += 1
                 }
             }
@@ -942,11 +942,11 @@ raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int
         if value == 42 {
             if {
                 next1 == 61 -> {
-                    last_code = push_code(&facts, K_STAR_EQ, start, start + 2, false)
+                    last_code = push_code(facts, K_STAR_EQ, start, start + 2, false)
                     i += 2
                 }
                 else -> {
-                    last_code = push_code(&facts, K_STAR, start, start + 1, false)
+                    last_code = push_code(facts, K_STAR, start, start + 1, false)
                     i += 1
                 }
             }
@@ -955,19 +955,19 @@ raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int
         if value == 47 {
             if {
                 next1 == 37 && next2 == 61 -> {
-                    last_code = push_code(&facts, K_SLASH_PERCENT_EQ, start, start + 3, false)
+                    last_code = push_code(facts, K_SLASH_PERCENT_EQ, start, start + 3, false)
                     i += 3
                 }
                 next1 == 37 -> {
-                    last_code = push_code(&facts, K_SLASH_PERCENT, start, start + 2, false)
+                    last_code = push_code(facts, K_SLASH_PERCENT, start, start + 2, false)
                     i += 2
                 }
                 next1 == 61 -> {
-                    last_code = push_code(&facts, K_SLASH_EQ, start, start + 2, false)
+                    last_code = push_code(facts, K_SLASH_EQ, start, start + 2, false)
                     i += 2
                 }
                 else -> {
-                    last_code = push_code(&facts, K_SLASH, start, start + 1, false)
+                    last_code = push_code(facts, K_SLASH, start, start + 1, false)
                     i += 1
                 }
             }
@@ -976,19 +976,19 @@ raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int
         if value == 37 {
             if {
                 next1 == 37 && next2 == 61 -> {
-                    last_code = push_code(&facts, K_PERCENT_PERCENT_EQ, start, start + 3, false)
+                    last_code = push_code(facts, K_PERCENT_PERCENT_EQ, start, start + 3, false)
                     i += 3
                 }
                 next1 == 37 -> {
-                    last_code = push_code(&facts, K_PERCENT_PERCENT, start, start + 2, false)
+                    last_code = push_code(facts, K_PERCENT_PERCENT, start, start + 2, false)
                     i += 2
                 }
                 next1 == 61 -> {
-                    last_code = push_code(&facts, K_PERCENT_EQ, start, start + 2, false)
+                    last_code = push_code(facts, K_PERCENT_EQ, start, start + 2, false)
                     i += 2
                 }
                 else -> {
-                    last_code = push_code(&facts, K_PERCENT, start, start + 1, false)
+                    last_code = push_code(facts, K_PERCENT, start, start + 1, false)
                     i += 1
                 }
             }
@@ -997,15 +997,15 @@ raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int
         if value == 38 {
             if {
                 next1 == 38 -> {
-                    last_code = push_code(&facts, K_AND_AND, start, start + 2, false)
+                    last_code = push_code(facts, K_AND_AND, start, start + 2, false)
                     i += 2
                 }
                 next1 == 61 -> {
-                    last_code = push_code(&facts, K_AMP_EQ, start, start + 2, false)
+                    last_code = push_code(facts, K_AMP_EQ, start, start + 2, false)
                     i += 2
                 }
                 else -> {
-                    last_code = push_code(&facts, K_AMP, start, start + 1, false)
+                    last_code = push_code(facts, K_AMP, start, start + 1, false)
                     i += 1
                 }
             }
@@ -1014,15 +1014,15 @@ raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int
         if value == 124 {
             if {
                 next1 == 124 -> {
-                    last_code = push_code(&facts, K_OR_OR, start, start + 2, false)
+                    last_code = push_code(facts, K_OR_OR, start, start + 2, false)
                     i += 2
                 }
                 next1 == 61 -> {
-                    last_code = push_code(&facts, K_PIPE_EQ, start, start + 2, false)
+                    last_code = push_code(facts, K_PIPE_EQ, start, start + 2, false)
                     i += 2
                 }
                 else -> {
-                    last_code = push_code(&facts, K_PIPE, start, start + 1, false)
+                    last_code = push_code(facts, K_PIPE, start, start + 1, false)
                     i += 1
                 }
             }
@@ -1031,11 +1031,11 @@ raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int
         if value == 94 {
             if {
                 next1 == 61 -> {
-                    last_code = push_code(&facts, K_CARET_EQ, start, start + 2, false)
+                    last_code = push_code(facts, K_CARET_EQ, start, start + 2, false)
                     i += 2
                 }
                 else -> {
-                    last_code = push_code(&facts, K_CARET, start, start + 1, false)
+                    last_code = push_code(facts, K_CARET, start, start + 1, false)
                     i += 1
                 }
             }
@@ -1044,19 +1044,19 @@ raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int
         if value == 126 {
             if {
                 next1 == 126 -> {
-                    last_code = push_code(&facts, K_TILDE_TILDE, start, start + 2, false)
+                    last_code = push_code(facts, K_TILDE_TILDE, start, start + 2, false)
                     i += 2
                 }
                 next1 == 124 && next2 == 61 -> {
-                    last_code = push_code(&facts, K_TILDE_PIPE_EQ, start, start + 3, false)
+                    last_code = push_code(facts, K_TILDE_PIPE_EQ, start, start + 3, false)
                     i += 3
                 }
                 next1 == 124 -> {
-                    last_code = push_code(&facts, K_TILDE_PIPE, start, start + 2, false)
+                    last_code = push_code(facts, K_TILDE_PIPE, start, start + 2, false)
                     i += 2
                 }
                 else -> {
-                    last_code = push_code(&facts, K_TILDE, start, start + 1, false)
+                    last_code = push_code(facts, K_TILDE, start, start + 1, false)
                     i += 1
                 }
             }
@@ -1065,28 +1065,28 @@ raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int
         if value == 60 {
             if {
                 next1 == 60 && next2 == 61 -> {
-                    last_code = push_code(&facts, K_SHL_EQ, start, start + 3, false)
+                    last_code = push_code(facts, K_SHL_EQ, start, start + 3, false)
                     i += 3
                 }
                 next1 == 60 -> {
-                    last_code = push_code(&facts, K_SHL, start, start + 2, false)
+                    last_code = push_code(facts, K_SHL, start, start + 2, false)
                     i += 2
                 }
                 next1 == 61 && next2 == 62 -> {
-                    last_code = push_code(&facts, K_COMPARE, start, start + 3, false)
+                    last_code = push_code(facts, K_COMPARE, start, start + 3, false)
                     i += 3
                 }
                 next1 == 61 -> {
-                    last_code = push_code(&facts, K_LE, start, start + 2, false)
+                    last_code = push_code(facts, K_LE, start, start + 2, false)
                     i += 2
                 }
                 // `<:` opens a statement-expansion fence.
                 next1 == 58 -> {
-                    last_code = push_code(&facts, K_FENCE_OPEN, start, start + 2, false)
+                    last_code = push_code(facts, K_FENCE_OPEN, start, start + 2, false)
                     i += 2
                 }
                 else -> {
-                    last_code = push_code(&facts, K_LT, start, start + 1, false)
+                    last_code = push_code(facts, K_LT, start, start + 1, false)
                     i += 1
                 }
             }
@@ -1095,19 +1095,19 @@ raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int
         if value == 62 {
             if {
                 next1 == 62 && next2 == 61 -> {
-                    last_code = push_code(&facts, K_SHR_EQ, start, start + 3, false)
+                    last_code = push_code(facts, K_SHR_EQ, start, start + 3, false)
                     i += 3
                 }
                 next1 == 62 -> {
-                    last_code = push_code(&facts, K_SHR, start, start + 2, false)
+                    last_code = push_code(facts, K_SHR, start, start + 2, false)
                     i += 2
                 }
                 next1 == 61 -> {
-                    last_code = push_code(&facts, K_GE, start, start + 2, false)
+                    last_code = push_code(facts, K_GE, start, start + 2, false)
                     i += 2
                 }
                 else -> {
-                    last_code = push_code(&facts, K_GT, start, start + 1, false)
+                    last_code = push_code(facts, K_GT, start, start + 1, false)
                     i += 1
                 }
             }
@@ -1129,7 +1129,7 @@ raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int
                             i = -end - 1
                         }
                         else -> {
-                            last_code = push_code(&facts, K_STR, start, end, false)
+                            last_code = push_code(facts, K_STR, start, end, false)
                             i = end
                         }
                     }
@@ -1142,7 +1142,7 @@ raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int
                             i = -end - 1
                         }
                         else -> {
-                            last_code = push_code(&facts, K_STR, start, end, false)
+                            last_code = push_code(facts, K_STR, start, end, false)
                             i = end
                         }
                     }
@@ -1157,7 +1157,7 @@ raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int
                     i = -end - 1
                 }
                 else -> {
-                    last_code = push_code(&facts, K_RAW_STR, start, end, false)
+                    last_code = push_code(facts, K_RAW_STR, start, end, false)
                     i = end
                 }
             }
@@ -1170,7 +1170,7 @@ raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int
                     i = source.len()
                 }
                 else -> {
-                    last_code = push_code(&facts, K_CHAR, start, end, false)
+                    last_code = push_code(facts, K_CHAR, start, end, false)
                     i = end
                 }
             }
@@ -1188,7 +1188,7 @@ raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int
                 numeric_is_float(source, start) -> K_FLOAT
                 else -> K_INT
             }
-            last_code = push_code(&facts, kind, start, end, false)
+            last_code = push_code(facts, kind, start, end, false)
             i = end
             next
         }
@@ -1198,13 +1198,13 @@ raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int
             if kind == K_FN -> fn_in_range = true
             upper := false
             if kind == K_IDENT -> upper = first_char_is_upper(source, i)
-            last_code = push_code(&facts, kind, i, end, upper)
+            last_code = push_code(facts, kind, i, end, upper)
             i = end
             next
         }
         i += utf8_width(source, i)
     }
-    if to >= source.len() -> emit(&facts, K_EOF, source.len(), source.len(), false)
+    if to >= source.len() -> emit(facts, K_EOF, source.len(), source.len(), false)
     RawScanStop{stop: i, bodies_local: bodies_local}
 }
 

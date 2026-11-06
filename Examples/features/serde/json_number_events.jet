@@ -15,13 +15,13 @@ use {
 
 reject_json: fn(path: Path, canonical: Bool, text: String) (EncodingError | IOError)! {
     output: files.create(path)
-    writer := json.writer(^output, canonical: canonical)
-    if &writer.write(encoding.DataEvent.Number(text)) == {
+    writer := json.writer(output, canonical: canonical)
+    if writer.write(encoding.DataEvent.Number(text)) == {
         .Ok(_) -> panic("JSON writer accepted Number")
         .Err(first) -> {
             print(first.kind == .Unsupported)
             print(first.byte_offset)
-            if &writer.write(encoding.DataEvent.Int(1)) == {
+            if writer.write(encoding.DataEvent.Int(1)) == {
                 .Ok(_) -> panic("JSON writer lost its terminal error")
                 .Err(second) -> print(second == first)
             }
@@ -31,8 +31,8 @@ reject_json: fn(path: Path, canonical: Bool, text: String) (EncodingError | IOEr
 
 reject_cbor: fn(path: Path, text: String) (EncodingError | IOError)! {
     output: files.create(path)
-    writer := cbor.writer(^output)
-    if &writer.write(encoding.DataEvent.Number(text)) == {
+    writer := cbor.writer(output)
+    if writer.write(encoding.DataEvent.Number(text)) == {
         .Ok(_) -> panic("CBOR writer accepted Number")
         .Err(error) -> {
             print(error.kind == .Unsupported)

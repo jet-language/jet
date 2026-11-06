@@ -69,7 +69,7 @@ FFIBuildLock: struct {
 }
 
 impl FFIBuildLock.Close {
-    close: fn(^self) -[FS]> {
+    close: fn(&&self) -[FS]> {
         files.remove_dir(self.dir).drop("the lock directory may already be gone")
     }
 }
@@ -132,7 +132,7 @@ pkg_ffi_build_bridge_full: fn(request: RustBridgeBuild) -[FS, Env, Exec, Time, T
     // target-dir lock protects the shared `target/`, not the sources this
     // build is about to rewrite.
     lock: FFIBuildLock.acquire(paths.cache_root)
-    defer close(^lock)
+    defer close(lock)
     // Re-check under the lock: the holder may have just finished this key.
     locked_hit: pkg_ffi_verified_cache_hit(request, key, deps, paths)
     if locked_hit == .Val(link) -> return Ok(link)
@@ -178,7 +178,7 @@ pkg_ffi_write_bridge_sources: fn(request: RustBridgeBuild, deps: [String: String
     }
     handle_names := [String]{}
     loop fact in request.handle_facts {
-        if !handle_names.contains(fact.jet_name) -> &handle_names.push(fact.jet_name)
+        if !handle_names.contains(fact.jet_name) -> handle_names.push(fact.jet_name)
     }
     wrapper_source: pkg_ffi_emit_wrapper_lib_with_handles(entries, handle_names, request.record_defs)
     files.write(files.join(src_dir, "lib.rs"), wrapper_source) ?? return Err(pkg_ffi_tool_error("couldn't write the FFI wrappers: {err}"))
@@ -200,7 +200,7 @@ pkg_ffi_run_sandboxed_cargo: fn(cargo_path: String, selected_target: String, pat
     cargo_home: sys.get("CARGO_HOME") ?? files.join(pkg_ffi_dirs_home(), ".cargo")
     mounts := [NativeSandboxMount]{}
     if files.canonicalize(files.join(cargo_home, "registry")) == .Ok(registry) {
-        if files.is_dir(registry) -> &mounts.push(NativeSandboxMount{source: registry, destination: "/work/output/cargo-home/registry"})
+        if files.is_dir(registry) -> mounts.push(NativeSandboxMount{source: registry, destination: "/work/output/cargo-home/registry"})
     }
     // U+001F joins Cargo's encoded rustflags.
     if native_link_args.len() > 0 -> sandbox_env["CARGO_ENCODED_RUSTFLAGS"] = native_link_args.join(String.from_bytes([U8]{U8{31}}) ?? "")
@@ -217,7 +217,7 @@ pkg_ffi_cargo_failure: fn(entries: [ExternEntry], deps: [String: String], stderr
     if pkg_ffi_looks_like_signature_mismatch(stderr) {
         hint: if entries.len() > 0 -> entries[0].line_hint else -> "an `extern rust` declaration"
         mismatch: diagnostic_from_registry("E0705", None, "the Rust item doesn't match the Jet signature at {hint}", "the `= \"rust::path\"` on an `extern rust` line must name a safe Rust function whose parameters and return type match what you wrote", "check the path and types on {hint}, or pick a different Rust function")
-        return diagnostic_with_detail(^mismatch, "  cargo said:\n{pkg_ffi_stable_cargo_detail(stderr)}")
+        return diagnostic_with_detail(mismatch, "  cargo said:\n{pkg_ffi_stable_cargo_detail(stderr)}")
     }
     pkg_ffi_cargo_bridge_failure_diagnostic(pkg_ffi_first_dependency(deps), pkg_ffi_stable_cargo_detail(stderr))
 }
@@ -275,7 +275,7 @@ pkg_ffi_cargo_metadata_has_compile_time_code: fn(metadata: String, bridge_crate_
 
 pkg_ffi_cargo_bridge_failure_diagnostic: fn(dependency: String, detail: String) -> Diagnostic Never! {
     failure: diagnostic_from_registry("E0704", None, "couldn't fetch or build `{dependency}`", "Cargo could not resolve or build this foreign crate bridge", "check the crate version, network, and Cargo diagnostic, then try again")
-    diagnostic_with_detail(^failure, "  cargo said:\n{detail}")
+    diagnostic_with_detail(failure, "  cargo said:\n{detail}")
 }
 
 pkg_ffi_looks_like_signature_mismatch: fn(stderr: String) -> Bool Never! {
@@ -288,7 +288,7 @@ pkg_ffi_looks_like_signature_mismatch: fn(stderr: String) -> Bool Never! {
 
 pkg_ffi_indent_block: fn(text: String) -> String Never! {
     lines := [String]{}
-    loop line in pkg_bridge_text_lines(text) -> &lines.push(if line == "" -> "" else -> "    {line}")
+    loop line in pkg_bridge_text_lines(text) -> lines.push(if line == "" -> "" else -> "    {line}")
     lines.join("\n")
 }
 
@@ -301,7 +301,7 @@ pkg_ffi_stable_cargo_detail: fn(stderr: String) -> String Never! {
         trimmed: line.trim()
         if trimmed == "" || trimmed.starts_with("Updating crates.io") || trimmed.starts_with("Locking ") || trimmed.starts_with("Adding ") || trimmed.contains("waiting for other jobs") -> next
         if trimmed.starts_with("Compiling ") && !trimmed.contains("jet_ffi_") -> next
-        &kept.push(pkg_ffi_normalize_ffi_generated_source_line(pkg_ffi_normalize_ffi_crate_name(pkg_ffi_normalize_ffi_cache_path(line))))
+        kept.push(pkg_ffi_normalize_ffi_generated_source_line(pkg_ffi_normalize_ffi_crate_name(pkg_ffi_normalize_ffi_cache_path(line))))
     }
     pkg_ffi_indent_block(kept.join("\n"))
 }

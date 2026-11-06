@@ -46,7 +46,7 @@ pkg_test_envelope_hangar_error: fn(out: String, hangar: String) -[FS, Env]> Stri
 
 // The error of a hook-observed native hash.
 pkg_test_envelope_hook_error: fn(out: String, hook: &EnvelopeWalkHook) -[FS, Env]> String Never! {
-    if pkg_try_output_hash_of_with_policy(out, false, &hook) == {
+    if pkg_try_output_hash_of_with_policy(out, false, hook) == {
         .Ok(_) -> panic("the concurrent change must be refused")
         .Err(error) -> error.message()
     }
@@ -66,37 +66,37 @@ EnvelopeTestLink: struct {
 
 pkg_test_reference_archive: fn(root: String, allow_semantic_xattrs: Bool) -[FS, Env]> [U8] Never! {
     archive_bytes := ENVELOPE_ARCHIVE_MAGIC.bytes()
-    &archive_bytes.push(U8{0})
+    archive_bytes.push(U8{0})
     links := [EnvelopeTestLink]{}
-    pkg_test_reference_encode_node(root, "", &archive_bytes, &links, allow_semantic_xattrs)
+    pkg_test_reference_encode_node(root, "", archive_bytes, links, allow_semantic_xattrs)
     archive_bytes
 }
 
 pkg_test_reference_push_bytes: fn(out: &[U8], bytes: [U8]) Never! {
-    loop byte in pkg_u64_be_bytes(bytes.len()) -> &out.push(byte)
-    loop byte in bytes -> &out.push(byte)
+    loop byte in pkg_u64_be_bytes(bytes.len()) -> out.push(byte)
+    loop byte in bytes -> out.push(byte)
 }
 
 pkg_test_reference_header: fn(out: &[U8], kind: U8, path: [U8], mode: Int) Never! {
-    &out.push(kind)
-    pkg_test_reference_push_bytes(&out, path)
-    loop byte in pkg_u32_be_bytes(mode) -> &out.push(byte)
+    out.push(kind)
+    pkg_test_reference_push_bytes(out, path)
+    loop byte in pkg_u32_be_bytes(mode) -> out.push(byte)
 }
 
 pkg_test_reference_xattrs: fn(path: String, out: &[U8], allow: Bool) Never! -[FS]> {
     names := [String]{}
     listed: pkg_list_xattr_names(path) ?? panic("xattr names")
     loop name in listed {
-        if !pkg_is_excluded_xattr(name) -> &names.push(name)
+        if !pkg_is_excluded_xattr(name) -> names.push(name)
     }
-    &names.sort()
+    names.sort()
     if names.len() == 0 -> return
     // Fixture xattrs require an explicit allowance.
     assert(allow)
     loop name in names {
-        &out.push(U8{88})
-        pkg_test_reference_push_bytes(&out, name.bytes())
-        pkg_test_reference_push_bytes(&out, pkg_xattr_value(path, name) ?? panic("xattr value"))
+        out.push(U8{88})
+        pkg_test_reference_push_bytes(out, name.bytes())
+        pkg_test_reference_push_bytes(out, pkg_xattr_value(path, name) ?? panic("xattr value"))
     }
 }
 
@@ -104,37 +104,37 @@ pkg_test_reference_encode_node: fn(path: String, rel: String, out: &[U8], links:
     info: files.stat(path) ?? panic("stat fixture node")
     mode: pkg_envelope_mode(info)
     if info.is_dir {
-        pkg_test_reference_header(&out, U8{68}, rel.bytes(), mode)
-        pkg_test_reference_xattrs(path, &out, allow)
+        pkg_test_reference_header(out, U8{68}, rel.bytes(), mode)
+        pkg_test_reference_xattrs(path, out, allow)
         entries := files.list_dir(path) ?? panic("list fixture directory")
-        &entries.sort_by(entry -> entry.name)
+        entries.sort_by(entry -> entry.name)
         loop entry in entries {
             child: if rel == "" -> entry.name else -> "{rel}/{entry.name}"
-            pkg_test_reference_encode_node(entry.path, child, &out, &links, allow)
+            pkg_test_reference_encode_node(entry.path, child, out, links, allow)
         }
         return
     }
     if info.is_symlink {
         target: files.read_link(path) ?? panic("read fixture link")
-        pkg_test_reference_header(&out, U8{76}, rel.bytes(), mode)
-        pkg_test_reference_push_bytes(&out, target.bytes())
-        pkg_test_reference_xattrs(path, &out, allow)
+        pkg_test_reference_header(out, U8{76}, rel.bytes(), mode)
+        pkg_test_reference_push_bytes(out, target.bytes())
+        pkg_test_reference_xattrs(path, out, allow)
         return
     }
     if !info.is_file -> panic("fixture contains an unsupported node `{path}`")
     if info.links > 1 {
         loop link in links {
             if link.key == info.id {
-                pkg_test_reference_header(&out, U8{72}, rel.bytes(), mode)
-                pkg_test_reference_push_bytes(&out, link.first.bytes())
+                pkg_test_reference_header(out, U8{72}, rel.bytes(), mode)
+                pkg_test_reference_push_bytes(out, link.first.bytes())
                 return
             }
         }
     }
-    pkg_test_reference_header(&out, U8{70}, rel.bytes(), mode)
-    pkg_test_reference_xattrs(path, &out, allow)
-    pkg_test_reference_push_bytes(&out, files.read_bytes(path) ?? panic("read fixture file"))
-    if info.links > 1 -> &links.push(EnvelopeTestLink{key: info.id, first: rel})
+    pkg_test_reference_header(out, U8{70}, rel.bytes(), mode)
+    pkg_test_reference_xattrs(path, out, allow)
+    pkg_test_reference_push_bytes(out, files.read_bytes(path) ?? panic("read fixture file"))
+    if info.links > 1 -> links.push(EnvelopeTestLink{key: info.id, first: rel})
 }
 
 #Test("envelope platform key is arch dash os") {
@@ -175,10 +175,10 @@ pkg_test_reference_encode_node: fn(path: String, rel: String, out: &[U8], links:
     files.create_dir_all(nested) ?? panic("mkdir nested")
     files.write(files.join(dir, "small.txt"), "small file") ?? panic("write small")
     chunk := [U8]{}
-    loop index in 0..<4096 -> &chunk.push(U8{index % 251})
+    loop index in 0..<4096 -> chunk.push(U8{index % 251})
     large := [U8]{}
     loop _ in 0..<768 {
-        loop byte in chunk -> &large.push(byte)
+        loop byte in chunk -> large.push(byte)
     }
     files.write_bytes(files.join(dir, "large.bin"), large) ?? panic("write large")
     files.write(files.join(nested, "payload"), "nested payload") ?? panic("write payload")
@@ -187,7 +187,7 @@ pkg_test_reference_encode_node: fn(path: String, rel: String, out: &[U8], links:
     has_xattr: files.set_extended_attribute(files.join(nested, "payload"), name: "user.jet.stream_reference", value: "stream-reference".bytes()) == .Ok(_)
     root: files.canonicalize(dir) ?? panic("canonicalize")
     hook := EnvelopeWalkHook.recording()
-    got: pkg_try_output_hash_of_with_policy(dir, has_xattr, &hook) ?? panic("stream hash")
+    got: pkg_try_output_hash_of_with_policy(dir, has_xattr, hook) ?? panic("stream hash")
     // Streamed archive bytes must match the materialized reference.
     assert_eq(got, "sha256-{pkg_sha256_hex(pkg_test_reference_archive(root, has_xattr))}")
     metadata: files.stat(files.join(dir, "small.txt")) ?? panic("stat small")
@@ -375,7 +375,7 @@ pkg_test_reference_encode_node: fn(path: String, rel: String, out: &[U8], links:
             files.rename(replacement, keep) ?? panic("replace")
         }
     }
-    assert(pkg_test_envelope_hook_error(dir, &hook).contains("changed while hashing"))
+    assert(pkg_test_envelope_hook_error(dir, hook).contains("changed while hashing"))
     files.remove(marker).drop("cleanup")
     files.remove_all(dir) ?? panic("cleanup")
 }
@@ -419,7 +419,7 @@ pkg_test_reference_encode_node: fn(path: String, rel: String, out: &[U8], links:
             files.remove(payload) ?? panic("remove payload")
         }
     }
-    assert(pkg_test_envelope_hook_error(dir, &hook).contains("changed while hashing"))
+    assert(pkg_test_envelope_hook_error(dir, hook).contains("changed while hashing"))
     files.remove_all(dir) ?? panic("cleanup")
 }
 
@@ -444,7 +444,7 @@ pkg_test_reference_encode_node: fn(path: String, rel: String, out: &[U8], links:
             assert_eq((files.stat(file) ?? panic("stat")).modified.to_unix_ns() ?? panic("mtime"), expected_mtime)
         }
     }
-    assert(pkg_test_envelope_hook_error(dir, &hook).contains("changed while hashing"))
+    assert(pkg_test_envelope_hook_error(dir, hook).contains("changed while hashing"))
     files.remove(marker).drop("cleanup")
     files.remove_all(dir) ?? panic("cleanup")
 }
@@ -501,7 +501,7 @@ pkg_test_reference_encode_node: fn(path: String, rel: String, out: &[U8], links:
     files.write_at(sparse, 0, "A".bytes()) ?? panic("write A")
     files.write_at(sparse, 1048575, "Z".bytes()) ?? panic("write Z")
     bytes := [U8]{}
-    loop _ in 0..<1048576 -> &bytes.push(U8{0})
+    loop _ in 0..<1048576 -> bytes.push(U8{0})
     bytes[0] = U8{65}
     bytes[1048575] = U8{90}
     files.write_bytes(dense, bytes) ?? panic("write dense")
@@ -570,9 +570,9 @@ pkg_test_reference_encode_node: fn(path: String, rel: String, out: &[U8], links:
     files.set_extended_attribute(file, name: "user.jet.identity", value: "first".bytes()) ?? panic("set first")
     assert(pkg_try_output_hash_of(dir) == .Err(_))
     hook := EnvelopeWalkHook.recording()
-    first: pkg_try_output_hash_of_with_policy(dir, true, &hook) ?? panic("first hash")
+    first: pkg_try_output_hash_of_with_policy(dir, true, hook) ?? panic("first hash")
     files.set_extended_attribute(file, name: "user.jet.identity", value: "second".bytes()) ?? panic("set second")
-    second: pkg_try_output_hash_of_with_policy(dir, true, &hook) ?? panic("second hash")
+    second: pkg_try_output_hash_of_with_policy(dir, true, hook) ?? panic("second hash")
     assert(first != second)
     files.remove_all(dir) ?? panic("cleanup")
 }

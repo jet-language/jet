@@ -2,16 +2,16 @@
 // Construct with Queue.new() / Queue.init([...]); push/pop both ends.
 run: fn() {
     d := Queue.new()
-    &d.push_back(<: 1..3 :>)
-    &d.push_front(0)
+    d.push_back(<: 1..3 :>)
+    d.push_front(0)
     print("len: {d.len()}")
     print("is_empty: {d.is_empty()}")
     print("cap_ok: {d.capacity() >= d.len()}")
     if d.peek_front() == .Val(n) -> print("front: {n}")
     if d.peek_back() == .Val(n) -> print("back: {n}")
-    if &d.pop_front() == .Val(n) -> print("popped front: {n}")
+    if d.pop_front() == .Val(n) -> print("popped front: {n}")
     print("len after pop: {d.len()}")
-    if &d.pop_back() == .Val(n) -> print("popped back: {n}")
+    if d.pop_back() == .Val(n) -> print("popped back: {n}")
     print("len after two pops: {d.len()}")
 
     e := Queue.init([10, 20, 30, 40])
@@ -20,11 +20,11 @@ run: fn() {
     print("contains 99: {e.contains(99)}")
     if e.get(1) == .Val(n) -> print("get1: {n}")
     print("join: {e.join(",")}")
-    &e.delete(20)
+    e.delete(20)
     print("after delete: {e.to_list()}")
-    &e.reverse()
+    e.reverse()
     print("after reverse: {e.to_list()}")
-    rest := &e.split(1)
+    rest := e.split(1)
     print("after split left: {e.to_list()}")
     print("after split right: {rest.to_list()}")
 
@@ -32,12 +32,12 @@ run: fn() {
     // their contents rather than the native String-handle addresses.
     source := ["alpha", "beta"]
     words := Queue.init(source)
-    &source.push("gamma")
+    source.push("gamma")
     assert(words.to_list() == ["alpha", "beta"])
     assert(words.contains("alpha"))
-    &words.delete("alpha")
+    words.delete("alpha")
     assert(words.to_list() == ["beta"])
-    popped: &words.pop_front()
+    popped: words.pop_front()
     if popped == {
         .Val(value) -> assert(value == "beta")
         .None -> assert(false)
@@ -46,10 +46,10 @@ run: fn() {
 
     // Split clamps exact Int bounds, including values beyond machine words.
     bounded := Queue.init([1, 2])
-    beyond := &bounded.split(100000000000000000000000000000000)
+    beyond := bounded.split(100000000000000000000000000000000)
     assert(bounded.len() == 2)
     assert(beyond.is_empty())
-    whole := &bounded.split(-1)
+    whole := bounded.split(-1)
     assert(bounded.is_empty())
     assert(whole.to_list() == [1, 2])
 }

@@ -83,7 +83,7 @@ the same abort a panic during unwinding gets. No additional TLS state
 or specialized plain cleanup call graph is introduced.
 The Source acceptance runner
 `Compiler/JetBackend/Tests/run-trap-source-fixtures.mjs` reuses the registered
-`defer close(^resource)` examples, checking native task publication, plain
+`defer close(resource)` examples, checking native task publication, plain
 task/root fatal report parity, LIFO closes exactly once, cancellation held
 through closing and delivered at the next wait, fatal panic inside closing,
 and the plain no-task output against its existing byte golden. Its

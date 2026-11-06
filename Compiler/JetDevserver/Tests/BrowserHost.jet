@@ -1,6 +1,6 @@
 use jet_devserver.BrowserHost.[BrowserActionGrant, BrowserHost, BrowserHostAction, BrowserHostEvent, BrowserHtmlElement, BrowserNode, BrowserPanelFact, BrowserReconnectCursor, BrowserSourceGrant, BrowserSourceLocation, MAX_RECONNECT_EVENTS]
 panel: fn(status: String, nodes: [BrowserNode]) -> BrowserPanelFact {
-    BrowserPanelFact.new("build", "Build", 12, status, ^nodes)
+    BrowserPanelFact.new("build", "Build", 12, status, nodes)
 }
 event: fn(session: String, revision: U64, sequence: U64, status: String) -> BrowserHostEvent {
     BrowserHostEvent.new(session, revision, sequence, 100 + sequence, [panel(status, [
@@ -9,31 +9,31 @@ event: fn(session: String, revision: U64, sequence: U64, status: String) -> Brow
 }
 #Test("event_validation_and_monotonic_projection") {
     host := BrowserHost.new("s1")
-    &host.apply_event(event("s1", 1, 1, "ready")).unwrap()
+    host.apply_event(event("s1", 1, 1, "ready")).unwrap()
     assert_eq(host.revision(), .Val(1))
     assert_eq(host.sequence(), .Val(1))
     assert_eq(host.state(), .Idle)
     assert_eq(host.panel_catalog().len(), 1)
-    assert(if &host.apply_event(event("s1", 0, 2, "ready")) == {
+    assert(if host.apply_event(event("s1", 0, 2, "ready")) == {
         .Err(.StaleRevision { .. }) -> true
         else -> false
     })
-    assert(if &host.apply_event(event("s1", 1, 1, "ready")) == {
+    assert(if host.apply_event(event("s1", 1, 1, "ready")) == {
         .Err(.StaleSequence { .. }) -> true
         else -> false
     })
-    assert(if &host.apply_event(event("s2", 2, 2, "ready")) == {
+    assert(if host.apply_event(event("s2", 2, 2, "ready")) == {
         .Err(.WrongSession { .. }) -> true
         else -> false
     })
 }
 #Test("layout_and_selection_are_shared_but_open_state_is_placement_local") {
     host := BrowserHost.new("s1")
-    &host.apply_event(event("s1", 1, 1, "ready")).unwrap()
-    &host.open_panel(.InApp, "build").unwrap()
-    &host.open_panel(.Workbench, "build").unwrap()
-    &host.select("build", .Val("source")).unwrap()
-    &host.dock_panel(.Workbench, "build", .Right).unwrap()
+    host.apply_event(event("s1", 1, 1, "ready")).unwrap()
+    host.open_panel(.InApp, "build").unwrap()
+    host.open_panel(.Workbench, "build").unwrap()
+    host.select("build", .Val("source")).unwrap()
+    host.dock_panel(.Workbench, "build", .Right).unwrap()
     in_app: host.view_model(.InApp)
     workbench: host.view_model(.Workbench)
     assert(in_app.panels[0].open)
@@ -51,7 +51,7 @@ event: fn(session: String, revision: U64, sequence: U64, status: String) -> Brow
 #Test("reconnect_is_bounded_and_cursor_resumes") {
     host := BrowserHost.new("s1")
     loop sequence in 1..(U64(MAX_RECONNECT_EVENTS) + 2) {
-        &host.apply_event(event("s1", sequence, sequence, "ready")).unwrap()
+        host.apply_event(event("s1", sequence, sequence, "ready")).unwrap()
     }
     retained: host.resume_from(.Val(BrowserReconnectCursor.from(254))).unwrap()
     assert_eq(retained.events.len(), 4)
@@ -67,25 +67,25 @@ event: fn(session: String, revision: U64, sequence: U64, status: String) -> Brow
 }
 #Test("stale_wrong_session_and_ungranted_actions_are_rejected") {
     host := BrowserHost.new("s1")
-    &host.apply_event(event("s1", 7, 1, "ready")).unwrap()
+    host.apply_event(event("s1", 7, 1, "ready")).unwrap()
     source: BrowserSourceGrant.new("s1", 7, "build", "source", BrowserSourceLocation.new("src/main.jet", 4, 2, .Val("main")))
-    effect_ref: &host.dispatch(BrowserHostAction.navigate_source(.InApp, "build", "source", source.copy())).unwrap()
+    effect_ref: host.dispatch(BrowserHostAction.navigate_source(.InApp, "build", "source", source.copy())).unwrap()
     assert(if effect_ref == {
         .SourceNavigated { .. } -> true
         else -> false
     })
     stale: BrowserSourceGrant.new("s1", 6, "build", "source", source.source.copy())
-    assert(if &host.dispatch(BrowserHostAction.navigate_source(.Workbench, "build", "source", ^stale)) == {
+    assert(if host.dispatch(BrowserHostAction.navigate_source(.Workbench, "build", "source", stale)) == {
         .Err(.StaleRevision { .. }) -> true
         else -> false
     })
     wrong: BrowserSourceGrant.new("s2", 7, "build", "source", source.source.copy())
-    assert(if &host.dispatch(BrowserHostAction.navigate_source(.InApp, "build", "source", ^wrong)) == {
+    assert(if host.dispatch(BrowserHostAction.navigate_source(.InApp, "build", "source", wrong)) == {
         .Err(.WrongSession { .. }) -> true
         else -> false
     })
     action: BrowserActionGrant.new("s1", 7, "build", "source", "source")
-    assert(if &host.dispatch(BrowserHostAction.invoke_action(.InApp, "build", "source", "source", ^action)) == {
+    assert(if host.dispatch(BrowserHostAction.invoke_action(.InApp, "build", "source", "source", action)) == {
         .Err(.ActionNotGranted(_)) -> true
         else -> false
     })

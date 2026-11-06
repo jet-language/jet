@@ -121,7 +121,7 @@ sema_expression_names_enum: fn(name: String, environment: SemaScopeEnvironment, 
     index := sema_scope_resolve_index(scopes, name)
     if index == .Val(found) && scopes.bindings[found].symbol.kind != SymbolKind.Type -> return false
     if sema_fact_enum_menu(Type.Named{name: name}, environment, program) != None -> return true
-    owner := sema_expression_type_symbol(&scopes, environment, program, name)
+    owner := sema_expression_type_symbol(scopes, environment, program, name)
     if owner == .Val(symbol) {
         if sema_scope_declaration_is(environment, program, symbol.id, SemaScopeDeclarationKind.Enum) -> return true
         user_declared: !symbol.module_name.starts_with("<corelib>/")
@@ -156,7 +156,7 @@ sema_expression_path_segments: fn(expression: Expr) -> [String]? {
         .Ident(name, _, _) -> Val([String]{name})
         .Field(inner, member, _, _) -> {
             segments := sema_expression_path_segments(inner) ?? return None
-            &segments.push(member)
+            segments.push(member)
             Val(segments)
         }
         else -> None
@@ -165,7 +165,7 @@ sema_expression_path_segments: fn(expression: Expr) -> [String]? {
 
 sema_expression_join_segments: fn(segments: [String], start: Int) -> String Never! {
     parts := [String]{}
-    loop index in start..<segments.len() -> &parts.push(segments[index])
+    loop index in start..<segments.len() -> parts.push(segments[index])
     parts.join(".")
 }
 
@@ -175,7 +175,7 @@ sema_expression_join_segments: fn(segments: [String], start: Int) -> String Neve
 // root names no variant.
 sema_expression_enum_variant_path: fn(base: Expr, member: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> SemaExpressionEnumPath? {
     segments := sema_expression_path_segments(base) ?? return None
-    &segments.push(member)
+    segments.push(member)
     root: segments[0]
     index: sema_scope_resolve_index(scopes, root)
     if index == .Val(found) {
@@ -186,11 +186,11 @@ sema_expression_enum_variant_path: fn(base: Expr, member: String, environment: S
     }
     // `use Tree: core.encoding.Dyn`: an alias of a Core enum carrier
     // names that enum, whose variants are read by its Core leaf.
-    enum_root: sema_expression_core_enum_alias(root, &scopes) ?? root
-    if sema_expression_names_enum(enum_root, environment, program, &scopes) -> return Val(SemaExpressionEnumPath{enum_name: enum_root, variant: sema_expression_join_segments(segments, 1)})
+    enum_root: sema_expression_core_enum_alias(root, scopes) ?? root
+    if sema_expression_names_enum(enum_root, environment, program, scopes) -> return Val(SemaExpressionEnumPath{enum_name: enum_root, variant: sema_expression_join_segments(segments, 1)})
     if segments.len() < 3 -> return None
     qualified: "{root}.{segments[1]}"
-    if !sema_expression_names_enum(qualified, environment, program, &scopes) -> return None
+    if !sema_expression_names_enum(qualified, environment, program, scopes) -> return None
     Val(SemaExpressionEnumPath{enum_name: qualified, variant: sema_expression_join_segments(segments, 2)})
 }
 
@@ -217,7 +217,7 @@ sema_expression_enum_variant_call: fn(receiver: Expr, method: String, method_spa
     loop argument in args {
         if argument.label != None || argument.spread -> return unhandled
     }
-    path: sema_expression_enum_variant_path(receiver, method, environment, program, &scopes) ?? return unhandled
+    path: sema_expression_enum_variant_path(receiver, method, environment, program, scopes) ?? return unhandled
     // `Dyn.Text("jet")` / `Tree.Int(7)` under an alias of the Core
     // carrier builds the compiler-owned data literal, whose variants carry
     // payloads the unit-only Core enum rows don't list. A declared enum of
@@ -226,12 +226,12 @@ sema_expression_enum_variant_call: fn(receiver: Expr, method: String, method_spa
     // data literal by its leaf.
     carrier: path.enum_name.split(".").to_list().last() ?? path.enum_name
     if path.variant == method && sema_data_is_json_name(carrier) {
-        owner: sema_expression_type_symbol(&scopes, environment, program, path.enum_name)
+        owner: sema_expression_type_symbol(scopes, environment, program, path.enum_name)
         declared_enum := false
         if owner == .Val(symbol) -> declared_enum = sema_scope_declaration_is(environment, program, symbol.id, SemaScopeDeclarationKind.Enum)
-        if !declared_enum -> return sema_call_try_data_literal(Type.Named{name: carrier}, path.variant, args, method_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        if !declared_enum -> return sema_call_try_data_literal(Type.Named{name: carrier}, path.variant, args, method_span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     }
-    if !sema_expression_enum_declares_variant(path.enum_name, path.variant, environment, program, &scopes) -> return unhandled
+    if !sema_expression_enum_declares_variant(path.enum_name, path.variant, environment, program, scopes) -> return unhandled
     // Payload slots retain written access even though they have no CallArg.
     enum_args: loop argument in args -> EnumLitArg.Positional{value: if argument.convention == {
         .Read -> argument.expr
@@ -241,11 +241,11 @@ sema_expression_enum_variant_call: fn(receiver: Expr, method: String, method_spa
     end := method_span.end
     if args.len() > 0 && args[args.len() - 1].span.end > end -> end = args[args.len() - 1].span.end
     span: Span{start: expr_span(receiver).start, end: end}
-    SemaMethodSpecialCheck{handled: true, value: sema_expression_enum_literal(path.enum_name, owner_type_args, path.variant, enum_args, false, Val(method_span), span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)}
+    SemaMethodSpecialCheck{handled: true, value: sema_expression_enum_literal(path.enum_name, owner_type_args, path.variant, enum_args, false, Val(method_span), span, expected, environment, program, scopes, state, tail_store, context, diagnostics)}
 }
 
 sema_expression_enum_declares_variant: fn(enum_name: String, variant: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> Bool {
-    owner: sema_expression_type_symbol(&scopes, environment, program, enum_name)
+    owner: sema_expression_type_symbol(scopes, environment, program, enum_name)
     if owner == .Val(symbol) {
         if sema_scope_declaration_is(environment, program, symbol.id, SemaScopeDeclarationKind.Enum) -> return sema_scope_declaration_enum_declares(environment, program, symbol.id, variant)
     }
@@ -272,35 +272,35 @@ SemaExpressionResolvedType: struct {
 sema_expression_struct_type: fn(type_name: String, type_args: [Type], expected: Type?, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> SemaExpressionResolvedType? {
     if type_name == "" {
         expected_ty: expected ?? {
-            &diagnostics.push(sema_error("E0119", span, "an inferred struct literal needs an expected type", "the `{{ ... }}` form uses the surrounding type to choose its fields", "write the struct name before the braces, like `Point{{ x: 1 }}`"))
+            diagnostics.push(sema_error("E0119", span, "an inferred struct literal needs an expected type", "the `{{ ... }}` form uses the surrounding type to choose its fields", "write the struct name before the braces, like `Point{{ x: 1 }}`"))
             return None
         }
         normalized: sema_expr_unwrap_tag(sema_expr_expected_type(expected_ty, environment, program))
         if normalized == {
             .Named(name) -> {
-                owner: sema_expression_type_symbol(&scopes, environment, program, name) ?? {
-                    &diagnostics.push(sema_error("E0119", span, "the expected type is not a registered struct", "inferred construction needs declaration metadata for its fields", "name a declared struct type"))
+                owner: sema_expression_type_symbol(scopes, environment, program, name) ?? {
+                    diagnostics.push(sema_error("E0119", span, "the expected type is not a registered struct", "inferred construction needs declaration metadata for its fields", "name a declared struct type"))
                     return None
                 }
                 return Val(SemaExpressionResolvedType{ty: normalized, owner: owner})
             }
             .Apply(name, args) -> {
-                owner: sema_expression_type_symbol(&scopes, environment, program, name) ?? {
-                    &diagnostics.push(sema_error("E0119", span, "the expected type is not a registered struct", "inferred construction needs declaration metadata for its fields", "name a declared struct type"))
+                owner: sema_expression_type_symbol(scopes, environment, program, name) ?? {
+                    diagnostics.push(sema_error("E0119", span, "the expected type is not a registered struct", "inferred construction needs declaration metadata for its fields", "name a declared struct type"))
                     return None
                 }
                 return Val(SemaExpressionResolvedType{ty: normalized, owner: owner})
             }
             else -> {
-                &diagnostics.push(sema_error("E0119", span, "`{{ ... }}` needs a known struct type", "inferred construction requires a nominal struct type from context", "name the type before the fields"))
+                diagnostics.push(sema_error("E0119", span, "`{{ ... }}` needs a known struct type", "inferred construction requires a nominal struct type from context", "name the type before the fields"))
                 return None
             }
         }
     }
-    owner: sema_expression_type_symbol(&scopes, environment, program, type_name) ?? {
+    owner: sema_expression_type_symbol(scopes, environment, program, type_name) ?? {
         unknown: sema_expression_unknown_type(type_name, span, environment, program)
         // A struct literal head that names no struct is E0119.
-        &diagnostics.push(if unknown.code == "E0107" -> sema_error("E0119", span, "there's no type called `{type_name}`", "struct literals need a struct type name", "define the struct first, or check the spelling") else -> unknown)
+        diagnostics.push(if unknown.code == "E0107" -> sema_error("E0119", span, "there's no type called `{type_name}`", "struct literals need a struct type name", "define the struct first, or check the spelling") else -> unknown)
         return None
     }
     ty := if type_args.len() > 0 -> Type.Apply{name: type_name, args: type_args} else -> Type.Named{name: type_name}
@@ -315,7 +315,7 @@ sema_expression_struct_type: fn(type_name: String, type_args: [Type], expected: 
         .Named(name) | .Apply(name, _) -> name
         else -> type_name
     }
-    resolved_owner: sema_expression_type_symbol(&scopes, environment, program, resolved_name) ?? owner
+    resolved_owner: sema_expression_type_symbol(scopes, environment, program, resolved_name) ?? owner
     Val(SemaExpressionResolvedType{ty: resolved_ty, owner: resolved_owner})
 }
 
@@ -335,7 +335,7 @@ sema_atomic_field_initializer: fn(field_ty: Type, value: TExpr, source: Expr, co
     row: sema_call_builtin_static_row("Atomic", "new", "") ?? return None
     argument: CallArg{convention: row.parameter_convention, expr: source, span: expr_span(source), flags: ast_empty_call_arg_flags(), label: None, spread: false}
     bindings: [SemaInferenceBinding]{SemaInferenceBinding{name: row.type_params[0], ty: inner, source: "atomic field initializer"}}
-    kind: sema_call_builtin_static_lowered(row, [TExpr]{value}, [CallArg]{^argument}, bindings, value.span, 0, &context) ?? return None
+    kind: sema_call_builtin_static_lowered(row, [TExpr]{value}, [CallArg]{argument.move()}, bindings, value.span, 0, context) ?? return None
     Val(sema_tree_expr(field_ty, kind, value.span))
 }
 
@@ -358,7 +358,7 @@ sema_expression_struct_field_fact: fn(field: Field, owner: Symbol, names: [Strin
     holds_view := false
     if program.registration_graph == .Val(graph) {
         seen := [String:Bool]{}
-        holds_view = sema_check_type_contains_view(graph, owner.module_name, field_ty, &seen)
+        holds_view = sema_check_type_contains_view(graph, owner.module_name, field_ty, seen)
     }
     SemaStructFieldFact{field_ty: field_ty, string_view: sema_stmt_string_view_type(field_ty), symbol: symbol, boxed: sema_scope_environment_boxed_edge(environment, program, owner.id, field.name), holds_view: holds_view}
 }
@@ -370,7 +370,7 @@ sema_expression_struct_field_fact: fn(field: Field, owner: Symbol, names: [Strin
 sema_expression_struct_field_facts: fn(owner: Symbol, fields: [Field], environment: SemaScopeEnvironment, program: SemaProgramTables, context: &SemaCheckContext) -> Int {
     if context.struct_field_fact_rows.get(owner.id.key) == .Val(known) -> return known
     first: context.struct_field_facts.len()
-    loop field in fields -> &context.struct_field_facts.push(sema_expression_struct_field_fact(field, owner, [String]{}, [Type]{}, environment, program))
+    loop field in fields -> context.struct_field_facts.push(sema_expression_struct_field_fact(field, owner, [String]{}, [Type]{}, environment, program))
     context.struct_field_fact_rows[owner.id.key] = first
     first
 }
@@ -380,17 +380,17 @@ sema_expression_struct_field_facts: fn(owner: Symbol, fields: [Field], environme
 // move is recorded at this point of the literal's evaluation order.
 sema_expression_struct_field_value: fn(field: Field, field_value: Expr, field_reference_span: Span, atomic_payload: Bool, owner: Symbol, names: [String], args: [Type], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStructFieldValue? {
     fact: sema_expression_struct_field_fact(field, owner, names, args, environment, program)
-    sema_expression_struct_field_checked(fact, field_value, field_reference_span, atomic_payload, owner, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    sema_expression_struct_field_checked(fact, field_value, field_reference_span, atomic_payload, owner, environment, program, scopes, state, tail_store, context, diagnostics)
 }
 
 sema_expression_struct_field_checked: fn(fact: SemaStructFieldFact, field_value: Expr, field_reference_span: Span, atomic_payload: Bool, owner: Symbol, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStructFieldValue? {
     field_ty: fact.field_ty
     expected_ty: if atomic_payload -> sema_atomic_field_inner(field_ty) ?? field_ty else -> field_ty
     string_view: fact.string_view
-    if !string_view -> sema_copy_site_check_field(field_value, environment, program, scopes, &tail_store, &context, &diagnostics)
-    checked_value := if string_view -> sema_string_view_check_field(field_value, field_ty, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression_with_lambda_escapes(field_value, Val(expected_ty), environment, program, &scopes, &state, &tail_store, &context, Val(true), &diagnostics)
+    if !string_view -> sema_copy_site_check_field(field_value, environment, program, scopes, tail_store, context, diagnostics)
+    checked_value := if string_view -> sema_string_view_check_field(field_value, field_ty, environment, program, scopes, state, tail_store, context, diagnostics) else -> sema_check_expression_with_lambda_escapes(field_value, Val(expected_ty), environment, program, scopes, state, tail_store, context, Val(true), diagnostics)
     checked: checked_value ?? return None
-    sema_expression_struct_field_finish(fact, checked, field_value, field_reference_span, atomic_payload, owner, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    sema_expression_struct_field_finish(fact, checked, field_value, field_reference_span, atomic_payload, owner, environment, program, scopes, state, tail_store, context, diagnostics)
 }
 
 // A checked field value against its field: ownership, the field type, the
@@ -399,21 +399,21 @@ sema_expression_struct_field_finish: fn(fact: SemaStructFieldFact, checked: TExp
     field_ty: fact.field_ty
     expected_ty: if atomic_payload -> sema_atomic_field_inner(field_ty) ?? field_ty else -> field_ty
     string_view: fact.string_view
-    if !string_view && !sema_copy_site_check_guard_owned(checked, environment, program, scopes, state, context, &diagnostics, false) -> return None
-    if !string_view -> sema_expression_struct_field_view_escape(field_value, scopes, state, &diagnostics)
+    if !string_view && !sema_copy_site_check_guard_owned(checked, environment, program, scopes, state, context, diagnostics, false) -> return None
+    if !string_view -> sema_expression_struct_field_view_escape(field_value, scopes, state, diagnostics)
     // A supported Atomic field checks its scalar initializer against the
     // scalar (`expected_ty`); the Atomic.new carrier is added below.
     compatible: sema_expr_expected_assignable(expected_ty, checked.ty, environment, program) ?? return None
     if !compatible {
-        &diagnostics.push(sema_type_mismatch(sema_expr_expected_type(expected_ty, environment, program), sema_expr_expected_type(checked.ty, environment, program), expr_span(field_value)))
+        diagnostics.push(sema_type_mismatch(sema_expr_expected_type(expected_ty, environment, program), sema_expr_expected_type(checked.ty, environment, program), expr_span(field_value)))
         return None
     }
-    if !string_view && !sema_copy_site_record_move(field_value, "the struct literal", environment, program, scopes, &state, &tail_store, &context, &diagnostics) -> return None
-    &context.name_references.push(SemaNameReferenceFact{span: field_reference_span, symbol: fact.symbol, kind: "field"})
-    if fact.holds_view -> &context.view_field_values.push(expr_span(field_value))
+    if !string_view && !sema_copy_site_record_move(field_value, "the struct literal", environment, program, scopes, state, tail_store, context, diagnostics) -> return None
+    context.name_references.push(SemaNameReferenceFact{span: field_reference_span, symbol: fact.symbol, kind: "field"})
+    if fact.holds_view -> context.view_field_values.push(expr_span(field_value))
     reference := sema_expression_field_ref(fact.symbol, Val(owner.id), field_ty)
     reference.boxed = fact.boxed
-    initialized: if atomic_payload -> sema_atomic_field_initializer(field_ty, checked, field_value, &context) ?? return None else -> checked
+    initialized: if atomic_payload -> sema_atomic_field_initializer(field_ty, checked, field_value, context) ?? return None else -> checked
     Val(TStructFieldValue{field: reference, value: initialized, boxed: reference.boxed})
 }
 
@@ -437,7 +437,7 @@ sema_expression_struct_field_view_escape: fn(field_value: Expr, scopes: SemaScop
             owner_name: fact.source.root
             owner: sema_scope_resolve(scopes, owner_name) ?? return
             if owner.kind == SymbolKind.Parameter || owner.kind == SymbolKind.Constant -> return
-            &diagnostics.push(sema_error("E2305", span, "`{name}` cannot be shared — it does not live long enough to be stored in a struct field", "`{name}` is a view into `{owner_name}`; sharing it outside `{owner_name}`'s scope would let it outlive its owner and point into freed storage", "keep `{name}` inside `{owner_name}`'s scope, or copy what you need before it leaves"))
+            diagnostics.push(sema_error("E2305", span, "`{name}` cannot be shared — it does not live long enough to be stored in a struct field", "`{name}` is a view into `{owner_name}`; sharing it outside `{owner_name}`'s scope would let it outlive its owner and point into freed storage", "keep `{name}` inside `{owner_name}`'s scope, or copy what you need before it leaves"))
             return
         }
     }
@@ -458,14 +458,14 @@ sema_expression_struct_field_inferred: fn(field: Field, field_value: Expr, field
     names: loop parameter in type_params -> parameter.name
     declared: sema_inference_substitute_type_bindings(sema_expression_field_owner_type(environment, program, owner.module_name, field.ty, names), bindings)
     open: loop parameter in type_params if sema_inference_binding_at(bindings, parameter.name) == None && sema_inference_type_mentions_param(declared, parameter.name) -> parameter
-    if open.len() == 0 -> return sema_expression_struct_field_value(field, field_value, field_reference_span, true, owner, names, sema_expression_struct_inferred_args(names, bindings), environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-    sema_copy_site_check_field(field_value, environment, program, scopes, &tail_store, &context, &diagnostics)
-    checked: sema_check_expression_with_lambda_escapes(field_value, None, environment, program, &scopes, &state, &tail_store, &context, Val(true), &diagnostics) ?? return None
+    if open.len() == 0 -> return sema_expression_struct_field_value(field, field_value, field_reference_span, true, owner, names, sema_expression_struct_inferred_args(names, bindings), environment, program, scopes, state, tail_store, context, diagnostics)
+    sema_copy_site_check_field(field_value, environment, program, scopes, tail_store, context, diagnostics)
+    checked: sema_check_expression_with_lambda_escapes(field_value, None, environment, program, scopes, state, tail_store, context, Val(true), diagnostics) ?? return None
     inference := sema_inference_context(environment.module_identity, environment.package_identity, sema_inference_type_params(open), environment.generic_params, None)
-    result: sema_infer_callable(program.registration_graph, &inference, [Type]{declared}, None, [Type]{checked.ty}, [Type]{}, expr_span(field_value), &diagnostics) ?? return None
-    loop binding in result.substitutions -> &bindings.push(binding)
+    result: sema_infer_callable(program.registration_graph, inference, [Type]{declared}, None, [Type]{checked.ty}, [Type]{}, expr_span(field_value), diagnostics) ?? return None
+    loop binding in result.substitutions -> bindings.push(binding)
     fact: sema_expression_struct_field_fact(field, owner, names, sema_expression_struct_inferred_args(names, bindings), environment, program)
-    sema_expression_struct_field_finish(fact, checked, field_value, field_reference_span, true, owner, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    sema_expression_struct_field_finish(fact, checked, field_value, field_reference_span, true, owner, environment, program, scopes, state, tail_store, context, diagnostics)
 }
 
 // An omitted field's declared default. Written in another module, it checks in
@@ -473,12 +473,12 @@ sema_expression_struct_field_inferred: fn(field: Field, field_value: Expr, field
 // anchored at this literal.
 sema_expression_struct_field_default: fn(field: Field, default_value: Expr, literal_span: Span, owner: Symbol, names: [String], args: [Type], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStructFieldValue? {
     owner_scope := sema_default_owner_scope(environment, program, scopes, owner.module_name, default_value)
-    scope := ^owner_scope ?? {
-        return sema_expression_struct_field_value(field, default_value, field.name_span, false, owner, names, args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    scope := owner_scope.move() ?? {
+        return sema_expression_struct_field_value(field, default_value, field.name_span, false, owner, names, args, environment, program, scopes, state, tail_store, context, diagnostics)
     }
     default_diagnostics := [Diagnostic]{}
-    checked: sema_expression_struct_field_value(field, default_value, field.name_span, false, owner, names, args, scope.environment, program, &scope.scopes, &scope.state, &tail_store, &context, &default_diagnostics)
-    loop diagnostic in default_diagnostics -> &diagnostics.push(sema_default_use_site_diagnostic(diagnostic, literal_span))
+    checked: sema_expression_struct_field_value(field, default_value, field.name_span, false, owner, names, args, scope.environment, program, scope.scopes, scope.state, tail_store, context, default_diagnostics)
+    loop diagnostic in default_diagnostics -> diagnostics.push(sema_default_use_site_diagnostic(diagnostic, literal_span))
     checked
 }
 
@@ -495,22 +495,22 @@ sema_expression_core_record_name: fn(struct_name: String, type_args: [Type], exp
             else -> { return None }
         }
     }
-    if sema_expression_type_symbol(&scopes, environment, program, name) != None -> return None
+    if sema_expression_type_symbol(scopes, environment, program, name) != None -> return None
     if core_record_literal_fields(name) == None -> return None
     if core_record_literal_is_core_only(name) && !sema_module_is_core_source(environment.module_identity) -> return None
     Val(name)
 }
 
 sema_expression_core_record_field_value: fn(owner_name: String, field: TypeTupleField, field_value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStructFieldValue? {
-    sema_copy_site_check_field(field_value, environment, program, scopes, &tail_store, &context, &diagnostics)
-    checked: sema_check_expression_with_lambda_escapes(field_value, Val(field.ty), environment, program, &scopes, &state, &tail_store, &context, Val(true), &diagnostics) ?? return None
-    if !sema_copy_site_check_guard_owned(checked, environment, program, scopes, state, context, &diagnostics, false) -> return None
+    sema_copy_site_check_field(field_value, environment, program, scopes, tail_store, context, diagnostics)
+    checked: sema_check_expression_with_lambda_escapes(field_value, Val(field.ty), environment, program, scopes, state, tail_store, context, Val(true), diagnostics) ?? return None
+    if !sema_copy_site_check_guard_owned(checked, environment, program, scopes, state, context, diagnostics, false) -> return None
     compatible: sema_expr_expected_assignable(field.ty, checked.ty, environment, program) ?? return None
     if !compatible {
-        &diagnostics.push(sema_type_mismatch(sema_expr_expected_type(field.ty, environment, program), sema_expr_expected_type(checked.ty, environment, program), expr_span(field_value)))
+        diagnostics.push(sema_type_mismatch(sema_expr_expected_type(field.ty, environment, program), sema_expr_expected_type(checked.ty, environment, program), expr_span(field_value)))
         return None
     }
-    if !sema_copy_site_record_move(field_value, "the struct literal", environment, program, scopes, &state, &tail_store, &context, &diagnostics) -> return None
+    if !sema_copy_site_record_move(field_value, "the struct literal", environment, program, scopes, state, tail_store, context, diagnostics) -> return None
     reference: TFieldRef{owner: None, field: symbol_id(SymbolKind.Field, "", owner_name, field.name), name: field.name, ty: field.ty, boxed: false}
     Val(TStructFieldValue{field: reference, value: checked, boxed: false})
 }
@@ -518,7 +518,7 @@ sema_expression_core_record_field_value: fn(owner_name: String, field: TypeTuple
 sema_expression_core_record_literal: fn(owner_name: String, fields: [ExprField], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     declared: core_record_literal_fields(owner_name) ?? return None
     supplied := [Bool]{}
-    loop _ in declared -> &supplied.push(false)
+    loop _ in declared -> supplied.push(false)
     loop source in fields {
         found := -1
         loop (index, row) in declared {
@@ -528,60 +528,60 @@ sema_expression_core_record_literal: fn(owner_name: String, fields: [ExprField],
             }
         }
         if found < 0 {
-            &diagnostics.push(sema_error("E0302", source.name_span, "`{owner_name}` has no field `{source.name}`", "struct fields must be declared by the type", "use one of the declared field names"))
+            diagnostics.push(sema_error("E0302", source.name_span, "`{owner_name}` has no field `{source.name}`", "struct fields must be declared by the type", "use one of the declared field names"))
             return None
         }
         if supplied[found] {
-            &diagnostics.push(sema_error("E0105", source.name_span, "field `{source.name}` is supplied more than once", "each struct field receives one value", "remove the duplicate field"))
+            diagnostics.push(sema_error("E0105", source.name_span, "field `{source.name}` is supplied more than once", "each struct field receives one value", "remove the duplicate field"))
             return None
         }
         supplied[found] = true
     }
     missing := [String]{}
     loop (index, row) in declared {
-        if !supplied[index] -> &missing.push(row.name)
+        if !supplied[index] -> missing.push(row.name)
     }
     if missing.len() > 0 {
-        &diagnostics.push(sema_expression_missing_fields("struct literal for `{owner_name}`", "every field must appear exactly once", missing, span))
+        diagnostics.push(sema_expression_missing_fields("struct literal for `{owner_name}`", "every field must appear exactly once", missing, span))
         return None
     }
     values := [TStructFieldValue]{}
     loop source in fields {
         loop row in declared {
             if row.name != source.name -> next
-            checked: sema_expression_core_record_field_value(owner_name, row, source.value, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-            &values.push(checked)
+            checked: sema_expression_core_record_field_value(owner_name, row, source.value, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+            values.push(checked)
             break
         }
     }
     value: sema_tree_node(Type.Named{name: owner_name}, TExprKind.StructLit{fields: values}, span)
-    sema_expr_expected(value, expected, environment, program, &diagnostics)
+    sema_expr_expected(value, expected, environment, program, diagnostics)
 }
 
 sema_expression_struct_literal: fn(struct_name: String, type_args: [Type], fields: [ExprField], inferred: Bool, as_trait: String?, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if !inferred && as_trait == None {
         head: if type_args.len() > 0 -> Type.Apply{name: struct_name, args: type_args} else -> Type.Named{name: struct_name}
-        if sema_expression_variant_head(head, environment, program, &scopes) == .Val(variant_head) {
+        if sema_expression_variant_head(head, environment, program, scopes) == .Val(variant_head) {
             enum_args: loop field in fields -> EnumLitArg.Named{label: field.name, expr: field.value}
-            return sema_expression_enum_literal(variant_head.enum_name, type_args, variant_head.variant, enum_args, false, None, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            return sema_expression_enum_literal(variant_head.enum_name, type_args, variant_head.variant, enum_args, false, None, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         }
     }
     if as_trait == None {
-        core_record: sema_expression_core_record_name(struct_name, type_args, expected, environment, program, &scopes)
-        if core_record == .Val(core_name) -> return sema_expression_core_record_literal(core_name, fields, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        core_record: sema_expression_core_record_name(struct_name, type_args, expected, environment, program, scopes)
+        if core_record == .Val(core_name) -> return sema_expression_core_record_literal(core_name, fields, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     }
-    resolved: sema_expression_struct_type(struct_name, type_args, expected, span, environment, program, &scopes, &diagnostics) ?? return None
+    resolved: sema_expression_struct_type(struct_name, type_args, expected, span, environment, program, scopes, diagnostics) ?? return None
     owner := resolved.owner
-    &context.name_references.push(SemaNameReferenceFact{span: span, symbol: owner, kind: "type"})
+    context.name_references.push(SemaNameReferenceFact{span: span, symbol: owner, kind: "type"})
     result_ty := resolved.ty
     // The struct's fields and type parameters, read at the declaration
     // without copying its methods.
     if sema_scope_declaration_kind(environment, program, owner.id) == None {
-        &diagnostics.push(sema_error("E0119", span, "struct `{type_name(result_ty)}` has no declaration metadata", "a struct literal must check every declared field before lowering", "use a registered struct declaration"))
+        diagnostics.push(sema_error("E0119", span, "struct `{type_name(result_ty)}` has no declaration metadata", "a struct literal must check every declared field before lowering", "use a registered struct declaration"))
         return None
     }
     struct_def: sema_scope_declaration_struct(environment, program, owner.id) ?? {
-        &diagnostics.push(sema_error("E0119", span, "`{type_name(result_ty)}` is not a struct", "struct literal syntax only constructs struct declarations", "use the enum variant constructor for an enum"))
+        diagnostics.push(sema_error("E0119", span, "`{type_name(result_ty)}` is not a struct", "struct literal syntax only constructs struct declarations", "use the enum variant constructor for an enum"))
         return None
     }
     names: loop parameter in struct_def.type_params -> parameter.name
@@ -593,11 +593,11 @@ sema_expression_struct_literal: fn(struct_name: String, type_args: [Type], field
     // expected type: its written fields infer them, as a call's arguments do.
     inferring: !inferred && type_args.len() == 0 && args.len() == 0 && names.len() > 0
     if args.len() != names.len() && !inferring {
-        &diagnostics.push(sema_error("E0104", span, "struct `{type_name(result_ty)}` has the wrong number of type arguments", "each declared type parameter needs one concrete argument", "provide one type argument for every generic parameter"))
+        diagnostics.push(sema_error("E0104", span, "struct `{type_name(result_ty)}` has the wrong number of type arguments", "each declared type parameter needs one concrete argument", "provide one type argument for every generic parameter"))
         return None
     }
     supplied := [Bool]{}
-    loop _ in struct_def.fields -> &supplied.push(false)
+    loop _ in struct_def.fields -> supplied.push(false)
     // Each written field's declaration index; fields are mostly written in
     // declaration order, so the one after the previous match is tried first.
     positions := [Int]{}
@@ -620,34 +620,34 @@ sema_expression_struct_literal: fn(struct_name: String, type_args: [Type], field
             fix: if suggestion == .Val(near) -> "did you mean `{near}`?" else -> "remove this field"
             diagnostic := sema_error("E0303", source.name_span, "struct literal for `{struct_name}` has no field `{source.name}`", "struct literals may only set fields that exist on the type", fix)
             if suggestion == .Val(near) -> diagnostic = diagnostic_with_edit(diagnostic, TextEdit{span: source.name_span, new_text: near})
-            &diagnostics.push(diagnostic)
+            diagnostics.push(diagnostic)
             return None
         }
         // Rust `check_struct_lit`: a computed field is recomputed on every
         // read, so a struct literal can never give it a value.
         if struct_def.fields[found].computed != None {
-            &diagnostics.push(sema_error("E0339", source.name_span, "`{source.name}` is a computed field on `{type_name(result_ty)}` — it can't be set", "`{source.name}` is declared `{source.name} -> …` — its value always comes from that formula, never from a struct literal", "remove `{source.name}` from this `.{{ … }}`"))
+            diagnostics.push(sema_error("E0339", source.name_span, "`{source.name}` is a computed field on `{type_name(result_ty)}` — it can't be set", "`{source.name}` is declared `{source.name} -> …` — its value always comes from that formula, never from a struct literal", "remove `{source.name}` from this `.{{ … }}`"))
             return None
         }
         // Only the type's own module writes a `priv` field, so a literal
         // elsewhere cannot forge a value whose invariant that field carries.
         if !sema_expression_field_visible(struct_def.fields[found].is_pub, struct_def.fields[found].is_package_pub, owner.module_name, environment, program) {
-            &diagnostics.push(sema_expression_private_field_error(source.name, source.name_span))
+            diagnostics.push(sema_expression_private_field_error(source.name, source.name_span))
             return None
         }
         if supplied[found] {
-            &diagnostics.push(sema_error("E0303", source.name_span, "field `{source.name}` appears more than once", "each field may be written only once in a struct literal", "remove the duplicate field"))
+            diagnostics.push(sema_error("E0303", source.name_span, "field `{source.name}` appears more than once", "each field may be written only once in a struct literal", "remove the duplicate field"))
             return None
         }
         supplied[found] = true
-        &positions.push(found)
+        positions.push(found)
     }
     // Rust `check_struct_lit`: supplied fields are checked (and their moves
     // recorded) in the order they are written, then omitted fields take their
     // defaults in declaration order. The checked tree keeps that order, so lowering
     // evaluates the initializers exactly as written. A non-generic struct's
     // field facts are resolved once per check (sema_expression_struct_field_facts).
-    facts: if names.len() == 0 -> sema_expression_struct_field_facts(owner, struct_def.fields, environment, program, &context) else -> -1
+    facts: if names.len() == 0 -> sema_expression_struct_field_facts(owner, struct_def.fields, environment, program, context) else -> -1
     values := [TStructFieldValue]{}
     // Every written field is checked, so one literal reports all of its bad
     // values together.
@@ -659,26 +659,26 @@ sema_expression_struct_literal: fn(struct_name: String, type_args: [Type], field
         checked := TStructFieldValue?{None}
         if facts >= 0 {
             fact: context.struct_field_facts[facts + position]
-            checked = sema_expression_struct_field_checked(fact, source.value, source.name_span, true, owner, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            checked = sema_expression_struct_field_checked(fact, source.value, source.name_span, true, owner, environment, program, scopes, state, tail_store, context, diagnostics)
         } else if inferring {
-            checked = sema_expression_struct_field_inferred(struct_def.fields[position], source.value, source.name_span, owner, struct_def.type_params, &bindings, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            checked = sema_expression_struct_field_inferred(struct_def.fields[position], source.value, source.name_span, owner, struct_def.type_params, bindings, environment, program, scopes, state, tail_store, context, diagnostics)
         } else {
-            checked = sema_expression_struct_field_value(struct_def.fields[position], source.value, source.name_span, true, owner, names, args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            checked = sema_expression_struct_field_value(struct_def.fields[position], source.value, source.name_span, true, owner, names, args, environment, program, scopes, state, tail_store, context, diagnostics)
         }
         if checked == None {
             failed = true
             next
         }
-        &values.push(checked ?? return None)
+        values.push(checked ?? return None)
     }
     if failed -> return None
     if inferring {
         loop parameter in sema_inference_type_params(struct_def.type_params) {
             binding: sema_inference_binding_at(bindings, parameter.name) ?? {
-                sema_inference_unresolved_diagnostic(parameter, span, &diagnostics)
+                sema_inference_unresolved_diagnostic(parameter, span, diagnostics)
                 return None
             }
-            &args.push(binding.ty)
+            args.push(binding.ty)
         }
         head: if result_ty == {
             .Named(name) -> name
@@ -692,29 +692,29 @@ sema_expression_struct_literal: fn(struct_name: String, type_args: [Type], field
         // An omitted `priv` field is still written, by its default or not at
         // all, so only the type's own module may build the value.
         if !sema_expression_field_visible(field.is_pub, field.is_package_pub, owner.module_name, environment, program) {
-            &diagnostics.push(sema_expression_private_field_omitted_error(struct_name, field.name, span))
+            diagnostics.push(sema_expression_private_field_omitted_error(struct_name, field.name, span))
             return None
         }
         default_value: field.default ?? {
-            &missing.push(field.name)
+            missing.push(field.name)
             next
         }
-        checked: sema_expression_struct_field_default(field, default_value, span, owner, names, args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-        &values.push(checked)
+        checked: sema_expression_struct_field_default(field, default_value, span, owner, names, args, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+        values.push(checked)
     }
     if missing.len() > 0 {
-        &diagnostics.push(sema_expression_missing_fields("struct literal for `{struct_name}`", "every field without a `{{…}}` default must appear exactly once", missing, span))
+        diagnostics.push(sema_expression_missing_fields("struct literal for `{struct_name}`", "every field without a `{{…}}` default must appear exactly once", missing, span))
         return None
     }
     value := sema_tree_node(result_ty, TExprKind.StructLit{fields: values}, span)
     if as_trait == .Val(trait_name) {
         trait_symbol_index: sema_scope_resolve_index(scopes, trait_name)
         if trait_symbol_index == None || scopes.bindings[trait_symbol_index ?? 0].symbol.kind != SymbolKind.Trait {
-            &diagnostics.push(sema_error("E0119", span, "`{trait_name}` is not a registered trait", "trait coercion must retain the target trait identity", "name a declared trait"))
+            diagnostics.push(sema_error("E0119", span, "`{trait_name}` is not a registered trait", "trait coercion must retain the target trait identity", "name a declared trait"))
             return None
         }
         trait_symbol: sema_scope_binding_symbol(environment, scopes, trait_symbol_index ?? 0)
-        &context.name_references.push(SemaNameReferenceFact{span: span, symbol: trait_symbol, kind: "trait"})
+        context.name_references.push(SemaNameReferenceFact{span: span, symbol: trait_symbol, kind: "trait"})
         resolved_trait: sema_expr_expected_type(Type.Named{name: trait_name}, environment, program)
         target: if resolved_trait == {
             .TraitObject(_) -> resolved_trait
@@ -725,9 +725,9 @@ sema_expression_struct_literal: fn(struct_name: String, type_args: [Type], field
     // An inferring literal checked against its own bare written head (`Top`,
     // a typed literal's head) has no arguments to check against.
     if inferring && expected == .Val(expected_ty) {
-        if expected_ty == .Named(expected_name) && expected_name == struct_name -> return Val(^value)
+        if expected_ty == .Named(expected_name) && expected_name == struct_name -> return Val(value.move())
     }
-    sema_expr_expected(value, expected, environment, program, &diagnostics)
+    sema_expr_expected(value, expected, environment, program, diagnostics)
 }
 
 sema_expression_enum_literal: fn(type_name: String, type_args: [Type], variant: String, args: [EnumLitArg], leading_dot: Bool, variant_span: Span?, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
@@ -740,28 +740,28 @@ sema_expression_enum_literal: fn(type_name: String, type_args: [Type], variant: 
     }
     if type_name == "" && contextual_allowed && variant == "Val" && args.len() == 1 {
         if args[0] == {
-            .Positional(value) -> return sema_expression_present(value, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            .Positional(value) -> return sema_expression_present(value, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
             else -> {}
         }
     }
     if type_name == "" && contextual_allowed && variant == "None" && args.len() == 0 {
-        return sema_expression_absent(span, expected, &context, &diagnostics)
+        return sema_expression_absent(span, expected, context, diagnostics)
     }
     // Leading-dot Result cases are contextual only when the expected type
     // is a Result; a declared enum's `.Ok` / `.Err` remains its own case.
     if type_name == "" && leading_dot && sema_expr_unwrap_tag(expected ?? Type.Named{name: "Never"}) == .Result(_, _) && args.len() == 1 {
         if args[0] == .Positional(value) {
-            if variant == "Ok" -> return sema_expression_result_payload(value, true, false, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            if variant == "Ok" -> return sema_expression_result_payload(value, true, false, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
             if variant == "Err" {
-                &context.failure_edges.push("")
-                return sema_expression_result_payload(value, false, false, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+                context.failure_edges.push("")
+                return sema_expression_result_payload(value, false, false, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
             }
         }
     }
     resolved_name := type_name
     if resolved_name == "" {
         expected_ty: expected ?? {
-            &diagnostics.push(sema_error("E0330", span, "can't infer the enum type for `.{variant}`", "a leading-dot variant needs a known enum type from context", "write the full form `EnumName.{variant}`, or use it where its enum type is already expected"))
+            diagnostics.push(sema_error("E0330", span, "can't infer the enum type for `.{variant}`", "a leading-dot variant needs a known enum type from context", "write the full form `EnumName.{variant}`, or use it where its enum type is already expected"))
             return None
         }
         normalized: sema_expr_unwrap_tag(expected_ty)
@@ -778,47 +778,47 @@ sema_expression_enum_literal: fn(type_name: String, type_args: [Type], variant: 
             else -> ""
         }
         if resolved_name == "" {
-            &diagnostics.push(sema_error("E0330", span, "can't infer the enum type for `.{variant}`", "a leading-dot variant needs a known enum type from context", "write the full form `EnumName.{variant}`, or use it where its enum type is already expected"))
+            diagnostics.push(sema_error("E0330", span, "can't infer the enum type for `.{variant}`", "a leading-dot variant needs a known enum type from context", "write the full form `EnumName.{variant}`, or use it where its enum type is already expected"))
             return None
         }
     }
     // `ExactnessKind.Approximate` / `.Approximate` builds a
     // compiler-owned fact enum value, which has no registered declaration.
-    fact_enum: sema_fact_enum_literal(resolved_name, variant, args, span, variant_span, expected, environment, program, &diagnostics)
+    fact_enum: sema_fact_enum_literal(resolved_name, variant, args, span, variant_span, expected, environment, program, diagnostics)
     if fact_enum.handled -> return fact_enum.value
     // `HookDecision.Transform(value)` / `HookDecision.Continue`: the
     // compiler-owned generic hook decision takes its payload types from the
     // expected `HookDecision<T, E>`, as its patterns do (Patterns.jet).
-    if resolved_name == "HookDecision" && sema_expression_type_symbol(&scopes, environment, program, resolved_name) == None {
-        return sema_expression_hook_decision_literal(variant, args, variant_span, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    if resolved_name == "HookDecision" && sema_expression_type_symbol(scopes, environment, program, resolved_name) == None {
+        return sema_expression_hook_decision_literal(variant, args, variant_span, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     }
     // Compiler-owned data cases have no user enum declaration metadata.
     // Route both qualified and contextual cases through the same payload
     // checker as the static-call spelling.
     if sema_data_is_json_name(resolved_name) {
-        if !sema_data_check_explicit_type_args(resolved_name, type_args, 0, span, &diagnostics) -> return None
+        if !sema_data_check_explicit_type_args(resolved_name, type_args, 0, span, diagnostics) -> return None
         call_args := [CallArg]{}
         loop argument in args {
             payload_expr: if argument == {
                 .Positional(value) -> value
                 else -> {
-                    &diagnostics.push(sema_error("E0764", span, "variant `{variant}` takes a positional payload", "compiler-owned data cases do not have field labels", "pass the value without a label"))
+                    diagnostics.push(sema_error("E0764", span, "variant `{variant}` takes a positional payload", "compiler-owned data cases do not have field labels", "pass the value without a label"))
                     return None
                 }
             }
-            &call_args.push(CallArg{convention: AccessConvention.Read, expr: payload_expr, span: expr_span(payload_expr), flags: ast_empty_call_arg_flags(), label: None, spread: false})
+            call_args.push(CallArg{convention: AccessConvention.Read, expr: payload_expr, span: expr_span(payload_expr), flags: ast_empty_call_arg_flags(), label: None, spread: false})
         }
-        checked: sema_call_try_data_literal(Type.Named{name: resolved_name}, variant, call_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        checked: sema_call_try_data_literal(Type.Named{name: resolved_name}, variant, call_args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         return checked.value
     }
     // A compiler-owned unit-only enum (`DurationUnit`) has neither a source
     // declaration nor generated Core rows.
     if sema_expression_compiler_unit_enum_variants(resolved_name) == .Val(compiler_variants) {
-        if sema_expression_type_symbol(&scopes, environment, program, resolved_name) == None -> return sema_expression_compiler_unit_enum_literal(resolved_name, compiler_variants, variant, args, variant_span, span, expected, environment, program, &diagnostics)
+        if sema_expression_type_symbol(scopes, environment, program, resolved_name) == None -> return sema_expression_compiler_unit_enum_literal(resolved_name, compiler_variants, variant, args, variant_span, span, expected, environment, program, diagnostics)
     }
     // A Core enum with no source declaration (`IOError`, `ProcessStreamMode`)
     // builds its variant from the generated Core enum rows.
-    owner_symbol: sema_expression_type_symbol(&scopes, environment, program, resolved_name)
+    owner_symbol: sema_expression_type_symbol(scopes, environment, program, resolved_name)
     if owner_symbol == None {
         core_variants := core_enum_payload_variants(resolved_name)
         if core_variants == None -> core_variants = core_enum_variants(resolved_name)
@@ -826,40 +826,40 @@ sema_expression_enum_literal: fn(type_name: String, type_args: [Type], variant: 
             // A source-owned Core enum is named by its canonical identity.
             modules: core_type_modules(resolved_name)
             display_name: if core_source_owns_type(resolved_name) && modules.len() == 1 -> "<corelib>/{modules[0]}::{core_module_type_leaf(resolved_name)}" else -> resolved_name
-            return sema_expression_core_enum_literal(resolved_name, display_name, variants, variant, args, variant_span, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            return sema_expression_core_enum_literal(resolved_name, display_name, variants, variant, args, variant_span, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         }
     }
     if owner_symbol == .Val(core_owner) {
         if sema_expression_core_export_variants(environment, program, core_owner) == .Val(variants) {
-            &context.name_references.push(SemaNameReferenceFact{span: span, symbol: core_owner, kind: "type"})
+            context.name_references.push(SemaNameReferenceFact{span: span, symbol: core_owner, kind: "type"})
             // A payload diagnostic names a Core enum by its canonical
             // `<corelib>/module::Name` identity (Rust `display_type_name`).
             display_name: "{core_owner.module_name}::{core_owner.name}"
-            return sema_expression_core_enum_literal(core_owner.name, display_name, variants, variant, args, variant_span, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            return sema_expression_core_enum_literal(core_owner.name, display_name, variants, variant, args, variant_span, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         }
     }
     if type_name == "" {
-        inferred_owner: sema_expression_type_symbol(&scopes, environment, program, resolved_name)
+        inferred_owner: sema_expression_type_symbol(scopes, environment, program, resolved_name)
         inferred_is_enum := false
         if inferred_owner == .Val(inferred_symbol) -> inferred_is_enum = sema_scope_declaration_is(environment, program, inferred_symbol.id, SemaScopeDeclarationKind.Enum)
         if !inferred_is_enum {
-            &diagnostics.push(sema_error("E0330", span, "can't infer the enum type for `.{variant}`", "a leading-dot variant needs a known enum type from context", "write the full form `EnumName.{variant}`, or use it where its enum type is already expected"))
+            diagnostics.push(sema_error("E0330", span, "can't infer the enum type for `.{variant}`", "a leading-dot variant needs a known enum type from context", "write the full form `EnumName.{variant}`, or use it where its enum type is already expected"))
             return None
         }
     }
-    owner: sema_expression_type_symbol(&scopes, environment, program, resolved_name) ?? {
-        &diagnostics.push(sema_expression_unknown_type(resolved_name, span, environment, program))
+    owner: sema_expression_type_symbol(scopes, environment, program, resolved_name) ?? {
+        diagnostics.push(sema_expression_unknown_type(resolved_name, span, environment, program))
         return None
     }
-    &context.name_references.push(SemaNameReferenceFact{span: span, symbol: owner, kind: "type"})
+    context.name_references.push(SemaNameReferenceFact{span: span, symbol: owner, kind: "type"})
     // The enum's variants, groups and type parameters, read at the
     // declaration without copying its methods.
     if sema_scope_declaration_kind(environment, program, owner.id) == None {
-        &diagnostics.push(sema_error("E0119", span, "enum `{resolved_name}` has no declaration metadata", "an enum constructor must check its variant payload", "use a registered enum declaration"))
+        diagnostics.push(sema_error("E0119", span, "enum `{resolved_name}` has no declaration metadata", "an enum constructor must check its variant payload", "use a registered enum declaration"))
         return None
     }
     enum_def: sema_scope_declaration_enum(environment, program, owner.id) ?? {
-        &diagnostics.push(sema_error("E0119", span, "`{resolved_name}` is not an enum", "enum literal syntax only constructs enum declarations", "use a struct literal for a struct type"))
+        diagnostics.push(sema_error("E0119", span, "`{resolved_name}` is not an enum", "enum literal syntax only constructs enum declarations", "use a struct literal for a struct type"))
         return None
     }
     selected := Variant?{None}
@@ -875,18 +875,18 @@ sema_expression_enum_literal: fn(type_name: String, type_args: [Type], variant: 
             if group.path != variant -> next
             leaves := [String]{}
             loop candidate in enum_def.variants {
-                if candidate.name.starts_with("{variant}.") -> &leaves.push("`{resolved_name}.{candidate.name}`")
+                if candidate.name.starts_with("{variant}.") -> leaves.push("`{resolved_name}.{candidate.name}`")
             }
-            &diagnostics.push(sema_error("E0332", variant_span ?? span, "`{variant}` is a group, not a value", "a group names its whole subtree in patterns; an actual value is always a leaf variant", "pick a leaf: {leaves.join(", ")}"))
+            diagnostics.push(sema_error("E0332", variant_span ?? span, "`{variant}` is a group, not a value", "a group names its whole subtree in patterns; an actual value is always a leaf variant", "pick a leaf: {leaves.join(", ")}"))
             return None
         }
         variant_names: loop candidate in enum_def.variants -> candidate.name
-        &diagnostics.push(sema_enum_unknown_variant(resolved_name, variant, variant_names, span, variant_span))
+        diagnostics.push(sema_enum_unknown_variant(resolved_name, variant, variant_names, span, variant_span))
         return None
     }
     variant_id: symbol_id(SymbolKind.Variant, owner.module_name, owner.id.key, variant)
     variant_symbol: Symbol{id: variant_id, kind: SymbolKind.Variant, name: variant, module_name: owner.module_name, owner: Val(owner.id.key), span: selected_variant.name_span, ty: sema_registration_variant_type(selected_variant.payload), visibility: owner.visibility}
-    &context.name_references.push(SemaNameReferenceFact{span: variant_span ?? span, symbol: variant_symbol, kind: "variant"})
+    context.name_references.push(SemaNameReferenceFact{span: variant_span ?? span, symbol: variant_symbol, kind: "variant"})
     generic_names: loop parameter in enum_def.type_params -> parameter.name
     generic_args := type_args
     if generic_args.len() == 0 && expected == .Val(expected_ty) {
@@ -896,7 +896,7 @@ sema_expression_enum_literal: fn(type_name: String, type_args: [Type], variant: 
         }
     }
     if generic_args.len() != generic_names.len() {
-        &diagnostics.push(sema_error("E0104", span, "enum `{resolved_name}` has the wrong number of type arguments", "each declared type parameter needs one concrete argument", "provide one type argument for every generic parameter"))
+        diagnostics.push(sema_error("E0104", span, "enum `{resolved_name}` has the wrong number of type arguments", "each declared type parameter needs one concrete argument", "provide one type argument for every generic parameter"))
         return None
     }
     payload := TEnumPayload.Unit
@@ -906,39 +906,39 @@ sema_expression_enum_literal: fn(type_name: String, type_args: [Type], variant: 
     if selected_variant.payload == {
         .Unit -> {
             if args.len() != 0 {
-                &diagnostics.push(sema_enum_unit_payload(resolved_name, variant, span))
+                diagnostics.push(sema_enum_unit_payload(resolved_name, variant, span))
                 return None
             }
         }
         .Single(ty, _) -> {
             if args.len() != 1 {
-                &diagnostics.push(sema_error("E0104", span, "variant `{variant}` expects one payload", "this enum variant has one positional field", "pass exactly one value"))
+                diagnostics.push(sema_error("E0104", span, "variant `{variant}` expects one payload", "this enum variant has one positional field", "pass exactly one value"))
                 return None
             }
             payload_expr: if args[0] == {
                 // copy: `value` is a payload of read parameter `args`, which keeps the original; the assigned `payload_expr` owns this one
                 .Positional(value) -> value.copy()
                 else -> {
-                    &diagnostics.push(sema_error("E0764", span, "variant `{variant}` takes a positional payload", "single-payload variants do not have field labels", "pass the value without a label"))
+                    diagnostics.push(sema_error("E0764", span, "variant `{variant}` takes a positional payload", "single-payload variants do not have field labels", "pass the value without a label"))
                     return None
                 }
             }
             // As a struct field: the payload type names types as the enum's
             // module sees them (Rust `owner_type_for_reader`).
             payload_ty: sema_inference_substitute_type(sema_expression_field_owner_type(environment, program, owner.module_name, ty, generic_names), generic_names, generic_args)
-            sema_copy_site_check_field(payload_expr, environment, program, scopes, &tail_store, &context, &diagnostics)
+            sema_copy_site_check_field(payload_expr, environment, program, scopes, tail_store, context, diagnostics)
             diagnostic_start: diagnostics.len()
-            checked: sema_check_expression(payload_expr, Val(payload_ty), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? {
-                sema_expression_enum_payload_replace_mismatch(payload_owner, variant, None, payload_ty, payload_expr, diagnostic_start, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            checked: sema_check_expression(payload_expr, Val(payload_ty), environment, program, scopes, state, tail_store, context, diagnostics) ?? {
+                sema_expression_enum_payload_replace_mismatch(payload_owner, variant, None, payload_ty, payload_expr, diagnostic_start, environment, program, scopes, state, tail_store, context, diagnostics)
                 return None
             }
-            if !sema_copy_site_check_guard_owned(checked, environment, program, scopes, state, context, &diagnostics, false) -> return None
+            if !sema_copy_site_check_guard_owned(checked, environment, program, scopes, state, context, diagnostics, false) -> return None
             compatible: sema_expr_expected_assignable(payload_ty, checked.ty, environment, program) ?? return None
             if !compatible {
-                &diagnostics.push(sema_expression_enum_payload_mismatch(payload_owner, variant, None, payload_ty, checked.ty, expr_span(payload_expr), environment, program))
+                diagnostics.push(sema_expression_enum_payload_mismatch(payload_owner, variant, None, payload_ty, checked.ty, expr_span(payload_expr), environment, program))
                 return None
             }
-            if !sema_copy_site_record_move(payload_expr, "the variant payload", environment, program, scopes, &state, &tail_store, &context, &diagnostics) -> return None
+            if !sema_copy_site_record_move(payload_expr, "the variant payload", environment, program, scopes, state, tail_store, context, diagnostics) -> return None
             payload = TEnumPayload.Positional{args: [TEnumArg]{TEnumArg{value: checked}}}
         }
         .Named(fields) -> {
@@ -946,7 +946,7 @@ sema_expression_enum_literal: fn(type_name: String, type_args: [Type], variant: 
             // order they are written; lowering evaluates them in that order and
             // places each into its declared slot afterwards.
             supplied := [Bool]{}
-            loop _ in fields -> &supplied.push(false)
+            loop _ in fields -> supplied.push(false)
             named_values := [TNamedEnumArg]{}
             // A field whose value does not fit its slot is reported and the
             // remaining fields are still checked, so every bad field reports.
@@ -961,7 +961,7 @@ sema_expression_enum_literal: fn(type_name: String, type_args: [Type], variant: 
                     }
                     .Positional(_) -> {
                         labels: loop declared in fields -> declared.name
-                        &diagnostics.push(sema_expression_enum_named_positional(owner.name, variant, labels, span))
+                        diagnostics.push(sema_expression_enum_named_positional(owner.name, variant, labels, span))
                         return None
                     }
                 }
@@ -973,40 +973,40 @@ sema_expression_enum_literal: fn(type_name: String, type_args: [Type], variant: 
                     }
                 }
                 if found < 0 {
-                    &diagnostics.push(sema_error("E0302", expr_span(payload_expr), "variant `{variant}` has no field `{label}`", "named enum payloads use the declaration's field names", "use a declared payload field"))
+                    diagnostics.push(sema_error("E0302", expr_span(payload_expr), "variant `{variant}` has no field `{label}`", "named enum payloads use the declaration's field names", "use a declared payload field"))
                     return None
                 }
                 if supplied[found] {
-                    &diagnostics.push(sema_error("E0105", expr_span(payload_expr), "variant field `{label}` is supplied more than once", "each enum payload field receives one value", "remove the duplicate field"))
+                    diagnostics.push(sema_error("E0105", expr_span(payload_expr), "variant field `{label}` is supplied more than once", "each enum payload field receives one value", "remove the duplicate field"))
                     return None
                 }
                 supplied[found] = true
                 field_ty: sema_inference_substitute_type(sema_expression_field_owner_type(environment, program, owner.module_name, fields[found].ty, generic_names), generic_names, generic_args)
-                sema_copy_site_check_field(payload_expr, environment, program, scopes, &tail_store, &context, &diagnostics)
+                sema_copy_site_check_field(payload_expr, environment, program, scopes, tail_store, context, diagnostics)
                 diagnostic_start: diagnostics.len()
-                checked_value: sema_check_expression(payload_expr, Val(field_ty), environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+                checked_value: sema_check_expression(payload_expr, Val(field_ty), environment, program, scopes, state, tail_store, context, diagnostics)
                 if checked_value == None {
-                    sema_expression_enum_payload_replace_mismatch(payload_owner, variant, Val(label), field_ty, payload_expr, diagnostic_start, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+                    sema_expression_enum_payload_replace_mismatch(payload_owner, variant, Val(label), field_ty, payload_expr, diagnostic_start, environment, program, scopes, state, tail_store, context, diagnostics)
                     failed = true
                     next
                 }
                 checked: checked_value
-                if !sema_copy_site_check_guard_owned(checked, environment, program, scopes, state, context, &diagnostics, false) -> return None
+                if !sema_copy_site_check_guard_owned(checked, environment, program, scopes, state, context, diagnostics, false) -> return None
                 compatible: sema_expr_expected_assignable(field_ty, checked.ty, environment, program) ?? return None
                 if !compatible {
-                    &diagnostics.push(sema_expression_enum_payload_mismatch(payload_owner, variant, Val(label), field_ty, checked.ty, expr_span(payload_expr), environment, program))
+                    diagnostics.push(sema_expression_enum_payload_mismatch(payload_owner, variant, Val(label), field_ty, checked.ty, expr_span(payload_expr), environment, program))
                     failed = true
                     next
                 }
-                if !sema_copy_site_record_move(payload_expr, "the variant payload", environment, program, scopes, &state, &tail_store, &context, &diagnostics) -> return None
-                &named_values.push(TNamedEnumArg{name: label, value: TEnumArg{value: checked}})
+                if !sema_copy_site_record_move(payload_expr, "the variant payload", environment, program, scopes, state, tail_store, context, diagnostics) -> return None
+                named_values.push(TNamedEnumArg{name: label, value: TEnumArg{value: checked}})
             }
             missing := [String]{}
             loop (index, was_supplied) in supplied {
-                if !was_supplied -> &missing.push(fields[index].name)
+                if !was_supplied -> missing.push(fields[index].name)
             }
             if missing.len() > 0 {
-                &diagnostics.push(sema_expression_missing_fields("variant `{variant}`", "every payload field must appear exactly once", missing, span))
+                diagnostics.push(sema_expression_missing_fields("variant `{variant}`", "every payload field must appear exactly once", missing, span))
                 return None
             }
             if failed -> return None
@@ -1017,26 +1017,26 @@ sema_expression_enum_literal: fn(type_name: String, type_args: [Type], variant: 
     // actual declaration owner's type, just as its payload field types do.
     declared_enum_ty: if generic_args.len() > 0 -> Type.Apply{name: owner.name, args: generic_args} else -> Type.Named{name: owner.name}
     enum_ty: sema_expression_field_owner_type(environment, program, owner.module_name, declared_enum_ty, generic_names)
-    payload_rows: body_flat_enum_payload(payload, &context.arena)
-    value: sema_node(&context, enum_ty, NodeKind.EnumCtor{owner: owner.id, variant: variant_id, payload: payload_rows}, span)
-    sema_expr_expected(value, expected, environment, program, &diagnostics)
+    payload_rows: body_flat_enum_payload(payload, context.arena)
+    value: sema_node(context, enum_ty, NodeKind.EnumCtor{owner: owner.id, variant: variant_id, payload: payload_rows}, span)
+    sema_expr_expected(value, expected, environment, program, diagnostics)
 }
 
 // A variant of a Core enum without a source declaration: unit variants take no
 // payload and payload variants take one positional value per row type.
 sema_expression_core_enum_literal: fn(enum_name: String, display_name: String, variants: [String], variant: String, args: [EnumLitArg], variant_span: Span?, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     payload_types: core_enum_variant_payload(enum_name, variant) ?? {
-        &diagnostics.push(sema_enum_unknown_variant(enum_name, variant, variants, span, variant_span))
+        diagnostics.push(sema_enum_unknown_variant(enum_name, variant, variants, span, variant_span))
         return None
     }
     if payload_types.len() == 0 && args.len() != 0 {
-        &diagnostics.push(sema_enum_unit_payload(enum_name, variant, span))
+        diagnostics.push(sema_enum_unit_payload(enum_name, variant, span))
         return None
     }
     if core_enum_variant_labels(enum_name, variant) == .Val(labels) {
-        return sema_expression_core_enum_named_literal(enum_name, display_name, variant, labels, payload_types, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        return sema_expression_core_enum_named_literal(enum_name, display_name, variant, labels, payload_types, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     }
-    sema_expression_core_enum_positional_literal(enum_name, display_name, variant, payload_types, Type.Named{name: enum_name}, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    sema_expression_core_enum_positional_literal(enum_name, display_name, variant, payload_types, Type.Named{name: enum_name}, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
 }
 
 sema_expression_hook_decision_variants: fn() -> [String] Never! {
@@ -1049,7 +1049,7 @@ sema_expression_hook_decision_variants: fn() -> [String] Never! {
 sema_expression_hook_decision_literal: fn(variant: String, args: [EnumLitArg], variant_span: Span?, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     variants: sema_expression_hook_decision_variants()
     if !variants.contains(variant) {
-        &diagnostics.push(sema_enum_unknown_variant("HookDecision", variant, variants, span, variant_span))
+        diagnostics.push(sema_enum_unknown_variant("HookDecision", variant, variants, span, variant_span))
         return None
     }
     type_args := [Type]{}
@@ -1057,25 +1057,25 @@ sema_expression_hook_decision_literal: fn(variant: String, args: [EnumLitArg], v
         if sema_expr_unwrap_tag(wanted) == .Apply(name, found) && name == "HookDecision" && found.len() == 2 -> type_args = found.copy()
     }
     if type_args.len() != 2 {
-        &diagnostics.push(sema_error("E0330", span, "can't infer the decision type for `HookDecision.{variant}`", "a hook decision takes its value and failure types from the decision hook it answers", "return it from a `DecisionHook<T, E>` handler"))
+        diagnostics.push(sema_error("E0330", span, "can't infer the decision type for `HookDecision.{variant}`", "a hook decision takes its value and failure types from the decision hook it answers", "return it from a `DecisionHook<T, E>` handler"))
         return None
     }
     payload_types := [Type]{}
-    if variant == "Transform" -> &payload_types.push(type_args[0])
-    if variant == "Fail" -> &payload_types.push(type_args[1])
+    if variant == "Transform" -> payload_types.push(type_args[0])
+    if variant == "Fail" -> payload_types.push(type_args[1])
     if payload_types.len() == 0 && args.len() != 0 {
-        &diagnostics.push(sema_enum_unit_payload("HookDecision", variant, span))
+        diagnostics.push(sema_enum_unit_payload("HookDecision", variant, span))
         return None
     }
     decision_ty: Type.Apply{name: "HookDecision", args: type_args}
-    sema_expression_core_enum_positional_literal("HookDecision", "HookDecision", variant, payload_types, decision_ty, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    sema_expression_core_enum_positional_literal("HookDecision", "HookDecision", variant, payload_types, decision_ty, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
 }
 
 // The positional payload of a Core enum variant without a source
 // declaration, checked against `payload_types`; the literal has `result_ty`.
 sema_expression_core_enum_positional_literal: fn(enum_name: String, display_name: String, variant: String, payload_types: [Type], result_ty: Type, args: [EnumLitArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if args.len() != payload_types.len() {
-        &diagnostics.push(sema_error("E0104", span, "variant `{variant}` expects {payload_types.len()} payload values", "this Core enum variant has positional payload fields", "pass exactly {payload_types.len()} values"))
+        diagnostics.push(sema_error("E0104", span, "variant `{variant}` expects {payload_types.len()} payload values", "this Core enum variant has positional payload fields", "pass exactly {payload_types.len()} values"))
         return None
     }
     checked_args := [TEnumArg]{}
@@ -1083,29 +1083,29 @@ sema_expression_core_enum_positional_literal: fn(enum_name: String, display_name
         payload_expr: if argument == {
             .Positional(value) -> value
             else -> {
-                &diagnostics.push(sema_error("E0764", span, "variant `{variant}` takes a positional payload", "Core enum payload values do not have field labels", "pass the value without a label"))
+                diagnostics.push(sema_error("E0764", span, "variant `{variant}` takes a positional payload", "Core enum payload values do not have field labels", "pass the value without a label"))
                 return None
             }
         }
         payload_ty: payload_types[index]
-        sema_copy_site_check_field(payload_expr, environment, program, scopes, &tail_store, &context, &diagnostics)
+        sema_copy_site_check_field(payload_expr, environment, program, scopes, tail_store, context, diagnostics)
         diagnostic_start: diagnostics.len()
-        checked: sema_check_expression(payload_expr, Val(payload_ty), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? {
-            sema_expression_enum_payload_replace_mismatch(display_name, variant, None, payload_ty, payload_expr, diagnostic_start, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        checked: sema_check_expression(payload_expr, Val(payload_ty), environment, program, scopes, state, tail_store, context, diagnostics) ?? {
+            sema_expression_enum_payload_replace_mismatch(display_name, variant, None, payload_ty, payload_expr, diagnostic_start, environment, program, scopes, state, tail_store, context, diagnostics)
             return None
         }
-        if !sema_copy_site_check_guard_owned(checked, environment, program, scopes, state, context, &diagnostics, false) -> return None
+        if !sema_copy_site_check_guard_owned(checked, environment, program, scopes, state, context, diagnostics, false) -> return None
         compatible: sema_expr_expected_assignable(payload_ty, checked.ty, environment, program) ?? return None
         if !compatible {
-            &diagnostics.push(sema_expression_enum_payload_mismatch(display_name, variant, None, payload_ty, checked.ty, expr_span(payload_expr), environment, program))
+            diagnostics.push(sema_expression_enum_payload_mismatch(display_name, variant, None, payload_ty, checked.ty, expr_span(payload_expr), environment, program))
             return None
         }
-        if !sema_copy_site_record_move(payload_expr, "the variant payload", environment, program, scopes, &state, &tail_store, &context, &diagnostics) -> return None
-        &checked_args.push(TEnumArg{value: checked})
+        if !sema_copy_site_record_move(payload_expr, "the variant payload", environment, program, scopes, state, tail_store, context, diagnostics) -> return None
+        checked_args.push(TEnumArg{value: checked})
     }
     payload: if checked_args.len() == 0 -> TEnumPayload.Unit else -> TEnumPayload.Positional{args: checked_args}
     value: sema_tree_node(result_ty, TExprKind.EnumLit{enum_type: enum_name, variant: variant, payload: payload}, span)
-    sema_expr_expected(value, expected, environment, program, &diagnostics)
+    sema_expr_expected(value, expected, environment, program, diagnostics)
 }
 
 // E0764: positional values for a named-payload variant. The fix spells the
@@ -1121,7 +1121,7 @@ sema_expression_enum_named_positional: fn(owner: String, variant: String, labels
 // declared field gets exactly one value.
 sema_expression_core_enum_named_literal: fn(enum_name: String, display_name: String, variant: String, labels: [String], payload_types: [Type], args: [EnumLitArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     supplied := [Bool]{}
-    loop _ in labels -> &supplied.push(false)
+    loop _ in labels -> supplied.push(false)
     named_values := [TNamedEnumArg]{}
     failed := false
     loop arg in args {
@@ -1133,7 +1133,7 @@ sema_expression_core_enum_named_literal: fn(enum_name: String, display_name: Str
                 payload_expr = value
             }
             .Positional(_) -> {
-                &diagnostics.push(sema_expression_enum_named_positional(display_name, variant, labels, span))
+                diagnostics.push(sema_expression_enum_named_positional(display_name, variant, labels, span))
                 return None
             }
         }
@@ -1145,45 +1145,45 @@ sema_expression_core_enum_named_literal: fn(enum_name: String, display_name: Str
             }
         }
         if found < 0 {
-            &diagnostics.push(sema_error("E0302", expr_span(payload_expr), "variant `{variant}` has no field `{label}`", "named enum payloads use the declaration's field names", "use a declared payload field"))
+            diagnostics.push(sema_error("E0302", expr_span(payload_expr), "variant `{variant}` has no field `{label}`", "named enum payloads use the declaration's field names", "use a declared payload field"))
             return None
         }
         if supplied[found] {
-            &diagnostics.push(sema_error("E0105", expr_span(payload_expr), "variant field `{label}` is supplied more than once", "each enum payload field receives one value", "remove the duplicate field"))
+            diagnostics.push(sema_error("E0105", expr_span(payload_expr), "variant field `{label}` is supplied more than once", "each enum payload field receives one value", "remove the duplicate field"))
             return None
         }
         supplied[found] = true
         field_ty: payload_types[found]
-        sema_copy_site_check_field(payload_expr, environment, program, scopes, &tail_store, &context, &diagnostics)
+        sema_copy_site_check_field(payload_expr, environment, program, scopes, tail_store, context, diagnostics)
         diagnostic_start: diagnostics.len()
-        checked_value: sema_check_expression(payload_expr, Val(field_ty), environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        checked_value: sema_check_expression(payload_expr, Val(field_ty), environment, program, scopes, state, tail_store, context, diagnostics)
         if checked_value == None {
-            sema_expression_enum_payload_replace_mismatch(display_name, variant, Val(label), field_ty, payload_expr, diagnostic_start, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            sema_expression_enum_payload_replace_mismatch(display_name, variant, Val(label), field_ty, payload_expr, diagnostic_start, environment, program, scopes, state, tail_store, context, diagnostics)
             failed = true
             next
         }
         checked: checked_value
-        if !sema_copy_site_check_guard_owned(checked, environment, program, scopes, state, context, &diagnostics, false) -> return None
+        if !sema_copy_site_check_guard_owned(checked, environment, program, scopes, state, context, diagnostics, false) -> return None
         compatible: sema_expr_expected_assignable(field_ty, checked.ty, environment, program) ?? return None
         if !compatible {
-            &diagnostics.push(sema_expression_enum_payload_mismatch(display_name, variant, Val(label), field_ty, checked.ty, expr_span(payload_expr), environment, program))
+            diagnostics.push(sema_expression_enum_payload_mismatch(display_name, variant, Val(label), field_ty, checked.ty, expr_span(payload_expr), environment, program))
             failed = true
             next
         }
-        if !sema_copy_site_record_move(payload_expr, "the variant payload", environment, program, scopes, &state, &tail_store, &context, &diagnostics) -> return None
-        &named_values.push(TNamedEnumArg{name: label, value: TEnumArg{value: checked}})
+        if !sema_copy_site_record_move(payload_expr, "the variant payload", environment, program, scopes, state, tail_store, context, diagnostics) -> return None
+        named_values.push(TNamedEnumArg{name: label, value: TEnumArg{value: checked}})
     }
     missing := [String]{}
     loop (index, was_supplied) in supplied {
-        if !was_supplied -> &missing.push(labels[index])
+        if !was_supplied -> missing.push(labels[index])
     }
     if missing.len() > 0 {
-        &diagnostics.push(sema_expression_missing_fields("variant `{variant}`", "every payload field must appear exactly once", missing, span))
+        diagnostics.push(sema_expression_missing_fields("variant `{variant}`", "every payload field must appear exactly once", missing, span))
         return None
     }
     if failed -> return None
     value: sema_tree_node(Type.Named{name: enum_name}, TExprKind.EnumLit{enum_type: enum_name, variant: variant, payload: TEnumPayload.Named{fields: named_values}}, span)
-    sema_expr_expected(value, expected, environment, program, &diagnostics)
+    sema_expr_expected(value, expected, environment, program, diagnostics)
 }
 
 // Rust `check_struct_lit` / `check_enum_lit`: every field a literal leaves
@@ -1202,15 +1202,15 @@ sema_expression_compiler_unit_enum_variants: fn(name: String) -> [String]? Never
 
 sema_expression_compiler_unit_enum_literal: fn(enum_name: String, variants: [String], variant: String, args: [EnumLitArg], variant_span: Span?, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> TExpr? {
     if !variants.contains(variant) {
-        &diagnostics.push(sema_enum_unknown_variant(enum_name, variant, variants, span, variant_span))
+        diagnostics.push(sema_enum_unknown_variant(enum_name, variant, variants, span, variant_span))
         return None
     }
     if args.len() != 0 {
-        &diagnostics.push(sema_enum_unit_payload(enum_name, variant, span))
+        diagnostics.push(sema_enum_unit_payload(enum_name, variant, span))
         return None
     }
     value: sema_tree_node(Type.Named{name: enum_name}, TExprKind.EnumLit{enum_type: enum_name, variant: variant, payload: TEnumPayload.Unit}, span)
-    sema_expr_expected(value, expected, environment, program, &diagnostics)
+    sema_expr_expected(value, expected, environment, program, diagnostics)
 }
 
 // Rust `check_enum_payload_assignable`: a payload value that doesn't fit its
@@ -1233,7 +1233,7 @@ sema_expression_enum_payload_replace_mismatch: fn(enum_name: String, variant: St
     value_span: expr_span(value)
     mismatch_index: sema_value_mismatch_index(diagnostics, diagnostic_start, value_span) ?? return
     probe_diagnostics := [Diagnostic]{}
-    offered: sema_probe_expression(value, None, environment, program, &scopes, &state, &tail_store, &context, &probe_diagnostics) ?? return
+    offered: sema_probe_expression(value, None, environment, program, scopes, state, tail_store, context, probe_diagnostics) ?? return
     diagnostics[mismatch_index] = sema_expression_enum_payload_mismatch(enum_name, variant, field, declared, offered.ty, value_span, environment, program)
 }
 
@@ -1300,7 +1300,7 @@ SemaExpressionCheckedTextLiteral: struct {
 
 sema_expression_checked_text_target: fn(head: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> SemaExpressionCheckedTextTarget? {
     name: if head == {.Named(value) -> value else -> { return None }}
-    owner: sema_expression_type_symbol(&scopes, environment, program, name) ?? return None
+    owner: sema_expression_type_symbol(scopes, environment, program, name) ?? return None
     if owner.kind != SymbolKind.Type -> return None
     if program.registration_graph == .Val(graph) {
     registered_row: sema_type_graph_nominal_row(graph, owner.id.key) ?? return None
@@ -1339,31 +1339,31 @@ sema_expression_checked_text_target: fn(head: Type, environment: SemaScopeEnviro
 
 sema_expression_checked_text_static_method_call: fn(receiver: Expr, method_name: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     type_name: if receiver == {.Ident(name, _, _) -> name else -> { return SemaMethodSpecialCheck{handled: false, value: None} }}
-    target: sema_expression_checked_text_target(Type.Named{name: type_name}, environment, program, &scopes) ?? return SemaMethodSpecialCheck{handled: false, value: None}
-    if method_name == "raw" -> return sema_expression_checked_text_raw(target, type_name, method_span, args, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    target: sema_expression_checked_text_target(Type.Named{name: type_name}, environment, program, scopes) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    if method_name == "raw" -> return sema_expression_checked_text_raw(target, type_name, method_span, args, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     function: if method_name == "check" || method_name == "from" -> target.check else -> if method_name == "encode_hole" -> target.encode_hole else -> { return SemaMethodSpecialCheck{handled: false, value: None} }
     if owner_type_args.len() > 0 {
-        &diagnostics.push(sema_error("E0119", method_span, "`{type_name}.{method_name}` has no owner type parameters", "CheckedText implementations target one concrete string-backed distinct type", "remove the explicit owner type arguments"))
+        diagnostics.push(sema_error("E0119", method_span, "`{type_name}.{method_name}` has no owner type parameters", "CheckedText implementations target one concrete string-backed distinct type", "remove the explicit owner type arguments"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     if !function.declaration.is_pure {
-        &diagnostics.push(sema_error("E0907", method_span, "`{type_name}.{method_name}` must be pure", "CheckedText methods are evaluated through the canonical pure Source evaluator", "declare this CheckedText method pure"))
+        diagnostics.push(sema_error("E0907", method_span, "`{type_name}.{method_name}` must be pure", "CheckedText methods are evaluated through the canonical pure Source evaluator", "declare this CheckedText method pure"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     if program.registration_graph == None -> return SemaMethodSpecialCheck{handled: true, value: None}
-    direct: sema_call_direct_target_from_registration(function, program.registration_graph, environment.module_identity, environment.package_identity, environment.generic_params, type_args, method_span, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    direct: sema_call_direct_target_from_registration(function, program.registration_graph, environment.module_identity, environment.package_identity, environment.generic_params, type_args, method_span, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     call := Call{
         name: "{type_name}.{method_name}",
         name_span: method_span,
         type_args: type_args,
         args: args,
     }
-    checked: sema_call_check_direct_target_owned(&state, direct, call, [SemaCallDefaultValue]{}, if method_name == "from" -> None else -> expected, environment, program, &scopes, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    checked: sema_call_check_direct_target_owned(state, direct, call, [SemaCallDefaultValue]{}, if method_name == "from" -> None else -> expected, environment, program, scopes, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     // The registered signature keeps its declared spelling (`-[]> String`
     // reads back as the named `String`) and the default failure route.
     hole_type: if checked.value.ty == {.Result(ok, _) -> ok else -> checked.value.ty}
     if method_name == "encode_hole" && hole_type != Type.String && hole_type != (Type.Named{name: "String"}) {
-        &diagnostics.push(sema_error("E0112", method_span, "a checked text hole encoder must return String", "every interpolation is passed through the type's pure `encode_hole` method before it reaches the checker", "make `encode_hole` return a String"))
+        diagnostics.push(sema_error("E0112", method_span, "a checked text hole encoder must return String", "every interpolation is passed through the type's pure `encode_hole` method before it reaches the checker", "make `encode_hole` return a String"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     check_returns_unit_result: if checked.value.ty == {
@@ -1371,14 +1371,14 @@ sema_expression_checked_text_static_method_call: fn(receiver: Expr, method_name:
         else -> false
     }
     if (method_name == "check" || method_name == "from") && !check_returns_unit_result {
-        &diagnostics.push(sema_error("E0907", method_span, "`{type_name}.check` must return `Result<Unit, Error>`", "the canonical CheckedText contract reports rejection through its error result", "match the pure CheckedText.check signature"))
+        diagnostics.push(sema_error("E0907", method_span, "`{type_name}.check` must return `Result<Unit, Error>`", "the canonical CheckedText contract reports rejection through its error result", "match the pure CheckedText.check signature"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    &context.call_return_views.push(SemaCallReturnView{span: method_span, facts: checked.return_view_facts})
-    if !sema_expr_record_call_fact(environment, program, &scopes, &context, method_span, checked, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    context.call_return_views.push(SemaCallReturnView{span: method_span, facts: checked.return_view_facts})
+    if !sema_expr_record_call_fact(environment, program, scopes, context, method_span, checked, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     if method_name == "from" {
         value: sema_expression_checked_text_from(target, type_name, checked.value, method_span) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-        return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
+        return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
     }
     SemaMethodSpecialCheck{handled: true, value: Val(checked.value)}
 }
@@ -1435,49 +1435,49 @@ sema_expression_checked_text_from: fn(target: SemaExpressionCheckedTextTarget, t
 sema_expression_checked_text_raw: fn(target: SemaExpressionCheckedTextTarget, type_name: String, method_span: Span, args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     callee: "{type_name}.raw"
     if args.len() != 1 {
-        &diagnostics.push(sema_error("E0103", method_span, "`{callee}` takes exactly one String", "a checked text boundary receives one complete text value", "write `{callee}(text)`"))
-        loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        diagnostics.push(sema_error("E0103", method_span, "`{callee}` takes exactly one String", "a checked text boundary receives one complete text value", "write `{callee}(text)`"))
+        loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
     }
     if context.unsafe_depth == 0 {
-        &diagnostics.push(sema_error("E0387", method_span, "Checked text raw construction requires an audited `#Unsafe` region", "`Type.raw(text)` bypasses the declared CheckedText checker and is an expert-only escape", "Wrap the call in `#Unsafe(\"reason\") {{ … }}`, or use `Type.from(text)` for validation"))
+        diagnostics.push(sema_error("E0387", method_span, "Checked text raw construction requires an audited `#Unsafe` region", "`Type.raw(text)` bypasses the declared CheckedText checker and is an expert-only escape", "Wrap the call in `#Unsafe(\"reason\") {{ … }}`, or use `Type.from(text)` for validation"))
     }
     if args.len() != 1 -> return SemaMethodSpecialCheck{handled: true, value: None}
-    argument: sema_check_expression(args[0].expr, Val(Type.String), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    argument: sema_check_expression(args[0].expr, Val(Type.String), environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     if argument.ty != Type.String {
-        &diagnostics.push(sema_type_mismatch(Type.String, argument.ty, expr_span(args[0].expr)))
+        diagnostics.push(sema_type_mismatch(Type.String, argument.ty, expr_span(args[0].expr)))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     params: [SemaCallParam]{SemaCallParam{label: "arg0", name: "arg0", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(Type.String), variadic: false}}
     ownership_args := args
-    ownership := sema_ownership_check_call_arguments(&state, callee, params, &ownership_args, scopes, &diagnostics)
+    ownership := sema_ownership_check_call_arguments(state, callee, params, ownership_args, scopes, diagnostics)
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
     constructed: sema_tree_node(Type.Named{name: type_name}, TExprKind.DistinctCtor{argument: argument}, method_span)
-    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(constructed, expected, environment, program, &diagnostics)}
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(constructed, expected, environment, program, diagnostics)}
 }
 
 sema_expression_checked_text_literal: fn(head: Type, source_head: Type?, body: TypedLitBody, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaExpressionCheckedTextLiteral {
-    target: sema_expression_checked_text_target(head, environment, program, &scopes) ?? return SemaExpressionCheckedTextLiteral{handled: false, value: None}
+    target: sema_expression_checked_text_target(head, environment, program, scopes) ?? return SemaExpressionCheckedTextLiteral{handled: false, value: None}
     type_name := if head == {.Named(name) -> name else -> panic("checked text target lost its named owner")}
     body_value: if body == {
         // copy: `value` is a payload of read parameter `body`, which keeps the original; the assigned `body_value` owns this one
         .Value(value) -> value.copy()
         else -> {
-            &diagnostics.push(sema_error("E0112", span, "`{type_name}{{ … }}` needs a string recipe body", "a checked text type is constructed from a quoted template, not another expression shape", "write `{type_name}{{\"…\"}}` with interpolation holes as needed"))
+            diagnostics.push(sema_error("E0112", span, "`{type_name}{{ … }}` needs a string recipe body", "a checked text type is constructed from a quoted template, not another expression shape", "write `{type_name}{{\"…\"}}` with interpolation holes as needed"))
             return SemaExpressionCheckedTextLiteral{handled: true, value: None}
         }
     }
     parts: if body_value == {
         .Str(rows, _, _) -> rows
         else -> {
-            &diagnostics.push(sema_error("E0112", expr_span(body_value), "`{type_name}{{ … }}` needs a string recipe body", "a checked text type is constructed from a quoted template, not another expression shape", "write `{type_name}{{\"…\"}}` with interpolation holes as needed"))
+            diagnostics.push(sema_error("E0112", expr_span(body_value), "`{type_name}{{ … }}` needs a string recipe body", "a checked text type is constructed from a quoted template, not another expression shape", "write `{type_name}{{\"…\"}}` with interpolation holes as needed"))
             return SemaExpressionCheckedTextLiteral{handled: true, value: None}
         }
     }
     encoded_parts := [StrPart]{}
     loop part in parts {
         if part == {
-            .Lit(_) -> &encoded_parts.push(part)
-            .Byte(value) -> &encoded_parts.push(StrPart.Lit{text: sema_expr_byte_text(value)})
+            .Lit(_) -> encoded_parts.push(part)
+            .Byte(value) -> encoded_parts.push(StrPart.Lit{text: sema_expr_byte_text(value)})
             .Interp(value, _) -> {
                 argument := CallArg{convention: AccessConvention.Read, expr: value, span: expr_span(value), flags: ast_empty_call_arg_flags(), label: None, spread: false}
                 encoder := Expr.MethodCall{
@@ -1489,7 +1489,7 @@ sema_expression_checked_text_literal: fn(head: Type, source_head: Type?, body: T
                     args: [CallArg]{argument},
                     id: AST_NODE_GENERATED,
                 }
-                &encoded_parts.push(StrPart.Interp{expr: encoder, format: StrFormat.Display})
+                encoded_parts.push(StrPart.Interp{expr: encoder, format: StrFormat.Display})
             }
         }
     }
@@ -1512,17 +1512,17 @@ sema_expression_checked_text_literal: fn(head: Type, source_head: Type?, body: T
     unresolved_hardware_start := context.hardware_use.unresolved_references.len()
     // The literal consumes the checker's Result itself: the call root keeps
     // its carrier instead of propagating into the enclosing function.
-    checked: sema_check_expression_carrier(check_call, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaExpressionCheckedTextLiteral{handled: true, value: None}
+    checked: sema_check_expression_carrier(check_call, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaExpressionCheckedTextLiteral{handled: true, value: None}
     text: if checked.kind == {
         .Call(_, _, args) -> if {
             args.len() == 1 -> args[0].value
             else -> {
-                &diagnostics.push(sema_error("E0003", span, "the checked text checker call lost its complete body argument", "the staged checker evaluates the ordinary pure `CheckedText.check` method on the exact encoded body", "preserve the canonical static method call in the checked tree"))
+                diagnostics.push(sema_error("E0003", span, "the checked text checker call lost its complete body argument", "the staged checker evaluates the ordinary pure `CheckedText.check` method on the exact encoded body", "preserve the canonical static method call in the checked tree"))
                 return SemaExpressionCheckedTextLiteral{handled: true, value: None}
             }
         }
         else -> {
-            &diagnostics.push(sema_error("E0003", span, "the checked text checker call did not lower as a direct static call", "CheckedText methods are ordinary registered pure functions", "preserve the canonical registered call target"))
+            diagnostics.push(sema_error("E0003", span, "the checked text checker call did not lower as a direct static call", "CheckedText methods are ordinary registered pure functions", "preserve the canonical registered call target"))
             return SemaExpressionCheckedTextLiteral{handled: true, value: None}
         }
     }
@@ -1531,7 +1531,7 @@ sema_expression_checked_text_literal: fn(head: Type, source_head: Type?, body: T
     // literal runs. Only constant holes are checked here, before the program runs.
     if !sema_expression_checked_text_holes_constant(parts, scopes) {
         value: sema_expression_checked_text_runtime(head, target.owner.name, checked, span, environment, program, scopes) ?? return SemaExpressionCheckedTextLiteral{handled: true, value: None}
-        return SemaExpressionCheckedTextLiteral{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
+        return SemaExpressionCheckedTextLiteral{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
     }
     if program.registration_graph == .Val(graph) {
     functions := sema_comptime_reachable_function_keys(graph, context.call_facts)
@@ -1541,20 +1541,20 @@ sema_expression_checked_text_literal: fn(head: Type, source_head: Type?, body: T
         loop fact_index < context.call_facts.len() {
             callee: context.call_facts[fact_index].callee
             if callee == .Val(symbol) && symbol.key == key {
-                &reachable.push(key)
+                reachable.push(key)
                 break
             }
             fact_index += 1
         }
     }
     loop method_key in ([String]{target.check.symbol.id.key, target.encode_hole.symbol.id.key}) {
-        if !reachable.contains(method_key) -> &reachable.push(method_key)
+        if !reachable.contains(method_key) -> reachable.push(method_key)
     }
     dependencies := [String]{}
     loop reference_index in reference_start..<context.name_references.len() {
         reference := context.name_references[reference_index]
         if reference.symbol.kind != SymbolKind.Constant -> next
-        if !dependencies.contains(reference.symbol.id.key) -> &dependencies.push(reference.symbol.id.key)
+        if !dependencies.contains(reference.symbol.id.key) -> dependencies.push(reference.symbol.id.key)
     }
     source_file := sema_source_file_at(environment.source_segments, environment.source_file, environment.source_origin, span)
     key := "{environment.module_identity}::checked-text::{target.owner.id.key}::{span.start}:{span.end}:{type_identity_key(head)}"
@@ -1576,7 +1576,7 @@ sema_expression_checked_text_literal: fn(head: Type, source_head: Type?, body: T
         dependencies: dependencies,
         span: span,
     }
-    &context.comptime_requests.push(SemaComptimeRequest{
+    context.comptime_requests.push(SemaComptimeRequest{
         callee_key: target.check.symbol.id.key,
         module_identity: target.implementation_module_identity,
         args: [TComptimeValue]{},
@@ -1585,7 +1585,7 @@ sema_expression_checked_text_literal: fn(head: Type, source_head: Type?, body: T
     })
     value: text
     result := sema_tree_node(head, TExprKind.DistinctCtor{argument: value}, span)
-    return SemaExpressionCheckedTextLiteral{handled: true, value: sema_expr_expected(result, expected, environment, program, &diagnostics)}
+    return SemaExpressionCheckedTextLiteral{handled: true, value: sema_expr_expected(result, expected, environment, program, diagnostics)}
     }
     SemaExpressionCheckedTextLiteral{handled: true, value: None}
 }
@@ -1655,13 +1655,13 @@ sema_expression_typed_literal_byte_text: fn(parts: [ByteTextPart], head: Type, s
             .Lit(text) -> {
                 loop byte in text.bytes() {
                     if Int.from_u8(byte) >= 128 {
-                        &diagnostics.push(sema_error("E0119", span, "this body doesn't match typed-literal head `{type_name(head)}`", "a typed literal body uses the head type's own literal shape", "use ASCII text or numeric elements for a byte list"))
+                        diagnostics.push(sema_error("E0119", span, "this body doesn't match typed-literal head `{type_name(head)}`", "a typed literal body uses the head type's own literal shape", "use ASCII text or numeric elements for a byte list"))
                         return None
                     }
-                    &bytes.push(byte)
+                    bytes.push(byte)
                 }
             }
-            .Byte(byte) -> &bytes.push(byte)
+            .Byte(byte) -> bytes.push(byte)
         }
     }
     Val(bytes)
@@ -1692,25 +1692,25 @@ sema_expression_typed_literal_text_parts: fn(parts: [StrPart], kind: TypedHeadKi
             }
             .Interp(value, _) -> {
                 if kind == TypedHeadKind.DateTime {
-                    &diagnostics.push(sema_error("E0155", expr_span(value), "a `DateTime` literal cannot contain interpolation", "DateTime values are checked as complete RFC3339 literals before the program runs", "write a complete `DateTime{{\"…\"}}` literal, or parse a runtime String explicitly"))
+                    diagnostics.push(sema_error("E0155", expr_span(value), "a `DateTime` literal cannot contain interpolation", "DateTime values are checked as complete RFC3339 literals before the program runs", "write a complete `DateTime{{\"…\"}}` literal, or parse a runtime String explicitly"))
                     return None
                 }
                 old_borrow := context.borrow_ctx
                 old_string_view := context.allow_string_view_read
                 context.borrow_ctx = true
                 context.allow_string_view_read = true
-                checked := sema_check_expression(value, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+                checked := sema_check_expression(value, None, environment, program, scopes, state, tail_store, context, diagnostics)
                 context.borrow_ctx = old_borrow
                 context.allow_string_view_read = old_string_view
                 hole: checked ?? return None
                 trusted := kind == TypedHeadKind.HTML && sema_expression_typed_hole_is(hole.ty, "HTML")
                 if !trusted && !sema_expression_typed_literal_printable(hole.ty, environment, program) {
-                    &diagnostics.push(sema_error("E0112", expr_span(value), "`{type_name(hole.ty)}` can't be used in a typed literal hole", "typed literal holes use the shared JetShow rendering contract", "use a printable value, or convert it to String before the hole"))
+                    diagnostics.push(sema_error("E0112", expr_span(value), "`{type_name(hole.ty)}` can't be used in a typed literal hole", "typed literal holes use the shared JetShow rendering contract", "use a printable value, or convert it to String before the hole"))
                     return None
                 }
-                &holes.push(hole)
-                &trusted_html.push(trusted)
-                &literals.push("")
+                holes.push(hole)
+                trusted_html.push(trusted)
+                literals.push("")
             }
         }
     }
@@ -1737,15 +1737,15 @@ sema_expression_validate_boundary_literal: fn(kind: TypedHeadKind, parts: [StrPa
             }
             .Interp(_, _) -> {
                 if kind == TypedHeadKind.DateTime {
-                    &diagnostics.push(sema_error("E0155", span, "a `DateTime` literal cannot contain interpolation", "DateTime values are checked as complete RFC3339 literals before the program runs", "write a complete `DateTime{{\"…\"}}` literal, or parse a runtime String explicitly"))
+                    diagnostics.push(sema_error("E0155", span, "a `DateTime` literal cannot contain interpolation", "DateTime values are checked as complete RFC3339 literals before the program runs", "write a complete `DateTime{{\"…\"}}` literal, or parse a runtime String explicitly"))
                     return false
                 }
-                &literals.push("")
+                literals.push("")
             }
         }
     }
     if sema_expression_boundary_literal_reason(kind, literals) == .Val(reason) {
-        &diagnostics.push(sema_error("E0155", span, "this `{name}` literal is invalid", reason, "fix the literal, or parse a runtime String with the ordinary `{name}` constructor"))
+        diagnostics.push(sema_error("E0155", span, "this `{name}` literal is invalid", reason, "fix the literal, or parse a runtime String with the ordinary `{name}` constructor"))
         return false
     }
     true
@@ -1847,11 +1847,11 @@ sema_expression_typed_literal_text: fn(kind: TypedHeadKind, head: Type, value: E
     parts := if value == {
         .Str(rows, _, _) -> rows
         else -> {
-            &diagnostics.push(sema_error("E0112", span, "`{type_name(head)}.{{ … }}` needs a string recipe body", "checked typed heads are built from a quoted template, not from another expression shape", "write `{type_name(head)}.{{\"...\"}}` with `{{value}}` holes as needed"))
+            diagnostics.push(sema_error("E0112", span, "`{type_name(head)}.{{ … }}` needs a string recipe body", "checked typed heads are built from a quoted template, not from another expression shape", "write `{type_name(head)}.{{\"...\"}}` with `{{value}}` holes as needed"))
             return None
         }
     }
-    if !sema_expression_validate_boundary_literal(kind, parts, expr_span(value), &diagnostics) -> return None
+    if !sema_expression_validate_boundary_literal(kind, parts, expr_span(value), diagnostics) -> return None
     if kind == TypedHeadKind.DateTime {
         argument: CallArg{convention: AccessConvention.Read, expr: value, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
         constructor: Expr.MethodCall{
@@ -1863,44 +1863,44 @@ sema_expression_typed_literal_text: fn(kind: TypedHeadKind, head: Type, value: E
             args: [CallArg]{argument},
             id: AST_NODE_GENERATED,
         }
-        return sema_check_expression(constructor, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        return sema_check_expression(constructor, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     }
-    checked: sema_expression_typed_literal_text_parts(parts, kind, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    checked: sema_expression_typed_literal_text_parts(parts, kind, span, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
     // Every holed typed head desugars to its Core constructor: the literal
     // pieces, one argument per hole, and (HTML) which holes were HTML.
     target: typed_head_literal_constructor(kind) ?? {
-        &diagnostics.push(sema_error("E0003", span, "typed head `{type_name(head)}` has no Core literal constructor", "every holed typed head is built by its Core owner", "register the head's constructor in typed_head_literal_constructor"))
+        diagnostics.push(sema_error("E0003", span, "typed head `{type_name(head)}` has no Core literal constructor", "every holed typed head is built by its Core owner", "register the head's constructor in typed_head_literal_constructor"))
         return None
     }
     literal_exprs := [Expr]{}
     hole_exprs := [Expr]{}
-    loop text in checked.literals -> &literal_exprs.push(Expr.Str{parts: [StrPart]{StrPart.Lit{text: text}}, span: span, id: AST_NODE_GENERATED})
+    loop text in checked.literals -> literal_exprs.push(Expr.Str{parts: [StrPart]{StrPart.Lit{text: text}}, span: span, id: AST_NODE_GENERATED})
     hole_index := 0
     loop part in parts {
         if part == .Interp(hole, _) {
             if kind == TypedHeadKind.SQL {
-                &hole_exprs.push(sema_expression_sql_hole_value(hole, checked.holes[hole_index].ty))
+                hole_exprs.push(sema_expression_sql_hole_value(hole, checked.holes[hole_index].ty))
             } else {
-                &hole_exprs.push(Expr.Str{parts: [StrPart]{StrPart.Interp{expr: hole, format: StrFormat.Display}}, span: expr_span(hole), id: AST_NODE_GENERATED})
+                hole_exprs.push(Expr.Str{parts: [StrPart]{StrPart.Interp{expr: hole, format: StrFormat.Display}}, span: expr_span(hole), id: AST_NODE_GENERATED})
             }
             hole_index += 1
         }
     }
     lists := [ [Expr] ]{literal_exprs, hole_exprs}
     if kind == TypedHeadKind.HTML {
-        &lists.push(loop trusted in checked.trusted_html -> Expr.Bool{value: trusted, span: span, id: AST_NODE_GENERATED})
+        lists.push(loop trusted in checked.trusted_html -> Expr.Bool{value: trusted, span: span, id: AST_NODE_GENERATED})
     }
     args := [CallArg]{}
     loop elements in lists {
-        &args.push(CallArg{convention: AccessConvention.Read, expr: Expr.ListLit{elements: elements, span: span, id: AST_NODE_GENERATED}, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false})
+        args.push(CallArg{convention: AccessConvention.Read, expr: Expr.ListLit{elements: elements, span: span, id: AST_NODE_GENERATED}, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false})
     }
     // Each constructor is declared `-> Head Never!`; the head yields its
     // success value exactly as the automatic `Never!` propagation of a call.
-    built := sema_call_core_check_fixed(environment, program, target.module_name, target.member, [Type]{}, args, span, None, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    built := sema_call_core_check_fixed(environment, program, target.module_name, target.member, [Type]{}, args, span, None, scopes, state, tail_store, context, diagnostics) ?? return None
     if sema_expr_unwrap_tag(built.ty) == .Result(_, error) && sema_expr_unwrap_tag(error) == (Type.Named{name: "Never"}) {
         built = sema_expression_propagated(built, TTryConvert.Never, span) ?? return None
     }
-    sema_expr_expected(built, expected, environment, program, &diagnostics)
+    sema_expr_expected(built, expected, environment, program, diagnostics)
 }
 
 // One `SQL{…}` hole as its bound DBValue: DBValue as-is, the Int, Float,
@@ -1942,7 +1942,7 @@ sema_expression_typed_literal_regex: fn(value: Expr, span: Span, expected: Type?
     parts := if value == {
         .Str(rows, _, _) -> rows
         else -> {
-            &diagnostics.push(sema_error("E0152", span, "`Regex{{…}}` needs one quoted pattern", "a regex typed literal contains pattern text, not another expression shape", "write `Regex{{\"...\"}}`"))
+            diagnostics.push(sema_error("E0152", span, "`Regex{{…}}` needs one quoted pattern", "a regex typed literal contains pattern text, not another expression shape", "write `Regex{{\"...\"}}`"))
             return None
         }
     }
@@ -1952,7 +1952,7 @@ sema_expression_typed_literal_regex: fn(value: Expr, span: Span, expected: Type?
             .Lit(text) -> pattern = "{pattern}{text}"
             .Byte(byte) -> pattern = "{pattern}{sema_expr_byte_text(byte)}"
             .Interp(expr, _) -> {
-                &diagnostics.push(sema_error("E0152", expr_span(expr), "a `Regex` literal cannot contain interpolation", "the compiler must know the complete pattern before the program runs", "use a fixed `Regex{{\"...\"}}` pattern, or build text and call `re.compile(text)`"))
+                diagnostics.push(sema_error("E0152", expr_span(expr), "a `Regex` literal cannot contain interpolation", "the compiler must know the complete pattern before the program runs", "use a fixed `Regex{{\"...\"}}` pattern, or build text and call `re.compile(text)`"))
                 return None
             }
         }
@@ -1960,22 +1960,22 @@ sema_expression_typed_literal_regex: fn(value: Expr, span: Span, expected: Type?
     // The literal is checked by the same Core parser that compiles it at run
     // time, so the two can never disagree about what a pattern means.
     _: boundary_regex.compile(pattern) ?? {
-        &diagnostics.push(sema_error("E0152", expr_span(value), "this regex pattern is invalid at position {err.offset}", err.reason, "fix the pattern at that position; a `\\` before ASCII punctuation matches it literally"))
+        diagnostics.push(sema_error("E0152", expr_span(value), "this regex pattern is invalid at position {err.offset}", err.reason, "fix the pattern at that position; a `\\` before ASCII punctuation matches it literally"))
         return None
     }
-    route: sema_call_core_resolve_route(environment, program, "core.regex", "compile", [Type]{}, 1, false, span, &diagnostics) ?? return None
+    route: sema_call_core_resolve_route(environment, program, "core.regex", "compile", [Type]{}, 1, false, span, diagnostics) ?? return None
     if route == {
         .Source(target) -> {
             argument: CallArg{convention: AccessConvention.Read, expr: Expr.Str{parts: [StrPart]{StrPart.Lit{text: pattern}}, span: expr_span(value), id: AST_NODE_GENERATED}, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
-            compiled: sema_call_core_check_source_owned(target, "core.regex.compile", [Type]{}, [CallArg]{argument}, span, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+            compiled: sema_call_core_check_source_owned(target, "core.regex.compile", [Type]{}, [CallArg]{argument}, span, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
             result_type: if compiled.ty == {.Result(ok, _) -> ok else -> panic("source Regex compile producer is not fallible")}
             message: sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: "compiler-checked regex failed to compile"}}}, span)
             fallback: TOrFallback.Panic{message: message, location: sema_expression_panic_location(environment, program, scopes, span)}
             checked: sema_tree_node(result_type, TExprKind.OrFallback{value: compiled, fallback: fallback, ambient_err: None}, span)
-            return sema_expr_expected_owned(^checked, expected, environment, program, &diagnostics)
+            return sema_expr_expected_owned(checked, expected, environment, program, diagnostics)
         }
         else -> {
-            &diagnostics.push(sema_error("E0906", span, "the source Regex literal producer is unavailable", "checked patterns and dynamic patterns use the same source-owned engine", "load the core.regex source module"))
+            diagnostics.push(sema_error("E0906", span, "the source Regex literal producer is unavailable", "checked patterns and dynamic patterns use the same source-owned engine", "load the core.regex source module"))
             return None
         }
     }
@@ -1989,7 +1989,7 @@ sema_expression_is_regex_head: fn(ty: Type) -> Bool Never! {
 }
 
 sema_expression_typed_literal_mismatch: fn(head: Type, span: Span, diagnostics: &[Diagnostic]) -> TExpr? {
-    &diagnostics.push(sema_error("E0119", span, "this body doesn't match typed-literal head `{type_name(head)}`", "a typed literal body uses the head type's own literal shape", "use elements for lists, entries for maps, fields for records, or one expression for scalars"))
+    diagnostics.push(sema_error("E0119", span, "this body doesn't match typed-literal head `{type_name(head)}`", "a typed literal body uses the head type's own literal shape", "use elements for lists, entries for maps, fields for records, or one expression for scalars"))
     None
 }
 
@@ -2008,9 +2008,9 @@ sema_expression_typed_literal_whole_value: fn(head: Type, value: Expr, environme
     probe_diagnostics := [Diagnostic]{}
     // The probe reads the enclosing statement tails (its liveness frames in
     // `context` index this store), so it shares the store, never a fresh one.
-    checked: sema_probe_expression(value, Val(head), environment, program, &scopes, &state, &tail_store, &context, &probe_diagnostics) ?? return false
+    checked: sema_probe_expression(value, Val(head), environment, program, scopes, state, tail_store, context, probe_diagnostics) ?? return false
     if probe_diagnostics.len() != 0 -> return false
-    _ := sema_expr_expected(checked, Val(head), environment, program, &probe_diagnostics) ?? return false
+    _ := sema_expr_expected(checked, Val(head), environment, program, probe_diagnostics) ?? return false
     probe_diagnostics.len() == 0
 }
 
@@ -2033,9 +2033,9 @@ sema_expression_never_whole_list: fn(value: Expr) -> Bool Never! {
 }
 
 sema_expression_typed_literal_whole: fn(head: Type, value: Expr, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    checked: sema_check_expression(value, Val(head), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-    typed: sema_expr_expected(checked, Val(head), environment, program, &diagnostics) ?? return None
-    sema_expr_expected(typed, expected, environment, program, &diagnostics)
+    checked: sema_check_expression(value, Val(head), environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+    typed: sema_expr_expected(checked, Val(head), environment, program, diagnostics) ?? return None
+    sema_expr_expected(typed, expected, environment, program, diagnostics)
 }
 
 SemaExpressionVariantHead: struct {
@@ -2062,7 +2062,7 @@ sema_expression_variant_head: fn(head: Type, environment: SemaScopeEnvironment, 
     enum_name: path.slice(0, separator)
     variant: path.slice(separator + 1, path.len())
     head_value: SemaExpressionVariantHead{enum_name: enum_name, variant: variant}
-    owner: sema_expression_type_symbol(&scopes, environment, program, enum_name)
+    owner: sema_expression_type_symbol(scopes, environment, program, enum_name)
     if owner == .Val(symbol) {
         if sema_scope_declaration_enum_declares(environment, program, symbol.id, variant) -> return Val(head_value)
         if sema_expression_core_export_variants(environment, program, symbol) == None -> return None
@@ -2083,10 +2083,10 @@ sema_expression_field_is_shorthand: fn(field: ExprField) -> Bool Never! {
 // the destination owns the explicit conversion. Returns true when reported.
 sema_expression_typed_literal_distinct_mismatch: fn(head: Type, value: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
     if value.ty == head -> return false
-    facts: sema_expr_distinct_facts(head, environment, program, &scopes) ?? return false
+    facts: sema_expr_distinct_facts(head, environment, program, scopes) ?? return false
     // A value that already has the head's distinct type (`Meters{a + b}` for
     // `Meters` operands) is no re-typing, whatever spelling its type carries.
-    if sema_expr_distinct_facts(sema_expr_unwrap_tag(value.ty), environment, program, &scopes) == .Val(own) {
+    if sema_expr_distinct_facts(sema_expr_unwrap_tag(value.ty), environment, program, scopes) == .Val(own) {
         if own.key == facts.key -> return false
     }
     offered: type_name(value.ty)
@@ -2100,7 +2100,7 @@ sema_expression_typed_literal_distinct_mismatch: fn(head: Type, value: TExpr, en
     }
     // The source spelling of the destination, never its resolved symbol identity.
     shown: sema_type_nominal_leaf(Type.Named{name: facts.name})
-    &diagnostics.push(sema_error("E0753", value.span, "a `{offered}` can't be used where a `{shown}` is expected", "`{shown}` and `{offered}` are different types — even though `{shown}` is built on `{type_name(facts.base)}`, one is never accepted in place of the other", "convert explicitly: `{shown}.{method}(expr)`"))
+    diagnostics.push(sema_error("E0753", value.span, "a `{offered}` can't be used where a `{shown}` is expected", "`{shown}` and `{offered}` are different types — even though `{shown}` is built on `{type_name(facts.base)}`, one is never accepted in place of the other", "convert explicitly: `{shown}.{method}(expr)`"))
     true
 }
 
@@ -2110,10 +2110,10 @@ sema_expression_typed_literal_distinct_mismatch: fn(head: Type, value: TExpr, en
 // value body (`CustomerID{n}`) keeps the E0753 mismatch.
 sema_expression_typed_literal_distinct_literal: fn(head: Type, value: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if sema_expression_typed_literal_written_integer(value) == None && !sema_expr_decimal_literal_operand(value, false) -> return SemaMethodSpecialCheck{handled: false, value: None}
-    facts: sema_expr_distinct_facts(head, environment, program, &scopes) ?? return SemaMethodSpecialCheck{handled: false, value: None}
-    owner: sema_expression_type_symbol(&scopes, environment, program, facts.name) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    facts: sema_expr_distinct_facts(head, environment, program, scopes) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    owner: sema_expression_type_symbol(scopes, environment, program, facts.name) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     argument: CallArg{convention: AccessConvention.Read, expr: value, span: expr_span(value), flags: ast_empty_call_arg_flags(), label: None, spread: false}
-    sema_call_try_distinct_conversion(owner, facts.name, sema_call_distinct_base_method(facts.base), [CallArg]{argument}, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    sema_call_try_distinct_conversion(owner, facts.name, sema_call_distinct_base_method(facts.base), [CallArg]{argument}, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
 }
 
 sema_expression_typed_literal: fn(head: Type?, body: TypedLitBody, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
@@ -2122,14 +2122,14 @@ sema_expression_typed_literal: fn(head: Type?, body: TypedLitBody, span: Span, e
     word: context.overflow_word
     context.overflow_word = None
     if head == .Val(written) {
-        if sema_expression_variant_head(written, environment, program, &scopes) == .Val(variant_head) {
+        if sema_expression_variant_head(written, environment, program, scopes) == .Val(variant_head) {
             owner_args: if sema_expr_unwrap_tag(written) == { .Apply(_, rows) -> rows else -> [Type]{} }
             if body == {
                 .Fields(fields) -> {
                     args: loop field in fields -> EnumLitArg.Named{label: field.name, expr: field.value}
-                    return sema_expression_enum_literal(variant_head.enum_name, owner_args, variant_head.variant, args, false, None, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+                    return sema_expression_enum_literal(variant_head.enum_name, owner_args, variant_head.variant, args, false, None, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
                 }
-                .Empty -> return sema_expression_enum_literal(variant_head.enum_name, owner_args, variant_head.variant, [EnumLitArg]{}, false, None, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+                .Empty -> return sema_expression_enum_literal(variant_head.enum_name, owner_args, variant_head.variant, [EnumLitArg]{}, false, None, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
                 else -> {}
             }
         }
@@ -2139,94 +2139,94 @@ sema_expression_typed_literal: fn(head: Type?, body: TypedLitBody, span: Span, e
     // (`IOContext`) is known whatever the written-name table says.
     if head == .Val(written) && program.registration_graph == .Val(graph) {
         if sema_expr_unwrap_tag(written) == .Named(written_name) {
-            if sema_expression_type_symbol(&scopes, environment, program, written_name) == None && sema_expression_core_record_name(written_name, [Type]{}, expected, environment, program, &scopes) == None {
+            if sema_expression_type_symbol(scopes, environment, program, written_name) == None && sema_expression_core_record_name(written_name, [Type]{}, expected, environment, program, scopes) == None {
                 before: diagnostics.len()
                 generic_names: loop parameter in environment.generic_params -> parameter.name
-                sema_type_unknown_written_names(graph, sema_scope_caller_row(environment, graph), written, span, generic_names, &diagnostics)
+                sema_type_unknown_written_names(graph, sema_scope_caller_row(environment, graph), written, span, generic_names, diagnostics)
                 if diagnostics.len() > before -> return None
             }
         }
     }
     written_head: head ?? (expected ?? {
-        &diagnostics.push(sema_error("E0119", span, "this inferred typed literal needs a known type", "an inferred typed literal needs an expected type from the surrounding context", "add a type head, or annotate the binding with the intended type"))
+        diagnostics.push(sema_error("E0119", span, "this inferred typed literal needs a known type", "an inferred typed literal needs an expected type from the surrounding context", "add a type head, or annotate the binding with the intended type"))
         return None
     })
     source_kind := typed_head_kind_of(written_head)
     result_head := sema_expr_expected_type(sema_expr_unwrap_tag(written_head), environment, program)
     kind := source_kind
     if kind == None -> kind = typed_head_kind_of(result_head)
-    checked_text := sema_expression_checked_text_literal(result_head, head, body, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    checked_text := sema_expression_checked_text_literal(result_head, head, body, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if checked_text.handled -> return checked_text.value
 
     if result_head == {
         .List(_) | .FixedList(_, _) -> if body == {
             .ByteText(parts) -> {
-                bytes: sema_expression_typed_literal_byte_text(parts, result_head, span, &diagnostics) ?? return None
+                bytes: sema_expression_typed_literal_byte_text(parts, result_head, span, diagnostics) ?? return None
                 if sema_expression_typed_literal_is_byte_list(result_head) {
                     constant: sema_tree_node(result_head, TExprKind.CtLit{value: TComptimeValue.Bytes{value: bytes}}, span)
-                    return sema_expr_expected_owned(^constant, expected, environment, program, &diagnostics)
+                    return sema_expr_expected_owned(constant, expected, environment, program, diagnostics)
                 }
                 // `[U8; N]{"…"}` and other element heads check each byte as an element.
                 elements: loop byte in bytes -> Expr.Int{value: Int.from_u8(byte), span: span, width: None, raw: Val("{Int.from_u8(byte)}"), id: AST_NODE_GENERATED}
-                checked: sema_expression_list(Expr.ListLit{elements: elements, span: span, id: AST_NODE_GENERATED}, elements, span, Val(result_head), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-                return sema_expr_expected_owned(^checked, expected, environment, program, &diagnostics)
+                checked: sema_expression_list(Expr.ListLit{elements: elements, span: span, id: AST_NODE_GENERATED}, elements, span, Val(result_head), environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+                return sema_expr_expected_owned(checked, expected, environment, program, diagnostics)
             }
             .Empty -> {
-                checked: sema_expression_list(Expr.ListLit{elements: [Expr]{}, span: span, id: AST_NODE_GENERATED}, [Expr]{}, span, Val(result_head), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-                return sema_expr_expected_owned(^checked, expected, environment, program, &diagnostics)
+                checked: sema_expression_list(Expr.ListLit{elements: [Expr]{}, span: span, id: AST_NODE_GENERATED}, [Expr]{}, span, Val(result_head), environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+                return sema_expr_expected_owned(checked, expected, environment, program, diagnostics)
             }
             .Elements(elements) -> {
-                if elements.len() == 1 && sema_expression_typed_literal_whole_value(result_head, elements[0], environment, program, &scopes, &state, &tail_store, &context) -> return sema_expression_typed_literal_whole(result_head, elements[0], expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-                checked: sema_expression_list(Expr.ListLit{elements: elements, span: span, id: AST_NODE_GENERATED}, elements, span, Val(result_head), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-                return sema_expr_expected_owned(^checked, expected, environment, program, &diagnostics)
+                if elements.len() == 1 && sema_expression_typed_literal_whole_value(result_head, elements[0], environment, program, scopes, state, tail_store, context) -> return sema_expression_typed_literal_whole(result_head, elements[0], expected, environment, program, scopes, state, tail_store, context, diagnostics)
+                checked: sema_expression_list(Expr.ListLit{elements: elements, span: span, id: AST_NODE_GENERATED}, elements, span, Val(result_head), environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+                return sema_expr_expected_owned(checked, expected, environment, program, diagnostics)
             }
             .Value(value) -> {
-                if sema_expression_typed_literal_whole_value(result_head, value, environment, program, &scopes, &state, &tail_store, &context) -> return sema_expression_typed_literal_whole(result_head, value, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+                if sema_expression_typed_literal_whole_value(result_head, value, environment, program, scopes, state, tail_store, context) -> return sema_expression_typed_literal_whole(result_head, value, expected, environment, program, scopes, state, tail_store, context, diagnostics)
                 elements := [Expr]{value}
-                checked: sema_expression_list(Expr.ListLit{elements: elements, span: span, id: AST_NODE_GENERATED}, elements, span, Val(result_head), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-                return sema_expr_expected_owned(^checked, expected, environment, program, &diagnostics)
+                checked: sema_expression_list(Expr.ListLit{elements: elements, span: span, id: AST_NODE_GENERATED}, elements, span, Val(result_head), environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+                return sema_expr_expected_owned(checked, expected, environment, program, diagnostics)
             }
-            else -> return sema_expression_typed_literal_mismatch(result_head, span, &diagnostics)
+            else -> return sema_expression_typed_literal_mismatch(result_head, span, diagnostics)
         }
         .Map(_, _, _) -> if body == {
             .Empty -> {
-                checked: sema_expression_map(Expr.MapLit{entries: [ExprPair]{}, span: span, id: AST_NODE_GENERATED}, [ExprPair]{}, span, Val(result_head), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-                return sema_expr_expected_owned(^checked, expected, environment, program, &diagnostics)
+                checked: sema_expression_map(Expr.MapLit{entries: [ExprPair]{}, span: span, id: AST_NODE_GENERATED}, [ExprPair]{}, span, Val(result_head), environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+                return sema_expr_expected_owned(checked, expected, environment, program, diagnostics)
             }
             .Entries(entries) -> {
-                checked: sema_expression_map(Expr.MapLit{entries: entries, span: span, id: AST_NODE_GENERATED}, entries, span, Val(result_head), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-                return sema_expr_expected_owned(^checked, expected, environment, program, &diagnostics)
+                checked: sema_expression_map(Expr.MapLit{entries: entries, span: span, id: AST_NODE_GENERATED}, entries, span, Val(result_head), environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+                return sema_expr_expected_owned(checked, expected, environment, program, diagnostics)
             }
             // #3739: a map body without `:` can only be the whole value.
-            .Value(value) -> return sema_expression_typed_literal_whole(result_head, value, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-            else -> return sema_expression_typed_literal_mismatch(result_head, span, &diagnostics)
+            .Value(value) -> return sema_expression_typed_literal_whole(result_head, value, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+            else -> return sema_expression_typed_literal_mismatch(result_head, span, diagnostics)
         }
         .Named(name) -> if body == {
             .Fields(fields) -> {
                 // (#4764): a distinct head is not a record, so `CustomerID{n}`
                 // is its one-expression body (the parser reads `{n}` as a field
                 // shorthand before types are known) and reaches the E0753 conversion rule.
-                if fields.len() == 1 && sema_expression_field_is_shorthand(fields[0]) && sema_expr_distinct_facts(result_head, environment, program, &scopes) != None {
+                if fields.len() == 1 && sema_expression_field_is_shorthand(fields[0]) && sema_expr_distinct_facts(result_head, environment, program, scopes) != None {
                     // copy: `fields` is a payload of read parameter `body`, which keeps the original
-                    return sema_expression_typed_literal(head, TypedLitBody.Value{value: fields[0].value.copy()}, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+                    return sema_expression_typed_literal(head, TypedLitBody.Value{value: fields[0].value.copy()}, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
                 }
-                checked: sema_expression_struct_literal(name, [Type]{}, fields, false, None, span, Val(result_head), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-                return sema_expr_expected_owned(^checked, expected, environment, program, &diagnostics)
+                checked: sema_expression_struct_literal(name, [Type]{}, fields, false, None, span, Val(result_head), environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+                return sema_expr_expected_owned(checked, expected, environment, program, diagnostics)
             }
             .Empty -> {
-                checked: sema_expression_struct_literal(name, [Type]{}, [ExprField]{}, false, None, span, Val(result_head), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-                return sema_expr_expected_owned(^checked, expected, environment, program, &diagnostics)
+                checked: sema_expression_struct_literal(name, [Type]{}, [ExprField]{}, false, None, span, Val(result_head), environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+                return sema_expr_expected_owned(checked, expected, environment, program, diagnostics)
             }
             else -> {}
         }
         .Apply(name, args) -> if body == {
             .Fields(fields) -> {
-                checked: sema_expression_struct_literal(name, args, fields, false, None, span, Val(result_head), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-                return sema_expr_expected_owned(^checked, expected, environment, program, &diagnostics)
+                checked: sema_expression_struct_literal(name, args, fields, false, None, span, Val(result_head), environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+                return sema_expr_expected_owned(checked, expected, environment, program, diagnostics)
             }
             .Empty -> {
-                checked: sema_expression_struct_literal(name, args, [ExprField]{}, false, None, span, Val(result_head), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-                return sema_expr_expected_owned(^checked, expected, environment, program, &diagnostics)
+                checked: sema_expression_struct_literal(name, args, [ExprField]{}, false, None, span, Val(result_head), environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+                return sema_expr_expected_owned(checked, expected, environment, program, diagnostics)
             }
             else -> {}
         }
@@ -2234,11 +2234,11 @@ sema_expression_typed_literal: fn(head: Type?, body: TypedLitBody, span: Span, e
         // body in the expected `T?` position, so `None` and `Val(x)` both elaborate.
         .Option(_) -> if body == {
             .Value(value) -> {
-                checked: sema_check_expression(value, Val(result_head), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-                typed: sema_expr_expected(checked, Val(result_head), environment, program, &diagnostics) ?? return None
-                return sema_expr_expected_owned(^typed, expected, environment, program, &diagnostics)
+                checked: sema_check_expression(value, Val(result_head), environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+                typed: sema_expr_expected(checked, Val(result_head), environment, program, diagnostics) ?? return None
+                return sema_expr_expected_owned(typed, expected, environment, program, diagnostics)
             }
-            else -> return sema_expression_typed_literal_mismatch(result_head, span, &diagnostics)
+            else -> return sema_expression_typed_literal_mismatch(result_head, span, diagnostics)
         }
         else -> {}
     }
@@ -2247,77 +2247,77 @@ sema_expression_typed_literal: fn(head: Type?, body: TypedLitBody, span: Span, e
         .Value(value) -> {
             if kind == .Val(head_kind) {
                 if head_kind == TypedHeadKind.SQL || head_kind == TypedHeadKind.HTML || head_kind == TypedHeadKind.Sh || head_kind == TypedHeadKind.URL || head_kind == TypedHeadKind.Path || head_kind == TypedHeadKind.DateTime {
-                    return sema_expression_typed_literal_text(head_kind, result_head, value, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+                    return sema_expression_typed_literal_text(head_kind, result_head, value, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
                 }
             }
             // The `Regex` head is the compile-checked pattern literal whether it is
             // written (`Regex{…}`, which `use core.regex` may resolve to the
             // source-owned record) or inferred from a Regex-typed slot (`{…}`).
-            if sema_expression_is_regex_head(result_head) || sema_expression_is_regex_head(written_head) -> return sema_expression_typed_literal_regex(value, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            if sema_expression_is_regex_head(result_head) || sema_expression_is_regex_head(written_head) -> return sema_expression_typed_literal_regex(value, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
             if word == .Val(name) {
-                if sema_expression_typed_literal_word_literal(name, result_head, value, &diagnostics) -> return None
+                if sema_expression_typed_literal_word_literal(name, result_head, value, diagnostics) -> return None
             }
-            distinct_literal := sema_expression_typed_literal_distinct_literal(result_head, value, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            distinct_literal := sema_expression_typed_literal_distinct_literal(result_head, value, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
             if distinct_literal.handled -> return distinct_literal.value
-            checked_optional := if sema_expression_typed_literal_value_needs_head(value, result_head) -> sema_check_expression(value, Val(result_head), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression(value, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            checked_optional := if sema_expression_typed_literal_value_needs_head(value, result_head) -> sema_check_expression(value, Val(result_head), environment, program, scopes, state, tail_store, context, diagnostics) else -> sema_check_expression(value, None, environment, program, scopes, state, tail_store, context, diagnostics)
             checked: checked_optional ?? return None
-            if sema_expression_typed_literal_float_to_integer(result_head, checked.ty, checked.span, &diagnostics) -> return None
+            if sema_expression_typed_literal_float_to_integer(result_head, checked.ty, checked.span, diagnostics) -> return None
             converted := checked
             value_span: expr_span(value)
             line := sema_source_line_at(environment.source_segments, value_span) ?? 0
             needs_conversion := (checked.ty == Type.Int && (if result_head == {.IntN(_, _) -> true else -> false})) || (sema_expr_is_integer(checked.ty) && (result_head == Type.Float || result_head == Type.Float32)) || (checked.ty == Type.Float && result_head == Type.Float32) || sema_expression_typed_literal_fixed_conversion(checked.ty, result_head)
             if needs_conversion {
-                converted = sema_expr_numeric_literal_conversion(checked, result_head, value_span, line, &diagnostics) ?? return None
+                converted = sema_expr_numeric_literal_conversion(checked, result_head, value_span, line, diagnostics) ?? return None
                 outcome: sema_expr_narrow_outcome(word)
                 if outcome != TNarrowOutcome.Stop && sema_expr_is_narrowing(converted) {
                     narrowed: sema_expr_narrowing_with(converted, outcome, line)
-                    return sema_expr_expected_owned(^narrowed, expected, environment, program, &diagnostics)
+                    return sema_expr_expected_owned(narrowed, expected, environment, program, diagnostics)
                 }
             }
             // `Millimeter{ 4meter }` converts another unit of the family.
             if sema_expr_unit_implicit_applies(result_head, converted.ty, environment, program) {
-                unit_value: sema_expr_unit_implicit_conversion(converted, result_head, environment, program, &scopes, context, &diagnostics) ?? return None
-                return sema_expr_expected_owned(^unit_value, expected, environment, program, &diagnostics)
+                unit_value: sema_expr_unit_implicit_conversion(converted, result_head, environment, program, scopes, context, diagnostics) ?? return None
+                return sema_expr_expected_owned(unit_value, expected, environment, program, diagnostics)
             }
-            if sema_expression_typed_literal_distinct_mismatch(result_head, converted, environment, program, &scopes, &diagnostics) -> return None
-            typed: sema_expr_expected(converted, Val(result_head), environment, program, &diagnostics) ?? return None
-            return sema_expr_expected_owned(^typed, expected, environment, program, &diagnostics)
+            if sema_expression_typed_literal_distinct_mismatch(result_head, converted, environment, program, scopes, diagnostics) -> return None
+            typed: sema_expr_expected(converted, Val(result_head), environment, program, diagnostics) ?? return None
+            return sema_expr_expected_owned(typed, expected, environment, program, diagnostics)
         }
         .Elements(elements) -> if elements.len() == 1 {
             value := elements[0]
             if word == .Val(name) {
-                if sema_expression_typed_literal_word_literal(name, result_head, value, &diagnostics) -> return None
+                if sema_expression_typed_literal_word_literal(name, result_head, value, diagnostics) -> return None
             }
-            distinct_literal := sema_expression_typed_literal_distinct_literal(result_head, value, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            distinct_literal := sema_expression_typed_literal_distinct_literal(result_head, value, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
             if distinct_literal.handled -> return distinct_literal.value
-            checked_optional := if sema_expression_typed_literal_value_needs_head(value, result_head) -> sema_check_expression(value, Val(result_head), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression(value, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            checked_optional := if sema_expression_typed_literal_value_needs_head(value, result_head) -> sema_check_expression(value, Val(result_head), environment, program, scopes, state, tail_store, context, diagnostics) else -> sema_check_expression(value, None, environment, program, scopes, state, tail_store, context, diagnostics)
             checked: checked_optional ?? return None
-            if sema_expression_typed_literal_float_to_integer(result_head, checked.ty, checked.span, &diagnostics) -> return None
+            if sema_expression_typed_literal_float_to_integer(result_head, checked.ty, checked.span, diagnostics) -> return None
             converted := checked
             value_span: expr_span(value)
             line := sema_source_line_at(environment.source_segments, value_span) ?? 0
             needs_conversion := (checked.ty == Type.Int && (if result_head == {.IntN(_, _) -> true else -> false})) || (sema_expr_is_integer(checked.ty) && (result_head == Type.Float || result_head == Type.Float32)) || (checked.ty == Type.Float && result_head == Type.Float32) || sema_expression_typed_literal_fixed_conversion(checked.ty, result_head)
             if needs_conversion {
-                converted = sema_expr_numeric_literal_conversion(checked, result_head, value_span, line, &diagnostics) ?? return None
+                converted = sema_expr_numeric_literal_conversion(checked, result_head, value_span, line, diagnostics) ?? return None
                 outcome: sema_expr_narrow_outcome(word)
                 if outcome != TNarrowOutcome.Stop && sema_expr_is_narrowing(converted) {
                     narrowed: sema_expr_narrowing_with(converted, outcome, line)
-                    return sema_expr_expected_owned(^narrowed, expected, environment, program, &diagnostics)
+                    return sema_expr_expected_owned(narrowed, expected, environment, program, diagnostics)
                 }
             }
-            if sema_expression_typed_literal_distinct_mismatch(result_head, converted, environment, program, &scopes, &diagnostics) -> return None
-            typed: sema_expr_expected(converted, Val(result_head), environment, program, &diagnostics) ?? return None
-            return sema_expr_expected_owned(^typed, expected, environment, program, &diagnostics)
+            if sema_expression_typed_literal_distinct_mismatch(result_head, converted, environment, program, scopes, diagnostics) -> return None
+            typed: sema_expr_expected(converted, Val(result_head), environment, program, diagnostics) ?? return None
+            return sema_expr_expected_owned(typed, expected, environment, program, diagnostics)
         }
         else -> {}
     }
-    sema_expression_typed_literal_mismatch(result_head, span, &diagnostics)
+    sema_expression_typed_literal_mismatch(result_head, span, diagnostics)
 }
 
 // This rule scalar heads use parameter acceptance, never a numeric retag.
 sema_expression_typed_literal_float_to_integer: fn(head: Type, offered: Type, span: Span, diagnostics: &[Diagnostic]) -> Bool {
     if (offered == Type.Float || offered == Type.Float32) && sema_expr_is_integer(head) {
-        &diagnostics.push(sema_error("E0112", span, "a `{type_name(offered)}` can't be used where a `{type_name(head)}` is expected", "a typed literal accepts its body like a parameter; converting a decimal value to a whole number must be explicit", "use `{type_name(head)}.from_float(value)` and handle its failure, or `math.round(value)` to round to the nearest Int"))
+        diagnostics.push(sema_error("E0112", span, "a `{type_name(offered)}` can't be used where a `{type_name(head)}` is expected", "a typed literal accepts its body like a parameter; converting a decimal value to a whole number must be explicit", "use `{type_name(head)}.from_float(value)` and handle its failure, or `math.round(value)` to round to the nearest Int"))
         return true
     }
     false
@@ -2393,7 +2393,7 @@ sema_expression_typed_literal_word_literal: fn(word: String, head: Type, value: 
             "saturating" -> if number < bounds.lo -> "`{spelling}{open}{bounds.lo}{close}`" else -> "`{spelling}{open}{bounds.hi}{close}`"
             else -> "`None`"
         }
-        &diagnostics.push(sema_error("E1003", expr_span(value), "`{number}` doesn't fit in `{spelling}`, which holds {bounds.lo}..{bounds.hi}", "`{word}` decides what a value that doesn't fit becomes, but a written literal is known now, so it must fit", "write {given}, which is what `{word}` gives for {number}"))
+        diagnostics.push(sema_error("E1003", expr_span(value), "`{number}` doesn't fit in `{spelling}`, which holds {bounds.lo}..{bounds.hi}", "`{word}` decides what a value that doesn't fit becomes, but a written literal is known now, so it must fit", "write {given}, which is what `{word}` gives for {number}"))
         return true
     }
     false

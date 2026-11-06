@@ -274,5 +274,5 @@ An interrupted run is explicitly incomplete, and any non-pass exits nonzero.
 
 Compiler fixture text follows the same language rules: escape literal braces
 in quoted parser input, and use explicit filesystem cleanup rather than an
-arbitrary `defer { ... }` block. S63 permits `defer close(^resource)`, not general
+arbitrary `defer { ... }` block. S63 permits `defer close(resource)`, not general
 deferred actions.

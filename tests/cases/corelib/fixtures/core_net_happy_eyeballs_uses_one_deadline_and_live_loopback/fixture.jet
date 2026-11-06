@@ -9,7 +9,7 @@ run: fn() {
         .Err(error) -> print(net.error_operation(error))
     }
     client: net.tcp_connect_happy("localhost", net.socket_port(address), 1000) ?? panic("happy connect")
-    server := &listener.accept() ?? panic("accept")
+    server := listener.accept() ?? panic("accept")
     client.write_text("happy") ?? panic("write")
     print(server.read_text(5) ?? panic("read"))
 }

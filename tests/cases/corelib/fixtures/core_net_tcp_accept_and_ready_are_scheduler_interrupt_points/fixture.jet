@@ -11,7 +11,7 @@ run: fn() {
     { sender: accept_tx, receiver: accept_rx }: channel<Int>()
     cancelled_accept: task {
         accept_tx.send(1)
-        if &cancelled_listener.accept() == {
+        if cancelled_listener.accept() == {
             .Ok(_) -> print("accept unexpectedly succeeded")
             .Err(error) -> print(net.error_message(error))
         }
@@ -34,7 +34,7 @@ run: fn() {
     print(net.ready_writable(write_ready))
     interest: NetReadyInterest.Read
     { sender: wait_tx, receiver: wait_rx }: channel<Int>()
-    ready_wait: task ^ready_server {
+    ready_wait: task &&ready_server {
         wait_tx.send(1)
         if ready_server.ready(interest, deadline: Duration.milliseconds(1000) ?? panic("ready deadline")) == {
             .Ok(_) -> print("ready unexpectedly succeeded")

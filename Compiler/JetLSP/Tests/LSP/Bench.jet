@@ -54,14 +54,14 @@ use {
 // providers (#4494/#4483); these registrations are not native parity evidence.
 LSPDoctorTranscriptScratch: struct { root: OSPath }
 impl LSPDoctorTranscriptScratch.Close {
-    close: fn(^self) Never! -[FS]> {
+    close: fn(&&self) Never! -[FS]> {
         lsp_doctor_native.remove_dir_all(self.root).drop("doctor transcript scratch cleanup")
     }
 }
 
 lsp_doctor_test_child: fn(root: OSPath, name: String) -> OSPath Never! {
     child := root.copy()
-    lsp_doctor_path.push(&child, lsp_doctor_path.from_text(name, root.platform))
+    lsp_doctor_path.push(child, lsp_doctor_path.from_text(name, root.platform))
     child
 }
 
@@ -70,7 +70,7 @@ lsp_doctor_test_scratch: fn() -[FS, Env, Exec]> LSPDoctorTranscriptScratch Never
     serial: lsp_doctor_test_counter.temp_counter_next()
     root: lsp_doctor_test_child(temporary, "jet-lsp-doctor-{lsp_doctor_test_process.id()}-{serial}")
     lsp_doctor_native.create_dir(root) ?? panic("create doctor transcript scratch: {err}")
-    LSPDoctorTranscriptScratch{root: ^root}
+    LSPDoctorTranscriptScratch{root: root.move()}
 }
 
 #Test("LSP doctor transcript cursor counts exact json extensions without file type filtering") {

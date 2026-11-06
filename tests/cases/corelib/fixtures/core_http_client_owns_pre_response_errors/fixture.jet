@@ -9,13 +9,13 @@ use {
 
 http_crlf: fn() -> String { String.from_bytes([U8]{13, 10}) ?? panic("CRLF") }
 http_read: fn(stream: &net.TCPStream) -> String {
-    net.set_read_timeout(&stream, 1000) ?? panic("read timeout")
-    String.from_bytes(net.tcp_read_bytes(&stream, 4096) ?? panic("read request")) ?? panic("request UTF-8")
+    net.set_read_timeout(stream, 1000) ?? panic("read timeout")
+    String.from_bytes(net.tcp_read_bytes(stream, 4096) ?? panic("read request")) ?? panic("request UTF-8")
 }
 http_reply: fn(stream: &net.TCPStream, file: String) {
     bytes: files.read_bytes(file) ?? panic("response bytes")
-    net.tcp_write_all_bytes(&stream, bytes) ?? panic("write response")
-    net.tcp_close(&stream) ?? panic("drop peer stream")
+    net.tcp_write_all_bytes(stream, bytes) ?? panic("write response")
+    net.tcp_close(stream) ?? panic("drop peer stream")
 }
 require_timeout: fn(request: HTTPRequest) {
     if request.send() == {
@@ -51,14 +51,14 @@ check_pre_response_errors: fn() {
         // Original nonblocking accept + stop atomic: zero-deadline accepts queued
         // sockets; Timeout alone = WouldBlock, any other failure panics.
         loop stop_rx.try_receive() == None {
-            if &listener.accept(deadline: 0s) == {
+            if listener.accept(deadline: 0s) == {
                 .Ok(stream) -> {
                     index: requests.len()
-                    &requests.push(http_read(&stream))
+                    requests.push(http_read(stream))
                     if index < 2 {
-                        http_reply(&stream, "proxy-{index}.response")
+                        http_reply(stream, "proxy-{index}.response")
                     } else {
-                        net.tcp_close(&stream) ?? panic("drop")
+                        net.tcp_close(stream) ?? panic("drop")
                     }
                 }
                 .Err(error) -> if error == {

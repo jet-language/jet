@@ -23,7 +23,7 @@ by_formula: fn(data: [Float], shape: [Int], target: [Int]) -> [Float] {
                 stride = stride * dim
             }
         }
-        &out.push(data[at])
+        out.push(data[at])
     }
     out
 }
@@ -32,7 +32,7 @@ check: fn(shape: [Int], target: [Int]) {
     n := 1
     loop d in shape -> n = n * d
     data := [Float]{}
-    loop i in 0..<n -> &data.push(Float{i} + 1.0)
+    loop i in 0..<n -> data.push(Float{i} + 1.0)
     flat: compute.from_list(data) ?? panic("from_list")
     tensor: compute.reshape(flat, shape) ?? panic("reshape")
     wide: compute.broadcast_to(tensor, target) ?? panic("broadcast_to")

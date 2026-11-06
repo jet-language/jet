@@ -37,9 +37,9 @@ run: fn() -[Secret, IO]> {
             0x1e,
             0x1f
         }
-        plan: vault.prepare_import_signing("", ^bytes) ?? return
+        plan: vault.prepare_import_signing("", bytes) ?? return
         write: vault.authorize_write(plan, "fixed prepare-import-signing authorization") ?? return
-        result: vault.commit_import_signing(^write, ^plan) ?? return
+        result: vault.commit_import_signing(write, plan) ?? return
         print(result)
     }
 }

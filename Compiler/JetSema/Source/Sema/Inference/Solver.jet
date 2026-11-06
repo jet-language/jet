@@ -60,7 +60,7 @@ sema_inference_declared_name: fn(name: String) -> String Never! {
 sema_inference_callee_renames: fn(context: SemaInferenceContext) -> [SemaInferenceBinding] Never! {
     renames := [SemaInferenceBinding]{}
     loop parameter in context.type_params {
-        if sema_inference_is_lexical_param(context, parameter.name) -> &renames.push(SemaInferenceBinding{name: parameter.name, ty: Type.Named{name: "{parameter.name}{SEMA_INFERENCE_CALLEE_SUFFIX}"}, source: "the callee's own parameter"})
+        if sema_inference_is_lexical_param(context, parameter.name) -> renames.push(SemaInferenceBinding{name: parameter.name, ty: Type.Named{name: "{parameter.name}{SEMA_INFERENCE_CALLEE_SUFFIX}"}, source: "the callee's own parameter"})
     }
     renames
 }
@@ -92,7 +92,7 @@ sema_inference_bind: fn(context: SemaInferenceContext, bindings: &[SemaInference
     normalized: sema_inference_resolve_type_bindings(found, bindings)
     if normalized == (Type.Named{name: name}) -> return true
     if sema_inference_type_contains_param(normalized, name, bindings) {
-        sema_inference_conflict(&conflict, name, Type.Named{name: name}, "the generic declaration", normalized, source)
+        sema_inference_conflict(conflict, name, Type.Named{name: name}, "the generic declaration", normalized, source)
         return false
     }
     existing_index: sema_inference_binding_index(bindings, name)
@@ -100,18 +100,18 @@ sema_inference_bind: fn(context: SemaInferenceContext, bindings: &[SemaInference
         existing: bindings[existing_at]
         prior: sema_inference_resolve_type_bindings(existing.ty, bindings)
         if type_identity_equal(prior, normalized) -> return true
-        sema_inference_conflict(&conflict, name, prior, existing.source, normalized, source)
+        sema_inference_conflict(conflict, name, prior, existing.source, normalized, source)
         return false
     }
     if sema_inference_parameter_index(context, name) == None -> return false
-    &bindings.push(SemaInferenceBinding{name: name, ty: normalized, source: source})
+    bindings.push(SemaInferenceBinding{name: name, ty: normalized, source: source})
     true
 }
 
 sema_inference_unify_optional: fn(context: SemaInferenceContext, left: Type?, right: Type?, bindings: &[SemaInferenceBinding], source: String, conflict: &SemaInferenceConflict?) -> Bool Never! {
     left_ty: left ?? return (right == None)
     right_ty: right ?? return false
-    sema_inference_unify_inner(context, left_ty, right_ty, &bindings, source, &conflict)
+    sema_inference_unify_inner(context, left_ty, right_ty, bindings, source, conflict)
 }
 
 sema_inference_unify_inner: fn(context: SemaInferenceContext, expected: Type, found: Type, bindings: &[SemaInferenceBinding], source: String, conflict: &SemaInferenceConflict?) -> Bool Never! {
@@ -119,35 +119,35 @@ sema_inference_unify_inner: fn(context: SemaInferenceContext, expected: Type, fo
     right: sema_inference_resolve_type_bindings(found, bindings)
     // Identical composite types still need their nested parameters bound.
     if left == .Named(name) {
-        if sema_inference_parameter_index(context, name) != None -> return sema_inference_bind(context, &bindings, name, right, source, &conflict)
+        if sema_inference_parameter_index(context, name) != None -> return sema_inference_bind(context, bindings, name, right, source, conflict)
     }
     if right == .Named(name) {
-        if sema_inference_parameter_index(context, name) != None -> return sema_inference_bind(context, &bindings, name, left, source, &conflict)
+        if sema_inference_parameter_index(context, name) != None -> return sema_inference_bind(context, bindings, name, left, source, conflict)
     }
     if left == {
         .List(inner) -> if right == {
-            .List(other) -> sema_inference_unify_inner(context, inner, other, &bindings, source, &conflict)
+            .List(other) -> sema_inference_unify_inner(context, inner, other, bindings, source, conflict)
             else -> false
         }
         .Map(key, _, value) -> if right == {
             .Map(other_key, _, other_value) -> {
-                if !sema_inference_unify_inner(context, key, other_key, &bindings, source, &conflict) -> return false
-                sema_inference_unify_inner(context, value, other_value, &bindings, source, &conflict)
+                if !sema_inference_unify_inner(context, key, other_key, bindings, source, conflict) -> return false
+                sema_inference_unify_inner(context, value, other_value, bindings, source, conflict)
             }
             else -> false
         }
         .Shared(inner) -> if right == {
-            .Shared(other) -> sema_inference_unify_inner(context, inner, other, &bindings, source, &conflict)
+            .Shared(other) -> sema_inference_unify_inner(context, inner, other, bindings, source, conflict)
             else -> false
         }
         .Option(inner) -> if right == {
-            .Option(other) -> sema_inference_unify_inner(context, inner, other, &bindings, source, &conflict)
+            .Option(other) -> sema_inference_unify_inner(context, inner, other, bindings, source, conflict)
             else -> false
         }
         .Result(ok, err) -> if right == {
             .Result(other_ok, other_err) -> {
-                ok_result: sema_inference_unify_inner(context, ok, other_ok, &bindings, source, &conflict)
-                err_result: sema_inference_unify_inner(context, err, other_err, &bindings, source, &conflict)
+                ok_result: sema_inference_unify_inner(context, ok, other_ok, bindings, source, conflict)
+                err_result: sema_inference_unify_inner(context, err, other_err, bindings, source, conflict)
                 ok_result && err_result
             }
             else -> false
@@ -156,9 +156,9 @@ sema_inference_unify_inner: fn(context: SemaInferenceContext, expected: Type, fo
             .Fn(other_params, other_ret, _, _, _, _) -> {
                 if params.len() != other_params.len() -> return false
                 loop index in 0..<params.len() {
-                    if !sema_inference_unify_inner(context, params[index], other_params[index], &bindings, source, &conflict) -> return false
+                    if !sema_inference_unify_inner(context, params[index], other_params[index], bindings, source, conflict) -> return false
                 }
-                sema_inference_unify_optional(context, ret, other_ret, &bindings, source, &conflict)
+                sema_inference_unify_optional(context, ret, other_ret, bindings, source, conflict)
             }
             else -> false
         }
@@ -166,7 +166,7 @@ sema_inference_unify_inner: fn(context: SemaInferenceContext, expected: Type, fo
             .Apply(other_name, other_args) -> {
                 if name != other_name || args.len() != other_args.len() -> return false
                 loop index in 0..<args.len() {
-                    if !sema_inference_unify_inner(context, args[index], other_args[index], &bindings, source, &conflict) -> return false
+                    if !sema_inference_unify_inner(context, args[index], other_args[index], bindings, source, conflict) -> return false
                 }
                 true
             }
@@ -177,36 +177,36 @@ sema_inference_unify_inner: fn(context: SemaInferenceContext, expected: Type, fo
                 if fields.len() != other_fields.len() -> return false
                 loop index in 0..<fields.len() {
                     if fields[index].name != other_fields[index].name -> return false
-                    if !sema_inference_unify_inner(context, fields[index].ty, other_fields[index].ty, &bindings, source, &conflict) -> return false
+                    if !sema_inference_unify_inner(context, fields[index].ty, other_fields[index].ty, bindings, source, conflict) -> return false
                 }
                 true
             }
             else -> false
         }
         .FixedList(element, length) -> if right == {
-            .FixedList(other, other_length) -> length == other_length && sema_inference_unify_inner(context, element, other, &bindings, source, &conflict)
+            .FixedList(other, other_length) -> length == other_length && sema_inference_unify_inner(context, element, other, bindings, source, conflict)
             else -> false
         }
         .InlineRange(base, lo, hi) -> if right == {
-            .InlineRange(other, other_lo, other_hi) -> lo == other_lo && hi == other_hi && sema_inference_unify_inner(context, base, other, &bindings, source, &conflict)
+            .InlineRange(other, other_lo, other_hi) -> lo == other_lo && hi == other_hi && sema_inference_unify_inner(context, base, other, bindings, source, conflict)
             else -> false
         }
         .Tagged(_, inner) -> if right == {
-            .Tagged(_, other) -> sema_inference_unify_inner(context, inner, other, &bindings, source, &conflict)
+            .Tagged(_, other) -> sema_inference_unify_inner(context, inner, other, bindings, source, conflict)
             else -> false
         }
         .Union(members) -> if right == {
             .Union(other) -> {
                 if members.len() != other.len() -> return false
                 loop index in 0..<members.len() {
-                    if !sema_inference_unify_inner(context, members[index], other[index], &bindings, source, &conflict) -> return false
+                    if !sema_inference_unify_inner(context, members[index], other[index], bindings, source, conflict) -> return false
                 }
                 true
             }
             else -> false
         }
         .Quantity(base, dimension) -> if right == {
-            .Quantity(other, other_dimension) -> dimension_identity(dimension) == dimension_identity(other_dimension) && sema_inference_unify_inner(context, base, other, &bindings, source, &conflict)
+            .Quantity(other, other_dimension) -> dimension_identity(dimension) == dimension_identity(other_dimension) && sema_inference_unify_inner(context, base, other, bindings, source, conflict)
             else -> false
         }
         else -> type_identity_equal(left, right)
@@ -232,12 +232,12 @@ sema_inference_assignable: fn(graph: SemaRegistrationGraph?, context: SemaInfere
 }
 
 sema_inference_conflict_diagnostic: fn(conflict: SemaInferenceConflict, span: Span, diagnostics: &[Diagnostic]) {
-    &diagnostics.push(sema_error("E0904", span, "can't figure out what `{sema_inference_declared_name(conflict.param)}` should be here", "one generic type parameter received incompatible concrete types", "make the argument types agree or provide an explicit type argument"))
+    diagnostics.push(sema_error("E0904", span, "can't figure out what `{sema_inference_declared_name(conflict.param)}` should be here", "one generic type parameter received incompatible concrete types", "make the argument types agree or provide an explicit type argument"))
 }
 
 sema_inference_unresolved_diagnostic: fn(parameter: SemaInferenceTypeParam, span: Span, diagnostics: &[Diagnostic]) {
     name: sema_inference_declared_name(parameter.name)
-    &diagnostics.push(sema_error("E0904", span, "can't figure out what `{name}` should be here", "generic calls need enough context to pick a concrete type", "pass the type argument explicitly, like `make<Int>()`, or give the value a typed head, like `p: Pair<Int>{{ … }}`"))
+    diagnostics.push(sema_error("E0904", span, "can't figure out what `{name}` should be here", "generic calls need enough context to pick a concrete type", "pass the type argument explicitly, like `make<Int>()`, or give the value a typed head, like `p: Pair<Int>{{ … }}`"))
 }
 
 // A bound that resolves to no trait: name the written bound as the cause.
@@ -264,12 +264,12 @@ sema_inference_validate_bounds: fn(graph: SemaRegistrationGraph?, context: &Sema
         actual: sema_inference_binding_at(bindings, parameter.name) ?? return None
         concrete: sema_inference_resolve_type_bindings(actual.ty, bindings)
         loop bound in parameter.bounds {
-            satisfied: sema_inference_bound_value(graph, &context, concrete, bound, parameter.bound_module) ?? {
+            satisfied: sema_inference_bound_value(graph, context, concrete, bound, parameter.bound_module) ?? {
                 has_graph: if graph == .Val(_) -> true else -> false
-                &diagnostics.push(sema_inference_unresolved_bound_diagnostic(has_graph, bound, parameter.bounds, sema_inference_declared_name(parameter.name), span))
+                diagnostics.push(sema_inference_unresolved_bound_diagnostic(has_graph, bound, parameter.bounds, sema_inference_declared_name(parameter.name), span))
                 return None
             }
-            &evidence.push(SemaInferenceBoundEvidence{param: parameter.name, actual: concrete, bound: bound, satisfied: satisfied, source: span})
+            evidence.push(SemaInferenceBoundEvidence{param: parameter.name, actual: concrete, bound: bound, satisfied: satisfied, source: span})
             if !satisfied {
                 name: type_name(concrete)
                 row: diagnostic_registry_row("E0905") ?? panic("E0905 must have a registry row")
@@ -285,7 +285,7 @@ sema_inference_validate_bounds: fn(graph: SemaRegistrationGraph?, context: &Sema
                         fix = "declare the bound where `{name}` is introduced: `<{name}: {bound}>`"
                     }
                 }
-                &diagnostics.push(sema_error("E0905", span, what, row.why.replace("{{why_text}}", why), row.fix.replace("{{fix_text}}", fix)))
+                diagnostics.push(sema_error("E0905", span, what, row.why.replace("{{why_text}}", why), row.fix.replace("{{fix_text}}", fix)))
                 return None
             }
         }
@@ -297,7 +297,7 @@ sema_inference_type_args: fn(context: &SemaInferenceContext, bindings: [SemaInfe
     result := [Type]{}
     loop parameter in context.type_params {
         actual: sema_inference_binding_at(bindings, parameter.name) ?? return None
-        &result.push(sema_inference_resolve_type_bindings(actual.ty, bindings))
+        result.push(sema_inference_resolve_type_bindings(actual.ty, bindings))
     }
     Val(result)
 }
@@ -313,24 +313,24 @@ sema_inference_specialized_return: fn(return_type: Type?, bindings: [SemaInferen
 }
 
 sema_inference_count_diagnostic: fn(expected: Int, actual: Int, span: Span, diagnostics: &[Diagnostic]) {
-    &diagnostics.push(sema_error("E0119", span, "expected {expected} type argument{if expected == 1 -> "" else -> "s"}, got {actual}", "generic parameters and call-site arguments must have the same arity", "provide one type argument for each declared generic parameter"))
+    diagnostics.push(sema_error("E0119", span, "expected {expected} type argument{if expected == 1 -> "" else -> "s"}, got {actual}", "generic parameters and call-site arguments must have the same arity", "provide one type argument for each declared generic parameter"))
 }
 
 sema_inference_prepare_explicit: fn(context: &SemaInferenceContext, explicit_type_args: [Type], bindings: &[SemaInferenceBinding], span: Span, diagnostics: &[Diagnostic]) -> Bool {
     if explicit_type_args.len() == 0 -> return true
     if context.type_params.len() == 0 {
-        sema_inference_count_diagnostic(0, explicit_type_args.len(), span, &diagnostics)
+        sema_inference_count_diagnostic(0, explicit_type_args.len(), span, diagnostics)
         return false
     }
     if explicit_type_args.len() != context.type_params.len() {
-        sema_inference_count_diagnostic(context.type_params.len(), explicit_type_args.len(), span, &diagnostics)
+        sema_inference_count_diagnostic(context.type_params.len(), explicit_type_args.len(), span, diagnostics)
         return false
     }
     conflict := SemaInferenceConflict?{None}
     loop index in 0..<context.type_params.len() {
         name: context.type_params[index].name.copy()
-        if !sema_inference_bind(context, &bindings, name, explicit_type_args[index], "the explicit type argument", &conflict) {
-            if conflict == .Val(row) -> sema_inference_conflict_diagnostic(row, span, &diagnostics)
+        if !sema_inference_bind(context, bindings, name, explicit_type_args[index], "the explicit type argument", conflict) {
+            if conflict == .Val(row) -> sema_inference_conflict_diagnostic(row, span, diagnostics)
             return false
         }
     }
@@ -341,10 +341,10 @@ sema_infer_validate_explicit: fn(graph: SemaRegistrationGraph?, context: &SemaIn
     renames: sema_inference_callee_renames(context)
     if renames.len() > 0 {
         solver := sema_inference_solver_context(context, renames)
-        return sema_infer_validate_explicit(graph, &solver, type_args, span, &diagnostics)
+        return sema_infer_validate_explicit(graph, solver, type_args, span, diagnostics)
     }
     if context.type_params.len() > 0 && type_args.len() == 0 {
-        sema_inference_unresolved_diagnostic(context.type_params[0], span, &diagnostics)
+        sema_inference_unresolved_diagnostic(context.type_params[0], span, diagnostics)
         return None
     }
     // A written type argument names a type as the caller's module sees it:
@@ -356,9 +356,9 @@ sema_infer_validate_explicit: fn(graph: SemaRegistrationGraph?, context: &SemaIn
         written = loop ty in type_args -> sema_type_resolve_declared_recursive(registered, ty, caller, context.lexical_generic_params)
     }
     bindings := [SemaInferenceBinding]{}
-    if !sema_inference_prepare_explicit(&context, written, &bindings, span, &diagnostics) -> return None
-    evidence: sema_inference_validate_bounds(graph, &context, bindings, span, &diagnostics) ?? return None
-    resolved_args: sema_inference_type_args(&context, bindings) ?? return None
+    if !sema_inference_prepare_explicit(context, written, bindings, span, diagnostics) -> return None
+    evidence: sema_inference_validate_bounds(graph, context, bindings, span, diagnostics) ?? return None
+    resolved_args: sema_inference_type_args(context, bindings) ?? return None
     Val(SemaInferenceResult{substitutions: sema_inference_declared_bindings(bindings), type_args: resolved_args, parameters: [Type]{}, return_type: None, evidence: sema_inference_declared_evidence(evidence), complete: true, compatible: true})
 }
 
@@ -384,13 +384,13 @@ sema_infer_callable: fn(graph: SemaRegistrationGraph?, context: &SemaInferenceCo
         solver := sema_inference_solver_context(context, renames)
         solver_parameters: loop parameter in parameters -> sema_inference_substitute_type_bindings(parameter, renames)
         solver_return: sema_inference_specialized_return(return_type, renames)
-        return sema_infer_callable(graph, &solver, solver_parameters, solver_return, args, explicit_type_args, span, &diagnostics)
+        return sema_infer_callable(graph, solver, solver_parameters, solver_return, args, explicit_type_args, span, diagnostics)
     }
     // Apply heads and their nested arguments must use the same declaration
     // identity before structural unification. Source signatures retain leaves
     // while values crossing a file boundary already carry canonical names.
     generic_scope := context.lexical_generic_params
-    loop parameter in context.type_params -> &generic_scope.push(TGenericParam{name: parameter.name, bounds: []})
+    loop parameter in context.type_params -> generic_scope.push(TGenericParam{name: parameter.name, bounds: []})
     resolved_parameters: if graph == .Val(registered) -> {
         loop parameter in parameters -> sema_type_resolve_declared_with_generics(registered, parameter, context.caller_module_identity, generic_scope)
     } else -> parameters
@@ -398,15 +398,15 @@ sema_infer_callable: fn(graph: SemaRegistrationGraph?, context: &SemaInferenceCo
         loop arg in args -> sema_type_resolve_declared_with_generics(registered, arg, context.caller_module_identity, generic_scope)
     } else -> args
     bindings := [SemaInferenceBinding]{}
-    if !sema_inference_prepare_explicit(&context, explicit_type_args, &bindings, span, &diagnostics) -> return None
+    if !sema_inference_prepare_explicit(context, explicit_type_args, bindings, span, diagnostics) -> return None
     compatible := true
     conflict := SemaInferenceConflict?{None}
     if args.len() != parameters.len() -> compatible = false
     loop index in 0..<args.len() {
         if index < parameters.len() {
-            if !sema_inference_unify_inner(context, resolved_parameters[index], resolved_args[index], &bindings, "argument {index + 1}", &conflict) {
+            if !sema_inference_unify_inner(context, resolved_parameters[index], resolved_args[index], bindings, "argument {index + 1}", conflict) {
                 if conflict == .Val(row) {
-                    sema_inference_conflict_diagnostic(row, span, &diagnostics)
+                    sema_inference_conflict_diagnostic(row, span, diagnostics)
                     return None
                 }
                 compatible = false
@@ -414,9 +414,9 @@ sema_infer_callable: fn(graph: SemaRegistrationGraph?, context: &SemaInferenceCo
         }
     }
     if context.expected == .Val(expected_ty) && return_type == .Val(declared_return) {
-        if !sema_inference_unify_inner(context, sema_inference_expected_return_view(declared_return, expected_ty), expected_ty, &bindings, "the expected result type", &conflict) {
+        if !sema_inference_unify_inner(context, sema_inference_expected_return_view(declared_return, expected_ty), expected_ty, bindings, "the expected result type", conflict) {
             if conflict == .Val(row) {
-                sema_inference_conflict_diagnostic(row, span, &diagnostics)
+                sema_inference_conflict_diagnostic(row, span, diagnostics)
                 return None
             }
             compatible = false
@@ -424,11 +424,11 @@ sema_infer_callable: fn(graph: SemaRegistrationGraph?, context: &SemaInferenceCo
     }
     loop parameter in context.type_params {
         if sema_inference_binding_index(bindings, parameter.name) == None {
-            sema_inference_unresolved_diagnostic(parameter, span, &diagnostics)
+            sema_inference_unresolved_diagnostic(parameter, span, diagnostics)
             return None
         }
     }
-    evidence: sema_inference_validate_bounds(graph, &context, bindings, span, &diagnostics) ?? return None
+    evidence: sema_inference_validate_bounds(graph, context, bindings, span, diagnostics) ?? return None
     specialized_parameters: sema_inference_specialized_parameters(resolved_parameters, bindings)
     specialized_return := sema_inference_specialized_return(return_type, bindings)
     loop index in 0..<args.len() {
@@ -437,10 +437,10 @@ sema_infer_callable: fn(graph: SemaRegistrationGraph?, context: &SemaInferenceCo
     if context.expected == .Val(expected_ty) && specialized_return != None {
         if !sema_inference_assignable(graph, context, expected_ty, sema_inference_expected_return_view(specialized_return ?? Type.Named{name: "Unit"}, expected_ty)) -> compatible = false
     }
-    type_args: sema_inference_type_args(&context, bindings) ?? return None
+    type_args: sema_inference_type_args(context, bindings) ?? return None
     Val(SemaInferenceResult{substitutions: sema_inference_declared_bindings(bindings), type_args: type_args, parameters: specialized_parameters, return_type: specialized_return, evidence: sema_inference_declared_evidence(evidence), complete: true, compatible: compatible})
 }
 
 sema_infer_nominal: fn(graph: SemaRegistrationGraph?, context: &SemaInferenceContext, declared: Type, actual: Type, explicit_type_args: [Type], span: Span, diagnostics: &[Diagnostic]) -> SemaInferenceResult? {
-    sema_infer_callable(graph, &context, [Type]{declared}, None, [Type]{actual}, explicit_type_args, span, &diagnostics)
+    sema_infer_callable(graph, context, [Type]{declared}, None, [Type]{actual}, explicit_type_args, span, diagnostics)
 }

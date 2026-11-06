@@ -1,4 +1,4 @@
-// `^p` of an owned subject's payload moves it; the subject's other fields
+// `p.move()` of an owned subject's payload moves it; the subject's other fields
 // stay usable.
 Slot: enum {
     Full(items: [Int], label: String)
@@ -10,12 +10,12 @@ Holder: struct {
     name: String
 }
 
-keep: fn(items: ^[Int]) -> Int { items.len() }
+keep: fn(items: &&[Int]) -> Int { items.len() }
 
-take_items: fn(holder: ^Holder) -> Int {
+take_items: fn(holder: &&Holder) -> Int {
     total := 0
     if holder.slot == .Full(items, label) {
-        total = keep(^items) + label.len()
+        total = keep(items) + label.len()
     }
     total + holder.name.len()
 }

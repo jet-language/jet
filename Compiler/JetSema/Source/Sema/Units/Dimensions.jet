@@ -64,10 +64,10 @@ sema_units_dimension_expression: fn(expression: Expr, visible: SemaUnitDimension
 // binary operator; the resolver itself admits only multiplication/division.
 sema_units_dimension_dependencies: fn(expression: Expr, names: &[String]) Never! {
     if expression == {
-        .Ident(name, _, _) -> &names.push(name)
+        .Ident(name, _, _) -> names.push(name)
         .Binary(_, left, right, _, _) -> {
-            sema_units_dimension_dependencies(left, &names)
-            sema_units_dimension_dependencies(right, &names)
+            sema_units_dimension_dependencies(left, names)
+            sema_units_dimension_dependencies(right, names)
         }
         else -> {}
     }
@@ -80,11 +80,11 @@ sema_units_dimension_aliases: fn(expression: Expr, aliases: &[String:Bool]) Neve
     if expression == {
         .Field(base, _, _, _) -> {
             if base == .Ident(alias, _, _) -> aliases[alias] = true
-            sema_units_dimension_aliases(base, &aliases)
+            sema_units_dimension_aliases(base, aliases)
         }
         .Binary(_, left, right, _, _) -> {
-            sema_units_dimension_aliases(left, &aliases)
-            sema_units_dimension_aliases(right, &aliases)
+            sema_units_dimension_aliases(left, aliases)
+            sema_units_dimension_aliases(right, aliases)
         }
         else -> {}
     }
@@ -114,8 +114,8 @@ sema_units_dimension_reads: fn(expression: Expr, visible: SemaUnitDimensionVisib
             // A field base is not an unqualified dimension read.
         }
         .Binary(_, left, right, _, _) -> {
-            sema_units_dimension_reads(left, visible, &dependencies, &aliases)
-            sema_units_dimension_reads(right, visible, &dependencies, &aliases)
+            sema_units_dimension_reads(left, visible, dependencies, aliases)
+            sema_units_dimension_reads(right, visible, dependencies, aliases)
         }
         else -> {}
     }
@@ -165,9 +165,9 @@ sema_units_resolve: fn(inputs: &[SemaRegistrationModuleInput], edges: [SemaRegis
     module_rows := [String:Int]{}
     locals := [[String:Int]]{}
     exports := [[String:Int]]{}
-    sema_units_dimension_declarations(inputs, &declarations, &module_rows, &locals, &exports)
+    sema_units_dimension_declarations(inputs, declarations, module_rows, locals, exports)
     visibility := [SemaUnitDimensionVisibility]{}
-    loop local in locals -> &visibility.push(SemaUnitDimensionVisibility{local: local, imported: [String:[Int]]{}, qualified: [String:Int]{}, aliases: [String:Int]{}})
+    loop local in locals -> visibility.push(SemaUnitDimensionVisibility{local: local, imported: [String:[Int]]{}, qualified: [String:Int]{}, aliases: [String:Int]{}})
     loop edge in edges {
         source: module_rows.get(edge.source_module_identity) ?? next
         target: module_rows.get(edge.target_module_identity) ?? next
@@ -178,7 +178,7 @@ sema_units_resolve: fn(inputs: &[SemaRegistrationModuleInput], edges: [SemaRegis
             candidates := visibility[source].imported.get(name) ?? [Int]{}
             seen := false
             loop candidate in candidates { if candidate == index -> seen = true }
-            if !seen -> &candidates.push(index)
+            if !seen -> candidates.push(index)
             visibility[source].imported[name] = candidates
         }
     }
@@ -187,8 +187,8 @@ sema_units_resolve: fn(inputs: &[SemaRegistrationModuleInput], edges: [SemaRegis
     waits := [Int]{}
     queue := [Int]{}
     loop _ in declarations {
-        &dependents.push([Int]{})
-        &waits.push(0)
+        dependents.push([Int]{})
+        waits.push(0)
     }
     loop (index, declaration) in declarations {
         if declaration.preset == .Val(value) {
@@ -201,23 +201,23 @@ sema_units_resolve: fn(inputs: &[SemaRegistrationModuleInput], edges: [SemaRegis
         if declaration.claim == .Derived(expression) {
             dependencies := [Int:Bool]{}
             aliases := [String:Bool]{}
-            sema_units_dimension_reads(expression, visibility[declaration.module_index], &dependencies, &aliases)
-            sema_units_dimension_aliases(expression, &aliases)
+            sema_units_dimension_reads(expression, visibility[declaration.module_index], dependencies, aliases)
+            sema_units_dimension_aliases(expression, aliases)
             loop (alias, _) in aliases {
                 if visibility[declaration.module_index].aliases.get(alias) != None {
                     // The same source ledger used by L0103 and NameFacts.
                     used := false
                     loop name in inputs[declaration.module_index].program.used_import_names { if name == alias -> used = true }
-                    if !used -> &inputs[declaration.module_index].program.used_import_names.push(alias)
+                    if !used -> inputs[declaration.module_index].program.used_import_names.push(alias)
                 }
             }
             loop (dependency, _) in dependencies {
                 if known.get(dependency) == None {
                     waits[index] = waits[index] + 1
-                    &dependents[dependency].push(index)
+                    dependents[dependency].push(index)
                 }
             }
-            if known.get(index) == None && waits[index] == 0 -> &queue.push(index)
+            if known.get(index) == None && waits[index] == 0 -> queue.push(index)
         }
     }
     at := 0
@@ -230,7 +230,7 @@ sema_units_resolve: fn(inputs: &[SemaRegistrationModuleInput], edges: [SemaRegis
                 known[index] = value
                 loop dependent in dependents[index] {
                     waits[dependent] = waits[dependent] - 1
-                    if waits[dependent] == 0 -> &queue.push(dependent)
+                    if waits[dependent] == 0 -> queue.push(dependent)
                 }
             }
         }
@@ -243,8 +243,8 @@ sema_units_resolve: fn(inputs: &[SemaRegistrationModuleInput], edges: [SemaRegis
                 if sema_units_dimension_expression(expression, visibility[declaration.module_index], known, true) == .Ambiguous(name) -> diagnostic = sema_error("E0905", declaration.span, "dimension name `{name}` is ambiguous", "more than one imported module exports that dimension", "qualify it with the intended module alias, such as `dep.{name}`")
             }
             start: diagnostics.len()
-            &diagnostics.push(diagnostic)
-            sema_attach_diagnostic_source_locations(&diagnostics, start, inputs[declaration.module_index].source_segments)
+            diagnostics.push(diagnostic)
+            sema_attach_diagnostic_source_locations(diagnostics, start, inputs[declaration.module_index].source_segments)
         }
         owner: sema_units_owner(inputs[declaration.module_index]).package
         if &inputs[declaration.module_index].program.items[declaration.item] == .UnitFamily(definition) {
@@ -277,11 +277,11 @@ sema_units_dimension_declarations: fn(inputs: [SemaRegistrationModuleInput], dec
                     index: declarations.len()
                     local[family.family] = index
                     if family.is_pub -> public[family.family] = index
-                    &declarations.push(SemaUnitDimensionDeclaration{module_index: module_index, item: item, family: family.family, span: family.family_span, claim: claim, preset: family.resolved_dimension})
+                    declarations.push(SemaUnitDimensionDeclaration{module_index: module_index, item: item, family: family.family, span: family.family_span, claim: claim, preset: family.resolved_dimension})
                 }
             }
         }
-        &locals.push(^local)
-        &exports.push(^public)
+        locals.push(local)
+        exports.push(public)
     }
 }

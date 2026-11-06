@@ -117,7 +117,7 @@ validate_test_records: fn(report: EvidenceReport) TestEvidenceError! {
     return
 }
 
-record_test_case: fn(report: &EvidenceReport, record: ^EvidenceRecord) TestEvidenceError! {
+record_test_case: fn(report: &EvidenceReport, record: &&EvidenceRecord) TestEvidenceError! {
     validate_test_report(report)
     validate_test_record(report, record)
     loop existing in report.records {
@@ -129,7 +129,7 @@ record_test_case: fn(report: &EvidenceReport, record: ^EvidenceRecord) TestEvide
         }
     }
     if record.derivation != None {
-        if evidence_report_add_record(&report, ^record) == {
+        if evidence_report_add_record(report, record) == {
             .Ok(_) -> {
                 return
             }
@@ -137,7 +137,7 @@ record_test_case: fn(report: &EvidenceReport, record: ^EvidenceRecord) TestEvide
         }
     } else {
         derivation: evidence_record_checked_derivation(record)
-        if evidence_report_add_record_with_derivation(&report, ^record, ^derivation) == {
+        if evidence_report_add_record_with_derivation(report, record, derivation) == {
             .Ok(_) -> {
                 return
             }
@@ -146,13 +146,13 @@ record_test_case: fn(report: &EvidenceReport, record: ^EvidenceRecord) TestEvide
     }
 }
 
-finalize_test_report: fn(report: ^EvidenceReport) -> EvidenceReport TestEvidenceError! {
+finalize_test_report: fn(report: &&EvidenceReport) -> EvidenceReport TestEvidenceError! {
     validate_test_report(report)
     validate_test_records(report)
     value := report
-    records := ^value.records
+    records := value.records.move()
     value.records = [EvidenceRecord]{}
-    loop record in ^records -> record_test_case(&value, ^record)
+    loop record in records.move() -> record_test_case(value, record)
     Ok(value)
 }
 

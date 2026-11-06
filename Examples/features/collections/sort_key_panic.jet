@@ -5,7 +5,7 @@ Rows: struct {
 }
 
 impl Rows.Close {
-    close: fn(^self) { print("receiver: {self.values}") }
+    close: fn(&&self) { print("receiver: {self.values}") }
 }
 
 OwnedKey: struct {
@@ -14,7 +14,7 @@ OwnedKey: struct {
 }
 
 impl OwnedKey.Close {
-    close: fn(^self) { print("close {self.label}") }
+    close: fn(&&self) { print("close {self.label}") }
 }
 
 key: fn(value: Int, label: String) -> OwnedKey {
@@ -28,6 +28,6 @@ key: fn(value: Int, label: String) -> OwnedKey {
 run: fn() {
     rows := Rows{values: [50, 40, 30, 20, 10]}
     label: "owned key capture {rows.values.len()}"
-    &rows.values.sort_by((value: Int) -> key(value, label))
+    rows.values.sort_by((value: Int) -> key(value, label))
     print("unreachable")
 }

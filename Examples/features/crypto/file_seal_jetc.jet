@@ -33,7 +33,7 @@ run: fn() {
     again: Path.from("{dir.path}/again.bin.jetc")
     opened: Path.from("{dir.path}/opened.bin")
     plain := [U8]{}
-    loop i in 0..<(2 * 1048576 + 4321) -> &plain.push(U8{i %% 251})
+    loop i in 0..<(2 * 1048576 + 4321) -> plain.push(U8{i %% 251})
     files.write_bytes(source, plain) ?? panic("write source")
 
     crypto.file_seal([back], source: source, destination: sealed) ?? panic("seal")

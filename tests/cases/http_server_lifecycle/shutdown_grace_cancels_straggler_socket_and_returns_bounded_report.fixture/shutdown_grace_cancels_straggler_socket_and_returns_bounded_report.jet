@@ -27,7 +27,7 @@ use {
     }
     started: time.start()
     report: bound.shutdown(30ms) ?? panic("server shutdown")
-    ^serving.join() ?? panic("server join")
+    serving.join() ?? panic("server join")
     assert(time.elapsed(started) < 150ms)
     assert(report.accepted == 1)
     assert(report.completed == 0)
@@ -37,7 +37,7 @@ use {
     loop {
         part: client.read_text(8192) ?? break
         if part == "" -> break
-        &parts.push(part)
+        parts.push(part)
     }
     response: parts.join("")
     assert(!response.contains("200 OK"), "straggler published after cancellation: {response}")

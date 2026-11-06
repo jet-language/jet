@@ -8,24 +8,24 @@ use jet_foundation.[BodyUnitRounding, Dimension, Span, Type, measure_signed_valu
 // "numerator/denominator" ratio). The identity conversion is the value
 // itself. A fallible conversion is checked exactly (ir_unit_convert_checked).
 ir_unit_convert: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, argument: Int, scale: String, offset: String, rounding: BodyUnitRounding?, fallible: Bool, span: Span) -> Int Never! {
-    if fallible -> return ir_unit_convert_checked(&m, p, &b, ty, argument, scale, offset, rounding, span)
-    if rounding != None -> return ir_fail_slot(&b, span, "infallible rounded unit conversion to {ir_type_name(ty)}")
-    value: ir_expr(&m, p, &b, argument)
+    if fallible -> return ir_unit_convert_checked(m, p, b, ty, argument, scale, offset, rounding, span)
+    if rounding != None -> return ir_fail_slot(b, span, "infallible rounded unit conversion to {ir_type_name(ty)}")
+    value: ir_expr(m, p, b, argument)
     if ir_failed(b) -> return -1
     if scale == "1/1" && offset == "0/1" -> return value
-    if ir_kind_of(m, b, value) != .Float -> return ir_fail_slot(&b, span, "unit conversion to {ir_type_name(ty)}")
+    if ir_kind_of(m, b, value) != .Float -> return ir_fail_slot(b, span, "unit conversion to {ir_type_name(ty)}")
     parts: scale.split("/").to_list()
-    if parts.len() != 2 -> return ir_fail_slot(&b, span, "unit scale {scale}")
+    if parts.len() != 2 -> return ir_fail_slot(b, span, "unit scale {scale}")
     scaled := value
     one: Float{1.0}
     numerator: ir_unit_ratio_part(parts[0])
-    if numerator != one -> scaled = ir_unit_float_op(&m, &b, IROp.Mul, scaled, numerator)
+    if numerator != one -> scaled = ir_unit_float_op(m, b, IROp.Mul, scaled, numerator)
     denominator: ir_unit_ratio_part(parts[1])
-    if denominator != one -> scaled = ir_unit_float_op(&m, &b, IROp.Div, scaled, denominator)
+    if denominator != one -> scaled = ir_unit_float_op(m, b, IROp.Div, scaled, denominator)
     if offset != "0/1" {
         shift: offset.split("/").to_list()
-        if shift.len() != 2 -> return ir_fail_slot(&b, span, "unit offset {offset}")
-        scaled = ir_unit_float_op(&m, &b, IROp.Add, scaled, ir_unit_ratio_part(shift[0]) / ir_unit_ratio_part(shift[1]))
+        if shift.len() != 2 -> return ir_fail_slot(b, span, "unit offset {offset}")
+        scaled = ir_unit_float_op(m, b, IROp.Add, scaled, ir_unit_ratio_part(shift[0]) / ir_unit_ratio_part(shift[1]))
     }
     scaled
 }
@@ -36,33 +36,33 @@ ir_unit_convert: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, argumen
 // helper's `Float String!` result is this node's Result of the unit.
 ir_unit_convert_checked: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, argument: Int, scale: String, offset: String, rounding: BodyUnitRounding?, span: Span) -> Int Never! {
     helper: ir_unit_conversion_helper(rounding != None)
-    row: ir_function_row(p, "function:<corelib>/core.math::{helper}") ?? return ir_fail_slot(&b, span, "unit conversion to {ir_type_name(ty)} without core.math")
-    value: ir_expr(&m, p, &b, argument)
+    row: ir_function_row(p, "function:<corelib>/core.math::{helper}") ?? return ir_fail_slot(b, span, "unit conversion to {ir_type_name(ty)} without core.math")
+    value: ir_expr(m, p, b, argument)
     if ir_failed(b) -> return -1
     values := [Int]{value}
-    &values.push(ir_unit_const_text(&m, &b, scale))
-    &values.push(ir_unit_const_text(&m, &b, offset))
+    values.push(ir_unit_const_text(m, b, scale))
+    values.push(ir_unit_const_text(m, b, offset))
     failure := "unit conversion is not exactly representable"
     if rounding == .Val(rounded) {
-        int_row: ir_value_type(&m, p, Type.Int) ?? return ir_type_fail(&b, span, Type.Int)
+        int_row: ir_value_type(m, p, Type.Int) ?? return ir_type_fail(b, span, Type.Int)
         mode: if rounded.mode == {
             .TowardZero -> 0
             .Floor -> 1
             .Ceiling -> 2
             .NearestEven -> 3
         }
-        &values.push(ir_int_constant(&m, &b, int_row, mode))
-        digits: ir_expr(&m, p, &b, rounded.digits)
+        values.push(ir_int_constant(m, b, int_row, mode))
+        digits: ir_expr(m, p, b, rounded.digits)
         if ir_failed(b) -> return -1
-        &values.push(digits)
-        &values.push(ir_unit_const_text(&m, &b, "rounded unit conversion needs nonnegative digits"))
+        values.push(digits)
+        values.push(ir_unit_const_text(m, b, "rounded unit conversion needs nonnegative digits"))
         failure = "unit conversion overflows its runtime representation"
     }
-    &values.push(ir_unit_const_text(&m, &b, failure))
-    result: ir_call_row_typed_values(&m, p, &b, row, [Type]{Type.String}, values, span)
+    values.push(ir_unit_const_text(m, b, failure))
+    result: ir_call_row_typed_values(m, p, b, row, [Type]{Type.String}, values, span)
     if ir_failed(b) || result < 0 -> return result
-    want: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
-    ir_adapt(&m, p, &b, result, want, span)
+    want: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
+    ir_adapt(m, p, b, result, want, span)
 }
 
 // The Core/Math/Math.jet helper of a fallible unit conversion.
@@ -72,18 +72,18 @@ ir_unit_conversion_helper: fn(rounded: Bool) -> String Never! {
 
 // A String constant of static `text`.
 ir_unit_const_text: fn(m: &IRModule, b: &IRBuilder, text: String) -> Int Never! {
-    string_row: ir_string_row(&m)
-    slot: ir_temp(&m, &b, string_row)
-    ir_emit(&b.f, IROp.ConstText, slot, ir_intern_text(&m, text), -1, -1, b.line)
+    string_row: ir_string_row(m)
+    slot: ir_temp(m, b, string_row)
+    ir_emit(b.f, IROp.ConstText, slot, ir_intern_text(m, text), -1, -1, b.line)
     slot
 }
 
 // `slot op constant`, in `slot`'s Float row.
 ir_unit_float_op: fn(m: &IRModule, b: &IRBuilder, op: IROp, slot: Int, constant: Float) -> Int Never! {
-    operand: ir_temp_like(&m, &b, slot)
-    ir_emit(&b.f, IROp.Const, operand, ir_float_constant_bits(constant, false), -1, -1, b.line)
-    dst: ir_temp_like(&m, &b, slot)
-    ir_emit(&b.f, op, dst, slot, operand, -1, b.line)
+    operand: ir_temp_like(m, b, slot)
+    ir_emit(b.f, IROp.Const, operand, ir_float_constant_bits(constant, false), -1, -1, b.line)
+    dst: ir_temp_like(m, b, slot)
+    ir_emit(b.f, op, dst, slot, operand, -1, b.line)
     dst
 }
 
@@ -107,15 +107,15 @@ ir_unit_ratio_part: fn(text: String) -> Float Never! {
 // unit.
 ir_unit_text: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, slot: Int) -> Int Never! {
     label: ir_unit_label(p, ty) ?? return -1
-    string_row: ir_string_row(&m)
-    magnitude: ir_runtime(&m, &b, "jet_fmt_quantity", [Int]{slot}, string_row)
-    pointer: ir_pointer_row(&m)
-    builder: ir_runtime(&m, &b, "jet_rt_string_builder_new", [Int]{}, pointer)
+    string_row: ir_string_row(m)
+    magnitude: ir_runtime(m, b, "jet_fmt_quantity", [Int]{slot}, string_row)
+    pointer: ir_pointer_row(m)
+    builder: ir_runtime(m, b, "jet_rt_string_builder_new", [Int]{}, pointer)
     b.fresh[builder] = false
-    _: ir_runtime(&m, &b, "jet_rt_string_builder_push", [Int]{builder, magnitude}, -1)
-    ir_release(&m, &b, magnitude)
-    ir_push_static(&m, &b, builder, " {label}")
-    ir_runtime(&m, &b, "jet_rt_string_builder_finish", [Int]{builder}, string_row)
+    _: ir_runtime(m, b, "jet_rt_string_builder_push", [Int]{builder, magnitude}, -1)
+    ir_release(m, b, magnitude)
+    ir_push_static(m, b, builder, " {label}")
+    ir_runtime(m, b, "jet_rt_string_builder_finish", [Int]{builder}, string_row)
 }
 
 // A unit type's label is the member that minted it; a dimensioned quantity
@@ -164,7 +164,7 @@ ir_quantity_label: fn(p: IRProgram, dimension: Dimension) -> String Never! {
         label: ir_unit_family_base(p, family) ?? if family == "Time" -> "ns" else -> family.to_lower()
         power: if exponent < 0 -> -exponent else -> exponent
         part: if power == 1 -> label else -> "{label}^{power}"
-        if exponent > 0 -> &numerator.push(part) else -> &denominator.push(part)
+        if exponent > 0 -> numerator.push(part) else -> denominator.push(part)
     }
     top: if numerator.len() == 0 -> "1" else -> numerator.join("*")
     if denominator.len() == 0 -> return top

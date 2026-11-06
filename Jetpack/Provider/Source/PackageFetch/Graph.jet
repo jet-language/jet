@@ -75,21 +75,21 @@ pkg_fetch_closure: fn(lock: LockFile, target: String) -> [String] Never! {
     seen := [String]{}
     pending := [String]{target}
     loop pending.len() > 0 {
-        name: &pending.pop() ?? break
+        name: pending.pop() ?? break
         if seen.contains(name) -> next
-        &seen.push(name)
+        seen.push(name)
         if lock.find_package(name) == .Val(package) {
-            loop dependency in package.dependencies -> &pending.push(dependency)
+            loop dependency in package.dependencies -> pending.push(dependency)
         }
     }
-    &seen.sort()
+    seen.sort()
     seen
 }
 pkg_fetch_update_scope: fn(previous: LockFile?, options: PackageFetchOptions) -> [String] Never! {
     if !options.update -> return [String]{}
     if options.update_dep == .Val(target) {
         scope := if previous == .Val(lock) -> pkg_fetch_closure(lock, target) else -> [String]{}
-        if !scope.contains(target) -> &scope.push(target)
+        if !scope.contains(target) -> scope.push(target)
         return scope
     }
     if previous == .Val(lock) -> return loop package in lock.packages -> package.name
@@ -136,7 +136,7 @@ pkg_fetch_resolve: fn(verification: &StoreVerification, roots: HangarRoots, cont
         return
     }
     if resolver.visiting.contains(name) -> return Err(pkg_fetch_error("E1207", "dependency graph contains a cycle at `{name}`", chain.join(" -> "), "remove the recursive package dependency"))
-    &resolver.visiting.push(name)
+    resolver.visiting.push(name)
     node: if spec == {
         .Path(path) -> {
             absolute: if path.starts_with("/") -> pkg_fetch_normalize_path(path) else -> pkg_fetch_normalize_path(files.join(parent, path))
@@ -147,33 +147,33 @@ pkg_fetch_resolve: fn(verification: &StoreVerification, roots: HangarRoots, cont
                 if !(resolved == canonical_parent || resolved.starts_with("{canonical_parent}/")) -> return Err(pkg_fetch_error("E1223", "path dependency `{name}` escapes its parent package", "canonical source is outside the declaring package", "use a relative path below the declaring package directory"))
             }
             snapshot: pkg_source_snapshot_tree(absolute) ?? return Err(PackageFetchError{diagnostic: err.diagnostic})
-            result: pkg_fetch_source_node(&verification, roots, context, &resolver, name, LockSource.Path(path), None, snapshot, chain)
-            close(^snapshot)
+            result: pkg_fetch_source_node(verification, roots, context, resolver, name, LockSource.Path(path), None, snapshot, chain)
+            close(snapshot)
             result
         }
-        .Git(url, selector) -> pkg_fetch_git_node(&verification, roots, context, &resolver, name, url, selector, chain)
-        .Registry(requirement) -> pkg_fetch_registry_node(&verification, roots, context, &resolver, name, requirement, chain)
+        .Git(url, selector) -> pkg_fetch_git_node(verification, roots, context, resolver, name, url, selector, chain)
+        .Registry(requirement) -> pkg_fetch_registry_node(verification, roots, context, resolver, name, requirement, chain)
         .Foreign(language, reference) -> {
             realization: resolver.foreign.get(name) ?? return Err(pkg_fetch_error("E1256", "foreign dependency `{name}` has no valid provider projection", "the provider projection was not produced for this dependency", "provide the pinned hash-verified artifact and generated binding"))
             if realization.language != language || realization.reference != reference -> return Err(pkg_fetch_error("E1256", "foreign dependency `{name}` has no valid provider projection", "provider identity disagrees with package.jet", "regenerate the pinned provider projection"))
-            pkg_fetch_record_version(&resolver, name, realization.entry.version, chain)
+            pkg_fetch_record_version(resolver, name, realization.entry.version, chain)
             entry: realization.entry
             PackageFetchNode{package: LockedPackage{name: name, version: entry.version, source: .Foreign{language: language, reference: reference, output: entry.out}, fingerprint: entry.envelope.output_hash, content_hash: Val(entry.envelope.output_hash), envelope: Val(LockEnvelope{output_hash: entry.envelope.output_hash, platform: entry.envelope.platform, signature: entry.envelope.signature, provenance: entry.envelope.provenance}), receipt: if entry.receipt == "" -> None else -> Val(entry.receipt)}, directory: entry.out}
         }
     }
     resolver.nodes[name] = node
-    _: &resolver.visiting.pop()
+    _: resolver.visiting.pop()
 }
 pkg_fetch_source_node: fn(verification: &StoreVerification, roots: HangarRoots, context: ProviderCtx, resolver: &PackageFetchResolver, name: String, source: LockSource, revision: LockedRevision?, snapshot: PackageSourceSnapshot, chain: [String]) -[FS, Env, Exec, Net, Time, Time.Wait]> PackageFetchNode PackageFetchError! {
     manifest: pkg_fetch_load_manifest(snapshot.path(), name)
-    pkg_fetch_record_version(&resolver, manifest.package.name, manifest.package.version, chain)
+    pkg_fetch_record_version(resolver, manifest.package.name, manifest.package.version, chain)
     dependencies: pkg_lock_manifest_dependency_names(manifest)
     fingerprints := [String]{}
     loop child in dependencies {
         child_chain := chain
-        &child_chain.push(child)
-        pkg_fetch_resolve(&verification, roots, context, &resolver, child, manifest.dependencies[child], snapshot.path(), child_chain)
-        &fingerprints.push(resolver.nodes[child].package.fingerprint)
+        child_chain.push(child)
+        pkg_fetch_resolve(verification, roots, context, resolver, child, manifest.dependencies[child], snapshot.path(), child_chain)
+        fingerprints.push(resolver.nodes[child].package.fingerprint)
     }
     fingerprint: pkg_lock_compute_fingerprint(snapshot.content_hash, fingerprints, pkg_project_capability_digest(snapshot.path()))
     installed: pkg_source_store_ensure(name, manifest.package.version, fingerprint, snapshot.directory) ?? return Err(PackageFetchError{diagnostic: err.diagnostic})
@@ -187,8 +187,8 @@ pkg_fetch_normalize_path: fn(path: String) -> String Never! {
     loop part in path.split("/") {
         if part == "" || part == "." -> next
         if part == ".." && parts.len() > 0 && parts[parts.len() - 1] != ".." {
-            _: &parts.pop()
-        } else if part != ".." || !path.starts_with("/") -> &parts.push(part)
+            _: parts.pop()
+        } else if part != ".." || !path.starts_with("/") -> parts.push(part)
     }
     if path.starts_with("/") -> "/{parts.join("/")}" else -> parts.join("/")
 }

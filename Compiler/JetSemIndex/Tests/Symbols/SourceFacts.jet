@@ -74,7 +74,7 @@ semantic_source_test_node: fn(id: Int, class: String, start: Int, end: Int) -> S
 // are NOT the original checked UnitFamily/affine fixtures retained by S14.
 semantic_s15_canonical_conversion_claims: fn() Never! {
     symbols := [SemanticSymbol]{}
-    semantic_distinct_conversion_symbols("UserID", Type.Int, false, None, "authored/../main.jet", "module:main", SourceSpan{start: 3, end: 9}, None, &symbols)
+    semantic_distinct_conversion_symbols("UserID", Type.Int, false, None, "authored/../main.jet", "module:main", SourceSpan{start: 3, end: 9}, None, symbols)
     found := false
     loop symbol in symbols {
         if symbol.name == "from_u8" {
@@ -85,10 +85,10 @@ semantic_s15_canonical_conversion_claims: fn() Never! {
     }
     assert(found)
     ranged := [SemanticSymbol]{}
-    semantic_distinct_conversion_symbols("Byte", Type.Int, true, None, "main.jet", "module:main", SourceSpan{start: 3, end: 9}, None, &ranged)
+    semantic_distinct_conversion_symbols("Byte", Type.Int, true, None, "main.jet", "module:main", SourceSpan{start: 3, end: 9}, None, ranged)
     loop symbol in ranged -> assert(symbol.signature.ends_with(" !String"))
     text_symbols := [SemanticSymbol]{}
-    semantic_distinct_conversion_symbols("Pattern", Type.String, false, Val("PatternError"), "main.jet", "module:main", SourceSpan{start: 3, end: 9}, None, &text_symbols)
+    semantic_distinct_conversion_symbols("Pattern", Type.String, false, Val("PatternError"), "main.jet", "module:main", SourceSpan{start: 3, end: 9}, None, text_symbols)
     assert_eq(text_symbols.len(), 1)
     assert_eq(text_symbols[0].signature, "Pattern.from_string(value: String) -> Pattern\nfailure: PatternError (CheckedText)")
 }

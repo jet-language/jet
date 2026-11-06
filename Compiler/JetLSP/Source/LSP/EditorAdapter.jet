@@ -24,13 +24,13 @@ EditorHostAdapter: struct {
         object: params ?? return Err(EditorHostError.InvalidRequest("editor host request is missing `params`"))
         if object != .Object(_) -> return Err(EditorHostError.InvalidRequest("editor host request `params` must be an object"))
         context: LSPRequestContext.parse(object) ?? return Err(err)
-        &self.sync_transport(context) ?? return Err(err)
+        self.sync_transport(context) ?? return Err(err)
         if self.transport == .Val(transport) {
             response: if method == {
-                EDITOR_WORKBENCH_METHOD -> EditorHostResponse.Workbench(&transport.open(lsp_editor_parse_open(object, context) ?? return Err(err)) ?? return Err(err))
+                EDITOR_WORKBENCH_METHOD -> EditorHostResponse.Workbench(transport.open(lsp_editor_parse_open(object, context) ?? return Err(err)) ?? return Err(err))
                 EDITOR_RECONNECT_METHOD -> EditorHostResponse.Workbench(transport.reconnect(lsp_editor_parse_reconnect(object, context) ?? return Err(err)) ?? return Err(err))
                 EDITOR_NAVIGATE_METHOD -> EditorHostResponse.Navigation(transport.navigate_source(lsp_editor_parse_navigation(object, context) ?? return Err(err)) ?? return Err(err))
-                EDITOR_SELECT_METHOD -> EditorHostResponse.Selection(&transport.select_panel(lsp_editor_parse_selection(object, context) ?? return Err(err)) ?? return Err(err))
+                EDITOR_SELECT_METHOD -> EditorHostResponse.Selection(transport.select_panel(lsp_editor_parse_selection(object, context) ?? return Err(err)) ?? return Err(err))
                 EDITOR_COMMAND_METHOD -> EditorHostResponse.Command(transport.command(lsp_editor_parse_command(object, context) ?? return Err(err)) ?? return Err(err))
                 else -> { return Err(EditorHostError.UnsupportedMethod(method)) }
             }
@@ -52,8 +52,8 @@ EditorHostAdapter: struct {
             }
             if context.grants == .Val(grants) {
                 order := [Int]{}
-                loop index in 0..<grants.len() -> &order.push(index)
-                &order.sort_by((left: Int, right: Int) -> grants[left] <=> grants[right])
+                loop index in 0..<grants.len() -> order.push(index)
+                order.sort_by((left: Int, right: Int) -> grants[left] <=> grants[right])
                 expected_grants: transport.grants()
                 if order.len() != expected_grants.len() -> return Err(EditorHostError.InvalidRequest("command grants cannot change for an active editor session"))
                 loop (index, grant_index) in order {
@@ -131,7 +131,7 @@ lsp_editor_parse_command: fn(object: Dyn, context: LSPRequestContext) -> EditorC
             .Array(values) -> {
                 if values.len() > EDITOR_MAX_HISTORY -> return Err(EditorHostError.InvalidRequest("command arguments exceed the bounded limit"))
                 loop item in values {
-                    if item == .Text(text) -> &arguments.push(text.copy()) else -> return Err(EditorHostError.InvalidRequest("command arguments must be strings"))
+                    if item == .Text(text) -> arguments.push(text.copy()) else -> return Err(EditorHostError.InvalidRequest("command arguments must be strings"))
                 }
             }
             else -> { return Err(EditorHostError.InvalidRequest("command arguments must be an array or null")) }
@@ -195,7 +195,7 @@ lsp_editor_parse_grants: fn(object: Dyn) -> [String]? EditorHostError! {
                         if next_code >= 128 && next_code <= 159 -> return Err(EditorHostError.InvalidRequest("editor host grants must be nonempty and free of control characters"))
                     }
                 }
-                &grants.push(text.copy())
+                grants.push(text.copy())
             } else { return Err(EditorHostError.InvalidRequest("editor host grants must be strings")) }
         }
         return Ok(Val(grants))

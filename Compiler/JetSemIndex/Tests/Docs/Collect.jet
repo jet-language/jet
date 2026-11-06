@@ -8,8 +8,8 @@ doc_collect_test_source: fn(source: String, rows: &[DocItem], impls: &[DocImpl])
     parsed: parse_source(source.bytes())
     assert_eq(parsed.diagnostics.len(), 0)
     names := [String:Bool]{}
-    doc_collect_protocol_names(parsed.program.items, &names)
-    doc_collect_items(parsed.program.items, "main.jet", "", parsed.program.pub_file, doc_test_os_path("/project/main.jet"), "logical", source, doc_test_os_path("/project"), names, &rows, &impls)
+    doc_collect_protocol_names(parsed.program.items, names)
+    doc_collect_items(parsed.program.items, "main.jet", "", parsed.program.pub_file, doc_test_os_path("/project/main.jet"), "logical", source, doc_test_os_path("/project"), names, rows, impls)
 }
 doc_collect_test_item: fn(rows: [DocItem], qualified_name: String, kind: String) -> Int Never! {
     loop index in 0..<rows.len() {
@@ -24,7 +24,7 @@ doc_collect_test_item: fn(rows: [DocItem], qualified_name: String, kind: String)
     source: "Door: struct {{ state {{ Closed, Open }} }}\nrun: fn() {{}}\n"
     rows := [DocItem]{}
     impls := [DocImpl]{}
-    doc_collect_test_source(source, &rows, &impls)
+    doc_collect_test_source(source, rows, impls)
     door: doc_collect_test_item(rows, "Door", "struct")
     assert_eq(rows[door].signature, "Door: struct {{ state {{ Closed, Open }} }}")
     loop row in rows -> assert(row.kind != "state")
@@ -36,7 +36,7 @@ doc_collect_test_item: fn(rows: [DocItem], qualified_name: String, kind: String)
     source: "/// Module overview.\n\n/// Door summary é.\nDoor: struct {{\n    state {{ Closed, Open }}\n    /// Field summary λ.\n    value: Int\n    /// Method summary.\n    /// Example: `door.read()`\n    read: fn(self) -> Int {{ 1 }}\n}}\n\nrun: fn() {{}}\n"
     rows := [DocItem]{}
     impls := [DocImpl]{}
-    doc_collect_test_source(source, &rows, &impls)
+    doc_collect_test_source(source, rows, impls)
     door: doc_collect_test_item(rows, "Door", "struct")
     field: doc_collect_test_item(rows, "Door::value", "field")
     method: doc_collect_test_item(rows, "Door::read", "function")
@@ -53,7 +53,7 @@ doc_collect_test_item: fn(rows: [DocItem], qualified_name: String, kind: String)
     // Retain actual name bytes and the exclusive byte end for the field row.
     bytes: source.bytes()
     selected := [U8]{}
-    loop offset in rows[field].source.start..<rows[field].source.end -> &selected.push(bytes[offset])
+    loop offset in rows[field].source.start..<rows[field].source.end -> selected.push(bytes[offset])
     assert_eq(String.from_bytes(selected) ?? panic("field name UTF8"), "value")
     assert_eq(rows[method].failure_contract, None)
     assert_eq(rows[method].failure_source, None)
@@ -64,7 +64,7 @@ doc_collect_test_item: fn(rows: [DocItem], qualified_name: String, kind: String)
     source: "Outer: module {{\n    Box: struct {{\n        priv hidden: Int\n        visible: Int\n        method: fn(self) {{}}\n    }}\n    Choice: enum {{ First, Second }}\n    Service: trait {{ call: fn(self) }}\n    work: fn() {{}}\n}}\npriv(package) Sibling: module {{}}\n"
     rows := [DocItem]{}
     impls := [DocImpl]{}
-    doc_collect_test_source(source, &rows, &impls)
+    doc_collect_test_source(source, rows, impls)
     box: doc_collect_test_item(rows, "Outer::Box", "struct")
     hidden: doc_collect_test_item(rows, "Outer::Box::hidden", "field")
     visible: doc_collect_test_item(rows, "Outer::Box::visible", "field")
@@ -89,7 +89,7 @@ doc_collect_test_item: fn(rows: [DocItem], qualified_name: String, kind: String)
     source: "Outer: module {{\n    Box: struct {{\n        own: fn(self) {{}}\n        impl Zed {{ z: fn(self) {{}} a: fn(self) {{}} }}\n        impl Alpha {{ alpha: fn(self) {{}} }}\n    }}\n    Choice: enum {{\n        First\n        impl Zed {{ choose: fn(self) {{}} }}\n    }}\n}}\n"
     rows := [DocItem]{}
     impls := [DocImpl]{}
-    doc_collect_test_source(source, &rows, &impls)
+    doc_collect_test_source(source, rows, impls)
     assert_eq(impls.len(), 3)
     assert_eq(impls[0].type_name, "Box")
     assert_eq(impls[0].trait_name, Val("Zed"))
@@ -114,19 +114,19 @@ doc_collect_test_item: fn(rows: [DocItem], qualified_name: String, kind: String)
     assert_eq(first.diagnostics.len(), 0)
     assert_eq(second.diagnostics.len(), 0)
     names := [String:Bool]{}
-    doc_collect_protocol_names(first.program.items, &names)
+    doc_collect_protocol_names(first.program.items, names)
     assert(!names.has_key("Exchange"))
-    doc_collect_protocol_names(second.program.items, &names)
+    doc_collect_protocol_names(second.program.items, names)
     assert(names.has_key("Exchange"))
     rows := [DocItem]{}
     impls := [DocImpl]{}
     source: "impl Box.Exchange {{ z: fn(self) {{}} a: fn(self) {{}} }}\n"
-    doc_collect_items(first.program.items, "first.jet", "", false, doc_test_os_path("/project/first.jet"), "first", source, doc_test_os_path("/project"), names, &rows, &impls)
+    doc_collect_items(first.program.items, "first.jet", "", false, doc_test_os_path("/project/first.jet"), "first", source, doc_test_os_path("/project"), names, rows, impls)
     assert_eq(impls[0].kind, "protocol_impl")
     assert_eq(impls[0].methods, [String]{"a", "z"})
     assert(impls[0].public)
     assert(!rows[doc_collect_test_item(rows, "Box::z", "function")].public)
-    doc_collect_items(second.program.items, "second.jet", "", false, doc_test_os_path("/project/second.jet"), "second", "Hidden: module {{ Generic: module<T> {{ protocol Exchange {{ client: Hello() }} }} }}\n", doc_test_os_path("/project"), names, &rows, &impls)
+    doc_collect_items(second.program.items, "second.jet", "", false, doc_test_os_path("/project/second.jet"), "second", "Hidden: module {{ Generic: module<T> {{ protocol Exchange {{ client: Hello() }} }} }}\n", doc_test_os_path("/project"), names, rows, impls)
     protocol: doc_collect_test_item(rows, "Hidden::Generic::Exchange", "protocol")
     assert(!rows[protocol].public)
     assert_eq(rows[protocol].module_path, "second.jet")
@@ -138,7 +138,7 @@ doc_collect_test_item: fn(rows: [DocItem], qualified_name: String, kind: String)
     source: "impl Exchange.Client {{ c: fn(self) {{}} }}\nimpl Exchange.Server {{ s: fn(self) {{}} }}\nimpl Client {{ bare: fn(self) {{}} }}\nimpl Exchange.Clientish {{ other: fn(self) {{}} }}\nimpl Box.Displayable {{ display: fn(self) {{}} }}\n"
     rows := [DocItem]{}
     impls := [DocImpl]{}
-    doc_collect_test_source(source, &rows, &impls)
+    doc_collect_test_source(source, rows, impls)
     assert_eq(impls.len(), 5)
     assert_eq(impls[0].kind, "protocol_impl")
     assert_eq(impls[1].kind, "protocol_impl")
@@ -153,7 +153,7 @@ doc_collect_test_item: fn(rows: [DocItem], qualified_name: String, kind: String)
     source: "#MustUse\nToken: distinct Int\nCount: Int\n#UnitFamily(Currency) {{ usd, eur }}\nSafe: tag {{ deny: [console] }}\nClock: effect\nChecked: struct {{\n    impl Marker {{\n        sites: [.Block]\n    }}\n}}\nfact Known()\nANSWER: 42\nrun: fn() {{}}\n#Test(\"ignored test\") {{ assert(true) }}\n"
     rows := [DocItem]{}
     impls := [DocImpl]{}
-    doc_collect_test_source(source, &rows, &impls)
+    doc_collect_test_source(source, rows, impls)
     token: doc_collect_test_item(rows, "Token", "distinct")
     assert(rows[token].public)
     assert_eq(rows[token].markers, [String]{"MustUse"})
@@ -176,7 +176,7 @@ doc_collect_test_item: fn(rows: [DocItem], qualified_name: String, kind: String)
     source: "/// External module docs.\npriv(package) External: module;\n/// Alias docs.\nAlias: External;\n"
     rows := [DocItem]{}
     impls := [DocImpl]{}
-    doc_collect_test_source(source, &rows, &impls)
+    doc_collect_test_source(source, rows, impls)
     assert_eq(rows.len(), 2)
     external: doc_collect_test_item(rows, "External", "module")
     alias: doc_collect_test_item(rows, "Alias", "module_alias")
@@ -195,7 +195,7 @@ doc_collect_test_item: fn(rows: [DocItem], qualified_name: String, kind: String)
     source: "Box: struct {{\n    #First #Second #First\n    value: Int\n    #First #Second\n    own: fn(self) {{}}\n}}\nChoice: enum {{\n    #First #Second #First\n    One\n}}\n"
     rows := [DocItem]{}
     impls := [DocImpl]{}
-    doc_collect_test_source(source, &rows, &impls)
+    doc_collect_test_source(source, rows, impls)
     field: doc_collect_test_item(rows, "Box::value", "field")
     method: doc_collect_test_item(rows, "Box::own", "function")
     variant: doc_collect_test_item(rows, "Choice::One", "variant")
@@ -213,10 +213,10 @@ doc_collect_test_item: fn(rows: [DocItem], qualified_name: String, kind: String)
 // passes its actual AST and source, not a copied fixture or fabricated rows.
 doc_collect_test_original_run_fixture: fn(items: [Item], source: String, inherited_public: Bool) Never! {
     names := [String:Bool]{}
-    doc_collect_protocol_names(items, &names)
+    doc_collect_protocol_names(items, names)
     rows := [DocItem]{}
     impls := [DocImpl]{}
-    doc_collect_items(items, "run.jet", "", inherited_public, doc_test_os_path("/project/run.jet"), "run", source, doc_test_os_path("/project"), names, &rows, &impls)
+    doc_collect_items(items, "run.jet", "", inherited_public, doc_test_os_path("/project/run.jet"), "run", source, doc_test_os_path("/project"), names, rows, impls)
     loop name in ([String]{"Checked", "Payment", "Widget", "Choice", "Displayable", "answer"}) {
         found := false
         loop row in rows { if row.qualified_name == name -> found = true }

@@ -5,14 +5,14 @@ package: {
 
 send_generic: fn(tx: Sender<String>) { tx.send("generic") }
 
-receive_generic: fn(rx: ^Receiver<String>) -> Receiver<String> { return rx }
+receive_generic: fn(rx: &&Receiver<String>) -> Receiver<String> { return rx }
 one: fn() -> Int { 1 }
 
 run: fn() {
     (sender, receiver): channel<String>()
     send_generic(sender)
     if {
-        value, receive_generic(^receiver) -> { print(value) }
+        value, receive_generic(receiver) -> { print(value) }
     }
     task.group group {
         results: task.all {one()} ?? panic("task.all failed")

@@ -29,12 +29,12 @@ use {
         out.extend_from_slice(value.as_bytes())
     }
     bytes := [U8]{}
-    words(&bytes, [3550338754064696650, 1, 42, 1, 7, 20_000_000_000, 3, 100, 1, 1, 2, 64, 1, 0])
-    loop value in ["session", "app.jet", "build-1", "rev-1", "world\n1"] -> text(&bytes, value)
-    words(&bytes, [1, 1, 2, 3, 0, 2, 0, 0, 0, U64.MAX])
-    text(&bytes, "channel send")
-    words(&bytes, [2, 1, 0, 0, 0, 0, 1, 0, 0])
-    words(&bytes, [0])
+    words(bytes, [3550338754064696650, 1, 42, 1, 7, 20_000_000_000, 3, 100, 1, 1, 2, 64, 1, 0])
+    loop value in ["session", "app.jet", "build-1", "rev-1", "world\n1"] -> text(bytes, value)
+    words(bytes, [1, 1, 2, 3, 0, 2, 0, 0, 0, U64.MAX])
+    text(bytes, "channel send")
+    words(bytes, [2, 1, 0, 0, 0, 0, 1, 0, 0])
+    words(bytes, [0])
     snapshot: decode_raw_snapshot(bytes.copy(), .None).unwrap()
     assert_eq(runtime_window(snapshot).unwrap(), .Val(LiveRuntimeWindow { elapsed_ns: 7, cpu_ns: .None, exit: true }))
     rendered: render(snapshot)

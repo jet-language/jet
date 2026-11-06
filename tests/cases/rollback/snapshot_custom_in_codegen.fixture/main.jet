@@ -8,7 +8,7 @@ impl Counter.Rollback {
     snapshot: fn(self) -> CounterSnap {
         return CounterSnap{ value: self.value }
     }
-    restore: fn(&self, snap: ^CounterSnap) {
+    restore: fn(&self, snap: &&CounterSnap) {
         self.value = snap.value
     }
 }
@@ -23,6 +23,6 @@ bump: fn(c: &Counter) -> Int Fail! {
 }
 run: fn() {
     c := Counter{ value: 0 }
-    _: bump(&c) ?? 0
+    _: bump(c) ?? 0
     print(c.value)
 }

@@ -13,7 +13,7 @@ Files under `pkg/`: `package.jet`, `run.jet`, `mmio_fixed.jet`, `signature_crypt
 - **Typed register model:** works with `#Layout(c)` records. Host output was `gpio mode 1 output 1 mmio 1`; fixed MMIO code also checked and built with the explicit unsafe gate.
 - **Timer and bounded handoff:** works as library code. Host output was `timer status 1 interrupts 4 dropped 0`; the loop generated four timer events and drained them after the ISR-shaped queue write.
 - **UART ring:** works as a fixed-capacity library type. Host output was `uart first 65 queued 3 dropped 0`.
-- **Pinning and replay bookkeeping:** works. Host output was `dma submitted true completed true owner 0 checksum 100`; `mem.pin(&buffer)` is accepted, but the owner transitions are user fields, not DMA runtime facts.
+- **Pinning and replay bookkeeping:** works. Host output was `dma submitted true completed true owner 0 checksum 100`; `mem.pin(buffer)` is accepted, but the owner transitions are user fields, not DMA runtime facts.
 - **Control loop:** works as deterministic library code. Host output was `control wcet_estimate_us 12 deadline_us 100 misses 0`; this is an integer estimate and comparison, not a compiler WCET proof.
 - **Signing API:** works in the standalone host and native build. `jet run .../signature_crypto.jet` printed `verified true`; `jet build .../signature_crypto.jet` ended `jet Built build/signature_crypto in 10.4s ✓`.
 - **Slot policy:** works as an in-memory state machine. The main replay printed `flash signature true active 100 rollback 1`, exercising acceptance and a rejected trial image.

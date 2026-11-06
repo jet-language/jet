@@ -26,7 +26,7 @@ run: fn() -[Exec, FS, IO, Net, Time.Wait]> {
     listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     address: net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("address"))
     client := net.tcp_connect(address) ?? panic("connect")
-    if receive(&client, 0) == {
+    if receive(client, 0) == {
         .Ok(_) -> panic("zero read succeeded")
         .Err(error) -> {
             if error == {

@@ -29,10 +29,10 @@ store_artifact_record_magic: fn() -> [U8] Never! {
 
 store_artifact_magic: fn(label: String) -> [U8] Never! {
     out := [U8]{}
-    &out.extend(STORE_ARTIFACT_VERSION.bytes())
-    &out.push(U8{0})
-    &out.extend(label.bytes())
-    &out.push(U8{0})
+    out.extend(STORE_ARTIFACT_VERSION.bytes())
+    out.push(U8{0})
+    out.extend(label.bytes())
+    out.push(U8{0})
     out
 }
 
@@ -40,7 +40,7 @@ store_artifact_magic: fn(label: String) -> [U8] Never! {
 store_artifact_push_le64: fn(out: &[U8], value: Int) Never! {
     shift := 0
     loop shift < 64 {
-        &out.push(U8{((value >> shift)).bit_and(255)})
+        out.push(U8{((value >> shift)).bit_and(255)})
         shift += 8
     }
 }
@@ -63,10 +63,10 @@ store_artifact_slice: fn(bytes: [U8], start: Int, end: Int) -> [U8] Never! {
 // digest, record.
 store_artifact_encode_action: fn(action: ActionHandle, record: [U8]) -> [U8] Never! {
     out := store_artifact_action_magic()
-    &out.extend(action.digest().as_bytes())
-    store_artifact_push_le64(&out, record.len())
-    &out.extend(store_artifact_sha256(record))
-    &out.extend(record)
+    out.extend(action.digest().as_bytes())
+    store_artifact_push_le64(out, record.len())
+    out.extend(store_artifact_sha256(record))
+    out.extend(record)
     out
 }
 
@@ -109,9 +109,9 @@ store_artifact_action_for_key: fn(key: String) -> ActionHandle ArtifactStoreErro
 // The artifact record: magic, object digest, object length, executable flag.
 store_artifact_encode_record: fn(object: ObjectHandle, executable: Bool) -> [U8] Never! {
     out := store_artifact_record_magic()
-    &out.extend(object.digest().as_bytes())
-    store_artifact_push_le64(&out, object.length())
-    &out.push(if executable -> U8{1} else -> U8{0})
+    out.extend(object.digest().as_bytes())
+    store_artifact_push_le64(out, object.length())
+    out.push(if executable -> U8{1} else -> U8{0})
     out
 }
 
@@ -180,7 +180,7 @@ store_artifact_read_file: fn(path: String) -[FS]> ArtifactRawRead ArtifactStoreE
     loop {
         chunk: reader.read(65536)
         if chunk.len() == 0 -> break
-        &bytes.extend(chunk)
+        bytes.extend(chunk)
     }
     after: reader.stat()
     path_after: files.stat(path)
@@ -231,7 +231,7 @@ store_artifact_replace_with: fn(temporary: String, path: String, parent: String,
     writer: files.create(temporary, if_exists: .Refuse)
     writer.write_all(bytes)
     if durable -> writer.fsync()
-    close(^writer)
+    close(writer)
     files.rename(temporary, path)
     if durable -> store_artifact_sync_dir(parent)
 }
@@ -248,7 +248,7 @@ store_artifact_create_new_synced: fn(path: String, bytes: [U8]) ArtifactStoreErr
     writer: files.create(path, if_exists: .Refuse)
     writer.write_all(bytes)
     writer.fsync()
-    close(^writer)
+    close(writer)
 }
 
 // Append one synced record to a regular file (the journal).
@@ -264,7 +264,7 @@ store_artifact_append_synced: fn(path: String, bytes: [U8]) ArtifactStoreError! 
     writer: files.append(path)
     writer.write_all(bytes)
     writer.fsync()
-    close(^writer)
+    close(writer)
     store_artifact_sync_dir(files.dirname(path))
 }
 
@@ -308,8 +308,8 @@ store_artifact_sync_dir: fn(path: String) ArtifactStoreError! -[FS]> {
 // The children of `directory`, ordered by path.
 store_artifact_sorted_children: fn(directory: String) -[FS]> [String] ArtifactStoreError! {
     paths := [String]{}
-    loop entry in files.list_dir(directory) -> &paths.push(entry.path)
-    &paths.sort()
+    loop entry in files.list_dir(directory) -> paths.push(entry.path)
+    paths.sort()
     Ok(paths)
 }
 
@@ -363,13 +363,13 @@ store_artifact_split_whitespace: fn(text: String) -> [String] Never! {
         space: code == 32 || (code >= 9 && code <= 13)
         if {
             space && start >= 0 -> {
-                &fields.push(pkg_bytes_text(raw, start, index))
+                fields.push(pkg_bytes_text(raw, start, index))
                 start = -1
             }
             !space && start < 0 -> start = index
             else -> {}
         }
     }
-    if start >= 0 -> &fields.push(pkg_bytes_text(raw, start, raw.len()))
+    if start >= 0 -> fields.push(pkg_bytes_text(raw, start, raw.len()))
     fields
 }

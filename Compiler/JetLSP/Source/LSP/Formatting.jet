@@ -50,7 +50,7 @@ lsp_on_type_format_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> Str
             tokens: token_permit.value
             edits: lsp_on_type_format_edits(doc.text, tokens, position, ch)
             rows := [String]{}
-            loop edit in edits -> &rows.push("{{\"range\":{lsp_range_json(lsp_byte_span_to_range(doc.text, edit.span))},\"newText\":{foundation_json_quote(edit.new_text)}}}")
+            loop edit in edits -> rows.push("{{\"range\":{lsp_range_json(lsp_byte_span_to_range(doc.text, edit.span))},\"newText\":{foundation_json_quote(edit.new_text)}}}")
             return Val(lsp_response(id, "[{rows.join(",")}]"))
         }
     }
@@ -107,10 +107,10 @@ lsp_token_brace_pairs: fn(tokens: [Token]) -> [LSPTokenBracePair] Never! {
     opens := [(Span, Bool)]{}
     pairs := [LSPTokenBracePair]{}
     loop (index, token) in tokens {
-        if token.kind == TOKEN_LBRACE -> &opens.push((_0: token.span, _1: lsp_typed_body_open(tokens, index)))
+        if token.kind == TOKEN_LBRACE -> opens.push((_0: token.span, _1: lsp_typed_body_open(tokens, index)))
         else if token.kind == TOKEN_RBRACE && opens.len() > 0 {
-            open: &opens.pop() ?? panic("nonempty brace stack")
-            &pairs.push(LSPTokenBracePair{open: open._0, close: token.span, opaque: open._1})
+            open: opens.pop() ?? panic("nonempty brace stack")
+            pairs.push(LSPTokenBracePair{open: open._0, close: token.span, opaque: open._1})
         }
     }
     pairs
@@ -155,12 +155,12 @@ lsp_newline_format_edits: fn(src: String, pair: LSPTokenBracePair, position: LSP
         expected = base_indent.copy()
     }
     edits := [TextEdit]{}
-    if bytes[line_start..<indent_end] != expected.bytes() -> &edits.push(TextEdit{span: (Span{start: line_start, end: indent_end}), new_text: ^expected})
+    if bytes[line_start..<indent_end] != expected.bytes() -> edits.push(TextEdit{span: (Span{start: line_start, end: indent_end}), new_text: expected.move()})
     if close_on_line == .Val(close) {
         if close.close.start > indent_end {
             gap_start := close.close.start
             loop gap_start > line_start && (bytes[gap_start - 1] == (U8{32}) || bytes[gap_start - 1] == (U8{9})) -> gap_start -= 1
-            &edits.push(TextEdit{span: Span{start: gap_start, end: close.close.start}, new_text: "{lsp_line_ending_before(src, line_start)}{base_indent}"})
+            edits.push(TextEdit{span: Span{start: gap_start, end: close.close.start}, new_text: "{lsp_line_ending_before(src, line_start)}{base_indent}"})
         }
     }
     edits
@@ -236,9 +236,9 @@ lsp_indent_formatted_fragment: fn(formatted: String, indent: String) -> String N
         loop end < bytes.len() && bytes[end] != (U8{10}) -> end += 1
         line: String.from_bytes(bytes[start..<end]) ?? panic("newline split is scalar aligned")
         trimmed := line.trim() // #4303
-        if !trimmed.is_empty() { loop byte in prefix -> &out.push(byte) }
+        if !trimmed.is_empty() { loop byte in prefix -> out.push(byte) }
         if end < bytes.len() -> end += 1
-        loop index in start..<end -> &out.push(bytes[index])
+        loop index in start..<end -> out.push(bytes[index])
         start = end
     }
     String.from_bytes(out) ?? panic("indentation preserves UTF-8")

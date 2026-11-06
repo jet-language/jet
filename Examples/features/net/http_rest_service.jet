@@ -46,5 +46,5 @@ run: fn() (HTTPError | IOError | NetError | TaskFailure)! {
     file_resp: file_req.header("range", "bytes=2-5").send() ?? panic("file")
     print(file_resp.status())
     print(file_resp.body().text(8 * 1024 * 1024) ?? "invalid body")
-    ^t.join() ?? panic("server")
+    t.join() ?? panic("server")
 }

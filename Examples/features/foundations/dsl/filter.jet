@@ -42,7 +42,7 @@ parse: fn(source: String) -> [Step]? {
     if stages.len() == 0 -> return None
     loop stage in stages {
         parsed: parse_stage(stage) ?? return None
-        &steps.extend(parsed)
+        steps.extend(parsed)
     }
     if steps.len() == 0 -> return None
     return Val(steps)
@@ -61,19 +61,19 @@ apply_step: fn(values: [Dyn], step: Step) -> [Dyn] {
     output := [Dyn]{}
     loop value in values {
         if step == {
-            .Identity -> { &output.push(value) }
+            .Identity -> { output.push(value) }
             .Field(name) -> {
-                if field(value.copy(), name.copy()) == .Val(found) -> &output.push(found)
+                if field(value.copy(), name.copy()) == .Val(found) -> output.push(found)
             }
             .Each -> {
                 if value == .Array(items) {
-                    loop item in items -> &output.push(item)
+                    loop item in items -> output.push(item)
                 }
             }
             .AtLeast(name, limit) -> {
                 if field(value.copy(), name.copy()) == .Val(found) {
                     score: found.int() ?? Int.MIN
-                    if score >= limit -> &output.push(value)
+                    if score >= limit -> output.push(value)
                 }
             }
         }

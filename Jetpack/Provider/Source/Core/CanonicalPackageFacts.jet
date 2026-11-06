@@ -32,7 +32,7 @@ provider_find_canonical_package: fn(repo: String, requested: String) -[FS, Env]>
     if root.members.len() == 0 -> return Ok(None)
     root.validate_members_in(repo) ?? return Err(ProviderReason{message: "canonical Package members are invalid: {err.message()}"})
     candidates := [CanonicalPackage]{}
-    provider_collect_canonical_packages(repo, root.members, requested, &candidates)
+    provider_collect_canonical_packages(repo, root.members, requested, candidates)
     if candidates.len() == {
         0 -> Err(ProviderReason{message: "canonical Package `{requested}` was not found under {repo}"})
         1 -> Ok(Val(candidates[0]))
@@ -70,17 +70,17 @@ provider_collect_canonical_packages: fn(repo: String, members: [MemberRef], requ
                 entry_info: files.stat(entry.path) ?? return Err(ProviderReason{message: "{err}"})
                 name: entry.name
                 if entry_info.is_symlink || !entry_info.is_dir || name.starts_with(".") || name == "build" || name == "target" -> next
-                provider_collect_one_canonical_package(entry.path, requested, &seen, &out)
+                provider_collect_one_canonical_package(entry.path, requested, seen, out)
             }
         } else {
-            provider_collect_one_canonical_package(member_root, requested, &seen, &out)
+            provider_collect_one_canonical_package(member_root, requested, seen, out)
         }
     }
 }
 
 provider_collect_one_canonical_package: fn(path: String, requested: String, seen: &[String], out: &[CanonicalPackage]) ProviderReason! -[FS, Env]> {
     if seen.contains(path) -> return
-    &seen.push(path)
+    seen.push(path)
     candidates: [String]{files.join(path, PACKAGE_FILE)}
     marker := ""
     loop candidate in candidates {
@@ -94,7 +94,7 @@ provider_collect_one_canonical_package: fn(path: String, requested: String, seen
     if info.is_symlink -> return Err(ProviderReason{message: "Package marker is a symlink: {marker}"})
     if !info.is_file -> return Err(ProviderReason{message: "Package marker is not a file: {marker}"})
     facts: provider_load_canonical_facts(path, marker)
-    if facts.name == requested || facts.outputs.has_key(requested) -> &out.push(CanonicalPackage{root: path, facts})
+    if facts.name == requested || facts.outputs.has_key(requested) -> out.push(CanonicalPackage{root: path, facts})
 }
 
 // The toolchain part of a cache identity. The host-specific cargo path never
@@ -122,20 +122,20 @@ provider_cargo_version_digest: fn(cargo: String) -[Env, Exec, Time.Wait]> String
 provider_core_tree_fingerprint: fn(root: String) -[FS, Env]> String ProviderReason! {
     provider_validate_core_source_tree(root)
     found := [(relative: String, path: String)]{}
-    provider_collect_core_files(root, "", &found)
-    &found.sort_by(file -> file.relative)
+    provider_collect_core_files(root, "", found)
+    found.sort_by(file -> file.relative)
     input := [U8]{}
-    loop byte in PROVIDER_CORE_TREE_SCHEMA.bytes() -> &input.push(byte)
+    loop byte in PROVIDER_CORE_TREE_SCHEMA.bytes() -> input.push(byte)
     loop file in found {
         bytes: files.read_bytes(file.path) ?? return Err(ProviderReason{message: "{err}"})
         relative: file.relative.bytes()
-        provider_push_be(&input, relative.len(), 8)
-        loop byte in relative -> &input.push(byte)
-        provider_push_be(&input, bytes.len(), 8)
-        loop byte in bytes -> &input.push(byte)
+        provider_push_be(input, relative.len(), 8)
+        loop byte in relative -> input.push(byte)
+        provider_push_be(input, bytes.len(), 8)
+        loop byte in bytes -> input.push(byte)
         if !sys.is_windows() {
             info: files.stat(file.path) ?? return Err(ProviderReason{message: "{err}"})
-            provider_push_be(&input, info.mode, 4)
+            provider_push_be(input, info.mode, 4)
         }
     }
     Ok(pkg_sha256_hex(input))
@@ -145,7 +145,7 @@ provider_core_tree_fingerprint: fn(root: String) -[FS, Env]> String ProviderReas
 provider_push_be: fn(out: &[U8], value: Int, width: Int) Never! {
     shift := (width - 1) * 8
     loop shift >= 0 {
-        &out.push(U8{((value >> shift)).bit_and(255)})
+        out.push(U8{((value >> shift)).bit_and(255)})
         shift -= 8
     }
 }
@@ -158,9 +158,9 @@ provider_collect_core_files: fn(root: String, relative: String, out: &[(relative
         child: if relative == "" -> entry.name else -> "{relative}/{entry.name}"
         if info.is_symlink -> return Err(ProviderReason{message: "core source tree contains symlink {entry.path}"})
         if info.is_dir {
-            provider_collect_core_files(root, child, &out)
+            provider_collect_core_files(root, child, out)
         } else if info.is_file {
-            &out.push((relative: child.replace("\\", "/"), path: entry.path))
+            out.push((relative: child.replace("\\", "/"), path: entry.path))
         } else {
             return Err(ProviderReason{message: "core source tree contains non-file {entry.path}"})
         }
@@ -225,17 +225,17 @@ provider_target_debug_name: fn(target: PackageTarget) -> String Never! {
 // declaration order never changes the identity.
 provider_normalized_manifest_semantics: fn(manifest: PackageFacts?) -> String Never! {
     facts := manifest ?? return "manifest=absent"
-    &facts.packages.sort_by(entry -> entry.name)
+    facts.packages.sort_by(entry -> entry.name)
     loop index in 0..<facts.packages.len() {
-        &facts.packages[index].targets.sort_by(target -> provider_target_debug_name(target))
+        facts.packages[index].targets.sort_by(target -> provider_target_debug_name(target))
     }
-    &facts.build_profiles.sort_by(profile -> profile.name)
-    &facts.authority.grants.sort_by(grant -> grant.package)
-    loop index in 0..<facts.authority.grants.len() -> &facts.authority.grants[index].rights.sort()
+    facts.build_profiles.sort_by(profile -> profile.name)
+    facts.authority.grants.sort_by(grant -> grant.package)
+    loop index in 0..<facts.authority.grants.len() -> facts.authority.grants[index].rights.sort()
     if facts.authority.allow == {
         .Val(effects) -> {
             sorted := effects
-            &sorted.sort()
+            sorted.sort()
             facts.authority.allow = Val(sorted)
         }
         .None -> {}
@@ -243,7 +243,7 @@ provider_normalized_manifest_semantics: fn(manifest: PackageFacts?) -> String Ne
     if facts.authority.deny == {
         .Val(effects) -> {
             sorted := effects
-            &sorted.sort()
+            sorted.sort()
             facts.authority.deny = Val(sorted)
         }
         .None -> {}
@@ -254,15 +254,15 @@ provider_normalized_manifest_semantics: fn(manifest: PackageFacts?) -> String Ne
     if facts.authority.trust == {
         .Val(policy) -> {
             sorted := policy
-            &sorted.services.sort_by(entry -> entry.service)
+            sorted.services.sort_by(entry -> entry.service)
             facts.authority.trust = Val(sorted)
         }
         .None -> {}
     }
-    &facts.authority.providers.sort_by(provider -> provider.provider)
+    facts.authority.providers.sort_by(provider -> provider.provider)
     loop index in 0..<facts.authority.providers.len() {
-        &facts.authority.providers[index].allow.sort()
-        &facts.authority.providers[index].deny.sort()
+        facts.authority.providers[index].allow.sort()
+        facts.authority.providers[index].deny.sort()
     }
     pkg_facts_semantic_text(facts)
 }

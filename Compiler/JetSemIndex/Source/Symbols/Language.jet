@@ -42,7 +42,7 @@ semantic_complete_core_module: fn(module_name: String, prefix: String, menus: [T
     symbols := [SemanticSymbol]{}
     declaration: core_module_export(module_name) ?? return symbols
     loop name in declaration.members {
-        if name.starts_with(prefix) -> &symbols.push(semantic_core_module_symbol(module_name, name, menus))
+        if name.starts_with(prefix) -> symbols.push(semantic_core_module_symbol(module_name, name, menus))
     }
     symbols
 }
@@ -91,7 +91,7 @@ semantic_numeric_conversion_symbols: fn() -> [SemanticSymbol] Never! {
                 else -> target.name
             }
             signature: "{qualified_name}(value: {source.source}) -> {result_label}"
-            &symbols.push(semantic_builtin_member(target.name, source.method, "core.numeric", signature, "Converts {source.source} to {target.name}.", [String]{qualified_name}))
+            symbols.push(semantic_builtin_member(target.name, source.method, "core.numeric", signature, "Converts {source.source} to {target.name}.", [String]{qualified_name}))
         }
     }
     symbols
@@ -103,13 +103,13 @@ semantic_numeric_conversion_symbols: fn() -> [SemanticSymbol] Never! {
 // lexer/registry and never reconstruct a checked verdict from display strings.
 semantic_language_symbols: fn() -> [SemanticSymbol] Never! {
     symbols := [SemanticSymbol]{}
-    loop name in jet_type_names() -> &symbols.push(semantic_language_leaf("builtin:type:{name}", name, "core", SemanticSymbolKind.Type, "type {name}", "Built-in Jet type."))
+    loop name in jet_type_names() -> symbols.push(semantic_language_leaf("builtin:type:{name}", name, "core", SemanticSymbolKind.Type, "type {name}", "Built-in Jet type."))
     loop member in fact_read_members() {
         fact: CompilerFact.from_member(member) ?? next
-        &symbols.push(semantic_language_leaf("builtin:fact:{fact.name}", fact.name, "compiler", SemanticSymbolKind.Member, "{fact.name}: {fact.type_name}", "Compiler-owned typed fact."))
+        symbols.push(semantic_language_leaf("builtin:fact:{fact.name}", fact.name, "compiler", SemanticSymbolKind.Member, "{fact.name}: {fact.type_name}", "Compiler-owned typed fact."))
     }
-    loop name in jet_keyword_names() -> &symbols.push(semantic_language_leaf("builtin:keyword:{name}", name, "syntax", SemanticSymbolKind.Keyword, name, "Jet keyword."))
-    loop symbol in semantic_builtin_doc_symbols() -> &symbols.push(symbol)
-    loop symbol in semantic_numeric_conversion_symbols() -> &symbols.push(symbol)
+    loop name in jet_keyword_names() -> symbols.push(semantic_language_leaf("builtin:keyword:{name}", name, "syntax", SemanticSymbolKind.Keyword, name, "Jet keyword."))
+    loop symbol in semantic_builtin_doc_symbols() -> symbols.push(symbol)
+    loop symbol in semantic_numeric_conversion_symbols() -> symbols.push(symbol)
     symbols
 }

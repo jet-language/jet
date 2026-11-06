@@ -185,13 +185,13 @@ finish: fn(&self) encoding.EncodingError!
 ```
 
 `&self` is the edit access because each call advances state; callers keep a
-handle in a changeable binding. Constructors consume file handles with `^`:
+handle in a changeable binding. Constructors consume file handles with `&&`:
 
 ```jet
-reader(input: ^files.FileReader,
+reader(input: &&files.FileReader,
        limits: encoding.EncodingLimits{encoding.EncodingLimits.safe()})
     -> Reader encoding.EncodingError!
-writer(output: ^files.FileWriter,
+writer(output: &&files.FileWriter,
        limits: encoding.EncodingLimits{encoding.EncodingLimits.safe()})
     -> Writer encoding.EncodingError!
 ```
@@ -259,7 +259,7 @@ use {
 
 run: fn() (EncodingError | IOError)! {
     input: files.open("catalog.json") ?? return
-    reader: json.reader(^input, limits: encoding.EncodingLimits.safe()) ?? return
+    reader: json.reader(input, limits: encoding.EncodingLimits.safe()) ?? return
     loop event in reader {
         if event == .Key("item") { print("item") }
     }
@@ -596,11 +596,11 @@ retaining the item, allocating, or truncating. (D-ENCXML1=A)
 Use these reader and writer constructors:
 
 ```jet
-xml.reader(input: ^files.FileReader,
+xml.reader(input: &&files.FileReader,
            limits: encoding.EncodingLimits{encoding.EncodingLimits.safe()},
            xml: xml.XMLParseOptions{xml.XMLParseOptions.safe()})
     -> xml.XMLReader encoding.EncodingError!
-xml.writer(output: ^files.FileWriter,
+xml.writer(output: &&files.FileWriter,
            limits: encoding.EncodingLimits{encoding.EncodingLimits.safe()},
            xml: xml.XMLRenderOptions{xml.XMLRenderOptions.safe()})
     -> xml.XMLWriter encoding.EncodingError!

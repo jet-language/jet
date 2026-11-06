@@ -146,9 +146,9 @@ seed_dyn: fn(seed: RegressionSeed) -> Dyn Never! {
 // The configuration a finding was found under: every seed and tier command.
 regression_config_hash: fn() -> String Never! {
     seeds := [Dyn]{}
-    loop seed in regression_seeds() -> &seeds.push(seed_dyn(seed))
+    loop seed in regression_seeds() -> seeds.push(seed_dyn(seed))
     commands := [Dyn]{}
-    loop tier in regression_tiers() -> &commands.push(Dyn.Text("{tier}: {tier_command(tier)}"))
+    loop tier in regression_tiers() -> commands.push(Dyn.Text("{tier}: {tier_command(tier)}"))
     digest(json.canonical(Dyn.Object([String: Dyn]{"commands": Dyn.Array(commands), "seeds": Dyn.Array(seeds)})) ?? "")
 }
 
@@ -204,7 +204,7 @@ run_seed: fn(seed: RegressionSeed, jet: String, scratch: String, invert: Bool{fa
         withheld: inverted && seed.stdin != ""
         run := run_tier(jet, tier, path, if withheld -> "" else -> seed.stdin)
         if inverted && !withheld -> run.stdout = seed.broken.copy()
-        &runs.push(run)
+        runs.push(run)
     }
     Ok(runs)
 }
@@ -242,7 +242,7 @@ severity: fn(run: TierRun) -> String Never! {
 // expected bytes and exited 0; otherwise the first tier that did not, sealed.
 seed_finding: fn(seed: RegressionSeed, runs: [TierRun], identity: RunIdentity, mutation_arm: String) -> [Dyn] Err! {
     commands := [TierCommand]{}
-    loop run in runs -> &commands.push(TierCommand{tier: run.tier.copy(), command: run.command.copy()})
+    loop run in runs -> commands.push(TierCommand{tier: run.tier.copy(), command: run.command.copy()})
     loop run in runs {
         if clean_run(seed, run) -> next
         oracle_input: json.canonical(seed_dyn(seed)) ?? return Err("seed {seed.seed} has no canonical form: {err}")

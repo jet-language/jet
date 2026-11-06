@@ -48,7 +48,7 @@ jobs_metadata_actual_entry: fn() {
     }
     request := jet_cli_driver_request(snapshot, [JetDriverCoreSource]{}, None, JetDriverCompileMode.Check)
     request.schema_snapshots = Val([String:jet_sema.SchemaSnapshot]{})
-    projection: jet_driver_checked_projection(^request)
+    projection: jet_driver_checked_projection(request)
     assert(projection.compile.complete && projection.compile.internal_problem == None)
     registry: jet_cli_jobs_metadata_registry(projection) ?? panic("actual successful entry projection")
     assert(registry.completion_words().join(" ") == "own_job")

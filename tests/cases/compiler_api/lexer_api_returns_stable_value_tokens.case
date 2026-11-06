@@ -6,6 +6,6 @@ step: jet inspect compiler lex input.jet
 exit: 0
 json: stdout doc $.compiler.value.api_version = 1 # ORACLE-DERIVED Source/Compiler.rs:15 API_VERSION=1
 json: stdout doc $.compiler.value.diagnostics #= 0
-json: stdout doc $.compiler.value.tokens[?kind="keyword.fn"][?text="fn"][?start.line=1][?start.column=1] #>= 1
+json: stdout doc $.compiler.value.tokens[?kind="keyword.fn"][?text="fn"][?start.line=1][?start.column=6] #>= 1 # `run: fn() {`: the `fn` keyword follows the name (D-DECL-COLON1)
 json: stdout doc $.compiler.value.tokens[?kind="identifier"][?text="run"] #>= 1
 json: stdout doc $.compiler.value.tokens[-1].kind = "eof" # original last().map(kind)

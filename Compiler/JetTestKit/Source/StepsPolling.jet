@@ -10,12 +10,12 @@ kit_steps_predicates: fn(text: String) -> [String]? {
         if token.text != "&&" || kit_steps_byte_slice(body, token.start, token.end) != "&&" -> next
         part: kit_steps_byte_slice(body, start, token.start).trim().copy()
         if part == "" -> return None
-        &result.push(part)
+        result.push(part)
         start = token.end
     }
     last: kit_steps_byte_slice(body, start, body.count_bytes()).trim().copy()
     if last == "" -> return None
-    &result.push(last)
+    result.push(last)
     Val(result)
 }
 
@@ -55,10 +55,10 @@ kit_steps_poll_step: fn(label: String, original: String) -> KitStep? {
         } else -> {
             kit_steps_stream_assertion(subject, "{form} {reason}") ?? return None
         }
-        &assertions.push(assertion)
+        assertions.push(assertion)
     }
     argv := [String]{}
-    loop token in tokens.slice(0, until) -> &argv.push(token.text)
+    loop token in tokens.slice(0, until) -> argv.push(token.text)
     Val(KitStep{argv: argv, stdin: "", exit: exit, assertions: assertions, label: label, action: "poll", duration: timeout, instruction: "{interval}"})
 }
 
@@ -68,7 +68,7 @@ kit_steps_poll: fn(step: KitStep, index: Int, context: KitStepCtx, previous: Kit
     attempt.action = ""
     state.replacements = kit_steps_replacements(step.replacements, context, state) ?? return kit_steps_action_error(state, "poll replacement token unavailable")
     rules := context.plan.json_normalize
-    loop rule in step.json_normalize -> &rules.push(rule)
+    loop rule in step.json_normalize -> rules.push(rule)
     interval: Int.parse(step.instruction) ?? return kit_steps_action_error(state, "invalid polling interval")
     deadline: kit_steps_answer_deadline(context.env, step.duration)
     started: time.instant()

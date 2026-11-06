@@ -13,7 +13,7 @@ use {
 
 envmodel_evaluate_integration_imports: fn(imports: [Expr], scope: ModuleEvalScope, globals: [String: CtValue]) -> [EnvironmentIntegration] EnvModelEvalError! {
     leaves := [Expr]{}
-    loop import in imports -> envmodel_collect_import_leaves(import, &leaves)
+    loop import in imports -> envmodel_collect_import_leaves(import, leaves)
     integrations := [EnvironmentIntegration]{}
     loop import in leaves {
         name: envmodel_qualified_call_name(import) ?? next
@@ -29,7 +29,7 @@ envmodel_evaluate_integration_imports: fn(imports: [Expr], scope: ModuleEvalScop
             .Val(item) -> {
                 if item != integration -> return Err(envmodel_error("E1335", "integration `{integration.name}` has conflicting declarations", "one environment graph cannot silently choose different SDK, host, credential, or grant facts", "merge the integration options so they agree, or keep one declaration", Val(call.name_span)))
             }
-            .None -> { &integrations.push(integration) }
+            .None -> { integrations.push(integration) }
         }
     }
     Ok(integrations)
@@ -49,9 +49,9 @@ envmodel_integration_call_parts: fn(import: Expr) -> (args: [CallArg], name_span
 envmodel_collect_import_leaves: fn(expr: Expr, out: &[Expr]) Never! {
     if expr == {
         .ListLit(items, _, _) -> {
-            loop item in items -> envmodel_collect_import_leaves(item, &out)
+            loop item in items -> envmodel_collect_import_leaves(item, out)
         }
-        else -> { &out.push(expr) }
+        else -> { out.push(expr) }
     }
 }
 
@@ -72,51 +72,51 @@ envmodel_evaluate_integration_call: fn(name: String, args: [CallArg], kind: Inte
             integration.options["ndk"] = "26.3"
             integration.options["license"] = "policy-required"
             integration.packages = [String]{"android-tools@jetpack", "android-sdk@jetpack"}
-            &integration.tasks.push("android-sdk-check")
-            &integration.providers.push("nixpkgs")
-            &integration.host_checks.push("target:linux-or-android")
+            integration.tasks.push("android-sdk-check")
+            integration.providers.push("nixpkgs")
+            integration.host_checks.push("target:linux-or-android")
         }
         .Apple -> {
             integration.options["targets"] = "IOS"
             integration.options["license"] = "policy-required"
-            &integration.packages.push("apple-sdk@jetpack")
-            &integration.tasks.push("apple-sdk-check")
-            &integration.providers.push("nixpkgs")
-            &integration.host_checks.push("target:darwin-or-macos")
+            integration.packages.push("apple-sdk@jetpack")
+            integration.tasks.push("apple-sdk-check")
+            integration.providers.push("nixpkgs")
+            integration.host_checks.push("target:darwin-or-macos")
         }
         .Certificates -> {
             integration.preset = "certificate-store"
-            &integration.tasks.push("certificate-store-check")
-            &integration.providers.push("vault")
-            &integration.grants.push("certificate.read")
+            integration.tasks.push("certificate-store-check")
+            integration.providers.push("vault")
+            integration.grants.push("certificate.read")
         }
         .Hosts -> {
             integration.preset = "project-hosts"
-            &integration.tasks.push("host-binding-check")
-            &integration.providers.push("host-binding")
+            integration.tasks.push("host-binding-check")
+            integration.providers.push("host-binding")
         }
         .CodexAgent -> {
             integration.preset = "codex"
-            &integration.tasks.push("mcp-agent-check")
-            &integration.providers.push("mcp")
-            &integration.grants.push("mcp.read")
+            integration.tasks.push("mcp-agent-check")
+            integration.providers.push("mcp")
+            integration.grants.push("mcp.read")
         }
         .Editor -> {
             integration.preset = "vscode"
-            &integration.packages.push("vscode@jetpack")
-            &integration.providers.push("nixpkgs")
+            integration.packages.push("vscode@jetpack")
+            integration.providers.push("nixpkgs")
         }
         .CloudCredentials -> {
             integration.preset = "cloud-credentials"
-            &integration.tasks.push("credential-store-check")
-            &integration.providers.push("credential-store")
-            &integration.grants.push("credential.read")
+            integration.tasks.push("credential-store-check")
+            integration.providers.push("credential-store")
+            integration.grants.push("credential.read")
         }
         .Vault -> {
             integration.preset = "vault"
-            &integration.tasks.push("vault-check")
-            &integration.providers.push("vault")
-            &integration.grants.push("vault.read")
+            integration.tasks.push("vault-check")
+            integration.providers.push("vault")
+            integration.grants.push("vault.read")
         }
     }
     loop index in 0..<args.len() {
@@ -127,7 +127,7 @@ envmodel_evaluate_integration_call: fn(name: String, args: [CallArg], kind: Inte
         // shape is a named reference already visible in the AST.
         skip_value: envmodel_integration_takes_secrets(kind) && envmodel_integration_reference_names(arg.expr) == None
         value: if skip_value -> CtValue.Int{value: 0} else -> envmodel_integration_arg_value(arg.expr, scope, globals)
-        envmodel_lower_integration_arg(&integration, key, arg.expr, value)
+        envmodel_lower_integration_arg(integration, key, arg.expr, value)
     }
     Ok(integration)
 }
@@ -139,7 +139,7 @@ envmodel_integration_arg_value: fn(expr: Expr, scope: ModuleEvalScope, globals: 
         .Field(base, member, _, _) -> Ok(CtValue.Str{value: "{envmodel_expression_name(base)}.{member}"})
         .ListLit(values, _, _) -> {
             items := [CtValue]{}
-            loop value in values -> &items.push(envmodel_integration_arg_value(value, scope, globals))
+            loop value in values -> items.push(envmodel_integration_arg_value(value, scope, globals))
             Ok(CtValue.List{values: items})
         }
         .MapLit(pairs, _, _) -> {
@@ -148,7 +148,7 @@ envmodel_integration_arg_value: fn(expr: Expr, scope: ModuleEvalScope, globals: 
                 key_value: envmodel_integration_arg_value(pair.key, scope, globals)
                 value: envmodel_integration_arg_value(pair.value, scope, globals)
                 key: envmodel_scalar_ct_key(key_value) ?? return Err(envmodel_error("E1335", "integration map keys must be deterministic scalar values", "host mappings and integration selections become named graph facts; arbitrary values cannot be used as stable keys", "use a string, integer, boolean, or character key", Val(expr_span(expr))))
-                if !envmodel_ct_map_insert(&lowered, key, value) {
+                if !envmodel_ct_map_insert(lowered, key, value) {
                     return Err(envmodel_error("E1335", "integration map contains a duplicate key", "one integration fact graph cannot silently choose between two values for the same host or secret name", "remove the duplicate key or merge its values", Val(expr_span(expr))))
                 }
             }
@@ -156,15 +156,15 @@ envmodel_integration_arg_value: fn(expr: Expr, scope: ModuleEvalScope, globals: 
         }
         .StructLit(type_name, _, _, _, fields, _, _, _) -> {
             lowered := [NamedCtValue]{}
-            loop field in fields -> &lowered.push(NamedCtValue{name: field.name, value: envmodel_integration_arg_value(field.value, scope, globals)})
+            loop field in fields -> lowered.push(NamedCtValue{name: field.name, value: envmodel_integration_arg_value(field.value, scope, globals)})
             Ok(CtValue.Struct{type_name: type_name, fields: lowered})
         }
         .EnumLit(type_name, variant, _, args, _, _, _) -> {
             lowered := [CtEnumArg]{}
             loop arg in args {
                 if arg == {
-                    .Positional(value) -> { &lowered.push(CtEnumArg{label: None, value: envmodel_integration_arg_value(value, scope, globals)}) }
-                    .Named(label, value) -> { &lowered.push(CtEnumArg{label: Val(label), value: envmodel_integration_arg_value(value, scope, globals)}) }
+                    .Positional(value) -> { lowered.push(CtEnumArg{label: None, value: envmodel_integration_arg_value(value, scope, globals)}) }
+                    .Named(label, value) -> { lowered.push(CtEnumArg{label: Val(label), value: envmodel_integration_arg_value(value, scope, globals)}) }
                 }
             }
             Ok(CtValue.Enum{type_name: type_name, variant: variant, args: lowered})
@@ -182,10 +182,10 @@ envmodel_lower_integration_arg: fn(integration: &EnvironmentIntegration, key: St
         .Certificates | .CloudCredentials | .Vault -> {
             names: envmodel_integration_reference_names(expr) ?? [String]{}
             if names.len() == 0 {
-                &integration.losses.push("{key}: secret input must be a named reference; value was redacted")
+                integration.losses.push("{key}: secret input must be a named reference; value was redacted")
             } else {
                 loop name in names {
-                    if !integration.secrets.contains(name) { &integration.secrets.push(name) }
+                    if !integration.secrets.contains(name) { integration.secrets.push(name) }
                 }
             }
             integration.options[key] = "<redacted-names>"
@@ -221,7 +221,7 @@ envmodel_integration_reference_names: fn(expr: Expr) -> [String]? Never! {
             names := [String]{}
             loop value in values {
                 found: envmodel_integration_reference_names(value) ?? return None
-                loop name in found -> &names.push(name)
+                loop name in found -> names.push(name)
             }
             Val(names)
         }
@@ -253,17 +253,17 @@ envmodel_integration_value_text: fn(value: CtValue) -> String Never! {
         }
         .List(items) -> {
             parts := [String]{}
-            loop item in items -> &parts.push(envmodel_integration_value_text(item))
+            loop item in items -> parts.push(envmodel_integration_value_text(item))
             parts.join(",")
         }
         .Map(entries) -> {
             parts := [String]{}
-            loop entry in entries -> &parts.push("{envmodel_integration_key_text(entry.key)}={envmodel_integration_value_text(entry.value)}")
+            loop entry in entries -> parts.push("{envmodel_integration_key_text(entry.key)}={envmodel_integration_value_text(entry.value)}")
             parts.join(",")
         }
         .Struct(_, fields) -> {
             parts := [String]{}
-            loop field in fields -> &parts.push("{field.name}={envmodel_integration_value_text(field.value)}")
+            loop field in fields -> parts.push("{field.name}={envmodel_integration_value_text(field.value)}")
             parts.join(",")
         }
         else -> ast_comptime_value_show(value)

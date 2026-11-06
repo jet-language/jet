@@ -22,7 +22,7 @@ jet_cli_gate_entries_at: fn(ledger: GateLedger, source: String, span: Span) -> [
         site: entry.span ?? next
         // copy: `entry` stays in the iterated collection (`entry` is a view of its element; no move
         // out of an element, E0225) and the pushed row owns its own.
-        if span.start <= site.start && site.end <= span.end -> &rows.push(entry.copy())
+        if span.start <= site.start && site.end <= span.end -> rows.push(entry.copy())
     }
     rows
 }
@@ -33,10 +33,10 @@ jet_cli_gate_append_build_facts: fn(ledger: &GateLedger, facts: [EffectiveFact])
     loop fact in facts {
         loop contribution in fact.provenance {
             if !contribution.force -> next
-            gate_ledger_push(&ledger, gate_source_entry(GateKind.BuildFlag, "build", contribution.layer.name(), contribution.source, contribution.span, fact.key.name, Val(contribution.force_reason ?? ".Force"), ".Force {contribution.value.display()}", "recorded"))
+            gate_ledger_push(ledger, gate_source_entry(GateKind.BuildFlag, "build", contribution.layer.name(), contribution.source, contribution.span, fact.key.name, Val(contribution.force_reason ?? ".Force"), ".Force {contribution.value.display()}", "recorded"))
         }
     }
-    gate_ledger_sort(&ledger)
+    gate_ledger_sort(ledger)
 }
 
 // `append_package_writers`: the entry package's `authority:` block and
@@ -47,43 +47,43 @@ jet_cli_gate_append_package_writers: fn(ledger: &GateLedger, snapshot: JetDriver
     loop root in snapshot.roots {
         if root.identity != snapshot.entry_root_identity -> next
         facts: jet_cli_root_package_facts(root) ?? break
-        jet_cli_gate_append_authority(&ledger, facts.authority, facts.origin)
+        jet_cli_gate_append_authority(ledger, facts.authority, facts.origin)
         recorded: facts.provenance.get("build_allow") ?? [String]{}
         loop allowed in facts.build_allow {
             provenance := recorded.copy()
-            if provenance.len() == 0 -> &provenance.push("{facts.origin}:build.allow")
-            gate_ledger_push(&ledger, jet_cli_gate_external(GateKind.BuildFlag, "package", facts.origin, "build:{allowed}", "package build authority", provenance))
+            if provenance.len() == 0 -> provenance.push("{facts.origin}:build.allow")
+            gate_ledger_push(ledger, jet_cli_gate_external(GateKind.BuildFlag, "package", facts.origin, "build:{allowed}", "package build authority", provenance))
         }
         break
     }
     lock: jet_cli_entry_lock(snapshot) ?? return
     if lock.authority == .Val(authority) {
-        jet_cli_gate_append_authority(&ledger, authority, UNIFIED_LOCK_FILE)
+        jet_cli_gate_append_authority(ledger, authority, UNIFIED_LOCK_FILE)
     } else {
         loop package in lock.packages {
             if package.effect_grants.len() == 0 && package.granted_effects.len() == 0 -> next
             authority: package.effect_authority ?? ".jet/lock effect provenance"
             detail: "required effects: {jet_cli_gate_effect_names(package.required_effects, package.effects)}; granted effects: {jet_cli_gate_effect_names(package.granted_effects, package.effect_grants)}; denied effects: {jet_cli_gate_effect_names(package.denied_effects, [String]{})}; authority: {authority}"
-            gate_ledger_push(&ledger, jet_cli_gate_external(GateKind.DependencyGrant, "package", UNIFIED_LOCK_FILE, package.name, detail, [String]{"{UNIFIED_LOCK_FILE}:dependency.effect-grants"}))
+            gate_ledger_push(ledger, jet_cli_gate_external(GateKind.DependencyGrant, "package", UNIFIED_LOCK_FILE, package.name, detail, [String]{"{UNIFIED_LOCK_FILE}:dependency.effect-grants"}))
         }
     }
     grants := lock.workspace_overlay_policy.build_grants.copy()
-    &grants.sort_by((left: BuildGrant, right: BuildGrant) -> left.subject <=> right.subject)
+    grants.sort_by((left: BuildGrant, right: BuildGrant) -> left.subject <=> right.subject)
     loop grant in grants {
         detail: "required effects: not evaluated; granted effects: {grant.effects.join(",")}; denied effects: none; authority: .jet/lock workspace authority"
-        gate_ledger_push(&ledger, jet_cli_gate_external(GateKind.DependencyGrant, "package", UNIFIED_LOCK_FILE, "build:{grant.subject}", detail, [String]{"{UNIFIED_LOCK_FILE}:workspace.build-grants"}))
+        gate_ledger_push(ledger, jet_cli_gate_external(GateKind.DependencyGrant, "package", UNIFIED_LOCK_FILE, "build:{grant.subject}", detail, [String]{"{UNIFIED_LOCK_FILE}:workspace.build-grants"}))
     }
     loop overlay in lock.workspace_overlay_policy.overlays {
         loop package in overlay.packages {
             names := package.field_priorities.keys().to_list()
-            &names.sort()
+            names.sort()
             fields := [String]{}
             loop name in names {
-                if (package.field_priorities.get(name) ?? 0) >= 100 -> &fields.push(name)
+                if (package.field_priorities.get(name) ?? 0) >= 100 -> fields.push(name)
             }
             if package.priority < 100 && fields.len() == 0 -> next
             detail: if fields.len() == 0 -> "workspace override" else -> "workspace override fields: {fields.join(",")}"
-            gate_ledger_push(&ledger, jet_cli_gate_external(GateKind.ForcePin, "package", UNIFIED_LOCK_FILE, package.package, detail, [String]{"{UNIFIED_LOCK_FILE}:overlay {overlay.name} priority=Force"}))
+            gate_ledger_push(ledger, jet_cli_gate_external(GateKind.ForcePin, "package", UNIFIED_LOCK_FILE, package.package, detail, [String]{"{UNIFIED_LOCK_FILE}:overlay {overlay.name} priority=Force"}))
         }
     }
 }
@@ -96,39 +96,39 @@ jet_cli_gate_append_authority: fn(ledger: &GateLedger, authority: PackageAuthori
     granted: "{source} authority.grants"
     if authority.allow == .Val(allow) {
         detail: "required effects: not evaluated; granted effects: {allow.join(",")}; denied effects: none; authority: {held}"
-        gate_ledger_push(&ledger, jet_cli_gate_external(GateKind.BuildFlag, "package", source, "authority.allow", detail, [String]{"{source}:authority.allow"}))
+        gate_ledger_push(ledger, jet_cli_gate_external(GateKind.BuildFlag, "package", source, "authority.allow", detail, [String]{"{source}:authority.allow"}))
     }
     if authority.deny == .Val(deny) {
         detail: "required effects: not evaluated; granted effects: none; denied effects: {deny.join(",")}; authority: {held}"
-        gate_ledger_push(&ledger, jet_cli_gate_external(GateKind.BuildFlag, "package", source, "authority.deny", detail, [String]{"{source}:authority.deny"}))
+        gate_ledger_push(ledger, jet_cli_gate_external(GateKind.BuildFlag, "package", source, "authority.deny", detail, [String]{"{source}:authority.deny"}))
     }
     grants := authority.grants.copy()
-    &grants.sort_by((left: PackageGrant, right: PackageGrant) -> left.package <=> right.package)
+    grants.sort_by((left: PackageGrant, right: PackageGrant) -> left.package <=> right.package)
     loop grant in grants {
         detail: "required effects: not evaluated; granted effects: {grant.rights.join(",")}; denied effects: none; authority: {granted}"
-        gate_ledger_push(&ledger, jet_cli_gate_external(GateKind.DependencyGrant, "package", source, grant.package, detail, [String]{"{source}:authority.grants"}))
+        gate_ledger_push(ledger, jet_cli_gate_external(GateKind.DependencyGrant, "package", source, grant.package, detail, [String]{"{source}:authority.grants"}))
     }
     if authority.trust == .Val(trust) {
         if trust.default == .Val(decision) {
-            gate_ledger_push(&ledger, jet_cli_gate_external(GateKind.TrustGrant, "package", source, "authority.trust.default", "default: {jet_cli_gate_trust_label(decision)}", [String]{"{source}:authority.trust.default"}))
+            gate_ledger_push(ledger, jet_cli_gate_external(GateKind.TrustGrant, "package", source, "authority.trust.default", "default: {jet_cli_gate_trust_label(decision)}", [String]{"{source}:authority.trust.default"}))
         }
         if trust.ci_prompt == .Val(decision) {
-            gate_ledger_push(&ledger, jet_cli_gate_external(GateKind.TrustGrant, "package", source, "authority.trust.ci", "prompt: {jet_cli_gate_trust_label(decision)}", [String]{"{source}:authority.trust.ci"}))
+            gate_ledger_push(ledger, jet_cli_gate_external(GateKind.TrustGrant, "package", source, "authority.trust.ci", "prompt: {jet_cli_gate_trust_label(decision)}", [String]{"{source}:authority.trust.ci"}))
         }
         services := trust.services.copy()
-        &services.sort_by((left: ServiceTrust, right: ServiceTrust) -> left.service <=> right.service)
+        services.sort_by((left: ServiceTrust, right: ServiceTrust) -> left.service <=> right.service)
         loop service in services {
-            gate_ledger_push(&ledger, jet_cli_gate_external(GateKind.TrustGrant, "package", source, "authority.trust.services.{service.service}", jet_cli_gate_trust_label(service.decision), [String]{"{source}:authority.trust.services"}))
+            gate_ledger_push(ledger, jet_cli_gate_external(GateKind.TrustGrant, "package", source, "authority.trust.services.{service.service}", jet_cli_gate_trust_label(service.decision), [String]{"{source}:authority.trust.services"}))
         }
         if trust.require == .Val(require) {
-            gate_ledger_push(&ledger, jet_cli_gate_external(GateKind.TrustGrant, "package", source, "authority.trust.require", "require: {require.label()}", [String]{"{source}:authority.trust.require"}))
+            gate_ledger_push(ledger, jet_cli_gate_external(GateKind.TrustGrant, "package", source, "authority.trust.require", "require: {require.label()}", [String]{"{source}:authority.trust.require"}))
         }
     }
     loop provider in authority.providers {
         detail := "registry: {provider.registry}"
         if provider.allow.len() > 0 -> detail = "{detail}, allow: {provider.allow.join(",")}"
         if provider.deny.len() > 0 -> detail = "{detail}, deny: {provider.deny.join(",")}"
-        gate_ledger_push(&ledger, jet_cli_gate_external(GateKind.TrustGrant, "package", source, "authority.providers.{provider.provider}", detail, [String]{"{source}:authority.providers"}))
+        gate_ledger_push(ledger, jet_cli_gate_external(GateKind.TrustGrant, "package", source, "authority.providers.{provider.provider}", detail, [String]{"{source}:authority.providers"}))
     }
 }
 

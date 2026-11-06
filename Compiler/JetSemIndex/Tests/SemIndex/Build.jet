@@ -112,7 +112,7 @@ semindex_build_test_operation: fn(path: String, start: Int, end: Int) -> Arithme
         semindex_build_test_hover("main.jet", 5, 6, "Café: struct\nrequired effects: preserved"),
         semindex_build_test_hover("main.jet", 7, 8, "marker: fn() required effects: not a newline marker"),
     }
-    semindex_refresh_effect_hover_rows(&rows, line)
+    semindex_refresh_effect_hover_rows(rows, line)
     assert_eq(rows[0].text, "café: fn()\nreplacement")
     assert_eq(rows[1].text, "fresh: fn()\nreturn = Int\nreplacement")
     assert_eq(rows[2].text, "Café: struct\nrequired effects: preserved")
@@ -122,11 +122,11 @@ semindex_build_test_operation: fn(path: String, start: Int, end: Int) -> Arithme
 #Test("symbol_db_refresh_retained_text_is_idempotent_with_projection_marker") {
     line: "required effects: replacement"
     rows := [HoverEntry]{semindex_build_test_hover("main.jet", 0, 2, "fresh: fn()")}
-    semindex_refresh_effect_hover_rows(&rows, line)
+    semindex_refresh_effect_hover_rows(rows, line)
     assert_eq(rows[0].text, "fresh: fn()\nrequired effects: replacement")
-    semindex_refresh_effect_hover_rows(&rows, line)
+    semindex_refresh_effect_hover_rows(rows, line)
     assert_eq(rows[0].text, "fresh: fn()\nrequired effects: replacement")
-    semindex_refresh_effect_hover_rows(&rows, line)
+    semindex_refresh_effect_hover_rows(rows, line)
     assert_eq(rows[0].text, "fresh: fn()\nrequired effects: replacement")
 }
 
@@ -140,11 +140,11 @@ semindex_build_test_operation: fn(path: String, start: Int, end: Int) -> Arithme
         semindex_build_test_hover("main.jet", 3, 4, "fresh: fn()\nreturn = Int"),
         semindex_build_test_hover("main.jet", 5, 6, "Café: struct\nrequired effects: preserved"),
     }
-    semindex_refresh_effect_hover_rows(&rows, line)
+    semindex_refresh_effect_hover_rows(rows, line)
     assert_eq(rows[0].text, "café: fn()\n{line}")
     assert_eq(rows[1].text, "fresh: fn()\nreturn = Int\n{line}")
     assert_eq(rows[2].text, "Café: struct\nrequired effects: preserved")
-    semindex_refresh_effect_hover_rows(&rows, line)
+    semindex_refresh_effect_hover_rows(rows, line)
     assert_eq(rows[0].text, "café: fn()\n{line}")
     assert_eq(rows[1].text, "fresh: fn()\nreturn = Int\n{line}")
 }
@@ -153,7 +153,7 @@ semindex_build_test_operation: fn(path: String, start: Int, end: Int) -> Arithme
 // and SymbolDB method, not a replacement package schema. Full DB/#4397 gated.
 #Test("symbol_db_attach_package_policy_refreshes_hovers_without_rebuilding_symbols") {
     db := SymbolDB.new()
-    &db.index.set_effect_projection(pkg_project_application_effects([String]{"IO"}, None))
+    db.index.set_effect_projection(pkg_project_application_effects([String]{"IO"}, None))
     db.defs = [SymDef]{semindex_build_test_definition("instance:retained", .Module, "main.jet", 0, 2)}
     db.hover = [HoverEntry]{
         semindex_build_test_hover("main.jet", 3, 5, "café: fn()\nrequired effects: stale"),
@@ -162,7 +162,7 @@ semindex_build_test_operation: fn(path: String, start: Int, end: Int) -> Arithme
     facts := PackageFacts.default()
     facts.authority.allow = Val([String]{"Net"})
     facts.authority.deny = Val([String]{"IO"})
-    &db.attach_package_facts(^facts)
+    db.attach_package_facts(facts)
     projection: db.index.effect_projection
     assert_eq(projection.required_effects, [String]{"IO"})
     assert_eq(projection.granted_effects, [String]{"Net"})
@@ -214,7 +214,7 @@ semindex_build_test_reference: fn(kind: String, path: String, start: Int, end: I
         semindex_build_test_reference("module", "absent.jet", 2, 8, Val("unmatched")),
         {name: "unresolved", span: Span{start: 0, end: 0}, module_path: "main.jet", scope_identity: None, target: None, fact: None},
     }
-    &db.align_reference_targets()
+    db.align_reference_targets()
     if db.refs[0].target == {
         .Val(target) -> assert_eq(target.semantic_identity, Val("instance:a"))
         else -> { panic("import anchor lost") }
@@ -260,7 +260,7 @@ semindex_build_test_semindex_projects_arithmetic_policy_and_exact_scope: fn(db: 
 
 // (terminal_state_graph.jet), including dossier wires.
 semindex_build_test_terminal_source: fn() -> String Never! {
-    "\nDoor: struct {{\n    state {{ Closed, Open, Orphan }}\n}}\nimpl Door {{\n    #Transition(_, Closed) close: fn() -> Door -> Door{{}}\n    #Transition(Closed, Open) open: fn(self: ^Door) -> Door -> self\n    #Transition(Closed, Closed) hold: fn(self: ^Door) -> Door -> self\n}}\nrun: fn() {{}}\n"
+    "\nDoor: struct {{\n    state {{ Closed, Open, Orphan }}\n}}\nimpl Door {{\n    #Transition(_, Closed) close: fn() -> Door -> Door{{}}\n    #Transition(Closed, Open) open: fn(self: &&Door) -> Door -> self\n    #Transition(Closed, Closed) hold: fn(self: &&Door) -> Door -> self\n}}\nrun: fn() {{}}\n"
 }
 semindex_build_test_semindex_projects_terminal_and_reachability_graph: fn(index: SemIndex, json: String, dossier_text: String, dossier_json: String) {
     found := false
@@ -285,7 +285,7 @@ semindex_build_test_semindex_projects_terminal_and_reachability_graph: fn(index:
 }
 
 semindex_build_test_terminal_hover_source: fn() -> String Never! {
-    "Door: struct {{\n    state {{ Closed, Open, Orphan }}\n}}\nimpl Door {{\n    #Transition(_, Closed) new: fn() -[]> Door {{ return Door{{}} }}\n    #Transition(Closed, Open) open: fn(self: ^Door) -[]> Door {{ return self }}\n}}\nrun: fn() {{}}\n"
+    "Door: struct {{\n    state {{ Closed, Open, Orphan }}\n}}\nimpl Door {{\n    #Transition(_, Closed) new: fn() -[]> Door {{ return Door{{}} }}\n    #Transition(Closed, Open) open: fn(self: &&Door) -[]> Door {{ return self }}\n}}\nrun: fn() {{}}\n"
 }
 semindex_build_test_semindex_hover_projects_terminal_and_reachability_facts: fn(db: SymbolDB) {
     closed := false
@@ -342,7 +342,7 @@ semindex_build_test_generic_instance_identity_reaches_index_and_symbol_database:
         assert_eq(instance.template_definition_id.len(), 64)
         names := [String]{}
         loop definition in index.definitions() {
-            if definition.identity == identity -> &names.push(definition.name)
+            if definition.identity == identity -> names.push(definition.name)
         }
         assert_eq(names, [String]{"a", "b"})
         assert(json.contains(instance.fingerprint))
@@ -395,7 +395,7 @@ semindex_build_test_checked_reference_facts_cover_import_members_aliases_and_rec
             loop prior in targets {
                 if prior.module_path == target.module_path && prior.def_span == target.def_span -> seen = true
             }
-            if !seen -> &targets.push(target)
+            if !seen -> targets.push(target)
         }
     }
     assert_eq(targets.len(), 2)

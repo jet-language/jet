@@ -46,7 +46,7 @@ ir_drop_early: fn(m: &IRModule) Never! {
     loop id in 0..<m.functions.len() {
         if m.functions[id].asm != None -> next
         plan: ir_drop_plan(m, m.functions[id], poll, trap)
-        if plan.slots.len() > 0 -> ir_drop_apply(&m.functions[id], plan)
+        if plan.slots.len() > 0 -> ir_drop_apply(m.functions[id], plan)
     }
 }
 
@@ -55,7 +55,7 @@ ir_drop_plan: fn(m: IRModule, f: IRFunction, poll: Int, trap: Int) -> IRDropPlan
     plan := IRDropPlan{slots: [Int]{}, to: [Int]{}, lines: [Int]{}, kill: [Bool]{}}
     // Per instruction: the If of the stop poll holding it, -1 for none.
     stop := [Int]{}
-    loop _ in 0..<n -> &stop.push(-1)
+    loop _ in 0..<n -> stop.push(-1)
     found := false
     loop at in 0..<n {
         if f.op[at] == .Drop -> found = true
@@ -68,8 +68,8 @@ ir_drop_plan: fn(m: IRModule, f: IRFunction, poll: Int, trap: Int) -> IRDropPlan
     dropped := [Bool]{}
     loop slot in 0..<count {
         row: m.types[f.slot_type[slot]]
-        &eligible.push(row.kind == .String && row.drop != "")
-        &dropped.push(false)
+        eligible.push(row.kind == .String && row.drop != "")
+        dropped.push(false)
     }
     reads := [Int]{}
     any := false
@@ -83,7 +83,7 @@ ir_drop_plan: fn(m: IRModule, f: IRFunction, poll: Int, trap: Int) -> IRDropPlan
             }
             next
         }
-        ir_x64_reads_into(f, at, &reads)
+        ir_x64_reads_into(f, at, reads)
         loop slot in reads {
             if slot < 0 || slot >= count || !eligible[slot] -> next
             if !ir_drop_borrows_only(m, f, at) -> eligible[slot] = false
@@ -92,26 +92,26 @@ ir_drop_plan: fn(m: IRModule, f: IRFunction, poll: Int, trap: Int) -> IRDropPlan
     if !any -> return plan
     // Per slot that may move, its references outside stop polls, in order.
     refs := [[Int]]{}
-    loop _ in 0..<count -> &refs.push([Int]{})
+    loop _ in 0..<count -> refs.push([Int]{})
     loop at in 0..<n {
         if stop[at] >= 0 -> next
-        ir_x64_reads_into(f, at, &reads)
+        ir_x64_reads_into(f, at, reads)
         loop slot in reads {
-            if slot >= 0 && slot < count && eligible[slot] && dropped[slot] -> &refs[slot].push(at)
+            if slot >= 0 && slot < count && eligible[slot] && dropped[slot] -> refs[slot].push(at)
         }
         written: ir_x64_write(f, at)
-        if written >= 0 && written < count && eligible[written] && dropped[written] -> &refs[written].push(at)
+        if written >= 0 && written < count && eligible[written] && dropped[written] -> refs[written].push(at)
     }
     // Per construct opener: whether the construct branches or returns
     // (outside its stop polls).
     blocked := [Bool]{}
-    loop _ in 0..<n -> &blocked.push(false)
+    loop _ in 0..<n -> blocked.push(false)
     open := [Int]{}
     loop at in 0..<n {
         if f.op[at] == {
-            .Block | .Loop | .If -> &open.push(at)
+            .Block | .Loop | .If -> open.push(at)
             .End -> {
-                _: &open.pop()
+                _: open.pop()
             }
             .Br | .BrIf | .Return | .Unreachable -> {
                 if stop[at] < 0 {
@@ -121,7 +121,7 @@ ir_drop_plan: fn(m: IRModule, f: IRFunction, poll: Int, trap: Int) -> IRDropPlan
             else -> {}
         }
     }
-    loop _ in 0..<n -> &plan.kill.push(false)
+    loop _ in 0..<n -> plan.kill.push(false)
     loop at in 0..<n {
         if f.op[at] != .Drop || stop[at] >= 0 -> next
         slot: f.a[at]
@@ -135,9 +135,9 @@ ir_drop_plan: fn(m: IRModule, f: IRFunction, poll: Int, trap: Int) -> IRDropPlan
         to := reached
         if to < at && f.op[to] == .Call && (f.a[to] == poll || f.a[to] == trap) && to + 1 < n && stop[to + 1] == to + 1 -> to = f.c[to + 1] + 1
         if to >= at -> next
-        &plan.slots.push(slot)
-        &plan.to.push(to)
-        &plan.lines.push(if previous >= 0 && reached == previous + 1 -> f.code_line[previous] else -> f.code_line[at])
+        plan.slots.push(slot)
+        plan.to.push(to)
+        plan.lines.push(if previous >= 0 && reached == previous + 1 -> f.code_line[previous] else -> f.code_line[at])
         plan.kill[at] = true
         loop inner in to..<at {
             if stop[inner] >= 0 && f.op[inner] == .Drop && f.a[inner] == slot -> plan.kill[inner] = true
@@ -223,26 +223,26 @@ ir_drop_apply: fn(f: &IRFunction, plan: IRDropPlan) Never! {
     n: f.op.len()
     // Per instruction the moved Drops before it, chained.
     head := [Int]{}
-    loop _ in 0..<n -> &head.push(-1)
+    loop _ in 0..<n -> head.push(-1)
     chain := [Int]{}
     loop k in 0..<plan.to.len() {
-        &chain.push(head[plan.to[k]])
+        chain.push(head[plan.to[k]])
         head[plan.to[k]] = k
     }
     code := IROptCode{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}}
     loop at in 0..<n {
         k := head[at]
         loop k >= 0 {
-            ir_opt_code_put(&code, .Drop, -1, plan.slots[k], -1, -1, plan.lines[k])
+            ir_opt_code_put(code, .Drop, -1, plan.slots[k], -1, -1, plan.lines[k])
             k = chain[k]
         }
-        if !plan.kill[at] -> ir_opt_code_put(&code, f.op[at], f.dst[at], f.a[at], f.b[at], f.c[at], f.code_line[at])
+        if !plan.kill[at] -> ir_opt_code_put(code, f.op[at], f.dst[at], f.a[at], f.b[at], f.c[at], f.code_line[at])
     }
-    f.op = ^code.op
-    f.dst = ^code.dst
-    f.a = ^code.a
-    f.b = ^code.b
-    f.c = ^code.c
-    f.code_line = ^code.line
-    ir_opt_compact(&f)
+    f.op = code.op.move()
+    f.dst = code.dst.move()
+    f.a = code.a.move()
+    f.b = code.b.move()
+    f.c = code.c.move()
+    f.code_line = code.line.move()
+    ir_opt_compact(f)
 }

@@ -48,9 +48,9 @@ json_escape: fn(text: String) -> String Never! {
             else -> ""
         }
         if piece.bytes().len() == 0 {
-            &escaped.push(bytes[index])
+            escaped.push(bytes[index])
         } else {
-            loop part in piece.bytes() -> &escaped.push(part)
+            loop part in piece.bytes() -> escaped.push(part)
         }
         index += 1
     }
@@ -66,8 +66,8 @@ publish: fn<T>(package: String, module_name: String, panel: String, field: Strin
     entity: "{source}::{panel}"
     fields: envelope_fields(package, module_name, panel, field)
     // copy: `field` and `value` are read parameters (the caller keeps them); the payload owns its own
-    // texts and value. An exact `^` on a read parameter is E0201.
-    core.devtools.__publish_payload(^source, ^entity, ^fields, field.copy(), value.copy())
+    // texts and value. An exact `.move()` of a read parameter is E0201.
+    core.devtools.__publish_payload(source, entity, fields, field.copy(), value.copy())
 }
 
 #Test("devtools identity field envelope has canonical order and exact escapes") {

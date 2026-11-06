@@ -14,7 +14,7 @@ handle_trailers: fn(req: HTTPRequest) -> HTTPResponse HTTPError! {
     // Request trailers are available only after Body reaches EOF.
     trailers: req.trailers()
     response: http_server.response(200, body)
-    return response.trailers(^trailers)
+    return response.trailers(trailers)
 }
 
 run: fn() (HTTPError | NetError | TaskFailure)! {
@@ -26,9 +26,9 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
     raw_request := "".bytes()
     loop line in
         ["POST / HTTP/1.1", "Host: local", "Transfer-Encoding: chunked", "Trailer: X-Trace", "Connection: close", "", "4", "body", "0", "X-Trace: first", "x-trace: second", ""] {
-        loop byte in line.bytes() -> &raw_request.push(byte)
-        &raw_request.push(13)
-        &raw_request.push(10)
+        loop byte in line.bytes() -> raw_request.push(byte)
+        raw_request.push(13)
+        raw_request.push(10)
     }
     raw_response := ""
     chunk := ""
@@ -45,5 +45,5 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
     print(raw_response.contains("X-Trace: first"))
     print(raw_response.contains("x-trace: second"))
     print(raw_response.contains("body"))
-    ^server_task.join() ?? panic("server")
+    server_task.join() ?? panic("server")
 }

@@ -14,7 +14,7 @@ use {
 
 add_node: fn(g: &GraphBuilder, id: String, descriptor_id: String, title: String, span: SourceSpan, x: I32, y: I32, badges: [String], affordances: [String]) {
     descriptor: node_catalog.descriptor_for_id(descriptor_id)
-    g.nodes.push(NodeRec(id: id.to_string(), kind: descriptor.kind.to_string(), archetype: descriptor.archetype.to_string(), title: title.to_string(), span: span, x: x, y: y, badges: ^badges, affordances: ^affordances, meta_json: .None))
+    g.nodes.push(NodeRec(id: id.to_string(), kind: descriptor.kind.to_string(), archetype: descriptor.archetype.to_string(), title: title.to_string(), span: span, x: x, y: y, badges: badges, affordances: affordances, meta_json: .None))
 }
 
 add_pin: fn(g: GraphBuilder, node_id: String, name: String, direction: String, ty: String, ability: String, fallible: Bool) -> String {
@@ -154,17 +154,17 @@ execution_block: fn(g: GraphBuilder, src: String, stmts: [AST.Stmt]) -> Executio
         current := execution_stmt(g, src, stmt)
         entry: current.entry.clone() ?? {
             if !current.exits.is_empty() {
-                exits = ^current.exits
+                exits = current.exits.move()
                 reachable = true
             }
             next
         }
         if flow.entry.is_none() { flow.entry = .Some(entry.clone()) }
         loop previous in exits { add_control_wire_once(g, previous.pin, entry.pin, previous.span, entry.span) }
-        exits = ^current.exits
+        exits = current.exits.move()
         reachable = !exits.is_empty()
     }
-    flow.exits = ^exits
+    flow.exits = exits.move()
     flow
 }
 
@@ -176,28 +176,28 @@ execution_stmt: fn(g: GraphBuilder, src: String, stmt: AST.Stmt) -> ExecutionFlo
             loop (index, arm) in arms.iter().enumerate() {
                 output_name: if node_has_arm_pins(g, node.id) { "arm{index + 1}" } else if index == 0 { "then" } else { "" }
                 output: if !output_name.is_empty() -> exec_output(g, node.id, output_name) else -> .None
-                append_branch_path(g, src, output, arm.body, node.span, &exits)
+                append_branch_path(g, src, output, arm.body, node.span, exits)
             }
             else_output: exec_output(g, node.id, "else")
             if else_body.as_ref() == .Val(body) {
-                append_branch_path(g, src, else_output, body, node.span, &exits)
+                append_branch_path(g, src, else_output, body, node.span, exits)
             } else if else_output == .Val(output) {
-                exits.push(ExecutionEndpoint(pin: ^output, span: node.span))
+                exits.push(ExecutionEndpoint(pin: output, span: node.span))
             }
-            ExecutionFlow(entry: exec_input(node), exits: ^exits)
+            ExecutionFlow(entry: exec_input(node), exits: exits)
         }
         .ComptimeIf(then_body: then_body, else_body: else_body, ..) -> {
             node: direct_execution_node(g, stmt) ?? return ExecutionFlow.default()
             exits := [ExecutionEndpoint]{}
             then_output: exec_output(g, node.id, "then")
-            append_branch_path(g, src, then_output, then_body, node.span, &exits)
+            append_branch_path(g, src, then_output, then_body, node.span, exits)
             if else_body.as_ref() == .Val(body) {
                 else_output: exec_output(g, node.id, "else")
-                append_branch_path(g, src, else_output, body, node.span, &exits)
+                append_branch_path(g, src, else_output, body, node.span, exits)
             } else if exec_output(g, node.id, "else") == .Val(output) {
-                exits.push(ExecutionEndpoint(pin: ^output, span: node.span))
+                exits.push(ExecutionEndpoint(pin: output, span: node.span))
             }
-            ExecutionFlow(entry: exec_input(node), exits: ^exits)
+            ExecutionFlow(entry: exec_input(node), exits: exits)
         }
         .While(body: body, ..) | .For(body: body, ..) | .Loop(body: body, ..) | .CountedLoop(body: body, ..) -> {
             node: direct_execution_node(g, stmt) ?? return ExecutionFlow.default()
@@ -207,8 +207,8 @@ execution_stmt: fn(g: GraphBuilder, src: String, stmt: AST.Stmt) -> ExecutionFlo
                 if body_flow.entry == .Val(body_entry) { add_control_wire_once(g, output, body_entry.pin, node.span, body_entry.span) }
                 loop exit in body_flow.exits { add_control_wire_once(g, exit.pin, "{node.id}:input:exec", exit.span, node.span) }
             }
-            exits: exec_output(g, node.id, "done").into_iter().map((pin) -> ExecutionEndpoint(pin: ^pin, span: node.span)).collect()
-            ExecutionFlow(entry: exec_input(node), exits: ^exits)
+            exits: exec_output(g, node.id, "done").into_iter().map((pin) -> ExecutionEndpoint(pin: pin, span: node.span)).collect()
+            ExecutionFlow(entry: exec_input(node), exits: exits)
         }
         .Switched(marker: marker, body: body, ..) -> {
             if AST.switched_off(marker) -> ExecutionFlow.default() else -> execution_block(g, src, body)
@@ -220,8 +220,8 @@ execution_stmt: fn(g: GraphBuilder, src: String, stmt: AST.Stmt) -> ExecutionFlo
                 .Return(..) | .Break(..) | .BreakValue(..) | .BreakLabel(..) | .BreakLabelValue(..) | .Continue(..) | .ContinueLabel(..) -> true
                 _ -> false
             }
-            exits: if terminal -> [] else -> exec_output(g, node.id, "then").into_iter().map((pin) -> ExecutionEndpoint(pin: ^pin, span: node.span)).collect()
-            ExecutionFlow(entry: exec_input(node), exits: ^exits)
+            exits: if terminal -> [] else -> exec_output(g, node.id, "then").into_iter().map((pin) -> ExecutionEndpoint(pin: pin, span: node.span)).collect()
+            ExecutionFlow(entry: exec_input(node), exits: exits)
         }
     }
 }
@@ -231,9 +231,9 @@ append_branch_path: fn(g: &GraphBuilder, src: String, output: String?, body: &[A
     body_flow := execution_block(g, src, body)
     if body_flow.entry == .Val(entry) {
         add_control_wire_once(g, pin, entry.pin, owner_span, entry.span)
-        exits.extend(^body_flow.exits)
+        exits.extend(body_flow.exits.move())
     } else {
-        exits.push(ExecutionEndpoint(pin: ^pin, span: owner_span))
+        exits.push(ExecutionEndpoint(pin: pin, span: owner_span))
     }
 }
 
@@ -344,7 +344,7 @@ collapse_region_id: fn(graph_id: String, span: SourceSpan) -> String {
 add_inline: fn(g: &GraphBuilder, node_id: String, ordinal: Usize, role: String, src: String, span: Span) {
     source: snippet(src, span)
     id: "{g.graph_id}:inline:{ordinal}:{role}"
-    g.inline_exprs.push(InlineRec(id: ^id, node_id: node_id.to_string(), role: role.to_string(), source: ^source, span: span.into()))
+    g.inline_exprs.push(InlineRec(id: id, node_id: node_id.to_string(), role: role.to_string(), source: source, span: span.into()))
 }
 
 graph_to_json: fn(g: GraphBuilder, f: AST.Func, src: String, visibility: String) -> String {
@@ -439,13 +439,13 @@ callback_event_name: fn(name: String) -> String? {
 
 rails_json: fn(g: GraphBuilder) -> String {
     kinds := [String]{}
-    push_rail(&kinds, "control")
-    if !g.wires.is_empty() || !g.pins.is_empty() { push_rail(&kinds, "data") }
-    if g.wires.iter().any((w) -> w.kind == "fallible") || g.pins.iter().any((p) -> p.fallible) { push_rail(&kinds, "fallible") }
-    if g.regions.iter().any((r) -> r.contains("\"kind\":\"task.group\"")) || g.nodes.iter().any((n) -> n.title == ".task" || n.title == "spawn" || n.title.ends_with(".spawn")) { push_rail(&kinds, "async") }
-    if g.nodes.iter().any((n) -> n.badges.iter().any((b) -> b == "effects")) || g.regions.iter().any((r) -> r.contains("\"kind\":\"authority\"")) { push_rail(&kinds, "effect") }
-    if g.regions.iter().any((r) -> r.contains("\"kind\":\"unsafe\"") || r.contains("\"kind\":\"comptime\"")) { push_rail(&kinds, "proof") }
-    push_rail(&kinds, "debug")
+    push_rail(kinds, "control")
+    if !g.wires.is_empty() || !g.pins.is_empty() { push_rail(kinds, "data") }
+    if g.wires.iter().any((w) -> w.kind == "fallible") || g.pins.iter().any((p) -> p.fallible) { push_rail(kinds, "fallible") }
+    if g.regions.iter().any((r) -> r.contains("\"kind\":\"task.group\"")) || g.nodes.iter().any((n) -> n.title == ".task" || n.title == "spawn" || n.title.ends_with(".spawn")) { push_rail(kinds, "async") }
+    if g.nodes.iter().any((n) -> n.badges.iter().any((b) -> b == "effects")) || g.regions.iter().any((r) -> r.contains("\"kind\":\"authority\"")) { push_rail(kinds, "effect") }
+    if g.regions.iter().any((r) -> r.contains("\"kind\":\"unsafe\"") || r.contains("\"kind\":\"comptime\"")) { push_rail(kinds, "proof") }
+    push_rail(kinds, "debug")
     "{{\"kinds\":[{json_strs(kinds)}],\"debug_overlay\":\"idle\",\"source\":\"front-end facts\"}}"
 }
 

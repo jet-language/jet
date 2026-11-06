@@ -96,7 +96,7 @@ jet_cli_memory_parse_row: fn(value: JetCLIStatusValue, line: Int) -> JetCLIMemor
         if text == "" || text.len() > 4096 {
             return Err(jet_cli_read_error("memory ledger row {line} has an invalid repair"))
         }
-        &repairs.push(text)
+        repairs.push(text)
     }
     Ok(
     JetCLIMemoryRow{
@@ -147,7 +147,7 @@ jet_cli_memory_read: fn(path: String) -[FS]> [JetCLIMemoryRow] JetCLIReadError! 
         if rows.len() >= 65536 -> return Err(jet_cli_read_error("memory ledger has more than 65536 rows"))
         line += 1
         tree: report_status_value_parse(text) ?? return Err(jet_cli_read_error("memory ledger row {line} is malformed"))
-        &rows.push(jet_cli_memory_parse_row(jet_cli_status_from_tree(tree), line))
+        rows.push(jet_cli_memory_parse_row(jet_cli_status_from_tree(tree), line))
     }
     // Stable merge sort by the same tuple as Rust; avoid quadratic insertion
     // when the bounded ledger contains its full 65,536 rows.
@@ -162,10 +162,10 @@ jet_cli_memory_read: fn(path: String) -[FS]> [JetCLIMemoryRow] JetCLIReadError! 
             right := middle
             loop left < middle || right < end {
                 if right >= end || (left < middle && !jet_cli_memory_before(rows[right], rows[left])) {
-                    &merged.push(rows[left])
+                    merged.push(rows[left])
                     left += 1
                 } else {
-                    &merged.push(rows[right])
+                    merged.push(rows[right])
                     right += 1
                 }
             }
@@ -197,7 +197,7 @@ jet_cli_audit_memory_at: fn(root: String, args: [String], color: Bool, json: Boo
     if json {
         values := [JetCLIStatusValue]{}
         loop row in rows {
-            &values.push(
+            values.push(
             jet_cli_status_object(
             [JetCLIStatusField]{
                 jet_cli_status_field("kind", jet_cli_status_text(row.kind)),

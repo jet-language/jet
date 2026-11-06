@@ -37,102 +37,102 @@ semindex_collect_item_facts: fn(db: &SymbolDB, ctx: &WalkCtx, names: NameFacts, 
         .ErrorConv(_) -> {}
         .Migration(_) -> {}
         .MarkerDecl(value) -> {
-            &db.defs.push(SymDef{identity: "rule:{ctx.scope_identity}::{value.name}", name: value.name, def_span: value.name_span, module_path: mp, kind: .Type{derives: [String]{}}})
+            db.defs.push(SymDef{identity: "rule:{ctx.scope_identity}::{value.name}", name: value.name, def_span: value.name_span, module_path: mp, kind: .Type{derives: [String]{}}})
         }
         .FactDecl(value) -> {
-            &db.defs.push(SymDef{identity: "fact:{ctx.scope_identity}::{value.name}", name: value.name, def_span: value.name_span, module_path: mp, kind: .Type{derives: [String]{}}})
+            db.defs.push(SymDef{identity: "fact:{ctx.scope_identity}::{value.name}", name: value.name, def_span: value.name_span, module_path: mp, kind: .Type{derives: [String]{}}})
         }
         .Const(value) -> {
-            &db.defs.push(SymDef{identity: "const:{ctx.scope_identity}::{value.name}", name: value.name, def_span: value.name_span, module_path: mp, kind: .Const})
-            &db.hover.push(HoverEntry{span: value.name_span, module_path: mp, text: "const `{value.name}`"})
-            semindex_structural_slot(&db, &ctx, "value", .Scalar, (db: SymbolDB, ctx: WalkCtx) -> {
-                semindex_collect_expr(&db, &ctx, names, program, source, value.value, mp)
+            db.defs.push(SymDef{identity: "const:{ctx.scope_identity}::{value.name}", name: value.name, def_span: value.name_span, module_path: mp, kind: .Const})
+            db.hover.push(HoverEntry{span: value.name_span, module_path: mp, text: "const `{value.name}`"})
+            semindex_structural_slot(db, ctx, "value", .Scalar, (db: SymbolDB, ctx: WalkCtx) -> {
+                semindex_collect_expr(db, ctx, names, program, source, value.value, mp)
             })
         }
         .Test(value) -> {
-            semindex_structural_slot(&db, &ctx, "body", .List, (db: SymbolDB, ctx: WalkCtx) -> {
-                semindex_collect_stmts(&db, &ctx, names, program, source, value.body, mp)
+            semindex_structural_slot(db, ctx, "body", .List, (db: SymbolDB, ctx: WalkCtx) -> {
+                semindex_collect_stmts(db, ctx, names, program, source, value.body, mp)
             })
         }
         .ExternRust(block) -> {
             // rust_path is bridge metadata, never a source navigation target.
-            loop function in block.functions -> &db.defs.push(SymDef{identity: "fn:{ctx.scope_identity}::{function.name}", name: function.name, def_span: function.name_span, module_path: mp, kind: semindex_extern_callable_kind(function, source)})
+            loop function in block.functions -> db.defs.push(SymDef{identity: "fn:{ctx.scope_identity}::{function.name}", name: function.name, def_span: function.name_span, module_path: mp, kind: semindex_extern_callable_kind(function, source)})
         }
         .Module(value) -> {
-            &db.defs.push(SymDef{identity: semindex_module_identity(ctx.scope_identity, value.name), name: value.name, def_span: value.name_span, module_path: mp, kind: .Module})
+            db.defs.push(SymDef{identity: semindex_module_identity(ctx.scope_identity, value.name), name: value.name, def_span: value.name_span, module_path: mp, kind: .Module})
         }
         .CodeModule(value) -> {
             identity: if value.instance_identity == {
                 .Val(instance) -> "instance:{instance.fingerprint}"
                 .None -> semindex_module_identity(ctx.scope_identity, value.name)
             }
-            &db.defs.push(SymDef{identity: identity, name: value.name, def_span: value.name_span, module_path: mp, kind: .Module})
+            db.defs.push(SymDef{identity: identity, name: value.name, def_span: value.name_span, module_path: mp, kind: .Module})
             if value.body == .Val(body) {
                 previous: ctx.scope_identity
                 ctx.scope_identity = identity
-                semindex_structural_slot(&db, &ctx, "items", .List, (db: SymbolDB, ctx: WalkCtx) -> {
-                    loop child in body -> semindex_collect_item(&db, &ctx, names, program, source, child, mp)
+                semindex_structural_slot(db, ctx, "items", .List, (db: SymbolDB, ctx: WalkCtx) -> {
+                    loop child in body -> semindex_collect_item(db, ctx, names, program, source, child, mp)
                 })
                 ctx.scope_identity = previous
             }
         }
         .Distinct(value) -> {
             derives := [String]{}
-            loop derive_ref in value.derives -> &derives.push(derive_ref.name)
-            &db.defs.push(SymDef{identity: semindex_type_identity(ctx.scope_identity, value.name), name: value.name, def_span: value.name_span, module_path: mp, kind: .Type{derives: derives}})
-            semindex_structural_slot(&db, &ctx, "base", .Scalar, (db: SymbolDB, ctx: WalkCtx) -> {
-                _ := semindex_record_node(&db, ctx, "type", "type", mp, value.base_span)
+            loop derive_ref in value.derives -> derives.push(derive_ref.name)
+            db.defs.push(SymDef{identity: semindex_type_identity(ctx.scope_identity, value.name), name: value.name, def_span: value.name_span, module_path: mp, kind: .Type{derives: derives}})
+            semindex_structural_slot(db, ctx, "base", .Scalar, (db: SymbolDB, ctx: WalkCtx) -> {
+                _ := semindex_record_node(db, ctx, "type", "type", mp, value.base_span)
             })
         }
         .TypeAlias(value) -> {
-            &db.defs.push(SymDef{identity: semindex_type_identity(ctx.scope_identity, value.name), name: value.name, def_span: value.name_span, module_path: mp, kind: .Type{derives: [String]{}}})
-            semindex_structural_slot(&db, &ctx, "target", .Scalar, (db: SymbolDB, ctx: WalkCtx) -> {
-                _ := semindex_record_node(&db, ctx, "type", "type", mp, value.target_span)
+            db.defs.push(SymDef{identity: semindex_type_identity(ctx.scope_identity, value.name), name: value.name, def_span: value.name_span, module_path: mp, kind: .Type{derives: [String]{}}})
+            semindex_structural_slot(db, ctx, "target", .Scalar, (db: SymbolDB, ctx: WalkCtx) -> {
+                _ := semindex_record_node(db, ctx, "type", "type", mp, value.target_span)
             })
         }
         .UnitFamily(value) -> {
-            &db.defs.push(SymDef{identity: semindex_type_identity(ctx.scope_identity, value.family), name: value.family, def_span: value.family_span, module_path: mp, kind: .Type{derives: [String]{}}})
+            db.defs.push(SymDef{identity: semindex_type_identity(ctx.scope_identity, value.family), name: value.family, def_span: value.family_span, module_path: mp, kind: .Type{derives: [String]{}}})
             // Canonical Foundation expansion includes affine Point/Delta and
             // core.units Time's fixed-carrier exception; no local sugar/provider.
             loop definition in unit_family_distinct_defs(value) {
                 derives := [String]{}
-                loop derive_ref in definition.derives -> &derives.push(derive_ref.name)
-                &db.defs.push(SymDef{identity: semindex_type_identity(ctx.scope_identity, definition.name), name: definition.name, def_span: definition.name_span, module_path: mp, kind: .Type{derives: derives}})
+                loop derive_ref in definition.derives -> derives.push(derive_ref.name)
+                db.defs.push(SymDef{identity: semindex_type_identity(ctx.scope_identity, definition.name), name: definition.name, def_span: definition.name_span, module_path: mp, kind: .Type{derives: derives}})
             }
-            loop member in value.members -> &db.defs.push(SymDef{identity: "unit:{ctx.scope_identity}::{member.name}", name: member.name, def_span: member.name_span, module_path: mp, kind: .Const})
+            loop member in value.members -> db.defs.push(SymDef{identity: "unit:{ctx.scope_identity}::{member.name}", name: member.name, def_span: member.name_span, module_path: mp, kind: .Const})
         }
         .ProtocolDecl(value) -> {
-            &db.defs.push(SymDef{identity: semindex_type_identity(ctx.scope_identity, value.name), name: value.name, def_span: value.name_span, module_path: mp, kind: .Type{derives: [String]{}}})
-            loop message in value.messages -> &db.defs.push(SymDef{identity: "protocol:{ctx.scope_identity}::{message.name}", name: message.name, def_span: message.name_span, module_path: mp, kind: (.EnumVariant{parent: value.name})})
+            db.defs.push(SymDef{identity: semindex_type_identity(ctx.scope_identity, value.name), name: value.name, def_span: value.name_span, module_path: mp, kind: .Type{derives: [String]{}}})
+            loop message in value.messages -> db.defs.push(SymDef{identity: "protocol:{ctx.scope_identity}::{message.name}", name: message.name, def_span: message.name_span, module_path: mp, kind: (.EnumVariant{parent: value.name})})
         }
         .UserDerive(value) -> {
-            &db.refs.push(semindex_scoped_ref(&db, ctx, names, value.trait_name, value.trait_span, mp))
-            semindex_structural_slot(&db, &ctx, "body", .List, (db: SymbolDB, ctx: WalkCtx) -> {
+            db.refs.push(semindex_scoped_ref(db, ctx, names, value.trait_name, value.trait_span, mp))
+            semindex_structural_slot(db, ctx, "body", .List, (db: SymbolDB, ctx: WalkCtx) -> {
                 loop body_item in value.body {
                     if body_item == {
-                        .Item(child) -> semindex_collect_item(&db, &ctx, names, program, source, child, mp)
-                        .Stmt(statement) -> semindex_collect_stmt(&db, &ctx, names, program, source, statement, mp)
+                        .Item(child) -> semindex_collect_item(db, ctx, names, program, source, child, mp)
+                        .Stmt(statement) -> semindex_collect_stmt(db, ctx, names, program, source, statement, mp)
                         .Loop(_, _, expression, body, _) -> {
-                            semindex_collect_expr(&db, &ctx, names, program, source, expression, mp)
-                            loop nested in body -> semindex_collect_template_body_item(&db, &ctx, names, program, source, nested, mp)
+                            semindex_collect_expr(db, ctx, names, program, source, expression, mp)
+                            loop nested in body -> semindex_collect_template_body_item(db, ctx, names, program, source, nested, mp)
                         }
                     }
                 }
             })
         }
         .TemplateLoop(value) -> {
-            semindex_structural_slot(&db, &ctx, "source", .Scalar, (db: SymbolDB, ctx: WalkCtx) -> {
-                semindex_collect_expr(&db, &ctx, names, program, source, value.source, mp)
+            semindex_structural_slot(db, ctx, "source", .Scalar, (db: SymbolDB, ctx: WalkCtx) -> {
+                semindex_collect_expr(db, ctx, names, program, source, value.source, mp)
             })
-            semindex_structural_slot(&db, &ctx, "body", .List, (db: SymbolDB, ctx: WalkCtx) -> {
-                loop body_item in value.body -> semindex_collect_template_body_item(&db, &ctx, names, program, source, body_item, mp)
+            semindex_structural_slot(db, ctx, "body", .List, (db: SymbolDB, ctx: WalkCtx) -> {
+                loop body_item in value.body -> semindex_collect_template_body_item(db, ctx, names, program, source, body_item, mp)
             })
         }
         .GenericModule(value) -> {
-            &db.defs.push(SymDef{identity: semindex_module_identity(ctx.scope_identity, value.name), name: value.name, def_span: value.name_span, module_path: mp, kind: .Module})
+            db.defs.push(SymDef{identity: semindex_module_identity(ctx.scope_identity, value.name), name: value.name, def_span: value.name_span, module_path: mp, kind: .Module})
         }
         .ModuleAlias(value) -> {
-            &db.defs.push(SymDef{identity: semindex_module_identity(ctx.scope_identity, value.name), name: value.name, def_span: value.name_span, module_path: mp, kind: .Module})
+            db.defs.push(SymDef{identity: semindex_module_identity(ctx.scope_identity, value.name), name: value.name, def_span: value.name_span, module_path: mp, kind: .Module})
         }
     }
 }
@@ -141,9 +141,9 @@ semindex_collect_item_facts: fn(db: &SymbolDB, ctx: &WalkCtx, names: NameFacts, 
 // not a recursive derive expander: checked expansion belongs to Sema.
 semindex_collect_template_body_item: fn(db: &SymbolDB, ctx: &WalkCtx, names: NameFacts, program: Program, source: String, body_item: DeriveBodyItem, mp: String) {
     if body_item == {
-        .Item(child) -> semindex_collect_item(&db, &ctx, names, program, source, child, mp)
-        .Stmt(statement) -> semindex_collect_stmt(&db, &ctx, names, program, source, statement, mp)
-        .Loop(_, _, expression, _, _) -> semindex_collect_expr(&db, &ctx, names, program, source, expression, mp)
+        .Item(child) -> semindex_collect_item(db, ctx, names, program, source, child, mp)
+        .Stmt(statement) -> semindex_collect_stmt(db, ctx, names, program, source, statement, mp)
+        .Loop(_, _, expression, _, _) -> semindex_collect_expr(db, ctx, names, program, source, expression, mp)
     }
 }
 
@@ -155,9 +155,9 @@ semindex_extern_callable_kind: fn(function: ExternFn, source: String) -> SymKind
     sources := [SourceSpan]{}
     access := [AccessConvention]{}
     loop parameter in function.params {
-        &params.push(SymNameType{name: parameter.name, ty: parameter.ty})
-        &sources.push(semindex_source_span(parameter.name_span))
-        &access.push(parameter.convention)
+        params.push(SymNameType{name: parameter.name, ty: parameter.ty})
+        sources.push(semindex_source_span(parameter.name_span))
+        access.push(parameter.convention)
     }
     SymKind.Function{
         params: params, param_sources: sources, signature_facts_available: true,
@@ -182,7 +182,7 @@ semindex_hover_for_fn: fn(function: Func) -> String Never! {
         if parameter.name == "self" -> next
         if parameter.zone == .LabelOnly && !star_done {
             star_done = true
-            &parts.push("*")
+            parts.push("*")
         }
         head: if parameter.zone == .PositionalOnly -> parameter.name else if parameter.public_label == {
             .Val(label) -> "{label.name} {parameter.name}"
@@ -190,11 +190,11 @@ semindex_hover_for_fn: fn(function: Func) -> String Never! {
         }
         default: if parameter.default != None -> "{{…}}" else -> ""
         rest: if parameter.variadic -> "..." else -> ""
-        &parts.push("{access_sigil(parameter.convention)}{head}: {rest}{type_name(parameter.ty)}{default}")
+        parts.push("{access_sigil(parameter.convention)}{head}: {rest}{type_name(parameter.ty)}{default}")
         if parameter.zone == .PositionalOnly {
             following := index + 1
             loop following < function.params.len() && function.params[following].name == "self" -> following += 1
-            if following >= function.params.len() || function.params[following].zone != .PositionalOnly -> &parts.push("/")
+            if following >= function.params.len() || function.params[following].zone != .PositionalOnly -> parts.push("/")
         }
     }
     arrow := ""
@@ -203,13 +203,13 @@ semindex_hover_for_fn: fn(function: Func) -> String Never! {
         .None -> {
             if function.declared_effects == .Val(row) {
                 effects := [String]{}
-                loop fact in row -> &effects.push(fact.name)
+                loop fact in row -> effects.push(fact.name)
                 arrow = " -[{effects.join(", ")}]>"
             }
         }
     }
     policies := [String]{}
-    loop policy in semindex_callable_policies(function) -> &policies.push(callable_policy_display(policy))
+    loop policy in semindex_callable_policies(function) -> policies.push(callable_policy_display(policy))
     chain: policies.join(", ")
     policy_text: if chain != "" -> " ; policies=[{chain}]" else -> ""
     failure: func_failure_contract(function)

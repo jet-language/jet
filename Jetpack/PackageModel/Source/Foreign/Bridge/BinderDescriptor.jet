@@ -470,7 +470,7 @@ ForeignScalar: enum {
 // `[Int, Float]`: the Rust `Debug` spelling of a scalar list.
 pkg_foreign_scalar_list_debug: fn(scalars: [ForeignScalar]) -> String Never! {
     names := [String]{}
-    loop scalar in scalars -> &names.push(scalar.debug_name())
+    loop scalar in scalars -> names.push(scalar.debug_name())
     "[{names.join(", ")}]"
 }
 
@@ -655,7 +655,7 @@ BinderDescriptor: struct {
 
     capabilities_debug: fn(self) -> String Never! {
         names := [String]{}
-        loop capability in self.capabilities -> &names.push(capability.debug_name())
+        loop capability in self.capabilities -> names.push(capability.debug_name())
         "[{names.join(", ")}]"
     }
 
@@ -852,7 +852,7 @@ FFILinkClosure: struct {
         direct_rows: pkg_ffi_sorted_nonempty(direct)
         transitive_rows := [String]{}
         loop library in pkg_ffi_sorted_nonempty(transitive) {
-            if !direct_rows.contains(library) -> &transitive_rows.push(library)
+            if !direct_rows.contains(library) -> transitive_rows.push(library)
         }
         FFILinkClosure{direct: direct_rows, transitive: transitive_rows}
     }
@@ -863,8 +863,8 @@ FFILinkClosure: struct {
 
     libraries: fn(self) -> [String] Never! {
         out := [String]{}
-        loop library in self.direct -> &out.push(library)
-        loop library in self.transitive -> &out.push(library)
+        loop library in self.direct -> out.push(library)
+        loop library in self.transitive -> out.push(library)
         out
     }
 
@@ -879,9 +879,9 @@ pkg_ffi_sorted_nonempty: fn(values: [String]) -> [String] Never! {
     out := [String]{}
     loop value in values {
         if value == "" || out.contains(value) -> next
-        &out.push(value)
+        out.push(value)
     }
-    &out.sort()
+    out.sort()
     out
 }
 
@@ -994,7 +994,7 @@ FFIBoundaryFacts: struct {
         loop obligation in self.obligations {
             if obligation.name.trim() == "" || obligation.checker.trim() == "" || obligation.assumptions.len() == 0 || obligation.coverage_digest != self.artifact_coverage_digest -> return Err(ForeignBridgeError{message: "foreign boundary carrier has invalid `{obligation.name}` obligation"})
             if names.contains(obligation.name) -> return Err(ForeignBridgeError{message: "foreign boundary carrier repeats `{obligation.name}` obligation"})
-            &names.push(obligation.name)
+            names.push(obligation.name)
         }
         loop obligation in FFI_BOUNDARY_OBLIGATIONS {
             if !names.contains(obligation) -> return Err(ForeignBridgeError{message: "foreign boundary carrier omits `{obligation}` obligation"})

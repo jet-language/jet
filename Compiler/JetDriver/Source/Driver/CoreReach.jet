@@ -74,8 +74,8 @@ jet_driver_unit_words: fn(source: [U8], comments: [Span], items: [Item], lazy: B
             span: jet_driver_reach_lazy_span(item, part_members) ?? next
             // Insertion by start: program.items is nearly in source order.
             at := spans.len()
-            &positions.push(position)
-            &spans.push(span)
+            positions.push(position)
+            spans.push(span)
             loop at > 0 && spans[at - 1].start > span.start {
                 spans[at] = spans[at - 1]
                 positions[at] = positions[at - 1]
@@ -99,14 +99,14 @@ jet_driver_unit_words: fn(source: [U8], comments: [Span], items: [Item], lazy: B
     scan := JetDriverWordScan{table: name_table(), comments: comments, comment: 0}
     cursor := 0
     loop (row, span) in spans {
-        jet_driver_spell_words(source, cursor, span.start, &scan, &rest_seen, 1, &rest)
+        jet_driver_spell_words(source, cursor, span.start, scan, rest_seen, 1, rest)
         words := [Int]{}
-        jet_driver_spell_words(source, span.start, span.end, &scan, &seen, row + 1, &words)
-        &spells.push(^words)
+        jet_driver_spell_words(source, span.start, span.end, scan, seen, row + 1, words)
+        spells.push(words)
         cursor = span.end
     }
-    jet_driver_spell_words(source, cursor, source.len(), &scan, &rest_seen, 1, &rest)
-    &spells.push(^rest)
+    jet_driver_spell_words(source, cursor, source.len(), scan, rest_seen, 1, rest)
+    spells.push(rest)
     JetDriverUnitWords{words: scan.table.texts, items: positions, spells: spells}
 }
 
@@ -118,7 +118,7 @@ jet_driver_comment_spans: fn(tokens: [Token]) -> [Span] Never! {
     loop token in tokens {
         if token.kind != TOKEN_LINE_COMMENT && token.kind != TOKEN_BLOCK_COMMENT -> next
         if spans.len() > 0 && token.span.start < spans[spans.len() - 1].end -> next
-        &spans.push(token.span)
+        spans.push(token.span)
     }
     spans
 }
@@ -157,12 +157,12 @@ jet_driver_spell_words: fn(source: [U8], start: Int, end: Int, scan: &JetDriverW
         kind := 0
         if word_start > 0 && source[word_start - 1] == (U8{46}) -> kind = 1
         if cursor < source.len() && source[cursor] == (U8{46}) -> kind += 2
-        name: name_intern_bytes(&scan.table, source, word_start, cursor)
+        name: name_intern_bytes(scan.table, source, word_start, cursor)
         key: Int.from_u32(name.id) * 4 + kind
-        loop seen.len() <= key -> &seen.push(0)
+        loop seen.len() <= key -> seen.push(0)
         if seen[key] == stamp -> next
         seen[key] = stamp
-        &row.push(key)
+        row.push(key)
     }
 }
 
@@ -244,32 +244,32 @@ jet_driver_reach_deferrable: fn(scoped: JetDriverScopedImport, scoped_imports: [
 // unit. The names a member list selects are reached wherever it names them.
 jet_driver_reach_admit: fn(reach: &JetDriverReach, loaded: Int, module_name: String, words: JetDriverUnitWords, items: [Item], imports: [ImportDecl], open: Bool) -> Int {
     unit: reach.units.len()
-    &reach.units.push(JetDriverReachUnit{loaded: loaded, module_name: module_name, open: open || reach.open_names.contains(module_name), local: [Bool]{}, heads: [Bool]{}})
+    reach.units.push(JetDriverReachUnit{loaded: loaded, module_name: module_name, open: open || reach.open_names.contains(module_name), local: [Bool]{}, heads: [Bool]{}})
     ids := [Int]{}
-    loop word in words.words -> &ids.push(Int.from_u32(name_intern(&reach.names, word).id))
+    loop word in words.words -> ids.push(Int.from_u32(name_intern(reach.names, word).id))
     loop declaration in imports {
         if declaration.kind == .Unqualified(_, _, selected, _, _) {
             loop selected_item in selected {
-                selected_name: Int.from_u32(name_intern(&reach.names, selected_item.original).id)
-                jet_driver_reach_global(&reach, selected_name)
+                selected_name: Int.from_u32(name_intern(reach.names, selected_item.original).id)
+                jet_driver_reach_global(reach, selected_name)
             }
         }
     }
     loop (row, position) in words.items {
-        name: Int.from_u32(name_intern(&reach.names, jet_driver_reach_item_name(items[position])).id)
+        name: Int.from_u32(name_intern(reach.names, jet_driver_reach_item_name(items[position])).id)
         spells := [Int]{}
-        loop spell in words.spells[row] -> &spells.push(ids[spell >> 2] * 4 + spell.bit_and(3))
+        loop spell in words.spells[row] -> spells.push(ids[spell >> 2] * 4 + spell.bit_and(3))
         index: reach.items.len()
-        &reach.items.push(JetDriverReachItem{unit: unit, item: position, name: name, spells: ^spells, live: false})
-        loop reach.by_name.len() <= name -> &reach.by_name.push([Int]{})
-        &reach.by_name[name].push(index)
-        if reach.units[unit].open || jet_driver_reach_has(reach.global, name) -> &reach.stack.push(index)
+        reach.items.push(JetDriverReachItem{unit: unit, item: position, name: name, spells: spells.move(), live: false})
+        loop reach.by_name.len() <= name -> reach.by_name.push([Int]{})
+        reach.by_name[name].push(index)
+        if reach.units[unit].open || jet_driver_reach_has(reach.global, name) -> reach.stack.push(index)
     }
     if words.spells.len() > 0 {
         last: words.spells.len() - 1
-        loop spell in words.spells[last] -> jet_driver_reach_mark(&reach, unit, ids[spell >> 2] * 4 + spell.bit_and(3))
+        loop spell in words.spells[last] -> jet_driver_reach_mark(reach, unit, ids[spell >> 2] * 4 + spell.bit_and(3))
     }
-    jet_driver_reach_drain(&reach)
+    jet_driver_reach_drain(reach)
     unit
 }
 
@@ -278,21 +278,21 @@ jet_driver_reach_admit: fn(reach: &JetDriverReach, loaded: Int, module_name: Str
 // it loads.
 jet_driver_reach_open: fn(reach: &JetDriverReach, module_name: String) {
     if !reach.enabled || reach.open_names.contains(module_name) -> return
-    &reach.open_names.push(module_name)
+    reach.open_names.push(module_name)
     loop unit in 0..<reach.units.len() {
         if reach.units[unit].module_name != module_name || reach.units[unit].open -> next
         reach.units[unit].open = true
         loop index in 0..<reach.items.len() {
-            if reach.items[index].unit == unit -> &reach.stack.push(index)
+            if reach.items[index].unit == unit -> reach.stack.push(index)
         }
     }
-    jet_driver_reach_drain(&reach)
+    jet_driver_reach_drain(reach)
 }
 
 // Defers `scoped`, an import of the module at `unit`.
 jet_driver_reach_defer: fn(reach: &JetDriverReach, unit: Int, scoped: JetDriverScopedImport) {
-    alias: Int.from_u32(name_intern(&reach.names, scoped.declaration.alias).id)
-    &reach.edges.push(JetDriverReachEdge{unit: unit, scoped: scoped, alias: alias, followed: false})
+    alias: Int.from_u32(name_intern(reach.names, scoped.declaration.alias).id)
+    reach.edges.push(JetDriverReachEdge{unit: unit, scoped: scoped, alias: alias, followed: false})
 }
 
 // Whether reached code of the deferring module now spells the edge's alias as
@@ -306,43 +306,43 @@ jet_driver_reach_mark: fn(reach: &JetDriverReach, unit: Int, spell: Int) {
     id: spell >> 2
     kind: spell.bit_and(3)
     if reach.units[unit].open || kind.bit_and(1) == 1 {
-        jet_driver_reach_global(&reach, id)
+        jet_driver_reach_global(reach, id)
     } else {
-        jet_driver_reach_local(&reach, unit, id)
+        jet_driver_reach_local(reach, unit, id)
     }
     if kind == 2 {
-        loop reach.units[unit].heads.len() <= id -> &reach.units[unit].heads.push(false)
+        loop reach.units[unit].heads.len() <= id -> reach.units[unit].heads.push(false)
         reach.units[unit].heads[id] = true
     }
 }
 
 jet_driver_reach_global: fn(reach: &JetDriverReach, id: Int) {
-    loop reach.global.len() <= id -> &reach.global.push(false)
+    loop reach.global.len() <= id -> reach.global.push(false)
     if reach.global[id] -> return
     reach.global[id] = true
     if id >= reach.by_name.len() -> return
-    loop at in 0..<reach.by_name[id].len() -> &reach.stack.push(reach.by_name[id][at])
+    loop at in 0..<reach.by_name[id].len() -> reach.stack.push(reach.by_name[id][at])
 }
 
 jet_driver_reach_local: fn(reach: &JetDriverReach, unit: Int, id: Int) {
-    loop reach.units[unit].local.len() <= id -> &reach.units[unit].local.push(false)
+    loop reach.units[unit].local.len() <= id -> reach.units[unit].local.push(false)
     if reach.units[unit].local[id] -> return
     reach.units[unit].local[id] = true
     if id >= reach.by_name.len() -> return
     loop at in 0..<reach.by_name[id].len() {
         index: reach.by_name[id][at]
-        if reach.items[index].unit == unit -> &reach.stack.push(index)
+        if reach.items[index].unit == unit -> reach.stack.push(index)
     }
 }
 
 // Marks reached every declaration on the stack and what it spells.
 jet_driver_reach_drain: fn(reach: &JetDriverReach) {
     loop reach.stack.len() > 0 {
-        index: &reach.stack.pop() ?? break
+        index: reach.stack.pop() ?? break
         if reach.items[index].live -> next
         reach.items[index].live = true
         unit: reach.items[index].unit
-        loop at in 0..<reach.items[index].spells.len() -> jet_driver_reach_mark(&reach, unit, reach.items[index].spells[at])
+        loop at in 0..<reach.items[index].spells.len() -> jet_driver_reach_mark(reach, unit, reach.items[index].spells[at])
     }
 }
 
@@ -354,23 +354,23 @@ jet_driver_reach_strip: fn(reach: JetDriverReach, modules: &[JetDriverLoadedModu
     dead := [[Bool]]{}
     dead_imports := [[Span]]{}
     loop _ in reach.units {
-        &dead.push([Bool]{})
-        &dead_imports.push([Span]{})
+        dead.push([Bool]{})
+        dead_imports.push([Span]{})
     }
     any := false
     loop edge in reach.edges {
         if edge.followed -> next
         any = true
-        loop dead[edge.unit].len() <= edge.alias -> &dead[edge.unit].push(false)
+        loop dead[edge.unit].len() <= edge.alias -> dead[edge.unit].push(false)
         dead[edge.unit][edge.alias] = true
-        &dead_imports[edge.unit].push(edge.scoped.declaration.span)
+        dead_imports[edge.unit].push(edge.scoped.declaration.span)
     }
     if !any -> return
     gone := [Bool]{}
-    loop _ in reach.items -> &gone.push(false)
+    loop _ in reach.items -> gone.push(false)
     global_gone := [Bool]{}
     local_gone := [[Bool]]{}
-    loop _ in reach.units -> &local_gone.push([Bool]{})
+    loop _ in reach.units -> local_gone.push([Bool]{})
     grew := true
     loop grew {
         grew = false
@@ -390,18 +390,18 @@ jet_driver_reach_strip: fn(reach: JetDriverReach, modules: &[JetDriverLoadedModu
             gone[index] = true
             grew = true
             name: reach.items[index].name
-            loop global_gone.len() <= name -> &global_gone.push(false)
+            loop global_gone.len() <= name -> global_gone.push(false)
             global_gone[name] = true
-            loop local_gone[unit].len() <= name -> &local_gone[unit].push(false)
+            loop local_gone[unit].len() <= name -> local_gone[unit].push(false)
             local_gone[unit][name] = true
         }
     }
     drop := [[Bool]]{}
-    loop _ in reach.units -> &drop.push([Bool]{})
+    loop _ in reach.units -> drop.push([Bool]{})
     loop index in 0..<reach.items.len() {
         if !gone[index] -> next
         unit: reach.items[index].unit
-        loop drop[unit].len() <= reach.items[index].item -> &drop[unit].push(false)
+        loop drop[unit].len() <= reach.items[index].item -> drop[unit].push(false)
         drop[unit][reach.items[index].item] = true
     }
     loop unit in 0..<reach.units.len() {
@@ -409,15 +409,15 @@ jet_driver_reach_strip: fn(reach: JetDriverReach, modules: &[JetDriverLoadedModu
         if dead_imports[unit].len() > 0 {
             imports := [ImportDecl]{}
             loop declaration in modules[loaded].program.imports {
-                if !dead_imports[unit].contains(declaration.span) -> &imports.push(declaration)
+                if !dead_imports[unit].contains(declaration.span) -> imports.push(declaration)
             }
-            modules[loaded].program.imports = ^imports
+            modules[loaded].program.imports = imports.move()
         }
         if drop[unit].len() == 0 -> next
         items := [Item]{}
         loop position in 0..<modules[loaded].program.items.len() {
-            if !jet_driver_reach_has(drop[unit], position) -> &items.push(modules[loaded].program.items[position])
+            if !jet_driver_reach_has(drop[unit], position) -> items.push(modules[loaded].program.items[position])
         }
-        modules[loaded].program.items = ^items
+        modules[loaded].program.items = items.move()
     }
 }

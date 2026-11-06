@@ -79,7 +79,7 @@ jet_cli_perf_read_private: fn(path: String, limit: Int) -[FS.Read, Env, Time.Wai
     loop {
         chunk: reader.read(jet_cli_table_min(65536, limit + 1 - bytes.len())) ?? return Err(jet_cli_read_error("cannot read observation `{path}`"))
         if chunk.len() == 0 -> break
-        loop byte in chunk -> &bytes.push(byte)
+        loop byte in chunk -> bytes.push(byte)
         if bytes.len() > limit -> return Err(jet_cli_read_error("observation exceeds {limit} bytes"))
     }
     after: reader.stat() ?? return Err(jet_cli_read_error("cannot inspect retained observation"))
@@ -119,7 +119,7 @@ jet_cli_perf_live_read: fn(pid: Int) -[FS.Read, Env, Time]> JetCLIPerfLive JetCL
     bytes: jet_cli_perf_read_private(path, 1048576)
     live := jet_cli_live_decode(bytes)
     if live.pid != pid -> return Err(jet_cli_read_error("live snapshot does not belong to process {pid}"))
-    jet_cli_live_bind(&live, stat)
+    jet_cli_live_bind(live, stat)
     // The process must still be the one the snapshot was bound to.
     if jet_cli_perf_process_start(pid) != live.start_id -> return Err(jet_cli_read_error("live snapshot does not belong to process {pid}"))
     now: perf_time.unix_ns() /% 1000000

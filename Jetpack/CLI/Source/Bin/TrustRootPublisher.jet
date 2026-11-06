@@ -68,9 +68,9 @@ TrustRootExportRequest: struct {
     // The requested key files in role order: index, cache, toolchain.
     key_paths: fn(self) -> [(role: String, path: String)] Never! {
         paths := [(role: String, path: String)]{}
-        if self.index_key == .Val(path) -> &paths.push((role: "index", path: path))
-        if self.cache_key == .Val(path) -> &paths.push((role: "cache", path: path))
-        if self.toolchain_key == .Val(path) -> &paths.push((role: "toolchain", path: path))
+        if self.index_key == .Val(path) -> paths.push((role: "index", path: path))
+        if self.cache_key == .Val(path) -> paths.push((role: "cache", path: path))
+        if self.toolchain_key == .Val(path) -> paths.push((role: "toolchain", path: path))
         paths
     }
 }
@@ -94,7 +94,7 @@ cli_trust_root_run: fn(args: [String]) CLIToolError! -[FS, IO]> {
     loop entry in request.key_paths() {
         value: cli_trust_root_read_public_key(entry.path) ?? return Err(CLIToolError.new("read {entry.role} public trust key `{entry.path}`: {err.message}"))
         key: PublicTrustKey.from_nix_line(entry.role, value) ?? return Err(CLIToolError.new("{entry.role} public trust key `{entry.path}`: {err.message()}"))
-        &keys.push(key)
+        keys.push(key)
     }
     bootstrap: if request.bootstrap == {
         .Val(path) -> Val(RootBootstrap.load(path) ?? return Err(CLIToolError.new("load trusted-root bootstrap: {err.message()}")))

@@ -10,21 +10,21 @@ use jet_foundation.[
 
 #Test("JetTrace original content validation precedes claimed id and hash") {
     content := trace_skeleton_content_json(jettrace_sample_skeleton()) ?? panic(err.message)
-    jettrace_test_set(&content, "command", .Null)
-    wrapper := jettrace_artifact(^content) ?? panic(err.message)
-    jettrace_test_set(&wrapper, "trace_id", .Integer("0"))
+    jettrace_test_set(content, "command", .Null)
+    wrapper := jettrace_artifact(content) ?? panic(err.message)
+    jettrace_test_set(wrapper, "trace_id", .Integer("0"))
     assert_eq(jettrace_test_error_bytes(canonical_json_bytes(wrapper)), "content.command is not text")
 }
 #Test("JetTrace wrapper exact keys schema version and lowercase Hex64") {
     content: trace_skeleton_content_json(jettrace_sample_skeleton()) ?? panic(err.message)
     wrapper := jettrace_artifact(content.copy()) ?? panic(err.message)
-    jettrace_test_set(&wrapper, "schema", .String("jet.gc.trace"))
+    jettrace_test_set(wrapper, "schema", .String("jet.gc.trace"))
     assert_eq(jettrace_test_error_bytes(canonical_json_bytes(wrapper)), "unsupported jettrace schema (need jet.trace)")
     wrapper = jettrace_artifact(content.copy()) ?? panic(err.message)
-    jettrace_test_set(&wrapper, "version", .String("1"))
+    jettrace_test_set(wrapper, "version", .String("1"))
     assert_eq(jettrace_test_error_bytes(canonical_json_bytes(wrapper)), "jettrace version is not an integer")
-    wrapper = jettrace_artifact(^content) ?? panic(err.message)
-    jettrace_test_set(&wrapper, "trace_id", .String("A".repeat(64)))
+    wrapper = jettrace_artifact(content) ?? panic(err.message)
+    jettrace_test_set(wrapper, "trace_id", .String("A".repeat(64)))
     assert_eq(jettrace_test_error_bytes(canonical_json_bytes(wrapper)), "jettrace trace_id is not lowercase Hex64")
     assert_eq(jettrace_test_error_bytes("[]\n".bytes()), "jettrace wrapper is not an object")
     assert_eq(jettrace_test_error_bytes("{{}}\n".bytes()), "jettrace wrapper has missing or unknown keys")
@@ -42,13 +42,13 @@ use jet_foundation.[
         }
     }
     skeleton := jettrace_sample_skeleton()
-    &skeleton.samples.push(TraceSample{domain: "cpu", duration_ns: U64{18446744073709551615}, symbol: jettrace_test_symbol()})
+    skeleton.samples.push(TraceSample{domain: "cpu", duration_ns: U64{18446744073709551615}, symbol: jettrace_test_symbol()})
     _: jettrace_test_valid(skeleton)
 }
 #Test("JetTrace task cycles duplicates zero ids and symbol references") {
     skeleton := jettrace_sample_skeleton()
-    &skeleton.tasks.push(jettrace_test_task(U64{1}, U64{2}, "done", ""))
-    &skeleton.tasks.push(jettrace_test_task(U64{2}, U64{1}, "done", ""))
+    skeleton.tasks.push(jettrace_test_task(U64{1}, U64{2}, "done", ""))
+    skeleton.tasks.push(jettrace_test_task(U64{2}, U64{1}, "done", ""))
     assert(jettrace_test_error(skeleton).contains("task 1 has cyclic parent causality"))
     skeleton.tasks[0].parent = U64{0}
     skeleton.tasks[1].id = U64{1}
@@ -57,15 +57,15 @@ use jet_foundation.[
     skeleton.tasks[1].id = U64{0}
     assert(jettrace_test_error(skeleton).contains("id must be greater than zero"))
     skeleton.tasks = [TraceTask]{jettrace_test_task(U64{1}, U64{0}, "blocked", "tcp accept")}
-    &skeleton.io.push(TraceIO{start_ns: U64{1}, end_ns: U64{2}, kind: "tcp", task_id: U64{1}, wait: "tcp accept", symbol: JetSymbolRef{path: "app.jet", name: "wrong"}})
+    skeleton.io.push(TraceIO{start_ns: U64{1}, end_ns: U64{2}, kind: "tcp", task_id: U64{1}, wait: "tcp accept", symbol: JetSymbolRef{path: "app.jet", name: "wrong"}})
     assert(jettrace_test_error(skeleton).contains("symbol does not match its task"))
 }
 jettrace_test_profile_skeleton: fn() -> TraceSkeleton Never! {
     skeleton := jettrace_sample_skeleton()
     skeleton.profile.status = "captured"
     skeleton.profile.coverage = "partial"
-    &skeleton.source_identity.push(SourceIdentity{path: "app.jet", sha256: "a".repeat(64), symbols: [(name: String, kind: String)]{(name: "run", kind: "fn")}})
-    &skeleton.profile.rows.push(TraceProfileRow{clock: "wall", execution_count: None, sample_count: U64{1}, sample_weight: U64{37},
+    skeleton.source_identity.push(SourceIdentity{path: "app.jet", sha256: "a".repeat(64), symbols: [(name: String, kind: String)]{(name: "run", kind: "fn")}})
+    skeleton.profile.rows.push(TraceProfileRow{clock: "wall", execution_count: None, sample_count: U64{1}, sample_weight: U64{37},
         source: TraceProfileSource{path: "app.jet", sha256: "a".repeat(64), start_line: U64{1}, start_column: U64{1}, end_line: U64{3}, end_column: U64{2}}, symbol: jettrace_test_symbol()})
     skeleton
 }
@@ -101,8 +101,8 @@ jettrace_test_profile_skeleton: fn() -> TraceSkeleton Never! {
     skeleton := jettrace_sample_skeleton()
     value: canonical_json_object([CanonicalJSONField]{CanonicalJSONField{key: "proof", value: .Bool(true)}}) ?? panic(err.message)
     digest: canonical_json_sha256(value)
-    &skeleton.receipt_sections.push(TraceReceiptSection{name: "b", type_name: "Evidence", value: value.copy(), digest: digest.copy()})
-    &skeleton.receipt_sections.push(TraceReceiptSection{name: "a", type_name: "Evidence", value: value.copy(), digest: digest.copy()})
+    skeleton.receipt_sections.push(TraceReceiptSection{name: "b", type_name: "Evidence", value: value.copy(), digest: digest.copy()})
+    skeleton.receipt_sections.push(TraceReceiptSection{name: "a", type_name: "Evidence", value: value.copy(), digest: digest.copy()})
     _: jettrace_test_valid(skeleton)
     skeleton.receipt_sections[0].name = "é".repeat(64)
     _: jettrace_test_valid(skeleton)
@@ -127,19 +127,19 @@ jettrace_test_profile_skeleton: fn() -> TraceSkeleton Never! {
     _: jettrace_test_valid(skeleton)
     content := trace_skeleton_content_json(skeleton) ?? panic(err.message)
     hardware := trace_hardware_to_json(skeleton.hardware) ?? panic(err.message)
-    jettrace_test_set(&hardware, "fingerprint", .String("0".repeat(64)))
-    jettrace_test_set(&content, "hardware", ^hardware)
-    assert(jettrace_test_error_bytes(jettrace_test_wrap(^content)).contains("content hash mismatch"))
+    jettrace_test_set(hardware, "fingerprint", .String("0".repeat(64)))
+    jettrace_test_set(content, "hardware", hardware)
+    assert(jettrace_test_error_bytes(jettrace_test_wrap(content)).contains("content hash mismatch"))
     content = trace_skeleton_content_json(skeleton) ?? panic(err.message)
     toolchain := trace_toolchain_to_json(skeleton.toolchain) ?? panic(err.message)
-    jettrace_test_set(&toolchain, "digest", .String("0".repeat(64)))
-    jettrace_test_set(&content, "toolchain", ^toolchain)
-    assert_eq(jettrace_test_error_bytes(jettrace_test_wrap(^content)), "toolchain digest mismatch")
+    jettrace_test_set(toolchain, "digest", .String("0".repeat(64)))
+    jettrace_test_set(content, "toolchain", toolchain)
+    assert_eq(jettrace_test_error_bytes(jettrace_test_wrap(content)), "toolchain digest mismatch")
     content = trace_skeleton_content_json(skeleton) ?? panic(err.message)
     policy := capture_policy_to_json(skeleton.capture_policy) ?? panic(err.message)
-    jettrace_test_set(&policy, "default_exclusions", .Array([CanonicalJSON]{}))
-    jettrace_test_set(&content, "capture_policy", ^policy)
-    assert(jettrace_test_error_bytes(jettrace_test_wrap(^content)).contains("does not match the default exclusions"))
+    jettrace_test_set(policy, "default_exclusions", .Array([CanonicalJSON]{}))
+    jettrace_test_set(content, "capture_policy", policy)
+    assert(jettrace_test_error_bytes(jettrace_test_wrap(content)).contains("does not match the default exclusions"))
 }
 #Test("JetTrace game projection retains every typed frame and draw identity") {
     function: jet_devtools_function_identity_new("fn:draw", "draw", jet_devtools_source_span_new("source:scene", "scene.jet", U32{2}, U32{3}, U32{4}, U32{5}))
@@ -158,7 +158,7 @@ jettrace_test_profile_skeleton: fn() -> TraceSkeleton Never! {
     assert_eq(projected.draws[0].resource_id, Val("resource"))
     assert_eq(projected.draws[0].function.source.start_line, U64{2})
     skeleton := jettrace_sample_skeleton()
-    _: trace_skeleton_add_game_devtools_bodies(&skeleton, bodies) ?? panic(err.message)
+    _: trace_skeleton_add_game_devtools_bodies(skeleton, bodies) ?? panic(err.message)
     _: jettrace_test_valid(skeleton)
     skeleton.game_frames[0].scene = ""
     assert(jettrace_test_error(skeleton).contains("scene is empty"))

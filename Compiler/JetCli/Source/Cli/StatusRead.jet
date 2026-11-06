@@ -60,7 +60,7 @@ jet_cli_status_from_tree: fn(tree: Dyn) -> JetCLIStatusValue JetCLIReadError! {
         .Bytes(_) | .DateTime(_) -> jet_cli_status_text(tree.to_text() ?? panic("Bytes and DateTime always have a text form"))
         .Array(values) -> {
             items := [JetCLIStatusValue]{}
-            loop value in values -> &items.push(jet_cli_status_from_tree(value))
+            loop value in values -> items.push(jet_cli_status_from_tree(value))
             jet_cli_status_array(items)
         }
         .Object(values) -> {
@@ -74,7 +74,7 @@ jet_cli_status_from_tree: fn(tree: Dyn) -> JetCLIStatusValue JetCLIReadError! {
                     return Err(jet_cli_read_error("duplicate status field `{entry.key}`"))
                 }
                 names[entry.key] = true
-                &fields.push(jet_cli_status_field(entry.key, jet_cli_status_from_tree(entry.value)))
+                fields.push(jet_cli_status_field(entry.key, jet_cli_status_from_tree(entry.value)))
             }
             jet_cli_status_object(fields)
         }

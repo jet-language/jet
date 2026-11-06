@@ -5,7 +5,7 @@
 // run time and at compile time.
 label_order: fn(pairs: [(key: String, index: Int)]) -> [(key: String, index: Int)] {
     sorted := pairs.copy()
-    &sorted.sort()
+    sorted.sort()
     sorted
 }
 
@@ -19,11 +19,11 @@ PAIRS: comptime { label_order([(key: "c", index: 0), (key: "a", index: 2), (key:
 
 run: fn() {
     pairs := [(key: "c", index: 0), (key: "a", index: 2), (key: "b", index: 1), (key: "a", index: 1)]
-    &pairs.sort()
+    pairs.sort()
     show("sort", pairs)
-    &pairs.sort_desc()
+    pairs.sort_desc()
     show("sort_desc", pairs)
-    &pairs.sort_by((left, right) -> (left.key <=> right.key).then(left.index <=> right.index))
+    pairs.sort_by((left, right) -> (left.key <=> right.key).then(left.index <=> right.index))
     show("by key", pairs)
     show("comptime", PAIRS)
 

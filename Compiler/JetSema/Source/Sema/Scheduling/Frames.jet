@@ -65,7 +65,7 @@ sema_frame_core_call_operation: fn(record: CoreCallRecord, name: String, args: [
     loop access in record.frame_accesses {
         if access.argument < 0 || access.argument >= args.len() -> next
         identity: sema_frame_resource_identity(args[access.argument].expr) ?? next
-        &accesses.push(ResourceAccess{
+        accesses.push(ResourceAccess{
             resource: identity,
             mode: sema_frame_core_access_mode(access.mode),
             region: ResourceRegion.Whole,
@@ -114,7 +114,7 @@ sema_frame_checked_call_operation: fn(name: String, args: [CallArg], signature_a
             parameters: signature_accesses
             if index < parameters.len() -> convention = parameters[index]
         }
-        &accesses.push(ResourceAccess{
+        accesses.push(ResourceAccess{
             resource: identity,
             mode: sema_frame_access_convention(convention),
             region: ResourceRegion.Whole,
@@ -261,13 +261,13 @@ sema_frame_schedule_build: fn(operations: [FrameOperation]) -> SemaFrameSchedule
                     unknown_alias := left_access.resource == ResourceIdentity.Unknown || right_access.resource == ResourceIdentity.Unknown
                     conflict := sema_frame_mode_writes(left_access.mode) || sema_frame_mode_writes(right_access.mode)
                     if unknown_alias {
-                        &conservative.push("{left.name} and {right.name} keep source order because aliasing is unknown")
-                        if !conflict -> sema_frame_push_dependency(&dependencies, &dependency_keys, left_index, right_index, "unknown resource", "unknown aliasing")
+                        conservative.push("{left.name} and {right.name} keep source order because aliasing is unknown")
+                        if !conflict -> sema_frame_push_dependency(dependencies, dependency_keys, left_index, right_index, "unknown resource", "unknown aliasing")
                     }
                     if conflict {
                         resource := if unknown_alias -> "unknown resource" else -> sema_frame_resource_label(left_access.resource)
                         reason := "{left.name} {sema_frame_mode_name(left_access.mode)} -> {right.name} {sema_frame_mode_name(right_access.mode)}"
-                        sema_frame_push_dependency(&dependencies, &dependency_keys, left_index, right_index, resource, reason)
+                        sema_frame_push_dependency(dependencies, dependency_keys, left_index, right_index, resource, reason)
                     }
                     if left_access.resource == {
                         .Named(resource) -> {
@@ -276,7 +276,7 @@ sema_frame_schedule_build: fn(operations: [FrameOperation]) -> SemaFrameSchedule
                                 right_layout: right_access.layout ?? ResourceLayout{size: 0, align: 0, layout: "", device: ""}
                                 if left_layout.device != "" && right_layout.device != "" && left_layout.device != right_layout.device {
                                     transfer := FrameTransfer{before: left_index, after: right_index, resource: resource, from_device: left_layout.device, to_device: right_layout.device}
-                                    if !sema_frame_has_transfer(transfers, transfer) -> &transfers.push(transfer)
+                                    if !sema_frame_has_transfer(transfers, transfer) -> transfers.push(transfer)
                                 }
                             }
                         }
@@ -284,15 +284,15 @@ sema_frame_schedule_build: fn(operations: [FrameOperation]) -> SemaFrameSchedule
                     }
                 }
             }
-            if left.external_effect || right.external_effect -> sema_frame_push_dependency(&dependencies, &dependency_keys, left_index, right_index, "external effect", "visible external effects preserve source order")
+            if left.external_effect || right.external_effect -> sema_frame_push_dependency(dependencies, dependency_keys, left_index, right_index, "external effect", "visible external effects preserve source order")
         }
     }
-    async_error := sema_frame_check_async_uses(operations, events, &dependencies, &dependency_keys)
+    async_error := sema_frame_check_async_uses(operations, events, dependencies, dependency_keys)
     if async_error != None -> return SemaFrameScheduleBuild{schedule: None, error: async_error}
     retentions := sema_frame_retentions(operations, events)
-    reuse := sema_frame_reuse(operations, events, &conservative)
-    sema_frame_sort_dependencies(&dependencies)
-    sema_frame_sort_transfers(&transfers)
+    reuse := sema_frame_reuse(operations, events, conservative)
+    sema_frame_sort_dependencies(dependencies)
+    sema_frame_sort_transfers(transfers)
     conservative = sema_frame_strings_sorted_unique(conservative)
     SemaFrameScheduleBuild{
         schedule: Val(FrameSchedule{operations: operations, dependencies: dependencies, transfers: transfers, reuse: reuse, retentions: retentions, conservative: conservative}),
@@ -309,10 +309,10 @@ sema_frame_schedule_produce: fn(operations: [FrameOperation], environment: SemaS
         module_path := graph.modules[module_index].module_path
         schedule: built.schedule ?? FrameSchedule{operations: [FrameOperation]{}, dependencies: [FrameDependency]{}, transfers: [FrameTransfer]{}, reuse: [FrameReuse]{}, retentions: [FrameRetention]{}, conservative: [String]{}}
         premises := [String]{}
-        loop operation in schedule.operations -> &premises.push("{operation.name}@{operation.source_index}")
+        loop operation in schedule.operations -> premises.push("{operation.name}@{operation.source_index}")
         identity := derivation_identity(module_path, "", "", source_bytes)
         record := derivation_record("{module_path}::on_frame@{lambda_start}", "checked frame resource schedule", "jet-sema", DerivationMethod.StaticDerivation, "checked-frame-accesses", premises, identity)
-        record = derivation_record_with_payload(^record, DerivationPayload.FrameSchedule{schedule: schedule})
+        record = derivation_record_with_payload(record, DerivationPayload.FrameSchedule{schedule: schedule})
         return SemaFrameScheduleFacts{
             schedule: Val(schedule),
             explanation: Val(sema_frame_schedule_explain(schedule)),
@@ -368,7 +368,7 @@ sema_frame_schedule_events: fn(operations: [FrameOperation]) -> FrameEventsResul
             .Event(token) -> {
                 previous := sema_frame_event_index(events, token)
                 if previous >= 0 -> return FrameEventsResult{events: events, error: Val("operation {index} is invalid: completion token `{token}` has duplicate events at {previous} and {index}")}
-                &events.push(FrameEventIndex{token: token, index: index})
+                events.push(FrameEventIndex{token: token, index: index})
             }
             else -> {}
         }
@@ -404,11 +404,11 @@ sema_frame_check_async_uses: fn(operations: [FrameOperation], events: [FrameEven
             .Pending(token) -> {
                 event_index := sema_frame_event_index(events, token)
                 if event_index < 0 -> return Val("operation `{operation.name}` has no completion event `{token}`")
-                sema_frame_push_dependency(&dependencies, &keys, index, event_index, "completion", "{operation.name} completes at event {token}")
+                sema_frame_push_dependency(dependencies, keys, index, event_index, "completion", "{operation.name} completes at event {token}")
                 loop later_index in event_index + 1..<operations.len() {
                     later_operation := operations[later_index]
                     loop access in later_operation.accesses {
-                        if sema_frame_operation_overlaps(operation, access) -> sema_frame_push_dependency(&dependencies, &keys, event_index, later_index, "completion", "event {token} releases submitted owners")
+                        if sema_frame_operation_overlaps(operation, access) -> sema_frame_push_dependency(dependencies, keys, event_index, later_index, "completion", "event {token} releases submitted owners")
                     }
                 }
             }
@@ -440,7 +440,7 @@ sema_frame_retentions: fn(operations: [FrameOperation], events: [FrameEventIndex
         if operation.completion == {
             .Pending(token) -> {
                 completed := sema_frame_event_index(events, token) > index
-                loop access in operation.accesses -> &retentions.push(FrameRetention{resource: sema_frame_resource_label(access.resource), operation: index, owner: operation.name, completion_token: Val(token), completed: completed})
+                loop access in operation.accesses -> retentions.push(FrameRetention{resource: sema_frame_resource_label(access.resource), operation: index, owner: operation.name, completion_token: Val(token), completed: completed})
             }
             else -> {}
         }
@@ -456,13 +456,13 @@ sema_frame_reuse: fn(operations: [FrameOperation], events: [FrameEventIndex], co
                 .Named(resource) -> {
                     use_index := sema_frame_use_index(uses, resource)
                     if {
-                        use_index < 0 -> &uses.push(FrameUse{resource: resource, first: index, last: index, temporary: access.temporary, layouts: [ResourceLayout?]{access.layout}})
+                        use_index < 0 -> uses.push(FrameUse{resource: resource, first: index, last: index, temporary: access.temporary, layouts: [ResourceLayout?]{access.layout}})
                         else -> {
                             usage := uses[use_index]
                             if index < usage.first -> usage.first = index
                             if index > usage.last -> usage.last = index
                             usage.temporary = usage.temporary && access.temporary
-                            &usage.layouts.push(access.layout)
+                            usage.layouts.push(access.layout)
                             uses[use_index] = usage
                         }
                     }
@@ -471,10 +471,10 @@ sema_frame_reuse: fn(operations: [FrameOperation], events: [FrameEventIndex], co
             }
         }
     }
-    sema_frame_sort_uses(&uses)
+    sema_frame_sort_uses(uses)
     candidates := [FrameUse]{}
     loop usage in uses {
-        if usage.temporary -> &candidates.push(usage)
+        if usage.temporary -> candidates.push(usage)
     }
     reuse := [FrameReuse]{}
     loop right in candidates {
@@ -515,10 +515,10 @@ sema_frame_reuse: fn(operations: [FrameOperation], events: [FrameEventIndex], co
                 }
             }
         }
-        if !legal -> &conservative.push("{left.resource} was not reused for {right.resource}: {reason_text}")
-        &reuse.push(FrameReuse{previous_resource: left.resource, next_resource: right.resource, previous_last_use: left.last, next_first_use: right.first, legal: legal, reason: reason_text})
+        if !legal -> conservative.push("{left.resource} was not reused for {right.resource}: {reason_text}")
+        reuse.push(FrameReuse{previous_resource: left.resource, next_resource: right.resource, previous_last_use: left.last, next_first_use: right.first, legal: legal, reason: reason_text})
     }
-    sema_frame_sort_reuse(&reuse)
+    sema_frame_sort_reuse(reuse)
     reuse
 }
 
@@ -609,8 +609,8 @@ sema_frame_push_dependency: fn(dependencies: &[FrameDependency], keys: &[FrameDe
     loop key in keys {
         if key.before == before && key.after == after && key.resource == resource -> return
     }
-    &dependencies.push(FrameDependency{before: before, after: after, resource: resource, reason: reason})
-    &keys.push(FrameDependencyKey{before: before, after: after, resource: resource})
+    dependencies.push(FrameDependency{before: before, after: after, resource: resource, reason: reason})
+    keys.push(FrameDependencyKey{before: before, after: after, resource: resource})
 }
 
 sema_frame_has_transfer: fn(transfers: [FrameTransfer], wanted: FrameTransfer) -> Bool Never! {
@@ -703,7 +703,7 @@ sema_frame_strings_sorted_unique: fn(values: [String]) -> [String] Never! {
     }
     output := [String]{}
     loop value in sorted {
-        if output.len() == 0 || output[output.len() - 1] != value -> &output.push(value)
+        if output.len() == 0 || output[output.len() - 1] != value -> output.push(value)
     }
     output
 }
@@ -716,24 +716,24 @@ sema_frame_schedule_explain: fn(schedule: FrameSchedule) -> String Never! {
     lines := [String]{"Why did these operations run in order?"}
     loop operation in schedule.operations {
         accesses := [String]{}
-        loop access in operation.accesses -> &accesses.push(sema_frame_explain_access(access))
+        loop access in operation.accesses -> accesses.push(sema_frame_explain_access(access))
         description := if accesses.len() == 0 -> "no resource access" else -> accesses.join(", ")
-        &lines.push("  {operation.name} {description}")
+        lines.push("  {operation.name} {description}")
     }
     loop dependency in schedule.dependencies {
-        &lines.push("  dependency: {schedule.operations[dependency.before].name} -> {schedule.operations[dependency.after].name} ({dependency.reason})")
+        lines.push("  dependency: {schedule.operations[dependency.before].name} -> {schedule.operations[dependency.after].name} ({dependency.reason})")
     }
-    loop transfer in schedule.transfers -> &lines.push("  transfer: {transfer.resource} {transfer.from_device} -> {transfer.to_device}")
+    loop transfer in schedule.transfers -> lines.push("  transfer: {transfer.resource} {transfer.from_device} -> {transfer.to_device}")
     loop reuse in schedule.reuse {
         verb := if reuse.legal -> "reuse" else -> "reuse refused"
-        &lines.push("  {verb}: {reuse.previous_resource} -> {reuse.next_resource} ({reuse.reason})")
+        lines.push("  {verb}: {reuse.previous_resource} -> {reuse.next_resource} ({reuse.reason})")
     }
     loop retention in schedule.retentions {
         state := if retention.completed -> "completed" else -> "still retained"
         token := retention.completion_token ?? "return"
-        &lines.push("  retention: {retention.resource} owner {retention.owner} until {token} ({state})")
+        lines.push("  retention: {retention.resource} owner {retention.owner} until {token} ({state})")
     }
-    loop reason in schedule.conservative -> &lines.push("  conservative: {reason}")
-    if schedule.dependencies.len() == 0 -> &lines.push("  no conflicting resource accesses")
+    loop reason in schedule.conservative -> lines.push("  conservative: {reason}")
+    if schedule.dependencies.len() == 0 -> lines.push("  no conflicting resource accesses")
     lines.join("\n")
 }

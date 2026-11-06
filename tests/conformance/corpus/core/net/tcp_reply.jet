@@ -7,7 +7,7 @@ run: fn() {
     client: net.tcp_connect(address) ?? panic("connect")
     server: net.tcp_accept(listener) ?? panic("accept")
     print((() -> {
-        net.tcp_reply(^server, "200 OK", "reply") ?? panic("reply")
+        net.tcp_reply(server, "200 OK", "reply") ?? panic("reply")
         true
     })())
     response: client.read_text(128) ?? panic("read")

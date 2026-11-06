@@ -12,18 +12,18 @@ use {
 
 lsp_semantic_hover: fn(symbol: SemanticSymbol, requested_path: String) -> String Never! {
     parts := [String]{}
-    if symbol.module_path != requested_path && symbol.kind == .Function -> &parts.push("from module `{symbol.module_path}`\n\n")
-    if (symbol.kind == .Type || symbol.kind == .Member) && symbol.qualified_name != symbol.name -> &parts.push("`{symbol.qualified_name}`\n\n")
-    if !symbol.summary.is_empty() -> &parts.push("{symbol.summary}\n\n---\n\n")
-    &parts.push(symbol.signature.copy())
-    loop example in symbol.examples -> &parts.push("\n\nExample: `{example}`")
+    if symbol.module_path != requested_path && symbol.kind == .Function -> parts.push("from module `{symbol.module_path}`\n\n")
+    if (symbol.kind == .Type || symbol.kind == .Member) && symbol.qualified_name != symbol.name -> parts.push("`{symbol.qualified_name}`\n\n")
+    if !symbol.summary.is_empty() -> parts.push("{symbol.summary}\n\n---\n\n")
+    parts.push(symbol.signature.copy())
+    loop example in symbol.examples -> parts.push("\n\nExample: `{example}`")
     parts.join("")
 }
 
 lsp_append_checked_signature: fn(hover: &String, checked_signature: String) Never! {
     lines := [String]{}
     loop line in checked_signature.lines() {
-        if !line.starts_with("failure: ") -> &lines.push(line.copy())
+        if !line.starts_with("failure: ") -> lines.push(line.copy())
     }
     checked: lines.join("\n")
     if !checked.is_empty() -> hover += "\n\n{checked}"
@@ -58,7 +58,7 @@ lsp_compute_hover: fn(db: SymbolDB, tokens: [Token], src: String, path: String, 
         hover := lsp_semantic_hover(symbol, path)
         if symbol.kind == .Function {
             if symbol.span == .Val(span) {
-                if db.hover_at(path, span.start) == .Val(checked) -> lsp_append_checked_signature(&hover, checked[0].text)
+                if db.hover_at(path, span.start) == .Val(checked) -> lsp_append_checked_signature(hover, checked[0].text)
             }
         }
         if lsp_derivation_for_symbol(db, symbol) == .Val(record) -> hover += "\n\n---\n\n{lsp_reasoning_summary(record[0])}"

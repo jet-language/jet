@@ -73,16 +73,16 @@ run: fn() {
     undo := [String]{}
     redo := [String]{}
     previous: draft.get()
-    &undo.push(previous)
-    &draft.set("Edited — café, résumé, 中文")
-    &selected.set(1)
-    &mode.set("light")
-    &settings.set("open")
+    undo.push(previous)
+    draft.set("Edited — café, résumé, 中文")
+    selected.set(1)
+    mode.set("light")
+    settings.set("open")
     print("edited renders: {backend.render_count()}")
     print("theme/settings: light / open")
-    restored: &undo.pop() ?? ""
-    &redo.push(draft.get())
-    &draft.set(restored)
+    restored: undo.pop() ?? ""
+    redo.push(draft.get())
+    draft.set(restored)
     print("undo restored: {draft.get() == loaded}")
     print("redo depth: {redo.len()}")
 

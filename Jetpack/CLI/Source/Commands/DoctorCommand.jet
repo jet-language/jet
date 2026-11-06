@@ -7,7 +7,7 @@ cli_cmd_doctor: fn(verification: &StoreVerification, theme: Theme, parsed: CLIPa
         return EXIT_USAGE
     }
     project: sys.current_dir() ?? "."
-    report: DoctorReport.run(&verification, project, parsed.flags.online && !parsed.flags.offline)
+    report: DoctorReport.run(verification, project, parsed.flags.online && !parsed.flags.offline)
     if parsed.flags.json {
         print(report.to_json() ?? return cli_status_encoding_error(err))
     } else {

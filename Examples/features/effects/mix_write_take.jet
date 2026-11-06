@@ -10,8 +10,8 @@ Item: struct {
     label: String
 }
 
-// &Player = edit in place; ^Item = consume/take ownership
-equip: fn(p: &Player, item: ^Item) {
+// &Player = edit in place; &&Item = consume/take ownership
+equip: fn(p: &Player, item: &&Item) {
     p.hp += item.bonus
     print("equipped {item.label}, hp now {p.hp}")
 }
@@ -19,7 +19,7 @@ equip: fn(p: &Player, item: ^Item) {
 run: fn() {
     hero := Player{hp: 50, name: "Rex"}
     sword: Item{bonus: 20, label: "iron sword"}
-    equip(&hero, ^sword)  // & mirrors write; ^ mirrors take
+    equip(hero, sword)  // & mirrors write; ^ mirrors take
     // sword is consumed; hero.hp is updated
     print(hero.name)
     print(hero.hp)

@@ -162,7 +162,7 @@ JET_CLI_RESERVED_SIGILS: [JetCLIReservedEntry]{
     {spelling: ":", kind: "sigil", note: "bind an immutable local"},
     {spelling: ":=", kind: "sigil", note: "bind a mutable local"},
     {spelling: "&", kind: "sigil", note: "borrow for write"},
-    {spelling: "^", kind: "sigil", note: "take/move ownership"},
+    {spelling: "&&", kind: "sigil", note: "take ownership"},
     {spelling: "@", kind: "sigil", note: "prefix `@` marks a live link"},
     {spelling: "$", kind: "sigil", note: "compiler fact: `T.$layout`, `$build.os`, `$holds:`"},
     {spelling: "<:", kind: "sigil", note: "open a statement-expansion fence"},
@@ -231,7 +231,7 @@ jet_cli_digest_section: fn(title: String, body: String) -> String Never! {
 jet_cli_digest_list: fn(values: [String]) -> String Never! {
     unique := [String]{}
     loop value in values {
-        if !unique.contains(value) -> &unique.push(value)
+        if !unique.contains(value) -> unique.push(value)
     }
     rows: loop value in unique -> "- {value}"
     rows.join("\n")
@@ -251,14 +251,14 @@ jet_cli_digest_one_line: fn(value: String) -> String Never! {
         space: code == 32 || (code >= 9 && code <= 13)
         if {
             space && start >= 0 -> {
-                &words.push(String.from_bytes(bytes[start..<index]) ?? "")
+                words.push(String.from_bytes(bytes[start..<index]) ?? "")
                 start = -1
             }
             !space && start < 0 -> start = index
             else -> {}
         }
     }
-    if start >= 0 -> &words.push(String.from_bytes(bytes[start..<bytes.len()]) ?? "")
+    if start >= 0 -> words.push(String.from_bytes(bytes[start..<bytes.len()]) ?? "")
     words.join(" ")
 }
 
@@ -268,24 +268,24 @@ jet_cli_digest_marker_declaration: fn(rule: TAppliedRule) -> String Never! {
     fields := [String]{}
     loop param in rule.signature.params {
         default: if param.default_source == .Val(value) -> "{{{value}}}" else -> ""
-        &fields.push("{param.name}: {param.source_type}{default}")
+        fields.push("{param.name}: {param.source_type}{default}")
     }
     if rule.signature.variadic_source_type == .Val(source_type) {
         variadic_name: rule.signature.variadic_name ?? "values"
-        &fields.push("{variadic_name}: [{source_type}]")
+        fields.push("{variadic_name}: [{source_type}]")
     }
     sites: loop site in rule.sites -> ".{site}"
     settings := [String]{"sites: [{sites.join(", ")}]"}
-    if rule.repeatable -> &settings.push("repeatable: true")
-    if rule.owns_menu -> &settings.push("owns_menu: true")
-    if rule.inherits -> &settings.push("inherits: true")
-    if rule.resolution != "SiteBound" -> &settings.push("resolution: .{rule.resolution}")
+    if rule.repeatable -> settings.push("repeatable: true")
+    if rule.owns_menu -> settings.push("owns_menu: true")
+    if rule.inherits -> settings.push("inherits: true")
+    if rule.resolution != "SiteBound" -> settings.push("resolution: .{rule.resolution}")
     if rule.policy_scopes.len() > 0 {
         scopes: loop scope in rule.policy_scopes -> ".{scope}"
-        &settings.push("scopes: [{scopes.join(", ")}]")
+        settings.push("scopes: [{scopes.join(", ")}]")
     }
-    if rule.companion_site == .Val(companion) -> &settings.push("companion: [{companion.rule}, .{companion.site}]")
-    &fields.push("impl Marker {{ {settings.join("; ")} }}")
+    if rule.companion_site == .Val(companion) -> settings.push("companion: [{companion.rule}, .{companion.site}]")
+    fields.push("impl Marker {{ {settings.join("; ")} }}")
     "{rule.name}: struct {{ {fields.join(", ")} }}"
 }
 
@@ -338,7 +338,7 @@ jet_cli_digest_core_module_text: fn() -> String Never! {
     loop module_row in CORE_MODULE_EXPORTS {
         unique := [String]{}
         loop item in module_row.members {
-            if !unique.contains(item) -> &unique.push(item)
+            if !unique.contains(item) -> unique.push(item)
         }
         rendered: if unique.len() == 0 -> "(no indexed item)" else -> unique.join(", ")
         out = "{out}\n{module_row.module_name}\t{rendered}"
@@ -380,7 +380,7 @@ jet_cli_llm_digest: fn() -> String Never! {
         "Control: `if condition {{ ... }} else {{ ... }}`; loops use `loop name in source {{ ... }}`, and a collecting loop yields a list with `loop name in source -> value`; exit with `break` and advance with `next`.",
         "Construction: use `Type{{ field: value }}`; list literals use `[T]{{ value1, value2 }}`.",
         "Calls and member access use `name(args)` and `value.member(args)`. Core imports use `use alias: core.module`, and two or more imports use one `use {{ … }}` block with a row per line.",
-        "Ownership is safe by default. `&T` writes, `^T` moves, and `value.copy()` copies. Expert unsafe code needs `#Unsafe(\"reason\")`.",
+        "Ownership is safe by default. `&T` writes, `&&T` takes, and `value.copy()` copies. Expert unsafe code needs `#Unsafe(\"reason\")`.",
     }
     core_rules_body: core_rules_lines.join("\n")
     marker_body: "User marker spelling is `#Name(arguments)`; rows below are registry declarations.\n\n```text\n{marker_text}\n```"
@@ -466,7 +466,7 @@ jet_cli_digest_slices: fn(digest: String) -> [JetCLIDigestSlice] Never! {
         start: if index == 0 -> 0 else -> starts[index]
         end: if index + 1 < starts.len() -> starts[index + 1] else -> digest.len()
         if topic != "core" {
-            &slices.push(JetCLIDigestSlice{topic: topic, bytes: jet_cli_inspect_slice(digest, start, end)})
+            slices.push(JetCLIDigestSlice{topic: topic, bytes: jet_cli_inspect_slice(digest, start, end)})
             next
         }
         header: "module\titems\n"
@@ -476,7 +476,7 @@ jet_cli_digest_slices: fn(digest: String) -> [JetCLIDigestSlice] Never! {
         offset := header_end
         loop line in jet_cli_inspect_slice(digest, header_end, end).split("\n") {
             if offset >= end -> break
-            if line.starts_with("core.") -> &rows.push(offset)
+            if line.starts_with("core.") -> rows.push(offset)
             offset += line.len() + 1
         }
         loop (row_index, row_start) in rows {
@@ -484,7 +484,7 @@ jet_cli_digest_slices: fn(digest: String) -> [JetCLIDigestSlice] Never! {
             tab: jet_cli_inspect_find(line, "\t", 0) ?? panic("core digest row lost module name")
             slice_start: if row_index == 0 -> start else -> row_start
             slice_end: if row_index + 1 < rows.len() -> rows[row_index + 1] else -> end
-            &slices.push(JetCLIDigestSlice{topic: jet_cli_inspect_slice(line, 0, tab), bytes: jet_cli_inspect_slice(digest, slice_start, slice_end)})
+            slices.push(JetCLIDigestSlice{topic: jet_cli_inspect_slice(line, 0, tab), bytes: jet_cli_inspect_slice(digest, slice_start, slice_end)})
         }
     }
     slices
@@ -503,7 +503,7 @@ jet_cli_inspect_edit_distance: fn(left: String, right: String) -> Int Never! {
             best := previous[j] + cost
             if previous[j + 1] + 1 < best -> best = previous[j + 1] + 1
             if current[j] + 1 < best -> best = current[j] + 1
-            &current.push(best)
+            current.push(best)
         }
         previous = current
     }
@@ -596,9 +596,9 @@ jet_cli_find_engine_binary_for: fn(name: String, jet: String) -[FS, Env]> String
         if jet_cli_named_engine() == .Val(named) -> return jet_cli_engine_candidate(named)
     }
     dirs := [String]{}
-    if jet_cli_parent(jet) == .Val(directory) -> &dirs.push(directory)
+    if jet_cli_parent(jet) == .Val(directory) -> dirs.push(directory)
     if cli_sys.get("PATH") == .Val(path) {
-        loop directory in path.split(":") -> &dirs.push(if directory == "" -> "." else -> directory)
+        loop directory in path.split(":") -> dirs.push(if directory == "" -> "." else -> directory)
     }
     loop directory in dirs {
         if jet_cli_engine_candidate(jet_cli_authority_path(directory, name)) == .Val(found) -> return Val(found)
@@ -669,7 +669,7 @@ jet_cli_engine_dispatch: fn(engine: String, verb: String, argv: [String]) -[Env,
         return jet_cli_version_skew(engine, JET_CLI_VERSION, reply)
     }
     command := [String]{bin}
-    loop argument in argv -> &command.push(argument)
+    loop argument in argv -> command.push(argument)
     spec: cli_process.cmd(command).env(JET_CLI_ROOT_ENGINE_DISPATCH_PID_ENV, "{cli_process.current_pid()}").stdin(.Inherit).stdout(.Inherit).stderr(.Inherit)
     receipt: spec.run() ?? return jet_cli_report_output("", "E2105", "couldn't run `{bin}`: {jet_cli_io_error_text(err)}", jet_cli_why("E2105"), "correct the named problem, then run the command again", false, JET_DRIVER_EXIT_USER_ERROR)
     exit_code := receipt.code
@@ -700,7 +700,7 @@ jet_cli_find_external: fn(name: String) -[FS, Env]> String? Never! {
 // stdio; its exit code is this run's (a signal-ended one exits 0).
 jet_cli_external_run: fn(bin: String, args: [String]) -[Exec, Time.Wait]> JetDriverVerbOutput Never! {
     command := [String]{bin}
-    loop argument in args -> &command.push(argument)
+    loop argument in args -> command.push(argument)
     receipt: cli_process.cmd(command).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).run() ?? return jet_cli_report_output("", "E2105", "couldn't run `{bin}`: {jet_cli_io_error_text(err)}", jet_cli_why("E2105"), "correct the named problem, then run the command again", false, JET_DRIVER_EXIT_USER_ERROR)
     exit_code: if receipt.signal != None -> 0 else -> receipt.code
     JetDriverVerbOutput{stdout: "", stderr: "", exit_code: exit_code}
@@ -743,7 +743,7 @@ jet_cli_inspect_first_positional: fn(args: [String]) -> String? Never! {
 jet_cli_inspect_positionals: fn(args: [String]) -> [String] Never! {
     found := [String]{}
     loop argument in args {
-        if !argument.starts_with("-") -> &found.push(argument)
+        if !argument.starts_with("-") -> found.push(argument)
     }
     found
 }
@@ -768,7 +768,7 @@ JetCLIInspectRoot: enum {
 // direct, uncolored user error even in machine output mode.
 jet_cli_require_inspect_root: fn(start: String, hint: String, color: Bool) -[FS, Env]> JetCLIInspectRoot Never! {
     cache := WorkspaceDeclarationCache.new()
-    if jet_cli_find_package_root_checked(&cache, start) == {
+    if jet_cli_find_package_root_checked(cache, start) == {
         .Ok(found) -> {
             if found == .Val(root) -> return JetCLIInspectRoot.Root{path: root}
         }
@@ -960,7 +960,7 @@ jet_cli_bind: fn(args: [String], color: Bool) -[FS, Env, Time]> JetCLIPlan Never
                 cwd: cli_files.cwd() ?? "."
                 absolute: if job.input_path.starts_with("/") -> job.input_path else -> jet_cli_entry_join(cwd, job.input_path)
                 cache := WorkspaceDeclarationCache.new()
-                root: jet_cli_selected_project_root(&cache, jet_cli_parent(absolute) ?? ".") ?? return jet_cli_done("", diagnostic_render_all(job.input_path, job.input, [Diagnostic]{err.diagnostic}, false), JET_DRIVER_EXIT_USER_ERROR)
+                root: jet_cli_selected_project_root(cache, jet_cli_parent(absolute) ?? ".") ?? return jet_cli_done("", diagnostic_render_all(job.input_path, job.input, [Diagnostic]{err.diagnostic}, false), JET_DRIVER_EXIT_USER_ERROR)
                 return jet_cli_data_bind_finish(job, root)
             }
         }

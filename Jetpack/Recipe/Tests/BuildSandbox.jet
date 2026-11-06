@@ -78,7 +78,7 @@ recipe_sandbox_test_exec: fn(tool: String, args: [String]) -> BuildRecipe {
     command: "if printf hostile > '{marker}'; then exit 41; fi && printf ok > \"$JET_BUILD_OUTPUT/ok\""
     attempt := BuildAttempt.new("logged-sandbox", "logged-sandbox", "test", "recipe", "source")
     status: foundation_native_sandbox_status()
-    if recipe_run_logged(recipe_sandbox_test_exec("sh", [String]{"-c", command}), ctx, None, &attempt) == {
+    if recipe_run_logged(recipe_sandbox_test_exec("sh", [String]{"-c", command}), ctx, None, attempt) == {
         .Ok(report) -> {
             assert(status.available, "unavailable sandbox must refuse")
             assert_eq(report.sandbox_class, "linux-bwrap")

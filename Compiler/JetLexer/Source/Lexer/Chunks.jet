@@ -83,16 +83,16 @@ lex_generated_threads: fn(source: [U8], threads: CompilerThreads) -> LexedThread
 lexed_threads_single: fn(source: [U8], config_surface: Bool, allow_reserved_identifiers: Bool) -> LexedThreads {
     lexed := lex_with_terminators(source, config_surface, allow_reserved_identifiers)
     count: lexed.tokens.len()
-    LexedThreads{lexed: ^lexed, line_starts: lexer_line_starts(source, 0, source.len(), true), runs: [Int]{0, count}}
+    LexedThreads{lexed: lexed.move(), line_starts: lexer_line_starts(source, 0, source.len(), true), runs: [Int]{0, count}}
 }
 
 // The starts of the lines that begin inside `source[from..<to]`: line 1 when
 // `first` (the range starts the source), then one past every newline.
 lexer_line_starts: fn(source: [U8], from: Int, to: Int, first: Bool) -> [Int] Never! {
     starts := [Int]{}
-    if first -> &starts.push(0)
+    if first -> starts.push(0)
     loop index in from..<to {
-        if source[index] == (U8{10}) -> &starts.push(index + 1)
+        if source[index] == (U8{10}) -> starts.push(index + 1)
     }
     starts
 }
@@ -150,13 +150,13 @@ lex_with_terminators_threads: fn(source: [U8], config_surface: Bool, allow_reser
         if target < 3 -> target = 3
         cut: lexer_chunk_cut(source, target)
         if cut < 0 -> break
-        &bounds.push(cut)
+        bounds.push(cut)
     }
-    &bounds.push(source.len())
+    bounds.push(source.len())
     if bounds.len() <= 2 -> return lexed_threads_single(source, config_surface, allow_reserved_identifiers)
     inputs: shared LexerChunkShared{source: source, config_surface: config_surface, allow_reserved_identifiers: allow_reserved_identifiers}
     parts := [Shared<LexerChunkPart>]{}
-    loop chunk in 0..<(bounds.len() - 1) -> &parts.push(shared LexerChunkPart{start: bounds[chunk], end: bounds[chunk + 1], outputs: [LexerChunkOutput]{}})
+    loop chunk in 0..<(bounds.len() - 1) -> parts.push(shared LexerChunkPart{start: bounds[chunk], end: bounds[chunk + 1], outputs: [LexerChunkOutput]{}})
     _ := lexer_lex_chunk_parts(inputs, parts, 0)
     clean := true
     loop part in parts {
@@ -169,33 +169,33 @@ lex_with_terminators_threads: fn(source: [U8], config_surface: Bool, allow_reser
     // local id order assigns exactly those ids. Literal rows follow in the
     // same order.
     first := lexer_chunk_part_take(parts[0])
-    tables := ^first.tables
+    tables := first.tables.move()
     literal_base := tables.literals.len()
     loop chunk in 1..<parts.len() {
-        map := lexer_chunk_name_map(parts[chunk], &tables)
+        map := lexer_chunk_name_map(parts[chunk], tables)
         permit := parts[chunk].guard_edit()
-        permit.value.outputs[0].map = ^map
+        permit.value.outputs[0].map = map.move()
         permit.value.outputs[0].literal_base = literal_base
         literal_base += permit.value.outputs[0].tables.literals.len()
     }
     _ := lexer_remap_chunk_parts(parts, 1)
-    tokens := ^first.tokens
-    diagnostics := ^first.diagnostics
-    terminator_diagnostics := ^first.terminator_diagnostics
-    line_starts := ^first.line_starts
+    tokens := first.tokens.move()
+    diagnostics := first.diagnostics.move()
+    terminator_diagnostics := first.terminator_diagnostics.move()
+    line_starts := first.line_starts.move()
     runs := [Int]{0}
     loop chunk in 1..<parts.len() {
         output := lexer_chunk_part_take(parts[chunk])
-        &runs.push(tokens.len())
-        compiler_transfer_rows<Token>(&tokens, &output.tokens)
-        compiler_transfer_rows<TokenLiteral>(&tables.literals, &output.tables.literals)
-        compiler_transfer_rows<Diagnostic>(&diagnostics, &output.diagnostics)
-        compiler_transfer_rows<Diagnostic>(&terminator_diagnostics, &output.terminator_diagnostics)
-        compiler_transfer_rows<Int>(&line_starts, &output.line_starts)
+        runs.push(tokens.len())
+        compiler_transfer_rows<Token>(tokens, output.tokens)
+        compiler_transfer_rows<TokenLiteral>(tables.literals, output.tables.literals)
+        compiler_transfer_rows<Diagnostic>(diagnostics, output.diagnostics)
+        compiler_transfer_rows<Diagnostic>(terminator_diagnostics, output.terminator_diagnostics)
+        compiler_transfer_rows<Int>(line_starts, output.line_starts)
     }
-    &runs.push(tokens.len())
-    compiler_transfer_rows<Diagnostic>(&diagnostics, &terminator_diagnostics)
-    LexedThreads{lexed: Lexed{tokens: ^tokens, tables: ^tables, diagnostics: ^diagnostics}, line_starts: ^line_starts, runs: ^runs}
+    runs.push(tokens.len())
+    compiler_transfer_rows<Diagnostic>(diagnostics, terminator_diagnostics)
+    LexedThreads{lexed: Lexed{tokens: tokens.move(), tables: tables.move(), diagnostics: diagnostics.move()}, line_starts: line_starts.move(), runs: runs.move()}
 }
 
 // A later chunk's name ids mapped onto the joined table: each local id in
@@ -206,7 +206,7 @@ lexer_chunk_name_map: fn(part: Shared<LexerChunkPart>, tables: &TokenTables) -> 
     map := [Int]{}
     loop id in 0..<name_count(reads.value.outputs[0].tables.names) {
         local: reads.value.outputs[0].tables.names
-        &map.push(name_index(name_intern_bytes(&tables.names, local.bytes, name_start(local, id), local.ends[id])))
+        map.push(name_index(name_intern_bytes(tables.names, local.bytes, name_start(local, id), local.ends[id])))
     }
     map
 }
@@ -214,7 +214,7 @@ lexer_chunk_name_map: fn(part: Shared<LexerChunkPart>, tables: &TokenTables) -> 
 // A part's output row, after its threads joined.
 lexer_chunk_part_take: fn(part: Shared<LexerChunkPart>) -> LexerChunkOutput {
     permit: part.guard_edit()
-    &permit.value.outputs.pop() ?? panic("a chunk lex thread left no output")
+    permit.value.outputs.pop() ?? panic("a chunk lex thread left no output")
 }
 
 // Lexes `parts[from..]`, one task per part and the last part on this
@@ -271,8 +271,8 @@ lexer_lex_chunk_part: fn(inputs: Shared<LexerChunkShared>, part: Shared<LexerChu
     seed: from > 0
     previous_code: if seed -> K_RBRACE else -> -1
     gap_start: if seed -> from - 2 else -> 0
-    if seed -> emit(&facts, K_RBRACE, from - 2, from - 1, false)
-    scanned: raw_token_facts_range(source, reads.value.config_surface, from, to, previous_code, &facts)
+    if seed -> emit(facts, K_RBRACE, from - 2, from - 1, false)
+    scanned: raw_token_facts_range(source, reads.value.config_surface, from, to, previous_code, facts)
     clean := true
     if seed && !scanned.bodies_local -> clean = false
     if !last {
@@ -284,16 +284,16 @@ lexer_lex_chunk_part: fn(inputs: Shared<LexerChunkShared>, part: Shared<LexerChu
     tables := token_tables()
     events: terminator_events(source, facts)
     terminator_diagnostics := [Diagnostic]{}
-    lexed := lex_payload_from_facts(source, facts, events, reads.value.config_surface, reads.value.allow_reserved_identifiers, 0, gap_start, to, &tables, &terminator_diagnostics)
+    lexed := lex_payload_from_facts(source, facts, events, reads.value.config_surface, reads.value.allow_reserved_identifiers, 0, gap_start, to, tables, terminator_diagnostics)
     if seed {
         // The seed `}` is the last token of the chunk before; it leaves the
         // front in place (reverse, pop, reverse: no token is copied).
         if lexed.tokens.len() == 0 || lexed.tokens[0].kind != K_RBRACE -> clean = false
-        &lexed.tokens.reverse()
-        _ := &lexed.tokens.pop()
-        &lexed.tokens.reverse()
+        lexed.tokens.reverse()
+        _ := lexed.tokens.pop()
+        lexed.tokens.reverse()
     }
-    &permit.value.outputs.push(LexerChunkOutput{tokens: ^lexed.tokens, tables: ^tables, diagnostics: ^lexed.diagnostics, terminator_diagnostics: ^terminator_diagnostics, line_starts: lexer_line_starts(source, from, to, from == 0), clean: clean, map: [Int]{}, literal_base: 0})
+    permit.value.outputs.push(LexerChunkOutput{tokens: lexed.tokens.move(), tables: tables.move(), diagnostics: lexed.diagnostics.move(), terminator_diagnostics: terminator_diagnostics.move(), line_starts: lexer_line_starts(source, from, to, from == 0), clean: clean, map: [Int]{}, literal_base: 0})
     1
 }
 
@@ -315,18 +315,18 @@ lexer_remap_chunk_parts: fn(parts: [Shared<LexerChunkPart>], from: Int) -> Int {
 // joined table's.
 lexer_remap_chunk_part: fn(part: Shared<LexerChunkPart>) -> Int {
     permit := part.guard_edit()
-    output := &permit.value.outputs.pop() ?? panic("a chunk lex thread left no output")
-    map := ^output.map
+    output := permit.value.outputs.pop() ?? panic("a chunk lex thread left no output")
+    map := output.map.move()
     base: output.literal_base
-    lexer_remap_tokens(&output.tokens, map, base)
+    lexer_remap_tokens(output.tokens, map, base)
     loop row in 0..<output.tables.literals.len() {
         output.tables.literals[row].suffix = lexer_remap_name(output.tables.literals[row].suffix, map)
         loop part_index in 0..<output.tables.literals[row].string_parts.len() {
             output.tables.literals[row].string_parts[part_index].text = lexer_remap_name(output.tables.literals[row].string_parts[part_index].text, map)
-            lexer_remap_tokens(&output.tables.literals[row].string_parts[part_index].tokens, map, base)
+            lexer_remap_tokens(output.tables.literals[row].string_parts[part_index].tokens, map, base)
         }
     }
-    &permit.value.outputs.push(LexerChunkOutput{tokens: ^output.tokens, tables: ^output.tables, diagnostics: ^output.diagnostics, terminator_diagnostics: ^output.terminator_diagnostics, line_starts: ^output.line_starts, clean: output.clean, map: ^map, literal_base: base})
+    permit.value.outputs.push(LexerChunkOutput{tokens: output.tokens.move(), tables: output.tables.move(), diagnostics: output.diagnostics.move(), terminator_diagnostics: output.terminator_diagnostics.move(), line_starts: output.line_starts.move(), clean: output.clean, map: map.move(), literal_base: base})
     1
 }
 

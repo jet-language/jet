@@ -66,7 +66,7 @@ image_write_projection_report: fn(layout: String, manifest_digest: String, repor
 
 image_render_projection_plan: fn(manifest_digest: String, plan: ProjectionPlan) -> String ImageError! {
     expose := [Dyn]{}
-    loop port in plan.expose -> &expose.push(Dyn.Int(port))
+    loop port in plan.expose -> expose.push(Dyn.Int(port))
     document := [String: Dyn]{}
     document["schema"] = Dyn.Text("jet.image.plan")
     document["version"] = Dyn.Int(1)
@@ -117,17 +117,17 @@ image_ownership: fn(plan: ProjectionPlan) -> Dyn Never! {
 // Sorted, deduplicated values as a JSON string array.
 image_report_values: fn(values: [String]) -> Dyn Never! {
     sorted := values
-    &sorted.sort()
+    sorted.sort()
     unique := [String]{}
     loop value in sorted {
-        if unique.len() == 0 || unique[unique.len() - 1] != value -> &unique.push(value)
+        if unique.len() == 0 || unique[unique.len() - 1] != value -> unique.push(value)
     }
     image_json_strings(unique)
 }
 
 image_json_strings: fn(values: [String]) -> Dyn Never! {
     items := [Dyn]{}
-    loop value in values -> &items.push(Dyn.Text(value))
+    loop value in values -> items.push(Dyn.Text(value))
     Dyn.Array(items)
 }
 

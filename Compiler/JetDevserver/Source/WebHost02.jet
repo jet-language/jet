@@ -29,13 +29,13 @@ use {
 impl WebHost {
     bind_application_only_with_listener: fn(file: String, verbose: Bool, static_root: OSPath, release_policy: ReleaseDevtoolsPolicy, web_swap_enabled: Bool, application_listener: TcpListener, session: Arc<ResidentDevSession>) -> Self Err! {
         application_port: application_listener.local_addr().map((a) -> a.port()).unwrap_or(0)
-        status: Arc.new(DevStatus.new_with_root(file, verbose, &static_root))
+        status: Arc.new(DevStatus.new_with_root(file, verbose, static_root))
         status.set_port(application_port)
         status.set_canvas_port(0)
         status.set_canvas_enabled(false)
         session_secret: mint_session_secret()
         return Self {
-            listener: Mutex.new(.None), application_listener: Mutex.new(.Val(^application_listener)),
+            listener: Mutex.new(.None), application_listener: Mutex.new(.Val(application_listener)),
             started: AtomicBool.new(false), shutdown: Arc.new(AtomicBool.new(false)), server_threads: Mutex.new([]),
             poll_thread: Mutex.new(.None), terminal_thread: Mutex.new(.None), status,
             debug_sessions: Arc.new(Canvas.DebugSessions.default()), session, canvas_file: file.to_string(),
@@ -67,7 +67,7 @@ impl WebHost {
         session: Arc.new(ResidentDevSession.new_with_hosts(file, host, canvas_port, "127.0.0.1", application_port))
         session.select_output_values(options.output.as_deref(), options.target.as_deref())
         return Self {
-            listener: Mutex.new(.Val(^listener)), application_listener: Mutex.new(.Val(^application_listener)),
+            listener: Mutex.new(.Val(listener)), application_listener: Mutex.new(.Val(application_listener)),
             started: AtomicBool.new(false), shutdown: Arc.new(AtomicBool.new(false)), server_threads: Mutex.new([]),
             poll_thread: Mutex.new(.None), terminal_thread: Mutex.new(.None), status,
             debug_sessions: Arc.new(Canvas.DebugSessions.default()), session, canvas_file: file.to_string(),
@@ -86,7 +86,7 @@ impl WebHost {
         session_secret: mint_session_secret()
         session: Arc.new(ResidentDevSession.new_with_canvas_host(file, host, bound_port, 0))
         return Self {
-            listener: Mutex.new(.Val(^listener)), application_listener: Mutex.new(.None),
+            listener: Mutex.new(.Val(listener)), application_listener: Mutex.new(.None),
             started: AtomicBool.new(false), shutdown: Arc.new(AtomicBool.new(false)), server_threads: Mutex.new([]),
             poll_thread: Mutex.new(.None), terminal_thread: Mutex.new(.None), status,
             debug_sessions: Arc.new(Canvas.DebugSessions.default()), session, canvas_file: file.to_string(),
@@ -98,7 +98,7 @@ impl WebHost {
     start: fn(self: Self) -> Unit { self.start_inner(true) }
     start_canvas: fn(self: Self) -> Unit { self.start_inner(false) }
     lock_source_transaction: fn(self: Self) -> MutexGuard[Unit] { return self.session.lock_source_transaction() }
-    resident_session: fn(self: Self) -> Arc<ResidentDevSession> { return Arc.clone(&self.session) }
+    resident_session: fn(self: Self) -> Arc<ResidentDevSession> { return Arc.clone(self.session) }
     publish_hot_swap_decision: fn(self: &Self, decision: &HotSwapDecision) Err! {
         self.session.publish_hot_swap_decision(decision)
         *self.hot_swap_decision.lock().unwrap() = .Val(decision.clone())
@@ -109,67 +109,67 @@ impl WebHost {
         has_canvas: self.listener.lock().unwrap().is_some()
         listener: self.listener.lock().unwrap().take()
         if listener == .Val(listener) {
-            status: Arc.clone(&self.status)
-            debug_sessions: Arc.clone(&self.debug_sessions)
-            session: Arc.clone(&self.session)
+            status: Arc.clone(self.status)
+            debug_sessions: Arc.clone(self.debug_sessions)
+            session: Arc.clone(self.session)
             canvas_file: self.canvas_file.clone()
             bind_host: self.bind_host.clone()
             session_secret: self.session_secret.clone()
             release_policy: self.release_policy.clone()
             static_root: self.static_root.clone()
-            shutdown: Arc.clone(&self.shutdown)
-            browser_state: Arc.clone(&self.browser_state)
-            paused_evaluate: Arc.clone(&self.paused_evaluate)
-            terminal_style: Arc.clone(&self.terminal_style)
-            handle: thread.spawn(() -> serve_forever(^listener, ^status, ^debug_sessions, ^session, ^canvas_file, .Canvas, ^bind_host, ^session_secret, ^shutdown, ^static_root, ^release_policy, ^browser_state, ^paused_evaluate, ^terminal_style))
-            self.server_threads.lock().unwrap().push(^handle)
+            shutdown: Arc.clone(self.shutdown)
+            browser_state: Arc.clone(self.browser_state)
+            paused_evaluate: Arc.clone(self.paused_evaluate)
+            terminal_style: Arc.clone(self.terminal_style)
+            handle: thread.spawn(() -> serve_forever(listener, status, debug_sessions, session, canvas_file, .Canvas, bind_host, session_secret, shutdown, static_root, release_policy, browser_state, paused_evaluate, terminal_style))
+            self.server_threads.lock().unwrap().push(handle)
         }
         if self.application_listener.lock().unwrap().take() == .Val(application_listener) {
-            status: Arc.clone(&self.status)
-            debug_sessions: Arc.clone(&self.debug_sessions)
-            session: Arc.clone(&self.session)
+            status: Arc.clone(self.status)
+            debug_sessions: Arc.clone(self.debug_sessions)
+            session: Arc.clone(self.session)
             canvas_file: self.canvas_file.clone()
             static_root: self.static_root.clone()
             session_secret: self.session_secret.clone()
             application_host: self.session.application_host().to_string()
             release_policy: self.release_policy.clone()
-            browser_state: Arc.clone(&self.browser_state)
-            paused_evaluate: Arc.clone(&self.paused_evaluate)
-            terminal_style: Arc.clone(&self.terminal_style)
-            shutdown: Arc.clone(&self.shutdown)
-            handle: thread.spawn(() -> serve_forever(^application_listener, ^status, ^debug_sessions, ^session, ^canvas_file, .Application, ^application_host, ^session_secret, ^shutdown, ^static_root, ^release_policy, ^browser_state, ^paused_evaluate, ^terminal_style))
-            self.server_threads.lock().unwrap().push(^handle)
+            browser_state: Arc.clone(self.browser_state)
+            paused_evaluate: Arc.clone(self.paused_evaluate)
+            terminal_style: Arc.clone(self.terminal_style)
+            shutdown: Arc.clone(self.shutdown)
+            handle: thread.spawn(() -> serve_forever(application_listener, status, debug_sessions, session, canvas_file, .Application, application_host, session_secret, shutdown, static_root, release_policy, browser_state, paused_evaluate, terminal_style))
+            self.server_threads.lock().unwrap().push(handle)
         }
         _: (() -> {
-            status: Arc.clone(&self.status)
-            shutdown: Arc.clone(&self.shutdown)
+            status: Arc.clone(self.status)
+            shutdown: Arc.clone(self.shutdown)
             handle: thread.spawn(() -> {
-                loop !wait_for_shutdown(&shutdown, Duration.from_millis(LIVE_RELOAD_POLL_MS)) {
+                loop !wait_for_shutdown(shutdown, Duration.from_millis(LIVE_RELOAD_POLL_MS)) {
                     status.activate_requested_browser_trace()
                     status.expire_clients()
                 }
             })
-            *self.poll_thread.lock().unwrap() = .Val(^handle)
+            *self.poll_thread.lock().unwrap() = .Val(handle)
         })()
         if self.session_application_port() != 0 -> println("App preview: http://{url_host(self.session.application_host())}:{self.session_application_port()}/")
         if has_canvas -> println("Canvas: {self.canvas_url()}")
         _: std.io.stdout().flush()
         if terminal_controls {
-            if start_terminal_controls(Arc.clone(&self.status), Arc.clone(&self.shutdown)) == .Val(handle) -> *self.terminal_thread.lock().unwrap() = .Val(^handle)
+            if start_terminal_controls(Arc.clone(self.status), Arc.clone(self.shutdown)) == .Val(handle) -> *self.terminal_thread.lock().unwrap() = .Val(handle)
         }
         self.status.activate()
     }
     mark_building: fn(self: Self) -> Unit { self.status.mark_building(); self.session.mark_building() }
     mark_ready: fn(self: Self, elapsed_ms: U128, is_rebuild: Bool) -> Unit {
         _: self.hot_swap_decision.lock().unwrap().take()
-        if self.web_swap_enabled && Canvas.read_source_without_symlinks(&OSPath.from(self.canvas_file)) == .Ok(source) -> self.session.observe_source(Canvas.source_revision(source))
+        if self.web_swap_enabled && Canvas.read_source_without_symlinks(OSPath.from(self.canvas_file)) == .Ok(source) -> self.session.observe_source(Canvas.source_revision(source))
         self.status.mark_ready(elapsed_ms, is_rebuild)
         self.session.mark_ready()
     }
     mark_error: fn(self: Self, code: String, diagnostic: String, is_rebuild: Bool) -> Unit {
         _: self.hot_swap_decision.lock().unwrap().take()
         self.status.mark_error(code.clone(), diagnostic.clone(), is_rebuild)
-        if Canvas.read_source_without_symlinks(&OSPath.from(self.canvas_file)) == .Ok(source) -> self.session.observe_source(Canvas.source_revision(source))
+        if Canvas.read_source_without_symlinks(OSPath.from(self.canvas_file)) == .Ok(source) -> self.session.observe_source(Canvas.source_revision(source))
         self.session.mark_error(code, diagnostic)
     }
     revision_facts: fn(self: Self) -> DevRevisionFacts { return self.status.revision_facts() }
@@ -189,7 +189,7 @@ impl WebHost.Drop {
         if self.poll_thread.lock().unwrap().take() == .Val(handle) -> _: handle.join()
         handles: self.server_threads.lock().unwrap().drain(..).collect[[thread.JoinHandle[Unit]]]()
         loop handle in handles -> _: handle.join()
-        if self.paused_evaluate.lock() == .Ok(paused_evaluate) -> _: self.debug_sessions.cancel_all_paused_sessions(&paused_evaluate, "web host stopped")
+        if self.paused_evaluate.lock() == .Ok(paused_evaluate) -> _: self.debug_sessions.cancel_all_paused_sessions(paused_evaluate, "web host stopped")
         self.status.active.store(false, .SeqCst)
     }
 }
@@ -209,12 +209,12 @@ start_terminal_controls: fn(status: Arc<DevStatus>, shutdown: Arc<AtomicBool>) -
     return .Val(thread.spawn(() -> {
         keys := KeyReader.new(std.io.stdin())
         loop {
-            if shutdown.load(.SeqCst) { status.disable_terminal_controls(); drop(^raw); return }
+            if shutdown.load(.SeqCst) { status.disable_terminal_controls(); drop(raw); return }
             if keys.read_key() == {
                 .Char('v') | .Char('V') -> status.toggle_verbose()
                 .Idle -> {}
-                .CtrlC -> { status.disable_terminal_controls(); drop(^raw); status.exit_code.store(130, .SeqCst); return }
-                .Eof -> { status.disable_terminal_controls(); drop(^raw); return }
+                .CtrlC -> { status.disable_terminal_controls(); drop(raw); status.exit_code.store(130, .SeqCst); return }
+                .Eof -> { status.disable_terminal_controls(); drop(raw); return }
                 else -> {}
             }
         }
@@ -264,41 +264,41 @@ WebOutputTempFile: struct { path: OSPath; inner: secure_output.TempFile }
 impl WebOutputAuthority {
     open_or_create: fn(path: OSPath, root: OSPath) -> Self io.Error! {
         real: ensure_real_output_dir(path, root)
-        directory: secure_output.open_root(&real, root)
-        return Self { path: ^real, directory }
+        directory: secure_output.open_root(real, root)
+        return Self { path: real.move(), directory }
     }
     open: fn(path: OSPath, root: OSPath) -> Self io.Error! {
         real: ensure_real_output_dir(path, root)
-        directory: secure_output.open_root(&real, root)
-        return Self { path: ^real, directory }
+        directory: secure_output.open_root(real, root)
+        return Self { path: real.move(), directory }
     }
     path: fn(self: Self) -> OSPath { return &self.path }
     path_for: fn(self: Self, name: String) -> OSPath io.Error! { return self.path.join(normal_output_name(name)?) }
-    replace_file: fn(self: Self, name: String, bytes: [U8]) -> io.Error! { return secure_output.replace_file(&self.directory, normal_output_name(name), bytes) }
-    open_file: fn(self: Self, name: String) -> File io.Error! { return secure_output.open_file(&self.directory, normal_output_name(name)?) }
+    replace_file: fn(self: Self, name: String, bytes: [U8]) -> io.Error! { return secure_output.replace_file(self.directory, normal_output_name(name), bytes) }
+    open_file: fn(self: Self, name: String) -> File io.Error! { return secure_output.open_file(self.directory, normal_output_name(name)?) }
     validate_file: fn(self: Self, name: String, required: Bool) -> Bool io.Error! {
         name: normal_output_name(name)
-        if secure_output.open_file(&self.directory, name) == {
+        if secure_output.open_file(self.directory, name) == {
             .Ok(_) -> { return true }
             .Err(error) && error.kind() == .NotFound && !required -> { return false }
-            .Err(error) -> { return .Err(^error) }
+            .Err(error) -> { return .Err(error) }
         }
     }
     remove_file_if_exists: fn(self: Self, name: String) -> io.Error! {
         name: normal_output_name(name)
-        if secure_output.remove_file(&self.directory, name) == {
+        if secure_output.remove_file(self.directory, name) == {
             .Ok(_) -> { return }
             .Err(error) && error.kind() == .NotFound -> { return }
-            .Err(error) -> { return .Err(^error) }
+            .Err(error) -> { return .Err(error) }
         }
     }
     rename_file_to: fn(self: Self, name: String, destination: Self) -> io.Error! {
         name: normal_output_name(name)
-        return secure_output.rename_file(&self.directory, name, &destination.directory, name)
+        return secure_output.rename_file(self.directory, name, destination.directory, name)
     }
     open_existing_child: fn(self: Self, name: String) -> Self io.Error! {
         name: normal_output_name(name)
-        directory: secure_output.open_child(&self.directory, name)
+        directory: secure_output.open_child(self.directory, name)
         return Self { path: self.path.join(name), directory }
     }
     create_child: fn(self: Self, path: OSPath) -> Self io.Error! {
@@ -306,35 +306,35 @@ impl WebOutputAuthority {
         real_parent: fs.canonicalize(parent)
         if real_parent != self.path -> return .Err(io.Error.new(.PermissionDenied, "web child directory escapes its held output root"))
         name: normal_output_name(path.file_name().and_then((n) -> n.to_str()) ?? return .Err(io.Error.new(.InvalidInput, "web child directory has no normal name")))
-        directory: secure_output.open_child(&self.directory, name)
+        directory: secure_output.open_child(self.directory, name)
         return Self { path: self.path.join(name), directory }
     }
     create_unique_child: fn(self: Self, prefix: String) -> (String, Self) io.Error! {
         loop _ in 0..100 {
             name: "{prefix}-{std.process.id()}-{PUBLICATION_COUNTER.fetch_add(1, .Relaxed)}"
-            if secure_output.create_child(&self.directory, OsStr.new(name)) == {
+            if secure_output.create_child(self.directory, OsStr.new(name)) == {
                 .Ok(directory) -> { return (_0: name.clone(), _1: Self { path: self.path.join(name), directory }) }
                 .Err(error) && error.kind() == .AlreadyExists -> { next }
-                .Err(error) -> { return .Err(^error) }
+                .Err(error) -> { return .Err(error) }
             }
         }
         return .Err(io.Error.new(.AlreadyExists, "could not allocate a web publication journal"))
     }
     remove_child_directory: fn(self: Self, name: String) -> io.Error! {
         name: normal_output_name(name)
-        if secure_output.remove_directory(&self.directory, name) == {
+        if secure_output.remove_directory(self.directory, name) == {
             .Ok(_) -> { return }
             .Err(error) && error.kind() == .NotFound -> { return }
-            .Err(error) -> { return .Err(^error) }
+            .Err(error) -> { return .Err(error) }
         }
     }
     create_temp_file: fn(self: Self, prefix: String, extension: String) -> WebOutputTempFile io.Error! {
         loop _ in 0..100 {
             name: ".{prefix}-{std.process.id()}-{PUBLICATION_COUNTER.fetch_add(1, .Relaxed)}{extension}"
-            if secure_output.create_temp_file(&self.directory, OsStr.new(name)) == {
+            if secure_output.create_temp_file(self.directory, OsStr.new(name)) == {
                 .Ok(inner) -> { return WebOutputTempFile { path: self.path.join(name), inner } }
                 .Err(error) && error.kind() == .AlreadyExists -> { next }
-                .Err(error) -> { return .Err(^error) }
+                .Err(error) -> { return .Err(error) }
             }
         }
         return .Err(io.Error.new(.AlreadyExists, "could not allocate a web compiler temporary"))
@@ -342,8 +342,8 @@ impl WebOutputAuthority {
 }
 impl WebOutputTempFile {
     path: fn(self: Self) -> OSPath { return &self.path }
-    write_all: fn(self: Self, bytes: [U8]) -> io.Error! { return secure_output.write_temp(&self.inner, bytes) }
-    read_all: fn(self: Self) -> [U8] io.Error! { return secure_output.read_temp(&self.inner) }
+    write_all: fn(self: Self, bytes: [U8]) -> io.Error! { return secure_output.write_temp(self.inner, bytes) }
+    read_all: fn(self: Self) -> [U8] io.Error! { return secure_output.read_temp(self.inner) }
 }
 normal_output_name: fn(value: String) -> OsStr io.Error! {
     path: OSPath.from(value)
@@ -406,29 +406,29 @@ secure_output_unix: module {
     open_root: fn(path: OSPath, anchor: OSPath) -> Directory io.Error! {
         anchor: fs.canonicalize(anchor)
         path: fs.canonicalize(path)
-        relative: path.strip_prefix(&anchor) ?? return .Err(permission("web output root escapes its owning directory"))
-        file := OpenOptions.new().read(true).custom_flags(O_DIRECTORY.bit_or(O_NOFOLLOW).bit_or(O_CLOEXEC)).open(&anchor)
+        relative: path.strip_prefix(anchor) ?? return .Err(permission("web output root escapes its owning directory"))
+        file := OpenOptions.new().read(true).custom_flags(O_DIRECTORY.bit_or(O_NOFOLLOW).bit_or(O_CLOEXEC)).open(anchor)
         walked := anchor.clone()
         loop component in relative.components() {
             name: if component == {
                 .Normal(name) -> name
                 else -> { return .Err(permission("web output root is not a normal directory")) }
             }
-            next: open_directory_at(&file, name)
+            next: open_directory_at(file, name)
             expected: walked.join(name)
-            path_metadata: fs.symlink_metadata(&expected)
+            path_metadata: fs.symlink_metadata(expected)
             actual: next.metadata()
             if !path_metadata.is_dir() || !actual.is_dir() || path_metadata.dev() != actual.dev() || path_metadata.ino() != actual.ino() -> return .Err(permission("web output root changed during secure open"))
-            file = ^next
-            walked = ^expected
+            file = next.move()
+            walked = expected.move()
         }
         if !file.metadata()?.is_dir() -> return .Err(permission("web output root is not a directory"))
         return Directory { path, file }
     }
     open_child: fn(parent: Directory, name: OsStr) -> Directory io.Error! {
-        file: open_directory_at(&parent.file, name)
+        file: open_directory_at(parent.file, name)
         path: parent.path.join(name)
-        path_metadata: fs.symlink_metadata(&path)
+        path_metadata: fs.symlink_metadata(path)
         actual: file.metadata()
         if !path_metadata.is_dir() || !actual.is_dir() || path_metadata.dev() != actual.dev() || path_metadata.ino() != actual.ino() -> return .Err(permission("web child directory changed during secure open"))
         return Directory { path, file }
@@ -439,12 +439,12 @@ secure_output_unix: module {
         if mkdirat(parent.file.as_raw_fd(), name_c.as_ptr(), 0o700) != 0 -> return .Err(io.Error.last_os_error())
         return open_child(parent, name)
     }
-    open_file: fn(parent: Directory, name: OsStr) -> File io.Error! { file: open_file_at(&parent.file, name)?; _: check_regular(&file)?; return file }
+    open_file: fn(parent: Directory, name: OsStr) -> File io.Error! { file: open_file_at(parent.file, name)?; _: check_regular(file)?; return file }
     check_existing: fn(parent: Directory, name: OsStr) -> Bool io.Error! {
         if open_file(parent, name) == {
             .Ok(_) -> { return true }
             .Err(error) && error.kind() == .NotFound -> { return false }
-            .Err(error) -> { return .Err(^error) }
+            .Err(error) -> { return .Err(error) }
         }
     }
     unique_temp_name: fn(prefix: OsStr) -> CString { return CString.new(".{prefix.to_string_lossy()}-{std.process.id()}-{PUBLICATION_COUNTER.fetch_add(1, .Relaxed)}").expect("generated web temporary name has no NUL") }
@@ -456,7 +456,7 @@ secure_output_unix: module {
         file: File.from_raw_fd(fd)
         parent_file: if parent.file.try_clone() == {
             .Ok(p) -> p
-            .Err(error) -> { drop(^file), _: unlink_at(&parent.file, &name, 0), return .Err(^error) }
+            .Err(error) -> { drop(file), _: unlink_at(parent.file, name, 0), return .Err(error) }
         }
         return TempFile { name, file, parent: parent_file }
     }
@@ -464,7 +464,7 @@ secure_output_unix: module {
     read_temp: fn(temp: TempFile) -> [U8] io.Error! {
         _: temp.file.seek(.Start(0))
         bytes := [U8]{}
-        _: temp.file.read_to_end(&bytes)
+        _: temp.file.read_to_end(bytes)
         return bytes
     }
     #Unsafe("exclusive temporary and renameat borrow retained parent and names")
@@ -477,30 +477,30 @@ secure_output_unix: module {
         result: (() -> Unit io.Error! {
             file.write_all(bytes)?
             file.sync_all()?
-            temporary_id: check_regular(&file)?
+            temporary_id: check_regular(file)?
             name_c: c_name(name)?
             if renameat(parent.file.as_raw_fd(), temporary.as_ptr(), parent.file.as_raw_fd(), name_c.as_ptr()) != 0 -> return .Err(io.Error.last_os_error())
             published: open_file(parent, name)?
-            if check_regular(&published)? != temporary_id -> return .Err(permission("published web output identity changed"))
+            if check_regular(published)? != temporary_id -> return .Err(permission("published web output identity changed"))
         })()
-        if result.is_err() -> _: unlink_at(&parent.file, &temporary, 0)
+        if result.is_err() -> _: unlink_at(parent.file, temporary, 0)
         return result
     }
     #Unsafe("renameat borrows both retained directory authorities")
     rename_file: fn(source: Directory, source_name: OsStr, destination: Directory, destination_name: OsStr) -> io.Error! {
         source_file: open_file(source, source_name)
-        source_id: check_regular(&source_file)
+        source_id: check_regular(source_file)
         _: check_existing(destination, destination_name)
         source_name_c: c_name(source_name)
         destination_name_c: c_name(destination_name)
         if renameat(source.file.as_raw_fd(), source_name_c.as_ptr(), destination.file.as_raw_fd(), destination_name_c.as_ptr()) != 0 -> return .Err(io.Error.last_os_error())
         published: open_file(destination, destination_name)
-        if check_regular(&published)? != source_id -> return .Err(permission("published web output identity changed"))
+        if check_regular(published)? != source_id -> return .Err(permission("published web output identity changed"))
     }
-    remove_file: fn(parent: Directory, name: OsStr) -> io.Error! { _: open_file(parent, name)?; name: c_name(name)?; return unlink_at(&parent.file, &name, 0) }
-    remove_directory: fn(parent: Directory, name: OsStr) -> io.Error! { name: c_name(name)?; return unlink_at(&parent.file, &name, AT_REMOVEDIR) }
+    remove_file: fn(parent: Directory, name: OsStr) -> io.Error! { _: open_file(parent, name)?; name: c_name(name)?; return unlink_at(parent.file, name, 0) }
+    remove_directory: fn(parent: Directory, name: OsStr) -> io.Error! { name: c_name(name)?; return unlink_at(parent.file, name, AT_REMOVEDIR) }
     impl TempFile.Drop {
-        drop: fn(self: Self) -> Unit { _: unlink_at(&self.parent, &self.name, 0) }
+        drop: fn(self: Self) -> Unit { _: unlink_at(self.parent, self.name, 0) }
     }
 }
 
@@ -547,7 +547,7 @@ secure_output_windows: module {
         written: GetFinalPathNameByHandleW(file.as_raw_handle(), buffer.as_mut_ptr(), U32{buffer.len()}, 0)
         if written == 0 || (Usize{written}) >= buffer.len() -> return .Err(io.Error.last_os_error())
         buffer.truncate(Usize{written})
-        return normalize(String.from_utf16_lossy(&buffer))
+        return normalize(String.from_utf16_lossy(buffer))
     }
     #Unsafe("Win32 writes exactly the C-layout attribute tag record")
     check_reparse: fn(file: File) -> io.Error! {
@@ -557,7 +557,7 @@ secure_output_windows: module {
     }
     open_directory: fn(path: OSPath) -> File io.Error! {
         file: OpenOptions.new().read(true).access_mode(GENERIC_READ.bit_or(GENERIC_WRITE)).share_mode(FILE_SHARE_ALL).custom_flags(FILE_FLAG_BACKUP_SEMANTICS.bit_or(FILE_FLAG_OPEN_REPARSE_POINT)).open(path)
-        check_reparse(&file)
+        check_reparse(file)
         if !file.metadata()?.is_dir() -> return .Err(io.Error.new(.PermissionDenied, "web output root is not a directory"))
         return file
     }
@@ -574,28 +574,28 @@ secure_output_windows: module {
     open_root: fn(path: OSPath, _anchor: OSPath) -> Directory io.Error! {
         file: open_directory(path)
         expected: normalize((if path.is_absolute() -> path.to_path_buf() else -> std.env.current_dir()?.join(path)).to_string_lossy().into_owned())
-        actual: final_path(&file)
+        actual: final_path(file)
         if actual != expected -> return .Err(io.Error.new(.PermissionDenied, "web output root changed during secure open"))
         return Directory { path: path.to_path_buf(), file, final_path: actual }
     }
     open_child: fn(parent: Directory, name: OsStr) -> Directory io.Error! {
         path: parent.path.join(name)
-        file: open_directory(&path)
-        actual: final_path(&file)
+        file: open_directory(path)
+        actual: final_path(file)
         expected: normalize(path.to_string_lossy().into_owned())
         if actual != expected || !actual.starts_with("{parent.final_path}\\") -> return .Err(io.Error.new(.PermissionDenied, "web child directory escaped its held output root"))
         return Directory { path, file, final_path: actual }
     }
     create_child: fn(parent: Directory, name: OsStr) -> Directory io.Error! {
         path: parent.path.join(name)
-        fs.create_dir(&path)
+        fs.create_dir(path)
         return open_child(parent, name)
     }
     open_file: fn(parent: Directory, name: OsStr) -> File io.Error! {
         path: parent.path.join(name)
-        file: open_file_path(&path, false, false)
-        check_regular(&file)
-        if normalize(final_path(&file)?) != normalize(path.to_string_lossy().into_owned()) -> return .Err(io.Error.new(.PermissionDenied, "web output file escaped its held directory"))
+        file: open_file_path(path, false, false)
+        check_regular(file)
+        if normalize(final_path(file)?) != normalize(path.to_string_lossy().into_owned()) -> return .Err(io.Error.new(.PermissionDenied, "web output file escaped its held directory"))
         return file
     }
     #Unsafe("aligned variable-sized FILE_RENAME_INFO uses selected C layout and live UTF16 loans")
@@ -617,49 +617,49 @@ secure_output_windows: module {
         if SetFileInformationByHandle(file.as_raw_handle(), FILE_DISPOSITION_INFO_CLASS, (&info as *FileDispositionInfo).cast(), (U32{std.mem.size_of[FileDispositionInfo]()})) == 0 -> return .Err(io.Error.last_os_error())
     }
     replace_file: fn(parent: Directory, name: OsStr, bytes: [U8]) -> io.Error! {
-        if open_file(parent, name) == .Ok(existing) -> check_regular(&existing)
+        if open_file(parent, name) == .Ok(existing) -> check_regular(existing)
         path: parent.path.join(".{name.to_string_lossy()}-{std.process.id()}-{PUBLICATION_COUNTER.fetch_add(1, .Relaxed)}")
-        temporary := open_file_path(&path, true, true)
+        temporary := open_file_path(path, true, true)
         temporary.write_all(bytes)
         temporary.sync_all()
-        check_regular(&temporary)
-        replace_handle(&temporary, &parent.file, name)
+        check_regular(temporary)
+        replace_handle(temporary, parent.file, name)
         published: open_file(parent, name)
-        return check_regular(&published)
+        return check_regular(published)
     }
     rename_file: fn(source: Directory, source_name: OsStr, destination: Directory, destination_name: OsStr) -> io.Error! {
         source_path: source.path.join(source_name)
-        source_file: open_file_path(&source_path, true, false)
-        check_regular(&source_file)
-        if open_file(destination, destination_name) == .Ok(existing) -> check_regular(&existing)
-        return replace_handle(&source_file, &destination.file, destination_name)
+        source_file: open_file_path(source_path, true, false)
+        check_regular(source_file)
+        if open_file(destination, destination_name) == .Ok(existing) -> check_regular(existing)
+        return replace_handle(source_file, destination.file, destination_name)
     }
     remove_file: fn(parent: Directory, name: OsStr) -> io.Error! {
         path: parent.path.join(name)
-        file: open_file_path(&path, true, false)
-        check_regular(&file)
-        return delete_handle(&file)
+        file: open_file_path(path, true, false)
+        check_regular(file)
+        return delete_handle(file)
     }
     remove_directory: fn(parent: Directory, name: OsStr) -> io.Error! {
         path: parent.path.join(name)
-        file: open_directory(&path)
-        return delete_handle(&file)
+        file: open_directory(path)
+        return delete_handle(file)
     }
     create_temp_file: fn(parent: Directory, name: OsStr) -> TempFile io.Error! {
         path: parent.path.join(name)
-        file: open_file_path(&path, true, true)
-        check_regular(&file)
+        file: open_file_path(path, true, true)
+        check_regular(file)
         return TempFile { path, file }
     }
     write_temp: fn(temp: TempFile, bytes: [U8]) -> io.Error! { temp.file.write_all(bytes)?; return temp.file.sync_all() }
     read_temp: fn(temp: TempFile) -> [U8] io.Error! {
         _: temp.file.seek(.Start(0))
         bytes := [U8]{}
-        _: temp.file.read_to_end(&bytes)
+        _: temp.file.read_to_end(bytes)
         return bytes
     }
     impl TempFile.Drop {
-        drop: fn(self: Self) -> Unit { _: delete_handle(&self.file) }
+        drop: fn(self: Self) -> Unit { _: delete_handle(self.file) }
     }
 }
 
@@ -794,20 +794,20 @@ stage_and_swap_locked: fn(staging: OSPath, out_dir: OSPath, root: OSPath) -> io.
         loop name in &names {
             if output_root.validate_file(name, false)? {
                 backed_up.push(name)
-                output_root.rename_file_to(name, &backup)?
+                output_root.rename_file_to(name, backup)?
             }
         }
         loop name in &staged_names {
             published.push(name)
-            staging_root.rename_file_to(name, &output_root)?
+            staging_root.rename_file_to(name, output_root)?
         }
     })()
     if result == .Err(error) {
         loop name in published.iter().rev() -> _: output_root.remove_file_if_exists(name)
-        loop name in backed_up.iter().rev() -> _: backup.rename_file_to(name, &output_root)
+        loop name in backed_up.iter().rev() -> _: backup.rename_file_to(name, output_root)
         loop name in &names -> _: backup.remove_file_if_exists(name)
         _: output_root.remove_child_directory(backup_name)
-        return .Err(^error)
+        return .Err(error)
     }
     loop name in &names -> _: backup.remove_file_if_exists(name)
     _: output_root.remove_child_directory(backup_name)
@@ -816,7 +816,7 @@ ensure_real_output_dir: fn(path: OSPath, root: OSPath) -> OSPath io.Error! {
     root: fs.canonicalize(root)
     ensure_directory_without_symlinks(path)
     real: fs.canonicalize(path)
-    if !real.starts_with(&root) -> return .Err(io.Error.new(.PermissionDenied, "output directory escapes `{root.display()}`"))
+    if !real.starts_with(root) -> return .Err(io.Error.new(.PermissionDenied, "output directory escapes `{root.display()}`"))
     return real
 }
 ensure_directory_without_symlinks: fn(path: OSPath) -> io.Error! {
@@ -828,7 +828,7 @@ ensure_directory_without_symlinks: fn(path: OSPath) -> io.Error! {
             if path.parent().filter((p) -> !p.as_os_str().is_empty()) == .Val(parent) -> ensure_directory_without_symlinks(parent)
             return fs.create_dir(path)
         }
-        .Err(error) -> { return .Err(^error) }
+        .Err(error) -> { return .Err(error) }
     }
 }
 bind_application_server: fn(port: U16?) -> TcpListener Err! {
@@ -845,7 +845,7 @@ bind_application_server: fn(port: U16?) -> TcpListener Err! {
     loop port in APPLICATION_PORT_RANGE {
         if TcpListener.bind((_0: "127.0.0.1", _1: port)) == {
             .Ok(listener) -> { return listener }
-            .Err(e) && e.kind() == .AddrInUse -> { last_err = .Val(^e); next }
+            .Err(e) && e.kind() == .AddrInUse -> { last_err = .Val(e); next }
             .Err(e) -> { return .Err("error: couldn't start the application preview: {e}") }
         }
     }
@@ -872,7 +872,7 @@ validate_canvas_options: fn(options: CanvasHostOptions) -> String Err! {
 mint_session_secret: fn() -> String Err! {
     bytes := [U8; CANVAS_SESSION_BYTES]{[0; CANVAS_SESSION_BYTES]}
     source := File.open(OSPath.from("/dev/urandom")) ?? return .Err("could not open the system random source: {err}")
-    source.read_exact(&bytes) ?? return .Err("could not read the system random source: {err}")
+    source.read_exact(bytes) ?? return .Err("could not read the system random source: {err}")
     return bytes.iter().map((byte) -> "{byte:02x}").collect()
 }
 normalize_bind_host: fn(host: String) -> String Err! {

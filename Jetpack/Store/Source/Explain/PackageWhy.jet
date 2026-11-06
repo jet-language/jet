@@ -69,8 +69,8 @@ PackageWhy: struct {
         qualified := [String]{explanation.query}
         if explanation.entry == {
             .Val(entry) -> {
-                &names.push(entry.name)
-                &qualified.push(entry.reference)
+                names.push(entry.name)
+                qualified.push(entry.reference)
             }
             .None -> {}
         }
@@ -156,7 +156,7 @@ PackageWhy: struct {
 // The facts on the one-screen `why` surface; read-only like the detailed
 // explanation it projects.
 store_why_package: fn(verification: &StoreVerification, roots: HangarRoots, query: String) -> PackageWhy? StoreError! {
-    found: store_explain_package(&verification, roots, query, ExplainLens.All)
+    found: store_explain_package(verification, roots, query, ExplainLens.All)
     explanation: found ?? return Ok(None)
     Ok(Val(PackageWhy.from_explain(roots, explanation)))
 }
@@ -229,7 +229,7 @@ store_why_lock_line: fn(raw: String, names: [String], qualified: [String]) -> Wh
             block = [WhyLine]{}
             in_block = true
         }
-        if in_block -> &block.push(WhyLine{line: index + 1, text: line})
+        if in_block -> block.push(WhyLine{line: index + 1, text: line})
     }
     if !in_block -> return None
     store_why_matching_lock_block(block, names, qualified)
@@ -258,8 +258,8 @@ store_why_source_line_matches: fn(line: String, names: [String], qualified: [Str
         .None -> line
     }
     values := [String]{}
-    loop name in names -> &values.push(name)
-    loop reference in qualified -> &values.push(reference)
+    loop name in names -> values.push(name)
+    loop reference in qualified -> values.push(reference)
     loop value in values {
         if value != "" && store_why_contains_package_token(code, value) -> return true
     }
@@ -429,7 +429,7 @@ store_why_disk_projection: fn(graph: ExplainGraph) -> WhyDisk Never! {
     loop object in graph.closure {
         if object.external || !object.known || object.path == "" -> next
         if paths.contains(object.path) -> next
-        &paths.push(object.path)
+        paths.push(object.path)
         objects += 1
         size: store_why_disk_size(object.path) ?? {
             measurable = false
@@ -455,7 +455,7 @@ store_why_dependent_projection: fn(graph: ExplainGraph) -> [String] Never! {
     views: [[ExplainObject]]{graph.referrers, graph.direct_referrers}
     loop view in views {
         loop object in view {
-            loop owner in object.owners -> &owners.push(owner)
+            loop owner in object.owners -> owners.push(owner)
         }
     }
     store_sorted_unique(owners)

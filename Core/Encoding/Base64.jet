@@ -15,7 +15,7 @@ Base64Error: struct {
         display: fn(self) -> String { self.reason }
     }
     impl Debug {
-        debug: fn(^self) -> String { self.reason }
+        debug: fn(&&self) -> String { self.reason }
     }
 }
 
@@ -75,8 +75,8 @@ encodebytes: fn(data: [U8]) -> String Never! {
     encoded: encode(data).bytes()
     out := [U8]{}
     loop i in 0..<encoded.len() {
-        &out.push(encoded[i])
-        if (i + 1) %% 76 == 0 || i + 1 == encoded.len() -> &out.push(U8{10})
+        out.push(encoded[i])
+        if (i + 1) %% 76 == 0 || i + 1 == encoded.len() -> out.push(U8{10})
     }
     String.from_bytes(out) ?? ""
 }
@@ -149,18 +149,18 @@ ascii85_encode: fn(data: [U8]) -> String {
         d: if width > 3 -> u8_int(data[i + 3]) else -> 0
         n: ((((a << 24)).bit_or((b << 16))).bit_or((c << 8))).bit_or(d)
         if width == 4 && n == 0 {
-            &out.push(U8{122})
+            out.push(U8{122})
         } else {
             digits := [U8]{}
             v := n
             loop _ in 0..<5 {
-                &digits.push(U8{33 + (v %% 85)})
+                digits.push(U8{33 + (v %% 85)})
                 v = v /% 85
             }
             k := digits.len()
             loop k > 0 {
                 k -= 1
-                if width == 4 || k >= 5 - (width + 1) -> &out.push(digits[k])
+                if width == 4 || k >= 5 - (width + 1) -> out.push(digits[k])
             }
         }
         i += width
@@ -176,33 +176,33 @@ ascii85_decode: fn(text: String) -> [U8] Base64Error! {
         n: u8_int(b)
         if n == 122 {
             if group.len() != 0 -> return Err(rewrap("invalid Ascii85 `z` shorthand inside a quantum"))
-            &out.push(U8{0})
-            &out.push(U8{0})
-            &out.push(U8{0})
-            &out.push(U8{0})
+            out.push(U8{0})
+            out.push(U8{0})
+            out.push(U8{0})
+            out.push(U8{0})
             next
         }
         if n < 33 || n > 117 -> return Err(rewrap("invalid Ascii85 character"))
-        &group.push(n - 33)
+        group.push(n - 33)
         if group.len() == 5 {
             value := 0
             loop d in group -> value = value * 85 + d
             if value > 4294967295 -> return Err(rewrap("invalid Ascii85 quantum; encoded value exceeds four bytes"))
-            &out.push(to_u8(value >> 24))
-            &out.push(to_u8(value >> 16))
-            &out.push(to_u8(value >> 8))
-            &out.push(to_u8(value))
+            out.push(to_u8(value >> 24))
+            out.push(to_u8(value >> 16))
+            out.push(to_u8(value >> 8))
+            out.push(to_u8(value))
             group = [Int]{}
         }
     }
     if group.len() == 1 -> return Err(rewrap("invalid Ascii85 length; a final quantum needs at least two characters"))
     if group.len() > 1 {
         original: group.len()
-        loop group.len() < 5 -> &group.push(84)
+        loop group.len() < 5 -> group.push(84)
         value := 0
         loop d in group -> value = value * 85 + d
         if value > 4294967295 -> return Err(rewrap("invalid Ascii85 quantum; encoded value exceeds four bytes"))
-        loop j in 0..<(original - 1) -> &out.push(to_u8(value >> (24 - j * 8)))
+        loop j in 0..<(original - 1) -> out.push(to_u8(value >> (24 - j * 8)))
     }
     Ok(out)
 }
@@ -223,13 +223,13 @@ base85_encode: fn(data: [U8], alphabet: String, require_full: Bool) -> String Ba
         digits := [Int]{}
         v := value
         loop _ in 0..<5 {
-            &digits.push(v %% 85)
+            digits.push(v %% 85)
             v = v /% 85
         }
         k := digits.len()
         loop k > 0 {
             k -= 1
-            if width == 4 || k >= 5 - (width + 1) -> &out.push(ab[digits[k]])
+            if width == 4 || k >= 5 - (width + 1) -> out.push(ab[digits[k]])
         }
         i += width
     }
@@ -242,7 +242,7 @@ base85_decode: fn(text: String, alphabet: String, require_full: Bool) -> [U8] Ba
     if !require_full && raw.len() %% 5 == 1 -> return Err(rewrap("invalid Base85 length; a final quantum needs at least two characters"))
     ab: alphabet.bytes()
     table := [Int]{}
-    loop _ in 0..<256 -> &table.push(-1)
+    loop _ in 0..<256 -> table.push(-1)
     loop i in 0..<ab.len() -> table[u8_int(ab[i])] = i
     out := [U8]{}
     i := 0
@@ -254,16 +254,16 @@ base85_decode: fn(text: String, alphabet: String, require_full: Bool) -> [U8] Ba
         loop j in 0..<width {
             v: table[u8_int(raw[i + j])]
             if v < 0 -> return Err(rewrap("invalid Base85 character"))
-            &digits.push(v)
+            digits.push(v)
         }
         original: width
-        loop digits.len() < 5 -> &digits.push(84)
+        loop digits.len() < 5 -> digits.push(84)
         value := 0
         loop d in digits -> value = value * 85 + d
         if value > 4294967295 -> return Err(rewrap("invalid Base85 quantum; encoded value exceeds four bytes"))
         count := 4
         if original < 5 -> count = original - 1
-        loop j in 0..<count -> &out.push(to_u8(value >> (24 - j * 8)))
+        loop j in 0..<count -> out.push(to_u8(value >> (24 - j * 8)))
         i += width
     }
     Ok(out)
@@ -285,13 +285,13 @@ encode_alphabet: fn(data: [U8], alphabet: String, padded: Bool) -> String Never!
         a: u8_int(data[i])
         b: if remain > 1 -> u8_int(data[i + 1]) else -> 0
         c: if remain > 2 -> u8_int(data[i + 2]) else -> 0
-        &out.push(chars[a >> 2])
-        &out.push(chars[((a.bit_and(3)) << 4).bit_or((b >> 4))])
-        if remain > 1 -> &out.push(chars[((b.bit_and(15)) << 2).bit_or((c >> 6))]) else {
-            if padded -> &out.push(U8{61})
+        out.push(chars[a >> 2])
+        out.push(chars[((a.bit_and(3)) << 4).bit_or((b >> 4))])
+        if remain > 1 -> out.push(chars[((b.bit_and(15)) << 2).bit_or((c >> 6))]) else {
+            if padded -> out.push(U8{61})
         }
-        if remain > 2 -> &out.push(chars[c.bit_and(63)]) else {
-            if padded -> &out.push(U8{61})
+        if remain > 2 -> out.push(chars[c.bit_and(63)]) else {
+            if padded -> out.push(U8{61})
         }
         i += 3
     }
@@ -368,7 +368,7 @@ decode_strict: fn(text: String, url: Bool, whitespace: Bool, relaxed: Bool) -> [
         bits += 6
         if bits >= 8 {
             bits -= 8
-            &out.push(U8{(buffer >> bits).bit_and(255)})
+            out.push(U8{(buffer >> bits).bit_and(255)})
         }
         buffer = buffer.bit_and(((1 << bits) - 1))
     }

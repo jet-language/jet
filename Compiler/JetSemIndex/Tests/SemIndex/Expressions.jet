@@ -70,7 +70,7 @@ semindex_expressions_original_projects_inline_module_inferred_effects: fn(symbol
 }
 // Filename effect_provenance_origins.jet.
 semindex_expressions_original_dispatch_source: fn() -> String Never! {
-    "Shape: trait {{ area: fn(self) -[IO]> Int }}\ndynamic: fn(shape: Shape) -> Int {{ return shape.area() }}\napply: fn(f: fn() -> Int) -> Int {{ return f() }}\nstored: fn(f: ^fn() -> Int) -> Int {{\n    g: f\n    return g()\n}}\nrun: fn() {{}}\n"
+    "Shape: trait {{ area: fn(self) -[IO]> Int }}\ndynamic: fn(shape: Shape) -> Int {{ return shape.area() }}\napply: fn(f: fn() -> Int) -> Int {{ return f() }}\nstored: fn(f: &&fn() -> Int) -> Int {{\n    g: f\n    return g()\n}}\nrun: fn() {{}}\n"
 }
 semindex_expressions_original_effect_provenance_covers_open_and_trait_dispatch: fn(index: SemIndex) {
     apply: index.effect_of("apply") ?? panic("open callback effects")
@@ -169,7 +169,7 @@ semindex_expressions_original_checked_reference_facts_cover_import_members_alias
             loop old in targets {
                 if old.module_path == target.module_path && old.def_span == target.def_span -> duplicate = true
             }
-            if !duplicate -> &targets.push(target)
+            if !duplicate -> targets.push(target)
         }
     }
     assert(targets.len() == 2, "receiver type must select exact method definition")
@@ -207,8 +207,8 @@ semindex_expressions_test_parsed_optional_method_projection: fn(names: NameFacts
             loop stmt in function.body {
                 if stmt == .Expr(expression) {
                     frame: CallerFrame{name: function.name, owner: None, identity: semindex_callable_identity(ctx.scope_identity, None, function.name)}
-                    semindex_with_caller(&db, &ctx, frame, function.params, mp, (db: SymbolDB, ctx: WalkCtx) -> {
-                        semindex_collect_expr(&db, &ctx, names, parsed.program, source, expression, mp)
+                    semindex_with_caller(db, ctx, frame, function.params, mp, (db: SymbolDB, ctx: WalkCtx) -> {
+                        semindex_collect_expr(db, ctx, names, parsed.program, source, expression, mp)
                     })
                     found = true
                 }

@@ -84,10 +84,10 @@ load_all_snapshots: fn(root: String) -[Env, FS]> [SchemaSnapshot] {
     // Stable insertion order mirrors Rust's sort_by(type_name). Directory
     // order is irrelevant unless two snapshots advertise the same type name.
     keys := [String]{}
-    loop (key, _) in snapshots -> &keys.push(key)
-    &keys.sort()
+    loop (key, _) in snapshots -> keys.push(key)
+    keys.sort()
     loop key in keys {
-        &result.push(snapshots[key])
+        result.push(snapshots[key])
         index := result.len() - 1
         loop index > 0 && result[index - 1].type_name > snapshots[key].type_name {
             result[index] = result[index - 1]
@@ -120,19 +120,19 @@ jet_driver_schema_pending_breaks: fn(modules: [[Item]], snapshots: [String:Schem
                 if !definition.is_published_schema -> next
                 matched := false
                 loop diagnostic in diagnostics { if diagnostic.what.contains("`{definition.name}`") -> matched = true }
-                if matched && !names.contains(definition.name) -> &names.push(definition.name)
+                if matched && !names.contains(definition.name) -> names.push(definition.name)
             }
         }
     }
-    &names.sort()
+    names.sort()
     names
 }
 
-jet_driver_check_schema_migrations: fn(request: JetDriverCompileRequest, registration: ^SemaRegistrationGraph, checked: SemaGraphResult, retain_inputs: Bool) -[Env, FS]> JetDriverSchemaCheckResult {
+jet_driver_check_schema_migrations: fn(request: JetDriverCompileRequest, registration: &&SemaRegistrationGraph, checked: SemaGraphResult, retain_inputs: Bool) -[Env, FS]> JetDriverSchemaCheckResult {
     if request.schema_snapshots == .Val(snapshots) {
         ingress: if retain_inputs -> Val(JetDriverSchemaIngress.Supplied{snapshots: snapshots}) else -> None
-        checked_schema := sema_check_schema_migration_graph(^registration, checked, snapshots)
-        return JetDriverSchemaCheckResult{registration: ^checked_schema.registration, diagnostics: ^checked_schema.diagnostics, ingress: ingress}
+        checked_schema := sema_check_schema_migration_graph(registration, checked, snapshots)
+        return JetDriverSchemaCheckResult{registration: checked_schema.registration.move(), diagnostics: checked_schema.diagnostics.move(), ingress: ingress}
     }
     root: jet_driver_entry_root_path(request.authorized_sources)
     snapshots := [String:SchemaSnapshot]{}
@@ -145,11 +145,11 @@ jet_driver_check_schema_migrations: fn(request: JetDriverCompileRequest, registr
                 seen[definition.name] = true
                 read: jet_driver_read_schema_dependency(root, definition.name)
                 if read.outcome == .Parsed(_, snapshot) -> snapshots[definition.name] = snapshot
-                if retain_inputs -> &reads.push(read)
+                if retain_inputs -> reads.push(read)
             }
         }
     }
     ingress: if retain_inputs -> Val(JetDriverSchemaIngress.Cache{root: root, reads: reads}) else -> None
-    checked_schema := sema_check_schema_migration_graph(^registration, checked, snapshots)
-    JetDriverSchemaCheckResult{registration: ^checked_schema.registration, diagnostics: ^checked_schema.diagnostics, ingress: ingress}
+    checked_schema := sema_check_schema_migration_graph(registration, checked, snapshots)
+    JetDriverSchemaCheckResult{registration: checked_schema.registration.move(), diagnostics: checked_schema.diagnostics.move(), ingress: ingress}
 }

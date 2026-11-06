@@ -28,10 +28,10 @@ PerlError: enum {
 }
 
 impl Session.Close {
-    close: fn(^self) { abi.close(self.value) }
+    close: fn(&&self) { abi.close(self.value) }
 }
 
-close: fn(session: ^Session) { abi.close(session.value) }
+close: fn(session: &&Session) { abi.close(session.value) }
 
 open: fn() -> Session PerlError! {
     handle: abi.open()
@@ -48,9 +48,9 @@ decode_response: fn(raw: String, code: Int) -> Dyn PerlError! {
     if code == 5 -> return Err(PerlError.Limit)
     if code != 0 -> return Err(PerlError.Protocol)
     response := json.parse(raw) ?? return Err(PerlError.Protocol)
-    succeeded := (&response.field("ok") ?? Dyn.Bool(false)).bool() ?? false
+    succeeded := (response.field("ok") ?? Dyn.Bool(false)).bool() ?? false
     if !succeeded -> return Err(PerlError.CommandFailed)
-    return Ok(&response.field("value") ?? Dyn.Null)
+    return Ok(response.field("value") ?? Dyn.Null)
 }
 
 fail: fn(session: Session, input: Dyn, deadline_ms: Int) -> Dyn PerlError! {

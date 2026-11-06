@@ -36,14 +36,23 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Remove the mark.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0225</code>: <code>tests/ui/E0225_read_param_takes_amp.stderr</code>.</p>
-<pre class="diag">Error [jet.UnusedPlaceMark]: `show` only reads this argument, so it takes no `&amp;` mark
-  --&gt; tests/ui/E0225_read_param_takes_amp.jet:7:10
+<p>First UI snapshot mentioning <code>E0225</code>: <code>tests/ui/move_mark_borrowed.stderr</code>.</p>
+<pre class="diag">Error [jet.MissingMoveMarker]: `xs` cannot be moved from borrowed storage
+  --&gt; tests/ui/move_mark_borrowed.jet:8:13
     |
-  7 |     show(&amp;x)
-    |          ^
- Why: A mark shows that a call writes (`&amp;`) or takes (`^`) the named place; `show` declares this parameter read-only, so the call leaves the place unmarked
- Fix: Remove `&amp;`
+  8 |     Box{xs: xs.move()}
+    |             ^^^^^^^
+ Why: Read and write parameters and named windows keep ownership with their source
+ Fix: Copy the value with `xs.copy()`, or declare the parameter `xs: &amp;&amp;[Int]` to take ownership
+More: jet-lang.dev/e/E0201
+
+Error [jet.UnusedPlaceMark]: `.move()` takes a named place, not this value
+  --&gt; tests/ui/move_mark_borrowed.jet:17:14
+    |
+ 17 |     first := grid[0].move()
+    |              ^^^^^^^^^^^^
+ Why: `.move()` moves a name or one of its fields out of its owner; an element stays owned by its collection, and a call result or literal is already new
+ Fix: Move the whole collection or name, or drop `.move()` from a fresh value
 More: jet-lang.dev/e/E0225
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

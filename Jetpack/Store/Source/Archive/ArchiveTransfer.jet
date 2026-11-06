@@ -10,7 +10,7 @@
 // Export a package closure into the canonical signed archive.
 store_export_archive: fn(verification: &StoreVerification, roots: HangarRoots, target: String, include_closure: Bool, key: String?) -> (bytes: [U8], report: HangarArchiveReport) StoreError! {
     _lock: env_runtime_lock(roots.root, "hangar")
-    archive: store_archive_build_unlocked(&verification, roots, target, include_closure, false)
+    archive: store_archive_build_unlocked(verification, roots, target, include_closure, false)
     signer: store_archive_signing_key(roots, key, true)
     signed: store_archive_sign_decoded(archive, signer)
     bytes: signed.encode()
@@ -23,7 +23,7 @@ store_export_archive: fn(verification: &StoreVerification, roots: HangarRoots, t
 // structurally complete for the archive decoder.
 store_export_unsigned_archive: fn(verification: &StoreVerification, roots: HangarRoots, target: String, include_closure: Bool) -> [U8] StoreError! {
     _lock: env_runtime_lock(roots.root, "hangar")
-    archive: store_archive_build_unlocked(&verification, roots, target, include_closure, false)
+    archive: store_archive_build_unlocked(verification, roots, target, include_closure, false)
     archive.encode()
 }
 
@@ -35,7 +35,7 @@ store_import_archive: fn(verification: &StoreVerification, roots: HangarRoots, b
     if bytes.len() > STORE_MAX_ARCHIVE_BYTES -> return Err(StoreError.InvalidData("archive exceeds the 1 GiB limit"))
     archive: HangarArchive.decode(bytes)
     archive.verify_signature(roots, key, allow_unsigned)
-    store_archive_import_verified(&verification, roots, archive, false)
+    store_archive_import_verified(verification, roots, archive, false)
 }
 
 // Import an archive returned by an authenticated shared-store broker. The
@@ -48,7 +48,7 @@ store_import_broker_archive: fn(verification: &StoreVerification, roots: HangarR
     archive: HangarArchive.decode(bytes)
     if archive.signature == None -> return Err(StoreError.InvalidData("shared-store broker returned an unsigned archive"))
     store_archive_verify_contents(roots, archive, false)
-    store_archive_import_verified(&verification, roots, archive, false)
+    store_archive_import_verified(verification, roots, archive, false)
 }
 
 // Report the archive, renaming a package root to its local entry identity,
@@ -62,7 +62,7 @@ store_archive_import_verified: fn(verification: &StoreVerification, roots: Hanga
         break
     }
     _lock: env_runtime_lock(roots.root, "hangar")
-    store_archive_import_unlocked(&verification, roots, archive, allow_nix_absolute_symlinks)
+    store_archive_import_unlocked(verification, roots, archive, allow_nix_absolute_symlinks)
     Ok(report)
 }
 
@@ -86,18 +86,18 @@ store_recover_repair_quarantine_unlocked: fn(verification: &StoreVerification, r
     objects: files.join(hangar, "objects")
     store_ensure_real_directory(objects, "Hangar object pool")
     permissions := MovePathPermissions.default()
-    recovered: store_archive_recover_quarantine_entries(&verification, roots, quarantine, objects, &permissions) ? count -> count ! error -> {
-        &permissions.restore() ?? return Err(StoreError.Other("{error.message()}; restoring Hangar permissions failed: {err.message()}"))
+    recovered: store_archive_recover_quarantine_entries(verification, roots, quarantine, objects, permissions) ? count -> count ! error -> {
+        permissions.restore() ?? return Err(StoreError.Other("{error.message()}; restoring Hangar permissions failed: {err.message()}"))
         return Err(error)
     }
-    &permissions.restore()
+    permissions.restore()
     Ok(recovered)
 }
 
 store_archive_recover_quarantine_entries: fn(verification: &StoreVerification, roots: HangarRoots, quarantine: String, objects: String, permissions: &MovePathPermissions) -> Int StoreError! {
     hangar: roots.hangar_dir()
-    &permissions.make_writable(quarantine, hangar)
-    &permissions.make_writable(objects, hangar)
+    permissions.make_writable(quarantine, hangar)
+    permissions.make_writable(objects, hangar)
     recovered := 0
     loop item in files.list_dir(quarantine) {
         repair_name: item.name.removeprefix("repair-")
@@ -145,7 +145,7 @@ store_archive_recover_quarantine_entries: fn(verification: &StoreVerification, r
                     files.rename(destination, backup) ?? return Err(StoreError.Other("{sealing.message()}; repair quarantine restore failed: {StoreError.IO(err).message()}"))
                     return Err(sealing)
                 }
-                store_write_seal(&verification, destination, hangar, digest)
+                store_write_seal(verification, destination, hangar, digest)
                 store_sync_store_directory(objects)
             }
         }
@@ -185,8 +185,8 @@ store_verify_archive: fn(verification: &StoreVerification, roots: HangarRoots, t
         store_archive_verify_contents(roots, archive, false)
         return Ok(archive.report())
     }
-    entry: store_archive_select_entry_unlocked(&verification, roots, target)
-    store_archive_verify_live_entry_unlocked(&verification, roots, entry)
+    entry: store_archive_select_entry_unlocked(verification, roots, target)
+    store_archive_verify_live_entry_unlocked(verification, roots, entry)
     sidecar: store_archive_signature_path(roots, entry)
     if files.is_file(sidecar) {
         archive: HangarArchive.decode(store_archive_read_bounded(sidecar))
@@ -211,8 +211,8 @@ store_sign_archive: fn(verification: &StoreVerification, roots: HangarRoots, tar
         store_archive_write_atomic(destination ?? target, signed.encode())
         return Ok(signed.report())
     }
-    entry: store_archive_select_entry_unlocked(&verification, roots, target)
-    archive: store_archive_build_unlocked(&verification, roots, entry.id, false, false)
+    entry: store_archive_select_entry_unlocked(verification, roots, target)
+    archive: store_archive_build_unlocked(verification, roots, entry.id, false, false)
     signer: store_archive_signing_key(roots, key, true)
     signed: store_archive_sign_decoded(archive, signer)
     sidecar: destination ?? store_archive_signature_path(roots, entry)
@@ -230,10 +230,10 @@ store_copy_archive: fn(verification: &StoreVerification, roots: HangarRoots, tar
     if destination.contains("://") {
         return Err(StoreError.InvalidData("Hangar copy has no configured remote archive transport; use a local Hangar root or export/import the signed archive"))
     }
-    exported: store_export_archive(&verification, roots, target, true, key)
+    exported: store_export_archive(verification, roots, target, true, key)
     archive: HangarArchive.decode(exported.bytes)
     archive.verify_signature(roots, key, false)
-    store_archive_import_verified(&verification, HangarRoots.at(destination), archive, false)
+    store_archive_import_verified(verification, HangarRoots.at(destination), archive, false)
 }
 
 // Repair a corrupt live object from a signed archive. No source archive is
@@ -241,17 +241,17 @@ store_copy_archive: fn(verification: &StoreVerification, roots: HangarRoots, tar
 // object is quarantined before import and restored if any import step fails.
 store_repair_archive: fn(verification: &StoreVerification, roots: HangarRoots, target: String, source_archive: String?, key: String?) -> HangarArchiveReport StoreError! {
     _lock: env_runtime_lock(roots.root, "hangar")
-    store_archive_repair_unlocked(&verification, roots, target, source_archive, key)
+    store_archive_repair_unlocked(verification, roots, target, source_archive, key)
 }
 
 store_archive_repair_unlocked: fn(verification: &StoreVerification, roots: HangarRoots, target: String, source_archive: String?, key: String?) -> HangarArchiveReport StoreError! {
     hangar: roots.hangar_dir()
     store_ensure_real_directory(hangar, "Hangar root")
     store_ensure_real_directory(files.join(hangar, "objects"), "Hangar object pool")
-    store_recover_closure_journal_unlocked(&verification, roots)
-    entry: store_archive_select_entry_unlocked(&verification, roots, target)
+    store_recover_closure_journal_unlocked(verification, roots)
+    entry: store_archive_select_entry_unlocked(verification, roots, target)
     live_failure := StoreError?{None}
-    if store_archive_verify_live_entry_unlocked(&verification, roots, entry) == {
+    if store_archive_verify_live_entry_unlocked(verification, roots, entry) == {
         .Ok(_) -> {}
         .Err(error) -> live_failure = Val(error)
     }
@@ -278,11 +278,11 @@ store_archive_repair_unlocked: fn(verification: &StoreVerification, roots: Hanga
     backup: files.join(quarantine, "repair-{entry.envelope.output_hash}-{store_archive_unique_suffix()}")
     had_object: store_archive_lstat(object_path) != None
     permissions := MovePathPermissions.default()
-    report: store_archive_repair_swap(&verification, roots, archive, object_path, backup, quarantine, had_object, &permissions) ? value -> value ! error -> {
-        &permissions.restore() ?? return Err(StoreError.Other("{error.message()}; restoring Hangar permissions failed: {err.message()}"))
+    report: store_archive_repair_swap(verification, roots, archive, object_path, backup, quarantine, had_object, permissions) ? value -> value ! error -> {
+        permissions.restore() ?? return Err(StoreError.Other("{error.message()}; restoring Hangar permissions failed: {err.message()}"))
         return Err(error)
     }
-    &permissions.restore() ?? return Err(StoreError.Other("repair succeeded; restoring Hangar permissions failed: {err.message()}"))
+    permissions.restore() ?? return Err(StoreError.Other("repair succeeded; restoring Hangar permissions failed: {err.message()}"))
     Ok(report)
 }
 
@@ -292,22 +292,22 @@ store_archive_repair_swap: fn(verification: &StoreVerification, roots: HangarRoo
     hangar: roots.hangar_dir()
     object_parent: store_archive_parent_or(object_path, hangar)
     writable_source: if had_object -> object_path else -> object_parent
-    &permissions.make_writable(writable_source, hangar)
-    &permissions.make_writable(quarantine, hangar)
+    permissions.make_writable(writable_source, hangar)
+    permissions.make_writable(quarantine, hangar)
     if had_object {
         files.rename(object_path, backup)
-        &permissions.renamed(object_path, backup)
+        permissions.renamed(object_path, backup)
         store_sync_store_directory(quarantine)
         store_sync_store_directory(object_parent)
     }
     report: archive.report()
     import_failure := StoreError?{None}
-    if store_archive_import_unlocked(&verification, roots, archive, false) == {
+    if store_archive_import_unlocked(verification, roots, archive, false) == {
         .Ok(_) -> {}
         .Err(error) -> import_failure = Val(error)
     }
     if import_failure == {
-        .Val(error) -> return Err(store_archive_repair_rollback(error, object_path, backup, object_parent, had_object, &permissions))
+        .Val(error) -> return Err(store_archive_repair_rollback(error, object_path, backup, object_parent, had_object, permissions))
         .None -> {}
     }
     if had_object {
@@ -326,7 +326,7 @@ store_archive_repair_rollback: fn(error: StoreError, object_path: String, backup
         .Ok(_) -> {
             if store_archive_remove_tree(object_path) == {
                 .Err(failed) -> {
-                    &rollback_errors.push("removing imported output: {failed.message()}")
+                    rollback_errors.push("removing imported output: {failed.message()}")
                 }
                 else -> {}
             }
@@ -335,7 +335,7 @@ store_archive_repair_rollback: fn(error: StoreError, object_path: String, backup
             if missing == {
                 .NotFound(_) -> {}
                 else -> {
-                    &rollback_errors.push("checking imported output: {StoreError.IO(missing).message()}")
+                    rollback_errors.push("checking imported output: {StoreError.IO(missing).message()}")
                 }
             }
         }
@@ -344,20 +344,20 @@ store_archive_repair_rollback: fn(error: StoreError, object_path: String, backup
         if rollback_errors.len() == 0 {
             if files.rename(backup, object_path) == {
                 .Ok(_) -> {
-                    &permissions.renamed(backup, object_path)
+                    permissions.renamed(backup, object_path)
                     if store_sync_store_directory(object_parent) == {
                         .Err(failed) -> {
-                            &rollback_errors.push("syncing restored output: {failed.message()}")
+                            rollback_errors.push("syncing restored output: {failed.message()}")
                         }
                         else -> {}
                     }
                 }
                 .Err(failed) -> {
-                    &rollback_errors.push("restoring quarantined output: {StoreError.IO(failed).message()}")
+                    rollback_errors.push("restoring quarantined output: {StoreError.IO(failed).message()}")
                 }
             }
         } else {
-            &rollback_errors.push("quarantined output remains at `{backup}`")
+            rollback_errors.push("quarantined output remains at `{backup}`")
         }
     }
     if rollback_errors.len() == 0 -> return error.copy()
@@ -378,14 +378,14 @@ store_archive_repair_output_path: fn(roots: HangarRoots, entry: StoreEntry) -> S
 store_archive_build_unlocked: fn(verification: &StoreVerification, roots: HangarRoots, target: String, include_closure: Bool, allow_nix_absolute_symlinks: Bool) -> HangarArchive StoreError! {
     hangar: roots.hangar_dir()
     store_require_real_directory(hangar, "Hangar root")
-    entry: store_archive_select_entry_unlocked(&verification, roots, target)
-    store_archive_verify_live_entry_unlocked(&verification, roots, entry)
+    entry: store_archive_select_entry_unlocked(verification, roots, target)
+    store_archive_verify_live_entry_unlocked(verification, roots, entry)
     objects_dir: files.join(hangar, "objects")
     store_require_real_directory(objects_dir, "Hangar object pool")
-    graph: store_closure_graph_structure_unlocked(&verification, roots)
+    graph: store_closure_graph_structure_unlocked(verification, roots)
     root_digest: entry.envelope.output_hash
     digests := if include_closure -> graph.closure(root_digest) else -> [String]{root_digest}
-    if digests.len() == 0 -> &digests.push(root_digest)
+    if digests.len() == 0 -> digests.push(root_digest)
     digests = store_archive_sorted_unique(digests)
 
     selected := [String: StoreEntry]{}
@@ -405,7 +405,7 @@ store_archive_build_unlocked: fn(verification: &StoreVerification, roots: Hangar
         if !store_archive_is_under(object.path, canonical_objects) {
             return Err(StoreError.InvalidData("closure object `{digest}` is outside the local Hangar object pool"))
         }
-        &objects.push(HangarArchiveObject{
+        objects.push(HangarArchiveObject{
             id: digest,
             digest: digest,
             meta: "",
@@ -417,19 +417,19 @@ store_archive_build_unlocked: fn(verification: &StoreVerification, roots: Hangar
         candidate: selected[id]
         primary: candidate.envelope.output_hash
         if !digests.contains(primary) -> next
-        &objects.push(HangarArchiveObject{id: candidate.id, digest: primary, meta: candidate.meta_json(), root_mode: 0, nodes: [HangarArchiveNode]{}})
+        objects.push(HangarArchiveObject{id: candidate.id, digest: primary, meta: candidate.meta_json(), root_mode: 0, nodes: [HangarArchiveNode]{}})
     }
-    &objects.sort_by(object -> object.digest)
-    &objects.sort_by(object -> object.id)
+    objects.sort_by(object -> object.digest)
+    objects.sort_by(object -> object.id)
     output_ids := [String]{}
     package_ids := [String]{}
     loop object in objects {
         if object.meta == "" {
             if output_ids.contains(object.digest) -> return Err(StoreError.InvalidData("archive contains duplicate output records"))
-            &output_ids.push(object.digest)
+            output_ids.push(object.digest)
         } else {
             if package_ids.contains(object.id) -> return Err(StoreError.InvalidData("archive contains duplicate package records"))
-            &package_ids.push(object.id)
+            package_ids.push(object.id)
         }
     }
     Ok(HangarArchive{root_id: entry.id, objects, nix_manifest: None, signature: None})
@@ -456,9 +456,9 @@ store_archive_import_unlocked: fn(verification: &StoreVerification, roots: Hanga
     files.create_dir(stage)
     files.create_dir(stage_objects)
     moved := [HangarArchiveMove]{}
-    count: store_archive_import_staged(&verification, roots, archive, allow_nix_absolute_symlinks, stage, stage_objects, objects_dir, &moved) ? value -> value ! error -> {
+    count: store_archive_import_staged(verification, roots, archive, allow_nix_absolute_symlinks, stage, stage_objects, objects_dir, moved) ? value -> value ! error -> {
         failure := error
-        if store_archive_rollback_import_moves(&verification, moved, hangar) == {
+        if store_archive_rollback_import_moves(verification, moved, hangar) == {
             .Err(rollback) -> failure = StoreError.Other("{error.message()}; archive import rollback failed: {rollback.message()}")
             else -> {}
         }
@@ -480,11 +480,11 @@ store_archive_import_staged: fn(verification: &StoreVerification, roots: HangarR
             if entry.envelope.output_hash != object.digest {
                 return Err(StoreError.InvalidData("package record `{entry.id}` names `{object.digest}` but its primary output is `{entry.envelope.output_hash}`"))
             }
-            &package_records.push(entry)
+            package_records.push(entry)
             next
         }
         if seen_digests.contains(object.digest) -> return Err(StoreError.InvalidData("archive contains duplicate output `{object.digest}`"))
-        &seen_digests.push(object.digest)
+        seen_digests.push(object.digest)
         store_archive_validate_digest(object.digest)
         output: files.join(stage_objects, object.digest)
         store_archive_write_nodes(output, object.nodes, object.root_mode, allow_nix_absolute_symlinks)
@@ -514,7 +514,7 @@ store_archive_import_staged: fn(verification: &StoreVerification, roots: HangarR
             break
         }
     }
-    store_ensure_hangar_capacity(&verification, roots, store_admission_reservation(incoming_bytes), Val(stage))
+    store_ensure_hangar_capacity(verification, roots, store_admission_reservation(incoming_bytes), Val(stage))
 
     loop digest in seen_digests {
         staged: files.join(stage_objects, digest)
@@ -522,7 +522,7 @@ store_archive_import_staged: fn(verification: &StoreVerification, roots: HangarR
         if store_archive_lstat_ok(destination) == {
             .Val(existing) -> {
                 if existing.is_symlink -> return Err(StoreError.InvalidData("existing Hangar object `{digest}` is a symlink"))
-                actual: store_verified_output_hash_persistent(&verification, destination, Val(hangar), false)
+                actual: store_verified_output_hash_persistent(verification, destination, Val(hangar), false)
                 if actual != digest -> return Err(StoreError.InvalidData("existing Hangar object `{digest}` has a conflicting digest"))
                 store_archive_remove_tree(staged)
             }
@@ -533,15 +533,15 @@ store_archive_import_staged: fn(verification: &StoreVerification, roots: HangarR
                 // before exposing it to the closure transaction.
                 store_archive_make_tree_writable(staged)
                 files.rename(staged, destination)
-                &moved.push(HangarArchiveMove{destination, staged})
+                moved.push(HangarArchiveMove{destination, staged})
                 store_archive_seal_tree(destination)
-                store_write_seal(&verification, destination, hangar, digest)
+                store_write_seal(verification, destination, hangar, digest)
             }
         }
     }
 
     store_sync_store_directory(objects_dir)
-    store_register_entries_unlocked(&verification, roots, package_records)
+    store_register_entries_unlocked(verification, roots, package_records)
     Ok(package_records.len())
 }
 
@@ -595,7 +595,7 @@ store_archive_map_member_path: fn(source_out: String, member: String, destinatio
 }
 
 store_archive_verify_live_entry_unlocked: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry) StoreError! {
-    store_verify_hangar_object_unlocked(&verification, roots, entry) ?? return Err(StoreError.Other(err.what()))
+    store_verify_hangar_object_unlocked(verification, roots, entry) ?? return Err(StoreError.Other(err.what()))
 }
 
 // The Hangar output identity of a staged tree. Nix closures may keep
@@ -638,7 +638,7 @@ store_archive_verify_staged: fn(roots: HangarRoots, archive: HangarArchive, stag
         if object.meta != "" -> next
         store_archive_write_nodes(files.join(stage, object.digest), object.nodes, object.root_mode, allow_nix_absolute_symlinks)
         store_archive_verify_object(roots, object, stage, allow_nix_absolute_symlinks)
-        &outputs.push(object.digest)
+        outputs.push(object.digest)
     }
     loop object in archive.objects {
         if object.meta == "" -> next
@@ -662,7 +662,7 @@ store_archive_verify_staged: fn(roots: HangarRoots, archive: HangarArchive, stag
 // projections before selecting an entry so export, sign, and repair never
 // publish or act on a pre-receipt view.
 store_archive_select_entry_unlocked: fn(verification: &StoreVerification, roots: HangarRoots, target: String) -> StoreEntry StoreError! {
-    store_migrate_closure_graph_unlocked(&verification, roots)
+    store_migrate_closure_graph_unlocked(verification, roots)
     store_archive_select_entry_from(store_list_unlocked(roots), target)
 }
 
@@ -694,8 +694,8 @@ store_archive_collect_nodes: fn(root: String, allow_nix_absolute_symlinks: Bool)
     canonical_root: files.canonicalize(root)
     hardlinks := [String: String]{}
     nodes := [HangarArchiveNode]{}
-    store_archive_collect_nodes_at(root, "", canonical_root, &hardlinks, &nodes, allow_nix_absolute_symlinks)
-    &nodes.sort_by(node -> node.path)
+    store_archive_collect_nodes_at(root, "", canonical_root, hardlinks, nodes, allow_nix_absolute_symlinks)
+    nodes.sort_by(node -> node.path)
     Ok(nodes)
 }
 
@@ -705,11 +705,11 @@ store_archive_collect_nodes_at: fn(path: String, relative: String, canonical_roo
     if {
         metadata.is_dir -> {
             if relative != "" {
-                &out.push(HangarArchiveNode{path: store_archive_portable_path(relative), kind: HangarArchiveNodeKind.Directory, mode: metadata.mode, bytes: [U8]{}})
+                out.push(HangarArchiveNode{path: store_archive_portable_path(relative), kind: HangarArchiveNodeKind.Directory, mode: metadata.mode, bytes: [U8]{}})
             }
             loop child in files.list_dir(path) {
                 child_relative: if relative == "" -> child.name else -> "{relative}/{child.name}"
-                store_archive_collect_nodes_at(child.path, child_relative, canonical_root, &hardlinks, &out, allow_nix_absolute_symlinks)
+                store_archive_collect_nodes_at(child.path, child_relative, canonical_root, hardlinks, out, allow_nix_absolute_symlinks)
             }
         }
         metadata.is_file -> {
@@ -719,14 +719,14 @@ store_archive_collect_nodes_at: fn(path: String, relative: String, canonical_roo
             if metadata.links > 1 {
                 if hardlinks.get(identity) == {
                     .Val(first) -> {
-                        &out.push(HangarArchiveNode{path: node_path, kind: HangarArchiveNodeKind.Hardlink, mode: metadata.mode, bytes: first.bytes()})
+                        out.push(HangarArchiveNode{path: node_path, kind: HangarArchiveNodeKind.Hardlink, mode: metadata.mode, bytes: first.bytes()})
                         return
                     }
                     .None -> hardlinks[identity] = node_path
                 }
             }
             contents: store_archive_read_bounded_limit(path, STORE_ARCHIVE_MAX_NODE_BYTES, "archive file")
-            &out.push(HangarArchiveNode{path: node_path, kind: HangarArchiveNodeKind.File, mode: metadata.mode, bytes: contents})
+            out.push(HangarArchiveNode{path: node_path, kind: HangarArchiveNodeKind.File, mode: metadata.mode, bytes: contents})
         }
         metadata.is_symlink -> {
             target: files.read_link(path)
@@ -739,7 +739,7 @@ store_archive_collect_nodes_at: fn(path: String, relative: String, canonical_roo
                 resolved: files.canonicalize(path) ?? return Err(StoreError.InvalidData("symlink `{path}` is dangling or cyclic: {StoreError.IO(err).message()}"))
                 if !store_archive_is_under(resolved, canonical_root) -> return Err(StoreError.InvalidData("symlink target escapes the Hangar output root"))
             }
-            &out.push(HangarArchiveNode{path: store_archive_portable_path(relative), kind: HangarArchiveNodeKind.Symlink, mode: metadata.mode, bytes: target.bytes()})
+            out.push(HangarArchiveNode{path: store_archive_portable_path(relative), kind: HangarArchiveNodeKind.Symlink, mode: metadata.mode, bytes: target.bytes()})
         }
         else -> return Err(StoreError.InvalidData("special files are not portable Hangar archive nodes"))
     }
@@ -790,9 +790,9 @@ store_archive_write_nodes: fn(root: String, nodes: [HangarArchiveNode], root_mod
     }
     directories := [HangarArchiveNode]{}
     loop node in nodes {
-        if node.kind == HangarArchiveNodeKind.Directory -> &directories.push(node)
+        if node.kind == HangarArchiveNodeKind.Directory -> directories.push(node)
     }
-    &directories.sort_by(node -> 0 - store_archive_separator_count(node.path))
+    directories.sort_by(node -> 0 - store_archive_separator_count(node.path))
     loop node in directories -> store_archive_set_mode(files.join(root, node.path), node.mode)
     if root_mode != 0 -> store_archive_set_mode(root, root_mode)
 }
@@ -828,7 +828,7 @@ store_archive_link_target: fn(root: String, link: String, bytes: [U8], allow_nix
                 normalized = normalized[0..<(normalized.len() - 1)]
             }
             else -> {
-                &normalized.push(component)
+                normalized.push(component)
             }
         }
     }
@@ -871,7 +871,7 @@ store_archive_rollback_import_moves: fn(verification: &StoreVerification, moved:
     loop index >= 0 {
         entry: moved[index]
         if store_archive_lstat_ok(entry.destination) != None {
-            store_remove_seal(&verification, entry.destination, hangar)
+            store_remove_seal(verification, entry.destination, hangar)
             store_archive_make_tree_writable(entry.destination)
             files.rename(entry.destination, entry.staged)
         }
@@ -926,7 +926,7 @@ store_archive_decode_secret: fn(bytes: [U8]) -> [U8] StoreError! {
     loop index < trimmed.len() {
         high: store_archive_hex_value(trimmed[index]) ?? return Err(StoreError.InvalidData("archive key has invalid hex"))
         low: store_archive_hex_value(trimmed[index + 1]) ?? return Err(StoreError.InvalidData("archive key has invalid hex"))
-        &out.push(U8{(high << 4).bit_or(low)})
+        out.push(U8{(high << 4).bit_or(low)})
         index += 2
     }
     Ok(out)
@@ -970,7 +970,7 @@ store_archive_read_bounded_limit: fn(path: String, limit: Int, label: String) ->
     loop {
         chunk: reader.read(65536)
         if chunk.len() == 0 -> break
-        loop byte in chunk -> &bytes.push(byte)
+        loop byte in chunk -> bytes.push(byte)
         if bytes.len() > limit -> return Err(StoreError.InvalidData("{label} exceeded its bound while being read"))
     }
     Ok(bytes)
@@ -1131,10 +1131,10 @@ store_archive_now_secs: fn() -[Time]> Int Never! {
 
 store_archive_sorted_unique: fn(values: [String]) -> [String] Never! {
     sorted := values
-    &sorted.sort()
+    sorted.sort()
     out := [String]{}
     loop value in sorted {
-        if out.len() == 0 || out[out.len() - 1] != value -> &out.push(value)
+        if out.len() == 0 || out[out.len() - 1] != value -> out.push(value)
     }
     out
 }

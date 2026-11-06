@@ -15,15 +15,15 @@ pkg_binder_c_escape: fn(value: String) -> String Never! {
     loop byte in value.bytes() {
         code: Int.from_u8(byte)
         if code == {
-            92 -> &out.push("\\\\")
-            34 -> &out.push("\\\"")
-            10 -> &out.push("\\n")
-            13 -> &out.push("\\r")
-            9 -> &out.push("\\t")
+            92 -> out.push("\\\\")
+            34 -> out.push("\\\"")
+            10 -> out.push("\\n")
+            13 -> out.push("\\r")
+            9 -> out.push("\\t")
             else -> {
                 if {
-                    code >= 32 && code <= 126 -> &out.push(pkg_bytes_text([U8]{byte}, 0, 1))
-                    else -> &out.push("\\{code /% 64}{(code /% 8) % 8}{code % 8}")
+                    code >= 32 && code <= 126 -> out.push(pkg_bytes_text([U8]{byte}, 0, 1))
+                    else -> out.push("\\{code /% 64}{(code /% 8) % 8}{code % 8}")
                 }
             }
         }
@@ -38,10 +38,10 @@ pkg_binder_fill_template: fn(template: String, slots: [String: String]) -> Strin
     out := [String]{}
     loop index in 0..<parts.len() {
         if index % 2 == 0 {
-            &out.push(parts[index])
+            out.push(parts[index])
             next
         }
-        &out.push(slots.get(parts[index]) ?? "@@{parts[index]}@@")
+        out.push(slots.get(parts[index]) ?? "@@{parts[index]}@@")
     }
     out.join("")
 }
@@ -51,8 +51,8 @@ pkg_binder_fill_template: fn(template: String, slots: [String: String]) -> Strin
 pkg_binder_identity_digest: fn(parts: [String]) -> String Never! {
     identity := [U8]{}
     loop index in 0..<parts.len() {
-        if index > 0 -> &identity.push(U8{0})
-        loop byte in parts[index].bytes() -> &identity.push(byte)
+        if index > 0 -> identity.push(U8{0})
+        loop byte in parts[index].bytes() -> identity.push(byte)
     }
     pkg_sha256_hex(identity)
 }
@@ -125,7 +125,7 @@ pkg_binder_descriptor_for: fn(language: ForeignLanguage, label: String) -> Binde
 // Append the standard boundary record for one built archive.
 pkg_binder_append_artifact_boundary: fn(provenance: &String, language: ForeignLanguage, label: String, lib: String, source: String, archive: String, toolchain: String) ForeignBindError! -[FS, Env, Exec, Time.Wait]> {
     descriptor: pkg_binder_descriptor_for(language, label)
-    if pkg_bridge_append_boundary_for_artifact(&provenance, descriptor, lib, source, archive, toolchain) == {
+    if pkg_bridge_append_boundary_for_artifact(provenance, descriptor, lib, source, archive, toolchain) == {
         .Ok(_) -> {}
         .Err(error) -> return Err(pkg_binder_bridge_error(error))
     }

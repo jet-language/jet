@@ -97,7 +97,7 @@ jet_cli_project_status_render: fn(target: String, rows: [JetCLIProjectClaim], er
     if json {
         claims := [JetCLIStatusValue]{}
         loop row in rows {
-            &claims.push(jet_cli_status_object([JetCLIStatusField]{
+            claims.push(jet_cli_status_object([JetCLIStatusField]{
                 jet_cli_status_field("action", jet_cli_status_text(row.action)),
                 jet_cli_status_field("claim", jet_cli_status_text(row.name)),
                 jet_cli_status_field("reason", jet_cli_status_text(row.reason)),
@@ -131,13 +131,13 @@ jet_cli_project_status_at: fn(root: String, cwd: String, target: String, json: B
         if !jet_cli_project_status_matches(receipt, canonical, directory) -> next
         name: receipt.claim.verb
         if by_verb.get(name) == None {
-            &verbs.push(name)
+            verbs.push(name)
             by_verb[name] = [JetCLIReceipt]{}
         }
-        &by_verb[name].push(receipt)
+        by_verb[name].push(receipt)
     }
-    &verbs.sort()
+    verbs.sort()
     rows := [JetCLIProjectClaim]{}
-    loop name in verbs -> &rows.push(jet_cli_project_status_summarize(root, by_verb.get(name) ?? [JetCLIReceipt]{}, name, target))
+    loop name in verbs -> rows.push(jet_cli_project_status_summarize(root, by_verb.get(name) ?? [JetCLIReceipt]{}, name, target))
     jet_cli_project_status_render(target, rows, "", json)
 }

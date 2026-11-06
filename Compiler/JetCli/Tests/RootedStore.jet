@@ -8,7 +8,7 @@ use {
 
 JetCLIRootedFixtureRoot: struct { path: String }
 impl JetCLIRootedFixtureRoot.Close {
-    close: fn(^self) -[FS]> {
+    close: fn(&&self) -[FS]> {
         cli_files.remove_all(self.path).drop("test root cleanup")
     }
 }
@@ -21,7 +21,7 @@ impl JetCLIRootedFixtureRoot.Close {
     root: "{cli_sys.temp_dir()}/jet-rooted-{cli_process.current_pid()}"
     cli_files.create_dir_all(root) ?? panic("test root")
     owner: JetCLIRootedFixtureRoot{path: root}
-    defer close(^owner)
+    defer close(owner)
     held: JetCLIRootedDirectory.open(root, [String]{"original"}, true) ?? panic("hold original")
     _: held.publish_immutable("record", "original".bytes(), Val(0o600), 1024) ?? panic("publish original")
     cli_files.rename("{root}/original", "{root}/moved", if_exists: .Refuse) ?? panic("move ancestor")

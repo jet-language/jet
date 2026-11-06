@@ -231,10 +231,10 @@ kit_steps_entries_walk: fn(directory: String, depth: Int, words: [String], recur
     entries: files.list_dir(directory) ?? return Err("entries directory: {err}")
     loop entry in entries {
         info: files.stat(entry.path) ?? return Err("entries stat: {err}")
-        if kit_steps_entry_matches(entry.path, entry.name, info.is_dir, info.is_file, depth, words) -> &output.push(entry.path)
+        if kit_steps_entry_matches(entry.path, entry.name, info.is_dir, info.is_file, depth, words) -> output.push(entry.path)
         if recursive && info.is_dir && !info.is_symlink {
             nested: kit_steps_entries_walk(entry.path, depth + 1, words, recursive) ?? return Err(err)
-            loop path in nested -> &output.push(path)
+            loop path in nested -> output.push(path)
         }
     }
     Ok(output)
@@ -257,8 +257,8 @@ kit_steps_entries_assertion: fn(original: String) -> KitAssertion? {
 kit_steps_directory_names: fn(path: String) -> [String] Err! {
     entries: files.list_dir(path) ?? return Err("directory names: {err}")
     names := [String]{}
-    loop entry in entries -> &names.push(entry.name)
-    &names.sort()
+    loop entry in entries -> names.push(entry.name)
+    names.sort()
     Ok(names)
 }
 
@@ -279,8 +279,8 @@ kit_steps_tree_assertion: fn(original: String) -> KitAssertion? {
 kit_steps_tree_check: fn(assertion: KitAssertion, context: KitStepCtx, state: KitStepState) -> KitVerdict {
     directory: kit_steps_work_path(assertion.path, context.env, context.work, context.scratch, state.built) ?? return kit_expect_verdict("REFUSED", "tree directory escapes work")
     words := [String]{}
-    loop word in assertion.alternatives -> &words.push(kit_steps_runtime_expand(word, context, state) ?? return kit_expect_verdict("ERROR", "tree filter token unavailable"))
-    if !kit_expect_named(words, "recursive") -> &words.push("recursive")
+    loop word in assertion.alternatives -> words.push(kit_steps_runtime_expand(word, context, state) ?? return kit_expect_verdict("ERROR", "tree filter token unavailable"))
+    if !kit_expect_named(words, "recursive") -> words.push("recursive")
     paths: kit_steps_entries(directory, words) ?? return kit_expect_verdict("ERROR", "{err}")
     value: kit_steps_runtime_expand(assertion.value, context, state) ?? return kit_expect_verdict("ERROR", "tree value token unavailable")
     total := 0
@@ -292,7 +292,7 @@ kit_steps_tree_check: fn(assertion: KitAssertion, context: KitStepCtx, state: Ki
         else {
             text: files.read(path) ?? next
             if assertion.mode == "!~" && text.contains(value) -> return kit_expect_verdict("FAIL", "tree file contains forbidden substring")
-            if assertion.mode == "~" -> &readable.push(text)
+            if assertion.mode == "~" -> readable.push(text)
         }
     }
     if assertion.mode == "!~" -> return kit_expect_verdict("PASS", "")

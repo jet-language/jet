@@ -1,8 +1,8 @@
 Error [jet.UseWhileWriteActive]: `values` is being changed in this call, so it can't be used again here
-  --> builtin_mut_receiver_uses_two_phase_reservation_3.jet:4:45
+  --> tests/ui/ownership/builtin_mut_receiver_uses_two_phase_reservation_3.jet:4:44
     |
-  4 |     &values.sort_by((value: Int) -> value + values.len())
-    |                                             ^^^^^^
- Why: While something is being changed through the write-access marker `&`, nobody else may be looking at it
- Fix: Pass the write-access marker `&` (`&values`) only once, or copy first with `values.copy()`
+  4 |     values.sort_by((value: Int) -> value + values.len())
+    |                                            ^^^^^^
+ Why: While something is being changed through a write parameter, nobody else may be looking at it
+ Fix: Pass `values` only once, or copy first with `values.copy()`
 More: jet-lang.dev/e/E0204

@@ -7,9 +7,9 @@ jetos_shell_single_quote: fn(value: String) -> String Never! {
     parts := [String]{"'"}
     loop scalar in value.chars() {
         text: "{scalar}"
-        &parts.push(if text == "'" -> "'\\''" else -> text)
+        parts.push(if text == "'" -> "'\\''" else -> text)
     }
-    &parts.push("'")
+    parts.push("'")
     parts.join("")
 }
 
@@ -47,7 +47,7 @@ jetos_resolved_option: fn(system: SystemPlan, key: String) -> JetOSResolvedOptio
     loop index in 0..<system.options.len() {
         option: system.options[index]
         if option.key == key {
-            &contenders.push(JetOSOptionContender{value: jetos_clean_value(option.value), tier: tier.copy(), priority: priority, source_order: index, winner: false})
+            contenders.push(JetOSOptionContender{value: jetos_clean_value(option.value), tier: tier.copy(), priority: priority, source_order: index, winner: false})
         }
     }
     if contenders.len() == 0 -> return None
@@ -134,20 +134,20 @@ jetos_option_doc: fn(key: String) -> String Never! {
 jetos_prefixed_options: fn(system: SystemPlan, prefix: String) -> [(key: String, value: String)] Never! {
     rows := [(key: String, value: String)]{}
     loop option in system.options {
-        if option.key.starts_with(prefix) -> &rows.push((key: option.key.removeprefix(prefix), value: jetos_clean_value(option.value)))
+        if option.key.starts_with(prefix) -> rows.push((key: option.key.removeprefix(prefix), value: jetos_clean_value(option.value)))
     }
     rows
 }
 
 jetos_option_rows_json: fn(rows: [(key: String, value: String)]) -> String Never! {
     parts := [String]{}
-    loop row in rows -> &parts.push("{{\n  \"key\": {foundation_json_quote(row.key)},\n  \"value\": {foundation_json_quote(row.value)}\n}}")
+    loop row in rows -> parts.push("{{\n  \"key\": {foundation_json_quote(row.key)},\n  \"value\": {foundation_json_quote(row.value)}\n}}")
     parts.join(",")
 }
 
 jetos_strings_json: fn(values: [String]) -> String Never! {
     parts := [String]{}
-    loop value in values -> &parts.push(foundation_json_quote(value))
+    loop value in values -> parts.push(foundation_json_quote(value))
     parts.join(",")
 }
 
@@ -175,18 +175,18 @@ jetos_collect_names: fn(system: SystemPlan, namespace: String) -> [String] Never
         rest: option.key.removeprefix(prefix)
         pair: rest.split_once(".") ?? next
         name: pair.before
-        if name != "" && !names.contains(name) -> &names.push(name)
+        if name != "" && !names.contains(name) -> names.push(name)
     }
-    &names.sort()
+    names.sort()
     names
 }
 
 jetos_user_names: fn(system: SystemPlan) -> [String] Never! {
     names := jetos_collect_names(system, "users")
     loop name in jetos_collect_names(system, "user") {
-        if !names.contains(name) -> &names.push(name)
+        if !names.contains(name) -> names.push(name)
     }
-    &names.sort()
+    names.sort()
     names
 }
 
@@ -206,7 +206,7 @@ jetos_render_user_profile_json: fn(system: SystemPlan, user: String) -> String N
     }
     file_rows := [String]{}
     loop row in jetos_prefixed_options(system, "user.{user}.files.") {
-        &file_rows.push("{{\n  \"path\": {foundation_json_quote(row.key)},\n  \"source\": {foundation_json_quote(row.value)}\n}}")
+        file_rows.push("{{\n  \"path\": {foundation_json_quote(row.key)},\n  \"source\": {foundation_json_quote(row.value)}\n}}")
     }
     jetos_render_user_profile_json_parts(user, home, shell, jetos_strings_json(packages), jetos_strings_json(services), file_rows.join(","))
 }
@@ -227,17 +227,17 @@ jetos_parse_list_items: fn(value: String) -> [String] Never! {
         text: "{scalar}"
         if text == "\"" {
             in_quotes = !in_quotes
-            &current.push(text)
+            current.push(text)
         } else if text == "," && !in_quotes {
             item: jetos_clean_symbol(jetos_clean_value(current.join("")))
-            if item != "" -> &items.push(item)
+            if item != "" -> items.push(item)
             current = [String]{}
         } else {
-            &current.push(text)
+            current.push(text)
         }
     }
     item: jetos_clean_symbol(jetos_clean_value(current.join("")))
-    if item != "" -> &items.push(item)
+    if item != "" -> items.push(item)
     items
 }
 
@@ -278,7 +278,7 @@ jetos_safe_filename: fn(value: String) -> String Never! {
     parts := [String]{}
     loop scalar in value.chars() {
         text: "{scalar}"
-        &parts.push(if jetos_ascii_alphanumeric(text) || text == "-" || text == "_" -> text else -> "-")
+        parts.push(if jetos_ascii_alphanumeric(text) || text == "-" || text == "_" -> text else -> "-")
     }
     parts.join("")
 }
@@ -287,7 +287,7 @@ jetos_safe_identifier: fn(value: String) -> String Never! {
     parts := [String]{}
     loop scalar in value.chars() {
         text: "{scalar}"
-        &parts.push(if jetos_ascii_alphanumeric(text) || text == "_" -> text else -> "_")
+        parts.push(if jetos_ascii_alphanumeric(text) || text == "_" -> text else -> "_")
     }
     out: parts.join("")
     if out == "" -> return "_"
@@ -310,14 +310,14 @@ jetos_render_proof: fn(system: SystemPlan, realized: [JetOSRealizedPackage], pla
     risks: jetos_risk_classes(system)
     risk: if risks.len() == 0 -> "low" else -> risks.join(", ")
     parts := [String]{"jetos proof for {system.name}\n", "target: {system.target}\n", "risk: {risk}\n", "plan: pass\n", "packages:\n"}
-    loop package in realized -> &parts.push("  {package.entry.reference} -> {package.entry.out}\n")
-    &parts.push("options:\n")
-    loop option in system.options -> &parts.push("  {option.key} = {option.value}\n")
-    &parts.push("services:\n")
-    loop service in system.services -> &parts.push("  {service.name} enable={if service.enable -> "true" else -> "false"}\n")
-    &parts.push("images:\n")
+    loop package in realized -> parts.push("  {package.entry.reference} -> {package.entry.out}\n")
+    parts.push("options:\n")
+    loop option in system.options -> parts.push("  {option.key} = {option.value}\n")
+    parts.push("services:\n")
+    loop service in system.services -> parts.push("  {service.name} enable={if service.enable -> "true" else -> "false"}\n")
+    parts.push("images:\n")
     loop image in plan.images {
-        if image.kind == ImageKind.Iso && image.from == system.name -> &parts.push("  {image.name} {image.format}\n")
+        if image.kind == ImageKind.Iso && image.from == system.name -> parts.push("  {image.name} {image.format}\n")
     }
     parts.join("")
 }
@@ -326,15 +326,15 @@ jetos_risk_classes: fn(system: SystemPlan) -> [String] Never! {
     risks := [String]{}
     loop option in system.options {
         key: option.key
-        if key.starts_with("filesystem.") && !risks.contains("filesystem") -> &risks.push("filesystem")
-        if key.contains("boot") && !risks.contains("boot") -> &risks.push("boot")
-        if key.contains("kernel") && !risks.contains("kernel") -> &risks.push("kernel")
-        if (key.starts_with("storage.") || key.starts_with("performance.")) && !risks.contains("performance/storage") -> &risks.push("performance/storage")
-        if (key.starts_with("user.") || key.starts_with("apps.") || key.starts_with("workload.")) && !risks.contains("user-app-workload") -> &risks.push("user-app-workload")
+        if key.starts_with("filesystem.") && !risks.contains("filesystem") -> risks.push("filesystem")
+        if key.contains("boot") && !risks.contains("boot") -> risks.push("boot")
+        if key.contains("kernel") && !risks.contains("kernel") -> risks.push("kernel")
+        if (key.starts_with("storage.") || key.starts_with("performance.")) && !risks.contains("performance/storage") -> risks.push("performance/storage")
+        if (key.starts_with("user.") || key.starts_with("apps.") || key.starts_with("workload.")) && !risks.contains("user-app-workload") -> risks.push("user-app-workload")
     }
     loop service in system.services {
         if service.enable {
-            &risks.push("service-risk")
+            risks.push("service-risk")
             break
         }
     }

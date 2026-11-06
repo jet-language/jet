@@ -10,16 +10,16 @@ use {
 
 run: fn() {
     input: files.open("{work}/csv_bad/input.data") ?? panic("open")
-    reader := csv.reader(^input) ?? panic("reader")
+    reader := csv.reader(input) ?? panic("reader")
     loop {
-        if &reader.next() == {
+        if reader.next() == {
             .Val(_) -> {}
             .None -> {
                 print("eof-missed")
                 break
             }
             .Err(first) -> {
-                if &reader.next() == {
+                if reader.next() == {
                     .Val(_) | .None -> { print("not-latched") }
                     .Err(second) -> {
                         print(first.byte_offset == second.byte_offset && first.reason == second.reason)

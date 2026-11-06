@@ -54,8 +54,8 @@ ir_x64_add_text: fn(tables: &IRX64Tables, text: String) -> Int Never! {
     if found >= 0 -> return found
     id: tables.data.len()
     bytes: text.bytes()
-    &tables.lengths.push(bytes.len())
-    &tables.data.push(X64Data{id: X64DataID{value: id}, bytes: bytes, align: 1, relocs: [X64DataReloc]{}})
+    tables.lengths.push(bytes.len())
+    tables.data.push(X64Data{id: X64DataID{value: id}, bytes: bytes, align: 1, relocs: [X64DataReloc]{}})
     tables.texts[text] = id
     id
 }
@@ -71,7 +71,7 @@ ir_x64_add_text: fn(tables: &IRX64Tables, text: String) -> Int Never! {
 ir_x64_static_int: fn(tables: &IRX64Tables, text: String) Never! {
     if tables.ints.get(text) != None -> return
     bytes := [Int]{}
-    loop byte in text.bytes() -> &bytes.push(Int.from_u8(byte))
+    loop byte in text.bytes() -> bytes.push(Int.from_u8(byte))
     negative: bytes.len() > 0 && bytes[0] == 45
     first: if negative -> 1 else -> 0
     digits: bytes.len() - first
@@ -95,28 +95,28 @@ ir_x64_static_int: fn(tables: &IRX64Tables, text: String) Never! {
         start: if end - 9 > first -> end - 9 else -> first
         limb := 0
         loop at in start..<end -> limb = limb * 10 + bytes[at] - 48
-        loop shift in 0..<4 -> &limbs.push(U8{(limb >> (8 * shift)).bit_and(255)})
+        loop shift in 0..<4 -> limbs.push(U8{(limb >> (8 * shift)).bit_and(255)})
         count += 1
         end = start
     }
     limbs_row: tables.data.len()
-    &tables.lengths.push(limbs.len())
-    &tables.data.push(X64Data{id: X64DataID{value: limbs_row}, bytes: ^limbs, align: 4, relocs: [X64DataReloc]{}})
+    tables.lengths.push(limbs.len())
+    tables.data.push(X64Data{id: X64DataID{value: limbs_row}, bytes: limbs.move(), align: 4, relocs: [X64DataReloc]{}})
     // refs, retired_next, negative, limbs (relocated), len, cap.
     words: [Int]{4611686018427387904, 0, if negative -> 1 else -> 0, 0, count, count}
     carrier := [U8]{}
     loop word in words {
-        loop shift in 0..<8 -> &carrier.push(U8{(word >> (8 * shift)).bit_and(255)})
+        loop shift in 0..<8 -> carrier.push(U8{(word >> (8 * shift)).bit_and(255)})
     }
     carrier_row: tables.data.len()
-    &tables.lengths.push(48)
-    &tables.data.push(X64Data{id: X64DataID{value: carrier_row}, bytes: ^carrier, align: 8, relocs: [X64DataReloc]{X64DataReloc{offset: 24, target: X64DataID{value: limbs_row}, addend: 0}}})
+    tables.lengths.push(48)
+    tables.data.push(X64Data{id: X64DataID{value: carrier_row}, bytes: carrier.move(), align: 8, relocs: [X64DataReloc]{X64DataReloc{offset: 24, target: X64DataID{value: limbs_row}, addend: 0}}})
     // The Int word is the carrier's address with bit 62 set (Int.jet int_tag).
     tagged := [U8]{}
-    loop _ in 0..<8 -> &tagged.push(U8{0})
+    loop _ in 0..<8 -> tagged.push(U8{0})
     word_row: tables.data.len()
-    &tables.lengths.push(8)
-    &tables.data.push(X64Data{id: X64DataID{value: word_row}, bytes: ^tagged, align: 8, relocs: [X64DataReloc]{X64DataReloc{offset: 0, target: X64DataID{value: carrier_row}, addend: 4611686018427387904}}})
+    tables.lengths.push(8)
+    tables.data.push(X64Data{id: X64DataID{value: word_row}, bytes: tagged.move(), align: 8, relocs: [X64DataReloc]{X64DataReloc{offset: 0, target: X64DataID{value: carrier_row}, addend: 4611686018427387904}}})
     tables.ints[text] = word_row
 }
 
@@ -145,25 +145,25 @@ ir_x64_tables: fn(m: IRModule) -> IRX64Tables Never! {
     loop (row, bytes) in m.data {
         // A static object (BuildStatic.jet) holds words; a text row is bytes.
         align: if m.data_relocs.get(row) != None -> 8 else -> 1
-        &tables.data.push(X64Data{id: X64DataID{value: row}, bytes: bytes, align: align, relocs: [X64DataReloc]{}})
-        &tables.lengths.push(bytes.len())
-        &tables.headers.push(-1)
+        tables.data.push(X64Data{id: X64DataID{value: row}, bytes: bytes, align: align, relocs: [X64DataReloc]{}})
+        tables.lengths.push(bytes.len())
+        tables.headers.push(-1)
     }
-    loop text in ir_x64_stop_texts() -> _ := ir_x64_add_text(&tables, text)
+    loop text in ir_x64_stop_texts() -> _ := ir_x64_add_text(tables, text)
     loop f in m.functions {
-        _ := ir_x64_add_text(&tables, f.source_file)
+        _ := ir_x64_add_text(tables, f.source_file)
         if f.source_file != "" && tables.file_rows.get(f.source_file) == None {
             tables.file_rows[f.source_file] = tables.files.len()
-            &tables.files.push(f.source_file)
+            tables.files.push(f.source_file)
         }
         loop at in 0..<f.op.len() {
             if f.op[at] == .ConstText {
                 row: f.a[at]
-                if row >= 0 && row < tables.headers.len() -> _ := ir_x64_text_header(&tables, row)
+                if row >= 0 && row < tables.headers.len() -> _ := ir_x64_text_header(tables, row)
             }
             if f.op[at] == .ConstBigInt && f.a[at] >= 0 && f.a[at] < m.names.len() {
-                _ := ir_x64_add_text(&tables, m.names[f.a[at]])
-                ir_x64_static_int(&tables, m.names[f.a[at]])
+                _ := ir_x64_add_text(tables, m.names[f.a[at]])
+                ir_x64_static_int(tables, m.names[f.a[at]])
             }
         }
     }
@@ -172,13 +172,13 @@ ir_x64_tables: fn(m: IRModule) -> IRX64Tables Never! {
     loop row in 0..<m.data.len() {
         relocs: m.data_relocs.get(row) ?? next
         loop reloc in relocs {
-            target: if reloc.text -> ir_x64_text_header(&tables, reloc.target) else -> reloc.target
-            &tables.data[row].relocs.push(X64DataReloc{offset: reloc.offset, target: X64DataID{value: target}, addend: reloc.addend})
+            target: if reloc.text -> ir_x64_text_header(tables, reloc.target) else -> reloc.target
+            tables.data[row].relocs.push(X64DataReloc{offset: reloc.offset, target: X64DataID{value: target}, addend: reloc.addend})
         }
     }
     loop ty in m.types {
-        &tables.type_debug.push(tables.debug_types.len())
-        &tables.debug_types.push(ir_x64_debug_type(ty))
+        tables.type_debug.push(tables.debug_types.len())
+        tables.debug_types.push(ir_x64_debug_type(ty))
     }
     tables
 }
@@ -190,14 +190,14 @@ ir_x64_text_header: fn(tables: &IRX64Tables, row: Int) -> Int Never! {
     if tables.headers[row] >= 0 -> return tables.headers[row]
     header: tables.data.len()
     bytes := [U8]{}
-    loop _ in 0..<24 -> &bytes.push(U8{0})
+    loop _ in 0..<24 -> bytes.push(U8{0})
     length := tables.lengths[row]
     loop index in 0..<8 {
         bytes[8 + index] = U8{length.bit_and(255)}
         length = length >> 8
     }
-    &tables.data.push(X64Data{id: X64DataID{value: header}, bytes: bytes, align: 8, relocs: [X64DataReloc]{X64DataReloc{offset: 0, target: X64DataID{value: row}, addend: 0}}})
-    &tables.lengths.push(24)
+    tables.data.push(X64Data{id: X64DataID{value: header}, bytes: bytes, align: 8, relocs: [X64DataReloc]{X64DataReloc{offset: 0, target: X64DataID{value: row}, addend: 0}}})
+    tables.lengths.push(24)
     tables.headers[row] = header
     header
 }
@@ -214,17 +214,17 @@ IR_X64_MIN_INSTRUCTIONS_PER_THREAD: 20000
 // bytes are those of the one-thread loop for any thread count. A thread that
 // stops (an internal panic) costs only the function it was selecting: that
 // function gets an error row and fresh threads select the rest.
-ir_x64_compile_module: fn(program: ^IRModule, threads: CompilerThreads) -> IRX64Result Never! {
-    m := ^program
-    ir_drop_early(&m)
-    ir_tail_calls(&m)
+ir_x64_compile_module: fn(program: &&IRModule, threads: CompilerThreads) -> IRX64Result Never! {
+    m := program.move()
+    ir_drop_early(m)
+    ir_tail_calls(m)
     tables := ir_x64_tables(m)
     count: m.functions.len()
     weights := [Int]{}
     total := 0
     loop f in m.functions {
         weight: 1 + f.op.len()
-        &weights.push(weight)
+        weights.push(weight)
         total += weight
     }
     workers: compiler_threads_admit(threads, count, total, IR_X64_MIN_INSTRUCTIONS_PER_THREAD, 0, 0)
@@ -235,55 +235,55 @@ ir_x64_compile_module: fn(program: ^IRModule, threads: CompilerThreads) -> IRX64
     if workers <= 1 {
         loop row in 0..<count {
             compiled := ir_x64_compile_function(m, tables, row)
-            &errors.extend(compiler_take_rows<String>(&compiled.errors))
-            &functions.push(^compiled.function)
-            &debug.push(^compiled.debug)
-            &variables.push(^compiled.variables)
+            errors.extend(compiler_take_rows<String>(compiled.errors))
+            functions.push(compiled.function.move())
+            debug.push(compiled.debug.move())
+            variables.push(compiled.variables.move())
         }
-        return IRX64Result{program: ^m, functions: ^functions, debug: ^debug, variables: ^variables, errors: ^errors, tables: ^tables, threads: threads}
+        return IRX64Result{program: m.move(), functions: functions.move(), debug: debug.move(), variables: variables.move(), errors: errors.move(), tables: tables.move(), threads: threads}
     }
     seats := [IRX64Seat]{}
-    loop _ in 0..<workers -> &seats.push(IRX64Seat{row: -1})
-    inputs: shared IRX64Inputs{programs: [IRModule]{^m}, tables: [IRX64Tables]{^tables}, order: compiler_threads_heaviest_first(weights), next: 0, seats: ^seats}
+    loop _ in 0..<workers -> seats.push(IRX64Seat{row: -1})
+    inputs: shared IRX64Inputs{programs: [IRModule]{m.move()}, tables: [IRX64Tables]{tables.move()}, order: compiler_threads_heaviest_first(weights), next: 0, seats: seats.move()}
     outputs := [[IRX64FunctionResult]]{}
     stops := [String]{}
     loop _ in 0..<count {
-        &outputs.push([IRX64FunctionResult]{})
-        &stops.push("")
+        outputs.push([IRX64FunctionResult]{})
+        stops.push("")
     }
-    ir_x64_select_rows(inputs, workers, &outputs, &stops)
+    ir_x64_select_rows(inputs, workers, outputs, stops)
     shells := ir_x64_take_inputs(inputs)
     // The rows leave their lists last-first (moved, never copied) and are
     // reversed into function order.
     row_errors := [[String]]{}
     row := count - 1
     loop row >= 0 {
-        taken := &outputs.pop() ?? panic("the x64 selection lost a function row")
-        stop: &stops.pop() ?? ""
-        if (&taken.pop()) == .Val(compiled) {
-            selected := ^compiled
-            &row_errors.push(compiler_take_rows<String>(&selected.errors))
-            &functions.push(^selected.function)
-            &debug.push(^selected.debug)
-            &variables.push(^selected.variables)
+        taken := outputs.pop() ?? panic("the x64 selection lost a function row")
+        stop: stops.pop() ?? ""
+        if (taken.pop()) == .Val(compiled) {
+            selected := compiled.move()
+            row_errors.push(compiler_take_rows<String>(selected.errors))
+            functions.push(selected.function.move())
+            debug.push(selected.debug.move())
+            variables.push(selected.variables.move())
         } else {
-            &row_errors.push([String]{"{shells.programs[0].functions[row].name}: selection stopped: {stop}"})
-            &functions.push(X64CompiledFunction{id: X64FunctionID{value: row}, name: shells.programs[0].functions[row].name, code: [U8]{}, relocs: [X64Reloc]{}, align: X64_FUNCTION_ALIGN})
-            &debug.push(X64FunctionDebug{lines: [X64LineRow]{}, body: 0, cfi: [U8]{}, ranges: [X64VariableRange]{}})
-            &variables.push([X64DebugVariable]{})
+            row_errors.push([String]{"{shells.programs[0].functions[row].name}: selection stopped: {stop}"})
+            functions.push(X64CompiledFunction{id: X64FunctionID{value: row}, name: shells.programs[0].functions[row].name, code: [U8]{}, relocs: [X64Reloc]{}, align: X64_FUNCTION_ALIGN})
+            debug.push(X64FunctionDebug{lines: [X64LineRow]{}, body: 0, cfi: [U8]{}, ranges: [X64VariableRange]{}})
+            variables.push([X64DebugVariable]{})
         }
         row -= 1
     }
-    &functions.reverse()
-    &debug.reverse()
-    &variables.reverse()
+    functions.reverse()
+    debug.reverse()
+    variables.reverse()
     loop row_errors.len() > 0 {
-        listed := &row_errors.pop() ?? { break }
-        &errors.extend(^listed)
+        listed := row_errors.pop() ?? { break }
+        errors.extend(listed)
     }
-    program_back := &shells.programs.pop() ?? panic("the x64 selection inputs lost the module")
-    tables_back := &shells.tables.pop() ?? panic("the x64 selection inputs lost the tables")
-    IRX64Result{program: ^program_back, functions: ^functions, debug: ^debug, variables: ^variables, errors: ^errors, tables: ^tables_back, threads: threads}
+    program_back := shells.programs.pop() ?? panic("the x64 selection inputs lost the module")
+    tables_back := shells.tables.pop() ?? panic("the x64 selection inputs lost the tables")
+    IRX64Result{program: program_back.move(), functions: functions.move(), debug: debug.move(), variables: variables.move(), errors: errors.move(), tables: tables_back.move(), threads: threads}
 }
 
 // The selecting threads' inputs, read-only while they run: the module and
@@ -315,12 +315,12 @@ IRX64Selected: struct {
 // deterministic), so a round that leaves rows behind has stopped on one.
 ir_x64_select_rows: fn(inputs: Shared<IRX64Inputs>, workers: Int, outputs: &[[IRX64FunctionResult]], stops: &[String]) {
     loop {
-        parts := ir_x64_claimers(inputs, 0, workers, &stops) ?? panic("the x64 selection threads failed")
+        parts := ir_x64_claimers(inputs, 0, workers, stops) ?? panic("the x64 selection threads failed")
         loop parts.len() > 0 {
-            part := &parts.pop() ?? { break }
+            part := parts.pop() ?? { break }
             loop part.len() > 0 {
-                selected := &part.pop() ?? { break }
-                &outputs[selected.row].push(^selected.compiled)
+                selected := part.pop() ?? { break }
+                outputs[selected.row].push(selected.compiled.move())
             }
         }
         missing := [Int]{}
@@ -329,19 +329,19 @@ ir_x64_select_rows: fn(inputs: Shared<IRX64Inputs>, workers: Int, outputs: &[[IR
             if stops[row] != "" {
                 stopped += 1
             } else if outputs[row].len() == 0 {
-                &missing.push(row)
+                missing.push(row)
             }
         }
         if missing.len() == 0 -> return
         if stopped == 0 -> panic("the x64 selection threads left {missing.len()} functions unselected")
-        ir_x64_reclaim(inputs, ^missing)
+        ir_x64_reclaim(inputs, missing)
     }
 }
 
 // The next round claims `rows`.
-ir_x64_reclaim: fn(inputs: Shared<IRX64Inputs>, rows: ^[Int]) {
+ir_x64_reclaim: fn(inputs: Shared<IRX64Inputs>, rows: &&[Int]) {
     permit := inputs.guard_edit()
-    permit.value.order = ^rows
+    permit.value.order = rows.move()
     permit.value.next.store(0)
 }
 
@@ -353,9 +353,9 @@ ir_x64_claimers: fn(inputs: Shared<IRX64Inputs>, seat: Int, tasks: Int, stops: &
     parts := [[IRX64Selected]]{}
     task.group ir_x64_threads {
         head: task ir_x64_claimed(inputs, seat)
-        parts = ir_x64_claimers(inputs, seat + 1, tasks - 1, &stops)
-        part: head.join() ?? ir_x64_stopped(inputs, seat, err, &stops)
-        &parts.push(^part)
+        parts = ir_x64_claimers(inputs, seat + 1, tasks - 1, stops)
+        part: head.join() ?? ir_x64_stopped(inputs, seat, err, stops)
+        parts.push(part)
     }
     parts
 }
@@ -370,7 +370,7 @@ ir_x64_claimed: fn(inputs: Shared<IRX64Inputs>, seat: Int) -> [IRX64Selected] {
         row: reads.value.order[rank]
         reads.value.seats[seat].row.store(row)
         compiled := ir_x64_compile_function(reads.value.programs[0], reads.value.tables[0], row)
-        &selected.push(IRX64Selected{row: row, compiled: ^compiled})
+        selected.push(IRX64Selected{row: row, compiled: compiled.move()})
     }
     reads.value.seats[seat].row.store(-1)
     selected
@@ -389,7 +389,7 @@ ir_x64_stopped: fn(inputs: Shared<IRX64Inputs>, seat: Int, failure: TaskFailure,
 
 ir_x64_take_inputs: fn(inputs: Shared<IRX64Inputs>) -> IRX64Inputs {
     permit := inputs.guard_edit()
-    IRX64Inputs{programs: compiler_take_rows<IRModule>(&permit.value.programs), tables: compiler_take_rows<IRX64Tables>(&permit.value.tables), order: [Int]{}, next: 0, seats: [IRX64Seat]{}}
+    IRX64Inputs{programs: compiler_take_rows<IRModule>(permit.value.programs), tables: compiler_take_rows<IRX64Tables>(permit.value.tables), order: [Int]{}, next: 0, seats: [IRX64Seat]{}}
 }
 
 // The relocatable object of `compiled` (moved in, every row moved on): its
@@ -399,36 +399,36 @@ ir_x64_take_inputs: fn(inputs: Shared<IRX64Inputs>) -> IRX64Inputs {
 // (IRModule.owned_main), attaching its thread first when
 // IRModule.owned_attach. `debug_info` false (the build option) leaves the
 // DWARF sections empty.
-ir_x64_object: fn(compiled: ^IRX64Result, debug_info: Bool) -> X64ExecutableResult Never! {
-    owned := ^compiled
-    if owned.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: ^owned.errors}
+ir_x64_object: fn(compiled: &&IRX64Result, debug_info: Bool) -> X64ExecutableResult Never! {
+    owned := compiled.move()
+    if owned.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: owned.errors.move()}
     entry: owned.program.entry
     if entry < 0 || entry >= owned.program.functions.len() -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"entry function {entry} is not in the module"}}
     if owned.program.functions[entry].param_count != 0 || owned.program.functions[entry].result >= 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"entry function {owned.program.functions[entry].name} must take no parameters and return nothing"}}
     owned_main: owned.program.owned_main
     owned_attach: owned.program.owned_attach
     kept: owned.program.kept.copy()
-    program: ir_x64_object_module(&owned)
+    program: ir_x64_object_module(owned)
     main: x64_object_main(X64FunctionID{value: entry}, owned_main, owned_attach)
     debug := [X64FunctionDebug]{x64_object_main_debug(main)}
-    &debug.extend(compiler_take_rows<X64FunctionDebug>(&owned.debug))
-    functions := [X64CompiledFunction]{^main}
-    &functions.extend(compiler_take_rows<X64CompiledFunction>(&owned.functions))
-    ir_x64_reached_only(&functions, &debug, kept)
+    debug.extend(compiler_take_rows<X64FunctionDebug>(owned.debug))
+    functions := [X64CompiledFunction]{main.move()}
+    functions.extend(compiler_take_rows<X64CompiledFunction>(owned.functions))
+    ir_x64_reached_only(functions, debug, kept)
     threads: CompilerThreads{cap: owned.threads.cap, cores: owned.threads.cores, memory_available: owned.threads.memory_available}
     // What is left of the compile (its IR module above all) is read no more:
     // it drops on tasks of their own while the object is written.
     released: shared IRX64Released{runs: [[IRFunction]]{}, rest: [IRX64Result]{}}
-    ir_x64_release_fill(released, ^owned, threads)
+    ir_x64_release_fill(released, owned, threads)
     objects := [X64ExecutableResult]{}
     task.group ir_x64_object_release {
         rest: task ir_x64_release_rest(released)
         dropped: task ir_x64_release_runs(released, -1)
-        &objects.push(x64_object_functions_threads(^program, ^functions, ^debug, [X64RuntimeExport]{X64RuntimeExport{function: X64FunctionID{value: -1}, symbol: "main"}}, threads, debug_info, false))
+        objects.push(x64_object_functions_threads(program, functions, debug, [X64RuntimeExport]{X64RuntimeExport{function: X64FunctionID{value: -1}, symbol: "main"}}, threads, debug_info, false))
         _: rest.join() ?? panic(compiler_threads_failure_text(err))
         _: dropped.join() ?? panic(compiler_threads_failure_text(err))
     }
-    &objects.pop() ?? panic("the object writer lost its object")
+    objects.pop() ?? panic("the object writer lost its object")
 }
 
 // Keeps the rows of `functions` (with their `debug` rows) whose function the
@@ -447,21 +447,21 @@ ir_x64_reached_only: fn(functions: &[X64CompiledFunction], debug: &[X64FunctionD
     id_rows := [[Int]]{}
     reached := [Bool]{}
     loop _ in 0..<(max_id + 2) {
-        &id_rows.push([Int]{})
-        &reached.push(false)
+        id_rows.push([Int]{})
+        reached.push(false)
     }
     loop (index, function) in functions {
-        if function.id.value >= -1 -> &id_rows[function.id.value + 1].push(index)
+        if function.id.value >= -1 -> id_rows[function.id.value + 1].push(index)
     }
     work := [Int]{functions[0].id.value}
     reached[functions[0].id.value + 1] = true
     loop id in roots {
         if id + 1 < 0 || id + 1 >= reached.len() || reached[id + 1] -> next
         reached[id + 1] = true
-        &work.push(id)
+        work.push(id)
     }
     loop work.len() > 0 {
-        id: &work.pop() ?? { break }
+        id: work.pop() ?? { break }
         loop row in id_rows[id + 1] {
             loop reloc in functions[row].relocs {
                 if reloc.target == {
@@ -469,7 +469,7 @@ ir_x64_reached_only: fn(functions: &[X64CompiledFunction], debug: &[X64FunctionD
                         at: target.value + 1
                         if at >= 0 && at < reached.len() && !reached[at] {
                             reached[at] = true
-                            &work.push(target.value)
+                            work.push(target.value)
                         }
                     }
                     else -> {}
@@ -480,18 +480,18 @@ ir_x64_reached_only: fn(functions: &[X64CompiledFunction], debug: &[X64FunctionD
     kept := [X64CompiledFunction]{}
     kept_debug := [X64FunctionDebug]{}
     loop functions.len() > 0 {
-        function := &functions.pop() ?? { break }
-        facts := &debug.pop() ?? panic("the object writer lost a debug row")
+        function := functions.pop() ?? { break }
+        facts := debug.pop() ?? panic("the object writer lost a debug row")
         at: function.id.value + 1
         if at >= 0 && reached[at] {
-            &kept.push(^function)
-            &kept_debug.push(^facts)
+            kept.push(function)
+            kept_debug.push(facts)
         }
     }
-    &kept.reverse()
-    &kept_debug.reverse()
-    compiler_transfer_rows<X64CompiledFunction>(&functions, &kept)
-    compiler_transfer_rows<X64FunctionDebug>(&debug, &kept_debug)
+    kept.reverse()
+    kept_debug.reverse()
+    compiler_transfer_rows<X64CompiledFunction>(functions, kept)
+    compiler_transfer_rows<X64FunctionDebug>(debug, kept_debug)
 }
 
 // What ir_x64_object releases: the compile's IR functions in runs, each
@@ -509,8 +509,8 @@ IR_X64_RELEASE_WAYS: 4
 
 // Moves `compiled` into `released`: its IR functions in up to
 // IR_X64_RELEASE_WAYS runs (no more than `threads` allows), then the rest.
-ir_x64_release_fill: fn(released: Shared<IRX64Released>, compiled: ^IRX64Result, threads: CompilerThreads) Never! {
-    owned := ^compiled
+ir_x64_release_fill: fn(released: Shared<IRX64Released>, compiled: &&IRX64Result, threads: CompilerThreads) Never! {
+    owned := compiled.move()
     wanted: threads.cap ?? threads.cores
     ways: if {
         wanted < 1 -> 1
@@ -522,12 +522,12 @@ ir_x64_release_fill: fn(released: Shared<IRX64Released>, compiled: ^IRX64Result,
     loop owned.program.functions.len() > 0 {
         run := [IRFunction]{}
         loop run.len() < share && owned.program.functions.len() > 0 {
-            row := &owned.program.functions.pop() ?? panic("a nonempty IR function list failed to pop")
-            &run.push(^row)
+            row := owned.program.functions.pop() ?? panic("a nonempty IR function list failed to pop")
+            run.push(row)
         }
-        &permit.value.runs.push(^run)
+        permit.value.runs.push(run)
     }
-    &permit.value.rest.push(^owned)
+    permit.value.rest.push(owned)
 }
 
 // Drops `runs` runs of `released` (-1: all of them), each on a thread of its
@@ -553,7 +553,7 @@ ir_x64_release_run: fn(released: Shared<IRX64Released>) -> Int Never! {
 
 ir_x64_release_pop_run: fn(released: Shared<IRX64Released>) -> [IRFunction] Never! {
     permit: released.guard_edit()
-    &permit.value.runs.pop() ?? [IRFunction]{}
+    permit.value.runs.pop() ?? [IRFunction]{}
 }
 
 ir_x64_release_count: fn(released: Shared<IRX64Released>) -> Int Never! {
@@ -570,7 +570,7 @@ ir_x64_release_rest: fn(released: Shared<IRX64Released>) -> Int Never! {
 
 ir_x64_release_pop_rest: fn(released: Shared<IRX64Released>) -> [IRX64Result] Never! {
     permit: released.guard_edit()
-    compiler_take_rows<IRX64Result>(&permit.value.rest)
+    compiler_take_rows<IRX64Result>(permit.value.rest)
 }
 
 // Order the functions of `compiled` (and their debug rows) for the object's
@@ -591,10 +591,10 @@ ir_x64_hot_order: fn(compiled: &IRX64Result, hot: [String]) -> Int Never! {
     // within a rank).
     found := [Int]{}
     starts := [Int]{}
-    loop _ in 0..<hot.len() + 1 -> &starts.push(0)
+    loop _ in 0..<hot.len() + 1 -> starts.push(0)
     loop index in 0..<count {
         listed: ranks.get(compiled.functions[index].name) ?? -1
-        &found.push(listed)
+        found.push(listed)
         if listed >= 0 -> starts[listed + 1] = starts[listed + 1] + 1
     }
     missing := 0
@@ -603,7 +603,7 @@ ir_x64_hot_order: fn(compiled: &IRX64Result, hot: [String]) -> Int Never! {
         starts[place + 1] = starts[place + 1] + starts[place]
     }
     order := [Int]{}
-    loop _ in 0..<count -> &order.push(0)
+    loop _ in 0..<count -> order.push(0)
     cold := starts[hot.len()]
     loop index in 0..<count {
         level: found[index]
@@ -615,8 +615,8 @@ ir_x64_hot_order: fn(compiled: &IRX64Result, hot: [String]) -> Int Never! {
             cold += 1
         }
     }
-    compiler_apply_order<X64CompiledFunction>(&compiled.functions, order.copy())
-    compiler_apply_order<X64FunctionDebug>(&compiled.debug, order)
+    compiler_apply_order<X64CompiledFunction>(compiled.functions, order.copy())
+    compiler_apply_order<X64FunctionDebug>(compiled.debug, order)
     missing
 }
 
@@ -625,31 +625,31 @@ ir_x64_hot_order: fn(compiled: &IRX64Result, hot: [String]) -> Int Never! {
 // a global symbol of its IR function and, with a priority, a constructor or
 // destructor hook. `debug_info` as ir_x64_object. Every function and data
 // object is in a section of its own, so a link keeps only what it reaches.
-ir_x64_library_object: fn(compiled: ^IRX64Result, exports: [IRLibraryExport], debug_info: Bool) -> X64ExecutableResult Never! {
-    owned := ^compiled
-    if owned.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: ^owned.errors}
-    program := ir_x64_object_module(&owned)
-    debug := compiler_take_rows<X64FunctionDebug>(&owned.debug)
-    functions := compiler_take_rows<X64CompiledFunction>(&owned.functions)
+ir_x64_library_object: fn(compiled: &&IRX64Result, exports: [IRLibraryExport], debug_info: Bool) -> X64ExecutableResult Never! {
+    owned := compiled.move()
+    if owned.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: owned.errors.move()}
+    program := ir_x64_object_module(owned)
+    debug := compiler_take_rows<X64FunctionDebug>(owned.debug)
+    functions := compiler_take_rows<X64CompiledFunction>(owned.functions)
     globals: loop row in exports -> X64RuntimeExport{function: X64FunctionID{value: row.function}, symbol: row.symbol, init_priority: row.init_priority, fini_priority: row.fini_priority, guards: row.guards.copy()}
-    x64_object_functions_threads(^program, ^functions, ^debug, globals, owned.threads, debug_info, true)
+    x64_object_functions_threads(program, functions, debug, globals, owned.threads, debug_info, true)
 }
 
 // The object writer's module of `owned`: its data, debug files and types
 // and per IR function its name, file, line and debug variables (taken).
 ir_x64_object_module: fn(owned: &IRX64Result) -> X64ObjectModule Never! {
     // Popped in function order.
-    variables := compiler_take_rows<[X64DebugVariable]>(&owned.variables)
-    &variables.reverse()
+    variables := compiler_take_rows<[X64DebugVariable]>(owned.variables)
+    variables.reverse()
     sources := [X64FunctionSource]{}
     loop f in owned.program.functions {
         file: owned.tables.file_rows.get(f.source_file) ?? -1
-        listed := &variables.pop() ?? [X64DebugVariable]{}
-        &sources.push(X64FunctionSource{name: f.name, file: file, line: f.line, variables: ^listed})
+        listed := variables.pop() ?? [X64DebugVariable]{}
+        sources.push(X64FunctionSource{name: f.name, file: file, line: f.line, variables: listed.move()})
     }
     X64ObjectModule{
-        data: compiler_take_rows<X64Data>(&owned.tables.data),
-        debug: X64ModuleDebug{directory: owned.program.debug_directory.copy(), files: compiler_take_rows<String>(&owned.tables.files), types: compiler_take_rows<X64DebugType>(&owned.tables.debug_types)},
-        functions: ^sources,
+        data: compiler_take_rows<X64Data>(owned.tables.data),
+        debug: X64ModuleDebug{directory: owned.program.debug_directory.copy(), files: compiler_take_rows<String>(owned.tables.files), types: compiler_take_rows<X64DebugType>(owned.tables.debug_types)},
+        functions: sources.move(),
     }
 }

@@ -20,8 +20,8 @@ spawn_expired: fn() -> Task<Int> {
     task nap(-1)
 }
 
-report: fn(name: String, ^handle: Task<Int>) {
-    if ^handle.join() == {
+report: fn(name: String, &&handle: Task<Int>) {
+    if handle.join() == {
         .Ok(value) -> { print("{name}: finished {value}") }
         .Err(error) -> {
             if error == {
@@ -37,7 +37,7 @@ run: fn() {
     before: task nap(1)
     inside: spawn_expired()
     after: task nap(2)
-    report("inside", ^inside)
-    report("before", ^before)
-    report("after", ^after)
+    report("inside", inside)
+    report("before", before)
+    report("after", after)
 }

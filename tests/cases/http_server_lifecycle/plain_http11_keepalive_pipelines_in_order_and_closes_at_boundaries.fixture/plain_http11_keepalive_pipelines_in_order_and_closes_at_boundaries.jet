@@ -14,12 +14,12 @@ s6_pipeline_crlf: fn() -> String { String.from_bytes([U8]{13, 10}) ?? panic("CRL
 s6_pipeline_exchange: fn(addr: String, request: String) -> String {
     stream := net.tcp_connect(addr) ?? panic("connect")
     stream.write_all(request.bytes()) ?? panic("request write")
-    net.tcp_shutdown(&stream, NetShutdown.Write) ?? panic("finish request write")
+    net.tcp_shutdown(stream, NetShutdown.Write) ?? panic("finish request write")
     parts := [String]{}
     loop {
         part: stream.read_text(8192) ?? panic("response read")
         if part == "" -> break
-        &parts.push(part)
+        parts.push(part)
     }
     parts.join("")
 }
@@ -67,5 +67,5 @@ s6_pipeline_exchange: fn(addr: String, request: String) -> String {
         assert(invalid.ends_with("Connection: close{crlf}{crlf}"), invalid)
     }
     bound.shutdown(30s) ?? panic("shutdown")
-    ^serving.join() ?? panic("server join")
+    serving.join() ?? panic("server join")
 }

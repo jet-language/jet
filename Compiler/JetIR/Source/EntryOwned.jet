@@ -155,11 +155,11 @@ ir_entry_root_need: fn(m: IRModule) -> String Never! {
             }
             if f.op[at] != .Call || f.a[at] < 0 || (f.a[at] != poll && f.a[at] != trap) -> next
             if at + 1 >= f.op.len() || f.op[at + 1] != .If || f.a[at + 1] != f.dst[at] || f.b[at + 1] >= 0 -> return "`{f.name}` has a stop point without its stop edge"
-            &edges.push(id)
-            &edges.push(at + 2)
-            &edges.push(f.c[at + 1])
+            edges.push(id)
+            edges.push(at + 2)
+            edges.push(f.c[at + 1])
             loop k in (at + 2)..<f.c[at + 1] {
-                if f.op[k] == .Call && f.a[k] >= 0 -> &seeds.push(f.a[k])
+                if f.op[k] == .Call && f.a[k] >= 0 -> seeds.push(f.a[k])
             }
         }
     }
@@ -215,26 +215,26 @@ ir_entry_quiet: fn(m: IRModule, f: IRFunction, at: Int, quiet: IREntryQuiet) -> 
 // last-owner release), counts as quiet when its cycle does nothing else.
 ir_entry_quiet_functions: fn(m: IRModule, seeds: [Int]) -> IREntryQuiet Never! {
     q := IREntryQuiet{glue: [Int]{}, functions: [Bool]{}}
-    loop _ in m.functions -> &q.functions.push(false)
+    loop _ in m.functions -> q.functions.push(false)
     seen := q.functions.copy()
     work := seeds.copy()
     loop row in m.types {
         id: if row.drop == "" || row.kind == .Int || row.kind == .String -> -1 else -> name_rows_value(m.function_rows, row.drop) ?? -2
-        &q.glue.push(id)
-        if id >= 0 -> &work.push(id)
+        q.glue.push(id)
+        if id >= 0 -> work.push(id)
     }
     members := [Int]{}
     loop work.len() > 0 {
-        id: &work.pop() ?? -1
+        id: work.pop() ?? -1
         if id < 0 || id >= m.functions.len() || seen[id] -> next
         seen[id] = true
         f: m.functions[id]
         if f.asm != None -> next
         q.functions[id] = true
-        &members.push(id)
+        members.push(id)
         loop at in 0..<f.op.len() {
-            if f.op[at] == .Call -> &work.push(f.a[at])
-            if f.op[at] == .Drop && q.glue[f.slot_type[f.a[at]]] >= 0 -> &work.push(q.glue[f.slot_type[f.a[at]]])
+            if f.op[at] == .Call -> work.push(f.a[at])
+            if f.op[at] == .Drop && q.glue[f.slot_type[f.a[at]]] >= 0 -> work.push(q.glue[f.slot_type[f.a[at]]])
         }
     }
     changed := true
@@ -307,16 +307,16 @@ ir_entry_own: fn(m: &IRModule) -> String Never! {
         if row >= 0 && ir_entry_calls(m, row) -> buffered = true
     }
     print: if buffered -> -1 else -> name_rows_value(m.name_rows, "jet_term_write_stdout_line") ?? -1
-    direct: if print >= 0 -> ir_intern_name(&m, "jet_term_write_stdout_line_direct") else -> -1
+    direct: if print >= 0 -> ir_intern_name(m, "jet_term_write_stdout_line_direct") else -> -1
     exit: name_rows_value(m.name_rows, "jet_std_process_exit") ?? -1
-    exit_owned: if exit >= 0 -> ir_intern_name(&m, "jet_std_process_exit_owned") else -> -1
+    exit_owned: if exit >= 0 -> ir_intern_name(m, "jet_std_process_exit_owned") else -> -1
     redirect := [Int]{}
-    loop _ in 0..<m.names.len() -> &redirect.push(-1)
+    loop _ in 0..<m.names.len() -> redirect.push(-1)
     if print >= 0 -> redirect[print] = direct
     if exit >= 0 -> redirect[exit] = exit_owned
     cleanup: IRCleanupRoutes{enter: name_rows_value(m.name_rows, "jet_rt_cleanup_enter") ?? -1, leave: name_rows_value(m.name_rows, "jet_rt_cleanup_leave") ?? -1}
     attach := [Bool]{}
-    loop _ in 0..<m.names.len() -> &attach.push(false)
+    loop _ in 0..<m.names.len() -> attach.push(false)
     loop route in IR_OWNED_ATTACH_ROUTES {
         row: name_rows_value(m.name_rows, route) ?? -1
         if row >= 0 -> attach[row] = true
@@ -324,7 +324,7 @@ ir_entry_own: fn(m: &IRModule) -> String Never! {
     if exit >= 0 -> attach[exit_owned] = true
     loop id in 0..<m.functions.len() {
         if m.functions[id].asm != None -> next
-        ir_entry_own_strip(&m.functions[id], poll, trap, entry_return, redirect, cleanup)
+        ir_entry_own_strip(m.functions[id], poll, trap, entry_return, redirect, cleanup)
         loop (at, op) in m.functions[id].op {
             if op == .CallRuntime && attach[m.functions[id].a[at]] -> m.owned_attach = true
         }
@@ -362,7 +362,7 @@ ir_entry_own_strip: fn(f: &IRFunction, poll: Int, trap: Int, entry_return: Int, 
     at := 0
     loop at < f.op.len() {
         if f.op[at] == .CallRuntime && (f.a[at] == entry_return || f.a[at] == cleanup.leave || (f.a[at] == cleanup.enter && f.dst[at] < 0)) {
-            ir_opt_kill(&f, at)
+            ir_opt_kill(f, at)
             removed = true
         } else if f.op[at] == .CallRuntime && f.a[at] == cleanup.enter {
             f.op[at] = .Const
@@ -373,11 +373,11 @@ ir_entry_own_strip: fn(f: &IRFunction, poll: Int, trap: Int, entry_return: Int, 
             f.a[at] = redirect[f.a[at]]
         } else if f.op[at] == .Call && f.a[at] >= 0 && (f.a[at] == poll || f.a[at] == trap) {
             end: f.c[at + 1]
-            loop k in at..<(end + 1) -> ir_opt_kill(&f, k)
+            loop k in at..<(end + 1) -> ir_opt_kill(f, k)
             removed = true
             at = end
         }
         at += 1
     }
-    if removed -> ir_opt_compact(&f)
+    if removed -> ir_opt_compact(f)
 }

@@ -44,7 +44,7 @@ RoleKeys: struct {
         seen := [String]{}
         loop id in key_ids {
             if seen.contains(id) -> return Err(TrustRootError.InvalidThreshold{detail: "duplicate key id `{id}` in role"})
-            &seen.push(id)
+            seen.push(id)
         }
         Ok(RoleKeys{key_ids, threshold})
     }
@@ -257,7 +257,7 @@ trust_is_test_public_key_id: fn(key_id: String) -> Bool Never! {
 trust_public_trust_manifest: fn(domain: String, bootstrap: RootBootstrap?, keys: [PublicTrustKey]) -> String TrustRootError! {
     if domain == "" || trust_has_control(domain) || trust_has_inner_space(domain) -> return Err(TrustRootError.InvalidKey{detail: "public trust manifest domain is empty or contains whitespace"})
     sorted := keys
-    &sorted.sort_by(key -> key.role)
+    sorted.sort_by(key -> key.role)
     loop index in 1..<sorted.len() {
         if sorted[index - 1].role == sorted[index].role -> return Err(TrustRootError.InvalidKey{detail: "public trust role `{sorted[index].role}` is duplicated"})
     }
@@ -281,7 +281,7 @@ trust_public_trust_manifest: fn(domain: String, bootstrap: RootBootstrap?, keys:
         fields["key_id"] = Dyn.Text(key.key_id)
         fields["algorithm"] = Dyn.Text(key.algorithm)
         fields["public_key"] = Dyn.Text(key.public_key)
-        &rendered.push(fields)
+        rendered.push(fields)
     }
     manifest := Dyn.object()
     manifest["schema"] = Dyn.Int(1)

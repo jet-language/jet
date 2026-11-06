@@ -86,7 +86,7 @@ diagnostic_scalar_at: fn(source: [U8], index: Int) -> String Never! {
     out := [U8]{}
     loop offset in 0..<width {
         if index + offset >= source.len() -> break
-        &out.push(source[index + offset])
+        out.push(source[index + offset])
     }
     String.from_bytes(out) ?? ""
 }
@@ -183,18 +183,18 @@ diagnostic_display_identities: fn(value: String, clashes: [String]) -> String Ne
     index := 0
     loop identity in identities {
         loop index < identity.start {
-            &out.push(bytes[index])
+            out.push(bytes[index])
             index += 1
         }
         if clashes.contains(identity.head) && identity.qualifier != "" {
-            loop byte in identity.qualifier.bytes() -> &out.push(byte)
-            loop byte in ".".bytes() -> &out.push(byte)
+            loop byte in identity.qualifier.bytes() -> out.push(byte)
+            loop byte in ".".bytes() -> out.push(byte)
         }
-        loop byte in identity.name.bytes() -> &out.push(byte)
+        loop byte in identity.name.bytes() -> out.push(byte)
         index = identity.end
     }
     loop index < bytes.len() {
-        &out.push(bytes[index])
+        out.push(bytes[index])
         index += 1
     }
     String.from_bytes(out) ?? value.copy()
@@ -212,7 +212,7 @@ diagnostic_identity_clashes: fn(context: [U8]) -> [String] Never! {
         loop other in identities {
             if other.head == identity.head && other.qualifier != identity.qualifier -> clash = true
         }
-        if clash -> &clashes.push(identity.head.copy())
+        if clash -> clashes.push(identity.head.copy())
     }
     clashes
 }
@@ -221,7 +221,7 @@ diagnostic_identities_in: fn(bytes: [U8]) -> [DiagnosticIdentity] Never! {
     found := [DiagnosticIdentity]{}
     index := 0
     loop index < bytes.len() {
-        end: diagnostic_identity_push(bytes, index, &found)
+        end: diagnostic_identity_push(bytes, index, found)
         index = if end > index -> end else -> index + 1
     }
     found
@@ -284,7 +284,7 @@ diagnostic_identity_push: fn(bytes: [U8], index: Int, found: &[DiagnosticIdentit
     if leaf < 0 || leaf >= cursor -> return -1
     head_end := leaf
     loop head_end < cursor && diagnostic_byte_at(bytes, head_end) != 46 -> head_end += 1
-    &found.push(DiagnosticIdentity{start: index, end: cursor, name: diagnostic_bytes_text(bytes, leaf, cursor), head: diagnostic_bytes_text(bytes, leaf, head_end), qualifier: qualifier})
+    found.push(DiagnosticIdentity{start: index, end: cursor, name: diagnostic_bytes_text(bytes, leaf, cursor), head: diagnostic_bytes_text(bytes, leaf, head_end), qualifier: qualifier})
     cursor
 }
 
@@ -388,7 +388,7 @@ diagnostic_registry_applicability: fn(row: DiagnosticRegistryRow, has_edit: Bool
     }
 }
 
-diagnostic_registry_project_row: fn(diagnostic: ^Diagnostic, row: DiagnosticRegistryRow) -> Diagnostic Never! {
+diagnostic_registry_project_row: fn(diagnostic: &&Diagnostic, row: DiagnosticRegistryRow) -> Diagnostic Never! {
     updated := diagnostic
     if updated.span != None {
         span: updated.span ?? return updated
@@ -420,13 +420,13 @@ diagnostic_from_registry: fn(code: String, span: Span?, what: String, why: Strin
         why: diagnostic_sentence_case_line(diagnostic_display_identities(why, clashes)),
         fix: diagnostic_sentence_case_line(diagnostic_display_identities(fix, clashes)),
     }
-    diagnostic_registry_project_row(^diagnostic, row)
+    diagnostic_registry_project_row(diagnostic, row)
 }
 
 // Dynamic Source edits are authorized and graded by the generated row. This
 // preserves the exact replacement/span authored by the producer without
 // deriving safety from human Fix prose.
-diagnostic_registry_with_edit: fn(diagnostic: ^Diagnostic, edit: TextEdit) -> Diagnostic Never! {
+diagnostic_registry_with_edit: fn(diagnostic: &&Diagnostic, edit: TextEdit) -> Diagnostic Never! {
     updated := diagnostic
     row: diagnostic_registry_row(updated.code) ?? panic("updated `{updated.code}` has no generated Source registry row")
     if updated.no_fix_reason != None || row.no_fix_reason != None -> panic("updated `{updated.code}` cannot carry an edit and a registry no-fix reason")
@@ -460,7 +460,7 @@ diagnostic_registry_safety_auto_apply: fn(safety: DiagnosticFixSafety) -> Bool N
     }
 }
 
-diagnostic_registry_with_edit_grade: fn(diagnostic: ^Diagnostic, edit: TextEdit, applicability: DiagnosticFixApplicability, safety: DiagnosticFixSafety) -> Diagnostic Never! {
+diagnostic_registry_with_edit_grade: fn(diagnostic: &&Diagnostic, edit: TextEdit, applicability: DiagnosticFixApplicability, safety: DiagnosticFixSafety) -> Diagnostic Never! {
     updated := diagnostic
     row: diagnostic_registry_row(updated.code) ?? panic("updated `{updated.code}` has no generated Source registry row")
     if updated.no_fix_reason != None || row.no_fix_reason != None -> panic("updated `{updated.code}` cannot carry an edit and a registry no-fix reason")
@@ -473,7 +473,7 @@ diagnostic_registry_with_edit_grade: fn(diagnostic: ^Diagnostic, edit: TextEdit,
     updated
 }
 
-diagnostic_registry_with_structured_edit: fn(diagnostic: ^Diagnostic, edit: TextEdit) -> Diagnostic Never! {
+diagnostic_registry_with_structured_edit: fn(diagnostic: &&Diagnostic, edit: TextEdit) -> Diagnostic Never! {
     updated := diagnostic
     row: diagnostic_registry_row(updated.code) ?? panic("updated `{updated.code}` has no generated Source registry row")
     if updated.no_fix_reason != None || row.no_fix_reason != None -> panic("updated `{updated.code}` cannot carry an edit and a registry no-fix reason")
@@ -485,7 +485,7 @@ diagnostic_registry_with_structured_edit: fn(diagnostic: ^Diagnostic, edit: Text
     updated
 }
 
-diagnostic_registry_with_source_derived_suggestion: fn(diagnostic: ^Diagnostic, span: Span, new_text: String) -> Diagnostic Never! {
+diagnostic_registry_with_source_derived_suggestion: fn(diagnostic: &&Diagnostic, span: Span, new_text: String) -> Diagnostic Never! {
     updated := diagnostic
     if updated.edit != None -> panic("updated `{updated.code}` already carries an edit")
     row: diagnostic_registry_row(updated.code) ?? panic("updated `{updated.code}` has no generated Source registry row")
@@ -497,7 +497,7 @@ diagnostic_registry_with_source_derived_suggestion: fn(diagnostic: ^Diagnostic, 
     updated
 }
 
-diagnostic_registry_with_alternative_edit: fn(diagnostic: ^Diagnostic, edit: TextEdit) -> Diagnostic Never! {
+diagnostic_registry_with_alternative_edit: fn(diagnostic: &&Diagnostic, edit: TextEdit) -> Diagnostic Never! {
     updated := diagnostic
     if updated.no_fix_reason != None -> panic("updated `{updated.code}` cannot carry an edit and no-fix reason")
     if updated.edit == None || updated.applicability == None || updated.safety == None -> panic("updated `{updated.code}` needs a graded primary edit before an alternative")
@@ -509,7 +509,7 @@ diagnostic_registry_with_alternative_edit: fn(diagnostic: ^Diagnostic, edit: Tex
     if structured == {
         .SuggestedEdits(edits) -> {
             alternatives := edits.copy()
-            &alternatives.push(edit)
+            alternatives.push(edit)
             updated.structured = Val(DiagnosticStructured.SuggestedEdits{edits: alternatives})
             updated
         }

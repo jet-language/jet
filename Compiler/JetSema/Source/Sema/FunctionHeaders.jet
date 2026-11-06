@@ -80,16 +80,16 @@ sema_function_header_normalize_external_methods: fn(program: &Program, in_packag
         if item == .Func(function) && function.external_type == .Val(target) {
             key: "{target.name}.{function.name}"
             if seen.get(key) != None {
-                &diagnostics.push(sema_defined_twice(function.name, "module declarations share one namespace", function.name_span))
+                diagnostics.push(sema_defined_twice(function.name, "module declarations share one namespace", function.name_span))
                 next
             }
             seen[key] = true
             if in_package || imported || target.name.contains(".") || declared.get(target.name) != None {
-                &items.push(sema_function_header_normalize_external_method(function))
+                items.push(sema_function_header_normalize_external_method(function))
                 next
             }
         }
-        &items.push(item)
+        items.push(item)
     }
     program.items = items
 }
@@ -99,7 +99,7 @@ sema_function_header_normalize_external_methods: fn(program: &Program, in_packag
 sema_function_header_external_target: fn(function: Func, diagnostics: &[Diagnostic], start: Int) Never! {
     target: function.external_type ?? return
     if sema_has_error_since(diagnostics, start) -> return
-    &diagnostics.push(sema_error("E0301", target.span, "the impl target `{target.name}` is not a registered type", "an implementation needs one nominal declaration in the resolved module graph", "declare or import the target type before its impl"))
+    diagnostics.push(sema_error("E0301", target.span, "the impl target `{target.name}` is not a registered type", "an implementation needs one nominal declaration in the resolved module graph", "declare or import the target type before its impl"))
 }
 
 sema_function_header_check_root_params: fn(function: Func, is_method: Bool, diagnostics: &[Diagnostic]) -> Bool {
@@ -107,7 +107,7 @@ sema_function_header_check_root_params: fn(function: Func, is_method: Bool, diag
     if is_method || function.external_type != None {
         loop parameter_index in 0..<function.params.len() {
             if function.params[parameter_index].root {
-                &diagnostics.push(sema_error("E0103", function.params[parameter_index].name_span, "`#Root` is only valid on a top-level function", "a method already owns its receiver after the dot; marking another receiver would make dispatch ambiguous", "remove `#Root`, or move the function to module scope"))
+                diagnostics.push(sema_error("E0103", function.params[parameter_index].name_span, "`#Root` is only valid on a top-level function", "a method already owns its receiver after the dot; marking another receiver would make dispatch ambiguous", "remove `#Root`, or move the function to module scope"))
                 valid = false
             }
         }
@@ -115,11 +115,11 @@ sema_function_header_check_root_params: fn(function: Func, is_method: Bool, diag
     }
     loop (index, parameter) in function.params {
         if parameter.root && index != 0 {
-            &diagnostics.push(sema_error("E0103", parameter.name_span, "`#Root` must mark the first parameter", "a reversible dot call has one receiver, and it is always the first value parameter", "move `#Root` to the first parameter"))
+            diagnostics.push(sema_error("E0103", parameter.name_span, "`#Root` must mark the first parameter", "a reversible dot call has one receiver, and it is always the first value parameter", "move `#Root` to the first parameter"))
             valid = false
         }
         if parameter.root && parameter.convention != AccessConvention.Read {
-            &diagnostics.push(sema_error("E0103", parameter.name_span, "`#Root` must mark a bare-read parameter", "dot-call syntax never hides write access or a move behind the receiver", "remove the write-access marker `&` or the move marker `^` from the `#Root` parameter"))
+            diagnostics.push(sema_error("E0103", parameter.name_span, "`#Root` must mark a bare-read parameter", "dot-call syntax never hides write access or a move behind the receiver", "remove the write mark `&` or the take mark `&&` from the `#Root` parameter"))
             valid = false
         }
     }
@@ -130,7 +130,7 @@ sema_function_header_check_root_params: fn(function: Func, is_method: Bool, diag
 // `??` fallback names `err`, and a fallback in the body would shadow it.
 sema_function_header_lint_err_params: fn(function: Func, diagnostics: &[Diagnostic]) {
     loop parameter in function.params {
-        if parameter.name == "err" -> &diagnostics.push(sema_err_shadow_lint(parameter.name_span))
+        if parameter.name == "err" -> diagnostics.push(sema_err_shadow_lint(parameter.name_span))
     }
 }
 
@@ -138,7 +138,7 @@ sema_function_header_lint_err_params: fn(function: Func, diagnostics: &[Diagnost
 // replaces that alias in its file; the declaration wins, and is worth seeing.
 sema_function_header_lint_prelude_shadow: fn(function: Func, diagnostics: &[Diagnostic]) {
     if function.compiler_generated || !SEMA_CALL_PRELUDE_NAMES.contains(function.name) -> return
-    &diagnostics.push(sema_lint("L0510", function.name_span, "Declaration {function.name} replaces a Core prelude alias", "The readable Core prelude opens this name automatically, and a user declaration wins in its file", "Keep the declaration to accept the shadow, or rename it to use the prelude alias"))
+    diagnostics.push(sema_lint("L0510", function.name_span, "Declaration {function.name} replaces a Core prelude alias", "The readable Core prelude opens this name automatically, and a user declaration wins in its file", "Keep the declaration to accept the shadow, or rename it to use the prelude alias"))
 }
 
 // L2401 (D-NARG1): a public function or method with a positional `Bool`
@@ -150,7 +150,7 @@ sema_function_header_lint_positional_bools: fn(function: Func, is_method: Bool, 
     name: sema_inline_member_source_name(function.name)
     loop parameter in function.params {
         if parameter.ty != Type.Bool || parameter.name == "self" || parameter.default != None -> next
-        &diagnostics.push(sema_lint("L2401", parameter.name_span, "Public {noun} `{name}` has a positional `Bool` parameter `{parameter.name}`", "Positional booleans are easy to transpose at the call site", "Callers can write `{parameter.name}: true` to make the intent clear (S61 labels)"))
+        diagnostics.push(sema_lint("L2401", parameter.name_span, "Public {noun} `{name}` has a positional `Bool` parameter `{parameter.name}`", "Positional booleans are easy to transpose at the call site", "Callers can write `{parameter.name}: true` to make the intent clear (S61 labels)"))
     }
 }
 
@@ -218,7 +218,7 @@ sema_function_header_memo_stats: fn(receiver: Expr, method: String, args: [CallA
     } else if !config.unbounded {
         return unhandled
     }
-    function: sema_call_callee_decl(program, symbol.id, method_span, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    function: sema_call_callee_decl(program, symbol.id, method_span, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     SemaDirectSpecialCheck{handled: true, value: Val(sema_tree_node(Type.Named{name: "MemoStats"}, TExprKind.HostCall{call: THostCall.MemoStats{function: function, bound: bound}}, method_span))}
 }
 
@@ -229,7 +229,7 @@ sema_function_header_memo_stats: fn(receiver: Expr, method: String, args: [CallA
 sema_function_header_check_default_forward_refs: fn(function: Func, diagnostics: &[Diagnostic]) -> [Int] {
     names := [String]{}
     loop parameter_index in 0..<function.params.len() {
-        if function.params[parameter_index].name != "self" -> &names.push(function.params[parameter_index].name)
+        if function.params[parameter_index].name != "self" -> names.push(function.params[parameter_index].name)
     }
     invalid := [Int]{}
     index := 0
@@ -237,7 +237,7 @@ sema_function_header_check_default_forward_refs: fn(function: Func, diagnostics:
         if function.params[parameter_index].name == "self" -> next
         if function.params[parameter_index].default == .Val(default) {
             references := [Expr]{}
-            sema_function_header_default_idents(default, &references)
+            sema_function_header_default_idents(default, references)
             loop reference in references {
                 if reference == .Ident(name, span, _) {
                     later := false
@@ -248,8 +248,8 @@ sema_function_header_check_default_forward_refs: fn(function: Func, diagnostics:
                         }
                     }
                     if later {
-                        &diagnostics.push(sema_error("E0126", span, "default for `{function.params[parameter_index].name}` in `{function.name}` references `{name}`, which comes after it", "defaults fill left to right; a parameter isn't in scope until it appears in the list", "reorder the parameters so `{name}` comes before `{function.params[parameter_index].name}`, or use a constant default"))
-                        if invalid.len() == 0 || invalid[invalid.len() - 1] != parameter_index -> &invalid.push(parameter_index)
+                        diagnostics.push(sema_error("E0126", span, "default for `{function.params[parameter_index].name}` in `{function.name}` references `{name}`, which comes after it", "defaults fill left to right; a parameter isn't in scope until it appears in the list", "reorder the parameters so `{name}` comes before `{function.params[parameter_index].name}`, or use a constant default"))
+                        if invalid.len() == 0 || invalid[invalid.len() - 1] != parameter_index -> invalid.push(parameter_index)
                     }
                 }
             }
@@ -262,34 +262,34 @@ sema_function_header_check_default_forward_refs: fn(function: Func, diagnostics:
 // The identifier nodes a default expression reads, in source order.
 sema_function_header_default_idents: fn(value: Expr, found: &[Expr]) {
     if value == {
-        .Ident(_, _, _) -> &found.push(value)
+        .Ident(_, _, _) -> found.push(value)
         .Binary(_, left, right, _, _) -> {
-            sema_function_header_default_idents(left, &found)
-            sema_function_header_default_idents(right, &found)
+            sema_function_header_default_idents(left, found)
+            sema_function_header_default_idents(right, found)
         }
-        .Unary(_, inner, _, _) | .Paren(inner, _, _) | .Copy(inner, _, _) | .Place(inner, _, _, _) | .Field(inner, _, _, _) | .Spread(inner, _, _) | .Ok(inner, _, _) | .Err(inner, _, _) | .Present(inner, _, _) | .Tainted(inner, _, _, _) -> sema_function_header_default_idents(inner, &found)
+        .Unary(_, inner, _, _) | .Paren(inner, _, _) | .Copy(inner, _, _) | .Place(inner, _, _, _) | .Field(inner, _, _, _) | .Spread(inner, _, _) | .Ok(inner, _, _) | .Err(inner, _, _) | .Present(inner, _, _) | .Tainted(inner, _, _, _) -> sema_function_header_default_idents(inner, found)
         .Index(base, index, _, _, _) -> {
-            sema_function_header_default_idents(base, &found)
-            sema_function_header_default_idents(index, &found)
+            sema_function_header_default_idents(base, found)
+            sema_function_header_default_idents(index, found)
         }
-        .Call(call, _) -> loop argument in call.args -> sema_function_header_default_idents(argument.expr, &found)
+        .Call(call, _) -> loop argument in call.args -> sema_function_header_default_idents(argument.expr, found)
         .CallValue(callee, args, _, _) -> {
-            sema_function_header_default_idents(callee, &found)
-            loop argument in args -> sema_function_header_default_idents(argument.expr, &found)
+            sema_function_header_default_idents(callee, found)
+            loop argument in args -> sema_function_header_default_idents(argument.expr, found)
         }
         .MethodCall(receiver, _, _, _, _, args, _) -> {
-            sema_function_header_default_idents(receiver, &found)
-            loop argument in args -> sema_function_header_default_idents(argument.expr, &found)
+            sema_function_header_default_idents(receiver, found)
+            loop argument in args -> sema_function_header_default_idents(argument.expr, found)
         }
-        .ListLit(items, _, _) -> loop item in items -> sema_function_header_default_idents(item, &found)
-        .TupleLit(fields, _, _, _) -> loop field in fields -> sema_function_header_default_idents(field.value, &found)
+        .ListLit(items, _, _) -> loop item in items -> sema_function_header_default_idents(item, found)
+        .TupleLit(fields, _, _, _) -> loop field in fields -> sema_function_header_default_idents(field.value, found)
         .Str(parts, _, _) -> loop part in parts {
-            if part == .Interp(inner, _) -> sema_function_header_default_idents(inner, &found)
+            if part == .Interp(inner, _) -> sema_function_header_default_idents(inner, found)
         }
         .If(cond, _, then_value, _, else_value, _, _) -> {
-            sema_function_header_default_idents(cond, &found)
-            sema_function_header_default_idents(then_value, &found)
-            sema_function_header_default_idents(else_value, &found)
+            sema_function_header_default_idents(cond, found)
+            sema_function_header_default_idents(then_value, found)
+            sema_function_header_default_idents(else_value, found)
         }
         else -> {}
     }
@@ -297,12 +297,12 @@ sema_function_header_default_idents: fn(value: Expr, found: &[Expr]) {
 
 sema_function_header_active_marker_gates: fn(function: Func) -> [SemaFunctionHeaderMarkerGate] Never! {
     gates := [SemaFunctionHeaderMarkerGate]{}
-    if function.is_unsafe -> &gates.push(SemaFunctionHeaderMarkerGate{name: "Unsafe", span: function.unsafe_span ?? function.name_span})
-    if function.is_replayable -> &gates.push(SemaFunctionHeaderMarkerGate{name: "Replayable", span: function.replayable_span ?? function.name_span})
-    if function.is_must_use -> &gates.push(SemaFunctionHeaderMarkerGate{name: "MustUse", span: function.must_use_span ?? function.name_span})
-    if function.is_inline -> &gates.push(SemaFunctionHeaderMarkerGate{name: "Inline", span: function.inline_span ?? function.name_span})
-    if function.is_inline_always -> &gates.push(SemaFunctionHeaderMarkerGate{name: "Inline", span: function.inline_span ?? function.name_span})
-    if function.is_reactive -> &gates.push(SemaFunctionHeaderMarkerGate{name: "Reactive", span: function.name_span})
+    if function.is_unsafe -> gates.push(SemaFunctionHeaderMarkerGate{name: "Unsafe", span: function.unsafe_span ?? function.name_span})
+    if function.is_replayable -> gates.push(SemaFunctionHeaderMarkerGate{name: "Replayable", span: function.replayable_span ?? function.name_span})
+    if function.is_must_use -> gates.push(SemaFunctionHeaderMarkerGate{name: "MustUse", span: function.must_use_span ?? function.name_span})
+    if function.is_inline -> gates.push(SemaFunctionHeaderMarkerGate{name: "Inline", span: function.inline_span ?? function.name_span})
+    if function.is_inline_always -> gates.push(SemaFunctionHeaderMarkerGate{name: "Inline", span: function.inline_span ?? function.name_span})
+    if function.is_reactive -> gates.push(SemaFunctionHeaderMarkerGate{name: "Reactive", span: function.name_span})
     gates
 }
 
@@ -314,7 +314,7 @@ sema_function_header_check_marker_gates: fn(function: Func, function_allowed_mar
             if name == gate.name -> allowed = true
         }
         if !allowed {
-            &diagnostics.push(sema_error("E0355", gate.span, "`#{gate.name}` cannot attach to a function", "the compiler-owned applicability registry is shared by parser, sema, formatter, semantic index, and explain", "move the rule to one of its registered sites"))
+            diagnostics.push(sema_error("E0355", gate.span, "`#{gate.name}` cannot attach to a function", "the compiler-owned applicability registry is shared by parser, sema, formatter, semantic index, and explain", "move the rule to one of its registered sites"))
             valid = false
         }
     }
@@ -372,7 +372,7 @@ sema_function_arithmetic_mode: fn(value: Expr) -> ArithmeticMode? Never! {
 sema_function_header_supported: fn(function: Func, context: &SemaCheckContext) -> Bool Never! {
     supported := true
     if function.head_pattern != None {
-        sema_check_unsupported(&context, "the multi-head pattern function `{function.name}` reached body checking without being desugared")
+        sema_check_unsupported(context, "the multi-head pattern function `{function.name}` reached body checking without being desugared")
         supported = false
     }
     // (Rust `check_fn`): an `#FFI(<lang>)` body is foreign
@@ -381,11 +381,11 @@ sema_function_header_supported: fn(function: Func, context: &SemaCheckContext) -
     // row, so the module loops never send it here; any other route has no Jet
     // body to produce.
     if function.inline_foreign != None {
-        sema_check_unsupported(&context, "the inline foreign (`#FFI`) function `{function.name}` has no Jet body; calls bind to its checked foreign row, so it cannot be checked or run as a Jet function")
+        sema_check_unsupported(context, "the inline foreign (`#FFI`) function `{function.name}` has no Jet body; calls bind to its checked foreign row, so it cannot be checked or run as a Jet function")
         supported = false
     }
     if function.is_reactive {
-        sema_check_unsupported(&context, "`#Reactive fn` is not lowered by the self-hosted checker yet")
+        sema_check_unsupported(context, "`#Reactive fn` is not lowered by the self-hosted checker yet")
         supported = false
     }
     loop marker in function.markers {
@@ -409,12 +409,12 @@ sema_function_header_supported: fn(function: Func, context: &SemaCheckContext) -
         // A user-declared marker is metadata its declaration describes; it
         // has no compiler meaning for the body check or lowering to read.
         if marker.declaration_module != None -> next
-        sema_check_unsupported(&context, "the function marker `#{marker.name}` is not supported by the self-hosted checker yet")
+        sema_check_unsupported(context, "the function marker `#{marker.name}` is not supported by the self-hosted checker yet")
         supported = false
     }
     loop parameter_index in 0..<function.params.len() {
         if function.params[parameter_index].variadic_bound_list != None {
-            sema_check_unsupported(&context, "the variadic bound list on parameter `{function.params[parameter_index].name}` is not supported by the self-hosted checker yet")
+            sema_check_unsupported(context, "the variadic bound list on parameter `{function.params[parameter_index].name}` is not supported by the self-hosted checker yet")
             supported = false
         }
     }
@@ -460,42 +460,42 @@ sema_function_header_check_variadic_bound_shape: fn(function: Func, environment:
     if !bounded -> return true
     loops := 0
     uses := [Span]{}
-    loop statement in function.body -> sema_function_header_variadic_statement(statement, last.name, true, &loops, &uses)
-    if loops > 1 -> &uses.push(last.name_span)
+    loop statement in function.body -> sema_function_header_variadic_statement(statement, last.name, true, loops, uses)
+    if loops > 1 -> uses.push(last.name_span)
     loop span in uses {
-        &diagnostics.push(sema_error("E1314", span, "`{last.name}` can only be used in a direct `loop x in {last.name} {{ … }}` loop here", "`{last.name}` is a trait-bounded variadic (`...Trait` / `...[A, B]`) — its elements can have different concrete types, so there's no single type to give `{last.name}` outside a loop that visits each argument once", "iterate it with `loop x in {last.name} {{ … }}` — that's the only supported use"))
+        diagnostics.push(sema_error("E1314", span, "`{last.name}` can only be used in a direct `loop x in {last.name} {{ … }}` loop here", "`{last.name}` is a trait-bounded variadic (`...Trait` / `...[A, B]`) — its elements can have different concrete types, so there's no single type to give `{last.name}` outside a loop that visits each argument once", "iterate it with `loop x in {last.name} {{ … }}` — that's the only supported use"))
     }
     uses.len() == 0
 }
 
 sema_function_header_variadic_body: fn(body: [Stmt], name: String, loops: &Int, uses: &[Span]) Never! {
-    loop statement in body -> sema_function_header_variadic_statement(statement, name, false, &loops, &uses)
+    loop statement in body -> sema_function_header_variadic_statement(statement, name, false, loops, uses)
 }
 
 sema_function_header_variadic_statement: fn(statement: Stmt, name: String, top_level: Bool, loops: &Int, uses: &[Span]) Never! {
     if statement == {
-        .Expr(value) | .DeferClose(value, _) -> sema_function_header_variadic_expr(value, name, &uses)
+        .Expr(value) | .DeferClose(value, _) -> sema_function_header_variadic_expr(value, name, uses)
         .Return(value, _) -> {
-            if value == .Val(returned) -> sema_function_header_variadic_expr(returned, name, &uses)
+            if value == .Val(returned) -> sema_function_header_variadic_expr(returned, name, uses)
         }
-        .Val(binding) -> sema_function_header_variadic_expr(binding.init, name, &uses)
+        .Val(binding) -> sema_function_header_variadic_expr(binding.init, name, uses)
         .Assign(target, _, _, value) -> {
             if target == {
                 .Index(base, index, _, _) -> {
-                    sema_function_header_variadic_expr(base, name, &uses)
-                    sema_function_header_variadic_expr(index, name, &uses)
+                    sema_function_header_variadic_expr(base, name, uses)
+                    sema_function_header_variadic_expr(index, name, uses)
                 }
-                .Field(base, _, _) -> sema_function_header_variadic_expr(base, name, &uses)
+                .Field(base, _, _) -> sema_function_header_variadic_expr(base, name, uses)
                 .Local(local, local_span) -> {
-                    if local == name -> &uses.push(local_span)
+                    if local == name -> uses.push(local_span)
                 }
                 else -> {}
             }
-            sema_function_header_variadic_expr(value, name, &uses)
+            sema_function_header_variadic_expr(value, name, uses)
         }
         .While(cond, body, _, _, _) -> {
-            sema_function_header_variadic_expr(cond, name, &uses)
-            sema_function_header_variadic_body(body, name, &loops, &uses)
+            sema_function_header_variadic_expr(cond, name, uses)
+            sema_function_header_variadic_body(body, name, loops, uses)
         }
         .For(_, _, second, kind, body, span, _, label, _) -> {
             direct := false
@@ -505,36 +505,36 @@ sema_function_header_variadic_statement: fn(statement: Stmt, name: String, top_l
             } else {
                 if kind == {
                     .Range(start, end, step, _) -> {
-                        sema_function_header_variadic_expr(start, name, &uses)
-                        sema_function_header_variadic_expr(end, name, &uses)
-                        if step == .Val(step_value) -> sema_function_header_variadic_expr(step_value, name, &uses)
+                        sema_function_header_variadic_expr(start, name, uses)
+                        sema_function_header_variadic_expr(end, name, uses)
+                        if step == .Val(step_value) -> sema_function_header_variadic_expr(step_value, name, uses)
                     }
                     .In(collection, step) -> {
                         if collection == .Ident(collection_name, _, _) && collection_name == name {
-                            &uses.push(span)
+                            uses.push(span)
                         } else {
-                            sema_function_header_variadic_expr(collection, name, &uses)
+                            sema_function_header_variadic_expr(collection, name, uses)
                         }
-                        if step == .Val(step_value) -> sema_function_header_variadic_expr(step_value, name, &uses)
+                        if step == .Val(step_value) -> sema_function_header_variadic_expr(step_value, name, uses)
                     }
                 }
             }
-            sema_function_header_variadic_body(body, name, &loops, &uses)
+            sema_function_header_variadic_body(body, name, loops, uses)
         }
         .Switch(subject, arms, else_body, _) -> {
-            sema_function_header_variadic_expr(subject, name, &uses)
+            sema_function_header_variadic_expr(subject, name, uses)
             loop arm in arms {
-                sema_function_header_variadic_expr(arm.cond, name, &uses)
-                sema_function_header_variadic_body(arm.body, name, &loops, &uses)
+                sema_function_header_variadic_expr(arm.cond, name, uses)
+                sema_function_header_variadic_body(arm.body, name, loops, uses)
             }
-            if else_body == .Val(body) -> sema_function_header_variadic_body(body, name, &loops, &uses)
+            if else_body == .Val(body) -> sema_function_header_variadic_body(body, name, loops, uses)
         }
-        .Loop(body, _, _, _) -> sema_function_header_variadic_body(body, name, &loops, &uses)
+        .Loop(body, _, _, _) -> sema_function_header_variadic_body(body, name, loops, uses)
         .CountedLoop(init, cond, step, body, _, _, _) -> {
-            sema_function_header_variadic_expr(init.init, name, &uses)
-            sema_function_header_variadic_expr(cond, name, &uses)
-            if step == .Val(inner) -> sema_function_header_variadic_statement(inner, name, false, &loops, &uses)
-            sema_function_header_variadic_body(body, name, &loops, &uses)
+            sema_function_header_variadic_expr(init.init, name, uses)
+            sema_function_header_variadic_expr(cond, name, uses)
+            if step == .Val(inner) -> sema_function_header_variadic_statement(inner, name, false, loops, uses)
+            sema_function_header_variadic_body(body, name, loops, uses)
         }
         // Scope wrappers (`#Unsafe { }`, regions, groups, …) stay out of the
         // v1 scan, as in the Rust walk.
@@ -543,68 +543,68 @@ sema_function_header_variadic_statement: fn(statement: Stmt, name: String, top_l
 }
 
 sema_function_header_variadic_args: fn(args: [CallArg], name: String, uses: &[Span]) Never! {
-    loop arg in args -> sema_function_header_variadic_expr(arg.expr, name, &uses)
+    loop arg in args -> sema_function_header_variadic_expr(arg.expr, name, uses)
 }
 
 sema_function_header_variadic_expr: fn(expr: Expr, name: String, uses: &[Span]) Never! {
     if expr == {
         .Ident(found, span, _) -> {
-            if found == name -> &uses.push(span)
+            if found == name -> uses.push(span)
         }
-        .Call(call, _) -> sema_function_header_variadic_args(call.args, name, &uses)
+        .Call(call, _) -> sema_function_header_variadic_args(call.args, name, uses)
         .MethodCall(receiver, _, _, _, _, args, _) | .CallValue(receiver, args, _, _) -> {
-            sema_function_header_variadic_expr(receiver, name, &uses)
-            sema_function_header_variadic_args(args, name, &uses)
+            sema_function_header_variadic_expr(receiver, name, uses)
+            sema_function_header_variadic_args(args, name, uses)
         }
         .Binary(_, left, right, _, _) -> {
-            sema_function_header_variadic_expr(left, name, &uses)
-            sema_function_header_variadic_expr(right, name, &uses)
+            sema_function_header_variadic_expr(left, name, uses)
+            sema_function_header_variadic_expr(right, name, uses)
         }
-        .Unary(_, inner, _, _) | .Field(inner, _, _, _) | .Deref(inner, _, _) | .RawOf(inner, _, _) | .Copy(inner, _, _) | .Place(inner, _, _, _) | .Tainted(inner, _, _, _) | .Present(inner, _, _) | .Ok(inner, _, _) | .Err(inner, _, _) | .OptField(inner, _, _, _, _, _) -> sema_function_header_variadic_expr(inner, name, &uses)
+        .Unary(_, inner, _, _) | .Field(inner, _, _, _) | .Deref(inner, _, _) | .RawOf(inner, _, _) | .Copy(inner, _, _) | .Place(inner, _, _, _) | .Tainted(inner, _, _, _) | .Present(inner, _, _) | .Ok(inner, _, _) | .Err(inner, _, _) | .OptField(inner, _, _, _, _, _) -> sema_function_header_variadic_expr(inner, name, uses)
         .Try(inner, _, _, note, _) -> {
-            sema_function_header_variadic_expr(inner, name, &uses)
-            if note == .Val(note_value) -> sema_function_header_variadic_expr(note_value, name, &uses)
+            sema_function_header_variadic_expr(inner, name, uses)
+            if note == .Val(note_value) -> sema_function_header_variadic_expr(note_value, name, uses)
         }
         .Index(base, index, _, _, _) -> {
-            sema_function_header_variadic_expr(base, name, &uses)
-            sema_function_header_variadic_expr(index, name, &uses)
+            sema_function_header_variadic_expr(base, name, uses)
+            sema_function_header_variadic_expr(index, name, uses)
         }
         .Slice(base, start, end, range, _, _) -> {
-            sema_function_header_variadic_expr(base, name, &uses)
+            sema_function_header_variadic_expr(base, name, uses)
             if range == .Val(range_value) {
-                sema_function_header_variadic_expr(range_value, name, &uses)
+                sema_function_header_variadic_expr(range_value, name, uses)
             } else {
-                sema_function_header_variadic_expr(start, name, &uses)
-                sema_function_header_variadic_expr(end, name, &uses)
+                sema_function_header_variadic_expr(start, name, uses)
+                sema_function_header_variadic_expr(end, name, uses)
             }
         }
-        .ListLit(elements, _, _) -> loop element in elements -> sema_function_header_variadic_expr(element, name, &uses)
+        .ListLit(elements, _, _) -> loop element in elements -> sema_function_header_variadic_expr(element, name, uses)
         .MapLit(entries, _, _) -> loop entry in entries {
-            sema_function_header_variadic_expr(entry.key, name, &uses)
-            sema_function_header_variadic_expr(entry.value, name, &uses)
+            sema_function_header_variadic_expr(entry.key, name, uses)
+            sema_function_header_variadic_expr(entry.value, name, uses)
         }
-        .StructLit(_, _, _, _, fields, _, _, _) -> loop field in fields -> sema_function_header_variadic_expr(field.value, name, &uses)
+        .StructLit(_, _, _, _, fields, _, _, _) -> loop field in fields -> sema_function_header_variadic_expr(field.value, name, uses)
         .TypedLit(_, body, _, _) -> {
             if body == {
-                .Fields(fields) -> loop field in fields -> sema_function_header_variadic_expr(field.value, name, &uses)
-                .Elements(elements) -> loop element in elements -> sema_function_header_variadic_expr(element, name, &uses)
+                .Fields(fields) -> loop field in fields -> sema_function_header_variadic_expr(field.value, name, uses)
+                .Elements(elements) -> loop element in elements -> sema_function_header_variadic_expr(element, name, uses)
                 .Entries(entries) -> loop entry in entries {
-                    sema_function_header_variadic_expr(entry.key, name, &uses)
-                    sema_function_header_variadic_expr(entry.value, name, &uses)
+                    sema_function_header_variadic_expr(entry.key, name, uses)
+                    sema_function_header_variadic_expr(entry.value, name, uses)
                 }
-                .Value(value) -> sema_function_header_variadic_expr(value, name, &uses)
+                .Value(value) -> sema_function_header_variadic_expr(value, name, uses)
                 else -> {}
             }
         }
-        .TupleLit(fields, _, _, _) -> loop field in fields -> sema_function_header_variadic_expr(field.value, name, &uses)
+        .TupleLit(fields, _, _, _) -> loop field in fields -> sema_function_header_variadic_expr(field.value, name, uses)
         .EnumLit(_, _, _, args, _, _, _) -> loop arg in args {
             if arg == {
-                .Positional(value) -> sema_function_header_variadic_expr(value, name, &uses)
-                .Named(_, value) -> sema_function_header_variadic_expr(value, name, &uses)
+                .Positional(value) -> sema_function_header_variadic_expr(value, name, uses)
+                .Named(_, value) -> sema_function_header_variadic_expr(value, name, uses)
             }
         }
         .Str(parts, _, _) -> loop part in parts {
-            if part == .Interp(value, _) -> sema_function_header_variadic_expr(value, name, &uses)
+            if part == .Interp(value, _) -> sema_function_header_variadic_expr(value, name, uses)
         }
         else -> {}
     }

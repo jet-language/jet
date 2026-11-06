@@ -73,7 +73,7 @@ jet_cli_extract_fixture_paths: fn(text: String) -> [String] Never! {
             loop before_start < index && bytes[before_start] >= 128 && bytes[before_start] < 192 -> before_start += 1
             before: String.from_bytes(bytes[before_start..<index]) ?? ""
             display: before.contains("render_diagnostics(") || before.contains("render_all_colored(") || before.contains("render_all_json(")
-            if !display && jet_cli_fixture_literal(literal) -> &paths.push(literal)
+            if !display && jet_cli_fixture_literal(literal) -> paths.push(literal)
         }
         index = end + 1
     }
@@ -88,9 +88,9 @@ jet_cli_collect_fixture_rs: fn(directory: String, files: &[String]) Never! -[FS]
     loop name in entries {
         path: "{directory}/{name}"
         if cli_files.is_dir(path) {
-            jet_cli_collect_fixture_rs(path, &files)
+            jet_cli_collect_fixture_rs(path, files)
         } else if name.ends_with(".rs") && name != ".rs" {
-            &files.push(path)
+            files.push(path)
         }
     }
 }
@@ -98,14 +98,14 @@ jet_cli_collect_fixture_rs: fn(directory: String, files: &[String]) Never! -[FS]
 jet_cli_devtools_fixture_paths: fn(color: Bool, json: Bool) -> JetDriverVerbOutput {
     if !cli_files.is_dir("tests") -> return jet_cli_maintenance_error("E2104", "no `tests/` directory here", Val("run from the repo root"), color, json)
     files := [String]{}
-    jet_cli_collect_fixture_rs("tests", &files)
+    jet_cli_collect_fixture_rs("tests", files)
     checked := 0
     missing := [String]{}
     loop file in files {
         source: cli_files.read(file) ?? ""
         loop path in jet_cli_extract_fixture_paths(source) {
             checked += 1
-            if !cli_files.exists(path) -> &missing.push("  {file} -> `{path}` does not exist\n")
+            if !cli_files.exists(path) -> missing.push("  {file} -> `{path}` does not exist\n")
         }
     }
     if missing.len() == 0 -> return JetDriverVerbOutput{stdout: "check-fixture-paths: {checked} embedded path(s) across {files.len()} file(s), all present\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}

@@ -110,7 +110,7 @@ pkg_release_parse_ip: fn(text: String) -> ReleaseIPAddress? Never! {
 pkg_release_ip_display: fn(address: ReleaseIPAddress) -> String Never! {
     if address.v4 {
         parts := [String]{}
-        loop part in address.parts -> &parts.push("{part}")
+        loop part in address.parts -> parts.push("{part}")
         return parts.join(".")
     }
     best_start := -1
@@ -130,13 +130,13 @@ pkg_release_ip_display: fn(address: ReleaseIPAddress) -> String Never! {
     }
     if best_start < 0 {
         parts := [String]{}
-        loop part in address.parts -> &parts.push(pkg_release_hex(part))
+        loop part in address.parts -> parts.push(pkg_release_hex(part))
         return parts.join(":")
     }
     head := [String]{}
-    loop index in 0..<best_start -> &head.push(pkg_release_hex(address.parts[index]))
+    loop index in 0..<best_start -> head.push(pkg_release_hex(address.parts[index]))
     tail := [String]{}
-    loop index in (best_start + best_len)..<8 -> &tail.push(pkg_release_hex(address.parts[index]))
+    loop index in (best_start + best_len)..<8 -> tail.push(pkg_release_hex(address.parts[index]))
     "{head.join(":")}::{tail.join(":")}"
 }
 
@@ -212,7 +212,7 @@ pkg_release_allowlist_parse: fn(value: String) -> [JetReleaseDevtoolsNetwork] Re
         item: piece.trim()
         if item == "" -> next
         if entries.len() == INSPECT_MAX_ALLOWLIST_ENTRIES -> return Err(ReleaseDevtoolsError{message: "inspect allowlist cannot contain more than {INSPECT_MAX_ALLOWLIST_ENTRIES} entries"})
-        &entries.push(pkg_release_network_parse(item))
+        entries.push(pkg_release_network_parse(item))
     }
     Ok(entries)
 }
@@ -258,7 +258,7 @@ pkg_release_deployment_debug: fn(deployment: JetReleaseDevtoolsDeployment) -> St
         .None -> "None"
     }
     networks := [String]{}
-    loop network in deployment.allowlist -> &networks.push("ReleaseDevtoolsNetwork {{ address: {network.address}, prefix: {network.prefix} }}")
+    loop network in deployment.allowlist -> networks.push("ReleaseDevtoolsNetwork {{ address: {network.address}, prefix: {network.prefix} }}")
     "ReleaseDevtoolsDeployment {{ enabled: {pkg_debug_bool(deployment.enabled)}, token: {token}, allowlist: ReleaseDevtoolsAllowlist([{networks.join(", ")}]) }}"
 }
 

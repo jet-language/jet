@@ -53,7 +53,7 @@ number: fn(text: String) -> Int Never! {
     }
 }
 
-// ^[a-z][a-z0-9-]*$
+// &&[a-z][a-z0-9-]*$
 valid_workload: fn(text: String) -> Bool Never! {
     bytes: text.bytes()
     if bytes.len() == 0 -> return false
@@ -66,7 +66,7 @@ valid_workload: fn(text: String) -> Bool Never! {
     true
 }
 
-// ^[0-9a-f]{64}$
+// &&[0-9a-f]{64}$
 valid_hash: fn(text: String) -> Bool Never! {
     bytes: text.bytes()
     if bytes.len() != 64 -> return false
@@ -85,7 +85,7 @@ read_lines: fn(text: String) -> [String] Never! {
     start := 0
     loop index in 0..<bytes.len() {
         if bytes[index] == (U8{10}) {
-            &lines.push(byte_text(bytes, start, index))
+            lines.push(byte_text(bytes, start, index))
             start = index + 1
         }
     }
@@ -130,21 +130,21 @@ row_fields: fn(line: String) -> Row Never! {
     loop at < bytes.len() && fields.len() < 8 {
         start: at
         loop at < bytes.len() && bytes[at] != (U8{9}) -> at += 1
-        &fields.push(byte_text(bytes, start, at))
+        fields.push(byte_text(bytes, start, at))
         loop at < bytes.len() && bytes[at] == (U8{9}) -> at += 1
     }
     end := bytes.len()
     loop end > at && bytes[end - 1] == (U8{9}) -> end -= 1
-    if at < end -> &fields.push(byte_text(bytes, at, end))
-    loop fields.len() < 9 -> &fields.push("")
+    if at < end -> fields.push(byte_text(bytes, at, end))
+    loop fields.len() < 9 -> fields.push("")
     Row{version: fields[0], workload: fields[1], source: fields[2], source_hash: fields[3], wasm: fields[4], glue: fields[5], runtime: fields[6], bundle: fields[7], regression: fields[8]}
 }
 
 passthrough: fn(receipt: ProcessReceipt) Never! -[IO]> {
     out := term.stdout()
-    &out.write(receipt.output).drop("web bundle stdout")
+    out.write(receipt.output).drop("web bundle stdout")
     errors := term.stderr()
-    &errors.write(receipt.errors).drop("web bundle stderr")
+    errors.write(receipt.errors).drop("web bundle stderr")
 }
 
 executable: fn(path: String) -[Exec, Time.Wait]> Bool Never! {
@@ -187,7 +187,7 @@ check_rows: fn(root: String, text: String, scratch: String, run_dir: String) -[E
         }
         if !valid_workload(row.workload) -> return fail("invalid workload: {row.workload}")
         if seen.contains(row.workload) -> return fail("duplicate workload: {row.workload}")
-        &seen.push(row.workload.copy())
+        seen.push(row.workload.copy())
         if row.source.starts_with("/") || row.source.contains("..") -> return fail("unsafe workload source: {row.source}")
         source_path: "{root}/{row.source}"
         if !regular_file(source_path) -> return fail("missing workload source: {row.source}")
@@ -226,7 +226,7 @@ check_rows: fn(root: String, text: String, scratch: String, run_dir: String) -[E
         if !built {
             log: files.read_bytes("{case_dir}/build.log") ?? [U8]{}
             errors := term.stderr()
-            &errors.write(String.from_bytes_lossy(first_lines(log, 120))).drop("web bundle stderr")
+            errors.write(String.from_bytes_lossy(first_lines(log, 120))).drop("web bundle stderr")
             return fail("build failed: {row.workload}")
         }
         loop artifact in ARTIFACTS {

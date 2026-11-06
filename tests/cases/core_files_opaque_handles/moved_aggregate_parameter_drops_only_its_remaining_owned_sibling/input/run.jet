@@ -3,10 +3,10 @@ use files: core.files
 
 Pair: struct { left: files.TempFile, right: files.TempFile }
 
-consume: fn(pair: ^Pair) -> String {
+consume: fn(pair: &&Pair) -> String {
     left: pair.left.path
     sibling: pair.right.path
-    close(^pair.left)
+    close(pair.left)
     print(!files.exists(left))
     print(files.exists(sibling))
     sibling
@@ -17,6 +17,6 @@ run: fn() {
         left: files.temp_file("parameter-left") ?? panic("left"),
         right: files.temp_file("parameter-right") ?? panic("right")
     }
-    sibling: consume(^pair)
+    sibling: consume(pair)
     print(!files.exists(sibling))
 }

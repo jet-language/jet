@@ -54,17 +54,17 @@ sema_effect_leaf_member: fn(name: String) -> String? {
 
 sema_effect_leaf_add: fn(leaves: &[SemaEffectLeaf], name: String) Never! {
     member: sema_effect_leaf_member(name) ?? return
-    &leaves.push(SemaEffectLeaf{root: sema_effect_root(name), member: member})
+    leaves.push(SemaEffectLeaf{root: sema_effect_root(name), member: member})
 }
 
 sema_effect_leaf_collect: fn(leaves: &[SemaEffectLeaf], items: [Item]) Never! {
     loop item in items {
         if item == {
-            .EffectDecl(declaration) -> sema_effect_leaf_add(&leaves, declaration.name)
+            .EffectDecl(declaration) -> sema_effect_leaf_add(leaves, declaration.name)
             .CodeModule(code_module) -> {
-                if code_module.body == .Val(body) -> sema_effect_leaf_collect(&leaves, body)
+                if code_module.body == .Val(body) -> sema_effect_leaf_collect(leaves, body)
             }
-            .GenericModule(generic_module) -> sema_effect_leaf_collect(&leaves, generic_module.body)
+            .GenericModule(generic_module) -> sema_effect_leaf_collect(leaves, generic_module.body)
             else -> {}
         }
     }
@@ -77,13 +77,13 @@ sema_effect_leaf_check_name: fn(leaves: [SemaEffectLeaf], name: String, span: Sp
     root: sema_effect_root(bare)
     members := [String]{}
     loop leaf in leaves {
-        if leaf.root == root -> &members.push(leaf.member)
+        if leaf.root == root -> members.push(leaf.member)
     }
     if members.len() == 0 -> return
     loop candidate in members {
         if candidate == member -> return
     }
-    &diagnostics.push(sema_effect_leaf_unknown_diagnostic(name, root, member, members, span))
+    diagnostics.push(sema_effect_leaf_unknown_diagnostic(name, root, member, members, span))
 }
 
 // A dotted package-budget right under a root Prelude/Effects.jet closes that
@@ -96,7 +96,7 @@ sema_effect_builtin_leaf_diagnostic: fn(name: String, span: Span) -> Diagnostic?
     members := [String]{}
     loop leaf in EFFECT_VOCABULARY_LEAVES {
         if sema_effect_root(leaf) == root {
-            if sema_effect_leaf_member(leaf) == .Val(leaf_member) -> &members.push(leaf_member)
+            if sema_effect_leaf_member(leaf) == .Val(leaf_member) -> members.push(leaf_member)
         }
     }
     Val(sema_effect_leaf_unknown_diagnostic(name, root, member, members, span))
@@ -118,37 +118,37 @@ sema_effect_leaf_unknown_diagnostic: fn(name: String, root: String, member: Stri
         if span.end - span.start == member.len() && closest_member == .Val(leaf) -> new_text = leaf
         diagnostic = diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: new_text})
     }
-    diagnostic_with_rights(^diagnostic, "vocabulary", [String]{name}, [String]{}, None)
+    diagnostic_with_rights(diagnostic, "vocabulary", [String]{name}, [String]{}, None)
 }
 
 sema_effect_leaf_check_row: fn(leaves: [SemaEffectLeaf], row: [EffectRowEntry], diagnostics: &[Diagnostic]) {
     loop entry in row {
         if entry.name.starts_with("..") -> next
-        sema_effect_leaf_check_name(leaves, entry.name, entry.span, &diagnostics)
+        sema_effect_leaf_check_name(leaves, entry.name, entry.span, diagnostics)
     }
 }
 
 sema_effect_leaf_check_type: fn(leaves: [SemaEffectLeaf], ty: Type, diagnostics: &[Diagnostic]) {
     if ty == {
         .Fn(params, ret, effect_bound, _, _, _) -> {
-            loop parameter in params -> sema_effect_leaf_check_type(leaves, parameter, &diagnostics)
-            if ret == .Val(value) -> sema_effect_leaf_check_type(leaves, value, &diagnostics)
-            if effect_bound == .Val(row) -> sema_effect_leaf_check_row(leaves, row, &diagnostics)
+            loop parameter in params -> sema_effect_leaf_check_type(leaves, parameter, diagnostics)
+            if ret == .Val(value) -> sema_effect_leaf_check_type(leaves, value, diagnostics)
+            if effect_bound == .Val(row) -> sema_effect_leaf_check_row(leaves, row, diagnostics)
         }
-        .List(inner) | .Option(inner) | .Shared(inner) | .Tagged(_, inner) | .FixedList(inner, _) -> sema_effect_leaf_check_type(leaves, inner, &diagnostics)
+        .List(inner) | .Option(inner) | .Shared(inner) | .Tagged(_, inner) | .FixedList(inner, _) -> sema_effect_leaf_check_type(leaves, inner, diagnostics)
         .Result(ok, err) -> {
-            sema_effect_leaf_check_type(leaves, ok, &diagnostics)
-            sema_effect_leaf_check_type(leaves, err, &diagnostics)
+            sema_effect_leaf_check_type(leaves, ok, diagnostics)
+            sema_effect_leaf_check_type(leaves, err, diagnostics)
         }
         .Apply(_, args) | .Union(args) -> {
-            loop argument in args -> sema_effect_leaf_check_type(leaves, argument, &diagnostics)
+            loop argument in args -> sema_effect_leaf_check_type(leaves, argument, diagnostics)
         }
         .Map(key, _, value) -> {
-            sema_effect_leaf_check_type(leaves, key, &diagnostics)
-            sema_effect_leaf_check_type(leaves, value, &diagnostics)
+            sema_effect_leaf_check_type(leaves, key, diagnostics)
+            sema_effect_leaf_check_type(leaves, value, diagnostics)
         }
         .Tuple(fields) -> {
-            loop field in fields -> sema_effect_leaf_check_type(leaves, field.ty, &diagnostics)
+            loop field in fields -> sema_effect_leaf_check_type(leaves, field.ty, diagnostics)
         }
         else -> {}
     }
@@ -158,11 +158,11 @@ sema_effect_leaf_check_statements: fn(leaves: [SemaEffectLeaf], statements: [Stm
     loop statement in statements {
         if statement == {
             .Val(binding) -> {
-                if binding.ty == .Val(ty) -> sema_effect_leaf_check_type(leaves, ty, &diagnostics)
+                if binding.ty == .Val(ty) -> sema_effect_leaf_check_type(leaves, ty, diagnostics)
             }
             .CountedLoop(init, _, _, body, _, _, _) -> {
-                if init.ty == .Val(ty) -> sema_effect_leaf_check_type(leaves, ty, &diagnostics)
-                sema_effect_leaf_check_statements(leaves, body, &diagnostics)
+                if init.ty == .Val(ty) -> sema_effect_leaf_check_type(leaves, ty, diagnostics)
+                sema_effect_leaf_check_statements(leaves, body, diagnostics)
             }
             .While(_, body, _, _, _)
             | .For(_, _, _, _, body, _, _, _, _)
@@ -181,18 +181,18 @@ sema_effect_leaf_check_statements: fn(leaves: [SemaEffectLeaf], statements: [Stm
             | .Live(body, _)
             | .AssumeDet(_, _, body, _)
             | .Transact(_, _, body, _, _)
-            | .ScopeMember(_, _, _, _, body, _, _, _) -> sema_effect_leaf_check_statements(leaves, body, &diagnostics)
+            | .ScopeMember(_, _, _, _, body, _, _, _) -> sema_effect_leaf_check_statements(leaves, body, diagnostics)
             .AuthorityScope(caps, _, _, body, _) -> {
-                loop cap in caps -> sema_effect_leaf_check_name(leaves, cap.name, cap.span, &diagnostics)
-                sema_effect_leaf_check_statements(leaves, body, &diagnostics)
+                loop cap in caps -> sema_effect_leaf_check_name(leaves, cap.name, cap.span, diagnostics)
+                sema_effect_leaf_check_statements(leaves, body, diagnostics)
             }
             .Switch(_, arms, else_body, _) | .ComptimeSwitch(_, arms, else_body, _) -> {
-                loop arm in arms -> sema_effect_leaf_check_statements(leaves, arm.body, &diagnostics)
-                if else_body == .Val(body) -> sema_effect_leaf_check_statements(leaves, body, &diagnostics)
+                loop arm in arms -> sema_effect_leaf_check_statements(leaves, arm.body, diagnostics)
+                if else_body == .Val(body) -> sema_effect_leaf_check_statements(leaves, body, diagnostics)
             }
             .ComptimeIf(_, _, then_body, else_body, _, _) -> {
-                sema_effect_leaf_check_statements(leaves, then_body, &diagnostics)
-                if else_body == .Val(body) -> sema_effect_leaf_check_statements(leaves, body, &diagnostics)
+                sema_effect_leaf_check_statements(leaves, then_body, diagnostics)
+                if else_body == .Val(body) -> sema_effect_leaf_check_statements(leaves, body, diagnostics)
             }
             else -> {}
         }
@@ -205,61 +205,61 @@ sema_effect_leaf_check_function: fn(leaves: [SemaEffectLeaf], function: Func, di
             name := entry.name
             if name.starts_with("!") -> name = name.slice(1, name.len())
             if name.starts_with("..") -> next
-            sema_effect_leaf_check_name(leaves, name, entry.span, &diagnostics)
+            sema_effect_leaf_check_name(leaves, name, entry.span, diagnostics)
         }
     }
-    loop parameter_index in 0..<function.params.len() -> sema_effect_leaf_check_type(leaves, function.params[parameter_index].ty, &diagnostics)
-    if function.return_type == .Val(ty) -> sema_effect_leaf_check_type(leaves, ty, &diagnostics)
-    sema_effect_leaf_check_statements(leaves, function.body, &diagnostics)
+    loop parameter_index in 0..<function.params.len() -> sema_effect_leaf_check_type(leaves, function.params[parameter_index].ty, diagnostics)
+    if function.return_type == .Val(ty) -> sema_effect_leaf_check_type(leaves, ty, diagnostics)
+    sema_effect_leaf_check_statements(leaves, function.body, diagnostics)
 }
 
 sema_effect_leaf_check_items: fn(leaves: [SemaEffectLeaf], items: [Item], diagnostics: &[Diagnostic]) {
     loop item in items {
         if item == {
             .EffectDecl(declaration) -> {
-                if sema_effect_parse_name(declaration.name) == None -> &diagnostics.push(sema_effect_unknown(declaration.name, declaration.name_span))
+                if sema_effect_parse_name(declaration.name) == None -> diagnostics.push(sema_effect_unknown(declaration.name, declaration.name_span))
             }
-            .Func(function) -> sema_effect_leaf_check_function(leaves, function, &diagnostics)
+            .Func(function) -> sema_effect_leaf_check_function(leaves, function, diagnostics)
             .Struct(definition) -> {
-                loop field in definition.fields -> sema_effect_leaf_check_type(leaves, field.ty, &diagnostics)
-                loop function in definition.methods -> sema_effect_leaf_check_function(leaves, function, &diagnostics)
+                loop field in definition.fields -> sema_effect_leaf_check_type(leaves, field.ty, diagnostics)
+                loop function in definition.methods -> sema_effect_leaf_check_function(leaves, function, diagnostics)
                 loop implementation in definition.trait_impls {
-                    loop function in implementation.methods -> sema_effect_leaf_check_function(leaves, function, &diagnostics)
+                    loop function in implementation.methods -> sema_effect_leaf_check_function(leaves, function, diagnostics)
                 }
             }
             .Enum(definition) -> {
                 loop variant in definition.variants {
                     if variant.payload == {
-                        .Single(ty, _) -> sema_effect_leaf_check_type(leaves, ty, &diagnostics)
+                        .Single(ty, _) -> sema_effect_leaf_check_type(leaves, ty, diagnostics)
                         .Named(fields) -> {
-                            loop field in fields -> sema_effect_leaf_check_type(leaves, field.ty, &diagnostics)
+                            loop field in fields -> sema_effect_leaf_check_type(leaves, field.ty, diagnostics)
                         }
                         .Unit -> {}
                     }
                 }
-                loop function in definition.methods -> sema_effect_leaf_check_function(leaves, function, &diagnostics)
+                loop function in definition.methods -> sema_effect_leaf_check_function(leaves, function, diagnostics)
                 loop implementation in definition.trait_impls {
-                    loop function in implementation.methods -> sema_effect_leaf_check_function(leaves, function, &diagnostics)
+                    loop function in implementation.methods -> sema_effect_leaf_check_function(leaves, function, diagnostics)
                 }
             }
             .Impl(implementation) -> {
-                loop function in implementation.methods -> sema_effect_leaf_check_function(leaves, function, &diagnostics)
+                loop function in implementation.methods -> sema_effect_leaf_check_function(leaves, function, diagnostics)
             }
             .Trait(definition) -> {
                 loop method in definition.methods {
                     if method.declared_effects == .Val(row) {
-                        loop entry in row -> sema_effect_leaf_check_name(leaves, entry.name, entry.span, &diagnostics)
+                        loop entry in row -> sema_effect_leaf_check_name(leaves, entry.name, entry.span, diagnostics)
                     }
-                    loop parameter in method.params -> sema_effect_leaf_check_type(leaves, parameter.ty, &diagnostics)
-                    if method.return_type == .Val(ty) -> sema_effect_leaf_check_type(leaves, ty, &diagnostics)
-                    if method.default_body == .Val(body) -> sema_effect_leaf_check_statements(leaves, body, &diagnostics)
+                    loop parameter in method.params -> sema_effect_leaf_check_type(leaves, parameter.ty, diagnostics)
+                    if method.return_type == .Val(ty) -> sema_effect_leaf_check_type(leaves, ty, diagnostics)
+                    if method.default_body == .Val(body) -> sema_effect_leaf_check_statements(leaves, body, diagnostics)
                 }
             }
-            .Test(test) -> sema_effect_leaf_check_statements(leaves, test.body, &diagnostics)
+            .Test(test) -> sema_effect_leaf_check_statements(leaves, test.body, diagnostics)
             .CodeModule(code_module) -> {
-                if code_module.body == .Val(body) -> sema_effect_leaf_check_items(leaves, body, &diagnostics)
+                if code_module.body == .Val(body) -> sema_effect_leaf_check_items(leaves, body, diagnostics)
             }
-            .GenericModule(generic_module) -> sema_effect_leaf_check_items(leaves, generic_module.body, &diagnostics)
+            .GenericModule(generic_module) -> sema_effect_leaf_check_items(leaves, generic_module.body, diagnostics)
             else -> {}
         }
     }
@@ -269,18 +269,18 @@ sema_effect_leaf_check_items: fn(leaves: [SemaEffectLeaf], items: [Item], diagno
 // declared leaves of its root. Returns true when a diagnostic was reported.
 sema_effect_check_declared_leaves: fn(graph: SemaRegistrationGraph, diagnostics: &[Diagnostic]) -> Bool {
     leaves := [SemaEffectLeaf]{}
-    loop name in EFFECT_VOCABULARY_LEAVES -> sema_effect_leaf_add(&leaves, name)
+    loop name in EFFECT_VOCABULARY_LEAVES -> sema_effect_leaf_add(leaves, name)
     loop source_module_index in 0..<graph.modules.len() {
         if graph.modules[source_module_index].module_identity == graph.canonical_effect_module_identity -> next
-        sema_effect_leaf_collect(&leaves, graph.modules[source_module_index].program.items)
+        sema_effect_leaf_collect(leaves, graph.modules[source_module_index].program.items)
     }
     found := false
     loop source_module_index in 0..<graph.modules.len() {
         if graph.modules[source_module_index].module_identity == graph.canonical_effect_module_identity -> next
         start: diagnostics.len()
-        sema_effect_leaf_check_items(leaves, graph.modules[source_module_index].program.items, &diagnostics)
+        sema_effect_leaf_check_items(leaves, graph.modules[source_module_index].program.items, diagnostics)
         if diagnostics.len() > start {
-            sema_attach_diagnostic_source_locations(&diagnostics, start, graph.modules[source_module_index].source_segments)
+            sema_attach_diagnostic_source_locations(diagnostics, start, graph.modules[source_module_index].source_segments)
             found = true
         }
     }
@@ -294,7 +294,7 @@ sema_effect_trait_bound_set: fn(bounds: &[SemaEffectTraitBound], trait_name: Str
             return
         }
     }
-    &bounds.push(SemaEffectTraitBound{trait_name: trait_name, method: method, bound: bound})
+    bounds.push(SemaEffectTraitBound{trait_name: trait_name, method: method, bound: bound})
 }
 
 // The trait-method effect ceilings one module declares. The operator
@@ -303,14 +303,14 @@ sema_effect_trait_bound_set: fn(bounds: &[SemaEffectTraitBound], trait_name: Str
 sema_effect_trait_bounds: fn(items: [Item]) -> [SemaEffectTraitBound] Never! {
     bounds := [SemaEffectTraitBound]{}
     loop owned in OWNED_TRAITS {
-        if owned.contract == .Operator(hook, _) -> &bounds.push(SemaEffectTraitBound{trait_name: owned.name, method: hook, bound: [String]{}})
+        if owned.contract == .Operator(hook, _) -> bounds.push(SemaEffectTraitBound{trait_name: owned.name, method: hook, bound: [String]{}})
     }
     loop item in items {
         if item == {
             .Trait(definition) -> {
                 loop method in definition.methods {
                     if method.is_pure {
-                        sema_effect_trait_bound_set(&bounds, definition.name, method.name, [String]{})
+                        sema_effect_trait_bound_set(bounds, definition.name, method.name, [String]{})
                         next
                     }
                     row: method.declared_effects ?? next
@@ -329,9 +329,9 @@ sema_effect_trait_bounds: fn(items: [Item]) -> [SemaEffectTraitBound] Never! {
                             closed = false
                             next
                         }
-                        &bound.push(effect_name)
+                        bound.push(effect_name)
                     }
-                    if closed -> sema_effect_trait_bound_set(&bounds, definition.name, method.name, bound)
+                    if closed -> sema_effect_trait_bound_set(bounds, definition.name, method.name, bound)
                 }
             }
             else -> {}
@@ -349,10 +349,10 @@ sema_effect_trait_implementers: fn(items: [Item]) -> [String] Never! {
     loop item in items {
         if item == {
             .Impl(definition) -> {
-                if definition.trait_name == .Val(trait_name) -> &rows.push("{trait_name}::{definition.type_name}")
+                if definition.trait_name == .Val(trait_name) -> rows.push("{trait_name}::{definition.type_name}")
             }
-            .Struct(definition) -> loop block in definition.trait_impls -> &rows.push("{block.trait_name}::{definition.name}")
-            .Enum(definition) -> loop block in definition.trait_impls -> &rows.push("{block.trait_name}::{definition.name}")
+            .Struct(definition) -> loop block in definition.trait_impls -> rows.push("{block.trait_name}::{definition.name}")
+            .Enum(definition) -> loop block in definition.trait_impls -> rows.push("{block.trait_name}::{definition.name}")
             else -> {}
         }
     }

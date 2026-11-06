@@ -1,14 +1,14 @@
-// `^p` of a payload of a read parameter has no storage to give up: E0201,
+// `p.move()` of a payload of a read parameter has no storage to give up: E0201,
 // never a silent copy.
 Slot: enum {
     Full(items: [Int])
     Empty
 }
 
-keep: fn(items: ^[Int]) -> Int { items.len() }
+keep: fn(items: &&[Int]) -> Int { items.len() }
 
 forward: fn(slot: Slot) -> Int {
-    if slot == .Full(items) -> return keep(^items)
+    if slot == .Full(items) -> return keep(items)
     0
 }
 

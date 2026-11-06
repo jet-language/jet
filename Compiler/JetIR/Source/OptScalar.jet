@@ -39,13 +39,13 @@ ir_opt_scalar_replace: fn(m: IRModule, f: &IRFunction, promote: Bool) -> Int Nev
     candidate := [Bool]{}
     loop slot in 0..<count {
         def: if slot >= f.param_count && facts.defs[slot] == 1 -> facts.def_at[slot] else -> -1
-        &candidate.push(def >= 0 && f.op[def] == .StackAddress)
+        candidate.push(def >= 0 && f.op[def] == .StackAddress)
     }
     // Aliases: a slot written once, by a Move of a candidate's address or of
     // another alias (an inlined call's result, a variable bound to it). Its
     // Loads and Stores are the storage's own; any other use refuses it.
     root := [Int]{}
-    loop _ in 0..<count -> &root.push(-1)
+    loop _ in 0..<count -> root.push(-1)
     loop at in 0..<f.op.len() {
         if f.op[at] != .Move -> next
         dst: f.dst[at]
@@ -61,9 +61,9 @@ ir_opt_scalar_replace: fn(m: IRModule, f: &IRFunction, promote: Bool) -> Int Nev
     rows := [[Int]]{}
     lent := [Bool]{}
     loop _ in 0..<count {
-        &offsets.push([Int]{})
-        &rows.push([Int]{})
-        &lent.push(false)
+        offsets.push([Int]{})
+        rows.push([Int]{})
+        lent.push(false)
     }
     // CopyBytes with a candidate's storage on a side, at its address or
     // through a view: an Offset of it that only CopyBytes read.
@@ -72,9 +72,9 @@ ir_opt_scalar_replace: fn(m: IRModule, f: &IRFunction, promote: Bool) -> Int Nev
     view_offset := [Int]{}
     view_reads := [Int]{}
     loop _ in 0..<count {
-        &view_slot.push(-1)
-        &view_offset.push(0)
-        &view_reads.push(0)
+        view_slot.push(-1)
+        view_offset.push(0)
+        view_reads.push(0)
     }
     // Open Loops around each instruction.
     depth := 0
@@ -83,11 +83,11 @@ ir_opt_scalar_replace: fn(m: IRModule, f: &IRFunction, promote: Bool) -> Int Nev
     loop at in 0..<f.op.len() {
         op: f.op[at]
         if op == .End || op == .Else {
-            closed: &open.pop() ?? panic("ir_opt_scalar_replace: End without an open construct")
+            closed: open.pop() ?? panic("ir_opt_scalar_replace: End without an open construct")
             if closed == .Loop -> depth -= 1
         }
         if op == .Block || op == .Loop || op == .If || op == .Else {
-            &open.push(op)
+            open.push(op)
             if op == .Loop -> depth += 1
         }
         if op == .Offset && f.a[at] >= 0 && candidate[f.a[at]] && f.dst[at] >= 0 && f.dst[at] != f.a[at] && facts.defs[f.dst[at]] == 1 {
@@ -102,13 +102,13 @@ ir_opt_scalar_replace: fn(m: IRModule, f: &IRFunction, promote: Bool) -> Int Nev
             // A copy within one storage could overwrite fields it still reads.
             if target.slot > -2 && source.slot > -2 && (target.slot >= 0 || source.slot >= 0) && target.slot != source.slot {
                 loose: promote && depth == 0
-                &copies.push(OptScalarCopy{at: at, target: target.slot, target_offset: target.offset, target_loose: loose && target.slot == f.a[at], source: source.slot, source_offset: source.offset, source_loose: loose && source.slot == f.b[at], size: f.c[at]})
+                copies.push(OptScalarCopy{at: at, target: target.slot, target_offset: target.offset, target_loose: loose && target.slot == f.a[at], source: source.slot, source_offset: source.offset, source_loose: loose && source.slot == f.b[at], size: f.c[at]})
                 if target.slot >= 0 && target.slot != f.a[at] -> view_reads[f.a[at]] = view_reads[f.a[at]] + 1
                 if source.slot >= 0 && source.slot != f.b[at] -> view_reads[f.b[at]] = view_reads[f.b[at]] + 1
                 next
             }
         }
-        ir_x64_reads_into(f, at, &reads)
+        ir_x64_reads_into(f, at, reads)
         loop read in reads {
             if read < 0 -> next
             // The Move that makes an alias is no use of the storage.
@@ -120,11 +120,11 @@ ir_opt_scalar_replace: fn(m: IRModule, f: &IRFunction, promote: Bool) -> Int Nev
             slot: if root[read] >= 0 -> root[read] else -> read
             if !candidate[slot] -> next
             if op == .Load && f.a[at] == read {
-                &offsets[slot].push(f.b[at])
-                &rows[slot].push(f.slot_type[f.dst[at]])
+                offsets[slot].push(f.b[at])
+                rows[slot].push(f.slot_type[f.dst[at]])
             } else if op == .Store && f.a[at] == read && f.c[at] != read {
-                &offsets[slot].push(f.b[at])
-                &rows[slot].push(f.slot_type[f.c[at]])
+                offsets[slot].push(f.b[at])
+                rows[slot].push(f.slot_type[f.c[at]])
             } else if promote && read == slot && ir_opt_lends(f, at, slot, depth) {
                 lent[slot] = true
             } else {
@@ -142,16 +142,16 @@ ir_opt_scalar_replace: fn(m: IRModule, f: &IRFunction, promote: Bool) -> Int Nev
         if candidate[slot] && !ir_opt_fields_fit(m, offsets[slot], rows[slot], f.a[facts.def_at[slot]]) -> candidate[slot] = false
     }
     rewrite := [Bool]{}
-    loop _ in copies -> &rewrite.push(true)
+    loop _ in copies -> rewrite.push(true)
     if copies.len() > 0 {
-        extras: ir_opt_resolve_copies(m, copies, &rewrite, &candidate, &lent, offsets, rows)
+        extras: ir_opt_resolve_copies(m, copies, rewrite, candidate, lent, offsets, rows)
         // Each storage also gets the fields copies bring it, after its own
         // accesses (the rewrite below walks only those, in order).
         loop slot in 0..<count {
             if !candidate[slot] -> next
             loop k in 0..<extras.offsets[slot].len() {
-                &offsets[slot].push(extras.offsets[slot][k])
-                &rows[slot].push(extras.rows[slot][k])
+                offsets[slot].push(extras.offsets[slot][k])
+                rows[slot].push(extras.rows[slot][k])
             }
         }
     }
@@ -161,8 +161,8 @@ ir_opt_scalar_replace: fn(m: IRModule, f: &IRFunction, promote: Bool) -> Int Nev
     fields := [[Int]]{}
     distinct := [[Int]]{}
     loop slot in 0..<count {
-        &fields.push([Int]{})
-        &distinct.push([Int]{})
+        fields.push([Int]{})
+        distinct.push([Int]{})
         if !candidate[slot] || offsets[slot].len() == 0 -> next
         size: f.a[facts.def_at[slot]]
         if !ir_opt_fields_fit(m, offsets[slot], rows[slot], size) {
@@ -175,14 +175,14 @@ ir_opt_scalar_replace: fn(m: IRModule, f: &IRFunction, promote: Bool) -> Int Nev
             offset: offsets[slot][k]
             found: seen.get(offset) ?? -1
             if found >= 0 {
-                &fields[slot].push(found)
+                fields[slot].push(found)
                 next
             }
-            field: ir_slot(&f, rows[slot][k], IRSlotKind.Local, -1, 0)
+            field: ir_slot(f, rows[slot][k], IRSlotKind.Local, -1, 0)
             seen[offset] = field
-            &fields[slot].push(field)
-            &distinct[slot].push(offset)
-            &distinct[slot].push(field)
+            fields[slot].push(field)
+            distinct[slot].push(offset)
+            distinct[slot].push(field)
         }
         replaced += 1
     }
@@ -190,7 +190,7 @@ ir_opt_scalar_replace: fn(m: IRModule, f: &IRFunction, promote: Bool) -> Int Nev
     // Rewrite the accesses in the order they were recorded; lent storage
     // gets its fields back around each loan.
     cursor := [Int]{}
-    loop _ in 0..<count -> &cursor.push(0)
+    loop _ in 0..<count -> cursor.push(0)
     code := IROptCode{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}}
     next_copy := 0
     loop at in 0..<f.op.len() {
@@ -200,7 +200,7 @@ ir_opt_scalar_replace: fn(m: IRModule, f: &IRFunction, promote: Bool) -> Int Nev
             next_copy += 1
         }
         if next_copy < copies.len() && copies[next_copy].at == at && rewrite[next_copy] {
-            ir_opt_copy_fields(&code, f, candidate, distinct, copies[next_copy], line)
+            ir_opt_copy_fields(code, f, candidate, distinct, copies[next_copy], line)
             next
         }
         // A view of replaced storage: every copy through it was rewritten.
@@ -214,41 +214,41 @@ ir_opt_scalar_replace: fn(m: IRModule, f: &IRFunction, promote: Bool) -> Int Nev
             field: fields[base][cursor[base]]
             cursor[base] = cursor[base] + 1
             if op == .Load {
-                ir_opt_code_put(&code, .Move, f.dst[at], field, -1, -1, line)
+                ir_opt_code_put(code, .Move, f.dst[at], field, -1, -1, line)
             } else {
-                ir_opt_code_put(&code, .Move, field, f.c[at], -1, -1, line)
+                ir_opt_code_put(code, .Move, field, f.c[at], -1, -1, line)
             }
             next
         }
         // Loans: the fields go back before, and come back after.
-        ir_x64_reads_into(f, at, &reads)
+        ir_x64_reads_into(f, at, reads)
         loans := [Int]{}
         loop slot in reads {
             if slot < 0 || !candidate[slot] || offsets[slot].len() == 0 || loans.contains(slot) -> next
-            &loans.push(slot)
+            loans.push(slot)
             k := 0
             loop k < distinct[slot].len() {
-                ir_opt_code_put(&code, .Store, -1, slot, distinct[slot][k], distinct[slot][k + 1], line)
+                ir_opt_code_put(code, .Store, -1, slot, distinct[slot][k], distinct[slot][k + 1], line)
                 k += 2
             }
         }
-        ir_opt_code_put(&code, op, f.dst[at], f.a[at], f.b[at], f.c[at], line)
+        ir_opt_code_put(code, op, f.dst[at], f.a[at], f.b[at], f.c[at], line)
         if op == .Drop -> next
         loop slot in loans {
             k := 0
             loop k < distinct[slot].len() {
-                ir_opt_code_put(&code, .Load, distinct[slot][k + 1], slot, distinct[slot][k], -1, line)
+                ir_opt_code_put(code, .Load, distinct[slot][k + 1], slot, distinct[slot][k], -1, line)
                 k += 2
             }
         }
     }
-    f.op = ^code.op
-    f.dst = ^code.dst
-    f.a = ^code.a
-    f.b = ^code.b
-    f.c = ^code.c
-    f.code_line = ^code.line
-    ir_opt_compact(&f)
+    f.op = code.op.move()
+    f.dst = code.dst.move()
+    f.a = code.a.move()
+    f.b = code.b.move()
+    f.c = code.c.move()
+    f.code_line = code.line.move()
+    ir_opt_compact(f)
     replaced
 }
 
@@ -304,11 +304,11 @@ ir_opt_resolve_copies: fn(m: IRModule, copies: [OptScalarCopy], rewrite: &[Bool]
     loop {
         extras := OptScalarExtras{offsets: [[Int]]{}, rows: [[Int]]{}}
         loop _ in 0..<candidate.len() {
-            &extras.offsets.push([Int]{})
-            &extras.rows.push([Int]{})
+            extras.offsets.push([Int]{})
+            extras.rows.push([Int]{})
         }
         clash := [Bool]{}
-        loop _ in copies -> &clash.push(false)
+        loop _ in copies -> clash.push(false)
         // Between two candidates, a field of either side inside the copied
         // range is a field of the other at the same place in it.
         grown := true
@@ -335,8 +335,8 @@ ir_opt_resolve_copies: fn(m: IRModule, copies: [OptScalarCopy], rewrite: &[Bool]
                             clash[k] = true
                             next
                         }
-                        &extras.offsets[into].push(placed)
-                        &extras.rows[into].push(row)
+                        extras.offsets[into].push(placed)
+                        extras.rows[into].push(row)
                         grown = true
                     }
                 }
@@ -402,8 +402,8 @@ ir_opt_range_covered: fn(m: IRModule, offsets: [Int], rows: [Int], extra_offsets
     all_offsets := offsets.copy() // copy: the candidate keeps its own accesses
     all_rows := rows.copy() // copy: as above
     loop k in 0..<extra_offsets.len() {
-        &all_offsets.push(extra_offsets[k])
-        &all_rows.push(extra_rows[k])
+        all_offsets.push(extra_offsets[k])
+        all_rows.push(extra_rows[k])
     }
     // Every field lies inside its storage already (own accesses are checked
     // after this, extras come from inside a copied range), so the bound
@@ -414,7 +414,7 @@ ir_opt_range_covered: fn(m: IRModule, offsets: [Int], rows: [Int], extra_offsets
     loop k in 0..<all_offsets.len() {
         offset: all_offsets[k]
         if seen.contains(offset) -> next
-        &seen.push(offset)
+        seen.push(offset)
         width: ir_x64_value_width(ir_x64_shape(m.types[all_rows[k]]))
         if offset + width <= start || offset >= start + size -> next
         if offset < start || offset + width > start + size -> return -1
@@ -451,9 +451,9 @@ ir_opt_copy_fields: fn(code: &IROptCode, f: IRFunction, candidate: [Bool], disti
             if offset < entry.target_offset || offset >= entry.target_offset + entry.size -> next
             placed: offset - entry.target_offset
             if source {
-                ir_opt_code_put(&code, .Move, field, ir_opt_field_at(distinct[entry.source], placed + entry.source_offset), -1, -1, line)
+                ir_opt_code_put(code, .Move, field, ir_opt_field_at(distinct[entry.source], placed + entry.source_offset), -1, -1, line)
             } else {
-                ir_opt_code_put(&code, .Load, field, f.b[entry.at], placed, -1, line)
+                ir_opt_code_put(code, .Load, field, f.b[entry.at], placed, -1, line)
             }
         }
         return
@@ -464,7 +464,7 @@ ir_opt_copy_fields: fn(code: &IROptCode, f: IRFunction, candidate: [Bool], disti
         field: pairs[k + 1]
         k += 2
         if offset < entry.source_offset || offset >= entry.source_offset + entry.size -> next
-        ir_opt_code_put(&code, .Store, -1, f.a[entry.at], offset - entry.source_offset, field, line)
+        ir_opt_code_put(code, .Store, -1, f.a[entry.at], offset - entry.source_offset, field, line)
     }
 }
 
@@ -500,12 +500,12 @@ IROptCode: struct {
 }
 
 ir_opt_code_put: fn(code: &IROptCode, op: IROp, dst: Int, a: Int, b: Int, c: Int, line: Int) Never! {
-    &code.op.push(op)
-    &code.dst.push(dst)
-    &code.a.push(a)
-    &code.b.push(b)
-    &code.c.push(c)
-    &code.line.push(line)
+    code.op.push(op)
+    code.dst.push(dst)
+    code.a.push(a)
+    code.b.push(b)
+    code.c.push(c)
+    code.line.push(line)
 }
 
 // Whether the accesses (offset, slot type row) of one storage of `size`

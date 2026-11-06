@@ -17,38 +17,38 @@ IR_SHARED_SITE_BYTES: 8
 
 ir_shared_site: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, initializer: DeclID, lifetime: SharedLifetime, span: Span) -> Int Never! {
     row: ir_decl_row(p, initializer)
-    if row < 0 -> return ir_fail_slot(&b, span, "Shared site initializer outside the checked program (declaration row {initializer.row.index()})")
-    shared_row: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
-    site: ir_shared_site_word(&m, &b, p.functions[row].key)
-    word_row: ir_word_row(&m)
-    zero: ir_word_const(&m, &b, 0)
+    if row < 0 -> return ir_fail_slot(b, span, "Shared site initializer outside the checked program (declaration row {initializer.row.index()})")
+    shared_row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
+    site: ir_shared_site_word(m, b, p.functions[row].key)
+    word_row: ir_word_row(m)
+    zero: ir_word_const(m, b, 0)
     if lifetime == .Process || lifetime == .World {
-        current: ir_load_at(&m, &b, site, 0, word_row)
-        empty: ir_bool_op(&m, &b, IROp.Eq, current, zero)
-        ir_open_if(&b.f, empty, b.line)
-        candidate: ir_call_row_values(&m, p, &b, row, [Int]{}, span)
+        current: ir_load_at(m, b, site, 0, word_row)
+        empty: ir_bool_op(m, b, IROp.Eq, current, zero)
+        ir_open_if(b.f, empty, b.line)
+        candidate: ir_call_row_values(m, p, b, row, [Int]{}, span)
         if ir_failed(b) -> return -1
-        world: ir_word_const(&m, &b, if lifetime == .World -> 1 else -> 0)
-        _: ir_runtime(&m, &b, "jet_rt_shared_site_publish", [Int]{site, candidate, world}, word_row)
+        world: ir_word_const(m, b, if lifetime == .World -> 1 else -> 0)
+        _: ir_runtime(m, b, "jet_rt_shared_site_publish", [Int]{site, candidate, world}, word_row)
         b.fresh[candidate] = false
-        ir_end(&b.f, b.line)
-        owner: ir_load_at(&m, &b, site, 0, shared_row)
-        return ir_clone(&m, &b, owner, shared_row)
+        ir_end(b.f, b.line)
+        owner: ir_load_at(m, b, site, 0, shared_row)
+        return ir_clone(m, b, owner, shared_row)
     }
-    scope: ir_word_const(&m, &b, if lifetime == .Attempt -> 1 else -> 0)
-    key: ir_runtime(&m, &b, "jet_rt_tls_shared_key", [Int]{site, scope}, word_row)
-    current: ir_runtime(&m, &b, "jet_rt_tls_get", [Int]{key}, word_row)
-    empty: ir_bool_op(&m, &b, IROp.Eq, current, zero)
-    ir_open_if(&b.f, empty, b.line)
-    candidate: ir_call_row_values(&m, p, &b, row, [Int]{}, span)
+    scope: ir_word_const(m, b, if lifetime == .Attempt -> 1 else -> 0)
+    key: ir_runtime(m, b, "jet_rt_tls_shared_key", [Int]{site, scope}, word_row)
+    current: ir_runtime(m, b, "jet_rt_tls_get", [Int]{key}, word_row)
+    empty: ir_bool_op(m, b, IROp.Eq, current, zero)
+    ir_open_if(b.f, empty, b.line)
+    candidate: ir_call_row_values(m, p, b, row, [Int]{}, span)
     if ir_failed(b) -> return -1
-    _: ir_runtime(&m, &b, "jet_rt_tls_set", [Int]{key, candidate}, -1)
+    _: ir_runtime(m, b, "jet_rt_tls_set", [Int]{key, candidate}, -1)
     b.fresh[candidate] = false
-    ir_end(&b.f, b.line)
+    ir_end(b.f, b.line)
     // The thread's slot keeps owning the value; the read borrows it.
-    owner: ir_runtime(&m, &b, "jet_rt_tls_get", [Int]{key}, shared_row)
+    owner: ir_runtime(m, b, "jet_rt_tls_get", [Int]{key}, shared_row)
     b.fresh[owner] = false
-    ir_clone(&m, &b, owner, shared_row)
+    ir_clone(m, b, owner, shared_row)
 }
 
 // The slot holding the address of the site word of the initializer keyed
@@ -59,14 +59,14 @@ ir_shared_site_word: fn(m: &IRModule, b: &IRBuilder, key: String) -> Int Never! 
     if object < 0 {
         object = m.data.len()
         word := [U8]{}
-        loop _ in 0..<IR_SHARED_SITE_BYTES -> &word.push(U8{0})
-        &m.data.push(^word)
+        loop _ in 0..<IR_SHARED_SITE_BYTES -> word.push(U8{0})
+        m.data.push(word)
         // No address words; the entry marks a word-aligned static object.
         m.data_relocs[object] = [IRDataReloc]{}
-        name_rows_set(&m.constant_rows, object_key, object)
+        name_rows_set(m.constant_rows, object_key, object)
     }
-    pointer_row: ir_pointer_row(&m)
-    address: ir_temp(&m, &b, pointer_row)
-    ir_emit(&b.f, IROp.DataAddress, address, object, -1, -1, b.line)
+    pointer_row: ir_pointer_row(m)
+    address: ir_temp(m, b, pointer_row)
+    ir_emit(b.f, IROp.DataAddress, address, object, -1, -1, b.line)
     address
 }

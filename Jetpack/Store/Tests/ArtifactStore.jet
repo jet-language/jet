@@ -110,7 +110,7 @@ store_artifact_test_host_limit: fn(store: ArtifactStore) -[FS]> Int? Never! {
             assert(text.contains("after waiting"))
         }
     }
-    close(^lock)
+    close(lock)
     store_artifact_test_cleanup(root)
 }
 
@@ -124,12 +124,12 @@ store_artifact_test_host_limit: fn(store: ArtifactStore) -[FS]> Int? Never! {
     lock: store.acquire_lock() ?? panic("test lock")
     left_store: store.copy()
     right_store: store.copy()
-    left: task ^left_store { store_artifact_test_published(left_store, "left") }
-    right: task ^right_store { store_artifact_test_published(right_store, "right") }
+    left: task &&left_store { store_artifact_test_published(left_store, "left") }
+    right: task &&right_store { store_artifact_test_published(right_store, "right") }
     time.sleep(time.duration_ms(500))
-    close(^lock)
-    assert_eq(^left.join() ?? panic("left publisher task"), "")
-    assert_eq(^right.join() ?? panic("right publisher task"), "")
+    close(lock)
+    assert_eq(left.join() ?? panic("left publisher task"), "")
+    assert_eq(right.join() ?? panic("right publisher task"), "")
     store_artifact_test_cleanup(root)
 }
 
@@ -219,7 +219,7 @@ store_artifact_test_host_limit: fn(store: ArtifactStore) -[FS]> Int? Never! {
     assert(report.blocked)
     assert(store_artifact_test_blob(store, first) != None)
     assert(!files.lexists(stale))
-    close(^lease)
+    close(lease)
     released: store.prune_to(0) ?? panic("prune after release")
     assert(!released.blocked)
     assert_eq(released.after_bytes, 0)

@@ -2,11 +2,11 @@ inline_hof_view: fn() -> String {
     values := [1, 2, 3, 4]
     each_seen := [Int]{}
     shadow := 99
-    values.each((shadow: Int) -> { &each_seen.push(shadow) })
+    values.each((shadow: Int) -> { each_seen.push(shadow) })
     predicate_seen := Set.from([0])
-    has_three: values.any((n: Int) -> &predicate_seen.add(n) && n == 3)
+    has_three: values.any((n: Int) -> predicate_seen.add(n) && n == 3)
     fold_seen := [Int:Int]{ 0: 0 }
-    total: values.fold(0, (acc: Int, n: Int) -> &fold_seen.add(n, n) ?? (acc + n))
+    total: values.fold(0, (acc: Int, n: Int) -> fold_seen.add(n, n) ?? (acc + n))
     partition_seen := Set.from([0])
     partition_shadow := 88
     split: values.partition((partition_shadow: Int) -> partition_seen.add(partition_shadow) && partition_shadow % 2 == 0)

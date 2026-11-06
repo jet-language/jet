@@ -21,18 +21,18 @@ Machine: struct {
 // Drops every frame, including the one `value` was read from, then reads
 // `value`.
 record: fn(value: String, machine: &Machine) -> Int {
-    &machine.frames.clear()
-    &machine.log.push(value)
+    machine.frames.clear()
+    machine.log.push(value)
     machine.log.len()
 }
 
 parameter: fn(machine: &Machine, frame: Int, index: Int) -> Int {
     value := machine.frames[frame][index]
-    record(value, &machine)
+    record(value, machine)
 }
 
 validate: fn(name: String, module_identity: String, seen: &[String]) {
-    &seen.push("{module_identity}:{name}")
+    seen.push("{module_identity}:{name}")
 }
 
 run: fn() {
@@ -54,10 +54,10 @@ run: fn() {
         cur = rows[1]
     }
     machine := Machine{frames: [[String]]{[String]{"a", "b"}, [String]{"c"}}, log: [String]{}}
-    print("record {parameter(&machine, 0, 1)} {machine.log[0]} {machine.frames.len()}")
+    print("record {parameter(machine, 0, 1)} {machine.log[0]} {machine.frames.len()}")
     // A `:=` field binding passed beside `&seen` of the same root.
     seen := [String]{"m"}
     module_identity := seen[0]
-    validate("x", module_identity, &seen)
+    validate("x", module_identity, seen)
     print("seen {seen[1]}")
 }

@@ -4,21 +4,21 @@
 jet_eval_format_char_text: fn(code: Int) -> String Never! {
     bytes := [U8]{}
     if {
-        code < 128 -> &bytes.push(U8{code})
+        code < 128 -> bytes.push(U8{code})
         code < 2048 -> {
-            &bytes.push(U8{(192).bit_or((code >> 6))})
-            &bytes.push(U8{(128).bit_or(((code).bit_and(63)))})
+            bytes.push(U8{(192).bit_or((code >> 6))})
+            bytes.push(U8{(128).bit_or(((code).bit_and(63)))})
         }
         code < 65536 -> {
-            &bytes.push(U8{(224).bit_or((code >> 12))})
-            &bytes.push(U8{(128).bit_or((((code >> 6)).bit_and(63)))})
-            &bytes.push(U8{(128).bit_or(((code).bit_and(63)))})
+            bytes.push(U8{(224).bit_or((code >> 12))})
+            bytes.push(U8{(128).bit_or((((code >> 6)).bit_and(63)))})
+            bytes.push(U8{(128).bit_or(((code).bit_and(63)))})
         }
         else -> {
-            &bytes.push(U8{(240).bit_or((code >> 18))})
-            &bytes.push(U8{(128).bit_or((((code >> 12)).bit_and(63)))})
-            &bytes.push(U8{(128).bit_or((((code >> 6)).bit_and(63)))})
-            &bytes.push(U8{(128).bit_or(((code).bit_and(63)))})
+            bytes.push(U8{(240).bit_or((code >> 18))})
+            bytes.push(U8{(128).bit_or((((code >> 12)).bit_and(63)))})
+            bytes.push(U8{(128).bit_or((((code >> 6)).bit_and(63)))})
+            bytes.push(U8{(128).bit_or(((code).bit_and(63)))})
         }
     }
     String.from_bytes(bytes) ?? ""

@@ -93,7 +93,7 @@ to_string: fn(doc: Ini) -> String Never! {
 
 sections: fn(doc: Ini) -> [String] Never! {
     names := [String]{}
-    loop s in doc.sections -> &names.push(s.name)
+    loop s in doc.sections -> names.push(s.name)
     names
 }
 
@@ -148,7 +148,7 @@ items: fn(doc: Ini, section: String) -> [Pair] Never! {
 
 options: fn(doc: Ini, section: String) -> [String] Never! {
     keys := [String]{}
-    loop p in items(doc, section) -> &keys.push(p.key)
+    loop p in items(doc, section) -> keys.push(p.key)
     keys
 }
 
@@ -162,20 +162,20 @@ set: fn(doc: Ini, section: String, key: String, value: String) -> Ini Never! {
             found_key := false
             loop p in s.pairs {
                 if p.key == key {
-                    &pairs.push(Pair{key: key, value: value})
+                    pairs.push(Pair{key: key, value: value})
                     found_key = true
                 } else {
-                    &pairs.push(p)
+                    pairs.push(p)
                 }
             }
-            if !found_key -> &pairs.push(Pair{key: key, value: value})
-            &sections.push(Section{name: s.name, pairs: pairs})
+            if !found_key -> pairs.push(Pair{key: key, value: value})
+            sections.push(Section{name: s.name, pairs: pairs})
         } else {
-            &sections.push(s)
+            sections.push(s)
         }
     }
     if !found_section {
-        &sections.push(Section{name: section, pairs: [Pair]{Pair{key: key, value: value}}})
+        sections.push(Section{name: section, pairs: [Pair]{Pair{key: key, value: value}}})
     }
     Ini{sections: sections}
 }
@@ -186,11 +186,11 @@ remove_option: fn(doc: Ini, section: String, key: String) -> Ini Never! {
         if s.name == section {
             pairs := [Pair]{}
             loop p in s.pairs {
-                if p.key != key -> &pairs.push(p)
+                if p.key != key -> pairs.push(p)
             }
-            &sections.push(Section{name: s.name, pairs: pairs})
+            sections.push(Section{name: s.name, pairs: pairs})
         } else {
-            &sections.push(s)
+            sections.push(s)
         }
     }
     Ini{sections: sections}
@@ -199,7 +199,7 @@ remove_option: fn(doc: Ini, section: String, key: String) -> Ini Never! {
 remove_section: fn(doc: Ini, section: String) -> Ini Never! {
     sections := [Section]{}
     loop s in doc.sections {
-        if s.name != section -> &sections.push(s)
+        if s.name != section -> sections.push(s)
     }
     Ini{sections: sections}
 }
@@ -209,8 +209,8 @@ defaults: fn(doc: Ini) -> [Pair] Never! { items(doc, "DEFAULT") }
 ensure_section: fn(doc: Ini, name: String) -> Ini Never! {
     if has_section(doc, name) -> return doc.copy()
     sections := [Section]{}
-    loop s in doc.sections -> &sections.push(s)
-    &sections.push(Section{name: name, pairs: [Pair]{}})
+    loop s in doc.sections -> sections.push(s)
+    sections.push(Section{name: name, pairs: [Pair]{}})
     Ini{sections: sections}
 }
 
@@ -245,12 +245,12 @@ unquote: fn(text: String) -> String Never! {
             loop i < raw.len() - 1 {
                 if raw[i] == (U8{92}) && i + 1 < raw.len() - 1 {
                     i += 1
-                    if raw[i] == (U8{110}) -> &body.push(U8{10})
-                    else if raw[i] == (U8{114}) -> &body.push(U8{13})
-                    else if raw[i] == (U8{116}) -> &body.push(U8{9})
-                    else -> &body.push(raw[i])
+                    if raw[i] == (U8{110}) -> body.push(U8{10})
+                    else if raw[i] == (U8{114}) -> body.push(U8{13})
+                    else if raw[i] == (U8{116}) -> body.push(U8{9})
+                    else -> body.push(raw[i])
                 } else {
-                    &body.push(raw[i])
+                    body.push(raw[i])
                 }
                 i += 1
             }
@@ -291,12 +291,12 @@ split_lines: fn(text: String) -> [String] Never! {
         if raw[i] == (U8{10}) {
             end := i
             if end > start && raw[end - 1] == (U8{13}) -> end = end - 1
-            &out.push(String.from_bytes(slice_b(raw, start, end)) ?? "")
+            out.push(String.from_bytes(slice_b(raw, start, end)) ?? "")
             start = i + 1
         }
         i = i + 1
     }
-    if start <= raw.len() -> &out.push(String.from_bytes(slice_b(raw, start, raw.len())) ?? "")
+    if start <= raw.len() -> out.push(String.from_bytes(slice_b(raw, start, raw.len())) ?? "")
     out
 }
 
@@ -329,7 +329,7 @@ slice_b: fn(raw: [U8], start: Int, end: Int) -> [U8] Never! {
     out := [U8]{}
     i := start
     loop i < end && i >= 0 && i < raw.len() {
-        &out.push(raw[i])
+        out.push(raw[i])
         i = i + 1
     }
     out
@@ -340,9 +340,9 @@ ascii_lower: fn(text: String) -> String Never! {
     loop b in text.bytes() {
         n: b
         if n >= 65 && n <= 90 {
-            &out.push(U8{n + 32})
+            out.push(U8{n + 32})
         } else {
-            &out.push(b)
+            out.push(b)
         }
     }
     String.from_bytes(out) ?? text.copy()

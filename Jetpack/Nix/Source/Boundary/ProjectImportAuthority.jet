@@ -44,7 +44,7 @@ nix_import_read_file: fn(parent: Directory, name: String) -[FS]> String NixError
     loop bytes.len() <= NIX_IMPORT_MAX_BYTES {
         chunk: file.read(NIX_IMPORT_READ_CHUNK) ?? return Err(NixError.ImportIO("{err}"))
         if chunk.len() == 0 -> break
-        loop byte in chunk -> &bytes.push(byte)
+        loop byte in chunk -> bytes.push(byte)
     }
     text: String.from_bytes(bytes) ?? return Err(NixError.ImportIO("stream did not contain valid UTF-8"))
     nix_import_admit_source(text)

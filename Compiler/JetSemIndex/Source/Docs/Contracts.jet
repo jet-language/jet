@@ -12,7 +12,7 @@ doc_enrich_callable_contracts: fn(items: &[DocItem], index: SemIndex, module_sou
         if index.defs[position].kind != .Function(_, _, _) -> next
         name: index.defs[position].name
         if !candidates.has_key(name) -> candidates[name] = [Int]{}
-        &candidates[name].push(position)
+        candidates[name].push(position)
     }
     module_paths: doc_contract_module_paths(module_sources, loaded_module_rows, root)
     loop position in 0..<items.len() {
@@ -42,7 +42,7 @@ doc_enrich_type_contracts: fn(items: &[DocItem], index: SemIndex, module_sources
         if index.defs[position].nominal_base == None -> next
         name: index.defs[position].name
         if !candidates.has_key(name) -> candidates[name] = [Int]{}
-        &candidates[name].push(position)
+        candidates[name].push(position)
     }
     module_paths: doc_contract_module_paths(module_sources, loaded_module_rows, root)
     loop position in 0..<items.len() {
@@ -53,8 +53,8 @@ doc_enrich_type_contracts: fn(items: &[DocItem], index: SemIndex, module_sources
             if !doc_definition_belongs_to_doc_item(index.defs[candidate], items[position], module_paths) -> next
             if index.defs[candidate].trait_contracts.len() == 0 -> break
             blocks := [String]{}
-            &blocks.push(items[position].signature.copy())
-            loop contract in index.defs[candidate].trait_contracts -> &blocks.push(doc_render_trait_contract(contract))
+            blocks.push(items[position].signature.copy())
+            loop contract in index.defs[candidate].trait_contracts -> blocks.push(doc_render_trait_contract(contract))
             items[position].signature = blocks.join("\n")
             break
         }
@@ -76,10 +76,10 @@ doc_contract_module_paths: fn(module_sources: [SemaCompilerModuleSource], loaded
         display: loaded.display
         alias: loaded.alias
         if !paths.has_key(display) -> paths[display] = [String]{}
-        &paths[display].push(path.copy())
+        paths[display].push(path.copy())
         if alias != display {
             if !paths.has_key(alias) -> paths[alias] = [String]{}
-            &paths[alias].push(path.copy())
+            paths[alias].push(path.copy())
         }
     }
     paths
@@ -101,10 +101,10 @@ doc_render_trait_contract: fn(contract: TraitContractFact) -> String Never! {
     lines := [String]{"implements {contract.trait_name}"}
     loop associated in contract.associated_types {
         if associated.implementation == {
-            .Val(ty) -> &lines.push("  type {associated.name} = {ty}")
-            .None -> &lines.push("  type {associated.name}")
+            .Val(ty) -> lines.push("  type {associated.name} = {ty}")
+            .None -> lines.push("  type {associated.name}")
         }
     }
-    loop method in contract.methods -> &lines.push("  {method}")
+    loop method in contract.methods -> lines.push("  {method}")
     lines.join("\n")
 }

@@ -59,7 +59,7 @@ doc_test_loaded_source: fn(identity: String, display: String, alias: String, pat
 // a substitute literal signature. Presentation uses canonical FailureContract
 // facts (frozen Rust's source spelling changes are Main's tandem responsibility).
 doc_test_checked_callable_contract_enrichment: fn(items: &[DocItem], index: SemIndex, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int], root: doc_os_path.OsPath?, checked_answer: CallableSignatureFact) Never! {
-    doc_enrich_callable_contracts(&items, index, module_sources, loaded_module_rows, root)
+    doc_enrich_callable_contracts(items, index, module_sources, loaded_module_rows, root)
     found := false
     loop item in items {
         if item.name != "answer" || item.kind != "function" || item.module_path != "run.jet" -> next
@@ -84,7 +84,7 @@ doc_test_checked_callable_contract_enrichment: fn(items: &[DocItem], index: SemI
 // Original checked_text.jet fixture, supplied by the canonical loader and checked
 // SemIndex, not hand-filled DocItem/trait facts.
 doc_test_checked_text_type_contract_enrichment: fn(items: &[DocItem], index: SemIndex, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int], root: doc_os_path.OsPath?) Never! {
-    doc_enrich_type_contracts(&items, index, module_sources, loaded_module_rows, root)
+    doc_enrich_type_contracts(items, index, module_sources, loaded_module_rows, root)
     found := false
     loop item in items {
         if item.name != "Pattern" || item.kind != "distinct" || item.module_path != "checked_text.jet" -> next

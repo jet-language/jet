@@ -80,13 +80,13 @@ jet_cli_audit_copies: fn(file: String, source: String, color: Bool, json: Bool) 
                 if root.identity != snapshot.entry_root_identity -> next
                 loop member in root.files {
                     if !member.path.ends_with(".jet") || jet_cli_fmt_is_package_manifest_file(member.path) || jet_cli_fmt_is_typed_package_source(member.source, member.path) -> next
-                    &modules.push(member)
+                    modules.push(member)
                 }
             }
         }
     }
     sites := jet_cli_audit_copy_sites(file, modules, color)
-    &sites.sort_by((left: JetCLICopySite, right: JetCLICopySite) -> (left.path <=> right.path).then(left.start <=> right.start))
+    sites.sort_by((left: JetCLICopySite, right: JetCLICopySite) -> (left.path <=> right.path).then(left.start <=> right.start))
     if json {
         rows: loop site in sites -> jet_cli_status_object([JetCLIStatusField]{
             jet_cli_status_field("path", jet_cli_status_text(site.path)),
@@ -133,7 +133,7 @@ jet_cli_audit_copy_sites: fn(file: String, modules: [JetDriverAuthorizedSourceFi
             }
             if duplicate -> next
             position: jet_cli_audit_line_column(source, start)
-            &sites.push(JetCLICopySite{path: owner.path, line: position[0], column: position[1], start: start, end: end})
+            sites.push(JetCLICopySite{path: owner.path, line: position[0], column: position[1], start: start, end: end})
         }
     }
     sites

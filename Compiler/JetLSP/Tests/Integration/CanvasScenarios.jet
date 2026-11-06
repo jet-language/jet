@@ -36,7 +36,7 @@ CanvasBrowserPermit: struct {
         (available, wake): CANVAS_BROWSER_POOL.get_or_init(() -> (_0: Mutex.new(MAX_CANVAS_BROWSERS), _1: Condvar.new()))
         available := available.lock().expect("Canvas browser permit lock poisoned")
         loop available.deref() == 0 {
-            available = wake.wait(^available).expect("Canvas browser permit lock poisoned")
+            available = wake.wait(available).expect("Canvas browser permit lock poisoned")
         }
         available.deref_mut() -= 1
         CanvasBrowserPermit{}
@@ -51,7 +51,7 @@ CanvasBrowserPermit: struct {
 DEMO: "helper: fn() -> Int {{\n    return 1\n}}\n\n/// Squares an integer input for this Canvas example.\nsquare: fn(n: Int) -> Int {{\n    return n * n\n}}\n\n/// Summarizes a checked value for Canvas hover guidance.\nsummarize: fn(limit: Int) -> Int {{\n    total := square(limit)\n    if total > 10 {{\n        return total\n    }} else {{\n        return total + 1\n    }}\n}}\n\nscratch: fn(limit: Int, text: String, flag: Bool, ratio: Float) {{\n    print(limit)\n}}\n\nrun: fn() {{\n    print(summarize(4))\n}}\n"
 CALLBACK_DEMO: "on_start: fn() {{\n    print(\"start\")\n}}\n\nhelper: fn() -> Int {{\n    return 1\n}}\n\nrun: fn() {{\n    on_start()\n}}\n"
 DEBUG_DEMO: "helper: fn() -> Int {{\n    return 1\n}}\n\nsquare: fn(n: Int) -> Int {{\n    return n * n\n}}\n\nsummarize: fn(limit: Int) -> Int {{\n    total := square(limit)\n    if total > 10 {{\n        return total\n    }} else {{\n        return total + 1\n    }}\n}}\n\nscratch: fn(limit: Int, text: String, flag: Bool, ratio: Float) {{\n    print(limit)\n}}\n\nrun: fn() {{\n    value := summarize(4)\n    print(value)\n    print(value)\n}}\n"
-EVENTS_PANEL_SOURCE: "use event: core.event\n\ndev: fn() {{\n    scope: event.scope()\n    clicked: event.new<Int>()\n    clicked.on(scope, n -> print(\"clicked {{n}}\"))\n    clicked.once(scope, n -> print(\"once {{n}}\"))\n    print(&clicked.emit(1).summary())\n    scope.cancel()\n}}\n\nrun: fn() {{\n    dev()\n}}\n"
+EVENTS_PANEL_SOURCE: "use event: core.event\n\ndev: fn() {{\n    scope: event.scope()\n    clicked: event.new<Int>()\n    clicked.on(scope, n -> print(\"clicked {{n}}\"))\n    clicked.once(scope, n -> print(\"once {{n}}\"))\n    print(clicked.emit(1).summary())\n    scope.cancel()\n}}\n\nrun: fn() {{\n    dev()\n}}\n"
 
 BigFixtureFacts: struct { file_count: USize, function_count: USize, source_bytes: USize, source_sha256: String }
 write_big_fixture: fn(dir: OSPath) -> BigFixtureFacts {
@@ -168,7 +168,7 @@ canvas_tools: fn() -> CanvasTools? {
         strict: env.var_os("JET_CANVAS_PREREQUISITES").as_deref() == "strict"
         chromium: resolve_canvas_tool("chromium", strict)
         node: resolve_canvas_tool("node", strict)
-        CanvasTools{chromium: ^chromium, node: ^node}
+        CanvasTools{chromium: chromium.move(), node: node.move()}
     }).as_ref()
 }
 gecko_tools: fn() -> GeckoTools Err! {
@@ -177,7 +177,7 @@ gecko_tools: fn() -> GeckoTools Err! {
         firefox: resolve_canvas_tool("firefox", strict).ok_or_else(() -> "Gecko smoke needs a valid Firefox executable")
         geckodriver: resolve_canvas_tool("geckodriver", strict).ok_or_else(() -> "Gecko smoke needs a valid geckodriver executable")
         node: resolve_canvas_tool("node", strict).ok_or_else(() -> "Gecko smoke needs a valid Node executable")
-        GeckoTools{firefox: ^firefox, geckodriver: ^geckodriver, node: ^node}
+        GeckoTools{firefox: firefox.move(), geckodriver: geckodriver, node: node.move()}
     }).as_ref().map_err(error -> error.as_str())
 }
 resolve_canvas_tool: fn(name: String, strict: Bool) -> OSPath? {
@@ -194,7 +194,7 @@ resolve_canvas_tool: fn(name: String, strict: Bool) -> OSPath? {
         "node" -> version.starts_with('v') && version.as_bytes().get(1).is_some_and(byte -> byte.is_ascii_digit())
         else -> false
     }
-    if valid -> ^path else -> none
+    if valid -> path.move() else -> none
 }
 resolve_executable: fn(candidate: OSPath) -> OSPath? {
     if candidate.components().count() > 1 {
@@ -247,7 +247,7 @@ CanvasCase: struct {
         }
         screenshots: dir.join("screenshots")
         fs.create_dir_all(screenshots).expect("create Canvas screenshot dir")
-        CanvasCase{dir: ^dir, entry: ^entry, screenshots: ^screenshots, big_fixture: ^big_fixture}
+        CanvasCase{dir: dir.move(), entry: entry, screenshots: screenshots, big_fixture: big_fixture.move()}
     }
     drop: fn(&self) {
         if fs.remove_dir_all(self.dir) == {
@@ -264,7 +264,7 @@ DevServer: struct {
         command := if cwd.join("env.jet").is_file() {
             command := Command.new(admitted_tool("JETPACK", "jetpack"))
             command.current_dir(cwd).env("JET_ROOT", cwd).args(["env", "-y", "--"]).arg(jet)
-            ^command
+            command.move()
         } else -> Command.new(jet)
         command.current_dir(cwd).arg("dev").arg(entry)
         if target_independent {
@@ -277,7 +277,7 @@ DevServer: struct {
         stdout: child.stdout.take()
         if stdout != none {
             thread.spawn(() -> {
-                loop line in BufReader.new(^stdout.unwrap()).lines().map_while(result -> result.ok()) {
+                loop line in BufReader.new(stdout.unwrap()).lines().map_while(result -> result.ok()) {
                     url: line.split("Canvas: ").nth(1)
                     if url == none -> next
                     port: url.unwrap().split("http://127.0.0.1:").nth(1)
@@ -287,27 +287,27 @@ DevServer: struct {
                     if port == none -> next
                     token: url.unwrap().split("session=").nth(1).map(value -> value.split(c -> !c.is_ascii_hexdigit()).next().unwrap_or_default().to_string())
                     if token == none -> next
-                    if token.unwrap().len() >= 32 -> CANVAS_SESSIONS.get_or_init(() -> Mutex.new({})).lock().unwrap().insert(port.unwrap(), ^token.unwrap())
+                    if token.unwrap().len() >= 32 -> CANVAS_SESSIONS.get_or_init(() -> Mutex.new({})).lock().unwrap().insert(port.unwrap(), token.unwrap())
                 }
             })
         }
-        wait_for_server(&child, port)
-        DevServer{child: ^child}
+        wait_for_server(child, port)
+        DevServer{child: child.move()}
     }
     stop: fn(&self) -> String {
-        stop_process_tree(&self.child)
+        stop_process_tree(self.child)
         out := String.new()
         stdout := self.child.stdout.take()
-        if stdout != none -> _: stdout.unwrap().read_to_string(&out)
+        if stdout != none -> _: stdout.unwrap().read_to_string(out)
         stderr := self.child.stderr.take()
         if stderr != none {
             err := String.new()
-            _: stderr.unwrap().read_to_string(&err)
+            _: stderr.unwrap().read_to_string(err)
             out.push_str(err)
         }
-        ^out
+        out.move()
     }
-    drop: fn(&self) { stop_process_tree(&self.child) }
+    drop: fn(&self) { stop_process_tree(self.child) }
 }
 stop_process_tree: fn(child: &Child) {
     if core.sys.target.selected_family() == "unix" -> stop_process_tree_unix(child.id()) else -> _: child.kill()
@@ -335,7 +335,7 @@ wait_for_server: fn(child: &Child, port: U16) {
 }
 http_ok: fn(port: U16, path: &String) -> Bool {
     stream := if TcpStream.connect((_0: "127.0.0.1", _1: port)) == {
-        .Ok(stream) -> ^stream
+        .Ok(stream) -> stream.move()
         .Err(_) -> { return false }
     }
     authorization: CANVAS_SESSIONS.get_or_init(() -> Mutex.new({})).lock().unwrap().get(port)
@@ -343,7 +343,7 @@ http_ok: fn(port: U16, path: &String) -> Bool {
     request: "GET {path} HTTP/1.1{Char{13}}\nHost: 127.0.0.1:{port}{Char{13}}\nOrigin: http://127.0.0.1:{port}{Char{13}}\n{authorization}Connection: close{Char{13}}\n{Char{13}}\n"
     if stream.write_all(request.as_bytes()).is_err() -> return false
     response := String.new()
-    if stream.read_to_string(&response).is_err() -> return false
+    if stream.read_to_string(response).is_err() -> return false
     response.starts_with("HTTP/1.1 200")
 }
 http_body: fn(port: U16, path: &String) -> String {
@@ -353,7 +353,7 @@ http_body: fn(port: U16, path: &String) -> String {
     request: "GET {path} HTTP/1.1{Char{13}}\nHost: 127.0.0.1:{port}{Char{13}}\nOrigin: http://127.0.0.1:{port}{Char{13}}\n{authorization}Connection: close{Char{13}}\n{Char{13}}\n"
     stream.write_all(request.as_bytes()).expect("request Jet Canvas preflight body")
     response := String.new()
-    stream.read_to_string(&response).expect("read Jet Canvas preflight body")
+    stream.read_to_string(response).expect("read Jet Canvas preflight body")
     assert(response.starts_with("HTTP/1.1 200"), "Jet Canvas preflight failed: {response}")
     response.split_once("{Char{13}}\n{Char{13}}\n").map((_, body) -> body.to_string()).expect("Jet Canvas response missing body separator")
 }

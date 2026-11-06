@@ -2,7 +2,7 @@
 Resource: struct { name: String }
 
 impl Resource.Close {
-    close: fn(^self) {
+    close: fn(&&self) {
         print("close {self.name}")
     }
 }
@@ -13,14 +13,14 @@ fail: fn() -> Int Err! {
 
 returned: fn() {
     resource := Resource{ name: "return" }
-    defer close(^resource)
+    defer close(resource)
     print("return body")
     return
 }
 
 questioned: fn() -> Int Err! {
     resource := Resource{ name: "question" }
-    defer close(^resource)
+    defer close(resource)
     value := fail()
     return Ok(value)
 }
@@ -28,7 +28,7 @@ questioned: fn() -> Int Err! {
 looped: fn() {
     loop n in [0, 1] {
         resource := Resource{ name: if n == 0 -> "continue" else -> "break" }
-        defer close(^resource)
+        defer close(resource)
         if n == 0 { next }
         break
     }
@@ -36,14 +36,14 @@ looped: fn() {
 
 run: fn() {
     first := Resource{ name: "a" }
-    defer close(^first)
+    defer close(first)
     second := Resource{ name: "b" }
-    defer close(^second)
+    defer close(second)
     print("body")
     returned()
     questioned().drop("this path intentionally proves `?` cleanup")
     looped()
     unwind := Resource{ name: "unwind" }
-    defer close(^unwind)
+    defer close(unwind)
     panic("boom")
 }

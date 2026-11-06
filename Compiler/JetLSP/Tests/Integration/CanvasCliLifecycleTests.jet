@@ -66,10 +66,10 @@ use {
     schedule: [(_0: "nightly", _1: JetJobSchedule.WallClockTime{hour: 3, minute: 0})]
     missed: DAY + THREE_AM + 61
     before_restart := JetJobClock.new()
-    assert((&before_restart.due_at(schedule, missed)).is_empty(), "a missed local schedule window must not be replayed before restart")
+    assert((before_restart.due_at(schedule, missed)).is_empty(), "a missed local schedule window must not be replayed before restart")
     after_restart := JetJobClock.new()
-    assert((&after_restart.due_at(schedule, missed)).is_empty(), "a fresh local clock must not replay an earlier missed occurrence")
-    assert_eq(&after_restart.due_at(schedule, DAY * 2 + THREE_AM), ["nightly"])
+    assert((after_restart.due_at(schedule, missed)).is_empty(), "a fresh local clock must not replay an earlier missed occurrence")
+    assert_eq(after_restart.due_at(schedule, DAY * 2 + THREE_AM), ["nightly"])
 }
 
 #Test("target_selected_prelude_parity") {
@@ -136,40 +136,40 @@ use {
 
 #Test("notebook_declarations_are_file_wide_but_state_cells_stay_ordered") {
     kernel := Kernel.open(None, "entry-order-test").expect("open entry-order notebook kernel")
-    comptime_reader: &kernel.notebook.add_cell(CellKind.Jet, "comptime_reader: fn() -> Int {{ return FUTURE_ANSWER }}").id.clone()
-    comptime_answer: &kernel.notebook.add_cell(CellKind.Jet, "FUTURE_ANSWER: comptime {{ 42 }}").id.clone()
-    caller: &kernel.notebook.add_cell(CellKind.Jet, "caller: fn() -> Int {{ return helper().value }}").id.clone()
-    helper: &kernel.notebook.add_cell(CellKind.Jet, "helper: fn() -> Answer {{ return Answer{{ value: 42 }} }}").id.clone()
-    answer_type: &kernel.notebook.add_cell(CellKind.Jet, "Answer: struct {{ value: Int }}").id.clone()
-    binding: &kernel.notebook.add_cell(CellKind.Jet, "answer: 7").id.clone()
-    read: &kernel.notebook.add_cell(CellKind.Jet, "print(answer)").id.clone()
-    assert((&kernel.execute_cell(ClientKind.FirstParty, comptime_reader)).unwrap().ok(), "function cells must see later comptime declarations")
-    assert((&kernel.execute_cell(ClientKind.FirstParty, comptime_answer)).unwrap().ok())
-    assert((&kernel.execute_cell(ClientKind.FirstParty, caller)).unwrap().ok(), "caller must see later helper/type declarations")
-    assert((&kernel.execute_cell(ClientKind.FirstParty, helper)).unwrap().ok())
-    assert((&kernel.execute_cell(ClientKind.FirstParty, answer_type)).unwrap().ok())
-    assert(!(&kernel.execute_cell(ClientKind.FirstParty, read)).unwrap().ok(), "state cells must not see a later binding")
-    assert((&kernel.execute_cell(ClientKind.FirstParty, binding)).unwrap().ok())
-    output: &kernel.execute_cell(ClientKind.FirstParty, read).unwrap()
+    comptime_reader: kernel.notebook.add_cell(CellKind.Jet, "comptime_reader: fn() -> Int {{ return FUTURE_ANSWER }}").id.clone()
+    comptime_answer: kernel.notebook.add_cell(CellKind.Jet, "FUTURE_ANSWER: comptime {{ 42 }}").id.clone()
+    caller: kernel.notebook.add_cell(CellKind.Jet, "caller: fn() -> Int {{ return helper().value }}").id.clone()
+    helper: kernel.notebook.add_cell(CellKind.Jet, "helper: fn() -> Answer {{ return Answer{{ value: 42 }} }}").id.clone()
+    answer_type: kernel.notebook.add_cell(CellKind.Jet, "Answer: struct {{ value: Int }}").id.clone()
+    binding: kernel.notebook.add_cell(CellKind.Jet, "answer: 7").id.clone()
+    read: kernel.notebook.add_cell(CellKind.Jet, "print(answer)").id.clone()
+    assert((kernel.execute_cell(ClientKind.FirstParty, comptime_reader)).unwrap().ok(), "function cells must see later comptime declarations")
+    assert((kernel.execute_cell(ClientKind.FirstParty, comptime_answer)).unwrap().ok())
+    assert((kernel.execute_cell(ClientKind.FirstParty, caller)).unwrap().ok(), "caller must see later helper/type declarations")
+    assert((kernel.execute_cell(ClientKind.FirstParty, helper)).unwrap().ok())
+    assert((kernel.execute_cell(ClientKind.FirstParty, answer_type)).unwrap().ok())
+    assert(!(kernel.execute_cell(ClientKind.FirstParty, read)).unwrap().ok(), "state cells must not see a later binding")
+    assert((kernel.execute_cell(ClientKind.FirstParty, binding)).unwrap().ok())
+    output: kernel.execute_cell(ClientKind.FirstParty, read).unwrap()
     assert(output.ok())
     assert(output.bundle.text_plain.contains('7'))
 }
 
 #Test("shared_session_identical_stale_rules_across_clients") {
     kernel := Kernel.open(None, "env-test").expect("open shared-session notebook kernel")
-    a: &kernel.notebook.add_cell(CellKind.Jet, "x: 1").id.clone()
-    b: &kernel.notebook.add_cell(CellKind.Jet, "print(\"fx\")").id.clone()
-    if &kernel.notebook.cells.find((c) -> c.id == b) == Val(cell) -> &cell.depends_on.push(a.clone())
+    a: kernel.notebook.add_cell(CellKind.Jet, "x: 1").id.clone()
+    b: kernel.notebook.add_cell(CellKind.Jet, "print(\"fx\")").id.clone()
+    if kernel.notebook.cells.find((c) -> c.id == b) == Val(cell) -> cell.depends_on.push(a.clone())
     observable_success: (result: CellExecResult) -> result.ok() && result.bundle.text_plain.contains("fx")
-    assert((&kernel.execute_cell(ClientKind.FirstParty, a)).unwrap().ok())
-    fx: &kernel.execute_cell(ClientKind.JupyterAdapter, b).unwrap()
-    broken: &kernel.notebook.add_cell(CellKind.Jet, "print(\"fx\") +").id.clone()
-    broken_result: &kernel.execute_cell(ClientKind.JupyterAdapter, broken).unwrap()
+    assert((kernel.execute_cell(ClientKind.FirstParty, a)).unwrap().ok())
+    fx: kernel.execute_cell(ClientKind.JupyterAdapter, b).unwrap()
+    broken: kernel.notebook.add_cell(CellKind.Jet, "print(\"fx\") +").id.clone()
+    broken_result: kernel.execute_cell(ClientKind.JupyterAdapter, broken).unwrap()
     assert(!observable_success(broken_result))
     assert(observable_success(fx))
     plan: kernel.replay_plan(1, Val("x: 2")).expect("plan")
     assert(plan.steps.any((s) -> s.kind == StepKind.ConfirmEffect) || plan.steps.len() >= 1)
-    stale_jp: &kernel.apply_rerun(ClientKind.JupyterAdapter, plan, [RerunDecision.SkipStale]).unwrap()
+    stale_jp: kernel.apply_rerun(ClientKind.JupyterAdapter, plan, [RerunDecision.SkipStale]).unwrap()
     view_first: kernel.view(ClientKind.FirstParty)
     view_canvas: kernel.view(ClientKind.CanvasLens)
     view_jp: kernel.view(ClientKind.JupyterAdapter)
@@ -180,15 +180,15 @@ use {
 
 #Test("jetnb_cache_merge_ipynb_and_jet_export_never_hide_loss") {
     nb := JetNotebook.new("env-doc")
-    c1: &nb.add_cell(CellKind.Jet, "answer: 42").id.clone()
-    &nb.store_output(c1, MimeBundle{text_plain: "answer : Int: 42", mime: [], quarantined: false, widget_id: None, requested_origins: [], requested_messages: []}, 1, None).unwrap()
+    c1: nb.add_cell(CellKind.Jet, "answer: 42").id.clone()
+    nb.store_output(c1, MimeBundle{text_plain: "answer : Int: 42", mime: [], quarantined: false, widget_id: None, requested_origins: [], requested_messages: []}, 1, None).unwrap()
     assert(nb.visible_output(c1).is_some())
     nb.cells[0].source = "answer: 7"
     assert(nb.visible_output(c1).is_none(), "stale output must not display")
     theirs := JetNotebook.new("env-doc")
     shared: c1.clone()
-    &theirs.cells.push(NotebookCell{id: shared.clone(), kind: CellKind.Jet, source: "answer: 7", output: None, depends_on: []})
-    &theirs.add_cell(CellKind.Markdown, "# hi")
+    theirs.cells.push(NotebookCell{id: shared.clone(), kind: CellKind.Jet, source: "answer: 7", output: None, depends_on: []})
+    theirs.add_cell(CellKind.Markdown, "# hi")
     merged: merge_by_id(nb, theirs)
     assert(merged.cells.any((c) -> c.kind == CellKind.Markdown))
     assert_eq(merged.cells.find((c) -> c.id == shared).unwrap().source, "answer: 7")
@@ -197,7 +197,7 @@ use {
     fs.create_dir_all(dir).unwrap()
     path: dir.join("demo.jetnb")
     nb.cells[0].source = "answer: 42"
-    &nb.store_output(c1, MimeBundle{text_plain: "42", mime: [], quarantined: false, widget_id: None, requested_origins: [], requested_messages: []}, 2, None).unwrap()
+    nb.store_output(c1, MimeBundle{text_plain: "42", mime: [], quarantined: false, widget_id: None, requested_origins: [], requested_messages: []}, 2, None).unwrap()
     save_jetnb(nb, path).unwrap()
     loaded: load_jetnb(path).unwrap()
     assert_eq(loaded.cells.len(), 1)
@@ -236,7 +236,7 @@ use {
 #Test("rich_output_trust_quarantines_imports_and_binds_grants") {
     store: TrustStore.default()
     bundle := MimeBundle{text_plain: "hi", mime: [(_0: "text/html", _1: "<b>hi</b>")], quarantined: false, widget_id: Val("w1"), requested_origins: ["https://evil.example"], requested_messages: ["click"]}
-    quarantine_outputs(&bundle)
+    quarantine_outputs(bundle)
     assert(decide_render(store, "src", "env", "rend", bundle) == {
         .FallbackPlain{..} -> true
         else -> false
@@ -249,13 +249,13 @@ use {
     store := TrustStore.default()
     payload_hash: sha256_hex("{live.mime}{TEXT_NUL}{live.widget_id}".bytes())
     req: ActiveRequest{notebook_source_hash: "src", payload_hash: payload_hash, renderer_hash: "rend", environment_hash: "env", policy_version: POLICY_VERSION, widget_id: "sales", origins: live.requested_origins.clone(), messages: live.requested_messages.clone()}
-    grant_active(&store, req)
+    grant_active(store, req)
     assert(decide_render(store, "src", "env", "rend", live) == {
         .AllowActive{..} -> true
         else -> false
     })
-    &live.requested_origins.clear()
-    &live.requested_messages.clear()
+    live.requested_origins.clear()
+    live.requested_messages.clear()
     live.mime = [(_0: "image/svg+xml", _1: "<svg/>")]
     assert(decide_render(store, "src", "env", "rend", live) == {
         .AllowPassive{..} -> true
@@ -265,7 +265,7 @@ use {
 
 #Test("headless_protocol_interrupt_stdin_debug_perf_and_clients") {
     kernel := Kernel.open(None, "proto-env").expect("open headless-protocol notebook kernel")
-    out: run_headless_script(&kernel, ["add-jet y: 3", "exec first", "visible jupyter", "visible canvas", "visible first", "interrupt", "stdin hello", "debug", "perf", "complete y", "inspect", "export-jet", "export-ipynb"])
+    out: run_headless_script(kernel, ["add-jet y: 3", "exec first", "visible jupyter", "visible canvas", "visible first", "interrupt", "stdin hello", "debug", "perf", "complete y", "inspect", "export-jet", "export-ipynb"])
     assert(out.contains("\"status\":\"ok\""), "{out}")
     assert(out.contains("interrupt_requested"), "{out}")
     assert(out.contains("stdin_queued=1"), "{out}")
@@ -280,14 +280,14 @@ use {
     source: "#FX(authority: IO, FS) {{\n    eprint(\"ambient-eprint\")\n    name: input(\"name: \") ?? \"fallback\"\n    assert(name == \"Ada\")\n    write_file(\"notes.txt\", name) ?? panic(\"write failed\")\n    assert(file_exists(\"notes.txt\"))\n    assert_eq(file_exists(\"notes.txt\"), true)\n    print(read_file(Path.from(\"notes.txt\")) ?? panic(\"read failed\"))\n}}"
     environment: Kernel.environment_hash(scratch.path)
     kernel := Kernel.open(Val(document), environment.clone()).expect("open first-hour notebook document")
-    cell_id: &kernel.notebook.add_cell(CellKind.Jet, source).id.clone()
-    &kernel.push_stdin("Ada")
-    result: &kernel.execute_cell(ClientKind.FirstParty, cell_id).unwrap()
+    cell_id: kernel.notebook.add_cell(CellKind.Jet, source).id.clone()
+    kernel.push_stdin("Ada")
+    result: kernel.execute_cell(ClientKind.FirstParty, cell_id).unwrap()
     assert(result.ok(), "shared Prelude cell failed: {result.eval.text}")
     assert(result.bundle.text_plain.contains("ambient-eprint"))
     assert(result.bundle.text_plain.contains("Ada"))
     assert_eq(fs.read_to_string(scratch.join("notes.txt")).unwrap(), "Ada")
-    &kernel.save_document(Val(document)).unwrap()
+    kernel.save_document(Val(document)).unwrap()
     reopened: Kernel.open(Val(document), environment).expect("reopen first-hour notebook document")
     assert_eq(reopened.document_path, Val(document))
     assert_eq(reopened.notebook.cells[0].source, source)
@@ -299,10 +299,10 @@ use {
     child := Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(["notebook", "journey.jetnb", "--protocol"])
         .current_dir(scratch.path).env("NO_COLOR", "1").stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.piped())
         .spawn().expect("start production notebook protocol")
-    input := &child.stdin.take().expect("protocol stdin")
-    &input.write_all("add-jet answer: 42\nexec first\ncomplete answer\nsave journey.jetnb\nreopen\nexport-ipynb\nexport-jet\nquit\n".bytes()).expect("write notebook protocol journey")
-    drop(^input)
-    output: &child.wait_with_output().expect("finish production notebook protocol")
+    input := child.stdin.take().expect("protocol stdin")
+    input.write_all("add-jet answer: 42\nexec first\ncomplete answer\nsave journey.jetnb\nreopen\nexport-ipynb\nexport-jet\nquit\n".bytes()).expect("write notebook protocol journey")
+    drop(input)
+    output: child.wait_with_output().expect("finish production notebook protocol")
     stdout: String.from_utf8_lossy(output.stdout)
     stderr: String.from_utf8_lossy(output.stderr)
     assert(output.status.success(), "protocol journey failed:\n{stdout}\n{stderr}")
@@ -333,7 +333,7 @@ use {
         document: browser_root.join("journey.jetnb")
         merge_document: browser_root.join("merge.jetnb")
         merge := JetNotebook.new(Kernel.environment_hash(browser_root))
-        &merge.add_cell(CellKind.Markdown, "# merged from another document")
+        merge.add_cell(CellKind.Markdown, "# merged from another document")
         save_jetnb(merge, merge_document).unwrap()
         port: free_loopback_port()
         token: "notebook-browser-test-token"
@@ -342,8 +342,8 @@ use {
         child: Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).current_dir(browser_root)
             .args(["notebook", document.to_str().unwrap(), "--bind", bind, "--token", token])
             .stdin(Stdio.null()).stdout(Stdio.null()).stderr(Stdio.null()).spawn().unwrap()
-        server: RunningNotebook{child: ^child}
-        defer -> drop(^server)
+        server: RunningNotebook{child: child.move()}
+        defer -> drop(server)
         wait_for_notebook_server(port, token)
         output: Command.new(command_path("node", "NODE")).current_dir(env.var("CARGO_MANIFEST_DIR").unwrap())
             .args(["Tools/notebook-test/acceptance.mjs", "--browser", browser, "--port", port_text, "--token", token, "--save-path", document.to_str().unwrap(), "--merge-path", merge_document.to_str().unwrap()])

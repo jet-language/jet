@@ -109,27 +109,27 @@ envmodel_files_from_value: fn(value: CtValue) -> [ManagedFile] ManagedFileError!
         .Map(map_entries) -> {
             loop entry in map_entries {
                 if entry.key == {
-                    .Str(name) -> { &entries.push(ManagedFileEntry{destination: name, value: entry.value}) }
+                    .Str(name) -> { entries.push(ManagedFileEntry{destination: name, value: entry.value}) }
                     else -> { return Err(ManagedFileError.InvalidEntry("managed file maps need string destination keys")) }
                 }
             }
         }
         .Struct(_, fields) -> {
             unique: envmodel_checked_unique_fields(fields, "files")
-            loop name in envmodel_sorted_keys(unique) -> &entries.push(ManagedFileEntry{destination: name, value: unique[name]})
+            loop name in envmodel_sorted_keys(unique) -> entries.push(ManagedFileEntry{destination: name, value: unique[name]})
         }
         .List(values) -> {
             loop item in values {
                 fields: envmodel_checked_managed_fields(item, "list entry")
                 destination: envmodel_optional_string_field(fields, "destination") ?? return Err(ManagedFileError.InvalidEntry("a managed file list entry needs a string `destination`"))
-                &entries.push(ManagedFileEntry{destination: destination, value: item})
+                entries.push(ManagedFileEntry{destination: destination, value: item})
             }
         }
         else -> { return Err(ManagedFileError.InvalidEntry("files must be a map or a list of managed file records")) }
     }
     managed := [ManagedFile]{}
-    loop entry in entries -> &managed.push(envmodel_managed_file_from_value(entry.destination, entry.value))
-    &managed.sort_by(file -> file.destination)
+    loop entry in entries -> managed.push(envmodel_managed_file_from_value(entry.destination, entry.value))
+    managed.sort_by(file -> file.destination)
     loop index in 1..<managed.len() {
         if managed[index - 1].destination == managed[index].destination {
             return Err(ManagedFileError.InvalidDestination(managed[index - 1].destination))

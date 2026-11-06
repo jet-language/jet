@@ -34,7 +34,7 @@ CacheBinding: struct {
             endpoint: store_cache_parse_endpoint(mirror)
             store_cache_validate_endpoint_binding(self, endpoint, self.allow_write)
             if seen.contains(mirror) -> return Err(StoreError.InvalidData("cache binding contains a duplicate mirror"))
-            &seen.push(mirror)
+            seen.push(mirror)
         }
         if !self.trust_key.starts_with("/") -> return Err(StoreError.InvalidData("cache trust key must be an absolute host path"))
         store_cache_validate_path_components(self.trust_key)
@@ -51,14 +51,14 @@ CacheBinding: struct {
     encode: fn(self) -> String StoreError! {
         self.validate()
         out := "{STORE_CACHE_BINDING_MAGIC}\n"
-        store_cache_line(&out, "role", self.role)
-        store_cache_line(&out, "key", self.trust_key)
-        store_cache_line(&out, "write", if self.allow_write -> "true" else -> "false")
+        store_cache_line(out, "role", self.role)
+        store_cache_line(out, "key", self.trust_key)
+        store_cache_line(out, "write", if self.allow_write -> "true" else -> "false")
         if self.credential_provider == {
-            .Val(provider) -> store_cache_line(&out, "credential", provider)
+            .Val(provider) -> store_cache_line(out, "credential", provider)
             .None -> {}
         }
-        loop mirror in self.mirrors -> store_cache_line(&out, "mirror", mirror)
+        loop mirror in self.mirrors -> store_cache_line(out, "mirror", mirror)
         Ok(out)
     }
 
@@ -88,7 +88,7 @@ CacheBinding: struct {
                 }
                 name == "credential" && credential == None -> credential = Val(value)
                 name == "mirror" -> {
-                    &mirrors.push(value)
+                    mirrors.push(value)
                 }
                 else -> return Err(StoreError.InvalidData("cache binding has an unknown or duplicate field"))
             }
@@ -181,7 +181,7 @@ store_list_cache_bindings: fn(roots: HangarRoots) -> [CacheBinding] StoreError! 
         binding: CacheBinding.decode(text)
         if binding.role != file_role -> return Err(StoreError.InvalidData("cache binding role disagrees with its file name"))
         store_cache_validate_binding_trust(roots, binding)
-        &bindings.push(binding)
+        bindings.push(binding)
     }
     Ok(bindings)
 }
@@ -388,7 +388,7 @@ store_cache_lines: fn(text: String) -> [String] Never! {
     loop index in 0..<count {
         raw: parts[index].bytes()
         end: if raw.len() > 0 && Int.from_u8(raw[raw.len() - 1]) == 13 -> raw.len() - 1 else -> raw.len()
-        &lines.push(pkg_bytes_text(raw, 0, end))
+        lines.push(pkg_bytes_text(raw, 0, end))
     }
     lines
 }
@@ -446,6 +446,6 @@ store_cache_binding_json: fn(binding: CacheBinding) -> String ReportError! {
 // `jet.status/v1` for `cache list`.
 store_cache_bindings_json: fn(bindings: [CacheBinding]) -> String ReportError! {
     values := [Dyn]{}
-    loop binding in bindings -> &values.push(report_status_object(binding.status_fields()))
+    loop binding in bindings -> values.push(report_status_object(binding.status_fields()))
     StatusEnvelope.new("cache-list", true).with_fields(StatusFields.new().with("bindings", Dyn.Array(values))).json()
 }

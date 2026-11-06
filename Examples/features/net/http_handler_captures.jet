@@ -44,7 +44,7 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
     }
     print(post_order(addr, "alice"))
     print(post_order(addr, "bob"))
-    ^t.join() ?? panic("server failed")
+    t.join() ?? panic("server failed")
 
     row: scope.query_one(SQL{"SELECT COUNT(*) AS n FROM orders"}) ?? panic("count")
     print("rows after requests: {db.row_int(row, "n") ?? 0}")

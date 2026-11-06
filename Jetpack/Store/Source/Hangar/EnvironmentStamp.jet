@@ -44,7 +44,7 @@ EnvironmentEntryIndex: struct {
 
     from_entries: fn(entries: [StoreEntry]) -> EnvironmentEntryIndex Never! {
         index := EnvironmentEntryIndex{by_selection: [String: StoreEntry]{}}
-        loop entry in entries -> &index.offer(store_environment_entry_selection(entry).key(), entry)
+        loop entry in entries -> index.offer(store_environment_entry_selection(entry).key(), entry)
         index
     }
 
@@ -63,7 +63,7 @@ EnvironmentEntryIndex: struct {
             if !base_keys.has_key(base) -> next
             key: store_environment_entry_selection(entry).key()
             if !wanted.has_key(key) -> next
-            &index.offer(key, entry)
+            index.offer(key, entry)
         }
         index
     }
@@ -84,8 +84,8 @@ EnvironmentEntryIndex: struct {
 }
 
 store_append_environment_stamp_field: fn(stamp: &[U8], field: [U8]) Never! {
-    store_push_u64_le(&stamp, field.len())
-    store_push_bytes(&stamp, field)
+    store_push_u64_le(stamp, field.len())
+    store_push_bytes(stamp, field)
 }
 
 // External output paths of the selected entries that live outside this
@@ -95,7 +95,7 @@ store_external_output_paths: fn(roots: HangarRoots, entries: [StoreEntry]) -> [S
     hangar: roots.hangar_dir()
     paths := [String]{}
     loop entry in entries {
-        if entry.out != "" && !store_path_starts_with(entry.out, hangar) -> &paths.push(entry.out)
+        if entry.out != "" && !store_path_starts_with(entry.out, hangar) -> paths.push(entry.out)
         producer: ProducerRecord.decode(entry.producer_record) ?? next
         // Nix named outputs are projected from their verified Hangar objects.
         if producer.provider == "nix" -> next
@@ -110,7 +110,7 @@ store_external_output_paths: fn(roots: HangarRoots, entries: [StoreEntry]) -> [S
                 }
                 else -> next
             }
-            if !store_path_starts_with(path, hangar) -> &paths.push(path)
+            if !store_path_starts_with(path, hangar) -> paths.push(path)
         }
     }
     store_sorted_unique(paths)
@@ -123,12 +123,12 @@ store_append_external_metadata_stamp: fn(stamp: &[U8], metadata: Stat) Never! {
         metadata.is_file -> "file"
         else -> "other"
     }
-    store_append_environment_stamp_field(&stamp, kind.bytes())
-    store_append_environment_stamp_field(&stamp, "{metadata.size}".bytes())
+    store_append_environment_stamp_field(stamp, kind.bytes())
+    store_append_environment_stamp_field(stamp, "{metadata.size}".bytes())
     nanos: metadata.modified.to_unix_ns() ?? panic("file times fit Unix nanoseconds")
     seconds: nanos /% 1000000000
     modified: if nanos < 0 -> "" else -> "{seconds}:{nanos - seconds * 1000000000}"
-    store_append_environment_stamp_field(&stamp, modified.bytes())
+    store_append_environment_stamp_field(stamp, modified.bytes())
 }
 
 // Rust `format!("{:?}", error.kind())` for the stamp.
@@ -145,32 +145,32 @@ store_io_kind_name: fn(error: IOError) -> String Never! {
 }
 
 store_append_external_output_stamp: fn(stamp: &[U8], path: String) Never! {
-    store_append_environment_stamp_field(&stamp, path.bytes())
+    store_append_environment_stamp_field(stamp, path.bytes())
     if files.stat(path) == {
         .Ok(metadata) -> {
-            store_append_environment_stamp_field(&stamp, "present".bytes())
-            store_append_external_metadata_stamp(&stamp, metadata)
+            store_append_environment_stamp_field(stamp, "present".bytes())
+            store_append_external_metadata_stamp(stamp, metadata)
             if metadata.is_symlink {
                 if files.read_link(path) == {
                     .Ok(target) -> {
-                        store_append_environment_stamp_field(&stamp, "symlink-target".bytes())
-                        store_append_environment_stamp_field(&stamp, target.bytes())
+                        store_append_environment_stamp_field(stamp, "symlink-target".bytes())
+                        store_append_environment_stamp_field(stamp, target.bytes())
                     }
                     .Err(error) -> {
-                        store_append_environment_stamp_field(&stamp, "symlink-target-error".bytes())
-                        store_append_environment_stamp_field(&stamp, store_io_kind_name(error).bytes())
+                        store_append_environment_stamp_field(stamp, "symlink-target-error".bytes())
+                        store_append_environment_stamp_field(stamp, store_io_kind_name(error).bytes())
                     }
                 }
                 if files.stat(path, links: .Follow) == {
                     .Ok(target) -> {
-                        store_append_environment_stamp_field(&stamp, "target-present".bytes())
-                        store_append_external_metadata_stamp(&stamp, target)
+                        store_append_environment_stamp_field(stamp, "target-present".bytes())
+                        store_append_external_metadata_stamp(stamp, target)
                     }
-                    .Err(error) -> store_append_stat_failure(&stamp, error, "target-missing", "target-error")
+                    .Err(error) -> store_append_stat_failure(stamp, error, "target-missing", "target-error")
                 }
             }
         }
-        .Err(error) -> store_append_stat_failure(&stamp, error, "missing", "error")
+        .Err(error) -> store_append_stat_failure(stamp, error, "missing", "error")
     }
 }
 
@@ -178,11 +178,11 @@ store_append_external_output_stamp: fn(stamp: &[U8], path: String) Never! {
 // the Rust error-kind name.
 store_append_stat_failure: fn(stamp: &[U8], error: IOError, missing: String, failed: String) Never! {
     if StoreError.IO(error).is_not_found() {
-        store_append_environment_stamp_field(&stamp, missing.bytes())
+        store_append_environment_stamp_field(stamp, missing.bytes())
         return
     }
-    store_append_environment_stamp_field(&stamp, failed.bytes())
-    store_append_environment_stamp_field(&stamp, store_io_kind_name(error).bytes())
+    store_append_environment_stamp_field(stamp, failed.bytes())
+    store_append_environment_stamp_field(stamp, store_io_kind_name(error).bytes())
 }
 
 // The composite warm-entry stamp: Store state, the environment definition,
@@ -192,30 +192,30 @@ store_append_stat_failure: fn(stamp: &[U8], error: IOError, missing: String, fai
 store_environment_entry_stamp_with_index: fn(roots: HangarRoots, project: String, definition_fingerprint: String, selections: [EnvironmentSelection], index: EnvironmentEntryIndex) -> String StoreError! {
     store_stamp: store_wal_state_stamp(roots)
     canonical := "jetpack-env-entry-v5".bytes()
-    &canonical.push(U8{0})
+    canonical.push(U8{0})
     header: [String]{store_stamp, definition_fingerprint, project}
-    loop field in header -> store_append_environment_stamp_field(&canonical, field.bytes())
+    loop field in header -> store_append_environment_stamp_field(canonical, field.bytes())
     ordered := selections.copy()
-    &ordered.sort_by(selection -> selection.key())
+    ordered.sort_by(selection -> selection.key())
     selected := [StoreEntry]{}
     seals: files.join(roots.hangar_dir(), STORE_SEALS_DIR)
     loop selection in ordered {
         fields: [String]{selection.reference, selection.name, selection.version, selection.output_hash, selection.metadata}
-        loop field in fields -> store_append_environment_stamp_field(&canonical, field.bytes())
+        loop field in fields -> store_append_environment_stamp_field(canonical, field.bytes())
         if index.get(selection) == {
             .Val(entry) -> {
-                store_append_environment_stamp_field(&canonical, "seal-v1".bytes())
+                store_append_environment_stamp_field(canonical, "seal-v1".bytes())
                 if files.read_bytes(files.join(seals, entry.envelope.output_hash)) == {
-                    .Ok(bytes) -> store_append_environment_stamp_field(&canonical, bytes)
-                    .Err(error) -> store_append_environment_stamp_field(&canonical, "error:{store_io_kind_name(error)}".bytes())
+                    .Ok(bytes) -> store_append_environment_stamp_field(canonical, bytes)
+                    .Err(error) -> store_append_environment_stamp_field(canonical, "error:{store_io_kind_name(error)}".bytes())
                 }
-                &selected.push(entry)
+                selected.push(entry)
             }
-            .None -> store_append_environment_stamp_field(&canonical, "missing-selection".bytes())
+            .None -> store_append_environment_stamp_field(canonical, "missing-selection".bytes())
         }
     }
-    store_append_environment_stamp_field(&canonical, "external-output-stamps-v1".bytes())
-    loop path in store_external_output_paths(roots, selected) -> store_append_external_output_stamp(&canonical, path)
+    store_append_environment_stamp_field(canonical, "external-output-stamps-v1".bytes())
+    loop path in store_external_output_paths(roots, selected) -> store_append_external_output_stamp(canonical, path)
     Ok(store_sha256_hex(canonical))
 }
 

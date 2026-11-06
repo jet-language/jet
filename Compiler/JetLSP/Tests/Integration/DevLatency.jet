@@ -24,13 +24,13 @@ measure_watch_latency_ms: fn() -> U128 {
     loop round in 0..<ROUNDS {
         source: "run: fn() {{ /* watch-round-{round} {"x".repeat(round + 1)} */ }}\n"
         started: Instant.now()
-        &watch.mark_edit_started()
+        watch.mark_edit_started()
         fs.write(file, source).unwrap()
-        receipt: &watch.poll().expect("watch edit")
+        receipt: watch.poll().expect("watch edit")
         elapsed: started.elapsed().as_millis()
         reported: receipt.edit_to_visible_ms.expect("watch timing")
         best = best.min(elapsed.max(reported))
-        &watch.acknowledge(receipt).unwrap()
+        watch.acknowledge(receipt).unwrap()
     }
     _: fs.remove_dir_all(dir)
     best

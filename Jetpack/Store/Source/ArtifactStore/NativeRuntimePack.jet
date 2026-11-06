@@ -128,8 +128,8 @@ NativeCandidateComposition: struct {
 
     action_key: fn(compiler: ObjectHandle) -> String Never! {
         parts := "jet.candidate-composition/v1".bytes()
-        &parts.push(U8{0})
-        &parts.extend(compiler.text().bytes())
+        parts.push(U8{0})
+        parts.extend(compiler.text().bytes())
         ArtifactDigest.hash(parts).to_hex()
     }
 
@@ -210,13 +210,13 @@ NativeRuntimeRailContract: struct {
         loop row in rows {
             values: native_pack_fields(row, [String]{"id", "expected_rc", "invocation", "inputs", "outputs"})
             id: native_pack_text_field(values, "id")
-            native_pack_unique(&ids, id)
+            native_pack_unique(ids, id)
             expected_rc: native_pack_rc(native_pack_text_field(values, "expected_rc"))
             if expected_rc != "0" -> return Err(NativeRuntimePackError.Invalid("publication requires successful admitted rail steps"))
             inputs: native_pack_rail_inputs(values, "inputs", produced)
             outputs: native_pack_output_roles(values)
-            &produced.add(id, outputs).drop("step checked absent")
-            &steps.push(NativeRuntimeRailStep{id, expected_rc, invocation: native_pack_handle_field(values, "invocation"), inputs, outputs})
+            produced.add(id, outputs).drop("step checked absent")
+            steps.push(NativeRuntimeRailStep{id, expected_rc, invocation: native_pack_handle_field(values, "invocation"), inputs, outputs})
         }
         Ok(NativeRuntimeRailContract{
             job: native_pack_handle_field(fields, "job"), steps,
@@ -239,7 +239,7 @@ NativeRuntimeRailContract: struct {
             return Err(NativeRuntimePackError.Invalid("subject generator, ABI, route and provider identities are required"))
         }
         produced := [String: [NativeRuntimeRoleObject]]{}
-        loop step in steps -> &produced.add(step.id, step.outputs).drop("checked admitted IDs")
+        loop step in steps -> produced.add(step.id, step.outputs).drop("checked admitted IDs")
         if self.artifacts.len() != 7 -> return Err(NativeRuntimePackError.Invalid("admitted rail must bind exactly seven runtime artifact roles"))
         loop index in 0..<4 {
             if self.artifacts[index].source == {
@@ -298,7 +298,7 @@ NativeRuntimePackApproval: struct {
     to_tree: fn(self) -> Dyn Never! {
         rows := [Dyn]{}
         loop step in self.steps {
-            &rows.push(Dyn.Object([String: Dyn]{"id": Dyn.Text(step.id), "observed_rc": Dyn.Text(step.observed_rc), "invocation": native_pack_handle_tree(step.invocation), "inputs": native_pack_roles_tree(step.inputs), "outputs": native_pack_roles_tree(step.outputs), "receipt": native_pack_handle_tree(step.receipt)}))
+            rows.push(Dyn.Object([String: Dyn]{"id": Dyn.Text(step.id), "observed_rc": Dyn.Text(step.observed_rc), "invocation": native_pack_handle_tree(step.invocation), "inputs": native_pack_roles_tree(step.inputs), "outputs": native_pack_roles_tree(step.outputs), "receipt": native_pack_handle_tree(step.receipt)}))
         }
         Dyn.Object([String: Dyn]{
             "schema": Dyn.Text("jet.native-runtime-pack-approval/v1"),
@@ -346,60 +346,60 @@ NativePackReadCensus: struct {
 
 native_pack_blob: fn(store: ArtifactStore, object: ObjectHandle, census: &NativePackReadCensus) -[FS, Env, Exec, Time, Rand]> [U8] NativeRuntimePackError! {
     bytes: store.get_blob(object) ?? return Err(NativeRuntimePackError.Invalid("missing or corrupt publication object {object.text()}"))
-    if census.capture -> &census.objects.push(object)
+    if census.capture -> census.objects.push(object)
     Ok(bytes)
 }
 
 native_pack_verify_roles: fn(store: ArtifactStore, roles: [NativeRuntimeRoleObject], census: &NativePackReadCensus) NativeRuntimePackError! -[FS, Env, Exec, Time, Rand]> {
-    loop role in roles -> _: native_pack_blob(store, role.object, &census)
+    loop role in roles -> _: native_pack_blob(store, role.object, census)
 }
 
 native_runtime_pack_verify: fn(store: ArtifactStore, identity: NativeRuntimePackIdentity) -[FS, Env, Exec, Time, Rand]> (subject: NativeRuntimePackSubject, pack_bytes: [U8]) NativeRuntimePackError! {
     census := NativePackReadCensus{capture: false, objects: [ObjectHandle]{}}
-    native_runtime_pack_verify_reads(store, identity, &census)
+    native_runtime_pack_verify_reads(store, identity, census)
 }
 
 native_runtime_pack_verify_reads: fn(store: ArtifactStore, identity: NativeRuntimePackIdentity, census: &NativePackReadCensus) -[FS, Env, Exec, Time, Rand]> (subject: NativeRuntimePackSubject, pack_bytes: [U8]) NativeRuntimePackError! {
-    subject: NativeRuntimePackSubject.from_bytes(native_pack_blob(store, identity.subject, &census))
-    approval: NativeRuntimePackApproval.from_bytes(native_pack_blob(store, identity.approval, &census))
-    pack_bytes: native_runtime_pack_check_approval(store, subject, identity.subject, approval, &census)
+    subject: NativeRuntimePackSubject.from_bytes(native_pack_blob(store, identity.subject, census))
+    approval: NativeRuntimePackApproval.from_bytes(native_pack_blob(store, identity.approval, census))
+    pack_bytes: native_runtime_pack_check_approval(store, subject, identity.subject, approval, census)
     Ok((subject: subject, pack_bytes: pack_bytes))
 }
 
 native_runtime_pack_check_approval: fn(store: ArtifactStore, subject: NativeRuntimePackSubject, subject_object: ObjectHandle, approval: NativeRuntimePackApproval, census: &NativePackReadCensus) -[FS, Env, Exec, Time, Rand]> [U8] NativeRuntimePackError! {
     if approval.subject != subject_object -> return Err(NativeRuntimePackError.Invalid("approval names a different subject"))
-    authorization: NativeRuntimePackAuthorization.from_bytes(native_pack_blob(store, approval.publication_authorization, &census))
+    authorization: NativeRuntimePackAuthorization.from_bytes(native_pack_blob(store, approval.publication_authorization, census))
     if authorization.subject != subject_object || authorization.rail_contract != approval.rail_contract || authorization.admission != approval.admission {
         return Err(NativeRuntimePackError.Invalid("authorization does not bind this subject and admitted rail"))
     }
-    native_runtime_pack_check_evidence(store, subject, approval.evidence(), &census)
+    native_runtime_pack_check_evidence(store, subject, approval.evidence(), census)
 }
 
 native_runtime_pack_check_evidence: fn(store: ArtifactStore, subject: NativeRuntimePackSubject, approval: NativeRuntimePackEvidence, census: &NativePackReadCensus) -[FS, Env, Exec, Time, Rand]> [U8] NativeRuntimePackError! {
-    contract: NativeRuntimeRailContract.from_bytes(native_pack_blob(store, approval.rail_contract, &census))
+    contract: NativeRuntimeRailContract.from_bytes(native_pack_blob(store, approval.rail_contract, census))
     approval.check_rail(contract, approval.rail_contract)
     contract.check_subject(subject, approval.steps)
-    done: native_pack_blob(store, approval.proof_done, &census)
+    done: native_pack_blob(store, approval.proof_done, census)
     if done != "0\n".bytes() -> return Err(NativeRuntimePackError.Invalid("publication requires terminal proofq done rc 0"))
-    native_pack_check_terminal(store, subject, contract, approval, &census)
-    if native_pack_blob(store, approval.final_source_tree, &census) != "{subject.runtime_source_tree}\n".bytes() -> return Err(NativeRuntimePackError.Invalid("actual final tree receipt differs from subject"))
-    native_pack_check_admission(native_pack_blob(store, approval.admission, &census), approval.job, approval.rail_contract)
-    _: native_pack_blob(store, approval.job, &census)
-    native_pack_check_generation(native_pack_blob(store, approval.generation, &census), subject)
-    _: native_pack_blob(store, approval.raw_frontend, &census)
+    native_pack_check_terminal(store, subject, contract, approval, census)
+    if native_pack_blob(store, approval.final_source_tree, census) != "{subject.runtime_source_tree}\n".bytes() -> return Err(NativeRuntimePackError.Invalid("actual final tree receipt differs from subject"))
+    native_pack_check_admission(native_pack_blob(store, approval.admission, census), approval.job, approval.rail_contract)
+    _: native_pack_blob(store, approval.job, census)
+    native_pack_check_generation(native_pack_blob(store, approval.generation, census), subject)
+    _: native_pack_blob(store, approval.raw_frontend, census)
     loop step in approval.steps {
-        _: native_pack_blob(store, step.invocation, &census)
-        _: native_pack_blob(store, native_pack_check_step_receipt(native_pack_blob(store, step.receipt, &census), step), &census)
-        native_pack_verify_roles(store, step.inputs, &census)
-        native_pack_verify_roles(store, step.outputs, &census)
+        _: native_pack_blob(store, step.invocation, census)
+        _: native_pack_blob(store, native_pack_check_step_receipt(native_pack_blob(store, step.receipt, census), step), census)
+        native_pack_verify_roles(store, step.inputs, census)
+        native_pack_verify_roles(store, step.outputs, census)
     }
-    loop object in ([ObjectHandle]{subject.jet_object, subject.remaining_native_archive, subject.remaining_raw_leaf_archive, subject.runtime_sources, subject.runtime_exports, subject.runtime_imports, subject.lifecycle}) -> _: native_pack_blob(store, object, &census)
-    native_pack_verify_roles(store, subject.generators, &census)
-    native_pack_verify_roles(store, subject.abi, &census)
-    native_pack_verify_roles(store, subject.routes, &census)
-    native_pack_verify_roles(store, subject.providers, &census)
-    native_pack_check_lifecycle(store, subject, &census)
-    Ok(native_pack_blob(store, subject.pack_object, &census))
+    loop object in ([ObjectHandle]{subject.jet_object, subject.remaining_native_archive, subject.remaining_raw_leaf_archive, subject.runtime_sources, subject.runtime_exports, subject.runtime_imports, subject.lifecycle}) -> _: native_pack_blob(store, object, census)
+    native_pack_verify_roles(store, subject.generators, census)
+    native_pack_verify_roles(store, subject.abi, census)
+    native_pack_verify_roles(store, subject.routes, census)
+    native_pack_verify_roles(store, subject.providers, census)
+    native_pack_check_lifecycle(store, subject, census)
+    Ok(native_pack_blob(store, subject.pack_object, census))
 }
 
 native_runtime_pack_publish: fn(store: ArtifactStore, subject: NativeRuntimePackSubject, approval: NativeRuntimePackApproval, compiler: ObjectHandle) -[FS, Env, Exec, Time, Rand]> StoredArtifact NativeRuntimePackError! {
@@ -407,10 +407,10 @@ native_runtime_pack_publish: fn(store: ArtifactStore, subject: NativeRuntimePack
     subject_bytes: subject.to_bytes()
     if ObjectHandle.from_bytes(subject_bytes) != approval.subject -> return Err(NativeRuntimePackError.Invalid("prepared subject changed before authorization"))
     _: store.publish_blob(subject_bytes) ?? return Err(NativeRuntimePackError.Store(err))
-    _: native_runtime_pack_check_approval(store, subject, approval.subject, approval, &census)
+    _: native_runtime_pack_check_approval(store, subject, approval.subject, approval, census)
     approval_object: store.publish_blob(approval.to_bytes()) ?? return Err(NativeRuntimePackError.Store(err))
     identity: NativeRuntimePackIdentity{subject: approval.subject, approval: approval_object}
-    _: native_pack_blob(store, compiler, &census)
+    _: native_pack_blob(store, compiler, census)
     identity_object: store.publish_blob(identity.to_bytes()) ?? return Err(NativeRuntimePackError.Store(err))
     composition: NativeCandidateComposition{
         compiler, expected_runtime_identity: identity_object, expected_approval: approval_object,
@@ -435,21 +435,21 @@ VerifiedNativeRuntimePack: struct {
 // qualify compiler Source/session or execution custody. No path/CLI HEAD authority.
 native_runtime_pack_load: fn(store: ArtifactStore, compiler: ObjectHandle) -[FS, Env, Exec, Time, Rand]> VerifiedNativeRuntimePack NativeRuntimePackError! {
     census := NativePackReadCensus{capture: true, objects: [ObjectHandle]{}}
-    _: native_pack_blob(store, compiler, &census)
+    _: native_pack_blob(store, compiler, census)
     selected: if (store.lookup_artifact(NativeCandidateComposition.action_key(compiler)) ?? return Err(NativeRuntimePackError.Store(err))) == {
         .Hit(artifact) -> artifact
         else -> { return Err(NativeRuntimePackError.Invalid("candidate composition is missing or corrupt")) }
     }
-    composition: NativeCandidateComposition.from_bytes(native_pack_blob(store, selected.object, &census))
+    composition: NativeCandidateComposition.from_bytes(native_pack_blob(store, selected.object, census))
     if composition.compiler != compiler -> return Err(NativeRuntimePackError.Invalid("candidate composition names another compiler"))
-    identity: NativeRuntimePackIdentity.from_bytes(native_pack_blob(store, composition.expected_runtime_identity, &census))
+    identity: NativeRuntimePackIdentity.from_bytes(native_pack_blob(store, composition.expected_runtime_identity, census))
     if identity.approval != composition.expected_approval -> return Err(NativeRuntimePackError.Invalid("candidate expected approval differs from identity"))
-    verified: native_runtime_pack_verify_reads(store, identity, &census)
+    verified: native_runtime_pack_verify_reads(store, identity, census)
     subject: verified.subject
     if subject.abi != composition.compatible_abi || subject.routes != composition.compatible_routes || subject.providers != composition.compatible_providers {
         return Err(NativeRuntimePackError.Invalid("candidate compatibility tuple differs from approved runtime"))
     }
-    Ok(VerifiedNativeRuntimePack{composition: selected.object, identity: composition.expected_runtime_identity, approval: composition.expected_approval, subject, pack_bytes: verified.pack_bytes, objects: ^census.objects})
+    Ok(VerifiedNativeRuntimePack{composition: selected.object, identity: composition.expected_runtime_identity, approval: composition.expected_approval, subject, pack_bytes: verified.pack_bytes, objects: census.objects.move()})
 }
 
 native_pack_encode: fn(tree: Dyn) -> [U8] NativeRuntimePackError! { Ok(json.canonical(tree).bytes()) }
@@ -556,7 +556,7 @@ native_pack_array_field: fn(fields: [String: Dyn], name: String) -> [Dyn] Native
 
 native_pack_unique: fn(seen: &[String: Bool], role: String) NativeRuntimePackError! {
     if role == "" || seen.get(role) != None -> return Err(NativeRuntimePackError.Invalid("empty or duplicate publication role/step {role}"))
-    &seen.add(role, true).drop("checked absent")
+    seen.add(role, true).drop("checked absent")
 }
 
 native_pack_roles_field: fn(fields: [String: Dyn], name: String) -> [NativeRuntimeRoleObject] NativeRuntimePackError! {
@@ -571,15 +571,15 @@ native_pack_roles_field_empty: fn(fields: [String: Dyn], name: String) -> [Nativ
     loop value in native_pack_array_field(fields, name) {
         row: native_pack_fields(value, [String]{"role", "object"})
         role: native_pack_text_field(row, "role")
-        native_pack_unique(&seen, role)
-        &result.push(NativeRuntimeRoleObject{role, object: native_pack_handle_field(row, "object")})
+        native_pack_unique(seen, role)
+        result.push(NativeRuntimeRoleObject{role, object: native_pack_handle_field(row, "object")})
     }
     Ok(result)
 }
 
 native_pack_roles_tree: fn(roles: [NativeRuntimeRoleObject]) -> Dyn Never! {
     values := [Dyn]{}
-    loop role in roles -> &values.push(Dyn.Object([String: Dyn]{"role": Dyn.Text(role.role), "object": native_pack_handle_tree(role.object)}))
+    loop role in roles -> values.push(Dyn.Object([String: Dyn]{"role": Dyn.Text(role.role), "object": native_pack_handle_tree(role.object)}))
     Dyn.Array(values)
 }
 
@@ -591,8 +591,8 @@ native_pack_output_roles: fn(fields: [String: Dyn]) -> [String] NativeRuntimePac
             .Text(text) -> text
             else -> { return Err(NativeRuntimePackError.Invalid("output role must be a string")) }
         }
-        native_pack_unique(&seen, role)
-        &result.push(role)
+        native_pack_unique(seen, role)
+        result.push(role)
     }
     Ok(result)
 }
@@ -603,7 +603,7 @@ native_pack_rail_inputs: fn(fields: [String: Dyn], name: String, produced: [Stri
     loop value in native_pack_array_field(fields, name) {
         row: native_pack_fields(value, [String]{"role", "source"})
         role: native_pack_text_field(row, "role")
-        native_pack_unique(&seen, role)
+        native_pack_unique(seen, role)
         source_tree: row.get("source") ?? return Err(NativeRuntimePackError.Invalid("missing input source"))
         source_fields: if source_tree == {
             .Object(values) -> native_pack_member_map(values) ?? return Err(err)
@@ -629,7 +629,7 @@ native_pack_rail_inputs: fn(fields: [String: Dyn], name: String, produced: [Stri
             }
             else -> { return Err(NativeRuntimePackError.Invalid("unknown input source kind")) }
         }
-        &result.push(NativeRuntimeRailInput{role, source})
+        result.push(NativeRuntimeRailInput{role, source})
     }
     Ok(result)
 }
@@ -638,7 +638,7 @@ native_pack_observed_steps: fn(fields: [String: Dyn]) -> [NativeRuntimeObservedS
     steps := [NativeRuntimeObservedStep]{}
     loop row in native_pack_array_field(fields, "steps") {
         values: native_pack_fields(row, [String]{"id", "observed_rc", "invocation", "inputs", "outputs", "receipt"})
-        &steps.push(NativeRuntimeObservedStep{
+        steps.push(NativeRuntimeObservedStep{
             id: native_pack_text_field(values, "id"), observed_rc: native_pack_rc(native_pack_text_field(values, "observed_rc")),
             invocation: native_pack_handle_field(values, "invocation"), inputs: native_pack_roles_field_empty(values, "inputs"),
             outputs: native_pack_roles_field_empty(values, "outputs"), receipt: native_pack_handle_field(values, "receipt"),
@@ -660,7 +660,7 @@ native_pack_check_steps: fn(expected: [NativeRuntimeRailStep], actual: [NativeRu
             if step.outputs[output].role != contract.outputs[output] -> return Err(NativeRuntimePackError.Invalid("rail output role differs"))
         }
         native_pack_check_roles(contract.inputs, step.inputs, produced)
-        &produced.add(step.id, step.outputs).drop("admitted step IDs are unique")
+        produced.add(step.id, step.outputs).drop("admitted step IDs are unique")
     }
 }
 
@@ -715,13 +715,13 @@ native_pack_check_consumed_known: fn(expected: [NativeRuntimeRailInput], steps: 
 }
 
 native_pack_check_lifecycle: fn(store: ArtifactStore, subject: NativeRuntimePackSubject, census: &NativePackReadCensus) NativeRuntimePackError! -[FS, Env, Exec, Time, Rand]> {
-    fields: native_pack_fields(native_pack_input_tree(native_pack_blob(store, subject.lifecycle, &census)), [String]{"schema", "pack", "jet_object", "entries", "sections", "relocations"})
+    fields: native_pack_fields(native_pack_input_tree(native_pack_blob(store, subject.lifecycle, census)), [String]{"schema", "pack", "jet_object", "entries", "sections", "relocations"})
     native_pack_schema(fields, "jet.native-runtime-lifecycle-evidence/v1")
     if native_pack_handle_field(fields, "pack") != subject.pack_object || native_pack_handle_field(fields, "jet_object") != subject.jet_object {
         return Err(NativeRuntimePackError.Invalid("lifecycle inspection names different pack or Jet object bytes"))
     }
-    _: native_pack_blob(store, native_pack_handle_field(fields, "sections"), &census)
-    _: native_pack_blob(store, native_pack_handle_field(fields, "relocations"), &census)
+    _: native_pack_blob(store, native_pack_handle_field(fields, "sections"), census)
+    _: native_pack_blob(store, native_pack_handle_field(fields, "relocations"), census)
     symbols := [String: Bool]{}
     allocator := false
     host := false
@@ -729,7 +729,7 @@ native_pack_check_lifecycle: fn(store: ArtifactStore, subject: NativeRuntimePack
     loop entry in native_pack_array_field(fields, "entries") {
         values: native_pack_fields(entry, [String]{"symbol", "phase", "priority", "provider", "section"})
         symbol: native_pack_text_field(values, "symbol")
-        native_pack_unique(&symbols, symbol)
+        native_pack_unique(symbols, symbol)
         phase: native_pack_text_field(values, "phase")
         priority: native_pack_text_field(values, "priority")
         if (phase != "init" && phase != "fini") || native_pack_decimal(priority) > 65535 {
@@ -795,7 +795,7 @@ NativeRuntimePackEvidence: struct {
         native_pack_check_steps(contract.steps, self.steps)
         if contract.evidence.len() != 3 -> return Err(NativeRuntimePackError.Invalid("admitted rail must bind exactly three evidence roles"))
         produced := [String: [NativeRuntimeRoleObject]]{}
-        loop step in self.steps -> &produced.add(step.id, step.outputs).drop("checked admitted step IDs")
+        loop step in self.steps -> produced.add(step.id, step.outputs).drop("checked admitted step IDs")
         loop role in contract.evidence {
             if role.source == {
                 .Known(_) -> { return Err(NativeRuntimePackError.Invalid("generation, raw frontend and final tree evidence require actual producer outputs")) }
@@ -814,7 +814,7 @@ NativeRuntimePackEvidence: struct {
 
 native_runtime_pack_prepare: fn(store: ArtifactStore, subject: NativeRuntimePackSubject, evidence: NativeRuntimePackEvidence) -[FS, Env, Exec, Time, Rand]> ObjectHandle NativeRuntimePackError! {
     census := NativePackReadCensus{capture: false, objects: [ObjectHandle]{}}
-    _: native_runtime_pack_check_evidence(store, subject, evidence, &census)
+    _: native_runtime_pack_check_evidence(store, subject, evidence, census)
     Ok(store.publish_blob(subject.to_bytes()) ?? return Err(NativeRuntimePackError.Store(err)))
 }
 
@@ -835,18 +835,18 @@ native_pack_check_admission: fn(bytes: [U8], job: ObjectHandle, contract: Object
 }
 
 native_pack_check_terminal: fn(store: ArtifactStore, subject: NativeRuntimePackSubject, contract: NativeRuntimeRailContract, evidence: NativeRuntimePackEvidence, census: &NativePackReadCensus) NativeRuntimePackError! -[FS, Env, Exec, Time, Rand]> {
-    fields: native_pack_fields(native_pack_input_tree(native_pack_blob(store, evidence.proof_terminal, &census)), [String]{"schema", "job", "rail_contract", "done", "proofq_metadata", "proofq_name", "runtime_source_revision", "runtime_source_tree"})
+    fields: native_pack_fields(native_pack_input_tree(native_pack_blob(store, evidence.proof_terminal, census)), [String]{"schema", "job", "rail_contract", "done", "proofq_metadata", "proofq_name", "runtime_source_revision", "runtime_source_tree"})
     native_pack_schema(fields, "jet.native-runtime-proofq-terminal/v1")
     if native_pack_handle_field(fields, "job") != evidence.job || native_pack_handle_field(fields, "rail_contract") != evidence.rail_contract || native_pack_handle_field(fields, "done") != evidence.proof_done || native_pack_text_field(fields, "proofq_name") != contract.proofq_name || native_pack_text_field(fields, "runtime_source_revision") != subject.runtime_source_revision || native_pack_text_field(fields, "runtime_source_tree") != subject.runtime_source_tree {
         return Err(NativeRuntimePackError.Invalid("terminal receipt differs from admitted job, contract or actual runtime FINAL"))
     }
-    metadata: String.from_bytes(native_pack_blob(store, native_pack_handle_field(fields, "proofq_metadata"), &census)) ?? return Err(NativeRuntimePackError.Invalid("proofq metadata is not UTF-8"))
+    metadata: String.from_bytes(native_pack_blob(store, native_pack_handle_field(fields, "proofq_metadata"), census)) ?? return Err(NativeRuntimePackError.Invalid("proofq metadata is not UTF-8"))
     values := [String: String]{}
     loop line in metadata.split("\n") {
         if line == "" -> next
         pair: store_artifact_split_once(line, "=") ?? return Err(NativeRuntimePackError.Invalid("malformed proofq metadata"))
         if pair.before == "" || values.get(pair.before) != None -> return Err(NativeRuntimePackError.Invalid("empty or duplicate proofq metadata key"))
-        &values.add(pair.before, pair.after).drop("metadata key checked absent")
+        values.add(pair.before, pair.after).drop("metadata key checked absent")
     }
     if values.get("name") != Val(contract.proofq_name) || values.get("rc") != Val("0") {
         return Err(NativeRuntimePackError.Invalid("proofq metadata does not name the admitted completed job"))

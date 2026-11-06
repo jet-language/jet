@@ -32,7 +32,7 @@ impl ReservoirSampler {
     add: fn(&self, item: String) Never! {
         self.state.count = self.state.count.wrapping_add(U64{1})
         if self.state.items.len() < self.state.capacity {
-            &self.state.items.push(item)
+            self.state.items.push(item)
             return
         }
         state := self.state.rng
@@ -51,14 +51,14 @@ impl ReservoirSampler {
 
 #Test("reservoir keeps filled slots and native minimum capacity") {
     sampler := new(3)
-    &sampler.add("x")
+    sampler.add("x")
     clone := sampler.copy()
-    &clone.add("y")
-    &clone.add("z")
+    clone.add("y")
+    clone.add("z")
     assert_eq(sampler.sample(), [String]{"x"})
     assert_eq(clone.sample(), [String]{"x", "y", "z"})
     minimum := new(-1)
-    &minimum.add("only")
+    minimum.add("only")
     assert_eq(minimum.sample(), [String]{"only"})
 }
 
@@ -66,8 +66,8 @@ impl ReservoirSampler {
     left := new(3)
     right := new(3)
     loop i in 0..<20 {
-        &left.add("{i}")
-        &right.add("{i}")
+        left.add("{i}")
+        right.add("{i}")
     }
     assert_eq(left.sample(), right.sample())
 }

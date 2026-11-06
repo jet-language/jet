@@ -119,21 +119,21 @@ run: fn() {
         Setting{name: "JET_CI_EVIDENCE_DIR", value: evidence.copy()},
         Setting{name: "NO_COLOR", value: "1"},
         Setting{name: "TERM", value: "dumb"},
-    }) -> &state.env.push(setting)
+    }) -> state.env.push(setting)
 
-    closeout: run_child(&state, "closeout-gate", [String]{binary, "{repo}/Tools/agent/CloseoutGate.jet", "check"})
-    record(&state, closeout.row)
+    closeout: run_child(state, "closeout-gate", [String]{binary, "{repo}/Tools/agent/CloseoutGate.jet", "check"})
+    record(state, closeout.row)
     if closeout.row.status != "PASS" -> process.exit(1)
-    if !pin_source(&state) -> process.exit(1)
-    if !check_pin(&state, "source-integrity-before") -> process.exit(1)
+    if !pin_source(state) -> process.exit(1)
+    if !check_pin(state, "source-integrity-before") -> process.exit(1)
     root: state.repo.copy()
-    &state.env.push(Setting{name: "JET_TOOLCHAIN_ROOT", value: root.copy()})
-    &state.env.push(Setting{name: "JET_SCRATCH_ROOT", value: scratch_root()})
+    state.env.push(Setting{name: "JET_TOOLCHAIN_ROOT", value: root.copy()})
+    state.env.push(Setting{name: "JET_SCRATCH_ROOT", value: scratch_root()})
     if process.env_get("JET_NATIVE_TRACE_LOG") != None {
         cache: "{evidence}/native-ffi-cache"
         files.create_dir_all(cache) ?? return abort("verify-full: `{cache}` cannot be created: {err}")
-        &state.env.push(Setting{name: "JET_NATIVE_TRACE_NODE", value: process.which("node") ?? "node"})
-        &state.env.push(Setting{name: "JET_NATIVE_TRACE_CACHE_ROOT", value: cache})
+        state.env.push(Setting{name: "JET_NATIVE_TRACE_NODE", value: process.which("node") ?? "node"})
+        state.env.push(Setting{name: "JET_NATIVE_TRACE_CACHE_ROOT", value: cache})
     }
 
     suites: shard_suites(state)
@@ -147,9 +147,9 @@ run: fn() {
         [String]{"core-module-check", binary, "CoreModuleCheck.jet", "--check"},
     }) {
         argv := [String]{gate[1], "{root}/Tools/agent/{gate[2]}"}
-        loop index in 3..<gate.len() -> &argv.push(gate[index])
-        ran: run_child(&state, gate[0], argv)
-        record(&state, ran.row)
+        loop index in 3..<gate.len() -> argv.push(gate[index])
+        ran: run_child(state, gate[0], argv)
+        record(state, ran.row)
     }
     head: state.pin ?? ""
     loop suite in suites {
@@ -157,27 +157,27 @@ run: fn() {
             // `jet test Compiler --profile <suite>` runs that corpus in process with
             // JET and JET_TEST_SCRATCH_DIR from this environment and writes its
             // case verdicts to $JET_CI_EVIDENCE_DIR/<suite>.json.
-            ran := run_child(&state, suite, [String]{binary, "test", "{root}/Compiler", "--profile", suite, "--color=never"})
-            if ran.row.status == "PASS" -> testkit_verdict(&ran.row, "{evidence}/{suite}.json", binary, suite)
-            record(&state, ran.row)
+            ran := run_child(state, suite, [String]{binary, "test", "{root}/Compiler", "--profile", suite, "--color=never"})
+            if ran.row.status == "PASS" -> testkit_verdict(ran.row, "{evidence}/{suite}.json", binary, suite)
+            record(state, ran.row)
             next
         }
         output: "{scratch}/registries"
         manifest: "{output}/manifest.json"
-        listed := run_child(&state, "registry-manifest", [String]{binary, "{root}/Tools/agent/CompilerRegistries.jet", "manifest", head, "--out", output})
-        if listed.row.status == "PASS" -> registry_verdict(&listed.row, manifest, None, head, root, binary)
+        listed := run_child(state, "registry-manifest", [String]{binary, "{root}/Tools/agent/CompilerRegistries.jet", "manifest", head, "--out", output})
+        if listed.row.status == "PASS" -> registry_verdict(listed.row, manifest, None, head, root, binary)
         passed: listed.row.status == "PASS"
-        record(&state, listed.row)
+        record(state, listed.row)
         if !passed {
-            record(&state, blocked_row("registries", "prerequisite registry-manifest did not pass", "{evidence}/registries.log"))
+            record(state, blocked_row("registries", "prerequisite registry-manifest did not pass", "{evidence}/registries.log"))
             next
         }
         receipt: "{evidence}/registries.json"
-        ran := run_child(&state, "registries", [String]{binary, "{root}/Tools/agent/CompilerRegistries.jet", "run", "--jet", binary, "--manifest", manifest, "--receipt", receipt})
-        if ran.row.status == "PASS" -> registry_verdict(&ran.row, manifest, Val(receipt), head, root, binary)
-        record(&state, ran.row)
+        ran := run_child(state, "registries", [String]{binary, "{root}/Tools/agent/CompilerRegistries.jet", "run", "--jet", binary, "--manifest", manifest, "--receipt", receipt})
+        if ran.row.status == "PASS" -> registry_verdict(ran.row, manifest, Val(receipt), head, root, binary)
+        record(state, ran.row)
     }
-    check_pin(&state, "source-integrity-after")
+    check_pin(state, "source-integrity-after")
     verdict: if all_pass(state.rows) -> "PASS" else -> "FAIL"
     term.eprint("verify-full: {verdict}; complete evidence: {evidence}/verify-full-summary.tsv")
     process.exit(if verdict == "PASS" -> 0 else -> 1)
@@ -238,7 +238,7 @@ all_pass: fn(rows: [Row]) -> Bool Never! {
 }
 
 record: fn(state: &Verify, row: Row) -[FS, Exec, IO]> () {
-    &state.rows.push(row)
+    state.rows.push(row)
     publish(state)
 }
 
@@ -292,9 +292,9 @@ pin_source: fn(state: &Verify) -[Env, Exec, FS, IO, Time, Time.Wait]> Bool Never
     if head.code != 0 || head.signal != None -> return abort("verify-full: cannot pin full verification source: {head.errors.trim_end()}")
     commit: head.output.trim()
     state.pin = Val(commit.copy())
-    export: run_child(&state, "source-export", [String]{state.binary, "{state.repo}/Tools/agent/ProofSource.jet", commit, state.repo})
+    export: run_child(state, "source-export", [String]{state.binary, "{state.repo}/Tools/agent/ProofSource.jet", commit, state.repo})
     passed: export.row.status == "PASS"
-    record(&state, export.row)
+    record(state, export.row)
     if passed -> state.repo = export.output.trim().copy()
     passed
 }
@@ -309,7 +309,7 @@ shard_suites: fn(state: Verify) -[Env, Exec, FS, IO, Time, Time.Wait]> [String] 
     loop line in receipt.output.split("\n") {
         if line == "" -> next
         if !SUITES.contains(line) || suites.contains(line) -> return abort("verify-full: invalid native suite inventory row `{line}`")
-        &suites.push(line.copy())
+        suites.push(line.copy())
     }
     if suites.len() == 0 -> return abort("verify-full: empty native suite inventory")
     suites
@@ -329,7 +329,7 @@ check_pin: fn(state: &Verify, scope: String) -[FS, Exec, IO]> Bool Never! {
     }
     files.write(log, text) ?? return abort("verify-full: `{log}` cannot be written: {err}")
     passed: row.status == "PASS"
-    record(&state, row)
+    record(state, row)
     passed
 }
 
@@ -367,8 +367,8 @@ executable: fn(mode: Int) -> Bool Never! {
 // Git's blob id: sha1 of `blob <length>\0<bytes>`.
 blob_hash: fn(bytes: [U8]) -> String Never! {
     framed := "blob {bytes.len()}".bytes()
-    &framed.push(U8{0})
-    &framed.extend(bytes)
+    framed.push(U8{0})
+    framed.extend(bytes)
     crypto.sha1(framed)
 }
 
@@ -387,10 +387,10 @@ fail_row: fn(row: &Row, reason: String) Never! {
 // A testkit suite passes only when its report names this compiler and every
 // case of that suite is PASS.
 testkit_verdict: fn(row: &Row, report: String, binary: String, suite: String) -[FS]> () {
-    tree: read_document(report) ?? return fail_row(&row, "testkit report `{report}` is missing or not JSON")
+    tree: read_document(report) ?? return fail_row(row, "testkit report `{report}` is missing or not JSON")
     results: array_field(tree, "results")
     if text_field(tree, "jet") != binary || results.len() == 0 || results.any(result -> text_field(result, "status") != "PASS" || text_field(result, "suite") != suite) {
-        return fail_row(&row, "missing, skipped, refused, wrong-suite or non-PASS testkit case verdict")
+        return fail_row(row, "missing, skipped, refused, wrong-suite or non-PASS testkit case verdict")
     }
     row.total = Val(results.len())
     row.passed = Val(results.len())
@@ -399,24 +399,24 @@ testkit_verdict: fn(row: &Row, report: String, binary: String, suite: String) -[
 // The registry manifest must be pinned to this source and complete; the run
 // receipt, when given, must pass every manifest entry with this compiler.
 registry_verdict: fn(row: &Row, manifest_path: String, receipt_path: String?, head: String, root: String, binary: String) -[FS]> () {
-    manifest: read_document(manifest_path) ?? return fail_row(&row, "registry manifest `{manifest_path}` is missing or not JSON")
+    manifest: read_document(manifest_path) ?? return fail_row(row, "registry manifest `{manifest_path}` is missing or not JSON")
     entries: array_field(manifest, "entries")
     complete: if field(manifest, "completeCompilerRegistries") == .Bool(flag) -> flag else -> false
     if text_field(manifest, "head") != head || text_field(manifest, "repo") != root || !complete || entries.len() == 0 || entries.any(entry -> text_field(entry, "status") == "BLOCKED") {
-        return fail_row(&row, "registry manifest is missing, unpinned, incomplete or BLOCKED")
+        return fail_row(row, "registry manifest is missing, unpinned, incomplete or BLOCKED")
     }
     ids := [String]{}
     loop entry in entries {
         id: text_field(entry, "id")
-        if ids.contains(id) -> return fail_row(&row, "duplicate registry manifest entries")
-        &ids.push(id.copy())
+        if ids.contains(id) -> return fail_row(row, "duplicate registry manifest entries")
+        ids.push(id.copy())
     }
     count: ids.len()
     path: receipt_path ?? {
         row.total = Val(count)
         return
     }
-    receipt: read_document(path) ?? return fail_row(&row, "registry receipt `{path}` is missing or not JSON")
+    receipt: read_document(path) ?? return fail_row(row, "registry receipt `{path}` is missing or not JSON")
     ran: array_field(receipt, "entries")
     // Same length, each receipt id a distinct manifest id: the same id set.
     ran_ids := [String]{}
@@ -424,12 +424,12 @@ registry_verdict: fn(row: &Row, manifest_path: String, receipt_path: String?, he
     loop entry in ran {
         id: text_field(entry, "id")
         if !ids.contains(id) || ran_ids.contains(id) -> same_ids = false
-        &ran_ids.push(id.copy())
+        ran_ids.push(id.copy())
     }
     if text_field(receipt, "status") != "PASS" || text_field(receipt, "head") != head || text_field(receipt, "jet") != binary
         || int_field(receipt, "total") != Val(count) || int_field(receipt, "passed") != Val(count) || int_field(receipt, "blocked") != Val(0) || int_field(receipt, "failed") != Val(0)
         || ran.len() != count || ran.any(entry -> text_field(entry, "status") != "PASS") || !same_ids {
-        return fail_row(&row, "registry receipt has missing, unpinned, blocked, failed or non-PASS entries")
+        return fail_row(row, "registry receipt has missing, unpinned, blocked, failed or non-PASS entries")
     }
     row.total = Val(count)
     row.passed = Val(count)
@@ -487,7 +487,7 @@ publish: fn(state: Verify) -[FS, Exec, IO]> () {
     loop row in state.rows {
         code: if row.code == .Val(number) -> "{number}" else -> "-"
         summary = "{summary}{row.status}\t{row.scope}\t{code}\t{row.reason ?? "-"}\t{row.log}\t{row.scope}\n"
-        &rows.push(row_tree(row))
+        rows.push(row_tree(row))
     }
     head: if state.pin == .Val(commit) -> Dyn.Text(commit.copy()) else -> Dyn.Null
     receipt: Dyn.Object([String: Dyn]{
@@ -537,7 +537,7 @@ fixture_tree: fn(tree: String, runner: String, export: String) -[FS]> [String] {
     paths := [String]{}
     loop item in written {
         fixture_put(tree, item.path, item.text)
-        &paths.push(item.path.copy())
+        paths.push(item.path.copy())
     }
     paths
 }
@@ -577,7 +577,7 @@ fixture_checkout: fn() -[FS, Env]> String {
         listed := [Dyn]{}
         loop path in tracked {
             bytes: files.read_bytes("{pinned}/{path}") ?? panic("fixture bytes: {err}")
-            &listed.push(Dyn.Object([String: Dyn]{"path": Dyn.Text(path.copy()), "mode": Dyn.Text("100755"), "blob": Dyn.Text(blob_hash(bytes))}))
+            listed.push(Dyn.Object([String: Dyn]{"path": Dyn.Text(path.copy()), "mode": Dyn.Text("100755"), "blob": Dyn.Text(blob_hash(bytes))}))
         }
         manifest: Dyn.Object([String: Dyn]{"schema": Dyn.Text(SOURCE_SCHEMA), "commit": Dyn.Text(FIXTURE_COMMIT), "files": Dyn.Array(listed.copy())})
         files.write("{container}/pinned/source.manifest.json", json.dumps(manifest) ?? panic("manifest")) ?? panic("fixture manifest: {err}")

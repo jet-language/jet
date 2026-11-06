@@ -161,7 +161,7 @@ pkg_cffi_automatic_operation: fn(name: String, source: String) -> BindingOperati
     if declaration.split_once(call) == .Val(parts) {
         if parts.after.split_once(")") == .Val(closing) {
             parameters := [String]{}
-            loop parameter in closing.before.split(",") -> &parameters.push(parameter.trim())
+            loop parameter in closing.before.split(",") -> parameters.push(parameter.trim())
             pointer := String?{None}
             count := String?{None}
             loop parameter in parameters {
@@ -218,14 +218,14 @@ pkg_cffi_record_obligation_marker: fn(contract: &ForeignBoundaryContract, line: 
                 assumptions = [String]{}
                 loop item in value.split("|") {
                     trimmed: item.trim()
-                    if trimmed != "" -> &assumptions.push(trimmed)
+                    if trimmed != "" -> assumptions.push(trimmed)
                 }
             }
             else -> {}
         }
     }
     name: obligation ?? return Err(pkg_bridge_error("an obligation marker needs `name=`"))
-    &contract.set_obligation(name, basis, checker, assumptions)
+    contract.set_obligation(name, basis, checker, assumptions)
 }
 
 // The binder's boundary with header coverage and the header's declared
@@ -235,7 +235,7 @@ pkg_cffi_annotated_contract: fn(contract: ForeignBoundaryContract, source: Strin
     annotated := contract.with_artifact_coverage(coverage)
     loop line in pkg_bridge_text_lines(source) {
         parts: line.split_once("jet-ffi-obligation:") ?? next
-        pkg_cffi_record_obligation_marker(&annotated, parts.after.trim())
+        pkg_cffi_record_obligation_marker(annotated, parts.after.trim())
     }
     annotated.validate()
     Ok(annotated)
@@ -247,13 +247,13 @@ pkg_cffi_automatic_header_facade_from_result: fn(header_source: String, header_p
     contract: pkg_cffi_annotated_contract(generated.boundary, header_source, header_path)
     inputs: BindingInputs.new(pkg_bridge_foreign_host_target(), "jet-bindgen-v1", "{header_path}:sha256-{pkg_sha256_hex(header_source.bytes())}").with_dependencies([String]{}).with_compiler_flags([String]{})
     names := generated.bound
-    &names.sort()
+    names.sort()
     facade := ""
     planned := [String]{}
     loop name in names {
         if planned.contains(name) -> next
         plan: BindingPlan.resolve(contract, pkg_cffi_automatic_operation(name, header_source), inputs, BindingShape.Automatic) ?? next
-        &planned.push(name)
+        planned.push(name)
         facade = "{facade}{plan.render_facade()}\n"
     }
     if planned.len() == 0 -> return Ok(None)
@@ -379,14 +379,14 @@ pkg_cffi_collect_binding_metadata: fn(metadata: &CBindingMetadata, cache: String
     if pkg_cffi_read_binding_metadata(cache, lib) == {
         .Ok(found) -> {
             if found == .Val(cache_metadata) {
-                loop fact in cache_metadata.handle_facts -> &metadata.add_handle(fact)
-                &metadata.add_closure(cache_metadata.link_closure)
+                loop fact in cache_metadata.handle_facts -> metadata.add_handle(fact)
+                metadata.add_closure(cache_metadata.link_closure)
             } else {
-                &metadata.add_closure(FFILinkClosure.new([String]{lib}, [String]{}))
+                metadata.add_closure(FFILinkClosure.new([String]{lib}, [String]{}))
             }
         }
         .Err(error) -> {
-            &diagnostics.push(pkg_cffi_e3208(pkg_cffi_binding_metadata_path(cache), lib, error.message))
+            diagnostics.push(pkg_cffi_e3208(pkg_cffi_binding_metadata_path(cache), lib, error.message))
         }
     }
 }
@@ -414,10 +414,10 @@ pkg_cffi_check_cache_descriptor: fn(source: String, path: String, lib: String) -
 // Queue one generated source for the loader after its descriptor check.
 pkg_cffi_queue_load: fn(preparation: &CBindingPreparation, source: String, path: String, lib: String) Never! {
     if pkg_cffi_check_cache_descriptor(source, path, lib) == .Val(diagnostic) {
-        &preparation.diagnostics.push(diagnostic)
+        preparation.diagnostics.push(diagnostic)
         return
     }
-    &preparation.loads.push(CBindingLoad{path: path, lib: lib, source: source})
+    preparation.loads.push(CBindingLoad{path: path, lib: lib, source: source})
 }
 
 // Discover, generate, and refresh the binding caches of every C library the
@@ -428,7 +428,7 @@ pkg_cffi_prepare_binding_caches: fn(project_root: String, imports: [CBindingImpo
     libs := [String]{}
     headers := [String: String]{}
     loop import in imports {
-        if !libs.contains(import.lib) -> &libs.push(import.lib)
+        if !libs.contains(import.lib) -> libs.push(import.lib)
         if import.header == .Val(header) {
             if !headers.has_key(import.lib) -> headers[import.lib] = header
         }
@@ -439,10 +439,10 @@ pkg_cffi_prepare_binding_caches: fn(project_root: String, imports: [CBindingImpo
         request: CBindingRequest{project_root: project_root, lib: lib, header_path: headers.get(lib), overlay: overlay, overlay_supplied: overlays.has_key(lib), entry: entry, frozen: frozen}
         cache_path: pkg_cffi_binding_cache_file(project_root, ForeignLanguage.C, lib)
         if loaded_paths.contains(cache_path) {
-            if pkg_cffi_prepare_loaded_cache(request, cache_path, &preparation) == .Err(error) -> &preparation.diagnostics.push(pkg_cffi_e3208(cache_path, lib, error.message))
+            if pkg_cffi_prepare_loaded_cache(request, cache_path, preparation) == .Err(error) -> preparation.diagnostics.push(pkg_cffi_e3208(cache_path, lib, error.message))
             next
         }
-        pkg_cffi_prepare_cache(request, cache_path, &preparation)
+        pkg_cffi_prepare_cache(request, cache_path, preparation)
     }
     preparation
 }
@@ -482,7 +482,7 @@ pkg_cffi_select_facade: fn(request: CBindingRequest, source: String, header_sour
     recorded: pkg_cffi_binding_plan_facade(request.project_root, request.lib, header_source, expected_boundary, request.frozen)
     if recorded == .Val(facade) {
         checked := source
-        pkg_cffi_append_binding_plan_facade(&checked, facade)
+        pkg_cffi_append_binding_plan_facade(checked, facade)
         if source.contains("// jet-ffi-plan=") -> return Ok(None)
         return Ok(Val(facade))
     }
@@ -497,8 +497,8 @@ pkg_cffi_prepare_loaded_cache: fn(request: CBindingRequest, cache_path: String, 
     header_source: pkg_cffi_read_header(request)
     expected_boundary: pkg_cffi_expected_boundary(request, source, header_source)
     facade: pkg_cffi_select_facade(request, source, header_source, expected_boundary)
-    if facade == .Val(text) -> pkg_cffi_queue_load(&preparation, text, pkg_cffi_sidecar(cache_path, "adapted.jet"), request.lib)
-    pkg_cffi_collect_binding_metadata(&preparation.metadata, cache_path, request.lib, &preparation.diagnostics)
+    if facade == .Val(text) -> pkg_cffi_queue_load(preparation, text, pkg_cffi_sidecar(cache_path, "adapted.jet"), request.lib)
+    pkg_cffi_collect_binding_metadata(preparation.metadata, cache_path, request.lib, preparation.diagnostics)
 }
 
 // Generate a missing or stale cache from its header, or load a present,
@@ -512,7 +512,7 @@ pkg_cffi_prepare_cache: fn(request: CBindingRequest, cache_path: String, prepara
         if files.read(pkg_cffi_resolve_header_path(header_path, request.project_root)) == {
             .Ok(source) -> header_source = Val(source)
             .Err(error) -> {
-                &preparation.diagnostics.push(pkg_cffi_e3208(header_path, lib, "the header file could not be read ({error})."))
+                preparation.diagnostics.push(pkg_cffi_e3208(header_path, lib, "the header file could not be read ({error})."))
                 return
             }
         }
@@ -529,14 +529,14 @@ pkg_cffi_prepare_cache: fn(request: CBindingRequest, cache_path: String, prepara
     if !files.is_file(cache_path) || need_rebind {
         header_path: request.header_path ?? {
             // No header: load an existing headerless cache as-is.
-            if files.is_file(cache_path) -> pkg_cffi_load_headerless_cache(request, cache_path, &preparation)
+            if files.is_file(cache_path) -> pkg_cffi_load_headerless_cache(request, cache_path, preparation)
             return
         }
         header: header_source ?? panic("header path was collected")
-        pkg_cffi_generate_cache(request, cache_path, header_path, header, &preparation)
+        pkg_cffi_generate_cache(request, cache_path, header_path, header, preparation)
         return
     }
-    pkg_cffi_load_fresh_cache(request, cache_path, header_source, &preparation)
+    pkg_cffi_load_fresh_cache(request, cache_path, header_source, preparation)
 }
 
 pkg_cffi_load_headerless_cache: fn(request: CBindingRequest, cache_path: String, preparation: &CBindingPreparation) Never! -[FS, Env]> {
@@ -546,19 +546,19 @@ pkg_cffi_load_headerless_cache: fn(request: CBindingRequest, cache_path: String,
     if pkg_cffi_binding_plan_facade(request.project_root, request.lib, None, expected_boundary, request.frozen) == {
         .Ok(selected) -> {
             if selected == .Val(facade) {
-                if pkg_cffi_append_binding_plan_facade(&source, facade) == .Err(error) {
-                    &preparation.diagnostics.push(pkg_cffi_e3208(cache_path, request.lib, error.message))
+                if pkg_cffi_append_binding_plan_facade(source, facade) == .Err(error) {
+                    preparation.diagnostics.push(pkg_cffi_e3208(cache_path, request.lib, error.message))
                     return
                 }
             }
         }
         .Err(error) -> {
-            &preparation.diagnostics.push(pkg_cffi_e3208(cache_path, request.lib, error.message))
+            preparation.diagnostics.push(pkg_cffi_e3208(cache_path, request.lib, error.message))
             return
         }
     }
-    pkg_cffi_queue_load(&preparation, source, cache_path, request.lib)
-    pkg_cffi_collect_binding_metadata(&preparation.metadata, cache_path, request.lib, &preparation.diagnostics)
+    pkg_cffi_queue_load(preparation, source, cache_path, request.lib)
+    pkg_cffi_collect_binding_metadata(preparation.metadata, cache_path, request.lib, preparation.diagnostics)
 }
 
 // Run the C binder over the header and publish the cache, its hash, typed
@@ -569,43 +569,43 @@ pkg_cffi_generate_cache: fn(request: CBindingRequest, cache_path: String, header
     result: if pkg_cbind_generate_with_overlay(header, lib, request.overlay) == {
         .Ok(generated) -> generated
         .Err(error) -> {
-            &preparation.diagnostics.push(pkg_cffi_e3208(header_path, lib, "{error.message}."))
+            preparation.diagnostics.push(pkg_cffi_e3208(header_path, lib, "{error.message}."))
             return
         }
     }
     if result.handle_skipped.len() > 0 {
         details := [String]{}
-        loop skipped in result.handle_skipped -> &details.push("`{skipped.typedef_name}`: {skipped.reason}")
-        &preparation.diagnostics.push(pkg_cffi_e3208(header_path, lib, "opaque handle bindings were unresolved: {details.join("; ")}"))
+        loop skipped in result.handle_skipped -> details.push("`{skipped.typedef_name}`: {skipped.reason}")
+        preparation.diagnostics.push(pkg_cffi_e3208(header_path, lib, "opaque handle bindings were unresolved: {details.join("; ")}"))
         return
     }
     generated_source := result.source
     automatic_facade := String?{None}
-    if pkg_cffi_generated_facade(request, header_path, header, result, &generated_source) == {
+    if pkg_cffi_generated_facade(request, header_path, header, result, generated_source) == {
         .Ok(facade) -> automatic_facade = facade
         .Err(error) -> {
-            &preparation.diagnostics.push(pkg_cffi_e3208(header_path, lib, error.message))
+            preparation.diagnostics.push(pkg_cffi_e3208(header_path, lib, error.message))
             return
         }
     }
     files.create_dir_all(files.dirname(cache_path)).drop("the cache write below reports a missing directory")
     if files.write(cache_path, generated_source) == .Err(_) {
-        &preparation.diagnostics.push(pkg_cffi_e3208(header_path, lib, "could not write generated cache `{cache_path}`"))
+        preparation.diagnostics.push(pkg_cffi_e3208(header_path, lib, "could not write generated cache `{cache_path}`"))
         return
     }
     pkg_cbind_write_bind_hash(cache_path, header, "").drop("the bind hash is the quick rebind check; a missing one only forces a rebind")
     if pkg_cffi_write_c_binding_metadata(cache_path, result.handles, result.link_closure) == .Err(error) {
-        &preparation.diagnostics.push(pkg_cffi_e3208(cache_path, lib, error.message))
+        preparation.diagnostics.push(pkg_cffi_e3208(cache_path, lib, error.message))
         return
     }
-    pkg_cffi_collect_binding_metadata(&preparation.metadata, cache_path, lib, &preparation.diagnostics)
+    pkg_cffi_collect_binding_metadata(preparation.metadata, cache_path, lib, preparation.diagnostics)
     header_file: pkg_cffi_resolve_header_path(header_path, request.project_root)
     if pkg_cffi_write_c_binding_provenance_with_boundary(request.project_root, lib, header_file, cache_path, request.entry, Val(result.boundary)) == .Err(error) {
-        &preparation.diagnostics.push(pkg_cffi_e3208(header_path, lib, error.message))
+        preparation.diagnostics.push(pkg_cffi_e3208(header_path, lib, error.message))
         return
     }
-    pkg_cffi_queue_load(&preparation, generated_source, cache_path, lib)
-    if automatic_facade == .Val(facade) -> pkg_cffi_queue_load(&preparation, facade, pkg_cffi_sidecar(cache_path, "adapted.jet"), lib)
+    pkg_cffi_queue_load(preparation, generated_source, cache_path, lib)
+    if automatic_facade == .Val(facade) -> pkg_cffi_queue_load(preparation, facade, pkg_cffi_sidecar(cache_path, "adapted.jet"), lib)
 }
 
 // The recorded facade appended to a newly generated cache, or the automatic
@@ -615,7 +615,7 @@ pkg_cffi_generated_facade: fn(request: CBindingRequest, header_path: String, hea
     expected_boundary: contract.digest()
     recorded: pkg_cffi_binding_plan_facade(request.project_root, request.lib, Val(header), Val(expected_boundary), request.frozen)
     if recorded == .Val(facade) {
-        pkg_cffi_append_binding_plan_facade(&generated_source, facade)
+        pkg_cffi_append_binding_plan_facade(generated_source, facade)
         return Ok(None)
     }
     pkg_cffi_automatic_header_facade_from_result(header, header_path, result)
@@ -630,29 +630,29 @@ pkg_cffi_load_fresh_cache: fn(request: CBindingRequest, cache_path: String, head
         if !files.is_file(pkg_cffi_sidecar(cache_path, "provenance")) {
             header_file: pkg_cffi_resolve_header_path(header_path, request.project_root)
             if pkg_cffi_write_c_binding_provenance_with_entry(request.project_root, lib, header_file, cache_path, request.entry) == .Err(error) {
-                &preparation.diagnostics.push(pkg_cffi_e3208(header_path, lib, error.message))
+                preparation.diagnostics.push(pkg_cffi_e3208(header_path, lib, error.message))
                 return
             }
         }
     }
     automatic_facade := String?{None}
-    if pkg_cffi_fresh_cache_facade(request, &source, header_source) == {
+    if pkg_cffi_fresh_cache_facade(request, source, header_source) == {
         .Ok(facade) -> automatic_facade = facade
         .Err(error) -> {
-            &preparation.diagnostics.push(pkg_cffi_e3208(cache_path, lib, error.message))
+            preparation.diagnostics.push(pkg_cffi_e3208(cache_path, lib, error.message))
             return
         }
     }
-    pkg_cffi_collect_binding_metadata(&preparation.metadata, cache_path, lib, &preparation.diagnostics)
-    pkg_cffi_queue_load(&preparation, source, cache_path, lib)
-    if automatic_facade == .Val(facade) -> pkg_cffi_queue_load(&preparation, facade, pkg_cffi_sidecar(cache_path, "adapted.jet"), lib)
+    pkg_cffi_collect_binding_metadata(preparation.metadata, cache_path, lib, preparation.diagnostics)
+    pkg_cffi_queue_load(preparation, source, cache_path, lib)
+    if automatic_facade == .Val(facade) -> pkg_cffi_queue_load(preparation, facade, pkg_cffi_sidecar(cache_path, "adapted.jet"), lib)
 }
 
 pkg_cffi_fresh_cache_facade: fn(request: CBindingRequest, source: &String, header_source: String?) -[FS, Env]> String? ForeignBridgeError! {
     expected_boundary: pkg_cffi_expected_boundary(request, source, header_source)
     recorded: pkg_cffi_binding_plan_facade(request.project_root, request.lib, header_source, expected_boundary, request.frozen)
     if recorded == .Val(facade) {
-        pkg_cffi_append_binding_plan_facade(&source, facade)
+        pkg_cffi_append_binding_plan_facade(source, facade)
         return Ok(None)
     }
     if source.contains("// jet-ffi-plan=") -> return Ok(None)

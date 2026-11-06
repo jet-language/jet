@@ -49,7 +49,7 @@ jet_cli_record_path_validate: fn(path: String) JetCLIReadError! {
     components := [String]{}
     loop (index, component) in path.split("/").to_list() {
         if component == "" || (component == "." && index > 0) -> next
-        &components.push(component)
+        components.push(component)
     }
     if components.len() < 3 || components[0] != ".jet" {
         return Err(jet_cli_read_error("record index path must stay under `.jet/<artifact-kind>`"))
@@ -71,7 +71,7 @@ jet_cli_record_link_order: fn(left: JetCLIRecordLink, right: JetCLIRecordLink) -
 jet_cli_record_links_sort: fn(links: [JetCLIRecordLink], field: String) -> [JetCLIRecordLink] JetCLIReadError! {
     normalized := links
     normalized = loop fresh_item in normalized -> fresh_item
-    &normalized.sort_by(jet_cli_record_link_order)
+    normalized.sort_by(jet_cli_record_link_order)
     loop index in 1..<normalized.len() {
         left: normalized[index - 1]
         right: normalized[index]
@@ -156,7 +156,7 @@ jet_cli_record_links_parse: fn(value: JetCLIStatusValue, field: String) -> [JetC
         _: jet_cli_record_kind_rank(kind)
         link: JetCLIRecordLink{kind: kind, artifact_id: jet_cli_record_string(item, "artifact_id")}
         jet_cli_record_link_validate(link)
-        &links.push(link)
+        links.push(link)
     }
     jet_cli_record_links_sort(links, field)
 }
@@ -227,7 +227,7 @@ jet_cli_record_entry_is_disposable: fn(entry: JetCLIRecordIndexEntry) -> Bool Ne
     normalized := [String]{}
     loop component in components {
         if component == "" || component == "." -> next
-        &normalized.push(component)
+        normalized.push(component)
     }
     path: normalized.join("/")
     return path == prefix || path.starts_with("{prefix}/")

@@ -73,10 +73,10 @@ pkg_bridge_bool_text: fn(value: Bool) -> String Never! {
 // The capability rows that follow every appended boundary row.
 pkg_bridge_append_capability_lines: fn(text: &String, language: ForeignLanguage) ForeignBridgeError! {
     capability: pkg_foreign_boundary_capability(language)
-    pkg_bridge_append_line(&text, "boundary-mixed-debug", pkg_bridge_bool_text(capability.mixed_debug))
-    pkg_bridge_append_line(&text, "boundary-native-export", pkg_bridge_bool_text(capability.native_export))
-    pkg_bridge_append_line(&text, "boundary-build-host", pkg_bridge_bool_text(capability.build_host))
-    pkg_bridge_append_line(&text, "boundary-reason", capability.reason)
+    pkg_bridge_append_line(text, "boundary-mixed-debug", pkg_bridge_bool_text(capability.mixed_debug))
+    pkg_bridge_append_line(text, "boundary-native-export", pkg_bridge_bool_text(capability.native_export))
+    pkg_bridge_append_line(text, "boundary-build-host", pkg_bridge_bool_text(capability.build_host))
+    pkg_bridge_append_line(text, "boundary-reason", capability.reason)
 }
 
 // Render the common queryable provenance format without publishing a file.
@@ -91,7 +91,7 @@ pkg_bridge_render_provenance: fn(identity: String, fields: [(name: String, value
     language := ForeignLanguage?{None}
     if pkg_bridge_field_value(fields, "language") == .Val(root) -> language = ForeignLanguage.from_root(root)
     if has_boundary_fields -> language = None
-    loop field in fields -> pkg_bridge_append_line(&text, field.name, field.value)
+    loop field in fields -> pkg_bridge_append_line(text, field.name, field.value)
     if language == .Val(boundary_language) {
         abi_library := String?{None}
         if pkg_bridge_field_value(fields, "abi") == .Val(abi) {
@@ -101,7 +101,7 @@ pkg_bridge_render_provenance: fn(identity: String, fields: [(name: String, value
         }
         library: pkg_bridge_field_value(fields, "library") ?? (pkg_bridge_field_value(fields, "lib") ?? (abi_library ?? "not-recorded"))
         artifact_rows := [String]{}
-        loop artifact in artifacts -> &artifact_rows.push("{artifact.name}:sha256-{artifact.digest}")
+        loop artifact in artifacts -> artifact_rows.push("{artifact.name}:sha256-{artifact.digest}")
         loaded_artifact: artifact_rows.join("|")
         source: pkg_bridge_field_value(fields, "source") ?? (pkg_bridge_field_value(fields, "source_path") ?? (pkg_bridge_field_value(fields, "type-library") ?? "not-recorded"))
         overlay: pkg_bridge_field_value(fields, "overlay") ?? (pkg_bridge_field_value(fields, "overlay-identity") ?? "none")
@@ -113,10 +113,10 @@ pkg_bridge_render_provenance: fn(identity: String, fields: [(name: String, value
         descriptor: pkg_binder_descriptor(boundary_language) ?? return Err(pkg_bridge_error("missing binder descriptor for {boundary_language.debug_name()}"))
         loaded: if loaded_artifact == "" -> "not-recorded" else -> loaded_artifact
         boundary: ForeignBoundaryContract.new(descriptor, library, ForeignBoundaryIdentity.new(source, overlay, generator, implementation, toolchain, target)).with_artifact_coverage(ForeignArtifactCoverage.new(loaded, target, generator))
-        loop field in boundary.provenance_fields() -> pkg_bridge_append_line(&text, field.name, field.value)
-        pkg_bridge_append_capability_lines(&text, boundary_language)
+        loop field in boundary.provenance_fields() -> pkg_bridge_append_line(text, field.name, field.value)
+        pkg_bridge_append_capability_lines(text, boundary_language)
     }
-    loop artifact in artifacts -> pkg_bridge_append_line(&text, "artifact.{artifact.name}", artifact.digest)
+    loop artifact in artifacts -> pkg_bridge_append_line(text, "artifact.{artifact.name}", artifact.digest)
     Ok(text)
 }
 
@@ -140,8 +140,8 @@ pkg_bridge_append_boundary_provenance: fn(text: &String, descriptor: BinderDescr
     }
     if !text.ends_with("\n") -> text = "{text}\n"
     boundary: ForeignBoundaryContract.new(descriptor, library, identity).with_artifact_coverage(coverage)
-    loop field in boundary.provenance_fields() -> pkg_bridge_append_line(&text, field.name, field.value)
-    pkg_bridge_append_capability_lines(&text, descriptor.language)
+    loop field in boundary.provenance_fields() -> pkg_bridge_append_line(text, field.name, field.value)
+    pkg_bridge_append_capability_lines(text, descriptor.language)
 }
 
 // Append a boundary for an adapter that publishes a legacy text record.
@@ -151,7 +151,7 @@ pkg_bridge_append_boundary_for_artifact: fn(text: &String, descriptor: BinderDes
     archive_name: bridge_core_files.basename(archive)
     if archive_name == "" -> return Err(pkg_bridge_error("foreign artifact path has no file name"))
     target: pkg_bridge_foreign_host_target()
-    pkg_bridge_append_boundary_provenance(&text, descriptor, library, ForeignBoundaryIdentity.new("source:{source}:sha256-{source_digest}", "none", descriptor.stamp(), "archive:{archive_name}:sha256-{archive_digest}", toolchain, target), ForeignArtifactCoverage.new("{archive_name}:sha256-{archive_digest}", target, descriptor.stamp()))
+    pkg_bridge_append_boundary_provenance(text, descriptor, library, ForeignBoundaryIdentity.new("source:{source}:sha256-{source_digest}", "none", descriptor.stamp(), "archive:{archive_name}:sha256-{archive_digest}", toolchain, target), ForeignArtifactCoverage.new("{archive_name}:sha256-{archive_digest}", target, descriptor.stamp()))
 }
 
 // The parsed schema, optional identity, and repeated fields of a sidecar.
@@ -180,7 +180,7 @@ pkg_bridge_parse_provenance: fn(path: String) -[FS]> ForeignProvenanceText Forei
             }
             else -> {
                 values := fields.get(parts.before) ?? [String]{}
-                &values.push(parts.after)
+                values.push(parts.after)
                 fields[parts.before] = values
             }
         }
@@ -194,8 +194,8 @@ pkg_bridge_parse_provenance: fn(path: String) -[FS]> ForeignProvenanceText Forei
 pkg_bridge_text_lines: fn(text: String) -> [String] Never! {
     carriage_return: String.from_bytes([U8]{U8{13}}) ?? ""
     lines := [String]{}
-    loop line in text.split("\n") -> &lines.push(line.removesuffix(carriage_return))
-    if lines.len() > 0 && lines[lines.len() - 1] == "" -> _ := &lines.pop()
+    loop line in text.split("\n") -> lines.push(line.removesuffix(carriage_return))
+    if lines.len() > 0 && lines[lines.len() - 1] == "" -> _ := lines.pop()
     lines
 }
 
@@ -241,14 +241,14 @@ pkg_bridge_local_archive_inputs: fn(library_dirs: [String], libraries: [String])
             .Ok(value) -> Val(value)
             .Err(_) -> None
         }
-        &inputs.push(ArchiveInput{library: library, path: canonical, bytes: bytes})
+        inputs.push(ArchiveInput{library: library, path: canonical, bytes: bytes})
     }
     inputs
 }
 
 // Add local archive path/byte records to a binding identity.
 pkg_bridge_add_local_archive_inputs: fn(identity: &ForeignIdentityBuilder, library_dirs: [String], libraries: [String]) -[FS, Env]> {
-    pkg_bridge_add_archive_inputs(&identity, pkg_bridge_local_archive_inputs(library_dirs, libraries))
+    pkg_bridge_add_archive_inputs(identity, pkg_bridge_local_archive_inputs(library_dirs, libraries))
 }
 
 // Add already-resolved archive records to an identity. Callers with a
@@ -256,14 +256,14 @@ pkg_bridge_add_local_archive_inputs: fn(identity: &ForeignIdentityBuilder, libra
 // missing candidates for system or provisioned dependencies.
 pkg_bridge_add_archive_inputs: fn(identity: &ForeignIdentityBuilder, inputs: [ArchiveInput]) Never! {
     loop input in inputs {
-        &identity.field("linked_library", input.library.bytes())
-        &identity.field("linked_archive_path", input.path.bytes())
+        identity.field("linked_library", input.library.bytes())
+        identity.field("linked_archive_path", input.path.bytes())
         if input.bytes == {
             .Val(bytes) -> {
-                &identity.field("linked_archive_bytes", bytes)
+                identity.field("linked_archive_bytes", bytes)
             }
             .None -> {
-                &identity.field("linked_archive_missing", "true".bytes())
+                identity.field("linked_archive_missing", "true".bytes())
             }
         }
     }
@@ -296,7 +296,7 @@ pkg_bridge_tool_identity: fn(tool: String) -[FS, Env, Exec, Time.Wait]> String N
             rows := [String]{}
             loop line in pkg_bridge_text_lines("{receipt.output}{receipt.errors}") {
                 trimmed: line.trim()
-                if trimmed != "" -> &rows.push(trimmed)
+                if trimmed != "" -> rows.push(trimmed)
             }
             joined: rows.join(" | ")
             if joined != "" -> version = joined

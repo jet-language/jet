@@ -1,13 +1,13 @@
 // The deferred payload must consume its real branch state before the join
 // and before scope-end obligations: every Ticket is used on both paths.
 #SingleUse Ticket: struct { message: String }
-ticket_message: fn(ticket: ^Ticket) -> String { return ticket.message.copy() }
-ticket_payload: fn(ticket: ^Ticket) -> (value: Int, tag: Int) Err! {
-    message: ticket_message(^ticket)
+ticket_message: fn(ticket: &&Ticket) -> String { return ticket.message.copy() }
+ticket_payload: fn(ticket: &&Ticket) -> (value: Int, tag: Int) Err! {
+    message: ticket_message(ticket)
     return Ok((value: message.len(), tag: 0))
 }
-outer_ticket: fn(flag: Bool, ticket: ^Ticket) -> Int {
-    result: if flag -> Err(ticket_message(^ticket)) else -> ticket_payload(^ticket)
+outer_ticket: fn(flag: Bool, ticket: &&Ticket) -> Int {
+    result: if flag -> Err(ticket_message(ticket)) else -> ticket_payload(ticket)
     if result == {
         .Ok(payload) -> payload.value
         .Err(error) -> 0
@@ -16,10 +16,10 @@ outer_ticket: fn(flag: Bool, ticket: ^Ticket) -> Int {
 local_ticket: fn(flag: Bool) -> Int {
     result: if flag -> {
         ticket: Ticket{message: "bad"}
-        Err(ticket_message(^ticket))
+        Err(ticket_message(ticket))
     } else -> {
         ticket: Ticket{message: "good"}
-        ticket_payload(^ticket)
+        ticket_payload(ticket)
     }
     if result == {
         .Ok(payload) -> payload.value
@@ -27,14 +27,14 @@ local_ticket: fn(flag: Bool) -> Int {
     }
 }
 // Coverage and each arm must share the one checked taking call.
-counted_ticket_payload: fn(ticket: ^Ticket, calls: &Int) -> (value: Int, tag: Int) Err! {
+counted_ticket_payload: fn(ticket: &&Ticket, calls: &Int) -> (value: Int, tag: Int) Err! {
     calls += 1
-    ticket_payload(^ticket)
+    ticket_payload(ticket)
 }
 taking_variant_subject_once: fn() -> Int Never! {
     calls := 0
     ticket: Ticket{message: "once"}
-    value: if counted_ticket_payload(^ticket, &calls) == {
+    value: if counted_ticket_payload(ticket, calls) == {
         .Err(error) -> 0
         .Ok(payload) -> payload.value
     }
@@ -44,8 +44,8 @@ taking_variant_subject_once: fn() -> Int Never! {
 run: fn() {
     first: Ticket{message: "bad"}
     second: Ticket{message: "good"}
-    print(outer_ticket(true, ^first))
-    print(outer_ticket(false, ^second))
+    print(outer_ticket(true, first))
+    print(outer_ticket(false, second))
     print(local_ticket(true))
     print(local_ticket(false))
     _ := taking_variant_subject_once()

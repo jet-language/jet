@@ -21,7 +21,7 @@ Resource: struct {
 }
 
 impl Resource.Close {
-    close: fn(^self) { print("close {self.name}") }
+    close: fn(&&self) { print("close {self.name}") }
 }
 
 #Error
@@ -39,10 +39,10 @@ stop_process: fn(code: Int) {
 
 body: fn(path: String, ready: Sender<Int>?, blocked: Receiver<Int>?) -> Int CaseFail! {
     first := Resource{name: "first"}
-    defer close(^first)
+    defer close(first)
     _guard_1: scope.guard(() -> print("guard 1"))
     second := Resource{name: "second"}
-    defer close(^second)
+    defer close(second)
     _guard_2: scope.guard(() -> print("guard 2"))
     print("body {path}")
     if path == {
@@ -62,7 +62,7 @@ body: fn(path: String, ready: Sender<Int>?, blocked: Receiver<Int>?) -> Int Case
     }
     print("after {path}")
     late := Resource{name: "late"}
-    defer close(^late)
+    defer close(late)
     _late_guard: scope.guard(() -> print("guard late"))
     Ok(1)
 }

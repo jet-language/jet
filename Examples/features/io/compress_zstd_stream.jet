@@ -29,7 +29,7 @@ expected_bytes: fn() -> [U8] {
         second: words[(i * 3) % 13]
         square: (i * i) % 1000
         line: "line {i}: {first} {second} {square}\n"
-        loop byte in line.bytes() -> &out.push(byte)
+        loop byte in line.bytes() -> out.push(byte)
     }
     out
 }
@@ -51,13 +51,13 @@ run: fn() {
     at := 0
     loop at < big.len() {
         stop: if at + 1000 < big.len() -> at + 1000 else -> big.len()
-        &decoder.feed(big[at..<stop])
+        decoder.feed(big[at..<stop])
         at = stop
         loop {
-            piece: &decoder.read(4096) ?? panic("stream")
+            piece: decoder.read(4096) ?? panic("stream")
             if piece.len() == 0 -> break
             if piece.len() > largest -> largest = piece.len()
-            loop byte in piece -> &streamed.push(byte)
+            loop byte in piece -> streamed.push(byte)
         }
     }
     decoder.finish() ?? panic("finish")
@@ -67,12 +67,12 @@ run: fn() {
     path: files.join(scratch.path, "big.zst")
     files.write_bytes(path, big)
     file: files.open(path)
-    reader := zstd.reader(^file)
+    reader := zstd.reader(file)
     from_file := [U8]{}
     loop {
-        piece: &reader.read(65536) ?? panic("reader")
+        piece: reader.read(65536) ?? panic("reader")
         if piece.len() == 0 -> break
-        loop byte in piece -> &from_file.push(byte)
+        loop byte in piece -> from_file.push(byte)
     }
     print("reader: equal {from_file == expected}")
 
@@ -83,9 +83,9 @@ run: fn() {
         .Err(error) -> print("corrupt checksum: {error == .Checksum}")
     }
     truncated := zstd.decoder()
-    &truncated.feed(big[0..<big.len() - 100])
+    truncated.feed(big[0..<big.len() - 100])
     loop {
-        piece: &truncated.read(65536) ?? panic("truncated read")
+        piece: truncated.read(65536) ?? panic("truncated read")
         if piece.len() == 0 -> break
     }
     if truncated.finish() == {

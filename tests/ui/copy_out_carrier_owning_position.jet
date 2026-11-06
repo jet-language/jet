@@ -3,7 +3,7 @@
 // pushed element each copy the caller's value.
 Res: struct { name: String }
 impl Res.Close {
-    close: fn(^self) { print("close {self.name}") }
+    close: fn(&&self) { print("close {self.name}") }
 }
 
 Slot: struct { held: Res? }
@@ -23,7 +23,7 @@ give: fn(env: Res) -> Res? {
 
 push: fn(env: Res) -> Int {
     kept := [Res?]{}
-    &kept.push(Val(env))
+    kept.push(Val(env))
     kept.len()
 }
 

@@ -7,12 +7,12 @@ use {
 }
 filled: fn(value: Int, count: Int) -> [U8] {
     out := [U8]{}
-    loop _ in 0..<count -> &out.push((U8{value}))
+    loop _ in 0..<count -> out.push((U8{value}))
     out
 }
 cut: fn(bytes: [U8], start: Int, end: Int) -> [U8] {
     out := [U8]{}
-    loop i in start..<end -> &out.push(bytes[i])
+    loop i in start..<end -> out.push(bytes[i])
     out
 }
 hex: fn(text: String) -> [U8] {
@@ -23,7 +23,7 @@ hex: fn(text: String) -> [U8] {
         b: Int.from_u8(raw[2 * i + 1])
         high: if a <= 57 -> a - 48 else -> a - 87
         low: if b <= 57 -> b - 48 else -> b - 87
-        &out.push((U8{high * 16 + low}))
+        out.push((U8{high * 16 + low}))
     }
     out
 }
@@ -37,7 +37,7 @@ store_little: fn(bytes: &[U8], at: Int, width: Int, value: Int) {
 }
 #Test("jetc_v1_expert_open_accepts_only_the_pinned_grammar") {
     key := [U8]{}
-    loop i in 0..<32 -> &key.push((U8{i}))
+    loop i in 0..<32 -> key.push((U8{i}))
     plain: "historical JETC v1".bytes()
     #Unsafe("original pinned JETC v1 migration grammar") {
         // Exact original independently pinned hex bytes, not a blessed transcript.
@@ -47,7 +47,7 @@ store_little: fn(bytes: &[U8], at: Int, width: Int, value: Int) {
                 nonce: cut(envelope, 6, 18)
                 ciphertext: expert.aes256gcm_seal(key, nonce, plain, [U8]{}) ?? panic("v1 AES")
                 generated := cut(envelope, 0, 18)
-                loop byte in ciphertext -> &generated.push(byte)
+                loop byte in ciphertext -> generated.push(byte)
                 assert_eq(generated, envelope)
             }
             assert_eq(expert.open_v1(key, envelope) ?? panic("v1 open"), plain)
@@ -60,7 +60,7 @@ store_little: fn(bytes: &[U8], at: Int, width: Int, value: Int) {
                     last: hostile.len() - 1
                     hostile[last] = (U8{Int.from_u8(hostile[last]).bit_xor(1)})
                 }
-                if mode == 4 -> &hostile.push(U8{0})
+                if mode == 4 -> hostile.push(U8{0})
                 // expert.jet609-620: all failures intentionally OpenFailed.
                 if expert.open_v1(key, hostile) == {
                     .Ok(_) -> panic("hostile v1 envelope opened")

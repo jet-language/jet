@@ -41,9 +41,9 @@ pkg_list_xattr_names: fn(path: String) -[FS]> [String] EnvelopeError! {
 pkg_semantic_xattr_names: fn(path: String) -[FS]> [String] EnvelopeError! {
     semantic := [String]{}
     loop name in pkg_list_xattr_names(path) {
-        if !pkg_is_excluded_xattr(name) -> &semantic.push(name)
+        if !pkg_is_excluded_xattr(name) -> semantic.push(name)
     }
-    &semantic.sort()
+    semantic.sort()
     Ok(semantic)
 }
 
@@ -56,7 +56,7 @@ pkg_semantic_xattr_rejection: fn(path: String, names: [String]) -> EnvelopeError
 pkg_check_xattrs: fn(path: String, allow_semantic_xattrs: Bool) EnvelopeError! -[FS]> {
     names := [String]{}
     loop name in pkg_list_xattr_names(path) {
-        if !pkg_is_excluded_xattr(name) -> &names.push(name)
+        if !pkg_is_excluded_xattr(name) -> names.push(name)
     }
     if names.len() == 0 || allow_semantic_xattrs -> return
     return Err(pkg_semantic_xattr_rejection(path, names))
@@ -70,9 +70,9 @@ pkg_encode_semantic_xattrs: fn(path: String, envelope_archive: &EnvelopeArchive,
     if !allow_semantic_xattrs -> return Err(pkg_semantic_xattr_rejection(path, names))
     loop name in names {
         value: pkg_xattr_value(path, name)
-        &envelope_archive.update([U8]{U8{88}})
-        &envelope_archive.push_bytes(name.bytes())
-        &envelope_archive.push_bytes(value)
+        envelope_archive.update([U8]{U8{88}})
+        envelope_archive.push_bytes(name.bytes())
+        envelope_archive.push_bytes(value)
     }
 }
 

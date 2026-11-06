@@ -33,14 +33,14 @@ use {
     invalid_tails: [String]{"broken-tail", "0\n", "zz\n", "80\n", "c080\n", "eda080\n", "e282\n", "f4908080\n", "41{carriage_return}\n"}
     loop tail in invalid_tails {
         bytes := prefix.copy()
-        loop byte in tail.bytes() -> &bytes.push(byte)
-        loop byte in "6c61746572\n".bytes() -> &bytes.push(byte)
+        loop byte in tail.bytes() -> bytes.push(byte)
+        loop byte in "6c61746572\n".bytes() -> bytes.push(byte)
         loaded: repl_history_load_bytes(bytes)
         assert(loaded.corrupt)
         assert_eq(loaded.entries, recovered.entries)
     }
     incomplete := prefix.copy()
-    loop byte in "41".bytes() -> &incomplete.push(byte)
+    loop byte in "41".bytes() -> incomplete.push(byte)
     unterminated: repl_history_load_bytes(incomplete)
     assert(unterminated.corrupt)
     assert_eq(unterminated.entries, recovered.entries)
@@ -74,13 +74,13 @@ use {
 
 #Test("history_trim_preserves_newest_order_and_zero_clears_loaded_rows") {
     entries := [String]{"a", "b", "c", "d"}
-    repl_history_trim(&entries, 2)
+    repl_history_trim(entries, 2)
     assert_eq(entries, [String]{"c", "d"})
-    repl_history_trim(&entries, 2)
+    repl_history_trim(entries, 2)
     assert_eq(entries, [String]{"c", "d"})
-    repl_history_trim(&entries, 10)
+    repl_history_trim(entries, 10)
     assert_eq(entries, [String]{"c", "d"})
-    repl_history_trim(&entries, 0)
+    repl_history_trim(entries, 0)
     assert(entries.is_empty())
 }
 
@@ -122,11 +122,11 @@ history_state_root_preserves_os_precedence_and_relative_xdg_refusal: fn() Never!
 // Full activation depends on H1/H2 resource definitions / #4494 bindings.
 history_session_record_search_clear_preserves_order_and_duplicates: fn() Never! -[FS, Time, Time.Wait]> {
     history := ReplHistory.fallback(3)
-    defer close(^history)
-    assert(&history.record("old") == None)
-    assert(&history.record("alpha") == None)
-    assert(&history.record("β alpha") == None)
-    assert(&history.record("alpha") == None)
+    defer close(history)
+    assert(history.record("old") == None)
+    assert(history.record("alpha") == None)
+    assert(history.record("β alpha") == None)
+    assert(history.record("alpha") == None)
     index := 0
     loop row in history.entries() {
         expected: [String]{"alpha", "β alpha", "alpha"}
@@ -141,25 +141,25 @@ history_session_record_search_clear_preserves_order_and_duplicates: fn() Never! 
     assert_eq(matches[2][0], "alpha")
     assert(history.search("ALPHA").is_empty())
     assert_eq(history.search("").len(), 3)
-    &history.clear() ?? panic("session clear")
+    history.clear() ?? panic("session clear")
     assert(history.search("").is_empty())
-    assert(&history.record("") == None)
+    assert(history.record("") == None)
     assert_eq(history.search("")[0][0], "")
 }
 
 history_zero_limit_record_is_noop_but_clear_still_clears: fn() Never! -[FS, Time, Time.Wait]> {
     history := ReplHistory.fallback(0)
-    defer close(^history)
-    assert(&history.record("not retained") == None)
+    defer close(history)
+    assert(history.record("not retained") == None)
     assert(history.search("").is_empty())
-    &history.clear() ?? panic("zero clear")
+    history.clear() ?? panic("zero clear")
     assert(history.search("").is_empty())
 }
 
 history_default_session_retains_two_thousand_newest_submissions: fn() Never! -[FS, Time, Time.Wait]> {
     history := ReplHistory.session_only()
-    defer close(^history)
-    loop index in 0..<2001 -> assert(&history.record("submission-{index}") == None)
+    defer close(history)
+    loop index in 0..<2001 -> assert(history.record("submission-{index}") == None)
     index := 1
     loop row in history.entries() {
         expected: "submission-{index}"
@@ -289,8 +289,8 @@ repl_history_two_processes_merge_and_clear_cannot_resurrect: fn() Never! -[Env, 
     writer_b: task_ref.bit_xor(second_stdin) {
         second_stdin.write_text("right_marker: 2\n:quit\n") ?? panic("right writer")
     }
-    ^writer_a.join() ?? panic("left writer join")
-    ^writer_b.join() ?? panic("right writer join")
+    writer_a.join() ?? panic("left writer join")
+    writer_b.join() ?? panic("right writer join")
     assert((first.wait() ?? panic("first wait")).success)
     assert((second.wait() ?? panic("second wait")).success)
     merged: repl_history_test_run_process(state, ":history search left_marker\n:history search right_marker\n:quit\n", None) ?? panic("merged session")

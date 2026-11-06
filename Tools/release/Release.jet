@@ -140,16 +140,16 @@ file_artifact: fn(path: String, shown: String) -[FS]> Artifact Problem! {
 tree_artifacts: fn(root: String, prefix: String, out: &[Artifact]) Never! -[FS]> {
     entries: files.list_dir(root) ?? return
     names := [String]{}
-    loop entry in entries -> &names.push(entry.name.copy())
-    &names.sort_by((left: String, right: String) -> left <=> right)
+    loop entry in entries -> names.push(entry.name.copy())
+    names.sort_by((left: String, right: String) -> left <=> right)
     loop name in names {
         path: files.join(root, name)
         shown: "{prefix}/{name}"
         if files.is_symlink(path) -> next
         if {
-            files.is_dir(path) -> tree_artifacts(path, shown, &out)
+            files.is_dir(path) -> tree_artifacts(path, shown, out)
             files.is_file(path) -> {
-                if file_artifact(path, shown) == .Ok(found) -> &out.push(found)
+                if file_artifact(path, shown) == .Ok(found) -> out.push(found)
             }
         }
     }
@@ -162,9 +162,9 @@ shipped_artifacts: fn(dir: String) -[FS]> [Artifact] Never! {
         path: files.join(dir, name)
         if !files.exists(path) -> next
         if {
-            files.is_dir(path) -> tree_artifacts(path, name, &out)
+            files.is_dir(path) -> tree_artifacts(path, name, out)
             else -> {
-                if file_artifact(path, name) == .Ok(found) -> &out.push(found)
+                if file_artifact(path, name) == .Ok(found) -> out.push(found)
             }
         }
     }
@@ -174,7 +174,7 @@ shipped_artifacts: fn(dir: String) -[FS]> [Artifact] Never! {
 // SHA256SUMS text of `artifacts`: `<sha256>  <path>` lines.
 sums_text: fn(artifacts: [Artifact]) -> String Never! {
     lines := [String]{}
-    loop artifact in artifacts -> &lines.push("{artifact.sha256}  {artifact.path}")
+    loop artifact in artifacts -> lines.push("{artifact.sha256}  {artifact.path}")
     "{lines.join("\n")}\n"
 }
 
@@ -189,9 +189,9 @@ read_release: fn(dir: String) -[FS]> Release Never! {
     admitted: files.exists(files.join(dir, "RELEASE.json"))
     release.kind = if admitted -> "admitted" else -> "build"
     required := [String]{"jet", "jet-runtime", "IDENTITY", "SHA256SUMS"}
-    if !admitted -> &required.extend([String]{"COMMIT", "SEED", "BUILD.json"})
+    if !admitted -> required.extend([String]{"COMMIT", "SEED", "BUILD.json"})
     loop name in required {
-        if !files.exists(files.join(dir, name)) -> &release.problems.push(problem(INPUT, "{dir} lacks {name}: not a publish-release.mjs build or a release-compiler.mjs release"))
+        if !files.exists(files.join(dir, name)) -> release.problems.push(problem(INPUT, "{dir} lacks {name}: not a publish-release.mjs build or a release-compiler.mjs release"))
     }
     if release.problems.len() > 0 -> return release
     release.identity = first_line(read_text(files.join(dir, "IDENTITY")) ?? "")
@@ -207,7 +207,7 @@ read_release: fn(dir: String) -[FS]> Release Never! {
     }
     if admitted {
         record: read_json(files.join(dir, "RELEASE.json")) ?? {
-            &release.problems.push(problem(ADMISSION, err.text))
+            release.problems.push(problem(ADMISSION, err.text))
             return release
         }
         release.commit = text_field(record, "commit")
@@ -223,7 +223,7 @@ read_release: fn(dir: String) -[FS]> Release Never! {
     release.commit = first_line(read_text(files.join(dir, "COMMIT")) ?? "")
     release.seed = first_line(read_text(files.join(dir, "SEED")) ?? "")
     built: read_json(files.join(dir, "BUILD.json")) ?? {
-        &release.problems.push(err)
+        release.problems.push(err)
         return release
     }
     release.target = text_field(built, "target")

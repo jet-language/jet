@@ -9,9 +9,9 @@ SemanticSymbolIndex: struct {
     entries: [SemanticSymbol]
 
     // Rust SemanticSymbolIndex::new/default.
-    new: fn(symbols: ^[SemanticSymbol]) -> SemanticSymbolIndex Never! {
-        index := SemanticSymbolIndex{entries: ^symbols}
-        &index.sort()
+    new: fn(symbols: &&[SemanticSymbol]) -> SemanticSymbolIndex Never! {
+        index := SemanticSymbolIndex{entries: symbols.move()}
+        index.sort()
         index
     }
 
@@ -31,7 +31,7 @@ SemanticSymbolIndex: struct {
     }
 
     // Rust SemanticSymbolIndex::push: replace only the first matching identity.
-    push: fn(&self, symbol: ^SemanticSymbol) Never! {
+    push: fn(&self, symbol: &&SemanticSymbol) Never! {
         slot := Int?{None}
         loop index in 0..<self.entries.len() {
             if self.entries[index].identity == symbol.identity {
@@ -40,15 +40,15 @@ SemanticSymbolIndex: struct {
             }
         }
         if slot == {
-            .Val(index) -> self.entries[index] = ^symbol
-            .None -> &self.entries.push(^symbol)
+            .Val(index) -> self.entries[index] = symbol.move()
+            .None -> self.entries.push(symbol)
         }
-        &self.sort()
+        self.sort()
     }
 
     // Rust SemanticSymbolIndex::extend; each insertion retains push semantics.
-    extend: fn(&self, symbols: ^[SemanticSymbol]) Never! {
-        loop symbol in symbols -> &self.push(^symbol)
+    extend: fn(&self, symbols: &&[SemanticSymbol]) Never! {
+        loop symbol in symbols -> self.push(symbol)
     }
 
     // Rust SemanticSymbolIndex::lookup_identity.
@@ -81,7 +81,7 @@ SemanticSymbolIndex: struct {
         matches := [View<SemanticSymbol>]{}
         loop index in 0..<self.entries.len() {
             symbol: self.entries[index]
-            if symbol.name == name || symbol.qualified_name == name -> &matches.push(self.window(index))
+            if symbol.name == name || symbol.qualified_name == name -> matches.push(self.window(index))
         }
         matches
     }
@@ -92,7 +92,7 @@ SemanticSymbolIndex: struct {
         wanted_owner: Val(owner)
         loop index in 0..<self.entries.len() {
             symbol: self.entries[index]
-            if symbol.owner == wanted_owner && symbol.name == name -> &matches.push(self.window(index))
+            if symbol.owner == wanted_owner && symbol.name == name -> matches.push(self.window(index))
         }
         matches
     }
@@ -138,7 +138,7 @@ SemanticSymbolIndex: struct {
         matches := [View<SemanticSymbol>]{}
         loop index in 0..<self.entries.len() {
             symbol: self.entries[index]
-            if symbol.owner == owner && symbol.name.starts_with(prefix) -> &matches.push(self.window(index))
+            if symbol.owner == owner && symbol.name.starts_with(prefix) -> matches.push(self.window(index))
         }
         matches
     }
@@ -196,13 +196,13 @@ SemanticSymbolIndex: struct {
                     }
                 }
                 .None -> {
-                    &keys.push(key)
-                    &indices.push(index)
+                    keys.push(key)
+                    indices.push(index)
                 }
             }
         }
         matches := [View<SemanticSymbol>]{}
-        loop index in indices -> &matches.push(self.window(index))
+        loop index in indices -> matches.push(self.window(index))
         matches
     }
 
@@ -221,7 +221,7 @@ SemanticSymbolIndex: struct {
 
     // Rust SemanticSymbolIndex::sort; inline comparator (#4343).
     sort: fn(&self) Never! {
-        &self.entries.sort_by((left: SemanticSymbol, right: SemanticSymbol) -> (left.qualified_name <=> right.qualified_name).then(left.module_path <=> right.module_path).then(left.identity <=> right.identity))
+        self.entries.sort_by((left: SemanticSymbol, right: SemanticSymbol) -> (left.qualified_name <=> right.qualified_name).then(left.module_path <=> right.module_path).then(left.identity <=> right.identity))
     }
 }
 

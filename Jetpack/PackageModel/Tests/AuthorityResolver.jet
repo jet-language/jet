@@ -91,7 +91,7 @@ pkg_test_authority_snapshot_probe: fn(resolver: AuthorityResolver, path: String,
     resolver: AuthorityResolver.open(root) ?? panic("open")
     found: resolver.discover_source_files() ?? panic("nested projects and linked directories are pruned")
     relatives := [String]{}
-    loop file in found -> &relatives.push(file.relative)
+    loop file in found -> relatives.push(file.relative)
     assert_eq(relatives, [String]{"main.jet"})
     files.remove_all(root) ?? panic("cleanup")
     files.remove(outside) ?? panic("cleanup outside")

@@ -41,7 +41,7 @@ MatrixRow: struct {
 
 receipt_rows: fn(items: [Dyn], scope_key: String) -> [Row] Never! {
     rows := [Row]{}
-    loop item in items -> &rows.push(Row{scope: text_field(item, scope_key), status: text_field(item, "status"), total: int_field(item, "total"), passed: int_field(item, "passed")})
+    loop item in items -> rows.push(Row{scope: text_field(item, scope_key), status: text_field(item, "status"), total: int_field(item, "total"), passed: int_field(item, "passed")})
     rows
 }
 
@@ -54,7 +54,7 @@ empty_receipt: fn(kind: String, file: String, bytes: [U8]) -> Receipt Never! {
 parse_verify_full: fn(file: String, bytes: [U8]) -> Receipt Never! {
     receipt := empty_receipt("verify-full", file, bytes)
     tree: json.parse(String.from_bytes_lossy(bytes)) ?? {
-        &receipt.problems.push(problem(INPUT, "{file} is not JSON: {err}"))
+        receipt.problems.push(problem(INPUT, "{file} is not JSON: {err}"))
         return receipt
     }
     receipt.head = text_field(tree, "head")
@@ -65,9 +65,9 @@ parse_verify_full: fn(file: String, bytes: [U8]) -> Receipt Never! {
     shard: field(tree, "shard")
     receipt.shard = int_field(shard, "index") ?? -1
     receipt.shards = int_field(shard, "count") ?? 0
-    if receipt.target == "" -> &receipt.problems.push(problem(MISSING_RUNNER, "{file} names no target: it predates runner targets, so rerun Tools/agent/VerifyFull.jet"))
-    if receipt.shards < 1 || receipt.shard < 0 || receipt.shard >= receipt.shards -> &receipt.problems.push(problem(MISSING_RUNNER, "{file} names no valid shard: rerun Tools/agent/VerifyFull.jet"))
-    if !is_hex(receipt.jet_sha256, 64) -> &receipt.problems.push(problem(STALE, "{file} does not record the sha256 of the jet it ran, so it cannot be tied to this release: rerun Tools/agent/VerifyFull.jet"))
+    if receipt.target == "" -> receipt.problems.push(problem(MISSING_RUNNER, "{file} names no target: it predates runner targets, so rerun Tools/agent/VerifyFull.jet"))
+    if receipt.shards < 1 || receipt.shard < 0 || receipt.shard >= receipt.shards -> receipt.problems.push(problem(MISSING_RUNNER, "{file} names no valid shard: rerun Tools/agent/VerifyFull.jet"))
+    if !is_hex(receipt.jet_sha256, 64) -> receipt.problems.push(problem(STALE, "{file} does not record the sha256 of the jet it ran, so it cannot be tied to this release: rerun Tools/agent/VerifyFull.jet"))
     receipt
 }
 
@@ -76,7 +76,7 @@ parse_verify_full: fn(file: String, bytes: [U8]) -> Receipt Never! {
 parse_admission_receipt: fn(file: String, bytes: [U8]) -> Receipt Never! {
     receipt := empty_receipt("release-compiler", file, bytes)
     tree: json.parse(String.from_bytes_lossy(bytes)) ?? {
-        &receipt.problems.push(problem(INPUT, "{file} is not JSON: {err}"))
+        receipt.problems.push(problem(INPUT, "{file} is not JSON: {err}"))
         return receipt
     }
     receipt.head = text_field(tree, "commit")
@@ -86,14 +86,14 @@ parse_admission_receipt: fn(file: String, bytes: [U8]) -> Receipt Never! {
     receipt.rows = receipt_rows(array_field(tree, "checks"), "check")
     receipt.shard = 0
     receipt.shards = 1
-    if receipt.target == "" -> &receipt.problems.push(problem(MISSING_RUNNER, "{file} names no target: it predates runner targets, so admit the release again with Tools/agent/release-compiler.mjs"))
+    if receipt.target == "" -> receipt.problems.push(problem(MISSING_RUNNER, "{file} names no target: it predates runner targets, so admit the release again with Tools/agent/release-compiler.mjs"))
     receipt
 }
 
 read_receipt: fn(dir: String, file: String, kind: String) -[FS]> Receipt Never! {
     bytes: files.read_bytes(files.join(dir, file)) ?? {
         receipt := empty_receipt(kind, file, [U8]{})
-        &receipt.problems.push(problem(MISSING_RUNNER, "the receipt {file} is missing: {err}"))
+        receipt.problems.push(problem(MISSING_RUNNER, "the receipt {file} is missing: {err}"))
         return receipt
     }
     if kind == "release-compiler" -> return parse_admission_receipt(file, bytes)
@@ -108,7 +108,7 @@ parse_matrix: fn(text: String) -> [MatrixRow] Problem! {
         if line == "" || line.starts_with("#") -> next
         cells: raw.trim_end().split("\t").to_list()
         if cells.len() != 2 || cells[0].trim() == "" || cells[1].trim() == "" -> return Err(problem(MATRIX, "{SUPPORT_MATRIX_PATH}:{index + 1}: a row needs a target and a name separated by a tab"))
-        &rows.push(MatrixRow{target: cells[0].trim().copy(), name: cells[1].trim().copy()})
+        rows.push(MatrixRow{target: cells[0].trim().copy(), name: cells[1].trim().copy()})
     }
     if rows.len() == 0 -> return Err(problem(MATRIX, "{SUPPORT_MATRIX_PATH} names no target"))
     Ok(rows)

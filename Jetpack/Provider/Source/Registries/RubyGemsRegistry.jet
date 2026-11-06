@@ -56,12 +56,12 @@ provider_rubygems_parse_info: fn(repository: String, name: String, raw: String) 
                     }
                     if dependency_name == "ruby" || dependency_name == "rubygems" -> next
                     if !(ScriptRegistryKind.RubyGems).valid_name(dependency_name) -> return Err(RegistryError.Reason("gem `{name}` has unsafe dependency `{dependency_name}`"))
-                    &dependencies.push(RegistryDependency{name: dependency_name, requirement: requirement.replace("&", ",")})
+                    dependencies.push(RegistryDependency{name: dependency_name, requirement: requirement.replace("&", ",")})
                 }
             }
             .None -> {}
         }
-        &out.push(RegistryPackage{
+        out.push(RegistryPackage{
             name,
             version,
             url: "{repository}/gems/{name}-{version}.gem",
@@ -97,7 +97,7 @@ provider_rubygems_write_projection: fn(artifacts: [RegistryArtifact], out: Strin
     ruby_lib := [String]{}
     loop artifact in artifacts {
         lib: "gems/{artifact.package.name}-{artifact.package.version}/lib"
-        if files.is_dir(files.join(out, lib)) -> &ruby_lib.push(lib)
+        if files.is_dir(files.join(out, lib)) -> ruby_lib.push(lib)
     }
     separator: pkg_path_separator_for_os(PlatformKey.host().os)
     provider_registry_write_text(files.join(out, "gem-home"), ".\n", "could not write Ruby runtime projection")

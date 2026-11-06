@@ -71,7 +71,7 @@ jet_cli_transaction_relative: fn(root: String, path: String) -> [String] JetCLIR
     parts := [String]{}
     loop part in relative.split("/") {
         jet_cli_rooted_validate_name(part)
-        &parts.push(part)
+        parts.push(part)
     }
     if parts.len() == 0 -> return Err(jet_cli_read_error("transaction path has no file name"))
     Ok(parts)
@@ -79,7 +79,7 @@ jet_cli_transaction_relative: fn(root: String, path: String) -> [String] JetCLIR
 
 jet_cli_transaction_record: fn(project: JetCLIRootedDirectory, change: JetCLISourceChange) -[FS]> JetCLITransactionRecord JetCLIReadError! {
     parts := jet_cli_transaction_relative(project.path, change.path)
-    name: &parts.pop() ?? return Err(jet_cli_read_error("transaction path has no file name"))
+    name: parts.pop() ?? return Err(jet_cli_read_error("transaction path has no file name"))
     parent := JetCLIRootedDirectory?{None}
     info := cli_files.Stat?{None}
     if parts.len() != 0 {
@@ -108,7 +108,7 @@ jet_cli_transaction_journal: fn(tx: String, completed: Int, records: [JetCLITran
         after: cli_transaction_hex.encode(record.change.after)
         destination_id: jet_cli_transaction_id_json(record.destination_id)
         temp_id: jet_cli_transaction_id_json(record.temp_id)
-        &rows.push("{{\"path\":{path_json},\"temp\":{temp_json},\"before\":\"{before}\",\"after\":\"{after}\",\"destination_id\":{destination_id},\"temp_id\":{temp_id}}}")
+        rows.push("{{\"path\":{path_json},\"temp\":{temp_json},\"before\":\"{before}\",\"after\":\"{after}\",\"destination_id\":{destination_id},\"temp_id\":{temp_id}}}")
     }
     tx_json: foundation_json_quote(tx)
     log_json: foundation_json_quote(log_path)
@@ -183,7 +183,7 @@ jet_cli_transaction_recover: fn(project: JetCLIRootedDirectory, journal: JetCLIR
             if temp_info.id != record.temp_id || !content_matches || identities.get(temp_identity) != None -> return Err(jet_cli_read_error("recovery temp identity changed, contents differ, or aliases another row; journal preserved"))
             identities[temp_identity] = true
         }
-        &records.push(record)
+        records.push(record)
     }
     if all_after {
         _: journal.publish_immutable(log_name, log, Val(0o600), JET_CLI_TRANSACTION_MAX_BYTES)
@@ -228,7 +228,7 @@ jet_cli_transaction_commit_locked: fn(project: JetCLIRootedDirectory, journal: J
             return Err(err)
         }
         record.temp_id = record.stat(project, record.temp).id
-        &records.push(record)
+        records.push(record)
     }
     tx: "{cli_process.current_pid()}-{cli_time.unix_ns()}"
     log_path: jet_cli_rooted_join(journal.path, log_name)
@@ -280,14 +280,14 @@ jet_cli_fix_operation_json: fn(operation: JetCLISemOp, changes: [JetCLISourceCha
         after: foundation_json_quote(target.after)
         kind: foundation_json_quote(target.kind)
         module_path: foundation_json_quote(target.module_path)
-        &targets.push("{{\"stable_id\":{stable},\"before\":{before},\"after\":{after},\"kind\":{kind},\"module_path\":{module_path}}}")
+        targets.push("{{\"stable_id\":{stable},\"before\":{before},\"after\":{after},\"kind\":{kind},\"module_path\":{module_path}}}")
     }
     files := [String]{}
     loop change in changes {
         path: foundation_json_quote(change.path)
         before: jet_cli_source_hash(change.before)
         after: jet_cli_source_hash(change.after)
-        &files.push("{{\"path\":{path},\"before_hash\":\"{before}\",\"after_hash\":\"{after}\"}}")
+        files.push("{{\"path\":{path},\"before_hash\":\"{before}\",\"after_hash\":\"{after}\"}}")
     }
     kind: foundation_json_quote(operation.kind)
     rule: jet_cli_fix_optional_json(operation.rule_id)
@@ -311,7 +311,7 @@ jet_cli_fix_log: fn(root: String, name: String, changes: [JetCLISourceChange], o
         after_hash: jet_cli_source_hash(change.after)
         before_bytes: cli_transaction_hex.encode(change.before)
         after_bytes: cli_transaction_hex.encode(change.after)
-        &rows.push("{{\"path\":{path},\"before_hash\":\"{before_hash}\",\"after_hash\":\"{after_hash}\",\"before_bytes\":\"{before_bytes}\",\"after_bytes\":\"{after_bytes}\"}}")
+        rows.push("{{\"path\":{path},\"before_hash\":\"{before_hash}\",\"after_hash\":\"{after_hash}\",\"before_bytes\":\"{before_bytes}\",\"after_bytes\":\"{after_bytes}\"}}")
     }
     ops: loop operation in operations -> jet_cli_fix_operation_json(operation, changes)
     skips: loop skip in skipped -> "{{\"title\":{foundation_json_quote(skip.title)},\"start\":{skip.edit.span.start},\"end\":{skip.edit.span.end},\"replacement\":{foundation_json_quote(skip.edit.new_text)},\"reason\":{foundation_json_quote(skip.reason)}}}"
@@ -348,7 +348,7 @@ jet_cli_fix_name: fn(stem: String) -> String Never! {
     parts := [String]{}
     loop character in stem.chars() {
         text: "{character}"
-        &parts.push(if text.is_alphabetic() || text.is_numeric() || text == "-" || text == "_" -> text else -> "_")
+        parts.push(if text.is_alphabetic() || text.is_numeric() || text == "-" || text == "_" -> text else -> "_")
     }
     sanitized: parts.join("")
     if sanitized == "" -> return "codemod"
@@ -361,7 +361,7 @@ jet_cli_commit_fix: fn(file: String, before: [U8], staged: [U8], semantic_ops: [
     cache := WorkspaceDeclarationCache.new()
     // Absence selects the standalone-file root; a failed manifest observation
     // is distinct and must not be flattened into that fallback.
-    found: if jet_cli_find_package_root_checked(&cache, parent) == {
+    found: if jet_cli_find_package_root_checked(cache, parent) == {
         .Val(value) -> Val(value)
         .None -> None
         .Err(error) -> { return Err(jet_cli_read_error(error.diagnostic.what)) }
@@ -442,7 +442,7 @@ jet_cli_undo_source_changes: fn(root: String, log_name: String) -[FS, Env, Exec,
         record: jet_cli_transaction_record(project, change)
         if record.destination_id == log_id -> return Err(jet_cli_read_error("replay log and destinations contain a file-ID alias"))
         if record.read(project) != after -> return Err(jet_cli_read_error("checkpoint mismatch for `{path}`; refusing undo; zero files written"))
-        &changes.push(change)
+        changes.push(change)
     }
     undo_name: "{log_name.slice(0, log_name.len() - 5)}.undo.log.json"
     marker_name: foundation_json_quote("{name}-undo")

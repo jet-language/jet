@@ -33,10 +33,10 @@ utf8_bytes: fn(text: String) -> [U8] Never! { text.bytes() }
 // Rust jet_unicode_append_mapping:42-53. One caller-owned UTF-8 output buffer.
 append_mapping: fn(out: &[U8], cp: Int, index: View<U8>, pool: View<U8>) Never! {
     if text_asset.mapping(index, pool, cp) == .Val(span) {
-        loop i in span.start..<(span.start + span.length) -> append_cp(&out, text_asset.scalar(pool, i))
+        loop i in span.start..<(span.start + span.length) -> append_cp(out, text_asset.scalar(pool, i))
         return
     }
-    append_cp(&out, cp)
+    append_cp(out, cp)
 }
 
 // Compare the pinned full mapping without allocating a one-scalar String.
@@ -93,16 +93,16 @@ lower: fn(text: String) -> String Never! {
     chars := [Int]{}
     at := 0
     loop at < raw.len() {
-        &chars.push(scalar_at(raw, at))
+        chars.push(scalar_at(raw, at))
         at = at + utf8_width_at(raw, at)
     }
     out := [U8]{}
     loop i in 0..<chars.len() {
         cp: chars[i]
         if cp == 931 && final_sigma(chars, i, cased_asset, ignorable_asset) {
-            append_cp(&out, 962)
+            append_cp(out, 962)
         } else {
-            append_mapping(&out, cp, index, pool)
+            append_mapping(out, cp, index, pool)
         }
     }
     String.from_bytes(out) ?? panic("Unicode lowercase produced invalid UTF-8")
@@ -130,7 +130,7 @@ map_stream: fn(text: String, index_asset: [U8], pool_asset: [U8]) -> String Neve
     out := [U8]{}
     at := 0
     loop at < raw.len() {
-        append_mapping(&out, scalar_at(raw, at), index, pool)
+        append_mapping(out, scalar_at(raw, at), index, pool)
         at = at + utf8_width_at(raw, at)
     }
     String.from_bytes(out) ?? panic("Unicode mapping produced invalid UTF-8")
@@ -158,11 +158,11 @@ title: fn(text: String) -> String Never! {
     loop at < raw.len() {
         cp: scalar_at(raw, at)
         if text_asset.asset_contains(alphabetic, cp) || text_asset.asset_contains(numeric, cp) {
-            if word_start -> append_mapping(&out, cp, title_index, title_pool)
-            else -> append_mapping(&out, cp, lower_index, lower_pool)
+            if word_start -> append_mapping(out, cp, title_index, title_pool)
+            else -> append_mapping(out, cp, lower_index, lower_pool)
             word_start = false
         } else {
-            append_cp(&out, cp)
+            append_cp(out, cp)
             word_start = true
         }
         at = at + utf8_width_at(raw, at)
@@ -180,9 +180,9 @@ capitalize: fn(text: String) -> String Never! {
     title_index: title_index_asset[40..<title_index_asset.len()]
     title_pool: title_pool_asset[40..<title_pool_asset.len()]
     out := [U8]{}
-    append_mapping(&out, scalar_at(raw, 0), title_index, title_pool)
+    append_mapping(out, scalar_at(raw, 0), title_index, title_pool)
     rest := text.slice(1, text.len()) // #4303: String-typed lowercase input.
-    loop byte in utf8_bytes(lower(rest)) -> &out.push(byte)
+    loop byte in utf8_bytes(lower(rest)) -> out.push(byte)
     String.from_bytes(out) ?? panic("Unicode capitalization produced invalid UTF-8")
 }
 
@@ -206,9 +206,9 @@ swapcase: fn(text: String) -> String Never! {
     loop at < raw.len() {
         cp: scalar_at(raw, at)
         if {
-            !text_asset.asset_contains(cased, cp) -> append_cp(&out, cp)
-            mapping_changes(cp, upper_index, upper_pool) -> append_mapping(&out, cp, upper_index, upper_pool)
-            else -> append_mapping(&out, cp, lower_index, lower_pool)
+            !text_asset.asset_contains(cased, cp) -> append_cp(out, cp)
+            mapping_changes(cp, upper_index, upper_pool) -> append_mapping(out, cp, upper_index, upper_pool)
+            else -> append_mapping(out, cp, lower_index, lower_pool)
         }
         at = at + utf8_width_at(raw, at)
     }
@@ -257,9 +257,9 @@ ascii_case: fn(text: String, upper: Bool) -> String Never! {
     out := [U8]{}
     loop byte in raw {
         if {
-            upper && byte >= (U8{97}) && byte <= (U8{122}) -> &out.push(byte - U8{32})
-            !upper && byte >= (U8{65}) && byte <= (U8{90}) -> &out.push(byte + U8{32})
-            else -> &out.push(byte)
+            upper && byte >= (U8{97}) && byte <= (U8{122}) -> out.push(byte - U8{32})
+            !upper && byte >= (U8{65}) && byte <= (U8{90}) -> out.push(byte + U8{32})
+            else -> out.push(byte)
         }
     }
     String.from_bytes(out) ?? panic("ASCII mapping produced invalid UTF-8")
@@ -416,13 +416,13 @@ split_whitespace: fn(text: String) -> [String] Never! {
         width: utf8_width_at(raw, at)
         space: text_asset.asset_contains(whitespace_asset, scalar_at(raw, at))
         if space && start >= 0 {
-            &out.push(utf8_field(raw, start, at))
+            out.push(utf8_field(raw, start, at))
             start = -1
         }
         if !space && start < 0 -> start = at
         at = at + width
     }
-    if start >= 0 -> &out.push(utf8_field(raw, start, raw.len()))
+    if start >= 0 -> out.push(utf8_field(raw, start, raw.len()))
     out
 }
 utf8_field: fn(raw: [U8], start: Int, end: Int) -> String Never! {
@@ -615,18 +615,18 @@ append_cp: fn(out: &[U8], cp: Int) Never! {
     n := cp
     if n < 0 || n > 1114111 || (n >= 55296 && n <= 57343) -> n = 65533
     if n < 128 {
-        &out.push(U8{n})
+        out.push(U8{n})
     } else if n < 2048 {
-        &out.push(U8{Int{192}.bit_or((n >> 6))})
-        &out.push(U8{Int{128}.bit_or((n.bit_and(Int{63})))})
+        out.push(U8{Int{192}.bit_or((n >> 6))})
+        out.push(U8{Int{128}.bit_or((n.bit_and(Int{63})))})
     } else if n < 65536 {
-        &out.push(U8{Int{224}.bit_or((n >> 12))})
-        &out.push(U8{Int{128}.bit_or(((n >> 6).bit_and(Int{63})))})
-        &out.push(U8{Int{128}.bit_or((n.bit_and(Int{63})))})
+        out.push(U8{Int{224}.bit_or((n >> 12))})
+        out.push(U8{Int{128}.bit_or(((n >> 6).bit_and(Int{63})))})
+        out.push(U8{Int{128}.bit_or((n.bit_and(Int{63})))})
     } else {
-        &out.push(U8{Int{240}.bit_or((n >> 18))})
-        &out.push(U8{Int{128}.bit_or(((n >> 12).bit_and(Int{63})))})
-        &out.push(U8{Int{128}.bit_or(((n >> 6).bit_and(Int{63})))})
-        &out.push(U8{Int{128}.bit_or((n.bit_and(Int{63})))})
+        out.push(U8{Int{240}.bit_or((n >> 18))})
+        out.push(U8{Int{128}.bit_or(((n >> 12).bit_and(Int{63})))})
+        out.push(U8{Int{128}.bit_or(((n >> 6).bit_and(Int{63})))})
+        out.push(U8{Int{128}.bit_or((n.bit_and(Int{63})))})
     }
 }

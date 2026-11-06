@@ -91,15 +91,15 @@ kit_steps_capture_guards: fn(plan: KitPlan, before: Int, inline: [String]) -> [S
     loop index in 0..<before {
         step: plan.steps[index]
         if step.action == "when" {
-            &frames.push(guards.len())
-            loop condition in step.conditions -> &guards.push(condition)
-            &guards.push(step.argv[0])
+            frames.push(guards.len())
+            loop condition in step.conditions -> guards.push(condition)
+            guards.push(step.argv[0])
         } else if step.action == "end when" {
             guards = guards.slice(0, frames[frames.len() - 1])
             frames = frames.slice(0, frames.len() - 1)
         }
     }
-    loop condition in inline -> &guards.push(condition)
+    loop condition in inline -> guards.push(condition)
     guards
 }
 
@@ -137,7 +137,7 @@ kit_steps_capture_duplicate_valid: fn(plan: KitPlan, name: String, conditions: [
     active := [Int]{}
     scopes := [Int]{}
     loop (index, step) in plan.steps {
-        if step.action == "for" || step.action == "repeat" -> &scopes.push(active.len())
+        if step.action == "for" || step.action == "repeat" -> scopes.push(active.len())
         else if step.action == "end for" || step.action == "end repeat" {
             restored := scopes[scopes.len() - 1]
             // Aggregates survive loop restoration, including nested loops.
@@ -149,7 +149,7 @@ kit_steps_capture_duplicate_valid: fn(plan: KitPlan, name: String, conditions: [
             }
             active = active.slice(0, restored)
             scopes = scopes.slice(0, scopes.len() - 1)
-        } else if step.action == "capture" && step.argv[0] == name -> &active.push(index)
+        } else if step.action == "capture" && step.argv[0] == name -> active.push(index)
     }
     if active.len() == 0 -> return false
     current: kit_steps_capture_guards(plan, plan.steps.len(), conditions)
@@ -174,7 +174,7 @@ kit_steps_captured_subject: fn(name: String, captures: [KitCapture]) -> String? 
             .Text(text) -> return Val(text)
             .Numbers(numbers) -> {
                 values := [String]{}
-                loop number in numbers -> &values.push("{number}")
+                loop number in numbers -> values.push("{number}")
                 return Val(values.join("\n"))
             }
             else -> return None
@@ -265,7 +265,7 @@ kit_steps_capture_value: fn(words: [String], context: KitStepCtx, state: KitStep
                 transform: kit_steps_subject_transform(words[3])
                 if transform.ends_with("cursor_up_counts") || transform.ends_with("visible_cols") {
                     numbers := [Int]{}
-                    loop line in kit_steps_rust_lines(source) -> &numbers.push(Int.parse(line) ?? return kit_steps_capture_failure("FAIL", "list transform produced a non-integer"))
+                    loop line in kit_steps_rust_lines(source) -> numbers.push(Int.parse(line) ?? return kit_steps_capture_failure("FAIL", "list transform produced a non-integer"))
                     return KitSubjectResult{value: KitCapturedValue.Numbers(numbers), verdict: kit_expect_verdict("PASS", "")}
                 }
             }
@@ -301,7 +301,7 @@ kit_steps_capture_value: fn(words: [String], context: KitStepCtx, state: KitStep
         }
         if kind == "concat-files" {
             entries := files.list_dir(directory) ?? return kit_steps_capture_failure("ERROR", "concat-files directory: {err}")
-            &entries.sort_by(entry -> entry.name)
+            entries.sort_by(entry -> entry.name)
             combined := ""
             loop entry in entries {
                 bytes: files.read_bytes(entry.path) ?? return kit_steps_capture_failure("ERROR", "concat-files read: {err}")
@@ -366,13 +366,13 @@ kit_steps_tree_contents: fn(directory: String, root: String, recursive: Bool) ->
         if info.is_symlink -> next
         if info.is_file {
             bytes: files.read_bytes(entry.path) ?? return Err("tree-contents read: {err}")
-            &result.push(KitTreeItem{path: files.relative(entry.path, root), bytes: bytes})
+            result.push(KitTreeItem{path: files.relative(entry.path, root), bytes: bytes})
         } else if info.is_dir && recursive {
             nested: kit_steps_tree_contents(entry.path, root, recursive) ?? return Err(err)
-            loop item in nested -> &result.push(item)
+            loop item in nested -> result.push(item)
         }
     }
-    &result.sort_by(item -> item.path)
+    result.sort_by(item -> item.path)
     Ok(result)
 }
 

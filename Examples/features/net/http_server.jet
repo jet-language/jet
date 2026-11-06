@@ -32,5 +32,5 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
     print("GET /ping -> {ping.status()} {ping.text() ?? "invalid body"}")
     echo: http_client.request("POST", "http://{addr}/echo").form("say", "hi").send() ?? panic("POST /echo")
     print("POST /echo -> {echo.status()} {echo.text() ?? "invalid body"}")
-    ^serving.join() ?? panic("server")
+    serving.join() ?? panic("server")
 }

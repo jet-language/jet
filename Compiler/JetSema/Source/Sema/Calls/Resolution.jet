@@ -140,12 +140,12 @@ sema_call_unknown_function_in: fn(name: String, span: Span, scopes: SemaScopeTab
         loop binding in scopes.bindings {
             if binding.frame != frame || binding.symbol.kind != SymbolKind.Function -> next
             if binding.symbol.name.starts_with("__") || binding.symbol.name.starts_with("@") -> next
-            &candidates.push(binding.symbol.name.copy())
+            candidates.push(binding.symbol.name.copy())
         }
         frame = scopes.frames[frame].parent
     }
     if !no_prelude {
-        loop prelude in SEMA_CALL_PRELUDE_NAMES -> &candidates.push(prelude.copy())
+        loop prelude in SEMA_CALL_PRELUDE_NAMES -> candidates.push(prelude.copy())
     }
     near: sema_suggest_field(name, candidates) ?? return sema_call_unknown_function(name, span)
     diagnostic: sema_error("E0102", span, "nothing named `{name}` exists here", "only functions that have been defined (or built in, like `print` / `input`) can be called", "did you mean `{near}`?")
@@ -173,11 +173,11 @@ sema_call_not_callable_value: fn(name: String, ty: Type, program: SemaProgramTab
         loop nominal_row in sema_registration_nominal_rows_named(graph, sema_expr_operator_row_name(base_name)) {
             loop function in graph.modules[nominal_row.module_index].nominals[nominal_row.row].methods {
                 receiver: function.parameters.len() > 0 && function.parameters[0].symbol.name == "self"
-                if receiver && !function.declaration.compiler_generated && !methods.contains(function.symbol.name) -> &methods.push(function.symbol.name.copy())
+                if receiver && !function.declaration.compiler_generated && !methods.contains(function.symbol.name) -> methods.push(function.symbol.name.copy())
             }
         }
     }
-    &methods.sort()
+    methods.sort()
     if methods.len() == 0 -> return sema_error("E0803", span, "`{name}` is {described}, not a function", "parentheses call functions and lambdas only", "remove the parentheses after `{name}`, or bind a function or lambda to call")
     sema_error("E0803", span, "`{name}` is {described}, not a function", "parentheses call functions and lambdas only; `{shown}` has the methods {methods.join(", ")}", "call one of its methods, such as `{name}.{methods[0]}(…)`, or write a method that returns a lambda")
 }
@@ -237,7 +237,7 @@ sema_call_never_type_args_valid: fn(signature: Type, generic_params: [SemaInfere
     loop index in 0..<type_args.len() {
         if type_args[index] == .Named(arg_name) {
             if arg_name == "Never" && !sema_call_type_names_failure_domain(signature, generic_params[index].name) {
-                &diagnostics.push(sema_never_as_value(span))
+                diagnostics.push(sema_never_as_value(span))
                 return false
             }
         }
@@ -251,7 +251,7 @@ sema_call_never_type_args_valid: fn(signature: Type, generic_params: [SemaInfere
 // further out.
 sema_call_resolve_direct: fn(name: String, type_args: [Type], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, span: Span, diagnostics: &[Diagnostic]) -> SemaCallDirectTarget? {
     nearest: sema_scope_resolve_index(scopes, name) ?? {
-        &diagnostics.push(sema_call_unknown_function_in(name, span, scopes, sema_module_no_prelude(environment, program)))
+        diagnostics.push(sema_call_unknown_function_in(name, span, scopes, sema_module_no_prelude(environment, program)))
         return None
     }
     symbol: sema_scope_binding_symbol(environment, scopes, nearest)
@@ -259,24 +259,24 @@ sema_call_resolve_direct: fn(name: String, type_args: [Type], environment: SemaS
         ty: symbol.ty ?? {
             // A binding whose type was already lost to a reported error is
             // poisoned: calling it adds no second report.
-            if diagnostics.len() == 0 -> &diagnostics.push(sema_call_not_callable(name, Type.Named{name: "Unknown"}, span))
+            if diagnostics.len() == 0 -> diagnostics.push(sema_call_not_callable(name, Type.Named{name: "Unknown"}, span))
             return None
         }
         // A distinct type is not a conversion function: its destination-owned
         // conversion names the base, `UserID.from_int(value)`.
         if symbol.kind == SymbolKind.Type && sema_scope_declaration_distinct(environment, program, symbol.id) == .Val(definition) {
-            &diagnostics.push(sema_error("E0753", span, "`{name}(value)` is not a distinct conversion", "explicit conversions are owned by the destination type and name their source", "write `{name}.{sema_call_distinct_base_method(definition.base)}(value)`"))
+            diagnostics.push(sema_error("E0753", span, "`{name}(value)` is not a distinct conversion", "explicit conversions are owned by the destination type and name their source", "write `{name}.{sema_call_distinct_base_method(definition.base)}(value)`"))
             return None
         }
-        &diagnostics.push(sema_call_not_callable_value(name, ty, program, span))
+        diagnostics.push(sema_call_not_callable_value(name, ty, program, span))
         return None
     }
     signature: symbol.ty ?? {
-        &diagnostics.push(sema_call_not_callable(name, Type.Named{name: "Unknown"}, span))
+        diagnostics.push(sema_call_not_callable(name, Type.Named{name: "Unknown"}, span))
         return None
     }
     if !sema_call_type_is_function(signature) {
-        &diagnostics.push(sema_call_not_callable(name, signature, span))
+        diagnostics.push(sema_call_not_callable(name, signature, span))
         return None
     }
 
@@ -285,7 +285,7 @@ sema_call_resolve_direct: fn(name: String, type_args: [Type], environment: SemaS
     generic_params: sema_inference_type_params(generic_params_source)
     if generic_params.len() == 0 {
         if type_args.len() > 0 {
-            &diagnostics.push(sema_call_not_generic_diagnostic(name, span))
+            diagnostics.push(sema_call_not_generic_diagnostic(name, span))
             return None
         }
         return SemaCallDirectTarget{symbol: symbol, signature: signature, type_args: [Type]{}, generic_params: [SemaInferenceTypeParam]{}, generic_substitutions: [SemaInferenceBinding]{}, generic_evidence: [SemaInferenceBoundEvidence]{}}
@@ -294,10 +294,10 @@ sema_call_resolve_direct: fn(name: String, type_args: [Type], environment: SemaS
         return SemaCallDirectTarget{symbol: symbol, signature: signature, type_args: [Type]{}, generic_params: generic_params, generic_substitutions: [SemaInferenceBinding]{}, generic_evidence: [SemaInferenceBoundEvidence]{}}
     }
     if type_args.len() != generic_params.len() {
-        &diagnostics.push(sema_call_direct_type_arg_count_diagnostic(name, generic_params.len(), type_args.len(), span))
+        diagnostics.push(sema_call_direct_type_arg_count_diagnostic(name, generic_params.len(), type_args.len(), span))
         return None
     }
-    if !sema_call_never_type_args_valid(signature, generic_params, type_args, span, &diagnostics) {
+    if !sema_call_never_type_args_valid(signature, generic_params, type_args, span, diagnostics) {
         return None
     }
     caller_module: if scopes.frames.len() > 0 -> scopes.frames[0].owner else -> ""
@@ -306,7 +306,7 @@ sema_call_resolve_direct: fn(name: String, type_args: [Type], environment: SemaS
         else -> ""
     }
     context := sema_inference_context(caller_module, caller_package, generic_params, environment.generic_params, None)
-    result: sema_infer_validate_explicit(program.registration_graph, &context, type_args, span, &diagnostics) ?? return None
+    result: sema_infer_validate_explicit(program.registration_graph, context, type_args, span, diagnostics) ?? return None
     specialized: sema_inference_substitute_type_bindings(signature, result.substitutions)
     SemaCallDirectTarget{symbol: symbol, signature: specialized, type_args: result.type_args, generic_params: generic_params, generic_substitutions: result.substitutions, generic_evidence: result.evidence}
 }
@@ -327,12 +327,12 @@ sema_call_direct_type_arg_mismatch_signature: fn(name: String, type_args: [Type]
 
 sema_call_direct_target_generic_ready: fn(target: SemaCallDirectTarget, diagnostics: &[Diagnostic], span: Span) -> Bool {
     if target.generic_params.len() > 0 && target.generic_substitutions.len() != target.generic_params.len() {
-        &diagnostics.push(sema_error("E0904", span, "cannot infer type arguments for `{target.symbol.name}`", "generic call checking requires a complete inference result", "provide the function's type arguments explicitly"))
+        diagnostics.push(sema_error("E0904", span, "cannot infer type arguments for `{target.symbol.name}`", "generic call checking requires a complete inference result", "provide the function's type arguments explicitly"))
         return false
     }
     if !sema_inference_bounds_checked(target.generic_params, target.generic_evidence, target.generic_substitutions) {
         if target.generic_params.len() > 0 {
-            &diagnostics.push(sema_error("E0905", span, "generic bounds for `{target.symbol.name}` were not resolved", "the shared inference solver must prove every declared bound", "use a registered specialized callable target"))
+            diagnostics.push(sema_error("E0905", span, "generic bounds for `{target.symbol.name}` were not resolved", "the shared inference solver must prove every declared bound", "use a registered specialized callable target"))
             return false
         }
     }
@@ -358,7 +358,7 @@ sema_call_infer_direct_target_from_types: fn(target: SemaCallDirectTarget, param
         else -> ""
     }
     context := sema_inference_context(caller_module, caller_package, target.generic_params, environment.generic_params, expected)
-    result: sema_infer_callable(program.registration_graph, &context, parameter_types, return_type, arg_types, target.type_args, span, &diagnostics) ?? return None
+    result: sema_infer_callable(program.registration_graph, context, parameter_types, return_type, arg_types, target.type_args, span, diagnostics) ?? return None
     sema_call_direct_target_with_inference(target, result)
 }
 
@@ -366,7 +366,7 @@ sema_call_direct_target_from_registration: fn(function: SemaRegistrationFunction
     generic_params: sema_inference_registration_params(function.generic_params)
     if generic_params.len() == 0 {
         if type_args.len() > 0 {
-            &diagnostics.push(sema_call_not_generic_diagnostic(function.symbol.name, span))
+            diagnostics.push(sema_call_not_generic_diagnostic(function.symbol.name, span))
             return None
         }
         return SemaCallDirectTarget{symbol: function.symbol, signature: function.signature, type_args: [Type]{}, generic_params: [SemaInferenceTypeParam]{}, generic_substitutions: [SemaInferenceBinding]{}, generic_evidence: [SemaInferenceBoundEvidence]{}}
@@ -374,11 +374,11 @@ sema_call_direct_target_from_registration: fn(function: SemaRegistrationFunction
     if type_args.len() == 0 {
         return SemaCallDirectTarget{symbol: function.symbol, signature: function.signature, type_args: [Type]{}, generic_params: generic_params, generic_substitutions: [SemaInferenceBinding]{}, generic_evidence: [SemaInferenceBoundEvidence]{}}
     }
-    if type_args.len() == generic_params.len() && !sema_call_never_type_args_valid(function.signature, generic_params, type_args, span, &diagnostics) {
+    if type_args.len() == generic_params.len() && !sema_call_never_type_args_valid(function.signature, generic_params, type_args, span, diagnostics) {
         return None
     }
     context := sema_inference_context(caller_module_identity, caller_package_identity, generic_params, lexical_generic_params, None)
-    result: sema_infer_validate_explicit(graph, &context, type_args, span, &diagnostics) ?? return None
+    result: sema_infer_validate_explicit(graph, context, type_args, span, diagnostics) ?? return None
     signature: sema_inference_substitute_type_bindings(function.signature, result.substitutions)
     SemaCallDirectTarget{symbol: function.symbol, signature: signature, type_args: result.type_args, generic_params: generic_params, generic_substitutions: result.substitutions, generic_evidence: result.evidence}
 }
@@ -390,7 +390,7 @@ sema_call_method_candidate_from_registration: fn(signature: Type, function_gener
     generic_params: sema_inference_registration_params(function_generic_params)
     if generic_params.len() == 0 {
         if type_args.len() > 0 {
-            &diagnostics.push(sema_error("E0119", span, "`{method.name}` is not generic", "only a registered generic method accepts type arguments", "remove the explicit type arguments"))
+            diagnostics.push(sema_error("E0119", span, "`{method.name}` is not generic", "only a registered generic method accepts type arguments", "remove the explicit type arguments"))
             return None
         }
         return SemaCallMethodCandidate{method: method, signature: signature, receiver_type: receiver_type, receiver_convention: receiver_convention, receiver_offset: receiver_offset, type_args: [Type]{}, generic_params: [SemaInferenceTypeParam]{}, generic_substitutions: [SemaInferenceBinding]{}, generic_evidence: [SemaInferenceBoundEvidence]{}}
@@ -399,7 +399,7 @@ sema_call_method_candidate_from_registration: fn(signature: Type, function_gener
         return SemaCallMethodCandidate{method: method, signature: signature, receiver_type: receiver_type, receiver_convention: receiver_convention, receiver_offset: receiver_offset, type_args: [Type]{}, generic_params: generic_params, generic_substitutions: [SemaInferenceBinding]{}, generic_evidence: [SemaInferenceBoundEvidence]{}}
     }
     context := sema_inference_context(caller_module_identity, caller_package_identity, generic_params, lexical_generic_params, None)
-    result: sema_infer_validate_explicit(graph, &context, type_args, span, &diagnostics) ?? return None
+    result: sema_infer_validate_explicit(graph, context, type_args, span, diagnostics) ?? return None
     substituted: sema_inference_substitute_type_bindings(signature, result.substitutions)
     SemaCallMethodCandidate{method: method, signature: substituted, receiver_type: receiver_type, receiver_convention: receiver_convention, receiver_offset: receiver_offset, type_args: result.type_args, generic_params: generic_params, generic_substitutions: result.substitutions, generic_evidence: result.evidence}
 }
@@ -411,26 +411,26 @@ sema_call_method_receiver_candidate_type: fn(candidate: SemaCallMethodCandidate)
 
 sema_call_direct_shape_matches: fn(target: SemaCallDirectTarget, name: String, args: [CallArg], span: Span) -> Bool Never! {
     probe := [CallArg]{}
-    loop arg in args -> &probe.push(arg)
+    loop arg in args -> probe.push(arg)
     probe_diagnostics := [Diagnostic]{}
-    sema_call_bind_direct(name, target.signature, &probe, span, &probe_diagnostics) != None
+    sema_call_bind_direct(name, target.signature, probe, span, probe_diagnostics) != None
 }
 
 sema_call_resolve_direct_candidates: fn(name: String, args: [CallArg], candidates: [SemaCallDirectTarget], span: Span, diagnostics: &[Diagnostic]) -> SemaCallDirectTarget? {
     if candidates.len() == 0 {
-        &diagnostics.push(sema_call_unknown_function(name, span))
+        diagnostics.push(sema_call_unknown_function(name, span))
         return None
     }
     shape_matches: loop candidate in candidates if sema_call_direct_shape_matches(candidate, name, args, span) -> candidate
     if {
         shape_matches.len() == 1 -> Val(shape_matches[0])
         shape_matches.len() > 1 -> {
-            &diagnostics.push(sema_error("E0772", span, "this call to `{name}` matches more than one callable body", "overload resolution requires one candidate after argument shape filtering", "add labels or explicit type arguments that select one callable"))
+            diagnostics.push(sema_error("E0772", span, "this call to `{name}` matches more than one callable body", "overload resolution requires one candidate after argument shape filtering", "add labels or explicit type arguments that select one callable"))
             None
         }
         candidates.len() == 1 -> Val(candidates[0])
         else -> {
-            &diagnostics.push(sema_error("E0772", span, "this call to `{name}` matches more than one callable body", "the overload set has no unique argument shape", "add labels or explicit type arguments that select one callable"))
+            diagnostics.push(sema_error("E0772", span, "this call to `{name}` matches more than one callable body", "the overload set has no unique argument shape", "add labels or explicit type arguments that select one callable"))
             None
         }
     }
@@ -438,9 +438,9 @@ sema_call_resolve_direct_candidates: fn(name: String, args: [CallArg], candidate
 
 sema_call_method_shape_matches: fn(candidate: SemaCallMethodCandidate, method: String, args: [CallArg], span: Span) -> Bool Never! {
     probe := [CallArg]{}
-    loop arg in args -> &probe.push(arg)
+    loop arg in args -> probe.push(arg)
     probe_diagnostics := [Diagnostic]{}
-    sema_call_bind_method(method, candidate.signature, candidate.receiver_offset, &probe, span, &probe_diagnostics) != None
+    sema_call_bind_method(method, candidate.signature, candidate.receiver_offset, probe, span, probe_diagnostics) != None
 }
 
 sema_call_resolve_method: fn(receiver_type: Type, method: String, args: [CallArg], span: Span, candidates: [SemaCallMethodCandidate], environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> SemaCallMethodCandidate? {
@@ -449,24 +449,24 @@ sema_call_resolve_method: fn(receiver_type: Type, method: String, args: [CallArg
         if candidate.method.name == method {
             if sema_call_method_receiver_candidate_type(candidate) == .Val(expected) {
                 compatible: sema_call_type_assignable(expected, receiver_type, environment, program) ?? false
-                if compatible -> &receiver_matches.push(candidate)
+                if compatible -> receiver_matches.push(candidate)
             }
         }
     }
     if receiver_matches.len() == 0 {
-        &diagnostics.push(sema_call_missing_method_diagnostic(receiver_type, method, args.len(), span, environment, program))
+        diagnostics.push(sema_call_missing_method_diagnostic(receiver_type, method, args.len(), span, environment, program))
         return None
     }
     shape_matches: loop candidate in receiver_matches if sema_call_method_shape_matches(candidate, method, args, span) -> candidate
     if {
         shape_matches.len() == 1 -> Val(shape_matches[0])
         shape_matches.len() > 1 -> {
-            &diagnostics.push(sema_error("E0772", span, "this call to `{method}` matches more than one callable body", "overload resolution requires one candidate after receiver and argument shape filtering", "add an explicit type argument or make the argument labels/types select one method"))
+            diagnostics.push(sema_error("E0772", span, "this call to `{method}` matches more than one callable body", "overload resolution requires one candidate after receiver and argument shape filtering", "add an explicit type argument or make the argument labels/types select one method"))
             None
         }
         receiver_matches.len() == 1 -> Val(receiver_matches[0])
         else -> {
-            &diagnostics.push(sema_error("E0772", span, "this call to `{method}` matches more than one callable body", "the receiver candidates disagree about this call's argument shape", "add labels or type arguments that select one method"))
+            diagnostics.push(sema_error("E0772", span, "this call to `{method}` matches more than one callable body", "the receiver candidates disagree about this call's argument shape", "add labels or type arguments that select one method"))
             None
         }
     }
@@ -500,7 +500,7 @@ sema_call_trait_rows_push: fn(graph: SemaRegistrationGraph, rows: &[SemaRegistra
             return
         }
     }
-    &rows.push(row)
+    rows.push(row)
 }
 
 sema_call_generic_receiver_name: fn(ty: Type) -> String? {
@@ -555,7 +555,7 @@ sema_call_trait_dispatch_signature: fn(signature: Type, declared_return: Type?) 
 
 sema_call_trait_method_candidate_from_registration: fn(graph: SemaRegistrationGraph, trait_nominal: SemaRegistrationNominal, method: SemaRegistrationTraitMethod, receiver_type: Type, type_args: [Type], caller_module: String, generic_params: [TGenericParam], span: Span, diagnostics: &[Diagnostic]) -> SemaCallMethodCandidate? {
     if type_args.len() > 0 {
-        &diagnostics.push(sema_error("E0119", span, "`{method.declaration.name}` is not generic", "trait method declarations do not carry independent type parameters", "remove the explicit method type arguments"))
+        diagnostics.push(sema_error("E0119", span, "`{method.declaration.name}` is not generic", "trait method declarations do not carry independent type parameters", "remove the explicit method type arguments"))
         return None
     }
     if method.parameters.len() == 0 || method.declaration.params.len() == 0 || method.declaration.params[0].name != "self" {
@@ -591,7 +591,7 @@ sema_call_trait_method_candidates: fn(graph: SemaRegistrationGraph, receiver_typ
         .TraitObject(bounds) -> {
             loop bound in bounds {
                 row: sema_call_trait_row_for_bound(graph, bound) ?? next
-                sema_call_trait_rows_push(graph, &trait_rows, row)
+                sema_call_trait_rows_push(graph, trait_rows, row)
             }
         }
         else -> {
@@ -610,9 +610,9 @@ sema_call_trait_method_candidates: fn(graph: SemaRegistrationGraph, receiver_typ
             first_match = true
             loop bound in current.bounds {
                 if sema_call_trait_row_for_symbol(graph, bound) == .Val(row) {
-                    sema_call_trait_rows_push(graph, &trait_rows, row)
+                    sema_call_trait_rows_push(graph, trait_rows, row)
                 } else {
-                    &owned_bounds.push(bound.copy())
+                    owned_bounds.push(bound.copy())
                 }
             }
         }
@@ -623,20 +623,20 @@ sema_call_trait_method_candidates: fn(graph: SemaRegistrationGraph, receiver_typ
         if !sema_call_trait_visible(graph, nominal, caller_module, caller_package) -> next
         loop trait_method in nominal.trait_methods {
             if trait_method.declaration.name != method -> next
-            candidate: sema_call_trait_method_candidate_from_registration(graph, nominal, trait_method, resolved_receiver, type_args, caller_module, generic_params, span, &diagnostics) ?? next
+            candidate: sema_call_trait_method_candidate_from_registration(graph, nominal, trait_method, resolved_receiver, type_args, caller_module, generic_params, span, diagnostics) ?? next
             duplicate: loop existing in candidates {
                 if existing.method.symbol.key == candidate.method.symbol.key {
                     break true
                 }
             } ?? false
-            if !duplicate -> &candidates.push(candidate)
+            if !duplicate -> candidates.push(candidate)
         }
         if first_match && candidates.len() > 0 -> break
     }
     if candidates.len() > 0 -> return candidates
     loop bound in owned_bounds {
-        candidate: sema_call_owned_trait_method_candidate(graph, bound, resolved_receiver, method, type_args, caller_module, generic_params, span, &diagnostics) ?? next
-        &candidates.push(candidate)
+        candidate: sema_call_owned_trait_method_candidate(graph, bound, resolved_receiver, method, type_args, caller_module, generic_params, span, diagnostics) ?? next
+        candidates.push(candidate)
         break
     }
     candidates
@@ -670,11 +670,11 @@ sema_call_owned_trait_method_candidate: fn(graph: SemaRegistrationGraph, bound: 
         else -> AccessConvention.Read
     }
     if type_args.len() > 0 {
-        &diagnostics.push(sema_error("E0119", span, "`{method}` is not generic", "trait method declarations do not carry independent type parameters", "remove the explicit method type arguments"))
+        diagnostics.push(sema_error("E0119", span, "`{method}` is not generic", "trait method declarations do not carry independent type parameters", "remove the explicit method type arguments"))
         return None
     }
     params := [Type]{receiver_type.copy()}
-    loop param in found.params -> &params.push(sema_type_resolve_declared_with_generics(graph, param.ty, caller_module, generic_params))
+    loop param in found.params -> params.push(sema_type_resolve_declared_with_generics(graph, param.ty, caller_module, generic_params))
     declared_return: if found.returns == {
         .Val(returned) -> if returned == {
             .Result(ok, _) -> Val(ok.copy())
@@ -688,7 +688,7 @@ sema_call_owned_trait_method_candidate: fn(graph: SemaRegistrationGraph, bound: 
     }
     SemaCallMethodCandidate{
         method: TMethodRef{symbol: symbol_id(SymbolKind.Function, "", trait_name, method), name: method, mangled: false, trait_owner: Val(builtin.id.copy()), operator_identity: None},
-        signature: Type.Fn{params: ^params, ret: ret, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None},
+        signature: Type.Fn{params: params.move(), ret: ret, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None},
         receiver_type: Val(receiver_type.copy()),
         receiver_convention: convention,
         receiver_offset: 1,
@@ -719,7 +719,7 @@ sema_call_implemented_trait_method_candidates: fn(graph: SemaRegistrationGraph, 
             if written -> next
             trait_row: sema_call_trait_row_for_symbol(graph, trait_symbol.id) ?? next
             delegated: graph.modules[graph_module_index].impls[implementation_index].delegation_field != .None
-            sema_call_unwritten_trait_method_candidates(graph, trait_row, delegated, receiver_type, method, type_args, caller_module, caller_package, generic_params, span, &diagnostics, &candidates)
+            sema_call_unwritten_trait_method_candidates(graph, trait_row, delegated, receiver_type, method, type_args, caller_module, caller_package, generic_params, span, diagnostics, candidates)
         }
     }
     if nominal.source == .SourceAST(item) {
@@ -730,7 +730,7 @@ sema_call_implemented_trait_method_candidates: fn(graph: SemaRegistrationGraph, 
             }
             if written -> next
             trait_row: sema_checked_trait_nominal_row(graph, nominal.symbol.module_name, block.trait_name) ?? next
-            sema_call_unwritten_trait_method_candidates(graph, trait_row, block.delegation_field != None, receiver_type, method, type_args, caller_module, caller_package, generic_params, span, &diagnostics, &candidates)
+            sema_call_unwritten_trait_method_candidates(graph, trait_row, block.delegation_field != None, receiver_type, method, type_args, caller_module, caller_package, generic_params, span, diagnostics, candidates)
         }
     }
     candidates
@@ -744,12 +744,12 @@ sema_call_unwritten_trait_method_candidates: fn(graph: SemaRegistrationGraph, tr
     loop trait_method in trait_nominal.trait_methods {
         if trait_method.declaration.name != method -> next
         if !delegated && trait_method.declaration.default_body == .None -> next
-        candidate: sema_call_trait_method_candidate_from_registration(graph, trait_nominal, trait_method, receiver_type, type_args, caller_module, generic_params, span, &diagnostics) ?? next
+        candidate: sema_call_trait_method_candidate_from_registration(graph, trait_nominal, trait_method, receiver_type, type_args, caller_module, generic_params, span, diagnostics) ?? next
         duplicate: loop existing in candidates {
             if existing.method.symbol.key == candidate.method.symbol.key {
                 break true
             }
         } ?? false
-        if !duplicate -> &candidates.push(candidate)
+        if !duplicate -> candidates.push(candidate)
     }
 }

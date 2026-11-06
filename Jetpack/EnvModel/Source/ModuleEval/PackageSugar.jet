@@ -43,9 +43,9 @@ envmodel_extract_packages: fn(value: Expr, src: String) -> ExtractedPackages Env
         item: piece.trim()
         if item == "" -> next
         if item.starts_with(PKG_ADAPT) {
-            &out.adapters.push(envmodel_parse_adapter(item))
+            out.adapters.push(envmodel_parse_adapter(item))
         } else {
-            &plain.push(item)
+            plain.push(item)
         }
     }
     out.packages = Pkg.parse_list(plain.join(", "))
@@ -78,14 +78,14 @@ envmodel_sugar_split_top_level: fn(body: String) -> [String] Never! {
             41 | 93 | 125 -> depth -= 1
             44 -> {
                 if depth == 0 {
-                    &out.push(pkg_bytes_text(raw, start, index))
+                    out.push(pkg_bytes_text(raw, start, index))
                     start = index + 1
                 }
             }
             else -> {}
         }
     }
-    if start < raw.len() { &out.push(pkg_bytes_text(raw, start, raw.len())) }
+    if start < raw.len() { out.push(pkg_bytes_text(raw, start, raw.len())) }
     out
 }
 
@@ -154,7 +154,7 @@ envmodel_parse_build_steps: fn(args: String) -> [BuildStep] EnvModelEvalError! {
     loop piece in envmodel_sugar_split_top_level(body) {
         item: piece.trim()
         if item == "" -> next
-        &steps.push(envmodel_parse_build_step(item))
+        steps.push(envmodel_parse_build_step(item))
     }
     if steps.len() == 0 -> return Err(envmodel_adapter_shape())
     Ok(steps)
@@ -215,7 +215,7 @@ envmodel_sugar_named_fields: fn(args: String) -> [SugarField]? Never! {
         name: halves.before.trim()
         value: halves.after.trim()
         if name == "" || value == "" -> return None
-        &fields.push(SugarField{name: name, value: value})
+        fields.push(SugarField{name: name, value: value})
     }
     Val(fields)
 }
@@ -226,7 +226,7 @@ envmodel_sugar_validate_fields: fn(args: String, allowed: [String]) EnvModelEval
     seen := [String]{}
     loop field in fields {
         if !allowed.contains(field.name) || seen.contains(field.name) -> return Err(envmodel_adapter_shape())
-        &seen.push(field.name)
+        seen.push(field.name)
     }
 }
 
@@ -243,7 +243,7 @@ envmodel_sugar_required_strings: fn(args: String, key: String) -> [String] EnvMo
     strings := [String]{}
     loop piece in envmodel_sugar_split_top_level(trimmed.removeprefix("[").removesuffix("]")) {
         text: envmodel_sugar_unquote(piece.trim()) ?? return Err(envmodel_adapter_shape())
-        &strings.push(text)
+        strings.push(text)
     }
     Ok(strings)
 }

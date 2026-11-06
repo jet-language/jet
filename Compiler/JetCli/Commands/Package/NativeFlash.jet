@@ -24,7 +24,7 @@ JetCLINativeFlashHost: struct {
             Ok(flash_paths.of(resolved))
         }
         metadata: fn(&self, path: Path) -> JetCLIFlashMetadata JetCLIFlashError! {
-            &self.symlink_metadata(path)
+            self.symlink_metadata(path)
         }
         sha256_file: fn(&self, path: Path) -> String JetCLIFlashError! {
             bytes: cli_files.read_bytes(path.raw) ?? return Err(jet_cli_flash_error("{err}"))
@@ -51,7 +51,7 @@ jet_cli_flash_execute: fn(plan: JetCLIFlashPlan) -[FS, Env, Exec, Time.Wait]> Je
     args := [String]{}
     // copy: `plan.argv[index]` stays with the caller (`plan` is a read parameter: no move out of
     // it, E0201) and the pushed row owns its own.
-    loop index in 1..<plan.argv.len() -> &args.push(plan.argv[index].copy())
+    loop index in 1..<plan.argv.len() -> args.push(plan.argv[index].copy())
     executed: foundation_run_native_sandboxed(plan.executable.raw, args, source, Val(output), [String:String]{}, false)
     cli_files.remove_all(output) ?? ()
     if executed == {

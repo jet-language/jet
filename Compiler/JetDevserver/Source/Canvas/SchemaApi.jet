@@ -392,7 +392,7 @@ run_jet_command: fn(cwd: OSPath, args: [String]) -> Output Err! {
     if current_exe() == .Ok(exe) {
         command := Command.new(exe) // GATE #4494
         command.args(args).current_dir(cwd)
-        if command_output_bounded(&command, MAX_CHILD_OUTPUT_BYTES) is {
+        if command_output_bounded(command, MAX_CHILD_OUTPUT_BYTES) is {
             .Ok(output) -> { return .Ok(output) }
             .Err(error) && error.kind() == ErrorKind.NotFound -> {} // GATE #4409
             .Err(error) -> { return .Err(query_error("resource_limit", error.to_string())) }
@@ -400,7 +400,7 @@ run_jet_command: fn(cwd: OSPath, args: [String]) -> Output Err! {
     }
     command := Command.new("jet") // GATE #4494
     command.args(args).current_dir(cwd)
-    command_output_bounded(&command, MAX_CHILD_OUTPUT_BYTES).map_err((error) -> query_error("resource_limit", error.to_string()))
+    command_output_bounded(command, MAX_CHILD_OUTPUT_BYTES).map_err((error) -> query_error("resource_limit", error.to_string()))
 }
 apply_transaction_json: fn(path: OSPath, request: String) -> String Err! {
     apply_transaction_json_inner(path, request).map((payload) -> canvas_machine_success("canvas.edit", payload)).map_err((error) -> canvas_machine_error("canvas.edit", error))

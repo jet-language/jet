@@ -99,8 +99,8 @@ p2_record: fn() Never! {
     }
     p2_require(rejected, "index path traversal refused")
     index := jet_cli_record_index_new(U64{1024}) ?? panic("record index")
-    jet_cli_record_index_update(&index, decoded) ?? panic("record update")
-    retained: jet_cli_record_index_save_replay(&index, decoded.artifact_id, decoded.identity, ".jet/replays/saved.jetreplay", U64{64}) ?? panic("save replay")
+    jet_cli_record_index_update(index, decoded) ?? panic("record update")
+    retained: jet_cli_record_index_save_replay(index, decoded.artifact_id, decoded.identity, ".jet/replays/saved.jetreplay", U64{64}) ?? panic("save replay")
     p2_require(retained.saved && retained.path == ".jet/replays/saved.jetreplay" && retained.size == U64{64} && retained.recorded_sequence == decoded.recorded_sequence, "save replay preserves row identity and sequence")
 }
 

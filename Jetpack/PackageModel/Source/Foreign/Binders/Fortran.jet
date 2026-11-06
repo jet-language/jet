@@ -129,7 +129,7 @@ pkg_fortran_bind: fn(source_path: String, source: String, lib: String, cache_dir
     if has_arrays {
         pkg_binder_write(bridge_source, pkg_fortran_render_bridge(module_name, lib, routines), "could not write the Fortran array bridge")
         pkg_fortran_compile(bridge_source, bridge_object, cache_dir)
-        &archive_command.push(bridge_object)
+        archive_command.push(bridge_object)
     }
     output: pkg_binder_capture(archive_command, None, "ar", FORTRAN_TOOL_ACTION)
     if !output.success -> return Err(ForeignBindError.ToolFailed{tool: "ar", action: FORTRAN_TOOL_ACTION, detail: pkg_fortran_launder(output.stderr)})
@@ -140,16 +140,16 @@ pkg_fortran_bind: fn(source_path: String, source: String, lib: String, cache_dir
     layouts := [FortranArrayLayoutFact]{}
     bound := [String]{}
     loop routine in routines {
-        &bound.push(routine.jet_name)
+        bound.push(routine.jet_name)
         loop entry in routine.params {
             if entry.param == {
-                .Array(_, extents) -> &layouts.push(FortranArrayLayoutFact{routine: routine.jet_name, parameter: entry.name, extents: extents, order: FORTRAN_COLUMN_MAJOR})
+                .Array(_, extents) -> layouts.push(FortranArrayLayoutFact{routine: routine.jet_name, parameter: entry.name, extents: extents, order: FORTRAN_COLUMN_MAJOR})
                 .Scalar(_) -> {}
             }
         }
     }
     provenance := "schema={FORTRAN_BIND_SCHEMA}\n"
-    pkg_binder_append_artifact_boundary(&provenance, ForeignLanguage.Fortran, "Fortran", lib, source_path, archive, "gfortran=-c;-fPIC;-ffree-line-length-none/ar")
+    pkg_binder_append_artifact_boundary(provenance, ForeignLanguage.Fortran, "Fortran", lib, source_path, archive, "gfortran=-c;-fPIC;-ffree-line-length-none/ar")
     Ok(FortranBindResult{source: generated, bound: bound, archive: archive, layouts: layouts, provenance: provenance})
 }
 
@@ -193,7 +193,7 @@ pkg_fortran_parse_routines: fn(source: String) -> [FortranRoutine] ForeignBindEr
         names := [String]{}
         loop raw_name in pkg_binder_slice(header, open + 1, close).split(",") {
             name: raw_name.trim()
-            if name != "" -> &names.push(name)
+            if name != "" -> names.push(name)
         }
         symbol: pkg_fortran_parse_bind_name(header) ?? return Err(ForeignBindError.Source("function `{jet_name}` must declare `bind(C, name=\"...\")`"))
         result_name: pkg_fortran_parse_result_name(header) ?? jet_name
@@ -202,7 +202,7 @@ pkg_fortran_parse_routines: fn(source: String) -> [FortranRoutine] ForeignBindEr
         loop i < lines.len() {
             body: pkg_fortran_strip_comment(lines[i]).trim()
             if pkg_ascii_lower(body).starts_with("end function") -> break
-            if body.contains("::") -> &declarations.push(body)
+            if body.contains("::") -> declarations.push(body)
             i += 1
         }
         params := [FortranNamedParam]{}
@@ -219,11 +219,11 @@ pkg_fortran_parse_routines: fn(source: String) -> [FortranRoutine] ForeignBindEr
                     FortranParam.Scalar(declaration.scalar)
                 }
             }
-            &params.push(FortranNamedParam{name: name, param: param})
+            params.push(FortranNamedParam{name: name, param: param})
         }
         result_decl: pkg_fortran_find_decl(declarations, result_name) ?? return Err(ForeignBindError.Source("result `{result_name}` in `{jet_name}` needs an explicit ISO_C_BINDING declaration"))
         if result_decl.extents != None -> return Err(ForeignBindError.Source("result `{result_name}` in `{jet_name}` must be a scalar"))
-        &routines.push(FortranRoutine{jet_name: jet_name, symbol: symbol, params: params, result: result_decl.scalar})
+        routines.push(FortranRoutine{jet_name: jet_name, symbol: symbol, params: params, result: result_decl.scalar})
         i += 1
     }
     if routines.len() == 0 -> return Err(ForeignBindError.Source("no supported `function ... bind(C, name=\"...\")` routines were found"))
@@ -271,7 +271,7 @@ pkg_fortran_find_decl: fn(declarations: [String], name: String) -> FortranDeclar
                 parsed := [Int]{}
                 loop part in raw.split(",") {
                     extent: pkg_fortran_parse_extent(part.trim()) ?? return None
-                    &parsed.push(extent)
+                    parsed.push(extent)
                 }
                 if parsed.len() == 0 -> return None
                 extents = Val(parsed)
@@ -317,14 +317,14 @@ pkg_fortran_split_top_level: fn(value: String) -> [String] Never! {
             }
             44 -> {
                 if depth == 0 {
-                    &parts.push(pkg_bytes_text(raw, start, index).trim())
+                    parts.push(pkg_bytes_text(raw, start, index).trim())
                     start = index + 1
                 }
             }
             else -> {}
         }
     }
-    &parts.push(pkg_bytes_text(raw, start, raw.len()).trim())
+    parts.push(pkg_bytes_text(raw, start, raw.len()).trim())
     parts
 }
 
@@ -396,9 +396,9 @@ pkg_fortran_render: fn(lib: String, routines: [FortranRoutine]) -> String Never!
         args := [String]{}
         loop entry in routine.params {
             if entry.param == {
-                .Scalar(_) -> &args.push(entry.name)
+                .Scalar(_) -> args.push(entry.name)
                 .Array(_, extents) -> {
-                    loop index in 0..<pkg_fortran_product(extents) -> &args.push("{entry.name}[{index}]")
+                    loop index in 0..<pkg_fortran_product(extents) -> args.push("{entry.name}[{index}]")
                 }
             }
         }
@@ -412,9 +412,9 @@ pkg_fortran_abi_params: fn(params: [FortranNamedParam]) -> String Never! {
     parts := [String]{}
     loop entry in params {
         if entry.param == {
-            .Scalar(scalar) -> &parts.push("{entry.name}: {scalar.jet()}")
+            .Scalar(scalar) -> parts.push("{entry.name}: {scalar.jet()}")
             .Array(scalar, extents) -> {
-                loop index in 0..<pkg_fortran_product(extents) -> &parts.push("{entry.name}_{index}: {scalar.jet()}")
+                loop index in 0..<pkg_fortran_product(extents) -> parts.push("{entry.name}_{index}: {scalar.jet()}")
             }
         }
     }
@@ -423,7 +423,7 @@ pkg_fortran_abi_params: fn(params: [FortranNamedParam]) -> String Never! {
 
 pkg_fortran_params: fn(params: [FortranNamedParam]) -> String Never! {
     parts := [String]{}
-    loop entry in params -> &parts.push("{entry.name}: {entry.param.jet()}")
+    loop entry in params -> parts.push("{entry.name}: {entry.param.jet()}")
     "({parts.join(", ")})"
 }
 
@@ -436,9 +436,9 @@ pkg_fortran_render_bridge: fn(module_name: String, lib: String, routines: [Fortr
         args := [String]{}
         loop entry in routine.params {
             if entry.param == {
-                .Scalar(_) -> &args.push(entry.name)
+                .Scalar(_) -> args.push(entry.name)
                 .Array(_, extents) -> {
-                    loop index in 0..<pkg_fortran_product(extents) -> &args.push("{entry.name}_{index}")
+                    loop index in 0..<pkg_fortran_product(extents) -> args.push("{entry.name}_{index}")
                 }
             }
         }
@@ -449,7 +449,7 @@ pkg_fortran_render_bridge: fn(module_name: String, lib: String, routines: [Fortr
                 .Scalar(scalar) -> out = "{out}    {scalar.fortran()}, value: {entry.name}\n"
                 .Array(scalar, extents) -> {
                     expanded := [String]{}
-                    loop index in 0..<pkg_fortran_product(extents) -> &expanded.push("{entry.name}_{index}")
+                    loop index in 0..<pkg_fortran_product(extents) -> expanded.push("{entry.name}_{index}")
                     out = "{out}    {scalar.fortran()}, value: {expanded.join(", ")}\n"
                     out = "{out}    {scalar.fortran()} :: {entry.name}({pkg_fortran_join_ints(extents, ",")})\n"
                 }
@@ -463,7 +463,7 @@ pkg_fortran_render_bridge: fn(module_name: String, lib: String, routines: [Fortr
                         remaining := index
                         coordinates := [String]{}
                         loop extent in extents {
-                            &coordinates.push("{remaining % extent + 1}")
+                            coordinates.push("{remaining % extent + 1}")
                             remaining = remaining /% extent
                         }
                         out = "{out}    {entry.name}({coordinates.join(",")}) = {entry.name}_{index}\n"
@@ -473,7 +473,7 @@ pkg_fortran_render_bridge: fn(module_name: String, lib: String, routines: [Fortr
             }
         }
         names := [String]{}
-        loop entry in routine.params -> &names.push(entry.name)
+        loop entry in routine.params -> names.push(entry.name)
         out = "{out}    jet_result = jet_original({names.join(", ")})\n"
         out = "{out}  end function {bridge}\n"
     }
@@ -488,7 +488,7 @@ pkg_fortran_product: fn(extents: [Int]) -> Int Never! {
 
 pkg_fortran_join_ints: fn(values: [Int], separator: String) -> String Never! {
     parts := [String]{}
-    loop value in values -> &parts.push("{value}")
+    loop value in values -> parts.push("{value}")
     parts.join(separator)
 }
 

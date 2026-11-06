@@ -186,7 +186,7 @@ arm_table_edits: fn(diagnostics: [Diagnostic]) -> [TextEdit] {
         if diagnostic.code != "L0507" -> next
         if diagnostic.edit == .Val(edit) {
             assert(diagnostic.applicability == (Val(DiagnosticFixApplicability.Safe)))
-            &edits.push(edit)
+            edits.push(edit)
         }
     }
     edits
@@ -194,9 +194,9 @@ arm_table_edits: fn(diagnostics: [Diagnostic]) -> [TextEdit] {
 arm_table_applied: fn(source: String, edit: TextEdit) -> String {
     out := [U8]{}
     bytes: source.bytes()
-    loop index in 0..<edit.span.start -> &out.push(bytes[index])
-    loop byte in edit.new_text.bytes() -> &out.push(byte)
-    loop index in edit.span.end..<bytes.len() -> &out.push(bytes[index])
+    loop index in 0..<edit.span.start -> out.push(bytes[index])
+    loop byte in edit.new_text.bytes() -> out.push(byte)
+    loop index in edit.span.end..<bytes.len() -> out.push(bytes[index])
     String.from_bytes(out) ?? panic("edit preserves UTF-8 source boundaries")
 }
 // Not ported: fix_all's same_tree assertion is blocked on the production
@@ -267,7 +267,7 @@ arm_table_fix_all: fn(source: String) -> String {
 }
 
 #Test("marked_result_handler_line_is_an_effect_statement") {
-    program: value_block_parsed("\nrun: fn() {{\n    &writer.write(1) ? done -> print(done) ! err -> {{\n        print(err)\n    }}\n}}\n")
+    program: value_block_parsed("\nrun: fn() {{\n    writer.write(1) ? done -> print(done) ! err -> {{\n        print(err)\n    }}\n}}\n")
     handler: loop item in program.items {
         if item == .Func(function) && function.name == "run" {
             assert(function.body.len() == 1, "the handler is one statement")

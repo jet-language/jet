@@ -8,13 +8,13 @@ Recorder: struct {
 
 impl Recorder {
     key: fn(&self, name: String) Never! {
-        &self.events.push(DataEvent.Key(name))
+        self.events.push(DataEvent.Key(name))
     }
 }
 
 run: fn() {
     recorder := Recorder{events: [DataEvent]{}}
-    &recorder.key("name")
+    recorder.key("name")
     print(recorder.events.len())
     if recorder.events[0] == .Key(name) -> print(name)
 }

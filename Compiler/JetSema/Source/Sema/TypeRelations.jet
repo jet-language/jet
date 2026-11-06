@@ -585,27 +585,27 @@ SemaTypeAliasCycleRow: struct {
 
 sema_type_alias_references: fn(ty: Type, names: &[String]) Never! {
     if ty == {
-        .Named(name) -> { &names.push(name) }
+        .Named(name) -> { names.push(name) }
         .Apply(name, args) -> {
-            &names.push(name)
-            loop arg in args -> sema_type_alias_references(arg, &names)
+            names.push(name)
+            loop arg in args -> sema_type_alias_references(arg, names)
         }
         .List(inner) | .Shared(inner) | .Option(inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Tagged(_, inner) | .Quantity(inner, _) -> {
-            sema_type_alias_references(inner, &names)
+            sema_type_alias_references(inner, names)
         }
         .Map(key, _, value) | .Result(key, value) -> {
-            sema_type_alias_references(key, &names)
-            sema_type_alias_references(value, &names)
+            sema_type_alias_references(key, names)
+            sema_type_alias_references(value, names)
         }
         .Tuple(fields) -> {
-            loop field in fields -> sema_type_alias_references(field.ty, &names)
+            loop field in fields -> sema_type_alias_references(field.ty, names)
         }
         .Union(members) -> {
-            loop member in members -> sema_type_alias_references(member, &names)
+            loop member in members -> sema_type_alias_references(member, names)
         }
         .Fn(params, ret, _, _, _, _) -> {
-            loop parameter in params -> sema_type_alias_references(parameter, &names)
-            if ret == .Val(value) -> sema_type_alias_references(value, &names)
+            loop parameter in params -> sema_type_alias_references(parameter, names)
+            if ret == .Val(value) -> sema_type_alias_references(value, names)
         }
         else -> {}
     }
@@ -613,10 +613,10 @@ sema_type_alias_references: fn(ty: Type, names: &[String]) Never! {
 
 sema_type_alias_cycle_visit: fn(graph: &SemaRegistrationGraph, rows: [SemaTypeAliasCycleRow], at: Int, marks: &[Int], path: &[Int]) Never! {
     marks[at] = 1
-    &path.push(at)
+    path.push(at)
     loop target in rows[at].edges {
         if marks[target] == 0 {
-            sema_type_alias_cycle_visit(&graph, rows, target, &marks, &path)
+            sema_type_alias_cycle_visit(graph, rows, target, marks, path)
             next
         }
         if marks[target] == 1 {
@@ -625,20 +625,20 @@ sema_type_alias_cycle_visit: fn(graph: &SemaRegistrationGraph, rows: [SemaTypeAl
             chain := [String]{}
             loop index in start..<path.len() {
                 row: rows[path[index]]
-                &chain.push(graph.modules[row.module_index].nominals[row.row].symbol.name)
+                chain.push(graph.modules[row.module_index].nominals[row.row].symbol.name)
             }
             target_row: rows[target]
-            &chain.push(graph.modules[target_row.module_index].nominals[target_row.row].symbol.name)
+            chain.push(graph.modules[target_row.module_index].nominals[target_row.row].symbol.name)
             closing: rows[at]
             nominal: graph.modules[closing.module_index].nominals[closing.row]
             item: sema_registration_nominal_source_item(nominal.source) ?? return
             if item == .TypeAlias(definition) {
                 chain_text: chain.join(" -> ")
-                sema_registration_push_graph_diagnostic(&graph, closing.module_index, sema_error("E0394", definition.target_span, "type alias cycle: {chain_text}", "transparent type aliases must expand to a non-alias type", "break the cycle by making one target a concrete type"))
+                sema_registration_push_graph_diagnostic(graph, closing.module_index, sema_error("E0394", definition.target_span, "type alias cycle: {chain_text}", "transparent type aliases must expand to a non-alias type", "break the cycle by making one target a concrete type"))
             }
         }
     }
-    _ := &path.pop()
+    _ := path.pop()
     marks[at] = 2
 }
 
@@ -650,7 +650,7 @@ sema_type_alias_cycles_check: fn(graph: &SemaRegistrationGraph) Never! {
             // Read in place: binding the row copied every nominal, methods included.
             if graph.modules[module_index].nominals[row].kind != SemaRegistrationNominalKind.TypeAlias -> next
             positions[graph.modules[module_index].nominals[row].symbol.id.key] = rows.len()
-            &rows.push(SemaTypeAliasCycleRow{module_index: module_index, row: row, edges: [Int]{}})
+            rows.push(SemaTypeAliasCycleRow{module_index: module_index, row: row, edges: [Int]{}})
         }
     }
     loop at in 0..<rows.len() {
@@ -659,7 +659,7 @@ sema_type_alias_cycles_check: fn(graph: &SemaRegistrationGraph) Never! {
         item: sema_registration_nominal_source_item(nominal.source) ?? next
         if item == .TypeAlias(definition) {
             names := [String]{}
-            sema_type_alias_references(definition.target, &names)
+            sema_type_alias_references(definition.target, names)
             loop name in names {
                 bound := false
                 loop parameter in definition.type_params {
@@ -668,15 +668,15 @@ sema_type_alias_cycles_check: fn(graph: &SemaRegistrationGraph) Never! {
                 if bound -> next
                 resolved: sema_type_graph_lookup_symbol(graph, nominal.symbol.module_name, name) ?? next
                 target: positions.get(sema_resolved_key(graph, resolved)) ?? next
-                &rows[at].edges.push(target)
+                rows[at].edges.push(target)
             }
         }
     }
     marks := [Int]{}
-    loop _ in rows -> &marks.push(0)
+    loop _ in rows -> marks.push(0)
     path := [Int]{}
     loop at in 0..<rows.len() {
-        if marks[at] == 0 -> sema_type_alias_cycle_visit(&graph, rows, at, &marks, &path)
+        if marks[at] == 0 -> sema_type_alias_cycle_visit(graph, rows, at, marks, path)
     }
 }
 
@@ -826,23 +826,23 @@ sema_type_graph_declares_name: fn(graph: SemaRegistrationGraph, name: String) ->
 sema_type_unknown_written_names: fn(graph: SemaRegistrationGraph, caller: Int, ty: Type, span: Span, generic_names: [String], diagnostics: &[Diagnostic]) {
     if ty == {
         .Named(name) -> {
-            if sema_type_written_name_unknown(graph, caller, name, generic_names) -> &diagnostics.push(sema_unknown_type_name(name, span))
+            if sema_type_written_name_unknown(graph, caller, name, generic_names) -> diagnostics.push(sema_unknown_type_name(name, span))
         }
         .Apply(name, args) -> {
-            if sema_type_written_name_unknown(graph, caller, name, generic_names) -> sema_unknown_generic_type_name(name, span, &diagnostics)
-            loop arg in args -> sema_type_unknown_written_names(graph, caller, arg, span, generic_names, &diagnostics)
+            if sema_type_written_name_unknown(graph, caller, name, generic_names) -> sema_unknown_generic_type_name(name, span, diagnostics)
+            loop arg in args -> sema_type_unknown_written_names(graph, caller, arg, span, generic_names, diagnostics)
         }
-        .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> sema_type_unknown_written_names(graph, caller, inner, span, generic_names, &diagnostics)
+        .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> sema_type_unknown_written_names(graph, caller, inner, span, generic_names, diagnostics)
         .Map(key, _, value) | .Result(key, value) -> {
-            sema_type_unknown_written_names(graph, caller, key, span, generic_names, &diagnostics)
-            sema_type_unknown_written_names(graph, caller, value, span, generic_names, &diagnostics)
+            sema_type_unknown_written_names(graph, caller, key, span, generic_names, diagnostics)
+            sema_type_unknown_written_names(graph, caller, value, span, generic_names, diagnostics)
         }
         .Fn(params, ret, _, _, _, _) -> {
-            loop parameter in params -> sema_type_unknown_written_names(graph, caller, parameter, span, generic_names, &diagnostics)
-            if ret == .Val(value) -> sema_type_unknown_written_names(graph, caller, value, span, generic_names, &diagnostics)
+            loop parameter in params -> sema_type_unknown_written_names(graph, caller, parameter, span, generic_names, diagnostics)
+            if ret == .Val(value) -> sema_type_unknown_written_names(graph, caller, value, span, generic_names, diagnostics)
         }
-        .Union(members) -> loop member in members -> sema_type_unknown_written_names(graph, caller, member, span, generic_names, &diagnostics)
-        .Tuple(fields) -> loop field in fields -> sema_type_unknown_written_names(graph, caller, field.ty, span, generic_names, &diagnostics)
+        .Union(members) -> loop member in members -> sema_type_unknown_written_names(graph, caller, member, span, generic_names, diagnostics)
+        .Tuple(fields) -> loop field in fields -> sema_type_unknown_written_names(graph, caller, field.ty, span, generic_names, diagnostics)
         else -> {}
     }
 }
@@ -855,18 +855,18 @@ sema_type_unknown_measure_names: fn(graph: SemaRegistrationGraph, caller: Int, t
     if ty == {
         .FixedList(inner, len) -> {
             if sema_type_measure_unknown_name(graph, caller, len, generic_names) == .Val(unknown) {
-                &diagnostics.push(sema_error("E0963", span, "a fixed-size list length must resolve to a compile-time integer", "the measure name `{unknown}` is not a declared constant or module value parameter", "use an integer literal, an integer constant, or a module Int value argument"))
+                diagnostics.push(sema_error("E0963", span, "a fixed-size list length must resolve to a compile-time integer", "the measure name `{unknown}` is not a declared constant or module value parameter", "use an integer literal, an integer constant, or a module Int value argument"))
                 return
             }
-            sema_type_unknown_measure_names(graph, caller, inner, span, generic_names, &diagnostics)
+            sema_type_unknown_measure_names(graph, caller, inner, span, generic_names, diagnostics)
         }
-        .Apply(_, args) | .Union(args) -> loop arg in args -> sema_type_unknown_measure_names(graph, caller, arg, span, generic_names, &diagnostics)
-        .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> sema_type_unknown_measure_names(graph, caller, inner, span, generic_names, &diagnostics)
+        .Apply(_, args) | .Union(args) -> loop arg in args -> sema_type_unknown_measure_names(graph, caller, arg, span, generic_names, diagnostics)
+        .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> sema_type_unknown_measure_names(graph, caller, inner, span, generic_names, diagnostics)
         .Map(key, _, value) | .Result(key, value) -> {
-            sema_type_unknown_measure_names(graph, caller, key, span, generic_names, &diagnostics)
-            sema_type_unknown_measure_names(graph, caller, value, span, generic_names, &diagnostics)
+            sema_type_unknown_measure_names(graph, caller, key, span, generic_names, diagnostics)
+            sema_type_unknown_measure_names(graph, caller, value, span, generic_names, diagnostics)
         }
-        .Tuple(fields) -> loop field in fields -> sema_type_unknown_measure_names(graph, caller, field.ty, span, generic_names, &diagnostics)
+        .Tuple(fields) -> loop field in fields -> sema_type_unknown_measure_names(graph, caller, field.ty, span, generic_names, diagnostics)
         else -> {}
     }
 }
@@ -895,28 +895,28 @@ sema_type_measure_unknown_name: fn(graph: SemaRegistrationGraph, caller: Int, me
 // (sema_check_failure_contract_type); its misspelled signature types still
 // report alongside the misspelled member (#6294, collect-all).
 sema_type_signature_unknown_names: fn(graph: SemaRegistrationGraph, caller: Int, diagnostics: &[Diagnostic]) {
-    loop function in graph.modules[caller].functions -> sema_type_func_unknown_names(graph, caller, function.declaration, [String]{}, &diagnostics)
+    loop function in graph.modules[caller].functions -> sema_type_func_unknown_names(graph, caller, function.declaration, [String]{}, diagnostics)
     loop nominal in graph.modules[caller].nominals {
         owner_names: loop param in nominal.generic_params -> param.name
-        loop method in nominal.methods -> sema_type_func_unknown_names(graph, caller, method.declaration, owner_names, &diagnostics)
+        loop method in nominal.methods -> sema_type_func_unknown_names(graph, caller, method.declaration, owner_names, diagnostics)
     }
     loop implementation in graph.modules[caller].impls {
         if implementation.compiler_generated -> next
         owner_names := [String]{}
         loop nominal in graph.modules[caller].nominals {
             if nominal.symbol.name == implementation.target_type_name {
-                loop param in nominal.generic_params -> &owner_names.push(param.name)
+                loop param in nominal.generic_params -> owner_names.push(param.name)
             }
         }
-        loop method in implementation.methods -> sema_type_func_unknown_names(graph, caller, method.declaration, owner_names, &diagnostics)
+        loop method in implementation.methods -> sema_type_func_unknown_names(graph, caller, method.declaration, owner_names, diagnostics)
     }
 }
 
 sema_type_func_unknown_names: fn(graph: SemaRegistrationGraph, caller: Int, func: Func, owner_names: [String], diagnostics: &[Diagnostic]) {
     generic_names := owner_names.copy()
-    loop param in func.type_params -> &generic_names.push(param.name)
-    loop param in func.params -> sema_type_unknown_written_names(graph, caller, param.ty, param.ty_span, generic_names, &diagnostics)
-    if func.return_type == .Val(ty) -> sema_type_unknown_written_names(graph, caller, ty, func.return_type_span ?? func.name_span, generic_names, &diagnostics)
+    loop param in func.type_params -> generic_names.push(param.name)
+    loop param in func.params -> sema_type_unknown_written_names(graph, caller, param.ty, param.ty_span, generic_names, diagnostics)
+    if func.return_type == .Val(ty) -> sema_type_unknown_written_names(graph, caller, ty, func.return_type_span ?? func.name_span, generic_names, diagnostics)
 }
 
 sema_type_resolve_declared_recursive: fn(graph: SemaRegistrationGraph, ty: Type, caller: Int, generic_params: [TGenericParam]) -> Type Never! {
@@ -1749,7 +1749,7 @@ sema_type_core_leaf_name: fn(graph: SemaRegistrationGraph, name: String, caller:
     last: parts.len() - 1
     leaf: parts[last]
     owner_parts := [String]{}
-    loop index in 0..<last -> &owner_parts.push(parts[index])
+    loop index in 0..<last -> owner_parts.push(parts[index])
     module_name: sema_registration_module_name(graph, owner_parts.join("::")) ?? return None
     if module_name == "core.crypto" -> return None
     if typed_head_kind_of(Type.Named{name: leaf}) != None && boundary_head_carrier_module(leaf) != Val(module_name) -> return None

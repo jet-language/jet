@@ -23,5 +23,5 @@ run: fn() {
     stream: net.tcp_connect(addr) ?? panic("connect")
     stream.write_all("GET /live HTTP/1.1{cr}\nHost: local{cr}\nUpgrade: websocket{cr}\nConnection: Upgrade{cr}\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ=={cr}\n{cr}\n".bytes()) ?? panic("write")
     stream.close() ?? panic("close")
-    ^serving.join() ?? panic("server join")
+    serving.join() ?? panic("server join")
 }

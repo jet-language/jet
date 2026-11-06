@@ -1,5 +1,5 @@
 // E0222/E0223: a `#Persist`, mutable, or `#Static` module binding owns one
-// shared storage cell. A mutable borrow (the write-access marker `&` or a
+// shared storage cell. A mutable borrow (a `&` parameter or a
 // mutating receiver) would let access escape that cell (E0223), except for a
 // `#Persist` cell, which is mutable module state lent like a local; a move
 // may take the cell as a whole but never one part of it (E0222).
@@ -43,18 +43,18 @@ sema_ownership_push_once: fn(diagnostic: Diagnostic, diagnostics: &[Diagnostic])
     loop previous in diagnostics {
         if previous.code == diagnostic.code && previous.span == diagnostic.span && previous.what == diagnostic.what -> return
     }
-    &diagnostics.push(diagnostic)
+    diagnostics.push(diagnostic)
 }
 
 // Rust `reject_static_mutable_borrow` for a static storage cell; any other
 // constant keeps Jet's E0202 static-binding report.
 sema_ownership_report_static_write: fn(state: &SemaOwnershipState, place: SemaOwnershipPlace, span: Span, diagnostics: &[Diagnostic]) {
     if !state.static_roots.contains(place.root_key) {
-        &diagnostics.push(sema_error("E0202", span, "cannot take write access to a static binding", "static storage is not mutable through a borrow", "copy the value into a mutable local before taking `&`"))
+        diagnostics.push(sema_error("E0202", span, "cannot take write access to a static binding", "static storage is not mutable through a borrow", "copy the value into a mutable local before taking `&`"))
         return
     }
     name: sema_ownership_place_name(place)
-    sema_ownership_push_once(sema_error("E0223", span, "A mutable borrow of `{name}` cannot escape its persistent or static storage cell", "Persistent and static state must be changed by computing a replacement and assigning the whole binding. A mutable borrow or mutating receiver would let access escape the cell.", "Compute an owned replacement, then assign the persistent or static binding as a whole instead of passing `{name}` with `&` or using a mutating receiver."), &diagnostics)
+    sema_ownership_push_once(sema_error("E0223", span, "A mutable borrow of `{name}` cannot escape its persistent or static storage cell", "Persistent and static state must be changed by computing a replacement and assigning the whole binding. A mutable borrow or mutating receiver would let access escape the cell.", "Compute an owned replacement, then assign the persistent or static binding as a whole instead of passing `{name}` with `&` or using a mutating receiver."), diagnostics)
 }
 
 // Rust `reject_partial_static_move`: an exact move of one projection of a
@@ -62,6 +62,6 @@ sema_ownership_report_static_write: fn(state: &SemaOwnershipState, place: SemaOw
 sema_ownership_reject_partial_static_move: fn(state: &SemaOwnershipState, place: SemaOwnershipPlace, expr: Expr, diagnostics: &[Diagnostic]) -> Bool {
     if place.projections.len() == 0 || !state.static_roots.contains(place.root_key) -> return false
     name: sema_ownership_place_name(place)
-    sema_ownership_push_once(sema_error("E0222", expr_span(expr), "A part of `{name}` cannot be moved independently", "Persistent and static storage is shared state; safe lowering can only take or replace the complete root.", "Move or take `{name}` as a whole, or update it atomically."), &diagnostics)
+    sema_ownership_push_once(sema_error("E0222", expr_span(expr), "A part of `{name}` cannot be moved independently", "Persistent and static storage is shared state; safe lowering can only take or replace the complete root.", "Move or take `{name}` as a whole, or update it atomically."), diagnostics)
     true
 }

@@ -172,11 +172,11 @@ XMLReader: struct {
     next: fn(&self) -[IO, Time.Wait]> Dyn? EncodingError! {
         if self.terminal == .Val(error) -> return Err(error.copy())
         loop {
-            candidate: if &self.scanner.next() == {
+            candidate: if self.scanner.next() == {
                 .Val(event) -> Val(event)
                 .None -> None
                 .Err(error) -> {
-                    return &self.fail(stream_error(error))
+                    return self.fail(stream_error(error))
                 }
             }
             if candidate == .Val(event) {
@@ -184,13 +184,13 @@ XMLReader: struct {
                 // Charge that projection before building so a hostile token
                 // fails closed without retaining the projected tree.
                 prospective: (event.raw_bytes.len() + event.bom.len()) * dyn_heap_cost()
-                if !self.allocation.charge(prospective) -> return &self.fail(heap_error(self.total))
+                if !self.allocation.charge(prospective) -> return self.fail(heap_error(self.total))
                 value: engine.stream_event_value(event)
                 full: value_heap_cost(value)
                 extra: max(full - prospective, 0)
                 if !self.allocation.charge(extra) {
                     self.allocation.release(prospective)
-                    return &self.fail(heap_error(self.total))
+                    return self.fail(heap_error(self.total))
                 }
                 self.allocation.release(prospective + extra)
                 return Val(value)
@@ -201,29 +201,29 @@ XMLReader: struct {
                 read_bytes = min(read_bytes, max(maximum - self.total, 0) + 1)
             }
             bytes := [U8]{}
-            if !stream.reserve(self.allocation, &bytes, read_bytes) -> return &self.fail(heap_error(self.total))
+            if !stream.reserve(self.allocation, bytes, read_bytes) -> return self.fail(heap_error(self.total))
             capacity: mem.__list_capacity<U8>(bytes)
-            count: encoding.__read_into(&self.input, &bytes, read_bytes) ?? {
+            count: encoding.__read_into(self.input, bytes, read_bytes) ?? {
                 self.allocation.release(capacity)
-                return &self.fail(io_error(self.total, err))
+                return self.fail(io_error(self.total, err))
             }
             if count == 0 {
                 self.allocation.release(capacity)
                 self.eof = true
-                &self.scanner.finish_input() ?? return &self.fail(stream_error(err))
+                self.scanner.finish_input() ?? return self.fail(stream_error(err))
             } else {
                 self.total += count
                 if self.limits.max_total_bytes == .Val(maximum) {
                     if self.total > maximum {
                         self.allocation.release(capacity)
-                        return &self.fail(EncodingError{format: .XML, kind: .Limit, byte_offset: self.total,
+                        return self.fail(EncodingError{format: .XML, kind: .Limit, byte_offset: self.total,
                             line: None, column: None, path: "", reason: "max_total_bytes {maximum} exceeded", cause: None})
                     }
                 }
                 window: bytes[0..<bytes.len()]
-                &self.scanner.push(window) ?? {
+                self.scanner.push(window) ?? {
                     self.allocation.release(capacity)
-                    return &self.fail(stream_error(err))
+                    return self.fail(stream_error(err))
                 }
                 self.allocation.release(capacity)
             }
@@ -231,7 +231,7 @@ XMLReader: struct {
     }
 }
 
-reader: fn(input: ^FileReader, limits: EncodingLimits{EncodingLimits.safe()}, xml: XMLParseOptions{XMLParseOptions.safe()}) -> XMLReader EncodingError! {
+reader: fn(input: &&FileReader, limits: EncodingLimits{EncodingLimits.safe()}, xml: XMLParseOptions{XMLParseOptions.safe()}) -> XMLReader EncodingError! {
     stream.validate_limits(limits) ?? {
         error := err
         error.format = .XML
@@ -267,8 +267,8 @@ XMLWriter: struct {
 
     write: fn(&self, event: Dyn) EncodingError! -[IO]> {
         if self.terminal == .Val(error) -> return Err(error.copy())
-        if self.finished -> return &self.fail(writer_error(.State, self.total, "write called after finish"))
-        bytes: &self.renderer.write(event) ?? {
+        if self.finished -> return self.fail(writer_error(.State, self.total, "write called after finish"))
+        bytes: self.renderer.write(event) ?? {
             // The engine marks lifecycle-order faults with a `[state] ` reason prefix.
             error := stream_error(err)
             error.byte_offset = self.total
@@ -276,24 +276,24 @@ XMLWriter: struct {
                 error.kind = .State
                 error.reason = error.reason.slice(8, error.reason.len())
             }
-            return &self.fail(error)
+            return self.fail(error)
         }
-        if !self.allocation.charge(bytes.len()) -> return &self.fail(heap_error(self.total))
+        if !self.allocation.charge(bytes.len()) -> return self.fail(heap_error(self.total))
         if bytes.len() > self.limits.max_item_bytes {
             self.allocation.release(bytes.len())
-            return &self.fail(writer_error(.Limit, self.total, "max_item_bytes {self.limits.max_item_bytes} exceeded"))
+            return self.fail(writer_error(.Limit, self.total, "max_item_bytes {self.limits.max_item_bytes} exceeded"))
         }
         next_total: self.total + bytes.len()
         if self.limits.max_total_bytes == .Val(maximum) {
             if next_total > maximum {
                 self.allocation.release(bytes.len())
-                return &self.fail(writer_error(.Limit, self.total, "max_total_bytes {maximum} exceeded"))
+                return self.fail(writer_error(.Limit, self.total, "max_total_bytes {maximum} exceeded"))
             }
         }
         window: bytes[0..<bytes.len()]
-        encoding.__write_bytes(&self.output, window) ?? {
+        encoding.__write_bytes(self.output, window) ?? {
             self.allocation.release(bytes.len())
-            return &self.fail(io_error(self.total, err))
+            return self.fail(io_error(self.total, err))
         }
         self.allocation.release(bytes.len())
         self.total = next_total
@@ -301,19 +301,19 @@ XMLWriter: struct {
 
     flush: fn(&self) EncodingError! -[IO]> {
         if self.terminal == .Val(error) -> return Err(error.copy())
-        encoding.__flush(&self.output) ?? return &self.fail(io_error(self.total, err))
+        encoding.__flush(self.output) ?? return self.fail(io_error(self.total, err))
     }
 
     finish: fn(&self) EncodingError! -[IO]> {
         if self.terminal == .Val(error) -> return Err(error.copy())
         if self.finished -> return
-        if !self.renderer.is_finished() -> return &self.fail(writer_error(.State, self.total, "finish requires document_end"))
-        &self.flush() ?? return Err(err)
+        if !self.renderer.is_finished() -> return self.fail(writer_error(.State, self.total, "finish requires document_end"))
+        self.flush() ?? return Err(err)
         self.finished = true
     }
 }
 
-writer: fn(output: ^FileWriter, limits: EncodingLimits{EncodingLimits.safe()}, xml: XMLRenderOptions{XMLRenderOptions.safe()}) -> XMLWriter EncodingError! {
+writer: fn(output: &&FileWriter, limits: EncodingLimits{EncodingLimits.safe()}, xml: XMLRenderOptions{XMLRenderOptions.safe()}) -> XMLWriter EncodingError! {
     stream.validate_limits(limits) ?? {
         error := err
         error.format = .XML

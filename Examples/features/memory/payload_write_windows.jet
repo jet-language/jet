@@ -24,7 +24,7 @@ Slot: enum {
 
 bump: fn(machine: &Machine) -> Bool {
     machine.n = machine.n + 1
-    &machine.log.push("bumped")
+    machine.log.push("bumped")
     true
 }
 
@@ -32,7 +32,7 @@ retire: fn(result: &Res) -> Bool {
     if &result.session == {
         None -> return false
         .Val(session) -> {
-            if !bump(&session.machine) -> return false
+            if !bump(session.machine) -> return false
             session.retired = true
         }
     }
@@ -55,15 +55,15 @@ double: fn(slot: &Slot) {
 
 run: fn() {
     result := Res{session: Val(Session{machine: Machine{n: 1, log: [String]{}}, retired: false}), count: Val(3)}
-    print(retire(&result))
-    tick(&result)
+    print(retire(result))
+    tick(result)
     session: result.session ?? return
     print(session.machine.n)
     print(session.machine.log.len())
     print(session.retired)
     print(result.count ?? 0)
     slot := Slot.Held(21)
-    double(&slot)
+    double(slot)
     if slot == {
         .Held(value) -> print(value)
         .Empty -> print("empty")

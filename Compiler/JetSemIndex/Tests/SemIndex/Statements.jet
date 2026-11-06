@@ -101,7 +101,7 @@ semindex_s11_call_inlays_filter_labels_and_dedup_variadic_slots: fn() {
         semindex_s11_arg(70, None, Val("tail"), Val(9)),
         semindex_s11_arg(80, None, Val("other"), Val(3)),
     }
-    semindex_collect_call_inlay_hints(&db, args, "main.jet")
+    semindex_collect_call_inlay_hints(db, args, "main.jet")
     assert_eq(db.inlay.len(), 3)
     assert_eq(db.inlay[0].label, "value: ")
     assert_eq(db.inlay[0].span, Span{start: 50, end: 50})
@@ -111,7 +111,7 @@ semindex_s11_call_inlays_filter_labels_and_dedup_variadic_slots: fn() {
     assert_eq(db.inlay[2].span, Span{start: 80, end: 80})
     loop hint in db.inlay -> assert_eq(hint.module_path, "main.jet")
     // Each call owns its own dedup set; slot9 in another call still gets a hint.
-    semindex_collect_call_inlay_hints(&db, [CallArg]{semindex_s11_arg(100, None, Val("tail"), Val(9))}, "other.jet")
+    semindex_collect_call_inlay_hints(db, [CallArg]{semindex_s11_arg(100, None, Val("tail"), Val(9))}, "other.jet")
     assert_eq(db.inlay.len(), 4)
     assert_eq(db.inlay[3].module_path, "other.jet")
     assert_eq(db.inlay[3].span, Span{start: 100, end: 100})
@@ -120,9 +120,9 @@ semindex_s11_loop_label_defs_use_ordinary_namespace_and_scope: fn() {
     db := SymbolDB.new()
     ctx := WalkCtx.new(0, "module:main.jet", [Span]{})
     ctx.caller = Val(CallerFrame{name: "run", owner: None, identity: "fn:module:main.jet::run"})
-    semindex_collect_loop_label_def(&db, ctx, None, "main.jet")
+    semindex_collect_loop_label_def(db, ctx, None, "main.jet")
     assert_eq(db.defs.len(), 0)
-    semindex_collect_loop_label_def(&db, ctx, Val(NamedSpan{name: "é外", span: Span{start: 3, end: 8}}), "main.jet")
+    semindex_collect_loop_label_def(db, ctx, Val(NamedSpan{name: "é外", span: Span{start: 3, end: 8}}), "main.jet")
     assert_eq(db.defs.len(), 1)
     assert_eq(db.defs[0].identity, "loop_label:fn:module:main.jet::run::é外")
     assert_eq(db.defs[0].name, "é外")
@@ -139,7 +139,7 @@ semindex_s11_body_restoration_assertions: fn(db: &SymbolDB, ctx: &WalkCtx, names
     slot: ctx.structural_slot
     kind: ctx.structural_slot_kind
     first: db.nodes.len()
-    semindex_collect_stmts(&db, &ctx, names, program, source, body, mp)
+    semindex_collect_stmts(db, ctx, names, program, source, body, mp)
     assert_eq(ctx.structural_parents, parents)
     assert_eq(ctx.structural_slot, slot)
     assert_eq(ctx.structural_slot_kind, kind)
@@ -151,7 +151,7 @@ semindex_s11_binding_assertions: fn(db: &SymbolDB, ctx: &WalkCtx, names: NameFac
     first_def: db.defs.len()
     first_hover: db.hover.len()
     first_inlay: db.inlay.len()
-    semindex_collect_binding(&db, &ctx, names, program, source, binding, mp)
+    semindex_collect_binding(db, ctx, names, program, source, binding, mp)
     if binding.pattern == .Val(pattern) {
         captures: bind_pattern_names(pattern)
         first_capture: db.defs.len() - captures.len()

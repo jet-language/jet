@@ -17,7 +17,7 @@ Hook: struct {
     }
 
     observe: fn(&self, path: String, stage: Stage) Never! -[IO]> {
-        &self.events.push(path.copy())
+        self.events.push(path.copy())
         self.react(path, stage)
     }
 }
@@ -32,8 +32,8 @@ announce: fn(path: String, stage: Stage) Never! -[IO]> {
 }
 
 walk: fn(path: String, hook: &Hook) -[IO]> {
-    &hook.observe(path, Stage.Node)
-    &hook.observe("{path}/leaf", Stage.Leaf)
+    hook.observe(path, Stage.Node)
+    hook.observe("{path}/leaf", Stage.Leaf)
 }
 
 notify: fn(react: fn(Int) Never!, n: Int) Never! { react(n) }
@@ -44,16 +44,16 @@ tally: fn(n: Int) Never! -[IO]> { print("tally {n}") }
 
 run: fn() {
     quiet := Hook.recording()
-    walk("root", &quiet)
+    walk("root", quiet)
     print("quiet events: {quiet.events.len()}")
 
     loud := Hook{events: [String]{}, react: announce}
-    walk("tree", &loud)
+    walk("tree", loud)
     print("loud events: {loud.events.len()}")
 
     label: "seen"
     captured := Hook{events: [String]{}, react: (path: String, stage: Stage) -[IO]> { print("{label} {path}") }}
-    walk("lambda", &captured)
+    walk("lambda", captured)
     print("captured events: {captured.events.len()}")
 
     notify(skip, 3)

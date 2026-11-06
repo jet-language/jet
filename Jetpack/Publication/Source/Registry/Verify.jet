@@ -43,7 +43,7 @@ publication_resolve_and_verify_all: fn(registry: PublicationRegistryConfig, name
     loop entry in all {
         publication_verify_entry_tier(entry)
         retained: publication_verify_index_entry(all, entry, registry.require_signed || entry.tier == .Community, registry.name)
-        &warnings.extend(retained)
+        warnings.extend(retained)
     }
     Ok(PublicationVerifiedEntries{entries: all, warnings: warnings})
 }
@@ -54,7 +54,7 @@ publication_resolve_and_verify: fn(registry: PublicationRegistryConfig, name: St
     verified: publication_resolve_and_verify_all(registry, name)
     live := [PublicationIndexEntry]{}
     loop entry in verified.entries {
-        if !entry.yanked -> &live.push(entry)
+        if !entry.yanked -> live.push(entry)
     }
     Ok(PublicationVerifiedEntries{entries: live, warnings: verified.warnings})
 }

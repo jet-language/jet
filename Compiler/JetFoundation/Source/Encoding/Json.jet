@@ -16,18 +16,18 @@ foundation_json_escape: fn(value: String) -> String Never! {
             else -> -1
         }
         if {
-            byte == 34 -> foundation_json_append(&out, "\\\"")
-            byte == 92 -> foundation_json_append(&out, "\\\\")
-            byte == 10 -> foundation_json_append(&out, "\\n")
-            byte == 13 -> foundation_json_append(&out, "\\r")
-            byte == 9 -> foundation_json_append(&out, "\\t")
+            byte == 34 -> foundation_json_append(out, "\\\"")
+            byte == 92 -> foundation_json_append(out, "\\\\")
+            byte == 10 -> foundation_json_append(out, "\\n")
+            byte == 13 -> foundation_json_append(out, "\\r")
+            byte == 9 -> foundation_json_append(out, "\\t")
             control >= 0 -> {
-                foundation_json_append(&out, "\\u00")
-                &out.push(hex[control >> 4])
-                &out.push(hex[control.bit_and(15)])
+                foundation_json_append(out, "\\u00")
+                out.push(hex[control >> 4])
+                out.push(hex[control.bit_and(15)])
                 if byte == 194 -> index += 1
             }
-            else -> &out.push(bytes[index])
+            else -> out.push(bytes[index])
         }
         index += 1
     }
@@ -40,7 +40,7 @@ foundation_json_quote: fn(value: String) -> String Never! {
 }
 
 foundation_json_append: fn(out: &[U8], text: String) Never! {
-    loop byte in text.bytes() -> &out.push(byte)
+    loop byte in text.bytes() -> out.push(byte)
 }
 
 // Rust `f64` Display (`value.to_string()`): the shortest round-trip digits,
@@ -70,7 +70,7 @@ foundation_float_display: fn(value: Float) -> String Never! {
             point = digits.len()
             next
         }
-        &digits.push(bytes[index])
+        digits.push(bytes[index])
     }
     if point < 0 -> point = digits.len()
     exponent_negative: bytes[exponent_at + 1] == (U8{45})
@@ -85,23 +85,23 @@ foundation_float_display: fn(value: Float) -> String Never! {
         point += exponent
     }
     out := [U8]{}
-    if negative -> &out.push(U8{45})
+    if negative -> out.push(U8{45})
     if point <= 0 {
-        foundation_json_append(&out, "0.")
-        loop _ in 0..<(0 - point) -> &out.push(U8{48})
-        loop digit in digits -> &out.push(digit)
+        foundation_json_append(out, "0.")
+        loop _ in 0..<(0 - point) -> out.push(U8{48})
+        loop digit in digits -> out.push(digit)
         return String.from_bytes(out) ?? panic("float display is ASCII")
     }
     loop index in 0..<point {
         if index < digits.len() {
-            &out.push(digits[index])
+            out.push(digits[index])
         } else {
-            &out.push(U8{48})
+            out.push(U8{48})
         }
     }
     if point < digits.len() {
-        &out.push(U8{46})
-        loop index in point..<digits.len() -> &out.push(digits[index])
+        out.push(U8{46})
+        loop index in point..<digits.len() -> out.push(digits[index])
     }
     String.from_bytes(out) ?? panic("float display is ASCII")
 }
@@ -109,23 +109,23 @@ foundation_float_display: fn(value: Float) -> String Never! {
 // Shared structural Debug quoting (formerly JetEval's value formatter).
 foundation_debug_quoted: fn(text: String, quote: Int) -> String Never! {
     out := [U8]{}
-    &out.push(U8{quote})
+    out.push(U8{quote})
     loop byte in text.bytes() {
         code: Int.from_u8(byte)
         if {
-            code == 92 -> foundation_json_append(&out, "\\\\")
+            code == 92 -> foundation_json_append(out, "\\\\")
             code == quote -> {
-                &out.push(U8{92})
-                &out.push(U8{quote})
+                out.push(U8{92})
+                out.push(U8{quote})
             }
-            code == 10 -> foundation_json_append(&out, "\\n")
-            code == 13 -> foundation_json_append(&out, "\\r")
-            code == 9 -> foundation_json_append(&out, "\\t")
-            code == 0 -> foundation_json_append(&out, "\\0")
-            code < 32 || code == 127 -> foundation_json_append(&out, "\\u{{{code.to_radix(16)}}}")
-            else -> &out.push(byte)
+            code == 10 -> foundation_json_append(out, "\\n")
+            code == 13 -> foundation_json_append(out, "\\r")
+            code == 9 -> foundation_json_append(out, "\\t")
+            code == 0 -> foundation_json_append(out, "\\0")
+            code < 32 || code == 127 -> foundation_json_append(out, "\\u{{{code.to_radix(16)}}}")
+            else -> out.push(byte)
         }
     }
-    &out.push(U8{quote})
+    out.push(U8{quote})
     String.from_bytes(out) ?? panic("Debug quoting preserves UTF-8")
 }

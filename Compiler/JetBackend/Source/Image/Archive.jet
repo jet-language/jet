@@ -70,13 +70,13 @@ link_read_archive: fn(path: String, bytes: [U8]) -> LinkArchive Never! {
     at := 8
     loop at + LINK_AR_HEADER_SIZE <= bytes.len() {
         if Int.from_u8(bytes[at + 58]) != 0x60 || Int.from_u8(bytes[at + 59]) != 0x0a {
-            &archive.errors.push("{path}: malformed member header at offset {at}")
+            archive.errors.push("{path}: malformed member header at offset {at}")
             return archive
         }
         size: link_ar_decimal(bytes, at + 48, 10)
         start: at + LINK_AR_HEADER_SIZE
         if start + size > bytes.len() {
-            &archive.errors.push("{path}: member at offset {at} runs past the end of the archive")
+            archive.errors.push("{path}: member at offset {at} runs past the end of the archive")
             return archive
         }
         first: Int.from_u8(bytes[at])
@@ -98,29 +98,29 @@ link_read_archive: fn(path: String, bytes: [U8]) -> LinkArchive Never! {
                 // `/<decimal>`: an offset into the long name table.
                 offset: link_ar_decimal(bytes, at + 1, 15)
                 if long_names_at < 0 || long_names_at + offset >= long_names_end {
-                    &archive.errors.push("{path}: member at offset {at} names a missing long name")
+                    archive.errors.push("{path}: member at offset {at} names a missing long name")
                     return archive
                 }
                 name = link_ar_text(bytes, long_names_at + offset, long_names_end, 0x2f)
             } else {
                 name = link_ar_text(bytes, at, at + 16, 0x2f)
             }
-            &ordinals.add(at, archive.names.len()).drop("member header offsets are unique")
-            &archive.names.push(name)
-            &archive.starts.push(start)
-            &archive.sizes.push(size)
+            ordinals.add(at, archive.names.len()).drop("member header offsets are unique")
+            archive.names.push(name)
+            archive.starts.push(start)
+            archive.sizes.push(size)
         }
         at = start + size + size % 2
     }
     if index_at < 0 {
-        &archive.errors.push("{path}: the archive has no symbol index (run `ranlib` on it)")
+        archive.errors.push("{path}: the archive has no symbol index (run `ranlib` on it)")
         return archive
     }
     count: link_ar_be(bytes, index_at, index_word)
     names_at := index_at + index_word * (count + 1)
     index_end: index_at + index_size
     if names_at > index_end {
-        &archive.errors.push("{path}: the symbol index is truncated")
+        archive.errors.push("{path}: the symbol index is truncated")
         return archive
     }
     loop k in 0..<count {
@@ -130,11 +130,11 @@ link_read_archive: fn(path: String, bytes: [U8]) -> LinkArchive Never! {
         name: String.from_bytes(bytes[names_at..<end]) ?? ""
         names_at = end + 1
         member: ordinals.get(header) ?? {
-            &archive.errors.push("{path}: symbol `{name}` points at offset {header}, which is not a member")
+            archive.errors.push("{path}: symbol `{name}` points at offset {header}, which is not a member")
             next
         }
-        &archive.symbol_names.push(name)
-        &archive.symbol_members.push(member)
+        archive.symbol_names.push(name)
+        archive.symbol_members.push(member)
     }
     archive
 }

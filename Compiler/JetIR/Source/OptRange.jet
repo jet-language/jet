@@ -231,10 +231,10 @@ ir_opt_int_facts: fn(m: IRModule, f: &IRFunction, s: &IRSsa) -> Int Never! {
         word: ty.kind == .Word
         narrow: word && ty.bits > 0 && ty.bits < 64
         if exact || word -> any = true
-        &r.ranged.push(exact || word)
-        &r.exact.push(exact)
-        &r.unsigned.push(word && !ty.signed)
-        &r.narrow.push(narrow)
+        r.ranged.push(exact || word)
+        r.exact.push(exact)
+        r.unsigned.push(word && !ty.signed)
+        r.narrow.push(narrow)
         cap_lo: if {
             !narrow -> IR_RANGE_LOW
             ty.signed -> 0 - (1 << (ty.bits - 1))
@@ -245,25 +245,25 @@ ir_opt_int_facts: fn(m: IRModule, f: &IRFunction, s: &IRSsa) -> Int Never! {
             ty.signed -> (1 << (ty.bits - 1)) - 1
             else -> (1 << ty.bits) - 1
         }
-        &r.cap_lo.push(cap_lo)
-        &r.cap_hi.push(cap_hi)
-        &r.known.push(false)
-        &r.lo.push(0)
-        &r.hi.push(0)
-        &r.inline.push(false)
+        r.cap_lo.push(cap_lo)
+        r.cap_hi.push(cap_hi)
+        r.known.push(false)
+        r.lo.push(0)
+        r.hi.push(0)
+        r.inline.push(false)
         kind: s.val_kind[value]
         home: if kind == .Def -> s.block[s.val_at[value]] else if kind == .Phi -> s.join_block[s.phi_join[s.val_at[value]]] else -> 0
-        &r.home.push(home)
-        &r.tested.push(false)
-        &r.lengths.push((exact || word) && !narrow && kind == .Def && ir_range_length_load(m, f, s.val_at[value]))
+        r.home.push(home)
+        r.tested.push(false)
+        r.lengths.push((exact || word) && !narrow && kind == .Def && ir_range_length_load(m, f, s.val_at[value]))
     }
     if !any -> return 0
     loop _ in 0..<s.preds.len() {
-        &r.cond.push(-1)
-        &r.holds.push(false)
-        &r.up.push(-1)
+        r.cond.push(-1)
+        r.holds.push(false)
+        r.up.push(-1)
     }
-    ir_range_conditions(f, s, &r)
+    ir_range_conditions(f, s, r)
     // Ascending rounds, widening late phi growth.
     round := 0
     changed := true
@@ -300,9 +300,9 @@ ir_opt_int_facts: fn(m: IRModule, f: &IRFunction, s: &IRSsa) -> Int Never! {
     if changed -> return 0
     // Descending rounds from the post-fixpoint, and again from the bounds
     // of the counted loops' accumulators.
-    ir_range_descend(f, s, &r, count)
-    if ir_range_counted(f, s, &r) -> ir_range_descend(f, s, &r, count)
-    ir_range_rewrite(m, &f, &s, r)
+    ir_range_descend(f, s, r, count)
+    if ir_range_counted(f, s, r) -> ir_range_descend(f, s, r, count)
+    ir_range_rewrite(m, f, s, r)
 }
 
 ir_range_descend: fn(f: IRFunction, s: IRSsa, r: &IRRanges, count: Int) Never! {
@@ -431,14 +431,14 @@ ir_range_conditions: fn(f: IRFunction, s: IRSsa, r: &IRRanges) Never! {
         if s.block[at] < 0 || at + 1 >= f.op.len() -> next
         op: f.op[at]
         if op == .If && s.use_a[at] >= 0 {
-            ir_range_decide(f, s, &r, at + 1, s.use_a[at], true)
-            if f.b[at] >= 0 && f.b[at] + 1 < f.op.len() -> ir_range_decide(f, s, &r, f.b[at] + 1, s.use_a[at], false)
+            ir_range_decide(f, s, r, at + 1, s.use_a[at], true)
+            if f.b[at] >= 0 && f.b[at] + 1 < f.op.len() -> ir_range_decide(f, s, r, f.b[at] + 1, s.use_a[at], false)
             // An If without an Else whose body never falls through (a stop
             // point): the code after its End runs only when the condition
             // failed (ir_range_decide's one-predecessor test).
-            if f.b[at] < 0 && f.c[at] + 1 < f.op.len() -> ir_range_decide(f, s, &r, f.c[at] + 1, s.use_a[at], false)
+            if f.b[at] < 0 && f.c[at] + 1 < f.op.len() -> ir_range_decide(f, s, r, f.c[at] + 1, s.use_a[at], false)
         }
-        if op == .BrIf && s.use_a[at] >= 0 -> ir_range_decide(f, s, &r, at + 1, s.use_a[at], false)
+        if op == .BrIf && s.use_a[at] >= 0 -> ir_range_decide(f, s, r, at + 1, s.use_a[at], false)
     }
     loop block in 1..<s.preds.len() {
         if r.cond[block] >= 0 {
@@ -878,7 +878,7 @@ ir_range_rewrite: fn(m: IRModule, f: &IRFunction, s: &IRSsa, r: IRRanges) -> Int
             if !r.exact[left] && !ir_range_word_fits(r, left, a, b, result) -> next
             f.c[at] = IR_OVERFLOW_WRAP
             rewritten += 1
-            ir_range_drop_point(&f, trap, at + 1)
+            ir_range_drop_point(f, trap, at + 1)
             next
         }
         if (op == .Div || op == .Rem || op == .FloorDiv || op == .Mod) && f.c[at] == IR_OVERFLOW_TRAP && ir_range_has(s, r, s.use_a[at]) && ir_range_has(s, r, s.use_b[at]) {
@@ -902,7 +902,7 @@ ir_range_rewrite: fn(m: IRModule, f: &IRFunction, s: &IRSsa, r: IRRanges) -> Int
             if !r.exact[left] || !ir_range_inline(a) || !ir_range_inline(b) || b.lo <= 0 -> next
             f.c[at] = IR_OVERFLOW_WRAP
             rewritten += 1
-            ir_range_drop_point(&f, trap, at + 1)
+            ir_range_drop_point(f, trap, at + 1)
             next
         }
         if (op == .BitAnd || op == .BitOr || op == .BitXor) && f.c[at] != IR_OVERFLOW_WRAP && ir_range_has(s, r, s.use_a[at]) && ir_range_has(s, r, s.use_b[at]) {
@@ -922,7 +922,7 @@ ir_range_rewrite: fn(m: IRModule, f: &IRFunction, s: &IRSsa, r: IRRanges) -> Int
             if !ir_range_inline(count) || count.lo < 0 || count.hi >= width -> next
             f.c[at] = IR_OVERFLOW_WRAP
             rewritten += 1
-            ir_range_drop_point(&f, trap, at + 1)
+            ir_range_drop_point(f, trap, at + 1)
             next
         }
         if ir_range_is_compare(op) && f.dst[at] >= 0 && ir_range_has(s, r, s.use_a[at]) && ir_range_has(s, r, s.use_b[at]) {
@@ -964,7 +964,7 @@ ir_range_rewrite: fn(m: IRModule, f: &IRFunction, s: &IRSsa, r: IRRanges) -> Int
             s.use_a[at] = used
             rewritten += 1
             // A native index call that is gone delivers no stop either.
-            if native_call -> ir_range_drop_point(&f, poll, at + 1)
+            if native_call -> ir_range_drop_point(f, poll, at + 1)
             next
         }
         if op == .CallRuntime && f.a[at] == fixed && f.c[at] == 5 && f.dst[at] >= 0 {
@@ -980,7 +980,7 @@ ir_range_rewrite: fn(m: IRModule, f: &IRFunction, s: &IRSsa, r: IRRanges) -> Int
             s.use_a[at] = used
             rewritten += 1
             // The call is gone, and with it the stop it could deliver.
-            ir_range_drop_point(&f, poll, at + 1)
+            ir_range_drop_point(f, poll, at + 1)
         }
     }
     rewritten
@@ -1007,16 +1007,16 @@ ir_range_loads: fn(m: IRModule, f: IRFunction, s: IRSsa) -> [Int] Never! {
     loads := [Int]{}
     open := [Bool]{}
     loop value in 0..<count {
-        &loads.push(-1)
-        &open.push(s.val_kind[value] == .Param && m.types[f.slot_type[s.val_slot[value]]].kind == .Aggregate)
+        loads.push(-1)
+        open.push(s.val_kind[value] == .Param && m.types[f.slot_type[s.val_slot[value]]].kind == .Aggregate)
     }
     // The words Stores write, as (base, offset) pairs.
     stored_bases := [Int]{}
     stored_offsets := [Int]{}
     loop at in 0..<f.op.len() {
         if f.op[at] == .Store && s.use_a[at] >= 0 {
-            &stored_bases.push(ir_ssa_find(s, s.use_a[at]))
-            &stored_offsets.push(f.b[at])
+            stored_bases.push(ir_ssa_find(s, s.use_a[at]))
+            stored_offsets.push(f.b[at])
         } else if f.op[at] != .Load && s.use_a[at] >= 0 {
             open[ir_ssa_find(s, s.use_a[at])] = false
         }
@@ -1048,9 +1048,9 @@ ir_range_loads: fn(m: IRModule, f: IRFunction, s: IRSsa) -> [Int] Never! {
             if bases[k] == base && offsets[k] == f.b[at] -> first = firsts[k]
         }
         if first == value {
-            &bases.push(base)
-            &offsets.push(f.b[at])
-            &firsts.push(value)
+            bases.push(base)
+            offsets.push(f.b[at])
+            firsts.push(value)
         }
         loads[value] = first
     }
@@ -1303,7 +1303,7 @@ ir_range_drop_point: fn(f: &IRFunction, key: Int, at: Int) Never! {
     branch: at + 1
     if f.op[branch] != .If || f.a[branch] != f.dst[at] || f.b[branch] >= 0 -> return
     end: f.c[branch]
-    loop k in at..<(end + 1) -> ir_opt_kill(&f, k)
+    loop k in at..<(end + 1) -> ir_opt_kill(f, k)
 }
 
 // How many stop points (calls of the trap or the stop poll) `f` has.

@@ -33,7 +33,7 @@ InputError: struct {
 
 acquire: fn(name: String) -> Lease { Lease{name: name.copy()} }
 
-release: fn(lease: ^Lease) { print("cleanup: released {lease.name}") }
+release: fn(lease: &&Lease) { print("cleanup: released {lease.name}") }
 
 checked_input: fn(value: String) -> String InputError! {
     if value == "bad" -> return Err(InputError{message: "input is not valid"})
@@ -54,6 +54,6 @@ run: fn() {
     }
     print("result: {message}")
 
-    release(^lease)
+    release(lease)
     print("main loop: jet run owns it")
 }

@@ -90,12 +90,12 @@ PackageGraph: struct {
     }
 
     add_catalog: fn(&self, entry: CatalogEntry) Never! {
-        &self.catalogs.push(entry)
+        self.catalogs.push(entry)
     }
 
     add_workspace_member: fn(&self, name: String, path: String) Never! {
         paths := self.workspace_members.get(name) ?? [String]{}
-        &paths.push(path)
+        paths.push(path)
         self.workspace_members[name] = paths
     }
 
@@ -106,14 +106,14 @@ PackageGraph: struct {
         if self.packages.get(owner_package) == {
             .Val(node) -> {
                 loop dep in node.direct_deps {
-                    &edges.push(VisibleEdge{owner_package: owner_package.copy(), dependency: dep.copy(), provider_ref: dep.copy(), kind: VisibleEdgeKind.DirectDep, rationale: "declared direct dependency"})
+                    edges.push(VisibleEdge{owner_package: owner_package.copy(), dependency: dep.copy(), provider_ref: dep.copy(), kind: VisibleEdgeKind.DirectDep, rationale: "declared direct dependency"})
                 }
             }
             .None -> {}
         }
         loop catalog in self.catalogs {
             if catalog.allowed_packages.contains(owner_package) {
-                &edges.push(VisibleEdge{owner_package: owner_package.copy(), dependency: catalog.logical_name.copy(), provider_ref: catalog.provider_ref.copy(), kind: VisibleEdgeKind.Catalog, rationale: catalog.rationale.copy()})
+                edges.push(VisibleEdge{owner_package: owner_package.copy(), dependency: catalog.logical_name.copy(), provider_ref: catalog.provider_ref.copy(), kind: VisibleEdgeKind.Catalog, rationale: catalog.rationale.copy()})
             }
         }
         provider_graph_stable_sort_edges(edges)
@@ -144,9 +144,9 @@ PackageGraph: struct {
     packages_using_hidden_dep: fn(self, dep: String) -> [String] Never! {
         names := [String]{}
         loop entry in self.packages {
-            if entry.value.transitive_deps.contains(dep) && !names.contains(entry.key) -> &names.push(entry.key)
+            if entry.value.transitive_deps.contains(dep) && !names.contains(entry.key) -> names.push(entry.key)
         }
-        &names.sort()
+        names.sort()
         names
     }
 }
@@ -158,9 +158,9 @@ provider_graph_stable_sort_edges: fn(edges: [VisibleEdge]) -> [VisibleEdge] Neve
         position := sorted.len()
         loop position > 0 && (sorted[position - 1].dependency <=> edge.dependency) == Ordering.Greater -> position -= 1
         shifted := [VisibleEdge]{}
-        loop index in 0..<position -> &shifted.push(sorted[index])
-        &shifted.push(edge)
-        loop index in position..<sorted.len() -> &shifted.push(sorted[index])
+        loop index in 0..<position -> shifted.push(sorted[index])
+        shifted.push(edge)
+        loop index in position..<sorted.len() -> shifted.push(sorted[index])
         sorted = shifted
     }
     sorted

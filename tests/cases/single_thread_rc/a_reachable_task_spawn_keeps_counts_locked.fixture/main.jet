@@ -1,6 +1,6 @@
 names: fn(count: Int) -> [String] {
     out := [String]{}
-    loop k in 0..<count -> &out.push("name {k}")
+    loop k in 0..<count -> out.push("name {k}")
     out
 }
 
@@ -8,5 +8,5 @@ run: fn() {
     first: names(3)
     second: first.copy()
     worker: task { 1 }
-    print(first.len() + second.len() + (^worker.join() ?? 0))
+    print(first.len() + second.len() + (worker.join() ?? 0))
 }

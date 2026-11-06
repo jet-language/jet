@@ -36,7 +36,7 @@ identifier_spans: fn(report: String) -> [Span] Err! {
         span: token.get("span") ?? return Err("token {index - 1} has no span")
         start: span.get("start") ?? return Err("token {index - 1} has no span start")
         end: span.get("end") ?? return Err("token {index - 1} has no span end")
-        &spans.push(Span{start: start.int() ?? 0, end: end.int() ?? 0})
+        spans.push(Span{start: start.int() ?? 0, end: end.int() ?? 0})
     }
     Ok(spans)
 }
@@ -76,11 +76,11 @@ rename_probe: fn() -[Env, Exec, FS, Time.Wait]> String Err! {
     at := 0
     loop span in spans {
         if span.start < at || span.end > raw.len() || span.end < span.start -> return Err("token span {span.start}..{span.end} is outside the source")
-        loop byte in raw[at..<span.start] -> &out.push(byte)
-        loop byte in "new_name".bytes() -> &out.push(byte)
+        loop byte in raw[at..<span.start] -> out.push(byte)
+        loop byte in "new_name".bytes() -> out.push(byte)
         at = span.end
     }
-    loop byte in raw[at..<raw.len()] -> &out.push(byte)
+    loop byte in raw[at..<raw.len()] -> out.push(byte)
     out_path: "{root}/{PROBE}/pkg/renamed.jet"
     files.write_bytes(out_path, out) ?? return Err("cannot write {out_path}: {err}")
     if occurrences(out, "new_name") != 2 -> return Err("rename count")

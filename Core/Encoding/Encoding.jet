@@ -157,7 +157,7 @@ EncodingError: struct {
         display: fn(self) -> String { self.display_text() }
     }
     impl Debug {
-        debug: fn(^self) -> String { self.display_text() }
+        debug: fn(&&self) -> String { self.display_text() }
     }
 }
 impl EncodingError {
@@ -196,7 +196,7 @@ HexError: struct {
         display: fn(self) -> String { self.reason }
     }
     impl Debug {
-        debug: fn(^self) -> String { self.reason }
+        debug: fn(&&self) -> String { self.reason }
     }
 }
 impl HexError {
@@ -222,8 +222,8 @@ bytes_to_hex: fn(bytes: [U8]) -> String Never! {
     out := [U8]{}
     loop b in bytes {
         n: Int.from_u8(b)
-        &out.push(hex_nibble(n /% 16))
-        &out.push(hex_nibble(n %% 16))
+        out.push(hex_nibble(n /% 16))
+        out.push(hex_nibble(n %% 16))
     }
     String.from_bytes(out) ?? ""
 }
@@ -239,7 +239,7 @@ hex_to_bytes: fn(text: String) -> [U8] HexError! {
     loop i < raw.len() {
         hi: hex_value(raw[i]) ?? return Err(HexError{reason: "invalid hex digit; expected 0-9, a-f, or A-F"})
         lo: hex_value(raw[i + 1]) ?? return Err(HexError{reason: "invalid hex digit; expected 0-9, a-f, or A-F"})
-        &out.push(U8{hi * 16 + lo})
+        out.push(U8{hi * 16 + lo})
         i = i + 2
     }
     Ok(out)
@@ -267,8 +267,8 @@ __decode_list: fn<Item: Decode>(tree: Dyn) -> [Item] [FieldError]! {
             failures := [FieldError]{}
             loop (index, item) in items {
                 if item.decode<Item>() == {
-                    .Ok(value) -> &values.push(value)
-                    .Err(errors) -> loop error in errors -> &failures.push(decode_under("[{index}]", error))
+                    .Ok(value) -> values.push(value)
+                    .Err(errors) -> loop error in errors -> failures.push(decode_under("[{index}]", error))
                 }
             }
             if failures.len() > 0 -> return Err(failures)
@@ -328,7 +328,7 @@ __decode_map: fn<Item: Decode>(tree: Dyn) -> [String: Item] [FieldError]! {
             loop entry in entries {
                 if entry.value.decode<Item>() == {
                     .Ok(value) -> values[entry.key] = value
-                    .Err(errors) -> loop error in errors -> &failures.push(decode_under(entry.key, error))
+                    .Err(errors) -> loop error in errors -> failures.push(decode_under(entry.key, error))
                 }
             }
             if failures.len() > 0 -> return Err(failures)

@@ -41,7 +41,7 @@ sema_web_partition_check: fn(modules: &[SemaGraphModuleResult], graph: SemaRegis
         program: graph.modules[registration].program
         is_entry: graph.modules[registration].module_identity == graph.entry_module_identity
         file_prefix: if is_entry -> String?{None} else -> Val(graph.modules[registration].module_name)
-        sema_web_collect(program.items, program.web_target_ceiling, None, None, file_prefix, module_index, registration, modules, &metas, &types)
+        sema_web_collect(program.items, program.web_target_ceiling, None, None, file_prefix, module_index, registration, modules, metas, types)
     }
     if metas.len() == 0 -> return
     active: sema_web_partition_active(graph)
@@ -51,7 +51,7 @@ sema_web_partition_check: fn(modules: &[SemaGraphModuleResult], graph: SemaRegis
     }
     buckets := [WebBucket]{}
     loop meta in metas {
-        &buckets.push(sema_web_bucket(meta, sema_web_solved(modules, meta)))
+        buckets.push(sema_web_bucket(meta, sema_web_solved(modules, meta)))
     }
     // Close the partition over the call edges.
     changed := true
@@ -80,15 +80,15 @@ sema_web_partition_check: fn(modules: &[SemaGraphModuleResult], graph: SemaRegis
         found := [Diagnostic]{}
         if meta.marker == .Val(.WasmExport) {
             loop param in meta.params {
-                if !sema_web_abi_safe(param, types) -> &found.push(sema_web_abi_type(param, "on a `#WasmExport` parameter", meta.name_span))
+                if !sema_web_abi_safe(param, types) -> found.push(sema_web_abi_type(param, "on a `#WasmExport` parameter", meta.name_span))
             }
             if meta.ret == .Val(ret) {
-                if !sema_web_abi_safe(ret, types) -> &found.push(sema_web_abi_type(ret, "as a `#WasmExport` return type", meta.name_span))
+                if !sema_web_abi_safe(ret, types) -> found.push(sema_web_abi_type(ret, "as a `#WasmExport` return type", meta.name_span))
             }
         }
         uses_browser: buckets[at] == .Wasm && sema_web_has_root(sema_web_solved(modules, meta), "Browser")
         if uses_browser {
-            &found.push(sema_error("E-WEB-TARGET-BROWSER", meta.name_span, "`{meta.name}` is pinned to Wasm but uses the `Browser` effect", "the web backend keeps DOM/view code in JS and compute in WASM; a Wasm-pinned function cannot call browser APIs directly", "remove the `#Target(Wasm)` pin, move browser work into a `#Target(JS)` function, or drop the browser API calls"))
+            found.push(sema_error("E-WEB-TARGET-BROWSER", meta.name_span, "`{meta.name}` is pinned to Wasm but uses the `Browser` effect", "the web backend keeps DOM/view code in JS and compute in WASM; a Wasm-pinned function cannot call browser APIs directly", "remove the `#Target(Wasm)` pin, move browser work into a `#Target(JS)` function, or drop the browser API calls"))
         }
         if meta.row >= 0 {
             loop edge in modules[meta.slot].functions[meta.row].effects.call_edges {
@@ -99,12 +99,12 @@ sema_web_partition_check: fn(modules: &[SemaGraphModuleResult], graph: SemaRegis
                 // A Core browser API reached from a Wasm pin is the E-WEB-TARGET-BROWSER
                 // above (Rust partitioned user functions only).
                 if uses_browser && sema_module_is_core_source(graph.modules[metas[callee].registration].module_identity) -> next
-                &found.push(sema_error("E-WEB-CROSS-PARTITION", meta.name_span, "`{meta.key}` is compiled to {sema_web_bucket_name(buckets[at])} but calls `{metas[callee].name}`, which lives in {sema_web_bucket_name(buckets[callee])}", "the web backend keeps DOM/view code in JS and compute in WASM; a direct call across that boundary is not allowed yet", "move the call behind a generated bridge, colocate both functions in the same bucket, or adjust their `#Target(Wasm|JS)` markers"))
+                found.push(sema_error("E-WEB-CROSS-PARTITION", meta.name_span, "`{meta.key}` is compiled to {sema_web_bucket_name(buckets[at])} but calls `{metas[callee].name}`, which lives in {sema_web_bucket_name(buckets[callee])}", "the web backend keeps DOM/view code in JS and compute in WASM; a direct call across that boundary is not allowed yet", "move the call behind a generated bridge, colocate both functions in the same bucket, or adjust their `#Target(Wasm|JS)` markers"))
             }
         }
         if found.len() == 0 -> next
-        sema_attach_diagnostic_source_locations(&found, 0, graph.modules[meta.registration].source_segments)
-        loop diagnostic in found -> &diagnostics.push(diagnostic)
+        sema_attach_diagnostic_source_locations(found, 0, graph.modules[meta.registration].source_segments)
+        loop diagnostic in found -> diagnostics.push(diagnostic)
     }
 }
 
@@ -162,28 +162,28 @@ sema_web_methods_marked: fn(methods: [Func]) -> Bool Never! {
 sema_web_collect: fn(items: [Item], file_ceiling: WebBucket?, module_ceiling: WebBucket?, module_prefix: String?, file_prefix: String?, module_index: Int, registration: Int, modules: [SemaGraphModuleResult], metas: &[SemaWebMeta], types: &SemaWebTypes) Never! {
     loop item in items {
         if item == {
-            .Func(function) -> sema_web_push(function, None, file_ceiling, module_ceiling, module_prefix, file_prefix, module_index, registration, modules, &metas)
+            .Func(function) -> sema_web_push(function, None, file_ceiling, module_ceiling, module_prefix, file_prefix, module_index, registration, modules, metas)
             .Struct(structure) -> {
                 if types.structs.get(structure.name) == None -> types.structs[structure.name] = structure
-                loop method in structure.methods -> sema_web_push(method, Val(structure.name), file_ceiling, module_ceiling, module_prefix, file_prefix, module_index, registration, modules, &metas)
+                loop method in structure.methods -> sema_web_push(method, Val(structure.name), file_ceiling, module_ceiling, module_prefix, file_prefix, module_index, registration, modules, metas)
                 loop implementation in structure.trait_impls {
-                    loop method in implementation.methods -> sema_web_push(method, Val(structure.name), file_ceiling, module_ceiling, module_prefix, file_prefix, module_index, registration, modules, &metas)
+                    loop method in implementation.methods -> sema_web_push(method, Val(structure.name), file_ceiling, module_ceiling, module_prefix, file_prefix, module_index, registration, modules, metas)
                 }
             }
             .Enum(enumeration) -> {
                 if types.enums.get(enumeration.name) == None -> types.enums[enumeration.name] = enumeration
-                loop method in enumeration.methods -> sema_web_push(method, Val(enumeration.name), file_ceiling, module_ceiling, module_prefix, file_prefix, module_index, registration, modules, &metas)
+                loop method in enumeration.methods -> sema_web_push(method, Val(enumeration.name), file_ceiling, module_ceiling, module_prefix, file_prefix, module_index, registration, modules, metas)
                 loop implementation in enumeration.trait_impls {
-                    loop method in implementation.methods -> sema_web_push(method, Val(enumeration.name), file_ceiling, module_ceiling, module_prefix, file_prefix, module_index, registration, modules, &metas)
+                    loop method in implementation.methods -> sema_web_push(method, Val(enumeration.name), file_ceiling, module_ceiling, module_prefix, file_prefix, module_index, registration, modules, metas)
                 }
             }
             .Impl(implementation) -> {
-                loop method in implementation.methods -> sema_web_push(method, Val(implementation.type_name), file_ceiling, module_ceiling, module_prefix, file_prefix, module_index, registration, modules, &metas)
+                loop method in implementation.methods -> sema_web_push(method, Val(implementation.type_name), file_ceiling, module_ceiling, module_prefix, file_prefix, module_index, registration, modules, metas)
             }
             .CodeModule(code_module) -> {
                 if code_module.body == .Val(body) {
                     inner: sema_web_ceiling_or(code_module.web_target, sema_web_ceiling_or(module_ceiling, file_ceiling))
-                    sema_web_collect(body, file_ceiling, inner, Val(code_module.name), file_prefix, module_index, registration, modules, &metas, &types)
+                    sema_web_collect(body, file_ceiling, inner, Val(code_module.name), file_prefix, module_index, registration, modules, metas, types)
                 }
             }
             else -> {}
@@ -208,9 +208,9 @@ sema_web_push: fn(function: Func, owner: String?, file_ceiling: WebBucket?, modu
         }
     }
     params := [Type]{}
-    loop param in function.params -> &params.push(param.ty)
+    loop param in function.params -> params.push(param.ty)
     ceiling: sema_web_ceiling_or(module_ceiling, file_ceiling)
-    &metas.push(SemaWebMeta{key: key, name: name, name_span: function.name_span, marker: function.web_marker, ceiling: ceiling, params: params, ret: function.return_type, slot: module_index, row: row, registration: registration})
+    metas.push(SemaWebMeta{key: key, name: name, name_span: function.name_span, marker: function.web_marker, ceiling: ceiling, params: params, ret: function.return_type, slot: module_index, row: row, registration: registration})
 }
 
 sema_web_ceiling_or: fn(first: WebBucket?, second: WebBucket?) -> WebBucket? Never! {
@@ -319,8 +319,8 @@ sema_web_codable: fn(derives: [NamedSpan]) -> Bool Never! {
     covered := [String]{}
     loop marker in derives {
         family: owned_trait_family(marker.name, false)
-        if family.len() == 0 -> &covered.push(marker.name.copy())
-        loop member in family -> &covered.push(member.copy())
+        if family.len() == 0 -> covered.push(marker.name.copy())
+        loop member in family -> covered.push(member.copy())
     }
     loop codec in owned_trait_codec_names() {
         if !covered.contains(codec) -> return false
@@ -347,7 +347,7 @@ sema_web_type_show: fn(ty: Type) -> String Never! {
 
 sema_web_type_debug_list: fn(types: [Type]) -> String Never! {
     shown := [String]{}
-    loop ty in types -> &shown.push(sema_web_type_debug(ty))
+    loop ty in types -> shown.push(sema_web_type_debug(ty))
     "[{shown.join(", ")}]"
 }
 

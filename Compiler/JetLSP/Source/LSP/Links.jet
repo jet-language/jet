@@ -53,7 +53,7 @@ lsp_document_links_for: fn(path: OSPath, workspace_root: OSPath?, src: String, r
         // Rust's link columns are bytes (including multibyte indent/import),
         // not scalar counts and not Position's UTF-16 conversion.
         range: LSPRange{start: LSPPos{line: line_index.bit_and(4294967295), character: path_start.bit_and(4294967295)}, end: LSPPos{line: line_index.bit_and(4294967295), character: end.bit_and(4294967295)}}
-        &out.push("{{\"range\":{lsp_range_json(range)},\"target\":{foundation_json_quote(target)}}}")
+        out.push("{{\"range\":{lsp_range_json(range)},\"target\":{foundation_json_quote(target)}}}")
     }
     out
 }
@@ -77,7 +77,7 @@ lsp_reasoning_code_lenses: fn(uri: String, path: String, src: String, db: Symbol
         loop fact in facts {
             if fact.stable_id != record.subject || fact.module_path != path -> next
             range: LSPRange{start: lsp_byte_offset_to_lsp(src, fact.span.start), end: lsp_byte_offset_to_lsp(src, fact.span.end)}
-            &out.push(lsp_code_lens_range_json(range, "Explain reasoning", "jet.reasoning", [String]{uri, record.id, "true"}))
+            out.push(lsp_code_lens_range_json(range, "Explain reasoning", "jet.reasoning", [String]{uri, record.id, "true"}))
             break
         }
     }
@@ -89,8 +89,8 @@ lsp_code_lenses_for: fn(uri: String, src: String) -> [String] Never! {
         line := src.slice(span.start, span.end) // #4303
         trimmed := lsp_source_text.trim_start(line) // #4303
         indent: line.bytes().len() - trimmed.bytes().len()
-        if trimmed.starts_with("run: fn") -> &out.push(lsp_code_lens_json(index, indent, line.bytes().len(), "Run file", "jet.runFile", ([String]{uri})))
-        else if trimmed.starts_with("#Test") -> &out.push(lsp_code_lens_json(index, indent, line.bytes().len(), "Run test", "jet.testFile", ([String]{uri, "{index}"})))
+        if trimmed.starts_with("run: fn") -> out.push(lsp_code_lens_json(index, indent, line.bytes().len(), "Run file", "jet.runFile", ([String]{uri})))
+        else if trimmed.starts_with("#Test") -> out.push(lsp_code_lens_json(index, indent, line.bytes().len(), "Run test", "jet.testFile", ([String]{uri, "{index}"})))
     }
     out
 }
@@ -100,6 +100,6 @@ lsp_code_lens_json: fn(line: Int, start: Int, end: Int, title: String, command: 
 }
 lsp_code_lens_range_json: fn(range: LSPRange, title: String, command: String, args: [String]) -> String Never! {
     arguments := [String]{}
-    loop arg in args -> &arguments.push(foundation_json_quote(arg))
+    loop arg in args -> arguments.push(foundation_json_quote(arg))
     "{{\"range\":{lsp_range_json(range)},\"command\":{{\"title\":{foundation_json_quote(title)},\"command\":{foundation_json_quote(command)},\"arguments\":[{arguments.join(",")}]}}}}"
 }

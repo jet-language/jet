@@ -74,7 +74,7 @@ sema_user_template_ct_values: fn(values: [TComptimeValue]) -> [CtValue]? Never! 
     converted := [CtValue]{}
     loop item in values {
         value: sema_user_template_ct_value(item) ?? return None
-        &converted.push(value)
+        converted.push(value)
     }
     Val(converted)
 }
@@ -96,7 +96,7 @@ sema_user_template_ct_value: fn(value: TComptimeValue) -> CtValue? Never! {
             loop entry in entries {
                 key: sema_user_template_ct_key(entry.key) ?? return None
                 item: sema_user_template_ct_value(entry.value) ?? return None
-                &converted.push(CtMapEntry{key: key, value: item})
+                converted.push(CtMapEntry{key: key, value: item})
             }
             Val(CtValue.Map{entries: converted})
         }
@@ -104,7 +104,7 @@ sema_user_template_ct_value: fn(value: TComptimeValue) -> CtValue? Never! {
             converted := [NamedCtValue]{}
             loop field in fields {
                 item: sema_user_template_ct_value(field.value) ?? return None
-                &converted.push(NamedCtValue{name: field.name, value: item})
+                converted.push(NamedCtValue{name: field.name, value: item})
             }
             Val(CtValue.Struct{type_name: owner, fields: converted})
         }
@@ -112,7 +112,7 @@ sema_user_template_ct_value: fn(value: TComptimeValue) -> CtValue? Never! {
             converted := [CtEnumArg]{}
             loop arg in args {
                 item: sema_user_template_ct_value(arg.value) ?? return None
-                &converted.push(CtEnumArg{label: arg.name, value: item})
+                converted.push(CtEnumArg{label: arg.name, value: item})
             }
             Val(CtValue.Enum{type_name: owner, variant: variant, args: converted})
         }
@@ -149,10 +149,10 @@ sema_user_template_type_info: fn(graph: SemaRegistrationGraph, module_index: Int
 sema_user_template_function_info: fn(function: Func) -> CtValue? {
     effects := [TComptimeValue]{}
     if function.declared_effects == .Val(rows) {
-        loop row in rows -> &effects.push(TComptimeValue.String{value: row.name})
+        loop row in rows -> effects.push(TComptimeValue.String{value: row.name})
     }
     params := [TComptimeValue]{}
-    loop param_index in 0..<function.params.len() -> &params.push(TComptimeValue.String{value: function.params[param_index].name})
+    loop param_index in 0..<function.params.len() -> params.push(TComptimeValue.String{value: function.params[param_index].name})
     info: sema_comptime_reflection_struct("FunctionInfo", [SemaComptimeReflectionField]{
         SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: function.name}},
         SemaComptimeReflectionField{name: "module", value: TComptimeValue.String{value: ""}},
@@ -186,18 +186,18 @@ sema_derive_expand_template_loops: fn(items: &[Item], diagnostics: &[Diagnostic]
             value := definition.ct
             if value == None -> value = sema_derive_static_value(SemaDeriveExpansion{scope: scope, failure: None}, definition.value)
             known: value ?? next
-            &scope.push(NamedCtValue{name: definition.name, value: known})
+            scope.push(NamedCtValue{name: definition.name, value: known})
         }
     }
     expanded := [Item]{}
     loop item in items {
         if item == .TemplateLoop(template) {
             body: [DeriveBodyItem]{DeriveBodyItem.Loop{var: template.var, var_span: template.var_span, source: template.source, body: template.body, span: template.span}}
-            generated: sema_derive_expand_template_body(body, scope, &diagnostics) ?? next
-            loop generated_item in generated -> &expanded.push(generated_item)
+            generated: sema_derive_expand_template_body(body, scope, diagnostics) ?? next
+            loop generated_item in generated -> expanded.push(generated_item)
             next
         }
-        &expanded.push(item)
+        expanded.push(item)
     }
     items = expanded
 }
@@ -215,25 +215,25 @@ sema_user_template_register: fn(graph: &SemaRegistrationGraph, module_index: Int
         source_origin: module_row.source_origin.copy()
         source_segments: module_row.source_segments.copy()
         loop item in generated {
-            &module_row.program.items.push(item)
+            module_row.program.items.push(item)
             if item == {
                 .Impl(_) -> {}
                 else -> {
-                    _ := sema_registration_add_root(&module_row, item, source_file, source_origin, source_segments, &problems)
+                    _ := sema_registration_add_root(module_row, item, source_file, source_origin, source_segments, problems)
                 }
             }
         }
         impl_rows: sema_registration_impl_rows(module_row)
         // The items move out of the row while sema_registration_add_impl
         // writes it, so they are read in place.
-        items := ^module_row.program.items
+        items := module_row.program.items.move()
         module_row.program.items = [Item]{}
-        loop item in generated -> sema_registration_add_impl(&module_row, item, items, impl_rows, &problems)
-        module_row.program.items = ^items
+        loop item in generated -> sema_registration_add_impl(module_row, item, items, impl_rows, problems)
+        module_row.program.items = items.move()
         graph.modules[module_index] = module_row
-        sema_registration_index_nominal_rows(&graph, module_index, first_nominal)
+        sema_registration_index_nominal_rows(graph, module_index, first_nominal)
     }
-    loop problem in problems -> sema_registration_push_graph_diagnostic(&graph, module_index, problem)
+    loop problem in problems -> sema_registration_push_graph_diagnostic(graph, module_index, problem)
 }
 
 // ---------------------------------------------------------------------------
@@ -249,12 +249,12 @@ sema_user_derive_member_sites: fn(items: [Item], owner: String) -> [SemaUserMemb
         if item == {
             .Struct(candidate) -> {
                 if candidate.name == owner {
-                    loop method in candidate.methods -> &sites.push(SemaUserMemberSite{name: method.name, site: "existing method `{owner}.{method.name}`", span: method.name_span})
+                    loop method in candidate.methods -> sites.push(SemaUserMemberSite{name: method.name, site: "existing method `{owner}.{method.name}`", span: method.name_span})
                 }
             }
             .Impl(candidate) -> {
                 if candidate.type_name == owner {
-                    loop method in candidate.methods -> &sites.push(SemaUserMemberSite{name: method.name, site: "existing method `{owner}.{method.name}`", span: method.name_span})
+                    loop method in candidate.methods -> sites.push(SemaUserMemberSite{name: method.name, site: "existing method `{owner}.{method.name}`", span: method.name_span})
                 }
             }
             else -> {}
@@ -276,7 +276,7 @@ sema_user_member_site: fn(sites: [SemaUserMemberSite], name: String) -> SemaUser
 
 sema_user_derive_collision: fn(derive_name: String, owner: String, method: Func, site: SemaUserMemberSite) -> Diagnostic {
     diagnostic: sema_error("E0105", method.name_span, "generated method `{method.name}` from `derive T.{derive_name}` collides with {site.site}", "`derive T.{derive_name}` and {site.site} both define a member named `{method.name}` on `{owner}`", "rename the generated member in `derive T.{derive_name}`, or rename the colliding member")
-    diagnostic_with_detail(^diagnostic, "generated member `{method.name}` from `derive T.{derive_name}` at span {method.name_span.start}..{method.name_span.end}\n{site.site} at span {site.span.start}..{site.span.end}")
+    diagnostic_with_detail(diagnostic, "generated member `{method.name}` from `derive T.{derive_name}` at span {method.name_span.start}..{method.name_span.end}\n{site.site} at span {site.span.start}..{site.span.end}")
 }
 
 sema_user_derive_provider: fn(providers: [SemaUserDeriveProvider], name: String, module_index: Int, entry_index: Int) -> SemaUserDeriveProvider? Never! {
@@ -302,36 +302,36 @@ sema_user_derive_expand_struct: fn(graph: SemaRegistrationGraph, module_index: I
         if module_index != entry_index && provider.module_index != entry_index {
             // The violating marker belongs to an imported source file, so the
             // diagnostic carries no entry-file caret.
-            &diagnostics.push(sema_error_optional("E2711", None, "derive orphan rule: neither `derive T.{requested.name}` nor `{definition.name}` is local", "a generated implementation is owned locally only when the derive provider or target type lives in the entry module", "define `derive T.{requested.name}` or `{definition.name}` in the entry module"))
+            diagnostics.push(sema_error_optional("E2711", None, "derive orphan rule: neither `derive T.{requested.name}` nor `{definition.name}` is local", "a generated implementation is owned locally only when the derive provider or target type lives in the entry module", "define `derive T.{requested.name}` or `{definition.name}` in the entry module"))
             next
         }
         if type_info == None -> type_info = sema_user_template_type_info(graph, module_index, definition.name)
         info: type_info ?? next
-        expanded: sema_derive_expand_provider_body(provider.definition.body, provider.definition.type_param, info, &diagnostics) ?? next
+        expanded: sema_derive_expand_provider_body(provider.definition.body, provider.definition.type_param, info, diagnostics) ?? next
         methods := [Func]{}
         loop expanded_item in expanded {
             if expanded_item == {
                 .Func(function) -> {
                     existing: sema_user_member_site(sites, function.name)
                     if existing == .Val(site) {
-                        &diagnostics.push(sema_user_derive_collision(requested.name, definition.name, function, site))
+                        diagnostics.push(sema_user_derive_collision(requested.name, definition.name, function, site))
                         next
                     }
                     prior: sema_user_member_site(generated_sites, function.name)
                     if prior == .Val(site) {
-                        &diagnostics.push(sema_user_derive_collision(requested.name, definition.name, function, site))
+                        diagnostics.push(sema_user_derive_collision(requested.name, definition.name, function, site))
                         next
                     }
-                    &generated_sites.push(SemaUserMemberSite{name: function.name, site: "generated member `{function.name}` from `derive T.{requested.name}`", span: function.name_span})
-                    &methods.push(function)
+                    generated_sites.push(SemaUserMemberSite{name: function.name, site: "generated member `{function.name}` from `derive T.{requested.name}`", span: function.name_span})
+                    methods.push(function)
                 }
-                else -> &generated.push(expanded_item)
+                else -> generated.push(expanded_item)
             }
         }
         // The provider name selects the derive; its body supplies ordinary
         // members on the target, not a trait conformance.
         if methods.len() > 0 {
-            &generated.push(Item.Impl{value: ImplDef{span: definition.span, type_name: definition.name, type_span: definition.name_span, trait_name: None, trait_span: None, operator_rhs: None, operator_marker: None, methods: methods, delegation_field: None, assoc_type_impls: [NamedType]{}, constants: [ImplConstValue]{}, is_generated_serde: false, os_target: None}})
+            generated.push(Item.Impl{value: ImplDef{span: definition.span, type_name: definition.name, type_span: definition.name_span, trait_name: None, trait_span: None, operator_rhs: None, operator_marker: None, methods: methods, delegation_field: None, assoc_type_impls: [NamedType]{}, constants: [ImplConstValue]{}, is_generated_serde: false, os_target: None}})
         }
     }
 }
@@ -339,15 +339,15 @@ sema_user_derive_expand_struct: fn(graph: SemaRegistrationGraph, module_index: I
 sema_user_derive_collect_module: fn(graph: SemaRegistrationGraph, module_index: Int, providers: [SemaUserDeriveProvider], entry_index: Int, generated: &[Item], diagnostics: &[Diagnostic]) {
     items: graph.modules[module_index].program.items
     loop item in items {
-        if item == .Struct(definition) -> sema_user_derive_expand_struct(graph, module_index, items, definition, providers, entry_index, &generated, &diagnostics)
+        if item == .Struct(definition) -> sema_user_derive_expand_struct(graph, module_index, items, definition, providers, entry_index, generated, diagnostics)
     }
 }
 
 sema_user_derive_expand_module: fn(graph: &SemaRegistrationGraph, module_index: Int, providers: [SemaUserDeriveProvider], entry_index: Int) {
     generated := [Item]{}
     diagnostics := [Diagnostic]{}
-    sema_user_derive_collect_module(graph, module_index, providers, entry_index, &generated, &diagnostics)
-    sema_user_template_register(&graph, module_index, generated, diagnostics)
+    sema_user_derive_collect_module(graph, module_index, providers, entry_index, generated, diagnostics)
+    sema_user_template_register(graph, module_index, generated, diagnostics)
 }
 
 // ---------------------------------------------------------------------------
@@ -373,11 +373,11 @@ sema_user_rule_body: fn(graph: SemaRegistrationGraph, module_identity: String, m
             if item == {
                 .Impl(definition) -> {
                     if definition.trait_name == .Val(trait_name) {
-                        if trait_name == "Diagnostic" -> &reports.push(SemaDeriveReport{module_name: module_name, definition: definition})
+                        if trait_name == "Diagnostic" -> reports.push(SemaDeriveReport{module_name: module_name, definition: definition})
                     }
                 }
-                .Struct(definition) -> sema_user_rule_nested_reports(module_name, definition.name, definition.name_span, definition.trait_impls, &reports)
-                .Enum(definition) -> sema_user_rule_nested_reports(module_name, definition.name, definition.name_span, definition.trait_impls, &reports)
+                .Struct(definition) -> sema_user_rule_nested_reports(module_name, definition.name, definition.name_span, definition.trait_impls, reports)
+                .Enum(definition) -> sema_user_rule_nested_reports(module_name, definition.name, definition.name_span, definition.trait_impls, reports)
                 else -> {}
             }
         }
@@ -398,7 +398,7 @@ sema_user_rule_nested_reports: fn(module_name: String, owner: String, owner_span
             assoc_type_impls: block.assoc_type_impls, constants: block.constants,
             is_generated_serde: false, os_target: block.os_target, markers: block.markers,
         }
-        &reports.push(SemaDeriveReport{module_name: module_name.copy(), definition: definition})
+        reports.push(SemaDeriveReport{module_name: module_name.copy(), definition: definition})
     }
 }
 
@@ -445,18 +445,18 @@ sema_user_rule_accept: fn(items: [Item], rule: String, expanded: [Item], generat
                     if existing == None -> existing = sema_user_rule_existing_span(generated, implementation.type_name, method.name)
                     if existing == .Val(span) {
                         diagnostic: sema_error("E0105", method.name_span, "generated member `{method.name}` would change or shadow `{method.name}` on `{implementation.type_name}`", "a rule may add a member but cannot change or shadow a written member", "rename the generated member or remove the existing member")
-                        &diagnostics.push(diagnostic_with_detail(^diagnostic, "generated member `{method.name}` from rule `{rule}` at span {method.name_span.start}..{method.name_span.end}\nexisting member `{implementation.type_name}.{method.name}` at span {span.start}..{span.end}"))
+                        diagnostics.push(diagnostic_with_detail(diagnostic, "generated member `{method.name}` from rule `{rule}` at span {method.name_span.start}..{method.name_span.end}\nexisting member `{implementation.type_name}.{method.name}` at span {span.start}..{span.end}"))
                         next
                     }
-                    &methods.push(method)
+                    methods.push(method)
                 }
                 if methods.len() > 0 {
                     accepted := implementation
                     accepted.methods = methods
-                    &generated.push(Item.Impl{value: accepted})
+                    generated.push(Item.Impl{value: accepted})
                 }
             }
-            else -> &generated.push(expanded_item)
+            else -> generated.push(expanded_item)
         }
     }
 }
@@ -471,8 +471,8 @@ sema_user_rule_collect_module: fn(graph: SemaRegistrationGraph, module_index: In
                 rule: sema_user_rule_body(graph, graph.modules[module_index].module_identity, marker) ?? next
                 if type_info == None -> type_info = sema_user_template_type_info(graph, module_index, definition.name)
                 info: type_info ?? next
-                expanded: sema_derive_expand_rule_body(rule.body, "target", info, rule.reports, Val(marker.span), &diagnostics) ?? next
-                sema_user_rule_accept(items, marker.name, expanded, &generated, &diagnostics)
+                expanded: sema_derive_expand_rule_body(rule.body, "target", info, rule.reports, Val(marker.span), diagnostics) ?? next
+                sema_user_rule_accept(items, marker.name, expanded, generated, diagnostics)
             }
         }
     }
@@ -483,8 +483,8 @@ sema_user_rule_collect_module: fn(graph: SemaRegistrationGraph, module_index: In
                 if marker.negated -> next
                 rule: sema_user_rule_body(graph, graph.modules[module_index].module_identity, marker) ?? next
                 info: sema_user_template_function_info(function) ?? next
-                expanded: sema_derive_expand_rule_body(rule.body, "target", info, rule.reports, Val(marker.span), &diagnostics) ?? next
-                loop expanded_item in expanded -> &generated.push(expanded_item)
+                expanded: sema_derive_expand_rule_body(rule.body, "target", info, rule.reports, Val(marker.span), diagnostics) ?? next
+                loop expanded_item in expanded -> generated.push(expanded_item)
             }
         }
     }
@@ -495,12 +495,12 @@ sema_user_rule_collect_module: fn(graph: SemaRegistrationGraph, module_index: In
     source: graph.modules[module_index].source
     block_spans: graph.modules[module_index].program.block_spans
     blocks := [SemaUserTextBlock]{}
-    loop item in items -> sema_user_text_blocks_in_item(item, source, block_spans, &blocks)
+    loop item in items -> sema_user_text_blocks_in_item(item, source, block_spans, blocks)
     loop block in blocks {
         marker: Marker{name: block.name, negated: false, name_span: block.span, args: [MarkerCallArg]{}, arg_labels: [CallLabel?]{}, span: block.span, ct: None}
         rule: sema_user_rule_body(graph, graph.modules[module_index].module_identity, marker) ?? next
-        expanded: sema_derive_expand_rule_body(rule.body, "target", CtValue.Str{value: block.text}, rule.reports, Val(block.site), &diagnostics) ?? next
-        loop expanded_item in expanded -> &generated.push(expanded_item)
+        expanded: sema_derive_expand_rule_body(rule.body, "target", CtValue.Str{value: block.text}, rule.reports, Val(block.site), diagnostics) ?? next
+        loop expanded_item in expanded -> generated.push(expanded_item)
     }
 }
 
@@ -574,13 +574,13 @@ sema_user_text_statement_bodies: fn(statement: Stmt) -> [[Stmt]] Never! {
     if statement == {
         .Switch(_, arms, else_body, _) | .ComptimeSwitch(_, arms, else_body, _) -> {
             bodies := [[Stmt]]{}
-            loop arm in arms -> &bodies.push(arm.body)
-            if else_body == .Val(body) -> &bodies.push(body)
+            loop arm in arms -> bodies.push(arm.body)
+            if else_body == .Val(body) -> bodies.push(body)
             bodies
         }
         .ComptimeIf(_, _, then_body, else_body, _, _) -> {
             bodies := [[Stmt]]{then_body}
-            if else_body == .Val(body) -> &bodies.push(body)
+            if else_body == .Val(body) -> bodies.push(body)
             bodies
         }
         .While(_, body, _, _, _) | .For(_, _, _, _, body, _, _, _, _) | .Loop(body, _, _, _) | .CountedLoop(_, _, _, body, _, _, _) | .Unsafe(_, _, body, _) | .Impure(_, _, body, _) | .Reactive(body, _) | .Shield(body, _) | .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .TaskGroup(_, _, _, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) | .ComptimeBlock(body, _, _) | .ContextBlock(_, body, _) | .Live(body, _) | .AssumeDet(_, _, body, _) | .Transact(_, _, body, _, _) | .ScopeMember(_, _, _, _, body, _, _, _) -> [[Stmt]]{body}
@@ -591,32 +591,32 @@ sema_user_text_statement_bodies: fn(statement: Stmt) -> [[Stmt]] Never! {
 sema_user_text_blocks_in: fn(statements: [Stmt], source: String, block_spans: [Span], blocks: &[SemaUserTextBlock]) {
     loop statement in statements {
         if statement == .ScopeMember(name, name_span, _, _, body, dsl, hash_span, span) {
-            if dsl -> &blocks.push(SemaUserTextBlock{name: name, text: sema_user_text_block_source(source, body, block_spans, span), span: span, site: Span{start: hash_span.start, end: name_span.end}})
+            if dsl -> blocks.push(SemaUserTextBlock{name: name, text: sema_user_text_block_source(source, body, block_spans, span), span: span, site: Span{start: hash_span.start, end: name_span.end}})
         }
-        loop child in sema_user_text_statement_bodies(statement) -> sema_user_text_blocks_in(child, source, block_spans, &blocks)
+        loop child in sema_user_text_statement_bodies(statement) -> sema_user_text_blocks_in(child, source, block_spans, blocks)
     }
 }
 
 sema_user_text_blocks_in_methods: fn(methods: [Func], source: String, block_spans: [Span], blocks: &[SemaUserTextBlock]) {
-    loop method in methods -> sema_user_text_blocks_in(method.body, source, block_spans, &blocks)
+    loop method in methods -> sema_user_text_blocks_in(method.body, source, block_spans, blocks)
 }
 
 sema_user_text_blocks_in_item: fn(item: Item, source: String, block_spans: [Span], blocks: &[SemaUserTextBlock]) {
     if item == {
-        .Func(function) -> sema_user_text_blocks_in(function.body, source, block_spans, &blocks)
-        .Test(test) -> sema_user_text_blocks_in(test.body, source, block_spans, &blocks)
-        .Impl(implementation) -> sema_user_text_blocks_in_methods(implementation.methods, source, block_spans, &blocks)
+        .Func(function) -> sema_user_text_blocks_in(function.body, source, block_spans, blocks)
+        .Test(test) -> sema_user_text_blocks_in(test.body, source, block_spans, blocks)
+        .Impl(implementation) -> sema_user_text_blocks_in_methods(implementation.methods, source, block_spans, blocks)
         .Struct(definition) -> {
-            sema_user_text_blocks_in_methods(definition.methods, source, block_spans, &blocks)
-            loop implementation in definition.trait_impls -> sema_user_text_blocks_in_methods(implementation.methods, source, block_spans, &blocks)
+            sema_user_text_blocks_in_methods(definition.methods, source, block_spans, blocks)
+            loop implementation in definition.trait_impls -> sema_user_text_blocks_in_methods(implementation.methods, source, block_spans, blocks)
         }
         .Enum(definition) -> {
-            sema_user_text_blocks_in_methods(definition.methods, source, block_spans, &blocks)
-            loop implementation in definition.trait_impls -> sema_user_text_blocks_in_methods(implementation.methods, source, block_spans, &blocks)
+            sema_user_text_blocks_in_methods(definition.methods, source, block_spans, blocks)
+            loop implementation in definition.trait_impls -> sema_user_text_blocks_in_methods(implementation.methods, source, block_spans, blocks)
         }
         .CodeModule(code_module) -> {
             if code_module.body == .Val(body) {
-                loop nested in body -> sema_user_text_blocks_in_item(nested, source, block_spans, &blocks)
+                loop nested in body -> sema_user_text_blocks_in_item(nested, source, block_spans, blocks)
             }
         }
         else -> {}
@@ -626,8 +626,8 @@ sema_user_text_blocks_in_item: fn(item: Item, source: String, block_spans: [Span
 sema_user_rule_expand_module: fn(graph: &SemaRegistrationGraph, module_index: Int) {
     generated := [Item]{}
     diagnostics := [Diagnostic]{}
-    sema_user_rule_collect_module(graph, module_index, &generated, &diagnostics)
-    sema_user_template_register(&graph, module_index, generated, diagnostics)
+    sema_user_rule_collect_module(graph, module_index, generated, diagnostics)
+    sema_user_template_register(graph, module_index, generated, diagnostics)
 }
 
 // ---------------------------------------------------------------------------
@@ -641,7 +641,7 @@ sema_registration_expand_user_templates: fn(graph: &SemaRegistrationGraph) {
     has_any_rule_body := false
     loop (module_index, module_row) in graph.modules {
         loop item in module_row.program.items {
-            if item == .UserDerive(definition) -> &providers.push(SemaUserDeriveProvider{module_index: module_index, definition: definition})
+            if item == .UserDerive(definition) -> providers.push(SemaUserDeriveProvider{module_index: module_index, definition: definition})
         }
         loop declaration in sema_marker_module_declarations(module_row.program.items, "", false) {
             if declaration.body != None -> has_any_rule_body = true
@@ -650,8 +650,8 @@ sema_registration_expand_user_templates: fn(graph: &SemaRegistrationGraph) {
     if providers.len() == 0 && !has_any_rule_body -> return
     entry_index: sema_registration_module_index(graph, graph.entry_module_identity) ?? -1
     loop module_index in 0..<graph.modules.len() {
-        if providers.len() > 0 -> sema_user_derive_expand_module(&graph, module_index, providers, entry_index)
-        if has_any_rule_body -> sema_user_rule_expand_module(&graph, module_index)
+        if providers.len() > 0 -> sema_user_derive_expand_module(graph, module_index, providers, entry_index)
+        if has_any_rule_body -> sema_user_rule_expand_module(graph, module_index)
     }
     // A rule's warning-severity `reject` reports without failing the graph.
     graph.complete = !sema_registration_blocking_error(graph.diagnostics)

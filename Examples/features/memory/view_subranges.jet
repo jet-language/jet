@@ -44,18 +44,19 @@ fill: fn(window: ViewMut<U8>, value: Int) {
 
 // A write window over part of a write window reborrows the same storage.
 tail_mut: fn(window: ViewMut<U8>, start: Int) -> ViewMut<U8> from window {
-    &window[start..<window.len()]
+    tail: &window[start..<window.len()]
+    tail
 }
 
 // A reader over a view parameter grabs subranges of that view.
 read: fn(all: View<U8>) {
     reader := Reader{bytes: all, at: 0}
-    first: &reader.grab(2) ?? return
+    first: reader.grab(2) ?? return
     print(total(first))
-    second: &reader.grab(3) ?? return
+    second: reader.grab(3) ?? return
     print(total(second))
     print(reader.at)
-    tail: &reader.grab(4) ?? all[0..<1]
+    tail: reader.grab(4) ?? all[0..<1]
     print(total(tail))
 }
 

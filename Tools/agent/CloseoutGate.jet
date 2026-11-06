@@ -70,7 +70,7 @@ output: fn(repo: String, argv: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> 
 
 tower: fn(repo: String, args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> String Never! {
     argv := [String]{"node", "{repo}/Tools/tower/tower.mjs"}
-    loop arg in args -> &argv.push(arg.copy())
+    loop arg in args -> argv.push(arg.copy())
     output(repo, argv)
 }
 
@@ -111,7 +111,7 @@ non_tower_changes: fn(status: String) -> [String] Never! {
     loop line in status.split("\n") {
         if line == "" -> next
         path: String.from_bytes_lossy(line.bytes()[3..<line.bytes().len()]).removeprefix("\"")
-        if !path.starts_with(TOWER_STATE_PREFIX) -> &changed.push(line.copy())
+        if !path.starts_with(TOWER_STATE_PREFIX) -> changed.push(line.copy())
     }
     changed
 }

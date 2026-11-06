@@ -61,11 +61,11 @@ lsp_cancellation_key: fn(params: Dyn?) -> String? Never! {
 // Rust318–326. The actual fallible Stderr methods are canonical
 // StreamHandles StderrWriteLine/StderrFlush, not the nonfallible eprint rail.
 lsp_write_log_line: fn(stderr: &lsp_protocol_term.Stderr, line: String) IOError! -[IO, Time.Wait]> {
-    &stderr.write_line(line) ?? return Err(err)
+    stderr.write_line(line) ?? return Err(err)
 }
 
 lsp_write_log: fn(message: String) IOError! -[IO, Time.Wait]> {
     stderr := lsp_protocol_term.stderr()
-    lsp_write_log_line(&stderr, "[jet-lsp] {message}") ?? return Err(err)
-    &stderr.flush() ?? return Err(err)
+    lsp_write_log_line(stderr, "[jet-lsp] {message}") ?? return Err(err)
+    stderr.flush() ?? return Err(err)
 }

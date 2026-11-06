@@ -79,7 +79,7 @@ pkg_ffi_test_occurrences: fn(text: String, needle: String) -> Int Never! {
 #Test("over budget asm push rail keeps early clobbers with one memory carrier") {
     names: [String]{"address", "a", "b", "c", "d", "e"}
     params := [(convention: AccessConvention, ty: Type)]{}
-    loop _ in names -> &params.push((convention: AccessConvention.Read, ty: Type.Int))
+    loop _ in names -> params.push((convention: AccessConvention.Read, ty: Type.Int))
     entry := pkg_ffi_test_entry("call5", "", params, names, Val(Type.Int), "audited word call")
     contract: InlineAsmContract{target: "x86_64-unknown-linux-gnu", output: Val(InlineAsmOutput.Register{name: "rax"}), clobbers: [String]{"rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11"}}
     source: "push {{address}}\npush {{a}}\npush {{b}}\npush {{c}}\npush {{d}}\npush {{e}}\npop r8\npop rcx\npop rdx\npop rsi\npop rdi\npop r11\ncall r11\nmov rax, rax ; -> return"
@@ -114,7 +114,7 @@ pkg_ffi_test_occurrences: fn(text: String, needle: String) -> Int Never! {
     changed_contract := original
     contract_inline := changed_contract.inline ?? panic("asm entry")
     contract := contract_inline.asm_contract ?? panic("asm contract")
-    &contract.clobbers.push("rbx")
+    contract.clobbers.push("rbx")
     contract_inline.asm_contract = Val(contract)
     changed_contract.inline = Val(contract_inline)
     assert(pkg_ffi_test_key([ExternEntry]{original}, x86, None) != pkg_ffi_test_key([ExternEntry]{changed_contract}, x86, None))

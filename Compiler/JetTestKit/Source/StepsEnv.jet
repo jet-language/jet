@@ -84,12 +84,12 @@ kit_steps_whitespace_words: fn(text: String) -> [String] {
     loop index < bytes.len() {
         scalar: kit_steps_scalar(bytes, index)
         if kit_steps_unicode_space(scalar.value) {
-            if index > start -> &words.push(String.from_bytes(bytes.slice(start, index)) ?? panic("word span is not UTF-8"))
+            if index > start -> words.push(String.from_bytes(bytes.slice(start, index)) ?? panic("word span is not UTF-8"))
             start = scalar.next
         }
         index = scalar.next
     }
-    if index > start -> &words.push(String.from_bytes(bytes.slice(start, index)) ?? panic("word span is not UTF-8"))
+    if index > start -> words.push(String.from_bytes(bytes.slice(start, index)) ?? panic("word span is not UTF-8"))
     words
 }
 

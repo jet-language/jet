@@ -18,19 +18,19 @@ DEFAULT_EXCLUSIONS: [String]{"arguments", "credentials", "environment", "request
 #Error
 JetTraceError: struct { message: String }
 jettrace_error: fn(message: String) -> JetTraceError Never! { JetTraceError{message: message} }
-jettrace_field: fn(key: String, ^value: CanonicalJSON) -> CanonicalJSONField Never! { CanonicalJSONField{key: key, value: ^value} }
+jettrace_field: fn(key: String, &&value: CanonicalJSON) -> CanonicalJSONField Never! { CanonicalJSONField{key: key, value: value.move()} }
 jettrace_object: fn(fields: [CanonicalJSONField]) -> CanonicalJSON JetTraceError! {
     if canonical_json_object(fields) == {
-        .Ok(value) -> return Ok(^value)
+        .Ok(value) -> return Ok(value)
         .Err(error) -> return Err(jettrace_error(error.message))
     }
 }
 
 // Fixed wrapper keys are unique; content's canonical LF participates in SHA256.
-jettrace_artifact: fn(^content: CanonicalJSON) -> CanonicalJSON JetTraceError! {
+jettrace_artifact: fn(&&content: CanonicalJSON) -> CanonicalJSON JetTraceError! {
     id: canonical_json_sha256(content)
     jettrace_object([CanonicalJSONField]{
-        jettrace_field("content", ^content),
+        jettrace_field("content", content),
         jettrace_field("schema", CanonicalJSON.String(TRACE_SCHEMA)),
         jettrace_field("trace_id", CanonicalJSON.String(id)),
         jettrace_field("version", CanonicalJSON.Integer("{TRACE_VERSION}"))
@@ -60,5 +60,5 @@ verify_jettrace: fn(bytes: [U8]) -> CanonicalJSON JetTraceError! {
     if !jettrace_hex64(claimed) -> return Err(jettrace_error("jettrace trace_id is not lowercase Hex64"))
     actual: canonical_json_sha256(content)
     if actual != claimed -> return Err(jettrace_error("content hash mismatch: claimed {claimed}, recomputed {actual}"))
-    Ok(^report)
+    Ok(report)
 }

@@ -139,16 +139,16 @@ jet_cli_script_dependency_roots: fn(roots: &[JetDriverAuthorizedSourceRoot], ent
             files := [JetDriverAuthorizedSourceFile]{}
             directories := [AppAuthorizedDirectory]{}
             budget := JetCLISourceBudget{entries: 0, bytes: 0, files: 0}
-            if jet_cli_walk_sources(canonical, "", 0, &files, &directories, true, &budget) == .Val(problem) {
+            if jet_cli_walk_sources(canonical, "", 0, files, directories, true, budget) == .Val(problem) {
                 return Val(jet_cli_script_dependency_error(entry_path, entry.source, dep, .InvalidTree(TreeHashError.IO{path: canonical, detail: problem}), color))
             }
-            &roots.push(JetDriverAuthorizedSourceRoot{canonical_path: canonical, identity: root_identity, allow_hardlinks: false, files: files, foreign_cache_files: [JetDriverAuthorizedSourceFile]{}, directories: directories})
+            roots.push(JetDriverAuthorizedSourceRoot{canonical_path: canonical, identity: root_identity, allow_hardlinks: false, files: files, foreign_cache_files: [JetDriverAuthorizedSourceFile]{}, directories: directories})
         }
         // The same full tree identity must survive source snapshot capture.
         // Held hashing rejects hardlinks and links, including ancestor swaps.
         content_hash: selected.tree_hash(true) ?? return Val(jet_cli_script_dependency_error(entry_path, entry.source, dep, .InvalidTree(TreeHashError.IO{path: canonical, detail: "{err}"}), color))
         if content_hash != resolved.content_hash -> return Val(jet_cli_script_dependency_error(entry_path, entry.source, dep, .InvalidTree(TreeHashError.IO{path: canonical, detail: "source tree changed while admitted"}), color))
-        &admitted.push(JetDriverScriptDependency{name: dep.name, selector: dep.selector, resolved_version: resolved.resolved_version, content_hash: content_hash, root_identity: root_identity, span: dep.span})
+        admitted.push(JetDriverScriptDependency{name: dep.name, selector: dep.selector, resolved_version: resolved.resolved_version, content_hash: content_hash, root_identity: root_identity, span: dep.span})
     }
     None
 }

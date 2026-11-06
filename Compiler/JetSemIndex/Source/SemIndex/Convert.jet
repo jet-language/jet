@@ -43,7 +43,7 @@ semindex_convert_defs: fn(defs: [SymDef], view_provenance: [String:ViewProvenanc
         }
         views := [ViewProvenanceFact]{}
         if view_provenance.get(definition.identity) == .Val(map) {
-            loop entry in map.entries -> &views.push(semindex_convert_view_provenance(entry.slot, entry.value))
+            loop entry in map.entries -> views.push(semindex_convert_view_provenance(entry.slot, entry.value))
         }
         owner: if definition.kind == {
             .EnumVariant(parent) -> Val(parent)
@@ -57,7 +57,7 @@ semindex_convert_defs: fn(defs: [SymDef], view_provenance: [String:ViewProvenanc
             .Type(derives) -> derives
             else -> [String]{}
         }
-        &output.push(SymbolDef{
+        output.push(SymbolDef{
             identity: definition.identity,
             declaration_identity_unavailable: CallableFactUnavailable{required_stage: CompilerStage.Resolved, reason: "the semindex producer does not receive a checker-issued DeclarationHandle"},
             name: definition.name,
@@ -90,7 +90,7 @@ semindex_declaration_contract_metadata: fn(item: Item, items: [Item], members: [
         .Enum(definition) -> { return SemIndexContractMetadata{nominal_base: None, trait_contracts: semindex_trait_contracts_for_owner(items, definition.name, members)} }
         .Trait(definition) -> {
             associated := [SemIndexAssociatedTypeFact]{}
-            loop row in definition.assoc_types -> &associated.push(SemIndexAssociatedTypeFact{name: row.name, implementation: None})
+            loop row in definition.assoc_types -> associated.push(SemIndexAssociatedTypeFact{name: row.name, implementation: None})
             return SemIndexContractMetadata{nominal_base: None, trait_contracts: [TraitContractFact]{TraitContractFact{
                 trait_name: definition.name, associated_types: associated,
                 methods: semindex_member_signatures(members, definition.name, MemberOrigin.TraitRequirement{trait_name: definition.name}),
@@ -123,7 +123,7 @@ semindex_find_declaration: fn(items: [Item], span: SourceSpan) -> Item? Never! {
 }
 semindex_trait_contracts_for_owner: fn(items: [Item], owner: String, members: [MemberFact]) -> [TraitContractFact] Never! {
     contracts := [TraitContractFact]{}
-    semindex_collect_trait_contracts(items, owner, members, &contracts)
+    semindex_collect_trait_contracts(items, owner, members, contracts)
     contracts
 }
 semindex_collect_trait_contracts: fn(items: [Item], owner: String, members: [MemberFact], contracts: &[TraitContractFact]) Never! {
@@ -133,39 +133,39 @@ semindex_collect_trait_contracts: fn(items: [Item], owner: String, members: [Mem
                 leaves: implementation.type_name.split(".")
                 leaf := leaves[leaves.len() - 1] // #4303
                 if leaf == owner {
-                    if implementation.trait_name == .Val(trait_name) -> &contracts.push(semindex_trait_contract(trait_name, implementation.assoc_type_impls, members, owner))
+                    if implementation.trait_name == .Val(trait_name) -> contracts.push(semindex_trait_contract(trait_name, implementation.assoc_type_impls, members, owner))
                 }
             }
             .Struct(definition) -> {
                 if definition.name == owner {
-                    loop implementation in definition.trait_impls -> &contracts.push(semindex_trait_contract(implementation.trait_name, implementation.assoc_type_impls, members, owner))
+                    loop implementation in definition.trait_impls -> contracts.push(semindex_trait_contract(implementation.trait_name, implementation.assoc_type_impls, members, owner))
                 }
             }
             .Enum(definition) -> {
                 if definition.name == owner {
-                    loop implementation in definition.trait_impls -> &contracts.push(semindex_trait_contract(implementation.trait_name, implementation.assoc_type_impls, members, owner))
+                    loop implementation in definition.trait_impls -> contracts.push(semindex_trait_contract(implementation.trait_name, implementation.assoc_type_impls, members, owner))
                 }
             }
             .CodeModule(module_row) -> {
-                if module_row.body == .Val(body) -> semindex_collect_trait_contracts(body, owner, members, &contracts)
+                if module_row.body == .Val(body) -> semindex_collect_trait_contracts(body, owner, members, contracts)
             }
-            .GenericModule(module_row) -> semindex_collect_trait_contracts(module_row.body, owner, members, &contracts)
+            .GenericModule(module_row) -> semindex_collect_trait_contracts(module_row.body, owner, members, contracts)
             else -> {}
         }
     }
 }
 semindex_trait_contract: fn(trait_name: String, associated_types: [NamedType], members: [MemberFact], owner: String) -> TraitContractFact Never! {
     associated := [SemIndexAssociatedTypeFact]{}
-    loop row in associated_types -> &associated.push(SemIndexAssociatedTypeFact{name: row.name, implementation: Val(type_name(row.ty))})
+    loop row in associated_types -> associated.push(SemIndexAssociatedTypeFact{name: row.name, implementation: Val(type_name(row.ty))})
     TraitContractFact{trait_name: trait_name, associated_types: associated, methods: semindex_member_signatures(members, owner, MemberOrigin.TraitImpl{trait_name: trait_name})}
 }
 semindex_member_signatures: fn(members: [MemberFact], owner: String, origin: MemberOrigin) -> [String] Never! {
     methods := [String]{}
-    loop member in members { if member.owner == owner && member.origin == origin -> &methods.push(member.signature) }
-    &methods.sort()
+    loop member in members { if member.owner == owner && member.origin == origin -> methods.push(member.signature) }
+    methods.sort()
     unique := [String]{}
     loop method in methods {
-        if unique.len() == 0 || unique[unique.len() - 1] != method -> &unique.push(method)
+        if unique.len() == 0 || unique[unique.len() - 1] != method -> unique.push(method)
     }
     unique
 }
@@ -180,7 +180,7 @@ semindex_callable_signature: fn(kind: SymKind, returned_views: [ViewProvenanceFa
             if index >= param_defaults.len() -> panic("callable parameter defaults must stay ordered")
             if index >= param_access.len() -> panic("callable parameter access facts must stay ordered")
             if index >= param_variadic.len() -> panic("callable variadic facts must stay ordered")
-            &parameters.push(CallableParameterFact{
+            parameters.push(CallableParameterFact{
                 name: params[index].name, label: param_contract[index].label, source: param_sources[index],
                 default: param_defaults[index], access: param_access[index], zone: param_contract[index].zone,
                 ty: params[index].ty, variadic: param_variadic[index],
@@ -192,7 +192,7 @@ semindex_callable_signature: fn(kind: SymKind, returned_views: [ViewProvenanceFa
             .None -> {
                 if effects == .Val(row) {
                     facts := [CallableEffectFact]{}
-                    loop entry in row -> &facts.push(CallableEffectFact.Named{name: entry.name, source: semindex_source_span(entry.span)})
+                    loop entry in row -> facts.push(CallableEffectFact.Named{name: entry.name, source: semindex_source_span(entry.span)})
                     checked_effects = .Checked{effects: facts}
                 }
             }
@@ -208,7 +208,7 @@ semindex_callable_signature: fn(kind: SymKind, returned_views: [ViewProvenanceFa
 
 semindex_convert_refs: fn(refs: [SymRef]) -> [SymbolRef] Never! {
     output := [SymbolRef]{}
-    loop reference in refs -> &output.push(SymbolRef{
+    loop reference in refs -> output.push(SymbolRef{
         name: reference.name, module_path: reference.module_path, scope_identity: reference.scope_identity,
         target: reference.target, fact: reference.fact, span: semindex_source_span(reference.span),
     })
@@ -219,7 +219,7 @@ semindex_convert_kind: fn(kind: SymKind) -> SemIndexSymbolKind Never! {
         .Module -> .Module
         .Function(params, _, _, param_contract, param_variadic, return_type, failure_contract, _, _, _, _, _, _, _) -> {
             projected := [SemIndexNameTypeFact]{}
-            loop parameter in params -> &projected.push(SemIndexNameTypeFact{name: parameter.name, ty: type_name(parameter.ty)})
+            loop parameter in params -> projected.push(SemIndexNameTypeFact{name: parameter.name, ty: type_name(parameter.ty)})
             contract := [SemIndexCallContractEntry]{}
             loop index in 0..<param_contract.len() {
                 zone: if param_contract[index].zone == {
@@ -227,7 +227,7 @@ semindex_convert_kind: fn(kind: SymKind) -> SemIndexSymbolKind Never! {
                     .Either -> "either"
                     .LabelOnly -> "label_only"
                 }
-                &contract.push(SemIndexCallContractEntry{label: param_contract[index].label, zone: zone, variadic: index < param_variadic.len() && param_variadic[index]})
+                contract.push(SemIndexCallContractEntry{label: param_contract[index].label, zone: zone, variadic: index < param_variadic.len() && param_variadic[index]})
             }
             ret: if failure_contract == {
                 .Checked(failure) -> failure_contract_shown_return(failure).map((ty) -> type_name(ty))
@@ -240,7 +240,7 @@ semindex_convert_kind: fn(kind: SymKind) -> SemIndexSymbolKind Never! {
         }
         .Struct(fields, _) -> {
             projected := [SemIndexNameTypeFact]{}
-            loop field in fields -> &projected.push(SemIndexNameTypeFact{name: field.name, ty: type_name(field.ty)})
+            loop field in fields -> projected.push(SemIndexNameTypeFact{name: field.name, ty: type_name(field.ty)})
             .Struct{fields: projected}
         }
         .Enum(variants, _) -> .Enum{variants: variants}
@@ -272,9 +272,9 @@ semindex_convert_view_provenance: fn(output_path: [String], provenance: ViewProv
                 .Index -> ViewProjectionFact.Index
                 .Range -> ViewProjectionFact.Range
             }
-            &projections.push(converted)
+            projections.push(converted)
         }
-        &sources.push(ViewSourcePathFact{source: source, projections: projections})
+        sources.push(ViewSourcePathFact{source: source, projections: projections})
     }
     ViewProvenanceFact{output_path: output_path, sources: sources, mutable: provenance.mutable}
 }
@@ -286,8 +286,8 @@ semindex_convert_view_provenance: fn(output_path: [String], provenance: ViewProv
 semindex_effect_witness: fn(function: String, effect_name: String, facts: SemIndexEffectFacts, seen: &[String:Bool]) -> EffectProvenance? Never! {
     if seen.get(function) != None -> return None
     seen[function] = true
-    result := semindex_effect_witness_entered(function, effect_name, facts, &seen)
-    _removed: &seen.remove(function)
+    result := semindex_effect_witness_entered(function, effect_name, facts, seen)
+    _removed: seen.remove(function)
     result
 }
 semindex_effect_witness_entered: fn(function: String, effect_name: String, facts: SemIndexEffectFacts, seen: &[String:Bool]) -> EffectProvenance? Never! {
@@ -295,13 +295,13 @@ semindex_effect_witness_entered: fn(function: String, effect_name: String, facts
     loop direct in summary.direct {
         if direct == effect_name {
             spans := [SourceSpan]{}
-            if summary.direct_spans.get(effect_name) == .Val(span) -> &spans.push(semindex_source_span(span))
+            if summary.direct_spans.get(effect_name) == .Val(span) -> spans.push(semindex_source_span(span))
             return Val(EffectProvenance{effect_name: effect_name, call_path: [String]{function}, spans: spans})
         }
     }
     if summary.maximal {
         spans := [SourceSpan]{}
-        if summary.maximal_span == .Val(span) -> &spans.push(semindex_source_span(span))
+        if summary.maximal_span == .Val(span) -> spans.push(semindex_source_span(span))
         return Val(EffectProvenance{effect_name: effect_name, call_path: [String]{function}, spans: spans})
     }
     loop callee in summary.edges {
@@ -309,16 +309,16 @@ semindex_effect_witness_entered: fn(function: String, effect_name: String, facts
         contains := false
         loop name in solved { if name == effect_name { contains = true; break } }
         if !contains -> next
-        if semindex_effect_witness(callee, effect_name, facts, &seen) == .Val(witness) {
-            retained := ^witness
-            &retained.call_path.insert(0, function)
+        if semindex_effect_witness(callee, effect_name, facts, seen) == .Val(witness) {
+            retained := witness.move()
+            retained.call_path.insert(0, function)
             loop call in summary.memory.calls {
                 if call.callee == callee {
-                    &retained.spans.insert(0, semindex_source_span(call.span))
+                    retained.spans.insert(0, semindex_source_span(call.span))
                     break
                 }
             }
-            return Val(^retained)
+            return Val(retained.move())
         }
     }
     None
@@ -330,10 +330,10 @@ semindex_convert_effects: fn(facts: SemIndexEffectFacts) -> [EffectFact] Never! 
         provenance := [EffectProvenance]{}
         loop effect_name in inferred {
             seen := [String:Bool]{}
-            if semindex_effect_witness(function, effect_name, facts, &seen) == .Val(witness) -> &provenance.push(^witness)
+            if semindex_effect_witness(function, effect_name, facts, seen) == .Val(witness) -> provenance.push(witness)
         }
-        &output.push(EffectFact{function: function, direct: summary.direct, callees: summary.edges, inferred: inferred, maximal: summary.maximal, provenance: provenance})
+        output.push(EffectFact{function: function, direct: summary.direct, callees: summary.edges, inferred: inferred, maximal: summary.maximal, provenance: provenance})
     }
-    &output.sort_by((left: EffectFact, right: EffectFact) -> left.function <=> right.function)
+    output.sort_by((left: EffectFact, right: EffectFact) -> left.function <=> right.function)
     output
 }

@@ -33,8 +33,8 @@ gate_test_callback_borrow: fn(rows: [SemaGateModule], projected: GateLedger) Nev
     loop item in rows[0].program.items {
         if item == .Func(function) {
             loop statement in function.body {
-                ast_visit_statement(statement, (expression: Expr) -> &wrapped.visit(expression), false)
-                if statement == .Val(binding) -> &reference.visit(binding.init)
+                ast_visit_statement(statement, (expression: Expr) -> wrapped.visit(expression), false)
+                if statement == .Val(binding) -> reference.visit(binding.init)
             }
         }
     }
@@ -52,30 +52,30 @@ gate_test_callback_borrow: fn(rows: [SemaGateModule], projected: GateLedger) Nev
 
 run: fn() Never! {
     ledger := GateLedger{}
-    gate_ledger_push(&ledger, gate_test_entry(GateKind.PrecisionDemotion, "a.jet", 1))
-    gate_ledger_push(&ledger, gate_test_entry(GateKind.Unsafe, "a.jet", 2))
-    gate_ledger_sort(&ledger)
+    gate_ledger_push(ledger, gate_test_entry(GateKind.PrecisionDemotion, "a.jet", 1))
+    gate_ledger_push(ledger, gate_test_entry(GateKind.Unsafe, "a.jet", 2))
+    gate_ledger_sort(ledger)
     gate_test_require(ledger.rows[0].kind == GateKind.Unsafe, "security before knowledge")
     first := gate_test_entry(GateKind.TrustGrant, "trust", 0)
     first.provenance = ["trust store"]
     second := first
     second.provenance = ["lockfile"]
     duplicate := GateLedger{}
-    gate_ledger_push(&duplicate, ^first)
-    gate_ledger_push(&duplicate, ^second)
+    gate_ledger_push(duplicate, first)
+    gate_ledger_push(duplicate, second)
     gate_test_require(duplicate.rows.len() == 1 && duplicate.rows[0].provenance == ([String]{"lockfile", "trust store"}), "coalesced fact preserves both provenance rows")
     external := gate_test_entry(GateKind.TrustGrant, "store", 0)
     external.span = None
     written := external
     written.source = "lock"
     written.reason = Val("verified publisher")
-    gate_ledger_push(&duplicate, ^external)
-    gate_ledger_push(&duplicate, ^written)
+    gate_ledger_push(duplicate, external)
+    gate_ledger_push(duplicate, written)
     gate_test_require(duplicate.rows.len() == 2 && duplicate.rows[1].reason == (Val("verified publisher")), "spanless writer coalescing and reason enrichment")
     names := gate_test_names()
-    &names.facts.structure_facts.push(StructureFact{kind: StructureFactKind.Liveness, subject: "files", source: "app.jet", span: Span{start: 4, end: 9}, status: "unused", detail: "remove or rename to _files", gate: Val("_name")})
+    names.facts.structure_facts.push(StructureFact{kind: StructureFactKind.Liveness, subject: "files", source: "app.jet", span: Span{start: 4, end: 9}, status: "unused", detail: "remove or rename to _files", gate: Val("_name")})
     structure := GateLedger{}
-    sema_gate_append_structure(&structure, names)
+    sema_gate_append_structure(structure, names)
     gate_test_require(structure.rows.len() == 1 && structure.rows[0].kind == GateKind.Structure && structure.rows[0].reason == (Val("_name")), "structure facts use canonical ledger")
     parsed: parse_source("_helper: fn(_input: Int) {{\n_unused := approx(7)\n#Unsafe(\"live\") {{ value := pointer.* }}\n}}".bytes())
     gate_test_require(parsed.diagnostics.len() == 0, "source fixture parse")

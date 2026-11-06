@@ -30,7 +30,7 @@ plain_length: fn(body: Int) -> Int? {
         envelope: "envelope-{size}.jetc"
         restored: "restored-{size}.out"
         plaintext := [U8]{}
-        loop index in 0..<size -> &plaintext.push((U8{index % 251}))
+        loop index in 0..<size -> plaintext.push((U8{index % 251}))
         files.write_bytes(source, plaintext) ?? panic("source")
         crypto.file_seal([public], Path.from(source), Path.from(envelope)) ?? panic("seal")
         encoded: files.read_bytes(envelope) ?? panic("encoded")
@@ -43,15 +43,15 @@ plain_length: fn(body: Int) -> Int? {
             length: little(encoded, at, 4)
             flags: Int.from_u8(encoded[at + 4])
             assert((flags == 0 && length == 1048576) || (flags == 1 && length < 1048576))
-            &records.push(Record{length: length, flags: flags})
+            records.push(Record{length: length, flags: flags})
             at += 5 + length + 16
         }
         assert_eq(at, encoded.len())
         expected := [Record]{}
-        if size < 1048576 -> &expected.push(Record{length: size, flags: 1})
+        if size < 1048576 -> expected.push(Record{length: size, flags: 1})
         else {
-            &expected.push(Record{length: 1048576, flags: 0})
-            &expected.push(Record{length: size - 1048576, flags: 1})
+            expected.push(Record{length: 1048576, flags: 0})
+            expected.push(Record{length: size - 1048576, flags: 1})
         }
         assert_eq(records, expected)
         crypto.file_open(recipient, Path.from(envelope), Path.from(restored)) ?? panic("open")

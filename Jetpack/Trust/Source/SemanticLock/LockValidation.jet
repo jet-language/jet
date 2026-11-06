@@ -30,8 +30,8 @@ ValidationIssue: enum {
 // then source maps.
 trust_semantic_lock_issues: fn(lock: SemanticLockFile) -> [ValidationIssue] Never! {
     issues := trust_lock_input_issues(lock.inputs)
-    loop issue in trust_lock_record_issues(lock) -> &issues.push(issue)
-    loop issue in trust_lock_source_map_issues(lock) -> &issues.push(issue)
+    loop issue in trust_lock_record_issues(lock) -> issues.push(issue)
+    loop issue in trust_lock_source_map_issues(lock) -> issues.push(issue)
     issues
 }
 
@@ -48,7 +48,7 @@ trust_merge_for_commit: fn(base: SemanticLockFile, left: SemanticLockFile, right
     if outcome.conflicts.len() > 0 {
         issues := [ValidationIssue]{}
         loop conflict in outcome.conflicts {
-            &issues.push(ValidationIssue.DomainConflict{key: conflict.semantic_key, left: conflict.left_identity, right: conflict.right_identity})
+            issues.push(ValidationIssue.DomainConflict{key: conflict.semantic_key, left: conflict.left_identity, right: conflict.right_identity})
         }
         return Err(TrustError.Rejected(issues))
     }
@@ -58,12 +58,12 @@ trust_merge_for_commit: fn(base: SemanticLockFile, left: SemanticLockFile, right
 
 trust_lock_input_issues: fn(inputs: [LockInput]) -> [ValidationIssue] Never! {
     names := [String]{}
-    loop input in inputs -> &names.push(input.name)
+    loop input in inputs -> names.push(input.name)
     names = pkg_overlay_sorted_unique(names)
     issues := [ValidationIssue]{}
     loop input in inputs {
         if input.follows != "" && !names.contains(input.follows) {
-            &issues.push(ValidationIssue.MissingFollows{input: input.name, follows: input.follows})
+            issues.push(ValidationIssue.MissingFollows{input: input.name, follows: input.follows})
         }
     }
     edges := [String: String]{}
@@ -74,8 +74,8 @@ trust_lock_input_issues: fn(inputs: [LockInput]) -> [ValidationIssue] Never! {
     loop name in names {
         cycle_node: trust_lock_cycle_from(name, edges) ?? next
         if reported.contains(cycle_node) -> next
-        &reported.push(cycle_node)
-        &issues.push(ValidationIssue.InputCycle(cycle_node))
+        reported.push(cycle_node)
+        issues.push(ValidationIssue.InputCycle(cycle_node))
     }
     issues
 }
@@ -99,19 +99,19 @@ trust_lock_record_issues: fn(lock: SemanticLockFile) -> [ValidationIssue] Never!
     loop record in lock.records {
         key: record.identity.semantic_key()
         if record.identity.hash == "" {
-            &issues.push(ValidationIssue.MissingHash{semantic_key: key.copy()})
-            &issues.push(ValidationIssue.OfflineIncomplete{semantic_key: key.copy()})
+            issues.push(ValidationIssue.MissingHash{semantic_key: key.copy()})
+            issues.push(ValidationIssue.OfflineIncomplete{semantic_key: key.copy()})
         }
         loop rationale in record.rationales {
             if rationale.cache_provenance.contains("signed") && rationale.signature == "" {
-                &issues.push(ValidationIssue.MissingSignature{semantic_key: key.copy()})
+                issues.push(ValidationIssue.MissingSignature{semantic_key: key.copy()})
             }
         }
         if record.identity.platform == "" -> next
         if seen_platform.get(key) == {
             .Val(previous) -> {
                 if previous != record.identity.platform {
-                    &issues.push(ValidationIssue.DomainConflict{key: key.copy(), left: previous, right: record.identity.platform})
+                    issues.push(ValidationIssue.DomainConflict{key: key.copy(), left: previous, right: record.identity.platform})
                 }
             }
             .None -> seen_platform[key] = record.identity.platform
@@ -138,7 +138,7 @@ trust_lock_source_map_issues: fn(lock: SemanticLockFile) -> [ValidationIssue] Ne
             }
         }
         if !allowed {
-            &issues.push(ValidationIssue.SourceAuthority{package: record.identity.key, source: source, allowed: map.sources})
+            issues.push(ValidationIssue.SourceAuthority{package: record.identity.key, source: source, allowed: map.sources})
         }
     }
     issues

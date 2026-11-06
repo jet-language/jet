@@ -1,8 +1,8 @@
-Error [jet.MissingWriteMarker]: Cannot write to `items` — it does not have the write-access marker `&`; required before calling `.next()`
-  --> tests/ui/iter_next_immutable_binding.jet:5:12
+Error [jet.MissingWriteMarker]: `.next()` changes `items`, which has read access only
+  --> tests/ui/iter_next_immutable_binding.jet:5:11
     |
-  5 |     print(&items.next())
-    |            ^^^^^
- Why: This method edits the value it's called on; the write-access marker `&` is required
+  5 |     print(items.next())
+    |           ^^^^^
+ Why: This method edits the value it's called on, so its receiver needs write access
  Fix: Declare `items := ...`
 More: jet-lang.dev/e/E0202

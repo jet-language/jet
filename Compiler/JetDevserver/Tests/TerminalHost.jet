@@ -12,7 +12,7 @@ event: fn(sequence: U64, panel_id: JetDevtoolsPanelId, kind: String, entity: Str
 panel_ids: fn() -> [U64:JetDevtoolsPanelId] { [1: JetDevtoolsPanelId.Build] }
 projection: fn() -> DevtoolsProjection {
     envelope := JetDevtoolsEnvelope.new("session", 0)
-    &envelope.push(JetDevtoolsEvent.from_parts_with_payload(1200, "devserver", "Build", "build", "{{\"accepted\":true}}", .Val("{{\"output\":\"ok\"}}")).unwrap())
+    envelope.push(JetDevtoolsEvent.from_parts_with_payload(1200, "devserver", "Build", "build", "{{\"accepted\":true}}", .Val("{{\"output\":\"ok\"}}")).unwrap())
     DevtoolsProjection{protocol: JET_DEVTOOLS_PROTOCOL.to_string(), session_id: "session", source_id: .Val("src/main.jet"),
         build_id: .Val("build-42"), revision: "revision-a", world_id: .Val("world-7"), sequence: 1, observed_at: 1234,
         panels: envelope.events().cloned().collect(), selection: .Val(DevtoolsSelectionFact{panel_id: "build", item_key: "event:revision-a:1:Build:build"}),
@@ -24,7 +24,7 @@ projection: fn() -> DevtoolsProjection {
 #Test("sync_projection_preserves_canonical_identity_and_status") {
     capabilities: TerminalHostCapabilities.new(false, false, true, 32, true, false, TerminalHostAccess.new(true, false, true))
     host := TerminalHost.new(TerminalHostConfig.new(TerminalViewport.new(80, 24), capabilities))
-    frame: &host.sync_projection(projection(), panel_ids()).unwrap()
+    frame: host.sync_projection(projection(), panel_ids()).unwrap()
     assert_eq(frame.session_id, "session")
     assert_eq(frame.source_id.as_ref(), .Val("src/main.jet"))
     assert_eq(frame.build_id.as_ref(), .Val("build-42"))
@@ -37,21 +37,21 @@ projection: fn() -> DevtoolsProjection {
     assert_eq(event.observed_at, 1200)
     assert_eq(event.facts[0].value, .Val(TerminalFactValue.Text("{{\"accepted\":true}}")))
     assert_eq(host.focus().item_key.as_ref(), .Val("event:revision-a:1:Build:build"))
-    assert(&host.handle_key(.Character('r')) == TerminalAction.Ignored)
+    assert(host.handle_key(.Character('r')) == TerminalAction.Ignored)
     assert(frame.lines.iter().all((line) -> strip_ansi(line).chars().count() <= 32))
 }
 #Test("quiet_suppresses_text_without_dropping_typed_tree") {
     capabilities: TerminalHostCapabilities.new(false, false, true, 20, false, true, TerminalHostAccess.interactive())
     host := TerminalHost.new(TerminalHostConfig.new(TerminalViewport.new(80, 24), capabilities))
-    frame: &host.sync_projection(projection(), panel_ids()).unwrap()
+    frame: host.sync_projection(projection(), panel_ids()).unwrap()
     assert(frame.lines.is_empty())
     assert_eq(frame.tree.panel_count, descriptors().len())
 }
 #Test("same_facts_keep_nodes_stable_across_capabilities") {
     plain := TerminalHost.new(TerminalHostConfig.new(TerminalViewport.new(80, 24), TerminalHostCapabilities.plain()))
     color := TerminalHost.new(TerminalHostConfig.new(TerminalViewport.new(80, 24), TerminalHostCapabilities.color()))
-    &plain.append_event(event(1, .Build, "Build", "build")).unwrap()
-    &color.append_event(event(1, .Build, "Build", "build")).unwrap()
+    plain.append_event(event(1, .Build, "Build", "build")).unwrap()
+    color.append_event(event(1, .Build, "Build", "build")).unwrap()
     plain_frame: plain.render(); color_frame: color.render()
     assert_eq(plain_frame.tree, color_frame.tree)
     assert(!plain_frame.text().contains(Char{27}))
@@ -60,16 +60,16 @@ projection: fn() -> DevtoolsProjection {
 }
 #Test("keyboard_paths_update_explicit_focus_and_return_actions") {
     host := TerminalHost.default()
-    &host.append_event(event(1, .Tests, "Tests", "fails")).unwrap()
-    assert_eq(&host.handle_key(.Enter), TerminalAction.Inspect{panel_id: "tests", item_key: "event:revision-a:1:Tests:fails"})
-    assert_eq(&host.handle_key(.Escape), TerminalAction.ReturnToPanel)
+    host.append_event(event(1, .Tests, "Tests", "fails")).unwrap()
+    assert_eq(host.handle_key(.Enter), TerminalAction.Inspect{panel_id: "tests", item_key: "event:revision-a:1:Tests:fails"})
+    assert_eq(host.handle_key(.Escape), TerminalAction.ReturnToPanel)
     assert(host.focus().item_key.is_none())
 }
 #Test("diff_operations_are_ordered_and_bounded") {
     host := TerminalHost.default()
-    &host.append_event(event(1, .Build, "Build", "one")).unwrap()
+    host.append_event(event(1, .Build, "Build", "one")).unwrap()
     first: host.render()
-    &host.append_event(event(2, .Jobs, "Jobs", "two")).unwrap()
+    host.append_event(event(2, .Jobs, "Jobs", "two")).unwrap()
     second: host.render(); diff: second.diff(first)
     assert(!diff.is_empty())
     ids: diff.operations.iter().map((operation) -> if operation == {

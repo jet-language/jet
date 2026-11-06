@@ -80,14 +80,14 @@ object: fn(entries: [String: Dyn]) -> Dyn Never! { Dyn.Object(entries.copy()) }
 
 seed_bytes: fn(byte: Int) -> [U8] Never! {
     seed := [U8]{}
-    loop _ in 0..<32 -> &seed.push(U8{byte})
+    loop _ in 0..<32 -> seed.push(U8{byte})
     seed
 }
 
 public_of: fn(seed: [U8]) -> String Never! {
     key: crypto.SigningKey.from_bytes(seed) ?? panic("fixture seed")
     public: hex.encode(key.public_key().bytes)
-    close(^key)
+    close(key)
     public
 }
 
@@ -179,7 +179,7 @@ publish: fn(fixture: Fixture, dry_run: Bool{false}) -[FS, Env, Exec, Time, Time.
 
 problem_lines: fn(problems: [Problem]) -> String Never! {
     lines := [String]{}
-    loop found in problems -> &lines.push("[{found.class}] {found.text}")
+    loop found in problems -> lines.push("[{found.class}] {found.text}")
     lines.join("\n")
 }
 
@@ -197,7 +197,7 @@ expect: fn(outcome: Outcome, verdict: String, class: String, part: String) Never
     audit: read_tree(outcome.audit)
     assert_eq(text_field(audit, "verdict"), verdict)
     kept := [Problem]{}
-    loop item in array_field(audit, "problems") -> &kept.push(problem(text_field(item, "class"), text_field(item, "text")))
+    loop item in array_field(audit, "problems") -> kept.push(problem(text_field(item, "class"), text_field(item, "text")))
     assert(has_problem(kept, class, part))
 }
 
@@ -210,14 +210,14 @@ gh_log: fn(fixture: Fixture) -[FS]> [String] Never! {
     text: files.read(files.join(fixture.scratch, "gh/gh.log")) ?? return [String]{}
     lines := [String]{}
     loop line in text.split("\n").to_list() {
-        if line != "" -> &lines.push(line.copy())
+        if line != "" -> lines.push(line.copy())
     }
     lines
 }
 
 released: fn(fixture: Fixture, name: String) -> Fixture Never! {
     out := fixture.copy()
-    &out.remote.released.push(name.copy())
+    out.remote.released.push(name.copy())
     out
 }
 
@@ -231,7 +231,7 @@ shipped_sha: fn(record: Dyn, path: String) -> String Never! {
 texts: fn(items: [Dyn]) -> [String] Never! {
     out := [String]{}
     loop item in items {
-        if item == .Text(value) -> &out.push(value.copy())
+        if item == .Text(value) -> out.push(value.copy())
     }
     out
 }
@@ -260,7 +260,7 @@ texts: fn(items: [Dyn]) -> [String] Never! {
     assert_eq(shipped_sha(record, "jet-runtime/native.key"), sha256_hex("runtime-key-1\n".bytes()))
     staged := [String]{}
     loop item in array_field(field(record, "artifacts"), "release") {
-        &staged.push(text_field(item, "path"))
+        staged.push(text_field(item, "path"))
         assert_eq(text_field(item, "sha256"), sha256_hex(files.read_bytes(files.join(files.join(dir, STAGE_DIR), text_field(item, "path"))) ?? panic("staged {err}")))
     }
     assert_eq(staged, [String]{asset, "{asset}.sha256", "jet", "IDENTITY", "SHA256SUMS"})
@@ -320,7 +320,7 @@ texts: fn(items: [Dyn]) -> [String] Never! {
             }
             edit == "receipt" -> {
                 rows := passing_rows()
-                &rows.push(row("tests/ui", "PASS"))
+                rows.push(row("tests/ui", "PASS"))
                 put(files.join(dir, "receipts/001-verify-full.json"), files.read(files.join(runner(fixture.scratch, "ev-edit", dir, 0, 1, "PASS", rows), "verify-full.json")) ?? panic("edited receipt {err}"))
                 section = "`tests`"
             }
@@ -363,7 +363,7 @@ texts: fn(items: [Dyn]) -> [String] Never! {
     expect(outcome, "BLOCKED", MISSING_RUNNER, "shard 2 of 2 for {TARGET}")
     assert(!files.exists(files.join(fixture.dir, CANDIDATE_FILE)))
     absent := new_fixture("runner-absent")
-    &absent.evidence.push(files.join(absent.scratch, "never-ran"))
+    absent.evidence.push(files.join(absent.scratch, "never-ran"))
     expect(candidate(absent), "BLOCKED", MISSING_RUNNER, "never reported")
     none := new_fixture("runner-none")
     none.evidence = [String]{}
@@ -372,7 +372,7 @@ texts: fn(items: [Dyn]) -> [String] Never! {
 
 #Test("a check that passed in one run and failed in another blocks as flaky") {
     fixture := new_fixture("flaky")
-    &fixture.evidence.push(runner(fixture.scratch, "ev-rerun", fixture.dir, 0, 1, "FAIL", [Dyn]{row("gates", "PASS"), row("tests/golden", "FAIL")}))
+    fixture.evidence.push(runner(fixture.scratch, "ev-rerun", fixture.dir, 0, 1, "FAIL", [Dyn]{row("gates", "PASS"), row("tests/golden", "FAIL")}))
     outcome: candidate(fixture)
     expect(outcome, "BLOCKED", FLAKY, "tests/golden on {TARGET} was PASS in one run and FAIL")
     expect(outcome, "BLOCKED", FLAKY, "a flaky gate")
@@ -448,7 +448,7 @@ texts: fn(items: [Dyn]) -> [String] Never! {
     assert_eq(repack_problems(archive.dir, staged, 90).len(), 0)
     assert_eq(files.read_bytes(files.join(archive.dir, "audit/090-repack/jet-a0_026-{TARGET}.tar.gz")) ?? panic("repack {err}"), first)
     changed := first.copy()
-    &changed.push(U8{0})
+    changed.push(U8{0})
     files.write_bytes(staged, changed) ?? panic("rewrite {err}")
     repacked: repack_problems(archive.dir, staged, 91)
     assert(has_problem(repacked, NONDETERMINISM, "packing jet-a0_026-{TARGET}.tar.gz twice gave different bytes"))

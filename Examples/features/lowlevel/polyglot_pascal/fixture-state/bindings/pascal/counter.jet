@@ -47,10 +47,10 @@ counter_add: fn(handle: Counter, delta: Int) -> Int PascalError! {
     return Ok(result_value)
 }
 
-close: fn(^handle: Counter) {}
+close: fn(&&handle: Counter) {}
 
 impl Counter.Close {
-    close: fn(^self) {
+    close: fn(&&self) {
         abi.counter_close(self.value)
         if abi.take_error() != 0 -> panic("invalid Pascal handle")
     }

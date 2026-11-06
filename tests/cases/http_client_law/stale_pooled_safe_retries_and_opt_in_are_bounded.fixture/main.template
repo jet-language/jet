@@ -9,7 +9,7 @@ drain: fn(response: HTTPResponse) -> [U8] {
     out := [U8]{}
     loop chunk in response.body().chunks(64) {
         bytes: chunk ?? panic("drain")
-        loop byte in bytes { &out.push(byte) }
+        loop byte in bytes { out.push(byte) }
     }
     return out
 }

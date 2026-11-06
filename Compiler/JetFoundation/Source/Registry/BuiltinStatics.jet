@@ -264,7 +264,7 @@ builtin_static_numeric_row: fn(owner: String, method: String) -> BuiltinStaticRo
 // whose module matches how the owner was named.
 builtin_static_rows: fn(owner: String, method: String) -> [BuiltinStaticRow] Never! {
     rows := builtin_static_rows_in(BUILTIN_STATIC_ROWS, owner, method)
-    if builtin_static_numeric_row(owner, method) == .Val(row) -> &rows.push(row)
+    if builtin_static_numeric_row(owner, method) == .Val(row) -> rows.push(row)
     rows
 }
 
@@ -272,7 +272,7 @@ builtin_static_rows: fn(owner: String, method: String) -> [BuiltinStaticRow] Nev
 builtin_static_rows_in: fn(table: [BuiltinStaticRow], owner: String, method: String) -> [BuiltinStaticRow] Never! {
     rows := [BuiltinStaticRow]{}
     loop row in table {
-        if row.owner == owner && row.method == method -> &rows.push(row)
+        if row.owner == owner && row.method == method -> rows.push(row)
     }
     rows
 }

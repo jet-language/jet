@@ -42,18 +42,18 @@ blank_repeated_core_uses: fn(sources: [String]) -> [String] {
             }
             if {
                 !line.starts_with("use core.") -> {
-                    &kept.push(line.copy())
+                    kept.push(line.copy())
                 }
                 known -> {
-                    &kept.push("")
+                    kept.push("")
                 }
                 else -> {
-                    &seen.push(line.copy())
-                    &kept.push(line.copy())
+                    seen.push(line.copy())
+                    kept.push(line.copy())
                 }
             }
         }
-        &out.push(join_with(kept, "\n"))
+        out.push(join_with(kept, "\n"))
     }
     out
 }
@@ -62,7 +62,7 @@ blank_repeated_core_uses: fn(sources: [String]) -> [String] {
 host_report_helper: fn(host: String) -> String {
     lines := [String]{}
     loop line in host.split("\n") {
-        &lines.push(line.copy())
+        lines.push(line.copy())
     }
     start := -1
     end := -1
@@ -81,7 +81,7 @@ host_report_helper: fn(host: String) -> String {
     }
     body := [String]{}
     loop index in start..<(end + 1) {
-        &body.push(lines[index].copy())
+        body.push(lines[index].copy())
     }
     join_with(body, "\n")
 }
@@ -97,13 +97,13 @@ run: fn() {
     sources := [String]{}
     loop name in names {
         text: files.read(files.join(repo.copy(), name.copy())) ?? fail("cannot read {name}: {err}")
-        &sources.push(text)
+        sources.push(text)
     }
     host: files.read(files.join(repo.copy(), "Compiler/JetCli/Source/Cli/Host.jet")) ?? fail("cannot read Host.jet: {err}")
     helper: host_report_helper(host)
     parts := blank_repeated_core_uses(sources)
-    &parts.push(helper)
-    &parts.push("use snapshot_term: core.term\nrun: fn() {{\n    output: snapshot_term.stdout()\n    &output.write(jet_cli_native_test_unrun_check_report()).drop(\"snapshot stdout\")\n}}\n")
+    parts.push(helper)
+    parts.push("use snapshot_term: core.term\nrun: fn() {{\n    output: snapshot_term.stdout()\n    output.write(jet_cli_native_test_unrun_check_report()).drop(\"snapshot stdout\")\n}}\n")
     snapshot: join_with(parts, "\n\n")
     snapshot_path: files.join(out.copy(), "snapshot.jet")
     files.write(snapshot_path.copy(), snapshot) ?? fail("cannot write {snapshot_path}: {err}")

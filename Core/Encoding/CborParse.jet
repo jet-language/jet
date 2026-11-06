@@ -53,7 +53,7 @@ parse: fn(bytes: [U8], options: CBOROptions) -> Dyn CBORError! {
     if options.max_bytes < 0 || options.max_bytes > 1073741824 -> return Err(failure(.Limit, 0, "$", "max_bytes must be in 0..1073741824"))
     if bytes.len() > options.max_bytes -> return Err(failure(.Limit, 0, "$", "input exceeds max_bytes {options.max_bytes}"))
     parser := Parser{cursor: 0, items: 0, live: 0, options: options}
-    value: &parser.value(bytes, 0, "$") ?? return Err(err)
+    value: parser.value(bytes, 0, "$") ?? return Err(err)
     if parser.cursor != bytes.len() -> return Err(failure(.TrailingData, parser.cursor, "$", "trailing CBOR data after root value"))
     Ok(value)
 }
@@ -82,7 +82,7 @@ impl Parser {
         retained: self.live - capacity * slot
         available: self.options.max_bytes - retained
         if count > available /% slot || values.len() > available /% slot - count -> return Err(failure(.Limit, offset, path, "{what} allocation exceeds max_bytes {self.options.max_bytes}"))
-        if !mem.__list_reserve_exact<T>(&values, count) -> return Err(failure(.Limit, offset, path, "{what} allocation exceeds max_bytes {self.options.max_bytes}"))
+        if !mem.__list_reserve_exact<T>(values, count) -> return Err(failure(.Limit, offset, path, "{what} allocation exceeds max_bytes {self.options.max_bytes}"))
         actual: mem.__list_capacity<T>(values)
         if actual > available /% slot {
             values = [T]{}
@@ -134,27 +134,27 @@ impl Parser {
                 chunk: self.cursor
                 head: Int.from_u8(input[self.cursor])
                 self.cursor += 1
-                &self.count(chunk, path) ?? return Err(err)
+                self.count(chunk, path) ?? return Err(err)
                 if (head >> 5) != major || (head.bit_and(31)) == 31 -> return Err(failure(.Syntax, chunk, path, "indefinite CBOR string contains a wrong or indefinite chunk"))
-                length: &self.argument(input, head.bit_and(31), chunk, path) ?? return Err(err)
+                length: self.argument(input, head.bit_and(31), chunk, path) ?? return Err(err)
                 if length.value > input.len() - self.cursor -> return Err(failure(.Truncated, input.len(), path, "CBOR byte/text string chunk is truncated"))
                 if major == 3 -> encoding.__utf8_validate(input[self.cursor..<(self.cursor + length.value)]) ?? return Err(failure(.Syntax, chunk, path, "CBOR text chunk is not UTF-8"))
-                &self.reserve<U8>(&bytes, length.value, 1, chunk, path, what) ?? return Err(err)
+                self.reserve<U8>(bytes, length.value, 1, chunk, path, what) ?? return Err(err)
                 piece: input[self.cursor..<(self.cursor + length.value)]
-                loop byte in piece -> &bytes.push(byte)
+                loop byte in piece -> bytes.push(byte)
                 self.cursor += length.value
             }
             if major == 2 -> return Ok(Dyn.Bytes(bytes))
             text: String.from_bytes(bytes) ?? return Err(failure(.Syntax, start, path, "CBOR text is not UTF-8"))
             return Ok(Dyn.Text(text))
         }
-        length: &self.argument(input, additional, start, path) ?? return Err(err)
+        length: self.argument(input, additional, start, path) ?? return Err(err)
         if length.value > input.len() - self.cursor -> return Err(failure(.Truncated, input.len(), path, "CBOR byte/text string is truncated"))
         what: if major == 2 -> "CBOR byte string" else -> "CBOR text string"
         bytes := [U8]{}
-        &self.reserve<U8>(&bytes, length.value, 1, start, path, what) ?? return Err(err)
+        self.reserve<U8>(bytes, length.value, 1, start, path, what) ?? return Err(err)
         loop _ in 0..<length.value {
-            &bytes.push(input[self.cursor])
+            bytes.push(input[self.cursor])
             self.cursor += 1
         }
         if major == 2 -> return Ok(Dyn.Bytes(bytes))
@@ -165,10 +165,10 @@ impl Parser {
     // Tag 0 (RFC 3339 text) and tag 1 (epoch seconds, Int or Float) are
     // DateTime; every other tag is Unsupported.
     datetime: fn(&self, input: [U8], additional: Int, start: Int, depth: Int, path: String) -> Dyn CBORError! {
-        number: &self.argument(input, additional, start, path) ?? return Err(err)
+        number: self.argument(input, additional, start, path) ?? return Err(err)
         if number.outside_int || number.value > 1 -> return Err(failure(.Unsupported, start, path, "only CBOR date-time tags 0 and 1 are supported"))
         if depth + 1 > self.options.max_depth -> return Err(failure(.Limit, start, path, "CBOR date-time tag exceeds max_depth"))
-        inner: &self.value(input, depth + 1, path) ?? return Err(err)
+        inner: self.value(input, depth + 1, path) ?? return Err(err)
         if number.value == 0 {
             if inner == .Text(_) {
                 stamp: inner.decode<ZonedDateTime>() ?? return Err(failure(.Unsupported, start, path, "invalid CBOR date-time tag payload"))
@@ -198,9 +198,9 @@ impl Parser {
         length := -1
         if additional == 31 -> self.indefinite(start, path) ?? return Err(err)
         else {
-            argument: &self.argument(input, additional, start, path) ?? return Err(err)
+            argument: self.argument(input, additional, start, path) ?? return Err(err)
             length = argument.value
-            &self.reserve<Dyn>(&items, length, 32, start, path, "CBOR array") ?? return Err(err)
+            self.reserve<Dyn>(items, length, 32, start, path, "CBOR array") ?? return Err(err)
         }
         index := 0
         loop length < 0 || index < length {
@@ -214,17 +214,17 @@ impl Parser {
             child_path: "{path}[{index}]"
             charged: child_path.count_bytes()
             offset: if length < 0 -> self.cursor else -> start
-            &self.charge(charged, offset, path, "CBOR path") ?? return Err(err)
+            self.charge(charged, offset, path, "CBOR path") ?? return Err(err)
             if length < 0 {
                 if self.items >= self.options.max_items -> return Err(failure(.Limit, self.cursor, child_path, "max_items {self.options.max_items} exceeded"))
-                &self.reserve<Dyn>(&items, 1, 32, self.cursor, child_path, "CBOR array") ?? return Err(err)
+                self.reserve<Dyn>(items, 1, 32, self.cursor, child_path, "CBOR array") ?? return Err(err)
             }
-            child: &self.value(input, depth + 1, child_path) ?? {
+            child: self.value(input, depth + 1, child_path) ?? {
                 self.live -= charged
                 return Err(err)
             }
             self.live -= charged
-            &items.push(child)
+            items.push(child)
             index += 1
         }
         Ok(Dyn.Array(items))
@@ -236,9 +236,9 @@ impl Parser {
         length := -1
         if additional == 31 -> self.indefinite(start, path) ?? return Err(err)
         else {
-            argument: &self.argument(input, additional, start, path) ?? return Err(err)
+            argument: self.argument(input, additional, start, path) ?? return Err(err)
             length = argument.value
-            &self.reserve<(key: String, value: Dyn)>(&entries, length, 56, start, path, "CBOR map") ?? return Err(err)
+            self.reserve<(key: String, value: Dyn)>(entries, length, 56, start, path, "CBOR map") ?? return Err(err)
         }
         prior_start := -1
         prior_end := -1
@@ -251,10 +251,10 @@ impl Parser {
                     break
                 }
                 if self.items >= self.options.max_items -> return Err(failure(.Limit, self.cursor, path, "max_items {self.options.max_items} exceeded"))
-                &self.reserve<(key: String, value: Dyn)>(&entries, 1, 56, self.cursor, path, "CBOR map") ?? return Err(err)
+                self.reserve<(key: String, value: Dyn)>(entries, 1, 56, self.cursor, path, "CBOR map") ?? return Err(err)
             }
             key_start: self.cursor
-            key_value: &self.value(input, depth + 1, path) ?? return Err(err)
+            key_value: self.value(input, depth + 1, path) ?? return Err(err)
             key := ""
             if key_value == {
                 .Text(text) -> key = text
@@ -276,16 +276,16 @@ impl Parser {
             key_debug: "{key:Debug}".replace("'", "\\'")
             child_path: "{path}[{key_debug}]"
             charged: child_path.count_bytes()
-            &self.charge(charged, key_start, path, "CBOR path") ?? return Err(err)
-            child: &self.value(input, depth + 1, child_path) ?? {
+            self.charge(charged, key_start, path, "CBOR path") ?? return Err(err)
+            child: self.value(input, depth + 1, child_path) ?? {
                 self.live -= charged
                 return Err(err)
             }
             self.live -= charged
-            &entries.push((key: key, value: child))
+            entries.push((key: key, value: child))
             index += 1
         }
-        Ok(stream.object_from_entries(^entries))
+        Ok(stream.object_from_entries(entries))
     }
 
     float: fn(&self, input: [U8], additional: Int, start: Int, path: String) -> Dyn CBORError! {
@@ -315,22 +315,22 @@ impl Parser {
         start: self.cursor
         head: Int.from_u8(input[self.cursor])
         self.cursor += 1
-        &self.count(start, path) ?? return Err(err)
+        self.count(start, path) ?? return Err(err)
         major: head >> 5
         additional: head.bit_and(31)
         if major == 0 || major == 1 {
-            number: &self.argument(input, additional, start, path) ?? return Err(err)
+            number: self.argument(input, additional, start, path) ?? return Err(err)
             if number.outside_int -> return Err(failure(.Unsupported, start, path, "CBOR integer is outside Jet Int"))
             return Ok(Dyn.Int(if major == 0 -> number.value else -> -number.value - 1))
         }
-        if major == 2 || major == 3 -> return &self.string(input, additional, start, depth, path, major)
-        if major == 4 -> return &self.array(input, additional, start, depth, path)
-        if major == 5 -> return &self.object(input, additional, start, depth, path)
-        if major == 6 -> return &self.datetime(input, additional, start, depth, path)
+        if major == 2 || major == 3 -> return self.string(input, additional, start, depth, path, major)
+        if major == 4 -> return self.array(input, additional, start, depth, path)
+        if major == 5 -> return self.object(input, additional, start, depth, path)
+        if major == 6 -> return self.datetime(input, additional, start, depth, path)
         if additional == 20 -> return Ok(Dyn.Bool(false))
         if additional == 21 -> return Ok(Dyn.Bool(true))
         if additional == 22 -> return Ok(Dyn.Null)
-        if additional >= 25 && additional <= 27 -> return &self.float(input, additional, start, path)
+        if additional >= 25 && additional <= 27 -> return self.float(input, additional, start, path)
         if additional == 31 -> return Err(failure(.Syntax, start, path, "CBOR break outside an indefinite container"))
         Err(failure(.Unsupported, start, path, "unsupported CBOR simple value {additional}"))
     }

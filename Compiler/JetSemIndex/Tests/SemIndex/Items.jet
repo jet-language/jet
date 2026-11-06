@@ -42,7 +42,7 @@ semindex_s9_method_contract_assertions: fn(index: SemIndex) Never! { semindex_s6
 
 // Actual state owner and checked marker anchor.
 semindex_s9_state_owner_source: fn() -> String Never! {
-    "\nDoor: struct {{\n    state {{ Closed, Open }}\n}}\nimpl Door {{\n    #Transition(_, Door.State.Closed) new: fn() -[]> Door {{ return Door{{}} }}\n    #Transition(Door.State.Closed, Door.State.Open) open: fn(self: ^Door) -[]> Door {{ return self }}\n}}\nrun: fn() {{}}\n"
+    "\nDoor: struct {{\n    state {{ Closed, Open }}\n}}\nimpl Door {{\n    #Transition(_, Door.State.Closed) new: fn() -[]> Door {{ return Door{{}} }}\n    #Transition(Door.State.Closed, Door.State.Open) open: fn(self: &&Door) -[]> Door {{ return self }}\n}}\nrun: fn() {{}}\n"
 }
 semindex_s9_state_owner_assertions: fn(index: SemIndex, source: String, json: String) Never! {
     definition_found := false

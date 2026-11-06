@@ -44,9 +44,9 @@ doc_discover_doctests: fn(root: doc_os_path.OsPath?, file_path: doc_os_path.OsPa
             next
         }
         if doc_line == "```" {
-            &tests.push(DocTest{
+            tests.push(DocTest{
                 module_path: module_path.copy(), line: fence_line,
-                setup: ^setup, expectations: ^expectations,
+                setup: setup.move(), expectations: expectations.move(),
                 // Rust uses the opening offset + closing raw line byte length,
                 // not the fence extent. The closing line follows the opening,
                 // so that end is already bounded by source byte length. Opening
@@ -66,8 +66,8 @@ doc_discover_doctests: fn(root: doc_os_path.OsPath?, file_path: doc_os_path.OsPa
             doc_bytes: doc_line.bytes()
             expression := doc_bytes_text(doc_bytes, 0, marker).trim() // #4303
             expected := doc_bytes_text(doc_bytes, marker + 5, doc_bytes.len()).trim() // #4303
-            &expectations.push(DocExpectation{expression: expression.copy(), expected: expected.copy()})
-        } else if doc_line != "" -> &setup.push(doc_line.copy())
+            expectations.push(DocExpectation{expression: expression.copy(), expected: expected.copy()})
+        } else if doc_line != "" -> setup.push(doc_line.copy())
     }
     tests
 }
@@ -130,15 +130,15 @@ doc_source_docs: fn(source: String, def_start: Int, summary: &String, examples: 
         line := doc_bytes_text(bytes, start, content_end).trim() // #4303
         if !line.starts_with("///") -> break
         doc := line.slice(3, line.len()).trim() // #4303
-        &lines.push(doc.copy())
+        lines.push(doc.copy())
         if start == 0 -> break
         end = start - 1
     }
-    &lines.reverse()
+    lines.reverse()
     loop line in lines {
         if line.starts_with("Example:") {
             example := line.slice(8, line.len()).trim() // #4303
-            &examples.push(example.copy())
+            examples.push(example.copy())
         } else if summary == "" && line != "" && !line.starts_with("```") -> summary = line.copy()
     }
 }

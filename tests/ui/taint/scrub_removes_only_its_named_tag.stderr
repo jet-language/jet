@@ -4,7 +4,7 @@ Error [jet.ReadOnlyValueNotOwned]: `value` was not moved here, so it cannot be r
   5 | redact: fn(value: #PII String) -> String { value }
     |                                            ^^^^^
  Why: This function has read access only and does not own the value
- Fix: Return a copy: `return value.copy()` — or take ownership with the move marker `^`: `value: ^#PII String`. To return borrowed data, declare `-> View<T> from value` and return a view derived from `value`
+ Fix: Return a copy: `return value.copy()` — or take ownership: `value: &&#PII String`. To return borrowed data, declare `-> View<T> from value` and return a view derived from `value`
 More: jet-lang.dev/e/E0120
 
 Error [jet.UnknownCoreItem]: `core.process` has no item `run`

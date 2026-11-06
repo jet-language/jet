@@ -136,7 +136,7 @@ CLIParsed: struct {
 // `args[start..]` as an owned list.
 cli_tail: fn(args: [String], start: Int) -> [String] Never! {
     out := [String]{}
-    loop index in start..<args.len() -> &out.push(args[index])
+    loop index in start..<args.len() -> out.push(args[index])
     out
 }
 
@@ -238,7 +238,7 @@ cli_parse_args_for: fn(verb: String, args: [String]) -> CLIParsed Never! {
                 loop index < args.len() {
                     package: args[index]
                     if package == "--" || package.starts_with("-") -> break
-                    &flags.packages.push(package)
+                    flags.packages.push(package)
                     index += 1
                 }
                 next
@@ -284,7 +284,7 @@ cli_parse_args_for: fn(verb: String, args: [String]) -> CLIParsed Never! {
                 if cli_flag_argument(args, index) == .Val(provider) -> flags.cache_credential = Val(provider)
             }
             arg.starts_with("--credential=") -> flags.cache_credential = Val(cli_trim_start_matches(arg, "--credential="))
-            else -> &positional.push(arg)
+            else -> positional.push(arg)
         }
         index += 1
     }
@@ -297,7 +297,7 @@ cli_before_argument_separator: fn(args: [String]) -> [String] Never! {
     out := [String]{}
     loop arg in args {
         if arg == "--" -> break
-        &out.push(arg)
+        out.push(arg)
     }
     out
 }
@@ -333,14 +333,14 @@ cli_verb_flags: fn(verb: String) -> [String] Never! {
         else -> [String]{}
     }
     out := [String]{}
-    loop flag in own -> &out.push(flag)
+    loop flag in own -> out.push(flag)
     if scoped {
-        loop flag in CLI_SCOPE_FLAGS -> &out.push(flag)
+        loop flag in CLI_SCOPE_FLAGS -> out.push(flag)
     }
     if realize {
-        loop flag in CLI_REALIZE_FLAGS -> &out.push(flag)
+        loop flag in CLI_REALIZE_FLAGS -> out.push(flag)
     }
-    loop flag in CLI_COMMON_FLAGS -> &out.push(flag)
+    loop flag in CLI_COMMON_FLAGS -> out.push(flag)
     out
 }
 

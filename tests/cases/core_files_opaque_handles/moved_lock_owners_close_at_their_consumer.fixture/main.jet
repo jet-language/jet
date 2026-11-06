@@ -28,16 +28,16 @@ Outer: struct {
 
 impl Holder {
     // Owns self: its lock closes when this returns.
-    finish: fn(^self) -[FS]> Int {
+    finish: fn(&&self) -[FS]> Int {
         held()
     }
 }
 
-consume_holder: fn(^h: Holder) -[FS]> Int {
+consume_holder: fn(&&h: Holder) -[FS]> Int {
     held()
 }
 
-consume_lock: fn(^l: FileLock) -[FS]> Int {
+consume_lock: fn(&&l: FileLock) -[FS]> Int {
     held()
 }
 
@@ -47,21 +47,21 @@ outer: fn(name: String) -[FS, Env]> Outer {
 
 receiver: fn() -[IO, FS, Env]> {
     h: Holder{note: "a", lock: lock("a.lk")}
-    inside: ^h.finish()
+    inside: h.finish()
     print("receiver {inside} {held()}")
 }
 
 member_receiver: fn() -[IO, FS, Env]> {
     o: outer("b")
-    inside: ^o.owner.finish()
+    inside: o.owner.finish()
     print("member receiver {inside} {held()}")
 }
 
 member_argument: fn() -[IO, FS, Env]> {
     o := outer("c")
-    inside: consume_holder(^o.owner)
+    inside: consume_holder(o.owner.move())
     print("member argument {inside} {held()}")
-    close(^o.spare)
+    close(o.spare)
     print("member close {held()}")
     o.spare = lock("c-again.lk")
     print("member reinitialized {held()}")
@@ -70,20 +70,20 @@ member_argument: fn() -[IO, FS, Env]> {
 branch: fn(moved: Bool) -[IO, FS, Env]> {
     o := outer("d")
     if moved {
-        close(^o.spare)
+        close(o.spare)
     }
     print("branch {moved} {held()}")
 }
 
-adopt: fn(^h: Holder) -[IO, FS]> {
-    me := ^h
-    inside: consume_holder(^me)
+adopt: fn(&&h: Holder) -[IO, FS]> {
+    me := h.move()
+    inside: consume_holder(me)
     print("adopted {inside} {held()}")
 }
 
 whole_lock: fn() -[IO, FS, Env]> {
     l: lock("e.lk")
-    inside: consume_lock(^l)
+    inside: consume_lock(l)
     print("whole lock {inside} {held()}")
 }
 

@@ -18,28 +18,28 @@ consume: fn(s: Session) -> Int {
 }
 
 take_field: fn(r: &Root) -> Int {
-    taken := ^r.session
+    taken := r.session.move()
     consume(taken)
 }
 
 replace_field: fn(r: &Root) -> Int {
     taken := Session{id: 0, names: [String]{}}
-    taken = ^r.session
+    taken = r.session.move()
     consume(taken)
 }
 
 wrap_field: fn(r: Root) -> Root {
-    Root{session: ^r.session}
+    Root{session: r.session.move()}
 }
 
 return_field: fn(r: Root) -> Session {
-    ^r.session
+    r.session.move()
 }
 
 run: fn() {
     root := Root{session: Session{id: 3, names: [String]{}}}
-    print(take_field(&root))
-    print(replace_field(&root))
+    print(take_field(root))
+    print(replace_field(root))
     print(wrap_field(root).session.id)
     print(return_field(root).id)
 }

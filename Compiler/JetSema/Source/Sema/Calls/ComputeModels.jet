@@ -38,18 +38,18 @@ SemaComputeModelsSpecialCheck: struct {
 // it must start from a place (spec.md:1306, E0213).
 sema_call_compute_tensor_window: fn(base: Expr, tensor: TExpr, range: TExpr, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> TExpr? {
     if !sema_expression_is_place(base) {
-        &diagnostics.push(sema_error("E0213", span, "a window must start from a place", "a borrowed place needs stable storage", "bind a temporary before taking a place"))
+        diagnostics.push(sema_error("E0213", span, "a window must start from a place", "a borrowed place needs stable storage", "bind a temporary before taking a place"))
         return None
     }
     if sema_call_core_module_identity(environment, program, "core.compute") == None {
-        &diagnostics.push(sema_error("E0003", span, "a Tensor window needs the core.compute source module", "a Tensor range selects first-axis slabs through core.compute", "load the registered core.compute source module"))
+        diagnostics.push(sema_error("E0003", span, "a Tensor window needs the core.compute source module", "a Tensor range selects first-axis slabs through core.compute", "load the registered core.compute source module"))
         return None
     }
     owner := "Tensor"
     if sema_expr_unwrap_tag(tensor.ty) == .Named(name) -> owner = name
     data_ty: core_record_field(owner, "data") ?? Type.List{element: Type.Float}
     data: sema_tree_node(data_ty, TExprKind.Field{receiver: tensor.copy(), field: TFieldRef{owner: None, field: symbol_id(SymbolKind.Field, "", owner, "data"), name: "data", ty: data_ty, boxed: false}}, span)
-    flat: sema_call_core_source("core.compute", "__window", [TExpr]{tensor, range}, Type.Named{name: "Range"}, true, span, environment, program, &diagnostics) ?? return None
+    flat: sema_call_core_source("core.compute", "__window", [TExpr]{tensor, range}, Type.Named{name: "Range"}, true, span, environment, program, diagnostics) ?? return None
     zero_start: sema_tree_node(Type.Int, TExprKind.IntLit{value: 0, width: None}, span)
     zero_end: sema_tree_node(Type.Int, TExprKind.IntLit{value: 0, width: None}, span)
     Val(sema_tree_node(data_ty, TExprKind.Slice{base: data, start: zero_start, end: zero_end, range: Val(flat), location: sema_expression_panic_location(environment, program, scopes, span)}, span))
@@ -62,8 +62,8 @@ sema_call_compute_window_copy: fn(value: TExpr, span: Span, expected: Type?, env
     if value.kind == .Slice(data, _, _, window, _) {
         if data.kind == .Field(tensor, field) && field.name == "data" && is_compute_tensor_family(tensor.ty) && window == .Val(flat) {
             if flat.kind == .Call(_, _, window_args) && window_args.len() == 2 {
-                copied: sema_call_core_source("core.compute", "__window_copy", [TExpr]{tensor, window_args[1].value, value}, Type.Named{name: "Tensor"}, true, span, environment, program, &diagnostics) ?? return SemaComputeModelsSpecialCheck{handled: true, value: None}
-                return SemaComputeModelsSpecialCheck{handled: true, value: sema_expr_expected_owned(^copied, expected, environment, program, &diagnostics)}
+                copied: sema_call_core_source("core.compute", "__window_copy", [TExpr]{tensor, window_args[1].value, value}, Type.Named{name: "Tensor"}, true, span, environment, program, diagnostics) ?? return SemaComputeModelsSpecialCheck{handled: true, value: None}
+                return SemaComputeModelsSpecialCheck{handled: true, value: sema_expr_expected_owned(copied, expected, environment, program, diagnostics)}
             }
         }
     }
@@ -121,12 +121,12 @@ sema_call_compute_alias_type: fn(member: String, args: [CallArg]) -> Type? {
 }
 
 sema_call_compute_arity_error: fn(member: String, expected: Int, actual: Int, span: Span, diagnostics: &[Diagnostic]) {
-    &diagnostics.push(sema_error("E0104", span, "`{member}` expects {expected} argument{if expected == 1 -> "" else -> "s"}, got {actual}", "this Core operation has a fixed argument shape", "pass exactly {expected} argument{if expected == 1 -> "" else -> "s"}"))
+    diagnostics.push(sema_error("E0104", span, "`{member}` expects {expected} argument{if expected == 1 -> "" else -> "s"}, got {actual}", "this Core operation has a fixed argument shape", "pass exactly {expected} argument{if expected == 1 -> "" else -> "s"}"))
 }
 
 sema_call_compute_explicit_type_args: fn(member: String, type_args: [Type], expected: Int, span: Span, diagnostics: &[Diagnostic]) -> Bool {
     if type_args.len() == expected -> return true
-    &diagnostics.push(sema_call_generic_count_diagnostic("core.compute.{member}", expected, type_args.len(), span))
+    diagnostics.push(sema_call_generic_count_diagnostic("core.compute.{member}", expected, type_args.len(), span))
     return false
 }
 
@@ -134,7 +134,7 @@ sema_call_compute_owned_params: fn(types: [Type], accesses: [AccessConvention]) 
     params := [SemaCallParam]{}
     loop (index, ty) in types {
         access := if index < accesses.len() -> accesses[index] else -> AccessConvention.Read
-        &params.push(SemaCallParam{label: "arg{index + 1}", name: "arg{index + 1}", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: access, ty: Val(ty), variadic: false})
+        params.push(SemaCallParam{label: "arg{index + 1}", name: "arg{index + 1}", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: access, ty: Val(ty), variadic: false})
     }
     return params
 }
@@ -144,20 +144,20 @@ sema_call_compute_owned_params: fn(types: [Type], accesses: [AccessConvention]) 
 // carries the literal extents as shape facts (D-COMPUTE-TYPE1).
 sema_call_try_compute_alias: fn(module_name: String, member: String, target: SemaCallDirectTarget, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaComputeModelsSpecialCheck {
     if module_name != "core.compute" || (member != "vec" && member != "matrix") -> return SemaComputeModelsSpecialCheck{handled: false, value: None}
-    &context.compute_calls.push(SemaComputeCallFact{method: member, span: span})
-    if !sema_call_compute_explicit_type_args(member, type_args, 0, span, &diagnostics) -> return SemaComputeModelsSpecialCheck{handled: true, value: None}
+    context.compute_calls.push(SemaComputeCallFact{method: member, span: span})
+    if !sema_call_compute_explicit_type_args(member, type_args, 0, span, diagnostics) -> return SemaComputeModelsSpecialCheck{handled: true, value: None}
     arity := if member == "vec" -> 2 else -> 3
     if args.len() != arity {
-        loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-        sema_call_compute_arity_error(member, arity, args.len(), span, &diagnostics)
+        loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
+        sema_call_compute_arity_error(member, arity, args.len(), span, diagnostics)
         return SemaComputeModelsSpecialCheck{handled: true, value: None}
     }
     scopes.ownership_call_depth += 1
-    value := sema_call_core_check_source_owned(target, "core.compute.{member}", [Type]{}, args, span, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    value := sema_call_core_check_source_owned(target, "core.compute.{member}", [Type]{}, args, span, None, environment, program, scopes, state, tail_store, context, diagnostics)
     scopes.ownership_call_depth -= 1
     checked := value ?? return SemaComputeModelsSpecialCheck{handled: true, value: None}
     checked.ty = sema_call_compute_alias_type(member, args) ?? panic("core.compute.{member} has an alias type")
-    return SemaComputeModelsSpecialCheck{handled: true, value: sema_expr_expected(checked, expected, environment, program, &diagnostics)}
+    return SemaComputeModelsSpecialCheck{handled: true, value: sema_expr_expected(checked, expected, environment, program, diagnostics)}
 }
 
 sema_call_compute_wrt_name: fn(item: Expr) -> String? {
@@ -174,7 +174,7 @@ sema_call_compute_wrt_names: fn(expression: Expr) -> [String]? {
             names := [String]{}
             loop item in items {
                 name: sema_call_compute_wrt_name(item) ?? return None
-                &names.push(name)
+                names.push(name)
             }
             Val(names)
         }
@@ -199,7 +199,7 @@ sema_call_compute_function_names: fn(expression: Expr, ty: Type, scopes: SemaSco
         .Paren(inner, _, _) -> return sema_call_compute_function_names(inner, ty, scopes)
         .Lambda(lambda, _) -> {
             params := [String]{}
-            loop parameter in lambda.params -> &params.push(parameter.name)
+            loop parameter in lambda.params -> params.push(parameter.name)
             if ty == {
                 .Fn(types, _, _, _, _, _) -> {
                     if types.len() == params.len() -> return Val(params)
@@ -232,9 +232,9 @@ sema_call_compute_function_identity: fn(expression: Expr, scopes: SemaScopeTable
 }
 
 sema_call_compute_tensor_value: fn(argument: CallArg, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    value: sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    value: sema_check_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
     if !is_compute_tensor_family(value.ty) {
-        &diagnostics.push(sema_error("E0112", argument.span, "this autodiff argument should be `Tensor`", "autodiff transforms record Tensor values, not scalar policy arguments", "pass a Tensor value"))
+        diagnostics.push(sema_error("E0112", argument.span, "this autodiff argument should be `Tensor`", "autodiff transforms record Tensor values, not scalar policy arguments", "pass a Tensor value"))
         return None
     }
     Val(value)
@@ -242,41 +242,41 @@ sema_call_compute_tensor_value: fn(argument: CallArg, environment: SemaScopeEnvi
 
 sema_call_compute_transform: fn(member: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaComputeModelsSpecialCheck {
     if args.len() == 0 {
-        sema_call_compute_arity_error(member, 1, 0, span, &diagnostics)
+        sema_call_compute_arity_error(member, 1, 0, span, diagnostics)
         return SemaComputeModelsSpecialCheck{handled: true, value: None}
     }
     value_indexes := [Int]{}
     wrt_expression := Expr?{None}
     loop (index, argument) in args {
         if index == 0 -> next
-        if argument.label == .Val(label) && label.name == "wrt" -> wrt_expression = Val(argument.expr) else -> &value_indexes.push(index)
+        if argument.label == .Val(label) && label.name == "wrt" -> wrt_expression = Val(argument.expr) else -> value_indexes.push(index)
     }
     direct := value_indexes.len() > 0
     if member == "jvp" && direct {
-        _ := sema_check_expression_with_lambda_escapes(args[0].expr, None, environment, program, &scopes, &state, &tail_store, &context, Val(false), &diagnostics)
-        loop index in value_indexes -> _ := sema_check_expression(args[index].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-        &diagnostics.push(sema_error("E0112", span, "`compute.jvp` is a function transform, not a direct call", "the ratified JVP surface returns a callable that accepts primal and tangent values", "bind `d_f: compute.jvp(f)`, then call `d_f(primal..., tangent...)`"))
+        _ := sema_check_expression_with_lambda_escapes(args[0].expr, None, environment, program, scopes, state, tail_store, context, Val(false), diagnostics)
+        loop index in value_indexes -> _ := sema_check_expression(args[index].expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
+        diagnostics.push(sema_error("E0112", span, "`compute.jvp` is a function transform, not a direct call", "the ratified JVP surface returns a callable that accepts primal and tangent values", "bind `d_f: compute.jvp(f)`, then call `d_f(primal..., tangent...)`"))
         return SemaComputeModelsSpecialCheck{handled: true, value: None}
     }
     valid := true
     wrt_names := [String]?{None}
     if wrt_expression == .Val(expression) -> wrt_names = sema_call_compute_wrt_names(expression)
     if wrt_expression != None && member != "gradient" && member != "value_and_gradient" {
-        &diagnostics.push(sema_error("E0112", span, "`wrt:` is not supported by `compute.{member}`", "`wrt:` selects named gradients on `compute.gradient` and `compute.value_and_gradient`", "remove `wrt:` and provide the full VJP or JVP inputs"))
+        diagnostics.push(sema_error("E0112", span, "`wrt:` is not supported by `compute.{member}`", "`wrt:` selects named gradients on `compute.gradient` and `compute.value_and_gradient`", "remove `wrt:` and provide the full VJP or JVP inputs"))
         valid = false
     }
     if wrt_expression != None && wrt_names == None {
-        &diagnostics.push(sema_error("E0112", expr_span(wrt_expression ?? Expr.Unit{span: span, id: AST_NODE_GENERATED}), "`wrt:` for `compute.{member}` must list parameter names", "the differentiation target is selected by the function parameter name", "write `wrt: [parameter]`"))
+        diagnostics.push(sema_error("E0112", expr_span(wrt_expression ?? Expr.Unit{span: span, id: AST_NODE_GENERATED}), "`wrt:` for `compute.{member}` must list parameter names", "the differentiation target is selected by the function parameter name", "write `wrt: [parameter]`"))
         valid = false
     }
-    function_value: sema_check_expression_with_lambda_escapes(args[0].expr, None, environment, program, &scopes, &state, &tail_store, &context, Val(!direct), &diagnostics) ?? {
-        loop index in value_indexes -> _ := sema_check_expression(args[index].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    function_value: sema_check_expression_with_lambda_escapes(args[0].expr, None, environment, program, scopes, state, tail_store, context, Val(!direct), diagnostics) ?? {
+        loop index in value_indexes -> _ := sema_check_expression(args[index].expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
         return SemaComputeModelsSpecialCheck{handled: true, value: None}
     }
     is_function := if function_value.ty == {.Fn(_, _, _, _, _, _) -> true else -> false}
     if !is_function {
-        &diagnostics.push(sema_error("E0112", span, "`compute.{member}` expects a function value", "autodiff transforms differentiate a function over Tensor arguments", "bind a Tensor function before passing it to the transform"))
-        loop index in value_indexes -> _ := sema_check_expression(args[index].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        diagnostics.push(sema_error("E0112", span, "`compute.{member}` expects a function value", "autodiff transforms differentiate a function over Tensor arguments", "bind a Tensor function before passing it to the transform"))
+        loop index in value_indexes -> _ := sema_check_expression(args[index].expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
         return SemaComputeModelsSpecialCheck{handled: true, value: None}
     }
     params := [Type]{}
@@ -295,9 +295,9 @@ sema_call_compute_transform: fn(member: String, args: [CallArg], span: Span, exp
         else -> {}
     }
     target_identity := sema_call_compute_function_identity(args[0].expr, scopes)
-    if target_identity == .Val(target) -> sema_compute_record_autodiff_obligation(member, target, span, &context)
+    if target_identity == .Val(target) -> sema_compute_record_autodiff_obligation(member, target, span, context)
     if effect_bound == .Val(effects) && effects.len() > 0 {
-        &diagnostics.push(sema_error("E0112", span, "`compute.{member}` needs a pure Tensor function", "autodiff records only pure Tensor operations and cannot carry an effectful callable", "remove the effect row from the differentiated function or differentiate a pure Tensor function"))
+        diagnostics.push(sema_error("E0112", span, "`compute.{member}` needs a pure Tensor function", "autodiff records only pure Tensor operations and cannot carry an effectful callable", "remove the effect row from the differentiated function or differentiate a pure Tensor function"))
         valid = false
     }
     output := ret.map((value) -> value) ?? Type.Named{name: "Unit"}
@@ -308,7 +308,7 @@ sema_call_compute_transform: fn(member: String, args: [CallArg], span: Span, exp
     gradient_value_type := sema_call_compute_gradient_value_type(output)
     gradient_output := member == "gradient" && gradient_value_type != None
     if !is_compute_tensor_family(output) && !gradient_output {
-        &diagnostics.push(sema_error("E0112", span, "`compute.{member}` needs a function returning `Tensor`", "the reverse and forward transforms have one Tensor output and keep Tensor storage law", "return a Tensor from the differentiated function"))
+        diagnostics.push(sema_error("E0112", span, "`compute.{member}` needs a function returning `Tensor`", "the reverse and forward transforms have one Tensor output and keep Tensor storage law", "return a Tensor from the differentiated function"))
         valid = false
     }
     invalid_parameter := false
@@ -316,37 +316,37 @@ sema_call_compute_transform: fn(member: String, args: [CallArg], span: Span, exp
         if !is_compute_tensor_family(parameter) -> invalid_parameter = true
     }
     if invalid_parameter {
-        &diagnostics.push(sema_error("E0112", span, "`compute.{member}` needs Tensor function arguments", "autodiff records only pure Tensor operations", "use a function whose parameters are all `Tensor`"))
+        diagnostics.push(sema_error("E0112", span, "`compute.{member}` needs Tensor function arguments", "autodiff records only pure Tensor operations", "use a function whose parameters are all `Tensor`"))
         valid = false
     }
     names_value := sema_call_compute_function_names(args[0].expr, function_value.ty, scopes)
     if names_value == None {
-        &diagnostics.push(sema_error("E0112", span, "`compute.{member}` needs named Tensor parameters", "named gradient fields come from the differentiated function signature", "pass a named Tensor function or lambda"))
-        loop index in value_indexes -> _ := sema_check_expression(args[index].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        diagnostics.push(sema_error("E0112", span, "`compute.{member}` needs named Tensor parameters", "named gradient fields come from the differentiated function signature", "pass a named Tensor function or lambda"))
+        loop index in value_indexes -> _ := sema_check_expression(args[index].expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
         return SemaComputeModelsSpecialCheck{handled: true, value: None}
     }
     names: names_value ?? [String]{}
     if names.len() != params.len() {
-        &diagnostics.push(sema_error("E0112", span, "`compute.{member}` needs named Tensor parameters", "named gradient fields come from the differentiated function signature", "pass a callable with named Tensor parameters"))
-        loop index in value_indexes -> _ := sema_check_expression(args[index].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        diagnostics.push(sema_error("E0112", span, "`compute.{member}` needs named Tensor parameters", "named gradient fields come from the differentiated function signature", "pass a callable with named Tensor parameters"))
+        loop index in value_indexes -> _ := sema_check_expression(args[index].expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
         return SemaComputeModelsSpecialCheck{handled: true, value: None}
     }
     if direct {
         expected_values := if member == "jvp" -> params.len() * 2 else -> params.len()
         expected_arguments := expected_values + 1
         if value_indexes.len() != expected_values {
-            sema_call_compute_arity_error(member, expected_arguments, args.len(), span, &diagnostics)
+            sema_call_compute_arity_error(member, expected_arguments, args.len(), span, diagnostics)
             valid = false
         }
     }
     typed_values := [TExpr]{}
     if direct {
         loop index in value_indexes {
-            value: sema_call_compute_tensor_value(args[index], environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? {
+            value: sema_call_compute_tensor_value(args[index], environment, program, scopes, state, tail_store, context, diagnostics) ?? {
                 valid = false
                 next
             }
-            &typed_values.push(value)
+            typed_values.push(value)
         }
     }
     selected := [Int]{}
@@ -362,26 +362,26 @@ sema_call_compute_transform: fn(member: String, args: [CallArg], span: Span, exp
                         }
                     }
                     if index == None {
-                        &diagnostics.push(sema_error("E0112", span, "`wrt` names no parameter `{target_name}`; parameters are [{names.join(", ")}]", "a differentiation target must name one function parameter", "use a parameter name from the differentiated function"))
+                        diagnostics.push(sema_error("E0112", span, "`wrt` names no parameter `{target_name}`; parameters are [{names.join(", ")}]", "a differentiation target must name one function parameter", "use a parameter name from the differentiated function"))
                         valid = false
                         next
                     }
                     selected_index: index ?? 0
                     duplicate: loop existing in selected { if existing == selected_index -> break true } ?? false
-                    if !duplicate -> &selected.push(selected_index)
+                    if !duplicate -> selected.push(selected_index)
                 }
             }
         }
         else -> {
-            loop index in 0..<params.len() -> &selected.push(index)
+            loop index in 0..<params.len() -> selected.push(index)
         }
     }
-    if selected.len() == 0 -> loop index in 0..<params.len() -> &selected.push(index)
+    if selected.len() == 0 -> loop index in 0..<params.len() -> selected.push(index)
     if !valid -> return SemaComputeModelsSpecialCheck{handled: true, value: None}
     gradient_names := (loop index in selected -> names[index])
     gradient_value: gradient_value_type ?? Type.Named{name: "Tensor"}
     gradient_fields := [TypeTupleField]{}
-    loop name in gradient_names -> &gradient_fields.push(TypeTupleField{name: name, ty: gradient_value})
+    loop name in gradient_names -> gradient_fields.push(TypeTupleField{name: name, ty: gradient_value})
     gradient_type := Type.Tuple{fields: gradient_fields}
     run_type := Type.Apply{name: "VJPRun", args: [Type]{gradient_type}}
     direct_return := if {
@@ -397,11 +397,11 @@ sema_call_compute_transform: fn(member: String, args: [CallArg], span: Span, exp
         transform_metadata := call_metadata
         if member == "jvp" {
             transform_params = [Type]{}
-            loop parameter in params -> &transform_params.push(parameter)
-            loop parameter in params -> &transform_params.push(parameter)
+            loop parameter in params -> transform_params.push(parameter)
+            loop parameter in params -> transform_params.push(parameter)
             if param_contract == .Val(contract) {
                 doubled := contract
-                loop row in contract -> &doubled.push(row)
+                loop row in contract -> doubled.push(row)
                 transform_contract = Val(doubled)
             }
             if call_metadata == .Val(metadata) {
@@ -412,10 +412,10 @@ sema_call_compute_transform: fn(member: String, args: [CallArg], span: Span, exp
                     conventions: metadata.conventions,
                     policies: metadata.policies,
                 }
-                loop value in metadata.names -> &doubled.names.push(value)
-                loop value in metadata.defaults -> &doubled.defaults.push(value)
-                loop value in metadata.variadic -> &doubled.variadic.push(value)
-                loop value in metadata.conventions -> &doubled.conventions.push(value)
+                loop value in metadata.names -> doubled.names.push(value)
+                loop value in metadata.defaults -> doubled.defaults.push(value)
+                loop value in metadata.variadic -> doubled.variadic.push(value)
+                loop value in metadata.conventions -> doubled.conventions.push(value)
                 transform_metadata = Val(doubled)
             }
         }
@@ -428,27 +428,27 @@ sema_call_compute_transform: fn(member: String, args: [CallArg], span: Span, exp
         result_type = Type.Fn{params: transform_params, ret: Val(transform_return), effect_bound: effect_bound, param_contract: transform_contract, call_metadata: transform_metadata, return_view_provenance: None}
     }
     runtime_args := [TExpr]{function_value}
-    loop value in typed_values -> &runtime_args.push(value)
+    loop value in typed_values -> runtime_args.push(value)
     target_values := [TExpr]{}
-    loop target in selected -> &target_values.push(sema_tree_node(Type.Int, TExprKind.IntLit{value: target, width: None}, span))
-    &runtime_args.push(sema_tree_node(Type.List{element: Type.Int}, TExprKind.ListLit{values: target_values}, span))
+    loop target in selected -> target_values.push(sema_tree_node(Type.Int, TExprKind.IntLit{value: target, width: None}, span))
+    runtime_args.push(sema_tree_node(Type.List{element: Type.Int}, TExprKind.ListLit{values: target_values}, span))
     effects: effect_bound ?? [EffectRowEntry]{}
     transform_effects := [EffectRowEntry]{EffectRowEntry{name: "GPU", span: span}}
-    loop entry in effects -> &transform_effects.push(entry)
+    loop entry in effects -> transform_effects.push(entry)
     facts := SemaCallFacts{return_type: result_type, failure_carrier: TFailureCarrier.Infallible, effect_bound: Val(transform_effects), type_args: [Type]{function_value.ty}, default_refs: [FunctionDefaultRef]{}}
     values_args := [CallArg]{args[0]}
-    loop index in value_indexes -> &values_args.push(args[index])
+    loop index in value_indexes -> values_args.push(args[index])
     ownership_types := [Type]{function_value.ty}
-    loop value in typed_values -> &ownership_types.push(value.ty)
+    loop value in typed_values -> ownership_types.push(value.ty)
     accesses := (loop _ in ownership_types -> AccessConvention.Read)
-    ownership := sema_ownership_check_call_arguments(&state, "core.compute.{member}", sema_call_compute_owned_params(ownership_types, accesses), &values_args, scopes, &diagnostics)
+    ownership := sema_ownership_check_call_arguments(state, "core.compute.{member}", sema_call_compute_owned_params(ownership_types, accesses), values_args, scopes, diagnostics)
     if !ownership.accepted || !ownership.complete -> return SemaComputeModelsSpecialCheck{handled: true, value: None}
-    if !sema_effect_record_intrinsic_fact(environment, program, &scopes, &context, "core.compute.{member}", span, facts, &diagnostics) -> return SemaComputeModelsSpecialCheck{handled: true, value: None}
+    if !sema_effect_record_intrinsic_fact(environment, program, scopes, context, "core.compute.{member}", span, facts, diagnostics) -> return SemaComputeModelsSpecialCheck{handled: true, value: None}
     // Autodiff is a code transform the compiler emits (inventory: emission),
     // not a Core semantic row: the named compiler builtin carries the function
     // value, the Tensor values and the selected parameter indexes.
     value: sema_tree_node(result_type, TExprKind.MathBuiltin{type_name: "core.compute", function: member, args: runtime_args}, span)
-    return SemaComputeModelsSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
+    return SemaComputeModelsSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
 }
 
 // `compute.gradient`, `value_and_gradient`, `vjp` and `jvp` have no Core row:
@@ -457,9 +457,9 @@ sema_call_try_compute_transform: fn(module_name: String, member: String, alias: 
     if module_name != "core.compute" -> return SemaDirectSpecialCheck{handled: false, value: None}
     if member != "gradient" && member != "value_and_gradient" && member != "vjp" && member != "jvp" -> return SemaDirectSpecialCheck{handled: false, value: None}
     imported: sema_call_core_import_target(environment, program, alias) ?? return SemaDirectSpecialCheck{handled: false, value: None}
-    if !sema_call_core_record_import_reference(environment, program, scopes, imported, alias_span, &context) -> return SemaDirectSpecialCheck{handled: false, value: None}
-    &context.compute_calls.push(SemaComputeCallFact{method: member, span: span})
-    if !sema_call_core_check_type_args("core.compute", member, 0, false, type_args, span, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
-    checked: sema_call_compute_transform(member, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    if !sema_call_core_record_import_reference(environment, program, scopes, imported, alias_span, context) -> return SemaDirectSpecialCheck{handled: false, value: None}
+    context.compute_calls.push(SemaComputeCallFact{method: member, span: span})
+    if !sema_call_core_check_type_args("core.compute", member, 0, false, type_args, span, diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
+    checked: sema_call_compute_transform(member, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     SemaDirectSpecialCheck{handled: true, value: checked.value}
 }

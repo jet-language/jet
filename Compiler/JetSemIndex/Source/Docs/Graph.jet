@@ -87,7 +87,7 @@ build_doc_graph: fn(registration: SemaRegistrationGraph, module_sources: [SemaCo
     protocol_names := [String:Bool]{}
     loop source_index in loaded_module_rows {
         module_index: doc_loaded_registration_index(registration, module_sources[source_index])
-        doc_collect_protocol_names(registration.modules[module_index].program.items, &protocol_names)
+        doc_collect_protocol_names(registration.modules[module_index].program.items, protocol_names)
     }
     graph := DocGraph{
         schema_version: DOC_SCHEMA_VERSION,
@@ -102,26 +102,26 @@ build_doc_graph: fn(registration: SemaRegistrationGraph, module_sources: [SemaCo
         registered: registration.modules[module_index]
         source: loaded.loaded_source
         path: doc_stable_module_path(project_root, loaded.physical_path, loaded.display)
-        &graph.modules.push(DocModule{
+        graph.modules.push(DocModule{
             name: doc_module_name(path, loaded.alias, path_platform), path: path,
             public: loaded.pub_file,
             summary: doc_leading_summary(source),
             source: doc_source_for(project_root, loaded.physical_path, loaded.display, source, Span{start: 0, end: 0}),
         })
         tests := doc_discover_doctests(project_root, loaded.physical_path, loaded.display, source, path)
-        &tests.reverse()
+        tests.reverse()
         loop tests.len() > 0 {
-            test: &tests.pop() ?? panic("nonempty documentation tests")
-            &graph.doctests.push(^test)
+            test: tests.pop() ?? panic("nonempty documentation tests")
+            graph.doctests.push(test)
         }
-        doc_collect_items(registered.program.items, path, "", loaded.pub_file, loaded.physical_path, loaded.display, source, project_root, protocol_names, &graph.items, &graph.impls)
+        doc_collect_items(registered.program.items, path, "", loaded.pub_file, loaded.physical_path, loaded.display, source, project_root, protocol_names, graph.items, graph.impls)
     }
-    doc_enrich_callable_contracts(&graph.items, index, module_sources, loaded_module_rows, project_root)
-    doc_enrich_type_contracts(&graph.items, index, module_sources, loaded_module_rows, project_root)
-    doc_sort_modules(&graph.modules)
-    doc_sort_items(&graph.items)
-    doc_sort_impls(&graph.impls)
-    doc_sort_tests(&graph.doctests)
+    doc_enrich_callable_contracts(graph.items, index, module_sources, loaded_module_rows, project_root)
+    doc_enrich_type_contracts(graph.items, index, module_sources, loaded_module_rows, project_root)
+    doc_sort_modules(graph.modules)
+    doc_sort_items(graph.items)
+    doc_sort_impls(graph.impls)
+    doc_sort_tests(graph.doctests)
     graph
 }
 doc_loaded_registration_index: fn(registration: SemaRegistrationGraph, source: SemaCompilerModuleSource) -> Int Never! {
@@ -131,16 +131,16 @@ doc_loaded_registration_index: fn(registration: SemaRegistrationGraph, source: S
 // Stable rendering order is separate from checked module/source collection
 // order. Equal keys keep authored order (the native stable list sort).
 doc_sort_modules: fn(rows: &[DocModule]) Never! {
-    &rows.sort_by((left: DocModule, right: DocModule) -> (left.path <=> right.path).then(left.name <=> right.name))
+    rows.sort_by((left: DocModule, right: DocModule) -> (left.path <=> right.path).then(left.name <=> right.name))
 }
 doc_sort_items: fn(rows: &[DocItem]) Never! {
-    &rows.sort_by((left: DocItem, right: DocItem) -> (left.module_path <=> right.module_path).then(left.qualified_name <=> right.qualified_name).then(doc_kind_rank(left.kind) <=> doc_kind_rank(right.kind)).then(left.source.start <=> right.source.start))
+    rows.sort_by((left: DocItem, right: DocItem) -> (left.module_path <=> right.module_path).then(left.qualified_name <=> right.qualified_name).then(doc_kind_rank(left.kind) <=> doc_kind_rank(right.kind)).then(left.source.start <=> right.source.start))
 }
 doc_sort_impls: fn(rows: &[DocImpl]) Never! {
-    &rows.sort_by((left: DocImpl, right: DocImpl) -> (left.module_path <=> right.module_path).then(left.type_name <=> right.type_name).then(doc_trait_name_order(left.trait_name, right.trait_name)).then(left.source.start <=> right.source.start))
+    rows.sort_by((left: DocImpl, right: DocImpl) -> (left.module_path <=> right.module_path).then(left.type_name <=> right.type_name).then(doc_trait_name_order(left.trait_name, right.trait_name)).then(left.source.start <=> right.source.start))
 }
 doc_sort_tests: fn(rows: &[DocTest]) Never! {
-    &rows.sort_by((left: DocTest, right: DocTest) -> (left.module_path <=> right.module_path).then(left.line <=> right.line))
+    rows.sort_by((left: DocTest, right: DocTest) -> (left.module_path <=> right.module_path).then(left.line <=> right.line))
 }
 // Rust Option orders None before Some; Jet's enum declaration order is not
 // that contract. Match the optional strings explicitly, without cloning them.
@@ -163,7 +163,7 @@ impl DocGraph {
     undocumented_public: fn(self) -> [View<DocItem>] Never! {
         rows := [View<DocItem>]{}
         loop index in 0..<self.items.len() {
-            if self.items[index].public && self.items[index].summary == "" -> &rows.push(self.item_window(index))
+            if self.items[index].public && self.items[index].summary == "" -> rows.push(self.item_window(index))
         }
         rows
     }
@@ -174,21 +174,21 @@ impl DocGraph {
     to_status_envelope: fn(self) -> StatusEnvelope Never! {
         projection: pkg_effect_projection_status_value(self.effect_projection)
         modules := [StatusValue]{}
-        loop row in self.modules -> &modules.push(doc_module_value(row))
+        loop row in self.modules -> modules.push(doc_module_value(row))
         items := [StatusValue]{}
-        loop row in self.items -> &items.push(doc_item_value(row))
+        loop row in self.items -> items.push(doc_item_value(row))
         impls := [StatusValue]{}
-        loop row in self.impls -> &impls.push(doc_impl_value(row))
+        loop row in self.impls -> impls.push(doc_impl_value(row))
         tests := [StatusValue]{}
-        loop row in self.doctests -> &tests.push(doc_test_value(row))
+        loop row in self.doctests -> tests.push(doc_test_value(row))
         doc: StatusFields.new()
             .with("schema_version", StatusValue.Integer{value: self.schema_version})
             .with("root", StatusValue.String{value: self.root.copy()})
             .with("effect_projection", projection)
-            .with("modules", StatusValue.Array{values: ^modules})
-            .with("items", StatusValue.Array{values: ^items})
-            .with("impls", StatusValue.Array{values: ^impls})
-            .with("doctests", StatusValue.Array{values: ^tests})
+            .with("modules", StatusValue.Array{values: modules.move()})
+            .with("items", StatusValue.Array{values: items.move()})
+            .with("impls", StatusValue.Array{values: impls.move()})
+            .with("doctests", StatusValue.Array{values: tests.move()})
         StatusEnvelope.new("inspect.doc", true).with_field("doc", StatusValue.Object{fields: doc})
     }
 
@@ -196,21 +196,21 @@ impl DocGraph {
     // field order and canonical Foundation quote, not RFC8785 canonicalization.
     to_json: fn(self) -> String Never! {
         modules := [String]{}
-        loop row in self.modules -> &modules.push(doc_module_json(row))
+        loop row in self.modules -> modules.push(doc_module_json(row))
         items := [String]{}
-        loop row in self.items -> &items.push(doc_item_json(row))
+        loop row in self.items -> items.push(doc_item_json(row))
         impls := [String]{}
-        loop row in self.impls -> &impls.push(doc_impl_json(row))
+        loop row in self.impls -> impls.push(doc_impl_json(row))
         tests := [String]{}
-        loop row in self.doctests -> &tests.push(doc_test_json(row))
+        loop row in self.doctests -> tests.push(doc_test_json(row))
         projection: pkg_render_effect_projection_object(self.effect_projection)
         "{{\"schema_version\":{self.schema_version},\"root\":{foundation_json_quote(self.root)},\"effect_projection\":{projection},\"modules\":[{modules.join(",")}],\"items\":[{items.join(",")}],\"impls\":[{impls.join(",")}],\"doctests\":[{tests.join(",")}]}}"
     }
 }
 doc_status_strings: fn(values: [String]) -> StatusValue Never! {
     rows := [StatusValue]{}
-    loop value in values -> &rows.push(StatusValue.String{value: value.copy()})
-    StatusValue.Array{values: ^rows}
+    loop value in values -> rows.push(StatusValue.String{value: value.copy()})
+    StatusValue.Array{values: rows.move()}
 }
 
 // Parent helper family shared by S23 and S24. Byte spans/columns stay Rust
@@ -223,7 +223,7 @@ doc_source_for: fn(root: doc_os_path.OsPath?, file_path: doc_os_path.OsPath?, di
     end: if clipped_end > start -> clipped_end else -> start
     line := 1
     column := 1
-    doc_line_column_bytes(bytes, start, &line, &column)
+    doc_line_column_bytes(bytes, start, line, column)
     DocSource{path: path, start: start, end: end, line: line, column: column, link: "{path}#L{line}"}
 }
 doc_declaration_text: fn(source: String, span: Span) -> String Never! {
@@ -241,8 +241,8 @@ doc_declaration_text: fn(source: String, span: Span) -> String Never! {
         if doc_text.is_whitespace(scalar) {
             if out.len() > 0 -> pending_space = true
         } else {
-            if pending_space -> &out.push(U8{32})
-            loop byte in scalar.bytes() -> &out.push(byte)
+            if pending_space -> out.push(U8{32})
+            loop byte in scalar.bytes() -> out.push(byte)
             pending_space = false
         }
     }
@@ -294,7 +294,7 @@ doc_kind_rank: fn(kind: String) -> Int Never! {
 // #4357: output receivers retain the Rust pair without an allocated list or
 // extra schema record. Columns count UTF8 bytes, NOT Unicode/display cells.
 doc_line_column: fn(source: String, offset: Int, line: &Int, column: &Int) Never! {
-    doc_line_column_bytes(source.bytes(), offset, &line, &column)
+    doc_line_column_bytes(source.bytes(), offset, line, column)
 }
 doc_line_column_bytes: fn(bytes: [U8], offset: Int, line: &Int, column: &Int) Never! {
     line = 1

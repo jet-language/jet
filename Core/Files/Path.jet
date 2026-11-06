@@ -89,7 +89,7 @@ parents: fn(path: Path) -> [Path] Never! {
     seen := path.raw.copy()
     loop {
         if cur.raw == seen || cur.raw.bytes().len() == 0 -> return out
-        &out.push(cur.copy())
+        out.push(cur.copy())
         if cur.raw == "/" || (cur.raw.bytes().len() == 2 && ends_colon(cur.raw)) -> return out
         seen = cur.raw.copy()
         nxt := parent(cur)
@@ -113,7 +113,7 @@ files_slice: fn(raw: [U8], start: Int, end: Int) -> String {
     i := start
     loop {
         if i >= end || i < 0 || i >= raw.len() -> return String.from_bytes(out) ?? ""
-        &out.push(raw[i])
+        out.push(raw[i])
         i = i + 1
     }
 }
@@ -127,12 +127,12 @@ suffixes: fn(path: Path) -> [String] Never! {
     i := 1
     loop i < raw.len() {
         if raw[i] == (U8{46}) {
-            if start >= 0 -> &out.push(files_slice(raw, start, i))
+            if start >= 0 -> out.push(files_slice(raw, start, i))
             start = i
         }
         i = i + 1
     }
-    if start >= 0 -> &out.push(files_slice(raw, start, raw.len()))
+    if start >= 0 -> out.push(files_slice(raw, start, raw.len()))
     out
 }
 
@@ -198,9 +198,9 @@ as_posix: fn(path: Path) -> String Never! {
     out := [U8]{}
     loop b in path.raw.bytes() {
         if b == (U8{92}) {
-            &out.push(U8{47})
+            out.push(U8{47})
         } else {
-            &out.push(b)
+            out.push(b)
         }
     }
     String.from_bytes(out) ?? path.raw.copy()
@@ -211,9 +211,9 @@ as_windows: fn(path: Path) -> String Never! {
     out := [U8]{}
     loop b in path.raw.bytes() {
         if b == (U8{47}) {
-            &out.push(U8{92})
+            out.push(U8{92})
         } else {
-            &out.push(b)
+            out.push(b)
         }
     }
     String.from_bytes(out) ?? path.raw.copy()
@@ -384,7 +384,7 @@ glob: fn(path: Path, pattern: String) -[FS]> [Path] IOError! {
     full: files.join(path.raw, pattern) ?? ""
     names: files.glob(full)?("glob")
     out := [Path]{}
-    loop n in names -> &out.push(Path{raw: n})
+    loop n in names -> out.push(Path{raw: n})
     Ok(out)
 }
 
@@ -393,7 +393,7 @@ rglob: fn(path: Path, pattern: String) -[FS]> [Path] IOError! {
     full: files.join(first, pattern) ?? ""
     names: files.glob(full)?("glob")
     out := [Path]{}
-    loop n in names -> &out.push(Path{raw: n})
+    loop n in names -> out.push(Path{raw: n})
     Ok(out)
 }
 
@@ -401,7 +401,7 @@ rglob: fn(path: Path, pattern: String) -[FS]> [Path] IOError! {
 iterdir: fn(path: Path) -[FS]> [Path] IOError! {
     entries: files.list_dir(path.raw)
     out := [Path]{}
-    loop e in entries -> &out.push(Path{raw: e.path})
+    loop e in entries -> out.push(Path{raw: e.path})
     Ok(out)
 }
 
@@ -409,7 +409,7 @@ iterdir: fn(path: Path) -[FS]> [Path] IOError! {
 walk: fn(path: Path) -[FS]> [Path] IOError! {
     entries: files.walk(path.raw, None)
     out := [Path]{}
-    loop e in entries -> &out.push(Path{raw: e.path})
+    loop e in entries -> out.push(Path{raw: e.path})
     Ok(out)
 }
 

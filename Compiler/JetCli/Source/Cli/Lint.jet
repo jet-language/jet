@@ -27,7 +27,7 @@ jet_cli_lint_a11y: fn(file: String, source: String, color: Bool, json: Bool) -> 
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     compiled: jet_cli_compile_file(file, color, None, JetDriverCompileMode.Program)
     if compiled == {
-        .Refused(refusal) -> output = ^refusal
+        .Refused(refusal) -> output = refusal.move()
         .Compiled(result, snapshot) -> {
             diagnostics: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
             errors: jet_cli_errors(diagnostics)
@@ -35,7 +35,7 @@ jet_cli_lint_a11y: fn(file: String, source: String, color: Bool, json: Bool) -> 
             if result.internal_problem == .Val(problem) -> jet_cli_finish(jet_cli_ice(problem))
             lints := [Diagnostic]{}
             loop diagnostic in diagnostics {
-                if jet_driver_is_a11y_lint(diagnostic.code) -> &lints.push(diagnostic)
+                if jet_driver_is_a11y_lint(diagnostic.code) -> lints.push(diagnostic)
             }
             if lints.len() == 0 -> jet_cli_finish(JetDriverVerbOutput{stdout: if json -> "" else -> "ok: `{file}` has no accessibility problems\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK})
             count: lints.len()
@@ -98,12 +98,12 @@ jet_cli_lint_complexity: fn(file: String, source: String, raw: [String], color: 
     budget_option: jet_cli_lint_max(raw, color)
     if budget_option == {
         .Value(value) -> budget = value
-        .Refused(output) -> return ^output
+        .Refused(output) -> return output.move()
     }
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     compiled: jet_cli_compile_file(file, color, None, JetDriverCompileMode.Program)
     if compiled == {
-        .Refused(refusal) -> output = ^refusal
+        .Refused(refusal) -> output = refusal.move()
         .Compiled(result, snapshot) -> {
             diagnostics: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
             errors: jet_cli_errors(diagnostics)
@@ -128,7 +128,7 @@ jet_cli_lint_complexity_report: fn(file: String, source: String, budget: Int?, c
         line: diagnostic_line_at(source, report.span.start)
         over: if budget == .Val(value) -> report.score > value else -> false
         if json {
-            &rows.push(jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("file", jet_cli_status_text(file)), jet_cli_status_field("fn", jet_cli_status_text(report.name)), jet_cli_status_field("line", jet_cli_status_int(line)), jet_cli_status_field("score", jet_cli_status_int(report.score)), jet_cli_status_field("budget", if budget == .Val(value) -> jet_cli_status_int(value) else -> JetCLIStatusValue.Null), jet_cli_status_field("over", jet_cli_status_bool(over))}))
+            rows.push(jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("file", jet_cli_status_text(file)), jet_cli_status_field("fn", jet_cli_status_text(report.name)), jet_cli_status_field("line", jet_cli_status_int(line)), jet_cli_status_field("score", jet_cli_status_int(report.score)), jet_cli_status_field("budget", if budget == .Val(value) -> jet_cli_status_int(value) else -> JetCLIStatusValue.Null), jet_cli_status_field("over", jet_cli_status_bool(over))}))
         } else {
             suffix: if budget == .Val(value) -> " (budget {value})" else -> ""
             stdout = "{stdout}{file}:{line} fn {report.name} — score {report.score}{suffix}\n"
@@ -136,7 +136,7 @@ jet_cli_lint_complexity_report: fn(file: String, source: String, budget: Int?, c
         if over {
             diagnostic := diagnostic_from_registry("L2902", Val(report.span), "function `{report.name}` has cognitive complexity {report.score} above budget {budget ?? 0}", "the function's control flow is harder to read and maintain than the selected budget allows", "split the function, reduce nesting, or replace mixed control flow with a focused helper")
             diagnostic.severity = DIAGNOSTIC_LINT
-            &exceeded.push(diagnostic)
+            exceeded.push(diagnostic)
         }
     }
     if budget == None {
@@ -149,7 +149,7 @@ jet_cli_lint_complexity_report: fn(file: String, source: String, budget: Int?, c
                 jet_cli_status_field("architecture_advice", jet_cli_architecture_value(inspection)),
                 jet_cli_status_field("measurement", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("benchmark", jet_cli_status_text("not_run")), jet_cli_status_field("change_task", jet_cli_status_text("not_measured")), jet_cli_status_field("claim", jet_cli_status_text("none"))})),
             }
-            if inspection.check == .Val(check) -> &fields.push(jet_cli_status_field("check", check))
+            if inspection.check == .Val(check) -> fields.push(jet_cli_status_field("check", check))
             stdout = "{jet_cli_status_render("lint.complexity", true, fields)}\n"
         } else {
             stdout = "{stdout}{jet_cli_architecture_text(inspection)}"
@@ -169,12 +169,12 @@ jet_cli_cost_add: fn(rows: &[Diagnostic], diagnostic: Diagnostic) Never! {
             return
         }
     }
-    &rows.push(diagnostic)
+    rows.push(diagnostic)
 }
 jet_cli_cost_diagnostics: fn(report: TCostReport, sema: [Diagnostic]) -> [Diagnostic] Never! {
     rows := [Diagnostic]{}
     loop diagnostic in sema {
-        if diagnostic.code == "L2510" -> jet_cli_cost_add(&rows, diagnostic)
+        if diagnostic.code == "L2510" -> jet_cli_cost_add(rows, diagnostic)
     }
     registry: diagnostic_registry_row("L2510") ?? panic("L2510 must be registered")
     loop site in report.sites {
@@ -182,7 +182,7 @@ jet_cli_cost_diagnostics: fn(report: TCostReport, sema: [Diagnostic]) -> [Diagno
         operation: checked_cost_operation(site.kind)
         fix: checked_cost_fix(site.kind)
         diagnostic: diagnostic_from_registry("L2510", Val(site.span), registry.what.replace("{{operation}}", operation), registry.why, registry.fix.replace("{{fix_text}}", fix))
-        jet_cli_cost_add(&rows, diagnostic)
+        jet_cli_cost_add(rows, diagnostic)
     }
     rows
 }
@@ -190,8 +190,8 @@ jet_cli_cost_diagnostics: fn(report: TCostReport, sema: [Diagnostic]) -> [Diagno
 // does not lower: a compiler fault (AGENTS.md I2), one ICE row per gap.
 jet_cli_lint_cost_gap: fn(file: String, gaps: [String]) -> JetDriverVerbOutput {
     census := [JetDriverIceRow]{}
-    loop gap in gaps -> jet_driver_ice_record(&census, "-", "cost.project", "unlowered", gap)
-    if census.len() == 0 -> jet_driver_ice_record(&census, "-", "cost.project", "unlowered", "the checked projection did not complete")
+    loop gap in gaps -> jet_driver_ice_record(census, "-", "cost.project", "unlowered", gap)
+    if census.len() == 0 -> jet_driver_ice_record(census, "-", "cost.project", "unlowered", "the checked projection did not complete")
     jet_cli_ice("the cost projection of `{file}` failed: {jet_driver_ice_text(census)}")
 }
 
@@ -199,9 +199,9 @@ jet_cli_lint_cost: fn(file: String, source: String, color: Bool, json: Bool) -> 
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     prepared: jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, None, JetDriverCompileMode.Doc)
     if prepared == {
-        .Refused(refusal) -> output = ^refusal
+        .Refused(refusal) -> output = refusal.move()
         .Prepared(request, snapshot) -> {
-            query: jet_driver_cost_query(^request)
+            query: jet_driver_cost_query(request)
             diagnostics: jet_driver_present_diagnostics(query.compile.diagnostics, snapshot, query.compile.generated_source_files)
             errors: jet_cli_errors(diagnostics)
             if errors.len() > 0 -> jet_cli_finish(jet_cli_lint_errors(file, source, errors, color, json))

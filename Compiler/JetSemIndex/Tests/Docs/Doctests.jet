@@ -72,19 +72,19 @@
     source: "/// Parent.\nOuter: struct {{\n    /// Nested summary.\n    /// Example: first\n    /// ```jet\n    /// second line\n    /// ```\n    /// Example: second\n    nested: fn() {{}}\n}}\n"
     summary := "old"
     examples := [String]{"old"}
-    doc_source_docs(source, doc_line_offset(source, 9) + 4, &summary, &examples)
+    doc_source_docs(source, doc_line_offset(source, 9) + 4, summary, examples)
     assert_eq(summary, "Nested summary.")
     assert_eq(examples, [String]{"first", "second"})
     gap: "/// Detached.\n\nplain: fn() {{}}"
-    doc_source_docs(gap, doc_line_offset(gap, 3), &summary, &examples)
+    doc_source_docs(gap, doc_line_offset(gap, 3), summary, examples)
     // Rust source_docs skips the trailing newline in before_declaration.lines:
     // one empty line is not a barrier; two empty lines are a barrier.
     assert_eq(summary, "Detached.")
     separated: "/// Detached.\n\n\nplain: fn() {{}}"
-    doc_source_docs(separated, doc_line_offset(separated, 4), &summary, &examples)
+    doc_source_docs(separated, doc_line_offset(separated, 4), summary, examples)
     assert_eq(summary, "")
     assert_eq(examples, [String]{})
-    doc_source_docs("first: fn() {{}}", 0, &summary, &examples)
+    doc_source_docs("first: fn() {{}}", 0, summary, examples)
     assert_eq(summary, "")
 }
 
@@ -92,11 +92,11 @@
     source: "/// é\n/// Example: α\nfn λ() {{}}"
     summary := ""
     examples := [String]{}
-    doc_source_docs(source, source.bytes().len() + 10, &summary, &examples)
+    doc_source_docs(source, source.bytes().len() + 10, summary, examples)
     assert_eq(summary, "é")
     assert_eq(examples, [String]{"α"})
     only_example: "/// Example: 1 + 1\nanswer: fn() {{}}"
-    doc_source_docs(only_example, doc_line_offset(only_example, 2), &summary, &examples)
+    doc_source_docs(only_example, doc_line_offset(only_example, 2), summary, examples)
     assert_eq(summary, "")
     assert_eq(examples, [String]{"1 + 1"})
 }
@@ -125,7 +125,7 @@ doc_test_run_fixture_doctest_extraction: fn(source: String, root: doc_os_path.Os
     assert_eq(tests[0].source.link, "run.jet#L35")
     summary := ""
     examples := [String]{}
-    doc_source_docs(source, doc_line_offset(source, 38), &summary, &examples)
+    doc_source_docs(source, doc_line_offset(source, 38), summary, examples)
     assert_eq(summary, "Return the fixture answer.")
     assert_eq(examples, [String]{"`answer()`"})
     assert_eq(doc_leading_summary(source), "Jetdoc fixture module.")

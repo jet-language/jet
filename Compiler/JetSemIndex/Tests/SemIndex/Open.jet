@@ -53,7 +53,7 @@ semindex_open_test_clean: fn(root: String) -[FS]> {
     semindex_open_test_write(root, "pkg.jet", "name: \"legacy\"\nversion: \"0.1.0\"\n")
     semindex_open_test_write(root, "run.jet", "run: fn() {{}}\n")
     entry: semindex_open_files.join(root, "run.jet")
-    if semindex_package_facts_for_entry(&cache, entry) == {
+    if semindex_package_facts_for_entry(cache, entry) == {
         .Ok(_) -> { panic("ambiguous package roots must remain an error") }
         .Err(error) -> {
             // Main's oracle ruling: the migration-era substring was stale;
@@ -72,7 +72,7 @@ semindex_open_test_clean: fn(root: String) -[FS]> {
     semindex_open_test_write(root, "workspace.jet", "workspace: module {{ members: [] }}\n")
     semindex_open_test_write(root, ".jet/lock", "version = 1\nworkspace_source_digest = \"sha256-stale\"\n")
     semindex_open_test_write(root, "run.jet", "run: fn() {{}}\n")
-    if semindex_workspace_overlay_policy_for_entry(&cache, semindex_open_files.join(root, "run.jet")) == {
+    if semindex_workspace_overlay_policy_for_entry(cache, semindex_open_files.join(root, "run.jet")) == {
         .Ok(_) -> { panic("stale workspace authority must remain visible") }
         .Err(error) -> assert_eq(error.diagnostic.code, "E1202")
     }
@@ -89,7 +89,7 @@ semindex_open_test_clean: fn(root: String) -[FS]> {
     semindex_open_test_write(root, ".jet/lock", "version = 1\nworkspace_source_digest = \"sha256-stale\"\n")
     semindex_open_test_write(child, "inner-authority.jet", "workspace: module {{ members: [] }}\n")
     semindex_open_test_write(child, "run.jet", "run: fn() {{}}\n")
-    policy: semindex_workspace_overlay_policy_for_entry(&cache, semindex_open_files.join(child, "run.jet")) ?? panic("nearest workspace boundary must stop lookup")
+    policy: semindex_workspace_overlay_policy_for_entry(cache, semindex_open_files.join(child, "run.jet")) ?? panic("nearest workspace boundary must stop lookup")
     assert(policy == None)
     semindex_open_test_clean(root)
 }
@@ -105,7 +105,7 @@ semindex_open_test_clean: fn(root: String) -[FS]> {
     digest: sha256_hex(source)
     semindex_open_test_write(root, ".jet/lock", "version = 1\nworkspace_source_digest = \"{digest}\"\nworkspace_policy_allow_unfree = [\"discord\"]\n")
     semindex_open_test_write(child, "run.jet", "run: fn() {{}}\n")
-    policy: (semindex_workspace_overlay_policy_for_entry(&cache, semindex_open_files.join(child, "run.jet")) ?? panic("ancestor workspace lock should load")) ?? panic("persisted policy should be attached")
+    policy: (semindex_workspace_overlay_policy_for_entry(cache, semindex_open_files.join(child, "run.jet")) ?? panic("ancestor workspace lock should load")) ?? panic("persisted policy should be attached")
     assert_eq(policy.allow_unfree, [String]{"discord"})
     semindex_open_test_clean(root)
 }
@@ -123,7 +123,7 @@ semindex_open_test_clean: fn(root: String) -[FS]> {
     semindex_open_test_write(child, "a.jet", source)
     semindex_open_test_write(child, "b.jet", source)
     semindex_open_test_write(child, "run.jet", "run: fn() {{}}\n")
-    if semindex_workspace_overlay_policy_for_entry(&cache, semindex_open_files.join(child, "run.jet")) == {
+    if semindex_workspace_overlay_policy_for_entry(cache, semindex_open_files.join(child, "run.jet")) == {
         .Ok(_) -> { panic("ambiguous boundary must remain visible") }
         .Err(error) -> assert_eq(error.diagnostic.code, "E1239")
     }
@@ -143,15 +143,15 @@ semindex_open_test_clean: fn(root: String) -[FS]> {
     semindex_open_test_write(child, "workspace.jet", source)
     semindex_open_test_write(child, "run.jet", "run: fn() {{}}\n")
     entry: semindex_open_files.join(child, "run.jet")
-    assert((semindex_workspace_overlay_policy_for_entry(&cache, entry) ?? panic("missing lock is a boundary")) == None)
+    assert((semindex_workspace_overlay_policy_for_entry(cache, entry) ?? panic("missing lock is a boundary")) == None)
     semindex_open_test_write(child, ".jet/lock", "version = 1\n")
-    assert((semindex_workspace_overlay_policy_for_entry(&cache, entry) ?? panic("nonworkspace lock is a boundary")) == None)
+    assert((semindex_workspace_overlay_policy_for_entry(cache, entry) ?? panic("nonworkspace lock is a boundary")) == None)
     digest: sha256_hex(source)
     semindex_open_test_write(child, ".jet/lock", "version = 1\nworkspace_source_digest = \"{digest}\"\n")
-    assert((semindex_workspace_overlay_policy_for_entry(&cache, entry) ?? panic("empty policy is a boundary")) == None)
+    assert((semindex_workspace_overlay_policy_for_entry(cache, entry) ?? panic("empty policy is a boundary")) == None)
     // A recognized workspace lock that cannot decode is an error, not absence.
     semindex_open_test_write(child, ".jet/lock", "version = nope\nworkspace_source_digest = \"{digest}\"\n")
-    if semindex_workspace_overlay_policy_for_entry(&cache, entry) == {
+    if semindex_workspace_overlay_policy_for_entry(cache, entry) == {
         .Ok(_) -> { panic("malformed inner workspace lock cannot fall outward") }
         .Err(error) -> assert_eq(error.diagnostic.code, "E1202")
     }

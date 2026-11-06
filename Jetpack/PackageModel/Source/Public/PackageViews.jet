@@ -123,7 +123,7 @@ ProfileView: struct {
     // without coupling the package model to the EnvModel area.
     from_parts: fn(name: String, extends: [String], packages: [String], collisions: [(key: String, value: String)], sources: [String]) -> ProfileView Never! {
         pairs := [KeyValueView]{}
-        loop collision in collisions -> &pairs.push(KeyValueView{key: collision.key, value: collision.value})
+        loop collision in collisions -> pairs.push(KeyValueView{key: collision.key, value: collision.value})
         ProfileView{name: name, extends: extends, packages: packages, collisions: pairs, sources: sources}
     }
 }
@@ -186,7 +186,7 @@ pkg_lock_view_from_lock: fn(lock: LockFile) -> LockView Never! {
             .Val(locked) -> Val(locked.rev)
             .None -> None
         }
-        &packages.push(LockedPackageView{
+        packages.push(LockedPackageView{
             name: package.name,
             version: package.version,
             source_kind: pkg_lock_source_kind(package.source),
@@ -221,9 +221,9 @@ pkg_view_redacted_repository: fn(repository: String?) -> String? Never! {
 // Dependencies in name order (the Rust BTreeMap order).
 pkg_dependency_views: fn(dependencies: [String: DepSource]) -> [DependencyView] Never! {
     names := dependencies.keys().to_list()
-    &names.sort()
+    names.sort()
     out := [DependencyView]{}
-    loop name in names -> &out.push(DependencyView{name: name, source: pkg_dep_display_redacted(dependencies[name])})
+    loop name in names -> out.push(DependencyView{name: name, source: pkg_dep_display_redacted(dependencies[name])})
     out
 }
 
@@ -241,15 +241,15 @@ pkg_package_target_views: fn(packages: [PackageEntry]) -> [PackageTargetView] Ne
     out := [PackageTargetView]{}
     loop package in packages {
         targets := [String]{}
-        loop target in package.targets -> &targets.push(pkg_package_target_name(target))
-        &out.push(PackageTargetView{name: package.name, targets: targets})
+        loop target in package.targets -> targets.push(pkg_package_target_name(target))
+        out.push(PackageTargetView{name: package.name, targets: targets})
     }
     out
 }
 
 pkg_target_profile_views: fn(targets: PackageTargets) -> [TargetProfileView] Never! {
     out := [TargetProfileView]{}
-    loop selection in targets.iter() -> &out.push(TargetProfileView{name: selection.name, profile: selection.profile.as_str()})
+    loop selection in targets.iter() -> out.push(TargetProfileView{name: selection.name, profile: selection.profile.as_str()})
     out
 }
 
@@ -270,11 +270,11 @@ pkg_output_kind_name: fn(kind: PackageOutputKind) -> String Never! {
 // Outputs in output-name order (the Rust BTreeMap value order).
 pkg_output_views: fn(outputs: [String: OutputFact]) -> [OutputView] Never! {
     names := outputs.keys().to_list()
-    &names.sort()
+    names.sort()
     out := [OutputView]{}
     loop name in names {
         output: outputs[name]
-        &out.push(OutputView{name: output.name, kind: pkg_output_kind_name(output.kind), entry: output.entry})
+        out.push(OutputView{name: output.name, kind: pkg_output_kind_name(output.kind), entry: output.entry})
     }
     out
 }
@@ -290,7 +290,7 @@ pkg_build_panic_name: fn(panic_mode: BuildPanic?) -> String? Never! {
 pkg_build_profile_views: fn(profiles: [BuildProfileDef]) -> [BuildProfileView] Never! {
     out := [BuildProfileView]{}
     loop profile in profiles {
-        &out.push(BuildProfileView{
+        out.push(BuildProfileView{
             name: profile.name,
             optimize: profile.optimize.as_str(),
             debug_info: profile.debug_info,

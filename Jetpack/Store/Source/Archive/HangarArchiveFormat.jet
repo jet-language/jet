@@ -28,7 +28,7 @@ STORE_MODE_DEFAULT_FILE: 0x1A4
 // The archive magic: the format name and one NUL byte.
 store_archive_magic: fn() -> [U8] Never! {
     magic := STORE_ARCHIVE_MAGIC.bytes()
-    &magic.push(U8{0})
+    magic.push(U8{0})
     magic
 }
 
@@ -88,11 +88,11 @@ HangarArchiveNode: struct {
     // The node's wire bytes, shared by the archive body and the canonical
     // Nix object bytes.
     encode_into: fn(self, out: &[U8]) StoreError! {
-        &out.push(U8{self.kind.wire_tag()})
-        store_archive_put_string(&out, self.path)
-        store_archive_put_raw_u32(&out, self.mode)
-        store_archive_put_u64(&out, self.bytes.len())
-        loop byte in self.bytes -> &out.push(byte)
+        out.push(U8{self.kind.wire_tag()})
+        store_archive_put_string(out, self.path)
+        store_archive_put_raw_u32(out, self.mode)
+        store_archive_put_u64(out, self.bytes.len())
+        loop byte in self.bytes -> out.push(byte)
     }
 }
 
@@ -115,39 +115,39 @@ NixClosureManifest: struct {
     members: [NixClosureMember]
 
     encode_into: fn(self, out: &[U8]) StoreError! {
-        store_archive_put_string(&out, self.output)
-        store_archive_put_string(&out, self.platform)
-        store_archive_put_string(&out, self.revision)
-        store_archive_put_string(&out, self.cache_key)
-        store_archive_put_u32(&out, self.members.len())
+        store_archive_put_string(out, self.output)
+        store_archive_put_string(out, self.platform)
+        store_archive_put_string(out, self.revision)
+        store_archive_put_string(out, self.cache_key)
+        store_archive_put_u32(out, self.members.len())
         loop member in self.members {
-            store_archive_put_string(&out, member.key)
-            store_archive_put_string(&out, member.hash)
-            store_archive_put_u64(&out, member.size)
-            store_archive_put_u32(&out, member.references.len())
-            loop reference in member.references -> store_archive_put_string(&out, reference)
+            store_archive_put_string(out, member.key)
+            store_archive_put_string(out, member.hash)
+            store_archive_put_u64(out, member.size)
+            store_archive_put_u32(out, member.references.len())
+            loop reference in member.references -> store_archive_put_string(out, reference)
         }
     }
 
     decode_from: fn(reader: &HangarArchiveReader) -> NixClosureManifest StoreError! {
-        output: &reader.string()
-        platform: &reader.string()
-        revision: &reader.string()
-        cache_key: &reader.string()
-        count: &reader.u32()
+        output: reader.string()
+        platform: reader.string()
+        revision: reader.string()
+        cache_key: reader.string()
+        count: reader.u32()
         if count > STORE_ARCHIVE_MAX_OBJECTS -> return Err(StoreError.InvalidData("Nix closure manifest contains too many members"))
         members := [NixClosureMember]{}
         loop _ in 0..<count {
-            key: &reader.string()
-            hash: &reader.string()
-            size: &reader.u64()
-            reference_count: &reader.u32()
+            key: reader.string()
+            hash: reader.string()
+            size: reader.u64()
+            reference_count: reader.u32()
             if reference_count > STORE_ARCHIVE_MAX_OBJECTS {
                 return Err(StoreError.InvalidData("Nix closure manifest member contains too many references"))
             }
             references := [String]{}
-            loop _ in 0..<reference_count -> &references.push(&reader.string())
-            &members.push(NixClosureMember{key, hash, size, references})
+            loop _ in 0..<reference_count -> references.push(reader.string())
+            members.push(NixClosureMember{key, hash, size, references})
         }
         Ok(NixClosureManifest{output, platform, revision, cache_key, members})
     }
@@ -193,20 +193,20 @@ HangarArchive: struct {
     // The signature payload: every byte before the signature trailer.
     encode_unsigned: fn(self) -> [U8] StoreError! {
         out := store_archive_magic()
-        store_archive_put_string(&out, self.root_id)
-        store_archive_put_u32(&out, self.objects.len())
+        store_archive_put_string(out, self.root_id)
+        store_archive_put_u32(out, self.objects.len())
         loop object in self.objects {
-            store_archive_put_string(&out, object.id)
-            store_archive_put_string(&out, object.digest)
-            store_archive_put_string(&out, object.meta)
-            store_archive_put_raw_u32(&out, object.root_mode)
-            store_archive_put_u32(&out, object.nodes.len())
-            loop node in object.nodes -> node.encode_into(&out)
+            store_archive_put_string(out, object.id)
+            store_archive_put_string(out, object.digest)
+            store_archive_put_string(out, object.meta)
+            store_archive_put_raw_u32(out, object.root_mode)
+            store_archive_put_u32(out, object.nodes.len())
+            loop node in object.nodes -> node.encode_into(out)
         }
         if self.nix_manifest == {
             .Val(manifest) -> {
-                &out.push(U8{STORE_ARCHIVE_NIX_MANIFEST_TRAILER})
-                manifest.encode_into(&out)
+                out.push(U8{STORE_ARCHIVE_NIX_MANIFEST_TRAILER})
+                manifest.encode_into(out)
             }
             .None -> {}
         }
@@ -219,12 +219,12 @@ HangarArchive: struct {
         out := self.encode_unsigned()
         if self.signature == {
             .Val(signature) -> {
-                &out.push(U8{1})
-                store_archive_put_string(&out, signature.key_id)
-                store_archive_put_string(&out, signature.algorithm)
-                store_archive_put_string(&out, signature.sig_hex)
+                out.push(U8{1})
+                store_archive_put_string(out, signature.key_id)
+                store_archive_put_string(out, signature.algorithm)
+                store_archive_put_string(out, signature.sig_hex)
             }
-            .None -> &out.push(U8{0})
+            .None -> out.push(U8{0})
         }
         Ok(out)
     }
@@ -240,40 +240,40 @@ HangarArchive: struct {
         if bytes.len() > STORE_MAX_ARCHIVE_BYTES -> return Err(StoreError.InvalidData("archive exceeds the 1 GiB limit"))
         reader := HangarArchiveReader{bytes, at: 0}
         magic: store_archive_magic()
-        if &reader.take_bytes(magic.len()) != magic -> return Err(StoreError.InvalidData("archive has an unknown format"))
-        root_id: &reader.string()
+        if reader.take_bytes(magic.len()) != magic -> return Err(StoreError.InvalidData("archive has an unknown format"))
+        root_id: reader.string()
         store_archive_validate_id(root_id)
-        count: &reader.u32()
+        count: reader.u32()
         if count > STORE_ARCHIVE_MAX_OBJECTS -> return Err(StoreError.InvalidData("archive contains too many records"))
         objects := [HangarArchiveObject]{}
         output_digests := [String]{}
         package_ids := [String]{}
         loop _ in 0..<count {
-            id: &reader.string()
-            digest: &reader.string()
-            meta: &reader.string()
+            id: reader.string()
+            digest: reader.string()
+            meta: reader.string()
             store_archive_validate_id(id)
             store_archive_validate_digest(digest)
             if meta != "" {
                 if pkg_parse_meta(meta) == None -> return Err(StoreError.InvalidData("archive contains malformed package metadata"))
                 if package_ids.contains(id) -> return Err(StoreError.InvalidData("archive contains duplicate package records"))
-                &package_ids.push(id)
+                package_ids.push(id)
             } else {
                 if id != digest || output_digests.contains(digest) {
                     return Err(StoreError.InvalidData("archive contains duplicate or mismatched output records"))
                 }
-                &output_digests.push(digest)
+                output_digests.push(digest)
             }
-            root_mode: &reader.u32()
-            node_count: &reader.u32()
+            root_mode: reader.u32()
+            node_count: reader.u32()
             if node_count > STORE_ARCHIVE_MAX_NODES_PER_OBJECT -> return Err(StoreError.InvalidData("archive output has too many nodes"))
             nodes := [HangarArchiveNode]{}
             loop _ in 0..<node_count {
-                kind_code: Int.from_u8(&reader.byte())
-                path: &reader.string()
+                kind_code: Int.from_u8(reader.byte())
+                path: reader.string()
                 store_archive_validate_relative(path)
-                mode: &reader.u32()
-                size: &reader.u64()
+                mode: reader.u32()
+                size: reader.u64()
                 if size < 0 || size > STORE_ARCHIVE_MAX_NODE_BYTES -> return Err(StoreError.InvalidData("archive node exceeds the 512 MiB limit"))
                 kind: HangarArchiveNodeKind.from_wire_tag(kind_code) ?? return Err(StoreError.InvalidData("archive contains an unknown node kind"))
                 payload: if kind == {
@@ -281,26 +281,26 @@ HangarArchive: struct {
                         if size != 0 -> return Err(StoreError.InvalidData("archive directory node has a payload"))
                         [U8]{}
                     }
-                    else -> &reader.take_bytes(size)
+                    else -> reader.take_bytes(size)
                 }
-                &nodes.push(HangarArchiveNode{path, kind, mode, bytes: payload})
+                nodes.push(HangarArchiveNode{path, kind, mode, bytes: payload})
             }
             store_archive_validate_no_path_collisions(nodes)
-            &objects.push(HangarArchiveObject{id, digest, meta, root_mode, nodes})
+            objects.push(HangarArchiveObject{id, digest, meta, root_mode, nodes})
         }
-        trailer: Int.from_u8(&reader.byte())
+        trailer: Int.from_u8(reader.byte())
         nix_manifest := NixClosureManifest?{None}
         signature_tag := trailer
         if trailer == STORE_ARCHIVE_NIX_MANIFEST_TRAILER {
-            nix_manifest = Val(NixClosureManifest.decode_from(&reader))
-            signature_tag = Int.from_u8(&reader.byte())
+            nix_manifest = Val(NixClosureManifest.decode_from(reader))
+            signature_tag = Int.from_u8(reader.byte())
         }
         if signature_tag != 0 && signature_tag != 1 -> return Err(StoreError.InvalidData("archive has an unknown signature trailer"))
         signature := HangarArchiveSignature?{None}
         if signature_tag == 1 {
-            key_id: &reader.string()
-            algorithm: &reader.string()
-            sig_hex: &reader.string()
+            key_id: reader.string()
+            algorithm: reader.string()
+            sig_hex: reader.string()
             signature = Val(HangarArchiveSignature{key_id, algorithm, sig_hex})
         }
         if reader.remaining() != 0 -> return Err(StoreError.InvalidData("archive has trailing bytes"))
@@ -349,12 +349,12 @@ HangarArchiveReader: struct {
     }
 
     byte: fn(&self) -> U8 StoreError! {
-        taken: &self.take_bytes(1)
+        taken: self.take_bytes(1)
         Ok(taken[0])
     }
 
     u32: fn(&self) -> Int StoreError! {
-        taken: &self.take_bytes(4)
+        taken: self.take_bytes(4)
         value := 0
         loop index in 0..<4 -> value = (value).bit_or((Int.from_u8(taken[index]) << (8 * index)))
         Ok(value)
@@ -363,16 +363,16 @@ HangarArchiveReader: struct {
     // A u64 field; values past Int's range come back negative, which every
     // caller rejects as over its bound.
     u64: fn(&self) -> Int StoreError! {
-        taken: &self.take_bytes(8)
+        taken: self.take_bytes(8)
         value := 0
         loop index in 0..<8 -> value = (value).bit_or((Int.from_u8(taken[index]) << (8 * index)))
         Ok(value)
     }
 
     string: fn(&self) -> String StoreError! {
-        len: &self.u32()
+        len: self.u32()
         if len > STORE_ARCHIVE_MAX_FIELD_BYTES -> return Err(StoreError.InvalidData("archive field is too large"))
-        raw: &self.take_bytes(len)
+        raw: self.take_bytes(len)
         text: String.from_bytes(raw) ?? return Err(StoreError.InvalidData("archive field is not UTF-8"))
         Ok(text)
     }
@@ -385,22 +385,22 @@ HangarArchiveReader: struct {
 
 store_archive_put_u32: fn(out: &[U8], value: Int) StoreError! {
     if value < 0 || value > 0xFFFFFFFF -> return Err(StoreError.InvalidData("archive field is too large"))
-    store_archive_put_raw_u32(&out, value)
+    store_archive_put_raw_u32(out, value)
 }
 
 store_archive_put_raw_u32: fn(out: &[U8], value: Int) Never! {
-    loop index in 0..<4 -> &out.push(U8{((value >> (8 * index))).bit_and(255)})
+    loop index in 0..<4 -> out.push(U8{((value >> (8 * index))).bit_and(255)})
 }
 
 store_archive_put_u64: fn(out: &[U8], value: Int) Never! {
-    loop index in 0..<8 -> &out.push(U8{((value >> (8 * index))).bit_and(255)})
+    loop index in 0..<8 -> out.push(U8{((value >> (8 * index))).bit_and(255)})
 }
 
 store_archive_put_string: fn(out: &[U8], value: String) StoreError! {
     raw: value.bytes()
     if raw.len() > STORE_ARCHIVE_MAX_FIELD_BYTES -> return Err(StoreError.InvalidData("archive field is too large"))
-    store_archive_put_u32(&out, raw.len())
-    loop byte in raw -> &out.push(byte)
+    store_archive_put_u32(out, raw.len())
+    loop byte in raw -> out.push(byte)
 }
 
 // Whether `raw` holds an ASCII control byte (C0 or DEL).
@@ -445,7 +445,7 @@ store_archive_path_components: fn(path: String) -> [String] Never! {
         segment: segments[index]
         if segment == "" -> next
         if segment == "." && (index > 0 || path.starts_with("/")) -> next
-        &components.push(segment)
+        components.push(segment)
     }
     components
 }
