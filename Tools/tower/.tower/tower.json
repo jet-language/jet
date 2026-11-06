@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6594,
-    "rev": 92925,
+    "nextNum": 6600,
+    "rev": 92950,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -53771,6 +53771,21 @@
         {
           "at": "2026-11-06",
           "by": "Main",
+          "text": "c8 partial, 3cca22d260 (CoreOwnership): item 4 done. realtime and text print relations and facts in place of timings and host glyph ids; their goldens pass 6/6 on o0/o1/o2. Item 3 (E0067 on __bindgen__ caches in bridges and opaque_handles) is blocked on #6599: no Jet C binding generator exists, so the stale caches can't be regenerated, and hand-written caches would be guesses. bridges also needs a musl Rust toolchain. Item 5 (capabilities, core.plugin) needs guest/build/capability_guest.wasm, and no wasm32-wasip2 component target exists; that target's card #1914 is frozen, so it is owner-gated."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "c8 partial, 668a296d5c (CoreOwnership): the testkit names the o1/o2 artifact after the build entry's default executable (or its single b.add_executable target); golden 18/18 on s1 of HEAD + patch, including build_entry_discovery, compiler_api, compiler_api_package and foundations/tooling. Kit unit tests 223 passed, 6 failed, none of them artifact tests; base comparison pending."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "c8 partial, a271a3a073 (CoreOwnership): full golden on 864c10a4d0 across o0 (jet run), o1 (jet build) and o2 (--release): 4648 PASS; this commit fixes 5 rows (data_battery, dsl, arrays, expiring_secret, debug_trace o2 tier split), now 15/15 identical on every tier. Open: units (#6004 derived-unit conversion), exact (#5454 generic T: Add +), capabilities (core.plugin), bridges and opaque_handles (E0067 on checked-in __bindgen__ caches), ui/battery and ui/surface (core.ui host runtime-route ICE), realtime and text (timings printed, no fixed snapshot), and 4 fn-build goldens that ERROR at o1/o2 because the testkit looks for .jet/build/run while jet build now names the b.add_executable target (91177176da). The perf clause has no Rust route left to compare; under today's tiers it is the AGENTS.md peer and ceiling gate."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
           "text": "c20 waits on a WASI backend target (CoreOwnership): jet build --target=wasm32-wasip2 reports jet.InvalidCommandInput 'not built yet'. wasmtime is available locally through nix, so this is build work, not an external block. c21 in progress: D-TESTFAULT1 #Test(faults:) was a silent no-op (TTestFact.faults never reached the harness, so the Core/Files fault tests proved nothing); CoreOwnership is building the harness (runtime jet_rt_test_unit_faults, IR, CLI)."
         },
         {
@@ -55301,7 +55316,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-06T10:08:37.412Z",
-      "updated": "2026-11-06T05:49:59.750Z",
+      "updated": "2026-11-06T06:41:01.146Z",
       "updatedBy": "Main",
       "goals": [
         "G14",
@@ -66057,11 +66072,11 @@
         {
           "n": 15,
           "text": "(was #6318) Float.from_int and Float{n} agree for whole numbers with no exact Float (2^53+1): both follow the one ratified rule, proven by an example on o0, o1 and o2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:38:49.284Z"
+          "evidence": "dev 90f5740d04 (GoldenRoots3): under ratified D-NUMWIDEN-CROSS1=E, Float.from_int(2^53+1) stops with the same E3010 at the call line as Float{n} on o0, o1 and o2, and a literal gets E1003 for both. Case numeric_widening/float_from_int_and_float_braces_follow_one_crossing_rule passes. Full A/B against base: no case regressions (every PASS to non-PASS row reran PASS, the rest fail on base); golden and ui identical apart from one timeout flake.",
+          "at": "2026-11-06T06:19:30.277Z"
         },
         {
           "n": 16,
@@ -66306,7 +66321,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:17:59.631Z",
-      "updated": "2026-11-06T05:33:22.349Z",
+      "updated": "2026-11-06T06:19:30.277Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
@@ -70963,6 +70978,16 @@
         {
           "at": "2026-11-06",
           "by": "Main",
+          "text": "c15 partial, 239612f209 (Recover3, c15l): 86 ui FAIL rows filed as known-failing under their named roots (#6425 ownership and sendability checks, #5454, #6006 lints, #4926 comptime, #4275 package and manifest rows, #5010 for runtime_rng_backward's missing caller location, #6564 for the extern-rust rows that need cargo); view_mut_bounds_interpreter re-recorded to the file:line stop form. ui on s1 of 90f5740d04: FAIL 122 to 35, known-failing 69 to 155, 0 lost; CHECK OK. Rulings (Main): distinct_constructor_alias needs no ballot. Restore E0753 for a call whose callee is a distinct type (syntax-decisions.md:1081,1134 make conversions destination-owned; E0803 is for values, not types) and keep the snapshot. migration_change_impl_ok's false E0910 and cffi_e3205's span move from #6564 to Recover3's sema fix list."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "c15 partial, cdadd0243f (Recover3): the guard tests/guards/core_surface_ledger.jet now matches the re-recorded snapshot wording (guards 97 pass / 5 fail, the 5 also fail on base); 14 ui snapshots re-recorded to ratified output plus the import_cycle fixture. ui full A/B on s1 of 59ffda6c23: 15 FAIL to PASS, 0 lost, FAIL 137 to 122. CHECK OK on 4bfcc132f9 + patch. New: pattern_test_reuse_record fails since the parser dual-accept commit 7bb6b7ee8d (E0118 no longer reported; inferred), routed to DeclColon."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
           "text": "c3 partial, 5ef6f1d1f5 (Recover3): compiled-workload-runner.mjs/.sh ported to jet Tools/ci/CompiledWorkloads.jet run; --measurement-registry output byte-identical to the node version, fail-closed probes identical, #Tests 11/11, native-trace 27/27, contract passes; lane check CHECK OK on 0998acbb54 + patch; cases A/B with the same s1, 0 LOST (compiled_workload 2/2, release_gates 7/7). Remaining for c3: the other node/shell scripts, the web tier's node driver.mjs, and an end-to-end producer run (6 peer toolchains; host go 1.26.7 vs pinned 1.26.5). core-coverage-census row 208 stays a blocked route: hosted CI runs it with no Jet compiler, and 6bee890a10's ratchet v2 makes the held CoreCoverageCensus.jet port stale."
         },
         {
@@ -71982,7 +72007,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T17:15:48.068Z",
-      "updated": "2026-11-06T05:48:14.183Z",
+      "updated": "2026-11-06T06:37:38.730Z",
       "updatedBy": "Main",
       "goals": [
         "G1"
@@ -86898,7 +86923,7 @@
       "epoch": "e14",
       "milestoneId": null,
       "phase": "planning",
-      "priority": "P1",
+      "priority": "P0",
       "plan": null,
       "checkSteps": null,
       "probe": null,
@@ -86906,6 +86931,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Raised to P0 under G2 (Main): Recover3's #6035 c15 grouping (c15w) puts 42 ui rows here. 22 have an ownership check that is not ported, so an expected code is lost (E0204 borrow conflicts, E0121 use after move, E2305 view escapes, E0212, E0433 and others); 14 report a different ownership code; 6 have the E1102 sendability check unported. A borrow conflict or escaping view that is not reported lets unsound programs compile (I1), so this is the safety floor, not polish. The rows become known-failing under this card in Recover3's c15l batch; GoldenRoots3 takes the port after #6590."
+        },
         {
           "at": "2026-11-05",
           "by": "agent",
@@ -87179,12 +87209,14 @@
         "#6006"
       ],
       "tags": [],
-      "goals": [],
+      "goals": [
+        "G2"
+      ],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T07:25:24.208Z",
-      "updated": "2026-11-05T12:32:59.109Z",
-      "updatedBy": "agent"
+      "updated": "2026-11-06T06:13:34.099Z",
+      "updatedBy": "Main"
     },
     {
       "id": "c0y97gu6",
@@ -93670,7 +93702,7 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "checkSteps": null,
@@ -93703,11 +93735,11 @@
         {
           "n": 2,
           "text": "The Jetpack Engine claim 'store profile receipt copy and proof preserve native io errors' (LeaseSnapshot.jet:314 crash) and the Engine AOT test binary run to completion with the fixed compiler",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-06T05:30:06.115Z"
+          "evidence": "dev 41ad578550 (GoldenRoots3): root cause was a heap overwrite, not the claims' own code. Stream line leaves handed out align-1 buffers with no count word as owned [U8], so trim_pipe_line's pop uniqueness check decremented the neighbouring String? box; the leaves now allocate with jet_rt_alloc_8. Repro before: 77/300 names intact and corrupted lines ('qeady'); after: 300/300 at none, basic and full. New case process_sessions/streamed_child_lines_leave_neighbouring_values_intact passes on O0/O1/O2 and a built binary; the other process_sessions cases pass. With jetpack rebuilt, Engine claims 69 and 81-92 (including 83) pass; the Engine AOT tier on c75109d407 runs to completion with 530 passed, 30 failed and no hang (its failures include claim 69, fixed by this commit).",
+          "at": "2026-11-06T06:13:41.121Z"
         }
       ],
       "refs": [],
@@ -93718,8 +93750,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T04:52:06.103Z",
-      "updated": "2026-11-06T05:54:29.822Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-06T06:13:42.516Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-06T06:13:42.516Z"
     },
     {
       "id": "c0fz569a",
@@ -93826,6 +93859,262 @@
       "needsAcceptance": false,
       "created": "2026-11-06T05:54:54.722Z",
       "updated": "2026-11-06T05:54:54.722Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "c0gaxqxg",
+      "num": 6594,
+      "title": "run-process-witnesses link fails on undefined jet_rt_fault_report",
+      "body": "Found by GoldenRoots3 on dev 41ad578550 and present on the base too: linking the program built by run-process-witnesses.mjs fails with an undefined reference to jet_rt_fault_report. Every runtime symbol a generated program calls must come from the one shared runtime (I9). Find where the reference is emitted without the runtime pack providing it, fix the pack or the route, and prove the witnesses link and run.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "run-process-witnesses links and its ProcessRoutes and ProcessExecution witnesses pass",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev e8bf2c763d (GoldenRoots3): the runtime pack imports jet_rt_fault_report, which only Jet's own linker writes, so the harness now links a fault-report object assembled from the same report.S (new Tools/packaging/fault-report-object.mjs); ProcessRoutesWitness and ProcessExecutionWitness link and PASS. TerminalProcessWitness links but fails its free-count assert, split to its own card.",
+          "at": "2026-11-06T06:18:26.383Z"
+        },
+        {
+          "n": 2,
+          "text": "Every harness that platform-links jet_runtime_jet.o (run-native-tcp-routes, run-native-codec-file-leaves, run-main-fixtures, run-http-body, run-cabi-driver, run-closure-refs-shared) links the fault-report object the same way and runs",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T06:18:25.679Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G1"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-06T06:13:43.662Z",
+      "updated": "2026-11-06T06:18:26.383Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "c0qeoxfp",
+      "num": 6595,
+      "title": "Witness harnesses that count frees through --wrap=jet_rt_free never see runtime frees",
+      "body": "Found by GoldenRoots3 on dev e8bf2c763d: the runtime object binds its internal calls section-relative (objdump shows R_X86_64_PC32 .text-4), so -Wl,--wrap=jet_rt_free never intercepts frees made inside the runtime. About 50 *Witness.c harnesses count frees that way, so their leak and double-free assertions prove nothing; TerminalProcessWitness fails its free-count assert because of it. Give the witnesses a counting route that sees every runtime free (for example a runtime test hook or symbol-relative calls in the test build), keep one mechanism, prove it with a negative control that leaks one buffer and fails, and rerun every witness.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G1"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-06T06:18:27.254Z",
+      "updated": "2026-11-06T06:18:27.254Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "c0o3di45",
+      "num": 6596,
+      "title": "core.ui host types and services lower on native tiers from Jet source",
+      "body": "Found by CoreOwnership on dev 668a296d5c (#4717 c8, goldens ui/battery and ui/surface, 14 lowering faults on checked code, an I2 and I9 defect). (a) bb9c74e522 made UIHostError, UIClipboardText, UICapabilityFacts, UIShortcut(Binding), UIFileDialogRequest, UIFSGrant and UIAccessibility Jet structs and enums in Core/Ui/Host.jet, but the JetIR RuntimeRoutes rows and the JetRuntime Ui*.jet carriers still treat them as opaque JetUi* handles, so ir_is_handle refuses them (BuildRoutes.jet:4263/4493/4609; 9 faults). (b) The native runtime exports no jet_ui_host_* service (clipboard, drag, IME, shortcuts, capabilities, open/save file) or jet_ui_text_input; only Prelude/Web/Core/Ui.js implements them, while the CoreCall rows mark them aot_direct (4 faults). (c) The UINode handle has field routes only for label, width and height, so .accessibility has none (1 fault). Fix at the root by finishing the Jet-source cutover: remove the handle carriers and Handle route rows for these types, and implement the native host services as source-owned Jet over a headless provider that returns CapabilityUnavailable, with the same meaning on every tier (I9). A native-tier rejection would split meaning by tier and is not the fix. Proof: ui/battery and ui/surface pass on o0/o1/o2 and web, and no lowering fault remains in a core.ui sweep.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G3"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-06T06:28:56.205Z",
+      "updated": "2026-11-06T06:28:56.205Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "c0w4gi4s",
+      "num": 6597,
+      "title": "Native-era collect-all launch gate: check in the preflight that AGENTS.md requires",
+      "body": "AGENTS.md (Find every issue at once) says expensive launches start only through tooling that refuses to launch without a collect-all preflight receipt for that exact commit, naming $JET_STATE_ROOT/scratch/Main/preflight.mjs enforced by prepare-sharded-chain.mjs. Neither is usable: prepare-sharded-chain.mjs does not exist in the repo or scratch, and preflight.mjs depends on the retired Rust-era jetc0 factory, hostJet and proof-source.mjs. In practice the gate today is chain full reaching FIXED_POINT plus the keep-going census, but nothing enforces it, and a fresh clone can't follow the contract. Fix: check in Tools/agent/preflight (Jet or the existing tooling convention). For a commit it runs, in collect-all mode: parse, imports, sema (JET_KEEP_GOING=1), the lowering sweep (JET_DEBUG_LOWER_ALL=1), the generator checks and the comptime-host count against the last admitted compiler. It writes a receipt keyed to the commit in which every row is clean or carries a written disposition. The seed-cut and release launchers refuse to start without a matching receipt. Then point AGENTS.md at the checked-in path in the same cutover.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "AGENTS.md names the checked-in path, and the Rust-era preflight.mjs and prepare-sharded-chain.mjs references are gone",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T06:38:18.537Z"
+        },
+        {
+          "n": 2,
+          "text": "The seed-cut, release and self-hosting launchers refuse to start without a matching receipt, shown by one refused and one admitted launch",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T06:38:22.510Z"
+        },
+        {
+          "n": 3,
+          "text": "AGENTS.md names the checked-in path, and the Rust-era preflight.mjs and prepare-sharded-chain.mjs references are gone",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T06:38:23.382Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G1"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-06T06:38:13.946Z",
+      "updated": "2026-11-06T06:38:23.382Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "c0423zxm",
+      "num": 6598,
+      "title": "Test kit unit tests: 6 failures on dev (integer capture, 2 free-port, terminal, UI comparison, UI directive)",
+      "body": "CoreOwnership measured the test kit's own unit tests at s1 on base 59ffda6c23: 222 passed, 6 failed. On 668a296d5c, which adds the build-entry test, the result is 223 passed with the same 6 failed. So the failures predate that change and are unowned: integer capture, two free-port tests, terminal, UI comparison and UI directive. Each needs its root found and either a fix to the kit or a corrected test that matches today's ratified behaviour. Do not file them as known-failing without a root.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The test kit's unit tests pass 229/229 at s1 on a dev commit, with each of the 6 failures fixed at its root or its test corrected to the ratified behaviour",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T06:38:51.563Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G1"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-06T06:38:47.078Z",
+      "updated": "2026-11-06T06:38:51.563Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "c0yy2xbx",
+      "num": 6599,
+      "title": "Port the C binding generator to Jet: jet inspect bind <header.h> and the cache-miss refresh",
+      "body": "Compiler/JetCli/Source/Cli/InspectB.jet:968 returns not-ported for `jet inspect bind <header.h>`, and there is no Jet implementation of the #Bindgen cache generator that the usage text says the compiler runs automatically on a cache miss. Only the data-schema binders (json, csv, sql, xml, proto) are ported. As a result, the checked-in `c.<lib>.__bindgen__` caches can't be regenerated under today's FFI rules. Examples/ffi opaque_handles fails E3203/E0702 because its cache predates them: `struct GzFile {}` is not C-ABI, and #Close needs a close that returns nothing, but run.jet reads gzclose's status. This blocks #4717 c8 item 3. Scope: the same header subset the retired Rust binder accepted (this is not #4174's full C front end); output a #Bindgen module that follows today's C-ABI and #Close rules; implement the manual verb and the cache-miss refresh as one mechanism; regenerate every checked-in cache and its golden in one cutover.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "jet inspect bind <header.h> generates a #Bindgen cache in Jet that follows today's C-ABI and #Close rules, and the compiler refreshes a missing cache through the same code",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T06:40:59.588Z"
+        },
+        {
+          "n": 2,
+          "text": "Every checked-in c.<lib>.__bindgen__ cache is regenerated by the tool, and the bridges and opaque_handles goldens pass on o0/o1/o2",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T06:41:00.340Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G2"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-06T06:40:53.022Z",
+      "updated": "2026-11-06T06:41:00.340Z",
       "updatedBy": "Main"
     }
   ],
@@ -176925,6 +177214,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-06T06:41:01.147Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0rqi33c",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T06:41:00.340Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0yy2xbx",
+      "note": "#2 Every checked-in c.<lib>.__bindgen__ cache is regenerated by"
+    },
+    {
+      "at": "2026-11-06T06:40:59.588Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0yy2xbx",
+      "note": "#1 jet inspect bind <header.h> generates a #Bindgen cache in Je"
+    },
+    {
+      "at": "2026-11-06T06:40:53.022Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0yy2xbx",
+      "note": "Port the C binding generator to Jet: jet inspect bind <header.h> and the cache-miss refresh"
+    },
+    {
+      "at": "2026-11-06T06:38:51.563Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0423zxm",
+      "note": "#1 The test kit's unit tests pass 229/229 at s1 on a dev commit"
+    },
+    {
+      "at": "2026-11-06T06:38:47.078Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0423zxm",
+      "note": "Test kit unit tests: 6 failures on dev (integer capture, 2 free-port, terminal, UI comparison, UI directive)"
+    },
+    {
+      "at": "2026-11-06T06:38:23.382Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0w4gi4s",
+      "note": "#3 AGENTS.md names the checked-in path, and the Rust-era prefli"
+    },
+    {
+      "at": "2026-11-06T06:38:22.511Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0w4gi4s",
+      "note": "#2 The seed-cut, release and self-hosting launchers refuse to s"
+    },
+    {
+      "at": "2026-11-06T06:38:18.537Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0w4gi4s",
+      "note": "#1 AGENTS.md names the checked-in path, and the Rust-era prefli"
+    },
+    {
+      "at": "2026-11-06T06:38:13.947Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0w4gi4s",
+      "note": "Native-era collect-all launch gate: check in the preflight that AGENTS.md requires"
+    },
+    {
+      "at": "2026-11-06T06:37:38.730Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pgowhn",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T06:28:56.205Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0o3di45",
+      "note": "core.ui host types and services lower on native tiers from Jet source"
+    },
+    {
+      "at": "2026-11-06T06:22:38.537Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0rqi33c",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T06:19:30.277Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08s0ppt",
+      "note": "#15"
+    },
+    {
+      "at": "2026-11-06T06:18:27.255Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0qeoxfp",
+      "note": "Witness harnesses that count frees through --wrap=jet_rt_free never see runtime frees"
+    },
+    {
+      "at": "2026-11-06T06:18:26.383Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0gaxqxg",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-06T06:18:25.679Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0gaxqxg",
+      "note": "#2 Every harness that platform-links jet_runtime_jet.o (run-nat"
+    },
+    {
+      "at": "2026-11-06T06:18:24.996Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0gaxqxg",
+      "note": "#1 run-process-witnesses links and its ProcessRoutes and Proces"
+    },
+    {
+      "at": "2026-11-06T06:13:43.662Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0gaxqxg",
+      "note": "run-process-witnesses link fails on undefined jet_rt_fault_report"
+    },
+    {
+      "at": "2026-11-06T06:13:42.516Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0jn1coj",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-06T06:13:41.121Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0jn1coj",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-06T06:13:34.099Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c01oyhqk",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T06:13:33.219Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c01oyhqk",
+      "note": "priority,goals"
+    },
+    {
+      "at": "2026-11-06T06:08:29.915Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pgowhn",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T06:08:13.603Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0rqi33c",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-06T06:02:23.894Z",
       "by": "Main",
