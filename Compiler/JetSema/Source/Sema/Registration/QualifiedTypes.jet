@@ -1,9 +1,12 @@
 // Types written with a module alias (`enc.EncodingError`) name their target
 // through the declaring file's import; the alias means nothing in any other
-// module. Once imports are bound, each module's declared signatures replace
-// such a name with the target's canonical key, so every copy of a symbol (an
-// import binding, a package name) carries types that resolve in whichever
-// module checks a use of it.
+// module. A bare name a file imports from another package
+// (`use jet_foundation.[Effect]`) is the same: another module resolves it
+// among the types it sees, where a second loaded `Effect` leaves it
+// unresolved. Once imports are bound, each module's declared signatures
+// replace such a name with the target's canonical key, so every copy of a
+// symbol (an import binding, a package name) carries types that resolve in
+// whichever module checks a use of it.
 use jet_foundation.[
     Symbol,
     Type,
@@ -35,8 +38,10 @@ fn sema_registration_canonicalize_qualified_types(graph: &SemaRegistrationGraph)
     }
 }
 
-// Each alias-qualified type name the module's declarations write, mapped to
-// the type it resolves to in that module (the checker's own resolution).
+// Each alias-qualified or imported type name the module's declarations
+// write, mapped to the type it resolves to in that module (the checker's own
+// resolution). A bare name keys only an import binding of a user package's
+// type: local names and Core types keep their spelling.
 fn sema_registration_module_qualified_keys(graph: SemaRegistrationGraph, module_index: Int) -> [String:Type] Never! {
     names := [String]{}
     loop function in graph.modules[module_index].functions -> sema_registration_function_qualified_names(function, &names)
@@ -52,11 +57,20 @@ fn sema_registration_module_qualified_keys(graph: SemaRegistrationGraph, module_
     keys := [String:Type]{}
     identity :: graph.modules[module_index].module_identity
     loop name in names {
+        if !name.contains(".") && !sema_registration_imported_user_type(graph, module_index, identity, name) -> next
         written :: Type.Named{name: name}
         resolved :: sema_type_resolve_declared(graph, written, identity)
         if !type_identity_equal(resolved, written) -> keys[name] = resolved
     }
     keys
+}
+
+fn sema_registration_imported_user_type(graph: SemaRegistrationGraph, module_index: Int, identity: String, name: String) -> Bool Never! {
+    found :: sema_registration_lookup_name_at(graph, module_index, identity, name) ?? return false
+    if found.place == {
+        .Imported(_, _, _) -> !found.source_module_identity.starts_with("<corelib>/")
+        else -> false
+    }
 }
 
 fn sema_registration_function_qualified_names(function: SemaRegistrationFunction, names: &[String]) Never! {
@@ -159,6 +173,8 @@ fn sema_registration_type_qualified_names(ty: Type, names: &[String]) Never! {
     }
 }
 
+// An alias-qualified name, or a bare one an import may bind; a canonical key
+// holds `::` and is already resolved.
 fn sema_registration_push_qualified_name(name: String, names: &[String]) Never! {
-    if name.contains(".") && !name.contains("::") && !name.starts_with("type:") && !names.contains(name) -> &names.push(name)
+    if name != "" && !name.contains("::") && !name.starts_with("type:") && !names.contains(name) -> &names.push(name)
 }
