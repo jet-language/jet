@@ -27,7 +27,7 @@ TOWER_CLI :: "Tools/tower/tower.mjs"
 // Owners are checked against this tree's own board. Without TOWER_DATA, Tower
 // follows a linked worktree to the main checkout's live board.
 TOWER_BOARD :: "Tools/tower/.tower/tower.json"
-USAGE :: "usage: jet Tools/ci/CompiledWorkloads.jet --contract|--check REPORT_DIR|review REPORT_DIR|self-check"
+USAGE :: "usage: jet Tools/ci/CompiledWorkloads.jet --contract|--check REPORT_DIR|review REPORT_DIR|self-check|run --platform PLATFORM --report-dir DIR|run --measurement-registry"
 REVIEW_WORKFLOW :: "compiled-workload-review.yml"
 PEER_LAUNCHER_CONTRACT :: "compiled-workload-peer-isolation-v1"
 
@@ -151,6 +151,7 @@ fn main(root: String, args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int
         return 0
     }
     if args.len() == 1 && args[0] == "self-check" -> return self_check(root)
+    if args.len() >= 1 && args[0] == "run" -> return producer_main(root, args.slice(1, args.len()))
     term.eprint(USAGE)
     64
 }
@@ -423,6 +424,43 @@ fn hash_input_method(path: String) -[FS]> String Never! {
     if files.is_dir(path) -> "tree-mode-v1" else -> "file-bytes-v1"
 }
 
+// A directory input's `.fixture-modes.tsv` sidecar: `relative_path<TAB>mode`
+// rows that override the modes git cannot keep.
+struct FixtureModes {
+    sidecar: String
+    present: Bool
+    bytes: [U8]
+    keys: [String]
+    modes: [String: String]
+}
+
+fn fixture_modes(input: String) -[FS]> FixtureModes Problem! {
+    sidecar :: "{input}/.fixture-modes.tsv"
+    found := FixtureModes{sidecar: sidecar.copy(), present: false, bytes: [U8]{}, keys: [String]{}, modes: [String: String]{}}
+    if !path_exists(sidecar) -> return found
+    meta :: files.stat(sidecar) ?? return Err(problem("`{sidecar}` cannot be read: {err}"))
+    if !meta.is_file -> return Err(problem("`{sidecar}` is not a file"))
+    found.bytes = files.read_bytes(sidecar) ?? return Err(problem("`{sidecar}` cannot be read: {err}"))
+    found.present = true
+    text :: String.from_bytes(found.bytes.copy()) ?? return Err(problem("`{sidecar}` is not UTF-8"))
+    lines := text.split("\n").to_list()
+    if lines.len() > 0 && lines[lines.len() - 1] == "" -> _ := &lines.pop()
+    loop raw in lines {
+        line :: raw.removesuffix("\r")
+        fields :: line.split("\t").to_list()
+        if fields.len() != 2 -> return Err(problem("`{sidecar}` has a malformed row"))
+        relative :: fields[0]
+        mode :: fields[1]
+        if relative == ".fixture-modes.tsv" || !safe_path(relative) || !full("[0-7]{{3}}|0[0-7]{{3}}", mode) || has(found.modes, relative) {
+            return Err(problem("`{sidecar}` has an invalid row"))
+        }
+        value :: from_octal(mode) ?? return Err(problem("`{sidecar}` has an invalid mode"))
+        &found.keys.push(relative.copy())
+        found.modes[relative.copy()] = octal(value)
+    }
+    found
+}
+
 // file-bytes-v1 for a file; tree-mode-v1 for a directory: every entry's path,
 // type, mode (as overridden by its `.fixture-modes.tsv` sidecar), link text
 // and bytes, then the sidecar itself.
@@ -432,35 +470,12 @@ fn hash_input_path(input: String) -[FS]> String Problem! {
         if !root.is_file -> return Err(problem("`{input}` is not a file"))
         return file_sha256(input)
     }
-    sidecar :: "{input}/.fixture-modes.tsv"
-    sidecar_bytes := [U8]{}
-    has_sidecar := false
-    if path_exists(sidecar) {
-        meta :: files.stat(sidecar) ?? return Err(problem("`{sidecar}` cannot be read: {err}"))
-        if !meta.is_file -> return Err(problem("`{sidecar}` is not a file"))
-        sidecar_bytes = files.read_bytes(sidecar) ?? return Err(problem("`{sidecar}` cannot be read: {err}"))
-        has_sidecar = true
-    }
-    override_keys := [String]{}
-    overrides := [String: String]{}
-    if has_sidecar {
-        text :: String.from_bytes(sidecar_bytes.copy()) ?? return Err(problem("`{sidecar}` is not UTF-8"))
-        lines := text.split("\n").to_list()
-        if lines.len() > 0 && lines[lines.len() - 1] == "" -> _ := &lines.pop()
-        loop raw in lines {
-            line :: raw.removesuffix("\r")
-            fields :: line.split("\t").to_list()
-            if fields.len() != 2 -> return Err(problem("`{sidecar}` has a malformed row"))
-            relative :: fields[0]
-            mode :: fields[1]
-            if relative == ".fixture-modes.tsv" || !safe_path(relative) || !full("[0-7]{{3}}|0[0-7]{{3}}", mode) || has(overrides, relative) {
-                return Err(problem("`{sidecar}` has an invalid row"))
-            }
-            value :: from_octal(mode) ?? return Err(problem("`{sidecar}` has an invalid mode"))
-            &override_keys.push(relative.copy())
-            overrides[relative.copy()] = octal(value)
-        }
-    }
+    spec :: fixture_modes(input) ?? return Err(err)
+    sidecar :: spec.sidecar
+    has_sidecar :: spec.present
+    sidecar_bytes :: spec.bytes
+    override_keys :: spec.keys
+    overrides :: spec.modes
     entries := [TreeEntry]{}
     walk_tree(".", input, &entries) ?? return Err(err)
     loop relative in override_keys {
@@ -2469,6 +2484,2151 @@ fn target_applies(targets: String, platform: String, target: String, alias: Stri
     false
 }
 
+// --- the producer ------------------------------------------------------------
+// `run` executes the frozen seven-workload corpus and writes one complete
+// report. It is a producer only: the report's review fields are filled by the
+// independent review before the gate checks it.
+
+RUN_USAGE :: "usage: jet Tools/ci/CompiledWorkloads.jet run --platform linux|macos|windows --report-dir DIR"
+REGISTRY_USAGE :: "usage: jet Tools/ci/CompiledWorkloads.jet run --measurement-registry"
+// Printed by `run --measurement-registry`; the collectors below implement it.
+MEASUREMENT_REGISTRY :: "{{\"network\":\"network=disabled\",\"rss\":{{\"linux\":{{\"collector\":\"proc-status\",\"fields\":[\"VmHWM\",\"VmRSS\"],\"unit\":\"bytes\"}},\"macos\":{{\"collector\":\"ps\",\"command\":\"ps\",\"args\":[\"-axo\",\"pid=,ppid=,rss=\"],\"unit\":\"bytes\"}},\"windows\":{{\"collector\":\"powershell\",\"shells\":[\"pwsh\",\"powershell\"],\"processProperty\":\"PeakWorkingSet64\",\"unit\":\"bytes\"}}}}}}"
+WINDOWS_RSS_SCRIPT :: "$ErrorActionPreference = 'Stop'; Get-CimInstance Win32_Process | ForEach-Object {{;   $process = Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue;   if ($null -ne $process) {{ '{{0}}|{{1}}|{{2}}' -f $_.ProcessId, $_.ParentProcessId, $process.PeakWorkingSet64 }}; }}"
+MEASURED_OUTPUT_LIMIT :: 134217728
+DIAGNOSTIC_STEPS :: "stage-source-closure,append-invalid-declaration,invoke-compiler-check,capture-stdout-stderr,apply-rubric-v1"
+
+struct EnvVar {
+    name: String
+    value: String
+}
+
+fn env_var(name: String, value: String) -> EnvVar Never! { EnvVar{name: name.copy(), value: value.copy()} }
+
+struct Measured {
+    status: Int
+    stdout: String
+    stderr: String
+    duration: Int
+    rss: Int
+    command: String
+}
+
+struct ToolInfo {
+    language: String
+    executable: String
+    sha256: String
+    version: String
+}
+
+struct Launcher {
+    path: String
+    version: String
+    sha256: String
+}
+
+struct Staged {
+    root: String
+    entry: String
+    files: [String]
+}
+
+struct ClosureFile {
+    name: String
+    file: String
+}
+
+// The files a measured artifact needs at run time; `entry` names the one run.
+struct Closure {
+    entries: [ClosureFile]
+    entry: String
+}
+
+struct Built {
+    result: Measured
+    unavailable: String
+    artifact: String
+    closure: Closure
+    command: String
+    args: [String]
+    env: [EnvVar]
+    source: Staged
+}
+
+struct Rubric {
+    result: Measured
+    burden: Int
+    steps: Int
+    method: String
+}
+
+struct UnsafeSites {
+    count: Int
+    method: String
+}
+
+struct AuthorityFields {
+    keys: [String]
+    values: [String: String]
+}
+
+struct ProcessRss {
+    pid: Int
+    ppid: Int
+    rss: Int
+}
+
+// What every measurement step needs: the run's fixed configuration.
+struct Producer {
+    root: String
+    corpus: String
+    platform: String
+    jet: String
+    work: String
+    timeout_ms: Int
+    suffix: String
+    node: String
+    machine: String
+    candidate: String
+    sample_count: Int
+    launcher: Launcher
+    toolchain_command: [String: String]
+    toolchain_prefix: [String: String]
+}
+
+// The report rows as they are produced.
+struct Rows {
+    samples: [[String]]
+    receipts: [String]
+    tier_receipts: [String]
+    tier_reports: [String]
+    peer_coverage: [String]
+    peer_measurements: [String]
+    outcomes: [[String]]
+    toolchain_by_key: [String: String]
+    tools: [ToolInfo]
+}
+
+// One side of a task's paired samples: Jet or its selected peer.
+struct Side {
+    name: String
+    language: String
+    source: String
+    jet: Bool
+    source_path: String
+    hostile_path: String
+    source_hash: String
+    source_effort: Int
+    unsafe_sites: UnsafeSites
+    build_values: [Int]
+    edit_values: [Int]
+    runtime_values: [Int]
+    memory_values: [Int]
+    diagnostic_values: [Int]
+    debugging_values: [Int]
+    diagnostic_methods: [String]
+    deployment_values: [Int]
+    artifact_sizes: [Int]
+    artifact: String
+    closure: Closure
+    first_output_hash: String
+    normal_command: String
+    last_build_command: String
+    hostile_status: Int
+    hostile_hash: String
+}
+
+// The checks made before anything is created under the scratch root.
+struct Setup {
+    root: String
+    platform: String
+    report: String
+    jet: String
+    suffix: String
+    scratch: String
+}
+
+fn producer_main(root: String, args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int {
+    platform := env_or("JET_COMPILED_WORKLOAD_PLATFORM", "")
+    report := ""
+    registry := false
+    index := 0
+    loop index < args.len() {
+        arg :: args[index]
+        if arg == {
+            "--platform" -> {
+                platform = if index + 1 < args.len() -> args[index + 1].copy() else -> ""
+                index += 2
+            }
+            "--report-dir" -> {
+                report = if index + 1 < args.len() -> args[index + 1].copy() else -> ""
+                index += 2
+            }
+            "--measurement-registry" -> {
+                registry = true
+                index += 1
+            }
+            else -> {
+                term.eprint(RUN_USAGE)
+                return 64
+            }
+        }
+    }
+    if registry {
+        if args.len() != 1 {
+            term.eprint(REGISTRY_USAGE)
+            return 64
+        }
+        term.print(MEASUREMENT_REGISTRY)
+        return 0
+    }
+    if (platform != "linux" && platform != "macos" && platform != "windows") || report == "" {
+        term.eprint(RUN_USAGE)
+        return 64
+    }
+    setup :: producer_setup(root, platform, report) ?? return producer_failed(err, "")
+    work :: producer_work(setup.scratch) ?? return producer_failed(err, "")
+    line :: produce(setup, work) ?? return producer_failed(err, work)
+    discard_work(work)
+    term.print(line)
+    0
+}
+
+fn producer_failed(failure: Problem, work: String) -[Env, FS, IO]> Int {
+    term.eprint("compiled workload runner: {failure.message}")
+    discard_work(work)
+    1
+}
+
+// The scratch tree is removed after the run unless
+// JET_COMPILED_WORKLOAD_KEEP_SCRATCH=1; the report always stays.
+fn discard_work(work: String) -[Env, FS]> {
+    if work == "" || env_or("JET_COMPILED_WORKLOAD_KEEP_SCRATCH", "") == "1" -> return
+    files.remove_all(work) ?? ()
+}
+
+fn host_platform() -[Env]> String Never! {
+    name :: sys.name()
+    if name == "linux" || name == "macos" || name == "windows" -> return name.copy()
+    ""
+}
+
+fn producer_setup(root: String, platform: String, report: String) -[Env, FS]> Setup Problem! {
+    host :: host_platform()
+    if platform != host -> return Err(problem("report platform does not match the host: {platform} (host={host})"))
+    windows :: platform == "windows"
+    configured :: env_or("JET_COMPILED_WORKLOAD_JET_BIN", env_or("JET", ""))
+    found :: if configured != "" -> configured.copy() else -> resolve_executable(if windows -> "jet.exe" else -> "jet")
+    if found == "" -> return Err(problem("no Jet compiler: set JET_COMPILED_WORKLOAD_JET_BIN or JET, or put jet on PATH"))
+    home :: files.home() ?? env_or("HOME", "")
+    cache :: "{home}/.cache"
+    scratch_text :: env_or("JET_COMPILED_WORKLOAD_SCRATCH", "{cache}/jet-dev/scratch")
+    scratch :: files.collapse(absolute(scratch_text))
+    if platform == "linux" && (scratch == "/tmp" || scratch.starts_with("/tmp/")) {
+        return Err(problem("scratch must not use the RAM-backed system temporary directory: {scratch_text}"))
+    }
+    Setup{
+        root: root.copy(),
+        platform: platform.copy(),
+        report: if report.starts_with("/") -> report.copy() else -> "{root}/{report}",
+        jet: files.collapse(absolute(found)),
+        suffix: if windows -> ".exe" else -> "",
+        scratch: scratch,
+    }
+}
+
+// A fresh `compiled-workload-runner-*` directory under the scratch root.
+fn producer_work(scratch: String) -[Env, FS]> String Problem! {
+    files.create_dir_all(scratch) ?? return Err(problem("`{scratch}` cannot be created: {err}"))
+    attempt := 0
+    loop {
+        work :: "{scratch}/compiled-workload-runner-{sys.pid()}-{attempt}"
+        if !path_exists(work) {
+            files.create_dir_all(work) ?? return Err(problem("`{work}` cannot be created: {err}"))
+            return work
+        }
+        attempt += 1
+    }
+}
+
+// --- producer helpers
+
+fn clean_text(value: String) -> String Never! {
+    out := [U8]{}
+    gap := false
+    loop byte in value.bytes() {
+        if byte == (U8{9}) || byte == (U8{10}) || byte == (U8{13}) {
+            gap = true
+            next
+        }
+        if gap -> &out.push(U8{32})
+        gap = false
+        &out.push(byte)
+    }
+    text :: String.from_bytes(out) ?? ""
+    text.trim().copy()
+}
+
+fn failure_text(result: Measured) -> String Never! {
+    errors :: clean_text(result.stderr)
+    if errors != "" -> return errors
+    clean_text(result.stdout)
+}
+
+// Each argument as a JSON string, space-separated.
+fn command_text(argv: [String]) -> String Never! {
+    parts := [String]{}
+    loop value in argv -> &parts.push(json.to_string(Dyn.Text(value.copy())) ?? "\"\"")
+    parts.join(" ")
+}
+
+fn text_sha256(text: String) -> String Never! { crypto.sha256(text.bytes()).hex() }
+
+// JavaScript's `String(number)` for a measured value.
+fn js_float(value: Float) -> String Never! { js_number("{value}") }
+
+fn all_digits(text: String) -> Bool Never! {
+    if text == "" -> return false
+    loop byte in text.bytes() {
+        if byte < (U8{48}) || byte > (U8{57}) -> return false
+    }
+    true
+}
+
+fn words(text: String) -> [String] Never! {
+    out := [String]{}
+    loop part in text.replace("\t", " ").split(" ").to_list() {
+        if part != "" -> &out.push(part.copy())
+    }
+    out
+}
+
+fn repeated(value: Int, count: Int) -> [Int] Never! {
+    out := [Int]{}
+    loop _ in 0..<count -> &out.push(value)
+    out
+}
+
+fn distinct_count(values: [String]) -> Int Never! {
+    seen := [String]{}
+    loop value in values {
+        if !seen.contains(value) -> &seen.push(value.copy())
+    }
+    seen.len()
+}
+
+fn execute_bits(mode: Int) -> Bool Never! { mode /% 64 % 2 == 1 || mode /% 8 % 2 == 1 || mode % 2 == 1 }
+
+// `file://` URL of an absolute path.
+fn file_url(path: String) -> String Never! {
+    safe :: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789/._~-"
+    hex :: [String]{"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "A", "B", "C", "D", "E", "F"}
+    out := "file://"
+    loop byte in path.bytes() {
+        value :: Int.from_u8(byte)
+        text :: String.from_bytes([U8]{byte}) ?? ""
+        if value < 128 && safe.contains(text) {
+            out = "{out}{text}"
+        } else {
+            out = "{out}%{hex[value /% 16]}{hex[value % 16]}"
+        }
+    }
+    out
+}
+
+fn resolve_executable(candidate: String) -[Env, FS]> String Never! {
+    if candidate.starts_with("/") -> return if files.exists(candidate) -> candidate.copy() else -> ""
+    separator :: if sys.family() == "windows" -> ";" else -> ":"
+    loop directory in env_or("PATH", "").split(separator).to_list() {
+        resolved :: if directory == "" -> candidate.copy() else -> "{directory}/{candidate}"
+        if files.exists(resolved) -> return absolute(resolved)
+    }
+    ""
+}
+
+fn require_file(file: String, label: String) Problem! -[FS]> {
+    if !files.is_file(file) -> return Err(problem("missing {label}: {file}"))
+    Ok(())
+}
+
+fn require_input_path(file: String, label: String) Problem! -[FS]> {
+    meta :: files.stat(file) ?? return Err(problem("missing {label}: {file}"))
+    if !meta.is_file && !meta.is_dir -> return Err(problem("missing {label}: {file}"))
+    Ok(())
+}
+
+fn file_size(file: String) -[FS]> Int Never! {
+    real :: files.canonicalize(file) ?? return 0
+    meta :: files.stat(real) ?? return 0
+    meta.size
+}
+
+fn ledger_rows(root: String, name: String) -[FS]> [[String: String]] Problem! {
+    table :: read_ledger(root, name, "{CORPUS}/{name}") ?? return Err(err)
+    rows := [[String: String]]{}
+    loop row in table.rows {
+        map := [String: String]{}
+        loop index in 0..<table.header.len() -> map[table.header[index].copy()] = row[index].copy()
+        &rows.push(map)
+    }
+    rows
+}
+
+fn peer_key(peer: [String: String]) -> String Never! {
+    "{at(peer, "task_id")}|{at(peer, "selection")}|{at(peer, "language")}|{at(peer, "program")}"
+}
+
+fn peer_supports(targets: String, target: String) -> Bool Never! {
+    alias :: target.partition("-").head
+    loop value in targets.split(",").to_list() {
+        trimmed :: value.trim()
+        if trimmed == target || trimmed == alias -> return true
+    }
+    false
+}
+
+fn remember_tool(rows: &Rows, info: ToolInfo) {
+    loop index in 0..<rows.tools.len() {
+        if rows.tools[index].language == info.language {
+            rows.tools[index] = info
+            return
+        }
+    }
+    &rows.tools.push(info)
+}
+
+fn node_path(state: Producer) -> String Problem! {
+    if state.node == "" -> return Err(problem("toolchain executable is unavailable: domain/node"))
+    state.node.copy()
+}
+
+fn version_args(language: String) -> [String] Never! {
+    if language == "rust" -> return [String]{"-Vv"}
+    if language == "go" || language == "zig" -> return [String]{"version"}
+    [String]{"--version"}
+}
+
+fn tool_version(command: String, args: [String]) -[Env, Exec, FS, Time, Time.Wait]> String Problem! {
+    argv := [String]{command.copy()}
+    loop arg in args -> &argv.push(arg.copy())
+    ran :: process.cmd(argv).run() ?? return Err(problem("tool version failed: {command}"))
+    if ran.code != 0 || ran.signal != None -> return Err(problem("tool version failed: {command}"))
+    clean_text(ran.output)
+}
+
+fn toolchain_identity(prefixes: [String: String], language: String, command: String, args: [String]) -[Env, Exec, FS, Time, Time.Wait]> ToolInfo Problem! {
+    executable :: if language == "jet" -> command.copy() else -> resolve_executable(command)
+    if executable == "" -> return Err(problem("toolchain executable is unavailable: {language}/{command}"))
+    raw :: tool_version(executable, args) ?? return Err(err)
+    version :: if language == "zig" -> "zig {raw}" else if language == "domain" -> "node {raw}" else -> raw.copy()
+    if !version.starts_with(at(prefixes, language)) -> return Err(problem("toolchain version drifted for {language}: {version}"))
+    sha :: file_sha256(executable)
+    if !is_nonzero_sha256(sha) -> return Err(problem("toolchain executable identity is invalid: {executable}"))
+    ToolInfo{language: language.copy(), executable: executable.copy(), sha256: sha.copy(), version: "{version};executable={executable};sha256={sha}"}
+}
+
+// --- measurement
+
+fn measurement_timeout() -[Env]> Int Problem! {
+    value :: Int.parse(env_or("JET_COMPILED_WORKLOAD_TIMEOUT_MS", "180000")) ?? return Err(problem("JET_COMPILED_WORKLOAD_TIMEOUT_MS must be a positive number"))
+    if value <= 0 -> return Err(problem("JET_COMPILED_WORKLOAD_TIMEOUT_MS must be a positive number"))
+    value
+}
+
+// Wall time and peak process-tree RSS of one command. A host without a
+// working RSS collector fails: a missing memory measurement is not a zero.
+fn run_measured(state: Producer, command: String, args: [String], cwd: String, extra: [EnvVar]) -[Env, Exec, FS, IO, Time, Time.Wait]> Measured Problem! {
+    argv := [String]{command.copy()}
+    loop arg in args -> &argv.push(arg.copy())
+    shown :: command_text(argv)
+    spec := process.cmd(argv).cwd(cwd).stdout(.Capture).stderr(.Capture).timeout(time.duration_ms(state.timeout_ms)).output_limit(MEASURED_OUTPUT_LIMIT)
+    loop pair in extra -> spec = spec.env(pair.name, pair.value)
+    spec = spec.env("LC_ALL", "C").env("LANG", "C")
+    watch :: time.start()
+    child :: spec.spawn() ?? return Err(problem("could not measure {shown}: {err}"))
+    pid :: child.id()
+    platform :: state.platform.copy()
+    first :: tree_rss(platform, pid)
+    stop :: channel<Int>()
+    receiver :: stop.receiver
+    sampler :: task { peak_rss_until_stopped(platform, pid, receiver) }
+    receipt :: child.wait() ?? {
+        stop.sender.send(1)
+        _ := ^sampler.join() ?? 0
+        return Err(problem("could not measure {shown}: {err}"))
+    }
+    duration :: time.elapsed(watch).ns
+    stop.sender.send(1)
+    sampled :: ^sampler.join() ?? 0
+    peak :: if first > sampled -> first else -> sampled
+    if peak <= 0 -> return Err(problem("RSS measurement failed for {shown}: RSS collector produced no measurement"))
+    stderr := receipt.errors.copy()
+    if receipt.timed_out -> stderr = "{stderr}measurement timed out after {state.timeout_ms}ms"
+    status :: if receipt.timed_out || receipt.signal != None -> 124 else -> receipt.code
+    Measured{status: status, stdout: receipt.output.copy(), stderr: stderr, duration: duration, rss: peak, command: shown}
+}
+
+// Samples every 5 ms until the measured command has closed.
+fn peak_rss_until_stopped(platform: String, pid: Int, stop: Receiver<Int>) -[Env, Exec, FS, Time, Time.Wait]> Int Never! {
+    peak := 0
+    loop {
+        value :: tree_rss(platform, pid)
+        if value > peak -> peak = value
+        if stop.try_receive() != None -> return peak
+        time.sleep(time.duration_ms(5))
+    }
+}
+
+fn tree_rss(platform: String, root: Int) -[Env, Exec, FS, Time, Time.Wait]> Int Never! {
+    if platform == "linux" -> return rss_of_tree(root, linux_processes())
+    if platform == "macos" -> return rss_of_tree(root, ps_processes())
+    if platform == "windows" {
+        loop shell in ([String]{"pwsh", "powershell"}) {
+            listed :: powershell_processes(shell) ?? next
+            value :: rss_of_tree(root, listed)
+            if value > 0 -> return value
+        }
+    }
+    0
+}
+
+// The summed RSS of `root` and its descendants; 0 when none was measured.
+fn rss_of_tree(root: Int, processes: [ProcessRss]) -> Int Never! {
+    tree := [Int]{root}
+    changed := true
+    loop changed {
+        changed = false
+        loop entry in processes {
+            if !tree.contains(entry.pid) && tree.contains(entry.ppid) {
+                &tree.push(entry.pid)
+                changed = true
+            }
+        }
+    }
+    total := 0
+    loop entry in processes {
+        if entry.rss >= 0 && tree.contains(entry.pid) -> total += entry.rss
+    }
+    total
+}
+
+// `/proc/*/status`: PPid and the larger of VmHWM and VmRSS.
+fn linux_processes() -[FS]> [ProcessRss] Never! {
+    out := [ProcessRss]{}
+    listed :: files.list_dir("/proc") ?? return out
+    loop entry in listed {
+        if !all_digits(entry.name) -> next
+        text :: files.read("/proc/{entry.name}/status") ?? next
+        ppid := -1
+        rss := -1
+        loop line in text.split("\n").to_list() {
+            pair :: line.partition(":")
+            if pair.sep != ":" -> next
+            value :: pair.tail.trim()
+            if pair.head == "PPid" && all_digits(value) {
+                ppid = Int.parse(value) ?? -1
+            } else if (pair.head == "VmHWM" || pair.head == "VmRSS") && value.ends_with(" kB") {
+                kb :: value.removesuffix(" kB").trim()
+                if all_digits(kb) {
+                    bytes :: (Int.parse(kb) ?? 0) * 1024
+                    if bytes > rss -> rss = bytes
+                }
+            }
+        }
+        if ppid < 0 -> next
+        &out.push(ProcessRss{pid: Int.parse(entry.name) ?? 0, ppid: ppid, rss: rss})
+    }
+    out
+}
+
+fn ps_processes() -[Env, Exec, FS, Time, Time.Wait]> [ProcessRss] Never! {
+    out := [ProcessRss]{}
+    ran :: process.cmd([String]{"ps", "-axo", "pid=,ppid=,rss="}).run() ?? return out
+    if ran.code != 0 || ran.signal != None -> return out
+    loop line in ran.output.split("\n").to_list() {
+        fields :: words(line.trim())
+        if fields.len() != 3 || !all_digits(fields[0]) || !all_digits(fields[1]) || !all_digits(fields[2]) -> next
+        &out.push(ProcessRss{pid: Int.parse(fields[0]) ?? 0, ppid: Int.parse(fields[1]) ?? 0, rss: (Int.parse(fields[2]) ?? 0) * 1024})
+    }
+    out
+}
+
+fn powershell_processes(shell: String) -[Env, Exec, FS, Time, Time.Wait]> [ProcessRss]? Never! {
+    ran :: process.cmd([String]{shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", WINDOWS_RSS_SCRIPT}).run() ?? return None
+    if ran.code != 0 || ran.signal != None -> return None
+    out := [ProcessRss]{}
+    loop line in ran.output.split("\n").to_list() {
+        fields :: line.trim().split("|").to_list()
+        if fields.len() != 3 || !all_digits(fields[0]) || !all_digits(fields[1]) || !all_digits(fields[2]) -> next
+        &out.push(ProcessRss{pid: Int.parse(fields[0]) ?? 0, ppid: Int.parse(fields[1]) ?? 0, rss: Int.parse(fields[2]) ?? 0})
+    }
+    Val(out)
+}
+
+fn checked(result: Measured, expected: String, label: String) Problem! -[FS]> {
+    if result.status != 0 -> return Err(problem("{label} exited {result.status}: {clean_text(result.stderr)}"))
+    bytes :: files.read_bytes(expected) ?? return Err(problem("{label} output differs from {expected}"))
+    if result.stdout.bytes() != bytes -> return Err(problem("{label} output differs from {expected}"))
+    Ok(())
+}
+
+// --- the peer isolation launcher
+
+fn launcher_kind(launcher: String) Problem! -[Env, FS]> {
+    lower :: launcher.lower()
+    if sys.family() == "windows" {
+        if !lower.ends_with(".exe") -> return Err(problem("Windows peer isolation launcher must be an executable: {launcher}"))
+        return Ok(())
+    }
+    if lower.ends_with(".exe") -> return Err(problem("non-Windows peer isolation launcher must not be a Windows executable: {launcher}"))
+    real :: files.canonicalize(launcher) ?? return Err(problem("peer isolation launcher cannot be inspected: {err}"))
+    meta :: files.stat(real) ?? return Err(problem("peer isolation launcher cannot be inspected: {err}"))
+    if !execute_bits(meta.mode) -> return Err(problem("peer isolation launcher is not executable: {launcher}"))
+    Ok(())
+}
+
+// JET_COMPILED_WORKLOAD_PEER_LAUNCHER, else `.jet/compiled-workload-peer-launcher`
+// built from Tools/ci/CompiledWorkloadPeerLauncher.jet when missing.
+fn peer_launcher(root: String, jet: String, suffix: String) -[Env, Exec, FS, Time, Time.Wait]> Launcher Problem! {
+    configured :: env_or("JET_COMPILED_WORKLOAD_PEER_LAUNCHER", "")
+    path :: if configured != "" -> configured.copy() else -> "{root}/.jet/compiled-workload-peer-launcher{suffix}"
+    if configured == "" && !files.exists(path) {
+        source :: "{root}/Tools/ci/CompiledWorkloadPeerLauncher.jet"
+        built :: "{root}/Tools/ci/.jet/build/CompiledWorkloadPeerLauncher{suffix}"
+        build :: process.cmd([String]{jet, "build", "--quiet", source}).cwd(root).run() ?? return Err(problem("peer isolation launcher build failed: {err}"))
+        if build.code != 0 || build.signal != None {
+            detail :: if clean_text(build.errors) != "" -> clean_text(build.errors) else -> clean_text(build.output)
+            return Err(problem("peer isolation launcher build failed: {detail}"))
+        }
+        files.create_dir_all(files.dirname(path)) ?? return Err(problem("`{path}` cannot be created: {err}"))
+        files.copy(built, path) ?? return Err(problem("`{built}` cannot be copied: {err}"))
+        files.set_mode(path, 493) ?? return Err(problem("`{path}` cannot be made executable: {err}"))
+    }
+    launcher :: resolve_executable(path)
+    if launcher == "" -> return Err(problem("peer isolation launcher is unavailable: {path}"))
+    launcher_kind(launcher) ?? return Err(err)
+    probe :: process.cmd([String]{launcher, "--contract"}).cwd(root).run() ?? return Err(problem("peer isolation launcher contract probe failed: {launcher}"))
+    if probe.code != 0 || probe.signal != None || clean_text(probe.output) != PEER_LAUNCHER_CONTRACT {
+        return Err(problem("peer isolation launcher contract probe failed: {launcher}"))
+    }
+    version :: tool_version(launcher, [String]{"--version"}) ?? return Err(err)
+    if version == "" -> return Err(problem("peer isolation launcher returned no version: {launcher}"))
+    Launcher{path: launcher.copy(), version: version.copy(), sha256: file_sha256(launcher)}
+}
+
+fn authority_fields(authority: String) -> AuthorityFields Problem! {
+    found := AuthorityFields{keys: [String]{}, values: [String: String]{}}
+    loop part in authority.split(";").to_list() {
+        if part.find("=") < 1 -> return Err(problem("malformed task authority: {authority}"))
+        pair :: part.partition("=")
+        if !found.keys.contains(pair.head) -> &found.keys.push(pair.head.copy())
+        found.values[pair.head.copy()] = pair.tail.copy()
+    }
+    found
+}
+
+// Every measured command runs under the launcher with the task's declared
+// authority: one input-root input, scratch cwd, ambient host, no external writes.
+fn peer_measured(state: Producer, task: [String: String], command: String, args: [String], cwd: String, extra: [EnvVar]) -[Env, Exec, FS, IO, Time, Time.Wait]> Measured Problem! {
+    launcher :: state.launcher
+    launcher_kind(launcher.path) ?? return Err(err)
+    if file_sha256(launcher.path) != launcher.sha256 -> return Err(problem("peer isolation launcher changed during run"))
+    temporary :: "{cwd}/.tmp"
+    files.create_dir_all(temporary) ?? return Err(problem("`{temporary}` cannot be created: {err}"))
+    task_id :: at(task, "task_id")
+    authority :: authority_fields(at(task, "authority")) ?? return Err(err)
+    values :: authority.values
+    allowed :: [String]{"argv", "build-input", "cwd", "host", "network", "external-write"}
+    inputs :: (if has(values, "argv") -> 1 else -> 0) + (if has(values, "build-input") -> 1 else -> 0)
+    input_key :: if has(values, "argv") -> "argv" else -> "build-input"
+    known := true
+    loop key in authority.keys {
+        if !allowed.contains(key) -> known = false
+    }
+    network :: at(values, "network")
+    if authority.keys.len() != 5 || inputs != 1 || !known || at(values, input_key) != "input-root" || at(values, "cwd") != "scratch" || at(values, "host") != "ambient" || (network != "disabled" && network != "loopback-only") || at(values, "external-write") != "disabled" {
+        return Err(problem("peer isolation authority is missing or unsupported: {task_id}"))
+    }
+    launch := [String]{
+        "--contract={PEER_LAUNCHER_CONTRACT}", "--task-id={task_id}", "--root={cwd}", "--cwd={cwd}", "--host={at(values, "host")}",
+        "--network={network}", "--external-write={at(values, "external-write")}", "--", command.copy(),
+    }
+    loop arg in args -> &launch.push(arg.copy())
+    env := [EnvVar]{env_var("TMPDIR", temporary), env_var("TMP", temporary), env_var("TEMP", temporary)}
+    loop pair in extra -> &env.push(pair.copy())
+    &env.push(env_var("JET_COMPILED_WORKLOAD_PEER_CONTRACT", PEER_LAUNCHER_CONTRACT))
+    run_measured(state, launcher.path, launch, cwd, env)
+}
+
+fn command_family(command: String) -> String Never! {
+    base :: files.basename(command).lower().removesuffix(".exe")
+    if base == "c++" || base == "clang++" || base == "g++" || base.ends_with("-g++") -> return "cxx"
+    base.copy()
+}
+
+// A ledger flag whose value is the ledger's own `build/` output path names the
+// output: the runner writes its own path there, so only the flag is compared.
+fn frozen_flag_kept(token: String, args: [String]) -> Bool Never! {
+    if args.contains(token) -> return true
+    pair :: token.partition("=")
+    if pair.sep != "=" || !pair.tail.starts_with("build/") -> return false
+    loop arg in args {
+        if arg.starts_with("{pair.head}=") -> return true
+    }
+    false
+}
+
+fn assert_frozen_peer_command(task_id: String, language: String, phase: String, command: String, args: [String], ledger: [String: String]) Problem! {
+    frozen :: if phase == "build" -> at(ledger, "build_command").trim() else -> at(ledger, "run_command").trim()
+    tokens :: words(frozen)
+    if tokens.len() == 0 || (tokens.len() == 1 && phase == "build") {
+        return Err(problem("frozen peer {phase} command is empty: {task_id}/{language}"))
+    }
+    if phase == "build" {
+        actual :: command_family(command)
+        expected :: command_family(tokens[0])
+        if actual != expected -> return Err(problem("peer {phase} tool drifted from ledger: {task_id}/{language} ({actual} != {expected})"))
+        loop index in 1..<tokens.len() {
+            token :: tokens[index]
+            if !token.starts_with("-") && token != "build" && token != "build-exe" -> next
+            if !frozen_flag_kept(token, args) -> return Err(problem("peer {phase} flag drifted from ledger: {task_id}/{language}/{token}"))
+        }
+        return Ok(())
+    }
+    if !tokens[1..<tokens.len()].contains("INPUT") || args.len() == 0 {
+        return Err(problem("peer run input boundary drifted from ledger: {task_id}/{language}"))
+    }
+    Ok(())
+}
+
+// --- staging
+
+fn remove_tree(path: String) Problem! -[FS]> {
+    if !path_exists(path) -> return Ok(())
+    if files.is_symlink(path) || !files.is_dir(path) {
+        files.remove(path) ?? return Err(problem("`{path}` cannot be removed: {err}"))
+        return Ok(())
+    }
+    files.remove_all(path) ?? return Err(problem("`{path}` cannot be removed: {err}"))
+    Ok(())
+}
+
+fn preserve_mode(source: String, destination: String, mode: Int) Problem! -[Env, FS]> {
+    if sys.family() == "windows" -> return Ok(())
+    files.set_mode(destination, mode) ?? return Err(problem("could not preserve mode for {source}: {err}"))
+    Ok(())
+}
+
+// Copies files, directories (without `.jet`) and links as links, keeping modes.
+fn copy_path(source: String, destination: String, exclude_control: Bool) Problem! -[Env, FS]> {
+    meta :: files.stat(source) ?? return Err(problem("`{source}` cannot be read: {err}"))
+    parent :: files.dirname(destination)
+    files.create_dir_all(parent) ?? return Err(problem("`{parent}` cannot be created: {err}"))
+    if meta.is_symlink {
+        remove_tree(destination) ?? return Err(err)
+        link :: files.read_link(source) ?? return Err(problem("`{source}` cannot be read: {err}"))
+        files.symlink(link, destination) ?? return Err(problem("`{destination}` cannot be linked: {err}"))
+        return Ok(())
+    }
+    if meta.is_dir {
+        files.create_dir_all(destination) ?? return Err(problem("`{destination}` cannot be created: {err}"))
+        listed :: files.list_dir(source) ?? return Err(problem("`{source}` cannot be listed: {err}"))
+        loop entry in listed {
+            if entry.name == ".jet" || (exclude_control && entry.name == ".fixture-modes.tsv") -> next
+            copy_path("{source}/{entry.name}", "{destination}/{entry.name}", exclude_control) ?? return Err(err)
+        }
+        return preserve_mode(source, destination, meta.mode % 4096)
+    }
+    if !meta.is_file -> return Err(problem("unsupported path entry: {source}"))
+    files.copy(source, destination) ?? return Err(problem("`{source}` cannot be copied: {err}"))
+    preserve_mode(source, destination, meta.mode % 4096)
+}
+
+// A fixture copied with its `.fixture-modes.tsv` modes applied, deepest first.
+fn stage_path(source: String, destination: String) Problem! -[Env, FS]> {
+    remove_tree(destination) ?? return Err(err)
+    meta :: files.stat(source) ?? return Err(problem("`{source}` cannot be read: {err}"))
+    if !meta.is_dir -> return copy_path(source, destination, false)
+    spec :: fixture_modes(source) ?? return Err(err)
+    loop relative in spec.keys {
+        target :: files.stat("{source}/{relative}") ?? return Err(problem("`{spec.sidecar}` names a missing entry"))
+        if !target.is_file && !target.is_dir -> return Err(problem("`{spec.sidecar}` names a link"))
+    }
+    copy_path(source, destination, true) ?? return Err(err)
+    ordered := spec.keys.copy()
+    &ordered.sort()
+    depth := 0
+    loop relative in ordered {
+        parts :: relative.split("/").to_list().len()
+        if parts > depth -> depth = parts
+    }
+    loop depth > 0 {
+        loop relative in ordered {
+            if relative.split("/").to_list().len() != depth -> next
+            mode :: from_octal(at(spec.modes, relative)) ?? 0
+            preserve_mode("{source}/{relative}", "{destination}/{relative}", mode) ?? return Err(err)
+        }
+        depth -= 1
+    }
+    Ok(())
+}
+
+fn source_candidates(language: String) -> [String] Never! {
+    if language == "jet" -> return [String]{"main.jet", "src/main.jet", "index.jet"}
+    if language == "rust" -> return [String]{"main.rs", "src/main.rs"}
+    if language == "go" -> return [String]{"main.go", "cmd/main/main.go"}
+    if language == "cxx" -> return [String]{"main.cpp", "main.cc", "main.cxx", "src/main.cpp", "src/main.cc"}
+    if language == "zig" -> return [String]{"main.zig", "src/main.zig"}
+    if language == "domain" -> return [String]{"index.mjs", "main.mjs", "index.js", "main.js"}
+    [String]{}
+}
+
+fn source_entry(source: String, language: String) -[FS]> String Problem! {
+    meta :: files.stat(source) ?? return Err(problem("source is not a file or directory: {source}"))
+    if meta.is_file -> return source.copy()
+    if !meta.is_dir -> return Err(problem("source is not a file or directory: {source}"))
+    loop relative in source_candidates(language) {
+        candidate :: "{source}/{relative}"
+        if files.is_file(candidate) -> return candidate
+    }
+    package :: "{source}/package.json"
+    if language == "domain" && files.exists(package) {
+        text :: files.read(package) ?? return Err(problem("domain source package.json is invalid: {err}"))
+        data :: json.parse(text) ?? return Err(problem("domain source package.json is invalid: {err}"))
+        loop name in ([String]{"main", "module", "browser"}) {
+            relative :: text_of(field(data, name))
+            if relative == "" -> next
+            candidate :: files.collapse(if relative.starts_with("/") -> relative.copy() else -> "{source}/{relative}")
+            if candidate != source && !candidate.starts_with("{source}/") -> return Err(problem("domain package entry escaped source root: {relative}"))
+            if files.is_file(candidate) -> return candidate
+        }
+    }
+    Err(problem("source directory has no conventional {language} entry: {source}"))
+}
+
+fn closure_walk(file: String, out: &[String]) Problem! -[FS]> {
+    meta :: files.stat(file) ?? return Err(problem("`{file}` cannot be read: {err}"))
+    if meta.is_dir {
+        if files.basename(file) == ".jet" -> return Ok(())
+        listed :: files.list_dir(file) ?? return Err(problem("`{file}` cannot be listed: {err}"))
+        loop entry in listed -> closure_walk("{file}/{entry.name}", &out) ?? return Err(err)
+        return Ok(())
+    }
+    if !meta.is_file && !meta.is_symlink -> return Err(problem("unsupported source closure entry: {file}"))
+    &out.push(file.copy())
+    Ok(())
+}
+
+// A source file, or every file and link under a source directory, by path.
+fn source_closure_files(source: String) -[FS]> [String] Problem! {
+    meta :: files.stat(source) ?? return Err(problem("source is not a file or directory: {source}"))
+    if meta.is_file -> return [String]{source.copy()}
+    if !meta.is_dir -> return Err(problem("source is not a file or directory: {source}"))
+    found := [String]{}
+    closure_walk(source, &found) ?? return Err(err)
+    &found.sort()
+    found
+}
+
+fn stage_source(source: String, destination: String, language: String) -[Env, FS]> Staged Problem! {
+    remove_tree(destination) ?? return Err(err)
+    files.create_dir_all(destination) ?? return Err(problem("`{destination}` cannot be created: {err}"))
+    meta :: files.stat(source) ?? return Err(problem("source is not a file or directory: {source}"))
+    if meta.is_file {
+        extension :: files.suffix(source)
+        entry :: "{destination}/main{if extension == "" -> ".src" else -> extension.copy()}"
+        copy_path(source, entry, false) ?? return Err(err)
+        return Staged{root: destination.copy(), entry: entry.copy(), files: [String]{entry.copy()}}
+    }
+    if !meta.is_dir -> return Err(problem("source is not a file or directory: {source}"))
+    listed :: files.list_dir(source) ?? return Err(problem("`{source}` cannot be listed: {err}"))
+    loop item in listed -> copy_path("{source}/{item.name}", "{destination}/{item.name}", false) ?? return Err(err)
+    entry :: source_entry(destination, language) ?? return Err(err)
+    closure :: source_closure_files(destination) ?? return Err(err)
+    Staged{root: destination.copy(), entry: entry, files: closure}
+}
+
+// Source text with comments and string contents blanked, newlines kept.
+fn scrub_code(text: String) -> String Never! {
+    raw :: text.bytes()
+    out := [U8]{}
+    space :: U8{32}
+    newline :: U8{10}
+    state := 0
+    quote := U8{0}
+    index := 0
+    loop index < raw.len() {
+        byte :: raw[index]
+        ahead :: if index + 1 < raw.len() -> raw[index + 1] else -> U8{0}
+        blank :: if byte == newline -> newline else -> space
+        if state == 0 {
+            if byte == (U8{47}) && (ahead == (U8{47}) || ahead == (U8{42})) {
+                &out.push(space)
+                &out.push(space)
+                state = if ahead == (U8{47}) -> 1 else -> 2
+                index += 1
+            } else if byte == (U8{39}) || byte == (U8{34}) || byte == (U8{96}) {
+                &out.push(space)
+                quote = byte
+                state = 3
+            } else {
+                &out.push(byte)
+            }
+        } else if state == 1 {
+            &out.push(blank)
+            if byte == newline -> state = 0
+        } else if state == 2 {
+            if byte == (U8{42}) && ahead == (U8{47}) {
+                &out.push(space)
+                &out.push(space)
+                state = 0
+                index += 1
+            } else {
+                &out.push(blank)
+            }
+        } else if byte == (U8{92}) {
+            &out.push(space)
+            if index + 1 < raw.len() {
+                &out.push(if ahead == newline -> newline else -> space)
+                index += 1
+            }
+        } else if byte == quote {
+            &out.push(space)
+            state = 0
+        } else {
+            &out.push(blank)
+        }
+        index += 1
+    }
+    String.from_bytes(out) ?? ""
+}
+
+fn source_effort(source: String) -[FS]> Int Problem! {
+    lines := 0
+    loop file in source_closure_files(source) ?? return Err(err) {
+        meta :: files.stat(file) ?? return Err(problem("`{file}` cannot be read: {err}"))
+        if !meta.is_file -> next
+        text :: files.read(file) ?? return Err(problem("`{file}` cannot be read: {err}"))
+        if text == "" -> next
+        lines += text.split("\n").to_list().len() - (if text.ends_with("\n") -> 1 else -> 0)
+    }
+    lines
+}
+
+fn unsafe_pattern(language: String) -> String Never! {
+    if language == "go" -> return "\\bunsafe\\b|\\b(?:syscall|cgo)\\b"
+    if language == "cxx" -> return "\\b(?:reinterpret_cast|malloc|free|new|delete)\\b|->|\\b(?:const\\s+)?(?:auto|char|unsigned\\s+char|void|int|long|float|double)\\s+\\*+\\s*[A-Za-z_][A-Za-z0-9_]*"
+    if language == "zig" -> return "@(?:ptrCast|intFromPtr|ptrFromInt|embedFile)\\b|\\[\\*c?\\]"
+    if language == "domain" -> return "\\b(?:eval|Function|child_process)\\b"
+    "\\bunsafe\\b"
+}
+
+fn unsafe_inventory(source: String, language: String) -[FS]> UnsafeSites Problem! {
+    pattern :: regex.compile(unsafe_pattern(language)) ?? return Err(problem("unsafe pattern: {err}"))
+    breaks :: regex.compile("\n") ?? return Err(problem("line pattern: {err}"))
+    sites := [String]{}
+    loop file in source_closure_files(source) ?? return Err(err) {
+        meta :: files.stat(file) ?? return Err(problem("`{file}` cannot be read: {err}"))
+        if !meta.is_file -> next
+        text :: files.read(file) ?? return Err(problem("`{file}` cannot be read: {err}"))
+        scrubbed :: scrub_code(text)
+        newlines :: breaks.matches(scrubbed)
+        lines :: scrubbed.split("\n").to_list()
+        loop found in pattern.matches(scrubbed) {
+            line := 1
+            loop mark in newlines {
+                if mark.start < found.start -> line += 1
+            }
+            kind :: if language == "cxx" -> "raw-pointer-or-unsafe" else if lines[line - 1].contains("unsafe") -> "unsafe-token" else -> "unsafe-construct"
+            &sites.push("{kind}@{file}:{line}:{found.text}")
+        }
+    }
+    UnsafeSites{count: sites.len(), method: "unsafe-structure-v2:language={language};sites={sites.join(",")}"}
+}
+
+// The package authority a Jet adapter needs, read from its scrubbed source.
+fn jet_authority(task: [String: String], source: String) -[FS]> String Problem! {
+    fields :: authority_fields(at(task, "authority")) ?? return Err(err)
+    texts := [String]{}
+    loop file in source_closure_files(source) ?? return Err(err) {
+        meta :: files.stat(file) ?? return Err(problem("`{file}` cannot be read: {err}"))
+        if !meta.is_file -> next
+        &texts.push(scrub_code(files.read(file) ?? return Err(problem("`{file}` cannot be read: {err}"))))
+    }
+    code :: texts.join("\n")
+    allow := [String]{}
+    if has(fields.values, "argv") || has(fields.values, "build-input") || code.contains("core.files") -> &allow.push("FS")
+    if code.contains("print(") -> &allow.push("IO")
+    if at(fields.values, "network") == "loopback-only" || matches_somewhere("\\bcore\\.(?:http|net)\\b", code) -> &allow.push("Net")
+    if matches_somewhere("\\bcore\\.time\\b", code) -> &allow.push("Time")
+    if matches_somewhere("\\b(?:String|struct|loop|use core\\.|embed_file|print\\s*\\()", code) -> &allow.push("Mem.Alloc")
+    if allow.len() == 0 -> return Err(problem("task authority resolved to no Jet effects: {at(task, "task_id")}"))
+    &allow.sort()
+    allow.join(", ")
+}
+
+fn matches_somewhere(pattern: String, text: String) -> Bool Never! {
+    compiled :: regex.compile(pattern) ?? panic("pattern {pattern}: {err}")
+    compiled.is_match(text)
+}
+
+fn write_workload_package(project: String, task: [String: String], source: String) Problem! -[FS]> {
+    allow :: jet_authority(task, source) ?? return Err(err)
+    path :: "{project}/package.jet"
+    files.write(path, "name: \"compiled-workload\"\nversion: \"0.1.0\"\nauthority: {{ allow: [{allow}] }}\n") ?? return Err(problem("`{path}` cannot be written: {err}"))
+    Ok(())
+}
+
+// --- builds
+
+fn hash_closure(entries: [ClosureFile]) -[FS]> String Never! {
+    buffer := [U8]{}
+    loop entry in entries {
+        put_text(&buffer, entry.name)
+        put_text(&buffer, file_sha256(entry.file))
+    }
+    crypto.sha256(buffer).hex()
+}
+
+fn closure_size(entries: [ClosureFile]) -[FS]> Int Never! {
+    total := 0
+    loop entry in entries -> total += file_size(entry.file)
+    total
+}
+
+fn program_closure(artifact: String) -> Closure Never! {
+    Closure{entries: [ClosureFile]{ClosureFile{name: "program", file: artifact.copy()}}, entry: "program"}
+}
+
+fn relative_inside(file: String, root: String) -> String Never! {
+    relative :: files.relative(file, root)
+    if relative == "" || relative == "." || relative == ".." || relative.starts_with("../") -> return ""
+    relative
+}
+
+// A domain artifact ships its source closure and the Node runtime; every
+// other artifact is one program.
+fn artifact_closure(state: Producer, language: String, artifact: String, sources: [String], root: String) -> Closure Problem! {
+    if language != "domain" -> return program_closure(artifact)
+    entry :: relative_inside(artifact, root)
+    if entry == "" -> return Err(problem("domain artifact escaped source root: {artifact}"))
+    entries := [ClosureFile]{}
+    loop file in sources {
+        relative :: relative_inside(file, root)
+        if relative == "" -> return Err(problem("domain source closure escaped root: {file}"))
+        &entries.push(ClosureFile{name: "source/{relative}", file: file.copy()})
+    }
+    &entries.push(ClosureFile{name: "runtime/node", file: node_path(state) ?? return Err(err)})
+    Closure{entries: entries, entry: "source/{entry}"}
+}
+
+fn target_artifact_proof(artifact: String, target: String) -[FS]> String Problem! {
+    bytes :: files.read_bytes(artifact) ?? return Err(problem("`{artifact}` cannot be read: {err}"))
+    if target.starts_with("aarch64-") {
+        if bytes.len() < 20 || bytes[0] != (U8{127}) || bytes[1] != (U8{69}) || bytes[2] != (U8{76}) || bytes[3] != (U8{70}) || bytes[18] != (U8{183}) || bytes[19] != (U8{0}) {
+            return Err(problem("cross-target artifact is not AArch64 ELF: {artifact}"))
+        }
+        return "format=ELF;machine=AArch64;target={target};bytes={bytes.len()}"
+    }
+    if target == "web" {
+        if bytes.len() < 4 || bytes[0] != (U8{0}) || bytes[1] != (U8{97}) || bytes[2] != (U8{115}) || bytes[3] != (U8{109}) {
+            return Err(problem("web artifact is not Wasm: {artifact}"))
+        }
+        return "format=Wasm;target=web;bytes={bytes.len()}"
+    }
+    Err(problem("unsupported target proof: {target}"))
+}
+
+fn unavailable_target(result: Measured, target: String) -> Bool Never! {
+    output :: failure_text(result)
+    if target == "" || !output.contains(target) -> return false
+    lower :: output.lower()
+    output.contains("E3302") || lower.contains("not available") || lower.contains("not installed") || lower.contains("cannot find")
+}
+
+fn unavailable_build(result: Measured, target: String, command: String, args: [String], env: [EnvVar], source: Staged) -> Built Never! {
+    Built{
+        result: result.copy(), unavailable: "toolchain_unavailable;target={target};error={failure_text(result)}", artifact: "",
+        closure: Closure{entries: [ClosureFile]{}, entry: ""}, command: command.copy(), args: args.copy(), env: env.copy(), source: source.copy(),
+    }
+}
+
+fn jet_build(state: Producer, task: [String: String], project: String, source: String, target: String, embedded: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Built Problem! {
+    files.create_dir_all(project) ?? return Err(problem("`{project}` cannot be created: {err}"))
+    source_path :: "{state.corpus}/{source}"
+    staged :: stage_source(source_path, project, "jet") ?? return Err(err)
+    write_workload_package(project, task, source_entry(source_path, "jet") ?? return Err(err)) ?? return Err(err)
+    if embedded != "" {
+        destination :: if files.is_dir(embedded) && !files.is_symlink(embedded) -> "{project}/input-root" else -> "{project}/input.tsv"
+        stage_path(embedded, destination) ?? return Err(err)
+    }
+    args := [String]{"build", "--profile=release"}
+    if target != "" -> &args.push("--target={target}")
+    &args.push(files.relative(staged.entry, project))
+    env := [EnvVar]{env_var("JET_STORE_DIR", "{project}/.jet-store"), env_var("JET_FFI_CACHE_DIR", "{project}/.jet-ffi-cache"), env_var("CARGO_NET_OFFLINE", "true")}
+    if target == "aarch64-unknown-linux-gnu" {
+        linker :: env_or("RUSTC_LINKER_CROSS", "aarch64-linux-gnu-gcc")
+        &env.push(env_var("RUSTC_LINKER", linker))
+        &env.push(env_var("CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER", linker))
+        &env.push(env_var("CC_aarch64_unknown_linux_gnu", env_or("CC_CROSS", linker)))
+        &env.push(env_var("AR_aarch64_unknown_linux_gnu", env_or("AR_CROSS", "aarch64-linux-gnu-ar")))
+    }
+    result :: peer_measured(state, task, state.jet, args, project, env) ?? return Err(err)
+    if result.status != 0 {
+        if unavailable_target(result, target) -> return unavailable_build(result, target, state.jet, args, env, staged)
+        return Err(problem("Jet build failed for {source}: {clean_text(result.stderr)}"))
+    }
+    binary :: "{project}/build/main{state.suffix}"
+    if target != "web" -> require_file(binary, "Jet build artifact") ?? return Err(err)
+    Built{result: result, unavailable: "", artifact: binary.copy(), closure: program_closure(binary), command: state.jet.copy(), args: args, env: env, source: staged}
+}
+
+fn peer_build(state: Producer, task: [String: String], ledger: [String: String], language: String, source: String, dir: String, cross: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Built Problem! {
+    files.create_dir_all(dir) ?? return Err(problem("`{dir}` cannot be created: {err}"))
+    staged :: stage_source("{state.corpus}/{source}", dir, language) ?? return Err(err)
+    entry :: files.relative(staged.entry, dir)
+    output :: "{dir}/peer{state.suffix}"
+    command := ""
+    args := [String]{}
+    env := [EnvVar]{}
+    if language == "rust" {
+        command = env_or("RUSTC", at(state.toolchain_command, "rust"))
+        args = [String]{"--edition=2021", "-O"}
+        if cross != "" {
+            &args.push("--target={cross}")
+            &args.push("-C")
+            &args.push("linker={env_or("RUSTC_LINKER_CROSS", "aarch64-linux-gnu-gcc")}")
+        }
+        &args.push(entry.copy())
+        &args.push("-o")
+        &args.push(output.copy())
+    } else if language == "go" {
+        command = at(state.toolchain_command, "go")
+        args = [String]{"build", "-trimpath", "-o", output.copy(), entry.copy()}
+        env = [EnvVar]{env_var("GOCACHE", "{dir}/.go-cache"), env_var("GOMODCACHE", "{dir}/.go-mod-cache")}
+        if cross != "" {
+            &env.push(env_var("CGO_ENABLED", "0"))
+            &env.push(env_var("GOOS", "linux"))
+            &env.push(env_var("GOARCH", "arm64"))
+        }
+    } else if language == "cxx" {
+        command = if cross != "" -> env_or("CXX_CROSS", "aarch64-linux-gnu-g++") else -> at(state.toolchain_command, "cxx")
+        args = [String]{"-std=c++20", "-O2", "-pipe", entry.copy(), "-o", output.copy()}
+    } else if language == "zig" {
+        command = at(state.toolchain_command, "zig")
+        args = [String]{"build-exe", "-O", "ReleaseFast"}
+        if cross != "" {
+            &args.push("-target")
+            &args.push("aarch64-linux-gnu")
+        }
+        &args.push(entry.copy())
+        &args.push("-femit-bin={output}")
+    } else if language == "domain" {
+        if cross != "" -> return Err(problem("domain peer declared for aarch64"))
+        command = node_path(state) ?? return Err(err)
+        args = [String]{"--check", entry.copy()}
+    } else if language == "swift" {
+        swift :: at(state.toolchain_command, "swift")
+        command = if swift == "" -> "swiftc" else -> swift.copy()
+        args = [String]{"-O", entry.copy(), "-o", output.copy()}
+    } else {
+        return Err(problem("unsupported peer language: {language}"))
+    }
+    assert_frozen_peer_command(at(task, "task_id"), language, "build", command, args, ledger) ?? return Err(err)
+    result :: peer_measured(state, task, command, args, dir, env) ?? return Err(err)
+    if result.status != 0 {
+        if unavailable_target(result, cross) -> return unavailable_build(result, cross, command, args, env, staged)
+        return Err(problem("peer build failed for {source}: {clean_text(result.stderr)}"))
+    }
+    artifact :: if language == "domain" -> staged.entry.copy() else -> output.copy()
+    closure :: artifact_closure(state, language, artifact, staged.files, staged.root) ?? return Err(err)
+    Built{result: result, unavailable: "", artifact: artifact, closure: closure, command: command, args: args, env: env, source: staged}
+}
+
+fn peer_run(state: Producer, task: [String: String], ledger: [String: String], language: String, artifact: String, input: String, cwd: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Measured Problem! {
+    task_id :: at(task, "task_id")
+    if language == "domain" {
+        node :: node_path(state) ?? return Err(err)
+        args :: [String]{artifact.copy(), input.copy()}
+        assert_frozen_peer_command(task_id, language, "run", node, args, ledger) ?? return Err(err)
+        return peer_measured(state, task, node, args, cwd, [EnvVar]{})
+    }
+    args :: [String]{input.copy()}
+    assert_frozen_peer_command(task_id, language, "run", artifact, args, ledger) ?? return Err(err)
+    peer_measured(state, task, artifact, args, cwd, [EnvVar]{})
+}
+
+// diagnostic-rubric-v1: classification, location, cause, action and source.
+fn rubric_passed(text: String) -> Int Never! {
+    insensitive :: regex.flags(true, false, false)
+    passed := 0
+    loop pattern in ([String]{
+        "\\b(?:error|fatal|syntax|parse|diagnostic)\\b",
+        "\\b(?:expected|unexpected|invalid|unclosed|unknown|mismatch|missing)\\b",
+        "\\b(?:help|fix|suggest|consider|add|remove)\\b",
+        "(?:main|diagnostic|\\.jet|\\.rs|\\.go|\\.c(?:c|xx)?|\\.zig|\\.m?js|\\.swift)\\b",
+    }) {
+        compiled :: regex.compile_with(pattern, insensitive) ?? panic("rubric pattern {pattern}: {err}")
+        if compiled.is_match(text) -> passed += 1
+    }
+    if matches_somewhere("(?:^|\\s|:)\\d+(?::\\d+)?(?:\\b|$)", text) -> passed += 1
+    passed
+}
+
+fn diagnostic_probe(state: Producer, task: [String: String], language: String, source: String, dir: String, jet: Bool) -[Env, Exec, FS, IO, Time, Time.Wait]> Rubric Problem! {
+    remove_tree(dir) ?? return Err(err)
+    staged :: stage_source(source, dir, language) ?? return Err(err)
+    invalid :: if language == "rust" || language == "zig" || language == "jet" -> "\nfn __diagnostic_probe( {{\n" else if language == "go" || language == "swift" -> "\nfunc __diagnostic_probe( {{\n" else if language == "cxx" -> "\nvoid __diagnostic_probe( {{\n" else -> "\nfunction __diagnostic_probe( {{\n"
+    files.append_all(staged.entry, invalid) ?? return Err(problem("`{staged.entry}` cannot be written: {err}"))
+    entry :: files.relative(staged.entry, dir)
+    binary :: "{dir}/diagnostic{state.suffix}"
+    command := ""
+    args := [String]{}
+    if jet {
+        command = state.jet.copy()
+        args = [String]{"check", entry.copy()}
+    } else if language == "rust" {
+        command = env_or("RUSTC", at(state.toolchain_command, "rust"))
+        args = [String]{"--edition=2021", entry.copy(), "-o", binary.copy()}
+    } else if language == "go" {
+        command = at(state.toolchain_command, "go")
+        args = [String]{"build", "-o", binary.copy(), entry.copy()}
+    } else if language == "cxx" {
+        command = at(state.toolchain_command, "cxx")
+        args = [String]{"-std=c++20", entry.copy(), "-o", binary.copy()}
+    } else if language == "zig" {
+        command = at(state.toolchain_command, "zig")
+        args = [String]{"build-exe", entry.copy(), "-femit-bin={binary}"}
+    } else if language == "swift" {
+        swift :: at(state.toolchain_command, "swift")
+        command = if swift == "" -> "swiftc" else -> swift.copy()
+        args = [String]{entry.copy(), "-o", binary.copy()}
+    } else {
+        command = node_path(state) ?? return Err(err)
+        args = [String]{"--check", entry.copy()}
+    }
+    result :: peer_measured(state, task, command, args, dir, [EnvVar]{}) ?? return Err(err)
+    if result.status == 0 -> return Err(problem("diagnostic probe was accepted: {language}"))
+    passed :: rubric_passed(clean_text("{result.stdout}\n{result.stderr}"))
+    if passed < 3 -> return Err(problem("diagnostic rubric failed: {language} ({passed}/5)"))
+    method :: "diagnostic-rubric-v1:passed={passed};burden={5 - passed};steps={DIAGNOSTIC_STEPS};replay={result.command};stdout-sha256={text_sha256(result.stdout)};stderr-sha256={text_sha256(result.stderr)}"
+    Rubric{result: result, burden: 5 - passed, steps: 5, method: method}
+}
+
+// Copy the closure, prove it unchanged, then run it once on the input.
+fn deploy_closure(state: Producer, task: [String: String], language: String, closure: Closure, input: String, expected: String, destination: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Problem! {
+    watch :: time.start()
+    remove_tree(destination) ?? return Err(err)
+    files.create_dir_all(destination) ?? return Err(problem("`{destination}` cannot be created: {err}"))
+    deployed := [ClosureFile]{}
+    loop entry in closure.entries {
+        target :: "{destination}/{entry.name}"
+        copy_path(entry.file, target, false) ?? return Err(err)
+        &deployed.push(ClosureFile{name: entry.name.copy(), file: target})
+    }
+    task_id :: at(task, "task_id")
+    if hash_closure(deployed) != hash_closure(closure.entries) -> return Err(problem("deployed artifact closure changed: {task_id}/{language}"))
+    deployed_input :: "{destination}/input-root"
+    stage_path(input, deployed_input) ?? return Err(err)
+    artifact :: "{destination}/{closure.entry}"
+    command :: if language == "domain" -> "{destination}/runtime/node" else -> artifact.copy()
+    args :: if language == "domain" -> [String]{artifact.copy(), deployed_input.copy()} else -> [String]{deployed_input.copy()}
+    result :: peer_measured(state, task, command, args, destination, [EnvVar]{}) ?? return Err(err)
+    checked(result, expected, "{task_id}/{language}/deployment") ?? return Err(err)
+    time.elapsed(watch).ns
+}
+
+// --- the web tier
+
+fn chromium_executable() -[Env, Exec, FS, Time, Time.Wait]> String Problem! {
+    configured :: env_or("JET_WEB_CHROMIUM", env_or("CHROMIUM", "chromium"))
+    resolved :: resolve_executable(configured)
+    if resolved == "" -> return Err(problem("cross-platform-notes web tier requires Chromium/Chrome: {configured}"))
+    ran :: process.cmd([String]{resolved, "--version"}).run() ?? return Err(problem("configured Chromium/Chrome is unusable: {resolved}"))
+    text :: clean_text("{ran.output} {ran.errors}")
+    if ran.code != 0 || ran.signal != None || !(text.contains("Chromium") || text.contains("Chrome")) {
+        return Err(problem("configured Chromium/Chrome is unusable: {resolved}"))
+    }
+    resolved
+}
+
+fn json_text(value: String) -> String Never! { json.to_string(Dyn.Text(value.copy())) ?? "\"\"" }
+
+// The Node harness serving `buildDir` and reading the page's console through
+// the CDP driver until it matches the expected output.
+fn web_harness(driver_module: String, serve_script: String) -> String Never! {
+    driver :: json_text(driver_module)
+    lines :: [String]{
+        "import fs from \"node:fs\";",
+        "import net from \"node:net\";",
+        "import {{ spawn }} from \"node:child_process\";",
+        "const driverModule = {driver};",
+        "const serveScript = {json_text(serve_script)};",
+        "const buildDir = process.argv[2];",
+        "const expectedPath = process.argv[3];",
+        "const expected = fs.readFileSync(expectedPath, \"utf8\");",
+        "const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));",
+        "const reservation = net.createServer();",
+        "await new Promise((resolve, reject) => {{ reservation.once(\"error\", reject); reservation.listen(0, \"127.0.0.1\", resolve); }});",
+        "const port = reservation.address().port;",
+        "await new Promise(resolve => reservation.close(resolve));",
+        "const server = spawn(process.execPath, [serveScript, \"--port\", String(port), \"--root\", buildDir], {{ stdio: [\"ignore\", \"ignore\", \"pipe\"] }});",
+        "let serverError = \"\";",
+        "server.stderr.setEncoding(\"utf8\");",
+        "server.stderr.on(\"data\", chunk => {{ serverError += chunk; }});",
+        "let serving = false;",
+        "for (let attempt = 0; attempt < 200; attempt += 1) {{",
+        "  try {{ const response = await fetch(\"http://127.0.0.1:\" + port + \"/index.html\", {{ cache: \"no-store\" }}); if (response.ok) {{ serving = true; break; }} }} catch {{}}",
+        "  await sleep(50);",
+        "}}",
+        "if (!serving) {{ server.kill(\"SIGKILL\"); throw new Error(\"web server did not serve index.html: \" + serverError); }}",
+        "const {{ CdpDriver }} = await import({driver});",
+        "const driver = await new CdpDriver({{ chrome: process.env.CHROMIUM, chromeTempRoot: process.env.JET_WEB_CHROME_TEMP }}).launch();",
+        "try {{",
+        "  await driver.send(\"Page.addScriptToEvaluateOnNewDocument\", {{ source: \"window.__compiledWorkloadLogs = []; console.log = (...args) => window.__compiledWorkloadLogs.push(args.map(value => String(value)).join(\\\" \\\"));\" }}, driver.pageSession);",
+        "  await driver.navigate(\"http://127.0.0.1:\" + port + \"/index.html\");",
+        "  const expectedLines = expected.replace(/\\r?\\n$/, \"\").split(/\\r?\\n/);",
+        "  let logs = [];",
+        "  for (let attempt = 0; attempt < 400; attempt += 1) {{",
+        "    logs = await driver.evaluate(\"window.__compiledWorkloadLogs || []\");",
+        "    if (logs.join(\"\\n\") === expectedLines.join(\"\\n\")) break;",
+        "    await sleep(50);",
+        "  }}",
+        "  if (logs.join(\"\\n\") !== expectedLines.join(\"\\n\")) throw new Error(\"browser output differs: \" + logs.join(\"|\"));",
+        "  process.stdout.write(expected);",
+        "}} finally {{",
+        "  await driver.close();",
+        "  server.kill(\"SIGKILL\");",
+        "}}",
+    }
+    "{lines.join("\n")}\n"
+}
+
+struct BrowserRun {
+    result: Measured
+    chromium: String
+}
+
+fn web_browser_run(state: Producer, task: [String: String], build_dir: String, expected: String, peer: Bool) -[Env, Exec, FS, IO, Time, Time.Wait]> BrowserRun Problem! {
+    chromium :: chromium_executable() ?? return Err(err)
+    harness :: "{build_dir}/.compiled-workload-web-browser.mjs"
+    driver_local :: "{build_dir}/.compiled-workload-cdp-driver.mjs"
+    serve_local :: "{build_dir}/.compiled-workload-serve.mjs"
+    files.copy("{state.root}/Tools/canvas-test/driver.mjs", driver_local) ?? return Err(problem("the CDP driver cannot be copied: {err}"))
+    files.copy("{state.root}/Tools/web-test/serve.mjs", serve_local) ?? return Err(problem("the web server cannot be copied: {err}"))
+    files.write(harness, web_harness(file_url(driver_local), serve_local)) ?? return Err(problem("`{harness}` cannot be written: {err}"))
+    chrome_temp :: "{build_dir}/.chrome-temp"
+    node :: node_path(state) ?? return Err(err)
+    env :: [EnvVar]{env_var("CHROMIUM", chromium), env_var("JET_WEB_CHROME_TEMP", chrome_temp)}
+    result :: peer_measured(state, task, node, [String]{harness.copy(), build_dir.copy(), expected.copy()}, build_dir, env) ?? {
+        remove_tree(chrome_temp) ?? ()
+        return Err(err)
+    }
+    if checked(result, expected, "{at(task, "task_id")}/{if peer -> "peer" else -> "jet"}/web-browser") == .Err(failure) {
+        remove_tree(chrome_temp) ?? ()
+        return Err(failure)
+    }
+    remove_tree(chrome_temp) ?? return Err(err)
+    BrowserRun{result: result, chromium: chromium}
+}
+
+struct PeerWeb {
+    entry: String
+    index: String
+    source: Staged
+}
+
+fn peer_web_build(state: Producer, source: String, input: String, dir: String) -[Env, FS]> PeerWeb Problem! {
+    remove_tree(dir) ?? return Err(err)
+    files.create_dir_all(dir) ?? return Err(problem("`{dir}` cannot be created: {err}"))
+    staged :: stage_source("{state.corpus}/{source}", "{dir}/source", "domain") ?? return Err(err)
+    index :: "{dir}/index.html"
+    raw :: if files.is_dir(input) && !files.is_symlink(input) -> json.to_string(Dyn.Object([String: Dyn]{"inputRoot": Dyn.Text(files.basename(input))})) ?? "" else -> files.read(input) ?? return Err(problem("`{input}` cannot be read: {err}"))
+    module_path :: "./{files.relative(staged.entry, dir)}"
+    page :: [String]{
+        "<!doctype html>", "<meta charset=\"utf-8\">", "<script type=\"module\">", "globalThis.__compiledWorkloadInput = {json_text(raw)};",
+        "await import({json_text(module_path)});", "</script>", "",
+    }
+    files.write(index, page.join("\n")) ?? return Err(problem("`{index}` cannot be written: {err}"))
+    PeerWeb{entry: staged.entry.copy(), index: index, source: staged}
+}
+
+// --- the run
+
+fn ledger_index(rows: [[String: String]], key: String) -> [String: [String: String]] Never! {
+    out := [String: [String: String]]{}
+    loop row in rows -> out[at(row, key)] = row.copy()
+    out
+}
+
+// Node's `os.platform()` and `os.arch()` names, which the machine string keeps.
+fn machine_name() -[Env, Exec, FS]> String Never! {
+    name :: sys.name()
+    platform :: if name == {
+        "macos" -> "darwin"
+        "windows" -> "win32"
+        else -> name.copy()
+    }
+    arch :: sys.arch()
+    cpu :: if arch == {
+        "x86_64" -> "x64"
+        "aarch64" -> "arm64"
+        else -> arch.copy()
+    }
+    "{platform}-{cpu}-{clean_text(sys.release()).replace(" ", "_")}"
+}
+
+fn produce(setup: Setup, work: String) -[Env, Exec, FS, IO, Time, Time.Wait]> String Problem! {
+    root :: setup.root
+    platform :: setup.platform
+    report :: setup.report
+    corpus :: "{root}/{CORPUS}"
+    if path_exists(report) {
+        if !files.is_dir(report) -> return Err(problem("report path is not a directory: {report}"))
+        listed :: files.list_dir(report) ?? return Err(problem("`{report}` cannot be listed: {err}"))
+        if listed.len() != 0 -> return Err(problem("report directory must be empty: {report}"))
+    } else {
+        files.create_dir_all(report) ?? return Err(problem("`{report}` cannot be created: {err}"))
+    }
+    files.create_dir_all("{work}/runs") ?? return Err(problem("`{work}/runs` cannot be created: {err}"))
+    _ := static_contract(root) ?? return Err(problem("frozen contract rejected: {err.message}"))
+    timeout_ms :: measurement_timeout() ?? return Err(err)
+    manifest :: ledger_rows(root, "manifest.tsv") ?? return Err(err)
+    peers :: ledger_rows(root, "peer_ledger.tsv") ?? return Err(err)
+    adapters :: ledger_rows(root, "adapter_ledger.tsv") ?? return Err(err)
+    peer_adapters :: ledger_rows(root, "peer_adapter_ledger.tsv") ?? return Err(err)
+    metric_rows :: ledger_rows(root, "metric_contract.tsv") ?? return Err(err)
+    policy_rows :: ledger_rows(root, "measurement_policy.tsv") ?? return Err(err)
+    tier_rows :: ledger_rows(root, "tier_matrix.tsv") ?? return Err(err)
+    toolchains :: ledger_rows(root, "toolchain_contract.tsv") ?? return Err(err)
+    commands := [String: String]{}
+    prefixes := [String: String]{}
+    languages := [String]{}
+    loop row in toolchains {
+        language :: at(row, "language")
+        commands[language.copy()] = at(row, "command")
+        prefixes[language.copy()] = at(row, "version_prefix")
+        &languages.push(language)
+    }
+    if distinct_count(languages) != 6 -> return Err(problem("frozen toolchain contract is incomplete"))
+    counts := [String]{}
+    loop row in policy_rows -> &counts.push(js_float(num(at(row, "samples"))))
+    sample_count :: if counts.len() == 0 -> 0 else -> Int.parse(counts[0]) ?? 0
+    if distinct_count(counts) != 1 || sample_count < 1 -> return Err(problem("measurement policy must use one positive sample count"))
+    selected := [String: [String: String]]{}
+    selected_ids := [String]{}
+    loop row in peers {
+        if at(row, "selection") != "best-applicable" -> next
+        selected[at(row, "task_id")] = row.copy()
+        &selected_ids.push(at(row, "task_id"))
+    }
+    adapter_by_task :: ledger_index(adapters, "task_id")
+    peer_adapter_by_key :: ledger_index(peer_adapters, "peer_key")
+    task_by_id :: ledger_index(manifest, "task_id")
+    policies :: ledger_index(policy_rows, "metric")
+    adapter_ids :: adapters.map(row -> at(row, "task_id"))
+    peer_adapter_keys :: peer_adapters.map(row -> at(row, "peer_key"))
+    if manifest.len() != 7 || distinct_count(selected_ids) != 7 || distinct_count(adapter_ids) != 7 {
+        return Err(problem("frozen task/peer/adapter count is incomplete"))
+    }
+    if peers.len() < manifest.len() || distinct_count(peer_adapter_keys) != peers.len() {
+        return Err(problem("all peer candidates must have one adapter row"))
+    }
+    if distinct_count(peers.map(row -> peer_key(row))) != peers.len() -> return Err(problem("peer ledger keys must be unique"))
+    loop policy in policy_rows {
+        if at(policy, "tolerance_ratio") != "1.00" -> return Err(problem("peer ratio law drifted for metric: {at(policy, "metric")}"))
+    }
+    loop row in manifest {
+        task_id :: at(row, "task_id")
+        require_input_path("{corpus}/{at(row, "input")}", "input fixture") ?? return Err(err)
+        require_file("{corpus}/{at(row, "expected")}", "expected fixture") ?? return Err(err)
+        adapter :: adapter_by_task.get(task_id) ?? return Err(problem("missing selected adapter or peer: {task_id}"))
+        peer :: selected.get(task_id) ?? return Err(problem("missing selected adapter or peer: {task_id}"))
+        commit :: at(adapter, "peer_commit")
+        if at(peer, "source_revision") != commit || !full("[0-9a-f]{{40}}", commit) -> return Err(problem("peer identity is not immutable: {task_id}"))
+        require_input_path("{corpus}/{at(adapter, "jet_source")}", "Jet adapter") ?? return Err(err)
+        require_input_path("{corpus}/{at(adapter, "jet_hostile")}", "Jet hostile fixture") ?? return Err(err)
+        require_input_path("{corpus}/{at(adapter, "peer_source")}", "peer adapter") ?? return Err(err)
+        require_input_path("{corpus}/{at(adapter, "peer_hostile")}", "peer hostile fixture") ?? return Err(err)
+        require_file("{corpus}/expected/{task_id}.hostile.out", "hostile expected output") ?? return Err(err)
+    }
+    loop peer in peers {
+        key :: peer_key(peer)
+        adapter :: peer_adapter_by_key.get(key) ?? return Err(problem("peer adapter row does not bind to ledger: {key}"))
+        if at(adapter, "task_id") != at(peer, "task_id") || at(adapter, "language") != at(peer, "language") || at(adapter, "selection") != at(peer, "selection") || at(adapter, "peer_commit") != at(peer, "source_revision") {
+            return Err(problem("peer adapter row does not bind to ledger: {key}"))
+        }
+        require_input_path("{corpus}/{at(adapter, "peer_source")}", "peer candidate adapter") ?? return Err(err)
+        require_input_path("{corpus}/{at(adapter, "peer_hostile")}", "peer candidate hostile fixture") ?? return Err(err)
+    }
+    candidate :: head_commit(root) ?? return Err(err)
+    if !full("[0-9a-f]{{40}}", candidate) -> return Err(problem("candidate commit is not immutable"))
+    jet :: setup.jet
+    require_file(jet, "Jet compiler") ?? return Err(err)
+    if platform != "windows" {
+        real :: files.canonicalize(jet) ?? return Err(problem("Jet compiler is not executable: {jet}"))
+        meta :: files.stat(real) ?? return Err(problem("Jet compiler is not executable: {jet}"))
+        if !execute_bits(meta.mode) -> return Err(problem("Jet compiler is not executable: {jet}"))
+    }
+    jet_sha :: file_sha256(jet)
+    jet_tool :: toolchain_identity(prefixes, "jet", jet, [String]{"--version"}) ?? return Err(err)
+    contract_hash :: hash_relative_files(root, contract_paths()) ?? return Err(err)
+    source_hash :: hash_relative_files(root, source_paths()) ?? return Err(err)
+    launcher :: peer_launcher(root, jet, setup.suffix) ?? return Err(err)
+    node_found :: resolve_executable(if platform == "windows" -> "node.exe" else -> "node")
+    node := ""
+    if node_found != "" -> node = files.canonicalize(node_found) ?? node_found.copy()
+    state :: Producer{
+        root: root.copy(), corpus: corpus.copy(), platform: platform.copy(), jet: jet.copy(), work: work.copy(), timeout_ms: timeout_ms,
+        suffix: setup.suffix.copy(), node: node, machine: machine_name(), candidate: candidate.copy(), sample_count: sample_count,
+        launcher: launcher.copy(), toolchain_command: commands, toolchain_prefix: prefixes,
+    }
+    commits := [String]{}
+    loop row in manifest {
+        peer :: selected.get(at(row, "task_id")) ?? return Err(problem("missing selected adapter or peer: {at(row, "task_id")}"))
+        &commits.push("{at(row, "task_id")}:{at(peer, "source_revision")}")
+    }
+    identity := [String]{
+        IDENTITY_HEADER, "1\tcandidate_commit\t{candidate}", "1\tplatform\t{platform}",
+        "1\tenvironment\tos={platform};ci=compiled-workload;locale=C;network=per-task-declared", "1\tmachine\t{state.machine}",
+        "1\tsamples\t{sample_count}", "1\tjet_tool_version\t{jet_tool.version}", "1\tjet_binary_sha256\t{jet_sha}",
+        "1\tpeer_launcher_path\t{launcher.path}", "1\tpeer_launcher_version\t{launcher.version}", "1\tpeer_launcher_sha256\t{launcher.sha256}",
+        "1\tcontract_sha256\t{contract_hash}", "1\tsource_closure_sha256\t{source_hash}", "1\tpeer_commits\t{commits.join(",")}",
+    }
+    rows := Rows{
+        samples: [[String]]{}, receipts: [String]{}, tier_receipts: [String]{}, tier_reports: [String]{}, peer_coverage: [String]{},
+        peer_measurements: [String]{}, outcomes: [[String]]{}, toolchain_by_key: [String: String]{}, tools: [ToolInfo]{jet_tool.copy()},
+    }
+    loop task in manifest {
+        task_id :: at(task, "task_id")
+        adapter :: adapter_by_task.get(task_id) ?? return Err(problem("missing selected adapter or peer: {task_id}"))
+        peer :: selected.get(task_id) ?? return Err(problem("missing selected adapter or peer: {task_id}"))
+        measure_task(state, &rows, task, adapter, peer, jet_tool, tier_rows) ?? return Err(err)
+    }
+    loop peer in peers {
+        key :: peer_key(peer)
+        task :: task_by_id.get(at(peer, "task_id")) ?? return Err(problem("peer coverage task or adapter missing: {key}"))
+        adapter :: peer_adapter_by_key.get(key) ?? return Err(problem("peer coverage task or adapter missing: {key}"))
+        run_peer_coverage(state, &rows, peer, task, adapter, metric_rows) ?? return Err(err)
+    }
+    stats :: sample_statistics(rows.samples, policies, selected) ?? return Err(err)
+    loss_rows :: stat_losses(stats, selected, task_by_id) ?? return Err(err)
+    statistics := [String]{STATISTICS_HEADER}
+    measurements := [String]{MEASUREMENT_HEADER}
+    loop index in 0..<stats.len() {
+        stat :: stats[index]
+        owner :: loss_rows[index]
+        status :: if owner == "-" -> "measured" else -> "loss"
+        evidence :: "samples={stat.samples};median={js_float(stat.median)};relative-stdev={js_float(stat.relative)};outliers={stat.outliers};comparison-peer={stat.peer_language};comparison-operator=>=;tolerance-ratio={js_float(stat.tolerance)}"
+        &statistics.push("1\t{stat.task}\t{stat.language}\t{stat.metric}\t{stat.samples}\t{js_float(stat.median)}\t{js_float(stat.min)}\t{js_float(stat.max)}\t{js_float(stat.relative)}\t{stat.outliers}\t{js_float(stat.threshold)}\t{js_float(stat.tolerance)}\t{status}\t{owner}\t{evidence}\t{stat.platform}\t{stat.target}\t{stat.tier}")
+        tool :: rows.toolchain_by_key.get("{stat.task}\t{stat.language}") ?? return Err(problem("toolchain identity missing: {stat.task}/{stat.language}"))
+        &measurements.push("1\t{stat.task}\t{stat.language}\t{stat.metric}\t{js_float(stat.median)}\t{stat.unit}\t{tool}\t{evidence}\t{status}\t{owner}\t{stat.platform}\t{stat.target}\t{stat.tier}")
+    }
+    outcomes := [String]{OUTCOME_HEADER}
+    loop outcome in rows.outcomes {
+        owner := "-"
+        loop index in 0..<stats.len() {
+            if stats[index].task == outcome[1] && stats[index].language == "jet" && loss_rows[index] != "-" -> owner = loss_rows[index].copy()
+        }
+        cells := outcome.copy()
+        if owner != "-" {
+            cells[12] = "loss"
+            cells[14] = owner.copy()
+        }
+        &outcomes.push(cells.join("\t"))
+    }
+    loop info in rows.tools {
+        &identity.push("1\ttoolchain_{info.language}_path\t{info.executable}")
+        &identity.push("1\ttoolchain_{info.language}_sha256\t{info.sha256}")
+        &identity.push("1\ttoolchain_{info.language}_version\t{info.version}")
+    }
+    if file_sha256(jet) != jet_sha -> return Err(problem("Jet compiler changed during run"))
+    if file_sha256(launcher.path) != launcher.sha256 -> return Err(problem("peer isolation launcher changed during run"))
+    samples := [String]{SAMPLE_HEADER}
+    loop row in rows.samples -> &samples.push(row.join("\t"))
+    tier_reports := [String]{TIER_REPORT_HEADER}
+    loop row in rows.tier_reports -> &tier_reports.push(row.copy())
+    receipts := [String]{RECEIPT_HEADER}
+    loop row in rows.receipts -> &receipts.push(row.copy())
+    tier_receipts := [String]{TIER_RECEIPT_HEADER}
+    loop row in rows.tier_receipts -> &tier_receipts.push(row.copy())
+    coverage := [String]{PEER_COVERAGE_HEADER}
+    loop row in rows.peer_coverage -> &coverage.push(row.copy())
+    peer_measurements := [String]{PEER_MEASUREMENT_HEADER}
+    loop row in rows.peer_measurements -> &peer_measurements.push(row.copy())
+    write_lines("{report}/peer_coverage.tsv", coverage) ?? return Err(err)
+    write_lines("{report}/peer_measurements.tsv", peer_measurements) ?? return Err(err)
+    write_lines("{report}/identity.tsv", identity) ?? return Err(err)
+    write_lines("{report}/samples.tsv", samples) ?? return Err(err)
+    write_lines("{report}/outcomes.tsv", outcomes) ?? return Err(err)
+    write_lines("{report}/measurements.tsv", measurements) ?? return Err(err)
+    write_lines("{report}/statistics.tsv", statistics) ?? return Err(err)
+    write_lines("{report}/tiers.tsv", tier_reports) ?? return Err(err)
+    write_lines("{report}/receipts.tsv", receipts) ?? return Err(err)
+    write_lines("{report}/tier_receipts.tsv", tier_receipts) ?? return Err(err)
+    "compiled workload report: produced platform={platform} report={report}"
+}
+
+fn add_samples(state: Producer, rows: &Rows, task: String, language: String, metric: String, values: [Int], unit: String, method: String) Problem! {
+    if values.len() != state.sample_count -> return Err(problem("sample count does not match policy: {task}/{language}/{metric}"))
+    loop index in 0..<values.len() {
+        &rows.samples.push([String]{"1", task.copy(), language.copy(), metric.copy(), "{index + 1}", "{values[index]}", unit.copy(), method.copy(), state.platform.copy(), "native", "aot"})
+    }
+    Ok(())
+}
+
+fn new_side(state: Producer, name: String, language: String, source: String, hostile: String, jet: Bool) -[FS]> Side Problem! {
+    source_path :: "{state.corpus}/{source}"
+    source_hash :: hash_input_path(source_path) ?? return Err(err)
+    effort :: source_effort(source_path) ?? return Err(err)
+    sites :: unsafe_inventory(source_path, language) ?? return Err(err)
+    Side{
+        name: name.copy(), language: language.copy(), source: source.copy(), jet: jet, source_path: source_path.copy(),
+        hostile_path: "{state.corpus}/{hostile}", source_hash: source_hash, source_effort: effort, unsafe_sites: sites,
+        build_values: [Int]{}, edit_values: [Int]{}, runtime_values: [Int]{}, memory_values: [Int]{}, diagnostic_values: [Int]{},
+        debugging_values: [Int]{}, diagnostic_methods: [String]{}, deployment_values: [Int]{}, artifact_sizes: [Int]{},
+        artifact: "", closure: Closure{entries: [ClosureFile]{}, entry: ""}, first_output_hash: "", normal_command: "",
+        last_build_command: "", hostile_status: 0, hostile_hash: "",
+    }
+}
+
+fn side_build(state: Producer, task: [String: String], peer: [String: String], side: Side, project: String, embedded: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Built Problem! {
+    if side.jet {
+        built :: jet_build(state, task, project, side.source, "", embedded) ?? return Err(err)
+        return built
+    }
+    built :: peer_build(state, task, peer, side.language, side.source, project, "") ?? return Err(err)
+    built
+}
+
+fn side_run(state: Producer, task: [String: String], peer: [String: String], side: Side, input: String, cwd: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Measured Problem! {
+    if side.jet -> return peer_measured(state, task, side.artifact, [String]{input.copy()}, cwd, [EnvVar]{})
+    peer_run(state, task, peer, side.language, side.artifact, input, cwd)
+}
+
+// The task's file paths every sample of it reads.
+struct TaskPaths {
+    work: String
+    input: String
+    input_hash: String
+    expected: String
+    hostile_expected: String
+}
+
+// One sample of one side: cold build, warmed source-edit rebuild, native and
+// hostile runs, the diagnostic probe and a deployment of the artifact closure.
+fn measure_sample(state: Producer, task: [String: String], peer: [String: String], side: &Side, sample: Int, paths: TaskPaths) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+    task_id :: at(task, "task_id")
+    normal_input :: "{paths.work}/input-{side.name}-{sample}"
+    hostile_input :: "{paths.work}/hostile-{side.name}-{sample}"
+    stage_path(paths.input, normal_input) ?? return Err(err)
+    stage_path(side.hostile_path, hostile_input) ?? return Err(err)
+    build_input :: at(task, "authority").contains("build-input=")
+    build_dir :: if side.jet -> "{paths.work}/jet-build-{sample}" else -> "{paths.work}/peer-build-{sample}"
+    build :: side_build(state, task, peer, side, build_dir, if build_input -> normal_input.copy() else -> "") ?? return Err(err)
+    side.artifact = build.artifact.copy()
+    side.closure = build.closure.copy()
+    &side.artifact_sizes.push(closure_size(side.closure.entries))
+    &side.build_values.push(build.result.duration)
+    side.last_build_command = build.result.command.copy()
+    // The edit input stays outside the project: staging the source replaces the project.
+    edit_project :: "{paths.work}/edit-{side.name}-{sample}"
+    edit_input :: "{paths.work}/edit-input-{side.name}-{sample}"
+    stage_path(paths.input, edit_input) ?? return Err(err)
+    warm :: side_build(state, task, peer, side, edit_project, if build_input -> edit_input.copy() else -> "") ?? return Err(err)
+    files.append_all(warm.source.entry, "\n// measured source edit\n") ?? return Err(problem("`{warm.source.entry}` cannot be written: {err}"))
+    edit_env :: if side.jet -> warm.env.copy() else -> [EnvVar]{}
+    edit :: peer_measured(state, task, warm.command, warm.args, edit_project, edit_env) ?? return Err(err)
+    if edit.status != 0 -> return Err(problem("{if side.jet -> "Jet" else -> "peer"} source-edit rebuild failed: {task_id}: {clean_text(edit.stderr)}"))
+    &side.edit_values.push(edit.duration)
+    result :: side_run(state, task, peer, side, normal_input, paths.work) ?? return Err(err)
+    checked(result, paths.expected, "{task_id}/{side.name}/native") ?? return Err(err)
+    if (hash_input_path(paths.input) ?? "") != paths.input_hash -> return Err(problem("normal input fixture changed during run: {task_id}"))
+    &side.runtime_values.push(result.duration)
+    &side.memory_values.push(result.rss)
+    if sample == 1 {
+        side.first_output_hash = text_sha256(result.stdout)
+        side.normal_command = result.command.copy()
+    }
+    hostile :: side_hostile(state, task, peer, side, sample, hostile_input, paths.work) ?? return Err(err)
+    checked(hostile, paths.hostile_expected, "{task_id}/{side.name}/hostile") ?? return Err(err)
+    side.hostile_status = hostile.status
+    side.hostile_hash = text_sha256(hostile.stdout)
+    diagnostic :: diagnostic_probe(state, task, side.language, side.source_path, "{paths.work}/diagnostic-{side.name}-{sample}", side.jet) ?? return Err(err)
+    &side.diagnostic_values.push(diagnostic.burden)
+    &side.debugging_values.push(diagnostic.result.duration)
+    &side.diagnostic_methods.push("{diagnostic.method};debugging-steps={diagnostic.steps};debugging-nanoseconds={diagnostic.result.duration}")
+    deployment :: deploy_closure(state, task, side.language, side.closure, paths.input, paths.expected, "{paths.work}/deploy-{side.name}-{sample}") ?? return Err(err)
+    &side.deployment_values.push(deployment)
+    Ok(())
+}
+
+// cross-platform-notes embeds its input at build time, so its hostile Jet run
+// is a fresh build around the hostile input.
+fn side_hostile(state: Producer, task: [String: String], peer: [String: String], side: Side, sample: Int, hostile_input: String, cwd: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Measured Problem! {
+    if side.jet && at(task, "task_id") == "cross-platform-notes" {
+        built :: jet_build(state, task, "{cwd}/jet-hostile-{sample}", side.source, "", hostile_input) ?? return Err(err)
+        return peer_measured(state, task, built.artifact, [String]{}, cwd, [EnvVar]{})
+    }
+    side_run(state, task, peer, side, hostile_input, cwd)
+}
+
+fn side_samples(state: Producer, rows: &Rows, task_id: String, side: Side, order: String) Problem! {
+    count :: state.sample_count
+    language :: side.language
+    methods :: side.diagnostic_methods.join("|")
+    add_samples(state, &rows, task_id, language, "source_effort", repeated(side.source_effort, count), "count", "{order};source-closure") ?? return Err(err)
+    add_samples(state, &rows, task_id, language, "build_time", side.build_values, "nanoseconds", "{order};cold-build") ?? return Err(err)
+    add_samples(state, &rows, task_id, language, "edit_time", side.edit_values, "nanoseconds", "{order};warmup-then-source-edit-rebuild") ?? return Err(err)
+    add_samples(state, &rows, task_id, language, "runtime", side.runtime_values, "nanoseconds", "{order};native-run") ?? return Err(err)
+    add_samples(state, &rows, task_id, language, "memory", side.memory_values, "bytes", "{order};native-maximum-process-tree-rss") ?? return Err(err)
+    add_samples(state, &rows, task_id, language, "artifact_size", side.artifact_sizes, "bytes", "{order};artifact-closure") ?? return Err(err)
+    add_samples(state, &rows, task_id, language, "diagnostics", side.diagnostic_values, "count-and-review", "{order};diagnostic-rubric-output-digests={methods}") ?? return Err(err)
+    add_samples(state, &rows, task_id, language, "debugging", side.debugging_values, "nanoseconds-and-steps", "{order};debugging-replay={methods}") ?? return Err(err)
+    add_samples(state, &rows, task_id, language, "deployment", side.deployment_values, "count-and-time", "{order};copy-count=1;closure-rehash=1;rerun-count=1") ?? return Err(err)
+    add_samples(state, &rows, task_id, language, "unsafe_burden", repeated(side.unsafe_sites.count, count), "count-and-review", "{order};{side.unsafe_sites.method}") ?? return Err(err)
+    Ok(())
+}
+
+fn task_environment(platform: String, task: [String: String]) -> String Never! {
+    network :: if at(task, "authority").contains("network=loopback-only") -> "network=loopback-only" else -> "network=disabled"
+    "os={platform};ci=compiled-workload;locale=C;{network}"
+}
+
+fn side_receipt(state: Producer, task: [String: String], peer: [String: String], side: Side, paths: TaskPaths, expected_hash: String, tool: String) -[FS]> String Problem! {
+    launcher :: state.launcher
+    authority :: at(task, "authority")
+    hostile_input_hash :: hash_input_path(side.hostile_path) ?? return Err(err)
+    command :: "build={side.last_build_command};run={side.normal_command};source-hash-method={hash_input_method(side.source_path)};input-hash-method={hash_input_method(paths.input)};hostile-input-hash-method={hash_input_method(side.hostile_path)};launcher={launcher.path};launcher-version={launcher.version};launcher-sha256={launcher.sha256};authority={authority}"
+    cells :: [String]{
+        "1", at(task, "task_id"), side.language.copy(), side.source_hash.copy(), paths.input_hash.copy(), expected_hash.copy(), side.first_output_hash.copy(),
+        hostile_input_hash, side.hostile_hash.copy(), task_environment(state.platform, task), state.machine.copy(), tool.copy(), command,
+        at(peer, "source_revision"), "0", "{side.hostile_status}", launcher.path.copy(), launcher.version.copy(), launcher.sha256.copy(), authority,
+    }
+    cells.join("\t")
+}
+
+// The non-native tiers' evidence: JIT on Linux, then the web tier for
+// cross-platform-notes or the AArch64 cross build for every other task.
+struct TierEvidence {
+    jit_output: String
+    jit_command: String
+    jet_cross_hash: String
+    peer_cross_hash: String
+    jet_cross_status: String
+    peer_cross_status: String
+    jet_cross_proof: String
+    peer_cross_proof: String
+    jet_web_hash: String
+    jet_web_output: String
+    jet_web_proof: String
+    jet_web_command: String
+    peer_web_hash: String
+    peer_web_output: String
+    peer_web_proof: String
+    peer_web_command: String
+}
+
+fn no_tier_evidence() -> TierEvidence Never! {
+    TierEvidence{
+        jit_output: "-", jit_command: "not-run:artifact=none:persistent=false", jet_cross_hash: "-", peer_cross_hash: "-",
+        jet_cross_status: "pass", peer_cross_status: "pass", jet_cross_proof: "-", peer_cross_proof: "-", jet_web_hash: "-",
+        jet_web_output: "-", jet_web_proof: "-", jet_web_command: "not-run", peer_web_hash: "-", peer_web_output: "-",
+        peer_web_proof: "-", peer_web_command: "not-run",
+    }
+}
+
+fn tier_evidence(state: Producer, task: [String: String], peer: [String: String], adapter: [String: String], paths: TaskPaths) -[Env, Exec, FS, IO, Time, Time.Wait]> TierEvidence Problem! {
+    found := no_tier_evidence()
+    if state.platform != "linux" -> return found
+    task_id :: at(task, "task_id")
+    authority :: at(task, "authority")
+    jit_project :: "{paths.work}/jet-build-{state.sample_count}"
+    jit_source :: source_entry(jit_project, "jet") ?? return Err(err)
+    jit_input :: "{paths.work}/jit-input"
+    stage_path(paths.input, jit_input) ?? return Err(err)
+    jit :: peer_measured(state, task, state.jet, [String]{"run", files.relative(jit_source, jit_project), "--", jit_input}, jit_project, [EnvVar]{env_var("JET_STORE_DIR", "{jit_project}/.jet-store")}) ?? return Err(err)
+    checked(jit, paths.expected, "{task_id}/jet/jit") ?? return Err(err)
+    found.jit_output = text_sha256(jit.stdout)
+    found.jit_command = "{jit.command};artifact=none:persistent=false"
+    targets :: at(peer, "applicable_targets")
+    if task_id == "cross-platform-notes" {
+        web_project :: "{paths.work}/jet-web"
+        _ := jet_build(state, task, web_project, at(adapter, "jet_source"), "web", paths.input) ?? return Err(err)
+        build :: "{web_project}/build"
+        require_file("{build}/app.js", "Jet web JavaScript") ?? return Err(err)
+        require_file("{build}/app.wasm", "Jet web Wasm") ?? return Err(err)
+        require_file("{build}/jet_dom_runtime.js", "Jet web DOM runtime") ?? return Err(err)
+        require_file("{build}/index.html", "Jet web host page") ?? return Err(err)
+        browser :: web_browser_run(state, task, build, paths.expected, false) ?? return Err(err)
+        found.jet_web_hash = hash_closure([ClosureFile]{
+            ClosureFile{name: "build/app.js", file: "{build}/app.js"}, ClosureFile{name: "build/app.wasm", file: "{build}/app.wasm"},
+            ClosureFile{name: "build/jet_dom_runtime.js", file: "{build}/jet_dom_runtime.js"}, ClosureFile{name: "build/index.html", file: "{build}/index.html"},
+            ClosureFile{name: "runtime/chromium", file: browser.chromium.copy()},
+        })
+        found.jet_web_proof = target_artifact_proof("{build}/app.wasm", "web") ?? return Err(err)
+        found.jet_web_output = text_sha256(browser.result.stdout)
+        found.jet_web_command = "{browser.result.command};authority={authority}"
+        if peer_supports(targets, "web") {
+            peer_project :: "{paths.work}/peer-web"
+            web :: peer_web_build(state, at(adapter, "peer_source"), paths.input, peer_project) ?? return Err(err)
+            peer_browser :: web_browser_run(state, task, peer_project, paths.expected, true) ?? return Err(err)
+            closure :: artifact_closure(state, "domain", web.entry, web.source.files, web.source.root) ?? return Err(err)
+            entries := closure.entries.copy()
+            &entries.push(ClosureFile{name: "build/index.html", file: web.index.copy()})
+            &entries.push(ClosureFile{name: "runtime/chromium", file: peer_browser.chromium.copy()})
+            found.peer_web_proof = "format=browser-js;target=web;entry={files.basename(web.entry)};index={files.basename(web.index)}"
+            found.peer_web_hash = hash_closure(entries)
+            found.peer_web_output = text_sha256(peer_browser.result.stdout)
+            found.peer_web_command = "{peer_browser.result.command};authority={authority}"
+        }
+        return found
+    }
+    cross :: "aarch64-unknown-linux-gnu"
+    jet_cross :: jet_build(state, task, "{paths.work}/jet-cross", at(adapter, "jet_source"), cross, "") ?? return Err(err)
+    if jet_cross.unavailable != "" {
+        found.jet_cross_status = "toolchain_unavailable"
+        found.jet_cross_proof = jet_cross.unavailable.copy()
+        found.peer_cross_status = "toolchain_unavailable"
+        found.peer_cross_proof = jet_cross.unavailable.copy()
+        return found
+    }
+    found.jet_cross_hash = hash_closure(program_closure(jet_cross.artifact).entries)
+    found.jet_cross_proof = target_artifact_proof(jet_cross.artifact, cross) ?? return Err(err)
+    if !peer_supports(targets, cross) -> return found
+    language :: at(peer, "language")
+    peer_cross :: peer_build(state, task, peer, language, at(adapter, "peer_source"), "{paths.work}/peer-cross", cross) ?? return Err(err)
+    if peer_cross.unavailable != "" {
+        found.peer_cross_status = "toolchain_unavailable"
+        found.peer_cross_proof = peer_cross.unavailable.copy()
+        return found
+    }
+    closure :: artifact_closure(state, language, peer_cross.artifact, peer_cross.source.files, peer_cross.source.root) ?? return Err(err)
+    found.peer_cross_hash = hash_closure(closure.entries)
+    found.peer_cross_proof = target_artifact_proof(peer_cross.artifact, cross) ?? return Err(err)
+    found
+}
+
+fn tier_rows_for(state: Producer, rows: &Rows, task: [String: String], peer: [String: String], tiers: [[String: String]], evidence: TierEvidence, jet_side: Side, peer_side: Side) {
+    task_id :: at(task, "task_id")
+    platform :: state.platform
+    launcher :: state.launcher
+    targets :: at(peer, "applicable_targets")
+    authority :: "authority={at(task, "authority")};launcher={launcher.path};launcher-version={launcher.version};launcher-sha256={launcher.sha256}"
+    loop tier in tiers {
+        if at(tier, "task_id") != task_id -> next
+        tier_platform :: at(tier, "platform")
+        target :: at(tier, "target")
+        kind :: at(tier, "tier")
+        excluded :: at(tier, "requirement") == "excluded"
+        in_scope :: tier_platform == platform || (platform == "linux" && tier_platform == "cross-target")
+        peer_applies :: tier_platform != "cross-target" || peer_supports(targets, target)
+        prefix :: if excluded -> "excluded;availability={at(tier, "availability")};reason={at(tier, "availability_reason")};rationale={at(tier, "rationale")}" else if !in_scope -> "platform-scope={platform};availability={at(tier, "availability")};reason={at(tier, "availability_reason")}" else -> ""
+        active :: !excluded && in_scope
+        loop jet in ([Bool]{true, false}) {
+            language :: if jet -> "jet" else -> at(peer, "language")
+            status := "not-applicable"
+            artifact := "-"
+            output := "-"
+            command := "not-run:{prefix};{authority}"
+            if active && kind == "jit" && jet {
+                status = "pass"
+                output = evidence.jit_output.copy()
+                command = "{evidence.jit_command};{authority}"
+            } else if active && kind == "jit" {
+                command = "not-run:reason=peer-native-only;{authority}"
+            } else if active && !jet && !peer_applies {
+                command = "not-run:reason=peer-target-not-declared;target={target};peer-targets={targets};{authority}"
+            } else if active && tier_platform == "cross-target" && target == "web" {
+                status = "pass"
+                artifact = if jet -> evidence.jet_web_hash.copy() else -> evidence.peer_web_hash.copy()
+                output = if jet -> evidence.jet_web_output.copy() else -> evidence.peer_web_output.copy()
+                command = "{if jet -> evidence.jet_web_command.copy() else -> evidence.peer_web_command.copy()};target-proof={if jet -> evidence.jet_web_proof.copy() else -> evidence.peer_web_proof.copy()};{authority}"
+            } else if active && tier_platform == "cross-target" {
+                status = if jet -> evidence.jet_cross_status.copy() else -> evidence.peer_cross_status.copy()
+                artifact = if jet -> evidence.jet_cross_hash.copy() else -> evidence.peer_cross_hash.copy()
+                proof :: if jet -> evidence.jet_cross_proof.copy() else -> evidence.peer_cross_proof.copy()
+                command = if status == "toolchain_unavailable" -> "{proof};{authority}" else -> "{if jet -> "jet" else -> "peer"} build --target={target};target-proof={proof};{authority}"
+            } else if active && kind == "aot" {
+                status = "pass"
+                artifact = hash_closure(if jet -> jet_side.closure.entries.copy() else -> peer_side.closure.entries.copy())
+                output = if jet -> jet_side.first_output_hash.copy() else -> peer_side.first_output_hash.copy()
+                command = "{if jet -> "jet" else -> "peer"} build;run;{authority}"
+            }
+            shown :: if status == "pass" -> "artifact={artifact};output={output};command={command}" else -> command.copy()
+            &rows.tier_reports.push("1\t{task_id}\t{language}\t{tier_platform}\t{target}\t{kind}\t{status}\t{shown}\t-")
+            &rows.tier_receipts.push("1\t{task_id}\t{language}\t{tier_platform}\t{target}\t{kind}\t{artifact}\t{output}\t{command}\t{status}")
+        }
+    }
+}
+
+// Paired, interleaved samples of Jet and the selected peer for one task.
+fn measure_task(state: Producer, rows: &Rows, task: [String: String], adapter: [String: String], peer: [String: String], jet_tool: ToolInfo, tiers: [[String: String]]) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+    task_id :: at(task, "task_id")
+    work :: "{state.work}/{task_id}"
+    files.create_dir_all(work) ?? return Err(problem("`{work}` cannot be created: {err}"))
+    input :: "{state.corpus}/{at(task, "input")}"
+    expected :: "{state.corpus}/{at(task, "expected")}"
+    language :: at(peer, "language")
+    command :: at(state.toolchain_command, language)
+    executable := command.copy()
+    if language == "rust" -> executable = env_or("RUSTC", command)
+    if language == "domain" -> executable = node_path(state) ?? return Err(err)
+    peer_tool :: toolchain_identity(state.toolchain_prefix, language, executable, version_args(language)) ?? return Err(err)
+    remember_tool(&rows, peer_tool.copy())
+    rows.toolchain_by_key["{task_id}\tjet"] = jet_tool.version.copy()
+    rows.toolchain_by_key["{task_id}\t{language}"] = peer_tool.version.copy()
+    paths :: TaskPaths{
+        work: work.copy(), input: input.copy(), input_hash: hash_input_path(input) ?? return Err(err), expected: expected.copy(),
+        hostile_expected: "{state.corpus}/expected/{task_id}.hostile.out",
+    }
+    expected_hash :: file_sha256(expected)
+    jet_side := new_side(state, "jet", "jet", at(adapter, "jet_source"), at(adapter, "jet_hostile"), true) ?? return Err(err)
+    peer_side := new_side(state, "peer", language, at(adapter, "peer_source"), at(adapter, "peer_hostile"), false) ?? return Err(err)
+    order := [String]{}
+    loop sample in 1..<(state.sample_count + 1) {
+        &order.push("jet:{sample}")
+        measure_sample(state, task, peer, &jet_side, sample, paths) ?? return Err(err)
+        &order.push("peer:{sample}")
+        measure_sample(state, task, peer, &peer_side, sample, paths) ?? return Err(err)
+    }
+    method :: "paired-interleave-v1:order={order.join(",")}"
+    side_samples(state, &rows, task_id, jet_side, method) ?? return Err(err)
+    &rows.receipts.push(side_receipt(state, task, peer, jet_side, paths, expected_hash, jet_tool.version) ?? return Err(err))
+    side_samples(state, &rows, task_id, peer_side, method) ?? return Err(err)
+    &rows.receipts.push(side_receipt(state, task, peer, peer_side, paths, expected_hash, peer_tool.version) ?? return Err(err))
+    launcher :: state.launcher
+    &rows.outcomes.push([String]{
+        "1", task_id.copy(), language.copy(), at(peer, "program"), at(task, "input"), at(task, "expected"), at(task, "declared_outcome"),
+        "platform={state.platform};candidate={state.candidate};authority={at(task, "authority")};peer-launcher={launcher.path};peer-launcher-sha256={launcher.sha256}",
+        jet_tool.version.copy(), peer_tool.version.copy(), at(peer, "dependency_rule"), at(peer, "source_boundary"), "pass", "pass", "-", "pending", "-",
+    })
+    evidence :: tier_evidence(state, task, peer, adapter, paths) ?? return Err(err)
+    tier_rows_for(state, &rows, task, peer, tiers, evidence, jet_side, peer_side)
+    Ok(())
+}
+
+// --- all-peer coverage
+
+fn coverage_numbers(values: [Int]) -> String Never! {
+    sorted := [Float]{}
+    loop value in values -> &sorted.push(Float{value})
+    sort_floats(&sorted)
+    count :: sorted.len()
+    total := Float{0.0}
+    loop value in sorted -> total = total + value
+    mean :: total / Float{count}
+    spread := Float{0.0}
+    loop value in sorted -> spread = spread + (value - mean) * (value - mean)
+    relative :: if mean == (Float{0.0}) -> Float{0.0} else -> math.sqrt(spread / Float{count}) / mean
+    "{js_float(median_of(sorted))}\t{js_float(sorted[0])}\t{js_float(sorted[count - 1])}\t{js_float(relative)}"
+}
+
+fn coverage_key_path(key: String) -> String Never! {
+    unsafe_run :: regex.compile("[^A-Za-z0-9._-]+") ?? panic("coverage key pattern: {err}")
+    unsafe_run.replace(key, "_")
+}
+
+// Every peer candidate, selected or not, measured natively on its own.
+fn run_peer_coverage(state: Producer, rows: &Rows, peer: [String: String], task: [String: String], adapter: [String: String], metrics: [[String: String]]) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+    key :: peer_key(peer)
+    task_id :: at(task, "task_id")
+    language :: at(peer, "language")
+    adapter_path :: "{state.corpus}/{at(adapter, "peer_source")}"
+    hostile_path :: "{state.corpus}/{at(adapter, "peer_hostile")}"
+    input :: "{state.corpus}/{at(task, "input")}"
+    expected :: "{state.corpus}/{at(task, "expected")}"
+    hostile_expected :: "{state.corpus}/expected/{task_id}.hostile.out"
+    source_hash :: hash_input_path(adapter_path) ?? return Err(err)
+    hostile_input_hash :: hash_input_path(hostile_path) ?? return Err(err)
+    input_hash :: hash_input_path(input) ?? return Err(err)
+    expected_hash :: file_sha256(expected)
+    head :: "1\t{key}\t{task_id}\t{at(peer, "selection")}\t{language}\t{at(peer, "program")}\t{at(adapter, "peer_source")}\t{at(peer, "source_revision")}\t{source_hash}\t{input_hash}\t{expected_hash}"
+    if !peer_supports_platform(at(peer, "applicable_targets"), state.platform) {
+        &rows.peer_coverage.push("{head}\t-\t{hostile_input_hash}\t-\tnot-applicable\t{state.platform}\t-\tnative\tnot-run:host-platform\tpeer-targets={at(peer, "applicable_targets")};reason=host-platform")
+        return Ok(())
+    }
+    command :: at(state.toolchain_command, language)
+    if command == "" -> return Err(problem("peer coverage toolchain missing: {language}"))
+    executable := command.copy()
+    if language == "domain" -> executable = node_path(state) ?? return Err(err)
+    tool :: toolchain_identity(state.toolchain_prefix, language, executable, version_args(language)) ?? return Err(err)
+    remember_tool(&rows, tool.copy())
+    lines :: source_effort(adapter_path) ?? return Err(err)
+    sites :: unsafe_inventory(adapter_path, language) ?? return Err(err)
+    build_values := [Int]{}
+    edit_values := [Int]{}
+    runtime_values := [Int]{}
+    memory_values := [Int]{}
+    diagnostic_values := [Int]{}
+    debugging_values := [Int]{}
+    deployment_values := [Int]{}
+    artifact_sizes := [Int]{}
+    first_output := ""
+    hostile_output := ""
+    first_build := ""
+    first_run := ""
+    first_hostile := ""
+    first_diagnostic := ""
+    path_key :: coverage_key_path(key)
+    loop sample in 1..<(state.sample_count + 1) {
+        run_root :: "{state.work}/coverage-{path_key}-{sample}"
+        normal_input :: "{run_root}/input"
+        hostile_input :: "{run_root}/hostile"
+        stage_path(input, normal_input) ?? return Err(err)
+        stage_path(hostile_path, hostile_input) ?? return Err(err)
+        build :: peer_build(state, task, peer, language, at(adapter, "peer_source"), "{run_root}/build", "") ?? return Err(err)
+        &artifact_sizes.push(closure_size(build.closure.entries))
+        &build_values.push(build.result.duration)
+        edit_project :: "{run_root}/edit"
+        warm :: peer_build(state, task, peer, language, at(adapter, "peer_source"), edit_project, "") ?? return Err(err)
+        files.append_all(warm.source.entry, "\n// measured source edit\n") ?? return Err(problem("`{warm.source.entry}` cannot be written: {err}"))
+        edit :: peer_measured(state, task, warm.command, warm.args, edit_project, [EnvVar]{}) ?? return Err(err)
+        if edit.status != 0 -> return Err(problem("peer coverage source-edit rebuild failed: {key}: {clean_text(edit.stderr)}"))
+        &edit_values.push(edit.duration)
+        result :: peer_run(state, task, peer, language, build.artifact, normal_input, run_root) ?? return Err(err)
+        checked(result, expected, "{task_id}/{key}/native") ?? return Err(err)
+        if (hash_input_path(input) ?? "") != input_hash -> return Err(problem("normal input fixture changed during peer coverage: {key}"))
+        &runtime_values.push(result.duration)
+        &memory_values.push(result.rss)
+        hostile :: peer_run(state, task, peer, language, build.artifact, hostile_input, run_root) ?? return Err(err)
+        checked(hostile, hostile_expected, "{task_id}/{key}/hostile") ?? return Err(err)
+        diagnostic :: diagnostic_probe(state, task, language, adapter_path, "{run_root}/diagnostic", false) ?? return Err(err)
+        &diagnostic_values.push(diagnostic.burden)
+        &debugging_values.push(diagnostic.result.duration)
+        &deployment_values.push(deploy_closure(state, task, language, build.closure, input, expected, "{run_root}/deploy") ?? return Err(err))
+        if sample == 1 {
+            first_output = text_sha256(result.stdout)
+            hostile_output = text_sha256(hostile.stdout)
+            first_build = build.result.command.copy()
+            first_run = result.command.copy()
+            first_hostile = hostile.command.copy()
+            first_diagnostic = diagnostic.method.copy()
+        }
+    }
+    command_line :: "build={first_build};run={first_run};hostile={first_hostile};source-hash-method={hash_input_method(adapter_path)};input-hash-method={hash_input_method(input)};hostile-input-hash-method={hash_input_method(hostile_path)}"
+    evidence :: "toolchain={tool.version};source-sha256={source_hash};input-sha256={input_hash};expected-sha256={expected_hash};output-sha256={first_output};hostile-input-sha256={hostile_input_hash};hostile-output-sha256={hostile_output};diagnostic={first_diagnostic}"
+    &rows.peer_coverage.push("{head}\t{first_output}\t{hostile_input_hash}\t{hostile_output}\tmeasured\t{state.platform}\t-\tnative\t{command_line}\t{evidence}")
+    count :: state.sample_count
+    loop metric in metrics {
+        name :: at(metric, "metric")
+        values :: if name == "source_effort" -> repeated(lines, count) else if name == "build_time" -> build_values.copy() else if name == "edit_time" -> edit_values.copy() else if name == "runtime" -> runtime_values.copy() else if name == "memory" -> memory_values.copy() else if name == "artifact_size" -> artifact_sizes.copy() else if name == "diagnostics" -> diagnostic_values.copy() else if name == "debugging" -> debugging_values.copy() else if name == "deployment" -> deployment_values.copy() else if name == "unsafe_burden" -> repeated(sites.count, count) else -> [Int]{}
+        if values.len() != count -> return Err(problem("peer coverage metric missing: {key}/{name}"))
+        &rows.peer_measurements.push("1\t{key}\t{task_id}\t{at(peer, "selection")}\t{language}\t{name}\t{count}\t{coverage_numbers(values)}\t{at(metric, "unit")}\tmeasured\t{command_line};evidence={evidence}\t{state.platform}\t-\tnative")
+    }
+    Ok(())
+}
+
+fn peer_supports_platform(targets: String, platform: String) -> Bool Never! {
+    loop value in targets.split(",").to_list() {
+        if value.trim() == platform -> return true
+    }
+    false
+}
+
+// --- statistics
+
+struct Stat {
+    task: String
+    language: String
+    metric: String
+    unit: String
+    platform: String
+    target: String
+    tier: String
+    samples: Int
+    median: Float
+    min: Float
+    max: Float
+    relative: Float
+    outliers: Int
+    threshold: Float
+    tolerance: Float
+    peer_language: String
+}
+
+// One statistic per task, language and metric, in first-sample order; a
+// group outside its measurement policy fails the run.
+fn sample_statistics(samples: [[String]], policies: [String: [String: String]], selected: [String: [String: String]]) -> [Stat] Problem! {
+    keys := [String]{}
+    loop row in samples {
+        key :: "{row[1]}\t{row[2]}\t{row[3]}"
+        if !keys.contains(key) -> &keys.push(key)
+    }
+    stats := [Stat]{}
+    loop key in keys {
+        values := [Float]{}
+        first := [String]{}
+        loop row in samples {
+            if "{row[1]}\t{row[2]}\t{row[3]}" != key -> next
+            if first.len() == 0 -> first = row.copy()
+            &values.push(num(row[5]))
+        }
+        label :: "{first[1]}/{first[2]}/{first[3]}"
+        policy :: policies.get(first[3]) ?? return Err(problem("measurement policy missing: {first[3]}"))
+        threshold :: num(at(policy, "min_value"))
+        count :: values.len()
+        below := false
+        loop value in values {
+            if value < threshold -> below = true
+        }
+        if (Float{count}) != num(at(policy, "samples")) || (Float{count}) < num(at(policy, "min_samples")) || below -> return Err(problem("sample threshold failed: {label}"))
+        sorted := values.copy()
+        sort_floats(&sorted)
+        med :: median_of(sorted)
+        total := Float{0.0}
+        loop value in values -> total = total + value
+        mean :: total / Float{count}
+        spread := Float{0.0}
+        loop value in values -> spread = spread + (value - mean) * (value - mean)
+        relative :: if mean == (Float{0.0}) -> Float{0.0} else -> math.sqrt(spread / Float{count}) / absf(mean)
+        deviations := [Float]{}
+        loop value in values -> &deviations.push(absf(value - med))
+        sort_floats(&deviations)
+        mad :: median_of(deviations)
+        limit :: if mad == (Float{0.0}) -> Float{0.0} else -> mad * num(at(policy, "outlier_mad_multiplier"))
+        outliers := 0
+        loop value in values {
+            outside :: if mad == (Float{0.0}) -> value != med else -> absf(value - med) > limit
+            if outside -> outliers += 1
+        }
+        if relative > num(at(policy, "max_relative_stdev")) || (Float{outliers}) > num(at(policy, "max_outliers")) -> return Err(problem("variance/outlier policy failed: {label}"))
+        peer :: selected.get(first[1]) ?? return Err(problem("measurement policy or peer missing: {first[1]}/{first[3]}"))
+        &stats.push(Stat{
+            task: first[1].copy(), language: first[2].copy(), metric: first[3].copy(), unit: first[6].copy(), platform: first[8].copy(),
+            target: first[9].copy(), tier: first[10].copy(), samples: count, median: med, min: sorted[0], max: sorted[count - 1],
+            relative: relative, outliers: outliers, threshold: threshold, tolerance: num(at(policy, "tolerance_ratio")), peer_language: at(peer, "language"),
+        })
+    }
+    stats
+}
+
+// Each statistic's loss owner: the task's loss cards when Jet's median is at
+// or above the peer's times the tolerance, else "-".
+fn stat_losses(stats: [Stat], selected: [String: [String: String]], tasks: [String: [String: String]]) -> [String] Problem! {
+    owners := [String]{}
+    loop stat in stats {
+        if stat.language != "jet" {
+            &owners.push("-")
+            next
+        }
+        peer :: selected.get(stat.task) ?? return Err(problem("peer statistic missing: {stat.task}/{stat.metric}"))
+        peer_language :: at(peer, "language")
+        peer_median := Float{0.0}
+        found := false
+        loop other in stats {
+            if other.task == stat.task && other.language == peer_language && other.metric == stat.metric {
+                peer_median = other.median
+                found = true
+            }
+        }
+        if !found -> return Err(problem("peer statistic missing: {stat.task}/{stat.metric}"))
+        loss :: if peer_median == (Float{0.0}) -> stat.median > (Float{0.0}) else -> stat.median >= peer_median * stat.tolerance
+        task :: tasks.get(stat.task) ?? return Err(problem("peer statistic missing: {stat.task}/{stat.metric}"))
+        &owners.push(if loss -> at(task, "loss_cards") else -> "-")
+    }
+    owners
+}
+
 // --- tests -------------------------------------------------------------------
 
 #Test("bash rows collapse tab runs and skip an unterminated last line") {
@@ -2523,4 +4683,33 @@ fn target_applies(targets: String, platform: String, target: String, alias: Stri
     assert_eq(is_nonzero_sha256("ab".repeat(32)), true)
     assert_eq(is_nonzero_sha256("0".repeat(64)), false)
     assert_eq(is_sha256("ab".repeat(31)), false)
+}
+
+#Test("producer text helpers match the JavaScript runner") {
+    assert_eq(clean_text(" a\tb\r\nc  "), "a b c")
+    assert_eq(command_text([String]{"jet", "a b"}), "\"jet\" \"a b\"")
+    assert_eq(file_url("/x/a b%.mjs"), "file:///x/a%20b%25.mjs")
+    assert_eq(all_digits("0123"), true)
+    assert_eq(all_digits(""), false)
+    assert_eq(words(" a\tb  c "), [String]{"a", "b", "c"})
+    assert_eq(distinct_count([String]{"a", "b", "a"}), 2)
+    assert_eq(task_environment("linux", [String: String]{"authority": "argv=input-root;network=loopback-only"}), "os=linux;ci=compiled-workload;locale=C;network=loopback-only")
+}
+
+#Test("scrubbed code keeps line structure and drops comments and strings") {
+    blank :: " ".repeat(12)
+    assert_eq(scrub_code("a // b\n\"c\" /* d */ e"), "a     \n{blank}e")
+}
+
+#Test("a ledger build/ output flag is compared by its key alone") {
+    assert_eq(frozen_flag_kept("-O", [String]{"-O"}), true)
+    assert_eq(frozen_flag_kept("-femit-bin=build/peer", [String]{"-femit-bin=/w/build/peer-1"}), true)
+    assert_eq(frozen_flag_kept("-femit-bin=out/peer", [String]{"-femit-bin=/w/out/peer"}), false)
+    assert_eq(frozen_flag_kept("-O", [String]{}), false)
+}
+
+#Test("tree RSS sums the root and its descendants only") {
+    processes :: [ProcessRss]{ProcessRss{pid: 10, ppid: 1, rss: 5}, ProcessRss{pid: 11, ppid: 10, rss: 7}, ProcessRss{pid: 12, ppid: 11, rss: 1}, ProcessRss{pid: 13, ppid: 1, rss: 100}}
+    assert_eq(rss_of_tree(10, processes), 13)
+    assert_eq(rss_of_tree(99, processes), 0)
 }

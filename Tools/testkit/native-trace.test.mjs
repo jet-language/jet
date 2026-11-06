@@ -23,7 +23,6 @@ function fixture(t) {
     const put = (path, contents = '') => { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, contents); return path; };
     mkdirSync(cacheRoot, { recursive: true });
     const wrapper = put(join(root, 'Tools/testkit/native-command.mjs'));
-    const peer = put(join(root, 'Tools/ci/compiled-workload-runner.mjs'));
     const perf = put(join(root, 'Tools/perf/nested/workload.mjs'));
     const jet = put(join(home, 'tools/jet'));
     const tools = Object.fromEntries(['cargo', 'rustc', 'rustup', 'ld.lld', 'clang', 'clang++', 'opt', 'llc', 'bwrap'].map(name => [name, put(join(home, 'tools', name))]));
@@ -44,7 +43,7 @@ function fixture(t) {
     const rustc = (pid = 30) => exec(pid, tools.rustc, [tools.rustc, '--crate-name', 'jet_ffi_bridge', 'src/lib.rs']);
     const branch = () => [chdir(10, root), mark(), jetExec(), fork(10, 20), cargo(), fork(20, 30), rustc()];
     const audit = (lines, overrides = {}) => auditNativeTrace({ text: Array.isArray(lines) ? lines.join('\n') : lines, root, jet, allowlistText, tracePath: join(home, 'outer.strace'), ...overrides });
-    return { home, root, cacheRoot, wrapper, peer, perf, jet, tools, name, zero, cache, manifest, contents, put, mark, jetExec, cargo, rustc, branch, audit, allowlistText };
+    return { home, root, cacheRoot, wrapper, perf, jet, tools, name, zero, cache, manifest, contents, put, mark, jetExec, cargo, rustc, branch, audit, allowlistText };
 }
 
 function pass(receipt) { assert.equal(receipt.status, 'PASS', JSON.stringify(receipt.violations, null, 2)); assert.deepEqual(receipt.violations, []); }
@@ -370,16 +369,14 @@ test('ld.lld only below admitted FFI Rustc; other LLVM tools and rustup always d
 
 test('only direct source-root performance Rustc peers are excluded, not their Jet Rust or Cargo', t => {
     const f = fixture(t);
-    for (const launcher of [f.peer, f.perf]) {
-        const start = exec(10, process.execPath, [process.execPath, launcher]);
-        const receipt = f.audit([start, fork(10, 30), f.rustc()]); pass(receipt); assert.equal(receipt.excludedPerformancePeers.length, 1);
-        fail(f.audit([start, fork(10, 20), f.jetExec(20), fork(20, 30), f.rustc()]));
-        fail(f.audit([start, fork(10, 20), f.cargo()]));
-        fail(f.audit([start, fork(10, 20), exec(20, '/bin/sh', ['sh', '-c', 'rustc']), fork(20, 30), f.rustc()]));
-    }
+    const start = exec(10, process.execPath, [process.execPath, f.perf]);
+    const receipt = f.audit([start, fork(10, 30), f.rustc()]); pass(receipt); assert.equal(receipt.excludedPerformancePeers.length, 1);
+    fail(f.audit([start, fork(10, 20), f.jetExec(20), fork(20, 30), f.rustc()]));
+    fail(f.audit([start, fork(10, 20), f.cargo()]));
+    fail(f.audit([start, fork(10, 20), exec(20, '/bin/sh', ['sh', '-c', 'rustc']), fork(20, 30), f.rustc()]));
     const fake = f.put(join(f.home, 'Tools/perf/peer.mjs'));
     fail(f.audit([exec(10, process.execPath, [process.execPath, fake]), fork(10, 30), f.rustc()]));
-    fail(f.audit([exec(10, process.execPath, [process.execPath, '-e', quote(f.peer)]), fork(10, 30), f.rustc()]));
+    fail(f.audit([exec(10, process.execPath, [process.execPath, '-e', quote(f.perf)]), fork(10, 30), f.rustc()]));
 });
 
 test('unfinished/resumed fork and child-before-parent completed fork preserve ancestry', t => {

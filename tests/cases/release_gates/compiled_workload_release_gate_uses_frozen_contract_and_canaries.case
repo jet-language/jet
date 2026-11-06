@@ -1,7 +1,5 @@
 # Port of tests/release_gates.rs::compiled_workload_release_gate_uses_frozen_contract_and_canaries; all original predicates.
-requires: tool:node
 copy: {root}/Tools/ci/CompiledWorkloads.jet gate.jet
-copy: {root}/Tools/ci/compiled-workload-runner.mjs runner.mjs
 copy: {root}/tests/compiled_workloads/canaries.tsv canaries.tsv
 file: gate.jet ~ "--contract" # Original gate.contains.
 file: gate.jet ~ "--check" # Original gate.contains.
@@ -19,19 +17,19 @@ file: gate.jet ~ "review_run" # Original gate.contains.
 file: gate.jet ~ "review_actor" # Original gate.contains.
 file: gate.jet ~ "peer ratio law drifted" # Gate enforces one peer ratio law for every peer.
 file: gate.jet ~ "metric_is_loss" # Original gate.contains.
-file: runner.mjs ~ "runMeasured" # Original runner.contains.
-file: runner.mjs ~ "process.hrtime.bigint" # Original runner.contains.
-file: runner.mjs ~ "JET_WEB_CHROMIUM" # Original runner.contains.
-file: runner.mjs ~ "CdpDriver" # Original runner.contains.
-file: runner.mjs ~ "network=loopback-only" # Original runner.contains.
-file: runner.mjs ~ "network=disabled" # Original runner.contains.
-file: runner.mjs ~ "peerMeasured" # Original runner.contains.
-file: runner.mjs ~ "samples" # Original runner.contains.
-file: runner.mjs ~ "targetArtifactProof" # Original runner.contains.
-file: runner.mjs ~ "JET_STORE_DIR" # Original runner.contains.
-file: runner.mjs ~ ".jet" # Original runner.contains.
+file: gate.jet ~ "fn run_measured(" # Original runner.contains runMeasured; the producer is now the gate's `run` subcommand.
+file: gate.jet ~ "time.elapsed(watch)" # Original runner.contains process.hrtime.bigint (the monotonic sample clock).
+file: gate.jet ~ "JET_WEB_CHROMIUM" # Original runner.contains.
+file: gate.jet ~ "CdpDriver" # Original runner.contains.
+file: gate.jet ~ "network=loopback-only" # Original runner.contains.
+file: gate.jet ~ "network=disabled" # Original runner.contains.
+file: gate.jet ~ "fn peer_measured(" # Original runner.contains peerMeasured.
+file: gate.jet ~ "samples" # Original runner.contains.
+file: gate.jet ~ "fn target_artifact_proof(" # Original runner.contains targetArtifactProof.
+file: gate.jet ~ "JET_STORE_DIR" # Original runner.contains.
+file: gate.jet ~ ".jet" # Original runner.contains.
 env: JET={jet}
-step: node {root}/Tools/ci/compiled-workload-runner.mjs --measurement-registry
+step: jet {root}/Tools/ci/CompiledWorkloads.jet run --measurement-registry
 exit: 0
 stdout: ~ "\"linux\"" # Original measurement-registry contains.
 stdout: ~ "\"macos\"" # Original measurement-registry contains.

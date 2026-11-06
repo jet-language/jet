@@ -536,7 +536,7 @@ export function auditNativeTrace({ text, root, jet, allowlistText = '', tracePat
                 } else throw Error(`${exec.kind} is forbidden outside the constrained Rust FFI branch`);
             } catch (error) { state.approvedCargo = null; state.approvedRustc = null; violate(event, state, 'forbidden-execution', error.message, exec); }
         }
-        if (script && existsSync(script.path) && (script.path === resolve(root, 'Tools/ci/compiled-workload-runner.mjs') || inside(resolve(root, 'Tools/perf'), script.path) && script.path.endsWith('.mjs'))) entry.performancePeer = script.path;
+        if (script && existsSync(script.path) && inside(resolve(root, 'Tools/perf'), script.path) && script.path.endsWith('.mjs')) entry.performancePeer = script.path;
         state.history = [...state.history, entry];
     }
     receipt.cases = [...cases.values()].sort((a, b) => a.case.localeCompare(b.case));
