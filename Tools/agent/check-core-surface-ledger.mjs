@@ -36,6 +36,13 @@ const CORE_SOURCE_PATH = "Compiler/Prelude/Core.jet";
 // built-in receiver methods, and the lowering-owned extension calls.
 const CORE_SURFACE_INVENTORY_PATH = "Compiler/Prelude/CoreSurfaceInventory.jet";
 const CORE_CALL_EXTENSIONS_PATH = "Compiler/Prelude/CoreCallExtensions.jet";
+// The Jet tables an inventory `receivers` row reads receiver methods from, and
+// the sema sources a `methods` row's names must be spelled in.
+const BUILTIN_METHODS_PATH = "Compiler/JetFoundation/Source/Registry/BuiltinMethods.jet";
+const BUILTIN_STATICS_PATH = "Compiler/JetFoundation/Source/Registry/BuiltinStatics.jet";
+const COLLECTIONS_PATH = "Compiler/JetFoundation/Source/Collections.jet";
+const CORE_SOURCE_PARTS_PATH = "Compiler/Prelude/CoreSourceParts.tsv";
+const SEMA_SOURCE_DIR = "Compiler/JetSema/Source";
 const CORE_CALL_ROWS_PATH = "Compiler/JetFoundation/Source/Registry/CoreCallRows.jet";
 const CORE_CALL_ROWS_BEGIN = "// BEGIN GENERATED CORE CALL ROWS";
 const CORE_CALL_ROWS_END = "// END GENERATED CORE CALL ROWS";
@@ -2725,19 +2732,26 @@ function checkCoreCallRegistryOnly() {
 
 
 // The Core surface beyond Core.jet's module exports, from its one authored
-// home: `fixed_sig <module> { … }` and `methods <Container> { … }` lines.
+// home: `fixed_sig <module> { … }`, `receivers <Container> { … }` and
+// `methods <Container> { … }` lines. A receivers row names the Jet tables a
+// container's receiver methods come from; the method names are read from those
+// tables, so the inventory follows the compiler. A methods row names only the
+// methods sema checks in code with no table to read; each must be spelled in
+// sema and must not already come from the container's receivers.
 function coreSurfaceInventory(modules) {
   const source = read(CORE_SURFACE_INVENTORY_PATH);
   const knownModules = new Set(modules.map(function (entry) { return entry.module; }));
+  const tables = jetReceiverTables();
   const pairs = new Set();
   const fixedModules = new Set();
-  const collections = new Map();
+  const derived = new Map();
+  const declared = new Map();
   for (const [index, raw] of source.split(/\r?\n/).entries()) {
     const line = raw.trim();
     if (!line || line.startsWith("//")) continue;
     const context = CORE_SURFACE_INVENTORY_PATH + " line " + (index + 1);
-    const row = line.match(/^(fixed_sig|methods)\s+(\S+)\s+\{\s*([^{}]*?)\s*\}$/);
-    if (!row) throw new Error(context + " is not a fixed_sig or methods row");
+    const row = line.match(/^(fixed_sig|receivers|methods)\s+(\S+)\s+\{\s*([^{}]*?)\s*\}$/);
+    if (!row) throw new Error(context + " is not a fixed_sig, receivers or methods row");
     const items = row[3].split(",").map(function (item) { return item.trim(); });
     if (items.some(function (item) { return !item; }) || new Set(items).size !== items.length) {
       throw new Error(context + " has an empty or repeated name");
@@ -2752,21 +2766,156 @@ function coreSurfaceInventory(modules) {
       }
       continue;
     }
-    if (collections.has(row[2])) throw new Error(context + " repeats container " + row[2]);
-    collections.set(row[2], {
-      function: CORE_SURFACE_INVENTORY_PATH,
-      type: row[2],
-      methods: items.slice().sort(),
-      sourceLine: index + 1,
-    });
+    const into = row[1] === "receivers" ? derived : declared;
+    if (into.has(row[2])) throw new Error(context + " repeats " + row[1] + " container " + row[2]);
+    if (row[1] === "receivers") {
+      const methods = new Set();
+      for (const item of items) {
+        for (const method of receiverSourceMethods(tables, item, context)) methods.add(method);
+      }
+      derived.set(row[2], { methods: methods, sourceLine: index + 1 });
+      continue;
+    }
+    for (const method of items) {
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(method)) throw new Error(context + " has an invalid method: " + method);
+      if (!tables.semaNames.has(method)) {
+        throw new Error(context + " declares `" + row[2] + "." + method + "`, but no sema source spells that method; delete the stale name");
+      }
+    }
+    declared.set(row[2], { methods: new Set(items), sourceLine: index + 1 });
+  }
+  const collections = new Map();
+  for (const [type, entry] of derived.entries()) {
+    collections.set(type, { function: CORE_SURFACE_INVENTORY_PATH, type: type, methods: new Set(entry.methods), sourceLine: entry.sourceLine });
+  }
+  for (const [type, entry] of declared.entries()) {
+    const owner = collections.get(type);
+    if (owner) {
+      const repeated = Array.from(entry.methods).filter(function (method) { return owner.methods.has(method); }).sort();
+      if (repeated.length) {
+        throw new Error(CORE_SURFACE_INVENTORY_PATH + " line " + entry.sourceLine + " declares " + type + " methods its receivers row already reads from the Jet tables: " + repeated.join(", "));
+      }
+      for (const method of entry.methods) owner.methods.add(method);
+      continue;
+    }
+    collections.set(type, { function: CORE_SURFACE_INVENTORY_PATH, type: type, methods: new Set(entry.methods), sourceLine: entry.sourceLine });
   }
   if (!pairs.size || !collections.size) throw new Error(CORE_SURFACE_INVENTORY_PATH + " has an empty table");
   return {
     fixedPairs: Array.from(pairs).sort(),
-    collections: Array.from(collections.values()).sort(function (left, right) {
+    collections: Array.from(collections.values()).map(function (entry) {
+      return { function: entry.function, type: entry.type, methods: Array.from(entry.methods).sort(), sourceLine: entry.sourceLine };
+    }).sort(function (left, right) {
       return left.type.localeCompare(right.type);
     }),
   };
+}
+
+// The Jet tables a receivers row reads. Each is the compiler's own row set:
+// sema checks receiver methods against these rows, so reading them here keeps
+// the inventory receiver-aware with no second copy.
+function jetReceiverTables() {
+  const builtin = new Map();
+  const collection = new Map();
+  const statics = new Map();
+  const numeric = new Set();
+  const record = function (table, key, name) {
+    if (!table.has(key)) table.set(key, new Set());
+    table.get(key).add(name);
+  };
+  for (const line of read(BUILTIN_METHODS_PATH).split(/\r?\n/)) {
+    const row = line.match(/receiver: BuiltinMethodReceiver\.([A-Za-z]+), name: "([^"]+)"/);
+    if (row) record(builtin, row[1], row[2]);
+  }
+  // `collection_receivers_accept`: a Sequence row serves List and Iter; a
+  // Proposed row is not checked by sema.
+  for (const line of read(COLLECTIONS_PATH).split(/\r?\n/)) {
+    const row = line.match(/receivers: CollectionReceivers\.([A-Za-z]+), name: "([^"]+)".*status: CollectionStatus\.([A-Za-z]+)/);
+    if (!row || row[3] === "Proposed") continue;
+    if (row[1] === "Sequence") {
+      record(collection, "List", row[2]);
+      record(collection, "Iter", row[2]);
+    } else {
+      record(collection, row[1], row[2]);
+    }
+  }
+  for (const line of read(BUILTIN_STATICS_PATH).split(/\r?\n/)) {
+    const row = line.match(/\{module_name: "([^"]*)", owner: "([^"]+)", method: "([^"]+)"/);
+    if (row) record(statics, (row[1] ? row[1] + "." : "") + row[2], row[3]);
+    const conversion = line.match(/\{method: "([^"]+)", source: "[^"]+"\}/);
+    if (conversion) numeric.add(conversion[1]);
+  }
+  const modulePaths = new Map();
+  for (const line of read(CORE_SOURCE_PATH).split(/\r?\n/)) {
+    const row = line.match(/^source_module\s+(\S+)\s+path\s+(\S+)\s/);
+    if (row) record(modulePaths, row[1], row[2]);
+  }
+  for (const line of read(CORE_SOURCE_PARTS_PATH).split(/\r?\n/)) {
+    if (line.startsWith("#")) continue;
+    const cells = line.split("\t");
+    if (cells.length > 2) record(modulePaths, cells[1], cells[2]);
+  }
+  const semaNames = new Set();
+  const walk = function (dir) {
+    for (const name of readdirSync(join(ROOT, dir)).sort()) {
+      const path = dir + "/" + name;
+      if (statSync(join(ROOT, path)).isDirectory()) walk(path);
+      else if (name.endsWith(".jet")) {
+        for (const literal of read(path).matchAll(/"([A-Za-z_][A-Za-z0-9_]*)"/g)) semaNames.add(literal[1]);
+      }
+    }
+  };
+  walk(SEMA_SOURCE_DIR);
+  return { builtin: builtin, collection: collection, statics: statics, numeric: numeric, modulePaths: modulePaths, semaNames: semaNames };
+}
+
+// One receivers source: `builtin:<BuiltinMethodReceiver>`,
+// `collection:<CollectionReceivers>`, `static:[<module>.]<owner>`,
+// `numeric:conversions` (BUILTIN_NUMERIC_SOURCES), or
+// `type:<core module>.<Type>` (the type's methods declared in its Core source).
+function receiverSourceMethods(tables, item, context) {
+  const source = item.match(/^(builtin|collection|static|numeric|type):([A-Za-z_][A-Za-z0-9_.]*)$/);
+  if (!source) throw new Error(context + " has an invalid receivers source: " + item);
+  const kind = source[1];
+  const key = source[2];
+  let methods = undefined;
+  if (kind === "builtin") methods = tables.builtin.get(key);
+  if (kind === "collection") methods = tables.collection.get(key);
+  if (kind === "static") methods = tables.statics.get(key);
+  if (kind === "numeric" && key === "conversions") methods = tables.numeric;
+  if (kind === "type") {
+    const dot = key.lastIndexOf(".");
+    const paths = dot < 0 ? undefined : tables.modulePaths.get(key.slice(0, dot));
+    if (!paths) throw new Error(context + " names a type outside any Core source module: " + item);
+    methods = coreTypeMethods(Array.from(paths), key.slice(dot + 1));
+  }
+  if (!methods || !methods.size) throw new Error(context + " names a receivers source with no methods: " + item);
+  return methods;
+}
+
+// The public methods a Core source declares on a type: `fn` members of its
+// struct body and of its `impl` blocks, trait implementations included.
+function coreTypeMethods(paths, type) {
+  const methods = new Set();
+  for (const path of paths) {
+    let owner = false;
+    let depth = 0;
+    for (const line of read(path).split(/\r?\n/)) {
+      if (depth === 0) {
+        const header = line.match(/^(?:impl|struct)\s+([A-Za-z_][A-Za-z0-9_]*)(?:<[^>]*>)?(?:\.[A-Za-z_.]+)?\s*\{/);
+        owner = header !== null && header[1] === type;
+      } else if (depth === 1 && owner) {
+        const fn = line.match(/^\s+fn\s+([A-Za-z_][A-Za-z0-9_]*)/);
+        if (fn && !fn[1].startsWith("__")) methods.add(fn[1]);
+      }
+      for (const char of line.replace(/"(?:[^"\\]|\\.)*"/g, "").replace(/\/\/.*$/, "")) {
+        if (char === "{") depth += 1;
+        else if (char === "}") depth -= 1;
+      }
+      if (depth < 0) depth = 0;
+    }
+  }
+  return methods;
 }
 
 // ---------------------------------------------------------------------------
@@ -3397,6 +3546,10 @@ function sourceFiles() {
   return [
     CORE_SOURCE_PATH,
     CORE_SURFACE_INVENTORY_PATH,
+    BUILTIN_METHODS_PATH,
+    BUILTIN_STATICS_PATH,
+    COLLECTIONS_PATH,
+    CORE_SOURCE_PARTS_PATH,
     CORE_CALL_EXTENSIONS_PATH,
     ...readdirSync(join(ROOT, SYNTAX_DIR))
       .filter(function (name) { return name.endsWith(".jet"); })
