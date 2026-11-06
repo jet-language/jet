@@ -1,0 +1,14 @@
+# A trait default body called on a concrete receiver runs the default with
+# that receiver's own impl (#5971 c7): the call is a direct method call;
+# only a trait value dispatches dynamically (ir_trait_receiver).
+fixture: trait_default_body_on_concrete_receiver_runs_the_default.fixture
+step: jet run run.jet
+exit: 0
+stdout: = trait_default_body_on_concrete_receiver_runs_the_default.out
+stderr: empty
+step: jet build --release run.jet
+exit: 0
+step: built
+exit: 0
+stdout: = trait_default_body_on_concrete_receiver_runs_the_default.out
+stderr: empty
