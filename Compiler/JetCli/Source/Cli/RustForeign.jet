@@ -61,19 +61,29 @@ jet_cli_rust_foreign_text: fn(directory: cli_files.Directory, name: String) -[FS
     bytes: jet_cli_rust_foreign_read(directory, name)
     String.from_bytes(bytes) ?? return Err(jet_cli_rust_foreign_io("FFI input `{directory.path}/{name}` is not UTF-8"))
 }
-jet_cli_rust_foreign_write: fn(directory: cli_files.Directory, name: String, bytes: [U8], mode: Int{384}) JetDriverRustForeignError! -[FS]> {
+// A `durable` file's bytes are flushed before it is used. Private workspace
+// files are deleted with the workspace, so they are never flushed: an fsync
+// waits for every dirty page on the filesystem.
+jet_cli_rust_foreign_write: fn(directory: cli_files.Directory, name: String, bytes: [U8], durable: Bool, mode: Int{384}) JetDriverRustForeignError! -[FS]> {
     writer: directory.create(name, .Replace, Val(384)) ?? return Err(jet_cli_rust_foreign_io("couldn't stage FFI input `{name}`: {err}"))
     writer.write_all(bytes) ?? return Err(jet_cli_rust_foreign_io("couldn't write FFI input `{name}`: {err}"))
     writer.set_mode(mode) ?? return Err(jet_cli_rust_foreign_io("couldn't preserve FFI output permissions: {err}"))
-    writer.fsync() ?? return Err(jet_cli_rust_foreign_io("couldn't flush FFI input `{name}`: {err}"))
+    if durable -> writer.fsync() ?? return Err(jet_cli_rust_foreign_io("couldn't flush FFI input `{name}`: {err}"))
     Ok(())
 }
+// Publish one shared file: its bytes are flushed before the rename makes it
+// visible. The caller flushes `directory` once after all its files
+// (jet_cli_rust_foreign_flush), so a tree costs one directory fsync, not one
+// per file.
 jet_cli_rust_foreign_publish: fn(directory: cli_files.Directory, name: String, bytes: [U8], mode: Int{384}) JetDriverRustForeignError! -[FS, Env]> {
     staged: ".{name}.tmp.{cli_sys.pid()}"
     // A prior crashed writer cannot make us follow its temporary symlink.
     directory.remove(staged).drop("an absent previous temporary is expected")
-    jet_cli_rust_foreign_write(directory, staged, bytes, mode)
+    jet_cli_rust_foreign_write(directory, staged, bytes, true, mode)
     directory.rename(staged, name) ?? return Err(jet_cli_rust_foreign_io("couldn't publish FFI artifact `{name}`: {err}"))
+    Ok(())
+}
+jet_cli_rust_foreign_flush: fn(directory: cli_files.Directory) JetDriverRustForeignError! -[FS]> {
     directory.fsync() ?? return Err(jet_cli_rust_foreign_io("couldn't flush FFI artifact directory: {err}"))
     Ok(())
 }
@@ -381,7 +391,9 @@ jet_cli_rust_foreign_validate_output: fn(directory: cli_files.Directory) JetDriv
 // Each key's digest/provenance sidecars are not Cargo output: only that key's
 // builder publishes them (jet_cli_rust_foreign_publish_sidecars), so a copy
 // of the shared tree never carries another key's sidecars back over newer ones.
-jet_cli_rust_foreign_copy_tree: fn(source: cli_files.Directory, destination: cli_files.Directory) JetDriverRustForeignError! -[FS, Env]> {
+// A `durable` copy publishes into the shared tree and flushes each directory
+// once after its entries; a copy into the private workspace flushes nothing.
+jet_cli_rust_foreign_copy_tree: fn(source: cli_files.Directory, destination: cli_files.Directory, durable: Bool) JetDriverRustForeignError! -[FS, Env]> {
     entries: source.list() ?? return Err(jet_cli_rust_foreign_io("couldn't list private Cargo output: {err}"))
     loop entry in entries {
         if entry.name == ".jet-publication-lock" || entry.name == "metadata-source" || entry.name == "cargo-home" || entry.name == "home" -> next
@@ -395,12 +407,13 @@ jet_cli_rust_foreign_copy_tree: fn(source: cli_files.Directory, destination: cli
             }
             child_source: source.open_directory(entry.name) ?? return Err(jet_cli_rust_foreign_io("couldn't open Cargo output directory: {err}"))
             child_destination: destination.open_directory(entry.name) ?? return Err(jet_cli_rust_foreign_sandbox_error("Cargo destination directory is not a real directory: {err}"))
-            jet_cli_rust_foreign_copy_tree(child_source, child_destination)
+            jet_cli_rust_foreign_copy_tree(child_source, child_destination, durable)
         } else {
             bytes: jet_cli_rust_foreign_read(source, entry.name)
-            jet_cli_rust_foreign_publish(destination, entry.name, bytes, info.mode)
+            if durable -> jet_cli_rust_foreign_publish(destination, entry.name, bytes, info.mode) else -> jet_cli_rust_foreign_write(destination, entry.name, bytes, false, info.mode)
         }
     }
+    if durable -> jet_cli_rust_foreign_flush(destination)
     Ok(())
 }
 
@@ -522,8 +535,8 @@ jet_cli_rust_foreign_build: fn(plan: JetDriverRustForeignPlan, cache: String, so
     private_source: root.create_directory("source", Val(448)) ?? return Err(jet_cli_rust_foreign_io("couldn't create private FFI sources: {err}"))
     private_src: private_source.create_directory("src", Val(448)) ?? return Err(jet_cli_rust_foreign_io("couldn't create private FFI src folder: {err}"))
     private_output: root.create_directory("output", Val(448)) ?? return Err(jet_cli_rust_foreign_io("couldn't create private FFI output: {err}"))
-    jet_cli_rust_foreign_write(private_source, "Cargo.toml", plan.manifest.bytes())
-    jet_cli_rust_foreign_write(private_src, "lib.rs", plan.source.bytes())
+    jet_cli_rust_foreign_write(private_source, "Cargo.toml", plan.manifest.bytes(), false)
+    jet_cli_rust_foreign_write(private_src, "lib.rs", plan.source.bytes(), false)
     shared: cli_files.open_directory(target_dir) ?? return Err(jet_cli_rust_foreign_io("couldn't hold shared Cargo output: {err}"))
     jet_cli_rust_foreign_snapshot(shared, private_output, target_dir)
     // Invalid uplift artifacts cannot be blessed by Cargo without recompiling.
@@ -540,12 +553,12 @@ jet_cli_rust_foreign_build: fn(plan: JetDriverRustForeignPlan, cache: String, so
     // Metadata writes Cargo.lock, not code: use the private output's source
     // projection as the writable package, never make host inputs writable.
     metadata_source: private_output.create_directory("metadata-source", Val(448)) ?? return Err(jet_cli_rust_foreign_io("couldn't create private metadata source: {err}"))
-    jet_cli_rust_foreign_copy_tree(private_source, metadata_source)
+    jet_cli_rust_foreign_copy_tree(private_source, metadata_source, false)
     metadata: jet_cli_rust_foreign_run(bwrap, cargo, private_source.path, private_output.path, registry, [String]{"metadata", "--format-version", "1", "--manifest-path", "/work/output/metadata-source/Cargo.toml"})
     if !metadata.success -> return Err(jet_cli_rust_foreign_cargo_error(plan, metadata.errors, cache, false))
     compile_time: jet_cli_rust_foreign_metadata(metadata.output, plan.crate_name) ?? return Err(jet_cli_rust_foreign_cargo_error(plan, err.what, cache, false))
     lock_bytes: jet_cli_rust_foreign_read(metadata_source, "Cargo.lock") ?? return Err(jet_cli_rust_foreign_cargo_error(plan, err.what, cache, false))
-    jet_cli_rust_foreign_write(private_source, "Cargo.lock", lock_bytes)
+    jet_cli_rust_foreign_write(private_source, "Cargo.lock", lock_bytes, false)
     built: jet_cli_rust_foreign_run(bwrap, cargo, private_source.path, private_output.path, registry, [String]{"build", "--release", "--target", plan.target, "--manifest-path", "/work/source/Cargo.toml"})
     if !built.success -> return Err(jet_cli_rust_foreign_cargo_error(plan, built.errors, cache, true))
     private_release: cli_files.open_directory(private_release_path) ?? return Err(jet_cli_rust_foreign_io("FFI build finished without its complete artifact set"))
@@ -564,6 +577,8 @@ jet_cli_rust_foreign_build: fn(plan: JetDriverRustForeignPlan, cache: String, so
     jet_cli_rust_foreign_publish(inputs, "Cargo.toml", plan.manifest.bytes())
     jet_cli_rust_foreign_publish(inputs, "Cargo.lock", lock_bytes)
     jet_cli_rust_foreign_publish(src, "lib.rs", plan.source.bytes())
+    jet_cli_rust_foreign_flush(src)
+    jet_cli_rust_foreign_flush(inputs)
     provenance: jet_cli_rust_foreign_provenance(plan, source, toolchain, link_closure, digest, compile_time)
     jet_cli_rust_foreign_publish_sidecars(target_dir, release, plan.crate_name, "{JET_CLI_RUST_ARTIFACT_SCHEMA}\n{digest} {archive}\n", provenance)
     if !jet_cli_rust_foreign_verified(plan, source, release, toolchain, link_closure) -> return Err(jet_cli_rust_foreign_io("published FFI artifact failed digest/provenance verification"))
@@ -577,12 +592,12 @@ jet_cli_rust_foreign_build: fn(plan: JetDriverRustForeignPlan, cache: String, so
 // key lock.
 jet_cli_rust_foreign_snapshot: fn(shared: cli_files.Directory, private_output: cli_files.Directory, target_dir: String) JetDriverRustForeignError! -[FS, Env]> {
     publication: cli_files.lock("{target_dir}/.jet-publication-lock") ?? return Err(jet_cli_rust_foreign_io("couldn't lock shared Cargo output: {err}"))
-    jet_cli_rust_foreign_copy_tree(shared, private_output)
+    jet_cli_rust_foreign_copy_tree(shared, private_output, false)
     Ok(())
 }
 jet_cli_rust_foreign_publish_output: fn(private_output: cli_files.Directory, shared: cli_files.Directory, target_dir: String) JetDriverRustForeignError! -[FS, Env]> {
     publication: cli_files.lock("{target_dir}/.jet-publication-lock") ?? return Err(jet_cli_rust_foreign_io("couldn't lock shared Cargo output: {err}"))
-    jet_cli_rust_foreign_copy_tree(private_output, shared)
+    jet_cli_rust_foreign_copy_tree(private_output, shared, true)
     Ok(())
 }
 // The sidecars land in the shared release directory, so they are published
@@ -593,6 +608,7 @@ jet_cli_rust_foreign_publish_sidecars: fn(target_dir: String, release: String, c
     released: cli_files.open_directory(release) ?? return Err(jet_cli_rust_foreign_io("couldn't hold published FFI artifacts: {err}"))
     jet_cli_rust_foreign_publish(released, "{crate_name}.sha256", manifest.bytes())
     jet_cli_rust_foreign_publish(released, "{crate_name}.provenance", provenance.bytes())
+    jet_cli_rust_foreign_flush(released)
     Ok(())
 }
 
