@@ -18,14 +18,16 @@ nixeval_shell_output_prefixes: fn(system: String) -> [[String]] Never! {
 
 impl NixEvaluator {
     // `shell.nix` and `default.nix` conventionally evaluate directly to a
-    // `mkShell` value (often behind a `{ pkgs ? ... }:` function). Project that
-    // bounded direct form before trying the flake output paths; a flake root
+    // `mkShell` value behind a `pkgs: ...` or `{ pkgs ? ... }:` function. Project
+    // that bounded direct form before trying the flake output paths; a flake root
     // still falls through because its `packages` field is not a package list.
     resolve_shell: fn(&self, root: NixEvalValue, output: String) -> NixEvalValue NixEvalError! {
         if root == {
             .Function(lambda, _) -> {
-                if self.accepts_direct_shell_arguments(lambda) {
-                    direct: &self.apply_flake_arguments(root)
+                argument: &self.direct_shell_argument(lambda)
+                if argument == .Val(value) {
+                    thunk: &self.value_thunk(value)
+                    direct: &self.apply(root, thunk)
                     if &self.is_direct_shell(direct) -> return Ok(direct)
                 }
             }
@@ -52,25 +54,28 @@ impl NixEvaluator {
         Err(NixEvalError.Unsupported("no supported `devShell` or `mkShell` output `{output}` was found"))
     }
 
-    accepts_direct_shell_arguments: fn(self, lambda: Int) -> Bool Never! {
+    // The argument a direct shell function receives: a bare `pkgs: ...` names
+    // the package set itself; a `{ pkgs, ... }:` pattern receives the flake
+    // arguments when every field without a default is one of them.
+    direct_shell_argument: fn(&self, lambda: Int) -> NixEvalValue? Never! {
         node: self.exprs[lambda].copy()
         if node == {
             .Lambda(pattern, _) -> {
                 if pattern == {
-                    .Name(_) -> true
+                    .Name(_) -> Val(NixEvalValue.Packages(NixEvalPackageSet{prefix: "", overlay: None}))
                     .Attrs(fields) -> {
                         loop field in fields {
                             if field.default != None -> next
                             if field.name == {
                                 "legacyPackages" | "nixpkgs" | "pkgs" | "self" | "system" -> {}
-                                else -> return false
+                                else -> return None
                             }
                         }
-                        true
+                        Val(&self.flake_arguments())
                     }
                 }
             }
-            else -> false
+            else -> None
         }
     }
 

@@ -674,6 +674,14 @@ nixeval_test_output_named: fn(outputs: [NixEvalDerivationOutput], name: String) 
     assert_eq(evaluated.packages, [String]{"fd"})
 }
 
+#Test("nixeval native devshell projects a direct shell.nix function of pkgs") {
+    bare: nixeval_test_shell(`pkgs: mkShell { packages = [ pkgs.fd ]; }`, "x86_64-linux")
+    assert_eq(bare.packages, [String]{"fd"})
+    pattern: nixeval_test_shell(`{ pkgs, system ? "x86_64-linux" }: pkgs.mkShell { packages = [ pkgs.ripgrep ]; }`, "x86_64-linux")
+    assert_eq(pattern.packages, [String]{"ripgrep"})
+    assert(nixeval_test_unsupported(nixeval_test_shell_error(`{ pkgs, extra }: pkgs.mkShell { packages = [ pkgs.fd ]; }`, "x86_64-linux")).contains("devShell"))
+}
+
 #Test("nixeval native devshell preserves string contexts during projection") {
     evaluated: nixeval_test_shell(`{
           devShells.x86_64-linux.default = pkgs.mkShell {
