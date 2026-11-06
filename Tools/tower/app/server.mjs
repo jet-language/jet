@@ -174,7 +174,8 @@ const STATUS = { E_NOT_FOUND: 404, E_INVALID: 400, E_USAGE: 400, E_CONFLICT: 409
 const OWNER_COOKIE = (sessionToken) => `${OWNER_SESSION_COOKIE}=${sessionToken}; Path=/; Max-Age=${OWNER_SESSION_TTL_MS / 1000}; SameSite=Strict; HttpOnly`;
 const cookieValue = (req, name) => new RegExp(`(?:^|;\\s*)${name}=([^;]+)`).exec(req.headers.cookie || '')?.[1];
 const MACHINE_HOSTNAME = machineHostname().trim().toLowerCase().replace(/\.$/, '');
-const LAN_SUFFIXES = ['.local', '.lan', '.home.arpa'];
+// Tailscale MagicDNS names (*.ts.net) resolve only inside the owner's tailnet.
+const LAN_SUFFIXES = ['.local', '.lan', '.home.arpa', '.ts.net'];
 
 function requestHostname(req) {
   const host = String(req.headers.host || '').trim();
@@ -188,9 +189,11 @@ function privateIPv4(host) {
   if (isIP(host) !== 4) return false;
   const parts = host.split('.').map(Number);
   const [a, b] = parts;
+  // 100.64.0.0/10 is carrier-grade NAT space; Tailscale assigns tailnet peers from it.
   return a === 10 || a === 127 || (a === 169 && b === 254)
     || (a === 172 && b >= 16 && b <= 31)
-    || (a === 192 && b === 168);
+    || (a === 192 && b === 168)
+    || (a === 100 && b >= 64 && b <= 127);
 }
 
 function privateIPv6(host) {
