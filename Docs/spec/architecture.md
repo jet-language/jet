@@ -2178,7 +2178,8 @@ and free memory (`--jobs`, `--memory`). Rows print as cases finish; each
 suite's report and failure list keep suite-then-path order, whatever the
 pool's size. Census and release tooling that shards or lists the corpus
 across processes passes `--shard`, `--list`, `--cases` and `--results` to the
-same command. Scratch stays disk-backed outside the checkout. O0, O1 and O2
+same command. Rows stage in memory outside the checkout, their files counted
+against the pool's memory budget; history stays on disk. O0, O1 and O2
 compare the real exit and exact streams; diagnostic text remains a product
 surface, not a blessable implementation accident.
 

@@ -544,9 +544,7 @@ async function suiteRun(ctx, side, suite, extra = []) {
     const runs = [];
     for (let index = 1; index <= shards; index++) {
         const tag = `${side}-${suite}${retry ? '-retry' : ''}-${index}`;
-        const scratch = join(ctx.work, 'kit', `scratch-${tag}`);
-        mkdirSync(scratch, { recursive: true });
-        const env = { ...ctx.env, JET_COMPILER_IDENTITY: compiler.identity, JET_TOOLCHAIN_ROOT: compiler.root, JET: compiler.jet, JET_TEST_SCRATCH_DIR: scratch };
+        const env = { ...ctx.env, JET_COMPILER_IDENTITY: compiler.identity, JET_TOOLCHAIN_ROOT: compiler.root, JET: compiler.jet };
         // Suite rows run host tools (C compilers, rustc, interpreters) that only jet-env supplies until jet does.
         const argv = [...STACK, join(ctx.tree, 'Tools/agent/jet-env'), ctx.candidate.jet, 'test', join(ctx.tree, 'Compiler'), '--profile', suite, `--compiler=${compiler.jet}`, `--results=${join(ctx.work, 'kit', `${tag}.json`)}`];
         if (!retry) argv.push(`--shard=${index}/${shards}`);
@@ -564,7 +562,6 @@ async function suiteRun(ctx, side, suite, extra = []) {
         if (!existsSync(file) && result.rc === 2 && /no matching corpus entries/.test(readFileSync(log, 'utf8'))) continue;
         if (!existsSync(file)) { errors.push(`${tag} rc=${result.rc}${result.timedOut ? ' (timed out)' : ''} wrote no results: ${tail(log, 3)}`); continue; }
         rows.push(...JSON.parse(readFileSync(file, 'utf8')).results);
-        removeTree(join(ctx.work, 'kit', `scratch-${tag}`));
     }
     return errors.length ? { error: errors.join('; '), rows } : { rows };
 }

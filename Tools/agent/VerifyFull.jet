@@ -155,7 +155,7 @@ run: fn() {
     loop suite in suites {
         if suite != "registries" {
             // `jet test Compiler --profile <suite>` runs that corpus in process with
-            // JET and JET_TEST_SCRATCH_DIR from this environment and writes its
+            // JET from this environment, stages its rows in memory and writes its
             // case verdicts to $JET_CI_EVIDENCE_DIR/<suite>.json.
             ran := run_child(state, suite, [String]{binary, "test", "{root}/Compiler", "--profile", suite, "--color=never"})
             if ran.row.status == "PASS" -> testkit_verdict(ran.row, "{evidence}/{suite}.json", binary, suite)

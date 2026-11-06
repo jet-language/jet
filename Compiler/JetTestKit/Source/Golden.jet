@@ -198,6 +198,50 @@ kit_golden_test_outcome: fn(context: KitStepCtx, entry: KitEntry, tier: KitTier,
     Val(KitOutcome{verdict: kit_expect_exact(context.id, path, Val(golden), result.stdout, context.bless, false), run: result})
 }
 
+// Stages `entry`'s project from `project` into `work`. A flat entry shares its
+// directory with the flat entries beside it (kit_golden_collect files every
+// flat `.jet` there as one), and its row reads none of theirs unless its
+// source names one: those siblings' files (`<stem>.*`) stay out, unless the
+// entry, or a sibling it names, names the stem. Every other file and every
+// support directory is staged, so the row writes only what it may read.
+kit_golden_stage: fn(project: String, entry: KitEntry, work: String) {
+    own: files.basename(entry.path)
+    if own == "run.jet" {
+        kit_exec_copy_tree(project, work, true, false)
+        return
+    }
+    files.create_dir_all(work) ?? panic("mkdir {work}: {err}")
+    listed: files.list_dir(project) ?? panic("list {project}: {err}")
+    siblings := [String]{}
+    loop child in listed {
+        if child.is_dir || !child.name.ends_with(".jet") || child.name == own || child.name == "package.jet" || child.name == "workspace.jet" -> next
+        siblings.push(kit_steps_byte_slice(child.name, 0, child.name.count_bytes() - 4))
+    }
+    own_stem: kit_steps_byte_slice(own, 0, own.count_bytes() - 4)
+    named := [String]{own_stem.copy()}
+    at := 0
+    loop at < named.len() {
+        text: files.read(files.join(project, "{named[at]}.jet")) ?? ""
+        at += 1
+        loop stem in siblings {
+            if !named.contains(stem) && text.contains(stem) -> named.push(stem.copy())
+        }
+    }
+    loop child in listed {
+        if !child.is_dir && !child.name.starts_with("{own_stem}.") && kit_golden_unnamed_sibling(child.name, siblings, named) -> next
+        kit_exec_copy_entry(child, work, true, false)
+    }
+}
+
+// Whether the file `name` belongs to a sibling entry (`<stem>.*`) that the
+// staged entry never names.
+kit_golden_unnamed_sibling: fn(name: String, siblings: [String], named: [String]) -> Bool {
+    loop stem in siblings {
+        if !named.contains(stem) && name.starts_with("{stem}.") -> return true
+    }
+    false
+}
+
 kit_golden_run_entry: fn(entry: KitEntry, tier: KitTier, env: KitEnv, scratch: String, bless: KitBless) -> KitOutcome {
     expected: files.join(env.root, entry.expected)
     plan := kit_steps_parse(kit_exec_optional("{expected}.case") ?? "")
@@ -212,7 +256,7 @@ kit_golden_run_entry: fn(entry: KitEntry, tier: KitTier, env: KitEnv, scratch: S
     }
     source: files.join(scratch, "source")
     work: files.join(source, entry.project)
-    kit_exec_copy_tree(files.join(env.root, entry.project), work, true, false)
+    kit_golden_stage(files.join(env.root, entry.project), entry, work)
     implicit: plan.steps.len() == 0
     if implicit {
         if plan.compile_only || !tier.direct -> plan.steps.push(kit_golden_default_step("build"))

@@ -26,13 +26,23 @@ KitEnv: struct {
     trace_case: String{""}
     trace_node: String{""}
     trace_cache: String{""}
-    // The entry's peak log: each child's sampled resident peak, one per line; "" keeps none.
-    peaks: String{""}
+    // The entry's memory claim so far (kit_exec_run): its children's largest
+    // resident peak plus the files a row held on a memory-backed scratch. None
+    // keeps none.
+    peak: Shared<KitPeak>?{None}
+    // The rows' scratch is memory-backed (kit_exec_memory_backed): their files
+    // count as memory they hold.
+    scratch_memory: Bool{false}
     // The FFI cache children share across runs; "" keeps one per run under `scratch`.
     ffi_cache: String{""}
     // A cap in nanoseconds on each wait for an answer (recv, poll, await, a
     // wait with a deadline, repeat while); 0 is none. A known-failing case sets it.
     answer_limit: Int{0}
+}
+
+// An entry's memory claim in bytes, which its rows' runs raise (KitEnv.peak).
+KitPeak: struct {
+    bytes: Int
 }
 
 KitEnvVar: struct {
@@ -756,11 +766,25 @@ kit_execute_corpus_order: fn(corpus: &[KitSelected]) {
     corpus.sort_by(item -> "{item.suite}\n{item.entry.path}")
 }
 
-// The disk-backed scratch directory a run uses without --scratch: JET_TEST_SCRATCH_DIR,
-// else <JET_SCRATCH_ROOT>/testkit, else Jet's user cache (<XDG_CACHE_HOME>/jet/testkit,
-// else ~/.cache/jet/testkit). None when not even HOME is set.
+// Where a run stages its rows without --scratch: in memory, so no row writes
+// the disk. That is /dev/shm, else the per-user runtime directory
+// (XDG_RUNTIME_DIR), each under a directory of this user's; a host with
+// neither stages on disk (kit_disk_root). Each row's files count against its
+// memory claim and resident guard (kit_exec_run), so the scratch stays inside
+// the run's memory budget. None when not even HOME is set.
 kit_scratch_root: fn() -> String? {
-    if sys.get("JET_TEST_SCRATCH_DIR") == .Val(dir) -> return Val(dir)
+    uid: sys.getuid()
+    if files.is_dir("/dev/shm") -> return Val("/dev/shm/jet-testkit-{uid}")
+    if sys.get("XDG_RUNTIME_DIR") == .Val(runtime) {
+        if runtime.starts_with("/") && files.is_dir(runtime) -> return Val(files.join(runtime, "jet-testkit"))
+    }
+    kit_disk_root()
+}
+
+// The disk directory for what outlives a run (the history and the FFI cache):
+// <JET_SCRATCH_ROOT>/testkit, else Jet's user cache (<XDG_CACHE_HOME>/jet/testkit,
+// else ~/.cache/jet/testkit). None when not even HOME is set.
+kit_disk_root: fn() -> String? {
     if sys.get("JET_SCRATCH_ROOT") == .Val(root) -> return Val(files.join(root, "testkit"))
     if sys.get("XDG_CACHE_HOME") == .Val(cache) -> return Val(files.join(cache, "jet/testkit"))
     home: sys.get("HOME") ?? return None
@@ -796,14 +820,15 @@ kit_execute_suites: fn(options: KitOptions, root: String, selected_suites: [Stri
     if options.jet == "" -> return kit_execution_refused("ERROR\tselection\t\tJET must name the compiler under test")
     jet: files.canonicalize(options.jet) ?? return kit_execution_refused("ERROR\tselection\t\tcompiler: {err}")
     jetpack: if options.jetpack == "" -> "" else -> files.canonicalize(options.jetpack) ?? return kit_execution_refused("ERROR\tselection\t\tjetpack: {err}")
-    base: if options.scratch != "" -> options.scratch else -> kit_scratch_root() ?? return kit_execution_refused("ERROR\tselection\t\tscratch: set JET_TEST_SCRATCH_DIR or JET_SCRATCH_ROOT, or pass --scratch")
-    canonical: kit_execute_disk_dir(base, root) ?? return kit_execution_refused("ERROR\tselection\t\tscratch: {err}")
+    base: if options.scratch != "" -> options.scratch else -> kit_scratch_root() ?? return kit_execution_refused("ERROR\tselection\t\tscratch: set HOME or pass --scratch")
+    canonical: kit_execute_scratch_dir(base, root) ?? return kit_execution_refused("ERROR\tselection\t\tscratch: {err}")
     // What outlives a run: each suite's measurements and the FFI cache.
-    state: kit_execute_disk_dir(sys.get("JET_TEST_STATE_DIR") ?? files.join(kit_scratch_root() ?? canonical, "state"), root) ?? return kit_execution_refused("ERROR\tselection\t\tstate: {err}")
+    state_base: sys.get("JET_TEST_STATE_DIR") ?? files.join(kit_disk_root() ?? return kit_execution_refused("ERROR\tselection\t\tstate: set JET_TEST_STATE_DIR, JET_SCRATCH_ROOT or HOME"), "state")
+    state: kit_execute_disk_dir(state_base, root) ?? return kit_execution_refused("ERROR\tselection\t\tstate: {err}")
     run_scratch: files.join(canonical, "testkit-{process.current_pid()}-{selected_suites.join("-")}")
     if files.exists(run_scratch) -> return kit_execution_refused("ERROR\tselection\t\tscratch already exists: {run_scratch}")
     files.create_dir_all(run_scratch) ?? return kit_execution_refused("ERROR\tselection\t\tscratch: {err}")
-    env := KitEnv{root: root, scratch: run_scratch, jet: jet, jetpack: jetpack, timeout: timeout, memory_limit: 0, resident_limit: kit_resident_guard(), ffi_cache: files.join(state, "ffi")}
+    env := KitEnv{root: root, scratch: run_scratch, jet: jet, jetpack: jetpack, timeout: timeout, memory_limit: 0, resident_limit: kit_resident_guard(), ffi_cache: files.join(state, "ffi"), scratch_memory: kit_exec_memory_backed(canonical)}
     if sys.get("JET_NATIVE_TRACE_LOG") != None {
         env.trace_node = sys.get("JET_NATIVE_TRACE_NODE") ?? ""
         env.trace_cache = sys.get("JET_NATIVE_TRACE_CACHE_ROOT") ?? ""
@@ -869,13 +894,20 @@ kit_execute_finish: fn(jet: String, results: [KitCaseResult], ran_suites: [Strin
     KitExecution{code: code, failures: failures, results: results}
 }
 
-// Creates `path` and returns it canonical, refusing RAM-backed /tmp and the checkout.
+// Creates the state directory `path` and returns it canonical, refusing
+// RAM-backed /tmp and the checkout: what outlives a run stays on disk.
 kit_execute_disk_dir: fn(path: String, root: String) -> String Err! {
+    canonical: kit_execute_scratch_dir(path, root) ?? return Err(err)
+    if canonical == "/tmp" || canonical.starts_with("/tmp/") -> return Err("{canonical} must be disk-backed and outside the checkout")
+    Ok(canonical)
+}
+
+// Creates the scratch directory `path` and returns it canonical, refusing the
+// checkout: rows never write it.
+kit_execute_scratch_dir: fn(path: String, root: String) -> String Err! {
     files.create_dir_all(path) ?? return Err("{err}")
     canonical: files.canonicalize(path) ?? return Err("{err}")
-    if canonical == root || canonical.starts_with("{root}/") || canonical == "/tmp" || canonical.starts_with("/tmp/") {
-        return Err("{canonical} must be disk-backed and outside the checkout")
-    }
+    if canonical == root || canonical.starts_with("{root}/") -> return Err("{canonical} must be outside the checkout")
     Ok(canonical)
 }
 
@@ -1071,7 +1103,8 @@ kit_execute_report: fn(index: Int, item: KitSelected, options: KitOptions, env: 
 }
 
 // One entry in its private scratch `<run>/<index>`, removed afterwards unless tracing.
-// Every row carries the entry's wall time and its children's largest resident peak.
+// Every row carries the entry's wall time and its memory claim: its children's largest
+// resident peak plus the files a row held on a memory-backed scratch.
 kit_execute_entry: fn(index: Int, item: KitSelected, options: KitOptions, env: KitEnv, known: [String: String], root: String, run_scratch: String, guard: Int) -> KitEntryRun {
     entry: item.entry
     started: time.instant()
@@ -1085,7 +1118,8 @@ kit_execute_entry: fn(index: Int, item: KitSelected, options: KitOptions, env: K
     context := KitCtx{options: options, env: env, root: root, scratch: scratch, bless: options.bless, known: known}
     context.env.trace_case = entry.path
     context.env.resident_limit = guard
-    context.env.peaks = files.join(run_scratch, "{index}.peaks")
+    claim: shared KitPeak{bytes: 0}
+    context.env.peak = Val(claim.copy())
     loop outcome in kit_suite_run(item.suite, entry, context) {
         run.results.push(KitCaseResult{suite: entry.suite, case: entry.path, tier: outcome.tier, status: outcome.verdict.status, detail: outcome.verdict.detail, exit: outcome.run.code, diff: outcome.verdict.diff})
     }
@@ -1096,13 +1130,8 @@ kit_execute_entry: fn(index: Int, item: KitSelected, options: KitOptions, env: K
             false
         }
     }
-    peak := 0
-    peaks: kit_exec_optional(context.env.peaks) ?? ""
-    loop line in peaks.split("\n") {
-        sampled: Int.parse(line) ?? next
-        if sampled > peak -> peak = sampled
-    }
-    files.remove(context.env.peaks).drop("an entry whose children were never sampled has no peak log")
+    held: claim.guard_read()
+    peak: held.value.bytes
     wall_ms: started.elapsed().ns /% 1000000
     loop at in 0..<run.results.len() {
         run.results[at].wall_ms = if wall_ms > 0 -> wall_ms else -> 1

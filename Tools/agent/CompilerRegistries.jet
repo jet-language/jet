@@ -1609,12 +1609,10 @@ run_entry: fn(result: &[String: Dyn], entry: Dyn, manifest: Dyn, repo: String, j
             if (sha256_path("{repo}/{name}") ?? "") != text_field(source, "sha256") -> return Err(problem("testkit input changed: {name}"))
         }
         evidence: "{stem}.evidence"
-        scratch: "{stem}.scratch"
         files.create_dir_all(evidence) ?? return Err(problem("`{evidence}` cannot be created: {err}"))
-        files.create_dir_all(scratch) ?? return Err(problem("`{scratch}` cannot be created: {err}"))
         command = [String]{jet, "test", KIT_PACKAGE, "--profile", KIT_PROFILE}
         cwd = repo.copy()
-        settings: [Setting]{Setting{name: "JET_CI_EVIDENCE_DIR", value: evidence.copy()}, Setting{name: "JET_TEST_SCRATCH_DIR", value: scratch.copy()}}
+        settings: [Setting]{Setting{name: "JET_CI_EVIDENCE_DIR", value: evidence.copy()}}
         child: registry_spec(command, repo, repo, settings, timeout_ms).run() ?? return Err(problem("the testkit cases cannot start: {err}"))
         stdout = child.output.copy()
         stderr = child.errors.copy()

@@ -110,7 +110,8 @@ kit_exec_base_value: fn(name: String, env: KitEnv, scratch: String) -> String? {
         name == "JET_TOOLCHAIN_ROOT" -> Val(sys.get(name) ?? env.root)
         name == "JET_STORE_DIR" -> Val(files.join(env.scratch, "store"))
         name == "JET_FFI_CACHE_DIR" -> if env.trace_node != "" -> sys.get(name) else if env.ffi_cache != "" -> Val(env.ffi_cache) else -> Val(files.join(env.scratch, "ffi"))
-        name == "TMPDIR" || name == "TMP" || name == "TEMP" -> Val(files.join(scratch, "tmp"))
+        // A row's tools that stage files of their own keep them in its tree.
+        name == "TMPDIR" || name == "TMP" || name == "TEMP" || name == "JET_TEST_SCRATCH_DIR" -> Val(files.join(scratch, "tmp"))
         name == "HOME" -> Val(kit_exec_home(scratch))
         name == "JET_HOME" -> Val(files.join(kit_exec_home(scratch), ".jet"))
         name == "XDG_CONFIG_HOME" -> Val(files.join(kit_exec_home(scratch), ".config"))
@@ -153,6 +154,7 @@ kit_exec_spec: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, ove
             .env("TMPDIR", kit_exec_base_value("TMPDIR", env, scratch) ?? "")
             .env("TMP", kit_exec_base_value("TMP", env, scratch) ?? "")
             .env("TEMP", kit_exec_base_value("TEMP", env, scratch) ?? "")
+            .env("JET_TEST_SCRATCH_DIR", kit_exec_base_value("JET_TEST_SCRATCH_DIR", env, scratch) ?? "")
             .env("HOME", kit_exec_base_value("HOME", env, scratch) ?? "")
             .env("JET_HOME", kit_exec_base_value("JET_HOME", env, scratch) ?? "")
             .env("XDG_CONFIG_HOME", kit_exec_base_value("XDG_CONFIG_HOME", env, scratch) ?? "")
@@ -249,7 +251,10 @@ kit_exec_run: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, stdi
         spec = spec.terminal(TerminalPolicy{size: TerminalSize{cols: shape.cols, rows: shape.rows}, mode: .Cooked})
     }
     child := spec.spawn() ?? return kit_exec_failed("spawn: {err}")
-    watched := KitResident{pid: if env.resident_limit > 0 -> child.id() else -> 0, limit: env.resident_limit, tree: env.resident_tree, due: 0, killed: false, peak: 0}
+    // A row's files on a memory-backed scratch are memory it holds: the guard
+    // counts them beside the child's resident memory.
+    files_in_memory: if env.scratch_memory -> scratch.copy() else -> ""
+    watched := KitResident{pid: if env.resident_limit > 0 -> child.id() else -> 0, limit: env.resident_limit, tree: env.resident_tree, due: 0, killed: false, peak: 0, scratch: files_in_memory, scratch_due: 0, scratch_bytes: 0}
     // Empty input writes nothing: a child that exits before the kit reaches its
     // stdin closed the pipe, which is no error when there was nothing to send.
     input_error := ""
@@ -289,8 +294,12 @@ kit_exec_run: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, stdi
     }
     kit_exec_wait(child, watched, started, -1)
     receipt: child.wait() ?? return kit_exec_failed("wait: {err}")
-    if env.peaks != "" && watched.peak > 0 {
-        files.append_all(env.peaks, "{watched.peak}\n").drop("a missing peak only loses one scheduling weight")
+    // The entry's claim: the child's resident peak and, on a memory-backed
+    // scratch, the files the row holds once it is done.
+    if env.peak == .Val(cell) {
+        held: watched.peak + if files_in_memory == "" -> 0 else -> kit_exec_tree_bytes(files_in_memory)
+        permit := cell.guard_edit()
+        if held > permit.value.bytes -> permit.value.bytes = held
     }
     run := kit_exec_receipt(receipt, started.elapsed().ns, if input_error == "" -> "" else -> kit_exec_input_detail(input_error, receipt.code, receipt.errors))
     if watched.killed -> run.limit_hit = "memory"
@@ -318,7 +327,9 @@ kit_exec_wait: fn(child: ProcessChild, watched: &KitResident, started: time.Inst
 // The resident-memory guard on one child: the child (`pid` 0 is unwatched),
 // its limit in bytes, whether it counts the child's live descendants (`tree`),
 // when it samples next in ns after spawn, whether it stopped the child, and
-// the largest resident size it sampled, in bytes.
+// the largest resident size it sampled, in bytes. `scratch` is the row's
+// memory-backed scratch ("" when its files are on disk), sampled every
+// second (`scratch_due`) into `scratch_bytes`.
 KitResident: struct {
     pid: Int
     limit: Int
@@ -326,22 +337,31 @@ KitResident: struct {
     due: Int
     killed: Bool
     peak: Int
+    scratch: String
+    scratch_due: Int
+    scratch_bytes: Int
 }
 
 // The run-wide memory guard counts resident memory, not address space: a
 // RLIMIT_AS limit fails thread-stack reservations long before the child uses
-// that memory. Samples VmRSS every 100 ms (`at` is ns after spawn) and kills
-// the child above `limit` bytes. Under `tree` (a case's `limit: resident=`) it
-// sums the child and its live descendants and kills them all. A case's
-// `limit: memory=` keeps Core memory_limit.
+// that memory. Samples VmRSS every 100 ms (`at` is ns after spawn), and the
+// row's files on a memory-backed scratch every second, and kills the child
+// when the two together pass `limit` bytes, so a row that fills the memory
+// scratch stops at its guard instead of exhausting the host. Under `tree` (a
+// case's `limit: resident=`) it sums the child and its live descendants and
+// kills them all. A case's `limit: memory=` keeps Core memory_limit.
 kit_exec_watch_resident: fn(watched: &KitResident, at: Int) Never! {
     if watched.pid <= 0 || watched.killed || at < watched.due -> return
     watched.due = at + 100000000
+    if watched.scratch != "" && at >= watched.scratch_due {
+        watched.scratch_due = at + 1000000000
+        watched.scratch_bytes = kit_exec_tree_bytes(watched.scratch)
+    }
     pids := [Int]{}
     used: kit_exec_tree_resident(watched.pid, watched.tree, pids)
     if pids.len() == 0 -> return
     if used > watched.peak -> watched.peak = used
-    if used <= watched.limit -> return
+    if used + watched.scratch_bytes <= watched.limit -> return
     #Unsafe("the testkit stops its own step child at the resident-memory guard") {
         sys.kill(watched.pid, 9) ?? return
         loop descendant in pids {
@@ -349,6 +369,38 @@ kit_exec_watch_resident: fn(watched: &KitResident, at: Int) Never! {
         }
     }
     watched.killed = true
+}
+
+// The bytes of the files under `path`, never following a link; 0 when it is
+// gone.
+kit_exec_tree_bytes: fn(path: String) -> Int {
+    entries: files.list_dir(path) ?? return 0
+    total := 0
+    loop entry in entries {
+        info: files.stat(entry.path) ?? next
+        if info.is_symlink -> next
+        total += if info.is_dir -> kit_exec_tree_bytes(entry.path) else -> info.size
+    }
+    total
+}
+
+// Whether the canonical `path` lies on a memory-backed filesystem (tmpfs or
+// ramfs): the type of the mount with the longest mount point holding it
+// (/proc/self/mounts). False when the table can't be read.
+kit_exec_memory_backed: fn(path: String) -> Bool {
+    mounts: files.read("/proc/self/mounts") ?? return false
+    best := -1
+    memory := false
+    loop line in mounts.split("\n") {
+        fields: line.split(" ").to_list()
+        if fields.len() < 3 -> next
+        point: fields[1]
+        holds: point == "/" || path == point || path.starts_with("{point}/")
+        if !holds || point.count_bytes() <= best -> next
+        best = point.count_bytes()
+        memory = fields[2] == "tmpfs" || fields[2] == "ramfs"
+    }
+    memory
 }
 
 // The resident bytes of `pid`, plus under `tree` those of its live descendants
@@ -524,18 +576,21 @@ kit_exec_optional: fn(path: String) -> String? {
 kit_exec_copy_tree: fn(source: String, destination: String, fixture_state: Bool, authored_jet: Bool) {
     files.create_dir_all(destination) ?? panic("mkdir {destination}: {err}")
     entries: files.list_dir(source) ?? panic("list {source}: {err}")
-    loop entry in entries {
-        if entry.name == ".git" -> next
-        if entry.name == ".jet" && !authored_jet {
-            bindings: files.join(entry.path, "bindings")
-            if entry.is_dir && files.is_dir(bindings) -> kit_exec_copy_tree(bindings, files.join(files.join(destination, ".jet"), "bindings"), false, true)
-            next
-        }
-        name: if fixture_state && (entry.name == "state" || entry.name == "fixture-state") -> ".jet" else -> entry.name
-        target: files.join(destination, name)
-        if entry.is_dir -> kit_exec_copy_tree(entry.path, target, fixture_state, authored_jet)
-        else -> kit_exec_copy_file(entry.path, target)
+    loop entry in entries -> kit_exec_copy_entry(entry, destination, fixture_state, authored_jet)
+}
+
+// Copies one listed `entry` of a tree into `destination` (kit_exec_copy_tree).
+kit_exec_copy_entry: fn(entry: files.DirEntry, destination: String, fixture_state: Bool, authored_jet: Bool) {
+    if entry.name == ".git" -> return
+    if entry.name == ".jet" && !authored_jet {
+        bindings: files.join(entry.path, "bindings")
+        if entry.is_dir && files.is_dir(bindings) -> kit_exec_copy_tree(bindings, files.join(files.join(destination, ".jet"), "bindings"), false, true)
+        return
     }
+    name: if fixture_state && (entry.name == "state" || entry.name == "fixture-state") -> ".jet" else -> entry.name
+    target: files.join(destination, name)
+    if entry.is_dir -> kit_exec_copy_tree(entry.path, target, fixture_state, authored_jet)
+    else -> kit_exec_copy_file(entry.path, target)
 }
 
 kit_exec_requires: fn(requirement: String, env: KitEnv, work: String, scratch: String) -> KitVerdict? {

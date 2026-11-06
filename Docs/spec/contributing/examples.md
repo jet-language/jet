@@ -156,10 +156,16 @@ refused as `pty-stdio`.
 
 Use `--list`, `--cases FILE` (exact repository-relative IDs), or `--filter TEXT`
 to select cases. `--shard I/N` partitions the sorted corpus deterministically.
-Scratch must be disk-backed and outside the checkout; it is staged and removed
-per case. `JET_TEST_STATE_DIR` (default `state/` under the scratch root, under the
-same rule) outlives runs: `history/<suite>.tsv` keeps each entry's last wall
-time and resident peak, and `ffi/` is the FFI cache every run shares.
+Rows stage in memory: the scratch is `/dev/shm`, else `$XDG_RUNTIME_DIR`, else
+Jet's user cache (`--scratch DIR` overrides it; never inside the checkout). Each
+entry's tree is removed as it ends, and a flat golden entry stages its own files,
+every support directory and only the sibling entries it names. A row's files on
+a memory-backed scratch count as memory it holds: the resident-memory guard
+counts them beside its processes, and the entry's peak (its claim below)
+includes them. `JET_TEST_STATE_DIR` (default `$JET_SCRATCH_ROOT/testkit/state`,
+else `jet/testkit/state` in the user cache; disk-backed, never `/tmp` or the
+checkout) outlives runs: `history/<suite>.tsv` keeps each entry's last wall
+time and peak, and `ffi/` is the FFI cache every run shares.
 Selected entries run in one `task.group`. Measured entries start longest
 first, after every unmeasured one. An entry starts once fewer than `--jobs N`
 run and its claim fits in the memory budget beside the running ones'; the

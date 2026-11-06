@@ -380,18 +380,17 @@ gate_main: fn(args: [String]) -[FS, Env, Exec, IO, Time.Wait]> Int Never! {
         return 1
     }
     run_dir: made.output.trim()
-    code: gate_corpus(root, scratch, run_dir.copy(), report)
+    code: gate_corpus(root, run_dir.copy(), report)
     files.remove_all(run_dir).drop("the run directory is scratch")
     code
 }
 
-gate_corpus: fn(root: String, scratch: String, run_dir: String, report: String) -[FS, Env, Exec, IO, Time.Wait]> Int Never! {
+gate_corpus: fn(root: String, run_dir: String, report: String) -[FS, Env, Exec, IO, Time.Wait]> Int Never! {
     jet: process.env_get("JET") ?? ""
     if jet == "" -> return uncovered("JET must name an executable jet binary")
     executable: process.cmd([String]{"test", "-x", jet.copy()}).run() ?? return uncovered("JET must name an executable jet binary")
     if executable.code != 0 -> return uncovered("JET must name an executable jet binary")
     receipt: process.cmd([String]{jet.copy(), "test", "{root}/Compiler", "--profile", "cases", "agent_workloads", "--color=never"})
-        .env("JET_TEST_SCRATCH_DIR", scratch)
         .env("JET_CI_EVIDENCE_DIR", run_dir)
         .stdout(.Inherit)
         .stderr(.Inherit)
