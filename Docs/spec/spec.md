@@ -577,7 +577,8 @@ list when `xs: [Int]` (D-DOTCTOR3 amendment, 2026-09-28, #3739).
 `self` is the receiver and follows the same access law as any parameter. In an
 `&self` method, field assignment, compound assignment, and whole-receiver
 replacement are legal. The same write in a read method is E0205. Calling a
-write-receiver method requires a changeable receiver binding and is E0202.
+write-receiver method needs a changeable receiver: on a `:` binding it is E0111,
+on a read parameter E0205, and the error quotes the method's signature line.
 Invoke an instance method as `circle.area()`, not `area(circle)`. Methods may
 live in the type, in `impl Type { … }`, or as a top-level external inherent
 method `Type.method: fn(self, …) { … }`; the type must be defined in the current
@@ -1212,7 +1213,8 @@ run: fn() {
 ```
 
 Writing through a read receiver is E0205 and points to `&self`. Calling a
-`&self` method requires a changeable receiver binding and is checked with E0202.
+`&self` method needs a changeable receiver: a `:` binding is E0111 and a read
+parameter is E0205, each quoting the method's signature line.
 Calls carry no marks (D-CALLSITE-MARK2=A): the signature says what a call does
 to each input, so `bump(score)`, `items.push(3)` and `buf.seal()` are written
 plain. Using the same name twice while a write access is live is E0204: pass
@@ -1577,7 +1579,7 @@ entries. Removing an entry bumps its generation and returns `?T`. Indexing a
 stale ID panics, like an array bounds failure, rather than silently reading old
 storage. `add`, `remove` and `pool[id] = v` change the pool, so they need a
 writable pool: a `:=` binding or a `&` parameter. Through an unmarked
-parameter, `add` and `remove` are **E0202**.
+parameter, `add` and `remove` are **E0205**.
 
 ```jet
 Player: struct {

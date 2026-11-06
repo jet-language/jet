@@ -1,8 +1,8 @@
-Error [jet.MissingWriteMarker]: `.next()` changes `cur`, which has read access only
+Error [jet.ImmutableAssignment]: `cur` was made with `:`, so it can't be changed
   --> tests/ui/iter_cursor_immutable_binding.jet:20:12
     |
  20 |     a: cur.next()
     |            ^^^^
- Why: This method edits the value it's called on, so its receiver needs write access
- Fix: Declare `cur := ...`
-More: jet-lang.dev/e/E0202
+ Why: `next: fn(&self)` changes the value it's called on, so `cur` must be mutable (`:=`)
+ Fix: Declare it with `cur := ...`
+More: jet-lang.dev/e/E0111

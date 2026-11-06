@@ -154,7 +154,7 @@ view_disjoint_admission_sources: fn() {
     view_pattern_case("disjoint-fixed-owner", "run: fn() {{ values := [Int#4]{{1, 2, 3, 4}}\nparts: values.split_write(2) ?? panic(\"split\")\nparts.left[0] = 8 }}", "")
     view_pattern_case("disjoint-split-arity", "run: fn() {{ {owner}result: values.split_write() }}", "E0104")
     view_pattern_case("disjoint-index-type", "run: fn() {{ {owner}result: values.get_disjoint_write([true]) }}", "E0112")
-    view_pattern_case("disjoint-read-parameter", "run: fn(values: [Int]) {{ result: values.split_write(2) }}", "E0202")
+    view_pattern_case("disjoint-read-parameter", "run: fn(values: [Int]) {{ result: values.split_write(2) }}", "E0205")
     view_pattern_case("disjoint-callback-cannot-store-view", "run: fn() {{ {owner}result: values.edit_disjoint([0, 2], (left, right) -> {{ held: left\nright[0] = 5 }}) }}", "E0212")
     view_pattern_case("disjoint-callback-cannot-return-value", "run: fn() {{ {owner}result: values.edit_disjoint([0, 2], (left, right) -> {{ return left }}) }}", "E0113")
     view_pattern_case("disjoint-callback-cannot-pass-view", "consume: fn(value: ViewMut<Int>) {{}}\nrun: fn() {{ {owner}result: values.edit_disjoint([0, 2], (left, right) -> {{ consume(left) }}) }}", "E0212")

@@ -1,17 +1,17 @@
-Error [jet.MissingWriteMarker]: `.add()` changes `world`, which has read access only
+Error [jet.FieldWriteWithoutMarker]: `.add()` changes `world`, which has read access only
   --> tests/ui/pool_read_only_param_mutation.jet:10:5
     |
  10 |     world.add(Player{name: "Kai", hp: 100})
     |     ^^^^^
- Why: This method edits the value it's called on, so its receiver needs write access
+ Why: `add: fn(&self, value: &&Player)` changes the value it's called on, but an unmarked parameter gives read access only
  Fix: Change the parameter to `world: &Pool<Player>`
-More: jet-lang.dev/e/E0202
+More: jet-lang.dev/e/E0205
 
-Error [jet.MissingWriteMarker]: `.remove()` changes `world`, which has read access only
+Error [jet.FieldWriteWithoutMarker]: `.remove()` changes `world`, which has read access only
   --> tests/ui/pool_read_only_param_mutation.jet:14:8
     |
  14 |     _: world.remove(id)
     |        ^^^^^
- Why: This method edits the value it's called on, so its receiver needs write access
+ Why: `remove: fn(&self, id: ID<Player>)` changes the value it's called on, but an unmarked parameter gives read access only
  Fix: Change the parameter to `world: &Pool<Player>`
-More: jet-lang.dev/e/E0202
+More: jet-lang.dev/e/E0205

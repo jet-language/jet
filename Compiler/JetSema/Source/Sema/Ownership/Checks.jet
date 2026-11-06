@@ -2216,7 +2216,7 @@ sema_ownership_open_write_reference: fn(state: &SemaOwnershipState, expr: Expr, 
     places := sema_ownership_places_from_expr_in_state(expr, scopes, state)
     if places.len() == 0 {
         if sema_ownership_writes_temporary_edit_guard(expr) -> return true
-        diagnostics.push(sema_error("E0202", span, "this write needs a place", "write access can only be granted to stable storage, not a temporary expression", "bind the value with `:=` first, then write through that name"))
+        diagnostics.push(sema_error("E0225", span, "`&` marks a fresh value, not a named place", "a write window lends a named place; a temporary value has no place to lend", "bind the value with `:=` first, then take the window from that name"))
         return false
     }
     loop place in places {
@@ -2247,7 +2247,7 @@ sema_ownership_open_write_reference: fn(state: &SemaOwnershipState, expr: Expr, 
         return false
     }
     if !has_view && !info.mutable && info.access != AccessConvention.Write && !sema_ownership_binding_is_edit_shared_guard(info) && !sema_ownership_writes_through_view_type(expr, info.symbol.ty) {
-        // Rust `validate_write_place`: a parameter is E0205, a local E0202.
+        // Rust `validate_write_place`: a parameter is E0205, a local E0111.
         if info.symbol.kind == SymbolKind.Parameter {
             param_ty: info.symbol.ty ?? Type.Named{name: "Unit"}
             // A `View<T>` lends read windows only; a `&` marker on it would
@@ -2260,7 +2260,7 @@ sema_ownership_open_write_reference: fn(state: &SemaOwnershipState, expr: Expr, 
                 diagnostics.push(sema_error("E0205", span, "cannot take a write window into `{places[0].root}`", "an unmarked parameter gives read access only; a write window needs write access", "change the parameter to `{places[0].root}: &{type_name(param_ty)}`"))
             }
         } else {
-            diagnostics.push(sema_error("E0202", span, "cannot take a write window into `{places[0].root}`", "a write window can change its owner, so the owner must be mutable", "declare `{places[0].root} := ...`"))
+            diagnostics.push(sema_ownership_diag_unchangeable(info, places[0].root, span, "a write window can change its owner, so the owner must be mutable (`:=`)"))
         }
         return false
     }
@@ -2861,15 +2861,17 @@ sema_ownership_place_is_static: fn(place: SemaOwnershipPlace, scopes: SemaScopeT
 // `capability` adds the mutability gate on the place's root binding. Without
 // it only the change checks run: Rust `check_write_arg_change` for a `&`
 // argument to a parameter that does not edit, and `record_call_receiver_access`
-// for a handle receiver that writes through the handle.
-sema_ownership_write_capability: fn(state: &SemaOwnershipState, expr: Expr, action: String, callee: String, capability: Bool, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
+// for a handle receiver that writes through the handle. `callee`, `receiver`
+// and `params` describe the call that writes the place, so a changeability
+// error quotes its signature line; `callee` is empty for any other write.
+sema_ownership_write_capability: fn(state: &SemaOwnershipState, expr: Expr, action: String, callee: String, receiver: AccessConvention?, params: [SemaCallParam], capability: Bool, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
     if sema_ownership_reject_frozen_write(state, expr, if action == "" -> "be edited" else -> action, expr_span(expr), scopes, diagnostics) -> return false
     if sema_ownership_report_invalidated_view(state, expr, scopes, expr_span(expr), diagnostics) -> return false
     places := sema_ownership_places_from_expr_in_state(expr, scopes, state)
     if places.len() == 0 {
         if sema_ownership_writes_temporary_edit_guard(expr) -> return true
         what: if callee == "" -> "this write needs a place, not a temporary" else -> "`{callee}` writes to this input, so it needs a place, not a temporary"
-        diagnostics.push(sema_error("E0202", expr_span(expr), what, "write access can only be granted to stable storage, not a temporary expression", "bind the value to a `:=` name first, then pass the name"))
+        diagnostics.push(sema_error("E0111", expr_span(expr), what, "write access can only be granted to stable storage, not a temporary expression", "bind the value to a `:=` name first, then pass the name"))
         return false
     }
     // The group loan outlives the borrow binding's last lexical use, so it is
@@ -2879,9 +2881,10 @@ sema_ownership_write_capability: fn(state: &SemaOwnershipState, expr: Expr, acti
     }
     loop place in places {
         if sema_ownership_place_refuses_write(state, place, scopes) {
-            // Rust's assignment path has no static-borrow check; keep E0202.
+            // Rust's assignment path has no static-borrow check: a constant
+            // can't be changed (E0111).
             if action == "be assigned" {
-                diagnostics.push(sema_error("E0202", expr_span(expr), "cannot take write access to a static binding", "static storage is not mutable through a borrow", "copy the value into a mutable local before taking `&`"))
+                diagnostics.push(sema_error("E0111", expr_span(expr), "`{places[0].root}` is a constant, so it can't be changed", "static storage is not mutable", "copy the value into a mutable local (`:=`) and change that"))
             } else {
                 sema_ownership_report_static_write(state, place, expr_span(expr), diagnostics)
             }
@@ -2918,24 +2921,24 @@ sema_ownership_write_capability: fn(state: &SemaOwnershipState, expr: Expr, acti
     persist: state.persist_roots.contains(places[0].root_key)
     if !has_view && !persist && !info.mutable && info.access != AccessConvention.Write && !sema_ownership_binding_is_edit_shared_guard(info) && !sema_ownership_writes_through_view_type(expr, info.symbol.ty) {
         if action == "be assigned" && sema_ownership_report_assignment_capability(expr, places[0].root, info, diagnostics) -> return false
+        call_why: if callee == "" -> "" else -> "{sema_ownership_signature_line(callee, receiver, params)} changes this input"
         if info.access == {
             .Read -> {
                 // An unmarked parameter is read access for
                 // the whole call; the fix is the parameter's `&` mark.
                 if info.symbol.kind == SymbolKind.Parameter {
                     param_type: type_name(info.symbol.ty ?? Type.Named{name: "Unit"})
-                    diagnostics.push(sema_error("E0205", expr_span(expr), "cannot edit through `{places[0].root}` — it has read access only", "an unmarked parameter gives read access only; nobody changes it during the call", "change the parameter to `{places[0].root}: &{param_type}`"))
-                } else if callee != "" && !info.place_alias && places[0].projections.len() == 0 && info.binding_sigil == .Val(sigil) {
-                    // A whole `:` local passed to a write parameter:
-                    // the fix is the binding's sigil, as for an assignment.
-                    leaf: callee.slice(callee.rfind(".") + 1, callee.len())
-                    diagnostic: sema_error("E0111", expr_span(expr), "`{places[0].root}` was made with `:`, so it can't be changed", "`{leaf}` will change this value, so it must be mutable (`:=`)", "declare it with `{places[0].root} := ...`")
-                    diagnostics.push(diagnostic_with_edit(diagnostic, TextEdit{span: sigil, new_text: " :="}))
+                    why: if call_why == "" -> "an unmarked parameter gives read access only; nobody changes it during the call" else -> "{call_why}, but an unmarked parameter gives read access only"
+                    diagnostics.push(sema_error("E0205", expr_span(expr), "cannot edit through `{places[0].root}` — it has read access only", why, "change the parameter to `{places[0].root}: &{param_type}`"))
+                } else if call_why != "" && !info.place_alias && info.binding_sigil != None {
+                    // A `:` local, or a part of one, passed to a write
+                    // parameter: the fix is the binding's sigil.
+                    diagnostics.push(sema_ownership_diag_unchangeable(info, places[0].root, expr_span(expr), "{call_why}, so `{places[0].root}` must be mutable (`:=`)"))
                 } else {
                     diagnostics.push(sema_error("E0205", expr_span(expr), "cannot edit through `{places[0].root}` — it has read access only", "a read window may inspect its place, but it cannot change the owner", "take a write window from a mutable owner instead"))
                 }
             }
-            else -> diagnostics.push(sema_error("E0202", expr_span(expr), "cannot take a write window into `{places[0].root}`", "a write window can change its owner, so the owner must be mutable", "declare `{places[0].root}` as a mutable binding"))
+            else -> diagnostics.push(sema_ownership_diag_unchangeable(info, places[0].root, expr_span(expr), if call_why == "" -> "a write window can change its owner, so the owner must be mutable (`:=`)" else -> "{call_why}, so `{places[0].root}` must be mutable (`:=`)"))
         }
         return false
     }
@@ -2944,7 +2947,7 @@ sema_ownership_write_capability: fn(state: &SemaOwnershipState, expr: Expr, acti
 
 // Rust's assignment statement checks: a field write through an immutable
 // root is E0205 for a parameter and a local alike; an index write is E0205
-// only for a read parameter and E0202 for any other binding. False for a
+// only for a read parameter and E0111 for any other binding. False for a
 // target that is neither.
 sema_ownership_report_assignment_capability: fn(expr: Expr, root: String, info: SemaScopeBinding, diagnostics: &[Diagnostic]) -> Bool {
     param_type: type_name(info.symbol.ty ?? Type.Named{name: "Unit"})
@@ -2965,7 +2968,7 @@ sema_ownership_report_assignment_capability: fn(expr: Expr, root: String, info: 
             if is_param && info.access == AccessConvention.Read {
                 diagnostics.push(sema_error("E0205", span, what, "an unmarked parameter gives read access only; assigning into it needs write access", "change the parameter to `{root}: &{param_type}`"))
             } else {
-                diagnostics.push(sema_error("E0202", span, what, "assigning into a collection edits it; the binding must be declared mutable", "declare `{root} := ...`"))
+                diagnostics.push(sema_ownership_diag_unchangeable(info, root, span, "assigning into a collection edits it, so the binding must be mutable (`:=`)"))
             }
             true
         }
@@ -2990,22 +2993,23 @@ sema_ownership_report_group_loan_change: fn(state: SemaOwnershipState, changed: 
 // `action` is Rust's change wording for a pinned place (E0219), such as
 // "be assigned"; an empty action keeps the general E0212 report.
 sema_ownership_check_write: fn(state: &SemaOwnershipState, expr: Expr, action: String, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
-    sema_ownership_check_write_as(state, expr, action, "", true, scopes, diagnostics)
+    sema_ownership_check_write_as(state, expr, action, "", None, [SemaCallParam]{}, true, scopes, diagnostics)
 }
 
-// A whole argument passed with `&` to `callee`'s write parameter.
-sema_ownership_check_write_argument: fn(state: &SemaOwnershipState, expr: Expr, callee: String, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
-    sema_ownership_check_write_as(state, expr, "be passed with write access", callee, true, scopes, diagnostics)
+// A whole argument passed to `callee`'s write parameter; `receiver` and
+// `params` are the callee's, for the signature line a changeability error quotes.
+sema_ownership_check_write_argument: fn(state: &SemaOwnershipState, expr: Expr, callee: String, receiver: AccessConvention?, params: [SemaCallParam], scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
+    sema_ownership_check_write_as(state, expr, "be passed with write access", callee, receiver, params, true, scopes, diagnostics)
 }
 
 // A write access whose root needs no write capability (see
 // `sema_ownership_write_capability`).
 sema_ownership_check_write_change: fn(state: &SemaOwnershipState, expr: Expr, action: String, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
-    sema_ownership_check_write_as(state, expr, action, "", false, scopes, diagnostics)
+    sema_ownership_check_write_as(state, expr, action, "", None, [SemaCallParam]{}, false, scopes, diagnostics)
 }
 
-sema_ownership_check_write_as: fn(state: &SemaOwnershipState, expr: Expr, action: String, callee: String, capability: Bool, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
-    ok: sema_ownership_write_capability(state, expr, action, callee, capability, scopes, diagnostics)
+sema_ownership_check_write_as: fn(state: &SemaOwnershipState, expr: Expr, action: String, callee: String, receiver: AccessConvention?, params: [SemaCallParam], capability: Bool, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
+    ok: sema_ownership_write_capability(state, expr, action, callee, receiver, params, capability, scopes, diagnostics)
     if ok {
         places := sema_ownership_places_from_expr_in_state(expr, scopes, state)
         loop place in places {
@@ -3323,7 +3327,7 @@ sema_ownership_param_for_arg: fn(params: [SemaCallParam], arg: CallArg, source_i
 // A range window has a fixed length, while this callee may
 // grow or shrink the list it receives.
 sema_ownership_call_diag_write_range_window: fn(span: Span) -> Diagnostic {
-    sema_error("E0202", span, "a range write window can't fill a list parameter that may resize", "a range window has a fixed length, but this function may grow or shrink the list it receives through its write parameter", "pass the whole list: `fill(values)`")
+    sema_error("E0212", span, "a range write window can't fill a list parameter that may resize", "a range window has a fixed length, but this function may grow or shrink the list it receives through its write parameter", "pass the whole list: `fill(values)`")
 }
 
 sema_ownership_argument_is_function_item: fn(arg: CallArg, scopes: SemaScopeTable) -> Bool Never! {
@@ -3389,7 +3393,7 @@ sema_ownership_diag_place_alias_move: fn(name: String, consumer: String, span: S
 // is false for a receiver call: E0142 belongs to direct calls and function
 // values (check_callable_argument_ownership), never to a Core route or a method
 // call.
-sema_ownership_check_call_arguments_with_accesses: fn(state: &SemaOwnershipState, callee: String, params: [SemaCallParam], args: &[CallArg], scopes: SemaScopeTable, diagnostics: &[Diagnostic], initial_accesses: &&[SemaOwnershipCallAccess], initial_accepted: Bool, initial_complete: Bool, borrowed_read: Bool, single_use: Bool) -> SemaOwnershipCheckResult {
+sema_ownership_check_call_arguments_with_accesses: fn(state: &SemaOwnershipState, callee: String, params: [SemaCallParam], receiver: AccessConvention?, args: &[CallArg], scopes: SemaScopeTable, diagnostics: &[Diagnostic], initial_accesses: &&[SemaOwnershipCallAccess], initial_accepted: Bool, initial_complete: Bool, borrowed_read: Bool, single_use: Bool) -> SemaOwnershipCheckResult {
     accesses := initial_accesses
     accepted := initial_accepted
     complete := initial_complete
@@ -3460,7 +3464,7 @@ sema_ownership_check_call_arguments_with_accesses: fn(state: &SemaOwnershipState
                     // was built; Rust infers each argument after the previous
                     // one's captures, so a write to a moved place is E0121.
                     arg.convention == AccessConvention.Write && sema_ownership_moved_before(state, arg.expr, scopes) && !sema_ownership_check_moved_place_use(state, arg.expr, scopes, diagnostics) -> false
-                    arg.convention == AccessConvention.Write && param.convention == AccessConvention.Write -> sema_ownership_check_write_argument(state, arg.expr, callee, scopes, diagnostics)
+                    arg.convention == AccessConvention.Write && param.convention == AccessConvention.Write -> sema_ownership_check_write_argument(state, arg.expr, callee, receiver, params, scopes, diagnostics)
                     arg.convention == AccessConvention.Write -> sema_ownership_check_write_change(state, arg.expr, "be passed with write access", scopes, diagnostics)
                     // Exact-place inference has already checked and consumed
                     // this projected argument; reading it again is a reuse.
@@ -3828,7 +3832,7 @@ sema_ownership_type_mentions_generic: fn(ty: Type, generic_params: [TGenericPara
 }
 
 sema_ownership_check_call_arguments: fn(state: &SemaOwnershipState, callee: String, params: [SemaCallParam], args: &[CallArg], scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> SemaOwnershipCheckResult {
-    sema_ownership_check_call_arguments_with_accesses(state, callee, params, args, scopes, diagnostics, [SemaOwnershipCallAccess]{}, true, true, true, true)
+    sema_ownership_check_call_arguments_with_accesses(state, callee, params, None, args, scopes, diagnostics, [SemaOwnershipCallAccess]{}, true, true, true, true)
 }
 
 sema_ownership_argument_name: fn(arg: CallArg) -> String Never! {
@@ -3842,34 +3846,35 @@ sema_ownership_argument_name: fn(arg: CallArg) -> String Never! {
 // receiver convention.  It reserves the receiver only for the duration of a
 // call and therefore cannot leak a Rust-style borrow into later statements.
 sema_ownership_check_call_receiver: fn(state: &SemaOwnershipState, receiver: Expr, convention: AccessConvention, scopes: SemaScopeTable, span: Span, diagnostics: &[Diagnostic]) -> Bool {
-    sema_ownership_check_call_receiver_as(state, receiver, convention, true, "", "", scopes, span, expr_span(receiver), diagnostics)
+    sema_ownership_check_call_receiver_as(state, receiver, convention, true, "", "", [SemaCallParam]{}, scopes, span, expr_span(receiver), diagnostics)
 }
 
 // A built-in method's receiver check: a consuming receiver names the method
 // it moved into (`t` was consumed by `.join()`), never a generic phrase.
 sema_ownership_check_method_receiver: fn(state: &SemaOwnershipState, receiver: Expr, convention: AccessConvention, method: String, scopes: SemaScopeTable, span: Span, diagnostics: &[Diagnostic]) -> Bool {
-    sema_ownership_check_call_receiver_as(state, receiver, convention, true, "", "`.{method}()`", scopes, span, expr_span(receiver), diagnostics)
+    sema_ownership_check_call_receiver_as(state, receiver, convention, true, "", "`.{method}()`", [SemaCallParam]{}, scopes, span, expr_span(receiver), diagnostics)
 }
 
 // `change_span` anchors the missing write-capability report: the receiver for
 // a built-in method, the method name for a declared one (Rust passes
 // `receiver.span()` or the call span to `check_mutating_method_receiver`).
 // `consumer` names the method a consuming receiver moves into; empty when the
-// caller has no method spelling to show.
-sema_ownership_check_call_receiver_as: fn(state: &SemaOwnershipState, receiver: Expr, convention: AccessConvention, capability: Bool, method: String, consumer: String, scopes: SemaScopeTable, span: Span, change_span: Span, diagnostics: &[Diagnostic]) -> Bool {
+// caller has no method spelling to show. `params` are the method's, for the
+// signature line a changeability error quotes.
+sema_ownership_check_call_receiver_as: fn(state: &SemaOwnershipState, receiver: Expr, convention: AccessConvention, capability: Bool, method: String, consumer: String, params: [SemaCallParam], scopes: SemaScopeTable, span: Span, change_span: Span, diagnostics: &[Diagnostic]) -> Bool {
     sema_ownership_note_call_receiver(state, receiver, convention)
     places: sema_ownership_places_from_expr_in_state(receiver, scopes, state)
     if places.len() == 0 {
         if convention == AccessConvention.Write {
             if sema_ownership_writes_temporary_edit_guard(receiver) -> return true
-            diagnostics.push(sema_error("E0202", span, "this call writes a temporary value", "write access can only be granted to stable storage, not a temporary expression", "bind the value with `:=` first, then call the method on that name"))
+            diagnostics.push(sema_error("E0111", span, "this call writes a temporary value", "write access can only be granted to stable storage, not a temporary expression", "bind the value with `:=` first, then call the method on that name"))
             return false
         }
         return true
     }
     if convention == {
         .Write -> if {
-            capability && method != "" -> sema_ownership_check_receiver_write(state, receiver, method, scopes, change_span, diagnostics)
+            capability && method != "" -> sema_ownership_check_receiver_write(state, receiver, method, params, scopes, change_span, diagnostics)
             capability -> sema_ownership_check_write(state, receiver, "", scopes, diagnostics)
             else -> sema_ownership_check_write_change(state, receiver, "", scopes, diagnostics)
         }
@@ -3890,7 +3895,9 @@ sema_ownership_note_call_receiver: fn(state: &SemaOwnershipState, receiver: Expr
     state.receiver_accesses[sema_ownership_span_key(expr_span(receiver))] = SemaOwnershipReceiverAccess{convention: convention, reserved: false}
 }
 
-sema_ownership_check_receiver_write: fn(state: &SemaOwnershipState, receiver: Expr, method: String, scopes: SemaScopeTable, change_span: Span, diagnostics: &[Diagnostic]) -> Bool {
+// A method that writes its receiver, called on a place that can't change: the
+// report quotes the method's signature line (D-CALLSITE-MARK2=A).
+sema_ownership_check_receiver_write: fn(state: &SemaOwnershipState, receiver: Expr, method: String, params: [SemaCallParam], scopes: SemaScopeTable, change_span: Span, diagnostics: &[Diagnostic]) -> Bool {
     action: "be changed by `.{method}()`"
     binding: sema_ownership_binding_for_expr(state, receiver, scopes)
     immutable: if binding == {
@@ -3903,12 +3910,11 @@ sema_ownership_check_receiver_write: fn(state: &SemaOwnershipState, receiver: Ex
     if !sema_ownership_check_write_change(state, receiver, action, scopes, diagnostics) -> return false
     info: binding ?? return false
     root: sema_receiver_mark_place_root(receiver) ?? info.symbol.name
-    what: "`.{method}()` changes `{root}`, which has read access only"
-    why: "this method edits the value it's called on, so its receiver needs write access"
+    why: "{sema_ownership_signature_line(method, Val(AccessConvention.Write), params)} changes the value it's called on"
     diagnostic: if {
-        root == "self" -> sema_error("E0202", change_span, "`.{method}()` edits `self`, but this method has read access only", why, "declare the enclosing method with the write mark: `&self`")
-        info.symbol.kind == SymbolKind.Parameter -> sema_error("E0202", change_span, what, why, "change the parameter to `{root}: &{type_name(info.symbol.ty ?? Type.Named{name: "Unit"})}`")
-        else -> sema_error("E0202", change_span, what, why, "declare `{root} := ...`")
+        root == "self" -> sema_error("E0205", change_span, "`.{method}()` edits `self`, but this method has read access only", why, "declare the enclosing method with the write mark: `&self`")
+        info.symbol.kind == SymbolKind.Parameter -> sema_error("E0205", change_span, "`.{method}()` changes `{root}`, which has read access only", "{why}, but an unmarked parameter gives read access only", "change the parameter to `{root}: &{type_name(info.symbol.ty ?? Type.Named{name: "Unit"})}`")
+        else -> sema_ownership_diag_unchangeable(info, root, change_span, "{why}, so `{root}` must be mutable (`:=`)")
     }
     diagnostics.push(diagnostic)
     false
@@ -4014,6 +4020,50 @@ sema_ownership_check_handle_method_call: fn(state: &SemaOwnershipState, callee: 
     sema_ownership_check_method_call_as(state, callee, sema_ownership_receiver_consumer(callee), receiver, receiver_convention, false, false, true, params, args, scopes, span, expr_span(receiver), diagnostics)
 }
 
+// D-CALLSITE-MARK2=A: a call is written plain and takes each input's
+// convention from the callee, so an error about a value the call would change
+// quotes the callee's signature line: `bump: fn(n: &Int, by: Int)`.
+sema_ownership_signature_line: fn(callee: String, receiver: AccessConvention?, params: [SemaCallParam]) -> String Never! {
+    inputs := [String]{}
+    if receiver == .Val(convention) -> inputs.push("{sema_ownership_convention_mark(convention)}self")
+    loop param in params {
+        spread: if param.variadic -> "..." else -> ""
+        ty: type_name(param.ty ?? Type.Named{name: "_"})
+        name: if sema_ownership_param_is_unnamed(param.name) -> "" else -> "{param.name}: "
+        inputs.push("{name}{spread}{sema_ownership_convention_mark(param.convention)}{ty}")
+    }
+    "`{sema_window_plain_name(callee)}: fn({inputs.join(", ")})`"
+}
+
+// A built-in's synthesized parameter (`arg0`) has no name worth showing.
+sema_ownership_param_is_unnamed: fn(name: String) -> Bool Never! {
+    if name == "" -> return true
+    if !name.starts_with("arg") || name.len() == 3 -> return false
+    loop (index, byte) in name.bytes() {
+        code: Int.from_u8(byte)
+        if index >= 3 && (code < 48 || code > 57) -> return false
+    }
+    true
+}
+
+sema_ownership_convention_mark: fn(convention: AccessConvention) -> String Never! {
+    if convention == {
+        .Write -> "&"
+        .Move -> "&&"
+        else -> ""
+    }
+}
+
+// E0111 for a change to a binding that can't change. `why` names what changes
+// it; a `:` binding that is not itself a window gets the `:=` edit.
+sema_ownership_diag_unchangeable: fn(info: SemaScopeBinding, root: String, span: Span, why: String) -> Diagnostic {
+    if !info.place_alias && info.binding_sigil == .Val(sigil) {
+        diagnostic: sema_error("E0111", span, "`{root}` was made with `:`, so it can't be changed", why, "declare it with `{root} := ...`")
+        return diagnostic_with_edit(diagnostic, TextEdit{span: sigil, new_text: " :="})
+    }
+    sema_error("E0111", span, "`{root}` can't be changed here", why, "declare it with `{root} := ...`")
+}
+
 // A type-qualified callee (`Option.map`) names the consumer of a moved
 // receiver; a bare method name leaves the generic wording.
 sema_ownership_receiver_consumer: fn(callee: String) -> String Never! {
@@ -4021,21 +4071,21 @@ sema_ownership_receiver_consumer: fn(callee: String) -> String Never! {
 }
 
 sema_ownership_check_method_call_as: fn(state: &SemaOwnershipState, callee: String, consumer: String, receiver: Expr, receiver_convention: AccessConvention, capability: Bool, reserved: Bool, borrowed_read: Bool, params: [SemaCallParam], args: &[CallArg], scopes: SemaScopeTable, span: Span, change_span: Span, diagnostics: &[Diagnostic]) -> SemaOwnershipCheckResult {
-    accepted: sema_ownership_check_call_receiver_as(state, receiver, receiver_convention, capability, sema_window_plain_name(callee), consumer, scopes, span, change_span, diagnostics)
+    accepted: sema_ownership_check_call_receiver_as(state, receiver, receiver_convention, capability, sema_window_plain_name(callee), consumer, params, scopes, span, change_span, diagnostics)
     state.receiver_accesses[sema_ownership_span_key(expr_span(receiver))] = SemaOwnershipReceiverAccess{convention: receiver_convention, reserved: reserved}
     receiver_places: sema_ownership_places_from_expr_in_state(receiver, scopes, state)
     // Rust `record_call_receiver_access` keeps no loan for a consuming receiver.
     accesses: loop receiver_place in receiver_places -> SemaOwnershipCallAccess{place: receiver_place, access: receiver_convention, span: span, reserved: reserved, retained: !reserved && receiver_convention != AccessConvention.Move}
-    sema_ownership_check_call_arguments_with_accesses(state, callee, params, args, scopes, diagnostics, accesses, accepted, true, borrowed_read, false)
+    sema_ownership_check_call_arguments_with_accesses(state, callee, params, Val(receiver_convention), args, scopes, diagnostics, accesses, accepted, true, borrowed_read, false)
 }
 
 // A Read receiver the call materializes into its own value before any
 // argument runs (`Option.or_err`, whose canonical body takes it by move)
 // keeps no loan on its place, so an argument may still change that place.
 sema_ownership_check_snapshot_receiver_call: fn(state: &SemaOwnershipState, callee: String, receiver: Expr, params: [SemaCallParam], args: &[CallArg], scopes: SemaScopeTable, span: Span, diagnostics: &[Diagnostic]) -> SemaOwnershipCheckResult {
-    accepted: sema_ownership_check_call_receiver_as(state, receiver, AccessConvention.Read, true, sema_window_plain_name(callee), sema_ownership_receiver_consumer(callee), scopes, span, expr_span(receiver), diagnostics)
+    accepted: sema_ownership_check_call_receiver_as(state, receiver, AccessConvention.Read, true, sema_window_plain_name(callee), sema_ownership_receiver_consumer(callee), params, scopes, span, expr_span(receiver), diagnostics)
     state.receiver_accesses[sema_ownership_span_key(expr_span(receiver))] = SemaOwnershipReceiverAccess{convention: AccessConvention.Read, reserved: false}
-    sema_ownership_check_call_arguments_with_accesses(state, callee, params, args, scopes, diagnostics, [SemaOwnershipCallAccess]{}, accepted, true, true, false)
+    sema_ownership_check_call_arguments_with_accesses(state, callee, params, Val(AccessConvention.Read), args, scopes, diagnostics, [SemaOwnershipCallAccess]{}, accepted, true, true, false)
 }
 
 // An allocator handle named as the receiver of `alloc`/`try_alloc` keeps its
@@ -4045,7 +4095,7 @@ sema_ownership_check_snapshot_receiver_call: fn(state: &SemaOwnershipState, call
 sema_ownership_check_allocator_handle_call: fn(state: &SemaOwnershipState, callee: String, receiver: Expr, params: [SemaCallParam], args: &[CallArg], scopes: SemaScopeTable, span: Span, diagnostics: &[Diagnostic]) -> SemaOwnershipCheckResult {
     sema_ownership_note_call_receiver(state, receiver, AccessConvention.Read)
     accesses: loop receiver_place in sema_ownership_places_from_expr_in_state(receiver, scopes, state) -> SemaOwnershipCallAccess{place: receiver_place, access: AccessConvention.Read, span: span, reserved: false, retained: true}
-    sema_ownership_check_call_arguments_with_accesses(state, callee, params, args, scopes, diagnostics, accesses, true, true, true, false)
+    sema_ownership_check_call_arguments_with_accesses(state, callee, params, Val(AccessConvention.Read), args, scopes, diagnostics, accesses, true, true, true, false)
 }
 
 sema_ownership_check_lambda_captures: fn(state: &SemaOwnershipState, lambda: Lambda, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
@@ -6085,12 +6135,12 @@ sema_ownership_check_lvalue_write: fn(state: &SemaOwnershipState, target: LValue
 // root binding needs no write capability of its own.
 sema_ownership_check_lvalue_write_as: fn(state: &SemaOwnershipState, target: LValue, capability: Bool, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
     if target == {
-        .Local(name, span) -> sema_ownership_check_write_as(state, Expr.Ident{name: name, span: span, id: AST_NODE_GENERATED}, "be assigned", "", capability, scopes, diagnostics)
+        .Local(name, span) -> sema_ownership_check_write_as(state, Expr.Ident{name: name, span: span, id: AST_NODE_GENERATED}, "be assigned", "", None, [SemaCallParam]{}, capability, scopes, diagnostics)
         // copy: `base` is a payload of read parameter `target`, which keeps the original; field `base` of the new Expr.Field owns this one
-        .Field(base, field, span) -> sema_ownership_check_write_as(state, Expr.Field{base: base.copy(), member: field, span: span, id: AST_NODE_GENERATED}, "be assigned", "", capability, scopes, diagnostics)
+        .Field(base, field, span) -> sema_ownership_check_write_as(state, Expr.Field{base: base.copy(), member: field, span: span, id: AST_NODE_GENERATED}, "be assigned", "", None, [SemaCallParam]{}, capability, scopes, diagnostics)
         .Index(base, index, span, kind) -> {
             if !sema_ownership_check_expression(state, index, scopes, diagnostics) -> return false
-            sema_ownership_check_write_as(state, Expr.Index{base: base, index: index, span: span, kind: kind, id: AST_NODE_GENERATED}, "be assigned", "", capability, scopes, diagnostics)
+            sema_ownership_check_write_as(state, Expr.Index{base: base, index: index, span: span, kind: kind, id: AST_NODE_GENERATED}, "be assigned", "", None, [SemaCallParam]{}, capability, scopes, diagnostics)
         }
     }
 }

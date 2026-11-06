@@ -1,0 +1,20 @@
+// D-CALLSITE-MARK2=A: a plain call that changes an input made with `:` is E0111,
+// and the report quotes the callee's signature line.
+bump: fn(n: &Int, by: Int) {
+    n += by
+}
+
+Counter: struct {
+    count: Int
+
+    tick: fn(&self) {
+        self.count += 1
+    }
+}
+
+run: fn() {
+    score: 41
+    bump(score, 1)
+    c: Counter{count: 0}
+    c.tick()
+}

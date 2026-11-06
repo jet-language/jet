@@ -339,6 +339,6 @@ sema_game_needs_edit: fn(receiver: Expr, api: String, scopes: SemaScopeTable, di
     root: sema_receiver_mark_place_root(receiver) ?? return
     index: sema_scope_resolve_index(scopes, root) ?? return
     if !scopes.bindings[index].mutable {
-        diagnostics.push(sema_error("E0202", expr_span(receiver), "`{api}` needs edit access to `{root}`", "game scene setup changes durable scene state", "declare `{root} := game.Scene.new(...)` before calling `{api}`"))
+        diagnostics.push(sema_ownership_diag_unchangeable(scopes.bindings[index], root, expr_span(receiver), "`{api}` changes durable scene state, so `{root}` must be mutable (`:=`)"))
     }
 }

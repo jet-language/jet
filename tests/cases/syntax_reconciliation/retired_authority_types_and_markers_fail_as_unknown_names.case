@@ -1,0 +1,27 @@
+# Retired authority types and markers get no teaching (owner ruling, #6068): each fails as an ordinary unknown name.
+fixture: fixtures/retired_authority_types_and_markers_fail_as_unknown_names
+env: NO_COLOR=1
+step: jet check Ability.jet
+exit: nonzero
+stderr: ~ "Error [jet.UnknownType]: There's no type called `Ability`" # a retired name is an ordinary unknown name
+stderr: !~ "retired" # no teaching for retired spellings (#6068)
+step: jet check Abilities.jet
+exit: nonzero
+stderr: ~ "Error [jet.UnknownType]: There's no type called `Abilities`" # a retired name is an ordinary unknown name
+stderr: !~ "retired" # no teaching for retired spellings (#6068)
+step: jet check Capability.jet
+exit: nonzero
+stderr: ~ "Error [jet.UnknownType]: There's no type called `Capability`" # a retired name is an ordinary unknown name
+stderr: !~ "retired" # no teaching for retired spellings (#6068)
+step: jet check Caps.jet
+exit: nonzero
+stderr: ~ "Error [jet.UnknownType]: There's no type called `Caps`" # a retired name is an ordinary unknown name
+stderr: !~ "retired" # no teaching for retired spellings (#6068)
+step: jet check marker_Abilities.jet
+exit: nonzero
+stderr: ~ "Error [jet.UnknownAppliedRule]: `#Abilities` isn't a known applied rule" # a retired name is an ordinary unknown name
+stderr: !~ "retired" # no teaching for retired spellings (#6068)
+step: jet check marker_Caps.jet
+exit: nonzero
+stderr: ~ "Error [jet.UnknownAppliedRule]: `#Caps` isn't a known applied rule" # a retired name is an ordinary unknown name
+stderr: !~ "retired" # no teaching for retired spellings (#6068)

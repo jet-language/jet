@@ -406,7 +406,7 @@ sema_call_pool_method: fn(receiver: Expr, receiver_value: TExpr, element: Type, 
     params: [SemaCallParam]{sema_call_shared_owner_param(if method == "add" -> "value" else -> "id", convention, slot)}
     ownership := sema_ownership_check_method_call(state, "Pool.{method}", receiver, AccessConvention.Read, params, updated_args, scopes, span, diagnostics)
     if !ownership.accepted || !ownership.complete -> return failed
-    if !sema_ownership_check_receiver_write(state, receiver, method, scopes, expr_span(receiver), diagnostics) -> return failed
+    if !sema_ownership_check_receiver_write(state, receiver, method, params, scopes, expr_span(receiver), diagnostics) -> return failed
     result: if method == "add" -> id_type else -> Type.Option{inner: element}
     sema_call_shared_owner_host_value(receiver_value, method, [TExpr]{value}, result, span, expected, environment, program, scopes, context, diagnostics)
 }

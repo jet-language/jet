@@ -221,7 +221,12 @@ sema_time_rng_generic_method: fn(receiver: Expr, receiver_value: TExpr, method: 
     if sema_expr_place_root_ident(receiver) == .Val(root) {
         if sema_scope_resolve_index(scopes, root) == .Val(index) {
             if !scopes.bindings[index].mutable && scopes.bindings[index].access != AccessConvention.Write {
-                diagnostics.push(sema_error("E0202", expr_span(receiver), "`.{method}()` changes `{root}`, which has read access only", "every `RNG` draw advances the stream, so its receiver needs write access", if scopes.bindings[index].symbol.kind == SymbolKind.Parameter -> "change the parameter to `{root}: &RNG`" else -> "declare `{root} := ...`"))
+                why: "every `RNG` draw advances the stream, so its receiver needs write access"
+                if scopes.bindings[index].symbol.kind == SymbolKind.Parameter {
+                    diagnostics.push(sema_error("E0205", expr_span(receiver), "`.{method}()` changes `{root}`, which has read access only", why, "change the parameter to `{root}: &RNG`"))
+                } else {
+                    diagnostics.push(sema_ownership_diag_unchangeable(scopes.bindings[index], root, expr_span(receiver), "{why}, so `{root}` must be mutable (`:=`)"))
+                }
             }
         }
     }

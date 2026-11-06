@@ -47,10 +47,10 @@ sema_ownership_push_once: fn(diagnostic: Diagnostic, diagnostics: &[Diagnostic])
 }
 
 // Rust `reject_static_mutable_borrow` for a static storage cell; any other
-// constant keeps Jet's E0202 static-binding report.
+// constant can't be changed at all (E0111).
 sema_ownership_report_static_write: fn(state: &SemaOwnershipState, place: SemaOwnershipPlace, span: Span, diagnostics: &[Diagnostic]) {
     if !state.static_roots.contains(place.root_key) {
-        diagnostics.push(sema_error("E0202", span, "cannot take write access to a static binding", "static storage is not mutable through a borrow", "copy the value into a mutable local before taking `&`"))
+        diagnostics.push(sema_error("E0111", span, "`{place.root}` is a constant, so it can't be changed", "static storage is not mutable", "copy the value into a mutable local (`:=`) and change that"))
         return
     }
     name: sema_ownership_place_name(place)
