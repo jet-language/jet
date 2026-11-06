@@ -1,10 +1,10 @@
-# Port of tests/typestate.rs::state_section_sema_diagnostic_spans_cover_the_section; original guest source preserved.
+# Port of tests/typestate.rs::state_section_sema_diagnostic_spans_cover_the_section; the guest source is now `Name: struct { … }`, one byte longer before the section than `struct Name { … }`.
 fixture: fixtures/state_section_sema_diagnostic_spans_cover_the_section
 step: jet check empty.jet --json
 exit: nonzero
 json: stdout doc $.reports[?code="E0169"] #>= 1 # original predicate: diagnostic exists
-json: stdout doc $.reports[?code="E0169"].span = {"start":15,"end":23}
+json: stdout doc $.reports[?code="E0169"][0].span = {"start":16,"end":24}
 step: jet check repeated.jet --json
 exit: nonzero
 json: stdout doc $.reports[?code="E0168"] #>= 1 # original predicate: diagnostic exists
-json: stdout doc $.reports[?code="E0168"].span = {"start":30,"end":44}
+json: stdout doc $.reports[?code="E0168"][0].span = {"start":31,"end":45}
