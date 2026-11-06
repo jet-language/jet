@@ -4413,6 +4413,10 @@ control belong to the migration/control path, not to arbitrary interpolated
 application values. Migrations record their name and checksum so a changed
 migration cannot silently replace an applied one.
 
+`DBScope` implements the prelude trait `Driver` (`query`, `query_one`,
+`execute`, `begin`, `commit`, `rollback`), which a generic bound names bare:
+`fn count<T: Driver>(conn: T)` takes any scope and calls its methods.
+
 `DBScope.live` (D-LIVEQUERY1, #1158) refuses any statement other than one
 `SELECT` and applies the scope's policy before binding, so a refused query
 fails at the call. The binding is identified by the scope's user, the

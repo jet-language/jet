@@ -784,7 +784,6 @@ fn __sql_table(sql: SQL) -> String? Never! {
 }
 
 impl DBScope {
-    fn query(self, sql: SQL) -[DB.Read]> [[String: DBValue]] DBError! { __scope_query(self, sql, false) }
     // A live binding over one policy-checked SELECT. `core.web.state` reads
     // it; each re-run applies this scope's policy again, and a write to the
     // table it reads (or a rollback of one) re-runs it on the next read. The
@@ -799,6 +798,12 @@ impl DBScope {
         query :: sql.copy()
         Ok(web.__live_bind<[[String: DBValue]], DBError>(__live_source(__sql_table(scoped) ?? ""), key, () -> __scope_query(scope, query, false)))
     }
+    fn close(self) -[DB]> Bool Never! { __db_shutdown(self.state) }
+}
+
+// A policy scope is the typed-SQL driver a generic `<T: Driver>` takes.
+impl DBScope.Driver {
+    fn query(self, sql: SQL) -[DB.Read]> [[String: DBValue]] DBError! { __scope_query(self, sql, false) }
     fn query_one(self, sql: SQL) -[DB.Read]> [String: DBValue]? DBError! {
         rows := __scope_query(self, sql, false) ?? return Err(err)
         if rows.len() == 0 -> return Ok(None)
@@ -809,7 +814,6 @@ impl DBScope {
     fn begin(self) -[DB]> Bool Never! { __db_begin(self.state, false) }
     fn commit(self) -[DB]> Bool Never! { __db_commit(self.state) }
     fn rollback(self) -[DB]> Bool Never! { __db_rollback(self.state) }
-    fn close(self) -[DB]> Bool Never! { __db_shutdown(self.state) }
 }
 
 // ---- transactions and migrations -----------------------------------------

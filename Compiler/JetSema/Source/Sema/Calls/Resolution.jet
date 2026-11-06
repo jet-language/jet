@@ -20,6 +20,9 @@ use jet_foundation.[
     TextEdit,
     Type,
     diagnostic_with_edit,
+    owned_trait,
+    OwnedMethod,
+    symbol_id,
     type_name,
 ]
 
@@ -571,6 +574,8 @@ fn sema_call_trait_method_candidate_from_registration(graph: SemaRegistrationGra
 fn sema_call_trait_method_candidates(graph: SemaRegistrationGraph, receiver_type: Type, method: String, type_args: [Type], caller_module: String, caller_package: String, generic_params: [TGenericParam], span: Span, diagnostics: &[Diagnostic]) -> [SemaCallMethodCandidate] Never! {
     resolved_receiver :: sema_type_resolve_declared_with_generics(graph, receiver_type, caller_module, generic_params)
     trait_rows := [SemaRegistrationRowRef]{}
+    // Bounds naming a bare-bound compiler-owned trait, which has no row.
+    owned_bounds := [SymbolID]{}
     // A type parameter's bounds dispatch in the order they are written: the
     // first bound that declares the method answers it, so `...[Inspect, Edit]`
     // calls `Inspect.touch`
@@ -598,8 +603,11 @@ fn sema_call_trait_method_candidates(graph: SemaRegistrationGraph, receiver_type
             current :: parameter ?? return [SemaCallMethodCandidate]{}
             first_match = true
             loop bound in current.bounds {
-                row :: sema_call_trait_row_for_symbol(graph, bound) ?? next
-                sema_call_trait_rows_push(graph, &trait_rows, row)
+                if sema_call_trait_row_for_symbol(graph, bound) == .Val(row) {
+                    sema_call_trait_rows_push(graph, &trait_rows, row)
+                } else {
+                    &owned_bounds.push(bound.copy())
+                }
             }
         }
     }
@@ -619,7 +627,70 @@ fn sema_call_trait_method_candidates(graph: SemaRegistrationGraph, receiver_type
         }
         if first_match && candidates.len() > 0 -> break
     }
+    if candidates.len() > 0 -> return candidates
+    loop bound in owned_bounds {
+        candidate :: sema_call_owned_trait_method_candidate(graph, bound, resolved_receiver, method, type_args, caller_module, generic_params, span, &diagnostics) ?? next
+        &candidates.push(candidate)
+        break
+    }
     candidates
+}
+
+// A type parameter bounded by a bare-bound compiler-owned trait (OWNED_TRAITS,
+// which no module declares, so it has no registered row) calls the method
+// that trait's row declares, its parameter and return types resolved where the
+// call is. The reference names the trait, so IR dispatches each instance's
+// call to its receiver's implementation (ir_method_key), and the call exposes
+// the declared success value as a registered trait method's does.
+fn sema_call_owned_trait_method_candidate(graph: SemaRegistrationGraph, bound: SymbolID, receiver_type: Type, method: String, type_args: [Type], caller_module: String, generic_params: [TGenericParam], span: Span, diagnostics: &[Diagnostic]) -> SemaCallMethodCandidate? {
+    segments :: bound.key.split(":").to_list()
+    trait_name :: segments[segments.len() - 1]
+    builtin :: sema_type_builtin_trait_symbol(trait_name) ?? return None
+    if builtin.id.key != bound.key -> return None
+    owned :: owned_trait(trait_name) ?? return None
+    wanted := OwnedMethod?{None}
+    if owned.contract == .Methods(methods, _, _) {
+        loop declared in methods {
+            if declared.name == method {
+                wanted = Val(declared.copy())
+                break
+            }
+        }
+    }
+    found :: wanted ?? return None
+    if found.receiver == .Static -> return None
+    convention :: if found.receiver == {
+        .Fixed(access) -> access
+        else -> AccessConvention.Read
+    }
+    if type_args.len() > 0 {
+        &diagnostics.push(sema_error("E0119", span, "`{method}` is not generic", "trait method declarations do not carry independent type parameters", "remove the explicit method type arguments"))
+        return None
+    }
+    params := [Type]{receiver_type.copy()}
+    loop param in found.params -> &params.push(sema_type_resolve_declared_with_generics(graph, param.ty, caller_module, generic_params))
+    declared_return :: if found.returns == {
+        .Val(returned) -> if returned == {
+            .Result(ok, _) -> Val(ok.copy())
+            else -> Val(returned.copy())
+        }
+        .None -> None
+    }
+    ret :: if declared_return == {
+        .Val(returned) -> Val(sema_type_resolve_declared_with_generics(graph, returned, caller_module, generic_params))
+        .None -> None
+    }
+    SemaCallMethodCandidate{
+        method: TMethodRef{symbol: symbol_id(SymbolKind.Function, "", trait_name, method), name: method, mangled: false, trait_owner: Val(builtin.id.copy()), operator_identity: None},
+        signature: Type.Fn{params: ^params, ret: ret, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None},
+        receiver_type: Val(receiver_type.copy()),
+        receiver_convention: convention,
+        receiver_offset: 1,
+        type_args: [Type]{},
+        generic_params: [SemaInferenceTypeParam]{},
+        generic_substitutions: [SemaInferenceBinding]{},
+        generic_evidence: [SemaInferenceBoundEvidence]{},
+    }
 }
 
 // Rust `synthesize_impls` (default bodies, S62 `using` delegation): a

@@ -42,6 +42,7 @@ use jet_foundation.[
     diagnostic_with_edit,
     expr_span,
     OWNED_TRAITS,
+    owned_trait,
     owned_trait_declares,
     owned_trait_operator_hook,
     sema_collection_is_list,
@@ -300,6 +301,9 @@ fn sema_call_try_type_param_hook_method(receiver_value: TExpr, method: String, a
                 hook_trait = Val(trait_name)
                 break
             }
+            // A method the bare-bound trait declares takes the candidate path
+            // (sema_call_owned_trait_method_candidate), as a registered bound's does.
+            if owned_trait(trait_name) == .Val(owned) && owned_trait_declares(owned, method) -> return unhandled
             next
         }
         if program.registration_graph == .Val(graph) {

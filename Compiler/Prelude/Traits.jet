@@ -207,15 +207,17 @@ trait Numeric {
     fn one() -> Self Never!
 }
 
-// The typed-SQL driver contract of `core.db`.
+// The typed-SQL driver contract of `core.db`. A driver is a handle to shared
+// connection state, so its calls read the value they're made on.
 trait Driver {
     local: Bool{true}
-    fn query(&self, sql: SQL) -> [[String: DBValue]] DBError!
-    fn query_one(&self, sql: SQL) -> [String: DBValue]? DBError!
-    fn execute(&self, sql: SQL) -> Int DBError!
-    fn begin(&self) -> Bool Never!
-    fn commit(&self) -> Bool Never!
-    fn rollback(&self) -> Bool Never!
+    bare_bound: Bool{true}
+    fn query(self, sql: SQL) -> [[String: DBValue]] DBError!
+    fn query_one(self, sql: SQL) -> [String: DBValue]? DBError!
+    fn execute(self, sql: SQL) -> Int DBError!
+    fn begin(self) -> Bool Never!
+    fn commit(self) -> Bool Never!
+    fn rollback(self) -> Bool Never!
 }
 
 // The byte-stream read contract of `core.term`.
