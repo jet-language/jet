@@ -1,0 +1,26 @@
+# D-UI-WEB-KEYS1=A (#6596 c4): shortcuts.register claims its key from the default browser provider, which cancels the
+# browser default of claimed keys only and queues them on provider queue 2; shortcuts.poll reads them with their
+# modifiers. A command binding matches Control+S and Meta+S; an Alt+Shift binding matches its own mask; an unbound
+# Control+P and a bare S keep their browser default and never reach poll. The same page runs at O0, O1 and O2.
+requires: tool:node
+fixture: ui_shortcut_claimed_keys_reach_poll.fixture
+env: NO_COLOR=1
+step: jet build --target web --optimize=none main.jet
+exit: 0
+copy: harness.mjs .jet/build/harness.mjs
+step: node harness.mjs
+cwd: .jet/build
+exit: 0
+stdout: = ui_shortcut_claimed_keys_reach_poll.out
+step: jet build --target web --optimize=basic main.jet
+exit: 0
+step: node harness.mjs
+cwd: .jet/build
+exit: 0
+stdout: = ui_shortcut_claimed_keys_reach_poll.out
+step: jet build --target web --optimize=full main.jet
+exit: 0
+step: node harness.mjs
+cwd: .jet/build
+exit: 0
+stdout: = ui_shortcut_claimed_keys_reach_poll.out

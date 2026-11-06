@@ -3713,7 +3713,14 @@ with no text cancels), places an unreported IME caret after the composition
 text in characters, reads URI items from `text/uri-list` lines, and reports a
 host buffer overflow as `QueueFull`. A drag event's `operation` is a
 `UIDragOperation?`: a `none` drop effect is no operation, and a drop with no
-operation arrives as `Cancel` (D-UI-DRAG-NONE1=A). Shortcuts and accessibility are
+operation arrives as `Cancel` (D-UI-DRAG-NONE1=A). `shortcuts.register`
+claims its key from the provider, and the browser provider cancels the
+default action of a claimed key press only and queues it for
+`shortcuts.poll`, which answers the matching binding (`None` when no key is
+queued); every unclaimed key keeps its browser default (D-UI-WEB-KEYS1=A).
+Modifier bits are Control 1, Alt 2, Shift 4, Meta 8 and the logical command
+16; a key pressed with exactly one of Control and Meta also matches a command
+binding. Accessibility is
 available. `clipboard.read_text` answers the clipboard text the page last
 observed (a paste, copy or cut, or its own `write_text`), because a browser
 lends the live clipboard only to a user gesture; before any is observed it

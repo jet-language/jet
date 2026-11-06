@@ -137,10 +137,13 @@ function providerRecord(fields) {
 
 // The page's default core.ui.host provider, installed when the page set none.
 // It forwards browser primitives only, raw event types and values included;
-// Core decodes and judges every answer. Composition events queue on 0 and
-// drag/drop events on 1 for event_pop, each in a host buffer of UI_QUEUE
-// records; a full buffer drops further events behind one empty record, which
-// Core reports as a full queue. The clipboard is the text this page last
+// Core decodes and judges every answer. Composition events queue on 0,
+// drag/drop events on 1 and claimed key presses on 2 for event_pop, each in a
+// host buffer of UI_QUEUE records; a full buffer drops further events behind
+// one empty record, which Core reports as a full queue. A key claim is
+// `<modifier mask>:<lowercased key>`, the mask Control 1, Alt 2, Shift 4 and
+// Meta 8: a keydown matching a claim loses its browser default and queues,
+// and every other key keeps its default. The clipboard is the text this page last
 // observed through a paste, copy or cut, or its own write: a browser lends the
 // live clipboard only to a user gesture, and a write's later refusal by the
 // browser is not seen. File dialogs and font shaping are absent: a file input
@@ -148,7 +151,8 @@ function providerRecord(fields) {
 const UI_QUEUE = 256;
 
 function defaultUiProvider(doc) {
-  const queues = [[], []];
+  const queues = [[], [], []];
+  const claims = new Set();
   let clipboard = null;
   const enqueue = (queue, fields) => {
     const records = queues[queue];
@@ -179,6 +183,14 @@ function defaultUiProvider(doc) {
   doc.addEventListener("dragover", drag);
   doc.addEventListener("drop", drag);
   doc.addEventListener("dragleave", drag);
+  const keydown = (event) => {
+    const mask = (event.ctrlKey ? 1 : 0) | (event.altKey ? 2 : 0) | (event.shiftKey ? 4 : 0) | (event.metaKey ? 8 : 0);
+    const key = String(event.key ?? "");
+    if (!claims.has(mask + ":" + key.toLowerCase())) return;
+    event.preventDefault();
+    enqueue(2, [target(event), key, String(mask)]);
+  };
+  doc.addEventListener("keydown", keydown);
   // Paste carries the pasted text; copy and cut carry what the page set, else
   // the selection the browser copies.
   const observe = (event) => {
@@ -202,6 +214,10 @@ function defaultUiProvider(doc) {
     eventPop: (queue) => queues[queue]?.shift() ?? null,
     dialogRequest: () => -1,
     dialogResult: () => null,
+    keyClaim: (claim) => {
+      claims.add(claim);
+      return true;
+    },
   };
 }
 
@@ -798,6 +814,7 @@ class Host {
       jet_ui_provider_event_pop: (queue) => stage(provider()?.eventPop(Number(queue))),
       jet_ui_provider_dialog_request: (kind, bytes, length) => BigInt(provider()?.dialogRequest(Number(kind), textAt(bytes, length)) ?? -1),
       jet_ui_provider_dialog_result: (token) => stage(provider()?.dialogResult(Number(token))),
+      jet_ui_provider_key_claim: (bytes, length) => (provider()?.keyClaim(textAt(bytes, length)) ? 0n : -1n),
       jet_ui_provider_take: (buffer) => {
         if (staged !== null) host.u8().set(staged, Number(buffer));
         staged = null;

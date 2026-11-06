@@ -1,7 +1,8 @@
 // The UI host provider seam (core.ui.host): primitives only. Core owns every
-// rule, queue, registry and UIHostError; a provider answers four questions:
+// rule, queue, registry and UIHostError; a provider answers five questions:
 // is a capability present, the clipboard's text (get and set), the next raw
-// event of a queue, and a dialog's request and result.
+// event of a queue, a dialog's request and result, and whether it claimed a
+// key for the shortcut queue.
 //
 // The leaves below are C functions. This native runtime defines them headless:
 // no capability is present and every service declines. A web build's host
@@ -20,6 +21,7 @@
 #Export(c) fn jet_ui_provider_event_pop(queue: I64) -> I64 { I64{-1} }
 #Export(c) fn jet_ui_provider_dialog_request(kind: I64, bytes: I64, length: I64) -> I64 { I64{-1} }
 #Export(c) fn jet_ui_provider_dialog_result(token: I64) -> I64 { I64{-1} }
+#Export(c) fn jet_ui_provider_key_claim(bytes: I64, length: I64) -> I64 { I64{-1} }
 #Export(c) fn jet_ui_provider_take(buffer: I64) {}
 
 // The staged text of `length` bytes as an owned string, into `some`; 0 when
@@ -50,6 +52,10 @@ fn ui_host_take_into(length: I64, some: I64) -> I64 {
 
 #Export(c) fn jet_ui_host_event_pop(queue: I64, some: I64) -> I64 {
     ui_host_take_into(jet_ui_provider_event_pop(jet_int_owned_to_i64(queue)), some)
+}
+
+#Export(c) fn jet_ui_host_key_claim(claim: I64) -> Bool {
+    jet_ui_provider_key_claim(rt_text_data(claim), rt_text_len(claim)) == I64{0}
 }
 
 #Export(c) fn jet_ui_host_dialog_request(kind: I64, request: I64) -> I64 {
