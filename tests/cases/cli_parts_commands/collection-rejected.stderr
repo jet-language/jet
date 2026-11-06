@@ -1,17 +1,17 @@
 Error [jet.UnknownFunction]: `Iter` has no method `get`
-  --> {work}/main.jet:14:37
+  --> {work}/main.jet:14:36
     |
- 14 |         &rows.push(Row{ name: parts.get(0), count: missing })
-    |                                     ^^^
+ 14 |         rows.push(Row{ name: parts.get(0), count: missing })
+    |                                    ^^^
  Why: `Iter` is a one-pass source; `get` needs a materialized list, so collection consumes the source and allocates the list
  Fix: Materialize it first with `.to_list()`; this consumes the source and allocates a list
 More: jet-lang.dev/e/E0102
 
 Error [jet.UnknownName]: Nothing named `missing` exists here
-  --> {work}/main.jet:14:52
+  --> {work}/main.jet:14:51
     |
- 14 |         &rows.push(Row{ name: parts.get(0), count: missing })
-    |                                                    ^^^^^^^
+ 14 |         rows.push(Row{ name: parts.get(0), count: missing })
+    |                                                   ^^^^^^^
  Why: A name must be declared before it's used
  Fix: Declare it first: `missing: ...`
 More: jet-lang.dev/e/E0107
