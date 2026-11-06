@@ -262,7 +262,11 @@ parser_parse_item_or_import: fn(state: &JetParserState) -> ParsedItemOrImport {
             return ParsedItemOrImport{item: Val(value), handled: true}
         }
         parser_current_kind(&state) == TOKEN_KW_USE -> {
-            return ParsedItemOrImport{item: None, imports: parser_parse_import(&state, modifiers.reexport), handled: true}
+            return ParsedItemOrImport{item: None, imports: parser_parse_import(&state, modifiers.reexport, None), handled: true}
+        }
+        parser_prep_verb_ahead(&state, 0, TOKEN_KW_USE) -> {
+            head: parser_bump(&state)
+            return ParsedItemOrImport{item: None, imports: parser_parse_import(&state, modifiers.reexport, Val(head.span)), handled: true}
         }
     }
     token: parser_current(&state)
@@ -508,13 +512,17 @@ parser_marker_first_expr: fn(marker: Marker) -> Expr? {
 // `use ROW` or a `use { … }` block with one ROW per line (#6542). A row is
 // a module path, a member list, or a "file" path, any of them after an
 // `alias:`: `alias: path` means what `use alias: path` means. `pub`
-// before `use` re-exports every row.
-parser_parse_import: fn(state: &JetParserState, is_pub: Bool) -> [ImportDecl] {
+// before `use` re-exports every row. `comptime_head` is the `comptime`
+// before `use`, which makes every row a build-only import.
+parser_parse_import: fn(state: &JetParserState, is_pub: Bool, comptime_head: Span?) -> [ImportDecl] {
     keyword: parser_bump(&state)
+    comptime_span := Span?{None}
+    if comptime_head == .Val(head) -> comptime_span = Val(Span{start: head.start, end: keyword.span.start})
     imports := [ImportDecl]{}
     if parser_current_kind(&state) != TOKEN_LBRACE {
-        import := parser_parse_import_row(&state, keyword.span)
+        import := parser_parse_import_row(&state, comptime_head ?? keyword.span)
         import.is_pub = is_pub
+        import.comptime_span = comptime_span
         &imports.push(import)
         return imports
     }
@@ -528,6 +536,7 @@ parser_parse_import: fn(state: &JetParserState, is_pub: Bool) -> [ImportDecl] {
         row_start: parser_current(&state).span
         import := parser_parse_import_row(&state, row_start)
         import.is_pub = is_pub
+        import.comptime_span = comptime_span
         &imports.push(import)
         parser_skip_semicolons(&state)
         // A row that read nothing (a stray token) must not stall the block.

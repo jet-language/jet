@@ -1106,6 +1106,20 @@ InBodyMarkerNeedsParentheses: struct {
     }
 }
 
+ComptimeImportAtRuntime: struct {
+    impl Diagnostic {
+        code: "E0944"
+        stage: [.Sema]
+        meaning: "Code that runs in the shipped program uses a name or a value from a `comptime use` import"
+        edit: .SourceEdit
+        no_fix: None
+        fix_safety: .NeedsReview
+        what: fn(self) -> String { "Code that runs in the shipped program uses a name from a `comptime use` import" }
+        why: fn(self) -> String { "A `comptime use` module exists only while building: its names work in compile-time code (a `comptime {{ … }}` block, a `comptime fn`, a comptime argument, a value computed while building), and the shipped program leaves the module out" }
+        fix: fn(self) -> String { "Import the module with plain `use` to use it at runtime, or move the reference into compile-time code, such as `NAME: comptime {{ value }}`." }
+    }
+}
+
 MissingRunFunction: struct {
     impl Diagnostic {
         code: "E0101"

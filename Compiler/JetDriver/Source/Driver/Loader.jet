@@ -3809,7 +3809,7 @@ jet_driver_core_runtime_member_imports: fn(program: &Program, core_sources: [Jet
                     member_span: Span{start: unit_span.end + 1, end: span.end}
                     local_span: declaration.alias_span
                     local: if declaration.alias != item -> String?{Val(declaration.alias)} else -> String?{None}
-                    &rewritten.push(ImportDecl{kind: ImportKind.Unqualified{module_alias: unit, module_alias_span: unit_span, items: [ImportedItem]{ImportedItem{original: item, alias: local}}, items_span: member_span, span: declaration.span}, alias: declaration.alias, alias_span: declaration.alias_span, span: declaration.span, item_spans: [Span]{member_span}, local_spans: [Span]{local_span}, is_pub: declaration.is_pub, is_package_pub: declaration.is_package_pub, inline_version: None})
+                    &rewritten.push(ImportDecl{kind: ImportKind.Unqualified{module_alias: unit, module_alias_span: unit_span, items: [ImportedItem]{ImportedItem{original: item, alias: local}}, items_span: member_span, span: declaration.span}, alias: declaration.alias, alias_span: declaration.alias_span, span: declaration.span, item_spans: [Span]{member_span}, local_spans: [Span]{local_span}, is_pub: declaration.is_pub, is_package_pub: declaration.is_package_pub, inline_version: None, comptime_span: declaration.comptime_span})
                     next
                 }
             }
@@ -3874,7 +3874,7 @@ jet_driver_member_import: fn(declaration: ImportDecl, imports: [ImportDecl], out
         member_span: Span{start: owner_span.end + 1, end: span.end}
         local: if declaration.alias != member -> String?{Val(declaration.alias)} else -> String?{None}
         local_span: declaration.alias_span
-        return Val(ImportDecl{kind: ImportKind.Unqualified{module_alias: owner, module_alias_span: owner_span, items: [ImportedItem]{ImportedItem{original: member, alias: local}}, items_span: member_span, span: declaration.span}, alias: owner, alias_span: owner_span, span: declaration.span, item_spans: [Span]{member_span}, local_spans: [Span]{local_span}, is_pub: declaration.is_pub, is_package_pub: declaration.is_package_pub, inline_version: None})
+        return Val(ImportDecl{kind: ImportKind.Unqualified{module_alias: owner, module_alias_span: owner_span, items: [ImportedItem]{ImportedItem{original: member, alias: local}}, items_span: member_span, span: declaration.span}, alias: owner, alias_span: owner_span, span: declaration.span, item_spans: [Span]{member_span}, local_spans: [Span]{local_span}, is_pub: declaration.is_pub, is_package_pub: declaration.is_package_pub, inline_version: None, comptime_span: declaration.comptime_span})
     }
     None
 }

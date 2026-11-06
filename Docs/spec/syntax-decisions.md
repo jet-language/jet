@@ -37,6 +37,7 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, recordin
 | `comptime if` | build-time branch; unchosen arms are name-checked only | `D-PREP-BRANCH1=A` |
 | `comptime loop` | build-time loop over statements or declarations | `D-PREP-BRANCH1=A; D-STRUCT-ONCE1=A` |
 | `comptime fn` | build-time literal-hook method | `D-PREP-FN1=A; D-FOUND-LITERAL1=A` |
+| `comptime use { … } / comptime use alias: path` | build-only import: the rows of `use`, whose names work only in compile-time code (a `comptime { … }` block, a `comptime fn` body, a comptime argument, a value computed while building); a user module only compile-time code uses, however it is imported, stays out of the shipped program | `D-COMPTIME-USE1=A` |
 | `<comptime N: Int>` | compile-time number parameter declaration | `D-CONSTGEN2=A` |
 | `$` | compiler fact: `T.$layout`, `f.$effects`, `value.$origin`; fact declaration metadata `$holds:`; template name splice `$method: fn`, `self.$field`, `.$left` | `D-COMPILER-NS1=A; D-META-ROOT3=A; D-DECL-META1=A; D-NAME-SPLICE1=B` |
 | `$build` | build fact root: `$build.os`, `.profile`, `.settings.*`, `.stamp.*`, `.cpu.cache_line` (an `Int`, also accepted in `#Layout(c, align(…))`) | `D-BUILD-FACT3=A; D-CACHE-CONTROL1=A` |

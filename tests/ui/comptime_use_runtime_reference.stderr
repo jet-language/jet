@@ -1,0 +1,8 @@
+Error [jet.ComptimeImportAtRuntime]: `math` comes from a `comptime use` import, but this code runs in the shipped program
+  --> tests/ui/comptime_use_runtime_reference.jet:7:11
+    |
+  7 |     print(math.int_pow(2, 3))
+    |           ^^^^
+ Why: A `comptime use` import exists only while building, so the shipped program does not contain its module
+ Fix: Import it with plain `use`, or move this use into compile-time code: a `comptime { … }` block, a `comptime fn`, or a value computed while building
+More: jet-lang.dev/e/E0944
