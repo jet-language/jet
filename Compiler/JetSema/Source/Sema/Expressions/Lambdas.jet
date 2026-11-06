@@ -1298,6 +1298,11 @@ fn sema_expression_lambda_append_name(names: &[String], name: String) Never! {
     if !sema_expression_lambda_name_contains(names, name) -> &names.push(name)
 }
 
+fn sema_expression_lambda_view_crossing(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: SemaCheckContext) -> Bool {
+    problem :: sema_ownership_crossing_problem(ty, SemaSendCrossing.TaskCapture, true, environment, program, scopes, context) ?? return false
+    problem.kind == SemaSendProblemKind.ViewBorrow
+}
+
 fn sema_expression_lambda_is_view_type(ty: Type, string_view: Bool) -> Bool Never! {
     if string_view -> return true
     if ty == {
@@ -2193,6 +2198,10 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
                 // ... and a view it cannot materialize (E1102, at the task's
                 // use of it): a moved or write view here, an uncopyable one below.
                 task_body && is_view && (explicit_move || binding.mutable) -> {}
+                // A Core handle the crossing prover reads as a view (a
+                // `Fixed` over its frame's backing) is refused there too
+                // (E1102), not moved into the task first.
+                task_body && sema_expression_lambda_view_crossing(capture_ty, environment, program, lambda_scopes, context) -> {}
                 !escapes -> {
                     if explicit_move -> sema_expression_lambda_append_name(&lambda_work.meta.moved_captures, binding.symbol.name) else -> sema_expression_lambda_append_name(&lambda_work.meta.frozen_captures, binding.symbol.name)
                 }
