@@ -694,7 +694,8 @@ supplies only the following-metadata fact or the host error.
 `is_symlink`, `id: FileID{device, inode}`, `links`, `owner: Int?` (None on
 Windows), `size_on_disk`, `modified` and `changed` (`DateTime`, nanosecond
 precision), and `created: DateTime?` (None where the file system keeps no
-birth time). `WalkEntry` exposes `path`,
+birth time). `mode` is the permission bits (0o0..0o7777, the domain
+`set_mode` takes); the file type is `kind`. `WalkEntry` exposes `path`,
 `relative`, `is_dir`, and `depth` through the checked type projection.
 The compiler-owned `IOOperation` enum describes the operation within this
 failure context. Its annotation is available to vetted Core source, not a new
